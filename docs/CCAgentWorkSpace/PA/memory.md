@@ -5042,3 +5042,16 @@ Sweep wrapper pattern 在 metrics 重型 monolithic function (1162 LOC `compute_
 - ContextDistiller v4 / ADR-0041 / AI cost cap 重評 = AI-E 唯一系統性缺失
 - 3 PM verdict missing module（M3 hot-swap / M6 capacity / M7 correlation）defer v5.9 非立 M14-M16
 
+
+## 2026-05-21 TODO v61 restructure proposal
+- Trigger: operator 反映 v60 400 行散亂；要求 session/wave/sprint 清晰、過時/已完成移除、可合併合併、必要 reference 完整
+- 散亂根因：v60 缺主軸 — 11 section 平鋪歷史/狀態/派工/路線四種資訊，actionable 密度只 ~10%
+- 修法主軸：§1 Session/Wave/Sprint 路線圖（v5.7+v5.8 Wave 1-16+Y1/Y2/Y3 timeline）作為唯一 navigation entry；§2 當前 Wave 詳情單一展開區（Wave 2 v5.8 修補 D+0~D+5）；其餘 collapse 到表格 + reference
+- 結構：§0 摘要 / §1 路線圖 / §2 當前 Wave / §3 P0 / §4 P1 / §5 P2/P3 / §6 Dormant / §7 排程 / §8 衝突 / §9 SOP / §10 References / §-1 ≤14d closure
+- 歸檔 ~92 行 → 新 archive `docs/archive/2026-05-21--todo_v60_archive.md`：v5.7 12 prefix DONE 細節（§0.5）+ W-AUDIT-4b retained（§5.1）+ H+I 批 closure（§6.1）+ 過去 14d 之外 closure（§-1 A-G）
+- 合併削減 ~41 行：§0+§3 / §0.6→§2 / §5.1 移 §11 / §6.1+§6.2→§5 / §10 SOP 裁剪 / §-1 留 H+I
+- Reference 補完：v60 §11 缺至少 11 條（v5.7+v5.8 主檔 + 14 audit + PA/FA/PM verdict + V103-V109 spec + 12 ADR + AMD）；v61 §10 補齊 28 條完整
+- 預估行數：256 行（v60 400 縮 36%）；actionable 密度 10%→70%
+- Top 3 必含：§1 Session/Wave/Sprint 路線圖表 + §2 當前 Wave 詳情單一展開區 + §10 References 28 條完整
+- 4 OQ 給 PM：Wave 結束整體歸檔 / W-AUDIT-4b 移 §11 / §9 SOP 裁剪 / §0 摘要限 8 bullet
+- 報告：docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--todo_v61_restructure_proposal.md

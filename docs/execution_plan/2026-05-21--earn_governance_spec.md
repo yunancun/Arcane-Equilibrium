@@ -465,20 +465,42 @@ CLAUDE.md §四 paper not active；本 spec 替換為「manual review mode」：
 
 ---
 
-## §12 審計記錄（待五角色 cross-ref 後填）
+## §12 審計記錄（五角色 cross-ref — CR-1 v5.7 4 follow-up 第 4 條 2026-05-21 補）
 
 本 spec 起草人 = CC（v57-C8 prefix dispatch）
 本 spec 起草時間 = 2026-05-21
+五角色 cross-ref 委派 = 主會話 PM 2026-05-21 CR-1 收口（per TODO §0.5 line 17 v57-C8 cross-ref follow-up）
 
-### 五角色 cross-ref 待補
+### 五角色 cross-ref 委派路徑 + verdict 等待狀態
 
-| 角色 | 視角 | 預期 verdict | 簽核時間 | 報告路徑 |
-|---|---|---|---|---|
-| CC | 16 原則 + 9 不變量 + 5-gate | self-draft 不簽 | — | — |
-| FA | 22 份治理文件 Gap 對 Earn 路徑覆蓋；ADR-0030 一致性 | ⬜ PENDING | — | `srv/docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-22--earn_governance_spec_review.md` |
-| E3 | secret slot scope；fail-closed 邊界；deploy impact | ⬜ PENDING | — | `srv/docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-22--earn_governance_spec_review.md` |
-| QA | AC-1~6 testability；runbook 完整性；reconciliation 自動化覆蓋 | ⬜ PENDING | — | `srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-22--earn_governance_spec_review.md` |
-| MIT | §3.2 payload schema 與 v57-C3 V103/V104 schema 一致性；audit field 完整性 | ⬜ PENDING | — | `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-22--earn_governance_spec_review.md` |
+| 角色 | 主要視角 | 範圍 + 必驗點 | 預期 verdict | 簽核時間 | 報告路徑 |
+|---|---|---|---|---|---|
+| **CC** | 16 原則 + 9 不變量 + 5-gate | self-draft 不簽（per §12 statistics 已自含 §1-§11 16 原則 + 9 不變量 coverage 矩陣）；外部 cross-ref 由 FA + E3 + QA + MIT + BB 對其他維度補強 | self-draft DONE | 2026-05-21 | `srv/docs/CCAgentWorkSpace/CC/workspace/reports/2026-05-21--v57_c8_earn_governance_spec.md`（self-drafted spec 本身）|
+| **FA** | 22 份治理文件 Gap 對 Earn 路徑覆蓋；ADR-0030 一致性 + Spec Compliance | (1) Earn 路徑是否覆蓋於 ADR-0030 / DOC-08 / 16 原則文件群 (2) ADR-0030 + 本 spec + ADR-0032 三者一致性 (3) Spec Compliance gap 分析（per `spec-compliance` skill） | ⬜ PENDING（D+1 2026-05-22 land）| — | `srv/docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-22--earn_governance_spec_review.md` |
+| **E3** | Secret slot scope；fail-closed 邊界；deploy impact + OWASP | (1) Earn API key scope (per BB v57-C5 已 DONE non-withdraw sufficient verdict) 是否與 mainnet boundary 對齊 (2) §5 fail-closed 3 連續失敗 disable trigger 是否符合 ADR-0007 fail-closed pattern (3) deploy impact secret slot writeup (per OWASP checklist) | ⬜ PENDING（D+1 2026-05-22 land）| — | `srv/docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-22--earn_governance_spec_review.md` |
+| **QA** | AC-1~6 testability；runbook 完整性；reconciliation 自動化覆蓋 + E2E | (1) AC-1~6 是否 testable（明確 fixture + assertion + mocked vs empirical 邊界）(2) AC-5 manual reset runbook 是否 deployable (3) §6 reconciliation cron 自動化覆蓋率 (4) Stage 0R replay preflight 對 Earn intent 是否適用 | ⬜ PENDING（D+1 2026-05-22 land）| — | `srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-22--earn_governance_spec_review.md` |
+| **MIT** | §3.2 payload schema 與 v57-C3 V103/V104 schema 一致性；audit field 完整性 + DB schema design | (1) §3.2 payload 與 V103 §2.3 earn_movement_log + V103 §14 EXTEND 5 audit field 是否一致 (2) lease_id / approval_id / actor_id / bybit_request_payload / rationale 與 §2.5 audit field 列表 alignment (3) hypertable 判斷（earn_movement_log §2.3.4 regular table 是否 OK 對應 §6 daily reconciliation 量級） | ⬜ PENDING（D+1 2026-05-22 land；與 V103 §14 EXTEND CR-1 第 1 條同步）| — | `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-22--earn_governance_spec_review.md` |
+| **BB** | Bybit Earn API + ToS + KYC + Broker rebate | (1) §3.1 stake/redeem 12 endpoint 對 BB v57-C4 verdict 一致 (2) Bybit Earn API rate limit 與 §6 reconciliation cron 是否衝突 (3) §4 mainnet boundary 與 Bybit production Earn 路徑對齊 (4) Earn API key 發行日 confirm（per v57-C5 operator follow-up） | ⬜ PENDING（D+1 2026-05-22 land）| — | `srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-22--earn_governance_spec_review.md` |
+
+**Cross-ref 派發委派 SOP**：
+
+1. **並行 dispatch**：5 角色（FA / E3 / QA / MIT / BB）並行；CC self-draft 不重簽
+2. **dispatch 工具**：主會話 PM 派 sub-agent；agent 工作於各自 worktree（避 multi-session memory race per `project_multi_session_memory_race`）
+3. **每角色 1-2 hr**（per TODO §0.5 line 17「Earn governance 五角色 cross-ref（FA + E3 + QA + MIT 並行；各 1-2 hr）」+ BB 新增 1-2 hr）
+4. **預期總工時 5-12 hr / 5 並行 sub-agent / D+1 2026-05-22 內 land**
+5. **每角色 verdict 三選一**：✅ APPROVE / ⚠️ APPROVE-WITH-CAVEAT / ❌ NEEDS-FIX
+6. **5/5 ✅ 或 4/5 ✅ + 1/5 ⚠️ minor caveat** → spec 升 SPEC-FINAL，CC sign-off
+7. **任 1 ❌ NEEDS-FIX** → CC 接收 + 修正 + 再 dispatch（最多 2 輪）
+
+**派發 dispatch 連結（D+1 2026-05-22）**：
+- FA + E3 + QA + MIT + BB 並行 sub-agent；template prompt 引用本 §12 表 + §1-§11 spec 主體 + V103 §14 audit field EXTEND
+- 預期 5 報告 land 在 `srv/docs/CCAgentWorkSpace/{FA,E3,QA,MIT,BB}/workspace/reports/2026-05-22--earn_governance_spec_review.md`
+- 主會話 PM 收 5 報告 → 整合 verdict → §12 sign-off table update
+
+### Cross-ref 範圍 / 不在本回合 cross-ref
+
+- ❌ 不在 cross-ref 範圍：Earn ML training pipeline （out of §1.3 scope）；Earn auto-compound（out of §1.3 scope）；GUI panel UX（per v57-C7 A3 / E1a 已 DONE）
+- ✅ 在 cross-ref 範圍：§1-§11 全部 spec + §12 16 原則 + 9 不變量 coverage + V103 §14 audit field consistency
 
 ### 16 原則 + 9 不變量 coverage 矩陣
 

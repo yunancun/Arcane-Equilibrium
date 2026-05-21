@@ -234,3 +234,13 @@ v1 樂觀「Strategist 354 applied / MLDE 41.7%」結論在 v2 不持續；v1 NE
 | 日期 | 任務 | 文件 | 行數 |
 |---|---|---|---|
 | 2026-05-09 v3 | 5 commits + PA redesign cross-check | docs/CCAgentWorkSpace/AI-E/workspace/reports/2026-05-09--ai_effectiveness_verification_v3.md | ~290 |
+
+## 2026-05-21 — v5.8 13-module LLM cost executability audit
+- File: workspace/reports/2026-05-21--v58_executability_audit.md
+- Verdict: GO-WITH-CONDITIONS (6 conditions + new ADR-0041 ContextDistiller v4)
+- Top finding: ContextDistiller token 從 v5.7 700-900 → v5.8 1,110-1,430 → L1 9B P50 直接撞 DOC-08 3s SLA（不是 P95 邊緣）
+- Y2 LLM cost peak: $1,340-2,560/年 = 月 $112-213 vs DOC-08 月 $60 cap = 1.9-3.5x 超 cap
+- M4 + M11 + M8 占 Y2 新增 LLM cost 72%（黑洞集中）
+- v5.8 §3/§4 工時表 2,780-3,930 hr 仍 0 字 LLM cost — 與 v5.7 audit 同性質 finding 但 module 數量 +13 倍放大
+- ADR roster gap：0034-0040 七個 ADR 但漏掉 ContextDistiller v4 = governance 盲點
+- Must-fix 6 條（§5）：ADR-0041 補入 1A-β / 工時表加 LLM cost 欄 / M4 Cowork review path 釘 / M11 narrative policy 釘 / writer path 修 / DOC-08 cap 重估

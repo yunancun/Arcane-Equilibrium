@@ -215,6 +215,10 @@ If an agent prompt asks for old CLAUDE §九, use this guardrail section plus
   sign-off.
 - Any passive wait in `TODO.md` must have a healthcheck, review date, named
   external action, or explicit reason automation is impossible.
+- PG connection examples + dry-run patterns: see
+  `docs/agents/context-loading.md` "PG Connection Examples (Linux runtime
+  authoritative)". Mac sandbox uses mocked pytest and cannot catch PG
+  runtime semantics; always `ssh trade-core` for empirical reflection.
 
 ## 十、Next Work And TODO Maintenance
 

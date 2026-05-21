@@ -70,3 +70,75 @@ captures the same decision surface or the deletion is explicitly called out.
   `docs/agents/todo-maintenance.md` and then the memory reminder.
 - Do not mirror the same long status paragraph across memory, README, and
   TODO. Use one source of truth plus links.
+
+## PG Connection Examples (Linux runtime authoritative)
+
+PostgreSQL empirical dry-run + reflection is mandatory before any V###
+migration sign-off (per CLAUDE.md `Data, Migrations, And Validation`). Mac
+sandbox uses pytest with mocked DB; Mac mock cannot catch runtime PG semantic
+(PL/pgSQL constraints, schema drift, sqlx checksum mismatch).
+
+Use these patterns on Linux `trade-core` runtime only:
+
+### Standard psql connect (via systemd-managed PG)
+
+```bash
+ssh trade-core 'sudo -u postgres psql -d openclaw -c "SELECT current_database(), version();"'
+```
+
+### Schema reflection example (V### dry-run)
+
+```bash
+# Verify column existence before ADD COLUMN IF NOT EXISTS
+ssh trade-core 'sudo -u postgres psql -d openclaw -c "
+  SELECT column_name, data_type
+  FROM information_schema.columns
+  WHERE table_schema=$$learning$$ AND table_name=$$hypotheses$$
+  ORDER BY ordinal_position;
+"'
+
+# Verify migration head (sqlx checksums)
+ssh trade-core 'sudo -u postgres psql -d openclaw -c "
+  SELECT version, success, checksum, execution_time
+  FROM _sqlx_migrations
+  ORDER BY version DESC
+  LIMIT 5;
+"'
+```
+
+### Idempotency double-apply test
+
+```bash
+# Apply V### twice on Linux PG; second apply must be a no-op (per Guard A/B/C)
+ssh trade-core 'cd ~/openclaw && cargo sqlx migrate run --database-url $DATABASE_URL'
+ssh trade-core 'cd ~/openclaw && cargo sqlx migrate run --database-url $DATABASE_URL'
+```
+
+### Engine restart empirical test (per a19797d sqlx hash drift 2026-05-02)
+
+```bash
+# After V### apply, restart engine and confirm migration head matches
+ssh trade-core 'bash ~/openclaw/helper_scripts/restart_all.sh --rebuild'
+ssh trade-core 'sudo -u postgres psql -d openclaw -c "SELECT version FROM _sqlx_migrations ORDER BY version DESC LIMIT 1;"'
+```
+
+### Hypertable + retention reflection (TimescaleDB)
+
+```bash
+ssh trade-core 'sudo -u postgres psql -d openclaw -c "
+  SELECT hypertable_name, num_chunks, compression_enabled
+  FROM timescaledb_information.hypertables
+  WHERE hypertable_schema = $$learning$$;
+"'
+```
+
+**Rules**:
+
+- Always use `ssh trade-core` prefix; do not run `psql` against Mac (no PG on
+  Mac per memory `project_dev_runtime_split`).
+- Use `sudo -u postgres` for admin-level reflection; never embed user/password
+  in command line.
+- Use `$$...$$` dollar-quoted strings inside SQL to avoid bash quote escaping
+  (per memory `feedback_shell_paste_safety` 2026-04-21).
+- For PR sign-off, capture `_sqlx_migrations.version` head + V### checksum +
+  engine restart output as evidence (per V055 5-round loop 2026-05-05 lesson).
