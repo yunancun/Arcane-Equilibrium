@@ -4693,3 +4693,56 @@ Sweep wrapper pattern 在 metrics 重型 monolithic function (1162 LOC `compute_
 
 **Commit timing**：交給主會話 PM review 後 commit；ADR 0028 commit hint = ADR-only governance commit + `[skip ci]` 可考慮；ADR 0029 commit hint = Proposed status，不需 `[skip ci]`，可能後續 IMPL 階段需 dispatched MIT calibration task。
 
+
+---
+
+## 2026-05-21 P1 status reverify (§11.3 watch entries × 3) — pre-v57.4 closure
+
+**Trigger**：operator 2026-05-21 要求收口 v57.3 之前所有舊 active 工作；reverify 3 條 P1-watch §11.3。
+
+**A · `P1-DATA-1..3-WATCH`（Runtime-reloaded WARN cluster row-rolloff watch）**：
+- Source fix landed at commit `34211ab4`（2026-05-02，LG5-W3-FUP-2 attribution writer fix）+ commit `463890de`（5/2 reviewer consumer scheduler land）。
+- 4+1 healthchecks `[14]/[37]/[40]/[42b]/[42c]/[45]/[51]` runtime-reloaded 後狀態：
+  - `[14] exit_features_accumulation_rate`：WARN ratio=0.32（this_week=172, last_week=543）但 grid `GROWING`、ma `SPARSE`；可接受。
+  - `[40] realized_edge_acceptance`：WARN avg_net=0.02bps <= target 5bps（這是 P0-EDGE-1 alpha 缺失問題，不是 row-rolloff bug）。
+  - `[42b]/[42c]` LG-5 attribution drift：**完全 fixed**；ma_crossover/grid_trading=1.000，bb_breakout/funding_arb=LOW_SAMPLE deferred by R-meta（正確語意）。
+  - `[45] pricing_binding`：WARN age exceeds 1h but within 24h 可接受。
+  - `[51] scanner_opportunity`：calibrated samples 仍 LOW_SAMPLE(n=0, need=10) — 繼續 watch。
+- **Verdict**：source ✅；row-rolloff watch 無新 critical drift；除 `[40] alpha negative` 已是 P0-EDGE-1 範圍，**可降級為 DOWNGRADE_TO_OPTIONAL（觀察 [51] scanner LOW_SAMPLE maturity 即可，不必獨立保留 P1-DATA-1..3-WATCH ID）**。
+
+**B · `P1-LG-5`（LG-5 reviewer maturity watch）**：
+- Source active：`governance_hub_live_candidate_review.py`（1552 LOC）+ `lg5_review_consumer_scheduler.py`（722 LOC）；5/7 commit `c8240b6a` P1 drain unaudited 修復；reviewer 5/8-5/19 daily fire 4-43/day。
+- runtime evidence：7d `learning.governance_audit_log` 共 68 rows = 66 `review_live_candidate`（**100% verdict=defer**）+ 1 `halt_session_set` + 1 `halt_session_manual_cleared`。
+- 100% defer **預期**：5 textbook 策略 EV negative（per QC 2026-05-11 audit）；reviewer 工作正常，promotion 自然延遲是設計意圖。
+- per-strategy attribution health（7d）：ma_crossover=1.000(n=215098) ✅；grid_trading=1.000(n=145) ✅；bb_breakout/funding_arb=LOW_SAMPLE（reviewer 正確 defer，per spec）。
+- **Verdict**：STILL_ACTIVE — source 活躍 + audit-row 健康；100% defer 不代表異常；維持 P1-watch 等到 alpha 路徑（R-1/R-2/R-3 + LG-3 Wave 2.4 IMPL）真實 promotable candidate 出現再 re-evaluate。
+
+**C · `P1-EDGE-1..2`**：
+- **C.1 P1-EDGE-1（ma_crossover + grid blocked_symbols frozen）**：
+  - freeze registry: `docs/governance_dev/strategy_blocked_symbols_freeze.json`（schema_version=1, freeze_id=P2-AUDIT-VERIFY-5-2026-05-09, status=frozen, scope=new_entries_only）。
+  - grid 17 symbols frozen / ma 4 symbols frozen；commit `c081029d` land 2026-05-09。
+  - runtime verify：grid 17 symbols 7d fills=0 ✅ / ma 4 symbols 7d fills=0 ✅（30d 有 fills 但都是 freeze 之前）。
+  - 結構 guard：`tests/structure/test_strategy_blocked_symbols_freeze.py` + audit helper `helper_scripts/db/audit/blocked_symbols_7d_counterfactual.py`。
+  - **Verdict**：CLOSED — freeze policy 完全執行；新 block 需 RFC + counterfactual 證據；保留 status=frozen 不需保留 ACTIVE-P1。
+- **C.2 P1-EDGE-2（funding_arb 14d audit 2026-05-16）**：
+  - audit script `helper_scripts/db/audit/2026-05-16_funding_arb_14d_audit.py` 已 land 於 commit `2d67c952`（2026-05-02），E2 PR review PASS（commit `34211ab4` 衍生）。
+  - 但**沒看到 2026-05-16 真實執行的 audit report**（搜遍 docs/CCAgentWorkSpace/ 無）。本次 PA reverify 手動跑：n=18 < 30；net_bps=-49.74bps preview only；1 fill 超過 5% notional → **SL gate failure**；**Decision: INSUFFICIENT**。
+  - 14d/30d funding_arb fills=0/125（demo dormant per memory `project_funding_arb_v2_deprecation_path`）。
+  - **Verdict**：STILL_ACTIVE 但**性質改變** — n 已不再累積（dormant），如果繼續等 n≥30 trigger 是 deadlock；建議升級為 `P0-FUNDING-ARB-DECISION-FORCE`：由 PM/QC 用現有 n=18 樣本 + 「中期棄策略」memory 路徑做 governance judgement decision，**不再等 n≥30**。1 fill 超 5% notional SL gate failure 是分離的 source bug 待 FA 查（升 P1 follow-up）。
+
+**Cross-watch findings（不在本 reverify 範圍但暴露）**：
+- `[Xa] leader_election_health`：edge_scheduler.leader.lock DEAD (PID 2897824)
+- `[66] panel_freshness`：PanelAggregator 1383s dead
+- `[56] live_pipeline_active`：snapshot stale 1335s > 180s threshold
+- `[48] replay_manifest_registry_growth`：7d=0 (rows total=23, last_age=235.8h)
+- `[12] bb_breakout_post_deadlock_fix`：bb_breakout 7d entries=0（FIX-26-DEADLOCK-1 可能未 deploy）
+- 3 cron sentinel WARN：[75/76/79]（panel_aggregator_health / wave9_replay_no_live_mutation_watch / blocked_symbols_30d_unblock_check）
+
+**PM action items（§11.3 → §12.4）**：
+1. **A 條目 P1-DATA-1..3-WATCH** → DOWNGRADE_TO_OPTIONAL，從 §11.3 移除（合併入 `[51]` scanner_opportunity LOW_SAMPLE watch 即可，已被 P0-EDGE-1 + R-1/R-2/R-3 路徑覆蓋）。
+2. **B 條目 P1-LG-5** → STILL_ACTIVE，維持 §11.3 watch；100% defer 是正確訊號不是異常。
+3. **C.1 P1-EDGE-1** → CLOSED，移到 §12.4 已完成列表（freeze registry permanent；新 block 走 RFC + 7d counterfactual SOP）。
+4. **C.2 P1-EDGE-2** → STILL_ACTIVE 但**升 P0**（n≥30 trigger 鎖死於 dormant；需強制 governance judgement decision），衍生 SL gate failure follow-up 升 P1。
+
+**Report path**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--p1_data_lg5_edge_status_reverify.md`
+
