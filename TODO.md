@@ -9,8 +9,8 @@
 
 ## §0 摘要
 
-- **Current Sprint Phase**：Sprint 1A-α DONE（v5.7 12 prefix sign-off 2026-05-21）+ Wave 2 v5.8 修補 16/16 ✅ DONE + Wave 2.5 paperwork closure ✅ DONE（2026-05-21）+ Sprint 1A-β D+5~D+6 dispatch readiness 12-check 10/12 ✅
-- **Current Wave**：Wave 2.5 ✅ DONE = ADR-0035/0037 TW draft + 0034/0036/0040 反向 ref + README index 53+7+3 條補 + 12-check sweep + 2 untracked stage；下一步 = D+3~D+5 operator-bound 2 條 + D+5 Sprint 1A-β PA dispatch packet
+- **Current Sprint Phase**：Sprint 1A-α ✅ + Wave 2 v5.8 16 CR ✅ + Wave 2.5 paperwork ✅ + **Sprint 1A-β ✅ PM-signed 2026-05-21（9/10 deliverable + 1 DEFER + 25+ open Q）**；Sprint 1A-γ READY 派
+- **Current Wave**：Sprint 1A-γ PENDING — M2/M4/M8/M9/M10 ADD-per-operator DESIGN + V105/V108/V109/V111 4 V### full DDL + V103 EXTEND M4 + 5 spec doc + 2 runbook + Cowork hybrid path + 3 ADR (M3/M6/M7 R4 建議補)
 - **Active P0**：`P0-EDGE-1`（5 strategy alpha-deficient）+ `P0-LG-3`（Wave 2.4 IMPL DISPATCH PENDING SPEC-READY 10d）+ `P0-OPS-1..4`（HTTPS / cred / legal / runbook）— Sprint 4 first Live W18-21 前必 closure
 - **Next 24h operator action**：D+1 (2026-05-22) AM ① BB OpenClaw key 發行日 5 min query ② Phase 2a 14d verdict 視窗（clock @ 2026-05-22~23 UTC）30-60 min 三選一決議
 - **Runtime**：engine PID 2934602 + API PID 2934665 + watchdog PID 2936560；最後 graceful restart 2026-05-21 13:31 UTC
@@ -24,11 +24,11 @@
 
 ```
 Sprint 1A-α  ✅ DONE (W0-1.5, 2026-05-21)            v5.7 12 prefix + PM signoff
-Sprint 1A-修補 🟡 ACTIVE (D+0~D+5, 2026-05-21~26)     v5.8 16 CRITICAL must-fix
-Sprint 1A-β  ⏳ PENDING (W1.5-3.5, ~2026-05-27 開派)   M1 LAL/M3/M6/M7/M11 DESIGN
-Sprint 1A-γ  ⏳ PENDING (W3.5-5.5)                    M2/M4/M8/M9/M10 DESIGN
-Sprint 1A-δ  ⏳ PENDING (W5.5-6.5)                    M5/M12/M13 interface stubs
-Sprint 1A-ε  ⏳ PENDING (W6.5-9)                      integration verify + Monthly Review Wizard
+Sprint 1A-修補 ✅ DONE (D+0~D+5, 2026-05-21)          v5.8 16 CR + Wave 2.5 paperwork
+Sprint 1A-β  ✅ DONE (2026-05-21 PM-signed)          M1 LAL/M3/M6/M7/M11 DESIGN + 5 V### full DDL + 6 runbook (16 artifact / ~12,900+ 行)
+Sprint 1A-γ  🟡 READY (W3.5-5.5)                    M2/M4/M8/M9/M10 DESIGN + V105/V108/V109/V111 + Cowork hybrid + 3 ADR (M3/M6/M7)
+Sprint 1A-δ  ⏳ PENDING (W5.5-6.5)                    M5/M12/M13 interface stubs (ADR-0035/0039/0040 已 Wave 2 land)
+Sprint 1A-ε  ⏳ PENDING (W6.5-9)                      integration verify + Monthly Review Wizard + 25+ open Q cross-ADR audit
 ```
 
 ### §1.2 Sprint Progression Table（Sprint 1A → Y3）
@@ -36,9 +36,9 @@ Sprint 1A-ε  ⏳ PENDING (W6.5-9)                      integration verify + Mon
 | Sprint | Calendar | 主要工作 | 工時 (hr) | Status |
 |---|---|---|---|---|
 | 1A-α | 2026-05-21 done | v5.7 baseline + 4 follow-up | 75-105 | ✅ DONE |
-| 1A-修補 | D+0~D+5 (2026-05-21~26) | 16 CRITICAL must-fix | 1,007-1,453 並行 | 🟡 ACTIVE |
-| 1A-β | W1.5-3.5 | M1 LAL/M3/M6/M7/M11 + ADR-0034/36/37/38 + V105/V106/V107/V112/V113 spec | 310-460 | ⏳ |
-| 1A-γ | W3.5-5.5 | M2/M4/M8/M9/M10 DESIGN + V108/V109/V111 + 4 runbook | 220-340 | ⏳ |
+| 1A-修補 | 2026-05-21 done | 16 CRITICAL + Wave 2.5 paperwork | 1,007-1,453 並行 | ✅ DONE |
+| 1A-β | 2026-05-21 done | M1 LAL/M3/M6/M7/M11 DESIGN + V106/V107/V110/V112/V113 full DDL + 6 runbook | 310-460 並行 (10 sub-agent + 3 recovery) | ✅ DONE |
+| 1A-γ | W3.5-5.5 (~2026-05-27 開派) | M2/M4/M8/M9/M10 DESIGN + V105/V108/V109/V111 + V103 EXTEND M4 + 5 spec + 2 runbook + Cowork hybrid + 3 ADR (M3/M6/M7) | 240-360 | 🟡 READY |
 | 1A-δ | W5.5-6.5 | M5/M12/M13 stubs + ADR-0035/0039/0040 + V114-116 partial | 75-120 | ⏳ |
 | 1A-ε | W6.5-9 | integration verify + cross-ADR + Monthly Review Wizard + docs/README index | 60-100 | ⏳ |
 | 1B | W9-12 | v5.7 baseline + C10 Stage 1 Demo + Earn first stake + M3 partial | 165-220 | ⏳ |
@@ -85,75 +85,18 @@ Sprint 1A-ε  ⏳ PENDING (W6.5-9)                      integration verify + Mon
 
 **Operator 親手時間 D+0~D+6 ≈ 3.5-5 hr**（分散 6 天，平均 30-50 min/day）；PM 每次 operator 進 session 主動 check 當天 action
 
-### §1.5 Sprint 1A-β Dispatch Readiness Checklist（12 條，D+5~D+6 必達；2026-05-21 paperwork closure 後 10/12 ✅，剩 #8 operator closure ETA + #9 Console tab decision 兩條 operator-bound action）
+### §1.5 Sprint 1A-α + Wave 2 + Wave 2.5 closure pointer
 
-1. ✅ v5.7 4 leftover land（CR-1：V103 audit field / V### re-number / PG conn / Earn 五角色 cross-ref）
-2. ✅ ADR-0030~0033（v5.7 Earn/Macro/Onchain/Bybit-Binance amendment 4 ADR）+ ADR-0034 LAL（CR-2）sign-off
-3. ✅ AMD-2026-05-21-01 autonomy-vs-human-final-review sign-off（CR-3）
-4. ✅ ADR-0040 multi-venue gate（CR-4）sign-off
-5. ✅ ADR-0035 + ADR-0036 + ADR-0037 + ADR-0038 sign-off — 0036/0038 此前 ✅；ADR-0035 (M5 online learning interface, 239 行) + ADR-0037 (M9 A/B framework, 391 行) TW 2026-05-21 補 draft（status Proposed；PM 簽 D+5）；反向 ref patch 0034/0036/0040 同 commit land
-6. ✅ M10 Tier D 黑名單 hardening + M8 GARCH 替換（CR-5）
-7. ✅ V105-V113 9 個 schema spec doc land（CR-8，90-140 MIT-hr placeholder ✅；full DDL Sprint 1A-β/γ）
-8. ⏳ §10 P0 precondition table ✅（CR-10 已 land v5.8 §10.5）+ **operator closure ETA D+3 親手填**
-9. ⏳ GUI 工時 +261-374 hr ✅ + A3 sign-off invariants 48-53 hr Y1 ✅（CR-11 已 land v5.8 §3.5.2/§12）+ **Console tab 4 sub-section decision D+5 operator 親手**
-10. ✅ TW 工時 +450-640 hr 寫入 §3/§4/§8/§9/§12（CR-12）
-11. ✅ §3/§4/§14 工時統一上修（CR-13：543-797→670-1,015 hr / 2,780-3,930→3,500-5,200 hr / 37-44w→44-55w）
-12. ✅ docs/README.md index 補（R4 audit + PM apply：新 2026-05-21 time-section 53 條 entry + ADR table 7 條 append + archive table 3 條 append + 0035/0037 反向 ref patch）+ TODO v61 finalize ✅（commit 7cd75c89）
+**狀態**：✅ Sprint 1A-α PM-signed（`26ee2f06`）+ Wave 2 v5.8 16 CR ✅（`77d5c54e`）+ Wave 2.5 paperwork ✅（`957491ee`）；Sprint 1A-β D+5~D+6 dispatch readiness 12-check **10/12 ✅**。剩 2 條 operator-bound action carry-over 到 §1.4：#8 P0-EDGE-1/LG-3/OPS-1..4 closure ETA D+3 / #9 Console tab 4 sub-section decision D+5。
 
-### §1.6 v5.8 16 CRITICAL must-fix（D+0~D+5 並行修補）
+**完整 12-check 表 + closure narrative + 反向 attack mitigation + commit chain + reference**：`docs/archive/2026-05-21--sprint_1a_alpha_repair_closure.md` §A-§F
 
-| ID | Item | Owner | 工時 | ETA |
-|---|---|---|---|---|
-| `v58-CR-1` | v5.7 4 follow-up | PA+MIT+TW+FA+E3+QA | 8-12 hr | D+1 |
-| `v58-CR-2` | M1→LAL + ADR-0034 5 細節 | PA+CC+QA | 12-18 hr | D+2 |
-| `v58-CR-3` | AMD-2026-05-21-01 autonomy-vs-human-final-review | PM+CC | 4-8 hr | D+2 |
-| `v58-CR-4` | ADR-0040 multi-venue gate（M13→Y3+ 措辭 + 5-gate venue schema） | TW+BB+E3 | 6-10 hr | D+3 |
-| `v58-CR-5` | M10 Tier D HMM 黑名單 + M8 GARCH 替換（ATR-vol regime + funding state）| TW+MIT+QC | 4-6 hr | D+2 |
-| `v58-CR-6` | M4 minimum bar + leakage protocol（6 attribute + shift(1) leak-free）| MIT+PA | 5-8 hr | D+3 |
-| `v58-CR-7` | M11 threshold statistical derivation + M7 dedup（M11→M7 input；M7 single authority）| MIT+QC | 4-6 hr | D+3 |
-| `v58-CR-8` | 9 個 V### schema spec doc（V105-V113）仿 v103_v104 範式 | MIT+PA+E5 | 90-140 hr | D+5 |
-| `v58-CR-9` | PG dry-run mandatory + cross-V### dependency graph | PA+E5 | 3-5 hr | D+3 |
-| `v58-CR-10` | §10 P0 precondition table + §12 operator decision 5 | PM | 2-4 hr | D+3 |
-| `v58-CR-11` | GUI 工時 +261-374 hr + Console tab + A3 sign-off invariants | PM+A3 | 3-5 hr | D+4 |
-| `v58-CR-12` | TW 工時 +450-640 hr | PM+TW | 2-3 hr | D+4 |
-| `v58-CR-13` | §3/§4/§14 工時統一上修 | PM | 1 hr | D+4 |
-| `v58-CR-14` | M12 maker_fill_rate + M11 PG `market.liquidations` source | BB+TW | 3-5 hr | D+3 |
-| `v58-CR-15` | 5-gate auto path inheritance 明文 + M4 DRAFT Decision Lease | TW+E3+CC | 4-6 hr | D+4 |
-| `v58-CR-16` | ADR-0041 ContextDistiller v4 + DOC-08 月 cap 重估 | AI-E+TW+PM | 6-10 hr | D+5 |
+### §1.6 v5.8 Wave 2 16 CRITICAL must-fix closure pointer
 
-**CRITICAL 合計**：~157-246 hr core + 90-140 hr MIT spec + 450-640 hr TW + 261-374 hr GUI + 48-53 hr A3 ≈ **1,007-1,453 hr**；並行 5-10 sub-agent wall-clock D+0~D+5
+**狀態**：✅ 16/16 DONE 2026-05-21（commit `77d5c54e`）+ Wave 2.5 paperwork（commit `957491ee`）；CRITICAL 合計 ~1,007-1,453 hr / D+0~D+5 並行 5-10 sub-agent。
 
-### §1.6.1 16 CRITICAL closure status — DONE 2026-05-21 主會話
+**完整 16 CR 表（Owner / 工時 / ETA）+ 統計**：`docs/archive/2026-05-21--sprint_1a_alpha_repair_closure.md` §B
 
-| ID | 狀態 | Artifact / 收口位置 |
-|---|---|---|
-| `v58-CR-1` | ✅ DONE | V103 spec §14 audit field EXTEND（5 field）+ CLAUDE.md §Data PG conn ref + docs/agents/context-loading.md PG examples + Earn governance §12 五角色 cross-ref 委派 + v5.8 §9 V### re-number consistent note |
-| `v58-CR-2` | ✅ DONE | `docs/adr/0034-decision-lease-layered-approval-lal.md` (~200 行；5 細節 + LAL↔Stage 矩陣) |
-| `v58-CR-3` | ✅ DONE | `docs/governance_dev/amendments/2026-05-21--AMD-2026-05-21-01-autonomy-vs-human-final-review.md` (254 行；protected 6 / opt-in 8 / 反向 attack 6) |
-| `v58-CR-4` | ✅ DONE | `docs/adr/0040-multi-venue-gate-spec.md` (257 行；M13 Y2→Y3+ + Venue enum hardcode + 6 trade gate criteria) |
-| `v58-CR-5` | ✅ DONE | `docs/adr/0036-m8-anomaly-detection-and-m10-tier-d-model-blacklist.md` (268 行；HMM/Markov/GARCH 黑名單 + ATR-vol+funding 雙 axis) |
-| `v58-CR-6` | ✅ DONE | `docs/execution_plan/2026-05-21--m4_minimum_bar_and_leakage_protocol.md` (839 行；6 attribute + shift(1) 三語言 + V103 EXTEND 6 字段 + leakage scan) |
-| `v58-CR-7` | ✅ DONE | `docs/execution_plan/2026-05-21--m11_threshold_m7_dedup_decay_enforced_rename.md` (321 行；3 threshold + M7 single decay authority + DECAY_ENFORCED rename) |
-| `v58-CR-8` | ✅ DONE | V105-V113 9 個 placeholder spec doc 1,970 行（`docs/execution_plan/2026-05-21--v###_*_schema_spec.md`）；full DDL Sprint 1A-β/γ 推進 |
-| `v58-CR-9` | ✅ DONE | v5.8 §3.5.5 cross-V### dependency graph + PG dry-run mandate；CLAUDE.md §Data ref |
-| `v58-CR-10` | ✅ DONE | v5.8 §10.5 P0 precondition table（P0-EDGE-1 / P0-LG-3 / P0-OPS-1..4 + 5-gate） + §12 decision 5 三選一 |
-| `v58-CR-11` | ✅ DONE | v5.8 §3.5.2 GUI 工時 +261-374 hr + §4 reflect + §12 A3 sign-off invariants 48-53 hr Y1 |
-| `v58-CR-12` | ✅ DONE | v5.8 §3.5.2 TW 工時 +450-640 hr + §4 reflect + §12 並行 dispatch with PA-MIT-CC parallel tracks |
-| `v58-CR-13` | ✅ DONE | v5.8 §3.5.1 Sprint 1A 543-797→670-1,015 hr + §4 Y1 2,780-3,930→3,500-5,200 hr + 37-44w→44-55w + 5.5w buffer |
-| `v58-CR-14` | ✅ DONE | `docs/adr/0039-m12-order-router-trait-and-maker-fill-rate-metric.md` (308 行) + `docs/adr/0038-m11-continuous-counterfactual-replay-and-liquidations-source.md` (255 行；self-hosted PG market.liquidations 非 Bybit API) |
-| `v58-CR-15` | ✅ DONE | v5.8 §11.5 5-gate auto path inheritance 7 條 + M4 DRAFT writeback Decision Lease + 6 反向 attack mitigation |
-| `v58-CR-16` | ✅ DONE | `docs/adr/0041-context-distiller-v4-and-ai-cost-cap-amendment.md` (272 行；800 token hard cap + DOC-08 §4 Y2 opt-in $150-200 + M4 hybrid + M11 daily L1 vs CRITICAL L2) |
-
-**16/16 ✅ DONE 2026-05-21** — 主會話統一 dispatch + sub-agent 並行 + 主會話收口；Sprint 1A-β D+5~D+10 內 PA dispatch packet → 5-7 並行 sub-agent → 真實 DESIGN 開始。
-
-**新增 artifact 統計**：
-- **6 ADR**：0034 (LAL) / 0036 (M8+M10 blacklist) / 0038 (M11 replay) / 0039 (M12 + maker fill rate) / 0040 (multi-venue Y3+) / 0041 (ContextDistiller v4)
-- **1 AMD**：AMD-2026-05-21-01 autonomy-vs-human-final-review
-- **2 spec docs**：M4 leakage protocol / M11+M7 dedup + DECAY_ENFORCED rename
-- **9 V### placeholder spec docs**：V105-V113
-- **6 v5.8 主檔 patches**：§3.5 / §4 / §9 / §10.5 / §11.5 / §12 / §14
-- **4 主文件 patches**：CLAUDE.md §Data + docs/agents/context-loading.md PG examples + Earn governance §12 五角色 cross-ref + V103 spec §14 audit field EXTEND
-- **總計**：~21 個新文件 + ~8 個現有文件 patches；~5,500+ 行新增
 
 ---
 

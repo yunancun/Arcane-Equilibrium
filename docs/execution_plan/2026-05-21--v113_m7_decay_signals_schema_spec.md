@@ -240,14 +240,274 @@ per CR-9 cross-V### dependency graph：
 
 ---
 
+## §8 Full DDL (Land Sprint 1A-β 2026-05-21；QC drafted + PM transcribed due to QC tool boundary)
+
+**Status promotion**：SPEC-PLACEHOLDER → **SPEC-DRAFT-V1**（per Sprint 1A-β CRITICAL deliverable；待 Linux PG empirical dry-run + MIT consultant verify 後可升 SPEC-VERIFIED）
+
+### 8.1 `learning.decay_signals` Full DDL
+
+```sql
+CREATE TABLE IF NOT EXISTS learning.decay_signals (
+    id                              BIGSERIAL PRIMARY KEY,
+    strategy_id                     TEXT NOT NULL,
+    symbol                          TEXT NOT NULL,
+    signal_type                     TEXT NOT NULL
+                                    CHECK (signal_type IN (
+                                        'SHARPE_DECAY',
+                                        'DRAWDOWN_WIDEN',
+                                        'OOS_DEG',
+                                        'HITRATE_PLUMMET',
+                                        'M11_CRITICAL_PERSISTENT',
+                                        'CUMULATIVE_LOSS_50PCT_IN_ENFORCED'
+                                    )),
+    signal_value                    NUMERIC(18,8) NOT NULL,
+    signal_threshold                NUMERIC(18,8) NOT NULL,
+    window_size_days                INTEGER NOT NULL CHECK (window_size_days BETWEEN 1 AND 365),
+    live_window_days                INTEGER NOT NULL DEFAULT 30,
+    oos_window_days                 INTEGER NOT NULL DEFAULT 90,
+    lifecycle_state                 TEXT NOT NULL
+                                    CHECK (lifecycle_state IN (
+                                        'NORMAL_LIVE',
+                                        'DECAY_DETECTED',
+                                        'DEMOTE_PROPOSED',
+                                        'DECAY_ENFORCED',
+                                        'RECOVERY',
+                                        'RETIRED'
+                                    )),
+    lifecycle_prev_state            TEXT
+                                    CHECK (lifecycle_prev_state IN (
+                                        'NORMAL_LIVE',
+                                        'DECAY_DETECTED',
+                                        'DEMOTE_PROPOSED',
+                                        'DECAY_ENFORCED',
+                                        'RECOVERY',
+                                        'RETIRED'
+                                    ) OR lifecycle_prev_state IS NULL),
+    m11_replay_divergence_ref       UUID NULL,
+    -- 註：V107 schema 仍 pending；UUID FK target 待 V107 land 後確認類型對齊
+    -- （若 V107 採 BIGSERIAL，此 column 必 patch 為 BIGINT）
+    retrain_triggered               BOOLEAN NOT NULL DEFAULT FALSE,
+    retrain_cooldown_expires_at     TIMESTAMPTZ NULL,
+    cumulative_pnl_during_decay     NUMERIC(20,8) NULL,
+    -- §9 14d × 50% mitigation 即時追蹤（per M7 design spec §9）
+    engine_mode                     TEXT NOT NULL
+                                    CHECK (engine_mode IN ('paper','demo','live_demo','live','replay')),
+    observed_at                     TIMESTAMPTZ NOT NULL,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+### 8.2 Hypertable + Retention + Compression
+
+```sql
+SELECT create_hypertable('learning.decay_signals', 'observed_at',
+    chunk_time_interval => INTERVAL '7 days',
+    if_not_exists => TRUE);
+
+ALTER TABLE learning.decay_signals SET (
+    timescaledb.compress,
+    timescaledb.compress_segmentby = 'strategy_id, signal_type',
+    timescaledb.compress_orderby = 'observed_at DESC'
+);
+
+SELECT add_compression_policy('learning.decay_signals', INTERVAL '7 days');
+SELECT add_retention_policy('learning.decay_signals', INTERVAL '180 days');
+-- 180d retention = 90d M7 historical query + 90d post-incident audit buffer
+```
+
+### 8.3 Indexes
+
+```sql
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_decay_strategy_symbol_observed
+    ON learning.decay_signals (strategy_id, symbol, observed_at DESC);
+
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_decay_lifecycle_state
+    ON learning.decay_signals (lifecycle_state, observed_at DESC);
+
+-- M1 LAL Tier 0 5-gate query hot path
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_decay_retired_strategies
+    ON learning.decay_signals (strategy_id)
+    WHERE lifecycle_state = 'RETIRED';
+
+-- M11 ingest dedup query hot path
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_decay_m11_persistent
+    ON learning.decay_signals (strategy_id, observed_at DESC)
+    WHERE signal_type = 'M11_CRITICAL_PERSISTENT';
+
+-- 14d × 50% mitigation hot path (real-time enforcement)
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_decay_enforced_cumulative
+    ON learning.decay_signals (strategy_id, cumulative_pnl_during_decay, observed_at DESC)
+    WHERE lifecycle_state = 'DECAY_ENFORCED';
+```
+
+### 8.4 Materialized View (latest decay state per strategy)
+
+```sql
+CREATE MATERIALIZED VIEW IF NOT EXISTS learning.mv_latest_decay_state_per_strategy AS
+SELECT DISTINCT ON (strategy_id)
+    strategy_id,
+    symbol,
+    lifecycle_state,
+    lifecycle_prev_state,
+    signal_type,
+    signal_value,
+    signal_threshold,
+    cumulative_pnl_during_decay,
+    engine_mode,
+    observed_at
+FROM learning.decay_signals
+ORDER BY strategy_id, observed_at DESC;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_mv_latest_decay_strategy
+    ON learning.mv_latest_decay_state_per_strategy (strategy_id);
+
+-- M1 LAL Tier 0 5-gate query path:
+-- SELECT lifecycle_state FROM mv_latest_decay_state_per_strategy WHERE strategy_id=$1
+-- Refresh schedule: cron every 1 min (M7 daily run + per-tick LAL query 平衡)
+```
+
+---
+
+## §9 DECAY_ENFORCED Rename — Single Authority Justification (per CR-7)
+
+### 9.1 字面碰撞分析
+
+原 v5.8 `STAGE_DEMOTED` 字面含「STAGE」三字，與：
+- **AMD-2026-05-15-01** Stage 0 / 0R / 1 / 2 / 3 / 4 canary promotion gate
+- **ADR-0034** LAL 0 / 1 / 2 / 3 / 4 Decision Lease Layered Approval
+
+SQL query `WHERE state = 'STAGE_DEMOTED'` 在 ETL / dashboard 易與 `stage_history.stage = 'Stage 1'` 邏輯混淆。
+
+### 9.2 為什麼 DECAY_ENFORCED 比 STAGE_DEMOTED 語意清楚
+
+| 維度 | STAGE_DEMOTED | DECAY_ENFORCED |
+|---|---|---|
+| 對應域 | promotion gate（Stage 0R-4）誤用 | M7 decay action 域，無跨域重疊 |
+| Operator 心智 | 「降到哪 Stage？」混淆 | 「strategy 在 enforced 50% sizing」明確 |
+| SQL filter | `WHERE state LIKE 'STAGE%'` 撞 Stage history | `WHERE state = 'DECAY_ENFORCED'` 唯一 |
+| Lineage | 跟 Stage promotion 混 | 對應 M7 single decay authority |
+
+### 9.3 M7 Single Authority 在 schema 上 enforce 路徑
+
+per CR-7 contract — M11 不可寫 `strategy_lifecycle`；schema 級防護：
+- V113 `decay_signals` table 不開放 M11 寫入（PG role grant 在 §10 Linux PG SOP 內 land）
+- V107 `replay_divergence_log` schema 必無 `auto_demote` / `target_state` / `demote_proposal_id` field（per M11 design spec §6.4）
+- `cumulative_pnl_during_decay` column 即時追蹤 + `idx_decay_enforced_cumulative` index 配合 §9 14d × 50% mitigation hardcoded enforcement
+
+### 9.4 與 M11 dedup 對齊
+
+- V107 schema 不含 demote field（M11 不可寫 lifecycle）
+- V113 schema 含 lifecycle_state 6 enum + `m11_replay_divergence_ref` UUID FK placeholder（M7 ingest M11 signal 走 reference 而非 M11 直寫 V113）
+- per CR-7 line specific：M7 query when `persistent_days >= 14` count as 1-of-5 signal source；不重複 run replay
+
+---
+
+## §10 Linux PG Empirical Dry-Run Protocol (per V103 範式)
+
+### 10.1 必跑 SQL (per V103 §4.1 範式)
+
+```bash
+# Linux only — ssh trade-core
+ssh trade-core "psql -h /var/run/postgresql -U openclaw -d openclaw -c '
+-- Round 1: existence reflection (Guard A baseline)
+SELECT relname FROM pg_class WHERE relname = ''decay_signals'' AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = ''learning'');
+SELECT typname FROM pg_type WHERE typname LIKE ''%decay%'';
+
+-- Round 2: schema applied (Guard A pass; Guard C 6 ENUM + 4 ENUM engine_mode + hypertable + 5 indexes + retention + compression)
+SELECT column_name, data_type, character_maximum_length
+FROM information_schema.columns
+WHERE table_schema = ''learning'' AND table_name = ''decay_signals''
+ORDER BY ordinal_position;
+
+-- Round 3: hypertable verify
+SELECT * FROM timescaledb_information.hypertables WHERE hypertable_name = ''decay_signals'';
+
+-- Round 4: compression + retention policy verify
+SELECT * FROM timescaledb_information.compression_policies WHERE hypertable_name = ''decay_signals'';
+SELECT * FROM timescaledb_information.drop_chunks_policies WHERE hypertable_name = ''decay_signals'';
+
+-- Round 5: index verify (5 indexes + 1 mv index = 6)
+SELECT indexname, indexdef FROM pg_indexes
+WHERE schemaname = ''learning'' AND tablename IN (''decay_signals'', ''mv_latest_decay_state_per_strategy'');
+'"
+```
+
+### 10.2 Idempotency 雙跑驗
+
+```bash
+# 第二次跑 V113 migration → 預期 0 row change（IF NOT EXISTS + Guard A 都 fail-safe）
+ssh trade-core "cd ~/BybitOpenClaw/srv && cargo run --bin migrate -- --target V113"
+ssh trade-core "psql -h /var/run/postgresql -U openclaw -d openclaw -c 'SELECT version, success, executed_at FROM _sqlx_migrations WHERE version = ''V113'';'"
+# Expected: success=t + executed_at unchanged
+```
+
+### 10.3 Engine restart 實測 SOP（per 2026-05-02 sqlx hash drift 教訓）
+
+```bash
+# After V113 land + Mac commit + push origin
+ssh trade-core "cd ~/BybitOpenClaw/srv && git pull --ff-only"
+ssh trade-core "cd ~/BybitOpenClaw/srv && bash helper_scripts/restart_all.sh --rebuild --keep-auth"
+# Expected:
+#  - engine PID 重啟成功
+#  - engine.log 0 panic
+#  - sqlx _sqlx_migrations V113 success=t（per AC-7 ref M7 design spec §10）
+# 若 sqlx checksum drift → 跑 helper_scripts/db/repair_migration_checksum binary（per 2026-05-02 incident SOP）
+```
+
+---
+
+## §11 Rollback Plan + Reversibility Analysis
+
+### 11.1 Rollback SQL (Linux PG only；不在 Mac 跑)
+
+```sql
+-- V113 rollback
+DROP MATERIALIZED VIEW IF EXISTS learning.mv_latest_decay_state_per_strategy;
+SELECT remove_retention_policy('learning.decay_signals', if_exists => TRUE);
+SELECT remove_compression_policy('learning.decay_signals', if_exists => TRUE);
+DROP TABLE IF EXISTS learning.decay_signals;
+-- V113 rollback 不跨 V107 boundary（V107 為 M11 schema，V113 rollback 不動）
+```
+
+### 11.2 Reversibility Analysis
+
+- **V113 apply 後立即 0 row**：Foundation stage（per MIT pipeline maturity 5-stage）；rollback 0 row loss
+- **V113 apply 後有 data**：rollback 會丟 decay signal history；建議 export to `/tmp/backup_v113_*.csv` 前才執行 rollback
+- **V107 dependency**：V113 `m11_replay_divergence_ref` column 是 UUID FK placeholder（無實際 FK constraint），V107 rollback 不會 cascade 到 V113
+
+---
+
+## §12 Audit Field (per V103 EXTEND 範式)
+
+V113 schema 不含 5 audit field（created_by / created_at / updated_by / updated_at / source_version）的完整對齊，因 `learning.decay_signals` 是 M7 sole writer + observation only（不像 V103 hypotheses 跨多角色 writer）。M7 IMPL 階段以 `created_at` + `signal_value` 為唯一 audit 鏈；若 Sprint 1A-ε cross-ADR audit 要求 5 audit field full set，將通過 V113 EXTEND 補。
+
+---
+
+## §13 Acceptance Criteria (Sprint 1A-β land verify)
+
+| # | Criteria | Test |
+|---|---|---|
+| **AC-1** | Guard A pass：`learning.decay_signals` 表存在 + 16 column 全俱在 + hypertable created | §10.1 Round 1+2 |
+| **AC-2** | Guard C pass：6 ENUM signal_type + 6 ENUM lifecycle_state + 5 ENUM engine_mode + 5 indexes + retention 180d + compression policy | §10.1 Round 3+4+5 |
+| **AC-3** | Idempotency pass：第二次跑 V113 migration → 0 row change | §10.2 |
+| **AC-4** | Engine restart pass：sqlx _sqlx_migrations V113 success=t + engine.log 0 panic | §10.3 |
+| **AC-5** | Materialized view query pass：`SELECT lifecycle_state FROM mv_latest_decay_state_per_strategy WHERE strategy_id='grid_btcusdt'` 返回最新 1 row | §10.1 Round 5 |
+| **AC-6** | M7 design spec AC-3 14d × 50% test：empirical INSERT 14 row + `cumulative_pnl_during_decay < -0.5 × pre_decay_account` → query path 必 SELECT row 用於 transition decision | M7 spec §10 AC-3 ref |
+| **AC-7** | V107 FK placeholder：`m11_replay_divergence_ref` UUID 可 NULL；V107 land 後 patch 為 BIGINT FK 或維持 UUID 取決 V107 final schema | M11 spec §V107 alignment audit |
+
+---
+
 ## §7 Sign-off Table
 
 | Role | Status | Date | Note |
 |---|---|---|---|
-| MIT Drafted (placeholder) | DONE | 2026-05-21 | Placeholder frontmatter + 大綱 reserve only |
-| PA | PENDING | — | Full DDL Sprint 1A-β |
-| E4 | PENDING | — | Regression after IMPL |
+| MIT Drafted (placeholder) | DONE | 2026-05-21 | Placeholder frontmatter + 大綱 reserve |
+| QC Full DDL drafted (§8-§13) | DONE | 2026-05-21 | inline draft → PM transcribed (QC tool boundary) |
+| PM Write (handoff) | DONE | 2026-05-21 | full DDL land in §8-§13 |
+| PA | PENDING | — | Sprint 1A-β dispatch packet alignment |
+| MIT consultant verify | PENDING | — | Linux PG empirical dry-run + V107 FK placeholder type align |
+| E4 | PENDING | — | Regression after IMPL Sprint 4-5 |
 | E5 | PENDING | — | Hypertable + retention 180d 驗 critical |
-| PM | PENDING | — | Sprint 1A-β closure |
+| PM Sign-off | PENDING | — | Sprint 1A-β closure |
 
-**END V113 spec placeholder**
+**END V113 spec full DDL**
