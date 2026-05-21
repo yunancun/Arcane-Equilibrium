@@ -564,15 +564,20 @@ class TestEngineFailureClassifier(unittest.TestCase):
         path = self._write_log(lines)
         self.assertEqual(classify_engine_failure(path), "engine_crash")
 
-    def test_non_consecutive_dns_below_threshold(self):
-        """Interleaved DNS lines break the run / DNS 被非匹配行打斷 → 不夠連續"""
+    def test_non_consecutive_dns_above_interleaved_threshold(self):
+        """DNS 被打斷但比例 ≥ MIN_RATIO → NETOUTAGE-CLASSIFIER-FIX gate (c) 判 network_outage。
+
+        為什麼這個 test 改了意圖：DNS-CLASSIFY-1 原設計只有「連續 ≥5」gate，
+        interleaved 場景被誤判 engine_crash 會觸發 restart storm。
+        NETOUTAGE-CLASSIFIER-FIX (2026-05-21) 新增 gate (c) interleaved。8 DNS /
+        16 行 = 50% ≥ 25% ratio AND 8 ≥ MIN_INTERLEAVED=5 → network_outage。
+        """
         lines = []
         for i in range(8):
             lines.append(f"ERROR Temporary failure in name resolution {i}")
             lines.append(f"INFO unrelated heartbeat {i}")
         path = self._write_log(lines)
-        # Longest run = 1 (every DNS line is broken by a heartbeat)
-        self.assertEqual(classify_engine_failure(path), "engine_crash")
+        self.assertEqual(classify_engine_failure(path), "network_outage")
 
     def test_case_insensitive_matching(self):
         """Patterns match regardless of case / 不分大小寫"""
@@ -626,6 +631,169 @@ class TestEngineFailureClassifier(unittest.TestCase):
             [f"ERROR DNS error old outage {i}" for i in range(5)],
             age_seconds=20 * 60,
         )
+        self.assertEqual(classify_engine_failure(path), "engine_crash")
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # WATCHDOG-NETOUTAGE-CLASSIFIER-FIX (2026-05-21) regression tests
+    # 強化：interleaved + cross-rotation evidence 場景；false-positive guard。
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def test_net_outage_classified_when_5_consecutive_dns_errors(self):
+        """Baseline：≥5 連續 DNS error 在新分類器下仍判 network_outage（不破舊行為）。"""
+        lines = [
+            "INFO startup ok",
+            "INFO heartbeat",
+        ] + [
+            f"ERROR Temporary failure in name resolution attempt {i}"
+            for i in range(5)
+        ]
+        path = self._write_log(lines)
+        self.assertEqual(classify_engine_failure(path), "network_outage")
+
+    def test_net_outage_classified_when_5_interleaved_dns_errors_within_5min(self):
+        """5 條 DNS error 散落於 tail 內被 heartbeat 打斷 → 新 gate (c) 判 network_outage。
+
+        舊行為（DNS-CLASSIFY-1）：longest_run=1 < 5 → engine_crash（false negative）。
+        新行為：tail 內總 match 數 5 / 總行數 17 ≈ 29% ≥ 25% ratio → network_outage。
+        為什麼這個情境真實：DNS lookup 失敗時引擎可能仍輸出 metric/lifecycle 行，
+        導致 error 連續性被破壞，但 DNS 確實是真實外部故障源。
+        """
+        # tail_lines=20，預期讀全部 17 行；5 條 DNS match / 17 ≈ 29% ≥ 25%
+        lines = [
+            "INFO startup ok",
+            "INFO metric heartbeat 1",
+            "ERROR Temporary failure in name resolution 1",
+            "INFO metric heartbeat 2",
+            "INFO some lifecycle event",
+            "ERROR Temporary failure in name resolution 2",
+            "INFO metric heartbeat 3",
+            "ERROR HTTP transport error 3",
+            "INFO metric heartbeat 4",
+            "INFO unrelated debug",
+            "ERROR DNS error 4",
+            "INFO metric heartbeat 5",
+            "ERROR connection refused 5",
+            "INFO metric heartbeat 6",
+            "INFO another lifecycle",
+            "INFO metric heartbeat 7",
+            "INFO last heartbeat",
+        ]
+        path = self._write_log(lines)
+        self.assertEqual(classify_engine_failure(path), "network_outage")
+
+    def test_net_outage_classified_when_dns_errors_span_log_rotation(self):
+        """DNS errors 散落跨 active + rotated log → cross-rotation aggregate gate (d) 判 outage。
+
+        場景：3 條 DNS 在 active log（不滿單檔 ≥5 連續/interleaved 門檻），2 條
+        DNS 在 rotated death log；單檔均 fail，但合併 tail 內共 5 條 match 達
+        aggregate gate（5 matches，total ~22-25，ratio ≥10%）→ network_outage。
+        舊行為：每個檔獨立評估，均 fail → engine_crash（false negative，會觸發
+        restart storm，與 v55 #5 watchdog RCA 同類更廣）。
+        """
+        # active log：3 DNS + heartbeats（不滿連續 ≥5 也不滿單檔 interleaved 5）
+        active_lines = [
+            "INFO restart heartbeat",
+            "ERROR Temporary failure in name resolution active-1",
+            "INFO startup heartbeat 1",
+            "INFO startup heartbeat 2",
+            "ERROR HTTP transport error active-2",
+            "INFO startup heartbeat 3",
+            "INFO startup heartbeat 4",
+            "ERROR DNS error active-3",
+            "INFO startup heartbeat 5",
+            "INFO startup heartbeat 6",
+        ]
+        path = self._write_log(active_lines)
+        # rotated death log：2 DNS + heartbeats（單檔也 fail）
+        rotated_lines = [
+            "INFO pre-restart heartbeat",
+            "ERROR Temporary failure in name resolution rotated-1",
+            "INFO pre-restart heartbeat 2",
+            "INFO pre-restart heartbeat 3",
+            "INFO pre-restart heartbeat 4",
+            "INFO pre-restart heartbeat 5",
+            "INFO pre-restart heartbeat 6",
+            "INFO pre-restart heartbeat 7",
+            "ERROR connection refused rotated-2",
+            "INFO pre-restart heartbeat 8",
+        ]
+        self._write_rotated_log(rotated_lines)
+        self.assertEqual(classify_engine_failure(path), "network_outage")
+
+    def test_pg_connection_error_not_classified_as_net_outage(self):
+        """tail 含 PG/sqlx 等 ambiguous-source token → 降級回 engine_crash（false-positive guard）。
+
+        場景：tail 裡同時有 5+ 條 "connection refused"（NETWORK_OUTAGE_PATTERN
+        命中）和 1 條 "ERROR sqlx pgconnection ..."（ambiguous source）。雖然
+        connection refused 在 substring 上跟 Bybit transport 不可分，但 PG
+        connection 異常 ≠ network outage 必走 engine_crash 計 strike（保守原則）。
+        """
+        lines = [
+            "ERROR connection refused 1",
+            "ERROR connection refused 2",
+            "ERROR connection refused 3",
+            "ERROR connection refused 4",
+            "ERROR connection refused 5",
+            "ERROR sqlx pgconnection unable to query database",
+        ]
+        path = self._write_log(lines)
+        self.assertEqual(classify_engine_failure(path), "engine_crash")
+
+    def test_unrelated_log_lines_dont_trigger(self):
+        """純 metric/lifecycle/heartbeat 行不應命中任何 gate → engine_crash（default）。
+
+        場景：tail 全部 unrelated INFO/DEBUG 行，無 network error 子串、無
+        panic、無 PG token。應走最終 default engine_crash（snapshot 過期但
+        log 證據不足以推論為 net outage）。為什麼這個 test 重要：證明分類器
+        不會把無證據場景錯判為 net-outage（最危險的 false positive：吞掉真
+        engine 死鎖）。
+        """
+        lines = [
+            "INFO startup ok",
+            "INFO pipeline tick 1",
+            "INFO pipeline tick 2",
+            "INFO heartbeat",
+            "DEBUG some debug output",
+            "INFO metric submission ok",
+            "INFO pipeline tick 3",
+            "INFO pipeline tick 4",
+            "INFO heartbeat",
+            "INFO pipeline tick 5",
+        ]
+        path = self._write_log(lines)
+        self.assertEqual(classify_engine_failure(path), "engine_crash")
+
+    def test_pg_pool_exhaustion_with_concurrent_dns_errors_not_classified_as_net_outage(self):
+        """HIGH-1 R2 production-empirical guard：真實 PG pool 失敗格式被正確識別為 ambiguous。
+
+        E2 R1 用 production `<OPENCLAW_DATA_DIR>/engine.log` 第 4 行 reproduce
+        false-positive：tail 內 5 條 connection refused + 1 條真實 ANSI-wrapped PG pool
+        timed out 行，原 R1 ambiguous patterns 只列 postgres / pgconnection / sqlx /
+        disk full / oom 等 token，**未涵蓋** `pg pool` / `pool timed out` / `db_pool`
+        三個 production engine 真實格式 → guard 在最常見 PG 失敗場景設計目標達成度 = 0%。
+
+        R2 補 3 個 token 後本 test 應命中 ambiguous guard → 降級回 engine_crash。
+
+        production 真實字串（含 Rust tracing ANSI escape）對齊：
+          - 第 4 行 `error=pool timed out while waiting for an open connection`
+          - 「PG pool connect failed — DB writes disabled / PG 連接失敗，DB 寫入已禁用」
+          - `db_pool unavailable, BudgetTracker not started`
+        三條任一行被讀到時 ambiguous guard 即應啟動（整體降級不依賴連續行數）。
+        """
+        # Rust tracing 預設格式：\x1b[2m...timestamp...\x1b[0m \x1b[33m WARN\x1b[0m ThreadId(NN) \x1b[2m<module>\x1b[0m\x1b[2m:\x1b[0m <message>
+        # 構造 5 條 connection refused（NETWORK_OUTAGE_PATTERN 命中）+ 1 條真實 ANSI-wrapped PG pool timed out
+        # 任一 ambiguous token 命中應整體降級回 engine_crash（保守原則）。
+        lines = [
+            "\x1b[2m2026-05-21T10:14:23.190848Z\x1b[0m \x1b[31mERROR\x1b[0m ThreadId(01) \x1b[2mopenclaw_engine::ws::bybit\x1b[0m\x1b[2m:\x1b[0m connection refused attempt 1",
+            "\x1b[2m2026-05-21T10:14:23.291848Z\x1b[0m \x1b[31mERROR\x1b[0m ThreadId(01) \x1b[2mopenclaw_engine::ws::bybit\x1b[0m\x1b[2m:\x1b[0m connection refused attempt 2",
+            "\x1b[2m2026-05-21T10:14:23.392848Z\x1b[0m \x1b[31mERROR\x1b[0m ThreadId(01) \x1b[2mopenclaw_engine::ws::bybit\x1b[0m\x1b[2m:\x1b[0m connection refused attempt 3",
+            "\x1b[2m2026-05-21T10:14:23.493848Z\x1b[0m \x1b[31mERROR\x1b[0m ThreadId(01) \x1b[2mopenclaw_engine::ws::bybit\x1b[0m\x1b[2m:\x1b[0m connection refused attempt 4",
+            "\x1b[2m2026-05-21T10:14:23.594848Z\x1b[0m \x1b[31mERROR\x1b[0m ThreadId(01) \x1b[2mopenclaw_engine::ws::bybit\x1b[0m\x1b[2m:\x1b[0m connection refused attempt 5",
+            # 真實 production line 4 字串（lowercase 後含 "pg pool" + "pool timed out"）
+            "\x1b[2m2026-05-21T10:14:28.480901Z\x1b[0m \x1b[33m WARN\x1b[0m ThreadId(01) \x1b[2mopenclaw_engine::database::pool\x1b[0m\x1b[2m:\x1b[0m PG pool connect failed — DB writes disabled / PG 連接失敗，DB 寫入已禁用 \x1b[3merror\x1b[0m\x1b[2m=\x1b[0mpool timed out while waiting for an open connection",
+        ]
+        path = self._write_log(lines)
+        # 預期：ambiguous guard 命中 ("pg pool" + "pool timed out" 雙重) → engine_crash
         self.assertEqual(classify_engine_failure(path), "engine_crash")
 
 
