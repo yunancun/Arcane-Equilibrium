@@ -11185,3 +11185,13 @@ E2 PR review (`2026-05-20--p2_sim_queue_aware_e2_review.md`) APPROVE-CONDITIONAL
 - 修改：rename 71_*→66_* + patterns 全替（4 大寫 + 4 小寫，含 R2 新補 DYNAMIC STOP%）+ check_id [71]→[66] + MODULE_NOTE 對齊 + new production-string test + __init__.py 補 [66] + [62] dead init 清
 - 結果：82/82 → 83/83 PASS；MEDIUM-D1 Wilson upper bound deferred（E2 標非 blocker）；E2 R2 review pending
 
+### 2026-05-21 P1-WATCHDOG-NETOUTAGE-CLASSIFIER-FIX 教訓
+
+- **任務**：source-only follow-up；強化 `classify_engine_failure` 處理 interleaved + cross-rotation evidence；4 新 test + 1 改意圖；test_canary.py 59→63 PASS / test_engine_watchdog.py 40→40 PASS unchanged
+- **教訓 1：「測試位置 follow 既有局部性，不機械對齊 task spec 字面 path」**：spec 寫 test 加在 `test_engine_watchdog.py` 但所有現有 13 個 classifier tests 在 `test_canary.py`（後者是 inert-probe 專用測試檔）。E1 push back PA + 在 report §2 明文記錄理由；測試局部性 + fixture 共享優先於字面對齊。E2 review 時若不認可可再討論，但不要靜默照搬位置失去 grep affinity
+- **教訓 2：「行為改變的 test 必須 rename + docstring 明文解釋」**：原 `test_non_consecutive_dns_below_threshold` 名稱記錄 DNS-CLASSIFY-1 的盲區「interleaved 必失敗」，NETOUTAGE-CLASSIFIER-FIX 設計目標恰恰是改變此行為。rename 為 `test_non_consecutive_dns_above_interleaved_threshold` + docstring 明文標 origin tag + 為什麼改 assert。**禁止默默改 assert 留舊 test 名 → reviewer 看不到行為改變痕跡**
+- **教訓 3：「ambiguous-source guard 是 fail-closed 必須整體降級不是 per-file」**：first draft 設計過 per-file ambiguous → 只本 candidate skip。但 cross-rotation 場景下 PG error 可能只在某 rotated death log，active log 全 DNS — per-file guard 會 false-positive 整體 outage。**整體降級**（任一 candidate 命中即整批 → engine_crash）才符合保守原則。test_pg_connection_error_not_classified_as_net_outage 釘住此契約
+- **教訓 4：「ratio gate vs timestamp window 是 brittleness trade-off」**：spec 提 5min rolling window 但 Rust engine.log timestamp format 與 Python regex 不對齊風險高；採 ratio gate（match/total ≥ 25%）作等價解，搭配既有 `NETWORK_OUTAGE_RECENT_SECONDS = 15min` mtime filter（檔案級別時間窗）。在 report §3.2 push back + 列為 OQ-2 留 PM 後續決定。**遇 brittle 替代方案先 push back 不盲改**
+- **教訓 5：「helper 抽出與否看共用次數」**：`_count_network_matches` 被 gate (c) per-file + gate (d) aggregate 共用 → 必抽（避免雙重維護）；`_longest_consecutive_network_run` 只 fast-path 一處用 → 也抽是為了 readability + 對齊新 helper 風格。`_has_ambiguous_source` 共用 4 處（每 candidate file 都查）→ 必抽。**單次用且 ≤ 5 行可 inline；2+ 次用或 ≥ 10 行邏輯抽 helper**
+- **教訓 6：「baseline test 必須先跑」**：本次先跑 baseline 確認 59 tests，再寫新 test。pytest 跑完發現 1 個既有 test 因新邏輯 FAIL → 是設計目標的核心成果不是 regression → rename + 改意圖。**禁止把 baseline FAIL 當 regression 強硬 revert classifier 邏輯 → 失去設計目標**
+

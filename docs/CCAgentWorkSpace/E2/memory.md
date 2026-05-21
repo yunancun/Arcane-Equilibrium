@@ -3377,3 +3377,68 @@ def test_default_patterns_match_real_exit_reason_strings():
 - 本 R2 review 報告：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-21--p1_p2_close_maker_healthcheck_e2_review_r2.md`
 - 對應 R1 review 報告：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-20--p1_p2_close_maker_healthcheck_e2_review.md`
 - 對應 E1 R2 fix 報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-21--p1_p2_close_maker_healthcheck_round2_fix.md`
+
+## 2026-05-21 — P1-WATCHDOG-NETOUTAGE-CLASSIFIER-FIX R1 · RETURN
+
+**對象**：E1 IMPL `helper_scripts/canary/engine_watchdog.py` +132 行（1369→1501）
++ `test_canary.py` +129 行（723→857，+4 new test + 1 改意圖）
+**Verdict**：**RETURN to E1**（0 CRITICAL / 1 HIGH / 2 MEDIUM / 1 LOW）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-21--p1_watchdog_netoutage_classifier_fix_e2_review.md`
+
+### Catch（HIGH-1 — false-positive guard 在真實 PG 場景無效）
+
+E1 設計初衷強調「false positive guard 防止 PG 故障被誤標 net-outage」但
+`AMBIGUOUS_SOURCE_PATTERNS = ('postgres', 'pgconnection', 'sqlx', ...)` 是**推測式
+token list 未對照 production engine.log empirical 取樣**。
+
+E2 grep `/Users/ncyu/.openclaw_runtime/engine.log` 第 4 行真實 PG 失敗格式：
+```
+WARN openclaw_engine::database::pool: PG pool connect failed — DB writes disabled / PG 連接失敗，DB 寫入已禁用 error=pool timed out while waiting for an open connection
+```
+
+該行 lowercase 後 = `... pg pool connect failed ... error=pool timed out ...`，
+**任何 AMBIGUOUS_SOURCE_PATTERNS token 都不命中**（`postgres` ⊄ `pg pool`，
+`pgconnection` ⊄ `pg pool connect`，`sqlx` ⊄ database::pool 層）。
+
+Adversarial probe (production 真實 ANSI-wrapped 字串) reproduce：
+- 5 條 `connection refused` (NETWORK_OUTAGE_PATTERN 命中) + 1 條真 production PG
+  pool timed out 行
+- **Classifier 回 `network_outage`**（false positive！）→ watchdog 跳過 strike 計
+  數 + 跳過 auto-restart → 真 PG bug 被吞掉
+
+新 (c) interleaved gate **放寬 false-positive 觸發門檻**（5 連續 → 5 條 + 25%
+比例），讓 guard 缺陷的影響更大。
+
+### 教訓 / Pattern
+
+- **Pattern token list 必對照真實 production log empirical**：不可純概念推測。
+  E1 設了 `postgres` / `pgconnection` / `sqlx` 但漏 production 實際出現的 `pg pool`
+  / `pool timed out` / `db_pool` — 整個 guard 在最常見 PG 失敗場景下無效。
+- **Adversarial probe 必用 production 字串**：不能用「我覺得 PG error 長什麼樣
+  子」的虛構字串測 guard，必須抓 `/Users/ncyu/.openclaw_runtime/engine.log` 內
+  真實行（含 ANSI escape）跑 classifier 看結果。E2 用 ANSI-wrapped real-log 字串
+  reproduce false-positive。
+- **設計初衷 vs 實作完整性 gap**：E1 §3.4 寫得很清楚「寧可漏報 net-outage 多計
+  strike，也不可錯把 PG/disk 失敗標為 network_outage」— **設計目標正確，但
+  token list 實作未驗證能否達成此目標**。設計目標達成度 = 0%（最常見 PG 失敗
+  場景下 guard 完全 bypass）。
+- **新 PR 不要因為「概念正確」就 approve**：必須 empirical 對照 production data
+  確認概念落地。
+
+### 對抗反問驗證
+
+E2 用 `python3 -c "..."` 跑 28 個 adversarial probe，27 個邏輯正確，**僅 probe 3
++ 18 (production PG pool timed out 場景) 失敗**。這就是 finding 1 的 RCA evidence。
+
+### MEDIUM findings
+
+- **MEDIUM-1**：spec push back §3.2「ratio gate 等價 timestamp window」假設在
+  sparse log 場景（engine paused/throttled）下不成立 — production 99% OK 但邊緣
+  場景未明說。應在注釋 explicit 記錄 assumption + 開 OQ 給 PM 決定是否升 P1 補
+  timestamp gate。
+- **MEDIUM-2**：`_count_network_matches(aggregate_lower)` 在 (d) gate 中重複呼叫
+  2 次，應抽變數避免 O(N×P) 雙重 walk。
+
+### 報告路徑
+- 本 R1 review 報告：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-21--p1_watchdog_netoutage_classifier_fix_e2_review.md`
+- E1 R1 IMPL 報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-21--p1_watchdog_netoutage_classifier_fix.md`

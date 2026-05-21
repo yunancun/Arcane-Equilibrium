@@ -90,6 +90,48 @@
 ### Rebuild 對 healthcheck [16] 的修復
 - `strategist_cycle_fresh` FAIL 在 pre-rebuild 是真問題；rebuild 22 分鐘後實測已 PASS（with "fresh boot, by design" message）。PM gap 5 預測正確。
 
+## 2026-05-21 LG-1 / LG-2 7d closure + Phase 2a T+72h verify 教訓
+
+| 報告 | 日期 | 關鍵發現 |
+|---|---|---|
+| 2026-05-21 LG-1/LG-2 7d closure + Phase 2a T+72h | 2026-05-21 | LG-1 PASS WITH 1 KNOWN GAP（H0 production wired 18M+ tick verified, P1-LG1T3-RMW-WIRE hot-reload gap still open, NEW P1-LG1-DEMO-SLA-VIOLATION max_latency_us=2454μs > 1ms SLA）；LG-2 PASS WITH 1 CAVEAT（startup assertion fire confirmed, but production tick path 0 caller for fee_source() is BY-DESIGN per spec §2.4 — LG-3 supervised live 須 IMPL tick-time pricing-source consumer）；Phase 2a T+72h HEALTHY VELOCITY (28 rows, 0.39/h, 14d projection ~140) BUT AC-1/AC-2/AC-4 projection FAIL (maker_fill 35.71% << 60% gate)，AC-20 secondary WARN projection；engine STOPPED at 09:58 UTC 須 PM restart 或標 deliberate pause。報告：`srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-21--lg1_lg2_7d_closure_phase2a_t72h_verify.md` |
+
+### 1. Engine logs 是 binary blob — 不可 strings 撈 plain-text status_report
+- `/tmp/openclaw/engine_logs/engine-*.log` 是 `file` 報 "data" 不是 text；`strings` 撈不到舊 `status_report` h0_checks 累積數值
+- 只有 current `/tmp/openclaw/engine.log` (5h window with hourly rotation `.1.gz/.2.gz/.3.gz`) 是 plain text
+- **QA verify limitation**：10d cumulative `h0_blocked` count 不可獲；必須依賴 `pipeline_snapshot_*.json` snapshot writer
+- **建議 PM**：若這對 fail-closed semantic verify 是 critical，open ticket 改 engine log rotate format plain text 或加 sidecar JSON metrics writer
+
+### 2. H0 production caller verify 必看 source code + pipeline_snapshot, 不只看 engine.log
+- engine.log 內 `h0_blocked` 出現在 `event_consumer::status_report` 每 30s 一行；要算累積須 snapshot JSON file (`/tmp/openclaw/pipeline_snapshot_{demo,live,paper}.json` 含 `h0_gate_stats` block)
+- 真 production caller verify = grep `step_0_5_h0_gate.rs` confirm `h0_gate.check()` 在 production path + status_report 顯示累積 `h0_checks` 18M+
+
+### 3. Fail-closed semantic「真實 fire 過」是高要求
+- LG-1 7d observation 期 `h0_blocked=0, shadow_would_block=0` — **fail-closed 從未實際 reject 任何 tick**
+- semantic correctness 靠 LG1-T1 unit test 5 (`test_h0_shadow_to_hardblock_race_safe`) PASS 證明，runtime 未被測試過
+- 這不等於 wiring failure — H0 真的有跑 (18M+ check)，但 H0 沒 trigger（freshness / health / eligibility / envelope / cooldown 五門都 0 violation）
+- QA verdict 用「PASS WITH 1 KNOWN GAP」更精準
+
+### 4. SLA verify 不要只看 average 也要看 max
+- LG-1 demo `max_latency_us=2454` (2.5ms) > 1ms SLA — single tick outlier 在 18M sample 內 confirmed
+- Live `max_latency_us=19μs` 完美
+- 找 P99 / max latency 才是 SLA verify 重點；average 0us 是 micros 解析度限制
+
+### 5. By-design 0-caller vs unwired 0-caller 必須分清楚
+- LG-2 `fee_source()` 在 tick_pipeline / strategies = 0 caller，**但這是 spec §2.4 by-design**（assertion + IPC contract, not tick-time consumer）
+- 不能誤標「LG-2 unwired」；要正確標「LG-2 spec scope 是 startup + IPC；future LG-3 supervised live 要 wire tick-time consumer」
+- QA verdict 「PASS WITH 1 CAVEAT」+ caveat 明文寫進 P0 DONE annotation
+
+### 6. Phase observation window verdict 看 projection 不只看當前
+- Phase 2a T+72h sample velocity 健康 (0.39 rows/h) 但 AC-1 (60% maker fill gate) projection FAIL — 因為當前 35.71% Wilson lower 18-22%，14d sample 增到 ~140 也很難 swing to 60%
+- AC-20 (secondary) 計算 projection：16 bucket × (336h/72h) extrapolated covers ~22 buckets（可能 PASS 18 gate）但 per-hour n ≥3 大多會 fail
+- QA 該主動 surface PM **verdict 視窗前** decision 路徑：(a) calibration round 2 / (b) accept regime baseline + spec amend / (c) Phase 2b LiveDemo recalibrate
+
+### 7. PG audit log 不是所有 wiring 都寫
+- LG-1 H0 BLOCKED 用 `tracing::warn!` → engine.log not PG (by-design)
+- LG-2 live_spawn_audit 用 `tracing::info!` → engine.log not PG (by-design per E2 MEDIUM-4)
+- 查 `learning.governance_audit_log` 對 H0/LG2 沒結果是正常 — 不能誤判「LG-1/2 wiring 完全沒 log」
+
 ## Round 2 hotfix retry 教訓（2026-05-04）
 
 ### git working tree dirty + uncommitted vs origin/main 不一致 = false-PASS 風險
