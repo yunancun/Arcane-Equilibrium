@@ -1,8 +1,16 @@
 # 玄衡 TODO — 活躍派工佇列
 
-版本：v57.3-zh（v57.2 dual-track v4.2 RATIFY 結構保留 + v56 P0-ENGINE-HALTSESSION-STUCK-FIX 完整 cycle CLOSED 2026-05-20 ~02:15 UTC）
-日期：2026-05-20
-狀態：本檔僅保留 ACTIVE / PENDING / ACTIVE-WATCH 項目；所有歷史 ✅ DONE 詳情已歸檔。**v56 P0 unblocks §-0.C Sequencing 後續 PHASE-0-MIGRATION-DRIFT-RECONCILE**。
+版本：v57.4-zh（v57.3 dispatch-prep cleanup — A+B+C 三批 closure 2026-05-21）
+日期：2026-05-21
+狀態：本檔僅保留 ACTIVE / PENDING / ACTIVE-WATCH 項目；所有歷史 ✅ DONE 詳情已歸檔。**v57.4 closure 後 working tree clean，無 stale active 項；下一步 §-0.C Sequencing PHASE-0-MIGRATION-DRIFT-RECONCILE 待 operator 拍板路線（v4.2 / v4.3 / v4.4 / v5.0）**。
+
+**v57.3 → v57.4 closure（2026-05-21）**：
+- **A 批**：TODO 縮 70 行（HALTSESSION/SPINE/WATCHDOG-EXIT/§12.2 sweep 6 項 + §-0 LEGACY v4.1 + §-1 incident 全歸檔）
+- **B 批**：13 個未追蹤文件入 git — AMD-01..05 + ADR-0024..0027 + execution_plan + LG-3 refresh + 9 個 srv/2026-05-20--*.md planning audit trail
+- **C 批**：P2 sweep 衍生 8 follow-up 全 closure — healthcheck [66] new + [62] --stratify（E1 R1+R2 / E2 R1 RETURN + R2 APPROVE-COND / E4 PASS）+ ADR-0028 dead-enum reservation + ADR-0029 trade-tape policy（Proposed 等 MIT calibration）+ FA C4 A-axis verdict (IMPL WIRED FOR LOG ONLY) + FA C6 phys-lock gate4 audit (spec PRESENT but incomplete) + spec v1.3→v1.4 AC-20 hour distribution coverage
+- **E2 R1 catch 重要 bug**：原 SQL 草案 `IN ('stop_loss', 'liquidation')` 全錯（exit_reason 是 free-text 大寫 LIKE pattern + liquidation 走 strategy_name LIKE 'unattributed:%'）；E1 R2 修正後 83/83 pass
+- **§12.3a 衍生 4 條新 follow-up**：P2-OBS-PRE-STOPOUT-WILSON-SUBCLAUSE / P1-SWEEP-A-AXIS-PRUNE / P2-PHYS-LOCK-72-HEALTHCHECK / P2-FALLBACK-DEAD-ENUM-90D-AUDIT
+- Commit chain：`5cd7b264`（A）+ `4f3ae2bb`（B governance）+ `cfb9d243`（B planning）+ `e96d8ebb`（C closure）
 
 ## §-0 v57.2 雙軌制 v4.2 RATIFY（2026-05-20 — 3 amendments）
 
