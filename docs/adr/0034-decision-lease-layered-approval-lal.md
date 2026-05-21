@@ -3,7 +3,7 @@
 Date: 2026-05-21
 Status: **Proposed-pending-commit**（per operator D2 2026-05-21 已批 LAL 改名；v5.8 §2 M1 module ADR 級落地；本 ADR 為 ADR-0008 Decision Lease 的擴展，不取代）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch via v5.8 §2 M1「Lease Tier 0-4 重命名為 Layered Approval Lease (LAL) 0-4 以避 AMD-2026-05-15-01 Stage 0R-4 字面碰撞」D2 已批）
-Related: ADR-0008 (Decision Lease state machine, baseline) / ADR-0016 (Decision Lease Router evidence mode) / ADR-0024-lite (Cowork operator-assistant) / AMD-2026-05-15-01 (Canary Rebase Replay Preflight Demo-Micro-Canary — Stage 0R-4) / AMD-2026-05-21-01 (autonomy-vs-human-final-review) / v5.8 §2 M1 / V112 schema spec (placeholder pending CR-8) / PA dispatch consolidation report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md` / PM final verdict `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v58_pm_final_verdict.md`
+Related: ADR-0008 (Decision Lease state machine, baseline) / ADR-0016 (Decision Lease Router evidence mode) / ADR-0024-lite (Cowork operator-assistant) / ADR-0035 (M5 online learning interface reservation; Y3+ activation 走 LAL Tier 4) / ADR-0037 (M9 A/B framework; variant promotion to Stage 4 走 LAL Tier 3 operator approval；cluster 對齊矩陣引用 LAL Tier 1/2/3) / AMD-2026-05-15-01 (Canary Rebase Replay Preflight Demo-Micro-Canary — Stage 0R-4) / AMD-2026-05-21-01 (autonomy-vs-human-final-review) / v5.8 §2 M1 / V112 schema spec (placeholder pending CR-8) / PA dispatch consolidation report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md` / PM final verdict `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v58_pm_final_verdict.md`
 
 ## Context
 

@@ -159,6 +159,66 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 ## 文档索引 (Document Index)
 
+### 2026-05-21 Sprint 1A-β dispatch packet + v5.7/v5.8 13-module thesis + autonomy AMD
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-05-20--execution-plan-v5.7.md` | v5.7 Dispatch-Safe Patch 主檔（Round 12-15 reviewer rounds 收斂、Bybit Earn Guardian / 14 hard problems 修法、§12 12-prefix 補丁；Sprint 1A dispatch baseline） |
+| `execution_plan/2026-05-20--execution-plan-v5.8.md` | v5.8 13-Module Autonomy Expansion 主檔（M1-M13 module roster + ADR-0034..0041 reservation + V105-V116 schema reserve + 5 階段 Sprint 1A 拆分） |
+| `execution_plan/2026-05-21--sprint_1a_dispatch_packet.md` | Sprint 1A-β PA dispatch packet（13 module spec land sub-phase + 7 必 ADR + 9 V### spec + runbook 派發排程） |
+| `execution_plan/2026-05-21--v103_v104_earn_hypotheses_schema_spec.md` | V103/V104 Earn Hypotheses + Allocator Proposals schema spec（Sprint 1A-α MIT 940 行 baseline；M4 Self-Supervised Hypothesis Discovery 依賴源） |
+| `execution_plan/2026-05-21--v103_v104_linux_pg_dry_run.md` | V103/V104 Linux PG dry-run protocol + 5-round empirical reflection + Guard A/B/C 驗證 |
+| `execution_plan/2026-05-21--earn_governance_spec.md` | Bybit Earn Asset Movement Guardian 完整治理 spec（5-Gate Adapter + Decision Lease retrofit + audit log；ADR-0032 spec phase） |
+| `execution_plan/2026-05-21--m4_minimum_bar_and_leakage_protocol.md` | M4 Pattern Miner minimum bar threshold + leakage protocol（hypothesis discovery 防 data leak + null-result acceptance + shift(1) 三語言） |
+| `execution_plan/2026-05-21--m11_threshold_m7_dedup_decay_enforced_rename.md` | M11 threshold rename + M7 dedup decay enforced（continuous replay 與 model decay 接線去重；per CR-7 contract） |
+| `execution_plan/2026-05-21--v105_m2_overlay_state_transitions_schema_spec.md` | V105 M2 overlay state transitions schema spec（5 值 state enum + from/to + trigger_type + counterfactual_log FK + engine_mode CHECK） |
+| `execution_plan/2026-05-21--v106_m3_health_observations_schema_spec.md` | V106 M3 health observations schema spec（health domain 6 column + hypertable + 7d chunk + 30d compression） |
+| `execution_plan/2026-05-21--v107_m11_replay_divergence_log_schema_spec.md` | V107 M11 replay divergence log schema spec（divergence_type / divergence_pnl_usdt / fill_chain_id FK + ~9k row/yr 規模） |
+| `execution_plan/2026-05-21--v108_m9_ab_testing_framework_schema_spec.md` | V108 M9 A/B testing framework schema spec（preregistration FK to V103 + hash algorithm + mSPRT schema） |
+| `execution_plan/2026-05-21--v109_m8_anomaly_events_schema_spec.md` | V109 M8 anomaly events schema spec（severity taxonomy + event_taxonomy 9 子類 FK；依賴 ADR-0036） |
+| `execution_plan/2026-05-21--v110_m6_reward_weight_history_schema_spec.md` | V110 M6 reward weight history schema spec（5 λ 值 5 column vs JSONB + bayesian_opt 算法欄位） |
+| `execution_plan/2026-05-21--v111_m10_discovery_tier_config_schema_spec.md` | V111 M10 discovery tier config schema spec（Tier A-E 5 行 config + capital threshold 7 級 trigger + activation log） |
+| `execution_plan/2026-05-21--v112_m1_decision_lease_lal_tiers_schema_spec.md` | V112 M1 Decision Lease LAL tiers schema spec（Tier 0-4 enum + eligibility materialized view + auto-approve toggle；依賴 ADR-0034） |
+| `execution_plan/2026-05-21--v113_m7_decay_signals_schema_spec.md` | V113 M7 decay signals schema spec（lifecycle 6 值 enum + 4 signal column） |
+| `adr/0034-decision-lease-layered-approval-lal.md` | ADR-0034: Decision Lease Layered Approval (LAL) — M1 5 層分層治理（Tier 0-4 重命名避免 AMD-2026-05-15-01 Stage 0R-4 字面碰撞；ADR-0008 擴展不取代） |
+| `adr/0035-m5-online-learning-interface-reserved.md` | ADR-0035: M5 Online Learning Interface Reserved — Trait Stub + V114 Placeholder, IMPL Deferred Y3+（Sprint 1A-δ deliverable；retirement criteria 4 條） |
+| `adr/0036-m8-anomaly-detection-and-m10-tier-d-model-blacklist.md` | ADR-0036: M8 Anomaly Detection + M10 Tier D Regime — Model Blacklist + ATR-vol × Funding-state 9-cell 矩陣替代 + RV Percentile + Block Bootstrap Threshold（v5.8 §2 M8+M10 合併 ADR） |
+| `adr/0037-m9-ab-framework-and-statistical-methodology.md` | ADR-0037: M9 A/B Testing Framework + Statistical Methodology — 4 Variant Cluster × i.i.d. 修正 × Variant Stage 路徑 + Fair Execution Clause（Sprint 1A-γ DESIGN 50-70 hr；Sprint 4-8 phased IMPL） |
+| `adr/0038-m11-continuous-counterfactual-replay-and-liquidations-source.md` | ADR-0038: M11 Continuous Counterfactual Replay — Self-Hosted PG market.liquidations 作 historical source（BB 5.21 audit push back 落地） |
+| `adr/0039-m12-order-router-trait-and-maker-fill-rate-metric.md` | ADR-0039: M12 OrderRouter Trait — Maker-Fill-Rate Metric + Adaptive Routing Audit Schema（V115 reserve） |
+| `adr/0040-multi-venue-gate-spec.md` | ADR-0040: Multi-Venue Gate Spec — M13 Binance Trade Enable Defer Y3+ At Earliest（ADR-0033 §Decision 2 時點 amendment standalone） |
+| `adr/0041-context-distiller-v4-and-ai-cost-cap-amendment.md` | ADR-0041: ContextDistiller v4 — Layered Snapshot + Token Hard Cap + DOC-08 AI Cost Amendment（ADR-0027 v4 級延伸；AI-E must-fix #1） |
+| `governance_dev/amendments/2026-05-21--AMD-2026-05-21-01-autonomy-vs-human-final-review.md` | AMD-2026-05-21-01 — v5.8 13-module thesis 核心治理 amendment（CLAUDE.md §二 第 5 條 human final review 拆 protected vs opt-in；5 mitigation + 6 反向 attack counter-mitigation；§四 hard boundaries 不放鬆）|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v58_pm_final_verdict.md` | PM v5.8 final verdict consolidation（5 audit + PA dispatch consolidation 整合；GO-WITH-CONDITIONS verdict） |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v57_autonomy_verdict.md` | PM v5.7 autonomy verdict（autonomy boundary 收斂 + opt-in path 標準化） |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v57_12_prefix_pm_signoff.md` | PM v5.7 §12 12-prefix patch sign-off（PA tech verify + FA business verify 整合 + ADR 編號順移敲定） |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md` | PA v5.8 dispatch consolidation（13 module spec roster + 7 ADR + 9 V### + runbook 派發 + 16 CR contract） |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v57_dispatch_consolidation.md` | PA v5.7 dispatch consolidation（12-prefix patch + Sprint 1A scope baseline） |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v57_12_prefix_tech_verify.md` | PA v5.7 §12 12-prefix tech verification（ADR 編號衝突解、Earn Guardian spec dispatch、router/lease 重命名安全） |
+| `CCAgentWorkSpace/FA/workspace/reports/2026-05-21--v57_business_consolidation.md` | FA v5.7 business consolidation（Earn APR business case + Allocator monthly business value + Bybit 14 hard problems business framing） |
+| `CCAgentWorkSpace/FA/workspace/reports/2026-05-21--v58_executability_audit.md` | FA v5.8 executability audit（13 module business chain 缺口 + 14 must-fix business framing） |
+| `CCAgentWorkSpace/FA/workspace/reports/2026-05-21--v57_12_prefix_business_verify.md` | FA v5.7 §12 12-prefix business verification（Bybit Earn business case + Allocator business value） |
+| `CCAgentWorkSpace/A3/workspace/reports/2026-05-21--v58_executability_audit.md` | A3 v5.8 executability audit（GUI/UX 13 module surface gap 評估） |
+| `CCAgentWorkSpace/AI-E/workspace/reports/2026-05-21--v58_executability_audit.md` | AI-E v5.8 executability audit（ContextDistiller v3 token 預算超 cap + Y2 LLM cost 風險；ADR-0041 must-fix #1） |
+| `CCAgentWorkSpace/BB/workspace/reports/2026-05-21--v58_executability_audit.md` | BB v5.8 executability audit（Bybit historical liquidations REST 不存在 push back + maker fill rate metric 要求；ADR-0038/0039 push back 來源） |
+| `CCAgentWorkSpace/CC/workspace/reports/2026-05-21--v58_executability_audit.md` | CC v5.8 executability audit（16 根原則 vs 13 module thesis 合規檢核） |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-05-21--v58_executability_audit.md` | E2 v5.8 executability audit（13 module 代碼結構評估） |
+| `CCAgentWorkSpace/E3/workspace/reports/2026-05-21--v58_executability_audit.md` | E3 v5.8 executability audit（13 module 安全攻擊面 + autonomy 升級風險） |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-21--v58_executability_audit.md` | E4 v5.8 executability audit（13 module 測試覆蓋預估 + CI 工時影響） |
+| `CCAgentWorkSpace/E5/workspace/reports/2026-05-21--v58_executability_audit.md` | E5 v5.8 executability audit（13 module 性能 / 結構優化潛在風險） |
+| `CCAgentWorkSpace/MIT/workspace/reports/2026-05-21--v58_executability_audit.md` | MIT v5.8 executability audit（9 V### schema 工時估算 ~90 MIT-hr + 跨週協調 30-50 hr buffer） |
+| `CCAgentWorkSpace/QA/workspace/reports/2026-05-21--v58_executability_audit.md` | QA v5.8 executability audit（13 module 質量門控 + acceptance criteria 風險） |
+| `CCAgentWorkSpace/QC/workspace/reports/2026-05-21--v58_executability_audit.md` | QC v5.8 executability audit（13 module 數學 / 統計 / 量化合理性） |
+| `CCAgentWorkSpace/R4/workspace/reports/2026-05-21--v58_executability_audit.md` | R4 v5.8 executability audit（13 module 文檔 + 編號 + index 漂移分析；本 README index patch 來源） |
+| `CCAgentWorkSpace/TW/workspace/reports/2026-05-21--v58_executability_audit.md` | TW v5.8 executability audit（ADR drafts + spec doc 工時 + 文檔成本） |
+| `CCAgentWorkSpace/FA/workspace/reports/2026-05-21--todo_business_chain_audit.md` | FA TODO business chain audit（business value chain 完整性核查） |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-21--todo_v61_restructure_proposal.md` | PA TODO v61 restructure proposal（v5.8 land 後 TODO 重組方案 — Sprint 1A-β-ε scope 分段） |
+| `CCAgentWorkSpace/FA/workspace/reports/2026-05-21--todo_v61_restructure_proposal.md` | FA TODO v61 restructure proposal（business framing + dispatch readiness checklist 反映 business chain） |
+| `CCAgentWorkSpace/QA/workspace/reports/2026-05-21--lg1_lg2_7d_closure_phase2a_t72h_verify.md` | QA LG-1 / LG-2 7-day closure Phase 2a T+72h verify report |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-21--p1_data_lg5_edge_status_reverify.md` | PA P1-DATA / LG-5 edge status re-verify |
+| `CCAgentWorkSpace/E5/workspace/reports/2026-05-21--p1_lg1_demo_sla_violation_hotpath_audit.md` | E5 P1-LG-1 demo SLA violation hotpath audit |
+| `CCAgentWorkSpace/BB/workspace/reports/2026-05-21--v57_c4_c5_c6_bybit_verdict.md` | BB v5.7 §12 C4/C5/C6 Bybit verdict（trade tape / Earn Guardian / 14 problems business framing review） |
+
 ### 2026-05-16 12-agent consolidated audit + Wave 1-4 (WP-01..13)
 
 | 文件 | 内容 |
@@ -530,7 +590,14 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `adr/0031-framework-expansion-earn-macro-onchain.md` | ADR-0031: Framework Expansion — Earn Governance + Macro Counterfactual + On-Chain Counterfactual (Proposed; v5.7 §11 提案順移自 ADR-0029) |
 | `adr/0032-bybit-earn-asset-movement-guardian.md` | ADR-0032: Bybit Earn Asset Movement Guardian — 5-Gate Adapter + Decision Lease Retrofit + Audit Log (Proposed; v5.7 §12 提案順移自 ADR-0030) |
 | `adr/0033-adr-0006-bybit-binance-amendment.md` | ADR-0033: ADR-0006 Amendment — Binance Market Data Approved Y1 + Trading Defer Y2 + DEX/Hyperliquid NOT Approved + D12 + ToS (Proposed; v5.7 §12 amendment standalone) |
+| `adr/0034-decision-lease-layered-approval-lal.md` | ADR-0034: Decision Lease Layered Approval (LAL) — M1 Tier 0-4 分層治理 (Proposed; v5.8 §2 M1；ADR-0008 擴展不取代；Tier 0-4 重命名避免 AMD-2026-05-15-01 Stage 0R-4 字面碰撞) |
+| `adr/0035-m5-online-learning-interface-reserved.md` | ADR-0035: M5 Online Learning Interface Reserved — Trait Stub + V114 Placeholder, IMPL Deferred Y3+ (Proposed; v5.8 §2 M5；Sprint 1A-δ deliverable；retirement criteria 4 條) |
 | `adr/0036-m8-anomaly-detection-and-m10-tier-d-model-blacklist.md` | ADR-0036: M8 Anomaly Detection + M10 Tier D Regime — Model Blacklist (HMM / Markov-switching / GARCH 永久禁用) + ATR-vol × Funding-state 雙 axis 9 cell 矩陣替代 + RV Percentile + Block Bootstrap Threshold + Y3+ PELT Evaluation ADR-debt (Proposed; v5.8 §2 M8+M10 Tier D 合併治理 ADR per PA CR-5 / PM 仲裁 #5) |
+| `adr/0037-m9-ab-framework-and-statistical-methodology.md` | ADR-0037: M9 A/B Testing Framework + Statistical Methodology — 4 Variant Cluster × i.i.d. 修正 × Variant Stage 路徑 + Fair Execution Clause (Proposed; v5.8 §2 M9；Sprint 1A-γ DESIGN 50-70 hr / Sprint 4 read-only logging / Sprint 7-8 manual A/B / Y2 auto-gate 分階段 IMPL) |
+| `adr/0038-m11-continuous-counterfactual-replay-and-liquidations-source.md` | ADR-0038: M11 Continuous Counterfactual Replay — Self-Hosted PG market.liquidations 作 historical source (Proposed; v5.8 §2 M11；BB 5.21 audit push back 落地) |
+| `adr/0039-m12-order-router-trait-and-maker-fill-rate-metric.md` | ADR-0039: M12 OrderRouter Trait — Maker-Fill-Rate Metric + Adaptive Routing Audit Schema (Proposed; v5.8 §2 M12；V115 reserve) |
+| `adr/0040-multi-venue-gate-spec.md` | ADR-0040: Multi-Venue Gate Spec — M13 Binance Trade Enable Defer Y3+ At Earliest (Proposed; v5.8 §2 M13；ADR-0033 §Decision 2 時點 amendment standalone) |
+| `adr/0041-context-distiller-v4-and-ai-cost-cap-amendment.md` | ADR-0041: ContextDistiller v4 — Layered Snapshot + Token Hard Cap + DOC-08 AI Cost Amendment (Proposed; v5.8 AI-E must-fix #1；ADR-0027 v4 級延伸) |
 | `architecture/2026-05-06--openclaw_control_plane_repositioning.md` | ARCH-02: OpenClaw control-plane repositioning |
 | `architecture/multi_agent_rework_2026-05-05/ENGINEERING_PLAN.md` | ARCH-03 parent: Agent Decision Spine engineering plan |
 | `architecture/multi_agent_rework_2026-05-05/AgentTodo.md` | Historical AgentTodo milestone board for MAG-010..084 |
@@ -1189,3 +1256,6 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-05-16--todo_v36_completion_cleanup_archive.md` | TODO v36 completion cleanup archive：v35 / 2026-05-15..16 completed detail, closed wave rows, DONE P0/P1/P2 rows, and stale C1 running wording moved out of active TODO |
 | `2026-05-16--close_maker_first_phase_1b_round1_archive.md` | Close-Maker-First Phase 1b Round 1 archive：design/governance/review history and active gates moved out of active TODO |
 | `2026-05-16--stage1_demo_a4c_tombstone_cleanup.md` | Stage 1 Demo + A4-C tombstone cleanup archive：old W3 paper cohort / A4-C promotion markers removed from active docs while diagnostic tombstone remains |
+| `2026-05-21--todo_v57_5_route_change_purge.md` | TODO v57.5 route change purge archive：v5.7 dispatch-safe patch 收斂前過時 active route 清除 |
+| `2026-05-21--todo_v58_layout_refactor_archive.md` | TODO v58 layout refactor archive：reverse-chronological dispatch view → grouped-by-module/wave view 重組過渡記錄 |
+| `2026-05-21--todo_v60_archive.md` | TODO v60 archive：Sprint N+1 / Sprint A 收尾與已完成內容歸檔；v61 起以 v5.8 13-module thesis 為主軸（含 §A v5.7 12 prefix DONE / §B W-AUDIT-4b retained / §C H+I 批 P2/P3 closure / §D 過去 14d 9 批 closure narrative） |
