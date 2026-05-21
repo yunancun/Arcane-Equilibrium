@@ -6,7 +6,7 @@
 **Module：** M3 Self-Monitoring / Auto-Diagnostics / Health-Aware Degradation
 **Severity coverage：** SEV-1 / SEV-2 / SEV-3（對應 4-state ladder）
 **On-call role：** On-call PM + Operator（Cowork 提供 narrative summary，不做 state transition）
-**Depends on：** v5.8 §2 M3 (line 123-151) / V106 schema (hypertable 7d chunk + 7d compression + 90d retention，pending CR-8) / ADR-0034 (LAL 1+2 在 HEALTH_DEGRADED 時 halt 對齊) / AMD-2026-05-21-01 (M3 opt-in scope 行為)
+**Depends on：** v5.8 §2 M3 (line 123-151) / V106 schema (hypertable 7d chunk + 7d compression + 90d retention，pending CR-8) / ADR-0034 (LAL 1+2 在 HEALTH_DEGRADED 時 halt 對齊) / **ADR-0042 (M3 governance authority — single health authority + 4-state ladder + 6 domain + amplification/cascade cap；R4 NEW-H-3 reverse-ref patch 2026-05-21)** / AMD-2026-05-21-01 (M3 opt-in scope 行為)
 
 > **Hands off — operator only**：HEALTH_CATASTROPHIC 觸發既有 5-gate kill；M3 auto-degradation 是 state machine 內部行為，**operator 不應手動編輯 V106 row 來「降速」health state**；必要時走 emergency disable IPC + 24h postmortem。
 

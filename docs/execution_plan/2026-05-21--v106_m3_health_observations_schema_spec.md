@@ -17,6 +17,7 @@ parent specs:
   - srv/docs/execution_plan/2026-05-20--execution-plan-v5.8.md §2 M3 Health domain
   - srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md §6 cross-V### dependency graph
   - srv/docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-21--v58_hypertable_audit.md (E5 hypertable + retention 驗)
+  - srv/docs/adr/0042-m3-health-monitoring.md (V106 schema 對應治理 authority；ADR-0042 Decision 3+4 為 column 設計邊界；R4 NEW-H-2 reverse-ref patch 2026-05-21)
 mirror precedent:
   - srv/docs/execution_plan/2026-05-21--v103_v104_earn_hypotheses_schema_spec.md (format reference; 940 行 baseline)
   - srv/docs/execution_plan/2026-05-21--v103_v104_linux_pg_dry_run.md (Linux PG dry-run protocol 範式)

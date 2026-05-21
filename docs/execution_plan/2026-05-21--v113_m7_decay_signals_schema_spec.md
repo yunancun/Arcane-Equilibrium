@@ -7,6 +7,7 @@ status: SPEC-PLACEHOLDER (frontmatter + 大綱 reserve; full DDL land Sprint 1A-
 parent specs:
   - srv/docs/execution_plan/2026-05-20--execution-plan-v5.8.md §2 M7 Decay
   - CR-7 contract — M7 是 single decay authority (PA dispatch consolidation)
+  - srv/docs/adr/0044-m7-decay-enforced-single-authority.md (V113 schema 對應治理 authority；ADR-0044 Decision 1-6 為 column 設計邊界；R4 NEW-H-2 reverse-ref patch 2026-05-21)
 mirror precedent:
   - srv/docs/execution_plan/2026-05-21--v103_v104_earn_hypotheses_schema_spec.md (format reference)
 scope: placeholder spec — 不寫 V113.sql, 不在 Mac 跑 SQL, 不執行 PG, full DDL 在 Sprint 1A-β 補完

@@ -6,7 +6,7 @@
 **Module：** M9 A/B Testing Framework（4 variant cluster + mSPRT + Bonferroni + fair execution）
 **Severity coverage：** SEV-1 / SEV-2 / SEV-3
 **On-call role：** Operator + PM + MIT（MIT 提供統計判讀建議；Strategist / DreamEngine 提供 variant 設計建議；operator 永遠執掌 winner promotion 與 hold 決策）
-**Depends on：** CR-4 M9 spec / Stage 0R/1/2/3/4 path / M11 divergence flag / ADR-0008 Decision Lease baseline / ADR-0034 LAL 5-tier（variant promotion 走 LAL 1 路徑）
+**Depends on：** CR-4 M9 spec / Stage 0R/1/2/3/4 path / M11 divergence flag / ADR-0008 Decision Lease baseline / ADR-0034 LAL 5-tier（variant promotion 走 LAL 1 路徑）/ **ADR-0037 (M9 A/B framework + statistical methodology — 4 variant cluster + mSPRT + AVI + Bonferroni；R4 NEW-H-3 reverse-ref patch 2026-05-21)**
 
 > **Hands off — operator only**：A/B test winner promotion 與 premature termination 永遠由 Operator 經 Console 親手執行；本 runbook 列的 IPC patch / SQL update **僅供 emergency mitigation**，平常運維走 Console UI。
 

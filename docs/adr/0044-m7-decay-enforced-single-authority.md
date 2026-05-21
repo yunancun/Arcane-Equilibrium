@@ -3,7 +3,7 @@
 Date: 2026-05-21
 Status: **Proposed-pending-commit**（v5.8 §2 M7 module ADR 級落地；對應 PA dispatch CR-7 single decay authority + H-11 14d × 50% mitigation + AMD-2026-05-21-01 protected scope）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch — v5.8 §2 M7 採 single decay authority + 6 lifecycle FSM；DECAY_ENFORCED 改名為 CR-7 字面跨域碰撞 mitigation）
-Related: v5.8 §2 M7 Decay Detection (lines 253-277) / M7 design spec `docs/execution_plan/2026-05-21--m7_decay_enforced_design_spec.md`（463 行；本 ADR 為其治理層 promotion）/ V113 schema spec `docs/execution_plan/2026-05-21--v113_m7_decay_signals_schema_spec.md` / M11 threshold M7 dedup decay enforced rename spec `docs/execution_plan/2026-05-21--m11_threshold_m7_dedup_decay_enforced_rename.md` / ADR-0034 LAL Tier 0 active blocker / ADR-0036 model blacklist (decay signal Sharpe 估計適用) / ADR-0038 stage lifecycle naming / AMD-2026-05-21-01 protected scope
+Related: v5.8 §2 M7 Decay Detection (lines 253-277) / M7 design spec `docs/execution_plan/2026-05-21--m7_decay_enforced_design_spec.md`（463 行；本 ADR 為其治理層 promotion）/ V113 schema spec `docs/execution_plan/2026-05-21--v113_m7_decay_signals_schema_spec.md` / M11 threshold M7 dedup decay enforced rename spec `docs/execution_plan/2026-05-21--m11_threshold_m7_dedup_decay_enforced_rename.md` / ADR-0034 LAL Tier 0 active blocker / ADR-0036 model blacklist (decay signal Sharpe 估計適用) / ADR-0038 M11 replay (字面命名空間分離參考——M11 module 名稱不與 M7 decay 重疊) / AMD-2026-05-21-01 protected scope
 
 ## Context
 
@@ -37,7 +37,7 @@ v5.8 §2 M7（lines 253-277）列 4 種 decay signal + 6 state lifecycle。Revie
 
 - SQL query `WHERE state = 'STAGE_DEMOTED'` 在 ETL / dashboard 易與 `stage_history.stage = 'Stage 1'` 邏輯混淆
 - Multi-agent dispatch reviewer 容易誤把 STAGE_DEMOTED 理解為「降到 Stage X」（兩個正交維度被誤對齊）
-- ADR-0038 stage lifecycle naming 已歸範 stage 領域字面；M7 必須避開此命名空間
+- AMD-2026-05-15-01 Stage 0R-4 + ADR-0034 LAL 0-4 已歸範 stage / lease tier 兩個命名空間；M7 必須避開此命名空間（per R4 NEW-H-1 修：ADR-0038 實為 M11 replay，非 stage lifecycle naming 權威）
 
 `DECAY_ENFORCED` 直接對應 M7 decay action 域，無跨域字面重疊，命名級隔離一次到位。
 
@@ -98,7 +98,7 @@ per PA H-11 反向 attack：M7 decay signal 對 alpha-bearing strategy 觸發 DE
 | 新命名 | `DECAY_ENFORCED` |
 | Rename 理由 | 字面 mitigation；避 AMD-2026-05-15-01 Stage 0R-4 + ADR-0034 LAL 0-4 字面碰撞；SQL query / dashboard / multi-agent dispatch reviewer 不再誤對齊 |
 | Backward compat | V113 schema 新 column 直接用 `DECAY_ENFORCED`；無歷史資料遷移風險（M7 是新 module） |
-| 與 ADR-0038 stage lifecycle naming 關係 | ADR-0038 規範 stage 領域命名；本 ADR Decision 4 規範 decay 領域命名；兩個正交不衝突 |
+| 與 stage lifecycle naming 關係 | AMD-2026-05-15-01 Stage 0R-4 規範 stage promotion progress；ADR-0034 LAL 0-4 規範 lease approval tier；本 ADR Decision 4 規範 decay 領域命名；三個正交不衝突（per R4 NEW-H-1 修：原誤 ref ADR-0038；ADR-0038 為 M11 replay 非 stage naming 權威）|
 | 反模式 | (a) 保留 `STAGE_DEMOTED` 命名（CR-7 catch 字面碰撞）(b) 改名為 `DOWNGRADED` / `DEPRECATED`（仍含跨域語意）(c) 改名為 M7-specific code（如 `M7_S4`，喪失語義）|
 | 落地 | M7 design spec §1.3 + V113 schema column `state ENUM(...)` 不含 STAGE 字眼 |
 
@@ -181,7 +181,7 @@ per PA H-11 反向 attack：M7 decay signal 對 alpha-bearing strategy 觸發 DE
 | v5.7 baseline per-strategy self-detect | **本 ADR 取代**；per-strategy 不再自行 demote；emit signal 到 V113 由 M7 polling |
 | ADR-0034 M1 LAL | **Decision 6 對接**；RETIRED → Tier 0 active blocker；DEMOTE_PROPOSED → Tier 1/2 auto-approve disabled |
 | ADR-0036 model black-list | **Decision 2 對齊**；Sharpe / Drawdown 估計不可用 HMM / GARCH |
-| ADR-0038 stage lifecycle naming | **Decision 4 對齊**；stage 領域 vs decay 領域命名空間分離 |
+| AMD-2026-05-15-01 Stage 0R-4 + ADR-0034 LAL 0-4 | **Decision 4 對齊**；stage / lease tier / decay 三領域命名空間分離（per R4 NEW-H-1 修：原誤 ref ADR-0038 stage lifecycle naming）|
 | AMD-2026-05-15-01 Stage 0R-4 | **Decision 5 RECOVERY 路徑對接**；RETIRED revive 必經新 promotion gate |
 | AMD-2026-05-21-01 protected scope | **Decision 5 對接**；protected scope strategy 必 LAL Tier 3 operator approve |
 | M3 Health (ADR-0042) | **DECAY_DETECTED → M3 WARN / DEMOTE_PROPOSED → M3 DEGRADED** alert 統一 |

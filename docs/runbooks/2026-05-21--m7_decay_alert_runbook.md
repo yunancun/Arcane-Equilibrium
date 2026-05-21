@@ -6,7 +6,7 @@
 **Module：** M7 Strategy Decay Detection + Auto-Retirement
 **Severity coverage：** SEV-1 / SEV-2 / SEV-3
 **On-call role：** On-call PM + Operator + MIT（Allocator 提出 demote proposal；operator 14d review window 末必 click）
-**Depends on：** v5.8 §2 M7 (line 253-277) / V113 schema (DECAY_ENFORCED rename per CR-7) / M11 dedup contract (per CR-7 — M7 single decay authority；M11 emit-only) / spec `docs/execution_plan/2026-05-21--m11_threshold_m7_dedup_decay_enforced_rename.md` / ADR-0034 (LAL 1 auto-demote 路徑) / AMD-2026-05-15-01 (Stage 0R-4 命名來源)
+**Depends on：** v5.8 §2 M7 (line 253-277) / V113 schema (DECAY_ENFORCED rename per CR-7) / M11 dedup contract (per CR-7 — M7 single decay authority；M11 emit-only) / spec `docs/execution_plan/2026-05-21--m11_threshold_m7_dedup_decay_enforced_rename.md` / ADR-0034 (LAL 1 auto-demote 路徑 + LAL Tier 0 active blocker on RETIRED) / **ADR-0044 (M7 single decay authority + DECAY_ENFORCED lifecycle + 14d × 50% mitigation；R4 NEW-H-3 reverse-ref patch 2026-05-21)** / AMD-2026-05-15-01 (Stage 0R-4 命名來源)
 
 > **Hands off — operator only**：14d review window 末 RECOVER / RETIRE 判定 **必由 operator 親手 click**；M7 auto-demote (50% size) 是 state machine 內部行為，**不可被 LAL override**（per §5）。
 
