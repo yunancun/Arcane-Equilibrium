@@ -1027,9 +1027,123 @@ fn classify_aggregated(domain: HealthDomain, metric_name: &str, mean: f64) -> He
             // f64 走 helper 不需 cast；mean 即 used pct。
             super::domains::database_pool::classify_database_pool_disk_used_pct(mean)
         }
-        // 其他 domain（api_latency / strategy_quality / risk_envelope）由 Track
-        // D/E/F 接時擴此 match；database_pool::pg_pool_active_conn raw 走
-        // fallback OK band 屬 telemetry-only 設計 per Sprint 2 round 3 fix。
+        // ----- strategy_quality (Track E) -----
+        // 為什麼 4 metric dispatch（per Sprint 2 Wave 2 Track E IMPL）:
+        //   - 對齊 spec §3.2 StrategyQualitySample 5 field 中 4 個有 ladder
+        //     band：fill_rate_intent_ratio / slippage_bps_p95 / decision_lease_
+        //     grant_rate / dormant_minutes；signal_count_24h 為 telemetry-only
+        //     量（per spec §3.2 + M3 spec line 105 「per-strategy 30d block
+        //     bootstrap」threshold pending Sprint 5）走 fallback OK band 不
+        //     誤升 SM state（與 database_pool::pg_pool_active_conn raw 一致
+        //     fallback 範式）。
+        //   - 為什麼 Track E 仍走 classify_aggregated 集中 helper（不自走 dispatch）:
+        //     scheduler dispatch 對齊 Track A/B/C 範式（per spec §4.1 step 4
+        //     band classify on aggregated value）；Track E `StrategyQualityScheduler`
+        //     獨立 run loop 內部仍呼此 helper，保 5-sample mean classify SSOT 不
+        //     分裂。
+        //   - count 類 metric（dormant_minutes 是 u32 cast 自 f64 mean）走
+        //     mean.round() 避 truncate（per Sprint 2 round 2 MEDIUM-2 fix）。
+        (HealthDomain::StrategyQuality, "fill_rate_intent_ratio") => {
+            super::domains::strategy_quality::classify_strategy_quality_fill_rate_intent_ratio(
+                mean,
+            )
+        }
+        (HealthDomain::StrategyQuality, "slippage_bps_p95") => {
+            super::domains::strategy_quality::classify_strategy_quality_slippage_bps_p95(mean)
+        }
+        (HealthDomain::StrategyQuality, "decision_lease_grant_rate") => {
+            super::domains::strategy_quality::classify_strategy_quality_decision_lease_grant_rate(
+                mean,
+            )
+        }
+        (HealthDomain::StrategyQuality, "dormant_minutes") => {
+            // count 類 metric round 對齊 Track A engine_runtime open_fd_count /
+            // thread_count 範式（避 truncate 誤歸 band；boundary mean=59.6 → 60
+            // 正確 WARN 而非錯歸 OK）。
+            super::domains::strategy_quality::classify_strategy_quality_dormant_minutes(
+                mean.round() as u32,
+            )
+        }
+        // ----- api_latency (Track D) -----
+        // 為什麼 8 metric dispatch（per dispatch packet §5 + spec §3.2 amend）:
+        //   - 8 metric 全經 5-sample rolling window mean classify；無「raw
+        //     telemetry-only」walk-through metric（對比 database_pool 之
+        //     pg_pool_active_conn raw + ratio 並存設計）。
+        //   - count 類 metric（ret_code_4xx / ret_code_5xx / ws_dropout_count）
+        //     走 mean.round() 避 truncate 誤歸 band（per Sprint 2 round 2
+        //     MEDIUM-2 fix 範式）；latency 類（ms p50/p95/p99）也走 round 對齊
+        //     ladder boundary（例 p99 mean=2000.4ms truncate=2000 仍屬 DEGRADED；
+        //     round=2000 一致；mean=2000.6ms truncate=2000 仍屬 DEGRADED；round=
+        //     2001 正確升 CRITICAL）。
+        //   - ret_code 4xx/5xx 用 HTTP 標準語意 multi-venue 預留（per ADR-0040
+        //     dispatch packet §5.5 反模式 (d)）。
+        (HealthDomain::ApiLatency, "rest_p50_ms") => {
+            super::domains::api_latency::classify_api_latency_rest_p50_ms(mean.round() as u32)
+        }
+        (HealthDomain::ApiLatency, "rest_p95_ms") => {
+            super::domains::api_latency::classify_api_latency_rest_p95_ms(mean.round() as u32)
+        }
+        (HealthDomain::ApiLatency, "rest_p99_ms") => {
+            super::domains::api_latency::classify_api_latency_rest_p99_ms(mean.round() as u32)
+        }
+        (HealthDomain::ApiLatency, "ws_rtt_p50_ms") => {
+            super::domains::api_latency::classify_api_latency_ws_rtt_p50_ms(mean.round() as u32)
+        }
+        (HealthDomain::ApiLatency, "ws_rtt_p99_ms") => {
+            super::domains::api_latency::classify_api_latency_ws_rtt_p99_ms(mean.round() as u32)
+        }
+        (HealthDomain::ApiLatency, "ret_code_4xx_count") => {
+            super::domains::api_latency::classify_api_latency_ret_code_4xx_count(
+                mean.round() as u32,
+            )
+        }
+        (HealthDomain::ApiLatency, "ret_code_5xx_count") => {
+            super::domains::api_latency::classify_api_latency_ret_code_5xx_count(
+                mean.round() as u32,
+            )
+        }
+        (HealthDomain::ApiLatency, "ws_dropout_count") => {
+            super::domains::api_latency::classify_api_latency_ws_dropout_count(
+                mean.round() as u32,
+            )
+        }
+        // ----- risk_envelope (Track F) -----
+        // 為什麼 5 metric dispatch（per Sprint 2 Wave 2 Track F IMPL + spec
+        // §3.2 line 405-415）:
+        //   - 5 metric 全經 5-sample rolling window mean classify（25min window）；
+        //     對齊 spec §2.1 risk_envelope 300s sample × 5 = 25min 慢動指標
+        //     設計（dispatch packet §7.5 反模式 (c) correlation 不可寫死高頻）。
+        //   - count 類 metric（position_count_active）走 mean.round() 避 truncate
+        //     誤歸 band（對齊 Track A engine_runtime open_fd_count / Track E
+        //     dormant_minutes 範式）。
+        //   - 浮點 metric（cum_pnl_24h_usd / max_dd_pct / correlation_avg_pairwise
+        //     / concentration_top1_pct）直接走 mean，不 round（小數精度有意義）。
+        //   - threshold 對齊 M3 design spec §2.3 line 106 ladder；emit DEGRADED
+        //     不觸 5-gate kill（per dispatch packet §7.5 反模式 (b)；Sprint 5
+        //     Tier 1 才同步 5-gate kill mechanism）。
+        (HealthDomain::RiskEnvelope, "portfolio_cum_pnl_24h_usd") => {
+            super::domains::risk_envelope::classify_risk_envelope_cum_pnl_24h_usd(mean)
+        }
+        (HealthDomain::RiskEnvelope, "portfolio_max_dd_pct") => {
+            super::domains::risk_envelope::classify_risk_envelope_max_dd_pct(mean)
+        }
+        (HealthDomain::RiskEnvelope, "position_count_active") => {
+            // count 類 metric round 對齊 Track A engine_runtime open_fd_count /
+            // thread_count 範式（避 truncate 誤歸 band；boundary mean=8.6 → 9
+            // 正確 WARN 而非錯歸 OK）。
+            super::domains::risk_envelope::classify_risk_envelope_position_count(
+                mean.round() as u32,
+            )
+        }
+        (HealthDomain::RiskEnvelope, "correlation_avg_pairwise") => {
+            super::domains::risk_envelope::classify_risk_envelope_correlation_avg(mean)
+        }
+        (HealthDomain::RiskEnvelope, "concentration_top1_pct") => {
+            super::domains::risk_envelope::classify_risk_envelope_concentration_top1_pct(mean)
+        }
+        // strategy_quality::signal_count_24h raw 走 fallback OK band 屬
+        // telemetry-only 設計 per spec §3.2 (Sprint 5 才接 block bootstrap)。
+        // 其他 domain 不需擴此 match（Sprint 2 6 domain 全 land）。
         _ => HealthState::HealthOk,
     }
 }
