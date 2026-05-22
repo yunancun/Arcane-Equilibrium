@@ -16,7 +16,8 @@ use crate::common::ws_backoff::BackoffConfig;
 use crate::ws_unknown_handler_guard::{ShouldReconnect, UnknownHandlerGuard};
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_util::sync::CancellationToken;
@@ -50,6 +51,213 @@ const AUTH_EXPIRES_OFFSET_MS: u64 = 10_000;
 // 而異：mainnet 支援 `execution.fast`（~50ms），demo/testnet 只支援普通的 `execution`。
 // Bybit 對未知 topic 在 subscribe 時靜默接受，因此 topic 錯了會導致 total_fills
 // 卡在 0 且無任何錯誤。詳見 2026-04-11 B-2 根因調查。
+
+// ---------------------------------------------------------------------------
+// PA-DRIFT-4 — WS dropout counter + RTT histogram 60s rolling window
+// ---------------------------------------------------------------------------
+//
+// 模塊用途（per PA-DRIFT-4 + dispatch packet §1.2 工作項 (3)）：
+//   - `WsDropoutCounter`：60s 滾窗 WS dropout（連線斷裂後重連）計數；emitter
+//     trait `current_ws_dropout_count_60s_window()` 對應觀測（per ADR-0042
+//     Decision 3 cascade gate）。
+//   - `WsRttHistogram`：60s 滾窗 WS ping/pong RTT 樣本 p50/p99；emitter trait
+//     `current_ws_rtt_p50_ms_60s_window()` / `current_ws_rtt_p99_ms_60s_window()`
+//     對應觀測。
+//
+// 設計選擇（與 RestLatencyHistogram 對齊）：
+//   - `Vec<(Instant, u64)>` for RTT；`Vec<Instant>` for dropout；讀取時 lazy
+//     expire。
+//   - thread-safe = `Arc<Mutex<...>>`；ws hot path 鎖極短（push + 可能的 prune）。
+//   - sort-based percentile（避新 dep + 跨平台 0 風險，per RestLatencyHistogram
+//     同 rationale）。
+//   - 60s window × ping interval = 20s → 最多 3 RTT samples / 60s；不需 cap。
+//   - dropout 在實務上 60s 內 ≤ 數次；cap = 256 預留 burst。
+//
+// 為什麼 RTT 是 ping→pong：
+//   - Bybit private WS 每 20s 主動 send ping；server 回 pong 含 echo timestamp。
+//   - 真實 RTT = pong arrival time - ping send time；非 message arrival 間隔。
+//   - 本實作走 ping send 時 record start + pong arrival 時 compute elapsed 對齊
+//     傳統 WS RTT 觀測 SOP（Prometheus / Datadog 同 pattern）。
+//
+// 硬邊界:
+//   - 不修既有 reconnect 邏輯（per packet §5.5 反模式 (b)）；只 wrap event
+//     emission 端增加 counter / histogram record。
+//   - probe 未注入 / sample 空返 0 不 panic（per emitter trait OK-band 契約）。
+
+/// WS RTT 樣本最大年齡（60s rolling window per packet §1.1 工作項 (3)）。
+const WS_RTT_WINDOW_SECS: u64 = 60;
+/// WS dropout 樣本最大年齡（60s rolling window）。
+const WS_DROPOUT_WINDOW_SECS: u64 = 60;
+/// WS dropout 緩衝上限（防 unbounded growth；60s 內極端 burst）。
+const WS_DROPOUT_BUFFER_CAP: usize = 256;
+/// WS RTT 緩衝上限（60s × 1 ping / 20s = 3 sample 上限；headroom 留 64）。
+const WS_RTT_BUFFER_CAP: usize = 64;
+
+/// WS ping/pong RTT 60s rolling-window histogram。
+///
+/// 為什麼 thread-safe `Arc<Mutex<Vec<...>>>`：
+///   - WS read loop 與 probe accessor 走不同 task；鎖必要。
+///   - 鎖內操作 = push + retain + sort；常數時間 < μs 級（≤ 3 sample）。
+#[derive(Debug)]
+pub struct WsRttHistogram {
+    /// 樣本緩衝：每筆 `(pong_arrival_time, rtt_ms)`。
+    samples: Mutex<Vec<(Instant, u64)>>,
+}
+
+impl Default for WsRttHistogram {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WsRttHistogram {
+    /// 建立空 histogram。
+    pub fn new() -> Self {
+        Self {
+            samples: Mutex::new(Vec::with_capacity(8)),
+        }
+    }
+
+    /// 紀錄一次 ping→pong RTT（ms）。
+    ///
+    /// 為什麼 cap 防護而非 unbounded：
+    ///   - 理論上 60s × 1 ping / 20s = 3 sample；實務 cap 64 預留 burst。
+    ///   - 達 cap 走 retain expired + truncate（與 RestLatencyHistogram 同
+    ///     pattern）。
+    pub fn record_rtt(&self, rtt_ms: u64) {
+        let now = Instant::now();
+        if let Ok(mut samples) = self.samples.lock() {
+            if samples.len() >= WS_RTT_BUFFER_CAP {
+                let cutoff = now
+                    .checked_sub(Duration::from_secs(WS_RTT_WINDOW_SECS))
+                    .unwrap_or(now);
+                samples.retain(|(t, _)| *t >= cutoff);
+                if samples.len() >= WS_RTT_BUFFER_CAP {
+                    let drop = samples.len() / 2;
+                    samples.drain(0..drop);
+                }
+            }
+            samples.push((now, rtt_ms));
+        }
+    }
+
+    /// 計算 60s rolling window 內 p50/p99 雙 percentile（ms）。
+    ///
+    /// 返回 (p50, p99) 雙 u32（ms）。樣本空返 (0, 0)（emitter 端視 0 為 OK band
+    /// 不誤升級）。
+    ///
+    /// 為什麼 sort-based + nearest-rank：與 RestLatencyHistogram 同 rationale
+    /// （≤ 64 sample sort 開銷 < μs；nearest-rank 對齊 SLO 行業慣例）。
+    pub fn percentile_pair(&self) -> (u32, u32) {
+        let samples_guard = match self.samples.lock() {
+            Ok(g) => g,
+            Err(_) => return (0, 0),
+        };
+        let now = Instant::now();
+        let cutoff = now
+            .checked_sub(Duration::from_secs(WS_RTT_WINDOW_SECS))
+            .unwrap_or(now);
+        let mut rtts: Vec<u64> = samples_guard
+            .iter()
+            .filter(|(t, _)| *t >= cutoff)
+            .map(|(_, ms)| *ms)
+            .collect();
+        drop(samples_guard);
+        if rtts.is_empty() {
+            return (0, 0);
+        }
+        rtts.sort_unstable();
+        let n = rtts.len();
+        let pick = |q: f64| -> u32 {
+            let idx = ((q * (n as f64)).ceil() as usize).saturating_sub(1).min(n - 1);
+            rtts[idx].min(u32::MAX as u64) as u32
+        };
+        (pick(0.50), pick(0.99))
+    }
+
+    /// 60s 內當前 RTT sample 數（test + debug 用）。
+    pub fn sample_count(&self) -> usize {
+        let samples_guard = match self.samples.lock() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+        let now = Instant::now();
+        let cutoff = now
+            .checked_sub(Duration::from_secs(WS_RTT_WINDOW_SECS))
+            .unwrap_or(now);
+        samples_guard.iter().filter(|(t, _)| *t >= cutoff).count()
+    }
+}
+
+/// WS dropout 60s rolling-window counter。
+///
+/// dropout 定義：WS 連線斷裂後進入 reconnect 路徑的事件數；emitter trait
+/// `current_ws_dropout_count_60s_window()` 對應 per ADR-0042 Decision 3 cascade
+/// gate 預警（dropout > 5 / 60s 升 CRITICAL）。
+///
+/// 為什麼 thread-safe `Arc<Mutex<Vec<Instant>>>`：
+///   - WS run loop（panic / disconnect / cancel）多入口走 reconnect；同時 probe
+///     accessor 走 trait method；鎖必要。
+///   - 鎖內 push + 可能的 prune；< μs 級。
+#[derive(Debug)]
+pub struct WsDropoutCounter {
+    /// 樣本緩衝：每筆紀錄一個 dropout 時間戳。
+    samples: Mutex<Vec<Instant>>,
+}
+
+impl Default for WsDropoutCounter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl WsDropoutCounter {
+    /// 建立空 counter。
+    pub fn new() -> Self {
+        Self {
+            samples: Mutex::new(Vec::with_capacity(8)),
+        }
+    }
+
+    /// 紀錄一次 WS dropout 事件。
+    ///
+    /// caller 端責任（per packet §1.2 工作項 (3)）：
+    ///   - `PrivateWsEvent::Disconnected` 發送 後 → record_dropout()。
+    ///   - 既有 reconnect 邏輯不動；本 counter 只觀測 dropout 事件數。
+    pub fn record_dropout(&self) {
+        let now = Instant::now();
+        if let Ok(mut samples) = self.samples.lock() {
+            if samples.len() >= WS_DROPOUT_BUFFER_CAP {
+                let cutoff = now
+                    .checked_sub(Duration::from_secs(WS_DROPOUT_WINDOW_SECS))
+                    .unwrap_or(now);
+                samples.retain(|t| *t >= cutoff);
+                if samples.len() >= WS_DROPOUT_BUFFER_CAP {
+                    let drop = samples.len() / 2;
+                    samples.drain(0..drop);
+                }
+            }
+            samples.push(now);
+        }
+    }
+
+    /// 60s 內 dropout 累積計數。
+    pub fn count(&self) -> u32 {
+        let samples = match self.samples.lock() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+        let now = Instant::now();
+        let cutoff = now
+            .checked_sub(Duration::from_secs(WS_DROPOUT_WINDOW_SECS))
+            .unwrap_or(now);
+        samples
+            .iter()
+            .filter(|t| **t >= cutoff)
+            .count()
+            .min(u32::MAX as usize) as u32
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Event types / 事件類型
@@ -298,6 +506,11 @@ pub struct BybitPrivateWs {
     /// via `OPENCLAW_WS_FORCE_RECONNECT_ON_UNKNOWN_ENABLED=1`).
     /// G9-02：未知 topic 守衛 + 強制重連觸發（DEFAULT-OFF）。
     unknown_guard: Arc<UnknownHandlerGuard>,
+    /// PA-DRIFT-4 工作項 (3)：WS dropout 60s rolling counter（per ADR-0042
+    /// Decision 3 cascade gate 預警）。Arc 暴露給 `ApiLatencySourceProbe` 注入。
+    dropout_counter: Arc<WsDropoutCounter>,
+    /// PA-DRIFT-4 工作項 (3)：WS ping→pong RTT 60s rolling histogram。
+    rtt_histogram: Arc<WsRttHistogram>,
 }
 
 impl BybitPrivateWs {
@@ -320,6 +533,11 @@ impl BybitPrivateWs {
             // `--rebuild` / restart for effect.
             // G9-02：env-gate 在建構時取快照；改 env 需 `--rebuild` / 重啟生效。
             unknown_guard: UnknownHandlerGuard::new_arc(),
+            // PA-DRIFT-4：dropout + RTT 初始化空；run loop hot path 自動累積。
+            // Arc 暴露給 `RealApiLatencySourceProbe` 注入（per packet §1.2 工作項
+            // (4)）。
+            dropout_counter: Arc::new(WsDropoutCounter::new()),
+            rtt_histogram: Arc::new(WsRttHistogram::new()),
         }
     }
 
@@ -329,6 +547,16 @@ impl BybitPrivateWs {
     /// writer / healthcheck）。Consumer 只讀。
     pub fn unknown_guard_handle(&self) -> Arc<UnknownHandlerGuard> {
         Arc::clone(&self.unknown_guard)
+    }
+
+    /// PA-DRIFT-4 工作項 (3)：暴露 dropout counter Arc（probe 注入）。
+    pub fn dropout_counter_handle(&self) -> Arc<WsDropoutCounter> {
+        Arc::clone(&self.dropout_counter)
+    }
+
+    /// PA-DRIFT-4 工作項 (3)：暴露 RTT histogram Arc（probe 注入）。
+    pub fn rtt_histogram_handle(&self) -> Arc<WsRttHistogram> {
+        Arc::clone(&self.rtt_histogram)
     }
 
     /// Main loop: connect, authenticate, subscribe, read messages, reconnect on failure.
@@ -360,6 +588,9 @@ impl BybitPrivateWs {
                     let auth_msg = self.generate_auth_message();
                     if let Err(e) = write.send(Message::Text(auth_msg.into())).await {
                         error!(error = %e, "Failed to send auth / 發送認證失敗");
+                        // PA-DRIFT-4 工作項 (3)：auth send failure = venue/網路端
+                        // 異常導致連線斷；計入 dropout（非主動 cancel）。
+                        self.dropout_counter.record_dropout();
                         let _ = self.event_tx.send(PrivateWsEvent::Disconnected).await;
                         continue;
                     }
@@ -421,6 +652,9 @@ impl BybitPrivateWs {
                     }
 
                     if !authed {
+                        // PA-DRIFT-4 工作項 (3)：auth failure / timeout / stream end
+                        // 導致連線斷 → dropout（venue 或網路 fault；非主動 cancel）。
+                        self.dropout_counter.record_dropout();
                         let _ = self.event_tx.send(PrivateWsEvent::Disconnected).await;
                         // Fall through to reconnect logic / 進入重連邏輯
                     } else {
@@ -435,6 +669,9 @@ impl BybitPrivateWs {
                         if let Err(e) = write.send(Message::Text(sub_msg.to_string().into())).await
                         {
                             error!(error = %e, "Failed to send subscribe / 發送訂閱失敗");
+                            // PA-DRIFT-4 工作項 (3)：subscribe send failure = 連線在
+                            // auth 後即斷；計入 dropout（venue/網路 fault）。
+                            self.dropout_counter.record_dropout();
                             let _ = self.event_tx.send(PrivateWsEvent::Disconnected).await;
                             continue;
                         }
@@ -450,11 +687,22 @@ impl BybitPrivateWs {
                             tokio::time::interval(Duration::from_millis(PING_INTERVAL_MS));
                         ping_timer.tick().await; // Skip first immediate tick / 跳過第一次立即觸發
 
+                        // PA-DRIFT-4 工作項 (3)：ping send → pong arrival RTT 追蹤。
+                        // 為什麼 local Option<Instant> 而非 self.<Mutex<>>:
+                        //   - ping send + pong arrival 都在同 task 的 tokio::select！中
+                        //     串行；不需跨 task 鎖。
+                        //   - run loop 退出（reconnect）即重置；不會跨重連污染。
+                        //   - 0 額外 lock 開銷 + 0 Arc clone。
+                        let mut last_ping_at: Option<Instant> = None;
+
                         loop {
                             tokio::select! {
                                 _ = self.cancel.cancelled() => {
                                     info!("Private WS shutdown requested / 私有 WS 請求關閉");
                                     let _ = write.send(Message::Close(None)).await;
+                                    // PA-DRIFT-4：主動 cancel 不計 dropout（per ADR-0042
+                                    // cascade gate 預警語意 = venue fault；operator
+                                    // shutdown 排除）。
                                     let _ = self.event_tx.send(PrivateWsEvent::Disconnected).await;
                                     return;
                                 }
@@ -464,11 +712,33 @@ impl BybitPrivateWs {
                                         warn!(error = %e, "Ping failed / Ping 失敗");
                                         break;
                                     }
+                                    // PA-DRIFT-4 工作項 (3)：ping send 後記錄 send_time；
+                                    // 下次 pong 到達時走 record_rtt。
+                                    last_ping_at = Some(Instant::now());
                                     debug!("Private WS ping sent / 私有 WS ping 已發送");
                                 }
                                 msg = read.next() => {
                                     match msg {
                                         Some(Ok(Message::Text(text))) => {
+                                            // PA-DRIFT-4 工作項 (3)：peek pong response 計算
+                                            // RTT。為什麼 contains 子串 + ping_at 雙重 guard：
+                                            //   - `{"op":"pong"...}` 子串幾乎不會在 order /
+                                            //     execution data payload 中出現（false
+                                            //     positive 罕見）；
+                                            //   - `last_ping_at` 必 Some 才 record，過濾 server
+                                            //     主動 pong 等罕見 edge case；
+                                            //   - record 後 clear `last_ping_at` 避一個 ping
+                                            //     對應多 RTT sample。
+                                            if last_ping_at.is_some() && text.contains("\"op\":\"pong\"") {
+                                                if let Some(ping_at) = last_ping_at.take() {
+                                                    let rtt_ms = ping_at
+                                                        .elapsed()
+                                                        .as_millis()
+                                                        .min(u64::MAX as u128)
+                                                        as u64;
+                                                    self.rtt_histogram.record_rtt(rtt_ms);
+                                                }
+                                            }
                                             // G9-02: use guard-aware wrapper in main loop only;
                                             // auth-phase parsing (above) keeps the original path
                                             // since fresh connections must not force-reconnect
@@ -492,6 +762,10 @@ impl BybitPrivateWs {
                                                          G9-02 私有 WS 強制重連請求 — 中斷內層迴圈"
                                                     );
                                                     let _ = write.send(Message::Close(None)).await;
+                                                    // PA-DRIFT-4 工作項 (3)：force-reconnect 由
+                                                    // unknown topic guard 觸發，本質是 venue 端
+                                                    // 行為異常（topic 漂移）；計入 dropout。
+                                                    self.dropout_counter.record_dropout();
                                                     let _ = self
                                                         .event_tx
                                                         .send(PrivateWsEvent::Disconnected)
@@ -524,10 +798,16 @@ impl BybitPrivateWs {
 
                     // Connection lost — emit Disconnected, will reconnect
                     // 連接斷開 — 發出 Disconnected 事件，準備重連
+                    // PA-DRIFT-4 工作項 (3)：main loop 結束（ping fail / read error /
+                    // server close / stream end）= venue/網路 fault；計入 dropout。
+                    self.dropout_counter.record_dropout();
                     let _ = self.event_tx.send(PrivateWsEvent::Disconnected).await;
                 }
                 Err(e) => {
                     warn!(error = %e, "Private WS connect failed / 私有 WS 連接失敗");
+                    // PA-DRIFT-4 工作項 (3)：connect 階段失敗（DNS / TLS / venue
+                    // 拒連）= venue/網路 fault；計入 dropout。
+                    self.dropout_counter.record_dropout();
                 }
             }
 

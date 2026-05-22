@@ -11897,3 +11897,82 @@ per Sprint 2 design spec §4.4 + dispatch packet §6:strategy_quality domain emi
 
 ### 報告
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_wave2_round2_combined_fix.md`
+
+## 2026-05-23 — Sprint 4+ Wave A PA-DRIFT-4 bybit_rest_client + bybit_private_ws instrumentation
+
+### 任務
+PA-DRIFT-4 follow-up（per Sprint 2 PM Phase 3e + dispatch packet §1.2）：補位 bybit_rest_client + bybit_private_ws wrapper 層 p50/p95/p99 latency histogram + retCode 4xx/5xx counter + WS dropout counter + WS RTT histogram + `RealApiLatencySourceProbe` trait 適配層 + integration test；Wave 2 Track D scaffold 已 land trait 抽象，本 round 補 wrapper 端 instrumentation。本 round 不接 main.rs scheduler（Wave B 工作）；blocks AC-1b real PG empirical。
+
+### 實作（5 工作項）
+1. **RestLatencyHistogram**（bybit_rest_client.rs +176 LOC）：60s 滾窗樣本緩衝（`Vec<(Instant, u64)>` + Mutex）；sort-based nearest-rank percentile p50/p95/p99；buffer cap 8192 prune；get/post 端 wrap 計時 `Instant::now()..elapsed.as_millis()`；fail-soft 空樣本返 0。
+2. **RetCodeCounter**（bybit_rest_client.rs，與 #1 同檔）：60s 滾窗 4xx + 5xx 計數；6 個 retCode (10001-10006, 10010) 對映 4xx (client fault)，其他 110xxx 業務碼對映 5xx (venue fault)；`record_for_error(&BybitApiError::Business)` helper；transport / JsonParse / NoCredentials / SigningError 不計入；get_checked/post_checked 端 wrap。
+3. **WsDropoutCounter + WsRttHistogram**（bybit_private_ws.rs +281 LOC）：6 個 dropout 接點 record（auth send fail / auth fail-timeout / subscribe send fail / G9-02 force reconnect / main loop exit / connect_async fail）；主動 cancel 排除（per ADR-0042 cascade gate = venue fault only）；ping/pong RTT 走 main loop 內 local `Option<Instant>` ping_at + text 收到 `"\"op\":\"pong\""` peek 計算 elapsed → record_rtt。
+4. **RealApiLatencySourceProbe**（health/domains/api_latency_probe_impl.rs 新 204 LOC）：8 trait method impl；持 4 個 Arc<instrumentation>（rest_latency / ret_code_counter / ws_dropout / ws_rtt）；inline test 2 個（state reflect + empty fail-soft）。
+5. **Integration test**（tests/api_latency_probe_real_impl.rs 新 350 LOC）：15 test 覆 1000 calls percentile / retCode 對映 / dropout / RTT / probe 經 emitter sample_now / multi-probe Arc 共享 / hot path cap prune。
+
+### 教訓
+- **Instant 沒有 `saturating_sub`，只有 `checked_sub`**：第一次 build 12 個 E0599 error 全是 `Instant::now().saturating_sub(Duration)`；Rust std `Instant` 只暴露 `checked_sub` 返 `Option<Instant>`。Fix pattern：`now.checked_sub(Duration::from_secs(WINDOW)).unwrap_or(now)`；fallback 到 now 等於不過濾（早期啟動時 cutoff 就是 now，所有 sample 都 in window）。usize 的 `saturating_sub` 仍可保留。
+- **手動構造 struct 加新字段必 cascade test fixture**：BybitRestClient 加 `latency_histogram` + `ret_code_counter` 兩個新 field 後，bybit_rest_client_tests.rs 9 個 manual struct constructor (test_sign_known_vector 等) 全部 E0063 missing field；replace_all batch 修一次解決。對齊「Rust API 變更 cascade 應一次性 sweep」教訓。
+- **ping/pong RTT 用 main loop 內 local Option<Instant> 不需 self Mutex**：ping send + pong arrival 都在同 tokio::select! task 串行；run loop 退出（reconnect）即重置；不會跨重連污染。優於 `self.last_ping_at: Mutex<Option<Instant>>`（0 lock 開銷 + 0 Arc clone）。
+- **dropout counter 排除主動 cancel 對齊 ADR-0042 cascade 預警語意**：5 個 Disconnected 發送點不是都算 dropout；主動 cancel（operator shutdown）排除；只計 venue/網路 fault（connect_async fail / auth send fail / main loop exit / G9-02 force reconnect / subscribe send fail）。per packet §5.5 「dropout > 5 / 60s 升 CRITICAL」語意 = venue 端不正常。
+- **避新 dep；用 sort-based percentile 不引 hdrhistogram 直接 dep**：hdrhistogram 在 workspace dep 但 openclaw_engine 沒拉；6000 sample sort O(n log n) < 100μs；每 60s 才呼一次 emitter sample_now；可接受。0 新編譯時間 + 跨平台 0 風險。
+- **`text.contains("\"op\":\"pong\"")` peek 比重新 parse 高效**：pong response 不需 deserialize；子串 match 加上 `last_ping_at.is_some()` 雙重 guard；false positive 在 order/execution payload 罕見且 record extra RTT sample 不致命。
+- **`use super::*;` parent module pub item 自動 in-scope test**：bybit_rest_client_tests.rs 走 `#[path]` mod 引入，`use super::*;` 即可看到 RestLatencyHistogram / RetCodeCounter 兩 pub struct，無需另 import。
+
+### Build / test 結果
+- cargo build --release: PASS (27.42s clean；3 pre-existing warning + 1 binary warning；本 round 0 new warning)
+- cargo test --release --test api_latency_probe_real_impl: **15/15 PASS** (new integration test)
+- cargo test --release --lib: **3170/3170 PASS / 0 fail / 1 ignored pre-existing**
+- cargo test --release --lib health::: **105/105 PASS** (含 risk_envelope_probe_impl + 新 api_latency_probe_impl 2 inline test)
+- Wave 2 regression: Track A 9/9 + Track B 5/5 + Track C 8/8 + Track D 7/7 + Track E 11/11 + Track F 8/8 = **48 PASS**
+- bybit_rest_client lib regression: 29/29 PASS
+- bybit_private_ws lib regression: 31/31 PASS
+- Spike regression: 3/3 PASS
+- nm scan AC-5: **0 hit**（production binary 0 mock time 滲透；spike feature default false 嚴守）
+- LOC：bybit_rest_client.rs 936→1272 (+336) / bybit_private_ws.rs 1413→1693 (+280) / api_latency_probe_impl.rs 新 204 / api_latency_probe_real_impl.rs test 新 350 = 共 +1170 LOC
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint_4_pa_drift_4_bybit_instrumentation.md`
+
+## 2026-05-23 Sprint 4+ first Live Wave A — PA-DRIFT-5 RiskEnvelopeSourceProbe wire-up
+
+### 任務
+PA Sprint 2 Phase 3e PM sign-off §4.1 item 4 + §6.1.4：Sprint 4+ first Live carry-over PA-DRIFT-5 `RiskEnvelopeSourceProbe` 對 portfolio SSOT calculator wire-up。Wave A 接前不可阻塞 AC-1b real PG empirical verify；Wave B main.rs 接 MetricEmitterScheduler 前必 closed。
+
+### 設計與實作
+1. 新 module `health/domains/risk_envelope_probe_impl.rs` (698 LOC)：
+   - `PortfolioStateCache` 24h sliding window 緩存 (VecDeque<(ts_ms, realized_pnl)> + VecDeque<(ts_ms, equity)> + Vec<PositionExposure>)
+   - 5 SSOT calculator accessor：cum_pnl_24h_usd / max_dd_pct_24h / position_count_active / correlation_avg_pairwise / concentration_top1_pct
+   - `RealRiskEnvelopeSourceProbe` impl `RiskEnvelopeSourceProbe` trait (5 method)
+   - 16 inline test
+2. 新 integration test `tests/risk_envelope_probe_real_impl.rs` (408 LOC, 11 test)：4 user prompt §7 scenario + 5 退化守 + 2 整合場景
+3. atomic edit `health/domains/mod.rs` (+6 LOC)：與 PA-DRIFT-4 並行 sub-agent 同檔加 `pub mod risk_envelope_probe_impl;`；兩 sub-agent 各加 1 pub mod line，無 git conflict
+4. 不修 paper_state / mode_state / pipeline_types / risk_envelope.rs 既有邏輯（per dispatch packet §7.5 反模式 (a)）
+
+### push back 對 user prompt 1 處
+- correlation_avg_pairwise → **Wave A placeholder 返 0.0**（real calculator 由 Wave B 接）
+- 治理依據：dispatch packet §7.5 反模式 (c)「correlation 不可寫死高頻」+ E2 Track F round 2 對抗反問 #2「correlation lookback 設計未 spec land」
+- 既有 `scanner::scorer::apply_correlation_filter` 是 scanner-level filter（候選池容量上限），非 portfolio-level pairwise correlation；不可直接 reuse
+- placeholder 0.0 對齊 OK band classify；不阻塞 emitter wire-up
+
+### 教訓
+- **並行 sub-agent atomic edit 同檔 OK**：PA-DRIFT-4 + PA-DRIFT-5 同改 health/domains/mod.rs；PA-DRIFT-4 加 `pub mod api_latency_probe_impl;` / 我加 `pub mod risk_envelope_probe_impl;`；兩條獨立 pub mod line + 兩條獨立 MODULE_NOTE 描述；read-then-edit 模式無衝突
+- **多實例並行邊界守住**：首次 build 撞 PA-DRIFT-4 引入的 `Instant::saturating_sub` not-found error 7 處；不修 bybit file（per profile 「文件互不重疊」原則）；後續 cargo incremental rebuild 自動拾取 PA-DRIFT-4 同步修復（saturating_sub → checked_sub + unwrap_or pattern）；當前 build PASS
+- **inline lib test 先 fail 再 PASS race**：首次 `cargo test --release --lib health::domains::risk_envelope_probe_impl::` 撞 PA-DRIFT-4 `bybit_rest_client_tests.rs` missing fields error 11 處；二次 run 已自動 PASS（PA-DRIFT-4 同步補 test 端 latency_histogram / ret_code_counter field 初始化）
+- **24h sliding window 與既有 PaperState.peak_balance 語義不一致**：PaperState peak 是 session-since-start，cache equity_history peak 是 24h sliding；spec 要求 24h sliding window max drawdown 故走 cache 自家 history；不依賴 PaperState peak。E2 audit 應確認此分離正確
+- **lock 設計 Mutex vs RwLock**：emitter sample tick 300s + update tick 300s = 低頻；無「多 reader 1 writer 高頻讀」情境；Mutex 足夠且簡單。換 RwLock 是 Sprint 5 cascade hot-path 優化點，不在 Wave A scope
+- **新 mutable singleton 登記注解**：本 task 引入 PortfolioStateCache + RealRiskEnvelopeSourceProbe 2 singleton；report §4.3 明示 + PA / PM 後續派 follow-up TODO 納入穩定登記表（per profile 硬約束 5）
+
+### 驗證
+- `cargo test --release --test risk_envelope_probe_real_impl`：**11/11** PASS
+- `cargo test --release --lib health::domains::risk_envelope_probe_impl::`：**16/16** PASS
+- `cargo test --release --lib`：**3170/0** (1 ignored)；比 Wave 2 round 2 closure 3152 多 18（本 task 16 inline + PA-DRIFT-4 並行 2 inline）
+- `cargo test --release --lib health::`：**105/105** PASS（比 closure 87 多 18）
+- Track A/B/C/D/E/F regression：**48/48** PASS
+- replay_forbidden regression：**3/3** PASS
+- spike regression (--features spike)：**3/3** PASS
+- nm scan AC-5：**0 hit**（production binary 0 mock time / spike 滲透）
+- LOC：risk_envelope_probe_impl.rs 新 698 / risk_envelope_probe_real_impl.rs test 新 408 / domains/mod.rs +6 = 共 +1112 LOC
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_4_pa_drift_5_risk_envelope_wireup.md`

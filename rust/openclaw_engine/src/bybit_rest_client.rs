@@ -13,8 +13,10 @@
 
 use crate::common::bybit_signer::sign_rest_v5;
 use reqwest::Client;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 use tokio::time::sleep;
 use tracing::{debug, warn};
@@ -282,6 +284,292 @@ impl Default for RateLimitState {
     }
 }
 
+// ---------------------------------------------------------------------------
+// PA-DRIFT-4 — REST latency histogram + ret_code counter 60s rolling window
+// ---------------------------------------------------------------------------
+//
+// 模塊用途（per PA-DRIFT-4 + dispatch packet §1.2 工作項 (1)-(2)）：
+//   - `RestLatencyHistogram`：60s 滾窗 REST call latency 樣本緩衝，提供
+//     p50/p95/p99 percentile accessor 供 `ApiLatencySourceProbe` 注入；
+//     emitter 端走 trait 抽象（per packet §5.5 反模式 (d) multi-venue 預留）。
+//   - `RetCodeCounter`：60s 滾窗 4xx + 5xx 計數；4xx = client fault（retCode
+//     != 0 + 客戶端錯誤 / 簽名 / 參數）；5xx = venue fault（HTTP 5xx / business
+//     error）。
+//
+// 設計選擇（為什麼 self-impl sort-based percentile，非 `hdrhistogram`）：
+//   - 60s window × 假設 100 call/s 上限 = 6000 sample；sort O(n log n) ≪
+//     hdrhistogram learning overhead；每次 sample_now 才呼一次 percentile（probe
+//     端走 lazy 計算）。
+//   - 0 新 dep（hdrhistogram 雖在 workspace 但 openclaw_engine 未 import）；
+//     最小編譯時間增量 + 跨平台 0 風險。
+//
+// 60s 滾窗實作：
+//   - `Vec<(Instant, u64)>` 帶時間戳；讀取時自動清除 > 60s sample（lazy expire）。
+//   - thread-safe = `Arc<Mutex<...>>`；REST hot path 鎖極短（push + retain）。
+//   - 為什麼不寫 `tokio::sync::Mutex`：probe accessor 是同步 trait method，
+//     `std::sync::Mutex` 對齊；REST call 端走 async 但 record 是常數時間
+//     不阻塞 runtime（per `feedback_no_dead_params` 對齊）。
+//
+// 硬邊界:
+//   - 不修既有 REST call 邏輯（per packet §5.5 反模式 (a)）；只在 get / post
+//     wrap latency 計時 + record。
+//   - probe failure（如未注入）返 0 不 panic（per emitter trait OK-band 契約）。
+
+/// REST 樣本最大年齡（60s rolling window per packet §1.1 工作項 (1)）。
+const REST_LATENCY_WINDOW_SECS: u64 = 60;
+/// retCode 樣本最大年齡（60s rolling window per packet §1.1 工作項 (2)）。
+const RET_CODE_WINDOW_SECS: u64 = 60;
+/// REST 樣本緩衝上限（防 unbounded growth；60s × 假設 100 call/s = 6000 上限）。
+const REST_LATENCY_BUFFER_CAP: usize = 8192;
+/// retCode 樣本緩衝上限。
+const RET_CODE_BUFFER_CAP: usize = 8192;
+
+/// REST API call latency 60s rolling-window histogram。
+///
+/// 為什麼 thread-safe `Arc<Mutex<Vec<...>>>`：
+///   - REST hot path 多 task 並發呼 record_latency；同時 probe accessor 端
+///     走 ApiLatencySourceProbe trait method（同步），鎖必要。
+///   - 鎖內操作 = push + drain_expired + sort_for_percentile；常數時間（< μs
+///     級）；不阻塞 async runtime。
+#[derive(Debug)]
+pub struct RestLatencyHistogram {
+    /// 樣本緩衝：每筆 `(record_time, latency_ms)`。
+    /// 讀取 percentile 時走 lazy expire（清除 > 60s）。
+    samples: Mutex<Vec<(Instant, u64)>>,
+}
+
+impl Default for RestLatencyHistogram {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RestLatencyHistogram {
+    /// 建立空 histogram。
+    pub fn new() -> Self {
+        Self {
+            samples: Mutex::new(Vec::with_capacity(256)),
+        }
+    }
+
+    /// 紀錄一次 REST call latency（ms）。
+    ///
+    /// 為什麼 cap = 8192：60s window × 假設 100 call/s = 6000 上限；8192 預留
+    /// 30% headroom；超過 cap 走 drain_expired + truncate 避 unbounded。
+    /// hot path 鎖極短（push + 可能的 prune），對 REST call 延遲影響 < μs 級。
+    pub fn record_latency(&self, latency_ms: u64) {
+        let now = Instant::now();
+        if let Ok(mut samples) = self.samples.lock() {
+            // 達 cap 時先 drain expired 釋放空間；仍滿則 truncate to half（保新樣本）
+            // 這裡走 retain 而非 binary_search + drain，因 prune 動作不頻繁
+            // （cap = 8192 樣本對齊 60s 100call/s 上限），實作直觀優先。
+            if samples.len() >= REST_LATENCY_BUFFER_CAP {
+                let cutoff = now
+                    .checked_sub(Duration::from_secs(REST_LATENCY_WINDOW_SECS))
+                    .unwrap_or(now);
+                samples.retain(|(t, _)| *t >= cutoff);
+                // 若清完還滿（極端 burst），truncate 留新一半
+                if samples.len() >= REST_LATENCY_BUFFER_CAP {
+                    let drop = samples.len() / 2;
+                    samples.drain(0..drop);
+                }
+            }
+            samples.push((now, latency_ms));
+        }
+    }
+
+    /// 計算 60s rolling window 內 p50/p95/p99 三 percentile（ms）。
+    ///
+    /// 為什麼 sort-based 而非 hdrhistogram：
+    ///   - 6000 sample sort O(n log n) ≈ 80000 op 級；< 100 μs；每 60s 才呼
+    ///     一次（emitter sample_interval=60s），完全可接受。
+    ///   - 0 新 dep（hdrhistogram 雖在 workspace 但本 crate 未拉）；最小編譯
+    ///     時間增量 + 跨平台 0 風險（hdrhistogram 在 ARM/x86 同行為）。
+    ///
+    /// 返回 (p50, p95, p99) 三 u32（ms）。樣本空返 (0, 0, 0)（emitter 端視 0 為
+    /// OK band 不誤升級）。
+    pub fn percentile_triple(&self) -> (u32, u32, u32) {
+        let samples_guard = match self.samples.lock() {
+            Ok(g) => g,
+            Err(_) => return (0, 0, 0),
+        };
+        let now = Instant::now();
+        let cutoff = now
+            .checked_sub(Duration::from_secs(REST_LATENCY_WINDOW_SECS))
+            .unwrap_or(now);
+        let mut latencies: Vec<u64> = samples_guard
+            .iter()
+            .filter(|(t, _)| *t >= cutoff)
+            .map(|(_, ms)| *ms)
+            .collect();
+        drop(samples_guard);
+        if latencies.is_empty() {
+            return (0, 0, 0);
+        }
+        latencies.sort_unstable();
+        let n = latencies.len();
+        let pick = |q: f64| -> u32 {
+            // 為什麼 nearest-rank percentile（非 linear interp）：
+            //   - 對 6000 sample 兩種方法差異 < 1ms；nearest-rank 更直觀且
+            //     對齊 SLO instrumentation 行業慣例（Prometheus / Datadog 同）。
+            let idx = ((q * (n as f64)).ceil() as usize).saturating_sub(1).min(n - 1);
+            latencies[idx].min(u32::MAX as u64) as u32
+        };
+        (pick(0.50), pick(0.95), pick(0.99))
+    }
+
+    /// 60s 內當前 sample 數量（test + debug 用）。
+    pub fn sample_count(&self) -> usize {
+        let samples_guard = match self.samples.lock() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+        let now = Instant::now();
+        let cutoff = now
+            .checked_sub(Duration::from_secs(REST_LATENCY_WINDOW_SECS))
+            .unwrap_or(now);
+        samples_guard.iter().filter(|(t, _)| *t >= cutoff).count()
+    }
+}
+
+/// HTTP 4xx + 5xx retCode 60s rolling-window counter。
+///
+/// 為什麼 4xx + 5xx 分桶（per packet §5.5 反模式 (d) multi-venue gate 預留）：
+///   - HTTP 4xx = client fault（簽名 / 參數 / rate-limit）；策略 / wrapper bug
+///     早期信號。
+///   - HTTP 5xx = venue fault（交易所事故 / maintenance）；emit 即「我端正常但
+///     venue 慢」cascade 預警 gate。
+///   - 多 venue（Binance / OKX）後 retCode 語意差異；HTTP class 是 transport-
+///     level 共通語意（per ADR-0040 multi-venue 預留）。
+///
+/// caller 端對映規則（per packet §1.2 工作項 (2)）：
+///   - reqwest transport error → 不計入（屬 network fault，emitter 不負責）。
+///   - `BybitApiError::Business` + retCode IN (10001 InvalidParam, 10002
+///     InvalidRequest, 10003 ApiKeyInvalid, 10004 SignError, 10005
+///     PermissionDenied, 10006 IpRateLimit) → 4xx（client fault）。
+///   - `BybitApiError::Business` + 其他 retCode（5xx-like venue fault）→ 5xx。
+///   - `BybitApiError::JsonParse` → 不計入（屬 protocol parse 錯誤）。
+#[derive(Debug)]
+pub struct RetCodeCounter {
+    /// 4xx 樣本：每筆紀錄一個時間戳。讀取時走 retain 過濾過期。
+    samples_4xx: Mutex<Vec<Instant>>,
+    /// 5xx 樣本。
+    samples_5xx: Mutex<Vec<Instant>>,
+}
+
+impl Default for RetCodeCounter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RetCodeCounter {
+    /// 建立空 counter。
+    pub fn new() -> Self {
+        Self {
+            samples_4xx: Mutex::new(Vec::with_capacity(64)),
+            samples_5xx: Mutex::new(Vec::with_capacity(64)),
+        }
+    }
+
+    /// 紀錄一次 4xx 樣本（client fault）。
+    pub fn record_4xx(&self) {
+        let now = Instant::now();
+        if let Ok(mut samples) = self.samples_4xx.lock() {
+            if samples.len() >= RET_CODE_BUFFER_CAP {
+                let cutoff = now
+                    .checked_sub(Duration::from_secs(RET_CODE_WINDOW_SECS))
+                    .unwrap_or(now);
+                samples.retain(|t| *t >= cutoff);
+                if samples.len() >= RET_CODE_BUFFER_CAP {
+                    let drop = samples.len() / 2;
+                    samples.drain(0..drop);
+                }
+            }
+            samples.push(now);
+        }
+    }
+
+    /// 紀錄一次 5xx 樣本（venue fault）。
+    pub fn record_5xx(&self) {
+        let now = Instant::now();
+        if let Ok(mut samples) = self.samples_5xx.lock() {
+            if samples.len() >= RET_CODE_BUFFER_CAP {
+                let cutoff = now
+                    .checked_sub(Duration::from_secs(RET_CODE_WINDOW_SECS))
+                    .unwrap_or(now);
+                samples.retain(|t| *t >= cutoff);
+                if samples.len() >= RET_CODE_BUFFER_CAP {
+                    let drop = samples.len() / 2;
+                    samples.drain(0..drop);
+                }
+            }
+            samples.push(now);
+        }
+    }
+
+    /// 60s 內 4xx 累積計數。
+    pub fn count_4xx(&self) -> u32 {
+        let samples = match self.samples_4xx.lock() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+        let now = Instant::now();
+        let cutoff = now
+            .checked_sub(Duration::from_secs(RET_CODE_WINDOW_SECS))
+            .unwrap_or(now);
+        samples.iter().filter(|t| **t >= cutoff).count().min(u32::MAX as usize) as u32
+    }
+
+    /// 60s 內 5xx 累積計數。
+    pub fn count_5xx(&self) -> u32 {
+        let samples = match self.samples_5xx.lock() {
+            Ok(g) => g,
+            Err(_) => return 0,
+        };
+        let now = Instant::now();
+        let cutoff = now
+            .checked_sub(Duration::from_secs(RET_CODE_WINDOW_SECS))
+            .unwrap_or(now);
+        samples.iter().filter(|t| **t >= cutoff).count().min(u32::MAX as usize) as u32
+    }
+
+    /// 從 `BybitApiError` 對映到 4xx / 5xx 並 record。
+    ///
+    /// 為什麼 helper 在 client 端 而非 caller 端：
+    ///   - 對映規則屬 Bybit-specific 知識（retCode 10001-10010 = client fault）；
+    ///     trait 端只看 transport-level class（per ADR-0040 multi-venue 預留）。
+    ///   - caller（RestClient::get / post）走 record_for_error 一個入口即可，
+    ///     不需在多處 wrap 對映邏輯。
+    pub fn record_for_error(&self, err: &BybitApiError) {
+        match err {
+            BybitApiError::Business { ret_code, .. } => {
+                if Self::is_client_fault_retcode(*ret_code) {
+                    self.record_4xx();
+                } else {
+                    self.record_5xx();
+                }
+            }
+            // Transport / JsonParse / NoCredentials / SigningError 不計入 4xx/5xx
+            // counter；屬 wrapper 層 fault 而非 venue 端 fault。
+            _ => {}
+        }
+    }
+
+    /// 判斷 retCode 是否為 client fault（4xx 對映）。
+    ///
+    /// 為什麼這 6 個 code 屬 4xx：
+    ///   - 10001 InvalidParam / 10002 InvalidRequest：請求格式錯（wrapper bug）
+    ///   - 10003 ApiKeyInvalid / 10004 SignError：認證錯（憑證或簽名 bug）
+    ///   - 10005 PermissionDenied：權限不足（key 配置錯）
+    ///   - 10006 IpRateLimit：IP 限流（client 端超頻）
+    ///   其他 110xxx 業務碼（balance / position / order lifecycle）走 5xx
+    ///   （venue-side state；非 client fault）；保守對映。
+    fn is_client_fault_retcode(ret_code: i64) -> bool {
+        matches!(ret_code, 10001 | 10002 | 10003 | 10004 | 10005 | 10006 | 10010)
+    }
+}
+
 /// Well-known Bybit retCode values with semantic meaning.
 /// 有語義含義的 Bybit retCode 常用值。
 ///
@@ -480,6 +768,12 @@ pub struct BybitRestClient {
     base_url: String,
     recv_window: String,
     rate_limit: RateLimitState,
+    /// PA-DRIFT-4 工作項 (1)：REST latency 60s rolling histogram。
+    /// Arc 暴露給外部 `ApiLatencySourceProbe` 注入（per packet §1.2 工作項 (4)）；
+    /// 同 client 既有共享機制（Arc<BybitRestClient> 廣播）對齊。
+    latency_histogram: Arc<RestLatencyHistogram>,
+    /// PA-DRIFT-4 工作項 (2)：retCode 4xx + 5xx counter 60s rolling window。
+    ret_code_counter: Arc<RetCodeCounter>,
 }
 
 impl BybitRestClient {
@@ -601,7 +895,27 @@ impl BybitRestClient {
             base_url: env.rest_base_url().to_string(),
             recv_window: "5000".to_string(),
             rate_limit: RateLimitState::default(),
+            // PA-DRIFT-4：histogram + counter 初始化空；REST call hot path 自動
+            // 累積。Arc 暴露給 `RealApiLatencySourceProbe` 注入（per packet
+            // §1.2 工作項 (4) trait impl）。
+            latency_histogram: Arc::new(RestLatencyHistogram::new()),
+            ret_code_counter: Arc::new(RetCodeCounter::new()),
         })
+    }
+
+    /// PA-DRIFT-4 工作項 (1)：暴露 latency histogram Arc（probe 注入）。
+    ///
+    /// 為什麼 Arc 而非 &：
+    ///   - probe 端（`RealApiLatencySourceProbe`）需持有 `Arc<RestLatencyHistogram>`
+    ///     供 trait method 跨 task 訪問；emitter scheduler 走 Arc<dyn Probe>。
+    ///   - client 自身也持 Arc（hot path 鎖共享）；clone Arc 0 allocation。
+    pub fn latency_histogram_handle(&self) -> Arc<RestLatencyHistogram> {
+        Arc::clone(&self.latency_histogram)
+    }
+
+    /// PA-DRIFT-4 工作項 (2)：暴露 retCode counter Arc（probe 注入）。
+    pub fn ret_code_counter_handle(&self) -> Arc<RetCodeCounter> {
+        Arc::clone(&self.ret_code_counter)
     }
 
     /// Check if the client has valid credentials configured.
@@ -709,6 +1023,10 @@ impl BybitRestClient {
             "Bybit API request / Bybit API 請求"
         );
 
+        // PA-DRIFT-4 工作項 (1)：REST latency 計時起點。
+        // 為什麼計到 parse 完成而非 send 完成：parse 是 client 端必走步驟；
+        // 整個 client-side latency 才是 emitter 觀測的 SLO 目標。
+        let call_start = Instant::now();
         let resp = self
             .client
             .get(&url)
@@ -724,6 +1042,8 @@ impl BybitRestClient {
         self.update_group_rate_limit(path, &resp);
         let body = resp.text().await?;
         let parsed: BybitResponse = serde_json::from_str(&body)?;
+        let elapsed_ms = call_start.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        self.latency_histogram.record_latency(elapsed_ms);
         Ok(parsed)
     }
 
@@ -750,6 +1070,8 @@ impl BybitRestClient {
             "Bybit API request / Bybit API 請求"
         );
 
+        // PA-DRIFT-4 工作項 (1)：REST latency 計時起點（POST 路徑）。
+        let call_start = Instant::now();
         let resp = self
             .client
             .post(&url)
@@ -766,17 +1088,27 @@ impl BybitRestClient {
         self.update_group_rate_limit(path, &resp);
         let body_text = resp.text().await?;
         let parsed: BybitResponse = serde_json::from_str(&body_text)?;
+        let elapsed_ms = call_start.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        self.latency_histogram.record_latency(elapsed_ms);
         Ok(parsed)
     }
 
     /// Signed GET that automatically checks retCode and returns Result.
     /// 簽名 GET，自動檢查 retCode 並返回 Result。
+    ///
+    /// PA-DRIFT-4 工作項 (2)：retCode 對映在 `_checked` 路徑端做，因為只有
+    /// `into_result` 才會把 retCode != 0 變 `BybitApiError::Business`，retCode
+    /// counter 才能正確分桶。
     pub async fn get_checked(
         &self,
         path: &str,
         params: &[(&str, &str)],
     ) -> BybitResult<BybitResponse> {
-        self.get(path, params).await?.into_result()
+        let result = self.get(path, params).await?.into_result();
+        if let Err(ref err) = result {
+            self.ret_code_counter.record_for_error(err);
+        }
+        result
     }
 
     /// Signed POST that automatically checks retCode and returns Result.
@@ -786,7 +1118,11 @@ impl BybitRestClient {
         path: &str,
         body: &serde_json::Value,
     ) -> BybitResult<BybitResponse> {
-        self.post(path, body).await?.into_result()
+        let result = self.post(path, body).await?.into_result();
+        if let Err(ref err) = result {
+            self.ret_code_counter.record_for_error(err);
+        }
+        result
     }
 
     // -----------------------------------------------------------------------
