@@ -12042,3 +12042,23 @@ M3 MetricEmitterScheduler + 5 emitter（Track A real + B placeholder + C real + 
 
 ### 報告
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint_4_wave_b_main_scheduler_wireup.md`
+
+---
+
+## 2026-05-23 — Sprint 4+ first Live Wave B round 2 fix（E2 round 1 REJECT 後 5 finding closure）
+
+### 摘要
+E2 round 1 catch 5 finding：HIGH-1 Track B placeholder 全 0 走 DEGRADED 染色 + MEDIUM-2 Track D WS half emit chain disconnected from supervisor + LOW-1/2/3 (report LOC + emitter_count hardcoded + TODO healthcheck entry)。round 2 fix 五條全 closed；MEDIUM-1 singleton 登記 per dispatch NOT in scope（PM 收口時派 PA）。cargo test 3510 持平不退。
+
+### 教訓
+1. **placeholder 全 0 ≠ OK band**：classify ladder 對 0 值的返回必須對齊 spec literal 才能走 OK band。pipeline_throughput.rs tick_rate `< 0.5 → DEGRADED` + signal_rate `< 0.1 → DEGRADED` ladder 在 value=0 時走 DEGRADED 而非 OK；placeholder 必須對齊 spec line 102 OK band 嚴格合法值（tick_rate >= 1.0 / signal_rate >= 0.5），不是「default 0 = 中性 = OK」直覺。
+2. **dispatch 給的 fix 範例值若違反 ladder 必須 push back**：HIGH-1 dispatch 範例「ipc_p99=10」走 line 314 `> 10 → DEGRADED` 而非 OK；本 round 採用嚴格 OK 值 1.0 並在 report 留 rationale；對齊 PA dispatch §HIGH-1 設計意圖「placeholder OK band 對齊 spec line 102」，不機械跟隨 dispatch literal。
+3. **半實裝邊界（doc 自稱 vs IMPL 真實）必須誠實揭露**：Track D WS half round 1 doc 自稱「OK band 不誤升」但 IMPL 是「fresh 0-state Arc 與 supervisor 完全 disconnect」；30 天 V106 row 全 0 是「placeholder 副作用」不是「supervisor 觀測 0 dropout」。doc 措辭模糊會誤導 reviewer 推論「實裝正確只是 0 觀測」；MEDIUM-2 (a) doc 補注路徑必須明確區分。
+4. **dispatch 推薦多選方案要交代為什麼選 (a) 不選 (b)**：MEDIUM-2 (a) 短期 doc 補注 vs (b) Sprint 5+ amend supervisor signature 改造；本 round 走 (a) 原因 = 改 BybitPrivateWs supervisor signature 破 dispatch §禁忌「不改既有業務邏輯」；(b) 留 Sprint 5+ carry-over。
+5. **HIGH-1 inline test 必擴 classify=HealthOk assertion 而非單純 value assertion**：原 round 1 `test_returns_zero` 只測 default value = 0，不測 classify 結果；round 2 改名 `test_default_in_ok_band` 並加 5 metric `classify_pipeline_throughput_*(value) == HealthState::HealthOk` assertion 對 caller path 守住「value → classify → V106 emit chain」端到端不誤升。
+6. **LOC 自報數字要 wc -l 實測對齊**：round 1 report §0/§5 LOC 對 main_health_emitters.rs 自報 478 actual 528（差 -50）；對 risk_envelope_probe_impl.rs 自報 +74 actual +136；reviewer 對 LOC 誤差會 catch；report 寫前 wc -l 一次。
+7. **emitter_count hardcoded log 即「assert/log 數值 hardcoded」反模式**：Sprint 5+ Track E wire-up 後 vec.push 不對齊 hardcoded log 數字；應 `emitters.len()` 提前在 move 前 capture（vec move 進 scheduler 後 borrow 不可用）；對齊 §九 反模式。
+8. **TODO 被動等待 entry 必對齊 todo-maintenance.md Passive waits 三要素**：healthcheck + scheduled review date + acceptance condition；本 round W-S4-AC1B-HEALTHCHECK 加 SQL `WHERE created_at > NOW() - INTERVAL '30 min'` + review_date 2026-05-24 + 前置條件 (E2/E4/PM commit/Linux deploy) + Track E strategy_quality 0 row 例外標明。
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint_4_wave_b_round2_fix.md`
