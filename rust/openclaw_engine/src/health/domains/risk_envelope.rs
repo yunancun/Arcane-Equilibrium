@@ -491,13 +491,25 @@ impl RiskEnvelopeEmitter {
     ///   - sysinfo refresh_processes 需 mut；trait probe 是純讀 accessor 不需
     ///     mut，故 emitter sample 端可走 &self（對齊 Track B
     ///     `PipelineThroughputEmitter::sample_now` 同模式）。
+    ///
+    /// 為什麼走 `snapshot_5_metric()` 而非 5 個 current_xxx（per Sprint 4+ Wave B
+    /// 接線；對齊 round 2 PA-DRIFT-5 F-3 fix）:
+    ///   - 5 個 individual accessor 各走一次 trait method dispatch；對 production
+    ///     `RealRiskEnvelopeSourceProbe` 端各拿一次 cache lock → 5-lock gap micro-
+    ///     race window（如 PnL 已更新但 position_count 仍舊）。
+    ///   - `snapshot_5_metric()` trait default impl 走 5 個 current_xxx 結果語意
+    ///     等價（單 thread test 無 race）；production override 走「一次 lock +
+    ///     batch 5 calculator」原子讀取整個 5-metric tuple，避 race window。
+    ///   - 既有 mock / test fixture（如 `StubSource` / `MockMutexRiskProbe`）走
+    ///     default impl 自動向後兼容；不需改 test。
     pub fn sample_now(&self) -> Result<RiskEnvelopeSample, M3Error> {
+        let snapshot = self.source.snapshot_5_metric();
         Ok(RiskEnvelopeSample {
-            portfolio_cum_pnl_24h_usd: self.source.current_portfolio_cum_pnl_24h_usd(),
-            portfolio_max_dd_pct: self.source.current_portfolio_max_dd_pct(),
-            position_count_active: self.source.current_position_count_active(),
-            correlation_avg_pairwise: self.source.current_correlation_avg_pairwise(),
-            concentration_top1_pct: self.source.current_concentration_top1_pct(),
+            portfolio_cum_pnl_24h_usd: snapshot.portfolio_cum_pnl_24h_usd,
+            portfolio_max_dd_pct: snapshot.portfolio_max_dd_pct,
+            position_count_active: snapshot.position_count_active,
+            correlation_avg_pairwise: snapshot.correlation_avg_pairwise,
+            concentration_top1_pct: snapshot.concentration_top1_pct,
         })
     }
 }

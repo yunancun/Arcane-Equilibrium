@@ -12,6 +12,7 @@ mod cost_edge_advisor_boot;
 mod live_auth_watcher;
 mod main_boot_tasks;
 mod main_fanout;
+mod main_health_emitters;
 mod main_instruments;
 mod main_pipelines;
 mod main_scanner_init;
@@ -1400,6 +1401,60 @@ async fn async_main(
              手動 `reload_edge_estimates` IPC method live"
         );
     }
+
+    // ------------------------------------------------------------------
+    // M3 metric emitter scheduler wire-up (Sprint 4+ first Live Wave B)
+    // ------------------------------------------------------------------
+    // 為什麼接此位置（per Sprint 4+ Wave B dispatch）:
+    //   1. db_pool ready（line ~616 connect 後）+ auto_migrate 完成 V106 schema
+    //      存在。
+    //   2. 三 pipeline spawn（paper / demo / live）已完成，pipeline kind 觀測
+    //      可決定 engine_mode_str 主標籤。
+    //   3. 此位置在 engine started log 前 ≈ scheduler 與 engine main loop 同
+    //      生命週期；cancel token 共用，graceful shutdown 自然。
+    //
+    // 為什麼 engine_mode_str 走 live > demo > paper 優先級（per spec V106
+    // CHECK 4 值 white-list + `effective_engine_mode` SSOT）:
+    //   - process-wide engine_runtime emitter 是觀測 engine 進程本身（不是
+    //     per-pipeline）；engine_mode label 必為 V106 CHECK 4 值之一。
+    //   - 多 pipeline 同進程運行時，採「最高優先 pipeline」label：live > demo
+    //     > paper（對齊 `effective_engine_mode` 既有 4 值優先語意）。
+    //   - has_live=true + Mainnet env 時為 "live"；has_live=true + 非 Mainnet
+    //     時為 "live_demo"（per LiveDemo 既有 endpoint-aware tag 規則）。
+    let primary_engine_mode: &'static str = if has_live {
+        // Live 走 effective_engine_mode 規則：live (Mainnet) / live_demo /
+        // live_testnet。Wave B 採 live_bybit_environment() 反映實際 env。
+        openclaw_engine::mode_state::effective_engine_mode(
+            openclaw_engine::tick_pipeline::PipelineKind::Live,
+            Some(live_bybit_environment()),
+        )
+    } else if has_demo {
+        "demo"
+    } else {
+        // paper-only / cold-start no-binding fallback；對齊 V106 CHECK 4 值。
+        "paper"
+    };
+    let cfg_snap_for_pool = config.get();
+    let data_dir_mount =
+        std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
+    let (portfolio_cache, _health_event_bus) =
+        main_health_emitters::spawn_metric_emitter_scheduler(
+            &db_pool,
+            cfg_snap_for_pool.database.pool_max_connections,
+            &data_dir_mount,
+            &shared_client,
+            primary_engine_mode,
+            &cancel,
+        );
+    drop(cfg_snap_for_pool);
+    // spawn PortfolioStateCache update task；共用同 cache Arc。
+    main_health_emitters::spawn_portfolio_state_update_task(portfolio_cache, &cancel);
+    info!(
+        target = "m3.health.wireup",
+        engine_mode = primary_engine_mode,
+        "M3 metric emitter scheduler + PortfolioStateCache update task wired \
+         (Sprint 4+ first Live Wave B; Track A/C/F real + B/D-WS placeholder + E skip)"
+    );
 
     info!(
         version = VERSION,

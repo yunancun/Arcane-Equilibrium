@@ -12023,3 +12023,22 @@ PM dispatch combined fix：E2 round 1 對 PA-DRIFT-4 (REJECT) + PA-DRIFT-5 (APPR
 
 ### 報告
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint_4_wave_a_round2_combined_fix.md`
+
+---
+
+## 2026-05-23 — Sprint 4+ first Live Wave B main.rs scheduler 接線
+
+### 摘要
+M3 MetricEmitterScheduler + 5 emitter（Track A real + B placeholder + C real + D REST-real/WS-placeholder + F real；Track E skip per Sprint 5+）spawn 進 main.rs；PortfolioStateCache update task 走 300s placeholder no-op tick；emitter sample_now 切換 batch path（F-3）；F-2 caller-end NaN/inf sanitize 落地。
+
+### 教訓
+1. **BybitPrivateWs handle 外部注入碰 supervisor 重建邊界**：startup/private_ws.rs supervisor 每次 attempt 重建 BybitPrivateWs::new → dropout_counter / rtt_histogram Arc 內部新建；main.rs 外無穩定 Arc 注入點。Wave B 採「REST half real + WS half placeholder」hybrid；Wave C / Sprint 5+ amend follow-up：supervisor signature 改外部注入 + caller probe 拿 stable Arc。
+2. **PaperState 不暴露 main.rs Arc**：PaperState 在 per-pipeline 內部 own；trading_tx `mpsc::Sender<TradingMsg>` 走 trading_writer → DB 無旁路；positions_mirror 只 `HashMap<symbol, is_long>` 不含 qty/entry_price/unrealized_pnl。Wave B PortfolioStateCache update task 走 placeholder no-op；Sprint 5+ caller 接 PaperState SSOT。
+3. **emitter sample_now 切換 batch path 需明確走 snapshot_5_metric trait default**：既有 StubSource / mock probe 不 impl override，自動向後兼容；production RealRiskEnvelopeSourceProbe override 走 batch read（一次 lock + 5 calculator）避 5-lock gap race。
+4. **F-2 caller sanitize NaN/inf 必在 cache 端 update 入口檢**：realized_pnl / equity / notional 三類 NaN/inf 各自 skip + fail-loud warn log；避 NaN 比較全 false 走 OK band 卻永不升 WARN 的雙重壞處。
+5. **engine_mode 優先級 live > demo > paper**：process-wide engine_runtime emitter 標籤必為 V106 CHECK 4 值之一；多 pipeline 同進程運行時 採「最高優先 pipeline」label（live (Mainnet) / live_demo / live_testnet / demo / paper）對齊 effective_engine_mode SSOT。
+6. **cargo test 3499→3510 增 11**：F-2 sanitize 3 inline + main_scheduler_wireup 6 + Track E mock OBSERVE-4 regression 2（混入 health::lib 內部）。Wave A round 2 baseline 3499 + 11 new = 3510 PASS / 0 FAIL / 4 ignored。
+7. **AC-5 production binary 0 spike**：strings scan 「mock_instant / tokio::time::pause / spike」全 0 hit（spike-feature 唯一 hit 是 M3Error::DomainNotImplemented enum 文字「domain not implemented in spike scope:」非 feature gate）。
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint_4_wave_b_main_scheduler_wireup.md`

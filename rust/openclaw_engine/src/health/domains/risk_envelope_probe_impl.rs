@@ -172,6 +172,18 @@ impl PortfolioStateCache {
     ///     equity；cache 端不重做計算。
     ///   - `snapshot.paper_state.positions`：當前 position 列表，caller 端走
     ///     `qty.abs() * entry_price.abs()` 投影為 `PositionExposure { notional_usd }`。
+    ///
+    /// F-2 NaN/inf sanitize（per PA-DRIFT-5 round 2 E2 升級 P1 Wave B condition）:
+    ///   - `realized_pnl` 非有限值 → skip push（fail-loud warn log）；避把 NaN/inf
+    ///     污染 24h sliding window sum，破壞 emitter classify ladder（NaN 比較
+    ///     全 false → 走 OK band 但永遠不會升 WARN，雙重壞處）。
+    ///   - `equity_usd` 非有限值 → skip push（fail-loud warn log）；max_dd_pct
+    ///     calculation 對 NaN peak 計算錯誤。
+    ///   - `latest_exposures[i].notional_usd` 非有限值 → 過濾掉該倉位（保留
+    ///     legal 倉位）；concentration top-1 sum 不被 NaN 干擾。
+    ///   - 全部 NaN/inf → equity / fill / exposure 各自不 push；cache 仍 advance
+    ///     `last_update_ts_ms` 對齊 caller 「tick 已執行」語意；24h drain 仍走
+    ///     不依賴本次 push 是否 land sample。
     pub fn update_from_pipeline_snapshot(
         &mut self,
         now_ms: u64,
@@ -179,18 +191,54 @@ impl PortfolioStateCache {
         new_fills: &[(u64, f64)],
         latest_exposures: Vec<PositionExposure>,
     ) {
-        // 1. push 增量 fill 到 sliding window，並截斷 24h 外的舊 sample。
+        // 1. push 增量 fill 到 sliding window；NaN/inf realized_pnl skip + fail-loud。
         for &(ts_ms, realized_pnl) in new_fills.iter() {
+            if !realized_pnl.is_finite() {
+                tracing::warn!(
+                    target = "m3.health.risk_envelope",
+                    ts_ms,
+                    realized_pnl,
+                    "PortfolioStateCache: skip NaN/inf realized_pnl fill (F-2 sanitize)"
+                );
+                continue;
+            }
             self.realized_pnl_history.push_back((ts_ms, realized_pnl));
         }
         self.drain_old_fills(now_ms);
 
-        // 2. push 當前 equity sample；截斷 24h 外的舊 sample。
-        self.equity_history.push_back((now_ms, equity_usd));
+        // 2. push 當前 equity sample；NaN/inf equity skip + fail-loud。
+        if equity_usd.is_finite() {
+            self.equity_history.push_back((now_ms, equity_usd));
+        } else {
+            tracing::warn!(
+                target = "m3.health.risk_envelope",
+                now_ms,
+                equity_usd,
+                "PortfolioStateCache: skip NaN/inf equity sample (F-2 sanitize)"
+            );
+        }
         self.drain_old_equity(now_ms);
 
-        // 3. 整列覆寫 latest position notional snapshot。
-        self.latest_exposures = latest_exposures;
+        // 3. 整列覆寫 latest position notional snapshot；過濾 NaN/inf notional。
+        //    為什麼過濾而非整列 reject：保留 legal 倉位讓 emitter 仍能觀測；個別
+        //    illegal notional 由 caller 端責任修，本 cache fail-soft sanitize 對齊
+        //    spec §3.6 「emitter 觀測語意：illegal source skip 不誤升」。
+        let sanitized_exposures: Vec<PositionExposure> = latest_exposures
+            .into_iter()
+            .filter(|e| {
+                if e.notional_usd.is_finite() {
+                    true
+                } else {
+                    tracing::warn!(
+                        target = "m3.health.risk_envelope",
+                        notional_usd = e.notional_usd,
+                        "PortfolioStateCache: filter NaN/inf notional exposure (F-2 sanitize)"
+                    );
+                    false
+                }
+            })
+            .collect();
+        self.latest_exposures = sanitized_exposures;
 
         // 4. 更新最後 update 時戳（telemetry）。
         self.last_update_ts_ms = now_ms;
@@ -783,6 +831,94 @@ mod tests {
         assert!(
             (snapshot.concentration_top1_pct - cache.concentration_top1_pct()).abs() < 1e-9,
         );
+    }
+
+    /// (8) F-2 sanitize：NaN realized_pnl 必 skip，不污染 cum_pnl sum
+    /// （per PA-DRIFT-5 round 2 E2 升級 P1 Wave B condition）。
+    #[test]
+    fn test_f2_sanitize_skips_nan_realized_pnl() {
+        let mut cache = PortfolioStateCache::new();
+        let now_ms: u64 = 1_700_000_000_000;
+        // 混入 NaN / inf / 正常 fill。
+        let fills = vec![
+            (now_ms - 1000, 10.0),
+            (now_ms - 800, f64::NAN),
+            (now_ms - 600, f64::INFINITY),
+            (now_ms - 400, -5.0),
+            (now_ms - 200, f64::NEG_INFINITY),
+            (now_ms - 100, 3.5),
+        ];
+        cache.update_from_pipeline_snapshot(now_ms, 100.0, &fills, Vec::new());
+        // 應只 push 3 個 legal fill；NaN/inf/-inf 全 skip。
+        assert_eq!(
+            cache.fill_history_len(),
+            3,
+            "NaN/inf realized_pnl 必 skip；只留 3 legal fill"
+        );
+        // cum_pnl 必為 10 + (-5) + 3.5 = 8.5，與 NaN test 一致。
+        let sum = cache.cum_pnl_24h_usd();
+        assert!(
+            (sum - 8.5).abs() < 1e-4,
+            "F-2 sanitize 後 cum_pnl 應 8.5；實得 {}",
+            sum
+        );
+        assert!(sum.is_finite(), "cum_pnl 必為 finite；不被 NaN 污染");
+    }
+
+    /// (8) F-2 sanitize：NaN equity 必 skip，max_dd 計算保 finite。
+    #[test]
+    fn test_f2_sanitize_skips_nan_equity() {
+        let mut cache = PortfolioStateCache::new();
+        let now_ms: u64 = 1_700_000_000_000;
+        // 3 次 update：正常 + NaN + 正常。
+        cache.update_from_pipeline_snapshot(now_ms - 2000, 100.0, &[], Vec::new());
+        cache.update_from_pipeline_snapshot(now_ms - 1000, f64::NAN, &[], Vec::new());
+        cache.update_from_pipeline_snapshot(now_ms, 95.0, &[], Vec::new());
+        // 只應 push 2 個 legal equity sample。
+        assert_eq!(
+            cache.equity_history_len(),
+            2,
+            "NaN equity 必 skip；只留 2 legal sample"
+        );
+        let dd = cache.max_dd_pct_24h();
+        assert!(dd.is_finite(), "max_dd 必為 finite；不被 NaN 污染");
+        let expected = ((100.0 - 95.0) / 100.0) * 100.0;
+        assert!(
+            (dd - expected).abs() < 1e-4,
+            "F-2 sanitize 後 max_dd 應 {}；實得 {}",
+            expected,
+            dd
+        );
+    }
+
+    /// (8) F-2 sanitize：inf notional exposure 必過濾，concentration 計算保 finite。
+    #[test]
+    fn test_f2_sanitize_filters_nan_exposure() {
+        let mut cache = PortfolioStateCache::new();
+        let now_ms: u64 = 1_700_000_000_000;
+        let exposures = vec![
+            PositionExposure { notional_usd: 100.0 },
+            PositionExposure { notional_usd: f64::NAN },
+            PositionExposure { notional_usd: 200.0 },
+            PositionExposure { notional_usd: f64::INFINITY },
+            PositionExposure { notional_usd: 50.0 },
+        ];
+        cache.update_from_pipeline_snapshot(now_ms, 100.0, &[], exposures);
+        // 應只剩 3 個 legal exposure。
+        assert_eq!(
+            cache.position_count_active(),
+            3,
+            "NaN/inf notional 必過濾；只留 3 legal"
+        );
+        let conc = cache.concentration_top1_pct();
+        let expected = 200.0 / 350.0 * 100.0;
+        assert!(
+            (conc - expected).abs() < 1e-4,
+            "F-2 sanitize 後 concentration 應 {:.4}%；實得 {:.4}",
+            expected,
+            conc
+        );
+        assert!(conc.is_finite(), "concentration 必為 finite");
     }
 
     /// (7) RealRiskEnvelopeSourceProbe::snapshot_5_metric override 走 batch 路徑
