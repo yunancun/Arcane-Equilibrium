@@ -11645,3 +11645,38 @@ PA-DRIFT-1 V107 SQL carry-over E1：4 處 `governance.audit_log` literal patch (
 
 ### 報告
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_pre_v107_sql_guard_a_fix.md`
+
+---
+
+## 2026-05-22 Sprint 2 Phase 2 Wave 1 Track A — M3 metric_emitter engine_runtime scaffold + D3 cascade reject
+
+### 任務
+per PM Phase 2 Wave 1 dispatch packet `2026-05-22--m3_metric_emitter_sprint2_dispatch_packet.md` §2 Track A：spike Track B `health/mod.rs` 718 行 baseline 升級為 sysinfo-backed 6 metric (cpu_pct / rss_mb / heartbeat_alive / open_fd_count / thread_count / uptime_sec) + 完整 4-state ladder transition matrix (OK→WARN dwell 60s / WARN→DEGRADED dwell 5min / DEGRADED→CRITICAL dwell 5min / WARN→OK 15min recovery / DEGRADED→WARN 30min recovery) + 新 module 三 (event_bus / writer / metric_emitter) + D3 cascade reject log emit minimal (≥2 fail-closed + same anomaly 24h suppress 2 sub-case)。Wave 1 Track A 為 scaffold owner，B/C/D/E/F 沿用本 module DomainEmitter / MetricSample / RollingWindowAggregator / HealthObservationWriter / HealthEventBus。
+
+### 教訓
+- **observe_classified new entry 不破 observe() backward compat**：spike Track B `observe()` API 內含 band classify (EngineRuntimeMetric→HealthState)；Sprint 2 把 classify 移到 emitter / scheduler 端，SM 新入口 `observe_classified(band, anomaly_id, now)` 直接接 caller 已 classify 的 band。舊 `observe()` 仍 fail-loud 對齊 spike Track B (test_state_machine_stub_domain_rejects PASS)；新 `observe_classified()` 6 domain 共用不 require_implemented。**規則**：Rust trait/API extension 不修舊 fn signature 而加新 fn 是 backward compat 安全範式；packet §2.5 反模式 (a) 明示。
+- **metric_emitter scheduler 0 spike feature gate**：per packet §2.5 反模式 (b) + AC-5 「production binary 0 mock time 滲透」，本 module (event_bus / writer / metric_emitter/mod.rs) 全程不引 `#[cfg(feature = "spike")]`。release build nm scan `grep -E "(mock_instant|tokio::time::pause|spike)" = 0 hit` 驗 PASS。spike feature 仍隔絕在 `tests/m3_amp_cap_24h_fire.rs` + `compute_window_stats` helper。**規則**：升級 spike skeleton 為 production-grade 必驗 nm 0 hit；不可順手加 `cfg(feature = "spike")` 給 production module。
+- **sysinfo 0.32 cross-platform 不寫 cfg(target_os="linux") 分支**：per packet §2.5 反模式 (c) + `feedback_cross_platform` + `project_mac_deployment_target`，sysinfo Process API (cpu_usage / memory / tasks / start_time) Mac+Linux 原生支援，無需 `cfg(target_os="linux")`。唯一例外 `read_open_fd_count` helper 在 Mac 走 fallback 返 0（sysinfo 0.32 沒提供 cross-platform open_fd API；fail-closed OK band 不誤升級）。**規則**：跨平台 dep crate (sysinfo / sqlx / tokio) 走原生 API；fallback path 必 fail-closed 不誤觸 alert。
+- **D3 cascade reject 兩 sub-case 推斷邏輯 prev_count vs cur_count**：scheduler `run_domain_loop` 內推斷 reject_reason：
+  - `prev_count >= 2 AND cur_count == prev_count AND band != current` → `amp_cap_>=2_fail_closed`
+  - `prev_count < 2 AND cur_count == prev_count AND band != current` → `amp_cap_same_anomaly_24h_suppress`
+  - 同 state (band == current) → 非 reject
+  V106 row state 維持 current_state (not advance to target；per packet §2.5 反模式 (e))，evidence_json 寫 reject_reason + anomaly_id + target_state + current_state。**規則**：D3 cascade reject emit 是 audit trail only，不 emit Slack/Console badge/halt strategy/降 LAL Tier (Sprint 5/7/8 才接)；emit V106 row 走既有 writer trait 不繞 Guardian。
+- **V106 schema 19 column 非 27 column (packet drift)**：packet §1 描述「INSERT 全 27 column」但實際 `sql/migrations/V106__health_observations.sql` schema 是 19 column (observation_id / observed_at / domain / metric_name / state / state_prev / dwell_time_sec / metric_value / metric_threshold / amplification_loop_24h_count / symbol / strategy_name / evidence_json / engine_mode / created_by / created_at / updated_by / updated_at / source_version)。**規則**：packet 描述 vs SQL file 衝突時以 SQL file 為事實 (per CLAUDE.md §三 active state authority + §Data Migrations 「Linux PG empirical 驗證」)；report 揭示 drift 但不阻 IMPL。
+- **metric_emitter/mod.rs 964 LOC 超 800 warning**：per CLAUDE.md §九 「Files over 800 lines require review attention; 2000 lines is the hard cap」。本 module 含 trait + window + scheduler + EngineRuntimeEmitter + 6 classify helpers + 8 unit test，未來 Track B/C/D/E/F 不擴此檔，僅 push 各自 `health/domains/<domain>.rs` 但共用本 module trait + scheduler。**規則**：scaffold 檔暫 800-1000 LOC 範圍是 acceptable；若 Wave 1+2 後此檔再擴需拆 emitter (Track A) 到 `health/domains/engine_runtime.rs`。
+- **observe_classified ladder transition matrix 升階中繼設計**：OK→DEGRADED/CRITICAL 不單 sample 跳階；先升 WARN (dwell 60s WARN 中繼)；WARN→CRITICAL 同樣先升 DEGRADED (dwell 5min DEGRADED 中繼)。**規則**：4-state ladder 漸進升階對齊 ADR-0042 Decision 2 漸進降級語意；單 sample 跳 2 階會繞 dwell + amp cap 反模式。CRITICAL → 任何更低 state 不支援自動 recovery (Sprint 5 才接 operator manual unlock + Console GUI)；本 Sprint 2 IMPL CRITICAL 進入後 sticky。
+- **HealthState/HealthDomain Serialize+Deserialize 為 event_bus 廣播必要**：Sprint 5 cascade subscribe 跨 IPC/multi-process 廣播時 V106 row 字串 round-trip 需 serde；對齊 `as_str()` / `from_str()` 既有 contract。derive `serde::Serialize, serde::Deserialize` 自動走 enum unit variant 寫成 JSON `"HealthOk"`；與 V106 row column 字串 `"HEALTH_OK"` 不同但 caller (writer) 端走 `as_str()` 對齊 V106 schema CHECK 4 值 (writer.rs internal mapping)。**規則**：Rust serde enum 跨 PG 邊界時用 `as_str()` / `from_str()` 而非 serde JSON `"HealthOk"`；本 module event_bus JSON broadcast 不直接寫 PG，沒衝突。
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_wave1_track_a_engine_runtime.md`
+
+## 2026-05-22 Sprint 2 Wave 1 Track A round 2 fix
+- E2 round 1 對抗 review: REJECT (3 HIGH + 2 MEDIUM + 1 LOW)；scaffold owner bug 會放大 5 倍到 Track B-F
+- HIGH-1 fix: SM 新 pub fn `is_anomaly_capped(&str) -> bool`；scheduler 抽 `pub fn infer_reject_reason()` helper 用 SM accessor 直接區分 guard 1 (same anomaly suppress) vs guard 3 (count>=2 fail-closed)；舊 IMPL 用 `prev_count >= 2` 推斷在 count=2 + 同 anomaly 場景誤標
+- HIGH-2 fix: observe_classified 升階方向 + 同 state 高 band 分支全部 reset `recovery_band_seen_at = None`；spec §5.2 持續 15min OK-band dwell 被高 band 採樣打斷必須重新計算
+- MEDIUM-1 fix: scheduler 端 SM 結果聚合到 `ObserveOutcome` struct + drop(sm_guard) 後再走 writer.await；徹底避免 async lock 跨 await
+- MEDIUM-2 fix: SM 加 `last_transition_dwell_secs: u32` 字段 + `last_transition_dwell_secs()` accessor；fire branch 在覆寫 state_entered_at 前計算 `(now - state_entered_at).as_secs()` 並緩存；scheduler 寫 V106 dwell_time_sec 真實值（原 hardcode 0）
+- LOW-2 fix: (HealthOk, HealthOk) 分支移除冗餘 `recovery_band_seen_at = None`（current=OK 無 recovery dwell；anchor 應已 None）
+- 4 新 test：test_sprint2_track_a_scheduler_emits_correct_reject_reason_same_anomaly_cap / fail_closed_ge_2 / test_sprint2_track_a_recovery_dwell_resets_on_high_band_sample / test_sprint2_track_a_sm_records_last_transition_dwell_secs
+- 教訓：integration test 走真實 scheduler.run 對抗 wall-clock dwell 60s/5min 太慢；抽 `pub fn infer_reject_reason` helper 後 test 走「真實 SM state + 推斷 helper」對齊；scheduler 內呼同一 helper（DRY + testable）
+- cargo test 結果: lib 3096/3096 / health lib 32/32 / sprint2 9/9 (5 舊 + 4 新) / spike regression 3/3 / nm scan 0 hit

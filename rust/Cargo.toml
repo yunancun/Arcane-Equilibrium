@@ -40,6 +40,12 @@ parking_lot = "0.12"
 # HdrHistogram 7.x pure Rust + sig_figs=3 ~256KB/instance × 5 engine_mode ≈ 1.3MB。
 # Apple Silicon arm64 build clean，無 sys dep（per spec §11.3）。
 hdrhistogram = "7"
+# M3 metric emitter Sprint 2 Track A — sysinfo 0.32 crate 採樣 process CPU/RSS/
+# heartbeat/open_fd/thread/uptime 6 metric。為什麼 0.32：MSRV 1.74 對齊本 workspace
+# rustc 1.95；跨平台原生支援 macOS + Linux（per `feedback_cross_platform` +
+# `project_mac_deployment_target`），不需 `cfg(target_os = "linux")` 分支寫死。
+# per docs/execution_plan/2026-05-22--m3_metric_emitter_sprint2_design_spec.md §3 D1。
+sysinfo = "0.32"
 
 [profile.release]
 strip = "symbols"

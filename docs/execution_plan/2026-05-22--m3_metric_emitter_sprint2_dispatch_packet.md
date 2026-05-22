@@ -25,6 +25,7 @@ per Sprint 1A-ζ Phase 1 PA refine pattern (`docs/execution_plan/2026-05-21--spr
 - Wave 1 (D0-D3)：Track A + B + C 3 並行；Track A 24h 內 land scaffold (trait + writer + event bus + observe_classified)
 - Wave 2 (D3-D6)：Track D + E + F 3 並行；用 Wave 1 已 land scaffold
 - Phase chain：本 packet (~2-3 hr) → Phase 2 E1 × 6 並行 (38-52 hr) → Phase 3a E2 × 6 並行 (10-15 hr) → Phase 3b E4 (4-6 hr) → Phase 3c QA (4-6 hr) → Phase 3d TW (2-3 hr) → Phase 3e PM (1-2 hr) = **70-104 hr 真實 + buffer 後 75-115 hr**
+- **AC-1 拆分 a/b** (per 2026-05-22 E2 round 1 HIGH-3 + LOW-1 fix)：AC-1a = Wave 1 scaffold sign-off 用 in-memory `HealthObservationWriter` mock fixture（不接 PG；cargo test PASS 即可結 Wave 1）；AC-1b = Wave 2+ main.rs 接 scheduler 後 Phase 3c QA 跑 real PG empirical（30 min window row count ≥ 5；前置 = main.rs scheduler 接線完成）。AC-1b 不阻 Wave 1 scaffold sign-off。
 
 ---
 
@@ -67,6 +68,12 @@ per Sprint 1A-ζ Phase 1 PA refine pattern (`docs/execution_plan/2026-05-21--spr
 - workspace `rust/Cargo.toml` 加 `sysinfo = "0.32"` (latest stable as of 2026-05；Track A E1 IMPL 動工前 confirm crates.io 最新 stable 不破壞 MSRV)
 - `rust/openclaw_engine/Cargo.toml` 加 `sysinfo = { workspace = true }`
 - 0 其他新 dep（sqlx / tokio / chrono / uuid / serde 全 workspace 已有）
+
+### 1.6.1 AC-1 拆分契約 (per E2 round 1 HIGH-3 fix)
+
+- **AC-1a** (Wave 1 scaffold sign-off)：cargo test `test_sprint2_track_*_in_memory_proxy` PASS；以 in-memory `HealthObservationWriter` mock fixture 驅動 5 sample window × N metric tick → ≥ N×5 V106 row written 至 mock；**不需 main.rs 接 scheduler / 不需 real PG**；Wave 1 / Wave 2 各 Track E1 IMPL 自我 sign-off 用本 AC。
+- **AC-1b** (Wave 2+ real PG empirical)：Phase 3c QA 階段跑 real PG SQL；前置 = (1) main.rs 接 `MetricEmitterScheduler::run` (2) Linux runtime --rebuild 啟用 schduler (3) ≥ 30 min 樣本累積；scaffold sign-off 不 block；6 Track 並行 sign-off 不繞此前置。
+- **Rationale**：per E2 round 1 review HIGH-3，main.rs 未接 scheduler 前 SQL query 必返 0 row；若 AC-1 寫死「real PG ≥ 5」，Wave 1 scaffold sign-off 永遠 fail-closed；拆 a/b 解開 Wave 1 阻塞但保 Phase 3c 治理門檻。
 
 ### 1.7 Wave 1 scaffold contract (Track A 必先 land)
 
@@ -131,7 +138,8 @@ Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event 
 
 | AC# | Pass criteria | Verify |
 |---|---|---|
-| AC-1 engine_runtime | V106 30 min window engine_runtime row count ≥ 5 (5 sample × 30s = 2.5 min cycle) | SQL `SELECT COUNT(*) FROM learning.health_observations WHERE domain='engine_runtime' AND created_at > NOW() - INTERVAL '30 min'` ≥ 5 |
+| AC-1a engine_runtime in-memory proxy (Wave 1 scaffold sign-off) | 5 sample window × 6 metric tick (cpu_pct / rss_mb / fd_pct / event_loop_lag_p95_ms / scheduler_tick_skew_ms / disk_io_util_pct) → ≥ 30 V106 row count via in-memory `HealthObservationWriter` mock fixture（不接 PG）；cycle 5 sample × 30s = 2.5 min mock Instant 推進 | `cargo test --release test_sprint2_track_a_engine_runtime_in_memory_proxy` PASS |
+| AC-1b engine_runtime real PG empirical (Wave 2+ main.rs 接 scheduler 後) | 30 min window engine_runtime row count ≥ 5 (real PG；6 metric × 5 sample = 30 row tick 折算 ≥ 5 sample window) | SQL `SELECT COUNT(*) FROM learning.health_observations WHERE domain='engine_runtime' AND created_at > NOW() - INTERVAL '30 min'` ≥ 5 (Phase 3c QA 跑；前置 = main.rs scheduler 接線完成) |
 | AC-2 4-state ladder | engine_runtime OK→WARN dwell 60s + WARN→DEGRADED dwell 5min 真實 fire | `cargo test --release test_sprint2_ladder_engine_runtime` PASS |
 | AC-3 amp cap | engine_runtime 24h-suppression empirical fire (spike Track B 已 PASS；本 Track 沿用) | `cargo test --release --features spike test_sprint2_amp_cap_engine_runtime` PASS |
 | AC-5 spike default false | `nm target/release/openclaw_engine \| grep -E "(mock_instant\|tokio::time::pause\|spike)" \| wc -l` = 0 | `cargo build --release` (無 `--features spike`) + nm symbol scan |
@@ -188,7 +196,8 @@ Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event 
 
 | AC# | Pass criteria |
 |---|---|
-| AC-1 pipeline_throughput | V106 30 min window pipeline_throughput row count ≥ 5 |
+| AC-1a pipeline_throughput in-memory proxy (Wave 1 scaffold sign-off) | 5 sample window × N metric tick → ≥ N×5 V106 row count via in-memory `HealthObservationWriter` mock fixture（不接 PG；cargo test --release test_sprint2_track_b_pipeline_throughput_in_memory_proxy PASS）|
+| AC-1b pipeline_throughput real PG empirical (Wave 2+ main.rs 接 scheduler 後) | V106 30 min window pipeline_throughput row count ≥ 5 (real PG；Phase 3c QA 跑) |
 | AC-2 4-state ladder | OK→WARN→DEGRADED ladder fire test PASS |
 | AC-4 cross-domain | pipeline_throughput DEGRADED 不影響 engine_runtime state |
 | AC-5 spike default false | production binary 不滲透 mock time |
@@ -235,7 +244,8 @@ Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event 
 
 | AC# | Pass criteria |
 |---|---|
-| AC-1 database_pool | V106 30 min window database_pool row count ≥ 3 (60s × 5 = 5 min cycle) |
+| AC-1a database_pool in-memory proxy (Wave 2 scaffold sign-off) | 5 sample window × N metric tick → ≥ N×5 V106 row count via in-memory `HealthObservationWriter` mock fixture（不接 PG；cargo test --release test_sprint2_track_c_database_pool_in_memory_proxy PASS）|
+| AC-1b database_pool real PG empirical (Wave 2+ main.rs 接 scheduler 後) | V106 30 min window database_pool row count ≥ 3 (real PG；60s × 5 = 5 min cycle；Phase 3c QA 跑) |
 | AC-2 4-state ladder | OK→WARN→DEGRADED ladder fire test PASS |
 | AC-4 cross-domain | database_pool DEGRADED 不影響其他 5 domain state |
 | AC-5 spike default false | production binary 不滲透 mock time |
@@ -281,7 +291,8 @@ Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event 
 
 | AC# | Pass criteria |
 |---|---|
-| AC-1 api_latency | V106 30 min window api_latency row count ≥ 3 (60s × 5 = 5 min cycle) |
+| AC-1a api_latency in-memory proxy (Wave 2 scaffold sign-off) | 5 sample window × N metric tick → ≥ N×5 V106 row count via in-memory `HealthObservationWriter` mock fixture（不接 PG；cargo test --release test_sprint2_track_d_api_latency_in_memory_proxy PASS）|
+| AC-1b api_latency real PG empirical (Wave 2+ main.rs 接 scheduler 後) | V106 30 min window api_latency row count ≥ 3 (real PG；60s × 5 = 5 min cycle；Phase 3c QA 跑) |
 | AC-2 4-state ladder | OK→WARN→DEGRADED ladder fire test PASS |
 | AC-4 cross-domain | api_latency DEGRADED 不影響其他 5 domain state |
 | AC-5 spike default false | production binary 不滲透 mock time |
@@ -331,7 +342,8 @@ Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event 
 
 | AC# | Pass criteria |
 |---|---|
-| AC-1 strategy_quality | V106 30 min window strategy_quality row count ≥ 1 per strategy × symbol pair (5min × 5 = 25 min cycle；30min 容差) |
+| AC-1a strategy_quality in-memory proxy (Wave 2 scaffold sign-off) | 5 sample window × N metric tick per strategy × symbol pair → ≥ N×5 V106 row count via in-memory `HealthObservationWriter` mock fixture（不接 PG；cargo test --release test_sprint2_track_e_strategy_quality_in_memory_proxy PASS）|
+| AC-1b strategy_quality real PG empirical (Wave 2+ main.rs 接 scheduler 後) | V106 30 min window strategy_quality row count ≥ 1 per strategy × symbol pair (real PG；5min × 5 = 25 min cycle；30min 容差；Phase 3c QA 跑) |
 | AC-2 4-state ladder | per-strategy OK→WARN→DEGRADED + aggregate rule 0.40 threshold fire test PASS |
 | AC-4 cross-domain | strategy_quality (per-strategy) DEGRADED 不影響其他 5 domain；aggregate DEGRADED 不直接降 LAL Tier |
 | AC-5 spike default false | production binary 不滲透 mock time |
@@ -379,7 +391,8 @@ Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event 
 
 | AC# | Pass criteria |
 |---|---|
-| AC-1 risk_envelope | V106 30 min window risk_envelope row count ≥ 1 (5min × 5 = 25 min cycle；30min 容差) |
+| AC-1a risk_envelope in-memory proxy (Wave 2 scaffold sign-off) | 5 sample window × N metric tick → ≥ N×5 V106 row count via in-memory `HealthObservationWriter` mock fixture（不接 PG；cargo test --release test_sprint2_track_f_risk_envelope_in_memory_proxy PASS）|
+| AC-1b risk_envelope real PG empirical (Wave 2+ main.rs 接 scheduler 後) | V106 30 min window risk_envelope row count ≥ 1 (real PG；5min × 5 = 25 min cycle；30min 容差；Phase 3c QA 跑) |
 | AC-2 4-state ladder | portfolio dd / correlation / concentration OK→WARN→DEGRADED fire test PASS |
 | AC-4 cross-domain | risk_envelope DEGRADED 不影響其他 5 domain；不觸 5-gate kill |
 | AC-5 spike default false | production binary 不滲透 mock time |
