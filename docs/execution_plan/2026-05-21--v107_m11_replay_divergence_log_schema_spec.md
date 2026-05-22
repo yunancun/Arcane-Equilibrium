@@ -374,6 +374,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_div_unack_detected
 ```
 
 > **註(2026-05-22 PA reconcile §5)**:`CREATE INDEX CONCURRENTLY` 對 TimescaleDB hypertable 在 `psql -v ON_ERROR_STOP=1 -f` transaction-implicit 內不可用(per V094 sister table 範式 + V106 / V107 IMPL §6.5 / §2.3 empirical);hypertable 走非 CONCURRENT path 改用 `CREATE INDEX IF NOT EXISTS`,TimescaleDB 自動逐 chunk 建 index;greenfield 0 row 時 0 lock cost。本 §4.2 DDL 保留 CONCURRENTLY 字面用於 spec 設計意圖呈現;.sql 實檔已對齊 V094 / V106 / V107 落地範式採非 CONCURRENT。Materialized view `REFRESH ... CONCURRENTLY` 仍適用(per §7.3 + UNIQUE INDEX 滿足前提),不在此 reconcile 範圍。
+>
+> **補(2026-05-22 Sprint 1A-ε P1 patch)**:V107 IMPL `.sql` 落地 reality = non-CONCURRENT(對齊 V094/V106 hypertable empirical;Round 1 sandbox dry-run 0 RAISE);上方 §4.2 DDL `CREATE INDEX CONCURRENTLY` 字面僅保留設計意圖呈現,非 IMPL reality;若 Sprint 1B M11 production grade 評估後需要 CONCURRENTLY non-blocking semantics(production hypertable 有 row + 真實 lock 競爭情境),走獨立 EXTEND migration 路徑:`CREATE INDEX CONCURRENTLY` 必須在 transaction 外執行,需單獨 `psql` 連線 + 顯式 NOT IN transaction wrapping(per PostgreSQL doc + 對齊 V094 footnote 範式)。
 
 ### 4.3 Partial index 理由
 
