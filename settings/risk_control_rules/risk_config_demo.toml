@@ -311,7 +311,9 @@ cost_gate_safety_multiplier = 1.3  # 30 % safety buffer on threshold
 # only after EDGE-DIAG-2 cycle proves the current 30 is too permissive.
 # EDGE-DIAG-2（2026-04-28）：demo cost_gate_moderate 對 n_trades<30 的負 edge cell
 # 走探索模式（放行+log）而非阻擋。Live 不受影響。觀察後可調高（50/100）。
-cost_gate_min_n_trades_for_block = 30
+# EDGE-DIAG-2 探索期門檻 30→15(2026-05-23 PM RCA + MIT sensitivity sweep)
+# 配合 gates.rs 新 low-sample 深負 arm 防 NEARUSDT 類 cell 累損
+cost_gate_min_n_trades_for_block = 15
 
 [[slippage.tiers]]
 min_turnover_usd = 1_000_000_000.0
