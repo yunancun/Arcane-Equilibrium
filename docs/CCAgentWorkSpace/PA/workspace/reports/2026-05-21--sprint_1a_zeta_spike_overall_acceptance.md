@@ -421,7 +421,7 @@ per `2026-05-21--v58_dispatch_consolidation.md` 14 audit verdict：
 |---|---|
 | `srv/sql/migrations/V106__health_observations.sql` | V106 full DDL；6 ADR-0042 domain CHECK + hypertable + amp cap column |
 | `srv/sql/migrations/V107__replay_divergence_log.sql` | V107 full DDL；27 column + Guard A forbidden field check + mv |
-| `srv/sql/migrations/V112__lease_lal_tiers.sql` | V112 full DDL；5 LAL_X_* name CHECK + tier_level 0-4 CHECK |
+| `srv/sql/migrations/V112__decision_lease_lal_tiers.sql` | V112 full DDL；5 LAL_X_* name CHECK + tier_level 0-4 CHECK |
 | `srv/rust/openclaw_engine/src/health/mod.rs` | M3 4-state ladder + state machine + dwell time + flap suppression + engine_runtime 1 domain CPU/RSS/heartbeat 30s sampling + amp cap 3 guard 嚴格 fire 語意（IMPL 為 single-file mod，無獨立 state_machine.rs / engine_runtime_domain.rs / amplification_cap.rs sub-module）|
 | `srv/rust/openclaw_engine/src/governance/lal/mod.rs` | M1 LAL state machine skeleton；Tier 0/1 + Tier 2-4 stub（IMPL 為 `lal/` directory + `mod.rs`，非 `lal_state_machine.rs` single file）|
 | `srv/rust/openclaw_engine/tests/m3_amp_cap_24h_fire.rs` | AC-5 24h fire test 3/3 + AC-4 LAL Tier 0→1 transition 涵蓋（無獨立 `spike_lal_transition.rs` test file）|
