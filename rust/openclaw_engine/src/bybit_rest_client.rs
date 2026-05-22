@@ -363,6 +363,15 @@ impl RestLatencyHistogram {
             // 達 cap 時先 drain expired 釋放空間；仍滿則 truncate to half（保新樣本）
             // 這裡走 retain 而非 binary_search + drain，因 prune 動作不頻繁
             // （cap = 8192 樣本對齊 60s 100call/s 上限），實作直觀優先。
+            //
+            // `checked_sub.unwrap_or(now)` fallback 語意（per E2 round 1 M-1 fix）：
+            //   - process boot > 60s normal path：cutoff = now - 60s，正常 retain
+            //     過濾 60s 外 sample。
+            //   - process boot < 60s edge case：Instant 算術下溢時 checked_sub 返
+            //     None；fallback cutoff = now，**所有歷史 sample 被 filter 掉**
+            //     （極端短期過渡；60s 後恢復正常 60s rolling window 語意）。
+            //   - 不會洩漏 sample（fail-safe 保守清空 < 不誤保留過期）；無實際業
+            //     務 bug — 8192 cap 已先確保緩衝不 unbounded。
             if samples.len() >= REST_LATENCY_BUFFER_CAP {
                 let cutoff = now
                     .checked_sub(Duration::from_secs(REST_LATENCY_WINDOW_SECS))
@@ -429,6 +438,23 @@ impl RestLatencyHistogram {
             .checked_sub(Duration::from_secs(REST_LATENCY_WINDOW_SECS))
             .unwrap_or(now);
         samples_guard.iter().filter(|(t, _)| *t >= cutoff).count()
+    }
+
+    /// test-only accessor：注入指定 `Instant` 時間戳的 sample，繞過 `Instant::now()`
+    /// 才能驗 60s 滾窗的過期邊界（per E2 round 1 H-2 fix）。
+    ///
+    /// 為什麼 `pub` + `#[doc(hidden)]` 而非 `#[cfg(test)]`：
+    ///   - integration test（`tests/api_latency_probe_real_impl.rs`）是外部
+    ///     crate；`#[cfg(test)]` 端方法在 integration crate 不可見。
+    ///   - `pub` + `#[doc(hidden)]` 在 production binary 仍編譯，但 rustdoc 不
+    ///     呈現；emitter / probe production 路徑不調用（grep 確認）。
+    ///   - AC-5 nm 守則檢 `mock_instant` / `tokio::time::pause` / `spike` 三關
+    ///     鍵字；本 method 名 `inject_sample_with_timestamp` 不撞守則。
+    #[doc(hidden)]
+    pub fn inject_sample_with_timestamp(&self, ts: Instant, latency_ms: u64) {
+        if let Ok(mut samples) = self.samples.lock() {
+            samples.push((ts, latency_ms));
+        }
     }
 }
 
@@ -534,6 +560,26 @@ impl RetCodeCounter {
         samples.iter().filter(|t| **t >= cutoff).count().min(u32::MAX as usize) as u32
     }
 
+    /// test-only accessor：注入指定 `Instant` 時間戳的 4xx sample（per E2 round 1
+    /// H-2 fix；驗 60s 滾窗過期邊界）。
+    ///
+    /// 為什麼 `pub` + `#[doc(hidden)]`：見 `RestLatencyHistogram::inject_sample_with_timestamp`
+    /// 同註解（integration test crate visibility + AC-5 nm 不撞）。
+    #[doc(hidden)]
+    pub fn inject_4xx_with_timestamp(&self, ts: Instant) {
+        if let Ok(mut samples) = self.samples_4xx.lock() {
+            samples.push(ts);
+        }
+    }
+
+    /// test-only accessor：注入指定 `Instant` 時間戳的 5xx sample。
+    #[doc(hidden)]
+    pub fn inject_5xx_with_timestamp(&self, ts: Instant) {
+        if let Ok(mut samples) = self.samples_5xx.lock() {
+            samples.push(ts);
+        }
+    }
+
     /// 從 `BybitApiError` 對映到 4xx / 5xx 並 record。
     ///
     /// 為什麼 helper 在 client 端 而非 caller 端：
@@ -541,9 +587,23 @@ impl RetCodeCounter {
     ///     trait 端只看 transport-level class（per ADR-0040 multi-venue 預留）。
     ///   - caller（RestClient::get / post）走 record_for_error 一個入口即可，
     ///     不需在多處 wrap 對映邏輯。
+    ///
+    /// noop guard（per PA-DRIFT-4 round 1 E2 H-1 fix）：
+    ///   - 對映 ADR-0042 Decision 3 cascade gate = venue fault only 語意。
+    ///   - retCode 在 `BybitRetCode::is_noop()` 集合（OrderNotFound 110001 /
+    ///     OrderCompletedOrCancelled 110008 / OrderAlreadyCancelled 110010 /
+    ///     LeverageNotModified 110043 / OrderNotExistSpot 170213）視為「動作已
+    ///     完成」非 venue fault；既不計 4xx 也不計 5xx，直接 return。
+    ///   - 若繼續計 5xx 會把 lifecycle race（caller 補打 cancel 時訂單已成交）
+    ///     誤升 venue fault，污染 emitter cascade 觀測。
     pub fn record_for_error(&self, err: &BybitApiError) {
         match err {
             BybitApiError::Business { ret_code, .. } => {
+                // noop guard：lifecycle race / 已套用設定 等「動作已完成」碼
+                // 非 venue fault；直接跳過計數（per ADR-0042 cascade gate 語意）。
+                if Self::is_noop_retcode(*ret_code) {
+                    return;
+                }
                 if Self::is_client_fault_retcode(*ret_code) {
                     self.record_4xx();
                 } else {
@@ -563,10 +623,27 @@ impl RetCodeCounter {
     ///   - 10003 ApiKeyInvalid / 10004 SignError：認證錯（憑證或簽名 bug）
     ///   - 10005 PermissionDenied：權限不足（key 配置錯）
     ///   - 10006 IpRateLimit：IP 限流（client 端超頻）
+    ///   - 10010 UnmatchedIp：IP 漂移（client 端 IP 變）
     ///   其他 110xxx 業務碼（balance / position / order lifecycle）走 5xx
     ///   （venue-side state；非 client fault）；保守對映。
     fn is_client_fault_retcode(ret_code: i64) -> bool {
         matches!(ret_code, 10001 | 10002 | 10003 | 10004 | 10005 | 10006 | 10010)
+    }
+
+    /// 判斷 retCode 是否為 noop（動作已完成；非 venue/client fault）。
+    ///
+    /// 為什麼引用 `BybitRetCode::is_noop()`：
+    ///   - noop 集合（OrderNotFound 110001 / OrderCompletedOrCancelled 110008 /
+    ///     OrderAlreadyCancelled 110010 / LeverageNotModified 110043 /
+    ///     OrderNotExistSpot 170213）已在 BybitRetCode enum 字典單一定義；
+    ///     復用同一 SSOT 避免雙處飄移（per dispatch packet §5.5 反模式 (d)）。
+    ///   - 未識別 retCode（不在 BybitRetCode enum）→ from_code 返 None → 預設
+    ///     `false`：保守對映為 venue fault（5xx），符合「未知 = 視為 venue
+    ///     fault」cascade 守則。
+    fn is_noop_retcode(ret_code: i64) -> bool {
+        BybitRetCode::from_code(ret_code)
+            .map(|c| c.is_noop())
+            .unwrap_or(false)
     }
 }
 
@@ -1044,6 +1121,19 @@ impl BybitRestClient {
         let parsed: BybitResponse = serde_json::from_str(&body)?;
         let elapsed_ms = call_start.elapsed().as_millis().min(u64::MAX as u128) as u64;
         self.latency_histogram.record_latency(elapsed_ms);
+
+        // PA-DRIFT-4 round 1 H-3 fix：retCode 觀測下沉至 `get` / `post` 內部。
+        // 為什麼這裡而非 `_checked`：account_manager / position_manager /
+        // instrument_info 等 raw caller 走 `client.get(...)` 後手動檢 retCode（不
+        // 走 `_checked`），若觀測停在 `_checked` 端會 bypass > 50% caller 流量。
+        // 本路徑覆蓋所有 caller；`_checked` 端不再重複 record 避雙重計。
+        if !parsed.is_ok() {
+            self.ret_code_counter.record_for_error(&BybitApiError::Business {
+                ret_code: parsed.ret_code,
+                ret_msg: parsed.ret_msg.clone(),
+                response: serde_json::to_value(&parsed).unwrap_or_default(),
+            });
+        }
         Ok(parsed)
     }
 
@@ -1090,39 +1180,44 @@ impl BybitRestClient {
         let parsed: BybitResponse = serde_json::from_str(&body_text)?;
         let elapsed_ms = call_start.elapsed().as_millis().min(u64::MAX as u128) as u64;
         self.latency_histogram.record_latency(elapsed_ms);
+
+        // PA-DRIFT-4 round 1 H-3 fix：retCode 觀測下沉至 `get` / `post` 內部
+        // （見 `get` 同節注釋）。POST 端同 GET 處理，覆蓋所有 raw caller。
+        if !parsed.is_ok() {
+            self.ret_code_counter.record_for_error(&BybitApiError::Business {
+                ret_code: parsed.ret_code,
+                ret_msg: parsed.ret_msg.clone(),
+                response: serde_json::to_value(&parsed).unwrap_or_default(),
+            });
+        }
         Ok(parsed)
     }
 
     /// Signed GET that automatically checks retCode and returns Result.
     /// 簽名 GET，自動檢查 retCode 並返回 Result。
     ///
-    /// PA-DRIFT-4 工作項 (2)：retCode 對映在 `_checked` 路徑端做，因為只有
-    /// `into_result` 才會把 retCode != 0 變 `BybitApiError::Business`，retCode
-    /// counter 才能正確分桶。
+    /// PA-DRIFT-4 round 1 H-3 fix：retCode 觀測已下沉至 `get` 內部以覆蓋所有
+    /// raw caller；本 wrapper 純粹做 `into_result()` 轉換，**不**重複 record，
+    /// 避免雙重計數。
     pub async fn get_checked(
         &self,
         path: &str,
         params: &[(&str, &str)],
     ) -> BybitResult<BybitResponse> {
-        let result = self.get(path, params).await?.into_result();
-        if let Err(ref err) = result {
-            self.ret_code_counter.record_for_error(err);
-        }
-        result
+        self.get(path, params).await?.into_result()
     }
 
     /// Signed POST that automatically checks retCode and returns Result.
     /// 簽名 POST，自動檢查 retCode 並返回 Result。
+    ///
+    /// PA-DRIFT-4 round 1 H-3 fix：retCode 觀測已下沉至 `post` 內部；本 wrapper
+    /// 不重複 record。
     pub async fn post_checked(
         &self,
         path: &str,
         body: &serde_json::Value,
     ) -> BybitResult<BybitResponse> {
-        let result = self.post(path, body).await?.into_result();
-        if let Err(ref err) = result {
-            self.ret_code_counter.record_for_error(err);
-        }
-        result
+        self.post(path, body).await?.into_result()
     }
 
     // -----------------------------------------------------------------------

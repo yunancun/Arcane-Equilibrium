@@ -187,6 +187,19 @@ impl WsRttHistogram {
             .unwrap_or(now);
         samples_guard.iter().filter(|(t, _)| *t >= cutoff).count()
     }
+
+    /// test-only accessor：注入指定 `Instant` 時間戳的 RTT sample（per E2 round 1
+    /// H-2 fix；驗 60s 滾窗過期邊界）。
+    ///
+    /// 為什麼 `pub` + `#[doc(hidden)]`：integration test crate visibility
+    /// 需要；AC-5 nm 守則檢 `mock_instant` / `tokio::time::pause` / `spike`
+    /// 三關鍵字不撞 `inject_sample_with_timestamp`。
+    #[doc(hidden)]
+    pub fn inject_sample_with_timestamp(&self, ts: Instant, rtt_ms: u64) {
+        if let Ok(mut samples) = self.samples.lock() {
+            samples.push((ts, rtt_ms));
+        }
+    }
 }
 
 /// WS dropout 60s rolling-window counter。
@@ -256,6 +269,18 @@ impl WsDropoutCounter {
             .filter(|t| **t >= cutoff)
             .count()
             .min(u32::MAX as usize) as u32
+    }
+
+    /// test-only accessor：注入指定 `Instant` 時間戳的 dropout sample（per E2
+    /// round 1 H-2 fix；驗 60s 滾窗過期邊界）。
+    ///
+    /// 為什麼 `pub` + `#[doc(hidden)]`：見 `WsRttHistogram::inject_sample_with_timestamp`
+    /// 同註解（integration test crate visibility + AC-5 nm 不撞）。
+    #[doc(hidden)]
+    pub fn inject_sample_with_timestamp(&self, ts: Instant) {
+        if let Ok(mut samples) = self.samples.lock() {
+            samples.push(ts);
+        }
     }
 }
 

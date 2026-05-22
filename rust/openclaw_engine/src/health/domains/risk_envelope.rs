@@ -399,6 +399,53 @@ pub trait RiskEnvelopeSourceProbe: Send + Sync {
     fn current_correlation_avg_pairwise(&self) -> f64;
     /// top-1 symbol exposure 佔 portfolio total exposure 比例 (%)；範圍 [0, 100]。
     fn current_concentration_top1_pct(&self) -> f64;
+
+    /// batch read helper：一次取得 5 metric snapshot（per PA-DRIFT-5 round 1
+    /// E2 F-3 fix）。
+    ///
+    /// 為什麼此 default method（per E2 round 1 F-3 micro-race window 修復）：
+    ///   - 5 個 current_xxx accessor 各拿一次 lock；emitter sample 時 5-lock
+    ///     gap 內若 cache update 介入 → 產生 5-metric snapshot inconsistency
+    ///     micro-race window。
+    ///   - 本 method 讓 impl override 走「一次 lock + 一次拷 5 metric」batch
+    ///     read，原子地 snapshot 整個 5-metric tuple；emitter Wave B 接線後可
+    ///     切換走 `snapshot_5_metric()` 避免 race window。
+    ///   - default impl 走 5 個 current_xxx 對齊 backward compat（既有 mock /
+    ///     test fixture 不需改）；具體 impl（`RealRiskEnvelopeSourceProbe`）
+    ///     override 走 batch path。
+    ///
+    /// 為什麼 default 而非 required：
+    ///   - 既有 mock / test fixture（如 `StubSource` / `MockMutexRiskProbe`）已
+    ///     impl trait；強制要求新 method 會破壞 backward compat。default 走 5
+    ///     個 current_xxx 結果語意等價（單 thread test 無 race）。
+    ///   - production `RealRiskEnvelopeSourceProbe` override 走 batch；emitter
+    ///     wire-up 端不需感知 impl 差異。
+    fn snapshot_5_metric(&self) -> RiskEnvelopeSampleSnapshot {
+        RiskEnvelopeSampleSnapshot {
+            portfolio_cum_pnl_24h_usd: self.current_portfolio_cum_pnl_24h_usd(),
+            portfolio_max_dd_pct: self.current_portfolio_max_dd_pct(),
+            position_count_active: self.current_position_count_active(),
+            correlation_avg_pairwise: self.current_correlation_avg_pairwise(),
+            concentration_top1_pct: self.current_concentration_top1_pct(),
+        }
+    }
+}
+
+/// 5 metric batch snapshot；trait `snapshot_5_metric()` 返值型別（per
+/// PA-DRIFT-5 round 1 E2 F-3 fix）。
+///
+/// 為什麼這 5 個欄位順序對齊 `RiskEnvelopeSample`：
+///   - emitter `sample_now()` 端可直接從 `RiskEnvelopeSampleSnapshot` 投影為
+///     `RiskEnvelopeSample`（field-wise 1:1 mapping），不需重新打包。
+///   - Copy + Clone：5 個 numeric primitive；emitter Box<dyn MetricSample>
+///     端拷貝 0 成本。
+#[derive(Debug, Clone, Copy)]
+pub struct RiskEnvelopeSampleSnapshot {
+    pub portfolio_cum_pnl_24h_usd: f64,
+    pub portfolio_max_dd_pct: f64,
+    pub position_count_active: u32,
+    pub correlation_avg_pairwise: f64,
+    pub concentration_top1_pct: f64,
 }
 
 // ============================================================

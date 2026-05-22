@@ -406,3 +406,130 @@ fn test_emitter_wireup_with_real_probe() {
         sample.concentration_top1_pct
     );
 }
+
+// ============================================================
+// PA-DRIFT-5 round 1 E2 F-3 fix：batch read helper integration
+// ============================================================
+
+/// snapshot_5_metric() batch path 對齊 5 個 current_xxx 個別 accessor；單 thread
+/// 下 5 metric 字面相等（per E2 round 1 F-3 fix）。
+///
+/// 為什麼此 test 必要：
+///   - F-3 fix 加 `RiskEnvelopeSourceProbe::snapshot_5_metric()` default method
+///     + `RealRiskEnvelopeSourceProbe::snapshot_5_metric()` override；
+///     emitter Wave B 接線後可切換走 batch path 避 5-lock gap micro-race window。
+///   - 本 test 守 batch path 與 5 個 current_xxx 字面結果相等的 contract；
+///     Wave B emitter wire-up 切換時不破壞語意。
+#[test]
+fn test_real_probe_batch_snapshot_aligns_with_5_current_xxx() {
+    use openclaw_engine::health::domains::risk_envelope::RiskEnvelopeSampleSnapshot;
+
+    let cache = Arc::new(Mutex::new(PortfolioStateCache::new()));
+    {
+        let mut guard = cache.lock();
+        let now_ms: u64 = 1_700_000_000_000;
+        guard.update_from_pipeline_snapshot(
+            now_ms - 1000,
+            100.0,
+            &[(now_ms - 2000, 10.0), (now_ms - 1500, -2.0)],
+            vec![
+                PositionExposure { notional_usd: 100.0 },
+                PositionExposure { notional_usd: 200.0 },
+            ],
+        );
+        guard.update_from_pipeline_snapshot(
+            now_ms,
+            85.0,
+            &[(now_ms - 100, 3.5)],
+            vec![
+                PositionExposure { notional_usd: 100.0 },
+                PositionExposure { notional_usd: 200.0 },
+            ],
+        );
+    }
+    let probe = RealRiskEnvelopeSourceProbe::new(cache);
+
+    let batch: RiskEnvelopeSampleSnapshot = probe.snapshot_5_metric();
+    let cum_pnl = probe.current_portfolio_cum_pnl_24h_usd();
+    let dd = probe.current_portfolio_max_dd_pct();
+    let pos_count = probe.current_position_count_active();
+    let corr = probe.current_correlation_avg_pairwise();
+    let conc = probe.current_concentration_top1_pct();
+
+    assert!(
+        (batch.portfolio_cum_pnl_24h_usd - cum_pnl).abs() < 1e-9,
+        "batch cum_pnl {} vs current {}",
+        batch.portfolio_cum_pnl_24h_usd,
+        cum_pnl
+    );
+    assert!(
+        (batch.portfolio_max_dd_pct - dd).abs() < 1e-9,
+        "batch dd {} vs current {}",
+        batch.portfolio_max_dd_pct,
+        dd
+    );
+    assert_eq!(batch.position_count_active, pos_count);
+    assert!((batch.correlation_avg_pairwise - corr).abs() < 1e-9);
+    assert!((batch.concentration_top1_pct - conc).abs() < 1e-9);
+}
+
+/// Empty cache 端 batch snapshot 也 fail-soft 返全 0（OK band 對齊）。
+#[test]
+fn test_real_probe_batch_snapshot_empty_cache_all_zero() {
+    let cache = Arc::new(Mutex::new(PortfolioStateCache::new()));
+    let probe = RealRiskEnvelopeSourceProbe::new(cache);
+
+    let batch = probe.snapshot_5_metric();
+    assert_eq!(batch.portfolio_cum_pnl_24h_usd, 0.0);
+    assert_eq!(batch.portfolio_max_dd_pct, 0.0);
+    assert_eq!(batch.position_count_active, 0);
+    assert_eq!(batch.correlation_avg_pairwise, 0.0);
+    assert_eq!(batch.concentration_top1_pct, 0.0);
+}
+
+/// 既有 mock trait impl（不 override `snapshot_5_metric`）走 default impl
+/// 5 個 current_xxx，字面結果與 override path 等價；backward compat 守。
+#[test]
+fn test_default_snapshot_5_metric_works_for_non_overriding_impl() {
+    /// 內嵌 mock；不 override `snapshot_5_metric`，走 trait default。
+    struct StubProbeNoOverride {
+        cum_pnl: f64,
+        dd: f64,
+        count: u32,
+        corr: f64,
+        conc: f64,
+    }
+    impl RiskEnvelopeSourceProbe for StubProbeNoOverride {
+        fn current_portfolio_cum_pnl_24h_usd(&self) -> f64 {
+            self.cum_pnl
+        }
+        fn current_portfolio_max_dd_pct(&self) -> f64 {
+            self.dd
+        }
+        fn current_position_count_active(&self) -> u32 {
+            self.count
+        }
+        fn current_correlation_avg_pairwise(&self) -> f64 {
+            self.corr
+        }
+        fn current_concentration_top1_pct(&self) -> f64 {
+            self.conc
+        }
+    }
+
+    let stub = StubProbeNoOverride {
+        cum_pnl: -125.5,
+        dd: 7.3,
+        count: 5,
+        corr: 0.42,
+        conc: 35.8,
+    };
+
+    // 走 default impl 端 snapshot_5_metric；應字面對齊個別 accessor
+    let batch = stub.snapshot_5_metric();
+    assert_eq!(batch.portfolio_cum_pnl_24h_usd, -125.5);
+    assert_eq!(batch.portfolio_max_dd_pct, 7.3);
+    assert_eq!(batch.position_count_active, 5);
+    assert_eq!(batch.correlation_avg_pairwise, 0.42);
+    assert_eq!(batch.concentration_top1_pct, 35.8);
+}

@@ -64,7 +64,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 
-use super::risk_envelope::RiskEnvelopeSourceProbe;
+use super::risk_envelope::{RiskEnvelopeSampleSnapshot, RiskEnvelopeSourceProbe};
 
 // 24h 毫秒（cache 滑動視窗保留視窗大小；超過此年齡的 fill / equity sample 從
 // 視窗淘汰）。
@@ -111,12 +111,21 @@ pub struct PositionExposure {
 ///   - sliding window 截斷在 cache 端 `update_*` 時做（push + drain_old）；
 ///     accessor 端不重做截斷（避雙重邏輯偏離）。
 ///
-/// 為什麼 cap = 100k:
-///   - 24h × 86400s × 1 fill/s 上限 86400；100k 含 safety margin。
-///   - 若 fill rate 超過 1/s 大量湧入，cap 端早 drop 舊 sample 是 fail-soft
-///     （不 panic）；emitter probe 返舊 cache 值。
-///   - cap 不為 NDay 警告閾值；NDay 觀測由 V106 row 監控（per 既有 Track F
-///     ladder fire）。
+/// 為什麼無顯式 cap（per PA-DRIFT-5 round 1 E2 F-1 fix）:
+///   - 上限 = 「24h × caller push rate」隱式上限；不設顯式 cap。
+///     - 預期 fill push rate ≪ 1/s（策略 throttle + 風控 max_open_positions）；
+///       上限 ≈ 86400 sample；多策略 burst 上限 ≈ 數十 k。
+///     - equity push rate = caller 端 emitter sample_interval=300s tick；
+///       上限 = 24h / 300s = 288 sample。
+///   - 為什麼不設顯式 cap：sliding window `drain_old_fills` / `drain_old_equity`
+///     在每次 `update_from_pipeline_snapshot` 端執行；24h 外 sample 自然 drain，
+///     不會 unbounded。
+///   - 若 caller 端 burst push（>> 1 fill/s 持續 24h）導致 sample 累積，本檔不
+///     設顯式 cap 保護；caller 端責任（per dispatch packet §7.5 反模式 (a)：
+///     emitter 不重做 risk_config 載入；burst 防禦由 caller 端 throttle）。
+///   - Sprint 5 cascade IMPL 後若 emitter wire-up 端發現 burst pattern，可在
+///     caller 端加 throttle；或在本檔加顯式 cap follow-up（PA Sprint 5 spec
+///     amend）。
 pub struct PortfolioStateCache {
     /// 24h 內 fill (ts_ms, realized_pnl_usd) sliding window；越新位於 back。
     realized_pnl_history: VecDeque<(u64, f64)>,
@@ -322,6 +331,28 @@ impl PortfolioStateCache {
         (top1 / total) * 100.0
     }
 
+    /// batch read helper：一次計算 5 metric snapshot，原子地返 owned tuple
+    /// （per PA-DRIFT-5 round 1 E2 F-3 fix）。
+    ///
+    /// 為什麼此 method（vs 5 個 current_xxx）：
+    ///   - 5 個個別 accessor 各拿一次 lock（probe 端 5 × `cache.lock()`）；
+    ///     emitter sample 時 5-lock gap 內若 cache update 介入 → 產生 5-metric
+    ///     snapshot inconsistency（如 PnL 已更新但 position_count 仍舊）。
+    ///   - 本 method 在單一 `&self` borrow 下走 5 calculator → owned snapshot；
+    ///     caller 端（`RealRiskEnvelopeSourceProbe::snapshot_5_metric` override）
+    ///     只需拿一次 lock 即可避 race window。
+    ///   - 保留 5 個個別 accessor 不刪：backward compat trait API + 既有 unit
+    ///     test 不破壞（per profile 「不擴大改動範圍」）。
+    pub fn snapshot_5_metric(&self) -> RiskEnvelopeSampleSnapshot {
+        RiskEnvelopeSampleSnapshot {
+            portfolio_cum_pnl_24h_usd: self.cum_pnl_24h_usd(),
+            portfolio_max_dd_pct: self.max_dd_pct_24h(),
+            position_count_active: self.position_count_active(),
+            correlation_avg_pairwise: self.correlation_avg_pairwise(),
+            concentration_top1_pct: self.concentration_top1_pct(),
+        }
+    }
+
     /// telemetry / E2 audit 用：返最後一次 update 的 wall-clock ms（0 = cold
     /// start 未 update）。
     pub fn last_update_ts_ms(&self) -> u64 {
@@ -408,6 +439,21 @@ impl RiskEnvelopeSourceProbe for RealRiskEnvelopeSourceProbe {
 
     fn current_concentration_top1_pct(&self) -> f64 {
         self.cache.lock().concentration_top1_pct()
+    }
+
+    /// override default trait impl：一次 lock + batch 走 5 calculator，避免
+    /// 5-lock gap micro-race window（per PA-DRIFT-5 round 1 E2 F-3 fix）。
+    ///
+    /// 為什麼 override：
+    ///   - default impl 走 5 個 current_xxx 各拿一次 lock；emitter sample 時
+    ///     5-lock gap 內若 cache update 介入 → 5-metric snapshot inconsistency。
+    ///   - 本 override 拿一次 lock 後 batch 走 `cache.snapshot_5_metric()`，原
+    ///     子地 snapshot 整個 5-metric tuple；對齊 emitter Wave B 接線後 race
+    ///     window 不變式。
+    ///   - emitter sample_now 端 Wave B 可切換走 `source.snapshot_5_metric()`
+    ///     替代 5 個 current_xxx；本 round 不改 emitter（per scope 限制）。
+    fn snapshot_5_metric(&self) -> RiskEnvelopeSampleSnapshot {
+        self.cache.lock().snapshot_5_metric()
     }
 }
 
@@ -694,5 +740,83 @@ mod tests {
             Arc::ptr_eq(&handle1, &cache),
             "cache_handle 必對齊 probe 構造時的 Arc"
         );
+    }
+
+    /// (7) PortfolioStateCache::snapshot_5_metric batch read 對齊個別 accessor
+    /// （per PA-DRIFT-5 round 1 E2 F-3 fix）。
+    #[test]
+    fn test_cache_snapshot_5_metric_aligns_with_individual_accessors() {
+        let mut cache = PortfolioStateCache::new();
+        let now_ms: u64 = 1_700_000_000_000;
+        cache.update_from_pipeline_snapshot(
+            now_ms - 1000,
+            100.0,
+            &[(now_ms - 1500, 10.0), (now_ms - 800, -3.5)],
+            vec![
+                PositionExposure { notional_usd: 200.0 },
+                PositionExposure { notional_usd: 50.0 },
+            ],
+        );
+        cache.update_from_pipeline_snapshot(
+            now_ms,
+            85.0,
+            &[(now_ms - 100, 2.0)],
+            vec![
+                PositionExposure { notional_usd: 200.0 },
+                PositionExposure { notional_usd: 50.0 },
+            ],
+        );
+
+        let snapshot = cache.snapshot_5_metric();
+
+        // batch snapshot 必字面對齊 5 個 individual accessor
+        assert!(
+            (snapshot.portfolio_cum_pnl_24h_usd - cache.cum_pnl_24h_usd()).abs() < 1e-9,
+        );
+        assert!(
+            (snapshot.portfolio_max_dd_pct - cache.max_dd_pct_24h()).abs() < 1e-9,
+        );
+        assert_eq!(snapshot.position_count_active, cache.position_count_active());
+        assert!(
+            (snapshot.correlation_avg_pairwise - cache.correlation_avg_pairwise()).abs() < 1e-9,
+        );
+        assert!(
+            (snapshot.concentration_top1_pct - cache.concentration_top1_pct()).abs() < 1e-9,
+        );
+    }
+
+    /// (7) RealRiskEnvelopeSourceProbe::snapshot_5_metric override 走 batch 路徑
+    /// 對齊 5 個 current_xxx；emitter wire-up Wave B 切換時的 contract 不變式。
+    #[test]
+    fn test_real_probe_snapshot_5_metric_aligns_with_5_current_xxx() {
+        let cache = Arc::new(Mutex::new(PortfolioStateCache::new()));
+        {
+            let mut guard = cache.lock();
+            let now_ms: u64 = 1_700_000_000_000;
+            guard.update_from_pipeline_snapshot(
+                now_ms,
+                90.0,
+                &[(now_ms - 500, 10.0), (now_ms, 3.5)],
+                vec![
+                    PositionExposure { notional_usd: 100.0 },
+                    PositionExposure { notional_usd: 200.0 },
+                    PositionExposure { notional_usd: 150.0 },
+                ],
+            );
+        }
+        let probe = RealRiskEnvelopeSourceProbe::new(cache);
+
+        let batch = probe.snapshot_5_metric();
+        let cum_pnl = probe.current_portfolio_cum_pnl_24h_usd();
+        let dd = probe.current_portfolio_max_dd_pct();
+        let pos_count = probe.current_position_count_active();
+        let corr = probe.current_correlation_avg_pairwise();
+        let conc = probe.current_concentration_top1_pct();
+
+        assert!((batch.portfolio_cum_pnl_24h_usd - cum_pnl).abs() < 1e-9);
+        assert!((batch.portfolio_max_dd_pct - dd).abs() < 1e-9);
+        assert_eq!(batch.position_count_active, pos_count);
+        assert!((batch.correlation_avg_pairwise - corr).abs() < 1e-9);
+        assert!((batch.concentration_top1_pct - conc).abs() < 1e-9);
     }
 }
