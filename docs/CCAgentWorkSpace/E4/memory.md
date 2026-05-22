@@ -4233,3 +4233,64 @@ I2 hot-path 接線（H0Gate 2 field + with_metrics ctor + setter / finalize_bloc
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-21--i2_lg1_slo_carveout_e4_regression.md`
+
+## 2026-05-22 — Sprint 1A-ζ Phase 3b regression E4 PASS
+
+### Task
+Phase 3b 回歸驗證 single-thread 4-6 hr per spike spec §3.3 P3-2。3 Track（A LAL + B health + C M11 replay）E2 round 2 全 APPROVE 後派 E4 regression。
+
+### Verdict
+**PASS** · ready for Phase 3c QA empirical driver.
+
+### Numbers
+| Surface | Result | Baseline | Delta | Non-flaky |
+|---|---|---|---|---|
+| Rust workspace + spike feature | 3769 pass / 0 fail / 4 ignored | – | – | ✅ |
+| Rust openclaw_engine lib | 3074 pass / 0 fail / 1 ignored | 3045 (last E4) | +29 sibling drift | ✅ 兩遍 0.70s 同綠 |
+| Rust health::tests inline | 10/10 PASS | – | – | – |
+| Rust governance::lal::tests inline | 14/14 PASS (含 AC-1.1 from_negative/overflow/strictness) | – | – | – |
+| Rust spike integration m3_amp_cap | 3/3 PASS (--features spike) | – | – | – |
+| Rust round 2 new unit test_try_transition_no_fire | 1/1 PASS | – | – | – |
+| Mac cargo check release + spike | clean (0 err / 1 pre-existing warn) | – | – | – |
+| Linux cargo check release + spike | clean (0 err / 1 same warn) | – | – | – |
+| Mac pytest 全量 | 28 fail / 6037 pass / 45 skip / 14 subtests | 28 / 6030 pre-fixture | +7 fixture | ✅ 兩遍 126s/124s 同綠 |
+
+### AC matrix
+| AC | Verdict | 主要 evidence |
+|---|---|---|
+| AC-1 sqlx migrations success=t | **PARTIAL** | 0 row (V096 為最高註冊；V106/107/112 走 psql -f raw apply path 不經 sqlx_migrate)；V106 + V112 table land ✅ / V107 cleanup ❌ per E1 §5.248 |
+| AC-2 idempotency Round 2 | **PASS** | delegated to E1 Track B/C sandbox empirical Round 1+2+3 all 0 RAISE |
+| AC-3 engine restart | **N/A** | per Q2(d) sandbox-only + Mac/Linux cargo check clean |
+| AC-4 PG CHECK 反向 INSERT | **PASS** | sandbox lal_level=-1/5 兩條 RAISE `lease_lal_tiers_tier_level_check` + Rust 14 unit |
+| AC-5 amp cap 24h fire | **PASS** | cargo test --features spike --test m3_amp_cap_24h_fire 3/3 + round 2 new test 1/1 |
+| AC-6 dedup contract | **PASS** | V107 真實 column 0 forbidden / SQL 8 grep hit 全屬 Guard A reverse-fire feature / decay_signals + strategy_lifecycle 不存在物理不可寫 / Python skeleton py_compile + import chain PASS |
+| AC-7 cross-lang 1e-4 fixture PoC | **PARTIAL PASS** | tests/test_spike_cross_lang_fixture.py 7/7 PASS Python naive + Welford + numpy 三互驗 1e-4；Rust binding 延 Sprint 1B per spec §5.3 |
+| AC-8 spike acceptance report | DEFERRED to phase 3d (TW) | – |
+
+### 28 pre-existing pytest failures attribution
+24 GUI static + 7 structure + 1 writer。spike commits `f0633002` + `2f6d1761` diff 對失敗 file 0 hit → 0 attribution 給 Sprint 1A-ζ；待 Sprint 1B 補位 candidate。
+
+### AC-7 fixture 設計
+- input `[10.0, 20.0, 30.0, 25.0, 15.0]` per spec §AC-7 line 277
+- expected mean=20.0 / sample sigma=sqrt(62.5)=7.905694150420948 / pop sigma=sqrt(50.0)
+- 3 條獨立實作 pure-Python（naive two-pass / Welford online / numpy ddof=1）三互驗 < 1e-4
+- pure-Python PoC — Sprint 1B Rust window IMPL（假設 Welford）對齊本 fixture expected 直通
+
+### 教訓 / 工程觀察
+
+- **spec literal path 不對齊 pytest auto-discovery convention 是高頻盲區**：spec § AC-7 line 277 寫 `tests/spike_cross_lang_fixture.py` 無 `test_` prefix → pytest default collection 跳過；E4 必跑 `pytest --collect-only | grep <fixture name>` 確認 file 真在 list；本次 E4 在 full pytest 6037 vs 6030 數字相同時警覺有問題、查 collect 才發現 file 不在；之後 rename `test_spike_cross_lang_fixture.py` 才 +7 land。**規則**：spec literal path 設計時必 cross-check pytest discovery；E4 加 fixture 必驗 collection。建議 PA spec edit `tests/spike_cross_lang_fixture.py` → `tests/test_spike_cross_lang_fixture.py`。
+
+- **sandbox state 與 spec literal「永久 land」差異是 Track C cleanup 設計的隱性 contract**：E1 Track C round 1 §5 line 248 cleanup design drop V107 + mv + stub prereq；spec § AC-1 期 `_sqlx_migrations` success=t 但實際 0 row（V107 已 drop）。PA reconcile 2026-05-22 5 issue 未涵蓋此條。**規則**：E1 sub-agent IMPL 報告必 callout「sandbox cleanup state vs spec literal expected」差異；PA reconcile 必收 dispatch packet acceptance check 字面 vs IMPL reality 跨對齊。
+
+- **AC pass 不只看 Rust binary fingerprint 還看 PG CHECK constraint runtime fire**：AC-4 反向 INSERT 走 sandbox PG empirical 驗 `lease_lal_tiers_tier_level_check` 真實 RAISE — Rust enum from_i32 14 unit test 雖 PASS（compile-time + runtime in-process）但 PG 端 CHECK 必獨立驗。本次 spec §AC-1.1 設計就要兩端對齊；E4 確實兩端跑了：cargo test 14 PASS + sandbox psql 反向 INSERT 兩條 RAISE。**規則**：跨 Rust ↔ PG 雙重 enforce 設計必兩端 empirical 驗；E4 sandbox SOP 標配 PG 端反向 INSERT 驗 RAISE message。
+
+- **5-sample window cross-lang fixture 是 algorithm contract 數位 fingerprint，不是 Rust binding 對驗 PoC**：本 fixture pure-Python（naive + Welford + numpy 三互驗）證明 algorithm well-defined + deterministic + numerically equivalent；Rust 端 window IMPL（未 land per spike scope §1.4）對齊本 fixture expected 值即直通。**規則**：cross-lang fixture 設計分兩步 (1) algorithm contract（pure-Python 三實作互驗 + expected 值定義）(2) Rust binding 對齊；Sprint 1A-ζ 走 (1)，Sprint 1B 走 (2) Rust IMPL + alignment test。
+
+- **adversarial probe 對 INSERT NOT NULL column 順序的注意**：AC-4 spec § AC-1.1 SQL 範本只列 5 column（tier_level / tier_name / auto_approve / approval_quorum / clawback_ttl_sec）但 V112 真實 schema 還有 `cohort_min_n` + `human_final_review` NOT NULL；初次 INSERT 撞 NOT NULL 而非 CHECK constraint。E4 必補完 NOT NULL column set 才驗到目標 CHECK fire。**規則**：spec SQL 範本必對齊真實 schema NOT NULL 集合；adversarial INSERT 設計時先 `\d <table>` 確認 NOT NULL columns，避免 "first error" attribute drift。
+
+- **spec § P3-2 baseline 數字 stale (2555/17 vs 實際 6037 / 28 pre-existing) 是 sprint accumulation drift**：spec 寫 v5.5 sprint 數字，當前 codebase 已 v5.8 sprint accumulate 6058 test。**規則**：spec literal baseline 數字 stale 不阻 PASS verdict；E4 必跑 `pytest --collect-only` 取當前真實 baseline，與 spec literal 數字差異 callout。
+
+- **memory.md 421KB+ append-only `cat >> EOF` mode**：跟 5/18-5/21 同 pattern 持續使用；Read 全檔超 256KB 上限。
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-22--sprint_1a_zeta_phase_3b_regression.md`
