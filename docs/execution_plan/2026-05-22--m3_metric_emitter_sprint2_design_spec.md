@@ -32,6 +32,7 @@ non-scope:
 - Phase chain：Phase 1 PA refine（~2-3 hr dispatch packet 縮版 per D2 ceiling 約束）→ Phase 2 E1 IMPL × 6 並行 wave 1+2（36-50 hr 並行）→ Phase 3a/b/c/d/e（22-33 hr）= **70-104 hr 真實 + buffer 後 75-115 hr**。
 - AC-1..7 對齊 spike scope spec §AC pattern：V106 row 真實寫入 (AC-1 拆 a/b — AC-1a Wave 1 in-memory mock fixture / AC-1b Wave 2+ real PG empirical；per 2026-05-22 E2 round 1 HIGH-3 fix) / 4-state ladder 每 domain fire / amp cap 24h fire / cross-domain 不互擾 / production binary 0 mock time 滲透 / cargo + pytest baseline 不退 / binary footprint <50ms cold start。
 - 2026-05-22 E2 round 1 reject 4 amend land：HIGH-2「持續 2min」classify vs SM dwell clarify（M3 spec §2.3.1 區分）；HIGH-1 heartbeat_lag CRITICAL > 60_000 ms 即時 fire SSOT 確認；MEDIUM-1 B ws_subscription_drift_count + strategy_signal_rate_per_min ladder threshold 補 ladder；MEDIUM-1 C `pool_max_conn` 5th column 加入 DatabasePoolSample；MEDIUM-3 C disconnected fail-closed OK band（M3 spec §2.3.2）。
+- 2026-05-22 E2 round 1 Wave 2 Track D/F 4 amend land：Track D CRIT-1 `ApiLatencySample` 5→8 field 結構升級（rest p50/p95/p99 + ws_rtt p50/p99 + ret_code 4xx/5xx + ws_dropout；M3 spec §2.3 line 104 + §2.3.3 + §3.2 amend）；Track D MED-1 OBSERVE-4 engine_mode == "replay" guard 為 Track A scaffold contract 必交付項（§1.7 + §5.0）；Track D HIGH-3 bybit_rest_client + bybit_private_ws 既有 hook 不存在屬 PA-DRIFT-4 carry-over（Wave 2 main.rs 接線前必補 instrumentation；dispatch packet §5.1 prerequisite amend）；Track F MED-1 `position_count_active` ladder OK 0-8 / WARN 9-16 / DEGRADED >16 補 M3 spec §2.3 line 106 literal（對齊 risk_config max_open_positions 16 上限）。
 - Sprint 2 dispatch readiness gate：**OPEN with carry-over conditions** — D1/D2/D3 operator-signed 2026-05-22；Phase 1 dispatch packet land；Sprint 1B mid 3 carry-over（PA-DRIFT-1/PA-DRIFT-2/E3-MED-2）file scope 與本 Sprint 2 6 Track 0 重疊可並行。
 - 治理硬邊界：Sprint 2 emitter **不**觸 cascade 執行（halt strategy / 降 LAL Tier）；emitter 只 emit `HealthStateChangeEvent` 給 event bus + D3 minimal cascade reject log emit（V106 row `evidence_json={"reject_reason": "..."}` 留 audit trail），cascade subscribe + 執行延 Sprint 5。
 
@@ -374,18 +375,38 @@ pub struct DatabasePoolSample {
 - max_conn 由 caller 注入（`DatabaseConfig::pool_max_connections`）；sqlx `PgPool` 未暴露 max accessor，emitter 不可強行 hack。
 - `classify_database_pool_active_conn(active, max)` 內部計算 ratio = active/max；ratio > 0.95 → DEGRADED / 0.80-0.95 → WARN / < 0.80 → OK；max=0（disconnected）→ fail-closed OK band（per M3 design spec §2.3.2）。
 
-**api_latency**：
+**api_latency**（per 2026-05-22 E2 round 1 Track D CRIT-1 amend：5→8 metric 結構升級；對齊 M3 design spec §2.3.3 8 metric 規範）：
 
 ```rust
 #[derive(Debug, Clone, Copy)]
 pub struct ApiLatencySample {
-    pub bybit_rest_success_rate_5min: f64,
-    pub bybit_rest_p95_latency_ms: u32,
-    pub bybit_rest_retcode_nonzero_count: u32,
-    pub bybit_ws_dropout_count_5min: u32,
-    pub bybit_ws_reconnect_count_5min: u32,
+    /// REST API call latency p50（ms；過去 60s 窗）。
+    pub rest_p50_ms: u32,
+    /// REST API call latency p95（ms；過去 60s 窗）。
+    pub rest_p95_ms: u32,
+    /// REST API call latency p99（ms；過去 60s 窗）。
+    pub rest_p99_ms: u32,
+    /// WS ping→pong RTT p50（ms；過去 60s 窗）。
+    pub ws_rtt_p50_ms: u32,
+    /// WS ping→pong RTT p99（ms；過去 60s 窗）。
+    pub ws_rtt_p99_ms: u32,
+    /// HTTP 4xx retCode 累積（採樣期 60s；client fault）。
+    pub ret_code_4xx_count: u32,
+    /// HTTP 5xx retCode 累積（採樣期 60s；venue fault）。
+    pub ret_code_5xx_count: u32,
+    /// WS dropout 累積（採樣期 60s；per ADR-0042 Decision 3 cascade gate）。
+    pub ws_dropout_count: u32,
 }
 ```
+
+**8 field 設計理由**（per 2026-05-22 E2 round 1 Track D CRIT-1 amend；對齊 M3 design spec §2.3.3）：
+- 三分位 latency（p50/p95/p99）取代舊 success_rate 單一指標：success_rate 把 outlier 平均掉看不到 venue 退化前兆；p99 outlier 提早 ~30-60s 反映 venue degrade。
+- 4xx vs 5xx 分離（per ADR-0040 multi-venue 預留）：client fault vs venue fault 語意不同；HTTP class 對映由 caller 端（bybit_rest_client wrapper）負責，emitter 不寫死 Bybit retCode。
+- ws_rtt 比 ws_dropout 早預警（per ADR-0042 Decision 3）；保留 ws_dropout 為 cascade gate。
+- 移除舊 `bybit_ws_reconnect_count_5min`：reconnect 是 ws_dropout 的後果，重複觀測；ws_rtt p99 + ws_dropout 已覆蓋同語意。
+- count 而非 rate（採樣期 60s 累積）：保留 spike 資訊讓 SM 端走 dwell 判斷。
+
+**Wave 2 main.rs 接線 carry-over**（per PA-DRIFT-4）：既有 `bybit_rest_client` + `bybit_private_ws` 未 instrumented p50/p95/p99 histogram + retCode 4xx/5xx counter + ws_dropout counter；Wave 2 main.rs 接 `ApiLatencySourceProbe` trait 前必先在 bybit wrapper 層補；emitter 端 IMPL trait 抽象已落，wrapper 端 instrumentation 屬 main.rs 接線責任（分離至 PA-DRIFT-4 follow-up）。
 
 **strategy_quality**（per-strategy variant；每 sample 帶 strategy_name + symbol）：
 
@@ -654,6 +675,30 @@ per-strategy SM 升 HEALTH_DEGRADED 不直接觸發 system-level cascade（per M
 
 ## §5 4-state ladder transition rule — per domain
 
+### 5.0 OBSERVE-4 invariant — engine_mode replay subprocess emit forbidden（必加 production safety）
+
+per `§1.7 Wave 1 scaffold contract` Track A 必交付項（per 2026-05-22 E2 round 1 Track D MED-1 amend）：
+
+**設計合約**（重申本 spec line 199-216）：M3 emitter **嚴禁** 在 replay subprocess 內 emit `learning.health_observations` row（V106 line 259 `engine_mode CHECK IN ('paper','demo','live_demo','live')` 不含 `'replay'`）。
+
+**Scaffold-level guard 必加位置**：
+- Track A 必在 `HealthObservationWriter::write` （或同等寫入入口）前置 guard：
+  ```rust
+  // Sprint 2 M3 emitter：fail-loud guard 防 replay subprocess 誤 emit
+  // per M3 design spec §1.78 + Sprint 2 spec line 199-216 OBSERVE-4 invariant
+  if engine_mode == "replay" {
+      return Err(M3Error::ReplaySubprocessForbidden);
+  }
+  ```
+- 屬 Track A scaffold 必交付項，**不可** 推遲至 Track D/E/F；6 Track 共用同一 writer，guard 必在 writer 入口（DRY 原則）；若各 emitter 各自 guard，replay 走 cascade reject path 或新 writer route 將漏。
+
+**E4 regression test 必加**：
+- `tests/m3_emitter_replay_forbidden.rs`（Track A E1 IMPL 工作）
+- 驗 `engine_mode == "replay"` → writer 返 `M3Error::ReplaySubprocessForbidden`；不撞 V106 CHECK；不靜默通過
+- grep `engine_mode.*replay` in m3 emitter caller 必 0 hit（或 hit 必走 guard）
+
+**Rationale**（per V106 spec §1.1 + §4.4 設計刻意）：M3 health 是 read-only consumer of replay path；replay session 不 fire health observation row（M11 replay 自身屬 dry-run）；若無 guard，replay subprocess emit health row 會撞 V106 CHECK constraint fail-closed（fail-loud 路徑），但屬 silent fail（caller 看不到 reject 原因）；fail-loud guard 在 emitter 端避 V106 端 silent fail。
+
 ### 5.1 spike Track B `HealthStateMachine` 升級點
 
 per spike skeleton `health/mod.rs` `try_transition_with_cap`：
@@ -755,7 +800,7 @@ Sprint 2 規約：
 | engine_runtime | `engine_runtime__cpu_pct` / `engine_runtime__rss_mb` |
 | pipeline_throughput | `pipeline_throughput__ws_tick_rate_per_sec` / `pipeline_throughput__ipc_roundtrip_ms_p99` |
 | database_pool | `database_pool__pg_writer_queue_depth` / `database_pool__pg_pool_wait_ms_p95` |
-| api_latency | `api_latency__bybit_rest_success_rate_5min` / `api_latency__bybit_ws_dropout_count_5min` |
+| api_latency | `api_latency__rest_p50_ms` / `api_latency__rest_p95_ms` / `api_latency__rest_p99_ms` / `api_latency__ws_rtt_p50_ms` / `api_latency__ws_rtt_p99_ms` / `api_latency__ret_code_4xx_count` / `api_latency__ret_code_5xx_count` / `api_latency__ws_dropout_count`（per 2026-05-22 E2 round 1 Track D CRIT-1 amend：5→8 metric）|
 | strategy_quality | `strategy_quality__<strategy>__<symbol>__fill_rate_intent_ratio` |
 | risk_envelope | `risk_envelope__portfolio_max_dd_pct` / `risk_envelope__concentration_top1_pct` |
 

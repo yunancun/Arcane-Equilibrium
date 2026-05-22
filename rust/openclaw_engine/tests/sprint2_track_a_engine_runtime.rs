@@ -339,7 +339,7 @@ async fn test_sprint2_track_a_engine_runtime_row_count_ge_5() {
     let cancel_clone = cancel.clone();
 
     let handle = tokio::spawn(async move {
-        scheduler.run(cancel_clone).await;
+        let _ = scheduler.run(cancel_clone).await;
     });
 
     tokio::time::sleep(Duration::from_secs(6)).await;

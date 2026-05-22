@@ -59,10 +59,15 @@
 //!     only；per packet §9 (d)）。
 //!   - 8 metric 各自 anomaly_id = `api_latency__<metric_name>`（per spec §6.2
 //!     命名規約）；8 個獨立 cap window，不互 cap。
-//!   - threshold 對齊 M3 design spec §2.3 ladder：先 hardcode，Sprint 5 ArcSwap
-//!     熱更新（per spec §4.3 注 + Track A/B/C 同 pattern）。
+//!   - threshold 對齊 M3 design spec §2.3 line 104 ladder（per PA Sprint 2
+//!     Wave 2 2026-05-22 amend）：先 hardcode，Sprint 5 ArcSwap 熱更新（per
+//!     spec §4.3 注 + Track A/B/C 同 pattern）。
 //!   - ret_code 4xx/5xx 用 HTTP 標準語意，預留 multi-venue（per ADR-0040
 //!     dispatch packet §5.5 反模式 (d)）。
+//!   - bybit_rest_client p95 / retCode / ws dropout source hook 為 Wave 2
+//!     main.rs 接 `ApiLatencySourceProbe` trait 時補（per PA-DRIFT-4
+//!     follow-up；本 Track 端不修 client 既有邏輯，per packet §5.5 反模式
+//!     (a)）。
 
 use std::sync::Arc;
 
@@ -235,7 +240,8 @@ impl ApiLatencySample {
 ///
 /// 為什麼 p50 不設 CRITICAL band:
 ///   - CRITICAL band 留給 p99 outlier（極端慢樣本）；p50 走 outlier 不合語意。
-///   - 對齊 spec line 102 ladder「p99 > 2000ms 為 CRITICAL；p50 維持 DEGRADED」。
+///   - 對齊 M3 spec §2.3 line 104 amend ladder「p99 > 2000ms 為 CRITICAL；
+///     p50 維持 DEGRADED」（per PA Sprint 2 Wave 2 2026-05-22 amend）。
 ///   - 三段已足夠分辨「常態 / 輕微退化 / 明顯退化」三狀態；CRITICAL 由 p99
 ///     / 5xx / ws_dropout 三條獨立路徑捕捉。
 pub fn classify_api_latency_rest_p50_ms(value: u32) -> HealthState {
@@ -280,7 +286,8 @@ pub fn classify_api_latency_rest_p95_ms(value: u32) -> HealthState {
 /// 為什麼 p99 走 CRITICAL band:
 ///   - p99 反映 outlier；超過 2s 表示 1% 樣本接近 Bybit REST 預設 timeout
 ///     （5s），下次 timeout 即觸發 fail-closed。
-///   - 對齊 spec §2.3 line 102 CRITICAL band「outlier latency > 2s」literal。
+///   - 對齊 M3 spec §2.3 line 104 amend CRITICAL band「outlier latency > 2s」
+///     literal（per PA Sprint 2 Wave 2 2026-05-22 amend）。
 pub fn classify_api_latency_rest_p99_ms(value: u32) -> HealthState {
     if value > 2000 {
         HealthState::HealthCritical
@@ -373,7 +380,8 @@ pub fn classify_api_latency_ret_code_4xx_count(value: u32) -> HealthState {
 /// 為什麼 5xx 走 CRITICAL band:
 ///   - 5xx 是 venue server fault；客戶端無法修復；持續 5xx = venue outage
 ///     直接影響交易執行。
-///   - 對齊 spec §2.3 line 102 CRITICAL band「venue outage」literal。
+///   - 對齊 M3 spec §2.3 line 104 amend CRITICAL band「venue outage」literal
+///     （per PA Sprint 2 Wave 2 2026-05-22 amend）。
 pub fn classify_api_latency_ret_code_5xx_count(value: u32) -> HealthState {
     if value > 20 {
         HealthState::HealthCritical
@@ -398,7 +406,12 @@ pub fn classify_api_latency_ret_code_5xx_count(value: u32) -> HealthState {
 ///   - per ADR-0042 Decision 3：ws_dropout 是 cascade gate；持續 dropout 走
 ///     fail-closed cascade 預警（Sprint 5 才執行）；Sprint 2 emitter 端只
 ///     classify CRITICAL band 留 audit trail。
-///   - 對齊 spec §2.3 line 102 CRITICAL band「ws dropout 持續累積」literal。
+///   - 對齊 M3 spec §2.3 line 104 amend CRITICAL band「ws dropout 持續累積」
+///     literal（per PA Sprint 2 Wave 2 2026-05-22 amend）。
+///   - 維度說明（LOW-1 誠實補）：本 metric 為 count 維度（採樣期 60s 內 dropout
+///     次數累積），與 spec line 102 既有 dropout duration 維度互補非對齊；
+///     SM `dwell` 機制由 5-sample rolling window 捕捉「持續」語意，count
+///     語意保留 burst 資訊讓 SM 走 dwell 判斷不被瞬時平均掉。
 pub fn classify_api_latency_ws_dropout_count(value: u32) -> HealthState {
     if value > 5 {
         HealthState::HealthCritical
@@ -428,16 +441,19 @@ pub fn classify_api_latency_ws_dropout_count(value: u32) -> HealthState {
 ///     責 metric collection 機制（histogram / counter 觀測層由 caller 端維護）。
 ///
 /// 接線分工（main.rs Wave 2 後或 Sprint 5 cascade IMPL 才接）:
-///   - `current_rest_p50_ms` / `current_rest_p95_ms` / `current_rest_p99_ms`：
-///     main.rs 接 bybit_rest_client wrapper histogram（caller 端需在 wrapper
-///     層加 latency 觀測；emitter 不創觀測層 per ADR-0040 multi-venue gate）。
-///   - `current_ws_rtt_p50_ms` / `current_ws_rtt_p99_ms`：main.rs 接 bybit_ws
-///     ping/pong 觀測（既有 reconnect path 有時延 instrumentation 預埋）。
-///   - `current_ret_code_4xx_count` / `current_ret_code_5xx_count`：main.rs 接
-///     bybit_rest_client retCode counter（caller 端把 retCode → HTTP class
-///     對映 per multi-venue gate 預留）。
-///   - `current_ws_dropout_count`：main.rs 接 bybit_private_ws Disconnected
-///     event counter（既有 reconnect 邏輯有計數 hook）。
+///   - `current_rest_p50_ms_60s_window` / `current_rest_p95_ms_60s_window` /
+///     `current_rest_p99_ms_60s_window`：main.rs 接 bybit_rest_client wrapper
+///     histogram（caller 端需在 wrapper 層加 latency 觀測；emitter 不創觀測
+///     層 per ADR-0040 multi-venue gate）。
+///   - `current_ws_rtt_p50_ms_60s_window` / `current_ws_rtt_p99_ms_60s_window`：
+///     main.rs 接 bybit_ws ping/pong 觀測（既有 reconnect path 有時延
+///     instrumentation 預埋）。
+///   - `current_ret_code_4xx_count_60s_window` /
+///     `current_ret_code_5xx_count_60s_window`：main.rs 接 bybit_rest_client
+///     retCode counter（caller 端把 retCode → HTTP class 對映 per multi-venue
+///     gate 預留）。
+///   - `current_ws_dropout_count_60s_window`：main.rs 接 bybit_private_ws
+///     Disconnected event counter（既有 reconnect 邏輯有計數 hook）。
 ///
 /// 為什麼 retCode 對映 4xx/5xx 是 caller 責任（per packet §5.5 反模式 (d)）:
 ///   - Bybit `retCode != 0` 是 venue-specific；多 venue 後（Binance / OKX）
@@ -450,23 +466,32 @@ pub fn classify_api_latency_ws_dropout_count(value: u32) -> HealthState {
 ///     不誤升級（per `feedback_no_dead_params` fail-soft 對齊）。
 ///   - test 注入 mock 走實作；production 接線責任 Wave 2+ 或 Sprint 5 cascade
 ///     IMPL 時由 main.rs caller 補。
+///   - **60s rolling window 契約（per E2 Wave 2 round 1 HIGH-2 fix Option C）**：
+///     trait method 名稱明示 `_60s_window` 後綴；caller 端 IMPL 必須返「過去
+///     60s sample window 內的當前統計」（rolling-window 語意），不可返
+///     since-restart cumulative count／total-life percentile。type-level 契約
+///     確保 caller 端寫實作時看到方法名即知必須 implement 60s 滑動視窗邏輯，
+///     不靠注釋紀律。
 pub trait ApiLatencySourceProbe: Send + Sync {
-    /// REST API call latency p50（ms；過去 60s 窗）。
-    fn current_rest_p50_ms(&self) -> u32;
-    /// REST API call latency p95（ms；過去 60s 窗）。
-    fn current_rest_p95_ms(&self) -> u32;
-    /// REST API call latency p99（ms；過去 60s 窗）。
-    fn current_rest_p99_ms(&self) -> u32;
-    /// WS ping→pong RTT p50（ms；過去 60s 窗）。
-    fn current_ws_rtt_p50_ms(&self) -> u32;
-    /// WS ping→pong RTT p99（ms；過去 60s 窗）。
-    fn current_ws_rtt_p99_ms(&self) -> u32;
-    /// HTTP 4xx retCode 累積（過去 60s 窗）。
-    fn current_ret_code_4xx_count(&self) -> u32;
-    /// HTTP 5xx retCode 累積（過去 60s 窗）。
-    fn current_ret_code_5xx_count(&self) -> u32;
-    /// WS dropout 累積（過去 60s 窗）。
-    fn current_ws_dropout_count(&self) -> u32;
+    /// REST API call latency p50（ms；過去 60s rolling window 內）。
+    fn current_rest_p50_ms_60s_window(&self) -> u32;
+    /// REST API call latency p95（ms；過去 60s rolling window 內）。
+    fn current_rest_p95_ms_60s_window(&self) -> u32;
+    /// REST API call latency p99（ms；過去 60s rolling window 內）。
+    fn current_rest_p99_ms_60s_window(&self) -> u32;
+    /// WS ping→pong RTT p50（ms；過去 60s rolling window 內）。
+    fn current_ws_rtt_p50_ms_60s_window(&self) -> u32;
+    /// WS ping→pong RTT p99（ms；過去 60s rolling window 內）。
+    fn current_ws_rtt_p99_ms_60s_window(&self) -> u32;
+    /// HTTP 4xx retCode 累積（過去 60s rolling window 內；非 since-restart
+    /// cumulative）。
+    fn current_ret_code_4xx_count_60s_window(&self) -> u32;
+    /// HTTP 5xx retCode 累積（過去 60s rolling window 內；非 since-restart
+    /// cumulative）。
+    fn current_ret_code_5xx_count_60s_window(&self) -> u32;
+    /// WS dropout 累積（過去 60s rolling window 內；非 since-restart
+    /// cumulative）。
+    fn current_ws_dropout_count_60s_window(&self) -> u32;
 }
 
 // ============================================================
@@ -505,15 +530,18 @@ impl ApiLatencyEmitter {
     ///   - sysinfo refresh_processes 需 mut；trait probe 是純讀 accessor 不需
     ///     mut，故 emitter sample 端可走 &self。
     pub fn sample_now(&self) -> Result<ApiLatencySample, M3Error> {
+        // trait method `_60s_window` 後綴契約（per HIGH-2 fix Option C）：probe
+        // 端必返「過去 60s rolling window」統計；sample_now 走純讀取，emitter
+        // 不再做窗口聚合（窗口語意推到 caller 端 IMPL 強制）。
         Ok(ApiLatencySample {
-            rest_p50_ms: self.source.current_rest_p50_ms(),
-            rest_p95_ms: self.source.current_rest_p95_ms(),
-            rest_p99_ms: self.source.current_rest_p99_ms(),
-            ws_rtt_p50_ms: self.source.current_ws_rtt_p50_ms(),
-            ws_rtt_p99_ms: self.source.current_ws_rtt_p99_ms(),
-            ret_code_4xx_count: self.source.current_ret_code_4xx_count(),
-            ret_code_5xx_count: self.source.current_ret_code_5xx_count(),
-            ws_dropout_count: self.source.current_ws_dropout_count(),
+            rest_p50_ms: self.source.current_rest_p50_ms_60s_window(),
+            rest_p95_ms: self.source.current_rest_p95_ms_60s_window(),
+            rest_p99_ms: self.source.current_rest_p99_ms_60s_window(),
+            ws_rtt_p50_ms: self.source.current_ws_rtt_p50_ms_60s_window(),
+            ws_rtt_p99_ms: self.source.current_ws_rtt_p99_ms_60s_window(),
+            ret_code_4xx_count: self.source.current_ret_code_4xx_count_60s_window(),
+            ret_code_5xx_count: self.source.current_ret_code_5xx_count_60s_window(),
+            ws_dropout_count: self.source.current_ws_dropout_count_60s_window(),
         })
     }
 }
@@ -561,28 +589,28 @@ mod tests {
     }
 
     impl ApiLatencySourceProbe for StubSource {
-        fn current_rest_p50_ms(&self) -> u32 {
+        fn current_rest_p50_ms_60s_window(&self) -> u32 {
             self.rest_p50_ms
         }
-        fn current_rest_p95_ms(&self) -> u32 {
+        fn current_rest_p95_ms_60s_window(&self) -> u32 {
             self.rest_p95_ms
         }
-        fn current_rest_p99_ms(&self) -> u32 {
+        fn current_rest_p99_ms_60s_window(&self) -> u32 {
             self.rest_p99_ms
         }
-        fn current_ws_rtt_p50_ms(&self) -> u32 {
+        fn current_ws_rtt_p50_ms_60s_window(&self) -> u32 {
             self.ws_rtt_p50_ms
         }
-        fn current_ws_rtt_p99_ms(&self) -> u32 {
+        fn current_ws_rtt_p99_ms_60s_window(&self) -> u32 {
             self.ws_rtt_p99_ms
         }
-        fn current_ret_code_4xx_count(&self) -> u32 {
+        fn current_ret_code_4xx_count_60s_window(&self) -> u32 {
             self.ret_code_4xx_count
         }
-        fn current_ret_code_5xx_count(&self) -> u32 {
+        fn current_ret_code_5xx_count_60s_window(&self) -> u32 {
             self.ret_code_5xx_count
         }
-        fn current_ws_dropout_count(&self) -> u32 {
+        fn current_ws_dropout_count_60s_window(&self) -> u32 {
             self.ws_dropout_count
         }
     }

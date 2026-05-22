@@ -101,9 +101,9 @@ threshold 數值列入 V106 spec `regime_threshold_table`（per ADR-0036 Decisio
 | `engine_runtime` | PID alive + RSS < 2GB + CPU < 50% | RSS 2-4GB OR CPU 50-80% | RSS > 4GB OR CPU > 80% 持續 5min | PID dead OR engine restart loop > 3/5min | 30s sample, 5min rolling |
 | `pipeline_throughput` | WS tick rate > 1/sec/symbol + ipc p99 < 5ms + ws_subscription_drift_count = 0 + strategy_signal_rate_per_min ≥ 0.5 | tick rate 0.5-1.0/sec/symbol OR ipc p99 5-10ms OR ws_subscription_drift_count 1-2 OR strategy_signal_rate_per_min 0.1-0.5 | tick rate < 0.5/sec/symbol OR ipc p99 > 10ms OR ws_subscription_drift_count ≥ 3 OR strategy_signal_rate_per_min < 0.1 | heartbeat_lag_ms > 60_000 (WS dropout > 60s) OR ipc p99 > 50ms | 30s sample, 5min rolling |
 | `database_pool` | active/max < 80% + queue < 1000 + pool wait p95 < 100ms + disk < 70% | active/max 80-95% OR queue 1000-5000 OR wait 100-500ms OR disk 70-85% | active/max > 95% OR queue > 5000 OR wait > 500ms OR disk > 85% | pool disconnected → fail-closed OK band (per §2.3.2 disconnected handling) | 60s sample |
-| `api_latency` | success rate > 99% + p95 < 500ms | success rate 97-99% OR p95 500-1000ms | success rate < 97% OR p95 > 1000ms 持續 5min | success rate < 90% OR WS reconnect storm | 60s sample, 5min rolling |
+| `api_latency` | rest_p50 < 50ms + rest_p95 < 200ms + rest_p99 < 500ms + ws_rtt_p50 < 50ms + ws_rtt_p99 < 200ms + ret_4xx 0-10 + ret_5xx = 0 + ws_dropout = 0 | rest_p50 50-200ms OR rest_p95 200-500ms OR rest_p99 500-1000ms OR ws_rtt_p50 50-150ms OR ws_rtt_p99 200-500ms OR ret_4xx 11-50 OR ret_5xx 1-5 OR ws_dropout 1-2 | rest_p50 > 200ms OR rest_p95 > 500ms OR rest_p99 1000-2000ms OR ws_rtt_p50 > 150ms OR ws_rtt_p99 500-1500ms OR ret_4xx > 50 OR ret_5xx 6-20 OR ws_dropout 3-5 | rest_p99 > 2000ms OR ws_rtt_p99 > 1500ms OR ret_5xx > 20 OR ws_dropout > 5（rest_p50 / rest_p95 / ws_rtt_p50 / ret_4xx 不含 CRITICAL band）| 60s sample, 5min rolling |
 | `strategy_quality` | fill rate > 80% + slippage p95 < 5bps + lease grant rate > 70% | fill rate 60-80% OR slippage 5-10bps OR lease grant 50-70% | fill rate < 60% OR slippage > 10bps 持續 15min OR dormant > 60min | dormant > 6h OR fill rate < 20% OR lease grant < 10% | 5min sample, 1h rolling |
-| `risk_envelope` | cum loss < $500/24h + dd < 5% + corr < 0.5 + top1 < 30% | cum loss $500-1500/24h OR dd 5-10% OR corr 0.5-0.7 OR top1 30-50% | cum loss $1500-2500/24h OR dd 10-15% OR corr > 0.7 OR top1 > 50% | cum loss > $2500/24h OR dd > 15% | 5min sample |
+| `risk_envelope` | cum loss < $500/24h + dd < 5% + position_count_active 0-8 + corr < 0.5 + top1 < 30% | cum loss $500-1500/24h OR dd 5-10% OR position_count_active 9-16 OR corr 0.5-0.7 OR top1 30-50% | cum loss $1500-2500/24h OR dd 10-15% OR position_count_active > 16 OR corr > 0.7 OR top1 > 50% | cum loss > $2500/24h OR dd > 15%（position_count_active 不含 CRITICAL band；位數本身不致命，致命層由 cum_pnl / dd / concentration 反映；對齊 risk_config max_open_positions 16 上限）| 5min sample |
 
 **HEALTH_CATASTROPHIC** = portfolio cum loss > $3000（既有 D2 kill criteria；M3 不重定義 only mirror 觀測）。
 
@@ -131,6 +131,38 @@ threshold 數值列入 V106 spec `regime_threshold_table`（per ADR-0036 Decisio
   4. 「失敗默認收縮」（§二 原則 6）的語意是「不主動升 cascade 造成更激進副作用」，OK band 是更保守的選擇；若硬升 CRITICAL，會自動 halt strategy + 降 LAL Tier，反而與「PG 短斷立即恢復」的常態場景衝突。
 - **disconnected 不靜默**：每 sample 雖回 OK band 但 evidence_json 仍寫 `{"pool_status": "disconnected"}` 留 audit trail（Sprint 2 D3 cascade reject log emit minimal pattern；Sprint 5 cascade subscribe 後可基於此 trigger 獨立路徑）。
 - **不獨立 CRITICAL classify**（Path B 拒）：避兩 domain 重複 emit CRITICAL（per ADR-0042 反模式 + V106 spec amplification cap）。
+
+### 2.3.3 api_latency 8 metric 結構 — Track D Sprint 2 amend（per 2026-05-22 E2 round 1 Track D CRIT-1 fix）
+
+Sprint 2 Track D IMPL（`rust/openclaw_engine/src/health/domains/api_latency.rs`）將 v5.7 carry-over 的 5 metric（success_rate / p95 / retcode_nonzero / dropout / reconnect）升級為 8 metric 結構：
+
+| Metric | 語意 | OK band | WARN band | DEGRADED band | CRITICAL band |
+|---|---|---|---|---|---|
+| `rest_p50_ms` | REST 常態延遲 | < 50ms | 50-200ms | > 200ms | —（不含；常態不上 CRITICAL）|
+| `rest_p95_ms` | REST 尾延 | < 200ms | 200-500ms | > 500ms | —（不含）|
+| `rest_p99_ms` | REST outlier | < 500ms | 500-1000ms | 1000-2000ms | > 2000ms（接近 5s timeout buffer）|
+| `ws_rtt_p50_ms` | WS 常態 RTT | < 50ms | 50-150ms | > 150ms | —（不含）|
+| `ws_rtt_p99_ms` | WS outlier RTT | < 200ms | 200-500ms | 500-1500ms | > 1500ms（ws_dropout 前 1 步預警）|
+| `ret_code_4xx_count` | client fault 累積 60s | 0-10 | 11-50 | > 50 | —（client 可修復不上 CRITICAL）|
+| `ret_code_5xx_count` | venue fault 累積 60s | 0 | 1-5 | 6-20 | > 20（venue outage）|
+| `ws_dropout_count` | WS 斷線累積 60s | 0 | 1-2 | 3-5 | > 5（持續斷線；market data 不可用）|
+
+**設計理由**：
+1. **三分位 latency**（p50/p95/p99）vs 舊 success_rate 單一指標：success_rate 把 outlier 平均掉看不到 venue 退化前兆；p99 outlier 提早 ~30-60s 反映 venue degrade。
+2. **4xx vs 5xx 分離**（per ADR-0040 multi-venue 預留）：4xx = client fault（rate-limit / 簽名）可由 client 端修復；5xx = venue fault 屬 outage 級。venue-specific retCode → HTTP class 對映由 caller 端（bybit_rest_client wrapper）負責；emitter 不寫死 Bybit 對映。
+3. **ws_rtt 比 ws_dropout 早預警**（per ADR-0042 Decision 3 cascade gate）：WS ping→pong 退化 → rtt p99 1500ms+ 是 dropout 前 1 步預警；ws_dropout 是事後 cascade gate。
+4. **count 而非 rate**（採樣期 60s 累積）：保留 spike 資訊讓 SM 端走 dwell 判斷；速率會把 burst 平均掉誤判 OK。
+5. **4 metric 含 CRITICAL band**（rest_p99 / ws_rtt_p99 / ret_5xx / ws_dropout）：對應 venue-side outage 級事故；其餘 4 metric 不含 CRITICAL（避過度敏感觸 cascade）。
+
+**Sprint 2 Wave 2 main.rs 接線 carry-over**（per E2 round 1 Track D HIGH-3 + PA-DRIFT-4）：
+既有 `bybit_rest_client` + `bybit_private_ws` **未** instrumented p50/p95/p99 histogram + ret_code 4xx/5xx counter + ws_dropout counter；Wave 2 main.rs 接 `ApiLatencySourceProbe` trait 前必先在 bybit wrapper 層補：
+1. `bybit_rest_client` p50/p95/p99 histogram（per ADR-0040 multi-venue 預留；wrapper 層加 latency 觀測，emitter 不創觀測層）；
+2. `bybit_rest_client` retCode 4xx/5xx counter（caller 把 venue-specific retCode → HTTP class 對映）；
+3. `bybit_private_ws` ws_dropout counter（既有 reconnect path 已有 instrumentation 預埋）。
+
+emitter 端 IMPL（Wave 2 Track D）已落 trait 抽象；wrapper 層 instrumentation 屬 main.rs 接線責任，分離至 PA-DRIFT-4 follow-up；Wave 2 scaffold sign-off 用 in-memory `ApiLatencySourceProbe` mock fixture 通過（per AC-1a），real PG empirical AC-1b 必前置 instrumentation land。
+
+**probe stub 預設值 = 0** 設計（per E2 round 1 Track D HIGH-3 amend）：source probe 未接線時返 0 → emitter classify OK band；AC-1b real PG empirical 容差條款補「stub probe value > 0 sanity check」避免「永 OK band」假陽性 sign-off。
 
 ### 2.4 Multi-domain aggregation rule
 

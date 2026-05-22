@@ -581,7 +581,21 @@ impl MetricEmitterScheduler {
     /// 為什麼 cancel_token 而非 JoinHandle::abort:
     ///   - graceful shutdown：每 domain loop 在 tick 邊界檢查 cancel，避中斷
     ///     INSERT 寫到一半。
-    pub async fn run(self, cancel_token: CancellationToken) {
+    ///
+    /// 為什麼返 `Result<(), M3Error>`（per Sprint 2 Wave 2 round 2 OBSERVE-4 fix）:
+    ///   - replay subprocess 嚴禁 emit health row（V106 line 259 engine_mode
+    ///     CHECK 不含 'replay'），caller 端需立即看到 fail-loud Err 而非靜默
+    ///     啟動後撞 PG CHECK。
+    ///   - 對齊 spec line 199-216 OBSERVE-4 設計合約。
+    pub async fn run(self, cancel_token: CancellationToken) -> Result<(), M3Error> {
+        // OBSERVE-4 guard：scheduler 啟動前檢 engine_mode。replay subprocess
+        // 嚴禁 emit health row（V106 CHECK 不含 'replay'）；fail-loud Err
+        // 讓 caller 立即看到設計違反，不靜默走到 PG CHECK fail 才暴露。
+        let startup_mode = (self.engine_mode)();
+        if startup_mode == "replay" {
+            return Err(M3Error::ReplaySubprocessForbidden);
+        }
+
         let writer = Arc::clone(&self.writer);
         let event_bus = Arc::clone(&self.event_bus);
         let state_machines = Arc::clone(&self.state_machines);
@@ -615,6 +629,7 @@ impl MetricEmitterScheduler {
         for handle in join_handles {
             let _ = handle.await;
         }
+        Ok(())
     }
 }
 
@@ -708,6 +723,28 @@ async fn run_domain_loop(
     loop {
         tokio::select! {
             _ = interval.tick() => {
+                // ----------------------------------------
+                // Step 0: OBSERVE-4 per-tick guard（per Sprint 2 Wave 2 round 2
+                // fix；spec line 199-216）
+                // ----------------------------------------
+                //
+                // 為什麼 per-tick 重檢 engine_mode（除 scheduler.run 啟動前檢）:
+                //   - engine_mode 由 main runtime 動態決定（per `effective_engine_mode`
+                //     main.rs:1044），運行中 caller 可能切換到 replay subprocess
+                //     模式；scheduler 不能假設啟動後 mode 不變。
+                //   - 撞 replay tick → 立即 break loop 避走後續 sample/writer
+                //     path 撞 V106 CHECK；err 訊息走 tracing log 留 audit。
+                let early_mode = (engine_mode)();
+                if early_mode == "replay" {
+                    tracing::error!(
+                        domain = %domain.as_str(),
+                        engine_mode = %early_mode,
+                        "M3 emitter detected replay engine_mode at tick boundary — \
+                         fail-loud break loop per spec line 199-216 OBSERVE-4 guard"
+                    );
+                    break;
+                }
+
                 // ----------------------------------------
                 // Step 2: emitter.sample() （fail-soft）
                 // ----------------------------------------

@@ -136,7 +136,7 @@ async fn test_sprint2_track_f_risk_envelope_in_memory_proxy() {
     let cancel_clone = cancel.clone();
 
     let handle = tokio::spawn(async move {
-        scheduler.run(cancel_clone).await;
+        let _ = scheduler.run(cancel_clone).await;
     });
 
     tokio::time::sleep(Duration::from_secs(6)).await;
@@ -333,7 +333,7 @@ async fn test_sprint2_track_f_risk_envelope_degraded_band_classify() {
     let cancel_clone = cancel.clone();
 
     let handle = tokio::spawn(async move {
-        scheduler.run(cancel_clone).await;
+        let _ = scheduler.run(cancel_clone).await;
     });
 
     // 跑 7s ≥ 6 tick；5-sample rolling window 滿後第 6 tick mean 必走 DEGRADED。
