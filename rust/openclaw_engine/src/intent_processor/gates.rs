@@ -127,6 +127,29 @@ impl IntentProcessor {
         let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;
         let min_n = slippage_cfg.cost_gate_min_n_trades_for_block;
         match self.edge_estimates.get_cell(strategy, symbol) {
+            // EDGE-DIAG-2 補:即使 low-sample,當 shrunk_bps 落在
+            // crypto 結構性 noise band 以下(< -15 bps),不放行;
+            // 避免 cell 在 noise band 內累損直到跨 min_n。
+            // cutoff 由 MIT sensitivity sweep 拍板(2026-05-23):
+            //   - cross-validation 50% 命中率顯示 [-15, 0) 是 noise band
+            //   - deep tail < -15 才方向可靠
+            //   - 1B funding_arb 框架僅 LABUSDT outlier 被影響
+            Some(cell) if cell.n_trades < min_n && cell.shrunk_bps < -15.0 => {
+                tracing::info!(
+                    strategy,
+                    symbol,
+                    shrunk_bps = cell.shrunk_bps,
+                    n_trades = cell.n_trades,
+                    cutoff_bps = -15.0,
+                    "cost_gate(JS-demo): low sample but deep-negative — block / 低樣本深負阻擋"
+                );
+                return Some(ExchangeGateResult::rejected(
+                    RejectionCode::CostGateJsDemoNegative {
+                        estimated_bps: cell.shrunk_bps,
+                    }
+                    .format(),
+                ));
+            }
             Some(cell) if cell.n_trades < min_n => {
                 // EDGE-DIAG-2: low-sample cell — treat as noise; route to exploration mode.
                 // EDGE-DIAG-2：低樣本 cell — 視為噪音；路由到探索模式。
