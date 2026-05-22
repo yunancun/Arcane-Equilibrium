@@ -650,9 +650,35 @@ impl StrategyQualityScheduler {
         }
     }
 
-    /// 為 test 開放 per-pair SM 數量讀取（25 × 4 = 100 instance）。
-    pub fn per_pair_sm_count(&self) -> usize {
+    /// 為 test 開放 per-pair-per-metric SM 數量讀取（25 pair × 4 metric =
+    /// 100 SM instance；內部 3-tuple key 儲存）。
+    ///
+    /// 為什麼此 accessor:
+    ///   - 對 aggregate_observe pair-level grouping 設計後（per E2 round 1
+    ///     Track E HIGH-1 fix Path A），SM 內部仍走 3-tuple 儲存，
+    ///     `per_metric_sm_count` 反映 SM 實例數而非 aggregate denominator。
+    ///   - aggregate denominator 在 `per_pair_count` accessor 取（= unique
+    ///     pair 數 = aggregate ratio 分母）。
+    pub fn per_metric_sm_count(&self) -> usize {
         self.per_pair_sms.len()
+    }
+
+    /// 為 test 開放 unique pair 數量讀取（= aggregate_observe degraded_ratio
+    /// 分母，per spec §3.4 line 211 SSOT）。
+    ///
+    /// 為什麼此 accessor:
+    ///   - aggregate rule 在 spec line 211 寫「DEGRADED 策略數 / 總策略數」
+    ///     2-tuple (strategy, symbol) pair-level；本 accessor 返 unique pair
+    ///     count = 25（5 strategy × 5 symbol typical）。
+    ///   - test 端驗 aggregate denominator 與 spec 對齊（per E2 round 1 Track
+    ///     E HIGH-1 fix Path A）。
+    pub fn per_pair_count(&self) -> usize {
+        let mut all_pairs: std::collections::HashSet<(String, String)> =
+            std::collections::HashSet::new();
+        for (strategy, symbol, _metric) in self.per_pair_sms.keys() {
+            all_pairs.insert((strategy.clone(), symbol.clone()));
+        }
+        all_pairs.len()
     }
 
     /// 為 test 開放 aggregate SM accessor。
@@ -665,7 +691,23 @@ impl StrategyQualityScheduler {
     /// 為什麼 cancel_token 而非 JoinHandle::abort:
     ///   - graceful shutdown：scheduler 在 tick 邊界檢查 cancel，避中斷 INSERT
     ///     寫到一半（per Track A scheduler 範式）。
-    pub async fn run(self, cancel_token: CancellationToken) {
+    ///
+    /// 為什麼返 `Result<(), M3Error>`（per Sprint 2 Wave 2 round 2 OBSERVE-4 fix
+    /// cross-Wave invariant）:
+    ///   - StrategyQualityScheduler 是 6 domain 中唯一獨立 scheduler，與
+    ///     MetricEmitterScheduler 範式一致：scheduler.run 啟動前 + 每 tick
+    ///     重檢 engine_mode，replay subprocess fail-loud break loop。
+    ///   - 對齊 spec line 199-216 OBSERVE-4 設計合約：所有 6 domain emitter（含
+    ///     strategy_quality）嚴禁在 replay subprocess 內 emit row。
+    pub async fn run(self, cancel_token: CancellationToken) -> Result<(), M3Error> {
+        // OBSERVE-4 guard：scheduler 啟動前檢 engine_mode。replay subprocess
+        // 嚴禁 emit health row（V106 CHECK 不含 'replay'）；fail-loud Err
+        // 讓 caller 立即看到設計違反，不靜默走到 PG CHECK fail 才暴露。
+        let startup_mode = (self.engine_mode)();
+        if startup_mode == "replay" {
+            return Err(M3Error::ReplaySubprocessForbidden);
+        }
+
         // 為什麼 emitter 不需 `mut`（per cargo lint）:
         //   `sample_now(&self)` 為 &self；emitter 在 run loop 內走 read-only
         //   accessor + trait probe 採樣。對比 Track A `EngineRuntimeEmitter`
@@ -679,6 +721,21 @@ impl StrategyQualityScheduler {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
+                    // OBSERVE-4 per-tick guard（cross-Wave invariant per
+                    // Sprint 2 spec line 199-216）：engine_mode 動態切到
+                    // replay 時 fail-loud break loop。
+                    let early_mode = (self.engine_mode)();
+                    if early_mode == "replay" {
+                        tracing::error!(
+                            domain = "strategy_quality",
+                            engine_mode = %early_mode,
+                            "StrategyQualityScheduler detected replay engine_mode \
+                             at tick boundary — fail-loud break loop per OBSERVE-4 \
+                             guard"
+                        );
+                        break;
+                    }
+
                     // ----------------------------------------
                     // Step 1: emitter.sample() fail-soft
                     // ----------------------------------------
@@ -748,6 +805,7 @@ impl StrategyQualityScheduler {
                 _ = cancel_token.cancelled() => break,
             }
         }
+        Ok(())
     }
 }
 
@@ -895,17 +953,29 @@ async fn process_pair_samples(
     }
 }
 
-/// aggregate SM 重算：per spec §3.4 + §4.4 line 646-651 rule = degraded_count /
-/// total_count > 0.40 → DEGRADED。
+/// aggregate SM 重算：per spec §3.4 line 211 SSOT「DEGRADED 策略數 / 總策略數」
+/// rule = pair-level OR-aggregate；> 0.40 → DEGRADED。
 ///
-/// 為什麼此設計:
+/// 為什麼 pair-level OR-aggregate（per E2 Wave 2 round 1 Track E HIGH-1 fix Path A）:
+///   - spec §3.4 line 211 寫「DEGRADED 策略數 / 總策略數」是 2-tuple
+///     (strategy, symbol) pair-level SSOT；非 3-tuple (strategy, symbol,
+///     metric_name) per_pair_sms.len() count。
+///   - 原 IMPL bug：total_count = per_pair_sms.len() = 25 × 4 = 100；
+///     degraded_count 走 per-SM 累加，11 個 metric DEGRADED 就觸 0.40
+///     threshold，但實際只壞了 11/100 = 11% 的 SM。違 spec「每 pair 4 metric
+///     OR-aggregate 為單 pair 的 DEGRADED 狀態，4 個 metric 中任一 DEGRADED
+///     即代表該 (strategy, symbol) pair degraded」。
+///   - Path A 修法：迭代 per_pair_sms，按 (strategy, symbol) tuple grouping；
+///     一個 pair 任一 metric SM = DEGRADED/CRITICAL → 該 pair 標 degraded；
+///     total_count = unique pair 數（25）；degraded_count = degraded pair 數。
+///
+/// 為什麼此設計（治理對照）:
 ///   - aggregate SM 是 system-level 觀測；rule 由 scheduler 端每 sample 後計算。
-///   - degraded_count = SM 當前 state ∈ {DEGRADED, CRITICAL} 的 SM 計數；
-///     total_count = per_pair_sms.len()（25 pair × 4 metric = 100；test 場景
-///     可能更少）。
 ///   - 走 observe_classified 入口讓 aggregate SM 也守 dwell time + amp cap
 ///     range（per spec §5.2 ladder dwell；aggregate SM 與 per-pair SM 共用
 ///     `HealthStateMachine` impl）。
+///   - per_pair_sms internal storage 保留 3-tuple key (per-pair-per-metric)
+///     不動；只改 aggregate 邏輯走 pair-level grouping。
 ///
 /// aggregate band classify rule:
 ///   - degraded_ratio > 0.40 → DEGRADED band
@@ -926,19 +996,32 @@ async fn aggregate_observe(
     observed_at: chrono::DateTime<chrono::Utc>,
     now_instant: Instant,
 ) {
-    // Step 1: 統計 degraded_count + total_count
-    let total_count = per_pair_sms.len() as f64;
+    // Step 1: pair-level OR-aggregate（per HIGH-1 fix Path A）
+    //
+    // 為什麼 collect all_pairs unique 集合而非用 emitter.pairs():
+    //   - aggregate_observe 走 per_pair_sms 內部 key（3-tuple）即可推導 pair
+    //     set，無需 caller 端再傳 pair list（DRY）。
+    //   - 等價於 emitter.pairs() 因 per_pair_sms init 時就按 pairs × 4 metric
+    //     建構。
+    let mut all_pairs: std::collections::HashSet<(String, String)> =
+        std::collections::HashSet::new();
+    let mut pair_degraded: std::collections::HashMap<(String, String), bool> =
+        std::collections::HashMap::new();
+    for ((strategy, symbol, _metric), sm) in per_pair_sms.iter() {
+        let pair_key = (strategy.clone(), symbol.clone());
+        all_pairs.insert(pair_key.clone());
+        let guard = sm.lock().await;
+        let state = guard.current_state();
+        // OR-aggregate：pair 任一 metric DEGRADED/CRITICAL 即標 degraded。
+        if state == HealthState::HealthDegraded || state == HealthState::HealthCritical {
+            pair_degraded.insert(pair_key, true);
+        }
+    }
+    let total_count = all_pairs.len() as f64;
     if total_count == 0.0 {
         return;  // 防禦：空 pair list 不做任何事
     }
-    let mut degraded_count = 0u32;
-    for sm in per_pair_sms.values() {
-        let guard = sm.lock().await;
-        let state = guard.current_state();
-        if state == HealthState::HealthDegraded || state == HealthState::HealthCritical {
-            degraded_count += 1;
-        }
-    }
+    let degraded_count = pair_degraded.len() as u32;
     let degraded_ratio = degraded_count as f64 / total_count;
 
     // Step 2: classify aggregate band
@@ -1384,11 +1467,12 @@ mod tests {
     }
 
     // -----------------------------------------------------------
-    // StrategyQualityScheduler — per_pair_sm_count + aggregate SM init
+    // StrategyQualityScheduler — pair count + metric SM count + aggregate
+    // SM init（per E2 round 1 Track E LOW-3 rename + 2 accessor 分拆）
     // -----------------------------------------------------------
 
     #[tokio::test]
-    async fn test_strategy_quality_scheduler_per_pair_sm_count_25_x_4() {
+    async fn test_strategy_quality_scheduler_per_pair_25_per_metric_sm_100() {
         let pairs = make_25_pairs();
         let emitter = StrategyQualityEmitter::new(StubSource::new(), pairs);
         let writer: Arc<dyn HealthObservationWriter> =
@@ -1396,11 +1480,18 @@ mod tests {
         let event_bus = Arc::new(HealthEventBus::new());
         let mode: EngineModeProvider = Arc::new(|| "demo".to_string());
         let scheduler = StrategyQualityScheduler::new(emitter, writer, event_bus, mode);
-        // 25 pair × 4 band metric (signal_count_24h 不算) = 100 SM 實例。
+        // per_pair_count = aggregate denominator（per spec §3.4 line 211 SSOT
+        // 2-tuple pair-level）= 25 unique pair。
         assert_eq!(
-            scheduler.per_pair_sm_count(),
+            scheduler.per_pair_count(),
+            25,
+            "unique pair 數（aggregate denominator）= 5 strategy × 5 symbol = 25"
+        );
+        // per_metric_sm_count = SM 內部 3-tuple instance 數 = 25 × 4 = 100。
+        assert_eq!(
+            scheduler.per_metric_sm_count(),
             25 * 4,
-            "per-pair SM 計數 = 25 pair × 4 band metric = 100"
+            "per-metric SM 實例數 = 25 pair × 4 band metric = 100"
         );
         // aggregate SM 初始 state = OK。
         let agg_sm = scheduler.aggregate_sm();

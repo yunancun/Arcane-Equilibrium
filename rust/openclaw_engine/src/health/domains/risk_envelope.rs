@@ -275,15 +275,16 @@ pub fn classify_risk_envelope_max_dd_pct(dd_pct: f64) -> HealthState {
 
 /// `position_count_active` classify。
 ///
-/// ladder（current setup 25 symbol × 5 strategy = 125 candidate slot；典型穩態
-/// 活躍 < 10 倉位；上限對齊 risk_config max_open_positions 既有設計）:
+/// ladder（per M3 spec §2.3 line 106 amend，PA Sprint 2 Wave 2 2026-05-22 amend；
+/// 對齊 risk_config max_open_positions 既有設計）:
 ///   OK       : 0 - 8     （穩態運營區）
 ///   WARN     : 9 - 16     （高位但可控）
 ///   DEGRADED : > 16       （超過正常 max_open_positions 上限）
 ///
-/// 為什麼此 threshold:
-///   - 對齊 `feedback_position_sizing` 3% risk/trade × 25 symbol baseline：
-///     典型最大持倉 ~10-15 位，> 16 是 portfolio over-leverage 預警。
+/// 為什麼此 threshold（per E2 round 1 Track F MED-1 fix Option A — PA spec
+/// amend + E1 doc 對齊）:
+///   - 移除原 `feedback_position_sizing` 自定 magic number rationale；threshold
+///     literal 統一以 M3 spec §2.3 line 106 amend 為 SSOT。
 ///   - 不設 CRITICAL band：位數本身不致命，致命層由 cum_pnl / dd / concentration
 ///     反映；避雙 metric 同時升 CRITICAL 重複觸發 cascade（per ADR-0042 反模式）。
 ///   - threshold 由 Sprint 5 Tier 1 ArcSwap 熱更新（per spec §4.3 規約）；

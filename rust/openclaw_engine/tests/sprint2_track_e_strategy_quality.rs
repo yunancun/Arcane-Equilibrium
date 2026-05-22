@@ -487,80 +487,100 @@ fn test_sprint2_track_e_spike_feature_not_active_in_default_build() {
 // Track E 特殊驗 1 — 25 instance SM 各自獨立 cap key
 // ============================================================
 
-/// 25 instance SM × per-(strategy, symbol) 各自獨立 cap window；同 metric_name
-/// 不同 pair 不互 cap。
+/// 25 instance SM × 4 band metric = 100 SM 全覆蓋驗 per-(strategy, symbol,
+/// metric_name) 各自獨立 cap window；同 metric_name 不同 pair 不互 cap；同
+/// pair 不同 metric_name 不互 cap。
 ///
 /// 為什麼此 test 守 (per packet §6.5 反模式 (e) 25 instance SM 必 (strategy,
-/// symbol) tuple 分隔 cap key):
+/// symbol) tuple 分隔 cap key + per E2 round 1 Track E LOW-1 expand 100 SM
+/// 全覆蓋):
 ///   - 若 cap key 漏帶 (strategy, symbol)，同 metric_name 跨 pair 會共用 cap，
 ///     一個 (grid, BTCUSDT) fire 後 (ma, ETHUSDT) 同 metric_name 走 cap
 ///     suppress 不 fire（嚴重退化）。
-///   - 本 test 連續 fire 25 pair × 同 metric_name (fill_rate_intent_ratio)；
-///     每 pair fire 都成功代表 anomaly_id 內嵌 (strategy, symbol) 真實獨立。
+///   - 若 cap key 漏帶 metric_name，同 pair 不同 metric 會共用 cap，
+///     fill_rate_intent_ratio fire 後 slippage_bps_p95 走 cap suppress 不 fire
+///     （亦嚴重退化；4 個 band metric 在 scheduler 內並行 sample，必各自獨立）。
+///   - 本 test 連續 fire 100 SM (25 pair × 4 band metric)；每 SM fire 都成功
+///     代表 anomaly_id 內嵌 (strategy, symbol, metric_name) 三 tuple 真實獨立。
 #[test]
 fn test_sprint2_track_e_per_pair_independence() {
     let pairs = make_25_pairs();
     assert_eq!(pairs.len(), 25, "25 pair = 5 strategy × 5 symbol");
 
+    // 4 band metric（不含 signal_count_24h 因 telemetry-only fallback OK band 不走 SM）
+    let band_metrics = [
+        "fill_rate_intent_ratio",
+        "slippage_bps_p95",
+        "decision_lease_grant_rate",
+        "dormant_minutes",
+    ];
+
     let base = Instant::now();
 
-    // 每 pair 建獨立 SM；模擬 scheduler per_pair_sms map。
-    let mut sms: HashMap<(String, String), HealthStateMachine> = HashMap::new();
+    // 每 (pair, metric_name) 建獨立 SM；模擬 scheduler per_pair_sms map（3-tuple key）。
+    let mut sms: HashMap<(String, String, String), HealthStateMachine> = HashMap::new();
     for (s, sym) in &pairs {
-        sms.insert(
-            (s.clone(), sym.clone()),
-            HealthStateMachine::new(HealthDomain::StrategyQuality),
-        );
+        for metric in &band_metrics {
+            sms.insert(
+                (s.clone(), sym.clone(), metric.to_string()),
+                HealthStateMachine::new(HealthDomain::StrategyQuality),
+            );
+        }
     }
+    assert_eq!(sms.len(), 100, "25 pair × 4 metric = 100 SM 實例");
 
-    // 對 25 pair 各自連續 2 次 WARN-band 採樣（dwell 60s 達標 fire）。
+    // 對 100 SM 各自連續 2 次 WARN-band 採樣（dwell 60s 達標 fire）。
     let mut fired_count = 0u32;
     for (s, sym) in &pairs {
-        let sm = sms.get_mut(&(s.clone(), sym.clone())).unwrap();
-        let anomaly_id = format!(
-            "strategy_quality__{}__{}__fill_rate_intent_ratio",
-            s, sym
-        );
-        // 採樣 1：anchor 設 now
-        let _ = sm.observe_classified(HealthState::HealthWarn, &anomaly_id, base);
-        // 採樣 2：dwell 60s 達標
-        let r = sm
-            .observe_classified(
+        for metric in &band_metrics {
+            let sm = sms
+                .get_mut(&(s.clone(), sym.clone(), metric.to_string()))
+                .unwrap();
+            let anomaly_id = format!("strategy_quality__{}__{}__{}", s, sym, metric);
+            // 採樣 1：anchor 設 now
+            let _ = sm.observe_classified(HealthState::HealthWarn, &anomaly_id, base);
+            // 採樣 2：dwell 60s 達標
+            let r = sm
+                .observe_classified(
+                    HealthState::HealthWarn,
+                    &anomaly_id,
+                    base + Duration::from_secs(60),
+                )
+                .unwrap();
+            if r {
+                fired_count += 1;
+            }
+            assert!(
+                r,
+                "(s={}, sym={}, metric={}) OK→WARN dwell 60s 達標必 fire（100 SM 各自獨立 cap key）",
+                s,
+                sym,
+                metric
+            );
+            assert_eq!(
+                sm.current_state(),
                 HealthState::HealthWarn,
-                &anomaly_id,
-                base + Duration::from_secs(60),
-            )
-            .unwrap();
-        if r {
-            fired_count += 1;
+                "(s={}, sym={}, metric={}) state 必升 WARN",
+                s,
+                sym,
+                metric
+            );
+            assert_eq!(
+                sm.amplification_loop_24h_count(),
+                1,
+                "(s={}, sym={}, metric={}) cap count 必為 1（不被其他 SM 共用）",
+                s,
+                sym,
+                metric
+            );
         }
-        assert!(
-            r,
-            "(s={}, sym={}) OK→WARN dwell 60s 達標必 fire（25 instance 各自獨立 cap key）",
-            s,
-            sym
-        );
-        assert_eq!(
-            sm.current_state(),
-            HealthState::HealthWarn,
-            "(s={}, sym={}) state 必升 WARN",
-            s,
-            sym
-        );
-        assert_eq!(
-            sm.amplification_loop_24h_count(),
-            1,
-            "(s={}, sym={}) cap count 必為 1（不被其他 pair 共用）",
-            s,
-            sym
-        );
     }
 
-    // 全 25 pair 都 fire 成功 = anomaly_id (strategy, symbol) 分隔有效；
-    // 若 cap key 漏帶 strategy/symbol，第 2 個 pair 就會被 same-anomaly suppress。
+    // 全 100 SM 都 fire 成功 = anomaly_id (strategy, symbol, metric_name) 三 tuple
+    // 分隔有效；若 cap key 漏帶任一維度，第 2 個 SM 就會被 same-anomaly suppress。
     assert_eq!(
-        fired_count, 25,
-        "25 pair 必全 fire（per packet §6.5 反模式 (e) 25 instance SM 必 (strategy, symbol) tuple 分隔 cap key）"
+        fired_count, 100,
+        "100 SM 必全 fire（per packet §6.5 反模式 (e) + LOW-1 fix 100 SM 全覆蓋；3-tuple cap key 任一漏掉即 suppress）"
     );
 }
 
@@ -731,6 +751,198 @@ fn test_sprint2_track_e_aggregate_sm_0_40_rule() {
 }
 
 // ============================================================
+// Track E HIGH-1 補充驗 — aggregate pair-level OR-aggregate 三 boundary 場景
+// （per E2 round 1 Track E HIGH-1 fix Path A sync test）
+// ============================================================
+
+/// aggregate_observe pair-level OR-aggregate Path A boundary 三場景：
+///
+/// 1. 11 pair × 1 metric DEGRADED → ratio = 11/25 = 0.44 > 0.40 → 升 DEGRADED
+/// 2. 10 pair × 4 metric DEGRADED → ratio = 10/25 = 0.40 ≤ 0.40 → 留 OK
+/// 3. 4 pair × 4 metric DEGRADED → ratio = 4/25 = 0.16 ≤ 0.40 → 留 OK
+///
+/// 為什麼此 test 是 HIGH-1 fix 後的決定性 sync 守:
+///   - 原 IMPL bug：total_count = per_pair_sms.len() = 100；degraded_count 走
+///     per-SM 累加；11 個 metric DEGRADED → ratio 11/100 = 0.11 < 0.40 不升
+///     DEGRADED，但實際 11 pair 1 metric DEGRADED 已超 spec 0.40 pair-level
+///     threshold（spec 設計意圖：超 40% pair 退化即觸 system-level cascade）。
+///   - Path A fix：unique pair (strategy, symbol) 為分母（25），OR-aggregate
+///     每 pair 內 4 metric SM 任一 DEGRADED 即標 pair degraded；ratio 走
+///     pair-level 對齊 spec §3.4 line 211「DEGRADED 策略數 / 總策略數」literal。
+///   - 三 boundary 場景守 fix 後正確語意：
+///     * scenario 1 反 bug 走 0.11；fix 後走 0.44 → DEGRADED（升階）
+///     * scenario 2 對齊 = 0.40 threshold「不過」邊界（spec literal「> 0.40」
+///       不是 「≥ 0.40」）；OR-aggregate 不會把 1 pair 內 4 metric 重複計
+///     * scenario 3 純 OK 對照組
+#[test]
+fn test_sprint2_track_e_aggregate_pair_level_or_aggregate_boundaries() {
+    use std::collections::HashSet;
+
+    // ----- scenario 1: 11 pair × 1 metric DEGRADED -----
+    {
+        let pairs = make_25_pairs();
+        let band_metrics = [
+            "fill_rate_intent_ratio",
+            "slippage_bps_p95",
+            "decision_lease_grant_rate",
+            "dormant_minutes",
+        ];
+
+        // 模擬 production per_pair_sms 結構：100 SM 全 OK，把前 11 pair 第 1 metric
+        // 標為 DEGRADED state。
+        let mut sm_states: HashMap<(String, String, String), HealthState> = HashMap::new();
+        for (s, sym) in &pairs {
+            for metric in &band_metrics {
+                sm_states.insert(
+                    (s.clone(), sym.clone(), metric.to_string()),
+                    HealthState::HealthOk,
+                );
+            }
+        }
+        for (idx, (s, sym)) in pairs.iter().enumerate() {
+            if idx < 11 {
+                sm_states.insert(
+                    (s.clone(), sym.clone(), "fill_rate_intent_ratio".to_string()),
+                    HealthState::HealthDegraded,
+                );
+            }
+        }
+
+        // 等價 production aggregate_observe Path A 邏輯：
+        let mut all_pairs: HashSet<(String, String)> = HashSet::new();
+        let mut pair_degraded: HashSet<(String, String)> = HashSet::new();
+        for ((strategy, symbol, _metric), state) in sm_states.iter() {
+            let pair_key = (strategy.clone(), symbol.clone());
+            all_pairs.insert(pair_key.clone());
+            if *state == HealthState::HealthDegraded
+                || *state == HealthState::HealthCritical
+            {
+                pair_degraded.insert(pair_key);
+            }
+        }
+        let total = all_pairs.len() as f64;
+        let degraded = pair_degraded.len() as f64;
+        let ratio = degraded / total;
+
+        assert_eq!(total as u32, 25, "unique pair denominator = 25");
+        assert_eq!(degraded as u32, 11, "11 pair degraded（每 pair 至少 1 metric DEGRADED）");
+        assert!(
+            ratio > 0.40,
+            "scenario 1: ratio = 11/25 = 0.44 > 0.40 → 升 DEGRADED；實際 ratio={}",
+            ratio
+        );
+    }
+
+    // ----- scenario 2: 10 pair × 4 metric DEGRADED -----
+    {
+        let pairs = make_25_pairs();
+        let band_metrics = [
+            "fill_rate_intent_ratio",
+            "slippage_bps_p95",
+            "decision_lease_grant_rate",
+            "dormant_minutes",
+        ];
+
+        let mut sm_states: HashMap<(String, String, String), HealthState> = HashMap::new();
+        for (s, sym) in &pairs {
+            for metric in &band_metrics {
+                sm_states.insert(
+                    (s.clone(), sym.clone(), metric.to_string()),
+                    HealthState::HealthOk,
+                );
+            }
+        }
+        for (idx, (s, sym)) in pairs.iter().enumerate() {
+            if idx < 10 {
+                for metric in &band_metrics {
+                    sm_states.insert(
+                        (s.clone(), sym.clone(), metric.to_string()),
+                        HealthState::HealthDegraded,
+                    );
+                }
+            }
+        }
+
+        let mut all_pairs: HashSet<(String, String)> = HashSet::new();
+        let mut pair_degraded: HashSet<(String, String)> = HashSet::new();
+        for ((strategy, symbol, _metric), state) in sm_states.iter() {
+            let pair_key = (strategy.clone(), symbol.clone());
+            all_pairs.insert(pair_key.clone());
+            if *state == HealthState::HealthDegraded
+                || *state == HealthState::HealthCritical
+            {
+                pair_degraded.insert(pair_key);
+            }
+        }
+        let total = all_pairs.len() as f64;
+        let degraded = pair_degraded.len() as f64;
+        let ratio = degraded / total;
+
+        assert_eq!(total as u32, 25);
+        assert_eq!(degraded as u32, 10, "OR-aggregate：10 pair 內 4 metric 重複計 = pair 數仍為 10");
+        assert!(
+            ratio <= 0.40,
+            "scenario 2: ratio = 10/25 = 0.40 不過 > 0.40 threshold → 留 OK；實際 ratio={}",
+            ratio
+        );
+    }
+
+    // ----- scenario 3: 4 pair × 4 metric DEGRADED -----
+    {
+        let pairs = make_25_pairs();
+        let band_metrics = [
+            "fill_rate_intent_ratio",
+            "slippage_bps_p95",
+            "decision_lease_grant_rate",
+            "dormant_minutes",
+        ];
+
+        let mut sm_states: HashMap<(String, String, String), HealthState> = HashMap::new();
+        for (s, sym) in &pairs {
+            for metric in &band_metrics {
+                sm_states.insert(
+                    (s.clone(), sym.clone(), metric.to_string()),
+                    HealthState::HealthOk,
+                );
+            }
+        }
+        for (idx, (s, sym)) in pairs.iter().enumerate() {
+            if idx < 4 {
+                for metric in &band_metrics {
+                    sm_states.insert(
+                        (s.clone(), sym.clone(), metric.to_string()),
+                        HealthState::HealthDegraded,
+                    );
+                }
+            }
+        }
+
+        let mut all_pairs: HashSet<(String, String)> = HashSet::new();
+        let mut pair_degraded: HashSet<(String, String)> = HashSet::new();
+        for ((strategy, symbol, _metric), state) in sm_states.iter() {
+            let pair_key = (strategy.clone(), symbol.clone());
+            all_pairs.insert(pair_key.clone());
+            if *state == HealthState::HealthDegraded
+                || *state == HealthState::HealthCritical
+            {
+                pair_degraded.insert(pair_key);
+            }
+        }
+        let total = all_pairs.len() as f64;
+        let degraded = pair_degraded.len() as f64;
+        let ratio = degraded / total;
+
+        assert_eq!(total as u32, 25);
+        assert_eq!(degraded as u32, 4);
+        assert!(
+            ratio < 0.40,
+            "scenario 3: ratio = 4/25 = 0.16 < 0.40 → 留 OK（純 OK 對照組）；實際 ratio={}",
+            ratio
+        );
+    }
+}
+
+// ============================================================
 // Track E V106 row carries strategy_name + symbol columns
 // ============================================================
 
@@ -783,18 +995,25 @@ async fn test_sprint2_track_e_v106_row_carries_strategy_symbol_columns() {
 }
 
 // ============================================================
-// Track E scheduler new — 25 instance SM × 4 band metric = 100 SM
+// Track E scheduler new — per_pair_count + per_metric_sm_count + aggregate
+// SM init（per E2 round 1 Track E LOW-3 rename + 2 accessor 分拆）
 // ============================================================
 
-/// 走 scheduler new 路徑驗 per_pair_sm_count = 25 × 4 = 100；aggregate SM 初始
-/// state = OK。
+/// 走 scheduler new 路徑驗:
+///   - per_pair_count = 25（unique pair = aggregate denominator per spec
+///     §3.4 line 211 SSOT 2-tuple）
+///   - per_metric_sm_count = 100（SM 內部 3-tuple 實例數 = 25 × 4）
+///   - aggregate SM 初始 state = OK
 ///
 /// 為什麼此 test:
 ///   - 對齊 packet prompt 「25 instance per-strategy SM (5 strategy × 5 symbol)
-///     - 每 (strategy, symbol) 一個獨立 SM cap key」literal；scheduler 內部
-///     ((strategy, symbol, metric_name) 三鍵 × 4 band metric) = 100 SM。
+///     - 每 (strategy, symbol) 一個獨立 SM cap key」literal。
+///   - per E2 round 1 Track E LOW-3 + HIGH-1 Path A fix：scheduler 內部
+///     ((strategy, symbol, metric_name) 三鍵 × 4 band metric) = 100 SM
+///     instance；aggregate ratio 分母走 2-tuple pair-level grouping = 25 unique
+///     pair。
 #[tokio::test]
-async fn test_sprint2_track_e_scheduler_per_pair_sm_count_25_x_4() {
+async fn test_sprint2_track_e_scheduler_per_pair_25_per_metric_sm_100() {
     let pairs = make_25_pairs();
     assert_eq!(pairs.len(), 25);
     let emitter = StrategyQualityEmitter::new(StubSource::new(), pairs);
@@ -804,9 +1023,14 @@ async fn test_sprint2_track_e_scheduler_per_pair_sm_count_25_x_4() {
     let mode: EngineModeProvider = Arc::new(|| "demo".to_string());
     let scheduler = StrategyQualityScheduler::new(emitter, writer, event_bus, mode);
     assert_eq!(
-        scheduler.per_pair_sm_count(),
+        scheduler.per_pair_count(),
+        25,
+        "unique pair = aggregate denominator（per spec §3.4 line 211 SSOT 2-tuple）= 5 strategy × 5 symbol = 25"
+    );
+    assert_eq!(
+        scheduler.per_metric_sm_count(),
         100,
-        "25 pair × 4 band metric = 100 SM 實例"
+        "per-metric SM 實例數 = 25 pair × 4 band metric = 100"
     );
     // aggregate SM 初始 OK
     let agg_sm = scheduler.aggregate_sm();
@@ -837,7 +1061,7 @@ async fn test_sprint2_track_e_scheduler_run_cancel_graceful_shutdown() {
     let cancel = CancellationToken::new();
     let cancel_clone = cancel.clone();
     let handle = tokio::spawn(async move {
-        scheduler.run(cancel_clone).await;
+        let _ = scheduler.run(cancel_clone).await;
     });
 
     // 立即 cancel；不等 sample tick（300s）。

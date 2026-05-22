@@ -346,7 +346,7 @@ async fn test_sprint2_track_b_pipeline_throughput_row_count() {
     let cancel_clone = cancel.clone();
 
     let handle = tokio::spawn(async move {
-        scheduler.run(cancel_clone).await;
+        let _ = scheduler.run(cancel_clone).await;
     });
 
     tokio::time::sleep(Duration::from_secs(6)).await;
@@ -482,7 +482,7 @@ async fn test_sprint2_track_b_real_emitter_through_scheduler() {
     let cancel_clone = cancel.clone();
 
     let handle = tokio::spawn(async move {
-        scheduler.run(cancel_clone).await;
+        let _ = scheduler.run(cancel_clone).await;
     });
 
     tokio::time::sleep(Duration::from_secs(4)).await;

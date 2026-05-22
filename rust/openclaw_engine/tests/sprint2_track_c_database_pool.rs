@@ -125,7 +125,7 @@ async fn test_sprint2_track_c_database_pool_row_count() {
     let cancel_clone = cancel.clone();
 
     let handle = tokio::spawn(async move {
-        scheduler.run(cancel_clone).await;
+        let _ = scheduler.run(cancel_clone).await;
     });
 
     tokio::time::sleep(Duration::from_secs(6)).await;
@@ -247,7 +247,7 @@ async fn test_sprint2_track_c_database_pool_degraded_band_classify() {
     let cancel_clone = cancel.clone();
 
     let handle = tokio::spawn(async move {
-        scheduler.run(cancel_clone).await;
+        let _ = scheduler.run(cancel_clone).await;
     });
 
     // 跑 6 tick；5-sample rolling window 滿後第 6 tick mean 必走 DEGRADED band。
@@ -798,7 +798,7 @@ async fn test_sprint2_track_c_database_pool_disconnected_emits_pool_status_evide
     let cancel_clone = cancel.clone();
 
     let handle = tokio::spawn(async move {
-        scheduler.run(cancel_clone).await;
+        let _ = scheduler.run(cancel_clone).await;
     });
 
     // 跑 3 tick 即足：disconnected 場景每 tick 5 row × evidence_json，不需

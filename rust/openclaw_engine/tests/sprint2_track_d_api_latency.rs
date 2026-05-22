@@ -75,28 +75,28 @@ struct StubSourceProbe {
 }
 
 impl ApiLatencySourceProbe for StubSourceProbe {
-    fn current_rest_p50_ms(&self) -> u32 {
+    fn current_rest_p50_ms_60s_window(&self) -> u32 {
         self.rest_p50_ms
     }
-    fn current_rest_p95_ms(&self) -> u32 {
+    fn current_rest_p95_ms_60s_window(&self) -> u32 {
         self.rest_p95_ms
     }
-    fn current_rest_p99_ms(&self) -> u32 {
+    fn current_rest_p99_ms_60s_window(&self) -> u32 {
         self.rest_p99_ms
     }
-    fn current_ws_rtt_p50_ms(&self) -> u32 {
+    fn current_ws_rtt_p50_ms_60s_window(&self) -> u32 {
         self.ws_rtt_p50_ms
     }
-    fn current_ws_rtt_p99_ms(&self) -> u32 {
+    fn current_ws_rtt_p99_ms_60s_window(&self) -> u32 {
         self.ws_rtt_p99_ms
     }
-    fn current_ret_code_4xx_count(&self) -> u32 {
+    fn current_ret_code_4xx_count_60s_window(&self) -> u32 {
         self.ret_code_4xx_count
     }
-    fn current_ret_code_5xx_count(&self) -> u32 {
+    fn current_ret_code_5xx_count_60s_window(&self) -> u32 {
         self.ret_code_5xx_count
     }
-    fn current_ws_dropout_count(&self) -> u32 {
+    fn current_ws_dropout_count_60s_window(&self) -> u32 {
         self.ws_dropout_count
     }
 }
@@ -396,7 +396,7 @@ async fn test_sprint2_track_d_api_latency_row_count() {
     let cancel_clone = cancel.clone();
 
     let handle = tokio::spawn(async move {
-        scheduler.run(cancel_clone).await;
+        let _ = scheduler.run(cancel_clone).await;
     });
 
     tokio::time::sleep(Duration::from_secs(6)).await;
@@ -554,7 +554,7 @@ async fn test_sprint2_track_d_real_emitter_through_scheduler() {
     let cancel_clone = cancel.clone();
 
     let handle = tokio::spawn(async move {
-        scheduler.run(cancel_clone).await;
+        let _ = scheduler.run(cancel_clone).await;
     });
 
     tokio::time::sleep(Duration::from_secs(4)).await;
@@ -771,7 +771,7 @@ async fn test_sprint2_track_d_api_latency_degraded_band_classify() {
     let cancel_clone = cancel.clone();
 
     let handle = tokio::spawn(async move {
-        scheduler.run(cancel_clone).await;
+        let _ = scheduler.run(cancel_clone).await;
     });
 
     tokio::time::sleep(Duration::from_secs(7)).await;

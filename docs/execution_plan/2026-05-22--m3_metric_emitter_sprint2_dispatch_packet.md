@@ -27,6 +27,7 @@ per Sprint 1A-ζ Phase 1 PA refine pattern (`docs/execution_plan/2026-05-21--spr
 - Phase chain：本 packet (~2-3 hr) → Phase 2 E1 × 6 並行 (38-52 hr) → Phase 3a E2 × 6 並行 (10-15 hr) → Phase 3b E4 (4-6 hr) → Phase 3c QA (4-6 hr) → Phase 3d TW (2-3 hr) → Phase 3e PM (1-2 hr) = **70-104 hr 真實 + buffer 後 75-115 hr**
 - **AC-1 拆分 a/b** (per 2026-05-22 E2 round 1 HIGH-3 + LOW-1 fix)：AC-1a = Wave 1 scaffold sign-off 用 in-memory `HealthObservationWriter` mock fixture（不接 PG；cargo test PASS 即可結 Wave 1）；AC-1b = Wave 2+ main.rs 接 scheduler 後 Phase 3c QA 跑 real PG empirical（30 min window row count ≥ 5；前置 = main.rs scheduler 接線完成）。AC-1b 不阻 Wave 1 scaffold sign-off。
 - **2026-05-22 E2 round 1 Track B+C 4 amend land**：HIGH-2「持續 2min」classify vs SM dwell clarify（M3 spec §2.3.1）；HIGH-1 heartbeat_lag CRITICAL > 60_000 ms 即時 fire SSOT（Track B IMPL `> 120_000` 必 revert 60_000；E1 round 2 修）；MEDIUM-1 B drift+signal_rate ladder threshold 補 M3 spec §2.3；MEDIUM-1 C `pool_max_conn` 5th column 加入 Sprint 2 spec §3.2；MEDIUM-3 C disconnected fail-closed OK band（M3 spec §2.3.2）。
+- **2026-05-22 E2 round 1 Wave 2 Track D/F 4 amend land**：Track D CRIT-1 `ApiLatencySample` 5→8 field 結構升級（M3 spec §2.3 line 104 + §2.3.3 + Sprint 2 spec §3.2）；Track D MED-1 OBSERVE-4 engine_mode == "replay" guard 升 Track A scaffold contract 必交付項（§1.7 補）；Track D HIGH-3 bybit_rest_client / bybit_private_ws hook 不存在 → PA-DRIFT-4 carry-over（Wave 2 main.rs 接線前必補 instrumentation；§5.1 prerequisite amend）；Track F MED-1 `position_count_active` 0-8/9-16/>16 ladder 補 M3 spec §2.3 line 106 literal（對齊 risk_config max_open_positions 16 上限；§7.4 補 AC 條款）。
 
 ---
 
@@ -40,13 +41,21 @@ per Sprint 1A-ζ Phase 1 PA refine pattern (`docs/execution_plan/2026-05-21--spr
 | D2 | 並行 with Sprint 1B mid items | YES (operator override PA 推 single-thread) | parent spec §3 D2 |
 | D3 | Sprint 5 cascade reject log emit minimal IMPL 包含於 Track A | YES (~2 hr E1 cost) | parent spec §3 D3 |
 
-### 1.2 Sprint 1B mid 3 NEW carry-over file scope conflict
+### 1.2 Sprint 1B mid 3 NEW carry-over + PA-DRIFT-4 file scope conflict
 
 | Sprint 1B mid item | File scope | Sprint 2 Track 重疊 |
 |---|---|---|
 | PA-DRIFT-1 governance.audit_log alignment | `docs/execution_plan/*` / `sql/migrations/V###` audit_log | 0 overlap (Sprint 2 寫 learning.health_observations only) |
 | PA-DRIFT-2 V103 file HARD BLOCKER | `sql/migrations/V103__*.sql` | 0 overlap (Sprint 2 不碰 V103) |
 | E3-MED-2 sandbox_admin hypertable OWNER | sandbox PG GRANT + TimescaleDB hypertable owner | 時序依賴 (Phase 3c 起跑前必 closed) |
+| **PA-DRIFT-4 bybit_rest_client + bybit_private_ws instrumentation 補位**（per 2026-05-22 E2 round 1 Track D HIGH-3 amend）| `rust/openclaw_engine/src/bybit_rest_client.rs` + `bybit_private_ws.rs`（wrapper 層加 p50/p95/p99 histogram + retCode 4xx/5xx counter + ws_dropout counter）| 0 overlap with Wave 2 Track D scaffold scope（Track D 只走 trait 抽象）；**時序依賴 = Wave 2 main.rs 接 ApiLatencySourceProbe 前必 closed**；blocks AC-1b real PG empirical（不阻 AC-1a scaffold sign-off）|
+
+**PA-DRIFT-4 工作分解**（屬 Wave 2 main.rs 接線責任，非 Track D scaffold IMPL 工作；E1 IMPL 估時 4-6 hr）：
+1. `bybit_rest_client` wrapper 層加 `HdrHistogram` 觀測 REST call latency p50/p95/p99；過去 60s 滾窗 reset
+2. `bybit_rest_client` retCode 4xx/5xx counter（caller 把 venue-specific retCode → HTTP class 對映；per ADR-0040 multi-venue 預留）
+3. `bybit_private_ws` ws_dropout counter（既有 reconnect path 已有 hook 預埋；補 atomic counter）
+4. wrapper 端公開 `current_*()` accessor 供 `ApiLatencySourceProbe` 注入；emitter 不直接 import bybit client
+5. test 用 mock probe；production main.rs Wave 2 接線時注入 Arc<RealBybitSourceProbe>
 
 ### 1.3 Sub-agent ceiling 預警
 
@@ -87,9 +96,26 @@ per Sprint 1A-ζ Phase 1 PA refine pattern (`docs/execution_plan/2026-05-21--spr
 | `observe_classified` SM 新入口 (參考 parent spec §5.2) | Track A | ~60 LOC |
 | `sysinfo::System` 接 `EngineRuntimeSample` | Track A | ~80 LOC |
 | D3 cascade reject log emit minimal | Track A | ~40 LOC |
-| **Track A 升級總計** | **Track A** | **~500 LOC + V106 writer wire-up** |
+| **OBSERVE-4 replay subprocess guard**（per 2026-05-22 E2 round 1 Track D MED-1 amend）| Track A | ~20 LOC |
+| **Track A 升級總計** | **Track A** | **~520 LOC + V106 writer wire-up** |
 
 Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event bus。
+
+**OBSERVE-4 replay subprocess guard 詳述**（per 2026-05-22 E2 round 1 Track D MED-1 amend；對齊 Sprint 2 spec §5.0 + line 199-216 OBSERVE-4 invariant）：
+
+Track A E1 IMPL 必在 `HealthObservationWriter::write`（或同等寫入入口）前置 guard：
+```rust
+// Sprint 2 M3 emitter：fail-loud guard 防 replay subprocess 誤 emit
+// per M3 design spec §1.78 + Sprint 2 spec §5.0 OBSERVE-4 invariant
+if engine_mode == "replay" {
+    return Err(M3Error::ReplaySubprocessForbidden);
+}
+```
+
+- **必交付測試**：`rust/openclaw_engine/tests/m3_emitter_replay_forbidden.rs`（Track A E1 IMPL 工作）：驗 `engine_mode == "replay"` writer 返 `M3Error::ReplaySubprocessForbidden` ＋ 不撞 V106 CHECK ＋ 不靜默通過。
+- **必交付 grep**：E2 review Track A 階段 grep `engine_mode.*replay` in m3 emitter caller paths 必 0 hit（或 hit 必走 guard 路徑）。
+- **必交付 enum 新 variant**：`M3Error::ReplaySubprocessForbidden`（新增；scaffold 公共依賴 6 Track）。
+- **不可** 推遲至 Track D/E/F：6 Track 共用同一 writer 入口（DRY 原則）；若各 emitter 各自 guard，replay 走 cascade reject path 或新 writer route 將漏 → fail-closed gap。
 
 ---
 
@@ -272,8 +298,10 @@ Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event 
 
 ### 5.1 Prerequisite
 
-- Wave 1 Track A scaffold land
-- 既有 `bybit_rest_client` + `bybit_ws_client` 有 p95 latency / retCode counter / WS dropout counter hook
+- Wave 1 Track A scaffold land（含 OBSERVE-4 replay guard + `M3Error::ReplaySubprocessForbidden` enum variant）
+- **既有 `bybit_rest_client` + `bybit_private_ws` p50/p95/p99 histogram + ret_code 4xx/5xx counter + ws_dropout counter hook 不存在**（per 2026-05-22 E2 round 1 Track D HIGH-3 amend；grep verify 0 hit）
+- Wave 2 main.rs 接 `ApiLatencySourceProbe` trait 前必先在 bybit wrapper 層補 instrumentation（PA-DRIFT-4 follow-up；屬 Wave 2 main.rs 接線責任；emitter 端 IMPL trait 抽象已落不需等 instrumentation）
+- Wave 2 Track D E1 IMPL 用 in-memory `ApiLatencySourceProbe` mock fixture 通過 AC-1a；real PG empirical AC-1b 必前置 instrumentation land
 
 ### 5.2 E1 prompt skeleton
 
@@ -281,11 +309,11 @@ Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event 
 
 **Scope**:
 1. `rust/openclaw_engine/src/health/domains/api_latency.rs` 新
-2. `ApiLatencySample` struct (per parent spec §3.2)
-3. impl `DomainEmitter` for `ApiLatencyEmitter`
-4. 接 `bybit_rest_client` 已存在 p95 latency / retCode counter hook
-5. 接 `bybit_ws_client` dropout / reconnect counter
-6. `tests/sprint2_track_d_api_latency.rs`
+2. `ApiLatencySample` struct **8 field**（per Sprint 2 spec §3.2 amend + M3 spec §2.3.3）：rest_p50_ms / rest_p95_ms / rest_p99_ms / ws_rtt_p50_ms / ws_rtt_p99_ms / ret_code_4xx_count / ret_code_5xx_count / ws_dropout_count
+3. impl `DomainEmitter` for `ApiLatencyEmitter`（含 `ApiLatencySourceProbe` trait 抽象）
+4. **不接** bybit wrapper instrumentation（屬 Wave 2 main.rs 責任 PA-DRIFT-4）；emitter 只走 trait 抽象
+5. `tests/sprint2_track_d_api_latency.rs` 用 in-memory mock 通過 AC-1a
+6. `tests/m3_emitter_replay_forbidden.rs` 屬 Track A scaffold 工作不在本 Track D scope
 
 ### 5.3 File scope
 
@@ -296,9 +324,10 @@ Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event 
 
 | AC# | Pass criteria |
 |---|---|
-| AC-1a api_latency in-memory proxy (Wave 2 scaffold sign-off) | 5 sample window × N metric tick → ≥ N×5 V106 row count via in-memory `HealthObservationWriter` mock fixture（不接 PG；cargo test --release test_sprint2_track_d_api_latency_in_memory_proxy PASS）|
-| AC-1b api_latency real PG empirical (Wave 2+ main.rs 接 scheduler 後) | V106 30 min window api_latency row count ≥ 3 (real PG；60s × 5 = 5 min cycle；Phase 3c QA 跑) |
-| AC-2 4-state ladder | OK→WARN→DEGRADED ladder fire test PASS |
+| AC-1a api_latency in-memory proxy (Wave 2 scaffold sign-off) | 5 sample window × **8 metric tick**（rest_p50_ms / rest_p95_ms / rest_p99_ms / ws_rtt_p50_ms / ws_rtt_p99_ms / ret_code_4xx_count / ret_code_5xx_count / ws_dropout_count）→ **≥ 40 V106 row** count via in-memory `HealthObservationWriter` mock fixture（不接 PG；cargo test --release test_sprint2_track_d_api_latency_in_memory_proxy PASS）|
+| AC-1b api_latency real PG empirical (Wave 2+ main.rs 接 scheduler 後) | V106 30 min window api_latency row count ≥ 3 per metric (real PG；60s × 5 = 5 min cycle；Phase 3c QA 跑；**stub probe value > 0 sanity check** 避免「永 OK band」假陽性 sign-off）|
+| AC-2 4-state ladder | OK→WARN→DEGRADED ladder fire test PASS；**4 metric 含 CRITICAL band**（rest_p99 > 2000ms / ws_rtt_p99 > 1500ms / ret_5xx > 20 / ws_dropout > 5）；4 metric 不含 CRITICAL（rest_p50 / rest_p95 / ws_rtt_p50 / ret_4xx）|
+| AC-2b anomaly_id 命名 | 8 anomaly_id 對應 8 metric：`api_latency__rest_p50_ms` / `api_latency__rest_p95_ms` / `api_latency__rest_p99_ms` / `api_latency__ws_rtt_p50_ms` / `api_latency__ws_rtt_p99_ms` / `api_latency__ret_code_4xx_count` / `api_latency__ret_code_5xx_count` / `api_latency__ws_dropout_count`（per Sprint 2 spec §6.2 amend）|
 | AC-4 cross-domain | api_latency DEGRADED 不影響其他 5 domain state |
 | AC-5 spike default false | production binary 不滲透 mock time |
 
@@ -306,6 +335,8 @@ Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event 
 
 - (a) emit retCode != 0 觸發 fail-closed retry（per CLAUDE.md hard boundary：「不增 hidden retry path for trading effects」；emitter 只觀測）
 - (b) WS dropout 觸發 reconnect 邏輯（既有 ws_client 已處理；emitter 只觀測）
+- (c) emitter 修 `bybit_rest_client` / `bybit_private_ws` instrumentation（屬 PA-DRIFT-4 Wave 2 main.rs 責任；emitter 只走 trait 抽象）
+- (d) emitter 直接 import bybit client struct（trait 抽象 + Arc<dyn ApiLatencySourceProbe> 依賴注入；對齊 ADR-0040 multi-venue 預留）
 
 ### 5.6 估時
 
@@ -398,7 +429,8 @@ Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event 
 |---|---|
 | AC-1a risk_envelope in-memory proxy (Wave 2 scaffold sign-off) | 5 sample window × N metric tick → ≥ N×5 V106 row count via in-memory `HealthObservationWriter` mock fixture（不接 PG；cargo test --release test_sprint2_track_f_risk_envelope_in_memory_proxy PASS）|
 | AC-1b risk_envelope real PG empirical (Wave 2+ main.rs 接 scheduler 後) | V106 30 min window risk_envelope row count ≥ 1 (real PG；5min × 5 = 25 min cycle；30min 容差；Phase 3c QA 跑) |
-| AC-2 4-state ladder | portfolio dd / correlation / concentration OK→WARN→DEGRADED fire test PASS |
+| AC-2 4-state ladder | portfolio dd / correlation / concentration / **position_count_active** OK→WARN→DEGRADED fire test PASS |
+| AC-2b position_count_active ladder（per 2026-05-22 E2 round 1 Track F MED-1 amend）| OK 0-8 / WARN 9-16 / DEGRADED >16；對齊 M3 spec §2.3 line 106 literal + `risk_config.max_open_positions=16` 上限；**不含 CRITICAL band**（位數本身不致命，致命層由 cum_pnl / dd / concentration 反映）；E1 IMPL `classify_risk_envelope_position_count` 函數 doc comment 必引 `M3 design spec §2.3 line 106` literal reference |
 | AC-4 cross-domain | risk_envelope DEGRADED 不影響其他 5 domain；不觸 5-gate kill |
 | AC-5 spike default false | production binary 不滲透 mock time |
 | AC-7 portfolio 原則 | risk_envelope 是 portfolio-level 聚合，對齊 16 根原則 #16 |

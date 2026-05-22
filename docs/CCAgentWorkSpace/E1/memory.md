@@ -11846,3 +11846,54 @@ E2 Track B + Track C round 1 REJECT；本 round 修「deterministic fix（不需
 
 ### 報告
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_wave2_track_f_risk_envelope.md`
+
+## 2026-05-22 — Sprint 2 Wave 2 Track E strategy_quality emitter IMPL (per-strategy SM variant)
+
+### 任務
+per Sprint 2 design spec §4.4 + dispatch packet §6:strategy_quality domain emitter 帶 per-strategy SM 25 instance + aggregate SM 0.40 rule。沿用 Wave 1 scaffold（DomainEmitter / MetricSample / RollingWindowAggregator / writer / SM observe_classified）+ 獨立 StrategyQualityScheduler（spec §4.4 line 638-643 明文）。
+
+### 教訓
+- **per-strategy variant = 獨立 scheduler 範式**:MetricEmitterScheduler::run_domain_loop 對 (domain, metric_name) 鍵設計;strategy_quality 需 (domain, metric_name, strategy, symbol) 4-tuple 鍵,直接合入 scheduler 會破壞 hash key shape。改走獨立 StrategyQualityScheduler (spec §4.4)。沿用 trait + writer + event_bus + SM impl 等組件不衝突;這是「沿用 scaffold 組件」而非「沿用 scheduler routing」的區別,packet §6.5 反模式 (c)「沿用 Track A scaffold」應理解為前者非後者。
+- **same anomaly_id 跨 ladder 多次 transition 被 24h cap suppress**: SM `try_transition_with_cap` 設計上 same anomaly_id 24h fire 1 次就 cap。若 aggregate SM 走 OK→WARN→DEGRADED ladder 全用同 anomaly_id (e.g. `strategy_quality__aggregate`),OK→WARN fire 後 24h 內 WARN→DEGRADED 會被 same-anomaly cap suppress。fix = per-target-band 分隔 anomaly_id (aggregate__warn / aggregate__degraded / aggregate__critical)。Track C test_sprint2_ladder_database_pool 已採此範式 (line 437-438「新 anomaly_id 避同 id cap suppress」),Track E aggregate_observe + integration test 都對齊。
+- **dispatch prompt 文字與 design spec SSOT drift**: prompt §2 描述 StrategyQualitySample 為「edge_score / win_rate / drawdown_pct / sharpe_30d / fill_rate / dormant_secs / signal_count_30d」7 field;但 design spec §3.2 權威 SSOT 為「fill_rate_intent_ratio / slippage_bps_p95 / decision_lease_grant_rate / dormant_minutes / signal_count_24h」5 field。E1 必以 design spec §3.2 為 SSOT (per M3 spec line 81+105 對齊「per-strategy fill rate / slippage / dormant / signal rate」);prompt 文字版做為任務概念描述,不可直接落地。
+- **classify_aggregated 擴 arm 是 cross-Track 共用 file scope 合法操作**: Track B+C+D+E+F 全要在 metric_emitter/mod.rs `classify_aggregated` 加自己的 dispatch arm;這是 spec §4.1 step 4 規範 (scheduler 端 5-sample mean classify);Track C 已範式化 (line 1012-1029),Track E + Track D + Track F 並行加 arm 不衝突 (各 domain 各 arm,無同行 conflict)。dispatch packet §9 共用反模式 (a)「跨 Track file scope 寫入」應理解為「同檔同行 conflict」,不是「同檔不同行 dispatch arm」。
+- **MetricSample trait method 走 trait object 不需 import**: integration test 用 `row.metric_name()` `row.classify_band()` `row.numeric_value()`,以為要 `use MetricSample`,實際 trait object 自帶 dispatch,移除 import 仍編譯通過。Rust trait method 解析規則:(1) inherent method (2) trait method via trait object (3) trait method via in-scope trait;trait object 路徑不需要 in-scope trait。
+- **25 instance SM cap key 必 (strategy, symbol) tuple 分隔**: anomaly_id format `strategy_quality__<strategy>__<symbol>__<metric_name>` 確保跨 pair 各自獨立 cap window。per packet §6.5 反模式 (e):若共用 cap key,25 pair 第一個 fire 後其他 24 pair 全被 same-anomaly suppress = 嚴重觀測退化。test_sprint2_track_e_per_pair_independence 連續 fire 25 pair × 同 metric_name 全成功 = 守不退化。
+- **per-pair SM 預建 + production scheduler hot path 不 lazy entry**: StrategyQualityScheduler::new 預建 100 個 SM (25 pair × 4 band metric);production hot path sample tick 必觸所有 key,pre-create 避 race。對比 Track A `run_domain_loop` lazy entry 是 fine 因 single SM map(每 sample 只觸 6 metric 路徑可控);本 scheduler 25 × 4 全 sample 必觸,pre-create 性能 + 確定性都優。
+- **independent run loop 端到端對齊 Track A run_domain_loop 範式**: SM lock 不跨 await (per round 2 MEDIUM-1 fix) → collect SM 結果到 local + drop guard + writer.await;event_bus.publish 在 fire 時走;V106 row INSERT 帶 with_strategy + with_symbol 兩列 (writer 既有 builder);aggregate row metric_name="aggregate" 區隔 per-pair row + evidence_json 帶 degraded_count / total_count audit trail。
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_wave2_track_e_strategy_quality.md`
+
+## 2026-05-22 — Sprint 2 Wave 2 round 2 combined fix (Track D 6 + E 3 + F 1 + OBSERVE-4 cross-Wave)
+
+### 任務
+- Track D fix 6 finding：CRIT-1 schema amend (PA align) / HIGH-1 doc comment 4 處 line 102 → line 104 amend + PA-DRIFT-4 reference / HIGH-2 trait method `_60s_window` 後綴 (Option C type-level 契約) / HIGH-3 acknowledge bybit_rest_client carry-over / MED-1 Track A scaffold OBSERVE-4 guard + new test / LOW-1 dropout count vs time 維度注釋誠實補
+- Track E fix 3 finding：HIGH-1 aggregate_observe pair-level OR-aggregate (Path A) + new boundary test 3 場景 / LOW-1 per_pair_independence expand 100 SM 全覆蓋 / LOW-3 rename + 2 accessor 分拆 (per_pair_count + per_metric_sm_count)
+- Track F fix 1 finding：MED-1 position_count_active doc 對齊 PA M3 spec §2.3 line 106 amend
+- Cross-Wave OBSERVE-4 fix：新 M3Error::ReplaySubprocessForbidden variant + MetricEmitterScheduler.run 啟動 + run_domain_loop per-tick guard + StrategyQualityScheduler.run 啟動 + tick guard 雙 scheduler 對齊
+
+### 教訓
+- **HIGH-2 trait method 後綴 = type-level 契約優於注釋紀律**：原 trait `current_rest_p50_ms()` 注釋寫「過去 60s 窗」但 caller 端 IMPL 時容易誤實作 since-restart cumulative；改 `current_rest_p50_ms_60s_window()` 把窗口語意推到方法名 → main.rs caller 寫 stub 時看見方法名即知必返 rolling window，不靠注釋紀律。8 method 同步 rename (trait + emitter sample_now + inline test StubSource + integration test StubSourceProbe)。
+- **scheduler.run 簽名變更 `Result<(), M3Error>` cascade 12 call sites**：OBSERVE-4 fix 需 fail-loud Err，run 改返 Result；Track A/B/C/D/F integration tests + Track E test 共 12 個 `scheduler.run(cancel_clone).await;` 必同步加 `let _ = ...`。replace_all per file 6 處全自動更新。Rust API 變更 cascade 應一次性完整 sweep，避邊改邊發現。
+- **OBSERVE-4 cross-Wave invariant：兩個 scheduler 都需 fix**：MetricEmitterScheduler (Track A scaffold; 覆 Track B/C/D/F 5 domain) + StrategyQualityScheduler (Track E 獨立; per-strategy variant)。fix 全沿用同 pattern：scheduler.run 啟動前檢 engine_mode (startup_mode == "replay" → Err) + run loop tick 邊界 per-tick 重檢 (early_mode == "replay" → break loop with tracing::error)。dual-layer guard 對抗動態 engine_mode 切換場景。
+- **aggregate pair-level OR-aggregate (Path A) 為 spec SSOT 對齊 fix**：原 IMPL 用 `per_pair_sms.len()` (= 100) 為分母 + per-SM 累加為分子；違 spec §3.4 line 211「DEGRADED 策略數 / 總策略數」2-tuple pair-level 設計。Path A 走 unique pair HashSet (= 25 分母) + OR-aggregate (任一 metric DEGRADED 即標 pair degraded)。11 pair × 1 metric scenario 修正前 ratio = 11/100 = 0.11 不升 → 修正後 ratio = 11/25 = 0.44 觸發 DEGRADED；spec literal 「> 0.40」threshold 正確生效。
+- **新 boundary test 三場景 11/10/4 pair 守 Path A 邊界**：scenario 1 (11 pair × 1 metric) 反 bug 走 0.11 不升 → fix 後 0.44 升 DEGRADED；scenario 2 (10 pair × 4 metric) = 0.40 不過 threshold 留 OK + 守 OR-aggregate 不重複計；scenario 3 (4 pair × 4 metric) = 0.16 純 OK 對照組。三場景 in-memory sm_states 模擬 production aggregate_observe 等價邏輯，無需走 wall-clock dwell。
+- **LOW-3 accessor 分拆 = 語意對 spec SSOT**：原 `per_pair_sm_count()` 返 100 屬「per-metric SM 實例數」；spec §3.4 line 211 aggregate denominator 是「unique pair 數」= 25。改 `per_metric_sm_count()` (100 = SM 內部 3-tuple) + 新 `per_pair_count()` (25 = unique pair = aggregate denominator) 雙 accessor，語意清晰。lib mod test + integration test 同步 rename + 雙 assert。
+- **expand per_pair_independence 25 → 100 SM 守 3-tuple cap key 不退化**：原 test 只測 25 pair × 1 metric (fill_rate_intent_ratio)；LOW-1 expand 4 band metric 全覆蓋 100 SM；每 SM fire 都成功 = anomaly_id 3-tuple (strategy, symbol, metric_name) 真實獨立。若 cap key 漏帶任一維度，第 2 個 SM 就 same-anomaly suppress。
+- **HIGH-1 spec line 102 → line 104 amend 是 PA 並行 amend 的 placeholder 對齊**：PA spec amend report 還未 land 時，E1 doc reference 用「per PA Sprint 2 Wave 2 2026-05-22 amend」明示 amend 來源；4 處 line 102 literal 全改 line 104 + amend 標記；E1 不 revert IMPL（schema 已 land 8 field），等 PA amend land 後 reference 自動對齊。
+- **HIGH-3 PA-DRIFT-4 carry-over 走 doc comment 不 IMPL**：bybit_rest_client p95/retCode/dropout hook 為 Wave 2 main.rs 接 SourceProbe trait 時補；本 Track 端 doc 寫「per PA-DRIFT-4 follow-up」明示分工，不擅自 wire 真實 source（per packet §5.5 反模式 (a) emitter 只讀）。
+
+### Build / test 結果
+- cargo build --release: PASS (2m 19s clean；3 pre-existing warning + 1 binary warning；本 round 0 new warning)
+- cargo test --release --lib: 3152/3152 PASS（1 ignored pre-existing；0 fail）
+- cargo test --release --lib health::: 87/87 PASS
+- Wave 1 regression: Track A 9/9 + Track B 5/5 + Track C 8/8 = 22 PASS
+- Wave 2 regression: Track D 7/7 + Track E 11/11 (+1 boundary test) + Track F 8/8 = 26 PASS
+- New OBSERVE-4 test (tests/m3_emitter_replay_forbidden.rs): 3/3 PASS
+- Spike regression (--features spike --test m3_amp_cap_24h_fire): 3/3 PASS
+- nm scan AC-5: 0 hit（production binary 0 mock time 滲透）
+- Total: 47+1 sprint2 integration + 3 OBSERVE-4 + 3 spike + 87 lib health + 3152 lib full = 161+3152 PASS / 0 fail
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_wave2_round2_combined_fix.md`

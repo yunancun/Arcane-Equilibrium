@@ -80,6 +80,20 @@ pub enum M3Error {
     /// per Sprint 2 spec §3.1 writer trait 失敗語意。
     #[error("V106 INSERT failed: {0}")]
     WriterError(String),
+
+    /// M3 emitter 嚴禁在 replay subprocess 內 emit health_observations row。
+    ///
+    /// 為什麼 fail-loud（per Sprint 2 design spec §1.x OBSERVE-4 line 199-216）:
+    ///   - V106 line 259 `engine_mode CHECK IN ('paper','demo','live_demo',
+    ///     'live')` 不含 'replay'；replay row 直接撞 PG CHECK constraint，
+    ///     PG error → sqlx 失敗 → audit trail 撕裂。
+    ///   - 設計合約：M3 health 是 read-only consumer of replay path（M11 replay
+    ///     自身屬 dry-run，不該觸發 health observation row）；replay subprocess
+    ///     誤 emit = 設計違反 → fail-loud Err 讓 caller 立即看到。
+    ///   - 對齊 V106 spec line 38 + §4.4 設計刻意：replay engine_mode 不在 V106
+    ///     CHECK 4 值 white-list。
+    #[error("M3 emitter forbidden in replay subprocess: engine_mode='replay'")]
+    ReplaySubprocessForbidden,
 }
 
 /// 4 級健康狀態階梯 (per ADR-0042 Decision 2 + V106 schema state CHECK)。
