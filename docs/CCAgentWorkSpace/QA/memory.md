@@ -542,3 +542,30 @@ R-1 報告為「deploy+72-73min 4-min burst window 集中」；實證為 **9 個
 | 2026-05-11 P1-RCA-1 orphan ER RCA | 2026-05-11 | **SYSTEMIC** — mpsc try_send silent-drop；deploy+15h drop 19-26%；fix plan F4 hybrid 給 PM；R-1 "non-systemic" 判斷顛覆但不阻 MAG-084（wiring correctness 仍對）|
 | 2026-05-19 Phase 1b 24h AC-A + engine restart RCA | 2026-05-19 | **INSUFFICIENT_SAMPLE / EXTEND_MONITORING** — n=8 grid_close demo (3 entry timeout_taker / 3 risk_exit maker_fill / 2 risk_exit non-attempt), Wilson [13.7, 69.4] NEUTRAL_LOW_SAMPLE per healthcheck [70]. **RCA correction**: PM brief "03:57 UTC" 實為 03:57 CEST = **01:57 UTC**（2h off）；engine PID 1737243 是 watchdog auto-respawn 不是 rebuild（binary mtime 2026-05-18 13:50 UTC 不變）。Root upstream = systemd watchdog 自己 status=2/INVALIDARGUMENT 第 9 次（7d 內），systemd 自動拉起新 watchdog → 新 watchdog 偵測 engine snapshot 181.9s stale > 120s grace → 觸發 engine respawn。**Phase 2a 14d clock decision: NO RESET**（binary/config 不變 + spec/AMD 沒 process-level restart clock reset clause + 16-root 原則 12 evidence-based）。建議 4 個 P0/P1 follow-up：T+72h re-verify / M-2 brief log clock decision / P1 ticket watchdog status=2 RCA / P2 entry-path 0% maker fill RCA (sim 70.8% vs real 0% 70pp 偏差) |
 | 2026-05-19 P0-ENGINE-HALTSESSION-STUCK-FIX Layer A pre-deploy QA | 2026-05-20 | **APPROVE-CONDITIONAL** — E1 Round 1+2 IMPL + E2 R1 RETURN + R2 APPROVE + E4 PASS 鏈完整；business chain forward/sticky-drawdown/Live sticky 三向 wiring 閉合；16 根原則 + 9 安全不變量 0 violation；P1-16 invariant 3/0 PASS；A-1 ~ A-9 + X-1 ~ X-10 acceptance gate 16/23 PASS + 2 runtime-EV pending + 1 Layer B deferred + 0 FAIL；jsonschema validate roundtrip 獨立驗 sample 兩條 line PASS；Linux V098 24-value CHECK 已 deploy（含 3 halt_session_*）；Mac dirty tree 41 entries 全 Layer A scope clean；3 CONDITIONAL（C-1 cross-arch byte-equiv 必跑 / C-2 runtime EV pending / C-3 commit message lineage + push）由 PM/operator 在 deploy 鏈內處理。報告：`srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-19--layer_a_halt_ttl_impl_qa_audit.md` |
+| 2026-05-22 Sprint 1A-ζ Phase 3c spike empirical verify | 2026-05-22 | **PASS WITH 3 CARRY-OVER** — 6 AC hard-gate 實證 PASS：AC-4 Rust 14/14 + PG `lease_lal_tiers_tier_level_check` reverse INSERT × 2 RAISE；AC-5 Rust spike test 3/3 + health lib 10/10；try_transition_with_cap 3 guard 對齊 ADR-0042 D4 (1-anomaly = 1-state-change/24h)；AC-6 V107 source SQL 8 grep hit 全屬 Guard A/C reverse-fire 不違反 dedup contract，sandbox `learning.replay_divergence_log` / `decay_signals` / `strategy_lifecycle` 三表物理不存在 trivially PASS by absence；AC-7 Python 三實作互驗 7/7。**AC-1 PARTIAL**: `_sqlx_migrations` V106/V107/V112 = 0 row（V096 為 sandbox 最高註冊；root cause = raw psql -f apply path 不寫註冊表非 checksum drift；不適用 repair_migration_checksum；治本 = E3 sandbox_admin role + cargo sqlx_migrate run）。**AC-3 N/A** per Q2(d) sandbox-only。**AC-8 DEFERRED to Phase 3d TW + Phase 3e PM**。3 NEW spec literal patch carry-over：NEW-QA-1 AC-1.1 反向 INSERT 範例缺 cohort_min_n / human_final_review 2 NOT NULL column → 先撞 NOT NULL 不撞 CHECK；NEW-QA-2 AC-6 grep `wc -l = 0` 太嚴，Guard A/C reverse-fire context 不能算違反；NEW-QA-3 spec § P3-3 Step 5 `spike_trigger.py --dry-run` arg 不存在於實際 script（usage 只 `--inject-synthetic`）。報告：`srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-22--sprint_1a_zeta_phase_3c_qa_empirical_verify.md` |
+
+## 教訓（2026-05-22 Sprint 1A-ζ Phase 3c spike — durable lessons）
+
+### 1. spec literal INSERT 範例缺 NOT NULL column 撞錯 constraint 是高頻盲區
+
+V112 schema 7 NOT NULL column（tier_level / tier_name / auto_approve / approval_quorum / clawback_ttl_sec / cohort_min_n / human_final_review）；spec § AC-1.1 line 286-298 反向 INSERT 範例只列 5 column，導致先撞 `null value violates not-null` 而非預期 `lease_lal_tiers_tier_level_check`。RAISE message 不 deterministic 會誤判 AC-4 fail。**規則**：spec literal INSERT 範例設計時必 `\d <table>` 確認所有 NOT NULL column 都帶值，QA 採納前必 cross-check schema vs spec literal。
+
+### 2. grep `wc -l = 0` literal 過嚴 — reverse-fire context 是 anti-pattern enforcement
+
+V107 source SQL 8 grep hit 全屬 Guard A pre-check `IN (...)` literal list + Guard C post-check + `RAISE EXCEPTION message body` — 這是 ADR-0044 + CR-7 dedup contract 的硬保險而非違反。spec § AC-6 寫 `wc -l = 0` literal 太嚴。**規則**：grep literal verify 設計時必排除 `RAISE` / `IN (` / 行內 comment context；reverse-fire mechanism 比文檔守則更強。正確 literal：`grep -E '...' V107.sql | grep -v 'RAISE\|IN (' | wc -l` 期 0。
+
+### 3. sandbox vs production state 治理差異要在 spec 明文
+
+V107 sandbox cleanup (E1 Track C round 1 §5 line 248) + V113 sandbox 不 land = dedup contract 物理 trivially PASS by absence。spec § AC-6 假設 V107 INSERT row + V113 verify 0 row 的 empirical drive 在 sandbox 跑不通。**規則**：spec 明文標 sandbox 前提（V098 + V103 + V107 + V113 都需 land 才能跑 dedup empirical），spike scope 走「物理 absence trivial PASS」+「Sprint 1B 真實 empirical drive」二段式 verify。
+
+### 4. `repair_migration_checksum` 對應 production checksum drift 不對應 sandbox raw apply missing register
+
+2026-05-02 P0 sqlx hash drift incident 治本是 `repair_migration_checksum` binary (file 改了 DB checksum 沒同步)。本 spike sandbox `_sqlx_migrations` V106/V107/V112 = 0 row 不是同個問題 — root cause = sandbox_admin role 未創建 → 走 `psql -f` raw apply path → 不經 sqlx_migrate binary → 不寫註冊表。治本 = E3 創 sandbox_admin role + `cargo run --release --bin sqlx_migrate -- run` 走全鏈。**規則**：sqlx_migrations 0 row 必先判 (a) checksum drift（file/DB 不一致）vs (b) raw apply path（從未經 binary）；兩個治本完全不同。
+
+### 5. spike_trigger.py 缺 `--dry-run` flag — spec literal vs script reality drift
+
+spec § P3-3 Step 5 寫 `spike_trigger.py --dry-run` 不在 script usage 內（只 `--inject-synthetic`）。**規則**：spec literal verification command 設計時必 cross-check `<script> --help` usage list；spec edit OR script flag 補 二選一；P2 不阻 PASS verdict。
+
+### 6. try_transition_with_cap 3 guard 對齊 ADR-0042 D4 是嚴格 fire 語意樣本
+
+`rust/openclaw_engine/src/health/mod.rs:387-425` 3 guard：(1) 同 anomaly_id 在 cap window suppress (2) current==target 不 fire (3) count≥2 fail-closed reject。對應 V106 spec §1.1 line 77 「state_prev != state」嚴格語意 + ADR-0042 Decision 4 「1-anomaly = 1-state-change/24h」+ E1 round 2 patch「count = transition fire 計數 not cap entries」。**規則**：state machine fire 語意設計 spec ↔ schema ↔ Rust code 三層必驗對齊；Rust unit test (E1 round 2 `test_try_transition_no_fire_when_current_eq_target`) 是嚴格 fire 語意 anchor。
