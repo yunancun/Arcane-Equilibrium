@@ -30,7 +30,7 @@ non-scope:
 - spike Track B 已完成 `engine_runtime` 1 domain + 4-state ladder + amp cap 24h Rust skeleton；Sprint 2 IMPL 把 stub 5 domain 補齊 + 5-sample window mean/sigma 聚合 + V106 row 真實寫入。
 - 6 並行 Track（Track A engine_runtime 沿用升級 + Track B-F pipeline_throughput / database_pool / api_latency / strategy_quality / risk_envelope）；Track A 不重做但需 V106 writer 真實接線 + sysinfo crate 引 + D3 cascade reject log minimal emit。
 - Phase chain：Phase 1 PA refine（~2-3 hr dispatch packet 縮版 per D2 ceiling 約束）→ Phase 2 E1 IMPL × 6 並行 wave 1+2（36-50 hr 並行）→ Phase 3a/b/c/d/e（22-33 hr）= **70-104 hr 真實 + buffer 後 75-115 hr**。
-- AC-1..7 對齊 spike scope spec §AC pattern：V106 row 真實寫入 / 4-state ladder 每 domain fire / amp cap 24h fire / cross-domain 不互擾 / production binary 0 mock time 滲透 / cargo + pytest baseline 不退 / binary footprint <50ms cold start。
+- AC-1..7 對齊 spike scope spec §AC pattern：V106 row 真實寫入 (AC-1 拆 a/b — AC-1a Wave 1 in-memory mock fixture / AC-1b Wave 2+ real PG empirical；per 2026-05-22 E2 round 1 HIGH-3 fix) / 4-state ladder 每 domain fire / amp cap 24h fire / cross-domain 不互擾 / production binary 0 mock time 滲透 / cargo + pytest baseline 不退 / binary footprint <50ms cold start。
 - Sprint 2 dispatch readiness gate：**OPEN with carry-over conditions** — D1/D2/D3 operator-signed 2026-05-22；Phase 1 dispatch packet land；Sprint 1B mid 3 carry-over（PA-DRIFT-1/PA-DRIFT-2/E3-MED-2）file scope 與本 Sprint 2 6 Track 0 重疊可並行。
 - 治理硬邊界：Sprint 2 emitter **不**觸 cascade 執行（halt strategy / 降 LAL Tier）；emitter 只 emit `HealthStateChangeEvent` 給 event bus + D3 minimal cascade reject log emit（V106 row `evidence_json={"reject_reason": "..."}` 留 audit trail），cascade subscribe + 執行延 Sprint 5。
 
@@ -722,7 +722,8 @@ per spike scope spec §4 AC pattern：
 
 | AC# | 描述 | 驗收方式 | Sign-off owner |
 |---|---|---|---|
-| **AC-1** | V106 6 domain row 真實寫入 — 每 domain 跑 5 sample window 後 emit row（≥1 row per domain per 25min cycle）| `psql -c "SELECT domain, COUNT(*) FROM learning.health_observations WHERE created_at > NOW() - INTERVAL '30 min' GROUP BY domain"` 必 6 row（每 domain count ≥ 1） | QA |
+| **AC-1a** (Wave 1 scaffold sign-off) | V106 6 domain row 寫入 via in-memory `HealthObservationWriter` mock fixture — 每 domain 跑 5 sample window × N metric tick → ≥ N×5 V106 row written 至 mock writer；**不需 main.rs scheduler 接線 / 不需 real PG**；Wave 1 / Wave 2 各 Track E1 IMPL 自我 sign-off 用本 AC | `cargo test --release test_sprint2_track_*_in_memory_proxy` PASS × 6 (per Track 一個 test) | E2 |
+| **AC-1b** (Wave 2+ real PG empirical) | V106 6 domain row 真實寫入 real PG — 每 domain 跑 5 sample window 後 emit row（≥1 row per domain per 25min cycle）；前置 = main.rs `MetricEmitterScheduler::run` 接線 + Linux runtime --rebuild + ≥30 min 樣本累積 | `psql -c "SELECT domain, COUNT(*) FROM learning.health_observations WHERE created_at > NOW() - INTERVAL '30 min' GROUP BY domain"` 必 6 row（每 domain count ≥ 1） | QA (Phase 3c) |
 | **AC-2** | 4-state ladder transition fire test — 每 domain 走完 OK → WARN → DEGRADED 至少一次 | `cargo test --release test_sprint2_ladder_<domain>` × 6（每 domain 一個 test）| E4 |
 | **AC-3** | amp cap 24h-suppression empirical fire — 至少 2 domain（engine_runtime 沿用 spike + 任 1 新 domain）24h 內第二 fire 真實 suppress | `cargo test --release --features spike test_sprint2_amp_cap_<domain>` × 2；走 mock Instant 跳 24h | E4 + QA |
 | **AC-4** | cross-domain coordination 不 conflict — domain A 升 DEGRADED 不影響 domain B 的 state | `cargo test --release test_sprint2_cross_domain_independence`；inject domain A spike + domain B 正常 metric → SM 各自獨立 | E4 |

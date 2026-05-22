@@ -34,6 +34,9 @@ feed-rs = "2"
 serde_yaml = "0.9"
 parking_lot = { workspace = true }
 rand = { workspace = true }
+# M3 metric emitter Sprint 2 Track A — sysinfo 0.32（workspace dep）採樣 process
+# 級 CPU/RSS/heartbeat/open_fd/thread/uptime 6 metric；對齊 Mac+Linux 跨平台。
+sysinfo = { workspace = true }
 
 # EDGE-P3-1 ort backend — ONNX Runtime 1.24 Rust binding.
 # Required over tract-onnx: tract 0.21 implements TreeEnsembleClassifier but
