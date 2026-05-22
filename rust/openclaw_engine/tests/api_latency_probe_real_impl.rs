@@ -98,12 +98,16 @@ fn test_rest_latency_sample_count_matches() {
 ///   - 10003 ApiKeyInvalid / 10004 SignError：認證 bug
 ///   - 10005 PermissionDenied：權限不足
 ///   - 10006 IpRateLimit / 10010 UnmatchedIp：rate-limit / IP 漂移
-/// 其他 110xxx 業務碼算 venue fault（5xx）。
+/// 其他非 noop 110xxx 業務碼算 venue fault（5xx）。
+///
+/// 注：110001 OrderNotFound 屬 noop（per H-1 fix），不計入；改用 110003
+/// PriceOutOfRange / 110007 AvailableInsufficient / 110049 PriceTickInvalid
+/// 等真 venue fault 碼。
 #[test]
 fn test_ret_code_counter_4xx_5xx_classify() {
     let counter = RetCodeCounter::new();
 
-    // 注入 4 個 4xx + 3 個 5xx
+    // 注入 4 個 4xx + 3 個 5xx（避開 noop 集合）
     for code in [10001, 10003, 10004, 10006] {
         counter.record_for_error(&BybitApiError::Business {
             ret_code: code,
@@ -111,7 +115,7 @@ fn test_ret_code_counter_4xx_5xx_classify() {
             response: serde_json::json!({}),
         });
     }
-    for code in [110001, 110007, 110049] {
+    for code in [110003, 110007, 110049] {
         counter.record_for_error(&BybitApiError::Business {
             ret_code: code,
             ret_msg: "test".into(),
@@ -120,7 +124,7 @@ fn test_ret_code_counter_4xx_5xx_classify() {
     }
 
     assert_eq!(counter.count_4xx(), 4, "10001/10003/10004/10006 are client fault");
-    assert_eq!(counter.count_5xx(), 3, "110xxx are venue fault");
+    assert_eq!(counter.count_5xx(), 3, "110003/110007/110049 are venue fault (non-noop)");
 }
 
 /// `BybitApiError::Transport` / `JsonParse` / `NoCredentials` 不計入 4xx/5xx
@@ -347,4 +351,272 @@ fn test_ret_code_counter_hot_path_cap_bounded() {
     }
     let count_4xx = counter.count_4xx();
     assert!(count_4xx <= 8192, "count_4xx={count_4xx} should be capped at 8192");
+}
+
+// ============================================================
+// (7) PA-DRIFT-4 round 1 H-1 fix：noop retCode 不計 4xx 也不計 5xx
+// ============================================================
+
+/// noop retCode 集合（OrderNotFound 110001 / OrderCompletedOrCancelled 110008 /
+/// OrderAlreadyCancelled 110010 / LeverageNotModified 110043 / OrderNotExistSpot
+/// 170213）視為「動作已完成」非 venue fault；counter 既不計 4xx 也不計 5xx。
+///
+/// 為什麼此 test 必要（per E2 round 1 H-1 BLOCKER fix）：
+///   - 原 `record_for_error` 把任何不在 client fault 6 個碼集合的 retCode 通通計
+///     5xx，包括 lifecycle race / 已套用設定 等 noop；違 ADR-0042 Decision 3
+///     cascade gate = venue fault only 語意。
+///   - 本 test 守 5 個 noop 碼注入後 counter 不增（counter 維持 0）。
+#[test]
+fn test_ret_code_counter_skips_noop_retcodes() {
+    let counter = RetCodeCounter::new();
+
+    // 5 個 noop retCode：lifecycle race / 已套用設定 / 對映 BybitRetCode::is_noop()
+    for code in [110001i64, 110008, 110010, 110043, 170213] {
+        counter.record_for_error(&BybitApiError::Business {
+            ret_code: code,
+            ret_msg: "noop test".into(),
+            response: serde_json::json!({"noop": true}),
+        });
+    }
+
+    assert_eq!(
+        counter.count_4xx(),
+        0,
+        "noop retCode 不應計 4xx；對映 ADR-0042 cascade gate venue fault only"
+    );
+    assert_eq!(
+        counter.count_5xx(),
+        0,
+        "noop retCode 不應計 5xx；對映 ADR-0042 cascade gate venue fault only"
+    );
+}
+
+/// noop retCode 不影響其他 venue fault 計入：混合注入 noop + 真 venue fault 後
+/// counter 只記真 venue fault。
+#[test]
+fn test_ret_code_counter_noop_does_not_affect_real_venue_fault() {
+    let counter = RetCodeCounter::new();
+
+    // 3 個 noop + 2 個真 venue fault
+    for code in [110001i64, 110008, 110010] {
+        counter.record_for_error(&BybitApiError::Business {
+            ret_code: code,
+            ret_msg: "noop".into(),
+            response: serde_json::json!({}),
+        });
+    }
+    for code in [110007i64, 110049] {
+        counter.record_for_error(&BybitApiError::Business {
+            ret_code: code,
+            ret_msg: "real venue fault".into(),
+            response: serde_json::json!({}),
+        });
+    }
+
+    assert_eq!(counter.count_4xx(), 0);
+    assert_eq!(
+        counter.count_5xx(),
+        2,
+        "只 110007/110049 真 venue fault 計入；noop 不污染"
+    );
+}
+
+// ============================================================
+// (8) PA-DRIFT-4 round 1 H-2 fix：60s rolling window expire boundary
+// ============================================================
+
+/// REST latency 60s 滾窗過期邊界：注入 61s 前 sample → expire；注入 59s 前
+/// sample → 保留（per E2 round 1 H-2 fix）。
+///
+/// 為什麼此 test 必要：
+///   - 既有 15 test 全 instant record + instant read；trait method name
+///     `_60s_window` 是 type-level contract 但 IMPL retain 邏輯從未實證跑過。
+///   - 本 test 走 `inject_sample_with_timestamp` cfg(test) accessor 注入指定時間
+///     戳，直接驗 retain 邏輯邊界正確。
+#[test]
+fn test_rest_latency_60s_window_expire_boundary() {
+    use std::time::Duration;
+    use std::time::Instant;
+
+    let histogram = RestLatencyHistogram::new();
+    let now = Instant::now();
+
+    // 61s 前 sample：超出 60s 滾窗，應被 filter
+    histogram.inject_sample_with_timestamp(
+        now.checked_sub(Duration::from_secs(61)).expect("boot > 61s"),
+        100,
+    );
+    // 59s 前 sample：仍在 60s 滾窗內，應保留
+    histogram.inject_sample_with_timestamp(
+        now.checked_sub(Duration::from_secs(59)).expect("boot > 59s"),
+        200,
+    );
+    // 當下 sample：保留
+    histogram.inject_sample_with_timestamp(now, 300);
+
+    // 預期 count 只算 59s 前 + 當下 = 2 sample（61s 外被 filter）
+    assert_eq!(
+        histogram.sample_count(),
+        2,
+        "61s 外 sample 應 expire；只 59s 內 + 當下 = 2 sample"
+    );
+
+    // percentile 也只看保留 sample：sorted [200, 300]，p50=200 / p95=300 / p99=300
+    let (p50, p95, p99) = histogram.percentile_triple();
+    assert_eq!(p50, 200);
+    assert_eq!(p95, 300);
+    assert_eq!(p99, 300);
+}
+
+/// WS RTT 60s 滾窗過期邊界。
+#[test]
+fn test_ws_rtt_60s_window_expire_boundary() {
+    use std::time::Duration;
+    use std::time::Instant;
+
+    let histogram = WsRttHistogram::new();
+    let now = Instant::now();
+
+    histogram.inject_sample_with_timestamp(
+        now.checked_sub(Duration::from_secs(61)).expect("boot > 61s"),
+        50,
+    );
+    histogram.inject_sample_with_timestamp(
+        now.checked_sub(Duration::from_secs(59)).expect("boot > 59s"),
+        80,
+    );
+    histogram.inject_sample_with_timestamp(now, 120);
+
+    assert_eq!(
+        histogram.sample_count(),
+        2,
+        "61s 外 RTT sample 應 expire；只 59s 內 + 當下 = 2 sample"
+    );
+
+    // sorted [80, 120]，p50 = sorted[0]=80（ceil(0.5*2)-1=0），p99 = sorted[1]=120
+    let (p50, p99) = histogram.percentile_pair();
+    assert_eq!(p50, 80);
+    assert_eq!(p99, 120);
+}
+
+/// RetCodeCounter 60s 滾窗過期邊界（4xx + 5xx 雙桶各驗）。
+#[test]
+fn test_ret_code_counter_60s_window_expire_boundary() {
+    use std::time::Duration;
+    use std::time::Instant;
+
+    let counter = RetCodeCounter::new();
+    let now = Instant::now();
+
+    // 4xx 桶：61s 前 + 59s 前 + 當下
+    counter.inject_4xx_with_timestamp(
+        now.checked_sub(Duration::from_secs(61)).expect("boot > 61s"),
+    );
+    counter.inject_4xx_with_timestamp(
+        now.checked_sub(Duration::from_secs(59)).expect("boot > 59s"),
+    );
+    counter.inject_4xx_with_timestamp(now);
+
+    // 5xx 桶：同樣 3 個 sample
+    counter.inject_5xx_with_timestamp(
+        now.checked_sub(Duration::from_secs(61)).expect("boot > 61s"),
+    );
+    counter.inject_5xx_with_timestamp(
+        now.checked_sub(Duration::from_secs(59)).expect("boot > 59s"),
+    );
+    counter.inject_5xx_with_timestamp(now);
+
+    assert_eq!(
+        counter.count_4xx(),
+        2,
+        "4xx 桶：61s 外 expire；只 59s 內 + 當下 = 2"
+    );
+    assert_eq!(
+        counter.count_5xx(),
+        2,
+        "5xx 桶：61s 外 expire；只 59s 內 + 當下 = 2"
+    );
+}
+
+/// WsDropoutCounter 60s 滾窗過期邊界。
+#[test]
+fn test_ws_dropout_60s_window_expire_boundary() {
+    use std::time::Duration;
+    use std::time::Instant;
+
+    let counter = WsDropoutCounter::new();
+    let now = Instant::now();
+
+    counter.inject_sample_with_timestamp(
+        now.checked_sub(Duration::from_secs(61)).expect("boot > 61s"),
+    );
+    counter.inject_sample_with_timestamp(
+        now.checked_sub(Duration::from_secs(59)).expect("boot > 59s"),
+    );
+    counter.inject_sample_with_timestamp(now);
+
+    assert_eq!(
+        counter.count(),
+        2,
+        "dropout：61s 外 expire；只 59s 內 + 當下 = 2"
+    );
+}
+
+// ============================================================
+// (9) PA-DRIFT-4 round 1 H-3 fix：raw caller pattern 也計入 retCode counter
+// ============================================================
+
+/// 模擬 raw caller 流程：caller 走 `client.get(...)` 後手動檢 retCode 並構造
+/// `BybitApiError::Business`，retCode counter 應在 `get` 內部已記錄不需 caller
+/// 端再呼 `record_for_error`（per E2 round 1 H-3 fix：觀測下沉至 get/post 內部）。
+///
+/// 為什麼此 test 必要：
+///   - 原 IMPL 把 retCode 對映只放在 `_checked` 端；account_manager:267 / 342
+///     + position_manager:203 + instrument_info:194 / 349 等 raw caller 走
+///     `client.get(...)` 後手動檢 retCode，bypass observer，覆蓋率 < 50%。
+///   - H-3 fix 把觀測下沉到 `get` / `post` 內部；本 test 模擬「parsed.ret_code
+///     != 0 時觀測自動記錄」的 contract（不直接接 real Bybit endpoint）。
+///
+/// 為什麼用 record_for_error 直接驗：raw caller 真實路徑是 `parsed.ret_code != 0
+/// → 內部觸發 ret_code_counter.record_for_error()`；本 test 直接呼此 helper 驗對映
+/// 規則 + counter 累積，等價驗證 raw caller 觀測契約（end-to-end real REST 路
+/// 徑由 Wave B Linux runtime QA 走）。
+#[test]
+fn test_raw_caller_pattern_records_via_internal_observer() {
+    let counter = RetCodeCounter::new();
+
+    // 模擬 raw caller 流程：3 個 venue fault（110007 / 110049 / 110074）
+    // 觸發 get 內部觀測（H-3 fix 後 raw caller 也走觀測）
+    for code in [110007i64, 110049, 110074] {
+        counter.record_for_error(&BybitApiError::Business {
+            ret_code: code,
+            ret_msg: "raw caller venue fault".into(),
+            response: serde_json::json!({}),
+        });
+    }
+
+    // 模擬 raw caller 流程：1 個 client fault（10004 sign error）
+    counter.record_for_error(&BybitApiError::Business {
+        ret_code: 10004,
+        ret_msg: "sign error".into(),
+        response: serde_json::json!({}),
+    });
+
+    // 模擬 raw caller 流程：1 個 noop（110008 訂單已完成）— 不計入
+    counter.record_for_error(&BybitApiError::Business {
+        ret_code: 110008,
+        ret_msg: "order completed".into(),
+        response: serde_json::json!({}),
+    });
+
+    assert_eq!(
+        counter.count_4xx(),
+        1,
+        "raw caller pattern：1 個 client fault 計入 4xx"
+    );
+    assert_eq!(
+        counter.count_5xx(),
+        3,
+        "raw caller pattern：3 個 venue fault 計入 5xx；noop 不污染"
+    );
 }

@@ -11976,3 +11976,50 @@ PA Sprint 2 Phase 3e PM sign-off §4.1 item 4 + §6.1.4：Sprint 4+ first Live c
 
 ### 報告
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_4_pa_drift_5_risk_envelope_wireup.md`
+
+---
+
+## 2026-05-23 — Sprint 4+ Wave A round 2 combined fix (PA-DRIFT-4 4 finding + PA-DRIFT-5 2 finding)
+
+### 任務
+PM dispatch combined fix：E2 round 1 對 PA-DRIFT-4 (REJECT) + PA-DRIFT-5 (APPROVE-WITH-CONDITIONS) verdicts；single-thread。
+
+### 修 6 finding
+
+**PA-DRIFT-4**：
+- H-1 BLOCKER：`record_for_error` noop guard，引用 `BybitRetCode::is_noop()` SSOT 5 個 code（110001/110008/110010/110043/170213）不計 4xx 也不計 5xx
+- H-2：4 instrumentation 加 `inject_sample_with_timestamp` test-only accessor（`pub` + `#[doc(hidden)]`，integration test crate visibility 需要）+ 4 boundary test (rest_latency / ws_rtt / ret_code 雙桶 / ws_dropout)
+- H-3：retCode 觀測下沉 `get`/`post` 內部；`_checked` 不再 record 避雙重計；raw caller 自動覆蓋
+- M-1：注釋補 boot < 60s edge case 行為（fail-safe 保守清空）
+
+**PA-DRIFT-5**：
+- F-1 (MED)：cap=100k comment 改為「24h × push rate 隱式上限；無顯式 cap」（選項 a）
+- F-3 (MED)：trait 加 default `snapshot_5_metric()` + 新 struct `RiskEnvelopeSampleSnapshot`；`PortfolioStateCache::snapshot_5_metric` + `RealRiskEnvelopeSourceProbe::snapshot_5_metric` override 走 batch read（一次 lock）；既有 mock 走 default impl backward compat
+
+### LOC
+- bybit_rest_client.rs: 1272→1367 (+95)
+- bybit_private_ws.rs: 1693→1718 (+25)
+- risk_envelope.rs: 849→896 (+47)
+- risk_envelope_probe_impl.rs: 698→822 (+124)
+- api_latency_probe_real_impl.rs (test): 350→622 (+272)
+- risk_envelope_probe_real_impl.rs (test): 408→535 (+127)
+
+### cargo test
+- PA-DRIFT-4 integration: **22/22 PASS**（15 baseline + 7 new: 2 noop + 4 boundary + 1 raw caller）
+- PA-DRIFT-5 integration: **14/14 PASS**（11 baseline + 3 new batch read）
+- bybit_rest_client lib: **29/29 PASS**
+- health lib unit: **107/107 PASS**（+2 new inline）
+- lib full: **3172/0/1 ignored**
+- Track A-F + replay + spike regression: 全綠
+- 累計 cargo test 全套: **3499 PASS / 0 FAIL / 4 ignored**
+- nm AC-5: **0 hit**（`mock_instant/tokio::time::pause/spike` 三關鍵字）
+- `inject_*` symbol leak check: **0 hit**（release build optimizer drop unused pub method）
+
+### 教訓
+1. **integration test crate visibility**：`#[cfg(test)]` 端 method 在 `tests/` 子目錄 integration test 不可見（外部 crate）；用 `pub` + `#[doc(hidden)]` 解 + 確認 release build optimizer 自動 drop（nm 0 hit 實證 invariant）
+2. **既有 test 反映新 invariant 必修**：H-1 fix 改變 noop 集合對映；既有 `test_ret_code_counter_4xx_5xx_classify` 用 110001 → 改為非 noop 的 110003 才能反映新語意；屬語意正確 test update 非破壞性改動
+3. **觀測下沉設計**：observer 在 `_checked` 端只覆蓋部分 caller；下沉到 `get`/`post` 內部覆蓋所有 raw caller + `_checked` simplify 端避免雙重計
+4. **trait extension backward compat**：trait default method + 新 Snapshot struct + override path = mock impl 不破壞 + production impl 走優化路徑
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint_4_wave_a_round2_combined_fix.md`
