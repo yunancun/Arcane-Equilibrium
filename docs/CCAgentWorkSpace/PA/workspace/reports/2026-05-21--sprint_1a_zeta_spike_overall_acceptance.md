@@ -422,13 +422,9 @@ per `2026-05-21--v58_dispatch_consolidation.md` 14 audit verdict：
 | `srv/sql/migrations/V106__health_observations.sql` | V106 full DDL；6 ADR-0042 domain CHECK + hypertable + amp cap column |
 | `srv/sql/migrations/V107__replay_divergence_log.sql` | V107 full DDL；27 column + Guard A forbidden field check + mv |
 | `srv/sql/migrations/V112__lease_lal_tiers.sql` | V112 full DDL；5 LAL_X_* name CHECK + tier_level 0-4 CHECK |
-| `srv/rust/openclaw_engine/src/health/mod.rs` | M3 4-state ladder + amp cap 3 guard 嚴格 fire 語意 |
-| `srv/rust/openclaw_engine/src/health/state_machine.rs` | M3 state machine + dwell time + flap suppression |
-| `srv/rust/openclaw_engine/src/health/engine_runtime_domain.rs` | M3 engine_runtime 1 domain CPU + RSS + heartbeat 30s sampling |
-| `srv/rust/openclaw_engine/src/health/amplification_cap.rs` | M3 24h suppression Rust enforce |
-| `srv/rust/openclaw_engine/src/governance/lal_state_machine.rs` | M1 LAL state machine skeleton；Tier 0/1 + Tier 2-4 stub |
-| `srv/rust/openclaw_engine/tests/m3_amp_cap_24h_fire.rs` | AC-5 24h fire test 3/3 |
-| `srv/rust/openclaw_engine/tests/spike_lal_transition.rs` | AC-4 5 row Tier 0→1 transition cycle |
+| `srv/rust/openclaw_engine/src/health/mod.rs` | M3 4-state ladder + state machine + dwell time + flap suppression + engine_runtime 1 domain CPU/RSS/heartbeat 30s sampling + amp cap 3 guard 嚴格 fire 語意（IMPL 為 single-file mod，無獨立 state_machine.rs / engine_runtime_domain.rs / amplification_cap.rs sub-module）|
+| `srv/rust/openclaw_engine/src/governance/lal/mod.rs` | M1 LAL state machine skeleton；Tier 0/1 + Tier 2-4 stub（IMPL 為 `lal/` directory + `mod.rs`，非 `lal_state_machine.rs` single file）|
+| `srv/rust/openclaw_engine/tests/m3_amp_cap_24h_fire.rs` | AC-5 24h fire test 3/3 + AC-4 LAL Tier 0→1 transition 涵蓋（無獨立 `spike_lal_transition.rs` test file）|
 | `srv/helper_scripts/replay/m11_spike/spike_trigger.py` | M11 manual trigger（461 LOC round 2）|
 | `srv/helper_scripts/replay/m11_spike/divergence_d1_fill_chain.py` | D1 fill_chain detector（212 LOC round 2）|
 | `srv/helper_scripts/replay/m11_spike/dedup_contract_test.py` | AC-6 dedup contract 5+1 condition driver（511 LOC round 2）|
@@ -438,12 +434,12 @@ per `2026-05-21--v58_dispatch_consolidation.md` 14 audit verdict：
 
 | Phase | Report path |
 |---|---|
-| Phase 2 Track A IMPL | `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1a_zeta_track_a_m1_lal_v112_impl.md` |
+| Phase 2 Track A IMPL | inline message handover（無獨立 report file；E1 IMPL DONE 通過 sub-agent final response 交付） |
 | Phase 2 Track B IMPL round 2 | `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1a_zeta_track_b_m3_health_v106_impl_round2.md` |
 | Phase 2 Track C IMPL | `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1a_zeta_track_c_v107_m11_spike.md` |
-| Phase 3a Track A E2 round 1 | `srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-22--sprint_1a_zeta_track_a_e2_review_round1.md` |
-| Phase 3a Track B E2 round 2 | `srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-22--sprint_1a_zeta_track_b_e2_review_round2.md` |
-| Phase 3a Track C E2 round 2 | `srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-22--sprint_1a_zeta_track_c_e2_review_round2.md` |
+| Phase 3a Track A E2 round 1 | inline message handover（無獨立 report file；E2 review 通過 sub-agent final response 交付） |
+| Phase 3a Track B E2 round 2 | inline message handover（無獨立 report file；E2 review 通過 sub-agent final response 交付） |
+| Phase 3a Track C E2 round 2 | inline message handover（無獨立 report file；E2 review 通過 sub-agent final response 交付） |
 | Phase 3a PA Spec Reconcile | `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_1a_zeta_phase_3a_spec_reconcile.md` |
 | Phase 3b E4 regression | `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-22--sprint_1a_zeta_phase_3b_regression.md` |
 | Phase 3c QA empirical verify | `srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-22--sprint_1a_zeta_phase_3c_qa_empirical_verify.md` |
@@ -464,7 +460,7 @@ per `2026-05-21--v58_dispatch_consolidation.md` 14 audit verdict：
 | ADR-0034 M1 LAL | `srv/docs/adr/0034-decision-lease-layered-approval-lal.md` |
 | ADR-0036 M8 anomaly + M10 blacklist | `srv/docs/adr/0036-m8-anomaly-detection-and-m10-tier-d-model-blacklist.md` |
 | ADR-0038 M11 replay | `srv/docs/adr/0038-m11-continuous-counterfactual-replay-and-liquidations-source.md` |
-| ADR-0042 M3 health domain taxonomy | `srv/docs/adr/0042-m3-health-domain-taxonomy.md` |
+| ADR-0042 M3 health monitoring | `srv/docs/adr/0042-m3-health-monitoring.md` |
 | ADR-0044 M7 decay enforced single authority | `srv/docs/adr/0044-m7-decay-enforced-single-authority.md` |
 
 ---

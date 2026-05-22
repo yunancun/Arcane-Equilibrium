@@ -5185,3 +5185,26 @@ Sweep wrapper pattern 在 metrics 重型 monolithic function (1162 LOC `compute_
 **Confidence**:HIGH for 5 reconcile verdict + 27 spec patch + 3 carry-over E1 round 2 task;HIGH for Linux PG empirical 驗證真實 schema;HIGH for governance authority hierarchy 推理(ADR-0042 Decision 3 + M3 design spec §2.1 + Rust enum 三方一致對齊新命名);MEDIUM for V112 §1.3 sister table 反向驗證副作用(`governance.canary_stage_metric_seed` 不存在的成因未深查 — 可能 V## 未 land 或概念命名 mis-spell;不阻塞 V112 schema migration apply 但 spec 內 hint 須改寫)。
 
 **Report path**:`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_1a_zeta_phase_3a_spec_reconcile.md`(411 行 / 10 section)
+
+---
+
+## 2026-05-22 — Sprint 1A-ε P2 N1 spec literal patch `sqlx_migrate` not a real binary
+
+**Context**: E3 Sprint 1A-ε P1 sandbox_admin role 創建報告 §4.1 push back — PA Phase 3e sign-off §4.2 + QA Phase 3c §1.4 寫的 `cargo run --release --bin sqlx_migrate -- run` 不是真實 binary。
+
+**Lesson**: PA 寫 sign-off / spec doc 時必須對 binary 名做 empirical confirm（`ls src/bin/` + `grep '^name = ' Cargo.toml`），不能信「直覺命名」。本次 sqlx_migrate 字面是 PA Phase 3e sign-off 從 「sqlx + migrate」概念合成，但 workspace 真實 binary 列表只有：openclaw-engine / repair_migration_checksum / feature_baseline_writer / replay_runner / (hot_path_baseline + intent_processor_exposure)。
+
+**Real migration path**:
+- Engine startup auto-migrate (`src/main.rs:633-650` 內嵌 `MigrationRunner::run_if_enabled`)
+- Env trigger `OPENCLAW_AUTO_MIGRATE=1` (預設 OFF per 2026-04-24 V023 silent-noop postmortem)
+- 失敗行為 engine startup abort（loud-fail by design）
+
+**Patch scope**: 1 file 1 line（spike scope spec doc AC-2 line 274）。V106/V107/V112 spec doc 引用 `repair_migration_checksum` 是**真實 binary**（不誤導，不 patch）。歷史 PA Phase 3e sign-off + QA Phase 3c report 是時點記錄不 retroactive 改寫，以本 patch report 為更正記錄。
+
+**Sprint 1B E1 carry-over**:
+- Path A（推薦 E3）：`openclaw-engine --dry-run-migrations-only` flag（E1 加 0.5-1 hr）
+- Path B（後備）：新建 `rust/openclaw_engine/src/bin/sandbox_migrate_runner.rs`（1-2 hr E1 + 1 hr E2）
+
+**Anti-pattern**: PA 在 sign-off 場景憑藉「sqlx 應該有 migrate binary」直覺命名而不 empirical confirm Cargo binary list；下次 sign-off PR 內含 cargo run --bin <name> 引用時必 grep `[[bin]]` 確認。
+
+**Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_1a_epsilon_p2_n1_spec_literal_patch.md`
