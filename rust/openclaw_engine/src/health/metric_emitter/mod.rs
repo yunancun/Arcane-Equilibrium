@@ -74,6 +74,24 @@ pub trait MetricSample: Send + Sync + 'static {
     fn numeric_value(&self) -> f64;
     /// 當前 sample 立即 classify band（window aggregation 由 scheduler 處理）。
     fn classify_band(&self) -> HealthState;
+
+    /// 採樣端額外 evidence_json payload（per Sprint 2 round 3 Track C MEDIUM-3
+    /// fix）。
+    ///
+    /// 為什麼 trait 加此 method（default None）:
+    ///   - scheduler 端 run_domain_loop 寫 V106 row 時除 reject_reason 與
+    ///     sample_error 兩條既有 evidence_json 路徑外，sample 端可能也帶採樣
+    ///     上下文需 audit trail（如 database_pool disconnected 標記）。
+    ///   - default 返 None：不影響既有 Track A engine_runtime / spike Track B
+    ///     pipeline_throughput row 寫 evidence_json 行為。
+    ///   - 與既有 reject_reason / sample_error evidence_json 路徑互斥：sample
+    ///     端 extra_evidence 是「採樣成功但有條件需 audit」場景（如 disconnected
+    ///     fail-closed OK band），不重複 sample_error 「採樣失敗」語意。
+    ///   - per M3 design spec §2.3.2 disconnected handling 「disconnected 不靜
+    ///     默」evidence_json 寫入路徑。
+    fn extra_evidence(&self) -> Option<serde_json::Value> {
+        None
+    }
 }
 
 // ============================================================
@@ -713,6 +731,13 @@ async fn run_domain_loop(
                     let metric_name = sample.metric_name();
                     let value = sample.numeric_value();
                     let _instant_band = sample.classify_band();
+                    // 為什麼在 for sample loop 開頭抓 extra_evidence（per Sprint 2
+                    // round 3 Track C MEDIUM-3 fix）:
+                    //   - sample 在 classify / SM observe 之後仍要寫 V106 row；
+                    //     extra_evidence 是 sample-time 採樣 audit；不依賴 SM 結
+                    //     果。disconnected 場景 sample 採樣成功（fail-closed OK
+                    //     band）但要寫 evidence_json `{"pool_status": "disconnected"}`。
+                    let sample_extra_evidence = sample.extra_evidence();
                     let anomaly_id = format!("{}__{}", domain.as_str(), metric_name);
 
                     // ----------------------------------------
@@ -829,6 +854,17 @@ async fn run_domain_loop(
                     //   per spec §3 D3，reject 場景 evidence_json 寫 reject_reason；
                     //   state 維持 current（不變 transition）；不 Slack / Console
                     //   badge / halt strategy / 降 LAL Tier（Sprint 5/7/8 才接）。
+                    //
+                    // 為什麼 reject_reason / sample-extra_evidence 互斥處理（per
+                    // Sprint 2 round 3 Track C MEDIUM-3 fix）:
+                    //   - reject_reason 是 SM observe 端 reject 場景；
+                    //     extra_evidence 是 sample 端採樣 audit 場景。
+                    //   - 兩者不同時 fire：sample 採樣成功且 extra_evidence != None
+                    //     時 observe 必返 Ok(true) / Ok(false) 路徑（同 SM 邏輯），
+                    //     reject_reason 由 observe 端 reject branch 才設立。
+                    //   - 若同時 fire，reject_reason 優先（D3 path 更關鍵）；
+                    //     extra_evidence 在 reject 場景被 reject_reason 覆蓋是
+                    //     spec §2.3.2 acceptable（disconnected + reject 並列罕見）。
                     if let Some(reason) = observe_outcome.reject_reason {
                         row = row.with_evidence(serde_json::json!({
                             "reject_reason": reason,
@@ -836,6 +872,11 @@ async fn run_domain_loop(
                             "target_state": band_from_mean.as_str(),
                             "current_state": observe_outcome.current_state.as_str(),
                         }));
+                    } else if let Some(extra) = sample_extra_evidence {
+                        // sample 端 extra_evidence 寫入（如 database_pool
+                        // disconnected `{"pool_status": "disconnected"}` audit
+                        // trail；per M3 design spec §2.3.2 disconnected handling）。
+                        row = row.with_evidence(extra);
                     }
 
                     let _ = writer.write_observation(row).await;
@@ -867,6 +908,25 @@ async fn run_domain_loop(
     }
 }
 
+/// pub wrapper for integration test only — per Sprint 2 round 2 Track C HIGH-2
+/// fix。
+///
+/// 為什麼開 pub re-export 而非 pub 主 fn:
+///   - 集中 helper 仍維持 private 封裝（內部 classify routing 不洩漏給外部
+///     caller）；integration test（`tests/sprint2_track_c_database_pool.rs` 等）
+///     需驗 classify_aggregated 真實 dispatch 對應 domain arm 不退化，借此 pub
+///     wrapper 端到端守 HIGH-1 不退化（避 `_ => HealthOk` fallback 誤接）。
+///   - 命名顯式 `_for_test` 表達意圖：production code path 走 private
+///     `classify_aggregated`；外部 test 走此 wrapper；兩者邏輯等價。
+#[doc(hidden)]
+pub fn classify_aggregated_for_test(
+    domain: HealthDomain,
+    metric_name: &str,
+    mean: f64,
+) -> HealthState {
+    classify_aggregated(domain, metric_name, mean)
+}
+
 /// 5-sample mean 走 classify_band。
 ///
 /// 為什麼集中此 helper:
@@ -886,21 +946,90 @@ fn classify_aggregated(domain: HealthDomain, metric_name: &str, mean: f64) -> He
             }
         }
         (HealthDomain::EngineRuntime, "open_fd_count") => {
-            classify_engine_runtime_open_fd_count(mean as u32)
+            // 為什麼用 mean.round() 而非 mean as u32：
+            //   raw `as u32` 是 truncation（mean=2.8 → 2）；對 ladder boundary
+            //   附近的 sample 會錯歸 band（per Sprint 2 round 2 MEDIUM-2 fix）。
+            //   round 對齊「半入」語意（mean=2.5 → 3），更貼近 5-sample mean
+            //   反映的整數 count 概念。
+            classify_engine_runtime_open_fd_count(mean.round() as u32)
         }
         (HealthDomain::EngineRuntime, "thread_count") => {
-            classify_engine_runtime_thread_count(mean as u32)
+            // 同 open_fd_count：count 類 metric 走 round 不 truncate。
+            classify_engine_runtime_thread_count(mean.round() as u32)
         }
         (HealthDomain::EngineRuntime, "uptime_sec") => {
             // 5-sample mean uptime > 60s → OK；連續 sample 都 < 60s → WARN。
-            if (mean as u64) < 60 {
+            // 同樣走 round 避 boundary 上 trunctate 差 0.x 秒誤歸 band。
+            if (mean.round() as u64) < 60 {
                 HealthState::HealthWarn
             } else {
                 HealthState::HealthOk
             }
         }
-        // 其他 domain（pipeline_throughput / database_pool / api_latency /
-        // strategy_quality / risk_envelope）Track B/C/D/E/F 接時擴此 match。
+        // ----- pipeline_throughput (Track B) -----
+        // 為什麼 5 metric 各自 hardcode classify：對齊 spec §4.3「先 hardcode；
+        // Sprint 5 Tier 1 ArcSwap 熱更新」；threshold 來自 M3 design spec §2.3
+        // line 102（per pipeline_throughput.rs classify_pipeline_throughput_*
+        // 5 helper）。
+        (HealthDomain::PipelineThroughput, "ws_tick_rate_per_sec") => {
+            super::domains::pipeline_throughput::classify_pipeline_throughput_ws_tick_rate(mean)
+        }
+        (HealthDomain::PipelineThroughput, "ws_heartbeat_lag_ms") => {
+            // mean.round() 避 truncate 誤歸 band（例 mean=60_000.6ms truncate
+            // 為 60_000 漏 CRITICAL；round 為 60_001 正確 CRITICAL）。
+            super::domains::pipeline_throughput::classify_pipeline_throughput_heartbeat_lag_ms(
+                mean.round() as u32,
+            )
+        }
+        (HealthDomain::PipelineThroughput, "ws_subscription_drift_count") => {
+            // count 類 metric round 對齊：例 5-sample [3,3,3,3,2] mean=2.8
+            // round=3 為 DEGRADED；truncate=2 誤歸 WARN（per Sprint 2 round 2
+            // dispatch 範例）。
+            super::domains::pipeline_throughput::classify_pipeline_throughput_subscription_drift(
+                mean.round() as u32,
+            )
+        }
+        (HealthDomain::PipelineThroughput, "strategy_signal_rate_per_min") => {
+            super::domains::pipeline_throughput::classify_pipeline_throughput_signal_rate(mean)
+        }
+        (HealthDomain::PipelineThroughput, "ipc_roundtrip_ms_p99") => {
+            super::domains::pipeline_throughput::classify_pipeline_throughput_ipc_roundtrip_ms_p99(
+                mean,
+            )
+        }
+        // ----- database_pool (Track C) -----
+        // 為什麼 4 metric dispatch（per Sprint 2 round 3 MEDIUM-1 C fix Path A）:
+        //   - pg_pool_active_conn raw 是 telemetry-only（單值無 max context 不
+        //     能 classify ratio）；走 _ => HealthOk fallback 設計上正確，不誤
+        //     升 SM state。
+        //   - pg_pool_active_conn_ratio 是 ratio 化後的 metric（emitter 端在
+        //     `into_metric_rows` 計算 active/max），單值入 classify_aggregated
+        //     可用 `classify_database_pool_active_conn_ratio(ratio)` helper。
+        //   - 其他 3 metric (wait/queue/disk) 已 round 2 HIGH-1 fix 接通。
+        // 為什麼 pg_pool_active_conn raw 仍走 fallback 不刪:
+        //   - raw 留 telemetry 觀測語意（V106 row 仍寫 active 數值）；fail-closed
+        //     OK band 不會誤升 cascade，且 ratio 路徑已守住真實升階。
+        (HealthDomain::DatabasePool, "pg_pool_active_conn_ratio") => {
+            // mean 即 5-sample ratio mean，直接走 helper。
+            super::domains::database_pool::classify_database_pool_active_conn_ratio(mean)
+        }
+        (HealthDomain::DatabasePool, "pg_pool_wait_ms_p95") => {
+            super::domains::database_pool::classify_database_pool_wait_ms_p95(
+                mean.round() as u32,
+            )
+        }
+        (HealthDomain::DatabasePool, "pg_writer_queue_depth") => {
+            super::domains::database_pool::classify_database_pool_writer_queue_depth(
+                mean.round() as u32,
+            )
+        }
+        (HealthDomain::DatabasePool, "disk_data_dir_used_pct") => {
+            // f64 走 helper 不需 cast；mean 即 used pct。
+            super::domains::database_pool::classify_database_pool_disk_used_pct(mean)
+        }
+        // 其他 domain（api_latency / strategy_quality / risk_envelope）由 Track
+        // D/E/F 接時擴此 match；database_pool::pg_pool_active_conn raw 走
+        // fallback OK band 屬 telemetry-only 設計 per Sprint 2 round 3 fix。
         _ => HealthState::HealthOk,
     }
 }

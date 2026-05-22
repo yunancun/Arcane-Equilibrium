@@ -99,13 +99,38 @@ threshold 數值列入 V106 spec `regime_threshold_table`（per ADR-0036 Decisio
 | Domain | OK band | WARN band | DEGRADED band | CRITICAL band | Measurement window |
 |---|---|---|---|---|---|
 | `engine_runtime` | PID alive + RSS < 2GB + CPU < 50% | RSS 2-4GB OR CPU 50-80% | RSS > 4GB OR CPU > 80% 持續 5min | PID dead OR engine restart loop > 3/5min | 30s sample, 5min rolling |
-| `pipeline_throughput` | WS tick rate > 1/sec/symbol + ipc p99 < 5ms | tick rate < 1/sec/symbol 持續 2min OR ipc p99 5-10ms | tick rate < 0.5/sec/symbol OR ipc p99 > 10ms | WS dropout > 60s OR ipc p99 > 50ms | 30s sample, 5min rolling |
-| `database_pool` | queue < 100 + pool wait p95 < 50ms + disk < 70% | queue 100-500 OR wait 50-200ms OR disk 70-85% | queue > 500 OR wait > 200ms OR disk > 85% | queue > 5000 OR pool exhausted OR disk > 95% | 60s sample |
+| `pipeline_throughput` | WS tick rate > 1/sec/symbol + ipc p99 < 5ms + ws_subscription_drift_count = 0 + strategy_signal_rate_per_min ≥ 0.5 | tick rate 0.5-1.0/sec/symbol OR ipc p99 5-10ms OR ws_subscription_drift_count 1-2 OR strategy_signal_rate_per_min 0.1-0.5 | tick rate < 0.5/sec/symbol OR ipc p99 > 10ms OR ws_subscription_drift_count ≥ 3 OR strategy_signal_rate_per_min < 0.1 | heartbeat_lag_ms > 60_000 (WS dropout > 60s) OR ipc p99 > 50ms | 30s sample, 5min rolling |
+| `database_pool` | active/max < 80% + queue < 1000 + pool wait p95 < 100ms + disk < 70% | active/max 80-95% OR queue 1000-5000 OR wait 100-500ms OR disk 70-85% | active/max > 95% OR queue > 5000 OR wait > 500ms OR disk > 85% | pool disconnected → fail-closed OK band (per §2.3.2 disconnected handling) | 60s sample |
 | `api_latency` | success rate > 99% + p95 < 500ms | success rate 97-99% OR p95 500-1000ms | success rate < 97% OR p95 > 1000ms 持續 5min | success rate < 90% OR WS reconnect storm | 60s sample, 5min rolling |
 | `strategy_quality` | fill rate > 80% + slippage p95 < 5bps + lease grant rate > 70% | fill rate 60-80% OR slippage 5-10bps OR lease grant 50-70% | fill rate < 60% OR slippage > 10bps 持續 15min OR dormant > 60min | dormant > 6h OR fill rate < 20% OR lease grant < 10% | 5min sample, 1h rolling |
 | `risk_envelope` | cum loss < $500/24h + dd < 5% + corr < 0.5 + top1 < 30% | cum loss $500-1500/24h OR dd 5-10% OR corr 0.5-0.7 OR top1 30-50% | cum loss $1500-2500/24h OR dd 10-15% OR corr > 0.7 OR top1 > 50% | cum loss > $2500/24h OR dd > 15% | 5min sample |
 
 **HEALTH_CATASTROPHIC** = portfolio cum loss > $3000（既有 D2 kill criteria；M3 不重定義 only mirror 觀測）。
+
+### 2.3.1 metric classify vs SM band dwell — 區分（per 2026-05-22 E2 round 1 HIGH-2 + HIGH-1 fix）
+
+**重要區分**（避免 line 102 ladder literal 與 §3.3 SM dwell time 混淆）：
+
+- **metric classify band**（本 §2.3 ladder）：每 sample 即時 classify_band；emitter 端純規則決策（如 ws_tick_rate=0.4 → metric=DEGRADED；heartbeat_lag_ms=70000 → metric=CRITICAL；ipc_p99=55 → metric=CRITICAL）。**無 dwell 概念**，每 sample 都立即得 band 樣本。
+- **SM band dwell**（§3.3 transition matrix）：SM 接 emitter 連續若干 sample 後才 fire 升階 transition（OK→WARN 60s dwell；WARN→DEGRADED 5min dwell）。
+- **measurement window vs dwell time**（per §4.3）：metric_value 計算的 rolling window（如 ws p95 5min 窗）≠ SM transition 觸發前必持續落 band 的 dwell time；兩者必須獨立。
+
+**heartbeat_lag_ms 即時 CRITICAL**：`heartbeat_lag_ms > 60_000 ms` 屬 metric classify=CRITICAL **即時 fire**，**不走 dwell 累積**；SM ladder 收到 CRITICAL band 樣本後仍走標準升階 matrix（OK→WARN→DEGRADED→CRITICAL，每階段各自 dwell；中繼經 WARN），但 metric_value 寫 V106 row 標 metric_classify_band=CRITICAL 不延遲。
+
+**「持續 2min」literal 的本義**（per E2 round 1 HIGH-2 reject root cause clarify）：v5.7 carry-over 用詞為非規範性語意（描述「WARN band 樣本期望持續 2min 觸發 SM 升階」的直覺敘述）；**真規範值** = §3.3 line 165 SM OK→WARN dwell **60s**；本 §2.3 ladder line 102 採用「即時 classify band」語意，dwell 由 §3.3 SM 統一處理。
+
+### 2.3.2 database_pool disconnected handling — fail-closed OK band（per 2026-05-22 E2 round 1 MEDIUM-3 C fix）
+
+當 sqlx `PgPool` 不可用（`DbPool::get()` 返 None / disconnected wrapper）時：
+
+- **metric classify**：所有 4 metric (pool_active_conn / pool_wait_ms_p95 / writer_queue_depth / disk_data_dir_used_pct) **回 OK band**；emitter 端不誤升 CRITICAL。
+- **rationale**：
+  1. 與 V106 spec §1.1 fail-closed 設計一致（sample error 場景 → V106 state=OK + evidence_json）；
+  2. 與 Track A scaffold sample_error 邏輯 pattern 對稱；
+  3. PG 真實斷線由 cascade event 接（engine_runtime PID dead / pipeline_throughput WS dropout / 既有 5-gate kill threshold；Sprint 5 才接），M3 emitter 自身不重複 emit CRITICAL；
+  4. 「失敗默認收縮」（§二 原則 6）的語意是「不主動升 cascade 造成更激進副作用」，OK band 是更保守的選擇；若硬升 CRITICAL，會自動 halt strategy + 降 LAL Tier，反而與「PG 短斷立即恢復」的常態場景衝突。
+- **disconnected 不靜默**：每 sample 雖回 OK band 但 evidence_json 仍寫 `{"pool_status": "disconnected"}` 留 audit trail（Sprint 2 D3 cascade reject log emit minimal pattern；Sprint 5 cascade subscribe 後可基於此 trigger 獨立路徑）。
+- **不獨立 CRITICAL classify**（Path B 拒）：避兩 domain 重複 emit CRITICAL（per ADR-0042 反模式 + V106 spec amplification cap）。
 
 ### 2.4 Multi-domain aggregation rule
 

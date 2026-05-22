@@ -26,6 +26,7 @@ per Sprint 1A-ζ Phase 1 PA refine pattern (`docs/execution_plan/2026-05-21--spr
 - Wave 2 (D3-D6)：Track D + E + F 3 並行；用 Wave 1 已 land scaffold
 - Phase chain：本 packet (~2-3 hr) → Phase 2 E1 × 6 並行 (38-52 hr) → Phase 3a E2 × 6 並行 (10-15 hr) → Phase 3b E4 (4-6 hr) → Phase 3c QA (4-6 hr) → Phase 3d TW (2-3 hr) → Phase 3e PM (1-2 hr) = **70-104 hr 真實 + buffer 後 75-115 hr**
 - **AC-1 拆分 a/b** (per 2026-05-22 E2 round 1 HIGH-3 + LOW-1 fix)：AC-1a = Wave 1 scaffold sign-off 用 in-memory `HealthObservationWriter` mock fixture（不接 PG；cargo test PASS 即可結 Wave 1）；AC-1b = Wave 2+ main.rs 接 scheduler 後 Phase 3c QA 跑 real PG empirical（30 min window row count ≥ 5；前置 = main.rs scheduler 接線完成）。AC-1b 不阻 Wave 1 scaffold sign-off。
+- **2026-05-22 E2 round 1 Track B+C 4 amend land**：HIGH-2「持續 2min」classify vs SM dwell clarify（M3 spec §2.3.1）；HIGH-1 heartbeat_lag CRITICAL > 60_000 ms 即時 fire SSOT（Track B IMPL `> 120_000` 必 revert 60_000；E1 round 2 修）；MEDIUM-1 B drift+signal_rate ladder threshold 補 M3 spec §2.3；MEDIUM-1 C `pool_max_conn` 5th column 加入 Sprint 2 spec §3.2；MEDIUM-3 C disconnected fail-closed OK band（M3 spec §2.3.2）。
 
 ---
 
@@ -198,7 +199,9 @@ Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event 
 |---|---|
 | AC-1a pipeline_throughput in-memory proxy (Wave 1 scaffold sign-off) | 5 sample window × N metric tick → ≥ N×5 V106 row count via in-memory `HealthObservationWriter` mock fixture（不接 PG；cargo test --release test_sprint2_track_b_pipeline_throughput_in_memory_proxy PASS）|
 | AC-1b pipeline_throughput real PG empirical (Wave 2+ main.rs 接 scheduler 後) | V106 30 min window pipeline_throughput row count ≥ 5 (real PG；Phase 3c QA 跑) |
-| AC-2 4-state ladder | OK→WARN→DEGRADED ladder fire test PASS |
+| AC-2 4-state ladder | OK→WARN→DEGRADED ladder fire test PASS（per M3 design spec §3.3 SM dwell：OK→WARN 60s；§2.3.1 metric classify 區分 SM dwell）|
+| **AC-2.1 heartbeat_lag_ms CRITICAL classify** (per 2026-05-22 E2 round 1 HIGH-1 fix) | `classify_pipeline_throughput_heartbeat_lag_ms(60_001)` returns `HealthState::HealthCritical`（不是 DEGRADED）；對齊 M3 design spec §2.3 line 102 + §2.3.1 即時 fire 規範 |
+| **AC-2.2 ws_subscription_drift_count + strategy_signal_rate ladder** (per 2026-05-22 E2 round 1 MEDIUM-1 B fix) | classify 對齊 M3 design spec §2.3 line 102 amend ladder：drift 0/1-2/3+ = OK/WARN/DEGRADED；signal_rate ≥0.5/0.1-0.5/<0.1 = OK/WARN/DEGRADED |
 | AC-4 cross-domain | pipeline_throughput DEGRADED 不影響 engine_runtime state |
 | AC-5 spike default false | production binary 不滲透 mock time |
 
@@ -247,6 +250,8 @@ Track B/C/D/E/F 用上述 scaffold；各 Track 不重做 trait + writer + event 
 | AC-1a database_pool in-memory proxy (Wave 2 scaffold sign-off) | 5 sample window × N metric tick → ≥ N×5 V106 row count via in-memory `HealthObservationWriter` mock fixture（不接 PG；cargo test --release test_sprint2_track_c_database_pool_in_memory_proxy PASS）|
 | AC-1b database_pool real PG empirical (Wave 2+ main.rs 接 scheduler 後) | V106 30 min window database_pool row count ≥ 3 (real PG；60s × 5 = 5 min cycle；Phase 3c QA 跑) |
 | AC-2 4-state ladder | OK→WARN→DEGRADED ladder fire test PASS |
+| **AC-2.3 pool_max_conn 5th column** (per 2026-05-22 E2 round 1 MEDIUM-1 C fix) | `DatabasePoolSample` 含 5 field 含 `pool_max_conn: u32`；`classify_database_pool_active_conn(active, max)` 計算 ratio = active/max；對齊 Sprint 2 design spec §3.2 amend |
+| **AC-2.4 disconnected fail-closed OK band** (per 2026-05-22 E2 round 1 MEDIUM-3 C fix) | `DbPool::get()` 返 None（disconnected）→ 4 metric 全 OK band；emitter sample_now 不 Err、不 panic；evidence_json 寫 `{"pool_status": "disconnected"}` audit trail；對齊 M3 design spec §2.3.2 + V106 spec §1.1 fail-closed 設計 |
 | AC-4 cross-domain | database_pool DEGRADED 不影響其他 5 domain state |
 | AC-5 spike default false | production binary 不滲透 mock time |
 
