@@ -21,6 +21,18 @@
 //!     sample；source closure 注入由 main.rs Wave 2 後接線）。
 //!   - `database_pool`：Track C IMPL（sqlx Pool stats + writer queue probe +
 //!     disk usage via sysinfo Disks）。
+//!   - `api_latency`：Track D IMPL（REST p50/p95/p99 + WS RTT p50/p99 +
+//!     HTTP 4xx/5xx retCode 累積 + ws_dropout 累積；60s sample；source
+//!     probe trait 注入；ret_code 用 HTTP 標準語意預留 multi-venue per
+//!     ADR-0040）。
+//!   - `strategy_quality`：Track E IMPL（per-strategy SM 25 instance =
+//!     5 strategy × 5 symbol + aggregate SM rule 0.40；fill_rate /
+//!     slippage / lease grant / dormant minute / signal count；5min sample；
+//!     trait probe 注入由 main.rs Wave 2 後接線）。
+//!   - `risk_envelope`：Track F IMPL（portfolio cum_pnl_24h / max_dd /
+//!     position_count / correlation_avg_pairwise / concentration_top1 — 300s
+//!     sample；source probe 注入由 main.rs Wave 2 後接線；emitter 只觀測，不
+//!     修 risk_verdict_ledger / position_snapshot / fill_writer SSOT）。
 //!
 //! 依賴:
 //!   - 全部沿用 Track A scaffold（`DomainEmitter` / `MetricSample` /
@@ -35,5 +47,8 @@
 //!   - 跨平台原生支援 Mac+Linux（per `feedback_cross_platform`）；不寫死
 //!     `cfg(target_os = "linux")` 分支。
 
+pub mod api_latency;
 pub mod database_pool;
 pub mod pipeline_throughput;
+pub mod risk_envelope;
+pub mod strategy_quality;

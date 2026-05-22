@@ -11780,3 +11780,69 @@ E2 Track B + Track C round 1 REJECT；本 round 修「deterministic fix（不需
 
 ### 報告
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_wave1_round3_pa_dependent_fix.md`
+
+---
+
+## 2026-05-22 Sprint 2 Wave 2 Track D — api_latency emitter IMPL
+
+### 教訓
+- **並行 atomic edit on shared mod.rs**: Wave 2 Track D + E + F 同時 atomic edit `domains/mod.rs` 加各自 `pub mod` 條目；初次 cargo build 因 Track E `strategy_quality.rs` source 尚未 land 而失敗（mod 條目已聲明，source 未到）；等 Track E sub-agent commit 後 lib build 恢復。**SOP**：並行 atomic edit shared file 時，先確認 cargo check 對自家 test 通過即可 IMPL DONE，lib 整體 build 阻塞屬正常並行 race，由 Wave 整體 closure 收口。
+- **HTTP 標準語意 vs venue-specific 對映**: api_latency `ret_code_4xx_count` / `ret_code_5xx_count` 採 HTTP 標準語意（per ADR-0040 multi-venue gate 預留）；caller 端負責 Bybit `retCode != 0` → 4xx 對映；emitter 不寫死 venue-specific 對映。**SOP**：trait probe signature 用 transport-level 名稱（4xx/5xx），caller 端做 venue → transport 對映；emitter 不持 venue 知識。
+- **8 metric × per-metric CRITICAL band 設計分流**: 8 metric 中 4 個含 CRITICAL band（p99 / 5xx / dropout 反映 outlier/venue fault/持續斷線）+ 4 個不含 CRITICAL（p50/p95/4xx 反映常態退化）；對齊 Track B 同 pattern（heartbeat / ipc 走 CRITICAL；tick_rate / drift / signal 不走 CRITICAL）。**SOP**：CRITICAL band 留給「即時 fail-closed cascade 預警」語意；常態退化 metric 不誤升 CRITICAL，由獨立 CRITICAL metric 覆蓋。
+- **classify_aggregated 端到端守 dispatch 不退化**: 本 Track 新增 `test_sprint2_classify_aggregated_api_latency_arm_wired` 直接呼 pub re-export 守 8 arm dispatch；對齊 Track C round 2 HIGH-2 fix pattern；任一 arm 漏接 → assert 失敗。**SOP**：scaffold owner 提供 pub re-export wrapper for test；後 Track 全部新增 arm 走 wrapper 端到端守 dispatch 不退化（避「PR 後 arm 被回退也測不出」regression 盲區）。
+- **probe trait 注入 vs 直接修 client**: Track D 採 `ApiLatencySourceProbe` trait 注入 8 metric source；不修 bybit_rest_client / bybit_private_ws（per packet §5.5 反模式 (a)）；main.rs Wave 2 後 caller 端把 wrapper stats 注入 emitter。對齊 Track B PipelineThroughputSourceProbe + Track C WriterQueueProbe/PoolWaitP95Probe 同 pattern。**SOP**：emitter 邊界 = 「採樣 + classify」；觀測層（histogram / counter）由 caller 維護；trait 抽象保 multi-venue 友好。
+
+### 8 metric ladder 速查
+- rest_p50_ms: OK<50 / WARN 50-200 / DEGRADED>200（無 CRITICAL）
+- rest_p95_ms: OK<200 / WARN 200-500 / DEGRADED>500（無 CRITICAL）
+- rest_p99_ms: OK<500 / WARN 500-1000 / DEGRADED 1000-2000 / CRITICAL>2000
+- ws_rtt_p50_ms: OK<50 / WARN 50-150 / DEGRADED>150（無 CRITICAL）
+- ws_rtt_p99_ms: OK<200 / WARN 200-500 / DEGRADED 500-1500 / CRITICAL>1500
+- ret_code_4xx_count: OK 0-10 / WARN 11-50 / DEGRADED>50（無 CRITICAL，client fault 可由 client 修復）
+- ret_code_5xx_count: OK 0 / WARN 1-5 / DEGRADED 6-20 / CRITICAL>20
+- ws_dropout_count: OK 0 / WARN 1-2 / DEGRADED 3-5 / CRITICAL>5
+
+### 數據
+- LOC：api_latency.rs 952 + sprint2_track_d_api_latency.rs 823 + metric_emitter/mod.rs +114（arm + comment）+ mod.rs +5（pub mod + doc）
+- cargo test: Track D 7/7 ✓ + health lib 87/87 ✓ + Track A 9/9 + Track B 5/5 + Track C 8/8 + spike 3/3 全 PASS
+- nm symbol scan AC-5: **0 hit** ✓
+- 8 metric × 5+ tick ≥ 40 row（AC-1a in-memory proxy）
+- 4 SM cross-domain 獨立驗（engine / pipeline / database / api 互不影響）
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_wave2_track_d_api_latency.md`
+
+## 2026-05-22 — Sprint 2 Wave 2 Track F: risk_envelope emitter IMPL
+
+### 任務
+- 新 `health/domains/risk_envelope.rs`（848 LOC）: 5 metric snapshot struct + 5 classify helper + DomainEmitter impl + SourceProbe trait + 10 inline test
+- 新 `tests/sprint2_track_f_risk_envelope.rs`（705 LOC）: 8 integration test（AC-1a proxy + dispatch 退化守 + DEGRADED stress + AC-2 ladder + AC-4 cross-domain + AC-5 spike 0 + sample_interval=300s 守 + SM dwell accessor）
+- 改 `health/domains/mod.rs`: 加 `pub mod risk_envelope;` + MODULE_NOTE 更新
+- 改 `health/metric_emitter/mod.rs`: classify_aggregated 加 risk_envelope 5 arm + comment 引 spec §2.3 line 106
+
+### 教訓
+- **user prompt 7 metric vs governance spec 5 metric drift push back**：user prompt 列 7 metric（cum_pnl_usdt / daily_drawdown_pct / portfolio_var_pct / concentration_top_n / correlation_avg / leverage_avg / margin_util_pct），但 PA-land dispatch packet §3.2 + M3 spec §2.1 line 82 + spec §3.2 line 405-415 + ADR-0042 一致規範 5 metric（portfolio_cum_pnl_24h_usd / portfolio_max_dd_pct / position_count_active / correlation_avg_pairwise / concentration_top1_pct）。Source order: governance docs > user prompt dispatch-time 修改。E1 不擅自 spec drift；1:1 對齊 spec 5 metric，把多出的 3 metric (portfolio_var_pct / leverage_avg / margin_util_pct) 標為 Track F+1 / Sprint 5+ 擴展點寫 report §3.2 push back，待 PM 決定走 PA spec amend 還是 keep。dispatch packet §7.5 反模式 (d/e)「VaR 不寫死 single-method」「concentration 不寫死 top-5」明文 PA 已知此為擴展點，本 Sprint 2 不引。
+- **Wave 2 並行 cross-Track race resolved**：接手時 mod.rs 已被 Track E owner 預先 land `pub mod strategy_quality;` 但 strategy_quality.rs 還沒落地（race），lib compile FAIL。Track E owner 21:31 land strategy_quality.rs 1460 LOC 後解 race。E1 接手三連檢查（ls + git log + find）catch 此 race；不擅自建 stub strategy_quality.rs（會破 Track E owner 邊界）。等 Track E land 後 lib build PASS，再執行 cargo test。
+- **scaffold reuse 8/8 對齊 Track A-E**：DomainEmitter / MetricSample (default extra_evidence = None) / RollingWindowAggregator / HealthObservationWriter / HealthEventBus / observe_classified / classify_aggregated 5 arm / EngineModeProvider 全沿用 Wave 1 + Track D。risk_envelope MetricRow 走 trait default extra_evidence None（無 disconnected 類採樣 audit；對齊 Track A/B/D pattern；不破壞既有 row 行為）。
+- **portfolio-level 聚合對齊 16 根原則 #16**：5 metric 全 portfolio-level（cum_pnl_24h / max_dd / position_count / correlation_pairwise / concentration_top1），無 per-symbol metric；對齊 spec §10 「portfolio > 孤立」原則；AC-7 PASS。
+- **cum_pnl 4 band 不對稱設計**：cum_pnl 4 band（含 CRITICAL > $2500/24h）對齊既有 5-gate kill cum_loss threshold；max_dd 4 band（> 15% CRITICAL）對齊 spec line 106；其他 3 metric (position_count / correlation / concentration) 走 3 band 設計（避雙重 CRITICAL 重複觸發 cascade per ADR-0042 反模式）。emit DEGRADED 不觸 5-gate kill（per dispatch packet §7.5 反模式 (b)；Sprint 5 Tier 1 才同步 5-gate kill mechanism）。
+- **SourceProbe trait 注入避修 risk SSOT**：emitter 經 RiskEnvelopeSourceProbe trait 取「當前 snapshot 計算結果」（read-only access）；不持有 risk_verdict_ledger / position_snapshot / fill_writer 既有 struct mut reference。main.rs Wave 2 wire-up 時 caller 注入既有 portfolio calc wrapper（per dispatch packet §7.5 反模式 (a) emitter 只觀測，既有 portfolio calc 是 SSOT）。
+
+### Build / test 結果
+- cargo build --release: PASS (51.40s clean)
+- cargo test --release --lib: 3152/3152 PASS（1 ignored pre-existing；0 fail）
+- cargo test --release --lib health::domains::risk_envelope::: 10/10 PASS（inline）
+- cargo test --release --test sprint2_track_f_risk_envelope: 8/8 PASS（integration）
+- Wave 1 + 2 regression: Track A 9/9 + B 5/5 + C 8/8 + D 7/7 + F 8/8 = 37/37 sprint2 integration PASS
+- Spike feature regression: 3/3 PASS（m3_amp_cap_24h_fire）
+- nm scan AC-5: 0 hit（production binary 0 mock time 滲透）
+
+### 5 metric ladder（對齊 M3 design spec §2.3 line 106）
+- portfolio_cum_pnl_24h_usd: OK <$500 loss / WARN $500-1500 / DEGRADED $1500-2500 / CRITICAL >$2500
+- portfolio_max_dd_pct: OK <5% / WARN 5-10% / DEGRADED 10-15% / CRITICAL >15%
+- position_count_active: OK 0-8 / WARN 9-16 / DEGRADED >16 (3 band，per `feedback_position_sizing` 25 symbol baseline)
+- correlation_avg_pairwise: OK <0.5 / WARN 0.5-0.7 / DEGRADED >0.7 (3 band)
+- concentration_top1_pct: OK <30% / WARN 30-50% / DEGRADED >50% (3 band；top-N 擴展 Sprint 5+)
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_wave2_track_f_risk_envelope.md`
