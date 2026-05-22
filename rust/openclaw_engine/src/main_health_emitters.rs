@@ -9,8 +9,10 @@
 //!
 //!   設計邊界（Wave B scope）:
 //!     - Track A `EngineRuntimeEmitter`：sysinfo + 30s sample；真實 wire-up。
-//!     - Track B `PipelineThroughputEmitter`：placeholder probe（全返 0；
-//!       Sprint 5+ wire-up）。
+//!     - Track B `PipelineThroughputEmitter`：placeholder probe（5 metric
+//!       default 走 spec line 102 OK band 合法值，避誤升 DEGRADED；Sprint 5+
+//!       wire-up 接 ws_client / IndicatorEngine / IPC real metric；per round 2
+//!       HIGH-1 fix 2026-05-23）。
 //!     - Track C `DatabasePoolEmitter`：sqlx PgPool + writer queue probe 0 +
 //!       disk usage 走 sysinfo Disks；Wave B 真實 pool stats wire-up。
 //!     - Track D `ApiLatencyEmitter`：REST half 真實 wire-up（`shared_client.
@@ -86,28 +88,67 @@ use openclaw_engine::health::M3Error;
 //     ai_service_client::stats() 等 source 端 accessor 未在 main.rs 外暴露 Arc
 //     handle（多在 pipeline 內部）；本 round 不擴 accessor scope（避破
 //     dispatch §禁忌「不改既有業務邏輯」）。
-//   - 全返 0：emitter 端 5-sample mean=0 走 OK band，不誤升 WARN/DEGRADED。
-//   - Sprint 5+ wire-up 時 caller 替換為 real probe；本 placeholder API 不變
-//     (impl trait 同一個 signature)。
+//   - Sprint 5+ wire-up 時 caller 替換為 real probe（per
+//     `pipeline_throughput.rs` line 343-352 接線分工：ws_client.stats().
+//     tick_rate() / heartbeat_lag / subscription_drift / IndicatorEngine
+//     signal_rate / IPC roundtrip p99）；本 placeholder API 不變（impl trait
+//     同一個 signature）。
+//
+// 為什麼 5 metric default 走 OK band 合法值 而非 0（per 2026-05-23 round 2
+// HIGH-1 fix；原 round 1 全 0 走 DEGRADED 染色 bug）:
+//   - spec line 102 OK band 明文：「tick rate > 1/sec/symbol + ipc p99 < 5ms +
+//     ws_subscription_drift_count = 0 + strategy_signal_rate_per_min ≥ 0.5」。
+//   - `classify_pipeline_throughput_ws_tick_rate` ladder（per
+//     `pipeline_throughput.rs:203`）：`< 0.5 = DEGRADED`，`< 1.0 = WARN`，
+//     `>= 1.0 = OK`；tick_rate=0.0 走 DEGRADED 而非 OK。
+//   - `classify_pipeline_throughput_signal_rate` ladder（per
+//     `pipeline_throughput.rs:293`）：`< 0.1 = DEGRADED`，`< 0.5 = WARN`，
+//     `>= 0.5 = OK`；signal_rate=0.0 走 DEGRADED 而非 OK。
+//   - 後果：round 1 IMPL 5 metric 全 0 → V106 row 30 天連續 DEGRADED 染色，
+//     違反「placeholder 不誤升」設計意圖（per `feedback_no_dead_params`
+//     fail-soft 對齊「未接線 source 不應假陽性 alarm」）。
+//   - round 2 HIGH-1 fix：5 metric 改 OK band 合法值
+//     - `tick_rate=2.0` （>1.0 嚴格 OK，留 1.0 緩衝避 boundary 抖動）
+//     - `heartbeat_lag_ms=0` （<=30000 OK band；原 0 即合法）
+//     - `subscription_drift_count=0` （=0 OK band；原 0 即合法）
+//     - `signal_rate=1.0` （>=0.5 嚴格 OK，留 0.5 緩衝避 boundary 抖動）
+//     - `ipc_roundtrip_ms_p99=1.0` （<5.0 嚴格 OK；spec line 102 OK band 對齊；
+//       dispatch §HIGH-1 fix (a) 給的「10」實際走 DEGRADED ladder，本 round
+//       採用嚴格 OK 值 1.0；rationale 留 doc 給 PM 與 E2 review）
+//   - Sprint 5+ wire-up 替換為 real probe 反映真實 ws_client / IndicatorEngine
+//     / IPC metric；本 placeholder 5 default value 在 real source 接入瞬間
+//     被替換，不再參與 V106 emit chain。
 
 struct PlaceholderPipelineThroughputSource;
 
 impl PipelineThroughputSourceProbe for PlaceholderPipelineThroughputSource {
     fn current_ws_tick_rate_per_sec(&self) -> f64 {
-        // placeholder：Sprint 5+ wire-up 走 ws_client.stats().tick_rate()。
-        0.0
+        // OK band 合法值（>1.0；spec line 102 OK band「tick rate > 1/sec/symbol」）。
+        // Sprint 5+ wire-up 走 ws_client.stats().tick_rate()。
+        2.0
     }
     fn current_ws_heartbeat_lag_ms(&self) -> u32 {
+        // OK band 合法值（<=30000；spec line 102 OK band heartbeat 心跳節奏正常）。
+        // Sprint 5+ wire-up 走 now() - ws_client.stats().last_tick_at()。
         0
     }
     fn current_ws_subscription_drift_count(&self) -> u32 {
+        // OK band 合法值（=0；spec line 102 OK band「ws_subscription_drift_count
+        // = 0」）。Sprint 5+ wire-up 走 ws_client.stats().expected_topic_count() -
+        // actual_topic_count()。
         0
     }
     fn current_strategy_signal_rate_per_min(&self) -> f64 {
-        0.0
+        // OK band 合法值（>=0.5；spec line 102 OK band「strategy_signal_rate_per
+        // _min ≥ 0.5」）。Sprint 5+ wire-up 走 indicator_engine.stats().
+        // signal_count_in_last_minute()。
+        1.0
     }
     fn current_ipc_roundtrip_ms_p99(&self) -> f64 {
-        0.0
+        // OK band 合法值（<5.0；spec line 102 OK band「ipc p99 < 5ms」）。
+        // Sprint 5+ wire-up 走 ai_service_client.stats().roundtrip_p99_ms()
+        // 或 IPC histogram p99 helper。
+        1.0
     }
 }
 
@@ -129,6 +170,38 @@ impl PipelineThroughputSourceProbe for PlaceholderPipelineThroughputSource {
 //   - Wave C / Sprint 5+ amend follow-up：BybitPrivateWs supervisor 改為外部
 //     注入 Arc handle pattern（per Track D `ApiLatencyEmitter::new(probe)` API
 //     不變；只換 probe 內部 ws_dropout/ws_rtt 為 external Arc clone）。
+//
+// ⚠️ Track D WS placeholder — emit chain disconnected from production supervisor
+// （per 2026-05-23 round 2 MEDIUM-2 fix；E2 round 1 catch 揭露半實裝陷阱）:
+//
+//   - **問題揭露**：`bybit_private_ws.rs:577-585` Wave A 已實裝 `dropout_counter
+//     _handle()` / `rtt_histogram_handle()` 兩個 expose accessor，但**本
+//     module 沒有呼叫**；每次 `build_real_api_latency_probe` 都 fresh 新建
+//     `Arc::new(WsDropoutCounter::new())` + `Arc::new(WsRttHistogram::new())`
+//     0-state instance（per line 145-146）。
+//   - **後果**：30 天 V106 row `api_latency__ws_rtt_p50_ms` /
+//     `api_latency__ws_rtt_p99_ms` / `api_latency__ws_dropout_count` 全 0
+//     染色；此「全 0」**不是** production WS 健康指標反映「無 dropout / 低
+//     latency」，而是 emit chain 從 production BybitPrivateWs supervisor 完全
+//     disconnect 的副作用（fresh 0-state Arc 永遠不會被 production WS run
+//     loop 觀測 + accumulate）。
+//   - **誠實揭露 vs round 1 doc 措辭**：round 1 doc 自稱「OK band 不誤升」
+//     可能誤導 reviewer 推論「Track D WS half 實裝正確只是 0 觀測值」；事實
+//     是 placeholder OK band 對齊 spec line 104 OK band literal 是 placeholder
+//     副作用，與 supervisor metric 0 連線。
+//   - **Wave B 走 (a) doc 補注 + Sprint 5+ carry-over**：本 round 不接
+//     supervisor handle（needs `BybitPrivateWs::new()` signature 改為「caller
+//     注入 external Arc」pattern；per `bybit_private_ws.rs:564-565` 既有
+//     code「Arc::new(WsDropoutCounter::new())」在 struct 內部 own，外部無
+//     穩定 share Arc handle）；Sprint 5+ amend BybitPrivateWs supervisor
+//     signature 改造 + main.rs Wave 接時拿 supervisor handle clone 替換
+//     placeholder fresh Arc。
+//   - **健康行為**：本 round V106 emitter `api_latency__ws_rtt_*` / `__ws_
+//     dropout_count` 走 placeholder OK band（0-state Arc count=0 / percentile
+//     =0）；Wave C QA Phase 3c AC-1b 30 min 樣本 wait 端，operator 須意識到
+//     此 4 row（ws_rtt_p50_ms / ws_rtt_p99_ms / ws_dropout_count + 衍生
+//     classify=OK）**不是真實 WS 觀測**，是 placeholder 副作用；Sprint 5+
+//     wire-up 接 supervisor 後 V106 row 才反映 production WS metric。
 
 /// 構造 Track D `RealApiLatencySourceProbe`：REST half real + WS half placeholder。
 ///
@@ -349,6 +422,12 @@ pub(crate) fn spawn_metric_emitter_scheduler(
     ];
 
     // Step 5: 建立 scheduler 後 spawn tokio task。
+    // 為什麼 emitter_count 動態計算（per round 2 LOW-2 fix；原 round 1 hardcoded
+    // = 5，Sprint 5+ Track E wire-up 後會 drift）:
+    //   - emitters vec 構造後 length = 當前實際 spawn emitter 數；Sprint 5+ Track
+    //     E StrategyQualityEmitter wire-up 後 vec.push 自動反映。
+    //   - 對齊 §九 反模式「assert/log 數值 hardcoded 會 drift」。
+    let emitter_count_for_log = emitters.len();
     let scheduler =
         MetricEmitterScheduler::new(emitters, writer, Arc::clone(&event_bus), engine_mode);
     let scheduler_cancel = cancel.clone();
@@ -357,7 +436,7 @@ pub(crate) fn spawn_metric_emitter_scheduler(
         info!(
             target = "m3.health.wireup",
             engine_mode = %mode_for_log,
-            emitter_count = 5,
+            emitter_count = emitter_count_for_log,
             "M3 MetricEmitterScheduler spawning (Track A real + B placeholder + C real \
              + D REST-real/WS-placeholder + F real; Track E skip per Sprint 5+ wire-up)"
         );
@@ -495,15 +574,60 @@ pub(crate) fn spawn_portfolio_state_update_task(
 mod tests {
     use super::*;
 
-    /// 驗 PlaceholderPipelineThroughputSource 全返 0（fail-soft OK band 對齊）。
+    /// 驗 PlaceholderPipelineThroughputSource 5 default 值對齊 spec line 102 OK
+    /// band（per round 2 HIGH-1 fix；原 round 1 全 0 導致 tick_rate/signal_rate
+    /// 走 DEGRADED 染色 bug）。
     #[test]
-    fn test_placeholder_pipeline_throughput_returns_zero() {
+    fn test_placeholder_pipeline_throughput_default_in_ok_band() {
+        use openclaw_engine::health::domains::pipeline_throughput::{
+            classify_pipeline_throughput_heartbeat_lag_ms,
+            classify_pipeline_throughput_ipc_roundtrip_ms_p99,
+            classify_pipeline_throughput_signal_rate,
+            classify_pipeline_throughput_subscription_drift,
+            classify_pipeline_throughput_ws_tick_rate,
+        };
+        use openclaw_engine::health::HealthState;
+
         let p = PlaceholderPipelineThroughputSource;
-        assert_eq!(p.current_ws_tick_rate_per_sec(), 0.0);
+        // 5 default 值對齊 spec line 102 OK band 合法值（無 boundary 抖動）。
+        assert_eq!(p.current_ws_tick_rate_per_sec(), 2.0);
         assert_eq!(p.current_ws_heartbeat_lag_ms(), 0);
         assert_eq!(p.current_ws_subscription_drift_count(), 0);
-        assert_eq!(p.current_strategy_signal_rate_per_min(), 0.0);
-        assert_eq!(p.current_ipc_roundtrip_ms_p99(), 0.0);
+        assert_eq!(p.current_strategy_signal_rate_per_min(), 1.0);
+        assert_eq!(p.current_ipc_roundtrip_ms_p99(), 1.0);
+
+        // 5 metric classify 結果 全 HealthOk（不誤升 DEGRADED/WARN）。
+        assert_eq!(
+            classify_pipeline_throughput_ws_tick_rate(p.current_ws_tick_rate_per_sec()),
+            HealthState::HealthOk,
+            "tick_rate=2.0 應走 OK band（>=1.0）"
+        );
+        assert_eq!(
+            classify_pipeline_throughput_heartbeat_lag_ms(p.current_ws_heartbeat_lag_ms()),
+            HealthState::HealthOk,
+            "heartbeat_lag=0ms 應走 OK band（<=30000）"
+        );
+        assert_eq!(
+            classify_pipeline_throughput_subscription_drift(
+                p.current_ws_subscription_drift_count()
+            ),
+            HealthState::HealthOk,
+            "subscription_drift=0 應走 OK band"
+        );
+        assert_eq!(
+            classify_pipeline_throughput_signal_rate(
+                p.current_strategy_signal_rate_per_min()
+            ),
+            HealthState::HealthOk,
+            "signal_rate=1.0/min 應走 OK band（>=0.5）"
+        );
+        assert_eq!(
+            classify_pipeline_throughput_ipc_roundtrip_ms_p99(
+                p.current_ipc_roundtrip_ms_p99()
+            ),
+            HealthState::HealthOk,
+            "ipc_p99=1.0ms 應走 OK band（<5.0）"
+        );
     }
 
     /// 驗 build_risk_envelope_emitter 返同一 cache Arc（caller update task / probe
