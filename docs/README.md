@@ -285,6 +285,22 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 |------|------|
 | `execution_plan/2026-05-21--sprint_1a_zeta_impl_spike_scope_spec.md` | Sprint 1A-ζ IMPL Prototype Spike Phase Scope Spec (657 行 + §12 operator sign-off + §6 Phase 0 sandbox prep + V107→V113→V112→V106 sequential ordering + Q4a Track C 16-27 hr update；3 track A/B/C；W8.5-10；66-102 hr 含 buffer) |
 
+### 2026-05-22 Sprint 1A-ζ IMPL Prototype Spike — Phase 0~3e artifact
+
+> Sprint 1A-ζ 9 commit chain（Phase 0 sandbox `ad002617` → Phase 1 PA refine `119893d4` → Phase 2 E1×3 並行 IMPL `2f6d1761` → Phase 3a E2 review + E1 round 2 + PA reconcile `f0633002` → Phase 3a parallel AMD v2 + autonomy toggle `01e20db9` → Phase 3b E4 regression `8a15de4d` → Phase 3c QA empirical `26c813fb` → Phase 3d TW Overall Acceptance `db84b748` → Phase 3e PM sign-off）。本 section 補 spike Phase 0/1/2/3 docs/ 內 artifact；既有 spike scope spec / 3 V### schema spec / 3 design spec / Phase 3a PA reconcile / Phase 3d TW Overall Acceptance 索引條目於 Sprint 1A-β / 1A-ζ planning section 不重覆登錄。Track A E1 IMPL + 3 E2 review report 為 inline message handover，無 docs/ 內 file artifact。SQL migrations / Rust code / Python helper scripts / tests 非 docs/README.md 索引範圍。
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-05-21--sprint_1a_zeta_phase0_sandbox_prep_checklist.md` | Sprint 1A-ζ Phase 0 Sandbox + Vault Prep Checklist（414 行；E3 + AI-E sequential 4-6 hr；V096 catch-up + role + Vault TOTP secret + sample fills seed；non-scope = production DB / Console / GUI patch；per spike scope spec §6.1 + §7.2 + §12 Q1d/Q2 operator decision） |
+| `execution_plan/2026-05-21--sprint_1a_zeta_3_e1_dispatch_packet.md` | Sprint 1A-ζ Phase 2 — 3 E1 IMPL Dispatch Packet（Track A V112 LAL + Track B V106 health + Track C V107 replay；PA Phase 1 single-thread deliverable；待 Phase 0 sandbox §6 6 confirm PASS 後 PM stagger 5min dispatch 3 並行 sub-agent） |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-21--sprint_1a_zeta_phase1_pa_refine.md` | PA Sprint 1A-ζ Phase 1 PA Refine Closure Report（single-thread 4-6 hr；5 critical patch P-5/P-6/P-7/P-8/P-9 close + 3 E1 dispatch packet 撰寫 + Phase 0 → Phase 1 → Phase 2 sign-off chain；verdict READY for Phase 2 dispatch） |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1a_zeta_track_b_m3_health_v106_impl.md` | E1 Sprint 1A-ζ Phase 2 Track B IMPL Round 1（M3 4-state ladder + V106 PG apply + amp cap 24h fire；3 task；health/mod.rs 516 LOC + tests/m3_amp_cap_24h_fire.rs 213 LOC；IMPL DONE → 待 E2 round 1 + E4 + QA） |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1a_zeta_track_b_m3_health_v106_impl_round2.md` | E1 Sprint 1A-ζ Phase 3a Track B Round 2 Fix（E2 round 1 catch 7 findings 全 closure：1 CRITICAL 6-domain naming + 1 HIGH amp cap fire 語意 drift + 3 MEDIUM + 2 LOW；READY for E2 round 2 re-review） |
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1a_zeta_track_c_v107_m11_spike.md` | E1 Sprint 1A-ζ Phase 2 Track C IMPL（V107 sandbox PG apply + M11 Python skeleton spike_trigger + divergence_d1_fill_chain + AC-6 dedup contract empirical；per Q4a override +5-10 hr scope） |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-22--sprint_1a_zeta_phase_3b_regression.md` | E4 Sprint 1A-ζ Phase 3b Regression Report（PASS；6 AC hard-gate PASS 含 AC-4 PG CHECK 反向 + AC-5 amp cap 24h fire + AC-6 dedup contract + AC-7 1e-4 fixture PoC；Mac Rust 3074-3769 pass / 0 fail；pytest 6037 pass / 28 pre-existing fail；兩遍 non-flaky；5 carry-over） |
+| `CCAgentWorkSpace/QA/workspace/reports/2026-05-22--sprint_1a_zeta_phase_3c_qa_empirical_verify.md` | QA Sprint 1A-ζ Phase 3c Empirical Verify Report（PASS WITH 3 CARRY-OVER；AC-2/3/4/5/6/7 全 PASS + AC-1 PARTIAL 沿用 E4 同手法 sandbox _sqlx_migrations 0 row + 1 NEW-QA-1 spec § AC-1.1 反向 INSERT 補 cohort_min_n / human_final_review NOT NULL） |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_1a_zeta_pm_phase_3e_signoff.md` | PM Sprint 1A-ζ Phase 3e Sign-off + Final Verdict（SIGNED-OFF；PASS WITH 3 CARRY-OVER per spec §5.3；8 AC verdict 拍板 + 9 PM sign-off carry-over routing + Sprint 1A-ε P1 7 條 + Sprint 1B 6 條 + Sprint 4+ 3 條 deploy-time verify；Sprint 1B 派發 readiness gate OPEN） |
+
 ### 2026-05-21 Sprint 1A closure narrative + acceptance evidence + 三化審計
 
 | 文件 | 内容 |

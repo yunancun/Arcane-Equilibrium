@@ -193,6 +193,8 @@ PM 主會話對 PA 原設計提 4 條 risk push back：
 
 - `sql/migrations/V107__replay_divergence_log.sql`（per V107 spec doc full DDL）
 - `helper_scripts/replay/m11_spike/spike_trigger.py`（手動 1 次 trigger；不接 cron；2026-05-22 PA reconcile §2:對齊 IMPL reality + `srv/python/` 不存在 + helper_scripts convention per CLAUDE.md §七 + SCRIPT_INDEX 約定）
+  - 真實 flag list（per IMPL line 374-394）:`--host --port --user --database --strategy --symbol --window-hours --inject-synthetic`（`--inject-synthetic` default=True；無 `--dry-run` flag）
+  - 「dry-run 風格 PoC」走法:沿用 `--inject-synthetic`（注入 1 條合成 D1 fixture；非 NOISE 才寫 V107 row）;Sprint 1B follow-up 若要嚴格「不寫任何 row」mode,E1 補 `--dry-run` flag（per 2026-05-22 QA Phase 3c NEW-QA-3）
 - `helper_scripts/replay/m11_spike/divergence_d1_fill_chain.py`（1 種 divergence type）
 - `helper_scripts/replay/m11_spike/dedup_contract_test.py`（empirical dedup verify;原計畫 path `tests/spike_m11_m7_dedup_contract.py` 改為 spike 整批同目錄）
 - `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--sprint_1a_zeta_track_c_acceptance.md`
@@ -273,8 +275,8 @@ per Track A / B / C §2.1-2.3 工作清單；3 並行 sub-agent 各自獨立 IMP
 | **AC-3** | **三 V### engine restart 跑 0 panic**（per 2026-05-02 sqlx hash drift incident 教訓） | `bash helper_scripts/restart_all.sh --rebuild` 後 `journalctl -u openclaw_engine --since '10 min ago' \| grep -c panic` = 0 | QA + E3 |
 | **AC-4** | **M1 LAL Tier 0→1 transition cycle 真實 fire** — 5 row 走完 Tier 0 → Tier 1 升階（eligibility 模擬 PASS）→ Tier 1 active → 5-gate kill 模擬 → Tier 1 demoted；**+ ADR-0034 LAL 0-4 數字方向 PG CHECK + Rust code 對齊**（反向 INSERT `lal_level=-1` 必 RAISE；Rust `LalTier::from(5)` 必 panic）| `cargo test --release --features spike test_lal_transition_cycle` + grep RAISE message | E4 + QA |
 | **AC-5** | **M3 amplification cap 24h-suppression empirical fire** — inject fake CPU spike → HEALTH_OK → HEALTH_WARN（dwell time 60s pass）；24h 內 inject 第二個 spike → cap 真實 suppress（不升 HEALTH_DEGRADED）；驗 `learning.health_observations.amplification_loop_24h_count` 寫入正確 | `cargo test --release --features spike test_amp_cap_24h_fire` | E4 + QA |
-| **AC-6** | **M11 → M7 dedup contract empirical verify** — M11 manual trigger 寫 V107 row（`flag_action_taken='m7_decay_candidate'`）；driver query 驗 `learning.decay_signals` 0 row 寫入；grep V107 schema 6 個禁忌字段 = 0 hit | `python tests/spike_m11_m7_dedup_contract.py` + `grep -E '(auto_demote\|target_state\|decay_recommendation\|demote_proposal_id\|decay_stage\|stage_demoted)' sql/migrations/V107__replay_divergence_log.sql \| wc -l` = 0 | E2 + QA |
-| **AC-7** | **cross-language 1e-4 fixture pass**（M3 health metric Rust ↔ Python replay） — 1 個 metric `engine_cpu_pct` 算 5 sample window mean / sigma 在 Rust 跟 Python replay 端誤差 < 1e-4 | `pytest tests/spike_cross_lang_fixture.py -k cpu_pct_window` | E4 |
+| **AC-6** | **M11 → M7 dedup contract empirical verify** — M11 manual trigger 寫 V107 row（`flag_action_taken='m7_decay_candidate'`）；driver query 驗 `learning.decay_signals` 0 row 寫入；grep V107 schema 6 個禁忌字段（排除 reverse-fire enforcement context）= 0 hit | `python tests/spike_m11_m7_dedup_contract.py` + `grep -E '(auto_demote\|target_state\|decay_recommendation\|demote_proposal_id\|decay_stage\|stage_demoted)' sql/migrations/V107__replay_divergence_log.sql \| grep -v 'RAISE\|IN (' \| wc -l` = 0（per 2026-05-22 QA Phase 3c NEW-QA-2：V107 Guard A/C reverse-fire 在 RAISE message + `IN (...)` 列舉 forbidden column 屬合法 enforcement，必須排除） | E2 + QA |
+| **AC-7** | **cross-language 1e-4 fixture pass**（M3 health metric Rust ↔ Python replay） — 1 個 metric `engine_cpu_pct` 算 5 sample window mean / sigma 在 Rust 跟 Python replay 端誤差 < 1e-4 | `pytest tests/test_spike_cross_lang_fixture.py -k cpu_pct_window`（path 必 `test_` prefix；pytest auto-discovery 走 `test_*.py` collection pattern；per 2026-05-22 E4 Phase 3b push back + QA Phase 3c QA-4） | E4 |
 | **AC-8** | **spike Acceptance Report TW write + PM sign-off** | `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--sprint_1a_zeta_spike_overall_acceptance.md` exists + PM sign-off section | TW + PM |
 
 ### AC-1.1 ADR-0034 LAL 0-4 數字方向 PG CHECK + Rust assert（Phase 1 PA Refine append per P-8 patch）
@@ -285,15 +287,20 @@ per Track A / B / C §2.1-2.3 工作清單；3 並行 sub-agent 各自獨立 IMP
 
 ```sql
 -- SQL test 1: lal_level = -1 反向 INSERT 必 RAISE (CHECK tier_level BETWEEN 0 AND 4)
+--   注:V112 schema 的 NOT NULL column 含 cohort_min_n + human_final_review;
+--   必須在 column-list 內帶值,否則 RAISE message 會先撞 not-null violation
+--   而非預期 tier_level CHECK constraint(per 2026-05-22 QA Phase 3c NEW-QA-1)。
 INSERT INTO governance.lease_lal_tiers (
-  tier_level, tier_name, auto_approve, approval_quorum, clawback_ttl_sec
-) VALUES (-1, 'NEGATIVE_TEST', false, 0, 60);
+  tier_level, tier_name, auto_approve, approval_quorum, clawback_ttl_sec,
+  cohort_min_n, human_final_review
+) VALUES (-1, 'NEGATIVE_TEST', false, 0, 60, 0, false);
 -- expect: ERROR "new row for relation \"lease_lal_tiers\" violates check constraint \"lease_lal_tiers_tier_level_check\""
 
 -- SQL test 2: lal_level = 5 反向 INSERT 必 RAISE
 INSERT INTO governance.lease_lal_tiers (
-  tier_level, tier_name, auto_approve, approval_quorum, clawback_ttl_sec
-) VALUES (5, 'TIER_5_OVERFLOW', false, 0, 60);
+  tier_level, tier_name, auto_approve, approval_quorum, clawback_ttl_sec,
+  cohort_min_n, human_final_review
+) VALUES (5, 'TIER_5_OVERFLOW', false, 0, 60, 0, false);
 -- expect: 同 ERROR
 ```
 
@@ -329,12 +336,14 @@ fn test_lal_tier_numeric_strictness_order() {
 
 ```bash
 # PG CHECK 反向 INSERT 驗
+# 注:NOT NULL column cohort_min_n + human_final_review 必須帶值,否則先撞 not-null
+# 而非預期 tier_level CHECK(per 2026-05-22 QA Phase 3c NEW-QA-1)。
 ssh trade-core "psql -h 127.0.0.1 -U sandbox_admin -d trading_ai_sandbox \
-  -c \"INSERT INTO governance.lease_lal_tiers (tier_level, tier_name, auto_approve, approval_quorum, clawback_ttl_sec) VALUES (-1, 'NEGATIVE_TEST', false, 0, 60);\" 2>&1 | grep -c 'violates check'"
+  -c \"INSERT INTO governance.lease_lal_tiers (tier_level, tier_name, auto_approve, approval_quorum, clawback_ttl_sec, cohort_min_n, human_final_review) VALUES (-1, 'NEGATIVE_TEST', false, 0, 60, 0, false);\" 2>&1 | grep -c 'violates check'"
 # expect: 1 (CHECK fire 一次)
 
 ssh trade-core "psql -h 127.0.0.1 -U sandbox_admin -d trading_ai_sandbox \
-  -c \"INSERT INTO governance.lease_lal_tiers (tier_level, tier_name, auto_approve, approval_quorum, clawback_ttl_sec) VALUES (5, 'TIER_5_OVERFLOW', false, 0, 60);\" 2>&1 | grep -c 'violates check'"
+  -c \"INSERT INTO governance.lease_lal_tiers (tier_level, tier_name, auto_approve, approval_quorum, clawback_ttl_sec, cohort_min_n, human_final_review) VALUES (5, 'TIER_5_OVERFLOW', false, 0, 60, 0, false);\" 2>&1 | grep -c 'violates check'"
 # expect: 1
 
 # Rust assert 驗
