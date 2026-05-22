@@ -11699,3 +11699,84 @@ per PM Phase 2 Wave 1 dispatch packet `2026-05-22--m3_metric_emitter_sprint2_dis
 
 ### 報告
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_wave1_track_c_database_pool.md`
+
+## 2026-05-22 Sprint 2 Wave 1 round 2 combined fix（Track A scaffold round 3 + Track B + Track C round 2）
+
+### 任務
+E2 Track B + Track C round 1 REJECT；本 round 修「deterministic fix（不需 PA spec amend）」5 條；PA spec-dependent 4 條由 PA 並行 amend（E1 round 3 carry-over）。
+
+### 5 deterministic fix
+1. **Track A scaffold MEDIUM-2 mean.round() cast**：`classify_aggregated` 5 處 `mean as u32`/`as u64` 全改 `mean.round() as u32`/`as u64`；解決「mean=2.8 truncate=2 誤歸 WARN」boundary bug。
+2. **Track C HIGH-1 classify_aggregated 加 database_pool 3 arm**：wait/queue/disk 3 metric 加 dispatch arm；`pg_pool_active_conn` 因需 pool_max context（簽名 (active, pool_max)），延 PA spec amend MEDIUM-1 C Path A/B 拍板後 E1 round 3 補（避引入 silent failure）。
+3. **Track C HIGH-2 test 加 state assert + 新 stress test**：`test_row_count` 加 `assert_eq!(row.state, OK)`；新 `test_sprint2_track_c_database_pool_degraded_band_classify` 直接呼 `classify_aggregated_for_test` 對 3 dispatched arm assert DEGRADED → 守 HIGH-1 不退化（PR 後 arm 被刪能 catch）。
+4. **Track B HIGH-1 heartbeat_lag revert 三段**：round 1 unilaterally 改 spec CRITICAL > 60s 為 DEGRADED 60-120s + CRITICAL > 120s；本 round revert 為三段 OK/WARN/CRITICAL（> 60s 即 CRITICAL，對齊 spec line 102 SSOT）。
+5. **Track C MEDIUM-2 probe wire-up doc**：`database_pool.rs` module doc 加「警告 — probe 注入式設計」block；report 載明 TODO follow-up「W-XX-Y Wave 2 wire-up probe + healthcheck」由 PM 收口登記。
+
+### 核心設計教訓
+- **classify_aggregated 加 `_ => HealthOk` fallback 是 silent failure trap**：production scheduler 對沒 dispatch arm 的 metric 永遠走 OK band，**永遠看不到升階**；不能依賴 unit test 守，必須加 integration adversarial 端到端 stress test（如本 round Fix 3 stress test）守每個 arm 真實接通。
+- **pub `_for_test` re-export 為 integration test 守內部 dispatch 不退化**：private helper 直接寫 unit test 不能守「PR 後 dispatch arm 被回退也測不出」regression；`#[doc(hidden)] pub fn ..._for_test()` wrapper 是「保留封裝 + 適度開放給 integration adversarial」最小代價方案。
+- **spec drift 必 revert**：spec SSOT 是「WS dropout > 60s = CRITICAL」，IMPL 端不能因「避誤觸 CRITICAL」拆 DEGRADED 中段；dwell 由 SM 上層守，classify 端對齊 SSOT；兩層雙重保護混淆 spec 語意是反模式。
+- **probe 注入式設計需 module doc 警告 + TODO healthcheck follow-up**：probe 永遠回 0 是 silent failure（永遠看不到 backlog 真升階）；雖風險低於誤觸 cascade，仍需明確 wire-up 路徑 + healthcheck（mean=0 stuck 30min 升 WARN log）。
+
+### 驗證
+- cargo build release：PASS（25.47s；2 pre-existing warning + 1 pre-existing tasks.rs warning；health 0 new warning）
+- lib 3118/3118 PASS（1 ignored pre-existing；0 new fail）
+- health:: lib 53/53 PASS（Track A 32 + Track B 7 + Track C 11 + writer/event_bus/sm）
+- sprint2_track_a regression 9/9 PASS
+- sprint2_track_b 5/5 PASS（含 ladder + cross_domain + row_count + spike + real_emitter）
+- sprint2_track_c 6/6 PASS（5 舊 + 1 新 stress + row_count 新 state assert）
+- spike regression 3/3 PASS
+- nm production binary 0 hit（mock_instant/tokio::time::pause/spike）
+
+### LOC
+- metric_emitter/mod.rs 1069 → 1128 (+59；> 800 警告 < 2000 hard cap)
+- pipeline_throughput.rs 702 → 712 (+10)
+- database_pool.rs 712 → 727 (+15)
+- sprint2_track_c_database_pool.rs 414 → 631 (+217 test)
+- 累計 +301 LOC
+
+### PA spec-dependent carry-over（E1 round 3 follow-up）
+- Track B HIGH-2 dwell「持續 2min」設計
+- Track B MEDIUM-1 drift / signal threshold
+- Track C MEDIUM-1 pool_max_conn Path A/B（決定 pg_pool_active_conn arm 接法）
+- Track C MEDIUM-3 disconnected DbPool 詳細語意
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_wave1_round2_combined_fix.md`
+
+## 2026-05-22 Sprint 2 Wave 1 Track B + C round 3 PA-dependent fix
+
+### 4 fix DONE
+- Fix 1 Track B HIGH-2：classify_pipeline_throughput_ws_tick_rate doc comment 加 §2.3.1 reference（metric classify vs SM band dwell 區分；60s SSOT；IMPL 數值不改）
+- Fix 2 Track B MEDIUM-1：classify_pipeline_throughput_subscription_drift + signal_rate doc comment 加 §2.3 line 102 amend reference（threshold IMPL 不改）
+- Fix 3 Track C MEDIUM-1 C Path A：新增 pg_pool_active_conn_ratio metric (5 row 替 4 row) + classify_database_pool_active_conn_ratio helper + classify_aggregated arm + MetricSample trait extra_evidence default method + DatabasePoolMetricRow 加 pool_disconnected flag
+- Fix 4 Track C MEDIUM-3：DatabasePoolSample 加 pool_disconnected: bool field + sample_now() 設 flag + MetricSample::extra_evidence 返 {"pool_status": "disconnected"} + scheduler run_domain_loop 端 reject_reason / extra_evidence 互斥 merge 寫 row.evidence_json
+
+### 設計關鍵決策
+- MetricSample trait 加 default extra_evidence method（default None）— 不破 Track A engine_runtime / Track B pipeline_throughput 既有 row 行為，只 Track C disconnected scenario 啟用
+- pg_pool_active_conn raw 留 telemetry（走 _ => HealthOk fallback）；pg_pool_active_conn_ratio 經 scheduler 5-sample mean classify — raw + ratio 並存避免雙重 dispatch 衝突
+- evidence_json reject_reason / extra_evidence 互斥優先級：reject_reason 優先（D3 path 更關鍵），extra_evidence 在 sample 採樣成功 + observe non-reject 場景生效
+
+### cargo test 結果
+- cargo build --release PASS（25.37s；0 new warning）
+- lib unit health:: 56/56 PASS（53 round 2 + 3 new round 3：ratio thresholds / extra_evidence audit / disconnected sample fail_closed）
+- lib unit total 3121/3121 PASS（1 ignored；0 fail）
+- sprint2_track_a 9/9 PASS（不退）
+- sprint2_track_b 5/5 PASS（不退）
+- sprint2_track_c 8/8 PASS（5 舊 + 1 round 2 stress + 2 new round 3：ratio_classify + disconnected_emits_pool_status_evidence）
+- spike regression 3/3 PASS
+- nm production binary 0 hit
+
+### LOC
+- pipeline_throughput.rs 712 → 727 (+15 comment only)
+- database_pool.rs 727 → 944 (+217；含新 helper + struct field + extra_evidence impl + 3 inline test + 5th metric row)
+- metric_emitter/mod.rs 1128 → 1173 (+45；含 trait extra_evidence method + scheduler 端 extra_evidence merge + arm 補 ratio)
+- sprint2_track_c_database_pool.rs 631 → 843 (+212；2 new test + 既有 mock 修補 5 field + degraded test 加 ratio assert)
+- 累計 +489 LOC
+
+### 9/9 finding closure
+- round 2 deterministic 5/5 ✓
+- round 3 spec-dependent 4/4 ✓ — Track B HIGH-2 + MEDIUM-1 + Track C MEDIUM-1 + MEDIUM-3
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_wave1_round3_pa_dependent_fix.md`

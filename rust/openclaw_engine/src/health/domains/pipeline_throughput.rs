@@ -180,7 +180,7 @@ impl PipelineThroughputSample {
 ///
 /// ladder:
 ///   OK       : >= 1.0       （spec line 102 OK band「tick rate > 1/sec/symbol」）
-///   WARN     : 0.5 - 1.0    （持續 < 1/sec/symbol 2min 為 WARN；dwell 由 SM 處理）
+///   WARN     : 0.5 - 1.0    （metric=WARN-band 即時 fire；dwell 由 SM 處理）
 ///   DEGRADED : < 0.5         （spec line 102 DEGRADED band「tick rate < 0.5」）
 ///   CRITICAL : 由 heartbeat_lag_ms > 60000 觸發（dropout >60s），本 metric 不直
 ///              接走 CRITICAL；保 spec 一致性。
@@ -191,6 +191,15 @@ impl PipelineThroughputSample {
 ///     heartbeat 觸發。
 ///   - 設計對齊 spec line 102：tick rate 「DEGRADED」是 < 0.5，CRITICAL 是
 ///     dropout >60s（heartbeat_lag 度量），兩 metric 互補不重複。
+///
+/// 為什麼 60s dwell SSOT（per M3 design spec §2.3.1，PA Sprint 2 Wave 1 amend
+/// 2026-05-22 Path A 採納）:
+///   - metric classify-time 即時返 WARN-band；SM band dwell（OK→WARN 60s per
+///     §3.3 line 165）提供時間累積；不在 classify helper 內混雜 dwell 邏輯。
+///   - spec line 102 carry-over「持續 2min」literal 為 v5.7 非規範性敘述；真
+///     規範值 = §3.3 line 165 SM OK→WARN dwell 60s。
+///   - 60s SM dwell SSOT 對齊 ADR-0042 v1.0 不 amend；本 classify helper
+///     只做 metric-level band decision 不處理時間軸。
 pub fn classify_pipeline_throughput_ws_tick_rate(value: f64) -> HealthState {
     if value < 0.5 {
         HealthState::HealthDegraded
@@ -201,26 +210,33 @@ pub fn classify_pipeline_throughput_ws_tick_rate(value: f64) -> HealthState {
     }
 }
 
-/// ws_heartbeat_lag_ms classify（per M3 design spec §2.3 line 102 CRITICAL band
-/// 「WS dropout > 60s」對齊）。
+/// ws_heartbeat_lag_ms classify（per M3 design spec §2.3 line 102 SSOT）。
 ///
 /// ladder（heartbeat lag 即 WS 距上 tick 的時延；越大越嚴）：
 ///   OK       : <= 30000       （30s 內為正常 WS 心跳節奏）
-///   WARN     : 30000 - 60000   （30-60s 為 WARN；尚未撞 dropout 邊界）
-///   DEGRADED : 60000 - 120000  （60-120s 已撞 dropout 級；但 < 2min 仍可恢復）
-///   CRITICAL : > 120000        （> 2min 連續無 tick；WS 進入需 reconnect 級嚴重）
+///   WARN     : 30000 - 60000   （30-60s 為 WARN；接近 dropout 邊界）
+///   CRITICAL : > 60000         （> 60s 為「WS dropout」即時 CRITICAL；per spec
+///                                §2.3 line 102 SSOT「WS dropout > 60s OR ipc
+///                                p99 > 50ms」明文）
 ///
-/// 為什麼此 threshold 設計:
-///   - spec line 102 CRITICAL band 寫「WS dropout > 60s」，原文表達是「斷線
-///     >60s 算嚴重」；但 60s 為 DEGRADED 起點，> 120s 才升 CRITICAL 是合理階
-///     梯（避免短暫網路抖動誤升 CRITICAL）。
-///   - SM 上層走 dwell time（OK→WARN 60s，WARN→DEGRADED 5min；per spec §5.2）；
-///     dwell + classify 雙重保護避誤觸 CRITICAL。
+/// 為什麼 revert 三段（per Sprint 2 round 2 Track B HIGH-1 fix）:
+///   - round 1 IMPL unilaterally 將 spec CRITICAL > 60s 改為 DEGRADED 60-120s
+///     + CRITICAL > 120s（兩階拆分），屬未經 PA 認可的 spec drift。
+///   - spec line 102 SSOT 明文「WS dropout > 60s OR ipc p99 > 50ms」=
+///     CRITICAL；ladder 必對齊 SSOT，不擅自延長嚴重門檻。
+///   - dwell time（OK→WARN 60s，WARN→DEGRADED 5min；per spec §5.2）由 SM 上
+///     層守住誤觸；classify 不重複設計 dwell 中段（避兩層雙重保護混淆 spec
+///     語意）。
+///   - 短暫抖動由 SM 5-sample rolling window mean 平滑（per spec §6）；
+///     classify 端不為「避誤升 CRITICAL」改 spec ladder，這是兩個正交問題。
+///
+/// PA spec amend pending（Track B HIGH-2 + MEDIUM-1）:
+///   - dwell「持續 2min」/ per-domain dwell：待 PA 拍板後 SM 端調整；不影響
+///     classify ladder。
+///   - tick_rate / signal_rate threshold：同上，與 heartbeat_lag 正交。
 pub fn classify_pipeline_throughput_heartbeat_lag_ms(value: u32) -> HealthState {
-    if value > 120_000 {
+    if value > 60_000 {
         HealthState::HealthCritical
-    } else if value > 60_000 {
-        HealthState::HealthDegraded
     } else if value > 30_000 {
         HealthState::HealthWarn
     } else {
@@ -236,12 +252,15 @@ pub fn classify_pipeline_throughput_heartbeat_lag_ms(value: u32) -> HealthState 
 ///   WARN     : 1 - 2       （少量 drift，可能是訂閱中暫態）
 ///   DEGRADED : 3+          （持續 drift 即 ws_client reconnect 邏輯失敗）
 ///
-/// 為什麼 threshold 是 1 / 3:
+/// 為什麼 threshold 是 1 / 3（per M3 design spec §2.3 line 102 amend，PA Sprint
+/// 2 Wave 1 amend 2026-05-22 land）:
 ///   - 0 是設計常態；任何 drift 進 WARN，但 1-2 可能是訂閱重建期間 race。
 ///   - 3+ 即「持續 drift」，反映 ws_client subscribe 邏輯 bug 或交易所限頻被
 ///     擋；屬 DEGRADED 級。
 ///   - 不設 CRITICAL band：drift 是訂閱層觀測，致命層是 heartbeat dropout；
 ///     避免雙 metric 同時升 CRITICAL 重複觸發 cascade（per ADR-0042 反模式）。
+///   - spec line 102 ladder 已補入此 threshold；IMPL 數值合理保留與 spec amend
+///     1:1 對齊。
 pub fn classify_pipeline_throughput_subscription_drift(value: u32) -> HealthState {
     if value >= 3 {
         HealthState::HealthDegraded
@@ -260,7 +279,8 @@ pub fn classify_pipeline_throughput_subscription_drift(value: u32) -> HealthStat
 ///   WARN     : 0.1 - 0.5     （signal 稀疏；可能策略 dormant 或 IPC 慢）
 ///   DEGRADED : < 0.1         （signal 接近 0；持續樣本反映 IPC 死鎖）
 ///
-/// 為什麼 threshold 設計:
+/// 為什麼 threshold 設計（per M3 design spec §2.3 line 102 amend，PA Sprint 2
+/// Wave 1 amend 2026-05-22 land）:
 ///   - 5 strategy × 25 symbol = 125 symbol-strategy pair，正常時 signal_rate
 ///     ~ 0.1-1.0/min（per `project_5agent_runtime_state` baseline）；< 0.1 是
 ///     persistent dormant signal。
@@ -268,6 +288,8 @@ pub fn classify_pipeline_throughput_subscription_drift(value: u32) -> HealthStat
 ///   - 不設 CRITICAL band：strategy_quality domain 已負責 per-strategy dormant
 ///     觀測（Track E），pipeline_throughput 走 DEGRADED 警告夠用，避兩 domain
 ///     重複 emit CRITICAL（per spec §3.5 cross-domain 邊界 + ADR-0042 反模式）。
+///   - spec line 102 ladder 已補入此 threshold；IMPL 數值合理保留與 spec amend
+///     1:1 對齊。
 pub fn classify_pipeline_throughput_signal_rate(value: f64) -> HealthState {
     if value < 0.1 {
         HealthState::HealthDegraded
@@ -482,6 +504,7 @@ mod tests {
 
     #[test]
     fn test_classify_heartbeat_lag_ms_ladder() {
+        // per Sprint 2 round 2 Track B HIGH-1 fix：三段對齊 spec line 102 SSOT
         // OK: <= 30000
         assert_eq!(
             classify_pipeline_throughput_heartbeat_lag_ms(0),
@@ -491,7 +514,7 @@ mod tests {
             classify_pipeline_throughput_heartbeat_lag_ms(30_000),
             HealthState::HealthOk
         );
-        // WARN: > 30000
+        // WARN: 30000 - 60000（含右閉 60_000ms，spec SSOT > 60s 為 CRITICAL）
         assert_eq!(
             classify_pipeline_throughput_heartbeat_lag_ms(45_000),
             HealthState::HealthWarn
@@ -500,16 +523,19 @@ mod tests {
             classify_pipeline_throughput_heartbeat_lag_ms(60_000),
             HealthState::HealthWarn
         );
-        // DEGRADED: > 60000
+        // CRITICAL: > 60000（spec line 102 SSOT 「WS dropout > 60s」即時 fire）
+        assert_eq!(
+            classify_pipeline_throughput_heartbeat_lag_ms(60_001),
+            HealthState::HealthCritical
+        );
         assert_eq!(
             classify_pipeline_throughput_heartbeat_lag_ms(90_000),
-            HealthState::HealthDegraded
+            HealthState::HealthCritical
         );
         assert_eq!(
             classify_pipeline_throughput_heartbeat_lag_ms(120_000),
-            HealthState::HealthDegraded
+            HealthState::HealthCritical
         );
-        // CRITICAL: > 120000
         assert_eq!(
             classify_pipeline_throughput_heartbeat_lag_ms(150_000),
             HealthState::HealthCritical

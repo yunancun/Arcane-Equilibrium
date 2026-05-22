@@ -5265,3 +5265,17 @@ Sweep wrapper pattern 在 metrics 重型 monolithic function (1162 LOC `compute_
 4. **Wave 內 cross-Track scaffold contract**：Wave 1 Track A 24h 內 land scaffold (trait + writer + event bus + observe_classified)；Wave 1 Track B/C dispatch packet 含「等 Track A scaffold commit SHA 才動工」hint；避 Wave 1 內 trait re-design drift；Wave 2 開派時 Wave 1 已 closure 無 race
 
 Report：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_2_pre_v107_governance_audit_log_align.md`
+
+## 2026-05-22 — Sprint 2 Wave 1 M3 design spec amend (E2 round 1 reject 4 finding)
+
+E2 round 1 Track B+C reject 4 finding 中（HIGH-2「持續 2min」semantic / HIGH-1 heartbeat CRITICAL band / MEDIUM-1 B drift+signal threshold / MEDIUM-1 C pool_max_conn / MEDIUM-3 C disconnected fail-closed），PA single-thread 1-1.5 hr land。
+
+教訓 / 反模式：
+1. **「metric classify」vs 「SM band dwell」混為一談是典型 spec drift 源頭**：M3 design spec §2.3 ladder 寫「tick rate < 1/sec/symbol 持續 2min」literal 引發 E2 reject 因該 literal 既像 metric classify 持續條件（measurement window）又像 SM dwell 觸發條件；real SSOT = §3.3 line 165 dwell 60s + line 102 metric classify 即時。修法 = 新增 §2.3.1 區分章節 + literal clarify「持續 2min」為 v5.7 carry-over 非規範性敘述。
+2. **E2 reject 找出 IMPL drift 但根因在 spec 用詞不清**：HIGH-1 Track B IMPL heartbeat 把 60-120s 設 DEGRADED / 120+s 才 CRITICAL 是 unilateral drift；但 spec line 102 「WS dropout > 60s」原意是即時 CRITICAL — E2 catch IMPL drift；spec line 102 必補 inline note 明示「heartbeat_lag > 60_000 ms 即時 fire CRITICAL classify，不走 dwell 累積」防後續 IMPL 再 drift。
+3. **MEDIUM-1 「unilateral drift」雙向處理**：Track B IMPL 自行決定 drift+signal_rate threshold 是程序問題（spec line 102 ladder 無此 2 metric threshold），但 IMPL 數值合理；解決方案 = **spec amend 補進 ladder**（不改 IMPL）+ comment 引 spec reference；不要把所有 unilateral drift 都視為 IMPL fault，spec 缺漏也是 drift root cause。
+4. **disconnected fail-closed OK band 與「升 CRITICAL」直覺反**：直覺上「PG disconnected = CRITICAL」但 M3 emitter 自身 fail-closed OK band 才對 — 4 rationale：(a) V106 spec §1.1 fail-closed 一致 (b) Track A scaffold sample_error pattern 對稱 (c) PG 斷線由 cascade 接（engine_runtime PID dead / 5-gate kill）非 M3 重複 emit (d) 「失敗默認收縮」原則 6 真意是「不主動升 cascade 造成更激進副作用」非「升最高 state」。
+5. **ADR amend trigger 判斷標準**：dwell semantic 不變（仍 60s）+ governance scope 不變 + 4 metric ladder 補 + measurement window 區分 + disconnected handling = M3 design spec § level 細化，**不觸 ADR amend**。ADR amend trigger 應限縮於 governance authority / dwell time semantic / cascade scope 重定義 / 16 原則合規範圍變更四場景。
+6. **PA spec amend 不改 Rust IMPL**：本 task PA scope 嚴守「不 IMPL Rust code / 不改 V### SQL / 不改 Track A scaffold IMPL / 不 commit / 不派下游 sub-agent」；4 finding 修法明確後 E1 round 2 並行修（Track B HIGH-1 revert + Track C disconnected evidence_json 補；其他屬 spec amend 對齊 doc/comment）；E1 round 2 不阻 Wave 1 Track A scaffold sign-off。
+
+Report：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_2_wave1_m3_spec_amend.md`

@@ -45,6 +45,7 @@
 //!   - sysinfo 跨平台原生支援 Mac+Linux（per `feedback_cross_platform` +
 //!     `project_mac_deployment_target`）；不寫死 `cfg(target_os="linux")` 分支。
 
+pub mod domains;
 pub mod event_bus;
 pub mod metric_emitter;
 pub mod writer;

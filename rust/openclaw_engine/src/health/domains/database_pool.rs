@@ -40,6 +40,22 @@
 //!   - disk usage 跨平台原生支援 Mac+Linux；走 sysinfo Disks 不寫死 procfs（per
 //!     dispatch packet §4.5 反模式 (d)）。
 //!   - 不引 V### / spike / 跨進程 IPC（per dispatch packet §4.5 反模式 (e)）。
+//!
+//! 警告 ── probe 注入式設計：未接線 Wave 2 main.rs 前的 production 行為
+//!   `WriterQueueProbe` + `PoolWaitP95Probe` 走 caller 注入 closure：
+//!     - Wave 1 IMPL 不在 main.rs 接 emitter（per Track A §7 carry-over，Wave 2
+//!       後或 Sprint 5 cascade IMPL 才接）。
+//!     - 在 Wave 2 wire-up 前若 production 已啟用 DatabasePoolEmitter，caller
+//!       端必須注入 placeholder closure；emitter 不能假設 probe 已接 source。
+//!     - 配合 Sprint 2 round 2 Track C MEDIUM-2 fix：未接 source 時 caller 端
+//!       傳 `Arc::new(|| 0_u32)` 並於 V106 row evidence_json 標記
+//!       `probe_not_wired`（或 main.rs 接線時 emitter 整體不 schedule）。
+//!     - 若 probe 永遠回 0，scheduler 端 5-sample mean = 0，必走 OK band
+//!       不會誤升 WARN/DEGRADED — 風險是「永遠看不到 backlog 真實升階」
+//!       而非「誤觸 cascade」。
+//!   後續 wire-up 由 TODO follow-up entry「W-XX-Y Sprint 2 Wave 2 wire-up
+//!   writer_queue_depth probe + pool_wait_p95 probe（per `docs/agents/
+//!   todo-maintenance.md` 被動等待 NDay 守則）」追蹤。
 
 use std::sync::Arc;
 
@@ -71,6 +87,36 @@ pub fn classify_database_pool_active_conn(active: u32, pool_max: u32) -> HealthS
     if pct > 0.95 {
         HealthState::HealthDegraded
     } else if pct >= 0.80 {
+        HealthState::HealthWarn
+    } else {
+        HealthState::HealthOk
+    }
+}
+
+/// `pg_pool_active_conn_ratio` classify（per M3 design spec §2.3 line 102 +
+/// Sprint 2 design spec §3.2 amend，PA Sprint 2 Wave 1 amend 2026-05-22 Path A
+/// 採納）。
+///
+/// 為什麼此 helper 與 classify_database_pool_active_conn 並存:
+///   - `classify_database_pool_active_conn(active, max)` 入參兩值，用於 emitter
+///     端 sample 時直接 classify_band（raw active 觀測語意）；
+///   - 本 helper `(ratio: f64) -> HealthState` 單值入參，用於 scheduler 端
+///     `classify_aggregated(domain, metric_name, mean)` 5-sample mean 分類；
+///     mean 已是 ratio（active/max），無 max context 也能 classify。
+///   - 兩 helper threshold ladder 1:1 對齊（ratio 0.80 / 0.95）；保 spec
+///     §2.3 line 102 ladder「active/max < 80% + 80-95% + > 95%」literal SSOT。
+///
+/// 為什麼 ratio == 1.0 走 DEGRADED 不另設 CRITICAL band:
+///   - spec line 102 CRITICAL band 為「pool disconnected → fail-closed OK band
+///     per §2.3.2」；ratio 1.0 = pool 全滿仍屬 DEGRADED 範疇（pool 飽和），不
+///     升 CRITICAL；disconnected fail-closed OK 由 emitter 端 sample_now() max=0
+///     路徑處理。
+///   - 不設 ratio >= 1.0 → CRITICAL 避免「pool 全滿」與「disconnected」混 band；
+///     按 ADR-0042 反模式避免雙 domain 重複 emit CRITICAL。
+pub fn classify_database_pool_active_conn_ratio(ratio: f64) -> HealthState {
+    if ratio > 0.95 {
+        HealthState::HealthDegraded
+    } else if ratio >= 0.80 {
         HealthState::HealthWarn
     } else {
         HealthState::HealthOk
@@ -129,10 +175,13 @@ pub fn classify_database_pool_disk_used_pct(pct: f64) -> HealthState {
 // DatabasePoolSample + DatabasePoolMetricRow
 // ============================================================
 
-/// database_pool domain 採樣輸出（per spec §3.2 4 metric）。
+/// database_pool domain 採樣輸出（per spec §3.2 5 field；含 PA Sprint 2 Wave 1
+/// amend 2026-05-22 Path A 加入 pool_max_conn）。
 ///
-/// 為什麼 4 metric:
-///   - pool_active_conn：寫入 contention 偵測（per spec §2.1）。
+/// 為什麼此 5 field 設計:
+///   - pool_active_conn：寫入 contention 偵測（per spec §2.1）；raw 值留 telemetry。
+///   - pool_max_conn：ratio 計算 denominator；caller 注入（sqlx PgPool 未暴露
+///     max_connections accessor，per Sprint 2 design spec §3.2 amend）。
 ///   - pool_wait_ms_p95：acquire latency burst（per spec §2.1）。
 ///   - writer_queue_depth：寫入 backlog 累積（per spec §2.1）。
 ///   - disk_data_dir_used_pct：PG 寫入空間耗盡（per spec §2.3）。
@@ -140,6 +189,7 @@ pub fn classify_database_pool_disk_used_pct(pct: f64) -> HealthState {
 /// 為什麼用 pool_max_conn 一併採樣:
 ///   - pool_active_conn 單值無意義（需 active / max ratio）；採樣時一併取 max
 ///     讓 classify 端有完整 context；classify_band 內部計算 ratio。
+///   - max=0 → disconnected fail-closed OK band（per M3 design spec §2.3.2）。
 #[derive(Debug, Clone, Copy)]
 pub struct DatabasePoolSample {
     pub pool_active_conn: u32,
@@ -147,19 +197,40 @@ pub struct DatabasePoolSample {
     pub pool_wait_ms_p95: u32,
     pub writer_queue_depth: u32,
     pub disk_data_dir_used_pct: f64,
+    /// 採樣時 pool 是否斷線。
+    ///
+    /// 為什麼此 flag（per Sprint 2 round 3 Track C MEDIUM-3 fix）:
+    ///   - PA Sprint 2 Wave 1 amend 2026-05-22 Path A 規範「disconnected → fail-
+    ///     closed OK band」+ evidence_json `{"pool_status": "disconnected"}` audit
+    ///     trail（per M3 design spec §2.3.2）。
+    ///   - sample_now() 端 DbPool::get() None → 設此 flag 為 true，scheduler 端
+    ///     在 V106 row 寫 evidence_json；不在 emitter 端誤升 CRITICAL。
+    ///   - default false（connected）；只在 disconnected 場景設 true。
+    pub pool_disconnected: bool,
 }
 
 /// MetricSample wrapper：每 metric 個別投影為 row；scheduler 端列表處理。
 ///
-/// 為什麼一 sample → 4 MetricSample row（per Track A scaffold pattern）:
-///   - V106 row 是 per-metric_name 一條；4 metric → 4 row + 4 SM 各自 transition。
+/// 為什麼一 sample → 5 MetricSample row（per Sprint 2 round 3 Track C MEDIUM-1
+/// C fix Path A）:
+///   - V106 row 是 per-metric_name 一條；5 metric → 5 row + 各自 SM transition。
 ///   - 共用 anomaly_id space（`database_pool__<metric_name>`）但各 metric 獨立
 ///     累積 fire（per spec §6.2 anomaly_id 命名規約）。
+///   - `pg_pool_active_conn` raw 留 telemetry（走 _ => HealthOk fallback；不 dispatch
+///     classify_aggregated）；`pg_pool_active_conn_ratio` 經 scheduler 端 mean
+///     classify。
 #[derive(Debug, Clone, Copy)]
 pub struct DatabasePoolMetricRow {
     pub metric_name: &'static str,
     pub value: f64,
     pub band: HealthState,
+    /// 採樣時 pool 是否斷線（per Sprint 2 round 3 Track C MEDIUM-3 fix）。
+    ///
+    /// 為什麼此 flag 於 MetricSample-level 而非 sample-level:
+    ///   scheduler 端 run_domain_loop 接 Box<dyn MetricSample>，需從 MetricSample
+    ///   抽 pool_status 資訊以寫 evidence_json；故每 row 帶 disconnected flag。
+    ///   per spec §2.3.2「disconnected 不靜默」evidence_json audit trail 要求。
+    pub pool_disconnected: bool,
 }
 
 impl MetricSample for DatabasePoolMetricRow {
@@ -174,17 +245,42 @@ impl MetricSample for DatabasePoolMetricRow {
     fn classify_band(&self) -> HealthState {
         self.band
     }
+
+    fn extra_evidence(&self) -> Option<serde_json::Value> {
+        // disconnected 場景寫 evidence_json `{"pool_status": "disconnected"}`
+        // audit trail；per M3 design spec §2.3.2 + PA Sprint 2 Wave 1 amend
+        // 2026-05-22 Path A 規範。
+        if self.pool_disconnected {
+            Some(serde_json::json!({ "pool_status": "disconnected" }))
+        } else {
+            None
+        }
+    }
 }
 
 impl DatabasePoolSample {
-    /// 將 sample 展為 4 個 metric row（每 metric_name 一條）。
+    /// 將 sample 展為 5 個 metric row（每 metric_name 一條；per Sprint 2 round 3
+    /// MEDIUM-1 C fix Path A 新增 `pg_pool_active_conn_ratio` 提供 scheduler 端
+    /// classify_aggregated 入口）。
     ///
-    /// 為什麼此設計（per Track A scaffold pattern）:
+    /// 為什麼此設計（per Track A scaffold pattern + Sprint 2 round 3 amend）:
     ///   - 對齊 V106 schema：1 row = 1 metric_name；不展平就無法各 metric 獨立
     ///     classify_band + SM transition。
+    ///   - 5 metric 即 raw active_conn（telemetry only）/ active_conn_ratio
+    ///     （classify）/ wait_ms_p95 / writer_queue_depth / disk_data_dir_used_pct。
+    ///   - ratio 計算：max=0（disconnected）→ ratio=0 fail-closed OK band；
+    ///     非零 max → ratio = active / max。
     pub fn into_metric_rows(self) -> Vec<DatabasePoolMetricRow> {
         let active_band =
             classify_database_pool_active_conn(self.pool_active_conn, self.pool_max_conn);
+        // ratio 計算：max=0（disconnected）→ ratio=0 fail-closed OK band（per
+        // M3 design spec §2.3.2 disconnected handling）。
+        let active_ratio = if self.pool_max_conn > 0 {
+            self.pool_active_conn as f64 / self.pool_max_conn as f64
+        } else {
+            0.0
+        };
+        let active_ratio_band = classify_database_pool_active_conn_ratio(active_ratio);
         let wait_band = classify_database_pool_wait_ms_p95(self.pool_wait_ms_p95);
         let queue_band = classify_database_pool_writer_queue_depth(self.writer_queue_depth);
         let disk_band = classify_database_pool_disk_used_pct(self.disk_data_dir_used_pct);
@@ -194,21 +290,31 @@ impl DatabasePoolSample {
                 metric_name: "pg_pool_active_conn",
                 value: self.pool_active_conn as f64,
                 band: active_band,
+                pool_disconnected: self.pool_disconnected,
+            },
+            DatabasePoolMetricRow {
+                metric_name: "pg_pool_active_conn_ratio",
+                value: active_ratio,
+                band: active_ratio_band,
+                pool_disconnected: self.pool_disconnected,
             },
             DatabasePoolMetricRow {
                 metric_name: "pg_pool_wait_ms_p95",
                 value: self.pool_wait_ms_p95 as f64,
                 band: wait_band,
+                pool_disconnected: self.pool_disconnected,
             },
             DatabasePoolMetricRow {
                 metric_name: "pg_writer_queue_depth",
                 value: self.writer_queue_depth as f64,
                 band: queue_band,
+                pool_disconnected: self.pool_disconnected,
             },
             DatabasePoolMetricRow {
                 metric_name: "disk_data_dir_used_pct",
                 value: self.disk_data_dir_used_pct,
                 band: disk_band,
+                pool_disconnected: self.pool_disconnected,
             },
         ]
     }
@@ -322,9 +428,15 @@ impl DatabasePoolEmitter {
         //     使用中的 connection 數，正是「active」語意。
         //   - pool_max_conn 來自 caller 注入（per struct 注釋），不依賴 sqlx
         //     提供 accessor（sqlx 沒暴露）。
-        let pool_active_conn = match self.db_pool.get() {
-            Some(pool) => pool.size().saturating_sub(pool.num_idle() as u32),
-            None => 0u32,
+        // pool_disconnected flag：DbPool::get() None 即斷線（per M3 design spec
+        // §2.3.2 + Sprint 2 round 3 Track C MEDIUM-3 fix）；scheduler 端寫 V106
+        // row evidence_json `{"pool_status": "disconnected"}` audit trail。
+        let (pool_active_conn, pool_disconnected) = match self.db_pool.get() {
+            Some(pool) => (
+                pool.size().saturating_sub(pool.num_idle() as u32),
+                false,
+            ),
+            None => (0u32, true),
         };
 
         // Step 2: writer queue depth probe。
@@ -349,6 +461,7 @@ impl DatabasePoolEmitter {
             pool_wait_ms_p95,
             writer_queue_depth,
             disk_data_dir_used_pct,
+            pool_disconnected,
         })
     }
 }
@@ -525,22 +638,130 @@ mod tests {
         );
     }
 
+    /// Sprint 2 round 3 Track C MEDIUM-1 C fix Path A：
+    /// `classify_database_pool_active_conn_ratio` 四 band 邊界正確。
     #[test]
-    fn test_database_pool_sample_into_metric_rows_4_metrics() {
+    fn test_classify_active_conn_ratio_thresholds() {
+        // OK band：ratio < 0.80
+        assert_eq!(
+            classify_database_pool_active_conn_ratio(0.0),
+            HealthState::HealthOk
+        );
+        assert_eq!(
+            classify_database_pool_active_conn_ratio(0.5),
+            HealthState::HealthOk
+        );
+        assert_eq!(
+            classify_database_pool_active_conn_ratio(0.79),
+            HealthState::HealthOk
+        );
+        // WARN band：0.80 - 0.95
+        assert_eq!(
+            classify_database_pool_active_conn_ratio(0.80),
+            HealthState::HealthWarn
+        );
+        assert_eq!(
+            classify_database_pool_active_conn_ratio(0.90),
+            HealthState::HealthWarn
+        );
+        assert_eq!(
+            classify_database_pool_active_conn_ratio(0.95),
+            HealthState::HealthWarn
+        );
+        // DEGRADED band：> 0.95
+        assert_eq!(
+            classify_database_pool_active_conn_ratio(0.951),
+            HealthState::HealthDegraded
+        );
+        assert_eq!(
+            classify_database_pool_active_conn_ratio(1.0),
+            HealthState::HealthDegraded
+        );
+        // ratio > 1.0 邊界（理論不發生，pool 不會超 max）：仍 DEGRADED。
+        assert_eq!(
+            classify_database_pool_active_conn_ratio(1.5),
+            HealthState::HealthDegraded
+        );
+    }
+
+    /// Sprint 2 round 3 Track C MEDIUM-3 fix：disconnected 場景 extra_evidence
+    /// 返 `{"pool_status": "disconnected"}` audit trail。
+    #[test]
+    fn test_metric_row_extra_evidence_disconnected_audit_trail() {
+        let row = DatabasePoolMetricRow {
+            metric_name: "pg_pool_active_conn",
+            value: 0.0,
+            band: HealthState::HealthOk,
+            pool_disconnected: true,
+        };
+        let evidence = MetricSample::extra_evidence(&row).expect("disconnected 應寫 evidence");
+        // evidence_json 含 pool_status disconnected key 對齊 spec §2.3.2 規範。
+        assert_eq!(evidence["pool_status"], "disconnected");
+    }
+
+    /// Sprint 2 round 3 Track C MEDIUM-1 C + MEDIUM-3 fix：disconnected
+    /// DatabasePoolSample 採樣後 ratio = 0 fail-closed OK band；全 row 帶
+    /// disconnected flag。
+    #[test]
+    fn test_disconnected_sample_into_metric_rows_fail_closed_with_evidence() {
+        // disconnected 場景：max=0 + active=0 + 各 probe 走 fallback。
+        let snapshot = DatabasePoolSample {
+            pool_active_conn: 0,
+            pool_max_conn: 0,
+            pool_wait_ms_p95: 0,
+            writer_queue_depth: 0,
+            disk_data_dir_used_pct: 0.0,
+            pool_disconnected: true,
+        };
+        let rows = snapshot.into_metric_rows();
+        assert_eq!(rows.len(), 5);
+        // 所有 row band 為 OK（fail-closed per spec §2.3.2）。
+        for r in &rows {
+            assert_eq!(
+                r.band,
+                HealthState::HealthOk,
+                "disconnected: {} should fail-closed OK",
+                r.metric_name
+            );
+            // 全 row 帶 disconnected flag → extra_evidence 寫 audit。
+            assert!(
+                r.pool_disconnected,
+                "disconnected flag 必傳遞至 row: {}",
+                r.metric_name
+            );
+            let evidence = MetricSample::extra_evidence(r)
+                .expect("disconnected row 必有 extra_evidence");
+            assert_eq!(evidence["pool_status"], "disconnected");
+        }
+        // ratio row 值 = 0.0（max=0 → ratio=0 fail-closed）。
+        let ratio_row = rows
+            .iter()
+            .find(|r| r.metric_name == "pg_pool_active_conn_ratio")
+            .unwrap();
+        assert_eq!(ratio_row.value, 0.0);
+    }
+
+    #[test]
+    fn test_database_pool_sample_into_metric_rows_5_metrics() {
+        // 為什麼 5 metric（per Sprint 2 round 3 Track C MEDIUM-1 C fix Path A）:
+        //   - raw pg_pool_active_conn + 新 pg_pool_active_conn_ratio + 3 既有
+        //     metric (wait / queue / disk) = 5 row。
         let snapshot = DatabasePoolSample {
             pool_active_conn: 2,
             pool_max_conn: 10,
             pool_wait_ms_p95: 50,
             writer_queue_depth: 100,
             disk_data_dir_used_pct: 50.0,
+            pool_disconnected: false,
         };
         let rows = snapshot.into_metric_rows();
-        assert_eq!(rows.len(), 4);
+        assert_eq!(rows.len(), 5);
         let names: Vec<&'static str> = rows.iter().map(|r| r.metric_name).collect();
         assert_eq!(
             names,
             vec![
                 "pg_pool_active_conn",
+                "pg_pool_active_conn_ratio",
                 "pg_pool_wait_ms_p95",
                 "pg_writer_queue_depth",
                 "disk_data_dir_used_pct",
@@ -550,6 +771,12 @@ mod tests {
         for r in &rows {
             assert_eq!(r.band, HealthState::HealthOk);
         }
+        // ratio = 2/10 = 0.2，落 OK band。
+        let ratio_row = rows
+            .iter()
+            .find(|r| r.metric_name == "pg_pool_active_conn_ratio")
+            .unwrap();
+        assert!((ratio_row.value - 0.2).abs() < 1e-9);
     }
 
     #[test]
@@ -560,9 +787,10 @@ mod tests {
             pool_wait_ms_p95: 200,
             writer_queue_depth: 2000,
             disk_data_dir_used_pct: 75.0,
+            pool_disconnected: false,
         };
         let rows = snapshot.into_metric_rows();
-        // 全 metric WARN band。
+        // 全 metric WARN band（含 ratio = 8/10 = 0.8 落 WARN）。
         for r in &rows {
             assert_eq!(r.band, HealthState::HealthWarn, "{} should WARN", r.metric_name);
         }
@@ -576,8 +804,10 @@ mod tests {
             pool_wait_ms_p95: 1000,
             writer_queue_depth: 10000,
             disk_data_dir_used_pct: 90.0,
+            pool_disconnected: false,
         };
         let rows = snapshot.into_metric_rows();
+        // ratio = 20/20 = 1.0 > 0.95 → DEGRADED；其餘 metric 也 DEGRADED。
         for r in &rows {
             assert_eq!(
                 r.band,
@@ -622,10 +852,13 @@ mod tests {
             metric_name: "pg_pool_active_conn",
             value: 5.0,
             band: HealthState::HealthOk,
+            pool_disconnected: false,
         };
         assert_eq!(MetricSample::metric_name(&row), "pg_pool_active_conn");
         assert_eq!(MetricSample::numeric_value(&row), 5.0);
         assert_eq!(MetricSample::classify_band(&row), HealthState::HealthOk);
+        // 預設 pool_disconnected=false → extra_evidence 為 None。
+        assert!(MetricSample::extra_evidence(&row).is_none());
     }
 
     /// DomainEmitter trait sanity check：sample_interval_sec=60 + domain
