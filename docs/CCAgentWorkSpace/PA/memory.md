@@ -5208,3 +5208,60 @@ Sweep wrapper pattern 在 metrics 重型 monolithic function (1162 LOC `compute_
 **Anti-pattern**: PA 在 sign-off 場景憑藉「sqlx 應該有 migrate binary」直覺命名而不 empirical confirm Cargo binary list；下次 sign-off PR 內含 cargo run --bin <name> 引用時必 grep `[[bin]]` 確認。
 
 **Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_1a_epsilon_p2_n1_spec_literal_patch.md`
+
+---
+
+## 2026-05-22 PA-DRIFT-1 V107 governance.audit_log alignment
+
+**Finding**：Sprint 1B E1 push back 的 PA-DRIFT-1 真實 drift 點不在 spec doc，在 V107 SQL implementation。
+
+**分層 verdict**：
+- Spec doc：PA Phase 3a 已 reconcile，10 處 `learning.governance_audit_log` + 1 處歷史注釋（line 472 標注「前版漂移」audit trail）→ ✅ NO PATCH
+- V107 SQL：4 處 `governance.audit_log` drift（line 23/47/127/134），其中 line 127-135 是 **Guard A check logic** drift（critical），不只注釋
+- PG 真實 schema 確認：V035 + V098 baseline 全用 `learning.governance_audit_log`（27 column hypertable + FK mlde_param_applications），`governance.audit_log` 是 5 column 遺留小表
+
+**Carry-over**：V107 SQL patch 屬 E1 IMPL bug，carry-over Sprint 1B follow-up；不阻 Sprint 2 派發。
+
+**教訓**：
+1. Phase 3a spec reconcile 完成時，應**主動檢查**對應 SQL implementation 是否同步 — 不能假設「spec 對齊 = IMPL 對齊」
+2. PA-DRIFT 類 finding 收到 push back 後，先做**雙向 grep**（spec + SQL）再下 scope verdict，避免 prompt 假設帶偏方向（本案 prompt 把 drift 定位在 spec doc，但實際在 SQL）
+3. 遺留 schema 物件（如 sandbox 同時存在 `governance.audit_log` + `learning.governance_audit_log`）會**掩蓋** Guard A logic drift — Mac mock 看不出，必 Linux PG empirical
+4. Audit trail 注釋（如「前版漂移」reconcile 說明）不該被 patch 抹除 — 它是治理可追溯性的證據
+
+## Sprint 2 pre-readiness Track 1 — spec D1/D2/D3 整合 + dispatch packet land（2026-05-22）
+
+**觸發**：operator brief Sprint 2 pre-readiness Track 1 任務派發；3-4 hr single-thread；spec D1/D2/D3 整合 + Phase 1 refine 縮版 + 6 Track dispatch packet + concurrent conflict check + readiness sign-off。
+
+**operator 拍板 3 決策**：
+- **D1 sysinfo crate (a) adopted**：跨平台 Mac+Linux 原生 + Mac 部署目標 ready；workspace `sysinfo = "0.32"`
+- **D2 並行 with Sprint 1B mid items**（operator override PA 推 single-thread）：Sprint 2 6 Track 與 Sprint 1B mid 3 NEW carry-over（PA-DRIFT-1/2 + E3-MED-2）並行；Wave 1/2 拆分各 3 並行；ceiling tight 階段 Wave 1 dispatch 6-7 sub-agent peak
+- **D3 cascade reject log emit minimal IMPL 包含於 Track A**：~2 hr E1 cost 補 spike Track B E2 round 1 LOW-2 + round 2 1 new LOW carry-over；Sprint 5 之前 V106 audit row 已有 reject reason 完整 trail
+
+**Deliverable 3 件**：
+1. parent spec patch：`docs/execution_plan/2026-05-22--m3_metric_emitter_sprint2_design_spec.md`（+130-150 LOC；新增 §3 Decisions Finalized + §4 IMPL plan adjust；更新 §0 TL;DR / §8.1 / §8.2 / §9.3）
+2. dispatch packet：`docs/execution_plan/2026-05-22--m3_metric_emitter_sprint2_dispatch_packet.md`（563 行；6 Track prerequisite + E1 prompt skeleton + AC sub-step + file path scope + 反模式 + Disconnect Recovery + Wave 拆分 + Phase chain）
+3. readiness sign-off report：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_2_readiness_signoff.md`（217 行；§1 decisions integrated + §2 dispatch packet + §3 conflict check + §4 gate verdict OPEN with carry-over + §5 next action）
+
+**Sprint 1B mid 並行 conflict 評估結論**：
+- **0 file scope overlap**：3 NEW carry-over file scope（docs/execution_plan/* + sql/migrations/V103/V### audit_log + sandbox PG role GRANT）與 Sprint 2 6 Track file scope（rust/Cargo.toml + rust/openclaw_engine/Cargo.toml + health/mod.rs + health/metric_emitter/* + health/writer.rs + health/event_bus.rs + health/domains/*）0 重疊
+- **1 條時序依賴**：E3-MED-2 sandbox_admin hypertable OWNER 必早於 Sprint 2 Phase 3c QA empirical 起跑；Phase 2 IMPL 階段不受影響
+- **Sub-agent ceiling check**：Phase 2 Wave 1 dispatch 為唯一 tight 階段（6-7 peak 含 Sprint 1B mid 並行）；嚴守 stagger 5min dispatch；其餘階段全 healthy 餘量（3+）
+
+**Sprint 2 readiness gate verdict**：**OPEN with carry-over conditions**
+
+**3 carry-over severity**：
+- 對 Sprint 2 Phase 2 IMPL：0 BLOCKER
+- 對 Sprint 2 Phase 3c QA empirical：1 條時序依賴（E3-MED-2 必早 closed）
+- 對 Sprint 4 first Live：1 條 HIGH（PA-DRIFT-2 V103 file；本 Sprint 2 不阻）
+
+**Wave 拆分執行順序**：
+- Wave 1 (D0-D3)：Track A engine_runtime 沿用升級 + sysinfo + V106 writer + D3 cascade reject minimal + Track B pipeline_throughput + Track C database_pool；Track A 24h 內 land scaffold (trait + writer + event bus + observe_classified) 後 Track B/C 才能用
+- Wave 2 (D3-D6)：Track D api_latency + Track E strategy_quality（最高工時 8-12 hr 含 25 instance per-strategy SM + aggregate 0.40 threshold rule + dormant retain 24h）+ Track F risk_envelope；用 Wave 1 已穩定 scaffold
+
+**核心教訓（4 個）**：
+1. **Phase 1 PA refine 縮版範式**：parent spec 已 land + operator decisions 已 sign-off 時，Phase 1 不需重做 cross-check 12-18 hr，只做 dispatch packet 落地 ~2-3 hr；cross-check 內嵌於 spec body §10 16 根原則合規確認，不重做
+2. **D2 並行 operator override 處理**：PA 原推 single-thread（保 7 sub-agent ceiling）；operator override 為並行；PA 接受 override 後必補 ceiling 預警 table + Wave 拆分 + cross-Sprint conflict matrix 三件套，不能單純「accepted」就放行
+3. **D3 cascade reject log emit minimal IMPL scope 控制**：~2 hr E1 cost 補完整 audit trail；scope 嚴守「V106 row INSERT only + evidence_json reject_reason」+ 不 emit Slack / Console badge / halt strategy / 降 LAL Tier；避 Sprint 5 才補 audit gap 同時不破 Sprint 2 scope
+4. **Wave 內 cross-Track scaffold contract**：Wave 1 Track A 24h 內 land scaffold (trait + writer + event bus + observe_classified)；Wave 1 Track B/C dispatch packet 含「等 Track A scaffold commit SHA 才動工」hint；避 Wave 1 內 trait re-design drift；Wave 2 開派時 Wave 1 已 closure 無 race
+
+Report：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_2_pre_v107_governance_audit_log_align.md`

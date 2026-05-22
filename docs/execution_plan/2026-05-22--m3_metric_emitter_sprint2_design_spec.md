@@ -3,7 +3,7 @@ spec: M3 metric emitter Sprint 2 IMPL phase design
 date: 2026-05-22
 author: PA (Project Architect)
 phase: Sprint 1B (early start design) → Sprint 2 (IMPL)
-status: DESIGN-DRAFT
+status: DESIGN-READY (D1/D2/D3 operator-signed 2026-05-22)
 parent specs:
   - srv/docs/execution_plan/2026-05-21--sprint_1a_zeta_impl_spike_scope_spec.md
   - srv/docs/execution_plan/2026-05-21--m3_health_monitoring_design_spec.md
@@ -28,11 +28,119 @@ non-scope:
 ## §0 TL;DR
 
 - spike Track B 已完成 `engine_runtime` 1 domain + 4-state ladder + amp cap 24h Rust skeleton；Sprint 2 IMPL 把 stub 5 domain 補齊 + 5-sample window mean/sigma 聚合 + V106 row 真實寫入。
-- 5 並行 Track（pipeline_throughput / database_pool / api_latency / strategy_quality / risk_envelope）；engine_runtime 在 spike Track B 完成不重做（Sprint 2 升級為 mean/sigma window aggregation + V106 writer 真實接線）。
-- Phase chain：Phase 1 PA refine（12-18 hr）→ Phase 2 E1 IMPL × 5 並行（30-45 hr）→ Phase 3a/b/c/d/e（12-18 hr）= **60-80 hr 真實工時 + buffer 後 75-100 hr**。
+- 6 並行 Track（Track A engine_runtime 沿用升級 + Track B-F pipeline_throughput / database_pool / api_latency / strategy_quality / risk_envelope）；Track A 不重做但需 V106 writer 真實接線 + sysinfo crate 引 + D3 cascade reject log minimal emit。
+- Phase chain：Phase 1 PA refine（~2-3 hr dispatch packet 縮版 per D2 ceiling 約束）→ Phase 2 E1 IMPL × 6 並行 wave 1+2（36-50 hr 並行）→ Phase 3a/b/c/d/e（22-33 hr）= **70-104 hr 真實 + buffer 後 75-115 hr**。
 - AC-1..7 對齊 spike scope spec §AC pattern：V106 row 真實寫入 / 4-state ladder 每 domain fire / amp cap 24h fire / cross-domain 不互擾 / production binary 0 mock time 滲透 / cargo + pytest baseline 不退 / binary footprint <50ms cold start。
-- Sprint 2 dispatch readiness gate：**PENDING**（待 operator approve Sprint 1B 6 條 early IMPL routing + Phase 1 PA refine cross-check）。
-- 治理硬邊界：Sprint 2 emitter **不**觸 cascade（halt strategy / 降 LAL Tier）；emitter 只 emit `HealthStateChangeEvent` 給 event bus，cascade subscribe + 執行延 Sprint 5。
+- Sprint 2 dispatch readiness gate：**OPEN with carry-over conditions** — D1/D2/D3 operator-signed 2026-05-22；Phase 1 dispatch packet land；Sprint 1B mid 3 carry-over（PA-DRIFT-1/PA-DRIFT-2/E3-MED-2）file scope 與本 Sprint 2 6 Track 0 重疊可並行。
+- 治理硬邊界：Sprint 2 emitter **不**觸 cascade 執行（halt strategy / 降 LAL Tier）；emitter 只 emit `HealthStateChangeEvent` 給 event bus + D3 minimal cascade reject log emit（V106 row `evidence_json={"reject_reason": "..."}` 留 audit trail），cascade subscribe + 執行延 Sprint 5。
+
+---
+
+## §3 Decisions Finalized (operator-signed 2026-05-22)
+
+per operator brief 2026-05-22 task dispatch：
+
+### D1 — sysinfo crate adopted (a 採納)
+
+- **決策**：選 (a) `sysinfo` crate 引入
+- **Rationale**：跨平台 Mac+Linux 原生支援；對齊 `project_mac_deployment_target` memory（Apple Silicon Mac 部署目標永遠 ready）；對齊 `feedback_cross_platform`（路徑不硬編碼、LLM 抽象、服務可遷移）。`sysinfo` ~80kb + 14 transitive dep 可接受（workspace 已用 `tokio` 拉 100+ dep，邊際成本低）。
+- **Version pick**：Sprint 2 Phase 1 Track A prerequisite check 階段 freeze sysinfo version；Cargo.toml workspace 加 `sysinfo = "0.32"`（latest stable as of 2026-05；Track A E1 dispatch packet 確認最新 stable 不破壞 MSRV）。
+- **影響檔**：`rust/Cargo.toml`（workspace deps 新加）+ `rust/openclaw_engine/Cargo.toml`（dep 引）+ `rust/openclaw_engine/src/health/mod.rs`（採 `sysinfo::System` 取 cpu/rss/heartbeat/open_fd/thread/uptime）。
+
+### D2 — 並行 with Sprint 1B mid items（operator override PA 推 single-thread）
+
+- **決策**：Sprint 2 與 Sprint 1B mid 3 NEW carry-over（PA-DRIFT-1 governance.audit_log alignment / PA-DRIFT-2 V103 file HARD BLOCKER / E3-MED-2 sandbox_admin hypertable OWNER）並行運行
+- **Rationale**：operator override PA 原推 single-thread；理由是 Sprint 1B mid 3 carry-over 屬文件 / SQL 補位 + sandbox role 補位，與 Sprint 2 6 Track Rust IMPL file scope 0 重疊（per 本 spec §4 IMPL plan adjust §4.1 conflict matrix）。
+- **Sub-agent ceiling 預警**：已知 Sprint 1B mid 5 並行峰值 + Sprint 2 6 Track 派發 packet 階段 4 並行最大 = 9 sub-agent peak；超 7 ceiling。**錯峰排程**：見 §4.1 + §4.2 wave 切分。
+- **Wave 拆分**：Sprint 2 Track A/B/C 拆 Wave 1 + Track D/E/F 拆 Wave 2 各 3 並行（與 Sprint 1B mid carry-over 並行最大 6 sub-agent，餘 1 預留 PM hands-on）。
+
+### D3 — Sprint 5 cascade reject log emit minimal IMPL 包含於 Track A（~2 hr E1 cost）
+
+- **決策**：Sprint 2 Track A 沿用升級範圍**含** Sprint 5 cascade reject log emit minimal IMPL（per Sprint 1A-ζ PM Phase 3e §4.3 item 5 + spike Track B E2 round 1 LOW-2 + Track B round 2 1 new LOW carry-over）
+- **Rationale**：~2 hr E1 cost 補 audit gap，避 Sprint 5 才補的 governance 治理漏洞；spike skeleton `try_transition_with_cap` 已有 `≥2 fail-closed reject` 邏輯（mod.rs:404-411）但沒 emit V106 audit row；Sprint 2 補完整 audit trail 後 Sprint 5 cascade subscribe 即用。
+- **Minimal scope**：V106 row INSERT 寫 `state` 維持當前 + `evidence_json={"reject_reason": "amp_cap_>=2_fail_closed" | "amp_cap_same_anomaly_24h_suppress"}`；**不** emit Slack alert / Console badge（Sprint 7 + 8 才接）；**不** halt strategy / 降 LAL Tier（Sprint 5 才接）。
+- **Track A 工時影響**：4-6 hr → 6-8 hr（+2 hr cascade reject log emit minimal）。
+
+---
+
+## §4 IMPL plan adjust (per D2 並行 + D3 工時延伸)
+
+### 4.1 Sprint 1B mid concurrent conflict matrix
+
+per D2 operator override，Sprint 2 6 Track 與 Sprint 1B mid 3 NEW carry-over 並行運行。file scope conflict 評估：
+
+| Sprint 1B mid item | 預估 file scope | Sprint 2 file scope 重疊 | 結論 |
+|---|---|---|---|
+| **PA-DRIFT-1** governance.audit_log alignment | `docs/execution_plan/*` / `sql/migrations/V###` audit_log schema | Sprint 2 6 Track 不碰 `governance.audit_log` 表（emitter 寫 `learning.health_observations` only）| ✅ 0 file overlap |
+| **PA-DRIFT-2** V103 file HARD BLOCKER | `sql/migrations/V103__*.sql`（V103 EXTEND outline → 真實 .sql 檔 land） | Sprint 2 6 Track 不碰 V103；新增 V### 走 V117+ reserved（per `2026-05-21--v58_dispatch_consolidation.md` ordering） | ✅ 0 file overlap |
+| **E3-MED-2** sandbox_admin hypertable OWNER | sandbox PG role GRANT / TimescaleDB hypertable owner 補位 | Sprint 2 6 Track Phase 3c QA empirical 需 sandbox_admin access；E3-MED-2 收口後可用，**有時序依賴非 file overlap** | ⚠️ 時序依賴：Phase 3c 起跑前必確認 E3-MED-2 closed |
+
+**衝突結論**：0 file scope overlap；1 條時序依賴（E3-MED-2 必早於 Sprint 2 Phase 3c 收口；Phase 2 IMPL 階段不受影響）。
+
+### 4.2 Sub-agent ceiling 預警 + Wave 拆分
+
+per `feedback_subagent_first` + `feedback_fetch_before_dispatch` + Sprint 1A-ζ Phase 2 7 sub-agent ceiling 守則：
+
+**Peak sub-agent matrix**（每階段並行最大 sub-agent count）：
+
+| 階段 | Sprint 2 並行 | Sprint 1B mid 並行 | 主會話 PM | Peak total | 7 ceiling 餘量 |
+|---|---|---|---|---|---|
+| Phase 0 (本 packet land) | 0 (PA single-thread) | 3 (PA-DRIFT-1/2 + E3-MED-2 PM 派發) | PM | 4 | 3 ✅ |
+| Phase 1 (本 packet review) | 0 (operator review) | 3 (3 carry-over IMPL) | PM | 4 | 3 ✅ |
+| **Phase 2 Wave 1** (Track A/B/C 並行) | **3** | 0-3 (3 carry-over 收尾) | PM | **6** | **1 ✅ tight** |
+| **Phase 2 Wave 2** (Track D/E/F 並行) | **3** | 0 (3 carry-over 已 DONE) | PM | **4** | 3 ✅ |
+| Phase 3a E2 review (Track A/B/C wave 1) | 3 | 0 | PM | 4 | 3 ✅ |
+| Phase 3a E2 review (Track D/E/F wave 2) | 3 | 0 | PM | 4 | 3 ✅ |
+| Phase 3b E4 / 3c QA / 3d TW / 3e PM | 1 single | 0 | PM | 2 | 5 ✅ |
+
+**結論**：Phase 2 Wave 1 為唯一 tight 階段（6 sub-agent peak）；嚴守 stagger 5min dispatch + 不接受第 4 個並行請求；其餘階段全 healthy 餘量。
+
+### 4.3 Wave 拆分執行順序
+
+per Sprint 1A-ζ pattern §3.2 sequential constraint + §6.3.1 multi-session race mitigation SOP：
+
+```
+[T+0]    Wave 1 dispatch（D1-D3 wall-clock）
+         stagger 5min:
+         T+0min     派 Track A E1 (engine_runtime 沿用升級 + sysinfo + V106 writer + D3 cascade reject)
+         T+5min     派 Track B E1 (pipeline_throughput)
+         T+10min    派 Track C E1 (database_pool)
+
+[T+~3 day] Wave 1 IMPL DONE → E2 review × 3 並行 → 收尾 PASS
+
+[T+~4 day] Wave 2 dispatch（D2-D5 wall-clock）
+         stagger 5min:
+         T+0min     派 Track D E1 (api_latency)
+         T+5min     派 Track E E1 (strategy_quality；最高工時 8-12 hr)
+         T+10min    派 Track F E1 (risk_envelope)
+
+[T+~7 day] Wave 2 IMPL DONE → E2 review × 3 並行 → 收尾 PASS
+
+[T+~8 day] Phase 3b E4 regression single-thread
+[T+~9 day] Phase 3c QA empirical single-thread (需 E3-MED-2 已 closed)
+[T+~10 day] Phase 3d TW + Phase 3e PM sign-off
+```
+
+**Cross-Track shared scaffold**（Wave 1 Track A 先 land 共用 trait）：
+
+per spike scope spec §3.2 + 本 spec §3.1 trait design：
+
+```
+Wave 1 Track A 升級先 land：
+  - DomainEmitter trait + MetricSample trait (§3.1)
+  - RollingWindowAggregator (§3.1 + §4.2 Bessel sigma)
+  - HealthObservationWriter trait + V106 INSERT 接 PgPool
+  - event_bus emit pattern + HealthStateChangeEvent
+  - observe_classified API (§5.2 new SM entry)
+  - sysinfo::System 接 EngineRuntimeSample
+  - D3 cascade reject log emit minimal
+  ↓
+Wave 1 Track B/C 並行使用上述 scaffold IMPL 各自 domain emitter (內 sequential after Track A 24h 內)
+  ↓
+Wave 2 Track D/E/F 使用 Wave 1 scaffold IMPL 各自 domain emitter
+```
+
+**Race mitigation**：Wave 1 Track A 24h 內 land trait + writer scaffold；Track B/C dispatch packet 含「等 Track A trait land commit SHA 才動工」hint；避 Wave 1 內 trait re-design drift。Wave 2 開派時 Wave 1 已 closure，無 trait race。
 
 ---
 
@@ -674,33 +782,38 @@ per ARCH-04 budget（per spike scope spec §1.6 cold start budget 引用）：M3
 
 per Sprint 1A-ζ Phase 0/1/2/3 pattern + spike scope spec §6.1：
 
-### 8.1 Phase 1 — PA refine + 5 dispatch packet
+### 8.1 Phase 1 — PA refine + 6 dispatch packet (per Sprint 1A-ζ Phase 1 PA refine pattern)
+
+per Sprint 1A-ζ Phase 1 e1_dispatch_packet 範本 + operator brief 2026-05-22 task：12-18 hr 縮為 ~2-3 hr dispatch packet 創建（不重做 cross-check，spec body §1-§10 已 land）。
 
 | # | Item | Owner | 估時 |
 |---|---|---|---|
-| P1-1 | 本 spec cross-check ADR-0042 / M3 design spec / V106 schema 三層對齊 — 確保 Sprint 2 IMPL 不違背任何治理邊界 | PA | 2 hr |
-| P1-2 | 5 Track 各 spike feature flag scope 確認 — 確保 production binary 不滲透 mock time（per AC-5）| PA | 2 hr |
-| P1-3 | 5 Track sysinfo / sqlx Pool / Bybit client / strategy event 拉值點 確認 — 確保 6 domain 各自 sample 來源真實存在 | PA | 3 hr |
-| P1-4 | 5 個 E1 dispatch packet（Track B/C/D/E/F；Track A 沿用）— 含 AC + 必讀 + 反模式 + Disconnect Recovery | PA | 5-8 hr |
-| P1-5 | event_bus 接 cascade subscribe schema review — 確保 Sprint 5 cascade IMPL 能 subscribe 而不卡 Sprint 2 emitter | PA | 2 hr |
-| P1-6 | per-strategy SM 25 instance memory footprint 評估 — 5 strategy × 5 symbol × `HealthStateMachine` size = ~5KB；25 instance = 125KB；可接受 | PA | 1 hr |
+| P1-A | 6 Track prerequisite check（spec 一致性 / V### 依賴 / Rust trait stub 沿用 / cargo dep / sysinfo crate version pick） | PA | 1 hr |
+| P1-B | 6 Track dispatch packet（estimate / E1 prompt skeleton / AC sub-step / file path scope / Disconnect Recovery / 反模式） | PA | 1.5-2 hr |
 
-**Phase 1 工時：12-18 hr**
+**Phase 1 工時：~2-3 hr**（output：`docs/execution_plan/2026-05-22--m3_metric_emitter_sprint2_dispatch_packet.md`）
 
-### 8.2 Phase 2 — E1 IMPL × 5 並行
+**Note**：原 P1-1..P1-6 12-18 hr 估時為 spec land 初版範式；本 Sprint 2 spec body 已 land + D1/D2/D3 已 sign-off → Phase 1 縮版 ~2-3 hr 僅做 dispatch packet 落地。Cross-check ADR-0042 / M3 spec / V106 schema 三層對齊已內嵌於 spec body §10 16 根原則合規確認；不重做。
 
-| Track | Domain | E1 Owner | 估時 | Sequential within track |
-|---|---|---|---|---|
-| Track A | engine_runtime (沿用升級) | E1 (rust E1) | 4-6 hr | sysinfo dep + V106 writer + Sprint 5 reject log emit |
-| Track B | pipeline_throughput | E1 並行 | 6-8 hr | WS client stats hook + IPC roundtrip metric + signal rate emitter + SM + V106 writer |
-| Track C | database_pool | E1 並行 | 6-8 hr | sqlx Pool stats hook + writer queue depth + disk usage helper + SM + V106 writer |
-| Track D | api_latency | E1 並行 | 6-8 hr | bybit_rest_client p95 latency emitter + retCode counter + WS dropout counter + SM + V106 writer |
-| Track E | strategy_quality | E1 並行 | 8-12 hr | per-strategy SM 25 instance + dormant 計時 + fill_rate ratio query + 5min sample loop |
-| Track F | risk_envelope | E1 並行 | 6-8 hr | portfolio calculation 共用 risk_config + correlation pairwise + top-1 concentration + SM + V106 writer |
+### 8.2 Phase 2 — E1 IMPL × 6 Track (Wave 1 + Wave 2 per §4.3 拆分)
 
-**Phase 2 工時：36-50 hr 並行；wall-clock 3-4 days**
+per D3 Track A 含 cascade reject minimal IMPL (+2 hr)：
 
-per `feedback_subagent_first` + `feedback_fetch_before_dispatch`：5 並行 + Track A sequential 升級 = 6 sub-agent 總（5 並行 + Track A single）；不撞 7 sub-agent ceiling。
+| Wave | Track | Domain | E1 Owner | 估時 | Sequential within track |
+|---|---|---|---|---|---|
+| **Wave 1** | Track A | engine_runtime (沿用升級) | E1 (rust E1) | **6-8 hr** (含 D3 ~2 hr cascade reject) | sysinfo dep + V106 writer + Sprint 5 reject log emit minimal + observe_classified API |
+| **Wave 1** | Track B | pipeline_throughput | E1 並行 | 6-8 hr | WS client stats hook + IPC roundtrip metric + signal rate emitter + SM + V106 writer |
+| **Wave 1** | Track C | database_pool | E1 並行 | 6-8 hr | sqlx Pool stats hook + writer queue depth + disk usage helper + SM + V106 writer |
+| **Wave 2** | Track D | api_latency | E1 並行 | 6-8 hr | bybit_rest_client p95 latency emitter + retCode counter + WS dropout counter + SM + V106 writer |
+| **Wave 2** | Track E | strategy_quality | E1 並行 | 8-12 hr | per-strategy SM 25 instance + dormant 計時 + fill_rate ratio query + 5min sample loop |
+| **Wave 2** | Track F | risk_envelope | E1 並行 | 6-8 hr | portfolio calculation 共用 risk_config + correlation pairwise + top-1 concentration + SM + V106 writer |
+
+**Phase 2 工時：38-52 hr 並行；wall-clock 4-7 days**（Wave 1 3-4 day + Wave 2 3-4 day；含 Wave 間 E2 review buffer）
+
+per `feedback_subagent_first` + `feedback_fetch_before_dispatch` + §4.2 ceiling check：
+- Wave 1：3 並行 + PM hands-on = 4 sub-agent peak（Sprint 1B mid 3 carry-over 並行時為 6-7 peak，需 stagger）
+- Wave 2：3 並行 + PM hands-on = 4 sub-agent peak（Sprint 1B mid 已 DONE）；無 race
+- Cross-wave race mitigation：Wave 1 Track A 24h 內 land scaffold（trait + writer + event bus + observe_classified）；Wave 1 Track B/C dispatch packet 含 SHA hint 等 Track A scaffold；Wave 2 開派時 Wave 1 已 closure
 
 ### 8.3 Phase 3a/b/c/d/e — review + regression + empirical + report + sign-off
 
@@ -785,15 +898,15 @@ Cross-Track constraint:
 - [ ] 5 Track 之間 cross-dep 確認（V106 writer trait + event bus + `observe_classified` API 必 Track A 先 land；5 並行 Track 不撞 race）
 - [ ] sandbox_admin role 創建（per Sprint 1A-ε P1 item 1）— 否則 AC-1 SQL query 跑不通
 
-### 9.3 NEEDS_OPERATOR
+### 9.3 NEEDS_OPERATOR — **RESOLVED 2026-05-22**
 
-以下 3 決策需 operator 顯式 sign-off：
+3 決策全 operator sign-off 2026-05-22；詳見本 spec §3 Decisions Finalized。
 
-| # | Decision | Options | PA 推薦 |
+| # | Decision | Verdict | Routing |
 |---|---|---|---|
-| **D1** | sysinfo crate 引入 vs 自寫 procfs/sysctl helper（per Track A 升級）| (a) sysinfo crate ~80kb / Mac+Linux 跨平台原生支援 / 14 transitive dep (b) 自寫 procfs (Linux) + sysctl (Mac) ~200 行 / 0 new dep / 平台分支 cfg(target_os) | **(a) sysinfo**：跨平台原生 + Mac 部署目標（per `project_mac_deployment_target` memory）；14 transitive dep 可接受（已有 `tokio` workspace 帶 100+ dep） |
-| **D2** | Sprint 2 IMPL 是否並行 Sprint 1B 其他 5 條 early IMPL（per PM Phase 3e §4.3 item 1-6）| (a) Sprint 2 IMPL single-thread（不並行 1B 其他）— 嚴守 7 sub-agent ceiling；wall-clock +1-1.5 week (b) Sprint 2 IMPL 與 1B 其他並行 — 5+5+5+QA+TW+PM = 18 sub-agent；遠超 7 ceiling | **(a) single-thread Sprint 2 within 1B**：Sprint 2 IMPL 已是 5 Track 並行 + Phase 3a E2 × 5 並行 = 共 6 sub-agent peak；不能再疊其他 1B item；其他 5 條（M11 V107 re-apply / 28 pytest fail / AC-7 H-18 / Sprint 5 cascade reject / M11 dedup c5）走 Sprint 2 之前或之後串 |
-| **D3** | Sprint 2 IMPL 是否預先包含 Sprint 5 cascade reject log emit（per PM Phase 3e §4.3 item 5）| (a) Sprint 2 IMPL 只 emit `HealthStateChangeEvent` 給 event bus，cascade subscribe + reject log emit 留 Sprint 5（per M3 spec §11.1）(b) Sprint 2 IMPL 含 reject log emit minimal IMPL（V106 row write fail-closed `≥2` reject 場景留 audit trail）| **(b) Sprint 2 含 minimal reject log**：spike Track B E2 round 1 LOW-2 + Track B round 2 1 new LOW 已 catch 此 gap；Sprint 2 補 `≥2` reject 場景的 V106 row INSERT（state 維持 + `evidence_json={"reject_reason": "amp_cap_>=2_fail_closed"}`）；不接 Slack alert / Console badge（Sprint 7 + 8 才接）。極小 IMPL cost (~2 hr E1) + 避免 Sprint 5 才補的 audit gap。|
+| **D1** | sysinfo crate 引入 vs 自寫 procfs/sysctl helper | **(a) sysinfo adopted** | §3 D1 + §4.1 Track A prerequisite |
+| **D2** | Sprint 2 IMPL 是否並行 Sprint 1B mid items | **並行（operator override PA 原推 single-thread）** | §3 D2 + §4.1 並行 conflict matrix + §4.2 wave 切分 |
+| **D3** | Sprint 2 IMPL 是否預先包含 Sprint 5 cascade reject log emit | **(b) Sprint 2 含 minimal IMPL（~2 hr E1 cost in Track A）** | §3 D3 + §8.2 Track A 工時 4-6 hr → 6-8 hr |
 
 ---
 
