@@ -206,6 +206,8 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v58_pm_final_verdict.md` | PM v5.8 final verdict consolidation（5 audit + PA dispatch consolidation 整合；GO-WITH-CONDITIONS verdict） |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v57_autonomy_verdict.md` | PM v5.7 autonomy verdict（autonomy boundary 收斂 + opt-in path 標準化） |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v57_12_prefix_pm_signoff.md` | PM v5.7 §12 12-prefix patch sign-off（PA tech verify + FA business verify 整合 + ADR 編號順移敲定） |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-21--sprint_1a_zeta_spike_overall_acceptance.md` | TW Sprint 1A-ζ IMPL Prototype Spike Overall Acceptance Report（合併 Track A/B/C + AC-1..8 verdict map + Lessons Learned 6 條 + Sprint 1A-ε/1B/4+ carry-over；PASS WITH 3 CARRY-OVER；Sprint 1B gate OPEN pending PM Phase 3e） |
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_1a_zeta_phase_3a_spec_reconcile.md` | PA Sprint 1A-ζ Phase 3a Spec Reconcile（5 spec internal conflict / drift closure — V106 6 domain naming SSOT + M11 file path drift + SCRIPT_INDEX 註冊 + Guard A schema name typo + CONCURRENTLY hypertable 兼容） |
 | `CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md` | PA v5.8 dispatch consolidation（13 module spec roster + 7 ADR + 9 V### + runbook 派發 + 16 CR contract） |
 | `CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v57_dispatch_consolidation.md` | PA v5.7 dispatch consolidation（12-prefix patch + Sprint 1A scope baseline） |
 | `CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v57_12_prefix_tech_verify.md` | PA v5.7 §12 12-prefix tech verification（ADR 編號衝突解、Earn Guardian spec dispatch、router/lease 重命名安全） |
