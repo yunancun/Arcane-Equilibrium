@@ -11627,3 +11627,21 @@ per PM Sprint 2 pre-readiness dispatch packet Track 2 + E1 Track C 2026-05-22 §
 
 ### 報告
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_pre_v103_file_land.md`
+
+---
+
+## 2026-05-22 Sprint 2 pre-readiness — V107 SQL Guard A P1 logic drift fix (PA-DRIFT-1 V107 SQL closure)
+
+### 任務
+PA-DRIFT-1 V107 SQL carry-over E1：4 處 `governance.audit_log` literal patch (3 處 P3 注釋 + 1 處 P1 runtime logic) → `learning.governance_audit_log`，Linux PG empirical Round 1+2 idempotent dry-run + reverse fire test。
+
+### 教訓
+- **Guard A schema/table check 真實命名 vs 概念命名漂移**：V107 原版用 `table_schema='governance' AND table_name='audit_log'` 在 sandbox 因遺留 5-column stub 表 (`governance.audit_log`) 誤過 → false negative；真正 V035 baseline + V098 EXTEND target 為 `learning.governance_audit_log` (27 column hypertable)。**規則**：cross-ref Guard A check 名稱必走 V### baseline empirical 確認，不可依「concept naming」直覺；fresh deploy 環境 (無遺留 stub) 會 RAISE 暴露原版 drift。
+- **PA-DRIFT-1 reconcile audit trail 範式**：保留漂移歷史注釋（line 129-131 新增 4 行 reconcile 注釋）vs 全清掃，前者保 audit trail 便於後續 RCA，對齊 PA Phase 3a spec doc line 472 範式（漂移命名保留為「audit trail not active literal」）。**規則**：drift patch 時不直接覆蓋舊 literal 不留 trace；新增 reconcile audit comment block 明示「原版 X / 真實 Y / 原因 Z」。
+- **destructive reverse fire test on owner-locked baseline table 不可行 → pseudo Guard A substitute**：sandbox_admin 非 V098 baseline 表 owner，ALTER TABLE RENAME 失敗 (`must be owner`)；trading_admin password 不在 readable secret path (僅 sandbox_admin secret file)；hypertable backup-restore 走 CREATE TABLE AS 必丟 27 column + segmentby/orderby + retention metadata，無法安全 restore。**替代**：構造 pseudo-V107 Guard A 區塊，table_name 改不存在字串模擬 fresh deploy，驗 RAISE EXCEPTION 與 text content 正確。**規則**：完整 destructive test 受限時，pseudo Guard A substitute 仍可驗 RAISE 邏輯路徑 + text content，不可僅憑 forward path PASS 結論 Guard A 邏輯正確（forward path 在 sandbox 因遺留 stub 誤過 = 正是本 P1 fix 目標）。
+- **Linux sandbox V107 row=1 既有 state 對 Round 1 idempotent 友善**：Sprint 1B Round 1 V107 file apply 已產出 1 row sandbox state，本 patch Round 1 對既有 row 全 idempotent skip path 走通 (`relation already exists, skipping`)，Round 2 同樣 0 RAISE / 1 row 不變。**規則**：既有 sandbox state 對 idempotent V### re-apply 是友善測試環境；不必 pristine baseline 才能驗 idempotency。
+- **PA-scope vs E1-scope 分工：spec doc patch ≠ SQL file patch**：PA-DRIFT-1 PA verdict 明確 spec doc (PA scope) 已 DONE 0 patch needed（spec line 472 reconcile audit trail 保留），SQL file (E1 scope) 需 4 處 patch。**規則**：drift 修復前必先確認 scope 邊界（spec doc / SQL file / Python / Rust），不可混淆 PA scope 與 E1 scope；同名 drift 在不同檔可能 verdict 不同（spec 保留 reconcile vs SQL active patch）。
+- **single-thread V### Guard A check 改動風險最小化**：本 patch 僅改 Guard A IF condition + RAISE text（line 129-138 範圍內 5 行 active 改動 + 4 行注釋），不動 V107 schema column / index / hypertable / compression / retention / mv / FK / Guard B/C。**規則**：V### file 已 land sandbox + 包含複雜 DDL + Guard B/C 時，drift fix 最小化策略 = 僅改 drift literal + reconcile audit comment，不順手「優化」其他 Guard 邏輯（per E1 §硬約束「不順手優化未被要求的代碼」）。
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_pre_v107_sql_guard_a_fix.md`
