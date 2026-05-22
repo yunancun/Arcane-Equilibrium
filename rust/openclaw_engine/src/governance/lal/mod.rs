@@ -366,6 +366,39 @@ mod tests {
         assert_eq!(LalTier::Lal4OperatorAttestation.numeric_value(), 4);
     }
 
+    /// ADR-0034「數字越大越嚴」 — derive(PartialOrd, Ord) 排序必嚴格對齊 numeric_value()。
+    /// 為什麼：LalTier 同時走兩條 ordering 軌道（derive per variant declaration order +
+    /// numeric_value() per ADR-0034）；未來在 enum 中間插入新 variant（例 Lal0_5HumanCheck）
+    /// 會被 derive 自動排在 Lal0Auto 之後 Lal1 之前，**改變既存比較行為而 0 compile-time fail**。
+    /// 本 test 確保兩條軌道 lock-step；任何 silent ordering drift 即時 fail（per E2 audit
+    /// OBSERVE-3 2026-05-22）。
+    #[test]
+    fn test_partial_ord_derive_matches_numeric_value() {
+        let tiers = [
+            LalTier::Lal0Auto,
+            LalTier::Lal1LightReview,
+            LalTier::Lal2FullReview,
+            LalTier::Lal3OperatorApproval,
+            LalTier::Lal4OperatorAttestation,
+        ];
+        for i in 0..tiers.len() {
+            for j in 0..tiers.len() {
+                let derive_cmp = tiers[i].cmp(&tiers[j]);
+                let numeric_cmp = tiers[i].numeric_value().cmp(&tiers[j].numeric_value());
+                assert_eq!(
+                    derive_cmp, numeric_cmp,
+                    "derive PartialOrd 與 numeric_value() 不對齊 — i={} j={} tier_i={:?}={} tier_j={:?}={}",
+                    i,
+                    j,
+                    tiers[i],
+                    tiers[i].numeric_value(),
+                    tiers[j],
+                    tiers[j].numeric_value()
+                );
+            }
+        }
+    }
+
     /// from_i32 5 條合法輸入全 Ok。
     #[test]
     fn test_lal_tier_from_i32_legal_inputs() {

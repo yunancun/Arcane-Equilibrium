@@ -1,7 +1,7 @@
 # Governance Specification Register / 治理規範註冊表
 
 **Project:** 玄衡 · Arcane Equilibrium
-**Last Updated:** 2026-05-16
+**Last Updated:** 2026-05-22
 **Maintained By:** R4 (Document Auditor) · TW catch-up（2026-04-29）· FA Sign-off path A（2026-05-02 AMD-2026-05-02-01）
 
 ---
@@ -20,7 +20,8 @@
 | AMD-2026-05-15-01 | W-AUDIT-9 · SM-05 · DOC-01 §5.5/§5.6/§5.11 · DOC-08 §12 · ARCH-04 | `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-01-canary-rebase-replay-preflight-demo-micro-canary.md` | 2026-05-15 | Removes Stage 1 `Environment::Paper × 7d`; adds Stage 0R Replay Preflight (`eligible_for_demo_canary=true/false`, no Stage 1 PASS); redefines Stage 1 as 1 strategy × 1 symbol × Demo × 7d micro-canary; Stage 2 must enter from Stage 1 demo evidence. |
 | AMD-2026-05-15-02 | EDGE-P2-3 Phase 1b · DOC-08 §12 · CLAUDE.md §二 #16 · §四 reject_cooldown | `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md` | 2026-05-15 (v0.4 Wave 3a re-review 2026-05-16) | EDGE-P2-3 Phase 1b close-maker-first refactor — 8 maker-first / N keep-market 邊界明文；hybrid V094 schema；FDR multiple testing；phys_lock_gate4 timeout 30→15s；dynamic backoff per-symbol；reject_cooldown entry/close split P0 prereq；W-C Caveat 2 lineage carve-out；4-agent re-review (QC+FA+BB+MIT) APPROVED-CONDITIONAL → v0.4 consolidated patch |
 | V094 hybrid schema spec | trading.fills.details JSONB extension · `close_maker_attempt:bool` + `close_maker_fallback_reason:text` 新欄位 · MakerRejectionCategory enum allowlist | `docs/execution_plan/2026-05-15--v094_close_maker_first_audit_schema_spec.md` | 2026-05-15 (commit `9b1117a0`) | Wave 2a Track A2 — V094 hybrid schema migration spec finalize（F-FA-1 IMPL Prereq 5 第 3 子條件）；Linux PG empirical 證實 trading.fills.details JSONB 已存於 V003 line 284，24h 98 fills 0% details；includes Guard A/B/C templates + Linux PG dry-run × 2 round + sqlx checksum repair SOP + writer upgrade spec (13 caller sites + TradingMsg::Fill enum +24 fields) + healthcheck [62][63][64][65] integration + Backward-compat append-only + Rollback paths；IMPL pending Phase 1b 主軸 |
-| AMD-2026-05-21-01 | v5.8 §11 · CLAUDE.md §二 priority order 第 5 條 · ADR-0034 (M1 LAL) · AMD-2026-05-15-01 (Stage gate) | `docs/governance_dev/amendments/2026-05-21--AMD-2026-05-21-01-autonomy-vs-human-final-review.md` | 2026-05-21 | v5.8 13-module thesis 核心治理 amendment：priority 5「human final review」拆 protected scope（6 條 a-f 永不可 auto：Stage LAL 3-4 / 5-gate / Copy Trading enable / Auto-Allocator activation / kill criteria / ADR-debt creation）vs opt-in scope（8 條 g-n operator 一次 opt-in 後可 auto：LAL 1+2 / M2 auto-disable always-on / M3 Tier 1+2 / M6 ≤30% / M7 auto-demote / M8 Y2 trigger / M10 capital tier eval）；5 條 mitigation（default-OFF / 5-gate fail-closed / 24h undo config-only / per-action lease+notify / 60d inactivity auto-rollback Advisory）+ 6 條反向 attack counter-mitigation（M1 fill 不可逆 / M2 false anomaly counterfactual / M3 healthy burst HEALTH_WARN alert-only / M7 14d review 末必 operator click / M8 4-級 severity halt 只 CRITICAL / M11 5d 不 ack 自動升 HEALTH_WARN）；§二 16 原則合規 #5/#6/#11/#15 重點確認；不放鬆 §四 hard boundaries 任一條；TW Drafted / CC + E3 + FA PENDING |
+| AMD-2026-05-21-01 (v1) | v5.8 §11 · CLAUDE.md §二 priority order 第 5 條 · ADR-0034 (M1 LAL) · AMD-2026-05-15-01 (Stage gate) | `docs/governance_dev/amendments/2026-05-21--AMD-2026-05-21-01-autonomy-vs-human-final-review.md` | 2026-05-21 | Status: Superseded by v2 (2026-05-22). v5.8 13-module thesis 核心治理 amendment：priority 5「human final review」拆 protected scope（6 條 a-f 永不可 auto：Stage LAL 3-4 / 5-gate / Copy Trading enable / Auto-Allocator activation / kill criteria / ADR-debt creation）vs opt-in scope（8 條 g-n operator 一次 opt-in 後可 auto：LAL 1+2 / M2 auto-disable always-on / M3 Tier 1+2 / M6 ≤30% / M7 auto-demote / M8 Y2 trigger / M10 capital tier eval）；5 條 mitigation（default-OFF / 5-gate fail-closed / 24h undo config-only / per-action lease+notify / 60d inactivity auto-rollback Advisory）+ 6 條反向 attack counter-mitigation（M1 fill 不可逆 / M2 false anomaly counterfactual / M3 healthy burst HEALTH_WARN alert-only / M7 14d review 末必 operator click / M8 4-級 severity halt 只 CRITICAL / M11 5d 不 ack 自動升 HEALTH_WARN）；§二 16 原則合規 #5/#6/#11/#15 重點確認；不放鬆 §四 hard boundaries 任一條；TW Drafted / CC + E3 + FA PENDING |
+| AMD-2026-05-21-01 v2 | v5.8 §11 · CLAUDE.md §二 priority order 第 5 條 · ADR-0034 (M1 LAL) · AMD-2026-05-15-01 (Stage gate) | `docs/governance_dev/amendments/2026-05-22--AMD-2026-05-21-01-autonomy-fully-with-failsafe.md` | 2026-05-22 | Active (Supersedes v1 2026-05-22). Layered Autonomy with Hard-Coded Fail-Safe — 取代 v1 protected/opt-in 二分；Autonomy Level Toggle (Conservative/Standard) + 三路通知 fail → 1h wait → SM-04 Defensive；Cache PG LISTEN/NOTIFY；7d fail-safe cooling；CC APPROVE A 級 (7/7 HC + 6/6 反模式 + 2 BLOCKER 候選解除)；4 SSOT file + Wave 5 cascade IMPL PENDING |
 
 ---
 
@@ -116,6 +117,45 @@
 | ARCH-02 | OpenClaw Control Plane Repositioning | docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md | ✅ Active | OpenClaw is communication/control-plane/Gateway/proposal relay only, not trading conductor and not second GUI |
 | ARCH-03 | Agent Decision Spine Architecture | docs/architecture/multi_agent_rework_2026-05-05/ENGINEERING_PLAN.md<br>docs/architecture/multi_agent_rework_2026-05-05/2026-05-07--mag030_agent_spine_rust_module_design.md | ✅ Active | Typed StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease/idempotency -> ExecutionReport lineage |
 | ARCH-04 | Alpha Source Architecture Upgrade | docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_loss_architectural_root_cause_redesign.md<br>docs/adr/0021-alpha-source-architecture-upgrade.md<br>docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md | 🟠 Proposed | R-1..R-5 architectural amendments (AlphaSurface Bundle / Strategist scope / Hypothesis Pipeline / Per-alpha-source Live Promotion / Spec-as-Code). operator partial accept: W-AUDIT-8a SPEC + W-AUDIT-9 graduated canary started. Supersedes LG-X-02..05 system-wide promotion design (baseline IMPL still required as substrate). |
+
+### Architecture Decision Records (ADR-0034 ~ ADR-0045)
+
+> v5.8 13-module thesis Sprint 1A 系列 ADR：M1 LAL 起步 / M5/M12/M13 Y3+ trait stub / M8+M10 安全機制 / M9 A/B / M11 counterfactual replay / ContextDistiller v4 / M3/M6/M7 health+reward+decay / M4 hypothesis discovery。
+
+| Code | Name | Path | Status | Sprint Phase |
+|------|------|------|--------|--------------|
+| ADR-0034 | Decision Lease Layered Approval (LAL) | docs/adr/0034-decision-lease-layered-approval-lal.md | ✅ Active | Sprint 1A-β land |
+| ADR-0035 | M5 Online Learning Interface Reserved | docs/adr/0035-m5-online-learning-interface-reserved.md | ✅ Active | Sprint 1A-δ |
+| ADR-0036 | M8 Anomaly + M10 Tier D Blacklist | docs/adr/0036-m8-anomaly-m10-tier-d-blacklist.md | ✅ Active | Sprint 1A-修補 |
+| ADR-0037 | M9 A/B Framework | docs/adr/0037-m9-ab-framework.md | ✅ Active | Sprint 1A-修補 |
+| ADR-0038 | M11 Continuous Counterfactual Replay | docs/adr/0038-m11-continuous-counterfactual-replay.md | ✅ Active | Sprint 1A-β land |
+| ADR-0039 | M12 OrderRouter Trait + maker_fill_rate | docs/adr/0039-m12-orderrouter-trait-maker-fill-rate.md | ✅ Active | Sprint 1A-δ |
+| ADR-0040 | M13 Multi-Venue Gate Y3+ | docs/adr/0040-m13-multi-venue-gate-y3.md | ✅ Active | Sprint 1A-δ |
+| ADR-0041 | ContextDistiller v4 + DOC-08 AI Cost Cap Amendment | docs/adr/0041-context-distiller-v4-doc-08-ai-cost-cap.md | ✅ Active | Sprint 1A-修補 |
+| ADR-0042 | M3 Health Monitoring | docs/adr/0042-m3-health-monitoring.md | ✅ Active | Sprint 1A-γ |
+| ADR-0043 | M6 Bayesian Reward Weight | docs/adr/0043-m6-bayesian-reward-weight.md | ✅ Active | Sprint 1A-γ |
+| ADR-0044 | M7 Decay Enforced Single Authority | docs/adr/0044-m7-decay-enforced-single-authority.md | ✅ Active | Sprint 1A-γ |
+| ADR-0045 | M4 Hypothesis Discovery Governance | docs/adr/0045-m4-hypothesis-discovery-governance.md | ✅ Active | Sprint 1A-ε |
+
+### v5.8 13-Module Thesis (M1 ~ M13)
+
+> v5.8 13-module thesis：M1 LAL / M2 overlay / M3 health / M4 hypothesis discovery / M5 online learning stub / M6 reward / M7 decay / M8 anomaly / M9 A/B / M10 Tier D / M11 counterfactual replay / M12 order routing stub / M13 multi-venue stub。
+
+| Code | Name | Sprint Phase | Status |
+|------|------|--------------|--------|
+| M1 | Decision Lease Layered Approval (LAL) | Sprint 1A-β DESIGN / Sprint 1A-ζ Track A IMPL prototype / Sprint 4+ full | 🟡 Design + Prototype |
+| M2 | Overlay State Machine | Sprint 1A-γ DESIGN / Sprint 2+ IMPL | 🟡 Design |
+| M3 | Self-monitoring + Auto-diagnostics + Health-aware Degradation | Sprint 1A-β DESIGN / Sprint 1A-ζ Track B IMPL prototype / Sprint 2 M3 metric emitter full | 🟡 Design + Prototype |
+| M4 | Self-supervised Hypothesis Discovery | Sprint 1A-γ DESIGN / Sprint 2+ IMPL | 🟡 Design |
+| M5 | Online Learning / Incremental Model Update (Y3+ stub) | Sprint 1A-δ Rust trait stub IMPL | 🟡 Trait Stub |
+| M6 | Multi-objective Reward Function Tuning | Sprint 1A-β DESIGN / Sprint 3+ IMPL | 🟡 Design |
+| M7 | Strategy Decay Detection + Auto-retirement (DECAY_ENFORCED single authority) | Sprint 1A-β DESIGN / Sprint 3+ IMPL | 🟡 Design |
+| M8 | Anomaly Detection | Sprint 1A-γ DESIGN / Sprint 2+ IMPL | 🟡 Design |
+| M9 | A/B Testing Framework | Sprint 1A-γ DESIGN / Sprint 2+ IMPL | 🟡 Design |
+| M10 | Autonomous Discovery Pipeline (Tier D) | Sprint 1A-γ DESIGN / Sprint 3+ IMPL | 🟡 Design |
+| M11 | Counterfactual Replay Automation | Sprint 1A-β DESIGN / Sprint 1A-ζ Track C IMPL prototype / Sprint 2+ full | 🟡 Design + Prototype |
+| M12 | Adaptive Order Routing (Y3+ stub) | Sprint 1A-δ Rust trait stub IMPL | 🟡 Trait Stub |
+| M13 | Multi-asset Class / Multi-venue Capacity (Y3+ stub) | Sprint 1A-δ Rust trait stub IMPL | 🟡 Trait Stub |
 
 ---
 

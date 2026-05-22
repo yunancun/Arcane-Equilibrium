@@ -1,7 +1,64 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-16（TODO v36 completion cleanup）
+> 最後更新：2026-05-22（Sprint 1A-α..ζ + 1A-ε P1/P2 + 1B early IMPL + Sprint 2 pre-readiness + AMD-2026-05-21-01 v1/v2 commit chain backfill）
+
+### Sprint 2 pre-readiness + Sprint 1A-ε P2 + Sprint 1B early IMPL + Sprint 1A-ζ Phase 3 — 2026-05-22
+
+**Scope**: Sprint 1A-ζ IMPL Prototype Spike Phase 3b/3c/3d/3e closure + Sprint 1A-ε P1 docs index sweep + P2 N1/N2/N3 patches + Sprint 1B early IMPL 5 並行 Track + Sprint 2 pre-readiness 4 並行 Track（gate FULLY OPEN）。
+
+**Commit chain (reverse-chronological)**:
+
+- `63149512` docs(todo-refresh): Sprint 2 pre-readiness 4 並行 DONE — readiness gate FULLY OPEN
+- `ca73798d` sec(sprint-2-pre-readiness): E3-MED-2 CLOSED — sandbox_admin trading.* hypertable OWNER via ALTER OWNER × 17 atomic
+- `81a2caeb` feat(sprint-2-pre-readiness): 4 並行 Track DONE — Sprint 2 readiness gate FULLY OPEN
+- `32c4893f` docs(todo-refresh): Sprint 1A-ζ + 1A-ε P1/P2 + 1B early IMPL closure
+- `9cf0fe82` feat(sprint-1b-early-impl): 5 並行 Track DONE — A PA M3 設計 848 LOC + B E4 28 fail triage + C V107 sandbox 6/6 + D AC-7 Rust binding bit-perfect + E cascade reject 2 unit test
+- `ddb7a57e` sec(sprint-1a-epsilon-p2-n3): E3-MED-1 CLOSED — sandbox_admin trading_ai connect block via pg_hba.conf reject rows
+- `8d744b95` fix(sprint-1a-epsilon-p2): V112 file name typo §8.2 line 424
+- `6cd3d631` docs(sprint-1a-epsilon-p2): PA N1 spec literal sqlx_migrate + TW N2 §8 path drift fix + V112 file name typo
+- `454f26f3` sec(sprint-1a-epsilon-p1): E3 sandbox_admin PG role created + Sprint 1B V### sandbox re-apply unblocked
+- `b579700e` docs(sprint-1a-epsilon-p1): PA 5 spec patch + TW docs/README.md spike artifact index
+- `7392d3d7` docs(sprint-1a-zeta-phase3e): PM Phase 3e sign-off DONE-VERDICT-PASS WITH 3 CARRY-OVER — Sprint 1A-ζ closed
+- `db84b748` docs(sprint-1a-zeta-phase3d): TW spike Acceptance Report DONE — 330 LOC / 14,500 字
+- `26c813fb` test(sprint-1a-zeta-phase3c): QA empirical verify PASS WITH 3 CARRY-OVER
+- `8a15de4d` test(sprint-1a-zeta-phase3b): E4 regression PASS — cargo 3769 + pytest 6037 + AC-7 cross-lang 7/7
+
+**Verification**: PG sandbox E3 role + pg_hba.conf reject rows + ALTER OWNER × 17 atomic + V107 sandbox 6/6 + AC-7 cross-lang bit-perfect + cascade reject 2 unit test + E4 regression cargo 3769 / pytest 6037 + QA empirical 3 NEW-QA spec literal carry-over。Sprint 1A-ζ closed / Sprint 1B gate OPEN / Sprint 2 gate FULLY OPEN。
+
+---
+
+### Sprint 1A-α/β/γ/δ/ε/ζ + AMD-2026-05-21-01 v1/v2 + Layered Autonomy + V099 spec + M1-M13 module spec — 2026-05-21
+
+**Scope**: v5.7 Wave 1+2+2.5 spec/ADR/AMD/runbook land + Sprint 1A-γ M3/M6/M7 ADR + 1A-δ Rust trait stubs M5/M12/M13 + 1A-ε cross-ADR audit + 1A-ζ Phase 0/1/2/3a IMPL Prototype Spike + AMD-2026-05-21-01 v1（protected/opt-in 二分）+ v2（fully-autonomy with fail-safe + Autonomy Level Toggle + 三路通知 escalation + Cache PG LISTEN/NOTIFY）+ V099 spec + M1-M13 module DESIGN + 6 runbook + R4+CC+PA+MIT 三化審計 Round 1+2 + Sprint 1A acceptance evidence audit。
+
+**Commit chain (reverse-chronological)**:
+
+- `01e20db9` docs(parallel-design): AMD-2026-05-21-01 v2 fully-autonomy + autonomy level toggle + V099 spec + QC phase2a + TW ADR batch signoff
+- `f0633002` feat(sprint-1a-zeta-phase3a-round2): E1 Track B/C round 2 IMPL + E2 round 2 全 APPROVE
+- `2f6d1761` feat(sprint-1a-zeta-phase2): 3 E1 IMPL ALL DONE — V106/V107/V112 PG apply + Rust governance/lal + health/ + Python m11_spike
+- `d2da9dc0` docs(sprint-1a-zeta-phase0): E3 sandbox infrastructure prep DONE — 6/6 GO PASS
+- `119893d4` docs(sprint-1a-zeta-phase1): PA refine DONE
+- `fbc90c84` docs(audit-round2): R4 + PA 三化審計 Round 2 — AMD §8 11 ADR cross-ref + README index 5 sub-section
+- `49584192` docs(audit-round1): R4 + CC + PA + MIT 三化審計 Round 1
+- `11e94d39` docs(sprint-1a-epsilon): PM SIGN-OFF — cross-ADR audit + 5 patches + dup dedup + 4 new spec
+- `4350dba9` feat(sprint-1a-delta-impl): Rust trait stubs M5+M12+M13 land — 6 file + 2 lib.rs + +25 cargo test
+- `90c808ce` docs(sprint-1a-delta): PM SIGN-OFF — 10 file land (5 module + 5 V### reserve；含 5 dup naming pending)
+- `f6fdba5a` docs(sprint-1a-zeta): operator sign-off 5 Open Q + §12 added
+- `142b170c` docs(sprint-1a-zeta): PM push back IMPL spike phase planning — PA scope spec 657 行
+- `563f100c` docs(audit): Sprint 1A acceptance evidence audit
+- `c168a39a` docs(sprint-1a-gamma): PM SIGN-OFF — final 4 artifact (M10 + M8 + V109 + V111)
+- `a06e5094` docs(archive): srv root cleanup — 20 stale .md → docs/archive/
+- `f75117ec` docs(sprint-1a-gamma): D+0 carry-over land — 3 ADR (M3/M6/M7) + 3 module DESIGN + 2 runbook + V105/V108 full DDL spec
+- `957491ee` docs(paperwork): Wave 2.5 — ADR-0035/0037 + README index drift fix + 反向 ref
+- `afb3d5df` test(h0-latency): h0_latency_metrics integration test stage 補
+- `7cd75c89` docs(todo): v60 → v61 重構
+- `77d5c54e` docs(planning): v5.8 16 CRITICAL prefix DONE — Wave 2 16 CR closure (6 ADR + 1 AMD + 9 V### placeholder + 6 主檔 patches)
+- `26ee2f06` docs(planning): v5.7 12 條 CRITICAL prefix DONE — Sprint 1A-α PM sign-off
+
+**Verification**: Wave 1+2+2.5 共 16 CR closure 含 6 ADR + 1 AMD + 9 V### placeholder + 6 主檔 patches；Sprint 1A-γ M3/M6/M7 ADR + V105/V108 DDL spec；1A-δ Rust trait stubs +25 cargo test PASS；1A-ε cross-ADR audit + 5 patches + 4 new spec；1A-ζ IMPL Prototype Spike Phase 0-3a E1×3 IMPL DONE + E2 round 1+2 全 APPROVE；AMD v2 684 行（+98）+ V099 spec 568 行（+139）含 PG ENUM autonomy_level_enum + LISTEN/NOTIFY + 雙時間戳 + 13 條 dry-run。所有 commit 為文檔 + spec + IMPL Prototype Spike + Rust trait stubs；無 production runtime restart / 無 true-live auth 變更 / 無策略開關。
+
+---
 
 ### TODO v36 Completion Cleanup — 2026-05-16
 

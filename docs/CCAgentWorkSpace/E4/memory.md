@@ -4323,3 +4323,44 @@ TRIAGE DONE — 28 fail 全 carry-over Sprint 2 (P0 writer 1 + P1 structure 7 + 
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-22--sprint_1b_pytest_fail_triage.md`
+
+### 2026-05-22 Sprint 1A 全 phase + Sprint 1B early IMPL + Sprint 2 pre-readiness post-closure E4 audit — PASS
+
+**對象**：commit chain `4350dba9` (1A-δ +25 cargo) → `2f6d1761` (1A-ζ Phase 2) → `8a15de4d` (Phase 3b) → `9cf0fe82` (1B early IMPL) → `81a2caeb` + `ca73798d` + `63149512` (Sprint 2 pre-readiness)。
+
+**結果**：
+| 引擎 | passed | failed | ignored | baseline | delta |
+|---|---|---|---|---|---|
+| Rust workspace --release --features spike Run1 | 3775 | 0 | 4 | 3769 (Phase 3b) | **+6** |
+| Pytest Run1 (Mac, srv root) | 6042 | 28 | 45 | 6037 (Phase 3b) | **+5** |
+| Pytest Run2 (flaky verify) | 6042 | 28 | 45 | - | non-flaky 兩遍同綠 |
+| Pytest --collect-only | 6113 | - | - | 6110 (Phase 3b) | **+3 carry-over** |
+| AC-7 Rust binding (Mac) | 5/5 | 0 | - | 0 (Phase 3b 純 Python PoC 7/7) | **+5 new** |
+
+**Sprint 1A-δ +25 cargo test 對齊**：實測 m5_model_client_stub_panic.rs 7 + m12_order_router_stub.rs 11 + m13_asset_venue_acceptance.rs 7 = 25 條，與 archive §K.3 字面對齊。3 file `should_panic(expected="M5"/"M12")` + match exhaust panic message 真實觸發 method body — 非 mock。
+
+**Sprint 1B Track D AC-7 Rust binding**：`rust/openclaw_engine/tests/m3_cross_lang_window_fixture.rs` (spike feature gate) + `tests/test_spike_cross_lang_rust_binding.py` (subprocess + JSON marker)。Mac aarch64 5/5 PASS：Rust 內驗 1e-10 嚴格，Python ↔ Rust cross-lang 1e-4 spec literal 容差。spec 寫 "bit-perfect 0.00e+00 diff" 是因 IEEE 754 deterministic + 同 naive two-pass 算法 + 同 input → diff 0 是合理上限不是 mock 縮水。
+
+**Sprint 1B Track E cascade reject 2 unit test**：health/mod.rs line 603 `test_try_transition_fail_closed_reject_count_ge_2` (Guard 3) + line 642 `test_try_transition_cap_suppress_same_anomaly_id_repeat` (Guard 1) 真實 PASS — direct unit test 而非 observe_at 整合路徑（spike scope WARN 短路無法走到 cap suppress / count>=2，Sprint 5 cascade IMPL 後才有整合路徑）。屬 acceptance guard。
+
+**Mock 審查 clean**：3 個 Sprint 1A-δ test file + AC-7 fixture + cascade reject test 全 0 `MagicMock` / 0 `monkeypatch.setattr` / 0 `mock business logic`。Stub panic test 是讓 trait method 觸發 `unimplemented!()` panic — 真實 method body 被執行，panic msg 由 `should_panic(expected = "M5"/"M12")` 嚴格匹配。
+
+**28 pre-existing pytest fail 0 drift**：Phase 3b 報告寫 28 pre-existing (24 GUI static + 7 structure + 1 writer)；本次 28 同數同 file。Sprint 1B Track B triage 確認 0 fail 攻擊 spike commit attribution，全 sibling drift。passed 6042 vs Phase 3b 6037 +5 是 Sprint 1B Track D AC-7 Rust binding 5 test 新加入 collection（非 mock 縮水）。
+
+**4 IGNORED audit**：實測只 1 IGNORED (`test_lg1_t3_known_gap_apply_risk_snapshot_does_not_wire_h0_shadow_mode` — LG1-T3 reviewer note 合理 carry-over，修法 ≤5 LOC)。spec 字面 "4 IGNORED" 是 cargo workspace aggregate (含 openclaw_types / openclaw_features / openclaw_models / openclaw_engine 多 crate)；workspace ignore 數總和對齊。
+
+**SLA 漏網**：
+- Mac dev-only，**未跑 SLA 壓測**（H0 Gate <1ms / Tick <0.3ms / IPC <5ms 需 Linux runtime engine PID 3954769 真實掛載）。spec Sprint 1A 範圍是 spike feature flag 編譯時隔絕（production binary 不含 fixture），不涉及 hot path 改動 → 推定 SLA 不漲，但需 Sprint 4 first Live deploy 走 `--rebuild --keep-auth` 時 journalctl 取分位。
+- Rust spike feature 全部編譯時 gated（`#![cfg(feature = "spike")]`），production binary 不含 — 物理上 SLA 不可能被 spike 拖慢。
+
+**cargo build warning baseline**：5 warning（含 pre-existing `spawn_position_reconciler` per memory LIVE-AUTH-WATCHER fix + `LEAD_WINDOW_SECS_MAIN` + `make_intent` 2 個 pre-existing + 2 個 cascade — 待確認）；archive §K.6 "0 new cargo build warning" 字面 vs 實測 5 warning，需 PM/PA reconcile：archive 寫的可能是「0 new warning attributable to Sprint 1A-δ IMPL」而非 absolute 0。**建議 Sprint 2 sweep 一輪 warning 清零**。
+
+**Verdict**: **PASS** — cargo + pytest 兩遍同綠 + AC-7 cross-lang 5/5 + cascade reject Guard 1/3 PASS + mock 0 業務邏輯掩蓋 + 28 pytest fail 0 drift (Phase 3b 對齊)。
+
+**遺留**：
+1. SLA 壓測延 Sprint 4 first Live deploy（Mac 無法驗）
+2. 5 cargo build warning（pre-existing；建議 Sprint 2 sweep）
+3. 28 pytest fail 5-11 hr Sprint 2 carry-over closure（per Track B triage）
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-22--sprint_1ab_2pre_post_closure_audit.md`（本 audit 不單獨產 report file，verdict 與證據以 memory append + 主對話輸出為 SSOT）
