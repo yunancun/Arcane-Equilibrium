@@ -35,7 +35,7 @@ scope: schema DDL design only — 不寫 V108.sql 實檔，不在 Mac 跑 SQL，
   - V108 `ab_tests.hypothesis_id NOT NULL` → V103 `learning.hypotheses(hypothesis_id)` （preregistration mandate，per ADR-0026 v3 + sibling M9 DESIGN §6.2）
   - V108 `ab_assignments.test_id NOT NULL` → V108 `learning.ab_tests(test_id)` ON DELETE CASCADE
   - V108 `ab_results.test_id NOT NULL` → V108 `learning.ab_tests(test_id)` ON DELETE CASCADE
-- **無 FK to V107 (M11 divergence)**：per sibling M9 DESIGN §8.3 V107 final type UUID vs BIGINT 仍 pending；採 UUID reference (not FK) + 應用層 join validation
+- **無 FK to V107 (M11 divergence)** **PATCHED 2026-05-22 per MIT 紅線 3**：V107 final type 經 empirical verify = `BIGINT bigserial`（`V107__replay_divergence_log.sql:81-87` PK）；本 spec `m11_replay_divergence_ref` type 從 UUID 更正為 **BIGINT NULL**；FK 仍 deferred 到 M11 land（per V107/V108 cross-V### dependency）；應用層 join validation 不變
 - **無 FK to V110 (M6 weight) / V113 (M7 decay) / V109 (M8 anomaly) / V111 (M10 discovery)**：cross-1A-β/γ decoupled，per CR-9 cross-V### dependency graph + sibling M9 DESIGN §12.1
 - **Hypertable on ab_assignments.assigned_at + ab_results.evaluation_ts**：7d chunk / 30d compress / 180d retention（per operator prompt + 對齊 V107 hypertable 設計）
 - **ab_tests 是 regular table**（低基數 ~hundreds row total per-test config）
@@ -78,7 +78,7 @@ per `srv/docs/execution_plan/2026-05-21--m9_ab_framework_design_spec.md`（同�
 | §5 Fair Execution Clause | §2.2 `lease_id` NOT NULL + `assignment_method` ENUM + UNIQUE (test_id, decision_id) |
 | §6 Preregistration | §2.1 `hypothesis_id BIGINT NOT NULL REFERENCES V103 hypotheses(hypothesis_id)` |
 | §7 Hash Algorithm | §2.1 `hash_seed BIGINT NOT NULL` + §2.2 `hash_value NUMERIC NOT NULL` + `stratification_keys JSONB` |
-| §8 M11 Cross-ref | §2.3 `m11_replay_divergence_ref UUID` (not FK) + §8.3 caveat |
+| §8 M11 Cross-ref | §2.3 `m11_replay_divergence_ref BIGINT` (not FK) + §8.3 caveat |
 | §9 M9 ↔ M7 Integration | §2.1 `cluster_type` 對應 M7 decay treated equal as same-strategy |
 | §10 AC 7 條 | §6.2 E2 Review 重點 + AC 對應 SQL empirical test |
 | §11 IMPL phase | §6 IMPL Plan Sprint 1A-γ + Sprint 3 + Sprint 4 + Sprint 7-8 + Y2 對齊 |
@@ -382,7 +382,7 @@ CREATE TABLE IF NOT EXISTS learning.ab_results (
     efficacy_boundary_crossed       BOOLEAN NOT NULL DEFAULT FALSE,
     futility_boundary_crossed       BOOLEAN NOT NULL DEFAULT FALSE,
     is_winner                       BOOLEAN NOT NULL DEFAULT FALSE,
-    m11_replay_divergence_ref       UUID NULL,
+    m11_replay_divergence_ref       BIGINT NULL,  -- PATCHED 2026-05-22 per MIT 紅線 3：V107 PK 確認 BIGINT bigserial（V107__replay_divergence_log.sql:81-87）
     engine_mode                     TEXT NOT NULL
                                     CHECK (engine_mode IN ('demo','live_demo','live','replay')),
     created_by                      TEXT NOT NULL DEFAULT 'msprt_evaluator',
@@ -447,7 +447,7 @@ SELECT add_retention_policy(
 | `efficacy_boundary_crossed` BOOLEAN NOT NULL DEFAULT FALSE | mSPRT efficacy boundary | TRUE → 觸發 variant winner 候選 + Stage 3 live canary 啟動 |
 | `futility_boundary_crossed` BOOLEAN NOT NULL DEFAULT FALSE | mSPRT futility boundary | TRUE → 觸發 test concluded_futility |
 | `is_winner` BOOLEAN NOT NULL DEFAULT FALSE | variant winner flag | concluded_efficacy 時 set for winning arm |
-| `m11_replay_divergence_ref` UUID NULL | M11 cross-ref | per sibling M9 DESIGN §8 + §8.3；UUID type 對齊 V107 final schema（pending；caveat in §10.1）|
+| `m11_replay_divergence_ref` BIGINT NULL | M11 cross-ref | PATCHED 2026-05-22 per MIT 紅線 3：V107 PK = BIGINT bigserial（V107.sql:81-87 empirical verified）；UUID → BIGINT 對齊 V107 final schema |
 | `engine_mode` NOT NULL CHECK 4 值 | TEXT + CHECK | 對齊 ab_tests + ab_assignments；不含 paper |
 | `created_by` TEXT NOT NULL DEFAULT 'msprt_evaluator' | evaluator identity | per V103 §14 範式；可能 'auto-evaluator' (Y2) |
 | `rationale` TEXT NULL | 人類可讀理由 | per V103 §14 範式；boundary_crossed 時填 "efficacy boundary at n=500 with mSPRT=4.2" |
@@ -1247,7 +1247,7 @@ E2 必驗 V108 SQL FK：
 - `ab_assignments.lease_id → governance.decision_lease(lease_id) NOT NULL`（fair execution 強制；per ADR-0037 Decision 5 + sibling M9 DESIGN §5.5）
 - `ab_assignments.test_id ON DELETE CASCADE`（test 撤掉 → assignment 連同 drop）
 - `ab_results.test_id ON DELETE CASCADE`（test 撤掉 → results 連同 drop）
-- `ab_results.m11_replay_divergence_ref` 不 FK（UUID 純 reference；per sibling M9 DESIGN §8.3 V107 type pending caveat）
+- `ab_results.m11_replay_divergence_ref` 不 FK（BIGINT 純 reference；PATCHED 2026-05-22 — V107 type empirical verify = BIGINT bigserial；FK 待 M11 land 時補 cross-V### dependency）
 
 ---
 
@@ -1262,7 +1262,7 @@ per CR-9 cross-V### dependency graph + sibling M9 DESIGN §12.1：
 | V110 (M6 reward) | V108 → V110 | Cluster 3 risk profile variant ref M6 weight_set_id；應用層 join | ❌ No FK (cross-1A-β/γ decoupled) |
 | V109 (M8 anomaly) | V108 → V109 | M9 variant 若觸發 M8 anomaly → variant abort；應用層 cron | ❌ No FK |
 | V113 (M7 decay) | V108 → V113 | per sibling M9 DESIGN §9 M7 single decay authority；應用層 join | ❌ No FK |
-| V107 (M11 replay) | V108 → V107 | per sibling M9 DESIGN §8；UUID reference, not FK | ❌ No FK (UUID + V107 type pending) |
+| V107 (M11 replay) | V108 → V107 | per sibling M9 DESIGN §8；BIGINT reference, not FK | ⚠️ No FK yet (BIGINT type confirmed 2026-05-22；FK 待 M11 land) |
 | V111 (M10 discovery) | V108 → V111 | M9 variant 若為 M10 discovery generated → 走 LAL 3 elevated approval | ❌ No FK |
 | governance.decision_lease | V108 → governance | ab_tests.lease_id + ab_assignments.lease_id | ✅ FK |
 | governance.audit_log | V108 → governance | ab_tests.approval_id | ✅ FK NULL |
@@ -1347,7 +1347,7 @@ per V103 spec §8.3 + V110 §10.2：rollback 路徑不跨 V096（V096 drop dead 
 ### 10.1 待 PA C9 確認 + Open Q（per sibling M9 DESIGN §12.3）
 
 1. **`_sqlx_migrations` head 真實 = ?**：spec 假設 V107 後 V108；若 V108-V113 並行 land 順序需 PA 仲裁
-2. **V107 final schema type (UUID vs BIGINT)**：影響 `ab_results.m11_replay_divergence_ref` type；本 spec 採 UUID（per sibling M9 DESIGN §8.3）；V107 land 後 verify；若 BIGINT 則 `m11_replay_divergence_ref` 改 BIGINT
+2. **V107 final schema type (UUID vs BIGINT)** **✅ RESOLVED 2026-05-22**：empirical verify V107__replay_divergence_log.sql:81-87 PK = id BIGINT bigserial；本 spec ab_results.m11_replay_divergence_ref type 已 patch UUID → BIGINT NULL；FK 仍 deferred 到 M11 land
 3. **TimescaleDB extension version**：影響 hypertable + compression + retention policy 語法（不同版本 chunk_time_interval 參數名差異）
 4. **UUID extension 名稱**：`uuid-ossp` (`uuid_generate_v4()`) vs `pgcrypto` (`gen_random_uuid()`) — IMPL 期 V108.sql 對應函數呼叫（與 V110 共用）
 5. **mSPRT AVI 具體 closed-form 公式**：per sibling M9 DESIGN §12.3 Open Q 2；V108 spec doc IMPL 期決策；本 spec 只列 schema 對應 column；IMPL 期 land
@@ -1496,7 +1496,7 @@ per sibling M9 DESIGN §13 同表（本 V108 schema 100% 對齊 sibling M9 DESIG
 ### 14.1 待 PA dispatch 前補充
 
 - [ ] PA C9 dry-run 5 條 ssh query 結果（§4.1）
-- [ ] V107 final schema type UUID vs BIGINT 確認（§10.1 #2）
+- [x] V107 final schema type UUID vs BIGINT 確認（§10.1 #2）— **RESOLVED 2026-05-22 = BIGINT bigserial per V107.sql:81-87；spec 已 patch**
 - [ ] TimescaleDB extension version 確認（§10.1 #3）
 - [ ] UUID extension 名稱確認（§10.1 #4）
 - [ ] mSPRT AVI closed-form 公式 V108 IMPL 期決策（§10.1 #5）

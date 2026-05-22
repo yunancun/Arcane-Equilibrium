@@ -159,6 +159,21 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 ## 文档索引 (Document Index)
 
+### 2026-05-22 Layered Autonomy v2 設計收口（CC re-audit APPROVE A 級）
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-05-22--autonomy_level_toggle_design_spec.md` | PA Layered Autonomy v2 — Autonomy Level Toggle 主 spec（1031 行；Conservative/Standard 雙層 + 5-gate switch + 24h cooldown + 三路通知 fail → 1h wait → SM-04 Defensive + 7d cooling + 6 cross-level invariant + 5 fail-safe hard requirements） |
+| `execution_plan/2026-05-22--m3_metric_emitter_sprint2_design_spec.md` | M3 metric emitter Sprint 2 design spec（848 → 961 LOC；6 health domain emitter + amplification cap + cross-language window fixture + cascade reject log）— Sprint 2 Wave 1 主 dispatch target |
+| `execution_plan/2026-05-22--m3_metric_emitter_sprint2_dispatch_packet.md` | M3 emitter Sprint 2 dispatch packet（563 LOC；Track A/B/C 6 Wave 1+2 並行 stagger + D1 sysinfo + D2 並行 + D3 cascade reject log minimal） |
+| `execution_plan/specs/2026-05-22--v099-autonomy-level-config.md` | V099 autonomy_level_config schema spec（568 LOC；`system.autonomy_level_config` + `_switch_audit` + PG ENUM `autonomy_level_enum` + Cache PG LISTEN/NOTIFY） — Wave 5 cascade IMPL prerequisite |
+| `governance_dev/amendments/2026-05-22--AMD-2026-05-21-01-autonomy-fully-with-failsafe.md` | AMD-2026-05-21-01 v2 — Layered Autonomy with Hard-Coded Fail-Safe（684 LOC；取代 v1 protected 6 / opt-in 8 二分版；三維度並列 + Autonomy Level Toggle + 反向 attack counter-mitigation 6 條） |
+| `CCAgentWorkSpace/CC/workspace/reports/2026-05-22--layered_autonomy_v2_reaudit.md` | CC re-audit verdict APPROVE A 級（7/7 HC PASS + 6/6 反模式 PASS + 2 BLOCKER 候選解除 + Hard Boundaries 5/5 PASS） |
+
+**Wave 5 cascade IMPL roadmap**（PENDING operator final sign-off）：見 `TODO.md` §1.7（V099 schema land + GUI Autonomy Posture + Rust `RiskEvent::NotificationFailsafeTimeout` variant + 5 module ADR sync + R4 cross-ref audit）
+
+---
+
 ### 2026-05-21 Sprint 1A-β dispatch packet + v5.7/v5.8 13-module thesis + autonomy AMD
 
 | 文件 | 内容 |

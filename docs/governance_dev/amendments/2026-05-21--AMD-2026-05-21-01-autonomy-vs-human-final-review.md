@@ -1,4 +1,10 @@
-# Amendment AMD-2026-05-21-01 — Autonomy vs Human Final Review 邊界定義
+# Amendment AMD-2026-05-21-01 (v1) — Autonomy vs Human Final Review 邊界定義
+
+> **⚠️ Status: Superseded by AMD-2026-05-21-01 v2 (2026-05-22)**
+> v2 取代本 v1「protected 6 / opt-in 8 二分版」立場，改採三維度並列 + Autonomy Level Toggle 設計（per operator 2026-05-22 三拍板：Q1 CLAUDE.md baseline 不動 / Q2 Autonomy Level Toggle 雙層 / Q3 命名 disambiguate）。
+> 本 v1 保留 governance trail 供反查設計演進，不再 active。
+> v2 路徑：`docs/governance_dev/amendments/2026-05-22--AMD-2026-05-21-01-autonomy-fully-with-failsafe.md`
+> Cascade IMPL 排程：TODO §1.7 Wave 5 (PENDING operator final sign-off)
 
 **對應 spec**: v5.8 主檔 §11（operator forgetfulness mitigation）· CLAUDE.md §二 priority order 第 5 條（human final review）· ADR-0034（M1 Decision Lease Tier）· AMD-2026-05-15-01（Stage gate framework）
 
@@ -12,7 +18,7 @@
 
 **日期**: 2026-05-21
 **作者**: PM applying operator-approved D5 decision（2026-05-21 v5.8 13-module thesis ADR-debt 化解器）
-**狀態**: Accepted — planning authority; CC + E3 + FA runtime sign-off remain required before any Sprint 1A-β auto-action IMPL land
+**狀態**: **Superseded by AMD-2026-05-21-01 v2 (2026-05-22)** — v1 立場（protected 6 / opt-in 8 二分）已被 v2 三維度並列 + Autonomy Level Toggle 設計取代；v1 從未進入 cascade IMPL 階段；保留供反查設計演進
 **索引**: `docs/governance_dev/SPECIFICATION_REGISTER.md` Amendments section · `docs/README.md` Amendments index
 **TODO 連結**: v5.8 §11 · CC 5.21 v5.8 audit Risk 3 must-fix · Sprint 1A-β dispatch readiness
 

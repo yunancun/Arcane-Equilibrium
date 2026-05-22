@@ -31,6 +31,7 @@ non-scope:
 - 6 並行 Track（Track A engine_runtime 沿用升級 + Track B-F pipeline_throughput / database_pool / api_latency / strategy_quality / risk_envelope）；Track A 不重做但需 V106 writer 真實接線 + sysinfo crate 引 + D3 cascade reject log minimal emit。
 - Phase chain：Phase 1 PA refine（~2-3 hr dispatch packet 縮版 per D2 ceiling 約束）→ Phase 2 E1 IMPL × 6 並行 wave 1+2（36-50 hr 並行）→ Phase 3a/b/c/d/e（22-33 hr）= **70-104 hr 真實 + buffer 後 75-115 hr**。
 - AC-1..7 對齊 spike scope spec §AC pattern：V106 row 真實寫入 (AC-1 拆 a/b — AC-1a Wave 1 in-memory mock fixture / AC-1b Wave 2+ real PG empirical；per 2026-05-22 E2 round 1 HIGH-3 fix) / 4-state ladder 每 domain fire / amp cap 24h fire / cross-domain 不互擾 / production binary 0 mock time 滲透 / cargo + pytest baseline 不退 / binary footprint <50ms cold start。
+- 2026-05-22 E2 round 1 reject 4 amend land：HIGH-2「持續 2min」classify vs SM dwell clarify（M3 spec §2.3.1 區分）；HIGH-1 heartbeat_lag CRITICAL > 60_000 ms 即時 fire SSOT 確認；MEDIUM-1 B ws_subscription_drift_count + strategy_signal_rate_per_min ladder threshold 補 ladder；MEDIUM-1 C `pool_max_conn` 5th column 加入 DatabasePoolSample；MEDIUM-3 C disconnected fail-closed OK band（M3 spec §2.3.2）。
 - Sprint 2 dispatch readiness gate：**OPEN with carry-over conditions** — D1/D2/D3 operator-signed 2026-05-22；Phase 1 dispatch packet land；Sprint 1B mid 3 carry-over（PA-DRIFT-1/PA-DRIFT-2/E3-MED-2）file scope 與本 Sprint 2 6 Track 0 重疊可並行。
 - 治理硬邊界：Sprint 2 emitter **不**觸 cascade 執行（halt strategy / 降 LAL Tier）；emitter 只 emit `HealthStateChangeEvent` 給 event bus + D3 minimal cascade reject log emit（V106 row `evidence_json={"reject_reason": "..."}` 留 audit trail），cascade subscribe + 執行延 Sprint 5。
 
@@ -195,6 +196,25 @@ per ADR-0042 + M3 design spec §11.1 Tier 1 active monitoring (Sprint 2 部分)�
 - **M11 replay divergence integration 不在 Sprint 2 範圍**（Sprint 8）。
 - **新 V### 不在 Sprint 2 範圍**。所有 row 寫 V106 既有 schema；不新增 `cascade_event_log` 表（per M3 spec §12.2 Sprint 5 由 MIT 決定是否合入 V106 或新 V###）。
 
+### Sprint 2 M3 emitter engine_mode guard（per E2 audit 2026-05-22 OBSERVE-4）
+
+**設計合約**：M3 emitter **嚴禁** 在 replay subprocess 內 emit health_observations row（V106 line 259 `engine_mode CHECK IN ('paper','demo','live_demo','live')` 不含 'replay'）。
+
+**理由（per V106 spec line 38 + §4.4 設計刻意）**：M3 health 是 read-only consumer of replay path；replay session 不 fire health observation row（M11 replay 自身屬 dry-run）。
+
+**IMPL guard**（必加）：
+```rust
+// Sprint 2 M3 emitter：fail-loud guard 防 replay subprocess 誤 emit
+if engine_mode == "replay" {
+    return Err(M3Error::ReplaySubprocessForbidden);
+    // 或 silent return Ok(()) 視 caller 設計，但禁靜默通過 V106 CHECK fail
+}
+```
+
+**E4 regression 必驗**：
+- Sprint 2 W1 IMPL 必加 `tests/m3_emitter_replay_forbidden.rs` 驗 replay subprocess emit health row → fail-loud / 不撞 V106 CHECK
+- grep `engine_mode.*replay` in m3 emitter caller 必 0 hit（或 hit 必走 guard）
+
 ---
 
 ## §2 6 Domain split — 5 Track (engine_runtime 沿用)
@@ -343,10 +363,16 @@ pub struct PipelineThroughputSample {
 pub struct DatabasePoolSample {
     pub pg_writer_queue_depth: u32,
     pub pg_pool_active_conn: u32,
+    pub pg_pool_max_conn: u32,           // ratio 計算 denominator；caller 注入（per 2026-05-22 E2 round 1 MEDIUM-1 C amend）
     pub pg_pool_wait_ms_p95: u32,
     pub disk_data_dir_used_pct: f64,
 }
 ```
+
+**`pg_pool_max_conn` 設計理由**（per 2026-05-22 E2 round 1 MEDIUM-1 C amend）：
+- `pg_pool_active_conn` 單值無法決 band（需 active/max ratio）；採樣時一併取 max 讓 classify 端有完整 context。
+- max_conn 由 caller 注入（`DatabaseConfig::pool_max_connections`）；sqlx `PgPool` 未暴露 max accessor，emitter 不可強行 hack。
+- `classify_database_pool_active_conn(active, max)` 內部計算 ratio = active/max；ratio > 0.95 → DEGRADED / 0.80-0.95 → WARN / < 0.80 → OK；max=0（disconnected）→ fail-closed OK band（per M3 design spec §2.3.2）。
 
 **api_latency**：
 
@@ -554,11 +580,49 @@ fn classify_band_from_mean(
             else if aggregated_value < 4096.0 { HealthState::HealthWarn }
             else { HealthState::HealthDegraded }
         }
-        // ... 其他 5 domain × multi-metric per ADR-0042 + M3 spec §2.3 + V106 schema
+        // pipeline_throughput 4 metric ladder（per M3 design spec §2.3 line 102 amend）
+        (HealthDomain::PipelineThroughput, "ws_tick_rate_per_sec") => {
+            // OK >= 1.0 / WARN 0.5-1.0 / DEGRADED < 0.5
+            if aggregated_value < 0.5 { HealthState::HealthDegraded }
+            else if aggregated_value < 1.0 { HealthState::HealthWarn }
+            else { HealthState::HealthOk }
+        }
+        (HealthDomain::PipelineThroughput, "ws_heartbeat_lag_ms") => {
+            // OK <= 30_000 / WARN 30-60 / DEGRADED 不適用 / CRITICAL > 60_000 即時 fire
+            // per M3 design spec §2.3.1 「heartbeat_lag_ms > 60_000 ms → metric classify=CRITICAL 即時 fire」
+            if aggregated_value > 60_000.0 { HealthState::HealthCritical }
+            else if aggregated_value > 30_000.0 { HealthState::HealthWarn }
+            else { HealthState::HealthOk }
+        }
+        (HealthDomain::PipelineThroughput, "ws_subscription_drift_count") => {
+            // per M3 design spec §2.3 line 102 amend ladder
+            if aggregated_value >= 3.0 { HealthState::HealthDegraded }
+            else if aggregated_value >= 1.0 { HealthState::HealthWarn }
+            else { HealthState::HealthOk }
+        }
+        (HealthDomain::PipelineThroughput, "strategy_signal_rate_per_min") => {
+            // per M3 design spec §2.3 line 102 amend ladder
+            if aggregated_value < 0.1 { HealthState::HealthDegraded }
+            else if aggregated_value < 0.5 { HealthState::HealthWarn }
+            else { HealthState::HealthOk }
+        }
+        (HealthDomain::PipelineThroughput, "ipc_roundtrip_ms_p99") => {
+            if aggregated_value > 50.0 { HealthState::HealthCritical }
+            else if aggregated_value > 10.0 { HealthState::HealthDegraded }
+            else if aggregated_value >= 5.0 { HealthState::HealthWarn }
+            else { HealthState::HealthOk }
+        }
+        // database_pool active_conn 需 ratio context (per §3.2 pool_max_conn 注釋)；
+        // 此 helper signature 僅單值，ratio classify 由 emitter 端 `classify_database_pool_active_conn(active, max)` 直接呼。
+        // ... 其他 4 domain × multi-metric per ADR-0042 + M3 spec §2.3 + V106 schema
         _ => HealthState::HealthOk,  // unknown metric — fail-closed to OK
     }
 }
 ```
+
+**heartbeat_lag_ms 即時 CRITICAL 設計理由**（per 2026-05-22 E2 round 1 HIGH-1 fix）：
+- M3 design spec §2.3 line 102 CRITICAL band literal「WS dropout > 60s」= `heartbeat_lag_ms > 60_000 ms`；本 IMPL 必 1:1 對齊不寫成 `> 120_000`。
+- metric classify 即時 fire CRITICAL band 樣本；SM ladder（§5.2）仍走 OK→WARN→DEGRADED→CRITICAL 標準升階（每階各自 dwell；中繼經 WARN）；metric classify 與 SM dwell 是兩件事（per M3 design spec §2.3.1 區分）。
 
 **threshold 來源**：per M3 spec §4.2 + ADR-0042 Decision 4：threshold 由 V106 schema `regime_threshold_table` column 提供（30d block bootstrap 估計 + ArcSwap 熱更新）。Sprint 2 IMPL 先 hardcode threshold（per M3 spec §2.3 ladder 表），threshold dynamic update 延 Sprint 5 Tier 1。
 
@@ -595,7 +659,7 @@ per-strategy SM 升 HEALTH_DEGRADED 不直接觸發 system-level cascade（per M
 per spike skeleton `health/mod.rs` `try_transition_with_cap`：
 
 **已 IMPL**（spike Track B）：
-- OK → WARN dwell time 60s
+- OK → WARN dwell time **60s**（對齊 M3 design spec §3.3 line 165 SSOT；per 2026-05-22 E2 round 1 HIGH-2 clarify「持續 2min」literal 屬 measurement window 直覺描述，非 SM dwell；真規範值 = §3.3 60s）
 - amp cap 24h-suppression（same anomaly_id 24h 內 max 1 fire）
 - ≥2 fail-closed reject（per V106 spec §1.1 line 77）
 

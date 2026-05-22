@@ -14,7 +14,7 @@
 - **Current Wave**：**Sprint 1A-ζ + 1A-ε P1/P2 + 1B early IMPL + Sprint 2 pre-readiness 全 ✅ DONE (2026-05-22 PM-signed)** — 20 commit chain ad002617 → ca73798d；**Sprint 2 dispatch readiness gate FULLY OPEN ✅** (D1 sysinfo + D2 並行 + D3 含 cascade reject log minimal operator-signed)；3 carry-over 全 closed (PA-DRIFT-1 spec scope ✅ / PA-DRIFT-2 V103 file land + sandbox Round 1+2 PASS ✅ / E3-MED-2 17 table ALTER OWNER atomic + 4 DDL PASS ✅)；1 NEW carry-over surfaced：V107 SQL line 129-135 Guard A P1 runtime logic drift ~40 min E1 patch（不阻 Sprint 2 派發）；**Next: Sprint 2 Wave 1 派發**（Track A 沿用升級 + B pipeline_throughput + C database_pool 3 並行 stagger 5min）OR V107 SQL P1 logic drift 收口
 - **Layered Autonomy with Hard-Coded Fail-Safe 設計 ✅ DONE 2026-05-22**（AMD-2026-05-21-01 v2 + PA spec + V099 schema + CC re-audit **APPROVE A 級**；7/7 HC + 6/6 反模式 + 2 BLOCKER 候選全解除 + Hard Boundaries 5/5 PASS）— ref **§1.7**；Wave 5 cascade IMPL PENDING operator final sign-off
 - **Active P0**：`P0-EDGE-1`（5 strategy alpha-deficient）+ `P0-LG-3`（Wave 2.4 IMPL DISPATCH PENDING SPEC-READY 10d）+ `P0-OPS-1..4`（HTTPS / cred / legal / runbook）— Sprint 4 first Live W18-21 前必 closure
-- **Next 24h operator action**：D+1 (2026-05-22) ① BB OpenClaw key 發行日 5 min query ② Phase 2a 三選一 **✅ 拍 (a) Calibration r2** 2026-05-22（cascade dispatch PENDING） ③ Layered Autonomy v2 三件套 final batch sign-off (~30 min, ref §1.7) ④ **Sprint 2 dispatch readiness 3 決策 D1/D2/D3 sign-off**（per PA M3 metric emitter Sprint 2 design spec §3）⑤ **3 NEW carry-over routing 拍板**（PA-DRIFT-1/2 + E3-MED-2 → Sprint 1A-ε P3 OR Sprint 2 / 1B mid）
+- **Next 24h operator action**：D+1 (2026-05-22) ① BB OpenClaw key 發行日 5 min query ② Phase 2a 三選一 **✅ 拍 (a) Calibration r2** 2026-05-22（cascade dispatch PENDING） ③ Layered Autonomy v2 三件套 final batch sign-off (~30 min, ref §1.7) ④ **Sprint 2 dispatch readiness 3 決策 D1/D2/D3 sign-off**（per PA M3 metric emitter Sprint 2 design spec §3）⑤ ~~**3 NEW carry-over routing 拍板**~~ **✅ closed 2026-05-22** — PA-DRIFT-1/2 + E3-MED-2 三條全 closed per Sprint 2 pre-readiness commits 81a2caeb + ca73798d；剩 1 NEW V107 SQL Guard A P1 logic drift ~40 min E1 patch awaiting E2 review（routing → §5.1 P1 queue）
 - **Runtime**：engine PID 2934602 + API PID 2934665 + watchdog PID 2936560；最後 graceful restart 2026-05-21 13:31 UTC
 - **Pending operator decision**：(1) ~~Phase 2a verdict~~ **✅ closed 2026-05-22** → (a) Calibration r2 (cascade dispatch pending) (2) `P0-FUNDING-ARB-DECISION-FORCE` 升等 (3) Watchdog daemon R2 deploy 時機 (4) v5.8 16 CRITICAL 派發後 D+5 Sprint 1A-β readiness sign-off (5) **Layered Autonomy v2 三件套 final batch sign-off + Wave 5 cascade IMPL dispatch** (ref §1.7)
 
@@ -110,7 +110,21 @@ Sprint 2 pre-readiness **✅ DONE (2026-05-22)** — 4 並行 Track 全 PASS + S
 - Wave 2.5 paperwork **DESIGN-DONE**（`957491ee`；ADR-0035/0037 補位 + 反向 ref + README 索引漂移修）
 - Sprint 1A-β D+5~D+6 dispatch readiness 12-check **10/12 ✅**（剩 #8 #9 operator-bound）
 
-**重要 caveat**（acceptance audit 揭露）：sql/migrations/ 本地 max=V098；Linux PG `_sqlx_migrations` MAX(version)=96 / COUNT=93；V099+ migration file 尚未產出；V97/V98 file 存在但未 apply。10 個 target table (health_observations / degradation_state / replay_divergence_log / reward_weight_history / decision_lease_lal_tiers / lal_eligibility_log / decay_signals / strategy_lifecycle / earn_movement_log / hypotheses) pg_class 0 hits。所有「DONE」措辭 = 文件 land 級別，不代表 runtime ready。
+**重要 caveat**（acceptance audit 揭露 + 2026-05-22 audit 更新）：sql/migrations/ 本地 max=V112（V103/V106/V107/V112 已 land per Sprint 1A-ζ Phase 2 commit `2f6d1761` + Sprint 1A-ε P1 `454f26f3`）；Linux PG **sandbox** `_sqlx_migrations` 已有 V103/V106/V107/V112；**trading_ai 主 PG `_sqlx_migrations` MAX(version)=96** — Sprint 1A V### **零 production apply**；V099/V105/V108/V109/V110/V111/V113/V114/V115/V116 共 10 條為 **spec markdown only 無 .sql**（per MIT audit 2026-05-22 紅線 1）。
+
+**真實 IMPL 落地表（2026-05-22 audit verify）**：
+
+| Phase | DESIGN-DONE | .sql land | sandbox apply | trading_ai apply |
+|---|---|---|---|---|
+| Sprint 1A-α/修補 | ✅ 12 prefix + 16 CR + 6 ADR + 1 AMD | n/a | n/a | n/a |
+| Sprint 1A-β/γ | ✅ 10 module + 12 V### spec + 10 ADR/runbook | V103 only | V103 | ❌ |
+| Sprint 1A-δ-IMPL | ✅ M5/M12/M13 trait stub + ADR-0035/0039/0040 | n/a (Rust only) | n/a | n/a |
+| Sprint 1A-ζ | ✅ Track A/B/C 3 IMPL | **V106/V107/V112** | ✅ Round 1+2 PASS | ❌ |
+| Sprint 1A-ε P1+P2 | E3 sandbox infra | n/a (PG role) | ✅ pg_hba reject 7/7 | ❌ |
+| Sprint 1B early IMPL | 5 並行 Track | n/a | n/a | n/a |
+| Sprint 2 pre-readiness | 4 並行 Track + E3-MED-2 | n/a | n/a (ALTER OWNER) | ALTER OWNER × 17 atomic |
+
+所有「Sprint 1A-β/γ DONE」措辭 = **DESIGN 文件 land 級別**（V### markdown spec），**不代表** runtime ready 或 .sql 已寫。決定 2 C 路線（trading_ai PG checksum 對齊）SOP 見 `docs/execution_plan/2026-05-22--decision_2_pg_checksum_alignment_runbook.md`（待 land）。
 
 **完整 12-check 表 + closure narrative + 反向 attack mitigation + commit chain + reference**：`docs/archive/2026-05-21--sprint_1a_alpha_repair_closure.md` §A-§F；Sprint 1A-β PM signoff narrative 在同檔 §G（無獨立 1A-β PM signoff file）
 
@@ -206,6 +220,8 @@ Sprint 2 pre-readiness **✅ DONE (2026-05-22)** — 4 並行 Track 全 PASS + S
 
 | ID | 優先 | 任務 | AC / Next Action |
 |---|---:|---|---|
+| `P1-V107-SQL-GUARD-A-LOGIC-DRIFT` | 1 | V107 SQL line 129-135 Guard A reverse-fire reject-row logic drift (Sprint 1B + Sprint 2 pre-readiness 揭露；E1 patch trace land but awaiting E2 review) | Owner: E1 + E2；ETA: ~40 min；source: `sql/migrations/V107__replay_divergence_log.sql:127-135` + `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_pre_v107_sql_guard_a_fix.md`；不阻 Sprint 2 Wave 1 派發 |
+| `P1-PG-CHECKSUM-ALIGNMENT-DECISION-2-C` | 1 | 決定 2 C 路線 — trading_ai 主 PG `_sqlx_migrations` register V103/V106/V107/V112 + AUTO_MIGRATE=0 env override + dry-run drift mark | Owner: E1 + MIT (Linux runtime)；ETA: ~30 min + Sprint 2 staging full apply test；source: `docs/execution_plan/2026-05-22--decision_2_pg_checksum_alignment_runbook.md`；阻 Sprint 2 Wave 1 deploy window |
 | `P1-EDGE-2` (funding_arb) | 3 | ⚠️ PA D3 建議升 P0-FUNDING-ARB-DECISION-FORCE 待 operator 拍板 | operator 選項 (A) 砍策略 / (B) 增樣本 / (C) 接受 INSUFFICIENT；缺 deadline |
 | `P1-LG-5` | 4 | LG-5 reviewer maturity watch — STILL_ACTIVE | source 活躍；7d 共 66 review_live_candidate 全 verdict=defer；建議 90d cadence + 3 not-defer 或 180d 都 defer 觸發 review |
 | `P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1` | 3 | v56 P0 未解 root cause；H4 healthcheck [69] LIVE → passive-wait 合規 | forensic `halt_audit.log` armed；passive wait + 90d review 2026-08-21 |

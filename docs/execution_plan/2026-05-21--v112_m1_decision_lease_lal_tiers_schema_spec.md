@@ -299,6 +299,16 @@ per ADR-0038 M11 replay 設計:
 
 CLAUDE.md §Data section 列出的 4 值(paper/demo/live_demo/live)是 baseline;M11 replay 屬於 M1 LAL 之外的 module 擴張,需於本 V112 schema 顯式涵蓋 'replay' 否則 M11 寫入會 RAISE。
 
+#### 2.2.4a Sprint 2 M11 writer 接線 actor/source guard 要求（forward note）
+
+per E2 audit 2026-05-22 OBSERVE-2：當前 V112 schema 僅以 engine_mode='replay' 區分 replay-driven assignment vs live assignment，但 row-level **actor/source 來源驗證** 尚未顯式 column 化。Sprint 2 M11 writer IMPL 接線時：
+
+- **必加 row-level constraint**（PA spec amend）：M11 replay engine 寫入 `lease_lal_assignments` 時必須在 actor field（or 新增 `assignment_source TEXT CHECK IN ('live_engine','m11_replay')`）標記來源 = `'m11_replay'`
+- **Guard A 反模式 RAISE**：engine_mode='replay' AND actor NOT IN ('m11_replay_engine','sandbox_test') → RAISE EXCEPTION（防 live engine 誤寫 replay row 繞 ML training filter）
+- **Sprint 2 dispatch packet** 必含此 actor/source guard spec patch（V112 ALTER 或 V### 新 migration 看 IMPL 時點決定）
+
+未在本 V112 spec land actor/source column 因 M11 writer Sprint 2 才 IMPL，提前定義會被 cross-V### dependency 抑制。
+
 #### 2.2.5 row 量級估算
 
 - 5 strategy × 25 symbol × per-strategy/symbol ~1 assign/day = 125 row/day
