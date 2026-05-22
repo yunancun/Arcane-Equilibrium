@@ -25,6 +25,10 @@
 //!     HTTP 4xx/5xx retCode 累積 + ws_dropout 累積；60s sample；source
 //!     probe trait 注入；ret_code 用 HTTP 標準語意預留 multi-venue per
 //!     ADR-0040）。
+//!   - `api_latency_probe_impl`：PA-DRIFT-4 Wave A IMPL — `RealApiLatencySourceProbe`
+//!     接 bybit_rest_client `RestLatencyHistogram` + `RetCodeCounter` 與
+//!     bybit_private_ws `WsDropoutCounter` + `WsRttHistogram` 的 trait 適配層；
+//!     main.rs Wave B 接 scheduler 時注入此 probe；本檔不修 client 既有邏輯。
 //!   - `strategy_quality`：Track E IMPL（per-strategy SM 25 instance =
 //!     5 strategy × 5 symbol + aggregate SM rule 0.40；fill_rate /
 //!     slippage / lease grant / dormant minute / signal count；5min sample；
@@ -33,6 +37,10 @@
 //!     position_count / correlation_avg_pairwise / concentration_top1 — 300s
 //!     sample；source probe 注入由 main.rs Wave 2 後接線；emitter 只觀測，不
 //!     修 risk_verdict_ledger / position_snapshot / fill_writer SSOT）。
+//!   - `risk_envelope_probe_impl`：Sprint 4+ first Live PA-DRIFT-5 Wave A IMPL —
+//!     `RealRiskEnvelopeSourceProbe` + `PortfolioStateCache` 24h sliding window
+//!     +5 SSOT calculator accessor；main.rs Wave B 接 scheduler 時注入此 probe；
+//!     本檔不修 paper_state / mode_state / pipeline_types 既有寫入邏輯。
 //!
 //! 依賴:
 //!   - 全部沿用 Track A scaffold（`DomainEmitter` / `MetricSample` /
@@ -48,7 +56,9 @@
 //!     `cfg(target_os = "linux")` 分支。
 
 pub mod api_latency;
+pub mod api_latency_probe_impl;
 pub mod database_pool;
 pub mod pipeline_throughput;
 pub mod risk_envelope;
+pub mod risk_envelope_probe_impl;
 pub mod strategy_quality;

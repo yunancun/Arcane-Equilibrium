@@ -29,6 +29,10 @@ fn test_sign_known_vector() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
+        // 不驗 latency / retCode；空 histogram + counter 即可）。
+        latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
+        ret_code_counter: std::sync::Arc::new(RetCodeCounter::new()),
     };
 
     let timestamp = "1700000000000";
@@ -64,6 +68,10 @@ fn test_sign_empty_params() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
+        // 不驗 latency / retCode；空 histogram + counter 即可）。
+        latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
+        ret_code_counter: std::sync::Arc::new(RetCodeCounter::new()),
     };
 
     // Should not panic / 不應 panic
@@ -166,6 +174,10 @@ fn test_has_credentials() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
+        // 不驗 latency / retCode；空 histogram + counter 即可）。
+        latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
+        ret_code_counter: std::sync::Arc::new(RetCodeCounter::new()),
     };
     assert!(client_with.has_credentials());
 
@@ -176,6 +188,10 @@ fn test_has_credentials() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
+        // 不驗 latency / retCode；空 histogram + counter 即可）。
+        latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
+        ret_code_counter: std::sync::Arc::new(RetCodeCounter::new()),
     };
     assert!(!client_without.has_credentials());
 }
@@ -200,6 +216,10 @@ fn test_near_rate_limit() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
+        // 不驗 latency / retCode；空 histogram + counter 即可）。
+        latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
+        ret_code_counter: std::sync::Arc::new(RetCodeCounter::new()),
     };
     // Default remaining = 120, threshold 5 → not near
     assert!(!client.is_near_rate_limit(5));
@@ -412,6 +432,10 @@ async fn test_get_no_credentials_fails_closed() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
+        // 不驗 latency / retCode；空 histogram + counter 即可）。
+        latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
+        ret_code_counter: std::sync::Arc::new(RetCodeCounter::new()),
     };
     let result = client
         .get("/v5/position/list", &[("category", "linear")])
@@ -431,6 +455,10 @@ async fn test_post_no_credentials_fails_closed() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
+        // 不驗 latency / retCode；空 histogram + counter 即可）。
+        latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
+        ret_code_counter: std::sync::Arc::new(RetCodeCounter::new()),
     };
     let body = serde_json::json!({"category": "linear", "symbol": "BTCUSDT"});
     let result = client.post("/v5/order/create", &body).await;
@@ -449,6 +477,10 @@ async fn test_get_transport_error_fails_closed() {
         base_url: "http://127.0.0.1:1".to_string(), // unreachable port
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
+        // 不驗 latency / retCode；空 histogram + counter 即可）。
+        latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
+        ret_code_counter: std::sync::Arc::new(RetCodeCounter::new()),
     };
     let result = client
         .get("/v5/position/list", &[("category", "linear")])
@@ -490,6 +522,10 @@ async fn test_checked_methods_propagate_no_credentials() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
+        // 不驗 latency / retCode；空 histogram + counter 即可）。
+        latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
+        ret_code_counter: std::sync::Arc::new(RetCodeCounter::new()),
     };
     let r1 = client.get_checked("/v5/position/list", &[]).await;
     assert!(matches!(r1.unwrap_err(), BybitApiError::NoCredentials));
@@ -518,6 +554,10 @@ fn test_client_timeout_configured() {
         base_url: "https://api-demo.bybit.com".to_string(),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
+        // 不驗 latency / retCode；空 histogram + counter 即可）。
+        latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
+        ret_code_counter: std::sync::Arc::new(RetCodeCounter::new()),
     };
     assert!(client.has_credentials());
 }
@@ -568,6 +608,10 @@ async fn test_timeout_fires_on_hung_server_fail_closed() {
         base_url: format!("http://{}", addr),
         recv_window: "5000".to_string(),
         rate_limit: RateLimitState::default(),
+        // PA-DRIFT-4：test 端 manual struct 構造補 instrumentation 初值（test
+        // 不驗 latency / retCode；空 histogram + counter 即可）。
+        latency_histogram: std::sync::Arc::new(RestLatencyHistogram::new()),
+        ret_code_counter: std::sync::Arc::new(RetCodeCounter::new()),
     };
 
     // EN: GET must fail with Transport, not hang forever.
