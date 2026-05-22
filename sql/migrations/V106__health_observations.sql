@@ -122,23 +122,28 @@ BEGIN
 
     IF v_table_exists THEN
         -- domain CHECK 6 值齊全。
+        -- 命名來源: ADR-0042 Decision 3 + M3 design spec §2.1 single source of
+        -- truth (3 層分離: Process / Pipeline / Business)。V106 spec §1.1 line
+        -- 53 (2026-05-22 PA reconcile) 明示前版 ws_latency/rest_success_rate/
+        -- db_backlog/disk_usage/cpu_mem/strategy_level 退役, 以 ADR-0042 為準。
         SELECT pg_get_constraintdef(oid) INTO v_actual
         FROM pg_constraint
         WHERE conrelid = 'learning.health_observations'::regclass
           AND conname LIKE '%domain%check%'
         LIMIT 1;
         IF v_actual IS NOT NULL THEN
-            IF position('ws_latency' IN v_actual) = 0
-               OR position('rest_success_rate' IN v_actual) = 0
-               OR position('db_backlog' IN v_actual) = 0
-               OR position('disk_usage' IN v_actual) = 0
-               OR position('cpu_mem' IN v_actual) = 0
-               OR position('strategy_level' IN v_actual) = 0
+            IF position('engine_runtime' IN v_actual) = 0
+               OR position('pipeline_throughput' IN v_actual) = 0
+               OR position('database_pool' IN v_actual) = 0
+               OR position('api_latency' IN v_actual) = 0
+               OR position('strategy_quality' IN v_actual) = 0
+               OR position('risk_envelope' IN v_actual) = 0
             THEN
                 RAISE EXCEPTION
                     'V106 Guard C FAIL: domain CHECK enum mismatch. Actual: %. '
-                    'Expected 6 values (ws_latency/rest_success_rate/db_backlog/'
-                    'disk_usage/cpu_mem/strategy_level).',
+                    'Expected 6 values (engine_runtime/pipeline_throughput/'
+                    'database_pool/api_latency/strategy_quality/risk_envelope) '
+                    'per ADR-0042 Decision 3.',
                     v_actual;
             END IF;
         END IF;
@@ -214,14 +219,19 @@ END $$;
 CREATE TABLE IF NOT EXISTS learning.health_observations (
     observation_id                BIGSERIAL,
     observed_at                   TIMESTAMPTZ NOT NULL,
+    -- domain 6 值對齊 ADR-0042 Decision 3 + M3 design spec §2.1 (3 層分離:
+    -- Process / Pipeline / Business)。V106 spec §1.1 line 53 (2026-05-22 PA
+    -- reconcile) 明示採 ADR-0042 為唯一 source of truth; Rust HealthDomain enum
+    -- (rust/openclaw_engine/src/health/mod.rs `as_str()`) 與此 6 個字面值
+    -- round-trip 必對齊。
     domain                        TEXT NOT NULL
                                   CHECK (domain IN (
-                                      'ws_latency',
-                                      'rest_success_rate',
-                                      'db_backlog',
-                                      'disk_usage',
-                                      'cpu_mem',
-                                      'strategy_level'
+                                      'engine_runtime',
+                                      'pipeline_throughput',
+                                      'database_pool',
+                                      'api_latency',
+                                      'strategy_quality',
+                                      'risk_envelope'
                                   )),
     metric_name                   TEXT NOT NULL,
     state                         TEXT NOT NULL
@@ -362,10 +372,12 @@ END $$;
 --   path; covering 6 domain × ~10 metric_name。
 -- - idx_health_state_observed: state-degraded alert dashboard; partial
 --   index (state ∈ DEGRADED/CRITICAL) 縮 99% 索引大小。
--- - idx_health_symbol_observed: per-symbol query (ws_latency / strategy_level
---   兩 domain 有 symbol); partial NOT NULL 縮 50%。
--- - idx_health_strategy_observed: per-strategy query (strategy_level domain);
---   partial NOT NULL 縮 25% (75% row 是 strategy_level)。
+-- - idx_health_symbol_observed: per-symbol query (pipeline_throughput /
+--   strategy_quality 兩 domain 有 symbol per ADR-0042 Decision 3); partial
+--   NOT NULL 縮 50%。
+-- - idx_health_strategy_observed: per-strategy query (strategy_quality domain
+--   per ADR-0042 Decision 3); partial NOT NULL 縮 25% (75% row 是
+--   strategy_quality)。
 --
 -- 注意: hypertable + chunk 上 CREATE INDEX 是逐 chunk 建 (timescale 自動);
 -- 不可加 CONCURRENTLY (timescale extension 不支援 transaction-block 內
@@ -428,11 +440,17 @@ BEGIN
         RAISE EXCEPTION
             'V106 Guard C post FAIL: domain CHECK constraint not found after DDL.';
     END IF;
-    IF position('ws_latency' IN v_domain_def) = 0
-       OR position('strategy_level' IN v_domain_def) = 0 THEN
+    -- 後驗 6 domain 字面值對齊 ADR-0042 Decision 3 (Process / Pipeline / Business
+    -- 三層分離); 缺任一即 RAISE (drift 防護)。
+    IF position('engine_runtime' IN v_domain_def) = 0
+       OR position('pipeline_throughput' IN v_domain_def) = 0
+       OR position('database_pool' IN v_domain_def) = 0
+       OR position('api_latency' IN v_domain_def) = 0
+       OR position('strategy_quality' IN v_domain_def) = 0
+       OR position('risk_envelope' IN v_domain_def) = 0 THEN
         RAISE EXCEPTION
-            'V106 Guard C post FAIL: domain CHECK missing required values. '
-            'Actual: %.', v_domain_def;
+            'V106 Guard C post FAIL: domain CHECK missing required ADR-0042 '
+            '6-domain values. Actual: %.', v_domain_def;
     END IF;
 
     -- state CHECK 必含 4 值。

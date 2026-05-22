@@ -56,10 +56,11 @@ ort = { version = "=2.0.0-rc.12", optional = true, default-features = false, fea
 
 [dev-dependencies]
 tempfile = "3"
-# Sprint 1A-ζ Track B — tokio test-util feature 提供 time::pause / time::advance
-# mock clock; 加在 dev-dependencies 不影響 release binary (test-util 不會被
-# `cargo build --release` 拉入)。對齊 spike spec §AC-5.1 mock time hook 設計。
-tokio = { workspace = true, features = ["test-util"] }
+# Sprint 1A-ζ Track B — M3 spike test 改採 observe_at 注入 std::time::Instant
+# (per spec §AC-5.1 mock time hook 設計 + dispatch §2.7 反模式邊界), 不需要
+# tokio::time::pause / advance mock clock。tokio test-util 已從 dev-dep 移除
+# (避免 dead dependency noise);若 Sprint 5 cascade IMPL 真的需要 tokio 虛擬
+# 時鐘再補回。
 
 # ============================================================
 # EDGE-P3-1 Realized Edge Predictor — backend feature flag.

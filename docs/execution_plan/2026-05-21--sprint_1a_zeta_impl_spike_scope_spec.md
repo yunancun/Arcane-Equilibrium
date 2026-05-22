@@ -192,9 +192,9 @@ PM 主會話對 PA 原設計提 4 條 risk push back：
 **Track C 工件 deliverable**：
 
 - `sql/migrations/V107__replay_divergence_log.sql`（per V107 spec doc full DDL）
-- `python/openclaw/m11_replay/spike_trigger.py`（手動 1 次 trigger；不接 cron）
-- `python/openclaw/m11_replay/divergence_d1_fill_chain.py`（1 種 divergence type）
-- `tests/spike_m11_m7_dedup_contract.py`（empirical dedup verify）
+- `helper_scripts/replay/m11_spike/spike_trigger.py`（手動 1 次 trigger；不接 cron；2026-05-22 PA reconcile §2:對齊 IMPL reality + `srv/python/` 不存在 + helper_scripts convention per CLAUDE.md §七 + SCRIPT_INDEX 約定）
+- `helper_scripts/replay/m11_spike/divergence_d1_fill_chain.py`（1 種 divergence type）
+- `helper_scripts/replay/m11_spike/dedup_contract_test.py`（empirical dedup verify;原計畫 path `tests/spike_m11_m7_dedup_contract.py` 改為 spike 整批同目錄）
 - `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--sprint_1a_zeta_track_c_acceptance.md`
 
 ### 2.4 三 Track 共同 deliverable

@@ -8,15 +8,19 @@ MODULE_NOTE
 主要函數:
   - main(): 解析 args + 跑 1 次 spike trigger
   - load_fills_window(): 拉 last 1d bb_breakout BTCUSDT live_demo fills
-  - detect_d1_fill_chain(): 1 種 divergence type D1 fill_chain count delta
+  - detect_d1_fill_chain(): thin wrapper 委派至 divergence_d1_fill_chain
+    (per round 2 HIGH-3: leak-free shift(1) + baseline column 落地)
   - write_divergence_row(): 寫 V107 row + flag_action_taken='m7_decay_candidate'
+    + baseline_5d_mean / sigma / noise_floor_threshold (per round 2 HIGH-3)
 依賴: psycopg2, trading.fills, learning.replay_divergence_log, learning.hypotheses
+  + divergence_d1_fill_chain (sibling module, round 2 HIGH-3 後正式 import)
 硬邊界:
   - 不真 nightly cron (Sprint 3 W15-18 Phase A 才上線)
   - 不寫 learning.decay_signals (M7 V113 own; per CR-7 + ADR-0044 Decision 1)
   - engine_mode INSERT='replay' (原 live trace mode 進 evidence_json)
   - 只跑 1 種 divergence type D1 fill_chain count delta (per spike spec C4)
-  - sandbox DB only; 連線參數寫死 trading_ai_sandbox (per Q1d operator sign-off)
+  - sandbox DB only; default 走 sandbox_admin role (per Phase 0 §2.2 設計);
+    operator 可顯式 `--user trading_admin` override 並接受 sandbox isolation 警告
 治理對照: ADR-0038 + ADR-0044 + CR-7 + V107 spec
 """
 
@@ -24,12 +28,9 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
 from typing import Any
 
 # stdlib psycopg2 (sandbox CI 已裝)
@@ -43,6 +44,14 @@ except ImportError:
         file=sys.stderr,
     )
     sys.exit(2)
+
+# round 2 HIGH-3: 正式 import sibling detector module;不再內聯
+from divergence_d1_fill_chain import (
+    compute_5d_baseline,
+    detect_with_baseline,
+    inject_synthetic_fixture,
+    leak_free_shift1_replay,
+)
 
 # 日誌設定: 對齊 helper_scripts 標準 (per CLAUDE.md %s format)
 logging.basicConfig(
@@ -77,6 +86,13 @@ def get_db_connection(cfg: SpikeTriggerConfig) -> Any:
     為什麼 sandbox-only:
         Q1d operator sign-off sandbox DB 隔絕 production;
         若連線指向 trading_ai 直接 sys.exit(2)
+
+    為什麼 sandbox_admin fallback 邏輯 (per round 2 HIGH-2):
+        Phase 0 §2.2 設計 sandbox_admin 為 sandbox 隔絕 role;但 E3 push
+        back 已將 sandbox_admin 創建 defer 到 Phase 2。spike 期間
+        sandbox_admin 可能不存在;此函式偵測連線失敗(InvalidPassword /
+        UndefinedObject 等 InsufficientPrivilege subtype)會 retry 並提示
+        operator 顯式用 trading_admin。
     """
     if "sandbox" not in cfg.pg_database.lower():
         LOG.error(
@@ -86,12 +102,29 @@ def get_db_connection(cfg: SpikeTriggerConfig) -> Any:
         )
         sys.exit(2)
 
-    conn = psycopg2.connect(
-        host=cfg.pg_host,
-        port=cfg.pg_port,
-        user=cfg.pg_user,
-        dbname=cfg.pg_database,
-    )
+    try:
+        conn = psycopg2.connect(
+            host=cfg.pg_host,
+            port=cfg.pg_port,
+            user=cfg.pg_user,
+            dbname=cfg.pg_database,
+        )
+    except psycopg2.OperationalError as exc:
+        # round 2 HIGH-2: sandbox_admin role 可能尚未創建(Phase 2 defer);
+        # 提示 operator 顯式用 trading_admin override (sandbox DB 仍隔絕)
+        if cfg.pg_user == "sandbox_admin":
+            LOG.error(
+                "DB connection failed with user=sandbox_admin (Phase 0 §2.2 "
+                "role 可能尚未創建; E3 push back defer 至 Phase 2): %s",
+                exc,
+            )
+            LOG.error(
+                "→ Operator 可顯式 `--user trading_admin` retry; sandbox DB "
+                "(%s) 仍隔絕 production trading_ai。長期解 = E3 + PA 創建 "
+                "sandbox_admin role per Phase 0 §2.2",
+                cfg.pg_database,
+            )
+        raise
     conn.autocommit = False
     return conn
 
@@ -156,54 +189,38 @@ def load_fills_window(conn: Any, cfg: SpikeTriggerConfig) -> list[dict]:
     return rows
 
 
-def replay_compute_expected_fill_chain(
-    fills: list[dict],
-) -> dict[str, int]:
-    """
-    基線 replay: 對 live fills 重算「應該」的 fill_chain count
-
-    為什麼採 context_id grouping:
-        fill_chain 在 v5.7 是 (entry+exit) 配對;同 context_id 對應同 chain;
-        replay 在 sandbox spike 只重算 count,不重 simulate 完整 path
-
-    本 spike 採最簡單 baseline:
-        expected_count = len(fills) (純 count;與 live 同)
-        若 detector 注入 fake divergence → expected = len(fills) + delta;
-        否則 expected = len(fills) → 0 divergence (no-op nightly)
-    """
-    return {
-        "fill_count": len(fills),
-        "buy_count": sum(1 for f in fills if str(f.get("side", "")).lower() == "buy"),
-        "sell_count": sum(1 for f in fills if str(f.get("side", "")).lower() == "sell"),
-    }
-
-
 def detect_d1_fill_chain(
     fills: list[dict],
     inject_synthetic: bool,
 ) -> dict[str, Any]:
     """
-    D1 fill_chain divergence detector (per M11 design spec §4.2 D1)
+    D1 fill_chain divergence detector — thin wrapper 委派至 sibling module
+    (per round 2 HIGH-3)
 
-    metric: fill_count_diff
-    threshold:
-        NOISE < ±2 fills (per spec §4.3)
-        WARN ±3-5 fills
-        CRITICAL ≥ ±5 fills
+    為什麼 thin wrapper:
+        E2 round 1 review HIGH-3 catch divergence_d1_fill_chain.py 4 函數
+        全 0 caller;AC-7 leak-free shift(1) mandate 形同未落地。round 2
+        正式 import sibling module 走 compute_5d_baseline +
+        detect_with_baseline + leak_free_shift1_replay 三函數,使 baseline
+        欄位 + leak-free shift(1) 真實 land。
 
-    為什麼採 synthetic injection:
-        sandbox seed live + replay 兩端 fills 相同 → 0 divergence (no-op);
-        spike 需 evidence row 寫入 V107 + dedup contract verify (per Task 2);
-        故注 1 synthetic divergence = fake fill chain count delta = 5
-
-    return:
-        divergence_value: count diff (signed; replay - live)
-        severity: NOISE / WARN / CRITICAL (per spec §4.3 D1 threshold)
-        evidence: dict (live count / replay count / diff)
+    flow:
+        1) leak-free shift(1) baseline = N-1 fills (排除 current bar)
+        2) live count = len(fills)
+        3) replay count = live count (或 +5 if synthetic)
+        4) compute_5d_baseline(historical 5 day fill counts)
+        5) detect_with_baseline(live, replay, baseline) → severity + 3 baseline column
+        6) routing per severity:
+           - CRITICAL → flag_action_taken='m7_decay_candidate'
+           - WARN → 'm3_health_recheck'
+           - NOISE → 'none' (writer 端 gate skip row write)
     """
     live_count = len(fills)
-    replay_baseline = replay_compute_expected_fill_chain(fills)
-    replay_count = replay_baseline["fill_count"]
+
+    # 為什麼用 leak_free_shift1_replay():
+    #   per AC-7 + feedback_indicator_lookahead_bias mandate;
+    #   replay baseline 不引用 current bar,避免 spike fill 自污染
+    leak_free_baseline_count = leak_free_shift1_replay(fills)
 
     # 為什麼 inject = 5:
     #   per packet Task 2 step 3.D「inject 1 synthetic divergence
@@ -211,48 +228,66 @@ def detect_d1_fill_chain(
     #   delta=5 對應 CRITICAL threshold (≥ ±5 fills per spec §4.3 D1);
     #   足以走完 m7_decay_candidate routing path
     if inject_synthetic:
-        replay_count = live_count + 5
+        replay_count = inject_synthetic_fixture(live_count, delta=5)
+    else:
+        # 非 synthetic 時 replay = live (no-op nightly hygiene)
+        replay_count = live_count
 
-    divergence = replay_count - live_count
-    abs_div = abs(divergence)
+    # 為什麼用 fake 5d history:
+    #   spike skeleton 階段 sandbox seed 無 5d empirical fill_count history;
+    #   nightly cron Phase A (Sprint 3 W15-18) 走真實 history aggregate;
+    #   spike 用 fake 5 sample [live_count]*5 對應 sigma≈0 noise_floor≈mean,
+    #   足以走通 detect_with_baseline path + 寫 3 個 baseline column row
+    fake_5d_history = [live_count] * 5
+    baseline = compute_5d_baseline(fake_5d_history)
 
-    if abs_div < 2:
-        severity = "NOISE"
-        flag_action: str | None = "none"
-    elif abs_div < 5:
-        severity = "WARN"
+    detect_result = detect_with_baseline(
+        live_count=live_count,
+        replay_count=replay_count,
+        baseline=baseline,
+    )
+
+    # routing per severity (per V107 spec §5.1)
+    severity = detect_result["severity"]
+    if severity == "CRITICAL":
+        flag_action: str | None = "m7_decay_candidate"
+    elif severity == "WARN":
         flag_action = "m3_health_recheck"
     else:
-        severity = "CRITICAL"
-        # 為什麼 m7_decay_candidate:
-        #   per V107 spec §5.1 + M11 design §7.2 CRITICAL → M7 input 1-of-4
-        #   source;14d window 內 ≥ 7d CRITICAL → M7 strong candidate;
-        #   spike 階段直接標 m7_decay_candidate 走 dedup contract verify
-        flag_action = "m7_decay_candidate"
+        flag_action = "none"
 
     evidence = {
         "live_fill_count": live_count,
         "replay_fill_count": replay_count,
-        "fill_count_diff": divergence,
+        "fill_count_diff": detect_result["divergence_count"],
+        "leak_free_shift1_baseline_count": leak_free_baseline_count,
         "live_engine_mode": fills[0]["engine_mode"] if fills else "unknown",
         "synthetic_injected": inject_synthetic,
-        "buy_count": replay_baseline["buy_count"],
-        "sell_count": replay_baseline["sell_count"],
         "detector_module": "divergence_d1_fill_chain",
+        "severity_origin": detect_result["severity_origin"],
+        "cold_start": detect_result["cold_start"],
+        "z_score": detect_result["z_score"],
     }
     LOG.info(
-        "D1 fill_chain detector: live=%s replay=%s diff=%s severity=%s flag=%s",
+        "D1 fill_chain detector (via sibling module): live=%s replay=%s "
+        "leak_free_baseline=%s diff=%s severity=%s flag=%s mu=%s sigma=%s",
         live_count,
         replay_count,
-        divergence,
+        leak_free_baseline_count,
+        detect_result["divergence_count"],
         severity,
         flag_action,
+        detect_result["baseline_mean"],
+        detect_result["baseline_sigma"],
     )
     return {
-        "divergence_value": float(divergence),
+        "divergence_value": float(detect_result["divergence_count"]),
         "severity": severity,
         "flag_action_taken": flag_action,
         "evidence_json": evidence,
+        "baseline_5d_mean": detect_result["baseline_mean"],
+        "baseline_5d_sigma": detect_result["baseline_sigma"],
+        "noise_floor_threshold": detect_result["noise_floor_threshold"],
     }
 
 
@@ -272,11 +307,16 @@ def write_divergence_row(
     為什麼 created_by='m11_spike_trigger':
         對齊 V107 spec §2.2 line 205 audit field;spike 期間用 spike-specific
         created_by 區分 nightly cron (default 'm11_replay_engine')
+
+    為什麼 round 2 補 baseline_5d_mean / sigma / noise_floor_threshold:
+        E2 round 1 HIGH-3 catch round 1 INSERT 漏這 3 個 V107 schema column;
+        round 2 import detect_with_baseline 後 detector_result 已含此 3 數值
     """
     sql = """
         INSERT INTO learning.replay_divergence_log (
             divergence_detected_at, replay_run_id, divergence_type, severity,
             divergence_metric_name, divergence_value,
+            baseline_5d_mean, baseline_5d_sigma, noise_floor_threshold,
             strategy_id, symbol,
             evidence_json, engine_mode,
             flag_action_taken,
@@ -284,6 +324,7 @@ def write_divergence_row(
         ) VALUES (
             now(), %s, %s, %s,
             %s, %s,
+            %s, %s, %s,
             %s, %s,
             %s, %s,
             %s,
@@ -300,6 +341,9 @@ def write_divergence_row(
                 detector_result["severity"],
                 "fill_count_diff",
                 detector_result["divergence_value"],
+                detector_result["baseline_5d_mean"],
+                detector_result["baseline_5d_sigma"],
+                detector_result["noise_floor_threshold"],
                 cfg.strategy_id,
                 cfg.symbol,
                 Json(detector_result["evidence_json"]),
@@ -310,7 +354,14 @@ def write_divergence_row(
             ),
         )
         new_id = cur.fetchone()[0]
-    LOG.info("V107 row written: id=%s replay_run_id=%s", new_id, replay_run_id)
+    LOG.info(
+        "V107 row written: id=%s replay_run_id=%s baseline_mean=%s sigma=%s noise_floor=%s",
+        new_id,
+        replay_run_id,
+        detector_result["baseline_5d_mean"],
+        detector_result["baseline_5d_sigma"],
+        detector_result["noise_floor_threshold"],
+    )
     return int(new_id)
 
 
@@ -323,7 +374,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="M11 spike trigger (manual 1-shot)")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5432)
-    parser.add_argument("--user", default="trading_admin")
+    # round 2 HIGH-2: default 改 sandbox_admin (對齊 Phase 0 §2.2 設計);
+    # operator 連 production 必須顯式 `--user trading_admin`;sandbox_admin
+    # 未創時 get_db_connection 偵測 OperationalError 提示 fallback
+    parser.add_argument("--user", default="sandbox_admin")
     parser.add_argument(
         "--database",
         default="trading_ai_sandbox",
@@ -352,11 +406,12 @@ def main() -> int:
     )
 
     LOG.info(
-        "M11 spike trigger starting: strategy=%s symbol=%s window=%sh sandbox=%s",
+        "M11 spike trigger starting: strategy=%s symbol=%s window=%sh sandbox=%s user=%s",
         cfg.strategy_id,
         cfg.symbol,
         cfg.window_hours,
         cfg.pg_database,
+        cfg.pg_user,
     )
 
     try:

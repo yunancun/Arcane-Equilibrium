@@ -231,8 +231,13 @@ struct AmpCapEntry {
 ///   - dwell time 60s OK→WARN / 5min WARN→DEGRADED (per spec §3.3 升階 dwell);
 ///     spike scope 只測 OK→WARN dwell 60s + WARN 維持 + amp cap fire 路徑;
 ///     WARN→DEGRADED 5min dwell + cascade 邏輯 Sprint 5 Tier 1 補。
-///   - amp cap: 同一 anomaly_id 24h 內最多 1 次 state transition;
-///     amplification_loop_24h_count 對齊 V106 schema column。
+///   - amp cap: 同一 anomaly_id 24h 內最多 1 次 state transition fire;
+///     amplification_loop_24h_count 對齊 V106 schema column 嚴格語意 —
+///     **transition 真實 fire 計數** (state_prev != target_state 才計入);
+///     同 anomaly_id 反覆採樣 (current==target) 不計 fire 也不 insert entry。
+///   - V106 spec §1.1 line 77 fail-closed ≥ 2 reject 規範: 同 domain 24h 內
+///     transition fired count ≥ 2 後,新 fire request reject (return false +
+///     count 不再增);spec 等待 Sprint 5 cascade 才會真 emit fail-closed log。
 ///   - flap suppression: 24h 內 WARN ↔ OK > 3 次 → lock WARN 直到 1h 全 OK
 ///     (per spec §3.3); spike scope 不測此 path (out-of-scope per dispatch
 ///     packet §2.7(c) "cascade gate cap 加進來" 反模式邊界)。
@@ -241,14 +246,20 @@ pub struct HealthStateMachine {
     /// 當前 active state。
     current_state: HealthState,
     /// 進入當前 state 的時間 (用於 dwell time 計算)。
+    /// 預留 Sprint 5 WARN→DEGRADED 5min dwell time IMPL 用; spike scope 不讀,
+    /// 但寫入時間戳保留供 cascade 計算 dwell delta。
+    #[allow(dead_code)]
     state_entered_at: Instant,
     /// 最近一次採樣到 WARN-band 的時間 (用於 OK→WARN 60s dwell 判斷)。
     warn_band_seen_at: Option<Instant>,
-    /// amplification cap: anomaly_id → 第一次觸發時間。
-    /// 24h 過期 → reset; 同 id 24h 內第 2+ 次不觸發 transition。
+    /// amplification cap: anomaly_id → 第一次 fire state transition 的時間。
+    /// 嚴格語意: 只在「真實 transition fire」(current_state != target_state)
+    /// 時才 insert; 同 id 反覆採樣不重 insert。24h 過期 retain 清理。
     amp_cap_entries: HashMap<String, AmpCapEntry>,
-    /// 24h window 計數 (對齊 V106 schema amplification_loop_24h_count column);
-    /// writer 端讀此值寫入新 row。
+    /// 24h window state transition fire 計數 (對齊 V106 schema
+    /// amplification_loop_24h_count column 嚴格語意); writer 端讀此值寫入新 row。
+    /// **嚴格 = transition fire 計數**,不是「unique seen anomaly_id 計數」。
+    /// retain 過期 entry 同步重算 = amp_cap_entries.len()。
     amplification_loop_24h_count: u32,
 }
 
@@ -310,8 +321,9 @@ impl HealthStateMachine {
         self.amp_cap_entries
             .retain(|_, entry| now.duration_since(entry.first_triggered_at) <= day);
 
-        // amplification_loop_24h_count 對齊 V106 schema; 重新計算當前 24h 內
-        // 已觸發 transition 的 unique anomaly_id 數 (per ADR-0042 Decision 4)。
+        // 嚴格語意: amplification_loop_24h_count = transition fire 計數;
+        // entry 1:1 對應 fire, retain 後 entries.len() 即為 24h window 內仍有效
+        // 的 fire 數 (對齊 V106 schema column 含義 per spec §1.1 line 77)。
         self.amplification_loop_24h_count = self.amp_cap_entries.len() as u32;
 
         // dwell-time 邏輯 (spike scope: 只 IMPL OK → WARN 60s dwell;
@@ -321,16 +333,20 @@ impl HealthStateMachine {
             (HealthState::HealthOk, HealthState::HealthWarn)
             | (HealthState::HealthOk, HealthState::HealthDegraded)
             | (HealthState::HealthOk, HealthState::HealthCritical) => {
-                // 第一次採樣到 WARN-band → 記時間, 不立即 transition。
-                if self.warn_band_seen_at.is_none() {
-                    self.warn_band_seen_at = Some(now);
-                    return Ok(false);
-                }
-                // dwell time 60s 持續 WARN-band → 觸發 transition (受 amp cap 約束)。
-                let dwell = now.duration_since(self.warn_band_seen_at.unwrap());
-                if dwell >= Duration::from_secs(60) {
-                    self.try_transition_with_cap(HealthState::HealthWarn, anomaly_id, now)
+                // 為什麼 if let: 對 None 場景 fail-closed 走「初次採樣 → 記時間」
+                // 路徑, 不可用 unwrap() (對 Sprint 5 cascade IMPL 改錯不安全)。
+                if let Some(seen) = self.warn_band_seen_at {
+                    // dwell time 60s 持續 WARN-band → 觸發 transition (受 amp
+                    // cap 約束)。
+                    let dwell = now.duration_since(seen);
+                    if dwell >= Duration::from_secs(60) {
+                        self.try_transition_with_cap(HealthState::HealthWarn, anomaly_id, now)
+                    } else {
+                        Ok(false)
+                    }
                 } else {
+                    // 第一次採樣到 WARN-band → 記時間, 不立即 transition。
+                    self.warn_band_seen_at = Some(now);
                     Ok(false)
                 }
             }
@@ -339,40 +355,62 @@ impl HealthStateMachine {
                 self.warn_band_seen_at = None;
                 Ok(false)
             }
-            // WARN 維持 (per spike scope, WARN → DEGRADED dwell time 5min 對齊
-            // M3 spec §3.3 但 spike 只測 cap suppress 不升 DEGRADED)。
-            (HealthState::HealthWarn, _) => {
-                // amp cap 約束下,同 anomaly_id 24h 內不重觸發; 不 transition。
-                // (test_m3_amp_cap_24h_fire 反向 verify: 第二個 spike 在 24h cap
-                //  窗口內 → 不升 DEGRADED 維持 WARN; 24h 後 cap reset → 第 2 次
-                //  spike 算「第一次」可再次計入 cap entry。)
-                self.try_transition_with_cap(HealthState::HealthWarn, anomaly_id, now)?;
-                Ok(false)
-            }
+            // WARN 維持: current 已是 WARN target 也是 WARN → 不算 transition
+            // fire (per V106 spec §1.1 line 77 嚴格語意: 「state_prev → state
+            // transitions」必須 state_prev != state 才算)。同 anomaly_id 在
+            // 24h cap 內反覆採樣不計入 entries / count; 不同 anomaly_id 在已
+            // WARN 場景也不 fire (沒新 transition, no new fire to cap)。
+            // WARN → DEGRADED 5min dwell 邏輯 Sprint 5 Tier 1 IMPL 時補。
+            (HealthState::HealthWarn, _) => Ok(false),
             // 其他 transition (DEGRADED/CRITICAL recovery / etc.) 不在 spike scope。
             _ => Ok(false),
         }
     }
 
-    /// 受 amp cap 約束的 state transition 嘗試 (per ADR-0042 Decision 4)。
+    /// 受 amp cap 約束的 state transition fire 嘗試 (per ADR-0042 Decision 4 +
+    /// V106 spec §1.1 line 77 嚴格 fail-closed ≥ 2 reject 語意)。
     ///
-    /// 為什麼:
-    ///   - 同 anomaly_id 24h 內最多觸發 1 次 state transition; cap entry 已存在
-    ///     → 即使 dwell time pass 也不 transition (返回 false)。
-    ///   - cap entry 新建時計入 amplification_loop_24h_count, 對齊 V106 row 寫入。
-    ///   - 注意: state ≠ current → 真實 transition; 同 state 重觸 → no-op 返回 false。
+    /// 為什麼此語意:
+    ///   - 1-anomaly = 1-state-change/24h (per ADR-0042 Decision 4): 同 anomaly_id
+    ///     在 24h cap window 內最多 fire 1 次 state transition; entry 存在 →
+    ///     suppress 返回 false 不 fire,不增 count。
+    ///   - state_prev != target_state 才算 transition fire (per V106 spec §1.1
+    ///     line 77 「state_prev → state transitions」嚴格語意); 同 state 重觸
+    ///     不算 fire,**不 insert entry**,不增 count, 返回 false。
+    ///   - V106 spec ≥ 2 fail-closed reject: 同 domain 24h 內 fire 數 ≥ 2 後新
+    ///     fire request 走 fail-closed: 不 insert entry, 不 fire, 不 increment
+    ///     count, 返回 false。實際 emit fail-closed log + WARN row 由 Sprint 5
+    ///     cascade IMPL 接 (本 IMPL 只在 state machine 層回 false; writer 端
+    ///     觀察 count 不增即可推斷 reject 發生)。
+    ///   - 真實 fire (新 transition + 未撞 ≥ 2 cap): insert entry, count++,
+    ///     set current_state, return true。
     fn try_transition_with_cap(
         &mut self,
         target_state: HealthState,
         anomaly_id: &str,
         now: Instant,
     ) -> Result<bool, M3Error> {
-        // 同 anomaly_id 已在 24h cap window 內觸發過 → suppress, 不 transition。
+        // 同 anomaly_id 已在 24h cap window 內 fire 過 → suppress, 不 fire。
         if self.amp_cap_entries.contains_key(anomaly_id) {
             return Ok(false);
         }
 
-        // 新 anomaly_id → 計入 cap entry。
+        // current == target → 沒有 transition fire 發生 (per V106 spec §1.1
+        // line 77 「state_prev → state transitions」需 state_prev != state),
+        // 不 insert entry, 不增 count。
+        if self.current_state == target_state {
+            return Ok(false);
+        }
+
+        // V106 spec §1.1 line 77 fail-closed ≥ 2 reject: 同 domain 24h 內已
+        // fire ≥ 2 次, 新 fire request reject。本 IMPL 只在 state machine 層
+        // 回 false; Sprint 5 cascade IMPL 接 emit fail-closed log + HEALTH_WARN
+        // row。spike scope 不真實 emit log, 僅校驗 count 不再增。
+        if self.amplification_loop_24h_count >= 2 {
+            return Ok(false);
+        }
+
+        // 真實 fire: insert entry + count++ + set state。
         self.amp_cap_entries.insert(
             anomaly_id.to_string(),
             AmpCapEntry {
@@ -380,15 +418,10 @@ impl HealthStateMachine {
             },
         );
         self.amplification_loop_24h_count = self.amp_cap_entries.len() as u32;
-
-        // 真實 transition (state 變更)。
-        if self.current_state != target_state {
-            self.current_state = target_state;
-            self.state_entered_at = now;
-            self.warn_band_seen_at = None;
-            return Ok(true);
-        }
-        Ok(false)
+        self.current_state = target_state;
+        self.state_entered_at = now;
+        self.warn_band_seen_at = None;
+        Ok(true)
     }
 
     /// 當前 state 查詢 (test + writer 用)。
@@ -512,5 +545,18 @@ mod tests {
         let metric = EngineRuntimeMetric { cpu_pct: 30.0, rss_mb: 1024.0, heartbeat_alive: true };
         let err = sm.observe(metric, "test").unwrap_err();
         assert!(matches!(err, M3Error::DomainNotImplemented(_)));
+    }
+
+    #[test]
+    fn test_try_transition_no_fire_when_current_eq_target() {
+        // 嚴格語意驗: current == target 不算 transition fire,不 insert entry,
+        // 不增 count (per V106 spec §1.1 line 77 「state_prev → state」需 ≠)。
+        let mut sm = HealthStateMachine::new(HealthDomain::EngineRuntime);
+        let now = Instant::now();
+        // SM 初始 current=HealthOk; 嘗試 transition 到 HealthOk → no fire。
+        let result = sm.try_transition_with_cap(HealthState::HealthOk, "noop_id", now);
+        assert!(matches!(result, Ok(false)));
+        assert_eq!(sm.amplification_loop_24h_count(), 0);
+        assert_eq!(sm.amp_cap_entry_count(), 0);
     }
 }

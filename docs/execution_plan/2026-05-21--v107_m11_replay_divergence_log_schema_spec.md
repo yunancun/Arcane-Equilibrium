@@ -8,7 +8,7 @@ sprint: Sprint 1A-β (DESIGN phase; IMPL Phase A Sprint 3 W15-18 nightly job; Ph
 size estimate: 100-140 LOC SQL (CREATE TABLE 1 hypertable + 4 indexes + multi-ENUM CHECK + Guard A/C + compression + retention + materialized view) + 80-120 hr E1 IMPL (含 Linux PG dry-run x 2 round; healthcheck wiring deferred to Sprint 1B; writer 接線 Sprint 3 W15-18 M11 nightly job Phase A)
 depend on:
   - V096 boundary (TimescaleDB extension; drop dead learning tables)
-  - V098 (governance.audit_log; M11 H-11 audit cross-ref)
+  - V098 (learning.governance_audit_log; M11 H-11 audit cross-ref;2026-05-22 PA reconcile §4 — 真實 schema 表名 `learning.governance_audit_log` per V035 baseline)
   - V103 (learning.hypotheses; hypothesis-grounded replay 用 hypothesis_id 寬 FK reference; nightly hygiene 走 NULL)
   - V108 (M9 A/B test schema; γ; bi-directional cross-ref via ab_test_id in evidence_json) — placeholder FK
   - V113 (M7 decay schema; M7 detector read-only pull V107 last 14d) — placeholder FK
@@ -46,7 +46,7 @@ scope: design / spec only — 不寫 V107.sql 實檔, 不在 Mac 跑 SQL, 不改
 - **Hot index `(strategy_name, symbol, divergence_detected_at DESC)`** + `(severity, divergence_detected_at DESC)` partial WHERE severity IN (WARN,CRITICAL) + `(replay_run_id)` + `(hypothesis_id) WHERE hypothesis_id IS NOT NULL` partial — per M11 design spec hot path query 對齊。
 - **Hypertable mandatory**:divergence_detected_at 為 time dim + 7d chunk + 30d compression policy + 90d retention(per ADR-0038 H-22 R4 governance + E5 5.21 hypertable audit;對齊 V106 sister table 範式)。
 - **engine_mode CHECK 5 值齊全**(paper/demo/live_demo/live/replay) — 額外加 `replay` 因 V107 row 本身可由 replay engine 寫入(不同於 live trace 寫入路徑);training filter 必 `IN ('live','live_demo')` (per CLAUDE.md §七 + MIT memory baseline);**M11 自身寫入時 engine_mode='replay'** 但 evidence_json 內含原 live trace 的 engine_mode。
-- **Cross-V### dependencies**:V096 boundary(TimescaleDB extension)+ V098(governance.audit_log)+ V103(learning.hypotheses hypothesis_id 寬參照)+ V108(M9 ab_test_id 寬參照;γ 待 land)+ V113(M7 m7_decay_signal_id 寬參照;待 land);**所有跨 module 引用採 nullable FK pattern 或 cross-ref query 而非 hard FK** 避免循環依賴 + writer hot path INSERT 過熱。
+- **Cross-V### dependencies**:V096 boundary(TimescaleDB extension)+ V098(learning.governance_audit_log)+ V103(learning.hypotheses hypothesis_id 寬參照)+ V108(M9 ab_test_id 寬參照;γ 待 land)+ V113(M7 m7_decay_signal_id 寬參照;待 land);**所有跨 module 引用採 nullable FK pattern 或 cross-ref query 而非 hard FK** 避免循環依賴 + writer hot path INSERT 過熱。
 - **5 audit field** per V103 §14 EXTEND 範式:`created_by` / `created_at` / `updated_by` / `updated_at` / `source_version` — 對齊 ADR-0024-lite Cowork operator-assistant + ADR-0008 Decision Lease audit chain。
 - **Materialized view (optional)** `mv_latest_divergence_per_strategy` — A3 Lv 3 GUI Console Banner + monthly review wizard 用 last divergence per strategy × symbol;refresh policy 4h cron(per A3 design)。
 - **Sprint 1A-β scheduling**:V107 必先 land(Sprint 1A-β CRITICAL);V113(M7) + V108(M9 γ) + V109(M8) 後續 land 後 Phase B Sprint 8 hookup。V107 stand-alone apply 後 0 row(Foundation stage per MIT pipeline maturity);Phase A Sprint 3 M11 nightly job spawn writer 後升 Skeleton → 累積 baseline 後 Shadow → CRITICAL 觸發 M7 dispatch 後 Canary。
@@ -373,6 +373,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_div_unack_detected
     WHERE passive_slack_ack_at IS NULL AND severity IN ('WARN', 'CRITICAL');
 ```
 
+> **註(2026-05-22 PA reconcile §5)**:`CREATE INDEX CONCURRENTLY` 對 TimescaleDB hypertable 在 `psql -v ON_ERROR_STOP=1 -f` transaction-implicit 內不可用(per V094 sister table 範式 + V106 / V107 IMPL §6.5 / §2.3 empirical);hypertable 走非 CONCURRENT path 改用 `CREATE INDEX IF NOT EXISTS`,TimescaleDB 自動逐 chunk 建 index;greenfield 0 row 時 0 lock cost。本 §4.2 DDL 保留 CONCURRENTLY 字面用於 spec 設計意圖呈現;.sql 實檔已對齊 V094 / V106 / V107 落地範式採非 CONCURRENT。Materialized view `REFRESH ... CONCURRENTLY` 仍適用(per §7.3 + UNIQUE INDEX 滿足前提),不在此 reconcile 範圍。
+
 ### 4.3 Partial index 理由
 
 per `db-schema-design-financial-time-series` skill §4.2:partial index 對 filter 條件穩定的場景大幅縮小索引(60-80% 空間節省):
@@ -401,7 +403,7 @@ V107 涉及 1 個 NEW hypertable CREATE + nullable FK to V103 hypotheses,需 Gua
 -- ============================================================
 -- Guard A: V107 預檢 — 若 learning.replay_divergence_log 已存在,必驗 V107 spec
 -- column 全俱在;缺即 RAISE。同時驗 TimescaleDB extension + V096 boundary + V098
--- governance.audit_log + V103 learning.hypotheses 三依賴表存在。
+-- learning.governance_audit_log + V103 learning.hypotheses 三依賴表存在。
 -- ============================================================
 DO $$
 DECLARE v_missing TEXT[];
@@ -463,13 +465,15 @@ BEGIN
         END IF;
     END IF;
 
-    -- governance.audit_log 必須存在(M11 H-11 audit cross-ref 雖無 FK 但 query JOIN 需要)
+    -- learning.governance_audit_log 必須存在(M11 H-11 audit cross-ref 雖無 FK 但 query JOIN 需要)
+    -- 2026-05-22 PA reconcile §4: V098 baseline 真實表名為 learning.governance_audit_log
+    -- (per V035 baseline);本 spec 前版「governance.audit_log」屬概念命名漂移。
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.tables
-        WHERE table_schema='governance' AND table_name='audit_log'
+        WHERE table_schema='learning' AND table_name='governance_audit_log'
     ) THEN
         RAISE EXCEPTION
-            'V107 Guard A FAIL: governance.audit_log missing — '
+            'V107 Guard A FAIL: learning.governance_audit_log missing — '
             'V098 must apply before V107 (cross-ref query target). Verify _sqlx_migrations.';
     END IF;
 
@@ -633,7 +637,7 @@ END $$;
 
 | Guard | 觸發場景 | RAISE 條件 | NOT RAISE 條件(idempotent)|
 |---|---|---|---|
-| A | NEW table 已存在但 column 缺;TimescaleDB / governance.audit_log / learning.hypotheses 缺;**或 V107 含 forbidden action column** | RAISE | 全 column 俱在 + 0 forbidden column / table 不存在(首次跑) |
+| A | NEW table 已存在但 column 缺;TimescaleDB / learning.governance_audit_log / learning.hypotheses 缺;**或 V107 含 forbidden action column** | RAISE | 全 column 俱在 + 0 forbidden column / table 不存在(首次跑) |
 | C | CHECK constraint 缺 enum 值;hypertable interval 不對 | RAISE | constraint 不存在(首次跑) / constraint 完整(重跑) |
 | C policy | compression / retention policy 首次跑不存在 | NOTICE(不 RAISE,migration body 會建)| policy 已存在重跑(skip) |
 | C FK | hypothesis_id FK 首次跑不存在 | NOTICE(不 RAISE,migration body 會建) | FK 已存在重跑(skip) |
@@ -889,7 +893,7 @@ CONCURRENTLY refresh 走 unique index;refresh 期間 mv 仍可 query(unblock GUI
 
 ```
 V096 (drop dead learning tables; TimescaleDB extension) ← V107 (prereq;hypertable infra)
-V098 (governance.audit_log)                              ← V107 (cross-ref query target;非 FK)
+V098 (learning.governance_audit_log)                     ← V107 (cross-ref query target;非 FK)
 V103 (learning.hypotheses)                               ← V107 (hypothesis_id nullable FK)
 V108 (M9 A/B test schema;Sprint 1A-γ 後續 land)         ← V107 (m9_ab_test_id soft reference;evidence_json bi-directional cross-ref)
 V113 (M7 decay schema;Sprint 8 後續 land)               ← V107 (m7_decay_signal_id soft reference;M7 detector pull V107)
@@ -1044,8 +1048,8 @@ ssh trade-core "psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c 'SEL
 ssh trade-core "psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c \"SELECT extversion FROM pg_extension WHERE extname='timescaledb'\""
 # Expected: ≥ 2.13 (per OpenClaw TimescaleDB minimum)
 
-# Query 3: governance.audit_log + learning.hypotheses 已 land 驗(V098 + V103 prereq)
-ssh trade-core "psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c \"SELECT count(*) FROM information_schema.tables WHERE (table_schema='governance' AND table_name='audit_log') OR (table_schema='learning' AND table_name='hypotheses')\""
+# Query 3: learning.governance_audit_log + learning.hypotheses 已 land 驗(V098 + V103 prereq)
+ssh trade-core "psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c \"SELECT count(*) FROM information_schema.tables WHERE (table_schema='learning' AND table_name='governance_audit_log') OR (table_schema='learning' AND table_name='hypotheses')\""
 # Expected: 2 (V098 + V103 都已 land)
 
 # Query 4: learning.hypotheses.hypothesis_id column type 驗(V107 FK target)
@@ -1064,7 +1068,7 @@ ssh trade-core "psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c \"SE
 **待 PA C9 補資料的 6 處 placeholder**(spec sign-off 前必更新):
 1. `_sqlx_migrations` head 真實 = ?
 2. TimescaleDB extension version 真實 = ?
-3. governance.audit_log 已 land 確認 = ?
+3. learning.governance_audit_log 已 land 確認 = ?
 4. learning.hypotheses 已 land + hypothesis_id type 確認 = ?
 5. learning.replay_divergence_log stub 不存在確認 = ?
 6. 反模式 forbidden action column 0 hit 確認 = ?

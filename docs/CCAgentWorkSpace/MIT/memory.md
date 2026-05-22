@@ -632,3 +632,47 @@ _Last updated: 2026-04-24_
 - data-drift-detection: bear-regime annotation as governance lever; 30d cross-regime required pre-live
 
 **Report**: `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-18--w_audit_8c_s0r_1_2_mit_dual_review_round2.md` (31KB / ~550 LOC)
+
+## 2026-05-22 V099 Autonomy Level Toggle schema spec
+
+**Spec**: `srv/docs/execution_plan/specs/2026-05-22--v099-autonomy-level-config.md` (429 行)
+
+**Source**: PA design spec `2026-05-22--autonomy_level_toggle_design_spec.md` §3 + AMD-2026-05-21-01 v2 §3.5。
+
+**V### decision**: V099。Linux PG `_sqlx_migrations` max=96 ssh trade-core empirical verified；local staged unapplied = {97, 98, 106, 107, 112}；V99 free + 連續未占用。
+
+**新 schema**: `system`（Linux PG `information_schema.schemata` verified 不存在；migration `CREATE SCHEMA IF NOT EXISTS system` 新建）。
+
+**兩 表 design**:
+- `system.autonomy_level_config` single-row PRIMARY KEY id=1 CHECK + cold start seed CONSERVATIVE default
+- `system.autonomy_level_switch_audit` append-only history bigserial PK + REVOKE UPDATE/DELETE on PUBLIC + trading_ai + 三路通知 status column + emergency_override + 2FA verify result
+
+**Schema 設計差異於 PA spec**: PA spec §3.2 寫 `current_level smallint CHECK (1, 2)`；MIT spec 改 `text CHECK ('CONSERVATIVE', 'STANDARD')` 對齊 AMD v2 §3.3 字串 enum 命名 first-class（Q1 unresolved；待 operator 拍板字面對齊 smallint vs text）。
+
+**Guard A/B/C 完整**: Guard A 雙表 column missing array verify；Guard B current_level type=text verify；Guard C idx_autonomy_audit_switched_at column ordering DESC verify。Idempotency `CREATE SCHEMA / TABLE IF NOT EXISTS + ON CONFLICT DO NOTHING + DO NOTICE skip`。
+
+**Linux PG dry-run 6 條** (per ADR-0011 + feedback_v_migration_pg_dry_run，每條 ssh trade-core 一行 抗貼上 one-liner):
+- D1 _sqlx_migrations 版本對齊（V96 baseline + V99 absent）
+- D2 第一次 apply + reflection 驗 column type / nullability / default
+- D3 二次 apply NOTICE skip 不 RAISE（idempotency）
+- D4 INSERT default → SELECT 反讀對齊（id=1, CONSERVATIVE）
+- **D5 CHECK constraint 強制驗（最高風險）**：UPDATE current_level='INVALID' 必 reject（spec/IMPL 字面 mismatch 會 silently drift；Mac mock pytest 無法 catch）
+- **D6 REVOKE + Index 雙驗（最高風險）**：trading_ai DELETE audit 必 permission denied + EXPLAIN ANALYZE show Index Scan idx_autonomy_audit_switched_at
+
+**Pre-deploy SOP (P0 sqlx hash drift 防線)**:
+- 禁本地 `psql -f`（避免 hash drift incident per project_2026_05_02_p0_sqlx_hash_drift）
+- 必 commit + push → Linux engine restart `OPENCLAW_AUTO_MIGRATE=1` 觸發 sqlx 第一次 apply
+- 後續任何 edit 必走 `bin/repair_migration_checksum`
+
+**Rollback strategy**: additive schema（純 CREATE）；apply 後立即發現 bug → DROP TABLE/SCHEMA CASCADE + 刪 sqlx_migrations row + 重 land；apply 後 production row 已寫入 → 不 rollback，走 ADR-0006 forward V### patch + 資料訂正。5-gate live mainnet 期間永不 destructive rollback。
+
+**ML / data drift implication**:
+- Level 切換 = governance posture change，**不觸發** ML re-training reset（feature distribution 不變 / cost_gate 不繞 / engine_mode filter 不變 / sample weight 不繞）
+- 例外：Level 2 切換後 strategy promotion rate 顯著上升 → LAL 3 immature strategy 樣本進 training set → PSI drift 監控建議
+- M3 health monitor **應**接 Level switch 觀察：新增 `check_autonomy_level_switch_recent_24h()`（24h ≥ 2 切換 CRITICAL；emergency_override=true WARNING）
+
+**Q1/Q2 unresolved for operator**:
+- Q1: enum string 'CONSERVATIVE'/'STANDARD' vs smallint 1/2 — MIT 推薦 text，待 operator 拍板
+- Q2: schema 命名 `system` vs 進既有 `governance` — MIT 推薦 system 對齊 PA spec，待拍板
+
+**MIT sign-off**: spec DRAFTED；E1 IMPL + E4 Linux PG dry-run 6 條 + E2 review 後 sign-off

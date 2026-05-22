@@ -11525,3 +11525,22 @@ PA spec land 後 5 件 plumbing：H0Gate.with_metrics + finalize_blocked/allowed
 
 ### 報告
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1a_zeta_track_b_m3_health_v106_impl.md`
+
+## 2026-05-22 — Sprint 1A-ζ Phase 3a Track B Round 2 Fix (E2 catch 7 findings)
+
+- E2 round 1 review catch 7 findings (1 CRITICAL spec internal conflict + 1 HIGH 語意 drift + 3 MEDIUM + 2 LOW);全 closure。
+- **CRITICAL = spec internal conflict 不是 IMPL bug**:V106 spec §1.1 (ADR-0042 命名) vs §2.1 / §5.3 / §6.1 (legacy ws_latency 命名) 兩個 source of truth 並存。PA reconcile verdict (V106 spec §1.1 line 53 2026-05-22 reconcile note) 採 ADR-0042 Decision 3 + M3 design spec §2.1 為唯一 source of truth。E1 round 2 修 V106.sql 6 domain CHECK enum + Guard C 預檢 / 後驗 + COMMENT 對齊 ADR-0042;Rust HealthDomain enum 保留不動。Sandbox PG empirical DROP + re-apply round 1+2 + positive INSERT engine_runtime + reverse INSERT ws_latency REJECT 全綠。
+- **HIGH 語意 drift = counter insert 不條件化**:`amp_cap_entries.insert` 在 `try_transition_with_cap` 內 unconditional 進行,結果「entries.len() = 24h unique seen anomaly_id 數」≠ V106 spec §1.1 line 77 「state transition fire 計數」嚴格語意。修法 = 嚴格在「真實 fire (state 真變 + 未撞 ≥ 2 fail-closed cap)」時才 insert + count++;current==target 不 fire (per spec 「state_prev → state transitions」需 prev != state);≥ 2 transitions 走 fail-closed reject 不 insert。新增 unit test `test_try_transition_no_fire_when_current_eq_target`。同步修 `test_amp_cap_different_anomaly_id_not_suppressed` assertion 對齊嚴格語意 (entries=1 不是 2)。
+- **MEDIUM-1 test step 順序 vs spec mismatch**:Round 1 Step 2/3 對調。Round 2 改 4-step 對齊 spec §AC-5.1: Step 1 OK→WARN fire, Step 2 24h+1s hop retain 清舊 entry, Step 3 24h reset 後 spike (spike scope no fire), Step 4 + 1h spike (cap suppress 一致)。注意 timestamp 計算 — fire 發生在 base+60s (dwell pass 時),所以 Step 2 hop 必 base+24h+60s+1s 才確保 retain 過期 (test 一次 fail 後 timestamp tuning fix 通過)。
+- **MEDIUM-2 dead dev-dep tokio test-util 移除**:Round 1 design pivot 後改 std::time::Instant 注入,tokio test-util 變 dead;Round 2 移除 Cargo.toml dev-dep + 加註釋說明若 Sprint 5 cascade IMPL 真需要再補。
+- **MEDIUM-3 unwrap → if let**:Round 1 line 330 `warn_band_seen_at.unwrap()` 雖 is_none() guard 後語意安全,但 Sprint 5 易誤 break;Round 2 改 `if let Some(seen) = self.warn_band_seen_at`。
+- **LOW-2 state_entered_at #[allow(dead_code)]**:Sprint 5 cascade IMPL dwell time 計算用,spike 不讀;加 #[allow(dead_code)] + 中文預留註釋。
+- **LOW-1 CONCURRENTLY drift**:不修 V106.sql (per task 禁忌「不動 spec doc」);report follow-up note PA 同步處理 §6.1 spec doc + reindex_chunk SOP。
+- **教訓 1: spec internal conflict 不是 IMPL bug**:當 PA spec 內部不一致 (Frontmatter / TL;DR / §2.1 DDL / §6.1 example 多個版本) 時,單純照抄 spec 字面跑 V106.sql 反而 catch 不到 drift。修法 = PA spec reconcile 拿到 single verdict (即使 reconcile note 只在 §1.1 line 53),IMPL 對齊 verdict + empirical PG 驗 + report 明列 PA 需後續同步 patch 的其他 spec section (§2.1 / §5.3 / §6.1 / 量級表)。
+- **教訓 2: counter 語意 drift 必補 empirical assertion**:`HashMap.len()` 看似自然 = transition fire count,但 unconditional insert 後可能 ≠ fire count (current==target 不 fire 但 entry insert)。修法 = 嚴格在「真實 fire」時才 insert + count++,並補 unit test 覆蓋「current==target no-fire」與「entries 在已 WARN 場景不 +1」兩個 case。
+- **教訓 3: PG CHECK constraint 改變需 DROP + recreate**:sandbox empirical 驗 6 domain 改 enum 時,table 已 land 走 IF NOT EXISTS skip → CHECK 不會自動更新。greenfield 0 row 場景 DROP TABLE CASCADE + apply V106 安全;production 場景需 ALTER TABLE DROP CONSTRAINT + ADD 新 CONSTRAINT。
+- **教訓 4: production code path 不留 unwrap()**:即使 is_none() guard 前置 + 同 fn 內語意安全,後續 sprint 改邏輯極易 break;一律 `if let Some(...)` 或 pattern match,嚴格 fail-closed。
+- **教訓 5: Dead dev-dep 反模式**:design pivot 後忘記回頭清 dependency 是常見 noise 源;每次 IMPL 對抗審查 (E1 報告寫前自查) 必查 Cargo.toml 是否所有 dep 都被 src/ + tests/ 真實使用。
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1a_zeta_track_b_m3_health_v106_impl_round2.md`

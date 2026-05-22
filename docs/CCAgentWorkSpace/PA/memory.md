@@ -5070,3 +5070,118 @@ Sweep wrapper pattern 在 metrics 重型 monolithic function (1162 LOC `compute_
 - Phase 0 → Phase 1 → Phase 2 sign-off chain：Phase 0 6 confirm (E3 sandbox + AI-E TOTP + MIT seed) + Phase 1 PA refine + 3 dispatch packet land → Phase 2 stagger dispatch
 - C7 v103 EXTEND M4 PM Q1 verdict 確認：carry-over Sprint 1A-ε 已 close（per Sprint 1A-β closure 2026-05-21）；不影響 spike
 - Verdict：READY for Phase 2 E1 IMPL Dispatch（待 Phase 0 §6 6 confirm 全 PASS）
+
+## 2026-05-22 — Autonomy Level Toggle design spec（AMD-2026-05-21-01 v2 §Decision 1 Q2 拍板 IMPL 設計）
+
+**Topic**：operator 2026-05-22 Q2 拍板「PM 推薦 Path B 設一個自動等級，CC 設另外一個等級，可以在設置裡切換 autonomy level」 → PA 落 spec for AMD v2 §Decision 1 IMPL
+
+**Deliverable**：`docs/execution_plan/2026-05-22--autonomy_level_toggle_design_spec.md`（648 行 / 13 section）
+
+**設計核心 — 三維度正交不變量**：Autonomy Level = system-wide policy（哪些 path 進 LAL auto） / LAL 0-4 = per-decision approval depth（per ADR-0034）/ Stage 0R-4 = per-strategy promotion progress（per AMD-2026-05-15-01）三維乘積構成 per-decision approval 行為；Level 只動 path 集合邊界不動 LAL gate eligibility + 不動 Stage 對齊 + 不動 §Decision 2 5 條 fail-safe hard requirements
+
+**16 surface 對照矩陣完整 cover**：5-gate × 5（A-E HMAC sign / Operator role / OPENCLAW_ALLOW_MAINNET / secret slot / authorization.json）+ 14 path（v1 protected (a)-(f) 6 條 + v1 opt-in (g)-(n) 8 條）+ venue change（per ADR-0040 §Decision 5）= 16 surfaces
+
+**Level 1 manual scope** = (a) + (b) + (c) + (d) + (f) + venue = 6 條 manual（含 5-gate 永鎖 (b)）；**Level 2 manual scope** = (b) + venue = 2 條 manual（5-gate 永鎖 + venue carve-out per Q2 拍板）；**Level 1 → 2 切換語意** = (a)/(c)/(d)/(f) 4 條從 manual 升 auto with §Decision 2 fail-safe
+
+**DB schema 2 表**（per ADR-0010 Guard A + ADR-0011 Linux PG dry-run mandatory）：
+- `system.autonomy_level_config`（single-row id=1 + CHECK constraint level IN (1,2) + cold start seed Level 1）
+- `system.autonomy_level_switch_audit`（append-only + REVOKE UPDATE/DELETE on trading_ai + emergency_override CHECK + 三路通知 status 字段）
+- V### placeholder 由後續 PA dispatch 階段協調拍（與 AMD v2 §9.5 V112 patch 同 wave 落地）
+
+**8 條 attack vectors（§8.1）**：1 快速 level 切換攻擊 / 2 audit log 偽造 / 3 Level 2 Kill noise / 4 cold start drift / 5 reason 字段濫用 / 6 emergency override 濫用為 cooldown bypass / 7 Level 2 protected (a) Stage promotion 引爆 immature strategy / 8 freeze 期間 toggle 規避 — 配對 mitigation 7 層（DB constraint + Engine hard-coded + Auth gate + Audit immutability + Notification + Time-based throttle + Cold start fail-closed）
+
+**§Decision 2 5 條 hard req 雙 level 雙生效**：4.1 deterministic + 4.2 evidence-based + 4.3 gate FAIL fallback + 4.4 freeze trigger + 4.5 compile-time hard-coded — 全部對 Level 1 + Level 2 兩 level 下所有 auto path 同等生效；Level toggle 不放寬 fail-safe 任一條（§7 + §12 對齊驗無 wording conflict）
+
+**新增 invariant**（per §7.4）：Freeze state active 期間 Level toggle 禁切換；防 freeze 期間 operator 切 Level 規避 freeze 紀律
+
+**Cascade patch checklist 8 條 / 42-64 hr / 5-7 sub-agent 並行 / ~1.5 working days**：9.1 AMD v2 draft §Decision 1 重寫（PM+TW 並行）/ 9.2 ADR-0034 LAL 三維 cross-ref（PA+E2）/ 9.3 ADR-0040 §Decision 5 補釋（PA+BB）/ 9.4 V### schema + PG dry-run（MIT+E1+E4）/ 9.5 GUI Governance tab Settings + 7-step UI flow（A3+E1+E3+E2）/ 9.6 5 module ADR cross-ref（R4+PA）/ 9.7 CLAUDE.md §四 + skill SKILL.md（PM+CC）/ 9.8 TODO + docs/README index（PM+TW）
+
+**並行 wave 設計**：Wave 1（9.1+9.3+9.7 並行 ~2-3 hr）/ Wave 2（9.2+9.6 並行 ~4-6 hr）/ Wave 3（9.4+9.5 並行 ~8-12 hr，互斥 PG layer vs GUI layer）/ Wave 4（9.8 serial ~1-2 hr）
+
+**2 PM unresolved 給 operator**：
+- Q1 Emergency override 月度硬上限？Path A 不設 / Path B 每月 3 次硬上限 / Path C governance review trigger（PA 推薦 Path C）
+- Q2 Cold start default Level 1 vs uninitialized 強制 operator 選？Path A auto seed Level 1 / Path B uninitialized 強制 / Path C 7d 內必 confirm（PA 推薦 Path A 對齊 §二 原則 6 + 14）
+
+**架構教訓 4 個**：
+1. **AMD v2 spec 並行 dispatch 時讀「v2 未 patched 狀態」** — operator Q2 拍板 land 在 v2 draft 但 v2 還沒 cascade patch；本 spec 寫時假設 v2 draft 未 patched 狀態，cite 路徑用相對 path
+2. **Q2 拍板「venue change 兩 level 都 manual」與 AMD v2 §Decision 1 wording 不一致** — AMD v2 §Decision 1 將 venue change 列為「allow auto with 6 條 hard gate」；Q2 拍板顯式 carve out venue change（兩 level 都 manual）；本 spec §2.1 矩陣明示 Q2 拍板優先（與 AMD v2 §Decision 1 wording 衝突需 §9.1 AMD draft 補釋）
+3. **Level 1 是 CC stance + Level 2 是 PM Path B 的 governance 解** — operator Q2 三維度並列承認 CC + PM 立場有合法分歧；不是其中一方錯，是兩個都對應 priority 5 的 sub-scope；Autonomy Level Toggle 顯式化 spectrum
+4. **Cold start fail-closed Level 1 對齊原則 6 + 14** — DB read fail 不是「raise error 停 engine」而是「auto seed Level 1 + emit red banner + alert」；engine 必須在 conservative mode 下仍可 boot；對齊 §二 原則 14「零外部成本可運行 baseline」
+
+**Confidence**：HIGH for spec / 矩陣 / DB schema / cascade checklist；MEDIUM-HIGH for §8 attack vectors（8 條完整 + 7 層 mitigation；可能有 9-10 條補充攻擊面待 E2 review catch）；MEDIUM for Q1 emergency override 硬上限選項（依賴 operator 對 governance review SLA 的偏好）
+
+**未派下游 sub-agent** — 本 spec 完成後立即派建議：
+1. **A3 sub-agent**：估時 GUI Governance tab Settings sub-section IMPL（per §5.2 7-step UI flow）+ 14 path × 2 level 對照表 panel + 三路通知 emit handler；估時可能 16-24 hr
+2. **MIT sub-agent**：V### migration schema spec doc + Linux PG empirical dry-run（6 條必驗 per §3.4）；估時 8-12 hr
+3. **FA sub-agent**：16 根原則 + §Decision 2 5 條 fail-safe hard req 雙 level 雙生效 walkthrough；估時 4-6 hr
+4. **E2 sub-agent**：本 spec adversarial review（§8 attack vectors 對抗式 fuzz + §7.5 反模式 grep）；估時 4-6 hr
+
+**Report path**：spec 落 `docs/execution_plan/2026-05-22--autonomy_level_toggle_design_spec.md`（648 行）；本 memo + return 給主會話 PM
+
+
+---
+
+## 2026-05-22 — Autonomy Level Toggle Design Spec v2 patch（648 → 1031 行）
+
+**Trigger**：operator 2026-05-22 整合 6 拍板 + E2 BLOCK 補丁 + FA/A3/MIT 補完 → spec v2 patch
+
+**6 operator 拍板（全 land）**：
+- A3 U1: typed-confirm = `CONFIRM SWITCH`（兩方向統一）
+- A3 U2: 14 path matrix 升級展開 / 降級折疊
+- E2 Q3: 三路 fail → 1h wait → SM-04 Defensive escalation（reuse 不新增 ULTRA_DEFENSIVE）
+- E2 Q4: emergency override rolling 30d + machine local time + 雙時間戳
+- FA U-FA-1: Level 2 GUI button disabled until evidence baseline（21d + 5×N≥30 + Wilson CI）
+- FA U-FA-2: 30% rate → freeze 24h + monthly PM review（混合模式）
+- MIT Q1: current_level PG ENUM type `autonomy_level_enum AS ENUM ('CONSERVATIVE', 'STANDARD')`
+- MIT Q2: 新建 `system` schema（不塞 governance）
+
+**SM-04 ladder mapping 決策（PA）**：reuse 既有 `Defensive` + active 鎖利 hook 擴充，**不**新增 ULTRA_DEFENSIVE；理由 = Defensive 語義 100% 對齊 + 不破壞既有 6 級 transition rules + 不誤用 CircuitBreaker emergency_stops 平倉 + active 鎖利由 Defensive `active_de_risking` hook 擴充實作即可。新增 `RiskEvent::NotificationFailsafeTimeout` 變體（cascade 9.8）。
+
+**Cache invalidation（B4 R-2 PA 拍板）**：PG LISTEN/NOTIFY 主路徑 + polling 5s fallback。禁 60s polling 也禁 engine 重啟。
+
+**E2 BLOCK 5 大類補丁全 land**：
+- B1 反模式 E fail-safe：§4.4 escalation ladder Stage 0-4
+- B2 CI-2/CI-3 wording：以 PA spec 立場為準（更保守）；TW 改齊
+- B3 AV-9/10/11 CRITICAL：PG transaction wrap + advisory lock + 2FA fail-closed
+- B4 R-1/R-2：transaction wrap + PG NOTIFY mechanism
+- B5 EC-3 rolling 30d 機制：雙時間戳 schema + index
+
+**FA F1-F3 + A3 8 anti-pattern 全 land**：§11 readiness 10 條 + §12 AC 8 條 + §13 M3 health check + §5.4 disabled state + §5.5 AP-1~AP-8 表。
+
+**Cascade 估時**：v1 42-64 hr → v2 46-71 hr（+9.8 SM-04 6-10 hr - 9.7 removed 2-3 hr）；9.5 GUI 估時 16-24 → 21-28 hr（per A3 audit）
+
+**Report path 更新**：spec 仍在 `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-22--autonomy_level_toggle_design_spec.md`（v2 patch，1031 行；status: REVISED）
+
+**經驗教訓**：
+1. operator 6 拍板涉及 spec 多章節聯動，Edit tool 比 Write rewrite 更安全（行數從 648 增至 1031 + 27 處 Edit）
+2. SM-04 ladder reuse 比新增 enum 成本顯著低（避免 35+ pair transition rule 重 verify）
+3. PG LISTEN/NOTIFY + polling fallback 雙路徑是 cache invalidation 在 PG runtime 的最佳實踐（latency ≤ 200ms vs polling-only 5-60s）
+4. dry-run 必驗清單從 6 條擴至 13 條（含 AV-9/10/11 + B1/B4 mock scenarios），MIT Linux PG dry-run 工作量增加
+5. v2 patch 後仍有 Q4 unresolved（30d cooling vs 24h cooldown 並存是否冗餘）需 operator 確認
+
+
+## 2026-05-22 — Sprint 1A-ζ Phase 3a Spec Reconcile(5 spec internal conflict closure)
+
+**任務**:Sprint 1A-ζ Phase 3a Track A+B+C E1 IMPL round 1 + E2 review 後 catch 5 spec drift / 內部 conflict;PA reconcile single-source-of-truth + apply spec patch(0 IMPL / 0 sub-agent / 0 commit per 任務禁忌)。
+
+**5 reconcile verdict**:
+1. **Issue 1 CRITICAL — V106 6 domain naming**:採 ADR-0042 Decision 3 + M3 design spec §2.1 為 SSOT(engine_runtime / pipeline_throughput / database_pool / api_latency / strategy_quality / risk_envelope);V106 schema spec + V106.sql 屬下游孤立漂移。Governance authority hierarchy ADR > spec doc > IMPL artifact;3 處 governance source(ADR-0042 + M3 design spec + Rust enum)一致,V106 schema spec 唯一漂移。V106 spec 9 處改 + carry-over E1 round 2 V106.sql line 219-224 + 431-432 CHECK 6 值同步。
+2. **Issue 2 MEDIUM-1 — M11 Python path**:採 IMPL reality `helper_scripts/replay/m11_spike/`(srv/python 不存在 + CLAUDE.md §七 convention + spike 是 manual-once 非 cron);spike scope spec 4 處 + dispatch packet 5 處改。Phase A Sprint 3 升級 nightly cron 時可再評估遷移。
+3. **Issue 3 MEDIUM-2 — SCRIPT_INDEX**:E1 sub-agent unstaged 已寫 3 entry;PA 加 reconcile 註標 closure;PM round 2 stage + commit。
+4. **Issue 4 LOW — Guard A schema name typo**:採 `learning.governance_audit_log` 真實表名(Linux PG empirical 驗證:`governance.audit_log` 不存在 + `learning.governance_audit_log` ✅);V106/V107/V112 spec 各 8 處改。V112 §1.3 副產品:sister table 引用「governance.audit_log / governance.unblock_candidates / governance.canary_stage_metric_seed」**錯 2/3**(只 unblock_candidates 真實在 governance schema)。
+5. **Issue 5 LOW — CONCURRENTLY hypertable transaction 不兼容**:保留 spec 字面 + 加 reconcile 註腳對齊 V094 sister table 範式;.sql 實檔已採非 CONCURRENT path(per V106/V107 IMPL empirical);0 reverse spec。
+
+**碼面 / 文檔面影響**:8 spec file 27 處 patch + SCRIPT_INDEX line 61 註標;0 IMPL 寫作;3 carry-over E1 round 2 task(V106.sql 同步 + V112 §1.3 PG empirical 驗 + SCRIPT_INDEX commit)給 PM 拍板。
+
+**Linux PG empirical 反向證據**:`ssh trade-core` 跑 1 條 query 驗證 `learning.governance_audit_log` 真實存在 + `governance.audit_log` 不存在 + `governance.canary_stage_metric_seed` 不存在;V112 spec §1.3 sister table 引用錯 2/3。屬「concept name vs real table name drift」高頻盲區。
+
+**Lessons Learned 5 條**:
+1. Governance authority hierarchy 必須在 spec dispatch 階段明示(ADR vs spec doc vs IMPL SSOT 標記);本 V106 spec 寫於 ADR-0042 land 前 → CRITICAL drift 必須 IMPL round 1 才 catch
+2. Schema concept name vs real table name drift 是高頻盲區(3 spec 都用「governance.audit_log」概念命名 → 3 IMPL 都被迫 self-correct);未來 spec dispatch 強制 Linux PG empirical schema name 驗
+3. CONCURRENTLY hypertable + transaction 範式不對等是 V094/V106/V107 共同盲區;PA dispatch hypertable migration 模板加「CONCURRENTLY restriction」boilerplate
+4. File path drift 是 spec 設計階段低成本盲點;dispatch 階段未驗 `srv/python/` 存在 → E1 IMPL 階段才 catch;dispatch packet 強制 `ls -d <path>` empirical 驗 path 存在
+5. Sub-agent unstaged worktree 改動屬於 round 2 collected work(SCRIPT_INDEX 3 entry 已在 worktree unstaged);dispatch packet 增加「完成回報必含 unstaged file 列表 + git diff --stat」要求
+
+**Confidence**:HIGH for 5 reconcile verdict + 27 spec patch + 3 carry-over E1 round 2 task;HIGH for Linux PG empirical 驗證真實 schema;HIGH for governance authority hierarchy 推理(ADR-0042 Decision 3 + M3 design spec §2.1 + Rust enum 三方一致對齊新命名);MEDIUM for V112 §1.3 sister table 反向驗證副作用(`governance.canary_stage_metric_seed` 不存在的成因未深查 — 可能 V## 未 land 或概念命名 mis-spell;不阻塞 V112 schema migration apply 但 spec 內 hint 須改寫)。
+
+**Report path**:`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_1a_zeta_phase_3a_spec_reconcile.md`(411 行 / 10 section)

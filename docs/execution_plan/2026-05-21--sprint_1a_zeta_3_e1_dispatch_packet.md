@@ -244,19 +244,21 @@ Step 3: amp cap mock time fire test (per AC-5.1)
 - 含 7 divergence_type ENUM CHECK + 3 severity ENUM CHECK + 5 flag_action_taken ENUM CHECK
 - 含 forbidden field RAISE pattern (6 個禁忌字段：`auto_demote / target_state / decay_recommendation / demote_proposal_id / decay_stage / stage_demoted`)
 
-**Python skeleton IMPL（per Q4a override 含 Python skeleton）**:
+**Python skeleton IMPL（per Q4a override 含 Python skeleton；2026-05-22 PA reconcile §2 path 對齊 IMPL reality）**:
 
-- `python/openclaw/m11_replay/spike_trigger.py`
+- `helper_scripts/replay/m11_spike/spike_trigger.py`
   - 不真 nightly cron；手動 1 次 trigger
   - scope 限 1 strategy × 1 symbol × 1 day（per spike spec §2.3 C3）
   - 接 `trading_ai_sandbox` sandbox DB（per Phase 0 sample fills fixture 100-500 rows）
   - 寫 V107 row（`engine_mode = 'replay'`）
 
-- `python/openclaw/m11_replay/divergence_d1_fill_chain.py`
+- `helper_scripts/replay/m11_spike/divergence_d1_fill_chain.py`
   - 1 種 divergence type：D1 fill_chain count delta
   - query `trading.fills` 內 strategy='bb_breakout' symbol='BTCUSDT' 1 day window
   - 計算 fill_chain count；對比 baseline；delta > 5 = D1 divergence
   - 寫 V107 row：`flag_action_taken = 'm7_decay_candidate'` + `divergence_type = 'fill_chain_count_delta'`
+
+> **PA reconcile 說明**:`srv/python/` 頂層目錄不存在;`helper_scripts/` 是 CLAUDE.md §七 + `SCRIPT_INDEX.md` 約定的 Python helper script convention;spike trigger 為 manual-once 一次性執行不是 nightly cron production module → 屬 helper_scripts/ 範圍。Phase A Sprint 3 W15-18 升級為 nightly cron 時可再評估是否遷至 `helper_scripts/cron/` 或 `srv/openclaw/`(per V107 spec §7.3 cron schedule 設計)。
 
 - `tests/spike_m11_m7_dedup_contract.py`
   - M7 dedup contract empirical verify：M11 寫 V107 後 driver query 驗 `learning.decay_signals` 0 row 寫入
@@ -319,7 +321,7 @@ Step 5: divergence empirical fire test (inject 1 synthetic divergence → V107 r
 
 ### 3.8 Disconnect Recovery Protocol
 
-同 §1.9（Track A）；額外驗 Python skeleton commit 狀態：`git log --oneline python/openclaw/m11_replay/`
+同 §1.9（Track A）；額外驗 Python skeleton commit 狀態：`git log --oneline helper_scripts/replay/m11_spike/`
 
 ---
 
