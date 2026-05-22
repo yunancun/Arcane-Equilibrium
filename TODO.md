@@ -11,11 +11,12 @@
 
 - **Current Sprint Phase**：Sprint 1A-α + Wave 2 + Wave 2.5 + Sprint 1A-β + **Sprint 1A-γ DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED** (PM-signed 2026-05-21；15/15 deliverable 全 land；M8 + V109 sequential final)；Sprint 1A-δ READY-TO-DISPATCH
   - 註：DESIGN-DONE = spec/ADR/runbook 文件 land；IMPL-PENDING = 無對應 IMPL 代碼；RUNTIME-NOT-APPLIED = sql/migrations/ 本地 max=V098 / Linux PG `_sqlx_migrations` max=96 / 10 target table (health_observations / degradation_state / replay_divergence_log / reward_weight_history / decision_lease_lal_tiers / lal_eligibility_log / decay_signals / strategy_lifecycle / earn_movement_log / hypotheses) pg_class 0 hits（per 2026-05-21 acceptance audit）
-- **Current Wave**：Sprint 1A-ε ✅ + **三化審計 Round 1+2 ✅ DONE 2026-05-21** (R4 cross-ref + CC 16 root × 13 module + PA IMPL feasibility + MIT V103 EXTEND；CC APPROVE-WITH-CONDITIONS A- / PA APPROVE-WITH-PATCHES 10 critical / R4 HOLD → close 多輪)；Round 1 commit `49584192` 含 11 patches；Round 2 含 AMD §8 11 ADR cross-ref table + README index 5 sub-section + V103 EXTEND M4 spec land + ADR-0045 stub；Sprint 1A-ζ READY-TO-DISPATCH (W8.5-10 IMPL Prototype Spike；operator Q1-Q5 signed；Q4a override；10 PA patches 已 close 主要 5 條)；剩 operator-bound: PM Q1 V### naming verdict (V103 vs V101) + DEFAULT 'OPERATOR' vs 'M4_AUTO' Path A/B 拍板
+- **Current Wave**：**Sprint 1A-ζ ✅ DONE-VERDICT-PASS WITH 3 CARRY-OVER (2026-05-22 PM-signed)** — IMPL Prototype Spike Track A/B/C 全 PASS；E4 regression 3769 cargo + 6037 pytest + 7/7 AC-7 cross-lang fixture；QA AC-1..7 driver；TW Overall Acceptance Report 330 LOC / 14,500 字；PM Phase 3e sign-off `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_1a_zeta_pm_phase_3e_signoff.md`；Sprint 1B readiness gate **OPEN** per spec §5.1；**Next: Sprint 1A-ε P1 carry-over 派發**（E3 sandbox_admin role + 5 PA spec literal patch + TW docs index sweep）+ **Sprint 1B 6 條 early IMPL 待 operator instructions**
+- **Layered Autonomy with Hard-Coded Fail-Safe 設計 ✅ DONE 2026-05-22**（AMD-2026-05-21-01 v2 + PA spec + V099 schema + CC re-audit **APPROVE A 級**；7/7 HC + 6/6 反模式 + 2 BLOCKER 候選全解除 + Hard Boundaries 5/5 PASS）— ref **§1.7**；Wave 5 cascade IMPL PENDING operator final sign-off
 - **Active P0**：`P0-EDGE-1`（5 strategy alpha-deficient）+ `P0-LG-3`（Wave 2.4 IMPL DISPATCH PENDING SPEC-READY 10d）+ `P0-OPS-1..4`（HTTPS / cred / legal / runbook）— Sprint 4 first Live W18-21 前必 closure
-- **Next 24h operator action**：D+1 (2026-05-22) AM ① BB OpenClaw key 發行日 5 min query ② Phase 2a 14d verdict 視窗（clock @ 2026-05-22~23 UTC）30-60 min 三選一決議
+- **Next 24h operator action**：D+1 (2026-05-22) ① BB OpenClaw key 發行日 5 min query ② Phase 2a 三選一 **✅ 拍 (a) Calibration r2** 2026-05-22（cascade dispatch PENDING） ③ Layered Autonomy v2 三件套 final batch sign-off (~30 min, ref §1.7)
 - **Runtime**：engine PID 2934602 + API PID 2934665 + watchdog PID 2936560；最後 graceful restart 2026-05-21 13:31 UTC
-- **Pending operator decision**：(1) Phase 2a verdict (D+1-D+2) (2) `P0-FUNDING-ARB-DECISION-FORCE` 升等 (3) Watchdog daemon R2 deploy 時機 (4) v5.8 16 CRITICAL 派發後 D+5 Sprint 1A-β readiness sign-off
+- **Pending operator decision**：(1) ~~Phase 2a verdict~~ **✅ closed 2026-05-22** → (a) Calibration r2 (cascade dispatch pending) (2) `P0-FUNDING-ARB-DECISION-FORCE` 升等 (3) Watchdog daemon R2 deploy 時機 (4) v5.8 16 CRITICAL 派發後 D+5 Sprint 1A-β readiness sign-off (5) **Layered Autonomy v2 三件套 final batch sign-off + Wave 5 cascade IMPL dispatch** (ref §1.7)
 
 ---
 
@@ -30,7 +31,7 @@ Sprint 1A-β   DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (2026-05-21 PM-s
 Sprint 1A-γ   DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED (2026-05-21 PM-signed)          M2/M4/M8/M9/M10 DESIGN spec + V105/V108/V109/V111 schema spec + V103 EXTEND outline + 2 runbook + 3 ADR (M3/M6/M7) (15 artifact / ~12,400+ 行；無 IMPL；V###未 apply)
 Sprint 1A-δ   DESIGN-DONE / **IMPL-DONE (Rust trait stubs)** / RUNTIME-NOT-APPLIED (2026-05-21 PM-signed + IMPL closure)  M5/M12/M13 spec + V114/V115/V116 reserve (10 file design) + **6 Rust file land** (model_client 277 / order_router 393 / asset_venue 151 + 3 test 100+243+152) + 2 lib.rs edit + **+25 cargo test PASS** (M5 7 / M12 11 / M13 7) + 3 dup file mv→archive 完成 + 0 new warning / 0 mock / 0 flaky / Mac aarch64-apple-darwin cross-compile PASS
 Sprint 1A-ε   DESIGN-DONE / IMPL-PENDING (2026-05-21 PM-signed)                                  R4 cross-ADR audit (5 CRITICAL + 4 HIGH patches applied) + TW CHANGELOG/CONTEXT + MIT V099-V116 ordering (1223) + E5 Mac CI (598) + A3 Wizard+Lv3-4 (520+) + 5 dup dedup applied (3 archived) + README index 22 entries
-Sprint 1A-ζ   **ACTIVE — Phase 0+1 ✅ DONE → Phase 2 E1 × 3 並行 IMPL READY** (2026-05-21；E3 sandbox 6/6 GO PASS commit `ad002617`：trading_ai_sandbox + TimescaleDB 2.26.1 + V096 baseline + 40 hypertable convert + 200 fake fills seed；2 MEDIUM security defer Phase 2 sandbox_admin role) — IMPL Prototype Spike (M1 LAL + M3 health + M11 replay critical-path；66-102 hr / 1-2 wall-clock week)
+Sprint 1A-ζ   **✅ DONE-VERDICT-PASS WITH 3 CARRY-OVER (2026-05-22 PM-signed)** — IMPL Prototype Spike Track A/B/C 全 PASS；8 AC: 6 PASS + 1 N/A per Q2(d) + 1 DEFERRED→AC-8 PM signed；Phase 0→1→2→3a→3b→3c→3d→3e 七 Phase 鏈全綠；Sprint 1B readiness gate OPEN per spec §5.1；commit chain: ad002617 → 119893d4 → 2f6d1761 → f0633002 → 01e20db9 → 8a15de4d → 26c813fb → db84b748 → 本 sign-off
 ```
 
 > **狀態語言**（per 2026-05-21 acceptance audit）：
@@ -48,7 +49,7 @@ Sprint 1A-ζ   **ACTIVE — Phase 0+1 ✅ DONE → Phase 2 E1 × 3 並行 IMPL R
 | 1A-γ | 2026-05-21 done | M2/M4/M8/M9/M10 DESIGN + V105/V108/V109/V111 schema spec + V103 EXTEND outline + 2 runbook + 3 ADR (M3/M6/M7) | 240-360 並行 (6 + 7 recovery + 2 sequential) | DESIGN-DONE / IMPL-PENDING / RUNTIME-NOT-APPLIED |
 | 1A-δ | 2026-05-21 done | M5/M12/M13 spec (10 file) + **Rust trait stub IMPL** (model_client 277 / order_router 393 / asset_venue 151 + 3 test 495 行) + 2 lib.rs edit + +25 cargo test | 75-110 + IMPL 18-28 並行 (3 PA sub-agent + 3 E1 sub-agent + 1 E1 refactor + E2/E4) | DESIGN-DONE / **IMPL-DONE (trait stubs)** / RUNTIME-NOT-APPLIED |
 | 1A-ε | 2026-05-21 done | R4 cross-ADR audit (5C+4H patches) + TW CHANGELOG/CONTEXT + MIT V099-V116 + E5 Mac CI + A3 Wizard+Lv3-4 + dup dedup + README index | 86-126 並行 (5 sub-agent + PM patch) | DESIGN-DONE / IMPL-PENDING |
-| **1A-ζ** | **2026-05-21 進入 ACTIVE** | **IMPL Prototype Spike — Phase 1 PA refine 進行中 + 5 P-5/6/7/8/9 patches finalize；Phase 2 E1 IMPL × 3 並行 Track A/B/C 待 Phase 1 sign-off** | **66-102 (含 buffer; Round 1 Phase 0 sandbox prep 上修)** | **ACTIVE Phase 1 PA refine** |
+| **1A-ζ** | **2026-05-21 — 2026-05-22 done** | **IMPL Prototype Spike DONE — Track A (M1 LAL+V112) PASS / Track B (M3 health+V106) PASS / Track C (M11 replay+V107) PASS WITH CAVEAT；E4 cargo 3769✅+pytest 6037✅+AC-7 7/7✅；QA AC-1..7 driver PASS WITH 3 CARRY-OVER；TW Acceptance Report 330 LOC；PM Phase 3e sign-off DONE** | **~30-40 actual (wall-clock 2 day high-density)** | **DONE-VERDICT-PASS WITH 3 CARRY-OVER (Sprint 1B gate OPEN)** |
 | 1B | W9-12 | v5.7 baseline + C10 Stage 1 Demo + Earn first stake + M3 partial | 165-220 | ⏳ |
 | 2 | W12-15 | Alpha Tournament + M4 stage 1 + M10 Tier A + M8 read-only | 280-400 | ⏳ |
 | 3 | W15-18 | Top-1 Unlock SHORT build + Stage 0 shadow + M11 nightly + M3 detectors | 280-380 | ⏳ |
@@ -86,7 +87,7 @@ Sprint 1A-ζ   **ACTIVE — Phase 0+1 ✅ DONE → Phase 2 E1 × 3 並行 IMPL R
 | **D+2-D+3** | review AMD-2026-05-21-01 草案（CC + PM draft 後；protected vs opt-in scope） | 15-30 min | CC + PM ping | 阻 CR-3 + 7 auto-apply module |
 | **D+3** | 提供 P0-EDGE-1 / P0-LG-3 / P0-OPS-1..4 closure ETA（填 §10 P0 precondition table） | 30 min | PM ping | 阻 Sprint 4 first Live + CR-10 |
 | **D+4** | batch review 4 ADR draft（ADR-0034 LAL / 0036 M8 anomaly / 0037 M9 A/B / 0038 M11 replay） | 30-60 min | TW + PM ping | 阻 CR-2/5/7 + V### spec |
-| **D+5** | **batch sign-off 12 ADR + 1 AMD**（ADR-0030~0033 + 0034 + 0035~0040 + 0041 + AMD-2026-05-21-01） | 60-90 min | PM ping | 阻 Sprint 1A-β 派發 |
+| **D+5** | **batch sign-off 12 ADR + 1 AMD**（2026-05-22 partial: ADR-0033 3-drift patch land + ADR-0034 對齊確認 + ADR-0040 venue gate + **AMD-2026-05-21-01 → v2 Layered Autonomy with Hard-Coded Fail-Safe** + V099 schema spec + CC re-audit APPROVE A 級 → ref **§1.7**；剩 9 ADR (0030/0031/0032/0035/0036/0037/0038/0039/0041) + v2 final batch sign） | ~30 min (was 60-90 min) | PM ping | 阻 Sprint 1A-β 派發 |
 | **D+5** | Console tab 歸屬決策（4 tab × 2-4 sub-section；不擴張 16 tab） | 15-30 min | A3 + PM ping | 阻 CR-11 + Sprint 4 M1 IMPL |
 | **D+5** | Bybit Tokenomist trial expiry 確認（M4 dependency）+ 續訂 / fallback vendor | 5-10 min | BB ping | 阻 Sprint 6-7 M4 active |
 | **D+5-D+6** | Sprint 1A-β 派發 readiness 12 check + final sign-off | 30 min | PM ping | – |
@@ -111,6 +112,46 @@ Sprint 1A-ζ   **ACTIVE — Phase 0+1 ✅ DONE → Phase 2 E1 × 3 並行 IMPL R
 
 **完整 16 CR 表（Owner / 工時 / ETA）+ 統計**：`docs/archive/2026-05-21--sprint_1a_alpha_repair_closure.md` §B
 
+### §1.7 Layered Autonomy with Hard-Coded Fail-Safe 設計 closure pointer (2026-05-22)
+
+**狀態**：✅ **DESIGN-DONE + CC APPROVE A 級** 2026-05-22；Wave 5 cascade IMPL **PENDING operator final sign-off**
+
+**4 個 SSOT 文件指針**（cascade IMPL 必 reference）：
+1. **AMD-2026-05-21-01 v2**（684 行 / 取代 v1 protected 6 / opt-in 8 二分版）— `docs/governance_dev/amendments/2026-05-22--AMD-2026-05-21-01-autonomy-fully-with-failsafe.md`
+2. **PA spec v2**（1031 行 / Autonomy Level Toggle design + 5 fail-safe hard req + readiness + AC + anti-pattern）— `docs/execution_plan/2026-05-22--autonomy_level_toggle_design_spec.md`
+3. **V099 schema spec**（568 行 / `system.autonomy_level_config` + `_switch_audit` + PG ENUM `autonomy_level_enum`）— `docs/execution_plan/specs/2026-05-22--v099-autonomy-level-config.md`
+4. **CC re-audit report**（A 級 / 7/7 HC PASS + 6/6 反模式 PASS + 2 BLOCKER 候選解除）— `docs/CCAgentWorkSpace/CC/workspace/reports/2026-05-22--layered_autonomy_v2_reaudit.md`
+
+**設計核心拍板**（per operator 2026-05-22 + PA + CC verdict）：
+- **命名**：Layered Autonomy with Hard-Coded Fail-Safe（解 CC 反模式 F「fully autonomy 命名誤讀」）
+- **Autonomy Level Toggle**：Level 1 Conservative (預設 / protected 6 條 manual + opt-in 8 條 auto) ↔ Level 2 Standard (venue change manual + 13 條 auto)；切換需 5-gate + 2FA + 24h cooldown
+- **CLAUDE.md baseline**：字面不動，amendment 並存（不 cascade re-read 14 agent profile）
+- **三路通知 fail escalation**：freeze + 1h wait → 自動進入 SM-04 `Defensive`（保住盈利 + 停止損失 + close-only + active 鎖利 hook + 縮 SL 至 entry）；reuse `Defensive` 不新增 enum（per PA 拍）
+- **Emergency override 月度**：rolling 30d + machine local time + 雙時間戳（local + UTC）；30% 達標 → active freeze 24h + monthly review 混合
+- **Cache invalidation**：PG LISTEN/NOTIFY 主路徑 + polling 5s fallback（per PA 拍）
+- **Level 2 啟用 gate**：GUI toggle disabled until 21d demo 穩定期 + 5 textbook 策略 N≥30 + Wilson CI 95% lower bound 正向（per FA U-FA-1；當前 4/5 達標，funding_arb dormant；Wilson CI 正向待 P0-EDGE-1 Phase B/C/D + A 群 alpha source）
+- **Fail-safe 復原 cooling**：7d（per operator 拍；非 ADR-0044 demote pattern 30d 對齊，fail-safe escalation 性質不同）
+- **新增 Rust variant**：`RiskEvent::NotificationFailsafeTimeout`（per AMD §9.8 cascade；需 PA + E1 + E4 三方 review 避免 35+ pair transition rules unhandled match arm panic）
+
+**Wave 5 cascade IMPL roadmap**（PENDING operator final sign-off 後派發）：
+1. **V099 schema land** — E1 + MIT Linux PG empirical dry-run 13 條（~ 8-12 hr）
+2. **GUI Autonomy Posture sub-section** — E1a (tab-governance.html / Vanilla JS / 'CONFIRM SWITCH' typed-confirm / 14 path × 2 level panel / 5-gate flow / BroadcastChannel cross-tab) ~ 21-28 hr（per A3 估時，含 i18n + a11y + 防誤觸 8 anti-pattern）
+3. **Rust SM-04 patch** — `RiskEvent::NotificationFailsafeTimeout` 新 variant + active 鎖利 hook 擴充 + 35+ pair transition rules verify（~ 52-86 hr per AMD §9.8）
+4. **5 module ADR sync** — ADR-0034 (LAL 對齊矩陣加 Autonomy Level 維度) + ADR-0040 (§Decision 5 venue manual 對齊 + 3 drift patch 已 land 2026-05-22) + ADR-0042/0044/0045 wording 對齊
+5. **R4 cross-ref audit** — Wave 5 完成後
+
+**Wave 1-4 沿途完成的副產品**：
+- ADR-0040 3 drift patch land 2026-05-22（liquidation hunting / BinanceSpotMarketData / sign-off chain note）— 257→259 行
+- m13 asset_class spec wording sync land 2026-05-22（line 32 + 358）
+- Phase 2a 三選一 → ✅ 拍 (a) Calibration r2 — QC report `docs/CCAgentWorkSpace/QC/workspace/reports/2026-05-21--phase2a_verdict_3option_data.md`
+
+**Wave 流程紀錄**（completed sub-agent）：
+- Wave 1 TW drift patch ✅ / QC Phase 2a 摘要 ✅
+- Wave 2 TW v2 patch ✅ / CC preview 7 HC + 6 反模式 ✅ / PM v2 draft 580 行 ✅
+- Wave 2 round 2 A3 + MIT + FA + E2 並行 ✅（E2 BLOCK 5 大類補丁送回 PA）
+- Wave 3a PA 補丁 648→1031 (+383 / +59%) ✅（SM-04 reuse Defensive + LISTEN/NOTIFY 拍）
+- Wave 3b TW sync v2 + V099 spec 兩 file ✅（10 條 wording sync TODO 全綠）
+- Wave 4 CC re-audit ✅ **APPROVE A 級**
 
 ---
 
