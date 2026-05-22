@@ -11544,3 +11544,68 @@ PA spec land 後 5 件 plumbing：H0Gate.with_metrics + finalize_blocked/allowed
 
 ### 報告
 `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1a_zeta_track_b_m3_health_v106_impl_round2.md`
+
+---
+
+## 2026-05-22 — Sprint 1B Early IMPL #4 AC-7 cross-language Rust binding 最小版
+
+### 概覽
+- AC-7 spec §AC-7 字面要求 `engine_cpu_pct` 5 sample window mean / sigma 在 Rust ↔ Python 1e-4 容差對齊
+- Phase 3b PoC (Python naive + Welford + numpy 三互驗) 已 land,本 task 補 Rust binding (Option A subprocess + JSON);AC-7 **PARTIAL PASS → FULL PASS**
+- 實測 cross-lang diff **0.0 / 0.0** (mean / sigma); 同 input + 同 two-pass 算法 + IEEE 754 deterministic → bit-perfect
+
+### 修改清單
+- `srv/rust/openclaw_engine/src/health/mod.rs`: 新 `compute_window_stats()` helper (+37 LOC, `#[cfg(any(test, feature = "spike"))]` gate) + 3 unit test (+43 LOC)
+- `srv/rust/openclaw_engine/tests/m3_cross_lang_window_fixture.rs`: 新 integration test (70 LOC, `#![cfg(feature = "spike")]` gate, 輸出 `RUST_FIXTURE_JSON` marker)
+- `srv/tests/test_spike_cross_lang_rust_binding.py`: 新 Python cross-lang test (165 LOC, subprocess + regex parse JSON, 5 test)
+- `srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1b_ac7_rust_binding.md`: 本次 report
+
+### Design choice — Option A vs B
+- 選 **Option A (subprocess + JSON)**:0 新 dep / 0 build chain 改動 / 跨平台自然支援;spike scope 「最小 binding」契合
+- 棄 **Option B (PyO3 binding)**:需 maturin + pyo3 crate,屬 H-18 全套範圍,Sprint 2+ carry-over per spec §5.3
+
+### 驗證結果
+- `cargo test --release --lib health::` **15 / 15 PASS** (12 既有 + 3 新)
+- `cargo test --release --features spike --test m3_amp_cap_24h_fire` **3 / 3 PASS** (regression existing)
+- `cargo test --release --features spike --test m3_cross_lang_window_fixture` **1 / 1 PASS**
+- `python3 -m pytest tests/test_spike_cross_lang_rust_binding.py` **5 / 5 PASS**
+- `cargo check --release` (default build 無 spike) clean 0 error / 1 pre-existing dead_code warn
+
+### 教訓 / Lessons
+- **教訓 1: cross-lang 對驗用 subprocess + JSON marker 是 spike 階段最低 coupling 路徑**:無需新 dep,無需 build chain 改動,marker line regex parse 簡單。註意 Rust f64 Display 對整數值省 `.0` (例 `20` 而非 `20.0`),Python json.loads parse 為 `int`,Python 端必 cast `float()` 才能避免 type mismatch。
+- **教訓 2: same algorithm + same input + IEEE 754 → bit-perfect cross-lang**:雖然浮點 sum 不滿足結合律,但同迭代順序 + 同算法 → Rust 與 Python 跑 two-pass mean/variance 得 **0.0 diff**;遠 <1e-4 容差。未來 Sprint 5 改 Welford incremental 預期 diff ~1e-15,仍遠 <1e-4。
+- **教訓 3: `#[cfg(any(test, feature = "spike"))]` 是 mod.rs 內 standalone helper 的標準 gate**:對齊既有 `amp_cap_entry_count` 模式;`cargo check --release` 無 spike feature 完全不編譯本 helper, production binary 0 污染。對應 integration test 用 `#![cfg(feature = "spike")]` (檔案級 gate)。
+- **教訓 4: spike PoC 階段不選 PyO3 binding 是務實判斷**:1 fixture × 1 metric subprocess overhead ~5s 可接受;H-18 全套 (多 fixture / multi-metric / 高頻調用) 後 PyO3 才有 ROI。pre-mature optimization 反致 build chain 複雜化 + maturin 跨平台維護成本。
+- **教訓 5: 跨平台 path 推算 `Path(__file__).resolve().parents[1]`**:Python test 從 srv root 推算 cargo manifest path,不硬編 `/Users/ncyu/...` 或 `/home/ncyu/...`;對齊 E1 hard constraint 跨平台合規 + 未來 Apple Silicon 部署目標。
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1b_ac7_rust_binding.md`
+
+## 2026-05-22 — Sprint 1B early IMPL #5 cascade reject ≥ 2 unit test
+
+### 任務
+per Sprint 1A-ζ Phase 3a E2 round 1 Track B LOW-2 + round 2 1 new LOW + PM Phase 3e §4.3 item 5:Sprint 5 cascade IMPL 補 ≥ 2 reject direct unit test 覆蓋
+
+### 教訓
+- **observe_at 短路會吃掉 transition fn 路徑覆蓋**:spike scope 內 `(HealthWarn, _) => Ok(false)` 短路 → guard 1 + guard 3 在 observe_at 整合路徑無法觸發。要 cover spike scope 階段的 reject branch 必須直接單測 transition fn (cfg test mod 內可直接呼 private fn)。Sprint 5 cascade IMPL 補 WARN→DEGRADED dwell 後 observe_at 整合可走,但 unit test 仍守 transition fn 端嚴格邊界。
+- **task example signature 不可盡信**:PM dispatch 內的 test example signature `(metric_key, anomaly_id, domain, target, now)` 與實際 fn signature `(target, anomaly_id, now)` 不符 (cap key = anomaly_id 不是 metric_key, domain 是 SM-level 不是 per-call 入參)。先讀真實 fn signature + parent report §4.2 設計再寫 test,不要照搬 dispatch example。
+- **reject branch test 必校驗 state 三件套**:reject 後 (1) `amplification_loop_24h_count` 不增 (2) `amp_cap_entry_count` 不增 (3) `current_state` 不前進。三者缺一不可,只測 `Ok(false)` 不夠。
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1b_cascade_reject_unit_tests.md`
+
+## 2026-05-22 — Sprint 1B early IMPL #2+#6 V107 sandbox land + dedup full 5-condition
+
+### 任務
+per PM Phase 3e signoff §4.3 row #2 + #6 合併:V107 sandbox re-apply (保留不 cleanup) + AC-6 dedup contract full 5-condition empirical (含 c5 Guard A reverse fire);移除 Sprint 1A-ζ Phase 3c AC-6 PASS WITH PHYSICAL ABSENCE CAVEAT。
+
+### 教訓
+- **spec literal drift 高頻盲區: V107 spec line 23+47+134 期望 governance.audit_log 但 V035+V098 實際建 learning.governance_audit_log**:E1 Track C round 1 已採 stub 補丁;Sprint 1B early IMPL #2 沿用同樣 stub 路徑保留不 cleanup。**規則**:V### Guard A schema reference 必 cross-check 上游 V### 真實建 schema 路徑;spec doc 寫「已 land」不等於 schema 對齊;treat ALL spike spec 內「已 land」line 為 V### file-empirical-verified mandatory(看 srv/sql/migrations/ + sandbox `\dt`)。
+- **V103 file 未 land 但 spike spec line 713 寫「已 Sprint 1A-α land」**:E3 v58 audit §2 row 2 明標 V103 為 Sprint 1A-γ HARD BLOCKER;spike spec 寫錯。Sprint 1B early IMPL #2 採 stub 補丁;learning.hypotheses minimal (hypothesis_id BIGSERIAL PK + 3 column) 滿足 V107 hypothesis_id FK nullable 即可。**規則**: spec doc 內所有「已 land」reference 必 `ls srv/sql/migrations/ | grep <V###>` 驗證;否則屬 carry-over push back PA。
+- **sandbox_admin 對 trading.* hypertable 無 OWNER → V097 apply ROLLBACK**:trading.intents/signals OWNER=trading_admin;TimescaleDB CREATE INDEX 即使 IF NOT EXISTS no-op 也撞 hypertable ownership lock check。實際 sandbox 從 production schema dump 已含 V097 兩個 index → V097 物理結果已生效但 raw psql apply path 觸 ownership 撞壁。**carry-over E3-MED-2**:需 ALTER hypertable OWNER OR GRANT pg_signal_backend + ALTER hypertable permission to sandbox_admin;OR sandbox V### subset routing (skip 已存物理 index 的 V###)。
+- **c5 Guard A reverse fire empirical 走 inline DO $$ ... 6-forbidden CHECK 而非重 apply 整 V107**:測完即 DROP COLUMN cleanup;sandbox state 不殘留 auto_demote。RAISE message empirical 對齊 V107.sql line 108-124 字面 (V107 Guard A FAIL: ... FORBIDDEN action column...);6 forbidden column 列表 + ADR-0044 Decision 1 + CR-7 引文完整。
+- **raw psql -f apply path 不寫 _sqlx_migrations 註冊表**:per QA AC-1 PARTIAL + E3 Sprint 1A-ε P1 §4.2;本 Sprint 1B #2 同樣走 raw psql + Python script,_sqlx_migrations 仍 V96 baseline 93 row max。真正 register 路徑 = engine OPENCLAW_AUTO_MIGRATE=1 + sandbox engine instance (E3 Path A) OR 新 sandbox_migrate_runner bin (E3 Path B);Sprint 1B 內不開做,carry-over Sprint 2+。
+- **dedup full empirical 比 spike PoC 質升一級**:Track C round 1 Phase 3c QA report §6.2 caveat (table absence trivial PASS) 不再適用;V107 真實 land + spike_trigger.py 真實 INSERT 1 row + c5 真實 RAISE → 三層物理 fire。V113 IMPL 後 (Sprint 8) c2 + c3 仍需重驗真實 count = 0 (替代 table absence 路徑)。
+
+### 報告
+`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_1b_v107_sandbox_land_dedup_full.md`

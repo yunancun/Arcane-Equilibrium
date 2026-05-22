@@ -441,6 +441,45 @@ impl HealthStateMachine {
     }
 }
 
+/// Sprint 1B AC-7 cross-language 1e-4 fixture 用 — 計算 sample window 的 mean +
+/// sample stddev (ddof=1)。
+///
+/// 為什麼:
+///   AC-7 spec §AC-7 要求 `engine_cpu_pct` 5 sample window mean / sigma Rust ↔
+///   Python replay 端在 1e-4 容差內對齊。Sprint 1A-ζ Phase 3b PoC
+///   (`tests/test_spike_cross_lang_fixture.py`) 已用 3 條 Python 實作互驗
+///   algorithm contract 數位 fingerprint;本 helper 是 Rust 端最小 binding,
+///   讓 Python test subprocess 跑 cargo test 並 parse JSON 輸出對齊 Python
+///   expected 值。
+///
+/// 為什麼用 two-pass 而非 Welford:
+///   Sprint 1A-ζ Phase 3b E4 Python fixture 已證 naive two-pass / Welford /
+///   numpy 三者 1e-4 內等價; spike PoC 階段選 two-pass (簡單、易讀、與 Python
+///   naive_mean_sigma 1:1 對齊)。Sprint 5+ 真實 hot-path 接 health writer 時
+///   可換 Welford incremental update。
+///
+/// 不變量:
+///   - samples.len() < 2 → return None (ddof=1 要求 N-1 > 0)
+///   - 任何 NaN/Inf 輸入 → 自然 propagate (caller 端 fail-closed)
+///   - mean / variance 走 f64 sum,catastrophic cancellation 風險限於本
+///     fixture 用例 (5 sample 數量級 10..100); production 不用此 helper。
+///
+/// 硬邊界:
+///   - 只在 `--features spike` 或 `cfg(test)` 編譯; 0 production code path 污染
+///   - 不接 IPC / DB / GovernanceHub; 純算術
+#[cfg(any(test, feature = "spike"))]
+pub fn compute_window_stats(samples: &[f64]) -> Option<(f64, f64)> {
+    let n = samples.len();
+    if n < 2 {
+        return None;
+    }
+    let n_f = n as f64;
+    let mean = samples.iter().sum::<f64>() / n_f;
+    // sample variance: sum((x - mean)^2) / (N - 1) per ddof=1。
+    let variance = samples.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / (n_f - 1.0);
+    Some((mean, variance.sqrt()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -558,5 +597,121 @@ mod tests {
         assert!(matches!(result, Ok(false)));
         assert_eq!(sm.amplification_loop_24h_count(), 0);
         assert_eq!(sm.amp_cap_entry_count(), 0);
+    }
+
+    #[test]
+    fn test_try_transition_fail_closed_reject_count_ge_2() {
+        // V106 spec §1.1 line 77 嚴格 fail-closed ≥ 2 reject 路徑直接覆蓋:
+        //   - 同 domain 24h 內 fire 數 ≥ 2 後, 新 fire request 走 fail-closed: 不
+        //     insert entry, 不 fire, 不 increment count, 返回 false。
+        //   - 為什麼直接呼 try_transition_with_cap 而非走 observe_at: spike scope
+        //     observe_at 內 (HealthWarn, _) 已短路返 Ok(false) 不再進 transition
+        //     fn (WARN → DEGRADED 5min dwell 在 Sprint 5 cascade IMPL 才接);
+        //     要 cover ≥ 2 fail-closed reject branch 在 spike scope 階段, 直接
+        //     單元測 transition fn 是唯一路徑。Sprint 5 cascade IMPL delivered
+        //     後, 此 test 仍守住 transition fn 端嚴格邊界。
+        let mut sm = HealthStateMachine::new(HealthDomain::EngineRuntime);
+        let now = Instant::now();
+
+        // 第 1 fire: HealthOk → HealthWarn, anomaly_id "spike_a"。
+        let r1 = sm.try_transition_with_cap(HealthState::HealthWarn, "spike_a", now);
+        assert!(matches!(r1, Ok(true)), "first fire OK→WARN should succeed");
+        assert_eq!(sm.amplification_loop_24h_count(), 1);
+
+        // 第 2 fire: 此時 current=WARN, target 必須 != WARN 才能再 fire 計入 count;
+        // 也需要新 anomaly_id "spike_b" 避開 guard 1 cap suppress。
+        // 嚴格語意: 直接走 transition fn (繞過 observe_at WARN 短路)。
+        let r2 = sm.try_transition_with_cap(HealthState::HealthDegraded, "spike_b", now);
+        assert!(matches!(r2, Ok(true)), "second fire WARN→DEGRADED should succeed");
+        assert_eq!(sm.amplification_loop_24h_count(), 2, "count should hit 2");
+
+        // 第 3 fire 嘗試: count == 2 → 走 fail-closed reject (guard 3); 不同
+        // anomaly_id "spike_c" + target != current 確保不被 guard 1/2 短路, 唯一
+        // 觸發路徑就是 guard 3。
+        let r3 = sm.try_transition_with_cap(HealthState::HealthCritical, "spike_c", now);
+        assert!(matches!(r3, Ok(false)), "third fire should be rejected (count >= 2)");
+
+        // 校驗 reject 不 insert / 不增 count / 不改 state。
+        assert_eq!(sm.amplification_loop_24h_count(), 2, "count must stay at 2 after reject");
+        assert_eq!(sm.amp_cap_entry_count(), 2, "no new entry should be inserted on reject");
+        assert_eq!(sm.current_state(), HealthState::HealthDegraded,
+            "state must remain at last successful target (DEGRADED), not advance to CRITICAL");
+    }
+
+    #[test]
+    fn test_try_transition_cap_suppress_same_anomaly_id_repeat() {
+        // V106 spec ADR-0042 Decision 4 「1-anomaly = 1-state-change/24h」嚴格
+        // 覆蓋: 同 anomaly_id 在 24h cap window 內第 2 次 fire request 走 guard 1
+        // suppress, 不 insert 新 entry, 不增 count, 不改 state。
+        //
+        // 為什麼 spike scope 必須直接單測 guard 1:
+        //   - observe_at 路徑下「同 id 反覆採樣」對 OK 起點走「初次採樣記時間
+        //     → 60s dwell → fire transition」, 不會在 OK 階段重複 hit guard 1;
+        //     一旦 fire 進 WARN 後, observe_at 走 (HealthWarn, _) 短路返 false
+        //     (不進 transition fn), guard 1 在 spike scope 階段無路可達。
+        //   - 直接單測 transition fn 是 spike scope 階段覆蓋 guard 1 的唯一辦
+        //     法; Sprint 5 cascade IMPL 補 WARN→DEGRADED dwell 路徑後, observe_at
+        //     可再驗 guard 1 整合路徑。
+        let mut sm = HealthStateMachine::new(HealthDomain::EngineRuntime);
+        let now = Instant::now();
+
+        // 第 1 fire: OK → WARN 用 anomaly_id "engine_cpu_spike"。
+        let r1 = sm.try_transition_with_cap(HealthState::HealthWarn, "engine_cpu_spike", now);
+        assert!(matches!(r1, Ok(true)), "first fire should succeed");
+        assert_eq!(sm.amplification_loop_24h_count(), 1);
+        assert_eq!(sm.amp_cap_entry_count(), 1);
+
+        // 第 2 fire 嘗試: 同 anomaly_id "engine_cpu_spike" + target != current,
+        // 期望 hit guard 1 cap_entries.contains_key → reject 返 false。
+        let r2 = sm.try_transition_with_cap(HealthState::HealthDegraded, "engine_cpu_spike", now);
+        assert!(matches!(r2, Ok(false)), "repeat same anomaly_id should be suppressed");
+
+        // 校驗 suppress 不增 entry / 不增 count / 不改 state。
+        assert_eq!(sm.amplification_loop_24h_count(), 1,
+            "count must stay at 1 (no new fire on same anomaly_id)");
+        assert_eq!(sm.amp_cap_entry_count(), 1,
+            "no new entry on guard 1 suppress");
+        assert_eq!(sm.current_state(), HealthState::HealthWarn,
+            "state must remain at first successful target (WARN)");
+    }
+
+    #[test]
+    fn test_compute_window_stats_spec_sample() {
+        // Sprint 1B AC-7 fixture sample (對齊 Phase 3b Python PoC line 40):
+        //   [10.0, 20.0, 30.0, 25.0, 15.0]
+        //   mean = 20.0
+        //   sample_var = ((10-20)^2 + (20-20)^2 + (30-20)^2 + (25-20)^2 + (15-20)^2) / 4
+        //              = (100 + 0 + 100 + 25 + 25) / 4 = 250/4 = 62.5
+        //   sample_sigma = sqrt(62.5) ≈ 7.905694150420948
+        let samples = [10.0_f64, 20.0, 30.0, 25.0, 15.0];
+        let (mean, sigma) = compute_window_stats(&samples).expect("len 5 must return Some");
+        assert!((mean - 20.0).abs() < 1e-10, "mean drift: {}", mean);
+        assert!(
+            (sigma - 7.905694150420948).abs() < 1e-10,
+            "sigma drift: {}",
+            sigma
+        );
+    }
+
+    #[test]
+    fn test_compute_window_stats_constant_edge_case() {
+        // 所有 sample 相同 → variance 0 → sigma 0.
+        let samples = [50.0_f64; 5];
+        let (mean, sigma) = compute_window_stats(&samples).expect("len 5 must return Some");
+        assert!((mean - 50.0).abs() < 1e-10);
+        assert!(sigma.abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_compute_window_stats_insufficient_samples() {
+        // ddof=1 要求 N >= 2,否則 None (fail-closed)。
+        assert!(compute_window_stats(&[]).is_none());
+        assert!(compute_window_stats(&[42.0_f64]).is_none());
+        // N=2 是最小可算; variance = (x1-x2)^2 / 2 / 1 path 仍 ok。
+        let (mean, sigma) =
+            compute_window_stats(&[10.0_f64, 20.0]).expect("len 2 must return Some");
+        // mean=15, sample_var=((10-15)^2+(20-15)^2)/1=50, sigma=sqrt(50)≈7.0710678
+        assert!((mean - 15.0).abs() < 1e-10);
+        assert!((sigma - 50.0_f64.sqrt()).abs() < 1e-10);
     }
 }
