@@ -194,3 +194,34 @@
 **5 hard gate 全綠 (W7-1 + W7-3 deploy 後仍維持)**
 
 報告：`docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-10--n1_d0_security_pre_audit.md`
+
+---
+
+## 2026-05-22 Sprint 1A-ε P1 sandbox_admin Role Creation
+
+**Verdict**: PASS WITH 1 MEDIUM FINDING（不阻 Sprint 1B 派發）
+
+### 已創建
+- PG role: sandbox_admin（LOGIN + SCRAM-SHA-256 + CONNECTION LIMIT 10）
+- attacker fence flag 6/6: NOSUPERUSER / NOCREATEDB / NOCREATEROLE / NOREPLICATION / NOBYPASSRLS + LOGIN
+- 14 schema 全 USAGE+CREATE + ALL PRIVILEGES on TABLES/SEQUENCES/FUNCTIONS + DEFAULT PRIVILEGES
+- _sqlx_migrations 表 ALL PRIVILEGES（migration registry write 能力）
+- search_path: governance, learning, trading, public
+- 密碼存 srv/settings/secret_files/postgres/sandbox_admin/password (0600, gitignored, 33-char base64 / 144-bit entropy)
+
+### 攻擊面 finding
+- **[E3-MED-1]** sandbox_admin 可 connect trading_ai production DB（PG PUBLIC 預設 CONNECT 副作用）；不能讀 user data / 不能 DDL；可讀 pg_catalog + information_schema 元資料
+- 修法 carry-over Sprint 1A-ε P2 或 Sprint 1B infra wave：pg_hba.conf 加 reject row OR REVOKE CONNECT FROM PUBLIC ON trading_ai
+
+### 治理 push back（PA + QA）
+- PA Phase 3e signoff §4.2 + QA Phase 3c §1.4 寫的 `cargo run --release --bin sqlx_migrate` 路徑 **不存在**
+- Cargo workspace 5 binary 全列：openclaw-engine / repair_migration_checksum / feature_baseline_writer / replay_runner / (hot_path_baseline + intent_processor_exposure bench)
+- Migration 真正 entry：engine startup main.rs:637 呼叫 `MigrationRunner::run_if_enabled`，靠 `OPENCLAW_AUTO_MIGRATE=1` env 觸發
+- Sprint 1B 兩條路徑：Path A 啟動獨立 sandbox engine instance + AUTO_MIGRATE=1 / Path B 寫獨立 sandbox_migrate_runner bin
+
+### Lesson sustained
+- **PUBLIC default CONNECT is a real DB-level attack surface**：新 role 不只看 `GRANT CONNECT` 個別 row；要查 `pg_database.datacl` PUBLIC ACL 列；本案 trading_ai datacl 含 `=Tc/trading_admin` 即 PUBLIC 可 connect
+- **PG 16 SCRAM-SHA-256 password setting**：SET password_encryption='scram-sha-256' 必須在 CREATE ROLE PASSWORD 同 session 之前，否則 PG 用 default 算法 hash 入庫
+- **secret_files/ 是 OpenClaw 既有 gitignored secret pattern**：與 secret_files/bybit/ 風格對齊（subdir/<name>/<key_file>）；不要新發明 secrets/.env
+
+報告：`docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-22--sprint_1a_epsilon_sandbox_admin_role.md`
