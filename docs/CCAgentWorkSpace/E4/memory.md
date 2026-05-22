@@ -8,6 +8,88 @@
 
 ## 工作記憶
 
+### 2026-05-22 Sprint 2 Phase 3b regression (Wave 1+2 combined 6 Track) — PASS
+
+**對象**：Sprint 2 M3 metric emitter Wave 1+2 6 Track E1 IMPL round 2 (HEAD `ffb7ed48`) — Track A engine_runtime scaffold + Track B pipeline_throughput + Track C database_pool + Track D api_latency + Track E strategy_quality + Track F risk_envelope + cross-Wave OBSERVE-4 fix (M3Error::ReplaySubprocessForbidden + dual scheduler guard)。
+
+**結果**：
+| Suite | Run 1 | Run 2 | non-flaky |
+|---|---|---|---|
+| cargo test --workspace --release (skip stress_tick_latency_benchmark) | 3894/0/4 | 3894/0/4 | ✅ |
+| sprint2_track_a..f + m3_emitter_replay_forbidden isolated | 51/0 | 51/0 | ✅ |
+| spike feature suite | 38 test result line all ok / 0 fail | (covered by workspace) | ✅ |
+| health:: subset | 87/0 | (covered) | ✅ |
+| governance::lal:: subset | 15/0 | (covered) | ✅ |
+| m3_amp_cap_24h_fire spike | 3/3 PASS (含 stub_domains_fail_loud) | (covered) | ✅ |
+| stress_tick_latency_benchmark isolated | 43-50μs | 43-50μs (3 runs) | ✅ PASS (target 100μs) |
+| pytest (program_code/ + tests/) | 6042 pass / 28 fail / 45 skip | 6042 pass / 28 fail / 45 skip | ✅ identical |
+| test_spike_cross_lang_fixture.py | 7/7 PASS | - | ✅ |
+| test_spike_cross_lang_rust_binding.py | 5/5 PASS | - | ✅ (Sprint 1B AC-7 Rust binding land confirmed) |
+
+**Linux ssh trade-core sandbox verify**：
+- `sandbox_admin` role 存在於 pg_roles ✅
+- `learning.health_observations` V106 schema 完整 land：6 domain CHECK (engine_runtime / pipeline_throughput / database_pool / api_latency / strategy_quality / risk_envelope) 對齊 Sprint 2 6 Track；engine_mode 4-val CHECK 不含 'replay' (OBSERVE-4 PG 層 fail-loud)
+- Sprint 2 不新增 V### per spec §1.4 ✅
+- AC-1b real PG empirical 走 Phase 3c QA per Q2(d) operator decision — E4 本 round N/A
+
+**Cross-platform aarch64-apple-darwin**：cargo check --release clean (0 error / 1 pre-existing dead_code warning `spawn_position_reconciler`)
+
+**AC-5 nm symbol scan**：production binary `target/release/openclaw-engine` 0 hit on (mock_instant / tokio::time::pause / spike) — invariant 維持
+
+**Pre-existing 28 pytest fail attribution**（與 Sprint 2 0 touch）：
+- 24 GUI static template test（tab-live / w_audit_7c / replay_subtab / openclaw_agent_control / performance_metrics / prelive_edge_gate / replay_routes / session_stop）
+- 7 structure test（confirm_modal_a11y / docs_readme_index / event_consumer_split / prompt_modal / strategy_action_visual_isolation / visual_isolation）
+- 1 v072_feature_baseline_writer
+
+baseline 比較：Sprint 1A-ζ Phase 3b 6037/28 → 當前 6042/28 → **+5 pass / 0 new fail** (Sprint 1B Rust binding 5 test land + 其他 sibling 增 test 抵消)
+
+**OBSERVE-4 audit finding（cross-Wave）**：
+- `tests/m3_emitter_replay_forbidden.rs:31` `use async_trait::async_trait;` 是 unused import warning（E2 Track E round 2 condition #2）→ **LOW carry-over** 不阻 PASS
+- 3/3 m3_emitter_replay_forbidden test PASS：MetricEmitterScheduler + StrategyQualityScheduler + paper/demo/live_demo/live 4 mode startup OK guard 只攔 'replay'
+- M3Error::ReplaySubprocessForbidden variant 新加；scaffold-level + per-tick 雙層 guard 全 cover
+
+**stress_tick_latency_benchmark 假陽性 RCA**（重要教訓）：
+- `cargo test --workspace --release` 並行模式下 stress_tick_latency_benchmark **5/5 FAIL** @ 163-228μs > 100μs target
+- 切到 baseline e2d213b5 worktree 同一 commit reproduce → 46.5μs **PASS**
+- 切回 HEAD ffb7ed48 + **isolated `cargo test --test stress_integration stress_tick_latency_benchmark`** 3 run → 43-50μs **PASS**
+- 結論：**Mac 並行 cargo workspace 跑 release benchmark 時 CPU contention 拉高 latency 至 ~4x；不是 Sprint 2 IMPL regression**
+- 解：E4 regression workspace 命令必 `--skip stress_tick_latency_benchmark`；isolated run 才是 SLA bench 可信信號
+
+**Sprint 2 IMPL 完整 fingerprint**：
+- 6 commit chain `788f8e99 → 2a7e2ae0 → 6152b01d → 6f6bbea8 → ffb7ed48` 全 PASS（baseline + Wave 1 + Wave 2 + round 2 全綠）
+- 51 sprint2 integration test (A 9 + B 5 + C 8 + D 7 + E 11 + F 8 + replay_forbidden 3)
+- 3 spike integration test (m3_amp_cap_24h_fire + amp_cap_different_anomaly_id_not_suppressed + stub_domains_fail_loud)
+- lib 3152 PASS（含 87 health:: + 15 governance::lal::）
+- Track D 8 metric (rest_p50/p95/p99 + ws_rtt_p50/p99 + ret_4xx/5xx + ws_dropout) 完整 IMPL 對齊 PA spec amend
+- Track E pair-level OR-aggregate + scheduler per-pair 25 per-metric SM 100
+- Track F position_count_active 4 band ladder + 5 min interval
+
+**Verdict**：**PASS** — Sprint 2 Wave 1+2 combined 6 Track IMPL 全 closure；ready for Phase 3c QA empirical driver。
+
+**Phase 3c QA carry-over（4 條）**：
+| # | 項目 | Owner |
+|---|---|---|
+| QA-1 | AC-1b real PG empirical（30 min window row count ≥ 5；前置 = main.rs scheduler 接線 + Linux runtime --rebuild） | QA + E3 |
+| QA-2 | m3_emitter_replay_forbidden.rs line 31 unused async_trait import warning cosmetic clean | E1 LOW |
+| QA-3 | PA-DRIFT-4 bybit_rest_client + bybit_private_ws instrumentation 補位（Wave 2 main.rs 接 ApiLatencySourceProbe 前必 closed） | E1 |
+| QA-4 | E4 workspace 命令固定加 `--skip stress_tick_latency_benchmark`；新增 SLA bench 文件說明 isolated-only constraint | PM SOP |
+
+**教訓**：
+
+1. **stress benchmark workspace vs isolated 假陽性**：Mac 並行 cargo workspace 跑 release benchmark 時 CPU contention 拉高 latency 至 ~4x；要 reproduce baseline 必須 isolated。如果只看 workspace fail message 會誤判 Sprint 2 引入 regression。E4 必 bisect 確認，並區別 workspace flaky 與 IMPL regression。
+
+2. **Linux sandbox role mapping vs Mac credential gap**：`sandbox_admin` role 存在於 Linux pg_roles，但 `/home/ncyu/.pgpass` 只記 `trading_admin` 兩個 database 的密碼；E4 用 `trading_admin → trading_ai_sandbox` 雙重身分 fallback 仍可走 sandbox query。若需 sandbox_admin 跑 DDL 則需 .pgpass 第三 row 對應條目（per Sprint 1A-ε P1 E3 IMPL `sandbox_admin role + secret_file 0600`）。
+
+3. **Sprint 2 emitter scaffold contract 6 Track 共用 writer 必走 OBSERVE-4 guard 一處**：M3Error::ReplaySubprocessForbidden 必加在 Track A scaffold 並 cross-Wave land 一次；6 Track 各自寫 guard 會漏（cascade reject path 或新 writer route）。round 2 fix 確認雙 scheduler (MetricEmitterScheduler + StrategyQualityScheduler) 對齊；3 test 含 startup 守 paper/demo/live_demo/live 4 mode 不誤攔。
+
+4. **PA-DRIFT-4 bybit wrapper instrumentation 屬 Wave 2 main.rs 責任不歸 Track D scaffold**：emitter trait 抽象 land + StubSourceProbe 用 mock fixture 通過 AC-1a；real bybit client p50/p95/p99 + retCode + ws_dropout 屬 main.rs 接線時補 (4-6 hr)；Track D E1 不修 bybit client 既有邏輯，per packet §5.5 反模式 (a)+(c)+(d)。
+
+5. **pytest baseline ratchet 6037 → 6042**：Sprint 1B Rust binding 5 test land（`test_spike_cross_lang_rust_binding.py`）對應 AC-7 從 PoC partial pass → FULL PASS（per Sprint 1B early IMPL Track D commit 9cf0fe82）。E4 baseline 跟著上升不下降 ✅。
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-22--sprint_2_phase_3b_regression.md`
+
+---
+
 ### 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX Layer B (Python watchdog inert probe) — PASS
 
 **對象**：E1 Layer B IMPL（Python-only：`engine_watchdog.py +525 LOC` + 新建 `test_engine_watchdog.py 581 LOC` 32 unit tests + `watchdog_inert_probe.toml 38 LOC` per-env config + `SCRIPT_INDEX.md` 索引更新）。spec v0.2 §4 + §10.2 B-1..B-7。Mac dirty tree，未 push。
