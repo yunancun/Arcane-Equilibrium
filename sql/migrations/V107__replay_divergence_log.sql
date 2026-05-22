@@ -20,7 +20,7 @@
 --   - 5 hot-path index (1 strategy_symbol / 4 partial: severity / run_id /
 --     hypothesis / unack 5d escalate);
 --   - 1 materialized view mv_latest_divergence_per_strategy + 1 unique index;
---   - Guard A: TimescaleDB extension + governance.audit_log + learning.hypotheses
+--   - Guard A: TimescaleDB extension + learning.governance_audit_log + learning.hypotheses
 --     三 prereq + 既有 table column 完整性 + forbidden action column 反模式
 --     反向檢測 (per CR-7 M7 single decay authority)；
 --   - Guard C: 4 CHECK enum 完整性 (divergence_type 7 / severity 3 /
@@ -44,7 +44,7 @@
 --     違反 = M7 single decay authority 紀律違反 → Guard A RAISE。
 --   - M11 自身寫入時 engine_mode='replay'；原 live trace mode 在 evidence_json；
 --     ML training filter 必 IN ('live','live_demo') per CLAUDE.md §七。
---   - V096 boundary (TimescaleDB extension) + V098 governance.audit_log +
+--   - V096 boundary (TimescaleDB extension) + V098 learning.governance_audit_log +
 --     V103 learning.hypotheses 三 prereq 都必須先 land。
 --   - hypothesis_id FK to learning.hypotheses (V103 land 後 nullable hard FK)。
 --   - m7_decay_signal_id / m9_ab_test_id 採 soft reference (BIGINT / UUID
@@ -124,14 +124,17 @@ BEGIN
         END IF;
     END IF;
 
-    -- governance.audit_log 必須存在 (M11 H-11 audit cross-ref query target；
-    -- 非 schema FK；spec §1.4 + Guard A 要求 V098 已 land)
+    -- learning.governance_audit_log 必須存在 (M11 H-11 audit cross-ref query target；
+    -- 非 schema FK；spec §1.4 + Guard A 要求 V098 已 land；
+    -- 2026-05-22 PA-DRIFT-1 patch: 原版誤用 governance.audit_log 為遺留 stub 表
+    -- (5 column 無 hypertable), 真正 V035 baseline + V098 extension target 為
+    -- learning.governance_audit_log 27 column hypertable)
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.tables
-        WHERE table_schema='governance' AND table_name='audit_log'
+        WHERE table_schema='learning' AND table_name='governance_audit_log'
     ) THEN
         RAISE EXCEPTION
-            'V107 Guard A FAIL: governance.audit_log missing — V098 must '
+            'V107 Guard A FAIL: learning.governance_audit_log missing — V098 must '
             'apply before V107 (cross-ref query target). Verify _sqlx_migrations.';
     END IF;
 
