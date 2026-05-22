@@ -4446,3 +4446,46 @@ TRIAGE DONE — 28 fail 全 carry-over Sprint 2 (P0 writer 1 + P1 structure 7 + 
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-22--sprint_1ab_2pre_post_closure_audit.md`（本 audit 不單獨產 report file，verdict 與證據以 memory append + 主對話輸出為 SSOT）
+
+---
+
+## 2026-05-23 · Sprint 4+ Wave A+B combined regression — PASS
+
+### Scope
+Sprint 4+ first Live carry-over Wave A (PA-DRIFT-4 bybit instrumentation + PA-DRIFT-5 RiskEnvelopeSourceProbe wire-up) + Wave B (main.rs MetricEmitterScheduler + PortfolioStateCache + 6 emitter spawn) combined regression × E2 round 2 全 APPROVE 後。
+
+### 數字
+- cargo workspace --release --skip stress_tick_latency_benchmark × 2 = **3961 / 0 / 5** non-flaky（baseline 3894 +67 attribution Wave A+B 42 integration + lib health +23 + sibling +2）
+- Wave A api_latency_probe_real_impl: **22 / 22**
+- Wave A risk_envelope_probe_real_impl: **14 / 14**
+- Wave B main_scheduler_wireup: **6 / 6**
+- Sprint 2 6 Track + replay_forbidden: **51 / 51** maintained
+- spike feature: **3 / 3**
+- lib health::: **110 / 0**（Sprint 2 87 → +23 Wave A+B real-impl 內部 unit）
+- lib bybit_rest_client: **29 / 0** unchanged
+- pytest × 2 = **28 fail / 6042 pass / 45 skip** non-flaky 與 Sprint 2 Phase 3b baseline 完全一致
+- cross-lang fixture: **12 / 12**（7 Python PoC + 5 Rust binding）
+- aarch64-apple-darwin release cargo check: 0 error / 4 既有 warning
+- nm AC-5 invariant: 0 hit ✅
+- Wave B inject_* leak: 0 hit ✅ (release optimizer drop)
+- strings Wave A+B wire-up: 全命中 main_health_emitters / RealApiLatencySourceProbe / api_latency_probe_impl / risk_envelope_probe_impl / PortfolioStateCache / F-2 sanitize / replay 禁 / Wave B startup log
+
+### Linux sandbox
+- sandbox_admin role 連線 OK (secret_file `srv/settings/secret_files/postgres/sandbox_admin/password`)
+- V106 schema 6 domain CHECK + 4 engine_mode (paper/demo/live_demo/live)（注意：replay 不在白名單，與 Wave B `engine_mode='replay' forbidden by V106 CHECK` 對齊）+ 4 state + state_prev null-tolerant 全 confirm
+- pg_hba E3-MED-1 reject row sandbox_admin→trading_ai REJECTED 仍生效
+- production engine PID 2934602 etime 1-12:06:42 不重啟 ✅
+
+### Carry-over to Wave C QA
+- AC-1b real PG empirical 待 operator 排程 Linux --rebuild + 30 min sample wait（同次 --rebuild deploy Sprint 1A-δ trait stub + Sprint 1A-ζ V106/V107 sandbox + Sprint 4+ Wave A+B Mac IMPL）
+- P1-SANDBOX-SQLX-METADATA-ALIGNMENT (Sprint 1A-ζ carry) E4 不負責
+- P1-ENGINE-BINARY-SPRINT-1A-IMPL-DEPLOY 仍待 --rebuild
+
+### 教訓
+- nm 對 Rust mangled symbol grep `MetricEmitterScheduler` 等高層 type 0 hit 是預期：release monomorphize + symbol stripping。改用 `strings` 抓 module path + log 訊息字串才是 wire-up 入 binary 的可信證據。E2 round 2 closure 對 strings hit 已預設此 SOP。
+- Mac CC 連 sandbox PG 需 `cat .../sandbox_admin/password | PGPASSWORD=` ssh wrapper；secret_file 是「目錄/password」結構，不是單一文件，避免 cat 對目錄出錯。
+- cargo workspace 並行模式下 stress_tick_latency_benchmark 仍延用 Sprint 2 Phase 3b `--skip` SOP，未獨立 isolated run，不阻 Sprint 4+ verdict。
+- baseline +67 計算精準對齊：Wave A+B 42 integration + lib health +23 + sibling +2 = 67，無 unaccountable drift。
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-23--sprint_4_e4_regression_wave_ab.md`
