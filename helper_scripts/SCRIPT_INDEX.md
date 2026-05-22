@@ -58,6 +58,16 @@
 | `db/test_cron_heartbeat_healthchecks.py` | `[75]`-`[79]` 單元測試（42 PASS）：fresh/missing/stale + threshold 邊界 + REQUIRED=1 升 FAIL + path 解析（HEARTBEAT_DIR > DATA_DIR）。 |
 | `security/compute_sri_hashes.sh` | P2-WP05-CSP-UNSAFE-INLINE（2026-05-18）— 為 GUI pinned CDN 計算 SHA-384 SRI integrity attribute；操作者跑一次將輸出 paste 進對應 `app/static/*.html` <script> / <link>。default URL = `lightweight-charts@4.1.0`；版本未 pin → WARNING + exit 1。 |
 
+## Sprint 1A-ζ Track C M11 spike (sandbox only / 非 nightly cron)
+
+> 2026-05-22 PA reconcile §3:此 3 條 entry 對應 `helper_scripts/replay/m11_spike/` IMPL reality;CLAUDE.md §七「新腳本必須更新 SCRIPT_INDEX.md」合規 closure。
+
+| 腳本 | 用途 |
+|------|------|
+| `replay/m11_spike/spike_trigger.py` | Sprint 1A-ζ Track C 手動 1 次 trigger M11 replay (skeleton, 非 nightly cron)。scope 限 1 strategy × 1 symbol × 1 day, 接 `trading_ai_sandbox` PG 寫 V107 row (engine_mode='replay')。round 2 後正式 import sibling detector + 落地 baseline_5d_mean / sigma / noise_floor_threshold；default `--user sandbox_admin` (per Phase 0 §2.2;Phase 2 defer 時 fallback `--user trading_admin`)。**sandbox only**;production DB 物理拒絕 (pg_database 不含 'sandbox' substring → sys.exit(2))。 |
+| `replay/m11_spike/divergence_d1_fill_chain.py` | D1 fill_chain divergence detector module (per M11 design spec §4.2 D1)。提供 `compute_5d_baseline` / `detect_with_baseline` / `leak_free_shift1_replay` / `inject_synthetic_fixture` 4 函數；caller = `spike_trigger.py`。落實 AC-7 leak-free shift(1) mandate (per feedback_indicator_lookahead_bias)。D1 only;D2-D7 不在 spike scope。 |
+| `replay/m11_spike/dedup_contract_test.py` | AC-6 M11 → M7 dedup contract empirical verify。5+1 condition (round 2 LOW-1 拆 c1a/c1b + HIGH-1 新增 c5)：V107 row 存在 + flag=m7_decay_candidate + decay_signals 0 row + strategy_lifecycle 0 row + 6 forbidden column 0 hit + Guard A forbidden column reverse fire empirical。Cleanup ADD/DROP COLUMN 自包含, sandbox state 不殘留。 |
+
 ## REF-20 Sprint 1+2 新增 cron 與 helper
 
 | 腳本 | 用途 |

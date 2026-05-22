@@ -8,7 +8,7 @@ sprint: Sprint 1A-β (DESIGN phase; IMPL 後續 sprint)
 size estimate: 80-120 LOC SQL (CREATE TABLE 1 hypertable + 3 indexes + 1 ENUM + Guard A/C + compression + retention) + 60-90 hr E1 IMPL (含 Linux PG dry-run x 2 round + healthcheck wiring deferred to Sprint 1B)
 depend on:
   - V096 boundary (TimescaleDB extension; drop dead learning tables)
-  - V098 (governance.audit_log; referenced by M3 amplification cap H-11 audit trail cross-ref)
+  - V098 (learning.governance_audit_log; referenced by M3 amplification cap H-11 audit trail cross-ref;2026-05-22 PA reconcile §4 — 真實 schema 表名 `learning.governance_audit_log` per V035 baseline)
 depended by:
   - V112 (M1 LAL) — HEALTH_DEGRADED state 透過 amplification cap H-11 觸發 LAL Tier 降階 (cross-ref 非 FK,單向 query)
   - M8 anomaly amplification cap H-11 (cross-ref 非 FK,單向 query;1-anomaly = 1-state-change/24h)
@@ -31,12 +31,12 @@ scope: design / spec only — 不寫 V106.sql 實檔,不在 Mac 跑 SQL,不改 R
 ## §0 TL;DR
 
 - **V106 新增 1 個 hypertable**:`learning.health_observations`(high-frequency per-domain health metric snapshots)。
-- **6 hot domains**(per v5.8 §2 M3):`ws_latency` / `rest_success_rate` / `db_backlog` / `disk_usage` / `cpu_mem` / `strategy_level`。
+- **6 hot domains**(per ADR-0042 Decision 3 + M3 design spec §2.1 single source of truth):`engine_runtime` / `pipeline_throughput` / `database_pool` / `api_latency` / `strategy_quality` / `risk_envelope`(3 層分離:Process / Pipeline / Business)。
 - **4 health state ENUM**:`HEALTH_OK` / `HEALTH_WARN` / `HEALTH_DEGRADED` / `HEALTH_CRITICAL`(per v5.8 §2 M3 + ADR-0036 severity taxonomy 對齊 — M8 採 INFO/WARN/CRITICAL 三級,M3 加 OK + 升 DEGRADED 中間層做 amplification cap H-11 限流)。
 - **`amplification_loop_24h_count` 欄位**(per H-11 cap):同一 domain 24h 內 state change 計數,exceeded ≥ 2 → fail-closed 拒絕新 state transition + WARN(防 M8 anomaly → M3 state change → 觸 M11 replay → 更多 anomaly 的雪球)。
 - **Hypertable mandatory**:7d chunk + 7d compression policy + 90d retention(per E5 5.21 audit;6mo +1.25-2.5 GB 占 PG buffer 16-63% 必 hypertable + compression)。
 - **engine_mode CHECK 4 值齊全**(paper / demo / live_demo / live);training filter 必含 `IN ('live','live_demo')`(per CLAUDE.md §七 + MIT memory baseline)。
-- **Cross-V### dependencies**:V096 boundary(TimescaleDB extension)+ V098(governance.audit_log cross-ref);**無 hard FK**(M3 是觀測層,FK 太重;cross-ref 走 query-time JOIN)。
+- **Cross-V### dependencies**:V096 boundary(TimescaleDB extension)+ V098(learning.governance_audit_log cross-ref);**無 hard FK**(M3 是觀測層,FK 太重;cross-ref 走 query-time JOIN)。
 - **5 audit field** per V103 EXTEND 範式:`created_by` / `created_at` / `updated_by` / `updated_at` / `source_version`。
 - **Hot-path indexes 4 個**:domain-time / state-time / symbol-time(partial)/ strategy-time(partial)。
 - **Sprint 1A-β scheduling**:M3 hypertable 是高頻表,必在 M2 / M11 module writer wire 前 land(避免 row backlog;per E5 hypertable audit)。
@@ -50,23 +50,25 @@ scope: design / spec only — 不寫 V106.sql 實檔,不在 Mac 跑 SQL,不改 R
 
 v5.8 §2 M3 Health-Aware Degradation module 列出 6 個健康觀測 domain,跨 OpenClaw 多個子系統:
 
-| Domain | 採樣源 | 採樣頻率 | 樣本基數 |
-|---|---|---|---|
-| **ws_latency** | bybit_connector WS heartbeat → tick arrival latency(per-symbol) | 30s | 25 symbol × 1 metric (p99) = 25 row/sample |
-| **rest_success_rate** | per-endpoint API call success/total ratio(rolling 1h window) | 60s | ~20 endpoint × 1 metric = 20 row/sample |
-| **db_backlog** | INSERT queue depth / writer queue size(per-writer) | 30s | ~10 writer × 2 metric = 20 row/sample |
-| **disk_usage** | PG data dir + log dir + binary backup dir | 300s | 3 path × 1 metric = 3 row/sample |
-| **cpu_mem** | per-process RSS + CPU%(engine / python-api / health-monitor / etc) | 60s | ~6 process × 2 metric = 12 row/sample |
-| **strategy_level** | per-strategy active count / signal rate / position count | 60s | 5 strategy × 25 symbol × 3 metric = 375 row/sample |
+> **註(2026-05-22 PA reconcile)**:6 domain 命名以 ADR-0042 Decision 3 + M3 design spec §2.1 為唯一 source of truth(3 層分離:Process / Pipeline / Business),取代本 spec 前版 6 domain(ws_latency / rest_success_rate / db_backlog / disk_usage / cpu_mem / strategy_level — 已退役;Rust enum + V106.sql 須同步 carry-over E1 round 2)。下表「採樣源」與每行 metric 對應仍保留(只是歸併到新 domain 名下);row 量級估算因合併不變。
 
-**row 量級估算**(per E5 hypertable audit):
-- ws_latency:25 row/30s × 2880 sample/day = 72k row/day
-- rest_success_rate:20 row/60s × 1440 = 28.8k row/day
-- db_backlog:20 row/30s × 2880 = 57.6k row/day
-- disk_usage:3 row/300s × 288 = 0.8k row/day
-- cpu_mem:12 row/60s × 1440 = 17.3k row/day
-- strategy_level:375 row/60s × 1440 = 540k row/day(**最大**)
-- **合計 ~716k row/day = ~261M row/yr** (每 row 估 ~250 byte) = ~65 GB/yr (uncompressed)
+| Domain | 層 | 採樣源(原 metric 範疇) | 採樣頻率 | 樣本基數 |
+|---|---|---|---|---|
+| **engine_runtime** | Process | per-process RSS + CPU% + PID alive + open fd(engine / python-api / health-monitor)| 60s | ~6 process × 2 metric = 12 row/sample |
+| **pipeline_throughput** | Pipeline | bybit_connector WS heartbeat → tick arrival latency(per-symbol)+ IPC roundtrip p99 + WS subscription drift | 30s | 25 symbol × 1 metric (p99) + IPC = 25-30 row/sample |
+| **database_pool** | Pipeline | INSERT queue depth / writer queue size(per-writer)+ PG pool active conn / pool wait p95 | 30s | ~10 writer × 2 metric = 20 row/sample |
+| **api_latency** | Pipeline | per-endpoint Bybit REST success/total ratio(rolling 1h window)+ retCode!=0 count + WS dropout/reconnect 5min | 60s | ~20 endpoint × 1 metric = 20 row/sample |
+| **strategy_quality** | Business | per-strategy active count / signal rate / position count / fill rate vs intent / slippage p95 | 60s | 5 strategy × 25 symbol × 3 metric = 375 row/sample |
+| **risk_envelope** | Business | portfolio cum PnL 24h / max DD% / position count / correlation avg pairwise / top-1 concentration + PG data dir disk usage(原 disk_usage 歸於 Business 層風險封套) | 60s+300s | 3 path × 1 metric + 5 portfolio metric = 8 row/sample |
+
+**row 量級估算**(per E5 hypertable audit;新 6 domain 名下):
+- pipeline_throughput:25-30 row/30s × 2880 sample/day ≈ 72-86k row/day(原 ws_latency + IPC 合併)
+- api_latency:20 row/60s × 1440 = 28.8k row/day(原 rest_success_rate)
+- database_pool:20 row/30s × 2880 = 57.6k row/day(原 db_backlog)
+- risk_envelope:3 row/300s × 288 + 5 row/60s × 1440 ≈ 8k row/day(原 disk_usage + portfolio aggregate)
+- engine_runtime:12 row/60s × 1440 = 17.3k row/day(原 cpu_mem)
+- strategy_quality:375 row/60s × 1440 = 540k row/day(**最大**;原 strategy_level)
+- **合計 ~720-740k row/day = ~265M row/yr** (每 row 估 ~250 byte) = ~65 GB/yr (uncompressed)
 
 **6 month +1.25-2.5 GB(已 compress 後)估算占 PG buffer (4-8 GB) 16-63%** → hypertable + compression mandatory。
 
@@ -80,7 +82,7 @@ V106 schema 提供 `amplification_loop_24h_count` 欄位讓 writer 預計算(避
 
 ### 1.3 v5.8 §2 M3 與本 spec 衝突仲裁
 
-v5.8 §2 M3 列「Health domain 5 domain」(漏 strategy_level);本 spec 採 PA dispatch §6 共識 6 domain(加 strategy_level)。**理由**:strategy_level 是 M3 → M7 decay signal source(per ADR-0038 OQ-4 + CR-7 dedup contract);M3 不含 strategy_level → M7 失去 single decay authority 的 health input。
+**2026-05-22 PA reconcile**:6 domain 命名統一以 ADR-0042 Decision 3 + M3 design spec §2.1 為單一 source of truth(governance authority 凌駕 schema spec)。v5.8 §2 M3 原列 5 domain;ADR-0042 + M3 design spec 補齊為 6 domain(engine_runtime / pipeline_throughput / database_pool / api_latency / strategy_quality / risk_envelope)。**理由**:strategy_quality 是 M3 → M7 decay signal source(per ADR-0038 OQ-4 + CR-7 dedup contract);risk_envelope 對齊 §16 portfolio risk 原則 + 5-gate 既有 kill 邊界。本 spec 前版採「ws_latency / rest_success_rate / db_backlog / disk_usage / cpu_mem / strategy_level」屬下游 IMPL artifact 漂移,已退役。Rust enum + V106.sql 須同步 carry-over E1 round 2 對齊本 reconcile。
 
 ### 1.4 Cross-V### 影響
 
@@ -112,12 +114,12 @@ CREATE TABLE IF NOT EXISTS learning.health_observations (
     observed_at                 TIMESTAMPTZ NOT NULL,
     domain                      TEXT NOT NULL
                                 CHECK (domain IN (
-                                    'ws_latency',
-                                    'rest_success_rate',
-                                    'db_backlog',
-                                    'disk_usage',
-                                    'cpu_mem',
-                                    'strategy_level'
+                                    'engine_runtime',
+                                    'pipeline_throughput',
+                                    'database_pool',
+                                    'api_latency',
+                                    'strategy_quality',
+                                    'risk_envelope'
                                 )),
     metric_name                 TEXT NOT NULL,
     state                       TEXT NOT NULL
@@ -166,8 +168,8 @@ CREATE TABLE IF NOT EXISTS learning.health_observations (
 | `metric_value` | NUMERIC(18,8) | NOT NULL | 高精度(避 FLOAT 精度誤差;crypto funding rate 小數 6 位、latency ms 整數、CPU% 小數 4 位皆能容);per `db-schema-design-financial-time-series` skill |
 | `metric_threshold` | NUMERIC(18,8) | YES | 觸發 state transition 的閾值(reference 當下 active config);用於 audit trail;config 可變但 historical row 鎖當下 threshold |
 | `amplification_loop_24h_count` | INTEGER + DEFAULT 0 | NOT NULL | per H-11 cap;writer 預計算 24h 同 domain state transition 次數;≥ 2 觸 fail-closed reject |
-| `symbol` | TEXT | YES | domain ∈ (ws_latency, strategy_level) 時非 null;其他 domain null;CHECK constraint 不強制(domain-specific NULL 容忍) |
-| `strategy_name` | TEXT | YES | domain='strategy_level' 時非 null;其他 null |
+| `symbol` | TEXT | YES | domain ∈ (pipeline_throughput, strategy_quality) 時非 null(per-symbol metric);其他 domain null;CHECK constraint 不強制(domain-specific NULL 容忍) |
+| `strategy_name` | TEXT | YES | domain ∈ (strategy_quality) 時非 null;其他 null |
 | `evidence_json` | JSONB | YES | 富 context:採樣 window、threshold derivation、raw computation、上下文時間戳;debug 用 |
 | `engine_mode` | TEXT + CHECK 4 值 | NOT NULL | 4 值齊全(per CLAUDE.md §七 + MIT memory baseline);training filter 必 `IN ('live','live_demo')` |
 | `created_by` | TEXT + DEFAULT 'health_monitor' | NOT NULL | per V103 EXTEND 範式;預設 writer process 名;允許 `cowork-agent` / `operator` / `m11_replay_engine` 多 actor |
@@ -256,10 +258,10 @@ per OpenClaw `db-schema-design-financial-time-series` skill + v5.8 §2 M3 query 
 
 | Query pattern | 命中 index | 範例 SQL |
 |---|---|---|
-| per-domain metric timeline | `idx_health_domain_metric_observed` | `SELECT * FROM learning.health_observations WHERE domain='ws_latency' AND metric_name='p99' ORDER BY observed_at DESC LIMIT 100` |
+| per-domain metric timeline | `idx_health_domain_metric_observed` | `SELECT * FROM learning.health_observations WHERE domain='pipeline_throughput' AND metric_name='ws_latency_ms_p99' ORDER BY observed_at DESC LIMIT 100` |
 | per-state alert dashboard | `idx_health_state_observed` (partial) | `SELECT * FROM learning.health_observations WHERE state IN ('HEALTH_DEGRADED','HEALTH_CRITICAL') ORDER BY observed_at DESC` |
-| per-symbol metric query | `idx_health_symbol_observed` (partial) | `SELECT * FROM learning.health_observations WHERE symbol='BTCUSDT' AND domain='ws_latency' ORDER BY observed_at DESC` |
-| per-strategy health query | `idx_health_strategy_observed` (partial) | `SELECT * FROM learning.health_observations WHERE strategy_name='grid' AND domain='strategy_level' ORDER BY observed_at DESC` |
+| per-symbol metric query | `idx_health_symbol_observed` (partial) | `SELECT * FROM learning.health_observations WHERE symbol='BTCUSDT' AND domain='pipeline_throughput' ORDER BY observed_at DESC` |
+| per-strategy health query | `idx_health_strategy_observed` (partial) | `SELECT * FROM learning.health_observations WHERE strategy_name='grid' AND domain='strategy_quality' ORDER BY observed_at DESC` |
 
 ### 4.2 Index DDL
 
@@ -273,23 +275,25 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_health_state_observed
     ON learning.health_observations (state, observed_at DESC)
     WHERE state IN ('HEALTH_DEGRADED', 'HEALTH_CRITICAL');
 
--- per-symbol query (partial,僅 ws_latency / strategy_level 兩 domain 有 symbol)
+-- per-symbol query (partial,僅 pipeline_throughput / strategy_quality 兩 domain 有 symbol)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_health_symbol_observed
     ON learning.health_observations (symbol, observed_at DESC)
     WHERE symbol IS NOT NULL;
 
--- per-strategy query (partial,僅 strategy_level domain 有 strategy_name)
+-- per-strategy query (partial,僅 strategy_quality domain 有 strategy_name)
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_health_strategy_observed
     ON learning.health_observations (strategy_name, observed_at DESC)
     WHERE strategy_name IS NOT NULL;
 ```
 
+> **註(2026-05-22 PA reconcile §5)**:`CREATE INDEX CONCURRENTLY` 對 TimescaleDB hypertable 在 `psql -v ON_ERROR_STOP=1 -f` transaction-implicit 內不可用(per V094 sister table 範式 + V106 IMPL §6.5 empirical);hypertable 走非 CONCURRENT path 改用 `CREATE INDEX IF NOT EXISTS`,TimescaleDB 自動逐 chunk 建 index;greenfield 0 row 時 0 lock cost。本 §4.2 DDL 保留 CONCURRENTLY 字面用於 spec 設計意圖呈現;.sql 實檔已對齊 V094 / V106 落地範式採非 CONCURRENT。
+
 ### 4.3 Partial index 理由
 
 per `db-schema-design-financial-time-series` skill §4.2:partial index 對 filter 條件穩定的場景大幅縮小索引(60-80% 空間節省):
 - state DEGRADED/CRITICAL 預期 < 1% 整體 row → partial index 縮 99%
-- symbol IS NOT NULL 約 50% row (ws_latency + strategy_level 兩 domain)→ partial index 縮 50%
-- strategy_name IS NOT NULL 約 75% row (strategy_level domain ~540k/716k daily)→ partial index 縮 25%(仍值得做,加速 query)
+- symbol IS NOT NULL 約 50% row (pipeline_throughput + strategy_quality 兩 domain)→ partial index 縮 50%
+- strategy_name IS NOT NULL 約 75% row (strategy_quality domain ~540k/720k daily)→ partial index 縮 25%(仍值得做,加速 query)
 
 ### 4.4 為什麼不加 `(engine_mode, observed_at)` index
 
@@ -349,13 +353,15 @@ BEGIN
         END IF;
     END IF;
 
-    -- governance.audit_log 必須存在(M3 → governance cross-ref 雖無 FK 但 query JOIN 需要)
+    -- learning.governance_audit_log 必須存在(M3 → governance cross-ref 雖無 FK 但 query JOIN 需要)
+    -- 2026-05-22 PA reconcile §4: V098 baseline + V035 真實 schema 表名為
+    -- learning.governance_audit_log,本 spec 前版「governance.audit_log」屬概念命名漂移。
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.tables
-        WHERE table_schema='governance' AND table_name='audit_log'
+        WHERE table_schema='learning' AND table_name='governance_audit_log'
     ) THEN
         RAISE EXCEPTION
-            'V106 Guard A FAIL: governance.audit_log missing — '
+            'V106 Guard A FAIL: learning.governance_audit_log missing — '
             'V098 must apply before V106 (cross-ref query target). Verify _sqlx_migrations.';
     END IF;
 END $$;
@@ -384,17 +390,18 @@ BEGIN
     WHERE conrelid='learning.health_observations'::regclass
       AND conname LIKE '%domain%check%';
     IF v_actual IS NOT NULL THEN
-        IF position('ws_latency' IN v_actual) = 0
-           OR position('rest_success_rate' IN v_actual) = 0
-           OR position('db_backlog' IN v_actual) = 0
-           OR position('disk_usage' IN v_actual) = 0
-           OR position('cpu_mem' IN v_actual) = 0
-           OR position('strategy_level' IN v_actual) = 0
+        IF position('engine_runtime' IN v_actual) = 0
+           OR position('pipeline_throughput' IN v_actual) = 0
+           OR position('database_pool' IN v_actual) = 0
+           OR position('api_latency' IN v_actual) = 0
+           OR position('strategy_quality' IN v_actual) = 0
+           OR position('risk_envelope' IN v_actual) = 0
         THEN
             RAISE EXCEPTION
                 'V106 Guard C FAIL: learning.health_observations domain CHECK enum mismatch. '
                 'Actual: %. Expected to contain all 6 domain values '
-                '(ws_latency/rest_success_rate/db_backlog/disk_usage/cpu_mem/strategy_level).',
+                '(engine_runtime/pipeline_throughput/database_pool/api_latency/strategy_quality/risk_envelope) '
+                'per ADR-0042 Decision 3 + M3 design spec §2.1.',
                 v_actual;
         END IF;
     END IF;
@@ -478,7 +485,7 @@ END $$;
 
 | Guard | 觸發場景 | RAISE 條件 | NOT RAISE 條件(idempotent)|
 |---|---|---|---|
-| A | NEW table 已存在但 column 缺;TimescaleDB extension 缺;governance.audit_log 缺 | RAISE | 全 column 俱在 / table 不存在(首次跑)|
+| A | NEW table 已存在但 column 缺;TimescaleDB extension 缺;learning.governance_audit_log 缺 | RAISE | 全 column 俱在 / table 不存在(首次跑)|
 | C | CHECK constraint 缺 enum 值;hypertable interval 不對 | RAISE | constraint 不存在(首次跑)/ constraint 完整(重跑) |
 | C policy | compression / retention policy 首次跑不存在 | NOTICE(不 RAISE,migration body 會建)| policy 已存在重跑(skip)|
 
@@ -489,6 +496,8 @@ END $$;
 ## §6 Migration up + down SQL
 
 ### 6.1 Migration UP(完整 V106.sql 設計)
+
+> **註(2026-05-22 PA reconcile §1 + §4 + §5)**:本 §6.1 範式為 spec 草案;落地 V106.sql 必對齊三項 reconcile —(1)domain CHECK 6 值用 ADR-0042 命名(engine_runtime / pipeline_throughput / database_pool / api_latency / strategy_quality / risk_envelope);(2)Guard A audit_log 表名用真實表名 `learning.governance_audit_log`(V098 / V035 baseline);(3)`CREATE INDEX` 不用 CONCURRENTLY(TimescaleDB hypertable + transaction-implicit 範式對齊 V094 sister table)。
 
 ```sql
 -- ============================================================
@@ -641,7 +650,7 @@ V106 不含 materialized view。理由:
 
 ```
 V096 (drop dead learning tables; TimescaleDB extension) ← V106 (prereq;hypertable infra)
-V098 (governance.audit_log)                              ← V106 (cross-ref query target;非 FK)
+V098 (learning.governance_audit_log)                     ← V106 (cross-ref query target;非 FK)
 V106 (M3 health observations; standalone)
        │
        ├─→ V112 (M1 LAL) — HEALTH_DEGRADED → LAL 1 reparam halt (cross-ref query)
@@ -676,7 +685,7 @@ INSERT INTO learning.health_observations
     (observed_at, domain, metric_name, state, state_prev, metric_value, 
      metric_threshold, engine_mode, evidence_json)
 VALUES
-    (now(), 'cpu_mem', 'm11_replay_wall_clock_sec', 'HEALTH_WARN', 'HEALTH_OK',
+    (now(), 'engine_runtime', 'm11_replay_wall_clock_sec', 'HEALTH_WARN', 'HEALTH_OK',
      15000, 14400, 'live',
      jsonb_build_object('source','m11_replay','replay_id', $1, 'budget_exceeded', true));
 ```
@@ -686,7 +695,7 @@ VALUES
 ```sql
 -- 例: M8 anomaly emit → 查 M3 24h 同 domain state change 計數
 SELECT COUNT(DISTINCT state) FROM learning.health_observations
-WHERE domain = 'ws_latency'
+WHERE domain = 'pipeline_throughput'
   AND observed_at > now() - INTERVAL '24 hours'
   AND state != 'HEALTH_OK'
   AND engine_mode = 'live';
@@ -723,14 +732,14 @@ per CLAUDE.md `docs/agents/context-loading.md` "PG Connection Examples"(Linux ru
 
 # Query 1: _sqlx_migrations head 確認
 ssh trade-core "PGPASSWORD=\$(cat ~/.pgpass | grep trading_ai | cut -d: -f5) psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c 'SELECT max(version) FROM _sqlx_migrations'"
-# Expected: ≥ V098 (V096 boundary + V097 LG-5 + V098 governance.audit_log 都 land)
+# Expected: ≥ V098 (V096 boundary + V097 LG-5 + V098 learning.governance_audit_log 都 land)
 
 # Query 2: TimescaleDB extension 確認
 ssh trade-core "PGPASSWORD=\$(cat ~/.pgpass | grep trading_ai | cut -d: -f5) psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c \"SELECT extversion FROM pg_extension WHERE extname='timescaledb'\""
 # Expected: ≥ 2.13 (per OpenClaw TimescaleDB minimum)
 
-# Query 3: governance.audit_log 已 land 驗
-ssh trade-core "PGPASSWORD=\$(cat ~/.pgpass | grep trading_ai | cut -d: -f5) psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c \"SELECT count(*) FROM information_schema.tables WHERE table_schema='governance' AND table_name='audit_log'\""
+# Query 3: learning.governance_audit_log 已 land 驗(per V035 baseline 真實表名)
+ssh trade-core "PGPASSWORD=\$(cat ~/.pgpass | grep trading_ai | cut -d: -f5) psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c \"SELECT count(*) FROM information_schema.tables WHERE table_schema='learning' AND table_name='governance_audit_log'\""
 # Expected: 1 (V098 land 後)
 
 # Query 4: learning.health_observations 是否已存在(legacy stub conflict 檢測)
@@ -741,7 +750,7 @@ ssh trade-core "PGPASSWORD=\$(cat ~/.pgpass | grep trading_ai | cut -d: -f5) psq
 **待 PA C9 補資料的 4 處 placeholder**(spec sign-off 前必更新):
 1. `_sqlx_migrations` head 真實 = ?
 2. TimescaleDB extension version 真實 = ?
-3. governance.audit_log 已 land 確認 = ?
+3. learning.governance_audit_log 已 land 確認 = ?
 4. learning.health_observations stub 不存在確認 = ?
 
 ### 9.2 Round 1 — V106 SQL 真實 PG semantic empirical 驗證
@@ -786,7 +795,7 @@ WHERE proc_name='policy_retention' AND hypertable_name='health_observations';
 SELECT pg_get_constraintdef(oid)
 FROM pg_constraint
 WHERE conrelid='learning.health_observations'::regclass AND conname LIKE '%domain%check%';
--- Expected: 含 ws_latency/rest_success_rate/db_backlog/disk_usage/cpu_mem/strategy_level
+-- Expected: 含 engine_runtime/pipeline_throughput/database_pool/api_latency/strategy_quality/risk_envelope
 
 -- 6. state CHECK 4 值齊全(HEALTH_OK/WARN/DEGRADED/CRITICAL)
 SELECT pg_get_constraintdef(oid)
@@ -807,7 +816,7 @@ SAVEPOINT test_engine_mode;
 INSERT INTO learning.health_observations
     (observed_at, domain, metric_name, state, metric_value, engine_mode)
 VALUES
-    (NOW(), 'ws_latency', 'test', 'HEALTH_OK', 100, 'INVALID_MODE');
+    (NOW(), 'engine_runtime', 'test', 'HEALTH_OK', 100, 'INVALID_MODE');
 -- Expected: ERROR: violates check constraint
 ROLLBACK TO SAVEPOINT test_engine_mode;
 
@@ -825,7 +834,7 @@ SAVEPOINT test_state;
 INSERT INTO learning.health_observations
     (observed_at, domain, metric_name, state, metric_value, engine_mode)
 VALUES
-    (NOW(), 'ws_latency', 'test', 'INVALID_STATE', 100, 'live');
+    (NOW(), 'engine_runtime', 'test', 'INVALID_STATE', 100, 'live');
 -- Expected: ERROR: violates check constraint
 ROLLBACK TO SAVEPOINT test_state;
 
@@ -1008,7 +1017,7 @@ H-11 amplification cap backfill 場景:
 
 1. **`_sqlx_migrations` head 真實**(per §9.1 Query 1)— spec 假設 ≥ V098
 2. **TimescaleDB extension version**(per §9.1 Query 2)— spec 假設 ≥ 2.13
-3. **governance.audit_log 已 land**(per §9.1 Query 3)— spec 假設已 land
+3. **learning.governance_audit_log 已 land**(per §9.1 Query 3)— spec 假設已 land
 4. **legacy stub conflict**(per §9.1 Query 4)— spec 假設 greenfield
 
 ### 14.2 已知 caveat

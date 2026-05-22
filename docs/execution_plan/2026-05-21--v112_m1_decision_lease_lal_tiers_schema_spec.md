@@ -9,7 +9,7 @@ size estimate: 130-180 LOC SQL (2 tables + 1 materialized view + 3 indexes + 5 I
 depend on:
   - V099/V100 (Decision Lease state machine baseline; lease_id FK source — assumed land Sprint 1A-α per PA dispatch consolidation)
   - V113 (M7 decay_signals; no_incident_check_v113_ref FK source — assumed land before V112 per PA cross-V### dep graph)
-  - V098 (governance.audit_log; assigned_by audit cross-ref;非 FK)
+  - V098 (learning.governance_audit_log; assigned_by audit cross-ref;非 FK;2026-05-22 PA reconcile §4 — 真實 schema 表名 `learning.governance_audit_log` per V035 baseline)
 depended by:
   - V109 (M8 anomaly) — γ track:M8 → LAL tier_change_reason='health_degraded' demote (cross-ref query 非 FK)
   - M3 V106 (HEALTH_DEGRADED → LAL 1 reparam halt) — cross-ref query 非 FK
@@ -89,7 +89,7 @@ ADR-0034 對齊矩陣明示:
 
 per ADR-0034 + M1 LAL design spec §3 state machine:
 - LAL tier 是 governance object(approval policy enforcement),非 learning observation
-- 既有 `governance.audit_log` / `governance.unblock_candidates` / `governance.canary_stage_metric_seed` 同 schema
+- 既有 `governance.unblock_candidates` 同 schema 為 governance object precedent;**audit_log 真實表名為 `learning.governance_audit_log`**(V098 / V035 baseline,本 spec 前版「governance.audit_log」屬概念命名漂移,2026-05-22 PA reconcile §4 對齊真實 schema)
 - 避 schema 混淆(learning schema 主要為 ML feature / training / shadow):per CLAUDE.md §二 原則 2「讀寫分離;research, GUI, and learning are mostly read-only」
 
 ### 1.4 Cross-V### 影響
@@ -446,13 +446,15 @@ BEGIN
             'Apply baseline schema migration before V112.';
     END IF;
 
-    -- governance.audit_log 必須存在(M1 LAL cross-ref audit query target)
+    -- learning.governance_audit_log 必須存在(M1 LAL cross-ref audit query target)
+    -- 2026-05-22 PA reconcile §4: V098 baseline 真實表名為 learning.governance_audit_log
+    -- (per V035 baseline);本 spec 前版「governance.audit_log」屬概念命名漂移。
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.tables
-        WHERE table_schema='governance' AND table_name='audit_log'
+        WHERE table_schema='learning' AND table_name='governance_audit_log'
     ) THEN
         RAISE EXCEPTION
-            'V112 Guard A FAIL: governance.audit_log missing — '
+            'V112 Guard A FAIL: learning.governance_audit_log missing — '
             'V098 must apply before V112 (cross-ref audit). Verify _sqlx_migrations.';
     END IF;
 
@@ -633,7 +635,7 @@ END $$;
 
 | Guard | 觸發場景 | RAISE 條件 | NOT RAISE 條件(idempotent)|
 |---|---|---|---|
-| A | NEW table 已存在但 column 缺;governance.audit_log 缺(V098)| RAISE | 全 column 俱在 / table 不存在(首次跑)|
+| A | NEW table 已存在但 column 缺;learning.governance_audit_log 缺(V098)| RAISE | 全 column 俱在 / table 不存在(首次跑)|
 | C | CHECK constraint 缺 enum 值;seed rows count 不對 | RAISE | constraint 不存在(首次跑)/ constraint 完整(重跑)|
 | C MV | materialized view 首次跑不存在 | NOTICE(不 RAISE,migration body 會建)| MV 已存在重跑(skip)|
 
@@ -857,7 +859,7 @@ per V055 5-round loop + V083/V084 incident precedent,V112.sql 必跑兩次:
 ### 6.1 Cross-V### dependency 圖
 
 ```
-V098 (governance.audit_log)             ← V112 (cross-ref audit;非 FK)
+V098 (learning.governance_audit_log)    ← V112 (cross-ref audit;非 FK)
 V099/V100 (Decision Lease state machine baseline)  ← V112 (lease_id source;application-layer ref;非 schema FK)
 V113 (M7 decay_signals)                  ← V112 (no_incident_check_v113_ref;placeholder FK,V113 land 後 ALTER ADD CONSTRAINT)
 
@@ -950,7 +952,7 @@ per CLAUDE.md `docs/agents/context-loading.md` "PG Connection Examples"(Linux ru
 
 # Query 1: _sqlx_migrations head 確認 V112 dispatch 前提
 ssh trade-core "PGPASSWORD=\$(cat ~/.pgpass | grep trading_ai | cut -d: -f5) psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c 'SELECT max(version), array_agg(version ORDER BY version DESC) FROM (SELECT version FROM _sqlx_migrations ORDER BY version DESC LIMIT 15) sub'"
-# Expected: ≥ V098 (V098 governance.audit_log land 是 V112 prereq);理想 V099/V100/V106/V107/V109/V113 也 land
+# Expected: ≥ V098 (V098 learning.governance_audit_log land 是 V112 prereq);理想 V099/V100/V106/V107/V109/V113 也 land
 
 # Query 2: governance schema + audit_log 已 land 驗
 ssh trade-core "PGPASSWORD=\$(cat ~/.pgpass | grep trading_ai | cut -d: -f5) psql -h 127.0.0.1 -p 5432 -U trading_admin -d trading_ai -c \"SELECT table_schema, table_name FROM information_schema.tables WHERE table_schema='governance' ORDER BY table_name\""
@@ -971,7 +973,7 @@ ssh trade-core "PGPASSWORD=\$(cat ~/.pgpass | grep trading_ai | cut -d: -f5) psq
 
 **待 PA C9 補資料的 5 處 placeholder**(spec sign-off 前必更新):
 1. `_sqlx_migrations` head 真實 = ?(spec 假設 ≥ V098)
-2. governance.audit_log 已 land 確認 = ?
+2. learning.governance_audit_log 已 land 確認 = ?
 3. V099/V100 lease 表 land 狀態 = ?(影響 application-layer cross-ref readiness)
 4. V113 decay_signals 已 land 確認 = ?(影響 placeholder FK 何時 ALTER ADD)
 5. governance.lease_lal_tiers / lease_lal_assignments stub 不存在確認 = ?
@@ -1246,7 +1248,7 @@ per DOC-08 §12 #8 安全不變量「交易可解釋」:LAL tier config + assign
 
 | # | 標準 | 驗證方法 |
 |---|---|---|
-| 1 | V098 prereq 滿足 + governance.audit_log 存在 | `SELECT version FROM _sqlx_migrations WHERE version=98` |
+| 1 | V098 prereq 滿足 + learning.governance_audit_log 存在 | `SELECT version FROM _sqlx_migrations WHERE version=98` |
 | 2 | V099/V100/V106/V107/V109/V113 cross-ref query 不破壞 V112 schema | per §6 範例 query 預跑 |
 
 ### 11.3 治理 acceptance(QA + R4)
@@ -1267,7 +1269,7 @@ per DOC-08 §12 #8 安全不變量「交易可解釋」:LAL tier config + assign
 2. **V099/V100 lease 表 land 狀態**(per §7.1 Query 3)— spec 採 application-layer cross-ref(不寫 FK CONSTRAINT)
 3. **V113 decay_signals 已 land 確認**(per §7.1 Query 4)— spec 寫 placeholder FK column;V113 land 後另起 V### ALTER ADD CONSTRAINT
 4. **legacy stub conflict**(per §7.1 Query 5)— spec 假設 greenfield
-5. **governance.audit_log.id column 是否 BIGSERIAL** — V112 不直接 FK 但 `evidence_json` 可能 ref;PA 驗證後 spec 對齊
+5. **learning.governance_audit_log.id column 是否 BIGSERIAL** — V112 不直接 FK 但 `evidence_json` 可能 ref;PA 驗證後 spec 對齊
 
 ### 12.2 已知 caveat
 

@@ -4,6 +4,7 @@ Date: 2026-05-21
 Status: **Proposed-pending-commit**（per operator D4 2026-05-21；本 ADR 為 ADR-0033 §Decision 2 時點 amendment standalone）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch via BB 5.21 v5.8 audit push back + PM final verdict §四 D4「M13 Y2 Binance trade enable → Y3+ at earliest」批准）
 Supersedes: ADR-0033 §Decision 2 「Y1 末（Sprint 10 W36-39）evaluation」時點 → 改 Y3+ first quarter (~Y2 末 W104+) evaluation；ADR-0033 §Decision 1（Binance market-data Y1 approved）+ §Decision 3（DEX/Hyperliquid not approved）+ §Decision 4（D12 + ToS posture）**不變**
+Sign-off chain note: ADR-0033 + ADR-0040 在同一 operator sign-off session（2026-05-21 主會話 PM dispatch）一起確認。邏輯順序為 ADR-0033 sign-off 先成立（v5.7 §12 ADR-0006 amendment 提案落地）→ ADR-0040 sign-off 包含對 ADR-0033 §Decision 2 的 timing supersede（v5.8 BB audit push back 觸發）；治理 trail = ADR-0006 baseline → ADR-0033 baseline amendment → ADR-0040 timing amendment，三 ADR 並存形成完整 cross-venue gate evidence chain。
 Related: ADR-0006 (Bybit-only baseline 2026-04-03 — thesis 不變) / ADR-0033 (ADR-0006 amendment Binance market-data + Y2 evaluation — 本 ADR 為其 §Decision 2 時點 amendment) / ADR-0034 (LAL 4 capital structure / venue change always operator) / ADR-0035 (M5 online learning interface reservation；同 Sprint 1A-δ deliverable + 同 interface-reservation pattern) / CLAUDE.md §一 Bybit-only + §四 mainnet boundary / AMD-2026-05-21-01 autonomy-vs-human-final-review / v5.8 §2 M13 (Multi-asset class / multi-venue capacity) / v5.8 §5 capital-tier ladder
 
 ## Context
@@ -93,7 +94,7 @@ ADR-0033 + CLAUDE.md §四 既有 5-gate live boundary（Python `live_reserved` 
 | # | Criterion | 來源 | 評估方法 |
 |---|---|---|---|
 | (a) | Y1 + Y2 Bybit self-trading alpha 已驗證 | ADR-0033 §Decision 2 (a) 延伸 | Sharpe ≥ X for **12-18 months sustained**（per ADR-0030 Gate 1 Alpha 延伸；Y1+Y2 累積 ~22 months 樣本足夠）|
-| (b) | Y1 + Y2 Binance market data analysis 顯示 cross-venue arbitrage 真有 +1%+ alpha vs Bybit-only baseline | ADR-0033 §Decision 2 (b) 延伸 | Counterfactual replay using Binance market data Y1+Y2 兩年累積；vs Bybit-only baseline alpha attribution |
+| (b) | Y1 + Y2 Binance market data analysis 顯示 cross-venue arbitrage / liquidation hunting 等 strategy 真有 +1%+ alpha vs Bybit-only baseline | ADR-0033 §Decision 2 (b) 延伸 | Counterfactual replay using Binance market data Y1+Y2 兩年累積；vs Bybit-only baseline alpha attribution |
 | (c) | Operator 仲裁 | ADR-0033 §Decision 2 (c) 不變 | **New 5-gate review session**（per Decision 2 venue-aware authorization.json 簽署需 Operator session）|
 | (d) | BB confirmed Binance ToS / KYC 持續可行 | ADR-0033 §Decision 2 (d) 不變 | BB 提供 Bybit + Binance KYC + ToS cross-venue 持續性 audit 報告 |
 | (e) | **Y2 末 Copy Trading evidence land** | **本 ADR 新增** | per ADR-0030 Copy Trading evidence-gated；Y2 末 Copy Trading 必須通過 4-Gate evaluation 並 land 為 active income stream（不要求 scaling，要求 evidence land）|
@@ -105,11 +106,13 @@ ADR-0033 + CLAUDE.md §四 既有 5-gate live boundary（Python `live_reserved` 
 
 | 元素 | 設計 |
 |---|---|
-| Rust `Venue` enum | `BybitPerp` / `BybitSpot` / `BybitOption` / `BinancePerpMarketData` (Y1+Y2 active) / `BinancePerpTrade` (Y3+ gated; enum slot 預留但 trading code path inactive) |
+| Rust `Venue` enum | `BybitPerp` / `BybitSpot` / `BybitOption` / `BinancePerpMarketData` (Y1+Y2 active) / `BinanceSpotMarketData` (Y1+Y2 active；per ADR-0033 §Decision 1 spot tickers + OHLCV 範圍) / `BinancePerpTrade` (Y3+ gated; enum slot 預留但 trading code path inactive) |
 | **Hardcode 拒絕的 venue** | **DEX**（Uniswap / GMX / dYdX 等）/ **Hyperliquid** —— 不在 enum 中保留 slot，從根源拒絕（per ADR-0033 §Decision 3 + CLAUDE.md §一）|
 | Enum 邊界 | 任何 IMPL **不可繞 enum 走 string literal venue ID**（per ADR-0006 / ADR-0033 architectural 簡化好處）；string literal 容易繞過編譯期 venue check，違反 fail-closed 紀律 |
 | 未來開放新 venue 路徑 | 若未來需開放新 venue（如 OKX / Coinbase），必須開新 ADR 顯式 amend 本 ADR + 新增 enum variant + 對應 per-venue 5-gate schema；不可在沒有新 ADR 的情況下 hot-patch 加 string venue |
 | Read-only on-chain query 例外 | per ADR-0033 §Decision 3 例外 + ADR-0031 Framework 3 on-chain counterfactual-only Y1 立場；**不創造 venue enum slot**（read-only RPC query 不屬於 trading venue）|
+
+**Note**：`BinanceSpotMarketData` enum slot 對應 ADR-0033 §Decision 1 「Spot/perp tickers + funding rate + liquidations + OHLCV」接入範圍中的 spot 部分；funding rate / liquidations / OHLCV 不需獨立 enum slot（屬於 market data feed dimension 而非 venue）。
 
 ### Decision 5 — Per-Venue Authorization 流程
 

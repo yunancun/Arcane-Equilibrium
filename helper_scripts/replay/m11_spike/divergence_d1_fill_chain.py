@@ -125,14 +125,14 @@ def detect_with_baseline(
         abs_severity = "CRITICAL"
 
     # σ-based threshold (per ADR-0038 Decision 3)
+    # round 2 LOW-2 合併:abs_z<2.5 兩階段 (<0.5 與 0.5-2.5) 同歸 NOISE,
+    # 簡化為單一條件
     z_score = (
         (divergence - baseline.mean) / baseline.sigma if baseline.sigma > 0 else 0.0
     )
     abs_z = abs(z_score)
-    if abs_z < 0.5:
+    if abs_z < 2.5:
         sigma_severity = "NOISE"
-    elif abs_z < 2.5:
-        sigma_severity = "NOISE"  # σ-based 中間階段歸 NOISE band
     elif abs_z < 3.0:
         sigma_severity = "WARN"
     else:
