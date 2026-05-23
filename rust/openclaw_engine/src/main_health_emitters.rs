@@ -469,7 +469,7 @@ pub(crate) fn spawn_metric_emitter_scheduler(
             emitter_count = emitter_count_for_log,
             "M3 MetricEmitterScheduler spawning (Track A real + B placeholder + C real \
              + D real (REST + WS production wire-up per Sprint 5+ §4.2.1) + F real; \
-             Track E skip per Sprint 5+ wire-up)"
+             Track E independent scheduler wire-up via spawn_strategy_quality_scheduler)"
         );
         match scheduler.run(scheduler_cancel).await {
             Ok(()) => {
