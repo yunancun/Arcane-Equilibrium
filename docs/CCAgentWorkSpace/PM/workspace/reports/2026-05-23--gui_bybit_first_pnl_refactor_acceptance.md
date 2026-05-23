@@ -2,7 +2,7 @@
 
 Date: 2026-05-23 13:23 CEST
 PM scope: `GUI-TODO.md` Phase 2, operator decisions `1A2A3A`
-Status: SOURCE-DONE / REVIEW-APPROVED / DEPLOY-SYNC-PENDING
+Status: DONE / DEPLOY-SYNCED
 
 ## Operator Decisions
 
@@ -45,6 +45,10 @@ Pass:
 - Invariant grep: no new closed-PnL write path; closed-PnL route is GET-only; Bybit helper uses `_get("/v5/position/closed-pnl", ...)`
 - E3 read-only/security review APPROVE
 - A3 UX re-review APPROVE
+- Linux source sync: `trade-core` fast-forwarded to code commit `47eddc37`
+- Linux focused pytest: `tests/test_bybit_rest_client.py tests/test_bybit_closed_pnl_route.py` = 50 passed, 11 existing warnings
+- Linux restart: `restart_all.sh --keep-auth` completed; `engine.sock ready after 3x500ms`; API restarted with 4 workers
+- Linux runtime smoke: `/api/v1/system/startup-status` returned 200; unauthenticated `/api/v1/strategy/demo/closed-pnl?limit=3` returned 401 as expected under auth gate; watchdog status showed fresh demo engine snapshot
 
 Known existing failures observed during broader verification:
 
