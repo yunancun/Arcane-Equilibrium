@@ -64,7 +64,9 @@
 pub mod api_latency;
 pub mod api_latency_probe_impl;
 pub mod database_pool;
+pub mod database_pool_probe_impl;
 pub mod pipeline_throughput;
+pub mod pipeline_throughput_probe_impl;
 pub mod risk_envelope;
 pub mod risk_envelope_probe_impl;
 pub mod strategy_quality;

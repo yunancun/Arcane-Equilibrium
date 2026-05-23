@@ -1165,6 +1165,16 @@ pub struct TickPipeline {
     /// （兩者語意一致即可，操作上 status_report 比較 recorder.last_reset_ms 也 OK，
     /// 此 field 設計餘地保留給未來 cadence policy 變更）。
     pub(crate) h0_latency_last_reset_ms: u64,
+    /// Sprint 5+ Track B real probe — strategy signal hot-path 累計 sink。
+    ///
+    /// 為什麼 Option：既有 paper-only / test pipeline 未接 health pipeline 走 None；
+    /// step_3_signals.rs hook 端 None 走 0 開銷分支；emitter 端 fallback
+    /// placeholder（per `feedback_no_dead_params`）。
+    ///
+    /// Arc：跨 pipeline / scheduler / emitter task 共享同一計數器 instance；
+    /// per spec §2.4 「main_health_emitters.rs 取 Arc 透傳給 RealPipeline
+    /// ThroughputSource」。
+    pub(crate) signal_stats: Option<Arc<signal_stats::SignalStats>>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1182,6 +1192,8 @@ mod close_sizing;
 mod commands;
 mod on_tick;
 pub(crate) mod on_tick_helpers;
+// Sprint 5+ Track B real probe — strategy signal hot-path 累計。
+pub mod signal_stats;
 #[cfg(test)]
 pub(crate) use on_tick::build_risk_close_tag;
 #[cfg(test)]

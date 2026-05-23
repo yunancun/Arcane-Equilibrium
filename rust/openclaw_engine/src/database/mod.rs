@@ -30,11 +30,13 @@ pub mod market_writer;
 pub mod migrations;
 pub mod outcome_backfiller;
 pub mod pool;
+pub mod pool_wait_stats;
 pub mod quality_writer;
 pub mod rest_poller;
 pub mod shadow_exit_writer;
 pub mod shadow_fill_writer;
 pub mod trading_writer;
+pub mod writer_queue_stats;
 
 use openclaw_core::klines::KlineBar;
 use serde::Deserialize;

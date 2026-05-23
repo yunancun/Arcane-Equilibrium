@@ -42,6 +42,10 @@ pub(crate) fn spawn_ws_supervisor(
     symbol_registry: &Arc<SymbolRegistry>,
     current_ws_client_tx: &WsTopicChangeRelay,
     event_tx: mpsc::Sender<PriceEvent>,
+    // Sprint 5+ Track B real probe — caller 注入 WsStats Arc；supervisor 每次
+    // ws_client 重連時 attach 同一 instance。None = paper-only / no-health-pipeline
+    // 走原本行為。
+    ws_stats: Option<Arc<openclaw_engine::ws_client::WsStats>>,
 ) -> tokio::task::JoinHandle<()> {
     let cfg_snapshot = config.get();
     let ws_subscriptions: Vec<String> = if cfg_snapshot.enable_extended_ws {
@@ -108,6 +112,13 @@ pub(crate) fn spawn_ws_supervisor(
 
             let mut ws_client =
                 WsClient::new(Arc::clone(&ws_config), event_tx.clone(), ws_cancel.clone());
+            // Sprint 5+ Track B real probe wire-up：supervisor restart 後新 ws_client
+            // instance 仍接同一 WsStats Arc；tick counter / last_tick_ms 跨 reconnect
+            // 連續累計，不會因 supervisor restart 重置（per spec §2.6「caller 端
+            // ws_client.attach_ws_stats() 後透傳同 Arc」設計）。
+            if let Some(stats) = &ws_stats {
+                ws_client.attach_ws_stats(Arc::clone(stats));
+            }
             for topic in &topics {
                 ws_client.subscribe(topic.clone());
             }

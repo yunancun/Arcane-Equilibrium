@@ -180,7 +180,21 @@ impl TickPipeline {
             // 對應 status JSON 端不附 summary 欄位（既有行為兼容）。
             h0_latency_recorder: None,
             h0_latency_last_reset_ms: 0,
+            // Sprint 5+ Track B real probe — default None；既有 paper/test ctor 0
+            // 行為退化。setter `set_signal_stats` 由 main.rs / health wire-up 注入。
+            signal_stats: None,
         }
+    }
+
+    /// Sprint 5+ Track B real probe — 注入 `SignalStats` Arc。
+    ///
+    /// 為什麼 setter：對齊既有 `set_h0_latency_recorder` 範式；ctor signature
+    /// 不擴張（per `feedback_working_principles` 範圍最小化）。
+    ///
+    /// 接線：main_health_emitters.rs 建好 Arc<SignalStats> 後由 main.rs 透過
+    /// pipeline command 或啟動序列注入；test / cold 路徑不注入即走 None fallback。
+    pub fn set_signal_stats(&mut self, stats: Arc<super::signal_stats::SignalStats>) {
+        self.signal_stats = Some(stats);
     }
 
     /// 3E-2a: Create a pipeline with explicit kind + balance.

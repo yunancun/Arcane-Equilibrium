@@ -605,12 +605,17 @@ async fn async_main(
     // 從 registry + `enable_extended_ws` 建初始 topics，spawn RE-2 supervisor
     // 自動重啟 WsClient（指數退避）。
     // ------------------------------------------------------------------
+    // Sprint 5+ Track B real probe — 在 ws supervisor spawn 前構造 Arc<WsStats>，
+    // 透傳給 supervisor 讓每次 ws_client 重連都接通同一 instance。同時 Arc clone
+    // 留給 spawn_metric_emitter_scheduler 注入 RealPipelineThroughputSource。
+    let ws_stats_arc = Arc::new(openclaw_engine::ws_client::WsStats::new());
     let ws_handle = main_ws::spawn_ws_supervisor(
         &config,
         &cancel,
         &symbol_registry,
         &current_ws_client_tx,
         event_tx.clone(),
+        Some(Arc::clone(&ws_stats_arc)),
     );
 
     // ------------------------------------------------------------------
@@ -1442,6 +1447,38 @@ async fn async_main(
     let cfg_snap_for_pool = config.get();
     let data_dir_mount =
         std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
+
+    // Sprint 5+ §4.3.5 Track B real probe — expected / actual subscription topic
+    // closure。`expected` 從 SymbolRegistry 既有 snapshot 推（extended 模式
+    // multi_interval_topics::full_subscription_list 每 sym 多 channel；非 extended
+    // 走 2 channel/sym）；`actual` 由本 process 全局 atomic counter 跟蹤 — 留 0
+    // closure 為 Wave 後續接通 (caller wire-up 漸進)，目前 expected != actual
+    // drift 由 closure 端 fallback default 0；signal_stats / writer_queue_stats /
+    // pool_wait_stats 同走 None 直到對應 caller 注入。
+    //
+    // 為什麼 expected closure 走 0 而非真實 snapshot：
+    //   - WsClient `subscriptions_count()` accessor 在每次 supervisor restart 後
+    //     重新 build，跨 process 全局 actual 不易暴露（需另開 Arc handle 或
+    //     atomic counter）。本 IMPL 限縮在 Track B placeholder fallback 路徑保
+    //     既有 V106 row 行為；真實 drift 觀測 IMPL caller wire-up 留 follow-up
+    //     wave（per spec §7.4 dependency「caller 兼容漸進」）。
+    //   - per spec §2.5 「partial-Some 走 placeholder fallback」設計：4 closure
+    //     任一 None → probe 全 placeholder；本 wire-up 因 expected/actual closure
+    //     未到位走 fallback，AC-3 production deploy 後 V106 row 走 placeholder
+    //     OK band 不誤升；real wire-up follow-up wave 接通後升級。
+    let expected_topic_count: Option<Arc<dyn Fn() -> u32 + Send + Sync>> = None;
+    let actual_topic_count: Option<Arc<dyn Fn() -> u32 + Send + Sync>> = None;
+    // signal_stats / writer_queue_stats / pool_wait_stats infra 已 IMPL 但 caller
+    // hot-path 接點漸進（per spec §7.4）— 暫走 None placeholder fallback。
+    let signal_stats_arc: Option<Arc<openclaw_engine::tick_pipeline::signal_stats::SignalStats>> =
+        None;
+    let writer_queue_stats_arc: Option<
+        Arc<openclaw_engine::database::writer_queue_stats::WriterQueueStats>,
+    > = None;
+    let pool_wait_stats_arc: Option<
+        Arc<openclaw_engine::database::pool_wait_stats::PoolWaitStats>,
+    > = None;
+
     let (portfolio_cache, health_event_bus) =
         main_health_emitters::spawn_metric_emitter_scheduler(
             &db_pool,
@@ -1452,6 +1489,14 @@ async fn async_main(
             // 注入，取代 Wave B fresh 0-state placeholder。
             &shared_ws_dropout,
             &shared_ws_rtt,
+            // Sprint 5+ §4.3.5 Track B real probe Arc 注入；wire-up 漸進。
+            &Some(Arc::clone(&ws_stats_arc)),
+            &signal_stats_arc,
+            expected_topic_count,
+            actual_topic_count,
+            // Sprint 5+ §4.3.6 Track C real probe Arc 注入；wire-up 漸進。
+            &writer_queue_stats_arc,
+            &pool_wait_stats_arc,
             primary_engine_mode,
             &cancel,
         );

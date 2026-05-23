@@ -244,6 +244,15 @@ impl ApiLatencySample {
 ///     p50 維持 DEGRADED」（per PA Sprint 2 Wave 2 2026-05-22 amend）。
 ///   - 三段已足夠分辨「常態 / 輕微退化 / 明顯退化」三狀態；CRITICAL 由 p99
 ///     / 5xx / ws_dropout 三條獨立路徑捕捉。
+///
+/// production hardening note (per Sprint 5+ Wave 1 §4.4 empirical 2026-05-23)：
+///   - 真實 6h sample 355 row vavg=187ms 落正中 WARN band（50-200ms），完全
+///     符合 ladder 預期；vmax 偶有 550ms 落 DEGRADED band 但 state 卡 WARN 是
+///     state machine cascade gap 預期行為，不是 ladder 問題。
+///   - 持續 WARN 不會自動升 DEGRADED（per health/mod.rs line 445 spike scope
+///     限制：WARN → DEGRADED 5min dwell 由 Sprint 5+ Tier 1 cascade IMPL 接）。
+///   - monitoring SOP：operator dashboard 看 WARN row 大量是 cascade gap 預期，
+///     不是 health bug。真實 DEGRADED transition 上線後 alert 才有意義。
 pub fn classify_api_latency_rest_p50_ms(value: u32) -> HealthState {
     if value > 200 {
         HealthState::HealthDegraded
@@ -265,6 +274,12 @@ pub fn classify_api_latency_rest_p50_ms(value: u32) -> HealthState {
 ///   - p95 是「100 個樣本中第 95 個」，正常情況下會有少量慢樣本，閾值不能跟
 ///     p50 一樣嚴。
 ///   - 500ms+ 表示 5% 樣本超過半秒，trading hot path 已退化。
+///
+/// production hardening note (per Sprint 5+ Wave 1 §4.4 empirical 2026-05-23)：
+///   - 真實 6h sample 354 row vavg=631ms 大量落 DEGRADED band（>500ms）但
+///     state 卡 HEALTH_WARN 是 state machine cascade gap 預期行為（per
+///     health/mod.rs line 445 WARN → DEGRADED 5min dwell 由 Sprint 5+ Tier 1
+///     cascade IMPL 接）；ladder 計算正確。
 pub fn classify_api_latency_rest_p95_ms(value: u32) -> HealthState {
     if value > 500 {
         HealthState::HealthDegraded
@@ -288,6 +303,12 @@ pub fn classify_api_latency_rest_p95_ms(value: u32) -> HealthState {
 ///     （5s），下次 timeout 即觸發 fail-closed。
 ///   - 對齊 M3 spec §2.3 line 104 amend CRITICAL band「outlier latency > 2s」
 ///     literal（per PA Sprint 2 Wave 2 2026-05-22 amend）。
+///
+/// production hardening note (per Sprint 5+ Wave 1 §4.4 empirical 2026-05-23)：
+///   - 真實 6h sample 354 row vavg=688ms 落 WARN band（500-1000ms）；ladder
+///     行為與 state machine 都正確（band=WARN，state=WARN）。
+///   - 與 rest_p50 / p95 同：持續 WARN 不會自動升 DEGRADED；cascade IMPL 由
+///     Sprint 5+ Tier 1 接。
 pub fn classify_api_latency_rest_p99_ms(value: u32) -> HealthState {
     if value > 2000 {
         HealthState::HealthCritical
@@ -302,20 +323,33 @@ pub fn classify_api_latency_rest_p99_ms(value: u32) -> HealthState {
 
 /// ws_rtt_p50_ms classify（WS 常態 RTT）。
 ///
-/// ladder：
-///   OK       : < 50ms
-///   WARN     : 50 - 150ms
-///   DEGRADED : > 150ms
+/// ladder (per Sprint 5+ Wave 1 §4.4 production hardening empirical 校準
+/// 2026-05-23)：
+///   OK       : < 170ms     （Bybit demo endpoint 到 trade-core 物理距離常態
+///                            150-163ms；ladder 留 ~10% headroom 對應網路
+///                            jitter）
+///   WARN     : 170 - 300ms （網路抖動 / venue 端 push 退化）
+///   DEGRADED : > 300ms     （已影響 trading hot path tick delivery；接近
+///                            ws_dropout 風險窗）
 ///
-/// 為什麼 WS RTT 比 REST 嚴:
-///   - WS 是 persistent connection；無 TCP handshake / TLS overhead，純 ping→
-///     pong 距離；正常 < 50ms。
-///   - WS RTT 退化是 venue 端 push 路徑慢或 client→venue 網路退化 signal；
-///     150ms+ 表示已影響 trading hot path tick delivery。
+/// 為什麼從 50ms baseline 改 170ms (per Linux empirical 2026-05-23 6h
+/// trading_postgres 47 row HEALTH_WARN sample vmin=162 vmax=163ms)：
+///   - 原 ladder 假設 WS persistent connection 無 TCP handshake / TLS
+///     overhead 應 < 50ms；對 colocated venue 成立，但 Bybit demo endpoint
+///     物理距離 ~150-160ms 是不可逆的網路常態。
+///   - Live mainnet endpoint 物理距離可能不同（hk/sg DC 更近）；mainnet 切
+///     換時須重 calibrate ladder；本次 amend 只覆蓋 demo + live_demo 範圍。
+///   - 對應 PA Sprint 5+ Wave 1 §2.3.2 「ladder 應反映真實網路 baseline 而非
+///     colocated 理論值」。
+///
+/// 為什麼 WS RTT 退化判定仍嚴於 REST:
+///   - WS 是 persistent connection；ws_rtt 退化是 venue 端 push 路徑慢或
+///     client→venue 網路退化 signal；300ms+ 仍表示已影響 trading hot path
+///     tick delivery，比 REST 的 500-1000ms 嚴格。
 pub fn classify_api_latency_ws_rtt_p50_ms(value: u32) -> HealthState {
-    if value > 150 {
+    if value > 300 {
         HealthState::HealthDegraded
-    } else if value >= 50 {
+    } else if value >= 170 {
         HealthState::HealthWarn
     } else {
         HealthState::HealthOk
@@ -704,26 +738,50 @@ mod tests {
 
     #[test]
     fn test_classify_ws_rtt_p50_ms_thresholds() {
-        // OK <50 / WARN 50-150 / DEGRADED >150。
+        // per Sprint 5+ Wave 1 §4.4 amend：OK <170 / WARN 170-300 / DEGRADED >300。
         assert_eq!(
             classify_api_latency_ws_rtt_p50_ms(0),
             HealthState::HealthOk
         );
         assert_eq!(
-            classify_api_latency_ws_rtt_p50_ms(49),
+            classify_api_latency_ws_rtt_p50_ms(169),
             HealthState::HealthOk
         );
         assert_eq!(
-            classify_api_latency_ws_rtt_p50_ms(50),
+            classify_api_latency_ws_rtt_p50_ms(170),
             HealthState::HealthWarn
         );
         assert_eq!(
-            classify_api_latency_ws_rtt_p50_ms(150),
+            classify_api_latency_ws_rtt_p50_ms(300),
             HealthState::HealthWarn
         );
         assert_eq!(
-            classify_api_latency_ws_rtt_p50_ms(151),
+            classify_api_latency_ws_rtt_p50_ms(301),
             HealthState::HealthDegraded
+        );
+    }
+
+    /// Sprint 5+ Wave 1 §4.4 production hardening — Bybit demo endpoint
+    /// 物理距離常態 150-163ms 必落新 OK band（避未來人改回 OK<50 baseline
+    /// 誤觸 47 row/6h 持續 WARN，per PA report §2.2.1）。
+    #[test]
+    fn test_ws_rtt_p50_demo_baseline_163_is_ok() {
+        assert_eq!(
+            classify_api_latency_ws_rtt_p50_ms(163),
+            HealthState::HealthOk,
+            "Bybit demo endpoint 物理距離常態 163ms 必落 OK band"
+        );
+    }
+
+    /// Sprint 5+ Wave 1 §4.4 production hardening — 真實 network jitter
+    /// 退化（250ms）必落 WARN band（非 DEGRADED）；對齊新 ladder 170-300
+    /// 為「網路抖動 / venue 端 push 退化」語意。
+    #[test]
+    fn test_ws_rtt_p50_jitter_250_warn() {
+        assert_eq!(
+            classify_api_latency_ws_rtt_p50_ms(250),
+            HealthState::HealthWarn,
+            "250ms 真實 jitter / venue push 退化 落 WARN band"
         );
     }
 
@@ -915,11 +973,16 @@ mod tests {
     async fn test_api_latency_emitter_critical_sample_propagates() {
         // 注入 critical / degraded 場景：rest_p99=3000 (CRITICAL), ws_rtt_p99
         // =2000 (CRITICAL), ret_5xx=30 (CRITICAL), ws_dropout=10 (CRITICAL)。
+        //
+        // 為什麼 ws_rtt_p50_ms=350 而非舊 200:
+        //   per Sprint 5+ Wave 1 §4.4 amend ladder OK<170 / WARN 170-300 /
+        //   DEGRADED >300；200 已不再屬 DEGRADED（落 WARN band），保持本 case
+        //   原意「ws_rtt_p50 DEGRADED」必用 >300。
         let source = StubSource {
             rest_p50_ms: 250,
             rest_p95_ms: 800,
             rest_p99_ms: 3000,
-            ws_rtt_p50_ms: 200,
+            ws_rtt_p50_ms: 350,
             ws_rtt_p99_ms: 2000,
             ret_code_4xx_count: 80,
             ret_code_5xx_count: 30,

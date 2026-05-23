@@ -149,6 +149,17 @@ impl WsClient {
             return ProcessOutcome::Continue;
         };
 
+        // Sprint 5+ Track B real probe hot-path hook (per spec §2.3)：
+        // 確認本次 dispatch 解出實際 PriceEvent（非控制訊息 / 未知 topic）才
+        // 累計 tick。inc_tick 是 2 atomic ops，無鎖；對 25 sym × 5/s = 125
+        // events/s 量級 0 性能退化（per AC-4 hot_path_baseline 守線）。
+        // None fallback：未接 health pipeline 的 scanner / paper 走 0 開銷分支。
+        if !events.is_empty() {
+            if let Some(stats) = &self.ws_stats {
+                stats.inc_tick(now_ms());
+            }
+        }
+
         for event in events {
             if self.event_tx.send(event).await.is_err() {
                 warn!("event channel closed / 事件通道已關閉");

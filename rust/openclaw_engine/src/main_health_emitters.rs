@@ -76,14 +76,20 @@ use openclaw_engine::bybit_rest_client::{
     BybitRestClient, RestLatencyHistogram, RetCodeCounter,
 };
 use openclaw_engine::database::pool::DbPool;
+use openclaw_engine::database::pool_wait_stats::PoolWaitStats;
+use openclaw_engine::database::writer_queue_stats::WriterQueueStats;
 use openclaw_engine::health::domains::api_latency::ApiLatencyEmitter;
 use openclaw_engine::health::domains::api_latency_probe_impl::RealApiLatencySourceProbe;
 use openclaw_engine::health::domains::database_pool::{
     DatabasePoolEmitter, PoolWaitP95Probe, WriterQueueProbe,
 };
+use openclaw_engine::health::domains::database_pool_probe_impl::{
+    build_pool_wait_p95_probe, build_writer_queue_probe,
+};
 use openclaw_engine::health::domains::pipeline_throughput::{
     PipelineThroughputEmitter, PipelineThroughputSourceProbe,
 };
+use openclaw_engine::health::domains::pipeline_throughput_probe_impl::RealPipelineThroughputSource;
 use openclaw_engine::health::domains::risk_envelope::RiskEnvelopeEmitter;
 use openclaw_engine::health::domains::risk_envelope_probe_impl::{
     PortfolioStateCache, PositionExposure, RealRiskEnvelopeSourceProbe,
@@ -95,6 +101,8 @@ use openclaw_engine::health::domains::strategy_quality_probe_impl::{
     RealStrategyQualitySourceProbe, StrategyQualityMetricsCache,
     StrategyQualityMetricsSnapshot,
 };
+use openclaw_engine::tick_pipeline::signal_stats::SignalStats;
+use openclaw_engine::ws_client::stats::WsStats;
 use openclaw_engine::event_consumer::SYMBOLS;
 use openclaw_engine::health::event_bus::HealthEventBus;
 use openclaw_engine::health::metric_emitter::{
@@ -142,6 +150,54 @@ use openclaw_engine::health::M3Error;
 //   - Sprint 5+ wire-up 替換為 real probe 反映真實 ws_client / IndicatorEngine
 //     / IPC metric；本 placeholder 5 default value 在 real source 接入瞬間
 //     被替換，不再參與 V106 emit chain。
+
+/// Sprint 5+ §4.3.5 Track B real probe builder（per spec §2.6）。
+///
+/// 為什麼 Option 注入：
+///   - 既有 caller（test / paper-only / cold-start no-binding）未必接 health pipeline；
+///     任一 Arc None → fallback `PlaceholderPipelineThroughputSource`，0 行為退化。
+///   - all-Some：5 metric 中 4 真實 + 1 placeholder（ipc_p99 延 Sprint 5++）；V106 row
+///     真實升 alpha。
+///
+/// 為什麼三 source 同 None 走 placeholder fallback（per `feedback_no_dead_params`）：
+///   - 半接通 mixed real/placeholder 會誤導 reviewer 認為「半連線是合法狀態」；
+///     統一走 placeholder fallback 讓 V106 row 中性表態。
+fn build_real_pipeline_throughput_probe(
+    ws_stats: Arc<WsStats>,
+    signal_stats: Arc<SignalStats>,
+    expected_topic_count: Arc<dyn Fn() -> u32 + Send + Sync>,
+    actual_topic_count: Arc<dyn Fn() -> u32 + Send + Sync>,
+) -> RealPipelineThroughputSource {
+    RealPipelineThroughputSource::new(ws_stats, signal_stats, expected_topic_count, actual_topic_count)
+}
+
+/// 構造 Track B `PipelineThroughputEmitter`：四 source 任一缺席走 placeholder。
+///
+/// 為什麼 partial-Some 也走 placeholder fallback（對齊 Track D 設計範式 §3.4 改動 2）:
+///   - 四 source `ws_stats` / `signal_stats` / `expected_topic` / `actual_topic`
+///     需同時存在才能 emit production-aligned 5 metric；任一 None = pipeline
+///     binding 半接通狀態。
+///   - per `feedback_no_dead_params` 反假陽性：partial 走 mixed real/placeholder
+///     會誤導 reviewer；統一走 placeholder fallback 讓 V106 row 中性表態。
+fn build_pipeline_throughput_emitter(
+    ws_stats: &Option<Arc<WsStats>>,
+    signal_stats: &Option<Arc<SignalStats>>,
+    expected_topic_count: Option<Arc<dyn Fn() -> u32 + Send + Sync>>,
+    actual_topic_count: Option<Arc<dyn Fn() -> u32 + Send + Sync>>,
+) -> Box<dyn DomainEmitter> {
+    match (ws_stats, signal_stats, expected_topic_count, actual_topic_count) {
+        (Some(ws), Some(sig), Some(exp), Some(act), ) => {
+            let probe = build_real_pipeline_throughput_probe(
+                Arc::clone(ws), Arc::clone(sig), exp, act,
+            );
+            Box::new(PipelineThroughputEmitter::new(probe))
+        }
+        _ => {
+            // 全 placeholder fallback：任一 None 走 5 metric default OK band。
+            Box::new(PipelineThroughputEmitter::new(PlaceholderPipelineThroughputSource))
+        }
+    }
+}
 
 struct PlaceholderPipelineThroughputSource;
 
@@ -299,15 +355,38 @@ fn build_engine_runtime_emitter() -> Box<dyn DomainEmitter> {
 //     時 caller 替換為 real probe。
 //   - 兩者全返 0 → emitter classify 走 OK band，不誤升 WARN/DEGRADED。
 
+/// Sprint 5+ §4.3.6 Track C real probe builder（per spec §3.5）。
+///
+/// 為什麼 Option<Arc<...>> 而非 mandatory：
+///   - tasks.rs spawn_db_writers 在 PG 不可用時 market_tx 為 None；此時 Track C
+///     real probe 無法構造（沒 sender handle 算 capacity）→ 走 placeholder
+///     fallback 0u32（既有 Wave B 範式 1:1 保留）。
+///
+/// 為什麼兩 stats 同 None / 同 Some 二選一（per `feedback_no_dead_params` 對齊
+/// Track B partial fallback）：
+///   - 任一 None = pipeline binding 半接通狀態；統一走 placeholder fallback 讓
+///     V106 row 中性表態，避免「半連線是合法狀態」誤導 reviewer。
 fn build_database_pool_emitter(
     db_pool: &Arc<DbPool>,
     pool_max_conn: u32,
     data_dir_mount: &str,
+    writer_queue_stats: &Option<Arc<WriterQueueStats>>,
+    pool_wait_stats: &Option<Arc<PoolWaitStats>>,
 ) -> Box<dyn DomainEmitter> {
-    // placeholder：Sprint 5+ wire-up 走 market_writer.rs Vec<MarketDataMsg> len。
-    let writer_queue_probe: WriterQueueProbe = Arc::new(|| 0u32);
-    // placeholder：Sprint 5+ wire-up 走 sqlx Pool acquire wait time histogram。
-    let pool_wait_p95_probe: PoolWaitP95Probe = Arc::new(|| 0u32);
+    let (writer_queue_probe, pool_wait_p95_probe): (WriterQueueProbe, PoolWaitP95Probe) =
+        match (writer_queue_stats, pool_wait_stats) {
+            (Some(wq), Some(pw)) => {
+                // Sprint 5+ §4.3.6 production wire-up：真實 source closure。
+                (
+                    build_writer_queue_probe(Arc::clone(wq)),
+                    build_pool_wait_p95_probe(Arc::clone(pw)),
+                )
+            }
+            _ => {
+                // 全 placeholder fallback：任一 None 走 0u32 closure（既有 Wave B 範式）。
+                (Arc::new(|| 0u32), Arc::new(|| 0u32))
+            }
+        };
 
     Box::new(DatabasePoolEmitter::new(
         Arc::clone(db_pool),
@@ -391,6 +470,18 @@ pub(crate) fn spawn_metric_emitter_scheduler(
     // aligned probe（取代 Wave B fresh 0-state placeholder）。
     shared_ws_dropout: &Option<Arc<WsDropoutCounter>>,
     shared_ws_rtt: &Option<Arc<WsRttHistogram>>,
+    // Sprint 5+ §4.3.5 Track B real probe — ws_client hot-path 統計與 strategy
+    // signal 累計。caller 端 main.rs 在 ws_client.attach_ws_stats() +
+    // pipeline.set_signal_stats() 後透傳同 Arc。任一 None → placeholder fallback。
+    ws_stats: &Option<Arc<WsStats>>,
+    signal_stats: &Option<Arc<SignalStats>>,
+    expected_topic_count: Option<Arc<dyn Fn() -> u32 + Send + Sync>>,
+    actual_topic_count: Option<Arc<dyn Fn() -> u32 + Send + Sync>>,
+    // Sprint 5+ §4.3.6 Track C real probe — writer queue depth + pool wait p95。
+    // caller 端 main.rs 在 tasks.rs market_tx 包 Arc + WriterQueueStats / Pool
+    // WaitStats ctor 後透傳同 Arc。任一 None → placeholder fallback。
+    writer_queue_stats: &Option<Arc<WriterQueueStats>>,
+    pool_wait_stats: &Option<Arc<PoolWaitStats>>,
     engine_mode_str: &'static str,
     cancel: &CancellationToken,
 ) -> (
@@ -429,12 +520,27 @@ pub(crate) fn spawn_metric_emitter_scheduler(
     let mode_str = engine_mode_str.to_string();
     let engine_mode: EngineModeProvider = Arc::new(move || mode_str.clone());
 
-    // Step 4: 構造 6 emitter（A real / B placeholder / C real / D hybrid / E
-    // skip / F real）。
+    // Step 4: 構造 6 emitter（A real / B real (Sprint 5+ §4.3.5 partial — 4/5
+    // metric real + ipc_p99 placeholder) / C real (Sprint 5+ §4.3.6) / D real
+    // (Sprint 5+ §4.2.1) / E skip / F real）。
     let engine_runtime = build_engine_runtime_emitter();
-    let pipeline_throughput: Box<dyn DomainEmitter> =
-        Box::new(PipelineThroughputEmitter::new(PlaceholderPipelineThroughputSource));
-    let database_pool = build_database_pool_emitter(db_pool, pool_max_conn, data_dir_mount);
+    // Sprint 5+ §4.3.5 Track B：四 source 同時注入才走 real probe；任一 None
+    // 走 placeholder fallback（per build_pipeline_throughput_emitter match arm）。
+    let pipeline_throughput: Box<dyn DomainEmitter> = build_pipeline_throughput_emitter(
+        ws_stats,
+        signal_stats,
+        expected_topic_count,
+        actual_topic_count,
+    );
+    // Sprint 5+ §4.3.6 Track C：兩 source 同時注入才走 real probe；任一 None
+    // 走 placeholder fallback（per build_database_pool_emitter match arm）。
+    let database_pool = build_database_pool_emitter(
+        db_pool,
+        pool_max_conn,
+        data_dir_mount,
+        writer_queue_stats,
+        pool_wait_stats,
+    );
     // PA-DRIFT-4 Sprint 5+ §4.2.1：transmit ws Arc through to api_latency
     // emitter；三 source 同 None 走 placeholder fallback（paper-only / cold-
     // start no-binding）。
@@ -572,9 +678,15 @@ pub(crate) fn spawn_portfolio_state_update_task(
                         .unwrap_or(0);
                     // Wave B placeholder no-op：fail-soft 0 sample push 推進
                     // sliding window drain。
+                    // F-4 per_symbol_mid_prices 空 HashMap = cold-start，無 mid
+                    // price 觀測；對齊 placeholder 0.0 OK band；Sprint 5+ §4.2
+                    // PaperState SSOT wire-up 後此 caller 由 mid price source 提供
+                    // 真實 HashMap（per PA spec §4 line 262）。
                     let equity_usd = 0.0_f64;
                     let new_fills: Vec<(u64, f64)> = Vec::new();
                     let latest_exposures: Vec<PositionExposure> = Vec::new();
+                    let per_symbol_mid_prices: std::collections::HashMap<String, f64> =
+                        std::collections::HashMap::new();
                     {
                         let mut guard = cache.lock();
                         guard.update_from_pipeline_snapshot(
@@ -582,6 +694,7 @@ pub(crate) fn spawn_portfolio_state_update_task(
                             equity_usd,
                             &new_fills,
                             latest_exposures,
+                            &per_symbol_mid_prices,
                         );
                     }
                 }
@@ -1074,7 +1187,7 @@ mod tests {
     #[test]
     fn test_build_risk_envelope_emitter_returns_shared_cache() {
         let (_emitter, cache1) = build_risk_envelope_emitter();
-        // 寫一個值
+        // 寫一個值（F-4 mid_prices 傳空 HashMap 對齊 placeholder cold-start）
         {
             let mut guard = cache1.lock();
             guard.update_from_pipeline_snapshot(
@@ -1082,6 +1195,7 @@ mod tests {
                 100.0,
                 &[(1_700_000_000_000, 5.0)],
                 vec![PositionExposure { notional_usd: 50.0 }],
+                &std::collections::HashMap::new(),
             );
         }
         // 驗 cache 內容對外 visible。
