@@ -101,6 +101,22 @@ def _make_writer(paper_engine=None, kline_manager=None, bridge=None, **kwargs):
     )
 
 
+def _isolate_leader_lock(monkeypatch, tmp_path):
+    """Keep lifecycle tests off the production /tmp/openclaw leader lock."""
+    from app import grafana_data_writer as gdw
+
+    if gdw._LEADER_LOCK_FD is not None:
+        try:
+            import os
+
+            os.close(gdw._LEADER_LOCK_FD)
+        except OSError:
+            pass
+    gdw._LEADER_LOCK_FD = None
+    gdw._LEADER_LOCK_PATH = None
+    monkeypatch.setenv("OPENCLAW_DATA_DIR", str(tmp_path))
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Test Class 1: Constructor and Lifecycle
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -119,9 +135,10 @@ class TestGrafanaDataWriterLifecycle:
         assert writer._stats["writes"] == 0
         assert writer._stats["errors"] == 0
 
-    def test_start_sets_running(self):
+    def test_start_sets_running(self, monkeypatch, tmp_path):
         """start() sets _running to True and creates thread.
         start() 设置 _running 为 True 并创建线程。"""
+        _isolate_leader_lock(monkeypatch, tmp_path)
         writer = _make_writer()
         writer.start()
         assert writer._running is True
@@ -129,9 +146,10 @@ class TestGrafanaDataWriterLifecycle:
         assert writer._thread.daemon is True
         writer.stop()
 
-    def test_start_idempotent(self):
+    def test_start_idempotent(self, monkeypatch, tmp_path):
         """Calling start() twice does not create second thread.
         连续两次 start() 不会创建第二个线程。"""
+        _isolate_leader_lock(monkeypatch, tmp_path)
         writer = _make_writer()
         writer.start()
         thread1 = writer._thread
