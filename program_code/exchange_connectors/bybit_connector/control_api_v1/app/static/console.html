@@ -796,15 +796,17 @@ async function refreshSidebar() {
   if (_sidebarRefreshInFlight) return;
   _sidebarRefreshInFlight = true;
   try {
-  // ── Live Section — always shown, reads real Bybit account via /api/v1/live/balance
-  // 實盤板塊 — 始終顯示，從 /api/v1/live/balance 讀取真實帳戶
+  // ── Live Section — always shown, sidebar uses fast Rust snapshot to avoid
+  // blocking API workers on exchange REST during the 30s refresh loop.
+  // 實盤板塊 — 始終顯示；側欄使用 Rust 快照 fast path，避免 30 秒刷新循環
+  // 因交易所 REST 卡住而拖死 API worker。
   document.getElementById('live-section').style.opacity = '1';
   document.getElementById('live-balance-section').style.opacity = '1';
   document.getElementById('live-pnl-section').style.opacity = '1';
 
   // F5/A1+A2 — fetch session status + balance + metrics in one go.
   //   session/status → mode label + actual_endpoint (LiveDemo / Mainnet / unconfigured)
-  //   balance        → equity / available
+  //   balance        → equity / available from Rust snapshot fast path
   //   metrics        → account_metrics_today DB-local-day identity
   // F5/A1+A2：一次抓 status + balance + metrics。前者給 mode + endpoint 標籤，
   // 後者算與 tab-live「今日淨 PnL」一致的口徑。
@@ -812,7 +814,7 @@ async function refreshSidebar() {
   try {
     const [lsR, bR, mR] = await Promise.allSettled([
       api('/api/v1/live/session/status'),
-      api('/api/v1/live/balance'),
+      api('/api/v1/live/balance?fast=1'),
       api('/api/v1/live/metrics'),
     ]);
     sessionData = lsR.status === 'fulfilled' && lsR.value && lsR.value.data;
@@ -856,8 +858,8 @@ async function refreshSidebar() {
     document.getElementById('s-live-mode-detail').textContent = '';
   }
 
-  // Live balance from /api/v1/live/balance (httpx BybitClient — real exchange data)
-  // 實盤餘額來自 /api/v1/live/balance（httpx BybitClient — 真實交易所數據）
+  // Live balance from /api/v1/live/balance?fast=1 (Rust snapshot fast path).
+  // 實盤餘額來自 /api/v1/live/balance?fast=1（Rust 快照 fast path）。
   try {
     if (balData && balData.error === 'live_slot_not_configured') {
       // F5/A1: refuse to display demo balance under the Live label
@@ -907,7 +909,7 @@ async function refreshSidebar() {
   try {
     const [sdR, balR, metricsR] = await Promise.allSettled([
       api('/api/v1/strategy/demo/session/status'),
-      api('/api/v1/strategy/demo/balance'),
+      api('/api/v1/strategy/demo/balance?fast=1'),
       api('/api/v1/strategy/demo/metrics'),
     ]);
     const sd = sdR.status === 'fulfilled' && sdR.value ? sdR.value.data : null;

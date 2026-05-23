@@ -3,12 +3,13 @@ from __future__ import annotations
 """
 MODULE_NOTE (中文):
   System / Health legacy 路由（E5-P0-5 拆分自 legacy_routes.py）。
-  包含 13 條只讀路由：
+  包含 14 條只讀路由：
     GET /api/v1/system/overview           — 系統總覽
     GET /api/v1/system/chapter-status     — 章節狀態
     GET /api/v1/system/control-plane      — 控制平面
     GET /api/v1/system/capability-matrix  — 能力矩陣
     GET /api/v1/system/product-families   — 產品族狀態
+    GET /api/v1/system/fx-rates           — 同源匯率代理
     GET /api/v1/system/business/daily     — 當日經營指標
     GET /api/v1/system/business/summary   — 完整經營與收益摘要
     GET /api/v1/system/health             — 健康遙測（需 auth，完整 snapshot）
@@ -23,14 +24,18 @@ MODULE_NOTE (中文):
 
 MODULE_NOTE (English):
   System / Health read-only legacy routes (split out of legacy_routes.py in E5-P0-5).
-  Contains 12 routes covering system overview, chapter status, control plane,
+  Contains 14 routes covering system overview, chapter status, control plane,
   capability matrix, product families, business metrics, health telemetry,
-  Grafana proxy, audit summary, source context, and DB pool health probe.
+  FX proxy, Grafana proxy, audit summary, source context, and DB pool health probe.
 
   ★ Monkey-patch safety: all patched symbols resolved via `_base.xxx(...)` at
     request time. No module-level capture of STORE/envelope_response/get_latest_snapshot.
 """
 
+import json
+import threading
+import time
+import urllib.request
 from typing import Any
 
 from fastapi import Depends
@@ -42,6 +47,84 @@ from .state_models import (
     OverviewData,
     ResponseEnvelope,
 )
+
+_FX_URL = "https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=usd,eur"
+_FX_TIMEOUT_SECONDS = 2.0
+_FX_TTL_SECONDS = 60.0
+_FX_FALLBACK_RATES = {"USDT": 1.0, "USD": 1.0, "EUR": 0.92}
+_FX_CACHE_LOCK = threading.Lock()
+_FX_CACHE: dict[str, Any] = {
+    "expires_at": 0.0,
+    "payload": {
+        "base": "USDT",
+        "rates": dict(_FX_FALLBACK_RATES),
+        "source": "fallback_static",
+        "available": False,
+        "ttl_seconds": int(_FX_TTL_SECONDS),
+        "updated_at_ms": 0,
+    },
+}
+
+
+def _finite_positive(value: Any, fallback: float) -> float:
+    """匯率只接受正有限值；異常時保守回退。"""
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return fallback
+    if parsed > 0 and parsed < 100:
+        return parsed
+    return fallback
+
+
+def _read_live_fx_rates() -> dict[str, Any]:
+    """
+    Read USDT display FX rates via a server-side proxy.
+    經後端代理讀取 USDT 顯示匯率，避免瀏覽器 CSP 放寬到第三方。
+    """
+    now = time.time()
+    with _FX_CACHE_LOCK:
+        cached = dict(_FX_CACHE["payload"])
+        if _FX_CACHE["expires_at"] > now:
+            cached["cached"] = True
+            return cached
+
+    rates = dict(cached.get("rates") or _FX_FALLBACK_RATES)
+    payload: dict[str, Any]
+    try:
+        with urllib.request.urlopen(_FX_URL, timeout=_FX_TIMEOUT_SECONDS) as resp:
+            raw = resp.read(4096)
+        body = json.loads(raw.decode("utf-8"))
+        tether = body.get("tether") if isinstance(body, dict) else {}
+        rates = {
+            "USDT": 1.0,
+            "USD": _finite_positive(tether.get("usd") if isinstance(tether, dict) else None, rates["USD"]),
+            "EUR": _finite_positive(tether.get("eur") if isinstance(tether, dict) else None, rates["EUR"]),
+        }
+        payload = {
+            "base": "USDT",
+            "rates": rates,
+            "source": "coingecko_server_proxy",
+            "available": True,
+            "ttl_seconds": int(_FX_TTL_SECONDS),
+            "updated_at_ms": int(now * 1000),
+        }
+    except Exception as exc:
+        payload = {
+            "base": "USDT",
+            "rates": rates,
+            "source": "stale_cache" if cached.get("updated_at_ms") else "fallback_static",
+            "available": False,
+            "ttl_seconds": int(_FX_TTL_SECONDS),
+            "updated_at_ms": int(cached.get("updated_at_ms") or now * 1000),
+            "error": type(exc).__name__,
+        }
+
+    with _FX_CACHE_LOCK:
+        _FX_CACHE["payload"] = dict(payload)
+        _FX_CACHE["expires_at"] = now + _FX_TTL_SECONDS
+    payload["cached"] = False
+    return payload
 
 
 def register_system_legacy_routes(app) -> None:
@@ -130,6 +213,22 @@ def register_system_legacy_routes(app) -> None:
             request_id=None,
             action_result="success",
             data=snapshot["product_family_status"],
+        )
+
+    @app.get(
+        f"{settings.api_prefix}/system/fx-rates",
+        response_model=ResponseEnvelope[dict[str, Any]],
+    )
+    def get_fx_rates(
+        actor=Depends(_base.current_actor),
+    ) -> ResponseEnvelope[dict[str, Any]]:
+        """Display-currency FX rates via same-origin backend proxy / 同源後端匯率代理."""
+        snapshot, _ = _base.get_latest_snapshot()
+        return _base.envelope_response(
+            snapshot=snapshot,
+            request_id=None,
+            action_result="success",
+            data=_read_live_fx_rates(),
         )
 
     @app.get(

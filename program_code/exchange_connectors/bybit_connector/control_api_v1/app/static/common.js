@@ -387,31 +387,22 @@ window.addEventListener('storage', function(e) {
 let _ocFxTimer = null;  // handle for the 60-second refresh loop / 60秒刷新定時器句柄
 
 async function ocInitFx() {
-  // Fetch real-time USDT/USD and USDT/EUR rates from CoinGecko (free, no key).
+  // Fetch USDT/USD and USDT/EUR rates through the same-origin backend proxy.
   // Runs once immediately, then schedules itself every 60 s via setTimeout
   // (recursive, not setInterval — avoids overlap if the fetch is slow).
   // Only dispatches 'occurrencychange' when a rate actually moves by ≥ 0.0001,
   // so tabs don't re-render every minute when rates are stable.
   //
-  // 从 CoinGecko 获取實時 USDT/USD 和 USDT/EUR 汇率（免費，無需 API Key）。
+  // 經同源後端代理获取 USDT/USD 和 USDT/EUR 汇率，避免浏览器 CSP 放寬到第三方。
   // 首次立即執行，之后每 60 秒通過 setTimeout 遞歸調度（避免 fetch 延遲导致重叠）。
   // 仅在汇率变化 ≥ 0.0001 時才派发 'occurrencychange' 事件，避免無效重渲染。
   const prev = { USD: _ocFxRates.USD, EUR: _ocFxRates.EUR };
   try {
-    const ctrl = new AbortController();
-    const tid = setTimeout(() => ctrl.abort(), 6000);
-    const r = await fetch(
-      'https://api.coingecko.com/api/v3/simple/price?ids=tether&vs_currencies=usd,eur',
-      { signal: ctrl.signal }
-    );
-    clearTimeout(tid);
-    if (r.ok) {
-      const d = await r.json();
-      const t = d && d.tether;
-      if (t) {
-        if (t.usd) _ocFxRates.USD = Number(t.usd);
-        if (t.eur) _ocFxRates.EUR = Number(t.eur);
-      }
+    const d = await ocApi('/api/v1/system/fx-rates');
+    const rates = d && d.data && d.data.rates;
+    if (rates) {
+      if (rates.USD) _ocFxRates.USD = Number(rates.USD);
+      if (rates.EUR) _ocFxRates.EUR = Number(rates.EUR);
     }
   } catch (_) { /* silent fallback / 靜默回退 */ }
 
