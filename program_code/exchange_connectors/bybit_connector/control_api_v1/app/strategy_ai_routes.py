@@ -16,6 +16,7 @@ import logging
 import os
 import re
 import time
+from threading import RLock
 from typing import Any
 
 from fastapi import Depends, HTTPException, Query
@@ -32,6 +33,10 @@ logger = logging.getLogger(__name__)
 _CLOSED_PNL_CACHE = None
 _OPENCLAW_LINK_RE = re.compile(r"^oc_(?:close_[a-z0-9_]+_)?(?:risk_)?(?P<engine>dm|ld)(?:_|$)", re.I)
 _CLOSED_PNL_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+_CLOSED_PNL_FAILURE_WINDOW_SEC = 60.0
+_CLOSED_PNL_DEGRADED_SEC = 5 * 60
+_CLOSED_PNL_BYBIT_FAILURES: list[float] = []
+_CLOSED_PNL_FAILURE_LOCK = RLock()
 _GUI_READ_STATEMENT_TIMEOUT_MS = int(os.getenv("OPENCLAW_GUI_READ_STATEMENT_TIMEOUT_MS", "1500"))
 
 
@@ -42,6 +47,31 @@ def _closed_pnl_cache():
         from .bybit_pnl_cache import ClosedPnlCache  # noqa: PLC0415
         _CLOSED_PNL_CACHE = ClosedPnlCache(ttl_sec=8.0)
     return _CLOSED_PNL_CACHE
+
+
+def _clear_closed_pnl_bybit_failures() -> None:
+    with _CLOSED_PNL_FAILURE_LOCK:
+        _CLOSED_PNL_BYBIT_FAILURES.clear()
+
+
+def _record_closed_pnl_bybit_failure() -> dict[str, Any]:
+    now = time.monotonic()
+    cutoff = now - _CLOSED_PNL_FAILURE_WINDOW_SEC
+    with _CLOSED_PNL_FAILURE_LOCK:
+        _CLOSED_PNL_BYBIT_FAILURES[:] = [
+            ts for ts in _CLOSED_PNL_BYBIT_FAILURES if ts >= cutoff
+        ]
+        _CLOSED_PNL_BYBIT_FAILURES.append(now)
+        count = len(_CLOSED_PNL_BYBIT_FAILURES)
+    degraded_until_ms = (
+        int((time.time() + _CLOSED_PNL_DEGRADED_SEC) * 1000)
+        if count >= 3
+        else None
+    )
+    return {
+        "bybit_failure_count_60s": count,
+        "degraded_until_ms": degraded_until_ms,
+    }
 
 
 def _require_demo_session_write(actor: base.AuthenticatedActor) -> None:
@@ -1087,6 +1117,8 @@ def _fetch_pg_closed_pnl_fallback(
     limit: int,
     offset: int,
     symbol: str | None,
+    start_ms: int,
+    end_ms: int,
 ) -> dict[str, Any]:
     """Read-only fallback from trading.fills when Bybit REST is unavailable."""
     try:
@@ -1097,8 +1129,13 @@ def _fetch_pg_closed_pnl_fallback(
     if conn is None:
         raise RuntimeError("pg_unavailable")
     try:
-        where = "engine_mode IN (%s, %s) AND COALESCE(realized_pnl, 0) <> 0"
-        params: list[Any] = ["demo", "live_demo"]
+        where = (
+            "engine_mode IN (%s, %s) "
+            "AND ts >= to_timestamp(%s / 1000.0) "
+            "AND ts <= to_timestamp(%s / 1000.0) "
+            "AND COALESCE(realized_pnl, 0) <> 0"
+        )
+        params: list[Any] = ["demo", "live_demo", start_ms, end_ms]
         if symbol:
             where += " AND symbol = %s"
             params.append(symbol)
@@ -1875,9 +1912,23 @@ async def get_demo_closed_pnl(
     rc = _get_rust_client()
     if rc is None:
         try:
-            return _envelope(
-                _fetch_pg_closed_pnl_fallback(limit=limit, offset=offset, symbol=sym)
+            payload = await asyncio.to_thread(
+                _fetch_pg_closed_pnl_fallback,
+                limit=limit,
+                offset=offset,
+                symbol=sym,
+                start_ms=start_ms,
+                end_ms=end_ms,
             )
+            pg_reason = payload.get("degraded_reason") or "pg_fallback"
+            pg_reason = pg_reason.removeprefix("bybit_closed_pnl_unavailable; ")
+            payload["degraded_reason"] = (
+                f"bybit_client_unavailable; "
+                f"{pg_reason}"
+            )
+            payload["bybit_failure_count_60s"] = 0
+            payload["degraded_until_ms"] = None
+            return _envelope(payload)
         except Exception:
             return _envelope({
                 "enabled": False,
@@ -1926,12 +1977,15 @@ async def get_demo_closed_pnl(
         return rows
 
     try:
-        cached = _closed_pnl_cache().get_or_fetch(
+        cached = await asyncio.to_thread(
+            _closed_pnl_cache().get_or_fetch,
             cache_key,
             _fetch_bybit_rows,
             force_refresh=force_refresh,
         )
-        enriched = _attach_closed_pnl_strategy(cached.value)
+        if not cached.hit:
+            _clear_closed_pnl_bybit_failures()
+        enriched = await asyncio.to_thread(_attach_closed_pnl_strategy, cached.value)
         page = enriched[offset:offset + limit]
         has_more = len(enriched) > offset + limit
         return _envelope({
@@ -1948,9 +2002,15 @@ async def get_demo_closed_pnl(
             "degraded_reason": None,
         })
     except Exception as exc:
+        failure_state = _record_closed_pnl_bybit_failure()
+        degraded_suffix = (
+            "; bybit_unavailable_5min_contact_operator"
+            if failure_state["degraded_until_ms"] is not None
+            else ""
+        )
         stale = _closed_pnl_cache().get_any(cache_key)
         if stale is not None:
-            enriched = _attach_closed_pnl_strategy(stale.value)
+            enriched = await asyncio.to_thread(_attach_closed_pnl_strategy, stale.value)
             page = enriched[offset:offset + limit]
             has_more = len(enriched) > offset + limit
             return _envelope({
@@ -1964,12 +2024,29 @@ async def get_demo_closed_pnl(
                 "source_ts": stale.source_ts,
                 "cache_age": stale.cache_age,
                 "cache_age_seconds": stale.cache_age,
-                "degraded_reason": f"bybit_fetch_failed_using_stale_cache: {type(exc).__name__}",
+                "degraded_reason": (
+                    f"bybit_fetch_failed_using_stale_cache: {type(exc).__name__}"
+                    f"; bybit_failure_count_60s={failure_state['bybit_failure_count_60s']}"
+                    f"{degraded_suffix}"
+                ),
+                **failure_state,
             })
         try:
-            return _envelope(
-                _fetch_pg_closed_pnl_fallback(limit=limit, offset=offset, symbol=sym)
+            payload = await asyncio.to_thread(
+                _fetch_pg_closed_pnl_fallback,
+                limit=limit,
+                offset=offset,
+                symbol=sym,
+                start_ms=start_ms,
+                end_ms=end_ms,
             )
+            payload["degraded_reason"] = (
+                f"{payload.get('degraded_reason') or 'bybit_closed_pnl_unavailable'}"
+                f"; bybit_failure_count_60s={failure_state['bybit_failure_count_60s']}"
+                f"{degraded_suffix}"
+            )
+            payload.update(failure_state)
+            return _envelope(payload)
         except Exception as pg_exc:
             logger.exception("Bybit closed-pnl and PG fallback both failed")
             from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415

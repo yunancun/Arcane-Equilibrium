@@ -32,6 +32,7 @@ from app.bybit_rest_client import (
     _normalize_env,
     _parse_instrument_item,
     _resolve_credentials,
+    _signed_get_query_string,
 )
 
 
@@ -755,6 +756,45 @@ def test_get_closed_pnl_sends_signed_get_params():
     assert params.get("limit") == "100"
     assert params.get("cursor") == "NEXT"
     assert recorded[0].method == "GET"
+    c.close()
+
+
+def test_get_closed_pnl_cursor_query_is_not_double_encoded(monkeypatch):
+    """Bybit nextPageCursor percent escapes must be sent once and signed as sent."""
+    c = _make_client()
+    monkeypatch.setattr(c, "_timestamp_ms", lambda: "1700000000000")
+    recorded = _install_mock_transport(
+        c,
+        lambda req: httpx.Response(200, json=_ok_envelope({"list": []})),
+    )
+    cursor = "5%3A1740208862283%2C5%3A1740208862283"
+    c.get_closed_pnl(
+        "linear",
+        symbol="OPUSDT",
+        start_time=1700000000000,
+        end_time=1700003600000,
+        limit=100,
+        cursor=cursor,
+    )
+    req = recorded[0]
+    query = str(req.url).split("?", 1)[1]
+    expected_query = _signed_get_query_string({
+        "category": "linear",
+        "symbol": "OPUSDT",
+        "startTime": 1700000000000,
+        "endTime": 1700003600000,
+        "limit": 100,
+        "cursor": cursor,
+    })
+    expected_signature = hmac.new(
+        b"TESTSECRET",
+        f"1700000000000TESTKEY5000{expected_query}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    assert query == expected_query
+    assert "cursor=5%3A1740208862283%2C5%3A1740208862283" in query
+    assert "%253A" not in query
+    assert req.headers["X-BAPI-SIGN"] == expected_signature
     c.close()
 
 

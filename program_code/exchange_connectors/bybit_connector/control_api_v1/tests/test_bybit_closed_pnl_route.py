@@ -94,6 +94,9 @@ def _install_fake_db(monkeypatch: pytest.MonkeyPatch, cursor: _FakeCursor) -> No
 @pytest.fixture(autouse=True)
 def _fresh_closed_pnl_cache(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(routes, "_CLOSED_PNL_CACHE", ClosedPnlCache(ttl_sec=8.0))
+    routes._clear_closed_pnl_bybit_failures()
+    yield
+    routes._clear_closed_pnl_bybit_failures()
 
 
 @pytest.mark.asyncio
@@ -253,9 +256,59 @@ async def test_demo_closed_pnl_pg_fallback_is_read_only_shape(monkeypatch):
     assert data["degraded_reason"].startswith("bybit_closed_pnl_unavailable")
     assert data["list"][0]["strategy_source"] == "pg_fill"
     assert "FROM trading.fills" in cursor.sql
+    assert "ts >= to_timestamp(%s / 1000.0)" in cursor.sql
+    assert "ts <= to_timestamp(%s / 1000.0)" in cursor.sql
+    assert cursor.params[0] == "demo"
+    assert cursor.params[1] == "live_demo"
+    assert cursor.params[2] < cursor.params[3]
+    assert cursor.params[4:] == (11, 0)
     assert "INSERT" not in cursor.sql.upper()
     assert "UPDATE" not in cursor.sql.upper()
     assert "DELETE" not in cursor.sql.upper()
+
+
+@pytest.mark.asyncio
+async def test_demo_closed_pnl_pg_fallback_when_client_unavailable(monkeypatch):
+    ts = datetime(2026, 5, 23, 12, 0, tzinfo=timezone.utc)
+    cursor = _FakeCursor([
+        (ts, "OID9", "OPUSDT", "Sell", 100.0, 0.4051, 0.08, -0.72, "grid_trading"),
+    ])
+    _install_fake_db(monkeypatch, cursor)
+    monkeypatch.setattr(routes, "_get_rust_client", lambda: None)
+
+    result = await routes.get_demo_closed_pnl(
+        limit=10, offset=0, symbol=None, force_refresh=False, actor=object()
+    )
+    data = result["data"]
+
+    assert data["source"] == "pg_fallback"
+    assert data["count"] == 1
+    assert data["list"][0]["order_id"] == "OID9"
+    assert data["bybit_failure_count_60s"] == 0
+    assert data["degraded_until_ms"] is None
+    assert data["degraded_reason"].startswith("bybit_client_unavailable; pg_fallback")
+
+
+@pytest.mark.asyncio
+async def test_demo_closed_pnl_three_bybit_failures_marks_operator_contact(monkeypatch):
+    ts = datetime(2026, 5, 23, 12, 0, tzinfo=timezone.utc)
+    cursor = _FakeCursor([
+        (ts, "OID9", "OPUSDT", "Sell", 100.0, 0.4051, 0.08, -0.72, "grid_trading"),
+    ])
+    _install_fake_db(monkeypatch, cursor)
+    monkeypatch.setattr(routes, "_get_rust_client", lambda: _FakeBybitClient(exc=RuntimeError("down")))
+
+    result = None
+    for _ in range(3):
+        result = await routes.get_demo_closed_pnl(
+            limit=10, offset=0, symbol=None, force_refresh=True, actor=object()
+        )
+    data = result["data"]
+
+    assert data["source"] == "pg_fallback"
+    assert data["bybit_failure_count_60s"] == 3
+    assert data["degraded_until_ms"] > 0
+    assert "bybit_unavailable_5min_contact_operator" in data["degraded_reason"]
 
 
 @pytest.mark.asyncio

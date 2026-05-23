@@ -635,20 +635,24 @@ Client 創建：`PositionManager::new(client: Arc<BybitRestClient>)`
 
 #### get_closed_pnl
 - **服務**: 查詢已平倉盈虧記錄（最長 2 年）。每筆記錄包含入場/出場價、已實現盈虧、槓桿等。用於績效歸因、稅務計算。
-- **調用**: `client.get_closed_pnl(category, symbol, limit)`
+- **調用**: `client.get_closed_pnl(category, symbol, start_time, end_time, limit, cursor)`
 - **Bybit 路徑**: `GET /v5/position/closed-pnl`
 - **Input**:
-  - `category: OrderCategory`
+  - `category: OrderCategory` — `linear` / `inverse`
   - `symbol: Option<&str>`
-  - `limit: Option<u32>`
-- **Output**: `BybitResult<Vec<ClosedPnlInfo>>`
+  - `startTime: Option<i64>` — ms；不傳 start/end 時默認回 7 天
+  - `endTime: Option<i64>` — ms；若 start/end 都傳，`endTime - startTime <= 7d`
+  - `limit: Option<u32>` — 1..100，默認 50
+  - `cursor: Option<&str>` — 使用 response `nextPageCursor` 取下一頁；cursor token 可能已含 `%3A` / `%2C` percent escapes，HTTP client 不可 double-encode 成 `%253A`
+- **Output**: `BybitResult<ClosedPnlPage>` / Python `dict{category, list, nextPageCursor}`
   ```
   ClosedPnlInfo { symbol, order_id, side, qty: f64, avg_entry_price: f64,
                   avg_exit_price: f64, closed_pnl: f64, cum_entry_value: f64,
                   cum_exit_value: f64, fill_count: i32, leverage: f64,
                   created_time, updated_time }
   ```
-- **關聯程式**: `position_manager.rs:434`
+- **GUI Demo PnL 用法（2026-05-23）**: `strategy_ai_routes.py:/demo/closed-pnl` 固定 `category=linear`，enforce 7d window，按 `nextPageCursor` 分頁至 `offset + limit + 1`，以 Bybit `closedPnl` 作 round-trip PnL truth；PG `trading.fills` 僅作 strategy attribution / fallback。
+- **關聯程式**: `position_manager.rs:434`; `app/bybit_rest_client.py:get_closed_pnl`; `app/strategy_ai_routes.py:get_demo_closed_pnl`
 
 ---
 
