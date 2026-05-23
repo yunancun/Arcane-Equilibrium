@@ -30,6 +30,11 @@ pub use super::strategy_params::{
     BbBreakoutParams, BbReversionParams, FundingArbParams, GridTradingParams, MaCrossoverParams,
 };
 
+// FundingHarvestParams 持有人為 sibling sub-module `funding_harvest::params`，
+// 此處 re-export 以保持 `crate::strategies::FundingHarvestParams` 路徑與
+// 五個 sibling 策略一致。
+pub use super::funding_harvest::FundingHarvestParams;
+
 // Factory fallback helpers used by `registry.rs` when TOML-supplied OI fields
 // fail the mirror validator. Routed through `params::` to match the historic
 // symbol path pre-C4c split.
@@ -83,6 +88,11 @@ pub struct StrategyParamsConfig {
     pub grid_trading: GridTradingParams,
     #[serde(default)]
     pub funding_arb: FundingArbParams,
+    /// C10 funding harvest (delta-neutral spot long + perp short matched notional).
+    /// Stage 1 Demo 限定 BTCUSDT + size cap $100 absolute；預設 active=false。
+    /// 與 funding_arb V2 (ADR-0018 dormant) 並列為新策略 slot。
+    #[serde(default)]
+    pub funding_harvest: FundingHarvestParams,
 }
 
 /// Resolve settings directory: `OPENCLAW_BASE_DIR/settings` or `./settings`.

@@ -141,3 +141,24 @@ expected_periods = 3.0
 funding_threshold = 0.0005
 max_basis_pct = 0.5
 max_hold_ms = 259200000
+
+# C10 funding harvest — Live 永鎖 active=false。
+# Stage 4 LIVE 升級時須完成 Sprint 5+ spot leg cascade (synthetic ledger → real
+# Bybit spot order via IntentProcessor + bybit_rest_client::place_spot_order)。
+# 參數值對齊 demo TOML 以便 audit grep 一致；env-isolation principle
+# (feedback_env_config_independence) 對風險閾值仍適用，但 active=false 是
+# 三環境統一硬鎖（與 funding_arb 範式一致）。
+[funding_harvest]
+active = false
+cooldown_ms = 3600000
+allowed_symbols = ["BTCUSDT"]
+funding_threshold_annualized = 0.05
+funding_exit_annualized = 0.02
+max_basis_pct = 0.5
+entry_basis_ratio = 0.8
+max_hold_ms = 259200000
+total_cost_bps = 37.0
+expected_periods = 3.0
+rebalance_check_ms = 7200000
+delta_drift_threshold = 0.02
+position_cap_usd = 100.0

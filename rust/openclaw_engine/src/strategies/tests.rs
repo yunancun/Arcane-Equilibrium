@@ -110,12 +110,14 @@ fn test_param_range_serde_roundtrip() {
 // ── 3E-9: StrategyFactory tests ──
 
 #[test]
-fn test_strategy_factory_creates_five_strategies() {
+fn test_strategy_factory_creates_six_strategies() {
+    // Sprint 1B Pending 3.1 C10：新增 funding_harvest 作為第 6 個 strategy。
+    // 與 funding_arb V2 (ADR-0018 dormant) 並列為新 slot。
     let strategies = StrategyFactory::create_all();
     assert_eq!(
         strategies.len(),
-        5,
-        "factory should produce exactly 5 strategies"
+        6,
+        "factory should produce exactly 6 strategies after C10 funding_harvest landing"
     );
     let names: Vec<&str> = strategies.iter().map(|s| s.name()).collect();
     assert!(names.contains(&"ma_crossover"), "missing ma_crossover");
@@ -123,6 +125,10 @@ fn test_strategy_factory_creates_five_strategies() {
     assert!(names.contains(&"bb_breakout"), "missing bb_breakout");
     assert!(names.contains(&"grid_trading"), "missing grid_trading");
     assert!(names.contains(&"funding_arb"), "missing funding_arb");
+    assert!(
+        names.contains(&"funding_harvest"),
+        "missing funding_harvest (Sprint 1B C10)"
+    );
 }
 
 #[test]
@@ -149,9 +155,11 @@ fn test_strategy_factory_active_defaults() {
     let strategies = StrategyFactory::create_all();
     for s in &strategies {
         match s.name() {
-            // OC-5: funding_arb inactive by default (TOML controls activation)
-            "funding_arb" => {
-                assert!(!s.is_active(), "funding_arb should be inactive by default")
+            // OC-5: funding_arb inactive by default (TOML controls activation)。
+            // Sprint 1B C10: funding_harvest inactive by default (Stage 0R PASS +
+            //   operator IPC active=true 才啟；參見 strategies/funding_harvest/params.rs)。
+            "funding_arb" | "funding_harvest" => {
+                assert!(!s.is_active(), "{} should be inactive by default", s.name())
             }
             _ => assert!(s.is_active(), "{} should be active by default", s.name()),
         }
@@ -325,14 +333,15 @@ fn test_load_strategy_params_missing_file_paper_keeps_default_fallback() {
 fn test_create_with_params_applies_active_flag() {
     // Strategies created with active=false should be inactive.
     // 使用 active=false 創建的策略應為非活躍。
+    // Sprint 1B C10：funding_harvest 也是 default active=false（fail-closed）。
     let mut p = StrategyParamsConfig::default();
     p.ma_crossover.active = false;
     p.bb_breakout.active = false;
     let strategies = StrategyFactory::create_with_params(&p);
-    assert_eq!(strategies.len(), 5);
+    assert_eq!(strategies.len(), 6);
     for s in &strategies {
         match s.name() {
-            "ma_crossover" | "bb_breakout" | "funding_arb" => {
+            "ma_crossover" | "bb_breakout" | "funding_arb" | "funding_harvest" => {
                 assert!(!s.is_active(), "{} should be inactive", s.name())
             }
             _ => assert!(s.is_active(), "{} should be active", s.name()),

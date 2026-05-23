@@ -21,6 +21,9 @@ pub mod confluence;
 // Sprint N+1 W2 sub-task 2：BtcLeadLagPanel paper-only shadow log 共用 helper。
 pub mod cross_asset;
 pub mod funding_arb;
+// C10 funding harvest — delta-neutral spot long + perp short matched notional。
+// 與 funding_arb V2（ADR-0018 dormant）並列，為新策略 slot。Stage 1 Demo 限定 BTCUSDT。
+pub mod funding_harvest;
 pub mod grid_helpers;
 pub mod grid_trading;
 pub mod ma_crossover;
@@ -39,8 +42,8 @@ pub(crate) mod test_harness;
 // 重新導出公用 API 表面，外部呼叫處 `crate::strategies::X` 完全不變。
 pub use params::{
     load_strategy_params, load_strategy_params_from, BbBreakoutParams, BbReversionParams,
-    FundingArbParams, GridTradingParams, MaCrossoverParams, ParamRange, StrategyParams,
-    StrategyParamsConfig,
+    FundingArbParams, FundingHarvestParams, GridTradingParams, MaCrossoverParams, ParamRange,
+    StrategyParams, StrategyParamsConfig,
 };
 pub use registry::StrategyFactory;
 

@@ -170,3 +170,25 @@ expected_periods = 3.0
 funding_threshold = 0.0005
 max_basis_pct = 0.5
 max_hold_ms = 259200000
+
+# C10 funding harvest — delta-neutral spot long + perp short matched notional。
+# Stage 1 Demo 限定 BTCUSDT + size cap $100 absolute。
+# spot 腿 = synthetic_spot::SyntheticSpotLedger (paper-only; Bybit demo 不支援 spot lending)。
+# Stage 4 LIVE 升級時 spot 腿 → IntentProcessor real spot order (Sprint 5+ cascade)。
+# 與 funding_arb V2 (ADR-0018 dormant) 並列為新策略 slot。
+# active=false 預設：Stage 0R replay preflight PASS + operator IPC active=true 才啟。
+# per v5.7 §2 + AMD-2026-05-15-01 §4 + FA §6 Stage 1 Demo matrix。
+[funding_harvest]
+active = false
+cooldown_ms = 3600000              # 1h between entries
+allowed_symbols = ["BTCUSDT"]      # Stage 1 限定；Stage 2 才擴 ETHUSDT
+funding_threshold_annualized = 0.05   # entry: annualized funding > 5%
+funding_exit_annualized = 0.02        # exit: annualized funding < 2%（hysteresis）
+max_basis_pct = 0.5                   # exit basis > 0.5%；entry 用 × ratio 0.4%
+entry_basis_ratio = 0.8
+max_hold_ms = 259200000               # 72h 強制平倉
+total_cost_bps = 37.0                 # perp(11) + spot(20) + slip(3) + basis_drift(3)
+expected_periods = 3.0
+rebalance_check_ms = 7200000          # 2h tick rebalance 檢查
+delta_drift_threshold = 0.02          # 2% drift → SyntheticSpotLedger.rebalance()
+position_cap_usd = 100.0              # Stage 1 hard ceiling absolute USD

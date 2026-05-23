@@ -77,6 +77,19 @@ take_profit_enforced_override = true
 trailing_activation_pct_override = 0.6
 trailing_distance_pct_override = 0.4
 
+# C10 funding harvest Stage 1 Demo per-strategy override。
+# - enabled=false：與 strategy_params_demo.toml `[funding_harvest].active=false`
+#   雙保險；Stage 0R replay preflight PASS + operator 顯式翻 true 才啟。
+# - max_concurrent_positions=1：Stage 1 限定 BTCUSDT 1 倉位。
+# - stop_loss_max_pct_override=5.0：單筆 perp 腿最大止損 5%（≈ $5 / $100 cap），
+#   per FA §6 Stage 1 conservative 因子。
+# 注意：絕對 USD cap ($100) 由 Rust `FundingHarvestParams.position_cap_usd`
+# enforce（validate hard ceiling），RiskConfig.per_strategy 無對應欄位。
+[per_strategy.funding_harvest]
+enabled = false
+max_concurrent_positions = 1
+stop_loss_max_pct_override = 5.0
+
 [agent]
 trailing_enabled = true
 trailing_activation_pct = 0.8
