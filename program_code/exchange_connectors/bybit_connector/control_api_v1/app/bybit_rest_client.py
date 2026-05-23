@@ -50,6 +50,7 @@ import time
 from pathlib import Path
 from threading import RLock
 from typing import Any, Optional
+from urllib.parse import quote, unquote
 
 import httpx
 
@@ -398,18 +399,14 @@ class BybitClient:
 
         # Bybit V5 spec: signature is computed over the SORTED query string.
         # Bybit V5 規範：簽名對排序後的 query string 計算。
-        sorted_items = sorted(
-            [(k, _param_to_str(v)) for k, v in params.items() if v is not None],
-            key=lambda kv: kv[0],
-        )
-        query_string = "&".join(f"{k}={v}" for k, v in sorted_items)
+        query_string = _signed_get_query_string(params)
         timestamp = self._timestamp_ms()
         signature = self._sign(timestamp, query_string)
 
         try:
+            url = f"{path}?{query_string}" if query_string else path
             r = self._client.get(
-                path,
-                params=sorted_items if sorted_items else None,
+                url,
                 headers=self._auth_headers(timestamp, signature),
             )
         except httpx.HTTPError as exc:
@@ -992,6 +989,23 @@ def _param_to_str(value: Any) -> str:
         # 查詢字串不使用科學記號。
         return _format_number(value)
     return str(value)
+
+
+def _signed_get_query_string(params: dict[str, Any]) -> str:
+    """Build the exact sorted query string used for both URL and GET signature.
+
+    Bybit cursors may already contain percent escapes. Decode once then encode
+    once so page-2 cursors are not sent as ``%253A`` while the signature covers
+    the same bytes as the actual URL query.
+    """
+    sorted_items = sorted(
+        [(str(k), _param_to_str(v)) for k, v in params.items() if v is not None],
+        key=lambda kv: kv[0],
+    )
+    return "&".join(
+        f"{quote(k, safe='')}={quote(unquote(v), safe='')}"
+        for k, v in sorted_items
+    )
 
 
 def _order_response_dual_shape(result: dict[str, Any]) -> dict[str, Any]:

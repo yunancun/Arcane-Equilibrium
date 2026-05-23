@@ -24,7 +24,7 @@ def test_fetch_pnl_series_aggregates_fills_fees_and_funding(monkeypatch) -> None
 
     class Cursor:
         def __init__(self) -> None:
-            self.calls = 0
+            self.last_sql = ""
 
         def __enter__(self) -> "Cursor":
             return self
@@ -32,14 +32,14 @@ def test_fetch_pnl_series_aggregates_fills_fees_and_funding(monkeypatch) -> None
         def __exit__(self, *_args: Any) -> None:
             return None
 
-        def execute(self, _sql: str, _params: tuple[Any, ...] | None = None) -> None:
-            self.calls += 1
+        def execute(self, sql: str, _params: tuple[Any, ...] | None = None) -> None:
+            self.last_sql = sql
 
         def fetchone(self) -> tuple[bool]:
             return (True,)
 
         def fetchall(self) -> list[tuple[Any, ...]]:
-            if self.calls == 1:
+            if "FROM trading.fills" in self.last_sql:
                 return [
                     (
                         datetime.fromtimestamp(trade_bucket, tz=timezone.utc),
@@ -48,7 +48,7 @@ def test_fetch_pnl_series_aggregates_fills_fees_and_funding(monkeypatch) -> None
                         0.5,
                     )
                 ]
-            if self.calls == 3:
+            if "FROM trading.funding_settlements" in self.last_sql:
                 return [(datetime.fromtimestamp(trade_bucket, tz=timezone.utc), -0.25)]
             return []
 

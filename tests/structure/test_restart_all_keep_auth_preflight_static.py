@@ -22,3 +22,12 @@ def test_keep_auth_preflight_runs_after_secret_preparation_before_restart() -> N
     preflight_index = text.index("warn_keep_auth_missing_authorization\n")
     case_index = text.index('case "$SCOPE" in')
     assert prepare_index < preflight_index < case_index
+
+
+def test_engine_socket_gate_uses_same_ipc_socket_as_engine_and_api() -> None:
+    text = SCRIPT.read_text(encoding="utf-8")
+    assert 'ENGINE_SOCKET="${OPENCLAW_IPC_SOCKET:-$DATA_DIR/engine.sock}"' in text
+    assert 'OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE=1' in text
+    assert 'OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" \\' in text
+    assert 'local sock="$ENGINE_SOCKET"' in text
+    assert 'engine.sock ready at ${ENGINE_SOCKET}' in text

@@ -37,6 +37,10 @@ WORKERS="${OPENCLAW_API_WORKERS:-4}"
 # Mac dev recommendation: export OPENCLAW_DATA_DIR="$HOME/.openclaw_runtime"
 # Runtime 資料目錄（支援 Mac env var 部署）。
 DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
+# Engine/API IPC socket path. If the operator customises DATA_DIR without
+# setting OPENCLAW_IPC_SOCKET, keep both processes and the readiness gate on
+# the same resolved socket instead of mixing $DATA_DIR and /tmp/openclaw.
+ENGINE_SOCKET="${OPENCLAW_IPC_SOCKET:-$DATA_DIR/engine.sock}"
 # Secrets root (env var for Mac / non-HOME deployment).
 # Mac dev recommendation: export OPENCLAW_SECRETS_ROOT="$HOME/.openclaw_secrets"
 # Secrets 根目錄（支援 Mac / 非 $HOME 路徑部署）。
@@ -462,7 +466,8 @@ restart_engine() {
     anthropic_api_key="$(resolve_provider_secret_env ANTHROPIC_API_KEY anthropic anthropic_api_key)"
     openai_api_key="$(resolve_provider_secret_env OPENAI_API_KEY openai openai_api_key)"
     deepseek_api_key="$(resolve_provider_secret_env DEEPSEEK_API_KEY deepseek deepseek_api_key)"
-    OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_CANARY_MODE=1 \
+    mkdir -p "$(dirname "$ENGINE_SOCKET")"
+    OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE=1 \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
         OPENCLAW_AUTO_MIGRATE="${auto_migrate}" \
@@ -480,7 +485,7 @@ restart_engine() {
 }
 
 engine_socket_ready() {
-    local sock="$DATA_DIR/engine.sock"
+    local sock="$ENGINE_SOCKET"
     [[ -S "$sock" ]] || return 1
     python3 - "$sock" <<'PY' >/dev/null 2>&1
 import socket
@@ -501,13 +506,13 @@ wait_for_engine_socket_ready() {
     local max_waits=60
     while [[ "$waited" -lt "$max_waits" ]]; do
         if engine_socket_ready; then
-            echo ">>> engine.sock ready after ${waited}x500ms"
+            echo ">>> engine.sock ready at ${ENGINE_SOCKET} after ${waited}x500ms"
             return 0
         fi
         sleep 0.5
         waited=$((waited + 1))
     done
-    echo "ERROR: engine.sock not ready after ${max_waits}x500ms — aborting before API restart" >&2
+    echo "ERROR: engine.sock not ready at ${ENGINE_SOCKET} after ${max_waits}x500ms — aborting before API restart" >&2
     exit 3
 }
 
@@ -629,6 +634,7 @@ restart_api() {
 
     OPENCLAW_BASE_DIR="$base_dir" \
         OPENCLAW_DATA_DIR="$DATA_DIR" \
+        OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
         OPENCLAW_ENGINE_BINARY_SHA="$engine_sha" \

@@ -812,6 +812,7 @@ function _demoUpdatePnlSource(payload) {
   const age = parseFloat(payload && payload.cache_age_seconds);
   const sourceTs = Number(payload && payload.source_ts);
   const reason = payload && payload.degraded_reason;
+  const failureCount = Number(payload && payload.bybit_failure_count_60s);
   const sourceBar = $('demo-fills-source');
   if (sourceBar) sourceBar.style.display = _demoFillState.tab === 'profit' ? 'flex' : 'none';
   const ageLabel = Number.isFinite(age) ? age.toFixed(1) + 's' : '--';
@@ -823,7 +824,9 @@ function _demoUpdatePnlSource(payload) {
     '<span class="' + (cls === 'bad' ? 'red' : cls === 'warn' ? 'yellow' : '') + '">cache age ' + ocEsc(ageLabel) + '</span>' +
     '<span>source ts ' + ocEsc(tsLabel) + detail + '</span>' +
     '<span title="profit tab uses sum(closedPnl), already net of Bybit fees">net PnL = sum(closedPnl)(已扣費)</span>');
-  if (source === 'pg_fallback') {
+  if (Number.isFinite(failureCount) && failureCount >= 3) {
+    _demoSetStaleBanner('收益 / PnL：Bybit 不可用 5 min · contact operator' + (reason ? ' · ' + reason : ''), 'bad');
+  } else if (source === 'pg_fallback') {
     _demoSetStaleBanner('收益 / PnL：Bybit 不可用 · 顯示 PG fallback 估值' + (reason ? ' · ' + reason : ''), 'bad');
   } else if (Number.isFinite(age) && age > 120) {
     _demoSetStaleBanner('收益 / PnL：Bybit closed-pnl 快照已超過 120s · 請立即刷新', 'bad');
