@@ -1020,19 +1020,64 @@ fn test_fee_rate_staleness_allows_fresh_rates() {
 // EDGE-DIAG-2（2026-04-28）：低樣本探索分支
 
 #[test]
-fn test_cost_gate_moderate_low_sample_negative_routes_to_exploration() {
-    // EDGE-DIAG-2: a negative shrunk_bps with n_trades < default 30 must NOT
-    // block — it routes to exploration mode (allow + log) so demo can
-    // accumulate fills toward statistically robust estimates.
-    // EDGE-DIAG-2：低樣本（n<30）負 shrunk_bps 不阻擋，走探索模式。
+fn test_cost_gate_moderate_low_sample_deep_neg_blocks() {
+    // EDGE-DIAG-2 v2(2026-05-23 PM RCA + MIT sensitivity sweep):
+    // low-sample deep-negative arm 已上線:n<min_n 且 shrunk_bps<-15 改為 BLOCK,
+    // 不再無條件走探索。原因:NEARUSDT(n=18, shrunk_bps=-16.46)在 noise band 內
+    // 累損 6 天 -21.98 USD demo。新 arm 把 deep tail(< -15)從探索分離出來直接 deny;
+    // noise band [-15, 0) 仍走探索,維持「demo 放寬」精神。
+    // 本 test 從 routes_to_exploration 改 deep_neg_blocks,fixture(shrunk=-50, n=6)
+    // 同時滿足 n<min_n AND shrunk<-15 → 新 arm 攔截。
+    // EDGE-DIAG-2 v2:低樣本深負(n<30 且 < -15bps)改為 BLOCK,避免噪音帶累損。
     let mut proc = IntentProcessor::new();
     let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -50.0, "win_rate": 0.3, "n": 6, "std_bps": 5.0}}"#;
     let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
     proc.set_edge_estimates(estimates);
     let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
     assert!(
+        result.is_some(),
+        "low-sample deep-negative (n=6 < 30 AND shrunk -50 < -15) should BLOCK via EDGE-DIAG-2 v2 arm"
+    );
+    let reason = result.unwrap().rejected_reason.unwrap();
+    assert!(
+        reason.contains("JS-demo"),
+        "block reason should be CostGateJsDemoNegative variant, got: {reason}"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_low_sample_noise_band_explore() {
+    // EDGE-DIAG-2 v2 boundary:low-sample 但 shrunk 落在 noise band [-15, 0) 內
+    // 仍走探索 — 統計上 50% 命中率,deep tail 才方向可靠。
+    // Fixture: n=6 < min_n=30,shrunk=-10.0 ∈ [-15, 0) → 不觸發新 arm,
+    // fall-through 到既有 low-sample arm 探索。
+    // EDGE-DIAG-2 v2 邊界:noise band 內低樣本續走探索。
+    let mut proc = IntentProcessor::new();
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -10.0, "win_rate": 0.3, "n": 6, "std_bps": 5.0}}"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
         result.is_none(),
-        "low-sample negative edge (n=6 < 30) should route to exploration, not block"
+        "low-sample shrunk -10 ∈ [-15, 0) noise band should still explore, not block"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_low_sample_at_neg15_boundary_explore() {
+    // EDGE-DIAG-2 v2 嚴格 `<` 邊界:shrunk_bps == -15.0 恰在 cutoff,
+    // 新 arm guard 是 `cell.shrunk_bps < -15.0`(strict less-than),
+    // -15.0 不觸發,fall-through 到 low-sample 探索 arm。
+    // 守住「邊界不攔」契約,避免 cutoff 移動造成 flip-flop。
+    // EDGE-DIAG-2 v2 邊界:cutoff -15.0 嚴格 `<`,等號不攔。
+    let mut proc = IntentProcessor::new();
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -15.0, "win_rate": 0.3, "n": 6, "std_bps": 5.0}}"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_none(),
+        "shrunk == -15.0 at boundary (strict `<` not `<=`) should not block, fall-through to explore"
     );
 }
 

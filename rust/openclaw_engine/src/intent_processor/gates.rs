@@ -135,12 +135,15 @@ impl IntentProcessor {
             //   - deep tail < -15 才方向可靠
             //   - 1B funding_arb 框架僅 LABUSDT outlier 被影響
             Some(cell) if cell.n_trades < min_n && cell.shrunk_bps < -15.0 => {
+                // E2 review 2026-05-23 對齊:tracing field key 改用 `estimated_edge_bps`
+                // 與既有 4 處(paper L73 / demo L159 / live L73 / live L157)baseline 一致;
+                // audit log grep 不再分裂兩種 key。`cutoff_bps` 顯式 f64 避免 type mismatch。
                 tracing::info!(
                     strategy,
                     symbol,
-                    shrunk_bps = cell.shrunk_bps,
+                    estimated_edge_bps = cell.shrunk_bps,
                     n_trades = cell.n_trades,
-                    cutoff_bps = -15.0,
+                    cutoff_bps = -15.0_f64,
                     "cost_gate(JS-demo): low sample but deep-negative — block / 低樣本深負阻擋"
                 );
                 return Some(ExchangeGateResult::rejected(
