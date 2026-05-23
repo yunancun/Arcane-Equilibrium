@@ -16,6 +16,15 @@ The original `21 failed / 12 skipped` connector baseline is no longer current. F
 
 The remaining 12 skips are opt-in/live-PG/replay/observer/G3-08/risk-escalation environment skips. None are GUI Bybit-first PnL failures.
 
+Linux / origin sync verification:
+
+- Linux `trade-core` fast-forwarded from `1d1dff01` to `d731b34e`.
+- Linux syntax/static checks: PASS.
+- Linux focused GUI/Bybit/restart matrix: `60 passed`.
+- Linux full connector suite: `4201 passed, 10 skipped, 448 warnings`.
+- Linux runtime restarted with `restart_all.sh --keep-auth`; shared engine socket gate passed.
+- Runtime smoke: startup-status HTTP 200, closed-pnl unauthenticated GET HTTP 401, engine watchdog `engine_alive=true`.
+
 ## Closed Gaps
 
 - Bybit cursor signing now uses one canonical encoded query string for both URL and HMAC preimage, avoiding `%253A/%252C` cursor double encoding.

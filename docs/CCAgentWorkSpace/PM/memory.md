@@ -5,6 +5,7 @@
 - Operator decision `1A2A3A` applied: no 24h reconcile cron this sprint, no `/demo/wallet-truth` this sprint, backend keeps 4 `strategy_source` values while GUI folds labels.
 - Final adversarial verification closed the post-implementation gaps: Bybit cursor/signature double encoding, PG fallback time window, `_get_rust_client() is None` fallback, async route blocking, 3-fail degraded banner, restart socket alignment, and legacy `test_pnl_series` fixture.
 - Final Mac verification: focused GUI/Bybit/restart matrix `60 passed`; full connector `4199 passed / 0 failed / 12 skipped`.
+- Linux sync verification: focused matrix `60 passed`; full connector `4201 passed / 0 failed / 10 skipped`; runtime restarted with `restart_all.sh --keep-auth`; startup-status HTTP 200, unauthenticated closed-pnl HTTP 401, engine watchdog alive.
 - E2 re-review PASS, BB re-review PASS, E4 regression PASS.
 - Root `GUI-TODO.md` archived to `docs/archive/2026-05-23--gui_bybit_first_pnl_refactor.md`; active `TODO.md` updated to remove stale `21 failed` status.
 - Remaining 12 skips are environment/opt-in skips, not GUI Bybit-first PnL failures.
