@@ -3,24 +3,26 @@ from __future__ import annotations
 """
 MODULE_NOTE (中文):
   GUI / HTML legacy 路由（E5-P0-5 拆分自 legacy_routes.py）。
-  包含 5 條路由：
+  包含 6 條路由：
     GET /login     — 登入頁面
     GET /          — 統一控制台根入口
     GET /gui       — 舊版 GUI index.html
     GET /console   — 統一控制台（交易儀表盤 + OpenClaw + AI Cost 側欄）
     GET /trading   — 交易圖表儀表盤（TradingView Lightweight Charts）
+    GET /favicon.ico — empty favicon response to avoid GUI console 404 noise
 
   除 /login 與根目錄 redirect 外，dashboard HTML 由 server-side auth guard
   保護，避免 client-side redirect JS 被 static auth middleware 擋住時仍洩漏 shell。
 
 MODULE_NOTE (English):
   GUI / HTML legacy routes (split out of legacy_routes.py in E5-P0-5).
-  Contains 5 routes:
+  Contains 6 routes:
     GET /login     — login page
     GET /          — unified console root entry
     GET /gui       — legacy GUI index.html
     GET /console   — unified console (trading dashboard + OpenClaw + AI cost sidebar)
     GET /trading   — trading chart dashboard (TradingView Lightweight Charts)
+    GET /favicon.ico — empty favicon response to avoid GUI console 404 noise
 
   Except /login and the root redirect, dashboard HTML is protected by a
   server-side auth guard so the shell is not served before auth.
@@ -30,7 +32,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from starlette.responses import RedirectResponse
 
 _static_dir = Path(__file__).resolve().parent / "static"
@@ -127,6 +129,11 @@ def register_gui_legacy_routes(app) -> None:
         if redirect is not None:
             return redirect
         return FileResponse(_static_dir / "trading.html", headers=_NO_CACHE_HEADERS)
+
+    @app.get("/favicon.ico", include_in_schema=False)
+    def favicon() -> Response:
+        """Avoid browser favicon 404 noise in the operator console."""
+        return Response(status_code=204, headers=_NO_CACHE_HEADERS)
 
 
 __all__ = ["register_gui_legacy_routes"]

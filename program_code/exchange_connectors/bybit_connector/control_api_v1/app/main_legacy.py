@@ -538,11 +538,11 @@ def envelope_response(
 #
 # Files + responsibility / 檔案與職責：
 #   auth_legacy_routes.py    — 3 auth routes (login/logout/check)
-#   gui_legacy_routes.py     — 5 GUI / HTML routes (/login, /, /gui, /console, /trading)
+#   gui_legacy_routes.py     — 6 GUI / HTML routes (/login, /, /gui, /console, /trading, /favicon.ico)
 #   system_legacy_routes.py  — 14 system / health read routes (incl. /api/v1/healthz)
 #   learning_legacy_routes.py — 19 learning / PnL routes
 #   control_legacy_routes.py — 15 control / operator-write routes
-# Total: 56 routes (54 from legacy_routes.py pre-refactor + /healthz + /system/fx-rates).
+# Total: 57 routes (54 from legacy_routes.py pre-refactor + /healthz + /system/fx-rates + /favicon.ico).
 from .auth_legacy_routes import register_auth_legacy_routes  # noqa: E402
 from .gui_legacy_routes import register_gui_legacy_routes  # noqa: E402
 from .system_legacy_routes import register_system_legacy_routes  # noqa: E402
