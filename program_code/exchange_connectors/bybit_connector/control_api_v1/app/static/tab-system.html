@@ -887,7 +887,7 @@ async function loadQuickStatus() {
   const [paperR, feedR, demoR, scannerR] = await Promise.allSettled([
     ocApi('/api/v1/paper/session/status'),
     ocApi('/api/v1/paper/market-feed/status'),
-    ocApi('/api/v1/strategy/demo/balance'),
+    ocApi('/api/v1/strategy/demo/balance?fast=1'),
     ocApi('/api/v1/strategy/scanner/opportunities'),
   ]);
   const paperD = paperR.status === 'fulfilled' ? paperR.value : null;

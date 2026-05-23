@@ -958,7 +958,7 @@ async function loadComparison(passedDemoBal) {
   } else {
     const [paperD, demoD] = await Promise.allSettled([
       ocApi('/api/v1/paper/session/status'),
-      ocApi('/api/v1/strategy/demo/balance'),
+      ocApi('/api/v1/strategy/demo/balance?fast=1'),
     ]);
     paper = paperD.status === 'fulfilled' && paperD.value ? paperD.value.data : null;
     demo = demoD.status === 'fulfilled' && demoD.value ? demoD.value.data : null;

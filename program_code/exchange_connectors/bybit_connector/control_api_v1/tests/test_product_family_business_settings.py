@@ -239,6 +239,42 @@ class TestProductFamilyConfig:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# 系統匯率代理測試 / System FX Proxy Tests
+# ════════════════════════════════════════════════════════════════════════════
+
+
+class TestSystemFxRates:
+    """同源匯率代理端點 / Same-origin FX proxy endpoint tests."""
+
+    def test_fx_rates_returns_backend_proxy_payload(self, monkeypatch):
+        """匯率由後端代理返回，前端不需要直連第三方 / Backend returns FX payload."""
+        client = build_client()
+        from app import system_legacy_routes
+
+        monkeypatch.setattr(
+            system_legacy_routes,
+            "_read_live_fx_rates",
+            lambda: {
+                "base": "USDT",
+                "rates": {"USDT": 1.0, "USD": 1.001, "EUR": 0.93},
+                "source": "test_proxy",
+                "available": True,
+                "ttl_seconds": 60,
+                "updated_at_ms": 1711425600000,
+                "cached": False,
+            },
+        )
+
+        r = client.get("/api/v1/system/fx-rates", headers=auth_headers())
+        assert r.status_code == 200
+        data = r.json()["data"]
+        assert data["base"] == "USDT"
+        assert data["rates"] == {"USDT": 1.0, "USD": 1.001, "EUR": 0.93}
+        assert data["source"] == "test_proxy"
+        assert data["available"] is True
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # 经营摘要测试 / Business Summary Tests
 # ════════════════════════════════════════════════════════════════════════════
 

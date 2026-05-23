@@ -100,6 +100,28 @@ async def test_live_fast_balance_uses_snapshot_without_rest(monkeypatch) -> None
     assert out["data"]["actual_endpoint"] == "live_demo"
 
 
+@pytest.mark.asyncio
+async def test_live_demo_fast_balance_uses_snapshot_without_rest(monkeypatch) -> None:
+    from app import live_session_account_routes as routes
+    from app import live_session_routes as core
+
+    monkeypatch.setattr(routes, "_phantom_view_guard", lambda: None)
+    monkeypatch.setattr(core, "_get_live_engine_kind", lambda: "live_demo")
+    monkeypatch.setattr(core, "_resolve_live_endpoint_label", lambda: "live_demo")
+    monkeypatch.setattr(routes, "get_rust_reader", lambda: _SnapshotReader())
+    monkeypatch.setattr(
+        core,
+        "_get_rust_client_safe",
+        lambda: pytest.fail("fast live-demo balance must not create a Bybit REST client"),
+    )
+
+    out = await routes.get_live_balance(fast=True, actor=None)
+
+    assert out["data"]["read_model"] == "rust_snapshot_fast"
+    assert out["data"]["actual_engine_kind"] == "live_demo"
+    assert out["data"]["actual_endpoint"] == "live_demo"
+
+
 def test_demo_and_live_tabs_use_fast_initial_snapshot_paths() -> None:
     demo = (STATIC_DIR / "tab-demo.html").read_text(encoding="utf-8")
     live = (
@@ -116,3 +138,18 @@ def test_demo_and_live_tabs_use_fast_initial_snapshot_paths() -> None:
     assert "/api/v1/live/positions?fast=1" in live
     assert "btn-live-start-locked" in live
     assert "status_unavailable" in live
+
+
+def test_sidebar_and_system_status_use_fast_balance_paths() -> None:
+    console = (STATIC_DIR / "console.html").read_text(encoding="utf-8")
+    system = (STATIC_DIR / "tab-system.html").read_text(encoding="utf-8")
+    demo = (STATIC_DIR / "tab-demo.html").read_text(encoding="utf-8")
+    paper = (STATIC_DIR / "tab-paper.html").read_text(encoding="utf-8")
+
+    assert "api('/api/v1/live/balance?fast=1')" in console
+    assert "api('/api/v1/live/balance')," not in console
+    assert "api('/api/v1/strategy/demo/balance?fast=1')" in console
+    assert "api('/api/v1/strategy/demo/balance')," not in console
+    assert "ocApi('/api/v1/strategy/demo/balance?fast=1')" in system
+    assert "ocApi('/api/v1/strategy/demo/balance?fast=1')" in demo
+    assert "ocApi('/api/v1/strategy/demo/balance?fast=1')" in paper
