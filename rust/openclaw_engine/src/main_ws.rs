@@ -20,6 +20,7 @@ use openclaw_engine::config::ConfigManager;
 use openclaw_engine::scanner::registry::SymbolRegistry;
 use openclaw_engine::ws_client::WsClient;
 use openclaw_types::PriceEvent;
+use std::sync::atomic::AtomicU32;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
@@ -46,6 +47,12 @@ pub(crate) fn spawn_ws_supervisor(
     // ws_client 重連時 attach 同一 instance。None = paper-only / no-health-pipeline
     // 走原本行為。
     ws_stats: Option<Arc<openclaw_engine::ws_client::WsStats>>,
+    // Sprint 5+ Track B round 2 — caller 預構 `Arc<AtomicU32>` 跨 supervisor
+    // restart 共享；本 supervisor 每次重建 WsClient 後 `attach_subscriptions
+    // _counter` 同步當前 subscriptions.len() 至 counter，emitter 端 closure
+    // 透過 `load(Relaxed)` 讀到實際 actual_topic_count。None = paper-only / 不接
+    // health pipeline 走 0 fallback。
+    subscriptions_counter: Option<Arc<AtomicU32>>,
 ) -> tokio::task::JoinHandle<()> {
     let cfg_snapshot = config.get();
     let ws_subscriptions: Vec<String> = if cfg_snapshot.enable_extended_ws {
@@ -118,6 +125,14 @@ pub(crate) fn spawn_ws_supervisor(
             // ws_client.attach_ws_stats() 後透傳同 Arc」設計）。
             if let Some(stats) = &ws_stats {
                 ws_client.attach_ws_stats(Arc::clone(stats));
+            }
+            // Sprint 5+ Track B round 2：跨 supervisor restart 共享 subscriptions
+            // counter；attach 後 setter 內部會把 counter store 為當前 subscriptions
+            // 數（restart 後重建 WsClient 時 subscriptions HashSet 為空，counter
+            // 同步至 0；下面 for-loop subscribe 透過 `Ordering::Relaxed` fetch_add
+            // 推回）。
+            if let Some(counter) = &subscriptions_counter {
+                ws_client.attach_subscriptions_counter(Arc::clone(counter));
             }
             for topic in &topics {
                 ws_client.subscribe(topic.clone());

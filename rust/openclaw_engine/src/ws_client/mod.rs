@@ -29,6 +29,7 @@ use crate::config::ConfigManager;
 use crate::ws_unknown_handler_guard::UnknownHandlerGuard;
 use openclaw_types::PriceEvent;
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -98,6 +99,21 @@ pub struct WsClient {
     /// `Arc` clone 跨 task 共享同 instance — dispatch.rs hot path 透過
     /// `inc_tick` 寫 + emitter 透過 accessor 讀。
     pub(super) ws_stats: Option<Arc<stats::WsStats>>,
+    /// Sprint 5+ Track B real probe round 2 — actual subscription count 跨
+    /// supervisor restart 的全局 Arc 計數器。
+    ///
+    /// 為什麼 `Arc<AtomicU32>` 跨 process 全局：
+    ///   - WsClient instance 每次 supervisor restart 重建；`subscriptions` HashSet
+    ///     生命週期跟 instance；caller 端讀 `subscriptions.len()` 需借用 instance，
+    ///     不可從 supervisor 外部安全讀取（會跨 thread mutable borrow）。
+    ///   - 改採 caller 端預構 `Arc<AtomicU32>`，supervisor 每次重建 WsClient 都
+    ///     attach 同一 Arc；WsClient 在 subscribe / unsubscribe / 重連初始化時
+    ///     fetch_add / fetch_sub / store。emitter 端 closure 走 `load(Relaxed)`
+    ///     讀同一 counter，0 鎖 0 task race。
+    ///   - 為什麼 Option：既有 8+ caller `WsClient::new` 不接 health pipeline 走
+    ///     None；attach 後 supervisor restart 都同 instance（per `feedback_no
+    ///     _dead_params` 反假陽性 fail-soft）。
+    pub(super) subscriptions_counter: Option<Arc<AtomicU32>>,
 }
 
 impl WsClient {
@@ -124,6 +140,10 @@ impl WsClient {
             // 既有 main_ws / scanner runner / paper test 不接 health pipeline，
             // 0 行為退化。
             ws_stats: None,
+            // Sprint 5+ Track B round 2：default None；caller 走
+            // `attach_subscriptions_counter` 注入 Arc<AtomicU32>。既有 caller 不接
+            // 走 None 路徑，subscribe / unsubscribe 不寫 counter（fail-soft）。
+            subscriptions_counter: None,
         }
     }
 
@@ -137,6 +157,23 @@ impl WsClient {
     ///     None fallback。
     pub fn attach_ws_stats(&mut self, ws_stats: Arc<stats::WsStats>) {
         self.ws_stats = Some(ws_stats);
+    }
+
+    /// Sprint 5+ Track B round 2 — 注入跨 supervisor restart 共享的
+    /// `Arc<AtomicU32>` subscription counter。
+    ///
+    /// 為什麼 supervisor 預構 Arc 跨 restart 共享：
+    ///   - 每次 supervisor restart 重建 WsClient + 新 `subscriptions` HashSet，
+    ///     若計數器隨 instance 走會在 restart 時歸零，emitter 端 actual 讀到 0
+    ///     觸發誤陽性 drift；改採 caller 預構 Arc，restart 後本 setter 同步
+    ///     `subscriptions.len()` 至 counter 確保連續性。
+    ///   - `Ordering::Relaxed` 因 counter 非 lock-acquire 語意（per spec §7.2）。
+    pub fn attach_subscriptions_counter(&mut self, counter: Arc<AtomicU32>) {
+        // 同步重連後 subscriptions 內容到 counter（restart 後初始 / 重新訂閱前
+        // 走 0；訂閱完成後 update 至實際數）。caller 在 attach 後立刻 subscribe
+        // 的常見路徑：先 attach（counter=0）→ subscribe（counter += 1）。
+        counter.store(self.subscriptions.len() as u32, Ordering::Relaxed);
+        self.subscriptions_counter = Some(counter);
     }
 
     /// Sprint 5+ Track B real probe — 暴露 subscription set count 給 emitter 端。
@@ -163,7 +200,14 @@ impl WsClient {
     /// Add a startup subscription topic (called before run()).
     /// 添加啟動訂閱主題（在 run() 前調用）。
     pub fn subscribe(&mut self, topic: impl Into<String>) {
-        self.subscriptions.insert(topic.into());
+        let inserted = self.subscriptions.insert(topic.into());
+        // Sprint 5+ Track B round 2：HashSet.insert() 已自動去重；只在實際新增時
+        // 推 counter 避重複 fetch_add（per WS-RC1 既有去重設計）。
+        if inserted {
+            if let Some(ref c) = self.subscriptions_counter {
+                c.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
 
     /// Attach a runtime topic-change channel. Returns the sender half for callers.

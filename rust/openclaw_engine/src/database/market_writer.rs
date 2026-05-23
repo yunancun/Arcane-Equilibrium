@@ -10,7 +10,8 @@
 
 use super::batch_insert::{batch_insert_chunked, batch_insert_chunked_with_override};
 use super::fallback::FallbackWriter;
-use super::pool::DbPool;
+use super::pool::{pool_acquire_with_stats, DbPool};
+use super::pool_wait_stats::PoolWaitStats;
 use super::{sanitize_f64, sanitize_f64_or_zero, MarketDataMsg};
 use sqlx::{Postgres, QueryBuilder};
 use std::path::PathBuf;
@@ -86,11 +87,19 @@ fn validated_liquidation_row(msg: &MarketDataMsg) -> Option<LiquidationRow<'_>> 
 
 /// Run the market data writer task: receive from channel, batch flush to PG.
 /// 運行市場數據寫入器任務：從通道接收，批量刷新到 PG。
+///
+/// Sprint 5+ Track C round 2 caller wire-up：可選 `pool_wait_stats` Arc 注入
+/// 後，每次 flush_timer tick 前透過 `pool_acquire_with_stats` 拿一條短暫的
+/// connection 計時樣本，反映當下 pool acquire backlog；釋放後再走既有 flush
+/// 路徑（`execute(pg)` 內部各自 acquire 不重複計時）。
+/// None = 既有 caller / test 不接 health pipeline 走 0 行為退化（per spec §3.4
+/// `caller 端 opt-in 切換即可`）。
 pub async fn run_market_writer(
     mut rx: mpsc::Receiver<MarketDataMsg>,
     pool: Arc<DbPool>,
     config: Arc<crate::config::ConfigManager>,
     cancel: CancellationToken,
+    pool_wait_stats: Option<Arc<PoolWaitStats>>,
 ) {
     let mut kline_buf: Vec<MarketDataMsg> = Vec::with_capacity(64);
     let mut ticker_buf: Vec<MarketDataMsg> = Vec::with_capacity(64);
@@ -119,6 +128,20 @@ pub async fn run_market_writer(
             _ = cancel.cancelled() => break,
             _ = flush_timer.tick() => {
                 if pool.is_available() && !in_fallback_mode {
+                    // Sprint 5+ Track C round 2：在實際 flush 之前先拿一條短暫
+                    // connection 計時樣本，反映 pool acquire wait 真實 latency。
+                    // 為什麼這裡 sample：buf 非空 = 即將進行 SQL execute；此時
+                    // acquire 與 flush 路徑面對的 backlog 一致，p95 反映實際生產
+                    // 路徑的 contention（per `feedback_no_dead_params` 真實樣本）。
+                    if let Some(ref pw_stats) = pool_wait_stats {
+                        if let Some(pg_ref) = pool.get() {
+                            if !kline_buf.is_empty() || !ticker_buf.is_empty() || !other_buf.is_empty() {
+                                // record_wait_ms 由 pool_acquire_with_stats 內部處理；
+                                // 樣本拿到後 drop 立即還 connection（非長租）。
+                                let _ = pool_acquire_with_stats(pg_ref, pw_stats).await;
+                            }
+                        }
+                    }
                     flush_all(&pool, &mut kline_buf, &mut ticker_buf, &mut other_buf).await;
                     // F-6: Switch to fallback after 3 consecutive PG failures
                     if pool.failure_count() >= 3 {

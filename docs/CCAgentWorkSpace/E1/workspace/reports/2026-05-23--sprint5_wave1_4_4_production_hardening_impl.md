@@ -302,3 +302,114 @@ per PA report §7.6 流程：
 ---
 
 E1 IMPLEMENTATION DONE: 待 E2 審查（report path: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint5_wave1_4_4_production_hardening_impl.md`）
+
+---
+
+# §8 Round 2 Fix Log（2026-05-23）
+
+per E2-5 round 1 review RETURN-TO-E1（1 HIGH + 3 MEDIUM + 2 LOW；E2-5 verdict 由 PM 主對話收）：
+
+## §8.1 HIGH-1 fix — `tests/sprint2_track_d_api_latency.rs`
+
+| 行 | Before | After |
+|---|---|---|
+| 711-713 docstring | `ws_p50=200 DEGRADED` | `ws_p50=350 DEGRADED (>300 per Sprint 5+ Wave 1 §4.4 amend)` |
+| 742 fixture | `ws_rtt_p50_ms: 200, // DEGRADED (>150)` | `ws_rtt_p50_ms: 350, // DEGRADED (>300 per §4.4 amend)` |
+
+為什麼必修：§4.4 ladder amend 後 ws_p50=200 落 **WARN band** 非 DEGRADED；docstring + fixture 仍寫舊 DEGRADED 會誤導 reviewer + 在「全 4 DEGRADED + 4 CRITICAL」testname 語義下與 fixture 行為脫節（assert 仍會 PASS 因為 contains check 是 metric_name 不是 state，但語意保證已破）。
+
+驗證：`cargo test --release --test sprint2_track_d_api_latency` 7/7 PASS（含 `test_sprint2_track_d_api_latency_degraded_band_classify`）。
+
+## §8.2 MEDIUM-1 fix — `helper_scripts/db/ac1b_monthly_healthcheck.sh`
+
+env var convention drift（對齊 `passive_wait_healthcheck/checks_cron_heartbeat.py` mainstream）：
+
+| 點 | Before | After |
+|---|---|---|
+| L34 docstring | `OPENCLAW_HEARTBEAT_DIR (default: /tmp/openclaw/cron_heartbeat)` | `OPENCLAW_CRON_HEARTBEAT_DIR (default: $OPENCLAW_DATA_DIR/cron_heartbeat → /tmp/openclaw/cron_heartbeat)` + `OPENCLAW_DATA_DIR` parent fallback 變量說明 |
+| L44 var name + fallback | `SENTINEL_DIR="${OPENCLAW_HEARTBEAT_DIR:-/tmp/openclaw/cron_heartbeat}"` | `DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"` + `SENTINEL_DIR="${OPENCLAW_CRON_HEARTBEAT_DIR:-$DATA_DIR/cron_heartbeat}"` + 注釋對齊 `checks_cron_heartbeat.py:45-48` |
+| L136 sentinel filename | `ac1b_monthly_healthcheck.last_run` | `ac1b_monthly_healthcheck.last_fire` + 為什麼此命名注釋（避被 cron_heartbeat WARN-by-default check 漏接） |
+
+為什麼必修：`checks_cron_heartbeat.py:39` `_DEFAULT_HEARTBEAT_SUBDIR = "cron_heartbeat"` + `:6` doc-comment `<name>.last_fire` + `test_cron_heartbeat_healthchecks.py:74,253,283` 全用 `OPENCLAW_CRON_HEARTBEAT_DIR` + `.last_fire`；`OPENCLAW_HEARTBEAT_DIR` 是新引入的 drift 變量名，sentinel 走 `.last_run` 偏離既有 WARN-by-default health check 模式 → 即使 cron fire sentinel，passive_wait_healthcheck check 也認不到。
+
+## §8.3 MEDIUM-2 fix — `helper_scripts/db/health_60s_boundary_verify.sh`
+
+bash numeric check 反 `2>/dev/null` 抑制（反 except:pass 反模式 per `feedback_working_principles` 「誠實報告測試」）：
+
+§2 samples_per_min 段 + §3 30min_summary 段同時改：
+
+```bash
+# Before（兩段都有）:
+elif [[ -n "$samples" && "$samples" -gt 2 ]] 2>/dev/null; then
+if [[ -z "$row_count" || "$row_count" -lt 25 ]] 2>/dev/null; then
+
+# After:
+if [[ ! "$samples" =~ ^[0-9]+$ ]]; then
+  echo "[FAIL] §2 ... samples_per_min='$samples' (非數字；SQL parse 漏接 or column drift)"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+elif (( samples > 2 )); then ...
+
+if [[ ! "$row_count" =~ ^[0-9]+$ ]]; then
+  echo "[FAIL] §3 ... row_count='$row_count' (非數字；SQL parse 漏接 or column drift)"
+  FAIL_COUNT=$((FAIL_COUNT + 1))
+elif (( row_count < 25 )); then ...
+```
+
+為什麼必修：原 `2>/dev/null` 抑制把「非數字」靜默歸 OK band；SQL parse 漏接（NULL column / column drift）會被埋掉 → fail-loud 原則破。改為顯式 regex check + 非數字必 FAIL（fail loud）。
+
+## §8.4 MEDIUM-3 fix — `docs/execution_plan/2026-05-21--m3_health_monitoring_design_spec.md`
+
+§2.3.3 「設計理由」段尾補「Sprint 5+ Wave 1 §4.4 amend（2026-05-23）」section：
+
+- L144 `ws_rtt_p50_ms` row：OK<50/WARN 50-150/DEGRADED>150 → **OK<170/WARN 170-300/DEGRADED>300**
+- 補 `engine_runtime.engine_open_fd` ladder amend：OK<1024/WARN 1024-4096/DEGRADED>4096 → **OK<3072/WARN 3072-6144/DEGRADED>6144**
+- 兩條 amend 附 Linux 6h empirical 1700-1800 fd / 150-163ms ws_rtt baseline rationale + mainnet recalibrate 警示
+
+為什麼必修：spec 是 SSOT；ladder code amend 後 spec 仍寫舊值 → 未來 reviewer 不知哪邊權威 → drift 累積。
+
+## §8.5 LOW-1 fix — `helper_scripts/db/ac1b_monthly_healthcheck.sh:18` crontab spec doc-comment
+
+| Before | After |
+|---|---|
+| `30 3 1 * * /home/ncyu/BybitOpenClaw/srv/helper_scripts/db/ac1b_monthly_healthcheck.sh` | `30 3 1 * * ${OPENCLAW_BASE_DIR:-/home/ncyu/BybitOpenClaw/srv}/helper_scripts/db/ac1b_monthly_healthcheck.sh` + 為什麼此抽象注釋 |
+
+為什麼修：避硬編碼 `/home/ncyu` 阻礙未來 Apple Silicon Mac 部署（per CLAUDE §六 跨平台 portability mandate）。
+
+## §8.6 LOW-2 fix — `docs/CCAgentWorkSpace/Operator/2026-05-23--sprint5_wave1_production_hardening_design.md`
+
+front-matter `status` 加 round 2 amendment note + 指向 canonical PA dispatch packet + design spec §2.3.3 為 SSOT；不再同步 ladder 數字。
+
+為什麼修：Operator workspace mirror 不是 SSOT；不標 deprecated/redirect 會造成「兩處 ladder 不一致 → 不知哪邊權威」。
+
+## §8.7 驗證結果
+
+| 驗證項 | 結果 |
+|---|---|
+| `bash -n ac1b_monthly_healthcheck.sh` | PASS |
+| `bash -n health_60s_boundary_verify.sh` | PASS |
+| `cargo test --release --test sprint2_track_d_api_latency` | 7 passed; 0 failed |
+| `cargo test --release --lib health::domains::api_latency` | 15 passed; 0 failed |
+| `cargo test --release --lib health::metric_emitter` | 10 passed; 0 failed |
+
+## §8.8 修改清單（round 2）
+
+| 檔 | 修改類型 | 行 |
+|---|---|---|
+| `rust/openclaw_engine/tests/sprint2_track_d_api_latency.rs` | HIGH-1 docstring + fixture | 711-713, 742 |
+| `helper_scripts/db/ac1b_monthly_healthcheck.sh` | MEDIUM-1 env var + sentinel | 18 crontab spec, 34 docstring, 44 var name+fallback, 132-138 comment+filename |
+| `helper_scripts/db/health_60s_boundary_verify.sh` | MEDIUM-2 numeric check | 124-148（§2 samples_per_min + §3 30min_summary 兩段 regex + fail-loud） |
+| `docs/execution_plan/2026-05-21--m3_health_monitoring_design_spec.md` | MEDIUM-3 ladder + amend | 144 ws_rtt_p50 row + 155 後新加 「Sprint 5+ Wave 1 §4.4 amend」 section |
+| `docs/CCAgentWorkSpace/Operator/2026-05-23--sprint5_wave1_production_hardening_design.md` | LOW-2 mirror amendment note | 6-13 front-matter |
+
+## §8.9 E2 round 2 readiness
+
+預期 E2 round 2 重點審查：
+
+1. **HIGH-1 確認**：docstring `ws_p50=350` 與 fixture `ws_rtt_p50_ms: 350` 一致；test_name `_degraded_band_classify` 語義對齊 fixture 全 8 metric DEGRADED/CRITICAL。
+2. **MEDIUM-1 確認**：grep `OPENCLAW_CRON_HEARTBEAT_DIR` + `.last_fire` 全 ac1b script + checks_cron_heartbeat.py convention 同步；不再使用 `OPENCLAW_HEARTBEAT_DIR` / `.last_run` drift 命名。
+3. **MEDIUM-2 確認**：`2>/dev/null` 已從兩處 numeric check 移除；非數字 sample 路徑必 FAIL 而非靜默歸 OK。
+4. **MEDIUM-3 確認**：spec L144 ladder + open_fd amend note 與 code（metric_emitter/mod.rs L346-371 + api_latency.rs L303-336）一致。
+5. **LOW 確認**：跨平台 portability + Operator mirror redirect note。
+6. **業務邏輯 0 改動**：cargo test 全 PASS = round 1 行為不變。
+
+E1 ROUND 2 FIX DONE: 待 E2 round 2 審查（同 report path 內 §8 round 2 fix log）

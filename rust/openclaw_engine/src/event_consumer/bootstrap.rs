@@ -165,6 +165,9 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         // W2 sub-task 4 (E1-δ, 2026-05-11): BtcLeadLagPanelSlot Arc clone for
         // pipeline；構造後 inject TickPipeline.btc_lead_lag_panel_slot。
         btc_lead_lag_panel_slot,
+        // Sprint 5+ Track B round 2 caller wire-up：strategy signal stats Arc。
+        // 三 pipeline 共享同一 instance；on_tick step_3 hot path fetch_add 累計。
+        signal_stats,
     } = deps;
 
     // MARKET-KLINES-STALE-1 (2026-04-18): the original D19 invariant
@@ -224,6 +227,17 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
     // → surface.btc_lead_lag = None，不影響既有行為。
     if let Some(slot) = btc_lead_lag_panel_slot {
         pipeline.set_btc_lead_lag_panel_slot(slot);
+    }
+
+    // Sprint 5+ Track B round 2 caller wire-up：strategy signal stats Arc 注入。
+    // 為什麼此處（pipeline 構造後 / 註冊策略前）：
+    //   - 對齊既有 set_h0_latency_recorder / set_funding_curve_panel_slot 注入
+    //     範式（pipeline mut access 局限在 setter，不破業務邏輯）；
+    //   - signal_stats 在 step_3_signals.rs hot path 走 `if let Some(stats) =
+    //     &self.signal_stats` 短路；None 走 fail-soft（既有 test 不接 health
+    //     pipeline 不退化）。
+    if let Some(stats) = signal_stats {
+        pipeline.set_signal_stats(stats);
     }
 
     // EDGE-P3-1 Phase B #1: Inject per-engine EdgePredictorStore. None preserves

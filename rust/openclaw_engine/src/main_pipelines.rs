@@ -92,6 +92,12 @@ pub(crate) struct PipelineSpawnContext<'a> {
     /// 拿到 None slot → surface.btc_lead_lag = None（fence + slot 兩層 None
     /// 邏輯一致）。
     pub btc_lead_lag_panel_slot: &'a Option<openclaw_engine::ipc_server::BtcLeadLagPanelSlot>,
+    /// Sprint 5+ Track B round 2 caller wire-up：strategy signal stats Arc。
+    /// main.rs 預建 Arc + clone 給三 pipeline 的 EventConsumerDeps + clone 給
+    /// spawn_metric_emitter_scheduler 共同寫 / 讀 SignalStats counter。
+    /// `None` = paper-only / 不接 health pipeline 走 fail-soft（pipeline 端
+    /// step_3 hot path None 短路；emitter 端走 placeholder fallback）。
+    pub signal_stats: &'a Option<Arc<openclaw_engine::tick_pipeline::signal_stats::SignalStats>>,
 }
 
 /// Writer channel senders shared across pipelines.
@@ -153,7 +159,7 @@ pub(crate) struct LiveChannels {
 fn reject_disabled_paper_command(cmd: PipelineCommand) {
     let reason = || {
         Err(
-            "paper pipeline disabled: set OPENCLAW_ENABLE_PAPER=1 before sending paper commands"
+            "paper pipeline archived: use Replay Stage 0R + Demo micro-canary instead"
                 .to_string(),
         )
     };
@@ -190,7 +196,7 @@ fn reject_disabled_paper_command(cmd: PipelineCommand) {
     }
 }
 
-/// Spawn the Paper pipeline (opt-in via OPENCLAW_ENABLE_PAPER=1).
+/// Spawn the archived Paper drain task.
 ///
 /// EN: When disabled (default), writes DISABLED markers to `paper_state.json`
 ///   + `pipeline_snapshot_paper.json` so GUI / IPC surfaces the state correctly
@@ -200,7 +206,7 @@ fn reject_disabled_paper_command(cmd: PipelineCommand) {
 ///   wrapper — a panic broadcasts `EngineEvent::Crashed(Paper)` + triggers
 ///   engine-wide cancel (2026-04-14 zombie-fix parity).
 ///
-/// 中: 禁用時（預設）寫 DISABLED 標記至 `paper_state.json`+`pipeline_snapshot_paper.json`
+/// 中: 禁用時（固定）寫 DISABLED 標記至 `paper_state.json`+`pipeline_snapshot_paper.json`
 ///   讓 GUI/IPC 顯示正確狀態（避免陳舊餘額），然後啟動最小 drain 任務消費
 ///   event+cmd 通道（scanner/phase4/IPC 仍 clone sender）。啟用時構建完整
 ///   `EventConsumerDeps` 並以 crash-only 包裝啟動 — panic 廣播
@@ -212,14 +218,20 @@ pub(crate) fn spawn_paper_pipeline(
     live_bindings_opt: &Option<ExchangePipelineBindings>,
     demo_bindings_opt: &Option<ExchangePipelineBindings>,
 ) -> tokio::task::JoinHandle<()> {
-    let paper_enabled = std::env::var("OPENCLAW_ENABLE_PAPER")
+    let paper_env_requested = std::env::var("OPENCLAW_ENABLE_PAPER")
         .map(|v| v.trim() == "1")
         .unwrap_or(false);
+    if paper_env_requested {
+        warn!(
+            "OPENCLAW_ENABLE_PAPER=1 ignored: paper pipeline is archived; use Replay Stage 0R + Demo micro-canary"
+        );
+    }
+    let paper_enabled = false;
 
     if !paper_enabled {
         info!(
-            "paper pipeline DISABLED (default; set OPENCLAW_ENABLE_PAPER=1 to enable) / \
-             Paper 管線已禁用（預設；設 OPENCLAW_ENABLE_PAPER=1 啟用）"
+            "paper pipeline ARCHIVED/DISABLED; promotion_allowed=false / \
+             Paper 管線已封存禁用；promotion_allowed=false"
         );
         // Mark health as Disabled so GUI / IPC surfaces DISABLED rather than stale Running.
         // 健康狀態標記為 Disabled，GUI / IPC 顯示禁用而非陳舊的 Running。
@@ -247,7 +259,7 @@ pub(crate) fn spawn_paper_pipeline(
                 .unwrap_or(0);
             let paper_state_marker = serde_json::json!({
                 "disabled": true,
-                "disabled_reason": "OPENCLAW_ENABLE_PAPER != 1",
+                "disabled_reason": "paper archived 2026-05-23; use Replay Stage 0R + Demo micro-canary",
                 "disabled_since_ms": ts_ms,
                 "balance": 0.0,
                 "initial_balance": paper.initial_balance,
@@ -265,7 +277,7 @@ pub(crate) fn spawn_paper_pipeline(
                 "paper_paused": true,
                 "paper_state": paper_state_marker,
                 "disabled": true,
-                "disabled_reason": "OPENCLAW_ENABLE_PAPER != 1",
+                "disabled_reason": "paper archived 2026-05-23; use Replay Stage 0R + Demo micro-canary",
                 "positions": [],
                 "recent_fills": [],
                 "recent_intents": [],
@@ -402,6 +414,8 @@ pub(crate) fn spawn_paper_pipeline(
         funding_curve_panel_slot: ctx.funding_curve_panel_slot.clone(),
         oi_delta_panel_slot: ctx.oi_delta_panel_slot.clone(),
         btc_lead_lag_panel_slot: ctx.btc_lead_lag_panel_slot.clone(),
+        // Sprint 5+ Track B round 2：三 pipeline 共享同 signal_stats Arc。
+        signal_stats: ctx.signal_stats.clone(),
     };
     // Fix 3 (2026-04-14): wrap in crash-only layer so a paper task panic
     // is logged + broadcast + triggers engine-wide cancel (watchdog restart).
@@ -519,6 +533,8 @@ pub(crate) fn spawn_demo_pipeline(
         funding_curve_panel_slot: ctx.funding_curve_panel_slot.clone(),
         oi_delta_panel_slot: ctx.oi_delta_panel_slot.clone(),
         btc_lead_lag_panel_slot: ctx.btc_lead_lag_panel_slot.clone(),
+        // Sprint 5+ Track B round 2：三 pipeline 共享同 signal_stats Arc。
+        signal_stats: ctx.signal_stats.clone(),
     };
     // Fix 3 (2026-04-14): same crash-only wrapper as paper.
     // 修復 3：同 paper 的 crash-only 包裝。
@@ -658,6 +674,8 @@ pub(crate) fn spawn_live_pipeline(
         funding_curve_panel_slot: ctx.funding_curve_panel_slot.clone(),
         oi_delta_panel_slot: ctx.oi_delta_panel_slot.clone(),
         btc_lead_lag_panel_slot: ctx.btc_lead_lag_panel_slot.clone(),
+        // Sprint 5+ Track B round 2：三 pipeline 共享同 signal_stats Arc。
+        signal_stats: ctx.signal_stats.clone(),
     };
 
     // D17: Live runs on dedicated OS thread with catch_unwind for panic isolation.
@@ -836,6 +854,9 @@ pub(crate) struct LiveSpawnBundle {
     /// W2 sub-task 4 (E1-δ, 2026-05-11): BtcLeadLagPanelSlot Arc clone for
     /// live respawn cycle；spawner closure 把此 slot 注入每次重生的 PipelineSpawnContext。
     pub btc_lead_lag_panel_slot: Option<openclaw_engine::ipc_server::BtcLeadLagPanelSlot>,
+    /// Sprint 5+ Track B round 2 caller wire-up：strategy signal stats Arc。
+    /// live respawn 每次重生共享同一 Arc，跨 watcher restart 連續累計。
+    pub signal_stats: Option<Arc<openclaw_engine::tick_pipeline::signal_stats::SignalStats>>,
 }
 
 /// Build the `LivePipelineSpawner` closure from a `LiveSpawnBundle`.
@@ -912,6 +933,9 @@ pub(crate) fn build_live_pipeline_spawner(
     let oi_delta_panel_slot_c = b.oi_delta_panel_slot;
     // W2 sub-task 4 (E1-δ, 2026-05-11): capture BtcLeadLagPanelSlot for closure
     let btc_lead_lag_panel_slot_c = b.btc_lead_lag_panel_slot;
+    // Sprint 5+ Track B round 2：capture signal_stats for closure，live respawn
+    // 共享同 Arc 跨 watcher restart 連續累計。
+    let signal_stats_c = b.signal_stats;
 
     Arc::new(move |spawn_output: crate::pipeline_slot::SpawnOutput| -> crate::live_auth_watcher::LivePipelineSpawnResult {
         // Build fresh channels for this spawn cycle.
@@ -965,6 +989,8 @@ pub(crate) fn build_live_pipeline_spawner(
             oi_delta_panel_slot: &oi_delta_panel_slot_c,
             // W2 sub-task 4 (E1-δ, 2026-05-11): live respawn 拿 slot
             btc_lead_lag_panel_slot: &btc_lead_lag_panel_slot_c,
+            // Sprint 5+ Track B round 2：live respawn 拿同 signal_stats Arc
+            signal_stats: &signal_stats_c,
         };
         let live_channels = LiveChannels {
             bindings: spawn_output.bindings,

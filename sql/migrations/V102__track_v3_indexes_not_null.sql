@@ -152,9 +152,29 @@ END $$;
 --     DEFAULT 'USDT' / is_paper BOOLEAN DEFAULT FALSE)
 --   - DEFAULT 是 metadata-only operation;不重寫既有 row;
 --     預期 columnstore-safe (per PA spec §3.2 Option B)
+--
+-- 為什麼包 BEGIN...EXCEPTION WHEN feature_not_supported:
+--   - 對齊 V077 line 122-156 + V049 line 545-558 已驗範式
+--   - trading.fills 是 columnstore hypertable;若 PG/Timescale 版本對
+--     ALTER COLUMN ... SET DEFAULT RAISE feature_not_supported，
+--     migration 不應整體 rollback
+--   - fallback path = RAISE WARNING + 注釋說明 trigger 兜底 NOT NULL；
+--     trigger trg_fills_track_not_null_v102 在 Main DDL Step 2 仍 land，
+--     仍能阻止 writer 寫入 NULL row (primary defence intact)
 -- ============================================================
-ALTER TABLE trading.fills
-    ALTER COLUMN track SET DEFAULT 'baseline'::strategy_track;
+DO $$
+BEGIN
+    BEGIN
+        ALTER TABLE trading.fills
+            ALTER COLUMN track SET DEFAULT 'baseline'::strategy_track;
+        RAISE NOTICE 'V102: trading.fills.track DEFAULT set to baseline';
+    EXCEPTION
+        WHEN feature_not_supported THEN
+            RAISE WARNING
+                'V102: ALTER COLUMN SET DEFAULT skipped (feature_not_supported on columnstore hypertable); '
+                'trigger trg_fills_track_not_null_v102 remains primary NOT NULL defence';
+    END;
+END $$;
 
 -- ============================================================
 -- Main DDL Step 2: trigger function + trigger (per V077 範式)
@@ -283,15 +303,28 @@ BEGIN
             'V102 Guard C FAIL: idx_fills_strategy_track_v102 definition drift。Actual: %。', v_idx2;
     END IF;
 
-    -- DEFAULT 'baseline' 已生效
+    -- DEFAULT 'baseline' 檢查 (對齊 Main DDL Step 1 EXCEPTION fallback path)
+    -- 為什麼 DEFAULT IS NULL 走 WARNING 不走 EXCEPTION:
+    --   - Main DDL Step 1 columnstore feature_not_supported fallback 後
+    --     v_column_default = NULL 是預期 (非 drift)；
+    --   - trigger trg_fills_track_not_null_v102 仍 land (Guard C 下方驗)，
+    --     primary NOT NULL defence intact;
+    --   - 只在 DEFAULT 被設了但值 drift 時才 RAISE EXCEPTION (操作員手工
+    --     ALTER 改成其他值的 schema drift case)。
     SELECT column_default INTO v_column_default
     FROM information_schema.columns
     WHERE table_schema = 'trading' AND table_name = 'fills'
       AND column_name = 'track';
 
-    IF v_column_default IS NULL OR v_column_default NOT ILIKE '%baseline%' THEN
+    IF v_column_default IS NULL THEN
+        RAISE WARNING
+            'V102 Guard C: trading.fills.track DEFAULT not set '
+            '(likely columnstore feature_not_supported fallback); '
+            'trigger trg_fills_track_not_null_v102 兜底 NOT NULL enforcement';
+    ELSIF v_column_default NOT ILIKE '%baseline%' THEN
         RAISE EXCEPTION
-            'V102 Guard C FAIL: trading.fills.track DEFAULT not set to baseline。Actual: %。',
+            'V102 Guard C FAIL: trading.fills.track DEFAULT drift '
+            '(expected baseline). Actual: %.',
             v_column_default;
     END IF;
 

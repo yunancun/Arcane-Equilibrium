@@ -609,6 +609,16 @@ async fn async_main(
     // 透傳給 supervisor 讓每次 ws_client 重連都接通同一 instance。同時 Arc clone
     // 留給 spawn_metric_emitter_scheduler 注入 RealPipelineThroughputSource。
     let ws_stats_arc = Arc::new(openclaw_engine::ws_client::WsStats::new());
+    // Sprint 5+ Track B round 2 caller wire-up：跨 supervisor restart 共享的
+    // subscriptions counter；emitter 端 actual_topic_count closure 走
+    // `subscriptions_counter_arc.load(Relaxed)` 讀真實接通 topic 數。
+    let subscriptions_counter_arc = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    // Sprint 5+ Track B round 2 caller wire-up：strategy signal stats Arc，三
+    // pipeline 共享 + spawn_metric_emitter_scheduler 注入 SignalStats。三
+    // pipeline 在 bootstrap.rs 收到後呼 set_signal_stats；step_3_signals hot
+    // path 透過 fetch_add 累計。
+    let signal_stats_arc =
+        Arc::new(openclaw_engine::tick_pipeline::signal_stats::SignalStats::new());
     let ws_handle = main_ws::spawn_ws_supervisor(
         &config,
         &cancel,
@@ -616,6 +626,7 @@ async fn async_main(
         &current_ws_client_tx,
         event_tx.clone(),
         Some(Arc::clone(&ws_stats_arc)),
+        Some(Arc::clone(&subscriptions_counter_arc)),
     );
 
     // ------------------------------------------------------------------
@@ -735,6 +746,12 @@ async fn async_main(
         shadow_exit_tx,
         agent_spine_tx,
         agent_spine_mode,
+        // Sprint 5+ §4.3.6 Track C round 2 caller wire-up：WriterQueueStats /
+        // PoolWaitStats Arc。spawn_db_writers 構造後反傳給 main_health_emitters
+        // 注入 RealDatabasePoolProbe。DB 不可用走 None None → spawn_metric
+        // _emitter_scheduler 端走 placeholder fallback emitter。
+        writer_queue_stats_arc,
+        pool_wait_stats_arc,
     ) = tasks::spawn_db_writers(
         &db_pool,
         &config,
@@ -1045,9 +1062,9 @@ async fn async_main(
     // 原 spec v1.2 §6.2 Layer 2 是「Python writer paper-only fence」；但 producer
     // 在 PA D+0 階段已從 Python writer 改為 Rust producer（panel_aggregator/btc_lead_lag.rs），
     // Python writer 從不存在。Layer 2 改為 **Producer 端 env-gate**：
-    //   (a) OPENCLAW_ENABLE_PAPER=1                     → spawn producer（paper 正路徑）
+    //   (a) OPENCLAW_ENABLE_PAPER=1                     → ignored since 2026-05-23
     //   (b) OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1   → spawn producer（Stage 0R diagnostic only）
-    //   (c) OPENCLAW_ENABLE_PAPER 未設 + paper-only（!has_demo && !has_live）→ spawn producer
+    //   (c) paper-only legacy runtime                    → archived; use diagnostic env
     //   (d) OPENCLAW_ENABLE_PAPER 未設 + has_demo|has_live = true            → **skip spawn**
     // Diagnostic mode is non-promotional per AMD-2026-05-15-01: rows are marked
     // with source_tier='cross_asset_btc_lead_lag_diagnostic', while downstream
@@ -1056,10 +1073,16 @@ async fn async_main(
     // demo/live engine_mode 不會把 panel 注入 surface；本 Layer 2 是深度防禦，
     // 避免在 mixed mode（paper + demo 同 host）時 paper-disabled 但 demo 跑的
     // 場景下 producer 還在寫 PG。
-    let btc_lead_lag_paper_enabled_env =
+    let btc_lead_lag_paper_env_requested =
         std::env::var(openclaw_engine::panel_aggregator::OPENCLAW_ENABLE_PAPER_ENV)
             .map(|v| v.trim() == "1")
             .unwrap_or(false);
+    if btc_lead_lag_paper_env_requested {
+        warn!(
+            "OPENCLAW_ENABLE_PAPER=1 ignored for BtcLeadLagProducer; use OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1 for non-promotional diagnostics"
+        );
+    }
+    let btc_lead_lag_paper_enabled_env = false;
     let btc_lead_lag_diagnostic_enabled_env =
         openclaw_engine::panel_aggregator::btc_lead_lag_diagnostic_mode_enabled();
     let btc_lead_lag_source_tier =
@@ -1136,8 +1159,8 @@ async fn async_main(
 
     // ------------------------------------------------------------------
     // 3E-ARCH pipeline spawns extracted to `main_pipelines.rs` (G1-03 Wave 1).
-    //   * `spawn_paper_pipeline` handles opt-in paper (OPENCLAW_ENABLE_PAPER=1)
-    //     with DISABLED-marker fallback, drain-task, or full crash-only spawn.
+    //   * `spawn_paper_pipeline` always writes archived DISABLED markers and drains;
+    //     OPENCLAW_ENABLE_PAPER=1 is ignored.
     //   * `spawn_demo_pipeline` wraps demo deps + crash-only wrapper.
     //   * `spawn_live_pipeline` spawns live on a dedicated OS thread with
     //     catch_unwind isolation and engine-wide cancel on panic.
@@ -1150,6 +1173,12 @@ async fn async_main(
     let funding_curve_slot_for_pipelines = Some(Arc::clone(&funding_curve_panel_slot));
     let oi_delta_slot_for_pipelines = Some(Arc::clone(&oi_delta_panel_slot));
     let btc_lead_lag_slot_for_pipelines = Some(Arc::clone(&btc_lead_lag_panel_slot));
+    // Sprint 5+ Track B round 2 caller wire-up：把 signal_stats_arc 包成 Option
+    // 透傳 PipelineSpawnContext + LiveSpawnBundle；三 pipeline 共享同 Arc，跨
+    // pipeline + supervisor restart 累積 signal counter。
+    let signal_stats_for_pipelines: Option<
+        Arc<openclaw_engine::tick_pipeline::signal_stats::SignalStats>,
+    > = Some(Arc::clone(&signal_stats_arc));
 
     let spawn_ctx = main_pipelines::PipelineSpawnContext {
         config: &config,
@@ -1174,6 +1203,8 @@ async fn async_main(
         oi_delta_panel_slot: &oi_delta_slot_for_pipelines,
         // W2 sub-task 4 (E1-δ, 2026-05-11): BtcLeadLagPanelSlot 注入三 pipeline
         btc_lead_lag_panel_slot: &btc_lead_lag_slot_for_pipelines,
+        // Sprint 5+ Track B round 2：SignalStats 注入三 pipeline
+        signal_stats: &signal_stats_for_pipelines,
     };
     let writers = main_pipelines::WriterSenders {
         market_tx: market_tx.clone(),
@@ -1298,6 +1329,9 @@ async fn async_main(
             // W2 sub-task 4 (E1-δ, 2026-05-11): live respawn 拿同 BtcLeadLagPanelSlot
             // Arc clone（與 paper / demo 三引擎共享 producer 寫入端）
             btc_lead_lag_panel_slot: Some(Arc::clone(&btc_lead_lag_panel_slot)),
+            // Sprint 5+ Track B round 2 caller wire-up：live respawn 拿同
+            // signal_stats Arc，跨 LiveAuthWatcher restart 連續累計 signal counter。
+            signal_stats: Some(Arc::clone(&signal_stats_arc)),
         });
 
     // Boot Some：使用預建通道直接 spawn，重用上方 spawn_ctx + writers（BLOCKER-1
@@ -1448,36 +1482,43 @@ async fn async_main(
     let data_dir_mount =
         std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
 
-    // Sprint 5+ §4.3.5 Track B real probe — expected / actual subscription topic
-    // closure。`expected` 從 SymbolRegistry 既有 snapshot 推（extended 模式
-    // multi_interval_topics::full_subscription_list 每 sym 多 channel；非 extended
-    // 走 2 channel/sym）；`actual` 由本 process 全局 atomic counter 跟蹤 — 留 0
-    // closure 為 Wave 後續接通 (caller wire-up 漸進)，目前 expected != actual
-    // drift 由 closure 端 fallback default 0；signal_stats / writer_queue_stats /
-    // pool_wait_stats 同走 None 直到對應 caller 注入。
+    // Sprint 5+ §4.3.5 Track B round 2 caller wire-up：expected / actual
+    // subscription topic closure 接通真實 source。
     //
-    // 為什麼 expected closure 走 0 而非真實 snapshot：
-    //   - WsClient `subscriptions_count()` accessor 在每次 supervisor restart 後
-    //     重新 build，跨 process 全局 actual 不易暴露（需另開 Arc handle 或
-    //     atomic counter）。本 IMPL 限縮在 Track B placeholder fallback 路徑保
-    //     既有 V106 row 行為；真實 drift 觀測 IMPL caller wire-up 留 follow-up
-    //     wave（per spec §7.4 dependency「caller 兼容漸進」）。
-    //   - per spec §2.5 「partial-Some 走 placeholder fallback」設計：4 closure
-    //     任一 None → probe 全 placeholder；本 wire-up 因 expected/actual closure
-    //     未到位走 fallback，AC-3 production deploy 後 V106 row 走 placeholder
-    //     OK band 不誤升；real wire-up follow-up wave 接通後升級。
-    let expected_topic_count: Option<Arc<dyn Fn() -> u32 + Send + Sync>> = None;
-    let actual_topic_count: Option<Arc<dyn Fn() -> u32 + Send + Sync>> = None;
-    // signal_stats / writer_queue_stats / pool_wait_stats infra 已 IMPL 但 caller
-    // hot-path 接點漸進（per spec §7.4）— 暫走 None placeholder fallback。
-    let signal_stats_arc: Option<Arc<openclaw_engine::tick_pipeline::signal_stats::SignalStats>> =
-        None;
-    let writer_queue_stats_arc: Option<
-        Arc<openclaw_engine::database::writer_queue_stats::WriterQueueStats>,
-    > = None;
-    let pool_wait_stats_arc: Option<
-        Arc<openclaw_engine::database::pool_wait_stats::PoolWaitStats>,
-    > = None;
+    // expected_topic_count: 從 SymbolRegistry snapshot 推 — extended 模式走
+    // `multi_interval_topics::full_subscription_list` 每 sym 多 channel；非
+    // extended 走 2 channel/sym（kline.1.{sym} + publicTrade.{sym}）。
+    //
+    // actual_topic_count: 走 main_ws.rs 注入的 `Arc<AtomicU32>` 跨 supervisor
+    // restart 累計；WsClient subscribe/unsubscribe 路徑 fetch_add / fetch_sub
+    // 維護；`load(Relaxed)` 0 鎖 0 race 讀取（per spec §7.2 ordering）。
+    //
+    // 為什麼 expected 端用 closure 重算每次而非快取：SymbolRegistry 受 Scanner
+    // dynamic AddSymbol/RemoveSymbol 影響；每次 emitter sample 重算反映真實
+    // 動態（per `feedback_no_dead_params` 反假陽性）。
+    let cfg_snap_for_topic = config.get();
+    let symbol_registry_for_expected = Arc::clone(&symbol_registry);
+    let enable_extended_ws_for_expected = cfg_snap_for_topic.enable_extended_ws;
+    drop(cfg_snap_for_topic);
+    let expected_topic_count_closure: Arc<dyn Fn() -> u32 + Send + Sync> = Arc::new(move || {
+        let symbols = symbol_registry_for_expected.snapshot();
+        if enable_extended_ws_for_expected {
+            let mut total: u32 = 0;
+            for sym in &symbols {
+                total = total.saturating_add(
+                    openclaw_engine::multi_interval_topics::full_subscription_list(sym).len() as u32,
+                );
+            }
+            total
+        } else {
+            // 非 extended：每 sym 2 channel（kline.1 + publicTrade）。
+            (symbols.len() as u32).saturating_mul(2)
+        }
+    });
+    let actual_counter_for_closure = Arc::clone(&subscriptions_counter_arc);
+    let actual_topic_count_closure: Arc<dyn Fn() -> u32 + Send + Sync> = Arc::new(move || {
+        actual_counter_for_closure.load(std::sync::atomic::Ordering::Relaxed)
+    });
 
     let (portfolio_cache, health_event_bus) =
         main_health_emitters::spawn_metric_emitter_scheduler(
@@ -1489,12 +1530,16 @@ async fn async_main(
             // 注入，取代 Wave B fresh 0-state placeholder。
             &shared_ws_dropout,
             &shared_ws_rtt,
-            // Sprint 5+ §4.3.5 Track B real probe Arc 注入；wire-up 漸進。
+            // Sprint 5+ §4.3.5 Track B round 2 caller wire-up：mandatory Arc
+            // 注入（per spec §2.6 + Operator round 2 instruction）。
             &Some(Arc::clone(&ws_stats_arc)),
-            &signal_stats_arc,
-            expected_topic_count,
-            actual_topic_count,
-            // Sprint 5+ §4.3.6 Track C real probe Arc 注入；wire-up 漸進。
+            &Some(Arc::clone(&signal_stats_arc)),
+            Some(expected_topic_count_closure),
+            Some(actual_topic_count_closure),
+            // Sprint 5+ §4.3.6 Track C round 2 caller wire-up：mandatory Arc
+            // 注入（per spec §3.5 + Operator round 2 instruction）。從
+            // spawn_db_writers 反傳的 Option<Arc> 直接透傳，DB 不可用時走 None
+            // → spawn_metric_emitter_scheduler 端走 placeholder fallback。
             &writer_queue_stats_arc,
             &pool_wait_stats_arc,
             primary_engine_mode,

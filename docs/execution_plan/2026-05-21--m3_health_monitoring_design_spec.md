@@ -141,7 +141,7 @@ Sprint 2 Track D IMPL（`rust/openclaw_engine/src/health/domains/api_latency.rs`
 | `rest_p50_ms` | REST 常態延遲 | < 50ms | 50-200ms | > 200ms | —（不含；常態不上 CRITICAL）|
 | `rest_p95_ms` | REST 尾延 | < 200ms | 200-500ms | > 500ms | —（不含）|
 | `rest_p99_ms` | REST outlier | < 500ms | 500-1000ms | 1000-2000ms | > 2000ms（接近 5s timeout buffer）|
-| `ws_rtt_p50_ms` | WS 常態 RTT | < 50ms | 50-150ms | > 150ms | —（不含）|
+| `ws_rtt_p50_ms` | WS 常態 RTT | < 170ms | 170-300ms | > 300ms | —（不含）|
 | `ws_rtt_p99_ms` | WS outlier RTT | < 200ms | 200-500ms | 500-1500ms | > 1500ms（ws_dropout 前 1 步預警）|
 | `ret_code_4xx_count` | client fault 累積 60s | 0-10 | 11-50 | > 50 | —（client 可修復不上 CRITICAL）|
 | `ret_code_5xx_count` | venue fault 累積 60s | 0 | 1-5 | 6-20 | > 20（venue outage）|
@@ -153,6 +153,14 @@ Sprint 2 Track D IMPL（`rust/openclaw_engine/src/health/domains/api_latency.rs`
 3. **ws_rtt 比 ws_dropout 早預警**（per ADR-0042 Decision 3 cascade gate）：WS ping→pong 退化 → rtt p99 1500ms+ 是 dropout 前 1 步預警；ws_dropout 是事後 cascade gate。
 4. **count 而非 rate**（採樣期 60s 累積）：保留 spike 資訊讓 SM 端走 dwell 判斷；速率會把 burst 平均掉誤判 OK。
 5. **4 metric 含 CRITICAL band**（rest_p99 / ws_rtt_p99 / ret_5xx / ws_dropout）：對應 venue-side outage 級事故；其餘 4 metric 不含 CRITICAL（避過度敏感觸 cascade）。
+
+**Sprint 5+ Wave 1 §4.4 amend（2026-05-23）**：
+
+- `ws_rtt_p50_ms`：OK<50/WARN 50-150/DEGRADED>150 → **OK<170/WARN 170-300/DEGRADED>300**
+  - 為什麼：Bybit demo endpoint → trade-core Linux 6h empirical baseline 落 150-163ms 為不可逆網路常態（物理距離 + WS handshake overhead）；舊 ladder >150ms DEGRADED 在 production 持續誤觸 47 row WARN/DEGRADED，干擾真實 latency degrade signal。
+  - 不變量：Live mainnet endpoint 物理距離可能不同；mainnet 切換 sprint 必須重新 calibrate 此 ladder（不留盲區）。
+- `engine_runtime.engine_open_fd`（新補 ladder row，原 §2.1 只列 metric 名）：**OK<3072/WARN 3072-6144/DEGRADED>6144**
+  - 為什麼：25 symbol × kline WS + REST pool + IPC + PG pool baseline 1700-1800 fd（Linux 6h empirical）；OK band 上限 3072 留 ~70% headroom；WARN band 對應「真實 fd leak signal」；DEGRADED 接近 RLIMIT_NOFILE 8192 上限；舊 ladder OK<1024 在 production 持續誤觸 711 row WARN。
 
 **Sprint 2 Wave 2 main.rs 接線 carry-over**（per E2 round 1 Track D HIGH-3 + PA-DRIFT-4）：
 既有 `bybit_rest_client` + `bybit_private_ws` **未** instrumented p50/p95/p99 histogram + ret_code 4xx/5xx counter + ws_dropout counter；Wave 2 main.rs 接 `ApiLatencySourceProbe` trait 前必先在 bybit wrapper 層補：

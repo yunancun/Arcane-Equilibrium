@@ -709,8 +709,9 @@ fn test_sprint2_classify_aggregated_api_latency_arm_wired() {
 ///   - 8 metric 經 classify_aggregated dispatch；若任一 arm 漏接，DEGRADED/
 ///     CRITICAL-band sample 也會被誤歸 OK band（HIGH-1 retro lesson）。
 ///   - 注入 sample = (p50=300 DEGRADED / p95=800 DEGRADED / p99=3000 CRITICAL /
-///     ws_p50=200 DEGRADED / ws_p99=2000 CRITICAL / 4xx=80 DEGRADED / 5xx=30
-///     CRITICAL / dropout=10 CRITICAL) — 4 metric DEGRADED + 4 metric CRITICAL。
+///     ws_p50=350 DEGRADED (>300 per Sprint 5+ Wave 1 §4.4 amend) /
+///     ws_p99=2000 CRITICAL / 4xx=80 DEGRADED / 5xx=30 CRITICAL /
+///     dropout=10 CRITICAL) — 4 metric DEGRADED + 4 metric CRITICAL。
 ///   - dwell 60s/5min 由 SM 端守；本 stress test 注 emit 端 classify 真實 fire
 ///     對應 band — 透過 5-sample rolling window mean 已固定 = sample value，
 ///     classify_aggregated 必返 DEGRADED/CRITICAL；若 arm 退化 catches 不到，
@@ -739,7 +740,7 @@ async fn test_sprint2_track_d_api_latency_degraded_band_classify() {
                 rest_p50_ms: 300,             // DEGRADED (>200)
                 rest_p95_ms: 800,             // DEGRADED (>500)
                 rest_p99_ms: 3000,            // CRITICAL (>2000)
-                ws_rtt_p50_ms: 200,           // DEGRADED (>150)
+                ws_rtt_p50_ms: 350,           // DEGRADED (>300 per §4.4 amend)
                 ws_rtt_p99_ms: 2000,          // CRITICAL (>1500)
                 ret_code_4xx_count: 80,       // DEGRADED (>50)
                 ret_code_5xx_count: 30,       // CRITICAL (>20)

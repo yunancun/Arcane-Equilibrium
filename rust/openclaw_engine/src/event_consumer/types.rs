@@ -422,4 +422,9 @@ pub struct EventConsumerDeps {
     /// pipeline_ctor.rs default None；step_4_5_dispatch fence 通過後拿到 None
     /// → surface.btc_lead_lag = None（與 paper-only fence 拒絕讀取同等語意）。
     pub btc_lead_lag_panel_slot: Option<crate::ipc_server::BtcLeadLagPanelSlot>,
+    /// Sprint 5+ Track B round 2 caller wire-up：strategy signal 累計 stats
+    /// Arc。bootstrap.rs 構造 TickPipeline 後呼叫 `pipeline.set_signal_stats`
+    /// 注入。`None` = 未注入（test / 不接 health pipeline）→ on_tick step_3
+    /// 路徑 None 短路 fail-soft（per pipeline_ctor.rs default None）。
+    pub signal_stats: Option<Arc<crate::tick_pipeline::signal_stats::SignalStats>>,
 }

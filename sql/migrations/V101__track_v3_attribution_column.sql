@@ -50,6 +50,10 @@
 --     Sprint 5+ Wave 2 Phase 2 carry-over
 --   - 不重新 CREATE learning.hypotheses (V100 已 land 2026-05-23 production)
 --   - V101 結尾 0 NULL row 必達成 (RAISE EXCEPTION on FAIL 根原則 6 fail-closed)
+--   - production deploy lock window 警告: sqlx migrate transaction 包整體
+--     V101;LOOP backfill 預估 wall-clock 17s-3min trading.fills writer block;
+--     production deploy 必走 low-IO window (避免與 demo/paper writer race
+--     觸發 V101 結尾 RAISE EXCEPTION rollback);詳見 Main DDL Step 2 注釋
 -- ============================================================
 
 -- ============================================================
@@ -82,8 +86,11 @@ END $$;
 --
 -- baseline 15 column = V003 base (ts/fill_id/order_id/symbol/side/qty/
 -- price/fee/strategy_name/context_id/details) + V015 (engine_mode) +
--- V077 不加 column (trigger only) + V083 (entry_context_id) + V033
--- (exit_reason) + V094 (close_maker_attempt)
+-- V077 不加 column (CHECK constraint + trigger fallback only) +
+-- V083 (entry_context_id) + V033 (exit_reason) +
+-- V094 (close_maker_attempt + close_maker_fallback_reason 2 columns;
+-- 注:Guard A unnest 只列 close_maker_attempt 作 representative,
+-- close_maker_fallback_reason 與其同源同步 land 不另列)
 -- ============================================================
 DO $$
 DECLARE
@@ -184,9 +191,18 @@ COMMENT ON COLUMN trading.fills.track IS
 --   - LIMIT 10000 + pg_sleep(0.1) = ~6k row/sec sustained
 --   - 估 trading.fills row volume ~100k-1M (live 8 個月 demo+paper 累計);
 --     wall clock ~17s-3min
---   - 對齊 V094 close_maker_audit 2026-05-15 land 同表 batched UPDATE 範式
---     (已驗 acceptable lock impact on columnstore hypertable)
 --   - FOR UPDATE SKIP LOCKED 避免與 writer 寫入新 row 互鎖
+--
+-- 為什麼必走 single-shot atomic backfill (sqlx migrate transaction 包整體):
+--   - V094 land 2026-05-15 不含 backfill (No data rewrite, no backfill, no
+--     runtime enablement per V094 header line 14-15);本 LOOP+pg_sleep 範式
+--     非直接 mirror V094，而是 V101 自行 ENUM nullable column EXTEND 場景
+--     需要 100% backfill 才能在 V102 上 NOT NULL trigger
+--   - sqlx migrate 將整段 V101 包入 BEGIN/COMMIT;LOOP 內 SELECT 全程
+--     transaction-isolated;writer 新寫入 row 在 COMMIT 前不可見;
+--     COMMIT 後 V102 trigger 立即接管 (writer 新 row 顯式填 trigger 強制)
+--   - production deploy 必須 low-IO window 執行;預估 wall-clock ~17s-3min
+--     trading.fills writer block (per fill_id, ts composite PK row lock)
 -- ============================================================
 DO $$
 DECLARE
@@ -215,9 +231,15 @@ END $$;
 -- Main DDL Step 3: V101 結尾 verify 0 NULL row (per fail-closed 根原則 6)
 -- 主 DDL Step 3: 收尾驗證 backfill 100%
 --
--- 若 backfill 中途 writer race 寫新 NULL row → V101 結尾 RAISE EXCEPTION
--- → migration 失敗 → rollback。V102 trigger 上線後此 race 消失
--- (writer 漏填即 trigger violation)。
+-- race scenario 釐清:
+--   - sqlx migrate 將整段 V101 包入 BEGIN/COMMIT;本 SELECT 全程在
+--     transaction-isolated snapshot 內;V101 COMMIT 前外部 writer
+--     新 INSERT 的 row 在本 SELECT 不可見;
+--   - V101 COMMIT 後 V102 trigger 立即上線 (V### sequence intact);
+--     若 V102 land 前有 writer race 寫 NULL row 進去，下一輪 V102 Guard A
+--     reflection 會 catch (RAISE EXCEPTION on v_null_count > 0);
+--   - V102 trigger 上線後 writer 漏填即 trigger violation (NOT NULL
+--     fail-closed 永久接管)。
 -- ============================================================
 DO $$
 DECLARE
@@ -230,7 +252,9 @@ BEGIN
     IF v_null_count > 0 THEN
         RAISE EXCEPTION
             'V101 backfill incomplete: % rows still have track=NULL. '
-            'Re-run backfill DO block or investigate writer race (V102 trigger 上線後消除).',
+            'sqlx migrate transaction isolation 內 SELECT 看不到外部 writer 新 row;'
+            'V101 COMMIT 後 V102 trigger 立即 catch NULL writer。'
+            'Re-run backfill DO block or investigate transaction isolation anomaly.',
             v_null_count;
     END IF;
     RAISE NOTICE 'V101: trading.fills.track 100%% backfilled (0 NULL row)';
