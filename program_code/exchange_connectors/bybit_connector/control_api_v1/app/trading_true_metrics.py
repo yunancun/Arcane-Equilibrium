@@ -13,12 +13,14 @@ engine 已將 realized PnL、fees、funding 與 MLDE 費後標籤寫入 DB。
 
 import logging
 import math
+import os
 from collections.abc import Sequence
 from typing import Any
 
 from . import db_pool
 
 logger = logging.getLogger(__name__)
+_STATEMENT_TIMEOUT_MS = int(os.getenv("OPENCLAW_GUI_METRICS_STATEMENT_TIMEOUT_MS", "1500"))
 
 
 def fetch_db_true_metrics(
@@ -49,6 +51,7 @@ def fetch_db_true_metrics(
         if conn is None:
             return _empty(window_days, "pg_unavailable")
         with conn.cursor() as cur:
+            _set_statement_timeout(cur)
             account = _fetch_account_metrics(cur, modes, window_days)
             account_today = _fetch_account_metrics_today(cur, modes)
             account_24h = _fetch_account_metrics(cur, modes, 1)
@@ -118,6 +121,11 @@ def _placeholders(n: int) -> str:
     建立 psycopg2 `IN` 條件使用的 placeholder 清單。
     """
     return ", ".join(["%s"] * n)
+
+
+def _set_statement_timeout(cur: Any) -> None:
+    """Bound GUI aggregate reads so one slow view cannot occupy API workers."""
+    cur.execute("SET LOCAL statement_timeout = %s", (_STATEMENT_TIMEOUT_MS,))
 
 
 def _window_clause(alias: str = "") -> str:

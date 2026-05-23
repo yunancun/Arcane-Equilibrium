@@ -228,7 +228,7 @@ async def get_live_balance(
     if guard is not None:
         return guard
 
-    if fast:
+    if fast is True:
         try:
             live_state = get_rust_reader().get_paper_state(engine="live") or {}
             if live_state:

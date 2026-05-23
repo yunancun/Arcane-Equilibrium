@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 _CLOSED_PNL_CACHE = None
 _OPENCLAW_LINK_RE = re.compile(r"^oc_(?:close_[a-z0-9_]+_)?(?:risk_)?(?P<engine>dm|ld)(?:_|$)", re.I)
 _CLOSED_PNL_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+_GUI_READ_STATEMENT_TIMEOUT_MS = int(os.getenv("OPENCLAW_GUI_READ_STATEMENT_TIMEOUT_MS", "1500"))
 
 
 def _closed_pnl_cache():
@@ -215,6 +216,278 @@ def _paper_state_positions_for_gui(state: dict[str, Any]) -> list[dict[str, Any]
     return out
 
 
+def _demo_snapshot_pair() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return the fresh Demo engine snapshot + paper_state, or empty dicts."""
+    try:
+        from .paper_trading_routes import get_rust_reader  # noqa: PLC0415
+        reader = get_rust_reader()
+        if not reader.is_engine_available("demo"):
+            return {}, {}
+        snap = (
+            reader.get_engine_snapshot("demo")
+            if hasattr(reader, "get_engine_snapshot")
+            else reader.get_snapshot(engine="demo")
+            if hasattr(reader, "get_snapshot")
+            else {}
+        ) or {}
+        state = reader.get_paper_state(engine="demo") or {}
+        return snap, state
+    except Exception:
+        logger.debug("Demo snapshot fast read unavailable", exc_info=True)
+        return {}, {}
+
+
+def _num(value: Any, default: float = 0.0) -> float:
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return default
+    return out if out == out else default
+
+
+def _time_ms(row: dict[str, Any]) -> int:
+    for key in ("timestamp_ms", "ts_ms", "exec_time", "execTime", "filled_at", "timestamp"):
+        value = row.get(key)
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _demo_snapshot_fills_payload(
+    *,
+    limit: int,
+    offset: int,
+    side: str | None = None,
+) -> dict[str, Any]:
+    """Fast GUI fills from the Rust snapshot only; never hits PG or Bybit REST."""
+    snap, state = _demo_snapshot_pair()
+    raw = snap.get("recent_fills") or state.get("fills") or []
+    if not isinstance(raw, list):
+        raw = []
+    safe_side = side if side in {"Buy", "Sell"} else None
+    fills: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        row = dict(item)
+        is_long = row.get("is_long")
+        if not row.get("side") and isinstance(is_long, bool):
+            row["side"] = "Buy" if is_long else "Sell"
+        ts_ms = _time_ms(row)
+        row["exec_time"] = str(ts_ms)
+        row["execTime"] = str(ts_ms)
+        row["qty"] = _num(row.get("qty") or row.get("execQty"))
+        row["price"] = _num(row.get("price") or row.get("execPrice"))
+        row["fee"] = _num(row.get("fee") or row.get("execFee"))
+        row["execQty"] = row["qty"]
+        row["execPrice"] = row["price"]
+        row["execFee"] = row["fee"]
+        row["realized_pnl"] = _num(row.get("realized_pnl") or row.get("closedPnl"))
+        row["closedPnl"] = row["realized_pnl"]
+        row["strategy"] = row.get("strategy") or row.get("strategy_name") or ""
+        sym = str(row.get("symbol") or "")
+        row["category"] = row.get("category") or (
+            "inverse" if sym.endswith("USD") and not sym.endswith("USDT") else "linear"
+        )
+        if safe_side and row.get("side") != safe_side:
+            continue
+        fills.append(_normalize_execution(row))
+    fills.sort(key=_time_ms, reverse=True)
+    page = fills[offset:offset + limit]
+    return {
+        "source": "rust_snapshot_fast",
+        "list": page,
+        "count": len(page),
+        "limit": limit,
+        "offset": offset,
+        "has_more": len(fills) > offset + limit,
+        "next_offset": offset + len(page) if len(fills) > offset + limit else None,
+    }
+
+
+def _demo_snapshot_orders_payload() -> dict[str, Any]:
+    """Fast GUI orders from snapshot fields when present; otherwise fail-soft empty."""
+    snap, state = _demo_snapshot_pair()
+    raw = (
+        snap.get("active_orders")
+        or snap.get("open_orders")
+        or state.get("active_orders")
+        or state.get("orders")
+        or []
+    )
+    if not isinstance(raw, list):
+        raw = []
+    orders = [_normalize_order(o) for o in raw if isinstance(o, dict)]
+    conditional_count = sum(
+        1 for o in orders
+        if (o.get("orderStatus") or "").lower() == "untriggered"
+    )
+    regular_count = len(orders) - conditional_count
+    return {
+        "source": "rust_snapshot_fast",
+        "retCode": 0,
+        "result": {"list": orders},
+        "regular_count": regular_count,
+        "conditional_count": conditional_count,
+        "degraded_reason": None if orders else "snapshot_has_no_open_orders",
+    }
+
+
+def _demo_snapshot_pnl_series_payload(
+    *,
+    range_key: str,
+    bucket_sec: int | None,
+) -> dict[str, Any]:
+    """Build a small PnL series from snapshot recent_fills without DB access."""
+    range_map = {
+        "1h": 60 * 60,
+        "6h": 6 * 60 * 60,
+        "24h": 24 * 60 * 60,
+        "7d": 7 * 24 * 60 * 60,
+        "30d": 30 * 24 * 60 * 60,
+    }
+    default_buckets = {
+        "1h": 60,
+        "6h": 5 * 60,
+        "24h": 15 * 60,
+        "7d": 60 * 60,
+        "30d": 4 * 60 * 60,
+    }
+    key = str(range_key or "24h").strip().lower()
+    if key not in range_map:
+        key = "24h"
+    range_sec = range_map[key]
+    bucket = int(bucket_sec or default_buckets[key])
+    bucket = max(60, min(bucket, 24 * 60 * 60))
+    now_ms = int(time.time() * 1000)
+    start_ms = now_ms - range_sec * 1000
+    fills = _demo_snapshot_fills_payload(limit=200, offset=0).get("list", [])
+    buckets: dict[int, dict[str, float | int]] = {}
+    for row in fills:
+        if not isinstance(row, dict):
+            continue
+        ts_ms = _time_ms(row)
+        if ts_ms < start_ms or ts_ms > now_ms:
+            continue
+        epoch = int((ts_ms // 1000) // bucket) * bucket
+        slot = buckets.setdefault(epoch, {"fills": 0, "gross_pnl": 0.0, "fees": 0.0})
+        slot["fills"] = int(slot["fills"]) + 1
+        slot["gross_pnl"] = float(slot["gross_pnl"]) + _num(row.get("realized_pnl") or row.get("closedPnl"))
+        slot["fees"] = float(slot["fees"]) + _num(row.get("fee") or row.get("execFee"))
+    cumulative = 0.0
+    points: list[dict[str, Any]] = []
+    for epoch in sorted(buckets):
+        slot = buckets[epoch]
+        gross = float(slot["gross_pnl"])
+        fees = float(slot["fees"])
+        net = gross - fees
+        cumulative += net
+        points.append({
+            "ts_ms": epoch * 1000,
+            "fills": int(slot["fills"]),
+            "gross_pnl": round(gross, 6),
+            "fees": round(fees, 6),
+            "funding_pnl": 0.0,
+            "net_pnl": round(net, 6),
+            "cumulative_net_pnl": round(cumulative, 6),
+        })
+    return {
+        "available": True,
+        "source": "rust_snapshot_fast",
+        "range": key,
+        "range_sec": range_sec,
+        "bucket_sec": bucket,
+        "engine_modes": ["demo"],
+        "from_ts_ms": start_ms,
+        "to_ts_ms": now_ms,
+        "window_net_pnl": round(sum(p["net_pnl"] for p in points), 6),
+        "window_gross_pnl": round(sum(p["gross_pnl"] for p in points), 6),
+        "window_fees": round(sum(p["fees"] for p in points), 6),
+        "window_funding_pnl": 0.0,
+        "fills": sum(int(p["fills"]) for p in points),
+        "points": points,
+    }
+
+
+def _demo_snapshot_metrics_payload() -> dict[str, Any]:
+    """Fast Demo metrics from Rust snapshot only; no PG, no Bybit REST."""
+    _, state = _demo_snapshot_pair()
+    if not state:
+        return {
+            "source": "rust_snapshot_fast",
+            "available": False,
+            "reason": "demo_snapshot_unavailable",
+            "performance_metrics": [],
+        }
+    positions = state.get("positions") if isinstance(state.get("positions"), list) else []
+    unrealized = sum(_num(p.get("unrealized_pnl")) for p in positions if isinstance(p, dict))
+    gross = _num(state.get("total_realized_pnl"))
+    fees = _num(state.get("total_fees"))
+    funding = _num(state.get("total_funding_pnl"))
+    net = gross - fees + funding
+    trade_count = int(_num(state.get("trade_count")))
+    db_like = {
+        "available": True,
+        "source": "rust_snapshot_fast",
+        "window_days": 7,
+        "engine_modes": ["demo"],
+        "edge_engine_modes": ["demo"],
+        "account_metrics": {
+            "total_fills": trade_count,
+            "gross_pnl": round(gross, 6),
+            "total_fees": round(fees, 6),
+            "funding_pnl": round(funding, 6),
+            "net_pnl": round(net, 6),
+        },
+        "account_metrics_today": {
+            "total_fills": trade_count,
+            "gross_pnl": round(gross, 6),
+            "total_fees": round(fees, 6),
+            "funding_pnl": round(funding, 6),
+            "net_pnl": round(net, 6),
+        },
+        "account_metrics_24h": {
+            "total_fills": trade_count,
+            "gross_pnl": round(gross, 6),
+            "total_fees": round(fees, 6),
+            "funding_pnl": round(funding, 6),
+            "net_pnl": round(net, 6),
+        },
+        "trade_metrics": {
+            "metric_source": "rust_snapshot_fast",
+            "metric_unit": "usdt",
+            "total_round_trips": trade_count,
+            "win_rate": 0.0,
+            "win_loss_ratio": 0.0,
+            "largest_win": 0.0,
+            "largest_loss": 0.0,
+            "avg_loss": 0.0,
+        },
+        "edge_metrics": {
+            "metric_source": "rust_snapshot_fast",
+            "metric_unit": "bps",
+            "total_round_trips": 0,
+        },
+        "risk_metrics": {
+            "metric_source": "rust_snapshot_fast",
+            "max_drawdown_pct": 0.0,
+            "sharpe_ratio": 0.0,
+            "avg_holding_period_sec": 0.0,
+        },
+    }
+    from .trading_true_metrics import build_performance_metrics  # noqa: PLC0415
+    return {
+        "source": "rust_snapshot_fast",
+        "unrealized_pnl": round(unrealized, 6),
+        "db_true_metrics": db_like,
+        "performance_metrics": build_performance_metrics(db_like),
+    }
+
+
 @phase2_router.get("/demo/balance")
 async def get_demo_balance(
     fast: bool = Query(False),
@@ -252,7 +525,7 @@ async def get_demo_balance(
             "engine_current_balance": None,
         })
 
-    if fast:
+    if fast is True:
         try:
             demo_state = reader.get_paper_state(engine="demo") or {}
             if demo_state:
@@ -548,7 +821,7 @@ async def get_demo_positions(
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Get Bybit Demo open positions via httpx BybitClient / 通過 httpx BybitClient 獲取 Demo 持倉"""
-    if fast:
+    if fast is True:
         try:
             from .paper_trading_routes import get_rust_reader  # noqa: PLC0415
             reader = get_rust_reader()
@@ -603,11 +876,17 @@ def _normalize_order(o: dict) -> dict:
 
 
 @phase2_router.get("/demo/orders")
-async def get_demo_orders(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+async def get_demo_orders(
+    fast: bool = Query(False),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """
     Get Bybit Demo open orders via httpx BybitClient.
     通過 httpx BybitClient 獲取 Demo 活躍訂單。
     """
+    if fast is True:
+        return _envelope(_demo_snapshot_orders_payload())
+
     rc = _get_rust_client()
     if rc is None:
         return _envelope({"enabled": False, "source": "rust_engine"})
@@ -1468,10 +1747,14 @@ async def get_demo_fills(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     side: str | None = Query(None),
+    fast: bool = Query(False),
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Get Demo fill history. DB primary (has realized_pnl) / Bybit API fallback.
     獲取 Demo 成交歷史。DB 為主（帶 realized_pnl）/ Bybit API 備援。"""
+    if fast is True:
+        return _envelope(_demo_snapshot_fills_payload(limit=limit, offset=offset, side=side))
+
     # DB path — same pattern as paper fills; carries engine-calculated realized_pnl.
     # DB 路徑 — 與 paper fills 相同模式；帶引擎計算的 realized_pnl。
     try:
@@ -1482,6 +1765,7 @@ async def get_demo_fills(
     if conn is not None:
         try:
             cur = conn.cursor()
+            cur.execute("SET LOCAL statement_timeout = %s", (_GUI_READ_STATEMENT_TIMEOUT_MS,))
             safe_side = side if side in {"Buy", "Sell"} else None
             where = "engine_mode IN (%s, %s)"
             params: list[Any] = ["demo", "live_demo"]
@@ -1699,17 +1983,27 @@ async def get_demo_closed_pnl(
 async def get_demo_pnl_series(
     range_key: str = Query("24h", alias="range"),
     bucket_sec: int | None = Query(None, ge=60, le=86400),
+    fast: bool = Query(False),
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Get Demo bucketed PnL series for GUI chart/table. / 獲取 Demo 分桶 PnL 序列。"""
+    if fast is True:
+        return _envelope(_demo_snapshot_pnl_series_payload(range_key=range_key, bucket_sec=bucket_sec))
+
     from .pnl_series import fetch_pnl_series  # noqa: PLC0415
 
     return _envelope(fetch_pnl_series(["demo"], range_key=range_key, bucket_sec=bucket_sec))
 
 
 @phase2_router.get("/demo/metrics")
-async def get_demo_metrics(actor: base.AuthenticatedActor = Depends(base.current_actor)):
+async def get_demo_metrics(
+    fast: bool = Query(False),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
     """Get DB-truth Demo performance metrics. / 獲取 DB 真實 Demo 績效指標。"""
+    if fast is True:
+        return _envelope(_demo_snapshot_metrics_payload())
+
     from .trading_true_metrics import build_performance_metrics, fetch_db_true_metrics  # noqa: PLC0415
 
     full: dict[str, Any] = {}
@@ -1721,7 +2015,16 @@ async def get_demo_metrics(actor: base.AuthenticatedActor = Depends(base.current
         if reader.is_engine_available("demo"):
             rust_state = reader.get_paper_state(engine="demo") or {}
             if rust_state:
-                full = compute_full_metrics(rust_state, engine_mode="demo")
+                snap = (
+                    reader.get_engine_snapshot("demo")
+                    if hasattr(reader, "get_engine_snapshot")
+                    else {}
+                ) or {}
+                fills = rust_state.get("fills") or snap.get("recent_fills") or []
+                if fills:
+                    full = compute_full_metrics({**rust_state, "fills": fills}, engine_mode="demo")
+                else:
+                    full = _demo_snapshot_metrics_payload()
     except Exception:
         logger.debug("Demo rust metrics fallback unavailable", exc_info=True)
 

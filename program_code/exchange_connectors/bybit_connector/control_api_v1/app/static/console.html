@@ -308,7 +308,7 @@ localStorage.removeItem('oc_trading_token');
 
 // Cache-bust version — increment on each deploy to force iframe reload
 // 緩存破壞版本號 — 每次部署遞增以強制 iframe 重新載入
-const BUILD_TS = '20260516.parallel-load-v1';
+const BUILD_TS = '20260523.db-timeout-v1';
 
 // ─── Tab Definitions ──────────────────────────────────────────
 // src uses BUILD_TS for cache-busting — update BUILD_TS on each deploy
@@ -910,7 +910,7 @@ async function refreshSidebar() {
     const [sdR, balR, metricsR] = await Promise.allSettled([
       api('/api/v1/strategy/demo/session/status'),
       api('/api/v1/strategy/demo/balance?fast=1'),
-      api('/api/v1/strategy/demo/metrics'),
+      api('/api/v1/strategy/demo/metrics?fast=1'),
     ]);
     const sd = sdR.status === 'fulfilled' && sdR.value ? sdR.value.data : null;
     const balPayload = balR.status === 'fulfilled' && balR.value ? balR.value.data : null;

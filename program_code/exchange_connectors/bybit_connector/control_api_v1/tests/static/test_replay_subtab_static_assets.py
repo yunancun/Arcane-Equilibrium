@@ -456,7 +456,7 @@ def test_demo_live_tabs_use_matching_backend_surfaces(
     assert "/api/v1/strategy/demo/positions" not in tab_live_html
 
     assert "api('/api/v1/live/metrics')" in console_html
-    assert "api('/api/v1/strategy/demo/metrics')" in console_html
+    assert "api('/api/v1/strategy/demo/metrics?fast=1')" in console_html
 
 
 def test_live_today_pnl_uses_backend_metric_not_position_cumulative(
@@ -478,7 +478,7 @@ def test_demo_and_live_pnl_charts_use_time_series_not_recent_fill_page(
     """Demo/Live PnL charts must use range-adjustable backend series."""
     assert "last 50 Demo fills" not in tab_demo_html
     assert "last 50 Live fills" not in tab_live_html
-    assert "/api/v1/strategy/demo/pnl-series?range=" in tab_demo_html
+    assert "/api/v1/strategy/demo/pnl-series?fast=1&range=" in tab_demo_html
     assert "/api/v1/live/pnl-series?range=" in tab_live_html
     assert "demo-pnl-range-controls" in tab_demo_html
     assert "live-pnl-range-controls" in tab_live_html
@@ -487,7 +487,7 @@ def test_demo_and_live_pnl_charts_use_time_series_not_recent_fill_page(
     assert "ocPnlSeriesTrend" in common_js
     assert "ocPnlSeriesTableRows" in common_js
     assert "ocPnlSeriesFromFills" in common_js
-    assert "/api/v1/strategy/demo/fills?limit=200&offset=0" in tab_demo_html
+    assert "/api/v1/strategy/demo/fills?fast=1&limit=200&offset=0" in tab_demo_html
     assert "/api/v1/live/fills?limit=200&offset=0" in tab_live_html
 
 

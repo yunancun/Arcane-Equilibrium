@@ -637,7 +637,7 @@ async function loadPositions() {
 }
 
 async function loadDemoOrders() {
-  const d = await ocApi('/api/v1/strategy/demo/orders');
+  const d = await ocApi('/api/v1/strategy/demo/orders?fast=1');
   if (!d || !d.data) return;
   let orders = [];
   if (d.data.result && d.data.result.list) {
@@ -900,7 +900,8 @@ async function loadDemoFills(opts) {
   const forceRefresh = opts && opts.forceRefresh === true;
   const minSpinnerMs = opts && opts.minSpinnerMs ? opts.minSpinnerMs : 0;
   const side = (DEMO_FILL_TABS[_demoFillState.tab] || {}).side || '';
-  const qs = '?limit=' + _demoFillState.limit + '&offset=' + _demoFillState.offset +
+  const fastPrefix = (_demoFillState.tab === 'profit' || forceRefresh) ? '' : 'fast=1&';
+  const qs = '?' + fastPrefix + 'limit=' + _demoFillState.limit + '&offset=' + _demoFillState.offset +
     (side ? '&side=' + encodeURIComponent(side) : '') +
     (forceRefresh && _demoFillState.tab === 'profit' ? '&force_refresh=true' : '');
   _demoFillState.loading = true;
@@ -1025,7 +1026,7 @@ function _ocMetricBps(value) {
 async function loadDemoMetrics() {
   let m = null;
   try {
-    const d = await ocApi('/api/v1/strategy/demo/metrics');
+    const d = await ocApi('/api/v1/strategy/demo/metrics?fast=1');
     m = d && d.data ? d.data : null;
   } catch (_) {}
   const metrics = ocPerformanceMetricsFromPayload(m);
@@ -1067,13 +1068,13 @@ async function loadDemoPnlSeries() {
   let payload = null;
   let points = [];
   try {
-    const d = await ocApi('/api/v1/strategy/demo/pnl-series?range=' + encodeURIComponent(_demoPnlRange));
+    const d = await ocApi('/api/v1/strategy/demo/pnl-series?fast=1&range=' + encodeURIComponent(_demoPnlRange));
     payload = d && d.data;
     points = (payload && Array.isArray(payload.points)) ? payload.points : [];
   } catch (_) {}
   if (!payload || payload.available === false || !points.length) {
     try {
-      const fd = await ocApi('/api/v1/strategy/demo/fills?limit=200&offset=0');
+      const fd = await ocApi('/api/v1/strategy/demo/fills?fast=1&limit=200&offset=0');
       const fallbackFills = _demoExtractFills(fd && fd.data).filter(_demoRowIsDemoEngine);
       payload = ocPnlSeriesFromFills(fallbackFills, _demoPnlRange);
       points = payload.points || [];

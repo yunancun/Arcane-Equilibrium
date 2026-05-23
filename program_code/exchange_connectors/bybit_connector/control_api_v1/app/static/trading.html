@@ -577,7 +577,7 @@ async function loadDynamicSymbols() {
       });
     }
     // Get symbols from demo positions (Rust returns {list: [...]})
-    const dd = await api('/api/v1/strategy/demo/positions');
+    const dd = await api('/api/v1/strategy/demo/positions?fast=1');
     if (dd && dd.data) {
       const demoList = (dd.data.result && dd.data.result.list) || dd.data.list || [];
       demoList.forEach(pos => {
