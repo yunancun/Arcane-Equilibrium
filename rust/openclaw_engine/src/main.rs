@@ -573,6 +573,11 @@ async fn async_main(
         shared_account_manager,
         shared_instruments,
         paper_balance,
+        // PA-DRIFT-4 Sprint 5+ §4.2.1：WS supervisor instrumentation shared Arc
+        // 透傳。後續 spawn_metric_emitter_scheduler 注入 M3 emitter probe，
+        // V106 `api_latency__ws_*` row 反映 production 真實 metric。
+        shared_ws_dropout,
+        shared_ws_rtt,
     } = main_instruments::init_shared_clients_and_instruments(
         &cancel,
         &live_bindings,
@@ -1437,23 +1442,61 @@ async fn async_main(
     let cfg_snap_for_pool = config.get();
     let data_dir_mount =
         std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
-    let (portfolio_cache, _health_event_bus) =
+    let (portfolio_cache, health_event_bus) =
         main_health_emitters::spawn_metric_emitter_scheduler(
             &db_pool,
             cfg_snap_for_pool.database.pool_max_connections,
             &data_dir_mount,
             &shared_client,
+            // PA-DRIFT-4 Sprint 5+ §4.2.1：production WS instrumentation Arc
+            // 注入，取代 Wave B fresh 0-state placeholder。
+            &shared_ws_dropout,
+            &shared_ws_rtt,
             primary_engine_mode,
             &cancel,
         );
     drop(cfg_snap_for_pool);
     // spawn PortfolioStateCache update task；共用同 cache Arc。
     main_health_emitters::spawn_portfolio_state_update_task(portfolio_cache, &cancel);
+
+    // Sprint 5+ §4.3.1 Phase A Wave C：Track E strategy_quality wire-up。
+    // 為什麼此處（per spec §4.2 line 808-844）:
+    //   - 在 spawn_metric_emitter_scheduler 後接，共用 health_event_bus；
+    //     6 domain 共享同一 event_bus（Sprint 5+ cascade subscriber 預埋）。
+    //   - 在 spawn_portfolio_state_update_task 後接，對齊「先 portfolio cache
+    //     再 strategy_quality cache」順序；不破 既有 5 domain wire-up scope。
+    let strategy_quality_cache = main_health_emitters::spawn_strategy_quality_scheduler(
+        &db_pool,
+        primary_engine_mode,
+        std::sync::Arc::clone(&health_event_bus),
+        &cancel,
+    );
+    if let Some(cache) = strategy_quality_cache {
+        main_health_emitters::spawn_strategy_quality_update_task(
+            cache,
+            std::sync::Arc::clone(&db_pool),
+            &cancel,
+        );
+        info!(
+            target = "m3.health.wireup",
+            engine_mode = primary_engine_mode,
+            "Track E strategy_quality scheduler + StrategyQualityMetricsCache \
+             update task wired (Sprint 5+ §4.3.1 Phase A Wave C; 25 pair × 5 \
+             metric SSOT calculator)"
+        );
+    } else {
+        info!(
+            target = "m3.health.wireup",
+            "Track E strategy_quality skipped (DbPool disconnected at boot)"
+        );
+    }
+
     info!(
         target = "m3.health.wireup",
         engine_mode = primary_engine_mode,
-        "M3 metric emitter scheduler + PortfolioStateCache update task wired \
-         (Sprint 4+ first Live Wave B; Track A/C/F real + B/D-WS placeholder + E skip)"
+        "M3 metric emitter scheduler + PortfolioStateCache update task + Track E \
+         strategy_quality wired (Sprint 5+ §4.2.1 Track D full production + Sprint \
+         5+ §4.3.1 Track E real PG wire-up; Track A/C/D/E/F real + B placeholder)"
     );
 
     info!(

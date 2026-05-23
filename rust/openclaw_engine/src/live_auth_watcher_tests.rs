@@ -15,6 +15,7 @@ use super::*;
 use crate::startup::{ExchangePipelineBindings, PrivateWsBindings};
 use async_trait::async_trait;
 use openclaw_engine::account_manager::AccountManager;
+use openclaw_engine::bybit_private_ws::{WsDropoutCounter, WsRttHistogram};
 use openclaw_engine::bybit_rest_client::{BybitEnvironment, BybitRestClient};
 use openclaw_engine::event_consumer::ExchangeEvent;
 use openclaw_engine::live_authorization::{
@@ -104,6 +105,11 @@ pub(super) fn synthetic_spawn_output(parent: &CancellationToken) -> SpawnOutput 
         bybit_balance: Arc::new(parking_lot::RwLock::new(None)),
         api_pnl: Arc::new(parking_lot::RwLock::new(std::collections::HashMap::new())),
         exchange_event_rx,
+        // PA-DRIFT-4 Sprint 5+ §4.2.1：test fixture 模擬 spawn_private_ws_
+        // supervisor 構造的 caller-injected Arc；本 mock factory 不啟動 WS
+        // run loop，fixture Arc 永不 accumulate sample。
+        dropout_counter: Arc::new(WsDropoutCounter::new()),
+        rtt_histogram: Arc::new(WsRttHistogram::new()),
     };
     let bindings = ExchangePipelineBindings {
         env: BybitEnvironment::LiveDemo,

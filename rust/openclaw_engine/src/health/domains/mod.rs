@@ -33,6 +33,12 @@
 //!     5 strategy × 5 symbol + aggregate SM rule 0.40；fill_rate /
 //!     slippage / lease grant / dormant minute / signal count；5min sample；
 //!     trait probe 注入由 main.rs Wave 2 後接線）。
+//!   - `strategy_quality_probe_impl`：Sprint 5+ §4.3.1 Phase A IMPL —
+//!     `RealStrategyQualitySourceProbe` + `StrategyQualityMetricsCache` per-
+//!     (strategy, symbol) HashMap 緩存 + 5 metric snapshot；main_health_emitters.rs
+//!     Wave C 接 scheduler 時注入此 probe；update task 走 300s tick 1 big CTE
+//!     join PG query 整 HashMap 覆寫；本檔不修 strategy_quality.rs 1580 LOC
+//!     emitter + scheduler + classify 既有邏輯。
 //!   - `risk_envelope`：Track F IMPL（portfolio cum_pnl_24h / max_dd /
 //!     position_count / correlation_avg_pairwise / concentration_top1 — 300s
 //!     sample；source probe 注入由 main.rs Wave 2 後接線；emitter 只觀測，不
@@ -62,3 +68,4 @@ pub mod pipeline_throughput;
 pub mod risk_envelope;
 pub mod risk_envelope_probe_impl;
 pub mod strategy_quality;
+pub mod strategy_quality_probe_impl;
