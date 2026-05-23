@@ -159,6 +159,34 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 ## 文档索引 (Document Index)
 
+### 2026-05-23 Sprint 1B late §4.1.1 + Sprint 5+ §4.2.1/§4.3.1 — Stage A→E + PA-DRIFT-6 catch+fix（Sprint 4+ §4.1.1/§4.2.1/§4.3.1 三條 carry-over closure）
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_1b_late_v100_m4_hypothesis_base_table_design.md` | PA Track 1 — V99-V102 spec gap audit + V099→V100 push back + V100 M4 base table design（V099 autonomy SSOT 不可碰 + V100 重 number；3 table 13/7/10 column 設計 + earn_movement_log FK target patch `learning.governance_audit_log` + Guard A 13 base column only；DESIGN-DONE / E1-IMPL-READY）|
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint5_bybit_private_ws_supervisor_design.md` | PA Track 2 — BybitPrivateWs supervisor signature 改造 design（Option A external Arc 注入 type-level enforcement；4 caller impact + PrivateWsBindings + SharedClientsBundle + spawn_metric_emitter_scheduler 三層擴展；5 AC + 半實裝陷阱誠實揭露 lesson；DESIGN-DONE-DISPATCH-READY）|
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint5_strategy_quality_wireup_design.md` | PA Track 3 — StrategyQualityEmitter wire-up Path A design（1 big CTE join query 25 pair × 5 metric snapshot；新 file strategy_quality_probe_impl.rs ~200 LOC + update task 5 min tick + cache 1:1 對齊 PortfolioStateCache；6 AC + 16 根原則 A 級；DISPATCH-READY 8-11 hr budget）|
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_1b_remaining_3_sections_audit.md` | PA Track 4 — Sprint 1B 剩 3 章節 audit（C10 Stage 1 Demo READY-TO-DISPATCH 41-62 hr / Earn first stake NEEDS-OPERATOR-DECISION + DEPENDS-ON-§4.1.1 50-78 hr / v5.7 baseline 收口 DOWNGRADE-TO-NON-WORK；PA 推薦路徑 A 先 C10 後 Earn）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint_1b_late_v100_m4_hypothesis_base_table.md` | E1 B-1 V100 M4 base table IMPL（V100 SQL 663 LOC + spec doc 581 LOC；3 NEW table 30 column + 11 status enum + 4 engine_mode enum + 2 direction enum + 3 reconciliation_status enum + 4 hot-path index + 20 COMMENT；earn_movement_log FK target patch；cargo test sqlx Migrator parser 15/15 PASS；3 hr 實際 IMPL）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint5_bybit_private_ws_supervisor_signature_impl.md` | E1 B-2 BybitPrivateWs supervisor IMPL（6 file +164 / -60 LOC；5 caller 全 update + Wave A handle accessor 保留；E1 push back 2 條 採信 SSOT — dispatch type 描述錯 + 新發現 caller live_auth_watcher_tests.rs:103；cargo test 3971 PASS / 0 FAIL baseline +10）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint5_strategy_quality_wireup_phase_a_impl.md` | E1 B-3 StrategyQualityEmitter Phase A IMPL（strategy_quality_probe_impl.rs 656 LOC + main_health_emitters.rs +571 LOC + main.rs +34 LOC + mod.rs +12 LOC；STRATEGY_QUALITY_BATCH_QUERY 5 CTE join + F-2 NaN/inf sanitize + interval.tick consume first；strings binary Track E 全 symbol + 0 mock/spike；cargo test 3522 PASS）|
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-23--stage_a_to_e_overall_acceptance.md` | TW Stage A→E Overall Acceptance Report（PASS WITH 8 CARRY-OVER；Stage A 4 並行 PA design + Stage B 3 並行 E1 IMPL + Stage C E2 round 1×3 + Round 2 PM Edit + Stage D E4 combined regression + Stage E Linux deploy + PA-DRIFT-6 catch+fix；7/7 target table land + 9 row metadata + B-2 ws_rtt/dropout 真實採樣 + B-3 strategy_quality 5 min 126 row；§6 PA-DRIFT-6 lesson learned 完整 RCA + §8 8 carry-over routing；待 PM Phase 3e 拍板）|
+
+**PA-DRIFT-6 核心治理 lesson**：TimescaleDB hypertable composite PK 不能作為 PostgreSQL FK target；V100 改 soft reference + Guard C 改 column check + COMMENT 中文紀錄 — 未來 V### 自動繼承。
+
+### 2026-05-23 Sprint 4+ first Live carry-over Acceptance（Sprint 2 §4.1 4 items closure）
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_4_pa_drift_5_risk_envelope_wireup.md` | E1 Wave A PA-DRIFT-5 round 1 IMPL（RealRiskEnvelopeSourceProbe + PortfolioStateCache 24h sliding window + 4 真實 calculator + 1 correlation placeholder + 16 inline test + 11 integration test）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint_4_pa_drift_4_bybit_instrumentation.md` | E1 Wave A PA-DRIFT-4 round 1 IMPL（RestLatencyHistogram + RetCodeCounter + WsRttHistogram + WsDropoutCounter 四 instrumentation singleton + RealApiLatencySourceProbe + 8 trait method + 4xx/5xx 對映 + 6/8 dropout 接點 + ping/pong RTT contains peek + 15 integration test）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint_4_wave_a_round2_combined_fix.md` | E1 Wave A round 2 combined fix（6/6 finding closure：PA-DRIFT-4 H-1 BLOCKER noop guard + H-2 60s boundary 4 test + H-3 觀測下沉 + M-1 注釋；PA-DRIFT-5 F-1 cap comment + F-3 batch read trait extension `snapshot_5_metric()`）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint_4_wave_b_main_scheduler_wireup.md` | E1 Wave B round 1 IMPL（main_health_emitters.rs 528 LOC + main.rs 接線 + 5/6 emitter spawn + PortfolioStateCache 300s update task placeholder no-op + F-2 NaN/inf sanitize + emitter sample_now batch path 切換 + OBSERVE-4 propagate Err 不 swallow + 6 integration test）|
+| `CCAgentWorkSpace/E1/workspace/reports/2026-05-23--sprint_4_wave_b_round2_fix.md` | E1 Wave B round 2 fix（5/6 finding closure：HIGH-1 Track B placeholder 5 metric OK band 合法值 tick_rate=2.0/signal_rate=1.0/ipc_p99=1.0 + MEDIUM-2 Track D WS half doc 揭露 supervisor disconnect 副作用 + LOW-1/2/3；MEDIUM-1 SSOT 建立由 PA 走獨立 task）|
+| `CCAgentWorkSpace/E4/workspace/reports/2026-05-23--sprint_4_e4_regression_wave_ab.md` | E4 Wave A+B combined regression（PASS；cargo workspace 3961/0/5 × 2 non-flaky + pytest 6042/28 × 2 + Wave A+B 42/42 + Sprint 2 51/51 + spike 3/3 + health 110 + cross-lang 12/12 + aarch64 darwin clean + AC-5 nm 0 hit + inject_* 0 leak + Linux sandbox + V106 schema + pg_hba reject + production engine PID 2934602 健康不重啟）|
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_4_wave_b_m1_singleton_registry_ssot.md` | PA Singleton Registry SSOT 建立（M-1 CLOSED；docs/architecture/singleton-registry.md 344 LOC 新建 + 6 singleton 12 欄位 + CLAUDE.md §七/§九 cross-ref + docs/README.md index + 5 deliverable + Wave C unblock 6/9 子目標 closed）|
+| `CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_4_first_live_carryover_acceptance.md` | TW Sprint 4+ first Live carry-over Overall Acceptance Report（PASS WITH 8 CARRY-OVER；Phase 0-3c chronology + §4.1 4 items Acceptance + cross-cutting verdict + Lessons Learned 6 條 + Sprint 1B late 3 條 + Sprint 5+ cascade IMPL 4 條 + Sprint 5+ M3 follow-up 6 條 + Production 監測 follow-up 4 條 carry-over；5 active domain row count 770 row + production V106 raw apply + engine PID 3654935 健康；待 PM Phase 3e 拍板）|
+
 ### 2026-05-23 Singleton Registry SSOT 建立（Sprint 4+ Wave B M-1 closure）
 
 | 文件 | 内容 |
