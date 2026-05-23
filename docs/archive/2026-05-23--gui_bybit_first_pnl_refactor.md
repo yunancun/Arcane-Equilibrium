@@ -28,6 +28,15 @@ Verification run on Mac:
 - Full connector suite — `4199 passed, 12 skipped, 440 warnings`
 - Scoped `git diff --check` — PASS
 
+Linux / origin sync verification:
+
+- Mac source, `origin/main`, and Linux `trade-core` were aligned on the same source HEAD after push/pull.
+- Linux syntax/static checks — PASS.
+- Linux focused GUI/Bybit/restart matrix — `60 passed`.
+- Linux full connector suite — `4201 passed, 10 skipped, 448 warnings`.
+- Linux runtime restarted via `restart_all.sh --keep-auth`; `engine.sock` gate passed at `/tmp/openclaw/engine.sock`.
+- Linux smoke: `GET /api/v1/system/startup-status` returned HTTP 200; unauthenticated `GET /api/v1/strategy/demo/closed-pnl?limit=1` returned expected HTTP 401; engine watchdog reported `engine_alive=true`.
+
 Adversarial review:
 
 - E2 re-review: PASS

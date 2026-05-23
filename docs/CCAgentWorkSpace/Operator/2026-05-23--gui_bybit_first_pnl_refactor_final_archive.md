@@ -8,10 +8,13 @@ Final verification:
 
 - Focused GUI/Bybit/restart matrix: `60 passed`
 - Full connector suite: `4199 passed, 12 skipped, 440 warnings`
+- Linux focused GUI/Bybit/restart matrix: `60 passed`
+- Linux full connector suite: `4201 passed, 10 skipped, 448 warnings`
 - Syntax/static checks: PASS
 - E2 re-review: PASS
 - BB re-review: PASS
 - E4 regression: PASS
+- Linux runtime `restart_all.sh --keep-auth`: PASS; startup-status HTTP 200; closed-pnl unauthenticated GET HTTP 401; engine watchdog `engine_alive=true`.
 
 Closed issues:
 
@@ -23,7 +26,7 @@ Closed issues:
 - `restart_all.sh` engine/API/socket gate alignment fixed.
 - Legacy `test_pnl_series` fixture failure fixed.
 
-The old `4171 passed / 21 failed / 12 skipped` status is obsolete. Current connector status is `4199 passed / 0 failed / 12 skipped`; remaining skips are environment/opt-in skips, not GUI Bybit-first PnL failures.
+The old `4171 passed / 21 failed / 12 skipped` status is obsolete. Current Mac connector status is `4199 passed / 0 failed / 12 skipped`; Linux is `4201 passed / 0 failed / 10 skipped`. Remaining skips are environment/opt-in skips, not GUI Bybit-first PnL failures.
 
 Archive:
 
