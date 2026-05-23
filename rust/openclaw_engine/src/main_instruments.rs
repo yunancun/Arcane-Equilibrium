@@ -29,6 +29,7 @@
 use crate::startup::{resolve_paper_initial_balance, ExchangePipelineBindings};
 use crate::tasks;
 use openclaw_engine::account_manager::AccountManager;
+use openclaw_engine::bybit_private_ws::{WsDropoutCounter, WsRttHistogram};
 use openclaw_engine::bybit_rest_client::BybitRestClient;
 use openclaw_engine::instrument_info::InstrumentInfoCache;
 use std::sync::Arc;
@@ -42,6 +43,19 @@ pub(crate) struct SharedClientsBundle {
     pub shared_account_manager: Option<Arc<AccountManager>>,
     pub shared_instruments: Option<Arc<InstrumentInfoCache>>,
     pub paper_balance: f64,
+    /// PA-DRIFT-4 Sprint 5+ §4.2.1：WS supervisor instrumentation shared Arc。
+    ///
+    /// 為什麼 Option：兩 binding 全無（paper-only / cold-start）時為 None；
+    /// main.rs 透傳 `&Option<Arc<...>>` 給 `spawn_metric_emitter_scheduler`，
+    /// 由 `build_api_latency_emitter` match arm 走 placeholder fallback（保
+    /// emitter chain 不破，避 paper-only 啟動拒絕 spawn）。
+    ///
+    /// 優先級對齊 shared_client：Live > Demo（live_bindings 優先，後 fallback
+    /// 至 demo_bindings）。
+    pub shared_ws_dropout: Option<Arc<WsDropoutCounter>>,
+    /// PA-DRIFT-4 Sprint 5+ §4.2.1：同上；V106 `api_latency__ws_rtt_*` 真實
+    /// source。
+    pub shared_ws_rtt: Option<Arc<WsRttHistogram>>,
 }
 
 /// Build shared REST client + instrument cache; spawn 4h instrument refresh +
@@ -78,6 +92,26 @@ pub(crate) async fn init_shared_clients_and_instruments(
             demo_bindings
                 .as_ref()
                 .map(|b| Arc::clone(&b.account_manager))
+        });
+
+    // PA-DRIFT-4 Sprint 5+ §4.2.1：WS supervisor instrumentation shared Arc
+    // extract — 對齊上方 shared_client / shared_account_manager Live > Demo
+    // 優先級鏈；M3 `api_latency` emit chain 從此處拿穩定 Arc reference。
+    let shared_ws_dropout: Option<Arc<WsDropoutCounter>> = live_bindings
+        .as_ref()
+        .map(|b| Arc::clone(&b.ws_bindings.dropout_counter))
+        .or_else(|| {
+            demo_bindings
+                .as_ref()
+                .map(|b| Arc::clone(&b.ws_bindings.dropout_counter))
+        });
+    let shared_ws_rtt: Option<Arc<WsRttHistogram>> = live_bindings
+        .as_ref()
+        .map(|b| Arc::clone(&b.ws_bindings.rtt_histogram))
+        .or_else(|| {
+            demo_bindings
+                .as_ref()
+                .map(|b| Arc::clone(&b.ws_bindings.rtt_histogram))
         });
 
     let mut shared_instruments: Option<Arc<InstrumentInfoCache>> = None;
@@ -189,5 +223,9 @@ pub(crate) async fn init_shared_clients_and_instruments(
         shared_account_manager,
         shared_instruments,
         paper_balance,
+        // PA-DRIFT-4 Sprint 5+ §4.2.1：透傳 caller-injected Arc 至 M3
+        // `spawn_metric_emitter_scheduler`。
+        shared_ws_dropout,
+        shared_ws_rtt,
     }
 }

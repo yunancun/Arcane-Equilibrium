@@ -15,12 +15,22 @@
 //!       HIGH-1 fix 2026-05-23）。
 //!     - Track C `DatabasePoolEmitter`：sqlx PgPool + writer queue probe 0 +
 //!       disk usage 走 sysinfo Disks；Wave B 真實 pool stats wire-up。
-//!     - Track D `ApiLatencyEmitter`：REST half 真實 wire-up（`shared_client.
-//!       latency_histogram_handle()` + `ret_code_counter_handle()`）；WS half
-//!       placeholder（per Wave B BybitPrivateWs supervisor 內部重建 Arc，外部
-//!       注入非本 round scope；Wave C / Sprint 5+ amend follow-up）。
-//!     - Track E `StrategyQualityEmitter`：本 Wave B skip（per dispatch §NOT in
-//!       scope；StrategyQualityScheduler 走獨立 scheduler，由 Sprint 5+ wire-up）。
+//!     - Track D `ApiLatencyEmitter`：REST + WS production wire-up
+//!       （per PA-DRIFT-4 Sprint 5+ §4.2.1 完成）。REST half 由 Wave B 拉
+//!       `shared_client.latency_histogram_handle()` +
+//!       `ret_code_counter_handle()`；WS half 由 Sprint 5+ §4.2.1 接 caller-
+//!       injected Arc（`BybitPrivateWs::new()` signature 改造 + `PrivateWs
+//!       Bindings` 暴露 `dropout_counter` / `rtt_histogram` field +
+//!       `SharedClientsBundle.shared_ws_dropout` / `shared_ws_rtt` extract
+//!       Live > Demo 優先級鏈）。任一 source None 走全 placeholder fallback
+//!       （paper-only / cold-start no-binding）。
+//!     - Track E `StrategyQualityEmitter`：Sprint 5+ §4.3.1 Phase A wire-up
+//!       (本 module 同檔內)；`RealStrategyQualitySourceProbe` +
+//!       `StrategyQualityMetricsCache` real PG batch query 接 trading.signals /
+//!       trading.fills / learning.lease_transitions SSOT；獨立 scheduler 不沿用
+//!       `MetricEmitterScheduler`（per spec §4.4 line 638-643）。
+//!       Wire-up 入口 `spawn_strategy_quality_scheduler` +
+//!       `spawn_strategy_quality_update_task` 由 main.rs caller Wave C 階段呼。
 //!     - Track F `RiskEnvelopeEmitter`：`RealRiskEnvelopeSourceProbe` +
 //!       `PortfolioStateCache` 真實 wire-up；update task 走 300s tick
 //!       placeholder no-op（fail-soft caller end；Wave C / Sprint 5+ 接 PaperState
@@ -31,6 +41,11 @@
 //!     auto_migrate 後 + 三 pipeline spawn 後呼此 fn 一次。
 //!   - `spawn_portfolio_state_update_task`：300s tick task；每 tick 呼
 //!     `PortfolioStateCache::update_from_pipeline_snapshot`。
+//!   - `spawn_strategy_quality_scheduler`：Sprint 5+ §4.3.1 Phase A Wave C；
+//!     獨立 spawn StrategyQualityScheduler 為 tokio task；返 cache handle 讓
+//!     caller 同時 spawn update task。
+//!   - `spawn_strategy_quality_update_task`：5 min tick PG batch query；走 1 個
+//!     CTE join query 拿 25 pair × 5 metric snapshot 整 HashMap 覆寫 cache。
 //!
 //! 依賴:
 //!   - sqlx PgPool（main.rs Phase 1 line ~615 後可拿）
@@ -49,6 +64,7 @@
 //!   - F-2 NaN/inf caller sanitize（per PA-DRIFT-5 round 2 升級 P1 Wave B
 //!     condition）在 cache 端 `update_from_pipeline_snapshot` 已守。
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex as ParkingMutex;
@@ -72,6 +88,14 @@ use openclaw_engine::health::domains::risk_envelope::RiskEnvelopeEmitter;
 use openclaw_engine::health::domains::risk_envelope_probe_impl::{
     PortfolioStateCache, PositionExposure, RealRiskEnvelopeSourceProbe,
 };
+use openclaw_engine::health::domains::strategy_quality::{
+    StrategyQualityEmitter, StrategyQualityScheduler,
+};
+use openclaw_engine::health::domains::strategy_quality_probe_impl::{
+    RealStrategyQualitySourceProbe, StrategyQualityMetricsCache,
+    StrategyQualityMetricsSnapshot,
+};
+use openclaw_engine::event_consumer::SYMBOLS;
 use openclaw_engine::health::event_bus::HealthEventBus;
 use openclaw_engine::health::metric_emitter::{
     DomainEmitter, EngineModeProvider, EngineRuntimeEmitter, MetricEmitterScheduler,
@@ -153,87 +177,83 @@ impl PipelineThroughputSourceProbe for PlaceholderPipelineThroughputSource {
 }
 
 // ============================================================
-// Placeholder probe — Track D WS half (REST half 走 real)
+// Track D — REST + WS production wire-up（Sprint 5+ §4.2.1 完成）
 // ============================================================
 //
-// 為什麼 hybrid（REST real + WS placeholder）:
-//   - `shared_client.latency_histogram_handle()` + `ret_code_counter_handle()`
-//     由 BybitRestClient 直接 expose Arc（main_instruments 後可拿）→ REST 半邊
-//     real wire-up 無風險。
-//   - BybitPrivateWs 在 startup/private_ws.rs supervisor 內每次重建（per attempt
-//     新 Arc<WsDropoutCounter> + Arc<WsRttHistogram>）；main.rs 外部無法穩定拿
-//     handle 注入 probe（needs supervisor signature 變更 = 破 dispatch §禁忌
-//     「不改既有 bybit_private_ws 業務邏輯」）。
-//   - Wave B placeholder：本 round 走 `WsDropoutCounter::new()` + `WsRttHistogram
-//     ::new()` 0-state instance；count() / percentile_pair() 均返 0 → emitter
-//     classify 走 OK band，不誤升。
-//   - Wave C / Sprint 5+ amend follow-up：BybitPrivateWs supervisor 改為外部
-//     注入 Arc handle pattern（per Track D `ApiLatencyEmitter::new(probe)` API
-//     不變；只換 probe 內部 ws_dropout/ws_rtt 為 external Arc clone）。
+// 為什麼 hybrid 已升級為 full production wire-up（per PA-DRIFT-4 Sprint 5+
+// §4.2.1 spec §3.4）:
+//   - REST half real wire-up 由 Wave B 完成：`shared_client.latency_histogram_
+//     handle()` + `ret_code_counter_handle()` 由 BybitRestClient 直接 expose
+//     Arc（main_instruments 後可拿）。
+//   - WS half production wire-up 由 Sprint 5+ §4.2.1 完成：BybitPrivateWs::
+//     new() signature 改為 caller external Arc 注入；`startup/private_ws.rs`
+//     supervisor 在 spawn 前構造 Arc 後跨 attempt 共享同 instance，並透過
+//     `PrivateWsBindings` 返 caller；main_instruments 端走 Live > Demo 優先級
+//     extract `shared_ws_dropout` + `shared_ws_rtt`，透傳本 fn 注入 probe。
 //
-// ⚠️ Track D WS placeholder — emit chain disconnected from production supervisor
-// （per 2026-05-23 round 2 MEDIUM-2 fix；E2 round 1 catch 揭露半實裝陷阱）:
+// 為什麼選 Option A caller-injected Arc 而非 Option B install_external_
+// handles() 兩步式（per spec §2.1 對照）:
+//   - type-level enforcement：BybitPrivateWs::new() 新增 2 個 Arc 參數，caller
+//     必傳；compile 強制無「忘 install」回退半實裝陷阱可能。
+//   - 0 race window：supervisor 構造瞬間即接通 production probe；不存在 install
+//     前 default Arc 接 measurement 又被 swap 丟失 risk。
+//   - 對齊既有 SharedClientsBundle 從 binding extract shared Arc 的 pattern
+//     （main_instruments.rs:70-81）— 子模塊純消費，main.rs 編排。
 //
-//   - **問題揭露**：`bybit_private_ws.rs:577-585` Wave A 已實裝 `dropout_counter
-//     _handle()` / `rtt_histogram_handle()` 兩個 expose accessor，但**本
-//     module 沒有呼叫**；每次 `build_real_api_latency_probe` 都 fresh 新建
-//     `Arc::new(WsDropoutCounter::new())` + `Arc::new(WsRttHistogram::new())`
-//     0-state instance（per line 145-146）。
-//   - **後果**：30 天 V106 row `api_latency__ws_rtt_p50_ms` /
-//     `api_latency__ws_rtt_p99_ms` / `api_latency__ws_dropout_count` 全 0
-//     染色；此「全 0」**不是** production WS 健康指標反映「無 dropout / 低
-//     latency」，而是 emit chain 從 production BybitPrivateWs supervisor 完全
-//     disconnect 的副作用（fresh 0-state Arc 永遠不會被 production WS run
-//     loop 觀測 + accumulate）。
-//   - **誠實揭露 vs round 1 doc 措辭**：round 1 doc 自稱「OK band 不誤升」
-//     可能誤導 reviewer 推論「Track D WS half 實裝正確只是 0 觀測值」；事實
-//     是 placeholder OK band 對齊 spec line 104 OK band literal 是 placeholder
-//     副作用，與 supervisor metric 0 連線。
-//   - **Wave B 走 (a) doc 補注 + Sprint 5+ carry-over**：本 round 不接
-//     supervisor handle（needs `BybitPrivateWs::new()` signature 改為「caller
-//     注入 external Arc」pattern；per `bybit_private_ws.rs:564-565` 既有
-//     code「Arc::new(WsDropoutCounter::new())」在 struct 內部 own，外部無
-//     穩定 share Arc handle）；Sprint 5+ amend BybitPrivateWs supervisor
-//     signature 改造 + main.rs Wave 接時拿 supervisor handle clone 替換
-//     placeholder fresh Arc。
-//   - **健康行為**：本 round V106 emitter `api_latency__ws_rtt_*` / `__ws_
-//     dropout_count` 走 placeholder OK band（0-state Arc count=0 / percentile
-//     =0）；Wave C QA Phase 3c AC-1b 30 min 樣本 wait 端，operator 須意識到
-//     此 4 row（ws_rtt_p50_ms / ws_rtt_p99_ms / ws_dropout_count + 衍生
-//     classify=OK）**不是真實 WS 觀測**，是 placeholder 副作用；Sprint 5+
-//     wire-up 接 supervisor 後 V106 row 才反映 production WS metric。
+// fallback path（shared_ws_dropout / shared_ws_rtt 任一 None）:
+//   - paper-only / cold-start no-binding 啟動時 PrivateWsBindings 不存在；
+//     shared_ws_dropout / shared_ws_rtt 為 None。
+//   - 此時 build_api_latency_emitter 走全 placeholder fallback（4 個 fresh
+//     0-state Arc）；V106 row 仍 emit（不缺 row）但內容為 placeholder。
+//   - 進入 production binding（live / demo）後 shared Arc 接通，V106 row 自動
+//     反映 production WS metric；不需 restart emitter scheduler。
 
-/// 構造 Track D `RealApiLatencySourceProbe`：REST half real + WS half placeholder。
+/// 構造 Track D `RealApiLatencySourceProbe`：REST + WS production wire-up。
 ///
-/// 為什麼 wrapper fn 而非 inline:
-///   - main.rs caller 端 clean call site（一行注入）；placeholder Arc 構造邏輯
-///     封裝避 noise。
-///   - 未來 Wave C amend 時 caller signature 不變；只在本 fn 內換 WS Arc 來源。
+/// PA-DRIFT-4 Sprint 5+ §4.2.1：WS half 接 caller-injected Arc（取代 Wave B
+/// fresh 0-state placeholder）。
+///
+/// caller 端責任（main.rs）：從 `SharedClientsBundle.shared_ws_dropout` /
+/// `shared_ws_rtt` 拿 Arc 透傳；本 fn 內走 `Arc::clone` 共享同 instance。
 fn build_real_api_latency_probe(
     shared_client: &Arc<BybitRestClient>,
+    shared_ws_dropout: &Arc<WsDropoutCounter>,
+    shared_ws_rtt: &Arc<WsRttHistogram>,
 ) -> RealApiLatencySourceProbe {
     let rest_latency: Arc<RestLatencyHistogram> = shared_client.latency_histogram_handle();
     let ret_code_counter: Arc<RetCodeCounter> = shared_client.ret_code_counter_handle();
-    // WS half placeholder：fresh 0-state instance（per module note）。
-    let ws_dropout: Arc<WsDropoutCounter> = Arc::new(WsDropoutCounter::new());
-    let ws_rtt: Arc<WsRttHistogram> = Arc::new(WsRttHistogram::new());
+    // PA-DRIFT-4 Sprint 5+ §4.2.1：caller-injected production WS Arc clone
+    // （取代 Wave B `Arc::new(WsDropoutCounter::new())` placeholder）。
+    let ws_dropout: Arc<WsDropoutCounter> = Arc::clone(shared_ws_dropout);
+    let ws_rtt: Arc<WsRttHistogram> = Arc::clone(shared_ws_rtt);
     RealApiLatencySourceProbe::new(rest_latency, ret_code_counter, ws_dropout, ws_rtt)
 }
 
-/// 構造 Track D `ApiLatencyEmitter`：shared_client 缺席時走全 placeholder probe。
+/// 構造 Track D `ApiLatencyEmitter`：三 source 任一缺席走全 placeholder。
 ///
-/// 為什麼 fallback：main_instruments 端 live/demo 均不 bind 時 shared_client 為
-/// None；emitter 仍構造（0 sample row 比缺 emitter 少干涉 V106 emitter chain）。
+/// 為什麼 partial-Some 也走全 placeholder fallback（per spec §3.4 改動 2
+/// rationale）:
+///   - 三 source `shared_client` / `shared_ws_dropout` / `shared_ws_rtt` 需
+///     同時存在才能 emit production-aligned 4 metric；任一 None = pipeline
+///     binding 半接通狀態。
+///   - partial-Some 走 mixed real/placeholder 會誤導 reviewer 認為「半連線」
+///     是合法狀態（per `feedback_no_dead_params` 反假陽性）；統一走全
+///     placeholder fallback 讓 V106 row 中性表態（不誤升、不誤稱真接通）。
+///   - 三 source 同源（main_instruments live > demo 優先級鏈），實務上要嘛
+///     all-Some 要嘛 all-None；partial 是極端冷啟動 race window 才可能撞。
 fn build_api_latency_emitter(
     shared_client: &Option<Arc<BybitRestClient>>,
+    shared_ws_dropout: &Option<Arc<WsDropoutCounter>>,
+    shared_ws_rtt: &Option<Arc<WsRttHistogram>>,
 ) -> Box<dyn DomainEmitter> {
-    match shared_client {
-        Some(client) => {
-            let probe = build_real_api_latency_probe(client);
+    match (shared_client, shared_ws_dropout, shared_ws_rtt) {
+        (Some(client), Some(dropout), Some(rtt)) => {
+            let probe = build_real_api_latency_probe(client, dropout, rtt);
             Box::new(ApiLatencyEmitter::new(probe))
         }
-        None => {
-            // 全 placeholder：4 個 0-state instance；REST 半邊 fallback。
+        _ => {
+            // 全 placeholder fallback：任一 None 走 4 個 0-state Arc。
+            // V106 row 仍 emit 但 OK band；paper-only / cold-start no-binding。
             let probe = RealApiLatencySourceProbe::new(
                 Arc::new(RestLatencyHistogram::new()),
                 Arc::new(RetCodeCounter::new()),
@@ -365,6 +385,12 @@ pub(crate) fn spawn_metric_emitter_scheduler(
     pool_max_conn: u32,
     data_dir_mount: &str,
     shared_client: &Option<Arc<BybitRestClient>>,
+    // PA-DRIFT-4 Sprint 5+ §4.2.1：WS supervisor instrumentation Arc 注入。
+    // caller 端 main.rs 從 SharedClientsBundle 透傳 Live > Demo 優先級提取
+    // 的 Arc；本 fn 走 build_api_latency_emitter match arm 構造 production-
+    // aligned probe（取代 Wave B fresh 0-state placeholder）。
+    shared_ws_dropout: &Option<Arc<WsDropoutCounter>>,
+    shared_ws_rtt: &Option<Arc<WsRttHistogram>>,
     engine_mode_str: &'static str,
     cancel: &CancellationToken,
 ) -> (
@@ -409,7 +435,11 @@ pub(crate) fn spawn_metric_emitter_scheduler(
     let pipeline_throughput: Box<dyn DomainEmitter> =
         Box::new(PipelineThroughputEmitter::new(PlaceholderPipelineThroughputSource));
     let database_pool = build_database_pool_emitter(db_pool, pool_max_conn, data_dir_mount);
-    let api_latency = build_api_latency_emitter(shared_client);
+    // PA-DRIFT-4 Sprint 5+ §4.2.1：transmit ws Arc through to api_latency
+    // emitter；三 source 同 None 走 placeholder fallback（paper-only / cold-
+    // start no-binding）。
+    let api_latency =
+        build_api_latency_emitter(shared_client, shared_ws_dropout, shared_ws_rtt);
     // Track E skip per dispatch §NOT in scope。
     let (risk_envelope, portfolio_cache) = build_risk_envelope_emitter();
 
@@ -438,7 +468,8 @@ pub(crate) fn spawn_metric_emitter_scheduler(
             engine_mode = %mode_for_log,
             emitter_count = emitter_count_for_log,
             "M3 MetricEmitterScheduler spawning (Track A real + B placeholder + C real \
-             + D REST-real/WS-placeholder + F real; Track E skip per Sprint 5+ wire-up)"
+             + D real (REST + WS production wire-up per Sprint 5+ §4.2.1) + F real; \
+             Track E skip per Sprint 5+ wire-up)"
         );
         match scheduler.run(scheduler_cancel).await {
             Ok(()) => {
@@ -567,6 +598,414 @@ pub(crate) fn spawn_portfolio_state_update_task(
 }
 
 // ============================================================
+// Track E strategy_quality scheduler — RealStrategyQualitySourceProbe + cache
+// （Sprint 5+ §4.3.1 Phase A Wave C wire-up）
+// ============================================================
+//
+// 為什麼獨立 scheduler 而非合入 `spawn_metric_emitter_scheduler`（per spec §4.4
+// line 638-643）:
+//   - `MetricEmitterScheduler` 內部 `state_machines: HashMap<(HealthDomain,
+//     String), HealthStateMachine>` 是 (domain, metric_name) 鍵；strategy_quality
+//     需要 (domain, metric_name, strategy, symbol) 4-tuple 鍵，會破壞 scheduler
+//     既有 hash key shape。
+//   - 對齊既有 `StrategyQualityScheduler::run` 範式（strategy_quality.rs line
+//     565-810）獨立 tokio task spawn。
+//
+// 為什麼 25 pair 動態生成 而非硬編碼（per spec §6 反問 #6 + 反模式 (e)）:
+//   - SYMBOLS 來自 `event_consumer::types::SYMBOLS` 5 元素 const（BTCUSDT /
+//     ETHUSDT / SOLUSDT / XRPUSDT / DOGEUSDT）；strategy 5 元素 const 對齊
+//     strategy_params_*.toml 5 [section]（ma_crossover / bb_reversion /
+//     bb_breakout / grid_trading / funding_arb）。
+//   - 25 pair 是 cartesian product；某些 pair runtime 永遠 inactive（如
+//     funding_arb 配 non-funding 對；emitter 端走 fail-soft default OK band）。
+//
+// 為什麼 PG batch query 而非增量 IPC subscribe（per spec §3.2 reasoning）:
+//   - 既有 strategy_engine / fill_writer / lease audit 寫端是 batch INSERT；
+//     emitter 端只觀測，不擴 IPC channel scope（per PA-DRIFT-5 Wave B 同
+//     reasoning）。
+//   - 5 min tick × 1 CTE join query × 5 metric 拿完 25 pair；對 PG load 可忽略
+//     （per spec §6 反問 #4 latency 5-10ms 對比 5 parallel query 25-50ms）。
+
+/// 5 strategy 名稱（對齊 strategy_params_*.toml 5 [section]）。
+///
+/// 為什麼 const 而非 caller 注入:
+///   - 5 strategy 是 production strategy_engine 編譯時固定枚舉；無 runtime 動態
+///     新增 / 移除路徑（per `feedback_no_dead_params` 反假可配置）。
+///   - 對齊既有 sprint2_track_e_strategy_quality.rs `make_25_pairs()` test fixture
+///     5 strategy 範式（其中 test 用 "grid" / "ma" 簡化字串；production 走 toml
+///     正名）。
+const STRATEGY_QUALITY_STRATEGIES: &[&str] = &[
+    "ma_crossover",
+    "bb_reversion",
+    "bb_breakout",
+    "grid_trading",
+    "funding_arb",
+];
+
+/// 構造 25 (strategy, symbol) pair list（5 strategy × 5 SYMBOLS）。
+///
+/// 為什麼此設計（per spec §4.1 line 690-701）:
+///   - 對齊既有 `event_consumer::types::SYMBOLS` 5 symbol（其他模塊已 IMPL 採用）。
+///   - 5 strategy 對齊 strategy_params_*.toml 5 [section]。
+///   - 25 pair 是 (5 strategy × 5 symbol) cartesian product；某些 pair runtime
+///     永遠 inactive（funding_arb × non-funding symbol；emitter 端 fail-soft 走
+///     default OK band 不誤升）。
+fn build_strategy_quality_pair_list() -> Vec<(String, String)> {
+    let mut pairs = Vec::with_capacity(STRATEGY_QUALITY_STRATEGIES.len() * SYMBOLS.len());
+    for strategy in STRATEGY_QUALITY_STRATEGIES {
+        for symbol in SYMBOLS {
+            pairs.push((strategy.to_string(), symbol.to_string()));
+        }
+    }
+    pairs
+}
+
+/// 構造 Track E `StrategyQualityScheduler` + 共享 `StrategyQualityMetricsCache`
+/// Arc 句柄。
+///
+/// 返 (scheduler, cache_handle)：caller 同時 spawn scheduler.run + cache update
+/// task；兩者共享同 cache Arc。None 時表 DbPool 斷線；caller 端 skip wire-up。
+///
+/// 為什麼複用 event_bus（caller 端傳入）:
+///   - 6 domain 共享 1 event_bus（Sprint 5+ cascade subscriber 預埋）；
+///     `spawn_metric_emitter_scheduler` 返 (cache, event_bus_arc)；本 fn 接同
+///     event_bus 避免分裂 cascade subscribe 兩條鏈。
+fn build_strategy_quality_scheduler(
+    db_pool: &Arc<DbPool>,
+    engine_mode: EngineModeProvider,
+    event_bus: Arc<HealthEventBus>,
+) -> Option<(
+    StrategyQualityScheduler,
+    Arc<ParkingMutex<StrategyQualityMetricsCache>>,
+)> {
+    let pg_pool = match db_pool.get() {
+        Some(p) => p.clone(),
+        None => {
+            warn!(
+                target = "m3.health.wireup",
+                "Track E StrategyQualityScheduler skipped: DbPool disconnected at boot"
+            );
+            return None;
+        }
+    };
+    let writer: Arc<dyn openclaw_engine::health::writer::HealthObservationWriter> =
+        Arc::new(PgHealthObservationWriter::new(pg_pool));
+
+    let cache = Arc::new(ParkingMutex::new(StrategyQualityMetricsCache::new()));
+    let probe = RealStrategyQualitySourceProbe::new(Arc::clone(&cache));
+    let pairs = build_strategy_quality_pair_list();
+    let emitter = StrategyQualityEmitter::new(probe, pairs);
+    let scheduler = StrategyQualityScheduler::new(emitter, writer, event_bus, engine_mode);
+
+    Some((scheduler, cache))
+}
+
+/// Wave C wire-up entry：spawn `StrategyQualityScheduler.run` 為 tokio task。
+///
+/// 為什麼分離 fn 而非合入 `spawn_metric_emitter_scheduler`（per spec §4.1 line
+/// 738-749）:
+///   - `StrategyQualityScheduler` 是 6 domain 中唯一獨立 scheduler（per spec
+///     §4.4 line 638-643；strategy_quality.rs line 542-556）；不沿用
+///     `MetricEmitterScheduler::run_domain_loop` 因 25 instance per-(strategy,
+///     symbol) SM 與 single-SM 路徑 hash key shape 不同。
+///   - main.rs caller 端兩 spawn entry：原 5 emitter 走 `spawn_metric_emitter_
+///     scheduler`，Track E 走本 fn；對齊既有 5 emitter wire-up 後 + 加一 entry
+///     不破 5 emitter scope。
+///
+/// 為什麼複用 event_bus（caller 端傳入）:
+///   - 6 domain 共享 1 event_bus（Sprint 5+ cascade subscriber 預埋）；
+///     避免分裂 cascade subscribe 兩條鏈。
+///
+/// OBSERVE-4 propagate Err 不 swallow（per既有 `spawn_metric_emitter_scheduler`
+/// 範式 + spec line 199-216）:
+///   - scheduler.run 啟動時 OBSERVE-4 guard 撞 replay →
+///     Err(ReplaySubprocessForbidden) log error 不 panic；caller 端 tokio task
+///     自然結束。
+pub(crate) fn spawn_strategy_quality_scheduler(
+    db_pool: &Arc<DbPool>,
+    engine_mode_str: &'static str,
+    event_bus: Arc<HealthEventBus>,
+    cancel: &CancellationToken,
+) -> Option<Arc<ParkingMutex<StrategyQualityMetricsCache>>> {
+    let mode_str = engine_mode_str.to_string();
+    let engine_mode: EngineModeProvider = Arc::new(move || mode_str.clone());
+
+    let (scheduler, cache) = build_strategy_quality_scheduler(db_pool, engine_mode, event_bus)?;
+
+    let scheduler_cancel = cancel.clone();
+    let mode_for_log = engine_mode_str.to_string();
+    tokio::spawn(async move {
+        info!(
+            target = "m3.health.wireup",
+            engine_mode = %mode_for_log,
+            domain = "strategy_quality",
+            pair_count = 25,
+            "Track E StrategyQualityScheduler spawning (independent scheduler; \
+             25 (strategy, symbol) pair × 4 band metric SM + 1 telemetry signal_count \
+             + 1 aggregate SM)"
+        );
+        match scheduler.run(scheduler_cancel).await {
+            Ok(()) => {
+                info!(
+                    target = "m3.health.wireup",
+                    "Track E StrategyQualityScheduler graceful shutdown"
+                );
+            }
+            Err(M3Error::ReplaySubprocessForbidden) => {
+                tracing::error!(
+                    target = "m3.health.wireup",
+                    "Track E StrategyQualityScheduler OBSERVE-4 guard tripped — \
+                     engine_mode='replay' forbidden"
+                );
+            }
+            Err(e) => {
+                tracing::error!(
+                    target = "m3.health.wireup",
+                    error = %e,
+                    "Track E StrategyQualityScheduler unexpected error"
+                );
+            }
+        }
+    });
+
+    Some(cache)
+}
+
+/// 跑 1 batch 5 query (1 big CTE join) → 整 HashMap update cache。
+///
+/// 為什麼分離 helper（per spec §3.2 line 514-557）:
+///   - test 端可直接呼此 fn 用 mocked PG pool（per既有 `RealRiskEnvelopeSourceProbe`
+///     test pattern）；spawn 端只負責 tick + cancel。
+///   - Path A 推薦（per spec §2.6）：1 big CTE join query 端 5-10ms round-trip
+///     對比 5 parallel query 25-50ms 差異 negligible；query 複雜度由 PA spec
+///     literal 對齊保 IMPL drift risk 可控。
+///
+/// fail-soft 對齊（per spec §3.2）:
+///   - DbPool 斷線 → log warn + return Ok（不返 Err 避免 spam log；cache 保留
+///     stale snapshot 到下次 tick）。
+///   - PG query fail → return Err；caller spawn 端 warn log + cache stale。
+///   - 整 batch 5 query 都成功 → 整 HashMap 替換；fail-soft sanitize 在 cache
+///     `update_batch` 內守 F-2 NaN/inf。
+async fn run_strategy_quality_query_batch(
+    cache: &Arc<ParkingMutex<StrategyQualityMetricsCache>>,
+    db_pool: &Arc<DbPool>,
+) -> Result<(), sqlx::Error> {
+    let pool = match db_pool.get() {
+        Some(p) => p.clone(),
+        None => {
+            tracing::warn!(
+                target = "m3.health.strategy_quality",
+                "StrategyQualityMetricsCache update skip: DbPool disconnected"
+            );
+            return Ok(()); // fail-soft；不返 Err
+        }
+    };
+
+    // Path A: 1 big CTE join query 拿 25 pair × 5 metric snapshot（per spec §2.6）。
+    let rows = sqlx::query_as::<_, StrategyQualityRow>(STRATEGY_QUALITY_BATCH_QUERY)
+        .fetch_all(&pool)
+        .await?;
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
+    let snapshots: HashMap<(String, String), StrategyQualityMetricsSnapshot> = rows
+        .into_iter()
+        .map(|r| {
+            (
+                (r.strategy_name, r.symbol),
+                StrategyQualityMetricsSnapshot {
+                    fill_rate_intent_ratio: r.fill_rate_intent_ratio,
+                    slippage_bps_p95: r.slippage_bps_p95,
+                    decision_lease_grant_rate: r.decision_lease_grant_rate,
+                    // PG i32 → Rust u32（spec §3.2 line 569 conversion；i32 0..=
+                    // 2147483647 全 fit u32；dormant_minutes ≥ 0 不會負）。
+                    dormant_minutes: r.dormant_minutes.max(0) as u32,
+                    signal_count_24h: r.signal_count_24h.max(0) as u32,
+                    last_update_ts_ms: now_ms,
+                },
+            )
+        })
+        .collect();
+
+    cache.lock().update_batch(now_ms, snapshots);
+    Ok(())
+}
+
+/// sqlx::FromRow target struct for STRATEGY_QUALITY_BATCH_QUERY。
+///
+/// 為什麼 i32 而非 u32（per spec §3.2 line 569）:
+///   - PG `EXTRACT(EPOCH FROM ...) / 60.0` 返 numeric；cast `::int` 為 PG int4
+///     ＝ Rust i32（sqlx 0.8 PG int4 → i32）；caller 端 max(0) as u32 對齊
+///     trait API。
+///   - COUNT(*) 也 cast `::int`；Rust i32；同樣 caller 端 max(0) as u32。
+///   - `EXTRACT(EPOCH FROM ...)` 可能 NULL（無 row 時）→ sqlx 端會 Option；本
+///     query CTE 端 COALESCE 已 fold 為 0，FromRow 視為 non-Option。
+#[derive(sqlx::FromRow)]
+struct StrategyQualityRow {
+    strategy_name: String,
+    symbol: String,
+    fill_rate_intent_ratio: f64,
+    slippage_bps_p95: f64,
+    decision_lease_grant_rate: f64,
+    dormant_minutes: i32,
+    signal_count_24h: i32,
+}
+
+/// spawn StrategyQualityMetricsCache update task (300s tick；對齊
+/// strategy_quality emitter sample_interval_sec=300)。
+///
+/// 為什麼 5 min tick 對齊 emitter sample interval（per spec §6 反問 #3）:
+///   - update tick 比 sample tick 慢 → emitter sample 時拿不到 fresh data，走
+///     fail-soft default OK band 失能。
+///   - update tick 比 sample tick 快 → cache 多餘 update 浪費 PG load。
+///   - 300s 對齊是 Pareto-optimal。
+///
+/// 為什麼啟動立即跑一次 update（per spec §3.2 line 483-487）:
+///   - emitter sample_interval=300s；若 update task 也 300s 後第一次跑，前 300s
+///     window V106 row 全 default OK band（fail-soft 但 misleading）；首次 update
+///     立即執行避此空窗。
+///
+/// graceful fail：5 query 任一 fail → 整 batch 不 update cache；保留 stale 直到
+/// 下次 tick；fail-loud warn log（per F-2 sanitize 對齊）。
+pub(crate) fn spawn_strategy_quality_update_task(
+    cache: Arc<ParkingMutex<StrategyQualityMetricsCache>>,
+    db_pool: Arc<DbPool>,
+    cancel: &CancellationToken,
+) {
+    let task_cancel = cancel.clone();
+    tokio::spawn(async move {
+        info!(
+            target = "m3.health.wireup",
+            tick_secs = 300,
+            domain = "strategy_quality",
+            "StrategyQualityMetricsCache 300s update task spawning (Sprint 5+ \
+             §4.3.1 Phase A Wave C; 1 big CTE join query × 25 pair × 5 metric)"
+        );
+
+        // 啟動立即跑一次 update（避免首 300s window 全 default OK band）。
+        if let Err(e) = run_strategy_quality_query_batch(&cache, &db_pool).await {
+            tracing::warn!(
+                target = "m3.health.strategy_quality",
+                error = %e,
+                "StrategyQualityMetricsCache initial batch update failed; cache stale until next tick"
+            );
+        }
+
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(300));
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        // tokio interval 第 1 tick 立即觸發；用 first_tick consume 對齊「啟動立即
+        // 跑 + 之後 300s 等 1 個完整週期」語意。
+        interval.tick().await;
+
+        loop {
+            tokio::select! {
+                _ = interval.tick() => {
+                    if let Err(e) = run_strategy_quality_query_batch(&cache, &db_pool).await {
+                        tracing::warn!(
+                            target = "m3.health.strategy_quality",
+                            error = %e,
+                            "StrategyQualityMetricsCache batch update failed; cache stale until next tick"
+                        );
+                    }
+                }
+                _ = task_cancel.cancelled() => {
+                    info!(
+                        target = "m3.health.wireup",
+                        "StrategyQualityMetricsCache update task cancelled"
+                    );
+                    break;
+                }
+            }
+        }
+    });
+}
+
+/// 25 pair × 5 metric batch query（per spec §2.6 Path A 整合 SSOT）。
+///
+/// CTE 結構（per spec §3.2 line 578-643）:
+///   sig_count, fill_count, dormant, strategy_ctx, lease_grants 5 CTE +
+///   FULL OUTER JOIN coalesce 出 25 pair × 5 metric snapshot。
+///
+/// engine_mode 4 值對齊 V106 CHECK：'paper', 'demo', 'live_demo', 'live'；
+/// 對齊 lease_transitions schema 仍用 'live_mainnet'（per spec §3.2 line 621）。
+///
+/// fail-soft OK band 對齊（per spec §2.1-§2.3）:
+///   - sig_n = 0 (cold start / dormant 策略) → fill_rate_intent_ratio = 1.0
+///   - requested_n = 0 → decision_lease_grant_rate = 1.0
+///   - 對齊 trait doc line 424「probe 失敗返 OK-band 值」。
+const STRATEGY_QUALITY_BATCH_QUERY: &str = r#"
+WITH
+sig_count AS (
+    SELECT strategy_name, symbol, COUNT(*)::int AS sig_n
+    FROM trading.signals
+    WHERE ts >= NOW() - INTERVAL '24 hours'
+      AND signal_type IN ('LONG', 'SHORT')
+      AND strategy_name IS NOT NULL
+    GROUP BY strategy_name, symbol
+),
+fill_count AS (
+    SELECT strategy_name, symbol,
+        COUNT(*)::int AS fill_n,
+        percentile_cont(0.95) WITHIN GROUP (ORDER BY ABS(slippage_bps))
+            FILTER (WHERE slippage_bps IS NOT NULL) AS slip_p95
+    FROM trading.fills
+    WHERE ts >= NOW() - INTERVAL '24 hours'
+      AND engine_mode IN ('paper', 'demo', 'live_demo', 'live')
+      AND strategy_name IS NOT NULL
+    GROUP BY strategy_name, symbol
+),
+dormant AS (
+    SELECT strategy_name, symbol,
+        EXTRACT(EPOCH FROM (NOW() - MAX(ts))) / 60.0 AS dormant_min
+    FROM trading.fills
+    WHERE engine_mode IN ('paper', 'demo', 'live_demo', 'live')
+      AND strategy_name IS NOT NULL
+    GROUP BY strategy_name, symbol
+),
+strategy_ctx AS (
+    SELECT DISTINCT context_id, strategy_name, symbol
+    FROM trading.signals
+    WHERE ts >= NOW() - INTERVAL '24 hours'
+      AND strategy_name IS NOT NULL
+      AND context_id IS NOT NULL
+),
+lease_grants AS (
+    SELECT
+        sc.strategy_name, sc.symbol,
+        COUNT(*) FILTER (WHERE lt.to_state = 'REGISTERED')::int AS requested_n,
+        COUNT(*) FILTER (WHERE lt.to_state = 'ACTIVE')::int AS granted_n
+    FROM learning.lease_transitions lt
+    JOIN strategy_ctx sc ON lt.context_id = sc.context_id
+    WHERE lt.created_at >= NOW() - INTERVAL '24 hours'
+      AND lt.engine_mode IN ('paper', 'demo', 'live_demo', 'live_mainnet')
+    GROUP BY sc.strategy_name, sc.symbol
+)
+SELECT
+    COALESCE(sc.strategy_name, fc.strategy_name, dm.strategy_name, lg.strategy_name)
+        AS strategy_name,
+    COALESCE(sc.symbol, fc.symbol, dm.symbol, lg.symbol) AS symbol,
+    CASE WHEN COALESCE(sc.sig_n, 0) > 0
+         THEN COALESCE(fc.fill_n, 0)::float8 / sc.sig_n
+         ELSE 1.0
+    END AS fill_rate_intent_ratio,
+    COALESCE(fc.slip_p95, 0.0)::float8 AS slippage_bps_p95,
+    CASE WHEN COALESCE(lg.requested_n, 0) > 0
+         THEN lg.granted_n::float8 / lg.requested_n
+         ELSE 1.0
+    END AS decision_lease_grant_rate,
+    LEAST(COALESCE(dm.dormant_min, 0.0), 2147483647.0)::int AS dormant_minutes,
+    COALESCE(sc.sig_n, 0)::int AS signal_count_24h
+FROM sig_count sc
+FULL OUTER JOIN fill_count fc USING (strategy_name, symbol)
+FULL OUTER JOIN dormant dm USING (strategy_name, symbol)
+FULL OUTER JOIN lease_grants lg USING (strategy_name, symbol)
+WHERE COALESCE(sc.strategy_name, fc.strategy_name, dm.strategy_name, lg.strategy_name) IS NOT NULL;
+"#;
+
+// ============================================================
 // 測試（inline 為 wire-up 入口屬性驗）
 // ============================================================
 
@@ -648,5 +1087,137 @@ mod tests {
         // 驗 cache 內容對外 visible。
         assert_eq!(cache1.lock().position_count_active(), 1);
         assert!((cache1.lock().cum_pnl_24h_usd() - 5.0).abs() < 1e-9);
+    }
+
+    // ============================================================
+    // Track E strategy_quality wire-up tests
+    // ============================================================
+
+    /// 驗 build_strategy_quality_pair_list 返 25 pair (5 strategy × 5 symbol)。
+    ///
+    /// 為什麼此 test:
+    ///   - 對齊 spec §3.3 反問 #6「25 pair 來源是否硬編碼？」結論：caller 端從
+    ///     event_consumer::SYMBOLS 動態生成；非 probe impl 內硬編碼。
+    ///   - sprint5_wave_c_strategy_quality_wireup.rs integration test 端可重用
+    ///     此 helper 驗 25 pair 完整對齊 STRATEGY_QUALITY_STRATEGIES × SYMBOLS。
+    #[test]
+    fn test_build_strategy_quality_pair_list_returns_25_unique_pairs() {
+        let pairs = build_strategy_quality_pair_list();
+        // 5 × 5 = 25
+        assert_eq!(pairs.len(), 25, "5 strategy × 5 symbol = 25 pair");
+        // 5 strategy 全在
+        let unique_strategies: std::collections::HashSet<&str> =
+            pairs.iter().map(|(s, _)| s.as_str()).collect();
+        assert_eq!(unique_strategies.len(), 5);
+        for s in STRATEGY_QUALITY_STRATEGIES {
+            assert!(
+                unique_strategies.contains(s),
+                "strategy {} 必在 pair list",
+                s
+            );
+        }
+        // 5 symbol 全在
+        let unique_symbols: std::collections::HashSet<&str> =
+            pairs.iter().map(|(_, s)| s.as_str()).collect();
+        assert_eq!(unique_symbols.len(), 5);
+        for sym in SYMBOLS {
+            assert!(
+                unique_symbols.contains(*sym),
+                "symbol {} 必在 pair list",
+                sym
+            );
+        }
+        // 25 unique tuple（無重複）
+        let unique_pairs: std::collections::HashSet<(String, String)> =
+            pairs.iter().cloned().collect();
+        assert_eq!(unique_pairs.len(), 25, "25 pair 必全 unique");
+    }
+
+    /// 驗 STRATEGY_QUALITY_BATCH_QUERY 字串包含 5 CTE + 4 engine_mode + 4 lease state。
+    ///
+    /// 為什麼此 test:
+    ///   - 對齊 spec AC-4「PG query string + result row parse」；Mac mock 無法
+    ///     跑 real PG，但可驗 query literal 對齊 spec §3.2 + 反模式 (j) 不改
+    ///     既有 engine_mode IN filter。
+    ///   - 防 IMPL 後 query 被「順手優化」改 engine_mode list 或 lease state name
+    ///     導致 24h drift。
+    #[test]
+    fn test_strategy_quality_batch_query_contains_all_required_clauses() {
+        let q = STRATEGY_QUALITY_BATCH_QUERY;
+        // 5 CTE 名
+        assert!(q.contains("sig_count AS"), "sig_count CTE 必存在");
+        assert!(q.contains("fill_count AS"), "fill_count CTE 必存在");
+        assert!(q.contains("dormant AS"), "dormant CTE 必存在");
+        assert!(q.contains("strategy_ctx AS"), "strategy_ctx CTE 必存在");
+        assert!(q.contains("lease_grants AS"), "lease_grants CTE 必存在");
+        // 5 SSOT 表
+        assert!(q.contains("trading.signals"), "走 trading.signals SSOT");
+        assert!(q.contains("trading.fills"), "走 trading.fills SSOT");
+        assert!(
+            q.contains("learning.lease_transitions"),
+            "走 learning.lease_transitions SSOT"
+        );
+        // engine_mode 4 值 fills 端
+        assert!(
+            q.contains("'paper', 'demo', 'live_demo', 'live'"),
+            "fills/dormant engine_mode 4 值對齊 V106 CHECK"
+        );
+        // lease_transitions engine_mode 用 live_mainnet（per spec §3.2 line 621）
+        assert!(
+            q.contains("'live_mainnet'"),
+            "lease_transitions engine_mode 用 live_mainnet"
+        );
+        // 4 lease state name
+        assert!(q.contains("'REGISTERED'"), "走 REGISTERED state");
+        assert!(q.contains("'ACTIVE'"), "走 ACTIVE state");
+        // signal_type 2 值
+        assert!(
+            q.contains("'LONG', 'SHORT'"),
+            "signal_type 排除 CLOSE/HOLD"
+        );
+        // p95 percentile
+        assert!(
+            q.contains("percentile_cont(0.95)"),
+            "slippage 走 p95 percentile_cont"
+        );
+        // 5 FULL OUTER JOIN
+        assert_eq!(
+            q.matches("FULL OUTER JOIN").count(),
+            3,
+            "3 FULL OUTER JOIN 把 sig_count / fill_count / dormant / lease_grants 4 CTE 合"
+        );
+        // fail-soft OK band default
+        assert!(
+            q.contains("ELSE 1.0"),
+            "sig_n=0 / requested_n=0 → fail-soft OK band 1.0"
+        );
+        // dormant u32 cap
+        assert!(
+            q.contains("LEAST(COALESCE(dm.dormant_min, 0.0), 2147483647.0)"),
+            "dormant_minutes cap i32::MAX 避免 overflow"
+        );
+    }
+
+    /// 驗 STRATEGY_QUALITY_STRATEGIES 5 const 對齊 strategy_params_*.toml
+    /// section name（per spec §4.1 line 690-695）。
+    ///
+    /// 為什麼此 test:
+    ///   - 對齊 spec §4.1 + 反模式 (e)「strategy/symbol 名硬編碼禁」；本 const
+    ///     在 production toml strategy section 同 IMPL，不破壞 single SSOT。
+    ///   - 防 IMPL 後常見「順手 rename」（如 ma_crossover → ma）造成 24h
+    ///     query strategy_name JOIN 落空。
+    #[test]
+    fn test_strategy_quality_strategies_align_with_toml_sections() {
+        // 5 strategy 必含這些 production name；若 IMPL 端「rename」必先撞此 test。
+        assert!(STRATEGY_QUALITY_STRATEGIES.contains(&"ma_crossover"));
+        assert!(STRATEGY_QUALITY_STRATEGIES.contains(&"bb_reversion"));
+        assert!(STRATEGY_QUALITY_STRATEGIES.contains(&"bb_breakout"));
+        assert!(STRATEGY_QUALITY_STRATEGIES.contains(&"grid_trading"));
+        assert!(STRATEGY_QUALITY_STRATEGIES.contains(&"funding_arb"));
+        assert_eq!(
+            STRATEGY_QUALITY_STRATEGIES.len(),
+            5,
+            "5 strategy 對齊 toml 5 [section]"
+        );
     }
 }

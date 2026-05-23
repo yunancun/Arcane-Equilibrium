@@ -57,6 +57,18 @@ pub(crate) struct PrivateWsBindings {
     pub bybit_balance: Arc<parking_lot::RwLock<Option<f64>>>,
     pub api_pnl: Arc<parking_lot::RwLock<std::collections::HashMap<String, f64>>>,
     pub exchange_event_rx: mpsc::UnboundedReceiver<ExchangeEvent>,
+    /// PA-DRIFT-4 Sprint 5+ §4.2.1：WS dropout counter shared Arc。
+    ///
+    /// supervisor task 內每次 RE-2 attempt 重建 `BybitPrivateWs` 時 clone 同
+    /// Arc 注入；caller 在 main.rs 走 `Arc::clone` 注入 `RealApiLatencySource
+    /// Probe`，30 天 V106 row `api_latency__ws_dropout_count` 反映 production
+    /// 真實 metric（非 Wave B placeholder fresh 0-state Arc）。
+    pub dropout_counter: Arc<openclaw_engine::bybit_private_ws::WsDropoutCounter>,
+    /// PA-DRIFT-4 Sprint 5+ §4.2.1：WS ping→pong RTT histogram shared Arc。
+    ///
+    /// 同上 rationale；V106 row `api_latency__ws_rtt_p50_ms` /
+    /// `api_latency__ws_rtt_p99_ms` 真實 source。
+    pub rtt_histogram: Arc<openclaw_engine::bybit_private_ws::WsRttHistogram>,
 }
 
 /// Spawn a per-pipeline private WS supervisor + ExecutionListener.
@@ -75,12 +87,23 @@ pub(crate) fn spawn_private_ws_supervisor(
     label: &str,
     cancel: CancellationToken,
 ) -> (PrivateWsBindings, Vec<JoinHandle<()>>) {
-    use openclaw_engine::bybit_private_ws::BybitPrivateWs;
+    use openclaw_engine::bybit_private_ws::{BybitPrivateWs, WsDropoutCounter, WsRttHistogram};
     use openclaw_engine::execution_listener::ExecutionListener;
     use parking_lot::RwLock;
 
     let (priv_tx, priv_rx) = mpsc::channel(512);
     let (exchange_event_tx, exchange_event_rx) = mpsc::unbounded_channel::<ExchangeEvent>();
+
+    // PA-DRIFT-4 Sprint 5+ §4.2.1：WS supervisor instrumentation Arc 構造。
+    //
+    // 為什麼在 supervisor task spawn 前構造而非 task 內：
+    //   - RE-2 restart loop 每 attempt 重建 BybitPrivateWs；若 task 內構造則每
+    //     attempt 一個全新 Arc instance（重蹈 Wave B placeholder 覆轍）。
+    //   - 構造一次後 task move clone（線下 #1）+ caller bindings.dropout_counter
+    //     clone（線下 #2）= 跨 task / 跨模塊 SSOT 同 instance；strong_count >= 2
+    //     穩定（supervisor + caller）。
+    let dropout_counter: Arc<WsDropoutCounter> = Arc::new(WsDropoutCounter::new());
+    let rtt_histogram: Arc<WsRttHistogram> = Arc::new(WsRttHistogram::new());
 
     // Shared state updated by callbacks / 回調更新的共享狀態
     let bybit_balance: Arc<RwLock<Option<f64>>> = Arc::new(RwLock::new(None));
@@ -231,6 +254,11 @@ pub(crate) fn spawn_private_ws_supervisor(
     // RE-2：監管器包裝 — 意外退出時自動重啟
     let lbl_sv = label.to_string();
     let sv_cancel = cancel.clone();
+    // PA-DRIFT-4 Sprint 5+ §4.2.1：跨 task move closure clone — supervisor
+    // task 內每 attempt 再 clone 注入 BybitPrivateWs::new；跨 attempt 同一個
+    // Arc instance（line 81-90 構造）。
+    let dropout_for_supervisor = Arc::clone(&dropout_counter);
+    let rtt_for_supervisor = Arc::clone(&rtt_histogram);
     let ws_handle = tokio::spawn(async move {
         let mut supervisor_attempt: u32 = 0;
         loop {
@@ -243,6 +271,11 @@ pub(crate) fn spawn_private_ws_supervisor(
                 env,
                 sv_cancel.clone(),
                 priv_tx.clone(),
+                // PA-DRIFT-4 Sprint 5+ §4.2.1：每 attempt clone 同一個 Arc;
+                // strong_count 隨 attempt 短暫升降不累加（priv_ws drop 後
+                // self.dropout_counter Arc 計數回 baseline）。
+                Arc::clone(&dropout_for_supervisor),
+                Arc::clone(&rtt_for_supervisor),
             );
             priv_ws.run().await;
             if sv_cancel.is_cancelled() {
@@ -274,6 +307,10 @@ pub(crate) fn spawn_private_ws_supervisor(
         bybit_balance,
         api_pnl,
         exchange_event_rx,
+        // PA-DRIFT-4 Sprint 5+ §4.2.1：返 caller 同一個 Arc instance；
+        // main.rs SharedClientsBundle extract 後注入 M3 emitter probe。
+        dropout_counter,
+        rtt_histogram,
     };
     // Order here is intentional but not semantically required (teardown awaits
     // all in sequence). Keep [ws_handle, listener_handle, status_writer?] so

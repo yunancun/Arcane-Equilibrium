@@ -541,12 +541,37 @@ pub struct BybitPrivateWs {
 impl BybitPrivateWs {
     /// Create a new private WS client.
     /// 創建新的私有 WebSocket 客戶端。
+    ///
+    /// PA-DRIFT-4 Sprint 5+ §4.2.1：caller external Arc 注入（取代 Wave A 內部
+    /// own pattern）。
+    ///
+    /// 為什麼 caller 注入而非內部 own：
+    ///   - supervisor（`startup/private_ws.rs`）RE-2 restart loop 每次 attempt
+    ///     重建 `BybitPrivateWs`；內部 own 模式下每次 attempt 產生全新 Arc
+    ///     instance = `main_health_emitters` 端 probe 永遠拿不到穩定 Arc
+    ///     reference（30 天 V106 row `api_latency__ws_*` 全 0 即此副作用）。
+    ///   - caller 構造 Arc 後在 supervisor + probe 兩端共享同一 instance；
+    ///     supervisor reconnect 不丟 measurement，probe 觀測 production 真實
+    ///     WS metric。
+    ///   - 對齊既有 SharedClientsBundle pattern（main_instruments.rs:70-81）—
+    ///     shared Arc 從 binding extract 走 main.rs 編排，子模塊純消費。
+    ///
+    /// 為什麼不走 `install_external_handles()` 兩步式 option B：
+    ///   - option B caller 走 `new()` → `install()` 兩步驟；忘 install 是合法
+    ///     compile + runtime 半盲（spec §2.1 對照表）。
+    ///   - option A type-level enforcement：caller 必傳 Arc，compile 強制；
+    ///     0 race window。
     pub fn new(
         api_key: String,
         api_secret: String,
         env: BybitEnvironment,
         cancel: CancellationToken,
         event_tx: mpsc::Sender<PrivateWsEvent>,
+        // PA-DRIFT-4 Sprint 5+ §4.2.1：caller external Arc 注入。
+        // supervisor 跨 attempt 共享同一 instance；同 Arc clone 注入
+        // `RealApiLatencySourceProbe`，emit chain 與 production 真實對齊。
+        dropout_counter: Arc<WsDropoutCounter>,
+        rtt_histogram: Arc<WsRttHistogram>,
     ) -> Self {
         Self {
             api_key,
@@ -558,11 +583,10 @@ impl BybitPrivateWs {
             // `--rebuild` / restart for effect.
             // G9-02：env-gate 在建構時取快照；改 env 需 `--rebuild` / 重啟生效。
             unknown_guard: UnknownHandlerGuard::new_arc(),
-            // PA-DRIFT-4：dropout + RTT 初始化空；run loop hot path 自動累積。
-            // Arc 暴露給 `RealApiLatencySourceProbe` 注入（per packet §1.2 工作項
-            // (4)）。
-            dropout_counter: Arc::new(WsDropoutCounter::new()),
-            rtt_histogram: Arc::new(WsRttHistogram::new()),
+            // PA-DRIFT-4 Sprint 5+ §4.2.1：caller 注入 Arc；不再 Arc::new(...)
+            // 內部 own（per module-level rationale + spec §3.1 before/after）。
+            dropout_counter,
+            rtt_histogram,
         }
     }
 
@@ -1181,12 +1205,17 @@ mod tests {
     fn test_auth_message_structure() {
         let cancel = CancellationToken::new();
         let (tx, _rx) = mpsc::channel(16);
+        // PA-DRIFT-4 Sprint 5+ §4.2.1：test fixture 模擬 caller 注入。
+        // auth 邏輯純看 api_key / api_secret / expires；fixture Arc 不影響
+        // assertion 結果，符 spec §3.2 caller 2/3 改動範式。
         let ws = BybitPrivateWs::new(
             "TEST_API_KEY".into(),
             "TEST_API_SECRET".into(),
             BybitEnvironment::Demo,
             cancel,
             tx,
+            Arc::new(WsDropoutCounter::new()),
+            Arc::new(WsRttHistogram::new()),
         );
 
         let msg = ws.generate_auth_message_with_time(1700000000000);
@@ -1208,12 +1237,15 @@ mod tests {
     fn test_auth_signature_deterministic() {
         let cancel = CancellationToken::new();
         let (tx, _rx) = mpsc::channel(16);
+        // PA-DRIFT-4 Sprint 5+ §4.2.1：同上，test fixture 模擬 caller 注入。
         let ws = BybitPrivateWs::new(
             "MYKEY".into(),
             "MYSECRET".into(),
             BybitEnvironment::Demo,
             cancel,
             tx,
+            Arc::new(WsDropoutCounter::new()),
+            Arc::new(WsRttHistogram::new()),
         );
 
         let msg1 = ws.generate_auth_message_with_time(1700000000000);
