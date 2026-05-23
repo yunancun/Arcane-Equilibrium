@@ -43,6 +43,7 @@ _TAB_SETTINGS_HTML = _STATIC_DIR / "tab-settings.html"
 _TAB_GOVERNANCE_HTML = _STATIC_DIR / "tab-governance.html"
 _GOVERNANCE_TAB_JS = _STATIC_DIR / "governance-tab.js"
 _COMMON_JS = _STATIC_DIR / "common.js"
+_COMMON_MODALS_JS = _STATIC_DIR / "common-modals.js"
 
 
 def _read(path: Path) -> str:
@@ -187,8 +188,8 @@ def test_tab_ai_pricing_table_reads_backend_mtok_fields() -> None:
 # CASE-05  common.js openTypedConfirmModal 函數體 brace_balanced
 # ─────────────────────────────────────────────────────────────
 def test_w_audit_7c_case05_open_typed_confirm_modal_helper_balanced() -> None:
-    """common.js 內 openTypedConfirmModal 函數體 brace 平衡。"""
-    src = _read(_COMMON_JS)
+    """common-modals.js 內 openTypedConfirmModal 函數體 brace 平衡。"""
+    src = _read(_COMMON_MODALS_JS)
     marker = "function openTypedConfirmModal("
     start = src.find(marker)
     assert start != -1, "common.js 找不到 openTypedConfirmModal 定義"
@@ -235,8 +236,8 @@ def test_w_audit_7c_case06_tab_settings_subtab_open_close_balanced() -> None:
 # CASE-07  openTypedConfirmModal 必備 hook keys 全在位
 # ─────────────────────────────────────────────────────────────
 def test_w_audit_7c_case07_open_typed_confirm_modal_hooks_present() -> None:
-    """common.js openTypedConfirmModal 必備 hook 全部存在。"""
-    src = _read(_COMMON_JS)
+    """common-modals.js openTypedConfirmModal 必備 hook 全部存在。"""
+    src = _read(_COMMON_MODALS_JS)
     required = [
         "function openTypedConfirmModal(",
         "oc-typed-confirm-overlay",

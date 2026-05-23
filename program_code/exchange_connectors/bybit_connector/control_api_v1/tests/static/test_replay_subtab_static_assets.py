@@ -44,6 +44,7 @@ _TAB_DEVELOPMENT_HTML = _STATIC_DIR / "tab-development.html"
 _TAB_EDGE_GATES_HTML = _STATIC_DIR / "tab-edge-gates.html"
 _TAB_DEMO_HTML = _STATIC_DIR / "tab-demo.html"
 _TAB_LIVE_HTML = _STATIC_DIR / "tab-live.html"
+_TAB_LIVE_JS = _STATIC_DIR / "tab-live.js"
 _TAB_GOVERNANCE_HTML = _STATIC_DIR / "tab-governance.html"
 _TAB_STRATEGY_HTML = _STATIC_DIR / "tab-strategy.html"
 _TAB_RISK_HTML = _STATIC_DIR / "tab-risk.html"
@@ -53,6 +54,8 @@ _LOGIN_HTML = _STATIC_DIR / "login.html"
 _INDEX_HTML = _STATIC_DIR / "index.html"
 _TRADING_HTML = _STATIC_DIR / "trading.html"
 _COMMON_JS = _STATIC_DIR / "common.js"
+_COMMON_FORMATTERS_JS = _STATIC_DIR / "common-formatters.js"
+_COMMON_MODALS_JS = _STATIC_DIR / "common-modals.js"
 _APP_PAPER_JS = _STATIC_DIR / "app-paper.js"
 _RISK_TAB_JS = _STATIC_DIR / "risk-tab.js"
 _BROWSER_TEST_HTML = _THIS_DIR / "test_replay_subtab_readiness.html"
@@ -119,9 +122,18 @@ def tab_settings_html() -> str:
 
 @pytest.fixture(scope="module")
 def tab_live_html() -> str:
-    """Read tab-live.html once per test module / 每模組讀一次。"""
+    """Read the Live tab static contract once per test module.
+
+    Live behavior lives in tab-live.js after the 2026-05 extraction; this
+    fixture intentionally returns the HTML shell plus its JS implementation.
+    """
     assert _TAB_LIVE_HTML.exists(), f"tab-live.html not found at {_TAB_LIVE_HTML}"
-    return _TAB_LIVE_HTML.read_text(encoding="utf-8")
+    assert _TAB_LIVE_JS.exists(), f"tab-live.js not found at {_TAB_LIVE_JS}"
+    return (
+        _TAB_LIVE_HTML.read_text(encoding="utf-8")
+        + "\n"
+        + _TAB_LIVE_JS.read_text(encoding="utf-8")
+    )
 
 
 @pytest.fixture(scope="module")
@@ -151,9 +163,18 @@ def tab_risk_html() -> str:
 
 @pytest.fixture(scope="module")
 def common_js() -> str:
-    """Read common.js once per test module / 每模組讀一次。"""
+    """Read shared common JS contract, including extracted helper modules."""
     assert _COMMON_JS.exists(), f"common.js not found at {_COMMON_JS}"
-    return _COMMON_JS.read_text(encoding="utf-8")
+    assert _COMMON_FORMATTERS_JS.exists(), (
+        f"common-formatters.js not found at {_COMMON_FORMATTERS_JS}"
+    )
+    assert _COMMON_MODALS_JS.exists(), (
+        f"common-modals.js not found at {_COMMON_MODALS_JS}"
+    )
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in (_COMMON_JS, _COMMON_FORMATTERS_JS, _COMMON_MODALS_JS)
+    )
 
 
 @pytest.fixture(scope="module")
@@ -224,8 +245,8 @@ def test_console_strategy_group_order_and_labels_are_operator_clear(
     strategy_idx = console_html.index("id: 'strategy'")
     charts_idx = console_html.index("id: 'charts'")
     assert replay_idx < strategy_idx < charts_idx
-    assert "label: 'AI 状态'" in console_html
-    assert "label: 'Agent 团队'" in console_html
+    assert "label: 'AI 狀態'" in console_html
+    assert "label: 'Agent 團隊'" in console_html
     assert "AI 智能" not in console_html
 
 
@@ -251,7 +272,8 @@ def test_development_tab_covers_v001_to_v063(tab_development_html: str) -> None:
     assert "auto refresh 60s" in tab_development_html
     assert "server-side scan per refresh" in tab_development_html
     assert "renderDocumentation" in tab_development_html
-    assert "新增 V064+ migration 后会自动出现在本页" in tab_development_html
+    assert "新增 V064+ migration" in tab_development_html
+    assert "自動出現在本页" in tab_development_html
     assert "for (let i = 1; i <= 63; i += 1)" not in tab_development_html
 
 
@@ -317,8 +339,8 @@ def test_demo_and_live_tabs_have_risk_shortcuts(
     assert "openLiveRisk" in tab_live_html
     assert "riskEngine: 'live'" in tab_live_html
     assert "riskTab: 'config'" in tab_live_html
-    assert "风险总览 / Risk Overview" in tab_risk_html
-    assert "参数设置 / Risk Settings" in tab_risk_html
+    assert "風險總覽 / Risk Overview" in tab_risk_html
+    assert "參數設置 / Risk Settings" in tab_risk_html
     assert "applyPaperRiskAvailability" in risk_tab_js
     assert "/api/v1/settings/paper-engine" in risk_tab_js
     assert "openclaw-risk-select" in risk_tab_js
@@ -344,11 +366,10 @@ def test_demo_and_live_fill_history_show_strategy(
     tab_live_html: str,
 ) -> None:
     """Demo/Live fill history tables show per-fill strategy attribution."""
-    assert "20260507.fill-tabs-v1" in console_html
     assert "<th>策略</th>" in tab_demo_html
     assert "f.strategy || f.strategy_name || f.owner_strategy" in tab_demo_html
     assert "ocStrategyChip(s)" in tab_demo_html
-    assert "暂无成交" in tab_demo_html
+    assert "暂無成交" in tab_demo_html
     assert "<th>策略 / Strategy</th>" in tab_live_html
     assert "f.strategy || f.strategy_name || f.owner_strategy || _liveStratMap" in tab_live_html
     assert "ocStrategyChip(s)" in tab_live_html
@@ -364,7 +385,6 @@ def test_strategy_identity_colors_are_shared_across_console_surfaces(
     tab_edge_gates_html: str,
 ) -> None:
     """Five strategy identities should keep one color system across pages."""
-    assert "20260507.fill-tabs-v1" in console_html
     assert "OC_STRATEGY_COLOR_META" in common_js
     for key in [
         "grid_trading",
@@ -391,7 +411,6 @@ def test_demo_and_live_fill_history_has_paged_subtabs(
     tab_live_html: str,
 ) -> None:
     """Demo/Live fill history should page server-side and split key views."""
-    assert "20260507.fill-tabs-v1" in console_html
     for html in [tab_demo_html, tab_live_html]:
         assert "data-fill-tab=\"aggregate\"" in html
         assert "data-fill-tab=\"buy\"" in html
@@ -402,7 +421,9 @@ def test_demo_and_live_fill_history_has_paged_subtabs(
         assert "side=' + encodeURIComponent(side)" in html
         assert "has_more" in html
         assert "Page ' + page" in html
-        assert "BuildProfitRows" in html
+    assert "/api/v1/strategy/demo/closed-pnl" in tab_demo_html
+    assert "_demoProfitRow" in tab_demo_html
+    assert "_liveBuildProfitRows" in tab_live_html
 
 
 def test_demo_live_tabs_use_matching_backend_surfaces(

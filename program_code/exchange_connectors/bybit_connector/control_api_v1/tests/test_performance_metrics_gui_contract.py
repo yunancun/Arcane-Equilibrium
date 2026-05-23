@@ -9,6 +9,13 @@ from app.trading_true_metrics import build_performance_metrics
 
 STATIC_DIR = Path(__file__).resolve().parents[1] / "app" / "static"
 
+def _static_source(filename: str) -> str:
+    source = (STATIC_DIR / filename).read_text(encoding="utf-8")
+    if filename == "tab-live.html":
+        source += "\n" + (STATIC_DIR / "tab-live.js").read_text(encoding="utf-8")
+    return source
+
+
 EXPECTED_KEYS = [
     "total_fills_7d",
     "round_trips_7d",
@@ -32,7 +39,7 @@ EXPECTED_KEYS = [
 
 
 def test_static_gui_uses_non_empty_performance_metric_payload_fallback() -> None:
-    common = (STATIC_DIR / "common.js").read_text(encoding="utf-8")
+    common = (STATIC_DIR / "common-formatters.js").read_text(encoding="utf-8")
 
     assert "function ocPerformanceMetricsFromPayload(payload)" in common
     assert "if (top && top.length > 0) return top" in common
@@ -57,7 +64,7 @@ def test_demo_performance_metrics_do_not_depend_on_balance_payload() -> None:
 
 @pytest.mark.parametrize("filename", ["console.html", "tab-demo.html", "tab-live.html", "tab-paper.html"])
 def test_static_gui_performance_metric_callers_use_canonical_payload_helper(filename: str) -> None:
-    source = (STATIC_DIR / filename).read_text(encoding="utf-8")
+    source = _static_source(filename)
 
     assert "ocPerformanceMetricsFromPayload(" in source
     assert "performance_metrics) ||" not in source
