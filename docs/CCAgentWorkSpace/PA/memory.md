@@ -5279,3 +5279,65 @@ E2 round 1 Track B+C reject 4 finding 中（HIGH-2「持續 2min」semantic / HI
 6. **PA spec amend 不改 Rust IMPL**：本 task PA scope 嚴守「不 IMPL Rust code / 不改 V### SQL / 不改 Track A scaffold IMPL / 不 commit / 不派下游 sub-agent」；4 finding 修法明確後 E1 round 2 並行修（Track B HIGH-1 revert + Track C disconnected evidence_json 補；其他屬 spec amend 對齊 doc/comment）；E1 round 2 不阻 Wave 1 Track A scaffold sign-off。
 
 Report：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_2_wave1_m3_spec_amend.md`
+
+## 2026-05-23 edge_estimate_snapshots writer 16d staleness RCA
+
+- 根因：`70e7b6b1 (2026-05-09)` land 了 `helper_scripts/cron/edge_estimate_snapshots_cycle_cron.sh` + V073 guard，但 commit message 明說「no cron installation … was performed」，crontab 從未加此行，故 5/7 00:46 後再無 INSERT。
+- 主嫌疑澄清反模式：5/7 那次寫入是 Sprint N+0 期間 operator 一次性手動跑 `ref21_backfill_v058_v059.py --apply` 留下；不是例行寫入失敗。
+- 對混淆點：`learning.edge_estimate_snapshots` 表 ≠ `EdgeEstimatorScheduler` 寫入目標。Scheduler 寫 `settings/edge_estimates*.json` 檔案（每 3h 健康跑著）；PG 表只由 `ref21_backfill_v058_v059.py` 寫入。整個 repo grep 確認唯一 INSERT 在 `helper_scripts/db/ref21_backfill_v058_v059.py:363`，Rust 無、ml_training 無。
+- 驗證手法：strategy 分布證明非自動寫入 — 表內含 `dust_frozen / orphan_adopted / orphan_frozen / bybit_sync` 4 個系統 sentinel，是 JSON 全量 backfill 特徵（scheduler 只跑 5 真實策略）。
+- 教訓：commit message 主動聲明「未做 X」應該被 PA / PM 立即接「補做 X 是誰、何時、追蹤位」否則 16 天無人 follow-up。
+- 修復 scope：crontab 加一行 + 一次手動驗證。零代碼改動。與 1B funding_arb active=true 完全並行（零文件重疊）。
+
+## 2026-05-23 Sprint 4+ Wave B MEDIUM-1 closure — Singleton Registry SSOT 建立
+
+**觸發**：E2 Wave B round 2 MEDIUM-1 escalate — 6 new mutable singleton（Wave A 4 + Wave B 2）未登記；grep 確認 singleton table SSOT 0 hit；M-1 升 PM 派 PA 收口建立 SSOT location。
+
+**Pre-state evidence**：
+- `grep -rn -i "singleton.*table\|singleton.*registry\|singleton.*authority" CLAUDE.md docs/architecture/ docs/adr/` 命中 CLAUDE.md line 165 + 196 兩條 abstract rule line（無 path hint）；docs/architecture/ + docs/adr/ 0 hit
+- `docs/archive/2026-05-02--CLAUDE-pre-trim-snapshot.md:73` archive 留 §九 完整 4 條 Python singleton entry，但 archive 純被動快照不是 active SSOT
+- trim narrative archive line 11「§九 Singleton 表後 5 條長注釋... 收成單行」實際操作 = 整段 table 刪除沒搬位，21 天 governance gap
+
+**SSOT location 拍板**：`docs/architecture/singleton-registry.md`（344 LOC，新建）
+
+3 候選方案對比：
+- A. `docs/architecture/singleton-registry.md` — 與 `DATA_STORAGE_ARCHITECTURE_V1.md` 同類 ongoing inventory pattern；不違 CLAUDE.md trim 意圖；**採納**
+- B. ADR-0046 governance-level — ADR 是「單一決策記錄」不適合 dynamic registry；拒絕
+- C. CLAUDE.md inline restore — 違 trim 設計目標；拒絕
+
+**6 singleton 完整 12 欄位登記**：
+- Wave A 4: RestLatencyHistogram（bybit_rest_client.rs:335-339）+ RetCodeCounter（bybit_rest_client.rs:479-484）+ WsRttHistogram（bybit_private_ws.rs:102-105）+ WsDropoutCounter（bybit_private_ws.rs:216-218）
+- Wave B 2: PortfolioStateCache（risk_envelope_probe_impl.rs:129-141）+ HealthEventBus（event_bus.rs:80-82）
+- 每 singleton 登 name + type_signature + location + owner_lifecycle + cross_task_pattern + lock_primitive + visibility + caller_chain + health_monitoring + registered_date + governance_authority + migration_plan 12 欄位
+
+**半實裝陷阱誠實揭露**：
+- WsRttHistogram + WsDropoutCounter Wave B 階段 main_health_emitters.rs `build_real_api_latency_probe` 不呼叫 bybit_private_ws.rs:577-585 的 `dropout_counter_handle()` / `rtt_histogram_handle()` accessor；每次走 `Arc::new(WsRttHistogram::new())` fresh 0-state instance
+- 後果：30 天 V106 `api_latency__ws_*` row 全 0 **不是** WS 健康反映「無 dropout / 低 latency」，是 emit chain 從 production supervisor disconnect 的 placeholder 副作用
+- caller_chain 欄位必如實揭露（per singleton-registry.md §3.4 反模式 2）；Sprint 5+ Wave C 必改 BybitPrivateWs supervisor signature
+
+**CLAUDE.md 不修 inline rationale**：
+- trim 設計目標保留 → 不 inline restore
+- §七 line 165 + §九 line 196 既有 abstract「current authority location」表述含具體 path 抽象 → singleton-registry.md §4.1 + §4.2 cross-ref 即達
+- docs/README.md index entry 補 path 即可達
+
+**4 條 Sprint 5+ carry-over**：
+- §6.1 P2: archive 4 Python singleton re-ingest（H_STATE_INVALIDATOR / MARKET_SCANNER / HStateCacheSlot / CostEdgeAdvisorDbSlot）— 1-2 hr TW+PA
+- §6.2 P2: dispatch packet 模板補「新 singleton 預登記」section — 30 min PA
+- §6.3 **P1**: BybitPrivateWs supervisor signature 改造（解 §3.1.3.a + §3.1.4.a Wave B 半實裝陷阱）— 4-6 hr E1+E2
+- §6.4 **P1**: PortfolioStateCache update task wire-up（接 PaperState SSOT）— 4-6 hr E1+PA
+
+**3 教訓 / 反模式**：
+1. **CLAUDE.md trim 反模式**：trim inline table「收成單行」實際是「整段刪除沒搬位」；governance gap 21 天才被 catch。修法：trim 必同時建新 SSOT location + CLAUDE.md rule line cross-ref + CHANGELOG 記變更 + archive snapshot 必註 new SSOT。
+2. **MEDIUM-1 應 dispatch packet 階段預判**：Sprint 2 Wave 1+2 dispatch packet（2026-05-22）未含「新 singleton 預登記」section 是 PA gap；E2 round 1 catch 是補救而非根治。本 SSOT §3.3 規則 + §6.2 模板 carry-over 確立後續預判路徑。
+3. **半實裝陷阱誠實揭露的價值**：caller_chain 欄位必反映「placeholder 未接 supervisor」狀態；30 天 V106 全 0 不掩飾為「真實 WS 健康」；對 Wave C / Sprint 5+ wire-up scope 拍板至關重要。
+
+**Scope 控制（task 期間守邊界）**：
+- 嚴守 prompt「不 IMPL Rust code / 不改 既有 singleton 業務邏輯 / 不改 ADR-0042 / 不改 ADR-0040 / 不 commit / 不派下游 sub-agent / 中文為主 / 0 emoji」
+- 0 code 改動；2 新 doc file（singleton-registry.md + PA report）+ 1 edit（docs/README.md index entry +5 行）
+- archive 4 條 Python singleton re-ingest 屬 §6.1 carry-over；不擴 scope 進本 task 30-45 min single-thread budget
+- 改 CLAUDE.md inline restore 屬 §4.3 拒絕方案；不違 trim 意圖
+
+**M-1 closure verdict**：CLOSED — 5 deliverable 全 DONE（SSOT location + 6 singleton 完整登記 + CLAUDE cross-ref + docs/README.md index + PA report）；6/9 子目標 closed；7/8/9 pending PM 收口屬路徑統一。
+
+Report: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_4_wave_b_m1_singleton_registry_ssot.md`
+

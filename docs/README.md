@@ -159,6 +159,12 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 ## 文档索引 (Document Index)
 
+### 2026-05-23 Singleton Registry SSOT 建立（Sprint 4+ Wave B M-1 closure）
+
+| 文件 | 内容 |
+|------|------|
+| `architecture/singleton-registry.md` | OpenClaw Mutable Singleton Registry SSOT（trim 後新權威位置；登記 Sprint 4+ Wave A 4 + Wave B 2 共 6 新 singleton：RestLatencyHistogram / RetCodeCounter / WsRttHistogram / WsDropoutCounter / PortfolioStateCache / HealthEventBus；§3 登記規則 + §5 lessons learned trim 反模式 + §6 4 條 Sprint 5+ carry-over）— per E2 Wave B round 2 MEDIUM-1 escalate；CLAUDE.md §七 line 165 + §九 line 196 「current authority location」 cross-ref |
+
 ### 2026-05-22 Layered Autonomy v2 設計收口（CC re-audit APPROVE A 級）
 
 | 文件 | 内容 |
