@@ -92,7 +92,7 @@ Stage F TW Acceptance + PM Phase 3e **✅ DONE-VERDICT-PASS WITH 8 CARRY-OVER (2
 
 | Strategy | Current Stage | Next Stage | Sprint ETA | Notes |
 |---|---|---|---|---|
-| C10 funding harvest | Stage 1 Demo（Sprint 1B） | Stage 4 LIVE | Sprint 4 | demo spot leg paper-only Phase 1 |
+| C10 funding harvest | Stage 1 Demo（Sprint 1B） | Stage 4 LIVE | Sprint 4 | Stage 0R replay-backed spot-leg accounting; no paper engine enablement |
 | Unlock SHORT | Stage 0 DRAFT | Stage 0R Replay Preflight | Sprint 3 W15-18 | Tokenomist signal dep |
 | Pairs trading | Stage 0 DRAFT | Stage 0 (Alpha Tournament) | Sprint 2 W12-15 | BTC/ETH cointegration |
 | C13 defined-risk | Stage 0 DRAFT | Stage 0 (Alpha Tournament) | Sprint 2-6 | Bybit options demo 待驗 |
