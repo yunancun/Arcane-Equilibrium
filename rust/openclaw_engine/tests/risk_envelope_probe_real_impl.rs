@@ -35,6 +35,7 @@
 //!     `sprint2_track_f_risk_envelope` 8 test 守；本 file 只守 probe 端 5 SSOT
 //!     calculator accessor 對齊與 cache update 路徑。
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -74,7 +75,13 @@ fn test_pa_drift_5_scenario_1_mock_fills_5_position_3_cum_pnl_sum() {
     ];
     {
         let mut guard = cache.lock();
-        guard.update_from_pipeline_snapshot(now_ms, 1000.0, &new_fills, positions);
+        guard.update_from_pipeline_snapshot(
+            now_ms,
+            1000.0,
+            &new_fills,
+            positions,
+            &HashMap::new(),
+        );
     }
     let probe = RealRiskEnvelopeSourceProbe::new(Arc::clone(&cache));
 
@@ -105,9 +112,9 @@ fn test_pa_drift_5_scenario_2_equity_100_90_95_max_dd_10pct() {
     let now_ms: u64 = 1_700_000_000_000;
     {
         let mut guard = cache.lock();
-        guard.update_from_pipeline_snapshot(now_ms - 2000, 100.0, &[], Vec::new());
-        guard.update_from_pipeline_snapshot(now_ms - 1000, 90.0, &[], Vec::new());
-        guard.update_from_pipeline_snapshot(now_ms, 95.0, &[], Vec::new());
+        guard.update_from_pipeline_snapshot(now_ms - 2000, 100.0, &[], Vec::new(), &HashMap::new());
+        guard.update_from_pipeline_snapshot(now_ms - 1000, 90.0, &[], Vec::new(), &HashMap::new());
+        guard.update_from_pipeline_snapshot(now_ms, 95.0, &[], Vec::new(), &HashMap::new());
     }
     let probe = RealRiskEnvelopeSourceProbe::new(Arc::clone(&cache));
 
@@ -134,7 +141,13 @@ fn test_pa_drift_5_scenario_3_three_active_positions() {
     ];
     {
         let mut guard = cache.lock();
-        guard.update_from_pipeline_snapshot(1_700_000_000_000, 1000.0, &[], positions);
+        guard.update_from_pipeline_snapshot(
+            1_700_000_000_000,
+            1000.0,
+            &[],
+            positions,
+            &HashMap::new(),
+        );
     }
     let probe = RealRiskEnvelopeSourceProbe::new(Arc::clone(&cache));
 
@@ -147,31 +160,37 @@ fn test_pa_drift_5_scenario_3_three_active_positions() {
 
 /// scenario 4：mock 2 correlated pair → correlation_avg。
 ///
-/// 為什麼 placeholder：per dispatch packet §7.5 反模式 (c) + E2 Track F round 2
-/// 對抗反問 #2 — portfolio cross-pair correlation rolling window calculator
-/// 由 PA 拍板 lookback 後 Wave B IMPL；本 Wave A placeholder 返 0.0 是合法 OK
-/// band 對齊，emitter 端 classify 視為 OK。Wave B 接 calculator 後此 test 端
-/// 改 expect real value（per `feedback_no_dead_params` fail-soft：placeholder
-/// 不致命，Wave B 升級不破壞 contract）。
+/// 為什麼此 test：per Sprint 5+ Wave 1 §4.3.4 F-4 real calculator IMPL 後，
+/// `correlation_avg_pairwise` 已從 placeholder 升級為真實 Pearson outer-join
+/// pairwise 計算。本 test 只驗「未提供 per_symbol_mid_prices」cold-start case
+/// 之 fail-soft 返 0.0；真實 calculator 測試在 inline tests F-4 test 1-7 涵蓋
+/// （single symbol / identical / inverse / uncorrelated / 5-symbol / mid_price
+/// sanitize / 1h drain）。
 #[test]
-fn test_pa_drift_5_scenario_4_correlation_placeholder_zero() {
+fn test_pa_drift_5_scenario_4_correlation_cold_start_returns_zero() {
     let cache = Arc::new(Mutex::new(PortfolioStateCache::new()));
-    // mock 2 correlated pair（exposure 投影；correlation 由 caller 端輸入
-    // returns time series，placeholder 不需 returns；只驗 trait method 返 0.0）。
+    // mock 2 correlated pair（exposure 投影；本 scenario 不提供 mid_prices →
+    // per_symbol_returns_history 空 → < 2 → fail-soft 0.0）。
     let positions = vec![
         PositionExposure { notional_usd: 100.0 },
         PositionExposure { notional_usd: 100.0 },
     ];
     {
         let mut guard = cache.lock();
-        guard.update_from_pipeline_snapshot(1_700_000_000_000, 1000.0, &[], positions);
+        guard.update_from_pipeline_snapshot(
+            1_700_000_000_000,
+            1000.0,
+            &[],
+            positions,
+            &HashMap::new(),
+        );
     }
     let probe = RealRiskEnvelopeSourceProbe::new(Arc::clone(&cache));
 
     assert_eq!(
         probe.current_correlation_avg_pairwise(),
         0.0,
-        "scenario 4：Wave A placeholder 返 0.0；Wave B 後接 calculator"
+        "scenario 4：empty per_symbol_returns_history cold-start fail-soft 0.0"
     );
 }
 
@@ -189,7 +208,13 @@ fn test_24h_sliding_window_cutoff_drops_old_fills() {
     let new_fills = vec![(old_fill_ts, 999.0), (recent_fill_ts, 5.0)];
     {
         let mut guard = cache.lock();
-        guard.update_from_pipeline_snapshot(now_ms, 1000.0, &new_fills, Vec::new());
+        guard.update_from_pipeline_snapshot(
+            now_ms,
+            1000.0,
+            &new_fills,
+            Vec::new(),
+            &HashMap::new(),
+        );
     }
     let probe = RealRiskEnvelopeSourceProbe::new(Arc::clone(&cache));
 
@@ -217,7 +242,13 @@ fn test_24h_sliding_window_boundary_exact() {
     let new_fills = vec![(just_outside_ts, 100.0), (just_inside_ts, 7.0)];
     {
         let mut guard = cache.lock();
-        guard.update_from_pipeline_snapshot(now_ms, 1000.0, &new_fills, Vec::new());
+        guard.update_from_pipeline_snapshot(
+            now_ms,
+            1000.0,
+            &new_fills,
+            Vec::new(),
+            &HashMap::new(),
+        );
     }
     let probe = RealRiskEnvelopeSourceProbe::new(cache);
 
@@ -237,10 +268,10 @@ fn test_max_dd_pct_peak_trough_across_curve() {
     // 100 → 110（peak）→ 88（trough；dd=20%）→ 95（恢復 dd=13.6%）
     {
         let mut guard = cache.lock();
-        guard.update_from_pipeline_snapshot(now_ms - 3000, 100.0, &[], Vec::new());
-        guard.update_from_pipeline_snapshot(now_ms - 2000, 110.0, &[], Vec::new());
-        guard.update_from_pipeline_snapshot(now_ms - 1000, 88.0, &[], Vec::new());
-        guard.update_from_pipeline_snapshot(now_ms, 95.0, &[], Vec::new());
+        guard.update_from_pipeline_snapshot(now_ms - 3000, 100.0, &[], Vec::new(), &HashMap::new());
+        guard.update_from_pipeline_snapshot(now_ms - 2000, 110.0, &[], Vec::new(), &HashMap::new());
+        guard.update_from_pipeline_snapshot(now_ms - 1000, 88.0, &[], Vec::new(), &HashMap::new());
+        guard.update_from_pipeline_snapshot(now_ms, 95.0, &[], Vec::new(), &HashMap::new());
     }
     let probe = RealRiskEnvelopeSourceProbe::new(cache);
 
@@ -265,7 +296,13 @@ fn test_concentration_top1_pct_sum_zero_fail_soft() {
     ];
     {
         let mut guard = cache.lock();
-        guard.update_from_pipeline_snapshot(1_700_000_000_000, 1000.0, &[], positions);
+        guard.update_from_pipeline_snapshot(
+            1_700_000_000_000,
+            1000.0,
+            &[],
+            positions,
+            &HashMap::new(),
+        );
     }
     let probe = RealRiskEnvelopeSourceProbe::new(cache);
 
@@ -300,13 +337,20 @@ fn test_integrated_scenario_5_fills_equity_curve_3_positions() {
     {
         let mut guard = cache.lock();
         // t-3000: equity=100
-        guard.update_from_pipeline_snapshot(now_ms - 3000, 100.0, &[(now_ms - 3500, 5.0)], Vec::new());
+        guard.update_from_pipeline_snapshot(
+            now_ms - 3000,
+            100.0,
+            &[(now_ms - 3500, 5.0)],
+            Vec::new(),
+            &HashMap::new(),
+        );
         // t-2000: equity=90
         guard.update_from_pipeline_snapshot(
             now_ms - 2000,
             90.0,
             &[(now_ms - 2500, -10.0), (now_ms - 2200, 3.0)],
             Vec::new(),
+            &HashMap::new(),
         );
         // t-1000: equity=95 + 3 倉位開倉
         guard.update_from_pipeline_snapshot(
@@ -318,6 +362,7 @@ fn test_integrated_scenario_5_fills_equity_curve_3_positions() {
                 PositionExposure { notional_usd: 200.0 },
                 PositionExposure { notional_usd: 150.0 },
             ],
+            &HashMap::new(),
         );
         // t now: equity=88（峰回落 → 新 trough；dd 升）
         guard.update_from_pipeline_snapshot(
@@ -329,6 +374,7 @@ fn test_integrated_scenario_5_fills_equity_curve_3_positions() {
                 PositionExposure { notional_usd: 200.0 },
                 PositionExposure { notional_usd: 150.0 },
             ],
+            &HashMap::new(),
         );
     }
     let probe = RealRiskEnvelopeSourceProbe::new(Arc::clone(&cache));
@@ -349,7 +395,7 @@ fn test_integrated_scenario_5_fills_equity_curve_3_positions() {
     );
     // (3) position_count = 3
     assert_eq!(probe.current_position_count_active(), 3);
-    // (4) correlation Wave A placeholder = 0.0
+    // (4) correlation cold-start: 未提供 mid_prices → empty deque → < 2 → 0.0
     assert_eq!(probe.current_correlation_avg_pairwise(), 0.0);
     // (5) concentration_top1 = 200 / 450 * 100 ≈ 44.44%
     let conc = probe.current_concentration_top1_pct();
@@ -381,6 +427,7 @@ fn test_emitter_wireup_with_real_probe() {
                 PositionExposure { notional_usd: 200.0 },
                 PositionExposure { notional_usd: 150.0 },
             ],
+            &HashMap::new(),
         );
     }
     let probe = RealRiskEnvelopeSourceProbe::new(Arc::clone(&cache));
@@ -396,7 +443,7 @@ fn test_emitter_wireup_with_real_probe() {
     assert_eq!(sample.position_count_active, 3);
     assert_eq!(
         sample.correlation_avg_pairwise, 0.0,
-        "Wave A placeholder"
+        "未提供 mid_prices → cold-start fail-soft 0.0"
     );
     let expected_conc = 200.0 / 450.0 * 100.0;
     assert!(
@@ -436,6 +483,7 @@ fn test_real_probe_batch_snapshot_aligns_with_5_current_xxx() {
                 PositionExposure { notional_usd: 100.0 },
                 PositionExposure { notional_usd: 200.0 },
             ],
+            &HashMap::new(),
         );
         guard.update_from_pipeline_snapshot(
             now_ms,
@@ -445,6 +493,7 @@ fn test_real_probe_batch_snapshot_aligns_with_5_current_xxx() {
                 PositionExposure { notional_usd: 100.0 },
                 PositionExposure { notional_usd: 200.0 },
             ],
+            &HashMap::new(),
         );
     }
     let probe = RealRiskEnvelopeSourceProbe::new(cache);

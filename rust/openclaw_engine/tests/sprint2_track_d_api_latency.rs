@@ -625,9 +625,11 @@ fn test_sprint2_classify_aggregated_api_latency_arm_wired() {
         classify_aggregated_for_test(HealthDomain::ApiLatency, "rest_p99_ms", 1500.0),
         HealthState::HealthDegraded
     );
-    // ws_rtt_p50_ms DEGRADED band（>150ms）
+    // ws_rtt_p50_ms DEGRADED band（>300ms per Sprint 5+ Wave 1 §4.4 hardening amend；
+    // OK<170 / WARN 170-300 / DEGRADED>300，舊 200ms 在 amended ladder 落 WARN band；
+    // 改 350ms 維持 DEGRADED 期望，對齊 E1-5 amend 其他 fixture 範式）
     assert_eq!(
-        classify_aggregated_for_test(HealthDomain::ApiLatency, "ws_rtt_p50_ms", 200.0),
+        classify_aggregated_for_test(HealthDomain::ApiLatency, "ws_rtt_p50_ms", 350.0),
         HealthState::HealthDegraded
     );
     // ws_rtt_p99_ms DEGRADED band（500-1500ms）

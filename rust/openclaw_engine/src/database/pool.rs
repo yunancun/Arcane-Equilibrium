@@ -8,10 +8,11 @@
 //!   提供 connect()、health_check() 和 CancellationToken 優雅關閉。
 //!   使用運行時 sqlx::query() 字符串（F1：無編譯時 PG 依賴）。
 
+use super::pool_wait_stats::PoolWaitStats;
 use super::DatabaseConfig;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tracing::{info, warn};
 
 /// Database pool wrapper with failure tracking and graceful degradation.
@@ -135,6 +136,32 @@ impl DbPool {
             info!("PG pool closed / PG 連接池已關閉");
         }
     }
+}
+
+/// Sprint 5+ Track C real probe helper：包 `Pool::acquire()` 計時。
+///
+/// 為什麼此 helper（per spec §3.4 設計）:
+///   - sqlx 0.8 未暴露 pool wait latency 直方圖 accessor；走「包裝 acquire 計時」
+///     approach — caller 端 hot-path（market_writer / trading_writer）切換到本
+///     helper 後，wait latency 自動進入 sliding window。
+///   - 範圍最小化（per `feedback_working_principles`）：本 helper 不改 `Pool`
+///     既有 signature；caller 端 opt-in 切換即可。
+///
+/// 為什麼 Err 路徑也 record_wait_ms（per spec §5 E2 重點審查 #4）:
+///   - 失敗也是觀測樣本；timeout / connection refuse 等情況下 acquire wait
+///     latency 可能比成功 case 還高，需納入 p95 才能正確反映 backlog。
+///   - per `feedback_no_dead_params` 反假陽性 fail-soft 對齊。
+pub async fn pool_acquire_with_stats(
+    pool: &PgPool,
+    stats: &PoolWaitStats,
+) -> Result<sqlx::pool::PoolConnection<sqlx::Postgres>, sqlx::Error> {
+    let t0 = Instant::now();
+    let result = pool.acquire().await;
+    // u128 → u32 cap：wait 不會超 49 天；cap 守 overflow。
+    let elapsed_ms = t0.elapsed().as_millis().min(u32::MAX as u128) as u32;
+    // 成功 / 失敗都 record（per spec §5 E2 #4 + F-2 sanitize 對齊）。
+    stats.record_wait_ms(elapsed_ms);
+    result
 }
 
 #[cfg(test)]

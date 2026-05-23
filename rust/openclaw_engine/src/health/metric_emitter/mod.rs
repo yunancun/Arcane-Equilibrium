@@ -343,15 +343,29 @@ pub fn classify_engine_runtime_rss_mb(value: f64) -> HealthState {
     }
 }
 
-/// open_fd_count classify：OK <1024 / WARN 1024-4096 / DEGRADED >4096。
+/// open_fd_count classify：OK <3072 / WARN 3072-6144 / DEGRADED >6144。
 ///
-/// 為什麼此 threshold:
-///   - 典型 Linux 默認 ulimit 1024 為 baseline；engine 全功能含 PG/Bybit/IPC
-///     正常 fd 數 < 256，> 1024 即 fd leak signal。
+/// 為什麼此 threshold（per Sprint 5+ Wave 1 §4.4 production hardening empirical
+/// 校準 2026-05-23）:
+///   - production engine 6h empirical baseline 1783-1809 fd（25 symbol × kline
+///     WS subscription + REST connection pool 8 + tokio task fd + IPC unix
+///     socket + PG pool 32 + epoll fd + log file handle）；常態約 1700-1800。
+///   - OK band 上限 3072 留 ~70% headroom 對應「symbol expansion to 40-50
+///     scenario」+「short-lived REST burst」；3072 以下視為正常 production
+///     steady state，不誤觸 WARN。
+///   - WARN band 3072-6144 對應「真實 fd leak signal」（baseline 70% 以上不
+///     正常累積）；engine debug 介入時間窗口。
+///   - DEGRADED band > 6144 對應「leak 已嚴重」（接近典型 RLIMIT_NOFILE
+///     8192 上限；engine 即將拒新 fd open）；engine 端不自動 abort，由
+///     health writer 寫 V106 row 給 operator alert。
+///   - 原 OK <1024 baseline 基於「Linux 默認 ulimit 1024」設計；未考慮
+///     production 25 symbol WS + REST pool + IPC + PG pool 真實 footprint，
+///     導致 Linux 6h 711 row 持續 WARN 全為正常運轉誤觸（per PA report
+///     §2.2.1）。
 pub fn classify_engine_runtime_open_fd_count(value: u32) -> HealthState {
-    if value > 4096 {
+    if value > 6144 {
         HealthState::HealthDegraded
-    } else if value >= 1024 {
+    } else if value >= 3072 {
         HealthState::HealthWarn
     } else {
         HealthState::HealthOk
@@ -1273,6 +1287,31 @@ mod tests {
         assert_eq!(
             classify_engine_runtime_rss_mb(4096.1),
             HealthState::HealthDegraded
+        );
+    }
+
+    /// Sprint 5+ Wave 1 §4.4 production hardening — production engine 25
+    /// symbol × kline WS + REST pool + IPC + PG pool baseline ~1800 fd 必落
+    /// 新 OK band（避未來人改回 OK<1024 baseline 誤觸 711 row/6h 持續 WARN，
+    /// per PA report §2.2.1）。
+    #[test]
+    fn test_open_fd_count_baseline_1800_is_ok() {
+        assert_eq!(
+            classify_engine_runtime_open_fd_count(1800),
+            HealthState::HealthOk,
+            "production engine 25 symbol baseline 1800 fd 必落 OK band"
+        );
+    }
+
+    /// Sprint 5+ Wave 1 §4.4 production hardening — 真實 fd leak signal
+    /// （baseline 2x = ~3500）必落 WARN band；對齊新 ladder OK<3072 /
+    /// WARN 3072-6144 / DEGRADED >6144 設計。
+    #[test]
+    fn test_open_fd_count_3500_warn() {
+        assert_eq!(
+            classify_engine_runtime_open_fd_count(3500),
+            HealthState::HealthWarn,
+            "3500 fd 真實 leak signal（baseline 2x）必落 WARN band"
         );
     }
 

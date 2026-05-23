@@ -37,15 +37,17 @@ mod connection;
 mod dispatch;
 mod parsers;
 mod run_loop;
+pub mod stats;
 
 #[cfg(test)]
 mod tests;
 
-// Public re-exports — keep crate-level callers (`main_ws.rs`,
-// `main.rs`, `scanner/runner.rs`) using the same import paths as before.
 // 公開再匯出 — 讓 crate 內呼叫端（main_ws.rs / main.rs / scanner/runner.rs）的
 // import 路徑與拆分前完全一致。
 pub use connection::WsState;
+// Sprint 5+ Track B real probe SSOT；`main_health_emitters.rs` 取 Arc 透傳給
+// `RealPipelineThroughputSource`。
+pub use stats::WsStats;
 
 // ---------------------------------------------------------------------------
 // Runtime topic change channel / 運行時主題變更通道
@@ -89,6 +91,13 @@ pub struct WsClient {
     /// 以便 metrics 讀取 / 診斷可 clone reference，而 run loop 持有一份呼叫
     /// `record_unknown()`。
     pub(super) unknown_guard: Arc<UnknownHandlerGuard>,
+    /// Sprint 5+ Track B real probe — WS tick rate / heartbeat lag 統計。
+    /// 為什麼 Option：既有 caller（test / scanner / paper-only）不接 health
+    /// pipeline 時走 None；emitter 端 fallback 走 PlaceholderPipelineThroughput
+    /// Source，per spec §2.5 `RealPipelineThroughputSource` 接 Arc<WsStats>。
+    /// `Arc` clone 跨 task 共享同 instance — dispatch.rs hot path 透過
+    /// `inc_tick` 寫 + emitter 透過 accessor 讀。
+    pub(super) ws_stats: Option<Arc<stats::WsStats>>,
 }
 
 impl WsClient {
@@ -111,7 +120,34 @@ impl WsClient {
             // G9-02：env-gate 在建構時取快照；改 env 需 `--rebuild` 或重啟才生效
             //（行為性 toggle，非熱重載參數，可接受）。
             unknown_guard: UnknownHandlerGuard::new_arc(),
+            // Sprint 5+ Track B：default None；caller 走 `attach_ws_stats` 接通。
+            // 既有 main_ws / scanner runner / paper test 不接 health pipeline，
+            // 0 行為退化。
+            ws_stats: None,
         }
+    }
+
+    /// Sprint 5+ Track B real probe — 注入 `WsStats` Arc。
+    ///
+    /// 為什麼 setter 而非 ctor 參數：
+    ///   - 既有 `WsClient::new` signature 已被 8+ caller 引用；加參數會破測試
+    ///     fixture 與 main_ws 編排。per `feedback_working_principles` 範圍最小化
+    ///     走 setter pattern（對齊 既有 `with_topic_change_channel` setter 範式）。
+    ///   - main_ws 在 ctor 後 + run() 前呼此 setter 注入；其它 caller 不呼即走
+    ///     None fallback。
+    pub fn attach_ws_stats(&mut self, ws_stats: Arc<stats::WsStats>) {
+        self.ws_stats = Some(ws_stats);
+    }
+
+    /// Sprint 5+ Track B real probe — 暴露 subscription set count 給 emitter 端。
+    ///
+    /// 為什麼 actual = subscriptions.len()：
+    ///   - WS-RC1 subscriptions HashSet 由 `subscribe()` 與 `with_topic_change_channel`
+    ///     維護；確認 ack 後 hot path 端不另外增刪（per WS Track B 既有設計）。
+    ///   - emitter 端 `current_ws_subscription_drift_count` 走 expected - actual
+    ///     abs_diff；expected 由 caller 端從 SymbolRegistry / config snapshot 決定。
+    pub fn subscriptions_count(&self) -> u32 {
+        self.subscriptions.len() as u32
     }
 
     /// G9-02: clone the unknown-handler guard `Arc` for external metrics

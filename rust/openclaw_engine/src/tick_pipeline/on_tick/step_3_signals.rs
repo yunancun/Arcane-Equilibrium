@@ -110,6 +110,18 @@ impl TickPipeline {
             vec![]
         };
 
+        // Sprint 5+ Track B real probe hot-path hook (per spec §2.4)：
+        // evaluate 後若有 signal 產出，batch increment 累計（一次 fetch_add
+        // 取代 N 次）；用 event.ts_ms 為 last_signal_ms，對齊 SignalEngine 內
+        // record_signal 的 wall-clock 來源。
+        // None fallback：未接 health pipeline 走 0 開銷 branch（per `feedback_no
+        // _dead_params` 反假陽性）。
+        if !signals.is_empty() {
+            if let Some(stats) = &self.signal_stats {
+                stats.inc_signal_batch(signals.len() as u64, event.ts_ms);
+            }
+        }
+
         // Store recent signals for IPC snapshot (ring buffer, max 100)
         // 存儲最近信號供 IPC 快照使用（環形緩衝，最大 100）
         // Engine mode tag for DB record IDs — prevents cross-pipeline collisions.

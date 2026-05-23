@@ -1,7 +1,16 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-20（P0-ENGINE-HALTSESSION-STUCK-FIX Layer B — `canary/engine_watchdog.py` 加 TRADING_INERT_PROLONGED 業務心跳探測 + 新增 `canary/watchdog_inert_probe.toml` per-env threshold + `canary/test_engine_watchdog.py` 32 unit tests PASS。保留 Layer A Round 2 + 2026-05-18 索引）
+最後更新：2026-05-23（Sprint 5+ Wave 1 §4.4 production hardening — 3 new health monitoring script：`db/health_60s_boundary_verify.{sh,sql}` + `db/health_f2_sanitize_monitor.sh` (DISABLED-by-default) + `db/ac1b_monthly_healthcheck.sh`。保留 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
+
+## 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening
+
+| 腳本 | 用途 |
+|------|------|
+| `db/health_60s_boundary_verify.sh` | Sprint 5+ Wave 1 §4.4.2 — REST latency 60s rolling window boundary verify SOP wrapper；對齊 passive_wait_healthcheck.sh 範式（venv-aware + secrets load + container psql）；3 SQL section（sample inter-arrival ±2s jitter / samples_per_min duplicate emit / 30min summary row_count ≥25）；exit 0/1/2 PASS/FAIL/DB-error。code-level 60s expire 已 verified（bybit_rest_client.rs:318-441 lazy expire `now.checked_sub(60s) → retain`）；本 wrapper 補 production runtime empirical verify（emitter scheduler tokio tick / task crash 等 runtime 失準路徑）。 |
+| `db/health_60s_boundary_verify.sql` | Sprint 5+ Wave 1 §4.4.2 — pure SQL 配套；3 section LIMIT 20+30+per-metric；只覆蓋 api_latency + engine_runtime（60s emitter tick 對齊範疇）；不含 risk_envelope (300s) / pipeline_throughput (30s)。 |
+| `db/health_f2_sanitize_monitor.sh` | Sprint 5+ Wave 1 §4.4.3 — F-2 NaN/inf sanitize fire log 監測；DISABLED-BY-DEFAULT 直到 Sprint 5+ §4.2.2 wireup PaperState SSOT 後 enable（Sprint 4+ Wave B placeholder 階段 F-2 fire 必 0，過早 enable 等同永遠 PASS）；grep-based 而非 PG-based（F-2 sanitize 在 in-process tracing::warn 觸發不寫 V106；engine.log 為唯一 SSOT）；cross-platform date (GNU `-d` / BSD `-v`)；OPENCLAW_F2_THRESHOLD=0 default = 任一 fire 即 alert。 |
+| `db/ac1b_monthly_healthcheck.sh` | Sprint 5+ Wave 1 §4.4.4 — Sprint 4+ §4.1.4 AC-1b production verify monthly cron；對齊 Sprint 4+ Phase 3c 驗範式（30 min × 6 active domain × ≥5 row）；對齊 passive_wait_healthcheck.sh 範式（secrets load + container psql + sentinel mtime touch）；crontab spec `30 3 1 * *` 月初 03:30 UTC（避撞 passive_wait_healthcheck 6h cron）；exit 1 表 ≥1 domain < 5 row；對齊 operator Stage F §8.6 PM phase 3e 拍板「§4.4 全部進 hardening + AC-1b monthly cron」。 |
 
 ## 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX Layer B
 

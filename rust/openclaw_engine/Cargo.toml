@@ -128,6 +128,15 @@ harness = false
 name = "intent_processor_exposure"
 harness = false
 
+# Sprint 5+ Wave 1 §4.3.2 AC-7（2026-05-23）：m3 metric_emitter scheduler
+# cold start bench — 量測 MetricEmitterScheduler::new + run 進入 first tick
+# wall-clock < 50ms。harness=false 對齊既有 bench plain main 範式，0
+# criterion dev-dep；對應 PA spec docs/execution_plan/specs/
+# 2026-05-23--sprint5_wave1_4_3_2_ac7_m3_cold_start_bench.md §AC-7。
+[[bench]]
+name = "m3_emitter_cold_start"
+harness = false
+
 # repair_migration_checksum — standalone tool to detect/repair _sqlx_migrations.checksum drift.
 # Borrows engine `database::migrations::load_migrations_from_dir` so checksum
 # computation is identical to engine startup verification (sqlx 0.8.6 SHA-384,
