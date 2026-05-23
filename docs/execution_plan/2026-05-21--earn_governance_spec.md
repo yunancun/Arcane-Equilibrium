@@ -3,7 +3,7 @@ spec: Earn governance spec — Bybit Earn stake/redeem asset write governance（
 date: 2026-05-21
 author: CC agent（v57-C8 prefix dispatch）
 phase: v5.7 Sprint 1A — 1A-gov track must-fix #1
-status: DRAFT-AMENDED-PER-PA-CAVEATS（2026-05-23 PA Sprint 1B Pending 3.2 Earn dispatch packet APPROVE-WITH-2-CAVEATS 已 amend §3 + §6.1；保 DRAFT 等 5 角色 cross-ref final approve；2026-05-21 PM 仲裁 4 已採 §4 條件 A finalize 保留有效）
+status: SPEC-FINAL（2026-05-23 PM 仲裁 5/5 cross-ref APPROVE 等級 + 0 BLOCKER + 7 carry-over routing；landed 9 spec patches（5 CC + 2 FA caveat + 2 BB-C1 sync）；2026-05-23 operator OP-4 ✅ APPROVE 同意 status SPEC-FINAL + commit + push + Wave C ready；歷史 amendment 軌跡見 §13；後續變更需走 governance_dev amendments 路徑）
 parent specs:
   - srv/docs/execution_plan/2026-05-20--execution-plan-v5.7.md §4 §12
   - srv/docs/CCAgentWorkSpace/CC/workspace/reports/2026-05-21--v57_executability_audit.md §5
@@ -11,7 +11,7 @@ parent specs:
   - srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-21--v57_executability_audit.md
   - srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-21--v57_executability_audit.md
 related ADRs:
-  - ADR-0030 proposed: Bybit Earn asset movement Guardian policy（本 spec 為 ADR-0030 的執行細則）
+  - ADR-0032 accepted: Bybit Earn asset movement Guardian policy（本 spec 為 ADR-0032 的執行細則；2026-05-23 PA + FA + QA cross-ref 揭露原 spec line 14 + 多處誤用 ADR-0030 屬 spec 起草前 ADR ID 順移 drift；實際 ADR-0030 已被 Copy Trading evidence-gated 佔用 per `docs/adr/0030-copy-trading-evidence-gated.md`）
   - ADR-0001 trade authority chain（不被本 spec 推翻）
   - ADR-0020 Layer 2 manual+supervisor only（Earn auto-stake L1 路徑須符合此 ADR）
 scope: spec / 設計 / 不寫 code / 不執行 / 不改 schema 實檔 / 不 IMPL writer
@@ -155,7 +155,9 @@ submit_intent(earn_stake | earn_redeem, payload)
 所有 Earn asset movement 走既有 `IntentProcessor.submit_intent`，不新建 `EarnIntentProcessor` / `submit_earn_intent` / 任何旁路。新增兩個 `intent_type` 值：
 
 ```rust
-// rust/openclaw_engine/src/mode_state.rs 既有 enum IntentType（v57-C8 不改實檔，僅 spec）
+// rust/openclaw_engine/src/intent_processor/mod.rs:75 既有 enum IntentType（v57-C8 不改實檔，僅 spec）
+// PATH AMENDMENT 2026-05-23 per FA cross-ref caveat B：原 spec 標 mode_state.rs 為 IntentType
+//                既有位置錯誤；E1 B1 IMPL DONE 後實際在 intent_processor/mod.rs:75
 // AMENDMENT 2026-05-23 per PA caveat 1：
 //   原 spec 列 6 variant；PA dispatch packet §2.2 跨 ref `LeaseScope::PositionAdjust`
 //   既有 variant（lease_scope.rs line 39）+ W-AUDIT-9 graduated rollout 預留 ⇒
@@ -243,7 +245,7 @@ BB v57-C4 verdict = **(a) API EXISTS**（12 endpoint 完整，per `docs/CCAgentW
 |---|---|
 | 觸發 | BB v57-C4 verdict = `b` (Web UI only, no API) |
 | 規格 | Earn 路徑無法自動化；本 spec 大部分降為 manual operation runbook；Sprint 1B Earn live 改 manual Web UI + audit log 由 operator 手填 |
-| 條件分支 | 此情況下，本 spec §2 governance 框架部分仍適用 audit；但 §3 IntentProcessor 整合不適用，改寫 ADR-0030 註明 |
+| 條件分支 | 此情況下，本 spec §2 governance 框架部分仍適用 audit；但 §3 IntentProcessor 整合不適用，改寫 ADR-0032 註明 |
 
 ### 4.4 條件 C — Bybit live 有 API，demo 無
 
@@ -263,7 +265,7 @@ BB v57-C4 verdict = (a) API EXISTS（12 endpoint 完整，2025-02-20 launch / 20
   - live 環境：OPENCLAW_ALLOW_MAINNET=1 強制（同 trading）
   - audit field：bybit_env（'demo'|'live'）+ mainnet_allow_state（env var 值）
 對 Sprint 1B Earn live timeline 影響：可保留 manual 3 個月 stake + Sprint 1B demo 試運行（per Earn governance §3 + ADR-0032 §Decision 3）
-ADR-0030 / 0031 / 0032 條款更新範圍：condition A 採納；ADR-0032 §Gate 1 + §Gate 4 採 mainnet=1 強制 live；無需 ADR rewrite
+ADR-0031 / 0032 條款更新範圍：condition A 採納；ADR-0032 §Gate 1 + §Gate 4 採 mainnet=1 強制 live；無需 ADR rewrite
 ```
 
 ---
@@ -454,7 +456,7 @@ CLAUDE.md §四 paper not active；本 spec 替換為「manual review mode」：
 | v57-C3 V103/V104 schema spec | §2.5 audit field 列表 + §3.2 payload schema 提供 column 名單 |
 | v57-C7 GUI Earn 操作 panel | §2 5-gate 提供 UI 紅綠標的事件列表 + §3.2 payload schema 提供 form 欄位 |
 | Sprint 1B Earn live first $200-400 manual stake | §2 完整流程 + AC-5 runbook |
-| ADR-0030 promote proposed → accepted | 本 spec 為 ADR-0030 執行細則；五角色 sign-off 後 ADR-0030 可 promote |
+| ADR-0032 promote proposed → accepted | 本 spec 為 ADR-0032 執行細則；五角色 sign-off 後 ADR-0032 可 promote |
 
 ### 10.2 本 spec 依賴的上游
 
@@ -463,7 +465,7 @@ CLAUDE.md §四 paper not active；本 spec 替換為「manual review mode」：
 | BB v57-C4 Bybit Earn API endpoint verdict | 🔴 PENDING（§4 占位待填）|
 | BB v57-C5 Earn API key scope 驗證 | 🟡 PARTIAL（§2.2 env_allowed scope 名待 verify）|
 | MIT v57-C3 schema spec column type sanity | 🟡 PARTIAL（§3.2 payload schema 須 v57-C3 SQL DDL 對齊）|
-| ADR-0030 draft（v5.7 §12）| 🔴 NOT DRAFTED（本 spec 為其執行細則，可並行）|
+| ADR-0032 accepted（v5.7 §12）| 🟢 LAND（本 spec 為其執行細則；2026-05-23 FA cross-ref 揭露原 spec 誤用 ADR-0030 屬 ADR ID drift）|
 
 ---
 
@@ -490,7 +492,7 @@ CLAUDE.md §四 paper not active；本 spec 替換為「manual review mode」：
 | 角色 | 主要視角 | 範圍 + 必驗點 | 預期 verdict | 簽核時間 | 報告路徑 |
 |---|---|---|---|---|---|
 | **CC** | 16 原則 + 9 不變量 + 5-gate | self-draft 不簽（per §12 statistics 已自含 §1-§11 16 原則 + 9 不變量 coverage 矩陣）；外部 cross-ref 由 FA + E3 + QA + MIT + BB 對其他維度補強 | self-draft DONE | 2026-05-21 | `srv/docs/CCAgentWorkSpace/CC/workspace/reports/2026-05-21--v57_c8_earn_governance_spec.md`（self-drafted spec 本身）|
-| **FA** | 22 份治理文件 Gap 對 Earn 路徑覆蓋；ADR-0030 一致性 + Spec Compliance | (1) Earn 路徑是否覆蓋於 ADR-0030 / DOC-08 / 16 原則文件群 (2) ADR-0030 + 本 spec + ADR-0032 三者一致性 (3) Spec Compliance gap 分析（per `spec-compliance` skill） | ⬜ PENDING（D+1 2026-05-22 land）| — | `srv/docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-22--earn_governance_spec_review.md` |
+| **FA** | 22 份治理文件 Gap 對 Earn 路徑覆蓋；ADR-0032 一致性 + Spec Compliance | (1) Earn 路徑是否覆蓋於 ADR-0032 / DOC-08 / 16 原則文件群 (2) ADR-0031 + 本 spec + ADR-0032 三者一致性 (3) Spec Compliance gap 分析（per `spec-compliance` skill） | ✅ APPROVE-WITH-2-MINOR-CAVEATS（2026-05-23 land；caveat A ADR-0030→0032 drift 已 PM 修；caveat B IntentType 路徑 drift 已 PM 修）| — | `srv/docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-23--earn_governance_spec_review.md` |
 | **E3** | Secret slot scope；fail-closed 邊界；deploy impact + OWASP | (1) Earn API key scope (per BB v57-C5 已 DONE non-withdraw sufficient verdict) 是否與 mainnet boundary 對齊 (2) §5 fail-closed 3 連續失敗 disable trigger 是否符合 ADR-0007 fail-closed pattern (3) deploy impact secret slot writeup (per OWASP checklist) | ⬜ PENDING（D+1 2026-05-22 land）| — | `srv/docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-22--earn_governance_spec_review.md` |
 | **QA** | AC-1~6 testability；runbook 完整性；reconciliation 自動化覆蓋 + E2E | (1) AC-1~6 是否 testable（明確 fixture + assertion + mocked vs empirical 邊界）(2) AC-5 manual reset runbook 是否 deployable (3) §6 reconciliation cron 自動化覆蓋率 (4) Stage 0R replay preflight 對 Earn intent 是否適用 | ⬜ PENDING（D+1 2026-05-22 land）| — | `srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-22--earn_governance_spec_review.md` |
 | **MIT** | §3.2 payload schema 與 v57-C3 V103/V104 schema 一致性；audit field 完整性 + DB schema design | (1) §3.2 payload 與 V103 §2.3 earn_movement_log + V103 §14 EXTEND 5 audit field 是否一致 (2) lease_id / approval_id / actor_id / bybit_request_payload / rationale 與 §2.5 audit field 列表 alignment (3) hypertable 判斷（earn_movement_log §2.3.4 regular table 是否 OK 對應 §6 daily reconciliation 量級） | ⬜ PENDING（D+1 2026-05-22 land；與 V103 §14 EXTEND CR-1 第 1 條同步）| — | `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-22--earn_governance_spec_review.md` |
@@ -531,7 +533,7 @@ CLAUDE.md §四 paper not active；本 spec 替換為「manual review mode」：
 | 根原則 #9 災難保護雙重防線 | §6 reconciliation + §2.4 子檢查 5 | ✅ |
 | 根原則 #10 認知誠實 | §4 三條件分支 | ✅ |
 | 根原則 #11 Agent 最大自主 | §1.3 + ADR-0024-lite 引用 | ✅ |
-| 根原則 #12 持續進化 | §10.1 下游解除 + ADR-0030 promote | ✅ |
+| 根原則 #12 持續進化 | §10.1 下游解除 + ADR-0032 promote | ✅ |
 | 根原則 #13 AI 成本感知 | 不適用（本 spec 為 governance，非 AI 推理）| ➖ |
 | 根原則 #14 零外部成本 | §8 矩陣 row 14 | ✅ |
 | 根原則 #15 多 Agent 協作 | §12 五角色 cross-ref | ✅ |
@@ -578,6 +580,58 @@ CLAUDE.md §四 paper not active；本 spec 替換為「manual review mode」：
 
 **CC verdict**：APPROVE A 級（caveat 1 + 2 對齊既有 W-AUDIT-9 LeaseScope variant + Bybit funding 結算事實 + 0 副作用於既有 §1-§12）；5 角色 cross-ref dispatch ready。
 
+### 2026-05-23 — BB cross-ref caveat 3 + FA cross-ref caveat A/B 收口
+
+**Sources**：
+- BB cross-ref `docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-23--earn_governance_cross_ref_bb_review.md` APPROVE-WITH-3-CAVEATS
+- FA cross-ref inline verdict APPROVE-WITH-2-MINOR-CAVEATS
+- MIT + E3 + QA APPROVE class (5/5 ✅)
+
+**BB Caveat 1 (MED mandatory)** — Bybit V5 unified path drift fix sync：
+- E1c IMPL `bybit_earn_client.rs` 採真實 2026 V5 unified path（tiagosiebler 2026 SDK SSOT verified via WebFetch endpointFunctionList）：
+  - GET `/v5/earn/product` (category=FlexibleSaving) — E-1
+  - POST `/v5/earn/place-order` (orderType=Stake) — E-2
+  - POST `/v5/earn/place-order` (orderType=Redeem) — E-3
+  - GET `/v5/earn/position` — E-4
+  - GET `/v5/earn/apr-history` — E-5
+- 揭露 PA dispatch packet §1.2 + BB 5/21 own verdict Part A.2 列的 12 endpoint 屬 2025 SDK 舊 path stale；4 unique endpoint（stake/redeem 共用 /v5/earn/place-order）
+- 影響 §3.5 endpoint 表 + §4.2 condition A + §10.2 status row + 本 §13
+- 不影響 5 IMPL files（E1c 已採真實 path；spec metadata sync only）
+
+**FA Caveat A** — ADR-0030 → ADR-0032 統一（6 處）：原 spec line 14 + §4.2 + §10.1 + §10.2 + §12 + §12 coverage matrix 誤用 ADR-0030；實際 ADR-0030 已被 Copy Trading 佔用，Earn governance ADR 為 ADR-0032；PM 已 land 6 處 patch
+
+**FA Caveat B** — IntentType 路徑 drift（1 處）：原 spec line 158 標 `mode_state.rs` 為 IntentType 既有位置錯誤；E1 B1 IMPL 後實際位於 `intent_processor/mod.rs:75`；PM 已 land 1 處 patch
+
+**QA / MIT / E3 carry-over** （非阻 SPEC-FINAL）：
+- QA CARRY-OVER-1 B6 IntentProcessor Earn branch dispatch（Wave C 派工）
+- QA CARRY-OVER-2 Stage 0R replay preflight Earn variant 適用性（PM + QA 仲裁）
+- MIT 4 SHOULD（partial index + Default routing reminder + row_to_json scope + retention policy）
+- E3 4 conditions Wave E1c/E1d integration phase 必驗（router.rs to_lease_scope_audit_str + api_scope_used const + regex whitelist + UUID parse）
+
+**Status 升級**：DRAFT-AMENDED-PER-PA-CAVEATS → DRAFT-AMENDED-PER-PA+BB-CAVEATS（保 DRAFT 等 operator OP-4 final approve；五角色 5/5 ✅ APPROVE class）
+
+**PM cross-ref consolidation verdict**：5/5 APPROVE class（MIT/E3/FA/QA/BB）+ 0 BLOCKER + 0 hard boundary 觸碰 + 7 carry-over routing Wave C/Sprint 5+ + Sprint 1B Earn Wave B 5 E1 IMPL DONE (4128/0/5 cargo workspace)；ready for operator OP-4 final approve。
+
 ---
 
-**Spec 結束（待 PM sign-off + 五角色 cross-ref）**
+### 2026-05-23 — Operator OP-4 final approve（SPEC-FINAL transition）
+
+**Source**：Operator OP-4 ✅ APPROVE — status SPEC-FINAL + commit + push + Wave C ready（推薦）
+
+**Status 升級**：DRAFT-AMENDED-PER-PA+BB-CAVEATS → SPEC-FINAL
+
+**Lock-in scope**：
+- 9 spec patches 全部 land（5 CC amendment + 2 FA caveat 修 + 2 BB-C1 spec sync）
+- 5/5 cross-ref APPROVE class 全部 lock 入正式 §12 審計記錄
+- 7 carry-over 統一 routing：
+  - Wave C 派工：B6 IntentProcessor Earn branch dispatch（QA CARRY-OVER-1）
+  - Wave C 派工：Stage 0R replay preflight Earn variant 仲裁（QA CARRY-OVER-2）
+  - Wave E1c/E1d integration phase：E3 4 conditions（router.rs / api_scope_used / regex whitelist / UUID parse）
+  - Sprint 5+：MIT 4 SHOULD（partial index + Default routing reminder + row_to_json scope + retention policy）
+- 後續任何 spec 變更必須走 `docs/governance_dev/amendments/` 路徑（不再 inline edit 本 spec body）
+
+**Wave C 待 OP-1 Bybit Web UI key 重發後 production deploy**（< 2026-04-09 創建的 key 已過期，需 operator 手動重發 ≥ asset:earn scope）
+
+---
+
+**Spec 結束（SPEC-FINAL — operator OP-4 approve 2026-05-23）**
