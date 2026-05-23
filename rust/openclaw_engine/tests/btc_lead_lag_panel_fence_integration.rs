@@ -1,8 +1,8 @@
-//! W2-IMPL-5 — BTC→Alt Lead-Lag panel paper-only fence 三層深度防禦 integration test。
+//! W2-IMPL-5 — BTC→Alt Lead-Lag panel archive/diagnostic fence 三層深度防禦 integration test。
 //!
 //! MODULE_NOTE：
 //!   本 integration test 收尾 W2 IMPL v1.2 chain 5 sub-task 的 acceptance gate，
-//!   驗證 spec v1.3 §6 三層 paper-only fence 主防線完整性，缺一不簽。
+//!   驗證 spec v1.3 §6 + 2026-05-23 paper Archive policy fence 主防線完整性，缺一不簽。
 //!
 //!   **三層 fence 主防線**（per dispatch §6 + spec v1.3 §6）：
 //!     - **Layer 1（主防線）**：`step_4_5_dispatch.rs:206-212` 構造 surface 時
@@ -12,11 +12,11 @@
 //!       slot.try_read 分支，其餘三 mode 走 None default arm。
 //!     - **Layer 2（深度防禦）**：`should_spawn_btc_lead_lag_producer()` 統一
 //!       BtcLeadLagProducer spawn 前 env-gate 三狀態：
-//!         (a) `OPENCLAW_ENABLE_PAPER=1` → spawn producer（paper 正路徑）
-//!         (b) env unset + `!has_demo && !has_live`（paper-only 配置）→ spawn
-//!         (c) env unset + `has_demo || has_live` → skip spawn（fence fired）
-//!       本 test 直接調 shared helper，並用 env guard 模擬三狀態 + has_demo/
-//!       has_live 4 種 mode 組合 driving truth table。
+//!         (a) `OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1` → spawn diagnostic producer
+//!         (b) `OPENCLAW_ENABLE_PAPER=1` → ignored（paper Archive；不得 spawn）
+//!         (c) env unset + any runtime shape → skip spawn（fence fired）
+//!       本 test 直接調 shared helper，並用 env guard 模擬 archive/diagnostic 狀態
+//!       + has_demo/has_live 4 種 mode 組合 driving truth table。
 //!     - **Layer 3（消費端深度防禦）**：策略內 `if let Some(panel) = surface
 //!       .btc_lead_lag` 隱含 None → skip；本 test 透過 `evaluate_shadow_signal`
 //!       對 `panel = None` 不被 call、`panel = Some(...)` 時 5 conditions 全
@@ -45,7 +45,7 @@
 //!   - IMPL-1 (orderbook 接線)：`panel_aggregator/btc_lead_lag.rs:117-301`
 //!   - IMPL-2 (Layer 2 fence)：`main.rs:1005-1078`
 //!   - IMPL-3 (Healthcheck [57])：`helper_scripts/db/passive_wait_healthcheck/checks_btc_lead_lag.py`
-//!   - IMPL-4 (D+12 paper edge report)：`helper_scripts/reports/w2_paper_edge_report.py`
+//!   - IMPL-4 (D+12 archived paper diagnostic lineage)：`helper_scripts/reports/w2_paper_edge_report.py`
 
 use std::ffi::OsString;
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -54,9 +54,12 @@ use std::time::Duration;
 use openclaw_core::alpha_surface::{AlphaSurface, BtcLeadLagPanel, EMPTY_ALPHA_SURFACE};
 use openclaw_engine::bybit_rest_client::BybitEnvironment;
 use openclaw_engine::mode_state::effective_engine_mode;
+use openclaw_engine::panel_aggregator::btc_lead_lag::{
+    OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC_ENV, OPENCLAW_ENABLE_PAPER_ENV,
+};
 use openclaw_engine::panel_aggregator::{
-    create_btc_orderbook_slot, should_spawn_btc_lead_lag_producer,
-    spawn_btc_orderbook_ingest_task, BtcOrderbookSlot,
+    create_btc_orderbook_slot, should_spawn_btc_lead_lag_producer, spawn_btc_orderbook_ingest_task,
+    BtcOrderbookSlot,
 };
 use openclaw_engine::strategies::cross_asset::{
     evaluate_shadow_signal, BtcLeadLagShadowSignal, SHADOW_LOG_TARGET,
@@ -130,36 +133,52 @@ fn mock_ctx(symbol: &'static str, ts_ms: u64) -> TickContext<'static> {
     }
 }
 
-static OPENCLAW_ENABLE_PAPER_ENV_LOCK: Mutex<()> = Mutex::new(());
+static BTC_LEAD_LAG_ENV_LOCK: Mutex<()> = Mutex::new(());
 
-struct OpenclawEnablePaperEnvGuard {
+struct BtcLeadLagEnvGuard {
     _guard: MutexGuard<'static, ()>,
-    previous: Option<OsString>,
+    previous_paper: Option<OsString>,
+    previous_diagnostic: Option<OsString>,
 }
 
-impl OpenclawEnablePaperEnvGuard {
-    fn set(value: Option<&str>) -> Self {
-        let guard = OPENCLAW_ENABLE_PAPER_ENV_LOCK
+impl BtcLeadLagEnvGuard {
+    fn set(paper: Option<&str>, diagnostic: Option<&str>) -> Self {
+        let guard = BTC_LEAD_LAG_ENV_LOCK
             .lock()
-            .expect("OPENCLAW_ENABLE_PAPER env lock poisoned");
-        let previous = std::env::var_os("OPENCLAW_ENABLE_PAPER");
-        match value {
-            Some(value) => std::env::set_var("OPENCLAW_ENABLE_PAPER", value),
-            None => std::env::remove_var("OPENCLAW_ENABLE_PAPER"),
-        }
+            .expect("BTC lead-lag env lock poisoned");
+        let previous_paper = std::env::var_os(OPENCLAW_ENABLE_PAPER_ENV);
+        let previous_diagnostic = std::env::var_os(OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC_ENV);
+        set_env_var(OPENCLAW_ENABLE_PAPER_ENV, paper);
+        set_env_var(OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC_ENV, diagnostic);
         Self {
             _guard: guard,
-            previous,
+            previous_paper,
+            previous_diagnostic,
         }
     }
 }
 
-impl Drop for OpenclawEnablePaperEnvGuard {
+fn set_env_var(name: &str, value: Option<&str>) {
+    match value {
+        Some(value) => std::env::set_var(name, value),
+        None => std::env::remove_var(name),
+    }
+}
+
+fn restore_env_var(name: &str, value: &Option<OsString>) {
+    match value {
+        Some(value) => std::env::set_var(name, value),
+        None => std::env::remove_var(name),
+    }
+}
+
+impl Drop for BtcLeadLagEnvGuard {
     fn drop(&mut self) {
-        match &self.previous {
-            Some(value) => std::env::set_var("OPENCLAW_ENABLE_PAPER", value),
-            None => std::env::remove_var("OPENCLAW_ENABLE_PAPER"),
-        }
+        restore_env_var(OPENCLAW_ENABLE_PAPER_ENV, &self.previous_paper);
+        restore_env_var(
+            OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC_ENV,
+            &self.previous_diagnostic,
+        );
     }
 }
 
@@ -186,10 +205,25 @@ fn layer_1_fence_only_paper_mode_reads_btc_lead_lag_slot() {
     //   (g) Live, None            → "live_demo"  → MUST be None
     let cases: Vec<(PipelineKind, Option<BybitEnvironment>, &str, bool)> = vec![
         (PipelineKind::Paper, None, "paper", true),
-        (PipelineKind::Paper, Some(BybitEnvironment::Mainnet), "paper", true),
+        (
+            PipelineKind::Paper,
+            Some(BybitEnvironment::Mainnet),
+            "paper",
+            true,
+        ),
         (PipelineKind::Demo, None, "demo", false),
-        (PipelineKind::Demo, Some(BybitEnvironment::Demo), "demo", false),
-        (PipelineKind::Live, Some(BybitEnvironment::Mainnet), "live", false),
+        (
+            PipelineKind::Demo,
+            Some(BybitEnvironment::Demo),
+            "demo",
+            false,
+        ),
+        (
+            PipelineKind::Live,
+            Some(BybitEnvironment::Mainnet),
+            "live",
+            false,
+        ),
         (
             PipelineKind::Live,
             Some(BybitEnvironment::Testnet),
@@ -227,7 +261,7 @@ fn layer_1_fence_only_paper_mode_reads_btc_lead_lag_slot() {
         let mock_panel = mock_panel_full_signal();
         let panel_owned: Option<BtcLeadLagPanel> = match em {
             "paper" => Some(mock_panel.clone()), // simulate slot.try_read() pass
-            _ => None,                            // Layer 1 fence default arm
+            _ => None,                           // Layer 1 fence default arm
         };
 
         if should_read {
@@ -248,72 +282,94 @@ fn layer_1_fence_only_paper_mode_reads_btc_lead_lag_slot() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════
-// Layer 2 fence：shared should_spawn_btc_lead_lag_producer env-gate 三狀態
+// Layer 2 fence：shared should_spawn_btc_lead_lag_producer archive/diagnostic env-gate
 // ═════════════════════════════════════════════════════════════════════════
 
-/// **Layer 2 fence 主 assert**：BtcLeadLagProducer spawn 前 env-gate 三狀態
-///   (a) OPENCLAW_ENABLE_PAPER=1                → spawn
-///   (b) env unset + paper-only                  → spawn
-///   (c) env unset + demo|live active            → skip spawn（fence fired）
+/// **Layer 2 fence 主 assert**：BtcLeadLagProducer spawn 前 env-gate
+///   (a) OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1 → spawn diagnostic producer
+///   (b) OPENCLAW_ENABLE_PAPER=1                   → ignored; no spawn
+///   (c) env unset + any runtime shape             → skip spawn（fence fired）
 ///
 /// 注意：本 test 使用 shared helper，並用 process-local mutex + RAII guard
-/// restore `OPENCLAW_ENABLE_PAPER`，避免 env var 污染同一 test binary 後續 case。
+/// restore env vars，避免污染同一 test binary 後續 case。
 #[test]
-fn layer_2_fence_env_gate_three_states() {
+fn layer_2_fence_archive_policy_diagnostic_only() {
     {
-        let _env = OpenclawEnablePaperEnvGuard::set(Some("1"));
-        // ──── 狀態 (a)：OPENCLAW_ENABLE_PAPER=1 → spawn 永遠 true ────
-        // 即便 has_demo=true / has_live=true，env=1 顯式 override 仍 spawn。
+        let _env = BtcLeadLagEnvGuard::set(Some("1"), None);
+        // ──── Archive 狀態：OPENCLAW_ENABLE_PAPER=1 被忽略，永不 spawn ────
         assert!(
-            should_spawn_btc_lead_lag_producer(false, false),
-            "Layer 2 (a): OPENCLAW_ENABLE_PAPER=1 + paper-only → must spawn"
+            !should_spawn_btc_lead_lag_producer(false, false),
+            "Layer 2 archive: OPENCLAW_ENABLE_PAPER=1 + paper-only must not spawn"
         );
-        assert!(
-            should_spawn_btc_lead_lag_producer(true, false),
-            "Layer 2 (a): OPENCLAW_ENABLE_PAPER=1 + has_demo → must spawn（env override）"
-        );
-        assert!(
-            should_spawn_btc_lead_lag_producer(false, true),
-            "Layer 2 (a): OPENCLAW_ENABLE_PAPER=1 + has_live → must spawn（env override）"
-        );
-        assert!(
-            should_spawn_btc_lead_lag_producer(true, true),
-            "Layer 2 (a): OPENCLAW_ENABLE_PAPER=1 + has_demo + has_live → must spawn（env override）"
-        );
-    }
-
-    {
-        let _env = OpenclawEnablePaperEnvGuard::set(None);
-        // ──── 狀態 (b)：env unset + paper-only（!has_demo && !has_live）→ spawn ────
-        // 對應 dev/test 工作流（單跑 paper engine 無 demo/live secret slot）。
-        assert!(
-            should_spawn_btc_lead_lag_producer(false, false),
-            "Layer 2 (b): env unset + paper-only (!has_demo && !has_live) → must spawn"
-        );
-
-        // ──── 狀態 (c)：env unset + demo|live active → SKIP spawn（fence fired）────
-        // 主要保護 case：mixed mode（paper-disabled 但 demo/live 跑）下 producer
-        // 不應寫 PG panel.btc_lead_lag_panel（避免 demo/live 期樣本污染 ML pipeline
-        // 與 5 策略 demo edge baseline）。
         assert!(
             !should_spawn_btc_lead_lag_producer(true, false),
-            "Layer 2 (c) FIRED: env unset + has_demo → must SKIP spawn (fence Layer 2)"
+            "Layer 2 archive: OPENCLAW_ENABLE_PAPER=1 + has_demo must not spawn"
         );
         assert!(
             !should_spawn_btc_lead_lag_producer(false, true),
-            "Layer 2 (c) FIRED: env unset + has_live → must SKIP spawn (fence Layer 2)"
+            "Layer 2 archive: OPENCLAW_ENABLE_PAPER=1 + has_live must not spawn"
         );
         assert!(
             !should_spawn_btc_lead_lag_producer(true, true),
-            "Layer 2 (c) FIRED: env unset + has_demo + has_live → must SKIP spawn (fence Layer 2)"
+            "Layer 2 archive: OPENCLAW_ENABLE_PAPER=1 + has_demo + has_live must not spawn"
         );
     }
 
     {
-        let _env = OpenclawEnablePaperEnvGuard::set(Some("0"));
+        let _env = BtcLeadLagEnvGuard::set(None, Some("1"));
+        // ──── Diagnostic 狀態：explicit diagnostic env 才可 spawn non-promotional producer ────
+        assert!(
+            should_spawn_btc_lead_lag_producer(false, false),
+            "Layer 2 diagnostic: diagnostic env + archival paper-only shape must spawn"
+        );
+        assert!(
+            should_spawn_btc_lead_lag_producer(true, false),
+            "Layer 2 diagnostic: diagnostic env + has_demo must spawn for replay infra collection"
+        );
+        assert!(
+            should_spawn_btc_lead_lag_producer(false, true),
+            "Layer 2 diagnostic: diagnostic env + has_live must spawn for replay infra collection"
+        );
+        assert!(
+            should_spawn_btc_lead_lag_producer(true, true),
+            "Layer 2 diagnostic: diagnostic env + has_demo + has_live must spawn"
+        );
+    }
+
+    {
+        let _env = BtcLeadLagEnvGuard::set(Some("1"), Some("1"));
+        assert!(
+            should_spawn_btc_lead_lag_producer(true, false),
+            "Layer 2 diagnostic: diagnostic env is the only accepted explicit spawn gate"
+        );
+    }
+
+    {
+        let _env = BtcLeadLagEnvGuard::set(None, None);
+        // ──── env unset + any runtime shape → SKIP spawn（fence fired）────
         assert!(
             !should_spawn_btc_lead_lag_producer(false, false),
-            "Layer 2 explicit disable: OPENCLAW_ENABLE_PAPER=0 must not use env-unset fallback"
+            "Layer 2 env unset: archival paper-only shape must SKIP spawn"
+        );
+        assert!(
+            !should_spawn_btc_lead_lag_producer(true, false),
+            "Layer 2 env unset: has_demo must SKIP spawn"
+        );
+        assert!(
+            !should_spawn_btc_lead_lag_producer(false, true),
+            "Layer 2 env unset: has_live must SKIP spawn"
+        );
+        assert!(
+            !should_spawn_btc_lead_lag_producer(true, true),
+            "Layer 2 env unset: has_demo + has_live must SKIP spawn"
+        );
+    }
+
+    {
+        let _env = BtcLeadLagEnvGuard::set(Some("0"), None);
+        assert!(
+            !should_spawn_btc_lead_lag_producer(false, false),
+            "Layer 2 archive: OPENCLAW_ENABLE_PAPER=0 must not use env-unset fallback"
         );
     }
 }
@@ -404,9 +460,7 @@ async fn nan_safe_ingest_task_does_not_panic_on_nan_qty() {
     nan_event.event_kind = Some(PriceEventKind::Orderbook);
     nan_event.bids5 = Some(vec![(100.0, f64::NAN), (99.0, 1.0)]);
     nan_event.asks5 = Some(vec![(101.0, 1.0); 5]);
-    tx.send(Arc::new(nan_event))
-        .await
-        .expect("send NaN event");
+    tx.send(Arc::new(nan_event)).await.expect("send NaN event");
 
     // event 2：BTCUSDT Orderbook 帶 empty bids → compute fail-soft → slot 不寫值。
     let mut empty_event = PriceEvent::new("BTCUSDT".to_string(), 50_000.0, 120_000);
@@ -541,14 +595,18 @@ fn fence_signoff_matrix_three_layers_each_with_assert() {
     // 此 test 純 marker — passes iff this test file compiles & loads.
     // 驗本檔包含 3 個 layer assert function（cargo test --list 可看到）：
     //   - layer_1_fence_only_paper_mode_reads_btc_lead_lag_slot
-    //   - layer_2_fence_env_gate_three_states
+    //   - layer_2_fence_archive_policy_diagnostic_only
     //   - layer_3_fence_panel_none_yields_no_signal_sentinel
     // 缺一 → cargo test --release -p openclaw_engine --test
     //         btc_lead_lag_panel_fence_integration --list 會少對應條目。
     // 本 sentinel 不直接 assert function 存在（Rust 沒有 reflection 抓 test
     // 列表），但本 file 編譯通過即證 3 個 fence function 都 well-typed。
     // 一致性驗證：3 個 fence layer 都對應 spec v1.3 §6 結構。
-    let layers: [&str; 3] = ["Layer 1 (step_4_5_dispatch)", "Layer 2 (main.rs env-gate)", "Layer 3 (cross_asset/mod.rs)"];
+    let layers: [&str; 3] = [
+        "Layer 1 (step_4_5_dispatch)",
+        "Layer 2 (main.rs env-gate)",
+        "Layer 3 (cross_asset/mod.rs)",
+    ];
     assert_eq!(
         layers.len(),
         3,

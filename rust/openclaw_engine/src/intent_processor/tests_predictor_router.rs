@@ -56,6 +56,9 @@ mod predictor_wiring_tests {
             persistence_elapsed_ms: None,
             time_in_force: None,
             maker_timeout_ms: None,
+            // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+            intent_type: super::IntentType::OpenLong,
+            earn_payload: None,
         }
     }
 
@@ -898,6 +901,9 @@ mod maker_kpi_gate_tests {
             persistence_elapsed_ms: None,
             time_in_force: Some(TimeInForce::PostOnly),
             maker_timeout_ms: Some(45_000),
+            // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+            intent_type: super::IntentType::OpenLong,
+            earn_payload: None,
         }
     }
 

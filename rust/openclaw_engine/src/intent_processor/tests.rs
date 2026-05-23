@@ -45,6 +45,9 @@ fn make_intent(symbol: &str, is_long: bool) -> OrderIntent {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: super::IntentType::OpenLong,
+        earn_payload: None,
     }
 }
 
@@ -540,6 +543,9 @@ fn test_cost_gate_rejects_low_confidence() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: super::IntentType::OpenLong,
+        earn_payload: None,
     };
     let result = proc.process(&intent, &gov, &state, 10.0, GovernanceProfile::Exploration);
     assert!(!result.submitted);
@@ -571,6 +577,9 @@ fn test_cost_gate_cold_start_exploration_mode() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: super::IntentType::OpenLong,
+        earn_payload: None,
     };
     // ATR=20 (very compressed for BTC) — previously rejected by ATR cold-start gate,
     // now allowed in paper exploration mode to accumulate data.
@@ -602,6 +611,9 @@ fn test_sec11_cost_gate_fail_closed_on_zero_atr() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: super::IntentType::OpenLong,
+        earn_payload: None,
     };
     // ATR=0 (indicator unavailable) — would have been waved through pre-SEC-11
     let result = proc.process(&intent, &gov, &state, 0.0, GovernanceProfile::Exploration);
@@ -643,6 +655,9 @@ fn test_process_gates_only_cost_gate_rejects_low_ev() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: super::IntentType::OpenLong,
+        earn_payload: None,
     };
     // AMD-2026-05-02-01 Track E E-1: seed real Active lease before Production
     // gates_only call (PA push back #4).
@@ -680,6 +695,9 @@ fn test_cost_gate_accepts_good_ev() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: super::IntentType::OpenLong,
+        earn_payload: None,
     };
     let result = proc.process(&intent, &gov, &state, 5.0, GovernanceProfile::Exploration);
     assert!(result.submitted);
@@ -719,6 +737,9 @@ fn test_cost_gate_cold_start_allows_low_volatility_paper() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: super::IntentType::OpenLong,
+        earn_payload: None,
     };
     let result = proc.process(&intent, &gov, &state, 0.1, GovernanceProfile::Exploration);
     assert!(
@@ -773,6 +794,9 @@ fn test_cost_gate_js_win_rate_weighting() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: super::IntentType::OpenLong,
+        earn_payload: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(
@@ -804,6 +828,9 @@ fn test_cost_gate_high_volume_reduces_slippage() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: super::IntentType::OpenLong,
+        earn_payload: None,
     };
     // BTC $67k, ATR=300 → atr_pct = 0.4478%
     // cost_pct = (0.00055 + 0.0001) × 2 × 100 = 0.13% (with 1bps slip)
@@ -1446,6 +1473,9 @@ fn test_opposite_direction_on_existing_position_allowed() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: super::IntentType::OpenLong,
+        earn_payload: None,
     };
     let result = proc.process(
         &intent,
@@ -1503,6 +1533,9 @@ fn test_gates_only_validation_profile_passes() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: super::IntentType::OpenLong,
+        earn_payload: None,
     };
     let result = proc.process_gates_only(&intent, &gov, &state, 5.0, GovernanceProfile::Validation);
     assert!(
@@ -1534,6 +1567,9 @@ fn test_gates_only_duplicate_rejected() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: super::IntentType::OpenLong,
+        earn_payload: None,
     };
     let result =
         proc.process_gates_only(&intent, &gov, &state, 50.0, GovernanceProfile::Validation);
@@ -1594,6 +1630,9 @@ fn test_p06_pre_guardian_reject_exchange_carries_synthetic_verdict_info() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: super::IntentType::OpenLong,
+        earn_payload: None,
     };
     let result =
         proc.process_gates_only(&intent, &gov, &state, 50.0, GovernanceProfile::Validation);
@@ -1961,5 +2000,6 @@ fn test_p2_portfolio_resting_multi_close_summed_capped_at_filled() {
     assert!(corr >= 0.0 && corr < 1e-4, "corr={} should be ~0", corr);
 }
 
-// Larger nested modules are split out to keep this file under the LOC cap.
+// 為控制本 file LOC,將 nested test mod 拆出獨立 file 並由此處 include!。
 include!("tests_predictor_router.rs");
+include!("tests_sprint1b_earn.rs");

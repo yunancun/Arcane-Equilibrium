@@ -23,7 +23,7 @@ use tracing::info;
 
 use super::common::{compute_post_only_price, MakerPriceInputs, TrendCooldown};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
-use crate::intent_processor::OrderIntent;
+use crate::intent_processor::{IntentType, OrderIntent};
 use crate::order_manager::TimeInForce;
 use crate::tick_pipeline::TickContext;
 use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
@@ -511,6 +511,9 @@ impl Strategy for FundingArb {
             persistence_elapsed_ms: None,
             time_in_force: Some(TimeInForce::PostOnly),
             maker_timeout_ms: Some(FUNDING_ARB_MAKER_TIMEOUT_MS),
+            // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+            intent_type: IntentType::OpenLong,
+            earn_payload: None,
         })]
     }
 
@@ -1168,6 +1171,9 @@ mod tests {
             persistence_elapsed_ms: None,
             time_in_force: Some(TimeInForce::PostOnly),
             maker_timeout_ms: Some(45_000),
+            // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+            intent_type: IntentType::OpenLong,
+            earn_payload: None,
         };
         let fill = openclaw_core::execution::FillResult {
             fill_price: 50_000.0,

@@ -12,6 +12,9 @@ pub mod account_manager;
 pub mod agent_spine;
 pub mod ai_budget;
 pub mod ai_service_client;
+// Sprint 1B Earn first stake B3（2026-05-23）：Flexible Saving only / 5 endpoint
+// 走共用 BybitRestClient（HMAC + rate limit + retCode 觀測）。
+pub mod bybit_earn_client;
 pub mod bybit_private_ws;
 pub mod bybit_private_ws_status_writer;
 pub mod bybit_rest_client;
@@ -21,6 +24,10 @@ pub mod combine_layer;
 pub mod common;
 pub mod config;
 pub mod cost_edge_advisor;
+// Sprint 1B Earn first stake (2026-05-23)：cron-like scheduler 命名空間。
+// 首個成員 `cron::earn_reconciliation` 每日 UTC 02:00 對 Bybit Earn 餘額 vs
+// V100 `learning.earn_movement_log` 做 reconciliation。
+pub mod cron;
 pub mod database;
 pub mod decision_context_producer;
 pub mod drawdown_revoke;

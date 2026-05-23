@@ -45,6 +45,138 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::paper_state::PaperState;
 
+/// Sprint 1B Earn first stake — IntentType 強型別 enum（7 variant）。
+///
+/// 設計依據:
+///   - earn_governance_spec §3.1 + PA dispatch packet 2026-05-23 §2 設計;
+///   - OP-4 path: CC 並行修 spec 加 PositionAdjust → 本 enum 同步含 7 variant;
+///   - 既有 trading hot-path 透過 `is_long: bool` 隱性區分 long/short;新 enum
+///     讓 IntentProcessor 入口可 dispatch trading vs Earn 分支(下游 Wave 接);
+///   - serde rename_all = "snake_case" 對齊 IPC JSON 慣例; Default = OpenLong
+///     保持既有 trading intent (4 策略 + IPC consumer) 反序列化路徑零行為差;
+///   - `is_earn()` 給 IntentProcessor.process() 用以分支 (Earn 走 bybit_earn_client
+///     + earn_movement_log writer; 非 Earn 走既有 trade path)。
+///
+/// E1b 接力說明(LeaseScope variant 擴展):
+///   本 IMPL 暫不引入 `to_lease_scope()` returning enum; LeaseScope::EarnStake /
+///   EarnRedeem 兩 variant 屬 E1b 工作(rust/openclaw_core/src/lease_scope.rs)。
+///   E1b land 後 PR 應在此補:
+///     pub fn to_lease_scope(self) -> openclaw_core::lease_scope::LeaseScope
+///   並把 router.rs line 100 字面 "TRADE_ENTRY" 改為 enum-driven。
+///   本 IMPL 提供 `to_lease_scope_audit_str()` 字串映射作為 forward-compatible 占位,
+///   下游可先用字串比對直到 enum 就緒。
+///
+/// SAFETY 不變量:
+///   - 新 variant 必須在 IntentType.to_lease_scope_audit_str() exhaustive match 同步補映射;
+///   - serde rename_all 後字串格式為 "open_long" / "earn_stake" 等 (snake_case);
+///   - Default = OpenLong: backward-compat IPC payload 不帶 intent_type 時自動回退。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntentType {
+    /// 真實開多 — Trading entry path(既有 is_long=true 路徑;serde default)。
+    OpenLong,
+    /// 真實開空 — Trading entry path(既有 is_long=false 路徑)。
+    OpenShort,
+    /// 真實平多 — Sprint 5+ position state machine 重構後啟用(預留)。
+    CloseLong,
+    /// 真實平空 — Sprint 5+ 預留。
+    CloseShort,
+    /// 倉位調整 — Strategist 重新 risk-scaled 動作(PA OP-4 path: CC 修 spec 加;
+    /// LeaseScope::PositionAdjust 既存 variant 對齊)。
+    PositionAdjust,
+    /// Bybit Earn flexible/fixed stake 操作 — earn_governance §3.1 新增。
+    /// amount + product_id + apr + tenor 等 Earn-specific field 走
+    /// EarnIntentPayload (per OrderIntent.earn_payload field)。
+    EarnStake,
+    /// Bybit Earn flexible/fixed redeem 操作 — earn_governance §3.1 新增。
+    /// 含提前贖回(fixed) + flexible 即時贖回兩種 sub-mode。
+    EarnRedeem,
+}
+
+impl Default for IntentType {
+    /// serde 反序列化 + 結構字面值 backward-compat 共用預設值。
+    /// 既有 trading IPC payload 不含 intent_type 時自動視為 OpenLong;
+    /// 非 OpenLong 場景(OpenShort/Earn) caller 必須顯式填。
+    fn default() -> Self {
+        Self::OpenLong
+    }
+}
+
+impl IntentType {
+    /// Sprint 1B Earn first stake — 是否為 Earn 路徑。
+    /// 用於 IntentProcessor.process() 內部 dispatch:
+    ///   true  → 走 bybit_earn_client + earn_movement_log writer(下游 Wave E1c/E1d);
+    ///   false → 走既有 trade path(IntentProcessor.execute_trade + bybit_rest_client)。
+    pub fn is_earn(self) -> bool {
+        matches!(self, Self::EarnStake | Self::EarnRedeem)
+    }
+
+    /// 字串映射占位(forward-compat;E1b LeaseScope variant 落地後升級為 enum return)。
+    ///
+    /// 對齊 PA dispatch packet §3.2 line 320-330 LeaseScope::as_audit_str() 預期值:
+    ///   OpenLong/OpenShort  → "TRADE_ENTRY"
+    ///   CloseLong/CloseShort → "TRADE_EXIT"
+    ///   PositionAdjust       → "POSITION_ADJUST"
+    ///   EarnStake            → "EARN_STAKE"
+    ///   EarnRedeem           → "EARN_REDEEM"
+    ///
+    /// 新 variant 必須在此 exhaustive match 同步補(編譯期強制)。
+    pub fn to_lease_scope_audit_str(self) -> &'static str {
+        match self {
+            Self::OpenLong | Self::OpenShort => "TRADE_ENTRY",
+            Self::CloseLong | Self::CloseShort => "TRADE_EXIT",
+            Self::PositionAdjust => "POSITION_ADJUST",
+            Self::EarnStake => "EARN_STAKE",
+            Self::EarnRedeem => "EARN_REDEEM",
+        }
+    }
+}
+
+/// Sprint 1B Earn first stake — Earn-specific intent payload。
+///
+/// 設計依據:
+///   - earn_governance §3.2 + V100 earn_movement_log schema 對映;
+///   - amount_usdt 用 String 載荷(非 Decimal): Bybit V5 API 原生回字串;
+///     避免引入 rust_decimal 新依賴(本 IMPL 範圍外); 下游 writer 可自行
+///     `.parse::<f64>()` 或 `.parse::<Decimal>()` (見 PA dispatch §11 push back);
+///   - product_id + tenor_days 對映 Bybit V5 Earn API param(flexible product_id /
+///     fixed product_id + tenor_days);
+///   - approval_id 對映 authorization.json UUID 字串
+///     (CLAUDE.md §四 5-gate Gate b authz_id);
+///   - actor_id: Operator role 字串(Gate a actor_id;
+///     例如 "PrimaryOperator" / "BackupOperator");
+///   - rationale: GUI 提交時的說明文字(audit forensic)。
+///
+/// SAFETY 不變量:
+///   - 此 struct 僅在 OrderIntent.earn_payload = Some(...) 時被使用;
+///   - serde default 路徑保留 IPC backward-compat (既有 trading payload 不含此 field);
+///   - Bybit V5 Earn API 對 amount 字串期望小數點數字(例 "200.00000000"); 寫入端
+///     必須先 sanitize / validate(下游 IMPL Wave E1c 職責);
+///   - approval_id 與 governance_audit_log.id 是 soft ref(PA-DRIFT-6 lesson)。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EarnIntentPayload {
+    /// stake / redeem 金額 USDT 字串(Bybit V5 API 原生格式;對映 V100
+    /// earn_movement_log.amount_usdt NUMERIC(18,8))。
+    pub amount_usdt: String,
+    /// 預期 APR basis points(stake 必填;redeem 可填可不填)。
+    /// 對映 V100 earn_movement_log.apr_at_time REAL(writer 將 bps → REAL 轉換)。
+    pub expected_apr_bps: i32,
+    /// Bybit product_id(flexible product_id 或 fixed product_id;
+    /// 查 E-1 getFlexibleProductList / E-6 getFixedProductList 返回值)。
+    pub product_id: String,
+    /// fixed staking tenor 天數(90 / 180);flexible 對應值由 caller 約定。
+    pub tenor_days: u32,
+    /// authorization.json UUID 字串
+    /// (Gate b cross-ref;對映 governance_audit_log.id soft ref)。
+    pub approval_id: String,
+    /// Operator role 字串(Gate a actor_id;
+    /// 例 "PrimaryOperator" / "BackupOperator")。
+    pub actor_id: String,
+    /// GUI 提交時的說明文字
+    /// (audit forensic;Sprint 1B Earn first stake operator 必填)。
+    pub rationale: String,
+}
+
 /// A trade intent from a strategy.
 /// 來自策略的交易意圖。
 ///
@@ -91,6 +223,27 @@ pub struct OrderIntent {
     /// （已於工廠 clamp 到 [15s, 300s]）。
     #[serde(default)]
     pub maker_timeout_ms: Option<u64>,
+    /// Sprint 1B Earn first stake — IntentType 強型別。
+    ///
+    /// 既有 trading intent ⇒ OpenLong (default;對齊既有 is_long=true 路徑) /
+    /// OpenShort (caller 顯式填;對齊 is_long=false 路徑)
+    /// Earn intent ⇒ EarnStake / EarnRedeem (走 bybit_earn_client + writer 下游 Wave)
+    /// 倉位調整 ⇒ PositionAdjust (預留;LeaseScope::PositionAdjust 對齊)
+    /// 平倉 ⇒ CloseLong / CloseShort (預留;Sprint 5+)
+    ///
+    /// serde default = OpenLong: 既有 IPC payload 不含此 field 時自動回退,
+    /// 既有 32 個 OrderIntent struct literal callers 顯式填 OpenLong 對齊
+    /// 既有行為(0 行為差;E2 review 重點 #2)。
+    #[serde(default)]
+    pub intent_type: IntentType,
+    /// Sprint 1B Earn first stake — Earn-specific payload (per EarnIntentPayload schema)。
+    ///
+    /// trading intent ⇒ None (既有路徑;不變)
+    /// Earn intent ⇒ Some(EarnIntentPayload {...}) (caller 必填 7 field)
+    ///
+    /// 不違反既有 trading hot-path: None 短路;下游 Earn writer Wave 才會讀。
+    #[serde(default)]
+    pub earn_payload: Option<EarnIntentPayload>,
 }
 
 /// Captured Guardian verdict for DB persistence (risk_verdicts table).

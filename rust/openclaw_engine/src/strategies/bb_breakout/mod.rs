@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use super::common::{compute_post_only_price, MakerPriceInputs, PerSymbolState, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{Strategy, StrategyAction, StrategyParams};
-use crate::intent_processor::OrderIntent;
+use crate::intent_processor::{IntentType, OrderIntent};
 use crate::order_manager::TimeInForce;
 use crate::tick_pipeline::TickContext;
 use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
@@ -864,6 +864,11 @@ impl Strategy for BbBreakout {
                             persistence_elapsed_ms,
                             time_in_force,
                             maker_timeout_ms,
+                            // Sprint 1B Earn first stake — IntentType backward-compat 占位
+                            // (既有 trading intent 預設 OpenLong;E1b 接 router dispatch
+                            // 後可改為按 is_long 推斷 OpenLong/OpenShort)。
+                            intent_type: IntentType::OpenLong,
+                            earn_payload: None,
                         }));
                         // 入場時寫 strategy-internal lifecycle state：squeeze 清空、entry_price
                         // 與 trailing_stop 初始化；position direction 不由本策略寫（P0 Option

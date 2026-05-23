@@ -20,6 +20,9 @@ fn make_intent(symbol: &str, qty: f64, strategy: &str) -> OrderIntent {
         persistence_elapsed_ms: None,
         time_in_force: Some(crate::order_manager::TimeInForce::PostOnly),
         maker_timeout_ms: Some(45_000),
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: crate::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     }
 }
 

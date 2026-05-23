@@ -415,6 +415,9 @@ fn test_persist_intent_helper_emits_trading_msg_intent_with_engine_mode() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: crate::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
 
@@ -472,6 +475,9 @@ fn test_persist_intent_helper_records_maker_entry_details() {
         persistence_elapsed_ms: None,
         time_in_force: Some(TimeInForce::PostOnly),
         maker_timeout_ms: Some(45_000),
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: crate::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
 
@@ -524,6 +530,9 @@ fn test_persist_intent_helper_records_scanner_opportunity_shadow_details() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: crate::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     };
     let scanner = super::super::on_tick_helpers::IntentScannerContext {
         authority_mode: ScannerAuthorityMode::AdvisoryShadow,

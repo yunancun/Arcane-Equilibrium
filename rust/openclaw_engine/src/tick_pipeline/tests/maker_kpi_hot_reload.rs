@@ -450,6 +450,9 @@ fn test_maker_kpi_gate_via_process_with_features_hot_reload_effective() {
         persistence_elapsed_ms: None,
         time_in_force: Some(TimeInForce::PostOnly),
         maker_timeout_ms: Some(45_000),
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: crate::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     };
 
     // (a) Under default config the gate is Cold (no samples) so enqueue succeeds.

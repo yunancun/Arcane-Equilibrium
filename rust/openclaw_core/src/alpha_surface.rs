@@ -28,13 +28,13 @@
 //! - **`AlphaSourceTag` enum 變更必經 ADR**：本 enum 是 alpha source SoT，添加 /
 //!   刪除 / 重命名都觸發 ADR；W-AUDIT-8a 落地後 enum 為權威。
 //!
-//! Sprint N+1 W2 BtcLeadLagPanel paper-only fence（trait 不知此 fence）：
-//! - paper-only fence 由 `tick_pipeline/on_tick/step_4_5_dispatch.rs`
+//! Sprint N+1 W2 BtcLeadLagPanel archived paper-mode read fence（trait 不知此 fence）：
+//! - archived read fence 由 `tick_pipeline/on_tick/step_4_5_dispatch.rs`
 //!   `effective_engine_mode()` gate 主防線實施（demo / live_demo / live →
 //!   `surface.btc_lead_lag = None`）。trait 端對 fence 不知情；
 //! - 策略消費端 `surface.btc_lead_lag.is_none()` → skip 即可，不需查
 //!   engine_mode；契約 = AlphaSurface::None 永遠是 fail-closed signal；
-//! - Python writer 端 + Strategy guard 是第二、三層深度防禦
+//! - explicit diagnostic producer gate + Strategy guard 是第二、三層深度防禦
 //!   （per PA `2026-05-10--alpha_surface_trait_final_shape_w1_w2_coord.md` §5）。
 
 use serde::{Deserialize, Serialize};
@@ -530,15 +530,15 @@ pub struct SentimentPanel {
 /// BtcLeadLagPanel — Sprint N+1 W2 BTC→Alt 跨資產 lead-lag panel（候選 C
 /// W-AUDIT-8c 落地版 stub）。
 ///
-/// 來源（Sprint N+1 W2 IMPL）：BTCUSDT 1m kline → lead signal（return / volume /
-/// orderbook imbalance over N=60-300s window）→ Python writer 寫
-/// `panel.btc_lead_lag_panel`（V088 migration；retention 14d）。
+/// 來源（Sprint N+1 W2 IMPL current reading）：Rust BtcLeadLag producer/replay
+/// tooling → lead signal（return / volume / orderbook imbalance over N=60-300s
+/// window）→ `panel.btc_lead_lag_panel`（V088 migration；retention 14d）。
 ///
-/// **執行邊界（Sprint N+1 W2 paper-only）**：本 wave Strategy 只在 paper engine
-/// mode 接此 panel；demo / live_demo / live → `AlphaSurface.btc_lead_lag = None`
-/// （fence 由 `tick_pipeline/on_tick/step_4_5_dispatch.rs` engine_mode gate
-/// 主防線實施，trait 端不知此 fence；策略消費端 `surface.btc_lead_lag.is_none()`
-/// → skip 即可，不需查 engine_mode）。BUSDT cohort 排除（per ADR-0018）。
+/// **執行邊界（2026-05-23 paper Archive）**：active paper engine 不再啟用；
+/// demo / live_demo / live → `AlphaSurface.btc_lead_lag = None`。diagnostic
+/// producer/replay rows 不得餵入 promotion path；策略消費端
+/// `surface.btc_lead_lag.is_none()` → skip 即可，不需查 engine_mode。BUSDT
+/// cohort 排除（per ADR-0018）。
 ///
 /// **Lead-lag 信號契約**：`btc_lead_return_pct` 必為 strict `shift(N)` 不含
 /// current bar（避免 look-ahead bias，per `feedback_indicator_lookahead_bias`）。
@@ -781,7 +781,7 @@ mod tests {
     }
 
     /// Sprint N+1 W2 BtcLeadLagPanel: trait skeleton 預寫 acceptance — 三
-    /// constructor 全部 default `btc_lead_lag = None`，paper-only fence 由
+    /// constructor 全部 default `btc_lead_lag = None`，archived read fence 由
     /// step_4_5_dispatch 構造階段控制；trait 端永遠 default None。
     #[test]
     fn btc_lead_lag_default_none() {
@@ -1041,10 +1041,7 @@ mod tests {
                 SourceAvailability::CohortExcluded,
                 r#"{"kind":"cohort_excluded"}"#,
             ),
-            (
-                SourceAvailability::StalePanel,
-                r#"{"kind":"stale_panel"}"#,
-            ),
+            (SourceAvailability::StalePanel, r#"{"kind":"stale_panel"}"#),
             (
                 SourceAvailability::MissingSymbol,
                 r#"{"kind":"missing_symbol"}"#,

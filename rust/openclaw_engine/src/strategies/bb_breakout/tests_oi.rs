@@ -505,6 +505,9 @@ fn make_open_intent(symbol: &str) -> OrderIntent {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: crate::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     }
 }
 

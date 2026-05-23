@@ -742,6 +742,9 @@ fn stress_guardian_rejects_on_high_drawdown() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: openclaw_engine::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(!result.submitted, "should reject on high drawdown");
@@ -776,6 +779,9 @@ fn stress_guardian_allows_capped_reducing_direction_conflict() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: openclaw_engine::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(
@@ -816,6 +822,9 @@ fn stress_guardian_rejects_position_count_limit() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: openclaw_engine::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(
@@ -844,6 +853,9 @@ fn stress_governance_not_authorized_rejects_all() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: openclaw_engine::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     };
     let result = proc.process(&intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
     assert!(!result.submitted);

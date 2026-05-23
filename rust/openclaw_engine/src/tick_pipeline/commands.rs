@@ -207,6 +207,12 @@ impl TickPipeline {
             persistence_elapsed_ms: None,
             time_in_force: None,
             maker_timeout_ms: None,
+            // Sprint 1B Earn first stake — IntentType backward-compat 占位
+            // (manual / IPC command 派發的 intent 預設 trading OpenLong;
+            // 未來若 GUI 加 Earn intent 派發路徑,則於此 caller 顯式填
+            // IntentType::EarnStake / EarnRedeem + Some(EarnIntentPayload {...}))。
+            intent_type: crate::intent_processor::IntentType::OpenLong,
+            earn_payload: None,
         };
 
         let result = self.intent_processor.process(
@@ -1875,11 +1881,15 @@ impl TickPipeline {
         let kind = self.halt_kind?;
         let ttl_ms = match kind {
             crate::halt_audit::HaltKind::DailyLoss => {
-                self.intent_processor.risk_config().limits.daily_loss_halt_ttl_ms
+                self.intent_processor
+                    .risk_config()
+                    .limits
+                    .daily_loss_halt_ttl_ms
             }
             // sticky kinds：無剩餘概念。
-            crate::halt_audit::HaltKind::SessionDrawdown
-            | crate::halt_audit::HaltKind::Other => return None,
+            crate::halt_audit::HaltKind::SessionDrawdown | crate::halt_audit::HaltKind::Other => {
+                return None
+            }
         };
         if ttl_ms == 0 {
             // Live D1：daily_loss sticky。
