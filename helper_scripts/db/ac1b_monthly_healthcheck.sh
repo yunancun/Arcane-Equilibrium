@@ -15,8 +15,10 @@
 #     後仍能 30 min 內回填即 PASS）。
 #
 # Crontab spec（per PA report §5.2.3）:
-#   30 3 1 * * /home/ncyu/BybitOpenClaw/srv/helper_scripts/db/ac1b_monthly_healthcheck.sh
+#   30 3 1 * * ${OPENCLAW_BASE_DIR:-/home/ncyu/BybitOpenClaw/srv}/helper_scripts/db/ac1b_monthly_healthcheck.sh
 #   月初 03:30 UTC（避撞 passive_wait_healthcheck 0/6/12/18:00 UTC 6h cron）
+#   為什麼 ${OPENCLAW_BASE_DIR:-...} 抽象：避硬編碼 /home/ncyu 阻礙未來 Apple
+#   Silicon Mac 部署（per CLAUDE §六 跨平台 portability mandate）。
 #
 # Usage:
 #   bash helper_scripts/db/ac1b_monthly_healthcheck.sh           # full output
@@ -31,7 +33,10 @@
 #   OPENCLAW_BASE_DIR        repo root (default: $HOME/BybitOpenClaw/srv)
 #   OPENCLAW_SECRETS_ROOT    secrets dir (default: $HOME/BybitOpenClaw/secrets)
 #   OPENCLAW_PG_CONTAINER    PG container (default: trading_postgres)
-#   OPENCLAW_HEARTBEAT_DIR   sentinel mtime dir (default: /tmp/openclaw/cron_heartbeat)
+#   OPENCLAW_CRON_HEARTBEAT_DIR   sentinel mtime dir
+#                                 (default: $OPENCLAW_DATA_DIR/cron_heartbeat
+#                                  → /tmp/openclaw/cron_heartbeat)
+#   OPENCLAW_DATA_DIR             cron_heartbeat parent (default: /tmp/openclaw)
 #   POSTGRES_DB / POSTGRES_USER / POSTGRES_HOST / POSTGRES_PORT fallback
 # =============================================================================
 
@@ -41,7 +46,11 @@ BASE_DIR="${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}"
 SECRETS_ROOT="${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}"
 SECRETS_ENV="$SECRETS_ROOT/environment_files/basic_system_services.env"
 PG_CONT="${OPENCLAW_PG_CONTAINER:-trading_postgres}"
-SENTINEL_DIR="${OPENCLAW_HEARTBEAT_DIR:-/tmp/openclaw/cron_heartbeat}"
+# 為什麼此 fallback chain：對齊 checks_cron_heartbeat.py:45-48 mainstream
+# convention — OPENCLAW_CRON_HEARTBEAT_DIR 直接覆蓋 > OPENCLAW_DATA_DIR/
+# cron_heartbeat 推導 > /tmp/openclaw/cron_heartbeat 最終 fallback。
+DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
+SENTINEL_DIR="${OPENCLAW_CRON_HEARTBEAT_DIR:-$DATA_DIR/cron_heartbeat}"
 
 QUIET=0
 for arg in "$@"; do
@@ -132,8 +141,11 @@ done <<<"$OUTPUT"
 # ─── 5. Sentinel mtime touch (per checks_cron_heartbeat.py 範式) ───────────
 # 為什麼 sentinel：passive_wait_healthcheck.py [75]-[79] 透過 sentinel mtime
 # 推斷 cron 是否按時 fire；本 cron 加入該 family（per PA spec §5.2.2）。
+# 為什麼 .last_fire 命名：對齊 checks_cron_heartbeat.py:6 mainstream pattern
+# `<name>.last_fire`（test_cron_heartbeat_healthchecks.py:283 verify）；
+# 偏離此 suffix 會被 cron_heartbeat WARN-by-default check 漏接。
 mkdir -p "$SENTINEL_DIR"
-touch "$SENTINEL_DIR/ac1b_monthly_healthcheck.last_run"
+touch "$SENTINEL_DIR/ac1b_monthly_healthcheck.last_fire"
 
 # ─── 6. Verdict ────────────────────────────────────────────────────────────
 if (( FAIL_COUNT > 0 )); then

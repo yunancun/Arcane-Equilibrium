@@ -124,10 +124,17 @@ while IFS='|' read -r check_name domain metric_name col4 col5; do
     "§2 samples_per_min")
       # col5 = samples_per_min；應 == 1
       samples="$col5"
-      if [[ "$samples" == "0" ]]; then
+      # 為什麼顯式 regex check：原本 `2>/dev/null` 抑制非數字 stderr 是
+      # except:pass 反模式（per feedback_working_principles 「誠實報告測試」）；
+      # 非數字 sample value（如 SQL parse 漏接 NULL / column drift）必須 fail
+      # loud 而非靜默歸 OK band。
+      if [[ ! "$samples" =~ ^[0-9]+$ ]]; then
+        echo "[FAIL] §2 $domain $metric_name bucket=$col4 samples_per_min='$samples' (非數字；SQL parse 漏接 or column drift)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+      elif [[ "$samples" == "0" ]]; then
         echo "[FAIL] §2 $domain $metric_name bucket=$col4 samples_per_min=0 (emitter task crashed?)"
         FAIL_COUNT=$((FAIL_COUNT + 1))
-      elif [[ -n "$samples" && "$samples" -gt 2 ]] 2>/dev/null; then
+      elif (( samples > 2 )); then
         echo "[FAIL] §2 $domain $metric_name bucket=$col4 samples_per_min=$samples (duplicate emit bug?)"
         FAIL_COUNT=$((FAIL_COUNT + 1))
       fi
@@ -136,7 +143,11 @@ while IFS='|' read -r check_name domain metric_name col4 col5; do
       # col4 = row_count_30min；col5 = avg_delta_seconds
       row_count="$col4"
       avg_delta="$col5"
-      if [[ -z "$row_count" || "$row_count" -lt 25 ]] 2>/dev/null; then
+      # 同上：row_count 非數字必須 fail loud。
+      if [[ ! "$row_count" =~ ^[0-9]+$ ]]; then
+        echo "[FAIL] §3 $domain $metric_name 30min row_count='$row_count' (非數字；SQL parse 漏接 or column drift)"
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+      elif (( row_count < 25 )); then
         echo "[FAIL] §3 $domain $metric_name 30min row_count=$row_count (expected ~30)"
         FAIL_COUNT=$((FAIL_COUNT + 1))
       else

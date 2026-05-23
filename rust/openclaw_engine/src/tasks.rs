@@ -462,6 +462,11 @@ pub(crate) async fn spawn_db_writers(
     Option<tokio::sync::mpsc::Sender<openclaw_engine::database::ShadowExitMsg>>,
     Option<tokio::sync::mpsc::Sender<openclaw_engine::agent_spine::store::AgentSpineMsg>>,
     openclaw_engine::agent_spine::config::AgentSpineMode,
+    // Sprint 5+ Track C round 2：WriterQueueStats / PoolWaitStats Arc 反傳給
+    // main.rs，main.rs 透傳 spawn_metric_emitter_scheduler 注入 emitter probe。
+    // DB 不可用時 (db_pool.is_available()=false) 兩者皆 None。
+    Option<Arc<openclaw_engine::database::writer_queue_stats::WriterQueueStats>>,
+    Option<Arc<openclaw_engine::database::pool_wait_stats::PoolWaitStats>>,
 ) {
     let agent_spine_mode = openclaw_engine::agent_spine::config::AgentSpineMode::from_runtime_env();
     if !db_pool.is_available() {
@@ -477,17 +482,44 @@ pub(crate) async fn spawn_db_writers(
             None,
             None,
             agent_spine_mode,
+            // Sprint 5+ Track C round 2：DB 不可用走 None；emitter 端 fallback
+            // 走 PlaceholderPipelineThroughputSource 0u32（per spec §3.5 設計）。
+            None,
+            None,
         );
     }
 
     // Market writer channel + task
-    let (market_tx, market_rx) = tokio::sync::mpsc::channel(4096);
+    // Sprint 5+ Track C round 2：channel cap=4096 對齊 WriterQueueStats ctor，
+    // 確保 emitter 端 `current_depth()` 計算 `MAX_CAP - Sender::capacity()` 正確。
+    const MARKET_TX_CAPACITY_MAX: u32 = 4096;
+    let (market_tx, market_rx) = tokio::sync::mpsc::channel(MARKET_TX_CAPACITY_MAX as usize);
+
+    // Sprint 5+ Track C round 2：構造 PoolWaitStats 與 WriterQueueStats Arc，
+    // 兩 stats 將跨 spawn 與 main_health_emitters.rs 共享同一 instance。
+    // - PoolWaitStats: market_writer / trading_writer 兩個 hot-path writer 共享，
+    //   合在一起 sample 300-bucket sliding window p95 反映實際 pool acquire backlog。
+    // - WriterQueueStats: 包 `Arc::new(market_tx.clone())` 暴露 channel handle 給
+    //   emitter；既有 market_tx 仍走 Sender::clone() 傳遞給 caller，0 行為退化。
+    let pool_wait_stats = Arc::new(
+        openclaw_engine::database::pool_wait_stats::PoolWaitStats::new(),
+    );
+    let writer_queue_stats = Arc::new(
+        openclaw_engine::database::writer_queue_stats::WriterQueueStats::new(
+            Arc::new(market_tx.clone()),
+            MARKET_TX_CAPACITY_MAX,
+        ),
+    );
+
     {
         let mw_pool = Arc::clone(db_pool);
         let mw_config = Arc::clone(config);
         let mw_cancel = cancel.clone();
+        // Sprint 5+ Track C round 2：透傳 pool_wait_stats Arc clone；market_writer
+        // 在 flush_timer tick 時 buf 非空走 pool_acquire_with_stats sample。
+        let mw_pool_wait = Some(Arc::clone(&pool_wait_stats));
         tokio::spawn(openclaw_engine::database::market_writer::run_market_writer(
-            market_rx, mw_pool, mw_config, mw_cancel,
+            market_rx, mw_pool, mw_config, mw_cancel, mw_pool_wait,
         ));
     }
 
@@ -510,9 +542,12 @@ pub(crate) async fn spawn_db_writers(
         let tw_pool = Arc::clone(db_pool);
         let tw_config = Arc::clone(config);
         let tw_cancel = cancel.clone();
+        // Sprint 5+ Track C round 2：透傳 pool_wait_stats Arc clone；trading_writer
+        // 與 market_writer 共享同一 stats sliding window，sample 量更高、p95 更穩。
+        let tw_pool_wait = Some(Arc::clone(&pool_wait_stats));
         tokio::spawn(
             openclaw_engine::database::trading_writer::run_trading_writer(
-                trading_rx, tw_pool, tw_config, tw_cancel,
+                trading_rx, tw_pool, tw_config, tw_cancel, tw_pool_wait,
             ),
         );
     }
@@ -741,6 +776,10 @@ pub(crate) async fn spawn_db_writers(
         Some(shadow_exit_tx),
         agent_spine_tx,
         agent_spine_mode,
+        // Sprint 5+ Track C round 2 caller wire-up：兩 stats Arc 反傳給 main.rs，
+        // main.rs 端透傳 spawn_metric_emitter_scheduler 注入 RealDatabasePoolProbe。
+        Some(writer_queue_stats),
+        Some(pool_wait_stats),
     )
 }
 

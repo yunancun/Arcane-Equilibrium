@@ -17,6 +17,7 @@
 
 use crate::common::ws_backoff::BackoffConfig;
 use futures_util::{SinkExt, StreamExt};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
@@ -154,8 +155,18 @@ impl WsClient {
                                         WsTopicChange::Subscribe(topics) => {
                                             // 1. Record for reconnect replay / 記錄以供重連重播
                                             // P-06: HashSet.insert() handles dedup natively / HashSet.insert() 自動去重
+                                            // Sprint 5+ Track B round 2：以 HashSet.insert() 回傳值判定實際新增，
+                                            // 避 dedup 重複時 counter 多算（per `feedback_no_dead_params`）。
+                                            let mut newly_inserted: u32 = 0;
                                             for t in &topics {
-                                                self.subscriptions.insert(t.clone());
+                                                if self.subscriptions.insert(t.clone()) {
+                                                    newly_inserted += 1;
+                                                }
+                                            }
+                                            if newly_inserted > 0 {
+                                                if let Some(ref c) = self.subscriptions_counter {
+                                                    c.fetch_add(newly_inserted, Ordering::Relaxed);
+                                                }
                                             }
                                             // 2. Send to Bybit in batches / 分批發送給 Bybit
                                             for chunk in topics.chunks(SUBSCRIBE_BATCH_SIZE) {
@@ -172,7 +183,16 @@ impl WsClient {
                                         }
                                         WsTopicChange::Unsubscribe(topics) => {
                                             // 1. Remove from replay list / 從重播列表移除
+                                            // Sprint 5+ Track B round 2：retain 後 len 差即實際移除數，
+                                            // 對齊 counter 同步（per `feedback_no_dead_params`）。
+                                            let before_len = self.subscriptions.len();
                                             self.subscriptions.retain(|t| !topics.contains(t));
+                                            let removed = before_len.saturating_sub(self.subscriptions.len()) as u32;
+                                            if removed > 0 {
+                                                if let Some(ref c) = self.subscriptions_counter {
+                                                    c.fetch_sub(removed, Ordering::Relaxed);
+                                                }
+                                            }
                                             // 2. Send unsubscribe to Bybit / 發送取消訂閱給 Bybit
                                             for chunk in topics.chunks(SUBSCRIBE_BATCH_SIZE) {
                                                 let msg = serde_json::json!({"op":"unsubscribe","args":chunk});

@@ -171,32 +171,35 @@ fn build_real_pipeline_throughput_probe(
     RealPipelineThroughputSource::new(ws_stats, signal_stats, expected_topic_count, actual_topic_count)
 }
 
-/// 構造 Track B `PipelineThroughputEmitter`：四 source 任一缺席走 placeholder。
+/// 構造 Track B `PipelineThroughputEmitter`：mandatory Arc 注入 real probe。
 ///
-/// 為什麼 partial-Some 也走 placeholder fallback（對齊 Track D 設計範式 §3.4 改動 2）:
-///   - 四 source `ws_stats` / `signal_stats` / `expected_topic` / `actual_topic`
-///     需同時存在才能 emit production-aligned 5 metric；任一 None = pipeline
-///     binding 半接通狀態。
-///   - per `feedback_no_dead_params` 反假陽性：partial 走 mixed real/placeholder
-///     會誤導 reviewer；統一走 placeholder fallback 讓 V106 row 中性表態。
+/// 為什麼 round 2 改 mandatory Arc（per spec §2.6 + Operator round 2 instruction）:
+///   - round 1 走 `&Option<Arc<...>>` 容忍模式，導致 caller 端 main.rs 4 None
+///     直接走全 placeholder fallback，V106 row 仍 100% placeholder（違 AC-3）。
+///   - round 2 強制 caller wire-up：caller (spawn_metric_emitter_scheduler) 在
+///     db_pool 不可用 / signal 端缺失時自行構造 `PlaceholderPipelineThroughput
+///     Source` Box，emitter 端 signature 不再容納 None；type-level enforce 真接通。
+///   - 對齊 spec §2.6 mandatory Arc + `feedback_no_dead_params` 反假陽性原則。
 fn build_pipeline_throughput_emitter(
-    ws_stats: &Option<Arc<WsStats>>,
-    signal_stats: &Option<Arc<SignalStats>>,
-    expected_topic_count: Option<Arc<dyn Fn() -> u32 + Send + Sync>>,
-    actual_topic_count: Option<Arc<dyn Fn() -> u32 + Send + Sync>>,
+    ws_stats: Arc<WsStats>,
+    signal_stats: Arc<SignalStats>,
+    expected_topic_count: Arc<dyn Fn() -> u32 + Send + Sync>,
+    actual_topic_count: Arc<dyn Fn() -> u32 + Send + Sync>,
 ) -> Box<dyn DomainEmitter> {
-    match (ws_stats, signal_stats, expected_topic_count, actual_topic_count) {
-        (Some(ws), Some(sig), Some(exp), Some(act), ) => {
-            let probe = build_real_pipeline_throughput_probe(
-                Arc::clone(ws), Arc::clone(sig), exp, act,
-            );
-            Box::new(PipelineThroughputEmitter::new(probe))
-        }
-        _ => {
-            // 全 placeholder fallback：任一 None 走 5 metric default OK band。
-            Box::new(PipelineThroughputEmitter::new(PlaceholderPipelineThroughputSource))
-        }
-    }
+    let probe = build_real_pipeline_throughput_probe(
+        ws_stats,
+        signal_stats,
+        expected_topic_count,
+        actual_topic_count,
+    );
+    Box::new(PipelineThroughputEmitter::new(probe))
+}
+
+/// caller 端 fallback：spawn_metric_emitter_scheduler 在 source 缺失時呼此 fn
+/// 構造 placeholder emitter；保留 round 1 的 5 metric OK band 默認值（避誤升
+/// DEGRADED），但**只在 caller 明確走 fallback 路徑時使用**。
+fn build_pipeline_throughput_placeholder_emitter() -> Box<dyn DomainEmitter> {
+    Box::new(PipelineThroughputEmitter::new(PlaceholderPipelineThroughputSource))
 }
 
 struct PlaceholderPipelineThroughputSource;
@@ -357,37 +360,40 @@ fn build_engine_runtime_emitter() -> Box<dyn DomainEmitter> {
 
 /// Sprint 5+ §4.3.6 Track C real probe builder（per spec §3.5）。
 ///
-/// 為什麼 Option<Arc<...>> 而非 mandatory：
-///   - tasks.rs spawn_db_writers 在 PG 不可用時 market_tx 為 None；此時 Track C
-///     real probe 無法構造（沒 sender handle 算 capacity）→ 走 placeholder
-///     fallback 0u32（既有 Wave B 範式 1:1 保留）。
-///
-/// 為什麼兩 stats 同 None / 同 Some 二選一（per `feedback_no_dead_params` 對齊
-/// Track B partial fallback）：
-///   - 任一 None = pipeline binding 半接通狀態；統一走 placeholder fallback 讓
-///     V106 row 中性表態，避免「半連線是合法狀態」誤導 reviewer。
+/// 為什麼 round 2 改 mandatory Arc（per spec §3.5 + Operator round 2 instruction）:
+///   - round 1 走 `&Option<Arc<...>>` 容忍模式，導致 caller 端 main.rs 2 None
+///     直接走 0u32 closure fallback，V106 writer_queue / pool_wait p95 row 仍
+///     100% placeholder。
+///   - round 2 強制 caller wire-up：caller 在 DB 不可用時自行構造 0u32 closure
+///     fallback；emitter 端 signature 不再容納 None。
+///   - 對齊 spec §3.5 mandatory Arc + `feedback_no_dead_params` 反假陽性原則。
 fn build_database_pool_emitter(
     db_pool: &Arc<DbPool>,
     pool_max_conn: u32,
     data_dir_mount: &str,
-    writer_queue_stats: &Option<Arc<WriterQueueStats>>,
-    pool_wait_stats: &Option<Arc<PoolWaitStats>>,
+    writer_queue_stats: Arc<WriterQueueStats>,
+    pool_wait_stats: Arc<PoolWaitStats>,
 ) -> Box<dyn DomainEmitter> {
-    let (writer_queue_probe, pool_wait_p95_probe): (WriterQueueProbe, PoolWaitP95Probe) =
-        match (writer_queue_stats, pool_wait_stats) {
-            (Some(wq), Some(pw)) => {
-                // Sprint 5+ §4.3.6 production wire-up：真實 source closure。
-                (
-                    build_writer_queue_probe(Arc::clone(wq)),
-                    build_pool_wait_p95_probe(Arc::clone(pw)),
-                )
-            }
-            _ => {
-                // 全 placeholder fallback：任一 None 走 0u32 closure（既有 Wave B 範式）。
-                (Arc::new(|| 0u32), Arc::new(|| 0u32))
-            }
-        };
+    let writer_queue_probe: WriterQueueProbe = build_writer_queue_probe(writer_queue_stats);
+    let pool_wait_p95_probe: PoolWaitP95Probe = build_pool_wait_p95_probe(pool_wait_stats);
+    Box::new(DatabasePoolEmitter::new(
+        Arc::clone(db_pool),
+        pool_max_conn,
+        data_dir_mount.to_string(),
+        writer_queue_probe,
+        pool_wait_p95_probe,
+    ))
+}
 
+/// caller 端 fallback：在 DB 不可用 / source Arc 缺失時走 0u32 closure
+/// placeholder（既有 Wave B 範式）；只在 caller 明確走 fallback 路徑時使用。
+fn build_database_pool_placeholder_emitter(
+    db_pool: &Arc<DbPool>,
+    pool_max_conn: u32,
+    data_dir_mount: &str,
+) -> Box<dyn DomainEmitter> {
+    let writer_queue_probe: WriterQueueProbe = Arc::new(|| 0u32);
+    let pool_wait_p95_probe: PoolWaitP95Probe = Arc::new(|| 0u32);
     Box::new(DatabasePoolEmitter::new(
         Arc::clone(db_pool),
         pool_max_conn,
@@ -520,27 +526,60 @@ pub(crate) fn spawn_metric_emitter_scheduler(
     let mode_str = engine_mode_str.to_string();
     let engine_mode: EngineModeProvider = Arc::new(move || mode_str.clone());
 
-    // Step 4: 構造 6 emitter（A real / B real (Sprint 5+ §4.3.5 partial — 4/5
-    // metric real + ipc_p99 placeholder) / C real (Sprint 5+ §4.3.6) / D real
-    // (Sprint 5+ §4.2.1) / E skip / F real）。
+    // Step 4: 構造 6 emitter（A real / B real (Sprint 5+ §4.3.5 round 2 caller
+    // wire-up 完成 — 4/5 metric real + ipc_p99 placeholder) / C real (Sprint 5+
+    // §4.3.6 round 2 caller wire-up 完成) / D real (Sprint 5+ §4.2.1) / E skip
+    // / F real）。
     let engine_runtime = build_engine_runtime_emitter();
-    // Sprint 5+ §4.3.5 Track B：四 source 同時注入才走 real probe；任一 None
-    // 走 placeholder fallback（per build_pipeline_throughput_emitter match arm）。
-    let pipeline_throughput: Box<dyn DomainEmitter> = build_pipeline_throughput_emitter(
+
+    // Sprint 5+ §4.3.5 Track B round 2 caller wire-up：mandatory Arc 注入。
+    // 任一 source None 走 caller-side placeholder fallback（per spec §2.6 +
+    // Operator round 2 instruction 「emitter signature 不再容納 None；fallback
+    // 由 caller 構造」）。
+    let pipeline_throughput: Box<dyn DomainEmitter> = match (
         ws_stats,
         signal_stats,
         expected_topic_count,
         actual_topic_count,
-    );
-    // Sprint 5+ §4.3.6 Track C：兩 source 同時注入才走 real probe；任一 None
-    // 走 placeholder fallback（per build_database_pool_emitter match arm）。
-    let database_pool = build_database_pool_emitter(
-        db_pool,
-        pool_max_conn,
-        data_dir_mount,
-        writer_queue_stats,
-        pool_wait_stats,
-    );
+    ) {
+        (Some(ws), Some(sig), Some(exp), Some(act)) => build_pipeline_throughput_emitter(
+            Arc::clone(ws),
+            Arc::clone(sig),
+            exp.clone(),
+            act.clone(),
+        ),
+        _ => {
+            warn!(
+                target = "m3.health.wireup",
+                "M3 PipelineThroughput Track B caller wire-up incomplete: \
+                 source Arc 缺失 → 走 PlaceholderPipelineThroughputSource fallback \
+                 (5 metric OK band default)"
+            );
+            build_pipeline_throughput_placeholder_emitter()
+        }
+    };
+
+    // Sprint 5+ §4.3.6 Track C round 2 caller wire-up：mandatory Arc 注入。
+    // 兩 source 任一 None 走 caller-side 0u32 closure placeholder（既有 Wave B
+    // 範式）。spawn_db_writers 在 DB 不可用時返 None None，此處走 fallback。
+    let database_pool: Box<dyn DomainEmitter> = match (writer_queue_stats, pool_wait_stats) {
+        (Some(wq), Some(pw)) => build_database_pool_emitter(
+            db_pool,
+            pool_max_conn,
+            data_dir_mount,
+            Arc::clone(wq),
+            Arc::clone(pw),
+        ),
+        _ => {
+            warn!(
+                target = "m3.health.wireup",
+                "M3 DatabasePool Track C caller wire-up incomplete: \
+                 WriterQueueStats / PoolWaitStats Arc 缺失 → 走 0u32 placeholder \
+                 closure fallback（既有 Wave B 範式）"
+            );
+            build_database_pool_placeholder_emitter(db_pool, pool_max_conn, data_dir_mount)
+        }
+    };
     // PA-DRIFT-4 Sprint 5+ §4.2.1：transmit ws Arc through to api_latency
     // emitter；三 source 同 None 走 placeholder fallback（paper-only / cold-
     // start no-binding）。

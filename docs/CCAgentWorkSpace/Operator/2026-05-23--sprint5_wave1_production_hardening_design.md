@@ -3,7 +3,14 @@ report: PA design — Sprint 5+ Wave 1 §8.6 §4.4 production hardening (4 items
 date: 2026-05-23
 author: PA (Project Architect)
 phase: Sprint 5+ Wave 1 (per Stage F §8.6 carry-over)
-status: DESIGN-DONE
+status: DESIGN-DONE (round 2 amendment 2026-05-23 — see note below)
+round_2_amendment:
+  - 為什麼此 note：本 mirror 為 Operator workspace 副本；canonical PA dispatch
+    packet 位於 `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint5_wave1_production_hardening_design.md`。
+  - E2-5 round 1 review RETURN-TO-E1 已就「ws_rtt_p50 ladder + sentinel
+    naming + bash numeric check + spec amend note」4 處 hardening 派 E1
+    round 2 fix；本 mirror 不再同步更新 ladder 數字，請以 canonical PA
+    packet + design spec §2.3.3 為準。
 parent_signoff: srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_4_first_live_carryover_pm_phase_3e_signoff.md §4.4
 parent_acceptance: srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--stage_a_to_e_overall_acceptance.md §8.6
 upstream_evidence:

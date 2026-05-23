@@ -12,7 +12,8 @@
 //!   與 market_writer 相同模式。
 
 use super::batch_insert::{batch_insert_chunked, BatchInsertOutcome};
-use super::pool::DbPool;
+use super::pool::{pool_acquire_with_stats, DbPool};
+use super::pool_wait_stats::PoolWaitStats;
 use super::{sanitize_f64, sanitize_f64_or_zero, TradingMsg};
 use sqlx::{Postgres, QueryBuilder};
 use std::sync::Arc;
@@ -22,11 +23,18 @@ use tracing::{info, warn};
 
 /// Run the trading data writer task.
 /// 運行交易數據寫入器任務。
+///
+/// Sprint 5+ Track C round 2 caller wire-up：可選 `pool_wait_stats` Arc 注入
+/// 後，每次 flush_timer tick 前在 buf 非空時透過 `pool_acquire_with_stats` 拿
+/// 一條短暫 connection 計時樣本，反映 pool acquire backlog 真實 latency；
+/// 釋放後再走既有 flush_all 路徑（每筆 query 內部 acquire 不重複計時）。
+/// None = 既有 caller / test 不接 health pipeline 走 0 行為退化。
 pub async fn run_trading_writer(
     mut rx: mpsc::Receiver<TradingMsg>,
     pool: Arc<DbPool>,
     config: Arc<crate::config::ConfigManager>,
     cancel: CancellationToken,
+    pool_wait_stats: Option<Arc<PoolWaitStats>>,
 ) {
     let mut signal_buf: Vec<TradingMsg> = Vec::with_capacity(32);
     let mut intent_buf: Vec<TradingMsg> = Vec::with_capacity(16);
@@ -53,6 +61,26 @@ pub async fn run_trading_writer(
             _ = cancel.cancelled() => break,
             _ = flush_timer.tick() => {
                 if pool.is_available() {
+                    // Sprint 5+ Track C round 2：buf 非空時先拿一條短暫 connection
+                    // 計時樣本，反映 pool acquire wait 真實 latency；釋放後續走
+                    // 既有 flush_all（每筆 query 內部 acquire 不重複計時）。
+                    if let Some(ref pw_stats) = pool_wait_stats {
+                        if let Some(pg_ref) = pool.get() {
+                            let any_pending = !signal_buf.is_empty()
+                                || !intent_buf.is_empty()
+                                || !fill_buf.is_empty()
+                                || !funding_buf.is_empty()
+                                || !pos_buf.is_empty()
+                                || !verdict_buf.is_empty()
+                                || !order_buf.is_empty()
+                                || !state_change_buf.is_empty()
+                                || !scanner_snapshot_buf.is_empty()
+                                || !scanner_decay_buf.is_empty();
+                            if any_pending {
+                                let _ = pool_acquire_with_stats(pg_ref, pw_stats).await;
+                            }
+                        }
+                    }
                     flush_all(
                         &pool,
                         &mut signal_buf,
