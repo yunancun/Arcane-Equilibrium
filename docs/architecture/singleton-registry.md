@@ -186,6 +186,27 @@ per main_health_emitters.rs:305-316 — Wave B 採「engine-wide single cache」
 | governance_authority | ADR-0042 Decision 5（cascade subscriber 上限 8） + Sprint 2 Wave 1 Track A scaffold + spec §4.1 + §3.1 step 5 |
 | migration_plan | Sprint 5+ cascade IMPL：接 4-8 subscriber（LAL Tier / Strategy halt / Alert router / GUI）；per ADR-0042 Decision 5；本 round 不接 cross-process channel；Sprint 5 才接 |
 
+### §2.3 GUI Bybit-first PnL — Python closed-PnL cache（2026-05-23）
+
+per GUI Bybit-first PnL refactor Phase 2；backend-only endpoint `/api/v1/strategy/demo/closed-pnl` 用 Bybit REST 讀取後做 PG strategy reconcile，不寫 `trading.fills`。
+
+#### 2.3.1 `_CLOSED_PNL_CACHE`
+
+| 欄位 | 值 |
+|---|---|
+| name | `_CLOSED_PNL_CACHE` |
+| type_signature | `app.bybit_pnl_cache.ClosedPnlCache | None`；內部 `{ _entries: dict[Hashable, _CacheEntry], _inflight: set[Hashable], _lock: threading.RLock, _ready: threading.Condition }` |
+| location | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/strategy_ai_routes.py:32` binding；implementation `app/bybit_pnl_cache.py` |
+| owner_lifecycle | `strategy_ai_routes._closed_pnl_cache()` lazy 構造；每個 uvicorn worker process-local；API worker exit 時 drop |
+| cross_task_pattern | producer: `/demo/closed-pnl` cache miss 執行 Bybit `GET /v5/position/closed-pnl` 後 put；consumer: 同 endpoint cache hit / stale-cache degraded path；in-flight set 讓同 worker 同 key 只打一個 Bybit request |
+| lock_primitive | `threading.RLock` + `threading.Condition`；TTL 8s；不跨 process 去重 |
+| visibility | private module binding；route helper 間接使用 |
+| caller_chain | producer/consumer: `strategy_ai_routes.get_demo_closed_pnl()`；Bybit read method: `bybit_rest_client.BybitClient.get_closed_pnl()`；PG reconcile/fallback 為 read-only SELECT `trading.fills` |
+| health_monitoring | NO — GUI read cache；失敗以 route `source/degraded_reason/cache_age` 暴露，無 M3 health row |
+| registered_date | 2026-05-23 |
+| governance_authority | `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-23--gui_bybit_first_pnl_refactor_acceptance.md` + operator Q1/Q2/Q3 = A/A/A |
+| migration_plan | 0 for current Phase 2；若未來多 worker 需要 cross-process cache，再另開 Redis/IPC design，不在本 scope |
+
 ---
 
 ## §3 Registration Rules

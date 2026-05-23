@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+import time
 from typing import Any
 
 from fastapi import Depends, HTTPException, Query
@@ -27,6 +29,18 @@ from .strategy_wiring import (
 )
 
 logger = logging.getLogger(__name__)
+_CLOSED_PNL_CACHE = None
+_OPENCLAW_LINK_RE = re.compile(r"^oc_(?:close_[a-z0-9_]+_)?(?:risk_)?(?P<engine>dm|ld)(?:_|$)", re.I)
+_CLOSED_PNL_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+
+
+def _closed_pnl_cache():
+    """Lazy singleton for Demo closed-PnL REST reads."""
+    global _CLOSED_PNL_CACHE
+    if _CLOSED_PNL_CACHE is None:
+        from .bybit_pnl_cache import ClosedPnlCache  # noqa: PLC0415
+        _CLOSED_PNL_CACHE = ClosedPnlCache(ttl_sec=8.0)
+    return _CLOSED_PNL_CACHE
 
 
 def _require_demo_session_write(actor: base.AuthenticatedActor) -> None:
@@ -647,6 +661,232 @@ def _normalize_execution(f: dict) -> dict:
     }
 
 
+def _strategy_from_order_link_id(
+    order_link_id: Any,
+    *,
+    symbol: str,
+) -> tuple[str, str]:
+    """Infer strategy_name/source from Bybit orderLinkId when PG join misses."""
+    link = str(order_link_id or "").strip()
+    match = _OPENCLAW_LINK_RE.match(link)
+    if not link or not match:
+        return "external_manual", "bybit_unknown"
+    engine = "live_demo" if match.group("engine").lower() == "ld" else "demo"
+    owner = _engine_owner_strategy_map(engine).get(symbol)
+    if owner:
+        return owner, "pg_link_id"
+    return "unknown_pending", "pg_missing_unknown_external"
+
+
+def _fetch_strategy_by_order_id(order_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """Read-only PG join: Bybit orderId/link id → latest local fill attribution."""
+    ids = sorted({oid for oid in order_ids if oid})
+    if not ids:
+        return {}
+    try:
+        from . import db_pool  # noqa: PLC0415
+        conn = db_pool.get_conn()
+    except Exception:
+        return {}
+    if conn is None:
+        return {}
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT DISTINCT ON (order_id) order_id, strategy_name, realized_pnl "
+            "FROM trading.fills "
+            "WHERE order_id = ANY(%s) AND engine_mode IN (%s, %s) "
+            "ORDER BY order_id, ts DESC",
+            (ids, "demo", "live_demo"),
+        )
+        rows = cur.fetchall()
+        return {
+            str(order_id): {
+                "strategy_name": str(strategy_name) if strategy_name else "",
+                "realized_pnl": _safe_float(realized_pnl),
+            }
+            for order_id, strategy_name, realized_pnl in rows
+            if order_id
+        }
+    except Exception as exc:
+        logger.warning("closed-pnl PG strategy join failed: %s", exc)
+        return {}
+    finally:
+        try:
+            db_pool.put_conn(conn)
+        except Exception:
+            pass
+
+
+def _closed_pnl_float(row: dict[str, Any], key: str) -> float | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    return _safe_float(value)
+
+
+def _closed_pnl_snake_row(row: dict[str, Any]) -> dict[str, Any]:
+    """Expose stable snake_case aliases while preserving raw Bybit camelCase."""
+    closed_pnl = _closed_pnl_float(row, "closedPnl")
+    open_fee = _closed_pnl_float(row, "openFee")
+    close_fee = _closed_pnl_float(row, "closeFee")
+    fill_count = row.get("fillCount")
+    try:
+        fill_count_int = int(fill_count) if fill_count is not None and fill_count != "" else 0
+    except Exception:
+        fill_count_int = 0
+    out = dict(row)
+    out.update({
+        "symbol": row.get("symbol") or "",
+        "side": row.get("side") or "",
+        "qty": _closed_pnl_float(row, "qty") or 0.0,
+        "avg_entry_price": _closed_pnl_float(row, "avgEntryPrice"),
+        "avg_exit_price": _closed_pnl_float(row, "avgExitPrice"),
+        "closed_pnl": closed_pnl if closed_pnl is not None else 0.0,
+        "bybit_closed_pnl": closed_pnl if closed_pnl is not None else 0.0,
+        "open_fee": open_fee,
+        "close_fee": close_fee,
+        "closed_size": _closed_pnl_float(row, "closedSize"),
+        "fill_count": fill_count_int,
+        "updated_time_ms": int(_closed_pnl_float(row, "updatedTime") or 0),
+        "created_time_ms": int(_closed_pnl_float(row, "createdTime") or 0),
+        "order_id": row.get("orderId") or "",
+        "order_link_id": row.get("orderLinkId") or "",
+        "leverage": row.get("leverage") or "",
+        "exec_type": row.get("execType") or "",
+    })
+    return out
+
+
+def _attach_closed_pnl_strategy(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Attach strategy_name, source, PG PnL and drift fields."""
+    lookup_ids: list[str] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        for key in ("orderId", "orderLinkId"):
+            value = str(row.get(key) or "").strip()
+            if value:
+                lookup_ids.append(value)
+    strategy_by_order_id = _fetch_strategy_by_order_id(lookup_ids)
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        order_id = str(row.get("orderId") or "").strip()
+        order_link_id = str(row.get("orderLinkId") or "").strip()
+        enriched = _closed_pnl_snake_row(row)
+        pg_match = strategy_by_order_id.get(order_id) or strategy_by_order_id.get(order_link_id)
+        pg_pnl = pg_match.get("realized_pnl") if pg_match else None
+        if pg_match and pg_match.get("strategy_name"):
+            enriched["strategy_name"] = pg_match["strategy_name"]
+            enriched["strategy_source"] = "pg_fill"
+        else:
+            strategy_name, strategy_source = _strategy_from_order_link_id(
+                row.get("orderLinkId"),
+                symbol=str(enriched.get("symbol") or ""),
+            )
+            enriched["strategy_name"] = strategy_name
+            enriched["strategy_source"] = strategy_source
+        bybit_pnl = _safe_float(enriched.get("closed_pnl"))
+        enriched["pg_engine_pnl"] = pg_pnl
+        if pg_pnl is not None and bybit_pnl is not None:
+            diff = abs(float(pg_pnl) - float(bybit_pnl))
+            enriched["pnl_source_drift_usd"] = diff
+            enriched["pnl_source_drift_pct"] = (
+                diff / abs(float(bybit_pnl)) if abs(float(bybit_pnl)) > 0 else None
+            )
+        else:
+            enriched["pnl_source_drift_usd"] = None
+            enriched["pnl_source_drift_pct"] = None
+        out.append(enriched)
+    return out
+
+
+def _fetch_pg_closed_pnl_fallback(
+    *,
+    limit: int,
+    offset: int,
+    symbol: str | None,
+) -> dict[str, Any]:
+    """Read-only fallback from trading.fills when Bybit REST is unavailable."""
+    try:
+        from . import db_pool  # noqa: PLC0415
+        conn = db_pool.get_conn()
+    except Exception as exc:
+        raise RuntimeError("pg_unavailable") from exc
+    if conn is None:
+        raise RuntimeError("pg_unavailable")
+    try:
+        where = "engine_mode IN (%s, %s) AND COALESCE(realized_pnl, 0) <> 0"
+        params: list[Any] = ["demo", "live_demo"]
+        if symbol:
+            where += " AND symbol = %s"
+            params.append(symbol)
+        params.extend([limit + 1, offset])
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ts, order_id, symbol, side, qty, price, fee, realized_pnl, strategy_name "
+            f"FROM trading.fills WHERE {where} ORDER BY ts DESC LIMIT %s OFFSET %s",
+            tuple(params),
+        )
+        rows = cur.fetchall()
+    finally:
+        try:
+            db_pool.put_conn(conn)
+        except Exception:
+            pass
+
+    has_more = len(rows) > limit
+    out: list[dict[str, Any]] = []
+    for ts, order_id, sym, side, qty, price, fee, rpnl, strategy in rows[:limit]:
+        ts_ms = int(ts.timestamp() * 1000) if ts is not None else 0
+        strategy_name = strategy or "unknown_external"
+        row = {
+            "symbol": sym or "",
+            "side": side or "",
+            "qty": str(qty if qty is not None else 0),
+            "avgEntryPrice": str(price if price is not None else 0),
+            "avgExitPrice": str(price if price is not None else 0),
+            "closedPnl": str(rpnl if rpnl is not None else 0),
+            "openFee": "",
+            "closeFee": str(fee if fee is not None else 0),
+            "closedSize": str(qty if qty is not None else 0),
+            "fillCount": "1",
+            "updatedTime": str(ts_ms),
+            "orderId": order_id or "",
+            "orderLinkId": "",
+            "leverage": "",
+            "execType": "pg_fallback",
+            "strategy_name": strategy_name,
+            "strategy_source": "pg_fill" if strategy else "pg_missing_unknown_external",
+            "pg_engine_pnl": float(rpnl) if rpnl is not None else 0.0,
+        }
+        normalized = _closed_pnl_snake_row(row)
+        normalized["strategy_name"] = row["strategy_name"]
+        normalized["strategy_source"] = row["strategy_source"]
+        normalized["pg_engine_pnl"] = row["pg_engine_pnl"]
+        normalized["pnl_source_drift_usd"] = 0.0
+        normalized["pnl_source_drift_pct"] = 0.0
+        out.append(normalized)
+    return {
+        "list": out,
+        "count": len(out),
+        "limit": limit,
+        "offset": offset,
+        "has_more": has_more,
+        "next_offset": offset + len(out) if has_more else None,
+        "source": "pg_fallback",
+        "source_ts": int(time.time() * 1000),
+        "cache_age": 0.0,
+        "cache_age_seconds": 0.0,
+        "degraded_reason": (
+            "bybit_closed_pnl_unavailable; pg_fallback_estimated_from_trading_fills; "
+            "avgEntryPrice/avgExitPrice/closedSize/fillCount are approximate"
+        ),
+    }
+
+
 @phase2_router.post("/demo/positions/{symbol}/close")
 async def post_demo_close_position(
     symbol: str,
@@ -1243,8 +1483,8 @@ async def get_demo_fills(
         try:
             cur = conn.cursor()
             safe_side = side if side in {"Buy", "Sell"} else None
-            where = "engine_mode = %s"
-            params: list[Any] = ["demo"]
+            where = "engine_mode IN (%s, %s)"
+            params: list[Any] = ["demo", "live_demo"]
             if safe_side:
                 where += " AND side = %s"
                 params.append(safe_side)
@@ -1318,6 +1558,141 @@ async def get_demo_fills(
             status_code=502,
             detail=sanitize_exc_for_detail(exc, "bybit_api_failure"),
         )
+
+
+@phase2_router.get("/demo/closed-pnl")
+async def get_demo_closed_pnl(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    start_time: int | None = Query(None),
+    end_time: int | None = Query(None),
+    symbol: str | None = Query(None),
+    force_refresh: bool = Query(False),
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+):
+    """Bybit-first Demo closed PnL read model with PG fallback."""
+    sym = symbol.upper().strip() if symbol else None
+    if not isinstance(start_time, (int, float, str)):
+        start_time = None
+    if not isinstance(end_time, (int, float, str)):
+        end_time = None
+    now_ms = int(time.time() * 1000)
+    end_ms = int(end_time) if end_time is not None else (now_ms // 5000) * 5000
+    start_ms = int(start_time) if start_time is not None else end_ms - 24 * 60 * 60 * 1000
+    if end_ms < start_ms:
+        raise HTTPException(status_code=400, detail="end_time must be >= start_time")
+    if end_ms - start_ms > _CLOSED_PNL_MAX_WINDOW_MS:
+        raise HTTPException(
+            status_code=400,
+            detail="Bybit closed-pnl query window must be <= 7 days",
+        )
+    rows_needed = offset + limit + 1
+    cache_key = ("demo_closed_pnl", "linear", sym or "", start_ms, end_ms, rows_needed)
+    rc = _get_rust_client()
+    if rc is None:
+        try:
+            return _envelope(
+                _fetch_pg_closed_pnl_fallback(limit=limit, offset=offset, symbol=sym)
+            )
+        except Exception:
+            return _envelope({
+                "enabled": False,
+                "source": "pg_fallback",
+                "source_ts": int(time.time() * 1000),
+                "cache_age": None,
+                "cache_age_seconds": None,
+                "list": [],
+                "count": 0,
+                "limit": limit,
+                "offset": offset,
+                "has_more": False,
+                "next_offset": None,
+                "degraded_reason": "bybit_client_unavailable_and_pg_fallback_failed",
+            })
+
+    def _fetch_bybit_rows() -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        cursor: str | None = None
+        seen_cursors: set[str] = set()
+        while len(rows) < rows_needed:
+            page_limit = min(100, max(1, rows_needed - len(rows)))
+            result = rc.get_closed_pnl(
+                "linear",
+                symbol=sym,
+                start_time=start_ms,
+                end_time=end_ms,
+                limit=page_limit,
+                cursor=cursor,
+            )
+            items = result.get("list") if isinstance(result, dict) else result
+            if not isinstance(items, list):
+                break
+            rows.extend([dict(row) for row in items if isinstance(row, dict)])
+            cursor = (
+                result.get("nextPageCursor")
+                if isinstance(result, dict)
+                else None
+            )
+            if len(rows) >= rows_needed or not cursor:
+                break
+            if cursor in seen_cursors:
+                logger.warning("Bybit closed-pnl returned repeated cursor; stopping pagination")
+                break
+            seen_cursors.add(cursor)
+        return rows
+
+    try:
+        cached = _closed_pnl_cache().get_or_fetch(
+            cache_key,
+            _fetch_bybit_rows,
+            force_refresh=force_refresh,
+        )
+        enriched = _attach_closed_pnl_strategy(cached.value)
+        page = enriched[offset:offset + limit]
+        has_more = len(enriched) > offset + limit
+        return _envelope({
+            "list": page,
+            "count": len(page),
+            "limit": limit,
+            "offset": offset,
+            "has_more": has_more,
+            "next_offset": offset + len(page) if has_more else None,
+            "source": "bybit_cached" if cached.hit else "bybit_api",
+            "source_ts": cached.source_ts,
+            "cache_age": cached.cache_age,
+            "cache_age_seconds": cached.cache_age,
+            "degraded_reason": None,
+        })
+    except Exception as exc:
+        stale = _closed_pnl_cache().get_any(cache_key)
+        if stale is not None:
+            enriched = _attach_closed_pnl_strategy(stale.value)
+            page = enriched[offset:offset + limit]
+            has_more = len(enriched) > offset + limit
+            return _envelope({
+                "list": page,
+                "count": len(page),
+                "limit": limit,
+                "offset": offset,
+                "has_more": has_more,
+                "next_offset": offset + len(page) if has_more else None,
+                "source": "bybit_cached",
+                "source_ts": stale.source_ts,
+                "cache_age": stale.cache_age,
+                "cache_age_seconds": stale.cache_age,
+                "degraded_reason": f"bybit_fetch_failed_using_stale_cache: {type(exc).__name__}",
+            })
+        try:
+            return _envelope(
+                _fetch_pg_closed_pnl_fallback(limit=limit, offset=offset, symbol=sym)
+            )
+        except Exception as pg_exc:
+            logger.exception("Bybit closed-pnl and PG fallback both failed")
+            from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+            raise HTTPException(
+                status_code=502,
+                detail=sanitize_exc_for_detail(pg_exc, "closed_pnl_unavailable"),
+            )
 
 
 @phase2_router.get("/demo/pnl-series")

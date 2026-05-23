@@ -884,68 +884,61 @@ async function loadHealth() {
 }
 
 async function loadQuickStatus() {
-  // Paper session
-  try {
-    const d = await ocApi('/api/v1/paper/session/status');
-    if (d && d.data) {
-      _paperActive = d.data.session.session_state === 'active';
-      $('qa-paper-dot').className = 'qa-dot ' + (_paperActive ? 'qa-dot-on' : 'qa-dot-off');
-      if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模擬 Paper';
-      if (d.data.state_revision) _stateRevision = d.data.state_revision;
-    }
-  } catch(e) {}
-  // Feed
-  try {
-    const d = await ocApi('/api/v1/paper/market-feed/status');
-    if (d && d.data) {
-      _feedRunning = d.data.dispatcher_running || d.data.running || false;
-      $('qa-feed-dot').className = 'qa-dot ' + (_feedRunning ? 'qa-dot-on' : 'qa-dot-off');
-      if ($('qa-feed-chip')) { $('qa-feed-chip').textContent = _feedRunning ? '運行中' : '待机'; $('qa-feed-chip').className = 'oc-chip ' + (_feedRunning ? 'oc-chip-good' : 'oc-chip-neutral') + ' ' + 'qa-chip-sm'; }
-    }
-  } catch(e) {}
-  // Demo
-  try {
-    const d = await ocApi('/api/v1/strategy/demo/balance');
-    _demoConnected = d && d.data && (d.data.source === 'rust_engine' || d.data.retCode === 0);
-    $('qa-demo-dot').className = 'qa-dot ' + (_demoConnected ? 'qa-dot-on' : 'qa-dot-off');
-  } catch(e) {}
-  // Scanner
-  try {
-    const d = await ocApi('/api/v1/strategy/scanner/opportunities');
-    if (d && d.data && d.data.stats) {
-      _scannerRunning = d.data.stats.running || false;
-      $('qa-scanner-dot').className = 'qa-dot ' + (_scannerRunning ? 'qa-dot-on' : 'qa-dot-off');
-    }
-  } catch(e) {}
+  const [paperR, feedR, demoR, scannerR] = await Promise.allSettled([
+    ocApi('/api/v1/paper/session/status'),
+    ocApi('/api/v1/paper/market-feed/status'),
+    ocApi('/api/v1/strategy/demo/balance'),
+    ocApi('/api/v1/strategy/scanner/opportunities'),
+  ]);
+  const paperD = paperR.status === 'fulfilled' ? paperR.value : null;
+  if (paperD && paperD.data) {
+    _paperActive = paperD.data.session.session_state === 'active';
+    $('qa-paper-dot').className = 'qa-dot ' + (_paperActive ? 'qa-dot-on' : 'qa-dot-off');
+    if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模擬 Paper';
+    if (paperD.data.state_revision) _stateRevision = paperD.data.state_revision;
+  }
+  const feedD = feedR.status === 'fulfilled' ? feedR.value : null;
+  if (feedD && feedD.data) {
+    _feedRunning = feedD.data.dispatcher_running || feedD.data.running || false;
+    $('qa-feed-dot').className = 'qa-dot ' + (_feedRunning ? 'qa-dot-on' : 'qa-dot-off');
+    if ($('qa-feed-chip')) { $('qa-feed-chip').textContent = _feedRunning ? '運行中' : '待机'; $('qa-feed-chip').className = 'oc-chip ' + (_feedRunning ? 'oc-chip-good' : 'oc-chip-neutral') + ' ' + 'qa-chip-sm'; }
+  }
+  const demoD = demoR.status === 'fulfilled' ? demoR.value : null;
+  _demoConnected = demoD && demoD.data && (demoD.data.source === 'rust_engine' || demoD.data.retCode === 0);
+  $('qa-demo-dot').className = 'qa-dot ' + (_demoConnected ? 'qa-dot-on' : 'qa-dot-off');
+  const scannerD = scannerR.status === 'fulfilled' ? scannerR.value : null;
+  if (scannerD && scannerD.data && scannerD.data.stats) {
+    _scannerRunning = scannerD.data.stats.running || false;
+    $('qa-scanner-dot').className = 'qa-dot ' + (_scannerRunning ? 'qa-dot-on' : 'qa-dot-off');
+  }
 }
 
 async function loadBusiness() {
-  try {
-    const d = await ocApi('/api/v1/paper/session/status');
-    if (d && d.data) {
-      const pnl = d.data.pnl;
-      const net = pnl.net_paper_pnl || 0;
-      const el = $('b-pnl');
-      el.textContent = ocMoney(net);
-      el.className = 'oc-metric-val ' + ocPnlClass(net);
-      ocSetText('b-orders', d.data.order_count || 0);
-      ocSetText('b-positions', d.data.position_count || 0);
-    }
-  } catch(e) {}
-  try {
-    const d = await ocApi('/api/v1/paper/ai-cost');
-    if (d && d.data && d.data.available) {
-      ocSetText('b-cost', '$' + d.data.today_cost.toFixed(4));
-      ocSetText('b-cost30', '$' + d.data.total_cost_30d.toFixed(2));
-    }
-  } catch(e) {}
-  try {
-    const d = await ocApi('/api/v1/strategy/list');
-    if (d && d.data) {
-      const active = (d.data.strategies || []).filter(s => s.state === 'active').length;
-      ocSetText('b-strategies', active + ' / ' + (d.data.strategies || []).length);
-    }
-  } catch(e) {}
+  const [paperR, costR, strategiesR] = await Promise.allSettled([
+    ocApi('/api/v1/paper/session/status'),
+    ocApi('/api/v1/paper/ai-cost'),
+    ocApi('/api/v1/strategy/list'),
+  ]);
+  const paperD = paperR.status === 'fulfilled' ? paperR.value : null;
+  if (paperD && paperD.data) {
+    const pnl = paperD.data.pnl;
+    const net = pnl.net_paper_pnl || 0;
+    const el = $('b-pnl');
+    el.textContent = ocMoney(net);
+    el.className = 'oc-metric-val ' + ocPnlClass(net);
+    ocSetText('b-orders', paperD.data.order_count || 0);
+    ocSetText('b-positions', paperD.data.position_count || 0);
+  }
+  const costD = costR.status === 'fulfilled' ? costR.value : null;
+  if (costD && costD.data && costD.data.available) {
+    ocSetText('b-cost', '$' + costD.data.today_cost.toFixed(4));
+    ocSetText('b-cost30', '$' + costD.data.total_cost_30d.toFixed(2));
+  }
+  const strategiesD = strategiesR.status === 'fulfilled' ? strategiesR.value : null;
+  if (strategiesD && strategiesD.data) {
+    const active = (strategiesD.data.strategies || []).filter(s => s.state === 'active').length;
+    ocSetText('b-strategies', active + ' / ' + (strategiesD.data.strategies || []).length);
+  }
 }
 
 async function loadProductFamilies() {
