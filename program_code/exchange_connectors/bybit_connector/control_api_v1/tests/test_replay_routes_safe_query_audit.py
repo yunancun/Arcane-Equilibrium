@@ -215,11 +215,15 @@ def test_case2_pg_kill_simulation_returns_200_degraded(monkeypatch):
     app = FastAPI()
     app.include_router(replay_router)
     app.dependency_overrides[current_actor] = _operator_actor
+    app.dependency_overrides[rr.base.current_actor] = _operator_actor
     client = TestClient(app)
 
     # GET /status — pure SELECT path, must return 200 + degraded.
     # GET /status — 純 SELECT 路徑，必回 200 + degraded。
-    resp = client.get("/api/v1/replay/status")
+    resp = client.get(
+        "/api/v1/replay/status",
+        headers={"Authorization": f"Bearer {rr.base.settings.api_token}"},
+    )
     assert resp.status_code == 200, f"expected 200, got {resp.status_code}"
     body = resp.json()
     # Envelope: { ok, data, degraded, reason, ... }

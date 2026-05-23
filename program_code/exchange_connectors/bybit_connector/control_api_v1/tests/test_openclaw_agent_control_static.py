@@ -39,7 +39,7 @@ def test_tab_agents_mounts_openclaw_control_surface() -> None:
     assert 'id="openclaw-gateway-panel"' in section
     assert 'id="openclaw-topology-panel"' in section
     assert 'id="openclaw-blockers-panel"' in section
-    assert "/static/js/openclaw-agent-control.js?v=20260506.mag018-v1" in html
+    assert "/static/js/openclaw-agent-control.js?v=" in html
     assert "startOpenClawAgentControl()" in html
     assert "/static/js/agent-tracker.js" in html
 

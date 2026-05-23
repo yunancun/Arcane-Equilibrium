@@ -102,7 +102,11 @@ async def test_live_fast_balance_uses_snapshot_without_rest(monkeypatch) -> None
 
 def test_demo_and_live_tabs_use_fast_initial_snapshot_paths() -> None:
     demo = (STATIC_DIR / "tab-demo.html").read_text(encoding="utf-8")
-    live = (STATIC_DIR / "tab-live.html").read_text(encoding="utf-8")
+    live = (
+        (STATIC_DIR / "tab-live.html").read_text(encoding="utf-8")
+        + "\n"
+        + (STATIC_DIR / "tab-live.js").read_text(encoding="utf-8")
+    )
 
     assert "/api/v1/strategy/demo/balance?fast=1" in demo
     assert "/api/v1/strategy/demo/positions?fast=1" in demo

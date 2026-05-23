@@ -172,7 +172,11 @@ async def test_prelive_edge_gate_route_returns_enveloped_payload(monkeypatch: py
 
 def test_live_static_tab_renders_prelive_edge_gate_contract() -> None:
     root = Path(__file__).resolve().parents[1]
-    tab = (root / "app" / "static" / "tab-live.html").read_text(encoding="utf-8")
+    tab = (
+        (root / "app" / "static" / "tab-live.html").read_text(encoding="utf-8")
+        + "\n"
+        + (root / "app" / "static" / "tab-live.js").read_text(encoding="utf-8")
+    )
     edge_tab = (root / "app" / "static" / "tab-edge-gates.html").read_text(encoding="utf-8")
     common = (root / "app" / "static" / "common.js").read_text(encoding="utf-8")
 
