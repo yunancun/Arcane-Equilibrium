@@ -184,6 +184,48 @@ COMMENT ON COLUMN trading.fills.track IS
     'V102 NOT NULL handling 走 BEFORE INSERT trigger 強制 fail-closed (per columnstore feature_not_supported)。';
 
 -- ============================================================
+-- Main DDL Step 1.5 [NEW per PA-DRIFT-8 lesson 2026-05-23]:
+-- Strategy B sentinel populate — legacy pre-V083 close fill entry_context_id NULL fix
+--
+-- PA-DRIFT-8 RCA (per MIT audit 2026-05-23):
+--   PG/TimescaleDB UPDATE row 觸發 row-level constraint re-validation EVEN
+--   if updated column 與 constraint 無關 (PG documented behavior;NOT VALID
+--   chunk constraint 不阻 historical scan 但不阻 UPDATE 觸發 re-validation)。
+--   53 pre-V083 close fills 違反 V083 chk_fills_close_has_entry_context_id_v083
+--   (exit_reason IS NOT NULL AND entry_context_id IS NULL);均在
+--   2026-04-30 ~ 2026-05-09 V083 install 之前 ipc_close_symbol /
+--   fast_track_reduce_half / phys_lock_gate4_giveback / orphan_frozen
+--   緊急路徑漏 set_entry_context_id (W-AUDIT-4b M2 接通之前 era)。
+--
+-- 修法 (Strategy B sentinel populate per MIT verdict):
+--   sentinel format = 'legacy_pre_v083_unknown_' || fill_id
+--   - 顯式標明 legacy unknown (per 根原則 10 分離 fact/inference;不假裝真實 entry)
+--   - 保留 fill_id suffix audit trace (per 根原則 8 可重建可解釋)
+--   - ML training 自然 filter `entry_context_id NOT LIKE 'legacy_%'` 防污染
+--   - 滿足 V083 constraint (entry_context_id IS NOT NULL)
+--   - 後續 Step 2 LOOP backfill UPDATE track 不觸發 V083 re-validation
+--
+-- 未來 V### spec SOP (per MIT recommendation):
+--   對 fills 等含 forward-only NOT VALID CHECK constraint 的表做 backfill
+--   UPDATE 前必先跑 violator detection SQL + sentinel populate (ADR-0010
+--   Guard D pre-UPDATE forward-only constraint violator scan;待 Sprint 5+
+--   Wave 2 governance amend)。
+-- ============================================================
+DO $$
+DECLARE
+    v_sentinel_count INT;
+BEGIN
+    UPDATE trading.fills
+       SET entry_context_id = 'legacy_pre_v083_unknown_' || fill_id
+     WHERE exit_reason IS NOT NULL
+       AND entry_context_id IS NULL;
+    GET DIAGNOSTICS v_sentinel_count = ROW_COUNT;
+    RAISE NOTICE 'V101 Step 1.5: sentinel-populated % legacy close fill(s) '
+                 '(pre-V083 entry_context_id NULL);per PA-DRIFT-8 MIT audit '
+                 '2026-05-23 verdict Strategy B', v_sentinel_count;
+END $$;
+
+-- ============================================================
 -- Main DDL Step 2: Backfill batched UPDATE → 'baseline'
 -- 主 DDL Step 2: 分批回填 track='baseline'
 --
