@@ -20,6 +20,9 @@ pub mod context_writer;
 pub mod decision_feature_evaluation_writer;
 pub mod decision_feature_writer;
 pub mod drift_detector;
+// Sprint 1B Pending 3.2 Earn first stake Wave B B4：V100 learning.earn_movement_log
+// writer (INSERT placeholder → UPDATE outcome → Daily cron fetch 24h pending)。
+pub mod earn_movement_writer;
 pub mod exit_feature_schema;
 pub mod exit_feature_writer;
 pub mod experiment_ledger_pg;

@@ -49,6 +49,31 @@ pub enum LeaseScope {
     /// W-AUDIT-9 T6 NEW — manual graduated canary stage promotion (operator-driven).
     /// TTL 60s; companion canary_stage_log row MUST carry decision_lease_id.
     CanaryStagePromotion,
+    /// Sprint 1B Earn first stake NEW — Bybit Earn stake（flexible / fixed）操作。
+    /// 為什麼：Earn 認購會把 spot balance 轉入 Earn 賬戶並鎖定本金，屬於對賬戶
+    /// 現金流的關鍵動作（即使 Bybit Earn 不算交易意圖、不走 IntentProcessor 主路徑），
+    /// 必需經 Decision Lease + operator authority + audit chain（per
+    /// earn_governance §2.1 + ADR-0030 5-gate Gate a）。
+    /// 對齊：
+    ///   - audit string = "EARN_STAKE"（對齊 V100 earn_movement_log.direction='stake'）
+    ///   - TTL 60s（per earn_governance §2.3 line 102「TTL = 60s 與 trading lease 一致」）
+    ///   - requires_operator_authority = true（ADR-0020 Layer 2 manual+supervisor only
+    ///     + earn_governance §2.1 hard fail-closed operator authority）
+    /// 不變量：新加此 variant 後所有 `match` 必須 exhaustive；既有 SQL CHECK
+    /// constraint（lease_transitions.scope / canary_stage_log.transition_kind）若限
+    /// 4 scope 字串 → 需 V### ALTER 擴此值（本 IMPL 不寫 V###，僅 grep + 報 PM）。
+    EarnStake,
+    /// Sprint 1B Earn first stake NEW — Bybit Earn redeem（flexible / fixed）操作。
+    /// 為什麼：Earn 贖回會把鎖定本金釋回 spot；當 margin headroom < 30% 時系統
+    /// 應自動贖回（per earn_governance §2.4 子檢查 3 Margin auto-redeem floor），
+    /// auto-redeem 走系統路徑、operator 直接 redeem 走此 lease scope。
+    /// 對齊：
+    ///   - audit string = "EARN_REDEEM"（對齊 V100 earn_movement_log.direction='redeem'）
+    ///   - TTL 60s（同 EarnStake）
+    ///   - requires_operator_authority = true（同 EarnStake；雖然 auto-redeem 路徑
+    ///     可不需 operator authority，但本 LeaseScope 專為 operator 主動 redeem 設計，
+    ///     auto-redeem 寫 earn_movement_log 不通過此 lease facade）
+    EarnRedeem,
 }
 
 impl LeaseScope {
@@ -65,25 +90,41 @@ impl LeaseScope {
             // W-AUDIT-9 T6 NEW — 對齊 governance.canary_stage_log.transition_kind
             // 期望的 'manual_promote' 條件下 PG NOT NULL decision_lease_id 約束。
             Self::CanaryStagePromotion => "CANARY_STAGE_PROMOTION",
+            // Sprint 1B 新增 — SCREAMING_SNAKE_CASE 對齊 W-AUDIT-9 audit string pattern。
+            // 對應 V100 earn_movement_log.direction (lowercase 'stake'/'redeem') 經由
+            // earn_movement_writer 層做 enum -> direction column 映射；本層只負責
+            // governance audit log 端的 lease scope 字串。
+            Self::EarnStake => "EARN_STAKE",
+            Self::EarnRedeem => "EARN_REDEEM",
         }
     }
 
     /// W-AUDIT-9 T6 — 是否需要 operator authority（hard fail-closed）。
-    /// 目前 CanaryStagePromotion 是唯一 strict operator-only scope；TradeEntry /
-    /// TradeExit / PositionAdjust 由 GovernanceProfile + auth state 共同判斷。
+    /// 為什麼：CanaryStagePromotion / EarnStake / EarnRedeem 均屬「對賬戶或 cohort
+    /// 配置有實質影響」的 operator-driven 動作，必須 hard fail-closed 在 operator
+    /// authority 上；TradeEntry / TradeExit / PositionAdjust 為 hot-path 策略意圖，
+    /// 由 GovernanceProfile + auth state 共同判斷（不在此處強制 true）。
     /// Whether this scope requires explicit operator authority (hard fail-closed).
     pub fn requires_operator_authority(self) -> bool {
-        matches!(self, Self::CanaryStagePromotion)
+        // Sprint 1B Earn — EarnStake / EarnRedeem 對齊 ADR-0020 Layer 2 manual+supervisor
+        // only + earn_governance §2.1 hard fail-closed operator authority；CanaryStage
+        // Promotion 既有 W-AUDIT-9 T6 strict operator-only 範式。
+        matches!(
+            self,
+            Self::CanaryStagePromotion | Self::EarnStake | Self::EarnRedeem
+        )
     }
 
     /// W-AUDIT-9 T6 — scope 規範的 TTL（毫秒）。
     /// CanaryStagePromotion 嚴格 60 秒（AMD-2026-05-09-03 §4.5）；
-    /// 其他 scope 預設用 caller 提供值（這裡 fallback 用 30 秒，作為合理保守 baseline）。
-    /// Spec-mandated TTL (ms) per scope; CanaryStagePromotion = 60s strict.
+    /// EarnStake / EarnRedeem 對齊 60 秒（earn_governance §2.3 line 102「TTL = 60s
+    /// 與 trading lease 一致」）；其餘 hot-path scope 用 30 秒 baseline（caller 仍可覆寫）。
+    /// Spec-mandated TTL (ms) per scope.
     pub fn default_ttl_ms(self) -> u32 {
         match self {
             // AMD-2026-05-09-03 §4.5 明文：「TTL 60s, 由 operator GUI 動作 trigger」。
-            Self::CanaryStagePromotion => 60_000,
+            // earn_governance §2.3 line 102 對齊：「TTL = 60s（與 trading lease 一致）」。
+            Self::CanaryStagePromotion | Self::EarnStake | Self::EarnRedeem => 60_000,
             // hot-path scope 的 baseline — 實際呼叫端 (router.rs) 仍可顯式覆寫。
             Self::TradeEntry | Self::TradeExit | Self::PositionAdjust => 30_000,
         }
@@ -218,6 +259,9 @@ mod tests {
             (LeaseScope::TradeExit, "TRADE_EXIT"),
             (LeaseScope::PositionAdjust, "POSITION_ADJUST"),
             (LeaseScope::CanaryStagePromotion, "CANARY_STAGE_PROMOTION"),
+            // Sprint 1B Earn 新增 — 對齊 V100 earn_movement_log + earn_governance §2.3
+            (LeaseScope::EarnStake, "EARN_STAKE"),
+            (LeaseScope::EarnRedeem, "EARN_REDEEM"),
         ];
         for (scope, expected) in all {
             assert_eq!(scope.as_audit_str(), expected);
@@ -236,11 +280,33 @@ mod tests {
     }
 
     #[test]
+    fn earn_scope_requires_operator_authority() {
+        // Sprint 1B Earn — EarnStake / EarnRedeem 對齊 ADR-0020 Layer 2 manual+supervisor
+        // only + earn_governance §2.1 hard fail-closed operator authority。
+        assert!(
+            LeaseScope::EarnStake.requires_operator_authority(),
+            "EarnStake 必需 operator authority（earn_governance §2.1 hard fail-closed）"
+        );
+        assert!(
+            LeaseScope::EarnRedeem.requires_operator_authority(),
+            "EarnRedeem 必需 operator authority（同 EarnStake）"
+        );
+    }
+
+    #[test]
     fn canary_stage_promotion_default_ttl_60s() {
         // AMD-2026-05-09-03 §4.5：「TTL 60s, 由 operator GUI 動作 trigger」。
         assert_eq!(LeaseScope::CanaryStagePromotion.default_ttl_ms(), 60_000);
         // 其他 scope baseline 30s（caller 仍可覆寫）。
         assert_eq!(LeaseScope::TradeEntry.default_ttl_ms(), 30_000);
+    }
+
+    #[test]
+    fn earn_scope_default_ttl_60s() {
+        // earn_governance §2.3 line 102：「TTL = 60s（與 trading lease 一致）」。
+        // EarnStake / EarnRedeem 對齊 CanaryStagePromotion strict 60s 範式。
+        assert_eq!(LeaseScope::EarnStake.default_ttl_ms(), 60_000);
+        assert_eq!(LeaseScope::EarnRedeem.default_ttl_ms(), 60_000);
     }
 
     #[test]

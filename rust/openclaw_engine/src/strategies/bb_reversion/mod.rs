@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use super::common::{compute_post_only_price, MakerPriceInputs, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{Strategy, StrategyAction, StrategyParams};
-use crate::intent_processor::OrderIntent;
+use crate::intent_processor::{IntentType, OrderIntent};
 use crate::strategies::cross_asset::{evaluate_shadow_signal, BtcLeadLagShadowSignal};
 use crate::tick_pipeline::TickContext;
 use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
@@ -333,6 +333,9 @@ impl BbReversion {
             persistence_elapsed_ms,
             time_in_force: None,
             maker_timeout_ms: None,
+            // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+            intent_type: IntentType::OpenLong,
+            earn_payload: None,
         })
     }
 }

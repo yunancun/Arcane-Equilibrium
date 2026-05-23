@@ -82,6 +82,9 @@ fn test_strategy_default_on_rejection_and_on_fill_noop() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: crate::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     };
     s.on_rejection(&intent, "test reason");
     // No assertion — only checking no panic / 僅檢查不 panic

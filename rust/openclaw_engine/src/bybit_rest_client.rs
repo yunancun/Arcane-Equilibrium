@@ -236,6 +236,11 @@ pub enum RateLimitGroup {
 impl RateLimitGroup {
     /// Determine the rate limit group for a given API path.
     /// 根據 API 路徑判斷所屬限流分組。
+    ///
+    /// Sprint 1B Earn first stake B3（2026-05-23）：`/v5/earn/` 前綴對映 `Asset`
+    /// 5 req/s。為什麼歸 Asset：Earn 屬資金移動類（Funding ↔ Unified ↔ Earn
+    /// staking），對齊既有 `/v5/asset/` 同 group 限流語意；BB C4 verdict Part A.2
+    /// + tiagosiebler SDK 註釋亦明列「Rate limit: 5 req/s」對齊。
     pub fn from_path(path: &str) -> Self {
         if path.starts_with("/v5/order/") || path.starts_with("/v5/execution/") {
             Self::Order
@@ -245,7 +250,11 @@ impl RateLimitGroup {
             Self::Account
         } else if path.starts_with("/v5/market/") || path.starts_with("/v5/spot-lever-token/") {
             Self::Market
-        } else if path.starts_with("/v5/asset/") || path.starts_with("/v5/spot-margin") {
+        } else if path.starts_with("/v5/asset/")
+            || path.starts_with("/v5/spot-margin")
+            || path.starts_with("/v5/earn/")
+        {
+            // /v5/earn/ 對映 Asset 5 req/s（Sprint 1B B3；per BB C4 verdict + SDK 註釋）。
             Self::Asset
         } else {
             Self::Other

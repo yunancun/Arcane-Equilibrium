@@ -191,6 +191,10 @@ pub(crate) fn build_intent(
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位
+        // (synthetic close / audit intent 屬 trading hot-path 不會走 Earn 分支)。
+        intent_type: crate::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     }
 }
 

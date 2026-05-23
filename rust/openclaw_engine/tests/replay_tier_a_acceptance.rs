@@ -233,6 +233,9 @@ impl Strategy for ContextObserver {
                     persistence_elapsed_ms: None,
                     time_in_force: None,
                     maker_timeout_ms: None,
+                    // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+                    intent_type: openclaw_engine::intent_processor::IntentType::OpenLong,
+                    earn_payload: None,
                 },
             )];
         }
@@ -579,6 +582,9 @@ fn test_position_state_lifecycle_tracked_in_replay() {
                         persistence_elapsed_ms: None,
                         time_in_force: None,
                         maker_timeout_ms: None,
+                        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+                        intent_type: openclaw_engine::intent_processor::IntentType::OpenLong,
+                        earn_payload: None,
                     },
                 )];
             }

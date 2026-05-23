@@ -35,6 +35,9 @@ fn sample_intent(is_long: bool) -> OrderIntent {
         persistence_elapsed_ms: Some(42_000),
         time_in_force: Some(TimeInForce::PostOnly),
         maker_timeout_ms: Some(90_000),
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: crate::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     }
 }
 

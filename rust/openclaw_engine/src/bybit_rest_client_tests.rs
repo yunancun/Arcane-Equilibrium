@@ -282,6 +282,33 @@ fn test_rate_limit_group_from_path() {
         RateLimitGroup::from_path("/v5/spot-margin-uta/status"),
         RateLimitGroup::Asset
     );
+
+    // Sprint 1B Earn first stake B3（2026-05-23）：/v5/earn/ 5 endpoint 對映 Asset
+    // 5 req/s。覆蓋 OP-3 拍板 flexible-only 後實際接的 5 endpoint：product 查詢
+    // (GET /v5/earn/product) / 統一下單 (POST /v5/earn/place-order) / 訂單歷史
+    // (GET /v5/earn/order) / 持倉 (GET /v5/earn/position) / APR 歷史 (GET
+    // /v5/earn/apr-history)。
+    assert_eq!(
+        RateLimitGroup::from_path("/v5/earn/product"),
+        RateLimitGroup::Asset
+    );
+    assert_eq!(
+        RateLimitGroup::from_path("/v5/earn/place-order"),
+        RateLimitGroup::Asset
+    );
+    assert_eq!(
+        RateLimitGroup::from_path("/v5/earn/order"),
+        RateLimitGroup::Asset
+    );
+    assert_eq!(
+        RateLimitGroup::from_path("/v5/earn/position"),
+        RateLimitGroup::Asset
+    );
+    assert_eq!(
+        RateLimitGroup::from_path("/v5/earn/apr-history"),
+        RateLimitGroup::Asset
+    );
+
     assert_eq!(
         RateLimitGroup::from_path("/v5/unknown"),
         RateLimitGroup::Other

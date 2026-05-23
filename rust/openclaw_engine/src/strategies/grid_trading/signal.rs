@@ -25,7 +25,7 @@
 //!   變更順序與拆前逐字節相同。
 
 use super::{compute_grid_confidence, GridHealth, GridTrading};
-use crate::intent_processor::OrderIntent;
+use crate::intent_processor::{IntentType, OrderIntent};
 use crate::order_manager::TimeInForce;
 use crate::strategies::common::{compute_post_only_price, MakerPriceInputs};
 use crate::strategies::cross_asset::{evaluate_shadow_signal, BtcLeadLagShadowSignal};
@@ -356,6 +356,9 @@ impl GridTrading {
                     persistence_elapsed_ms: None,
                     time_in_force,
                     maker_timeout_ms,
+                    // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+                    intent_type: IntentType::OpenLong,
+                    earn_payload: None,
                 };
                 intents.push(StrategyAction::Open(intent));
                 *self.net_inventory.entry(sym.to_string()).or_insert(0.0) += self.qty_per_grid;
@@ -388,6 +391,9 @@ impl GridTrading {
                     persistence_elapsed_ms: None,
                     time_in_force,
                     maker_timeout_ms,
+                    // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+                    intent_type: IntentType::OpenLong,
+                    earn_payload: None,
                 };
                 intents.push(StrategyAction::Open(intent));
                 *self.net_inventory.entry(sym.to_string()).or_insert(0.0) -= self.qty_per_grid;

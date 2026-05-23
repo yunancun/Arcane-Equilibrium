@@ -756,6 +756,9 @@ fn make_test_intent(symbol: &str, is_long: bool) -> OrderIntent {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: crate::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     }
 }
 

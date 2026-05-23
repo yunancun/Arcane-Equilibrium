@@ -3,7 +3,7 @@ spec: Earn governance spec — Bybit Earn stake/redeem asset write governance（
 date: 2026-05-21
 author: CC agent（v57-C8 prefix dispatch）
 phase: v5.7 Sprint 1A — 1A-gov track must-fix #1
-status: DRAFT-FOR-FIVE-ROLE-CROSS-REF（2026-05-21 PM 仲裁 4 已採 §4 條件 A finalize；待 FA + E3 + QA + MIT 四角色 cross-ref 後 sign-off）
+status: DRAFT-AMENDED-PER-PA-CAVEATS（2026-05-23 PA Sprint 1B Pending 3.2 Earn dispatch packet APPROVE-WITH-2-CAVEATS 已 amend §3 + §6.1；保 DRAFT 等 5 角色 cross-ref final approve；2026-05-21 PM 仲裁 4 已採 §4 條件 A finalize 保留有效）
 parent specs:
   - srv/docs/execution_plan/2026-05-20--execution-plan-v5.7.md §4 §12
   - srv/docs/CCAgentWorkSpace/CC/workspace/reports/2026-05-21--v57_executability_audit.md §5
@@ -156,11 +156,19 @@ submit_intent(earn_stake | earn_redeem, payload)
 
 ```rust
 // rust/openclaw_engine/src/mode_state.rs 既有 enum IntentType（v57-C8 不改實檔，僅 spec）
+// AMENDMENT 2026-05-23 per PA caveat 1：
+//   原 spec 列 6 variant；PA dispatch packet §2.2 跨 ref `LeaseScope::PositionAdjust`
+//   既有 variant（lease_scope.rs line 39）+ W-AUDIT-9 graduated rollout 預留 ⇒
+//   加 PositionAdjust variant 對齊 LeaseScope::PositionAdjust 1:1 映射（不破壞既有 6
+//   variant 行為；Sprint 5+ position state machine 啟用）。
 enum IntentType {
     OpenLong,
     OpenShort,
     CloseLong,
     CloseShort,
+    PositionAdjust,   // 2026-05-23 新增 per PA caveat 1：對齊 LeaseScope::PositionAdjust
+                      //                既有 variant（Sprint 5+ position state machine 預留，
+                      //                Sprint 1B Earn 不用）
     // ↓ v5.7 §4 新增
     EarnStake,
     EarnRedeem,
@@ -303,7 +311,13 @@ ADR-0030 / 0031 / 0032 條款更新範圍：condition A 採納；ADR-0032 §Gate
 
 ### 6.1 reconciliation 機制
 
-每日固定時間（建議 UTC 00:30，避開 funding 結算）執行：
+每日固定時間 UTC 02:00 執行：
+
+AMENDMENT 2026-05-23 per PA caveat 2：原 spec UTC 00:30；PA dispatch packet §1.1 + §5.3
+跨 ref Bybit perp funding settlement window UTC 00:00 / 08:00 / 16:00 daily（8h cadence）；
+UTC 00:30 距 settlement 00:00 僅 30 min，settlement in-flight 期間 Bybit `/v5/earn/position/query`
+可能返回 stale balance ⇒ reconciliation false-positive mismatch；改 UTC 02:00 距上一
+funding window 2h + 距下一 funding window 6h，避雙向 race。
 
 ```
 1. Query Bybit Earn account balance via API（read-only）
@@ -408,7 +422,7 @@ CLAUDE.md §四 paper not active；本 spec 替換為「manual review mode」：
 
 ### AC-4 — Daily reconciliation cron 已寫 + 失敗自動 disable
 
-- [ ] cron 每日 UTC 00:30 跑（per §6.1）
+- [ ] cron 每日 UTC 02:00 跑（per §6.1；2026-05-23 amend per PA caveat 2 避 funding settlement window）
 - [ ] cron 自身失敗計數 + reconciliation mismatch 計數兩條獨立
 - [ ] mismatch_critical 自動寫 `earn_enabled=false`（per §6.2）
 - [ ] 連續 3 日 mismatch halt strategy（per §6.2）
@@ -533,6 +547,36 @@ CLAUDE.md §四 paper not active；本 spec 替換為「manual review mode」：
 | 不變量 #9 Operator + live_reserved 缺一即拒 | §2.1 | ✅ |
 
 **矩陣統計**：根原則 14 ✅ / 1 ➖（#13 不適用）/ 1 ⬜ 待補；不變量 8 ✅ / 1 ⬜ 待 C4 verdict；總 PASS 22/25 + 1 N/A + 2 PENDING（含 5 角色 cross-ref + C4 verdict）。
+
+---
+
+## §13 Amendment Log
+
+### 2026-05-23 — PA Sprint 1B Pending 3.2 Earn dispatch packet caveat 1+2 收口
+
+**Source**：PA dispatch packet `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_1b_earn_first_stake_dispatch_packet.md` APPROVE-WITH-2-CAVEATS（HEAD c9913ff8）
+
+**Caveat 1** — §3 IntentType enum：
+- 原 6 variant（OpenLong / OpenShort / CloseLong / CloseShort / EarnStake / EarnRedeem）→ 7 variant（加 PositionAdjust）
+- 對齊 `LeaseScope::PositionAdjust` 既有 variant（rust/openclaw_core/src/lease_scope.rs line 39）
+- W-AUDIT-9 graduated rollout 預留；Sprint 5+ position state machine 啟用；Sprint 1B Earn 不用
+- 影響 §3.1 line 158-167（enum 加 1 variant + amendment 註腳）
+- 不影響 §2.3 / §3.3 / §3.4 / §8 / AC-2
+
+**Caveat 2** — §6.1 Daily reconciliation cron：
+- 原 UTC 00:30 → UTC 02:00
+- 避 Bybit perp funding settlement window UTC 00:00 / 08:00 / 16:00 daily（8h cadence）
+- UTC 00:30 距 settlement 00:00 僅 30 min，settlement in-flight 期間 `/v5/earn/position/query` 可能返回 stale balance → false-positive mismatch
+- UTC 02:00 距上一 funding window 2h + 距下一 funding window 6h，避雙向 race
+- 影響 §6.1 line 306（cron schedule）+ §9 AC-4 line 411（內部一致性 sync）
+- 不影響 §6.2 / §6.3 / §7 row #8 / §11 RISK-3 / §10
+
+**Status 升級**：DRAFT-FOR-FIVE-ROLE-CROSS-REF → DRAFT-AMENDED-PER-PA-CAVEATS（line 6）
+- 保 DRAFT 等 5 角色 cross-ref final approve
+- amendment 是 PM 仲裁前 caveat 收口，不繞 §12 五角色 cross-ref
+- 5 角色 dispatch 必須含本 §13 amendment log 提示 reviewer 必驗
+
+**CC verdict**：APPROVE A 級（caveat 1 + 2 對齊既有 W-AUDIT-9 LeaseScope variant + Bybit funding 結算事實 + 0 副作用於既有 §1-§12）；5 角色 cross-ref dispatch ready。
 
 ---
 

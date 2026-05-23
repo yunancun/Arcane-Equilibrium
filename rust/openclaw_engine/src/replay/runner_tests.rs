@@ -238,6 +238,9 @@ impl Strategy for OneShotStub {
             persistence_elapsed_ms: None,
             time_in_force: None,
             maker_timeout_ms: None,
+            // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+            intent_type: crate::intent_processor::IntentType::OpenLong,
+            earn_payload: None,
         })]
     }
 }
@@ -729,6 +732,9 @@ impl Strategy for TifStub {
             persistence_elapsed_ms: None,
             time_in_force: self.tif,
             maker_timeout_ms: None,
+            // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+            intent_type: crate::intent_processor::IntentType::OpenLong,
+            earn_payload: None,
         })]
     }
 }
@@ -1539,6 +1545,9 @@ fn test_replay_kelly_sizer_uses_per_symbol_price() {
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: crate::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
     };
     let decision = adapter.evaluate(&intent, &snapshot, 0.0);
     match decision {
