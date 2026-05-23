@@ -359,7 +359,13 @@ CREATE TABLE IF NOT EXISTS learning.earn_movement_log (
                                CHECK (direction IN ('stake', 'redeem')),
     amount_usdt                NUMERIC(18, 8) NOT NULL,
     apr_at_time                REAL,
-    governance_approval_id     BIGINT REFERENCES learning.governance_audit_log(id),
+    -- governance_approval_id 是 soft reference 不是 FK constraint
+    -- (per PA-DRIFT-6 production deploy lesson 2026-05-23):
+    -- learning.governance_audit_log 是 TimescaleDB hypertable 用 composite PK (id, ts)
+    -- (TimescaleDB partition column 必含於 PK);PostgreSQL FK 必須對齊完整 unique constraint
+    -- 不能只 reference (id);因此採用 soft reference,審計時透過 application-level
+    -- query learning.governance_audit_log WHERE id=governance_approval_id 反查
+    governance_approval_id     BIGINT,
     bybit_response_payload     JSONB,
     engine_mode                TEXT NOT NULL
                                CHECK (engine_mode IN ('paper', 'demo', 'live_demo', 'live')),
@@ -477,9 +483,11 @@ COMMENT ON COLUMN learning.hypothesis_preregistration.operator_signature IS
     'per DOC-08 §12 + §四 Operator 角色硬邊界。';
 
 COMMENT ON TABLE learning.earn_movement_log IS
-    'Bybit Earn 質押/贖回審計日誌 (V100; append-only). 10 column 含 FK to '
-    'learning.governance_audit_log (Decision Lease 審批 cross-ref); '
-    'reconciliation_status 3 值 (pending → matched/mismatch 由 daily cron 寫入)。';
+    'Bybit Earn 質押/贖回審計日誌 (V100; append-only). 10 column 含 soft reference '
+    'to learning.governance_audit_log (Decision Lease 審批 cross-ref;非 FK constraint '
+    '因 governance_audit_log 是 TimescaleDB hypertable composite PK (id, ts) per '
+    'PA-DRIFT-6 lesson 2026-05-23); reconciliation_status 3 值 (pending → matched/mismatch '
+    '由 daily cron 寫入)。';
 
 COMMENT ON COLUMN learning.earn_movement_log.direction IS
     '2 enum (stake/redeem) 雙向流動方向。';
@@ -492,10 +500,15 @@ COMMENT ON COLUMN learning.earn_movement_log.apr_at_time IS
     'REAL APR 4-decimal float 足夠;NULL allowed for redeem (redemption 不 lock APR)。';
 
 COMMENT ON COLUMN learning.earn_movement_log.governance_approval_id IS
-    'FK to learning.governance_audit_log(id); Decision Lease 審批 cross-ref。'
-    '注意: spec doc §2.3.1 寫 governance.audit_log 為 schema 名 typo;'
-    '真實 production 表名為 learning.governance_audit_log (per V035/V053/V098 baseline)。'
-    'V106/V107/V112 PA-DRIFT-1 patch lesson 對齊。';
+    'BIGINT soft reference to learning.governance_audit_log(id); Decision Lease 審批 cross-ref。'
+    '注意 1: spec doc §2.3.1 寫 governance.audit_log 為 schema 名 typo;'
+    '真實 production 表名為 learning.governance_audit_log (per V035/V053/V098 baseline);'
+    'V106/V107/V112 PA-DRIFT-1 patch lesson 對齊。'
+    '注意 2: 非 SQL FK constraint (per PA-DRIFT-6 lesson 2026-05-23): '
+    'governance_audit_log 是 TimescaleDB hypertable composite PK (id, ts);'
+    'PostgreSQL FK 不能只對齊 (id) — 必須完整 unique constraint;故 V100 採用 '
+    'application-level soft reference,審計時透過 SELECT FROM learning.governance_audit_log '
+    'WHERE id=governance_approval_id 反查。';
 
 COMMENT ON COLUMN learning.earn_movement_log.bybit_response_payload IS
     'JSONB Bybit API raw response (reconciliation/debug); NULL allowed for '
@@ -636,19 +649,18 @@ BEGIN
             'learning.hypotheses missing.';
     END IF;
 
-    -- FK 必存在:earn_movement_log → governance_audit_log
-    -- (注意 FK target schema 名 patch:learning.governance_audit_log 非
-    -- governance.audit_log per PA-DRIFT-1 lesson)
+    -- governance_approval_id 必為 BIGINT 欄位存在 (soft reference;非 FK constraint)
+    -- (per PA-DRIFT-6 lesson 2026-05-23: governance_audit_log 是 TimescaleDB
+    --  hypertable composite PK (id, ts);PostgreSQL FK 不能只對齊 (id);故 V100 用
+    --  application-level soft reference 而非 SQL FK constraint)
     SELECT COUNT(*) INTO v_fk_count
-    FROM pg_constraint c
-    JOIN pg_class r ON c.conrelid = r.oid
-    JOIN pg_namespace n ON r.relnamespace = n.oid
-    WHERE n.nspname='learning' AND r.relname='earn_movement_log'
-      AND c.contype='f';
+    FROM information_schema.columns
+    WHERE table_schema='learning' AND table_name='earn_movement_log'
+      AND column_name='governance_approval_id' AND data_type='bigint';
     IF v_fk_count = 0 THEN
         RAISE EXCEPTION
-            'V100 Guard C post FAIL: earn_movement_log.governance_approval_id FK to '
-            'learning.governance_audit_log missing.';
+            'V100 Guard C post FAIL: earn_movement_log.governance_approval_id BIGINT '
+            'column missing (soft reference to learning.governance_audit_log).';
     END IF;
 
     RAISE NOTICE
