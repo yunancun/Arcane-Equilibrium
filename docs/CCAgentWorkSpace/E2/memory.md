@@ -6,6 +6,42 @@
 - 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
 - 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
 
+## 2026-05-23 — cost_gate low-sample deep-negative arm · RETURN-TO-E1
+
+**對象**：commits `718c1ddd` (TOML 30→15) + `188f244a` (gates.rs +23 LOC 新 low-sample-deep-neg arm cutoff=-15bps)
+**Verdict**：**RETURN-TO-E1**（1 CRITICAL 既有 unit test FAIL + 1 HIGH RCA scope understated + 1 MEDIUM log field 不一致）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-23--cost_gate_low_sample_deep_neg_e2_review.md`
+
+**Pass 6/8（cargo test 1 既有 test FAIL）**：
+- §1 arm 順序 ✅ (新 arm L138-152 在 catch-all low-sample arm L153 之前)
+- §2 RejectionCode 兼容 ✅ (CostGateJsDemoNegative variant 既存 rejection_coding.rs:111)
+- §3 paper/live 零改動 ✅ (diff 1 hunk 23 LOC 全在 cost_gate_moderate_with_slippage body 內)
+- §4 ArcSwap 熱加載 ✅ (pipeline_config.rs:67 apply_risk_snapshot 推路；但是 owned RiskConfig 非 ArcSwap lock-free,restart/IPC 後生效)
+- §5 risk invariant 零違反 ✅ (live/paper TOML + live_execution_allowed + system_mode 零觸碰)
+- §8 f64 type ✅ (cell.shrunk_bps + -15.0 字面值都 f64)
+
+**3 個 Issue 必退 E1（不代寫）**：
+1. **🔴 CRITICAL**: tests.rs:1023-1037 `test_cost_gate_moderate_low_sample_negative_routes_to_exploration` FAIL — fixture shrunk_bps=-50/n=6,新 arm 攔截但 test 期望 explore (`is_none()`)。E1 自報 cargo check PASS 9.15s 但**未跑 cargo test**,沒抓到。
+2. **🟡 HIGH**: commit 188f244a body 「1B funding_arb 框架僅 LABUSDT outlier 被影響」**不準確** — 實證 funding_arb::BUSDT (n=16, shrunk_bps=-36.05) 也被新 arm 攔截。amend commit message 或 sign-off report 補明示。
+3. **🟡 MEDIUM**: gates.rs:141 新 arm tracing! field key `shrunk_bps =` 跟既有 L72/L156/paper L74 統一用 `estimated_edge_bps =` 不一致。audit log 分析會分裂兩 key。
+
+**Empirical edge_estimates.json 影響分析**:
+- 新攔截 cell n ∈ [15, 30) AND shrunk_bps < -15: **22 cell**（grid::FILUSDT/LABUSDT/LINKUSDT/HYPEUSDT/API3USDT/AVAXUSDT/DOTUSDT/AXSUSDT/ADAUSDT/ARBUSDT/INJUSDT/PENGUUSDT/ZECUSDT/AXSUSDT/BIOUSDT、ma::NEARUSDT/1000PEPEUSDT/TAOUSDT/ZECUSDT/PENGUUSDT/FARTCOINUSDT、funding_arb::BUSDT）
+- 既有 robust 邊界 cell (n≥30 且 shrunk_bps 略 < -15): grid::PRLUSDT/ETHUSDT/ZBTUSDT/BSBUSDT 本就被攔,新 arm 不影響
+- bybit_sync/orphan_*/dust_* 全是 n=0/shrunk=-13.89 stub cell — 新 arm 不觸發(shrunk_bps > -15)
+
+**對抗反問 catch**:
+- 「cargo check 9.15s PASS」陷阱：`cargo check ≠ cargo test`。Pattern match 新增 BLOCK 路徑必破既有 explore-mode test → 必跑 cargo test 親驗
+- 「RCA 1B funding_arb 影響僅 LABUSDT」：用 python jq 跑 edge_estimates.json 篩 `n ∈ [15, 30) AND shrunk_bps < -15`,實證 BUSDT 也被攔
+
+**Lessons captured**：
+1. **`cargo check` 不是 unit test 替代品**: E1 自報 cargo check PASS 不夠,E2 必跑 `cargo test --lib <module>` 親驗,尤其新增 match arm BLOCK 路徑必破既有 explore-mode test
+2. **RCA scope claim empirical 對齊 edge_estimates.json**: 「僅 X 個 outlier 被影響」是 falsifiable claim,E2 必跑實證 grep 對齊真實 deny cell list,本案 catch 漏 funding_arb::BUSDT
+3. **Same-facility log field key 統一**: 同 function 多分支 tracing log,field key 必對齊 baseline (本案 `estimated_edge_bps` vs `shrunk_bps`)。audit 分析腳本若 grep field key 取值會被分裂
+4. **新 boundary arm 必有 3+ boundary test**: 嚴格 `<` cutoff / NaN / cutoff 內外側各 1 個。Pattern match 新分支必同步加 unit test + 更新既有 test 反映新 invariant
+
+---
+
 ## 2026-05-21 — H 批（H1 + H3 + H4）· 3/3 APPROVE → E4
 
 **對象**：H1 P3-AUDIT-SCRIPT-STALE-CONST audit script fix + H3 P2-PHYS-LOCK-72-HEALTHCHECK new healthcheck + H4 P1-HALT-TRIGGER-ROOT-CAUSE new healthcheck，3 件並行 sub-agent IMPL
