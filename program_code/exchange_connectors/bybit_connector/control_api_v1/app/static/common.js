@@ -166,6 +166,7 @@ function _ocUUID() {
 // ─── API Helper ──────────────────────────────────────────────────────────────
 let _ocAuthFails = 0;
 const _OC_AUTH_MAX = 5;
+const _ocGetErrorToastAt = {};
 
 async function ocApi(path, opts) {
   // Auth is handled by HttpOnly cookie — no token in JS needed.
@@ -205,13 +206,30 @@ async function ocApi(path, opts) {
         if (errBody.message && typeof errBody.message === 'string') errMsg = errBody.message;
       } catch (_) { /* no JSON body */ }
       console.warn('[ocApi] ' + method + ' ' + path + ' → ' + r.status + ': ' + errMsg);
-      if (method === 'POST') ocToast(errMsg + ' (' + r.status + ')', 'error');
+      if (method === 'POST') {
+        ocToast(errMsg + ' (' + r.status + ')', 'error');
+      } else {
+        const key = method + ':' + path.split('?')[0] + ':' + r.status;
+        const now = Date.now();
+        if ((now - (_ocGetErrorToastAt[key] || 0)) > 30000) {
+          _ocGetErrorToastAt[key] = now;
+          ocToast(errMsg + ' (' + r.status + ')', 'error');
+        }
+      }
       return null;
     }
     _ocAuthFails = 0;
     return await r.json();
   } catch (e) {
     console.warn('[ocApi] Network error: ' + path, e);
+    if (method === 'GET') {
+      const key = method + ':' + path.split('?')[0] + ':network';
+      const now = Date.now();
+      if ((now - (_ocGetErrorToastAt[key] || 0)) > 30000) {
+        _ocGetErrorToastAt[key] = now;
+        ocToast('API 連線失敗 / API request failed', 'error');
+      }
+    }
     return null;
   }
 }
@@ -424,11 +442,19 @@ async function ocInitFx() {
 // ─── Auto Refresh ────────────────────────────────────────────────────────────
 let _ocRefreshTimer = null;
 let _ocRefreshFn = null;
+let _ocRefreshInFlight = false;
 
 function ocStartRefresh(fn, interval) {
-  _ocRefreshFn = fn;
+  _ocRefreshFn = function() {
+    if (_ocRefreshInFlight) return;
+    _ocRefreshInFlight = true;
+    Promise.resolve()
+      .then(fn)
+      .catch(e => console.warn('[ocStartRefresh] refresh failed', e))
+      .finally(() => { _ocRefreshInFlight = false; });
+  };
   if (_ocRefreshTimer) clearInterval(_ocRefreshTimer);
-  _ocRefreshTimer = setInterval(fn, interval || 15000);
+  _ocRefreshTimer = setInterval(_ocRefreshFn, interval || 15000);
 }
 
 function ocStopRefresh() {

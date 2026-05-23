@@ -479,6 +479,38 @@ restart_engine() {
     echo "    PID: $!"
 }
 
+engine_socket_ready() {
+    local sock="$DATA_DIR/engine.sock"
+    [[ -S "$sock" ]] || return 1
+    python3 - "$sock" <<'PY' >/dev/null 2>&1
+import socket
+import sys
+
+sock_path = sys.argv[1]
+client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+client.settimeout(0.25)
+try:
+    client.connect(sock_path)
+finally:
+    client.close()
+PY
+}
+
+wait_for_engine_socket_ready() {
+    local waited=0
+    local max_waits=60
+    while [[ "$waited" -lt "$max_waits" ]]; do
+        if engine_socket_ready; then
+            echo ">>> engine.sock ready after ${waited}x500ms"
+            return 0
+        fi
+        sleep 0.5
+        waited=$((waited + 1))
+    done
+    echo "ERROR: engine.sock not ready after ${max_waits}x500ms — aborting before API restart" >&2
+    exit 3
+}
+
 restart_api() {
     echo ">>> Stopping API server..."
     stop_api_safe
@@ -649,7 +681,7 @@ prepare_runtime_secret_files
 warn_keep_auth_missing_authorization
 
 case "$SCOPE" in
-    --engine-only) restart_engine; wait_and_verify ;;
+    --engine-only) restart_engine; wait_for_engine_socket_ready; wait_and_verify ;;
     --api-only)    restart_api; sleep 3; echo "API server restarted" ;;
-    all)           restart_engine; restart_api; wait_and_verify ;;
+    all)           restart_engine; wait_for_engine_socket_ready; restart_api; wait_and_verify ;;
 esac

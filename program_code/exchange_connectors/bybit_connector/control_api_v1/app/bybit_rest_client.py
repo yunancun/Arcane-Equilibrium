@@ -11,6 +11,7 @@ MODULE_NOTE (EN): Same public surface as the Rust PyO3 openclaw_core.BybitClient
     - get_positions(...) -> list[dict] (raw Bybit V5 camelCase from /v5/position/list)
     - get_active_orders(...) -> list[dict] (Bybit V5 camelCase)
     - get_executions(...) -> list[dict] (Bybit V5 camelCase + closedPnl)
+    - get_closed_pnl(...) -> dict (Bybit V5 closed-PnL result with list/cursor)
     - get_instrument(sym) -> dict | None (SymbolSpec-style snake_case)
     - place_order(...) -> dict with BOTH snake_case order_id / order_link_id AND
       the original camelCase orderId / orderLinkId (upstream callers use either
@@ -742,6 +743,54 @@ class BybitClient:
         result = payload.get("result") or {}
         items = result.get("list") or [] if isinstance(result, dict) else []
         return [it for it in items if isinstance(it, dict)]
+
+    # ------------------------------------------------------------------
+    # Closed PnL — GET /v5/position/closed-pnl
+    # 已平倉盈虧
+    # ------------------------------------------------------------------
+
+    def get_closed_pnl(
+        self,
+        category: str = "linear",
+        symbol: Optional[str] = None,
+        start_time: Optional[int] = None,
+        end_time: Optional[int] = None,
+        limit: int = 50,
+        cursor: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Return Bybit V5 closed-PnL result (camelCase rows + cursor).
+        返回 Bybit V5 已平倉盈虧 result（camelCase rows + cursor）。
+
+        GET-only helper for the GUI read model. It does not mutate exchange or
+        local state; callers may reconcile rows against local PG fills.
+        GUI 讀模型專用 GET helper；不修改交易所或本地狀態，呼叫端可再與 PG fills 對賬。
+        """
+        if category not in {"linear", "inverse"}:
+            raise BybitError("get_closed_pnl supports only linear/inverse category")
+        safe_limit = min(max(int(limit), 1), 100)
+        params: dict[str, Any] = {
+            "category": category,
+            "limit": safe_limit,
+        }
+        if symbol:
+            params["symbol"] = symbol
+        if start_time is not None:
+            params["startTime"] = int(start_time)
+        if end_time is not None:
+            params["endTime"] = int(end_time)
+        if cursor:
+            params["cursor"] = cursor
+        payload = self._get("/v5/position/closed-pnl", params)
+        result = payload.get("result") or {}
+        if not isinstance(result, dict):
+            return {"category": category, "list": [], "nextPageCursor": ""}
+        items = result.get("list") or []
+        return {
+            **result,
+            "category": result.get("category") or category,
+            "list": [it for it in items if isinstance(it, dict)],
+            "nextPageCursor": result.get("nextPageCursor") or "",
+        }
 
     # ------------------------------------------------------------------
     # Place order — POST /v5/order/create

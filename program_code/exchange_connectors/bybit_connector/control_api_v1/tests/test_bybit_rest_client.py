@@ -728,6 +728,64 @@ def test_get_executions_returns_raw_rows():
 
 
 # ---------------------------------------------------------------------------
+# get_closed_pnl
+# ---------------------------------------------------------------------------
+
+def test_get_closed_pnl_sends_signed_get_params():
+    """get_closed_pnl uses GET /v5/position/closed-pnl with category/symbol/limit."""
+    c = _make_client()
+    recorded = _install_mock_transport(
+        c,
+        lambda req: httpx.Response(200, json=_ok_envelope({"list": []})),
+    )
+    c.get_closed_pnl(
+        "linear",
+        symbol="OPUSDT",
+        start_time=1700000000000,
+        end_time=1700003600000,
+        limit=130,
+        cursor="NEXT",
+    )
+    assert recorded[0].url.path == "/v5/position/closed-pnl"
+    params = dict(recorded[0].url.params)
+    assert params.get("category") == "linear"
+    assert params.get("symbol") == "OPUSDT"
+    assert params.get("startTime") == "1700000000000"
+    assert params.get("endTime") == "1700003600000"
+    assert params.get("limit") == "100"
+    assert params.get("cursor") == "NEXT"
+    assert recorded[0].method == "GET"
+    c.close()
+
+
+def test_get_closed_pnl_returns_raw_rows():
+    """Closed-PnL rows stay camelCase for GUI/route reconciliation."""
+    c = _make_client()
+    rows = [{
+        "symbol": "OPUSDT",
+        "side": "Buy",
+        "qty": "100",
+        "avgEntryPrice": "0.4123",
+        "avgExitPrice": "0.4051",
+        "closedPnl": "-0.72",
+        "orderId": "OID1",
+        "orderLinkId": "openclaw-grid-OPUSDT-001",
+        "updatedTime": "1737651234567",
+    }]
+    _install_mock_transport(
+        c,
+        lambda req: httpx.Response(200, json=_ok_envelope({"list": rows})),
+    )
+    out = c.get_closed_pnl("linear", limit=50)
+    assert out["category"] == "linear"
+    assert out["nextPageCursor"] == ""
+    assert len(out["list"]) == 1
+    assert out["list"][0]["closedPnl"] == "-0.72"
+    assert out["list"][0]["orderLinkId"] == "openclaw-grid-OPUSDT-001"
+    c.close()
+
+
+# ---------------------------------------------------------------------------
 # cancel_order (drop-in compat for clean_restart_flatten.py)
 # ---------------------------------------------------------------------------
 

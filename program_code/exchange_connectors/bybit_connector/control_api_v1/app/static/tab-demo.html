@@ -11,6 +11,17 @@
 </head>
 <body>
 <script>ocAuthCheck(); ocInjectBaseCSS();</script>
+<style>
+  .oc-demo-source-bar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin:8px 0; font-size:12px; color:var(--text-dim); }
+  .oc-demo-source-bar .oc-chip { font-size:11px; }
+  .oc-demo-stale-banner { display:none; margin:8px 0; padding:8px 10px; border-radius:6px; font-size:12px; border:1px solid rgba(210,153,34,0.35); background:rgba(210,153,34,0.10); color:var(--yellow); }
+  .oc-demo-stale-banner.bad { border-color:rgba(248,81,73,0.35); background:rgba(248,81,73,0.10); color:var(--red); }
+  .oc-stale { opacity:0.58; filter:saturate(0.55); }
+  .oc-row-muted { color:var(--text-dim); }
+  .oc-source-note { color:var(--text-dim); font-size:10px; display:block; margin-top:2px; }
+  .oc-spin { display:inline-block; animation:ocSpin 0.8s linear infinite; }
+  @keyframes ocSpin { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
+</style>
 
 <!-- Connector Status + Demo Session Control / 连接状态 + Demo 會話控制 -->
 <div class="oc-control-bar">
@@ -27,6 +38,7 @@
 </div>
 
 <div id="explain-demo"></div>
+<div id="demo-status-banner" class="oc-demo-stale-banner"></div>
 
 <!-- Content (shown when connected) / 已连接時顯示 -->
 <div id="demo-content" style="display:none">
@@ -157,11 +169,17 @@
           <button class="oc-fill-tab" data-fill-tab="profit" onclick="setDemoFillView('profit')">收益 / PnL</button>
         </div>
         <div class="oc-fill-pager">
+          <button class="oc-btn" id="demo-fills-refresh" onclick="refreshDemoFillsNow()" title="重新讀取 PG 成交記錄" style="font-size:12px;padding:4px 10px"><span id="demo-fills-refresh-icon">&#x21BB;</span> <span id="demo-fills-refresh-label">刷新成交</span></button>
           <button class="oc-btn" id="demo-fills-prev" onclick="demoFillPrev()" disabled>上一页</button>
           <span id="demo-fills-page-info">Page 1 · 50/页</span>
           <button class="oc-btn" id="demo-fills-next" onclick="demoFillNext()" disabled>下一页</button>
         </div>
       </div>
+      <div class="oc-demo-source-bar" id="demo-fills-source" style="display:none">
+        <span class="oc-chip oc-chip-neutral">source=--</span>
+        <span>cache age --</span>
+      </div>
+      <div id="demo-stale-banner" class="oc-demo-stale-banner"></div>
       <div class="oc-fill-summary" id="demo-fills-summary">當前只載入本页數據，切页時再拉取下一页。</div>
       <div class="oc-table-wrap">
         <table class="oc-table">
@@ -247,6 +265,8 @@ let _demoPnlRange = '24h';
 let _demoConnectedOnce = false;
 let _demoMetricsLoadedOnce = false;
 let _demoFillsLoadedOnce = false;
+let _demoFillManualRefreshInFlight = false;
+const _demoLastToastByKey = {};
 // 並行加載防重入 + tab 可見性節流：避免 15s timer + visibilitychange + console 切 tab 三路同時觸發 loadAll
 // 造成同一時刻 8 個 Bybit Demo REST 重複打，加大 GUI 卡頓。
 let _demoRefreshInFlight = false;
@@ -262,6 +282,47 @@ const DEMO_FILL_TABS = {
   profit: { label: '收益 / PnL', side: '' },
 };
 let _demoFillState = { tab: 'aggregate', offset: 0, limit: DEMO_FILL_PAGE_SIZE, hasMore: false, loading: false };
+
+function _demoToastLoadFailure(key, msg) {
+  const now = Date.now();
+  if ((now - (_demoLastToastByKey[key] || 0)) < 30000) return;
+  _demoLastToastByKey[key] = now;
+  ocToast(msg, 'error');
+}
+
+function _demoSetStaleBanner(message, severity) {
+  const banner = $('demo-stale-banner');
+  const sourceBar = $('demo-fills-source');
+  if (!banner) return;
+  if (!message) {
+    banner.style.display = 'none';
+    banner.className = 'oc-demo-stale-banner';
+    if (sourceBar) sourceBar.classList.remove('oc-stale');
+    return;
+  }
+  banner.textContent = message;
+  banner.style.display = '';
+  banner.className = 'oc-demo-stale-banner' + (severity === 'bad' ? ' bad' : '');
+  if (sourceBar) sourceBar.classList.toggle('oc-stale', severity === 'bad');
+}
+
+function _demoSetStatusBanner(message, severity) {
+  const banner = $('demo-status-banner');
+  if (!banner) return;
+  if (!message) {
+    banner.style.display = 'none';
+    banner.className = 'oc-demo-stale-banner';
+    return;
+  }
+  banner.textContent = message;
+  banner.style.display = '';
+  banner.className = 'oc-demo-stale-banner' + (severity === 'bad' ? ' bad' : '');
+}
+
+function _demoRowIsDemoEngine(row) {
+  const mode = row && (row.engine_mode || row.engineMode || row.mode);
+  return !mode || mode === 'demo' || mode === 'live_demo';
+}
 
 function openDemoRisk() {
   try {
@@ -389,9 +450,11 @@ async function loadDemoStatus() {
     _demoConnectedOnce = true;
     $('demo-badge').textContent = '已连接';
     $('demo-badge').className = 'oc-chip oc-chip-good';
-    $('demo-api-info').textContent = 'demo-trading.bybit.com';
+    const pipeline = balD.data.pipeline_status || balD.data.pipelineStatus || '';
+    $('demo-api-info').textContent = 'demo-trading.bybit.com' + (pipeline ? ' · pipeline=' + pipeline : '');
     $('demo-content').style.display = '';
     $('demo-offline').style.display = 'none';
+    _demoSetStatusBanner('', '');
     renderBalance(balD.data);
     // 成交歷史表是折疊區，不應阻塞首屏。Positions 從後端 owner_strategy 快照拿歸屬；
     // Orders 若缺 fills fallback，首幀允許顯示 `--`，後續展開 fills / refresh 會補齊。
@@ -404,6 +467,10 @@ async function loadDemoStatus() {
     ]);
     return;
   }
+  $('demo-badge').textContent = '連線逾時';
+  $('demo-badge').className = 'oc-chip oc-chip-warn';
+  _demoSetStatusBanner('Demo balance 暫不可用 · 保留最後快照', 'warn');
+  _demoToastLoadFailure('demo-status', 'Demo 狀態載入失敗，保留最後快照');
   if (!_demoConnectedOnce) showOffline();
 }
 
@@ -497,28 +564,6 @@ function renderBalance(raw) {
   ocSetText('d-maxdd', '--');
 }
 
-// Demo strategy map: symbol → strategy_name, derived from _demoFillsCache
-// (most recent fill per symbol carries the owning strategy). Paper pipeline
-// can be disabled, so paper positions are not a reliable source.
-// Demo 策略映射：symbol → strategy_name，從 _demoFillsCache 推導
-// （每個 symbol 最新一筆 fill 的 strategy_name 即當前擁有該倉位的策略）。
-// paper 管線可關，paper 持倉不可靠。
-let _demoStratMap = {};
-function _buildDemoStratMap(fills) {
-  const m = {};
-  if (!Array.isArray(fills)) return m;
-  // Fills endpoint returns most-recent-first (ORDER BY ts DESC), so the first
-  // occurrence per symbol is the latest strategy attribution.
-  // fills 端點按 ts DESC 排，首見 symbol 即最新策略歸屬。
-  for (const f of fills) {
-    const sym = f && f.symbol;
-    if (!sym || m[sym]) continue;
-    const s = f.strategy || f.strategy_name;
-    if (s) m[sym] = s;
-  }
-  return m;
-}
-
 async function loadPositions() {
   const d = await ocApi('/api/v1/strategy/demo/positions?fast=1');
   if (!d || !d.data) return;
@@ -531,7 +576,7 @@ async function loadPositions() {
     const raw = d.data.positions || d.data || [];
     positions = Array.isArray(raw) ? raw : Object.values(raw);
   }
-  positions = positions.filter(p => parseFloat(p.size || p.qty || 0) > 0);
+  positions = positions.filter(p => _demoRowIsDemoEngine(p) && parseFloat(p.size || p.qty || 0) > 0);
   if (!positions.length) {
     ocSetHtml('demo-positions', '<tr class="empty-row"><td colspan="12">暂無持倉</td></tr>');
     // Empty positions → empty dust panel (footer shows "no dust").
@@ -539,9 +584,6 @@ async function loadPositions() {
     _renderDemoDustPanel([]);
     return;
   }
-  // Derive symbol→strategy from the demo fills cache (latest fill per symbol).
-  // 從 demo fills 快取推導 symbol→策略（每個 symbol 取最新一筆 fill 的 strategy_name）。
-  _demoStratMap = _buildDemoStratMap(_demoFillsCache);
   let html = '';
   positions.forEach(p => {
     const pnl = parseFloat(p.unrealisedPnl || p.unrealised_pnl || p.unrealized_pnl || 0);
@@ -554,7 +596,7 @@ async function loadPositions() {
     // Fallback to fills-derived map (may miss low-turnover strategies).
     // 優先讀後端從 Rust paper_state 注入的 owner_strategy（權威歸屬）。
     // 降級到 fills 反推映射（低週轉策略可能漏）。
-    const strat = p.owner_strategy || _demoStratMap[sym] || '--';
+    const strat = p.owner_strategy || p.strategy || p.strategy_name || '--';
     // Synthetic-owner aware close button: for dust-frozen positions the button
     // label becomes "清塵 / Clear Dust" and the onclick handler receives the
     // owner_strategy + frozen_reason via data-* attrs so it can warn clearly
@@ -597,11 +639,6 @@ async function loadPositions() {
 async function loadDemoOrders() {
   const d = await ocApi('/api/v1/strategy/demo/orders');
   if (!d || !d.data) return;
-  // Refresh strategy map (defensive — loadPositions may not have run yet).
-  // 防禦性刷新策略映射（loadPositions 可能尚未執行）。
-  if (Object.keys(_demoStratMap).length === 0) {
-    _demoStratMap = _buildDemoStratMap(_demoFillsCache);
-  }
   let orders = [];
   if (d.data.result && d.data.result.list) {
     orders = d.data.result.list;
@@ -613,6 +650,7 @@ async function loadDemoOrders() {
   }
   // Filter active orders only (New/PartiallyFilled for regular, Untriggered for conditional)
   orders = orders.filter(o => {
+    if (!_demoRowIsDemoEngine(o)) return false;
     const st = (o.orderStatus || o.status || '').toLowerCase();
     return st === 'new' || st === 'partiallyfilled' || st === 'untriggered';
   });
@@ -639,7 +677,7 @@ async function loadDemoOrders() {
     const triggerPrice = parseFloat(o.triggerPrice || 0);
     const sym = o.symbol || '';
     const cat = o.category || (sym.endsWith('USD') && !sym.endsWith('USDT') ? 'inverse' : 'linear');
-    const strat = _demoStratMap[sym] || '--';
+    const strat = o.owner_strategy || o.strategy || o.strategy_name || '--';
     html += '<tr>';
     html += '<td>' + ocEsc(o.symbol) + '</td>';
     html += '<td style="font-size:11px">' + ocEsc(strat) + '</td>';
@@ -676,6 +714,14 @@ function _demoExtractFills(data) {
   return Array.isArray(raw) ? raw : Object.values(raw);
 }
 
+function _demoExtractClosedPnlRows(data) {
+  if (!data) return [];
+  if (Array.isArray(data.list)) return data.list;
+  if (data.result && Array.isArray(data.result.list)) return data.result.list;
+  const raw = data.closed_pnl || data.rows || [];
+  return Array.isArray(raw) ? raw : [];
+}
+
 function _demoFillHead(tab) {
   if (tab === 'profit') {
     return '<tr><th>平倉時間</th><th>交易對</th><th>策略</th><th>開倉</th><th>平倉</th><th>數量</th><th>持倉</th><th>收益 / PnL</th></tr>';
@@ -702,76 +748,100 @@ function _demoFillRow(f) {
   html += '<td>' + ocNum(price, 2) + '</td>';
   html += '<td>' + ocAmount(ocFillExecValue(f)) + '</td>';
   html += '<td>' + ocNum(fee, 6) + '</td>';
-  html += ocPnlCell(_demoFillPnl(f));
+  const pnl = _demoFillPnl(f);
+  const pnlCls = pnl >= 0 ? 'green' : 'red';
+  html += '<td class="' + pnlCls + '" title="engine-calc · PG realized_pnl"><span aria-label="engine-calc">&#x2699;</span> ' + ocMoney(pnl) + '</td>';
   html += '</tr>';
   return html;
 }
 
-function _demoBuildProfitRows(fills) {
-  const sorted = fills.slice().sort((a, b) => (Number(_demoFillTs(a)) || 0) - (Number(_demoFillTs(b)) || 0));
-  const lotsBySymbol = {};
-  const rows = [];
-  sorted.forEach(f => {
-    const sym = f.symbol || '';
-    const side = f.side || '';
-    const qty = _demoFillQty(f);
-    const price = _demoFillPrice(f);
-    const fee = _demoFillFee(f);
-    const time = Number(_demoFillTs(f)) || 0;
-    const strategy = f.strategy || f.strategy_name || f.owner_strategy || '';
-    if (!sym || !side || qty <= 0 || price <= 0) return;
-    const lots = lotsBySymbol[sym] || (lotsBySymbol[sym] = []);
-    let remaining = qty;
-    while (remaining > 0.00000001 && lots.length && lots[0].side !== side) {
-      const open = lots[0];
-      const matchQty = Math.min(remaining, open.remaining);
-      const rawPnl = _demoFillPnl(f);
-      const computed = open.side === 'Buy'
-        ? (price - open.price) * matchQty
-        : (open.price - price) * matchQty;
-      const pnl = Math.abs(rawPnl) > 0.0001 ? rawPnl * (matchQty / qty) : computed - fee * (matchQty / qty) - open.fee * (matchQty / open.qty);
-      rows.push({ sym, strategy: strategy || open.strategy, open, close: { side, price, time }, qty: matchQty, pnl, holdMs: time - open.time, paired: true });
-      open.remaining -= matchQty;
-      remaining -= matchQty;
-      if (open.remaining <= 0.00000001) lots.shift();
-    }
-    if (remaining > 0.00000001) {
-      lots.push({ side, price, time, qty: remaining, remaining, fee: fee * (remaining / qty), strategy });
-    }
-  });
-  if (!rows.length) {
-    fills.forEach(f => {
-      const pnl = _demoFillPnl(f);
-      if (Math.abs(pnl) > 0.0001) {
-        rows.push({ sym: f.symbol || '', strategy: f.strategy || f.strategy_name || f.owner_strategy || '', open: null, close: { side: f.side || '', price: _demoFillPrice(f), time: Number(_demoFillTs(f)) || 0 }, qty: _demoFillQty(f), pnl, holdMs: null, paired: false });
-      }
-    });
-  }
-  return rows.sort((a, b) => (b.close.time || 0) - (a.close.time || 0));
+function _demoStrategySourceLabel(row) {
+  const source = row.strategy_source || row.strategySource || '';
+  const labels = {
+    pg_fill: '由成交記錄匹配',
+    pg_link_id: '由訂單連結匹配',
+    bybit_unknown: '外部/手動',
+    pg_missing_unknown_external: '重啟前資料不足'
+  };
+  return labels[source] || source || '策略來源不足';
 }
 
 function _demoProfitRow(r) {
-  const openText = r.open ? (r.open.side + ' @ ' + ocNum(r.open.price, 2)) : '--';
-  const closeText = (r.close.side || '--') + (r.close.price ? ' @ ' + ocNum(r.close.price, 2) : '');
-  const hold = r.holdMs != null && r.holdMs >= 0 ? (r.holdMs / 60000).toFixed(1) + 'm' : (r.paired ? '--' : 'page edge');
-  const pnlCls = r.pnl >= 0 ? 'green' : 'red';
-  const sign = r.pnl >= 0 ? '+' : '';
+  const entryPrice = r.avg_entry_price != null ? r.avg_entry_price : r.avgEntryPrice;
+  const exitPrice = r.avg_exit_price != null ? r.avg_exit_price : r.avgExitPrice;
+  const closedPnlRaw = r.closed_pnl != null ? r.closed_pnl : r.closedPnl;
+  const closedPnlNum = parseFloat(closedPnlRaw);
+  const pnlCls = Number.isFinite(closedPnlNum) ? (closedPnlNum >= 0 ? 'green' : 'red') : '';
+  const strategy = r.strategy_name || r.strategy || '';
+  const source = r.strategy_source || r.strategySource || '';
+  const mutedStrategy = !strategy || source === 'bybit_unknown' || source === 'pg_missing_unknown_external';
+  const strategyText = strategy || (source === 'bybit_unknown' ? '外部/手動' : '未知策略');
+  const sourceLabel = _demoStrategySourceLabel(r);
+  const updated = r.updated_time_ms || r.updatedTime || r.updated_time || '';
+  const qty = r.closed_size != null ? r.closed_size : (r.closedSize != null ? r.closedSize : r.qty);
+  const orderLinkId = r.order_link_id || r.orderLinkId || '';
+  const orderId = r.order_id || r.orderId || '';
+  const drift = parseFloat(r.pnl_source_drift_usd || r.pnlSourceDriftUsd || r.diff_usd || 0);
+  const driftHtml = Number.isFinite(drift) && Math.abs(drift) > 0.10
+    ? '<span class="oc-source-note yellow" title="PG-Bybit 差 ' + ocEsc(String(drift)) + ' USD">&#x26A0; PG-Bybit 差 ' + ocEsc(String(drift)) + ' USD</span>'
+    : '';
+  const title = 'exchange-confirmed · orderLinkId=' + orderLinkId + ' · orderId=' + orderId;
   return '<tr>' +
-    '<td>' + ocFillTime(r.close.time) + '</td>' +
-    '<td>' + ocEsc(r.sym) + '</td>' +
-    '<td style="font-size:11px">' + (r.strategy ? _ocRenderOwnerStrategy(r.strategy, r) : '--') + '</td>' +
-    '<td>' + ocEsc(openText) + '</td>' +
-    '<td>' + ocEsc(closeText) + '</td>' +
-    '<td>' + ocNum(r.qty, 4) + '</td>' +
-    '<td style="color:var(--text-dim)">' + ocEsc(hold) + '</td>' +
-    '<td class="' + pnlCls + '">' + sign + r.pnl.toFixed(4) + '</td>' +
+    '<td>' + ocFillTime(updated) + '</td>' +
+    '<td>' + ocEsc(r.symbol || '') + '</td>' +
+    '<td style="font-size:11px" title="' + ocEsc(sourceLabel) + '">' +
+      '<span class="' + (mutedStrategy ? 'oc-row-muted' : '') + '">' + ocEsc(strategyText) + '</span>' +
+      '<span class="oc-source-note">' + ocEsc(sourceLabel) + '</span></td>' +
+    '<td>' + (entryPrice != null ? ocNum(parseFloat(entryPrice), 2) : '--') + '</td>' +
+    '<td>' + (exitPrice != null ? ocNum(parseFloat(exitPrice), 2) : '--') + '</td>' +
+    '<td>' + ocEsc(String(qty != null ? qty : '--')) + '</td>' +
+    '<td style="color:var(--text-dim)">' + ocEsc(String(r.side || '--')) + '</td>' +
+    '<td class="' + pnlCls + '" title="' + ocEsc(title) + '"><span aria-label="exchange-confirmed">&#x2705;</span> ' + ocEsc(String(closedPnlRaw != null ? closedPnlRaw : '--')) + driftHtml + '</td>' +
     '</tr>';
+}
+
+function _demoSourceChip(source) {
+  if (source === 'bybit_api') return '<span class="oc-chip oc-chip-good">&#x2705; Bybit API</span>';
+  if (source === 'bybit_cached') return '<span class="oc-chip oc-chip-neutral">cached</span>';
+  if (source === 'pg_fallback') return '<span class="oc-chip oc-chip-warn">&#x2699; PG fallback</span>';
+  return '<span class="oc-chip oc-chip-neutral">source=--</span>';
+}
+
+function _demoUpdatePnlSource(payload) {
+  const source = (payload && payload.source) || '--';
+  const age = parseFloat(payload && payload.cache_age_seconds);
+  const sourceTs = Number(payload && payload.source_ts);
+  const reason = payload && payload.degraded_reason;
+  const sourceBar = $('demo-fills-source');
+  if (sourceBar) sourceBar.style.display = _demoFillState.tab === 'profit' ? 'flex' : 'none';
+  const ageLabel = Number.isFinite(age) ? age.toFixed(1) + 's' : '--';
+  const tsLabel = Number.isFinite(sourceTs) && sourceTs > 0 ? ocFillTime(sourceTs) : '--';
+  const cls = Number.isFinite(age) && age > 120 ? 'bad' : (Number.isFinite(age) && age > 30 ? 'warn' : '');
+  const detail = reason ? ' · ' + ocEsc(reason) : '';
+  ocSetHtml('demo-fills-source',
+    _demoSourceChip(source) +
+    '<span class="' + (cls === 'bad' ? 'red' : cls === 'warn' ? 'yellow' : '') + '">cache age ' + ocEsc(ageLabel) + '</span>' +
+    '<span>source ts ' + ocEsc(tsLabel) + detail + '</span>' +
+    '<span title="profit tab uses sum(closedPnl), already net of Bybit fees">net PnL = sum(closedPnl)(已扣費)</span>');
+  if (source === 'pg_fallback') {
+    _demoSetStaleBanner('收益 / PnL：Bybit 不可用 · 顯示 PG fallback 估值' + (reason ? ' · ' + reason : ''), 'bad');
+  } else if (Number.isFinite(age) && age > 120) {
+    _demoSetStaleBanner('收益 / PnL：Bybit closed-pnl 快照已超過 120s · 請立即刷新', 'bad');
+  } else if (Number.isFinite(age) && age > 30) {
+    _demoSetStaleBanner('收益 / PnL：Bybit closed-pnl 快照已超過 30s', 'warn');
+  } else if (source === 'bybit_api' || source === 'bybit_cached') {
+    _demoSetStaleBanner('', '');
+  }
 }
 
 function _demoUpdateFillControls(payload, fills) {
   document.querySelectorAll('#demo-fill-tabs .oc-fill-tab').forEach(btn => {
     btn.classList.toggle('active', btn.getAttribute('data-fill-tab') === _demoFillState.tab);
   });
+  const isProfitTab = _demoFillState.tab === 'profit';
+  const sourceBar = $('demo-fills-source');
+  if (sourceBar) sourceBar.style.display = isProfitTab ? 'flex' : 'none';
+  if (!isProfitTab) _demoSetStaleBanner('', '');
   _demoFillState.hasMore = !!(payload && payload.has_more);
   const page = Math.floor(_demoFillState.offset / _demoFillState.limit) + 1;
   const tabLabel = (DEMO_FILL_TABS[_demoFillState.tab] || {}).label || _demoFillState.tab;
@@ -780,7 +850,16 @@ function _demoUpdateFillControls(payload, fills) {
   const next = $('demo-fills-next');
   if (prev) prev.disabled = _demoFillState.offset <= 0 || _demoFillState.loading;
   if (next) next.disabled = !_demoFillState.hasMore || _demoFillState.loading;
-  ocSetText('demo-fills-summary', '本页 ' + fills.length + ' 笔 · source=' + ((payload && payload.source) || '--') + ' · offset=' + _demoFillState.offset);
+  const refresh = $('demo-fills-refresh');
+  if (refresh) {
+    refresh.disabled = _demoFillState.loading || _demoFillManualRefreshInFlight;
+    refresh.title = isProfitTab ? '跳過快取重新讀取 Bybit closed PnL' : '重新讀取 PG 成交記錄';
+  }
+  ocSetText('demo-fills-refresh-label', isProfitTab ? '刷新 Bybit PnL' : '刷新成交');
+  const sourceLabel = isProfitTab
+    ? 'Bybit closed PnL · source=' + ((payload && payload.source) || '--')
+    : 'PG fills';
+  ocSetText('demo-fills-summary', '本页 ' + fills.length + ' 笔 · ' + sourceLabel + ' · offset=' + _demoFillState.offset);
 }
 
 function setDemoFillView(tab) {
@@ -802,9 +881,28 @@ function demoFillNext() {
   loadDemoFills();
 }
 
-async function loadDemoFills() {
+async function refreshDemoFillsNow() {
+  if (_demoFillState.loading || _demoFillManualRefreshInFlight) return;
+  _demoFillManualRefreshInFlight = true;
+  const icon = $('demo-fills-refresh-icon');
+  if (icon) icon.className = 'oc-spin';
+  try {
+    await loadDemoFills({ forceRefresh: true, minSpinnerMs: 200 });
+  } finally {
+    _demoFillManualRefreshInFlight = false;
+    if (icon) icon.className = '';
+    const refresh = $('demo-fills-refresh');
+    if (refresh) refresh.disabled = _demoFillState.loading;
+  }
+}
+
+async function loadDemoFills(opts) {
+  const forceRefresh = opts && opts.forceRefresh === true;
+  const minSpinnerMs = opts && opts.minSpinnerMs ? opts.minSpinnerMs : 0;
   const side = (DEMO_FILL_TABS[_demoFillState.tab] || {}).side || '';
-  const qs = '?limit=' + _demoFillState.limit + '&offset=' + _demoFillState.offset + (side ? '&side=' + encodeURIComponent(side) : '');
+  const qs = '?limit=' + _demoFillState.limit + '&offset=' + _demoFillState.offset +
+    (side ? '&side=' + encodeURIComponent(side) : '') +
+    (forceRefresh && _demoFillState.tab === 'profit' ? '&force_refresh=true' : '');
   _demoFillState.loading = true;
   _demoUpdateFillControls(null, []);
   ocSetHtml('demo-fills-head', _demoFillHead(_demoFillState.tab));
@@ -812,24 +910,37 @@ async function loadDemoFills() {
     ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">載入中...</td></tr>');
   }
   try {
-    const d = await ocApi('/api/v1/strategy/demo/fills' + qs);
+    const endpoint = _demoFillState.tab === 'profit'
+      ? '/api/v1/strategy/demo/closed-pnl'
+      : '/api/v1/strategy/demo/fills';
+    const started = Date.now();
+    const d = await ocApi(endpoint + qs);
+    const waitMs = minSpinnerMs - (Date.now() - started);
+    if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
+    if (!d) throw new Error('demo fills unavailable');
     const payload = d && d.data;
-    const fills = _demoExtractFills(payload);
+    let fills = _demoFillState.tab === 'profit' ? _demoExtractClosedPnlRows(payload) : _demoExtractFills(payload);
+    if (_demoFillState.tab !== 'profit') fills = fills.filter(_demoRowIsDemoEngine);
     if (_demoFillState.tab === 'aggregate' && _demoFillState.offset === 0) _demoFillsCache = fills;
     _demoFillsLoadedOnce = true;
     _demoFillState.loading = false;
     _demoUpdateFillControls(payload, fills);
+    if (_demoFillState.tab === 'profit') _demoUpdatePnlSource(payload);
     if (!fills.length) {
-      ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">暂無成交</td></tr>');
+      const empty = _demoFillState.tab === 'profit' && payload && payload.source === 'bybit_api'
+        ? 'Bybit closed-pnl 暂無平倉收益'
+        : '暂無成交';
+      ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">' + empty + '</td></tr>');
       return;
     }
     const html = _demoFillState.tab === 'profit'
-      ? (_demoBuildProfitRows(fills).map(_demoProfitRow).join('') || '<tr class="empty-row"><td colspan="8">本页没有可關联收益</td></tr>')
+      ? (fills.map(_demoProfitRow).join('') || '<tr class="empty-row"><td colspan="8">Bybit closed-pnl 暂無平倉收益</td></tr>')
       : fills.map(_demoFillRow).join('');
     ocSetHtml('demo-fills', html);
   } catch (e) {
     _demoFillState.loading = false;
     _demoUpdateFillControls(null, []);
+    _demoToastLoadFailure('demo-fills', 'Demo 成交載入失敗，保留最後快照');
     if (!_demoFillsLoadedOnce) {
       ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="' + (_demoFillState.tab === 'profit' ? '8' : '10') + '">無法載入成交</td></tr>');
     }
@@ -895,55 +1006,6 @@ async function loadComparison(passedDemoBal) {
     html += '</tr>';
   });
   ocSetHtml('comparison-tbody', html);
-}
-
-// Reconstruct round trips from fills: pair Buy opens with Sell closes (and vice versa)
-// 从成交記錄重建完整交易：配對买入開倉与卖出平倉
-function _calcRoundTrips(fills) {
-  if (!fills || !Array.isArray(fills) || fills.length === 0) return [];
-  // Group by symbol, then pair opens with closes
-  const bySymbol = {};
-  fills.forEach(f => {
-    const sym = f.symbol || '';
-    if (!bySymbol[sym]) bySymbol[sym] = [];
-    bySymbol[sym].push(f);
-  });
-
-  const trips = [];
-  Object.values(bySymbol).forEach(group => {
-    // Sort by time ascending
-    group.sort((a, b) => Number(a.execTime || 0) - Number(b.execTime || 0));
-    let openSide = null, openPrice = 0, openQty = 0, openTime = 0;
-
-    group.forEach(f => {
-      const side = f.side;
-      const qty = parseFloat(f.execQty || f.qty || 0);
-      const price = parseFloat(f.execPrice || f.price || 0);
-      const time = Number(f.execTime || 0);
-      const fee = Math.abs(parseFloat(f.execFee || f.fee || 0));
-
-      if (openSide == null) {
-        // Start new position
-        openSide = side; openPrice = price; openQty = qty; openTime = time;
-      } else if (side !== openSide) {
-        // Closing fill — compute PnL
-        const closeQty = Math.min(qty, openQty);
-        const pnl = openSide === 'Buy'
-          ? (price - openPrice) * closeQty - fee
-          : (openPrice - price) * closeQty - fee;
-        const holdMs = time - openTime;
-        trips.push({ pnl, holdMs });
-        openQty -= closeQty;
-        if (openQty <= 0.0001) { openSide = null; openQty = 0; }
-      } else {
-        // Adding to position — average price
-        const totalQty = openQty + qty;
-        openPrice = (openPrice * openQty + price * qty) / totalQty;
-        openQty = totalQty;
-      }
-    });
-  });
-  return trips;
 }
 
 function _ocMetricPct(rate) {
@@ -1012,7 +1074,7 @@ async function loadDemoPnlSeries() {
   if (!payload || payload.available === false || !points.length) {
     try {
       const fd = await ocApi('/api/v1/strategy/demo/fills?limit=200&offset=0');
-      const fallbackFills = _demoExtractFills(fd && fd.data);
+      const fallbackFills = _demoExtractFills(fd && fd.data).filter(_demoRowIsDemoEngine);
       payload = ocPnlSeriesFromFills(fallbackFills, _demoPnlRange);
       points = payload.points || [];
     } catch (_) {}
