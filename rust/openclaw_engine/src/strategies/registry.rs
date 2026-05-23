@@ -18,7 +18,10 @@ use super::params::{
     StrategyParamsConfig,
 };
 use super::Strategy;
-use super::{bb_breakout, bb_reversion, funding_arb, grid_helpers, grid_trading, ma_crossover};
+use super::{
+    bb_breakout, bb_reversion, funding_arb, funding_harvest, grid_helpers, grid_trading,
+    ma_crossover,
+};
 use crate::tick_pipeline::PipelineKind;
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -246,6 +249,26 @@ impl StrategyFactory {
         fa.entry_basis_ratio = p.funding_arb.entry_basis_ratio;
         fa.set_active(p.funding_arb.active);
         strategies.push(Box::new(fa));
+
+        // C10 FundingHarvest — delta-neutral spot long + perp short matched notional。
+        // Sprint 1B Pending 3.1 Stage 1 Demo strategy (BTCUSDT only, $100 cap)。
+        // 與 funding_arb V2 (ADR-0018 dormant) 並列；預設 active=false，
+        // Stage 0R replay preflight PASS + operator IPC active=true 才啟。
+        let mut fh = funding_harvest::FundingHarvest::new();
+        fh.cooldown_ms = p.funding_harvest.cooldown_ms;
+        fh.allowed_symbols = p.funding_harvest.allowed_symbols.clone();
+        fh.funding_threshold_annualized = p.funding_harvest.funding_threshold_annualized;
+        fh.funding_exit_annualized = p.funding_harvest.funding_exit_annualized;
+        fh.max_basis_pct = p.funding_harvest.max_basis_pct;
+        fh.entry_basis_ratio = p.funding_harvest.entry_basis_ratio;
+        fh.max_hold_ms = p.funding_harvest.max_hold_ms;
+        fh.total_cost_bps = p.funding_harvest.total_cost_bps;
+        fh.expected_periods = p.funding_harvest.expected_periods;
+        fh.rebalance_check_ms = p.funding_harvest.rebalance_check_ms;
+        fh.delta_drift_threshold = p.funding_harvest.delta_drift_threshold;
+        fh.position_cap_usd = p.funding_harvest.position_cap_usd;
+        fh.set_active(p.funding_harvest.active);
+        strategies.push(Box::new(fh));
 
         strategies
     }

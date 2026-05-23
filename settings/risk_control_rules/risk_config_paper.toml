@@ -89,6 +89,14 @@ take_profit_enforced_override = true
 trailing_activation_pct_override = 0.6
 trailing_distance_pct_override = 0.4
 
+# C10 funding harvest — Paper 永鎖 (AMD-2026-05-15-01 §2.2 BLOCKED：paper 不再做
+# alpha-bearing 樣本累積)；與 strategy_params_paper.toml `[funding_harvest].active=false`
+# 雙保險。同 demo 結構保 audit grep 一致。
+[per_strategy.funding_harvest]
+enabled = false
+max_concurrent_positions = 1
+stop_loss_max_pct_override = 5.0
+
 [agent]
 trailing_enabled = true
 trailing_activation_pct = 0.5

@@ -95,6 +95,14 @@ take_profit_enforced_override = true
 trailing_activation_pct_override = 0.6
 trailing_distance_pct_override = 0.4
 
+# C10 funding harvest — Live 永鎖（與 strategy_params_live.toml `[funding_harvest].active=false`
+# 雙保險）。Stage 4 LIVE 升級時需先完成 Sprint 5+ spot leg cascade。
+# 同 demo 結構保 audit grep 一致 per memory `feedback_env_config_independence`。
+[per_strategy.funding_harvest]
+enabled = false
+max_concurrent_positions = 1
+stop_loss_max_pct_override = 5.0
+
 [agent]
 trailing_enabled = true
 trailing_activation_pct = 0.5
