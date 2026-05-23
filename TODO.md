@@ -74,7 +74,7 @@ Stage F TW Acceptance + PM Phase 3e **✅ DONE-VERDICT-PASS WITH 8 CARRY-OVER (2
 | **1A-ε P2** | **2026-05-22 done** | **3 follow-up closure — N1 PA sqlx_migrate path real + N2 TW §8 path drift × 6 + N3 E3-MED-1 pg_hba.conf reject row CLOSED** | **~1-1.5 hr 3 並行** | **✅ DONE** |
 | **1B early IMPL** | **2026-05-22 done** | **5 並行 early Track — A PA M3 設計 848 LOC + B E4 pytest triage (5-11hr fix Sprint 2 carry) + C V107 sandbox + dedup full 6/6 (AC-6 caveat REMOVED) + D AC-7 Rust binding FULL + E cascade reject 2 unit test** | **~4-6 hr 5 並行** | **✅ DONE (Sprint 2 gate FULLY OPEN ✅)** |
 | **2 pre-readiness** | **2026-05-22 done** | **4 並行 Track — PA D1/D2/D3 spec + dispatch packet 6 Track Wave 1+2 + E1 V103 land sandbox PASS + PA V107 align + E3 17 table ALTER OWNER × 4 DDL PASS** | **~2-3 hr 4 並行** | **✅ DONE (Sprint 2 dispatch gate FULLY OPEN ✅)** |
-| 1B (full) | W9-12 | v5.7 baseline + C10 Stage 1 Demo + Earn first stake + M3 partial | 165-220 | ⏳ (early IMPL ✅) |
+| 1B (full) | W9-12 | C10 Stage 1 Demo + Earn first stake + M3 partial（v5.7 baseline ✅ 移除：misnamed misnomer per PA Track 4 audit 2026-05-23；12 prefix 12/12 全 DONE via Sprint 1A-α + Wave 2/2.5 + Sprint 1A-β/γ/δ/ε/ζ + Sprint 4+/5+ chain；剩餘真實工作已被 C10/Earn/§4.1.1/operator action 吸收）| 165-220 | ⏳ (early IMPL ✅ + Wave 1 Sprint 5+ ✅) |
 | 2 | W12-15 | Alpha Tournament + M4 stage 1 + M10 Tier A + M8 read-only | 280-400 | ⏳ |
 | 3 | W15-18 | Top-1 Unlock SHORT build + Stage 0 shadow + M11 nightly + M3 detectors | 280-380 | ⏳ |
 | **4** | **W18-21 (~2026-09 初)** | **★ Top-1 LIVE $500 first time ★** + Top-2 + Options Stack 1 + M1 LAL Tier 1 + M9 read-only | 360-490 | ⏳ |
