@@ -757,3 +757,73 @@ v57 audit total over-estimated by ~30 hr，主因 §6 Risk 1 過度反估 +50 hr
 `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-21--v57_c4_c5_c6_bybit_verdict.md`
 （同檔複製到 `docs/CCAgentWorkSpace/Operator/`，因 Risk 1 推翻 + 工時 ±50 hr 修正屬 HIGH severity operator advisory）
 
+
+---
+
+## 2026-05-23 Sprint 1B Pending 3.2 Earn cross-ref BB review (HEAD `875de212`)
+
+### Trigger
+
+PM 派 5 角色 (FA/E3/QA/MIT/BB) 並行 cross-ref on earn_governance spec amendment + 5 E1 IMPL Wave B DONE（含 E1c `bybit_earn_client.rs` 601 LOC）。1-2 hr single-thread review。
+
+### Verdict: **APPROVE-WITH-3-CAVEATS**
+
+1 spec amend mandatory (BB-C1 MED) + 2 follow-up advisory (BB-C2/C3 LOW)；0 ship-stop。
+
+### 重大發現：Bybit V5 path SSOT drift fix verify
+
+- **E1c IMPL 揭露 spec drift fix**：PA dispatch packet §1.2 + BB 5/21 own verdict Part A.2 兩處都列 2025 SDK 舊 path（`/v5/earn/flexible/*` + `/v5/earn/fixed/*` 12 endpoint）。E1c Rust IMPL 採真實 2026 V5 unified path：`/v5/earn/product` + `/v5/earn/place-order` + `/v5/earn/position` + `/v5/earn/apr-history` 4 unique endpoint，stake/redeem 共用 place-order 走 orderType=Stake/Redeem 區分。
+- **WebFetch verify tiagosiebler 2026 SDK endpointFunctionList**：4 unique path 對齊 SDK SSOT；BB 5/21 own verdict 自己過時。
+- **SSOT 原則生效**：代碼為真，PA packet + BB 5/21 + 字典三方都需向 E1c IMPL 對齊；不該硬改 PA packet 舊表（保 audit trail）但 forward dispatch 不再引用。
+
+### Caveat 1 (MEDIUM mandatory) — earn_governance spec amend
+
+| 章節 | 改 |
+|---|---|
+| §3.5 NEW | 補真實 V5 unified path 表（4 endpoint constant + stake/redeem orderType 區分） |
+| §4.2 condition A line 233-238 | 明示 demo + live 同走 4 unique endpoint |
+| §10.2 line 463-465 | **內部矛盾**：§4.5 line 257-267 已採 condition A finalize；line 463 仍寫 `BB v57-C4 verdict PENDING` 須同步改 `✅ DONE 2026-05-21 (a)` |
+| §13 amend log | 加 caveat 3 entry 記錄 BB cross-ref 揭露 PA §1.2 stale + E1c IMPL SSOT |
+
+### Caveat 2 (LOW follow-up) — 字典 §3 Earn 章節
+
+- grep 0 hit `/v5/earn` `FlexibleSaving` 全部 0
+- BB memory 5/21 verdict 列「§3 NEW Earn API 章節，HIGH」**從 7 升 13** — 仍未 land
+- Wave 3b BB1 啟動時用 **E1c IMPL 4 unique endpoint** 為 SSOT；12 SDK function name 為 alias reference；估 4-6 hr 合併 Wave 3b
+
+### Caveat 3 (LOW awareness) — Bybit Dynamic Settlement Frequency System
+
+- 2025-10-30 launch；funding rate 達 ±0.75% 上下限 → auto shift 1h cadence
+- 當前 Earn-only scope **0 影響**（Earn 是 staking yield 非 perp funding）
+- Sprint 5+ 若加 perp funding reconciliation，UTC 02:00 cron 須重評
+
+### RateLimit + ToS + KYC verify
+
+| 項目 | 狀態 |
+|---|---|
+| RateLimitGroup::Asset 5 req/s patch `bybit_rest_client.rs:240-258` | ✅ verified |
+| 共享 budget Asset (5 req/s) `/v5/earn/` + `/v5/asset/` + `/v5/spot-margin` | ✅ < 0.15 req/s 用量 = 3% 利用率 (97% headroom) |
+| OP-1 `Earn` non-withdraw scope 充分覆蓋 5 endpoint read + write | ✅ verified (per 5/21 C5 verdict (a)) |
+| OP-3 flexible-only vs Bybit Earn product matrix | ✅ verified (5 endpoint = FlexibleSaving only；Fixed/Easy-Onchain/BYUSDT/Fixed-Saving/DualAssets/Crypto-Loan 全 defer) |
+| ToS / KYC / broker rebate / 地理禁區 | ✅ 0 觸碰 |
+| funding settlement UTC 02:00 amend caveat 2 | ✅ 對齊 Bybit 8h default cadence |
+
+### Bybit-side overall
+
+- 技術合規度: 98%（spec §3.5 補 endpoint 表後 100%）
+- 政策合規度: 72%（M5-1/M5-2 stale + OP-1 < 2026-04-09 key 重發 pending）
+- 0 ship-stop
+- 30d Bybit V5 changelog 0 breaking change
+
+### 下次啟動需查驗項
+
+1. earn_governance spec §3.5 NEW endpoint 表 + §4.2 / §10.2 / §13 amend 是否 land
+2. 字典 §3 Earn 章節是否啟動（Wave 3b BB1，從 7 升 13）
+3. OP-1 D+1 OpenClaw key 發行日 5-min operator action 是否完成
+4. Sprint 1B Wave C E2 adversarial review 後 5 角色 verdict consolidate
+5. Bybit V5 changelog 30d 例行 audit (per BB SOP 每月)
+6. M5-1 / M5-2 governance entry + IP whitelist preflight 是否啟動
+
+### Report path
+
+`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-23--earn_governance_cross_ref_bb_review.md`

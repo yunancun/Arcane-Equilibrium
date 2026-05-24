@@ -207,9 +207,9 @@ v2 把 fail-safe 自動觸發升級為 first-class design primitive。每個 aut
 | Freeze trigger | 任一 freeze trigger 命中 → 所有 auto path **立即全停**，回退到 v5.7 advisory baseline（fail-closed） |
 | Freeze trigger 清單 | (a) M3 health domain CRITICAL 或 DEGRADED (b) M7 decay signal DECAY_ENFORCED 或 RETIRED (c) Guardian alert active (d) 5-gate kill criteria 任一命中 (e) M8 anomaly active trigger (Y2) (f) Regime change detected (per M10 Tier D regime classification — 不用 HMM，per ADR-0036 model blacklist) |
 | Freeze 範圍 | 全系統 auto path freeze，不只 freeze 觸發 module；確保 cascade failure 不被部分 auto path 放大 |
-| Freeze 持續 | 直到 trigger condition clear + operator manual review trigger 移除 + 30d cooling window（per M7 ADR-0044 §3.2 transition table 對應） |
+| Freeze 持續 | 直到 trigger condition clear + operator manual review trigger 移除 + 7d cooling window（per M7 ADR-0044 §3.2 transition table 對應） |
 | Freeze audit | Freeze event 必 emit lease + Slack + email + Console banner；不可 silent freeze |
-| 反模式（明示禁止） | (a) Freeze 只範圍對應 module 不全停 (b) Freeze 自動 clear 不等 30d cooling (c) Freeze silent 不通知 operator |
+| 反模式（明示禁止） | (a) Freeze 只範圍對應 module 不全停 (b) Freeze 自動 clear 不等 7d cooling (c) Freeze silent 不通知 operator |
 | 落地 | engine 啟動時讀取 freeze state；任何 auto path 執行前必先 check `failsafe_freeze_state` global flag |
 
 ### 4.5 Fail-safe code path 不可被 runtime config override（compile-time hard-coded only）
@@ -243,7 +243,7 @@ operator 2026-05-22 directive 明示「以下三條是 design DNA，無妥協」
 | Email 通知 | 每個 auto decision fire 後 ≤ 60s emit email；email 含 full decision payload + Console deep link |
 | Console banner | 任何 auto decision fire 時 Console 全局 banner 顯示「auto decision fired @ timestamp」+ click-through link；banner 在 24h 內可見 |
 | 三路冗餘 | Slack + email + Console banner 三路通知獨立 emit；任一路 fail 不影響其他兩路 |
-| 三路全 fail Escalation Ladder（per E2 Q3 + PA spec §4.4） | **freeze + 1h wait → 無 operator response → 自動進入 SM-04 `Defensive` mode**（保住盈利 + 停止損失 + close-only）；不採 v1「auto-recovery 通道恢復後自動 unfreeze」反模式；SM-04 Defensive reuse 既有 `active_de_risking=true / reduce_only=true / new_entries_allowed=false / emergency_stops=false` ladder level（per `rust/openclaw_core/src/sm/risk_gov.rs` line 180-187）+ active 鎖利 hook 擴充「縮 SL 至 entry + sync to exchange conditional」；觸發來源 = `RiskEvent::NotificationFailsafeTimeout` 新 variant（per §9.8 cascade）；操作員 1h 內介入 → 不自動 escalate；1h 內無 response → audit `notification_escalation_result='auto_escalated_to_sm04_defensive'`；復原必 operator manual 解除 + 30d cooling（per ADR-0044 demote pattern 對齊）|
+| 三路全 fail Escalation Ladder（per E2 Q3 + PA spec §4.4） | **freeze + 1h wait → 無 operator response → 自動進入 SM-04 `Defensive` mode**（保住盈利 + 停止損失 + close-only）；不採 v1「auto-recovery 通道恢復後自動 unfreeze」反模式；SM-04 Defensive reuse 既有 `active_de_risking=true / reduce_only=true / new_entries_allowed=false / emergency_stops=false` ladder level（per `rust/openclaw_core/src/sm/risk_gov.rs` line 180-187）+ active 鎖利 hook 擴充「縮 SL 至 entry + sync to exchange conditional」；觸發來源 = `RiskEvent::NotificationFailsafeTimeout` 新 variant（per §9.8 cascade）；操作員 1h 內介入 → 不自動 escalate；1h 內無 response → audit `notification_escalation_result='auto_escalated_to_sm04_defensive'`；復原必 operator manual 解除 + 7d cooling（per ADR-0044 demote pattern 對齊）|
 | 反模式（明示禁止） | (a) 靜默 auto-approve（no Console entry）(b) Slack 通道 fail 後不 emit email (c) Console entry 不顯示 lifecycle state (d) 通知延遲 > 5s console / > 10s slack / > 60s email |
 | 落地 | A3 Console tab design + E1 通道 IMPL + E4 三路冗餘 regression test |
 
@@ -563,7 +563,7 @@ v2 land 觸發下列 cascade patch；**PA 統籌 + 派 sub-agent 並行執行 + 
 |---|---|---|
 | `RiskEvent::NotificationFailsafeTimeout` 新 variant | `rust/openclaw_core/src/sm/risk_gov.rs` | E1 加入 RiskEvent enum 新 variant；觸發 SM-04 → Defensive transition；emit lease `active_lock_profit_triggered_by_notification_failsafe`；audit `notification_escalation_result='auto_escalated_to_sm04_defensive'` |
 | Defensive `active_de_risking` hook 擴充 | `rust/openclaw_core/src/sm/risk_gov.rs`（既有 Defensive level） | 擴充實作「縮 SL 至 entry + 小幅 protective buffer (per ATR)」+ 「sync 至 exchange-side conditional protection」（per CLAUDE.md §二 原則 9 雙重防線）|
-| 復原路徑 | engine + operator manual | 必 operator manual 解除 + 30d cooling window（per ADR-0044 demote pattern 對齊）；30d cooling 期間 Level toggle 仍 freeze |
+| 復原路徑 | engine + operator manual | 必 operator manual 解除 + 7d cooling window（per ADR-0044 demote pattern 對齊）；7d cooling 期間 Level toggle 仍 freeze |
 | E4 regression | 三路通知 fail scenario regression | mock 三路通知全 FAIL → 1h timeout → SM-04 Defensive transition 驗證 + audit `notification_escalation_result` 雙路徑（operator_responded / auto_escalated_to_sm04_defensive）覆蓋 |
 
 估時 PA + E1 + E4 sub-agent：6-10 hr（含 E4 regression）

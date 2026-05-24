@@ -1,8 +1,8 @@
 # ARCH-04: Graduated Canary 5-Stage Architecture
 
 Date: 2026-05-10
-Status: **Accepted (architecture spec)** — IMPL via W-AUDIT-9 Sprint N+0
-Authority Source: AMD-2026-05-09-03 (graduated canary default for alpha-bearing pathways)
+Status: **Accepted (architecture spec)** — active semantics amended by AMD-2026-05-15-01 + 2026-05-23 replay redesign
+Authority Source: AMD-2026-05-09-03 (historical foundation) + AMD-2026-05-15-01 (active Stage 0R / Stage 1 Demo rebase)
 Cross-references:
 - AMD-2026-05-09-01 (SM-05 polling design)
 - AMD-2026-05-09-02 (operator decision audit closure §2 Option A)
@@ -18,6 +18,12 @@ Cross-references:
 
 ---
 
+> **2026-05-23 active reading**: the original ARCH-04 paper Stage 1 is closed.
+> Paper engine is long-term Archive / replay-infrastructure lineage and cannot
+> be enabled for promotion evidence. The active path is Stage 0 shadow →
+> virtual Stage 0R Replay Preflight (`eligible_for_demo_canary=true/false`) →
+> Stage 1 `Environment::Demo` micro-canary.
+
 ## 1. Architecture Overview
 
 Graduated Canary 是 alpha-bearing pathway 的 5-stage 狀態機，把
@@ -28,7 +34,12 @@ metric 雙鎖）。
 ### 5-stage 狀態機
 
 ```
-Stage 0 (shadow only)  ── operator manual approve ──▶  Stage 1 (paper × 7d × 1S × 1Sym)
+Stage 0 (shadow only)  ── replay preflight ──▶  Stage 0R (read-only replay evidence)
+                                                              │
+                                                              │ eligible_for_demo_canary=true
+                                                              │ + operator cohort approval
+                                                              ▼
+                                                        Stage 1 (demo × 7d × 1S × 1Sym)
                                                               │
                                             auto-promote:    │ entry_fills ≥ 10
                                                               │ AND boundary_violation == 0
@@ -89,7 +100,7 @@ Stage 0 (shadow only)  ── operator manual approve ──▶  Stage 1 (paper 
                     ▼ (governance_canary_routes.py)
 ┌──────────────────────────────────────────────────────────────────┐
 │              FastAPI Control API v1 Layer                        │
-│  /api/v1/openclaw/canary/{stage,cohort,promote,rollback,history} │
+│  /api/v1/governance/canary/{cohorts,manual_promote}              │
 └───────────────────┬──────────────────────────────────────────────┘
                     │
                     ▼ (IPC patch_risk_config + Decision Lease)
@@ -168,8 +179,9 @@ Stage 0 (shadow only)  ── operator manual approve ──▶  Stage 1 (paper 
 
 | Stage | Cohort scope | 觀察期 | 自動升級條件（**全部** AND） | Auto-rollback 觸發（**任一** OR） |
 |---|---|---|---|---|
-| **0** | shadow only — 不送 intent 到 Rust submit path | 0（持續態，無自動升級） | n/a — 升 Stage 1 必須 operator 顯式核准（GUI Settings tab toggle 或 IPC `patch_risk_config`） | n/a |
-| **1** | 1 strategy × 1 symbol × `Environment::Paper` | 7d wall-clock | `entry_fills ≥ 10` AND `boundary_violation_count == 0` | 任一 fail-closed metric trip：lease IPC 失敗率 24h > 0.5% / authorization invalid / SM-04 ≥ L3 / `[40]` realized_edge_acceptance FAIL / `[55]` chain_with_lease ratio drop ≥ 10% / `[42b]` settled eligible ratio < 0.95 / 任一 healthcheck 收 hard FAIL |
+| **0** | shadow only — 不送 intent 到 Rust submit path | 0（持續態，無自動升級） | n/a — 升 Stage 1 必須先有 Stage 0R Replay Preflight `eligible_for_demo_canary=true` evidence packet + operator 顯式核准；舊 Stage 0→1 direct manual approve 關閉 | n/a |
+| **0R** | virtual read-only replay preflight；不寫 `canary_stage`，不送 order | bounded replay window | leak/bias/coverage/DSR/PBO/bootstrap sanity PASS → 只輸出 `eligible_for_demo_canary=true/false` | 任一 hard fail → 保持 Stage 0 / archive candidate |
+| **1** | 1 strategy × 1 symbol × `Environment::Demo` | 7d wall-clock | `entry_fills ≥ 10` AND `boundary_violation_count == 0` | 任一 fail-closed metric trip：lease IPC 失敗率 24h > 0.5% / authorization invalid / SM-04 ≥ L3 / `[40]` realized_edge_acceptance FAIL / `[55]` chain_with_lease ratio drop ≥ 10% / `[42b]` settled eligible ratio < 0.95 / 任一 healthcheck 收 hard FAIL |
 | **2** | 1 strategy × 1 symbol × `Environment::Demo` | 14d wall-clock | `gross_pnl_usdt > -5.0` AND `DSR > 0.5` AND `entry_fills ≥ 30` AND `boundary_violation_count == 0` | `gross_pnl_usdt < -10.0` OR `DSR < 0` OR Stage 1 任一 rollback 條件持續 ≥ 6h |
 | **3** | 5 active strategies × `Environment::Demo` full universe | 21d wall-clock | `gross_pnl_usdt > 0` AND `DSR/PBO PASS by W-AUDIT-6 acceptance` AND `attribution_chain_ok ratio ≥ 0.7` AND `boundary_violation_count == 0` | `gross_pnl_usdt < -20.0` OR `DSR < 0` OR `attribution_chain_ok ratio < 0.3` OR Stage 2 任一 rollback 條件持續 ≥ 12h |
 | **4** | `LIVE_PENDING` — 等待 operator MAG-084 + LG-X-04 supervised-live state machine + 全部 5-gate live boundary 滿足 | n/a — operator 顯式拍板（不自動升級） | operator + signed authorization + Decision Lease per-intent + Rust execution authority 全鏈 | n/a — 任何 boundary 失敗即 cancel_token shutdown，回退至 Stage 0（不是 Stage 3） |
@@ -465,7 +477,7 @@ per AMD-2026-05-09-03 §5.4：
 ## 9. Risk Acceptance（per AMD-2026-05-09-03 §6.2）
 
 最壞情境：
-- Stage 1：1 strategy × 1 symbol × paper × 7d → paper 不是真錢損失
+- Stage 1：1 strategy × 1 symbol × demo × 7d（必須承接 Stage 0R evidence packet）；paper 不再是風險緩解或 promotion stage
 - Stage 2：1 strategy × 1 symbol × demo × 14d → 達到 rollback 閾值 -10 USDT 即 trip → 實際損失 ≤ -10 USDT，demo endpoint 不影響真 mainnet
 - Stage 3：5 active strategies × demo × 21d → 達到 rollback 閾值 -20 USDT 即 trip → 實際損失 ≤ -20 USDT
 

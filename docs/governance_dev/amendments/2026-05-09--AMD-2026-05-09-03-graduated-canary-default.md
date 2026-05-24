@@ -13,6 +13,30 @@
 
 > **2026-05-15 supersession note**: AMD-2026-05-15-01 supersedes this document's Stage 1 paper cohort semantics. `Environment::Paper × 7d` is removed as a promotion stage; Stage 0R Replay Preflight now outputs only `eligible_for_demo_canary=true/false`, and Stage 1 is `Environment::Demo` micro-canary evidence. Historical rationale below is retained for audit context only.
 
+> **2026-05-23 active redesign note**: AMD-03 is now interpreted as a
+> replay-gated canary framework, not as a paper-engine launch plan. Paper is
+> long-term Archive: retained for historical artifacts, compatibility fixtures,
+> and replay infrastructure, but blocked as promotion evidence. The operational
+> flow is now:
+>
+> 1. **Stage 0 Shadow** — fail-closed baseline.
+> 2. **Stage 0R Replay Preflight** — read-only replay sanity using the actual
+>    replay surface: `/api/v1/replay/health`,
+>    `/api/v1/replay/full-chain/coverage`,
+>    `/api/v1/replay/full-chain/run`, and
+>    `/api/v1/replay/report/{experiment_id}`. Coverage/run responses remain
+>    `promotion_allowed=false`; they may only emit
+>    `eligible_for_demo_canary=true|false` with evidence refs.
+> 3. **Stage 1 Demo micro-canary** — 1 strategy × 1 symbol × Demo × 7d, after
+>    Stage 0R true + operator cohort approval + lineage/runtime gates.
+> 4. **Stage 2 Demo extended** — demo empirical evidence × 14d.
+> 5. **Stage 3 Demo full** — full demo universe × 21d.
+> 6. **Stage 4 LIVE_PENDING** — operator + supervised-live SM + live 5-gate.
+>
+> Stage 0R can accelerate leak/bias/coverage/DSR/PBO/bootstrap sanity, but it
+> cannot replace demo fill-lineage, Decision Lease, Guardian verdict,
+> ExecutionReport, exchange reject shape, or wall-clock demo windows.
+
 ## 1. 修訂背景
 
 ### 1.1 AMD-2026-05-09-02 §2 Option A 原文

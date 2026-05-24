@@ -490,8 +490,8 @@ per AMD v2 §Decision 3.1 三路冗餘紀律：
    ↓
 [Stage 4] 復原路徑（per ADR-0044 demote pattern 對齊）
    - 必 operator manual 解除（不存在 auto-recovery — per CLAUDE.md HC-5 原則 6「失敗默認收縮」）
-   - 解除前必 audit + 30d cooling window（per ADR-0044 m7-decay-enforced demote pattern）
-   - 30d cooling 期間 Level toggle 仍 freeze；30d 後 operator 顯式 unfreeze + 顯式選 Level
+   - 解除前必 audit + 7d cooling window（per ADR-0044 m7-decay-enforced demote pattern）
+   - 7d cooling 期間 Level toggle 仍 freeze；7d 後 operator 顯式 unfreeze + 顯式選 Level
 ```
 
 **SM-04 ladder mapping 決策（PA 拍板）**：**reuse 既有 `Defensive` level + active 鎖利 hook 擴充**，**不新增 `ULTRA_DEFENSIVE`**。理由 4 條：
@@ -792,7 +792,7 @@ per §1.4 + 重申：
 | Level 1 | 6 條 freeze trigger（M3 health domain CRITICAL/DEGRADED / M7 lifecycle DECAY_ENFORCED/RETIRED / Guardian alert active / 5-gate kill / M8 anomaly Y2 / regime change）任一命中 → Level 1 內所有 auto path freeze；freeze 不縮 Level 範圍 |
 | Level 2 | 同 Level 1；Level 2 內 13 條 auto path 全 freeze；freeze 期間 Level toggle 切換被拒絕（防 freeze 期間 operator 切換 Level 規避 freeze 紀律）|
 
-**新增 invariant（per §7.4）**：**Freeze state active 期間 Level toggle 禁切換**；只有 freeze clear + 30d cooling window 後可切換（per AMD v2 §Decision 2.4 freeze 持續紀律）。
+**新增 invariant（per §7.4）**：**Freeze state active 期間 Level toggle 禁切換**；只有 freeze clear + 7d cooling window 後可切換（per AMD v2 §Decision 2.4 freeze 持續紀律）。
 
 ### 7.5 §Decision 2 4.5 — Compile-Time Hard-Coded（不可 runtime config override）
 
@@ -982,15 +982,15 @@ M3 health monitor 新增 `check_autonomy_level_switch_recent_24h()`：
 
 ✅ **RESOLVED**：Path A 採納（§4.4 SM-04 Defensive reuse + active 鎖利 hook 擴充）；新增 `RiskEvent::NotificationFailsafeTimeout` variant 由 9.8 cascade patch land。
 
-### Q4（new）— Open: spec 是否需引 PM 階段 cooling-off 設計覆寫 30d cooling
+### Q4 ✅ RESOLVED 2026-05-22 — Operator 拍板「保留兩計時 + cooling 從 30d 縮為 7d」
 
-**背景**：§4.4 Stage 4 復原路徑 cite ADR-0044 demote pattern「30d cooling」。
+**背景**：§4.4 Stage 4 復原路徑 cite ADR-0044 demote pattern「7d cooling」。
 
-**Open question**：30d cooling 與 §4.2 24h cooldown 並存（兩個獨立計時）；是否冗餘？
+**Open question**：7d cooling 與 §4.2 24h cooldown 並存（兩個獨立計時）；是否冗餘？
 
-**PA 推薦**：保留 30d cooling（per ADR-0044 demote pattern對齊；30d 對應「進過 SM-04 Defensive escalation」這個重大事件；24h cooldown 對應一般 Level toggle 切換）。兩者語義不同不冗餘。
+**PA 推薦**：保留 7d cooling（per ADR-0044 demote pattern對齊；30d 對應「進過 SM-04 Defensive escalation」這個重大事件；24h cooldown 對應一般 Level toggle 切換）。兩者語義不同不冗餘。
 
-🟡 **PENDING operator confirm**：30d cooling 是否與 ADR-0044 demote 一致即可。
+✅ **Operator 2026-05-22 拍板**：保留兩計時（7d cooling 與 24h cooldown 語義不同不冗餘）；但 SM-04 Defensive 復原 cooling 從 30d **縮為 7d**（fail-safe escalation 性質與 strategy demote 不同，7d 足夠 verify 通知通道穩定 + operator review；ADR-0044 demote pattern 14d × 50% 對 strategy decay 仍適用，本 spec 7d 為 fail-safe escalation 專屬 cooling，非 ADR-0044 對齊）。
 
 ---
 

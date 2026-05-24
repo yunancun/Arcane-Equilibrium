@@ -5,6 +5,11 @@
 > Liquidation Cluster Reaction strategy, while R-3 Hypothesis Pipeline is
 > tracked as `W-AUDIT-8f`. Treat this document as the R-3 / `W-AUDIT-8f`
 > architecture spec unless PM explicitly reassigns IDs.
+>
+> **2026-05-23 replay rebase**：Any “paper engine validation” wording below is
+> historical. Hypothesis experiment validation must use replay/counterfactual
+> diagnostics and, if promoted, Stage 1 Demo micro-canary evidence. Do not enable
+> paper runtime for hypothesis promotion.
 
 **Wave 名稱**：W-AUDIT-8c "Hypothesis Pipeline"
 **對應 ARCH-04 amendment**：R-3（ADR-0021 Accepted 2026-05-09）

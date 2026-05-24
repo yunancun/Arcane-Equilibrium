@@ -37,7 +37,7 @@ H0 是 §五 [架構總覽] 中 5-Agent runtime 的 **第一道防線**；任何
 | H0 是 pre-lease；lease consumption 在 H0-blocked tick **必為 0** | RFC §Required Metrics | lease 被 H0-blocked intent 消耗 = SM-02 lifecycle 漏洞 |
 | 切換 shadow_mode 必須寫審計日誌（SEC-02） | h0_gate.rs::set_shadow_mode | 遠程切換不可追溯 |
 | Demo / Live TOML 預設 `h0_shadow_mode = false`（hard-block） | risk_config_demo.toml:171 / risk_config_live.toml:188 | demo / live 退回 shadow = 失 hard-block 保護 |
-| Paper TOML 預設 `h0_shadow_mode = true`（shadow） | risk_config_paper.toml:187 | paper 翻 hard-block 會在 OPENCLAW_ENABLE_PAPER=1 啟動瞬間誤擋 paper observation |
+| Paper TOML 預設 `h0_shadow_mode = true`（shadow） | risk_config_paper.toml:187 | 2026-05-23 起 Paper runtime 長期 Archive；paper TOML 僅保留 diagnostic/replay lineage，不可作 observation/promotion path |
 | ctor 預設 `shadow_mode = false`（LG1-T3 之後） | pipeline_ctor.rs:75–93 | 啟動瞬窗 fail-open；ctor 必為 fail-closed safety net |
 | Flip / rollback 不需重啟 engine | RFC §Acceptance | 「需重啟才能 flip」= operator 體驗倒退 |
 | Flip 後 24h 內必持續觀察 5 metric（latency / FP / leak / lease / fail-closed proof） | RFC §Required Metrics + healthcheck `[59]` | 沒觀察期 = 沒驗收依據 |

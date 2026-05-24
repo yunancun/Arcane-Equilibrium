@@ -8,6 +8,11 @@
 
 ---
 
+> **2026-05-23 active rebase**: this criteria spec still defines the
+> Stage 1→2→3 metric math, but Stage 1 is now Demo-only and may start only
+> after Stage 0R Replay Preflight outputs `eligible_for_demo_canary=true`.
+> Paper engine metrics are Archive/diagnostic only and cannot satisfy this spec.
+
 ## 1. Background + Trigger
 
 QC 在 Sprint N+1 dispatch v3 review 提了 **HIGH push back 2** — AMD-2026-05-09-03 §2.2 5-stage 表雖 list 出 promotion / rollback 條件文字，但 IMPL 落地時面臨歧義：

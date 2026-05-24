@@ -194,7 +194,7 @@ A4-C BTC→Alt Lead-Lag remains a valid alpha candidate, but its promotion path 
 - A4-C promotion requires Stage 1 demo micro-canary evidence.
 - Any A4-C spec text that says paper evidence can promote to demo must be amended.
 
-The old `OPENCLAW_ENABLE_PAPER=1` producer fence remains useful as a blocking signal: production/demo runtime must not enable paper as a promotion workaround.
+`OPENCLAW_ENABLE_PAPER=1` is treated only as an archive-policy violation signal: it must be ignored by runtime enablement, and production/demo must not use paper as a promotion workaround.
 
 ---
 

@@ -9,6 +9,12 @@
 
 ---
 
+> **2026-05-23 active rebase**: paper-engine evidence paths in this draft are
+> obsolete. Paper is Archive/diagnostic only and `OPENCLAW_ENABLE_PAPER=1` must
+> not be used to collect unblock or promotion evidence. Any future unblock
+> implementation must use replay/counterfactual diagnostics plus demo evidence,
+> or explicitly mark `dormant_no_evidence`.
+
 ## 1. Background + Trigger
 
 QC v3 NEW-ISSUE-V3-4 揭露 **freeze 是 one-way street**：
@@ -253,7 +259,7 @@ Exit code：FAIL → exit 1；WARN → exit 0 + log。
 - **與 freeze SOP 互動**：unfreeze 動作 = freeze 反向操作 → 需符合 freeze SOP 的「source freeze + runtime deploy + observation follow-up」三段式（per `strategy_blocked_symbols_freeze.json:policy.new_block_requirements`）反向；具體 PA + QC report 結構對齊
 - **Backward compat**：既有 `blocked_symbols_7d_counterfactual.py` 不動（短期 P2-AUDIT-VERIFY-5 audit 仍走舊腳本）；新腳本是擴充非取代
 - **Race condition**：若 cron 跑 §2.3 cycle 同時 operator 手動 force_eval → 兩者各寫一筆 `governance.unblock_candidates` row（candidate_at_ms 不同），無 race；`[64]` stale candidate 邏輯按時間先後 evaluate
-- **Paper engine availability**：paper engine `OPENCLAW_ENABLE_PAPER!=1` 預設關閉（per `feedback`）→ paper_fills_30d 可能持續 0 → `dormant_no_evidence` 將是常態 verdict；此非 spec 缺陷而是 paper engine policy 結果；operator 拍板「需 paper edge evidence 解封」前提是「啟動 paper engine」決策
+- **Paper engine availability**：paper engine 長期 Archive，`OPENCLAW_ENABLE_PAPER=1` 不得作 evidence collection；paper_fills_30d 持續 0 → `dormant_no_evidence` 是正常 verdict。需要解封時必改走 replay/counterfactual diagnostics + demo observation，而不是啟動 paper engine。
 
 ---
 

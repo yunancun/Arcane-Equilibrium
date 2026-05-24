@@ -31,7 +31,7 @@ Step 5b restored diagnostic producer health but failed Stage 0R: pooled R²(60/1
 
 | # | Section | 改動 essence |
 |---|---|---|
-| 1 | §6.2 Layer 2 | 從「Python writer paper-only fence」改為「BtcLeadLagProducer env-gate fence」。Producer 在 PA D+0 trait skeleton 階段就 IMPL 為 Rust producer（`rust/openclaw_engine/src/panel_aggregator/btc_lead_lag.rs`），Python writer 從不存在；舊 v1.2 §6.2 描述為 spec 與 code 失步殘留。Layer 2 改為 main.rs spawn 前 env-gate 三狀態邏輯：(a) `OPENCLAW_ENABLE_PAPER=1` → spawn producer；(b) env unset + `!has_demo && !has_live`（paper-only 配置）→ spawn；(c) env unset + `has_demo || has_live` → skip spawn（fence fired，避免 PG panel.btc_lead_lag_panel 累積 demo/live 期樣本污染下游 ML pipeline 與 5 策略 demo edge baseline）。 |
+| 1 | §6.2 Layer 2 | 從「Python writer paper-only fence」改為「BtcLeadLagProducer env-gate fence」。Producer 在 PA D+0 trait skeleton 階段就 IMPL 為 Rust producer（`rust/openclaw_engine/src/panel_aggregator/btc_lead_lag.rs`），Python writer 從不存在；舊 v1.2 §6.2 描述為 spec 與 code 失步殘留。2026-05-23 paper Archive 後 Layer 2 改為：`OPENCLAW_ENABLE_PAPER=1` ignored；paper-only runtime 不再 spawn；只有 `OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1` 可啟 non-promotional diagnostic producer。 |
 | 2 | §11 E1 派發計劃 | C-IMPL-2 row 註明：`btc_lead_lag_writer.py` 從不存在；producer 是 Rust `panel_aggregator/btc_lead_lag.rs`；本 spec 引用「Python writer」字樣為歷史殘留（v1.0-v1.2），v1.3 amend 後一律以 Rust producer 為準。 |
 
 **v1.3 不動 §7.1 mandatory metric 6 條 + §8.1 三檔 step gate + §13 16 原則合規（amend 為 spec internal cleanup，IMPL phase 不需重 sign-off）**。
@@ -217,18 +217,17 @@ PA spec draft 預設：`threshold_X = 10 bps`、`threshold_Y = 0.40`、`N = 120s
 
 **Migration template**：套 `sql/migrations/templates/schema_guard_template.sql` Guard A/B/C；MIT C-3 必審 PL/pgSQL 語法、idempotency dry-run 兩次。
 
-### 4.2 Python writer — `program_code/exchange_connectors/bybit_connector/control_api_v1/app/btc_lead_lag_writer.py`
+### 4.2 Rust producer — `rust/openclaw_engine/src/panel_aggregator/btc_lead_lag.rs`
 
-**新檔（W2 E1-δ C-IMPL-2 IMPL）**。職責：
+**2026-05-23 current reading**：v1.0-v1.2 的 Python writer never existed；A4-C producer 在 PA D+0 已落地為 Rust `panel_aggregator/btc_lead_lag.rs`。本段以下職責只描述 replay/diagnostic infrastructure，不得解讀成 active paper engine 或 promotion gate。
 
-1. 從 Bybit V5 `/v5/market/kline` 拉 BTCUSDT 1m kline + BTCUSDT 1h kline（v1.1 regime_tag 用）+ alt cohort 1m kline（rolling 1h buffer）
-2. 從 Bybit V5 `/v5/market/orderbook` 拉 BTCUSDT top-10 snapshot（每 1m）
-3. 計算 lead signal（§3.1）、xcorr（§3.2）、expected_dir（§3.3）；**主信號 N=120s**，同時計算 N=60s + N=300s shadow value 寫 `btc_lead_return_pct_60s` + `btc_lead_return_pct_300s` columns（v1.1 condition #3 decay curve evidence）
-4. **v1.1 regime_tag 計算（§9 condition #5）**：每 1m 用 BTCUSDT 1h kline shift(1) 算 1h return；`abs(btc_1h_return_bps) > 200` → `regime_tag = 'extreme'`，否則 `'normal'`；shadow log 標記不影響 main signal 寫入
-5. 1m grain bucketing：每 60 秒 1 個 snapshot 寫入 `panel.btc_lead_lag_panel`
-6. 更新 Rust IPC slot `BtcLeadLagPanelSlot`（per `slots.rs` 新增）；**主 N=120 信號寫主 panel 欄位，60s/300s shadow value 寫 schema column 但不寫 IPC slot**（避免 Rust 端 surface 接 60s/300s 引發 strategy 接觸下游）
-7. **legacy diagnostic fence Layer 2**：啟動讀 `OPENCLAW_ENABLE_PAPER` env；v1.4 起 `OPENCLAW_ENABLE_PAPER=1` 不得作 promotion evidence；若未設 + 偵測 demo/live engine active → writer 不啟動（per PA #1 trait final shape §5）
-8. **strict shift(N) lookahead-free（v1.1 condition #4）**：所有 `rolling()` / `[t-N..t]` slice operation 必用 `shift(1)` 後 N 秒前 BTC value，禁含 current bar；MIT C-3 grep verification gate
+1. 由 Rust producer/ingest path 讀取 BTCUSDT orderbook/kline-derived inputs；離線 replay 可用相同 schema 產生 counterfactual evidence。
+2. 計算 lead signal（§3.1）、xcorr（§3.2）、expected_dir（§3.3）；**主信號 N=120s**，N=60s/N=300s 只作 Stage 0R decay curve diagnostic evidence。
+3. **v1.1 regime_tag 計算（§9 condition #5）**：用 shift(1) 後資料計算 1h return；`abs(btc_1h_return_bps) > 200` → `regime_tag = 'extreme'`，否則 `'normal'`；shadow log 標記不影響 main signal 寫入。
+4. 1m grain bucketing：每 60 秒 1 個 snapshot 寫入 `panel.btc_lead_lag_panel`
+5. 更新 Rust IPC slot `BtcLeadLagPanelSlot`（per `slots.rs`）；**主 N=120 信號寫主 panel 欄位，60s/300s shadow value 不注入 live/demo strategy surface**（避免 strategy 接觸 diagnostic-only 下游）。
+6. **Archive/diagnostic Layer 2**：`OPENCLAW_ENABLE_PAPER=1` ignored；paper-only runtime no-op；只有 `OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1` 可啟 non-promotional diagnostic producer。
+7. **strict shift(N) lookahead-free（v1.1 condition #4）**：所有 rolling / window slice logic 必用 shift(1) 後 N 秒前 BTC value，禁含 current bar；驗證對象是 Rust producer/replay tooling，不是不存在的 Python writer。
 
 ### 4.3 Bybit V5 rate budget 整合
 
@@ -325,28 +324,23 @@ let alpha_surface = AlphaSurface {
 
 ### 6.2 Layer 2：BtcLeadLagProducer env-gate fence（v1.3 amendment 2026-05-11）
 
-**v1.4 canary rebase note（2026-05-15）**：`OPENCLAW_ENABLE_PAPER=1` is now **BLOCKED for promotion evidence** per AMD-2026-05-15-01. The v1.3 producer fence remains historical implementation context and may support non-promotional diagnostics only. It cannot be used to start a paper promotion lane or to substitute for Stage 1 demo evidence.
+**v1.5 paper Archive note（2026-05-23）**：`OPENCLAW_ENABLE_PAPER=1` is ignored for active runtime and **BLOCKED for promotion evidence**. Use `OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1` for non-promotional diagnostics only. It cannot be used to start a paper promotion lane or to substitute for Stage 1 demo evidence.
 
 **Producer 端 env-gate**（main.rs spawn 前判斷）：
 
 ```rust
-// main.rs:977-1004 (W2-IMPL-2, 2026-05-11)
-let paper_enabled = std::env::var("OPENCLAW_ENABLE_PAPER")
+// main.rs current policy (2026-05-23 paper Archive)
+let paper_enabled = false; // OPENCLAW_ENABLE_PAPER=1 is ignored
+let diagnostic_enabled = std::env::var("OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC")
     .map(|v| v.trim() == "1")
     .unwrap_or(false);
-let should_spawn = if paper_enabled {
-    true                          // (a) 顯式 OPENCLAW_ENABLE_PAPER=1 → spawn
-} else if !has_demo && !has_live {
-    true                          // (b) env unset + paper-only 配置 → spawn
-} else {
-    false                         // (c) env unset + demo|live active → skip
-};
+let should_spawn = diagnostic_enabled; // non-promotional diagnostic only
 ```
 
-**三狀態（v1.4 語義）**：
-- (a) `OPENCLAW_ENABLE_PAPER=1` → **BLOCKED for promotion**；不得作為 A4-C / W-AUDIT-9 promotion workaround。
-- (b) `OPENCLAW_ENABLE_PAPER` 未設 + `!has_demo && !has_live`（paper-only dev/test 配置）→ allowed only for non-promotional diagnostics。
-- (c) `OPENCLAW_ENABLE_PAPER` 未設 + `has_demo || has_live` → **skip spawn**（fence Layer 2 觸發；production/demo runtime expected posture）
+**當前語義（v1.5）**：
+- `OPENCLAW_ENABLE_PAPER=1` → ignored；不得作為 A4-C / W-AUDIT-9 promotion workaround。
+- paper-only dev/test 配置 → no-op；不得自動 spawn producer。
+- `OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1` → 可 spawn diagnostic producer；rows 必標 non-promotional diagnostic source tier。
 
 **目的**：避免 PG `panel.btc_lead_lag_panel` 累積 demo/live 期樣本污染下游 ML pipeline 與 5 策略 demo edge baseline。Layer 1（step_4_5_dispatch.rs effective_engine_mode() 主防線）已保證 demo/live engine_mode 不會把 panel 注入 surface；本 Layer 2 是**深度防禦**（mixed mode 場景下 paper-disabled 但 demo 跑時 producer 仍不寫 PG）。
 
@@ -428,7 +422,7 @@ GROUP BY symbol;
 
 ### 7.3 Strict shift(N) leak-free 對比強制（v1.1 condition #4）
 
-**Counterfactual backtest 必並列 strict `shift(N)` 版 vs naive `[t-N..t]` 版**，差異 > 30% → spec 失敗（log 內含 current bar leak），對照 `feedback_indicator_lookahead_bias.md` Donchian RETRACT 教訓。MIT C-3 D+1 review 同步必跑 strict shift grep verification（`btc_lead_lag_writer.py` 內所有 `rolling()` / `[t-N..t]` slice operation）。
+**Counterfactual backtest 必並列 strict `shift(N)` 版 vs naive `[t-N..t]` 版**，差異 > 30% → spec 失敗（log 內含 current bar leak），對照 `feedback_indicator_lookahead_bias.md` Donchian RETRACT 教訓。MIT C-3 D+1 review 同步必跑 strict shift verification（Rust producer/replay tooling 內所有 rolling / slice operation）。
 
 ---
 
@@ -480,7 +474,7 @@ GROUP BY symbol;
 - **W2 IMPL phase historical note**：spec v1.2 sign-off 後曾 D+3 起派 C-IMPL-1..4 paper IMPL；v1.4 起 C-IMPL-4 semantics 改為 Stage 0R replay preflight evidence tooling，不再啟動 paper promotion lane。
 
 **MIT C-3 D+1 review focus（保留 IMPL phase 啟動前驗）**：
-- §7.3 strict shift(N) leak-free grep verification（`btc_lead_lag_writer.py` 內 `rolling()` / slice operation 全掃）
+- §7.3 strict shift(N) leak-free verification（Rust producer/replay tooling 內 rolling / slice operation 全掃）
 - §4.1 V088 hypertable PL/pgSQL 語法 + retention drop_chunks policy + idempotency dry-run
 - §4.1 60s/300s shadow value column 寫入路徑與主信號 N=120 disjoint 不污染
 
@@ -541,7 +535,7 @@ per dispatch v3.3 §3.2 W2 fast-track：
 | Sub-agent | Scope | 動的 file | est LOC |
 |---|---|---|---|
 | **W2 E1-γ (C-IMPL-1)** | trait extension **NO-OP**（PA D+0 已 land） | **無檔可動** — 範圍縮為 BtcLeadLagPanel typedef 驗收 + 對照 producer schema | 0 LOC |
-| **W2 E1-δ (C-IMPL-2)** | lead-lag producer + V088 + IPC slot（v1.1 含 60s/300s shadow value column + regime_tag column + BTCUSDT 1h kline regime 計算 + strict shift(N) lookahead-free） | `program_code/.../btc_lead_lag_writer.py`（新）+ `sql/migrations/V088__btc_lead_lag_panel.sql`（新）+ `rust/openclaw_engine/src/ipc_server/slots.rs`（加 `BtcLeadLagPanelSlot`） + `rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs`（一行 surface field assignment + legacy diagnostic engine_mode gate） | ~400 LOC（v1.1 +50 LOC for regime_tag + 60s/300s shadow value + 1h kline integration） |
+| **W2 E1-δ (C-IMPL-2)** | lead-lag producer + V088 + IPC slot（v1.1 含 60s/300s diagnostic value + regime_tag + strict shift(N) lookahead-free） | `rust/openclaw_engine/src/panel_aggregator/btc_lead_lag.rs` + `sql/migrations/V088__btc_lead_lag_panel.sql` + `rust/openclaw_engine/src/ipc_server/slots.rs`（加 `BtcLeadLagPanelSlot`） + `rust/openclaw_engine/src/tick_pipeline/on_tick/step_4_5_dispatch.rs`（surface field assignment + archived read gate） | Rust producer/replay infra；no Python writer |
 | **W2 E1-ε (C-IMPL-3)** | strategy diagnostic shadow | `ma_crossover/strategy_impl.rs`（declare `CrossAsset` + on_tick shadow log）+ `grid_trading/mod.rs`（同） | ~80 LOC |
 | **W2 E1-ζ (C-IMPL-4)** | Stage 0R replay preflight evidence collection | 操作 / tooling only；run replay/preflight diagnostics and emit `eligible_for_demo_canary=true/false` packet；legacy paper edge report is read-only diagnostic | 0 LOC |
 
@@ -555,7 +549,7 @@ per PA 輸出物標準：
 
 1. **Layer 1 legacy diagnostic fence default → None**：E2 必 grep `btc_lead_lag = match self.effective_engine_mode()` in step_4_5_dispatch.rs，confirm `_ => None`（**不是** `_ => Some(...)`）。漏 `None` default = demo/live 污染主路徑。
 
-2. **Strict shift(N) lookahead-free 驗證（v1.1 condition #4）**：E2 必 grep `btc_lead_lag_writer.py` 內所有 `rolling()` / `[t-N..t]` slice operation，確認 BTC return（含 N=60s + N=120s + N=300s 三檔 shadow value）/ volume z-score 計算 strict 用 `shift(1)` 後的 N 秒前 value，**禁** include current bar；BTCUSDT 1h kline regime 計算同樣 strict shift(1)。對照 `feedback_indicator_lookahead_bias` Rolling-window breach 反模式。MIT C-3 D+1 review 同步必跑 grep（Q4 strict shift 並列對比 §7.3，差異 > 30% spec 失敗）。
+2. **Strict shift(N) lookahead-free 驗證（v1.1 condition #4）**：E2 必檢查 Rust producer/replay tooling 內所有 rolling / `[t-N..t]` slice operation，確認 BTC return（含 N=60s + N=120s + N=300s 三檔 diagnostic value）/ volume z-score 計算 strict 用 `shift(1)` 後的 N 秒前 value，**禁** include current bar；BTCUSDT 1h kline regime 計算同樣 strict shift(1)。對照 `feedback_indicator_lookahead_bias` Rolling-window breach 反模式。MIT C-3 D+1 review 同步必跑（Q4 strict shift 並列對比 §7.3，差異 > 30% spec 失敗）。
 
 3. **V088 hypertable retention drop_chunks policy 必設 + v1.1 schema 完整**：E2 + MIT 必審 V088 SQL 含 `SELECT add_retention_policy('panel.btc_lead_lag_panel', INTERVAL '14 days');`；漏設 → PG table 永久膨脹。**v1.1 schema 補完驗證**：必含 `btc_lead_return_pct_60s` + `btc_lead_return_pct_300s` + `regime_tag` 三新欄位（per §4.1 condition #3 + condition #5）。idempotency dry-run 兩次，第二次必須不 RAISE。
 

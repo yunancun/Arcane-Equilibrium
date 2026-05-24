@@ -25,7 +25,7 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 |-----|------|
 | `system` | 系统总览、运行状态、章节状态 |
 | `replay` | replay / Stage 0R 诊断与报告入口 |
-| `paper` | Paper 状态展示；promotion evidence 已由 AMD-2026-05-15-01 冻结 |
+| `paper` | Paper Archive 状态展示；不再启用为 promotion lane，legacy artifacts 仅作 replay diagnostics / fixture infrastructure |
 | `demo` | Demo trading / Stage 1 demo micro-canary 目标环境（当前未开放） |
 | `live` | Live_Ready 仪表盘、余额/PnL/持仓/成交/API key 管理 |
 | `strategy` | 策略部署、scanner、品种管理 |
@@ -46,7 +46,7 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 
 实时面板：[`TODO.md`](TODO.md) — active blockers、P0/P1/P2 queue、runtime evidence、schedule 和 handoff checks 均在那里维护。README 不再镜像动态状态（避免 drift）。
 
-**关键里程碑（2026-05-15）**：Decision Lease 路径 A retrofit 已落地并在 shadow/evidence 语义下运行；`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` 不等于真实 live 授权或 Executor order authority。AMD-2026-05-15-01 已冻结 paper promotion，Stage 1 改为未来 green Stage 0R 之后的 Demo micro-canary。
+**关键里程碑（2026-05-15 / 2026-05-23 口径收敛）**：Decision Lease 路径 A retrofit 已落地并在 shadow/evidence 语义下运行；`OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` 不等于真实 live 授权或 Executor order authority。AMD-2026-05-15-01 已冻结 paper promotion；2026-05-23 起 paper engine 口径为长期 Archive / replay infrastructure，Stage 1 改为未来 green Stage 0R 之后的 Demo micro-canary。
 
 **Context loading**：稳定入口见本 README；当前工作状态见 `TODO.md`；agent 启动路由见 `docs/agents/context-loading.md`；TODO 维护标准见 `docs/agents/todo-maintenance.md`。**领域词汇** → `CONTEXT.md`；**架构决策记录** → `docs/adr/`。
 
@@ -107,7 +107,7 @@ srv/
 │   ├── stop_all.sh                ← 优雅停止 + maintenance flag
 │   ├── clean_restart.sh           ← 交易所平仓 + 重启（不动 DB / paper_state）
 │   ├── fresh_start.sh             ← ★ 完整 DB 重置重启（PnL/手续费/胜率清零）
-│   ├── start_paper_trading.sh     ← Paper Trading 一键启动
+│   ├── start_paper_trading.sh     ← Legacy Paper diagnostic 启动入口（promotion lane frozen）
 │   ├── cron_observer_cycle.sh     ← Observer 自动化
 │   ├── cron_daily_report.sh       ← 日报 → Telegram（UTC 0:00）
 │   ├── canary/                    ← 灰度验证 + watchdog
@@ -212,8 +212,7 @@ systemctl --user status openclaw-watchdog       # 引擎存活监控 + 自动重
 # Grafana
 cd docker_projects/monitoring_services && docker compose up -d   # 端口 3000
 
-# 一键启动 Paper Trading
-bash helper_scripts/start_paper_trading.sh
+# Paper runtime is Archive/diagnostic only; do not start it for canary evidence.
 ```
 
 ### Mac dev-only 模式（开发环境，不参与交易）
@@ -253,7 +252,7 @@ done
 | `stop_all.sh` | 优雅停止 + 建 `engine_maintenance.flag`。`rm flag` 或 `restart_all.sh` 恢复。 | 停机维护、手工 debug |
 | `clean_restart.sh` | 停 → 交易所平仓 → 归档 runtime → 编译检查 → 重启 → watchdog 验证。**保留 paper_state 与 DB**。 | 清空交易所持仓、解决 runtime snapshot 污染 |
 | `fresh_start.sh` ★ | `clean_restart` 全部动作 + **清空 DB 经验数据**。**保留**：市场数据、已训练模型、LinUCB archive。 | 开发阶段结束、需要从零历史冷启动验证 |
-| `start_paper_trading.sh` | API 就绪后自动启 Paper Trading 会话。 | 开机自动化 |
+| `start_paper_trading.sh` | Legacy Paper diagnostic 会话启动入口；promotion lane 已冻结。 | 仅未来 operator 明确重开时使用 |
 
 ### 灰度 / 监控 (Canary & Monitor)
 

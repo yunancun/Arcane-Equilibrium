@@ -60,8 +60,8 @@ bb_breakout 在 W1 land 後**真實 consume `OiDeltaPanel`**；OI panel unavaila
 
 | 維度 | W1 (Phase B Tier 2 panel) | W2 (A4-C BTC→Alt Lead-Lag) |
 |---|---|---|
-| Engine mode | demo + live_demo + live | **paper-only**（fence by `step_4_5_dispatch.rs` engine_mode gate）|
-| Rationale | Phase B 是 production foundation；funding/OI 是 well-known signal，無 paper-only 理由 | A4-C 是 fast-track exploration；7d paper edge gate 才升 demo |
+| Engine mode | demo + live_demo + live | Legacy diagnostic fence only；active promotion path is Stage 0R replay preflight → Stage 1 Demo |
+| Rationale | Phase B 是 production foundation；funding/OI 是 well-known signal，無 paper-only 理由 | A4-C legacy paper report 已由 AMD-2026-05-15-01 rebase；paper output 不得作 promotion gate |
 | Consumer | bb_breakout 真 consume + 5 策略可選 declare | ma_crossover + grid_trading shadow log only（C-IMPL-3 不直接 trade）|
 | Edge gate | 無（直接接 production；evidence 由 healthcheck `[40]` realized_edge 觀察）| ≥ +5 bps paper avg_net 才 promote N+2 demo |
 
@@ -539,7 +539,7 @@ W1 不擴 declare scope；ma_crossover / grid_trading 加 `CrossAsset` 在 W2 IM
 - `FundingCurveSnapshot` / `OIDeltaPanel` struct typedef 在 Phase A 已 land；W1 不改 struct shape，只 wire producer
 - `AlphaSurface.{funding_curve, oi_delta_panel}` field 在 Phase A 已存在；W1 從 None → Some
 - bb_breakout `on_tick` 加新邏輯但保留 `oi_buffer` fallback 路徑（暫時，留 W-AUDIT-8d 完全移除），**不 break existing test**
-- E4 regression：5 策略全 retest + bb_breakout 跑 demo 24h surface.oi_delta_panel = Some 路徑 + paper engine 跑 surface.oi_delta_panel = None 路徑（fail-closed evaluation_outcome 寫入驗）
+- E4 regression：5 策略全 retest + bb_breakout 跑 demo 24h surface.oi_delta_panel = Some 路徑 + offline/replay diagnostic harness 跑 surface.oi_delta_panel = None 路徑（fail-closed evaluation_outcome 寫入驗）；不得啟動 paper engine 作 promotion evidence
 
 ### 7.2 16 原則合規（CLAUDE.md §二 + skill checklist）
 

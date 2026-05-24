@@ -34,12 +34,12 @@ Sprint 1B — C10 Stage 0R Replay Preflight + Stage 1 Demo Micro-Canary + Earn D
 （Week 1.5-3；mainnet live $2,000 落 Sprint 3-4，待 P0-EDGE-1 + P0-LG-3 + P0-OPS-1..4 全 closed）
 
 - C10 Stage 0R replay preflight：
-  - replay engine 跑 C10 strategy 對 spot leg 假設（spot leg paper-only 模擬）
+  - replay engine 跑 C10 strategy 對 spot leg 假設（replay-backed synthetic accounting；不啟動 paper engine）
   - eligible_for_demo_canary=true/false verdict（per AMD-2026-05-15-01）
   - 若 PASS → 進 Stage 1 Demo；若 FAIL → 凍結 C10 + 派 PA review
 - C10 Stage 1 Demo Micro-Canary：
   - 1 strategy × 1 symbol × Demo endpoint × 7d
-  - spot leg paper-only（Bybit demo 不支援 spot lending；per memory funding_arb_v2 教訓）
+  - spot leg 使用 replay-backed synthetic accounting sidecar（Bybit demo 不支援 spot lending；per memory funding_arb_v2 教訓），不得用 `OPENCLAW_ENABLE_PAPER=1` 當 promotion path
   - Demo USDT $200-500 cap（不寫 mainnet live $2,000）
 - Earn governance + first small manual stake：
   - Demo endpoint 試運行（待 BB C4 verdict 確認 demo 是否支援 Earn）
