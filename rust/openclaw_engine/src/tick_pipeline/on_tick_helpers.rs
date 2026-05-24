@@ -169,6 +169,14 @@ pub(crate) fn make_order_id(em: &str, symbol: &str, ts_ms: u64) -> String {
 
 // ── S-03: Build a synthetic market OrderIntent — shared helper for close / audit intents ──
 // S-03：構建合成市價 OrderIntent — 供平倉/審計意圖共用，消除 on_tick 中的重複結構字面量。
+//
+// Round 2 finding 3：本 helper 是 close-audit intent（push_display_intent 顯示用，
+// 不走 IntentProcessor / 不送交易所），但 OrderIntent struct 與 trade-path 共享 →
+// 必須由 is_long 派生 intent_type，否則 caller 傳 is_long=false 會殘留 OpenLong
+// 占位（finding 3 反模式重犯）。
+//
+// 不變量：本 helper 只構造 trading audit intent；caller（step_4_5_dispatch 1615 /
+// step_6_risk_checks）傳 is_long 後此處派生對齊。Earn 路徑不會走此 helper。
 #[inline]
 pub(crate) fn build_intent(
     symbol: &str,
@@ -177,6 +185,13 @@ pub(crate) fn build_intent(
     confidence: f64,
     strategy: String,
 ) -> crate::intent_processor::OrderIntent {
+    // Round 2 finding 3：由 is_long 派生 intent_type，消除 caller 傳 is_long=false
+    // 卻殘留 OpenLong 字面占位的矛盾（即便此 intent 不走 process，仍須 self-consistent）。
+    let intent_type = if is_long {
+        crate::intent_processor::IntentType::OpenLong
+    } else {
+        crate::intent_processor::IntentType::OpenShort
+    };
     crate::intent_processor::OrderIntent {
         symbol: symbol.to_string(),
         is_long,
@@ -191,9 +206,7 @@ pub(crate) fn build_intent(
         persistence_elapsed_ms: None,
         time_in_force: None,
         maker_timeout_ms: None,
-        // Sprint 1B Earn first stake — IntentType backward-compat 占位
-        // (synthetic close / audit intent 屬 trading hot-path 不會走 Earn 分支)。
-        intent_type: crate::intent_processor::IntentType::OpenLong,
+        intent_type,
         earn_payload: None,
     }
 }

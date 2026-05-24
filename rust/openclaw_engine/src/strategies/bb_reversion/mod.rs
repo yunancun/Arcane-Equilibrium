@@ -26,7 +26,7 @@ use std::collections::HashMap;
 use super::common::{compute_post_only_price, MakerPriceInputs, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{Strategy, StrategyAction, StrategyParams};
-use crate::intent_processor::{IntentType, OrderIntent};
+use crate::intent_processor::OrderIntent;
 use crate::strategies::cross_asset::{evaluate_shadow_signal, BtcLeadLagShadowSignal};
 use crate::tick_pipeline::TickContext;
 use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
@@ -321,22 +321,20 @@ impl BbReversion {
         };
         let scaled =
             crate::tick_pipeline::on_tick_helpers::clamp_confidence(conf * self.conf_scale);
-        Some(OrderIntent {
-            symbol: ctx.symbol.to_string(),
+        // Round 2 finding 1：emit 改走 OrderIntent::new_trade helper（消 inline literal）。
+        Some(OrderIntent::new_trade(
+            ctx.symbol.to_string(),
             is_long,
             qty,
-            confidence: scaled,
-            strategy: self.name().into(),
+            scaled,
+            self.name().into(),
             order_type,
             limit_price,
             confluence_score,
             persistence_elapsed_ms,
-            time_in_force: None,
-            maker_timeout_ms: None,
-            // Sprint 1B Earn first stake — IntentType backward-compat 占位。
-            intent_type: IntentType::OpenLong,
-            earn_payload: None,
-        })
+            None,
+            None,
+        ))
     }
 }
 
@@ -385,7 +383,9 @@ impl Strategy for BbReversion {
     /// P0 Option A-Lite — 倉位被外部風控/止損平掉後，僅清 strategy-internal
     /// 訊號狀態（persistence）。本地 positions 已不存在；paper_state 端 close
     /// 後 ctx.position_state 自然為 None，策略下個 tick 即視為「未持倉」。
-    fn on_external_close(&mut self, symbol: &str) {
+    fn on_external_close(&mut self, symbol: &str, _close_price: f64, _close_ts_ms: u64) {
+        // Sprint 1B Bug 1 fix：本 strategy 不維護 synthetic ledger，無需 PnL 結算；
+        // 簽名新增 close_price / close_ts_ms 純編譯對齊 trait 升級（0 行為差）。
         self.persistence.clear(symbol);
     }
 

@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use super::common::{compute_post_only_price, MakerPriceInputs, PerSymbolState, TrendCooldown};
 use super::confluence::{self, ConfluenceConfig, PersistenceTracker};
 use super::{Strategy, StrategyAction, StrategyParams};
-use crate::intent_processor::{IntentType, OrderIntent};
+use crate::intent_processor::OrderIntent;
 use crate::order_manager::TimeInForce;
 use crate::tick_pipeline::TickContext;
 use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
@@ -359,7 +359,9 @@ impl Strategy for BbBreakout {
     ///     expiry 窗口約束，由 on_tick 自動清過期，docstring 對齊 mod.rs:281-291 原契約）
     ///   * `oi_buffer` → **保留**（市場觀察序列，與倉位完全解耦）
     ///   * `persistence` → 清（W7-* 一致性：cross-strategy close 後重新累積信號持續度）
-    fn on_external_close(&mut self, symbol: &str) {
+    fn on_external_close(&mut self, symbol: &str, _close_price: f64, _close_ts_ms: u64) {
+        // Sprint 1B Bug 1 fix：本 strategy 不維護 synthetic ledger，無需 PnL 結算；
+        // 簽名新增 close_price / close_ts_ms 純編譯對齊 trait 升級（0 行為差）。
         if let Some(st) = self.symbols.get_mut(symbol) {
             st.entry_price = None;
             st.trailing_stop = None;
@@ -850,26 +852,24 @@ impl Strategy for BbBreakout {
                             } else {
                                 ("market".to_string(), None, None, None)
                             };
-                        intents.push(StrategyAction::Open(OrderIntent {
-                            symbol: ctx.symbol.to_string(),
+                        // Round 2 finding 1：emit 改走 OrderIntent::new_trade helper —
+                        // 由 is_long 自動派生 intent_type，禁 inline struct literal，避免
+                        // 短路 helper 設計（PA E2 focus 2.1：唯一 trade-path 建構器）。
+                        intents.push(StrategyAction::Open(OrderIntent::new_trade(
+                            ctx.symbol.to_string(),
                             is_long,
                             qty,
-                            confidence: crate::tick_pipeline::on_tick_helpers::clamp_confidence(
+                            crate::tick_pipeline::on_tick_helpers::clamp_confidence(
                                 raw_conf * self.conf_scale,
                             ),
-                            strategy: self.name().into(),
+                            self.name().into(),
                             order_type,
                             limit_price,
                             confluence_score,
                             persistence_elapsed_ms,
                             time_in_force,
                             maker_timeout_ms,
-                            // Sprint 1B Earn first stake — IntentType backward-compat 占位
-                            // (既有 trading intent 預設 OpenLong;E1b 接 router dispatch
-                            // 後可改為按 is_long 推斷 OpenLong/OpenShort)。
-                            intent_type: IntentType::OpenLong,
-                            earn_payload: None,
-                        }));
+                        )));
                         // 入場時寫 strategy-internal lifecycle state：squeeze 清空、entry_price
                         // 與 trailing_stop 初始化；position direction 不由本策略寫（P0 Option
                         // A-Lite：paper_state.apply_fill 統一寫入 SSoT，下個 tick 經

@@ -220,7 +220,7 @@ fn test_grid_close_on_inventory_reduction() {
 
     // Pipeline confirms close → inventory adjusted
     // 管線確認平倉 → 庫存已調整
-    g.on_close_confirmed("BTC");
+    g.on_close_confirmed("BTC", 0.0, 0); // Sprint 1B Bug 1 fix：簽名升級對齊（grid 不消費 close_price/close_ts_ms）
     let inv = g.net_inventory.get("BTC").copied().unwrap_or(0.0);
     assert!(
         inv.abs() < 1e-9,
@@ -1075,7 +1075,7 @@ fn test_grid_churn_breaker_arms_after_repeated_confirmed_closes() {
     g.prev_inventory.insert("BTC".to_string(), 1.0);
     g.net_inventory.insert("BTC".to_string(), 1.0);
     g.last_trade_ms.insert("BTC".to_string(), 1_000);
-    g.on_close_confirmed("BTC");
+    g.on_close_confirmed("BTC", 0.0, 0); // Sprint 1B Bug 1 fix：簽名升級對齊
     assert!(
         !g.churn_breaker_until_ms.contains_key("BTC"),
         "first close alone should not arm churn breaker"
@@ -1084,7 +1084,7 @@ fn test_grid_churn_breaker_arms_after_repeated_confirmed_closes() {
     g.prev_inventory.insert("BTC".to_string(), 1.0);
     g.net_inventory.insert("BTC".to_string(), 1.0);
     g.last_trade_ms.insert("BTC".to_string(), 2_000);
-    g.on_close_confirmed("BTC");
+    g.on_close_confirmed("BTC", 0.0, 0); // Sprint 1B Bug 1 fix：簽名升級對齊
     assert_eq!(
         g.churn_breaker_until_ms.get("BTC").copied(),
         Some(3_602_000)

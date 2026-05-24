@@ -1009,7 +1009,7 @@ fn test_on_external_close_mutation_does_not_panic() {
         .exit_persistence
         .check("BTC", Some(false), 100_000, 180_000, false);
 
-    s.on_external_close("BTC");
+    s.on_external_close("BTC", 0.0, 0); // Sprint 1B Bug 1 fix：簽名升級，ma_crossover 不消費 close_price/close_ts_ms
 
     // clear 過後 fresh check 不 panic（mutation 完整生效）。
     let _ = s.persistence.check("BTC", Some(true), 1_000_000, 0, false);

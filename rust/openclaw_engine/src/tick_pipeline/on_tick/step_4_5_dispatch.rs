@@ -1600,16 +1600,25 @@ impl TickPipeline {
         // ═══════════════════════════════════════════════════════════════════════
         // Track confirmed/skipped closes for strategy callbacks after execution.
         // 追蹤已確認/跳過的平倉，供執行後的策略回調使用。
-        let mut close_confirmed_symbols: Vec<String> = Vec::new();
+        //
+        // Sprint 1B Bug 1 fix（C10 HYBRID-BUG）：close_confirmed_symbols 從
+        // `Vec<String>` 升 `Vec<(String, f64, u64)>`，攜帶 close fill price + ts，
+        // 供 funding_harvest synthetic spot ledger 用真實價結算 PnL，避免
+        // entry_price fallback 觸發 Stage 0R replay drift > 5% 永真。
+        let mut close_confirmed_symbols: Vec<(String, f64, u64)> = Vec::new();
         let mut close_skipped_symbols: Vec<String> = Vec::new();
 
         for (symbol, reason) in &pending_strategy_closes {
             // P2 fix: synthetic intent for monitoring/audit (recent_intents ring buffer).
             // S-03: use build_intent() helper — eliminates inline OrderIntent literal.
             // P2 修復：合成 intent 供監控/審計；S-03：使用 build_intent 消除內聯字面量。
+            // Round 2 finding 3：close_intent 僅供 push_display_intent 審計顯示（不走
+            // process），實際 close direction 由下方 paper_state.get_position(symbol).is_long
+            // 決定。傳 is_long=false 是 audit-only placeholder；build_intent 已派生
+            // intent_type=OpenShort 對齊 is_long，消除 finding 3 矛盾。
             let close_intent = build_intent(
                 symbol,
-                false, // direction filled in below if position found
+                false,
                 0.0,
                 0.0,
                 format!("strategy_close:{reason}"),
@@ -1630,6 +1639,9 @@ impl TickPipeline {
                 if let Some(pos) = self.paper_state.get_position(symbol) {
                     let is_long = pos.is_long;
                     let qty = pos.qty;
+                    // Sprint 1B Bug 1 fix：先 snapshot entry_price，避免 execute_position_close
+                    // mutable borrow 期間仍持 pos immutable borrow（E0502）。
+                    let entry_price_snap = pos.entry_price;
                     info!(symbol = %symbol, is_long = %is_long, qty = %qty, reason = %reason,
                           "strategy close → exchange / 策略平倉 → 交易所");
                     let tag = format!("strategy_close:{reason}");
@@ -1641,7 +1653,14 @@ impl TickPipeline {
                         None,
                         format!("close_dispatched:{reason}"),
                     );
-                    close_confirmed_symbols.push(symbol.clone());
+                    // Sprint 1B Bug 1 fix：exchange dispatch path 尚無 fill confirmed
+                    // → 用 paper_state.latest_price best-effort；fail-soft fallback 用
+                    // entry_price snapshot（dispatch confirm 後 fill_handler 再以真實 fill 重算）。
+                    let close_px_dispatch = self
+                        .paper_state
+                        .latest_price(symbol)
+                        .unwrap_or(entry_price_snap);
+                    close_confirmed_symbols.push((symbol.clone(), close_px_dispatch, event.ts_ms));
                 } else {
                     warn!(symbol = %symbol, reason = %reason, "strategy close skipped: no position found / 策略平倉跳過：未找到倉位");
                     push_display_intent(
@@ -1670,31 +1689,37 @@ impl TickPipeline {
                     // close cross-symbol positions (after multi-symbol position tracking),
                     // so event.last_price (current tick) is wrong when symbol ≠ event.symbol.
                     // PNL-FIX-1：策略可能跨交易對平倉，必須以該交易對自己的最新價平倉。
-                    if let Some((_il, _q, close_px, pnl)) =
-                        self.close_position_at_symbol_market(symbol, event.ts_ms)
-                    {
-                        let tag = format!("strategy_close:{reason}");
-                        self.emit_close_fill(
-                            symbol,
-                            is_long,
-                            qty,
-                            close_px,
-                            event.ts_ms,
-                            pnl,
-                            &tag,
-                            &ectx,
-                            snap.as_ref(),
-                        );
-                        // Update Kelly stats for future sizing / 更新 Kelly 統計供未來 sizing 使用
-                        self.intent_processor.record_trade(symbol, pnl);
-                        // Track consecutive losses for risk evaluator
-                        // 追蹤連續虧損供風控評估器使用
-                        if pnl < 0.0 {
-                            *self.consecutive_losses.entry(symbol.clone()).or_insert(0) += 1;
+                    //
+                    // Sprint 1B Bug 1 fix：capture close_px_paper 在 if-let 外，供 callback tuple 用真實價。
+                    let close_px_paper_opt: Option<f64> = {
+                        let close_result = self.close_position_at_symbol_market(symbol, event.ts_ms);
+                        if let Some((_il, _q, close_px, pnl)) = close_result {
+                            let tag = format!("strategy_close:{reason}");
+                            self.emit_close_fill(
+                                symbol,
+                                is_long,
+                                qty,
+                                close_px,
+                                event.ts_ms,
+                                pnl,
+                                &tag,
+                                &ectx,
+                                snap.as_ref(),
+                            );
+                            // Update Kelly stats for future sizing / 更新 Kelly 統計供未來 sizing 使用
+                            self.intent_processor.record_trade(symbol, pnl);
+                            // Track consecutive losses for risk evaluator
+                            // 追蹤連續虧損供風控評估器使用
+                            if pnl < 0.0 {
+                                *self.consecutive_losses.entry(symbol.clone()).or_insert(0) += 1;
+                            } else {
+                                self.consecutive_losses.remove(symbol);
+                            }
+                            Some(close_px)
                         } else {
-                            self.consecutive_losses.remove(symbol);
+                            None
                         }
-                    }
+                    };
                     // Shadow order: mirror close to Demo API / 影子訂單：鏡像平倉到 Demo API
                     let tag = format!("strategy_close:{reason}");
                     self.execute_position_close(symbol, is_long, qty, event, false, &tag);
@@ -1705,7 +1730,17 @@ impl TickPipeline {
                         None,
                         format!("close_filled:{reason}"),
                     );
-                    close_confirmed_symbols.push(symbol.clone());
+                    // Sprint 1B Bug 1 fix：paper-mode close path 拿到真實 close_px → callback 用真實價。
+                    // fail-soft fallback：close_position_at_symbol_market 回 None 時用 latest_price → entry_price。
+                    let close_px_for_cb = close_px_paper_opt
+                        .or_else(|| self.paper_state.latest_price(symbol))
+                        .unwrap_or_else(|| {
+                            self.paper_state
+                                .get_position(symbol)
+                                .map(|p| p.entry_price)
+                                .unwrap_or(0.0)
+                        });
+                    close_confirmed_symbols.push((symbol.clone(), close_px_for_cb, event.ts_ms));
                 } else {
                     warn!(symbol = %symbol, reason = %reason, "strategy close skipped: no position found / 策略平倉跳過：未找到倉位");
                     push_display_intent(
@@ -1722,9 +1757,13 @@ impl TickPipeline {
 
         // Notify strategies of close outcomes (P1 fix: prevents grid inventory drift on skipped close).
         // 通知策略平倉結果（P1 修復：防止 grid 庫存在跳過平倉時漂移）。
+        //
+        // Sprint 1B Bug 1 fix：close_confirmed tuple 攜帶 (symbol, close_px, ts) 供
+        // funding_harvest synthetic spot ledger 用真實 close fill price 結算 PnL，
+        // 不再使用 entry_price fallback（Stage 0R replay drift gate 結構性永真）。
         for strategy in self.orchestrator.strategies_mut() {
-            for sym in &close_confirmed_symbols {
-                strategy.on_close_confirmed(sym);
+            for (sym, close_px, ts_ms) in &close_confirmed_symbols {
+                strategy.on_close_confirmed(sym, *close_px, *ts_ms);
             }
             for sym in &close_skipped_symbols {
                 strategy.on_close_skipped(sym);

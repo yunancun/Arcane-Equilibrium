@@ -23,7 +23,7 @@ use tracing::info;
 
 use super::common::{compute_post_only_price, MakerPriceInputs, TrendCooldown};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
-use crate::intent_processor::{IntentType, OrderIntent};
+use crate::intent_processor::OrderIntent;
 use crate::order_manager::TimeInForce;
 use crate::tick_pipeline::TickContext;
 use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
@@ -496,25 +496,22 @@ impl Strategy for FundingArb {
         // 在 fill confirm 前 cooldown 已 record，防 same-tick re-emit。
         self.cooldown.record_signal(sym, now_ms);
 
-        vec![StrategyAction::Open(OrderIntent {
-            symbol: sym.to_string(),
+        // Round 2 finding 1：emit 改走 OrderIntent::new_trade helper（消 inline literal）。
+        // funding_arb short-capable；helper 由 is_long 派生 intent_type，避免 is_long=false /
+        // OpenLong 矛盾。confluence/persistence 為 None（feature_builder 會填 0.0）。
+        vec![StrategyAction::Open(OrderIntent::new_trade(
+            sym.to_string(),
             is_long,
-            qty: self.default_qty, // sentinel → IntentProcessor applies Kelly/risk sizing
+            self.default_qty, // sentinel → IntentProcessor applies Kelly/risk sizing
             confidence,
-            strategy: self.name().into(),
-            order_type: "limit".into(),
-            limit_price: Some(limit_price),
-            // FundingArb has no confluence scoring / persistence tracker; leave
-            // features unset so feature_builder fills 0.0 placeholders.
-            // FundingArb 無 confluence/persistence；feature_builder 會填 0。
-            confluence_score: None,
-            persistence_elapsed_ms: None,
-            time_in_force: Some(TimeInForce::PostOnly),
-            maker_timeout_ms: Some(FUNDING_ARB_MAKER_TIMEOUT_MS),
-            // Sprint 1B Earn first stake — IntentType backward-compat 占位。
-            intent_type: IntentType::OpenLong,
-            earn_payload: None,
-        })]
+            self.name().into(),
+            "limit".into(),
+            Some(limit_price),
+            None,
+            None,
+            Some(TimeInForce::PostOnly),
+            Some(FUNDING_ARB_MAKER_TIMEOUT_MS),
+        ))]
     }
 
     fn update_params_json(&mut self, json: &str) -> Result<(), String> {
@@ -1145,7 +1142,9 @@ mod tests {
         s.cooldown.record_signal("BTC", 100_000);
         let before = s.cooldown.last_ms("BTC");
 
-        s.on_external_close("BTC");
+        // Sprint 1B Bug 1 fix: hook 簽名升級加 close_price / close_ts_ms 兩參數，
+        // funding_arb 預設 no-op，傳 0.0 / 0 表 ignored value。
+        s.on_external_close("BTC", 0.0, 0);
 
         assert_eq!(
             s.cooldown.last_ms("BTC"),
@@ -1159,22 +1158,22 @@ mod tests {
     #[test]
     fn test_funding_arb_on_fill_is_noop_no_local_state() {
         let mut s = FundingArb::new();
-        let intent = OrderIntent {
-            symbol: "BTC".to_string(),
-            is_long: false,
-            qty: 1.0,
-            confidence: 0.5,
-            strategy: "funding_arb".to_string(),
-            order_type: "limit".to_string(),
-            limit_price: Some(50_000.0),
-            confluence_score: None,
-            persistence_elapsed_ms: None,
-            time_in_force: Some(TimeInForce::PostOnly),
-            maker_timeout_ms: Some(45_000),
-            // Sprint 1B Earn first stake — IntentType backward-compat 占位。
-            intent_type: IntentType::OpenLong,
-            earn_payload: None,
-        };
+        // Round 2 finding 8：原 test fixture is_long=false / OpenLong 矛盾（PASS = 該
+        // fixture 沒走 validate / 沒走 new_trade，是 living example of Bug 2 未修 pattern）。
+        // 改走 new_trade(false, ...) helper：自動派生 IntentType::OpenShort，對齊 is_long。
+        let intent = OrderIntent::new_trade(
+            "BTC".to_string(),
+            false,
+            1.0,
+            0.5,
+            "funding_arb".to_string(),
+            "limit".to_string(),
+            Some(50_000.0),
+            None,
+            None,
+            Some(TimeInForce::PostOnly),
+            Some(45_000),
+        );
         let fill = openclaw_core::execution::FillResult {
             fill_price: 50_000.0,
             fill_qty: 1.0,

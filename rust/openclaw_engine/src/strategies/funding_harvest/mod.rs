@@ -31,7 +31,7 @@ use tracing::info;
 
 use super::common::{compute_post_only_price, MakerPriceInputs, TrendCooldown};
 use super::{ParamRange, Strategy, StrategyAction, StrategyParams};
-use crate::intent_processor::{IntentType, OrderIntent};
+use crate::intent_processor::OrderIntent;
 use crate::order_manager::TimeInForce;
 use crate::tick_pipeline::TickContext;
 use openclaw_core::alpha_surface::{AlphaSourceTag, AlphaSurface};
@@ -514,22 +514,22 @@ impl Strategy for FundingHarvest {
                     "perp short entry intent emitted; synthetic spot leg pending fill"
                 );
 
-                vec![StrategyAction::Open(OrderIntent {
-                    symbol: sym.to_string(),
-                    is_long: false, // perp SHORT
-                    qty: qty_perp,
+                // Round 2 finding 1：emit 改走 OrderIntent::new_trade helper。
+                // funding_harvest perp 腿 always SHORT（is_long=false）；helper 自動
+                // 派生 IntentType::OpenShort，消除 inline struct literal 路徑。
+                vec![StrategyAction::Open(OrderIntent::new_trade(
+                    sym.to_string(),
+                    false, // perp SHORT
+                    qty_perp,
                     confidence,
-                    strategy: self.name().to_string(),
-                    order_type: "limit".to_string(),
-                    limit_price: Some(limit_price),
-                    confluence_score: None,
-                    persistence_elapsed_ms: None,
-                    time_in_force: Some(TimeInForce::PostOnly),
-                    maker_timeout_ms: Some(FUNDING_HARVEST_MAKER_TIMEOUT_MS),
-                    // Sprint 1B Earn first stake — IntentType backward-compat 占位。
-                    intent_type: IntentType::OpenLong,
-                    earn_payload: None,
-                })]
+                    self.name().to_string(),
+                    "limit".to_string(),
+                    Some(limit_price),
+                    None,
+                    None,
+                    Some(TimeInForce::PostOnly),
+                    Some(FUNDING_HARVEST_MAKER_TIMEOUT_MS),
+                ))]
             }
         }
     }
@@ -572,19 +572,22 @@ impl Strategy for FundingHarvest {
     }
 
     /// strategy 自主 Close confirmed → realize synthetic spot 腿 PnL。
-    /// 不變量：spot price 用 entry_price 作 fallback（無 ctx 可用）；現實 Stage 1-3
-    /// 期間 realized PnL 主要供 ledger book-keeping，不影響 paper_state balance。
-    fn on_close_confirmed(&mut self, symbol: &str) {
+    ///
+    /// Sprint 1B Bug 1 fix（C10 HYBRID-BUG）：
+    /// 改用 caller 傳入的真實 close fill price + ts 結算，取代舊 `entry_price`
+    /// fallback。舊行為 PnL ≡ 0 → spec §4.1 line 765「runtime PnL vs Stage 0R
+    /// replay drift > 5%」對 nonzero replay PnL 結構性永真 → C10 永遠 demote。
+    /// 新行為：synthetic spot 腿用真實價結算，runtime vs replay drift gate 才能
+    /// 正常運作（drift < 5% 不 demote / drift ≥ 5% 才 demote）。
+    fn on_close_confirmed(&mut self, symbol: &str, close_price: f64, close_ts_ms: u64) {
         if let Some(mut ledger) = self.synthetic_spot.remove(symbol) {
-            // 沒有 ctx hook 拿 current spot price → 用 entry_price 結算（PnL = 0）。
-            // 為什麼接受 0 PnL：本 Wave 不擴 trait 簽名加 close_price 參數；
-            // Stage 0R replay harness 會以歷史 spot price 重算 PnL（更精確）。
-            let close_price = ledger.entry_price;
-            let pnl = ledger.close(close_price, 0);
+            let pnl = ledger.close(close_price, close_ts_ms);
             info!(
                 strategy = "funding_harvest",
                 symbol = %symbol,
                 pnl_usd = pnl,
+                close_price,
+                close_ts_ms,
                 rebalance_count = ledger.rebalance_count,
                 "synthetic spot leg closed on perp close_confirmed"
             );
@@ -595,15 +598,18 @@ impl Strategy for FundingHarvest {
 
     /// 風控強平 perp → 同步清 synthetic spot 腿。
     /// 不變量：external close 必同步消 ledger，避免 orphan ledger 累積。
-    fn on_external_close(&mut self, symbol: &str) {
+    ///
+    /// Sprint 1B Bug 1 fix（C10 HYBRID-BUG）：同 `on_close_confirmed`，用真實
+    /// close fill price + ts 結算 PnL。
+    fn on_external_close(&mut self, symbol: &str, close_price: f64, close_ts_ms: u64) {
         if let Some(mut ledger) = self.synthetic_spot.remove(symbol) {
-            // 同 on_close_confirmed：缺 ctx → 用 entry_price 結算（保守）。
-            let close_price = ledger.entry_price;
-            let pnl = ledger.close(close_price, 0);
+            let pnl = ledger.close(close_price, close_ts_ms);
             info!(
                 strategy = "funding_harvest",
                 symbol = %symbol,
                 pnl_usd = pnl,
+                close_price,
+                close_ts_ms,
                 "synthetic spot leg closed on external (risk) close"
             );
         }

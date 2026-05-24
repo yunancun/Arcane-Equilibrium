@@ -368,7 +368,10 @@ impl Strategy for GridTrading {
 
     /// Reset per-symbol net_inventory on external close (risk-stop) to prevent desync.
     /// 外部平倉（風控止損）時重設該幣種 net_inventory，防止與 paper_state 脫鉤。
-    fn on_external_close(&mut self, symbol: &str) {
+    ///
+    /// Sprint 1B Bug 1 fix：close_price / close_ts_ms 兩參數本 strategy 不消費
+    /// （grid 無 synthetic ledger），純編譯對齊 trait 升級。
+    fn on_external_close(&mut self, symbol: &str, _close_price: f64, _close_ts_ms: u64) {
         self.on_external_close_impl(symbol);
     }
 
@@ -416,7 +419,10 @@ impl Strategy for GridTrading {
 
     /// Pipeline confirmed a strategy-emitted Close was executed — adjust per-symbol inventory.
     /// 管線確認策略平倉已執行 — 調整該幣種庫存。
-    fn on_close_confirmed(&mut self, symbol: &str) {
+    ///
+    /// Sprint 1B Bug 1 fix：close_price / close_ts_ms 兩參數本 strategy 不消費
+    /// （grid 無 synthetic ledger），純編譯對齊 trait 升級。
+    fn on_close_confirmed(&mut self, symbol: &str, _close_price: f64, _close_ts_ms: u64) {
         self.on_close_confirmed_impl(symbol);
     }
 

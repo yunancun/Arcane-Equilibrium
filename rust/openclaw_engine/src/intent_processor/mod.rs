@@ -246,6 +246,102 @@ pub struct OrderIntent {
     pub earn_payload: Option<EarnIntentPayload>,
 }
 
+impl OrderIntent {
+    /// Sprint 1B audit Bug 2 fix（IntentType HYBRID-PLACEHOLDER-BUG）—— Constructor helper。
+    ///
+    /// 為什麼新增此 helper：32 既有 callsite 字面 `intent_type: IntentType::OpenLong`
+    /// 是 backward-compat 占位；short-capable strategy（funding_arb / funding_harvest /
+    /// bidirectional bb_breakout / bb_reversion / ma_crossover / grid_trading）出現
+    /// `is_long=false / intent_type=OpenLong` 矛盾，造成 router.rs:100 寫死「TRADE_ENTRY」
+    /// 與 LeaseScope 對映漂移風險。
+    ///
+    /// 本 helper 由 is_long 自動決定 intent_type，禁止 caller 再寫 literal；
+    /// 8 個 strategy Open emit site 改走此 helper（per dispatch §Bug 2 Phase A）。
+    /// 既有 Earn / CloseLong / PositionAdjust path 不走此 helper（caller 顯式填）。
+    ///
+    /// 不變量：本 helper 只負責 trade-entry intent（OpenLong / OpenShort 兩 variant）；
+    /// 其他 intent_type 由 caller 直接 struct literal 或專屬 helper 構造。
+    pub fn new_trade(
+        symbol: String,
+        is_long: bool,
+        qty: f64,
+        confidence: f64,
+        strategy: String,
+        order_type: String,
+        limit_price: Option<f64>,
+        confluence_score: Option<f32>,
+        persistence_elapsed_ms: Option<u64>,
+        time_in_force: Option<crate::order_manager::TimeInForce>,
+        maker_timeout_ms: Option<u64>,
+    ) -> Self {
+        // 由 is_long 自動派生 intent_type，消除 is_long=false / OpenLong 矛盾。
+        let intent_type = if is_long {
+            IntentType::OpenLong
+        } else {
+            IntentType::OpenShort
+        };
+        let intent = Self {
+            symbol,
+            is_long,
+            qty,
+            confidence,
+            strategy,
+            order_type,
+            limit_price,
+            confluence_score,
+            persistence_elapsed_ms,
+            time_in_force,
+            maker_timeout_ms,
+            intent_type,
+            earn_payload: None,
+        };
+        intent.validate();
+        intent
+    }
+
+    /// Sprint 1B audit Bug 2 fix + Round 2 finding 6 —— dual-layer invariant check。
+    ///
+    /// 為什麼 dual-layer：
+    /// 1. **Debug build**：debug_assert 直接 panic，CI / test / dev 自動暴露 mismatch；
+    /// 2. **Release build**：tracing::warn! telemetry — trading hot path 不容許 panic
+    ///    （Root Principle #5「survival above profit」），但 release CI 不能完全失明，
+    ///    將來 caller 若用 inline struct literal 又呼 validate()，release 仍能由
+    ///    log / metrics 監測到 mismatch。caller 必走 new_trade helper 才是設計契約；
+    ///    本 layer 是 defence in depth，不是 fail-closed。
+    ///
+    /// Earn intent 跳過檢查（is_earn() 短路），因為 EarnStake / EarnRedeem 與
+    /// is_long 不耦合（Earn flexible/fixed staking 與 long/short direction 無關）。
+    pub fn validate(&self) {
+        let aligned = self.intent_type.is_earn()
+            || matches!(
+                (self.is_long, &self.intent_type),
+                (true, IntentType::OpenLong | IntentType::CloseLong | IntentType::PositionAdjust)
+                    | (false, IntentType::OpenShort | IntentType::CloseShort | IntentType::PositionAdjust)
+            );
+        debug_assert!(
+            aligned,
+            "IntentType direction mismatch: is_long={} intent_type={:?} symbol={} strategy={}",
+            self.is_long,
+            self.intent_type,
+            self.symbol,
+            self.strategy
+        );
+        // Round 2 finding 6：release path 防線 —— warn telemetry 取代 silent passthrough。
+        // 為什麼不 fail-closed reject：本 fn 簽名為 `(&self)` 無返回值，現有 caller
+        // 路徑（OrderIntent::new_trade 構造 + IntentProcessor::process）已由 helper
+        // 自動派生 intent_type，理論不會 mismatch。本 warn 是 future-proof defence。
+        if !aligned {
+            tracing::warn!(
+                is_long = self.is_long,
+                ?self.intent_type,
+                symbol = %self.symbol,
+                strategy = %self.strategy,
+                "IntentType direction mismatch detected at validate() — caller bypassed new_trade helper / IntentType 方向不一致：caller 繞過 new_trade helper"
+            );
+        }
+    }
+}
+
 /// Captured Guardian verdict for DB persistence (risk_verdicts table).
 /// 捕獲的 Guardian 裁定，用於持久化到 risk_verdicts 表。
 #[derive(Debug, Clone)]

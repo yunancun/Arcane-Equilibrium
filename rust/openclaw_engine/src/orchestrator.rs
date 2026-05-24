@@ -357,7 +357,9 @@ mod tests {
             persistence_elapsed_ms: None,
             time_in_force: None,
             maker_timeout_ms: None,
-            // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+            // Round 2 finding 7：本 fixture only —— production caller 必走
+            // OrderIntent::new_trade helper（由 is_long 自動派生 intent_type）。
+            // 本 fixture is_long=true 對齊 IntentType::OpenLong，self-consistent。
             intent_type: crate::intent_processor::IntentType::OpenLong,
             earn_payload: None,
         }
