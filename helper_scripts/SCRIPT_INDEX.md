@@ -1,7 +1,7 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-23（Sprint 5+ Wave 1 §4.4 production hardening — 3 new health monitoring script：`db/health_60s_boundary_verify.{sh,sql}` + `db/health_f2_sanitize_monitor.sh` (DISABLED-by-default) + `db/ac1b_monthly_healthcheck.sh`。保留 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
+最後更新：2026-05-25（Hygiene Option E Phase 1 Step 2 — 新增 `build_then_restart_atomic.sh` + `restart_all.sh --require-clean-build-window` flag,防 multi-session cargo race 覆蓋 release binary inode;per PA sub-agent a6326f17 修法 Option B。保留 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
 
 ## 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening
 
@@ -97,7 +97,8 @@
 
 | 腳本 | 用途 |
 |------|------|
-| `restart_all.sh` | **輕量重啟**：停+啟 Rust 引擎 + API server（不動數據）。旗標：`--engine-only` / `--api-only` 限定範圍；`--rebuild` 先重建 openclaw-engine binary 再啟動（PYO3-ELIMINATE-1 Phase 3 後無 PyO3 wheel）。 |
+| `restart_all.sh` | **輕量重啟**：停+啟 Rust 引擎 + API server（不動數據）。旗標：`--engine-only` / `--api-only` 限定範圍；`--rebuild` 先重建 openclaw-engine binary 再啟動（PYO3-ELIMINATE-1 Phase 3 後無 PyO3 wheel）；`--require-clean-build-window`（2026-05-25 Hygiene Option E Phase 1 Step 2）重啟前 fail-closed 檢查系統是否仍有 `cargo build`/`cargo test` 在跑,防 multi-session race 覆蓋 release binary inode;一般 operator 不直接帶,由 `build_then_restart_atomic.sh` 串接時自動帶入。 |
+| `build_then_restart_atomic.sh` | **2026-05-25 Hygiene Option E Phase 1 Step 2**（per PA sub-agent a6326f17 hygiene 修法 Option B + memory `project_multi_session_memory_race`）：原子化 build → SHA snapshot → restart → verify deploy 鏈。flock(`$OPENCLAW_DATA_DIR/build_window.lock`) 持有 build window 期間禁第二 cargo;結束 verify `/proc/$PID/exe` SHA == on-disk binary SHA;任何 phase 失敗即 abort,杜絕「`cargo test --release` incremental rebuild 在 engine startup 後覆蓋 inode」的 multi-session race。Mac 無 procfs 則 fallback 驗 disk SHA 不被偷換。預期 operator 下次 deploy 跑 `bash helper_scripts/build_then_restart_atomic.sh` 一鍵完成。 |
 | `stop_all.sh` | **優雅停止**：停引擎 + 建立 `engine_maintenance.flag`，讓 `engine_watchdog.py` 不自動重啟。`--engine-only` / `--api-only`。移除 flag: `rm /tmp/openclaw/engine_maintenance.flag` 或跑 `restart_all.sh`。 |
 | `clean_restart.sh` | **交易所層重啟**：停引擎 → httpx BybitClient flatten demo/live 倉位 → 歸檔 runtime 文件（**不動 paper_state，不動 DB**）→ 檢查 binary 新舊 → 重建/重啟 → watchdog 驗證。輕度重置，保留歷史累計。旗標：`--yes` / `--mark-damaged`（歸檔 DB 交易表）/ `--include-live` / `--skip-flatten` / `--skip-build-check` |
 | `fresh_start.sh` | **完整 DB 重置重啟**（2026-04-15 新增）：在 clean_restart 基礎上額外清空所有 PnL / 手續費 / 勝率 / 經驗數據（透過 `fresh_start_reset.py`）讓引擎從零歷史冷啟動。**保留**：市場數據（klines/funding/OI/LSR/liquidations/regime/news）、model_registry、linucb_state_archive、features.versions、ai_budget_config。**摧毀**：fills/intents/orders/outcomes/signals/agent 活動/學習狀態。旗標：`--yes` / `--include-live` / `--skip-flatten` / `--skip-build-check` |
