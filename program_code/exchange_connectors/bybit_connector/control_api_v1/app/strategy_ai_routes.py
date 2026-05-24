@@ -12,6 +12,8 @@ Python BybitDemoConnector 降級路徑已移除 — 純 Python httpx BybitClient
 from __future__ import annotations
 
 import asyncio
+import base64
+import json
 import logging
 import os
 import re
@@ -32,7 +34,11 @@ from .strategy_wiring import (
 logger = logging.getLogger(__name__)
 _CLOSED_PNL_CACHE = None
 _OPENCLAW_LINK_RE = re.compile(r"^oc_(?:close_[a-z0-9_]+_)?(?:risk_)?(?P<engine>dm|ld)(?:_|$)", re.I)
+_CLOSED_PNL_DAY_MS = 24 * 60 * 60 * 1000
 _CLOSED_PNL_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
+_CLOSED_PNL_ALL_HISTORY_DAYS = 730
+_CLOSED_PNL_MAX_WINDOWS_PER_PRELOAD = 8
+_CLOSED_PNL_CURSOR_VERSION = 1
 _CLOSED_PNL_FAILURE_WINDOW_SEC = 60.0
 _CLOSED_PNL_DEGRADED_SEC = 5 * 60
 _CLOSED_PNL_BYBIT_FAILURES: list[float] = []
@@ -72,6 +78,195 @@ def _record_closed_pnl_bybit_failure() -> dict[str, Any]:
         "bybit_failure_count_60s": count,
         "degraded_until_ms": degraded_until_ms,
     }
+
+
+def _closed_pnl_encode_cursor(payload: dict[str, Any]) -> str:
+    data = dict(payload)
+    data["v"] = _CLOSED_PNL_CURSOR_VERSION
+    raw = json.dumps(data, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _closed_pnl_decode_cursor(cursor: str | None) -> dict[str, Any]:
+    if not cursor:
+        return {}
+    try:
+        padded = cursor + ("=" * (-len(cursor) % 4))
+        raw = base64.urlsafe_b64decode(padded.encode("ascii"))
+        data = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="invalid closed-pnl cursor") from exc
+    if not isinstance(data, dict) or data.get("v") != _CLOSED_PNL_CURSOR_VERSION:
+        raise HTTPException(status_code=400, detail="invalid closed-pnl cursor")
+    return data
+
+
+def _closed_pnl_optional_ms(value: Any) -> int | None:
+    if not isinstance(value, (int, float, str)):
+        return None
+    try:
+        return int(value)
+    except Exception:
+        return None
+
+
+def _closed_pnl_history_bounds(
+    *,
+    start_time: Any,
+    end_time: Any,
+    lookback_days: int,
+) -> tuple[int, int]:
+    now_ms = int(time.time() * 1000)
+    end_ms = _closed_pnl_optional_ms(end_time)
+    if end_ms is None:
+        end_ms = (now_ms // 5000) * 5000
+    start_ms = _closed_pnl_optional_ms(start_time)
+    if start_ms is None:
+        try:
+            requested_days = int(lookback_days)
+        except Exception:
+            requested_days = _CLOSED_PNL_ALL_HISTORY_DAYS
+        safe_days = min(max(requested_days, 1), _CLOSED_PNL_ALL_HISTORY_DAYS)
+        start_ms = end_ms - safe_days * _CLOSED_PNL_DAY_MS
+    if end_ms < start_ms:
+        raise HTTPException(status_code=400, detail="end_time must be >= start_time")
+    return start_ms, end_ms
+
+
+def _closed_pnl_initial_bybit_state(
+    *,
+    start_ms: int,
+    end_ms: int,
+    symbol: str | None,
+) -> dict[str, Any]:
+    window_start_ms = max(start_ms, end_ms - _CLOSED_PNL_MAX_WINDOW_MS)
+    return {
+        "source": "bybit",
+        "start_ms": start_ms,
+        "end_ms": end_ms,
+        "window_start_ms": window_start_ms,
+        "window_end_ms": end_ms,
+        "cursor": None,
+        "symbol": symbol,
+    }
+
+
+def _closed_pnl_previous_window_state(state: dict[str, Any]) -> dict[str, Any] | None:
+    start_ms = int(state.get("start_ms") or 0)
+    window_start_ms = int(state.get("window_start_ms") or 0)
+    prev_end_ms = window_start_ms - 1
+    if prev_end_ms < start_ms:
+        return None
+    return {
+        "source": "bybit",
+        "start_ms": start_ms,
+        "end_ms": int(state.get("end_ms") or prev_end_ms),
+        "window_start_ms": max(start_ms, prev_end_ms - _CLOSED_PNL_MAX_WINDOW_MS),
+        "window_end_ms": prev_end_ms,
+        "cursor": None,
+        "symbol": state.get("symbol"),
+    }
+
+
+def _closed_pnl_bybit_state_with_cursor(
+    *,
+    cursor: str | None,
+    start_ms: int,
+    end_ms: int,
+    symbol: str | None,
+) -> dict[str, Any]:
+    decoded = _closed_pnl_decode_cursor(cursor)
+    if decoded.get("source") != "bybit":
+        return _closed_pnl_initial_bybit_state(start_ms=start_ms, end_ms=end_ms, symbol=symbol)
+    return {
+        "source": "bybit",
+        "start_ms": int(decoded.get("start_ms") or start_ms),
+        "end_ms": int(decoded.get("end_ms") or end_ms),
+        "window_start_ms": int(decoded.get("window_start_ms") or start_ms),
+        "window_end_ms": int(decoded.get("window_end_ms") or end_ms),
+        "cursor": decoded.get("cursor") or None,
+        "symbol": decoded.get("symbol") or symbol,
+    }
+
+
+def _fetch_closed_pnl_bybit_history_page(
+    rc: Any,
+    *,
+    limit: int,
+    cursor: str | None,
+    symbol: str | None,
+    start_ms: int,
+    end_ms: int,
+) -> tuple[list[dict[str, Any]], str | None]:
+    rows: list[dict[str, Any]] = []
+    state = _closed_pnl_bybit_state_with_cursor(
+        cursor=cursor,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        symbol=symbol,
+    )
+    next_state: dict[str, Any] | None = None
+    seen_cursors: set[str] = {str(state["cursor"])} if state.get("cursor") else set()
+    calls = 0
+    while state and len(rows) < limit and calls < _CLOSED_PNL_MAX_WINDOWS_PER_PRELOAD:
+        calls += 1
+        page_limit = min(100, max(1, limit - len(rows)))
+        bybit_cursor = state.get("cursor") or None
+        result = rc.get_closed_pnl(
+            "linear",
+            symbol=symbol,
+            start_time=int(state["window_start_ms"]),
+            end_time=int(state["window_end_ms"]),
+            limit=page_limit,
+            cursor=bybit_cursor,
+        )
+        items = result.get("list") if isinstance(result, dict) else result
+        if isinstance(items, list):
+            rows.extend([dict(row) for row in items if isinstance(row, dict)])
+        next_bybit_cursor = (
+            result.get("nextPageCursor")
+            if isinstance(result, dict)
+            else None
+        )
+        if next_bybit_cursor:
+            if next_bybit_cursor in seen_cursors:
+                logger.warning("Bybit closed-pnl returned repeated cursor; stopping pagination")
+                next_state = None
+                break
+            seen_cursors.add(str(next_bybit_cursor))
+            next_state = {**state, "cursor": str(next_bybit_cursor)}
+            if len(rows) >= limit:
+                break
+            state = next_state
+            continue
+        previous = _closed_pnl_previous_window_state(state)
+        if len(rows) >= limit:
+            next_state = previous
+            break
+        state = previous
+        next_state = state
+    if len(rows) < limit and state is not None and calls >= _CLOSED_PNL_MAX_WINDOWS_PER_PRELOAD:
+        next_state = state
+    next_cursor = _closed_pnl_encode_cursor(next_state) if next_state else None
+    return rows[:limit], next_cursor
+
+
+def _closed_pnl_pg_cursor(
+    *,
+    offset: int,
+    symbol: str | None,
+    start_ms: int,
+    end_ms: int,
+    engine_modes: tuple[str, ...],
+) -> str:
+    return _closed_pnl_encode_cursor({
+        "source": "pg",
+        "offset": offset,
+        "symbol": symbol,
+        "start_ms": start_ms,
+        "end_ms": end_ms,
+        "engine_modes": list(engine_modes),
+    })
 
 
 def _require_demo_session_write(actor: base.AuthenticatedActor) -> None:
@@ -987,11 +1182,17 @@ def _strategy_from_order_link_id(
     return "unknown_pending", "pg_missing_unknown_external"
 
 
-def _fetch_strategy_by_order_id(order_ids: list[str]) -> dict[str, dict[str, Any]]:
+def _fetch_strategy_by_order_id(
+    order_ids: list[str],
+    *,
+    engine_modes: tuple[str, ...] = ("demo", "live_demo"),
+) -> dict[str, dict[str, Any]]:
     """Read-only PG join: Bybit orderId/link id → latest local fill attribution."""
     ids = sorted({oid for oid in order_ids if oid})
     if not ids:
         return {}
+    safe_modes = tuple(engine_modes or ("demo", "live_demo"))
+    mode_placeholders = ", ".join(["%s"] * len(safe_modes))
     try:
         from . import db_pool  # noqa: PLC0415
         conn = db_pool.get_conn()
@@ -1004,9 +1205,9 @@ def _fetch_strategy_by_order_id(order_ids: list[str]) -> dict[str, dict[str, Any
         cur.execute(
             "SELECT DISTINCT ON (order_id) order_id, strategy_name, realized_pnl "
             "FROM trading.fills "
-            "WHERE order_id = ANY(%s) AND engine_mode IN (%s, %s) "
+            f"WHERE order_id = ANY(%s) AND engine_mode IN ({mode_placeholders}) "
             "ORDER BY order_id, ts DESC",
-            (ids, "demo", "live_demo"),
+            (ids, *safe_modes),
         )
         rows = cur.fetchall()
         return {
@@ -1067,7 +1268,11 @@ def _closed_pnl_snake_row(row: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _attach_closed_pnl_strategy(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _attach_closed_pnl_strategy(
+    rows: list[dict[str, Any]],
+    *,
+    engine_modes: tuple[str, ...] = ("demo", "live_demo"),
+) -> list[dict[str, Any]]:
     """Attach strategy_name, source, PG PnL and drift fields."""
     lookup_ids: list[str] = []
     for row in rows:
@@ -1077,7 +1282,7 @@ def _attach_closed_pnl_strategy(rows: list[dict[str, Any]]) -> list[dict[str, An
             value = str(row.get(key) or "").strip()
             if value:
                 lookup_ids.append(value)
-    strategy_by_order_id = _fetch_strategy_by_order_id(lookup_ids)
+    strategy_by_order_id = _fetch_strategy_by_order_id(lookup_ids, engine_modes=engine_modes)
     out: list[dict[str, Any]] = []
     for row in rows:
         if not isinstance(row, dict):
@@ -1119,8 +1324,11 @@ def _fetch_pg_closed_pnl_fallback(
     symbol: str | None,
     start_ms: int,
     end_ms: int,
+    engine_modes: tuple[str, ...] = ("demo", "live_demo"),
 ) -> dict[str, Any]:
     """Read-only fallback from trading.fills when Bybit REST is unavailable."""
+    safe_modes = tuple(engine_modes or ("demo", "live_demo"))
+    mode_placeholders = ", ".join(["%s"] * len(safe_modes))
     try:
         from . import db_pool  # noqa: PLC0415
         conn = db_pool.get_conn()
@@ -1130,12 +1338,12 @@ def _fetch_pg_closed_pnl_fallback(
         raise RuntimeError("pg_unavailable")
     try:
         where = (
-            "engine_mode IN (%s, %s) "
+            f"engine_mode IN ({mode_placeholders}) "
             "AND ts >= to_timestamp(%s / 1000.0) "
             "AND ts <= to_timestamp(%s / 1000.0) "
             "AND COALESCE(realized_pnl, 0) <> 0"
         )
-        params: list[Any] = ["demo", "live_demo", start_ms, end_ms]
+        params: list[Any] = [*safe_modes, start_ms, end_ms]
         if symbol:
             where += " AND symbol = %s"
             params.append(symbol)
@@ -1192,6 +1400,13 @@ def _fetch_pg_closed_pnl_fallback(
         "offset": offset,
         "has_more": has_more,
         "next_offset": offset + len(out) if has_more else None,
+        "next_cursor": _closed_pnl_pg_cursor(
+            offset=offset + len(out),
+            symbol=symbol,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            engine_modes=safe_modes,
+        ) if has_more else None,
         "source": "pg_fallback",
         "source_ts": int(time.time() * 1000),
         "cache_age": 0.0,
@@ -1201,6 +1416,173 @@ def _fetch_pg_closed_pnl_fallback(
             "avgEntryPrice/avgExitPrice/closedSize/fillCount are approximate"
         ),
     }
+
+
+async def _closed_pnl_history_cursor_payload(
+    *,
+    rc: Any,
+    limit: int,
+    cursor: str | None,
+    symbol: str | None,
+    start_time: Any,
+    end_time: Any,
+    lookback_days: int,
+    engine_modes: tuple[str, ...],
+    client_unavailable_reason: str,
+) -> dict[str, Any]:
+    """Cursor-mode all-history read model for GUI preloading."""
+    safe_modes = tuple(engine_modes or ("demo", "live_demo"))
+    cursor_state = _closed_pnl_decode_cursor(cursor)
+    start_ms, end_ms = _closed_pnl_history_bounds(
+        start_time=start_time,
+        end_time=end_time,
+        lookback_days=lookback_days,
+    )
+    sym = symbol
+    if cursor_state:
+        start_ms = int(cursor_state.get("start_ms") or start_ms)
+        end_ms = int(cursor_state.get("end_ms") or end_ms)
+        sym = cursor_state.get("symbol") or sym
+    if cursor_state.get("source") == "pg":
+        pg_modes = tuple(cursor_state.get("engine_modes") or safe_modes)
+        offset = int(cursor_state.get("offset") or 0)
+        payload = await asyncio.to_thread(
+            _fetch_pg_closed_pnl_fallback,
+            limit=limit,
+            offset=offset,
+            symbol=sym,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            engine_modes=pg_modes,
+        )
+        payload.update({
+            "all_history": True,
+            "range_start_ms": start_ms,
+            "range_end_ms": end_ms,
+            "page_size": 50,
+            "preload_limit": limit,
+        })
+        return payload
+
+    if rc is None:
+        try:
+            payload = await asyncio.to_thread(
+                _fetch_pg_closed_pnl_fallback,
+                limit=limit,
+                offset=0,
+                symbol=sym,
+                start_ms=start_ms,
+                end_ms=end_ms,
+                engine_modes=safe_modes,
+            )
+            pg_reason = payload.get("degraded_reason") or "pg_fallback"
+            pg_reason = pg_reason.removeprefix("bybit_closed_pnl_unavailable; ")
+            payload["degraded_reason"] = f"{client_unavailable_reason}; {pg_reason}"
+            payload["bybit_failure_count_60s"] = 0
+            payload["degraded_until_ms"] = None
+            payload.update({
+                "all_history": True,
+                "range_start_ms": start_ms,
+                "range_end_ms": end_ms,
+                "page_size": 50,
+                "preload_limit": limit,
+            })
+            return payload
+        except Exception:
+            return {
+                "enabled": False,
+                "source": "pg_fallback",
+                "source_ts": int(time.time() * 1000),
+                "cache_age": None,
+                "cache_age_seconds": None,
+                "list": [],
+                "count": 0,
+                "limit": limit,
+                "offset": 0,
+                "has_more": False,
+                "next_offset": None,
+                "next_cursor": None,
+                "degraded_reason": f"{client_unavailable_reason}_and_pg_fallback_failed",
+                "all_history": True,
+                "range_start_ms": start_ms,
+                "range_end_ms": end_ms,
+                "page_size": 50,
+                "preload_limit": limit,
+            }
+
+    try:
+        rows, next_cursor = await asyncio.to_thread(
+            _fetch_closed_pnl_bybit_history_page,
+            rc,
+            limit=limit,
+            cursor=cursor,
+            symbol=sym,
+            start_ms=start_ms,
+            end_ms=end_ms,
+        )
+        _clear_closed_pnl_bybit_failures()
+        enriched = await asyncio.to_thread(
+            _attach_closed_pnl_strategy,
+            rows,
+            engine_modes=safe_modes,
+        )
+        return {
+            "list": enriched,
+            "count": len(enriched),
+            "limit": limit,
+            "offset": 0,
+            "has_more": bool(next_cursor),
+            "next_offset": None,
+            "next_cursor": next_cursor,
+            "source": "bybit_api",
+            "source_ts": int(time.time() * 1000),
+            "cache_age": 0.0,
+            "cache_age_seconds": 0.0,
+            "degraded_reason": None,
+            "all_history": True,
+            "range_start_ms": start_ms,
+            "range_end_ms": end_ms,
+            "page_size": 50,
+            "preload_limit": limit,
+        }
+    except Exception as exc:
+        failure_state = _record_closed_pnl_bybit_failure()
+        degraded_suffix = (
+            "; bybit_unavailable_5min_contact_operator"
+            if failure_state["degraded_until_ms"] is not None
+            else ""
+        )
+        try:
+            payload = await asyncio.to_thread(
+                _fetch_pg_closed_pnl_fallback,
+                limit=limit,
+                offset=0,
+                symbol=sym,
+                start_ms=start_ms,
+                end_ms=end_ms,
+                engine_modes=safe_modes,
+            )
+            payload["degraded_reason"] = (
+                f"{payload.get('degraded_reason') or 'bybit_closed_pnl_unavailable'}"
+                f"; bybit_failure_count_60s={failure_state['bybit_failure_count_60s']}"
+                f"{degraded_suffix}"
+            )
+            payload.update(failure_state)
+            payload.update({
+                "all_history": True,
+                "range_start_ms": start_ms,
+                "range_end_ms": end_ms,
+                "page_size": 50,
+                "preload_limit": limit,
+            })
+            return payload
+        except Exception as pg_exc:
+            logger.exception("Bybit closed-pnl cursor mode and PG fallback both failed")
+            from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+            raise HTTPException(
+                status_code=502,
+                detail=sanitize_exc_for_detail(pg_exc, "closed_pnl_unavailable"),
+            ) from pg_exc
 
 
 @phase2_router.post("/demo/positions/{symbol}/close")
@@ -1885,14 +2267,33 @@ async def get_demo_fills(
 async def get_demo_closed_pnl(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    cursor: str | None = Query(None),
     start_time: int | None = Query(None),
     end_time: int | None = Query(None),
     symbol: str | None = Query(None),
     force_refresh: bool = Query(False),
+    cursor_mode: bool = Query(False),
+    lookback_days: int = Query(_CLOSED_PNL_ALL_HISTORY_DAYS, ge=1, le=_CLOSED_PNL_ALL_HISTORY_DAYS),
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Bybit-first Demo closed PnL read model with PG fallback."""
     sym = symbol.upper().strip() if symbol else None
+    cursor_token = cursor if isinstance(cursor, str) and cursor else None
+    cursor_mode_enabled = cursor_mode is True or str(cursor_mode).lower() == "true"
+    if cursor_mode_enabled or cursor_token:
+        payload = await _closed_pnl_history_cursor_payload(
+            rc=_get_rust_client(),
+            limit=limit,
+            cursor=cursor_token,
+            symbol=sym,
+            start_time=start_time,
+            end_time=end_time,
+            lookback_days=lookback_days,
+            engine_modes=("demo", "live_demo"),
+            client_unavailable_reason="bybit_client_unavailable",
+        )
+        return _envelope(payload)
+
     if not isinstance(start_time, (int, float, str)):
         start_time = None
     if not isinstance(end_time, (int, float, str)):

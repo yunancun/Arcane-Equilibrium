@@ -81,6 +81,34 @@ class _PagedFakeBybitClient:
         }
 
 
+class _CursorModeFakeBybitClient:
+    def __init__(self, pages: dict[str, tuple[list[dict[str, Any]], str]]):
+        self.pages = pages
+        self.calls: list[dict[str, Any]] = []
+
+    def get_closed_pnl(
+        self,
+        category: str,
+        symbol: str | None = None,
+        start_time: int | None = None,
+        end_time: int | None = None,
+        limit: int = 50,
+        cursor: str | None = None,
+    ):
+        self.calls.append({
+            "limit": limit,
+            "cursor": cursor,
+            "start_time": start_time,
+            "end_time": end_time,
+        })
+        rows, next_cursor = self.pages[cursor or ""]
+        return {
+            "category": category,
+            "list": [dict(row) for row in rows[:limit]],
+            "nextPageCursor": next_cursor,
+        }
+
+
 def _install_fake_db(monkeypatch: pytest.MonkeyPatch, cursor: _FakeCursor) -> None:
     fake_db = types.SimpleNamespace(
         get_conn=lambda: _FakeConn(cursor),
@@ -216,6 +244,92 @@ async def test_demo_closed_pnl_cursor_paginates_past_500_rows(monkeypatch):
     assert data["list"][0]["orderId"] == "OID-550"
     assert data["has_more"] is True
     assert data["next_offset"] == 570
+
+
+@pytest.mark.asyncio
+async def test_demo_closed_pnl_cursor_mode_preloads_100_with_next_cursor(monkeypatch):
+    _install_fake_db(monkeypatch, _FakeCursor([]))
+    first_rows = [
+        {"orderId": f"OID-{idx}", "orderLinkId": "external-link", "symbol": "OPUSDT", "closedPnl": "0.1"}
+        for idx in range(100)
+    ]
+    second_rows = [
+        {"orderId": f"OID-{idx}", "orderLinkId": "external-link", "symbol": "OPUSDT", "closedPnl": "0.2"}
+        for idx in range(100, 200)
+    ]
+    fake_client = _CursorModeFakeBybitClient({
+        "": (first_rows, "C1"),
+        "C1": (second_rows, ""),
+    })
+    monkeypatch.setattr(routes, "_get_rust_client", lambda: fake_client)
+
+    first = await routes.get_demo_closed_pnl(
+        limit=100,
+        offset=0,
+        cursor=None,
+        symbol=None,
+        force_refresh=False,
+        cursor_mode=True,
+        actor=object(),
+    )
+    first_data = first["data"]
+
+    assert first_data["count"] == 100
+    assert first_data["has_more"] is True
+    assert first_data["next_cursor"]
+    assert first_data["page_size"] == 50
+    assert first_data["preload_limit"] == 100
+    assert fake_client.calls[0]["limit"] == 100
+    assert fake_client.calls[0]["cursor"] is None
+    assert fake_client.calls[0]["end_time"] - fake_client.calls[0]["start_time"] <= (
+        7 * 24 * 60 * 60 * 1000
+    )
+
+    second = await routes.get_demo_closed_pnl(
+        limit=100,
+        offset=0,
+        cursor=first_data["next_cursor"],
+        symbol=None,
+        force_refresh=False,
+        cursor_mode=True,
+        actor=object(),
+    )
+    second_data = second["data"]
+
+    assert second_data["count"] == 100
+    assert fake_client.calls[1]["cursor"] == "C1"
+    assert second_data["list"][0]["orderId"] == "OID-100"
+
+
+@pytest.mark.asyncio
+async def test_demo_closed_pnl_cursor_mode_pg_fallback_returns_pg_cursor(monkeypatch):
+    ts = datetime(2026, 5, 23, 12, 0, tzinfo=timezone.utc)
+    cursor = _FakeCursor([
+        (ts, f"OID-{idx}", "OPUSDT", "Sell", 100.0, 0.4051, 0.08, -0.72, "grid_trading")
+        for idx in range(101)
+    ])
+    _install_fake_db(monkeypatch, cursor)
+    monkeypatch.setattr(routes, "_get_rust_client", lambda: None)
+
+    result = await routes.get_demo_closed_pnl(
+        limit=100,
+        offset=0,
+        cursor=None,
+        symbol=None,
+        force_refresh=False,
+        cursor_mode=True,
+        actor=object(),
+    )
+    data = result["data"]
+
+    assert data["source"] == "pg_fallback"
+    assert data["count"] == 100
+    assert data["has_more"] is True
+    assert data["next_cursor"]
+    decoded = routes._closed_pnl_decode_cursor(data["next_cursor"])
+    assert decoded["source"] == "pg"
+    assert decoded["offset"] == 100
+    assert decoded["engine_modes"] == ["demo", "live_demo"]
 
 
 @pytest.mark.asyncio

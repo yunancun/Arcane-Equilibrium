@@ -1412,6 +1412,16 @@ const LIVE_FILL_TABS = {
   profit: { label: '收益 / PnL', side: '' },
 };
 let _liveFillState = { tab: 'aggregate', offset: 0, limit: LIVE_FILL_PAGE_SIZE, hasMore: false, loading: false };
+const LIVE_PNL_PRELOAD_SIZE = 100;
+let _livePnlHistoryState = {
+  rows: [],
+  page: 0,
+  nextCursor: null,
+  hasMore: true,
+  loading: false,
+  loadedOnce: false,
+  lastPayload: null,
+};
 
 function toggleFills() {
   const section = document.getElementById('fills-section');
@@ -1527,35 +1537,224 @@ function _liveProfitRow(r) {
     '</tr>';
 }
 
+function _liveStrategySourceLabel(row) {
+  const source = row.strategy_source || row.strategySource || '';
+  const labels = {
+    pg_fill: '由成交記錄匹配',
+    pg_link_id: '由訂單連結匹配',
+    bybit_unknown: '外部/手動',
+    pg_missing_unknown_external: '重啟前資料不足'
+  };
+  return labels[source] || source || '策略來源不足';
+}
+
+function _liveClosedPnlRow(r) {
+  const entryPrice = r.avg_entry_price != null ? r.avg_entry_price : r.avgEntryPrice;
+  const exitPrice = r.avg_exit_price != null ? r.avg_exit_price : r.avgExitPrice;
+  const closedPnlRaw = r.closed_pnl != null ? r.closed_pnl : r.closedPnl;
+  const closedPnlNum = parseFloat(closedPnlRaw);
+  const pnlCls = Number.isFinite(closedPnlNum) ? (closedPnlNum >= 0 ? 'green' : 'red') : '';
+  const strategy = r.strategy_name || r.strategy || '';
+  const source = r.strategy_source || r.strategySource || '';
+  const mutedStrategy = !strategy || source === 'bybit_unknown' || source === 'pg_missing_unknown_external';
+  const strategyText = strategy || (source === 'bybit_unknown' ? '外部/手動' : '未知策略');
+  const sourceLabel = _liveStrategySourceLabel(r);
+  const updated = r.updated_time_ms || r.updatedTime || r.updated_time || '';
+  const qty = r.closed_size != null ? r.closed_size : (r.closedSize != null ? r.closedSize : r.qty);
+  const orderLinkId = r.order_link_id || r.orderLinkId || '';
+  const orderId = r.order_id || r.orderId || '';
+  const drift = parseFloat(r.pnl_source_drift_usd || r.pnlSourceDriftUsd || r.diff_usd || 0);
+  const driftHtml = Number.isFinite(drift) && Math.abs(drift) > 0.10
+    ? '<span class="oc-source-note yellow" title="PG-Bybit 差 ' + ocEsc(String(drift)) + ' USD">&#x26A0; PG-Bybit 差 ' + ocEsc(String(drift)) + ' USD</span>'
+    : '';
+  const title = 'exchange-confirmed · orderLinkId=' + orderLinkId + ' · orderId=' + orderId;
+  return '<tr>' +
+    '<td>' + ocFillTime(updated) + '</td>' +
+    '<td><strong>' + ocEsc(r.symbol || '') + '</strong></td>' +
+    '<td style="font-size:11px" title="' + ocEsc(sourceLabel) + '">' +
+      '<span class="' + (mutedStrategy ? 'oc-row-muted' : '') + '">' + ocEsc(strategyText) + '</span>' +
+      '<span class="oc-source-note">' + ocEsc(sourceLabel) + '</span></td>' +
+    '<td>' + (entryPrice != null ? ocNum(parseFloat(entryPrice), 2) : '--') + '</td>' +
+    '<td>' + (exitPrice != null ? ocNum(parseFloat(exitPrice), 2) : '--') + '</td>' +
+    '<td>' + ocEsc(String(qty != null ? qty : '--')) + '</td>' +
+    '<td style="color:var(--text-dim)">' + ocEsc(String(r.side || '--')) + '</td>' +
+    '<td class="' + pnlCls + '" title="' + ocEsc(title) + '"><span aria-label="exchange-confirmed">&#x2705;</span> ' + ocEsc(String(closedPnlRaw != null ? closedPnlRaw : '--')) + driftHtml + '</td>' +
+    '</tr>';
+}
+
 function _liveUpdateFillControls(payload, fills) {
   document.querySelectorAll('#live-fill-tabs .oc-fill-tab').forEach(btn => {
     btn.classList.toggle('active', btn.getAttribute('data-fill-tab') === _liveFillState.tab);
   });
-  _liveFillState.hasMore = !!(payload && payload.has_more);
-  const page = Math.floor(_liveFillState.offset / _liveFillState.limit) + 1;
+  const isProfitTab = _liveFillState.tab === 'profit';
+  if (isProfitTab) {
+    const nextStart = (_livePnlHistoryState.page + 1) * _liveFillState.limit;
+    _liveFillState.hasMore = _livePnlHistoryState.rows.length > nextStart || !!_livePnlHistoryState.nextCursor;
+  } else {
+    _liveFillState.hasMore = !!(payload && payload.has_more);
+  }
+  const page = isProfitTab
+    ? _livePnlHistoryState.page + 1
+    : Math.floor(_liveFillState.offset / _liveFillState.limit) + 1;
   const tabLabel = (LIVE_FILL_TABS[_liveFillState.tab] || {}).label || _liveFillState.tab;
   ocSetText('live-fills-page-info', tabLabel + ' · Page ' + page + ' · ' + _liveFillState.limit + '/页');
   const prev = document.getElementById('live-fills-prev');
   const next = document.getElementById('live-fills-next');
-  if (prev) prev.disabled = _liveFillState.offset <= 0 || _liveFillState.loading;
-  if (next) next.disabled = !_liveFillState.hasMore || _liveFillState.loading;
-  ocSetText('live-fills-summary', '本页 ' + fills.length + ' 笔 · source=' + ((payload && payload.source) || '--') + ' · offset=' + _liveFillState.offset);
+  const loading = _liveFillState.loading || _livePnlHistoryState.loading;
+  if (prev) prev.disabled = (isProfitTab ? _livePnlHistoryState.page <= 0 : _liveFillState.offset <= 0) || loading;
+  if (next) next.disabled = !_liveFillState.hasMore || loading;
+  const suffix = isProfitTab
+    ? ' · 已預載 ' + _livePnlHistoryState.rows.length + ' 筆 · 每批 ' + LIVE_PNL_PRELOAD_SIZE + ' 筆'
+    : ' · offset=' + _liveFillState.offset;
+  ocSetText('live-fills-summary', '本页 ' + fills.length + ' 笔 · source=' + ((payload && payload.source) || '--') + suffix);
+}
+
+function _liveResetPnlHistory() {
+  _livePnlHistoryState = {
+    rows: [],
+    page: 0,
+    nextCursor: null,
+    hasMore: true,
+    loading: false,
+    loadedOnce: false,
+    lastPayload: null,
+  };
+}
+
+function _liveCurrentPnlRows() {
+  const start = _livePnlHistoryState.page * _liveFillState.limit;
+  return _livePnlHistoryState.rows.slice(start, start + _liveFillState.limit);
+}
+
+function _liveRenderPnlHistory() {
+  const body = document.getElementById('live-fills-body');
+  const badge = document.getElementById('fills-count-badge');
+  const rows = _liveCurrentPnlRows();
+  const payload = _livePnlHistoryState.lastPayload || {};
+  _liveFillsLoadedOnce = true;
+  _fillsLoaded = true;
+  _liveFillState.loading = false;
+  _liveUpdateFillControls(payload, rows);
+  if (badge) badge.textContent = _livePnlHistoryState.rows.length ? _livePnlHistoryState.rows.length + ' 筆' : '';
+  if (!rows.length) {
+    body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">Bybit closed-pnl 暫無平倉收益</td></tr>';
+    return;
+  }
+  body.innerHTML = rows.map(_liveClosedPnlRow).join('');
+}
+
+async function _liveLoadPnlBatch(opts) {
+  opts = opts || {};
+  const body = document.getElementById('live-fills-body');
+  const badge = document.getElementById('fills-count-badge');
+  if (_livePnlHistoryState.loading) return _livePnlHistoryState.lastPayload;
+  if (opts.forceRefresh) _liveResetPnlHistory();
+  if (!_livePnlHistoryState.hasMore && _livePnlHistoryState.loadedOnce) {
+    if (opts.render !== false) _liveRenderPnlHistory();
+    return _livePnlHistoryState.lastPayload;
+  }
+  _livePnlHistoryState.loading = true;
+  _liveFillState.loading = true;
+  _liveUpdateFillControls(_livePnlHistoryState.lastPayload, _liveCurrentPnlRows());
+  document.getElementById('live-fills-head').innerHTML = _liveFillHead('profit');
+  if (!_livePnlHistoryState.loadedOnce) {
+    body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center;padding:16px">加載中...</td></tr>';
+  }
+  try {
+    let qs = '?limit=' + LIVE_PNL_PRELOAD_SIZE + '&lookback_days=730';
+    if (_livePnlHistoryState.nextCursor) qs += '&cursor=' + encodeURIComponent(_livePnlHistoryState.nextCursor);
+    const d = await ocApi('/api/v1/live/closed-pnl' + qs);
+    const payload = d && d.data;
+    if (_isPhantomViewError(payload)) {
+      const msg = ocEsc(payload.error_zh || payload.error || 'Live slot not configured');
+      body.innerHTML = '<tr><td colspan="8" style="color:#f87171;text-align:center;padding:16px">&#9888; ' + msg + '</td></tr>';
+      if (badge) badge.textContent = '';
+      _fillsLoaded = false;
+      _livePnlHistoryState.loading = false;
+      _liveFillState.loading = false;
+      _liveUpdateFillControls(payload, []);
+      return payload;
+    }
+    const rows = payload && Array.isArray(payload.list) ? payload.list : [];
+    _livePnlHistoryState.rows = _livePnlHistoryState.rows.concat(rows);
+    _livePnlHistoryState.nextCursor = payload && payload.next_cursor ? payload.next_cursor : null;
+    _livePnlHistoryState.hasMore = !!(payload && (payload.has_more || payload.next_cursor));
+    _livePnlHistoryState.loadedOnce = true;
+    _livePnlHistoryState.lastPayload = payload || {};
+    _livePnlHistoryState.loading = false;
+    _liveFillState.loading = false;
+    if (opts.render !== false) _liveRenderPnlHistory();
+    return payload;
+  } catch(e) {
+    _livePnlHistoryState.loading = false;
+    _liveFillState.loading = false;
+    _liveUpdateFillControls(_livePnlHistoryState.lastPayload, _liveCurrentPnlRows());
+    if (!_livePnlHistoryState.loadedOnce) {
+      body.innerHTML = '<tr><td colspan="8" style="color:var(--text-dim);text-align:center">無法加載收益 / PnL</td></tr>';
+    }
+    return null;
+  }
+}
+
+function _liveMaybePreloadNextPnlPage() {
+  const threshold = (_livePnlHistoryState.page + 1) * _liveFillState.limit;
+  if (
+    _livePnlHistoryState.loading ||
+    !_livePnlHistoryState.nextCursor ||
+    _livePnlHistoryState.rows.length > threshold
+  ) {
+    return;
+  }
+  _liveLoadPnlBatch({ render: false }).then(() => {
+    if (_liveFillState.tab === 'profit') {
+      _liveUpdateFillControls(_livePnlHistoryState.lastPayload, _liveCurrentPnlRows());
+    }
+  });
 }
 
 function setLiveFillView(tab) {
   if (!LIVE_FILL_TABS[tab] || _liveFillState.loading) return;
   _liveFillState.tab = tab;
   _liveFillState.offset = 0;
+  if (tab === 'profit') {
+    _livePnlHistoryState.page = 0;
+    if (_livePnlHistoryState.loadedOnce) {
+      document.getElementById('live-fills-head').innerHTML = _liveFillHead('profit');
+      _liveRenderPnlHistory();
+      _liveMaybePreloadNextPnlPage();
+    } else {
+      _liveLoadPnlBatch({ render: true });
+    }
+    return;
+  }
   loadFills();
 }
 
 function liveFillPrev() {
+  if (_liveFillState.tab === 'profit') {
+    if (_livePnlHistoryState.loading || _livePnlHistoryState.page <= 0) return;
+    _livePnlHistoryState.page = Math.max(0, _livePnlHistoryState.page - 1);
+    _liveRenderPnlHistory();
+    return;
+  }
   if (_liveFillState.loading || _liveFillState.offset <= 0) return;
   _liveFillState.offset = Math.max(0, _liveFillState.offset - _liveFillState.limit);
   loadFills();
 }
 
-function liveFillNext() {
+async function liveFillNext() {
+  if (_liveFillState.tab === 'profit') {
+    if (_livePnlHistoryState.loading || !_liveFillState.hasMore) return;
+    _livePnlHistoryState.page += 1;
+    const rows = _liveCurrentPnlRows();
+    if (!rows.length && _livePnlHistoryState.nextCursor) {
+      await _liveLoadPnlBatch({ render: true });
+    } else {
+      _liveRenderPnlHistory();
+    }
+    _liveMaybePreloadNextPnlPage();
+    return;
+  }
   if (_liveFillState.loading || !_liveFillState.hasMore) return;
   _liveFillState.offset += _liveFillState.limit;
   loadFills();
@@ -1564,6 +1763,10 @@ function liveFillNext() {
 async function loadFills() {
   const body = document.getElementById('live-fills-body');
   const badge = document.getElementById('fills-count-badge');
+  if (_liveFillState.tab === 'profit') {
+    await _liveLoadPnlBatch({ render: true });
+    return;
+  }
   const side = (LIVE_FILL_TABS[_liveFillState.tab] || {}).side || '';
   const qs = '?limit=' + _liveFillState.limit + '&offset=' + _liveFillState.offset + (side ? '&side=' + encodeURIComponent(side) : '');
   _liveFillState.loading = true;
