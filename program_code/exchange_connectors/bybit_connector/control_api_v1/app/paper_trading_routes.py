@@ -762,17 +762,19 @@ async def post_close_position(
 @paper_router.get("/fills")
 def get_fills(
     limit: int = 50,
+    offset: int = 0,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """Get fill history for the paper engine.
     獲取 paper 引擎的成交歷史。
 
     Source priority: PG `trading.fills` (authoritative, carries realized_pnl) →
-    Rust in-memory ring buffer fallback (50-deep, now also carries realized_pnl).
+    Rust in-memory ring buffer fallback (limited, now also carries realized_pnl).
     數據源優先序：PG `trading.fills`（權威，帶 realized_pnl）→ Rust 環形緩衝備援
-    （50 筆上限，現亦帶 realized_pnl）。
+    （容量有限，現亦帶 realized_pnl）。
     """
-    capped_limit = min(limit, 200)
+    capped_limit = min(max(int(limit or 50), 1), 200)
+    safe_offset = max(int(offset or 0), 0)
     # Try PG first — DB row has realized_pnl per fill.
     # 優先讀 PG — DB 列帶逐筆 realized_pnl。
     try:
@@ -785,12 +787,13 @@ def get_fills(
             cur = conn.cursor()
             cur.execute(
                 "SELECT ts, symbol, side, qty, price, fee, realized_pnl, strategy_name "
-                "FROM trading.fills WHERE engine_mode = %s ORDER BY ts DESC LIMIT %s",
-                ("paper", capped_limit),
+                "FROM trading.fills WHERE engine_mode = %s ORDER BY ts DESC LIMIT %s OFFSET %s",
+                ("paper", capped_limit + 1, safe_offset),
             )
             rows = cur.fetchall()
+            has_more = len(rows) > capped_limit
             fills = []
-            for ts, symbol, side, qty, price, fee, realized_pnl, strategy in rows:
+            for ts, symbol, side, qty, price, fee, realized_pnl, strategy in rows[:capped_limit]:
                 ts_ms = int(ts.timestamp() * 1000) if ts is not None else 0
                 sym = symbol or ""
                 # Category inference: USDT pair → linear; plain USD pair → inverse.
@@ -808,7 +811,16 @@ def get_fills(
                     "strategy": strategy or "",
                     "category": category,
                 })
-            return _paper_response({"fills": fills, "count": len(fills), "source": "pg_trading_fills"})
+            return _paper_response({
+                "fills": fills,
+                "list": fills,
+                "count": len(fills),
+                "limit": capped_limit,
+                "offset": safe_offset,
+                "has_more": has_more,
+                "next_offset": safe_offset + len(fills) if has_more else None,
+                "source": "pg_trading_fills",
+            })
         except Exception as e:
             logger.warning("PG fills query failed, falling back to Rust snapshot: %s", e)
         finally:
@@ -825,9 +837,28 @@ def get_fills(
         for f in rust_fills:
             if isinstance(f, dict) and "side" not in f:
                 f["side"] = "Buy" if f.get("is_long") else "Sell"
-        capped = rust_fills[:capped_limit]
-        return _paper_response({"fills": capped, "count": len(capped), "source": "rust_engine"})
-    return _paper_response({"fills": [], "count": 0, "source": "rust_engine"})
+        page = rust_fills[safe_offset:safe_offset + capped_limit]
+        has_more = len(rust_fills) > safe_offset + capped_limit
+        return _paper_response({
+            "fills": page,
+            "list": page,
+            "count": len(page),
+            "limit": capped_limit,
+            "offset": safe_offset,
+            "has_more": has_more,
+            "next_offset": safe_offset + len(page) if has_more else None,
+            "source": "rust_engine",
+        })
+    return _paper_response({
+        "fills": [],
+        "list": [],
+        "count": 0,
+        "limit": capped_limit,
+        "offset": safe_offset,
+        "has_more": False,
+        "next_offset": None,
+        "source": "rust_engine",
+    })
 
 
 @paper_router.get("/pnl")

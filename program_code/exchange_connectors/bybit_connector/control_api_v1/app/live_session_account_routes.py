@@ -14,6 +14,7 @@ MODULE_NOTE (中文):
   - GET  /api/v1/live/positions                     — 倉位
   - GET  /api/v1/live/orders                        — 掛單
   - GET  /api/v1/live/fills                         — 成交（DB primary）
+  - GET  /api/v1/live/closed-pnl                    — 平倉 PnL（Bybit cursor）
   - POST /api/v1/live/positions/{symbol}/close      — 單倉平倉（IPC + REST 降級）
   - POST /api/v1/live/close-all-positions           — 全倉平倉（IPC + REST 降級）
   - GET  /api/v1/live/metrics                       — 性能指標
@@ -513,6 +514,38 @@ async def get_live_fills(
         except Exception:
             pass
     return core._live_response({"list": [], "count": 0, "available": False})
+
+
+@core.live_router.get("/closed-pnl")
+async def get_live_closed_pnl(
+    limit: int = Query(100, ge=1, le=200),
+    cursor: str | None = Query(None),
+    start_time: int | None = Query(None),
+    end_time: int | None = Query(None),
+    symbol: str | None = Query(None),
+    lookback_days: int = Query(730, ge=1, le=730),
+    actor: Any = Depends(base.current_actor),
+) -> dict:
+    """Live closed-PnL history via Bybit cursor mode, with PG fallback."""
+    guard = _phantom_view_guard()
+    if guard is not None:
+        return guard
+
+    from .strategy_ai_routes import _closed_pnl_history_cursor_payload  # noqa: PLC0415
+
+    sym = symbol.upper().strip() if symbol else None
+    payload = await _closed_pnl_history_cursor_payload(
+        rc=core._get_rust_client_safe(),
+        limit=limit,
+        cursor=cursor if isinstance(cursor, str) and cursor else None,
+        symbol=sym,
+        start_time=start_time,
+        end_time=end_time,
+        lookback_days=lookback_days,
+        engine_modes=("live", "live_demo"),
+        client_unavailable_reason="live_bybit_client_unavailable",
+    )
+    return core._live_response(payload)
 
 
 @core.live_router.post("/positions/{symbol}/close")

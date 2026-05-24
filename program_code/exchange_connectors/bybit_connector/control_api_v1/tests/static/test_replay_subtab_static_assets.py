@@ -422,8 +422,25 @@ def test_demo_and_live_fill_history_has_paged_subtabs(
         assert "has_more" in html
         assert "Page ' + page" in html
     assert "/api/v1/strategy/demo/closed-pnl" in tab_demo_html
+    assert "cursor_mode=true" in tab_demo_html
+    assert "DEMO_PNL_PRELOAD_SIZE = 100" in tab_demo_html
+    assert "/api/v1/live/closed-pnl" in tab_live_html
+    assert "LIVE_PNL_PRELOAD_SIZE = 100" in tab_live_html
     assert "_demoProfitRow" in tab_demo_html
+    assert "_liveClosedPnlRow" in tab_live_html
     assert "_liveBuildProfitRows" in tab_live_html
+
+
+def test_paper_fill_history_uses_same_lazy_page_shape(tab_paper_html: str) -> None:
+    """Paper fill history should match the 50/page, 100/preload GUI contract."""
+    assert "Fill History（分页，每页 50" in tab_paper_html
+    assert "PAPER_FILL_PAGE_SIZE = 50" in tab_paper_html
+    assert "PAPER_FILL_PRELOAD_SIZE = 100" in tab_paper_html
+    assert "paperFillPrev()" in tab_paper_html
+    assert "paperFillNext()" in tab_paper_html
+    assert "/api/v1/paper/fills' + qs" in tab_paper_html
+    assert "'&offset=' + _paperFillHistoryState.nextOffset" in tab_paper_html
+    assert "has_more" in tab_paper_html
 
 
 def test_demo_live_tabs_use_matching_backend_surfaces(
@@ -446,6 +463,7 @@ def test_demo_live_tabs_use_matching_backend_surfaces(
         "/api/v1/live/positions",
         "/api/v1/live/orders",
         "/api/v1/live/fills",
+        "/api/v1/live/closed-pnl",
         "/api/v1/live/metrics",
     ]:
         assert endpoint in tab_live_html

@@ -185,7 +185,7 @@
     <div style="margin-top:10px">
       <div style="font-size:10px;color:var(--text-dim);margin-bottom:4px;display:flex;align-items:center;gap:6px">
         <span>累計收益趨勢 / Cumulative PnL Trend</span>
-        <span style="color:var(--text-dim);font-size:9px">（最近 50 筆成交 / last 50 fills）</span>
+        <span style="color:var(--text-dim);font-size:9px">（當前頁 50 筆成交 / current 50 fills）</span>
       </div>
       <svg id="pnl-sparkline" width="100%" height="120"
         style="display:block;background:rgba(13,17,23,0.5);border-radius:6px;border:1px solid #21262d"
@@ -232,8 +232,16 @@
 
   <!-- Fill History / 成交歷史 -->
   <details class="oc-collapse">
-    <summary>&#x1F4C4; 成交歷史 / Fill History（最近 50 筆）</summary>
+    <summary>&#x1F4C4; 成交歷史 / Fill History（分页，每页 50 筆）</summary>
     <div class="oc-collapse-body">
+      <div class="oc-fill-toolbar">
+        <div class="oc-fill-summary" id="paper-fills-summary">每页顯示 50 筆，每次預載 100 筆。</div>
+        <div class="oc-fill-pager">
+          <button class="oc-btn" id="paper-fills-prev" onclick="paperFillPrev()" disabled>上一页</button>
+          <span id="paper-fills-page-info">Page 1 · 50/页</span>
+          <button class="oc-btn" id="paper-fills-next" onclick="paperFillNext()" disabled>下一页</button>
+        </div>
+      </div>
       <div class="oc-table-wrap">
         <table class="oc-table">
           <thead><tr><th>時間</th><th>交易對</th><th>品類</th><th>方向</th><th>數量</th><th>價格</th><th>成交金額</th><th>手續費</th><th>盈虧 / PnL</th></tr></thead>
@@ -335,6 +343,17 @@ $('explain-paper').innerHTML = ocExplain(
 let stateRevision = 0;
 let _cachedPositions = []; // Cache for margin calculation
 let _cachedPnlAiCost = null; // Cache AI cost from session PnL for metrics
+const PAPER_FILL_PAGE_SIZE = 50;
+const PAPER_FILL_PRELOAD_SIZE = 100;
+let _paperFillHistoryState = {
+  rows: [],
+  page: 0,
+  nextOffset: 0,
+  hasMore: true,
+  loading: false,
+  loadedOnce: false,
+  lastPayload: null,
+};
 
 async function sessionAction(action) {
   // Session actions control the Rust engine process (start/stop)
@@ -639,36 +658,137 @@ async function loadFeed() {
 }
 
 async function loadFills() {
-  const d = await ocApi('/api/v1/paper/fills');
-  if (!d || !d.data) { ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="9" style="color:var(--text-dim)">⚠ 連接失敗 / Connection failed <button class="oc-btn" onclick="loadFills()" style="padding:2px 8px;font-size:10px;margin-left:8px">↺ 重試</button></td></tr>'); return; }
-  const fills = d.data.fills || d.data || [];
+  if (_paperFillHistoryState.loadedOnce) {
+    renderPaperFills();
+    maybePreloadNextPaperFillPage();
+    return;
+  }
+  await loadPaperFillBatch({ render: true });
+}
+
+function updatePaperFillControls(fills) {
+  const nextStart = (_paperFillHistoryState.page + 1) * PAPER_FILL_PAGE_SIZE;
+  const hasBufferedNext = _paperFillHistoryState.rows.length > nextStart;
+  const hasMore = hasBufferedNext || !!_paperFillHistoryState.hasMore;
+  const page = _paperFillHistoryState.page + 1;
+  const prev = $('paper-fills-prev');
+  const next = $('paper-fills-next');
+  if (prev) prev.disabled = _paperFillHistoryState.page <= 0 || _paperFillHistoryState.loading;
+  if (next) next.disabled = !hasMore || _paperFillHistoryState.loading;
+  ocSetText('paper-fills-page-info', 'Page ' + page + ' · ' + PAPER_FILL_PAGE_SIZE + '/页');
+  const source = (_paperFillHistoryState.lastPayload && _paperFillHistoryState.lastPayload.source) || '--';
+  ocSetText(
+    'paper-fills-summary',
+    '本页 ' + fills.length + ' 笔 · source=' + source +
+      ' · 已預載 ' + _paperFillHistoryState.rows.length + ' 筆 · 每批 ' + PAPER_FILL_PRELOAD_SIZE + ' 筆'
+  );
+}
+
+function currentPaperFillRows() {
+  const start = _paperFillHistoryState.page * PAPER_FILL_PAGE_SIZE;
+  return _paperFillHistoryState.rows.slice(start, start + PAPER_FILL_PAGE_SIZE);
+}
+
+function paperFillRow(f) {
+  const sideLabel = f.side === 'Buy' ? '买入' : '卖出';
+  const cat = f.category || 'linear';
+  let html = '<tr>';
+  // Rust TimestampedFill serializes the time field as `timestamp_ms` — was missing from
+  // the fallback chain so the column rendered empty. / Rust 端欄位名為 timestamp_ms，
+  // 之前不在 fallback 鏈中導致該欄空白。
+  html += '<td>' + ocFillTime(f.timestamp_ms || f.ts_ms || f.filled_at || f.timestamp) + '</td>';
+  html += '<td>' + ocEsc(f.symbol) + '</td>';
+  html += '<td>' + ocCategoryTag(cat) + '</td>';
+  html += '<td class="' + (f.side === 'Buy' || f.is_long === true ? 'green' : 'red') + '">' + sideLabel + '</td>';
+  html += '<td>' + ocNum(f.qty, 4) + '</td>';
+  html += '<td>' + ocNum(f.price, 2) + '</td>';
+  html += '<td>' + ocAmount(ocFillExecValue(f)) + '</td>';
+  html += '<td>' + ocNum(f.fee || 0, 6) + '</td>';
+  html += ocPnlCell(f.realized_pnl);
+  html += '</tr>';
+  return html;
+}
+
+function renderPaperFills() {
+  const fills = currentPaperFillRows();
+  updatePaperFillControls(fills);
   if (!fills.length) {
     ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="9">暫無成交</td></tr>');
     return;
   }
-  let html = '';
-  fills.slice(0, 50).forEach(f => {
-    const sideLabel = f.side === 'Buy' ? '买入' : '卖出';
-    const cat = f.category || 'linear';
-    html += '<tr>';
-    // Rust TimestampedFill serializes the time field as `timestamp_ms` — was missing from
-    // the fallback chain so the column rendered empty. / Rust 端欄位名為 timestamp_ms，
-    // 之前不在 fallback 鏈中導致該欄空白。
-    html += '<td>' + ocFillTime(f.timestamp_ms || f.ts_ms || f.filled_at || f.timestamp) + '</td>';
-    html += '<td>' + ocEsc(f.symbol) + '</td>';
-    html += '<td>' + ocCategoryTag(cat) + '</td>';
-    html += '<td class="' + (f.side === 'Buy' || f.is_long === true ? 'green' : 'red') + '">' + sideLabel + '</td>';
-    html += '<td>' + ocNum(f.qty, 4) + '</td>';
-    html += '<td>' + ocNum(f.price, 2) + '</td>';
-    html += '<td>' + ocAmount(ocFillExecValue(f)) + '</td>';
-    html += '<td>' + ocNum(f.fee || 0, 6) + '</td>';
-    html += ocPnlCell(f.realized_pnl);
-    html += '</tr>';
-  });
-  ocSetHtml('fills-tbody', html);
+  ocSetHtml('fills-tbody', fills.map(paperFillRow).join(''));
 
   // Update PnL trend chart from fill PnL data / 從成交盈虧數據更新趨勢圖
   ocPnlTrend('pnl-sparkline-line', 'pnl-sparkline-label', fills, 'pnl-sparkline-zero');
+}
+
+async function loadPaperFillBatch(opts) {
+  opts = opts || {};
+  if (_paperFillHistoryState.loading) return _paperFillHistoryState.lastPayload;
+  if (!_paperFillHistoryState.hasMore && _paperFillHistoryState.loadedOnce) {
+    if (opts.render !== false) renderPaperFills();
+    return _paperFillHistoryState.lastPayload;
+  }
+  _paperFillHistoryState.loading = true;
+  updatePaperFillControls(currentPaperFillRows());
+  if (!_paperFillHistoryState.loadedOnce) {
+    ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="9">載入中...</td></tr>');
+  }
+  try {
+    const qs = '?limit=' + PAPER_FILL_PRELOAD_SIZE + '&offset=' + _paperFillHistoryState.nextOffset;
+    const d = await ocApi('/api/v1/paper/fills' + qs);
+    if (!d || !d.data) throw new Error('paper fills unavailable');
+    const payload = d.data || {};
+    const fills = Array.isArray(payload.fills) ? payload.fills : (Array.isArray(payload.list) ? payload.list : []);
+    _paperFillHistoryState.rows = _paperFillHistoryState.rows.concat(fills);
+    _paperFillHistoryState.nextOffset = payload.next_offset != null
+      ? payload.next_offset
+      : _paperFillHistoryState.rows.length;
+    _paperFillHistoryState.hasMore = !!payload.has_more;
+    _paperFillHistoryState.loadedOnce = true;
+    _paperFillHistoryState.lastPayload = payload;
+    _paperFillHistoryState.loading = false;
+    if (opts.render !== false) renderPaperFills();
+    return payload;
+  } catch (e) {
+    _paperFillHistoryState.loading = false;
+    updatePaperFillControls(currentPaperFillRows());
+    if (!_paperFillHistoryState.loadedOnce) {
+      ocSetHtml('fills-tbody', '<tr class="empty-row"><td colspan="9" style="color:var(--text-dim)">&#9888; 連接失敗 / Connection failed <button class="oc-btn" onclick="loadPaperFillBatch({render:true})" style="padding:2px 8px;font-size:10px;margin-left:8px">&#x21BA; 重試</button></td></tr>');
+    }
+    return null;
+  }
+}
+
+function maybePreloadNextPaperFillPage() {
+  const threshold = (_paperFillHistoryState.page + 1) * PAPER_FILL_PAGE_SIZE;
+  if (
+    _paperFillHistoryState.loading ||
+    !_paperFillHistoryState.hasMore ||
+    _paperFillHistoryState.rows.length > threshold
+  ) {
+    return;
+  }
+  loadPaperFillBatch({ render: false }).then(() => updatePaperFillControls(currentPaperFillRows()));
+}
+
+function paperFillPrev() {
+  if (_paperFillHistoryState.loading || _paperFillHistoryState.page <= 0) return;
+  _paperFillHistoryState.page = Math.max(0, _paperFillHistoryState.page - 1);
+  renderPaperFills();
+}
+
+async function paperFillNext() {
+  const nextStart = (_paperFillHistoryState.page + 1) * PAPER_FILL_PAGE_SIZE;
+  const hasBufferedNext = _paperFillHistoryState.rows.length > nextStart;
+  if (_paperFillHistoryState.loading || (!hasBufferedNext && !_paperFillHistoryState.hasMore)) return;
+  _paperFillHistoryState.page += 1;
+  if (!currentPaperFillRows().length && _paperFillHistoryState.hasMore) {
+    await loadPaperFillBatch({ render: true });
+  } else {
+    renderPaperFills();
+  }
+  maybePreloadNextPaperFillPage();
 }
 
 async function loadMetrics() {

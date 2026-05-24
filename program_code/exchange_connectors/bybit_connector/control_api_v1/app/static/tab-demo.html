@@ -282,6 +282,16 @@ const DEMO_FILL_TABS = {
   profit: { label: '收益 / PnL', side: '' },
 };
 let _demoFillState = { tab: 'aggregate', offset: 0, limit: DEMO_FILL_PAGE_SIZE, hasMore: false, loading: false };
+const DEMO_PNL_PRELOAD_SIZE = 100;
+let _demoPnlHistoryState = {
+  rows: [],
+  page: 0,
+  nextCursor: null,
+  hasMore: true,
+  loading: false,
+  loadedOnce: false,
+  lastPayload: null,
+};
 
 function _demoToastLoadFailure(key, msg) {
   const now = Date.now();
@@ -845,40 +855,177 @@ function _demoUpdateFillControls(payload, fills) {
   const sourceBar = $('demo-fills-source');
   if (sourceBar) sourceBar.style.display = isProfitTab ? 'flex' : 'none';
   if (!isProfitTab) _demoSetStaleBanner('', '');
-  _demoFillState.hasMore = !!(payload && payload.has_more);
-  const page = Math.floor(_demoFillState.offset / _demoFillState.limit) + 1;
+  if (isProfitTab) {
+    const nextStart = (_demoPnlHistoryState.page + 1) * _demoFillState.limit;
+    _demoFillState.hasMore = _demoPnlHistoryState.rows.length > nextStart || !!_demoPnlHistoryState.nextCursor;
+  } else {
+    _demoFillState.hasMore = !!(payload && payload.has_more);
+  }
+  const page = isProfitTab
+    ? _demoPnlHistoryState.page + 1
+    : Math.floor(_demoFillState.offset / _demoFillState.limit) + 1;
   const tabLabel = (DEMO_FILL_TABS[_demoFillState.tab] || {}).label || _demoFillState.tab;
   ocSetText('demo-fills-page-info', tabLabel + ' · Page ' + page + ' · ' + _demoFillState.limit + '/页');
   const prev = $('demo-fills-prev');
   const next = $('demo-fills-next');
-  if (prev) prev.disabled = _demoFillState.offset <= 0 || _demoFillState.loading;
-  if (next) next.disabled = !_demoFillState.hasMore || _demoFillState.loading;
+  const loading = _demoFillState.loading || _demoPnlHistoryState.loading;
+  if (prev) prev.disabled = (isProfitTab ? _demoPnlHistoryState.page <= 0 : _demoFillState.offset <= 0) || loading;
+  if (next) next.disabled = !_demoFillState.hasMore || loading;
   const refresh = $('demo-fills-refresh');
   if (refresh) {
-    refresh.disabled = _demoFillState.loading || _demoFillManualRefreshInFlight;
+    refresh.disabled = loading || _demoFillManualRefreshInFlight;
     refresh.title = isProfitTab ? '跳過快取重新讀取 Bybit closed PnL' : '重新讀取 PG 成交記錄';
   }
   ocSetText('demo-fills-refresh-label', isProfitTab ? '刷新 Bybit PnL' : '刷新成交');
   const sourceLabel = isProfitTab
     ? 'Bybit closed PnL · source=' + ((payload && payload.source) || '--')
     : 'PG fills';
-  ocSetText('demo-fills-summary', '本页 ' + fills.length + ' 笔 · ' + sourceLabel + ' · offset=' + _demoFillState.offset);
+  const suffix = isProfitTab
+    ? ' · 已預載 ' + _demoPnlHistoryState.rows.length + ' 筆 · 每批 ' + DEMO_PNL_PRELOAD_SIZE + ' 筆'
+    : ' · offset=' + _demoFillState.offset;
+  ocSetText('demo-fills-summary', '本页 ' + fills.length + ' 笔 · ' + sourceLabel + suffix);
+}
+
+function _demoResetPnlHistory() {
+  _demoPnlHistoryState = {
+    rows: [],
+    page: 0,
+    nextCursor: null,
+    hasMore: true,
+    loading: false,
+    loadedOnce: false,
+    lastPayload: null,
+  };
+}
+
+function _demoCurrentPnlRows() {
+  const start = _demoPnlHistoryState.page * _demoFillState.limit;
+  return _demoPnlHistoryState.rows.slice(start, start + _demoFillState.limit);
+}
+
+function _demoRenderPnlHistory() {
+  const rows = _demoCurrentPnlRows();
+  const payload = _demoPnlHistoryState.lastPayload || {};
+  _demoFillsLoadedOnce = true;
+  _demoFillState.loading = false;
+  _demoUpdateFillControls(payload, rows);
+  _demoUpdatePnlSource(payload);
+  if (!rows.length) {
+    const empty = payload && payload.source === 'bybit_api'
+      ? 'Bybit closed-pnl 暂無平倉收益'
+      : '暂無成交';
+    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="8">' + empty + '</td></tr>');
+    return;
+  }
+  ocSetHtml('demo-fills', rows.map(_demoProfitRow).join(''));
+}
+
+async function _demoLoadPnlBatch(opts) {
+  opts = opts || {};
+  if (_demoPnlHistoryState.loading) return _demoPnlHistoryState.lastPayload;
+  if (opts.forceRefresh) _demoResetPnlHistory();
+  if (!_demoPnlHistoryState.hasMore && _demoPnlHistoryState.loadedOnce) {
+    if (opts.render !== false) _demoRenderPnlHistory();
+    return _demoPnlHistoryState.lastPayload;
+  }
+  _demoPnlHistoryState.loading = true;
+  _demoFillState.loading = true;
+  _demoUpdateFillControls(_demoPnlHistoryState.lastPayload, _demoCurrentPnlRows());
+  ocSetHtml('demo-fills-head', _demoFillHead('profit'));
+  if (!_demoPnlHistoryState.loadedOnce) {
+    ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="8">載入中...</td></tr>');
+  }
+  const started = Date.now();
+  try {
+    let qs = '?cursor_mode=true&limit=' + DEMO_PNL_PRELOAD_SIZE + '&lookback_days=730';
+    if (_demoPnlHistoryState.nextCursor) qs += '&cursor=' + encodeURIComponent(_demoPnlHistoryState.nextCursor);
+    if (opts.forceRefresh) qs += '&force_refresh=true';
+    const d = await ocApi('/api/v1/strategy/demo/closed-pnl' + qs);
+    const waitMs = (opts.minSpinnerMs || 0) - (Date.now() - started);
+    if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
+    if (!d) throw new Error('demo pnl unavailable');
+    const payload = d && d.data ? d.data : {};
+    const rows = _demoExtractClosedPnlRows(payload);
+    _demoPnlHistoryState.rows = _demoPnlHistoryState.rows.concat(rows);
+    _demoPnlHistoryState.nextCursor = payload.next_cursor || null;
+    _demoPnlHistoryState.hasMore = !!(payload.has_more || payload.next_cursor);
+    _demoPnlHistoryState.loadedOnce = true;
+    _demoPnlHistoryState.lastPayload = payload;
+    _demoPnlHistoryState.loading = false;
+    _demoFillState.loading = false;
+    if (opts.render !== false) _demoRenderPnlHistory();
+    return payload;
+  } catch (e) {
+    _demoPnlHistoryState.loading = false;
+    _demoFillState.loading = false;
+    _demoUpdateFillControls(_demoPnlHistoryState.lastPayload, _demoCurrentPnlRows());
+    _demoToastLoadFailure('demo-fills', 'Demo PnL 載入失敗，保留最後快照');
+    if (!_demoPnlHistoryState.loadedOnce) {
+      ocSetHtml('demo-fills', '<tr class="empty-row"><td colspan="8">無法載入收益 / PnL</td></tr>');
+    }
+    return null;
+  }
+}
+
+function _demoMaybePreloadNextPnlPage() {
+  const threshold = (_demoPnlHistoryState.page + 1) * _demoFillState.limit;
+  if (
+    _demoPnlHistoryState.loading ||
+    !_demoPnlHistoryState.nextCursor ||
+    _demoPnlHistoryState.rows.length > threshold
+  ) {
+    return;
+  }
+  _demoLoadPnlBatch({ render: false }).then(() => {
+    if (_demoFillState.tab === 'profit') {
+      _demoUpdateFillControls(_demoPnlHistoryState.lastPayload, _demoCurrentPnlRows());
+    }
+  });
 }
 
 function setDemoFillView(tab) {
   if (!DEMO_FILL_TABS[tab] || _demoFillState.loading) return;
   _demoFillState.tab = tab;
   _demoFillState.offset = 0;
+  if (tab === 'profit') {
+    _demoPnlHistoryState.page = 0;
+    if (_demoPnlHistoryState.loadedOnce) {
+      ocSetHtml('demo-fills-head', _demoFillHead('profit'));
+      _demoRenderPnlHistory();
+      _demoMaybePreloadNextPnlPage();
+    } else {
+      _demoLoadPnlBatch({ render: true });
+    }
+    return;
+  }
   loadDemoFills();
 }
 
 function demoFillPrev() {
+  if (_demoFillState.tab === 'profit') {
+    if (_demoPnlHistoryState.loading || _demoPnlHistoryState.page <= 0) return;
+    _demoPnlHistoryState.page = Math.max(0, _demoPnlHistoryState.page - 1);
+    _demoRenderPnlHistory();
+    return;
+  }
   if (_demoFillState.loading || _demoFillState.offset <= 0) return;
   _demoFillState.offset = Math.max(0, _demoFillState.offset - _demoFillState.limit);
   loadDemoFills();
 }
 
-function demoFillNext() {
+async function demoFillNext() {
+  if (_demoFillState.tab === 'profit') {
+    if (_demoPnlHistoryState.loading || !_demoFillState.hasMore) return;
+    _demoPnlHistoryState.page += 1;
+    const rows = _demoCurrentPnlRows();
+    if (!rows.length && _demoPnlHistoryState.nextCursor) {
+      await _demoLoadPnlBatch({ render: true });
+    } else {
+      _demoRenderPnlHistory();
+    }
+    _demoMaybePreloadNextPnlPage();
+    return;
+  }
   if (_demoFillState.loading || !_demoFillState.hasMore) return;
   _demoFillState.offset += _demoFillState.limit;
   loadDemoFills();
@@ -902,6 +1049,10 @@ async function refreshDemoFillsNow() {
 async function loadDemoFills(opts) {
   const forceRefresh = opts && opts.forceRefresh === true;
   const minSpinnerMs = opts && opts.minSpinnerMs ? opts.minSpinnerMs : 0;
+  if (_demoFillState.tab === 'profit') {
+    await _demoLoadPnlBatch({ forceRefresh: forceRefresh, minSpinnerMs: minSpinnerMs, render: true });
+    return;
+  }
   const side = (DEMO_FILL_TABS[_demoFillState.tab] || {}).side || '';
   const fastPrefix = (_demoFillState.tab === 'profit' || forceRefresh) ? '' : 'fast=1&';
   const qs = '?' + fastPrefix + 'limit=' + _demoFillState.limit + '&offset=' + _demoFillState.offset +
