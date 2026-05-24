@@ -152,7 +152,7 @@ impl H0LatencyRecorder {
 
 | engine_mode | 來源 | 預期 record frequency |
 |---|---|---|
-| `paper` | `(Paper, _)` | OPENCLAW_ENABLE_PAPER=1 才 spawn；預設 0 record |
+| `paper` | `(Paper, _)` | Archive/diagnostic only；`OPENCLAW_ENABLE_PAPER=1` 不得作 promotion evidence；預設 0 record |
 | `demo` | `(Demo, _)` | demo pipeline tick；E5 F1 觀察 ~100×live rate |
 | `live` | `(Live, Mainnet)` | 真正 mainnet live；目前環境 0 record |
 | `live_demo` | `(Live, LiveDemo/Demo/None)` | LiveDemo 流量；當前主力 record path |

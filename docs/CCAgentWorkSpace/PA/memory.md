@@ -1,5 +1,70 @@
 # PA Memory — 工作記憶
 
+## Sprint 5+ Wave 1 §8.3 §4.2.2-4 cascade design（2026-05-23）
+
+**觸發**：Stage F §8.3 carry-over operator 拍板「3 項全頃現在 dispatch」。
+
+**核心 verdict**：**DESIGN-DONE-DISPATCH-READY**（5-6 hr wall-clock total；3 items 0 file scope 重疊；風險中 §4.2.2 主導）
+
+**3 items 設計**：
+
+1. **§4.2.2 PortfolioStateCache PaperState SSOT 接線** (P1, 4-6 hr, 中風險)
+   - 選 **Option A disk-based pipeline_snapshot JSON 讀取**（不破 PaperState pipeline 獨佔邊界 + 0 新 mutable singleton）
+   - 既有 `pipeline_snapshot_{paper/demo/live}.json` 是現成 disk SSOT（debounce 4.5-5.5s，遠快於 300s update tick）
+   - 新 fn `read_portfolio_state_from_pipeline_snapshots` + `spawn_portfolio_state_update_task` 簽名 +1 參數 `data_dir`
+   - E1 IMPL ~150-200 LOC（80 LOC 新 fn + 70 LOC unit test 4 case）；fail-soft + last_update_ts_ms dedupe + 3 pipeline merge
+
+2. **§4.2.3 archive 4 條 Python singleton re-ingest** (P2 LOW, 1-2 hr, 低風險)
+   - **強 push back operator scope 漂移**：operator prompt 把 §8.8 sandbox stub cleanup 誤併入 §4.2.3
+   - 真實 §4.2.3 = `_H_STATE_INVALIDATOR` / `MARKET_SCANNER` / `HStateCacheSlot` / `CostEdgeAdvisorDbSlot` 4 條補入 singleton-registry.md §2.3
+   - TW + PA doc-only audit + entry append ~150 LOC
+   - **sandbox stub cleanup 不入本 cascade**（屬 §8.8 E3 + operator routing）
+
+3. **§4.2.4 dispatch template + PA-DRIFT lesson template** (P2, 1.5-2 hr, 低風險)
+   - **拆兩個獨立 doc**：
+     - **§4.2.4a** `docs/CCAgentWorkSpace/PM/race_dispatch_template.md` amend §7「新 mutable singleton 預登記」
+     - **§4.2.4b** `docs/governance_dev/templates/2026-05-23--pa_drift_lesson_template.md` 新建（7 section skeleton + 6 PA-DRIFT lessons 摘要）
+   - 6 lessons 摘要：PA-DRIFT-1 schema 命名漂移 / PA-DRIFT-2 V### file BLOCKER drift / **PA-DRIFT-3 待 audit 補正 origin** / PA-DRIFT-4 既有 hook claim FALSE / PA-DRIFT-5 半實裝 placeholder land production / PA-DRIFT-6 TimescaleDB hypertable composite PK FK
+   - 4 反模式收錄（「既有 hook claim 不 grep」/「half-IMPL placeholder 不明示」/「schema spec ≠ production reality 不 PG empirical」/「新 singleton 未 SSOT 預登記」）
+
+**核心 push back（強）**：operator prompt §4.2.3 wording 漏掉 4 Python singleton re-ingest 的 SSOT 來源（singleton-registry.md §6.1），把 §8.8 sandbox stub cleanup 誤併入 — 兩個 task scope / owner / 風險完全不同：
+- §4.2.3 = doc-only / TW+PA / 0 sandbox 操作
+- §8.8 = sandbox IMPL / E3+operator / sandbox_admin role + 9-step empirical chain
+- 混淆危險：若 PM 派 E1 跑 sandbox cleanup 撞授權邊界
+
+**Option A 選擇 reasoning（§4.2.2）**：
+- Option B `Arc<RwLock<PaperStateSnapshot>>` mirror → 破 Wave A PA-DRIFT-5 反模式 (a)「不改 既有寫入邏輯」+ 引入 1 條新 mutable singleton
+- Option C broadcast::Sender<EngineEvent::FillCompleted> → 混 EngineEvent emergency event 與 fill stream + lagged warn 風險
+- Option A disk JSON pipeline_snapshot → 0 新 singleton + 0 PaperState side mutate + 既有 5-6 month 穩定 producer + I/O cost 可忽略
+
+**4 個 PA 親自驗的關鍵 finding**（read-only Bash 證據）：
+1. `rust/openclaw_engine/src/event_consumer/bootstrap.rs:920-945`：每個 pipeline 已有 `DualStateWriter` 寫 `pipeline_snapshot_{kind}.json`；debounce paper=5000ms / demo=5500ms / live=4500ms（per stagger I/O contention）
+2. `rust/openclaw_engine/src/pipeline_types.rs:96-170 PipelineSnapshot`：含 `paper_state: PaperStateSnapshot` + `recent_fills: Vec<TimestampedFill>` last 50（serde Deserialize 既有 derive）
+3. `rust/openclaw_engine/src/paper_state/snapshots.rs:29-89 PaperStateSnapshot::export_state()`：含 balance / peak_balance / total_realized_pnl / positions (含 qty + entry_price + unrealized_pnl + api_pnl) + bybit_sync_balance
+4. `rust/openclaw_engine/src/tick_pipeline/mod.rs:152-157 EngineEvent`：當前只 Crashed + CircuitBreakerTripped 2 variant（Option C 擴 enum 會破契約）
+
+**3 個 NEW finding**（重要 PA debt）：
+1. **PA-DRIFT-3 origin TBD**：6 PA-DRIFT lessons 摘要時 PA-DRIFT-3 在 memory + reports grep 找不到獨立 origin；template §8 mark `merged into PA-DRIFT-2 / -1 — TBD by future audit`；下次 PA workspace audit 補正
+2. **`recent_fills` last 50 fill 限制 PA debt**：對 5 min 內 > 50 fill 場景（高頻 demo）會輕度低估 cum_pnl_24h sum；對 risk OK band classify 影響可忽略；如需 100% 完整改走 PG fills table read 路徑屬 Sprint 5+ amend follow-up
+3. **3 pipeline equity sum 跨環境語意**：per spec line 332-334 PM 拍板採 single cache view → live + demo + paper equity 直接相加；不同 pipeline disabled / file missing 走 fail-soft skip；對 max_dd_pct_24h calculator 影響需 production verify（demo 開啟期間 max_dd 可能由 demo session start equity 主導）
+
+**改動風險評級 = 中（§4.2.2 主導）**：簽名變動 + disk read + 跨 3 pipeline merge；每處有既有 pattern 對齊（Wave A `read_to_string` 範式 / Wave B fail-soft / F-2 sanitize 已 land）
+
+**E2 重點審查 3 點**：
+1. `read_portfolio_state_from_pipeline_snapshots` fail-soft：grep 確認無 unwrap / panic / expect；3 file 任 1 fail 不影響其他 pipeline merge
+2. `last_update_ts_ms` 跨 tick 持狀 dedupe correctness：unit test 涵蓋 5 min < 50 fill / > 50 fill 兩 case + last 50 限制 PA debt log
+3. 3 pipeline merge：equity sum / exposures concat / fills dedupe 合理性 + 跨 pipeline 同 symbol 多 PositionExposure 行對 concentration_top1_pct 行為
+
+**核心教訓（4 個）**：
+1. **disk-based SSOT 比 in-process Arc mirror 在 observability layer 更乾淨**：既有 `pipeline_snapshot_{kind}.json` 5 month 穩定 producer + I/O cost 可忽略 + 0 新 mutable singleton + fail-soft 自然支援。新 PA mandate：observability layer 接 hot path 狀態先評估「既有 disk JSON / DB query / IPC channel」是否現成 SSOT；不可第一反應就「新增 Arc mirror」
+2. **operator prompt scope wording 必對齊 SSOT (singleton-registry.md §6.1)**：operator §4.2.3 wording 漏 SSOT 來源 + 誤併 §8.8 sandbox stub cleanup → PA push back 必對齊 SSOT 真實 scope；不可機械接受 operator wording。新 PA mandate：dispatch 起點 wording 與 SSOT routing 不一致時必 push back（即使 operator 拍板「3 items 全派」）
+3. **6 PA-DRIFT lessons template 收錄價值**：governance lesson 散落 6 個 PA workspace report；template skeleton 提供 7 section 結構化收錄 + 4 反模式抽象 + 跨 V### / 跨 module 防線 → 未來 PA-DRIFT-7+ IMPL drift 直接套 template skeleton（學習曲線 ≈ 0）。新 PA mandate：governance lesson 第 6+ 條觸發時必走 template land
+4. **option matrix 對抗反問展示是 PA 對「半實裝陷阱」最強防線**：§2.2 列 Option A/B/C + reasoning + 缺點 + 緩解 → operator / PM / E2 review 後續任何時點都能查 PA 是否「漏掉某 option」+ 是否「半實裝」+ 是否「綁定特定 vendor / 既有 implementation」。新 PA mandate：所有「新 wire-up / 新 ingest / 新 reader」必走 option matrix 對抗反問（最少 3 option）
+
+**完整報告**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint5_wave1_cascade_4_2_design.md`（已複製到 `srv/docs/CCAgentWorkSpace/Operator/`）
+
+---
+
 ## v5.7 12 條 CRITICAL prefix 技術派工核實（2026-05-21）
 
 **觸發**：12 條 prefix（v57-C1..C12）由 5 並行 sub-agent + PM hands-on 完成；PM 派 PA 對抗審計派發 readiness。
@@ -5341,3 +5406,466 @@ Report：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-22--sprint_2_wave1_
 
 Report: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_4_wave_b_m1_singleton_registry_ssot.md`
 
+---
+
+## 2026-05-23 — Sprint 1B 剩 3 章節 audit + dispatch plan
+
+**Context**：per Sprint 4+ PM Phase 3e §5.3，Sprint 1B 剩 3 章節（C10 Stage 1 Demo / Earn first stake / v5.7 baseline 收口）audit + dispatch plan。Sprint 4+ first Live carry-over PASS WITH 8 CARRY-OVER 後 dispatch readiness gate OPEN。
+
+**核心發現**：
+
+1. **C10 funding harvest = 新策略 0 既有 IMPL**：
+   - grep verify：`rust/openclaw_engine/src/strategies/` 無 funding_harvest / C10；settings TOML 無 C10
+   - 既有 `funding_arb.rs` 1198 行 = V2 directional dormant per ADR-0018，與 C10 delta-neutral 完全不同概念（QC 2026-05-02 已否決 funding_arb V2 改 delta-neutral：cost = 34 bps / funding mean = 1.5 bps → break-even 7.6 day too costly）
+   - C10 funding harvest 建議新建 `strategies/funding_harvest/` 並列 directory；保留 funding_arb.rs 為 R-02 重設計 slot marker
+
+2. **Bybit demo 不支援 spot lending = C10 Stage 1-3 demo 灰度核心技術難點**：
+   - 解法：spot leg paper-only emulation（real WS spot price + internal mock balance + engine paper engine 同模式）
+   - **違反「demo 等同 live 嚴格度」原則** per memory `feedback_live_no_degradation_by_endpoint`，但 FA + QA + QC consensus 接受此例外（FA §6 row 1）
+   - Stage 4 LIVE 升級時 spot leg paper-only → spot leg live 路徑屬 Sprint 5+ cascade IMPL（未 IMPL）
+
+3. **Bybit Earn API 0/12 endpoint 接線**：
+   - grep verify：`bybit_rest_client.rs` 0 Earn endpoint（"learning" 字串 substring 與 Earn 無關）；既有僅 `/v5/spot-*` rate limit path detection 無真實 spot/Earn 訂單路徑
+   - per PA v57 12-prefix verify §3.3/§3.4 揭露：既有 `OrderIntent` struct **無 IntentType enum**（CC earn_governance spec §3.1 假設「擴 enum」是概念性 placeholder）；既有 `LeaseScope` enum 只有 4 variant (TradeEntry/TradeExit/PositionAdjust/CanaryStagePromotion)，無 EarnStake/Redeem
+
+4. **`learning.earn_movement_log` table 缺**：
+   - V103 是 M4 hypothesis columns 不是 earn_movement_log
+   - V104 spec land 但 `.sql` 未 land
+   - Sprint 4+ PM Phase 3e §4.1.1 V99-V102 base table audit + V099 earn_movement_log schema land 是 first stake P0 前置
+
+5. **v5.7 「12 prefix」= Sprint 1A-α C1-C12 12 dispatch must-fix**：
+   - **12/12 ✅ DONE** via Sprint 1A-α PM sign-off `26ee2f06` + Wave 2 `77d5c54e` + Wave 2.5 `957491ee` + 1A-β/γ/δ/ε/ζ closure chain
+   - C7 對應 IMPL = Pending 3.1 C10；C8 對應 IMPL = Pending 3.2 Earn first stake
+   - 「v5.7 baseline 收口」**是 misnomer**；真實剩餘工作已被 Pending 3.1/3.2 + §4.1.1 + operator action 吸收
+   - 建議 **TODO §1.2 line 61 措辭修正**（移除 「v5.7 baseline」+ 改寫 「C10 Stage 1 Demo + Earn first stake + M3 partial」）
+
+**3 章節 dispatch readiness verdict**：
+
+| 章節 | verdict | estimated effort | 前置 |
+|---|---|---|---|
+| Pending 3.1 C10 Stage 1 Demo | ✅ READY-TO-DISPATCH | ~41-62 hr / 並行 3-4 day | 無前置阻塞 |
+| Pending 3.2 Earn first stake | ⏳ NEEDS-OPERATOR-DECISION + DEPENDS-ON-§4.1.1 | ~50-78 hr / 並行 4-6 day | §4.1.1 V99-V102 audit + V099 earn_movement_log + operator D+1 OpenClaw key 5 min + earn_governance spec 五角色 cross-ref final sign-off |
+| Pending 3.3 v5.7 baseline 收口 | ✅ DOWNGRADE-TO-NON-WORK | ~5 min（PM TODO 措辭修正） | 無 |
+
+**PA 推薦路徑 A — 序列 dispatch**：
+1. W+0：dispatch C10 IMPL（並行 §4.1.1 audit + earn_governance final sign-off prep）
+2. W+0.5：PM 修 TODO §1.2 line 61 措辭 → Pending 3.3 自動 closure
+3. W+1：C10 closure + §4.1.1 closure + earn_governance sign-off
+4. W+1（operator action）：first stake 拍板
+5. W+1.5：dispatch Earn first stake IMPL
+6. W+2.5：Earn first stake closure → Sprint 1B late 全 closure
+
+整體 wall-clock ~2-3 weeks；core effort ~110-130 hr；operator parallel ~45 min。
+
+**Lesson learned**：
+1. **TODO 措辭 misnomer 可阻塞 dispatch judgement**：「v5.7 baseline 收口」字面看像 baseline IMPL 工作，但真實 = 12 prefix DESIGN 已 closure + 兩個 IMPL 衍生（C10/Earn）已被獨立列為 Pending 3.1/3.2。未來 TODO 措辭必標 "DESIGN-DONE 引出 IMPL Pending X.X"，避命名干擾後續 audit。
+2. **新 IMPL 前先 grep verify「既有 IMPL 是否已存在」**：避假設 funding_arb.rs = C10 funding harvest 同概念；兩者 IMPL 完全不重疊。
+3. **Sprint 4+ first Live carry-over 「DOWNGRADE」pattern 可複用**：Pending 3.3 v5.7 baseline 收口 與「PA-DRIFT-1 spec scope CLOSED」同類型 — 真實工作早已分散到其他 ticket，「總結性命名」反成阻塞點。
+
+Report: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_1b_remaining_3_sections_audit.md`
+
+
+## 2026-05-23 Sprint 5+ §4.3.1 StrategyQualityEmitter wire-up design
+
+**觸發**：Sprint 4+ PM Phase 3e §4.3.1 P1 carry-over — Track E V106 0 row 例外（5 active domain × 30 min sample 770 row PASS，strategy_quality 0 因 Wave B dispatch §NOT in scope）；3-4 hr single-thread design only。
+
+**Deliverable**：spec doc `2026-05-23--sprint5_strategy_quality_wireup_design.md`（790 行 / 10 章節）+ PA report。
+
+**3 設計反問結論**：
+1. `learning.lease_transitions` schema 無 strategy_name 欄位 → 經 context_id JOIN trading.signals 反查（PG empirical bottleneck，Phase B AC-4 必驗 context_id 非空率 > 0.5）
+2. cache 為 batch snapshot 而非 sliding window — 與 risk_envelope `PortfolioStateCache` 增量 push 語意不同；5 metric 全為 PG-side 24h aggregate
+3. update task 300s tick aligned with emitter sample_interval=300 — Pareto-optimal（sample 慢於 update 走 wasted；sample 快於 update 走 stale）
+
+**5 metric SSOT 對映**：
+- fill_rate_intent_ratio：trading.signals + trading.fills 24h JOIN COUNT 比
+- slippage_bps_p95：trading.fills.slippage_bps (V028) percentile_cont(0.95) WITHIN GROUP ABS(slippage_bps)
+- decision_lease_grant_rate：learning.lease_transitions (V054) granted/requested → context_id JOIN signals 反查 strategy_name
+- dormant_minutes：trading.fills.ts MAX per (strategy, symbol)
+- signal_count_24h：trading.signals COUNT 24h（telemetry-only；不經 SM）
+
+**Path A 推薦**：1 big CTE join 5 metric query 一次 5-10ms round-trip vs 5 parallel query 25-50ms。
+
+**Pattern 對齊 Wave A PA-DRIFT-5**：`RealStrategyQualitySourceProbe` + `StrategyQualityMetricsCache` 1:1 對齊 `RealRiskEnvelopeSourceProbe` + `PortfolioStateCache` API surface（new / update_batch / lookup_for / telemetry 4 method 同形 + Arc<parking_lot::Mutex<>>)；E1 學習曲線 ≈ 0；E2 review 走「pattern 對齊」核查節省時間。
+
+**6 AC + Phase split**：
+- Phase A scaffold 6-8 hr（E1 IMPL 5.5 + test 2 + E2 review 2；AC-1a/2/3/5/6 PASS）
+- Phase B production deploy 2-3 hr（QA AC-4 dry-run + operator restart + QA AC-1b 30 min sample + PM sign-off；AC-1b/4 PASS）
+- Total 8-11 hr
+
+**並行衝突**：§4.3.1 + §4.2.1（BybitPrivateWs supervisor）+ §4.2.2（PortfolioStateCache real wire）共用 main_health_emitters.rs → 建議 sequential E1 或 stagger 5min；§4.3.2-§4.3.6 全並行可。
+
+**16 原則 + 9 安全不變量 + 8 hard boundary**：全 PASS 0 觸碰；A 級合規；屬 observability layer。
+
+**E2 重點審查 3 點**：
+1. PG query string 對齊 spec §2 + §3.2（CTE 5 metric 不漂；fail-soft default OK band 對齊 trait doc line 424）
+2. cache update_batch 不破 既有 100 SM key chain（emitter ctor 取 pairs() 預建 SM；caller build_strategy_quality_pair_list 25 pair 注入；chain 完整）
+3. main_health_emitters.rs:441 log literal 同步 update（grep `"Track E skip"` 必返 0 hit）
+
+**反模式（spec §8 10 條）**：(a) 改 既有 strategy_quality.rs 1580 LOC (b) 改 既有 trading_writer / lease_writer (c) 寫死 30s/60s 而非 300s (d) cache unbounded growth (e) 25 pair 寫死 probe impl 內 (f) fail-soft default 非 OK band 值 (g) update task fail 後 silent skip (h) signal_count_24h 走 SM observe (i) cache 串入 PaperState / 既有 IPC (j) log literal 不同步
+
+**4 教訓**：
+1. PA design 強制 PG empirical 驗 schema 假設（lease_transitions 無 strategy_name 欄位是 Sprint 1A-ζ Phase 3a learning.governance_audit_log empirical 教訓再次體現）
+2. Cache pattern 對齊既有 Wave A PA-DRIFT-5 確立 — 1:1 同形大幅降 E1 學習成本 + E2 review 速度
+3. 300s tick aligned across update + sample 是 Pareto-optimal — 設計反問顯式對抗反問防 IMPL drift
+4. placeholder snapshot 走 OK band 對齊 trait doc line 424 — 違反 = round 1 IMPL 走 DEGRADED 染色 bug（同 Wave B Track B placeholder round 1 5 metric 全 0 走 DEGRADED 30 天 V106 染色 round 2 HIGH-1 fix 教訓再次）
+
+**Scope 守邊界（task 期間）**：嚴守 prompt「0 IMPL Rust code / 0 改既有 strategy_quality.rs 1580 LOC / 0 改 ADR / 0 commit / 0 派下游 sub-agent / 中文為主 / 0 emoji」；2 新 doc file（spec 790 行 + PA report）+ 0 code 改動。
+
+**Verdict**：**DISPATCH READY (OPEN)** — 7 前置條件全 land（Sprint 2 Track E IMPL closure + Sprint 4+ Wave A/B production AC-1b PASS + Wave A pattern + M-1 SSOT + V003/V028/V054 SSOT 表 + 4 engine_mode tag + Linux PG empirical 已驗）；E1 IMPL 可立即派；風險 中（main_health_emitters.rs 共用區 + PG batch query 5 CTE 複雜度）。
+
+**Confidence**：HIGH for 5 metric source 對映 + Path A query strategy + Cache pattern；HIGH for 8-11 hr budget（依 Sprint 2 Track E 12 hr IMPL + Wave A/B 12 hr scaffold 經驗校正）；MEDIUM for Phase B AC-4 PG empirical（context_id JOIN 比例待驗）；HIGH for 0 hard boundary 觸碰 + A 級 16 原則合規。
+
+Report path：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint5_strategy_quality_wireup_design.md`
+
+---
+
+## 2026-05-23 — Sprint 5+ Wave 1 §8.6 §4.4 production hardening 4 items + AC-1b monthly cron 設計
+
+**觸發**：Stage F §8.6 PM Phase 3e sign-off (HEAD 5a58cc96) §4.4 carry-over；operator 拍板「全部進 hardening (4 項) + AC-1b monthly cron (不 defer)」；3-4 hr single-thread design only。
+
+**Deliverable**：`2026-05-23--sprint5_wave1_production_hardening_design.md`（單一 PA dispatch packet；不另開 4 個 spec 子文件避維護成本）。
+
+**4 items 重分類（基於 Linux empirical 6h evidence 2026-05-23 13:20 UTC）**：
+
+| § | §4.4 原描述 | Linux 真實 | 重分類 |
+|---|---|---|---|
+| §4.4.1 | `60 row api_latency rest_p50/p95/p99 WARN` | 1063 row WARN; vavg p50=187 / p95=631 / p99=688 | REAL — threshold + state machine cascade gap 兩問題 |
+| §4.4.2 | `41 row engine_runtime open_fd_count WARN` | **711 row WARN**（不是 41）；vmin=1783 vmax=1809 vavg=1788 | REAL — threshold mismatch（ladder OK<1024 但 production engine baseline 1700-1800）|
+| §4.4.3 | 60s boundary verify | bybit_rest_client.rs L355-441 source-level verified（`REST_LATENCY_WINDOW_SECS=60` + `now.checked_sub(60s) → retain`）| VERIFIED — code 對齊；只 QA 補 Linux empirical re-run SOP 1 hr |
+| §4.4.4 | F-2 sanitize fire log | engine.log 6h F-2 fire 0 次 (PaperState SSOT wireup 由 Sprint 5+ §4.2.2 接後才會見) | MONITORING SOP 待建 |
+| AC-1b | monthly cron | Sprint 4+ Phase 3c 30 min × 5 domain × 20-264 row PASS 範式 | NEW monthly cron 自動化同 SQL |
+
+**§4.4.1 + §4.4.2 真實 root cause 三類分**：
+1. **Threshold mismatch (open_fd_count + ws_rtt_p50_ms)**: ladder 設計基於 ulimit 1024 / colocated venue 50ms 假設，與 production 真實 25 symbol engine 1700-1800 fd + Bybit demo 物理距離 150-163ms 不符
+2. **State machine cascade IMPL gap (rest_p50/p95/p99)**: `health/mod.rs:445` 注釋「WARN → DEGRADED 5min dwell 邏輯 Sprint 5 Tier 1 IMPL 時補」+ `(HealthState::HealthWarn, _) => Ok(false)` — WARN→DEGRADED cascade 尚未 IMPL 不在本 hardening 範疇
+3. **Sprint 5+ §4.3.1 strategy_quality wireup 後續 sample（不是問題）**: dormant_minutes 128 row WARN vmax=44325 分鐘是真實冷板凳策略 evidence
+
+**Threshold amend 設計**：
+- open_fd_count: OK<1024 / WARN 1024-4096 / DEGRADED>4096 **→** OK<3072 / WARN 3072-6144 / DEGRADED>6144 (留 70% headroom + 8192 ulimit 範圍)
+- ws_rtt_p50_ms: OK<50 / WARN 50-150 / DEGRADED>150 **→** OK<170 / WARN 170-300 / DEGRADED>300 (對齊 demo 物理距離 + mainnet 切換 必 recalibrate warning)
+- rest_p50/p95/p99: ladder 不改（vavg 都正中 ladder band）；只補注釋「state 卡 WARN ≠ band 計算錯誤；cascade gap 預期行為」
+
+**4 items combined Phase Split (~6-8 hr E1 + 2-3 hr QA + 0.5 hr operator)**：
+- Phase A (2 hr E1)：classify ladder amend Rust IMPL + 4 unit test
+- Phase B (1.5 hr E2+E4)：E2 round 1 + E4 regression
+- Phase C (1.5 hr E1+QA)：60s boundary verify SQL + bash script（concurrent w A）
+- Phase D (1.5 hr E1+QA)：F-2 sanitize monitor bash script + crontab spec（concurrent w A/C）
+- Phase E (2.5 hr E1+QA)：AC-1b monthly cron bash script + 6 active domain × 30 min × ≥5 row check + sentinel mtime
+- Phase F (0.5 hr operator)：deploy + crontab install
+
+**並行優化**: Phase A (Rust) + Phase D (Bash) 同時做（不同 codebase；無 LOC 重疊）。
+
+**文件改動 8 條**：
+1. edit `rust/openclaw_engine/src/health/metric_emitter/mod.rs` (open_fd ladder + 2 test)
+2. edit `rust/openclaw_engine/src/health/domains/api_latency.rs` (ws_rtt ladder + rest_p50/p95/p99 注釋 + 2 test)
+3. new `helper_scripts/db/health_60s_boundary_verify.sql`
+4. new `helper_scripts/db/health_60s_boundary_verify.sh`
+5. new `helper_scripts/db/health_f2_sanitize_monitor.sh` (DISABLED-by-default 直到 §4.2.2 wireup 後 enable)
+6. new `helper_scripts/db/ac1b_monthly_healthcheck.sh` (monthly cron `30 3 1 * *`)
+7. edit `helper_scripts/SCRIPT_INDEX.md` (4 entries)
+8. new 本 PA design report (done)
+
+**16 原則 + 硬邊界**：A 級 16/16 + 0 硬邊界觸碰（無 execution_state / live_execution_allowed / max_retries 等接觸；本 hardening 屬 observability layer）。
+
+**E2 必重點審查 3 點**：
+1. §2.3.1 open_fd 3072 baseline 校準 — E2 必驗 production `docker exec engine ls /proc/{pid}/fd/ | wc -l` 應落 1700-1800
+2. §2.3.2 ws_rtt 170ms 對 demo + live_demo 適用；mainnet 切換必 recalibrate warning 在注釋
+3. §5.2.2 AC-1b script `PGPASSWORD` vs `PG_PASSWORD` 變量名一致 (libpq env var)
+
+**5 教訓 (sustained)**：
+1. **真實 Linux empirical 比 prompt 描述準確**：§4.4.2 prompt 描「41 row」但 Linux 6h 真實 711 row；prompt 數字老化 6h 後就漂移；PA dispatch packet 必 ssh trade-core 重驗
+2. **threshold 設計必對齊 real-world baseline 而非 theoretical**：ulimit 1024 / colocated 50ms 假設與 25 symbol engine + Bybit demo 物理距離不符；ladder amend 必含「為什麼此 threshold」校準注釋
+3. **cascade IMPL gap 不是 health bug**：WARN 大量 row vmax 落 DEGRADED band 是 spike scope OK→WARN-only 設計；不可作為「升 DEGRADED ladder threshold」的依據（會破 cascade IMPL upgrade path）
+4. **F-2 fire 0 在 placeholder 階段 expected**：PaperState SSOT wireup 由 §4.2.2 接後才會見 fire；monitor script DISABLED-by-default 直到 wireup 後 enable，避誤 alert 0-fire 為 bug
+5. **AC-1b 30 min × ≥5 row 是 emitter 至少跑 1 次的 baseline**：不是 SLA performance gate；monthly cron 補 6h passive_wait_healthcheck 覆蓋外的「emitter task crash 1 月才發現」風險
+
+**Scope 守邊界**：嚴守 prompt「不 IMPL / 不改既有 V106 schema / 不 commit / 不派下游 sub-agent / 中文為主 / 0 emoji」；本 task 純 1 design report；0 code 改動；0 git operation。
+
+**Verdict**：DISPATCH READY；風險 低（無 IPC schema / 無業務邏輯 / 無 V### migration / 0 硬邊界）；Confidence HIGH for ladder amend + monthly cron 範式；MEDIUM for §4.4.1 cascade IMPL gap 釐清（依賴 PM 確認本 hardening 不接 cascade IMPL）；HIGH for 6-8 hr budget 校正 (Wave A/B 12 hr + Sprint 4+ AC-1b production 經驗依據)。
+
+Report path：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint5_wave1_production_hardening_design.md`
+
+
+## 2026-05-23 — PA-DRIFT-6 governance audit (Sprint 5+ Wave 1)
+
+**觸發**：per Stage F PM Phase 3e sign-off §8.7 carry-over (HEAD 5a58cc96 2026-05-23) — operator 拍板 dispatch PA audit 現在；3-5 hr single-thread；audit-only 不 IMPL fix；不 commit；不寫 ADR-0010 amend (defer Sprint 5+ Wave 2)。
+
+**核心結論**：
+- 既有 production schema 0 PA-DRIFT-6 violation（V100 catch + fix range model land）
+- Future V### spec 3 HIGH RISK PA-DRIFT-6 candidate + 1 SPEC-ERR-1 hypertable PK design error + 5 LOW RISK pass-through
+
+**HIGH-1 V112 spec line 894-897**：future ALTER ADD CONSTRAINT `fk_lal_no_incident_v113 REFERENCES learning.decay_signals(id)` — V113 hypertable composite PK `(signal_id, ingested_at)` → 必撞 PA-DRIFT-6；fix = Option A soft ref + Guard C column check + COMMENT lesson
+
+**HIGH-2 V113 spec §3 line 75**：`source_v107_divergence_id BIGINT FK to learning.replay_divergence_log.divergence_id` — V107 production PK = `(id, divergence_detected_at)` composite；spec §3 narrative 與 §8.1 DDL internally drift（§8.1 已 soft ref + §3 narrative 仍 prose FK）；fix = spec §3 statement unify; column name typo `divergence_id` patch 為 `id`
+
+**HIGH-3 V113 spec §3 line 92**：`strategy_lifecycle.triggering_signal_id BIGINT FK to learning.decay_signals.signal_id` — V113 hypertable composite PK；fix = Option A soft ref + spec §8 strategy_lifecycle DDL 同步 patch
+
+**SPEC-ERR-1 V108 ab_assignments PK**：line 247 `BIGSERIAL PRIMARY KEY` + line 269 hypertable on assigned_at → TimescaleDB 規範違反 (PK 必含 partition column)；不是 strict PA-DRIFT-6 但同類別；fix = PK composite `(assignment_id, assigned_at)` 對齊 ab_results (line 390) + V105/V107/V109/V111 範式
+
+**重要 lesson learned**：
+1. **V109 spec 範式已內化 PA-DRIFT-6 lesson 早於 V100 catch**（line 254 + 871 + 946 + m3_health_observation_ref soft ref pattern）— invariant 可推導 per `db-schema-design-financial-time-series` skill，V100 spec design 沒 cross-ref 此 skill 是 PA design SOP gap
+2. **V107 hypothesis_id FK production PASS** 證明：hypertable 自己作為 SOURCE 引用非 hypertable 完全合法；混淆此方向是 PA-DRIFT-6 衍生 misunderstanding（hypertable 不能作為 TARGET 才是真實 invariant）
+3. **Spec internal drift 是 PA design pattern 一致性失敗**：V108 ab_assignments vs ab_results PK 設計不對稱 + V113 §3 narrative vs §8.1 DDL column name/soft ref pattern 不一致；single-spec internal cross-section review 必跑
+4. **PG empirical 是唯一可靠防線**：Mac sandbox + cargo test + sqlx Migrator parser 全不驗 FK target unique constraint runtime semantic；per `feedback_v_migration_pg_dry_run` 2026-05-05 教訓重申
+5. **三層治理（COMMENT + spec doc + ADR）+ V100 fix range model 已 production-verified**：未來 V### spec amend 直接複用此 pattern
+
+**Empirical SQL evidence**:
+- Production 42 hypertables (`agent/learning/market/observability/panel/risk/trading` 跨 7 schema)
+- 16 production business FK + 3 chunk-level mirror = 19 production FK total
+- 12 FK target tables; 1 是 hypertable composite PK (`learning.governance_audit_log`) — V100 catch + soft ref fix
+- 39 future V### spec FK declaration scan; 3 HIGH RISK + 1 SPEC-ERR + 5 LOW PASS
+
+**Sprint 5+ Wave 2 amend 建議**：
+- V112 / V113 / V108 spec amend ~2.5 hr PA + MIT consultant verify (type alignment)
+- ADR-0010 V2 amend round add §6 PA-DRIFT-6 invariant ~1-1.5 hr PA + CC final acceptance
+- Total Wave 2 PA budget ~3.5-5.5 hr single-session
+
+**Scope 守邊界（task 期間）**：嚴守 prompt「audit-only / 不 IMPL fix / 不 commit / 不寫 ADR-0010 amend / 不派下游 sub-agent / 中文為主 / 0 emoji」；0 code 改動；1 新 PA report file（含 fix path 建議 + SOP amend draft）；0 file edit on V### / spec docs / ADR-0010
+
+**Verdict**：AUDIT-DONE — 3 HIGH RISK + 1 SPEC-ERR-1 + 5 LOW PASS findings 鎖定；Sprint 5+ Wave 2 amend dispatch ready；ADR-0010 amend round draft 在 §5.5 + §6 sketch 提供。
+
+**Confidence**：HIGH for 3 HIGH RISK candidate identification（empirical PG SQL verify pg_constraint + timescaledb_information.hypertables 全 verify）；HIGH for V100 fix range model 可複用；HIGH for V109 spec 範式已 internalize lesson；MEDIUM for V113 spec internal drift (§3 vs §8.1) — 需 spec author 拍板 unified pattern；HIGH for SOP amend draft 對 Sprint 5+ Wave 2 dispatch readiness。
+
+Report: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--pa_drift_6_governance_audit.md`
+
+---
+
+## 2026-05-23 — Sprint 5+ Wave 1 §8.5 §4.3.2-6 M3 follow-up design (4 IMPL items)
+
+**Task**：per Stage F PM Phase 3e sign-off (HEAD `5a58cc96`) §8.5 carry-over operator 拍板「5 項全頃 dispatch」(不 defer)；LOC 切檔 (§4.3.3) defer Phase B IMPL-driven。PA design 5-6 hr single-thread。
+
+**SSOT 校正**：operator prompt 對 §4.3.2 AC-7 描述「Linux x86_64 Rust binding bit-perfect」**錯誤**：
+- Sprint 1B AC-7 cross-language fixture（spike scope spec §AC-7；commit `9cf0fe82`）= Mac aarch64 5/5 **FULL PASS**，**0 Linux x86_64 deploy 依賴**（spike feature gate test，dev 端跑）
+- §8.5 item 2 真意 = Sprint 2 AC-7 `MetricEmitterScheduler::new + run` first tick < 50ms wall-clock **cargo bench**（per `2026-05-22--m3_metric_emitter_sprint2_design_spec.md` line 841）；`benches/m3_emitter_cold_start.rs` 0 file PENDING IMPL
+- 兩個不同 AC-7（spike fixture vs cold start bench）operator prompt conflate；本 design 以 §8.5 SSOT 為準
+
+**3 spec docs land**：
+- `docs/execution_plan/specs/2026-05-23--sprint5_wave1_4_3_2_ac7_m3_cold_start_bench.md`：~155 LOC / 3-4 hr E1；plain `fn main()` + `Instant` + 0 criterion + mock writer/emitter + `Arc<tokio::sync::Notify>` 第一 row notify；Mac+Linux 兩平台均驗 p99 < 50ms（100 iter）
+- `docs/execution_plan/specs/2026-05-23--sprint5_wave1_4_3_4_f4_correlation_real_calculator.md`：~280 LOC / 6-8 hr E1；**PA 拍板 lookback=1h**（對齊 24h 1/24 採樣密度 + 30 sample Pearson 推薦下限）；`per_symbol_returns_history: HashMap<String, VecDeque<(u64, f64)>>` + `last_symbol_prices: HashMap<String, f64>` 兩 new field；`update_from_pipeline_snapshot` signature change 加 `per_symbol_mid_prices: &HashMap<String, f64>`；F-2 NaN/inf sanitize 對齊 Wave A；Pearson outer-join two-pointer + `clamp(-1, 1)` + MIN_PAIRWISE_SAMPLES=5；7 unit test (empty/single/identical/inverse/5-symbol pairwise/NaN sanitize/1h drain)；signature change 涉 §4.2 item 2 PortfolioStateCache update task wire-up 同步
+- `docs/execution_plan/specs/2026-05-23--sprint5_wave1_4_3_5_6_track_b_c_real_probes.md`：Track B ~375 LOC / 8-10 hr + Track C ~190 LOC / 4-5 hr；**source 端 stats 全不存在大發現**（ws_client / SignalEngine 0 counter；market_writer 是 task-local Vec 跨 task 不可觀；sqlx 0.8 未暴 pool wait metric）→ 走最小入侵範式：ws_client/stats.rs + tick_pipeline/signals/stats.rs 新 AtomicU64 counter struct；ws_client/dispatch.rs + step_3_signals.rs inc_tick hook；tasks.rs market_tx 由 `Sender` 改 `Arc<Sender>`（caller deref 透明）；database/pool.rs `pool_acquire_with_stats` helper 包裝；database/{writer_queue_stats,pool_wait_stats}.rs 新；pool_wait_p95 走自建 300-sample sliding window histogram；`current_ipc_roundtrip_ms_p99()` 延 Sprint 5++（IPC stats infrastructure 獨立工作量）
+
+**4 IMPL items 並行性檢查**：
+- AC-7 ↔ F-4 / AC-7 ↔ Track B / AC-7 ↔ Track C 0 文件交集，全可並行
+- F-4 ↔ Track B / F-4 ↔ Track C 0 交集
+- Track B ↔ Track C 文件交集 `tasks.rs` + `main_health_emitters.rs` 兩處共改 — mitigation：tasks.rs market_tx 包裝由 Track C 負責；main_health_emitters.rs 6 build_* fn 各自獨立（同檔不同 fn merge 不衝突）
+
+**Phase B LOC refactor 順手機會**（per §4.3.3 simplified suggest）：
+- main_health_emitters.rs 1223 LOC → §4.3.5/6 IMPL +20 LOC 變 1243 LOC → E1 IMPL 時順手拆 6 submodule（track_a..f）
+- risk_envelope_probe_impl.rs 958 LOC → §4.3.4 F-4 +280 LOC 變 1238 LOC → E1 IMPL 時順手拆 portfolio_state_cache.rs + correlation_calculator.rs + real_probe.rs 3 submodule
+- bybit_rest_client.rs / bybit_private_ws.rs 純 defer Sprint 5+ Wave 2（後者 §4.2 item 1 supervisor signature 改造時順手拆）
+
+**Total Sprint 5+ Wave 1 dispatch**：~1175 LOC / 21-27 hr 並行（wall-clock 1-1.5 day）；4 並行 E1 sub-agent；風險 中（algorithm 正確性 + signature change 涉 caller 端同步 + hot path AtomicU64 stats 注入 + pool acquire wrapper）。
+
+**Report**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint5_wave1_m3_follow_up_design.md`
+**Verdict**：DESIGN-DONE — 3 spec + 1 design report land；4 items dispatch ready；§4.3.3 LOC 切檔 defer Phase B IMPL-driven；E2 重點審查 5 條 + 16 根原則合規 A 級 + 0 hard boundary 觸碰。
+**Confidence**：HIGH for SSOT 校正（spike fixture 與 cold start bench 兩 AC-7 區別已 SSOT 文件 + commit hash 驗）；HIGH for F-4 lookback=1h 拍板（30 sample Pearson 推薦下限）；HIGH for Track B/C 最小入侵 atomic counter 範式（對齊 Rust idiom + 既有 dep）；MEDIUM for Track B/C 文件交集 mitigation（main_health_emitters.rs 同檔不同 fn merge 安全但需 dispatch explicit 告知）；HIGH for AC-7 cold start bench 範式（對齊既有 hot_path_baseline / intent_processor_exposure plain fn main 範式）。
+
+
+## 2026-05-23 Sprint 5+ Wave 1 §8.1 V101/V102 Track v3 attribution column + indexes design
+
+**觸發**：Stage F PM Phase 3e §8.1 carry-over (HEAD 5a58cc96, 2026-05-23) + operator 拍板「V101/V102 現在順手推上去」+ 3-4 hr single-thread budget — PA single-thread design only.
+
+**Deliverable**：
+- V101 spec: `docs/execution_plan/specs/2026-05-23--v101-track-v3-attribution-column.md` (~650 LOC spec + ~250 SQL est)
+- V102 spec: `docs/execution_plan/specs/2026-05-23--v102-track-v3-indexes-not-null.md` (~700 LOC spec + ~280 SQL est)
+- PA design report: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint5_wave1_v101_v102_track_v3_attribution_design.md` (~600 LOC)
+
+**核心 PA push back（強制 scope 收緊）**：
+- v3 spec (`2026-05-20--v101_v102_track_attribution_migration_spec.md`) 完整 scope = 12 既存表 ADD COLUMN + 2 新表 CREATE + 4 view + governance.track_kill_events + ENUM + Rust enum + Guardian check 6
+- 估 40-60 hr E1 effort，遠超 operator 3-4 hr single-thread budget
+- PA 收緊 scope 至 trading.fills only；其他 11 表 + 2 新表 + view + kill_events 拆 Sprint 5+ Wave 2 Phase 2 carry-over (~40-60 hr)
+
+**3 衝突解析**：
+1. v3 spec §3.3.1 寫 CREATE TABLE learning.hypotheses，但 V100 (2026-05-23 land) 已 CREATE 同表 base — V101 spec §1.1 衝突解析「從本 V101 spec 削除」
+2. v3 spec §3.3.2 寫 CREATE TABLE learning.hypothesis_preregistration，同上 — V101 spec §1.1 衝突解析削除
+3. V### 編號移位：v3 spec 假設 V101/V102；現實 V099/V100 已被 autonomy + M4 base 佔用 — operator prompt + Stage A-E §8.1 拍板 Track v3 移至 V101/V102 (本 spec OPEN slot)
+
+**3 critical lesson alignment**：
+1. **trading.fills 是 TimescaleDB columnstore hypertable**（per V077 hotfix 2026-05-09 PM signed 49ceeb61）— V102 NOT NULL handling 必走 Option B (BEFORE INSERT/UPDATE trigger fallback)，不走 Option C (ALTER COLUMN SET NOT NULL 預期 RAISE feature_not_supported)
+2. **CONCURRENTLY index 在 sqlx migrate BEGIN/COMMIT 內 RAISE** — V102 走 CREATE INDEX IF NOT EXISTS (非 CONCURRENTLY) 對齊 V094/V083/V028 既有 fills index 範式
+3. **Batched UPDATE LIMIT 10000 + pg_sleep(0.1) + LOOP** — V101 backfill 走 batched 範式對齊 v3 spec §3.4 + V094 同表 land lock contention 範式
+
+**3 Options 比對 + PA Verdict (V102 NOT NULL handling)**：
+- Option A NULL allowed: fail-closed 弱 → NOT RECOMMENDED (per 根原則 6 違反)
+- **Option B trigger + DEFAULT 'baseline' (PA STRONGLY RECOMMENDED)**: trigger BEFORE INSERT/UPDATE OF track + RAISE on NULL + DEFAULT 'baseline' 雙保險;columnstore-safe per V077 範式;rollback 低風險
+- Option C ALTER COLUMN SET NOT NULL: 預期 RAISE feature_not_supported per V077 教訓 → NOT RECOMMENDED
+
+**E1 IMPL est**：
+- V101 ~3-4 hr (~250 LOC SQL + cargo test + commit)
+- V102 ~3-4 hr (~280 LOC SQL + cargo test + commit)
+- Sandbox dry-run ~45 min (operator + PA execute on Linux trade-core)
+- Production deploy ~30 min
+- 30 min observe + verify
+- **Total wall-clock ~8-11 hr**
+
+**Sprint 5+ Wave 2 Phase 2 carry-over (其他 11 表 + view + kill_events + Rust enum)**：
+- 11 表 ADD COLUMN + backfill (trading.intents/orders/signals/risk_verdicts/position_snapshots/decision_outcomes/learning.*/agent.*) — 14-22 hr V104+
+- CREATE TABLE governance.track_kill_events + 4 P&L view — 4-6 hr
+- 11 indexes + 11 trigger NOT NULL fan-out — 8-12 hr
+- Rust enum + writer fan-out — 12-20 hr
+- **Total Sprint 5+ Wave 2 Phase 2 ~40-60 hr** (建議 3-4 並行 sub-agent + 1-2 day wall-clock)
+
+**E2 重點審查 3 條**：
+1. E2-1: columnstore hypertable trigger fallback path 對齊 V077 範式 (不走 ALTER COLUMN SET NOT NULL;trigger 命名/function 命名直接 mirror V077)
+2. E2-2: scope 嚴守 trading.fills only — Sprint 5+ Wave 2 Phase 2 carry-over (不擴展至 11 表 + view + kill_events + Rust enum;不 CREATE TABLE learning.hypotheses)
+3. E2-3: V101 backfill 100% verify + V102 Guard A V101 prerequisite verify (V101 結尾 SELECT COUNT NULL = 0;V102 Guard A 再 verify 一次防 race condition)
+
+**16 原則 + 9 安全不變量 + 8 hard boundary 合規**：
+- 16 原則：A 級 16/16 PASS (原則 6 fail-closed + 原則 8 交易可解釋 對齊 trigger fallback + track audit metadata)
+- 9 安全不變量：N/A schema migration; 不涉 runtime invariants
+- 8 hard boundary：0 觸碰
+
+**4 反模式（spec §8 10 條反模式精選）**：
+1. v3 spec 全 12-table ADD COLUMN scope creep (V101 §1.1 + E2-2 reject)
+2. V102 ALTER COLUMN SET NOT NULL 嘗試 (V102 §3.1 Option C NOT RECOMMENDED + E2-1 reject)
+3. CONCURRENTLY index 在 sqlx transaction (V102 §5.3 對齊 V094 範式)
+4. V101 → V102 race window writer 漏填 (V102 Guard A V101 prerequisite verify)
+
+**4 教訓 / spec design 反思**：
+1. **operator 「順手推」字面遇到 large legacy spec 必先 PA scope audit + push back**：避 silent under-commitment;ADR / spec 設計 mode 與 dispatch 階段 mode 對齊驗
+2. **parent spec 引用前必先 grep 真實 production state**：v3 spec §3.3.1 與 V100 production 衝突 (learning.hypotheses 已建)；直接複製 spec = production deploy RAISE
+3. **trading.fills schema migration 必先 review columnstore constraint state**：grep V077 hotfix + hypertable feature_not_supported；對齊 trigger fallback 範式
+4. **Sprint 5+ Wave 2 Phase 2 carry-over scope 必明示**：spec §1.1 push back 紀錄 + §8 carry-over table 列舉 11 表 + view + kill_events est 40-60 hr;避未來 audit reasoning ambiguity
+
+**Scope 守邊界（task 期間）**：
+- ✅ 不 IMPL Rust / Python / SQL (E1 phase work)
+- ✅ 不改 既有 V### / trading.fills schema
+- ✅ 不 commit
+- ✅ 不派下游 sub-agent
+- ✅ 中文為主 / 0 emoji
+- ✅ 0 code 改動; 2 新 spec doc + 1 PA report
+
+**Verdict**：**DISPATCH READY (OPEN)** — 8/8 前置條件 PASS (V099 spec + V100 production land + V103 land + V077 columnstore 範式 + V094 fills migration 範式 + sqlx Migrator chain + Linux PG empirical SOP + ADR-0025 v3)；風險 中 (hot-path table + columnstore feature_not_supported constraint + trigger fallback path)；派發優先級 immediate (per operator 拍板字面)。
+
+**Confidence**：HIGH for V101 ADD COLUMN + backfill 設計 (per V094 範式對齊);HIGH for V102 trigger fallback + DEFAULT 設計 (per V077 範式對齊);HIGH for 8-11 hr wall-clock budget;MEDIUM for ALTER COLUMN SET DEFAULT 'baseline' columnstore 兼容 (metadata-only PA 預設 PASS 但未 sandbox empirical 驗;如 RAISE feature_not_supported 需 fallback drop DEFAULT 段 + 強化 trigger 必填規則);LOW for v3 spec full 12-table scope completeness (本 spec 收緊 + carry-over 路徑;Sprint 5+ Wave 2 Phase 2 補完)。
+
+Report: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint5_wave1_v101_v102_track_v3_attribution_design.md`
+
+---
+
+## 2026-05-23 — Sprint 1B Pending 3.1 C10 funding harvest Stage 1 Demo dispatch packet 設計
+
+**Context**：Sprint 1B late 剩 3 章節 audit `2026-05-23--sprint_1b_remaining_3_sections_audit.md` 確認 C10 為唯一 READY-TO-DISPATCH 章節（Earn first stake NEEDS-OPERATOR-DECISION；v5.7 baseline 收口 DOWNGRADE-TO-NON-WORK）。operator 拍板 C10 chain 全力推進；Earn 等 operator return。
+
+**packet 設計重點**：
+1. delta-neutral 二腿：perp short (real demo fill) + spot long (paper-only `SyntheticSpotLedger` synthetic accounting；Bybit demo 不支援 spot lending per BB C4 verdict §2)
+2. 新建 `strategies/funding_harvest/` 6-file module ~1230 LOC 對齊既有 `bb_breakout/` 結構（mod.rs + params.rs + runtime_params.rs + synthetic_spot.rs + tests + tests_synthetic）
+3. 保留 `funding_arb.rs` V2 dormant marker per ADR-0018 不動；新策略完全並列；funding_harvest **不擴 governance 表面**（不新增 LeaseScope / IntentType；既有 perp leg pipeline 完整覆蓋）
+4. Stage 0R replay preflight harness `replay_funding_harvest.py` 新檔 ~800 LOC 擴展既有 `replay_runner.py` (新增 fetch_funding_rates + fetch_spot_klines + synthetic PnL 計算 + 6 sanity check + output JSON with `eligible_for_demo_canary`)
+5. 5 AC per FA §6 Stage 1 Demo gate (fills ≥ 5 / 7d PnL ≥ -0.5% = -$5 absolute / P0 breach=0 / size $100 hard cap / Stage 0R PASS)
+6. 8-step dispatch chain (Wave A PA spec + QC review // Wave B 5 並行 sub-agent IMPL // Wave C E2 // Wave D round 2 fix + E4 // Wave E QA + PM)
+7. estimate **41-62 hr core / wall-clock 4 day to cohort open + 7d 觀察 = 11d to verdict**
+
+**核心 design choice**：
+- entry: annualized funding > 5% AND basis_pct < 0.4% AND funding > 0
+- exit: annualized < 2% OR basis > 0.5% OR 72h max hold OR funding flip 負
+- rebalance: 2h tick check delta_drift > 2% → SyntheticSpotLedger.rebalance() (純 in-memory book-keeping)
+- size cap: $100 absolute (FundingHarvestParams::validate() 強制 ≤ 100.0)
+- annualized formula: funding_rate_8h × 3 × 365 (per Bybit V5 funding cycle 8h)
+
+**16 root principles 合規驗**：
+- §1 單一寫入口：perp leg 經 IntentProcessor；synthetic spot 不發 Bybit order
+- §4 策略不繞風控：perp leg 完整經 Guardian + Decision Lease + cost_gate + Kelly
+- §5 生存 > 利潤：stop_loss_pct=0.05 override + on_external_close 清 synthetic spot leg
+- §8 交易可解釋：is_synthetic_spot flag + parent_perp_fill_id cross-leg ref 寫 V101 trading.fills.track
+
+**E2 重點審查 3 條**：
+1. delta-neutral 數學正確性（basis_pct abs / net_edge use |funding_rate| / annualized × 3 × 365 / delta_drift_pct 分母 spot_notional）
+2. SyntheticSpotLedger 邊界 + attribution（不發 Bybit order / is_synthetic_spot V101 column / parent_perp_fill_id JOIN / close 用 current spot price / on_external_close orphan handle）
+3. 16 root principles + AMD-2026-05-15-01 §4.4 rollback (Stage 1 demo evidence 6 條 / replay drift > 5% demote)
+
+**dispatch readiness verdict**：**READY-TO-DISPATCH**
+- 0 hard blocker
+- 1 soft 諮詢 (MIT V101 schema 是否預留 `is_synthetic_spot` column 0.5 hr W+0；結論決定 B5 並行性)
+- 0 operator decision points needed
+- 與 Sprint 4+ §4.1.1 V99-V102 base table audit 可並行
+
+**Sprint 4 LIVE 路徑 forward-look**：Stage 1 → Stage 2 14d (BTCUSDT only size $200) → Stage 3 21d (BTCUSDT + ETHUSDT size $500) → Stage 4 LIVE (size $2000 initial + spot leg synthetic retire → IntentProcessor real spot order；Sprint 5+ cascade window ~25-40 hr estimate)。
+
+**教訓**：
+- C10 spot leg paper-only emulation 違反 `feedback_live_no_degradation_by_endpoint` 但 FA + QA + QC consensus 接受（無更好替代；不做 = 失 Sprint 1B 唯一 strategy IMPL 窗口）
+- delta-neutral 策略對 Bybit demo spot 不支援的 workaround = synthetic ledger pattern，可重用於未來其他 spot-bearing strategy demo 灰度
+- 既有 funding_arb V2 dormant marker pattern 為 R-02 重設計 slot；C10 新策略並列 not 取代，避「retire-then-rebuild」混淆
+
+**Reports**:
+- Full packet: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_1b_c10_funding_harvest_stage1_demo_dispatch_packet.md` (1198 LOC)
+- Summary: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_1b_c10_pa_design.md` (148 LOC)
+
+**Confidence**: HIGH for delta-neutral 數學 + module 結構對齊 (per bb_breakout 範式驗); HIGH for Stage 0R harness 擴展 既有 replay_runner.py path; HIGH for 41-62 hr core estimate (per parallel 5 sub-agent 30-40% compression); MEDIUM for V101 schema `is_synthetic_spot` column 預留 (待 MIT 0.5 hr 諮詢 verdict); MEDIUM for synthetic spot leg PnL 與 perp leg real PnL 在 ML training 集隔離 (memory `feedback_demo_over_paper_for_edge` 範式對齊但具體 query default 待 MIT confirm)。
+
+---
+
+## 2026-05-23 — Sprint 1B Pending 3.2 Earn first stake — audit + dispatch packet + 4 OP enumeration
+
+**Context**: per Sprint 1B late §4.2 PA dispatch packet `2026-05-23--sprint_1b_remaining_3_sections_audit.md` Pending 3.2 → operator 拍板 2026-05-23「Earn audit + spec refine + 4 operator decisions enumeration;不 IMPL Wave B」
+
+**Trigger**: Sprint 4+ first Live carry-over PASS WITH 8 CARRY-OVER 後;Pending 3.2 Earn first stake DISPATCH-PACKET 與 4 OP 列出後 operator return PM 拍 dispatch chain
+
+**Key findings**:
+
+1. **既有 IMPL gap (4 個全 0)**:
+   - Bybit Earn 12 endpoint client 0/12 (既有 `bybit_rest_client.rs` 1367 LOC 僅含 `/v5/order/` + `/v5/position/` + `/v5/account/` + `/v5/market/` + `/v5/asset/` + `/v5/spot-lever-token/` + `/v5/spot-margin/` rate limit path detection;0 hit `/v5/earn/`)
+   - `IntentProcessor::IntentType` enum 不存在 (既有 `OrderIntent` struct line 59-94 11 field 透過 `is_long: bool` + `strategy: String` 隱性區分 long/short;無 open/close/earn 區分)
+   - `LeaseScope::EarnStake` + `EarnRedeem` variant 不存在 (既有 `lease_scope.rs` line 34-91 4 variant only: TradeEntry/TradeExit/PositionAdjust/CanaryStagePromotion)
+   - `learning.earn_movement_log` writer 0 (但 V100 schema 已 LAND per Sprint 4+ §4.1.1 PA-DRIFT-6 patch closure 完成 — schema 前置已解;只需 writer IMPL)
+
+2. **V100 earn_movement_log schema LAND**: 10 column (movement_id BIGSERIAL PK / event_ts / direction CHECK 2 enum / amount_usdt NUMERIC(18,8) / apr_at_time REAL / governance_approval_id BIGINT soft ref per PA-DRIFT-6 / bybit_response_payload JSONB / engine_mode CHECK 4 enum / api_scope_used TEXT / reconciliation_status CHECK 3 enum DEFAULT 'pending') + idx_earn_movement_log_strategy_ts on (event_ts DESC)
+
+3. **earn_governance spec 五角色 cross-ref pending**: CC self-draft ✅ DONE / FA + E3 + QA + MIT + BB ⬜ PENDING D+1 2026-05-22 未 land;PA 補 cross-ref 結論 ⚠️ APPROVE-WITH-2-CAVEATS — §3 IntentType enum 範圍 7 variant (spec 列 6 變數;PA 建議加 CloseLong/Short 預留對齊 LeaseScope 範式) + §6.1 daily reconciliation UTC 00:30 → UTC 02:00 改正 (避 funding settlement 00:00 + 08:00 + 16:00)
+
+4. **4 operator-bound decisions HARD BLOCK Wave B IMPL**:
+   - **OP-1** D+1 OpenClaw key 發行日 5 min query (block E1c test;per BB C5 verdict (a) ≥ 2026-04-09 自動帶 Earn / (b) < 2026-04-09 +30-60 min 重發)
+   - **OP-2** first stake $100-500 拍板 (NO block IMPL;PA 建議 $100-200 對齊 AMD-2026-05-15-01 Stage 1 micro-canary + Bybit flexible tier 1 $200 @ ~10% APR boundary)
+   - **OP-3** flexible (30 day flex) vs fixed (90/180 day) 拍板 (PARTIAL block: E1c 範圍縮 4-6 hr if flexible only;PA 建議 flexible — Sprint 1B W9-12 過短 + fixed 鎖倉撞 margin auto-redeem)
+   - **OP-4** earn_governance spec 五角色 cross-ref final sign approve (HARD BLOCK Wave B;CC 修 2 PA caveat → 5 角色並行 cross-ref dispatch 5-12 hr → CC final sign → operator approve)
+
+5. **8-step IMPL dispatch chain + 50-78 hr estimate**:
+   - Wave 0 operator (~45 min + sub-agent cross-ref 5-12 hr 並行)
+   - Wave A PA spec (PA1 dispatch packet 本 DONE + PA2 V100 writer spec 2-3 hr + PA3 reconciliation cron 2-3 hr + PA4 Linux PG CHECK audit 1-2 hr + CC caveat 修正 1 hr)
+   - Wave B 5 並行 E1 IMPL (E1a IntentType 4-6 + E1b LeaseScope variant 2-3 + E1c bybit_earn_client.rs 12 endpoint 10-15 + E1d EarnMovementWriter + Earn 分支接線 5-7 + E1e Daily reconciliation cron + hot-reload hook 4-6 + E1a GUI manual stake form 8-12 阻於 H2 Console tab 可延 W+2)
+   - Wave C 並行 review (E2 adversarial 3-5 + BB Bybit ToS/KYC verdict 1-2 + E3 secret slot governance 1-2)
+   - Wave D sequential (E1 round 2 fix 0-4 + E4 regression 1-2 + QA Stage 0R + 5-gate verify + AC-1~6 2-4)
+   - Wave E (operator GUI manual stake first execution 10-30 min + Linux PG verify 5 min + PM Phase 3e sign-off 1 hr)
+   - **Total**: 50-78 hr core / Wall-clock 4-6 day / Sub-agent peak 5-6 並行
+
+6. **3 個新建檔案**:
+   - `srv/rust/openclaw_engine/src/bybit_earn_client.rs` (~600-900 LOC;對齊 bybit_rest_client.rs 範式;共用 BybitRestClient.get_checked() / post_checked() 不重複 HTTP / signing / rate limit;12 endpoint method + 12 response struct)
+   - `srv/rust/openclaw_engine/src/database/earn_movement_writer.rs` (~250 LOC;INSERT placeholder → Bybit API ack → UPDATE outcome 範式;governance_audit_log.id soft ref 反查 per PA-DRIFT-6 V100 line 502-511 comment)
+   - `srv/rust/openclaw_engine/src/cron/earn_reconciliation.rs` (~150 LOC;UTC 02:00 systemd timer;diff thresholds $0.01/$1.00/3 day cascade)
+
+7. **既有 bybit_rest_client.rs 必要 patch**:
+   - Patch-1: line 246-249 `RateLimitGroup::from_path` 加 `else if path.starts_with("/v5/earn/")` 分支 → `Self::Asset` 映射 (E1c Wave B must-fix;否則 12 endpoint 全走 `Other` default 不對齊 5 req/s constraint)
+   - Patch-2: `lib.rs` or `mod.rs` 加 `pub mod bybit_earn_client;`
+
+8. **既有 callers backward-compat 保護**:
+   - OrderIntent struct 擴 `intent_type` 預設 OpenLong + `earn_payload: Option<EarnIntentPayload>` (serde `#[serde(default = "default_intent_type")]` + `#[serde(default)]`) — 4 既有策略 (bb_breakout/bb_reversion/grid_trading/ma_crossover) constructor + 11 既有 OrderIntent test fixture + IPC consumer 全 backward-compat;新 Earn 路徑於 IntentProcessor.process 入口 1 個 branch fork
+   - LeaseScope exhaustive match 3 method (as_audit_str / requires_operator_authority / default_ttl_ms) 編譯期強制 — 新加 2 variant 不補 match → 編譯 fail (好事)
+
+9. **PA-DRIFT-6 lesson 應用**: V100 earn_movement_log.governance_approval_id 是 BIGINT soft reference 不是 SQL FK constraint (per 2026-05-23 PA-DRIFT-6 governance audit lesson — governance_audit_log 是 TimescaleDB hypertable composite PK (id, ts);PostgreSQL FK 不能只對齊 (id) 必須完整 unique constraint);application-level 透過 SELECT FROM learning.governance_audit_log WHERE id=governance_approval_id 反查;對齊 V106/V107/V112 既有範式;E1d IMPL must-fix grep verify
+
+10. **PA verdict 對 earn_governance spec 額外 caveat**:
+    - §3 line 159-167 IntentType enum 列 6 variant (OpenLong/Short + CloseLong/Short + EarnStake/Redeem) — 漏 PositionAdjust 對齊 LeaseScope 範式;PA 修正建議加 PositionAdjust variant (LeaseScope 既有 W-AUDIT-9 設計範式)
+    - §6.1 line 308 Daily reconciliation UTC 00:30 改 UTC 02:00 避 funding settlement (Bybit funding 結算 00:00 + 08:00 + 16:00 UTC;cron UTC 00:30 撞 funding settlement transit period;UTC 02:00 安全 buffer)
+
+11. **dispatch readiness verdict**: **NEEDS-OPERATOR-DECISION-4 / WAVE-B-IMPL-PENDING / EARN-GOVERNANCE-SPEC-FINAL-SIGN-PENDING**
+    - DESIGN ✅ (dispatch packet 750+ line)
+    - V100 schema ✅ LAND
+    - IntentType / LeaseScope / bybit_earn_client / writer / cron design ✅
+    - earn_governance final sign ⏳ (CC ✅ / 5 角色 ⬜)
+    - OP-1/2/3/4 ⏳ all PENDING
+    - Wave B IMPL 最快 D+1 dispatch / 最遲 D+2 dispatch
+
+12. **PA 建議路徑**: 路徑 A (per parent audit §5.2) — 先 C10 後 Earn 序列 dispatch;W+0 dispatch C10 Pending 3.1 + operator 4 OP 並行 + earn_governance 5 角色 cross-ref 並行;W+1 C10 closure → Wave B IMPL 5 並行 E1 dispatch;W+2 Wave C-E 完成 → Pending 3.2 closure;整體 wall-clock 2-3 weeks
+
+**Reports**:
+- Full dispatch packet: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_1b_earn_first_stake_dispatch_packet.md` (750+ LOC / §0-§11 完整)
+- Audit summary: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint_1b_earn_pa_audit.md` (§0-§7)
+
+**Confidence**:
+- HIGH for 12 endpoint 清單 + V100 schema 接線 (per BB C4 verdict tiagosiebler SDK + V100 schema 直讀)
+- HIGH for IntentType + LeaseScope variant 設計 (per 既有 lease_scope.rs CanaryStagePromotion W-AUDIT-9 範式 1:1 對齊)
+- HIGH for bybit_earn_client.rs ~600-900 LOC estimate (per bybit_rest_client.rs 1367 LOC + 12 endpoint method 範式比例)
+- HIGH for 50-78 hr core estimate (per 5 並行 sub-agent 30-40% compression + Wave B 30-45 hr / 2-3 day calibration vs ahead-of-time C10 41-62 hr estimate)
+- MEDIUM for OP-1 key 重發路徑 (b) +30-60 min wall-clock (per BB C5 advisory;operator carry-over from TODO §0 D+1 5 min;具體三端同步運維 SOP 待 `engineering:devops` skill cross-ref)
+- MEDIUM for earn_governance 五角色 cross-ref 預期 4-5/5 ✅ APPROVE (per PA verdict ⚠️ APPROVE-WITH-2-CAVEATS quality high 但 FA + E3 + QA + MIT + BB 角度可能補額外 caveat)
+- LOW for E1d governance_audit_log.id soft ref 反查邏輯複雜度 (per PA-DRIFT-6 V100 line 502-511 comment + V106/V107/V112 既有範式;LOW risk)

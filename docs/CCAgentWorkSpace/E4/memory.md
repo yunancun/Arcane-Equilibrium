@@ -4489,3 +4489,25 @@ Sprint 4+ first Live carry-over Wave A (PA-DRIFT-4 bybit instrumentation + PA-DR
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-23--sprint_4_e4_regression_wave_ab.md`
+
+## 2026-05-23 Sprint 5+ Wave 1 Phase D combined regression — HEAD c4e1411d
+
+R2-1 V101/V102 sqlx parser + R2-2 §4.4 hardening + R2-3 Track B+C CRITICAL caller wire-up 三並行 round 2 fix combined regression Verdict: **PASS — APPROVE**。
+
+### 主要數字
+- cargo --workspace --release --no-fail-fast Run 1 / Run 2 = **4018 passed / 0 failed / 5 ignored** non-flaky；baseline 3961 → +57 R2 增量對齊。
+- pytest Run 1 / Run 2 = **6122 passed / 18 failed / 30 skipped** non-flaky；baseline 6042/28 → passed +80 / failed -10，無 R2 regression（R2 純 Rust+SQL+Bash 0 Python touch）。
+- `database::migrations::` 15/15 PASS（含 load_migrations_real_srv_tree V99→V100→V101→V102→V103→V106→V107→V112 monotonic）。
+- `health::domains::` 110/0 維持，`database::pool_wait_stats` 5/0 unit ✅。
+- Sprint 2 Track B/C/D integration 5+8+7=20/0；Wave A/B integration 22+14+6=42/0。
+
+### Concurrent session 1 fail 認證
+prompt 預期 1 fail (`layer_2_fence_env_gate_three_states` / `btc_lead_lag_panel_fence_integration.rs:267`) 在 HEAD c4e1411d Mac workspace 實測 **0 fail**（比預期更乾淨）；同期 sibling 已收斂或不在 narrow staging。Per `feedback_multi_session_memory_race`「不認識改動禁 revert」，本 E4 未觸碰 concurrent session test。
+
+### 教訓
+1. **Release binary strings 不會留 Rust internal identifier**：LLVM 內聯 + symbol stripping 後 `_probe_impl` / `Real*Source` / `build_*_emitter` / `set_signal_stats` / `attach_subscriptions_counter` 等 Rust function name 不出現在 `strings <binary>` 輸出。實際 land 驗證應透過：(1) cargo test --workspace 全綠涵蓋的 integration suite (2) source path string literal in binary (3) metric key string literal in binary (4) nm 0 hit 排除 dyld_stub_binder 系統符號後。Prompt 級「grep Rust internal identifier」是 false negative 預警，不能單獨用作 fail signal。
+2. **`grep -E "170|3072"` boundary number 過寬鬆**：會吃到 binary 內 SSL 證書年份字串（`-Microsoft RSA Root Certificate Authority 20170` 等）。boundary 驗證應透過 unit test pass + metric key literal land + E2 round 2 APPROVE 三條獨立鏈，不靠 strings number grep。
+3. **pytest 公平 baseline 對齊需重複前次 `--ignore=`**：`test_pure_utils.py` 2 collection error 是 prior baseline 一直用 `--ignore=` 規避的 case，Run 2 補回 `--ignore` 才能與 prior baseline apples-to-apples 對齊（否則多 2 error 看似 regression 但實非）。
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-23--sprint_5plus_wave_1_phase_d_combined_regression.md`

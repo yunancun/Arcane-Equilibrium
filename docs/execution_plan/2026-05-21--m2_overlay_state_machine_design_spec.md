@@ -300,7 +300,7 @@ V105 `engine_mode` CHECK ENUM 5 值（per V105 §2.1）：`paper` / `demo` / `li
 
 | engine_mode | 寫 V105 row 場景 | 影響 production decision？ | 進入 training filter？ | 進入 M1 LAL eligibility filter？ | 進入 mv 嗎？ |
 |---|---|---|---|---|---|
-| `paper` | paper engine M2 state observer（per 2026-04-16 paper 預設關閉 memory；OPENCLAW_ENABLE_PAPER=1 才寫）| 否 | 否 | 否 | 否 |
+| `paper` | Archive/diagnostic M2 observer only（per 2026-05-23 paper 長期 Archive；`OPENCLAW_ENABLE_PAPER=1` 不得作 promotion evidence）| 否 | 否 | 否 | 否 |
 | `demo` | demo engine M2 state observer | 否 | 否 | 否 | 否 |
 | `live_demo` | LiveDemo engine M2 state observer | **是**（LiveDemo 是 live 管線走 demo endpoint per memory `feedback_live_no_degradation_by_endpoint`）| 是（per CLAUDE.md §七 + MIT memory `IN ('live','live_demo')`）| 是 | 是 |
 | `live` | Live engine M2 state observer | **是** | 是 | 是 | 是 |

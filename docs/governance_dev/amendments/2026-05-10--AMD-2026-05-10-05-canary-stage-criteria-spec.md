@@ -19,6 +19,11 @@
 
 ---
 
+> **2026-05-23 active rebase**: this amendment refines metric thresholds only.
+> Stage 1 is `Environment::Demo` after Stage 0R Replay Preflight; paper engine
+> output is Archive/diagnostic and cannot satisfy promotion or cohort launch
+> evidence.
+
 ## 1. Background
 
 ### 1.1 QC HIGH push back 2 觸發

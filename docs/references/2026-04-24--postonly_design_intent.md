@@ -118,7 +118,7 @@ pub struct AgentConfig {
 **paper = `true`**：
 - 紙盤鏡像 demo，保持探索資料的「費率代表性」與 live-target profile 對齊。
 - TOML 註腳「mirrors demo so paper exploration matches live-target fee profile」。
-- 本身 paper engine 在 2026-04-16 已預設關閉（`OPENCLAW_ENABLE_PAPER=1` 才 spawn，見 memory `project_paper_pipeline_disabled_by_default.md`），這個欄位主要是冷啟動 + 偶爾啟用紙盤 ad-hoc 驗證時生效。
+- 2026-05-23 current reading：paper engine 已改為長期 Archive/replay infrastructure，`OPENCLAW_ENABLE_PAPER=1` 不再 spawn runtime；此欄位僅保留歷史設定相容與離線 replay/diagnostic 解讀，不得作啟用或 promotion gate。
 
 ### 3.2 `post_only_limit` per env（GUI/Agent 偏好旗 — 目前無 enforce）
 

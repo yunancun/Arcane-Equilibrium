@@ -26,7 +26,7 @@ not in scope:
 Sprint 4+ first Live carry-over PASS WITH 8 CARRY-OVER 後，Sprint 1B late + Sprint 5+ cascade dispatch readiness OPEN。Sprint 1B 「剩 3 章節」per PM Phase 3e §5.3：(1) C10 Stage 1 Demo、(2) Earn first stake、(3) v5.7 baseline 收口。
 
 **核心結論**：
-- **C10 funding harvest strategy 0 IMPL**（既有 `funding_arb.rs` 是 V2 directional dormant per ADR-0018，與 C10 delta-neutral 不同概念）。Stage 1 Demo 真實工作 = **新建 Rust strategy + spot leg paper-only emulation + risk_config TOML + Stage 0R replay preflight gate**，估 **PA spec 8-12 hr + E1 IMPL 30-45 hr**。
+- **C10 funding harvest strategy 0 IMPL**（既有 `funding_arb.rs` 是 V2 directional dormant per ADR-0018，與 C10 delta-neutral 不同概念）。Stage 1 Demo 真實工作 = **新建 Rust strategy + spot leg replay-backed synthetic accounting + risk_config TOML + Stage 0R replay preflight gate**，估 **PA spec 8-12 hr + E1 IMPL 30-45 hr**。
 - **Earn first stake 0 IMPL**（既有 `bybit_rest_client.rs` 12 個 Bybit Earn endpoint 完全沒接；既有 `OrderIntent` struct 無 `IntentType` enum；既有 `LeaseScope` enum 無 `EarnStake/Redeem` variant）。前置 = **Bybit Earn API client 新建 + IntentProcessor enum extension + LeaseScope extension + V###（earn_movement_log table missing per V099/V100/V101 P0 base table audit）**。估 **PA + E1 35-55 hr**，**operator 親手 5 min query OpenClaw key 發行日 + first stake $200-400 拍板**。
 - **v5.7 baseline 收口** = **誤導命名 — 真實狀態是「12 prefix DESIGN-DONE 已 100% closed via Sprint 1A-α + Wave 2 + Wave 2.5」**。剩餘真實工作 = **operator D+1 5 min OpenClaw API key query** + **operator D+5 Console tab 歸屬決策**（per Sprint 1A-β D+5 12-check #8/#9 carry-over）。**不存在 baseline IMPL 工作**。
 
@@ -79,7 +79,7 @@ grep -l "C10\|funding_harvest" settings/strategy_params*.toml settings/risk_cont
 | ADR | ADR-0018 retire（QC 2026-05-02 量化分析否決）| 新（v5.7 §1）|
 | 文件 | `rust/openclaw_engine/src/strategies/funding_arb.rs` 1198 行（active=false dormant） | **0 既有** |
 | 風險 | directional 暴露於 spot-perp 反向風暴 | delta-neutral，理論上 spot↔perp price 漂移自動對沖 |
-| Demo 可行性 | demo 可 perp single-leg backtest | **Bybit demo 不支援 spot lending** → Stage 1-3 demo 灰度需 paper-only spot leg |
+| Demo 可行性 | demo 可 perp single-leg backtest | **Bybit demo 不支援 spot lending** → Stage 1-3 demo 灰度需 replay-backed synthetic spot leg |
 | 入場條件 | 拋棄（per QC 否決，break-even 7.6 day too costly）| BTCUSDT funding annualized > 5%（per FA §2）|
 | 平倉條件 | dormant | funding annualized < 2% OR spot-perp basis drift > 0.5% absolute |
 
@@ -97,42 +97,42 @@ Stage 0R Replay Preflight → Stage 1 Demo Micro-Canary 7d → Stage 2 14d → S
 
 Stage 1 Demo gate 條件（per FA §6）：
 - fills ≥ 5；7d cum PnL ≥ -0.5%；P0 breach=0
-- size $100（spot leg paper-only；perp leg demo $100 matched notional）
+- size $100（spot leg replay-backed synthetic accounting；perp leg demo $100 matched notional）
 - 前置 Stage 0R Replay Preflight PASS：replay 30d historical funding harvest fills；attribution_chain_ok=100%；PnL 偏離 < 1%
 
 **Stage 1 Demo 部署實質工作清單**：
 
 | # | 工作項 | Owner | 估時 | 前置 |
 |---|---|---|---|---|
-| 1 | **PA spec** — C10 funding harvest strategy 設計（入場/出場/size/rebalance/異常退出/spot leg paper-only emulation 機制） | PA | 8-12 hr | – |
-| 2 | **C10 strategy IMPL**（`strategies/funding_harvest/` 新 module；perp leg = Rust strategy；spot leg = paper-only simulator state machine；basis drift 計算；funding rate listener；72h max hold；2h rebalance check） | E1 | 18-26 hr | #1 |
+| 1 | **PA spec** — C10 funding harvest strategy 設計（入場/出場/size/rebalance/異常退出/spot leg replay-backed synthetic accounting 機制） | PA | 8-12 hr | – |
+| 2 | **C10 strategy IMPL**（`strategies/funding_harvest/` 新 module；perp leg = Rust strategy；spot leg = replay-backed synthetic accounting state machine；basis drift 計算；funding rate listener；72h max hold；2h rebalance check） | E1 | 18-26 hr | #1 |
 | 3 | **risk_config TOML**（`settings/strategy_params_demo.toml` + `risk_control_rules/risk_config_demo.toml` 新增 `[funding_harvest]` block + stop_loss override + position_size cap $100） | E1 | 1-2 hr | #2 |
-| 4 | **Stage 0R replay preflight harness**（replay engine 接 C10 strategy 對 30d historical funding harvest fills；spot leg paper sim；attribution_chain_ok=100% verify；PnL 偏離 < 1% verify） | E1 + QC | 8-12 hr | #2 |
-| 5 | **E2 review**（adversarial review of strategy IMPL + 16 原則 4/5/9 風控合規 + delta-neutral 數學驗證 + paper spot leg emulation 邊界） | E2 | 2-3 hr | #2 #4 |
+| 4 | **Stage 0R replay preflight harness**（replay engine 接 C10 strategy 對 30d historical funding harvest fills；spot leg synthetic accounting；attribution_chain_ok=100% verify；PnL 偏離 < 1% verify） | E1 + QC | 8-12 hr | #2 |
+| 5 | **E2 review**（adversarial review of strategy IMPL + 16 原則 4/5/9 風控合規 + delta-neutral 數學驗證 + replay-backed synthetic spot-leg accounting 邊界） | E2 | 2-3 hr | #2 #4 |
 | 6 | **E4 regression**（cargo test + pytest + integration test + cross-strategy attribution_chain_ok） | E4 | 1-2 hr | #5 |
 | 7 | **QA Stage 0R replay preflight Acceptance** + **Stage 1 Demo Acceptance**（per Strategy × Stage gate matrix）| QA | 2-4 hr | #5 #6 |
 | 8 | **PM closure**（Phase 3e sign-off） | PM | 1 hr | #7 |
 
 **合計**：~41-62 hr（5-7 並行 sub-agent wall-clock 2-3 day）。
 
-### §1.4 spot leg paper-only emulation 設計關鍵風險
+### §1.4 spot leg replay-backed synthetic accounting 設計關鍵風險
 
 per memory `project_funding_arb_v2_deprecation_path` §2 + BB C4 verdict + Bybit V5 API：
-- **Bybit demo endpoint 不支援 spot lending**（C10 spot long 在 demo 需「paper-only emulation」），這是 C10 demo 灰度的核心技術難點
+- **Bybit demo endpoint 不支援 spot lending**（C10 spot long 在 demo 需「replay-backed synthetic accounting」），這是 C10 demo 灰度的核心技術難點
 - Sprint 1B C10 spot leg **不接 Bybit demo spot order**，純 internal state machine 模擬 fill + price drift
-- spot leg paper sim 必滿足：
+- spot leg synthetic accounting 必滿足：
   1. price source = real Bybit demo BTCUSDT spot price WS feed（read-only）
   2. fill latency = production live spot 平均（即時模擬，不延遲）
-  3. balance accounting = engine-internal mock USDT balance（不寫 PG live balance；mock 同 paper engine）
-  4. Stage 4 LIVE 升級時，spot leg paper-only → spot leg live（透過 IntentProcessor 既有 spot order path；該 path Sprint 4 IMPL 在 §4 carry-over Sprint 5+ cascade 中）
+  3. balance accounting = engine-internal mock USDT balance（不寫 PG live balance；mock is local-only and not paper-engine backed）
+  4. Stage 4 LIVE 升級時，spot leg replay-backed synthetic accounting → spot leg live（透過 IntentProcessor 既有 spot order path；該 path Sprint 4 IMPL 在 §4 carry-over Sprint 5+ cascade 中）
 
-**側風險**：Bybit demo 不支援 spot order → spot leg 必走 paper-only，**這違反 demo 等同 live 嚴格度的原則**（per memory `feedback_live_no_degradation_by_endpoint`）。FA + QA + QC 已 consensus 接受此例外（per FA §6 row 1）。PA 立場：**接受**（無更好替代方案；其他選項 = 不做 C10 demo，但這就失 Sprint 1B 唯一可做的 strategy）。
+**側風險**：Bybit demo 不支援 spot order → spot leg 必走 replay-backed synthetic accounting，**這違反 demo 等同 live 嚴格度的原則**（per memory `feedback_live_no_degradation_by_endpoint`）。FA + QA + QC 已 consensus 接受此例外（per FA §6 row 1）。PA 立場：**接受**（無更好替代方案；其他選項 = 不做 C10 demo，但這就失 Sprint 1B 唯一可做的 strategy）。
 
 ### §1.5 C10 Stage 1 Demo 前置條件
 
 | 前置 | 狀態 | 影響 |
 |---|---|---|
-| Stage 0R Replay Preflight infrastructure | **PARTIAL** — 既有 replay engine（per `helper_scripts/canary/*`）；需擴 C10 spot paper sim hook | 阻 Stage 0R PASS |
+| Stage 0R Replay Preflight infrastructure | **PARTIAL** — 既有 replay engine（per `helper_scripts/canary/*`）；需擴 C10 spot synthetic-accounting replay hook | 阻 Stage 0R PASS |
 | Bybit demo BTCUSDT funding rate WS feed | **READY** — 既有 bybit_private_ws + WS funding rate listener（per Sprint 4+ instrumentation） | – |
 | Bybit demo BTCUSDT spot price WS feed | **READY** — 既有 spot price feed for ML/edge | – |
 | Demo perp endpoint | **READY** — production engine PID 3654935 active | – |
@@ -337,14 +337,14 @@ per PA v57_dispatch_consolidation §50-62 行 + PA v57_12_prefix_tech_verify §1
 
 **chain**：PA spec → E1 IMPL（並行 #2 #3 #4） → E2 review → E4 regression → QA Stage 0R + Stage 1 Demo Acceptance → PM closure
 
-**dispatch readiness verdict**：**READY-TO-DISPATCH**（不阻塞 Sprint 4+ §4.1.1 V99-V102 base table audit；C10 strategy IMPL 不依賴 earn_movement_log；spot leg paper-only emulation 自包含）
+**dispatch readiness verdict**：**READY-TO-DISPATCH**（不阻塞 Sprint 4+ §4.1.1 V99-V102 base table audit；C10 strategy IMPL 不依賴 earn_movement_log；spot leg replay-backed synthetic accounting 自包含）
 
 **並行 sub-agent dispatch 設計**：
 
 ```
 Wave A（並行，wall-clock 4-6 hr）
 ├─ PA1: C10 funding harvest strategy spec（8-12 hr）
-└─ PA2: Stage 0R replay preflight C10 spot paper sim harness spec（per PA1 完成後跟）
+└─ PA2: Stage 0R replay preflight C10 spot synthetic-accounting replay harness spec（per PA1 完成後跟）
 
 Wave B（並行，wall-clock 1.5-2 day）
 ├─ E1a: strategies/funding_harvest/ 新 module IMPL（18-26 hr）
@@ -367,7 +367,7 @@ Wave E（sequential 0.5 day）
 **estimated effort**：~41-62 hr core + 並行 sub-agent wall-clock 3-4 day。
 
 **Operator decision points**：
-- 無（C10 strategy IMPL 純內部 design + IMPL；Stage 1 Demo size $100 cap + spot paper-only 已 FA 決議 acceptance）
+- 無（C10 strategy IMPL 純內部 design + IMPL；Stage 1 Demo size $100 cap + spot replay-backed synthetic accounting acceptance）
 - 偶有 PA + QC adversarial review verdict 衝突時，operator 仲裁 1 次 ~10 min
 
 **前置 / 後置依賴**：
@@ -504,7 +504,7 @@ Wave F（sequential 0.5 day）
 |---|---|---|
 | Pending 3.2 阻於 §4.1.1（V99-V102 base table audit + V099/V100 IMPL）| HIGH | §4.1.1 PA spec 4-6 hr + E1 IMPL 6-8 hr 已 routing to Sprint 1B late P0；可並行 C10 IMPL 期間 prep |
 | operator D+1 OpenClaw key 過期或需重發 | MED | per BB C5 verdict (a) non-withdraw scope sufficient；若需重發 30-60 min operator action（已 TODO §1.4 active）|
-| C10 spot leg paper-only emulation 邊界 — Stage 4 LIVE 升級時轉 live spot order 路徑未驗 | MED | Sprint 5+ cascade IMPL window；Stage 1-3 Demo 7d/14d/21d gate 期間 PA + E1 在 4-5 hr buffer 完成 live spot order 接 IntentProcessor 路徑 spec |
+| C10 spot leg replay-backed synthetic accounting 邊界 — Stage 4 LIVE 升級時轉 live spot order 路徑未驗 | MED | Sprint 5+ cascade IMPL window；Stage 1-3 Demo 7d/14d/21d gate 期間 PA + E1 在 4-5 hr buffer 完成 live spot order 接 IntentProcessor 路徑 spec |
 | C10 替代既有 funding_arb V2 dormant slot — 命名衝突 | LOW | 維持 funding_arb.rs dormant marker + 新建 funding_harvest/ 並列；docs 補 cross-ref note |
 | Sprint 1B「baseline 收口」措辭誤導其他 sub-agent / operator | LOW | 本 audit §3 + TODO §1.2 line 61 措辭修正 |
 | Pending 3.1 + 3.2 並行 sub-agent 帶寬超過 5 並行 mandate ceiling | MED | 建議路徑 A 序列 dispatch；若路徑 B 則 PM 主動 traffic shape |
@@ -559,7 +559,7 @@ W+2.5 ─→ Pending 3.2 進 QA + operator first stake 執行 + PM signoff
 - ❌ **不可** 在 §4.1.1 closure 前 dispatch Pending 3.2 IMPL Wave B（Earn API client + IntentProcessor + LeaseScope IMPL 必依賴 earn_movement_log schema）
 - ❌ **不可** 跳過 earn_governance spec 五角色 cross-ref 直接 IMPL Wave B（spec status DRAFT-FOR-FIVE-ROLE-CROSS-REF）
 - ❌ **不可** 在 C10 Stage 0R replay preflight FAIL 後 直接進 Stage 1 Demo（per AMD-2026-05-15-01 graduated canary gate）
-- ❌ **不可** 將 spot leg paper-only 模擬視為 Stage 4 LIVE spot order 路徑 ready（Stage 4 LIVE spot order path 屬 Sprint 5+ cascade IMPL §4.2/§4.3）
+- ❌ **不可** 將 spot leg replay-backed synthetic accounting 模擬視為 Stage 4 LIVE spot order 路徑 ready（Stage 4 LIVE spot order path 屬 Sprint 5+ cascade IMPL §4.2/§4.3）
 
 ---
 
@@ -569,8 +569,8 @@ W+2.5 ─→ Pending 3.2 進 QA + operator first stake 執行 + PM signoff
 
 - **0 既有 C10 IMPL**（grep 0 hit；strategies/mod.rs 無 funding_harvest）
 - 既有 funding_arb.rs 是 V2 directional dormant per ADR-0018，與 C10 delta-neutral 完全不同概念，保留為 R-02 重設計 slot marker
-- C10 funding harvest = 新建 Rust strategy + spot leg paper-only emulation；Bybit demo 不支援 spot lending 是 Stage 1-3 demo 灰度核心技術難點
-- Stage 1 Demo 部署實質工作 ~41-62 hr / 並行 3-4 day（PA spec + Rust strategy + paper sim + risk_config + Stage 0R replay preflight harness + E2/E4/QA/PM 全鏈）
+- C10 funding harvest = 新建 Rust strategy + spot leg replay-backed synthetic accounting；Bybit demo 不支援 spot lending 是 Stage 1-3 demo 灰度核心技術難點
+- Stage 1 Demo 部署實質工作 ~41-62 hr / 並行 3-4 day（PA spec + Rust strategy + replay-backed synthetic accounting + risk_config + Stage 0R replay preflight harness + E2/E4/QA/PM 全鏈）
 - **dispatch readiness**：✅ **READY-TO-DISPATCH**（無前置阻塞；可即刻並行 dispatch）
 
 ### 7.2 Earn first stake audit + Bybit Earn API gap

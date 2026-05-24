@@ -651,7 +651,7 @@ Client 創建：`PositionManager::new(client: Arc<BybitRestClient>)`
                   cum_exit_value: f64, fill_count: i32, leverage: f64,
                   created_time, updated_time }
   ```
-- **GUI Demo PnL 用法（2026-05-23）**: `strategy_ai_routes.py:/demo/closed-pnl` 固定 `category=linear`，enforce 7d window，按 `nextPageCursor` 分頁至 `offset + limit + 1`，以 Bybit `closedPnl` 作 round-trip PnL truth；PG `trading.fills` 僅作 strategy attribution / fallback。
+- **GUI Demo/Live PnL 用法（2026-05-24）**: `strategy_ai_routes.py:/demo/closed-pnl?cursor_mode=true` 與 `live_session_account_routes.py:/live/closed-pnl` 固定 `category=linear`，用 opaque GUI cursor 在 Bybit `<=7d` windows 上向前滾動，前端每批預載 100 筆、每頁顯示 50 筆；以 Bybit `closedPnl` 作 round-trip PnL truth；PG `trading.fills` 僅作 strategy attribution / fallback。
 - **關聯程式**: `position_manager.rs:434`; `app/bybit_rest_client.py:get_closed_pnl`; `app/strategy_ai_routes.py:get_demo_closed_pnl`
 
 ---

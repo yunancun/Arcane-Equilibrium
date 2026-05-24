@@ -26,7 +26,7 @@ E1 W2-IMPL-5 完成 W2 IMPL v1.2 chain 收尾：
 
 W2 IMPL v1.2 chain **IMPL DONE**，待 E2 對抗 review + E4 regression sign-off 後 PM 統一 commit + push。
 
-**W2 IMPL chain 不解除任何硬邊界**：W2 是 paper-only fence 三層深度防禦 的新 panel + healthcheck + paper edge report 工具鏈；live 路徑、Mainnet 路徑、Decision Lease、authorization 全 0 觸碰。
+**2026-05-23 current reading**：W2 原本的 paper-only fence 語意已被 paper Archive policy supersede。BtcLeadLag 現在是 Archive/diagnostic + replay infrastructure：`OPENCLAW_ENABLE_PAPER=1` ignored；只有 `OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1` 可啟 non-promotional producer，且不得作 canary promotion evidence。live 路徑、Mainnet 路徑、Decision Lease、authorization 全 0 觸碰。
 
 ---
 
@@ -46,7 +46,13 @@ W2 IMPL v1.2 chain **IMPL DONE**，待 E2 對抗 review + E4 regression sign-off
 **Sibling commit**: `ad8132eb` (merged into `1f0354cf` chain commit)
 **Report**: commit `1f0354cf` body §W2-IMPL-2 (內含 inline 細節)
 
-spec v1.2 → v1.3 inline edit：§6.2 Layer 2 從「Python writer paper-only fence」改為「BtcLeadLagProducer env-gate fence」（producer 在 PA D+0 trait skeleton 階段就 IMPL 為 Rust producer，Python writer 從不存在；v1.0-v1.2 描述為 spec 與 code 失步殘留）。main.rs spawn 前加三狀態 env-gate Bool 邏輯：(a) `OPENCLAW_ENABLE_PAPER=1` → spawn；(b) env unset + paper-only → spawn；(c) env unset + demo|live active → skip spawn（fence fired）。cross_asset/mod.rs:12-13 MODULE_NOTE 同步更新（清 Python writer 字樣）。0 acceptance gate change（§7.1 mandatory metric 6 條 + §8.1 三檔 step gate 0 動）。
+spec v1.2 → v1.3 inline edit：§6.2 Layer 2 從「Python writer paper-only fence」改為「BtcLeadLagProducer env-gate fence」（producer 在 PA D+0 trait skeleton 階段就 IMPL 為 Rust producer，Python writer 從不存在；v1.0-v1.2 描述為 spec 與 code 失步殘留）。原 2026-05-11 三狀態 env-gate 已被 2026-05-23 paper Archive policy 取代：`OPENCLAW_ENABLE_PAPER=1` ignored，paper-only runtime 不再 spawn；只有 `OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1` 可啟 non-promotional diagnostic producer。0 acceptance gate change（§7.1 mandatory metric 6 條 + §8.1 三檔 step gate 0 動）。
+
+> 2026-05-23 active rebase: the above W2-IMPL-2 env-gate description is
+> historical. `OPENCLAW_ENABLE_PAPER=1` is now ignored for active runtime and
+> cannot be used for AMD-03 canary, unblock, or promotion evidence. Use
+> `OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1` only for non-promotional
+> diagnostics, and use Stage 0R replay preflight + Stage 1 Demo for canary flow.
 
 ### 2.3 W2-IMPL-3 (Healthcheck [57])
 
@@ -74,7 +80,7 @@ spec v1.2 → v1.3 inline edit：§6.2 Layer 2 從「Python writer paper-only fe
 
 Integration test 三層 fence 各對應 1 assert（缺一拒簽 per dispatch §6 PA E2 重點 1）：
 - **Layer 1 fence assert**：`layer_1_fence_only_paper_mode_reads_btc_lead_lag_slot`（驗 effective_engine_mode 對 9 種 PipelineKind+env 組合的字串輸出 + match arm 行為 → 只有 "paper" 進 slot.try_read 分支，其餘 8 種 mode（demo / live_testnet / live / live_demo × 5 variant）走 None default arm）
-- **Layer 2 fence assert**：`layer_2_fence_env_gate_three_states`（驗 3 狀態邏輯：env=1 4 種 has_demo/has_live 組合全 spawn / env unset + paper-only spawn / env unset + 3 種 demo/live active 組合全 skip — 共 8 個子 assert）
+- **Layer 2 fence assert**：`layer_2_fence_archive_policy_diagnostic_only`（驗 Archive/diagnostic 邏輯：`OPENCLAW_ENABLE_PAPER=1` 全 skip；`OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1` 才 spawn non-promotional producer；env unset 全 skip）
 - **Layer 3 fence assert**：`layer_3_fence_panel_none_yields_no_signal_sentinel`（驗 panel=None sentinel + panel=Some 但 5 conditions 全 fail → step_gate=minus5 行為）
 
 額外 6 個 invariant test：
@@ -94,10 +100,10 @@ Integration test 三層 fence 各對應 1 assert（缺一拒簽 per dispatch §6
 | Sub-task | Layer 1 (step_4_5_dispatch) | Layer 2 (main.rs env-gate) | Layer 3 (cross_asset evaluator) | 額外不變量 |
 |---|---|---|---|---|
 | **IMPL-1 (Orderbook 接線)** | ✅ orderbook slot 寫入時序自然 shift(1)（WS push 100Hz vs producer read 1/60s = 6000:1，必先寫入） | ✅ ingest task spawn 在 IMPL-2 fence pass `if` block 內；fence skip 路徑 else 分支 `drop(book_event_rx)` | N/A（IMPL-1 不動 evaluator）| ✅ `nan_safe_ingest_task_does_not_panic_on_nan_qty`：NaN qty / empty bids fail-soft → slot 不寫值 ✅ `compute_btc_book_imbalance` fail-soft 對 NaN / empty / denom≤0 / sum overflow 全 return None |
-| **IMPL-2 (Layer 2 fence amendment)** | ✅ Layer 1 主防線不變（IMPL-2 不動 step_4_5_dispatch.rs） | ✅ `layer_2_fence_env_gate_three_states` 三狀態 × 8 子 assert | N/A（IMPL-2 改 spec + main.rs + MODULE_NOTE，不動 evaluator）| ✅ spec v1.3 §6.2 同源；amendment 不破 §7.1 metric 6 / §8.1 三檔 gate / §13 16 原則合規 |
+| **IMPL-2 (Layer 2 fence amendment)** | ✅ Layer 1 主防線不變（IMPL-2 不動 step_4_5_dispatch.rs） | ✅ `layer_2_fence_archive_policy_diagnostic_only` Archive/diagnostic assert | N/A（IMPL-2 改 spec + main.rs + MODULE_NOTE，不動 evaluator）| ✅ v1.4 current reading：`OPENCLAW_ENABLE_PAPER=1` ignored；diagnostic env only；不破 §7.1 metric 6 / §8.1 三檔 gate / §13 16 原則合規 |
 | **IMPL-3 (Healthcheck [57])** | N/A（Python healthcheck 純讀 PG，不動 Rust dispatch）| ✅ check_57 設計：W2-IMPL-1 接線前 producer 寫 0.0 → check WARN（OPENCLAW_W2_HEALTHCHECK_BOOK_REQUIRED=0）；IMPL-1 land 後 REQUIRED=1 升 FAIL | N/A | ✅ Linux PG dry-run empirical 驗 hot-path index 命中 0.167ms ✅ opt-in env default-off 對齊 [52] / [56] sibling pattern |
-| **IMPL-4 (D+12 paper edge report)** | N/A（offline tool 純讀 panel.btc_lead_lag_panel + trading.fills + market.klines（post W2-IMPL-4 SQL fix `98a9d35f`/`163a5cba`））| ✅ counterfactual SQL `WHERE engine_mode='paper'` 過濾（producer 在 paper-only fence Layer 2 skip 後不寫 PG，自然不會有 demo/live 期 row） | ✅ Python evaluator 對 shadow log target `btc_alt_lead_lag_shadow` grep + alignment 不破 Rust 端 SHADOW_LOG_TARGET 字串契約 | ✅ PSR(0) Bailey-LdP 2012 skew/kurt-aware（禁 normal z-test）✅ Block-bootstrap deterministic seed reproducibility ✅ counterfactual SQL 5 CTE 純 READ-ONLY |
-| **IMPL-5 (本 wave)** | ✅ `layer_1_fence_only_paper_mode_reads_btc_lead_lag_slot` 9 種 PipelineKind+env 組合 | ✅ `layer_2_fence_env_gate_three_states` 8 子 assert | ✅ `layer_3_fence_panel_none_yields_no_signal_sentinel` + `layer_3_shadow_log_target_locked_to_spec_v1_2` | ✅ 三層 fence × 4 sub-task 對照表（本表）+ pre-existing exception accept rationale（§4）+ top-5 vs top-10 accept（§5）|
+| **IMPL-4 (D+12 archived diagnostic/replay report)** | N/A（offline tool 純讀 panel.btc_lead_lag_panel + trading.fills + market.klines（post W2-IMPL-4 SQL fix `98a9d35f`/`163a5cba`））| ✅ counterfactual SQL 必須視為 archived diagnostic/read-only；不得用 `engine_mode='paper'` 作 promotion gate | ✅ Python evaluator 對 shadow log target `btc_alt_lead_lag_shadow` grep + alignment 不破 Rust 端 SHADOW_LOG_TARGET 字串契約 | ✅ PSR(0) Bailey-LdP 2012 skew/kurt-aware（禁 normal z-test）✅ Block-bootstrap deterministic seed reproducibility ✅ counterfactual SQL 5 CTE 純 READ-ONLY |
+| **IMPL-5 (本 wave)** | ✅ `layer_1_fence_only_paper_mode_reads_btc_lead_lag_slot` 9 種 PipelineKind+env 組合（legacy/replay-compatible read path only） | ✅ `layer_2_fence_archive_policy_diagnostic_only` Archive/diagnostic 子 assert | ✅ `layer_3_fence_panel_none_yields_no_signal_sentinel` + `layer_3_shadow_log_target_locked_to_spec_v1_2` | ✅ 三層 fence × 4 sub-task 對照表（本表）+ pre-existing exception accept rationale（§4）+ top-5 vs top-10 accept（§5）|
 
 **結論**：三層 fence 每層各對應 1 個 explicit assert function（缺一即 cargo test 紅）；4 sub-task × 3 layer fence 結構責任明確；NaN safety + cross-language consistency + file ≤ 800 LOC 三額外 invariant 全 GREEN。
 

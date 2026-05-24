@@ -483,7 +483,7 @@ M9 worker 拉 queue → 跑 backtest → 寫 `learning.ab_test_outcomes`（不 p
 
 ### §7.1 為什麼 M4 → M6
 
-M4 產出 hypothesis 後，若 promote past `'experimenting'`（Stage 1 paper-active），M6 Auto-Allocator 需 reward weight baseline 才能 size allocation。
+M4 產出 hypothesis 後，若 promote past `'experimenting'`（Stage 0R replay PASS + Stage 1 Demo micro-canary active），M6 Auto-Allocator 需 reward weight baseline 才能 size allocation。Paper engine output is Archive/diagnostic only and cannot promote a hypothesis.
 
 ### §7.2 Reward weight baseline
 

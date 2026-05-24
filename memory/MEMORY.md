@@ -1,6 +1,7 @@
 # Memory Index
 
 ## Project context
+- [Layered Autonomy with Hard-Coded Fail-Safe 設計 (2026-05-22)](project_2026_05_22_layered_autonomy_with_failsafe.md) — AMD-2026-05-21-01 v2 取代 v1 protected/opt-in 二分；Autonomy Level Toggle (Conservative/Standard)；三路通知 fail → 1h wait → SM-04 Defensive；Cache PG LISTEN/NOTIFY；7d fail-safe cooling；CC APPROVE A 級 (7/7 HC + 6/6 反模式 + 2 BLOCKER 候選解除)；4 SSOT file + Wave 5 cascade IMPL PENDING；ref TODO §1.7
 - [REF-20 Sprint 1+2+3+4 closure — P6 PRODUCTION CLOSED (2026-05-03)](project_2026_05_03_ref20_sprint1_2_closure.md) — Sprint 1 critical security + schema drift (edf33c0) / Sprint 2 §八 evidence + AMD (aa9343c+5184990) / Sprint 3 Track H Decision Lease retrofit (dbcf845b) + Track I Linux deploy / Sprint 4 closure operator override (0ad79f67) = REF-20 P6 CLOSED；24/25 V3 §12 GREEN
 - [2026-05-02 codex 4-day audit chain](project_2026_05_02_codex_4day_audit.md) — 162 codex/operator commits cold review；P1-1 retrofit chain E1×3/E2×3/E4×3 closed (e858ae2 + 6cb1c3b)；.codex/ 治理 = option (a) hint mirror only
 - [LIVE-AUTH-WATCHER fix (2026-04-27)](project_live_auth_watcher_event_consumer_spawn.md) — Live 8天 snapshot 停寫；watcher respawn 漏接 event_consumer；has_pipeline_spawner=true 驗；P1 stale-cmd-tx 待修
