@@ -498,6 +498,17 @@ restart_engine() {
     # daemon spawn 鋪路 + 清 engine.log WARN（A2-followup 2026-05-09 operator authorize）。
     local h_state_gateway
     h_state_gateway="${OPENCLAW_H_STATE_GATEWAY:-$(grep '^OPENCLAW_H_STATE_GATEWAY=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    # Hygiene Option E Phase 1b（2026-05-25）：5-gate Gate b 由 Rust BybitRestClient
+    # 構造時 std::env::var("OPENCLAW_ALLOW_MAINNET") 讀取（rust/openclaw_engine/src/
+    # bybit_rest_client.rs L909），未設 → fail-closed Err。原本 restart_all.sh 從不
+    # 傳該 var，導致 engine PID environ 永遠缺 Gate b → C10 etc. 任何 mainnet REST
+    # call 立即 blocked。修法：對齊 OPENCLAW_ENABLE_PAPER 模式，operator env 優先，
+    # 否則讀 basic_system_services.env；空/缺 → 留空（engine 仍 fail-closed），
+    # 不在 shell 寫死 "1" 以保留 fail-closed 預設語意。
+    # 為什麼 fail-closed by default：mainnet gate 是 CLAUDE.md §四 五閘之一，shell
+    # 預設啟用 → 任何手動 restart_all.sh 都會解閘，違反 survival > profit。
+    local allow_mainnet
+    allow_mainnet="${OPENCLAW_ALLOW_MAINNET:-$(grep '^OPENCLAW_ALLOW_MAINNET=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     local base_dir
     base_dir="${OPENCLAW_BASE_DIR:-$(pwd)}"
     # W-AUDIT-7 F-07: feed provider keys to Rust as process env. Provider
@@ -516,6 +527,7 @@ restart_engine() {
         OPENCLAW_LEASE_ROUTER_GATE_ENABLED="${lease_router_gate_enabled}" \
         OPENCLAW_COST_EDGE_ADVISOR="${cost_edge_advisor}" \
         OPENCLAW_H_STATE_GATEWAY="${h_state_gateway}" \
+        OPENCLAW_ALLOW_MAINNET="${allow_mainnet}" \
         OPENCLAW_BASE_DIR="${base_dir}" \
         ANTHROPIC_API_KEY="${anthropic_api_key}" \
         OPENAI_API_KEY="${openai_api_key}" \

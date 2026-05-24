@@ -42,6 +42,16 @@
 
 set -euo pipefail
 
+# ssh non-interactive 不自動 source ~/.profile / ~/.bashrc，cargo 不在 PATH。
+# 為什麼：本腳本必經 ssh trade-core 觸發（Mac dev → Linux runtime atomic deploy），
+# 沒有此 source 則 Phase 3 立刻 `cargo: command not found` abort。
+# fail-soft：env 檔不存在則跳過（Mac dev 或無 rustup 環境會有 cargo 在 PATH，
+# 此情況 source 失敗也不影響）。
+if [[ -f "$HOME/.cargo/env" ]]; then
+    # shellcheck disable=SC1091
+    source "$HOME/.cargo/env"
+fi
+
 # ── Phase 0：路徑解析 ──
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRV_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
