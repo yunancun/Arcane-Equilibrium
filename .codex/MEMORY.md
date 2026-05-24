@@ -163,6 +163,10 @@ Do not paste long reports or stable architecture into TODO.
   when committing.
 - Every commit needs subject plus body. Use `[skip ci]` for non-CI-relevant docs
   or governance updates when appropriate.
+- Operator shorthand `三端同步` means: push the intended commit to `main`, then
+  pull `main` on Linux `trade-core` (`/home/ncyu/BybitOpenClaw/srv`).
+- Unless the operator explicitly asks for CI, `push main` means use a
+  non-CI-triggering commit subject/body (`[skip ci]`) where GitHub honors it.
 - Do not accumulate independent green batches in one dirty tree.
 - Every push report includes branch, commit SHA, and short description.
 - Do not use destructive git commands unless explicitly requested.
