@@ -143,17 +143,31 @@ pub trait Strategy: Send {
         // Default no-op / 默認無操作
     }
 
-    /// Called when a position was closed externally (risk-close/stop) rather than by this strategy.
-    /// Strategies that track internal position state should override to stay in sync.
-    /// 當倉位被外部（風控止損）而非本策略關閉時調用。跟蹤內部倉位狀態的策略應覆蓋以保持同步。
-    fn on_external_close(&mut self, _symbol: &str) {
+    /// 當倉位被外部（風控止損/熔斷）而非本策略關閉時調用。
+    /// 跟蹤內部倉位狀態或維護 spot-side ledger 的策略應覆蓋以保持同步。
+    ///
+    /// Sprint 1B audit Bug 1 fix（C10 HYBRID-BUG）：
+    /// 簽名新增 `close_price` / `close_ts_ms` 兩參數，讓策略可以用真實 close fill
+    /// price 結算 realized PnL（funding_harvest synthetic spot leg）。
+    /// 既有 strategy override 不消費這兩參數時可命名 `_close_price` / `_close_ts_ms`
+    /// 並保持 default no-op 行為（純編譯通過修，0 行為差）。
+    /// 不變量：caller 必傳 close fill price + close ts；無 fill 確認的 path（例如
+    /// exchange-mode dispatch-only 路徑、halt close-all fail-soft 路徑）走對稱
+    /// fallback chain：`latest_price → entry_price → 0.0`（Round 2 finding 5/9 對齊
+    /// step_6_risk_checks halt path 與 step_4_5_dispatch close path 實作）。
+    /// 不直接 fallback 到 0.0，避免 funding_harvest synthetic ledger close(0.0) 產生
+    /// 負巨額 PnL `(0 - entry_price) * qty`。
+    fn on_external_close(&mut self, _symbol: &str, _close_price: f64, _close_ts_ms: u64) {
         // Default no-op / 默認無操作
     }
 
-    /// Called after the pipeline confirms a strategy-emitted Close was executed successfully.
-    /// Strategies that defer state changes until close is confirmed should override.
-    /// 管線確認策略發出的 Close 已成功執行後調用。延遲狀態變更直到確認平倉的策略應覆蓋。
-    fn on_close_confirmed(&mut self, _symbol: &str) {
+    /// 管線確認策略發出的 Close 已成功執行後調用。
+    /// 延遲狀態變更直到確認平倉的策略應覆蓋；維護 synthetic ledger 的策略必須用
+    /// `close_price` / `close_ts_ms` 結算真實 PnL（避免 entry_price fallback 造成
+    /// PnL ≡ 0 觸發 Stage 0R replay drift > 5% 結構性永真，spec §4.1 line 765 demote）。
+    ///
+    /// Sprint 1B audit Bug 1 fix（C10 HYBRID-BUG）：簽名升級理由同 `on_external_close`。
+    fn on_close_confirmed(&mut self, _symbol: &str, _close_price: f64, _close_ts_ms: u64) {
         // Default no-op / 默認無操作
     }
 

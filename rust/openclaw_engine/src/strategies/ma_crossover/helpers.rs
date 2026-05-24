@@ -14,7 +14,7 @@
 //!   `higher_tf_allows_entry`（RC-02 多時間框架代理）、信心計算、
 //!   `compute_trend_adjusted_cooldown`（A2）及 `compute_exit_persistence_ms`（A1）。
 
-use crate::intent_processor::{IntentType, OrderIntent};
+use crate::intent_processor::OrderIntent;
 use crate::order_manager::TimeInForce;
 use crate::strategies::common::{compute_post_only_price, MakerPriceInputs};
 use crate::strategies::Strategy;
@@ -82,22 +82,20 @@ impl MaCrossover {
         } else {
             ("market".to_string(), None, None, None)
         };
-        Some(OrderIntent {
-            symbol: ctx.symbol.to_string(),
+        // Round 2 finding 1：emit 改走 OrderIntent::new_trade helper（消 inline literal）。
+        Some(OrderIntent::new_trade(
+            ctx.symbol.to_string(),
             is_long,
             qty,
-            confidence: scaled,
-            strategy: self.name().into(),
+            scaled,
+            self.name().into(),
             order_type,
             limit_price,
             confluence_score,
             persistence_elapsed_ms,
             time_in_force,
             maker_timeout_ms,
-            // Sprint 1B Earn first stake — IntentType backward-compat 占位。
-            intent_type: IntentType::OpenLong,
-            earn_payload: None,
-        })
+        ))
     }
 
     /// RC-01: Check if Hurst regime allows entry (only `Persistent` passes).

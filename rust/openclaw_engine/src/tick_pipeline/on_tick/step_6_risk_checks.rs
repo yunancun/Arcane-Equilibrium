@@ -206,7 +206,10 @@ impl TickPipeline {
         );
 
         let is_exchange_mode = self.pipeline_kind.is_exchange();
-        let mut risk_closed_symbols: Vec<String> = Vec::new();
+        // Sprint 1B Bug 1 fix（C10 HYBRID-BUG）：risk_closed_symbols 從 `Vec<String>`
+        // 升 `Vec<(String, f64, u64)>`，攜帶 close fill price + ts 供 strategy
+        // on_external_close hook 用真實價結算（funding_harvest synthetic spot leg）。
+        let mut risk_closed_symbols: Vec<(String, f64, u64)> = Vec::new();
         for decision in &decisions {
             let symbol = &decision.symbol;
             let is_long = &decision.is_long;
@@ -372,7 +375,9 @@ impl TickPipeline {
                         }
                     }
 
-                    risk_closed_symbols.push(symbol.clone());
+                    // Sprint 1B Bug 1 fix：原舊行為 push 時只有 symbol；本 fix 收 close_px。
+                    // exchange path 尚無 fill → 用 latest_price best-effort；paper path
+                    // 拿到真實 close_px。
                     if is_exchange_mode {
                         if self.pending_close_symbols.contains(symbol) {
                             continue;
@@ -381,9 +386,28 @@ impl TickPipeline {
                         // RUST-DOUBLE-PREFIX-1: use pre-computed `close_tag` (single
                         // `risk_close:` prefix). See comment block above.
                         // RUST-DOUBLE-PREFIX-1：使用上方已計算好的 `close_tag`（單前綴）。
+                        //
+                        // Round 2 finding 4 + 5：pre-dispatch snapshot entry_price，供
+                        // latest_price 缺位時對稱 fallback。雖然 dispatch 後 position 在
+                        // execute_position_close 不會清，但 fail-soft 仍 prefer
+                        // entry_price 而非寫死 0.0（同 halt path 對稱）。
+                        let entry_price_snap = self
+                            .paper_state
+                            .get_position(symbol)
+                            .map(|p| p.entry_price)
+                            .unwrap_or(0.0);
                         self.execute_position_close(
                             symbol, *is_long, *qty, event, true, &close_tag,
                         );
+                        // Sprint 1B Bug 1 + Round 2 finding 4：exchange dispatch 尚無 fill →
+                        // best-effort latest_price → entry_price → 0.0 對稱 fallback chain；
+                        // 避免 unwrap_or(0.0) 觸發 funding_harvest synthetic ledger close(0.0)
+                        // 產生負巨額 PnL，亦避免 PnL ≡ 0 結構性永真。
+                        let close_px_dispatch = self
+                            .paper_state
+                            .latest_price(symbol)
+                            .unwrap_or(entry_price_snap);
+                        risk_closed_symbols.push((symbol.clone(), close_px_dispatch, event.ts_ms));
                     } else {
                         warn!(symbol = %symbol, reason = %reason, "risk close (paper) / 風控平倉（紙盤）");
                         if *pnl_pct < 0.0 {
@@ -402,7 +426,8 @@ impl TickPipeline {
                         // EXIT-FEATURES-TABLE-1: snapshot BEFORE close.
                         // EXIT-FEATURES-TABLE-1：先取快照再平倉。
                         let snap = self.paper_state.position_exit_snapshot(symbol);
-                        if let Some((_il, _q, close_px, pnl)) =
+                        // Sprint 1B Bug 1 fix：capture close_px 給 callback tuple。
+                        let close_px_for_cb = if let Some((_il, _q, close_px, pnl)) =
                             self.close_position_at_symbol_market(symbol, event.ts_ms)
                         {
                             // RUST-DOUBLE-PREFIX-1: reuse `close_tag` to avoid the
@@ -422,13 +447,18 @@ impl TickPipeline {
                             // P1-2 fix: update Kelly stats for risk-close (pre-existing omission).
                             // P1-2 修復：風控平倉也更新 Kelly 統計（既有遺漏）。
                             self.intent_processor.record_trade(symbol, pnl);
-                        }
+                            close_px
+                        } else {
+                            // fail-soft fallback：latest_price 0 表完全無 price ref。
+                            self.paper_state.latest_price(symbol).unwrap_or(0.0)
+                        };
                         self.stats.total_stops += 1;
                         // RUST-DOUBLE-PREFIX-1: single outbound tag, single prefix.
                         // RUST-DOUBLE-PREFIX-1：單一出口 tag，單前綴。
                         self.execute_position_close(
                             symbol, *is_long, *qty, event, false, &close_tag,
                         );
+                        risk_closed_symbols.push((symbol.clone(), close_px_for_cb, event.ts_ms));
                     }
                 }
                 RiskAction::HaltSession(reason) => {
@@ -494,9 +524,10 @@ impl TickPipeline {
                         .iter()
                         .map(|p| (p.symbol.clone(), p.is_long, p.qty))
                         .collect();
-                    for (sym, _, _) in &all_pos {
-                        risk_closed_symbols.push(sym.clone());
-                    }
+                    // Sprint 1B Bug 1 fix：halt-close-all path 移除舊「push 占位 then close」
+                    // 順序，改為 close 後 push 真實 close_px tuple；舊行為留 placeholder 後
+                    // 來無 fixup，與 funding_harvest synthetic ledger 真實 PnL 結算契約
+                    // 不一致。本路徑無 funding_harvest 倉位時 push 自動空，行為 0 差。
                     for (sym, il, q) in &all_pos {
                         // Q1 fix: skip already-dispatched closes / 跳過已派發的平倉
                         if is_exchange_mode && self.pending_close_symbols.contains(sym) {
@@ -520,6 +551,15 @@ impl TickPipeline {
                         // EXIT-FEATURES-TABLE-1: snapshot BEFORE close.
                         // EXIT-FEATURES-TABLE-1：先取快照再平倉。
                         let snap = self.paper_state.position_exit_snapshot(sym);
+                        // Round 2 finding 5：pre-close snapshot entry_price，供 close_result=None
+                        // fail-soft 路徑用對稱 fallback（latest_price → entry_price → 0.0）。
+                        // 為什麼必須 snapshot 在 close 前：close 後 position 可能已從 paper_state
+                        // 消除，後續再取 entry_price 拿不到。
+                        let entry_price_snap = self
+                            .paper_state
+                            .get_position(sym)
+                            .map(|p| p.entry_price)
+                            .unwrap_or(0.0);
                         let close_result = if is_exchange_mode {
                             self.close_position_after_exchange_dispatch(
                                 sym,
@@ -531,7 +571,12 @@ impl TickPipeline {
                         } else {
                             self.close_position_at_symbol_market(sym, event.ts_ms)
                         };
-                        if let Some((_il, _q, close_px, pnl)) = close_result {
+                        // Sprint 1B Bug 1 + Round 2 finding 5：close 後 push 真實 close_px tuple；
+                        // close_result=None fail-soft fallback chain 改為
+                        // latest_price → entry_price → 0.0（對齊 paper close path），
+                        // 避免 unwrap_or(0.0) 直接走到 0 觸發 funding_harvest synthetic ledger
+                        // close(0.0) 產生負巨額 PnL（(0 - entry_price) * qty = 大負）。
+                        let close_px_for_cb = if let Some((_il, _q, close_px, pnl)) = close_result {
                             self.emit_close_fill(
                                 sym,
                                 *il,
@@ -553,7 +598,13 @@ impl TickPipeline {
                                     "risk_close:halt_session",
                                 );
                             }
-                        }
+                            close_px
+                        } else {
+                            self.paper_state
+                                .latest_price(sym)
+                                .unwrap_or(entry_price_snap)
+                        };
+                        risk_closed_symbols.push((sym.clone(), close_px_for_cb, event.ts_ms));
                         self.stats.total_stops += 1;
                     }
                     break;
@@ -579,10 +630,13 @@ impl TickPipeline {
         // Notify strategies of externally-closed positions (risk-stop/halt)
         // so they can reset internal state (e.g., grid net_inventory, position flag).
         // 通知策略外部平倉的倉位（風控止損/熔斷），讓策略重設內部狀態。
+        //
+        // Sprint 1B Bug 1 fix：risk_closed_symbols tuple 攜帶 (symbol, close_px, ts) 供
+        // funding_harvest synthetic spot ledger 用真實價結算 PnL。
         if !risk_closed_symbols.is_empty() {
             for strategy in self.orchestrator.strategies_mut() {
-                for sym in &risk_closed_symbols {
-                    strategy.on_external_close(sym);
+                for (sym, close_px, ts_ms) in &risk_closed_symbols {
+                    strategy.on_external_close(sym, *close_px, *ts_ms);
                 }
             }
         }

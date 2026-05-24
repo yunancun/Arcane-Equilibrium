@@ -531,7 +531,7 @@ fn test_fix26_deadlock_external_close_then_expiry() {
     );
     assert!(s.has_squeeze("BTC"));
     // External close (e.g., risk-stop) — squeeze record should survive this.
-    s.on_external_close("BTC");
+    s.on_external_close("BTC", 0.0, 0); // Sprint 1B Bug 1 fix：簽名升級對齊
     assert!(
         s.has_squeeze("BTC"),
         "on_external_close must preserve squeeze (within-expiry window)"

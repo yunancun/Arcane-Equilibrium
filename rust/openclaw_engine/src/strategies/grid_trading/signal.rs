@@ -25,7 +25,7 @@
 //!   變更順序與拆前逐字節相同。
 
 use super::{compute_grid_confidence, GridHealth, GridTrading};
-use crate::intent_processor::{IntentType, OrderIntent};
+use crate::intent_processor::OrderIntent;
 use crate::order_manager::TimeInForce;
 use crate::strategies::common::{compute_post_only_price, MakerPriceInputs};
 use crate::strategies::cross_asset::{evaluate_shadow_signal, BtcLeadLagShadowSignal};
@@ -342,24 +342,21 @@ impl GridTrading {
             } else {
                 let (order_type, limit_price, time_in_force, maker_timeout_ms) =
                     entry_order.expect("entry_order precomputed for grid buy open");
-                let intent = OrderIntent {
-                    symbol: ctx.symbol.to_string(),
-                    is_long: true,
-                    qty: self.qty_per_grid,
-                    confidence: conf,
-                    strategy: self.name().into(),
+                // Round 2 finding 1：emit 改走 OrderIntent::new_trade helper。
+                // Grid long entry — helper 由 is_long=true 派生 IntentType::OpenLong。
+                let intent = OrderIntent::new_trade(
+                    ctx.symbol.to_string(),
+                    true,
+                    self.qty_per_grid,
+                    conf,
+                    self.name().into(),
                     order_type,
                     limit_price,
-                    // Grid has no confluence/persistence; builder fills 0.0.
-                    // Grid 無 confluence/persistence；builder 填 0。
-                    confluence_score: None,
-                    persistence_elapsed_ms: None,
+                    None,
+                    None,
                     time_in_force,
                     maker_timeout_ms,
-                    // Sprint 1B Earn first stake — IntentType backward-compat 占位。
-                    intent_type: IntentType::OpenLong,
-                    earn_payload: None,
-                };
+                );
                 intents.push(StrategyAction::Open(intent));
                 *self.net_inventory.entry(sym.to_string()).or_insert(0.0) += self.qty_per_grid;
             }
@@ -377,24 +374,21 @@ impl GridTrading {
             } else {
                 let (order_type, limit_price, time_in_force, maker_timeout_ms) =
                     entry_order.expect("entry_order precomputed for grid sell open");
-                let intent = OrderIntent {
-                    symbol: ctx.symbol.to_string(),
-                    is_long: false,
-                    qty: self.qty_per_grid,
-                    confidence: conf,
-                    strategy: self.name().into(),
+                // Round 2 finding 1：emit 改走 OrderIntent::new_trade helper。
+                // Grid short entry — helper 由 is_long=false 派生 IntentType::OpenShort。
+                let intent = OrderIntent::new_trade(
+                    ctx.symbol.to_string(),
+                    false,
+                    self.qty_per_grid,
+                    conf,
+                    self.name().into(),
                     order_type,
                     limit_price,
-                    // Grid has no confluence/persistence; builder fills 0.0.
-                    // Grid 無 confluence/persistence；builder 填 0。
-                    confluence_score: None,
-                    persistence_elapsed_ms: None,
+                    None,
+                    None,
                     time_in_force,
                     maker_timeout_ms,
-                    // Sprint 1B Earn first stake — IntentType backward-compat 占位。
-                    intent_type: IntentType::OpenLong,
-                    earn_payload: None,
-                };
+                );
                 intents.push(StrategyAction::Open(intent));
                 *self.net_inventory.entry(sym.to_string()).or_insert(0.0) -= self.qty_per_grid;
             }

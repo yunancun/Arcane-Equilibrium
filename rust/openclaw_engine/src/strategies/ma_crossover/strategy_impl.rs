@@ -83,7 +83,9 @@ impl Strategy for MaCrossover {
     /// 改造前：`self.positions.remove(symbol)` + `persistence` 清理。
     /// 改造後：positions 已不存在（field 移除）；persistence / exit_persistence
     /// 仍需清理 — signal-time state 與 position lifecycle 強耦合，無 SSoT 替代。
-    fn on_external_close(&mut self, symbol: &str) {
+    fn on_external_close(&mut self, symbol: &str, _close_price: f64, _close_ts_ms: u64) {
+        // Sprint 1B Bug 1 fix：本 strategy 不維護 synthetic ledger，無需 PnL 結算；
+        // 簽名新增 close_price / close_ts_ms 純編譯對齊 trait 升級（0 行為差）。
         self.persistence.clear(symbol);
         self.exit_persistence.clear(symbol);
     }

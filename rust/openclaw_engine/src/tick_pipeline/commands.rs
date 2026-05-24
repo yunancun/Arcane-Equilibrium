@@ -192,28 +192,26 @@ impl TickPipeline {
             .map(|a| a.atr)
             .unwrap_or(0.0);
 
-        let intent = crate::intent_processor::OrderIntent {
-            symbol: symbol.to_string(),
+        // Round 2 finding 2：production caller 改走 OrderIntent::new_trade helper —
+        // 由 is_long 自動派生 intent_type，消除 line 214 寫死 OpenLong 與
+        // submit_external_order(is_long: bool) short 路徑的 HYBRID-PLACEHOLDER 反模式。
+        //
+        // 指令派發的 intent 無策略端 confluence/persistence/maker 參數。
+        // 未來若 GUI 加 Earn intent 派發路徑，須走獨立 EarnIntent constructor，
+        // 不能再經此 trade-path 路徑。
+        let intent = crate::intent_processor::OrderIntent::new_trade(
+            symbol.to_string(),
             is_long,
             qty,
             confidence,
-            strategy: strategy.to_string(),
-            order_type: order_type.to_string(),
+            strategy.to_string(),
+            order_type.to_string(),
             limit_price,
-            // Command-dispatched intents (manual / IPC-triggered) have no
-            // strategy-side confluence or persistence state to pass through.
-            // 指令派發的 intent 無策略端 confluence/persistence。
-            confluence_score: None,
-            persistence_elapsed_ms: None,
-            time_in_force: None,
-            maker_timeout_ms: None,
-            // Sprint 1B Earn first stake — IntentType backward-compat 占位
-            // (manual / IPC command 派發的 intent 預設 trading OpenLong;
-            // 未來若 GUI 加 Earn intent 派發路徑,則於此 caller 顯式填
-            // IntentType::EarnStake / EarnRedeem + Some(EarnIntentPayload {...}))。
-            intent_type: crate::intent_processor::IntentType::OpenLong,
-            earn_payload: None,
-        };
+            None,
+            None,
+            None,
+            None,
+        );
 
         let result = self.intent_processor.process(
             &intent,

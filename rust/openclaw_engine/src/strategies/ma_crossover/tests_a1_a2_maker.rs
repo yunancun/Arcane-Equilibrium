@@ -255,7 +255,7 @@ fn test_a1_external_close_clears_exit_persistence() {
     assert!(s.on_tick(&ctx_reverse, &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE).is_empty());
 
     // Step 2：External close wipes exit_persistence onset。
-    s.on_external_close("BTC");
+    s.on_external_close("BTC", 0.0, 0); // Sprint 1B Bug 1 fix：簽名升級對齊
 
     // Step 3：fresh re-entry path 走 entry 分支（無 position_state）。
     s.min_persistence_ms = 0;
