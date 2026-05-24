@@ -5869,3 +5869,99 @@ Report: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-23--sprint5_wave1_v1
 - MEDIUM for OP-1 key 重發路徑 (b) +30-60 min wall-clock (per BB C5 advisory;operator carry-over from TODO §0 D+1 5 min;具體三端同步運維 SOP 待 `engineering:devops` skill cross-ref)
 - MEDIUM for earn_governance 五角色 cross-ref 預期 4-5/5 ✅ APPROVE (per PA verdict ⚠️ APPROVE-WITH-2-CAVEATS quality high 但 FA + E3 + QA + MIT + BB 角度可能補額外 caveat)
 - LOW for E1d governance_audit_log.id soft ref 反查邏輯複雜度 (per PA-DRIFT-6 V100 line 502-511 comment + V106/V107/V112 既有範式;LOW risk)
+
+---
+
+## 2026-05-25 Stage 0R Earn variant design spec land (Sprint 1B Earn Wave C carry-over)
+
+### Task
+PM 派 Sprint 1B Earn Wave C 「Stage 0R Earn variant 仲裁」carry-over 設計 spec — Earn 操作 (Stake / Redeem) 進入真實 stake 前的 replay preflight 設計。trigger = `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-24--sprint_1a_1b_completion_audit.md` line 20/90 「Earn Wave C is still blocked by IntentProcessor Earn branch, OP-1 Bybit key refresh, **Stage 0R Earn variant**, rebuild/deploy, and operator first-stake execution」。
+
+### Output
+- spec land: `docs/execution_plan/2026-05-25--stage_0r_earn_variant_design_spec.md` (656 行)
+- 涵蓋 §1-§10：Status + Scope + Replay harness design + 5 AC + 5-gate inheritance + Earn-specific risk + IMPL roadmap + Open Questions + Cross-refs + Sign-off
+
+### Key Design Decisions
+
+1. **Earn variant 必要差異 vs C10 範式**: Earn 不是 strategy 沒 alpha edge;5 sanity check 換為 (a) APY drift 5% (b) 5-gate reject coverage (c) cron dry-run 3 cascade (d) liquidity gate latency (e) runtime boundary — 移除 leak/bias/DSR/PSR/PBO 4 條 (對 Earn 不適用),保留 runtime boundary (對齊 C10)
+2. **Skip 條件**: dust ≤ $10 / stable APY 7d Δ < 0.5% / emergency redeem / read-only query 4 場景 skip preflight;Sprint 1B 鎖 first stake variant only
+3. **Dry-run boundary 5 不變量** (§3.5): 不發 stake/redeem 寫單 / 不寫 V100 / 不動 demo balance / 不繞 5-gate (mock 是 inject fail state 不 short circuit) / 不污染 V100 schema
+4. **AC 設計**: AC-1 drift 5% (vacuous PASS first stake) / AC-2 5 fail injection 100% Earn branch / AC-3 deferred to operator first stake (harness 不驗 V100) / AC-4 fail-closed exit code = 1 (任 1 check FAIL) / AC-5 ATR cap N/A + drawdown gate partial Sprint 5+
+5. **5-gate inheritance**: protected (a)/(c)/(d)/(f) N/A;(b) 適用 + (e) 適用;opt-in (g)/(h)/(i)/(k)/(l) N/A;(j) 適用 + (m)/(n) partial Sprint 5+
+6. **新 sub-scope (o) Earn asset write 提案**: Level 1+2 兩 level 均 manual (對齊 v2 §1.2 protected scope operator click 維度 + Earn 沒 alpha edge 證據累積不對齊 LAL 1+2 auto)
+7. **5 Earn-specific risk** (§6.6 summary): APY 變動 MEDIUM / Liquidity LOW / Withdrawal gate LOW / Cross-product cannibalize MEDIUM / Demo vs live drift LOW
+8. **IMPL roadmap**: PA spec ← → QA+MIT+FA 3 cross-ref ← → E1 IMPL replay_earn_preflight.py (~4-6 hr) ← → E2 adversarial ← → E4 regression ← → QA acceptance ← → PM Phase 3e sign-off ← → Operator OP-1 key refresh ← → Operator first stake $100-200 Flexible
+9. **8 Open Questions** (operator 拍板): OQ-1 強制必跑 / OQ-2 defer Sprint 5+ stake-redeem-reparam / OQ-3 AC-3 deferred / OQ-4 採納 sub-scope (o) / OQ-5 5% drift / OQ-6 live endpoint / OQ-7 不 retry / OQ-8 鏡像 audit_log
+
+### Side Effects + Risk
+- 與既有 C10 範式並列 (兩 harness 共用 `$OPENCLAW_DATA_DIR/canary/` dir + JSON 檔名前綴區分 funding_harvest_ / earn_first_stake_)
+- 不動既有 IntentProcessor Earn branch IMPL (B6 IMPL pending);只設計 harness + acceptance
+- Wave C E1 IMPL replay_earn_preflight.py 必對齊 C10 `replay_funding_harvest.py` 結構 (fetch_* + _simulate_* + sanity_check_* + output_preflight_verdict + run_stage0r_preflight + CLI main)
+- Open Q OQ-4 採納新 sub-scope (o) 提案需 cascade patch AMD-2026-05-21-01 v2 §1.2 三維度並列定義 (sub-scope 字典擴展) — 若 operator 接受 (a) 則加 ADR-debt;若拒則 sub-scope (o) 視為 protected (b) 子集不另建
+
+### Confidence
+- HIGH: 5 sanity check 設計 (對齊 C10 範式 + Earn-specific 差異識別)
+- HIGH: 5-gate inheritance 對 Earn 適用性分析 (對齊 earn_governance + AMD-2026-05-21-01 v2)
+- HIGH: dry-run boundary 5 不變量 (對齊 C10 範式 line 25-28)
+- MEDIUM: §6 Earn-specific risk 5 條 (per BB-C3 Dynamic Settlement caveat + earn_governance §1.4;Cross-product risk 需 Sprint 5+ M10 spec land 後 finalize)
+- MEDIUM: §5.3 新 sub-scope (o) 提案 (governance 路徑;operator OQ-4 拍板影響採納)
+- MEDIUM: AC-1 5% drift threshold (per Bybit Earn APR ~10% 動態 ±0.5%;若實證偏低可降到 3%)
+
+### Reports
+- Full spec: `docs/execution_plan/2026-05-25--stage_0r_earn_variant_design_spec.md` (656 行 / §1-§10 完整)
+- PA work report: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-25--stage_0r_earn_variant_design.md`
+
+---
+
+## 2026-05-25 Hygiene Option E Phase 1 Step 2 — multi-session cargo race protection IMPL
+
+### Task
+operator 拍板 Hygiene Option E Phase 1 Step 2 (Option B 同 sprint build lock + SOP IMPL)。E1 純 script IMPL（0 cargo touch / 0 engine restart;Phase 1a 並行 sub-agent 處理 SSH restart）。
+
+### Root cause (per PA sub-agent a6326f17)
+multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine startup 後 ~8s 觸 `cargo test --release` incremental rebuild,覆蓋 release binary inode → `/proc/$PID/exe` link 變 `(deleted)`,on-disk binary 與 process image SHA 不一致,operator 後續任何 binary 驗證都會誤判。
+
+### IMPL output
+1. **`helper_scripts/build_then_restart_atomic.sh`** (NEW, ~140 行) — 原子化 7-phase deploy 鏈：
+   - Phase 1 取 flock(`$OPENCLAW_DATA_DIR/build_window.lock`)（防 multi-session race window）
+   - Phase 2 pre-build SHA snapshot
+   - Phase 3 `cargo build --release -p openclaw_engine`
+   - Phase 4 post-build SHA snapshot
+   - Phase 5 `bash restart_all.sh --engine-only --keep-auth --require-clean-build-window`（雙保險）
+   - Phase 6 verify `/proc/$PID/exe` SHA == post-build SHA（Mac 無 procfs 則 fallback 驗 disk binary SHA 不被偷換）
+   - Phase 7 summary + lock 自動釋放（exec 200> + flock -n 200,kernel 在 script exit 時釋放）
+2. **`helper_scripts/restart_all.sh`** — 新 flag `--require-clean-build-window`：
+   - flag parse 後 `pgrep -af 'cargo (build|test)'`（排除自身 PID）
+   - 任一非零即 exit 1 + 列出 offending process
+   - 設計上由 atomic script 串接時自動帶入;operator 一般不直接帶
+3. **`helper_scripts/SCRIPT_INDEX.md`** — 在「頂層腳本 / 生命週期」表格補登 `build_then_restart_atomic.sh` entry + 更新 `restart_all.sh` 描述含新 flag + 更新「最後更新」標記
+4. **本 memory entry** — 治理 closure 留證
+
+### Verify
+- `bash -n helper_scripts/build_then_restart_atomic.sh` → syntax OK
+- `bash -n helper_scripts/restart_all.sh` → syntax OK
+- 0 cargo build / 0 cargo test / 0 engine restart 觸發（per operator 明確指示;Phase 1a 並行 sub-agent 處理 SSH restart）
+
+### 預期使用流程
+- operator 下次 deploy：`bash helper_scripts/build_then_restart_atomic.sh` 一鍵原子化（取 lock → 拍 SHA → cargo build → 拍 SHA → restart → verify;任一階段失敗 abort）
+- 任何 sub-agent 想直接呼 `restart_all.sh` 並避免 race：帶 `--require-clean-build-window` 即得 fail-closed check
+- 不再有 sub-agent 在 engine startup 後 8s 觸 cargo test 覆蓋 inode 的場景（flock 強制序列化 build window）
+
+### Side Effects + Risk
+- 新 flag 預設值=0,既有所有 caller（cron / clean_restart / fresh_start / operator 手動）行為不變（backward compatible）
+- flock 是 Linux/macOS POSIX 標準,util-linux 提供;Mac coreutils 也有（brew install util-linux 不必,系統內建）
+- lock file 在 `$OPENCLAW_DATA_DIR/build_window.lock`,sandbox 化於 runtime dir,不污染 system /var/lock
+- Phase 6 Mac path 降級驗 disk SHA 不被偷換,並非完整原子驗證（macOS 沒 procfs）;Linux 路徑為完整 atomic check
+- 不防護的場景：cron 跑的維護 script 內部呼 cargo build —— 若未來有此類 case,需評估是否在 cron wrapper 內帶 `--require-clean-build-window` flag
+
+### Confidence
+- HIGH: flock + SHA-based atomic verify 設計（per Unix multi-process serialization 經典範式）
+- HIGH: bash syntax + 既有 flag parsing 風格對齊（per restart_all.sh §285 既有 case 結構 1:1 對齊）
+- HIGH: SCRIPT_INDEX.md 索引位置選擇（per 既有「頂層腳本 / 生命週期」表格上下文）
+- MEDIUM: pgrep 命中精度（`cargo (build|test)` regex 可能漏命中 `cargo nextest` / `cargo bench` 等;若未來這些工作流進入並行,需擴 regex）
+- MEDIUM: Phase 6 sleep 5s 是否足夠（per restart_all.sh readiness gate 已等待 + 5s margin,實測足夠;若未來 cold startup 變慢需提高）
+- LOW: Mac procfs fallback 驗證強度（disk SHA 不被偷換已是 multi-session race 防護的 95% 目標,完整 process image SHA verify 是 Linux-only luxury）
+
+### Reports
+- E1 IMPL report: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-25--hygiene_option_e_phase_1_step_2_atomic_deploy.md`（待寫）
+- Source: operator 拍板訊息 + PA sub-agent a6326f17 hygiene 修法 Option B

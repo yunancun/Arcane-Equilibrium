@@ -7,7 +7,7 @@
 #   refreshes the openclaw-engine binary (PyO3-ELIMINATE-1 Phase 3 removed the
 #   PyO3 cdylib — --rebuild is now a single-artifact cargo build).
 #
-# Usage: bash helper_scripts/restart_all.sh [scope] [--rebuild] [--keep-auth]
+# Usage: bash helper_scripts/restart_all.sh [scope] [--rebuild] [--keep-auth] [--require-clean-build-window]
 #   scope: --engine-only | --api-only | (none = both)
 #   --rebuild: rebuild openclaw-engine binary before starting services
 #              (exits if build fails)
@@ -20,6 +20,12 @@
 #              re-approve. `--keep-auth` is a deliberate ergonomic opt-out.
 #              Crash / watchdog / systemd auto-restart paths never run this
 #              shell, so they always preserve auth regardless of this flag.
+#   --require-clean-build-window: 重啟前先檢查系統中是否仍有 `cargo build` /
+#              `cargo test` 在跑;有任一即 exit 1（防 multi-session race
+#              覆蓋 release binary inode 觸發 /proc/$PID/exe deleted）。
+#              一般 operator 不必直接帶此 flag;由
+#              `build_then_restart_atomic.sh` 在 flock build window 內串接時
+#              自動帶入,作為 atomic deploy 鏈的雙保險。
 #
 # 使用範例：
 #   bash helper_scripts/restart_all.sh                     # 重啟引擎+API
@@ -255,6 +261,7 @@ signal_engine_pids() {
 # 接受 --rebuild 出現在任意位置；SCOPE 為剩餘的位置參數。
 REBUILD=0
 KEEP_AUTH=0
+REQUIRE_CLEAN_BUILD_WINDOW=0
 SCOPE="all"
 for arg in "$@"; do
     case "$arg" in
@@ -270,6 +277,19 @@ for arg in "$@"; do
             # 預設仍為清除（CLAUDE.md §四 Gate #5）。
             KEEP_AUTH=1
             ;;
+        --require-clean-build-window)
+            # Hygiene Option E Phase 1 Step 2（2026-05-25,per PA sub-agent
+            # a6326f17）：multi-session cargo race 防護。
+            # 為什麼：QA Stage 0R / E4 regression sub-agent 在 engine startup 後
+            # 觸 `cargo test --release` incremental rebuild,會覆蓋 release
+            # binary inode → `/proc/$PID/exe` 指向 deleted artifact。本 flag
+            # 強制 restart 前先 grep 系統中是否仍有 `cargo build` 或
+            # `cargo test --release` 在跑,有任何一條即 fail-closed abort。
+            # 設計搭配：`build_then_restart_atomic.sh` 持 flock 取 build window
+            # 後才呼 restart_all.sh,因此本 flag 在原子 deploy 鏈中應該總是
+            # PASS;若 FAIL 表示繞過 atomic chain 直接 restart,屬於誤用。
+            REQUIRE_CLEAN_BUILD_WINDOW=1
+            ;;
         --engine-only|--api-only)
             SCOPE="$arg"
             ;;
@@ -278,11 +298,31 @@ for arg in "$@"; do
             ;;
         *)
             echo "Unknown argument: $arg" >&2
-            echo "Usage: bash helper_scripts/restart_all.sh [--engine-only|--api-only] [--rebuild] [--keep-auth]" >&2
+            echo "Usage: bash helper_scripts/restart_all.sh [--engine-only|--api-only] [--rebuild] [--keep-auth] [--require-clean-build-window]" >&2
             exit 1
             ;;
     esac
 done
+
+# ── multi-session cargo race 前置 check ──
+# 為什麼放在 flag parse 之後、其他工作之前:取得 SCOPE 後盡早 fail-closed,
+# 不浪費後續 sentinel write / log rotate 等準備工作。
+if [[ "$REQUIRE_CLEAN_BUILD_WINDOW" == "1" ]]; then
+    # 排除自身 PID（如果未來透過 restart_all.sh --rebuild 直接呼 cargo,
+    # 仍 want flag 攔截「別的 session」而非自家 rebuild_engine_binary 函數）。
+    # 目前 rebuild_engine_binary 跑在 flag check 之後,所以此刻 pgrep 不會
+    # 命中自家 cargo;但保留 self-exclusion 以防未來 refactor。
+    SELF_PID=$$
+    CARGO_HITS=$(pgrep -af 'cargo (build|test)' 2>/dev/null | grep -v "^$SELF_PID " | wc -l | tr -d ' ')
+    if [[ "$CARGO_HITS" != "0" ]]; then
+        echo "ERROR: --require-clean-build-window: $CARGO_HITS cargo process(es) active; aborting to prevent multi-session race" >&2
+        echo "       offending processes:" >&2
+        pgrep -af 'cargo (build|test)' | grep -v "^$SELF_PID " >&2 || true
+        echo "       fix: wait for the cargo workload to finish, or use build_then_restart_atomic.sh which holds a flock build window" >&2
+        exit 1
+    fi
+    echo ">>> --require-clean-build-window: 0 cargo processes active, proceeding"
+fi
 
 rebuild_engine_binary() {
     # Rebuild rust/target/release/openclaw-engine.
