@@ -1,5 +1,13 @@
 # PM Memory — 工作記憶
 
+## 2026-05-25 Sprint 1A -> 1B Recheck Lesson
+
+- 2026-05-25 recheck superseded part of the 2026-05-24 audit: C10 PnL and IntentType gaps are source-fixed, Earn Wave C branch is source-landed, and the running engine contains C10/Earn strings.
+- Deploy verification must check `/proc/$pid/exe` and hash alignment, not just source grep, strings, and watchdog. PID 320381 was alive but running from a deleted executable whose SHA differed from the on-disk binary.
+- API health must use the actual bind address. On trade-core the API was healthy on `100.91.109.86:8000`; `127.0.0.1:8000` failed because the service was not bound to loopback.
+- Earn first stake remains a product outcome, not a source-test outcome: `learning.earn_movement_log` rows=0 until OP-1 key refresh and the real $100-200 Flexible-only stake path executes.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-25--sprint_1a_1b_recheck.md
+
 ## 2026-05-24 Sprint 1A -> 1B Completion Audit
 
 - PM local audit found 1A→1B is not fully runtime/product complete: design/source layers are partially done, but C10 Stage 1 Demo and Earn first stake are not closed.
