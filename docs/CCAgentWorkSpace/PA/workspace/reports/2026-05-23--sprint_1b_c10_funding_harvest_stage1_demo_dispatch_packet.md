@@ -746,6 +746,29 @@ paper_state.apply_synthetic_spot_fill(synthetic_fill);
 
 Total strategy PnL = #1 + #2，但對 demo balance 的影響只有 #1。
 
+### §3.4.1 Stage 1 Demo 真實 synthetic spot PnL accounting（2026-05-25 Round 1+2 IMPL amend）
+
+**Bug 1 HYBRID-BUG 揭露**：Round 1 dispatch packet 原 §3.4 寫「synthetic spot leg close 用 `ledger.entry_price`」，但 round 1 audit 發現 — 若 close 時用 entry_price 結算，synthetic spot leg PnL **結構性永遠 = 0**（entry == close → notional delta = 0），導致 delta-neutral 數學從根本不成立、drift gate 在 cold-start 以外場景也永真。Round 1+2 IMPL（commit `015b9735`）落地對應修正：
+
+**Strategy trait sig 升級**：
+- 既有 `on_close_confirmed(symbol)` → 新 `on_close_confirmed(symbol, close_price: f64, close_ts_ms: u64)`
+- 新增 `on_external_close(symbol, close_price: f64, close_ts_ms: u64)` — StopManager 強平 / lease revoke / SM-04 cancel 等外部 close 路徑統一入口
+- 5 既有 strategy override 全 trait sig migrate：`bb_breakout` / `bb_reversion` / `ma_crossover` / `grid_trading` / `funding_arb`（既有 close path 直接吸收新 args，accounting 不變只是 sig 對齊）
+- `funding_harvest` SyntheticSpotLedger.close() 改吃 `close_price` arg — 真實 close-time spot price 入賬，spot leg PnL = `(close_price - entry_price) * qty` 真實非零
+
+**close_price source（dispatch path fallback chain）**：
+- `engine/openclaw_engine/src/execution_pipeline/step_4_5_dispatch.rs:1657-1662`（normal exit dispatch）
+- `engine/openclaw_engine/src/execution_pipeline/step_6_risk_checks.rs:603-605`（external close / risk forced close dispatch）
+- Fallback chain semantics：`latest_price (BBO mid from WS) → entry_price (cold-start fallback) → 0.0 (last-resort sentinel)`
+- Cold-start corner case（latest_price WS 尚未到位 + entry_price 退到 0.0）→ PnL=0 觸發 drift gate **acceptable**，非結構性永真
+
+**Round 1+2 sign-off lineage**：
+- IMPL commit: `015b9735` (feat sprint1b-audit-fix: C10 PnL fallback + IntentType direction 2-round IMPL)
+- E2 round 2 inline return verdict: sub-agent `a015830b`（RETURN → PA spec amend；本 §3.4.1 即回應）
+- E4 round 2 inline return PASS: sub-agent `a314d88a`（regression 4135/1/5 GREEN）
+
+**保持不變**：本 §3.4 §3.3 既有「不違反原則 1/4/8 + 不違反 AMD §4.3」全部論證**繼續成立** — trait sig 升級不改變「synthetic spot 不發 Bybit order / 不繞 Guardian / 寫 trading.fills.track 可審計」三層邊界。
+
 ---
 
 ## §4 entry/exit/size/rebalance/異常退出設計
@@ -762,7 +785,7 @@ Total strategy PnL = #1 + #2，但對 demo balance 的影響只有 #1。
 | Perp Close confirmed (`on_close_confirmed`) | Synthetic spot close | SyntheticSpotLedger.close() + write trading.fills.track row | None | None |
 | External perp close (`on_external_close`, e.g., StopManager 強平) | Synthetic spot orphan close | SyntheticSpotLedger.close(price=current_spot_price) | None | None |
 | SM-04 escalate ≥ L3 | Demote | Strategy set_active(false) + halt new entries; existing position 等下一 exit trigger 自然平 | None | Governance level |
-| Stage 0R replay PnL vs runtime PnL drift > 5% | Demote | Strategy demote Stage 0 + 24h cooldown | None | per AMD §4.4 |
+| Stage 0R replay PnL vs runtime PnL drift > 5% | Demote | Strategy demote Stage 0 + 24h cooldown | None | per AMD §4.4（**2026-05-25 amend**：fallback chain semantics — runtime synthetic spot PnL 真實採用 close-time spot price (`latest_price → entry_price → 0.0` chain per §3.4.1)；drift gate 不再結構性永真；cold-start corner case (latest_price 空 + entry_price 退 = PnL=0) 觸發 drift gate **acceptable not structural**；ref commit `015b9735` + round 1+2 IMPL report + E2 sub-agent `a015830b` RETURN verdict + E4 sub-agent `a314d88a` PASS 4135/1/5）|
 
 ### §4.2 異常退出 fail-closed 清單
 
@@ -947,6 +970,15 @@ per AMD §3 + FA §6 Stage 0R row：
 - Output JSON writer ~60 LOC
 - QC 接 PSR / bootstrap 統計 ~80 LOC（與既有 canary_comparator.py 對齊）
 - **Total ~800 LOC / 估 8-12 hr E1 + QC 並行**
+
+### §6.6 Carry-over non-blocking follow-up（next sprint）
+
+**OrderIntent struct encapsulation hardening**（per E2 round 2 a015830b inline note carry-over）：
+- 當前 `OrderIntent` struct 多個 field 為 `pub`（外部 crate 可直接構造），round 1+2 IMPL 為對齊既有 mutation pattern 暫保留
+- Follow-up scope：`pub` → `pub(crate)` + 引入 builder pattern 強制 invariant（如 `direction` ↔ `qty.sign()` 不可錯配）
+- 影響面：4 既有 integration test cross-crate 直接構造 OrderIntent；需 PA spec design（新 builder API surface） + E1 重構 + E2 review
+- 評級：**non-blocking**（current sprint demo path 已 PASS；屬結構優化非正確性問題）
+- 派發時點：next sprint 起點 PM triage 決定要否插入
 
 ---
 
