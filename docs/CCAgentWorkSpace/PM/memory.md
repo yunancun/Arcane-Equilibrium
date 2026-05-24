@@ -1,5 +1,14 @@
 # PM Memory — 工作記憶
 
+## 2026-05-24 Sprint 1A -> 1B Completion Audit
+
+- PM local audit found 1A→1B is not fully runtime/product complete: design/source layers are partially done, but C10 Stage 1 Demo and Earn first stake are not closed.
+- trade-core PG current landed SQL set is healthy: `_sqlx_migrations` max=112 / count=102, V100/V101/V102/V103/V106/V107/V112 success=true, 7 target tables present, 6 health domains live in 30m.
+- Running trade-core engine binary predates C10/Earn commits; binary `strings` has `funding_harvest=0`, `EarnStake=0`, `LAL_0_AUTO=0`, `replay_divergence_log=0`, so current runtime cannot prove C10/Earn/LAL behavior.
+- Earn Wave C remains blocked by OP-1 Bybit key refresh, IntentProcessor Earn branch, Stage 0R Earn variant, rebuild/deploy, and first-stake execution; `learning.earn_movement_log` rows=0.
+- C10 needs E2/V108/E4/QA closure and a decision on synthetic spot close PnL accounting; also normalize `IntentType` for short-capable intents before future LeaseScope/IntentProcessor routing uses it.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-24--sprint_1a_1b_completion_audit.md
+
 ## 2026-05-23 GUI Bybit-first Demo PnL Final Archive
 
 - Operator decision `1A2A3A` applied: no 24h reconcile cron this sprint, no `/demo/wallet-truth` this sprint, backend keeps 4 `strategy_source` values while GUI folds labels.
