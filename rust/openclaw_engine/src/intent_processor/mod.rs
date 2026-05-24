@@ -7,6 +7,7 @@
 //! MODULE_NOTE (中): 通過治理管線處理交易意圖：H0 門控 → Guardian 風控 →
 //!   CostGate EV 過濾 → Kelly 倉位 → OMS。持有 RiskConfig 快照用於逐 tick 限制。
 
+mod earn_router;
 mod gates;
 mod reject_reason_code;
 mod rejection_coding;
@@ -639,6 +640,15 @@ pub struct IntentProcessor {
     /// `update_maker_kpi_config` 推入最新快照；預設 `MakerKpiConfig::default()`
     /// 保持測試與未接線路徑的 bit-identical。
     maker_kpi_config: crate::paper_state::MakerKpiConfig,
+    /// Sprint 1B Earn Wave C：Bybit Earn REST client（B3 wave land）。
+    /// None = 引擎端 Earn capability OFF；process_earn_intent 路徑 fail-closed
+    /// reject。Production caller 經 set_bybit_earn_client 注入；test 端不注入
+    /// 即可驗 fail-closed 路徑。
+    bybit_earn_client: Option<Arc<crate::bybit_earn_client::BybitEarnClient>>,
+    /// Sprint 1B Earn Wave C：V100 earn_movement_log writer（B4 wave land）。
+    /// None = Earn capability OFF；process_earn_intent 路徑 fail-closed reject。
+    /// Production caller 經 set_earn_movement_writer 注入。
+    earn_movement_writer: Option<Arc<crate::database::earn_movement_writer::EarnMovementWriter>>,
 }
 
 /// EDGE-P3-1 A4: Result of predictor-gate evaluation, translated to caller action.
@@ -683,6 +693,10 @@ impl IntentProcessor {
             // W-AUDIT-4b-M1 split (V082)
             decision_feature_evaluation_tx: None,
             maker_kpi_config: crate::paper_state::MakerKpiConfig::default(),
+            // Sprint 1B Earn Wave C：預設 None，capability OFF；
+            // Production caller 經 set_bybit_earn_client / set_earn_movement_writer 注入。
+            bybit_earn_client: None,
+            earn_movement_writer: None,
         }
     }
 
@@ -713,6 +727,9 @@ impl IntentProcessor {
             // W-AUDIT-4b-M1 split (V082)
             decision_feature_evaluation_tx: None,
             maker_kpi_config: crate::paper_state::MakerKpiConfig::default(),
+            // Sprint 1B Earn Wave C：預設 None。
+            bybit_earn_client: None,
+            earn_movement_writer: None,
         }
     }
 
@@ -1369,6 +1386,11 @@ impl IntentProcessor {
     ) {
         self.decision_feature_evaluation_tx = Some(tx);
     }
+
+    // Sprint 1B Earn Wave C：setter + process_earn_intent 於
+    // earn_router.rs 內 cross-file impl block 提供，避免 mod.rs 超 2000 LOC hard cap。
+    // 對齊 CLAUDE.md §九「Files over 800 lines require review attention; 2000 lines
+    // is the hard cap」原則：split 到 sibling file 是允許的反模式之一。
 
     /// EDGE-P3-1 A4: Evaluate the predictor gate for an intent. Returns a
     /// `PredictorAction` the caller uses to decide whether to skip/continue/reject.

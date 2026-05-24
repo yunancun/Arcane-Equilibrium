@@ -195,6 +195,23 @@ impl IntentProcessor {
         context_id: Option<&str>,
         now_ms: u64,
     ) -> IntentResult {
+        // ─── Gate 0: Earn intent guard (Sprint 1B Earn Wave C) ───
+        // 為什麼 fail-closed reject 而非靜默轉派：
+        // 1. trade-path 是 sync `&self`；Bybit Earn API 是 async，sync 入口不能
+        //    block 在 async runtime 上（會破 trading hot path 的 tokio scheduler）；
+        // 2. Earn intent 必須走 IntentProcessor::process_earn_intent (async)
+        //    entry；caller 端送到本 fn 是「caller invariant 違反」應顯式 reject；
+        // 3. 防 caller silent drift（過去 Earn intent 用 OpenLong 占位 placeholder
+        //    被 trade-path 走完然後 emit 假 PnL；本 guard 早 fail 避免污染）。
+        // 對應 IntentType::EarnStake / EarnRedeem 兩 variant（per earn_router.rs
+        // Gate E-2 redundant check + IntentProcessor.process_earn_intent 入口）。
+        if intent.intent_type.is_earn() {
+            return IntentResult::rejected(
+                "earn_intent_routed_to_trade_path: caller must use \
+                IntentProcessor::process_earn_intent (async) for EarnStake/EarnRedeem".to_string(),
+            );
+        }
+
         // Gate 1: Governance authorization check (fail-closed)
         if !governance.is_authorized() {
             return IntentResult::rejected(RejectionCode::GovernanceNotAuthorized.format());
@@ -729,6 +746,16 @@ impl IntentProcessor {
         context_id: Option<&str>,
         now_ms: u64,
     ) -> ExchangeGateResult {
+        // ─── Gate 0: Earn intent guard (Sprint 1B Earn Wave C) ───
+        // 同 process_with_features Gate 0：exchange-mode gate-only 路徑也是 sync，
+        // 不能跑 async Bybit Earn API；Earn intent 必走 process_earn_intent。
+        if intent.intent_type.is_earn() {
+            return ExchangeGateResult::rejected(
+                "earn_intent_routed_to_trade_path: caller must use \
+                IntentProcessor::process_earn_intent (async) for EarnStake/EarnRedeem".to_string(),
+            );
+        }
+
         // Gate 1: Governance authorization
         if !governance.is_authorized() {
             return ExchangeGateResult::rejected(RejectionCode::GovernanceNotAuthorized.format());

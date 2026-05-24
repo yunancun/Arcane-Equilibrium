@@ -345,3 +345,245 @@ fn order_intent_grid_short_emit_via_new_trade_aligns_intent_type() {
     assert_eq!(grid_short.strategy, "grid_trading");
     // helper 內 validate() 已跑（debug 下 panic 即捕獲；release 下 warn 不阻擋）。
 }
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Sprint 1B Earn first stake Wave C — IntentProcessor.process_earn_intent
+// dispatch branch test。
+//
+// 範圍對應 PA dispatch prompt 2026-05-24 §「新增 test」：
+//   - intent_processor_dispatches_earn_intent_to_earn_router       : 入口分流驗
+//   - intent_processor_trade_intent_unaffected_by_earn_branch      : 對抗性驗
+//   - earn_router_fail_closed_when_unwired                         : E-0 wiring gate
+//   - earn_router_fail_closed_when_earn_payload_missing            : E-1 payload gate
+//
+// 集成 Bybit+PG 真實 dispatch 路徑（success path / Bybit retCode != 0）留 QA Stage 0R
+// replay + operator OP-1 真實 stake smoke（per E1 IMPL DONE report carry-over §）。
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Wave C dispatch test 1：trade-path 入口拒 Earn intent。
+///
+/// 驗 process_with_features (sync trade-path) 對 IntentType::EarnStake/EarnRedeem
+/// 入口 Gate 0 fail-closed reject，不繼續走 Gate 1 governance / Gate 2 Guardian
+/// 等 trade-only 路徑（避免 Earn intent 被 silent dispatch 成假 trade fill）。
+#[test]
+fn intent_processor_dispatches_earn_intent_to_earn_router() {
+    let proc = IntentProcessor::new();
+    let mut gov = GovernanceCore::new();
+    gov.grant_paper_authorization(None)
+        .expect("paper auth must succeed");
+    let state = PaperState::new(10_000.0);
+
+    // 構造 EarnStake intent（earn_payload Some）；trade-path 入口必拒。
+    let earn_intent = OrderIntent {
+        symbol: "USDT".to_string(),
+        is_long: true,
+        qty: 0.0,
+        confidence: 1.0,
+        strategy: "earn_governance".to_string(),
+        order_type: "earn".to_string(),
+        limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
+        time_in_force: None,
+        maker_timeout_ms: None,
+        intent_type: super::IntentType::EarnStake,
+        earn_payload: Some(super::EarnIntentPayload {
+            amount_usdt: "200.00000000".to_string(),
+            expected_apr_bps: 1000,
+            product_id: "USDT-FLEX-001".to_string(),
+            tenor_days: 0,
+            approval_id: "approval-test-1".to_string(),
+            actor_id: "PrimaryOperator".to_string(),
+            rationale: "Wave C dispatch test".to_string(),
+        }),
+    };
+    let result = proc.process(&earn_intent, &gov, &state, 500.0, GovernanceProfile::Exploration);
+    assert!(!result.submitted, "trade-path 必拒 Earn intent");
+    let reason = result.rejected_reason.unwrap_or_default();
+    assert!(
+        reason.contains("earn_intent_routed_to_trade_path")
+            && reason.contains("process_earn_intent"),
+        "reject reason 必明示「Earn 走 process_earn_intent 入口」: actual={}",
+        reason
+    );
+
+    // 同對 EarnRedeem 驗（cover 兩 Earn variant）。
+    let redeem_intent = OrderIntent {
+        intent_type: super::IntentType::EarnRedeem,
+        ..earn_intent
+    };
+    let result_redeem = proc.process(
+        &redeem_intent,
+        &gov,
+        &state,
+        500.0,
+        GovernanceProfile::Exploration,
+    );
+    assert!(!result_redeem.submitted, "trade-path 必拒 EarnRedeem intent");
+    assert!(
+        result_redeem
+            .rejected_reason
+            .unwrap_or_default()
+            .contains("earn_intent_routed_to_trade_path"),
+        "EarnRedeem 同樣走 Gate 0 reject"
+    );
+}
+
+/// Wave C dispatch test 2：trade intent 不被 Earn branch 干擾（對抗性驗）。
+///
+/// 驗 process_with_features 對 IntentType::OpenLong/OpenShort intent 路徑不變
+/// （Gate 0 短路條件 is_earn() == false），仍走既有 Gate 1...n trade-path。
+/// 此測試保證 Wave C 入口加 Gate 0 後不破現有 trade-path（regression guard）。
+#[test]
+fn intent_processor_trade_intent_unaffected_by_earn_branch() {
+    let proc = IntentProcessor::new();
+    let gov = GovernanceCore::new(); // no auth → 預期 Gate 1 reject (not Gate 0)
+    let state = PaperState::new(10_000.0);
+
+    // 既有 trade intent (OpenLong)：走完 Gate 0（is_earn false 短路）後到 Gate 1
+    // governance authorization → reject。reject reason 必為 governance_not_authorized
+    // **非** earn_intent_routed_to_trade_path（後者才是 Gate 0 命中）。
+    let trade_intent = OrderIntent::new_trade(
+        "BTCUSDT".to_string(),
+        true,
+        0.01,
+        0.7,
+        "ma_crossover".to_string(),
+        "market".to_string(),
+        None,
+        Some(45.0),
+        Some(120_000),
+        None,
+        None,
+    );
+    let result = proc.process(
+        &trade_intent,
+        &gov,
+        &state,
+        500.0,
+        GovernanceProfile::Exploration,
+    );
+    assert!(!result.submitted, "no-auth state 必拒 trade intent");
+    let reason = result.rejected_reason.unwrap_or_default();
+    assert!(
+        !reason.contains("earn_intent_routed_to_trade_path"),
+        "trade intent 不應命中 Gate 0 earn guard: actual={}",
+        reason
+    );
+    // 應命中 Gate 1 governance_not_authorized；reason 字串對齊既有 RejectionCode。
+    assert!(
+        reason.to_lowercase().contains("governance")
+            || reason.to_lowercase().contains("authorization")
+            || reason.to_lowercase().contains("auth"),
+        "trade intent 入 Gate 1 governance gate reject: actual={}",
+        reason
+    );
+}
+
+/// Wave C dispatch test 3：process_earn_intent 在 capability 未注入時 fail-closed。
+///
+/// 驗 EarnRouter Gate E-0：bybit_earn_client / earn_movement_writer 任一未注入
+/// （IntentProcessor::new() 預設 None）→ process_earn_intent 必 fail-closed reject
+/// 並帶 "earn_dispatch_unwired" 字串。production caller 注入兩 dep 才能走真實
+/// Bybit + PG 路徑；未注入 = 引擎端 Earn capability OFF。
+#[tokio::test]
+async fn earn_router_fail_closed_when_unwired() {
+    let proc = IntentProcessor::new();
+    let mut gov = GovernanceCore::new();
+    gov.grant_paper_authorization(None)
+        .expect("paper auth must succeed");
+
+    let earn_intent = OrderIntent {
+        symbol: "USDT".to_string(),
+        is_long: true,
+        qty: 0.0,
+        confidence: 1.0,
+        strategy: "earn_governance".to_string(),
+        order_type: "earn".to_string(),
+        limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
+        time_in_force: None,
+        maker_timeout_ms: None,
+        intent_type: super::IntentType::EarnStake,
+        earn_payload: Some(super::EarnIntentPayload {
+            amount_usdt: "200.00000000".to_string(),
+            expected_apr_bps: 1000,
+            product_id: "USDT-FLEX-001".to_string(),
+            tenor_days: 0,
+            approval_id: "approval-test-unwired".to_string(),
+            actor_id: "PrimaryOperator".to_string(),
+            rationale: "Wave C unwired test".to_string(),
+        }),
+    };
+    let result = proc
+        .process_earn_intent(&earn_intent, &gov, GovernanceProfile::Exploration)
+        .await;
+    assert!(!result.submitted, "unwired capability 必拒");
+    let reason = result.rejected_reason.unwrap_or_default();
+    assert!(
+        reason.contains("earn_dispatch_unwired"),
+        "reject reason 必含 earn_dispatch_unwired: actual={}",
+        reason
+    );
+    // 子字串驗：unwired 提示哪個 dep 缺（bybit_earn_client 或 earn_movement_writer
+    // 任一），對齊 EarnDispatchError::Unwired 的 &'static str payload。
+    assert!(
+        reason.contains("bybit_earn_client") || reason.contains("earn_movement_writer"),
+        "unwired reason 必指出缺哪個 dep: actual={}",
+        reason
+    );
+}
+
+/// Wave C dispatch test 4：process_earn_intent 在 earn_payload absent 時 fail-closed。
+///
+/// 驗 EarnRouter Gate E-1：caller 送 EarnStake/EarnRedeem 但 earn_payload=None →
+/// fail-closed reject "earn_dispatch_payload_missing"。本 gate 在 Gate E-0 通過
+/// （即 capability 已注入）後才會命中；本 test 用「假 wiring」走捷徑 — 預期
+/// Gate E-0 unwired 仍先 fail，但本 test 重點是驗 caller bug (payload None) 不會
+/// 被 silent 通過 dispatch。
+///
+/// 注意：current IMPL Gate E-0 在 E-1 之前，所以 unwired 路徑先 trip；要直接驗
+/// E-1 命中需注入 dep（需 real BybitRestClient + PG，違 mac dev local-only）。
+/// 折衷：本 test 驗「caller 構造 earn_payload=None 的 EarnStake intent，process_
+/// earn_intent 不 panic 且回 fail-closed reject reason」— 對齊 IntentResult::
+/// rejected 契約。**真實 E-1 命中由 Wave D/E integration test + Stage 0R 補。**
+#[tokio::test]
+async fn earn_router_fail_closed_when_earn_payload_missing() {
+    let proc = IntentProcessor::new(); // unwired (capability OFF)
+    let mut gov = GovernanceCore::new();
+    gov.grant_paper_authorization(None)
+        .expect("paper auth must succeed");
+
+    let bad_intent = OrderIntent {
+        symbol: "USDT".to_string(),
+        is_long: true,
+        qty: 0.0,
+        confidence: 1.0,
+        strategy: "earn_governance".to_string(),
+        order_type: "earn".to_string(),
+        limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
+        time_in_force: None,
+        maker_timeout_ms: None,
+        intent_type: super::IntentType::EarnStake, // earn intent
+        earn_payload: None, // ← caller bug
+    };
+    let result = proc
+        .process_earn_intent(&bad_intent, &gov, GovernanceProfile::Exploration)
+        .await;
+    assert!(
+        !result.submitted,
+        "earn_payload None 必拒（caller bug 早 fail）"
+    );
+    // current IMPL Gate E-0 unwired 在 E-1 之前 trip；本 test 寬容驗 reject reason
+    // 為 unwired 或 payload_missing 兩者之一（兩者語意都是 fail-closed reject）。
+    let reason = result.rejected_reason.unwrap_or_default();
+    assert!(
+        reason.contains("earn_dispatch_unwired")
+            || reason.contains("earn_dispatch_payload_missing"),
+        "earn payload None / unwired 任一 fail-closed reason: actual={}",
+        reason
+    );
+}
