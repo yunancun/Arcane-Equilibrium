@@ -58,6 +58,7 @@
 | 2026-05-11 | Wave 1.6 P1-FILL-LINEAGE-DROP perf re-audit | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-11--p1_fill_lineage_drop_e5_perf.md` |
 | 2026-05-11 | Wave 2.2 LG-1 + LG-2 (8 task) perf+LOC+refactor review | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-11--wave2_2_e5_perf.md` |
 | 2026-05-21 | P1-LG1-DEMO-SLA-VIOLATION H0 hot-path RCA（demo max=2454μs > 1ms SLA）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-21--p1_lg1_demo_sla_violation_hotpath_audit.md` |
+| 2026-05-25 | Pre Sprint 2 runtime hygiene audit (FD 200 leak + 13 cron disabled + path mismatch) | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-25--runtime_hygiene_audit_pre_sprint_2.md` |
 
 ## 2026-05-10 W-C Caveat 1+2+3 fix perf review 教訓
 
@@ -325,6 +326,31 @@ E1 P1-FILL-LINEAGE-MONITOR follow-up（接 counter 到 IPC + healthcheck [55]/[N
 2. **rx 消費阻塞時段 必入 throughput equation**：PG INSERT batch flush 200-500ms 是 producer 累積窗口
 3. **empirical evidence > theoretical capacity**：當有真實 runtime 證據（QA RCA empirical 25.8% drop）必反推 capacity ceiling
 4. **false sharing pattern**：連續 static AtomicU64 宣告會撞同 cache line；多 thread 並發 fetch_add 互相 invalidate → 50-200ns extra latency / contention（cosmetic 非 SLA）
+
+---
+
+### 2026-05-25 Pre Sprint 2 runtime hygiene audit (FD 200 leak + 13 cron disabled + path mismatch)
+
+**報告**：`docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-25--runtime_hygiene_audit_pre_sprint_2.md`
+
+**Verdict**：3 Day -1 必修（H-1 FD 200 leak / H-3 edge_estimates path mismatch / H-2 Phase 1 cron 復原 4 個 HIGH）+ 4 Sprint 2 內並行（M-1/M-3/M-4/H-2 Phase 2）+ 3 defer
+
+**最 critical 發現**：`fuser /tmp/openclaw/build_window.lock = 374287` 即 current engine PID 此刻仍持鎖；下次 `build_then_restart_atomic.sh` 會 self-block；修法 = `restart_all.sh:535` 加 `nohup ... 0<&- 200<&- &`（1 LOC）。
+
+**Pattern 級教訓（durable）**：
+1. **FD inherit 治理盲點是高危反模式**：shell 內 spawn 子進程默認繼承全 FD；治理用 flock / pipe lock 必 explicit close。所有 `nohup`/`exec`/`&` spawn 必 audit FD inherit；E5 sign-off SOP 加 checklist。
+2. **Crontab 不在 git** 是治理 silent class：operator 手動 `crontab -e` 改動 → 4 day 後才被 healthcheck 跑出。建議：crontab 必走 setup script + git diff verify。
+3. **healthcheck path / schema 期望需與 source-of-truth 對齊**：本 audit case「edge_estimates.json 寫 `srv/settings/` 但 healthcheck 讀 `/tmp/openclaw/`」永久 FAIL 製造治理 noise；healthcheck land 前必 ssh trade-core 驗 path / table 真實位置。
+4. **Sub-agent ssh trade-core 環境無圍欄**：cargo race / FD inherit / hygiene SOP 需 prompt template 級 enforcement，不能依賴 sub-agent self-discipline。本 sprint 已第 3 次 cargo race。
+5. **Healthcheck 內雙路徑分歧自我矛盾**（[7] FAIL「scheduler 掛了」vs [13] PASS「full G1-01 recovery target met」同對象不同 path 同一條 cron）是 hygiene gap detector。設計 healthcheck 時應避免單一現象多 check 分歧。
+6. **Audit 過程的 path quoting 反模式**：ssh inline command `stat /tmp/openclaw/edge_estimates.json` 對 mount + symlink + path 期望容易誤判 missing；驗 critical file 必 fallback 多路徑（cron log + writer source + 目標 dir）三角驗證後才下「missing」結論。
+
+**對 PM Sprint 2 派發 readiness 影響**：Day -1 必修 H-1（否則所有 deploy 全阻）；H-3 修後 PM evidence loop 乾淨；H-2 Phase 1 修後 Alpha Tournament 必需 evidence 可信。Day -1 投資 ~2 hr 並行（E1 1 hr + PA 30 min + operator 30 min）→ Sprint 2 Day 0 派發路徑乾淨。
+
+**對抗性 sign-off 補充（生效 2026-05-25）**：
+- shell script spawn 子進程必驗 FD inherit（fuser / lsof 對 governance lock 文件）
+- crontab 變更必要求 commit `helper_scripts/setup_openclaw_cron.sh` diff
+- healthcheck 多個 check 對「同對象」應有單一 source path；雙路徑分歧 = hygiene gap
 
 ---
 
