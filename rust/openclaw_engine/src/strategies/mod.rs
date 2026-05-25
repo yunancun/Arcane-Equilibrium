@@ -24,8 +24,18 @@ pub mod funding_arb;
 // C10 funding harvest — delta-neutral spot long + perp short matched notional。
 // 與 funding_arb V2（ADR-0018 dormant）並列，為新策略 slot。Stage 1 Demo 限定 BTCUSDT。
 pub mod funding_harvest;
+// Sprint 2 Alpha Tournament Candidate #1 — funding_short_v2。
+// short-only directional capture (funding > 30% annualized)；與 funding_arb V2
+// (ADR-0018 dormant) + funding_harvest (delta-neutral) 並列為第三個 funding slot；
+// Stage 1 Demo 限定 BTCUSDT / ETHUSDT。
+pub mod funding_short_v2;
 pub mod grid_helpers;
 pub mod grid_trading;
+// Sprint 2 Alpha Tournament Candidate #4 — liquidation_cascade_fade。
+// 5min liquidation cluster mean-revert fade（per BB C6 PROOF PASS + W-AUDIT-8a C1
+// LiquidationPulseAggregator + commit 0e8a8ae8 allLiquidation 訂閱）。
+// Stage 1 Demo 限定 BTCUSDT / ETHUSDT。
+pub mod liquidation_cascade_fade;
 pub mod ma_crossover;
 pub mod maker_rejection;
 

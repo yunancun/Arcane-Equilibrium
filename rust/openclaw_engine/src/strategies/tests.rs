@@ -114,13 +114,15 @@ fn test_param_range_serde_roundtrip() {
 
 #[test]
 fn test_strategy_factory_creates_six_strategies() {
-    // Sprint 1B Pending 3.1 C10：新增 funding_harvest 作為第 6 個 strategy。
-    // 與 funding_arb V2 (ADR-0018 dormant) 並列為新 slot。
+    // Sprint 1B Pending 3.1 C10：funding_harvest 作為第 6 個 strategy。
+    // Sprint 2 W2-B：funding_short_v2 + liquidation_cascade_fade 加入為第 7-8 strategy
+    // （Alpha Tournament Stream A Candidate #1 + #4；與 funding_arb V2 dormant 並列）。
+    // 測試名稱保留為 `creates_six_strategies` 以保留歷史檢核；但 assertion 更新為 8。
     let strategies = StrategyFactory::create_all();
     assert_eq!(
         strategies.len(),
-        6,
-        "factory should produce exactly 6 strategies after C10 funding_harvest landing"
+        8,
+        "factory should produce exactly 8 strategies after Sprint 2 W2-B funding_short_v2 + liquidation_cascade_fade landing"
     );
     let names: Vec<&str> = strategies.iter().map(|s| s.name()).collect();
     assert!(names.contains(&"ma_crossover"), "missing ma_crossover");
@@ -132,25 +134,59 @@ fn test_strategy_factory_creates_six_strategies() {
         names.contains(&"funding_harvest"),
         "missing funding_harvest (Sprint 1B C10)"
     );
+    assert!(
+        names.contains(&"funding_short_v2"),
+        "missing funding_short_v2 (Sprint 2 W2-B Candidate #1)"
+    );
+    assert!(
+        names.contains(&"liquidation_cascade_fade"),
+        "missing liquidation_cascade_fade (Sprint 2 W2-B Candidate #4)"
+    );
 }
 
 #[test]
-fn test_strategy_factory_has_no_liquidation_cascade_consumer_before_stage0r_launch() {
-    // W-AUDIT-8a C1 / W-AUDIT-8c boundary guard:
-    // allLiquidation writer + LiquidationPulse panel availability is transport
-    // and replay-tooling evidence only. Until a future Stage 0R → Stage 1 Demo
-    // launch packet lands, the production strategy factory must not expose a
-    // live LiquidationCascade consumer.
+fn test_strategy_factory_liquidation_cascade_consumer_gate_after_stage0r_launch() {
+    // W-AUDIT-8a C1 / W-AUDIT-8c boundary guard 演進至 Sprint 2 W2-B：
+    //
+    // 原 invariant：「factory must not expose a live LiquidationCascade consumer
+    //   before an explicit Stage 0R launch packet」。Sprint 2 W2-B 落地 explicit
+    //   launch packet = `2026-05-25--alpha_candidate_4_liquidation_cascade_fade_spec.md v1.1`
+    //   + W2-A finalize report；因此 LiquidationCascade consumer 已允許暴露於 factory，
+    //   但仍須 active=false default（5-gate auto path inheritance + operator
+    //   IPC active=true 才啟）。
+    //
+    // 新 invariant：
+    //   (a) 唯一允許的 LiquidationCascade consumer = `liquidation_cascade_fade`；
+    //   (b) 其 active flag 在 `create_all()` (default params) 必為 false；
+    //   (c) 任何其他策略仍禁止 declare LiquidationCascade。
     let strategies = StrategyFactory::create_all();
-    for strategy in strategies {
-        assert!(
-            !strategy
-                .declared_alpha_sources()
-                .contains(&AlphaSourceTag::LiquidationCascade),
-            "{} must not consume LiquidationCascade before an explicit Stage 0R launch packet",
-            strategy.name()
-        );
+    let mut lcf_consumer_found = false;
+    for strategy in &strategies {
+        let consumes_liq = strategy
+            .declared_alpha_sources()
+            .contains(&AlphaSourceTag::LiquidationCascade);
+        if strategy.name() == "liquidation_cascade_fade" {
+            assert!(
+                consumes_liq,
+                "liquidation_cascade_fade must declare LiquidationCascade"
+            );
+            assert!(
+                !strategy.is_active(),
+                "liquidation_cascade_fade default must be inactive (Stage 1 Demo fail-closed)"
+            );
+            lcf_consumer_found = true;
+        } else {
+            assert!(
+                !consumes_liq,
+                "{} must not consume LiquidationCascade (only liquidation_cascade_fade allowed)",
+                strategy.name()
+            );
+        }
     }
+    assert!(
+        lcf_consumer_found,
+        "liquidation_cascade_fade must be present in StrategyFactory (Sprint 2 W2-B)"
+    );
 }
 
 #[test]
@@ -161,7 +197,13 @@ fn test_strategy_factory_active_defaults() {
             // OC-5: funding_arb inactive by default (TOML controls activation)。
             // Sprint 1B C10: funding_harvest inactive by default (Stage 0R PASS +
             //   operator IPC active=true 才啟；參見 strategies/funding_harvest/params.rs)。
-            "funding_arb" | "funding_harvest" => {
+            // Sprint 2 W2-B: funding_short_v2 + liquidation_cascade_fade inactive
+            //   by default (5-gate auto path inheritance fail-closed + operator
+            //   IPC active=true 才啟；per CR-15)。
+            "funding_arb"
+            | "funding_harvest"
+            | "funding_short_v2"
+            | "liquidation_cascade_fade" => {
                 assert!(!s.is_active(), "{} should be inactive by default", s.name())
             }
             _ => assert!(s.is_active(), "{} should be active by default", s.name()),
@@ -337,14 +379,20 @@ fn test_create_with_params_applies_active_flag() {
     // Strategies created with active=false should be inactive.
     // 使用 active=false 創建的策略應為非活躍。
     // Sprint 1B C10：funding_harvest 也是 default active=false（fail-closed）。
+    // Sprint 2 W2-B：funding_short_v2 + liquidation_cascade_fade 同 default false。
     let mut p = StrategyParamsConfig::default();
     p.ma_crossover.active = false;
     p.bb_breakout.active = false;
     let strategies = StrategyFactory::create_with_params(&p);
-    assert_eq!(strategies.len(), 6);
+    assert_eq!(strategies.len(), 8);
     for s in &strategies {
         match s.name() {
-            "ma_crossover" | "bb_breakout" | "funding_arb" | "funding_harvest" => {
+            "ma_crossover"
+            | "bb_breakout"
+            | "funding_arb"
+            | "funding_harvest"
+            | "funding_short_v2"
+            | "liquidation_cascade_fade" => {
                 assert!(!s.is_active(), "{} should be inactive", s.name())
             }
             _ => assert!(s.is_active(), "{} should be active", s.name()),

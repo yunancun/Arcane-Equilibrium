@@ -192,3 +192,42 @@ expected_periods = 3.0
 rebalance_check_ms = 7200000          # 2h tick rebalance 檢查
 delta_drift_threshold = 0.02          # 2% drift → SyntheticSpotLedger.rebalance()
 position_cap_usd = 100.0              # Stage 1 hard ceiling absolute USD
+
+# Sprint 2 Alpha Tournament Candidate #1 — funding_short_v2 short-only directional capture。
+# 與 funding_arb V2 (ADR-0018 dormant) + funding_harvest (delta-neutral) 並列為第三個
+# funding-related strategy slot；short-only thesis (funding > 30% annualized 收 carry)。
+# spec ref: srv/docs/execution_plan/2026-05-25--alpha_candidate_1_funding_short_v2_spec.md v1.1
+# Stage 1 Demo 限定；live deployment 須 5-gate green + P0-EDGE-1 closure。
+# active=false 預設：Stage 0R replay preflight PASS + operator IPC active=true 才啟
+# (per CR-15 5-gate fail-closed inheritance)。
+[funding_short_v2]
+active = false
+cooldown_ms = 28800000                # 8h cooldown per symbol（1 funding cycle）
+allowed_symbols = ["BTCUSDT", "ETHUSDT"]  # Stage 1 限定 BTC/ETH only
+funding_threshold_annualized = 0.30   # 30% annualized hard gate (QC break-even ~22 bps cost)
+funding_exit_annualized = 0.05        # exit when annualized < 5%（hysteresis）
+max_basis_pct = 0.5                   # exit basis > 0.5%
+entry_basis_ratio = 0.6               # entry basis < 0.5% × 0.6 = 0.3%（tight）
+max_hold_ms = 86400000                # 24h hard time-stop（3 funding cycle）
+total_cost_bps = 22.0                 # perp roundtrip + slip（無 spot 腿）
+expected_periods = 1.5                # 1-2 cycle median hold（QC 量化分析）
+
+# Sprint 2 Alpha Tournament Candidate #4 — liquidation_cascade_fade microstructure。
+# 5min liquidation cluster > per-symbol threshold (BTC $500k / ETH $300k) + fade
+# against dominant cascade side (counter-cascade mean-revert; 60min hold)。
+# 依賴：surface.liquidation_pulse (W-AUDIT-8a C1 LiquidationPulseAggregator + commit
+# 0e8a8ae8 allLiquidation WS production 訂閱)；不走 Bybit historical REST
+# (per ADR-0038 §Decision 1 self-hosted PG only)。
+# spec ref: srv/docs/execution_plan/2026-05-25--alpha_candidate_4_liquidation_cascade_fade_spec.md v1.1
+# Stage 1 Demo 限定；live deployment 須 5-gate green + P0-EDGE-1 closure。
+[liquidation_cascade_fade]
+active = false
+cooldown_ms = 1800000                 # 30min cooldown per symbol（防同 cascade 重入）
+allowed_symbols = ["BTCUSDT", "ETHUSDT"]  # Stage 1 限定
+default_threshold_usd = 100000.0      # non-cohort fallback（理論不 trigger）
+btc_threshold_usd = 500000.0          # BTC 5m notional 閾值（percentile 80%）
+eth_threshold_usd = 300000.0          # ETH 5m notional 閾值
+min_events = 3                        # min event_count_5m（防 single-event 假訊號）
+max_hold_ms = 3600000                 # 60min hard time-stop
+take_profit_pct = 1.5                 # TP at 1.5% mean-revert
+reverse_cascade_ratio = 1.5           # 反向 cascade > 入場時 1.5x → 立即出場

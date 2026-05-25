@@ -19,8 +19,8 @@ use super::params::{
 };
 use super::Strategy;
 use super::{
-    bb_breakout, bb_reversion, funding_arb, funding_harvest, grid_helpers, grid_trading,
-    ma_crossover,
+    bb_breakout, bb_reversion, funding_arb, funding_harvest, funding_short_v2, grid_helpers,
+    grid_trading, liquidation_cascade_fade, ma_crossover,
 };
 use crate::tick_pipeline::PipelineKind;
 
@@ -269,6 +269,56 @@ impl StrategyFactory {
         fh.position_cap_usd = p.funding_harvest.position_cap_usd;
         fh.set_active(p.funding_harvest.active);
         strategies.push(Box::new(fh));
+
+        // Sprint 2 Alpha Tournament Candidate #1 — FundingShortV2。
+        // funding > 30% annualized + short-only hard enforcement directional capture。
+        // 與 funding_arb V2 (ADR-0018 dormant) + funding_harvest (delta-neutral) 並列；
+        // 不繞 V2 dormant 結論。Stage 1 Demo 限定 BTCUSDT / ETHUSDT。
+        // 預設 active=false：5-gate auto path inheritance + operator IPC 顯式 true 才啟。
+        let mut fsv2 = funding_short_v2::FundingShortV2::new();
+        // cooldown TrendCooldown 為 sub-module private state；TOML active=true
+        // 時走 update_params_json/update_params 路徑會 set_duration；初始 cooldown_ms
+        // 由 new() default 已對齊 spec §3.1。
+        fsv2.cooldown_ms = p.funding_short_v2.cooldown_ms;
+        fsv2.allowed_symbols = p.funding_short_v2.allowed_symbols.clone();
+        fsv2.funding_threshold_annualized = p.funding_short_v2.funding_threshold_annualized;
+        fsv2.funding_exit_annualized = p.funding_short_v2.funding_exit_annualized;
+        fsv2.max_basis_pct = p.funding_short_v2.max_basis_pct;
+        fsv2.entry_basis_ratio = p.funding_short_v2.entry_basis_ratio;
+        fsv2.max_hold_ms = p.funding_short_v2.max_hold_ms;
+        fsv2.total_cost_bps = p.funding_short_v2.total_cost_bps;
+        fsv2.expected_periods = p.funding_short_v2.expected_periods;
+        fsv2.set_active(p.funding_short_v2.active);
+        strategies.push(Box::new(fsv2));
+
+        // Sprint 2 Alpha Tournament Candidate #4 — LiquidationCascadeFade。
+        // 5min liquidation cluster > per-symbol threshold (BTC $500k / ETH $300k) +
+        // fade against dominant cascade side mean-revert (60min hold)。
+        // 依賴 surface.liquidation_pulse (W-AUDIT-8a C1 LiquidationPulseAggregator +
+        // commit 0e8a8ae8 allLiquidation WS subscription)。
+        // 預設 active=false：5-gate auto path inheritance + operator IPC 顯式 true 才啟。
+        let mut lcf = liquidation_cascade_fade::LiquidationCascadeFade::new();
+        // 同 funding_short_v2 / funding_harvest 範式：cooldown 為 private state；
+        // IPC update_params 才走 set_duration；初始 cooldown_ms 由 new() default 對齊 spec。
+        lcf.cooldown_ms = p.liquidation_cascade_fade.cooldown_ms;
+        lcf.allowed_symbols = p.liquidation_cascade_fade.allowed_symbols.clone();
+        lcf.default_threshold_usd = p.liquidation_cascade_fade.default_threshold_usd;
+        // per-symbol threshold map 從 TOML 重建（BTC + ETH 兩 key；非-cohort 走 default）。
+        lcf.per_symbol_threshold.clear();
+        lcf.per_symbol_threshold.insert(
+            "BTCUSDT".to_string(),
+            p.liquidation_cascade_fade.btc_threshold_usd,
+        );
+        lcf.per_symbol_threshold.insert(
+            "ETHUSDT".to_string(),
+            p.liquidation_cascade_fade.eth_threshold_usd,
+        );
+        lcf.min_events = p.liquidation_cascade_fade.min_events;
+        lcf.max_hold_ms = p.liquidation_cascade_fade.max_hold_ms;
+        lcf.take_profit_pct = p.liquidation_cascade_fade.take_profit_pct;
+        lcf.reverse_cascade_ratio = p.liquidation_cascade_fade.reverse_cascade_ratio;
+        lcf.set_active(p.liquidation_cascade_fade.active);
+        strategies.push(Box::new(lcf));
 
         strategies
     }

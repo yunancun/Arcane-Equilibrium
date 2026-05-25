@@ -1,7 +1,16 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-25（Hygiene Option E Phase 1 Step 2 — 新增 `build_then_restart_atomic.sh` + `restart_all.sh --require-clean-build-window` flag,防 multi-session cargo race 覆蓋 release binary inode;per PA sub-agent a6326f17 修法 Option B。保留 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
+最後更新：2026-05-25（Sprint 2 W2-B Alpha Tournament scaffold — 新增 `alpha_tournament/__init__.py` + `alpha_tournament/attribution_daily.py` + `alpha_tournament/tournament_orchestrator.py` + `alpha_tournament/14d_bucket_split.sql`，配套 funding_short_v2 / liquidation_cascade_fade Rust strategy IMPL；保留 2026-05-25 Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
+
+## 2026-05-25 Sprint 2 W2-B Alpha Tournament Stream A scaffold
+
+| 腳本 | 用途 |
+|------|------|
+| `alpha_tournament/__init__.py` | helper package entry + MODULE_NOTE；標註 ADR-0026 track='direct_exploit' + V100/V103 actual schema + engine_mode IN ('demo','live_demo') hard invariants；read-only SELECT only。 |
+| `alpha_tournament/attribution_daily.py` | Sprint 2 daily cron @02:30 UTC fire；14d demo bucket-split per strategy × symbol × date + Wilson CI 95% lower bound projection + Bonferroni K=2 alpha 調整 + sample size cumulative projection (target ≥ 30 per CR-6)；stdout JSON log；dry-run mode 不連 PG（驗 module import + SQL syntax）。 |
+| `alpha_tournament/tournament_orchestrator.py` | Sprint 2 stub return 0；Sprint 3+ M11 counterfactual replay integration + candidate ranking 邏輯接續入口。 |
+| `alpha_tournament/14d_bucket_split.sql` | psql -f 直接跑的 standalone SQL；對映 attribution_daily.py SQL 內嵌版本，供 cron wrapper / 手動 audit 使用。WHERE track = 'direct_exploit' + engine_mode IN ('demo','live_demo') + attribution_chain_ok = TRUE 三 invariant hard-coded。 |
 
 ## 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening
 
