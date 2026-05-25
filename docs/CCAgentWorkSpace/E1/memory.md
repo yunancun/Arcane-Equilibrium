@@ -12496,3 +12496,23 @@ P A 引用 line 範圍錯。
 1. 接到 IMPL 任務先 grep 確認 root cause；E5 audit 不是無誤的單一 source of truth
 2. Push back 含「實證 path 對齊」+「真實 root cause 是 threshold dual-layer」+「PA line range 錯指」
 3. 不盲改 — 改了實質 = 沒效（path 已經對的）
+
+## 2026-05-25 EA-1 Phase 1b 81-cell sweep — harness IMPL bug detected via adversarial verification
+
+### 結論
+- 81-cell sweep on trade-core wall-clock 3 s (PG cache 熱)
+- 原 sweep raw verdict: 0/0/81 PASS/CONDITIONAL/FAIL
+- 但 adversarial monkey-patch（不改 file）verification 顯示真實 verdict: 46/8/27
+- bug = `_bbo_at_or_before(post_drift_samples, fill_ts+60s)` 邏輯互斥（post_drift 構造為 `>= fill_ts+60s`，filter 是 `<= target_ts`），永遠回 None → adverse_selection_proxy 必 None → classifier conservative fail-closed → ALL FAIL false negative
+
+### 教訓
+1. **harness IMPL bug 沉默不爆 exception**，只透過 dataclass Optional[None] propagate；aggregate summary 才暴露異常（81/81 = FAIL 不正常）。E2 review timebox 短 + E4 regression fixture 不覆 boundary → 兩層審查都漏。
+2. **Adversarial verification 必跑 in-memory monkey-patch**：spec 明確 task 是 execute + analysis 不改 harness，但 sub-agent 自己 monkey-patch 跑 verification 不違 spec（不寫 file/不 commit/不部署），給 PA dispatch repair 提供 evidence-based decision input。
+3. **task ask CLI invocation 寫 `phase_1b_sweep_replay.py --all-cells` 是錯**：實際 entry 是 `phase_1b_sweep_cli.py`（sweep_replay.py 沒 argparse main）。讀檔 verify CLI 不要照 task ask 盲信。
+4. **Mac → trade-core PG 5432 不開 Tailscale**：harness 純 read-only Python 但 Mac local 跑不了，必 ssh + scp + run on trade-core pattern。
+5. **scp + ssh + 自帶 env parser script** 模式避 bash heredoc 引號 nightmare：Python script 自己 parse `secrets/environment_files/basic_system_services.env`（PG password 含 `()` 字符 bash quote 麻煩）。
+6. **classifier conservative fail-closed `adverse_proxy is None → FAIL`** 是 spec §二 #6 對齊但跟 harness bug 結合 = silent false negative。PA 可考慮加 telemetry：當 N% cells adverse=None 觸 audit-time warning（而非靜默 fail）。
+7. **Block 3 phys_lock_gate4_stale_roc_neg 7 d 0 sample**：data scarcity 不是 harness bug；PA 需 decide drop family 或 extend window。
+8. **完全 ALT-symbol sample bias**：18 unique symbols 都是 ARB/OP/XRP/DOT/LTC；BTCUSDT/ETHUSDT 0 sample → operator pilot 必須 over-sample large-cap。
+9. **Top-1 recommendation = `G-AB-01-C90`**: baseline buffer / baseline offset / 只變 timeout 30s→90s 一個 axis，最低 rollout 風險；fill 76.7% / Wilson CI 66.8-84.4% / fee +3.41 bps / adv +0.01 bps（near-baseline neutrality）。
+10. **未 commit；verdict report + buggy/patched archive 全在 E1 workspace；harness 修法是 1-LOC Option A（`_nearest_by_abs_time` replacement at call site `phase_1b_sweep_replay.py:328`）**；PM 派 follow-up E1 修 + E2/E4 rerun + PA §4 acceptance gate。

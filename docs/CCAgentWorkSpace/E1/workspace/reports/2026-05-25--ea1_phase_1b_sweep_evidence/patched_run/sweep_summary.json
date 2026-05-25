@@ -1,0 +1,16 @@
+{
+  "total_cells": 81,
+  "n_pass": 46,
+  "n_conditional": 8,
+  "n_fail": 27,
+  "top_pass_cells": [
+    "G-AB-01-C90",
+    "G-AB-02-C90"
+  ],
+  "top_conditional_cells": [
+    "PG-AB-04-C15",
+    "PG-AB-04-C45"
+  ],
+  "data_source": "bybit_demo_ws",
+  "generated_at": "2026-05-25T01:31:37.440242+00:00"
+}
