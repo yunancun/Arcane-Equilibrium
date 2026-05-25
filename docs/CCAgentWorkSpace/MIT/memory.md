@@ -676,3 +676,41 @@ _Last updated: 2026-04-24_
 - Q2: schema 命名 `system` vs 進既有 `governance` — MIT 推薦 system 對齊 PA spec，待拍板
 
 **MIT sign-off**: spec DRAFTED；E1 IMPL + E4 Linux PG dry-run 6 條 + E2 review 後 sign-off
+
+## 2026-05-25 W1-B M4 Pattern Miner Stage 1 Algorithm Spec (Sprint 2 Wave 1)
+
+**Trigger**: Sprint 2 Day 0 dispatch packet §3 Stream B W1-B 任務 — 給 W1-C E1 IMPL 寫 algorithm-level dispatch packet
+
+**Spec**: `srv/docs/execution_plan/2026-05-25--m4_pattern_miner_stage_1_algorithm_spec.md` (907 行)
+
+**核心交付**:
+1. **5 source ingestion**: market.klines (1m-4h × 25 symbol × 90d ~4M row) / trading.fills (engine_mode IN ('live','live_demo') ~65k row) / market.liquidations (含 self-fill 過濾) / market.funding_rates / token unlocks (Sprint 3+ stub)
+2. **5 sub-algorithm IMPL**: Pearson + Spearman rolling cross-corr (statistical) + funding flip + liquidation cascade + large funding spike (event-window)
+3. **5 hard invariant** (E2 cold review): shift(1) leak-free 強制 / HMM-Markov-GARCH 黑名單 / Bonferroni K_total=2500 α=2e-5 / N≥30 event gate / DRAFT≠live per 16#7
+4. **V103 EXTEND 6 attribute writeback contract**: hypothesis_source_module='M4_AUTO' + leakage_scan_pass + bonferroni_corrected_p + replicability_score (0.3 subperiod + 0.4 cross-asset + 0.3 cross-timeframe) + decision_lease_draft_id + cowork_review_status='NONE'
+5. **Rust + Python hybrid placement**: `rust/openclaw_core/src/m4_miner/` (polars + sqlx + rayon hot path) + `helper_scripts/m4/` (scipy/statsmodels orchestration + DRAFT writeback + Decision Lease)
+6. **5 AC (AC-S2-B-1..5)**: 4 source freshness + 5 sub-algo IMPL DONE + leak-free regression test + 30 event gate + V103 6 attribute non-NULL
+7. **5 對抗式 review grep**: shift(1) presence / Bonferroni K hard-coded / HMM-GARCH 黑名單 / engine_mode IN ('live','live_demo') / Decision Lease backref
+
+**ML Pipeline Maturity rating**:
+- 當前 Stage = **Foundation** (V100 base + V103 EXTEND land,writer 待 W1-C IMPL)
+- 升 Skeleton (Sprint 2 末): W1-C IMPL DONE + dry-run pass + cron disabled
+- 升 Shadow (Sprint 3): cron daily 啟動 + DRAFT row 累積但 promote 仍 operator review
+
+**Open Q 待 W1-C IMPL 期間定**:
+- Q1: K_hyp=500 empirical adjustment (第一週後 PA+MIT+QC 仲裁)
+- Q2: Cross-asset feature Sprint 2 vs Sprint 3 ship cadence
+- Q3: Cron freq (daily UTC 00:00 recommended baseline)
+- Q4: 90d 50/50 split 對 event-based hypothesis 不適用 (跳過 subperiod check)
+- Q5: Cross-language 1e-4 fixture 在 E4 regression 階段 (IMPL DONE 後) 跑
+
+**邊界遵守**:
+- Read-only audit + algorithm spec; 不寫 IMPL code (W1-C scope)
+- 不修 V103 SQL (已 land); 不修 design spec 主檔 (引用)
+- 不寫 ADR-0036 主檔 (PA Sprint 1A-γ dispatch);本 spec §2.3 grep invariant 即生效
+- 不依賴 LinUCB / scorer / quantile / mlde (M4 是 statistical miner 不是 ML model retrain)
+
+**Commit**: `7eab15e0` (main, [skip ci]) — pushed to origin
+
+**W1-C E1 IMPL dispatch verdict**: **READY** — 3 自查項 (4 source freshness / GovernanceHub `M4_DRAFT_WRITEBACK` lease type 支援 / cross-lang fixture infra) 為 W1-C IMPL 內自查 + IMPL DONE 後 regression,不阻 W1-C 開工
+
