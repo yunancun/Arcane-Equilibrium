@@ -90,6 +90,36 @@ enabled = false
 max_concurrent_positions = 1
 stop_loss_max_pct_override = 5.0
 
+# Sprint 2 Alpha Tournament Candidate #1 — funding_short_v2 per-strategy override。
+# - enabled=false：與 strategy_params_demo.toml `[funding_short_v2].active=false` 雙保險。
+# - max_concurrent_positions=2：BTC + ETH 各 1 倉位。
+# - stop_loss_max_pct_override=3.0：單筆 short 最大 SL 3%（緊；per memory
+#   project_funding_arb_v2_deprecation_path 1B 3% tight SL 範式）。
+# - take_profit_max_pct_override=2.0：funding-driven 短倉 TP 不需大，2% 即 partial close。
+# - trailing_activation_pct_override=1.0 / distance 0.5：1% 浮盈啟動，0.5% 緊距離。
+[per_strategy.funding_short_v2]
+enabled = false
+max_concurrent_positions = 2
+stop_loss_max_pct_override = 3.0
+take_profit_max_pct_override = 2.0
+take_profit_enforced_override = true
+trailing_activation_pct_override = 1.0
+trailing_distance_pct_override = 0.5
+
+# Sprint 2 Alpha Tournament Candidate #4 — liquidation_cascade_fade per-strategy override。
+# - enabled=false：與 strategy_params_demo.toml `[liquidation_cascade_fade].active=false` 雙保險。
+# - stop_loss_max_pct_override=2.0：fade thesis 期望 1-2% mean-revert；SL > 2% = thesis 失效
+#   （cascade 是 informed selling 非 panic）；緊於 funding_short_v2 3%。
+# - take_profit_max_pct_override=1.5：對齊 strategy 內 take_profit_pct。
+[per_strategy.liquidation_cascade_fade]
+enabled = false
+max_concurrent_positions = 2
+stop_loss_max_pct_override = 2.0
+take_profit_max_pct_override = 1.5
+take_profit_enforced_override = true
+trailing_activation_pct_override = 0.8
+trailing_distance_pct_override = 0.4
+
 [agent]
 trailing_enabled = true
 trailing_activation_pct = 0.8

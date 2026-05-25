@@ -35,6 +35,14 @@ pub use super::strategy_params::{
 // 五個 sibling 策略一致。
 pub use super::funding_harvest::FundingHarvestParams;
 
+// Sprint 2 Alpha Tournament Candidate #1 — FundingShortV2Params。
+// 與 funding_harvest 範式對齊：params 結構放 sub-module，registry 用 re-export 路徑。
+pub use super::funding_short_v2::FundingShortV2Params;
+
+// Sprint 2 Alpha Tournament Candidate #4 — LiquidationCascadeFadeParams。
+// 同範式：params 結構放 sub-module，registry 用 re-export 路徑。
+pub use super::liquidation_cascade_fade::LiquidationCascadeFadeParams;
+
 // Factory fallback helpers used by `registry.rs` when TOML-supplied OI fields
 // fail the mirror validator. Routed through `params::` to match the historic
 // symbol path pre-C4c split.
@@ -93,6 +101,16 @@ pub struct StrategyParamsConfig {
     /// 與 funding_arb V2 (ADR-0018 dormant) 並列為新策略 slot。
     #[serde(default)]
     pub funding_harvest: FundingHarvestParams,
+    /// Sprint 2 Alpha Tournament Candidate #1 — funding_short_v2 directional capture。
+    /// short-only + funding > 30% annualized hard gate；24h max hold；Stage 1 Demo
+    /// 限定 BTCUSDT / ETHUSDT；預設 active=false（per CR-15 5-gate fail-closed）。
+    #[serde(default)]
+    pub funding_short_v2: FundingShortV2Params,
+    /// Sprint 2 Alpha Tournament Candidate #4 — liquidation_cascade_fade mean-revert。
+    /// 5min cascade > per-symbol threshold (BTC $500k / ETH $300k) + fade dominant side；
+    /// Stage 1 Demo 限定 BTCUSDT / ETHUSDT；預設 active=false。
+    #[serde(default)]
+    pub liquidation_cascade_fade: LiquidationCascadeFadeParams,
 }
 
 /// Resolve settings directory: `OPENCLAW_BASE_DIR/settings` or `./settings`.
@@ -142,6 +160,11 @@ fn fail_closed_inactive_config() -> StrategyParamsConfig {
     cfg.bb_breakout.active = false;
     cfg.grid_trading.active = false;
     cfg.funding_arb.active = false;
+    // funding_harvest / funding_short_v2 / liquidation_cascade_fade default 已 = false；
+    // 此處顯式重申是 fail-closed 不變量（exchange-facing pipeline 必全停）。
+    cfg.funding_harvest.active = false;
+    cfg.funding_short_v2.active = false;
+    cfg.liquidation_cascade_fade.active = false;
     cfg
 }
 
