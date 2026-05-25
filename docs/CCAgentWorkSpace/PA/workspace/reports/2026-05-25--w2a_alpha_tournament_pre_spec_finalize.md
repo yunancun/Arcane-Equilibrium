@@ -871,3 +871,63 @@ W1-A spec §7 DRAFT writeback schema 錯誤（CRITICAL-1）+ track 值錯誤（C
 **Report END**
 
 PA DESIGN DONE: report path: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-25--w2a_alpha_tournament_pre_spec_finalize.md`
+
+---
+
+## Step X — PM Decision 拍板 Option A — closure note
+
+**Date**: 2026-05-25
+**Source**: PM decision in W1-A inline amend dispatch task
+
+### PM 決策
+
+PM 拍板 **Option A（inline amend）**，不退回 W1-A revise：
+- 採 §§3 + §4 修正版 schema：V103 EXTEND actual 6 column + `track = 'direct_exploit'`
+- W1-A spec § 不全部 redrive；只動 2 spec 的 §7.1 + §7.3/§7.4 + 加 Changelog block
+
+### 執行確認
+
+1. **funding_short_v2 spec amend**：
+   - `srv/docs/execution_plan/2026-05-25--alpha_candidate_1_funding_short_v2_spec.md`
+   - §7.1 track value `'alpha_short_carry'` → `'direct_exploit'` ✅
+   - §7.3 INSERT target `learning.m4_hypotheses_extended` → `learning.hypotheses` + V103 EXTEND 6 real column ✅
+   - 加 Changelog v1.1 footnote ✅
+
+2. **liquidation_cascade_fade spec amend**：
+   - `srv/docs/execution_plan/2026-05-25--alpha_candidate_4_liquidation_cascade_fade_spec.md`
+   - §7.1 track value `'alpha_microstructure_fade'` → `'direct_exploit'` ✅
+   - §7.4 INSERT target → `learning.hypotheses` + V103 EXTEND 6 real column ✅
+   - 加 Changelog v1.1 footnote ✅
+
+3. **V101 ENUM SSH empirical verify**：
+   ```
+   $ ssh trade-core "psql ... -c \"SELECT enum_range(NULL::strategy_track);\""
+   {direct_exploit, asds_factory, baseline}
+   ```
+   注意：ENUM type 名稱 = `strategy_track`（非 `strategy_track_enum`，本 report §1.2 原 SQL `enum_range(NULL::strategy_track_enum)` syntax 不完全準確；ENUM 值正確）。
+
+### W2-B E1 IMPL dispatch readiness verdict 更新
+
+| 維度 | Status (W2-A finalize) | Status (Step X closure) |
+|---|---|---|
+| Algorithm spec / Rust struct skeleton / TOML / 5-gate / look-ahead bias / AC | ✅ ALL GREEN | ✅ unchanged |
+| §10 P0 precondition 4/4 + 5-gate | ✅ ALL PASS | ✅ unchanged |
+| CRITICAL-1 schema drift（`learning.m4_hypotheses_extended` 不存在）| 🔴 BLOCKER | ✅ **CLOSED** (W1-A spec inline amend v1.1) |
+| CRITICAL-2 ENUM drift（`alpha_short_carry / alpha_microstructure_fade` 不存在）| 🔴 BLOCKER | ✅ **CLOSED** (W1-A spec inline amend v1.1) |
+| W2-B E1 IMPL dispatch readiness | CONDITIONAL READY | **DISPATCH-READY** |
+
+### W2-E E2 review grep guard（必跑）
+
+W2-E E2 review 強制 grep：
+```
+grep -rn 'm4_hypotheses_extended' src/ helper_scripts/ tests/         # MUST 0 hit
+grep -rnE 'attribute_(n|p_value|effect_size|subperiod_stable|graveyard_flag|cluster_silhouette)' src/ helper_scripts/ tests/  # MUST 0 hit
+grep -rnE 'alpha_short_carry|alpha_microstructure_fade' src/ helper_scripts/  # MUST 0 hit
+```
+任一 hit → IMPL CRITICAL FAIL → 退 W2-B IMPL revise
+
+### closure verdict
+
+W2-A pre-spec finalize report + W1-A 2 spec v1.1 amend = **W2-B E1 IMPL DISPATCH-READY**。
+
+Step X closure done 2026-05-25 by PA inline amend task per PM Option A decision.
