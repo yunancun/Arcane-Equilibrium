@@ -1,5 +1,42 @@
 # PA Memory — 工作記憶
 
+## Sprint 2 Day -1 3-spec dispatch（2026-05-25）
+
+**觸發**：operator 任務 — 3 個 spec 並行 (1) H-2 cron 復原 (2) M-4 sub-agent hygiene SOP (3) EA-3 funding_arb SL gate「P1 hot-fix」
+
+**3 spec verdict**：
+
+1. **H-2 cron 復原** (`docs/execution_plan/2026-05-25--h2_cron_restoration_spec.md`)
+   - SSH crontab 驗：13 cron 全 disabled 2026-05-21；唯一活著 = `edge_estimate_snapshots_cycle_cron.sh`（hourly @12）
+   - 分級：4 HIGH/MED Sprint 2 阻派發 must Day -1 enable（counterfactual + symbol_universe + ml_training + edge_label_backfill）
+   - 5 SHOULD Day 0 enable（panel_aggregator + wave9_replay + replay_key + feature_baseline + halt_audit + logrotate）
+   - 3 DEFER 不復原（microstructure high noise / blocked_symbols_30d 不 trigger / passive_wait 手動代）
+   - **修正 E5 audit ml_training 分級**：per memory `project_2026_05_09_ml_training_cron_weekly` 確認 hybrid（5 training daily + 5 audit weekday=6 gate），非 weekly；應 Day -1 enable
+   - Operator 動作：method A 手動 `crontab -e` 移除 `# DISABLED_OPENCLAW_20260521` 前綴，禁 sed pattern
+   - 治理 follow-up（Sprint 2 內並行）：setup_openclaw_cron.sh + crontab 納入 git，防再發
+
+2. **M-4 sub-agent hygiene SOP** (`docs/agents/sub-agent-hygiene-sop.md`)
+   - 禁 cargo build/test/check --release on trade-core（本 sprint 已 3 次 race）
+   - sub-agent 角色分類：7 read-only OK（QC/MIT/E5/E3/FA/BB/A3）/ 3 必走 Mac SSOT（E1/E2/E4）/ 3 邊界（PA/PM/CC）
+   - 8 個 sub-agent prompt template 加 hygiene 警示段落（通用 + 角色 specific）
+   - 主會話 enforcement flow（race detect → STOP → E1 atomic restart 修復 → E5 post-fix audit → PASS 續派）
+   - Defense-in-depth：Layer 1 prompt template enforce（Sprint 2 用）/ Layer 2 cargo wrapper script（defer Sprint 3）/ Layer 3 atomic restart only
+   - 期望 effect：cargo race 從 3 次/sprint → ≤1 次/sprint（80% 改善）
+
+3. **EA-3 funding_arb SL gate** (`docs/execution_plan/2026-05-25--ea3_funding_arb_sl_gate_p1_hotfix_spec.md`)
+   - **PA 重新分級 = LOW（非 bug；reject QC P1 hot-fix）**
+   - PA 親讀 evidence：risk_config_demo.toml `stop_loss_max_pct=25.0` + `base_ratio=0.25` → demo dyn_stop floor = 6.25%；6.29% fill = floor + 0.04pp 設計範圍內
+   - Sentinel test `risk_checks_per_strategy_tests.rs:444-508` 已鎖定本 case（FA F2 RCA OQ-4）
+   - funding_arb 三端 active=false 自 2026-05-03（per memory `project_funding_arb_v2_deprecation_path`）
+   - QC verdict 誤讀拆解：「3% risk_config hard cap」混淆 position sizing target 與 SL gate；「5% SL gate」不存在於 demo TOML
+   - 推薦 Path A（reject + reclassify P3 doc-only）；Path B 可選 ~10 min doc clarification；Path C deprecate funding_arb defer 獨立 ticket
+   - PA push back QC：要 QC 提供 (a) 5% gate codebase source (b) 對 sentinel test 註釋反駁 (c) 5/16 fill 時間戳（active 期還是 dormant 期）
+
+**教訓**：
+- **QC verdict 不能 inline 升級不經 PA 真實 codebase 驗**（5% gate / 3% cap 是 verdict author 自外部認知，沒對 codebase grep）
+- **read-only SSH probe 比 spec 階段 dispatch 多 sub-agent 高效**（3 spec 並行只需 PA 一輪 evidence collection）
+- **sentinel-locked design value 必加 cross-ref 到上游 doc**（risk_config_demo.toml 應 inline 註釋 sentinel test 路徑，防 verdict author 重蹈 EA-3 誤讀）
+
 ## Sprint 5+ Wave 1 §8.3 §4.2.2-4 cascade design（2026-05-23）
 
 **觸發**：Stage F §8.3 carry-over operator 拍板「3 項全頃現在 dispatch」。
