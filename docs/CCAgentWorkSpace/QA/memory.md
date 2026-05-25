@@ -386,6 +386,35 @@ Round 5 曾預警 round 6 可能再被「/finalize 拒接 subprocess_pid IS NULL
 
 | 報告 | 日期 | 關鍵發現 |
 | 2026-05-04 REF-20 Sprint A R3 round 6 FINAL | 2026-05-05 02:05 | **PASS — Sprint A 達成**；6 layer blocker chain 100% 清；4 表 acceptance 4/4 GREEN（first-ever simulated_fills + report_artifacts）；Wave 9 safety GREEN（0 trading.fills leak / 0 critical audit / FK 4/4 valid）；Layer 7 預警 NOT triggered；唯一邊角警告 strategy_name_missing manifest_jsonb (non-BLOCKER, Sprint B 處理); push back PM 進行 close commit + Sprint B 派工 |
+| 2026-05-25 W1-G AC-19 ALT bucket 14d monitor SOP | 2026-05-25 | **PASS (AC-S2-E-1 + AC-S2-E-4)** — SOP land 含 Wilson CI 95% inline SQL + cron wrapper spec + 3 級 verdict trigger (PASS≥30% / MARGINAL 20-30% / FAIL<20%) + spec §4.3 Option α (ATR-aware adaptive offset) / β (BB depth audit → demote ALT to live-only)；day 7 empirical re-verify: ALT 35/9/23 = 25.7%, Wilson lower **14.1%** << 30% gate → WARN trajectory；large_cap 6/4/1 = 66.7%；4 個 AC: E-1 SOP ✅ / E-2 pending E1 IMPL (3 helper + crontab paste) / E-3 pending 6/2 final verdict / E-4 ✅；caveat §5.2 demo-vs-mainnet drift 明示；只 15 ALT 有 close_maker_attempt (1 ALT symbol 0 attempts)；OPUSDT 重 sample (n=10) 拖低 ALT bucket。報告：`srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-25--ac19_alt_bucket_14d_monitor_sop.md` |
+
+## 教訓（2026-05-25 W1-G AC-19 ALT bucket SOP）
+
+### 1. Wilson CI 95% lower bound 對小樣本 fail-rate gate 必要
+- ALT n=35 / p_hat=0.257 → Wilson lower **14.1%**；naive 25.7% 看似 marginal，Wilson lower 揭示真實統計顯著程度離 30% gate 還很遠
+- 對小 n 高方差 binomial，必用 Wilson 不用 normal approximation（z·sqrt(p(1-p)/n) 在 p→0/1 / n 小時 normal 會給出 < 0 lower）
+- Wilson CI 95% formula: `(p_hat + z²/2n ± z·sqrt(p_hat(1-p_hat)/n + z²/4n²)) / (1 + z²/n)`；z=1.96 for two-sided 95%
+- SQL 內須 `GREATEST(..., 0)` 防 floating point SQRT 負數 panic
+
+### 2. SOP 只寫 SQL + cron line spec，不 IMPL helper script
+- QA 邊界 = SOP doc author；E1 邊界 = IMPL（helper script + crontab edit）
+- SOP 寫到 "spec only — not written by QA" 明示
+- 過去 round 5 教訓 (route_helpers self-fix vs push back) 對齊 — 知道 IMPL 不執行 IMPL
+
+### 3. 14d window expiry trigger 必 documented + clock 預設
+- 2026-05-19 → 2026-06-02 14d clock；day 7 (今日) 是 baseline + start cron daily fire 後最快 day 8 開始才能進 jsonl
+- final verdict 是 manual 觸發 by QA at 6/2，不應放 cron 自動 verdict（避免 silent verdict drift）
+- cron wrapper script 可加 idempotent expiry check (day > 14 skip + log "window expired")
+
+### 4. demo-vs-mainnet drift caveat 必明示
+- ALT bucket 在 demo book depth 可能比 mainnet 更薄 (per BB Q1 prior + PA Phase 1b §4.4)
+- 6/2 final verdict 即使 FAIL 也不能直接 extrapolate 到 mainnet 必 FAIL
+- 必 §5.2 明寫 caveat + 6/2 verdict 必 reference 此 caveat
+
+### 5. 對抗 SQL 必 ts >= 起點 AND ts <= 終點（明確 timestamptz UTC）
+- 不要只寫 `ts > '2026-05-19 00:00:00'`（無 timezone literal 易導 server TZ 解析錯）
+- 必 `'2026-05-19 00:00:00+00'::timestamptz` 強制 UTC（per 2026-05-11 W-C re-audit 教訓 #1 時區陷阱）
+- 14d 終點 cap `ts <= '2026-06-02 00:00:00+00'::timestamptz` 必加，避免 cron 在 6/3+ 仍累積
 
 
 ## 2026-05-11 W-C MAG-082 Stage 2 RE-AUDIT — PASS
