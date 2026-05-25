@@ -39,6 +39,12 @@ pub mod klines;
 // canary stage promotion 提供專用 LeaseScope::CanaryStagePromotion variant 與
 // CanaryStageTransition row payload。
 pub mod lease_scope;
+// W1-C M4 Pattern Miner Stage 1 (per docs/execution_plan/2026-05-25--m4_pattern_miner_stage_1_algorithm_spec.md):
+// 自監督統計 hypothesis discovery 模組 hot-path computation — leak-free rolling
+// cross-correlation + event-window analysis + Bonferroni K=2500 correction。
+// Rust 端只算 statistic（pure compute，無 PG I/O）；DRAFT writeback 走 Python
+// 端 helper_scripts/m4/ 寫入 learning.hypotheses 表（V100 + V103 EXTEND 6 column）。
+pub mod m4_miner;
 pub mod portfolio;
 pub mod risk;
 pub mod signals;

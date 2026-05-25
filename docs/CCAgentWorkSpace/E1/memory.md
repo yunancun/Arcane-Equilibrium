@@ -12533,3 +12533,48 @@ P A 引用 line 範圍錯。
 **教訓**：unit test fixture 必須鏡像真實 loader/上游模塊 boundary 不變量，否則 silent bug 沉默通過。EA-1 verdict §2.5 catch 此 root cause — 「synthetic test fixtures whose tick_window construction does not exercise the same drift_start = fill_ts + 60s boundary」── 本 fix 直接補上 regression guard。
 
 **未 commit**：等 PM 統一 commit + push（per chain E1→E2→E4→QA→PM）；待 E2 1-pass review。
+
+## 2026-05-25 — W1-C M4 Pattern Miner Stage 1 Rust+Python Hybrid IMPL Scaffold
+
+W1-B MIT spec (`docs/execution_plan/2026-05-25--m4_pattern_miner_stage_1_algorithm_spec.md` 907 lines, commit 7eab15e0) → W1-C E1 IMPL scaffold。
+
+**範圍**：M4 Pattern Miner Stage 1 自監督統計 hypothesis discovery — 從 5 source 挖 alpha candidate 寫 DRAFT 進 `learning.hypotheses`（V100 base + V103 EXTEND 6 column）。
+
+**改動清單 (~3411 LOC, 0 production code change to existing module)**：
+- Rust `rust/openclaw_core/src/m4_miner/` 新 sub-module 8 file (1511 LOC)：mod.rs + types.rs + feature_engineering.rs + cross_correlation.rs + event_window.rs + bonferroni.rs + tick_window.rs（含 inline unit tests，46 test pass）
+- Python `helper_scripts/m4/` 14 file (~1900 LOC)：pattern_miner_stage_1.py (主 entry) + 5 source loader (kline/fills/liquidations/funding/token_unlocks_stub) + 4 algorithm (cross_correlation/event_window/bonferroni/effect_size) + attribute_enforcer + draft_writer + feature_engineering_validator + tests/test_m4_leakage_regression.py (51 test pass)
+- `rust/openclaw_core/src/lib.rs` 註冊 `pub mod m4_miner`（既有 module 0 改動）
+
+**5 hard invariant 強制（W1-B spec §0）**：
+- I-1 shift(1) leak-free：Rust `shift1_rolling_*` 命名 + 函式體不含 current bar；Python `shift1_rolling_mean_pure_python` 對齊；feature_engineering_validator.is_leaky_sql + is_leaky_pandas regex
+- I-2 黑名單禁用：HMM/Markov/GARCH 0 production import；comment 標「禁用」3 處（per ADR-0036）
+- I-3 Bonferroni K=2500：Rust + Python 同 hard-code `BONFERRONI_K_TOTAL = 2500`，ALPHA_CORRECTED = 2e-5
+- I-4 event N>=30 硬 gate：Rust + Python event_window_sample_gate 強制 'exploratory' 不可繞
+- I-5 不 auto-promote past 'preregistered'：types.rs `PatternDraft::new` + draft_writer.py `build_writeback_payload` 雙端白名單 reject test pass
+
+**Mac SSOT verify**：
+- cargo test -p openclaw_core --lib: **416 pass / 0 fail**（m4_miner 46 + 既有 370）
+- pytest helper_scripts/m4/: **51 pass / 0 fail**
+- main entry --dry-run: 4 source query built + 1 stub fail-loud raise + summary 完整
+- pre-existing baseline failure: `openclaw_engine::layer_2_fence_archive_policy_diagnostic_only` 與本改動無關（驗 `git stash` 後仍 fail）
+
+**5 對抗 grep 自驗（W1-B spec §9 / W1-C step 6）**：
+1. rolling 沒 shift(1)：Python 2 hit 全在 test fixture 標 leaky/clean 對照；Rust hit 全在 `shift1_rolling_*` 命名或 mod.rs comment（0 production violation）
+2. HMM/Markov/GARCH：0 import，4 處 hit 全在 comment 標「禁用」
+3. K_TOTAL：Rust BONFERRONI_K_TOTAL=2500 + Python 同；ALPHA_CORRECTED=2e-5 對齊
+4. engine_mode：0 單獨 `='live'`；fills_loader SQL 強制 `IN ('live', 'live_demo')`
+5. promote past：白名單 reject test 雙端 pass
+
+**設計決策**：
+- 不引 polars / sqlx / rayon / statrs（W1-B spec §5.1 列為 dep）— scaffold 階段 keep dep clean，用 pure Rust slice + manual stat 實裝。Sprint 3 接 cron + 1M+ row 真實 batch 時再評估 polars hot-path optimization 必要性。
+- 不引 PyO3 binding — Rust/Python 各語言獨立實裝 + SSOT 對齊 1e-4（pure Python rolling vs pandas-mimic 已驗）；真實 cross-language fixture 由 W2-D MIT 接 cron wire-up 後跑 `srv/tests/test_m4_cross_language_fixture.py`
+- 不在 trade-core 跑 cargo（per M-4 hygiene SOP）— Mac 完整 cargo test SSOT
+- GovernanceHubInterface stub：scaffold 階段 local UUID lease；Sprint 3 W2-D MIT 接 ai_service.py IPC JSON-RPC
+
+**不確定 / Sprint 3 follow-up（不阻 W1-C IMPL closure）**：
+- W1-B §7 PG empirical verify SQL（V100 base + V103 EXTEND 6 column reflection + 4 source freshness）— Mac scaffold 階段不執行，需主會話 ssh trade-core 跑（per `feedback_v_migration_pg_dry_run`）
+- GovernanceHub `M4_DRAFT_WRITEBACK` lease type 真實註冊 — Sprint 3 W2-D MIT 接 IPC 時驗
+- Cron schedule wire-up — Sprint 2 末週 land (default disabled) per W1-B spec §12
+
+**教訓**：Rust 不需要全部上 polars/sqlx 才能 IMPL — scaffold 階段以「algorithm correctness + invariant verify + unit test」為主，performance optimization 推遲到 cron wire-up 後做 benchmark-driven。新建 module dep 0 改動是「最小影響」原則的最佳化實踐。
+
