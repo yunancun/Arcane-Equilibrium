@@ -4511,3 +4511,75 @@ prompt 預期 1 fail (`layer_2_fence_env_gate_three_states` / `btc_lead_lag_pane
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-23--sprint_5plus_wave_1_phase_d_combined_regression.md`
+
+## 2026-05-25 — W2-E4 Sprint 2 Wave 2 regression — PASS
+
+### Task
+Sprint 2 v5.8 Stream B Wave 2 W2-E4 regression：V109 schema (W1-F) + V109 writer skeleton (W2-D) + W1-C M4 round 2 三件並行 verify。W2-E E2 verdict d15cbe56 對 V109 + W2-D APPROVE → E4；M4 W1-C-R2 mid-flight commit 99709a2f land 期間 closure。
+
+### Verdict
+**PASS** — 0 W2-attribution failure · cargo 1 pre-existing fail（Sprint 1B Earn 875de212 scope leak）+ pytest 7 pre-existing fail（W-AUDIT-7c structural drift carry-over）。
+
+### Numbers
+| Surface | Result | Baseline (Sprint 5+ Wave 1 Phase D HEAD c4e1411d) | Delta | Non-flaky |
+|---|---|---|---|---|
+| Mac cargo --workspace --release × 2 + recount × 1 | 4205 / 1 / 6 | 4018 / 0 / 5 | +187 / +1 / +1 | ✅ 三遍同綠 |
+| Mac pytest × 3 (--ignore both pure_utils collisions) | 6158 / 7 / 45 | 6122 / 18 / 30 | +36 / -11 / +15 | ✅ 三遍同綠 |
+| W2-D anomaly_event_writer cargo (× 2) | 14 / 0 | – | – | ✅ |
+| W1-C-R2 openclaw_core lib | 416 / 0 | 416 / 0 | 0 (m4 已內含) | ✅ |
+| W1-C-R2 m4_miner subset | 46 / 0 | – | – | ✅ |
+| W1-C-R2 helper_scripts/m4 pytest | 70 / 0 | 51 / 0 | +19 schema-grep regression | ✅ |
+| V109 PG col_count | 23 | 23 (W1-F-retry verdict) | 0 | ✅ |
+| V109 PG hypertable num_dim | 1 | 1 | 0 | ✅ |
+| V109 PG indexes count | 6 | ≥ 5 | – | ✅ |
+| V109 PG compression+retention | 1 + 1 | 1 + 1 | 0 | ✅ |
+
+### Hard boundary + safety verify
+- git diff origin/main~10..origin/main hard boundary scan (live_execution_allowed/system_mode/authorization.json) = **0 hits** ✅
+- nm release binary mock/spike infiltration = **0 hits** ✅
+- /Users/ncyu / /home/ncyu hardcode in W2 scope = **0 hits** ✅
+- unsafe block in W2 scope = **0 hits** ✅
+- file size cap 800/2000 W2 scope = 全合規 (event_window.rs 344 / anomaly_event_writer < 800 / V109.sql 832) ✅
+
+### 1 cargo fail attribution = Sprint 1B Earn 875de212 sibling scope leak
+- Fail: `layer_2_fence_archive_policy_diagnostic_only` line 300 panic
+- Root cause: 875de212 (2026-05-23 Sprint 1B Earn Wave B) 改 btc_lead_lag_panel_fence_integration.rs test 從 PAPER=1→spawn 改為 PAPER=1→ignored；但 production helper btc_lead_lag.rs:67-71 未同步改 → contract drift
+- `git show --stat ae9a2dd8 a8d4bfa8 99709a2f 16796d13 | grep btc_lead_lag` = 0 hit → **0 W2 attribution**
+- 修法：E1 一行修 btc_lead_lag.rs:67-71 `Ok(value) => value.trim() == "1"` → `Ok(_) => false`（PAPER 進 archive policy）；MEDIUM 不阻 W2 deploy
+
+### 7 pytest fail attribution = W-AUDIT-7c carry-over
+全 7 file list = test_confirm_modal / test_docs_readme / test_event_consumer_split / test_prompt_modal / test_strategy_action × 2 / test_v072 writer。W2 4 commit 觸碰範圍純 helper_scripts/m4 + rust/openclaw_core/m4_miner + rust/openclaw_engine/database/anomaly_event_writer.rs + sql/migrations/V109 → 0 overlap with 7 fail file。0 W2 attribution。Sprint 1B-late 28 → Phase D 18 → 本 E4 7，sweep 持續 chip down。
+
+### Mid-flight commit observation
+W1-C-R2 99709a2f land 在 E4 run 期間（19:10:39 介於 E4 start ~19:06 與 final verify 之間）— sub-agent acd7ed4b3512e093e 完成同步 commit。Run 2 + Run 3 post-R2 環境跑同綠（4205/1/6）= non-flaky verify。E4 verdict 對齊最後 HEAD = 99709a2f。Per `feedback_multi_session_memory_race` SOP「不認識改動禁 revert」原則執行。
+
+### release binary 19:06 build 不含 W2-D + W1-C-R2
+strings grep 0 hit anomaly_event_writer / m4_miner = **expected per task spec Step 5** (本 step 是 baseline check 不是 deployment gate)。Production deploy 走 `helper_scripts/restart_all.sh --rebuild --keep-auth` atomic restart 後才會 bake；E4 verdict = source-land PASS。
+
+### V109 production-LIVE 但不在 _sqlx_migrations
+PG max=112 / count=102 不含 V109，但 anomaly_events 表已物理 land 23 col + hypertable + 6 index + 2 policy。V109 同 V106/V107/V112 走 raw `psql -f` apply path 不經 sqlx_migrate（per Sprint 1A-ζ memory）。
+
+### W2-D dispatch deployment readiness
+| Gate | Status |
+|---|---|
+| E1 IMPL DONE | ✅ a8d4bfa8 |
+| E2 cold review APPROVE | ✅ d15cbe56 |
+| E4 regression PASS | ✅ (本 E4) |
+| Atomic restart | ⏳ pending PM dispatch |
+| Post-restart proc-exe alignment + sha256 verify | ⏳ |
+| Post-restart strings grep anomaly_event_writer | ⏳ |
+| Post-restart PG INSERT smoke | ⏳ |
+
+### W1-C M4 不阻 V109 deploy 條件確認
+W1-C M4 與 V109 解耦（per E2 §9.2）— V109 schema 純 hypertable land；W2-D writer 0 dependency on M4 cron readiness；W1-C M4 scaffold 階段 cron disabled。99709a2f closed E2 HIGH+MEDIUM+LOW 全 finding → W1-C 可進 E2 round 2 re-review。V109 + W2-D 可獨立 atomic restart deploy。
+
+### 教訓 (本次 6 條新增)
+1. **cargo workspace +187 attribution breakdown**：W1-C 46 + W2-D 14 + W1-C-R2 19 schema-grep = 79；剩下 +108 是 sibling Sprint 1B Earn Wave B/C bbb21c56 + 875de212 lib growth；E4 報告必列 per-component attribution 不只 single number diff。
+2. **W1-C-R2 mid-flight land 是 multi-session race 警示**：E4 開始 3 unstaged file，run 中途 99709a2f commit land 吸收；HEAD 變化必 re-verify baseline；本 E4 run 2 + run 3 post-R2 fresh verify。
+3. **layer_2_fence test rewrite 不同步 prod helper 是 contract drift pattern**：875de212 改 test 但 0 diff prod btc_lead_lag.rs:67-71；E1 amend test 前 grep prod 端定義 對齊 1 處。
+4. **strings 0 hit 不是 deployment fail，是 build 時序**：release binary 19:06 < W2-D 18:59 commit；atomic restart 後才會 bake；E4 verify 包含「expect 入 release」vs「expect 未 deploy」兩種模式判定。
+5. **pytest fail chip down 18 → 7 across Sprint**：Sprint 1B-late 28 → Phase D 18 → 本 7 是固定 sweep 累積；每 Sprint 開頭「contract drift sweep」固定 slot 已見效。
+6. **--ignore=tests/misc_tools 不夠，需加 tests/ml_training**：3 個 test_pure_utils.py（local_model_tools / misc_tools / ml_training），兩 collision 對 → E4 baseline 對齊命令必加兩 --ignore；Sprint 5+ Wave 1 Phase D 漏 ml_training（1 collection error 被計成 single fail 而非 baseline 對齊問題）。
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-25--w2e4_sprint_2_wave_2_regression.md`
