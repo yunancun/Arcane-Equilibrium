@@ -12627,3 +12627,38 @@ W1-B MIT spec (`docs/execution_plan/2026-05-25--m4_pattern_miner_stage_1_algorit
 - Linux PG empirical INSERT roundtrip — 主會話 ssh trade-core 跑（per `feedback_v_migration_pg_dry_run`）
 - Cap policy boundary（≥ 2）仲裁 — Sprint 3 empirical 收集後 PM + PA + QC 拍板
 
+
+---
+
+## 2026-05-25 — W1-C Round 2 M4 source loader schema drift fix（per W2-E E2 RETURN-TO-E1 verdict）
+
+**任務**：W2-E E2 cold review (commit d15cbe56) catch M4 IMPL 5 個 schema-incorrect column → RETURN-TO-E1。修 5 column drift + 補 schema-grep regression + tick_window unwrap cleanup。
+
+**Root cause**：W1-C IMPL 階段 E1 自行猜 trading.fills + market.liquidations column 名（per W1-B spec 草稿 illustrative pseudo-schema），未走 `feedback_v_migration_pg_dry_run` SOP 先 ssh trade-core 跑 `\d trading.fills` + `\d market.liquidations` empirical reflection。Mac scaffold 51 pytest 全 PASS 是因為 0 個 test 真正 grep SQL string column 名；Mac dry-run 不 connect PG，5 column drift 不會立即觸發 runtime RAISE。
+
+**5 schema column 修正**（empirical PG 2026-05-25）：
+- trading.fills: `size` → `qty`；`close_fill = TRUE` → `entry_context_id IS NOT NULL`；`realized_net_bps` → `realized_pnl` (source) + `(realized_pnl / NULLIF(price * qty, 0)) * 10000 AS realized_net_bps` (derived alias)；`close_reason_code` → `exit_reason`
+- market.liquidations: `liq.size` → `liq.qty`；`aggregator_type IN ('top_liq_30s','cascade_5min')` filter 完全移除（empirical PG 0 column；cascade 偵測走 caller-side algorithms/event_window.detect_liquidation_cascade_events 5min rolling）
+
+**Mac SSOT verify**：
+- pytest helper_scripts/m4/: 70 passed (51 existing + 19 new schema-grep)
+- cargo test --release -p openclaw_core --lib: 416 passed / 0 failed (baseline 不退)
+- cargo test --release -p openclaw_core --lib m4_miner::tick_window: 7/7 PASS (after unwrap → if let Some refactor)
+- 5 self-grep（fills.size / fills.close_fill / fills.realized_net_bps standalone / liq.size / liq.aggregator_type）SQL 代碼 0 hit；comment 中有 reference 是 traceability 設計
+- Linux PG empirical SQL: fills_loader 3 row return ✅；liquidations_loader 3 row return ✅；0 ERROR
+
+**3 個關鍵教訓**：
+
+1. **PG-coupled source loader 必先 empirical reflection 再 IMPL**（per `feedback_v_migration_pg_dry_run` 2026-05-05 教訓二次強化）：W1-B spec § illustrative SQL 不是 SSOT；empirical PG `\d table` 才是。任何 source loader land 前必 ssh trade-core 跑 schema reflection 一次。
+2. **Mac mock pytest catch 不到 SQL column 名 drift**：Python 端 SQL 是 string；只 grep `engine_mode IN(...)` whitelist 之類 invariant，不 grep column 名 → 51 PASS 假象。MED-1 補的 schema-grep regression test (test_source_loader_schema.py 19 test) 是必要安全網。
+3. **spec 與 PG empirical 衝突時 empirical 是 SSOT**：W1-B spec line 97-99 + line 117-118 寫了 illustrative `size / close_fill / realized_net_bps / aggregator_type`，但這是 PA 草稿期未對齊 PG 的 pseudo-schema；E1 不能盲信 spec 列出的 column 名，必須走 empirical PG 對齊。
+
+**設計決策**：
+- realized_net_bps derived 用 `realized_pnl / NULLIF(price * qty, 0) * 10000`：表 notional bps；NULLIF 防除以零；realized_pnl NULL（DEFAULT 0 但歷史可能）由 caller dropna 處理
+- close-fill 判定走 `entry_context_id IS NOT NULL`（canonical per edge_label_backfill.py）：對 M4 場景 close fill = forward return basis；entry fill 沒 forward return 意義
+- aggregator_type 完全移除而非 stub default：market.liquidations 純 raw event 表，cascade aggregation 在 algorithm 層；不在 source 層偽造 column
+- tick_window.rs:64 unwrap → if let Some(...) early return：邏輯等價但更 idiom；Rust unwrap 僅限不可恢復場景 (per E2 profile guideline)
+
+**Carry-over（Sprint 2 末 W2-D MIT 接 cron 時驗）**：
+- realized_pnl NULL row 在 caller 端 dropna 行為對 forward return 計算 sample size 影響評估
+- close fill 統計（entry_context_id IS NOT NULL 比例）若 < 期望（per W-AUDIT-4b-M2 backfill ratio 95%）會影響 M4 sample size，需收集 baseline metric

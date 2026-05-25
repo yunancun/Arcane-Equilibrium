@@ -61,17 +61,20 @@ impl TickWindowAggregator {
         kahan_add(&mut self.running_sum_sq, &mut self.running_sum_sq_c, value * value);
         self.buffer.push_back(value);
         if self.buffer.len() > self.capacity {
-            let evicted = self.buffer.pop_front().unwrap();
-            kahan_add(&mut self.running_sum, &mut self.running_sum_c, -evicted);
-            kahan_add(
-                &mut self.running_sum_sq,
-                &mut self.running_sum_sq_c,
-                -evicted * evicted,
-            );
-            Some(evicted)
-        } else {
-            None
+            // 為什麼 if let Some 而非 unwrap：上面 len > capacity guard 邏輯上保證
+            //   pop_front 必返 Some，但 unwrap 違反 E2 profile「unwrap 僅限不可
+            //   恢復場景」guideline。if let 是等價且更 idiom 的寫法。
+            if let Some(evicted) = self.buffer.pop_front() {
+                kahan_add(&mut self.running_sum, &mut self.running_sum_c, -evicted);
+                kahan_add(
+                    &mut self.running_sum_sq,
+                    &mut self.running_sum_sq_c,
+                    -evicted * evicted,
+                );
+                return Some(evicted);
+            }
         }
+        None
     }
 
     /// 當前 mean — O(1)。
