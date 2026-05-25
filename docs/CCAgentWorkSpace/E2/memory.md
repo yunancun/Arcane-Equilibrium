@@ -3860,3 +3860,29 @@ Round 1 RETURN 4 finding (HIGH-1 + MEDIUM-1/2/3) + 2 LOW optional 全修。HEAD 
 5. **Multi-source-loader common pytest pattern — parametrize cross-loader blacklist**: `test_no_loader_uses_illegal_column[illegal_token]` parametrize 跨 4 source loader 同步 grep 黑名單 column — 1 行 test parametrize 防 4 個 loader 任一引入 schema 違規。任何 future source loader 加入時用 `import` 後 parametrize 自動 cover。
 
 ---
+
+## 2026-05-25 W2-E-R3 — W1-C-R3 draft_writer schema fix + PM 3 push back
+
+**對抗審核結果**：APPROVE-WITH-CONDITIONS（commit `b2febd43` 可 land 但 Sprint 2 cron production fire 前需 PA spec amend 1 HIGH）
+
+**3 push back verdict**（E1 對 PM Option B）：
+1. `evidence_json` column → E1 全對（SSH PG empirical 19 column 0 hit；W1-A spec §7.3 + V103 EXTEND §2.2 都未要求）
+2. `cowork_review_status='PENDING_REVIEW'` → E1 全對（PG CHECK enum = NONE/PENDING/APPROVED/REJECTED；'PENDING_REVIEW' 會撞 CHECK 違規）
+3. `decision_lease_draft_id 'TEXT or NULL'` → E1 部分對（PG 真實 type=UUID 非 TEXT；nullable=YES 但 application-level fail-loud 鎖 non-NULL 是 audit chain 16#8 必要）
+
+**核心教訓 — PM dispatch packet 文字精度問題**：W1-C-R3 揭露 PM Option B 文字「evidence_json column / PENDING_REVIEW enum / decision_lease_draft_id 'TEXT or NULL'」3 處詳細與 production PG empirical 不符。E1 用 SSH PG `\d learning.hypotheses` + V103 EXTEND spec + V100 base spec 三軌交叉驗 catch。將來 dispatch packet 內提到 schema column / enum / type 細節時 PM/PA 應先 SSH PG empirical verify 一次再下發。
+
+**HIGH 發現 — replicability_score 公式 spec 不一致**：E1 IMPL `_compose_replicability_score = 0.4*|d|/3 + 0.3*subperiod + 0.3*silhouette`；W1-B alg spec §4.3 line 469-485 定義 `0.3*subperiod + 0.4*cross_asset/25 + 0.3*cross_timeframe/5`；W1-A spec §10.2 line 630 寫「跨 sub-period + cross-asset / cross-timeframe robustness」。E1 公式 invent 因 Sprint 2 ship 1-asset / same-timeframe（spec line 813）無 cross_asset / cross_timeframe 數據可用。Pragmatic workaround 但 spec drift。E1 自我標記 §8.1 Open Q3 + `build_audit_metadata` 保留 raw 6 attribute 值供 Sprint 3 retroactive recompute → 可接受 mitigation。
+
+**反模式 — sub-agent 在 spec 內部不一致時自行 invent formula**：發現 spec §4.3 公式定義與 §10 Sprint 2 ship scope 矛盾時，E1 應該 raise 4th push back 給 PM 而非 invent formula。將來遇到 spec internal inconsistency（例如：§A 定義 formula 需 X+Y+Z，§B 寫 Sprint N 只 ship X），sub-agent 應停 IMPL 並 escalate，由 PM/PA 仲裁 (a) 用 NULL placeholder 等齊全 (b) 採部分 ship (c) 改變 ship scope。
+
+**正面範式 — `build_audit_metadata` 雙軌 audit chain**：E1 拒絕 PM 提的 `evidence_json` JSONB sidecar（不存在於 PG）而改用 `build_audit_metadata` function 回 dict 給 caller cron logger emit + PG `decision_lease_draft_id` UUID backref。雙軌 audit：PG 提供 transactional reconstructable backbone（hypothesis_id → lease_id），log file 提供 6 attribute 完整 raw value（含 PG 沒有的 graveyard_flag / raw cohens_d / raw silhouette）。Sprint 3 retroactive QC arbitration 即使 PG schema 改也能從 log recompute。
+
+**Lessons captured**：
+1. **PM dispatch packet schema 細節必先 SSH PG empirical verify**：PM 在 dispatch 內提到 column name / enum value / data type 必先跑 `\d schema.table` + `SELECT pg_get_constraintdef(...)` 驗一次再下發；W1-C-R3 PM Option B 3 處文字錯就是因為直接從 PA task wording 抄而沒 empirical verify。將來 PM Option pattern dispatch 必加 1 步「SSH PG empirical pre-verify」於下發前。
+2. **Spec internal inconsistency 必 escalate 而非自行 invent**：sub-agent 發現 spec §A formula 定義需要 §B Sprint scope 沒 ship 的數據時，應停 IMPL + raise push back，不自行 invent formula。W1-C-R3 E1 invent replicability_score 公式即使有 `build_audit_metadata` mitigation 仍是 spec drift HIGH。將來 E1/E1a sub-agent meta-skill：spec 公式 internal inconsistency → push back > pragmatic invent。
+3. **`build_audit_metadata` function 雙軌 audit chain 範式**：當 PG schema 無對應 column 但 audit 完整性要求保留 raw value 時，E1 用 `build_audit_metadata(payload) -> dict` 回 dict 給 caller emit log + PG backref 雙軌。Sprint 3 retroactive recompute 可從 log 重建。此範式適用 future case：spec 要求 6 attribute 完整保留但 PG schema 只有 4 column；不需要新加 JSONB sidecar column。
+4. **chicken-egg 分析：UUID client-side generate vs server-side FK 不同邏輯**：`decision_lease_draft_id` UUID 不是 chicken-egg 因 client-side `uuid.uuid4()` 同步生成 + PG FK 暫不加；UUID 寫入 PG INSERT 不需要 Lease table 存在。將來 audit chain 加 UUID backref 採同樣 pattern：先 client-side 生成 UUID 再雙寫（PG + Lease/log），不依賴 server-side INSERT 完成才知道 ID（避免 BIGSERIAL 等 server-allocated）。
+5. **SSH PG empirical reflection 3 條核心 query 全 set**：(a) `\d schema.table` → 全 column 列表 + DEFAULT；(b) `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='schema.table'::regclass AND contype='c'` → CHECK constraint 真實 enum；(c) `SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema='schema' AND table_name='table'` → 標準化 nullable + type。3 條全跑才能完整 verify schema drift 假設。W1-C-R3 SSH PG 3 條全跑 + V103 EXTEND spec + V100 base spec 三軌交叉 catch PM 文字錯 3 處。
+
+---
