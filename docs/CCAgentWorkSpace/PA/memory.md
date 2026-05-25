@@ -1,5 +1,37 @@
 # PA Memory — 工作記憶
 
+## ALT bucket "28h+ velocity stall" RCA reframe（2026-05-25 PM dispatch from W2-F NEW QA-1）
+
+**觸發**：QA W2-F report (`fbfbd184`) NEW QA-1 MEDIUM 宣稱「ALT bucket 28h+ 0 close_maker_attempt」+ 「0.27→0.11 attempts/hr 跌至 stall」
+
+**PA empirical RCA（讀-only SSH + PG probe，5.25 19:35 UTC）verdict**：
+
+- **TZ confusion in QA report**：QA W2-F §0 「last close_maker_attempt = 2026-05-25 16:30 UTC」實際是 `5/25 14:30 UTC + 02:00` (CEST mislabeled UTC)。Actual last = **5/25 14:30 UTC = 5.08h ago，非 28h+**
+- **ALT bucket 健康**：35 close_attempts 7d，last 5/25 14:30 UTC (UNIUSDT grid_trading)，cadence ~0.11/h 符合 Phase 1b post-deploy 結構性 ceiling
+- **真正 stall ≠ ALT，是 LARGE_CAP**：BTC/ETH last close_maker = 5/20 22:53 UTC = **116.7h (~4.86d)**；grid_trading 在 BTC/ETH 連續 OpenShort 每 30s 但 0 Close（H6 separate concern）
+- **engine 邊界**：engine PID 598276 boot 12:37 UTC（非 dispatch 提的 17:50）；H1 atomic deploy regression hypothesis DISMISSED（post-boot 3 close_maker=true 12:37→14:30 UTC 證 close path 仍 fire）
+
+**Top hypothesis H1 (P~0.65)：cost_gate over-block + grid ranging-pole short bias**：
+- 39 `cost_gate(JS-demo) deep-negative block` events 在 APTUSDT grid_trading 19min 內 (n=10 shrunk -17.46 cutoff -15)
+- Signal/intent conversion ratio **0.026%** (137k signals 24h → 36 intents 24h)
+- 不 block AC-19 measurement；secondary issue 可 post-Wave-3 派 QC + AI-E
+
+**Sprint 2 Wave 3 dispatch verdict**：**PROCEED ON SCHEDULE**
+- NEW QA-1 reframed MEDIUM → LOW（TZ confusion，非 incident）
+- 6/2 14d AC-19 ALT 仍預期 FAIL（per Phase 1b PA report §4.4 結構性 25.8% ceiling，與 velocity stall 無關）
+- 真 blocker = M4 writer schema drift HIGH + AC-19 cron NEW QA-2，皆 pre-existing 非本 RCA scope
+
+**16 root principles compliance**：A 級 16/16；§16 portfolio risk PARTIAL = 提示 operator 5 ALT short 24h+ 累積且 BTC/ETH chronic OpenShort
+
+**Memory 教訓**：
+- PA 必驗 timezone（PG TZ Europe/Madrid CEST = UTC+2；ssh `date -u` 對齊）
+- QA W2-F BLOCK 結論若基於 single-point timestamp claim，PA 必先 reproduce empirical 再裁決
+- engine ps lstart vs dispatch claimed boot time mismatch 是常見 dispatch error，每次先 cross-check
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-25--alt_bucket_velocity_28h_stall_rca.md`
+
+---
+
 ## Sprint 2 Day -1 3-spec dispatch（2026-05-25）
 
 **觸發**：operator 任務 — 3 個 spec 並行 (1) H-2 cron 復原 (2) M-4 sub-agent hygiene SOP (3) EA-3 funding_arb SL gate「P1 hot-fix」
