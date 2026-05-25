@@ -6047,3 +6047,73 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 - 等 FA business priority verdict 後可能 amend ml_training / ref21_symbol_universe / panel_aggregator 三者分級
 - §5.1 setup_openclaw_cron.sh + crontab 納入 git 是 Future Sprint follow-up（不阻 Sprint 2）
 - Lesson：QC verdict update 含過時段落時必 SSH empirical reverify；不可逐字採納；本案 EA-2 ssh 5 min 確認直接 collapse 一個 sub-action
+
+## 2026-05-25 — Sprint 2 Day 0 business dispatch packet (design level)
+
+**Trigger**：operator Day -1 全鏈 closure 後拍 Sprint 2 Day 0 業務 sprint design 任務；前置 = H-1 atomic deploy / H-2 cron 10/13 / EA-2 N/A / EA-4 P0-EDGE-1 AC-A amend / M-4 hygiene SOP / V103 EXTEND + V106/V107/V112 land
+**Output**：`srv/docs/execution_plan/2026-05-25--sprint_2_business_dispatch_packet.md` (685 LOC, commit 31fb4412 local; push blocked auto mode classifier)
+
+**5 work stream 拆分**：
+1. **Stream A Alpha Tournament**（3 sub-track A1/A2/A3 = 5 textbook retry / 新 source candidate / portfolio attribution）— 核心 = P0-EDGE-1 AC-A (ii) closure 唯一前置路徑；PA pre-screen 5-6 candidate → 推薦 IMPL #1 funding short > 30% annualized + #4 liquidation cascade fade；80-120 hr
+2. **Stream B M4 pattern miner stage 1**（v5.8 §2.M4 line 158-184）— V103 EXTEND ready；MIT cross-correlation + event-window + leakage protocol shift(1) leak-free + 6 attribute minimum bar；80-120 hr
+3. **Stream C M10 Tier A productionize**（v5.8 §2.M10 line 376-380）— V111 spec 屬 Sprint 1A-γ；後端 Optuna IMPL 不依賴 V111；40-60 hr
+4. **Stream D M8 read-only schema land**（v5.8 §2.M8 line 307-308）— V109 anomaly_events schema-only Sprint 2；detector IMPL Sprint 3；ADR-0036 ATR-vol + funding state 雙 axis 替 HMM/GARCH 黑名單；40-60 hr
+5. **Stream E AC-19 ALT bucket monitor**（per PA Phase 1b 5/25 §4.4）— daily SQL bucket-split + 6/2 14d ALT gate verdict；10-15 hr
+
+**Wave staging**：
+- Wave 1 D+0 → D+5 / 7 並行 sub-agent / W1-A/B/C/D/E/F/G PA + MIT + E1 + QA
+- Wave 2 D+5 → D+12 / 5-6 並行 sub-agent / W2-A/B/C/D + E2 review + QA empirical
+- Wave 3 D+12 → D+21 / single-thread / 14d ALT gate verdict + PA + MIT + PM sign-off
+- 總 hr 248-351 / 3w wall-clock ≈ v5.8 §4 280-400 hr 對齊
+- 7 並行 ceiling per memory `project_multi_session_memory_race`；T+0 → T+30min stagger sequence
+
+**3 PM decision point 待拍**：
+1. PM #1 Stream A scope 仲裁 — PA 推薦 (a) Sprint 2 IMPL 2 candidate (#1 funding short + #4 liquidation cascade) + DRAFT 1 (#3 BTC/ETH pairs) + Sprint 3+ defer 2
+2. PM #2 V111 spec land cadence — PA 推薦 (a) Sprint 1A-γ V111 spec 必先；Stream C Wave 1 不依賴 V111；Wave 2 W2-C V111 schema deploy 等 1A-γ ready
+3. PM #3 close_maker_audit P1 land cadence — PA 推薦 (a) Sprint 1B follow-up（不阻 Sprint 2 evidence path；trading.fills 已有 close_maker 兩 column）
+
+**Cross-cutting carry-over**：
+- M-4 hygiene SOP 全 7 sub-agent prompt 必加（per `docs/agents/sub-agent-hygiene-sop.md` §3.5 通用警示 + 角色 specific）
+- Multi-session memory race 防護 + commit-first 協議
+- PM 主會話 dispatch 前 `git fetch` + `git branch -r | grep <topic>` SOP
+
+**Sprint 4 First Live precondition impact**：
+- Stream A 14d demo evidence accumulation = P0-EDGE-1 AC-A (ii) amend closure 唯一前置路徑
+- Sprint 2 結束 W14.5 → Stream A 2 candidate 14d 達標
+- Sprint 3 Stage 0 → 0R verdict
+- Sprint 4 First Live W17.5-20.5 precondition unblock = 至少 1 candidate 達 7d avg_net > 5bps + Wilson CI lower > 0 (或) portfolio-level gross 正
+
+**16 原則 compliance pre-IMPL**：A — 16/16 + 0 hard boundary touch 預期；IMPL 後 Wave 2 E2 review verify
+
+**Push back items**：
+1. Sprint 2 4 stream + Stream A 3 軌 = 真實 5 stream；維持 v5.8 §4 命名 + 接受 5-7 並行 capacity
+2. Sprint 1A-γ V109/V111 spec readiness 未明朗時 Stream D + Stream C 工時可能 +30-50 hr 補 spec draft
+3. close_maker_audit P1 不阻 Sprint 2 evidence path —> 推薦 Sprint 1B follow-up（PM #3 拍）
+4. Stream A 14d gate timing match Sprint 2 末段（6/2 = D+8~D+13 之間）
+
+**Lesson**：v5.8 §4 line 624 標 4 stream 但 v5.8 §2 沒明寫 Alpha Tournament single block；v5.7 §7 + EA-4 amend = implicit scope；PA 必補 cross-source 仲裁；建議 v5.9 主檔下 Alpha Tournament 明寫單一 spec block 避雜歧義
+
+---
+
+## 2026-05-25 — W2-A Stream A Alpha Tournament 2 candidate pre-spec finalize + 2 CRITICAL schema drift catch
+
+**Task**: W2-A pre-spec finalize for funding_short_v2 + liquidation_cascade_fade IMPL-ready 給 W2-B E1
+
+**Outcome**: DISPATCH-READY with 2 inline schema corrections
+
+**Key findings (CRITICAL)**:
+1. **CRITICAL-1**: W1-A spec §7.3 + §7.4 引用 `learning.m4_hypotheses_extended` table 不存在 + 引用 6 個虛構 column 名（attribute_n/p_value/effect_size/subperiod_stable/graveyard_flag/cluster_silhouette）。實際 schema = `learning.hypotheses` table + V103 EXTEND 6 column (hypothesis_source_module / leakage_scan_pass / bonferroni_corrected_p / replicability_score / decision_lease_draft_id / cowork_review_status)。RCA: W1-A 把 W1-B M4 spec CR-6 6 attribute minimum bar 設計概念誤當作 V103 actual column name。
+2. **CRITICAL-2**: W1-A spec §7.1 strategy_track 值 invalid。spec 寫 'alpha_short_carry' + 'alpha_microstructure_fade' 不存在於 V101 strategy_track ENUM（V101 line 72-76 ENUM 僅 3 值：direct_exploit / asds_factory / baseline）。AMD-2026-05-15-01 全文 grep 結果 0 hit on 這 2 名稱 = misattribution。per ADR-0026 hand-coded Rust strategy 必 track='direct_exploit'。
+
+**Verdict path**: PA W2-A inline amend（不退回 W1-A revise）— 90% W1-A spec 正確 + 修正點 specific（不是設計層級錯）+ Option A 不影響 Wave 2 timeline。
+
+**§10 P0 precondition 對照**: 2 candidate × 4 P0 (EDGE-1 / OPS-1..4 / LG-3 / 5-gate) = 8/8 全 PASS。
+
+**Cross-cutting collision**: Stream A 2 candidate vs Stream B M4 pattern miner (W1-C commit ae9a2dd8) — 0 collision；都寫 learning.hypotheses + V103 EXTEND，但 strategy_name 不同 + INSERT 路徑獨立（M4 cron auto-discovery / Alpha tournament W2-F MIT 手動）。hypothesis_source_module 同 'M4_AUTO' 是 design alignment 不是 conflict。
+
+**Lessons for next W?-A**:
+- 派 sub-agent pre-spec finalize 必 grep IMPL spec 引用的 PG schema 是否 actual exists（W1-A pre-spec 漏這步致 schema drift）
+- IMPL-ready spec 不可只 verbatim 抄上游 spec，必 cross-reference 實際 SQL migration file + Rust ENUM source
+- track ENUM 是 V101 hard-coded 3 值，新策略一律 'direct_exploit'（per ADR-0026），不需要新 track 名稱
+
+**Report path**: srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-25--w2a_alpha_tournament_pre_spec_finalize.md + Operator copy
