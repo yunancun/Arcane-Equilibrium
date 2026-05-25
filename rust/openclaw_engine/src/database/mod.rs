@@ -12,6 +12,10 @@
 
 pub mod agent_spine_writer;
 pub mod aggregators;
+// Sprint 2 Wave 1 W2-D：V109 learning.anomaly_events writer skeleton
+// (Sprint 3 detector wire 前置；23 column + 4 client-side validator + H-11
+// amplification cap 24h count helper)。
+pub mod anomaly_event_writer;
 pub mod batch_insert;
 pub mod black_swan_detector;
 // Sprint N+1 W2 sub-task 1：V088 panel.btc_lead_lag_panel writer。

@@ -12578,3 +12578,52 @@ W1-B MIT spec (`docs/execution_plan/2026-05-25--m4_pattern_miner_stage_1_algorit
 
 **教訓**：Rust 不需要全部上 polars/sqlx 才能 IMPL — scaffold 階段以「algorithm correctness + invariant verify + unit test」為主，performance optimization 推遲到 cron wire-up 後做 benchmark-driven。新建 module dep 0 改動是「最小影響」原則的最佳化實踐。
 
+---
+
+## 2026-05-25 W2-D V109 anomaly_event_writer Rust skeleton (IMPL DONE)
+
+**Phase**: v5.8 Sprint 2 Stream D Wave 2 W2-D E1 IMPL（Sprint 3 detector wire 前置；V109 schema 已 land commit `16796d13` PG dry-run × 2 PASS）
+
+**Task scope**：Rust writer skeleton + Python query helper skeleton；**不寫 detector**（Sprint 3 W3-A/W3-B）。
+
+**5 hard invariant 必守**：
+- I-1：V109 23 column 嚴格對齊（含 v2 amend `metric_baseline`）
+- I-2：ADR-0036 Decision 1 黑名單 detection_method（HMM/Markov-switching/GARCH 永久禁用）反向防護 — V109 Guard A/C schema-level + 本 writer client-side = **三重防護**
+- I-3：amplification cap H-11 24h count helper（per M3 §6.2 + V109 spec §5.3）；read-only 不自動 enforce
+- I-4：5 enum CHECK constraint client-side mirror（event_taxonomy 9 / severity 4 / detection_method 4 / engine_mode 5）
+- I-5：Mac SSOT 不接 PG；unit test 走 SQL self-grep + struct field lock + validator pure logic
+
+**輸出**：
+- `rust/openclaw_engine/src/database/anomaly_event_writer.rs`（935 LOC）：AnomalyEventRow 23 column + 4 validator + write_anomaly_event + amplification_loop_24h_count + 14 unit test
+- `helper_scripts/m8/__init__.py`（22 LOC）+ `helper_scripts/m8/anomaly_event_query.py`（278 LOC）：read-only query helper
+- `rust/openclaw_engine/src/database/mod.rs`（+3 line `pub mod` 註冊）
+
+**Mac SSOT verify**：
+- `cargo test --release -p openclaw_engine --lib database::anomaly_event_writer`：14/14 PASS
+- `cargo test --release -p openclaw_engine --lib`（baseline）：3368 passed / 0 failed（含 14 new；3354 pre-existing baseline 不退）
+- `python3 -c "import ast; ast.parse(...)"`：syntax PASS
+- `cargo check --release -p openclaw_engine --lib`：0 warning from new code
+
+**3 對抗式 grep（per task Step 7）**：
+1. `grep -E "hmm|markov_switching|garch" anomaly_event_writer.rs`：24 hits 100% 在 reject-context（validator + test blacklist + ADR-0036 reference）；strict pattern `grep -niE "(use ::(hmm|markov|garch)|fn.*(hmm|markov|garch).*->|impl.*(Hmm|Markov|Garch))"` = **0 productive use**
+2. `grep -c "AnomalyEventRow"`：9 hits ≥ 5
+3. `grep -c "validate_"`：31 hits ≥ 4（4 validator function）
+
+**設計決策**：
+- 不接 in-memory PG mock（per CLAUDE.md §六 + earn_movement_writer/lease_transition_writer 範式）— 真實 PG roundtrip 留 Sprint 3 W2-E review + Linux empirical
+- NUMERIC(18,8) 走 PG-side cast `$N::NUMERIC(18,8)`（workspace 無 BigDecimal feature；對齊 earn writer + health writer 範式）
+- amplification cap 是 read-only helper（不自動 mutate）— enforcement 政策（≥ 2 → cap_suppressed=true）在 caller 端
+- Python helper 是 read-only query facade — 寫入唯一路徑走 Rust writer（per CLAUDE.md §七 New standalone trading/risk/config logic Rust-first）
+
+**教訓**：
+1. **三重防護 pattern**（DB schema CHECK + Rust validator + Python validator）對 ADR-0036 黑名單算法是必要 enforcement — 任一層失效另兩層守住；substring match 反向防護比 exact match 更嚴（catch hmm_v2 / garch_1_1 / arima_markov 等變體）
+2. **SQL self-grep test pattern**（include_str! + .contains()）對防 schema drift 是輕量但有效的 Mac SSOT 工具 — 不需要 PG runtime 即可 catch column rename / table name 漂移；對齊 earn_movement_writer + lease_transition_writer 已驗證範式
+3. **23 column struct lock test**（test_anomaly_event_row_struct_has_23_fields）對 Sprint 2 Wave 1 階段 schema 可能微調 是有效安全網 — 加 column 時 test 直接 fail 提示 reviewer 必同步 V### + struct
+4. **Mac LOC 限制 vs 大 module 平衡**：935 LOC 超 800 warn threshold 但不超 2000 hard cap；對「14 unit test + 23 column struct + 4 validator + 2 method + MODULE_NOTE」這種 skeleton 工作是合理 pattern — review attention 必要但不該強制拆分（拆分反而破壞 cohesion）
+
+**不確定 / Sprint 3 follow-up（不阻 W2-D closure）**：
+- Sprint 3 W3-A/W3-B detector wire-up — `write_anomaly_event` 由誰呼？預計 ATR-vol×Funding 9-cell + 3 副算法 detector 接通
+- Cross-ref backfill（m3 / m7 / m1_lal _ref）UPDATE 函式 — Sprint 3 W3-C cascade emit handler 接通時補
+- Linux PG empirical INSERT roundtrip — 主會話 ssh trade-core 跑（per `feedback_v_migration_pg_dry_run`）
+- Cap policy boundary（≥ 2）仲裁 — Sprint 3 empirical 收集後 PM + PA + QC 拍板
+
