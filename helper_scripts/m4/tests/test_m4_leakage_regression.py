@@ -611,7 +611,20 @@ def test_writeback_payload_accepts_legitimate():
 
 
 def test_payload_to_params_complete():
-    """payload_to_params 必含所有 INSERT 必填字段。"""
+    """payload_to_params 必含所有 INSERT 必填字段（per W1-C Round 3 真實 V100+V103 schema）。
+
+    11 個 INSERT 必填字段對齊真實 PG `learning.hypotheses` schema：
+       - V100 base 5 NOT NULL：strategy_name / pre_reg_ts / pre_reg_hash / status / engine_mode
+       - V100 base 1 optional：min_sample_size → n_observations key
+       - V103 EXTEND 4：leakage_scan_pass / bonferroni_corrected_p / replicability_score /
+         decision_lease_draft_id
+       - 1 timestamp：created_at（V100 base DEFAULT now() 但顯式設）
+
+    為什麼不含 hypothesis_id：BIGSERIAL DEFAULT nextval；INSERT RETURNING 由 PG 配 ID。
+    為什麼不含 hypothesis_source_module / cowork_review_status：SQL 常量直 hard-code 'M4_AUTO' / 'NONE'。
+    為什麼 raw_p_value / cohens_d / subperiod_pass / graveyard_flag / silhouette
+    不在 INSERT params：caller-side metadata，audit log emit 用，不入 PG。
+    """
     import uuid as uuid_mod
 
     payload = build_writeback_payload(
@@ -624,16 +637,14 @@ def test_payload_to_params_complete():
     )
     params = payload_to_params(payload)
     required_keys = {
-        "hypothesis_id",
         "strategy_name",
+        "pre_reg_ts",
+        "pre_reg_hash",
         "status",
+        "engine_mode",
         "n_observations",
-        "raw_p_value",
-        "cohens_d",
-        "subperiod_pass",
-        "graveyard_flag",
-        "silhouette",
         "leakage_scan_pass",
+        "bonferroni_corrected_p",
         "replicability_score",
         "decision_lease_draft_id",
         "created_at",

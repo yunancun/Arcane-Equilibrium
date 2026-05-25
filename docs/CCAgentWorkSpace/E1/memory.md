@@ -12662,3 +12662,78 @@ W1-B MIT spec (`docs/execution_plan/2026-05-25--m4_pattern_miner_stage_1_algorit
 **Carry-over（Sprint 2 末 W2-D MIT 接 cron 時驗）**：
 - realized_pnl NULL row 在 caller 端 dropna 行為對 forward return 計算 sample size 影響評估
 - close fill 統計（entry_context_id IS NOT NULL 比例）若 < 期望（per W-AUDIT-4b-M2 backfill ratio 95%）會影響 M4 sample size，需收集 baseline metric
+
+## 2026-05-25 AC-19 ALT bucket cron IMPL (NEW QA-2 5/26 EOD)
+
+W2-F QA-2 HIGH BLOCKER：AC-19 cron 0% IMPL'd，Day 8/9 cron-captured trajectory 已 lose。
+per W1-G SOP §8 handoff IMPL：
+- `helper_scripts/cron/ac19_alt_bucket_daily_query.sql` (70 行) — W1-G SOP §2 canonical bucket-split + Wilson CI + 3 級 verdict（含 INSUFFICIENT_DATA n=0）
+- `helper_scripts/cron/ac19_alt_bucket_jsonl_writer.py` (377 行) — stdlib only（無 psycopg2）；wilson_lower/upper_95 + classify_verdict + load_psql_csv + build_jsonl_records（含 sanity drift 偵測 > 1pp tolerance）+ append_jsonl fsync + aggregate_exit_code (0/1/2)
+- `helper_scripts/cron/ac19_alt_bucket_daily_cron.sh` (98 行) — secrets env load (對齊 panel_aggregator_health_cron) + lock mkdir 防 overrun + heartbeat sentinel + day_index>14 idempotent skip + psql --csv + writer 串接
+- `helper_scripts/cron/tests/test_ac19_alt_bucket_daily.py` (44 case) — Wilson 5 / verdict 13 / bucket 3 / day_index 5 / CSV 4 / JSONL 3 / append 2 / exit 5 / CLI 2
+
+Mac 44/44 PASS + Linux empirical PG smoke：CSV `alt 35/9/23 = 25.7%` + `large_cap 6/4/1 = 66.7%` 對齊 W1-G SOP §1 baseline；Python 重算 Wilson lower 14.2% 與 SQL CASE 14.2% 完全對齊（無 sanity_drift）；Linux pytest 44/44 PASS。
+
+Crontab line for PM ssh paste:
+```
+0 8 * * * OPENCLAW_BASE_DIR=$HOME/BybitOpenClaw/srv OPENCLAW_DATA_DIR=/tmp/openclaw $HOME/BybitOpenClaw/srv/helper_scripts/cron/ac19_alt_bucket_daily_cron.sh >>/tmp/openclaw/logs/ac19_alt_bucket_daily_cron.cron.log 2>&1
+```
+
+教訓：
+- Wilson canonical formula 與 SOP §2.1 文字 14.1% 差 0.1pp 是 SOP 計算手筆 rounding；canonical 公式 14.2% 是真實值，已寫進測試 tolerance ±0.5pp
+- 用 stdlib（math/csv/json）代 psycopg2 → cron entry 不依賴 venv，更穩；PG SELECT 由 psql --csv 走，writer 只處理 CSV → JSONL
+- SCP + ssh trade-core 跑 psql + python + pytest 為 read-only empirical smoke（per hygiene SOP，未 cargo build / sudo / 寫 PG）
+
+---
+
+## 2026-05-25 — W1-C Round 3 M4 draft_writer.py schema drift fix（W2-F QA + FA HIGH BLOCKER 退回）
+
+**任務**：W2-F QA + FA cold review (commit `fbfbd184`) catch `helper_scripts/m4/draft_writer.py:25-50` INSERT SQL 寫 6 個 **不存在** 於 production `learning.hypotheses` 的 `m4_attribute_*` column → 首次 cron fire 必 PG ERROR。PM 拍 Option B refactor INSERT 不新加 schema column；用 W1-A §7.3 6 attribute composite mapping。
+
+**Empirical PG verify 2026-05-25**：`\d learning.hypotheses` 19 column = V100 base 13 + V103 EXTEND 6；**0 個 `m4_attribute_*` + 0 個 `evidence_json`**。`evidence_json` 在 `learning.replay_divergence_log` (V107) + `learning.decision_lease_lal_tiers` (V112)，非 hypotheses。
+
+**6 attribute → V100/V103 real column mapping**（per W1-A §7.3 + W2-F QA report §5.3）：
+- `attribute_n` → `min_sample_size` (V100 base INTEGER) — direct
+- `attribute_p_bonferroni` → `bonferroni_corrected_p` (V103 EXTEND NUMERIC(10,8) CHECK [0,1]) — clamp [0,1]
+- `attribute_effect_size` (Cohen's d) → composite `replicability_score` weight 0.4，`|d|/3` cap 1.0
+- `attribute_subperiod_pass` → composite `replicability_score` weight 0.3
+- `attribute_silhouette` → composite `replicability_score` weight 0.3，clamp [0,1]
+- `attribute_graveyard_flag` → 不寫 PG（caller log only，warning only per attribute_enforcer 既有設計）
+
+**Push back PA task 三點**：
+1. PA task 期望 `evidence_json` JSONB INSERT — empirical PG 不存在 + W1-A §7.3 也未要求 → 不引入；改 `build_audit_metadata` function 供 cron logger emit + `decision_lease_draft_id` PG backref 雙軌 audit chain
+2. PA task `cowork_review_status='PENDING_REVIEW'` → V103 EXTEND CHECK enum 是 NONE/PENDING/APPROVED/REJECTED；'PENDING_REVIEW' 非 enum 值，採 'NONE'（Y1 不啟 Cowork）
+3. PA task `decision_lease_draft_id` 'TEXT or NULL' → V103 EXTEND 是 UUID type NOT NULL（audit chain 不變量）
+
+**改動 file（2 + 1 新）**：
+- `helper_scripts/m4/draft_writer.py`（200→332 LOC）：INSERT SQL 完整 refactor + `_compose_replicability_score` 3-axis composite + `_compute_pre_reg_hash` SHA-256 + engine_mode validation reject paper/demo + `build_audit_metadata` cron logger supplément
+- `helper_scripts/m4/tests/test_m4_leakage_regression.py`：`test_payload_to_params_complete` required_keys 對齊新 11 字段
+- `helper_scripts/m4/tests/test_source_loader_schema.py` §6 新區段：19 schema-grep regression test (6 parametrized m4_attribute_* + 13 individual)
+
+**Mac SSOT verify**：
+- pytest helper_scripts/m4/: 89/89 PASS (70 baseline + 19 new)
+- cargo test --release -p openclaw_core --lib: 416/0 PASS baseline 不退
+- 4 對抗式 grep self-verify：SQL string `m4_attribute_` 0 hit / `evidence_json` 0 hit / V103 EXTEND key column 26 hit / pre_reg_hash 31 hit
+
+**Linux PG empirical INSERT verify**：
+- Happy path 13 column INSERT 0 ERROR + RETURNING hypothesis_id + ROLLBACK 不留 row ✅
+- CHECK negative：hypothesis_source_module='XYZ' → PG CHECK reject ✅
+- CHECK negative：bonferroni_corrected_p=2.5 → PG CHECK reject ✅
+- Boundary：bonferroni_corrected_p=1.0 / replicability_score=0.0 accepted ✅
+- ⚠ status='live' PG layer 不 reject（V100 CHECK 11 enum 含 'live'）；M4 application fail-loud 是唯一防線
+
+**3 個關鍵教訓**：
+
+1. **PG-coupled writer schema 必先 empirical reflection 再 IMPL**（per `feedback_v_migration_pg_dry_run` 三次強化）：W1-C Round 1 + Round 2 IMPL 階段 51+70 pytest 全 PASS 但 0 個 test 真正 grep DRAFT_INSERT_SQL SQL string 對 PG schema。W2-F QA catch 是「Mac mock pytest catch 不到 PG-side schema drift」第三次教訓。**any future PG INSERT path land 前必 ssh trade-core `\d table` empirical reflection** + 加 schema-grep regression test（不能只信 spec 列出的 column 名）。
+
+2. **PA dispatch task expectations 與 empirical PG 衝突時 empirical 是 SSOT**：PA task `evidence_json` / `'PENDING_REVIEW'` / `'TEXT or NULL'` 三點均與 empirical schema 不對齊；E1 不能盲信 dispatch packet 寫的 column 名/value，必走 empirical + spec §7.3 對齊。Push back 是必要而非 disrespect。
+
+3. **6→4 composite mapping 失去某些審計痕跡時必補 caller-side log**：`build_audit_metadata` function 是 graveyard_flag / raw cohens_d / raw silhouette 不入 PG 時的審計 supplément；W2-D MIT 接 cron 時 wire；audit chain 走 PG backref（decision_lease_draft_id）+ log file emit 雙軌。
+
+**Carry-over（Sprint 3 不阻 W1-C Round 3 closure）**：
+- replicability_score weights 0.4/0.3/0.3 仲裁（QC review W1-B spec §4.3 Open Q3）
+- GovernanceHub M4_DRAFT_WRITEBACK lease IPC 接通（W2-D MIT）
+- build_audit_metadata cron logger wire（W2-D MIT）
+- W1-A spec amend 建議 `effect_size composite via replicability_score` 明示
+
+**未 commit**；待 E2 re-review + E4 regression + W2-F QA re-audit 後 PM 統一 commit（per chain E1→E2→E4→QA→PM）

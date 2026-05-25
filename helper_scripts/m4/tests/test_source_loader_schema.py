@@ -49,6 +49,11 @@ from helper_scripts.m4.sources.liquidations_loader import (  # noqa: E402
     LIQUIDATIONS_QUERY_SQL,
     build_liquidations_query,
 )
+from helper_scripts.m4.draft_writer import (  # noqa: E402
+    DRAFT_INSERT_SQL,
+    build_writeback_payload,
+    payload_to_params,
+)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -281,4 +286,274 @@ def test_no_loader_uses_illegal_column(illegal_token: str):
     )
     assert not _grep_whole_word(all_sql, illegal_token), (
         f"非法 column '{illegal_token}' 不可出現在任何 source loader SQL"
+    )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# §6 draft_writer.py: learning.hypotheses V100 base + V103 EXTEND 真實 schema
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# 為什麼這個 §6：W1-C Round 1/2 IMPL 51 → 70 pytest 全 PASS 但 0 個 test 真正 grep
+# DRAFT_INSERT_SQL column 名是否對齊 PG 真實 schema。W2-F QA + FA HIGH BLOCKER
+# (commit fbfbd184) catch：6 個 m4_attribute_* column 不存在於 production
+# learning.hypotheses。本 §6 補位 schema-grep regression。
+#
+# Empirical PG verify 2026-05-25 (`\\d learning.hypotheses`)：
+#    19 column total = V100 base 13 + V103 EXTEND 6；**0 個 m4_attribute_***。
+
+
+@pytest.mark.parametrize(
+    "illegal_attribute_column",
+    [
+        "m4_attribute_n",
+        "m4_attribute_p_bonferroni",
+        "m4_attribute_effect_size",
+        "m4_attribute_subperiod_pass",
+        "m4_attribute_graveyard_flag",
+        "m4_attribute_silhouette",
+    ],
+)
+def test_draft_writer_no_m4_attribute_column(illegal_attribute_column: str):
+    """DRAFT_INSERT_SQL 不可含 6 個 m4_attribute_* column（empirical 不存在）。
+
+    W2-F QA + FA HIGH BLOCKER 教訓：first cron fire 會 PG ERROR
+    `column "m4_attribute_n" of relation "hypotheses" does not exist`。
+    """
+    assert not _grep_whole_word(DRAFT_INSERT_SQL, illegal_attribute_column), (
+        f"DRAFT_INSERT_SQL 不可含 '{illegal_attribute_column}' — "
+        f"empirical PG learning.hypotheses 0 個 m4_attribute_* column"
+    )
+
+
+def test_draft_writer_writes_v100_base_required_columns():
+    """V100 base 5 NOT NULL required column 必出現於 DRAFT_INSERT_SQL。"""
+    required_v100_columns = (
+        "strategy_name",
+        "pre_reg_ts",
+        "pre_reg_hash",
+        "status",
+        "engine_mode",
+    )
+    for col in required_v100_columns:
+        assert _grep_whole_word(DRAFT_INSERT_SQL, col), (
+            f"DRAFT_INSERT_SQL 必含 V100 base NOT NULL column '{col}'"
+        )
+
+
+def test_draft_writer_writes_v103_extend_real_columns():
+    """V103 EXTEND 6 real column 必出現於 DRAFT_INSERT_SQL（per W1-A §7.3 mapping）。
+
+    `decision_lease_draft_id` 必 audit chain backref；不可省略。
+    """
+    required_v103_columns = (
+        "hypothesis_source_module",
+        "leakage_scan_pass",
+        "bonferroni_corrected_p",
+        "replicability_score",
+        "decision_lease_draft_id",
+        "cowork_review_status",
+    )
+    for col in required_v103_columns:
+        assert _grep_whole_word(DRAFT_INSERT_SQL, col), (
+            f"DRAFT_INSERT_SQL 必含 V103 EXTEND column '{col}'"
+        )
+
+
+def test_draft_writer_w1a_spec_7_3_mapping_n_to_min_sample_size():
+    """W1-A spec §7.3 mapping：attribute_n → min_sample_size（V100 base INTEGER）。
+
+    per W1-A spec line 695 + W2-F QA report §5.3 mapping invariant。
+    """
+    assert _grep_whole_word(DRAFT_INSERT_SQL, "min_sample_size"), (
+        "DRAFT_INSERT_SQL 必含 min_sample_size column（W1-A §7.3 attribute_n mapping）"
+    )
+
+
+def test_draft_writer_hypothesis_source_module_explicit_m4_auto():
+    """INSERT SQL 必顯式設 hypothesis_source_module='M4_AUTO'（不依 DEFAULT 'OPERATOR'）。
+
+    per V103 spec §2.2 backfill 'M4_AUTO' silent contamination 警示；M4 寫入路徑顯式設。
+    """
+    assert "'M4_AUTO'" in DRAFT_INSERT_SQL, (
+        "DRAFT_INSERT_SQL 必含顯式 'M4_AUTO' literal（hypothesis_source_module）"
+    )
+
+
+def test_draft_writer_cowork_review_status_explicit_none():
+    """INSERT SQL 必顯式設 cowork_review_status='NONE'（Y1 不啟 Cowork review）。"""
+    assert "'NONE'" in DRAFT_INSERT_SQL, (
+        "DRAFT_INSERT_SQL 必含顯式 'NONE' literal（cowork_review_status）"
+    )
+
+
+def test_draft_writer_no_evidence_json_column():
+    """DRAFT_INSERT_SQL 不可含 evidence_json column（empirical learning.hypotheses 0 hit）。
+
+    W1-C Round 3 dispatch packet 提及 `evidence_json` 但 empirical PG schema 不含；
+    W1-A spec §7.3 mapping 也未要求；本 IMPL 採 caller-side audit log emit 取代。
+    """
+    assert not _grep_whole_word(DRAFT_INSERT_SQL, "evidence_json"), (
+        "DRAFT_INSERT_SQL 不可含 evidence_json — empirical learning.hypotheses 0 hit"
+    )
+
+
+def test_draft_writer_no_status_promote_past_preregistered():
+    """SQL 字串中不可出現 'live' / 'promoted' / 'rejected' 作為 INSERT status 常量。
+
+    per W1-B spec §0 I-5 + AMD-2026-05-21-01 protected scope (a)：M4 不可 promote past
+    'preregistered'。SQL 中 status 走 %(status)s placeholder，build_writeback_payload
+    端 reject promote past。
+    """
+    # SQL 中 status 走 placeholder 不應 hard-code 'live' 之類常量
+    for forbidden in ("'live'", "'promoted'", "'rejected'"):
+        assert forbidden not in DRAFT_INSERT_SQL, (
+            f"DRAFT_INSERT_SQL 不可出現 {forbidden} 常量（M4 status placeholder only）"
+        )
+
+
+def test_draft_writer_returns_hypothesis_id_for_audit_backref():
+    """INSERT 必 RETURNING hypothesis_id — caller 需取得 ID 為下游 audit log emit / lease 更新。
+
+    為什麼必含 RETURNING：BIGSERIAL DEFAULT nextval 後 caller 需要 ID 作 audit chain
+    backref；INSERT without RETURNING 失去 audit chain key。
+    """
+    assert "RETURNING hypothesis_id" in DRAFT_INSERT_SQL, (
+        "DRAFT_INSERT_SQL 必含 RETURNING hypothesis_id（audit chain backref）"
+    )
+
+
+def test_draft_writer_engine_mode_validation_blocks_paper():
+    """engine_mode='paper' 必 reject（per CLAUDE.md §七 + memory project_engine_mode_tag_live_demo）。"""
+    import uuid as uuid_mod
+
+    with pytest.raises(ValueError, match="engine_mode"):
+        build_writeback_payload(
+            strategy_name="grid",
+            n_observations=100,
+            raw_p_value=1e-10,
+            cohens_d=0.5,
+            status_candidate="preregistered",
+            decision_lease_draft_id=uuid_mod.uuid4(),
+            engine_mode="paper",  # 必 fail
+        )
+
+
+def test_draft_writer_replicability_score_composite_range():
+    """replicability_score composite 必在 [0,1] (V103 EXTEND CHECK constraint)。"""
+    import uuid as uuid_mod
+
+    # 高分情境：強 cohens_d + subperiod pass + 高 silhouette
+    payload_high = build_writeback_payload(
+        strategy_name="grid",
+        n_observations=100,
+        raw_p_value=1e-10,
+        cohens_d=2.5,  # |d|/3 = 0.83
+        status_candidate="preregistered",
+        decision_lease_draft_id=uuid_mod.uuid4(),
+        subperiod_pass=True,
+        silhouette=0.9,
+    )
+    assert payload_high.replicability_score is not None
+    assert 0.0 <= payload_high.replicability_score <= 1.0, (
+        f"replicability_score 超範圍 [0,1]: {payload_high.replicability_score}"
+    )
+
+    # 低分情境：弱 cohens_d + subperiod fail + 低 silhouette
+    payload_low = build_writeback_payload(
+        strategy_name="grid",
+        n_observations=100,
+        raw_p_value=0.5,
+        cohens_d=0.0,
+        status_candidate="exploratory",
+        decision_lease_draft_id=uuid_mod.uuid4(),
+        subperiod_pass=False,
+        silhouette=0.0,
+    )
+    assert payload_low.replicability_score is not None
+    assert 0.0 <= payload_low.replicability_score <= 1.0
+
+
+def test_draft_writer_bonferroni_p_clamped_to_unit_interval():
+    """bonferroni_corrected_p 必 clamp [0,1] 對齊 V103 EXTEND CHECK [0,1]。"""
+    import uuid as uuid_mod
+
+    # raw_p = 2.5 → clamp 到 1.0
+    payload_over = build_writeback_payload(
+        strategy_name="grid",
+        n_observations=100,
+        raw_p_value=2.5,
+        cohens_d=0.5,
+        status_candidate="exploratory",
+        decision_lease_draft_id=uuid_mod.uuid4(),
+    )
+    assert payload_over.bonferroni_corrected_p == 1.0
+
+    # raw_p = -0.1 → clamp 到 0.0
+    payload_neg = build_writeback_payload(
+        strategy_name="grid",
+        n_observations=100,
+        raw_p_value=-0.1,
+        cohens_d=0.5,
+        status_candidate="exploratory",
+        decision_lease_draft_id=uuid_mod.uuid4(),
+    )
+    assert payload_neg.bonferroni_corrected_p == 0.0
+
+
+def test_draft_writer_pre_reg_hash_deterministic():
+    """同 input 必產生同 pre_reg_hash（canonical JSON SHA-256 不變式）。"""
+    import uuid as uuid_mod
+
+    lease_id = uuid_mod.uuid4()
+    p1 = build_writeback_payload(
+        strategy_name="grid",
+        n_observations=100,
+        raw_p_value=1e-10,
+        cohens_d=0.5,
+        status_candidate="preregistered",
+        decision_lease_draft_id=lease_id,
+        subperiod_pass=True,
+        silhouette=0.6,
+    )
+    p2 = build_writeback_payload(
+        strategy_name="grid",
+        n_observations=100,
+        raw_p_value=1e-10,
+        cohens_d=0.5,
+        status_candidate="preregistered",
+        decision_lease_draft_id=lease_id,
+        subperiod_pass=True,
+        silhouette=0.6,
+    )
+    assert p1.pre_reg_hash == p2.pre_reg_hash, "同 input 必產生同 pre_reg_hash"
+    # SHA-256 hex 長度 = 64
+    assert len(p1.pre_reg_hash) == 64
+
+
+def test_draft_writer_payload_to_params_excludes_caller_metadata():
+    """payload_to_params 不可含 caller-side metadata（不入 PG）。"""
+    import uuid as uuid_mod
+
+    payload = build_writeback_payload(
+        strategy_name="grid",
+        n_observations=100,
+        raw_p_value=1e-10,
+        cohens_d=0.5,
+        status_candidate="preregistered",
+        decision_lease_draft_id=uuid_mod.uuid4(),
+        graveyard_flag=True,
+    )
+    params = payload_to_params(payload)
+    # caller-side metadata 不入 INSERT params
+    forbidden_keys = {
+        "raw_p_value",
+        "cohens_d",
+        "subperiod_pass",
+        "graveyard_flag",
+        "silhouette",
+        "hypothesis_id",  # BIGSERIAL by PG
+    }
+    found_forbidden = forbidden_keys & params.keys()
+    assert not found_forbidden, (
+        f"payload_to_params 含禁止字段 {found_forbidden}（應為 caller-side metadata）"
     )
