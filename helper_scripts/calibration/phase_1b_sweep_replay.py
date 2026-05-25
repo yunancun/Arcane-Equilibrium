@@ -163,6 +163,24 @@ def _bbo_in_range(
     return [s for s in samples if start <= s.ts <= end]
 
 
+def _nearest_by_abs_time(
+    samples: tuple[TickSample, ...],
+    target_ts: datetime,
+) -> Optional[TickSample]:
+    """取絕對時間距 target_ts 最近的 sample。
+
+    為什麼這 helper：post_drift_samples 構造邏輯要求 `ts >= fill_ts + 60s`
+    （見 phase_1b_tick_loader.py:305-309），與 `_bbo_at_or_before(ts=fill_ts+60s)`
+    篩 `ts <= target` 互斥 → 後者永遠回 None。
+    adverse_selection_proxy 概念是「fill 後 60s 附近的 mid」用以判 adverse drift；
+    語意上「距 fill+60s 最近的可用 sample」最貼切，無論先或後一個 tick。
+    歷史 bug：EA-1 verdict §2.2-2.4，2026-05-25 commit ?? 修。
+    """
+    if not samples:
+        return None
+    return min(samples, key=lambda s: abs((s.ts - target_ts).total_seconds()))
+
+
 def simulate_cell_against_fill(
     cell: CalibrationCell,
     seed: FillReplaySeed,
@@ -322,10 +340,16 @@ def simulate_cell_against_fill(
                     break
 
     # 步驟 5: adverse selection proxy （+60s mid）
+    # 為什麼用 _nearest_by_abs_time 而非 _bbo_at_or_before：
+    # post_drift_samples 由 loader 構造（loader.py:305-309）滿足 `ts >= fill_ts + 60s`；
+    # `_bbo_at_or_before(target=fill_ts+60s)` 篩 `ts <= target` 與該不變量互斥 →
+    # 永遠回 None → adverse_proxy 永遠 None → cell 全 fail-closed (EA-1 verdict §2)。
+    # 語意上「距 fill+60s 最近的 sample」最貼合 adverse_selection_proxy 概念，
+    # 故 call-site 用 nearest-by-abs-time 修；不改 loader contract，不影響其他 tests。
     mid_at_fill_plus_60s: Optional[float] = None
     if tick_window.post_drift_samples:
         target_ts = seed.ts + timedelta(seconds=60)
-        nearest = _bbo_at_or_before(tick_window.post_drift_samples, target_ts)
+        nearest = _nearest_by_abs_time(tick_window.post_drift_samples, target_ts)
         if nearest is not None:
             mid_at_fill_plus_60s = nearest.mid
 
