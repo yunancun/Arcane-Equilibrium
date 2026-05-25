@@ -714,3 +714,57 @@ _Last updated: 2026-04-24_
 
 **W1-C E1 IMPL dispatch verdict**: **READY** — 3 自查項 (4 source freshness / GovernanceHub `M4_DRAFT_WRITEBACK` lease type 支援 / cross-lang fixture infra) 為 W1-C IMPL 內自查 + IMPL DONE 後 regression,不阻 W1-C 開工
 
+
+## 2026-05-25 W1-D M10 Tier A productionize backend spec(Sprint 2 Wave 1)
+
+**Spec**:`srv/docs/execution_plan/2026-05-25--m10_tier_a_productionize_backend_spec.md`(519 行)
+
+**Trigger**:Sprint 2 Wave 1 W1-D sub-agent track per dispatch packet §1.2;PM #2 decision 拍 (a) V111 spec @ Sprint 1A-γ 先,Stream C Wave 1 後端不阻。
+
+**Status**:MIT spec DRAFTED;W2-C E1 IMPL chain 接 Wave 2;依賴 Sprint 1A-γ V111 spec FINAL 才能完整接線 governance.discovery_tier_activations。
+
+**核心設計**:
+1. **V111 dependency 解耦**:Wave 1 sentinel JSON file `/tmp/openclaw/m10_tier_a_proposals/{strategy}_{symbol}_{regime}.json` writeback;Wave 2 W2-C V111 land 後接線 governance.discovery_tier_activations INSERT(dual-write with V004 ml_parameter_suggestions)
+2. **Cron cadence**:weekly Sun 05:30 UTC(`30 5 * * 0`)— 不撞 ml_training_maintenance daily 17:03;Tier A Optuna trial 較重(n_trials=30 × 7 策略 × 25 symbol × 3 regime = 15,750 trial)適合 weekly
+3. **7 策略 scope**:5 textbook(grid_trading/ma_crossover/bb_breakout/bb_reversion/funding_arb)+ Sprint 2 W2-B IMPL 2 新 candidate(funding_short_v2 + liquidation_cascade_fade per PM #1 decision Stream A)
+4. **Walk-forward 設計**:purge_days=2 + ≥ 6 historical sub-period × ≥ 30 fills per sub-period(per CR-6 + Lopez de Prado AFML Ch.7);per-strategy embargo 走既有 quantile_trainer.get_embargo_config()(funding_arb 72h carve-out;其餘 24h)
+5. **既有 IMPL reuse**:不改 optuna_optimizer.py / edge_estimate_validation.py / quantile_trainer.py / ml_training_maintenance_cron.sh;Tier A productionize 是新 surface 不污染既有 trainer scope
+6. **ADR-0036 黑名單 enforce**:Tier A only Optuna TPE + Walk-Forward Rolling;HMM / Markov-switching / GARCH 任何形式永久禁用;sub-agent dispatch 三方雙 round grep gate(W1-D + W2-C 前 + IMPL DONE 後)
+
+**Empirical findings(MIT ssh trade-core Linux PG)**:
+1. `_sqlx_migrations` max=112(Linux PG main trading_ai container)— V111 unapplied(V111.sql 不存在;V112 已 land)
+2. `to_regclass(\$\$learning.discovery_tier_config\$\$)` = NULL — V111 PA spec FULL-V0 改 schema 至 `governance` schema(不是 learning),per V111 spec `2026-05-21--v111_m10_discovery_tier_config_schema_spec.md` §1.1 placeholder v0 廢棄
+3. 既有 Optuna IMPL(optuna_optimizer.py)用 TPE + JournalFileStorage(per E5-O4 audit 非 PG),proposal 寫入 V004 ml_parameter_suggestions
+4. 既有 walk-forward IMPL(edge_estimate_validation._walk_forward_oos_values)已含 purge gap(default 0;Sprint 2 W1-D spec 改 purge_days=2)
+5. quantile_trainer.get_embargo_config():funding_arb 72h embargo(3-fold + 14d holdout);其餘 24h embargo(5-fold + 7d holdout)
+
+**10 AC for Stream C(Sprint 2 dispatch packet §4.3 5 條 + MIT 補 5 條 = 10)**:
+- AC-S2-C-1: Optuna walk-forward cron skeleton IMPL DONE(Wave 1 W1-D)
+- AC-S2-C-2: 7 策略 weekly run pass empirical(Sprint 2 14d 內 1-2 次 fire = 6/1 + 6/8)
+- AC-S2-C-3: V111 schema 接線(Wave 2 W2-C,依賴 1A-γ V111 spec FINAL)
+- AC-S2-C-4: capital tier $10k → Tier A only confirmed(本 spec §2.4 鎖 OPENCLAW_M10_TIER_LEVEL=A)
+- AC-S2-C-5: capital-tier hook 留 Tier B-E(per v5.8 §2 M10 + ADR-0036)
+- **AC-S2-C-6(MIT 補)**: Tier A proposal 不直接觸 trading(per 16 原則 #7 學習 ≠ live;走 V004 + governance.activations + 不繞 Decision Lease)
+- **AC-S2-C-7(MIT 補)**: Walk-forward look-ahead bias 防護(purge gap 2d + per-strategy embargo + 6 leakage 維度 leak-free check;sentinel JSON `leakage_checks.shift1_applied=true` 必對)
+- **AC-S2-C-8(MIT 補)**: ADR-0036 黑名單 grep gate enforce(W2-E E2 review verify)
+- **AC-S2-C-9(MIT 補)**: 5 textbook 不破 demo runtime(E4 Mac cargo test --workspace --release + pytest 5 策略 demo regression)
+- AC-S2-C-10(MIT 補): Optuna study journal storage 30d 自動 prune(P1 carry-forward 非 blocker)
+
+**W2-C E1 IMPL dispatch readiness**:條件性 — 依賴 Sprint 1A-γ V111 spec FINAL(operator + MIT C9 Linux PG dry-run sign-off pending)+ V111.sql land(W2-C IMPL chain 內)+ Linux PG dry-run x 2 round(per ADR-0011 V055 5-round loop precedent)。Wave 1 Optuna walk-forward backend cron skeleton 可獨立 IMPL 不阻塞 V111。
+
+**邊界遵守(M-4 hygiene SOP per docs/agents/sub-agent-hygiene-sop.md + Sprint 2 dispatch packet §10)**:
+- ✅ read-only ssh probe(Linux PG `_sqlx_migrations` max + V111 table state)
+- ✅ 不跑 cargo build/test/check --release(0 cargo invocation)
+- ✅ 不寫 PG / 不 sudo / 不 restart 服務
+- ✅ 不 install cron(operator scope)
+- ✅ 不寫 helper_scripts/m10/*.py 實 code(W2-C E1 IMPL 接手)
+- ✅ 不改 既有 IMPL(optuna_optimizer.py / edge_estimate_validation.py / quantile_trainer.py / ml_training_maintenance.py)
+- ✅ Mac dev-only;ssh probe 2 query 完結
+
+**Cross-skill consulted**:
+- time-series-cv-protocol(Purge / Embargo / Rolling vs Anchored)— Walk-Forward Rolling 採用(crypto regime 切換)
+- feature-engineering-protocol(6 leakage 維度 + shift(1) compliance)— sentinel JSON leakage_checks 必對
+- ml-pipeline-maturity-audit(Foundation/Skeleton/Shadow/Canary/Production)— Tier A productionize Stage = Skeleton(writer cron 在,V111 接線 Wave 2 後到 Shadow)
+- math-model-audit(HMM/GARCH/VPIN 黑名單 source of truth)— ADR-0036 governance promotion mirror
+- walk-forward-validation-protocol(QC alpha 顯著性協議)— PSR + DSR + Bonferroni 入 sentinel JSON
+
