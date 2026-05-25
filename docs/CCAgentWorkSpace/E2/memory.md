@@ -3808,3 +3808,55 @@ Round 1 RETURN 4 finding (HIGH-1 + MEDIUM-1/2/3) + 2 LOW optional 全修。HEAD 
 **Verdict**: APPROVE → PASS to E4.
 
 **Report path**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-23--sprint5_wave1_4_4_production_hardening_e2_review_r2.md`
+
+---
+
+## 2026-05-25 — W2-E-R2 dual re-review · M4 R2 (99709a2f) APPROVE + W2-B (817de10a) APPROVE → E4 pending
+
+**對象**：commit `99709a2f` (M4 W1-C Round 2 fix · 6 schema column drift + 19 schema-grep regression test + tick_window unwrap cleanup) + commit `817de10a` (W2-B Alpha Tournament IMPL · funding_short_v2 + liquidation_cascade_fade Rust scaffold + Python harness + TOML)
+**Verdict**: M4 R2 **APPROVE** (E4 fa466361 已驗 · 不需重 E2 / E4) · W2-B **APPROVE → E4 regression pending** (E4 fa466361 在 W2-B 之前完成 · 需新 E4 cover 817de10a)
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-25--w2e_r2_m4_r2_w2b_dual_review.md`
+
+**M4 R2 7 closure**（W2-E original review 5 finding 全修 + E1 Round 2 額外 catch 第 6 column drift）：
+- HIGH BLOCKER #1-5（fills_loader size/close_fill/realized_net_bps + liquidations_loader liq.size/aggregator_type）全修：SQL string 全 PASS blacklist 0 hit + whitelist 全到位
+- HIGH BLOCKER #6（E1 Round 2 self-found）：trading.fills 無 `close_reason_code` column → 用既存 `exit_reason`（line 61）；test `test_fills_loader_uses_exit_reason_not_close_reason_code` parametrize 進 blacklist；對齊 `feedback_v_migration_pg_dry_run` SOP — 任何 PG-coupled spec 修改必先 empirical reflection
+- MEDIUM #1 51 pytest 黑盒 source loader SQL：新增 `test_source_loader_schema.py` 19 test (10 whitelist + 5 blacklist + 4 build_query contract) 全 PASS
+- LOW #1 tick_window.rs:64 unwrap → `if let Some(evicted)` early return pattern；7/7 tick_window tests 含 100k push Kahan precision exercise PASS
+
+**W2-B 10 spec compliance 全 PASS**：
+- W1-A v1.1 funding_short_v2: `const IS_LONG: bool = false` compile-time 不可繞 + 30% annualized + 24h hold + Stage 1 BTC/ETH + FUNDING_THRESHOLD_FLOOR=0.20 break-even floor + hysteresis (exit < threshold) + amortized edge gate + 負 funding hard reject 不轉長
+- W1-A v1.1 liquidation_cascade_fade: 5min panel-internal aggregation（非 entry rolling stat 避 look-ahead bias）+ BTC \$500k / ETH \$300k per-symbol + 60min max_hold + fade direction map LongLiq→long / ShortLiq→short / Mixed→reject + min_events 3 + reverse_cascade 1.5x ratio + take_profit 1.5% + panel/pulse None fail-closed + Stage 1 cohort + self-fills filter stub 永遠 false（避誤判 true 錯失 cascade）
+
+**5-gate auto path inheritance 完整**：
+- 2 candidate emit `StrategyAction::Open(OrderIntent::new_trade(...))` 走標準 pipeline → IntentProcessor → Guardian → Decision Lease
+- 0 hit `execution_authority` / `live_reserved` / `live_demo_authority` / `OPENCLAW_ALLOW_MAINNET` in W2-B 範圍
+- active=false（strategy_params_demo.toml）+ enabled=false（risk_config_demo.toml）雙保險 4 hits 全 land
+- `fail_closed_inactive_config()` (params.rs:163-167) 顯式 set `cfg.funding_short_v2.active = false` + `cfg.liquidation_cascade_fade.active = false` — exchange-facing pipeline TOML parse fail → fail-closed inactive
+
+**V101 / V103 / 跨平台 / unsafe 全 grep clean**：
+- V101 ENUM: 0 production hit `alpha_short_carry` / `alpha_microstructure_fade`（4 grep hit 全在註釋 anti-pattern 標註）；EXPECTED_TRACK = 'direct_exploit' 唯一值
+- V103 hypotheses: W2-B 整套 SELECT-only path（不寫 learning.hypotheses）；0 hit `m4_hypotheses_extended` 在 production code
+- `/home/ncyu` / `/Users/[^/]+` hardcode: 0 hit
+- `unsafe` Rust 塊: 0 hit
+- `.unwrap()` / `.expect()` in production path: 0 hit (1 expect 僅在 `#[cfg(test)] mod tests` params.rs:386)
+- file size max prod 610 LOC (lcf/mod.rs) · max test 649 LOC — 全 < 800 LOC warn
+
+**對抗反問 10 條 catch 2 inherited LOW NTH（不阻 E4）**：
+- #2 #3: registry.rs startup 路徑直接 mutate field 跳過 `StrategyParams::validate()`（funding_threshold_annualized / allowed_symbols 等）；inherited from funding_arb (line 243) + funding_harvest pattern — Sprint 3+ 統一 wrapper helper 加 `params.validate()?` 前置；不阻當前 sign-off
+- #2 同問題：startup 直接 set `fsv2.cooldown_ms = ...` field 但不調用 `fsv2.cooldown.set_duration(...)`；TrendCooldown.duration_ms 用 `new()` default 8h；TOML cooldown_ms 是裝飾性；IPC update_params 路徑正確；inherited from funding_arb 範式（registry.rs:243 同問題）；不阻 E4
+
+**M4 + W2-B PG path collision check empirical 0 collision**：
+- M4 engine_mode IN ('live', 'live_demo') + 5 textbook strategy_name；W2-B engine_mode IN ('demo', 'live_demo') + 2 candidate strategy_name
+- 重疊只在 'live_demo'（PipelineKind::Live + non-mainnet）+ 1 candidate；Sprint 2 W2-B default active=false，Stage 1 跑時 engine_mode='demo'，M4 看不到
+- 同 learning.hypotheses table 由 source_module 標籤完全區分（'M4_pattern_miner' vs 'alpha_tournament'）
+
+**95/95 W2-B Rust unit test 全 PASS（funding_short_v2 47 + liquidation_cascade_fade 48）+ Mac cargo --release × 2 (openclaw_core 416/0/0 + openclaw_engine 3463/0/1) non-flaky + pytest M4 70/0 (51 base + 19 new schema-grep) non-flaky**
+
+**Lessons captured**：
+1. **`feedback_v_migration_pg_dry_run` 升級版範式 — `test_source_loader_schema.py` 19 test**: 任何 sub-agent IMPL 寫 SQL `SELECT col_a, col_b FROM schema.table` 都必加 1 行 test `assert "qty" in SQL_STRING` 或更強 `assert "size" not in SQL_STRING`。Mac 跑不到 PG 但 SQL string grep 是 schema-coupled regression 補位手段；任何 future schema 改動 + SQL 改動都會被 catch。M4 / W2-B 各自 dedicated test 防呆 — schema drift defense in depth。
+2. **W2-B 2 candidate IMPL 100% spec compliance — Rust compile-time enforcement gold standard**: `const IS_LONG: bool = false` (funding_short_v2) + fade direction map explicit match (LongLiq→long / ShortLiq→short / Mixed→reject) — alpha thesis 物理性不可錯。任何 future alpha candidate 應沿用 compile-time const + explicit pattern match enum 對應 spec direction map；避免 runtime config-driven direction（避免「is_long: bool from config」這種運行時可翻盤的 anti-pattern）。
+3. **Cross-stream PG path collision check — engine_mode + strategy_name + source_module 三維獨立**: 同 PG 表多 stream 並存的最佳實踐：engine_mode 過濾（M4 看 live/live_demo · W2-B 看 demo/live_demo）+ strategy_name 過濾（W2-B 只看 2 candidate）+ source_module 標籤（writeback path 完全區分）。Sprint 3+ M11 + M4 + M8 + W2 共讀 trading.fills + learning.hypotheses 必沿用此三維框架。
+4. **registry.rs startup field-mutation 跳過 validate 是 funding_arb / funding_harvest / W2-B 共用 inherited pattern**: 4 strategy 範式都直接 set `strategy.field = p.toml.field`，不走 `strategy.update_params_json(toml_to_json(p))` validate 路徑。Sprint 3+ unify 為 helper `apply_<strategy>_params(strategy, params)`，內部先 `params.validate()?` 再 mutate；同時 cooldown.set_duration 也補上。debt tracked but not E4 blocker — pre-existing pattern。
+5. **Multi-source-loader common pytest pattern — parametrize cross-loader blacklist**: `test_no_loader_uses_illegal_column[illegal_token]` parametrize 跨 4 source loader 同步 grep 黑名單 column — 1 行 test parametrize 防 4 個 loader 任一引入 schema 違規。任何 future source loader 加入時用 `import` 後 parametrize 自動 cover。
+
+---
