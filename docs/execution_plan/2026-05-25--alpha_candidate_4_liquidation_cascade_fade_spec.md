@@ -737,8 +737,15 @@ per `srv/rust/openclaw_engine/src/panel_aggregator/liquidation_pulse.rs:4-8`：
 
 liquidation_cascade_fade fills 經 `trading.fills`：
 - `strategy_name = "liquidation_cascade_fade"`
-- `strategy_track = "alpha_microstructure_fade"`（新 track；對齊 AMD-2026-05-15-01 track classification）
+- `track = 'direct_exploit'`（per V101 strategy_track ENUM + ADR-0026：hand-coded Rust strategy 必 = `direct_exploit`，Track A bypass CPCV；非新 track 命名空間）
 - `engine_mode IN ('demo', 'live_demo')`
+
+**Empirical V101 ENUM verified**（2026-05-25 SSH read-only probe）：
+```
+SELECT enum_range(NULL::strategy_track);
+=> {direct_exploit, asds_factory, baseline}
+```
+非 `alpha_microstructure_fade`（不存在 ENUM 命名空間）。
 
 ### §7.2 14d demo SQL bucket-split monitor
 
@@ -792,21 +799,67 @@ per ADR-0038 §Decision 1 + BB C6 PROOF PASS：
   ```
 - 驗證 thesis: entry hour 前 5min 的 market.liquidations notional 應顯著高於 baseline（threshold check empirical）
 
-### §7.4 DRAFT writeback to V103 hypotheses（per AC-S2-A-4）
+### §7.4 DRAFT writeback to V103 EXTEND hypotheses（per AC-S2-A-4）
 
-per CR-6 minimum bar 6 attribute（same as funding_short_v2 spec §7.3）：
+**Schema 真相**（per V100 base + V103 EXTEND actual spec `srv/docs/execution_plan/2026-05-21--v103_extend_m4_hypothesis_columns_schema_spec.md`）：
+- 目標 table = `learning.hypotheses`（**非** `learning.m4_hypotheses_extended` — 該 table 不存在）
+- V103 EXTEND 6 column 為 ALTER ADD 到 `learning.hypotheses`：
+  1. `hypothesis_source_module` (TEXT, 3 enum: `M4_AUTO`/`OPERATOR`/`HISTORIC`)
+  2. `leakage_scan_pass` (BOOLEAN, DEFAULT FALSE)
+  3. `bonferroni_corrected_p` (NUMERIC(10,8), [0,1])
+  4. `replicability_score` (NUMERIC(5,4), [0,1])
+  5. `decision_lease_draft_id` (UUID)
+  6. `cowork_review_status` (TEXT, 4 enum: `NONE`/`PENDING`/`APPROVED`/`REJECTED`)
+
+per CR-6 minimum bar 6 attribute（同 funding_short_v2 spec §7.3 mapping）：
+- N ≥ 30 → `learning.hypotheses.min_sample_size`
+- Bonferroni p < 0.05/K（K = 2 candidate → α = 0.025）→ V103 `bonferroni_corrected_p`
+- effect size ≥ 0.2 → V103 `replicability_score` (composite)
+- 6mo sub-period stability → V103 `replicability_score` (composite)
+- leakage scan pass → V103 `leakage_scan_pass`
+- cluster K silhouette → V103 `replicability_score` (composite)
+
+W2-F MIT post-IMPL audit 寫 V103 EXTEND DRAFT row（**正確 schema**）：
 
 ```sql
-INSERT INTO learning.m4_hypotheses_extended (
-  hypothesis_id, strategy_name, attribute_n, attribute_p_value,
-  attribute_effect_size, attribute_subperiod_stable, attribute_graveyard_flag,
-  attribute_cluster_silhouette, source_run_id, draft_state
+INSERT INTO learning.hypotheses (
+  -- V100 base required column
+  strategy_name,
+  state,                       -- 'draft' Sprint 2
+  hypothesis_text,
+  null_hypothesis,
+  acceptance_criteria,
+  min_sample_size,             -- N (per CR-6 #1)
+  max_drawdown_pct,
+  -- V103 EXTEND 6 column
+  hypothesis_source_module,    -- 'M4_AUTO'
+  leakage_scan_pass,           -- per CR-6 #5
+  bonferroni_corrected_p,      -- per CR-6 #2; K=2 → α=0.025
+  replicability_score,         -- composite (#3 + #4 + #6)
+  decision_lease_draft_id,     -- STRATEGY_TRIAL lease UUID
+  cowork_review_status         -- 'NONE'
 ) VALUES (
-  'liquidation_cascade_fade_sprint2_demo', 'liquidation_cascade_fade', /* n */ ?,
-  /* bonferroni p */ ?, /* effect size */ ?,
-  'pending', 'caution', 'single-cluster', 'sprint2_w2b_impl', 'draft'
+  'liquidation_cascade_fade',
+  'draft',
+  'Liquidation cascade > $500k 5m + dominant_side fade entry (Sprint 2 Alpha Tournament Candidate #4)',
+  'Mean net_pnl_bps in demo over 14d <= 0',
+  '14d demo avg_net_pnl_bps > 5 + Wilson CI lower > 0 + n_fills ≥ 30',
+  /* n_fills */ ?::int,
+  2.0,                         -- per_strategy SL 2% 對齊 strategy_params
+  'M4_AUTO',
+  /* leakage_scan_pass */ TRUE,
+  /* bonferroni p */ ?::numeric(10,8),
+  /* replicability composite */ ?::numeric(5,4),
+  /* lease_draft_id */ ?::uuid,
+  'NONE'
 );
 ```
+
+**W2-B E1 IMPL 必 honor**：
+- 不可寫 `learning.m4_hypotheses_extended`（該 table 不存在）
+- 不可寫 W1-A 原 spec 虛構 column（`attribute_n` / `attribute_p_value` / `attribute_effect_size` / `attribute_subperiod_stable` / `attribute_graveyard_flag` / `attribute_cluster_silhouette`）
+- 必走 V100 base + V103 EXTEND actual 6 column
+- W2-E E2 review grep `m4_hypotheses_extended` / `attribute_n` / `attribute_p_value` 必 0 hit
 
 ---
 
@@ -883,3 +936,14 @@ INSERT INTO learning.m4_hypotheses_extended (
 **Report END**
 
 PA SPEC DONE: spec path: `/Users/ncyu/Projects/TradeBot/srv/docs/execution_plan/2026-05-25--alpha_candidate_4_liquidation_cascade_fade_spec.md`
+
+---
+
+## Changelog
+- 2026-05-25 v1.1: inline amend by PA per W2-A 2 CRITICAL catch + PM Option A decision
+  - §7.1 strategy_track `'alpha_microstructure_fade'` → `'direct_exploit'` (per V101 ENUM empirical verified `{direct_exploit, asds_factory, baseline}` + ADR-0026 hand-coded Rust = direct_exploit)
+  - §7.4 INSERT target table `learning.m4_hypotheses_extended` → `learning.hypotheses` (V100 base + V103 EXTEND actual schema per `2026-05-21--v103_extend_m4_hypothesis_columns_schema_spec.md`)
+  - §7.4 INSERT 6 column 名稱 (`attribute_n` / `attribute_p_value` / `attribute_effect_size` / `attribute_subperiod_stable` / `attribute_graveyard_flag` / `attribute_cluster_silhouette`) → V103 EXTEND 6 real column (`hypothesis_source_module` / `leakage_scan_pass` / `bonferroni_corrected_p` / `replicability_score` / `decision_lease_draft_id` / `cowork_review_status`)
+  - 加 W2-E E2 review grep guard: `m4_hypotheses_extended` / `attribute_n` / `attribute_p_value` / `alpha_microstructure_fade` 必 0 hit
+  - W2-A finalize report path: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-25--w2a_alpha_tournament_pre_spec_finalize.md`
+  - W2-B E1 IMPL dispatch verdict: NEEDS-MORE-DESIGN → DISPATCH-READY
