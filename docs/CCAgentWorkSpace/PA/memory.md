@@ -6149,3 +6149,30 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 - track ENUM 是 V101 hard-coded 3 值，新策略一律 'direct_exploit'（per ADR-0026），不需要新 track 名稱
 
 **Report path**: srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-25--w2a_alpha_tournament_pre_spec_finalize.md + Operator copy
+
+## 2026-05-25 — W2-E-R3 spec amend (M4 replicability_score 1 HIGH + 3 LOW closure)
+
+**Trigger**: W2-E-R3 E2 review (a605af57) APPROVE-WITH-CONDITIONS on W1-C-R3 draft_writer (b2febd43); 1 HIGH spec drift (`replicability_score` formula invented vs W1-B §4.3 multi-asset spec) + 3 LOW (evidence_json wording / min_sample_size semantic / audit ordering).
+
+**Verdict**: Option C two-stage spec — Sprint 2 pragmatic 3-axis weighted formula (E1 invented baseline) + Sprint 3 retroactive recompute path. Rationale: Sprint 2 ships 1-asset/same-timeframe; W1-B §4.3 full formula collapses to 0.076-0.376 (low discrimination); discriminative signal needed for Sprint 4 First Live AC-A (ii) precondition. Option A loses long-term spec authority; Option B's NULL placeholder blocks Sprint 4. Option C preserves both.
+
+**3 LOW closure**:
+- evidence_json: W1-A/W1-B both never required; PM Option B dispatch packet wording loose; E1 W1-C-R3 already correctly rejected + regression guard ✅
+- min_sample_size: V100 COMMENT "threshold for promotion" vs M4 IMPL "actual n at DRAFT time" — semantic per hypothesis_source_module; add W1-A §10.2 footnote
+- Audit ordering: log emit not 2PC with PG accepted design per ADR-0024-lite + memory project_p06_rca_and_fix_plan; W2-D MIT cron spec amend documents step 1-6 ordering
+
+**E1 IMPL re-verify**: `helper_scripts/m4/draft_writer.py` STAYS — no E1 round 4 dispatch. Spec aligns to IMPL. Mac pytest 89/89 + Linux PG empirical INSERT dry-run + 19 schema-grep regression all green.
+
+**Doc-debt registered**: E1 W1-C-R3 references "W1-A §7.3 mapping" 6 times in module docstring + inline comments. W1-A §7.3 is actually "M4↔M6 不 auto-tune 規則" not 6-attribute mapping. Canonical anchor = W1-A §3.1 + §10.2 + W1-B §4.3 + amend §1.4. Next E1 touch cleanup.
+
+**Catch (PA dual verify)**: E1 W1-C-R3 cites "W2-F QA report §5.3 line 695-697 composite (#3 effect + #4 subperiod + #6 cluster)" — E2 verified line 695-697 has no such mapping text. **E1 fabricated citation**. Disclosed in this amend §1.2. Lesson: PA pre-spec finalize should verify ALL E1 citations across W?-A/W?-B/QA reports before approve.
+
+**Sprint 3 M4 cron production fire dispatch readiness**: **READY** conditional on (a) this amend committed + pushed (b) QC sign-off Open Q3 Sprint 2 baseline formula weights at W14.5 empirical (c) PA lift §1.4/§1.5/§2.2 into source specs (Sprint 3 W0 sub-task).
+
+**Files**:
+- This amend: `srv/docs/execution_plan/2026-05-25--m4_spec_amend_w2e_r3_findings.md` (~370 LOC)
+- PA work report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-25--w2e_r3_m4_replicability_spec_amend.md` (this entry + amend pointer)
+
+**Confidence**: HIGH for Option C choice + 3 LOW closure + E1 IMPL stays. MEDIUM for Sprint 2 baseline weights 0.4/0.3/0.3 (pragmatic baseline pending QC empirical arbitration W14.5).
+
+**16/16 + 9/9 + hard boundary 0 touch** maintained per W2-E-R3 §7 + amend §4.3.
