@@ -12466,3 +12466,33 @@ operator 拍板 Hygiene Option E Phase 1 Step 2（Option B 同 sprint build lock
   1. `--engine-only` 標誌正確避免打斷 API/watchdog，C10 demo 觀察不中斷。
   2. `--keep-auth` 在缺 authorization.json 場景下 WARN 但 graceful（簽信並非本任務範圍）。
   3. `restart_all.sh` 對 PID 認 stripped name `openclaw-engine`，pgrep 命中 `rust/target/release/openclaw-engine` 即可 — `WARN: skip non-OpenClaw engine pid -> 320381` 是 SIGTERM 後的二次 pgrep 命中 stale entry，非實際漏殺（後續 `Engine exited cleanly after 0x500ms` 證明 PID 已退）。
+
+## 2026-05-25 H-1 FD 200 flock leak fix + H-3 push back
+
+### H-1 IMPL（commit 5e8302f7）
+
+- 修法：`restart_all.sh:535` 加 `0<&- 200<&-` 顯式關 stdin + FD 200
+- Verify：Mac `bash -n` 通過 + 不在 trade-core deploy（PM Day -1 收口）
+- 教訓：spawn 子進程（nohup/setsid/exec）必 explicit close 治理用 FD；
+  shell script 內 flock advisory lock 預設 child 會繼承 → 隱形 leak
+
+### H-3 push back（未 IMPL）
+
+E5 report §H-3 claim「edge_estimates.json path mismatch — cron 寫 `srv/settings/`、
+healthcheck [7] 讀 `/tmp/openclaw/`」**實證不成立**：
+- checks_ipc_edge.py:250 [7]: `base = OPENCLAW_BASE_DIR or ~/BybitOpenClaw/srv` → `settings/edge_estimates.json`
+- checks_strategy.py:196 [13]: 同上完全一致
+- 兩 check 讀**同一 file 同一 mtime**
+
+真實 root cause = threshold mismatch：
+- [7] threshold = 90 min（嚴）→ 124 min → FAIL
+- [13] threshold = 6h（寬）→ 124 min → PASS
+- 不是 path bug，是 dual-layer 警報設計（[7] = quick miss / [13] = G1-01 recovery target）
+
+PA 指示 `checks_ipc_edge.py:353-444` 對應實際 = `check_decision_shadow_exits` 與 edge_estimates 無關。
+P A 引用 line 範圍錯。
+
+教訓：
+1. 接到 IMPL 任務先 grep 確認 root cause；E5 audit 不是無誤的單一 source of truth
+2. Push back 含「實證 path 對齊」+「真實 root cause 是 threshold dual-layer」+「PA line range 錯指」
+3. 不盲改 — 改了實質 = 沒效（path 已經對的）
