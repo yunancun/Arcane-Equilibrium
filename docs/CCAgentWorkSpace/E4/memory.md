@@ -4583,3 +4583,53 @@ W1-C M4 與 V109 解耦（per E2 §9.2）— V109 schema 純 hypertable land；W
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-25--w2e4_sprint_2_wave_2_regression.md`
+
+---
+
+## 2026-05-25 Fresh E4 Sprint 2 Wave 2 complete chain (HEAD b2febd43)
+
+5 commit chain regression coverage:
+- W2-B 817de10a (funding_short_v2 + liquidation_cascade_fade Rust scaffold + Python harness)
+- W2-F fbfbd184 (QA + FA audit reports)
+- W2-F b2febd43 (AC-19 cron + W1-C-R3 draft_writer fix + PA velocity RCA)
+- W2-E-R2 aeb8a84b (E2 dual re-review M4 R2 + W2-B both APPROVE)
+- PA velocity RCA d8311cf2
+
+### Numbers (vs fa466361 baseline 4205/1/6 cargo · 6158/7/45 pytest)
+- Mac cargo workspace 雙跑: **4300/1/6** (+95 = funding_short_v2 47 + liquidation_cascade_fade 48 ✅)
+- Mac pytest 雙跑: **6221/7/45** (+63 = M4 19 + AC-19 44 ✅)
+- 兩遍 non-flaky 同綠（diff fail set = empty）
+- 唯一 cargo fail `layer_2_fence_archive_policy_diagnostic_only` 是 Sprint 1B Earn Wave B 875de212 carry-over
+- 7 pytest fail 全 pre-existing W-AUDIT-7c / structural drift
+
+### Module isolation
+- V109 writer (W2-D): 14/0
+- W2-B funding_short_v2: 47/0
+- W2-B liquidation_cascade_fade: 48/0
+- M4 helper_scripts/m4: 89/0 (70 base + 19 W1-C-R3 schema-grep)
+- AC-19 helper_scripts/cron: 44/0
+
+### Linux PG empirical (read-only)
+- V109 `learning.anomaly_events`: 23 col / 0 row (scaffold, expected)
+- AC-19 crontab: installed 5/26 08:00 UTC
+- AC-19 cron 7d empirical: alt 35/9/25.7% · large_cap 6/4/66.7%
+- _sqlx_migrations max=112 / count=102
+
+### Binary symbol scan
+- Mac openclaw-engine (21:45): 5 funding_short_v2 + 5 liquidation_cascade_fade strings; 0 V109 writer / m4_miner / alpha_tournament (expected scaffold)
+- Linux openclaw-engine (00:27, pre-Wave 2): 0 W2-B symbols → atomic deploy decision defer to Sprint 3 wire-up
+- 0 mock_instant / tokio::time::pause / spike leak
+
+### Hard boundary + cross-platform + unsafe scan
+- git diff fa466361..b2febd43 hard boundary literal grep = 0
+- 0 /Users/ncyu | /home/ncyu hardcode in 全 Wave 2 IMPL
+- 0 unsafe blocks in W2-B + M4 source
+
+### Lessons
+1. **Pre-existing layer_2_fence baseline 持續 across W2 commits**：fa466361 → b2febd43 仍 1 cargo fail；Sprint 1B Earn 875de212 修復未推進 = Sprint 3 carry-over。
+2. **AC-19 cron deployed Linux but Linux binary 尚未含 W2-B Rust scaffold**：atomic restart 政策定義「detector wire-up + binary build + cron deploy 合一」防 binary churn；目前 cron live + binary defer Sprint 3 是 by design。
+3. **+95 cargo / +63 pytest delta 100% attribution clean**：W2-B 47+48 → cargo +95；M4 19 + AC-19 44 → pytest +63；無 hidden 增量 / 無 drift；non-flaky 同綠驗證。
+4. **--ignore both test_pure_utils.py 對齊 Sprint 5+ Wave 1 Phase D 教訓持續**：commands 含 `--ignore=tests/ml_training/test_pure_utils.py --ignore=tests/misc_tools/test_pure_utils.py` 雙 ignore 標準保留。
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-25--fresh_e4_sprint_2_wave_2_complete_regression.md`
