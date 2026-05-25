@@ -6,6 +6,55 @@
 - 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
 - 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
 
+## 2026-05-25 — W2-E dual review M4 (W1-C) + V109 (W1-F) · M4 RETURN-TO-E1 / V109 APPROVE
+
+**對象**：commit `ae9a2dd8` (W1-C M4 IMPL Rust 1511 + Python 1900 LOC) + commit `16796d13` (W1-F V109 832 LOC schema)
+**Verdict**：M4 **RETURN-TO-E1**（1 HIGH BLOCKER + 1 MEDIUM + 1 LOW）；V109 **APPROVE → E4** (0 finding · 9/9 對抗 grep + 7/7 AC + Guard A/B/C 三重 ADR-0036 反向防護全完整)
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-25--w2e_m4_v109_dual_adversarial_review.md`
+
+**M4 5 invariant 全 PASS**（cargo 416/0 round 1+2 + pytest 51/0）：
+- I-1 shift(1) leak-free Rust feature_engineering + cross_correlation 雙端 verify
+- I-2 HMM/Markov/GARCH 0 production import + 4 comment 標禁用
+- I-3 K_TOTAL=2500 / ALPHA_CORRECTED=2e-5 Rust + Python 雙端 hard-code
+- I-4 N>=30 event gate Rust + Python 雙 sample_gate
+- I-5 reject 'live'/'promoted'/'rejected' Rust types.rs + Python draft_writer.py 雙重
+
+**M4 1 HIGH BLOCKER catch — 5 schema-incorrect column 在 2 source loader**:
+- fills_loader.py FILLS_QUERY_SQL: `size` (應 `qty`) / `close_fill = TRUE` (應 `entry_context_id IS NOT NULL`) / `realized_net_bps` (不存在；trading.fills 有 `realized_pnl`) 三處 wrong
+- liquidations_loader.py LIQUIDATIONS_QUERY_SQL: `liq.size` (應 `liq.qty`) / `aggregator_type IN ('top_liq_30s', 'cascade_5min')` (column 完全不存在)
+- empirical 證據：V003/V002 schema + production trading_writer.rs:459 INSERT + program_code/ml_training/edge_label_backfill.py:417/513/624 全用 canonical pattern
+- W2-D MIT cron wire-up 第一次 run 必 100% RAISE EXCEPTION
+- 直接違反 `feedback_v_migration_pg_dry_run` SOP（Mac mock pytest 不能 catch PG runtime semantic）
+
+**為什麼 51 pytest 漏 catch**:
+- grep test 0 hit `build_fills_query|FILLS_QUERY_SQL|build_liquidations_query` — source loader SQL 完全 untested
+- 51 test 全在 algorithm / leakage / writeback contract / 邏輯 helper；source loader SQL string 是黑盒
+- Mac `--dry-run` 路徑只 log SQL 不 execute；全程沒接觸 PG schema
+- E1 self-verify 「cargo + pytest 全 PASS」**未對齊 production schema empirical**
+
+**V109 APPROVE 全項**：
+- 23 col post-Guard count strict 驗 + 9 taxonomy + 4 severity + 5 engine_mode(含 replay) + 4 detection_method + 3 atr_vol_state + 3 funding_state
+- P0-1 表名 `learning.governance_audit_log` (非 governance.audit_log) 整體 6 hit
+- P1-5 `metric_baseline` column 加 + Guard A v_missing array 含 (13 hit total)
+- ADR-0036 黑名單 reverse RAISE 防護：Guard A (line 117-157) + Guard C 預檢 (line 244-254) + Guard C 後驗 (line 695-702) 三重 + column name pattern 雙重 → 結構性 enforcement
+- Hypertable 7d chunk + Compression 30d + Retention 180d + 4 partial index 全 post-Guard 驗
+- 7/7 AC PASS（含 AC-S2-D-7 23 column 強制 verify）
+
+**Hard boundary 0 觸碰 (M4 + V109)**：
+- 0 grep hit live_execution_allowed / authorization.json / system_mode / OPENCLAW_ALLOW_MAINNET in either
+- `unsafe` Rust 塊 0 hit；1 production-path `unwrap()` (tick_window.rs:64 邏輯安全 LOW)
+- file size cap 全內（max m4 file 344 LOC）
+
+**對抗反問 8 條全跑**（含 mock SQL execution gap / PA spec column 列表 / Bonferroni K trade-off / ADR-0036 反向 grep / engine_mode application filter / scope leak）
+
+**Lessons captured**：
+1. **PG-coupled source loader SQL 必 schema-grep test**：任何 sub-agent IMPL 寫 SQL `SELECT col_a, col_b FROM schema.table` 都必加 1 行 test `assert "qty" in SQL_STRING` 或更強 `assert "size" not in SQL_STRING`；51 test 完全沒 source loader SQL coverage 是 P1 cover gap。Source loader test 不需連 PG — 可純 regex / string check baseline 防禦 schema drift。
+2. **PA spec § 編碼點對齊「column 名」非「§ 號」**：PA W1-B spec §1.2/§1.3 寫「trading.fills」「market.liquidations」但 0 列 column 名 → E1 自行猜 column → 5 個猜錯。任何 PG-coupled spec 必含 empirical column 列表（`feedback_v_migration_pg_dry_run` 2026-05-05 invariant 升級版）— PA/MIT 寫 spec 必先 Linux PG 跑 `\d schema.table` 列 column 進 spec。
+3. **「dry-run mode 只 log SQL 不 execute」是 schema drift 盲點**：M4 `--dry-run` 設計上不 execute SQL 是合理（per CLAUDE.md §六 Mac 不跑 PG），但這令 schema-incorrect column 完全靜默。Future scaffold IMPL 必加 `--dry-run --validate-schema` mode：query `information_schema.columns` 對齊 spec column 名（read-only metadata，Mac 可跑透過 ssh trade-core 或本地 mock metadata）。
+4. **ADR-0036 黑名單反向 enforcement 三重防護是 V### gold-standard pattern**：V109 Guard A + Guard C 預檢 + Guard C 後驗 + column name pattern 雙重；任何 future ADR amendment 想加 hmm/markov/garch 必先 amend ADR-0036 → amend V109.sql → 各 V### sister 同步加；structurally impossible to back-door。M4 / M8 / future M### 黑名單演算法必沿用此 pattern。
+
+---
+
 ## 2026-05-23 — cost_gate low-sample deep-negative arm · RETURN-TO-E1
 
 **對象**：commits `718c1ddd` (TOML 30→15) + `188f244a` (gates.rs +23 LOC 新 low-sample-deep-neg arm cutoff=-15bps)
