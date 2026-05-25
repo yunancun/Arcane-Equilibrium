@@ -1,7 +1,17 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-25（Sprint 2 W2-B Alpha Tournament scaffold — 新增 `alpha_tournament/__init__.py` + `alpha_tournament/attribution_daily.py` + `alpha_tournament/tournament_orchestrator.py` + `alpha_tournament/14d_bucket_split.sql`，配套 funding_short_v2 / liquidation_cascade_fade Rust strategy IMPL；保留 2026-05-25 Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
+最後更新：2026-05-25（Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron IMPL — 新增 `cron/ac19_alt_bucket_daily_query.sql` + `cron/ac19_alt_bucket_daily_cron.sh` + `cron/ac19_alt_bucket_jsonl_writer.py` + `cron/tests/test_ac19_alt_bucket_daily.py` 44 pytest PASS；per W1-G SOP §8 handoff；5/26 EOD deadline 達成。保留 2026-05-25 Sprint 2 W2-B Alpha Tournament scaffold + Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
+
+## 2026-05-25 Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron IMPL
+
+| 腳本 | 用途 |
+|------|------|
+| `cron/ac19_alt_bucket_daily_query.sql` | AC-19 14d 監測 daily SQL：post-deploy window 5/19~6/2 + bucket-split (large_cap=BTC/ETH / alt=其它 15 symbol) + Wilson CI 95% lower/upper bound + 3 級 verdict (PASS / MARGINAL / FAIL / INSUFFICIENT_DATA)；psql --csv -f 直接跑。per W1-G SOP §2 canonical。 |
+| `cron/ac19_alt_bucket_daily_cron.sh` | Daily 08:00 UTC cron wrapper：讀 secrets env file 取 PG creds → psql --csv 跑 SQL 寫 CSV → ac19_alt_bucket_jsonl_writer.py 將結果 append 到 14d 累積 JSONL summary + heartbeat sentinel + lock mkdir 防 overrun + day_index>14 idempotent skip。Exit code 對齊 verdict 聚合（0/1/2）。 |
+| `cron/ac19_alt_bucket_jsonl_writer.py` | CSV → JSONL append + sanity verify：解析 psql --csv 輸出 / 重算 Wilson lower/upper（防 SQL ↔ Python 漂移；超過 1pp tolerance 寫 sanity_drift_pct）/ 重判 verdict / append-only fsync 寫累積 summary。stdlib only（無 psycopg2）。 |
+| `cron/tests/__init__.py` | 測試 package marker。 |
+| `cron/tests/test_ac19_alt_bucket_daily.py` | 44 pytest case：Wilson formula 5 case（大型/小樣本/邊界/完美 fills/fail-loud）/ 3 級 verdict 13 case（large_cap+alt 閾值 inclusive 邊界 + INSUFFICIENT_DATA + unknown bucket fail-loud）/ bucket 分類 3 case / day_index 5 case（day 1 / day 7 SOP baseline / day 8 cron target / day 14 邊界 / naive datetime）/ CSV 解析 4 case（兩 row / psql trailing line / 空 / malformed fail-loud）/ JSONL 構造 3 case（baseline 對齊 / sanity drift / INSUFFICIENT_DATA）/ append 2 case（新建 / 既存保留）/ exit code 聚合 5 case / CLI dry-run 2 case。 |
 
 ## 2026-05-25 Sprint 2 W2-B Alpha Tournament Stream A scaffold
 
