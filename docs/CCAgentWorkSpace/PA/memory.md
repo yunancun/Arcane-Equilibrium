@@ -6002,3 +6002,38 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 ### Reports
 - E1 IMPL report: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-25--hygiene_option_e_phase_1_step_2_atomic_deploy.md`（待寫）
 - Source: operator 拍板訊息 + PA sub-agent a6326f17 hygiene 修法 Option B
+
+## 2026-05-25 — Phase 1b §4 acceptance gate + 4 PA arbitration + pilot readiness
+
+### Context
+- Fresh 81-cell sweep (EA-1 round 2 `b5820b67` post-harness-fix) produced 46/8/27 PASS/COND/FAIL — overturned 2026-05-18 raw 0/0/81 artifact verdict.
+- Top-1 G-AB-01-C90 (timeout 90s) **already deployed to production demo since 2026-05-19** (commit `820f0532` + merge `67f1a047`).
+- Predecessor PA report (`2b65d3f1`, 2026-05-18) had walked INDETERMINATE-pending-pilot path because adverse_proxy was NULL artifact.
+
+### Decision Chain
+1. Read fresh sweep aggregate CSV — verified all 46 PASS satisfy 5/5 §4.1 gate (fill ≥0.25, wilson_lo ≥0.15, fee ≥0.5, fee_wilson_lo ≥0, adv ≤baseline).
+2. Verified Top-1 = 4-way tie at wilson_lo × fee_saving = 2.203 (G-AB-01/02/03/05/07-C90); per tiebreak rule `n_fill DESC, cell_id ASC` → G-AB-01-C90.
+3. Ran 4 PA arbitration verdicts per EA-1 §6.3 open items.
+4. **NEW evidence vs EA-1**: PG cross-check post-deploy 7d demo runtime — Total 32.4% fill rate (12/37), BTC/ETH 66.7% (4/6) vs ALT 25.8% (8/31). **Sweep predicted 76.7% is 2.4x optimistic** vs real runtime.
+
+### Side Effects + Risk
+- **Top-1 no-op deployment**: Rust binary `maker_price.rs:97` already has timeout=90_000; sweep simply re-validates after harness fix; no IMPL chain needed.
+- **Track A pilot scope shift**: was "deploy Top-1 + 24h monitor"; now "14d in-production AC monitoring + bucket-split healthcheck [71]".
+- **Annual fee saving revised down from $61/year (sweep §3.4) to ~$25/year (runtime-based)** — still positive but lower end of spec §1.2 range.
+- **AC-19 14d gate risk**: at real 25.8% ALT fill rate, AC-19 ≥30% may FAIL on ALT bucket only. Bucket-split healthcheck [71] = early warning to trigger spec §4.3 escalate path (Option α ATR-aware adaptive offset) before formal AC-19 failure verdict.
+- 1 spec amend needed: AMD v0.8 footnote dropping PS-AB-* family (5 LOC); deferred to PM trigger.
+
+### Confidence
+- HIGH: §4 acceptance gate result (5/5 gates verified per cell from CSV)
+- HIGH: Top-1 cell selection (matches EA-1 §3.4 + tiebreak deterministic)
+- HIGH: PG runtime evidence (real demo runtime 7d post-deploy fills, not extrapolation)
+- MEDIUM: Annual saving estimate $25/year — depends on sustained 32.4% fill rate; first 14d empirical AC-19 will refine
+- HIGH: 4 arbitration verdicts (a) PS drop / (b) D-axis accept / (c) PG hold all align with spec philosophy
+- HIGH: (d) bucket-split healthcheck [71] not in spec v1.3 — operational compromise; PA pushes it as healthcheck not AC to avoid scope creep
+
+### Reports
+- PA cell selection: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-25--phase_1b_calibration_cell_selection.md` (commit `e75a83d9`)
+- EA-1 round 1: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-25--ea1_phase_1b_sweep_execution_verdict.md` (`6a63e0fd`)
+- EA-1 round 2: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-25--ea1_harness_fix_rerun_verdict.md` (`b5820b67`)
+- Predecessor PA: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--phase_1b_calibration_cell_selection_report.md` (`2b65d3f1`)
+- Source: operator dispatch + EA-1 round 2 IMPL DONE + spec v0.2 SPEC-FINAL `8d8a0123`
