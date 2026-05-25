@@ -6037,3 +6037,13 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 - EA-1 round 2: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-25--ea1_harness_fix_rerun_verdict.md` (`b5820b67`)
 - Predecessor PA: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--phase_1b_calibration_cell_selection_report.md` (`2b65d3f1`)
 - Source: operator dispatch + EA-1 round 2 IMPL DONE + spec v0.2 SPEC-FINAL `8d8a0123`
+
+## 2026-05-25 — H-2 cron restoration + EA-2 closed verify
+- SSH crontab probe: 13/13 OpenClaw cron 仍 `# DISABLED_OPENCLAW_20260521`；隔壁 PM session 73e124ba 未動 crontab（docs-only audit）
+- EA-2 真實狀態 = (a) closed N/A：cron `12 * * * * .../edge_estimate_snapshots_cycle_cron.sh` active；最近 5 cycle（10:12/11:12/12:12/13:12/14:12）all `end OK`；edge_rows=674~675/cycle
+- 70e7b6b1 (2026-05-09) wrapper + V073 contract + 2 test 已 land；cron line 同期 install；QC EA-2 verdict update 過時，移出 packet
+- Option A/B/C trade-off：推薦 **Option C PM 主會話直接 ssh crontab -e**（10 min total vs. A 50 min vs. B 2.5 hr team time）；不違反 hygiene SOP §2.3 PM atomic 治理權威
+- 16/16 + 9/9 + 硬邊界 0 觸碰 → A 級評定
+- 等 FA business priority verdict 後可能 amend ml_training / ref21_symbol_universe / panel_aggregator 三者分級
+- §5.1 setup_openclaw_cron.sh + crontab 納入 git 是 Future Sprint follow-up（不阻 Sprint 2）
+- Lesson：QC verdict update 含過時段落時必 SSH empirical reverify；不可逐字採納；本案 EA-2 ssh 5 min 確認直接 collapse 一個 sub-action
