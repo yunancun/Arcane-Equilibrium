@@ -424,3 +424,47 @@ def test_simulate_sell_close_fills_when_bid_rises_to_limit():
     assert result.skipped_reason is None
     assert result.simulated_fill is True
     assert abs(result.limit_price - 100.02) < 1e-9
+
+
+def test_adverse_selection_proxy_resolves_when_drift_samples_strictly_after_60s():
+    """REGRESSION GUARD（EA-1 verdict §2 harness bug）：
+
+    post_drift_samples 由 loader 構造（phase_1b_tick_loader.py:305-309）滿足
+    `sample.ts >= fill_ts + 60s` 的硬性不變量。如果 simulate_cell_against_fill 用
+    `_bbo_at_or_before(target=fill_ts+60s)` 篩 `ts <= target`，與此不變量互斥
+    →  永遠回 None → adverse_selection_proxy_bps 永遠 None → 全 cell fail-closed。
+
+    本 test 故意鏡像 loader 真實邊界（drift_quotes 全 offset > +60s），確認 fix
+    後 adverse_selection_proxy_bps non-None。
+
+    為什麼這個 fixture 重要：原 `test_simulate_fills_when_ask_drops_to_buy_limit`
+    等所有 test 都不提供 drift_quotes (None) → post_drift_samples = ()，bug 沉默。
+    PA spec §2.3 step 5 mandates this code path; absent test → silent regression.
+    """
+    fill_ts = datetime(2026, 5, 18, 0, 0, 0, tzinfo=timezone.utc)
+    cell = _make_cell(buffer_ticks=0, timeout_ms=30_000)
+    seed = _make_seed(
+        side="Buy", exit_reason="grid_close_short", price=100.0, ts=fill_ts,
+    )
+    # drift_quotes 全 offset > +60s — 鏡像 loader.py:305-309 真實邏輯
+    # （drift_start = fill_ts + 60s，sample.ts >= drift_start 才入 drift list）
+    # 為什麼 100.05 / 100.06 quotes：mid = 100.055，與 simulated_fill 對比可算 proxy
+    window = _make_tick_window(
+        fill_ts=fill_ts,
+        pre_quotes=[(-1, 100.00, 100.01)],
+        replay_quotes=[(5, 99.97, 99.99)],  # fill at 99.99 (BUY limit close short)
+        drift_quotes=[
+            (65, 100.05, 100.06),   # +65s, first sample after drift_start
+            (90, 100.05, 100.06),
+            (120, 100.04, 100.07),
+        ],
+    )
+    result = simulate_cell_against_fill(cell, seed, window, tick_size=0.01)
+    assert result.simulated_fill is True
+    # 關鍵 invariant：post_drift_samples 雖全 > fill_ts+60s，但 nearest-by-abs-time
+    # 必命中（最近的是 offset=+65s）→ mid_at_fill_plus_60s non-None
+    assert result.mid_at_fill_plus_60s is not None
+    # nearest 是 (65, 100.05, 100.06) → mid = 100.055
+    assert abs(result.mid_at_fill_plus_60s - 100.055) < 1e-9
+    # adverse_selection_proxy_bps 必 non-None（fix 前永遠 None → cell 永遠 FAIL）
+    assert result.adverse_selection_proxy_bps is not None

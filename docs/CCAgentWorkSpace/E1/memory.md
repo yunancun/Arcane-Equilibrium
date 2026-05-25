@@ -12516,3 +12516,20 @@ P A 引用 line 範圍錯。
 8. **完全 ALT-symbol sample bias**：18 unique symbols 都是 ARB/OP/XRP/DOT/LTC；BTCUSDT/ETHUSDT 0 sample → operator pilot 必須 over-sample large-cap。
 9. **Top-1 recommendation = `G-AB-01-C90`**: baseline buffer / baseline offset / 只變 timeout 30s→90s 一個 axis，最低 rollout 風險；fill 76.7% / Wilson CI 66.8-84.4% / fee +3.41 bps / adv +0.01 bps（near-baseline neutrality）。
 10. **未 commit；verdict report + buggy/patched archive 全在 E1 workspace；harness 修法是 1-LOC Option A（`_nearest_by_abs_time` replacement at call site `phase_1b_sweep_replay.py:328`）**；PM 派 follow-up E1 修 + E2/E4 rerun + PA §4 acceptance gate。
+
+## 2026-05-25 (E1 follow-up): EA-1 harness fix lands + fresh rerun matches predicted aggregate
+
+報告：`srv/docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-25--ea1_harness_fix_rerun_verdict.md`
+
+**Status**: GREEN — Option A fix 應用 + E4 regression fixture + Mac/trade-core pytest 90/90 + fresh 81-cell rerun aggregate 46/8/27 PASS/CONDITIONAL/FAIL **完全等同** EA-1 §3.1 in-memory patched prediction。PA + QA §4 acceptance gate dispatch READY。
+
+**Fix scope**：
+1. `phase_1b_sweep_replay.py` +18 行：新 `_nearest_by_abs_time(samples, target_ts)` helper + step 5 call-site 從 `_bbo_at_or_before` 改 `_nearest_by_abs_time`
+2. `tests/test_phase_1b_sweep_replay.py` +43 行：新 `test_adverse_selection_proxy_resolves_when_drift_samples_strictly_after_60s` regression guard，鏡像 loader.py:305-309 真實 boundary 邏輯（drift_quotes 全 offset > +60s）
+3. 0 改動 loader.py / 0 改動 spec / 0 改動 cell 定義 / 0 改動其他 helper
+
+**Top-1 cell unchanged**：`G-AB-01-C90` (fill 76.7% / Wilson 66.8-84.4% / fee +3.41 bps / adv +0.01 bps) — baseline buffer + baseline offset + 只變 timeout 30s→90s 一個 axis；最低 rollout 風險。
+
+**教訓**：unit test fixture 必須鏡像真實 loader/上游模塊 boundary 不變量，否則 silent bug 沉默通過。EA-1 verdict §2.5 catch 此 root cause — 「synthetic test fixtures whose tick_window construction does not exercise the same drift_start = fill_ts + 60s boundary」── 本 fix 直接補上 regression guard。
+
+**未 commit**：等 PM 統一 commit + push（per chain E1→E2→E4→QA→PM）；待 E2 1-pass review。
