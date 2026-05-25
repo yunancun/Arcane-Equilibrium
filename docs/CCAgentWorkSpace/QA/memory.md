@@ -594,3 +594,43 @@ parent spec §AC-7 寫 `cargo bench --bench m3_emitter_cold_start` 或 tokio_con
 ### 11. PA spec amend driver 9 個檢點是 IMPL ↔ spec 1:1 mirror 對齊強信號
 
 Sprint 2 Wave 2 PA spec amend report 列出 9 個 checkpoint（ApiLatencySample 8 field / api_latency 8 metric × 4 band / 8 anomaly_id literal / ApiLatencySourceProbe trait `_60s_window` 後綴 / position_count_active 0-8/9-16/>16 不含 CRITICAL / OBSERVE-4 scaffold-level guard / PG V106 engine_mode CHECK 不含 'replay' / PA-DRIFT-4 carry-over doc / spec literal reference in IMPL doc comment）；QA grep 對應 IMPL line 全 ✅。**規則**：spec amend driver review 比 unit test pass 更強的 signal（unit test 證明 code 跑通但不證明 spec mirror；driver review 證明 spec literal ↔ IMPL line 一字不差）；E2 對抗 review 已 catch 但 QA 必再驗一次確認 PA spec amend land 後 IMPL 沒漂回 round 1。
+
+## 2026-05-25 Phase 1b §4 acceptance gate QA verify + AC-19 14d projection
+
+**Trigger**: PM dispatch parallel with PA §4 cell-selection sub-agent；EA-1 round 2 commit `b5820b67` fresh sweep 46/8/27 PASS/CONDITIONAL/FAIL ready for §4 verify
+**Verdict**: §5 operator pilot dispatch READY (G-AB-01-C90 top-1 + G-AB-01-C60 top-2 fallback)
+**Report**: `srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-25--phase_1b_acceptance_qa_verify.md`
+
+### Durable lessons
+
+#### 12. Independent gate verify by parsing CSV directly is the gold standard
+
+Spec §4.1/§4.2/§4.3 PASS/CONDITIONAL/FAIL gate 寫成 5-condition boolean，QA 不能信賴 `phase_1b_sweep_report.classify_cell()` output（會被 harness bug 污染，如 EA-1 round 1 raw 0/0/81 全 FAIL artifact）。寫 30-LOC Python 腳本直接 parse CSV + re-apply gate 條件 = 零依賴 source-of-truth verify。本次 0 mismatch across 81 cells = ENDORSE E1 verdict 強信號。**規則**：任何 acceptance gate report 必有 QA 獨立 verify 腳本附 inline，方便 PM/operator 自行重跑。
+
+#### 13. E1 projection number 用 estimate 不用 empirical 是 +28% 通膨陷阱
+
+E1 §4 line 217-218 寫「~88/week → ~176 per 14d → ~123 grid family」基於「~75% whitelist eligible × 70% grid family」估值，QA 跑 PG empirical query 證實實際 44 attempts in 165.19h = 44.7/week = 89.4 per 14d = 83.4 grid only (93.2% grid family share, not 70%)。**E1 inflated +28% (123 vs 89)**。所幸 Wilson margin 太大（66.9% vs 30% threshold = +36.9pp），方向不變。**規則**：任何 projection number QA 必跑 empirical PG query 驗 1-層；E1/PA 給的 percentage 估算 (75%/70% etc.) 必拿 actual `GROUP BY` query 驗。對其他高風險 sweep 同樣 SOP。
+
+#### 14. Wilson sensitivity scenarios surface 真正 risk 邊界
+
+E1 verdict 只給「current sample = 76.7%, projected n=123, Wilson 68.5%」一個 scenario。QA 加 3 個 drift sensitivity（60%/50%/40%/35%）找 break-even = 35-40% mean fill = AC-19 PASS margin tipping point。這暴露 demo→pilot endpoint drift -27pp 仍 PASS、-37pp at margin、-42pp FAIL。**規則**：sample-based PASS gate verdict 必加 ±20-40pp drift sensitivity table，讓 PM 看 worst case 而不只 expected case。
+
+#### 15. Hot-reload ArcSwap 1-axis change is min-rollout-risk pattern
+
+G-AB-01-C90 vs current baseline 只變一個 axis (timeout 30s→90s)；其他 A/B/D 全 baseline；rollback 路徑 = 同一 TOML edit revert + ArcSwap 1 tick；engine restart 不需要；fail-safe cold-boot baseline (`use_maker_close=false`) 不受影響。**規則**：QA approve calibration cell 應優先選「single-axis change」cell 即使 multi-axis change cell 可能 score 更高 — minimum surface area for rollback。E2 Tune-1 (buffer=0) 雖也 PASS 但是 multi-axis change，rollout 風險高，QA reject 是對的。
+
+#### 16. close_maker_audit table not deployed = healthcheck [62][63] 半瘸狀態 QA 必 surface
+
+`learning.close_maker_audit` table per spec v1.3 §8 設計，但 PG empirical 證實 `relation does not exist`。runner.py 有 `checks_close_maker_audit.py` module 但實際從 `trading.fills` 直接讀。**這是 spec 設計 vs 實際 deploy gap**，pilot 24h 期間 adverse selection 60s 漂移 verify 需要 offline post-hoc 從 `trading.fills` × `market.trades` join 算，不能用 healthcheck 自動驗。QA 不能假設 spec §8 設施 alright，必跑 `\dt learning.close_maker_*` 確認。**規則**：spec §N 寫「audit table X 提供 healthcheck Y verify」必 PG `\dt` empirical 確認 table 真實存在；不存在開 P1 ticket + 標 pilot offline workaround。
+
+#### 17. ID prefix split (v55 reframe) 不 apply 於 calibration replay harness
+
+memory 2026-05-11 v55 critical reframe: post-deploy verification 禁用 `oc_*` vs `oc_risk_*` ID prefix split；但這只 apply 於 spine lineage propagation 對接（agent.decision_state_changes ↔ trading.fills）+ **post-deploy real-trade attempt × fallback matrix** 場景。**Phase 1b calibration sweep harness** 是另一個層：每 seed (歷史 fill) = 一個 attempt，n_simulated_fills / n_eligible 已是 attempt-axis 分母（已扣 data-quality skip）；不存在 ID 雙計問題。QA 必區分「post-deploy real verification」（用 attempt × fallback matrix）vs「pre-deploy replay sweep」（用 attempt-axis denominator）兩個場景，不能誤套規則。**規則**：v55 reframe 場景 SCOPE = post-deploy real-trade verification ONLY；pre-deploy replay harness 用 attempt-axis 是正確的，不需替換為 attempt × fallback matrix。
+
+#### 18. Pilot 24h vs 48-72h tradeoff = sample velocity × Wilson CI tightening
+
+empirical velocity 0.27 attempts/h × 24h = n≈6.4，Wilson CI 太寬無法決定 verdict；48h n≈13 / 72h n≈19 兩個量級 Wilson CI 才開始可信。QA push back operator pilot 24h ask，建議 48-72h。**規則**：pilot duration 不是「越短越好」也不是「越長越好」；要由 empirical velocity × target Wilson tightness 決定；E2E SOP 必含「sample size needed for Wilson lower < 5pp margin」計算題。
+
+#### 19. Engine alive verify 3-tier signal: PID + binary mtime + pipeline_snapshot mtime
+
+`pgrep -af openclaw-engine` 拿 PID（活）；`stat -c %y rust/target/release/openclaw-engine` 拿 binary mtime（新）；`stat -c %y /tmp/openclaw/pipeline_snapshot.json` 拿 runtime snapshot mtime（活躍）。三個全綠 = engine 真實 alive。本次 QA 一度誤判 engine dead（last fill 5508 秒 = 91min，看起來像 stalled），但拉 ps + pgrep 看 PID 374287 alive 1h59m + tick stats 5621000+ ticks running + snapshot mtime 60s fresh = 真實活躍只是 fill rate 低（0.27/h 預期）。**規則**：「last fill time 老」不等於「engine dead」，必 3-tier 全驗才能判 alive；QA 在 e2e-integration-acceptance SOP 加此 3-tier signal。
