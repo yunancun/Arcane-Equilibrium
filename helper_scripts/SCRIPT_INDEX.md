@@ -176,6 +176,8 @@
 | `canary/canary_schema.py` | Canary JSONL schema 定義（Pydantic model） |
 | `canary/rollback_drill.sh` | 回滾演練腳本 |
 | `canary/test_canary.py` | Canary 系統單元測試 |
+| `canary/replay_earn_preflight.py` | Stage 0R Earn variant preflight harness (Sprint 1B Wave C) — first stake 前 5 sanity check (APY drift / 5-gate reject path / first stake LAL 0 / fail-closed exit code / ATR cap+drawdown);拉 Bybit V5 /v5/earn/apr-history public GET + 7d cumulative accrual day-by-day + mock 5 gate fail injection + 3 階 reconciliation cascade;產 `earn_first_stake_stage0r_<date>.json` verdict;CLI `--coin USDT --amount-usd 100 --days 7`;exit 1 任 1 FAIL。對齊 spec `docs/execution_plan/2026-05-25--stage_0r_earn_variant_design_spec.md` §3。 |
+| `canary/test_replay_earn_preflight.py` | Stage 0R Earn preflight harness 14 unit test:5 sanity check (含 PASS/FAIL/VACUOUS_PASS/DEFERRED 各 case) + 5 gate fail injection grid + 3 階 cascade + JSON schema 對齊 spec §4 AC-5。Mac unittest 14/14 PASS。 |
 | `canary/healthchecks/_common.py` | Phase 1b close-maker-first healthcheck 共享層（PG conn + Wilson 95% CI + JSON formatter + CLI argparse），對齊 AMD-2026-05-15-02 v0.6 §4.1 + spec §8.1。 |
 | `canary/healthchecks/62_close_maker_fill_rate.py` | `[62]` close_maker_fill_rate Wilson-CI gate（spec §8.1 Consensus-MF-2）：7d demo+live_demo maker fill rate + Wilson 95% CI，PASS lower≥0.60 / FAIL upper<0.40 / WARN 中段。CLI standalone for QA T+24h post-deploy verification。 |
 | `canary/healthchecks/63_close_maker_fallback_audit.py` | `[63]` close_maker_fallback_audit（spec §8.1 Consensus-MF-3）：enum allowlist 完整性 + NULL ladder ratio (PASS ≤0.1% / WARN ≤1% / FAIL >1%)；safety path 三 enum 排除於 NULL ladder 之外。 |

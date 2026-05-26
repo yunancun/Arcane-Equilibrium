@@ -12737,3 +12737,110 @@ Crontab line for PM ssh paste:
 - W1-A spec amend 建議 `effect_size composite via replicability_score` 明示
 
 **未 commit**；待 E2 re-review + E4 regression + W2-F QA re-audit 後 PM 統一 commit（per chain E1→E2→E4→QA→PM）
+
+## 2026-05-26 — Stage 0R Earn variant preflight harness IMPL (Sprint 1B Wave C)
+
+**任務**：IMPL `helper_scripts/canary/replay_earn_preflight.py` per spec `docs/execution_plan/2026-05-25--stage_0r_earn_variant_design_spec.md` §3 §4 §7.4。
+
+**對齊 C10 範式 + diverge 關鍵點**：
+- C10 funding_harvest replay 是 tick-by-tick on_tick simulation;Earn 是 day-by-day cumulative APY accrual (per spec §3.2)
+- C10 6 sanity check (leak / bias / DSR / PSR / PBO / runtime);Earn **5** sanity check (drift / 5-gate reject / first stake LAL 0 / fail-closed exit code / ATR cap+drawdown) — Earn 移除 4 條 alpha-edge 統計 check 因 Earn 是穩定 yield 非 strategy alpha
+- Earn 是 staking yield 沒有 alpha edge 可 replay 驗;Stage 0R 改驗 governance 機制 + APY drift + 5-gate fail-closed reject + Daily reconciliation cron path
+
+**5 sanity check 狀態**:
+1. `apy_drift_check` — first stake 0 V100 row → VACUOUS_PASS;有 V100 record drift < 5% PASS;drift > 5% FAIL
+2. `5gate_reject_check` — mock 5 fail injection (operator_role=None / authz_invalid / lease_unavailable / risk_envelope_fail / db_insert_fail) 5/5 PASS
+3. `first_stake_lal0_check` — DEFERRED (harness 不寫 V100 per spec §3.5 第 2 條;AC-3 由 operator first stake 真實 INSERT 後 PG empirical query 驗)
+4. `failclosed_exitcode_check` — meta-check 驗 verdict gate 邏輯;任 1 FAIL → expected_exit_code=1
+5. `atr_cap_drawdown_check` — constant by design (atr_cap_applicable=false / drawdown_gate_applicable='partial_post_sprint5')
+
+**硬邊界 5 條 (per spec §3.5 grep 0 hit)**:
+- 不發 `subscribe_flexible` / `redeem_flexible` / POST `/v5/earn/place-order` 寫單
+- 不寫 V100 `learning.earn_movement_log` (`EarnMovementWriter.insert_placeholder` / `update_outcome`)
+- 不動 Bybit demo Earn balance
+- 不繞 5-gate (mock 是 inject fail state 非 short circuit)
+- 不污染 V100 schema (純 in-memory + JSON output)
+
+**教訓**:
+- **Earn 不是 strategy 的核心立場**：spec §1.1 thesis 反覆強調 Earn 沒有 alpha edge 可 replay 驗;這影響 sanity check 設計選擇 (不抄 C10 6 check 全套);新策略類型先想清楚「Stage 0R 設計初衷在 Earn 場景該驗什麼」再實作
+- **fail-closed fallback path 設計**:`fetch_apr_history` Mac SSL 抓 endpoint fail 走 vacuous PASS path (per spec §3.4 fallback);避免 transient network error 直接 abort 所有 5 check 可跑性;Linux runtime 真實連 Bybit 走 PASS path 取 baseline
+- **VACUOUS_PASS 視為 PASS 的 verdict gate 邏輯**:`_check_pass(status in ("PASS","VACUOUS_PASS"))` per spec §4.6 first stake AC-1 vacuous = PASS
+- **DEFERRED 不算 FAIL**:check 3 first_stake_lal0 永遠 DEFERRED 因 harness dry-run 邊界硬約束;verdict gate 視 DEFERRED 為通過 (per spec §4.6 AC-3 deferred 視為通過)
+- **mock 5 fail injection ≠ short circuit**:本 mock 是「若 IntentProcessor Earn branch 注入 X fail state 應該 emit Y reject event」的邏輯驗證;不調 IntentProcessor real code;對齊 spec §3.5 第 4 條
+
+**IMPL 統計**：
+- 714 LOC (harness, 對齊 spec §7.4 ~400-500 LOC 略超,主因 5 check IMPL 較 verbose + JSON schema fields + audit trail metrics)
+- 14 unit test 全 PASS (helper_scripts/canary/test_replay_earn_preflight.py)
+- CLI smoke `python3 helper_scripts/canary/replay_earn_preflight.py --coin USDT --amount-usd 100 --days 7` → exit 0 + verdict PASS + eligible_for_first_stake=true
+- grep 0 hit dry-run write surfaces (code 0 hit;MODULE_NOTE 注釋的 hit 是 spec 註)
+- SCRIPT_INDEX.md 已加 2 entry (replay_earn_preflight.py + test_replay_earn_preflight.py)
+
+**未 commit**；report 寫在 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-26--stage_0r_earn_preflight_harness_impl.md`;待 E2 review + E4 regression + QA acceptance 後 PM 統一 commit (per chain E1→E2→E4→QA→PM)
+
+---
+
+## 2026-05-26 Sprint 1B Earn Wave C — earn_routes.py FastAPI IMPL (IMPL DONE)
+
+**任務**：對齊 `docs/execution_plan/2026-05-25--earn_first_stake_gui_design_spec.md` §4 IMPL FastAPI Earn 6 endpoint（per PA Earn first stake GUI spec 6 OQ defaults 全 approve）。
+
+**改動清單**：
+- 新建 `program_code/exchange_connectors/bybit_connector/control_api_v1/app/earn_routes.py` (1121 LOC)：6 endpoint + 5-gate preflight + Stage 0R harness 掃描 + IPC strict/soft 兩路 + V100 PG records query
+- 修改 `program_code/exchange_connectors/bybit_connector/control_api_v1/app/main.py`：include earn_router（live_router 後、engine_capabilities_router 前）
+- 新建 `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_earn_routes.py` (558 LOC, 22 test)：覆蓋 typed-confirm / amount 範圍 / live_reserved 雙閘 / Operator role / preflight 結構 / Stage 0R PASS/FAIL/PENDING / PG fail-soft / IPC dispatch happy + reject
+
+**6 endpoint 對齊 spec 表格**：
+| Endpoint | Auth | IPC Method (Wave D) | Sprint 1B 路徑 |
+|---|---|---|---|
+| GET /balance | session valid | get_earn_balance | degraded ↔ Wave D 接通 |
+| GET /products | session valid | get_flexible_products | degraded + server-side USDT/Flexible filter |
+| GET /preflight | session valid | 5-gate Python 內部驗 + IPC connect probe | 5s cache + 5 gate result |
+| GET /positions | session valid | get_flexible_positions | degraded + 空狀態 |
+| GET /records | session valid | (PG 直查 V100 learning.earn_movement_log) | 對齊 live_session_account_routes db_pool 範式 |
+| POST /stake | Operator + live_reserved + typed-confirm | process_earn_intent | fail-closed 503/504/400 完整路徑 |
+
+**5-gate IMPL 真接 Rust IPC vs stub return**：
+- Gate (a) Operator role：Python `actor.roles` 真實 check ✅
+- Gate (b) Signed authz：read main_legacy.LIVE_AUTHORIZATION 探測（Wave D MIT 接 governance_hub 嚴格 scope 驗證）
+- Gate (c) MAINNET：env var 真實讀 ✅（demo endpoint 走 N/A 對齊 spec §5.1 條件 A）
+- Gate (d) Secret slot：secret_runtime.get_secret_value("BYBIT_API_KEY") 真實 probe（Wave D 接 metadata API 才能驗 < 6 mo + earn scope）
+- Gate (e) IntentProcessor wired：EngineIPCClient.connect() probe（Wave D 接 engine_capabilities IPC 變嚴）
+
+**Operator role auth 機制**：
+- Read-only 5 端點走 `_get_auth_actor`（Depends，HttpOnly cookie 或 Bearer token）—  401 if 無 auth
+- POST /stake 走 `_require_operator_for_stake = Depends(_get_auth_actor) + _require_operator_role` 雙 chain — 403 if viewer
+- live_reserved global mode 二閘（spec §4.3 dual gate）— 403 if 非 live_reserved
+- typed_confirm_phrase HMAC compare_digest case-sensitive 比對 — 400 if mismatch
+
+**pytest unit test count**：22 PASS / 0 fail（PA 預期 +6-10，實 22；超出因為 R1-R9 共 9 個 test category 各 1-5 test，hardlock + happy + reject + fail-soft + IPC mock 完整覆蓋）
+
+**設計決策**：
+- spec 寫 `/gate-status` task prompt 寫 `/gate-status`，spec §4.2 寫 `/preflight` — 採 spec SSOT 用 `/preflight`
+- IPC method name 對齊 Rust `IntentProcessor.process_earn_intent`（earn_router.rs:605）+ 5 BybitEarnClient method 名（get_earn_balance / get_flexible_products / get_flexible_positions）— **Wave D MIT carry-over 須 register dispatch.rs method**
+- GET 端點 fail-soft（IPC 不可達 → degraded envelope + 空狀態）；POST fail-closed（503/504/500 + reason_codes）
+- /records 走 PG 直查不走 IPC — 對齊 live_session_account_routes db_pool 既有範式 + audit log read-only 性質
+- 5-gate preflight 模組層 5s cache 避 GUI 15s auto-refresh + manual refresh burst
+- Stage 0R harness 掃 OPENCLAW_DATA_DIR/canary/earn_first_stake_stage0r_*.json + 24h age gate + PASS/PENDING/FAIL 三狀態
+- amount Decimal 走 `format(d, "f")` 對齊 Bybit V5 amount 字串 + V100 NUMERIC(18,8) 精度
+
+**hygiene SOP 合規**：0 cargo touch / 0 Rust source 改 / 0 engine restart / 0 V### migration / 0 hardcoded path / 0 hard boundary parameter / 0 bare except / 0 except:pass / logger %s 格式 / SQL 全參數化
+
+**Wave D carry-over（不阻 Wave C closure）**：
+1. Rust dispatch.rs 註冊 `process_earn_intent` IPC method（earn_router.rs `process_earn_intent` 已 IMPL but not wired to dispatch handler）
+2. Rust dispatch.rs 註冊 5 BybitEarn IPC wrap method（get_earn_balance / get_flexible_products / get_flexible_positions / 等）
+3. Gate (b) earn-write scope 嚴格驗（authorization_state_machine scope 字段對齊）
+4. Gate (d) secret slot metadata API 接通（< 6 mo lifetime + earn scope 嚴格驗）
+
+**教訓**：
+1. **spec vs task prompt 衝突採 spec SSOT**：task prompt 寫 `/gate-status`，spec §4.2 寫 `/preflight`；spec 是 PA + A3 + QA 三方審過的 SSOT，task prompt 是執行任務簡述；衝突時優先 spec
+2. **Pydantic Decimal field 接受字串 input**：test fixture 用 `str(amount)` 傳入 amount_usd 是 OK，Pydantic 自動 parse；min_length 計算要對齊真實 phrase（28 char for `CONFIRM EARN STAKE $100 USDT`），不能拍腦袋取 30
+3. **既有 codebase 慣例優先 vs deprecation warning**：handoff_routes / evolution_routes 都用 Pydantic V1 `@validator`；本 IMPL 對齊（per CLAUDE.md §七 «Prefer existing project patterns»）；Pydantic V2 migration 是全 codebase 統一任務不該獨自帶頭
+4. **Wave D dependency 不阻 Wave C closure**：IPC method 未 register 走 fail-soft degraded envelope（GET）+ fail-closed 503（POST），test 用 monkeypatch 模擬 IPC 兩種狀態；Wave D 接通後本檔 0 改動，envelope 從 degraded=True 自動轉 degraded=False
+
+## 2026-05-26 — Earn Wave C E2 round 2 (F1+F3+F4+F7) fix
+- 範圍：earn_routes.py (Python 後端) + replay_earn_preflight.py (harness) + test_earn_routes.py (5 新 case)
+- F1 浮點 phrase 不對齊：amount_usd Decimal→int + Pydantic strict=True;雙端鎖整數 phrase 對齊無小數歧義;_format_phrase_amount 簡化 `f"{n}"`;harness CLI argparse type=int + range guard [100,200]
+- F3 Stage 0R JSON 防偽 HMAC：harness 寫 JSON 加 _hmac_sig field (HMAC-SHA256 over canonical JSON, sort_keys+separators=',':',' key=OPENCLAW_IPC_SECRET);後端 _verify_stage_0r_hmac mismatch/missing → PENDING + fail_reasons=['stage_0r_hmac_mismatch'|'stage_0r_hmac_missing'|'stage_0r_hmac_secret_missing'];對齊既有 live_trust_routes._sign_authorization_payload hex-lowercase 範式
+- F4 Wave D carry-over：intent_id/movement_id/bybit_response graceful None handling (isinstance dict check);data.wave_d_pending=True 給 GUI 顯示 'pending Wave D' badge
+- F7：ipc_client lazy import 上移 module top (EngineIPCClient/EngineTimeoutError/EngineDisconnectedError + secret_runtime.get_secret_value)
+- 測試 27 PASS (22+5 new: F1 ×3 / F3 tamper ×1 / F4 None ×1);harness CLI float reject + range reject + signed JSON verify 三 negative path 全 GREEN
+- 教訓：F3 改既有 stage_0r PASS/FAIL test 需同步加 _sign_stage_0r_payload helper,否則 HMAC verify mismatch 致 status 從 PASS 變 PENDING;先檢查既有 fixture 是否依賴新 invariant 再加 new case (避免 round 3 還要修舊 test)

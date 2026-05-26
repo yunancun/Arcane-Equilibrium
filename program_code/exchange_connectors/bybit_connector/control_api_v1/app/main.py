@@ -200,6 +200,15 @@ app.include_router(live_router)
 from .live_trust_routes import live_trust_router  # noqa: E402
 app.include_router(live_trust_router)
 
+# ── Earn Router / Bybit Earn 質押路由注册（Sprint 1B Wave C / Earn first stake）──
+# 對應 docs/execution_plan/2026-05-25--earn_first_stake_gui_design_spec.md §4：
+# 6 個端點（balance / products / preflight / positions / records / stake）。
+# Wave D MIT 接通 Rust IPC（process_earn_intent + BybitEarnClient wrap method）
+# 後 GET 端點從 degraded 自動轉 PASS 路徑；POST 端點目前在 IPC 未接通時
+# fail-closed 503，符合 stake 寫操作 fail-closed 原則。
+from .earn_routes import earn_router  # noqa: E402
+app.include_router(earn_router)
+
 # ── Engine Capabilities Router / 引擎能力路由注册（EDGE-P3-1 Step 7f）──
 from .engine_capabilities_routes import engine_capabilities_router  # noqa: E402
 app.include_router(engine_capabilities_router)
