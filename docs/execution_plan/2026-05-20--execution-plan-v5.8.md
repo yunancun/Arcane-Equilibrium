@@ -34,7 +34,7 @@ v5.8 honors operator directive: **all 13 modules in scope**, phased per operator
 | **M1** | Decision Lease autonomous proposal-to-execution loop | Closes per-strategy Advisory→Auto gate without operator click for proven trials | CRITICAL (was Claude's prior triage) | Sprint 1A DESIGN + Sprint 4 partial IMPL | Sprint 7-10 full |
 | **M2** | Overlay enable / disable mechanism (macro + on-chain auto-trigger) | Per operator: APR max autonomy + safety net when operator forgets / errs | **ADD per operator** | Sprint 1A DESIGN + Sprint 3 hook | Y2 Q1 enable (post counterfactual verify) |
 | **M3** | Self-monitoring / auto-diagnostics / health-aware degradation | Detect own failure modes, auto-degrade without operator alert lag | HIGH (was Claude's prior triage) | Sprint 1B DESIGN + Sprint 2 partial IMPL | Sprint 5-7 full |
-| **M4** | Self-supervised hypothesis discovery (unsupervised pattern mining → preregistration draft) | Per operator: long-term self-iteration; bot proposes its own hypotheses for Cowork+operator review | **ADD per operator** | Sprint 1A schema + Sprint 8 first IMPL | Y2 Q2-Q3 active |
+| **M4** | Self-supervised hypothesis discovery (unsupervised pattern mining → preregistration draft) | Per operator: long-term self-iteration; bot proposes its own hypotheses for Cowork+operator review | **ADD per operator** | Sprint 1A schema + Sprint 2-3 stage 1 IMPL + Sprint 8 stage 2 (per §2 spec) | Y2 Q2-Q3 active |
 | **M5** | Online learning / incremental model update (vs daily-batch retrain) | Per operator: low priority, future development point | **ADD per operator (LOW)** | Sprint 1A interface reservation only | Y3+ when justified |
 | **M6** | Multi-objective reward function tuning / weight self-calibration | Auto-Allocator's reward weights (λ_dd / λ_tail / λ_turnover / λ_slippage / λ_decay) tune from outcomes | CRITICAL (Auto-Allocator gate dependency) | Sprint 1A DESIGN + Sprint 7 IMPL (Advisory) | Y2 active |
 | **M7** | Strategy decay detection + retirement automation | Per-strategy alpha decay → auto Stage demote / retire | CRITICAL (Sprint 8 originally in v5.7) | Sprint 1A DESIGN + Sprint 8 IMPL | Sprint 8 active |
@@ -43,7 +43,7 @@ v5.8 honors operator directive: **all 13 modules in scope**, phased per operator
 | **M10** | Autonomous strategy / market / regime discovery pipeline | Per operator: don't assume always $10k; design for capital scaling | **ADD per operator** | Sprint 1A DESIGN + Sprint 8 Discovery Pipeline IMPL | Y2-Y3 scaling activation |
 | **M11** | Counterfactual replay automation + continuous validation | Stage 0R replay infrastructure scaling: nightly counterfactual replay for all live strategies | CRITICAL (replay is approved evidence lane) | Sprint 1A DESIGN + Sprint 3 IMPL | Sprint 5+ continuous |
 | **M12** | Adaptive order routing (venue / order type / slicing self-tuning) | Per operator: do even if delayed | **ADD per operator (delayed)** | Sprint 1A interface reservation + Sprint 6 IMPL | Y2 Q2 active |
-| **M13** | Multi-asset class / multi-venue capacity (beyond Bybit perp+spot+options) | Per operator: do even if delayed; capital may scale | **ADD per operator (delayed)** | Sprint 1A interface reservation + Y1 末 spec | Y2-Y3 phased per AUM |
+| **M13** | Multi-asset class / multi-venue capacity (beyond Bybit perp+spot+options) | Per operator: do even if delayed; capital may scale | **ADD per operator (delayed)** | Sprint 1A interface reservation + Y1 末 spec | **Y3+ at earliest** phased per AUM (per ADR-0040 §Decision 1 supersede ADR-0033) |
 
 **Module count by phase**:
 - Sprint 1A DESIGN-or-IMPL-start: 13/13
@@ -261,12 +261,12 @@ Decay detection signals:
   - N consecutive losing trades > 2σ historical max
   - Counterfactual replay (M11) shows strategy underperforming baseline by ≥ X bps
 
-Auto-retirement state machine (per-strategy):
+Auto-retirement state machine (per-strategy; renamed per ADR-0044 CR-7 to avoid Stage 0R-4 字面碰撞):
   STAGE_LIVE → DECAY_DETECTED (signal triggered)
-  DECAY_DETECTED → STAGE_DEMOTE_PROPOSED (Allocator generates proposal)
-  STAGE_DEMOTE_PROPOSED → STAGE_DEMOTED (operator approve OR Tier 1 auto-approve via M1)
-  STAGE_DEMOTED → live size scaled to 50% pending review
-  Review window (14 d) → either RECOVER (re-promote) or RETIRE (size = 0)
+  DECAY_DETECTED → DEMOTE_PROPOSED (Allocator generates proposal; was STAGE_DEMOTE_PROPOSED)
+  DEMOTE_PROPOSED → DECAY_ENFORCED (operator approve OR Tier 1 auto-approve via M1; was STAGE_DEMOTED)
+  DECAY_ENFORCED → live size scaled to 50% pending review (14d window)
+  Review window (14 d) → either RECOVERY (re-promote NORMAL_LIVE) or RETIRED (size = 0)
 
 Engineering scope:
   - Sprint 1A: decay_signals + strategy_lifecycle schema (40-60 hr)
@@ -429,7 +429,7 @@ Total: 140-200 hr
 **v5.8 design**:
 ```
 Routing dimensions:
-  - Venue choice (Y1: Bybit only; Y2+: Bybit / Binance perp where price-equivalent)
+  - Venue choice (Y1: Bybit only; **Y3+ at earliest**: Bybit / Binance perp where price-equivalent, per ADR-0040 §Decision 1)
   - Order type (Market / Limit / PostOnly maker / Conditional / FOK / IOC)
   - Slicing (single shot / TWAP / VWAP / iceberg / dark)
   - Time-in-force tuning
@@ -451,7 +451,7 @@ Engineering scope:
   - Sprint 1A: OrderRouter trait interface + ADR-0039 (interface stub only) (20-30 hr)
   - Sprint 6: Maker-vs-taker adaptive logic IMPL (Bybit only) (80-120 hr)
   - Sprint 7-8: Slicing IMPL (TWAP for unlock SHORT entry, iceberg for pairs) (60-100 hr)
-  - Y2: Cross-venue routing (when Binance trading enabled per ADR-0006 amendment) (100-160 hr)
+  - **Y3+ at earliest**: Cross-venue routing (when Binance trading enabled per ADR-0040 §Decision 1 supersede ADR-0033) (100-160 hr)
 
 Initial DESIGN cost Sprint 1A: 20-30 hr
 Total IMPL Y1-Y2: 240-380 hr
@@ -463,12 +463,13 @@ Total IMPL Y1-Y2: 240-380 hr
 
 **v5.8 design**:
 ```
-Asset class expansion roadmap:
+Asset class expansion roadmap (per ADR-0040 §Decision 1 supersede ADR-0033 §Decision 2 timing):
   Y1: Bybit perp + Bybit spot (Earn) + Bybit options (C13 VRP)
-  Y2: + Binance perp (price-equivalent symbols only; per ADR-0006 amendment Binance market-data primary, trade secondary)
+  Y1-Y2: Binance market-data only (per ADR-0033 amendment; no trade)
+  **Y3+ at earliest**: + Binance perp trade enable (per ADR-0040; was v5.7/v5.8 §2 draft "Y2"; BB push back + Bybit-only baseline)
   Y2-Y3: + structured products (Bybit Earn variants, options strategies beyond VRP)
   Y3+: + Binance options (when AUM justifies)
-  Always declined: DEX / Hyperliquid (D1a per operator)
+  Always declined: DEX / Hyperliquid (D1a per operator; ADR-0040 venue enum 根源拒絕)
 
 Multi-asset abstractions:
   - AssetClass enum (Perp / Spot / Option / Earn / Structured)
@@ -479,7 +480,7 @@ Multi-asset abstractions:
 Engineering scope:
   - Sprint 1A: AssetClass + Venue enums + ADR-0040 (interface stub only) (30-40 hr)
   - Y1 末: Multi-venue spec (when do we add Binance trade authority) (50-70 hr)
-  - Y2: Binance perp trade enable (with Stage 0R replay using Binance data) (200-300 hr)
+  - **Y3+ at earliest**: Binance perp trade enable (with Stage 0R replay using Binance data) (200-300 hr; per ADR-0040 §Decision 1 supersede)
   - Y3+: Additional asset classes per AUM (variable)
 
 Initial DESIGN cost Sprint 1A: 30-40 hr
@@ -651,7 +652,7 @@ AUM trigger ladder:
   $15-20k (Y1 末 if Copy Trading prep on)     : M4 active, M9 manual A/B active, M2 Y2 enable eval
   $20-30k (Y2 Q1-Q2)                         : Auto-Allocator active (M1 Tier 2 + M6 Auto), M8 active trigger, M11 mature
   $30-50k (Y2 Q2-Q4)                         : M10 Tier C (new symbol screening), M12 cross-venue routing
-  $50-75k (Y2 末 - Y3 Q1)                    : M13 Binance perp trade enable, M10 Tier D regime auto-classify
+  $50-75k (Y3 Q1+ at earliest)               : M13 Binance perp trade enable (per ADR-0040 §Decision 1), M10 Tier D regime auto-classify
   $75-150k (Y3+)                             : M5 online learning IMPL, M10 Tier E venue evaluation
   > $150k (Y4+)                              : Full M13 multi-asset (Binance options, structured products)
 
@@ -741,25 +742,31 @@ These are honest. M4/M6/M10 alpha contributions are **conditional on actually wo
 
 ---
 
-## §8 ADR Roster (v5.8 adds 7 new ADRs)
+## §8 ADR Roster (v5.8 adds 7 new ADRs; 2026-05-25 V1→V5.8 drift audit adds 1 proposed)
 
 | ADR | Topic | Status |
 |---|---|---|
-| 0034 | M1 Decision Lease Tier system | NEW Sprint 1A-β |
-| 0035 | M5 Online learning interface (reservation) | NEW Sprint 1A-δ |
-| 0036 | M8 Anomaly detection event taxonomy | NEW Sprint 1A-γ |
-| 0037 | M9 A/B testing framework + statistical methodology | NEW Sprint 1A-γ |
-| 0038 | M11 Continuous counterfactual replay | NEW Sprint 1A-β |
-| 0039 | M12 OrderRouter trait interface (reservation) | NEW Sprint 1A-δ |
-| 0040 | M13 AssetClass + Venue abstraction (reservation) | NEW Sprint 1A-δ |
+| 0034 | M1 Decision Lease Layered Approval (LAL) | Land 2026-05-21 |
+| 0035 | M5 Online learning interface (reservation) | Land 2026-05-21 |
+| 0036 | M8 Anomaly + M10 Tier D Model Blacklist (HMM/Markov/GARCH 永久禁) | Land 2026-05-21 |
+| 0037 | M9 A/B testing framework + statistical methodology (mSPRT + Bonferroni) | Land 2026-05-21 |
+| 0038 | M11 Continuous counterfactual replay + self-hosted PG | Land 2026-05-21 |
+| 0039 | M12 OrderRouter trait + maker_fill_rate_30d metric | Land 2026-05-21 |
+| 0040 | M13 Multi-Venue Gate Spec (Binance trade Y3+ at earliest) | Land 2026-05-21 |
+| 0041 | ContextDistiller v4 + DOC-08 §4 AI cost cap amendment | Land 2026-05-21 |
+| 0042 | M3 Single Health Authority | Land 2026-05-21 |
+| 0043 | M6 Bayesian Reward Weight (GP Matern 5/2 + EI) | Land 2026-05-21 |
+| 0044 | M7 Single Decay Authority + DECAY_ENFORCED FSM | Land 2026-05-21 |
+| 0045 | M4 Hypothesis Discovery Governance | Reserved placeholder 2026-05-21 (full IMPL 待 Sprint 6+) |
+| **0046** | **basis observation vs execution split (funding_arb scope)** | **PROPOSED 2026-05-25 per BB+QC spec; IMPL Sprint 1A-δ/ε 平行 land (24-30 hr)** |
 
 Plus existing v5.7 lineage:
-- 0030 Bybit Earn governance
-- 0031 Macro counterfactual policy
-- 0032 On-chain counterfactual policy
-- 0033 ADR-0006 amendment (Bybit primary, DEX declined)
+- 0030 Bybit Copy Trading evidence-gated (Y1末 4-gate)
+- 0031 Framework Expansion (Earn + Macro + On-chain counterfactual)
+- 0032 Bybit Earn Asset Movement Guardian
+- 0033 ADR-0006 amendment (Bybit primary, Binance market-data Y1, DEX declined)
 
-**Total ADR adds Sprint 1A**: 11 (4 from v5.7 + 7 from v5.8). TW workload concentrated here.
+**Total ADR adds Sprint 1A**: 11 (4 from v5.7 + 7 from v5.8 batch 1; +4 from v5.8 batch 2 = 0042/0043/0044/0045 land 2026-05-21; +1 proposed 2026-05-25 = ADR-0046). TW workload concentrated here.
 
 ---
 
@@ -973,10 +980,16 @@ Operator stated: "Operator 可能忘記，可能犯錯。我們追求 APR 的最
 - PM final verdict (主入口): `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-21--v58_pm_final_verdict.md`
 - PA dispatch consolidation 562 行: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md`
 - 14 agent v5.8 executability audit: `docs/CCAgentWorkSpace/{A3,AI-E,BB,CC,E2,E3,E4,E5,FA,MIT,QA,QC,R4,TW}/workspace/reports/2026-05-21--v58_executability_audit.md`
-- **新 ADR**：ADR-0034 (M1 LAL) / ADR-0036 (M8 anomaly + M10 Tier D blacklist) / ADR-0038 (M11 replay + liquidations source) / ADR-0039 (M12 OrderRouter + maker_fill_rate) / ADR-0040 (multi-venue Y3+) / ADR-0041 (ContextDistiller v4 + DOC-08 amend)
-- **新 AMD**：AMD-2026-05-21-01 autonomy-vs-human-final-review
+- **新 ADR (2026-05-21 batch)**：ADR-0034 (M1 LAL) / ADR-0036 (M8 anomaly + M10 Tier D blacklist) / ADR-0038 (M11 replay + liquidations source) / ADR-0039 (M12 OrderRouter + maker_fill_rate) / ADR-0040 (multi-venue Y3+) / ADR-0041 (ContextDistiller v4 + DOC-08 amend) / ADR-0042 (M3 health) / ADR-0043 (M6 reward) / ADR-0044 (M7 decay DECAY_ENFORCED) / ADR-0045 (M4 governance placeholder)
+- **新 AMD**：AMD-2026-05-21-01 v2 Layered Autonomy with Hard-Coded Fail-Safe (2026-05-22 supersede v1 protected 6 / opt-in 8)
 - **新 spec doc**：m4_minimum_bar_and_leakage_protocol / m11_threshold_m7_dedup_decay_enforced_rename
 - **新 V### placeholder spec**：V105-V113 (9 docs at `docs/execution_plan/2026-05-21--v{105..113}_*_schema_spec.md`)
+- **新 AMD (2026-05-25 V1→V5.8 drift audit closure)**:
+  - AMD-2026-05-25-01 Commercialization Boundary (Exchange-Native Only) — Retire IP sale + Telegram subscription + Substack + codebase sale + signal feed + MEV/DEX + Stripe pre-order；Retain Bybit + Binance 平台官方 (Copy Trading / Earn / Master Trader / Competitions)
+  - AMD-2026-05-25-02 v5.5 Bot Positioning + Capital Structure Formalization — Single product 完整 quant bot；Y1 100% 主帳 $7,500；副帳 Y2+ ADR-0030 4-gate + Moat 5-gate conditional enable
+- **新 ADR proposed (2026-05-25)**: ADR-0046 basis observation vs execution split (funding_arb scope, BB+QC spec; Sprint 1A-δ/ε 24-30 hr 平行 IMPL)
+- **drift audit 終稿**: `docs/audits/2026-05-25--v1_to_v58_full_consolidation_drift.md` (V1→V5.8 全鏈 plan/audit 整合 + 8 條報告錯誤修正 + SSH empirical verify + 10 條剩餘 unresolved + 2 AMD drafts + canary [67]→[80] rename)
+- **canary [67]→[80] rename**: per operator 2026-05-25 directive avoid passive_wait [67] collision; 4 files modified, 16 tests collected PASS, pending operator commit
 
 ---
 
