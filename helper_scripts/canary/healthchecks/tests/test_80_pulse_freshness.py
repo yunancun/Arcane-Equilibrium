@@ -1,4 +1,4 @@
-"""[67] liquidation_pulse_freshness run() 單元測試。
+"""[80] liquidation_pulse_freshness run() 單元測試。
 
 MODULE_NOTE:
   覆蓋四維度 verdict ladder：
@@ -9,6 +9,9 @@ MODULE_NOTE:
 
   與 [62-65] tests 共用 conftest.fake_cursor_factory，但本 check 走 fetchone
   + fetchall 兩步 query，要 stub queue 兩個 result。
+
+  Slot 編號歷史：2026-05-25 rename [67] → [80] 避 passive_wait [67]
+  feature_baseline_readiness 衝突。
 """
 
 from __future__ import annotations
@@ -41,9 +44,9 @@ def _load_script(filename: str, module_name: str) -> ModuleType:
 
 
 @pytest.fixture(scope="module")
-def hc67():
+def hc80():
     return _load_script(
-        "67_liquidation_pulse_freshness.py", "hc67_liquidation_pulse_freshness"
+        "80_liquidation_pulse_freshness.py", "hc80_liquidation_pulse_freshness"
     )
 
 
@@ -68,14 +71,14 @@ def _make_queue(stats_row: tuple, observed_symbols: list[str]) -> list:
 # ───────────────────────────────────────────────────────────────────────────
 
 
-def test_all_green_passes(hc67, fake_cursor_factory):
+def test_all_green_passes(hc80, fake_cursor_factory):
     """正常生產：latest age 30s / 600 row / 5 cohort sym / Buy+Sell 均出現。"""
     queue = _make_queue(
         (600, 30.0, 300, 300, 0),
         ["BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT"],
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur,
         window_secs=3600,  # 1h
         cohort=TEST_COHORT,
@@ -91,7 +94,8 @@ def test_all_green_passes(hc67, fake_cursor_factory):
     assert result["dimensions"]["symbol_coverage"]["verdict"] == "PASS"
     assert result["dimensions"]["parse_guard"]["verdict"] == "PASS"
     assert result["cohort_coverage_pct"] == 100.0
-    assert result["check_id"] == "[67]"
+    assert result["check_id"] == "[80]"
+    assert result["namespace"] == "canary"
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -99,14 +103,14 @@ def test_all_green_passes(hc67, fake_cursor_factory):
 # ───────────────────────────────────────────────────────────────────────────
 
 
-def test_freshness_warn_above_60s(hc67, fake_cursor_factory):
+def test_freshness_warn_above_60s(hc80, fake_cursor_factory):
     """latest_age = 120s → WARN（> 60s, < 300s）；其他維 PASS。"""
     queue = _make_queue(
         (100, 120.0, 50, 50, 0),
         list(TEST_COHORT),
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur, window_secs=3600, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -117,14 +121,14 @@ def test_freshness_warn_above_60s(hc67, fake_cursor_factory):
     assert "latest_age=120s" in result["dimensions"]["freshness"]["note"]
 
 
-def test_freshness_fail_above_300s(hc67, fake_cursor_factory):
+def test_freshness_fail_above_300s(hc80, fake_cursor_factory):
     """latest_age = 500s → FAIL。"""
     queue = _make_queue(
         (100, 500.0, 50, 50, 0),
         list(TEST_COHORT),
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur, window_secs=3600, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -134,14 +138,14 @@ def test_freshness_fail_above_300s(hc67, fake_cursor_factory):
     assert result["verdict"] == "FAIL"
 
 
-def test_freshness_none_when_zero_rows(hc67, fake_cursor_factory):
+def test_freshness_none_when_zero_rows(hc80, fake_cursor_factory):
     """0 row → freshness INSUFFICIENT_SAMPLE；row_volume 也 FAIL。"""
     queue = _make_queue(
         (0, None, 0, 0, 0),
         [],
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur, window_secs=3600, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -159,14 +163,14 @@ def test_freshness_none_when_zero_rows(hc67, fake_cursor_factory):
 # ───────────────────────────────────────────────────────────────────────────
 
 
-def test_volume_pass_at_exact_threshold(hc67, fake_cursor_factory):
+def test_volume_pass_at_exact_threshold(hc80, fake_cursor_factory):
     """n_rows = pass_lower_per_hour × hours = 30 → PASS（不嚴格 < ）。"""
     queue = _make_queue(
         (30, 10.0, 15, 15, 0),
         list(TEST_COHORT),
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur, window_secs=3600, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -175,14 +179,14 @@ def test_volume_pass_at_exact_threshold(hc67, fake_cursor_factory):
     assert result["dimensions"]["row_volume"]["verdict"] == "PASS"
 
 
-def test_volume_warn_below_pass(hc67, fake_cursor_factory):
+def test_volume_warn_below_pass(hc80, fake_cursor_factory):
     """n_rows = 20 (between warn=15 and pass=30) → WARN。"""
     queue = _make_queue(
         (20, 10.0, 10, 10, 0),
         list(TEST_COHORT),
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur, window_secs=3600, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -192,14 +196,14 @@ def test_volume_warn_below_pass(hc67, fake_cursor_factory):
     assert result["verdict"] == "WARN"
 
 
-def test_volume_fail_below_warn(hc67, fake_cursor_factory):
+def test_volume_fail_below_warn(hc80, fake_cursor_factory):
     """n_rows = 5 (< warn=15) → FAIL。"""
     queue = _make_queue(
         (5, 10.0, 3, 2, 0),
         list(TEST_COHORT),
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur, window_secs=3600, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -214,14 +218,14 @@ def test_volume_fail_below_warn(hc67, fake_cursor_factory):
 # ───────────────────────────────────────────────────────────────────────────
 
 
-def test_coverage_warn_below_80pct(hc67, fake_cursor_factory):
+def test_coverage_warn_below_80pct(hc80, fake_cursor_factory):
     """3/5 sym = 60% < 80% warn → WARN。"""
     queue = _make_queue(
         (300, 10.0, 150, 150, 0),
         ["BTCUSDT", "ETHUSDT", "SOLUSDT"],
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur, window_secs=3600, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -233,14 +237,14 @@ def test_coverage_warn_below_80pct(hc67, fake_cursor_factory):
     assert "XRPUSDT" in result["missing_cohort_symbols"]
 
 
-def test_coverage_fail_below_50pct(hc67, fake_cursor_factory):
+def test_coverage_fail_below_50pct(hc80, fake_cursor_factory):
     """2/5 sym = 40% < 50% fail → FAIL。"""
     queue = _make_queue(
         (200, 10.0, 100, 100, 0),
         ["BTCUSDT", "ETHUSDT"],
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur, window_secs=3600, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -251,7 +255,7 @@ def test_coverage_fail_below_50pct(hc67, fake_cursor_factory):
     assert result["cohort_coverage_pct"] == 40.0
 
 
-def test_coverage_excludes_non_cohort(hc67, fake_cursor_factory):
+def test_coverage_excludes_non_cohort(hc80, fake_cursor_factory):
     """Non-cohort symbols (BSBUSDT) 不算 coverage 分子。"""
     queue = _make_queue(
         (500, 10.0, 250, 250, 0),
@@ -260,7 +264,7 @@ def test_coverage_excludes_non_cohort(hc67, fake_cursor_factory):
         # observed_symbols 只該回 cohort 內的。本 test 直接驗 cohort-only。
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur, window_secs=3600, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -275,14 +279,14 @@ def test_coverage_excludes_non_cohort(hc67, fake_cursor_factory):
 # ───────────────────────────────────────────────────────────────────────────
 
 
-def test_parse_guard_fails_when_buy_absent(hc67, fake_cursor_factory):
+def test_parse_guard_fails_when_buy_absent(hc80, fake_cursor_factory):
     """100% Sell row → Buy_side_absent FAIL（parser silent degradation）。"""
     queue = _make_queue(
         (100, 30.0, 0, 100, 0),
         list(TEST_COHORT),
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur, window_secs=3600, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -293,14 +297,14 @@ def test_parse_guard_fails_when_buy_absent(hc67, fake_cursor_factory):
     assert result["verdict"] == "FAIL"
 
 
-def test_parse_guard_fails_when_sell_absent(hc67, fake_cursor_factory):
+def test_parse_guard_fails_when_sell_absent(hc80, fake_cursor_factory):
     """100% Buy → Sell_side_absent。"""
     queue = _make_queue(
         (100, 30.0, 100, 0, 0),
         list(TEST_COHORT),
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur, window_secs=3600, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -310,14 +314,14 @@ def test_parse_guard_fails_when_sell_absent(hc67, fake_cursor_factory):
     assert "Sell_side_absent" in result["dimensions"]["parse_guard"]["note"]
 
 
-def test_parse_guard_fails_on_non_finite(hc67, fake_cursor_factory):
+def test_parse_guard_fails_on_non_finite(hc80, fake_cursor_factory):
     """non_finite_count = 5 → FAIL（qty/price <= 0）。"""
     queue = _make_queue(
         (100, 30.0, 50, 50, 5),
         list(TEST_COHORT),
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur, window_secs=3600, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -332,14 +336,14 @@ def test_parse_guard_fails_on_non_finite(hc67, fake_cursor_factory):
 # ───────────────────────────────────────────────────────────────────────────
 
 
-def test_severity_max_fail_overrides_warn(hc67, fake_cursor_factory):
+def test_severity_max_fail_overrides_warn(hc80, fake_cursor_factory):
     """WARN freshness + FAIL coverage → overall FAIL（嚴重者 wins）。"""
     queue = _make_queue(
         (200, 120.0, 100, 100, 0),  # latest_age=120s → WARN freshness
         ["BTCUSDT", "ETHUSDT"],     # 40% coverage → FAIL coverage
     )
     cur = fake_cursor_factory(queue)
-    result = hc67.run(
+    result = hc80.run(
         cur, window_secs=3600, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -350,14 +354,14 @@ def test_severity_max_fail_overrides_warn(hc67, fake_cursor_factory):
     assert result["verdict"] == "FAIL"
 
 
-def test_sql_uses_window_secs(hc67, fake_cursor_factory):
+def test_sql_uses_window_secs(hc80, fake_cursor_factory):
     """確保 SQL 用 window_secs 參數。"""
     queue = _make_queue(
         (10, 10.0, 5, 5, 0),
         list(TEST_COHORT),
     )
     cur = fake_cursor_factory(queue)
-    hc67.run(
+    hc80.run(
         cur, window_secs=7200, cohort=TEST_COHORT,
         pass_lower_per_hour=30.0,
         warn_freshness_secs=60.0, fail_freshness_secs=300.0,
@@ -382,10 +386,10 @@ def test_sql_uses_window_secs(hc67, fake_cursor_factory):
 # ───────────────────────────────────────────────────────────────────────────
 
 
-def test_cohort_size_25(hc67):
+def test_cohort_size_25(hc80):
     """COHORT_SYMBOLS 必 = 25 sym（與 main.rs 對齊；POLUSDT 取代 MATICUSDT）。"""
-    assert len(hc67.COHORT_SYMBOLS) == 25
-    assert "POLUSDT" in hc67.COHORT_SYMBOLS
-    assert "MATICUSDT" not in hc67.COHORT_SYMBOLS
-    assert "BTCUSDT" in hc67.COHORT_SYMBOLS
-    assert "ETHUSDT" in hc67.COHORT_SYMBOLS
+    assert len(hc80.COHORT_SYMBOLS) == 25
+    assert "POLUSDT" in hc80.COHORT_SYMBOLS
+    assert "MATICUSDT" not in hc80.COHORT_SYMBOLS
+    assert "BTCUSDT" in hc80.COHORT_SYMBOLS
+    assert "ETHUSDT" in hc80.COHORT_SYMBOLS
