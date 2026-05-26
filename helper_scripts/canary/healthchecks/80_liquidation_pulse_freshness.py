@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""[67] liquidation_pulse_freshness — W-AUDIT-8a C1-LIQ-WRITER acceptance #3。
+"""[80] liquidation_pulse_freshness — W-AUDIT-8a C1-LIQ-WRITER acceptance #3。
 
 MODULE_NOTE:
-  PA decomposition §6.3 acceptance #3 規範的 [67] healthcheck standalone 入口。
+  PA decomposition §6.3 acceptance #3 規範的 [80] healthcheck standalone 入口。
+  Slot 編號歷史：原 R1 取 [67]，2026-05-25 operator directive rename 為 [80]
+  以避與 passive_wait_healthcheck runner.py:1181 ``[67] feature_baseline_readiness``
+  namespace 衝突；canary cohort [62][63][64][65][66][67→80][68][69] 連續性
+  保留，新 [80] 緊鄰 passive_wait [70-79] block 之後，未來新 canary slot 從
+  [81] 起遞增。
   覆蓋四個維度（per PA spec 與 acceptance criteria）：
     1. **Topic freshness** — `market.liquidations` 最新 row 的 age vs NOW()；
        Bybit `allLiquidation.{symbol}` WS 應持續推送（24h baseline ~6000+
@@ -35,7 +40,7 @@ Verdict ladder（per dimension 嚴重度 max-rolled up）：
 整體 verdict 取四維 severity_max；任一 FAIL → overall FAIL。
 
 CLI:
-  python3 67_liquidation_pulse_freshness.py [--window-secs 86400] \\
+  python3 80_liquidation_pulse_freshness.py [--window-secs 86400] \\
         [--pass-lower-per-hour 30] [--warn-freshness-secs 60] \\
         [--fail-freshness-secs 300] [--warn-coverage 0.80] \\
         [--fail-coverage 0.50] [--write-file PATH] [--text]
@@ -95,9 +100,9 @@ DEFAULT_WINDOW_SECS_LIQ: int = 86400  # 24h；對齊 PA prompt §6.3 expected ba
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="67_liquidation_pulse_freshness",
+        prog="80_liquidation_pulse_freshness",
         description=(
-            "[67] liquidation_pulse_freshness — topic freshness + row volume + "
+            "[80] liquidation_pulse_freshness — topic freshness + row volume + "
             "symbol coverage + parse guard (PA §6.3 #3)"
         ),
     )
@@ -354,7 +359,8 @@ def run(
 
     return {
         "metric": "liquidation_pulse_freshness",
-        "check_id": "[67]",
+        "check_id": "[80]",
+        "namespace": "canary",
         "spec": (
             "PA decomposition 2026-05-18 §6.3 acceptance #3 / "
             "W-AUDIT-8a C1-LIQ-WRITER"
