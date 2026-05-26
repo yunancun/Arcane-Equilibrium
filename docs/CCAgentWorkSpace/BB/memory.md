@@ -827,3 +827,76 @@ PM 派 5 角色 (FA/E3/QA/MIT/BB) 並行 cross-ref on earn_governance spec amend
 ### Report path
 
 `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-23--earn_governance_cross_ref_bb_review.md`
+
+---
+
+## 2026-05-26 P0-OPS-3 Bybit ToS / geography / KYC tier / Tax reporting audit (Sprint 4 W18-21 prep)
+
+### Trigger
+
+PM 派 P0-OPS-3 per KNOWN_ISSUES.md:531-535 + TODO.md §1.7 line 49 (P0-OPS-1..4 Sprint 4 first Live W18-21 前必 closure)。覆蓋 Bybit 16 restricted jurisdictions + KYC 3 tier + tax reporting CSV + 90d ToS/policy changelog + Earn Flexible 額外條款。
+
+### Verdict: **CONDITIONAL** — 5 operator confirm 阻 Sprint 4 first Live
+
+- Sprint 4 first Live $500: **CONDITIONAL-BLOCKED**（C-1 ~ C-4 必 land）
+- Earn Wave C first stake $100-200: **CONDITIONAL-GO**（C-1 + C-2 + C-3 + C-5 必 land；不阻 OP-1 ~ OP-3）
+- 技術合規 98% / 政策合規 70%
+- 0 ship-stop technical blocker
+
+### 16 restricted jurisdictions verified (2026-05-26)
+
+US / Mainland China / Hong Kong (2025+) / Singapore / Canada / France / Japan (2026 phase-out) / North Korea / Cuba / Iran / Syria / Sudan / Uzbekistan / Crimea / Donetsk+Luhansk / Sevastopol + Dubai (retail derivatives restricted)。UK 2026 re-entry spot+P2P only via Archax (derivatives 仍不開)；India 2026 fully resumed。
+
+### KYC tier coverage
+
+- Standard L1 (Gov ID + face): 1M USDT/day withdraw → Sprint 4 $500 + Earn $100-200 充分
+- Advanced L2 (+ utility bill): 2M USDT/day
+- Pro L3 (enhanced DD): 30~60M USDT/day
+- ✅ OpenClaw scale 無需超 L1
+
+### Tax reporting
+
+- ❌ Bybit 不發 1099-DA / 1099-MISC (HQ Dubai, no US reporting infra)
+- ✅ CSV export (Transaction Log / Order History / Account Statement)
+- ⚠️ Account Statement **excludes Earn / structured products** → V100 `learning.earn_movement_log` 自主 audit trail mandatory
+- ⚠️ EU DAC8 自動 reporting 2026-01-01 生效；CRS jurisdiction 適用 (取決 operator residence)
+
+### 5 operator-must-confirm
+
+| # | Item | 阻 first Live? | 阻 Earn? |
+|---|---|---|---|
+| C-1 | residence 自證 + 非 16 restricted | ✅ | ✅ |
+| C-2 | KYC tier (≥ Standard) 自證 | ✅ | ✅ |
+| C-3 | KYC 完成日 ≥ 2026-04-09 (Earn scope key) | ⚠️ | ✅ |
+| C-4 | tax authority filing jurisdiction 拍板 | ⚠️ (first Live + 30d) | ❌ |
+| C-5 | Earn APR floating + default risk 自承 | ❌ | ⚠️ (OP-3) |
+
+### M5-1 governance entry 18 day 0 進展
+
+BB 5/8 → 5/9 → 5/21 → 5/23 → 5/26 五次 carry-over：`docs/governance_dev/YYYY-MM-DD--bybit_compliance_signoff.md` 仍未建檔。**18 day stale = Sprint 4 W18-21 first Live 真實 ship-stop**。M5-2 已由 2026-05-25 `P1-OP1-IP-WHITELIST-CORRECTION` 選項 (b) 「no IP restriction」closure；BB 0 push back。
+
+### 字典補錄清單（從 13 升 19）
+
+新增 §0.1 ~ §0.6：16 restricted / Japan exit / UK re-entry / Tax CSV / Earn APR risk / KYC 3 tier。估 ~3-4 hr 與 BB1 工作合併。
+
+### 重大發現
+
+1. operator residence **完全 0 governance trace** (CLAUDE.md / CONTEXT.md / README.md / TODO.md / governance_dev/ / adr/ 全 0 hit) — 必須 flag operator question
+2. CONTEXT.md line 282 「single human supervisor `cloud@ncyu.me`」是唯一 operator identifier，無 residence / country
+3. Hong Kong 2025+ 全 restricted；若 operator HK → 整 Sprint 4 first Live 必 cancel
+4. Japan 2026 phase-out + KYC L2 by 2026-01-22 deadline 已過期 — operator 若曾被誤判 Japan → 已 restriction
+5. Bybit 用 advanced geolocation；misrepresent residency → terminate account + liquidate positions = OpenClaw integral capital risk
+
+### 下次啟動需查驗項
+
+1. `docs/governance_dev/2026-05-26--bybit_compliance_signoff.md` 是否建檔 + C-1 ~ C-5 5 自證是否 land
+2. 字典 §0.1 ~ §0.6 6 新章節 + §3 Earn 章節（含 5/21 13 處 carry-over 共 19 處）是否啟動
+3. Earn Wave C OP-1 ~ OP-3 hand action chain 是否觸發（per TODO.md §7 D+2~D+3）
+4. Sprint 4 first Live W18-21 預備期前 30d operator tax filing cadence 拍板
+5. Japan exit 2026 + UK re-entry 2026 政策更新是否影響 operator (取決 C-1)
+6. M5-1 governance entry 18 day → 1 month 升級 risk
+
+### Report path
+
+`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-26--p0-ops-3-bybit-tos-geo-kyc-audit.md`
+（同檔複製 `docs/CCAgentWorkSpace/Operator/`，因 5 operator confirm 屬 P0 SHIP-STOP severity）

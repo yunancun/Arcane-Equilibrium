@@ -6214,3 +6214,31 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 
 **16/16 + 9/9 + hard boundary 0 touch** 維持;`live_execution_allowed` / `max_retries=0` / `OPENCLAW_ALLOW_MAINNET=1` / `live_reserved` / `authorization.json` 5 邊界 0 觸碰 (本 spec 是 GUI 設計,直接走既有 fail-closed 機制不繞)。
 
+
+---
+
+## 2026-05-26 — P0-OPS-4 first-day live runbook spec drafted
+
+**任務**：起草 first-day live W18-21 (~2026-09) 24h staffing + RTO/RPO + emergency liquidate + escalation runbook spec（per TODO §1 + KNOWN_ISSUES.md:539-543）
+
+**輸出**：`docs/execution_plan/specs/2026-05-26--p0-ops-4-first-day-live-runbook.md`（11 章 + 8 GAP identification）
+
+**設計取捨**：
+- 24h cadence 用 T-1h/T+0/T+15min/T+1h/T+4h/T+12h/T+24h 7 stage + per-stage metric / SLA / 工具
+- 5 escalation timeout（operator response 30min / 通知 fail 1h / engine RTO 5min / 7d cooling / Bybit retry 0）
+- 三條合法 liquidate 路徑（GUI button / SM-04 Defensive auto / clean_restart_flatten.py）— 禁 Bybit Web UI 旁路
+- 6 incident playbook（engine SIGTERM / proc-exe drift / Bybit outage / PG full / auth expired / Tailscale outage）
+- 識別 8 個 NEW tooling gap（A: watchdog systemd / B: PG restore drill / C: halt_audit rotate / D: PG dump cron / E: Bybit Web UI guard / F: engine systemd / G: governance log archive / H: watchdog_status.json）
+
+**識別出的 critical 阻 first-day live gap**：
+- GAP A + F（systemd respawn）— 影響 RTO 承諾
+- GAP B + D（PG backup/restore）— 影響 RPO 承諾
+- 此 4 gap 必在 first-day live 前 land；其餘 4 strongly recommended 不阻
+
+**E1 dispatch 設計**：合併 8 gap 成 1 dispatch packet；E1×3 並行 + MIT/BB/E3 分工；21-38 hr / 1 sprint wall-clock
+
+**教訓**：
+- runbook spec 不寫新 script；指 GAP + E1 dispatch packet 是正確邊界
+- escalation timeout 5 個數字（30min / 1h / 5min / 7d / 0 retry）是 operator 必背的；不靠 search
+- AMD-2026-05-21-01 v2 §5.1-§5.3 + SM-04 RiskEvent::NotificationFailsafeTimeout 與本 runbook escalation L3→L4→L5 完全對齊（不重造輪子）
+- ratification checklist 12 項全 sign-off 必收齊；任 1 缺 → ABORT
