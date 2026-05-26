@@ -360,6 +360,10 @@ const TABS = [
   { id: 'strategy',   group: 'edge', label: '策略 Strategy',    labelEn: 'Strategy',  icon: '&#x2699;',  src: `/static/tab-strategy.html?v=${_v}` },
   { id: 'charts',     group: 'edge', label: '圖表 Charts',      labelEn: 'Charts',    icon: '&#x1F4C8;', src: '/trading?embed=1' },
   { id: 'risk',       group: 'governance', label: '風控 Risk',        labelEn: 'Risk',      icon: '&#x1F6E1;', src: `/static/tab-risk.html?v=${_v}` },
+  // Sprint 1B Earn Wave C: Earn first stake GUI（per docs/execution_plan/2026-05-25--earn_first_stake_gui_design_spec.md §2.3）
+  // 位置：governance group 內 risk 之後；icon=💰；group='governance'（per OQ-1 default）
+  // 6 端點 GET + 1 POST /api/v1/earn/stake；5-gate 對映後端 9-gate；typed-confirm phrase 帶 amount
+  { id: 'earn',       group: 'governance', label: 'Earn 理財',        labelEn: 'Earn',      icon: '&#x1F4B0;', src: `/static/tab-earn.html?v=${_v}` },
   { id: 'governance', group: 'governance', label: '治理 Governance',  labelEn: 'Governance',icon: '&#x2696;',  src: `/static/tab-governance.html?v=${_v}` },
   { id: 'ai',         group: 'intelligence', label: 'AI 狀態',          labelEn: 'AI Status', icon: '&#x1F9E0;', src: `/static/tab-ai.html?v=${_v}` },
   { id: 'learning',   group: 'intelligence', label: '學習 Learning',    labelEn: 'Learning',  icon: '&#x1F4D6;', src: `/static/tab-learning.html?v=${_v}` },

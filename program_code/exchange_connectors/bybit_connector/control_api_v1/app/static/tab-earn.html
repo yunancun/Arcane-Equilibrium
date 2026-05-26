@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Earn 理財 / Earn First Stake</title>
+<script src="/static/common-formatters.js?v=20260519.split-p2"></script>
+<script src="/static/common-mode-badge.js?v=20260519.split-p2"></script>
+<script src="/static/common-modals.js?v=20260519.split-p2"></script>
+<script src="/static/common.js?v=20260523.fx-proxy"></script>
+<script src="/static/i18n_zh.js"></script>
+</head>
+<body>
+<script>ocAuthCheck(); ocInjectBaseCSS();</script>
+
+<!--
+  MODULE_NOTE
+  模塊用途：OpenClaw Control Console「Earn 理財」Tab — Layer 1 Bybit Earn-only mainnet
+            first stake GUI（Sprint 1B Earn Wave C carry-over）。
+  Spec 來源：docs/execution_plan/2026-05-25--earn_first_stake_gui_design_spec.md
+            §2 GUI 位置 / §3 7 sections / §5 5-gate viz / §6 防誤觸 / §7 Stage 0R
+  7 sections：標頭 / 餘額 / 5-gate / 產品 / first-stake 表單 / 持倉 / 歷史
+  硬邊界：(1) 純 GUI 不直接改 Rust 參數 (2) Earn POST 必經 5-gate + typed-confirm
+          (3) typed-confirm phrase 後端再驗一次（per AC-3 / OQ-3 default）
+          (4) 永不 silent 升級 baseline 視覺合約（read-only 觀察 / write 嚴格）
+  依賴：common-formatters.js (ocEsc / ocChip / ocNum / ocMoney / ocTime)
+        common-modals.js   (openTypedConfirmModal — phrase 帶 amount)
+        common.js          (ocApi / ocPost / ocToast / ocExplain)
+        i18n_zh.js         (中文主導 fallback EN)
+        earn-tab.js        (本 Tab 對應 sibling JS — render + submit logic)
+-->
+
+<style>
+  /* ─── Earn Tab 樣式 / Earn Tab styles ─────────────────────────────────── */
+
+  /* 標頭橫條 / Header bar */
+  .earn-header-row {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center;
+    padding: 10px 12px; background: var(--card-bg); border: 1px solid var(--border);
+    border-radius: var(--card-radius); margin-bottom: 12px;
+  }
+  .earn-header-title {
+    font-size: 15px; font-weight: 700; margin: 0;
+  }
+  .earn-header-meta {
+    color: var(--text-dim); font-size: 11px; line-height: 1.6;
+  }
+  .earn-header-actions {
+    margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap;
+  }
+
+  /* 5-gate panel：5 個 light box / 5-light status panel */
+  .earn-gate-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 10px;
+    margin: 12px 0;
+  }
+  .earn-gate-box {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: rgba(13, 17, 23, 0.55);
+    text-align: left;
+    min-height: 92px;
+    position: relative;
+  }
+  .earn-gate-icon {
+    font-size: 22px;
+    line-height: 1;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .earn-gate-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 4px;
+    line-height: 1.35;
+  }
+  .earn-gate-detail {
+    font-size: 10px;
+    color: var(--text-dim);
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+  }
+  .earn-gate-box.gate-pass { border-color: rgba(63, 185, 80, 0.45); background: rgba(63, 185, 80, 0.05); }
+  .earn-gate-box.gate-fail { border-color: rgba(248, 81, 73, 0.5);  background: rgba(248, 81, 73, 0.06); }
+  .earn-gate-box.gate-warn { border-color: rgba(210, 153, 34, 0.5); background: rgba(210, 153, 34, 0.06); }
+  .earn-gate-box.gate-na   { border-color: rgba(139, 148, 158, 0.4); background: rgba(139, 148, 158, 0.04); }
+
+  .earn-gate-verdict {
+    margin-top: 10px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+  }
+  .earn-gate-verdict.verdict-pass { background: rgba(63, 185, 80, 0.12); border: 1px solid rgba(63, 185, 80, 0.4); color: var(--green); }
+  .earn-gate-verdict.verdict-fail { background: rgba(248, 81, 73, 0.10); border: 1px solid rgba(248, 81, 73, 0.4); color: var(--red); }
+
+  /* Stage 0R 3-state badge / Stage 0R 三狀態徽章 */
+  .earn-stage0r-row {
+    margin-top: 8px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.6;
+    display: flex; gap: 8px; flex-wrap: wrap; align-items: center;
+  }
+  .earn-stage0r-row.stage0r-pass    { background: rgba(63, 185, 80, 0.08);  border: 1px solid rgba(63, 185, 80, 0.35); }
+  .earn-stage0r-row.stage0r-pending { background: rgba(210, 153, 34, 0.08); border: 1px solid rgba(210, 153, 34, 0.4); }
+  .earn-stage0r-row.stage0r-fail    { background: rgba(248, 81, 73, 0.08);  border: 1px solid rgba(248, 81, 73, 0.4); }
+  .earn-stage0r-badge {
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    letter-spacing: 0.4px;
+  }
+  .earn-stage0r-badge.stage0r-pass    { background: rgba(63, 185, 80, 0.18); color: var(--green); }
+  .earn-stage0r-badge.stage0r-pending { background: rgba(210, 153, 34, 0.2); color: var(--yellow); }
+  .earn-stage0r-badge.stage0r-fail    { background: rgba(248, 81, 73, 0.2);  color: var(--red); }
+  .earn-stage0r-copy {
+    margin-left: auto;
+    font-family: monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    overflow-wrap: anywhere;
+  }
+
+  /* First-stake form / 首次 stake 表單 */
+  .earn-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 12px;
+    margin: 10px 0;
+  }
+  .earn-form-row { display: flex; flex-direction: column; gap: 4px; }
+  .earn-form-label {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+  }
+  .earn-form-input,
+  .earn-form-select,
+  .earn-form-textarea {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    min-height: 36px;
+  }
+  .earn-form-input:focus,
+  .earn-form-select:focus,
+  .earn-form-textarea:focus { outline: none; border-color: var(--accent); }
+  .earn-form-input.input-error { border-color: var(--red); }
+  .earn-form-input.input-ok    { border-color: var(--green); }
+  .earn-form-textarea { min-height: 64px; resize: vertical; font-family: inherit; }
+  .earn-form-readonly {
+    background: rgba(13, 17, 23, 0.6);
+    color: var(--text);
+    font-weight: 600;
+  }
+  .earn-form-hint {
+    font-size: 11px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+  .earn-form-hint.hint-error { color: var(--red); }
+  .earn-form-hint.hint-ok    { color: var(--green); }
+
+  /* Typed-confirm warning notice / 打字確認警示 */
+  .earn-typed-warn {
+    margin: 12px 0;
+    padding: 10px 14px;
+    background: rgba(248, 81, 73, 0.06);
+    border-left: 3px solid var(--red);
+    border-radius: 0 8px 8px 0;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+  .earn-typed-warn b { color: var(--red); }
+  .earn-typed-warn code {
+    font-family: monospace;
+    background: rgba(13, 17, 23, 0.7);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--yellow);
+  }
+
+  .earn-submit-row {
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .earn-submit-btn {
+    padding: 10px 22px;
+    font-size: 13px;
+    font-weight: 700;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .earn-submit-disabled-reason {
+    font-size: 11px;
+    color: var(--red);
+    line-height: 1.5;
+  }
+
+  /* Loading overlay on submit / 送單載入遮罩 */
+  .earn-submit-loading {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .earn-spinner {
+    width: 12px; height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: earn-spin 0.7s linear infinite;
+  }
+  @keyframes earn-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+
+  /* 行動裝置 a11y：5-gate 5 col 過擠時 wrap / Mobile collapse */
+  @media (max-width: 700px) {
+    .earn-gate-grid { grid-template-columns: repeat(2, 1fr); }
+    .earn-submit-btn { min-height: 44px; }
+    .earn-form-input, .earn-form-select, .earn-form-textarea { min-height: 44px; font-size: 14px; }
+    .earn-gate-box { min-height: 86px; }
+  }
+</style>
+
+<!-- ═══ §3.1 標頭橫條 / Header bar ═══════════════════════════════════════
+     Title + env badge + engine_mode + refresh button + audit footer ts -->
+<div class="earn-header-row" role="region" aria-label="Earn 理財 header / Earn header">
+  <div>
+    <h2 class="earn-header-title">&#x1F4B0; Earn 理財 / Earn</h2>
+    <div class="earn-header-meta">
+      <span id="earn-env-badge">--</span>
+      &nbsp;·&nbsp;
+      <span id="earn-engine-mode">--</span>
+      &nbsp;·&nbsp;
+      <span id="earn-last-refresh-ts">採集時間：--</span>
+    </div>
+  </div>
+  <div class="earn-header-actions">
+    <button id="earn-refresh-btn" class="oc-btn" type="button" aria-label="重新整理 / Refresh">
+      &#x21BB; 重新整理 / Refresh
+    </button>
+  </div>
+</div>
+
+<!-- ═══ Explainer / 雙層解釋 ════════════════════════════════════════════
+     ocExplain 雙層提示，operator 一眼了解風險 + 詳細展開閱讀 -->
+<div class="oc-card">
+  <h3>&#x1F4D6; 為什麼這裡需要謹慎 / Why this requires care</h3>
+  <div id="earn-explain"></div>
+</div>
+
+<!-- ═══ §3.2 Earn 帳戶餘額 / Earn account balance ════════════════════════
+     USDT Earn balance + claimable yield + reconciliation status -->
+<section class="oc-card" role="region" aria-label="Earn 帳戶餘額 / Earn balance">
+  <h3>&#x1F4B5; Earn 帳戶餘額 / Earn Account Balance</h3>
+  <div id="earn-balance-loading" style="padding:8px;color:var(--text-dim);font-size:12px">
+    &#x23F3; 正在讀取 Earn 餘額…
+  </div>
+  <div id="earn-balance-error" style="display:none;padding:8px;color:var(--yellow);font-size:12px">
+    &#x26A0;&#xFE0F; Earn 餘額讀取失敗 — 後端可能尚未實裝 endpoint，或網路問題；下次 15 秒輪詢自動重試
+  </div>
+  <div id="earn-balance-data" style="display:none" tabindex="0">
+    <div class="oc-metrics">
+      <div class="oc-metric">
+        <div class="oc-metric-label">USDT Earn 餘額 / USDT Earn Balance</div>
+        <div class="oc-metric-val" id="earn-balance-usdt">--</div>
+        <div class="oc-metric-sub" id="earn-balance-usdt-sub">USDT</div>
+      </div>
+      <div class="oc-metric">
+        <div class="oc-metric-label">可領取收益 / Claimable Yield</div>
+        <div class="oc-metric-val" id="earn-balance-claimable">--</div>
+        <div class="oc-metric-sub">USDT</div>
+      </div>
+      <div class="oc-metric">
+        <div class="oc-metric-label">最近對賬 / Last Reconciliation</div>
+        <div class="oc-metric-val" id="earn-balance-recon-ts" style="font-size:13px">--</div>
+        <div class="oc-metric-sub" id="earn-balance-recon-status">--</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ §3.3 5-Gate Status Panel / 5-Gate 預檢面板 ═══════════════════════
+     5 light box (a-e) + verdict line + Stage 0R 3-state badge
+     對齊 backend 9-gate (E-0..E-9)；5 light = 5 governance gate 群組 -->
+<section class="oc-card" role="region" aria-label="5-Gate 預檢 / 5-Gate Preflight">
+  <h3>&#x1F6E1;&#xFE0F; 5-Gate 預檢 / 5-Gate Preflight
+    <span style="font-size:11px;color:var(--text-dim);font-weight:normal">
+      (對齊後端 9-gate E-0..E-9) / (aligns with backend 9-gate E-0..E-9)
+    </span>
+  </h3>
+  <div id="earn-preflight-loading" style="padding:8px;color:var(--text-dim);font-size:12px">
+    &#x23F3; 正在執行 5-gate 預檢…
+  </div>
+  <div id="earn-preflight-error" style="display:none;padding:8px;color:var(--yellow);font-size:12px">
+    &#x26A0;&#xFE0F; 5-gate 預檢讀取失敗 — Submit 按鈕將保持禁用直到下次成功讀取
+  </div>
+  <div id="earn-preflight-data" style="display:none" tabindex="0">
+    <div class="earn-gate-grid" id="earn-gate-grid"></div>
+    <div class="earn-gate-verdict" id="earn-gate-verdict">--</div>
+    <div class="earn-stage0r-row stage0r-pending" id="earn-stage0r-row">
+      <span class="earn-stage0r-badge stage0r-pending" id="earn-stage0r-badge">Stage 0R: ⏳ PENDING</span>
+      <span id="earn-stage0r-detail" style="font-size:12px;line-height:1.6">尚未跑過 Stage 0R preflight</span>
+      <span class="earn-stage0r-copy" id="earn-stage0r-copy"></span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ §3.4 Available products / 可用 Flexible 產品列表 ══════════════════
+     filter: coin=USDT AND category=FlexibleSaving AND status=Available
+     sort: estimateApr DESC -->
+<section class="oc-card" role="region" aria-label="可用 Earn 產品 / Available Earn Products">
+  <h3>&#x1F4DC; 可用 Earn 產品 / Available Earn Products
+    <span style="font-size:11px;color:var(--text-dim);font-weight:normal">
+      (Sprint 1B 鎖 USDT FlexibleSaving / Sprint 1B locked to USDT FlexibleSaving)
+    </span>
+  </h3>
+  <div id="earn-products-loading" style="padding:8px;color:var(--text-dim);font-size:12px">
+    &#x23F3; 正在讀取可用產品…
+  </div>
+  <div id="earn-products-empty" style="display:none;padding:8px;color:var(--text-dim);font-size:12px">
+    &#x1F4A4; Bybit Earn 沒有可用的 USDT FlexibleSaving 產品（下架或維護中）
+  </div>
+  <div id="earn-products-error" style="display:none;padding:8px;color:var(--yellow);font-size:12px">
+    &#x26A0;&#xFE0F; 產品列表讀取失敗 — 下次 15 秒輪詢自動重試
+  </div>
+  <div id="earn-products-data" style="display:none" tabindex="0">
+    <div class="oc-table-wrap">
+      <table class="oc-table" id="earn-products-table">
+        <thead><tr>
+          <th>產品 ID</th><th>幣種</th><th>預估 APR</th>
+          <th>Min Stake</th><th>Max Stake</th><th>狀態</th>
+        </tr></thead>
+        <tbody id="earn-products-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ §3.5 First Stake form / 首次 Stake 表單 ══════════════════════════
+     write surface；受 5-gate + Stage 0R gate；typed-confirm + cooldown -->
+<section class="oc-card" role="region" aria-label="首次 Stake 表單 / First Stake Form">
+  <h3>&#x1F510; 首次 Stake 表單 / First Stake Form</h3>
+
+  <div class="earn-typed-warn">
+    <b>注意：</b>此操作將寫入真實 Bybit Earn 帳戶，動主帳 USDT 資金。
+    所有 5-gate + Stage 0R 必先 PASS，並通過 typed-confirm phrase
+    <code id="earn-typed-phrase-preview">CONFIRM EARN STAKE $&lt;amount&gt; USDT</code>
+    （大小寫敏感 / case-sensitive）。Bybit ack 失敗自動 fail-closed
+    並寫入 audit log，不重試。
+  </div>
+
+  <div class="earn-form-grid">
+    <div class="earn-form-row">
+      <label class="earn-form-label" for="earn-coin">幣種 / Coin</label>
+      <select id="earn-coin" class="earn-form-select earn-form-readonly" disabled>
+        <option value="USDT">USDT</option>
+      </select>
+      <span class="earn-form-hint">Sprint 1B 鎖 USDT / locked to USDT</span>
+    </div>
+
+    <div class="earn-form-row">
+      <label class="earn-form-label" for="earn-product-id">產品 ID / Product ID</label>
+      <input id="earn-product-id" type="text" class="earn-form-input earn-form-readonly" readonly value="--" />
+      <span class="earn-form-hint">自動選取第一個 Available USDT FlexibleSaving / auto-picked</span>
+    </div>
+
+    <div class="earn-form-row">
+      <label class="earn-form-label" for="earn-amount">金額 / Amount (USDT)</label>
+      <input id="earn-amount" type="number" min="100" max="200" step="1"
+             class="earn-form-input" placeholder="100 - 200" inputmode="numeric" />
+      <span class="earn-form-hint" id="earn-amount-hint">請輸入 $100 - $200 USDT 整數 / integer USDT only</span>
+    </div>
+
+    <div class="earn-form-row">
+      <label class="earn-form-label" for="earn-apr">預估 APR / Expected APR</label>
+      <input id="earn-apr" type="text" class="earn-form-input earn-form-readonly" readonly value="--" />
+      <span class="earn-form-hint">由產品 estimateApr 自動帶入 / from product.estimateApr</span>
+    </div>
+  </div>
+
+  <div class="earn-form-row" style="margin-top:10px">
+    <label class="earn-form-label" for="earn-rationale">理由 / Rationale (10-200 字)</label>
+    <textarea id="earn-rationale" class="earn-form-textarea" minlength="10" maxlength="200"
+              placeholder="例如：首次 Sprint 1B Earn first stake；驗證 V100 row INSERT 鏈路；Stage 0R preflight 已 PASS。"></textarea>
+    <span class="earn-form-hint" id="earn-rationale-hint">0 / 200 字</span>
+  </div>
+
+  <div class="earn-submit-row">
+    <button id="earn-submit-btn" class="oc-btn oc-btn-danger earn-submit-btn" type="button" disabled>
+      &#x1F4E5; 提交 Stake (typed-confirm) / Submit Stake
+    </button>
+    <span id="earn-submit-loading" class="earn-submit-loading" style="display:none">
+      <span class="earn-spinner" aria-hidden="true"></span>
+      <span>正在等待 Bybit ack… / Waiting for Bybit ack…</span>
+    </span>
+    <span class="earn-submit-disabled-reason" id="earn-submit-reason">5-gate / Stage 0R 尚未 PASS</span>
+  </div>
+</section>
+
+<!-- ═══ §3.6 Active positions / 當前 Earn 持倉 ═══════════════════════════
+     read-only；空狀態提示「尚未有持倉」-->
+<section class="oc-card" role="region" aria-label="當前 Earn 持倉 / Active Earn Positions">
+  <h3>&#x1F4CB; 當前 Earn 持倉 / Active Earn Positions</h3>
+  <div id="earn-positions-loading" style="padding:8px;color:var(--text-dim);font-size:12px">
+    &#x23F3; 正在讀取持倉…
+  </div>
+  <div id="earn-positions-empty" style="display:none;padding:8px;color:var(--text-dim);font-size:12px">
+    &#x1F4A4; 尚未有 Earn 持倉；首次 stake 成功後此處顯示 / No positions yet
+  </div>
+  <div id="earn-positions-error" style="display:none;padding:8px;color:var(--yellow);font-size:12px">
+    &#x26A0;&#xFE0F; 持倉列表讀取失敗 — 下次 15 秒輪詢自動重試
+  </div>
+  <div id="earn-positions-data" style="display:none" tabindex="0">
+    <div class="oc-table-wrap">
+      <table class="oc-table" id="earn-positions-table">
+        <thead><tr>
+          <th>產品 ID</th><th>幣種</th><th>金額</th>
+          <th>累積收益</th><th>可領取</th><th>狀態</th><th>Order ID</th>
+        </tr></thead>
+        <tbody id="earn-positions-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ §3.7 Records history / 歷史審計記錄 ══════════════════════════════
+     read-only audit log；filter direction + outcome；click row 展開 detail -->
+<section class="oc-card" role="region" aria-label="Earn 歷史審計記錄 / Earn Records History">
+  <h3>&#x1F4DC; 歷史審計記錄 / Records History</h3>
+  <div class="oc-control-bar">
+    <label class="earn-form-label" for="earn-records-direction" style="margin:0">
+      方向 / Direction：
+    </label>
+    <select id="earn-records-direction" class="earn-form-select" style="min-height:32px;padding:4px 8px">
+      <option value="all">全部 / All</option>
+      <option value="stake">Stake</option>
+      <option value="redeem">Redeem</option>
+    </select>
+    <label class="earn-form-label" for="earn-records-outcome" style="margin:0">
+      結果 / Outcome：
+    </label>
+    <select id="earn-records-outcome" class="earn-form-select" style="min-height:32px;padding:4px 8px">
+      <option value="all">全部 / All</option>
+      <option value="pending">待對賬 / Pending</option>
+      <option value="matched">已對賬 / Matched</option>
+      <option value="mismatch">對賬失敗 / Mismatch</option>
+    </select>
+  </div>
+  <div id="earn-records-loading" style="padding:8px;color:var(--text-dim);font-size:12px">
+    &#x23F3; 正在讀取審計記錄…
+  </div>
+  <div id="earn-records-empty" style="display:none;padding:8px;color:var(--text-dim);font-size:12px">
+    &#x1F4A4; 尚未有 Earn 記錄 / No records yet
+  </div>
+  <div id="earn-records-error" style="display:none;padding:8px;color:var(--yellow);font-size:12px">
+    &#x26A0;&#xFE0F; 審計記錄讀取失敗 — 下次 15 秒輪詢自動重試
+  </div>
+  <div id="earn-records-data" style="display:none" tabindex="0">
+    <div class="oc-table-wrap">
+      <table class="oc-table" id="earn-records-table">
+        <thead><tr>
+          <th>時間 (UTC + local)</th><th>方向</th><th>金額</th>
+          <th>APR</th><th>結果</th><th>Lease ID</th><th>Movement ID</th>
+        </tr></thead>
+        <tbody id="earn-records-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<script>
+// ─── Explainer 雙層解釋 / Dual-layer explainer ─────────────────────────
+// ocExplain：operator-friendly 簡介 + 詳細展開閱讀；對齊 gui-style-guide 原則 1
+$('earn-explain').innerHTML = ocExplain(
+  'Earn 理財 Tab 用於 Bybit Flexible USDT 首次 stake。所有寫操作必經 5-gate 預檢 + Stage 0R replay preflight + typed-confirm phrase（含 amount）。Bybit ack 失敗 fail-closed，不重試。',
+  '本 Tab 是 Layer 1 Bybit Earn-only Sprint 1B「first stake」surface。後端 9-gate (E-0..E-9) 對應前端 5-gate 5 light：(a) Operator 角色 (b) authorization.json (c) OPENCLAW_ALLOW_MAINNET (d) Bybit secret slot (e) IntentProcessor wired。typed-confirm phrase 強制帶 amount 反 muscle memory（OQ-3 default）。Stage 0R preflight 走 helper_scripts/canary/replay_earn_preflight.py CLI 觸發，GUI 只讀 JSON file。後續 stake / redeem / Auto-Allocator GUI deferred 至 Sprint 5+。'
+);
+</script>
+
+<!-- ═══ Earn Tab JS load + boot / 載入並啟動 earn-tab.js ═══
+     必須先載入 earn-tab.js，再呼叫 startEarnTab() 啟動 polling + bind listeners。
+     cache-bust v20260525.earn-wave-c — Earn Wave C first stake GUI -->
+<script src="/static/earn-tab.js?v=20260525.earn-wave-c"></script>
+<script>
+// 啟動 5-gate / balance / products / positions / records 首次拉取 + 15s 輪詢
+// + bind submit / refresh / records filter listeners。
+if (typeof startEarnTab === 'function') {
+  startEarnTab();
+} else {
+  console.warn('[tab-earn] earn-tab.js not loaded — Earn tab inactive');
+}
+</script>
+
+</body>
+</html>

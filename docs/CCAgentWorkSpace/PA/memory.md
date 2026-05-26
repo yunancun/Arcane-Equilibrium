@@ -6176,3 +6176,41 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 **Confidence**: HIGH for Option C choice + 3 LOW closure + E1 IMPL stays. MEDIUM for Sprint 2 baseline weights 0.4/0.3/0.3 (pragmatic baseline pending QC empirical arbitration W14.5).
 
 **16/16 + 9/9 + hard boundary 0 touch** maintained per W2-E-R3 §7 + amend §4.3.
+
+---
+
+## 2026-05-25 — Earn first stake GUI design spec (Sprint 1B Earn Wave C carry-over「GUI scope 仲裁」)
+
+**Trigger**: operator 拍板 Earn first stake 上線 (Layer 1 Bybit Earn-only mainnet key + GUI 同時 IMPL);Stage 0R Earn variant spec §7.10 line 540-549 只列「GUI Earn governance tab → type-to-confirm $100-200 USDT FlexibleSaving」一行 walkthrough,缺 GUI 位置/UI scope/FastAPI route/5-gate visualization/防誤觸/Stage 0R integration/E1+E1a 分工。
+
+**Decision**:
+1. **GUI 位置 = 新建 `tab-earn.html`** (group='governance');拒絕 (B) governance tab 加 section (LOC 觸 hard cap) + 拒絕 (C) live tab 加 section (語意混淆)。
+2. **7 sections scope**:header / balance / 5-gate panel / products list / stake form / positions / records;~680 LOC < 800 review attention threshold。
+3. **FastAPI routes 6 endpoint**:`GET balance/products/preflight/positions/records` + `POST stake`;`/preflight` 一次性回 5-gate + Stage 0R status。
+4. **5-gate UI = 5 light** (a/b/c/d/e) + integrated Stage 0R status row;對齊 earn_router.rs E-0..E-9 後端 9-gate (5 governance gate + 4 技術 gate)。
+5. **Typed-confirm phrase = `CONFIRM EARN STAKE $<amount> USDT`** 帶 amount 反 muscle memory + 後端再驗;復用 common-modals.js `openTypedConfirmModal`。
+6. **Stage 0R integration = GUI read JSON only;CLI 觸發 harness**;對齊 C10 funding_harvest 範式;3 狀態 PENDING/PASS/FAIL with submit button gate。
+7. **E1 + E1a parallel**:E1 = Python FastAPI earn_routes.py (5-7 hr);E1a = Vanilla JS tab-earn.html + earn-tab.js (7-11 hr);+ E1 Stage 0R harness 第三條並行 (4-6 hr per Stage 0R spec §7.4);walltime = max ≈ 7-11 hr。
+
+**5 AC**:AC-1 7 sections render / AC-2 5-gate UI align / AC-3 typed-confirm enforce 雙端 / AC-4 Stage 0R 3 狀態 / AC-5 V100 row real-run verify (deferred to operator)。
+
+**6 OQ**:(1) governance group vs 新 'earn' group [建議 governance] (2) stake/redeem variant defer Sprint 5+ (3) phrase 帶 amount (4) Stage 0R CLI only (5) positions/records Sprint 1B IMPL (6) stake sync wait Bybit ack。
+
+**E2 重點 3 點**: (a) 後端 typed-confirm 驗 case-sensitive 不可漏 (b) Stage 0R JSON 防偽 (age + 可選 hash) 不可只看 file 存在 (c) 5-gate UI 5 light ↔ 後端 9-gate 對映精確 (避免 UI all green 但 E-0 unwired silent)。
+
+**Files**:
+- Spec: `docs/execution_plan/2026-05-25--earn_first_stake_gui_design_spec.md` (776 lines)
+- Report: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-25--earn_first_stake_gui_design.md`
+- Operator mirror: `docs/CCAgentWorkSpace/Operator/2026-05-25--earn_first_stake_gui_design.md`
+
+**對齊**:
+- Stage 0R Earn variant spec §5 5-gate inheritance + §7.10 operator workflow + §8 8 OQ
+- earn_governance §2 (5-gate) + §3.2 (EarnIntentPayload schema)
+- earn_router.rs 9-gate E-0..E-9 IMPL contract
+- gui-style-guide skill (Vanilla JS / README-listed tab / 中文界面 / a11y)
+- ux-checklist skill (5 維度 / 防誤等級 4 / 8 anti-pattern 全防護)
+- common-modals.js `openTypedConfirmModal` 既有 API (phrase + actor + impact + rollback)
+- governance_routes._require_operator_role + live_session_routes.py dual gate 範式
+
+**16/16 + 9/9 + hard boundary 0 touch** 維持;`live_execution_allowed` / `max_retries=0` / `OPENCLAW_ALLOW_MAINNET=1` / `live_reserved` / `authorization.json` 5 邊界 0 觸碰 (本 spec 是 GUI 設計,直接走既有 fail-closed 機制不繞)。
+
