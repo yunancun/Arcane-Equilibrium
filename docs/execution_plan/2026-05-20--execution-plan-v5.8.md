@@ -634,6 +634,8 @@ V116 (M13 asset/venue) — Sprint 1A-δ reserve frontmatter only
 | **Y1 buffer** | — | — | **38.5-44 (5.5w)** | cross-Sprint collision + cross-ADR re-amendment + 13 prerequisite emergent | 80-120 |
 | **Y1 Total** | **39 wk** | **37-44 wk** | **44-55 wk** | | **3,500-5,200 hr** |
 
+**Sprint 2 Alpha SSOT (2026-05-26 addendum)**：Sprint 2 `Alpha Tournament` 不再只是本表的 implicit slot；執行、候選池、評分、淘汰、Stage output 與治理讀取順序以 `docs/execution_plan/2026-05-26--alpha_tournament_ssot_spec.md` 為準。任何後續 agent 觸碰 Sprint 2 alpha work 必先讀該 SSOT + `TODO.md` 最新 P0/P1 狀態。
+
 **vs v5.7 1,275-1,710 hr**: v5.8 ~2.7-3.0x engineering（含補位完整工時）。
 
 **vs v5.8 §3 上方文本 2,780-3,930 hr**: PM 整合上修 +26-32% / +7-11w。原因 = GUI 261-374 hr + TW 450-640 hr + MIT spec 90-140 hr + A3 sign-off 48-53 hr + governance amend 60-90 hr + AI cost reserve $1,344-2,556 Y2 + cross-Sprint collision buffer 80-120 hr。
@@ -990,6 +992,7 @@ Operator stated: "Operator 可能忘記，可能犯錯。我們追求 APR 的最
 - **新 ADR proposed (2026-05-25)**: ADR-0046 basis observation vs execution split (funding_arb scope, BB+QC spec; Sprint 1A-δ/ε 24-30 hr 平行 IMPL)
 - **drift audit 終稿**: `docs/audits/2026-05-25--v1_to_v58_full_consolidation_drift.md` (V1→V5.8 全鏈 plan/audit 整合 + 8 條報告錯誤修正 + SSH empirical verify + 10 條剩餘 unresolved + 2 AMD drafts + canary [67]→[80] rename)
 - **canary [67]→[80] rename**: per operator 2026-05-25 directive avoid passive_wait [67] collision; 4 files modified, 16 tests collected PASS, pending operator commit
+- **Alpha Tournament SSOT (2026-05-26)**: `docs/execution_plan/2026-05-26--alpha_tournament_ssot_spec.md`（Sprint 2 盈利主線補洞；候選池 / scoring contract / Stage output / 最小前置 / 跨文檔讀取順序）
 
 ---
 

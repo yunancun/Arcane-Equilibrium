@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-25
 **Author**: PA（Project Architect）
-**Source SoT**: v5.8 主檔 `srv/docs/execution_plan/2026-05-20--execution-plan-v5.8.md` §2 + §4 line 624 + v5.7 §8 line 282
+**Source SoT**: v5.8 主檔 `srv/docs/execution_plan/2026-05-20--execution-plan-v5.8.md` §2 + §4 line 624 + v5.7 §8 line 282；**Alpha Tournament SSOT**: `srv/docs/execution_plan/2026-05-26--alpha_tournament_ssot_spec.md`
 **Predecessor**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-21--v58_dispatch_consolidation.md`（v5.8 13 prerequisite + 16 CRITICAL + 24 HIGH）
 **Day -1 closure**: H-1 atomic deploy（PID 598276 SHA b005bb00）✅ + H-2 cron 10/13（4 HIGH/MED + 6 SHOULD）✅ + EA-2 N/A confirmed ✅ + EA-4 P0-EDGE-1 AC-A amend ✅ + 4 false-positive declassify ✅ + M-4 hygiene SOP land ✅
 **Format**: PnL-led per `feedback_pnl_priority_over_governance.md`
@@ -16,7 +16,7 @@
 
 | Stream | Spec readiness | Schema readiness | Cron readiness | Verdict |
 |---|---|---|---|---|
-| **A: Alpha Tournament** | 🟡 implicit module 缺 single PA spec block | ✅ V101/V102/V103 land | ✅ ml_training daily | DESIGN PHASE 1 必先 land |
+| **A: Alpha Tournament** | ✅ Alpha SSOT landed 2026-05-26；candidate-level PA/MIT spec still required | ✅ V101/V102/V103 land | ✅ ml_training daily | READY FOR CANDIDATE-SPEC → IMPL |
 | **B: M4 pattern miner stage 1** | ✅ v5.8 §2.M4 line 158-184 + V103 EXTEND land | ✅ V103 hypotheses + V103 EXTEND land | ✅ edge_label_backfill */30min | READY |
 | **C: M10 Tier A productionize** | ✅ v5.8 §2.M10 line 357-388 | 🔴 V111 NOT LANDED | ✅ ref21_symbol_universe @20 | PARTIAL — V111 spec→IMPL 同 sprint |
 | **D: M8 read-only schema land** | ✅ v5.8 §2.M8 line 279-314 + ADR-0036 spec'd | 🔴 V109 NOT LANDED | ✅ feature_baseline @04:41 | READY — schema-only Sprint 2 |
@@ -24,13 +24,13 @@
 
 **核心結論**：
 - **Stream B + D + E** Day 0 即可派（spec + schema/SQL ready）；總 ~150-200 hr / 5-7 並行 sub-agent Wave 1
-- **Stream A** 需 Phase 1 PA design 仲裁 scope（5 textbook retry vs 新 source vs portfolio attribution）—> ~10-15 hr / 2-3 並行 sub-agent；Wave 1 期間並行 design + Wave 2 才 IMPL
+- **Stream A** Alpha Tournament SSOT 已補（2026-05-26）；不再是 implicit scope。Wave 1 仍需 PA/MIT per-candidate spec（A1 funding short-only v2 + A2 liquidation cascade fade 優先；A3 BTC/ETH pairs DRAFT；A4 C13 / A5 token unlock defer）後 Wave 2 才 IMPL
 - **Stream C** V111 schema + cron + Optuna IMPL 同 sprint，依賴 §1A-γ V111 spec land；建議 D+3 V111 schema spec + Day 0 起 Optuna 後端 IMPL（不依賴 V111）
 
 **total hr estimate**：240-380 hr / Sprint 2 wall-clock 3w（W12-14.5 per v5.8 §4 CR-13 整合 11.5-14.5w 真實 calendar）
 
 **3 條 PM decision point 待拍**（§9）：
-1. Stream A Alpha Tournament scope 仲裁（5 textbook retry vs 新 source vs portfolio attribution 三選 / 順序）
+1. Stream A Alpha Tournament scope 仲裁 — **superseded by 2026-05-26 Alpha SSOT**：A1+A2 Sprint 2 primary；A3 DRAFT/stats-first；A4/A5 defer unless data gate passes
 2. Stream C V111 spec land cadence（Sprint 2 內或 Sprint 1A-γ 推遲）
 3. Sprint 2 close_maker_audit P1 missing table land 順序（Sprint 1B follow-up 或 Sprint 2 cross-cutting）
 
@@ -49,7 +49,7 @@ per memory `project_multi_session_memory_race`（2026-04-23 教訓 + v5.7 12 pre
 
 | Wave 1 Track | Sub-agent | 角色 | Hours | Stream | Dependency |
 |---|---|---|---|---|---|
-| W1-A | sa-1 | **PA spec** Stream A Alpha Tournament scope 仲裁 + 5 candidate alpha source 過篩 | 10-15 | A | PM #1 decision |
+| W1-A | sa-1 | **PA + MIT spec** Stream A candidate-level spec + Alpha SSOT §3 candidate pre-screen（A1/A2 primary；A3 DRAFT；A4/A5 defer） | 10-15 | A | Alpha SSOT §3-§8 |
 | W1-B | sa-2 | **MIT** Stream B M4 pattern miner stage 1 algorithm spec（cross-correlation + event-window）+ leakage protocol（per CR-6） | 15-20 | B | V103 EXTEND land ✅ |
 | W1-C | sa-3 | **E1 IMPL** Stream B M4 pattern miner Rust+Python hybrid scaffold + DRAFT writeback to V103 | 30-40 | B | W1-B spec land |
 | W1-D | sa-4 | **MIT spec + E1 IMPL** Stream C M10 Tier A Optuna walk-forward cron skeleton（後端，不依賴 V111） | 20-30 | C | ml_training cron ✅ |
@@ -63,7 +63,7 @@ per memory `project_multi_session_memory_race`（2026-04-23 教訓 + v5.7 12 pre
 
 | Wave 2 Track | Sub-agent | 角色 | Hours | Stream | Dependency |
 |---|---|---|---|---|---|
-| W2-A | sa-1 | **PA + MIT** Stream A: 5-6 新 alpha source pre-spec 過 §10 P0 precondition 對照 | 20-30 | A | W1-A scope ⇒ |
+| W2-A | sa-1 | **PA + MIT** Stream A: A1/A2 implementation spec + scoring/gate acceptance packet against Alpha SSOT §5-§10 | 20-30 | A | W1-A candidate spec |
 | W2-B | sa-2 | **E1 IMPL** Stream A: alpha_tournament_runner scaffold（Rust + Python harness）+ 14d demo data 累積 hook | 30-40 | A | W2-A spec |
 | W2-C | sa-3 | **E1 IMPL** Stream C M10 Tier A V111 schema land + Optuna cron 接線 V111 config table | 15-20 | C | V111 spec land (PM #2) |
 | W2-D | sa-4 | **E1 IMPL** Stream D V109 anomaly_events read-only writer skeleton（Sprint 3 detector 不在 scope） | 10-15 | D | W1-F V109 land |

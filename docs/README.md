@@ -159,6 +159,12 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 ## 文档索引 (Document Index)
 
+### 2026-05-26 Sprint 2 Alpha Tournament SSOT
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-05-26--alpha_tournament_ssot_spec.md` | ARCH-05 / Sprint 2 Alpha Tournament SSOT：補齊 v5.8 §4 implicit Alpha slot，固定讀取順序、候選池 A0-A5/B0、scoring contract、minimum evidence gates、Stage output、最小前置、role chain、跨文檔指針；文檔補丁不授權任何新 strategy、不放鬆 P0/Stage/5-gate。|
+
 ### 2026-05-23 Sprint 1B late §4.1.1 + Sprint 5+ §4.2.1/§4.3.1 — Stage A→E + PA-DRIFT-6 catch+fix（Sprint 4+ §4.1.1/§4.2.1/§4.3.1 三條 carry-over closure）
 
 | 文件 | 内容 |
