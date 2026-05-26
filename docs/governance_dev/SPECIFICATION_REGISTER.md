@@ -209,7 +209,7 @@
 | Active OPS-X prerequisites | 1 |
 | Reserved specifications | 0 |
 | Active REF specifications | 19 |
-| Active ARCH specifications | 3 (+ 1 Proposed: ARCH-04) |
+| Active ARCH specifications | 4 |
 | Active AUDIT entries | 13 |
 | Total code references | 335+ |
 | Implementing modules | 22 |

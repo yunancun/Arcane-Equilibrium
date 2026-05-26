@@ -1,9 +1,17 @@
 # Monetization Demand Test Spec — Stream 2 Parallel Sprint
 
+> **⚠️ SUPERSEDED 2026-05-25 by [AMD-2026-05-25-01 Commercialization Boundary: Exchange-Native Only](../governance_dev/amendments/2026-05-25--AMD-2026-05-25-01-commercialization-exchange-native-only.md)**
+>
+> 本 spec 全部 scope (Telegram subscription / Substack/Beehiiv newsletter / Stripe pre-order $1 reservation / Cloudflare Pages landing / 玄衡 Signal hero) 屬「交易所提供功能外的商業化模式」，已被 AMD-25-01 §3.1 explicit retire。本文件保留作為 historical evidence + governance lineage，**不再 active dispatch**。
+>
+> Retire 範圍對齊：IP sale (per AMD-2026-05-20-05) + Telegram subscription + Substack + codebase sale + signal feed + MEV/DEX + Stripe pre-order + Cloudflare landing。Retain (Bybit + Binance 平台官方)：Copy Trading / Earn / Master Trader / Competitions / referral implicit。
+>
+> Future 重啟須走 AMD-25-01 amendment chain，不繞本 spec。
+
 **日期**: 2026-05-20
-**對應 AMD**: AMD-2026-05-20-04 (v4.3 commercial evidence sprint)
-**Status**: SPEC READY — N+1 W1 launch concurrent with Stream 1
-**Owner**: Operator (primary) + E1a (tech setup) + legal friend (ToS review, 0.5 hr)
+**對應 AMD**: AMD-2026-05-20-04 (v4.3 commercial evidence sprint) — **superseded by AMD-2026-05-25-01**
+**Status**: ~~SPEC READY — N+1 W1 launch concurrent with Stream 1~~ → **SUPERSEDED 2026-05-25**
+**Owner**: Operator (primary) + E1a (tech setup) + legal friend (ToS review, 0.5 hr) — N/A after supersede
 
 ---
 
