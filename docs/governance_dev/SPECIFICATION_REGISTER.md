@@ -117,6 +117,7 @@
 | ARCH-02 | OpenClaw Control Plane Repositioning | docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md | ✅ Active | OpenClaw is communication/control-plane/Gateway/proposal relay only, not trading conductor and not second GUI |
 | ARCH-03 | Agent Decision Spine Architecture | docs/architecture/multi_agent_rework_2026-05-05/ENGINEERING_PLAN.md<br>docs/architecture/multi_agent_rework_2026-05-05/2026-05-07--mag030_agent_spine_rust_module_design.md | ✅ Active | Typed StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease/idempotency -> ExecutionReport lineage |
 | ARCH-04 | Alpha Source Architecture Upgrade | docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_loss_architectural_root_cause_redesign.md<br>docs/adr/0021-alpha-source-architecture-upgrade.md<br>docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md | 🟠 Proposed | R-1..R-5 architectural amendments (AlphaSurface Bundle / Strategist scope / Hypothesis Pipeline / Per-alpha-source Live Promotion / Spec-as-Code). operator partial accept: W-AUDIT-8a SPEC + W-AUDIT-9 graduated canary started. Supersedes LG-X-02..05 system-wide promotion design (baseline IMPL still required as substrate). |
+| ARCH-05 | Alpha Tournament SSOT | docs/execution_plan/2026-05-26--alpha_tournament_ssot_spec.md | ✅ Active / IMPL-PENDING | Sprint 2 profit-spine SSOT. Fills v5.8 implicit Alpha Tournament slot with required read order, candidate pool, fee-adjusted scoring, minimum evidence gates, Stage output lanes, role chain, and cross-document pointers. Does not grant trading authority or relax Stage/5-gate constraints. |
 
 ### Architecture Decision Records (ADR-0034 ~ ADR-0045)
 
@@ -209,7 +210,7 @@
 | Active OPS-X prerequisites | 1 |
 | Reserved specifications | 0 |
 | Active REF specifications | 19 |
-| Active ARCH specifications | 4 |
+| Active ARCH specifications | 5 |
 | Active AUDIT entries | 13 |
 | Total code references | 335+ |
 | Implementing modules | 22 |

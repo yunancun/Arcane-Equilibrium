@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-05-26 10:45 CEST
+- added `docs/execution_plan/2026-05-26--alpha_tournament_ssot_spec.md` as the Sprint 2 Alpha Tournament SSOT
+- synchronized pointers across v5.8, Sprint 2 dispatch packet, TODO, docs README, and SPECIFICATION_REGISTER so future agents do not miss governance boundaries
+- no code/runtime change; next work is PA/MIT candidate-level specs for funding short-only v2 and liquidation cascade fade before any strategy implementation
+
 2026-05-16 22:19 CEST
 - completed role profile/memory hygiene across `docs/CCAgentWorkSpace/*`
 - added `docs/agents/role-profile-memory-standard.md`, linked it from context loading/docs index, and made every role profile point at the shared contract
