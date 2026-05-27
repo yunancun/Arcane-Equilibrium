@@ -241,6 +241,7 @@ pub struct AlphaSurface<'a> {
     // Tier 3 — Microstructure（新一等對象）
     pub orderflow: Option<&'a OrderflowFeatures>,           // microprice, queue imbalance from L50 (or L200), large-trade tape
     pub liquidation_pulse: Option<&'a LiquidationPulse>,    // requires_revival flag — handler 已 4 weeks ago deleted（見 BB v3 NEW-6）
+    // > **CORRECTION 2026-05-27**: 上一行 inline 注釋為 FALSE CLAIM，retract — `allLiquidation` WS handler + `liquidation_pulse.rs` 已於 2026-05-18 commit `0e8a8ae8` (W-AUDIT-8a C1-LIQ-WRITER) ACTIVE revive；`requires_revival` flag 不再需要，`liquidation_pulse` 為現役 alpha source（不再 dormant）。原文保留作 audit trail，禁止 IMPL 引用「4 weeks ago deleted」措辭。Source: drift audit `docs/audits/2026-05-25--v1_to_v58_full_consolidation_drift.md` §11.3 J + §11.7 #4。
 
     // Tier 4 — 信息流（從 Scout 真實接入）
     pub event_alerts: &'a [EventAlert],
@@ -257,6 +258,8 @@ pub enum AlphaSourceTag {
 **Bybit V5 真實 levels 對齊**（BB v3 NEW-5）：Bybit V5 WS linear orderbook 真實 depth levels = `1 / 50 / 200 / 1000`，**沒有 L25**。`OrderflowFeatures` 的 microprice / queue imbalance / orderbook imbalance 必須從 `orderbook.50.{symbol}`（已預設訂閱）抽取；如需 deeper book context（large order resting、queue depth tail）改 `orderbook.200.{symbol}`，禁止任何「L25」字眼進 spec / IMPL / migration / healthcheck。
 
 **`liquidation_pulse` 復活前置條件**（BB v3 NEW-6）：OpenClaw 於 2026-04-06 已刪除 `allLiquidation` WS handler（字典手冊 line 990 證明）。`market.liquidations` 表雖 reserved 保留，但 R-1 IMPL 必須**先付 +1 sprint 重接 WS handler + 重啟 writer**，期間此 alpha source 必須以 `requires_revival: true` flag 標記為 dormant；策略 ctor 階段 declare `LiquidationCascade` 的，在 handler 復活前 surface 永遠 `None`，而不是 stub mock 數據。
+
+> **CORRECTION 2026-05-27**: 上段「2026-04-06 已刪除 `allLiquidation` WS handler」為 FALSE CLAIM，retract — W-AUDIT-8a C1-LIQ-WRITER 2026-05-18 commit `0e8a8ae8` 已 land `rust/openclaw_engine/src/panel_aggregator/liquidation_pulse.rs` provider + 接線 `tick_pipeline/on_tick/step_4_5_dispatch.rs` + `AlphaSurface.liquidation_pulse` wire + healthcheck `helper_scripts/canary/healthchecks/80_liquidation_pulse_freshness.py` (canary rename [67]→[80] in drift audit §11.5)。`requires_revival: true` flag + 「+1 sprint 重接 WS handler」前置條件已不適用，`liquidation_pulse` 現為 ACTIVE alpha source；策略 ctor declare `LiquidationCascade` 的 surface 應由 freshness + topic age + parser-error rate gate 控制（W-AUDIT-8a Wave 1 已 MERGE），非 `requires_revival` flag。原文保留作 audit trail。Source: drift audit `docs/audits/2026-05-25--v1_to_v58_full_consolidation_drift.md` §11.3 J + §11.7 #4 + BB push back evidence in `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-18--w_audit_8a_phase_b_c_d_worktree_decomposition.md` line 31/56。
 
 **`Basis` execution 邊界**（BB v3 NEW-8）：`basis_curve` (perp - spot) 在 Bybit demo 環境**僅支援 observation**（demo 無 spot lending execution capability，與 funding_arb v2 retire 同因 ADR-0018）。R-1 spec 必須明文「`basis = observation-only signal until mainnet`」，並對 `Basis` tag 的策略加 `requires_spot_capability: true` flag — 在 demo 環境下任何吃 `Basis` tag 的策略產生的 `StrategyAction` **必須 fail-closed**，不可進 IntentProcessor；只有 mainnet + 真實 spot account 接通後才解封 execution path。否則跟 funding_arb v2 同陷阱（demo edge sample 全是 paper-grade，graduate live 時必死）。
 

@@ -1,5 +1,68 @@
 # PA Memory — 工作記憶
 
+## P0-LG-3 AC drift correction + V104 spec scaffold（2026-05-26）
+
+**觸發**：2026-05-26 §1 4 P0 並行 Pass A verify 揭 TODO §1 行 48 P0-LG-3 AC 3 處 drift；operator 指派 PA spec patch + V### renumber + V104 scaffold + TODO reframe text。
+
+**3 drift fact**：
+1. spec v2 §2.4A 「fee_source tick-time consumer」全 docs grep 0 hit（NOT-FOUND）
+2. V099 已被 `autonomy_level_config` 預留（2026-05-22 spec），V100 已 land `m4_hypothesis_base_table`（2026-05-23），均與 LG-3 無關
+3. TODO §15 #1「LG-3 ↔ funding_arb」FALSE — LG-3 是 4 textbook + C10 共用 supervised live activation gate；funding_arb V2 retired 不影響
+
+**Linux PG empirical 2026-05-27**（dispatch 提供）：
+- `_sqlx_migrations` max=112 / count=102
+- V099-V103 全占；V104 / V105 / V108 / V110 / V111 free
+- V104 = next free hole 後第一個連續號 → 分派 LG-3 audit migration
+
+**3 deliverables**：
+
+1. **Spec v2 patch**（`2026-05-11--lg_3_spec_v2_final.md`，1768→1851 行，+83 行 / ~2800 字）
+   - 新增 §2026-05-26 AMENDMENT（A1-A6 共 6 段）
+   - A1: V### 號漂移事實表（V094/V099/V100 占用對照 + V104 新分派）
+   - A2: dispatch trigger condition refresh（移除 funding_arb / fee_source / V099/V100 false claim）
+   - A3: dispatch readiness checklist 對齊 V104（含 grep gate `V094\|V099`）
+   - A4: ETA 預估 0 變化（~2026-05-29 派 / ~2026-06-10~12 closure / ~2026-06-22~30 supervised live）
+   - A5: spec v2 章節 1-17 不動之保證（3-review APPROVE baseline 保留）
+   - A6: 配套交付物索引
+
+2. **V104 migration spec scaffold**（`srv/docs/execution_plan/specs/2026-05-26--v104-lg3-supervised-live-audit-migration.md`，378 行 / 10 章節）
+   - §1 Migration file identity（V104 號 + sqlx checksum 治理 對齊 P0 hash drift 教訓）
+   - §2 Schema spec（21 column allowlist + 4 CHECK constraint + TimescaleDB hypertable policy 引 V107 樣板）
+   - §3 Guard A/B/C（A 三段：prereq + 21-col check + forbidden column 反模式 per MIT MUST-5；B N/A；C enum + hypertable + index 完整性）
+   - §4 Linux PG empirical dry-run plan（4 step 含 9 query；9/9 PASS gate）
+   - §5 sqlx checksum 治理（對齊 `project_2026_05_02_p0_sqlx_hash_drift` 教訓）
+   - §6 Non-training surface invariant（E3 grep guard 規則對齊 spec v2 §4.4B）
+   - §7 V094 字眼 replacement 規則（V094 → V104 + grep gate）
+   - §8 Dependency & ordering（V054+V035 prereq + Wave 2.4.A T1+T4 並行）
+   - §9 Risk assessment（中；TimescaleDB 既有樣板 100% 對齊）
+   - §10 PA sign-off + next step
+
+3. **TODO §1 行 48 reframe text**（提供主會話 copy-paste，197 字）
+
+**v56 P0 Layer B observation gate 預估 trigger date**：~2026-05-29 UTC
+- per `2026-05-19--lg_3_wave_2_4_dispatch_plan_refresh.md` §4.2 Candidate (b)
+- v56 P0 cycle = Phase 1-8 ~10d → Phase 9 Layer B deploy + 7d observation
+- 2026-05-19 + 10d = ~2026-05-29 Layer B 啟動；+24h gate = ~2026-05-30 LG-3 Wave 2.4.A 可派
+- 真實滑動由 v56 P0 IMPL/review/QA 進度決定（PM 監看 `P0-ENGINE-HALTSESSION-STUCK-FIX` cycle 狀態）
+
+**Dispatch readiness verdict**：**READY post-amendment**（待 2 外部 gate）
+- ✅ V104 number 確認可用（Linux PG empirical 2026-05-27 確認）
+- ✅ Spec v2 patch land（1851 行）
+- ✅ V104 spec scaffold ship（378 行）
+- ⏳ External gate 1：v56 P0 Layer B deploy + 24h（~2026-05-29 預估）
+- ⏳ External gate 2：MIT 走 V104 spec §4 4-step dry-run → 9/9 PASS sign-off
+
+**教訓**：
+- PA spec ship 後 14 天若未派 IMPL，V### 號可能被其他 spec 預留搶 — 派 IMPL 前必 Linux PG `_sqlx_migrations` + `srv/docs/execution_plan/specs/` ls 重驗 V### 號
+- TODO 行內 AC wording 修改需 PA 自驗 grep / SSOT 來源，不接受其他 sub-agent 提的 AC 直接 paste
+- V### renumber 是 IMPL 階段事務，不必 redo 3-review；spec v2 章節 1-17 V094 字眼可保留（V094 → V104 在 IMPL prompt 1:1 替換）
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_3_spec_v2_final.md`（含 2026-05-26 AMENDMENT）+ `srv/docs/execution_plan/specs/2026-05-26--v104-lg3-supervised-live-audit-migration.md`
+
+**16 root principles compliance**：A 級 16/16；§1 / §3 / §4 / §6 / §8 / §11 directly relevant（LG-3 = supervised live activation gate；audit table = §8 trade reconstructable；7-state SM = §3 AI → Lease → check → 執行 鏈條 supervised-live 強化）。
+
+---
+
 ## ALT bucket "28h+ velocity stall" RCA reframe（2026-05-25 PM dispatch from W2-F NEW QA-1）
 
 **觸發**：QA W2-F report (`fbfbd184`) NEW QA-1 MEDIUM 宣稱「ALT bucket 28h+ 0 close_maker_attempt」+ 「0.27→0.11 attempts/hr 跌至 stall」
@@ -6242,3 +6305,41 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 - escalation timeout 5 個數字（30min / 1h / 5min / 7d / 0 retry）是 operator 必背的；不靠 search
 - AMD-2026-05-21-01 v2 §5.1-§5.3 + SM-04 RiskEvent::NotificationFailsafeTimeout 與本 runbook escalation L3→L4→L5 完全對齊（不重造輪子）
 - ratification checklist 12 項全 sign-off 必收齊；任 1 缺 → ABORT
+
+## 2026-05-26 P1-OPS-2-SECRET-SPLIT design spec — split OPENCLAW_IPC_SECRET dual-purpose (E3-CRIT-1)
+
+**任務**：起草 design spec 把 OPENCLAW_IPC_SECRET 拆成 IPC HMAC + live-auth signing 兩獨立 key。E3 2026-05-26 audit 揭 CRITICAL design defect — 同 key 同時簽 IPC commands + authorization.json，rotation 結構性 fragile，阻 OPS-2 runbook 撰寫 + Sprint 4 first Live W18-21。
+
+**產出**：`docs/execution_plan/specs/2026-05-26--p1-ops-2-secret-split-design.md`（484 行 12 章）
+
+**核心設計**：
+1. 新 env `OPENCLAW_LIVE_AUTH_SIGNING_KEY` + `OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE` companion，預設 `$SECRETS_ROOT/environment_files/live_auth_signing_key.txt`
+2. Phase 1 D+0..D+14 — fallback OPENCLAW_IPC_SECRET if new env unset + WARN log；restart_all 首次 boot seed same material from ipc_secret.txt（避免現存 authorization.json 立即失效）
+3. Phase 2 D+14 — 移除 fallback；fail-closed 強化（main.rs 新增第二 panic block check live_auth key）
+4. Rotation cadence: IPC HMAC 180d / live-auth 90d（不同 blast radius）
+
+**5-gate impact**：gate #4 + #5 受影響，**兩者皆強化非弱化**。Gate #4 多一個獨立 file 邊界；gate #5 signing key 與 IPC key 隔離。
+
+**Hidden risk PA 補（E3 audit 漏 5 條）**：
+1. **HIGH** — IPC 客戶端腳本誤遷移（grep `OPENCLAW_IPC_SECRET` 8 hits 但只 3 個是 live signing；其他 5 個是 IPC 客戶端域如 optuna_optimizer / replay_earn_preflight / edge_p2_flip_dry_run / connection.rs / main.rs panic）
+2. **MEDIUM** — replay_earn_preflight.py 同名 false-positive（cron 簽 manifest 用同 env var 但獨立信任域；E1 看 grep 結果可能誤遷移）
+3. **LOW** — Cross-platform user-home assumption（restart_all seed 不能硬編碼 /home/ncyu）
+4. **LOW** — Phase 1 seed 與 OPS-2 runbook §3 Initial Deployment "from urandom" 衝突（runbook 須加 note 標 migration-only）
+5. **LOW-MEDIUM** — alert rule 字串 break change `ipc_secret_missing` → `live_auth_signing_key_missing`（grep repo 0 hit beyond test，但 operator 個人 Grafana dashboard 可能引用）
+
+**E1 IMPL 範圍**：~125 LOC 變更 + ~40 LOC 新 test；可拆 3 並行 sub-agent（E1-A Rust / E1-B Python / E1-C Bash，檔案互不重疊）。預估 active work 10-14 hours + 14d soak gate。
+
+**E2 重點 3 項**：
+1. AuthError enum rename 影響 alert rule 字串（grep 確認 0 caller 用舊字串）
+2. restart_all seed `[ ! -f live_auth_signing_key.txt ]` 條件嚴；不可覆蓋已 rotated 的 key
+3. Phase 1 fallback WARN 不 flood（≤1/h，不是每 sign call 都噴；watcher 5s poll → 7200 logs/day 風險）
+
+**CC review trigger**：E1 IMPL DONE + E4 regression GREEN（不接受 E4 取代 CC，per `feedback_impl_done_adversarial_review`），CC 核 16-root-principles + 9 安全不變量 + 5 hard gates。
+
+**Scope guard 守住**：不碰 POSTGRES_PASSWORD / OPENCLAW_API_TOKEN / Bybit api_key / AI provider keys / cron drift / audit endpoint / gitleaks — 全列為 E3 已記 P2 follow-up，本 spec scope creep 直接 reject。
+
+**教訓**：
+- E3 audit 列出 3 個 call site 但 grep 實際 8 個（其中 5 個是 IPC 客戶端域）— PA 必親 grep 全 repo 而不採信 audit report 的 file list，否則 E1 IMPL 誤遷移破 IPC handshake
+- Phase 1 seed-same-material 是合理 backward-compat shortcut；但必在 runbook §3 標 migration-only 否則違反 OPS-2 "from urandom" 不變量
+- AuthError enum string `auth_error_kind` 是 alert rule contract — rename 屬 break change，須在 E1 packet 提醒 operator 確認 Grafana dashboard
+- Phase 2 panic block 必須 mirror 既有 IPC panic 位置（main.rs:399 區塊內），不能晚於 watcher spawn 留 dangling tokio task
