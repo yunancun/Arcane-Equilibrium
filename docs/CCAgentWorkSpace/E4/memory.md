@@ -4665,3 +4665,45 @@ W1-C M4 與 V109 解耦（per E2 §9.2）— V109 schema 純 hypertable land；W
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-25--fresh_e4_sprint_2_wave_2_complete_regression.md`
+
+## 2026-05-27 P0-OPS-4 GAP B+D round 1+2 regression (commits 1392c9e1 + 261d3956)
+
+### IMPL scope
+- 3 cron Bash (install / trading_ai_pg_dump / verify) + V113 migration + post_restore_validation.sql 9 query
+- check_pg_dump_freshness.py 616 LOC 7 sub-check + passive_wait_healthcheck/ wire +127 LOC
+- pg_restore_drill_sop.md 572 LOC + MIT template 239 LOC
+- PA spec amendment 449→695 行
+- 16 files commit chain total
+
+### Linux empirical
+- bash -n 3/3 PASS
+- check_pg_dump_freshness.py --status: verdict=INSUFFICIENT_SAMPLE (7/7 fail-soft), EXIT=0, SLA 67ms
+- DRY-RUN install OPENCLAW_BACKUP_CRON_APPLY=0: 預覽正確 + 預檢提示完整 EXIT=0
+- V113 BEGIN/ROLLBACK 內含 COMMIT 不可包；冪等 PASS（二跑 NOTICE-skip）
+- V113 直接 psql 跑 → _sqlx_migrations 缺 row（風險自動回正 via 下次 engine restart sqlx::migrate）
+- passive_wait_healthcheck.py --quiet 整合 PASS; [80] 行出現 SUMMARY 前; 不破其他 [1]-[79]
+- 9 query post_restore_validation.sql 7/9 PASS, 1/9 FAIL (V099 deployment gap), **1/9 BUG** Q3 column drift
+
+### Test baseline (Linux verified, 兩次跑同綠 non-flaky)
+- control_api_v1 pytest: 3994p/68f/51s (歷史 2555 baseline 已遠超，0 regression from this IMPL)
+- Rust engine lib: 3469p/0f/1i (歷史 1980 baseline 已遠超，0 touch by IMPL)
+- 0 test file touch（無刪測試遮蓋反模式）
+
+### BUG-1 (BLOCKER 必修)
+`helper_scripts/db/post_restore_validation.sql` Q3 references `learning.lease_transitions.ts` 但表只有 `ts_ms` (bigint) + `created_at` (timestamptz)。Line 95 + 284 兩處 column `ts` 不存在。Script 第 40 行 `\set ON_ERROR_STOP on` → drill day Q3 ERROR abort 整 9 query gate。Fix: `ts` → `created_at`。
+
+### Carry-over (E1 round 3)
+1. 743 LOC production code 0 unit test — 違反 E4 profile「新 E1 改動必須有對應測試」
+2. V099 deploy 後重驗 Q1 PASS (deployment dep, not bug)
+
+### Verdict
+**YELLOW** — 14 of 15 acceptance criteria GREEN; 1 BUG (Q3 column drift, 5min fix) + 2 carry-over (governance test gap + V099 dep)
+
+### Lessons
+1. **V113 內含 COMMIT 是 by-design race-free pattern (鏡 V053/V098)，但 dry-run -c ROLLBACK 對內部 COMMIT 無效**。Operator 真實 deploy 必走 sqlx route 而非 psql 直跑（避 _sqlx_migrations drift）；本 case V113 idempotency guard 完備所以可自動回正，但類似 pattern migration 不可假定。
+2. **SQL script 開發必對齊真實 PG schema 而非 spec 字面**。Q3 column drift = spec/code drift；E1 round 2 應 ssh trade-core 跑 `\d learning.lease_transitions` 驗 column name 後寫 SQL（per memory `feedback_v_migration_pg_dry_run`）。
+3. **passive_wait_healthcheck wire-up 對齊 [20] check_h_state_gateway_freshness 既有 pattern 是好實踐**（importlib + sys.path 動態，OPENCLAW_BASE_DIR fallback），證明 E1 round 2 architectural alignment OK。
+4. **Production code 無 unit test 是治理 gap 但不阻 commit**（per E4 profile 規則）；E4 必標 carry-over 給 E1 round 3，不單方面刪/補 production code（profile 邊界）。
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-27--ops_4_gap_bd_e4_regression.md`
