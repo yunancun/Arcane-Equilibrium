@@ -12962,3 +12962,19 @@ Crontab line for PM ssh paste:
 - Linux empirical: standalone --status JSON 全 7 check 正確分類 (FAIL→INSUFFICIENT_SAMPLE bug fix 後), overall verdict=INSUFFICIENT_SAMPLE, exit=0；wrapper invoke summary collapse 成單行帶 sub-check 摘要, exit=0
 - Mac syntax: py_compile 4 file 全綠（check_pg_dump_freshness.py + checks_cron_heartbeat.py + runner.py + __init__.py）；bash -n passive_wait_healthcheck.sh 全綠（無動 .sh）
 - Report: workspace/reports/2026-05-27--ops_4_round_2_e1_pg_dump_healthcheck.md
+
+## 2026-05-27 P0-OPS-4 GAP-D Track A round 3 — 3 MED fix (E2 round 2 returns)
+
+- E2 verdict: APPROVE-WITH-CONDITION (0 BLOCKER / 0 HIGH / 3 MED / 4 LOW)；3 MED 必修，4 LOW 列 P3 backlog defer
+- **MED-1 fix** (`check_pg_dump_freshness.py:483 run()`): 加 `_platform_guard()` 呼叫；之前只 main() 有 guard，wrapper `checks_cron_heartbeat.check_80_pg_dump_freshness` 直接 `mod.run()` 繞過；Mac dev 跑 passive_wait_healthcheck 會 false-FAIL flap（subprocess pg_restore + connect_pg）。Mac empirical verify: `python3 -c "import check_pg_dump_freshness as m; m.run()"` 現 exit 2 with platform refuse 訊息（之前會走 check[6] subprocess BSD pg_restore 出錯）
+- **MED-2 fix** (`check_pg_dump_freshness.py:452 check_7_audit_trail`): n_rows==0 加 heartbeat mtime cross-check；若 heartbeat sentinel <26h（cron 有 fire）但 0 audit row（V113 INSERT silent fail / permission drift / payload jsonb cast bug）→ 升 WARN with diag 訊息（"檢查 trading_ai_pg_dump_cron.log"）；signature 加 optional `paths` + `now_epoch` 參數保持向後相容
+- **MED-3 fix** (`install_pg_dump_cron.sh:71 ENTRY 組裝`): 新增 `_validate_cron_env_value()` Bash function + 7 個 env-var validation call；cron-conflict regex 拒 `%`/space/control/quote/`\$`/backtick + length > 200 abort；exit code 6；理由註釋：cron 不跑 full shell parser，`%` 即使 quoted 仍當 stdin newline，唯一可靠 = validation reject special char
+- **教訓 1**：standalone module 同時被 main() + wrapper 直 import 兩條路徑 invoke 時，平台/環境 guard 必同時放 main() 和 run() 入口；只防 main() 是常見盲區。E2 catch 此問題救一個 Mac dev false-FAIL flap
+- **教訓 2**：silent INSERT-fail mask 的反模式（`|| true` 吞掉 INSERT 錯）需要 cross-check 兩條獨立信號（heartbeat sentinel + DB row count）才能反推 INSERT 是否真的成功；單條 INSUFFICIENT_SAMPLE 無法分辨「cron 從未 fire」vs「cron fire 但寫 silent fail」
+- **教訓 3**：cron 環境變數注入 entry 不能簡單字串 concatenation；`printf %q` 不能解 cron `%` 的 stdin-newline 語義（cron 不跑真 shell parser）；唯一可靠路徑 = strict validation reject + ASCII-only restriction
+- **教訓 4**：bash `[[ "$value" =~ [[:space:]%[:cntrl:]\"\'\\\$\`] ]]` POSIX character class 配合 special char 是最簡 cron env validation pattern；不需 regex 字串字面 escape 多重
+- Mac syntax: `py_compile` + `bash -n` 全綠；Mac fail-fast: standalone --status + wrapper run() 都 exit 2 with platform refuse 訊息
+- Linux empirical: `--status` JSON 7 check 全 INSUFFICIENT_SAMPLE (V113 未 land + cron 未 fire) verdict=INSUFFICIENT_SAMPLE；4 install_pg_dump_cron.sh validation negative tests 全 exit 6（%/space/>200chars）+ clean env 仍 exit 0 DRY-RUN
+- 4 LOW (LOW-1 dead heartbeat resolve / LOW-2 timeout 60→120s / LOW-3 cron lock dir 同步 / LOW-4 report 描述更正) defer 到 P3 quarterly cleanup；4 LOW 中 LOW-1 我看後悔不一併修（heartbeat sentinel resolve 已有了，MED-2 fix 順手就用了，但 task scope 嚴格 = 不擴）
+- LOC delta: check_pg_dump_freshness.py +46 (616→662)；install_pg_dump_cron.sh +35 (97→132)；總 +81 LOC
+- Report: workspace/reports/2026-05-27--ops_4_round_3_e1_3med_fix.md

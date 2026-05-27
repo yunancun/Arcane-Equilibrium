@@ -893,3 +893,24 @@ MIT AUDIT DONE: docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-27--v104_sup
 5. §2.3 explicit RTO/RPO numbers
 
 **邊界遵守**: research only / 不寫 IMPL / 不改 PG schema / 不執行 dump / sub-agent 0 派 / ssh trade-core read-only
+
+
+## 2026-05-27 OPS-4 GAP-B Q3 column drift fix (MIT round 3)
+
+**Trigger**: E4 regression `2026-05-27--ops_4_gap_bd_e4_regression.md` §3.5 BLOCKER-1 BUG — `helper_scripts/db/post_restore_validation.sql` Q3 references `learning.lease_transitions.ts` but column 不存在（only `ts_ms` bigint + `created_at` timestamptz）。`\set ON_ERROR_STOP on` 致 Q3 ERROR abort 整 9-query drill gate。
+
+**Fix**: Line 99-110 (主 block) + Line 289 (AGGREGATE SUMMARY q3 CTE) `ts` → `created_at`。選 `created_at` 非 `to_timestamp(ts_ms/1000)`：fully-typed timestamptz 直接對齊 `NOW() - INTERVAL` 比較；避免 epoch 換算誤差；audit-trail use case 兩者語意可換用（created_at 是 row insertion time，與 ts_ms 落後 0-ms 級同一 INSERT now() default）；補 5-line column note 注釋說明。
+
+**Verify**: SSH live test 通 2 query：
+- Q3 主 block 返 68588 BYPASS transitions/68588 distinct leases (對齊 memory `2026-05-09 v2` 7955 BYPASS/24h steady pattern)
+- AGGREGATE q3 CTE 返 n=1 verdict=WARN (only BYPASS to_state in 24h, runtime obs)
+
+**其他 8 query column drift check**：Linux PG empirical `\d` 11 tables:
+- Q1 system.autonomy_level_config NOT EXISTS (V099 未 land deployment gap, E4 CARRY-OVER-1 不是 BUG)
+- Q2/Q4/Q5/Q6/Q7/Q8/Q9a/Q9b 全 8 query column 對齊真實 schema PASS
+
+**Outcome**: BLOCKER-1 結案；Q1 carry-over 等 V099 / Wave 5 Packet A land；E4 14/15→15/15 GREEN 待 E4 re-verify。
+
+**邊界**: 只改 SQL（MIT scope）；不擴 scope（未補 unit test, E4 round 3 P1 governance carry-over）；不執行 governance_audit_log INSERT。
+
+**Report**: `workspace/reports/2026-05-27--q3_column_drift_fix.md` (本 fix 不寫獨立報告 ≤200 字 inline 即可)

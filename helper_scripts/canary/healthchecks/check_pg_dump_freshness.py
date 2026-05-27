@@ -397,13 +397,28 @@ def check_6_l0_schema_coverage(paths: dict[str, Path]) -> tuple[str, str]:
     )
 
 
-def check_7_audit_trail(max_age_hours: int) -> tuple[str, str]:
+def check_7_audit_trail(
+    max_age_hours: int,
+    paths: dict[str, Path] | None = None,
+    now_epoch: float | None = None,
+) -> tuple[str, str]:
     """[7] last pg_dump_completed event ts < max_age_hours（governance_audit_log）。
 
     V113 未 apply（CHECK constraint 缺 pg_dump_completed 值）→ INSUFFICIENT_SAMPLE-
-    skip with note；cron 從未 fire（0 row）→ INSUFFICIENT_SAMPLE。
+    skip with note；cron 從未 fire（0 row）→ INSUFFICIENT_SAMPLE，但若 heartbeat
+    sentinel mtime < max_age_hours 則升 WARN（解 silent V113-INSERT-fail mask）。
 
     V113 已 apply 且有 row 但 stale → FAIL。
+
+    heartbeat cross-check 由 E2 round 2 review MED-2 指出：
+      原 ``if n_rows == 0: INSUFFICIENT_SAMPLE`` 無法分辨「cron 從未 fire」與
+      「cron fired 但 audit INSERT silent fail（V113 dropped / permission drift /
+      payload jsonb cast fail）」。若 heartbeat 顯示 cron 最近 fire 過卻 0 row，
+      代表 INSERT 失敗被 ``|| true`` 吞掉，必須升 WARN 提醒 operator。
+
+    參數說明：
+      paths / now_epoch optional 是為了向後相容 - 既有 caller（run()）會傳；
+      若呼叫 site 沒傳則退化為「無 heartbeat 線索」純 INSUFFICIENT_SAMPLE。
     """
     try:
         conn = connect_pg()
@@ -450,6 +465,24 @@ def check_7_audit_trail(max_age_hours: int) -> tuple[str, str]:
             n_rows = int(row[1] or 0)
 
             if n_rows == 0:
+                # heartbeat cross-check：若 cron 最近確實 fire 過但 0 row
+                # → INSERT silent fail（V113 drop / permission drift / payload bug）
+                # → 升 WARN 解 mask（E2 round 2 MED-2）
+                heartbeat_mtime = None
+                if paths is not None and now_epoch is not None:
+                    heartbeat_mtime = _stat_mtime(paths["heartbeat"])
+                if heartbeat_mtime is not None and now_epoch is not None:
+                    heartbeat_age_hours = (now_epoch - heartbeat_mtime) / 3600.0
+                    if heartbeat_age_hours < max_age_hours:
+                        return (
+                            VERDICT_WARN,
+                            f"cron heartbeat fresh "
+                            f"({heartbeat_age_hours:.1f}h < {max_age_hours}h) "
+                            f"but 0 pg_dump_completed row in 7d — "
+                            f"audit INSERT likely silent fail "
+                            f"(V113 dropped? permission drift? payload jsonb cast?). "
+                            f"檢查 {paths['log_dir']}/trading_ai_pg_dump_cron.log",
+                        )
                 return (
                     VERDICT_INSUFFICIENT_SAMPLE,
                     "no pg_dump_completed event in last 7d (cron not yet fired)",
@@ -484,8 +517,19 @@ def run(
     max_age_hours: int = DEFAULT_MAX_AGE_HOURS,
     retention_days: int = DEFAULT_RETENTION_DAYS,
 ) -> dict:
-    """跑 7 個 check 並合併 verdict。"""
+    """跑 7 個 check 並合併 verdict。
+
+    為什麼 run() 開頭也呼 _platform_guard()：
+      passive_wait_healthcheck.checks_cron_heartbeat.check_80_pg_dump_freshness
+      wrapper 直接 ``mod.run()`` 不經 main()，會繞過 main() 平台守門；Mac dev
+      跑 passive_wait_healthcheck.sh 時若無此守門，check[6] subprocess
+      pg_restore（BSD vs GNU 行為差異）+ check[7] connect_pg 都會 false-FAIL。
+      E2 round 2 review MED-1 結論：standalone + wrapper 兩條路徑都必 fail-fast，
+      不可只防 main()。
+    """
     import time
+
+    _platform_guard()
 
     paths = _resolve_paths()
     now_epoch = time.time()
@@ -511,7 +555,9 @@ def run(
     checks.append(("[6]", v, m))
 
     # check[7] 依 PG；若 connect_pg fail 整體 exit 2（_common.connect_pg sys.exit）
-    v, m = check_7_audit_trail(max_age_hours)
+    # 傳 paths + now_epoch 供 heartbeat cross-check 解 silent INSERT-fail mask
+    # （E2 round 2 MED-2）
+    v, m = check_7_audit_trail(max_age_hours, paths=paths, now_epoch=now_epoch)
     checks.append(("[7]", v, m))
 
     overall = VERDICT_PASS

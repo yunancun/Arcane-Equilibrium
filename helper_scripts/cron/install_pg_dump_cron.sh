@@ -68,6 +68,42 @@ if [[ ! -x "$WRAPPER" ]]; then
     exit 5
 fi
 
+# ----- env value validation：防 cron 特殊字 / 空格 / 過長 entry 解析錯亂（E2 round 2 MED-3）-----
+# cron 對 `%` 解為 stdin 換行（除非 escape `\%`）；space 拆 token 破解析；
+# control char / newline 直接 corrupt crontab；長度 > 200 通常是 ENV 污染。
+# 任一不合即 abort 強制 operator 顯式覆寫（避免 silent corruption）。
+_validate_cron_env_value() {
+    local name="$1"
+    local value="$2"
+    if [[ -z "$value" ]]; then
+        echo "ERROR: cron env value empty: ${name}" >&2
+        exit 6
+    fi
+    if [[ ${#value} -gt 200 ]]; then
+        echo "ERROR: cron env value too long (>200 chars): ${name}=${value}" >&2
+        echo "       crontab line size limit risk；請縮短 path 或 abort。" >&2
+        exit 6
+    fi
+    # cron 特殊字 / shell 特殊字 / 空格 / 控制字
+    if [[ "$value" =~ [[:space:]%[:cntrl:]\"\'\\\$\`] ]]; then
+        echo "ERROR: cron-conflict character in ${name}=${value}" >&2
+        echo "       Disallowed: space / % (cron stdin newline) / control / quote / backslash / \$ / backtick" >&2
+        echo "       請用 ASCII path 無 special char；或 abort 並用 systemd timer 替代 cron。" >&2
+        exit 6
+    fi
+}
+
+_validate_cron_env_value "OPENCLAW_BASE_DIR" "$OPENCLAW_BASE_DIR"
+_validate_cron_env_value "OPENCLAW_DATA_DIR" "$OPENCLAW_DATA_DIR"
+_validate_cron_env_value "OPENCLAW_SECRETS_ROOT" "$OPENCLAW_SECRETS_ROOT"
+_validate_cron_env_value "OPENCLAW_BACKUP_ROOT" "$OPENCLAW_BACKUP_ROOT"
+_validate_cron_env_value "OPENCLAW_BACKUP_RETENTION_DAYS" "$OPENCLAW_BACKUP_RETENTION_DAYS"
+_validate_cron_env_value "OPENCLAW_BACKUP_HOUR_UTC" "$OPENCLAW_BACKUP_HOUR_UTC"
+_validate_cron_env_value "WRAPPER" "$WRAPPER"
+
+# 為什麼不用 printf %q quoting：cron 不跑 full shell parser；`%` 即使被
+# single-quote / backslash escape 在某些 cron impl 仍當 stdin newline；
+# 唯一可靠路徑是上面 validation reject special char，這裡組裝就 plain。
 ENTRY="0 ${OPENCLAW_BACKUP_HOUR_UTC} * * * OPENCLAW_BASE_DIR=${OPENCLAW_BASE_DIR} OPENCLAW_DATA_DIR=${OPENCLAW_DATA_DIR} OPENCLAW_SECRETS_ROOT=${OPENCLAW_SECRETS_ROOT} OPENCLAW_BACKUP_ROOT=${OPENCLAW_BACKUP_ROOT} OPENCLAW_BACKUP_RETENTION_DAYS=${OPENCLAW_BACKUP_RETENTION_DAYS} ${WRAPPER} >> ${OPENCLAW_DATA_DIR}/logs/trading_ai_pg_dump_cron.cron.log 2>&1"
 
 echo "------- proposed crontab entry -------"
