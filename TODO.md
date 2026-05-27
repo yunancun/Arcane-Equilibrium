@@ -1,9 +1,9 @@
 # 玄衡 TODO — 活躍派工佇列
 
-**版本**：v69（v68 + 2026-05-27 Wave 4 推進 — OPS-1 round 2 + OPS-4 minor + Wave 5 Packet A V099 + Packet C SM-04 IMPL + R4 cross-ref + MIT GAP-B/D drafts）
+**版本**：v70（v69 + 2026-05-27 Wave 5 review/regression 部分推進 + Linux session 並行 OPS-4 GAP-BD V113 + 182GB evaluations 發現 + Packet B GUI 134 LOC partial）
 **日期**：2026-05-27
-**HEAD**：`07027493`（feat wave4 commit；Mac local，待 push + ssh fast-forward）
-**Session**：D+0 PM session 28 並行 sub-agent — Wave 1 (4) + Wave 2 (9) + Wave 3 (8) + Wave 4 (6) — 全綠 closure；Wave 5 IMPL Packet A + C land；OPS-1 enforcing ready 待 E2/A3 重審
+**HEAD**：Mac commit pending（含 Wave 5 partial + Linux session 整合）；origin/main + trade-core 上輪 `261d3956`
+**Session**：D+0 PM session 40 sub-agent dispatched；37 completed；3 hit usage cap (6 Wave 5 review/regression silent killed - need re-dispatch；Packet B GUI 134 LOC partial 結構完整)
 **v65 archive**：`docs/archive/2026-05-26--todo_v65_archive.md`（待 archive；含 5 Strategy Stage roster / 5.1.1 H 級 ticket / W-AUDIT-4b retained / archive index 沿用）
 
 ---
@@ -24,7 +24,7 @@
 
 ## §0 三端同步 + Runtime 健康儀表
 
-**三端 sync**：Mac HEAD `07027493`（2026-05-27 Wave 4 commit；待 push + ssh ff）；origin/main + trade-core 上輪同步 HEAD `c092b6a6`（v68 TODO update 2026-05-27）
+**三端 sync**：Mac local 有 Wave 5 partial commit 待 push；origin/main + trade-core 已同步 `261d3956`（含 Linux session OPS-4 GAP-BD 3 commits + Mac wave2-3-4 commits）
 
 **Runtime snapshot**（2026-05-27 04:48 UTC SSH verify post-restart）：
 - Engine PID `1228870`（atomic rebuild+restart 2026-05-26 23:06，取代舊 PID 374287）；cmdline `rust/target/release/openclaw-engine` ✅
