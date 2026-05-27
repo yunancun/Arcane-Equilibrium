@@ -846,3 +846,50 @@ MIT AUDIT DONE: docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-27--v104_sup
 1. spec §2.3 "daily logical dump → NAS 異地" 假設 NAS available；reality 不是 → spec 與 runtime drift；MIT audit 必 empirical 查 mount 不能信 spec 描述
 2. spec 寫 15d retention 是 minimum；真實 226GB DB → 必驗 dump size 對齊 disk 容量；本 draft 留 env var 讓 operator 縮 7d 或加 NAS
 3. weekly `pg_basebackup` + WAL archive 不在 GAP-D 範圍 (spec §2.3 weekly track 是 separate ticket)；本 draft scope = daily logical dump only
+
+## 2026-05-27 OPS-4 GAP B/D PG backup/restore deepening research (post-baseline)
+
+**Reports**:
+- baseline 21:06: `workspace/reports/2026-05-27--ops_4_gap_b_d_pg_backup_drill.md` (9.3 KB; empirical + 3 draft script 291 lines)
+- deepening 21:00+: `workspace/reports/2026-05-27--ops_4_gap_bd_pg_backup_restore_research.md` (460 lines)
+
+**Empirical discoveries (post-baseline)**:
+1. `learning.decision_features_evaluations` = **182 GB / 17d / 279.5M row / 無 retention / 0 SQL consumer** (Rust producer only, intent_processor emit, W-AUDIT-4b 評估痕跡) — DB total 226 GB 中 81% 來自此表
+2. `trading.decision_context_snapshots` 20 GB / 46d / 5.8M row
+3. `learning.decision_features` 12 GB / 41d / 11.5M row
+4. WAL archive 關閉（`archive_mode=off` / `archive_command=disabled` / `max_wal_size=1GB`） → pg_basebackup 不能 PITR; Phase 3 才考慮
+5. Compression tools: zstd 1.5.5 ✓ / pigz 2.8 ✓ / lz4 ✗（未裝）/ xz ✓
+6. Hardware: AMD Ryzen AI MAX+ 395 / 32 threads / 124 GiB RAM / 47 GiB free / 74 GiB cache / disk 842 GB free / 10GbE confirmed
+7. NAS: `/mnt/nas` 未掛載；nfsd 在 trade-core 是 server but no client mount; sudo 拒 export verify
+
+**Design recommendations**:
+1. **Dump strategy**: `pg_dump -Fc -j 4 --compress=zstd:3 --exclude-table='learning.decision_features_evaluations' --exclude-table='*_damaged_*'` → 226 GB → 44 GB raw → 6-9 GB compressed
+2. **Storage placement**: option A local-only `/home/ncyu/pg_backups/` 15d Phase 1 (90-135 GB << 842 free OK); option B NAS Phase 2 deferred
+3. **RTO**: ≤ 4h S1 / ≤ 30 min S2-S5
+4. **RPO**: ≤ 24h Tier 0+1 / Phase 3 WAL archive → ≤ 5 min
+5. **Drill cadence**: quarterly S1 full + per-event S4 migration rollback + first-day live qualifying drill 必跑
+
+**3 hidden risks (PA OPS-4 spec gaps not listed)**:
+1. PA spec §7.2 NAS path 假設不成立（reality 未掛）→ option A 必須先 default
+2. PA spec §7.2 `--schema=learning` 默認 include 182 GB evaluations → 1 個月後撞 disk 紅線 → 必加 explicit EXCLUDE + NEW MIT proposal V### retention policy on evaluations
+3. PA spec §10 漏列 GAP-J restore-with-sqlx-checksum-drift SOP（per memory `project_2026_05_02_p0_sqlx_hash_drift`）→ restore 後必跑 `bin/repair_migration_checksum`
+
+**Operator confirm needed (block IMPL dispatch)**:
+- A. Storage placement option A vs B
+- B. `evaluations` 表 EXCLUDE 是否屬 RPO
+- C. Retention 15d 或 30d
+- D. NAS mount Phase 2 owner
+
+**E1 IMPL packet**:
+- Sub-agent A (GAP-D dump cron land): 3-4 hours
+- Sub-agent B (GAP-B full restore drill SOP + first drill): 5-7 hours (依賴 D+1 03:00 dump fire ~30h wall-clock wait)
+- Total active dev 8-11 hours / 2 parallel sub-agent / ~30h wall-clock
+
+**Push back to PA spec (5 amendments)**:
+1. §7.2 NAS → option A local Phase 1
+2. §7.2 EXCLUDE evaluations
+3. §10 add GAP-I (evaluations retention) + GAP-J (sqlx checksum drift)
+4. §8 MIT row sub-check (dump path writable + size sanity)
+5. §2.3 explicit RTO/RPO numbers
+
+**邊界遵守**: research only / 不寫 IMPL / 不改 PG schema / 不執行 dump / sub-agent 0 派 / ssh trade-core read-only
