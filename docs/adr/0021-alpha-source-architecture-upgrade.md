@@ -53,7 +53,7 @@ R-1 SPEC phase IMPL is deferred to per-wave decision; this ADR records the archi
 - `_REGIME_STRATEGY_PREFERENCES` 4×5 hardcoded dict added to DEPRECATED.md candidate list when ADR-0021 reaches Accepted status.
 - W-AUDIT-4 (ML/Dream feature_baselines + outcome backfill) recommended to **fold into R-3 Hypothesis Pipeline IMPL** rather than run as parallel track (otherwise dead schema becomes alive schema without semantic anchor).
 - W-AUDIT-7 Layer2 portion reframed by R-2 (alpha-source proposal as Layer2 unblock substrate, compatible with ADR-0020 manual + supervisor-only invariant).
-- W-AUDIT-6 戰略 ROI 重評為 minimum-only (funding_arb retire per ADR-0018 + DSR/PBO wiring + Kelly config), not full 5-strategy rewrite.
+- W-AUDIT-6 戰略 ROI 重評為 minimum-only (funding_arb retired per ADR-0018 **升格 Retired closed per AMD-2026-05-26-01** + DSR/PBO wiring + Kelly config), not full 5-strategy rewrite. **roster 收斂 4 textbook**（funding_arb 移除）。
 - R-3 introduces new V### migration (`learning.hypotheses` table + state machine + `originating_hypothesis_id` columns on Decision Lease / ExecutionPlan / fills); subject to Guard A/B/C + Linux PG dry-run mandate (CLAUDE.md §七 V### migration rule).
 
 ## References
@@ -65,6 +65,7 @@ R-1 SPEC phase IMPL is deferred to per-wave decision; this ADR records the archi
 - v2 verification summary: `2026-05-09--audit_fix_verification_v2_summary.md`
 - v3 verification summary: `2026-05-09--audit_fix_verification_v3_summary.md`
 - R4 v3 index verification: `docs/CCAgentWorkSpace/R4/workspace/reports/2026-05-09--index_verification_v3.md`
-- ADR-0018 funding_arb V2 deprecation: `docs/adr/0018-funding-arb-v2-deprecation-watch.md`
+- ADR-0018 funding_arb V2 deprecation (Status 升格 **Retired closed** 2026-05-26): `docs/adr/0018-funding-arb-v2-deprecation-watch.md`
+- AMD-2026-05-26-01 funding_arb deprecation closure: `docs/governance_dev/amendments/2026-05-26--AMD-2026-05-26-01-funding-arb-deprecation.md`
 - ADR-0020 Layer2 manual supervisor-only: `docs/adr/0020-layer2-manual-supervisor-only.md`
 - EX-06 Agent Conflict Arbitration: `docs/governance_dev/EX-06.md`

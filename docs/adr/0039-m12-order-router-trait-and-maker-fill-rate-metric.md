@@ -247,7 +247,7 @@ CREATE TABLE IF NOT EXISTS learning.routing_tier_transitions (
 
 **待 QC + FA review**：
 
-- 不同 strategy（grid 穩定 BBO / bb_breakout 高 vol / funding_arb 中 vol）的 signal confidence + market direction 噪音不同
+- 不同 strategy（grid 穩定 BBO / bb_breakout 高 vol / funding_arb 中 vol）的 signal confidence + market direction 噪音不同（注：funding_arb retired per AMD-2026-05-26-01；本表保留作為 ADR-0046 future redesign 設計參考）
 - Per-strategy threshold IMPL 複雜度高但 cost edge 提升明顯
 - Venue-uniform threshold IMPL 簡單但對 high-vol strategy under-trigger
 
@@ -285,7 +285,7 @@ CREATE TABLE IF NOT EXISTS learning.routing_tier_transitions (
 **待 E5 + FA review**：
 
 - TWAP for unlock SHORT entry（per v5.8 §2 M12 spec）的時間窗口設計
-- iceberg for pairs（funding_arb leg execution）的 sub-order size 設計
+- iceberg for pairs（funding_arb leg execution；retired per AMD-2026-05-26-01，保留作 ADR-0046 future redesign design point）的 sub-order size 設計
 - 對齊 ADR-0026 direct-exploit bypass CPCV evidence quality
 
 **建議起點**：Sprint 7-8 IMPL 階段獨立 sub-spec；本 ADR 只 lock trait method signature。

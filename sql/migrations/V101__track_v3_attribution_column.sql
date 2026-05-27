@@ -1,13 +1,20 @@
 -- ============================================================
 -- V101: Track v3 Attribution Column EXTEND — trading.fills only
 --
+-- 2026-05-26 deprecation note: funding_arb enum/case branches are now
+-- historical-only post AMD-2026-05-26-01 (funding_arb V2 retired closed per
+-- ADR-0018 status upgrade). Retain enum / case for backfill query support;
+-- Track C baseline cohort 收斂為 4 textbook（funding_arb 移除）；trading.fills
+-- 歷史 funding_arb row 自然 30d V075 retention drop（不手動 DELETE）。
+--
 -- 用途:
 --   為 ADR-0025 v3 Track-Based Strategy Attribution 在 trading.fills 加
 --   single column `track` (strategy_track ENUM 3 值)，標記每筆 fill 屬於
 --   哪一條 Track:
 --     - direct_exploit : Track A 手寫 Rust 策略，cash flow 優先
 --     - asds_factory   : Track B schema-only LLM hypothesis (N+1 ~ N+3)
---     - baseline       : Track C frozen textbook 5 策略，A/B 對照基準
+--     - baseline       : Track C frozen textbook 4 策略（funding_arb retired per
+--                        AMD-2026-05-26-01；原 5 → 4），A/B 對照基準
 --
 --   既有 5 textbook 策略 (grid_trading / bb_breakout / bb_reversion /
 --   ma_crossover / funding_arb) 全 row backfill → 'baseline'。Sprint 5+

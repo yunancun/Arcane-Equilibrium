@@ -3,6 +3,12 @@
 --   governance reject 寫 negative label + class weight handling
 -- ============================================================
 --
+-- 2026-05-26 deprecation note: funding_arb enum/case branches are now
+-- historical-only post AMD-2026-05-26-01 (funding_arb V2 retired closed per
+-- ADR-0018 status upgrade). Retain enum / case for backfill query support;
+-- no new funding_arb sample writes post-deprecation. learning.decision_features
+-- 內 funding_arb 歷史 row 自然 30d V075 retention drop（不手動 DELETE）。
+--
 -- 動機 / Motivation:
 --   2026-05-09 MIT PG 直查：trading.intents 24h 12,681 中只 175 成交（1.38%）。
 --   98.6% reject 沒寫 negative label → ML training pool 67 row vs 應有 12,500+。

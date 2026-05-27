@@ -1,6 +1,11 @@
 -- V031: ML/Dream edge-unblock data contract.
 -- V031：ML/Dream edge 修復啟用資料契約。
 --
+-- 2026-05-26 deprecation note: funding_arb enum/case branches are now
+-- historical-only post AMD-2026-05-26-01 (funding_arb V2 retired closed per
+-- ADR-0018 status upgrade). Retain enum / case for backfill query support;
+-- no new funding_arb sample writes post-deprecation.
+--
 -- Scope:
 --   * learning.mlde_edge_training_rows is a read-only view that turns the
 --     current attribution chain into training rows.

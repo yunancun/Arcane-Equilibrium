@@ -23,7 +23,7 @@ v5.8 §2 M11 **沒有明寫**「historical market data 從哪裡 pull」。Naive
 
 > **Bybit historical liquidations REST API 不存在**。Bybit V5 liquidations 只在 WebSocket push event 形式提供（per `docs/references/2026-04-04--bybit_api_reference.md` line 1088-1092；2026-04-05 已知 `liquidation.{symbol}` 已移除避免 broken topic 毒化整個 WS 連接，2026-05-15 W-AUDIT-8a C1 確認 `allLiquidation.{symbol}` 是 Bybit V5 official topic 但 production 未訂閱）。**無 historical batch query endpoint**。
 
-若 M11 nightly replay 假設可從 Bybit historical API 拉 liquidations 歷史 → 永遠拉不到 → replay 在 liquidation-sensitive strategy（如 funding_arb spike detection / bb_breakout absorption）的 fidelity 必然斷裂。
+若 M11 nightly replay 假設可從 Bybit historical API 拉 liquidations 歷史 → 永遠拉不到 → replay 在 liquidation-sensitive strategy（如 funding_arb spike detection / bb_breakout absorption）的 fidelity 必然斷裂。（注：funding_arb 已 retired per AMD-2026-05-26-01；此處保留作為 liquidation-sensitive strategy 範式說明，replay fidelity 議題對 bb_breakout 及未來 ADR-0046 funding_arb 重設計仍適用。）
 
 ### 既有 v5.7 §6 self-hosted `market.liquidations` writer
 
@@ -119,7 +119,7 @@ ADR-0029 落地 `market.public_trades` + `market.orderbook_l2_snapshot` 為 fide
 - **2.5σ vs 3σ 為什麼分開** — 2.5σ 是 day-to-day operational warn（每月 ~2 次 WARN 是 acceptable noise level）；3σ 是 strategy decay signal（每月 ~0.7 次 CRITICAL 已是 unusual 信號值）
 - **為什麼用 σ 而非絕對 bps** — 不同 strategy / symbol scale 不同（grid 日 PnL volatility 與 bb_breakout 差 5-10x）；絕對 bps threshold 會 over-flag low-vol strategy / under-flag high-vol strategy
 - **為什麼 5d rolling baseline 而非 longitudinal mean** — strategy regime 變化下（如 funding cycle flip / volatility regime shift）long-window mean 對近期偏離不敏感；5d 是 short enough to capture regime + long enough to smooth daily noise
-- **QC review 範圍** — (a) 5d baseline 在 strategy cold start 期（< 5d data）的 fallback 策略 (b) 不同 strategy（grid vs bb_breakout vs funding_arb）是否需 per-strategy σ 還是全 cohort 統一 σ (c) σ 對 outlier-driven distribution 的 robust 替代（如 MAD-based threshold）
+- **QC review 範圍** — (a) 5d baseline 在 strategy cold start 期（< 5d data）的 fallback 策略 (b) 不同 strategy（grid vs bb_breakout vs funding_arb）是否需 per-strategy σ 還是全 cohort 統一 σ；funding_arb retired per AMD-2026-05-26-01，QC review 對 ADR-0046 future redesign slot 仍適用 (c) σ 對 outlier-driven distribution 的 robust 替代（如 MAD-based threshold）
 
 #### CRITICAL → M7 dedup 路徑（per CR-7）
 
@@ -197,7 +197,7 @@ CREATE INDEX IF NOT EXISTS idx_replay_div_log_ts_desc
 
 **待 QC review + MIT empirical analysis**：
 
-- 不同 strategy（grid 低 vol vs bb_breakout 高 vol vs funding_arb 中 vol）的 PnL distribution variance scale 不同
+- 不同 strategy（grid 低 vol vs bb_breakout 高 vol vs funding_arb 中 vol）的 PnL distribution variance scale 不同；funding_arb retired per AMD-2026-05-26-01，本表保留作為 future ADR-0046 redesign 設計參考
 - Per-strategy σ 計算更精確但 schema 變複雜（V107 多 per-strategy baseline column）
 - Cohort-uniform σ 計算簡單但對 low-vol strategy 不敏感
 

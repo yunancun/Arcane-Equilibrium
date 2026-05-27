@@ -839,7 +839,7 @@ Sprint 4 首次 Live（W17.5-20.5 PM 整合 calendar）受以下 4+1 條 active 
 
 | P0 ID | 描述 | Status (2026-05-21) | Sprint 4 Live 阻塞影響 |
 |---|---|---|---|
-| **P0-EDGE-1** | net-positive edge — 5 textbook 策略結構性 alpha-deficient（QC 2026-05-11 audit verdict 持續有效）| OPEN — Phase B/C/D + A 群 待 closure | **HARD BLOCKER**：Sprint 4 Top-1 LIVE 必先有 net-positive edge evidence |
+| **P0-EDGE-1** | net-positive edge — **4 textbook** 策略結構性 alpha-deficient（QC 2026-05-11 audit verdict 持續有效；funding_arb 已 retired per AMD-2026-05-26-01，原 5 textbook roster 收斂 4）| OPEN — Phase B/C/D + A 群 待 closure | **HARD BLOCKER**：Sprint 4 Top-1 LIVE 必先有 net-positive edge evidence |
 | **P0-LG-3** | Wave 2.4 IMPL DISPATCH 完整鏈 | OPEN — 部分 IMPL | Sprint 4 部分 module 依賴 LG-3 落地 |
 | **P0-OPS-1..4** | HTTPS / cred rotation / legal / runbook OPS 4 條 | OPEN — OPS-1 HTTPS 部署 / OPS-2 cred rotation cadence / OPS-3 legal sign-off / OPS-4 runbook完整 | OPS-1/2 是 Live 5-gate 級必要；OPS-3/4 可 LiveDemo 階段並行補 |
 | **5-gate live boundary** | Python live_reserved + Operator role + OPENCLAW_ALLOW_MAINNET=1 + valid secret slot + signed authorization.json | 4/5 gate ready；secret slot Sprint 1A-α DONE；authorization 在 Sprint 4 W17.5 簽發 | **HARD GATE**：5/5 必齊；缺一不可 Live |
@@ -990,6 +990,7 @@ Operator stated: "Operator 可能忘記，可能犯錯。我們追求 APR 的最
   - AMD-2026-05-25-01 Commercialization Boundary (Exchange-Native Only) — Retire IP sale + Telegram subscription + Substack + codebase sale + signal feed + MEV/DEX + Stripe pre-order；Retain Bybit + Binance 平台官方 (Copy Trading / Earn / Master Trader / Competitions)
   - AMD-2026-05-25-02 v5.5 Bot Positioning + Capital Structure Formalization — Single product 完整 quant bot；Y1 100% 主帳 $7,500；副帳 Y2+ ADR-0030 4-gate + Moat 5-gate conditional enable
 - **新 ADR proposed (2026-05-25)**: ADR-0046 basis observation vs execution split (funding_arb scope, BB+QC spec; Sprint 1A-δ/ε 24-30 hr 平行 IMPL)
+- **新 AMD (2026-05-26 Workflow F closure)**: AMD-2026-05-26-01 funding_arb V2 Deprecation Closure — operator (D) 3C TOML deprecation closure；ADR-0018 status 升格 Retired closed；strategy code `#[deprecated]` marker + runtime fail-closed guard；**5 textbook roster → 4 textbook**（funding_arb 移除）；ADR-0046 future redesign slot 並存保留；D+0/D+7/D+30 cleanup 三階段
 - **drift audit 終稿**: `docs/audits/2026-05-25--v1_to_v58_full_consolidation_drift.md` (V1→V5.8 全鏈 plan/audit 整合 + 8 條報告錯誤修正 + SSH empirical verify + 10 條剩餘 unresolved + 2 AMD drafts + canary [67]→[80] rename)
 - **canary [67]→[80] rename**: per operator 2026-05-25 directive avoid passive_wait [67] collision; 4 files modified, 16 tests collected PASS, pending operator commit
 - **Alpha Tournament SSOT (2026-05-26)**: `docs/execution_plan/2026-05-26--alpha_tournament_ssot_spec.md`（Sprint 2 盈利主線補洞；候選池 / scoring contract / Stage output / 最小前置 / 跨文檔讀取順序）
