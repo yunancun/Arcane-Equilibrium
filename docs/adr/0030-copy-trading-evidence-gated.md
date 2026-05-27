@@ -3,7 +3,7 @@
 Date: 2026-05-21
 Status: **Proposed-pending-commit**（v5.7 §11 ADR-0028 提案順移為 0030；本 ADR 為 Y1 末 evaluation framework 鎖定，不 commit Y2 enablement decision）
 Operator Sign-off: 2026-05-21（主會話 PM dispatch via v5.7 §11 Reviewer Condition 5 + §12 governance recap）
-Related: v5.7 §1 (Y1 income recompute) / v5.7 §9 (Sprint 10 Y1 Review + Copy Trading Evidence Gate) / v5.7 §11 (5 Reviewer Conditions Met) / ADR-0006 (Bybit-only exchange baseline) / ADR-0033 (ADR-0006 amendment — DEX/Hyperliquid NOT approved baseline)
+Related: v5.7 §1 (Y1 income recompute) / v5.7 §9 (Sprint 10 Y1 Review + Copy Trading Evidence Gate) / v5.7 §11 (5 Reviewer Conditions Met) / ADR-0006 (Bybit-only exchange baseline) / ADR-0033 (ADR-0006 amendment — DEX/Hyperliquid NOT approved baseline) / **AMD-2026-05-25-02 §4.2** (副帳 Y2+ enable additional Gate 5 Moat requirement on top of本 ADR 4-gate；本 ADR 4-gate + AMD-25-02 Gate 5 全 PASS 才 enable 副帳 — Cadet/Bronze/Silver/Gold tier ladder defer from v5.4 Sprint 1 immediate setup to Y2+ Conditional Enable phase)
 
 ## Context
 

@@ -1,9 +1,9 @@
 # AMD-2026-05-25-02 — v5.5 Bot Positioning + Capital Structure Formalization
 
 Date: 2026-05-25
-Status: **Proposed-pending-operator-confirm**
-Operator Sign-off: 2026-05-25 directive — 確認 v5.5 §0 changelog 兩條轉變（Bot 定位反轉 + 副帳 1.5k→0）為 AMD-level governance
-PM Sign-off: 本 draft；批准前 cascade 不執行
+Status: **Active** (Operator APPROVE 2026-05-27 — Workflow E cascade executing)
+Operator Sign-off: 2026-05-25 directive — 確認 v5.5 §0 changelog 兩條轉變（Bot 定位反轉 + 副帳 1.5k→0）為 AMD-level governance；2026-05-27 final APPROVE + Workflow E cascade authorized
+PM Sign-off: 2026-05-27 — cascade dispatch via PA Workflow E
 
 Supersedes:
 - `docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--execution-plan-v5.4.md` §2 Capital Structure (主帳 $8.5k + 副帳 Master Trader $1.5k)
@@ -20,9 +20,16 @@ Related:
 
 ## 1. Status
 
-**Proposed-pending-operator-confirm**
+**Active** (Operator APPROVE 2026-05-27)
 
-本 AMD 為 v5.5 execution-plan §0 changelog 兩條核心轉變的 AMD-level 正式化。當時（2026-05-21）v5.5 在 14 rounds reviewer audit cumulative drive 下完成 reframe，但**未立 AMD**（因 v5.x execution-plan 改太快、未進入 AMD 化階段）。Operator 2026-05-25 在 V1→V5.8 drift audit 過程中確認此兩條轉變應 AMD 化以解 governance gap。
+本 AMD 為 v5.5 execution-plan §0 changelog 兩條核心轉變的 AMD-level 正式化。當時（2026-05-21）v5.5 在 14 rounds reviewer audit cumulative drive 下完成 reframe，但**未立 AMD**（因 v5.x execution-plan 改太快、未進入 AMD 化階段）。Operator 2026-05-25 在 V1→V5.8 drift audit 過程中確認此兩條轉變應 AMD 化以解 governance gap，2026-05-27 final APPROVE + Workflow E cascade authorized。
+
+### Approval Log
+
+| Date | Event | Authority |
+|---|---|---|
+| 2026-05-25 | Draft + operator directive 確認兩條轉變 | Operator |
+| 2026-05-27 | Final APPROVE + cascade dispatch via PA Workflow E | Operator |
 
 ---
 
@@ -173,10 +180,11 @@ Cascade patch 範圍：
 
 | Role | Status | Date | Note |
 |---|---|---|---|
-| Operator | DIRECTIVE GIVEN | 2026-05-25 | 確認 v5.5 §0 changelog 兩條轉變 + 副帳 Y2+ moat 後啟動邏輯 |
-| PM | DRAFT | 2026-05-25 | Pending operator confirm before commit + cascade |
-| CC | PENDING | — | 16 root principles compliance（特別 #5 survival > profit + #11 Agent autonomy）|
-| R4 | PENDING | — | docs/README + SPECIFICATION_REGISTER cascade |
+| Operator | **APPROVE** | 2026-05-27 | Final approval + Workflow E cascade authorized（先 2026-05-25 directive given）|
+| PM | **SIGN-OFF** | 2026-05-27 | Cascade dispatch via PA Workflow E |
+| PA | **CASCADE EXECUTED** | 2026-05-27 | Workflow E：docs/README + SPECIFICATION_REGISTER + AMD-25-01 cross-ref + TODO cleanup |
+| CC | DEFERRED | — | 16 root principles compliance（formalize only, no engineering work; §5/§11 compliance verified by v5.5 chain）|
+| R4 | DEFERRED | — | docs/README + SPECIFICATION_REGISTER cascade executed by PA Workflow E |
 
 ---
 

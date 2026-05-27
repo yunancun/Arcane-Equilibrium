@@ -84,7 +84,7 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 | **A** | 22 fail-closed 1e-3 invariant Option (c) AMD-09-03 附錄 | T2: PA → TW → FA + QC → R4 cascade (waterfall+parallel) | 7.5-11.5 hr | 1 (parallel) | — D+0 可啟動 |
 | **B** | ADR-0046 basis observation/execution split | T1: PA design → E1 Rust → MIT V117 → E2 → E4 → BB → QA | 24-30 hr | 2 (Phase 1→2→3) | PA design first |
 | **D** | AMD-2026-05-25-01 商業化邊界 cascade | T2: operator confirm → PA + FA + R4 parallel + TW docs/README cascade | 4-6 hr | 3 (operator-gated) | operator 確認 |
-| **E** | AMD-2026-05-25-02 v5.5 reframe cascade | T2: operator confirm → PA + FA + R4 parallel + TW docs/README cascade | 4-6 hr | 3 (operator-gated) | operator 確認 |
+| ~~**E**~~ | ~~AMD-2026-05-25-02 v5.5 reframe cascade~~ | – | ✅ **CLOSED 2026-05-27** | – | PA Workflow E cascade 完成；report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_e_amd_25_02_cascade.md` |
 | ~~**F**~~ | ~~funding_arb (D) 3C TOML deprecation cascade~~ | – | ✅ **FULLY CLOSED 2026-05-26** | – | Phase 1 PA spec ✅ + Phase 2 TW (AMD-26-01 + 5 primary + 19 secondary) ✅ + R4 Pass A APPROVE-WITH-DRIFT ✅ + R4 Pass B APPROVE ✅；3 LOW carry-over defer D+7 |
 | **Earn Wave C** | OP-1 series → first stake $100-200 Flexible-only | T1: 7 hand OP + 5 可代做 post-1..5 | OP 30min + post-flow 30min | 3 (operator-gated) | OP-1 a-f hand actions |
 | **Layered Autonomy v2 Wave 5** | V099 + GUI + Rust SM-04 + 5 ADR sync + R4 | T1+T2: 3 並行 (E1 V099 / E1a GUI / Rust SM-04) | 81-126 hr (8-12+21-28+52-86) | 1 partial (operator approve) | operator final sign-off |
@@ -194,7 +194,7 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 
 | 日期 | Action | 預期時間 | Trigger | 卡進度後果 |
 |---|---|---|---|---|
-| **D+0 NEW (2026-05-26)** | **confirm AMD-2026-05-25-01 商業化邊界 + AMD-2026-05-25-02 v5.5 reframe** | 15 min | PM ping | 阻 Workflow D + E cascade |
+| ~~**D+0 NEW (2026-05-26)**~~ | ~~confirm AMD-2026-05-25-01 商業化邊界 + AMD-2026-05-25-02 v5.5 reframe~~ ✅ **DONE 2026-05-27** — 兩 AMD operator APPROVE；Workflow D (25-01) + E (25-02) cascade completed | — | — | — |
 | **D+0 NEW** | commit canary [67]→[80] rename 4 files | 5 min | E1 sub-agent ready | 阻 sync (已 commit cf61d1f0 ✅) |
 | **D+1-D+2** | **AMD-21-01 v2 Layered Autonomy 最終 sign-off** | 30 min | PA spec + CC re-audit A 級 done | 阻 Wave 5 cascade IMPL（V099 + GUI + Rust SM-04 + 5 ADR sync） |
 | **D+2-D+3** | OP-1 a-f Bybit Web UI **mainnet** key 重發（per C-3 2026-05-26：現 2 demo key + 33d TTL，mainnet key 未發 → Sprint 4 first Live + Earn 雙線需）| 5-10 min | OP-1 pre-verify done | 阻 Sprint 4 first Live + Earn Wave C production deploy |
@@ -246,7 +246,7 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 **估時**：248-351 hr / 3w wall-clock / 7 並行 sub-agent
 
 ### §8.5 PA Condition Follow-up Deferred
-- **C2** ADR-0030 4-gate threshold 副帳場景 verify（E4 + FM；3-6 hr；opportunistic）
+- ~~**C2** ADR-0030 4-gate threshold 副帳場景 verify（E4 + FM；3-6 hr；opportunistic）~~ ✅ **CLOSED 2026-05-27 by AMD-2026-05-25-02 §4.2** — 副帳 Y2+ enable 條件 = ADR-0030 4-gate + AMD-25-02 Gate 5 Moat（reverse-snipe defense + simulator >95% + anti-snipe + Master Trader API + ranking dashboard）共 5-gate 全 PASS；framework 已 lock，無 verify work
 - **C3** ADR-0046 公式補位（funding_cost_bps + borrow_cost_bps）+ dual-write phase + V117 預寫 pending（PA → E1 → MIT → E2；8-12 hr）
 - **C4** E4 canary [80] full sweep verify namespace="canary"（E4；2-4 hr；依 canary deploy 穩定）
 
@@ -256,8 +256,8 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 
 | 來源 | Cascade 目標 | Owner | Status |
 |---|---|---|---|
-| **AMD-2026-05-25-01** | docs/README AMD list / SPECIFICATION_REGISTER count / TODO §8 Stream 2 殘留 cleanup | PM + R4 + TW | Pending operator confirm |
-| **AMD-2026-05-25-02** | 同上 + ADR-0030 4-gate 副帳場景 cross-ref | PM + R4 + TW | Pending operator confirm |
+| **AMD-2026-05-25-01** | docs/README AMD list / SPECIFICATION_REGISTER count / TODO §8 Stream 2 殘留 cleanup / AMD-04+05 supersede markers | PA Workflow D | ✅ **CLOSED 2026-05-27** Cascade executed — operator APPROVE 2026-05-27 via PM session AskUserQuestion；AMD-25-01 Status Active；docs/README + SPECIFICATION_REGISTER 已 land entry；AMD-04 §1 Stream 2 + AMD-05 Stream 2 retain 部分 supersede marker land；`monetization-demand-test-spec.md` superseded marker pre-existed；TODO 無 Stream 2 active task 殘留（active surface 0 / archive-only mention 11+ files）；report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_d_amd_25_01_cascade.md` |
+| **AMD-2026-05-25-02** | docs/README AMD list / SPECIFICATION_REGISTER count / AMD-25-01 §3.2 cross-ref / ADR-0030 cross-ref / AMD Status Active + approval log / TODO §8.5 C2 cleanup | PA Workflow E | ✅ **CLOSED 2026-05-27** Cascade 完成；report `2026-05-27--workflow_e_amd_25_02_cascade.md` |
 | **AMD-2026-05-21-01 v2 Wave 5** | ADR-0034 LAL 對齊矩陣加 Autonomy Level / ADR-0040 §Decision 5 / ADR-0042/0044/0045 wording sync + V099 schema + GUI sub-section + Rust SM-04 patch | PA + E1 + E1a + MIT + R4 | Pending operator final sign-off |
 | **ADR-0046 (Proposed)** | funding_arb.rs IMPL + V117 migration spec + Optuna search space update | PA + E1 + MIT | Sprint 1A-δ/ε 平行 land |
 | **drift audit 2026-05-25** | TODO active state update + v5.8 文檔 patches (DONE 10 patches) | PM | Cascade 完成 ✅ |
