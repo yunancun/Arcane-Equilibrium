@@ -4773,3 +4773,29 @@ verify round 3 P0 Q3 SQL fix + 3 MED runtime behavior post E1 round 3 + MIT roun
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-27--ops_4_gap_bd_e4_regression_round_2.md`
+
+---
+
+## 2026-05-27 E4 round 2 re-dispatch (usage cap silent kill 重派) — GREEN confirm
+
+前次 E4 round 2 sub-agent silent killed by usage cap, 無 stdout 無 file mtime confirmation, 但實際 report file 已寫到 249 lines + verdict GREEN。Re-dispatch spot-check 重採 10 個原 verify point 全部與前次匹配：
+
+| 點 | 結果 |
+|---|---|
+| Q3 主 block (Linux psql) | n=1 to_state=BYPASS 66310 row 24h **匹配** |
+| Q3 AGG (Linux psql) | n=1 **匹配** |
+| 9 query syntax tail (skip Q1 V099 dep) | Q2-Q9 全 syntax PASS, Q1+AGG carry-over **匹配** |
+| Mac CLI fail-fast | EXIT=2 **匹配** |
+| Mac wrapper run() fail-fast | EXIT=2 **匹配** |
+| Linux runtime --status | EXIT=0 verdict=INSUFFICIENT_SAMPLE **匹配** |
+| Space → exit 6 | **匹配** |
+| % → exit 6 | **匹配** |
+| Clean DRY-RUN → exit 0 | **匹配** |
+| Import wire-up | IMPORT_OK + HAS check_80=True **匹配** |
+
+### 學到
+1. **Sub-agent silent kill 復原協議** — 用 file existence + content tail (verdict block) 判斷前次 run 是否完成；若內容完整且 verdict 明確不要 overwrite, 只 append re-dispatch §
+2. **Spot-check re-sample 是 silent-kill 場景最低成本 confirmation** — 不 rerun full 8 verify suite, 只重採每點各 1 次, 對比結果一致即可確認原 run valid
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-27--ops_4_gap_bd_e4_regression_round_2.md` (前次 GREEN 結論 valid + 新增 §12 re-dispatch confirmation)

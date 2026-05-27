@@ -247,3 +247,25 @@ E1 round 3 claim「無新增/刪測試 0 LOC」**verified**。
 ---
 
 **E4 REGRESSION DONE: GREEN · report path: srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-27--ops_4_gap_bd_e4_regression_round_2.md**
+
+---
+
+## §12 Re-dispatch confirmation (2026-05-27 23:37 UTC)
+
+前次 E4 round 2 已派但 silent kill by usage cap, 但 report file 已寫入完整內容 (249 lines)。本次 re-dispatch 不重做、不覆寫，僅針對 8 個原 verify point 重新採樣 spot-check empirical 確認結論未漂移：
+
+| 點 | 重採樣 | 結果 |
+|---|---|---|
+| A.1 Q3 主 block | `ssh trade-core "psql -c WITH lt_24h..."` | n=1 to_state=BYPASS, 66310 row 24h | **匹配** |
+| A.2 Q3 AGG | `ssh trade-core "psql -c SELECT COUNT(DISTINCT to_state)..."` | n=1 | **匹配** |
+| A.4 9 query 跑 | psql tail 跳 Q1 V099 dep | Q2 1 row / Q3 1 row / Q4 2 / Q5 1 / Q6-Q9a 0 / Q9b 5; Q1+AGG ERROR carry-over | **匹配** |
+| B.1 Mac CLI fail-fast | `python3 ... --status` | EXIT=2 with platform diag | **匹配** |
+| B.2 Mac wrapper fail-fast | `python3 -c "import ...; m.run()"` | EXIT=2 with platform diag | **匹配** |
+| C Linux runtime | `ssh trade-core "DB_URL=... --status"` | EXIT=0, verdict=INSUFFICIENT_SAMPLE, 7 sub-check | **匹配** |
+| D.1 Space → exit 6 | `ssh trade-core "OPENCLAW_BACKUP_ROOT='/tmp/pg backups' bash ..."` | EXIT=6 with cron-conflict diag | **匹配** |
+| D.3 Clean DRY-RUN → exit 0 | `ssh trade-core "OPENCLAW_BACKUP_ROOT=/tmp/pg_backups_test bash ..."` | EXIT=0 with 預檢提示 | **匹配** |
+| D.2 % → exit 6 | `ssh trade-core "OPENCLAW_BACKUP_ROOT='/tmp/pg%backups' bash ..."` | EXIT=6 with cron-conflict diag | **匹配** |
+| E.3 Import wire-up | `python3 -c "import passive_wait_healthcheck..."` | IMPORT_OK + HAS check_80_pg_dump_freshness=True | **匹配** |
+
+**Re-dispatch verdict 不變：GREEN**。前次 round 2 report (上方 §1-§11) 結論 valid, 可直接 QA → PM commit chain。
+
