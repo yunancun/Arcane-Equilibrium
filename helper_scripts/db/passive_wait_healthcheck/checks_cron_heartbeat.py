@@ -1,4 +1,4 @@
-"""Cron heartbeat sentinel healthchecks [75]-[79].
+"""Cron heartbeat sentinel healthchecks [75]-[80].
 
 MODULE_NOTE:
   P1-CRON-INSTALL-WAVE-1（2026-05-18）— 5 個 cron wrapper 已 source/test
@@ -22,10 +22,16 @@ MODULE_NOTE:
     [77] replay_key_rotation_check      每日     → stale > 25h   → WARN
     [78] feature_baseline_writer        每日     → stale > 25h   → WARN
     [79] blocked_symbols_30d_unblock    每週     → stale > 8d    → WARN
+    [80] trading_ai_pg_dump_freshness   每日     → stale > 26h   → WARN/FAIL
 
   Sentinel 缺失 → WARN「heartbeat file missing — cron not installed or
   has never fired」；過時 → WARN「heartbeat stale (age=<s>s, threshold=<s>s)
   — cron likely stopped firing」；新鮮 → PASS。
+
+  [80] 不同於 [75]-[79]：它是 P0-OPS-4 GAP-D PG dump cron 的 wrapper，
+  delegate 給 standalone ``helper_scripts/canary/healthchecks/check_pg_dump_freshness.py``
+  跑完整 7 check（5 verify_pg_dump.sh + L0 schema coverage + governance audit
+  trail）；本檔僅作 runner.py 註冊點 + verdict 提取，不重複實作以保單一 SSOT。
 """
 
 from __future__ import annotations
@@ -207,10 +213,113 @@ def check_79_blocked_symbols_30d_unblock_check_cron_fires(
     )
 
 
+def check_80_pg_dump_freshness(
+    now: float | None = None,
+) -> tuple[str, str]:
+    """[80] trading_ai_pg_dump cron + 7-check freshness wrapper（P0-OPS-4 GAP-D）。
+
+    為什麼 wrapper 而非自己實作：standalone
+    ``helper_scripts/canary/healthchecks/check_pg_dump_freshness.py`` 是 SSOT
+    （operator ad-hoc + dashboard 共用），本檔僅 delegate 取 verdict + 7 check
+    結果 collapse 成 runner.py 期待的 ``(verdict, msg)`` tuple。任何 5 + L0 +
+    audit-log 邏輯改動只動 standalone module 一處。
+
+    特殊處理：
+      - import 失敗（standalone module 缺）→ FAIL（infra 缺檔，不可繼續）
+      - standalone ``run()`` 拋例外 → WARN（runner 不該 crash；其他 check
+        仍要跑完）
+      - sub-check INSUFFICIENT_SAMPLE（V113 未 apply / dump 未 fire）→ PASS-skip
+        透傳，避免 first-day deploy 阻擋
+      - 整體 verdict FAIL → ``OPENCLAW_CRON_HEARTBEAT_REQUIRED=1`` 升 FAIL
+        （與 [75]-[79] 對齊）；否則 WARN
+
+    ``now`` 參數保留是為與 [75]-[79] _classify signature 對齊測試介面；本 check
+    不用（standalone 自己取 ``time.time()``）。
+    """
+    del now  # 為 signature 對齊保留，不使用
+
+    try:
+        # 為什麼用 importlib：standalone module 路徑在 ``srv/helper_scripts/canary/
+        # healthchecks/`` 不在本 package；走 sys.path 動態 import 避免硬編
+        # relative import 跨 package。對齊 [20] check_h_state_gateway_freshness
+        # 同模式。
+        import importlib
+        import sys
+        from pathlib import Path
+
+        srv_root = (
+            os.environ.get("OPENCLAW_BASE_DIR")
+            or str(Path.home() / "BybitOpenClaw" / "srv")
+        )
+        healthchecks_dir = Path(srv_root) / "helper_scripts" / "canary" / "healthchecks"
+        if str(healthchecks_dir) not in sys.path:
+            sys.path.insert(0, str(healthchecks_dir))
+
+        mod = importlib.import_module("check_pg_dump_freshness")
+    except ImportError as e:
+        warn_severity = "FAIL" if _required_mode() else "WARN"
+        return (
+            warn_severity,
+            f"[80] standalone check_pg_dump_freshness import failed: {e} "
+            "— P0-OPS-4 GAP-D infra missing",
+        )
+
+    try:
+        result = mod.run()
+    except SystemExit:
+        # standalone connect_pg() 在 missing creds 用 sys.exit(2)；不能讓它打掛 runner。
+        warn_severity = "FAIL" if _required_mode() else "WARN"
+        return (
+            warn_severity,
+            "[80] standalone run() exited (PG creds / connect failure) — "
+            "check_pg_dump_freshness.py --status 看細節",
+        )
+    except Exception as e:  # noqa: BLE001 — runner 不可 crash 必須包裝
+        warn_severity = "FAIL" if _required_mode() else "WARN"
+        return (
+            warn_severity,
+            f"[80] standalone run() raised {type(e).__name__}: {e}",
+        )
+
+    overall = result.get("verdict", "WARN")
+    sub_checks = result.get("checks", [])
+    # Collapse 成單行 summary：``[80] verdict=PASS (7 check: ...)``
+    # 取 non-PASS 的 sub-check id + verdict 摘要；全 PASS 則只報 count。
+    non_pass = [
+        f"{c['id']}:{c['verdict']}"
+        for c in sub_checks
+        if c.get("verdict") != "PASS"
+    ]
+    if non_pass:
+        summary = (
+            f"[80] pg_dump_freshness verdict={overall} "
+            f"(7 sub-check; non-PASS: {', '.join(non_pass)})"
+        )
+    else:
+        summary = (
+            f"[80] pg_dump_freshness verdict={overall} "
+            f"(7 sub-check all PASS)"
+        )
+
+    # FAIL 升級：standalone 已決定整體 verdict；本 wrapper 對 FAIL 看 REQUIRED env
+    # 升級語意僅供 cron_heartbeat 一致性；standalone FAIL 本身就會被 runner
+    # ``aggregate severity`` 認知為 FAIL。
+    if overall == "FAIL":
+        return ("FAIL", summary)
+    if overall == "WARN":
+        return ("WARN", summary)
+    if overall == "INSUFFICIENT_SAMPLE":
+        # 與 _common.severity_max 一致：INSUFFICIENT_SAMPLE 比 WARN 輕；
+        # runner 顯示為 INSUFFICIENT_SAMPLE 即可，operator 知道 cron 未 fire。
+        return ("INSUFFICIENT_SAMPLE", summary)
+    return ("PASS", summary)
+
+
 __all__ = [
     "check_75_panel_aggregator_health_cron_fires",
     "check_76_wave9_replay_no_live_mutation_watch_cron_fires",
     "check_77_replay_key_rotation_check_cron_fires",
     "check_78_feature_baseline_writer_cron_fires",
     "check_79_blocked_symbols_30d_unblock_check_cron_fires",
+    "check_80_pg_dump_freshness",
 ]

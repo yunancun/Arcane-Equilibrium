@@ -222,6 +222,10 @@ from .checks_cron_heartbeat import (  # noqa: F401
     check_77_replay_key_rotation_check_cron_fires,
     check_78_feature_baseline_writer_cron_fires,
     check_79_blocked_symbols_30d_unblock_check_cron_fires,
+    # [80] P0-OPS-4 GAP-D（2026-05-27）— trading_ai_pg_dump cron 7-check wrapper
+    # （FA acceptance §E #7）；delegate 給 standalone
+    # ``helper_scripts/canary/healthchecks/check_pg_dump_freshness.py``。
+    check_80_pg_dump_freshness,
 )
 
 __all__ = [
@@ -328,4 +332,6 @@ __all__ = [
     "check_77_replay_key_rotation_check_cron_fires",
     "check_78_feature_baseline_writer_cron_fires",
     "check_79_blocked_symbols_30d_unblock_check_cron_fires",
+    # [80] P0-OPS-4 GAP-D（2026-05-27）pg_dump cron 7-check delegate wrapper.
+    "check_80_pg_dump_freshness",
 ]
