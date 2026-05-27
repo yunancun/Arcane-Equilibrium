@@ -91,17 +91,22 @@ WHERE event_type = 'lease_grant'
 -- Pass criteria：last 24h lease_id 分布 + to_state 分布合理（不全 'rejected' / 不全 'pending'）
 -- FAIL action：transition chain 斷 → 可能 producer code drift；不可 swap
 \echo '=== Query 3: learning.lease_transitions last 24h aggregated (I7 lease state) ==='
+-- Column note: lease_transitions 只有 ts_ms (bigint, epoch ms) 與 created_at (timestamptz)；
+--   無 plain `ts` column。用 created_at（row insertion time, fully-typed timestamptz）對齊
+--   NOW() - INTERVAL 直接比較；不用 to_timestamp(ts_ms/1000) 避免 epoch 換算誤差。
+--   created_at 比 ts_ms 落後 0-ms 級（同一 INSERT now() default），audit-trail-after-restore
+--   use case 兩者語意可換用，created_at 比較簡潔。
 WITH lt_24h AS (
-    SELECT lease_id, to_state, ts
+    SELECT lease_id, to_state, created_at
     FROM learning.lease_transitions
-    WHERE ts > NOW() - INTERVAL '24 hours'
+    WHERE created_at > NOW() - INTERVAL '24 hours'
 )
 SELECT
     to_state,
     COUNT(*) AS transition_count,
     COUNT(DISTINCT lease_id) AS distinct_lease,
-    MIN(ts) AS oldest_ts,
-    MAX(ts) AS newest_ts
+    MIN(created_at) AS oldest_ts,
+    MAX(created_at) AS newest_ts
 FROM lt_24h
 GROUP BY to_state
 ORDER BY transition_count DESC;
@@ -281,7 +286,7 @@ ORDER BY tier_level;
 \echo '=== AGGREGATE SUMMARY ==='
 WITH q1 AS (SELECT COUNT(*) AS n FROM system.autonomy_level_config WHERE id = 1 AND current_level IN ('CONSERVATIVE','STANDARD')),
      q2 AS (SELECT COUNT(*) AS n FROM learning.governance_audit_log WHERE event_type = 'lease_grant' AND ts > NOW() - INTERVAL '24 hours'),
-     q3 AS (SELECT COUNT(DISTINCT to_state) AS n FROM learning.lease_transitions WHERE ts > NOW() - INTERVAL '24 hours'),
+     q3 AS (SELECT COUNT(DISTINCT to_state) AS n FROM learning.lease_transitions WHERE created_at > NOW() - INTERVAL '24 hours'),
      q4 AS (SELECT COUNT(*) AS n FROM trading.fills WHERE ts > NOW() - INTERVAL '24 hours'),
      q5 AS (SELECT COUNT(*) FILTER (WHERE o.intent_id IS NULL) AS orphan_n,
                    COUNT(*) AS total_n
