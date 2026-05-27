@@ -4707,3 +4707,69 @@ W1-C M4 與 V109 解耦（per E2 §9.2）— V109 schema 純 hypertable land；W
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-27--ops_4_gap_bd_e4_regression.md`
+
+## 2026-05-27 OPS-4 GAP B+D round 2 light regression (commit cf710dc7)
+
+### Scope (narrow re-verify)
+verify round 3 P0 Q3 SQL fix + 3 MED runtime behavior post E1 round 3 + MIT round 3 Q3 fix；不重做 full baseline。
+
+### A. P0 Q3 fix Linux empirical PASS
+- Q3 main block (line 95 `WHERE created_at`): SELECT n=1 (1 distinct to_state in 24h)
+- Q3 AGGREGATE CTE (line 289 `created_at`): SELECT n=1
+- `\d learning.lease_transitions` 確認 column `created_at timestamptz` 存在 (line 14 schema)
+- 兩處不再 `column "ts" does not exist`
+
+### B. MED-1 platform guard 雙路徑 PASS
+- Mac `--status`: EXIT=2 with platform refuse 訊息
+- Mac `run()` 繞 main(): EXIT=2 with same platform refuse 訊息（wrapper path 已 fail-fast）
+- Linux runtime: EXIT=0, verdict=INSUFFICIENT_SAMPLE, 7 sub-check structure 完整
+
+### C. MED-2 heartbeat cross-check 4 scenario PASS
+- A. paths=None → INSUFFICIENT_SAMPLE (backward compat)
+- B. heartbeat fresh (0h) + n=0 → **WARN** with diag log path（解 silent V113-INSERT-fail mask）
+- C. heartbeat stale (100h > 24h) + n=0 → fallthrough INSUFFICIENT_SAMPLE
+- D. heartbeat missing + n=0 → fallthrough INSUFFICIENT_SAMPLE
+
+### D. MED-3 install_pg_dump_cron.sh validation PASS
+- Clean DRY-RUN: EXIT_CODE=0
+- `/tmp/pg backups` (space): EXIT_CODE=6 with cron-conflict 訊息
+- `/tmp/pg%backups` (%): EXIT_CODE=6 with cron-conflict 訊息
+- 220 char path (>200): EXIT_CODE=6 with too-long 訊息
+
+### E. Baseline 9 query post-fix
+- Q1 FAIL (V099 deployment gap, non-bug)
+- Q2 0 row (live not 24h yet)
+- **Q3 PASS** (n=1, MIT round 3 fix verified — UNBLOCK)
+- Q4 PASS (2 fills 24h)
+- Q5 PASS (0 orphan / 4 total)
+- Q6 0 row (operator 未 stake)
+- Q7 0 row (runtime 全 demo)
+- Q8 PASS (0 bad hash)
+- Q9 PASS (5 lal_tiers)
+- **8/9 PASS（Q1 deployment dep，非 BUG）**
+
+### F. Baseline regression check
+- Linux control_api_v1 pytest: **3994p/68f/51s** — 與 round 1 完全一致，0 regression
+- 0 test file touched by round 3 IMPL（E1 round 3 claim 0 test 增 confirm）
+
+### Round 1 → 2 delta
+| 項目 | Round 1 | Round 2 (post round 3 fix) |
+|---|---|---|
+| P0 Q3 column drift BUG | BLOCKER FAIL | **PASS** (created_at fix landed) |
+| 9 query post-fix PASS | 6/9 + 1 BUG + 2 carry-over | **8/9 + 0 BUG + 1 carry-over (V099 dep)** |
+| MED-1 platform guard wrapper | FAIL (silent miss) | **PASS** (run() exit 2 on Mac) |
+| MED-2 heartbeat cross-check | not implemented | **PASS** (B scenario WARN) |
+| MED-3 cron env validation | not implemented | **PASS** (4 negative case exit 6) |
+| Baseline pytest | 3994p/68f/51s | **3994p/68f/51s** (no regression) |
+
+### Verdict
+**GREEN** — 5/5 verify criteria PASS, P0 BLOCKER unblocked, 3 MED behavior empirical correct, baseline 不變
+
+### Lessons (round 2)
+1. **MIT round 3 fix 同 commit (cf710dc7) 與 E1 3 MED fix 一起 land** — 三方並行 fix 合 PR 治理 OK，commit message 明確列「round 3 — E2 3 MED + E4 P0 Q3 BLOCKER + auto-resolve E2 LOW-1」allow E4 round 2 light verify 不需 split commit。
+2. **`learning.lease_transitions.created_at` 是 standard timestamptz column with DEFAULT now()** — schema 已驗，未來其他 audit-table query 可直接 reuse pattern 避 `ts` 字面假定。
+3. **MED-2 heartbeat sentinel + DB row cross-check 是 dual-signal silent-fail detection 範本** — 兩個獨立信號 sources（filesystem mtime + PG row count）對打可 surface 「sentinel 正常但 audit INSERT 被吞」這類 mask 情境。LOW-1 dead resolution 自動消解（heartbeat 不再 dead）。
+4. **SSH session 內 `bash file.sh | tail` 的 `$?` 是 tail 的 exit, not 原 script** — 必須 wrap `bash -c '... ; echo EXIT=$?'` 隔離才能取 script exit。E4 round 2 第一次測 MED-3 exit code 被誤判 0，重 wrap 後正確顯示 6。
+
+### Report
+`srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-27--ops_4_gap_bd_e4_regression_round_2.md`
