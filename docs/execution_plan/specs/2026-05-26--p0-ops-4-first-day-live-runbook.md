@@ -1,11 +1,12 @@
 # P0-OPS-4 — First-Day Live 24h Runbook（spec-only / pre-ratification）
 
-**Date**: 2026-05-26
-**Status**: SPEC-DRAFT / pending operator + PA + E3 + BB + QA sign-off
+**Date**: 2026-05-26（initial）／ **2026-05-27 amendment v2**
+**Status**: SPEC-DRAFT v2 / pending operator + PA + E3 + BB + QA + MIT + FA sign-off
 **Scope**: Sprint 4 first Live $500 W18-21 (~2026-09 初) D-1（pre-launch）→ T+0 launch → T+24h closure
 **Owner**: PA spec → operator ratify → ops handoff
 **Trigger**: KNOWN_ISSUES.md:539-543（P0-OPS-4 blocker）/ TODO.md §1 第 3 列
 **Cross-ref**: CLAUDE.md §四 hard boundaries / TODO.md §5 9 safety invariants / AMD-2026-05-21-01 v2 fail-safe / ADR-0030 4-gate / ADR-0034 LAL
+**Amendment v2（2026-05-27）**: 補 §2.1 RTO PG restore / §2.2 RPO V099+V100 / §2.3 dump cadence（operator Q1-Q4 拍板）/ §7.2 NAS reality / §8 sign-off 加 FA+BB+MIT cross-sign / §10 新增 §10.A GAP B + §10.B GAP D 細化；per FA business audit + MIT empirical research push back
 
 ---
 
@@ -89,6 +90,8 @@
 | Bybit API outage > 5min | depends（external）| 不可控；engine fail-closed retry off | 見 §5.3 |
 | Authorization.json expired | < 5 min（operator 在線）| operator manual renew via Python `/auth/renew` endpoint | per CLAUDE.md §四 「Signed live authorization 必走 Python renew/approve」 |
 | Tailscale outage → Mac dev 失聯 | depends；engine 不停 | engine 在 Linux 自運行；只影響 dev / monitor surface | 見 §5.6 |
+| **PG full restore from dump（GAP B 補列）** | **≤ 4 hr** | 估：MIT empirical 32-thread / 124 GiB / 44 GB raw decompress + 10-step verify + Bybit reconcile + 6 health domain 30min PASS | per MIT report §2.2 RTO breakdown；S1 full restore 5-phase SOP |
+| **PG single L0 schema restore（GAP B 補列）** | **≤ 30 min** | 估：`pg_restore -j 16 --schema=<single>` selective + verify | per MIT report §2.2 S2/S3 scenario |
 
 ### 2.2 RPO（Recovery Point Objective）
 
@@ -101,6 +104,8 @@
 | `decision_lease` records | per ADR-0008 lifecycle | ≤ 60s（state machine snapshot 間距）| 引擎 crash 期間在飛 lease 失去 in-memory state |
 | Bybit account state（position / balance）| Bybit 端權威 | 0（Bybit 主庫）| 不影響本地 RPO |
 | `pipeline_snapshot.json` watchdog heartbeat | 即時覆寫 | < 5s | crash 期 stale → watchdog 觸發；RPO 不適用（觀測 only） |
+| **`learning.earn_movement_log`（FA gap #1 補列）** | **永久** | **≤ 24h（post-GAP-D daily dump）** | Bybit Earn 唯一本地 audit；丟失=稅務+monetary loss；per BB OPS-3 C-4 verdict |
+| **`system.autonomy_level_config`（FA gap #1 補列）** | **永久（V099 singleton CHECK id=1）** | **≤ 24h（post-GAP-D daily dump）** | Autonomy Level Toggle 唯一 SoT；丟 = AMD-2026-05-21-01 v2 fail-safe 框架不可重建 |
 
 **Known data loss windows**：
 1. Engine crash 期間（typical < 5 min）— in-memory 已 emit 但未落 PG 的 lease state；mitigation = engine 重啟自 PG 恢復最後 settled snapshot
@@ -110,11 +115,36 @@
 ### 2.3 PG dump cadence（DR）
 
 **現況**：未排定 PG dump cron — **GAP D**（見 §10）
-**建議**：
-- daily logical dump（`pg_dump --schema=trading,learning,governance,system`）→ NAS 40TB 異地
-- weekly full base backup（`pg_basebackup` + WAL archive）
-- 留 30d × 7 = 210 個 dump rotation
-- restore drill 至少 quarterly
+
+**Operator 拍板（2026-05-27）**：
+- **Q1**: EXCLUDE `learning.decision_features_evaluations`（182 GB / 17d / 0 SQL consumer / W6 audit log producer-only）
+- **Q2**: Retention **30d 統一**（解 §2.3 原「30d × 7 rotation」與 §10 原 GAP D「15d minimum」矛盾）
+- **Q3**: Local-only `/home/ncyu/pg_backups` Phase 1（NAS mount = Phase 2 operator hand task post first-day live）
+- **Q4**: 立即派 PA + E1 + MIT 並行 chain
+
+**建議 cadence（post-operator-pinned）**：
+- **Daily 03:00 UTC**：`pg_dump -Fc -j 4 --compress=zstd:3 --exclude-table='learning.decision_features_evaluations' --exclude-table='*_damaged_*' --schema=trading,learning,governance,system` → `/home/ncyu/pg_backups/`
+- **Tier-2 weekly**（market.*）Phase 2 延後 — Bybit history API 可 replay
+- **Retention 30d 統一**：30d × 9 GB (zstd:3 compressed Tier 0+1) = **270 GB << 842 GB free → local-only OK**
+- **Phase 2**：mount NAS + rsync 異地（operator hand task）
+- **Phase 3**：enable WAL archive + `pg_basebackup` weekly → PITR capability
+- **Restore drill**：first qualifying drill 在 W18-21 first Live cutover 前；之後 quarterly
+
+**EXCLUDE `decision_features_evaluations` 理由**（per MIT critical finding + operator Q1 拍板）：
+1. 182 GB / 17d window / ~10.7 GB/day growth → 不 exclude 30d 後 disk explode
+2. 0 SQL consumer (`grep 'FROM learning.decision_features_evaluations' = 0 match`) — W6 audit log producer-only
+3. RPO loss tolerable（producer-only audit；不影響策略 / lease / fills 重建）
+4. **NEW retention policy MIT V### proposal**（separate work）：對該表加 `add_retention_policy(..., INTERVAL '30 days')` + compress_after 7d
+
+**Disk budget reframe（post-EXCLUDE）**：
+- Tier 0+1 raw: ~44 GB
+- zstd:3 compressed (5-8x ratio on jsonb-heavy): **6-9 GB / dump**
+- 30d × 9 GB = **270 GB local**（占 842 GB free 的 32%）
+
+**MIT 3 draft script 接點（E1 Track A 會 land）**：
+- `srv/helper_scripts/cron/install_pg_dump_cron.sh`
+- `srv/helper_scripts/cron/trading_ai_pg_dump_cron.sh`
+- `srv/helper_scripts/cron/verify_pg_dump.sh`
 
 ---
 
@@ -360,14 +390,29 @@ ssh trade-core "tail -20 /tmp/openclaw/halt_audit.log 2>/dev/null || echo 'no ha
 | Bybit API | timeout / nonzero retCode | fail-closed retry off + 自動 degrade paper | §5.3 SOP |
 | Tailscale | network outage | engine 不停（不依賴 Tailscale）| 物理 local login |
 
-### 7.2 NAS backup（40TB via 10GbE，per memory `project_hardware_constraints`）
+### 7.2 NAS backup reality（更新 2026-05-27 per MIT empirical + operator Q3 拍板）
 
-**現況**：PG → NAS dump cron 未排（GAP D）；只有 manual ad-hoc
+**Reality check（per MIT report §3.1 HIDDEN RISK #1）**：
+- 既有 §7.2 「NAS available」假設**不成立** — `/mnt/nas` 未掛載 trade-core（baseline §1.1 empirical 驗）；memory `project_hardware_constraints` 是 hardware claim 不是 mount state
+- trade-core 雖是 nfsd 提供者，但 sudo 拒 verify export → 短期不可靠
 
-**建議 cadence**（pre-ratification）：
-- daily 02:00 UTC：`pg_dump --schema=trading,learning,governance,system` → NAS
-- weekly Sunday 03:00 UTC：full `pg_basebackup` + WAL archive
-- monthly 1st：restore drill on staging Linux instance
+**Phase 1（first-day live unblock，per operator Q3 + Q2 拍板）**：
+- **Local-only `/home/ncyu/pg_backups/`** — 30d retention × 9 GB = 270 GB << 842 GB free（占 32%）
+- 不嘗試 NAS mount；avoid「first cron fire fail」陷阱
+
+**Phase 2（W18-21 first-day live cutover 後）**：
+- **operator hand task**：mount NAS + 加 rsync step → local 7d hot + NAS 30d cold（10GbE bandwidth）
+- 異地 + 雙重備援 — 解 Phase 1「同 disk = backup+DB 同毀」風險
+- Owner：operator + E3（不在本 spec scope；spec sign-off 後另案 Phase 2 ticket）
+
+**Phase 3（GA 後）**：
+- enable WAL archive (`archive_mode=on`) + `pg_basebackup` weekly + PITR drill SOP
+- 預期 W22+
+
+**Cadence summary（post-rephase）**：
+- Phase 1：daily 03:00 UTC `pg_dump -Fc` → local；30d retention；first qualifying restore drill before W18-21
+- Phase 2：daily local + rsync → NAS；quarterly drill
+- Phase 3：daily + WAL stream + weekly `pg_basebackup`；monthly PITR drill
 
 ---
 
@@ -386,8 +431,12 @@ ssh trade-core "tail -20 /tmp/openclaw/halt_audit.log 2>/dev/null || echo 'no ha
 | **BB** | clean_restart_flatten.py 對 mainnet 已 dry-run 並驗 reduce_only 行為 | dry-run report | YES |
 | **QA** | 5 handoff inspection commands 走過一輪 + halt_audit.log fsync 驗 | 本 §6 | YES |
 | **QA** | passive_wait_healthcheck.sh 6 domain × 30min PASS rate ≥ 95% 連續 ≥ 7d | TODO §0 + §5 | YES |
-| **MIT** | PG dump cadence cron 已 land + restore drill quarterly schedule 已排（GAP D mitigation）| GAP 修法 | YES |
-| **PM** | 本 ratification checklist 全 12 項 sign-off 集齊 | 本 §8 | YES |
+| **MIT** | PG dump cadence cron 已 land + 30d retention 統一 + EXCLUDE evaluations 已驗 + verify_pg_dump.sh 5 check exit 0 + governance_audit_log 寫入確認（GAP D mitigation）| §10.B + GAP 修法 | YES |
+| **MIT** | first qualifying restore drill 跑通 (S1 full ≤ 4 hr + 9 query PASS + 4/9 invariant re-verify + sqlx checksum repair)（GAP B mitigation）| §10.A + GAP 修法 | YES |
+| **FA** | 9 post-restore L0 validation query 跑通 + L0/L1/L2/L3 業務分層對齊（restore 成功 ≠ 業務可重用 業務 acceptance gate）| §10.A.2 / §10.A.1 | YES |
+| **FA** | 7 drill scenarios（含 mid-Sprint 4 disaster S7）至少 S1/S6/S7 已跑 + 9 invariant matrix 4/9 mandatory re-verify 確認 | §10.A.4 / §10.A.3 | YES |
+| **BB** | Earn cross-sign：S6 drill 跑通 (Disaster after Earn first stake) + Bybit Earn API cross-reconcile earn_movement_log restore 完整性 | §10.A.4 #6 + BB OPS-3 C-4 | YES |
+| **PM** | 本 ratification checklist 全 15 項 sign-off 集齊 | 本 §8 | YES |
 
 **未集齊任一 → first-day live 推遲**。
 
@@ -435,14 +484,212 @@ ssh trade-core "tail -20 /tmp/openclaw/halt_audit.log 2>/dev/null || echo 'no ha
 
 ---
 
+## 10.A GAP B 細化（PG restore drill SOP）— per FA + MIT 2026-05-27
+
+### 10.A.1 L0/L1/L2/L3 業務分層（FA §A — 84 active tables 跨 8 schema）
+
+**摘要表**：
+
+| Schema | L0 Critical | L1 Important | L2 Replayable | L3 Ephemeral | Total |
+|---|---:|---:|---:|---:|---:|
+| governance | 3 | 2 | 0 | 0 | 5 |
+| trading | 5 | 4 | 2 | 1 | 12 |
+| learning | 6 | 11 | 8 | 3 | 28 |
+| observability | 0 | 1 | 0 | 4 | 5 |
+| system | 2 | 0 | 0 | 0 | 2 |
+| replay | 0 | 2 | 5 | 0 | 7 |
+| market | 0 | 0 | 11 | 0 | 11 |
+| public (V001 legacy) | 0 | 0 | 0 | 14 | 14 |
+| **合計** | **16** | **20** | **26** | **22** | **84** |
+
+**L0 Critical 必列 5 表（restore 最優先 / RTO budget 優先消耗）**：
+1. **`trading.fills`** (V003 hypertable 永久) — 唯一 real-fill audit；Bybit reconcile source
+2. **`learning.governance_audit_log`** (V035 永久) — 9 invariant audit 唯一 SoT
+3. **`learning.earn_movement_log`** (V100, per BB OPS-3 C-4) — Bybit Earn 唯一本地 audit
+4. **`learning.lease_transitions`** (V054) — Decision Lease state transition history
+5. **`system.autonomy_level_config`** (V099 singleton CHECK id=1) — Autonomy Level Toggle 唯一 SoT
+
+**L0 Critical 完整 16 表** + L1 / L2 / L3 詳細：see FA report §A.1-§A.4。
+
+**Restore 優先級對應 RTO budget**：
+- L0 16 表 = first 2hr restore window 必 cover
+- L1 20 表 = first 24h restore；資訊損失可接受但需重建
+- L2 26 表 = 可從 raw event / market 重算（market.* 從 Bybit API replay）
+- L3 22 表 = runtime cache；restore 不必
+
+### 10.A.2 9 Post-Restore L0 Validation Queries（必跑；restore 成功 ≠ 業務可重用）
+
+restore 完成後**必跑下列 9 query**作為業務 acceptance gate（per FA §B.1）：
+
+| # | 業務目的 | SQL pattern | Pass criteria |
+|---|---|---|---|
+| 1 | **5-gate state 完整 (I1)** | `SELECT current_level, last_switched_at FROM system.autonomy_level_config WHERE id=1` | 1 row + level IN (CONSERVATIVE/STANDARD) |
+| 2 | **Signed authorization 路徑 (I2)** | `SELECT event_type, COUNT(*) FROM learning.governance_audit_log WHERE event_type='lease_grant' AND ts > pre_disaster_ts GROUP BY event_type` | rows > 0 |
+| 3 | **Decision Lease state (I7)** | `SELECT lease_id, status_to, COUNT(*) FROM learning.lease_transitions WHERE ts > pre_disaster_ts GROUP BY lease_id, status_to` | rows match pre-disaster snapshot |
+| 4 | **trading.fills 完整性 (#8)** | `SELECT COUNT(*), MAX(ts), MIN(ts), SUM(realized_pnl) FROM trading.fills WHERE ts > pre_disaster_ts AND is_paper=false` | count + sum = pre-disaster + Bybit balance match |
+| 5 | **intents → orders FK lineage** | `SELECT COUNT(*) FROM trading.intents i LEFT JOIN trading.orders o ON i.intent_id=o.intent_id WHERE o.intent_id IS NULL` | 0 orphaned post-restore |
+| 6 | **earn_movement_log (BB OPS-3 C-4)** | `SELECT direction, COUNT(*), SUM(amount_usdt), MAX(ts) FROM learning.earn_movement_log GROUP BY direction` | 全 stake/redeem rows preserved |
+| 7 | **strategist_applied_params (#11)** | `SELECT strategy_name, MAX(applied_at) FROM learning.strategist_applied_params GROUP BY strategy_name` | rows for 4 active strategies |
+| 8 | **hypothesis preregistration signed integrity** | `SELECT hypothesis_id, payload_hash, signed_at FROM learning.hypothesis_preregistration ORDER BY signed_at DESC LIMIT 10` | payload_hash NOT NULL + signature valid |
+| 9 | **LAL tier integrity (ADR-0034)** | `SELECT tier_level, COUNT(*) FROM governance.lease_lal_assignments WHERE assigned_at > pre_disaster_ts GROUP BY tier_level` | rows match + 5 tier seed intact |
+
+**任一 query FAIL → restore 不通過 → 不可 resume live trading**。
+
+### 10.A.3 9 Safety Invariant Re-verify Matrix（post-restore；FA §B.2）
+
+| # | Invariant | Re-verify? | Path |
+|---|---|:---:|---|
+| I1 | 5-gate live boundary | **YES** | authorization.json signature + autonomy_level_config + live_reserved + OPENCLAW_ALLOW_MAINNET |
+| I2 | Signed authorization 走 Python renew/approve | **YES** | engine 不能 bypass renew；query 2 |
+| I3 | LiveDemo 不降級 | NO | runtime endpoint；不在 PG |
+| I4 | Mainnet env-var fallback closed | NO | env-var only |
+| I5 | Bybit API timeout fail-closed | NO | runtime IPC |
+| I6 | execution_authority = denylist | NO | Rust constant |
+| I7 | ML/Dream/Executor/Strategist 不繞 Governance | **YES** | lease_transitions + lease_lal_assignments + post-restore first lease；query 3, 9 |
+| I8 | 不 fake healthcheck / fills / lineage | **YES** | governance_audit_log 0 row loss + trading.fills Bybit reconcile；query 2, 4 |
+| I9 | Paper 非 active promotion | NO | restored paper_state 不影響 live |
+
+**Mandatory re-verify count**：**4/9**（I1, I2, I7, I8）；5/9 不需要（I3-I6 + I9 屬 runtime/config，不依賴 PG state）。
+
+### 10.A.4 7 Drill Scenarios（必驗業務 scenarios；FA §B.5）
+
+| # | Scenario | RTO budget | Pass criteria |
+|---|---|---|---|
+| **1** | Full DB corruption recovery | ≤ 4 hr | drop trading_ai → restore latest → 9 query PASS + Bybit balance reconcile |
+| **2** | Single L0 schema restore (governance only) | ≤ 30 min | 驗 selective restore 不破其他 schema |
+| **3** | Single L0 table truncate accident | ≤ 30 min | `pg_restore -t trading.fills`；驗 FK lineage 不破 |
+| **4** | V### migration rollback | ≤ 30 min | V112 LAL retract 後 restore；驗 5 tier seed intact |
+| **5** | TimescaleDB hypertable chunk loss | ≤ 30 min | 單 chunk corrupt → restore；retention policy 不重 fire |
+| **6** | Disaster after Earn first stake | ≤ 4 hr | operator 首 stake 後 24h disaster；**Bybit Earn API cross-check** earn_movement_log 重建完整性 |
+| **7** | **Mid-Sprint 4 first-day live disaster** | **≤ 4 hr + operator approval resume** | 模擬 first 24h disaster；9 invariant re-verify 4/4 PASS + operator approval resume |
+
+### 10.A.5 sqlx_migrations checksum repair post-restore（MIT HIDDEN RISK #3）
+
+**Risk**（per memory `project_2026_05_02_p0_sqlx_hash_drift`）：
+- restore 流程 = `pg_restore` recreates `public._sqlx_migrations` table from dump
+- dump time 點 vs restore 時點 的 `_sqlx_migrations` max 可能不同
+- 若 restore 後 engine 走 `OPENCLAW_AUTO_MIGRATE=1` path → checksum mismatch panic
+- 真實 scenario：S1 full restore 從 7d 前 dump 拿 `_sqlx_migrations max=84` → 期間 V085/V086 apply 過 → restore 後 engine startup 跑 sqlx migrate → V085/V086 重新 apply 但 checksum 與當時不同 → panic
+
+**MANDATORY post-restore step**（restore 後 + engine restart 前）：
+```bash
+# 對齊 _sqlx_migrations.checksum 與當前 SQL file SHA256
+ssh trade-core "cd ~/BybitOpenClaw/srv && cargo run --bin repair_migration_checksum --release -- --confirm"
+```
+
+否則 sqlx engine 拒 boot OR checksum drift error。
+
+### 10.A.6 7-step Restore Procedure（含 sqlx repair）
+
+| Phase | Action | Duration | Verify |
+|---|---|---|---|
+| 1 | Snapshot | freeze writes; emit halt_session | 1 min | live engine state = paused |
+| 2 | Side-restore | `createdb trading_ai_restore_YYYYMMDD; pg_restore -j 16 -d ... dump` | 30-90 min | exit 0 |
+| 3 | **sqlx checksum repair** | `bin/repair_migration_checksum --confirm` (MIT HIDDEN RISK #3) | 1-2 min | 0 checksum mismatch |
+| 4 | Verify | 跑 §10.A.2 9 query + §10.A.3 4/9 invariant | 15 min | 9/9 query PASS + 4/4 invariant PASS |
+| 5 | Swap | rename live → archive; rename restore → live | 5 min | PG up + `_sqlx_migrations` max correct |
+| 6 | Reconcile | engine restart + Bybit position 對賬 reconciler | 30 min | 0 diff |
+| 7 | **operator approval resume** | operator explicit confirm 9/9 + 4/4 PASS + Bybit reconcile | < 5 min | operator sign-off in incident report |
+
+**Total RTO ≤ 4 hr**（含全 7 phase）。
+
+---
+
+## 10.B GAP D 細化（PG dump cron audit trail）— per FA gap #5 + #8 root principle
+
+### 10.B.1 Dump wrapper governance audit trail（FA §C.1）
+
+**Gap**：MIT draft `trading_ai_pg_dump_cron.sh` 寫 JSONL log + sentinel，但**不寫 `learning.governance_audit_log`** governance audit row → 違反原則 #8（every trade reconstructable）+ I8（不 fake healthcheck / lineage）。
+
+**Impact**：dump 失敗 / md5 drift / retention violation 不入 9 invariant audit dashboard；I8 無 PG 級可查證據。
+
+**MANDATORY wrapper enhancement**（E1 IMPL）：
+
+dump 完成（成功 or 失敗）後必 INSERT `learning.governance_audit_log`：
+- `event_type='pg_dump_completed'` — 成功 case；payload 含 dump file path / size / md5 / duration_sec
+- `event_type='pg_dump_failed'` — 失敗 case；payload 含 exit code / error message / partial dump path
+- `event_type='pg_dump_retention_dropped'` — retention prune 觸發；payload 含 dropped file list
+- `event_type='pg_dump_md5_drift'` — md5 verify 失敗；payload 含 expected / actual md5
+
+**Acceptance**：
+```sql
+-- post-dump 第一次驗
+SELECT event_type, ts, payload->>'dump_file' FROM learning.governance_audit_log
+WHERE event_type LIKE 'pg_dump_%' AND ts > now() - INTERVAL '1 hour'
+ORDER BY ts DESC;
+-- expect: 1+ row per daily cron fire
+```
+
+### 10.B.2 9 invariant dashboard 接點
+
+加 `check_pg_dump_freshness()` 進 `srv/helper_scripts/db/passive_wait_healthcheck.sh`（CLAUDE.md §七 mandate）：
+- 預期 last `pg_dump_completed` event ts < 26h（daily 03:00 UTC cron + 2h tolerance）
+- 若 > 26h → WARN → escalate per §4 5-stage ladder
+
+### 10.B.3 Dump 期間 5-gate 影響（FA §C.2）
+
+**Impact 評估**：
+- `pg_dump -Fc` 加 ACCESS SHARE lock；15-30 min for 226GB
+- 阻 `VACUUM FULL`（低 risk；不在 cron 路徑）
+- 與 retention `drop_chunks` 競爭（中 risk；建議 pre-check）
+- 不阻 INSERT/SELECT（OK；fills/intents 持續寫入）
+
+**Pre-check before dump**：
+```sql
+SELECT * FROM timescaledb_information.job_stats
+WHERE next_start < now() + interval '1 hour';
+```
+若有 retention/compression policy 在 dump window 內 fire → offset 1h（dump 改 04:00 UTC）。
+
+**Dump 期間 health monitoring**：
+- dump 開始前 + 結束後 30min 跑 `passive_wait_healthcheck.sh`
+- 若 6 health domain 任一 WARN → 提前 abort dump + alert
+
+### 10.B.4 DR Scenario Coverage（FA §C.3）
+
+| DR scenario | Coverage | Gap mitigation |
+|---|---|---|
+| Tailscale outage | OK | — |
+| Bybit API outage | OK | — |
+| PG out-of-disk | **NEW D-1**: dump 前 `df -h > 5GB` precheck；不足 skip + alert（不執行可能撐爆 disk 的 dump）| E1 wrapper enhancement |
+| PG container crash | partial OK（exit≠0 alert）| — |
+| NAS unmount | N/A Phase 1（local-only）| Phase 2 補 NAS verify |
+| concurrent dump race | OK（lock dir）| — |
+
+### 10.B.5 Compliance（30d audit per CLAUDE.md §四 + V075）
+
+**已解**（per operator Q2 拍板 retention 30d）：
+- V075 risk_verdicts 30d retention drop
+- dump retention 30d 統一 → 9 invariant 30d audit window 完整對齊
+- 不再有「15d dump < 30d audit window → D+16 真 audit window 15d 非 30d」矛盾
+
+### 10.B.6 Earn V100 audit trail（per BB OPS-3 C-4）
+
+**Coverage**：MIT draft 已含 `--schema=learning` 涵蓋 `earn_movement_log` ✓。
+
+**Post-install smoke test**（E1 IMPL acceptance）：
+```bash
+# 第一份 dump 跑
+pg_restore --list /home/ncyu/pg_backups/tier01_$(date +%Y%m%d).dump | grep earn_movement_log
+# expect: ≥ 3 entries (table + index + comment)
+```
+
+`verify_pg_dump.sh` 必加此第 6 check「L0 schema coverage smoke test」。
+
+---
+
+---
+
 ## 11. Ratification Sign-off Block
 
 | Role | Date | Signature / Commit SHA | Notes |
 |---|---|---|---|
-| Operator | | | |
+| Operator | | | per 2026-05-27 4 confirm Q1-Q4（EXCLUDE evaluations / retention 30d / local-only Phase 1 / 立即派 PA+E1+MIT）|
 | PA | 2026-05-26 | spec draft | 本 spec author |
+| PA | 2026-05-27 | spec amendment v2 | 補 §2.1 / §2.2 / §2.3 / §7.2 / §8 / §10 GAP B + GAP D；per FA + MIT push back |
 | E3 | | | OPS-1/2/3/A/F gap clearance |
-| BB | | | clean_restart_flatten dry-run + GAP E |
+| BB | | | clean_restart_flatten dry-run + GAP E + Earn cross-sign §10.A.4 #6（per §8 BB row）|
 | QA | | | 5 handoff command walk-through |
-| MIT | | | GAP B/D land |
+| MIT | | | GAP B/D land + 30d retention + EXCLUDE evaluations + sqlx checksum repair SOP |
+| FA | | | 9 query + 9 invariant 4/9 re-verify + L0/L1/L2/L3 業務分層（per §8 FA rows）|
 | PM | | | final ratification + Sprint 4 first Live unlock |
