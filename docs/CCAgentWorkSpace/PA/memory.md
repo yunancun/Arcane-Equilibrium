@@ -6343,3 +6343,42 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 - Phase 1 seed-same-material 是合理 backward-compat shortcut；但必在 runbook §3 標 migration-only 否則違反 OPS-2 "from urandom" 不變量
 - AuthError enum string `auth_error_kind` 是 alert rule contract — rename 屬 break change，須在 E1 packet 提醒 operator 確認 Grafana dashboard
 - Phase 2 panic block 必須 mirror 既有 IPC panic 位置（main.rs:399 區塊內），不能晚於 watcher spawn 留 dangling tokio task
+
+## 2026-05-27 P0-LG-3 spec verify + TODO patch draft
+
+**Trigger**: Operator audit — TODO §1 行 46 / §6 P1-LG-3-AC-CORRECTION / §15 #1 三處 drift 仍掛 TODO；驗 2026-05-26 PA workspace 兩份 spec land 是否完整解決。
+
+**Verify result**:
+- 3/3 drift FULLY COVERED：(a) fee_source tick-time consumer NOT-FOUND wording drift 已於 spec v2 amendment L1796 移除 + QA 2026-05-21 by-design caveat confirm；(b) V099/V100 占用已於 spec v2 amendment A1 + V104 scaffold 378 LOC + PA report §1.2 完整 V### renumber；(c) §15 #1 LG-3↔funding_arb FALSE dep 已 reframed line 377 + PA report §3.4。
+- sql/migrations/ empirical verify (2026-05-27)：V099 spec-only 預留 / V100/V101/V102/V103/V106/V107/V109/V112 occupied / V104/V105/V108/V110/V111 FREE → V104 ASSIGNED to LG-3 CONFIRMED。
+
+**TODO patch draft**: 3 row diff (§1 L46 + §6 L157 + §15 L377) ≤ 80 line；主會話用 `git commit --only TODO.md` apply。
+
+**IMPL dispatch readiness**:
+- Wave 2.4.A: E1-T1 (Rust SM core ~1700 LOC) + E1-T4 (V104 + writer + healthcheck ~980 LOC) 雙派 + MIT 4-step dry-run
+- Wave 2.4.B-F: sequential per dispatch refresh §3.3 Option B
+- Wall time ~12-13d；earliest start 2026-05-30 post 2 external gate
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--p0_lg3_spec_verify_and_todo_patch.md`
+
+**Lesson**: TODO drift verify SOP — 收到「TODO 某行 drift」報告時，先看是否已 land spec 解決（避免重複 patch）；本次 100% reuse 既有 spec，0 新 spec work。
+
+## 2026-05-27 — Workflow J liquidation_pulse FALSE CLAIM 撤回
+
+- Patch file: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_loss_architectural_root_cause_redesign.md` L243 + L259 兩處撤回標記
+- Evidence: W-AUDIT-8a C1-LIQ-WRITER commit `0e8a8ae8` (2026-05-18) `liquidation_pulse.rs` ACTIVE + healthcheck `80_liquidation_pulse_freshness.py` ACTIVE
+- 反模式記憶：IMPL plan spec 寫「handler 4 weeks ago deleted」「2026-04-06 已刪除」斷言而未帶 commit SHA + 重新驗證的，當後續 W-AUDIT commit 已 revive 時，撰寫日 stale 是 false claim 最大源頭 — 未來 spec 寫 deletion claim 必附 commit SHA 證據；R-1 spec 寫 dormant 假設前需 SSH trade-core empirical verify handler 真實狀態
+- Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_j_false_claim_retraction.md`
+- BB 3 條 push back status：J 撤回 DONE / I L25 NO ACTION / B basis ADR-0046 forward-link debt（Sprint 1A-δ/ε 後補）
+
+## 2026-05-27 — Workflow A 22 fail-closed 1e-3 invariant Option (c) PA design
+
+- PM CONDITIONAL APPROVED Option (c) AMD-09-03 附錄 invariant land (drift audit §11.3 A 條 + §13 P1 行)；不升新 ADR；保留 future option
+- 22 條 invariant 來源 = AMD-09-03 §1.2 行 52 字面（cost_gate / Decision Lease shadow / executor shadow_mode / Cognitive Modulator / SM-04 ladder / Guardian veto / Layer2 manual / lambda:True / shadow_mode_provider IPC / _read_shadow_mode exception / OPENCLAW_LEASE_ROUTER / risk_envelope / strategy active=false / promotion gate min_obs=200 / DSR/PBO None / Kelly hardcoded / [40][33][55][42b][51] / funding_arb ADR-0018）
+- 1e-3 容差是 §1.2 行 63 整體乘積 `Π_{i=1..22} P(pass_i)` 的對比基準，不是每條 1e-3；PA design 分 4 Group：A (I1-7/9-16 P_i ∈ [0.5,0.9]) / B (P_total ∈ [1e-4,1e-2]) / C (I17-21 healthcheck spec 自帶) / D (I8/I22 靜態 grep / config flag)
+- 反模式記憶：將「22 條 fail-closed 1e-3」一刀切讀成每條容差 1e-3 是最大 sub-agent dispatch 誤讀風險；附錄字面必明示「1e-3 僅適用 §2.2 Group B」
+- 附錄結構建議：AMD-09-03 新 §9（不擾動 §1-§8 已 sign-off）+ healthcheck `[81] failclosed_invariant_matrix_aggregate`（避 [78][80] collision）+ 升 ADR future option 三條觸發
+- Cascade: TW patch 5 點 / FA verify 5 hook / QC math 5 hook / R4 cross-ref 10 target（含 ADR-0042-0046 + DOC-01 §5.6 + TODO §3 行 84）
+- 風險 5 大：R1 22 真實 ≥ 50 cherry-pick / R2 1e-3 誤讀 / R3 Group C healthcheck dual-source / R4 Group D funding_arb 與 ADR-0046 PROPOSED 衝突 / R5 工時假設 5 並行不成立應改 PA→FA pre-verify→TW chain
+- PA 推薦先派 FA pre-verify（I1-I22 字面 + §2 分組）再 TW patch，否則 TW 寫完被 FA push back 必返工破 11.5 hr 上限
+- Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_a_22_failclosed_option_c_design.md` (323 行)
