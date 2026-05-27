@@ -169,8 +169,7 @@ const _OC_AUTH_MAX = 5;
 const _ocGetErrorToastAt = {};
 
 async function ocApi(path, opts) {
-  // Auth is handled by HttpOnly cookie — no token in JS needed.
-  // 認證由 HttpOnly cookie 處理，JS 中無需 token。
+  // Auth 由 HttpOnly cookie 處理，JS 中無需 token。
   if (_ocAuthFails >= _OC_AUTH_MAX) {
     console.warn('[ocApi] Auth lockout active (' + _ocAuthFails + ' failures). Probing...');
   }
@@ -178,6 +177,14 @@ async function ocApi(path, opts) {
   const method = (opts && opts.method) || 'GET';
   const headers = {};
   if (opts && opts.body) headers['Content-Type'] = 'application/json';
+
+  // OPS-1 Track B: 寫操作（POST/PUT/DELETE/PATCH）自動附 X-CSRF-Token；讀操作
+  // 不附以避免污染快取 / log。token 來源 = 登入時設定的 oc_csrf cookie（非
+  // HttpOnly，可被 JS 讀取）。若 cookie 不存在（尚未登入），不附 header，
+  // 後端會回 403 csrf_token_mismatch — 預期行為。
+  if (typeof window !== 'undefined' && typeof window.ocCsrfHeaders === 'function') {
+    window.ocCsrfHeaders(method, headers);
+  }
 
   try {
     const r = await fetch(path, {

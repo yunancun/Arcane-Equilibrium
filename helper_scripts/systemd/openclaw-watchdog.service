@@ -1,0 +1,93 @@
+# MODULE_NOTE
+# 模塊用途：Linux systemd unit — engine_watchdog.py（GAP A）。
+#   監控 $OPENCLAW_DATA_DIR/pipeline_snapshot.json 過期，連續 stale 觸發
+#   ENGINE_CRASH 事件 + 3-strike runtime rollback；Layer B inert-probe
+#   檢 TRADING_INERT_PROLONGED 業務心跳（per P0-ENGINE-HALTSESSION-STUCK-FIX）。
+# 對應 macOS launchd plist：helper_scripts/deploy/com.openclaw.engine-watchdog.plist。
+# 與 openclaw-engine.service 對稱但相互獨立 — 兩者 fail 不互相影響。
+#
+# 環境占位符（install_watchdog_service.sh 安裝時 sed 替換）：
+#   __ENGINE_USER__ / __ENGINE_GROUP__
+#   __OPENCLAW_BASE_DIR__ / __OPENCLAW_DATA_DIR__ / __OPENCLAW_SECRETS_ROOT__
+#   __PYTHON_BIN__ — venv python（如 /home/ncyu/.venv/bin/python3）
+#
+# 硬邊界：
+#   1. watchdog 自己 crash 必自動 respawn（解決 P0-OPS-4 §10 GAP A
+#      「watchdog 自己 crash 後無自動恢復」），對齊 RTO §2.1「< 1 min」
+#   2. Restart=always — watchdog 是純監控，沒有 graceful exit-0 語意；
+#      任何退出都重啟（即使 SIGTERM by manual stop 也只是 systemctl stop 終止）
+#   3. WatchdogSec=120 — systemd 自身對 python 進程的 deadman；
+#      watchdog 內部會 sd_notify (or 不會即略過) — 此處設保守 120s 不依賴
+#      sd_notify，避誤殺；未來若 watchdog 補 sd_notify(READY=1, WATCHDOG=1)
+#      可降至 60s
+#   4. CLI args 對齊 restart_all.sh:226 + launchd plist：
+#      --data-dir / --stale-threshold 45 / --grace-period 120 / --poll-interval 1
+#
+# 安裝步驟：
+#   sudo bash helper_scripts/systemd/install_watchdog_service.sh
+#
+# 啟停命令：
+#   sudo systemctl start openclaw-watchdog
+#   sudo systemctl stop openclaw-watchdog
+#   sudo systemctl status openclaw-watchdog
+#   sudo journalctl -u openclaw-watchdog -f
+
+[Unit]
+Description=Arcane Equilibrium / OpenClaw Engine Watchdog
+Documentation=file:///__OPENCLAW_BASE_DIR__/docs/execution_plan/specs/2026-05-26--p0-ops-4-first-day-live-runbook.md
+# watchdog 不要 Requires=openclaw-engine — 設計上 engine 可能還沒啟而 watchdog 先 ready
+# 等 snapshot 出來；After= 給予 startup 順序提示但非硬依賴
+After=network-online.target openclaw-engine.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__ENGINE_USER__
+Group=__ENGINE_GROUP__
+WorkingDirectory=__OPENCLAW_BASE_DIR__
+
+# 載入同一份 secrets env（讓 watchdog 內可能呼叫 halt_audit_pg_writer 等用到 PG 的 path）
+EnvironmentFile=__OPENCLAW_SECRETS_ROOT__/environment_files/basic_system_services.env
+
+Environment="OPENCLAW_BASE_DIR=__OPENCLAW_BASE_DIR__"
+Environment="OPENCLAW_DATA_DIR=__OPENCLAW_DATA_DIR__"
+Environment="OPENCLAW_SECRETS_ROOT=__OPENCLAW_SECRETS_ROOT__"
+Environment="PYTHONUNBUFFERED=1"
+Environment="PYTHONDONTWRITEBYTECODE=1"
+
+# PreStart：python + watchdog script + data dir 存在
+ExecStartPre=/usr/bin/test -x __PYTHON_BIN__
+ExecStartPre=/usr/bin/test -f __OPENCLAW_BASE_DIR__/helper_scripts/canary/engine_watchdog.py
+ExecStartPre=/usr/bin/test -d __OPENCLAW_DATA_DIR__
+
+ExecStart=__PYTHON_BIN__ __OPENCLAW_BASE_DIR__/helper_scripts/canary/engine_watchdog.py \
+    --data-dir __OPENCLAW_DATA_DIR__ \
+    --stale-threshold 45 \
+    --grace-period 120 \
+    --poll-interval 1
+
+# Graceful stop — watchdog 內部 signal handler 退出 (~5s)
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+# 重啟策略 — watchdog 自己必須極高可用性，crash 後 < 60s respawn
+Restart=always
+RestartSec=10
+StartLimitBurst=10
+StartLimitIntervalSec=600
+# Burst 10 / 10min — watchdog 不應 thrash；若 10 連 fail 表 python env 損毀，
+# systemd 進入 failed state → operator 需 journalctl 排查（per RTO §2.1）
+
+# systemd 自身對 watchdog 的 deadman — 預留；若 engine_watchdog.py 未補
+# sd_notify，systemd 不會誤殺（沒收到 ping 但 process 還活著 → systemd 殺重啟）
+# 故先註解，未來 watchdog 加 sd_notify 後再開
+# WatchdogSec=120
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=openclaw-watchdog
+
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

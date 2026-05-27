@@ -70,6 +70,9 @@ API_VENV="program_code/exchange_connectors/bybit_connector/control_api_v1/.venv"
 API_WORKDIR="$REPO_ROOT/program_code/exchange_connectors/bybit_connector/control_api_v1"
 SECRETS_ENV="$SECRETS_ROOT/environment_files/basic_system_services.env"
 IPC_SECRET_FILE="$SECRETS_ROOT/environment_files/ipc_secret.txt"
+# OPS-2 SECRET-SPLIT — clean_restart 不 seed（保留 state；seed 由 restart_all 主路徑做）；
+# spawn 點注入 env 讓 engine + API 接通新 path。
+LIVE_AUTH_SIGNING_KEY_FILE="$SECRETS_ROOT/environment_files/live_auth_signing_key.txt"
 MAINT_FLAG="$DATA_DIR/engine_maintenance.flag"
 
 # Colors for readability
@@ -382,6 +385,7 @@ OPENCLAW_DATA_DIR="$DATA_DIR" \
 OPENCLAW_CANARY_MODE=1 \
 OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
 OPENCLAW_IPC_SECRET_FILE="$IPC_SECRET_FILE" \
+OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE="$LIVE_AUTH_SIGNING_KEY_FILE" \
     nohup "$BIN" > "$DATA_DIR/engine.log" 2>&1 &
 ENGINE_PID=$!
 echo "    engine PID: $ENGINE_PID"
@@ -390,6 +394,7 @@ echo "  starting API (4 workers, bind $API_BIND_HOST:8000)..."
 cd program_code/exchange_connectors/bybit_connector/control_api_v1
 OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
 OPENCLAW_IPC_SECRET_FILE="$IPC_SECRET_FILE" \
+OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE="$LIVE_AUTH_SIGNING_KEY_FILE" \
     nohup .venv/bin/python3 .venv/bin/uvicorn app.main:app \
     --host "$API_BIND_HOST" --port 8000 --workers 4 \
     > "$DATA_DIR/api.log" 2>&1 &

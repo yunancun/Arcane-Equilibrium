@@ -8,6 +8,7 @@
 **狀態**：Accepted — planning authority；F-01 source 不再以「binary fail-closed default」為唯一姿態，但實作必待 §5 IMPL wave land 後 runtime active
 **索引**：`SPECIFICATION_REGISTER.md` Amendments section
 **TODO 連結**：W-AUDIT-3 / W-AUDIT-6 / W-AUDIT-9（新）/ P0-EDGE-1 / P0-LG-2 / P0-LG-3 / P0-LG-4 / R-1（Alpha Surface Foundation pre-req）
+**附錄補充**：2026-05-27 新增 §9 Fail-Closed 1e-3 Invariant 矩陣附錄（per drift audit §11.3 A Option (c) CONDITIONAL APPROVED；PA design + FA pre-verify CONDITIONAL APPROVE 後 land）
 
 ---
 
@@ -382,6 +383,148 @@ T1+T2+T3+T6 可 4-way parallel；T4+T5 待 T2/T1 完；T7 final。
 | QC | 同 PA 報告 引用 | 2026-05-09 | ✅ 共識 |
 | MIT | 同 PA 報告 引用 | 2026-05-09 | ✅ 共識 |
 | PM | TBD（本 amendment commit 後通知）| 2026-05-09 | 🟡 Pending sign-off post-commit |
+
+---
+
+## 9. Fail-Closed 1e-3 Invariant 矩陣附錄（2026-05-27 補；per drift audit §11.3 A Option (c)）
+
+> **╔══════════════════════════════════════════════════════════════════╗**
+> **║ ⚠ BIG BOX WARNING — 1e-3 容差語意                                ║**
+> **║                                                                  ║**
+> **║ 1e-3 是 §1.2 行 63 所述「22 條 fail-closed default 整體乘積」    ║**
+> **║ `P_total = Π_{i=1..22} P(pass_i)` 的對比基準（Group B），        ║**
+> **║ **不是**每條 invariant 的容差。任何把「22 條 fail-closed 1e-3」  ║**
+> **║ 讀成「每條容差 1e-3」皆為誤讀，將觸發治理 push back。            ║**
+> **║                                                                  ║**
+> **║ 各條 invariant 的真實容差語意，依其性質分為 4 Group：             ║**
+> **║   • Group A — per-invariant `P_i ∈ [0.5, 0.9]`                   ║**
+> **║   • Group B — 整體乘積 `log10(P_total) ∈ [-4, -2]`               ║**
+> **║   • Group C — 沿用既有 healthcheck spec 自帶容差                 ║**
+> **║   • Group D — 靜態 codebase 檢查 / config flag                    ║**
+> **╚══════════════════════════════════════════════════════════════════╝**
+
+### 9.1 附錄來源與治理理由
+
+- **drift audit §11.3 A 行 424 PM 註原文引用**：「22 fail-closed 1e-3 invariant ADR 化 — PM verdict: Option (c) AMD-09-03 附錄 invariant（不升新 ADR）；理由 = AMD-25-21-01 v2 已建上層 fail-safe framework；1e-3 推導不滿足 v2 §Decision 2.2 evidence gate；**22 條真實 ≥ 50 條**；Option (c) 保留升 ADR future option。」（粗體強調為本附錄補；其餘字字相符 drift audit 原文）
+- **本附錄 land 範圍**：僅 land AMD-09-03 §1.2 行 52 一字一句列舉的 22 條 invariant 字面（PM Option (c) verdict 字面）；其餘「真實 ≥ 50 條」屬未來升 ADR candidate（見 §9.6 P3 backlog）
+- **PA design source**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_a_22_failclosed_option_c_design.md` §1 + §2
+- **FA pre-verify source**：`docs/CCAgentWorkSpace/FA/workspace/reports/2026-05-27--workflow_a_22_invariant_pre_verify.md` C1-C6 wording 條件
+
+### 9.2 22 條 invariant 矩陣（I1-I22）
+
+22 條 invariant 一字未改抽取自 AMD-09-03 §1.2 行 52 原文，按行內 ` / ` 分隔順序編號：
+
+| ID | Invariant（§1.2 行 52 字面）| 類別 | Group |
+|---|---|---|---|
+| I1 | cost_gate | gate 預設姿態 | A |
+| I2 | Decision Lease shadow | lease 授權路徑 | A |
+| I3 | executor shadow_mode | 5-agent 鏈授權 | A |
+| I4 | Cognitive Modulator default conservative | agent 行為調製 | A |
+| I5 | SM-04 ladder | 風控 escalation | A |
+| I6 | Guardian veto | per-intent 風控 | A |
+| I7 | Layer2 manual-only | AI escalation | A |
+| I8 | lambda:True 移除 | runtime callable 收緊 | **D** |
+| I9 | `shadow_mode_provider` IPC fail | IPC fail-closed | A |
+| I10 | `_read_shadow_mode` exception fallback | Python exception path | A |
+| I11 | OPENCLAW_LEASE_ROUTER 單向 | router 方向收緊 | A |
+| I12 | `risk_envelope` 默認收縮 | 風控 envelope | A |
+| I13 | strategy active=false default for new strategies | 策略註冊 | A *(註)* |
+| I14 | promotion gate min_observations=200 | promotion 樣本門 | A *(註)* |
+| I15 | DSR/PBO 卡 None evidence | 統計 evidence gate | A *(註)* |
+| I16 | Kelly tier hardcoded | sizing 預設 | A *(註)* |
+| I17 | `[40]` realized edge tolerance | healthcheck edge | **C** |
+| I18 | `[33]` maker fill-rate target | healthcheck maker | **C** |
+| I19 | `[55]` chain coverage | healthcheck lineage | **C** |
+| I20 | `[42b]` LOW_SAMPLE | healthcheck sample | **C** |
+| I21 | `[51]` opportunity_positive_n=0 | healthcheck opportunity | **C** |
+| I22 | `funding_arb` ADR-0018 退役 default | 策略 retired default | **D** |
+
+**Group A 備註（per FA C6）**：I13-I16 屬「config flag set 持續性」型 invariant — 一旦於 config 設置即為 binary（active/inactive），其「通過率」P_i = 1.0 為穩態。視為 P_i = 1.0 binary，**豁免 9.7 healthcheck `[81]` 的 7d auto fail-closed threshold**（避免把 stable config 持續性誤判為「過寬」）；變更動作仍走 IPC + Decision Lease + audit log（與 risk_config 同等治理）。
+
+**字面對齊驗證**：FA pre-verify 已確認 22/22 字字相符、0 創造、0 漏抽、0 順序重排（FA-1 PASS，引用 source 同 §9.1）。
+
+### 9.3 Group C — Healthcheck spec source path（不重定義容差）
+
+I17-I21 五條 invariant 為帶 ID healthcheck，**容差由各 healthcheck spec 自帶；本附錄不重定義**（per FA C3 + PA §2.3 dual-source-of-truth 防漂）：
+
+| ID | Healthcheck | Spec source path | 容差語意（既有 spec 自帶）|
+|---|---|---|---|
+| I17 | `[40]` realized edge tolerance | `helper_scripts/db/passive_wait_healthcheck/checks_execution.py:1125-1137`（DB-truth acceptance monitor）| `avg_net_bps` + Wilson lower bound；spec 內定 |
+| I18 | `[33]` maker fill-rate target | `helper_scripts/db/passive_wait_healthcheck/checks_execution.py:1027-1037`（G2-01 PostOnly monitor）+ ADR-0039 maker_fill_rate_30d | spec + ADR 內定 |
+| I19 | `[55]` chain coverage | `helper_scripts/db/passive_wait_healthcheck/checks_agent_spine.py`（Agent Decision Spine lineage）+ 本 AMD §2.2 Stage 3 引用 | `chain_with_lease ratio ≥ 0.7`（per §2.2 Stage 3）|
+| I20 | `[42b]` LOW_SAMPLE | `helper_scripts/db/passive_wait_healthcheck/__init__.py:121-128 + 288-291`（LG-5-IMPL-3 governance contract + attribution drift）+ 本 AMD §2.2 Stage 1 引用 | `settled eligible ratio < 0.95`（per §2.2 Stage 1 rollback）|
+| I21 | `[51]` opportunity_positive_n=0 | `helper_scripts/db/passive_wait_healthcheck/checks_scanner_market.py`（scanner opportunity shadow checks）| `n=0` 即觸 fail-closed（spec 已為 binary）|
+
+**1e-3 不適用 Group C**。
+
+### 9.4 1e-3 容差語意（Group A vs Group B vs Group C/D）
+
+**核心反向澄清（per FA C1）**：
+
+> **1e-3 是 Group B 整體乘積的對比基準，*不是*每條 invariant 的容差。**
+
+容差分組規則：
+
+| Group | 條目 | 1e-3 適用 | 容差方式 | 觸發 fail-closed 條件 |
+|---|---|---|---|---|
+| A | I1-I7, I9-I12 (per-invariant runtime 觀察) | ❌ | `P_i ∈ [0.5, 0.9]` per-invariant | `P_i < 0.5` 持續 ≥ 24h（過嚴）OR `P_i = 1.0` 持續 ≥ 7d（完全 bypass）|
+| A *(註)* | I13-I16 (config flag 持續性) | ❌ | binary `P_i = 1.0` 視為穩態 | 配置變更未走 IPC + Lease（治理路徑外）|
+| B | 整體乘積 P_total | ✅ | `log10(P_total) ∈ [-4, -2]`（±1 數量級 window）| `P_total > 1e-2` 持續 ≥ 24h（死循環解套訊號）OR `P_total < 1e-4` 持續 ≥ 24h（demo 進一步癱瘓）|
+| C | I17-I21 healthcheck | ❌ | 各 healthcheck spec 自帶（§9.3）| spec 內定 |
+| D | I8, I22 removal/retirement | ❌ | 靜態 grep / config flag | I8 `lambda: True` 殘留 / I22 `funding_arb.active=true` |
+
+**數學自洽性**（QC verify 範圍）：採 P_i ∈ [0.5, 0.9]，22 條乘積下界 `0.5^22 ≈ 2.4e-7`、上界 `0.9^22 ≈ 0.098`，1e-3 落於區間內，與 §1.2 行 63「乘積在 1e-3 量級」字面自洽。
+
+### 9.5 與既有不變式族群的關係（不替代既有 4 類）
+
+本附錄是 §3 既有 4 類硬不變式之外的**細粒度量化容差層**，**不替代、不弱化、不繞過**既有任一類。對應如下：
+
+- **§9.5.1**：§3.1 DOC-08 §12 9 條安全不變量 — 本附錄不改、不弱化；違反任一條仍立即觸 Stage 0 rollback + incident
+- **§9.5.2**：§3.2 SM-04 5 ladder — 本附錄不改；SM-04 ≥ L3 仍 rollback to Stage 0 across all cohorts
+- **§9.5.3**：§3.3 Live boundary 5-gate — 本附錄完全不適用 live；Stage 4 仍需 5-gate 全滿足
+- **§9.5.4**：§3.4 §二 16 根原則硬不變式 — 本附錄與 #1/#2/#4/#5/#6/#7/#13/#14 正向相容（per AMD-09-03 §6.3 已校核）
+- **§9.5.5 DOC-08 §12 9 條 vs §9 附錄 22 條 abstraction level 對應表（per FA C5）**：
+
+| 維度 | DOC-08 §12 9 條 | AMD-09-03 §9 附錄 22 條 |
+|---|---|---|
+| **Source 權威** | DOC-08 §12 + CLAUDE.md §四 Hard Boundaries | AMD-09-03 §1.2 行 52 4-agent consensus |
+| **Abstraction level** | Enforcement gate（live boundary 5-gate / lease acquired before submit / Bybit retCode != 0 等）| Sub-component fail-closed default（cost_gate / shadow_mode / risk_envelope 收縮等）|
+| **強度** | 硬邊界 — 任一違反即立即 cancel_token + Stage 0 rollback | 細粒度容差 — Group B `log10(P_total) ∈ [-4, -2]`；Group A per-invariant `[0.5, 0.9]` |
+| **觀察粒度** | binary PASS/FAIL（per intent / per submit）| 24h-7d window 統計觀察 |
+| **重疊條目** | I7（ML/Dream/Executor 不繞 Lease）| I2 + I3 + I7 三條交集（同層不同切面，無 enforcement 衝突）|
+| **覆蓋語意** | 「最後一道門」防越權 | 「進入下單路徑的條件機率」防系統性死循環 |
+| **失敗處置** | 立即 incident + Stage 0 | 24h-7d 觀察後升級 / rollback / 升 ADR |
+
+兩層不變式族群並存無衝突；本附錄補的是「fail-closed 哲學在 demo runtime 的細粒度量化容差」，而非取代既有 4 類硬邊界。
+
+### 9.6 升 ADR 觸發條件（future option 保留）
+
+本附錄保留升 ADR 條件（per drift audit §11.3 A「Option (c) 保留升 ADR future option」字面 + FA C2）：
+
+1. **22 條擴張到 ≥ 30 條**：當未來 audit / agent consensus 累積出 ≥ 30 條 fail-closed default 證據，本附錄即不足以承載，必升新 ADR
+2. **P_total 連續觀察超界**：runtime healthcheck `[81]`（見 §9.7）偵測 `log10(P_total)` 連續 14d 跌出 `[-4, -2]` window — 表示死循環解套或進一步癱瘓的長期信號，需升 ADR 重評
+3. **Group D 任一條目恢復 active**：I8 `lambda: True` 重新引入 codebase / I22 `funding_arb` 恢復 `active=true`（與 AMD-2026-05-26-01 + ADR-0018 + ADR-0046 PROPOSED 衝突）— 必升 ADR 重評 retirement default
+4. **DOC-08 §12 或 §二 16 原則新增條目**：上層硬邊界擴張時，本附錄需重新對齊 §9.5.5 abstraction level 對應表
+
+**P3 backlog（per FA C2 + drift audit §11.3 A PM 註）**：「produce 28 條 additional candidate list — 補齊 22 條 → ≥ 50 條完整 fail-closed default 盤點」列為 future ADR 升級的 P3 backlog item；owner = 主會話 + PA + FA 並行 audit；觸發條件 = §9.6 第 1 條或第 4 條啟動時同步啟動。
+
+**I22 funding_arb 治理 anchor（per FA C4）**：I22「`funding_arb` ADR-0018 退役 default」字面同時 cross-ref 三個治理 anchor — **AMD-2026-05-26-01**（roster-level retirement：strategy roster 5→4）+ **ADR-0018**（funding_arb retire 原始決議）+ **ADR-0046 PROPOSED**（basis observation/execution split future redesign slot；2026-05-25 BB APPROVE 候選）。三 anchor 任一變動均觸 §9.6 條件 3 升 ADR。
+
+### 9.7 Healthcheck 接線（`[81] failclosed_invariant_matrix_aggregate`）
+
+新 healthcheck 編號 `[81]`（避 `[78]/[80]` collision per drift audit §11 canary [67]→[80] rename 教訓）：
+
+- **檔案位置**：`helper_scripts/db/passive_wait_healthcheck/checks_governance.py`（與 `[55]/[56]/[58]` 同 family）
+- **Check 名稱**：`check_81_failclosed_invariant_matrix_aggregate(cur)`
+- **語義**：
+  - 每 24h 對 **Group B** 觀測 `P_total`，驗證 `log10(P_total) ∈ [-4, -2]`；超界持續 ≥ 24h → FAIL
+  - 對 **Group A** I1-I7, I9-I12 每條觀測 `P_i`，驗證 `P_i ∈ [0.5, 0.9]`；過嚴持續 ≥ 24h / 完全 bypass 持續 ≥ 7d → FAIL
+  - **Group A 註項** I13-I16 視為 binary `P_i = 1.0` 穩態，**豁免** 7d auto fail-closed threshold（per §9.2 Group A 備註）
+  - **Group C** I17-I21 沿用既有 healthcheck spec（§9.3 source path），本 check **不重新評估**容差
+  - **Group D** I8 靜態 grep codebase；I22 讀 strategy roster config flag
+- **Cron**：`0 */6 * * *`（與 passive_wait_healthcheck family 同期）
+- **Exit code**：FAIL → exit 1（silent-dead 偵測）；WARN → exit 0 + log
+- **SQL prototype**：由 QC dispatch（§4.3 QC-3 範圍）；Linux PG dry-run 強制（per `feedback_v_migration_pg_dry_run.md`）
 
 ---
 

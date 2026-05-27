@@ -1,0 +1,35 @@
+# MODULE_NOTE (CN)：
+#   OPS-1 Track A：Caddy 反向代理 systemd unit。
+#   為什麼 Restart=always + RestartSec=5：spec §2.3 失敗模式表 — Caddy crash
+#   時 systemd 5s 內復活；連續 5 次 fail 由 systemd journal 反映給 operator
+#   觀察。
+#
+# 部署：sudo cp helper_scripts/systemd/openclaw-caddy.service /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable --now openclaw-caddy
+#
+# 硬邊界：
+#   - bind 127.0.0.1:8000 由 FastAPI 控；本 unit 不傳 backend 端口
+#   - 不開 admin endpoint（Caddyfile.template 已 admin off）
+
+[Unit]
+Description=OpenClaw Caddy reverse proxy (TLS termination via Tailscale cert)
+Documentation=https://caddyserver.com/docs/
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=caddy
+Group=caddy
+ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/Caddyfile
+ExecReload=/usr/bin/caddy reload --config /etc/caddy/Caddyfile --force
+Restart=always
+RestartSec=5
+LimitNOFILE=1048576
+LimitNPROC=1048576
+PrivateTmp=true
+ProtectSystem=full
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

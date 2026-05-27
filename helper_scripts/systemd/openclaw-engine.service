@@ -1,0 +1,94 @@
+# MODULE_NOTE
+# 模塊用途：Linux systemd unit — Rust openclaw-engine 主進程（取代 nohup + watchdog
+#   manual respawn 鏈），對齊 P0-OPS-4 first-day live RTO < 5min（GAP F）。
+# 對應 macOS launchd plist：helper_scripts/deploy/com.openclaw.engine.plist。
+# 環境占位符（install_engine_service.sh 安裝時 sed 替換）：
+#   __ENGINE_USER__ / __ENGINE_GROUP__ — 跑 engine 的 OS 帳號（通常 trade-core 上 ncyu）
+#   __OPENCLAW_BASE_DIR__ — srv repo root（如 /home/ncyu/BybitOpenClaw/srv）
+#   __OPENCLAW_DATA_DIR__ — runtime data dir（通常 /tmp/openclaw 或 $HOME/.openclaw_runtime）
+#   __OPENCLAW_SECRETS_ROOT__ — secrets 根（如 /home/ncyu/BybitOpenClaw/secrets）
+# 硬邊界：
+#   1. 不允許 0.0.0.0 / network all-interface bind（engine 走 IPC unix socket）
+#   2. CLAUDE.md §四 5 gate — restart sentinel `last_shutdown_kind` 寫由
+#      restart_all.sh 控制，本 unit 重啟 = crash/auto path = 不清 authorization.json
+#   3. Restart=on-failure（非 always）— SIGTERM exit-0 視為 operator 主動 stop，
+#      不自動重啟；非 0 exit 才 restart
+#   4. RestartSec=10 + StartLimitBurst=5 + StartLimitIntervalSec=300 — 5 連 fail
+#      / 5min 內 → 進入 failed state 停止 thrash（per RTO §2.1 「5 連 fail →
+#      circuit-break + alert」）
+#   5. PreStart hook 驗 binary + secret file 存在；缺即 fail-closed 不啟動
+#
+# 安裝步驟：
+#   sudo bash helper_scripts/systemd/install_engine_service.sh
+#
+# 啟停命令：
+#   sudo systemctl start openclaw-engine
+#   sudo systemctl stop openclaw-engine
+#   sudo systemctl status openclaw-engine
+#   sudo journalctl -u openclaw-engine -f
+#
+# RTO 驗證 SOP：見 helper_scripts/systemd/README.md §RTO
+
+[Unit]
+Description=Arcane Equilibrium / OpenClaw Rust Trading Engine
+Documentation=file:///__OPENCLAW_BASE_DIR__/docs/execution_plan/specs/2026-05-26--p0-ops-4-first-day-live-runbook.md
+After=network-online.target postgresql.service
+Wants=network-online.target
+# PG 不在同機亦不阻 engine 啟動（engine 內含 PG retry/backoff）
+Requires=
+
+[Service]
+Type=simple
+User=__ENGINE_USER__
+Group=__ENGINE_GROUP__
+WorkingDirectory=__OPENCLAW_BASE_DIR__
+
+# EnvironmentFile — 載入 basic_system_services.env（含 OPENCLAW_ALLOW_MAINNET /
+# POSTGRES_* / 其他 runtime env）；缺檔 systemd fail-closed
+EnvironmentFile=__OPENCLAW_SECRETS_ROOT__/environment_files/basic_system_services.env
+
+# 補上 base/data dir + IPC socket path（與 restart_all.sh L520 對齊）
+Environment="OPENCLAW_BASE_DIR=__OPENCLAW_BASE_DIR__"
+Environment="OPENCLAW_DATA_DIR=__OPENCLAW_DATA_DIR__"
+Environment="OPENCLAW_SECRETS_ROOT=__OPENCLAW_SECRETS_ROOT__"
+Environment="OPENCLAW_CANARY_MODE=1"
+Environment="OPENCLAW_IPC_SOCKET=__OPENCLAW_DATA_DIR__/engine.sock"
+Environment="OPENCLAW_DATABASE_URL_FILE=__OPENCLAW_DATA_DIR__/runtime_secrets/openclaw_database_url"
+Environment="OPENCLAW_IPC_SECRET_FILE=__OPENCLAW_SECRETS_ROOT__/environment_files/ipc_secret.txt"
+
+# PreStart fail-closed 三檢：binary / secret file / DATABASE_URL file 存在
+# 任一失敗 → systemd start 立即 fail，不空跑 engine
+ExecStartPre=/usr/bin/test -x __OPENCLAW_BASE_DIR__/rust/target/release/openclaw-engine
+ExecStartPre=/usr/bin/test -s __OPENCLAW_SECRETS_ROOT__/environment_files/ipc_secret.txt
+ExecStartPre=/usr/bin/test -s __OPENCLAW_DATA_DIR__/runtime_secrets/openclaw_database_url
+
+# Engine binary 啟動
+ExecStart=__OPENCLAW_BASE_DIR__/rust/target/release/openclaw-engine
+
+# Graceful stop：engine 內部有 SIGTERM → cancel_token shutdown 邏輯（10s 足夠）
+KillSignal=SIGTERM
+TimeoutStopSec=15
+
+# 重啟策略 — RTO < 5min
+# Restart=on-failure：SIGTERM exit-0 視 operator 主動 stop，不自動重啟
+# RestartSec=10：避免 race；對齊 launchd ThrottleInterval=5 但稍寬以含 PG retry
+# StartLimitBurst=5 + StartLimitIntervalSec=300：5 連 fail / 5min 內進入 failed
+#   → 配合 watchdog circuit-break 形成雙重防線（per AMD-2026-05-21-01 v2 §5.1）
+Restart=on-failure
+RestartSec=10
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
+# 日誌 — engine 內部已 tracing::warn/info 寫 $OPENCLAW_DATA_DIR/engine.log；
+# systemd 額外 capture stdout/stderr 到 journal 供 journalctl 檢索
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=openclaw-engine
+
+# 資源限制 — 避 fork-bomb / memory leak 拖垮 trade-core
+LimitNOFILE=65536
+# 不設 MemoryMax — engine 內存上限由業務層控制（cache / order book 等）；
+# systemd 強制 OOM kill 違反 fail-closed 語意（會留半成型 IPC state）
+
+[Install]
+WantedBy=multi-user.target

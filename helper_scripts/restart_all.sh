@@ -70,6 +70,12 @@ API_BIND_HOST="$(resolve_openclaw_api_bind_host)"
 RUNTIME_SECRET_DIR="$DATA_DIR/runtime_secrets"
 OPENCLAW_DATABASE_URL_FILE="$RUNTIME_SECRET_DIR/openclaw_database_url"
 OPENCLAW_IPC_SECRET_FILE="$SECRETS_ROOT/environment_files/ipc_secret.txt"
+# OPS-2 SECRET-SPLIT — Phase 1 新增獨立 live-auth signing key 檔案。
+# 為什麼分檔：spec §2 把 IPC HMAC（180d cadence）與 live-auth signing（90d cadence）
+# 的 blast radius 隔離；rotate 任一不影響另一 signed artefact。
+# Phase 1 期間（D+0..D+14）若 file 不存在 → prepare_runtime_secret_files seed
+# 自 ipc_secret.txt（同值），確保零 runtime regression。
+OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE="$SECRETS_ROOT/environment_files/live_auth_signing_key.txt"
 BYBIT_SECRETS_DIR="${OPENCLAW_SECRETS_DIR:-$SECRETS_ROOT/secret_files/bybit}"
 ENGINE_BIN_REL="rust/target/release/openclaw-engine"
 ENGINE_BIN_ABS="$REPO_ROOT/$ENGINE_BIN_REL"
@@ -142,6 +148,19 @@ prepare_runtime_secret_files() {
     chmod 600 "$OPENCLAW_DATABASE_URL_FILE" 2>/dev/null || true
     if [ -f "$OPENCLAW_IPC_SECRET_FILE" ]; then
         chmod 600 "$OPENCLAW_IPC_SECRET_FILE" 2>/dev/null || true
+    fi
+    # OPS-2 SECRET-SPLIT Phase 1 — seed live_auth_signing_key.txt 自 ipc_secret.txt。
+    # 為什麼 [ ! -f ] 條件嚴：spec §8.5 E2 重點 #2 — 若已存在新 file（已 rotate 過
+    # 為獨立值）不可被 ipc 同值覆蓋，否則破壞 rotation。重 boot idempotent。
+    # Phase 2（D+14+）operator 須走 OPS-2 runbook §3 generate new key from urandom；
+    # 此 seed 路徑是 migration-only shortcut（spec §9.4 hidden risk Phase 1 vs urandom）。
+    if [ ! -f "$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE" ] && [ -f "$OPENCLAW_IPC_SECRET_FILE" ]; then
+        cp "$OPENCLAW_IPC_SECRET_FILE" "$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE"
+        chmod 600 "$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE"
+        echo ">>> OPS-2 SECRET-SPLIT phase 1: seeded $OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE from ipc_secret.txt (same material; rotate independently per OPS-2 runbook)"
+    fi
+    if [ -f "$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE" ]; then
+        chmod 600 "$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE" 2>/dev/null || true
     fi
 }
 
@@ -521,6 +540,7 @@ restart_engine() {
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE=1 \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
+        OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE="$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE" \
         OPENCLAW_AUTO_MIGRATE="${auto_migrate}" \
         OPENCLAW_ENABLE_PAPER="${enable_paper}" \
         OPENCLAW_AGENT_SPINE_RUNTIME_MODE="${agent_spine_runtime_mode}" \
@@ -689,6 +709,7 @@ restart_api() {
         OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
+        OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE="$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE" \
         OPENCLAW_ENGINE_BINARY_SHA="$engine_sha" \
         OPENCLAW_REPLAY_FIXTURE_DEFAULT="$replay_fixture_default" \
         OPENCLAW_REPLAY_SIGNING_KEY_FILE="$replay_signing_key_file" \

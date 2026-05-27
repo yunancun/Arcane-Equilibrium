@@ -1,0 +1,70 @@
+# Caddyfile.template — OPS-1 Track A：Caddy 反向代理 + Tailscale cert 終結 HTTPS。
+#
+# MODULE_NOTE (CN)：
+#   FastAPI/uvicorn bind 127.0.0.1:8000；Caddy 在 tailnet IPv4:443 終結 TLS，
+#   反代過去。為什麼選 Tailscale-issued cert：見 spec §1.2 五條理由摘要：
+#   公網零暴露 / 攻擊面只在 Tailscale-authenticated 設備 / Apple Silicon 可移植
+#   / 失敗模式可控 / 與既有 bind 對齊。
+#
+# 部署時用 envsubst 處理：
+#   envsubst < Caddyfile.template > /etc/caddy/Caddyfile
+# 必填 env：
+#   OPENCLAW_TLS_CERT_HOST   — Tailnet DNS name，例：trade-core.tail358794.ts.net
+#   OPENCLAW_TLS_CERT_DIR    — Linux 預設 /var/lib/tailscale/certs；macOS 不同
+#   OPENCLAW_API_BACKEND_PORT — 預設 8000（uvicorn bind 端口）
+#
+# 跨平台注意：
+#   - macOS 部署時 cert_dir = $HOME/Library/Application Support/Tailscale/certs
+#   - launchd 取代 systemd；timer 改為 launchd plist 的 StartCalendarInterval
+#   - helper_scripts/lib/tls_cert.sh 抽象平台差異
+#
+# 硬邊界：
+#   - 永不 bind 0.0.0.0:443；只 bind tailnet IPv4（讓 Tailscale ACL 控存取）
+#   - 禁用 Caddy 內建 dev CA — 必走真實 Tailscale cert，避免 dev mode 退路
+#   - 拒 HTTP 直連 8000（FastAPI 改 bind 127.0.0.1，Caddy 唯一入口）
+
+{
+    # Global options
+    # 為什麼關 admin endpoint：避免 :2019 在 tailnet 暴露 Caddy 管理 API
+    admin off
+
+    # 為什麼 auto_https disable_redirects=false：HTTP→HTTPS 308 redirect 開
+    # 雖然 bind 127.0.0.1:8000 不暴露 80，但本地 dev 偶爾測 http:// 仍應該被
+    # 引導至 https 入口。
+    auto_https disable_redirects
+}
+
+# 反代主域名（Tailnet HTTPS）
+https://{$OPENCLAW_TLS_CERT_HOST} {
+    # 使用 Tailscale internal CA cert（非 ACME）
+    # cert 由 systemd timer 透過 `tailscale cert` 重發；Caddy 只負責 serve。
+    tls {$OPENCLAW_TLS_CERT_DIR}/{$OPENCLAW_TLS_CERT_HOST}.crt {$OPENCLAW_TLS_CERT_DIR}/{$OPENCLAW_TLS_CERT_HOST}.key
+
+    # 反代到 FastAPI/uvicorn
+    # 為什麼帶 X-Forwarded-Proto：FastAPI auth_routes_common._has_https_proxy_hint
+    # 在 OPENCLAW_TRUST_PROXY_HEADERS=1 時依此判定 Secure cookie；其他環境不信任。
+    reverse_proxy 127.0.0.1:{$OPENCLAW_API_BACKEND_PORT:8000} {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+
+        # WebSocket 升級 clause（spec §7.2 次要風險）— FastAPI 目前無 /ws/*，
+        # 預留以免未來新 endpoint 卡住。
+        # transport http {
+        #     versions 1.1
+        # }
+    }
+
+    # 安全 header 由 FastAPI middleware 注入；Caddy 不重複設定，避免雙重 CSP。
+    # 唯一例外：HSTS 由 reverse-proxy 加（FastAPI 不知道是不是 HTTPS 在邊界）。
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    }
+
+    # log 寫到 systemd journald（Linux）/ launchd log（macOS）— stdout 即可。
+    log {
+        output stdout
+        format console
+    }
+}
