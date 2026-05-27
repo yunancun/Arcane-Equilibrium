@@ -4,6 +4,11 @@
 --   NOT VALID CHECK + one-shot in-migration backfill
 --   + trading.fills.strategy_name 17 row 雙前綴 normalize
 --
+-- 2026-05-26 deprecation note: funding_arb enum/case branches are now
+-- historical-only post AMD-2026-05-26-01 (funding_arb V2 retired closed per
+-- ADR-0018 status upgrade). Retain enum / case for backfill query support;
+-- no new funding_arb sample writes post-deprecation.
+--
 -- 動機 / Motivation:
 --   2026-05-10 W-AUDIT-4b 後續：reject reason 與 close reason 目前散落在
 --     - trading.risk_verdicts.reason (free-form 字串, ~12.4M row)

@@ -7,6 +7,11 @@
 -- Status: NOT_RUN — D+1 deploy after Sprint N+1 D+0 21:30 UTC sign-off
 -- Reservation: V090 per memory project_2026_05_10_sprint_n1_d0_readiness.md
 --
+-- 2026-05-26 deprecation note: funding_arb enum/case branches (line 213 + 505)
+-- are now historical-only post AMD-2026-05-26-01 (funding_arb V2 retired closed
+-- per ADR-0018 status upgrade). Retain enum / case for backfill query support;
+-- no new funding_arb unblock candidate evaluation post-deprecation.
+--
 -- 動機 / Motivation:
 --   QC v3 NEW-ISSUE-V3-4 揭露 freeze 是 one-way street：
 --     - 17 frozen cells (13 grid + 4 ma_crossover)
@@ -502,7 +507,7 @@ COMMENT ON TABLE governance.unblock_candidates IS
 
 COMMENT ON COLUMN governance.unblock_candidates.cell_strategy IS
     'Strategy identifier (per CLAUDE.md §三 active strategy list). E.g. grid_trading, '
-    'ma_crossover, bb_breakout, bb_reversion, funding_arb (post-ADR-0018 retired).';
+    'ma_crossover, bb_breakout, bb_reversion, funding_arb (post-ADR-0018 retired; AMD-2026-05-26-01 升格 Retired closed → 4 textbook roster reframe).';
 
 COMMENT ON COLUMN governance.unblock_candidates.cell_symbol IS
     'Bybit symbol (USDT perpetual). E.g. BTCUSDT, TONUSDT. Cohort key alongside cell_strategy.';

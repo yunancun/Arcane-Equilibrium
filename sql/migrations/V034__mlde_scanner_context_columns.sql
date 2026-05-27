@@ -1,6 +1,11 @@
 -- V034: Expose scanner market-judgment context to MLDE.
 -- V034：將 scanner 趨勢/fitness context 暴露給 MLDE。
 --
+-- 2026-05-26 deprecation note: funding_arb enum/case branches are now
+-- historical-only post AMD-2026-05-26-01 (funding_arb V2 retired closed per
+-- ADR-0018 status upgrade). Retain enum / case for backfill query support;
+-- no new funding_arb sample writes post-deprecation.
+--
 -- Scope:
 --   * Recreate learning.mlde_edge_training_rows with the same V031 column
 --     order, appending scanner context columns at the end for PostgreSQL

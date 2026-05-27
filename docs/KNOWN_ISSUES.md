@@ -473,11 +473,11 @@
 
 # ━━━ 2026-05-16 12-agent audit Wave 1 reconcile — OPEN ━━━
 
-## OPEN — P0-EDGE-1：5 textbook 策略 negative realized edge
+## OPEN — P0-EDGE-1：4 textbook 策略 negative realized edge
 
 **來源**：W-AUDIT P0-EDGE-1 + 2026-05-15 full healthcheck `[40]` 仍 WARN
 **嚴重性**：P0 BLOCKER（live promotion 全鏈封死直到至少 1 個策略 cohort 轉正）
-**位置**：5 textbook strategies (`ma_crossover` / `bb_breakout` / `bb_reversion` / `grid_trading` / `funding_arb`) demo edge 全 negative
+**位置**：4 textbook strategies (`ma_crossover` / `bb_breakout` / `bb_reversion` / `grid_trading`) demo edge 全 negative；funding_arb 已 retired per AMD-2026-05-26-01（原 5 textbook roster 縮為 4）
 **狀態**：Alpha Surface C1（liquidation revival）/ C1 24h proof / W-AUDIT-8b funding skew Stage 0R replay 待跑；A4-C 已 archive；其他 alpha candidate spec phase
 **緩解**：W-AUDIT-8a/8b/8c 並行 prep；replay-first validation default；無 alpha gates 轉正前 paper/demo promotion 路徑全 freeze
 

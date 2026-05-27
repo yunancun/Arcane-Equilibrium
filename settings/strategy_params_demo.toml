@@ -162,8 +162,18 @@ blocked_symbols = [
 # the strategy is redesigned around funding settlement windows and maker entry.
 # 2026-05-03 止損 RCA：demo-only 重啟後在未驗證 funding capture 前再產生負 edge。
 # 三端統一關閉，待重做結算窗口 + maker 入場後再議。
+#
+# 2026-05-26 DEPRECATED per AMD-2026-05-26-01 + ADR-0018（Status 升格 Retired closed）：
+# operator (D) 3C TOML deprecation closure。22d dormant since 2026-05-03 + n=18 不再
+# 累積 → governance deadlock 終結。QC EA-3 verdict：V2 delta-neutral 數學在 Bybit
+# 結構性不成立（spot lending 缺失 + 34 bps cost / 1.5 bps funding mean → 7.6 day
+# break-even infeasible）。程式碼層 #[deprecated] marker + runtime fail-closed guard
+# （E1 D+7 IMPL）。Slot reserved for ADR-0046 future redesign。
+# 本 [funding_arb] 區段不可刪除（FundingArbParams deserialize + registry.rs 仍引用）。
+# risk_config_demo.toml:97 per_strategy.funding_short_v2.stop_loss_max_pct_override=3.0
+# 是 1B 3% tight SL 範式 cross-ref，與本 V2 deprecation 並存（funding_short_v2 ≠ V2）。
 [funding_arb]
-active = false
+active = false  # 三端硬鎖；revive 須走 AMD amendment + ADR-0046 Accepted + 5-gate + Stage 0R
 cooldown_ms = 3600000
 total_cost_bps = 34.0
 expected_periods = 3.0

@@ -92,7 +92,8 @@ options:
 - `WHERE track IS NULL` — universal, idempotent
 - `WHERE strategy_name IN ('grid_trading', 'bb_breakout', 'bb_reversion',
   'ma_crossover', 'funding_arb')` — explicit, defensive for tables with
-  `strategy_name`
+  `strategy_name`（注：funding_arb 已 retired per AMD-2026-05-26-01；
+  backfill 保留 enum 以維持 historical row 可查；新樣本 4 textbook roster only）
 
 `trading.decision_outcomes` has no `strategy_name` direct column; backfill
 joins via `context_id` → `decision_context_snapshots` → strategy. PA

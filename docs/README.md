@@ -225,6 +225,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `execution_plan/2026-05-22--m3_metric_emitter_sprint2_dispatch_packet.md` | M3 emitter Sprint 2 dispatch packet（563 LOC；Track A/B/C 6 Wave 1+2 並行 stagger + D1 sysinfo + D2 並行 + D3 cascade reject log minimal） |
 | `execution_plan/specs/2026-05-22--v099-autonomy-level-config.md` | V099 autonomy_level_config schema spec（568 LOC；`system.autonomy_level_config` + `_switch_audit` + PG ENUM `autonomy_level_enum` + Cache PG LISTEN/NOTIFY） — Wave 5 cascade IMPL prerequisite |
 | `governance_dev/amendments/2026-05-22--AMD-2026-05-21-01-autonomy-fully-with-failsafe.md` | AMD-2026-05-21-01 v2 — Layered Autonomy with Hard-Coded Fail-Safe（684 LOC；取代 v1 protected 6 / opt-in 8 二分版；三維度並列 + Autonomy Level Toggle + 反向 attack counter-mitigation 6 條） |
+| `governance_dev/amendments/2026-05-26--AMD-2026-05-26-01-funding-arb-deprecation.md` | AMD-2026-05-26-01 — funding_arb V2 Deprecation Closure（Workflow F Phase 2；operator (D) 3C TOML deprecation closure；ADR-0018 status 升格 Retired closed；strategy code `#[deprecated]` marker + runtime fail-closed guard + 5 textbook → 4 textbook reframe + D+0/D+7/D+30 cleanup 三階段；ADR-0046 future redesign slot 並存保留） |
 | `CCAgentWorkSpace/CC/workspace/reports/2026-05-22--layered_autonomy_v2_reaudit.md` | CC re-audit verdict APPROVE A 級（7/7 HC PASS + 6/6 反模式 PASS + 2 BLOCKER 候選解除 + Hard Boundaries 5/5 PASS） |
 
 **Wave 5 cascade IMPL roadmap**（PENDING operator final sign-off）：見 `TODO.md` §1.7（V099 schema land + GUI Autonomy Posture + Rust `RiskEvent::NotificationFailsafeTimeout` variant + 5 module ADR sync + R4 cross-ref audit）
@@ -779,7 +780,7 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `adr/0015-openclaw-control-plane-repositioning.md` | ADR-0015: OpenClaw is Control Plane/Gateway, not trading conductor |
 | `adr/0016-decision-lease-router-evidence-mode.md` | ADR-0016: Decision Lease router flag may run as shadow evidence |
 | `adr/0017-scanner-is-evidence-not-authority.md` | ADR-0017: scanner is always-on evidence infrastructure, not authority |
-| `adr/0018-funding-arb-v2-deprecation-watch.md` | ADR-0018: funding_arb V2 retired from active strategy set; W-AUDIT-6 cleanup pending |
+| `adr/0018-funding-arb-v2-deprecation-watch.md` | ADR-0018: funding_arb V2 **Retired closed** per AMD-2026-05-26-01（status 升格自「retire from active strategy set」；W-AUDIT-6 cleanup 終結） |
 | `adr/0019-github-issues-active-tracker.md` | ADR-0019: GitHub Issues active external tracker; git remains SoT |
 | `adr/0020-layer2-manual-supervisor-only.md` | ADR-0020: Layer2 is manual supervisor escalation, not autonomous loop |
 | `adr/0030-copy-trading-evidence-gated.md` | ADR-0030: Copy Trading Y1 末 4-Gate Evidence Evaluation, Y2 Enablement Conditional (Proposed; v5.7 §11 提案順移自 ADR-0028) |

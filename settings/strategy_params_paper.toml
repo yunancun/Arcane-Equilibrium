@@ -131,8 +131,16 @@ blocked_symbols = [
 #
 # 2026-05-03: keep disabled after demo re-enable produced fresh negative edge
 # without verified funding settlement capture.
+#
+# 2026-05-26 DEPRECATED per AMD-2026-05-26-01 + ADR-0018（Status 升格 Retired closed）：
+# operator (D) 3C TOML deprecation closure，22d dormant since 2026-05-03 終結。
+# V2 結構性無法 break-even（Bybit demo 無 spot lending + 34 bps cost / 1.5 bps funding mean
+# → 7.6 day break-even infeasible）。程式碼層 #[deprecated] marker + runtime
+# update_params() fail-closed guard（拒絕任何 IPC active=true 注入；E1 D+7 IMPL）。
+# Slot reserved for ADR-0046 future redesign（並存保留）。
+# 本 [funding_arb] 區段不可刪除（FundingArbParams deserialize + registry.rs 仍引用）。
 [funding_arb]
-active = false
+active = false  # 三端硬鎖；revive 須走 AMD amendment + ADR-0046 Accepted + 5-gate + Stage 0R
 cooldown_ms = 3600000
 total_cost_bps = 34.0
 expected_periods = 3.0

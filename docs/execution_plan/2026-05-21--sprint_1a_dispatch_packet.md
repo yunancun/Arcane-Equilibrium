@@ -39,7 +39,7 @@ Sprint 1B — C10 Stage 0R Replay Preflight + Stage 1 Demo Micro-Canary + Earn D
   - 若 PASS → 進 Stage 1 Demo；若 FAIL → 凍結 C10 + 派 PA review
 - C10 Stage 1 Demo Micro-Canary：
   - 1 strategy × 1 symbol × Demo endpoint × 7d
-  - spot leg 使用 replay-backed synthetic accounting sidecar（Bybit demo 不支援 spot lending；per memory funding_arb_v2 教訓），不得用 `OPENCLAW_ENABLE_PAPER=1` 當 promotion path
+  - spot leg 使用 replay-backed synthetic accounting sidecar（Bybit demo 不支援 spot lending；per memory funding_arb_v2 教訓 + funding_arb V2 retired per AMD-2026-05-26-01 終結 lesson），不得用 `OPENCLAW_ENABLE_PAPER=1` 當 promotion path
   - Demo USDT $200-500 cap（不寫 mainnet live $2,000）
 - Earn governance + first small manual stake：
   - Demo endpoint 試運行（待 BB C4 verdict 確認 demo 是否支援 Earn）

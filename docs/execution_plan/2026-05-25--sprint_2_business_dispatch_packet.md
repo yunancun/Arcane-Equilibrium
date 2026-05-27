@@ -106,7 +106,7 @@ per memory `project_multi_session_memory_race`（2026-04-23 教訓 + v5.7 12 pre
 
 | # | Candidate | Source | Sprint 2 可行性 |
 |---|---|---|---|
-| 1 | **Funding rate dislocation arbitrage v2 — short-only > 30% annualized** | v5.7 §8 line 304 + funding_arb V2 dormant 教訓 | 設 funding > 30% annualized 為 gate；只開 short side（per memory `project_funding_arb_v2_deprecation_path`）；可 Sprint 2 IMPL |
+| 1 | **Funding rate dislocation arbitrage v2 — short-only > 30% annualized** | v5.7 §8 line 304 + funding_arb V2 dormant 教訓（V2 已 retired per AMD-2026-05-26-01；本 candidate 為 funding_short_v2 窄 short-only carve-out，與 V2 directional bi-side 不同設計） | 設 funding > 30% annualized 為 gate；只開 short side（per memory `project_funding_arb_v2_deprecation_path`）；可 Sprint 2 IMPL |
 | 2 | **Token unlock event-window short alpha** | v5.8 §2.M4 line 162-163；Tokenomist trial calendar | 過 unlock 前 4h 開 short bias；Sprint 2 demo 累積；MIT bar 30 events min |
 | 3 | **Cross-symbol cointegration pairs (BTC/ETH)** | v5.7 §8 Pairs trading；TODO §1.2 line 112 | KalmanFilter pairs；需 BTC + ETH 同時 active；可 Sprint 2 IMPL |
 | 4 | **Microstructure liquidation cascade fade** | v5.7 §7 microstructure + market.liquidations writer | Liquidation > $X / 5min → fade short；需 liquidation writer 5d+ stable；Sprint 2 可 IMPL |
