@@ -1,0 +1,21 @@
+# MODULE_NOTE (CN)：
+#   OPS-1 Track A：每日 03:00 UTC 觸 openclaw-tls-renew.service 檢查 cert。
+#   為什麼 03:00 UTC：低流量時段；renewal 觸 Caddy reload 不影響 GUI 使用者。
+#   為什麼 OnCalendar 而非 OnUnitActiveSec：絕對時間更可預測，operator audit log
+#   更容易對齊 system clock。
+#
+# 部署：sudo cp helper_scripts/systemd/openclaw-tls-renew.timer /etc/systemd/system/
+#       sudo systemctl daemon-reload && sudo systemctl enable --now openclaw-tls-renew.timer
+
+[Unit]
+Description=Daily Tailscale cert renewal check (OPS-1 Track A)
+Requires=openclaw-tls-renew.service
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+# 為什麼 Persistent：機器關機跨過 03:00 UTC 後，下次開機補跑
+Persistent=true
+Unit=openclaw-tls-renew.service
+
+[Install]
+WantedBy=timers.target

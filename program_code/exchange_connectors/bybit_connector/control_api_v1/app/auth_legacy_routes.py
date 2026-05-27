@@ -38,8 +38,14 @@ from .auth_routes_common import (
     increment_ip_failure,
     load_expected_credentials,
     set_auth_cookie,
+    should_set_secure_cookie,
     verify_login_credentials,
     verify_token_constant_time,
+)
+from .csrf_middleware import (
+    delete_csrf_cookie,
+    generate_csrf_token,
+    set_csrf_cookie,
 )
 
 
@@ -94,10 +100,14 @@ def register_auth_legacy_routes(app) -> None:
         # 登入成功，清除該 IP 的失敗記錄。
         await clear_ip_failure(client_ip)
 
-        # SEC-06: do NOT echo the token in the JSON body — HttpOnly invariant.
-        # SEC-06：不在 JSON body 中回傳 token，保持 HttpOnly 不變式。
+        # SEC-06: do NOT echo the auth token in the JSON body — HttpOnly invariant.
+        # SEC-06：不在 JSON body 中回傳 auth token，保持 HttpOnly 不變式。
+        # OPS-1 Track B: 登入成功時連帶 issue CSRF token cookie（double-submit
+        # 第二層）。CSRF token 同樣不在 JSON body 中回傳，前端由 cookie 讀取。
         resp = JSONResponse({"status": "ok", "username": req.username})
         set_auth_cookie(resp, settings.api_token, request)
+        secure = should_set_secure_cookie(request)
+        set_csrf_cookie(resp, generate_csrf_token(), secure=secure)
         return resp
 
     @app.post("/api/v1/auth/logout", include_in_schema=False)
@@ -105,9 +115,12 @@ def register_auth_legacy_routes(app) -> None:
         """
         Clear the HttpOnly auth cookie. GUI calls this on logout.
         清除 HttpOnly 認證 cookie；GUI 登出時呼叫。
+
+        OPS-1 Track B: 同步清除 oc_csrf cookie。
         """
         resp = JSONResponse({"status": "logged_out"})
         delete_auth_cookie(resp, request)
+        delete_csrf_cookie(resp, secure=should_set_secure_cookie(request))
         return resp
 
     @app.get("/api/v1/auth/check", include_in_schema=False)

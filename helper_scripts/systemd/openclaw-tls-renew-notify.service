@@ -1,0 +1,21 @@
+# MODULE_NOTE (CN)：
+#   OPS-1 Track A：cert renewal 失敗時的通知 hook。
+#   為什麼獨立 unit：systemd OnFailure= 機制要求另一 unit；本 unit 跑 notify
+#   script（spec §2.2「Renewal 失敗 → systemd unit OnFailure= 觸
+#   notify_renewal_failure.sh → Telegram + Grafana alert」）。
+#
+# 注意：本 unit 不可 enable（會無限觸發）；只由 sibling 的 OnFailure= 拉起。
+
+[Unit]
+Description=Notify operator on Tailscale cert renewal failure
+
+[Service]
+Type=oneshot
+Environment="OPENCLAW_BASE_DIR=/opt/openclaw"
+# notify_renewal_failure.sh：spec §2.2 待 operator 提供 Telegram/Grafana 接點
+# 後再具體實作；本占位先寫 stderr + journal 標記。
+ExecStart=/bin/bash -c '\
+    echo "ALERT: openclaw TLS cert renewal FAILED at $(date -u +%FT%TZ)" >&2; \
+    if [ -x "${OPENCLAW_BASE_DIR}/helper_scripts/notify_renewal_failure.sh" ]; then \
+        "${OPENCLAW_BASE_DIR}/helper_scripts/notify_renewal_failure.sh"; \
+    fi'

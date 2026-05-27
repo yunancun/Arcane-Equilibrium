@@ -1,7 +1,30 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-25（Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron IMPL — 新增 `cron/ac19_alt_bucket_daily_query.sql` + `cron/ac19_alt_bucket_daily_cron.sh` + `cron/ac19_alt_bucket_jsonl_writer.py` + `cron/tests/test_ac19_alt_bucket_daily.py` 44 pytest PASS；per W1-G SOP §8 handoff；5/26 EOD deadline 達成。保留 2026-05-25 Sprint 2 W2-B Alpha Tournament scaffold + Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
+最後更新：2026-05-27（P0-OPS-1 HTTPS / Secure cookie / CSRF / CSP Track A + B + C IMPL — 新增 `lib/tls_cert.sh` + `Caddyfile.template` + `install_caddy.sh` + `systemd/openclaw-{caddy,tls-renew,tls-renew-notify}.{service,timer}` Track A 共 7 個檔；E1 IMPL DONE 待 E2 + E3 + BB sign-off。同日保留 P0-OPS-4 first-day-live runbook GAP A + GAP F IMPL 索引 + 2026-05-25 Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron + W2-B Alpha Tournament scaffold + Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
+
+## 2026-05-27 P0-OPS-1 HTTPS / Secure cookie / CSRF / CSP Track A IMPL
+
+| 腳本 | 用途 |
+|------|------|
+| `lib/tls_cert.sh` | OPS-1 Track A — 跨平台 Tailscale cert 路徑與 renewal helper：`resolve_openclaw_tls_cert_dir`（Linux `/var/lib/tailscale/certs` / Darwin `$HOME/Library/Application Support/Tailscale/certs`）、`resolve_openclaw_tls_cert_host`（讀 env 或 `tailscale status --json`）、`tls_cert_days_remaining`（openssl + 跨平台 date）、`tls_cert_should_renew`（< 14d threshold）。被 install_caddy.sh + systemd unit 共用。 |
+| `Caddyfile.template` | OPS-1 Track A — Caddy 反向代理設定模板。`envsubst` 處理：HTTPS bind tailnet IPv4 + Tailscale cert + reverse_proxy `127.0.0.1:8000` + X-Forwarded-Proto 傳遞。`admin off` 不暴露 :2019。HSTS header 在反代邊界加。 |
+| `install_caddy.sh` | OPS-1 Track A — 一次性 Linux/macOS 部署：preflight Tailscale + 安裝 Caddy + envsubst 生 Caddyfile + `tailscale cert` 首次拉證書 + 安裝 systemd unit/timer + curl 驗證。預設 `--dry-run`；`--apply` 才實際寫 `/etc/caddy/Caddyfile`。跨平台分支 (Linux apt / macOS brew + launchd 指引)。 |
+| `systemd/openclaw-caddy.service` | OPS-1 Track A — Caddy reverse proxy systemd unit（`Type=notify` + `Restart=always` 5s 復活 + `CAP_NET_BIND_SERVICE` 不需 root 綁 443）。 |
+| `systemd/openclaw-tls-renew.service` | OPS-1 Track A — Tailscale cert renewal `Type=oneshot`，由 sibling timer 觸發。引用 `lib/tls_cert.sh` 走 14d threshold 判定 + 拉新 cert + chown caddy + `systemctl reload openclaw-caddy.service`。`OnFailure=` 接 notify service。 |
+| `systemd/openclaw-tls-renew.timer` | OPS-1 Track A — 每日 03:00 UTC `OnCalendar` 觸發 renew service。`Persistent=true` 機器關機跨午夜後補跑。 |
+| `systemd/openclaw-tls-renew-notify.service` | OPS-1 Track A — renewal 失敗 hook（`OnFailure=` 才被拉起，**不可 enable**）。占位實作寫 stderr + journal；接 Telegram/Grafana 待 operator 提供接點。 |
+
+## 2026-05-27 P0-OPS-4 GAP A + GAP F systemd unit IMPL
+
+| 腳本 | 用途 |
+|------|------|
+| `systemd/openclaw-engine.service` | GAP F — Linux systemd unit for Rust openclaw-engine 主進程；Restart=on-failure + RestartSec=10 + StartLimitBurst=5 / 5min；PreStart 三檢（binary / ipc_secret / database_url file）；EnvironmentFile 載 basic_system_services.env；對應 macOS launchd `deploy/com.openclaw.engine.plist`。占位符 `__ENGINE_USER__ / __OPENCLAW_BASE_DIR__ / __OPENCLAW_DATA_DIR__ / __OPENCLAW_SECRETS_ROOT__` 由 install script sed 替換。 |
+| `systemd/openclaw-watchdog.service` | GAP A — Linux systemd unit for engine_watchdog.py；Restart=always + RestartSec=10 + StartLimitBurst=10 / 10min；CLI args 對齊 restart_all.sh:226（--stale-threshold 45 / --grace-period 120 / --poll-interval 1）；解決 watchdog 自 crash 後無自動 respawn 的 RTO 鏈缺口（< 1min）。 |
+| `systemd/install_engine_service.sh` | Linux-only installer for openclaw-engine.service；root + Linux guard；sed 替換 5 占位符；atomic mv + occupy-check + systemd-analyze verify + daemon-reload；install 後不自動啟動（留 operator 5-gate launch sequence）。 |
+| `systemd/install_watchdog_service.sh` | Linux-only installer for openclaw-watchdog.service；自動偵測 python venv (PYTHON_BIN env > $HOME/.venv/bin/python3 > /usr/bin/python3)；sed 替換 6 占位符；同 root + Linux + daemon-reload pattern。 |
+| `systemd/README.md` | systemd unit 部署文件：跨平台 portability / operator deploy 三段 hand-action checklist (A install / B enable+start / C restart_all.sh 共存) / RTO ≤ 5min 4-step 驗證 SOP（含 SIGKILL 模擬 + systemctl poll + snapshot age 恢復驗證）/ 反模式 / cross-reference spec。 |
+
 
 ## 2026-05-25 Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron IMPL
 
@@ -116,7 +139,7 @@
 
 | 腳本 | 用途 |
 |------|------|
-| `restart_all.sh` | **輕量重啟**：停+啟 Rust 引擎 + API server（不動數據）。旗標：`--engine-only` / `--api-only` 限定範圍；`--rebuild` 先重建 openclaw-engine binary 再啟動（PYO3-ELIMINATE-1 Phase 3 後無 PyO3 wheel）；`--require-clean-build-window`（2026-05-25 Hygiene Option E Phase 1 Step 2）重啟前 fail-closed 檢查系統是否仍有 `cargo build`/`cargo test` 在跑,防 multi-session race 覆蓋 release binary inode;一般 operator 不直接帶,由 `build_then_restart_atomic.sh` 串接時自動帶入。 |
+| `restart_all.sh` | **輕量重啟**：停+啟 Rust 引擎 + API server（不動數據）。旗標：`--engine-only` / `--api-only` 限定範圍；`--rebuild` 先重建 openclaw-engine binary 再啟動（PYO3-ELIMINATE-1 Phase 3 後無 PyO3 wheel）；`--require-clean-build-window`（2026-05-25 Hygiene Option E Phase 1 Step 2）重啟前 fail-closed 檢查系統是否仍有 `cargo build`/`cargo test` 在跑,防 multi-session race 覆蓋 release binary inode;一般 operator 不直接帶,由 `build_then_restart_atomic.sh` 串接時自動帶入。**OPS-2 SECRET-SPLIT 2026-05-27 Phase 1**：`prepare_runtime_secret_files` 自動 seed `live_auth_signing_key.txt` 自 `ipc_secret.txt`（`[ ! -f ]` 條件嚴，已 rotate 之 key 不被覆蓋）+ engine/API spawn 注入 `OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE`；Rust + Python `_read_live_auth_signing_key` 提供 Phase 1 fallback，rate-limit WARN ≤1/h。 |
 | `build_then_restart_atomic.sh` | **2026-05-25 Hygiene Option E Phase 1 Step 2**（per PA sub-agent a6326f17 hygiene 修法 Option B + memory `project_multi_session_memory_race`）：原子化 build → SHA snapshot → restart → verify deploy 鏈。flock(`$OPENCLAW_DATA_DIR/build_window.lock`) 持有 build window 期間禁第二 cargo;結束 verify `/proc/$PID/exe` SHA == on-disk binary SHA;任何 phase 失敗即 abort,杜絕「`cargo test --release` incremental rebuild 在 engine startup 後覆蓋 inode」的 multi-session race。Mac 無 procfs 則 fallback 驗 disk SHA 不被偷換。預期 operator 下次 deploy 跑 `bash helper_scripts/build_then_restart_atomic.sh` 一鍵完成。 |
 | `stop_all.sh` | **優雅停止**：停引擎 + 建立 `engine_maintenance.flag`，讓 `engine_watchdog.py` 不自動重啟。`--engine-only` / `--api-only`。移除 flag: `rm /tmp/openclaw/engine_maintenance.flag` 或跑 `restart_all.sh`。 |
 | `clean_restart.sh` | **交易所層重啟**：停引擎 → httpx BybitClient flatten demo/live 倉位 → 歸檔 runtime 文件（**不動 paper_state，不動 DB**）→ 檢查 binary 新舊 → 重建/重啟 → watchdog 驗證。輕度重置，保留歷史累計。旗標：`--yes` / `--mark-damaged`（歸檔 DB 交易表）/ `--include-live` / `--skip-flatten` / `--skip-build-check` |

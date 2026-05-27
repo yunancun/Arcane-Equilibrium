@@ -30,7 +30,9 @@ use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::warn;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -38,6 +40,15 @@ type HmacSha256 = Hmac<Sha256>;
 /// payload layout changes.
 /// `authorization.json` schema 版本。簽名載荷布局變更時遞增。
 pub const SCHEMA_VERSION: u32 = 2;
+
+/// OPS-2 SECRET-SPLIT Phase 1 fallback WARN log rate-limit window (3600s = 1h).
+/// 為什麼：spec §8.5 E2 重點 #3 要求 Phase 1 fallback WARN log rate ≤1/h；watcher 每 5s
+/// `load_and_verify` → 7200 logs/day 若每次噴會洪流。原子 timestamp 攔截後續 call。
+const FALLBACK_WARN_INTERVAL_SECS: u64 = 3600;
+
+/// Last unix-second 任一 process emitted the Phase 1 fallback WARN log.
+/// 為什麼：跨多 caller（load_and_verify / 5min ticker）共享單一 rate limiter，避免每路徑各自 emit。
+static LAST_FALLBACK_WARN_TS: AtomicU64 = AtomicU64::new(0);
 
 /// Filename inside `secret_files/bybit/live/`.
 pub const AUTHORIZATION_FILENAME: &str = "authorization.json";
@@ -105,9 +116,17 @@ impl LiveAuthorization {
 /// 告警規則能區分「operator 尚未批准」與「檔案被竄改」。
 #[derive(Debug)]
 pub enum AuthError {
-    /// `OPENCLAW_IPC_SECRET` env var is unset. HMAC cannot be computed.
-    /// Fatal — no signature can be trusted. Operator action: set env var.
+    /// `OPENCLAW_IPC_SECRET` env var is unset. Phase 1 保留以維持 alert 字串
+    /// 兼容；Phase 2 移除（spec §3.2 / §4.1.1）— 屆時所有 missing 走
+    /// `LiveAuthSigningKeyMissing`。
+    /// 為什麼保留：Phase 1 14d soak 期間 alert rule `ipc_secret_missing` 不可斷。
     IpcSecretMissing,
+    /// OPS-2 SECRET-SPLIT — `OPENCLAW_LIVE_AUTH_SIGNING_KEY` env var is unset
+    /// 且 Phase 1 fallback `OPENCLAW_IPC_SECRET` 也未設置。授權簽名 HMAC 無法
+    /// 計算，Live pipeline 必須 fail-closed。
+    /// 為什麼新變體：spec §4.1.1 — Phase 2 後 ipc_secret 純 IPC-only 語意，
+    /// 簽名 key missing 需獨立 alert kind 對應不同 rotation cadence (90d vs 180d)。
+    LiveAuthSigningKeyMissing,
     /// `authorization.json` does not exist under the live secret slot.
     /// Expected during first-time setup or post-revoke — operator must
     /// approve via `/api/v1/live/auth/renew`.
@@ -139,9 +158,15 @@ impl std::fmt::Display for AuthError {
         match self {
             Self::IpcSecretMissing => write!(
                 f,
-                "OPENCLAW_IPC_SECRET env var is not set — cannot verify signed \
-                 live authorization / 無 OPENCLAW_IPC_SECRET 環境變量，無法驗證 \
-                 簽名 live 授權"
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY (with OPENCLAW_IPC_SECRET Phase 1 \
+                 fallback) is not set — cannot verify signed live authorization / \
+                 簽名 key 未設置（含 Phase 1 fallback），無法驗證 live 授權"
+            ),
+            Self::LiveAuthSigningKeyMissing => write!(
+                f,
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY env var is not set — cannot sign / \
+                 verify live authorization (OPS-2 SECRET-SPLIT) / \
+                 OPENCLAW_LIVE_AUTH_SIGNING_KEY 未設置，無法簽名/驗證 live 授權"
             ),
             Self::FileMissing { path } => write!(
                 f,
@@ -212,6 +237,7 @@ impl std::error::Error for AuthError {}
 pub fn auth_error_kind(err: &AuthError) -> &'static str {
     match err {
         AuthError::IpcSecretMissing => "ipc_secret_missing",
+        AuthError::LiveAuthSigningKeyMissing => "live_auth_signing_key_missing",
         AuthError::FileMissing { .. } => "file_missing",
         AuthError::FileReadError { .. } => "file_read_error",
         AuthError::JsonParseError { .. } => "json_parse_error",
@@ -352,12 +378,56 @@ pub fn verify_in_memory(
     Ok(())
 }
 
+/// OPS-2 SECRET-SPLIT — 讀取 live-auth 簽名 key，Phase 1 期間允許 fallback 到
+/// `OPENCLAW_IPC_SECRET`（含 `_FILE` companion）並 emit 一次性 WARN log（rate ≤1/h）。
+///
+/// 為什麼分兩階段：
+///   - Phase 1（D+0..D+14）：兩 env 都允許，舊 deploy 期間 0 regression；fallback
+///     觸發須 WARN 提醒 operator 在 Phase 2 cutover 前完成 seed。
+///   - Phase 2（D+14+）：移除 fallback；missing 純 `OPENCLAW_LIVE_AUTH_SIGNING_KEY`
+///     必 fail-closed（TODO: P1-OPS-2-SECRET-SPLIT-PHASE-2 移除 fallback 分支）。
+///
+/// Rate-limit 規格：每 process 最多 1 emit / 1h（`FALLBACK_WARN_INTERVAL_SECS`）；
+/// watcher 5s poll → 7200 計次/天若無 rate-limit 會洪流 log。
+fn read_live_auth_signing_key() -> Option<String> {
+    if let Some(v) = secret_env::var_or_file("OPENCLAW_LIVE_AUTH_SIGNING_KEY") {
+        return Some(v);
+    }
+    // Phase 1 fallback：新 env 未設 → 嘗試舊 env；觸發即 WARN（rate-limit）。
+    // TODO(P1-OPS-2-SECRET-SPLIT-PHASE-2 D+14): 移除以下 fallback 分支 + 在
+    // main.rs 加第二個 panic block 強制 LIVE_AUTH_SIGNING_KEY 必設（spec §3.2）。
+    if let Some(v) = secret_env::var_or_file("OPENCLAW_IPC_SECRET") {
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let last = LAST_FALLBACK_WARN_TS.load(Ordering::Relaxed);
+        // 為什麼用 compare_exchange：多 caller 並發時保證僅一個贏得 emit 權。
+        if now_secs.saturating_sub(last) >= FALLBACK_WARN_INTERVAL_SECS
+            && LAST_FALLBACK_WARN_TS
+                .compare_exchange(last, now_secs, Ordering::AcqRel, Ordering::Relaxed)
+                .is_ok()
+        {
+            warn!(
+                target: "live_authorization",
+                event = "ops2_secret_split_phase1_fallback",
+                "MIGRATION-FALLBACK: OPENCLAW_LIVE_AUTH_SIGNING_KEY unset; \
+                 falling back to OPENCLAW_IPC_SECRET (OPS-2 SECRET-SPLIT Phase 1). \
+                 Set OPENCLAW_LIVE_AUTH_SIGNING_KEY(_FILE) before Phase 2 cutover \
+                 (D+14). / Phase 1 fallback 觸發，cutover 前須 seed 新 key。"
+            );
+        }
+        return Some(v);
+    }
+    None
+}
+
 /// Full disk-read + verify path used by Live pipeline startup and the periodic
 /// ticker. Returns the parsed [`LiveAuthorization`] on success so callers can
 /// log `tier` / `expires_at_ms` / `operator_id` for audit trail.
 pub fn load_and_verify(env: BybitEnvironment) -> Result<LiveAuthorization, AuthError> {
     let ipc_secret =
-        secret_env::var_or_file("OPENCLAW_IPC_SECRET").ok_or(AuthError::IpcSecretMissing)?;
+        read_live_auth_signing_key().ok_or(AuthError::LiveAuthSigningKeyMissing)?;
     let path = authorization_path().ok_or(AuthError::FileMissing {
         path: PathBuf::from("<unresolved-HOME>"),
     })?;
@@ -647,8 +717,272 @@ mod tests {
         assert!(verify_in_memory(&b, BybitEnvironment::LiveDemo, now, TEST_SECRET).is_ok());
     }
 
+    // ------------------------------------------------------------------
+    // OPS-2 SECRET-SPLIT — 對抗式 + cross-lang HMAC fixture verify tests
+    // 為什麼三組：(a) mismatched key 必 BadSignature 防 Earn first stake silent
+    // fail；(b) Phase 1 fallback path 仍能驗證；(c) Phase 2 missing 必走新變體。
+    // ------------------------------------------------------------------
+
+    const TEST_LIVE_AUTH_KEY: &str = "test-live-auth-signing-key-do-not-use-in-prod";
+
+    /// 多個 OPS-2 SECRET-SPLIT test 改 process-wide env vars；同 test binary 並行
+    /// 會交錯 → 用 ENV_TEST_LOCK 串行（對齊 live_auth_watcher_tests::ENV_GUARD pattern）。
+    static ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Cross-language HMAC byte-identical fixture：固定 input 對應固定 sig。
+    /// 與 Python `_sign_authorization_payload` 用同一 canonical payload + 同一 key
+    /// 必產出此 hex sig；任何 canonical 格式 / endianness drift 立刻 fail。
+    /// payload = "2|T0_ENTRY|1700000000000|1700086400000|ncyu|live_reserved|live_demo"
+    /// key = TEST_LIVE_AUTH_KEY
+    /// expected sig 由 Rust 端 compute_signature 產出後固化（Python 端對齊驗）。
+    #[test]
+    fn cross_lang_hmac_fixture_is_byte_identical() {
+        let auth = LiveAuthorization {
+            version: SCHEMA_VERSION,
+            tier: "T0_ENTRY".into(),
+            issued_at_ms: 1_700_000_000_000,
+            expires_at_ms: 1_700_086_400_000,
+            operator_id: "ncyu".into(),
+            approved_system_mode: APPROVED_SYSTEM_MODE_LIVE_RESERVED.into(),
+            env_allowed: vec!["live_demo".into()],
+            sig: String::new(),
+        };
+        let payload = canonical_payload(&auth);
+        // canonical payload byte-for-byte invariant — Python 必對齊。
+        assert_eq!(
+            payload,
+            "2|T0_ENTRY|1700000000000|1700086400000|ncyu|live_reserved|live_demo"
+        );
+        let sig = compute_signature(&auth, TEST_LIVE_AUTH_KEY);
+        // sig 長度檢查：HMAC-SHA256 hex = 64 chars；其他長度即 algorithm drift。
+        assert_eq!(sig.len(), 64);
+        // Self-consistency：同 key 重算必相同。
+        let sig2 = compute_signature(&auth, TEST_LIVE_AUTH_KEY);
+        assert_eq!(sig, sig2);
+        // Cross-language pin：此 sig 必與 Python `_sign_authorization_payload` 相同。
+        // Pinned hex computed via:
+        //   python3 -c "import hmac,hashlib;\
+        //   print(hmac.new(b'test-live-auth-signing-key-do-not-use-in-prod',\
+        //   b'2|T0_ENTRY|1700000000000|1700086400000|ncyu|live_reserved|live_demo',\
+        //   hashlib.sha256).hexdigest())"
+        // 任何 canonical 格式 / endianness / HMAC algorithm drift 都會在此 fail。
+        assert_eq!(
+            sig,
+            "1b2b18d7e212d0d1e8f943c25f6f070b2ba75013b8fd5c3a021800d11b8b78fc",
+            "Rust-Python cross-lang HMAC fixture drift detected！"
+        );
+    }
+
+    #[test]
+    fn mismatched_live_auth_key_produces_bad_signature() {
+        // 用 key-A 簽，用 key-B 驗 → 必 BadSignature（防偽授權）
+        let now = 1_700_000_000_000;
+        let mut auth = LiveAuthorization {
+            version: SCHEMA_VERSION,
+            tier: "T0_ENTRY".into(),
+            issued_at_ms: now,
+            expires_at_ms: now + 24 * 3600 * 1000,
+            operator_id: "ncyu".into(),
+            approved_system_mode: APPROVED_SYSTEM_MODE_LIVE_RESERVED.into(),
+            env_allowed: vec!["live_demo".into()],
+            sig: String::new(),
+        };
+        auth.sig = compute_signature(&auth, TEST_LIVE_AUTH_KEY);
+        // 偽 IPC secret 攻擊者拿到 ipc_secret 試圖偽造 live auth
+        let err = verify_in_memory(
+            &auth,
+            BybitEnvironment::LiveDemo,
+            now,
+            "different-ipc-secret-from-leak",
+        )
+        .unwrap_err();
+        assert!(matches!(err, AuthError::BadSignature));
+    }
+
+    #[test]
+    fn phase1_fallback_reads_ipc_secret_when_live_auth_unset() {
+        // Phase 1 backward-compat：未設 LIVE_AUTH 時走 IPC_SECRET fallback。
+        let _guard = ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev_la = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY").ok();
+        let prev_la_file = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE").ok();
+        let prev_ipc = std::env::var("OPENCLAW_IPC_SECRET").ok();
+        let prev_ipc_file = std::env::var("OPENCLAW_IPC_SECRET_FILE").ok();
+
+        std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY");
+        std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE");
+        std::env::set_var("OPENCLAW_IPC_SECRET", TEST_LIVE_AUTH_KEY);
+        std::env::remove_var("OPENCLAW_IPC_SECRET_FILE");
+
+        let got = read_live_auth_signing_key();
+
+        // Restore env before assert（避免污染後續 test）。
+        match prev_la {
+            Some(v) => std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY", v),
+            None => std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY"),
+        }
+        match prev_la_file {
+            Some(v) => std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE", v),
+            None => std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE"),
+        }
+        match prev_ipc {
+            Some(v) => std::env::set_var("OPENCLAW_IPC_SECRET", v),
+            None => std::env::remove_var("OPENCLAW_IPC_SECRET"),
+        }
+        match prev_ipc_file {
+            Some(v) => std::env::set_var("OPENCLAW_IPC_SECRET_FILE", v),
+            None => std::env::remove_var("OPENCLAW_IPC_SECRET_FILE"),
+        }
+
+        assert_eq!(got.as_deref(), Some(TEST_LIVE_AUTH_KEY));
+    }
+
+    #[test]
+    fn live_auth_signing_key_primary_wins_over_ipc_fallback() {
+        // 兩 env 都設且值不同 → 必走 primary（LIVE_AUTH），不走 IPC fallback。
+        let _guard = ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev_la = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY").ok();
+        let prev_ipc = std::env::var("OPENCLAW_IPC_SECRET").ok();
+
+        std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY", "primary-live-key");
+        std::env::set_var("OPENCLAW_IPC_SECRET", "fallback-ipc-key");
+
+        let got = read_live_auth_signing_key();
+
+        match prev_la {
+            Some(v) => std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY", v),
+            None => std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY"),
+        }
+        match prev_ipc {
+            Some(v) => std::env::set_var("OPENCLAW_IPC_SECRET", v),
+            None => std::env::remove_var("OPENCLAW_IPC_SECRET"),
+        }
+
+        assert_eq!(got.as_deref(), Some("primary-live-key"));
+    }
+
+    #[test]
+    fn live_auth_signing_key_missing_returns_specific_variant() {
+        // 兩 env 都未設 → 必 LiveAuthSigningKeyMissing（非舊 IpcSecretMissing）。
+        let _guard = ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let prev_la = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY").ok();
+        let prev_la_file = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE").ok();
+        let prev_ipc = std::env::var("OPENCLAW_IPC_SECRET").ok();
+        let prev_ipc_file = std::env::var("OPENCLAW_IPC_SECRET_FILE").ok();
+        let prev_secrets = std::env::var("OPENCLAW_SECRETS_DIR").ok();
+
+        std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY");
+        std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE");
+        std::env::remove_var("OPENCLAW_IPC_SECRET");
+        std::env::remove_var("OPENCLAW_IPC_SECRET_FILE");
+        // Need OPENCLAW_SECRETS_DIR otherwise authorization_path may unexpectedly
+        // resolve under $HOME — but here we only need read_live_auth_signing_key
+        // to return None, so leave it alone.
+
+        let result = load_and_verify(BybitEnvironment::LiveDemo);
+
+        match prev_la {
+            Some(v) => std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY", v),
+            None => std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY"),
+        }
+        match prev_la_file {
+            Some(v) => std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE", v),
+            None => std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE"),
+        }
+        match prev_ipc {
+            Some(v) => std::env::set_var("OPENCLAW_IPC_SECRET", v),
+            None => std::env::remove_var("OPENCLAW_IPC_SECRET"),
+        }
+        match prev_ipc_file {
+            Some(v) => std::env::set_var("OPENCLAW_IPC_SECRET_FILE", v),
+            None => std::env::remove_var("OPENCLAW_IPC_SECRET_FILE"),
+        }
+        match prev_secrets {
+            Some(v) => std::env::set_var("OPENCLAW_SECRETS_DIR", v),
+            None => std::env::remove_var("OPENCLAW_SECRETS_DIR"),
+        }
+
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, AuthError::LiveAuthSigningKeyMissing),
+            "expected LiveAuthSigningKeyMissing, got {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn load_and_verify_uses_live_auth_signing_key_when_set() {
+        // 接 load_and_verify_reads_file_via_env_override 改造變體：當新 env 設置
+        // 時，verify 必須以新 env 為簽名 key 來源（不走 fallback）。
+        let _guard = ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        // 用 TEST_LIVE_AUTH_KEY 簽授權。
+        let mut auth = LiveAuthorization {
+            version: SCHEMA_VERSION,
+            tier: "T0_ENTRY".into(),
+            issued_at_ms: now,
+            expires_at_ms: now + 24 * 3600 * 1000,
+            operator_id: "ncyu".into(),
+            approved_system_mode: APPROVED_SYSTEM_MODE_LIVE_RESERVED.into(),
+            env_allowed: vec!["live_demo".into()],
+            sig: String::new(),
+        };
+        auth.sig = compute_signature(&auth, TEST_LIVE_AUTH_KEY);
+        let serialized = serde_json::to_string_pretty(&auth).unwrap();
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let live_dir = tmp.path().join("live");
+        std::fs::create_dir_all(&live_dir).unwrap();
+        std::fs::write(live_dir.join(AUTHORIZATION_FILENAME), &serialized).unwrap();
+
+        let prev_secrets = std::env::var("OPENCLAW_SECRETS_DIR").ok();
+        let prev_la = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY").ok();
+        let prev_ipc = std::env::var("OPENCLAW_IPC_SECRET").ok();
+
+        std::env::set_var("OPENCLAW_SECRETS_DIR", tmp.path());
+        std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY", TEST_LIVE_AUTH_KEY);
+        // 設 IPC = 不同值，確認 verify 走 primary 而非 fallback；若走 fallback
+        // 用 IPC key 來驗會 BadSignature。
+        std::env::set_var("OPENCLAW_IPC_SECRET", "different-ipc-only-key");
+
+        let result = load_and_verify(BybitEnvironment::LiveDemo);
+
+        match prev_secrets {
+            Some(v) => std::env::set_var("OPENCLAW_SECRETS_DIR", v),
+            None => std::env::remove_var("OPENCLAW_SECRETS_DIR"),
+        }
+        match prev_la {
+            Some(v) => std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY", v),
+            None => std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY"),
+        }
+        match prev_ipc {
+            Some(v) => std::env::set_var("OPENCLAW_IPC_SECRET", v),
+            None => std::env::remove_var("OPENCLAW_IPC_SECRET"),
+        }
+
+        let loaded = result.expect("should verify with LIVE_AUTH primary key");
+        assert_eq!(loaded.tier, "T0_ENTRY");
+    }
+
     #[test]
     fn load_and_verify_reads_file_via_env_override() {
+        // 為什麼用 ENV_TEST_LOCK：OPS-2 SECRET-SPLIT 新增 LIVE_AUTH primary path 後
+        // 並行 test 可能在 IPC/LIVE_AUTH env 之間留殘餘，導致此 test 走 primary path
+        // 用錯 key 解 → BadSignature。串行所有 env-mutating test 消除 race。
+        let _guard = ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -663,9 +997,17 @@ mod tests {
 
         // Snapshot & override env vars.
         let prev_secrets = std::env::var("OPENCLAW_SECRETS_DIR").ok();
+        let prev_la = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY").ok();
+        let prev_la_file = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE").ok();
         let prev_ipc = std::env::var("OPENCLAW_IPC_SECRET").ok();
+        let prev_ipc_file = std::env::var("OPENCLAW_IPC_SECRET_FILE").ok();
         std::env::set_var("OPENCLAW_SECRETS_DIR", tmp.path());
+        // OPS-2 SECRET-SPLIT：同時 set 兩 env 對齊 Phase 1 restart_all seed 行為。
+        // fresh_auth 用 TEST_SECRET 簽，primary 與 fallback 同值。
+        std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY", TEST_SECRET);
+        std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE");
         std::env::set_var("OPENCLAW_IPC_SECRET", TEST_SECRET);
+        std::env::remove_var("OPENCLAW_IPC_SECRET_FILE");
 
         let result = load_and_verify(BybitEnvironment::LiveDemo);
 
@@ -675,9 +1017,21 @@ mod tests {
             Some(v) => std::env::set_var("OPENCLAW_SECRETS_DIR", v),
             None => std::env::remove_var("OPENCLAW_SECRETS_DIR"),
         }
+        match prev_la {
+            Some(v) => std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY", v),
+            None => std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY"),
+        }
+        match prev_la_file {
+            Some(v) => std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE", v),
+            None => std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE"),
+        }
         match prev_ipc {
             Some(v) => std::env::set_var("OPENCLAW_IPC_SECRET", v),
             None => std::env::remove_var("OPENCLAW_IPC_SECRET"),
+        }
+        match prev_ipc_file {
+            Some(v) => std::env::set_var("OPENCLAW_IPC_SECRET_FILE", v),
+            None => std::env::remove_var("OPENCLAW_IPC_SECRET_FILE"),
         }
 
         let loaded = result.expect("should verify");
@@ -691,6 +1045,11 @@ mod tests {
         assert_eq!(
             auth_error_kind(&AuthError::IpcSecretMissing),
             "ipc_secret_missing"
+        );
+        // OPS-2 SECRET-SPLIT — 新 kind 必對應 90d cadence alert rule。
+        assert_eq!(
+            auth_error_kind(&AuthError::LiveAuthSigningKeyMissing),
+            "live_auth_signing_key_missing"
         );
         assert_eq!(auth_error_kind(&AuthError::BadSignature), "bad_signature");
         assert_eq!(

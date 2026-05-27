@@ -57,8 +57,30 @@ def _first_header_token(headers: Any, name: str) -> str:
     return str(raw or "").split(",", 1)[0].strip().lower()
 
 
+def _proxy_headers_trusted() -> bool:
+    """是否信任反向代理塞入的 X-Forwarded-* / Forwarded header。
+
+    為什麼：直連 8000 的攻擊者可任意偽造 `X-Forwarded-Proto: https`，
+    若我們無條件信任 → cookie 仍被標 Secure，瀏覽器又因現在是 HTTP 就
+    丟回去 → cookie 永遠不會被瀏覽器送出 → 是 fail-closed，但 audit 上
+    仍構成「proxy header spoof 影響安全決策」的 risk surface。
+    OPS-1 P1-OPS-1-PROXY-HEADER-SPOOF-RISK：唯有 operator 顯式 opt-in
+    `OPENCLAW_TRUST_PROXY_HEADERS=1` 才讀取 proxy header；否則完全忽略，
+    fail-closed 至 request.url.scheme 為唯一真相。
+    """
+    flag = (os.getenv("OPENCLAW_TRUST_PROXY_HEADERS", "") or "").strip().lower()
+    return flag in {"1", "true", "yes", "on"}
+
+
 def _has_https_proxy_hint(request: Request) -> bool:
-    """Treat positive HTTPS proxy hints as fail-closed Secure-cookie signals."""
+    """正向 HTTPS proxy hint 偵測，僅在 trust gate 開啟時才生效。
+
+    為什麼 gate：見 `_proxy_headers_trusted` 注釋 — 避免直連 8000 的攻擊
+    者用偽 header 影響 Secure-cookie 判定。Caddy 反代後 operator 顯式設
+    `OPENCLAW_TRUST_PROXY_HEADERS=1`，未設則此函數一律回 False。
+    """
+    if not _proxy_headers_trusted():
+        return False
     if _first_header_token(request.headers, "x-forwarded-proto") == "https":
         return True
     if _first_header_token(request.headers, "x-forwarded-ssl") in {"on", "1", "true"}:
@@ -179,18 +201,18 @@ def load_expected_credentials() -> tuple[str, str]:
 
 
 def should_set_secure_cookie(request: Request) -> bool:
-    """Decide auth-cookie Secure using config plus trusted proxy headers.
-    使用部署配置與可信 proxy header 判定 auth cookie 是否加 Secure。
+    """以部署配置 + 受信任 proxy header 判定 auth cookie 是否加 Secure。
 
-    Default remains local-dev friendly auto mode for plain HTTP with no proxy
-    evidence. Positive HTTPS proxy hints set Secure even when
-    OPENCLAW_TRUST_PROXY_HEADERS is not configured; spoofing such a hint on a
-    direct HTTP request fails closed by making the cookie unusable over HTTP.
-    Production deployments may still force Secure with OPENCLAW_COOKIE_SECURE=1.
-    預設保留本機開發 auto 模式；若看到正向 HTTPS proxy hint，即使未設
-    OPENCLAW_TRUST_PROXY_HEADERS 也加 Secure。直接 HTTP 偽造該 header 只會讓
-    cookie 在 HTTP 下不可用，屬 fail-closed。正式部署仍可用
-    OPENCLAW_COOKIE_SECURE=1 強制 Secure。
+    決策順序：
+    1. `OPENCLAW_COOKIE_SECURE=1/true/yes/on` → 強制 True（Live 部署必設）。
+    2. `OPENCLAW_COOKIE_SECURE=0/false/no/off` → 強制 False。
+    3. `auto`（預設）→ `request.url.scheme == "https"` 或
+       `_has_https_proxy_hint(request)` 任一成立則 True。
+
+    Proxy header 信任策略（P1-OPS-1-PROXY-HEADER-SPOOF-RISK fix）：
+    只有顯式設 `OPENCLAW_TRUST_PROXY_HEADERS=1` 才讀取 X-Forwarded-Proto /
+    X-Forwarded-Ssl / Forwarded header；未設則完全忽略，杜絕直連 8000 偽造
+    header 干擾 Secure 判定。
     """
     override = (os.getenv("OPENCLAW_COOKIE_SECURE", "auto") or "auto").strip().lower()
     if override in {"1", "true", "yes", "on"}:

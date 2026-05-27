@@ -192,11 +192,16 @@ fn fresh_auth(now_ms: u64, ttl_ms: u64) -> LiveAuthorization {
 /// 同一 test binary 並行會交錯。下方 mutex 串行。
 fn set_test_env(secrets_dir: &std::path::Path) {
     std::env::set_var("OPENCLAW_SECRETS_DIR", secrets_dir);
+    // OPS-2 SECRET-SPLIT — 兩 env 都 set；Phase 1 兩值相同對齊 restart_all seed 行為。
+    // 為什麼：避免測試走 Phase 1 fallback path 觸發 WARN log（測試環境 1/h 仍會 emit）；
+    // 同時驗 primary path 工作。
     std::env::set_var("OPENCLAW_IPC_SECRET", TEST_SECRET);
+    std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY", TEST_SECRET);
 }
 fn clear_test_env() {
     std::env::remove_var("OPENCLAW_SECRETS_DIR");
     std::env::remove_var("OPENCLAW_IPC_SECRET");
+    std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY");
 }
 
 // Serialize all watcher tests to avoid env-var contention between
