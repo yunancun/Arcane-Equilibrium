@@ -1,9 +1,9 @@
 # 玄衡 TODO — 活躍派工佇列
 
-**版本**：v67（v66 + 2026-05-26 §1 4 P0 並行推進 + funding_arb (D) deprecation closure + LG-3 AC drift correction）
-**日期**：2026-05-26
-**HEAD**：cf61d1f0（Mac / origin / trade-core 三端同步 2026-05-25；v67 待 commit + push + ssh fast-forward）
-**Session**：§1 4 P0 sub-agent fan-out — PA OPS-1+OPS-4 / E3 OPS-2 / BB OPS-3 / PA LG-3 verify + EDGE-1 SSH empirical + operator funding_arb decision
+**版本**：v68（v67 + 2026-05-27 Wave 1-3 大規模並行推進 + 三 AMD operator APPROVE + OPS-1/2/4 IMPL + Workflow A AMD-09-03 §9 patch land）
+**日期**：2026-05-27
+**HEAD**：`65e78437`（feat wave2-3 commit；Mac local，待 push + ssh fast-forward）
+**Session**：D+0 PM session 22 並行 sub-agent — Wave 1 (4×PA/E3 spec verify) + Wave 2 (9×PA/MIT/E1 IMPL+cascade) + Wave 3 (8×A3/E2/CC/TW/QC review chain) — 全綠 closure
 **v65 archive**：`docs/archive/2026-05-26--todo_v65_archive.md`（待 archive；含 5 Strategy Stage roster / 5.1.1 H 級 ticket / W-AUDIT-4b retained / archive index 沿用）
 
 ---
@@ -24,7 +24,7 @@
 
 ## §0 三端同步 + Runtime 健康儀表
 
-**三端 sync**：Mac / origin/main / Linux trade-core 全 HEAD `d9be33de`（2026-05-26 commit chain `6a20b9ea` → `e913adbf` → `d9be33de` push + ssh pull --ff-only verified）
+**三端 sync**：Mac HEAD `65e78437`（2026-05-27 Wave 2-3 IMPL+TW patch+reviews commit；待 push + ssh trade-core ff）；origin/main + trade-core 上輪同步 HEAD `0459d451`（Wave 2 governance cascade commit 2026-05-27）
 
 **Runtime snapshot**（2026-05-27 04:48 UTC SSH verify post-restart）：
 - Engine PID `1228870`（atomic rebuild+restart 2026-05-26 23:06，取代舊 PID 374287）；cmdline `rust/target/release/openclaw-engine` ✅
@@ -43,8 +43,8 @@
 | ID | 狀態 | Owner | AC | Next Action |
 |---|---|---|---|---|
 | **P0-EDGE-1** | 🔴 ACTIVE（SSH empirical 2026-05-26 22:00 UTC: 0/3 AC paths satisfied；2026-05-26 cohort reframed 5→4 textbook per AMD-2026-05-26-01）| QC + PA | (i) **4 textbook** ≥3 demo 7d avg_net>5bps + Wilson lower>0 + n≥30（funding_arb retired per AMD-2026-05-26-01）；**OR** (ii) ≥3 alpha-bearing 達同標；**OR** (iii) portfolio 7d gross 正向 | 唯一可預期 closure path = (ii) Sprint 2 Alpha Tournament W12-15 dispatch；當前 (i) **4/4 textbook** `insufficient_total_samples`（funding_arb 樣本不再累積：deprecated；ma_crossover / bb_breakout / bb_reversion / grid_trading runtime_bps −11~−42）；(iii) live_demo 7d net=-1.99 USDT |
-| **P0-LG-3** | ⚠️ PA AC correction + V104 scaffold ✅ DONE 2026-05-26 / **IMPL DISPATCH READY** / 2 external gate pending（per 2026-05-27 PA verify: 3/3 drift FULLY COVERED） | PA ✅ → MIT V104 dry-run → E1×N IMPL | **AMENDED 2026-05-26**：spec v2 §4.1/§4.2/AC-T4-1~10 V094 字眼 IMPL 階段 1:1 替換 V104（V099 autonomy_level_config 預留 + V100 m4_hypothesis_base_table 已 land；§2.4A "fee_source tick-time consumer" wording drift 移除 per QA 2026-05-21 by-design caveat）；2026-05-27 empirical `ls sql/migrations/` 確認 V104 FREE（V099/V100/V101/V102/V103/V106/V107/V109/V112 占；V104/V105/V108/V110/V111 未 land）；real dispatch precondition = (1) V104 spec scaffold ship ✅ (2) v56 P0 Layer B + 24h ⏳ ~2026-05-30 (3) MIT 4-step dry-run 9/9 PASS ⏳ (4) Option B race-aware dispatch；§15 #1 FALSE dep reframed | LG-3 Wave 2.4.A earliest ~2026-05-30 UTC；ref V104 spec `srv/docs/execution_plan/specs/2026-05-26--v104-lg3-supervised-live-audit-migration.md` + amendment `2026-05-11--lg_3_spec_v2_final.md` L1771-1851 + verify report `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--p0_lg3_spec_verify_and_todo_patch.md` |
-| **P0-OPS-1..4** | 🟡 SPEC LAND 2026-05-26 / OPS-3 5/5 operator confirm ✅ CLEARED 2026-05-26 / E1 IMPL DISPATCH PENDING / W18-21 前必 closure | PA + BB + E3 | OPS-1 HTTPS Caddy+Tailscale cert spec ✅；OPS-2 1 CRITICAL secret split + 2 HIGH runbook gap；**OPS-3 5/5 cleared**（C-1 Spain ✅ / C-2 ≥L2 ✅ / C-3 demo+33d ⚠ pending OP-1 mainnet / C-4 defer first Live+30d / C-5 USDT Flexible $100-200 ✅）；OPS-4 runbook 11 章 / 4 critical gap | OPS-1 E1 dispatch (23-33hr)；OPS-2 P1-OPS-2-SECRET-SPLIT + RUNBOOK + DRY-RUN；**OPS-3 已 closure via `srv/docs/governance_dev/2026-05-26--bybit_compliance_signoff.md`**；OPS-4 4 critical gap (systemd + PG backup)；ref §6 NEW P1 entries |
+| **P0-LG-3** | ⚠️ PA verify ✅ + MIT V104 dry-run ✅ 9/9 PASS + 2 bonus / **IMPL DISPATCH gate (2) UNBLOCKED 2026-05-27** / gate (1) v56 P0 Layer B + 24h ~2026-05-30 待 | PA ✅ → MIT V104 dry-run ✅ → E1×N IMPL (gated) | **AMENDED 2026-05-26 / MIT dry-run 2026-05-27**：spec v2 V094→V104 1:1；2026-05-27 MIT BEGIN/ROLLBACK in trading_ai PG empirical PASS：21 col / 4 CHECK / hypertable 7day / compression 30d / retention 90d / V104 hole FREE confirmed / Guard A part 3 forbidden col 0 hit / 4 boundary INSERT check_violation rejected / 2nd apply NOTICE-skip 一致 V083/V084 gold；real dispatch precondition = (1) V104 spec scaffold ship ✅ (2) v56 P0 Layer B + 24h ⏳ ~2026-05-30 (3) MIT 4-step dry-run 9/9 PASS ✅ (4) Option B race-aware dispatch；§15 #1 FALSE dep reframed | LG-3 Wave 2.4.A earliest ~2026-05-30 UTC；ref V104 spec + verify report `2026-05-27--p0_lg3_spec_verify_and_todo_patch.md` + MIT dry-run `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-27--v104_supervised_live_audit_dry_run.md` |
+| **P0-OPS-1..4** | 🟡 IMPL DONE 2026-05-27 / OPS-3 ✅ / OPS-1 RETURN to E1 round 2 (2 HIGH 14d shadow 緩衝) / OPS-2 Phase 1 APPROVE-CONDITIONAL (E2+A3+CC) / OPS-4 APPROVE-WITH-MINOR / W18-21 前必 closure | E1 IMPL ✅ → E2+A3+CC reviews ✅ → E4 regression + operator deploy pending | OPS-1 IMPL ✅ 1242/22 LOC + 33/33 PASS + node --check；2 HIGH (raw fetch 7+ callsite / auth_check no auto seed csrf) ➔ shadow mode 14d 緩衝 + E1 round 2 4-6 hr fix；OPS-2 SECRET-SPLIT Phase 1 ✅ 477 LOC + cross-lang HMAC byte-identical + 5 PA hidden risk mitigation；CC 16/16 + 9/9 + 4/4 hard gate；14d soak D+0 2026-05-27 → D+14 2026-06-10；OPS-4 systemd ✅ 569 LOC + 1 MED Requires=空值 + 3 LOW; ref §6 NEW P1 entries (E1 round 2 + Phase 2 cutover + 4 minor) |
 | **P0-FUNDING-ARB-DECISION-FORCE** | ✅ **CLOSED 2026-05-26**（operator decision = D） | operator + PA | operator chose (D) 3C TOML deprecation closure | **Cascade WORKFLOW F NEW**：PA deprecation spec + TW docs/README/AMD cascade + R4 cross-ref；ref §9 NEW row + §6 P1 entry |
 
 ---
@@ -81,13 +81,13 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 
 | ID | Workflow | Owner chain (T1-T5 template) | 估時 | Cluster | Blocked-on |
 |---|---|---|---|---|---|
-| **A** | 22 fail-closed 1e-3 invariant Option (c) AMD-09-03 附錄 | T2: PA → TW → FA + QC → R4 cascade (waterfall+parallel) | 7.5-11.5 hr | 1 (parallel) | — D+0 可啟動 |
+| ~~**A**~~ | ~~22 fail-closed 1e-3 invariant Option (c) AMD-09-03 附錄~~ | – | ✅ **PA design + FA pre-verify + TW patch + QC math DONE 2026-05-27** | – | PA design 323 行 + FA CONDITIONAL APPROVE 22/22 字對齊 + TW AMD-09-03 §9 附錄 +143 LOC (C1-C6 全 land) + QC math sanity PASS + [81] SQL prototype 155 LOC；C7 cluster center 收緊 wording defer non-blocker；pending = E4 regression + R4 cross-ref + operator sign-off |
 | **B** | ADR-0046 basis observation/execution split | T1: PA design → E1 Rust → MIT V117 → E2 → E4 → BB → QA | 24-30 hr | 2 (Phase 1→2→3) | PA design first |
-| **D** | AMD-2026-05-25-01 商業化邊界 cascade | T2: operator confirm → PA + FA + R4 parallel + TW docs/README cascade | 4-6 hr | 3 (operator-gated) | operator 確認 |
+| ~~**D**~~ | ~~AMD-2026-05-25-01 商業化邊界 cascade~~ | – | ✅ **CLOSED 2026-05-27** | – | PA Workflow D cascade 完成 6 files (AMD Status Active + docs/README + SPECIFICATION_REGISTER + AMD-20-04/05 superseded callout + TODO §9 closed)；report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_d_amd_25_01_cascade.md` |
 | ~~**E**~~ | ~~AMD-2026-05-25-02 v5.5 reframe cascade~~ | – | ✅ **CLOSED 2026-05-27** | – | PA Workflow E cascade 完成；report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_e_amd_25_02_cascade.md` |
 | ~~**F**~~ | ~~funding_arb (D) 3C TOML deprecation cascade~~ | – | ✅ **FULLY CLOSED 2026-05-26** | – | Phase 1 PA spec ✅ + Phase 2 TW (AMD-26-01 + 5 primary + 19 secondary) ✅ + R4 Pass A APPROVE-WITH-DRIFT ✅ + R4 Pass B APPROVE ✅；3 LOW carry-over defer D+7 |
 | **Earn Wave C** | OP-1 series → first stake $100-200 Flexible-only | T1: 7 hand OP + 5 可代做 post-1..5 | OP 30min + post-flow 30min | 3 (operator-gated) | OP-1 a-f hand actions |
-| **Layered Autonomy v2 Wave 5** | V099 + GUI + Rust SM-04 + 5 ADR sync + R4 | T1+T2: 3 並行 (E1 V099 / E1a GUI / Rust SM-04) | 81-126 hr (8-12+21-28+52-86) | 1 partial (operator approve) | operator final sign-off |
+| **Layered Autonomy v2 Wave 5** | V099 + GUI + Rust SM-04 + 5 ADR sync + R4 | T1+T2: 3 並行 (E1 V099 / E1a GUI / Rust SM-04) | 81-126 hr (8-12+21-28+52-86) | 1 partial | ✅ **operator APPROVE 2026-05-27** + PA dispatch packet master 410 行 ✅；Packet A V099 + Packet C Rust SM-04 IMMEDIATELY DISPATCHABLE；Packet B GUI e2e gate 需 A land 24-48h；待主會話派 E1+MIT+E1a；ref `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--wave_5_dispatch_packet_master.md` |
 | **Sprint 2 業務 Alpha Tournament** | A1 funding short>30% + A2 LCS fade + A3 BTC/ETH pairs DRAFT | T1+T5: PA spec → E1 Rust×3 → MIT V108/V109/V111 → E2 → E4 → QC → BB → QA | 248-351 hr / 3w wall-clock | 4 (Sprint 2 dispatch) | Sprint 1A-γ V111 land |
 
 **Sub-agent dispatch hygiene SOP**（per memory `feedback_fetch_before_dispatch` + 2026-05-25 cargo test-after-atomic 教訓）：
@@ -144,14 +144,23 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 
 | ID | 優先 | 任務 | AC / Next Action |
 |---|---:|---|---|
-| `P1-OPS-1-E1-DISPATCH` | 1 | **NEW 2026-05-26 per PA OPS-1 verdict** — Caddy + Tailscale cert (Tailnet-only HTTPS) + CSRF middleware + secure cookie env + CSP report-only 升 P1；spec at `srv/docs/execution_plan/specs/2026-05-26--p0-ops-1-https-secure-cookie.md`；3 parallel track 23-33 hr (A 10-14h / B 8-12h / C 5-7h)；3 risk + 3 open question；Owner: PA spec → E1×3 → E2 → E4 → BB → QA；阻 Sprint 4 first Live |
-| `P1-OPS-1-PROXY-HEADER-SPOOF-RISK` | 1 | **NEW 2026-05-26 per PA OPS-1 §3.2** — `auth_routes_common.py:181-204` docstring 提 `OPENCLAW_TRUST_PROXY_HEADERS` env，但 `_has_https_proxy_hint` 實作沒 gate → 直連 8000 偽造 `X-Forwarded-Proto: https` 即可讓 Secure cookie 在 HTTP 用 = spoof risk；OPS-1 IMPL 一併修 |
-| `P1-OPS-2-SECRET-SPLIT` | 1 | **PA DESIGN ✅ DONE 2026-05-26** spec `srv/docs/execution_plan/specs/2026-05-26--p1-ops-2-secret-split-design.md` (484 行 / 12 章)；Phase 1 D+0 seed `live_auth_signing_key.txt` from `ipc_secret.txt` + fallback WARN / Phase 2 D+14 移 fallback；5-gate #4+#5 **強化**（不弱化）；E1 IMPL ~125 LOC 3 並行 sub-agent (E1-A Rust / E1-B Python / E1-C Bash) 10-14 hr active + 14d soak；PA 5 hidden risks 補（E3 audit 漏）含 HIGH IPC client script 8 grep hits 僅 3 actual live signing；E2 重點 3 點；CC review trigger = E1 IMPL DONE + E4 GREEN (E4 不取代 CC per `feedback_impl_done_adversarial_review`)；阻 OPS-2 runbook 撰寫 + Sprint 4 first Live |
-| `P1-OPS-2-RUNBOOK` | 1 | **NEW 2026-05-26 per E3-HIGH-2** — 撰寫 `docs/runbooks/credential_rotation.md` mirror `replay_signing_key_rotation.md` 9 章；涵蓋 3 secret class + 6 auxiliary；含 Schedule / Emergency / Fail Modes / Rollback / Audit Verification SQL；Owner: PA + E1 draft → E3 + CC review → PM approve → BB sign-off；ETA: 1 sprint after C-1 land |
+| `P1-OPS-1-E1-DISPATCH` | – | ✅ **IMPL DONE 2026-05-27 commit `65e78437`** — E1 1242/22 LOC + 33/33 PASS + node --check；E2 RETURN 2 HIGH + 3 MED；A3 6.0/10 CONDITIONAL；BLOCK commit NO with shadow OPENCLAW_CSRF_SHADOW=1；ref `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-27--ops_1_https_secure_cookie_impl.md` + E2 + A3 reports |
+| `P1-OPS-1-E1-ROUND-2-RAW-FETCH-CSRF` | 1 | **NEW 2026-05-27 per E2 F-1 HIGH** — `static/risk-tab.js:1079` + `app.js:407` apiPost + `handoff_helper.js:820` + `app-paper.js:1325/1332/1397/1421/1451` 7+ raw fetch 未走 ocApi/ocFetchWithCsrf；enforcing 後 403 黑屏；shadow mode 14d 緩衝；E1 改走 ocApi 或 ocCsrfHeaders；補 unit test mock cookie + spy fetch headers；阻 OPS-1 enforcing cutover；4-6 hr |
+| `P1-OPS-1-E1-ROUND-2-AUTH-CHECK-SEED` | 1 | **NEW 2026-05-27 per E2 F-2 HIGH** — `auth_legacy_routes.py:118-126` /auth/check 對既有 24h oc_auth_token user 不會 auto re-issue oc_csrf cookie → enforcing 後寫操作全 403；E1 補 set_csrf_cookie + test fixture；阻 OPS-1 enforcing cutover；1-2 hr |
+| `P1-OPS-1-E1-ROUND-2-MINOR` | 2 | **NEW 2026-05-27 per E2 3 MED + 3 LOW** — round 2 一併修：F-3 main_legacy.py:317 middleware LIFO 註釋矛盾 / F-4 /api/v1/csp/report 限頻+limit body / F-5 logout exempt 評估 / F-6 install_caddy macOS chown / F-7 systemd ExecStart pipefail / F-8 envsubst special-char；2-3 hr |
+| `P1-OPS-1-PROXY-HEADER-SPOOF-RISK` | – | ✅ **CLOSED 2026-05-27 by E2 verify PASS** — `auth_routes_common.py:60-94` `_proxy_headers_trusted()` env gate fail-closed verified；偽造 X-Forwarded-Proto 無效；regression batch B 10/10 PASS |
+| `P1-OPS-2-SECRET-SPLIT` | – | ✅ **IMPL DONE 2026-05-27 commit `65e78437`** Phase 1 — E1 477 LOC (Rust 371 + Python 74 + Bash 32) + 24/24 cargo + 8/8 pytest + 10/10 batch B + cross-lang HMAC `1b2b18d7...` byte-identical 三端 + 5 PA hidden risk mitigation；E2 APPROVE-CONDITIONAL 0 BLOCKER/HIGH；A3 8.0/10；CC 16/16 + 9/9 + 4/4 hard gate；Mainnet env-var fallback closed 紀律 reconcile PASS (signing-key 域 ≠ Bybit credential)；ref `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-27--ops_2_secret_split_impl.md` + E2 + A3 + CC reports |
+| `P1-OPS-2-PHASE-2-CUTOVER` | 1 | **NEW 2026-05-27 per CC C-1 P0 hard gate** — D+14 (2026-06-10) Phase 2 PR：移 fallback + main.rs:402 後第二 panic block + Python reason `ipc_secret_missing` → `live_auth_signing_key_missing` + `AuthError::IpcSecretMissing` 變體刪除；Phase 2 不 land = hardcoded fallback 永久化違規；Owner: E1 + CC + BB；trigger: D+14 + 14d soak 0 WARN log；2-4 hr |
+| `P1-OPS-2-14D-SOAK-OBSERVE` | 1 | **NEW 2026-05-27 per CC C-2/C-3** — 14d soak D+0 2026-05-27 → D+14 2026-06-10：(a) 每日 `ssh trade-core grep -c ops2_secret_split_phase1_fallback /tmp/openclaw/{engine,api}.log` 累計 = 0 (b) 至少 1 次 `/api/v1/live/auth/renew` 重簽；任一 fail = Phase 2 BLOCK |
+| `P1-OPS-2-RUNBOOK` | – | ✅ **CLOSED 2026-05-27 PA draft v0.9** — `docs/runbooks/credential_rotation.md` 495 行 / 12 章 / 3 primary + 6 auxiliary / Emergency RTO ≤5-7min / 4 audit SQL；ref `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--ops_2_runbook_draft.md` |
+| `P1-OPS-2-RUNBOOK-V1.0-PATCH` | 2 | **NEW 2026-05-27 per A3 4 follow-up** — Phase 2 D+14 前 close：(1) §4.2.1 vs IMPL §5.3 urandom vs seed 同值 language drift fix (2) §13 Phase 2 cutover SOP (外部 Grafana 新字串 / 14d soak result / E1 dispatch / panic verify) (3) §10.1 加 grep WARN=0 invariant (4) §10.5 cross-lang HMAC sanity check；2 hr |
+| `P1-OPS-2-CI-FLAKINESS-TEST-LOCK` | 3 | **NEW 2026-05-27 per E2 MEDIUM-1** — `live_authorization::tests::ENV_TEST_LOCK` vs `live_auth_watcher_tests::ENV_GUARD` 兩獨立 mutex；cargo test --lib 並行下 env-var race；24/24 PASS 實測未觸但 latent；合併至 crate-level shared mutex 或 serial_test crate；defer follow-up 非 prod risk |
+| `P1-OPS-2-RESTART-ALL-CP-ATOMIC` | 3 | **NEW 2026-05-27 per E2 MEDIUM-2** — `restart_all.sh:159` `cp ipc_secret.txt live_auth_signing_key.txt` 非 atomic；SIGTERM 中斷可能 partial-written；改 `cp ... tmp && mv tmp final`；首 boot 場景概率低 fail-closed 路徑安全；defer follow-up 非 prod risk |
 | `P1-OPS-2-DRY-RUN` | 1 | **NEW 2026-05-26 per E3-LOW-2** — OP-1 a-f path 45+ 天未動 = SOP 從未 end-to-end exercised；用 OP-1 當 OPS-2 SOP first dry-run 收 timing + fail-modes → runbook v1.1；Owner: Operator + PM；trigger: OP-1 unblock D+2-D+3 |
 | `P1-OPS-3-OPERATOR-CONFIRM-5` | – | ✅ **CLOSED 2026-05-26 sequential confirmation** — C-1 Spain (EU member, MiCA-compliant, NOT in 16 restricted) ✅ / C-2 ≥ Advanced L2 (Gov ID + face + utility bill, 2M USDT/day) ✅ / C-3 2 demo keys + 33d TTL ⚠ pending OP-1 a-f mainnet reissue (unblocks Sprint 4 + Earn) / C-4 defer Spanish tax planning to first Live + 30d (~2026-10) / C-5 accept Earn risks, first stake $100-200 USDT Flexible only ✅；signoff doc `srv/docs/governance_dev/2026-05-26--bybit_compliance_signoff.md`；ref `srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-26--p0-ops-3-bybit-tos-geo-kyc-audit.md` |
-| `P1-OPS-4-GAP-A-WATCHDOG-SYSTEMD` | 1 | **NEW 2026-05-26 per PA OPS-4 GAP A** — watchdog systemd respawn 未實裝；engine crash → watchdog auto-restart RTO ≤5min；阻 first-day live；Owner: E1 + E3 review |
-| `P1-OPS-4-GAP-F-ENGINE-SYSTEMD` | 1 | **NEW 2026-05-26 per PA OPS-4 GAP F** — engine systemd unit 未實裝；補 systemd 失效 supervisor 自動 restart；阻 first-day live；Owner: E1 + E3 review |
+| `P1-OPS-4-GAP-A-WATCHDOG-SYSTEMD` | – | ✅ **IMPL DONE 2026-05-27 commit `65e78437`** — `helper_scripts/systemd/openclaw-watchdog.service` (Restart=always + StartLimitBurst=10/600s) + install_watchdog_service.sh；E2 APPROVE-WITH-MINOR；RTO ≤5min 數學成立 |
+| `P1-OPS-4-GAP-F-ENGINE-SYSTEMD` | – | ✅ **IMPL DONE 2026-05-27 commit `65e78437`** — `helper_scripts/systemd/openclaw-engine.service` (Restart=on-failure + RestartSec=10 + StartLimitBurst=5/300s) + install_engine_service.sh；E2 APPROVE-WITH-MINOR；ref `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-27--ops_4_gap_a_f_systemd_impl.md` |
+| `P1-OPS-4-GAP-A-F-MINOR-FIX` | 2 | **NEW 2026-05-27 per E2 1 MED + 3 LOW** — E1 in-place fix（不重 round）：(1) MED `openclaw-engine.service:38` 刪整行 `Requires=` 空值 (2) LOW install_*.sh `systemd-analyze verify` 區分 warn vs error (3) LOW install_*.sh 加 `[[ "$ENGINE_USER" == "root" ]] && fail` (4) LOW `README.md §B` 補 `systemctl reset-failed` recovery 提示；1 hr |
 | `P1-OPS-4-GAP-B-PG-RESTORE-DRILL` | 1 | **NEW 2026-05-26 per PA OPS-4 GAP B** — PG restore drill 未驗 (15d retention 30d cron need verify)；阻 first-day live；Owner: MIT + E1 |
 | `P1-OPS-4-GAP-D-PG-DUMP-CRON` | 1 | **NEW 2026-05-26 per PA OPS-4 GAP D** — PG dump cron 未排；阻 first-day live；Owner: MIT + E1 |
 | `P1-LG-3-AC-CORRECTION` | – | ✅ **CLOSED 2026-05-26 / VERIFIED 2026-05-27** — PA delivered (1) spec v2 amendment 83 行 L1771-1851 (V094→V104 1:1 + V099/V100 移除 + §2.4A wording drift 移除) (2) V104 scaffold 378 行 `srv/docs/execution_plan/specs/2026-05-26--v104-lg3-supervised-live-audit-migration.md` (10 章 + 21 col + 4 CHECK + hypertable + Guard A/B/C + 4-step PG dry-run + V094→V104 replacement rule) (3) TODO §1 row reframe applied；**2026-05-27 PA verify pass**：3/3 drift FULLY COVERED + sql/migrations/ empirical V104 FREE；2 external gate remain = v56 P0 Layer B + 24h (~2026-05-30) + MIT V104 4-step empirical dry-run 9/9 PASS；ref close report `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-26--p0_lg3_ac_correction_and_v104_scaffold.md` + verify report `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--p0_lg3_spec_verify_and_todo_patch.md` |
@@ -196,7 +205,7 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 |---|---|---|---|---|
 | ~~**D+0 NEW (2026-05-26)**~~ | ~~confirm AMD-2026-05-25-01 商業化邊界 + AMD-2026-05-25-02 v5.5 reframe~~ ✅ **DONE 2026-05-27** — 兩 AMD operator APPROVE；Workflow D (25-01) + E (25-02) cascade completed | — | — | — |
 | **D+0 NEW** | commit canary [67]→[80] rename 4 files | 5 min | E1 sub-agent ready | 阻 sync (已 commit cf61d1f0 ✅) |
-| **D+1-D+2** | **AMD-21-01 v2 Layered Autonomy 最終 sign-off** | 30 min | PA spec + CC re-audit A 級 done | 阻 Wave 5 cascade IMPL（V099 + GUI + Rust SM-04 + 5 ADR sync） |
+| ~~**D+1-D+2**~~ | ~~AMD-21-01 v2 Layered Autonomy 最終 sign-off~~ ✅ **DONE 2026-05-27** — operator APPROVE 三 AMD 同輪；Wave 5 packet master ready 待主會話派 E1+MIT+E1a | — | — | — |
 | **D+2-D+3** | OP-1 a-f Bybit Web UI **mainnet** key 重發（per C-3 2026-05-26：現 2 demo key + 33d TTL，mainnet key 未發 → Sprint 4 first Live + Earn 雙線需）| 5-10 min | OP-1 pre-verify done | 阻 Sprint 4 first Live + Earn Wave C production deploy |
 | **D+2-D+3** | OP-2 Stage 0R Earn variant 仲裁（8 OQ）| 30-60 min | OP-1 完成 | 阻 first stake |
 | **D+2-D+3** | OP-3 first stake **$100-200 USDT Flexible-only** via tab-earn（per C-5 2026-05-26 拍板 USDT only 免幣價跌）| 5 min | OP-2 拍板 | 阻 `learning.earn_movement_log` rows>0 |
@@ -211,13 +220,13 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 
 ## §8 Backlog by Cluster（per PM §3 parallel 分組）
 
-### §8.1 Cluster 1 — Independent Parallel（D+0 立即啟動）
-1. **Workflow A** — 22 fail-closed 1e-3 invariant Option (c)（PM CONDITIONAL APPROVED；PA→TW→FA→QC→R4 5-agent；7.5-11.5 hr）
-2. **Workflow D** — AMD-25-01 商業化邊界 cascade（operator confirm pending → docs/README + SPEC_REGISTER + TODO cleanup；4-6 hr）
-3. **Workflow E** — AMD-25-02 v5.5 reframe cascade（operator confirm pending；4-6 hr）
-4. **Workflow F** (NEW 2026-05-26) — funding_arb (D) 3C TOML deprecation cascade（operator-decided；PA deprecation spec → TW docs/README/AMD → R4 cross-ref；4-6 hr）
-5. ~~**Workflow J**~~ — ✅ **CLOSED 2026-05-27** by PA：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_loss_architectural_root_cause_redesign.md` L243+L259 inline CORRECTION 撤回 + audit trail 保留；BB push back 3 條盤點：J ✅ / I (L25) NO ACTION / B (basis observation) defer ADR-0046 land；ref `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_j_false_claim_retraction.md`
-6. ~~**OPS [78]**~~ — ✅ **CLOSED 2026-05-27** by E3：root cause (c) post-restart auto-fix（crontab now installed + sentinel fresh + healthcheck today PASS）；無 IMPL 需求；ref §13 + §10
+### §8.1 Cluster 1 — Independent Parallel（D+0 立即啟動）— ✅ **6/6 全 CLOSED 2026-05-27**
+1. ~~**Workflow A**~~ — ✅ PA design + FA pre-verify CONDITIONAL APPROVE + TW AMD-09-03 §9 patch +143 LOC (C1-C6 全 land) + QC math sanity PASS + [81] SQL prototype；pending = E4 + R4 + operator sign-off
+2. ~~**Workflow D**~~ — ✅ AMD-25-01 cascade 6 files
+3. ~~**Workflow E**~~ — ✅ AMD-25-02 cascade 6 files
+4. ~~**Workflow F**~~ — ✅ CLOSED 2026-05-26 funding_arb deprecation
+5. ~~**Workflow J**~~ — ✅ CLOSED 2026-05-27 by PA inline CORRECTION
+6. ~~**OPS [78]**~~ — ✅ CLOSED 2026-05-27 by E3 (crontab now installed)
 
 ### §8.2 Cluster 2 — Partial-Dependent（B Phase 1→2→3 / Sprint 1A-γ/δ/ε）
 - **Workflow B Phase 1**（Sprint 1A-γ）：ADR-0046 basis spec execution split IMPL（PA → E1 → E2）
@@ -258,7 +267,7 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 |---|---|---|---|
 | **AMD-2026-05-25-01** | docs/README AMD list / SPECIFICATION_REGISTER count / TODO §8 Stream 2 殘留 cleanup / AMD-04+05 supersede markers | PA Workflow D | ✅ **CLOSED 2026-05-27** Cascade executed — operator APPROVE 2026-05-27 via PM session AskUserQuestion；AMD-25-01 Status Active；docs/README + SPECIFICATION_REGISTER 已 land entry；AMD-04 §1 Stream 2 + AMD-05 Stream 2 retain 部分 supersede marker land；`monetization-demand-test-spec.md` superseded marker pre-existed；TODO 無 Stream 2 active task 殘留（active surface 0 / archive-only mention 11+ files）；report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_d_amd_25_01_cascade.md` |
 | **AMD-2026-05-25-02** | docs/README AMD list / SPECIFICATION_REGISTER count / AMD-25-01 §3.2 cross-ref / ADR-0030 cross-ref / AMD Status Active + approval log / TODO §8.5 C2 cleanup | PA Workflow E | ✅ **CLOSED 2026-05-27** Cascade 完成；report `2026-05-27--workflow_e_amd_25_02_cascade.md` |
-| **AMD-2026-05-21-01 v2 Wave 5** | ADR-0034 LAL 對齊矩陣加 Autonomy Level / ADR-0040 §Decision 5 / ADR-0042/0044/0045 wording sync + V099 schema + GUI sub-section + Rust SM-04 patch | PA + E1 + E1a + MIT + R4 | Pending operator final sign-off |
+| **AMD-2026-05-21-01 v2 Wave 5** | ADR-0034 LAL 對齊矩陣加 Autonomy Level / ADR-0040 §Decision 5 / ADR-0042/0044/0045 wording sync + V099 schema + GUI sub-section + Rust SM-04 patch | PA + E1 + E1a + MIT + R4 | ✅ **operator APPROVE 2026-05-27** + PA dispatch packet master 410 行 (`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--wave_5_dispatch_packet_master.md`)；Packet A V099 + Packet C Rust SM-04 IMMEDIATELY DISPATCHABLE；Packet B GUI gated 24-48h post A；待主會話派 E1+MIT+E1a |
 | **ADR-0046 (Proposed)** | funding_arb.rs IMPL + V117 migration spec + Optuna search space update | PA + E1 + MIT | Sprint 1A-δ/ε 平行 land |
 | **drift audit 2026-05-25** | TODO active state update + v5.8 文檔 patches (DONE 10 patches) | PM | Cascade 完成 ✅ |
 | **operator decision 2026-05-26 (D) funding_arb deprecation** (Workflow F) | (1) PA spec (551 行) ✅ `2026-05-26--funding-arb-deprecation-cascade.md` (2) TW AMD-26-01 372 行 + 5 primary + 19 secondary ✅ `2026-05-26--AMD-2026-05-26-01-funding-arb-deprecation.md` (3) R4 Pass A APPROVE-WITH-DRIFT ✅ `2026-05-26--workflow-f-cross-ref-audit.md` (4) R4 Pass B APPROVE ✅ `2026-05-26--workflow-f-cross-ref-audit-pass-b.md` | PA → TW → R4 | ✅ **CLOSED 2026-05-26** Cascade 完成；3 LOW carry-over defer D+7 (~2026-06-02) |
@@ -292,7 +301,7 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 
 ## §11 Layered Autonomy v2 Wave 5 Cascade Pointer（2026-05-22）
 
-**狀態**：✅ **DESIGN-DONE + CC APPROVE A 級** 2026-05-22；Wave 5 cascade IMPL **PENDING operator final sign-off**
+**狀態**：✅ **DESIGN-DONE + CC APPROVE A 級** 2026-05-22 + ✅ **operator APPROVE 2026-05-27** + PA dispatch packet master ready；Wave 5 IMPL DISPATCH READY（Packet A V099 + Packet C Rust SM-04 即派；Packet B GUI 需 A land 24-48h）
 
 **4 個 SSOT 文件指針**：
 1. **AMD-2026-05-21-01 v2** — `docs/governance_dev/amendments/2026-05-22--AMD-2026-05-21-01-autonomy-fully-with-failsafe.md`（684 行）
@@ -300,10 +309,10 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 3. **V099 schema spec** — `docs/execution_plan/specs/2026-05-22--v099-autonomy-level-config.md`（568 行）
 4. **CC re-audit** — `docs/CCAgentWorkSpace/CC/workspace/reports/2026-05-22--layered_autonomy_v2_reaudit.md`（A 級 / 7 HC + 6 反模式 + 2 BLOCKER 候選解除）
 
-**Wave 5 cascade IMPL roadmap**（PENDING operator sign-off）：
-1. V099 schema land — E1 + MIT Linux PG empirical dry-run 13 條（8-12 hr）
-2. GUI Autonomy Posture sub-section — E1a tab-governance.html / CONFIRM SWITCH typed-confirm / 14 path × 2 level panel（21-28 hr）
-3. Rust SM-04 patch — `RiskEvent::NotificationFailsafeTimeout` 新 variant + active 鎖利 hook + 35+ transition rules verify（52-86 hr per AMD §9.8；PA + E1 + E4 三方 review）
+**Wave 5 cascade IMPL roadmap**（operator APPROVE 2026-05-27 + PA packet master 410 行 ready）：
+1. **Packet A V099 schema land** — E1 + MIT Linux PG empirical dry-run 13 條（8-12 hr）— **IMMEDIATELY DISPATCHABLE**
+2. **Packet B GUI Autonomy Posture sub-section** — E1a tab-governance.html / CONFIRM SWITCH typed-confirm / 14 path × 2 level panel（21-28 hr）— **DISPATCHABLE but e2e gate 需 Packet A land 24-48h**
+3. **Packet C Rust SM-04 patch** — `RiskEvent::NotificationFailsafeTimeout` 新 variant + active 鎖利 hook + 35+ transition rules verify（6-10 hr per packet master subset；52-86 hr 為 AMD §9.8 整體 cascade subset 含 R4+TW；PA + E1 + E4 三方 review）— **IMMEDIATELY DISPATCHABLE**
 4. 5 module ADR sync — ADR-0034 + ADR-0040 + ADR-0042/0044/0045 wording 對齊
 5. R4 cross-ref audit
 
@@ -354,8 +363,9 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 
 | 日期 / Sprint | 工作 | Gate |
 |---|---|---|
-| **D+0 (2026-05-26)** | confirm AMD-25-01/02 + Cluster 1 五並行啟動 | 5 sub-agent dispatch |
-| **D+1-D+2** | AMD-21-01 v2 final sign-off + Wave 5 cascade dispatch | operator sign + 3 並行 |
+| ~~**D+0 (2026-05-26)**~~ | ~~confirm AMD-25-01/02 + Cluster 1 五並行啟動~~ ✅ **DONE 2026-05-27** Cluster 1 6/6 全 CLOSED + 三 AMD operator APPROVE | — |
+| ~~**D+1-D+2**~~ | ~~AMD-21-01 v2 final sign-off + Wave 5 cascade dispatch~~ ✅ **operator APPROVE 2026-05-27** + Packet A V099 + Packet C Rust SM-04 IMMEDIATELY DISPATCHABLE | 主會話派 E1+MIT+E1a Wave 5 IMPL |
+| **2026-06-10** | OPS-2 Phase 2 cutover (D+14 soak end) | E1 PR move fallback + main.rs panic block + Python reason rename + AuthError variant delete |
 | **D+2-D+3** | OP-1 a-f + OP-2 + OP-3 Earn first stake | `learning.earn_movement_log` rows > 0 |
 | **D+5** | P0-EDGE-1 / LG-3 / OPS-1..4 closure ETA | Sprint 4 first Live W18-21 unblock |
 | **2026-06-01** | C10 funding harvest 7d demo AC #1/#4 sample | Stage 1 Demo verdict |
@@ -429,6 +439,12 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && PGHOST=localhost PGUSER=trading_admin 
 
 ## §-1 歷史 closure 摘要（≤14d；舊細節 → archive）
 
+- **2026-05-27 D+0 Wave 1-3 大規模並行 closure（22 sub-agent / 三波 / commits `bcf0e401` → `0459d451` → `65e78437`）**：
+  - **Wave 1 (4 並行)**: PA Workflow A design 323 行 (22 invariant 4-Group framework + 5 risk + FA pre-verify recommend) / PA Workflow J L243+L259 inline CORRECTION 撤回 / E3 OPS [78] reconcile root cause (c) crontab now installed + healthcheck today PASS / PA P0-LG-3 verify 3/3 drift FULLY COVERED + V104 FREE empirical
+  - **Wave 2 (9 並行)**: FA Workflow A pre-verify CONDITIONAL APPROVE 22/22 字對齊 + 6 conditions / PA Workflow D AMD-25-01 cascade 6 files / PA Workflow E AMD-25-02 cascade 6 files / PA Wave 5 dispatch packet master 410 行 / MIT V104 9/9 PASS + 2 bonus LG-3 IMPL gate (2) UNBLOCKED / PA OPS-2 runbook v0.9 495 行 / E1 OPS-1 1242 LOC + 33/33 PASS / E1 OPS-2 SECRET-SPLIT Phase 1 477 LOC + cross-lang HMAC byte-identical / E1 OPS-4 systemd 2 unit + 2 install script
+  - **Wave 3 (8 並行 review chain)**: A3 OPS-1 6.0/10 CONDITIONAL (1 BLOCKER raw fetch + 2 HIGH SOP/toast) / A3 OPS-2 8.0/10 CONDITIONAL (4 Phase 2 follow-ups) / E2 OPS-1 RETURN 2 HIGH + 3 MED (E1 round 2 4-6 hr) / E2 OPS-2 APPROVE-CONDITIONAL 0 BLOCKER/HIGH + 2 MED / E2 OPS-4 APPROVE-WITH-MINOR 1 MED + 3 LOW / CC OPS-2 APPROVE-CONDITIONAL 16/16+9/9+4/4 hard gate + Mainnet env-var fallback closed 紀律 reconcile PASS (signing-key 域) / TW Workflow A AMD-09-03 §9 patch +143 LOC (C1-C6 全 land) / QC Workflow A math sanity PASS + [81] SQL prototype 155 LOC + C7 cluster center wording suggestion
+  - **3 AMD operator APPROVE 2026-05-27**: AMD-25-01 Commercialization Exchange-Native + AMD-25-02 v5.5 Bot Positioning + AMD-21-01 v2 Layered Autonomy with Fail-Safe (Wave 5 packet master ready)
+  - 真實 closure: 0 OPS critical block；P0-LG-3 gate (2) UNBLOCKED；OPS-1 shadow mode commit OK pending E1 round 2 enforcing cutover；OPS-2 14d soak start D+0 → D+14 2026-06-10 Phase 2 cutover；OPS-4 4 minor E1 in-place fix
 - **2026-05-26 §1 P0 advance — LG-3 AC correction + OPS-2 SECRET-SPLIT design**：
   - **P0-LG-3 AC correction** ✅ PA delivered — spec v2 amendment 83 行 (line 1771-1851) + V104 migration spec scaffold 378 行 + TODO §1 reframe applied；2 external gate pending = v56 P0 Layer B + 24h (~2026-05-30) + MIT V104 4-step PG dry-run；ref `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-26--p0_lg3_ac_correction_and_v104_scaffold.md`
   - **P1-OPS-2-SECRET-SPLIT design** ✅ PA delivered — 484 行 / 12 章 spec at `srv/docs/execution_plan/specs/2026-05-26--p1-ops-2-secret-split-design.md`；Phase 1 D+0 + Phase 2 D+14；5-gate #4+#5 強化；E1 IMPL 125 LOC / 3 並行 sub-agent / 10-14 hr active + 14d soak；5 hidden risks (HIGH IPC client mis-migration); CC review trigger E1 IMPL DONE + E4 GREEN
