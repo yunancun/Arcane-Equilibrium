@@ -1,7 +1,16 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-27（P0-OPS-1 HTTPS / Secure cookie / CSRF / CSP Track A + B + C IMPL — 新增 `lib/tls_cert.sh` + `Caddyfile.template` + `install_caddy.sh` + `systemd/openclaw-{caddy,tls-renew,tls-renew-notify}.{service,timer}` Track A 共 7 個檔；E1 IMPL DONE 待 E2 + E3 + BB sign-off。同日保留 P0-OPS-4 first-day-live runbook GAP A + GAP F IMPL 索引 + 2026-05-25 Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron + W2-B Alpha Tournament scaffold + Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
+最後更新：2026-05-27（P0-OPS-4 GAP-D Track A round 2 — 新增 `canary/healthchecks/check_pg_dump_freshness.py` Python 主入口 7-check（5 verify_pg_dump.sh + L0 schema coverage + governance audit trail） + wire `passive_wait_healthcheck/checks_cron_heartbeat.py` 加 `check_80_pg_dump_freshness()` wrapper；E1 IMPL DONE 待 E2 sign-off。同日保留 P0-OPS-1 HTTPS Track A IMPL + P0-OPS-4 first-day-live runbook GAP A + GAP F IMPL 索引 + 2026-05-25 Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron + W2-B Alpha Tournament scaffold + Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
+
+## 2026-05-27 P0-OPS-4 GAP-D PG dump cron + healthcheck IMPL
+
+| 腳本 | 用途 |
+|------|------|
+| `cron/install_pg_dump_cron.sh` | round 1 — `crontab -l` idempotent installer for `trading_ai_pg_dump_cron.sh`；Linux only；偵測 existing entry 避重複；`--dry-run` 預覽。對齊 PA spec §10 GAP-D + MIT empirical report §1.7 Phase 1 plan A（local-only）。 |
+| `cron/trading_ai_pg_dump_cron.sh` | round 1 — daily 03:00 UTC PG `-Fc` dump wrapper：EXCLUDE `learning.decision_features_evaluations`（182GB / 17d / 無 retention）+ `*_damaged_*` quarantine 表；retention 30d；完成/失敗均 INSERT `learning.governance_audit_log` event_type `pg_dump_completed` / `pg_dump_failed`（V113 CHECK enum 補登 26-value）。Linux only；lock dir 防 overrun；cron heartbeat sentinel start-time touch `${OPENCLAW_DATA_DIR}/cron_heartbeat/trading_ai_pg_dump.last_fire`。 |
+| `cron/verify_pg_dump.sh` | round 1 — Bash sidecar 5-check：backup dir / latest dump mtime < 26h / size > 1MB / md5 對齊 JSONL entry / retention prune 生效。operator SSH ad-hoc 場景下不需 venv 快速跑 14-step drill；Python 版 `check_pg_dump_freshness.py` 才是 healthcheck pipeline 主要入口。 |
+| `canary/healthchecks/check_pg_dump_freshness.py` | round 2 — Python 主入口 7-check standalone（FA acceptance §E #7）：5 個對齊 `verify_pg_dump.sh` + 第 6 個 L0 schema coverage smoke（subprocess `pg_restore --list <latest> \| grep earn_movement_log` per FA §C.5）+ 第 7 個 governance_audit_log audit trail（last `pg_dump_completed` ts < 26h）。V113 未 apply / cron 未 fire → INSUFFICIENT_SAMPLE-skip fail-soft。stdlib + psycopg2 only；Linux only（`sys.platform` guard）。被 `passive_wait_healthcheck.checks_cron_heartbeat.check_80_pg_dump_freshness()` wrapper 引用。對齊 [80] healthcheck slot；JSON 輸出 + exit 0/1/2 對齊 `_common.py` 慣例。 |
 
 ## 2026-05-27 P0-OPS-1 HTTPS / Secure cookie / CSRF / CSP Track A IMPL
 

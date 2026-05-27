@@ -12946,3 +12946,19 @@ Crontab line for PM ssh paste:
 - 治理: JS 沒 Jest/Vitest 基建時，subprocess `node -e` inline harness 是 cheap path；spy fetch + mock document.cookie 一次驗多個 wrapper
 - Test 從 33 → 48；新檔 test_ops1_csrf_js_callsites.py（7 test）
 - Report: workspace/reports/2026-05-27--ops_1_round_2_e2_e1_returns.md
+
+## 2026-05-27 P0-OPS-4 GAP-D Track A round 2 — check_pg_dump_freshness.py + passive_wait wire
+
+- 補 round 1 缺的 2 deliverable：(1) Python 主入口 `helper_scripts/canary/healthchecks/check_pg_dump_freshness.py` 616 LOC 標準 7-check；(2) wrapper `check_80_pg_dump_freshness()` 加進 `passive_wait_healthcheck/checks_cron_heartbeat.py` + runner.py 註冊 + `__init__.py` re-export
+- 7 check = 5 對齊 verify_pg_dump.sh（backup dir / freshness 26h / size 1MB / md5 vs JSONL / retention 30d）+ 第 6 個 `pg_restore --list | grep earn_movement_log` L0 schema smoke（per FA §C.5）+ 第 7 個 governance_audit_log `pg_dump_completed` < 26h trail（per PA §10.B.1 + FA §C / §E #7）
+- task 文字「在 .sh 加 check function」與既有架構不符（passive_wait_healthcheck.sh 是 venv loader wrapper，無 check function 概念；真實 check 在 .py package runner.py 註冊）；採 PA 真意 = wire 進 passive_wait pipeline，標 `[80]` slot 對齊 [75]-[79] cron_heartbeat 系列
+- 教訓: Wrapper 對 standalone 用 importlib + `OPENCLAW_BASE_DIR` 動態解析 sys.path，對齊 [20] check_h_state_gateway_freshness pattern；避 hardcode relative import 跨 package
+- 教訓: standalone `connect_pg()` 失敗用 sys.exit(2) — wrapper 必 `try/except SystemExit` 包覆，否則整個 runner 被打掛
+- 教訓: 寫 healthcheck 必查 V### migration 是否已 PG empirical apply（V113 CHECK constraint 還未 land；INSERT pg_dump_completed 會被 CHECK 拒）→ 加 INSUFFICIENT_SAMPLE-skip fail-soft 邏輯避 deploy 阻擋
+- 教訓: backup dir missing 不該是 FAIL — first-day pre-deploy 期 install_pg_dump_cron.sh 還沒跑時 dir 不存在是 expected；只有 dir 存在但配置錯（非 dir / 不可寫）才 FAIL
+- 重要 finding: round 1 `trading_ai_pg_dump_cron.sh` 第 8 行已預先 reference 本 round 2 path `check_pg_dump_freshness.py` — round 1 已預埋接口契約
+- 重要 finding: SCRIPT_INDEX 之前沒 P0-OPS-4 GAP-D 段（round 1 漏補）— round 2 合補 4 file 完整 entry，避部分一致
+- 重要 finding: PA spec §10.B.1 列 4 個 event_type（completed / failed / retention_dropped / md5_drift）但 V113 + trading_ai_pg_dump_cron.sh 只實作 2 個（completed / failed）— 對齊 round 1 實際 schema 不擴
+- Linux empirical: standalone --status JSON 全 7 check 正確分類 (FAIL→INSUFFICIENT_SAMPLE bug fix 後), overall verdict=INSUFFICIENT_SAMPLE, exit=0；wrapper invoke summary collapse 成單行帶 sub-check 摘要, exit=0
+- Mac syntax: py_compile 4 file 全綠（check_pg_dump_freshness.py + checks_cron_heartbeat.py + runner.py + __init__.py）；bash -n passive_wait_healthcheck.sh 全綠（無動 .sh）
+- Report: workspace/reports/2026-05-27--ops_4_round_2_e1_pg_dump_healthcheck.md

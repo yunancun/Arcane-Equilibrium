@@ -325,6 +325,14 @@ from .checks_cron_heartbeat import (
     check_77_replay_key_rotation_check_cron_fires,
     check_78_feature_baseline_writer_cron_fires,
     check_79_blocked_symbols_30d_unblock_check_cron_fires,
+    # P0-OPS-4 GAP-D（2026-05-27）— PG dump cron freshness wrapper（FA acceptance
+    # §E #7）。Delegate 給 standalone
+    # ``helper_scripts/canary/healthchecks/check_pg_dump_freshness.py`` 跑完整 7
+    # check（5 verify_pg_dump.sh + L0 schema coverage + governance audit trail）；
+    # 整體 verdict 收 runner severity 合成。standalone 自開 PG conn（check[7]
+    # audit-log 用），跑於 conn.close() 後 — 與 [75]-[79] 同 cron_heartbeat 性質
+    # 不同點：[80] 不只 sentinel mtime，而是 full 7-check 健康評估。
+    check_80_pg_dump_freshness,
 )
 
 
@@ -353,6 +361,8 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [29]                                                  1 F7 (no-IPC stub)
     [47]                                                  REF-20 Sprint D R8 — replay_runner binary presence (filesystem)
     [56]                                                  Live / LiveDemo pipeline active sentinel (filesystem)
+    [75][76][77][78][79]                                  P1-CRON-INSTALL-WAVE-1 cron heartbeat sentinels
+    [80]                                                  P0-OPS-4 GAP-D — trading_ai_pg_dump 7-check (delegate standalone)
 
 F7 sentinels [22]-[29] added 2026-04-26 by MIT DB audit + E5 engine.log dive:
   [22] trading_pipeline_silent_gap    (DCS active but fills cliff)
@@ -533,6 +543,8 @@ def main() -> int:
                    [29]   (F7 [29] is deferred-no-ipc stub)
                    [47]   (REF-20 Sprint D R8 replay_runner binary filesystem)
                    [56]   (P0-NEW-ISSUE-1 live pipeline active filesystem)
+                   [75][76][77][78][79]  (P1-CRON-INSTALL-WAVE-1 cron heartbeats)
+                   [80]   (P0-OPS-4 GAP-D pg_dump 7-check delegate to standalone)
 
     入口 — 跑全部註冊 check 並印結構化報告。順序固定 — cursor 區塊跑
     DB 相關 check，conn.close() 之後再跑純檔案系統 check。每個 check 回
@@ -541,7 +553,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55][57][58][58a][59][64][65][66][67][68][69][70][71][72][73][74]
-      post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56]
+      post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56] [75][76][77][78][79] [80]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
     ap.add_argument("--quiet", action="store_true", help="Only print non-PASS lines")
@@ -1389,6 +1401,16 @@ def main() -> int:
     results.append(
         ("[79] blocked_symbols_30d_unblock_check_cron_fires", s, m)
     )
+
+    # [80] P0-OPS-4 GAP-D (2026-05-27)— trading_ai_pg_dump cron freshness wrapper
+    # （FA acceptance 2026-05-27 §E #7 — 7-check 含 5 verify_pg_dump.sh + L0 schema
+    # coverage smoke + governance_audit_log trail）。Delegate 給 standalone
+    # ``helper_scripts/canary/healthchecks/check_pg_dump_freshness.py`` 取 verdict
+    # + sub-check 摘要 collapse 成單行。standalone 自開 PG conn 跑 check[7] audit
+    # trail；本 invocation 在 conn.close() 後因不依賴 runner cur。
+    # [80] P0-OPS-4 GAP-D — PG dump 7 check wrapper；standalone SSOT delegate。
+    s, m = check_80_pg_dump_freshness()
+    results.append(("[80] pg_dump_freshness", s, m))
 
     # NOTE: [30] cost_edge_advisor_status moved INSIDE the cursor block by
     # G3-09 Phase B Wave 1 (2026-04-28). Phase A version was filesystem-only
