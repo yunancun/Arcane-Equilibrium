@@ -8,6 +8,38 @@
 
 ## 工作記憶
 
+### 2026-05-27 OPS-4 systemd (GAP-A + GAP-F + minor fix) E4 regression — PASS（含 3 carry-over）
+
+**對象**：`65e78437` (OPS-4 IMPL) + `07027493` (OPS-4 minor fix 4 條：MED-1 空 Requires= 刪 / LOW-2 verify warn vs error / LOW-3 root user guard exit 12 / LOW-4 README reset-failed)。E2 APPROVE-WITH-MINOR + 4 minor fix DONE。
+
+**結果**：
+| 檢查 | 結果 |
+|---|---|
+| bash -n install_engine + install_watchdog | 2/2 PASS |
+| systemd-analyze verify 6 unit (ssh trade-core, sed 替換 9 placeholder) | 4 clean / 2 warn / 1 fail (全預存非本次引入) |
+| README 渲染（1 H1/7 H2/9 H3/12 fence balanced/154 行/3 reset-failed mention）| PASS |
+| SCRIPT_INDEX 9 systemd entry 對齊 | PASS |
+| 跨平台 grep /home/ncyu (logic line) | **0 違反**（11 hit 全在注釋/錯誤訊息字串內）|
+| install script idempotency smoke (static) | OVERWRITE+daemon-reload pattern 正確冪等 |
+
+**3 carry-over（全屬 65e78437 或更早 OPS-1 Track A 預存，不阻 07027493 commit）**：
+1. **C-1 HIGH**：`StartLimitIntervalSec` 寫在 `[Service]` 被 systemd 245+ ignore → rate-limit 實際不生效（spec §5.1 雙重防線 systemd 端失效，僅靠 watchdog circuit-break）。應改為 `StartLimitInterval` 或移到 `[Unit]`。OPS-4 round 3。
+2. **C-2 MED**：`openclaw-tls-renew-notify.service` `ExecStart` 內 `$(date -u +%FT%TZ)` 撞 systemd `%F/%T/%Z` specifiers → fatal error，OnFailure hook 無法觸發。需 escape `%%FT%%TZ`。OPS-1 round 3。
+3. **C-3 LOW**：caddy binary `/usr/bin/caddy` 缺檔 — operator hand-action 提示，非 IMPL 缺陷。
+
+**Verdict**：PASS — OPS-4 4 minor fix 全 land；deploy ready；3 carry-over 顯式記錄不漏。
+
+**教訓**：
+1. **systemd `StartLimitIntervalSec` section drift（systemd 230 → 245+）**：spec 寫 `[Service]` 在 systemd 245+ 是 unknown key，warning 是「ignoring」說明 directive **完全不生效**。E2 review 只看語法/結構，systemd-analyze 才能 catch；E4 必跑 trade-core 真實 systemd parser。Mac 沒有 systemd 不可代驗。
+2. **systemd `ExecStart` 內 `%` 是 unit specifier escape**：`/bin/bash -c '... $(date -u +%FT%TZ) ...'` 看似 shell 字符串但 systemd 在執行前先解析 specifier，`%F/%T/%Z` 撞 systemd built-in specifier（如 `%F` = full hostname）→ fatal "无效的 slot"。修法 `%%FT%%TZ`。
+3. **E4 對 minor fix 必 scope diff confirm**：本 round 3 finding 都不是 07027493 引入，必須顯式 git show 65e78437 + git log 證明預存，否則會誤判 minor fix 引入 regression 退 E1。
+4. **install script idempotent ≠ skip-warn**：systemd unit install 是 leaf state OVERWRITE pattern；第二次跑直接覆寫 + daemon-reload，正確且冪等。比 `if exists then warn` 更安全（避免半成型 unit 殘留）。
+5. **cross-platform grep 必 distinguish logic line vs comment/string**：`/home/ncyu` 出現在 install script `${VAR:?例: /home/ncyu/...}` 是錯誤訊息字串內，不是硬編碼；簡單 grep 會 false positive。
+
+**Report path**: `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-27--ops_4_e4_regression.md`
+
+---
+
 ### 2026-05-22 Sprint 2 Phase 3b regression (Wave 1+2 combined 6 Track) — PASS
 
 **對象**：Sprint 2 M3 metric emitter Wave 1+2 6 Track E1 IMPL round 2 (HEAD `ffb7ed48`) — Track A engine_runtime scaffold + Track B pipeline_throughput + Track C database_pool + Track D api_latency + Track E strategy_quality + Track F risk_envelope + cross-Wave OBSERVE-4 fix (M3Error::ReplaySubprocessForbidden + dual scheduler guard)。
