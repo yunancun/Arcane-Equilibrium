@@ -500,6 +500,140 @@
   </div>
 </div>
 
+<!-- ═══ Autonomy Posture / 自主程度設定 ═══ -->
+<!-- Wave 5 Packet B Sub-section · AMD-2026-05-21-01 v2 §Decision 1 + PA spec §5
+     系統級政策：在 fail-safe 自動觸發 robustness 為主防線的設計 thesis 下，
+     哪些 protected/opt-in path 走 LAL 自動路徑、哪些仍走 operator approve manual。
+     Default = Level 1 Conservative；Level 2 Standard 受 evidence baseline gating。 -->
+<div class="gov-section-label">Autonomy Posture / 自主程度</div>
+<div class="oc-card gov-full-row" id="autonomy-posture-card">
+  <!-- Preview-only banner：後端 endpoint + V099 schema 未 land，全區 mock data -->
+  <div id="autonomy-preview-banner"
+       style="margin-bottom:12px;padding:10px 12px;background:rgba(245,158,11,.12);
+              border-left:4px solid #f59e0b;border-radius:0 6px 6px 0;
+              color:#fbbf24;font-size:12px;line-height:1.6">
+    <strong>&#x26A0;&#xFE0F; PREVIEW ONLY / 預覽模式</strong>
+    後端 endpoint <code>/api/v1/governance/autonomy-level/*</code> 與
+    V099 schema（<code>system.autonomy_level_config</code>）尚未 land；
+    本區塊目前以 mock data 展示 UX 形態。切換按鈕停用直到後端 endpoint 接通
+    並通過 E3 安全審核。
+  </div>
+
+  <h3>&#x1F39B;&#xFE0F; Autonomy Posture / 自主程度設定
+    <abbr title="System-wide policy controlling which protected/opt-in paths go LAL auto vs operator approve manual. AMD-2026-05-21-01 v2 §Decision 1."
+          style="font-size:10px;color:var(--text-dim);cursor:help">AMD v2</abbr>
+  </h3>
+  <div class="subtitle">系統級 governance 政策 — Level 1 Conservative / Level 2 Standard 切換</div>
+  <div class="gov-sm-note">
+    Autonomy Level 與 LAL 0-4（per-decision approval depth）+ Stage 0R-4（per-strategy promotion）
+    三維度正交。Level 只動 path 集合邊界，不動 §Decision 2 5 條 fail-safe hard requirements。
+  </div>
+
+  <details class="gov-learn">
+    <summary>了解更多 / Learn more</summary>
+    <div class="gov-learn-body">
+      <strong>Level 1 (Conservative · CC stance)</strong>：6 條 protected/opt-in path 走 operator manual
+      （含 5-gate + venue change 永鎖）；<br/>
+      <strong>Level 2 (Standard · PM Path B)</strong>：13 條 path 走 auto with §Decision 2 fail-safe
+      （5-gate + venue change 兩 level 都 manual 永鎖）。<br/>
+      切換需 Operator role + 2FA TOTP + typed-confirm「CONFIRM SWITCH」+
+      ≥30 字元 reason + 24h cooldown + 三路通知（Slack + email + Console banner）。
+    </div>
+  </details>
+
+  <!-- ── Current Level Display / 當前等級顯示（PA spec §5.6 header）── -->
+  <div style="display:flex;justify-content:space-between;align-items:center;
+              padding:12px 14px;background:var(--bg);border:1px solid var(--border);
+              border-radius:8px;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div style="flex:1;min-width:240px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">Current Level / 當前等級</div>
+      <div id="autonomy-current-level-badge" style="display:inline-block;padding:4px 10px;
+            border-radius:6px;font-size:14px;font-weight:700;
+            background:rgba(56,139,253,.18);color:#58a6ff">
+        --
+      </div>
+    </div>
+    <div style="flex:2;min-width:300px">
+      <div style="font-size:11px;color:var(--text-dim);margin-bottom:4px">
+        Last switched / 上次切換（雙時間戳 UTC + local · per A3 AP-8）
+      </div>
+      <div id="autonomy-last-switched" style="font-size:12px;line-height:1.6">--</div>
+      <div id="autonomy-switched-by" style="font-size:11px;color:var(--text-dim);margin-top:2px">by --</div>
+      <div id="autonomy-switch-reason" style="font-size:11px;color:var(--text-dim);
+           margin-top:4px;font-style:italic">--</div>
+    </div>
+    <div>
+      <button class="oc-btn oc-btn-primary" id="autonomy-switch-btn"
+              onclick="autonomyOpenSwitchModal()" disabled
+              title="切換 Autonomy Level（受後端 endpoint + evidence baseline gating）">
+        &#x21C4; Switch Autonomy Level
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Level 2 Eligibility Progress / Level 2 啟用閘門進度（PA spec §5.4 + FA U-FA-1）── -->
+  <div style="margin-bottom:14px">
+    <div style="font-size:11px;color:var(--text-dim);font-weight:700;
+                letter-spacing:0.06em;text-transform:uppercase;margin-bottom:8px">
+      Level 2 Eligibility / Level 2 啟用閘門進度
+    </div>
+    <div id="autonomy-eligibility-list" style="display:flex;flex-direction:column;gap:6px">
+      <!-- 由 JS render：C-1 21d demo 穩定期 / C-2 5 策略 N≥30 / C-3 Wilson CI 95% lower bound 正向 -->
+      <div style="color:var(--text-dim);font-size:12px">Loading... / 載入中...</div>
+    </div>
+  </div>
+
+  <!-- ── 14 path × 2 level Matrix Panel（PA spec §2.1 完整對照矩陣）── -->
+  <details id="autonomy-matrix-details" class="gov-learn">
+    <summary>14 path × 2 level Matrix / 14 條 path × 2 等級對照表（per AMD v2 §Decision 1）</summary>
+    <div class="gov-learn-body" style="padding:0;background:transparent;border:none">
+      <div style="font-size:11px;color:var(--text-dim);margin:8px 0">
+        對照表共 20 row（5-gate 5 + protected 6 + opt-in 8 + venue 1）× 2 level = 40 cell；
+        Level 1→Level 2 升級時預設展開（per A3 U2 AP-7）。
+      </div>
+      <div class="oc-table-wrap">
+        <table class="oc-table" id="autonomy-matrix-table">
+          <thead>
+            <tr>
+              <th style="width:60px">#</th>
+              <th style="min-width:200px">Path</th>
+              <th style="min-width:140px">Category / 分類</th>
+              <th style="min-width:170px">Level 1 Conservative</th>
+              <th style="min-width:170px">Level 2 Standard</th>
+            </tr>
+          </thead>
+          <tbody id="autonomy-matrix-tbody">
+            <tr><td colspan="5" style="color:var(--text-dim)">Loading... / 載入中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </details>
+
+  <!-- ── 三路通知 status footer（per AMD v2 §Decision 3.1）── -->
+  <div style="margin-top:14px;padding:10px 12px;background:var(--bg);
+              border:1px solid var(--border);border-radius:8px">
+    <div style="font-size:11px;color:var(--text-dim);font-weight:700;
+                letter-spacing:0.06em;text-transform:uppercase;margin-bottom:8px">
+      Notification Channels / 三路通知（最近一次切換）
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px" id="autonomy-notification-row">
+      <span>Slack: <strong id="autonomy-notif-slack">--</strong>
+        <span style="color:var(--text-dim);font-size:10px">(SLA ≤10s)</span></span>
+      <span style="color:var(--border)">|</span>
+      <span>Email: <strong id="autonomy-notif-email">--</strong>
+        <span style="color:var(--text-dim);font-size:10px">(SLA ≤60s)</span></span>
+      <span style="color:var(--border)">|</span>
+      <span>Console banner: <strong id="autonomy-notif-banner">--</strong>
+        <span style="color:var(--text-dim);font-size:10px">(SLA ≤5s)</span></span>
+    </div>
+    <div id="autonomy-notification-escalation" style="margin-top:6px;font-size:11px;color:var(--text-dim)">
+      Escalation result: <strong>--</strong>
+      <span style="font-size:10px">（三路全 fail → 1h wait → SM-04 Defensive · per AMD §Decision 3.1 + PA spec §4.4）</span>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ Paper → Live Gate / 升级门禁 ═══ -->
 <div class="gov-section-label">Eligibility & Learning / 准入与學習</div>
 <div class="oc-card" id="paper-live-gate-card">

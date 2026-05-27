@@ -605,11 +605,11 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && cargo run --bin repair_migration_check
 
 **MANDATORY wrapper enhancement**（E1 IMPL）：
 
+> **AMENDMENT 2026-05-27 round 2 reconcile**：原列 4 event_type，V113 + cron round 1 land 真相只 2 個（`pg_dump_completed` + `pg_dump_failed`）；其餘 2 個（`pg_dump_retention_dropped` + `pg_dump_md5_drift`）未實作，列為 P3 future-V### follow-up backlog（見 §10.C carry-over）。本節 spec 對齊現實降到 2 個 event_type；E1 IMPL DONE 不再被本節阻塞。
+
 dump 完成（成功 or 失敗）後必 INSERT `learning.governance_audit_log`：
 - `event_type='pg_dump_completed'` — 成功 case；payload 含 dump file path / size / md5 / duration_sec
 - `event_type='pg_dump_failed'` — 失敗 case；payload 含 exit code / error message / partial dump path
-- `event_type='pg_dump_retention_dropped'` — retention prune 觸發；payload 含 dropped file list
-- `event_type='pg_dump_md5_drift'` — md5 verify 失敗；payload 含 expected / actual md5
 
 **Acceptance**：
 ```sql
@@ -677,6 +677,21 @@ pg_restore --list /home/ncyu/pg_backups/tier01_$(date +%Y%m%d).dump | grep earn_
 `verify_pg_dump.sh` 必加此第 6 check「L0 schema coverage smoke test」。
 
 ---
+
+---
+
+## 10.C P3 Future-V### Backlog（round 2 carry-over）
+
+下列 round 1+2 land 後識別的 future-V### follow-up（**不阻 first-day live**）：
+
+| Item ID | 描述 | Source | Priority | Owner |
+|---|---|---|---|---|
+| **PG-DUMP-EVENT-EXTEND-1** | `learning.governance_audit_log` 加 `pg_dump_retention_dropped` event_type — retention prune 觸發時 INSERT；payload 含 dropped file list；需 V### migration 補登 CHECK constraint + cron wrapper retention 段加 INSERT call | §10.B.1 round 2 reconcile | **P3** | E1 → MIT |
+| **PG-DUMP-EVENT-EXTEND-2** | `learning.governance_audit_log` 加 `pg_dump_md5_drift` event_type — md5 verify 失敗時 INSERT；payload 含 expected / actual md5；需 V### migration 補登 CHECK constraint + verify_pg_dump.sh md5 check 段加 INSERT call | §10.B.1 round 2 reconcile | **P3** | E1 → MIT |
+
+**Trigger condition for promotion to P1**：first-day live 後若 ops team 發現 retention/md5_drift 失蹤無 audit trail → 升 P1 land；否則 P3 待 quarterly cleanup sprint pick up。
+
+**Note**：當前 cron wrapper retention 段 + verify md5 check 仍**正常運作**（JSONL log + sentinel 走），只是缺 governance_audit_log row。Fail-safe 行為不受影響。
 
 ---
 
