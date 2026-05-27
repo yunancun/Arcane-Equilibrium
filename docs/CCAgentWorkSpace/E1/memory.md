@@ -12844,3 +12844,52 @@ Crontab line for PM ssh paste:
 - F7：ipc_client lazy import 上移 module top (EngineIPCClient/EngineTimeoutError/EngineDisconnectedError + secret_runtime.get_secret_value)
 - 測試 27 PASS (22+5 new: F1 ×3 / F3 tamper ×1 / F4 None ×1);harness CLI float reject + range reject + signed JSON verify 三 negative path 全 GREEN
 - 教訓：F3 改既有 stage_0r PASS/FAIL test 需同步加 _sign_stage_0r_payload helper,否則 HMAC verify mismatch 致 status 從 PASS 變 PENDING;先檢查既有 fixture 是否依賴新 invariant 再加 new case (避免 round 3 還要修舊 test)
+
+## 2026-05-27 — P0-OPS-4 GAP A + GAP F Linux systemd unit IMPL
+- 範圍：watchdog systemd respawn (GAP A) + engine systemd unit (GAP F)，補齊 first-day live RTO < 5min 鏈
+- File land：`helper_scripts/systemd/{openclaw-engine,openclaw-watchdog}.service`（94+93 行）+ `install_{engine,watchdog}_service.sh`（107+126 行 exec）+ `README.md`（149 行 RTO 驗證 SOP）；SCRIPT_INDEX 新增 5 entry；569 LOC total
+- 對應 macOS launchd plist 已存在於 `helper_scripts/deploy/com.openclaw.engine*.plist` — 跨平台 1:1 對稱（KeepAlive ↔ Restart=always / ThrottleInterval ↔ RestartSec）
+- 設計取捨：engine `Restart=on-failure`（區分 operator manual stop vs crash；對齊 5 gate 不誤清 authorization.json）；watchdog `Restart=always`（純監控應極高可用）；StartLimitBurst 5 vs 10（engine 5 連 fail circuit-break / watchdog 10 連 fail 表 python env 損毀）
+- 教訓 1：unit `EnvironmentFile=` + `Environment=` 必須對齊 `restart_all.sh` 完整 env list（OPENCLAW_BASE_DIR / DATA_DIR / CANARY_MODE / IPC_SOCKET / DATABASE_URL_FILE / IPC_SECRET_FILE）— 漏一個 engine startup 立 fail；先 grep restart_all.sh L520-535 抓 nohup 啟動 env block
+- 教訓 2：install script 跨平台 guard 必 `uname -s != Linux` exit 1 + root EUID guard + 占位符殘留 grep guard（防 sed 漏 replace）；用 `mktemp` + atomic `install -m 644` 避半成型 unit
+- 教訓 3：systemd unit 中所有 `/home/ncyu` 路徑均必為 `__OPENCLAW_BASE_DIR__` 占位符；install script sed 替換用 env；驗收 `grep -nE '/home/ncyu|/Users/ncyu'` 命中只能在 docstring `如:` / `例:` 注釋
+- 教訓 4：unit 不設 `MemoryMax`（OOM kill 違 fail-closed 留半成型 IPC）；不設 `Restart=always` 於 engine（混淆 SIGTERM exit 0 主動 stop vs crash）；不在 install script 自動 `systemctl start`（留 operator 5-gate 後決策）
+- 教訓 5：`WatchdogSec` 預留註解未開啟 — 開需先 patch `engine_watchdog.py` 加 `sd_notify(WATCHDOG=1)`；本 sub-agent 不擴 watchdog scope，建議獨立 follow-up task
+- 沒做：未真實 install service / 未啟動 / 未跑 RTO drill SOP（spec 明示）；GAP B + GAP D MIT 負責，本 sub-agent 不碰
+
+## 2026-05-27 P0-OPS-1 HTTPS/Secure cookie/CSRF/CSP IMPL（Track A+B+C 三 track 同 sub-agent 完成）
+
+- 三 track 拆開 spec 但同 sub-agent 寫：A (Caddy infra) / B (CSRF middleware) / C (secure cookie env + CSP report-only)，避免 3 instance 並行寫 main_legacy.py 競態
+- Track C 連帶修 P1-OPS-1-PROXY-HEADER-SPOOF-RISK：`_has_https_proxy_hint` 新加 `_proxy_headers_trusted()` env gate；未設 `OPENCLAW_TRUST_PROXY_HEADERS=1` → 完全忽略 proxy header（fail-closed）
+- Track B 設計：CSRFMiddleware（BaseHTTPMiddleware 繼承）+ 豁免 hardcoded 不可由 env 擴充 + Shadow mode `OPENCLAW_CSRF_SHADOW=1` 提供 14d 過渡期；token 走 `secrets.token_urlsafe(32)` + `hmac.compare_digest`
+- GUI 前端 helper `static/js/fetch_with_csrf.js` 提供 `window.ocCsrfHeaders` API；`common.js::ocApi` 自動套用；19 個 tab-*.html + index.html + trading.html 用 Python 批量插入 `<script src="/static/js/fetch_with_csrf.js">` before common.js
+- Caddy 設計：`Caddyfile.template` envsubst 處理，禁 `tls internal` dev CA；systemd unit 4 個（caddy + tls-renew service/timer/notify）；helper `lib/tls_cert.sh` 跨平台 Linux/Darwin 雙分支 + openssl 算 days remaining
+- 教訓 1：static check test 「不應含 `/home/ncyu`」遇到自己的反 pattern 注釋（`不寫死 /home/ncyu`）會 false positive；改寫成 generic 描述（"operator-specific home 路徑"）
+- 教訓 2：static check test 「不應含 `tls internal`」遇到 Caddy 設定的 `Tailscale internal CA` 注釋會 false positive；改寫成「Tailscale-issued cert」+「禁用 Caddy 內建 dev CA」
+- 教訓 3：登入時必同步 set `oc_csrf` cookie（auth_legacy_routes.py login 修改）+ logout 同步 delete；不靠前端建 token，避免 race
+- 教訓 4：CSRF middleware 不擋 `/api/v1/csp/report`（瀏覽器後台 POST，不可能附 token）— 豁免名單必 hardcode 不可 env 擴充
+- 教訓 5：跑 `python3 -c "from app import auth_legacy_routes"` 有 circular import；必先 import main_legacy（其 import chain 觸發完整載入）
+- 33/33 pytest PASS（23 新 + 10 既有 batch_b_security_auth regression）；node --check 過 fetch_with_csrf.js + common.js
+- 沒做：未實際 deploy Caddy；未 cargo build（不需）；未 commit / push；未 patch TODO（主會話處理）
+- 報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-27--ops_1_https_secure_cookie_impl.md`
+
+## 2026-05-27 — P1-OPS-2-SECRET-SPLIT Phase 1 IMPL DONE (待 E2 + A3 + E4)
+
+任務：spec `docs/execution_plan/specs/2026-05-26--p1-ops-2-secret-split-design.md` 3 並行 sub-track ABC 合一 Phase 1 IMPL。
+
+3 track LOC + 結果：
+- Rust live_authorization.rs +371（含 5 對抗式 new test + 1 舊 test 補 ENV lock）/ live_auth_watcher_tests.rs +5
+- Python live_trust_routes.py +74 / new test file 244 LOC（8 test）
+- Bash restart_all +21（seed `[ ! -f ]` 嚴條件 + 2 spawn inject）/ fresh +6 / clean +5 / SCRIPT_INDEX 擴句
+- cargo test 24/24 PASS（含 5 新 OPS-2）/ pytest 18/18 PASS（8 新 + 10 batch B invariant 不破）
+
+3 個關鍵教訓：
+1. **Cross-lang HMAC fixture pinning 雙端互鎖最強**：Rust + Python 兩端各自 assert 同一 pinned hex `1b2b18d7e212d0d1e8f943c25f6f070b2ba75013b8fd5c3a021800d11b8b78fc`（同 key+payload 算出）。canonical_payload 格式 / HMAC algo / hex encoding 任一漂移立刻 fail。比「只驗 algorithm 對齊 stdlib」更強的 invariant lock。
+2. **Phase staged AuthError migration**：保留 `IpcSecretMissing` 變體 + `ipc_secret_missing` 字串 + 並列加 `LiveAuthSigningKeyMissing` 新變體，不替換 — 避免 Phase 1 14d 期間 alert rule break。Phase 2 cutover 時 rename。staged migration 是「不破現有 alert」的乾淨做法。
+3. **rate-limit WARN 必雙端對齊 + 共享窗口**：Rust 用 AtomicU64 `compare_exchange` / Python 用 `threading.Lock`；同 process 內 sign+verify 兩路徑共享 state（每 1h 雙路徑合計最多 1 條）。watcher 5s poll 換算 7200 logs/day 未限速會洪流。同 process 多 caller 必走同一 limiter，否則 limiter 多副本失效。
+
+教訓副產品：
+- 並行 Rust unit test 環境變量爭用 race：原 `load_and_verify_reads_file_via_env_override` 因新 OPS-2 test set LIVE_AUTH=不同值留殘餘 → 舊 test 走 primary path 用錯 key 解 → BadSignature；修法 = 共享 `ENV_TEST_LOCK` static Mutex 串行所有 env-mutating test。env-mutating test 並行設計即有風險，加 lock 是基本功。
+- restart_all `[ ! -f live_auth_signing_key.txt ]` seed 條件嚴 = spec §8.5 E2 重點 #2 守住；已 rotate 的 key 不被覆蓋；重 boot idempotent。
+
+未 commit；report 寫在 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-27--ops_2_secret_split_impl.md`；待 E2 + A3 對抗式 + E4 regression（Linux integration A/B/C 屬 E4 範圍）後 PM 統一 commit + 14d soak start。

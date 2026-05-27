@@ -1,9 +1,15 @@
 # Amendment AMD-2026-05-20-05 — Retract Stream 3 IP Sale Prep (Operator Reality Check)
 
+> **⚠️ SCOPE EXTENDED 2026-05-25 by [AMD-2026-05-25-01 Commercialization Boundary: Exchange-Native Only](2026-05-25--AMD-2026-05-25-01-commercialization-exchange-native-only.md) (operator approved 2026-05-27)**
+>
+> 本 AMD 原 scope 僅 retract Stream 3 IP Sale。AMD-25-01 將 retract scope 從「IP sale only」擴 to「all non-exchange-native commercialization」，包含 Stream 2 (Telegram subscription / Substack / Stripe pre-order / Cloudflare landing) + MEV/DEX + signal feed integration。
+> 本 AMD §1 Stream 3 IP sale retract 結論不變；§1 「Stream 2 monetization demand test 維持 30%」**已 OBSOLETED**（AMD-25-01 §3.1 #2-#8 完整 retire）。其他章節保留作 historical evidence + governance lineage。
+> Future 重啟 Stream 2 或 IP sale 須走 AMD-25-01 amendment chain。
+
 **對應 spec**: `srv/2026-05-20--commercial-evidence-sprint-v4.3.md` (in-place retraction notice added)
 **修訂對象**: AMD-2026-05-20-04 §1 三 stream 架構 + v4.3 §3 Stream 3 IP Sale Prep + v4.3 §5 W8/W12 verdict matrix + v4.3 §12 EV 算式
 **日期**: 2026-05-20
-**狀態**: Accepted
+**狀態**: ~~Accepted~~ → **Stream 3 IP sale retract 結論 Active；Stream 2 retain 部分 SUPERSEDED by AMD-2026-05-25-01 (2026-05-27)**
 
 ---
 

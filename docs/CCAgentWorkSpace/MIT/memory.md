@@ -768,3 +768,53 @@ _Last updated: 2026-04-24_
 - math-model-audit(HMM/GARCH/VPIN 黑名單 source of truth)— ADR-0036 governance promotion mirror
 - walk-forward-validation-protocol(QC alpha 顯著性協議)— PSR + DSR + Bonferroni 入 sentinel JSON
 
+
+## 2026-05-27 V104 supervised_live_audit Linux PG empirical dry-run (LG-3 Wave 2.4.A gate 2)
+
+**Report**: `workspace/reports/2026-05-27--v104_supervised_live_audit_dry_run.md` (132 行)
+
+**Verdict**: **9/9 PASS + 2 bonus PASS → LG-3 Wave 2.4.A E1 IMPL dispatch UNBLOCKED ✅**
+
+**Trade-core PG snapshot (BEGIN/ROLLBACK transaction-safe)**:
+- `_sqlx_migrations` max=112 / count=102 (V99-V103 all success=t; V104 hole FREE confirmed; V105-V112 already land 後續 spec)
+- V35 governance_audit_log + V54 lease_transitions prereq met (Guard A part 1 PASS)
+- learning.supervised_live_audit baseline 0 row clean
+- Round 1+2 全在 BEGIN/ROLLBACK 內，0 leaked row、0 sqlx_migrations 異動
+
+**9-Query empirical 結果**:
+1. Q1 sqlx baseline → max=112 / count=102 ✓
+2. Q2 CREATE+Guard A part 1 → 0 RAISE / hypertable_id=88 ✓
+3. Q3 idempotency 2nd apply → `relation ... already exists, skipping` NOTICE ✓
+4. Q4a 21 col allowlist → col_count=21 / ordinal 1..21 / type 全對 (TEXT[]/JSONB/FLOAT8/TIMESTAMPTZ) ✓
+5. Q4b 4 CHECK constraint → conname × 4 全在 ✓
+6. Q4c hypertable → num_dimensions=1 / chunk_days=7 ✓
+7. Q4d 2 policy job → 1050 compression 30d + 1051 retention 90d ✓
+8. Q4e 4 named idx + PK + auto created_at idx = 6 indexname ✓
+9. Q4f action CHECK 17 enum 完整 (request_registered/approval_granted/approval_rejected/expired_pre_auth/auth_file_observed/auth_file_invalid/lease_acquired/lease_released/auth_recheck_fail/drawdown_breach/drawdown_close_complete/kill_api/kill_ipc/session_max_duration/reconcile_force_close/illegal_transition_attempted/session_closed) ✓
+
+**Bonus verify**:
+- Guard A part 3 forbidden column (ml_label/training_label/feature_vector/signal_id) 0 hit → non-training surface invariant 達成
+- 4 boundary INSERT (bad action / bad result / paper engine_mode / ts_ms=0) 全 check_violation rejected
+- 1 valid INSERT (engine_mode=live_demo, action=request_registered, result=ok) 成功
+
+**1 push back (非阻 IMPL)**:
+- `OPENCLAW_PG_URL_DRYRUN` 在 trade-core unset；spec §4.1 Step 2 「scp + psql」流程在無 sandbox DB 環境下需改寫為 BEGIN/ROLLBACK 模式。建議 PA E1 dispatch packet 註明採 transaction rollback 模式（per task brief 已指定）。
+- PG WARNING `column "event_id" should be used for segmenting or ordering` — spec §2.3 選 `session_id` segmentby 是 hot-read pattern 設計正確；informational only。
+
+**sqlx checksum drift 治理**:
+- 本 dry-run 在 BEGIN/ROLLBACK 內，未寫 `_sqlx_migrations` row → 0 checksum drift hazard
+- 將來 V104 真 apply 後 count 102→103, max 不變(112)
+- V104 file 若 land 後再 edit → 必跑 `bin/repair_migration_checksum --target V104` per `project_2026_05_02_p0_sqlx_hash_drift`
+
+**Gate 狀態**:
+- Gate (2) MIT 4-step dry-run 9/9 PASS — **DONE**
+- Gate (1) v56 P0 Layer B + 24h (~2026-05-30) — operator/PM 觀察
+- 兩 gate 解後即可 PM 派 Wave 2.4.A E1 IMPL (T1 SM core + T4 V104 audit writer 並行)
+
+**Lessons reinforced**:
+1. trade-core 無獨立 sandbox DB；transaction rollback 是當前唯一安全 dry-run 模式
+2. V083/V084 NOTICE-skip 模式 = idempotency gold standard；本次 Round 2 verify 一致
+3. spec §3.1 Guard A part 3 forbidden column 反模式（非 ML training surface）empirical 確認生效
+4. CHECK constraint 4 條全用 boundary INSERT 驗 enforce — 比靜態 SQL parse 強得多
+
+MIT AUDIT DONE: docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-27--v104_supervised_live_audit_dry_run.md

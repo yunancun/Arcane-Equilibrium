@@ -1,5 +1,38 @@
 # PA Memory — 工作記憶
 
+## Workflow D — AMD-25-01 Commercialization Exchange-Native Only cascade（2026-05-27）
+
+**觸發**：Operator 2026-05-27 APPROVE AMD-2026-05-25-01 via PM session AskUserQuestion；4-6 hr cascade。
+
+**6 cascade edits land**：
+1. AMD-25-01 主檔 Status: `Proposed-pending` → `Active (operator approved 2026-05-27)` + Operator approval log section + §7 Sign-off table 6 角色狀態全更新
+2. `docs/README.md` line 229 新增 AMD-25-01 entry（Active 區）含 retire 8/retain 6 路徑摘要
+3. `docs/governance_dev/SPECIFICATION_REGISTER.md` line 26 新增 AMD-25-01 entry（Last Updated 已被並行 Workflow E session 改為 2026-05-27，PA Workflow D 不 revert per multi-session race protocol）
+4. `docs/governance_dev/amendments/2026-05-20--AMD-2026-05-20-04-v4.3-commercial-evidence-sprint.md` 頂加 §1 Stream 2 SUPERSEDED callout
+5. `docs/governance_dev/amendments/2026-05-20--AMD-2026-05-20-05-retract-stream-3-ip-sale.md` 頂加 SCOPE EXTENDED callout（Stream 3 IP sale retract 結論保留 Active）
+6. `srv/TODO.md` §9 line 259 AMD-25-01 row Status → ✅ CLOSED 2026-05-27 / Owner → PA Workflow D / 補 6 cascade artifacts pointer
+
+**Pre-existing markers respected**：`docs/execution_plan/2026-05-20--monetization-demand-test-spec.md` line 1-13 superseded marker 已於 2026-05-25 drift audit cascade land；不重複 patch。
+
+**6 carry-over noted**：
+1. SPECIFICATION_REGISTER 缺 AMD-20-04 / AMD-20-05 historical entries（pre-existing gap，不擴 scope）
+2. archive/ 內 v4.3/v4.4 files 不需 cascade
+3. AMD-25-01 §3.2 Retain table row 1 Bybit Copy Trading 被 Workflow E linter 加 Y2+ Reserve 限定（cross-AMD 對齊 v5.5 / AMD-25-02）保留
+4. TODO §16 Active AMD list 已含 `-25-01` pre-Workflow-D
+5. §9 line 260 AMD-25-02 cascade row 並行 Workflow E session 已 CLOSED 非本 scope
+6. rust_migration/00 Telegram bot 為 alert 通知非 subscription monetization 語意不同
+
+**16 根原則合規**：A 級 16/16；純治理文件 cascade，0 hard boundary 觸碰；本 AMD §6.3 引「不放鬆 §四 hard boundaries 任一條」明文。
+
+**教訓**：
+- Multi-session race：SPECIFICATION_REGISTER Last Updated 行被 Workflow E session 先 update — 不 revert，補強 entry 即可（per memory `feedback_git_commit_only_for_metadoc` + 多 session race 協議）
+- AMD supersede marker 寫 callout 而非 strikethrough whole file — 保留 historical evidence + governance lineage 對齊 v4.3 doc 既有風格
+- 治理文件 cascade ≠ engineering work；scope 嚴守「只 retire / mark superseded / TODO row close」per AMD §4.3「不觸發 cascade patch」
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_d_amd_25_01_cascade.md`
+
+---
+
 ## P0-LG-3 AC drift correction + V104 spec scaffold（2026-05-26）
 
 **觸發**：2026-05-26 §1 4 P0 並行 Pass A verify 揭 TODO §1 行 48 P0-LG-3 AC 3 處 drift；operator 指派 PA spec patch + V### renumber + V104 scaffold + TODO reframe text。
@@ -6382,3 +6415,55 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 - 風險 5 大：R1 22 真實 ≥ 50 cherry-pick / R2 1e-3 誤讀 / R3 Group C healthcheck dual-source / R4 Group D funding_arb 與 ADR-0046 PROPOSED 衝突 / R5 工時假設 5 並行不成立應改 PA→FA pre-verify→TW chain
 - PA 推薦先派 FA pre-verify（I1-I22 字面 + §2 分組）再 TW patch，否則 TW 寫完被 FA push back 必返工破 11.5 hr 上限
 - Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_a_22_failclosed_option_c_design.md` (323 行)
+
+## 2026-05-27 — Workflow E AMD-2026-05-25-02 cascade（formalize only）
+- Trigger: operator 2026-05-27 APPROVE AMD-25-02 (v5.5 Bot Positioning + Capital Structure Formalization)
+- Decision 1: 完整 quant bot 單一產品（主帳承載全部 strategies，含 spot+perp delta-neutral / options multi-leg；Copy Trading 是後續可選 monetization channel 非平行 product line）
+- Decision 2: Y1 100% 主帳 $7,500 + Off-exchange $2,500；副帳 $0 Y1；Y2+ 副帳 enable = ADR-0030 4-gate + AMD-25-02 §4.2 Gate 5 Moat 全 5-gate PASS
+- Decision 3: Zero new engineering work（v5.5/v5.6/v5.7/v5.8 已對齊 + Sprint 1A-10 dispatch packet 已不含副帳 task）
+- Active path cascade 唯一 v5.4 殘留 patch 點 = AMD-25-01 line 82（Active per ADR-0030 → Reserve Y2+ Conditional per 5-gate）；ADR-0030 自身 4-gate framework 無殘留只需 Related cross-ref
+- 5 files patched: AMD-25-02 self / docs/README / SPECIFICATION_REGISTER / AMD-25-01 / ADR-0030 / TODO 4 cleanup 行
+- v5.4 殘留在 drift audit + sub-agent reports 是 audit history snapshot，不需 supersede
+- Operator follow-up: 無；formalize-only cascade
+- Report: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_e_amd_25_02_cascade.md`
+
+## 2026-05-27 — Wave 5 dispatch packet master 起草（Layered Autonomy v2 cascade IMPL）
+
+**Trigger**: Operator 2026-05-27 APPROVE AMD-2026-05-21-01 v2；Wave 5 cascade IMPL 81-126 hr / 3 並行；4 SSOT file 已 land per TODO §11
+
+**輸出**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--wave_5_dispatch_packet_master.md`（410 行 ≤ 500 ceiling）
+
+**3 並行 packet**：
+- **Packet A V099 schema**（E1 + MIT, 8-12 hr）— sql/migrations/V099__autonomy_level_config.sql + Linux PG D1-D13 dry-run；高風險 D5 PG ENUM / D6 REVOKE+Index Scan / D11 escalation enum / D12 PG NOTIFY channel name / D13 雙時間戳一致性
+- **Packet B GUI Autonomy Posture sub-section**（E1a + A3 + E3, 21-28 hr）— tab-governance.html + governance-tab.js + FastAPI 3 endpoint + CONFIRM SWITCH typed-confirm + 14 path × 2 level panel + 8 anti-pattern AP-1..AP-8 + 5s delay-enabled + 24h banner persistence
+- **Packet C Rust SM-04 patch**（PA + E1 + E4, 6-10 hr per AMD §9.8 純 SM-04 subset）— RiskEvent::NotificationFailsafeTimeout 新 variant + Defensive active_lock_profit_per_position function + 35+ transition pair regression + 7d cooling enforce on Defensive→Normal
+
+**核心架構決策確認**：
+- 既有 Defensive variant line 180-187 reuse + active_de_risking hook 擴充（不新增 ULTRA_DEFENSIVE）— per PA §4.4 4 條理由 / Q3 RESOLVED Path A
+- V099 ENUM 'CONSERVATIVE'/'STANDARD' + system schema + 雙時間戳 + PG NOTIFY autonomy_level_changed channel — per MIT Q1/Q2 + E2 Q4 + B4 R-2
+- Vanilla JS + node --check sign-off + A3+E2 adversarial review per `feedback_impl_done_adversarial_review` — W-AUDIT-7c governance-tab.js lexical scope shadow 教訓
+
+**衝突分析**：
+- 🚨 Sprint 1A-ε V099-V116 字面號碼直撞 V99 — TODO §15 #7「不可同 Sprint 1A-ε 並行」；派發前主會話必 ssh trade-core grep P3+ 狀態 confirm 無 active
+- ✅ LG-3 V104 timing 不衝（V104 dispatch earliest 2026-05-30 / Wave 5 V099 apply by D+2 = 2026-05-29）
+- ✅ Sprint 2 Stream B V108/V109/V111 timing 不衝（W12-15 dispatch / 現未啟動）
+
+**並行 ceiling 拍板**：A + B + C 文件互不重疊（PG schema / GUI HTML+JS / Rust SM module）→ 完全並行 per PM §5 Wave-X2；wall-clock max(A,B,C) ≈ 2-3 working day（B dominates）
+
+**Sign-off chain**：
+- A: E1 → MIT D1-D13 → E2 (Guard A/B/C + grep) → E4 4 AC → CC 16-root → PM
+- B: E1a → A3 (8 anti-pattern) → E3 (auth + AV-11) → E2 (node --check + lexical scope grep) → A3+E2 adversarial → E4 4 AC → PM
+- C: PA verify → E1 → E2 (cargo clippy + transition grep) → E4 6 test → CC walkthrough → A3+E2 adversarial → PM
+- Wave 5 closure: R4 cross-ADR + TW docs index → PM 最終 sign-off
+
+**派發建議順序**：D+0=2026-05-27 09:30 confirm 衝突 → 10:00 三 packet 並行派 → D+1 evening A+C complete → D+2 B 完成 e2e GREEN → D+3 R4+TW+PM 收尾
+
+**3 packet IMMEDIATELY DISPATCHABLE 確認**：
+- A ✅ V099 spec 字面 IMPL-ready 568 行
+- C ✅ risk_gov.rs verified 940 行 + Defensive line 180-187 確認 + RiskEvent enum line 53-78
+- B ⚠️ IMPL 可即派 but e2e GREEN gate 需 A 先 land（24-48h）
+
+**教訓**：
+- 派發 packet 必親 verify 既有代碼字面（risk_gov.rs 940 行 + line 180-187 Defensive）— 不可基於 spec 字面假設
+- 衝突分析必 grep TODO + Sprint 狀態（§15 #7 字面）— 不可基於記憶
+- self-contained packet template 是核心 deliverable — sub-agent 不需再讀 4 SSOT 也能 IMPL
