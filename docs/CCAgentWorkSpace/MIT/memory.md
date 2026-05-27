@@ -818,3 +818,31 @@ _Last updated: 2026-04-24_
 4. CHECK constraint 4 條全用 boundary INSERT 驗 enforce — 比靜態 SQL parse 強得多
 
 MIT AUDIT DONE: docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-27--v104_supervised_live_audit_dry_run.md
+
+## 2026-05-27 OPS-4 GAP-B + GAP-D PG backup drill (MIT owner, P0 first-day-live blocker)
+
+**Trigger**: P0-OPS-4 first-day live runbook §10 — MIT-owned gaps for PG restore drill + dump cron.
+
+**Report**: `workspace/reports/2026-05-27--ops_4_gap_b_d_pg_backup_drill.md` (183 行)
+**Drafts**: `workspace/drafts/ops4_gap_b_d/{install_pg_dump_cron.sh, trading_ai_pg_dump_cron.sh, verify_pg_dump.sh}` (74+101+116 = 291 lines)
+
+**核心 empirical findings (ssh trade-core 21:00-21:05 UTC)**:
+1. **0 active pg_dump cron** (crontab 46 行，0 backup entry，only commented Ubuntu sample)
+2. **唯一 backup = 53d-old 189KB schema-only pre-phase0a dump** (`/srv/backups/trading_ai_pre_phase0a_20260404_180411.dump`，118 TOC，PG custom format) — DR 無法依賴
+3. **trading_ai 真實 = 226 GB** (PG 16 timescale docker container `trading_postgres` healthy 6 weeks)；host pg_dump 16.14 ↔ container 16.13 兼容已驗
+4. **NAS 未掛載** trade-core (`/mnt/nas` `/nas` 不存在，nfsd 跑但無 client mount) — 與 `project_hardware_constraints` 10GbE 40TB NAS 假設 drift；spec §7.2 NAS-bound 異地 backup 與 reality drift
+5. **841G free on `/`** = 3.7× DB size → 15d × ~50GB (gzip 4-6x 壓縮估計) ≈ 750GB 接近 ceiling → 必縮 retention 至 ~10d OR 接 NAS
+6. **Restore path empirical 驗 OK**：sandbox DB `TEMPLATE template0` (避 template1 collation warning) + pg_restore schema-only exit 0 silent / 0.090s / 14 public tables + 14 PK + 2 CHECK 還原；sandbox drop OK 不動主庫
+
+**Drafts 設計亮點**:
+- 0 hardcoded `/home/ncyu` 路徑 — 全 env var (`OPENCLAW_BACKUP_ROOT` / `OPENCLAW_BACKUP_RETENTION_DAYS` / `OPENCLAW_BACKUP_HOUR_UTC` / `OPENCLAW_BACKUP_GRACE_HOURS`)
+- install script Linux-only gate (Mac dev refuse exit 2) + idempotent (crontab 已有 pg_dump entry 即 skip) + default DRY-RUN (必 `OPENCLAW_BACKUP_CRON_APPLY=1` 才實裝)
+- cron wrapper 與 `outcome_backfiller_live_cron.sh` style 一致 (lock dir / secrets env 讀法 / JSONL log + sentinel)
+- verify 5-check 含 critical 路徑 (mtime < 26h + size > 1MB 任一失敗即 FAIL exit 2)，給 `passive_wait_healthcheck.sh` 加 `check_pg_dump_freshness()` consume
+
+**Unblock verdict**: NOT CLEARED. GAP-B + GAP-D 兩列 spec §8 MIT sign-off row 仍未滿足。最早 unblock = operator hand-action T+~28 hr (≤2 hr land + dry-run + install → D+1 03:00 UTC fresh dump → D+1 full restore drill ~1 hr)。
+
+**Lessons reinforced**:
+1. spec §2.3 "daily logical dump → NAS 異地" 假設 NAS available；reality 不是 → spec 與 runtime drift；MIT audit 必 empirical 查 mount 不能信 spec 描述
+2. spec 寫 15d retention 是 minimum；真實 226GB DB → 必驗 dump size 對齊 disk 容量；本 draft 留 env var 讓 operator 縮 7d 或加 NAS
+3. weekly `pg_basebackup` + WAL archive 不在 GAP-D 範圍 (spec §2.3 weekly track 是 separate ticket)；本 draft scope = daily logical dump only

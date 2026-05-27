@@ -405,9 +405,15 @@ async function apiGet(path) {
 }
 
 async function apiPost(path, payload) {
+  // OPS-1 Track B (F-1)：寫操作必補 X-CSRF-Token。headers() 來自上方 helper
+  // 含 Content-Type；再過 ocCsrfHeaders 補 token。未登入時 cookie 缺失，後端 403。
+  const _apiPostHeaders = headers();
+  if (typeof window !== 'undefined' && typeof window.ocCsrfHeaders === 'function') {
+    window.ocCsrfHeaders('POST', _apiPostHeaders);
+  }
   const response = await fetch(path, {
     method: "POST",
-    headers: headers(),
+    headers: _apiPostHeaders,
     credentials: 'same-origin',
     body: JSON.stringify(payload)
   });

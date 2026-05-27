@@ -68,6 +68,11 @@ sudo systemctl status openclaw-engine
 sudo systemctl enable openclaw-watchdog
 sudo systemctl start openclaw-watchdog
 sudo systemctl status openclaw-watchdog
+
+# 若 5 連 fail（StartLimitBurst 達上限）→ 進 failed state，再 start 不會起
+# 必須先 reset-failed 清計數器，再 start：
+#   sudo systemctl reset-failed openclaw-engine && sudo systemctl start openclaw-engine
+#   sudo systemctl reset-failed openclaw-watchdog && sudo systemctl start openclaw-watchdog
 ```
 
 ### C. 與既有 restart_all.sh 共存

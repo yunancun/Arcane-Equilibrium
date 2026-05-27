@@ -129,13 +129,26 @@ def register_auth_legacy_routes(app) -> None:
         Lightweight endpoint for GUI to verify cookie validity.
         No Authorization header needed — reads cookie directly.
         GUI 用於驗證 cookie 是否仍有效的輕量端點；無需 Authorization header。
+
+        OPS-1 round 2 (F-2)：cookie token 有效但 oc_csrf 缺失時 → seed 一個。
+        為什麼：OPS-1 deploy 前已存在 24h auth cookie 的 user，token 還沒過期
+        但沒有 csrf cookie；不 seed 的話 enforcing 切換瞬間所有寫操作 403。
         """
         cookie_token = request.cookies.get("oc_auth_token")
         if not cookie_token:
             raise HTTPException(status_code=401, detail="Not authenticated")
         if not verify_token_constant_time(cookie_token):
             raise HTTPException(status_code=401, detail="Not authenticated")
-        return {"authenticated": True}
+
+        resp = JSONResponse({"authenticated": True})
+        # 缺 csrf cookie 時補一個（既有 session 平滑過渡）；已存在則尊重既有值。
+        if not request.cookies.get("oc_csrf"):
+            set_csrf_cookie(
+                resp,
+                generate_csrf_token(),
+                secure=should_set_secure_cookie(request),
+            )
+        return resp
 
 
 __all__ = ["register_auth_legacy_routes"]

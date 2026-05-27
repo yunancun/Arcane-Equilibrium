@@ -813,17 +813,20 @@
 
   // ─── fetch with Idempotency-Key header / 帶冪等鍵 header 的 fetch ─────────
   // ocApi 不支援 custom header；此處 raw fetch 包一層，保持其他 endpoint 不動。
-  // ocApi lacks custom header support; raw fetch wrapper keeps other endpoints
-  // untouched.
+  // OPS-1 Track B (F-1)：補 X-CSRF-Token；Idempotency-Key 與 CSRF token 並存無衝突。
   async function fetchWithIdempotency(path, body, idempotencyKey) {
     try {
+      var _hoHeaders = {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey
+      };
+      if (typeof window !== "undefined" && typeof window.ocCsrfHeaders === "function") {
+        window.ocCsrfHeaders("POST", _hoHeaders);
+      }
       var r = await fetch(path, {
         method: "POST",
         credentials: "same-origin",
-        headers: {
-          "Content-Type": "application/json",
-          "Idempotency-Key": idempotencyKey
-        },
+        headers: _hoHeaders,
         body: JSON.stringify(body || {}),
         signal: AbortSignal.timeout(10000)
       });

@@ -35,7 +35,7 @@ Documentation=file:///__OPENCLAW_BASE_DIR__/docs/execution_plan/specs/2026-05-26
 After=network-online.target postgresql.service
 Wants=network-online.target
 # PG 不在同機亦不阻 engine 啟動（engine 內含 PG retry/backoff）
-Requires=
+# 不設 Requires= — 故意無硬依賴，systemd 空值 directive 會 warn，整行省略才合法
 
 [Service]
 Type=simple

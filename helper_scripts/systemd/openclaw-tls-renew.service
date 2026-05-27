@@ -19,14 +19,16 @@ Type=oneshot
 # 必要 env：可由 systemctl edit override 注入
 Environment="OPENCLAW_BASE_DIR=/opt/openclaw"
 # 為什麼用 helper script：跨平台抽象 + 14d threshold + reload Caddy
-ExecStart=/bin/bash -c '\
+# F-7：`set -euo pipefail` 強制中途任一步失敗即整個 ExecStart 失敗（觸 OnFailure
+# notify service）；避免 `tailscale cert` 後 chown 失敗 silent 繼續 reload caddy。
+ExecStart=/bin/bash -c 'set -euo pipefail; \
     source ${OPENCLAW_BASE_DIR}/helper_scripts/lib/tls_cert.sh; \
     host="$(resolve_openclaw_tls_cert_host)"; \
     dir="$(resolve_openclaw_tls_cert_dir)"; \
     if tls_cert_should_renew "$dir/$host.crt" 14; then \
-        tailscale cert "$host" && \
-        chown root:caddy "$dir/$host.crt" "$dir/$host.key" && \
-        chmod 640 "$dir/$host.crt" "$dir/$host.key" && \
+        tailscale cert "$host"; \
+        chown root:caddy "$dir/$host.crt" "$dir/$host.key"; \
+        chmod 640 "$dir/$host.crt" "$dir/$host.key"; \
         systemctl reload openclaw-caddy.service; \
     else \
         echo "cert still has >14d remaining; skip renewal"; \

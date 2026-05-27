@@ -1076,9 +1076,15 @@ async function saveAiBudget(btn) {
       if (!el) continue;
       const val = parseFloat(el.value);
       if (!Number.isFinite(val) || val < 0) continue;
+      // OPS-1 Track B (F-1)：寫操作必補 X-CSRF-Token；ocCsrfHeaders 從
+      // window.oc_csrf cookie 抽 token，不存在時不附 header（後端會 403）。
+      const _aiBudgetHeaders = { 'Content-Type': 'application/json' };
+      if (typeof window !== 'undefined' && typeof window.ocCsrfHeaders === 'function') {
+        window.ocCsrfHeaders('POST', _aiBudgetHeaders);
+      }
       const r = await fetch('/api/v1/ai_budget/config', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: _aiBudgetHeaders,
         credentials: 'include',
         body: JSON.stringify({ scope: scope, monthly_usd: val, updated_by: 'gui_operator' }),
       });

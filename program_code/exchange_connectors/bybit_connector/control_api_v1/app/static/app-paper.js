@@ -692,10 +692,17 @@ function ocPaperSubtabInit() {
   }
 
   async function _fetchReplayJson(url, options) {
-    const resp = await fetch(url, Object.assign({
+    // OPS-1 Track B (F-1)：寫操作（POST/PUT/DELETE/PATCH）統一補 X-CSRF-Token。
+    // 為什麼集中在 helper 而非 callsite：5+ 個 raw fetch callsite 容易漏接，
+    // 把 ocCsrfHeaders 注入唯一 wrapper 一勞永逸。
+    const opts = Object.assign({
       credentials: "include",
       headers: { "Accept": "application/json" }
-    }, options || {}));
+    }, options || {});
+    if (typeof window !== "undefined" && typeof window.ocCsrfHeaders === "function") {
+      opts.headers = window.ocCsrfHeaders(opts.method, opts.headers || {});
+    }
+    const resp = await fetch(url, opts);
     const body = await resp.json().catch(function () { return {}; });
     if (!resp.ok) {
       const detail = body && body.detail ? body.detail : {};

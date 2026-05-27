@@ -14,7 +14,9 @@
 #   OPENCLAW_API_BACKEND_PORT — 預設 8000（uvicorn bind 端口）
 #
 # 跨平台注意：
-#   - macOS 部署時 cert_dir = $HOME/Library/Application Support/Tailscale/certs
+#   - macOS 部署時 cert_dir = <用戶 HOME>/Library/Application Support/Tailscale/certs
+#     （此處不寫 $HOME 字面 — envsubst 預處理會把 $HOME 展開成 operator 主目錄，
+#     生成的 /etc/caddy/Caddyfile 會含硬編碼路徑違反 AC-9 portability）
 #   - launchd 取代 systemd；timer 改為 launchd plist 的 StartCalendarInterval
 #   - helper_scripts/lib/tls_cert.sh 抽象平台差異
 #
@@ -35,15 +37,20 @@
 }
 
 # 反代主域名（Tailnet HTTPS）
-https://{$OPENCLAW_TLS_CERT_HOST} {
+# 為什麼用 ${VAR} 而非 Caddy `{$VAR}` syntax：install_caddy.sh 走 envsubst 預處理
+# 把所有 placeholder 展開成純字串再寫入 /etc/caddy/Caddyfile；envsubst 不認
+# Caddy 的 `{$VAR:default}` 並會在輸出留下花括號，導致 Caddyfile 解析失敗。
+https://${OPENCLAW_TLS_CERT_HOST} {
     # 使用 Tailscale internal CA cert（非 ACME）
     # cert 由 systemd timer 透過 `tailscale cert` 重發；Caddy 只負責 serve。
-    tls {$OPENCLAW_TLS_CERT_DIR}/{$OPENCLAW_TLS_CERT_HOST}.crt {$OPENCLAW_TLS_CERT_DIR}/{$OPENCLAW_TLS_CERT_HOST}.key
+    tls ${OPENCLAW_TLS_CERT_DIR}/${OPENCLAW_TLS_CERT_HOST}.crt ${OPENCLAW_TLS_CERT_DIR}/${OPENCLAW_TLS_CERT_HOST}.key
 
     # 反代到 FastAPI/uvicorn
     # 為什麼帶 X-Forwarded-Proto：FastAPI auth_routes_common._has_https_proxy_hint
     # 在 OPENCLAW_TRUST_PROXY_HEADERS=1 時依此判定 Secure cookie；其他環境不信任。
-    reverse_proxy 127.0.0.1:{$OPENCLAW_API_BACKEND_PORT:8000} {
+    # F-8 (OPS-1 round 2)：刪除 `:8000` 雙重 default，install_caddy.sh L57 已預設
+    # BACKEND_PORT=8000 並 export 給 envsubst，envsubst 一定產出純數字。
+    reverse_proxy 127.0.0.1:${OPENCLAW_API_BACKEND_PORT} {
         header_up Host {host}
         header_up X-Real-IP {remote_host}
         header_up X-Forwarded-For {remote_host}
