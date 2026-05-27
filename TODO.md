@@ -24,19 +24,17 @@
 
 ## §0 三端同步 + Runtime 健康儀表
 
-**三端 sync**：Mac / origin/main / Linux trade-core 全 HEAD `cf61d1f0`（2026-05-25 22:43 UTC + 23:00 ssh pull --ff-only）
+**三端 sync**：Mac / origin/main / Linux trade-core 全 HEAD `d9be33de`（2026-05-26 commit chain `6a20b9ea` → `e913adbf` → `d9be33de` push + ssh pull --ff-only verified）
 
-**Runtime snapshot**（2026-05-25 SSH verify per V1→V5.8 closure）：
-- Engine PID 374287 alive；SHA `b005bb00...` 與 disk matched；`/proc/374287/exe` 非 deleted；env count 13 含 `OPENCLAW_ALLOW_MAINNET=1` ✅
-- API PID 320486 bind `100.91.109.86:8000`（Tailscale IPv4）；`/api/v1/healthz` HTTP 200
-- Watchdog PID 2936560 running；`engine_alive=true` paper/demo/live；tick 27M+
-- PG `_sqlx_migrations` max=112 / count=102；V100/V101/V102/V103/V106/V107/V112 success=true；7/7 target table 物理 land
-- `risk_verdicts` hypertable 15 chunks / 9.35M rows；retention 30d + compression 7d（V075 active）
-- `learning.earn_movement_log` rows=0（OP-1 operator-blocked）
-- 6 health domain × 30min PASS（api_latency / database_pool / engine_runtime / pipeline_throughput / risk_envelope / strategy_quality）
-- ⚠️ `[78] feature_baseline_writer_cron_fires` WARN heartbeat stale 4.75d（cron 停 fire；ref §13）
+**Runtime snapshot**（2026-05-27 04:48 UTC SSH verify post-restart）：
+- Engine PID `1228870`（atomic rebuild+restart 2026-05-26 23:06，取代舊 PID 374287）；cmdline `rust/target/release/openclaw-engine` ✅
+- API PID 320486（2026-05-25 起跑未動）bind `100.91.109.86:8000`；`/api/v1/healthz` HTTP 200 verified
+- Watchdog daemon ALIVE（ps 不可見；`engine_watchdog.py --status` 返 `engine_alive=true` snapshot_age 22.4s < 45s threshold）
+- Pipeline state：demo alive ✅ / paper dead 47223s (expected per `paper_pipeline_disabled_by_default`) / **live dead 302627s ≈ 84h pre-existing per OP-1 authorization.json 未簽 (per C-3 確認 demo+33d，mainnet key 待 reissue)**
+- PG `_sqlx_migrations` max=112 / count=102 verified（無新增）
+- `observability.feature_baselines` MAX(created_ts)=`2026-05-27 04:42 UTC` (~7.5h ago / 2074 rows) — **與 §13 [78] WARN claim 衝突**：writer 實際在 fire；healthcheck 信號源獨立 verify 待 OPS[78] investigation 確認
 
-**Cron schedule（post-H-2 restore 2026-05-25）**：10/13 enabled（5 Day -1 MUST + 2 SHOULD + 3 Day 0）；3 defer（passive_wait_healthcheck / ref21_market_microstructure_recorder / blocked_symbols_30d_unblock）
+**Cron schedule（unchanged from 2026-05-25 H-2 restore）**：10/13 enabled (5 Day -1 MUST + 2 SHOULD + 3 Day 0)；3 defer（passive_wait_healthcheck / ref21_market_microstructure_recorder / blocked_symbols_30d_unblock）
 
 ---
 
@@ -199,9 +197,9 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 | **D+0 NEW (2026-05-26)** | **confirm AMD-2026-05-25-01 商業化邊界 + AMD-2026-05-25-02 v5.5 reframe** | 15 min | PM ping | 阻 Workflow D + E cascade |
 | **D+0 NEW** | commit canary [67]→[80] rename 4 files | 5 min | E1 sub-agent ready | 阻 sync (已 commit cf61d1f0 ✅) |
 | **D+1-D+2** | **AMD-21-01 v2 Layered Autonomy 最終 sign-off** | 30 min | PA spec + CC re-audit A 級 done | 阻 Wave 5 cascade IMPL（V099 + GUI + Rust SM-04 + 5 ADR sync） |
-| **D+2-D+3** | OP-1 a-f Bybit Web UI key 重發（< 2026-04-09 key 已過期 ≥45 天）| 5-10 min | OP-1 pre-verify done | 阻 Earn Wave C production deploy |
+| **D+2-D+3** | OP-1 a-f Bybit Web UI **mainnet** key 重發（per C-3 2026-05-26：現 2 demo key + 33d TTL，mainnet key 未發 → Sprint 4 first Live + Earn 雙線需）| 5-10 min | OP-1 pre-verify done | 阻 Sprint 4 first Live + Earn Wave C production deploy |
 | **D+2-D+3** | OP-2 Stage 0R Earn variant 仲裁（8 OQ）| 30-60 min | OP-1 完成 | 阻 first stake |
-| **D+2-D+3** | OP-3 first stake $100-200 Flexible-only via GUI | 5 min | OP-2 拍板 | 阻 `learning.earn_movement_log` rows>0 |
+| **D+2-D+3** | OP-3 first stake **$100-200 USDT Flexible-only** via tab-earn（per C-5 2026-05-26 拍板 USDT only 免幣價跌）| 5 min | OP-2 拍板 | 阻 `learning.earn_movement_log` rows>0 |
 | ~~D+3~~ | ~~P0-FUNDING-ARB-DECISION-FORCE 升等拍板~~ | – | ✅ **CLOSED 2026-05-26 operator chose (D)** | cascade Workflow F NEW (4-6 hr)；§15 #1 reframed |
 | **D+5** | P0-EDGE-1 + P0-LG-3 + P0-OPS-1..4 closure ETA 填 §10 P0 precondition | 30 min | PM ping | 阻 Sprint 4 first Live W18-21 |
 | **W12** | **Sprint 2 業務 Alpha Tournament 派發**（5 stream × 7 sub-agent Wave 1+2+3）| – | Sprint 1A-γ V111 land | 阻 §1 P0-EDGE-1 AC-A (ii) 路徑 |
@@ -219,7 +217,7 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 3. **Workflow E** — AMD-25-02 v5.5 reframe cascade（operator confirm pending；4-6 hr）
 4. **Workflow F** (NEW 2026-05-26) — funding_arb (D) 3C TOML deprecation cascade（operator-decided；PA deprecation spec → TW docs/README/AMD → R4 cross-ref；4-6 hr）
 5. **Workflow J** — PA 撤回 PA workspace「liquidation_pulse.rs deleted」FALSE CLAIM（per drift audit §11.3 J；~1-2 hr）
-6. **OPS [78]** — `feature_baseline_writer` cron stale 4.75d investigation（可能 v5.7 path migration `/home/ncyu/srv/` → `/home/ncyu/BybitOpenClaw/srv/` 衝突；E3 → E1 → E4；~4-8 hr）
+6. **OPS [78]** — healthcheck signal reconcile（2026-05-27 SSH empirical：table write 7.5h ago = writer 在 fire，與 [78] WARN claim 衝突；reframe scope = 信號源 reconcile，非 cron 修復；E3 → E1 quick triage；~1-2 hr，per §13）
 
 ### §8.2 Cluster 2 — Partial-Dependent（B Phase 1→2→3 / Sprint 1A-γ/δ/ε）
 - **Workflow B Phase 1**（Sprint 1A-γ）：ADR-0046 basis spec execution split IMPL（PA → E1 → E2）
@@ -342,7 +340,7 @@ Layered Autonomy v2 Wave 5  🟡 DESIGN-DONE CC APPROVE A / IMPL PENDING operato
 | 風險 | 狀態 | Mitigation |
 |---|---|---|
 | **proc-exe drift**（cargo test multi-session 觸 incremental rebuild）| Active；3 次 reproduce 2026-05-25 | per Hygiene SOP `build_then_restart_atomic.sh` 7-phase flock；`--require-clean-build-window` flag；ref `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC` |
-| **[78] feature_baseline_writer cron stale 4.75d** | NEW 2026-05-25 via SSH | E3 → E1 → E4 investigation；可能 v5.7 path migration `/home/ncyu/srv/` → `/home/ncyu/BybitOpenClaw/srv/` 衝突；Cluster 1 OPS[78] |
+| **[78] feature_baseline_writer cron stale** | ⚠️ **CONFLICT SURFACED 2026-05-27 SSH**：`observability.feature_baselines` MAX(created_ts)=2026-05-27 04:42 UTC（7.5h ago，2074 rows）= writer 實際在 fire；但 [78] healthcheck 仍 WARN — 信號源不一致 | OPS[78] investigation scope 改為「healthcheck 信號源 vs writer 實際狀態 reconcile」；可能：(a) healthcheck 監控 cron 觸發 timestamp 而非 table write (b) post-restart cron 自動 fix；E3 → E1 quick triage；ETA: 1-2 hr |
 | **Hygiene Option E FD 200 inherit corner case** | NEW 2026-05-25 | PA spec + E1 IMPL；`restart_all.sh nohup ... 0<&- 200<&-` 或 Phase 5 前 manual `flock -u 200`；ref `P3-HYGIENE-OPTION-E-FD-INHERIT-CORNER-CASE` |
 | **DEPRECATED.md 引用警報** | NEW per FA §5 | 任何代碼/文件仍引舊 DOC = active blocker；FA grep 週期 |
 | **5-gate / hard boundary 觸碰 record** | OPENCLAW_ALLOW_MAINNET=1 set 2026-05-25 + authorization.json missing OP-1 預期 | 14d lineage scan per FA |
