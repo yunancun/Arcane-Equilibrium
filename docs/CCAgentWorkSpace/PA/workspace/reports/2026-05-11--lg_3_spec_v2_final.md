@@ -1765,3 +1765,87 @@ Next:
 - ⏳ PA memory.md 追加（spec v2 final 完成 + 26 caveat resolution 索引）
 - ⏳ PM 派 Wave 2.4 IMPL（per §8 task breakdown, 7-8d）
 - 後續 sign-off：Wave 2.5（LG-3 三方 sign-off + QA + PM 收口）
+
+---
+
+## 2026-05-26 AMENDMENT — V### renumber + dispatch trigger correction (PA spec drift fix)
+
+**觸發**：2026-05-26 §1 4 P0 並行 Pass A verify 揭 TODO §1 行 48 P0-LG-3 AC drift（3 處 false claim）。本次 patch 只修 V### 號 + dispatch trigger 條件，**不動 spec v2 1-17 章節核心設計**（3-review APPROVE baseline 保留）。
+
+### A1. V### 號漂移事實
+
+| 原 spec 引用 V### | 漂移現實（2026-05-27 Linux PG empirical） | 新分派 |
+|---|---|---|
+| V094（spec v2 §4.1 / §4.2 / AC-T4-1~10） | ✅ 已被 W-AUDIT-8c hybrid schema 占用（`c9234ecf` 2026-05-15 land） | — |
+| V099（2026-05-19 dispatch refresh §2.4 重派） | ❌ 已被 `autonomy_level_config` 預留（`docs/execution_plan/specs/2026-05-22--v099-autonomy-level-config.md`，未 land 但 V### 已占） | — |
+| V100 | ❌ 已 land `m4_hypothesis_base_table`（`docs/execution_plan/specs/2026-05-23--v100-m4-hypothesis-base-table.md`） | — |
+| V101 / V102 / V103 / V106 / V107 / V109 / V112 | ❌ 全占（track_v3 / m4_extend / health_observations / replay_divergence / m8_anomaly / lal_tiers） | — |
+| **V104** | ✅ 未占；前面 V099/V100/V101/V102/V103 連續分派完，V104 = next free hole 後第一個 | **新分派 LG-3 audit migration** |
+
+V### 號 disk gap 同層自由位另有 V105 / V108 / V110 / V111。V104 為最小自由號，符合 sqlx 連續推薦。
+
+**結論**：spec v2 §4.1 / §4.2 / AC-T4-1~10 / 2026-05-19 dispatch refresh §2.4 內所有 `V094` 與 `V099` 字眼，IMPL 階段 1:1 替換為 `V104`。spec v2 本身（章節 1-17）**不改 V094 字眼**，避免破壞 3-review APPROVE baseline；E1 dispatch packet 帶 inline `V094 → V104` replacement 規則 + `grep -n 'V094\|V099' <touched_files>` 0 match sign-off gate。
+
+### A2. Dispatch trigger condition refresh（替代 2026-05-19 §4.3）
+
+原 2026-05-19 dispatch refresh §4.3 「Candidate (b) v56 P0 Layer B 7d observation 啟動後派」**仍成立**，但須移除以下 false dependency：
+
+| TODO §15 #1 原 wording | 2026-05-26 reframe 後 wording | 理由 |
+|---|---|---|
+| 「LG-3 IMPL DISPATCH ↔ P0-FUNDING-ARB-DECISION-FORCE」 | ❌ 刪除此 dependency | LG-3 supervised live SM 是 **4 textbook 策略 + C10 Funding Harvest** 共用 supervised live activation gate；funding_arb V2 已 per AMD-2026-05-26-01 retired closed（demo + paper + live 三端 active=false 自 2026-05-03 起），對 LG-3 IMPL 需求 0 影響 |
+| 「§2.4A fee_source tick-time consumer」 | ❌ 移除此 AC claim | spec v2 全文 grep `fee_source` / `tick-time consumer` 0 hit；NOT-FOUND 屬 TODO §1 行 48 文字漂移（可能來自其他 spec 誤剪貼） |
+| 「V099/V100 Linux PG empirical dry-run」 | ❌ 改為「V104 audit migration Linux PG empirical dry-run」 | V099/V100 已被 autonomy_level_config + m4_hypothesis_base_table 占用，LG-3 無關 |
+
+**新真實 dispatch precondition**（IMPL 啟動前必滿足）：
+
+1. ✅ **V104 migration spec scaffold**（本 amendment 同時 ship → `docs/execution_plan/specs/2026-05-26--v104-lg3-supervised-live-audit-migration.md`）
+2. ⏳ **v56 P0 Layer B deploy + 7d observation gate** —估 ~2026-05-29 啟動（per `2026-05-19--lg_3_wave_2_4_dispatch_plan_refresh.md` §4.2 Candidate (b)），LG-3 Wave 2.4.A 不早於 Layer B deploy 後 24h
+3. ⏳ **LG-3 V104 migration Linux PG empirical dry-run PASS** —E1 IMPL 前 MIT 走 spec scaffold §X.Y 列的 4-step dry-run（per MIT MUST-3 / `feedback_v_migration_pg_dry_run`）
+4. ⏳ **Race-aware dispatch confirmed**：採 `2026-05-19--lg_3_wave_2_4_dispatch_plan_refresh.md` §3.3 Option B（T1 + T4 並行對 → B → C → D → E → F sequential）
+
+### A3. Dispatch readiness checklist 對齊 V104
+
+| Item | 2026-05-19 refresh wording | 2026-05-26 patch wording |
+|---|---|---|
+| V### 號 | V099 | **V104** |
+| spec source files 1:1 replace | spec v2 §4.1 / §4.2 / AC-T4-1~10 內 `V094` → `V099` | spec v2 §4.1 / §4.2 / AC-T4-1~10 內 `V094` → **`V104`** |
+| E1 dispatch sign-off gate grep | `grep -n 'V094' <touched_files>` | `grep -n 'V094\|V099' <touched_files>` |
+| Migration spec scaffold | （無，當時直接派 IMPL） | **`docs/execution_plan/specs/2026-05-26--v104-lg3-supervised-live-audit-migration.md`** |
+| MIT pre-IMPL dry-run | 缺 | **必跑** — 4-step Linux PG empirical 走 spec scaffold §X 列 |
+| §15 #1 funding_arb dependency | 「↔ funding_arb 決策」 | **刪除** — funding_arb retired 不影響 LG-3 |
+
+### A4. 修正後 ETA 預估
+
+| 階段 | 2026-05-19 refresh ETA | 2026-05-26 patch ETA | 變化 |
+|---|---|---|---|
+| Wave 2.4 派發目標日 | ~2026-05-29 UTC | ~2026-05-29 UTC（v56 Layer B deploy + 24h gate 不變） | 0 變化 |
+| Wave 2.4 wallclock | ~12-13d | ~12-13d | 0 變化（V### renumber 0 工時影響） |
+| Wave 2.4 closure ETA | ~2026-06-10~12 UTC | ~2026-06-10~12 UTC | 0 變化 |
+| Supervised live earliest activation | ~2026-06-22~30 | ~2026-06-22~30 | 0 變化 |
+
+**MIT pre-IMPL dry-run 工時加 ~2-4h**（在 dispatch precondition 內，不延 Wave 2.4 wallclock；Layer B 24h gate 內可完）。
+
+### A5. Spec v2 章節 1-17 不動之保證
+
+本 amendment **只動本檔末尾 + V### 替換規則**。spec v2 章節 1-17 內：
+
+- 1-3 章：state diagram / RPC schema / Validation Pipeline — 不動（V094 字眼非結構 spec 元素，IMPL 時 1:1 替換）
+- 4 章：audit schema（V094）— spec 文字保留 `V094`；IMPL 時改 `V104`（與 V099→V104 同等替換）
+- 5-7 章：session_override / GUI kill / EarnedTrust × KYC — 不動
+- 8 章：Wave 2.4 IMPL task breakdown — 不動（race-aware Option B 已 cover）
+- 9-13 章：healthcheck / runtime evidence / safety invariant / dispatch SOP — 不動
+- 14-16 章：mainnet pre-flight / caveat resolution / 風險評級 — 不動
+- 17 章：改動風險評級 — 不動（極高，未變）
+
+26/26 caveat fully incorporated 結論不變；3-review APPROVE baseline 不變。
+
+### A6. 配套交付物
+
+1. **本 amendment 段落**（本檔 §2026-05-26 AMENDMENT）— 起 ~1768 行
+2. **V104 migration spec scaffold**：`docs/execution_plan/specs/2026-05-26--v104-lg3-supervised-live-audit-migration.md`（spec-only，不寫 SQL；用 V086/V090/V107 為樣板）
+3. **TODO §1 行 48 reframe text**（PA report 內提供，主會話 copy-paste）
+4. **TODO §15 #1 已 reframed**（2026-05-26 commit；本 amendment 後 §15 #1 dependency 全失效，可進一步刪行）
+
+---
+
+PA SPEC v2 AMENDMENT 2026-05-26 DONE.
