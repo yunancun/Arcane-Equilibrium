@@ -692,3 +692,35 @@ Day 7 → Day 8/9 0 new `close_maker_attempt=true` row in 28h+ 雖然 engine PID
 
 W1-G SOP 5/25 land 但 § 8 IMPL handoff (3 script + 1 crontab paste) 24h 內 0% IMPL'd by E1。Day 8/9 cron-captured trajectory 已 lost — 補 IMPL 5/26 EOD 才能搶救 Day 9/10/11/12/13 trajectory，14d endpoint 6/2 verdict 只有 5-6 個 daily snapshot 而非 14。**規則**：SOP 寫 IMPL handoff 必標 「latest acceptable start date」 + 「missing days impact statistical power」 — operator 才知道延遲成本。SOP land 即標「IMPL by D+1 EOD or escalate」否則 schedule slip silent.
 
+## 2026-05-27 P0-OPS-4 GAP B+D 整鏈 QA E2E Acceptance — APPROVE-CONDITIONAL
+
+| 報告 | 日期 | 關鍵發現 |
+|---|---|---|
+| 2026-05-27 OPS-4 GAP B+D QA E2E acceptance | 2026-05-27 21:42 UTC | **APPROVE-CONDITIONAL** — 5 round review chain 全綠（E2 R1 APPROVE-WITH-CONDITION → E2 R2 APPROVE / E4 R1 YELLOW → E4 R2 GREEN / MIT R3 + PA spec amendment）；9/9 safety invariant compliance（I8 1 NOTE：MED-2 heartbeat cross-check 補強 silent-fail detection）；5/5 gate 完全不弱化（V113 純 enum 擴；cron 純 read PG 寫 audit row；不繞 live boundary）；FA 15 sign-off criteria = 6 PASS-AUTO + 3 PARTIAL + 6 PENDING operator/BB runtime + 0 FAIL；Bybit Earn scenario 6 = INFRASTRUCTURE READY + BB sign-off PENDING；Sprint 4 first-day live readiness = APPROVE-CONDITIONAL（infrastructure 100% ready；7 operator hand-action deferrable to §11 sign-off block）；**3 hidden risk QA 獨立 ssh trade-core 揭**：(1) V099 deployment gap（Wave 5 Packet A scope；非 GAP B+D scope） (2) V113 sqlx register drift（CHECK enum 26-value pg_dump_completed live but `_sqlx_migrations` 缺 row=113 — 治本 `repair_migration_checksum --verify --apply`） (3) Engine + watchdog dead on trade-core（pipeline_snapshot 8h stale；out-of-scope but flagged）。報告：`srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-27--ops_4_gap_bd_qa_e2e_acceptance.md` |
+
+### Durable lessons（2026-05-27 OPS-4 GAP B+D QA E2E）
+
+#### 25. CHECK enum live but `_sqlx_migrations` missing row — `psql -f` raw apply path leaves register gap
+
+empirical 揭：V113 source SQL Linux 已 `psql -f` apply（pg_get_constraintdef 26-value list 含 pg_dump_completed + pg_dump_failed runtime live），但 `SELECT version FROM public._sqlx_migrations WHERE version=113` = 0 row。這是 memory `project_2026_05_02_p0_sqlx_hash_drift` 同個 pattern — operator 用 raw psql apply path 觸發 V113 idempotent guard，functionality unblocked，但 sqlx binary 沒 record。**檢查 SOP**：QA 對任何 V### migration sign-off 必雙路 verify：(a) `pg_get_constraintdef` / `\d <table>` runtime CHECK 真實 live（function unblock）；(b) `_sqlx_migrations` register row exists（engine startup `OPENCLAW_AUTO_MIGRATE=1` 不撞 checksum drift）。兩路 mismatch = 治本走 `repair_migration_checksum --verify`，不需 V### re-apply。
+
+#### 26. 9 invariant safety matrix 與單 OPS scope review 分清「scope 內可控」vs「scope 外 deferred」
+
+GAP B+D QA E2E 揭 9/9 invariant PASS — 但 Q1 query FAIL（autonomy_level_config 表不存）= V099 deployment gap 是 Wave 5 Packet A scope（NOT GAP B+D scope）。E4 round 2 標 Q1 為 「deployment dep, non-bug」；FA §E #3 criterion「9 invariant 4/4 PASS」變成 PARTIAL。**QA 規則**：sign-off matrix 內 PASS criteria 可雙拆「IMPL scope 內 PASS」+「cross-scope dependency PENDING」；不可把 cross-scope dep 算「OPS-4 GAP B+D FAIL」。本 QA 報告 §10 Risk #1 列為 Wave 5 cascade dependency 標 PM；不阻 GAP B+D sign-off block。
+
+#### 27. Engine dead 不影響 cron pipeline DR 鏈 — cron 走 system cron daemon 獨立 engine
+
+empirical 揭：trade-core engine + watchdog 都 dead（pipeline_snapshot.json mtime 8h21m stale）— 但 GAP D cron pipeline 不受影響，because cron fires via Linux system cron daemon（not engine）。任何 dump/healthcheck/audit INSERT 路徑都不依賴 engine alive。**QA 規則**：DR 範疇 IMPL（dump / restore / audit trail）的 e2e-integration-acceptance 不需 engine alive 為 pre-check；skill `e2e-integration-acceptance` §3.2 雙進程降級驗證 inapplicable for ops infrastructure scope。但 Sprint 4 first-day live 啟動前 engine 必 restart（屬 Wave 5 Packet C + engine restart pre-flight）— 應在 PM ratification block 排序。
+
+#### 28. wrapper INSERT 失敗 `|| true` 吞 exception = I8 1 NOTE acceptable trade-off
+
+I8「不 fake healthcheck / fills / lineage」嚴格定義要 fail-loud；wrapper line 143-146 `emit_governance_audit() || true` 吞 INSERT exception 後 echo WARN 到 log，是 non-fail-closed at cron-exit-code level。**設計 rationale**：dump 已成（main task done），audit row 寫不進去 ≠ should block cron exit；MED-2 heartbeat cross-check 補強 silent-fail detection（n_rows==0 + heartbeat fresh → WARN with diag log path）。**QA 規則**：對 9 invariant compliance verify，I8 audit fail-loud 嚴格度可由補強 cross-check 路徑（雙獨立信號）達成 acceptable trade-off；明文標 1 NOTE 不算 FAIL。
+
+#### 29. 「FA criteria PASS-AUTOMATIC vs PENDING operator runtime」必明確分類
+
+FA §E 15 criteria QA 對照當前 IMPL state，必拆「IMPL DONE 即 auto-fulfill」vs「依賴 runtime execution / external sign-off」。本次拆解：6 PASS-AUTO + 3 PARTIAL + 6 PENDING operator + 0 FAIL。**QA 規則**：sign-off report 必含此分類表 → operator/PM 在 ratification block 可一眼看「我需 take 7 hand-action」（不必逐 criterion 解析）；模糊的「all PASS / all PENDING」會誤導 cutover decision。
+
+#### 30. 5 round review chain 全綠後 QA scope 是「業務鏈 + cross-module 一致 + hidden risk independent surface」
+
+E2 R1+R2 / E4 R1+R2 全綠 + MIT round 3 + PA spec amendment + FA 15 criteria — QA scope **不重做 code review**（per skill §reviews 邊界）；QA 走「業務鏈完整 + 9 invariant compliance + cross-OPS hidden risk surface + sign-off block readiness verdict」4 維。本次走 3.5h 拿到 3 hidden risk（V099/V113 sqlx/engine dead），全是 sub-agent reviews 不可能 surface（cross-scope dependency + sqlx infra drift + runtime cron alive）。**QA 規則**：sign-off-gate QA 必獨立 ssh empirical 跑「全鏈 Linux smoke」找 sub-agent review 不可能看見的 cross-cut hidden risk。Sub-agent reviews 看 commit diff scope；QA 看 cross-module + production-runtime SOP。
+
