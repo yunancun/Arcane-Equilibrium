@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 """
-MODULE_NOTE (中文):
+MODULE_NOTE
   CSRF double-submit token middleware（OPS-1 Track B）。
   對所有寫操作（POST / PUT / DELETE / PATCH）強制：請求 header
   `X-CSRF-Token` 必須存在且與 cookie `oc_csrf` constant-time 相等；
@@ -15,11 +15,14 @@ MODULE_NOTE (中文):
   豁免清單：
   - GET / HEAD / OPTIONS — 純讀，無 side effect，自動跳過
   - `/api/v1/auth/login` — login 時 csrf cookie 還沒存在
-  - `/api/v1/auth/logout` — logout 需要對應同源 POST，但 SameSite=Strict
-     已防 CSRF；豁免避免 GUI 登出鏈卡住
   - `/api/v1/csp/report` — 瀏覽器自動 POST，不可能附 token
   - `/api/v1/healthz` — 系統健康檢查
   - `/static/*` — 靜態資源（雖然不會 POST）
+
+  注意：`/api/v1/auth/logout` **不再豁免**（OPS-1 round 2 / F-5 Option A）：
+    前端同源 logout 鏈已附 cookie + CSRF token（common.js::ocLogout / index.html
+    inline button 均走 ocFetchWithCsrf）；強制要求 token 可阻擋已被 XSS 注入的
+    同源頁面對 logout 發動 DoS 騷擾。
 
   Shadow mode：`OPENCLAW_CSRF_SHADOW=1` 時，token 不匹配只記 warning，
   仍放行。為 spec §7.2 風險 #2「上線後既有 GUI 寫操作全 403」緩衝期。
@@ -29,11 +32,6 @@ MODULE_NOTE (中文):
   - cookie 屬性：HttpOnly=False（讓 JS 讀）+ SameSite=Strict + Secure（Live）
 
   比對採用 `hmac.compare_digest` 防 timing attack。
-
-MODULE_NOTE (English):
-  CSRF double-submit token middleware (OPS-1 Track B). Enforces matching
-  `X-CSRF-Token` header vs `oc_csrf` cookie on write operations; mismatch
-  returns 403 with reason_code `csrf_token_mismatch`.
 
 硬邊界：
   - constant-time compare 必走 `hmac.compare_digest`，禁直接 `==`
@@ -61,9 +59,9 @@ _WRITE_METHODS = frozenset({"POST", "PUT", "DELETE", "PATCH"})
 _EXEMPT_PATHS = frozenset(
     {
         "/api/v1/auth/login",     # login 時還沒有 csrf cookie 可比對
-        "/api/v1/auth/logout",    # SameSite=Strict 已防；豁免避免登出鏈斷
         "/api/v1/csp/report",     # 瀏覽器後台 POST，不可能附 token
         "/api/v1/healthz",        # 健康檢查
+        # logout 不豁免（OPS-1 round 2 / F-5 Option A）：前端登出鏈會帶 token。
     }
 )
 

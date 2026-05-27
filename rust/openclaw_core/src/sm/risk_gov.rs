@@ -78,6 +78,12 @@ pub enum RiskEvent {
     /// Reconciler clean cycles met — auto-recovery toward pre-escalation floor.
     /// 對帳器連續乾淨週期達標 — 自動恢復至降級前水位。
     ReconcilerRecovery,
+    /// 三路通知（Slack/Email/Console banner）全 fail + 1h timeout → 觸發 SM-04 Defensive transition。
+    /// 為什麼：per AMD-2026-05-21-01 v2 §Decision 3.1 + PA spec §4.4 Stage 3b，三路冗餘全 fail
+    /// 且 1h 內無 operator response 必自動進入最高保護模式（保住 unrealized PnL + 停止新倉）。
+    /// 不變量：本 variant 是 hard-coded fail-safe 觸發路徑，runtime TOML 不得 override
+    /// （per AMD §Decision 2.5 + Q3 RESOLVED Path A）；7d cooling 復原由 transition 邏輯強制。
+    NotificationFailsafeTimeout,
 }
 
 impl RiskEvent {
@@ -104,6 +110,7 @@ impl RiskEvent {
             Self::ReconcilerDrift => "reconciler_drift",
             Self::ReconcilerRestFailure => "reconciler_rest_failure",
             Self::ReconcilerRecovery => "reconciler_recovery",
+            Self::NotificationFailsafeTimeout => "notification_failsafe_timeout",
         }
     }
 }
@@ -248,6 +255,136 @@ impl Default for EscalationThresholds {
         }
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Defensive Active Lock-Profit Hook / Defensive 主動鎖利擴充
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// 為什麼存在這層 hook：
+//   per AMD-2026-05-21-01 v2 §9.8 + PA spec §4.4 Stage 3b，當三路通知全 fail + 1h
+//   無 operator response 觸發 NotificationFailsafeTimeout 自動進 Defensive 時，
+//   既有 Defensive constraints (active_de_risking=true / emergency_stops=false) 必須
+//   配合一個「縮 SL 至 entry + ATR-based protective buffer」的具體執行動作 —
+//   否則 active_de_risking 旗標只是個 boolean 不會真的鎖利。
+//
+// 為什麼放在 openclaw_core 而非 openclaw_engine：
+//   1) SM-04 transition rule 與 active 鎖利語義是同一份治理邊界，分裂會讓兩處互
+//      相 drift（per CLAUDE.md §九 「business logic 不漂移」）；
+//   2) 本層只計算 stop adjustment 的純值，不直接呼叫 exchange API — engine 層
+//      取得 Vec<StopAdjustment> 後負責「sync 至 exchange-side conditional」
+//      （per CLAUDE.md §二 原則 9 雙重防線）。
+//
+// 不變量：
+//   - 無 panic / 無 unwrap / 無 unsafe（per CLAUDE.md §七 Rust 紀律）
+//   - 輸入 NaN / 非正 ATR / 非正 entry 一律跳過該倉位，不阻塞其他倉位
+//   - SL 永遠在「保護方向」：Buy 倉 new_sl >= entry，Sell 倉 new_sl <= entry
+//   - 不接受 runtime TOML override（per AMD §Decision 2.5 fail-safe compile-time
+//     hard-coded）
+
+/// 倉位快照 — 計算 active lock-profit 所需的最小欄位集。
+/// 為什麼獨立定義：openclaw_core 不可依賴 openclaw_engine 的 PositionInfo /
+/// PositionView（會造成循環依賴）；engine 層在 call hook 前負責 map。
+#[derive(Debug, Clone, PartialEq)]
+pub struct PositionSnapshot {
+    pub symbol: String,
+    /// 倉位方向 "Buy" 或 "Sell"（與 openclaw_types::price Trade side 約定一致）。
+    pub side: &'static str,
+    pub entry_price: f64,
+    pub qty: f64,
+    /// 當前 SL（若未設則 None）。
+    pub current_sl: Option<f64>,
+    /// 該倉位的位置生命 ATR（per `openclaw_core::indicators::volatility::atr` 的
+    /// position-life ATR；非 PriceHistoryTracker 的 per-tick micro-volatility）。
+    pub atr: f64,
+}
+
+/// SL 調整指令 — 由 engine 層取走後負責下交易所 conditional order。
+#[derive(Debug, Clone, PartialEq)]
+pub struct StopAdjustment {
+    pub symbol: String,
+    pub side: &'static str,
+    pub new_sl: f64,
+    /// 觸發 lease 紀錄 reason（per PA spec §4.4 line 488）。
+    pub reason: &'static str,
+}
+
+/// 每倉位 active 鎖利 — 縮 SL 至 entry + ATR-based protective buffer。
+///
+/// 為什麼採「entry + buffer × ATR」公式（per PA spec §4.4 line 485-487）：
+///   - Buy 倉 new_sl = entry + atr × buffer_multiplier （買入後價格上漲，SL 拉至
+///     entry 上方一個 ATR 的 fraction = 鎖住 unrealized PnL 中的小幅）
+///   - Sell 倉 new_sl = entry - atr × buffer_multiplier
+///   - 若既有 current_sl 已比新 SL 更保護（Buy 倉 current_sl > new_sl），保留
+///     既有 SL（不放鬆保護方向）
+///
+/// 對輸入無效的倉位（NaN / atr<=0 / entry<=0 / buffer<0）跳過該倉位、不 panic、
+/// 不阻塞其他倉位 — fail-closed per CLAUDE.md §二 原則 6 「uncertainty defaults
+/// to conservative behavior」。
+///
+/// 呼叫端契約：本函式只計算 stop adjustment 值；engine 層必負責同步至
+/// exchange-side conditional protection（per CLAUDE.md §二 原則 9 雙重防線）+
+/// emit lease "active_lock_profit_triggered_by_notification_failsafe"。
+pub fn active_lock_profit_per_position(
+    positions: &[PositionSnapshot],
+    atr_buffer_multiplier: f64,
+) -> Vec<StopAdjustment> {
+    // 邊界檢查：buffer 負值或 NaN 直接整批返回空（不接受 garbage 配置觸發鎖利）
+    if !atr_buffer_multiplier.is_finite() || atr_buffer_multiplier < 0.0 {
+        return Vec::new();
+    }
+
+    let mut adjustments = Vec::with_capacity(positions.len());
+    for pos in positions {
+        // 跳過無效輸入 — fail-closed 不 panic 不 unwrap
+        if !pos.atr.is_finite() || pos.atr <= 0.0 {
+            continue;
+        }
+        if !pos.entry_price.is_finite() || pos.entry_price <= 0.0 {
+            continue;
+        }
+        if !pos.qty.is_finite() || pos.qty.abs() < f64::EPSILON {
+            continue;
+        }
+
+        let buffer = pos.atr * atr_buffer_multiplier;
+        let candidate_sl = match pos.side {
+            "Buy" => pos.entry_price + buffer,
+            "Sell" => pos.entry_price - buffer,
+            // 未知方向：跳過該倉位（不假設預設方向）
+            _ => continue,
+        };
+
+        // 不放鬆既有 SL 保護方向：
+        //   Buy 倉新 SL 必須 >= current_sl（不向下放鬆）
+        //   Sell 倉新 SL 必須 <= current_sl（不向上放鬆）
+        let new_sl = match (pos.side, pos.current_sl) {
+            ("Buy", Some(existing)) if existing.is_finite() && existing >= candidate_sl => {
+                existing
+            }
+            ("Sell", Some(existing)) if existing.is_finite() && existing <= candidate_sl => {
+                existing
+            }
+            _ => candidate_sl,
+        };
+
+        if !new_sl.is_finite() || new_sl <= 0.0 {
+            continue;
+        }
+
+        adjustments.push(StopAdjustment {
+            symbol: pos.symbol.clone(),
+            side: pos.side,
+            new_sl,
+            reason: "active_lock_profit_triggered_by_notification_failsafe",
+        });
+    }
+    adjustments
+}
+
+/// 7d cooling window（per PA spec §4.4 Stage 4 + Q4 拍板 30d→7d）。
+/// Defensive 因 `NotificationFailsafeTimeout` 觸發後，復原至 Normal 必經過
+/// 7 天 cooling；engine 層或 operator unfreeze flow 引用本常數做比對。
+pub const FAILSAFE_DEFENSIVE_COOLING_MS: u64 = 7 * 24 * 60 * 60 * 1000;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Transition rules / 遷移規則
@@ -936,5 +1073,217 @@ mod tests {
         )
         .unwrap();
         assert_eq!(sm.level, RiskLevel::Cautious);
+    }
+
+    // ── Wave 5 Packet C: NotificationFailsafeTimeout + active lock-profit ──
+    //
+    // 為什麼一組 6 條 test：對齊 Packet C §3 deliverable T1-T6（per AMD §9.8 +
+    // PA spec §4.4 ladder Stage 1-4 + §12 AC）。
+
+    /// 建構一個 buy/sell 倉位 helper（避免 6 條 test 重複 PositionSnapshot 字面值）。
+    fn pos(symbol: &str, side: &'static str, entry: f64, sl: Option<f64>, atr: f64) -> PositionSnapshot {
+        PositionSnapshot {
+            symbol: symbol.to_string(),
+            side,
+            entry_price: entry,
+            qty: 1.0,
+            current_sl: sl,
+            atr,
+        }
+    }
+
+    #[test]
+    fn t1_notification_failsafe_timeout_variant_emits_and_handles() {
+        // T1: 新 variant 可被識別 + as_str 對齊 spec
+        let ev = RiskEvent::NotificationFailsafeTimeout;
+        assert_eq!(ev.as_str(), "notification_failsafe_timeout");
+        // 該 variant 可在 transition 中作為事件原因傳入（不破壞既有 match 完整性）
+        let mut sm = RiskGovernorSm::new();
+        sm.transition(
+            RiskLevel::Defensive,
+            RiskEvent::NotificationFailsafeTimeout,
+            RiskInitiator::RiskGovernor,
+            vec!["notification_3way_fail_1h_timeout".into()],
+            None,
+            "auto_escalated_to_sm04_defensive",
+        )
+        .expect("Normal→Defensive via NotificationFailsafeTimeout 應允許");
+        assert_eq!(sm.level, RiskLevel::Defensive);
+        assert_eq!(sm.transitions.len(), 1);
+        assert_eq!(sm.transitions[0].event, "notification_failsafe_timeout");
+    }
+
+    #[test]
+    fn t2_failsafe_escalation_from_all_lower_levels() {
+        // T2: Normal | Cautious | Reduced → Defensive 三條 escalation path 都允許
+        //     NotificationFailsafeTimeout 作為觸發事件（per spec §4.4 Stage 3b）
+        for from in [RiskLevel::Normal, RiskLevel::Cautious, RiskLevel::Reduced] {
+            let mut sm = RiskGovernorSm::new();
+            sm.level = from;
+            sm.level_entered_at_ms = super::super::now_ms();
+            sm.transition(
+                RiskLevel::Defensive,
+                RiskEvent::NotificationFailsafeTimeout,
+                RiskInitiator::RiskGovernor,
+                vec!["notification_3way_fail_1h_timeout".into()],
+                None,
+                "auto_escalated_to_sm04_defensive",
+            )
+            .unwrap_or_else(|e| panic!("from {from:?} escalate via failsafe 失敗: {e:?}"));
+            assert_eq!(sm.level, RiskLevel::Defensive);
+            // Defensive 既有 constraints 不動（per AMD §9.8 mitigation 理由 1）
+            let c = sm.constraints();
+            assert!(c.active_de_risking, "Defensive active_de_risking 必須 true");
+            assert!(c.reduce_only, "Defensive reduce_only 必須 true");
+            assert!(!c.new_entries_allowed, "Defensive new_entries 必須 false");
+            assert!(
+                !c.emergency_stops,
+                "Defensive emergency_stops 必須 false（保住 unrealized PnL）"
+            );
+            assert_eq!(c.position_size_multiplier, 0.0);
+        }
+    }
+
+    #[test]
+    fn t3_active_lock_profit_computes_sl_with_atr_buffer() {
+        // T3: Defensive transition 後 active_lock_profit_per_position 縮 SL
+        //     to entry + ATR-buffer，且不放鬆既有 SL 保護方向。
+        let positions = vec![
+            // Buy 倉，無既有 SL → new_sl = entry + 0.5 × atr
+            pos("BTCUSDT", "Buy", 100.0, None, 4.0),
+            // Sell 倉，無既有 SL → new_sl = entry - 0.5 × atr
+            pos("ETHUSDT", "Sell", 200.0, None, 6.0),
+            // Buy 倉，既有 SL 更保護（高於 candidate） → 保留既有
+            pos("SOLUSDT", "Buy", 50.0, Some(55.0), 4.0),
+            // Sell 倉，既有 SL 更保護（低於 candidate） → 保留既有
+            pos("XRPUSDT", "Sell", 1.0, Some(0.5), 0.2),
+        ];
+        let adj = active_lock_profit_per_position(&positions, 0.5);
+        assert_eq!(adj.len(), 4);
+        // Buy candidate = 100 + 0.5*4 = 102.0
+        assert!((adj[0].new_sl - 102.0).abs() < 1e-9);
+        assert_eq!(adj[0].symbol, "BTCUSDT");
+        assert_eq!(adj[0].side, "Buy");
+        assert_eq!(
+            adj[0].reason,
+            "active_lock_profit_triggered_by_notification_failsafe"
+        );
+        // Sell candidate = 200 - 0.5*6 = 197.0
+        assert!((adj[1].new_sl - 197.0).abs() < 1e-9);
+        // Buy 既有 SL=55 > candidate(50 + 0.5*4 = 52) → 保留 55
+        assert!((adj[2].new_sl - 55.0).abs() < 1e-9);
+        // Sell 既有 SL=0.5 < candidate(1.0 - 0.5*0.2 = 0.9) → 保留 0.5
+        assert!((adj[3].new_sl - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn t3_active_lock_profit_fail_closed_on_bad_input() {
+        // T3 fail-closed：NaN / 非正 ATR / 非正 entry / 未知 side / 負 buffer
+        // 全部不 panic，跳過該倉位（不阻塞其他倉位）。
+        let positions = vec![
+            pos("NAN_ATR", "Buy", 100.0, None, f64::NAN),
+            pos("ZERO_ATR", "Buy", 100.0, None, 0.0),
+            pos("NEG_ATR", "Buy", 100.0, None, -1.0),
+            pos("ZERO_ENTRY", "Buy", 0.0, None, 5.0),
+            pos("NAN_ENTRY", "Buy", f64::NAN, None, 5.0),
+            pos("UNKNOWN_SIDE", "Long", 100.0, None, 5.0),
+            pos("OK", "Buy", 100.0, None, 5.0), // 唯一有效倉位
+        ];
+        let adj = active_lock_profit_per_position(&positions, 0.5);
+        assert_eq!(adj.len(), 1, "只有 OK 倉位應產生 adjustment");
+        assert_eq!(adj[0].symbol, "OK");
+
+        // 負 buffer / NaN buffer 整批跳過
+        assert!(active_lock_profit_per_position(&positions, -0.1).is_empty());
+        assert!(active_lock_profit_per_position(&positions, f64::NAN).is_empty());
+
+        // 空陣列輸入 → 空輸出
+        assert!(active_lock_profit_per_position(&[], 0.5).is_empty());
+    }
+
+    #[test]
+    fn t4_failsafe_does_not_break_existing_de_escalation_paths() {
+        // T4: 35+ existing transition pair 不應受 NotificationFailsafeTimeout 影響。
+        // 全 escalation/de-escalation pair 逐一 lookup_rule 驗存在。
+        use RiskLevel::*;
+        let escalations = [
+            (Normal, Cautious),
+            (Normal, Reduced),
+            (Normal, Defensive),
+            (Normal, CircuitBreaker),
+            (Normal, ManualReview),
+            (Cautious, Reduced),
+            (Cautious, Defensive),
+            (Cautious, CircuitBreaker),
+            (Cautious, ManualReview),
+            (Reduced, Defensive),
+            (Reduced, CircuitBreaker),
+            (Reduced, ManualReview),
+            (Defensive, CircuitBreaker),
+            (Defensive, ManualReview),
+            (CircuitBreaker, ManualReview),
+        ];
+        for (from, to) in escalations {
+            assert!(
+                lookup_rule(from, to).is_some(),
+                "Escalation regression: {from} → {to} 應仍存在"
+            );
+        }
+        let de_escalations = [
+            (Cautious, Normal),
+            (Reduced, Cautious),
+            (Reduced, Normal),
+            (Defensive, Reduced),
+            (Defensive, Cautious),
+            (CircuitBreaker, Defensive),
+            (ManualReview, Defensive),
+            (ManualReview, Reduced),
+            (ManualReview, Cautious),
+            (ManualReview, Normal),
+        ];
+        for (from, to) in de_escalations {
+            let rule = lookup_rule(from, to);
+            assert!(rule.is_some(), "De-escalation regression: {from} → {to}");
+            assert!(
+                rule.unwrap().requires_approval,
+                "De-escalation {from} → {to} 必 require approval"
+            );
+        }
+        // Defensive ↔ CircuitBreaker / ManualReview / Reduced / Cautious 四條
+        // 仍可任由現有 initiator 觸發（per spec §9.8 mitigation 理由 2）
+        assert!(lookup_rule(Defensive, CircuitBreaker).is_some());
+        assert!(lookup_rule(Defensive, ManualReview).is_some());
+        assert!(lookup_rule(Defensive, Reduced).is_some());
+        assert!(lookup_rule(Defensive, Cautious).is_some());
+    }
+
+    #[test]
+    fn t5_seven_day_cooling_constant_matches_spec() {
+        // T5: 7d cooling window constant = 7 * 24 * 3600 * 1000 ms
+        //     per PA spec §4.4 Stage 4 + Q4 拍板 30d→7d。
+        //     engine 層 / operator unfreeze flow 引用本常數做 cooling 比對。
+        assert_eq!(FAILSAFE_DEFENSIVE_COOLING_MS, 604_800_000);
+        // 確認常數可參與算術（不變量檢測 — 若有人誤改成 0 或溢位，本 assert fail）
+        let one_week_seconds = FAILSAFE_DEFENSIVE_COOLING_MS / 1000;
+        assert_eq!(one_week_seconds, 604_800);
+    }
+
+    #[test]
+    fn t6_existing_24_tests_unaffected_smoke() {
+        // T6: smoke test — 確認新增 variant + active lock-profit hook 不影響
+        // 既有 evaluate_risk_context auto-escalation 路徑（pressure / drawdown /
+        // daily_loss / consecutive_losses / session_halted / cooldown_active）。
+        let mut sm = RiskGovernorSm::new();
+        let result = sm.evaluate_risk_context(0.6, 9.0, 0.0, 0, false, false);
+        assert_eq!(result, Some(RiskLevel::Reduced));
+
+        let mut sm2 = RiskGovernorSm::new();
+        let r2 = sm2.evaluate_risk_context(0.0, 0.0, 0.0, 0, true, false);
+        assert_eq!(r2, Some(RiskLevel::CircuitBreaker));
+
+        // Reconciler path 不受影響
+        let mut sm3 = RiskGovernorSm::new();
+        sm3.reconciler_escalate_to(RiskLevel::Cautious, "drift").unwrap();
+        assert_eq!(sm3.level, RiskLevel::Cautious);
     }
 }

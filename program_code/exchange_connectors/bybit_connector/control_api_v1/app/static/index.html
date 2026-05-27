@@ -33,7 +33,7 @@
       <p>RC2 control console · OpenClaw services + Bybit venue adapter</p>
     </div>
     <div style="display:flex;align-items:center;gap:8px">
-      <button onclick="fetch('/api/v1/auth/logout',{method:'POST',credentials:'same-origin'}).finally(function(){localStorage.removeItem('oc_username');window.location.href='/login'})" style="background:transparent;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:12px;padding:4px 10px;cursor:pointer">Logout</button>
+      <button onclick="(window.ocFetchWithCsrf||fetch)('/api/v1/auth/logout',{method:'POST',credentials:'same-origin'}).finally(function(){localStorage.removeItem('oc_username');window.location.href='/login'})" style="background:transparent;border:1px solid #30363d;border-radius:4px;color:#8b949e;font-size:12px;padding:4px 10px;cursor:pointer">Logout</button>
     </div>
   </header>
 

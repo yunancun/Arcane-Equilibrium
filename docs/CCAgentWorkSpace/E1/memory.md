@@ -12893,3 +12893,56 @@ Crontab line for PM ssh paste:
 - restart_all `[ ! -f live_auth_signing_key.txt ]` seed 條件嚴 = spec §8.5 E2 重點 #2 守住；已 rotate 的 key 不被覆蓋；重 boot idempotent。
 
 未 commit；report 寫在 `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-27--ops_2_secret_split_impl.md`；待 E2 + A3 對抗式 + E4 regression（Linux integration A/B/C 屬 E4 範圍）後 PM 統一 commit + 14d soak start。
+
+## 2026-05-27 OPS-4 systemd minor in-place fix
+- E2 APPROVE-WITH-MINOR (commit 65e78437) → 4 fix 不重 round：
+  - MED-1 刪 `openclaw-engine.service:38` 空 Requires= directive（空值 systemd 會 warn，整行刪才合法）
+  - LOW-2 install script `systemd-analyze verify` 區分 Warning（繼續）vs Error（exit 11）；grep -qi 'Error' 判斷
+  - LOW-3 兩 install script 加 `[[ "$ENGINE_USER" == "root" ]] && exit 12`（防 `su - root` + SUDO_USER 缺失 fallback id -un=root）
+  - LOW-4 README §B 補 `systemctl reset-failed openclaw-engine` recovery 一行（5 連 fail 後須清計數器）
+- 驗證：bash -n PASS；Requires= 已剩注釋；11 個 `/home/ncyu` hit 全注釋示例 0 logic 違反
+- 教訓：systemd 空值 directive（key=）≠ 整行省略；舊習慣以為「留空 = 無依賴」實際語法上是不同的（warn 反例）
+- Report: workspace/reports/2026-05-27--ops_4_minor_e1_in_place_fix.md
+
+## 2026-05-27 — Wave 5 Packet C SM-04 NotificationFailsafeTimeout + active lock-profit hook
+- Task: AMD-2026-05-21-01 v2 §9.8 + PA spec §4.4 Stage 3b — `RiskEvent::NotificationFailsafeTimeout` variant + `active_lock_profit_per_position` hook
+- 路徑驗證：spec 寫 `openclaw_core/src/sm/risk_gov.rs` 對；非 `openclaw_engine/src/risk_gov.rs`（後者不存在）
+- 設計選擇：PositionSnapshot / StopAdjustment 純值 struct 放在 risk_gov.rs（非 import `openclaw_engine::PositionInfo`）— 避免循環依賴；engine 層 mapping `PositionView → PositionSnapshot` 後 call hook
+- transition rule 不動：新 variant 走 RiskEvent 路徑、不新增 lookup_rule pair；既有 Normal/Cautious/Reduced → Defensive 已在 lookup_rule 內覆蓋（per spec §9.8 mitigation 理由 2 不破壞 35+ pair）
+- 35+ pair 實測：lookup_rule 含 15 escalation + 10 de-escalation = 25 explicit pair；spec「35+」是粗估；t4 regression 全 pair 逐一驗存在
+- 安全紀律：active_lock_profit_per_position 對 NaN/0/負 ATR/未知 side/空 SL/負 buffer 全 fail-closed 跳過倉位、不 panic；t3_fail_closed_on_bad_input 7 個 invalid 倉位驗
+- cargo test: 423/423 PASS @ openclaw_core lib + 3469/3469 PASS @ openclaw_engine lib + 27/27 PASS @ sm::risk_gov (含 6 新 T1-T6)
+- clippy: 標準 lint risk_gov.rs 零 hit；pedantic 命中全是中文 doc backtick 提示（既有反模式 + 純 cosmetic）
+- 反模式 grep：`runtime_failsafe_override` / `disable_failsafe` 全 0 hit；`/Users/ncyu` / `/home/ncyu` 全 0 hit
+- 教訓：Rust workspace 多 crate hierarchy 下 spec 引用 `openclaw_engine/src/risk_gov.rs` 是 typo（packet master text），實際在 `openclaw_core/src/sm/risk_gov.rs`；先 `find` 驗路徑省下 5 分鐘盲翻
+- Report: workspace/reports/2026-05-27--wave_5_packet_c_rust_sm04_impl.md
+
+### 2026-05-27 Wave 5 Packet A V099 Autonomy Level Toggle schema land 教訓
+
+- **Packet master scope > operator prompt scope**：operator prompt 列 6 sub-task（Sub A SQL / Sub B Rust binding / Sub C Python API / Sub D dry-run / Sub E checksum / Sub F cross-lang）但 packet master §1 字面只 5 條 DELIVERABLES（schema + 禁 psql -f + D1-D13 + sqlx workflow + AC-1/5/7/8）。Sub B 屬 Packet C / Sub C 屬 Packet B / Sub F 屬 integration phase。**E1 嚴格 follow packet master scope；operator prompt 多列的 sub 必 push back + clarify**，否則一 packet 範圍模糊 = E2 review boundary 模糊 = sign-off chain 失效（per CLAUDE.md §七「不擴大 PA 給定範圍」+ profile.md 工作規則）。
+- **PG `now()` is transaction-start time，single-txn dry-run 不能用 updated_at 變動證 trigger fire**：D17 用 `before_update` 對比 `updated_at` 想證 trigger 觸發 → 同 txn 內兩值相等，誤判 trigger 未 fire。實際 trigger DOES 透過 `NEW.updated_at := now()` 把欄位重設為 txn-start 時刻（從 INSERT time 改到 trigger fire time，本來就同一個 txn time）。**證 trigger 真 fire 需用 `clock_timestamp()` 作 sentinel**（statement-time 而非 txn-time），或在 cross-txn 場景驗（migration apply COMMIT 後另開 UPDATE txn）。
+- **`trading_ai` role 在 dev sandbox 不存在 — DO block IF EXISTS REVOKE 設計正確**：V099 spec §2.3 line 320-326 既有 `DO $$ BEGIN IF EXISTS (SELECT FROM pg_roles WHERE rolname='trading_ai') THEN EXECUTE 'REVOKE ...'; END IF; END $$` 在 sandbox empirical run 觸發 NOTICE skip 而非 RAISE；production trade-core 預期 role 存在 → REVOKE 真生效。**設計 role-scoped GRANT/REVOKE 必 DO block IF EXISTS gate**，否則 dev/prod 環境分歧立即炸。
+- **PG ENUM `invalid_text_representation` SQLSTATE 22P02 而非 `check_violation`**：D5 dry-run assertion `EXCEPTION WHEN invalid_text_representation` 才能正確 catch；用 `check_violation` 會 leak through。**PG ENUM type 比 text+CHECK 更強：DB-level 自動 reject + 不同 SQLSTATE**（語意 invalid input vs constraint violation）；trailing-space 也是 invalid_text_representation 不 trim。
+- **psql ROLLBACK chain 死亡：一條 ERROR 後若不 SAVEPOINT/RELEASE，後續 statement 全 `current transaction is aborted`**：D14 五個 negative-case INSERT 寫成單 VALUES 多 row 一條 ERROR（VALUES 長度不齊）後整 txn 廢；後續 D15/D16/D17 全 `current transaction is aborted, commands ignored`。**多獨立 negative-case 必 SAVEPOINT s; ... ROLLBACK TO SAVEPOINT s;` 或 `RELEASE SAVEPOINT s;` 包單條**；不要省這個 boilerplate。
+- **scp + docker cp 雙 hop copy migration file 到 PG container 的 SOP**：sandbox PG 跑在 docker container 內，host /tmp ≠ container /tmp。流程 = `scp <local-file> trade-core:/tmp/X.sql` → `ssh trade-core "docker cp /tmp/X.sql trading_postgres:/tmp/X.sql"` → `ssh trade-core "docker exec trading_postgres psql -f /tmp/X.sql"`。**這個雙 hop 紀律不能省**；漏 docker cp 一步 → `psql -f` 找不到 file。
+- **D2 reflection query 必涵蓋 column / ENUM / index / CHECK constraint / cold seed 5 面**：spec §3.1 D2 一行字「first apply + reflection」展開成本 IMPL 寫了 5 SELECT — column_name+data_type+udt_name+is_nullable / ENUM enumlabel+sortorder / pg_indexes indexdef / pg_get_constraintdef / seed row。**reflection ≠ 只查 columns；至少 5 面 cross-verify 才能 catch schema drift**（如 ENUM order / index ordering DESC vs ASC / CHECK enum string match / partial index WHERE 條件）。
+- **EXPLAIN ANALYZE Index Scan 不能假設**：D6 + D19 兩次跑 EXPLAIN ANALYZE 驗 PG planner 真採用 idx_autonomy_audit_switched_at_utc + idx_autonomy_audit_switched_at_local_override partial — 若只 cold-start 跑（無 audit row），planner 可能選 Seq Scan + 看不出 index usage。必先 INSERT 1 seed row 才 EXPLAIN ANALYZE，這樣 cost-based optimizer 才會擇 Index Scan over Seq。
+- **V099 spec §3.1 D17 trigger verify 沒寫進 spec 必驗 13 條 — 是 E1 自己加的對抗式 extra**：spec 列 13 條（D1-D13）；本 IMPL 加 D14-D19 6 條對抗式（剩餘 CHECK enum + chk_level_changes_or_system_default 雙路徑 + chk_emergency_override_has_reason + trigger + id=1 singleton + partial index）。**對抗式測試覆蓋 spec 沒明示但邏輯上 invariant 的點**，不只跑 spec 列的 happy-path 13 條 → E2 review 時 catch corner case 更穩。
+- **V099 < V100 out-of-order land sqlx 文檔允許但需 PM accept**：trading_ai 已 apply V100（m4_hypothesis）；V099 將後 apply。sqlx 不強 strict ordering（registers by version when applied）。**Out-of-order migration deploy 必在 IMPL report §「不確定之處」明示給 PM**；不假設 PM 知道 sqlx 容忍此情境（特別是 P0 sqlx hash drift incident 2026-05-02 教訓後，apply order 是 PM 警戒區）。
+- **Report 結構：§0a Scope clarification 章節**：當 operator prompt scope > PA packet master scope 時，必在 report §0 / §0a 顯式列 scope diff + 引用 PA dependency graph 證 push back rationale。不能默默縮 scope 完成；要顯式紀錄 scope 邊界讓 PM 確認。
+
+- baseline (sandbox trade-core PG empirical 2026-05-27): _sqlx_migrations V96/97/98/100；V99 FREE; PG TimeZone=Europe/Madrid; trading_ai role absent in dev
+- IMPL output: srv/sql/migrations/V099__autonomy_level_config.sql 369 LOC + report 240 行
+- Linux PG dry-run: 13/13 D1-D13 PASS + 11/11 D14-D19 extras PASS / idempotency 2nd apply 0 RAISE 14 NOTICE skip
+- 反模式 grep: `runtime_failsafe_override` / `disable_failsafe` 全 0 hit；`/Users/ncyu` / `/home/ncyu` 全 0 hit
+- Report: workspace/reports/2026-05-27--wave_5_packet_a_v099_impl.md
+
+## 2026-05-27 — OPS-1 round 2 E2 returns 修復
+- Scope: 2 HIGH (F-1/F-2) + 3 MED (F-3/F-4/F-5) + 3 LOW (F-6/F-7/F-8) + 3 NIT (F-10/F-11/F-12)
+- F-1 教訓: helper 集中注入 ocCsrfHeaders 比 patch 每個 callsite 安全；E2 grep 證偽 IMPL §5.2 假設「都走 ocApi」
+- F-2 教訓: deploy 前 production state migration（24h auth cookie 已存活的 user）必須 server-side seed csrf，不能靠 user re-login
+- F-5 教訓: SameSite=Strict 第一層下，logout exempt 仍有 XSS-同源 DoS 騷擾風險；Option A 移除豁免 + 前端統一 wrapper = 零 UX 影響
+- F-8 教訓: NIT 投入意外發現整個 Caddyfile.template envsubst-vs-Caddy syntax 衝突 + $HOME 字面被展開違反 AC-9；最小影響原則下一併修；CC 級教訓：「Caddy `{$VAR:default}` ≠ envsubst `${VAR}`，install 時若走 envsubst 必全 envsubst syntax」
+- 治理: JS 沒 Jest/Vitest 基建時，subprocess `node -e` inline harness 是 cheap path；spy fetch + mock document.cookie 一次驗多個 wrapper
+- Test 從 33 → 48；新檔 test_ops1_csrf_js_callsites.py（7 test）
+- Report: workspace/reports/2026-05-27--ops_1_round_2_e2_e1_returns.md

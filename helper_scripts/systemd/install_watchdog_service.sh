@@ -75,6 +75,14 @@ if ! id -u "$ENGINE_USER" >/dev/null 2>&1; then
     exit 8
 fi
 
+# 拒絕 root user — watchdog 必須以非 root 身份跑（per README 反模式「不寫 User=root」）
+# 防護 `su - root` 啟 install 時 SUDO_USER 缺失 → fallback id -un=root 的場景
+if [[ "$ENGINE_USER" == "root" ]]; then
+    echo "[install][FAIL] 不允許 ENGINE_USER=root；watchdog 必須以非 root 身份跑（per systemd README §反模式）" >&2
+    echo "[install] 提示：顯式 export ENGINE_USER=<非 root 帳號> 後重跑" >&2
+    exit 12
+fi
+
 echo "[install] 安裝 $UNIT_NAME"
 echo "  ENGINE_USER           = $ENGINE_USER"
 echo "  ENGINE_GROUP          = $ENGINE_GROUP"
@@ -102,9 +110,22 @@ if grep -E '__(ENGINE_USER|ENGINE_GROUP|OPENCLAW_BASE_DIR|OPENCLAW_DATA_DIR|OPEN
     exit 9
 fi
 
+# systemd unit syntax 驗證 — 區分 warn vs error
+# verify 退出碼非 0 但 stdout/stderr 只含 Warning → 繼續安裝
+# 退出碼非 0 且含 Error → exit 11 拒絕半成型 unit
 if command -v systemd-analyze >/dev/null 2>&1; then
-    systemd-analyze verify "$TMP_UNIT" 2>&1 || \
+    verify_output="$(systemd-analyze verify "$TMP_UNIT" 2>&1 || true)"
+    verify_rc=$?
+    if [[ -n "$verify_output" ]]; then
+        echo "$verify_output" >&2
+    fi
+    if [[ $verify_rc -ne 0 ]]; then
+        if echo "$verify_output" | grep -qi 'Error'; then
+            echo "[install][FAIL] systemd-analyze verify 報 Error；拒絕安裝半成型 unit" >&2
+            exit 11
+        fi
         echo "[install][WARN] systemd-analyze verify 報 warning；繼續" >&2
+    fi
 fi
 
 install -m 644 "$TMP_UNIT" "$TARGET"

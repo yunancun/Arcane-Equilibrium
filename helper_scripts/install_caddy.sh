@@ -56,6 +56,18 @@ CERT_HOST="$(resolve_openclaw_tls_cert_host)" || exit 2
 CERT_DIR="$(resolve_openclaw_tls_cert_dir)" || exit 2
 BACKEND_PORT="${OPENCLAW_API_BACKEND_PORT:-8000}"
 
+# F-12：CERT_HOST 來自 tailscale CLI / env，理論上限 DNS 字符；明確校驗只允許
+# `[A-Za-z0-9.-]` 防未來 user-provided 帶引號 / 空格 / shell metachar 注入 envsubst。
+if ! printf '%s' "$CERT_HOST" | grep -qE '^[A-Za-z0-9][A-Za-z0-9.-]*$'; then
+    echo "ERROR: invalid CERT_HOST '$CERT_HOST' — expected DNS-name characters only" >&2
+    exit 2
+fi
+# BACKEND_PORT 必須是純數字
+if ! printf '%s' "$BACKEND_PORT" | grep -qE '^[0-9]+$'; then
+    echo "ERROR: invalid BACKEND_PORT '$BACKEND_PORT' — expected digits only" >&2
+    exit 2
+fi
+
 echo "===== OPS-1 install_caddy.sh ====="
 echo "platform        : $UNAME"
 echo "cert host       : $CERT_HOST"
@@ -140,7 +152,13 @@ if [ ! -f "$CERT_CRT" ] || [ ! -f "$CERT_KEY" ]; then
         sudo mkdir -p "$CERT_DIR"
         cd "$CERT_DIR"
         sudo tailscale cert "$CERT_HOST"
-        sudo chown root:caddy "$CERT_CRT" "$CERT_KEY" 2>/dev/null || true
+        # F-6：只在 caddy user 存在時才 chown；Linux apt 安裝會自建，macOS brew
+        # 不會（brew 預設用呼叫者 user），盲跑 chown 會 silent fail 留 cert 給 root only。
+        if id caddy >/dev/null 2>&1; then
+            sudo chown root:caddy "$CERT_CRT" "$CERT_KEY"
+        else
+            echo ">>> caddy user not present; skip chown (Mac brew / non-systemd setup)"
+        fi
         sudo chmod 640 "$CERT_CRT" "$CERT_KEY"
         cd "$REPO_ROOT"
     else

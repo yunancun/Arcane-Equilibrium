@@ -142,10 +142,13 @@ function ocGetToken() {
 }
 
 async function ocLogout() {
-  // Call server to clear the HttpOnly cookie, then redirect to login.
+  // OPS-1 Track B (F-1 + F-5)：logout 從 CSRF 豁免名單移除後，必須帶 X-CSRF-Token；
+  // 走 window.ocFetchWithCsrf 統一注入（fetch_with_csrf.js 載入早於 common.js）。
   // 調用服務端清除 HttpOnly cookie，然后跳转登录页。
   try {
-    await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' });
+    const _fetcher = (typeof window !== 'undefined' && typeof window.ocFetchWithCsrf === 'function')
+      ? window.ocFetchWithCsrf : fetch;
+    await _fetcher('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' });
   } catch (e) { /* best-effort / 尽力而为 */ }
   localStorage.removeItem(OC_USER_KEY);
   window.location.href = '/login';

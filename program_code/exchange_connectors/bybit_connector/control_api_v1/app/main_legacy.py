@@ -314,7 +314,14 @@ from slowapi.middleware import SlowAPIMiddleware
 app.add_middleware(SlowAPIMiddleware)
 
 # ── OPS-1 Track B: CSRF double-submit middleware ─────────────────────────────
-# 為什麼放在 SlowAPI 後：rate-limit 先擋住惡意洪流，再做 CSRF 比對節省 CPU。
+# Starlette `add_middleware` 採 LIFO/onion 順序：較晚 add 的 middleware 在 inbound
+# 階段較早執行。本檔註冊次序為 CORS → SlowAPI → CSRF，故 inbound 處理順序為
+# `CSRF → SlowAPI → CORS → route`。
+# 為什麼這個順序安全：
+#   - OPTIONS 不在 CSRF 寫操作集合，preflight 不會被攔截，CORS 正常運作
+#   - CSRF 比對是 constant-time + 常數成本，先擋 mismatch 反而避免下游 SlowAPI 與
+#     route handler 多餘 CPU；惡意洪流仍會被 SlowAPI 在 5/分鐘 login 等 endpoint
+#     獨立攔截
 # 為什麼用 add_middleware 而非 @middleware：CSRFMiddleware 繼承 BaseHTTPMiddleware
 # 走 ASGI 標準路徑，比 decorator 更明確且可單獨單元測試。
 # 預設 enforcing；操作者可暫時設 OPENCLAW_CSRF_SHADOW=1 進入 shadow mode（只記
@@ -381,19 +388,37 @@ async def security_headers_middleware(request: Request, call_next):
 # ── OPS-1 Wave A: CSP violation report endpoint ──────────────────────────────
 # 為什麼 stdout JSON log 而非 V### migration：spec §5.3 明說 OPS-1 不開新
 # migration；Wave B 完成升級後再考慮入 `learning.csp_violation_log`。
+# OPS-1 round 2 (F-4)：加 60/分鐘限頻 + 8KB body 上限。tailnet 內任何設備都能 POST
+# 此 endpoint，沒有限制會被灌爆 journal log；瀏覽器正常 violation 頻率 ≤幾次/分鐘。
+_CSP_REPORT_MAX_BYTES = 8 * 1024  # 8KB body 上限
+
+
 @app.post("/api/v1/csp/report", include_in_schema=False)
+@limiter.limit("60/minute")
 async def csp_report(request: Request):
     """接收瀏覽器送來的 CSP violation report（JSON）。
 
     spec §5.3：Wave A 用 stdout JSON log 蒐集 14 天樣本；Wave B 才考慮 PG
     持久化。不需 auth（瀏覽器後台自動 POST，不可能附 cookie 給 cross-origin
     target；同源 report 即使無 cookie 也應接收）。
+
+    OPS-1 round 2 (F-4)：限頻 60/分鐘 per-IP + body 上限 8KB；超出 413。
     """
+    # 為什麼先讀 raw body 再 parse：FastAPI request.json() 直接讀完全部 bytes，
+    # 沒辦法後置限制大小；改先 await body() 量 length 才安全。
+    raw = await request.body()
+    if len(raw) > _CSP_REPORT_MAX_BYTES:
+        logger.warning(
+            "CSP report body too large (%d bytes > %d) from %s",
+            len(raw), _CSP_REPORT_MAX_BYTES,
+            request.client.host if request.client else "unknown",
+        )
+        return JSONResponse(status_code=413, content=None)
     try:
-        payload = await request.json()
+        import json as _json  # 局部 import 避免污染 module top-level
+        payload = _json.loads(raw.decode("utf-8")) if raw else {}
     except Exception:
-        # 為什麼 fail-closed 改 silent 200：瀏覽器送爛 JSON 時不該 noise toast
-        # 給使用者；只記 warning。
+        # 為什麼 silent 204：瀏覽器送爛 JSON 時不該 noise toast 給使用者；只記 warning。
         logger.warning(
             "CSP report received with invalid JSON body from %s",
             request.client.host if request.client else "unknown",
