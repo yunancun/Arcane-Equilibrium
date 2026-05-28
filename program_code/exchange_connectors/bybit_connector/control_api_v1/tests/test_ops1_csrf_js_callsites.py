@@ -104,6 +104,49 @@ def test_fetch_with_csrf_helper_no_cookie_no_header() -> None:
     assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
 
 
+def test_ocapi_csrf_mismatch_toasts_and_reloads() -> None:
+    """common.js ocApi：enforcing 403 csrf_token_mismatch 要提示中文並自動 reload。"""
+    common_src = _read("common.js")
+    harness = (
+        "globalThis.window = globalThis;"
+        "globalThis.localStorage = { getItem: () => null, setItem: () => {}, removeItem: () => {} };"
+        "globalThis.sessionStorage = { setItem: () => {} };"
+        "globalThis.document = { cookie: '', body: {}, createElement: () => ({"
+        "  classList: { add: () => {}, remove: () => {} },"
+        "  style: {}, remove: () => {}"
+        "}), querySelectorAll: () => [] };"
+        "globalThis.addEventListener = () => {};"
+        "globalThis.dispatchEvent = () => {};"
+        "globalThis.CustomEvent = function(name, opts) { return { name, opts }; };"
+        "let reloads = 0;"
+        "globalThis.location = { pathname: '/console', search: '', href: '', reload: () => { reloads += 1; } };"
+        "globalThis.AbortSignal = { timeout: () => ({}) };"
+        "globalThis.setTimeout = (fn, _ms) => { fn(); return 1; };"
+        f"{common_src}"
+        "let toasts = [];"
+        "ocToast = (msg, type) => { toasts.push({ msg, type }); };"
+        "globalThis.fetch = (_path, _opts) => Promise.resolve({"
+        "  ok: false,"
+        "  status: 403,"
+        "  clone() { return this; },"
+        "  json: () => Promise.resolve({ detail: { reason_codes: ['csrf_token_mismatch'] } })"
+        "});"
+        "(async () => {"
+        "  const result = await ocApi('/api/v1/some_write', { method: 'POST', body: { x: 1 } });"
+        "  if (result !== null) { console.error('FAIL: expected null'); process.exit(1); }"
+        "  if (reloads !== 1) { console.error('FAIL: reloads=' + reloads); process.exit(1); }"
+        "  if (!toasts.length || !toasts[0].msg.includes('登入安全令牌')) {"
+        "    console.error('FAIL: toast=' + JSON.stringify(toasts));"
+        "    process.exit(1);"
+        "  }"
+        "  if (toasts[0].type !== 'info') { console.error('FAIL: type=' + toasts[0].type); process.exit(1); }"
+        "  process.exit(0);"
+        "})();"
+    )
+    result = _run_node_harness(harness)
+    assert result.returncode == 0, f"stdout={result.stdout!r} stderr={result.stderr!r}"
+
+
 # ─── F-1 4 raw-fetch callsite grep verify ────────────────────────────────────
 
 

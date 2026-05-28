@@ -207,4 +207,16 @@ if [ "$APPLY" -eq 1 ]; then
     fi
 fi
 
+cat <<EOF
+>>> first-use HTTPS cert trust checkpoint
+    Open the GUI with the certificate hostname only:
+      https://$CERT_HOST/
+    Do not use the tailnet IP or short hostname for browser verification.
+    On first Mac Chrome/Safari access, treat any certificate/privacy warning as
+    a deployment checkpoint: inspect the certificate subject/SAN first. It must
+    match $CERT_HOST. If it does not match, stop and fix OPENCLAW_TLS_CERT_HOST
+    or DNS before proceeding. Do not click through a hostname mismatch.
+    Runbook: docs/runbooks/2026-05-28--ops_1_cert_trust_first_use.md
+EOF
+
 echo "===== install_caddy.sh DONE ($([ "$APPLY" -eq 1 ] && echo APPLY || echo DRY-RUN)) ====="

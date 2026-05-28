@@ -209,7 +209,7 @@ frame-src 'self' http://trade-core:3000;  ← 含 HTTP，CSP 升級時必同改 
 
 **Wave A（OPS-1 IMPL 內，必做）**：
 1. `frame-src 'self' https://trade-core:3000` —— Grafana iframe 需 Grafana 自己也有 TLS；若 Grafana 暫無 HTTPS，spec 允許 Wave A 暫保 `http://trade-core:3000` + 記錄 CSP report
-2. `Content-Security-Policy-Report-Only` 加 nonce-based 影子規則，**只記錄不阻擋**，蒐集 14 天 violation report 數據
+2. `Content-Security-Policy-Report-Only` 加 nonce-based 影子規則，**只記錄不阻擋**，蒐集 7 天 violation report 數據
 
 **Wave B（live-gate 前 1 sprint，per TODO §12 `P2-WP05-CSP-UNSAFE-INLINE` 升 P1）**：
 1. 25 個 HTML 全部把 inline `<script>` 移到 external `static/js/<tab>.js`
@@ -277,7 +277,7 @@ frame-src 'self' http://trade-core:3000;  ← 含 HTTP，CSP 升級時必同改 
 | # | 風險 | 等級 | Mitigation |
 |---|---|---|---|
 | 1 | **Tailscale CA 中斷 + cert 過期同時發生** → GUI 不可用，operator 無法觀察 Live engine | **高** | (a) systemd timer 14d 提前 renew + 7d alert；(b) emergency fallback `OPENCLAW_BIND_HOST=auto` 環境變數可讓 operator SSH 進去改回 HTTP 直連（degraded mode，需 operator 手動觸發，不自動降級）；(c) Caddy crash → systemd 5s restart |
-| 2 | **CSRF middleware 上線後既有 GUI 寫操作全 403**（25 個 HTML 漏改 fetch wrapper）| **中-高** | (a) 14d shadow mode：先 `Content-Security-Policy-Report-Only` 同款 — `X-CSRF-Token` 缺失只記 log 不阻擋；(b) E2 必查 25 個 HTML 全部過 helper；(c) E4 regression 跑所有 tab 寫操作 smoke test |
+| 2 | **CSRF middleware 上線後既有 GUI 寫操作全 403**（25 個 HTML 漏改 fetch wrapper）| **中-高** | (a) 7d shadow mode：先 `Content-Security-Policy-Report-Only` 同款 — `X-CSRF-Token` 缺失只記 log 不阻擋；(b) E2 必查 25 個 HTML 全部過 helper；(c) E4 regression 跑所有 tab 寫操作 smoke test；(d) `helper_scripts/canary/healthchecks/csrf_shadow_zero_verify.sh` 驗 7d window `csrf_shadow:` 為 0 才切 enforcing |
 | 3 | **`_has_https_proxy_hint` env gate 改動意外讓現有 dev/test 環境 cookie 不再 Secure** → 開發機 cookie 在 HTTP 下能用，但 production 行為錯位 | **中** | (a) `OPENCLAW_TRUST_PROXY_HEADERS=1` 預設 unset = 不讀 proxy header（fail-closed）；(b) Test fixture 顯式 setenv；(c) E2 必看 `test_batch_b_security_auth.py` L120-128 兼容 |
 
 **次要風險**（不阻 dispatch，但 E2 review 必看）：

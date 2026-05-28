@@ -94,6 +94,16 @@ def test_install_caddy_dry_run_default() -> None:
     assert 'source "$REPO_ROOT/helper_scripts/lib/tls_cert.sh"' in text
 
 
+def test_install_caddy_prints_first_use_cert_trust_checkpoint() -> None:
+    """A3 R3：install_caddy.sh 結尾必提示首次 HTTPS cert trust 檢查與 runbook。"""
+    script = _helper_scripts / "install_caddy.sh"
+    text = script.read_text(encoding="utf-8")
+    assert "first-use HTTPS cert trust checkpoint" in text
+    assert "Chrome/Safari" in text
+    assert "Do not click through a hostname mismatch" in text
+    assert "2026-05-28--ops_1_cert_trust_first_use.md" in text
+
+
 def test_systemd_units_reference_helper_lib() -> None:
     """systemd renew service 必引用 lib/tls_cert.sh 而非寫死 tailscale cert 邏輯。
 

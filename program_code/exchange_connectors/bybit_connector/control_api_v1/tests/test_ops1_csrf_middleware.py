@@ -16,7 +16,10 @@ OPS-1 round 2 (E2 returns)：
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -24,6 +27,7 @@ from fastapi.testclient import TestClient
 
 _test_dir = os.path.dirname(os.path.abspath(__file__))
 _control_api_dir = os.path.dirname(_test_dir)
+_repo_root = Path(_control_api_dir).parents[3]
 if _control_api_dir not in sys.path:
     sys.path.insert(0, _control_api_dir)
 
@@ -296,3 +300,41 @@ def test_csp_report_oversize_body_returns_413(monkeypatch) -> None:
         headers={"Content-Type": "application/csp-report"},
     )
     assert r.status_code == 413
+
+
+# ── OPS-1 enforcing cutover：7d shadow zero verify ──────────────────────────
+
+
+def test_csrf_shadow_zero_verify_script_pass_and_fail(tmp_path) -> None:
+    """7d shadow cutover helper：0 csrf_shadow PASS，出現 violation 則 FAIL。"""
+    if not shutil.which("bash"):
+        pytest.skip("bash not available")
+
+    script = _repo_root / "helper_scripts" / "canary" / "healthchecks" / "csrf_shadow_zero_verify.sh"
+    logs_dir = tmp_path / "logs"
+    logs_dir.mkdir()
+    api_log = logs_dir / "api.log"
+    api_log.write_text("api boot ok\n", encoding="utf-8")
+    env = os.environ.copy()
+    env["OPENCLAW_DATA_DIR"] = str(tmp_path)
+
+    result = subprocess.run(
+        ["bash", str(script)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "csrf_shadow=0" in result.stdout
+
+    api_log.write_text("csrf_shadow: missing header on POST /api/v1/x\n", encoding="utf-8")
+    result = subprocess.run(
+        ["bash", str(script)],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "csrf_shadow=1" in result.stdout
