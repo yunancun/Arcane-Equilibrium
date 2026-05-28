@@ -170,6 +170,27 @@ function _ocUUID() {
 let _ocAuthFails = 0;
 const _OC_AUTH_MAX = 5;
 const _ocGetErrorToastAt = {};
+let _ocCsrfReloadScheduled = false;
+
+function ocIsCsrfTokenMismatchDetail(detail) {
+  return !!(
+    detail === 'csrf_token_mismatch' ||
+    (
+      detail &&
+      Array.isArray(detail.reason_codes) &&
+      detail.reason_codes.includes('csrf_token_mismatch')
+    )
+  );
+}
+
+function ocScheduleCsrfTokenReload() {
+  if (_ocCsrfReloadScheduled) return;
+  _ocCsrfReloadScheduled = true;
+  ocToast('登入安全令牌已更新，頁面即將重新整理 / Security token refreshed; reloading', 'info');
+  if (typeof window !== 'undefined' && window.location && typeof window.location.reload === 'function') {
+    setTimeout(() => window.location.reload(), 1200);
+  }
+}
 
 async function ocApi(path, opts) {
   // Auth 由 HttpOnly cookie 處理，JS 中無需 token。
@@ -210,6 +231,11 @@ async function ocApi(path, opts) {
       try {
         const errBody = await r.json();
         const detail = errBody.detail;
+        if (ocIsCsrfTokenMismatchDetail(detail)) {
+          console.warn('[ocApi] ' + method + ' ' + path + ' → ' + r.status + ': csrf_token_mismatch');
+          ocScheduleCsrfTokenReload();
+          return null;
+        }
         if (typeof detail === 'string') errMsg = detail;
         else if (detail && detail.reason_codes) errMsg = detail.reason_codes.join(', ');
         else if (detail) errMsg = JSON.stringify(detail);

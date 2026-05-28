@@ -325,7 +325,7 @@ app.add_middleware(SlowAPIMiddleware)
 # 為什麼用 add_middleware 而非 @middleware：CSRFMiddleware 繼承 BaseHTTPMiddleware
 # 走 ASGI 標準路徑，比 decorator 更明確且可單獨單元測試。
 # 預設 enforcing；操作者可暫時設 OPENCLAW_CSRF_SHADOW=1 進入 shadow mode（只記
-# log 不阻擋）作為 14d 過渡期使用。
+# log 不阻擋）作為 7d 過渡期使用。
 from .csrf_middleware import CSRFMiddleware  # noqa: E402
 app.add_middleware(CSRFMiddleware)
 
@@ -349,7 +349,7 @@ async def security_headers_middleware(request: Request, call_next):
     """為每個 HTTP 響應注入安全頭，降低 XSS / 點擊劫持 / MIME 嗅探等風險。
 
     OPS-1 Wave A (Track C)：除既有 enforcing CSP 之外，並 emit
-    `Content-Security-Policy-Report-Only` 影子規則蒐集 14 天 violation。
+    `Content-Security-Policy-Report-Only` 影子規則蒐集 7 天 violation。
     為什麼 report-only：Wave A 不砍 `unsafe-inline`（25 個 HTML 仍 inline
     script），先以 Report-Only 觀測 nonce-based 升級在實際 GUI 上會生出多少
     violation；Wave B（P1，first Live D-14 前 1 sprint）才正式收緊。
@@ -398,7 +398,7 @@ _CSP_REPORT_MAX_BYTES = 8 * 1024  # 8KB body 上限
 async def csp_report(request: Request):
     """接收瀏覽器送來的 CSP violation report（JSON）。
 
-    spec §5.3：Wave A 用 stdout JSON log 蒐集 14 天樣本；Wave B 才考慮 PG
+    spec §5.3：Wave A 用 stdout JSON log 蒐集 7 天樣本；Wave B 才考慮 PG
     持久化。不需 auth（瀏覽器後台自動 POST，不可能附 cookie 給 cross-origin
     target；同源 report 即使無 cookie 也應接收）。
 

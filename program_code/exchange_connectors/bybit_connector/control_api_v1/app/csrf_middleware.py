@@ -75,7 +75,7 @@ CSRF_HEADER_NAME = "X-CSRF-Token"
 def _is_shadow_mode() -> bool:
     """讀 OPENCLAW_CSRF_SHADOW env：1/true 啟用 shadow（只 log warning 不阻擋）。
 
-    為什麼：spec §7.2 風險 #2 緩衝；前 14 天 shadow 蒐集「哪個 tab fetch 沒接
+    為什麼：spec §7.2 風險 #2 緩衝；前 7 天 shadow 蒐集「哪個 tab fetch 沒接
     csrf token」的真實 violation 樣本，E2 review 後才正式 enforce。
     """
     flag = (os.getenv("OPENCLAW_CSRF_SHADOW", "") or "").strip().lower()
