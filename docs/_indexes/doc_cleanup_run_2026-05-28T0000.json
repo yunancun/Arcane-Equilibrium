@@ -1,0 +1,257 @@
+{
+  "schema_version": 2,
+  "generated_at": "2026-05-28T00:00:00+00:00",
+  "mode": "dry_run_manual_tw_phase1",
+  "note": "TW sub-agent 在無 Bash 工具的環境下手算 candidate 清單；正式 dry-run 由 main session 派 E1 跑 helper_scripts/maintenance_scripts/regen_doc_inventory.py 產生完整 entries 段",
+  "baseline": {
+    "pm_proposal_baseline_md_count": 2248,
+    "tw_phase1_scanned_md_count": 2250,
+    "diff_vs_baseline": "+2 (含本次 PM proposal + TW report 草稿)"
+  },
+  "freeze_set": [
+    "docs/decisions/DOC-*",
+    "docs/decisions/SM-*",
+    "docs/decisions/EX-*",
+    "docs/decisions/HIST-*",
+    "docs/adr/*.md",
+    "docs/CCAgentWorkSpace/*/profile.md",
+    "docs/CCAgentWorkSpace/*/memory.md",
+    "docs/CCAgentWorkSpace/*/workspace/README.md",
+    "docs/CCAgentWorkSpace/*/workspace/templates/*",
+    "docs/CCAgentWorkSpace/Operator/*",
+    "docs/CCAgentWorkSpace/*/workspace/reports/*",
+    "docs/_indexes/*",
+    "docs/governance_dev/amendments/AMD-*",
+    "docs/README.md",
+    "docs/KNOWN_ISSUES.md",
+    "docs/CLAUDE_CHANGELOG.md",
+    "docs/CLAUDE_REFERENCE.md",
+    "docs/lessons.md"
+  ],
+  "class1_keep_all_hotspots": [
+    {"topic_token": "v58_executability_audit", "count": 14, "verdict": "KEEP_ALL (multi-agent audit lineage)"},
+    {"topic_token": "v57_executability_audit", "count": 14, "verdict": "KEEP_ALL (multi-agent audit lineage)"},
+    {"topic_token": "todo_complete_proposal", "count": 9, "verdict": "KEEP_ALL (multi-agent audit lineage)"}
+  ],
+  "class2_cross_ref_add_candidates": {
+    "scanned_pairs": 0,
+    "note": "worklogs/ 根目錄掃描結果：daily_summary（9 檔，04-08~04-15 + 04-17）與專題 worklog（21 檔，04-16~05-11）在日期上互斥，0 對同日同存。Class 2 規則無命中。",
+    "pairs": []
+  },
+  "class3_cross_ref_add_candidates": {
+    "scanned_pairs": 1,
+    "max_pairs_per_batch": 30,
+    "pairs": [
+      {
+        "topic_token": "live_auth_watcher_event_consumer_spawn",
+        "agent_report": "docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-27--live_auth_watcher_event_consumer_spawn.md",
+        "worklog": "docs/worklogs/2026-04-27--live_auth_watcher_event_consumer_spawn_fix.md",
+        "existing_cross_ref_in_worklog": "NO",
+        "proposed_action": "在 worklog 頂部加 `> 對應 agent report: <path>` cross-ref"
+      }
+    ]
+  },
+  "class4_archive_candidates": {
+    "total": 8,
+    "max_per_batch": 30,
+    "batch_status": "within batch limit",
+    "candidates": [
+      {
+        "old_path": "docs/execution_plan/2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md",
+        "new_version_path": "docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md",
+        "supersedes_evidence_line": "> **SUPERSEDED** by [ref20_paper_replay_lab_dev_plan_v3.md] -- retained for historical reference.",
+        "active_reference_grep_hits": {
+          "srv/CLAUDE.md": 0,
+          "srv/TODO.md": 0,
+          "srv/README.md": 0,
+          "docs/agents/": 0,
+          "docs/_indexes/path_redirects.md": 0
+        },
+        "docs_internal_reference_note": "docs/README.md / docs/execution_plan/README.md / docs/CLAUDE_CHANGELOG.md / docs/execution_plan/2026-05-02--ref20_v1_round2_audit.md / TW/2026-05-08--apr_may_doc_audit.md 仍引用（lineage 指針，需在 archive 後留 redirect stub）",
+        "proposed_archive_path": "docs/archive/2026-05-28--ref20_paper_replay_lab_dev_plan_chain_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md"
+      },
+      {
+        "old_path": "docs/execution_plan/2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md",
+        "new_version_path": "docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md",
+        "supersedes_evidence_line": "> **SUPERSEDED** by [ref20_paper_replay_lab_dev_plan_v3.md] -- retained for historical reference.",
+        "active_reference_grep_hits": {
+          "srv/CLAUDE.md": 0,
+          "srv/TODO.md": 0,
+          "srv/README.md": 0,
+          "docs/agents/": 0,
+          "docs/_indexes/path_redirects.md": 0
+        },
+        "docs_internal_reference_note": "docs/README.md / docs/execution_plan/README.md / docs/CLAUDE_CHANGELOG.md / docs/execution_plan/2026-05-02--ref20_v1_round2_audit.md 引用 lineage",
+        "proposed_archive_path": "docs/archive/2026-05-28--ref20_paper_replay_lab_dev_plan_chain_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md"
+      },
+      {
+        "old_path": "docs/execution_plan/2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md",
+        "new_version_path": "docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md",
+        "supersedes_evidence_line": "> **SUPERSEDED** by [ref20_paper_replay_lab_dev_plan_v3.md] -- retained for historical reference. ; 狀態：SUPERSEDED by V3；V2 development baseline 歷史保留",
+        "active_reference_grep_hits": {
+          "srv/CLAUDE.md": 0,
+          "srv/TODO.md": 0,
+          "srv/README.md": 0,
+          "docs/agents/": 0,
+          "docs/_indexes/path_redirects.md": 0
+        },
+        "docs_internal_reference_note": "docs/README.md / docs/execution_plan/README.md / docs/CLAUDE_CHANGELOG.md 引用 lineage",
+        "proposed_archive_path": "docs/archive/2026-05-28--ref20_paper_replay_lab_dev_plan_chain_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md"
+      },
+      {
+        "old_path": "docs/execution_plan/2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md",
+        "new_version_path": "docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md",
+        "supersedes_evidence_line": "> **SUPERSEDED** by [ref20_paper_replay_lab_dev_plan_v3.md] -- retained for historical reference.",
+        "active_reference_grep_hits": {
+          "srv/CLAUDE.md": 0,
+          "srv/TODO.md": 0,
+          "srv/README.md": 0,
+          "docs/agents/": 0,
+          "docs/_indexes/path_redirects.md": 0
+        },
+        "docs_internal_reference_note": "docs/README.md / docs/execution_plan/README.md / docs/CLAUDE_CHANGELOG.md / docs/execution_plan/2026-05-02--ref20_v2_round3_audit.md / docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md（新版內部引用為審查歷史）引用 lineage",
+        "proposed_archive_path": "docs/archive/2026-05-28--ref20_paper_replay_lab_dev_plan_chain_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md"
+      },
+      {
+        "old_path": "docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md",
+        "new_version_path": "docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md",
+        "supersedes_evidence_line": "> **SUPERSEDED** by [ref21_full_chain_replay_engine_dev_plan_v1_3.md] -- retained for historical reference.",
+        "active_reference_grep_hits": {
+          "srv/CLAUDE.md": 0,
+          "srv/TODO.md": 0,
+          "srv/README.md": 0,
+          "docs/agents/": 0,
+          "docs/_indexes/path_redirects.md": 0
+        },
+        "docs_internal_reference_note": "docs/CLAUDE_CHANGELOG.md / docs/execution_plan/README.md 引用 lineage",
+        "proposed_archive_path": "docs/archive/2026-05-28--ref21_chain_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md"
+      },
+      {
+        "old_path": "docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md",
+        "new_version_path": "docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md",
+        "supersedes_evidence_line": "> **SUPERSEDED** by [ref21_full_chain_replay_engine_dev_plan_v1_3.md] -- retained for historical reference.",
+        "active_reference_grep_hits": {
+          "srv/CLAUDE.md": 0,
+          "srv/TODO.md": 0,
+          "srv/README.md": 0,
+          "docs/agents/": 0,
+          "docs/_indexes/path_redirects.md": 0
+        },
+        "docs_internal_reference_note": "docs/CLAUDE_CHANGELOG.md 引用 lineage",
+        "proposed_archive_path": "docs/archive/2026-05-28--ref21_chain_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md"
+      },
+      {
+        "old_path": "docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md",
+        "new_version_path": "docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md",
+        "supersedes_evidence_line": "> **SUPERSEDED** by [ref21_full_chain_replay_engine_dev_plan_v1_3.md] -- retained for historical reference.",
+        "active_reference_grep_hits": {
+          "srv/CLAUDE.md": 0,
+          "srv/TODO.md": 0,
+          "srv/README.md": 0,
+          "docs/agents/": 0,
+          "docs/_indexes/path_redirects.md": 0
+        },
+        "docs_internal_reference_note": "docs/CLAUDE_CHANGELOG.md 引用 lineage",
+        "proposed_archive_path": "docs/archive/2026-05-28--ref21_chain_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md"
+      },
+      {
+        "old_path": "docs/execution_plan/2026-05-06--ref21_gui_ux_spec_v1.md",
+        "new_version_path": "docs/execution_plan/2026-05-06--ref21_gui_ux_spec_v1_1.md",
+        "supersedes_evidence_line": "> **SUPERSEDED** by [ref21_gui_ux_spec_v1_1.md] -- retained for historical reference.",
+        "active_reference_grep_hits": {
+          "srv/CLAUDE.md": 0,
+          "srv/TODO.md": 0,
+          "srv/README.md": 0,
+          "docs/agents/": 0,
+          "docs/_indexes/path_redirects.md": 0
+        },
+        "docs_internal_reference_note": "docs/CLAUDE_CHANGELOG.md / docs/execution_plan/README.md 引用 lineage",
+        "proposed_archive_path": "docs/archive/2026-05-28--ref21_chain_superseded/2026-05-06--ref21_gui_ux_spec_v1.md"
+      }
+    ]
+  },
+  "phase_packet_candidates": {
+    "total_directories": 6,
+    "candidates": [
+      {
+        "dir": "docs/worklogs/phase5_arch_rc1/",
+        "file_count": 5,
+        "latest_mtime_date_observed": "2026-04-07",
+        "days_since_mtime_at_audit": "~51",
+        "sign_off_evidence_required": "PM 確認 Phase 5 ARCH-RC1 已 closure（reference: project_2026_05_03_ref20_sprint1_2_closure 似乎相關但屬另 sprint；建議 PM 指認 ADR-0011 / ARCH-RC1 sign-off 報告路徑）",
+        "active_reference_grep_hits": 0,
+        "proposed_archive_path": "docs/archive/2026-05-28--phase_packet_phase5_arch_rc1/"
+      },
+      {
+        "dir": "docs/worklogs/control_api_gui/",
+        "file_count": "55 (50 .md + 5 .txt)",
+        "latest_mtime_date_observed": "2026-04-02",
+        "days_since_mtime_at_audit": "~56",
+        "sign_off_evidence_required": "Phase 3 control_api_gui closure 報告路徑由 PM 指認；本目錄含 batch9a / wave7 / wave8 等多 wave，sprint closure 線索散落",
+        "active_reference_grep_hits": 0,
+        "proposed_archive_path": "docs/archive/2026-05-28--phase_packet_control_api_gui/"
+      },
+      {
+        "dir": "docs/worklogs/chapters_j-k/",
+        "file_count": "8 (.txt + .md)",
+        "latest_mtime_date_observed": "2026-03-24",
+        "days_since_mtime_at_audit": "~65",
+        "sign_off_evidence_required": "Chapter j-k closure 報告路徑由 PM 指認",
+        "active_reference_grep_hits": 0,
+        "proposed_archive_path": "docs/archive/2026-05-28--phase_packet_chapters_j-k/"
+      },
+      {
+        "dir": "docs/worklogs/chapters_a-g/",
+        "file_count": 11,
+        "latest_mtime_date_observed": "2026-03-19",
+        "days_since_mtime_at_audit": "~70",
+        "sign_off_evidence_required": "Chapter a-g closure 報告路徑由 PM 指認",
+        "active_reference_grep_hits": 0,
+        "proposed_archive_path": "docs/archive/2026-05-28--phase_packet_chapters_a-g/"
+      },
+      {
+        "dir": "docs/worklogs/chapters_h-i/",
+        "file_count": 14,
+        "latest_mtime_date_observed": "2026-03-22",
+        "days_since_mtime_at_audit": "~67",
+        "sign_off_evidence_required": "Chapter h-i closure 報告路徑由 PM 指認",
+        "active_reference_grep_hits": 0,
+        "proposed_archive_path": "docs/archive/2026-05-28--phase_packet_chapters_h-i/"
+      },
+      {
+        "dir": "docs/worklogs/learning/",
+        "file_count": 1,
+        "latest_mtime_date_observed": "2026-03-26",
+        "days_since_mtime_at_audit": "~63",
+        "sign_off_evidence_required": "L 章自動學習管線 closure 報告路徑由 PM 指認",
+        "active_reference_grep_hits": 0,
+        "proposed_archive_path": "docs/archive/2026-05-28--phase_packet_learning/"
+      }
+    ],
+    "note": "phase_packet 全體在紅線 grep 5 條中 0 命中；但 PM C.4 條件 b 要求 sign-off 證據，PM 需逐 dir 指認 closure 報告路徑後才能進入 batch 2 執行。"
+  },
+  "redline_grep_verification": {
+    "checked_targets": [
+      "decisions/DOC-",
+      "decisions/SM-",
+      "decisions/EX-",
+      "decisions/HIST-",
+      "adr/00",
+      "CCAgentWorkSpace/*/profile.md",
+      "CCAgentWorkSpace/*/memory.md",
+      "_indexes/*",
+      "governance_dev/amendments/AMD-*"
+    ],
+    "mv_candidates_intersecting_redline": 0,
+    "verdict": "PASS"
+  },
+  "stops": [],
+  "totals": {
+    "KEEP_ALL_hotspots_listed": 3,
+    "CROSS_REF_ADD_class2_pairs": 0,
+    "CROSS_REF_ADD_class3_pairs": 1,
+    "ARCHIVE_CANDIDATE_class4_files": 8,
+    "ARCHIVE_CANDIDATE_phase_packet_dirs": 6,
+    "TOTAL_MV_or_ADD_operations_estimate": "1 cross-ref add (class3) + 8 file mv (class4) + 6 dir mv (phase packet) = 15 operations (excluding sign-off-required gating); PM 預估 150-200 有顯著落差"
+  }
+}
