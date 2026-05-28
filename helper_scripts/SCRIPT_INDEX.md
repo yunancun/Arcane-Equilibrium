@@ -231,6 +231,7 @@
 | 腳本 | 用途 |
 |------|------|
 | `maintenance_scripts/prune_dated_files.sh` | 清理過期的 dated 輸出文件 |
+| `maintenance_scripts/regen_doc_inventory.py` | 重生 docs/_indexes/ 內 doc cleanup dry-run JSON（schema v2，含 supersedes_candidate 偵測；TW doc cleanup SOP 用） |
 
 ### maintenance_scripts/bybit_connector/ — 舊治理鏈腳本 (Legacy H/I/J/K Chain)
 

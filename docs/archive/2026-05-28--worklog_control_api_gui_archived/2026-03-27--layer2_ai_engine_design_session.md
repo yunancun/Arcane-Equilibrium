@@ -112,8 +112,8 @@ Paper Trading Dashboard 新增 AI Budget 控制卡片：
 | 文件 | 位置 | 说明 |
 |------|------|------|
 | Layer 2 实现计划 | `docs/references/2026-03-27--layer2_ai_reasoning_engine_implementation_plan.md` | 完整实现计划存档 |
-| 本工作记录 | `docs/worklogs/control_api_gui/2026-03-27--layer2_ai_engine_design_session.md` | 本文件 |
-| Brainstorm 留档 | `docs/worklogs/control_api_gui/2026-03-26--brainstorm_layer2_ai_reasoning_engine.md` | 前一轮初步设计（已有） |
+| 本工作记录 | `docs/archive/2026-05-28--worklog_control_api_gui_archived/2026-03-27--layer2_ai_engine_design_session.md` | 本文件（2026-05-28 歸檔） |
+| Brainstorm 留档 | `docs/archive/2026-05-28--worklog_control_api_gui_archived/2026-03-26--brainstorm_layer2_ai_reasoning_engine.md` | 前一轮初步设计（同歸檔目錄） |
 
 ---
 

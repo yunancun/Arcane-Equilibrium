@@ -76,26 +76,26 @@ helper_scripts/maintenance_scripts/bybit_connector/run_i10_canonical_decision_le
 | 本地交易邏輯審查 | `docs/references/2026-03-27--local_trading_logic_audit_and_strategy_plan.md` |
 | 遠程訪問指南 | `docs/references/2026-03-27--remote_access_guide.md` |
 
-### 工作日誌（worklogs/control_api_gui/ — 2026-03-25~04-02）
+### 工作日誌（worklog_control_api_gui — 2026-03-25~04-02，已 2026-05-28 歸檔）
 
 | 內容 | 文件位置 |
 |------|---------|
-| Round 2 Batch 3-12 + Session 8-12 歸檔 | `docs/worklogs/control_api_gui/2026-03-31--round2_batch_records_archive.md` |
-| GUI Tab 重構 + Ollama 優化 | `docs/worklogs/control_api_gui/2026-03-31--gui_tab_restructure_ollama_optimization.md` |
-| Session 4 GUI 專業控制台 | `docs/worklogs/control_api_gui/2026-03-27--session4_gui_10tab_professional_console.md` |
-| Session 6 勝率0%根因 | `docs/worklogs/control_api_gui/2026-03-28--session6_halfday_data_analysis_and_fixes.md` |
-| Session 7 系統審核 | `docs/worklogs/control_api_gui/2026-03-28--session7_system_audit_and_fixes.md` |
-| Session 8 功能審核 | `docs/worklogs/control_api_gui/2026-03-28--session8_functional_audit_report.md` |
+| Round 2 Batch 3-12 + Session 8-12 歸檔 | `docs/archive/2026-05-28--worklog_control_api_gui_archived/2026-03-31--round2_batch_records_archive.md` |
+| GUI Tab 重構 + Ollama 優化 | `docs/archive/2026-05-28--worklog_control_api_gui_archived/2026-03-31--gui_tab_restructure_ollama_optimization.md` |
+| Session 4 GUI 專業控制台 | `docs/archive/2026-05-28--worklog_control_api_gui_archived/2026-03-27--session4_gui_10tab_professional_console.md` |
+| Session 6 勝率0%根因 | `docs/archive/2026-05-28--worklog_control_api_gui_archived/2026-03-28--session6_halfday_data_analysis_and_fixes.md` |
+| Session 7 系統審核 | `docs/archive/2026-05-28--worklog_control_api_gui_archived/2026-03-28--session7_system_audit_and_fixes.md` |
+| Session 8 功能審核 | `docs/archive/2026-05-28--worklog_control_api_gui_archived/2026-03-28--session8_functional_audit_report.md` |
 
-### 工作日誌（worklogs/phase5_arch_rc1/ — 2026-04-03~04-07）
+### 工作日誌（worklog_phase5_arch_rc1 — 2026-04-03~04-07，已 2026-05-28 歸檔）
 
 | 內容 | 文件位置 |
 |------|---------|
-| 2026-04-03 日匯總（Phase 5 啟動 + Rust 遷移開始） | `docs/worklogs/phase5_arch_rc1/2026-04-03--daily_summary.md` |
-| 2026-04-04 日匯總（Bybit API 整合）| `docs/worklogs/phase5_arch_rc1/2026-04-04--daily_summary.md` |
-| 2026-04-05 日匯總（Rust 數據管線 + ML 基礎設施）| `docs/worklogs/phase5_arch_rc1/2026-04-05--daily_summary.md` |
-| L3 R0-R2 整改（Session 10-13）| `docs/worklogs/phase5_arch_rc1/2026-04-06--session1*.md` |
-| ARCH-RC1 1A/1B/1C-1/1C-2 實現 | `docs/worklogs/phase5_arch_rc1/2026-04-07--session_arch_rc1_*.md` |
+| 2026-04-03 日匯總（Phase 5 啟動 + Rust 遷移開始） | `docs/archive/2026-05-28--worklog_phase5_arch_rc1_archived/2026-04-03--daily_summary.md` |
+| 2026-04-04 日匯總（Bybit API 整合）| `docs/archive/2026-05-28--worklog_phase5_arch_rc1_archived/2026-04-04--daily_summary.md` |
+| 2026-04-05 日匯總（Rust 數據管線 + ML 基礎設施）| `docs/archive/2026-05-28--worklog_phase5_arch_rc1_archived/2026-04-05--daily_summary.md` |
+| L3 R0-R2 整改（Session 10-13）| 已合併至 `2026-04-06--daily_summary.md`（archive 內） |
+| ARCH-RC1 1A/1B/1C-1/1C-2 實現 | 已合併至 `2026-04-07--daily_summary.md`（archive 內） |
 
 ### L3 全系統綜合審計（audits/2026-04-05--l3_comprehensive/）
 
