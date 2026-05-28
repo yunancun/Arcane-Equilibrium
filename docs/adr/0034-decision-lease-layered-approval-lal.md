@@ -139,14 +139,26 @@ AMD-2026-05-21-01 是 operator D5 提出的 autonomy directive，將以 amendmen
 | **LAL 0** | per-fill | Stage 0 / 0R / 1 / 2 / 3 / 4 | yes（既有 Guardian 路徑） | always（既有 Guardian auto） |
 | **LAL 1** | intra-strategy reparam | **Stage 4 only**（30d stable） | yes | yes after eligibility（per §Decision 5 gate criteria） |
 | **LAL 2** | cross-strategy reweight | **Stage 4 only**（Y2 gate） | yes | Y2 only + Console opt-in（per §Decision 4 toggle）|
-| **LAL 3** | new strategy promotion | n/a（gate to Stage 0R+） | yes | **never auto**（always operator approve） |
-| **LAL 4** | capital structure / venue change | n/a（gate to ADR-debt） | yes | **never auto**（always operator approve） |
+| **LAL 3** | new strategy promotion | n/a（gate to Stage 0R+） | yes | Level-dependent（見 Wave 5 v2 overlay） |
+| **LAL 4** | capital structure / venue change | n/a（gate to ADR-debt） | yes | Level-dependent with venue carve-out（見 Wave 5 v2 overlay） |
 
 **矩陣讀法**：
 
 - **「Compatible Stages」直欄**：表示該 LAL level 對應的決策對象 strategy / config 必須處於該 Stage（或 LAL 3/4 是 gate 不適用）
 - **「Per-decision lease emit」直欄**：永遠 yes（per §Decision 1）
-- **「Auto-approve gate eligibility」直欄**：對應 §Decision 5 6 條 hard gate；LAL 3/4 永遠不過 gate
+- **「Auto-approve gate eligibility」直欄**：對應 §Decision 5 6 條 hard gate；Wave 5 v2 之後還必須疊加 Autonomy Level policy overlay，不能只看 LAL 數字決定 auto/manual
+
+### Wave 5 v2 Autonomy Level overlay（2026-05-28 sync）
+
+AMD-2026-05-21-01 v2 + `docs/execution_plan/2026-05-22--autonomy_level_toggle_design_spec.md` 將 **Autonomy Level** 定義為 system-wide policy 維度，與 LAL / Stage 正交：
+
+| Path | Level 1 Conservative | Level 2 Standard | Non-negotiable carve-out |
+|---|---|---|---|
+| LAL 3 new strategy / Stage LAL 3-4 promotion | operator approve manual | auto with fail-safe only after AMD v2 §Decision 2 gates + Stage gate + evidence gate pass | 任何 M3/M7/Guardian/5-gate freeze trigger active 時回 manual/freeze |
+| LAL 4 venue change | operator approve manual | operator approve manual | ADR-0040 §Decision 5：venue change 在兩個 Level 下都保留 operator click |
+| LAL 4 non-venue capital / allocator activation path | operator approve manual | auto only if owning module ADR + AMD v2 §Decision 2 gates explicitly allow | 5-gate / authorization / venue / ADR-debt hard boundaries 不被 Level 2 放寬 |
+
+因此，本 ADR 原始「LAL 3/4 never auto」語句只代表 v5.8 初始保守 baseline；Wave 5 v2 起，最終決策需同時看 `(LAL level, Stage, Autonomy Level, owning module gate, freeze trigger)`。Level 2 不是 bypass：它只改變可進入 auto path 的集合，不移除 per-decision lease、evidence gate、2FA toggle、notification、24h undo 與 audit trail。
 
 ### Auto-Approval Gate Criteria（LAL 1 + LAL 2 only，6 條 hard gate）
 

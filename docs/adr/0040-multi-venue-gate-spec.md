@@ -124,6 +124,8 @@ ADR-0033 + CLAUDE.md §四 既有 5-gate live boundary（Python `live_reserved` 
 | 簽署時的 5-gate review | per Decision 3 (c) Operator 仲裁 = **new 5-gate review session**；session 中 Operator 必須逐一確認 5 gate + 6 條 evaluation criteria + 簽署 venue + environment + secret slot 三元組 |
 | Lease tier 對齊 | per ADR-0034 LAL 4 capital structure：**venue change 永遠走 LAL 4** = Operator approval mandatory，Agent 無法自主提案 venue enable / disable |
 
+**Wave 5 v2 sync（2026-05-28）**：AMD-2026-05-21-01 v2 / Autonomy Level Toggle Q2 拍板不改本 Decision 的 final-action 邊界。Venue gate 的 deterministic evaluation（6 條 hard gate verify）可以自動計算並展示，但 **venue enable / disable / authorization 三元組簽署在 Level 1 與 Level 2 下都仍需 operator approve manual**。Level 2 Standard 不把 venue change 納入 auto path。
+
 ## §ADR-0033 ↔ ADR-0040 關係圖
 
 ```

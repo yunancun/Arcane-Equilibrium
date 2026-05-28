@@ -39,7 +39,13 @@ class _FakeCursor:
         self.conn.statements.append((q, params))
         self._row = None
         self.description = []
-        if q.startswith("SELECT current_level::text AS current_level, last_switched_at"):
+        if q.startswith("SELECT pg_try_advisory_xact_lock"):
+            self._row = (True,)
+        elif q.startswith("UPDATE system.autonomy_level_config"):
+            self.conn.current_level = str((params or ("CONSERVATIVE",))[0])
+        elif q.startswith("NOTIFY autonomy_level_changed"):
+            pass
+        elif q.startswith("SELECT current_level::text AS current_level, last_switched_at"):
             self.description = [
                 ("current_level",),
                 ("last_switched_at",),
@@ -50,7 +56,7 @@ class _FakeCursor:
             ]
             ts = datetime.now(timezone.utc) - timedelta(days=2)
             self._row = (
-                "CONSERVATIVE",
+                self.conn.current_level,
                 ts,
                 "system_default",
                 "cold_start_default_level_conservative",
@@ -98,7 +104,7 @@ class _FakeCursor:
                 None,
             )
         elif q.startswith("SELECT current_level::text FROM system.autonomy_level_config"):
-            self._row = ("CONSERVATIVE",)
+            self._row = (self.conn.current_level,)
         elif q.startswith("INSERT INTO system.autonomy_level_switch_audit"):
             self.conn.insert_params.append(params or ())
 
@@ -112,6 +118,7 @@ class _FakeConn:
         self.insert_params: list[tuple[Any, ...]] = []
         self.committed = False
         self.rolled_back = False
+        self.current_level = "CONSERVATIVE"
 
     def cursor(self) -> _FakeCursor:
         return _FakeCursor(self)
@@ -142,7 +149,7 @@ def test_autonomy_state_degrades_when_pg_unavailable(monkeypatch) -> None:
 
     response = client.get("/api/v1/governance/autonomy-level/state")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.json()
     body = response.json()
     assert body["ok"] is True
     assert body["data"]["wiring_status"] == "degraded"
@@ -156,7 +163,7 @@ def test_autonomy_state_reads_v099_and_disables_switch_until_gates(monkeypatch) 
 
     response = client.get("/api/v1/governance/autonomy-level/state")
 
-    assert response.status_code == 200
+    assert response.status_code == 200, response.json()
     data = response.json()["data"]
     assert data["wiring_status"] == "pg_path_active"
     assert data["current_level"] == "CONSERVATIVE"
@@ -170,6 +177,12 @@ def test_autonomy_state_reads_v099_and_disables_switch_until_gates(monkeypatch) 
 def test_autonomy_switch_fails_closed_and_audits_when_totp_backend_missing(monkeypatch) -> None:
     conn = _FakeConn()
     client = _client(monkeypatch, _fake_pg(conn))
+    monkeypatch.setattr(gr, "_get_autonomy_pg_conn", lambda: _fake_pg(conn))
+    monkeypatch.setattr(
+        gr,
+        "_autonomy_eligibility_payload",
+        lambda: {"eligible": True, "gates": [], "summary": "test eligible"},
+    )
     payload = {
         "target_level": "STANDARD",
         "reason": "evidence baseline review text long enough for audit trail",
@@ -187,6 +200,57 @@ def test_autonomy_switch_fails_closed_and_audits_when_totp_backend_missing(monke
     assert insert[3] == "FAIL"
     assert insert[4] == "backend_unreachable"
     assert insert[6] == "twofa_backend_down"
+
+
+def test_autonomy_switch_blocks_level2_before_totp_when_evidence_missing(monkeypatch) -> None:
+    conn = _FakeConn()
+    client = _client(monkeypatch, _fake_pg(conn))
+    monkeypatch.setattr(gr, "_verify_autonomy_totp", lambda _code: (True, "TOTP", "success"))
+    payload = {
+        "target_level": "STANDARD",
+        "reason": "evidence baseline review text long enough for audit trail",
+        "typed_confirm_phrase": "CONFIRM SWITCH",
+        "totp_code": "123456",
+    }
+
+    response = client.post("/api/v1/governance/autonomy-level/switch", json=payload)
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["reason_codes"] == ["level2_evidence_gate_not_met"]
+    assert conn.insert_params
+    assert conn.insert_params[0][6] == "freeze_active_block"
+
+
+def test_autonomy_switch_success_audits_and_notifies_when_eligible(monkeypatch) -> None:
+    conn = _FakeConn()
+    client = _client(monkeypatch, _fake_pg(conn))
+    monkeypatch.setattr(gr, "_get_autonomy_pg_conn", lambda: _fake_pg(conn))
+    monkeypatch.setattr(
+        gr,
+        "_autonomy_eligibility_payload",
+        lambda: {"eligible": True, "gates": [], "summary": "test eligible"},
+    )
+    monkeypatch.setattr(gr, "_autonomy_totp_backend_configured", lambda: True)
+    monkeypatch.setattr(gr, "_verify_autonomy_totp", lambda _code: (True, "TOTP", "success"))
+    payload = {
+        "target_level": "STANDARD",
+        "reason": "evidence baseline review text long enough for audit trail",
+        "typed_confirm_phrase": "CONFIRM SWITCH",
+        "totp_code": "123456",
+    }
+
+    response = client.post("/api/v1/governance/autonomy-level/switch", json=payload)
+
+    assert response.status_code == 200, response.json()
+    assert response.json()["message"] == "autonomy_level_switched"
+    assert conn.current_level == "STANDARD"
+    assert conn.committed is True
+    assert conn.insert_params
+    insert = conn.insert_params[0]
+    assert insert[3] == "PASS"
+    assert insert[4] == "TOTP"
+    assert insert[6] == "success"
+    assert any(stmt[0].startswith("NOTIFY autonomy_level_changed") for stmt in conn.statements)
 
 
 def test_autonomy_switch_typed_confirm_mismatch_is_audited(monkeypatch) -> None:

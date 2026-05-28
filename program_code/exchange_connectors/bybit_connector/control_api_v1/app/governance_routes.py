@@ -50,6 +50,10 @@ from pydantic import BaseModel, Field
 import hmac
 import html
 
+from .autonomy_totp import (
+    autonomy_totp_backend_configured,
+    verify_autonomy_totp,
+)
 from .live_halt_recovery import (
     LIVE_HALT_REQUEST_ID,
     approve_live_halt_recovery,
@@ -560,19 +564,11 @@ def _autonomy_level_label(level: str | None) -> str:
 
 
 def _autonomy_totp_backend_configured() -> bool:
-    # TOTP verifier is not implemented in this service yet. This explicit
-    # backend-unavailable gate prevents a fake-success switch path.
-    return False
+    return autonomy_totp_backend_configured()
 
 
 def _verify_autonomy_totp(_code: str) -> tuple[bool, str, str]:
-    """
-    Verify Autonomy Level TOTP.
-
-    Production path is intentionally fail-closed until a real TOTP backend is
-    wired. Tests may monkeypatch this helper to exercise the PG transaction.
-    """
-    return False, "backend_unreachable", "twofa_backend_down"
+    return verify_autonomy_totp(_code)
 
 
 def _autonomy_eligibility_payload() -> dict[str, Any]:
@@ -1018,8 +1014,8 @@ def switch_autonomy_level(
     """
     Switch Autonomy Level through the guarded PG transaction path.
 
-    The production path intentionally fails closed until a real TOTP verifier is
-    wired; failed attempts are still audit-persisted when V099 is available.
+    The production path fails closed when the TOTP backend or evidence gate is
+    unavailable; failed attempts are still audit-persisted when V099 is available.
     """
     target = body.target_level.strip().upper()
     actor_id = str(getattr(actor, "actor_id", "unknown_operator"))
@@ -1048,6 +1044,25 @@ def switch_autonomy_level(
             detail={
                 "reason_codes": ["typed_confirm_mismatch"],
                 "message": "typed_confirm_phrase must exactly equal CONFIRM SWITCH",
+            },
+        )
+
+    eligibility = _autonomy_eligibility_payload()
+    if target == "STANDARD" and not eligibility["eligible"]:
+        _record_autonomy_switch_attempt(
+            actor_id=actor_id,
+            target_level=target,
+            reason=body.reason,
+            result="freeze_active_block",
+            emergency_override=body.emergency_override,
+            emergency_override_reason=body.emergency_override_reason,
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "reason_codes": ["level2_evidence_gate_not_met"],
+                "message": "Level 2 switch is disabled until evidence gates pass",
+                "eligibility": eligibility,
             },
         )
 

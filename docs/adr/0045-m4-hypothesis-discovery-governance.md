@@ -51,6 +51,10 @@ R4 audit 2026-05-21 (a affd343f) catch ADR-0042 編號衝突：
 7. **Cowork hybrid path** — Y1 read-only review only；Y2 LAL Tier 2 auto-suggest（per ADR-0024）；不 auto-promote
 8. **V103 EXTEND 6 column** — hypothesis_source_module / leakage_scan_pass / bonferroni_corrected_p / replicability_score / decision_lease_draft_id / cowork_review_status (per V103 EXTEND spec)
 
+### Wave 5 v2 Autonomy Level sync（2026-05-28）
+
+M4 remains DRAFT-only under both Level 1 and Level 2. Autonomy Level Standard may allow eligible DRAFT writeback / review routing to proceed through fail-safe automation when the owning M4/M9/M6 gates pass, but it **does not** promote a hypothesis to Stage 0R, create live trading authority, bypass the six-attribute leakage minimum bar, or bypass Decision Lease audit. Any M3 health degradation, M7 freeze state, Guardian alert, 5-gate kill, M8 anomaly trigger, or regime-change freeze returns M4 actions to manual/frozen posture.
+
 ## Consequences
 
 **Reserved** — 完整 Consequences 待 Sprint 6+ TW 補充。預期方向：
