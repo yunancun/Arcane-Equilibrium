@@ -212,3 +212,13 @@
 7. `g2_funding_arb_clean_edge.md` + `v2.md` 同議題 2 份可合為 closeout
 
 **上輪 04-12 P0 閉合進度**：3 個 DEPRECATED 已進 archive ✅；arch_rc1_1c 雙副本已消 ✅；04-09 ~ 04-15 連續 daily_summary ✅。但 CLAUDE_REFERENCE / KNOWN_ISSUES / CHANGELOG 倒退（12 天未 sync）。
+
+## Lesson L-PHASE1-1（2026-05-28）— Doc cleanup proposal scope estimate drift
+
+Doc cleanup Phase 1 PM proposal `docs/governance_dev/2026-05-27--doc_governance_cleanup_proposal.md` 階段預估範圍 150-200 操作；TW phase 1 candidate dry-run 後 PM CONDITIONAL APPROVED 階段已預警範圍偏低；最終 8 batches 落地實際範圍 = 9 git mv + 1 cross-ref + 9 index/markdown edit（4 archive 子目錄 + 4 `_README.md` stub），**遠低於 proposal 預估**。
+
+**根因**：PM proposal heuristic（Class 1/2/3/4 + Phase packet）過於寬鬆；D5 phase packet 6 dir / ~89 檔在 phase 1 全部 DEFER 後實際 mv 範圍大幅收窄至 Class 4 v1→v2/v3 supersedes 子集（ref20×4 + ref21×3 + ref21_gui×1 + g_sr1×1）。Class 2（daily_summary↔專題 worklog 同日 dup）= 0 對命中；Class 3（CCAgentWorkSpace↔worklogs 同 topic stem）= 1 對命中。
+
+**未來治理建議**：cleanup-type proposal 必先讓 TW 跑 candidate dry-run 給 lower-bound 估算 → PM 再 final scope sign-off → 避免 proposal sign-off 階段預估失準帶來的 batch 設計返工。Phase 2 餘留 D5 phase packet 三選項（A 重組 README + 歸檔 / B 永久 KEEP / C 補 closure 證據）依 operator 決議。
+
+**Final report**：`docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-28--doc_cleanup_final.md`（8 段 + PR body 模板 + PM checklist 8/8 自評 ✅ + Phase 2 routing 餘留）。
