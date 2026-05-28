@@ -23,8 +23,9 @@
 //! `SmtpTransport` trait + 兩個內建實作：
 //!   - `DisabledTransport`：所有 send 回 false（fail-closed disabled）
 //!   - `StubTransport`：測試用 in-memory 攔截，記錄 envelope + 永遠 success
-//! 真實 SMTP 走 lettre 的 work item 留給 PM 拍板後 follow-up commit（後續會在
-//! `RealSmtpTransport` 注入；或改自寫 raw SMTP socket）。
+//!
+//! 真實 SMTP 走 lettre 的 work item 留給 PM 拍板後 follow-up commit
+//! （後續會在 `RealSmtpTransport` 注入；或改自寫 raw SMTP socket）。
 //!
 //! 不變量（per CLAUDE.md §二 + spec §2.3/§2.4）：
 //!   - Secret 缺檔 → `transport = DisabledTransport`，send 回 false（fail-closed）；
@@ -200,10 +201,9 @@ impl EmailDispatcher {
             body: body.to_string(),
         };
         let send_fut = self.transport.send(&msg);
-        match tokio::time::timeout(self.timeout, send_fut).await {
-            Ok(ok) => ok,
-            Err(_) => false,
-        }
+        tokio::time::timeout(self.timeout, send_fut)
+            .await
+            .unwrap_or(false)
     }
 }
 

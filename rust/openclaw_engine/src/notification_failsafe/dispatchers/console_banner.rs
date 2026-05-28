@@ -22,6 +22,7 @@
 //!   - 寫檔（本檔）= C1 IMPL；
 //!   - PG audit row（V114 schema）= C2 IMPL（audit_emitter.rs，獨立 wave）；
 //!   - GUI 端讀 = C5 IMPL（可直接讀檔或讀 PG，待 Sprint 3 拍板）。
+//!
 //! 兩條路徑不互斥：本檔 + audit_emitter 並行寫入，GUI 之後依 spec 拍板選讀源。
 //!
 //! 不變量（per CLAUDE.md §二 + PA spec §3 + AMD-2026-05-21-01 v2 §3.1）：
