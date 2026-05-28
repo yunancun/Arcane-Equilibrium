@@ -3886,3 +3886,18 @@ Round 1 RETURN 4 finding (HIGH-1 + MEDIUM-1/2/3) + 2 LOW optional 全修。HEAD 
 5. **SSH PG empirical reflection 3 條核心 query 全 set**：(a) `\d schema.table` → 全 column 列表 + DEFAULT；(b) `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='schema.table'::regclass AND contype='c'` → CHECK constraint 真實 enum；(c) `SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema='schema' AND table_name='table'` → 標準化 nullable + type。3 條全跑才能完整 verify schema drift 假設。W1-C-R3 SSH PG 3 條全跑 + V103 EXTEND spec + V100 base spec 三軌交叉 catch PM 文字錯 3 處。
 
 ---
+
+## 2026-05-28 — M11 cron install (b43481f7) 對抗審查 — APPROVE-WITH-CONDITIONS
+
+Review 對象：2 個新 cron script（install + daily wrapper）851 LOC，Stage A replay_runner smoke heartbeat。verdict = APPROVE-WITH-CONDITIONS（0 BLOCKER；2 MED + 4 LOW；不阻 runtime deploy）。E1 自報 7 divergences 全核實：5 OK（a/c/d/e/g）+ 2 帶 follow-up 但合理（b/f）。
+
+**cron-specific review 範式（沉澱供未來 cron PR 重用）**：
+1. **curl Bearer token 洩漏面 = `ps`/`/proc/<pid>/cmdline`**：curl 無 env-var header option，`-H "Authorization: Bearer $TOK"` 必走 cmdline，本機 local user 可在 curl 執行窗口 `ps` 偷看。對比 pg_dump 用 `PGPASSWORD` env（不上 cmdline）。loopback/tailnet + 短窗 + 單機可信 → LOW，但要 note。**未來 cron 走 curl 認證一律記此 LOW**。
+2. **`event_type='audit_write_failed'` piggyback 已是既有 pattern**（`replay_key_rotation_check.sh:243-279`），且 grep 確認 **0 production consumer** 把 `audit_write_failed` 當實際 alarm → 成功事件記 `audit_write_failed` 不誤觸告警。語義污染 LOW + OQ-2 follow-up（Sprint 3 擴 V035 enum）。**驗法 = `grep -rn "audit_write_failed" program_code helper_scripts rust | grep -v cron/|md|test`**。
+3. **embargo CHECK 真實公式 V041 = `embargo_days >= GREATEST(7, CEIL(2.0*half_life_days)::INTEGER)`**；half_life=7 → 下限 14；request model `embargo_days: float` 接受 `14.0` 寫進 INTEGER column。E1 embargo_days=14 = 邊界值正確。
+4. **server-side sha override 行為**：`experiment_registry.py:308-326` body 帶 `strategy_params` 時 server OVERRIDE client sha = `sha256(canonical_bytes)`；cron 塞 fixture-SHA placeholder 會被改正。
+5. **heartbeat sentinel 無 consumer ≠ silent-death 盲區**：`m11_replay_runner_daily.last_fire` 無 healthcheck 消費（grep 證），但**主偵測走 `[48]` rows_7d（有 consumer + flip 實證）**，cron 死亡仍偵測得到。sentinel 冗餘二級，缺 consumer = LOW follow-up 非 blocker。
+6. **install script echo 的 operator pre-flight 指令 vs wrapper 真實 resolve 必 cross-check**：本 PR install echo `127.0.0.1:8000` + 教 operator `curl http://127.0.0.1:8000/...`，但 wrapper auto-resolve Tailscale IPv4（E1 §5.5 證 loopback 不通）→ operator 照 echo 跑連不上。誤導指引 = LOW UX bug，退 E1 改 echo。
+7. **divergence (b) operator API token 重用 = least-privilege 違反**：單一 global actor（`auth.py:182-245`）預設持 operator role + `replay:write` + 連 `live:trade`/`live:authority`/`system:restart` 全 scope；cron 用全權限 token 做只需 replay:write 的事。不觸 CLAUDE §四 hard boundary（signed live authorization 另一機制），但 OQ-1 dedicated Service principal swap 應追 P3 follow-up（E3 owns）。MED。
+
+---
