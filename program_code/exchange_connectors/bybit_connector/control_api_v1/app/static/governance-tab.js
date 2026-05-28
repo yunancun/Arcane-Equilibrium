@@ -1834,6 +1834,12 @@ async function loadAll() {
     // 載入治理事件流
     loadEventsFeed().catch(e => console.warn('Events feed load failed:', e));
 
+    // Load Wave 5 Autonomy Posture
+    // 載入 Wave 5 Autonomy Posture 狀態
+    if (typeof loadAutonomyPosture === 'function') {
+      loadAutonomyPosture().catch(e => console.warn('Autonomy posture load failed:', e));
+    }
+
     // Load pending approvals (async, non-blocking)
     loadPendingApprovals().catch(e => console.warn('Failed to load pending approvals:', e));
   }

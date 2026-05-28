@@ -134,6 +134,24 @@ async function govGetEvents(limit) {
   return ocApi('/api/v1/governance/events?limit=' + (limit || 50));
 }
 
+async function govGetAutonomyLevelState() {
+  // GET /api/v1/governance/autonomy-level/state
+  // 讀取系統級 Autonomy Level 姿態。
+  return ocApi('/api/v1/governance/autonomy-level/state');
+}
+
+async function govGetAutonomyLevelEligibility() {
+  // GET /api/v1/governance/autonomy-level/eligibility
+  // 讀取 Level 2 啟用門檻。
+  return ocApi('/api/v1/governance/autonomy-level/eligibility');
+}
+
+async function govSwitchAutonomyLevel(payload) {
+  // POST /api/v1/governance/autonomy-level/switch
+  // Operator-only；後端 TOTP backend 未接通時 fail-closed。
+  return ocPost('/api/v1/governance/autonomy-level/switch', payload || {});
+}
+
 async function govGetLearningTier() {
   // GET /api/v1/governance/learning-tier/status — tier level, metrics, promotion eligibility
   // 获取學習層级状态：當前層级、觀察數、勝率、晋升資格
