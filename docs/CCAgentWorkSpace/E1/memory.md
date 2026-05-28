@@ -12978,3 +12978,40 @@ Crontab line for PM ssh paste:
 - 4 LOW (LOW-1 dead heartbeat resolve / LOW-2 timeout 60→120s / LOW-3 cron lock dir 同步 / LOW-4 report 描述更正) defer 到 P3 quarterly cleanup；4 LOW 中 LOW-1 我看後悔不一併修（heartbeat sentinel resolve 已有了，MED-2 fix 順手就用了，但 task scope 嚴格 = 不擴）
 - LOC delta: check_pg_dump_freshness.py +46 (616→662)；install_pg_dump_cron.sh +35 (97→132)；總 +81 LOC
 - Report: workspace/reports/2026-05-27--ops_4_round_3_e1_3med_fix.md
+
+## 2026-05-28 W2-B IMPL re-dispatch — NO-OP closure (already land 2026-05-25)
+
+**任務**：W2-B E1 IMPL funding_short_v2 + liquidation_cascade_fade Rust struct + TOML default active=false per W2-A §11.3 12-action checklist。
+
+**Push back verdict**：**NO-OP**。所有 W2-A §11.3 12 action checklist 已於 2026-05-25 commit `817de10a` 完整 land，並通過 E2 R2 (`aeb8a84b`) + E2 R3 (`a605af57`) APPROVE + E4 fresh regression (`9a82c6d3`) 5 commit chain PASS。
+
+**git fetch + grep 證據**：
+- `817de10a feat(alpha-tournament-w2b): funding_short_v2 + liquidation_cascade_fade Rust scaffold + Python harness`（17 file +3737 LOC）
+- E2 R2 dual re-review approve `aeb8a84b`
+- E2 R3 cold review with-conditions `a605af57`
+- E4 fresh regression PASS `9a82c6d3`
+
+**Empirical disk-state verify**（2026-05-28）：
+| 驗證項 | 結果 |
+|---|---|
+| `funding_short_v2/{mod,params,tests}.rs` 存在 | ✅ 60KB land |
+| `liquidation_cascade_fade/{mod,params,tests}.rs` 存在 | ✅ 64KB land |
+| `strategies/mod.rs` pub mod 兩 entry | ✅ 2 hits |
+| `strategies/params.rs` Params struct | ✅ 6 hits（含 use + struct + default）|
+| `strategies/registry.rs` 2 candidate factory append | ✅ 2 hits |
+| `strategy_params_demo.toml` `[funding_short_v2]` + `[liquidation_cascade_fade]` `active=false` | ✅ verified |
+| `risk_config_demo.toml` per_strategy enabled=false 雙保險 | ✅ verified |
+| `helper_scripts/alpha_tournament/` 4 file（__init__.py + attribution_daily.py + tournament_orchestrator.py + 14d_bucket_split.sql）| ✅ land |
+| `cargo test --release -p openclaw_engine --lib` | ✅ 3483 passed / 0 failed / 1 ignored（baseline 3482 + 1 from W2-E R3 amend）|
+| funding_short_v2 module tests filtered | ✅ 47 PASS |
+| liquidation_cascade_fade module tests filtered | ✅ 48 PASS |
+| grep `m4_hypotheses_extended\|attribute_n\|alpha_short_carry\|alpha_microstructure_fade` | ✅ 0 hits |
+| 5-gate grep `live_reserved\|max_retries\|live_execution_allowed\|OPENCLAW_ALLOW_MAINNET\|execution_authority` | ✅ 0 hits |
+| Python harness EXPECTED_TRACK='direct_exploit' | ✅ verified（commit message 標）|
+
+**教訓**：
+1. E1 啟動序列必先 `git log --oneline --all | grep <topic>` 才能避免「重做已 land 的 W2-B」
+2. multi-session race 場景下「PA 派 IMPL ticket」可能是已 land 但 sub-agent stuck 後 PM 補吸收（per commit message 註「W2-B sub-agent a5935745 stuck after IMPL done ~19:21, PM verify + commit per W1-C/W2-D chain rule 範式」）
+3. v77 TODO P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH 主軌與此 IMPL ticket 分離；W2-B 已 closed by E4 chain，TODO 軌可能 stale 或指向不同 follow-up
+
+**Operator 下一步**：PM 確認 v77 TODO `P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH` 是否仍有未覆蓋面（如 Stage 0R replay harness 接通 vs IMPL；後者已 done），若 follow-up = M4 W2-E R3 conditions（per `a605af57` APPROVE-WITH-CONDITIONS）需另派 E1。

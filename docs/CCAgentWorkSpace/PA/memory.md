@@ -6533,3 +6533,111 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 **5 自評 push-back**: 治理債 8 並行 ≥ 7 ceiling / Sprint 2 命中率不確定 / M11 runner 0 cron 阻 stage0_ready 出口 / Sprint 2 W12-14.5 calendar 緊 / governance signaling SSOT vs IMPL state 模糊；全 mitigable；最強 = M11 runner 已有 ticket 派發路徑。
 
 **Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-28--sprint2_alpha_tournament_entry_checklist.md`
+
+---
+
+## 2026-05-28 — Alpha Tournament Activation Protocol Spec (governance ladder permanent doc)
+
+**Ticket**: TODO v77 `P2-ALPHA-TOURNAMENT-ACTIVATION-SPEC`（per Sprint 2 Q2 lock = N=5 / M=15）。
+
+**Output**: `srv/docs/execution_plan/specs/2026-05-28--alpha_tournament_activation_protocol.md`
+
+**核心決策**：
+- spec = activation layer，不取代 SSOT (`2026-05-26--alpha_tournament_ssot_spec.md`) scoring + 5-gate + output lane。
+- C1 池大小 ≥ N=5 + C2 每策略 n_settled ≥ M=15 兩 AND → activation。
+- 退出 hysteresis：池 < N-1=4 自動凍結回 Stage 0R direct path（per Sprint 2 Q1）。
+- §4-§7 metric / K / X / re-entry penalty 全 `[future-iteration]` slot；本 spec 不寫 runner code。
+- 對照軌 grid+ma 不計池（per SSOT §3 B0 baseline-only）；funding_arb retired 不計（per AMD-2026-05-26-01）。
+
+**激活時點推估**：最早合理 ~Sprint 4-5（2026-08-25 至 2026-09-25），取決 A1+A2+A3+A4+A5 IMPL pace。Sprint 2-3 內部走 Stage 0R direct path。
+
+**N=5 / M=15 push-back 自評**：
+1. 無 empirical anchor → mitigated by §11 AMD path + 預估 6-9 月窗口可改。
+2. M=15 vs SSOT §5 (n≥30) 不一致 → mitigated by §1.2 分層（跨策略可比 vs single-strategy edge significance）。
+3. 對照軌排除可能讓 N=5 永遠不滿足 → mitigated by §3.1 凍結不傷 trading + §11 可改 N=4。
+4. activation 拍板過早 → 目標管理反模式 → mitigated by §13 Non-Goals + Sprint dispatch reminder。
+5. 30+ `[future-iteration]` slot = dead spec → mitigated by 本 spec = governance ladder 非 implementation spec（operator mandate）。
+
+**最強 push-back**：#1 N=5 / M=15 拍板早於有真實多策略 settled 分布做 reference。但 mitigation 已 sufficient（凍結不傷 trading + AMD path 開放）。
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-28--alpha_tournament_activation_protocol_spec.md`
+
+---
+
+## 2026-05-28 — M11 replay_runner 排程 proposal（P2-M11-REPLAY-RUNNER-SCHEDULE-PROPOSAL）
+
+**Context**：v77 ticket per operator decision [4]=b；`replay.experiments` 23 rows / last_age=407h（17d stale）；replay_runner binary build 但 0 cron。
+
+**核心判斷**：
+- 排程必須分 Stage A（當前 single-manifest smoke heartbeat）vs Stage B（ADR-0038 Sprint 3 Phase A nightly cohort wrapper，尚未 IMPL）
+- 推薦 Stage A = **Daily 04:00 UTC**（避開 03:00 pg_dump / 03:17 ml_training / 04:41 feature_baseline）
+- ADR-0038 line 244 明文 REJECT hourly；6h over-engineered（ADR-0044 line 74 「daily aggregate」是 1-day grain）；on-demand FAIL gate（Sprint 2 Wave 3 stage0_ready 6 Reject 之一「M11 runner cron」）
+- PG cost 邊際：~50 kB/day write / 30d ~1.5 MB / 90d ~4.5 MB；對 4-8 GB shared_buffers 0.02-0.04% 級忽略不計
+
+**runtime empirical（2026-05-28 ssh trade-core）**：
+- per-run footprint ≈ 50 kB（experiments 15.3 kB + run_state 4.2 kB + artifacts 4.7 kB + fills 13×2 kB）
+- 17 completed + 6 failed + 0 zombie / failed_rate 26% 接近 [50] WARN 邊（>20%）但 23 row 小樣本
+- 既有 cron 已有 04:00 UTC 空檔；無 schedule 衝突
+
+**healthcheck 預估**：
+- [48] FAIL → cron 首次 fire 後（≤24h）變 PASS
+- [47] replay_runner_binary 已 PASS 不受影響
+- [50] zombie/failed_rate 不受影響
+
+**反模式記**：
+- on-demand → 永久 [48] FAIL + Sprint 2 Wave 3 阻塞
+- hourly → ADR-0038 governance breach
+- 6h → ADR-0044 spirit 不對齊（day-grain signal 4× freq 不 4× value）
+
+**stage A → stage B 升級**：
+- Stage A binary = single-manifest exec；Stage B 需 nightly wrapper (5 strategy × N symbol 125 run/4h)；wrapper 不存在
+- Stage B IMPL after：cron entry pattern 不變，wrapper 內 iterate 升級即可；本 proposal 設計直接支持
+
+**16 原則 + Hard Boundary**：A 級全綠（ReplayProfile::Isolated 三層 fail-closed guard / 不觸 5-gate / 不寫 trading state）
+
+**Open Question 留 operator/PM 拍板**：
+- OQ-1: Service principal 創建路徑（cron run-as）= E3 sign-off
+- OQ-2: V035 governance_audit_log enum 擴展 vs piggyback
+- OQ-3: Stage A → Stage B 過渡時 cron entry idempotent guard
+
+**report path**：`srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-28--m11_replay_runner_schedule_proposal.md`（+ Operator mirror）
+
+**教訓**：proposal 必須分兩層 stage（當前可行 vs spec 設計）；不分層會直接套 ADR-0038 「nightly continuous」字面 → 但對應的 wrapper script 不存在；發現 binary signature 是「single-manifest exec」是關鍵切分點。
+
+---
+
+## 2026-05-28 — Wave 5 Packet C 3-way Dispatcher + pipeline_ctor Wire 設計 spec
+
+**Spec path**: `srv/docs/execution_plan/specs/2026-05-28--packet_c_3way_dispatcher_wire_spec.md`
+
+**起因**: TODO v77 `P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH` Q5 operator 拍板路線 2 = Packet C 完整 wire 拉進 Sprint 2 並行軌。Source baseline = commit `920f8299` minimal slice land：5 trait seam + 14 mock test，3482/3482 GREEN，Linux 16:18 UTC rebuild GREEN（dead code 編譯產物）。
+
+**核心架構決策**:
+- §4.1 Spawn 位置 = `tasks.rs::spawn_notification_failsafe_watcher`（對齊 spawn_position_reconciler pattern）
+- §4.2 Watcher 結構 = **single watcher 共享 4 pipeline**（PA 推薦 a）— 通知失敗根因跨 engine 同源，fail-safe 是 system-level；但 SM transition per-pipeline 各自跑（4 個獨立 RiskGovernorSm）
+- §4.5 Dispatch outcome 來源 = 選項 B（incident_policy 觸發 → mpsc 送 watcher）；本 wave 不接 incident_policy，後續 wave 接
+- §3.1 Banner 寫入 = 路徑 (b) engine 寫 PG → control_api GET poll（不走反向 IPC）
+- §5.1 新 PG 表 `observability.notification_failsafe_events`（V114 — V113 之後相鄰）；不重用 V099 autonomy 表（operator switch path 語義不同）
+- §6 Watcher 不依賴 live_reserved / OPENCLAW_ALLOW_MAINNET / authorization.json — fail-safe 永遠跑（per AMD §3.1）
+
+**Backend 候選評估**:
+- §1 Slack = Incoming Webhook URL（不要 Bot Token，最低 OAuth surface）
+- §2 Email = Gmail SMTP App Password（per §二 原則 14 零外部成本）；reject SendGrid/SES（付費依賴）
+- 兩 secret 對齊 `~/BybitOpenClaw/secrets/vault/` pattern + fingerprint sha256 + 0600 file mode
+
+**IMPL 切片**: 5 commit C1-C5；C1/C2/C3 真並行（3 個獨立 E1）；C4 序列；C5 序列。E1 25-34 sub-agent hr / wall clock 12-16 hr。E2+E4+QA+PM 共 19-24 hr。**總計 44-58 sub-agent hr / 16-22 wall clock hr**。
+
+**PA 對 operator Q5 拍板的 5 條 push-back**:
+1. **Sprint 2 scope creep 22%**（最強）→ mitigation = C1/C2/C3 並行真實 wall overhead 8-12 hr；建議降級「路線 2-hybrid」C1+C2+C3 進 Sprint 2，C4+C5 拉 Sprint 3
+2. **未接 incident_policy = dead wire** → mitigation = Sprint 3 必接 incident_policy；本 wave land 後 integration test 用 mock trigger 驗 wire 正確
+3. **RwLock<TickPipeline> 寫鎖跨 tick 風險阻 H0 SLA** → mitigation = E2 強制檢「snapshot read（read lock）/ exchange sync（no lock）/ SM transition（write lock）」三 phase 拆分
+4. **GUI ack 路徑語意混淆**（ack banner ≠ restore SM-04）→ mitigation = 文案分離 + 既有 risk/override 不混
+5. **testcontainers CI 成本** → mitigation = integration 限 Linux runner，E2E push/cron only，per `feedback_github_actions_cost`
+
+**10 Open questions for operator**: Slack workspace+webhook URL（3 條）/ Email backend choice + addresses（2 條）/ Banner display strategy + ack confirm（3 條）/ Watcher single vs per-pipeline（1 條 — PA 推薦）/ V114 table 命名 + 編號 + UPDATE grant（3 條）/ Sprint 2 scope 接受 22% creep vs hybrid 降級（1 條）。
+
+**E2 重點審查 3 條**: (1) Tick loop SM transition 不阻塞 / (2) Paper engine ExchangeStopSync noop（不誤觸 demo endpoint） / (3) Per-pipeline 4 個 SM 升級互不影響。
+
+**Cross-ref**: AMD-2026-05-21-01 v2 §Decision 2.5 / 3.1 / Q3 / Q4；source baseline `notification_failsafe/mod.rs` 14 mock test；CLAUDE.md §二 原則 5/6/9/14。
+
+**未動 SSOT**: 不改 pipeline_ctor.rs / tasks.rs / main_pipelines.rs（spec only，design only）。
