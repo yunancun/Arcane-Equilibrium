@@ -29,6 +29,12 @@ tokio-util = { version = "0.7", features = ["rt"] }
 futures-util = "0.3"
 rand = { version = "0.8", features = ["std_rng", "small_rng"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+# Wave 5 Packet C / C1 email follow-up — 真實 Gmail SMTP transport（operator EA 拍板）。
+# default-features=false 關掉 lettre 預設的 native-tls，改用 rustls，避免拉 openssl-sys
+# 系統依賴，對齊 Apple Silicon 跨平台零 sys-dep 部署（per feedback_cross_platform）。
+# tokio1-rustls-tls 同時帶入 tokio1 async runtime + rustls TLS provider；顯式加 ring
+# crypto provider 對齊 workspace rustls={features=["ring"]} 的 pin。
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "ring"] }
 hmac = "0.12"
 sha2 = "0.10"
 sha1 = "0.10"

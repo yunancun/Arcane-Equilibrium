@@ -25,6 +25,8 @@ hmac = { workspace = true }
 sha2 = { workspace = true }
 sha1 = { workspace = true }
 hex = { workspace = true }
+# Wave 5 Packet C / C1 email follow-up — 真實 SMTP transport（RealSmtpTransport）。
+lettre = { workspace = true }
 sqlx = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
