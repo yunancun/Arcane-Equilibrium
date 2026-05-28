@@ -50,7 +50,12 @@ use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use serde::Deserialize;
 
 /// Email config 檔案 schema。
-#[derive(Debug, Clone, Deserialize)]
+///
+/// 為什麼手寫 `Debug`（LOW-1 修法）：`smtp_app_password` 是 SMTP secret；若用
+/// `derive(Debug)`，任何 `{:?}`（log / tracing / panic message / 結構體巢狀）都會把
+/// 明文密碼印出 — latent leak。手寫 impl 把該欄位 redact 成 `***REDACTED***`，其餘欄位
+/// 正常顯示，避免日後新增 debug log 時意外洩漏。
+#[derive(Clone, Deserialize)]
 pub struct EmailConfig {
     pub backend: String,
     pub smtp_host: String,
@@ -63,6 +68,27 @@ pub struct EmailConfig {
     pub subject_prefix: String,
     #[serde(default)]
     pub fingerprint: Option<String>,
+}
+
+impl std::fmt::Debug for EmailConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EmailConfig")
+            .field("backend", &self.backend)
+            .field("smtp_host", &self.smtp_host)
+            .field("smtp_port", &self.smtp_port)
+            .field("smtp_username", &self.smtp_username)
+            // secret：永遠 redact，不印明文
+            .field("smtp_app_password", &"***REDACTED***")
+            .field("from_address", &self.from_address)
+            .field("to_addresses", &self.to_addresses)
+            .field("subject_prefix", &self.subject_prefix)
+            // fingerprint 是 sha256 hex，非可逆 secret，但屬敏感衍生值：一併 redact 較安全
+            .field(
+                "fingerprint",
+                &self.fingerprint.as_ref().map(|_| "***REDACTED***"),
+            )
+            .finish()
+    }
 }
 
 fn default_subject_prefix() -> String {
@@ -682,5 +708,38 @@ mod tests {
         };
         let ok = transport.send(&msg).await;
         assert!(!ok, "unreachable host send 必 fail-soft 回 false");
+    }
+
+    // ── T15: EmailConfig Debug 輸出 redact secret（LOW-1 驗）────────────────────
+    // 為什麼：`{:?}` 不得洩漏 smtp_app_password / fingerprint 明文。
+    #[test]
+    fn t15_email_config_debug_redacts_secret() {
+        let cfg = EmailConfig {
+            backend: "smtp_gmail".to_string(),
+            smtp_host: "smtp.gmail.com".to_string(),
+            smtp_port: 465,
+            smtp_username: "alerts@example.com".to_string(),
+            smtp_app_password: "super-secret-app-password-1234".to_string(),
+            from_address: "alerts@example.com".to_string(),
+            to_addresses: vec!["ops@example.com".to_string()],
+            subject_prefix: "[OpenClaw Failsafe]".to_string(),
+            fingerprint: Some("deadbeefcafef00d".to_string()),
+        };
+        let dbg = format!("{cfg:?}");
+        // 明文密碼絕不出現
+        assert!(
+            !dbg.contains("super-secret-app-password-1234"),
+            "Debug 輸出洩漏了 smtp_app_password 明文：{dbg}"
+        );
+        // fingerprint 明文也不出現
+        assert!(
+            !dbg.contains("deadbeefcafef00d"),
+            "Debug 輸出洩漏了 fingerprint 明文：{dbg}"
+        );
+        // redaction 標記在
+        assert!(dbg.contains("***REDACTED***"), "應有 redaction 標記：{dbg}");
+        // 非 secret 欄位仍正常顯示（驗未過度 redact）
+        assert!(dbg.contains("smtp.gmail.com"));
+        assert!(dbg.contains("alerts@example.com"));
     }
 }

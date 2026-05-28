@@ -38,8 +38,19 @@
 //!   - PM 派發 prompt（2026-05-28 E1-PC1 Phase 3）
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
+
+/// 進程級單調遞增計數器 — 為 tmp 檔名提供進程內唯一後綴。
+///
+/// 為什麼（MED-1 修法）：原 tmp 檔名只用 `std::process::id()`，同進程內 `write_banner`
+/// 與 `clear_banner` 並發（兩者皆透過 `write_payload` 寫同一 tmp path）時會競爭同一檔，
+/// atomic rename 失效（two writers 同 tmp，一方的半寫內容可能被另一方 rename 出去）。
+/// 加 process_id + 高精度 nanos + 此單調 counter 三重後綴，確保同進程任兩次並發寫各自
+/// 獨立 tmp，rename 各自 atomic 互不踩。
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Banner 持久化 schema。
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -162,10 +173,20 @@ impl ConsoleBannerDispatcher {
             Err(_) => return false,
         };
         let final_path = self.banner_path();
+        // tmp 檔名三重唯一化（MED-1）：process_id + 高精度 nanos + 進程內單調 counter。
+        // process_id 在同進程恆定，故額外靠 nanos + counter 區分同進程並發寫；
+        // counter 用 Relaxed 即可（只需唯一性，不需跨執行緒順序保證）。
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.subsec_nanos())
+            .unwrap_or(0);
+        let seq = TMP_COUNTER.fetch_add(1, Ordering::Relaxed);
         let tmp_path = self.banner_dir.join(format!(
-            "{}.tmp.{}",
+            "{}.tmp.{}.{}.{}",
             BANNER_FILENAME,
-            std::process::id()
+            std::process::id(),
+            nanos,
+            seq
         ));
         if tokio::fs::write(&tmp_path, serialized.as_bytes())
             .await
@@ -325,5 +346,51 @@ mod tests {
         assert!(s.ends_with('Z'));
         // 形如 2026-05-28T12:34:56Z（20 字符）
         assert_eq!(s.len(), 20);
+    }
+
+    // ── T11: 同進程並發寫不腐化 final 檔（MED-1 tmp uniquifier 驗）─────────────
+
+    /// 多 writer 同進程並發寫同一 banner 檔，每次 rename 必 atomic（不出現半寫 /
+    /// 損毀 JSON）。修法前兩 writer 共用 `.tmp.<pid>` 同檔，第二個 writer 的部分
+    /// 內容可能被第一個 writer rename 出去。修法後各自獨立 tmp，final 檔每刻都是
+    /// 某次完整寫入的結果。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn t11_concurrent_writes_never_corrupt_final() {
+        use std::sync::Arc;
+        let tmp = TempDir::new().unwrap();
+        let d = Arc::new(ConsoleBannerDispatcher::new(tmp.path().to_path_buf()));
+        // 先建一個基礎 banner 確保 clear_banner 有檔可讀
+        assert!(d.write_banner("critical", "init").await);
+
+        let mut handles = Vec::new();
+        for i in 0..16 {
+            let d = d.clone();
+            handles.push(tokio::spawn(async move {
+                if i % 2 == 0 {
+                    d.write_banner("critical", "concurrent-write").await;
+                } else {
+                    // clear_banner 也走 write_payload → 同 tmp 競爭路徑
+                    d.clear_banner("op").await;
+                }
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        // final 檔必能完整 parse（沒有半寫 / 損毀）。
+        let payload = d.read_banner().await.expect("final banner must parse");
+        assert_eq!(payload.severity, "critical");
+
+        // 並發結束後不應殘留 .tmp.* 檔（每個 rename 都成功消費掉自己的 tmp）。
+        let mut entries = tokio::fs::read_dir(tmp.path()).await.unwrap();
+        while let Some(e) = entries.next_entry().await.unwrap() {
+            let name = e.file_name();
+            let name = name.to_string_lossy();
+            assert!(
+                !name.contains(".tmp."),
+                "並發寫後不應殘留 tmp 檔，但發現：{name}"
+            );
+        }
     }
 }

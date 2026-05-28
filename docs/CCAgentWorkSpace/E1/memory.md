@@ -13220,3 +13220,15 @@ register + mod.rs setter）。
 - **靜態驗限制**：Mac 無生產 PG（本地有 /tmp:5432 但缺 TimescaleDB ext + observability schema + V113 baseline + trading_admin role，Guard A 會先 RAISE EXCEPTION）→ 不對任何 PG apply，純靜態：5 `DO $$`=5 `END $$;` 平衡（nested inner BEGIN/END 無 `$$` 不計）+ EXCEPTION handler line 251 + GRANT 行號全 < compress 行號 + schema 一字不動。MIT 第三輪 Linux trade-core 重跑 4-step dry-run（含雙跑 idempotency）才是冪等權威 sign-off；operator 已 DROP 第二輪 dirty 殘留表。
 - **C5 follow-up（不在本 task）**：trading_admin = OWNER + superuser 隱式持全 column UPDATE，column-level 限制只 bind 非-owner role；production GUI ack 路徑前置 = provision restricted role（e.g. `failsafe_ack_role` 只 column UPDATE acked_*）。當前 DB 無此 role，屬 C5 Sprint 3，本 task 不建。
 - 不 commit（鏈 E1→E2→E4→QA→PM）。報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-28--e1_v114_idempotency_fix.md`
+
+## 2026-05-28 — Wave 5 Packet C E2 對抗審查 MED-1/MED-2/LOW-1 hardening
+
+- 任務：修 E2 adversarial review (APPROVE-WITH-CONDITIONS) 的 concurrency + secret hardening；HIGH-1 banner channel weight 退 PA Sprint 3 不在此 task。
+- 教訓 1（MED-1 atomic-rename uniquifier）：同進程 atomic write（write tmp + rename）若 tmp 檔名只用 `std::process::id()`（同進程恆定），兩條並發路徑寫同一 final 檔（write_banner / clear_banner 都走 write_payload）會共用同一 tmp → 一方半寫內容可能被另一方 rename 出去。修法 = tmp 名加 `nanos + static AtomicU64 counter`（counter 用 Relaxed，只需唯一性）。反模式記錄：任何「同進程多寫者 + 共享 final path + atomic rename」必須 per-write 唯一 tmp。
+- 教訓 2（MED-2 claim-before-await）：三段拆鎖（lock→drop→await→re-lock）的 idempotent guard 若留到「最後 re-lock 才 set」，`&self` 並發呼叫可都在 Phase1 看到 expired==true → double fire。修法 = 把 guard claim 提前到 **Phase1 同一個 lock hold 內**（判定 expired 後立刻 set flag 才 drop lock）。mutex 序列化把「判定+佔用」原子化。原 `&mut self` 版無此 bug（&mut 獨佔）；改 `&self` shared 後必須 claim-before-await。
+- 教訓 3（MED-2 escalate-fail flag 不 reset）：fail-safe escalation 失敗時 flag **不該 reset** 讓下一 tick re-fire — 重觸發=double SM transition+double audit 噪音（正是要消除的）。失敗細節由 FailsafeExecutionReport(sync_records/audit_error) 承載交 audit 記，不靠重觸發補救。flag 真正重置點是 evaluate_dispatch 新一輪 AllFail / record_operator_ack。survival 優先語義。
+- 教訓 4（對抗驗證 concurrency test）：寫並發 test 後務必「臨時還原 buggy 版 + 加 tokio::task::yield_now() 放大窗口」確認 test FAIL（抓得到 race），再還原修法版 PASS。本次 buggy 版 16 escalations vs 修法版 1，證 T4.12 有效。光看修法版 PASS 不足以證 test 抓得到 bug。
+- 教訓 5（LOW-1 secret Debug redaction）：持 secret 的 struct 禁 `derive(Debug)`；手寫 `impl std::fmt::Debug` 用 `debug_struct().field("pw", &"***REDACTED***")`。連 fingerprint（sha256 衍生）一併 redact 較安全。latent leak（當前無 log 印它，但 derive 一旦被 {:?} 就洩）也要修。
+- 教訓 6（clippy pre-existing 隔離）：`cargo clippy --no-deps` 隔離 openclaw_core pre-existing（price_tracker deprecated_semver）；本 task 唯一 hit email.rs:199 doc_lazy_continuation 經 git diff hunk header 確認在我的 diff 外（pre-existing commit 9bf71423），不順手修（最小影響）。判斷「是否本 task 引入」用 `git diff <file> | grep '^@@'` 對比行號 vs hit 行號。
+- 結果：notification_failsafe 107 passed（104 baseline + T11 banner / T4.12 watcher / T15 email）；我改的 3 檔 clippy 0 hit。
+- 不 commit（鏈 E1→E2→E4→QA→PM）。報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-28--e1_med_low_hardening.md`
