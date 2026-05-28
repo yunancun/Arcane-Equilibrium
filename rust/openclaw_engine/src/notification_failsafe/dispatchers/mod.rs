@@ -22,3 +22,4 @@
 pub mod console_banner;
 pub mod email;
 pub mod slack;
+pub mod three_way;
