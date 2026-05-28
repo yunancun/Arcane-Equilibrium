@@ -6478,3 +6478,28 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 - 重新數結果（PA `ls` 跑）：6 dir 實檔 1+5+8+11+13+50 = 88；R4 review §1 寫 89 為信任 prompt 慣性 + 含 ghost；**正確數字以 PA `ls` 驗為準（88）**
 - 紅線堅守：worklogs/ 根目錄 28 個 daily_summary 04-08+ 永不歸檔；README L1-861 + L1017-1466 不重組；audits/2026-04-12 內文不改只加 footer
 - 教訓：phase packet 折疊不僅 mv，必同時治理歷史 ghost link（R4 memory 2026-04-24 第 2 點記載的「索引分化」反模式可在此 batch 一次治理完）；不要把 ghost 治理推到下一個 phase
+
+
+---
+
+## 2026-05-28 — P1-OPS-2-RUNBOOK-V1.0-PATCH land
+
+**Scope**: credential_rotation.md v0.9 (495 line / 12 ch) → v1.0 (687 line / 13 ch); 4 patches land per A3 SSOT 2026-05-27--ops_2_secret_split_adversarial_review.md 4 conditional items.
+
+**Patches**:
+- P1 §4.2.1 Phase 1 backward-compat note (restart_all `prepare_runtime_secret_files` seed-from-ipc not violating urandom; first 90d rotation must be urandom)
+- P2 §10.1.1 Phase 1 fallback WARN invariant (D+0 → D+14 daily `grep -c ops2_secret_split_phase1_fallback /tmp/openclaw/{engine,api}.log = 0`)
+- P3 §10.5 Cross-language HMAC sanity check (pinned hex `1b2b18d7e212d0d1e8f943c25f6f070b2ba75013b8fd5c3a021800d11b8b78fc` + Python stdlib one-liner + Rust `cross_lang_hmac_fixture_is_byte_identical` test)
+- P4 §13 Phase 2 Cutover SOP (D+14 = 2026-06-10; 6 sub-sections: preconditions / Grafana 新字串 / PR dispatch / panic verify / rollback / post-cutover verify; first rotation due 2026-09-08)
+
+**A3 conditional close**: 4/4 (cond #4 PM confirm Sprint 4 first Live ≥ 2026-06-10 surface in §13.1 readiness gate, not runbook text-closable).
+
+**Out-of-scope risk (P2 carry-over, did NOT expand scope)**:
+- C1: §10.3 healthcheck SQL routine 未實裝 (MEDIUM)
+- C2: §6.2.4 A-1 emergency revoke 缺 audit row contract (LOW)
+- C3: §5.2.3 P-3 Bybit 24h soak old key revoke 缺 audit row (LOW)
+
+**Architectural lesson**: 任務 SOP 強制「不擴範圍」是對的；發現 risk 時 carry-over 列表比 silent expand 安全 — 避免 v1.0 patch 變 v1.x 雜糅。
+
+**Deliverable**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-28--ops_2_runbook_v1_0_patch.md`
+**Next**: PM commit + push timing; E2 LIGHT review optional (verify §10.5 pinned hex match E1 IMPL line 13/31/41); D+0~D+14 daily soak grep; D+14 = 2026-06-10 cutover.
