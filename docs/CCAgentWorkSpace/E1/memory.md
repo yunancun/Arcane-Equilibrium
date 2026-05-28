@@ -13158,3 +13158,22 @@ register + mod.rs setter）。
 - 教訓 8：PM dispatch prompt 與 PA spec §3.1 路徑分歧（spec 推 PG，prompt 拍 vault file）— prompt > spec，要在 report 明確標明差異 + 為什麼 + 兩路徑不互斥的關係
 - 42/42 dispatchers tests PASS；101/101 notification_failsafe 全 module tests PASS（含既有 14 mock test）；dispatchers 範圍 clippy 0 hit
 - 報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-28--e1_pc1_dispatchers_impl.md`
+
+---
+
+## 2026-05-28 — M11 replay_runner Daily 04:00 UTC cron install
+
+- 任務：P2-M11-REPLAY-RUNNER-SCHEDULE-PROPOSAL = M11.a；2 個新 cron script + SCRIPT_INDEX edit；首次 fire 已 land `[48]` healthcheck FAIL → PASS 證據
+- 教訓 1：`replay_runner` Rust binary **本身不寫 PG**；`replay.experiments` row 必經 Python `/experiments/register` 路由 INSERT。direct binary invoke smoke 無法 flip `[48]` healthcheck。必走 REST。
+- 教訓 2：CSRF middleware 對所有 POST/PUT/DELETE/PATCH enforce double-submit (cookie `oc_csrf` ↔ header `X-CSRF-Token` constant-time compare)；cron curl 必加 `-b "oc_csrf=X" -H "X-CSRF-Token: X"` 同值 random hex 即可通過（middleware 不簽署 token 只比同源）。
+- 教訓 3：實機 uvicorn bind 在 Tailscale IPv4 (`100.91.x.x:8000`) 不是 0.0.0.0；loopback 127.0.0.1:8000 **不通**。cron wrapper auto-resolve `tailscale ip -4` + env `OPENCLAW_API_BASE_URL` 覆寫 + fallback loopback。
+- 教訓 4：V049 PG CHECK `chk_embargo_days` 約束 `embargo_days >= GREATEST(7, ceil(2 * half_life_days))`；half_life=7 ⇒ 下限 14。fixture deterministic 場景隨意填會撞 CheckViolation。
+- 教訓 5：`psql -v var=value -c "...:'var'::jsonb..."` 對 JSON 內 `:` 衝突（被當 variable substitution prefix → `syntax error at or near ":"`）。改用 stdin heredoc + dollar-quoted string literal `$payload$...$payload$`（對齊 `trading_ai_pg_dump_cron.sh:132-148` 範式）。
+- 教訓 6：V035 governance_audit_log enum 不含 `m11_*` event_type；對齊 `replay_key_rotation_check.sh:243-285` pattern piggyback `event_type='audit_write_failed'` + payload.alert_type 識別。Sprint 3 Phase A 同步擴 V### enum 為 follow-up。
+- 教訓 7：operator API token (`.secrets/api_token`) 可重用為 cron Bearer auth；ＡＰＩ token ≠ signed live authorization（後者觸 hard boundary）。短期 piggyback OK，長期 swap 到 dedicated Service principal（OQ-1 follow-up）。
+- 教訓 8：cron wrapper `fail-soft exit 0`（避免 cron mail spam）+ governance_audit_log audit trail + `[48]` rows_24h WARN + `[50]` failed_rate 偵測 連續多日 fail；exit non-zero 反而觸發 systemd cron mail 噪音。
+- 教訓 9：避撞時段已驗 04:00 UTC 安全：03:00 pg_dump (30 min budget) → 03:17 ml_training_maintenance → **04:00 M11** → 04:41 feature_baseline_writer → 06:00 counterfactual_daily → 09:00 replay_key_rotation_check。
+- 教訓 10：PA proposal 範本與實機差異 — 範本 `127.0.0.1:8000`、`embargo_days=0.0` 都過不了實機 gate；E1 IMPL 必走 ssh trade-core 實機 smoke 驗 4-6 個維度（host bind / CSRF / CHECK constraints / SQL syntax / token path / heartbeat sentinel）才能找全 bug。Mac 靜態 review 0 bug 不代表實機 0 bug — 對齊 memory `feedback_v_migration_pg_dry_run`。
+- empirical evidence：23 → 24 replay.experiments rows / rows_24h=1 rows_7d=1 / last_age 410.1h → 0.0h / `[48]` FAIL → PASS / governance_audit_log 2 row (`_register_failed` + `_smoke_completed`)。
+- 報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-28--e1_m11_replay_runner_cron_install.md`
+- follow-up TODO：(1) OQ-1 Service principal swap (2) OQ-2 V### enum expand (3) OQ-3 Stage A → Stage B cohort wrapper (Sprint 3 Phase A)
