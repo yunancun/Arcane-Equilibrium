@@ -13015,3 +13015,146 @@ Crontab line for PM ssh paste:
 3. v77 TODO P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH 主軌與此 IMPL ticket 分離；W2-B 已 closed by E4 chain，TODO 軌可能 stale 或指向不同 follow-up
 
 **Operator 下一步**：PM 確認 v77 TODO `P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH` 是否仍有未覆蓋面（如 Stage 0R replay harness 接通 vs IMPL；後者已 done），若 follow-up = M4 W2-E R3 conditions（per `a605af57` APPROVE-WITH-CONDITIONS）需另派 E1。
+
+---
+
+## 2026-05-28 — Wave 5 Packet C C2 IMPL（V114 hypertable + PgAuditEmitter + ack stub）
+
+**任務**：PA C spec 2026-05-28 §5 + operator Q5 hybrid PC.B 拍板 — 落地 V114
+`observability.notification_failsafe_events` hypertable + `PgAuditEmitter`
+（`FailsafeAuditEmitter` trait 實裝）+ C5 GUI `ack_failsafe_event` stub。
+
+**Commit**：`4ac2b7a4` `feat(wave5-packet-c/c2): V114 hypertable + PgAuditEmitter + ack stub`
+
+**檔案改動**：
+- `sql/migrations/V114__notification_failsafe_events_hypertable.sql`（新建 354 行）
+- `rust/openclaw_engine/src/notification_failsafe/audit_emitter.rs`（stub → 真實 IMPL；542 行）
+
+**設計關鍵決策**：
+1. **BIGINT ts_ms 不是 timestamptz**：對齊 mod.rs `FailsafeClock::now_ms()` u64 直 INSERT，
+   不引 chrono 轉換最小化 Rust binding 複雜度；chunk_time_interval => 604800000（7d ms）
+   per V026 pattern。Spec §5.2 寫 timestamptz 與 PA prompt 寫 ts_ms BIGINT 衝突 — 我採
+   PA prompt（operator 拍板的 hybrid PC.B）。
+2. **acked_at_utc 用 TIMESTAMPTZ**：control_api GUI write 路徑 server-side NOW() 較直觀；
+   與 ts_ms BIGINT (engine write) 分工。
+3. **column-level GRANT trading_admin UPDATE (acked_at_utc, acked_by)**：per Q5.3 拍板；
+   append-only enforcement 透過 REVOKE PUBLIC UPDATE/DELETE + 限 2 column UPDATE。
+4. **event_type CHECK 當前 1 值**：預留後續 wave 用 V053/V098/V113 DROP+ADD pattern ALTER 擴。
+5. **5s timeout 硬限 const**：fail-safe path emit timeout 不可被 runtime override
+   (per CLAUDE.md §四 hard boundary)；對齊 mod.rs `FailsafeConfig::DEFAULT_TIMEOUT_MS`
+   const 範式。
+6. **fail-soft NULL bind 不 panic**：audit 是 fail-soft；payload 缺欄位 NULL INSERT 比 panic
+   好。schema drift caller 端 E2 review 把守。
+
+**Test 結果**：
+- `cargo test -p openclaw_engine --lib notification_failsafe::audit_emitter`：**14/14 PASS**
+- `cargo test -p openclaw_engine --lib notification_failsafe`：**51/51 PASS**（含 14 audit_emitter +
+  14 mod.rs T1-T14 + 23 dispatchers email/slack）
+- audit_emitter.rs 自身 clippy clean；既有 `ws_unknown_handler_guard.rs` doc_lazy_continuation
+  warning 與本 C2 無關。
+
+**潛在衝突 — PM 拍板**：
+- `rust/openclaw_engine/src/model_client.rs:91` doc comment 提「V114 `learning.model_versions`
+  表 schema 預留」（Sprint 1A-δ pre-IMPL placeholder）；
+- `rust/openclaw_engine/src/order_router.rs:71/84/339` doc comment 提「V115 Part 1/2 audit log
+  PK」（Sprint 6+ placeholder）；
+- 兩處 placeholder 不在 sql/migrations 目錄（無真實 V114/V115 file）；operator Q5.2 已 verify
+  V114 free（18:00 UTC）；
+- **PM 拍板**：是否更新 model_client.rs:91 doc comment 對齊「V114 = notification_failsafe_events」
+  事實，或保留 placeholder（後續 V115/V116/... 再 reserve model_versions）。
+
+**Linux PG dry-run 4-step hint**（per `feedback_v_migration_pg_dry_run`，PM SSH deploy 任務）：
+```bash
+# 1. 上 Linux trade-core
+ssh trade-core
+
+# 2. 切到 srv + pull commit 4ac2b7a4
+cd ~/BybitOpenClaw/srv && git fetch && git checkout 4ac2b7a4
+
+# 3. 對 demo PG empirical 跑 V114（idempotent 兩次驗）
+psql "$(cat ~/BybitOpenClaw/secrets/database_url_file)" -f sql/migrations/V114__notification_failsafe_events_hypertable.sql
+# 預期：第 1 次 NOTICE "V114: all guards PASS — 17 column, ..."
+psql "$(cat ~/BybitOpenClaw/secrets/database_url_file)" -f sql/migrations/V114__notification_failsafe_events_hypertable.sql
+# 預期：第 2 次仍 NOTICE PASS（compress NOTICE 改為 "already enabled"）
+
+# 4. 反向 verify schema
+psql "$(cat ~/BybitOpenClaw/secrets/database_url_file)" -c "\d observability.notification_failsafe_events"
+psql "$(cat ~/BybitOpenClaw/secrets/database_url_file)" -c "SELECT * FROM timescaledb_information.dimensions WHERE hypertable_name='notification_failsafe_events';"
+psql "$(cat ~/BybitOpenClaw/secrets/database_url_file)" -c "SELECT grantee, privilege_type, column_name FROM information_schema.column_privileges WHERE table_schema='observability' AND table_name='notification_failsafe_events' AND grantee='trading_admin';"
+```
+
+**教訓**：
+1. PA prompt 與 PA spec 文件衝突時（ts_ms BIGINT vs timestamptz），優先 prompt（operator
+   拍板版本）；但必須在 report 明示衝突供 PM 驗。
+2. doc-comment placeholder（model_client.rs / order_router.rs 中的 V114/V115 預訂）會與
+   實際 sqlx file slot 搶位；E1 啟動序列應加「grep V### in src/」確認無 doc-level pre-reservation
+   conflict。
+3. `git commit --only` 對 untracked file 不適用 — 需先 `git add` 再 commit。Multi-session
+   race 場景仍適用 narrow staging（per CLAUDE.md Git And Sync）。
+
+---
+
+## 2026-05-28 — Wave 5 Packet C / C3 IMPL（runtime providers）
+
+**任務**：PA spec 2026-05-28 `packet_c_3way_dispatcher_wire_spec.md` §4.3 C3 切片。
+**Commits**：3b5b30aa（WallClock）→ d44a3173（RestPositionProvider）→ fbcc1aa9
+（BybitExchangeStopSync）→ 3ba572ad（SharedFailsafeWatcher singleton + providers/mod
+register + mod.rs setter）。
+**Tests**：31/31 pass（providers 子樹）；clippy 0 hit（providers 子樹）。No new dep。
+**Report**：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-28--e1_pc3_providers_impl.md`
+
+**關鍵設計決策**：
+
+1. **`SharedFailsafeWatcher` 採 `Box<dyn Trait>` trait-object 解除與 C1/C2 具體型別
+   耦合**：原 PA spec 範例寫 `Arc<FailsafeWatcher<ThreeWayDispatcher, RestPositionProvider,
+   BybitExchangeStopSync, PgAuditEmitter, WallClock>>` 直接耦合 C1 `ThreeWayDispatcher`
+   具體型別；但 C1 並行未 land 時 import 衝突。改用 5 個 `Box<dyn ...>` 欄位，C4 wire
+   時 `Box::new(ThreeWayDispatcher::...)` 即可填入。vtable 開銷對 30s tick fail-safe
+   可忽略。
+
+2. **`check_timer` 三段拆分（lock → drop → await → re-lock）**：per spec §4.7 + §11.3
+   反對 3 mitigation。`parking_lot::Mutex` 不可跨 `.await` 持有（鎖跨 await 死鎖溫床
+   + Send bound 問題）；改採「snapshot 純邏輯判定 → drop guard → 無鎖跑 async escalation
+   → re-lock 標記 idempotent guard」三段，全程不持 risk_sm 鎖（由 caller 注入）。
+
+3. **`FailsafeWatcherState::set_escalated_for_current_arm` 新增 `pub(crate)` setter**：
+   原 watcher 直寫 private 欄位 OK（同 mod），但 SharedFailsafeWatcher 透過 Mutex 持
+   state，re-lock 階段必須走 pub setter。`pub(crate)` 而非 `pub` 是因為這 guard 是
+   internal idempotent invariant 不該被 GUI/IPC 修改。最小侵入：mod.rs 只加 15 行。
+
+4. **ATR known-limitation**：`PositionSnapshot.atr` 需要「位置生命 ATR」但 Bybit REST
+   `/v5/position/list` 不回 ATR。本 C3 暫設 `atr=0.0` 讓下游 `active_lock_profit_per_position`
+   自動 fail-closed 過濾（`pos.atr <= 0.0` 跳過）。**C4 wire 時必須從 PriceHistoryTracker
+   / paper_state 旁路注入真實 ATR**，否則 fail-safe SL 計算永遠是 empty Vec（dead path）。
+   已在 report § 不確定之處 明示。
+
+5. **error mapping 表（BybitApiError → ExchangeStopError）**：Business → Rejected；
+   Transport / JsonParse / NoCredentials / SigningError → 全部 Transport（對 fail-safe
+   都屬「外部不可達」一類，呼叫端 retry 無助；個別失敗由 execute_failsafe_escalation
+   記入 StopSyncRecord 不 rollback transition）。
+
+**教訓**：
+1. PA spec 用具體泛型參數寫範例時要警覺 — 並行 wave 下其他 packet 的具體型別可能未
+   land，需用 trait object / placeholder 解耦。
+2. `parking_lot::Mutex` 與 `tokio::sync::Mutex` 行為差異：`parking_lot` 不需 `.await`
+   lock，但跨 `.await` 持有 guard 會 panic（Send bound 不滿足）— 必須拆三段。
+3. 並行多 E1 工作下，「narrow staging + `git add` + `git commit --only`」是 untracked
+   file 的正解；不應 `git add -A`（會吸 C1 / C2 中間 WIP）。本次 4 commit 全部走
+   `git add <file> && git commit --only <file>` 順序，無誤吸。
+
+---
+
+## 2026-05-28 — Wave 5 Packet C / C1 dispatchers IMPL
+
+- Wave 5 Packet C C1 — 3-way notification dispatchers（Slack / Email / Console banner + ThreeWayDispatcher）IMPL DONE
+- 4 phase commits chain：`804392fc` (slack) → `9cea1d2d` (email) → `e41e4fc6` (banner) → `3ab62cc0` (three_way + clippy fix)
+- 教訓 1：`r#"..."#` raw string 內含 `"#` 會提早結束；改用 `r##"..."##` 多級分隔（slack.rs T3 觸發）
+- 教訓 2：spec 提的 new dep（lettre）絕不擅加；改用 trait abstraction（`SmtpTransport` + `DisabledTransport` + `StubTransport`），real wire 留 PM 拍板後 follow-up commit。保 0 unilateral Cargo.toml 改動原則。
+- 教訓 3：clippy `doc list item without indentation` 警告 = 連續 `-` 開頭 doc comment 被當 markdown list；中間插一行 `//!` 空行解掉
+- 教訓 4：cargo clippy 全 workspace 跑會撞 openclaw_core 既有 errors（`since` 欄 + PI 近似）；用 `--no-deps` 隔離本 IMPL 範圍 clippy 結果
+- 教訓 5：file-based secret pattern 對齊既有 `autonomy_totp.py` — 缺檔 / 解析失敗 / fingerprint mismatch 一律 fail-closed disable（**不是 error**），對 watcher 來說 disabled dispatcher send 永遠回 false，等於三路冗餘自然退化
+- 教訓 6：`tokio::join!` 三路並發前提 = 個別 dispatcher 內必各自包好 timeout（reqwest client 5s + tokio::time::timeout 5s 雙保險 / lettre 10s timeout / fs write 無 timeout 但 atomic rename 快）；個別 dispatcher 卡死 不會拖死其他兩路
+- 教訓 7：跨平台 unix `0700/0600` permission set 用 `#[cfg(unix)]` 包，best-effort 忽略 error；Windows 路徑 ignore 但邏輯不阻塞
+- 教訓 8：PM dispatch prompt 與 PA spec §3.1 路徑分歧（spec 推 PG，prompt 拍 vault file）— prompt > spec，要在 report 明確標明差異 + 為什麼 + 兩路徑不互斥的關係
+- 42/42 dispatchers tests PASS；101/101 notification_failsafe 全 module tests PASS（含既有 14 mock test）；dispatchers 範圍 clippy 0 hit
+- 報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-28--e1_pc1_dispatchers_impl.md`
