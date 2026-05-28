@@ -66,6 +66,12 @@ pub mod mode_state;
 pub mod model_client;
 pub mod multi_interval_topics;
 pub mod news;
+// Wave 5 Packet C engine integration (2026-05-28) — wires
+// `RiskEvent::NotificationFailsafeTimeout` to engine副作用鏈：3-way fail observe
+// → 1h timer → SM-04 Defensive → active lock-profit → exchange conditional SL
+// sync → audit emit `auto_escalated_to_sm04_defensive`。純邏輯 + 5 trait seam
+// + 14 條 unit/integration mock 測試；尚未接 pipeline_ctor / tasks (下一 wave)。
+pub mod notification_failsafe;
 pub mod orchestrator;
 pub mod order_manager;
 // Sprint 1A-δ M12：OrderRouter trait stub（6 method default panic）per ADR-0039。
