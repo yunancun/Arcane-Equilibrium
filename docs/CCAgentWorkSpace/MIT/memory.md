@@ -914,3 +914,24 @@ MIT AUDIT DONE: docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-27--v104_sup
 **邊界**: 只改 SQL（MIT scope）；不擴 scope（未補 unit test, E4 round 3 P1 governance carry-over）；不執行 governance_audit_log INSERT。
 
 **Report**: `workspace/reports/2026-05-27--q3_column_drift_fix.md` (本 fix 不寫獨立報告 ≤200 字 inline 即可)
+
+## 2026-05-29 V114 notification_failsafe_events 4-step dry-run — FAIL (退 E1)
+
+**對象**: `sql/migrations/V114__notification_failsafe_events_hypertable.sql` (commit 4ac2b7a4, E1-PC2)
+**環境**: Linux trade-core / trading_ai / psql 16.14 / TimescaleDB 2.26.1 / trading_admin role
+
+**BLOCKER (TimescaleDB runtime semantic — Mac static review 抓不到)**:
+- Step 5 GRANT 在 Step 4 enable compression **之後** 跑 → `GRANT UPDATE (acked_at_utc, acked_by)` column-level grant 被 TimescaleDB 傳播到 internal `_compressed_hypertable_94`,該壓縮 twin rel 無 user column → `ERROR: column "acked_at_utc" of relation "_compressed_hypertable_94" does not exist`。
+- ERROR 在 line 262 abort → GRANT USAGE ON SEQUENCE (264) + REVOKE PUBLIC (268) + Guard C 後驗全沒跑。
+- table-level `GRANT SELECT, INSERT` (260) 已成功 (table-level grant 不查 column 存在性,clean propagate)。只有 **column-level** GRANT 觸發此 bug。
+- V109 無此問題因 V109 無 column-level GRANT (只 CREATE+compression)。這是 V114 引入 column-level UPDATE grant 新 pattern 的首次踩雷。
+
+**修法建議 (回 E1,不自己改)**: 把 Step 5 GRANT 移到 Step 4 compression **之前**;或 enable compression 前先做全部 GRANT/REVOKE。column-level grant 必須在 hypertable 還沒 compressed twin 時做。需 E1 改後重跑 4-step dry-run 才 sign-off。
+
+**Schema 設計本身正確 (Step 1-4 全 PASS)**: 17 col 全對 type、chunk=604800000ms(7d)、2 hot-path index + 1 ts auto index + pkey、event_type CHECK 1 值、compression policy 30d (2592000000ms)。
+**INSERT/ack 語義驗證 PASS**: audit_emitter.rs 13-binding INSERT 完美對齊 (RETURNING id=1);ack #1 UPDATE 1 / ack #2 (double-ack) UPDATE 0 idempotent / acked_by 不被覆蓋。
+**audit_emitter.rs INSERT 13 col + 4 DB-controlled (id/acked_at_utc/acked_by/created_at) = 17 col 對齊正確**。
+
+**遺留 dirty 狀態 (operator 必清)**: partial-apply 留下 `observability.notification_failsafe_events` 表 + hypertable + compression (0 row),但 V114 **未** 進 `_sqlx_migrations` (max 仍 113)。test row 已 DELETE 清掉。DROP TABLE 被 auto-mode classifier 擋 (用戶禁 trading_ai 破壞性 DROP),須 operator 手動 `DROP TABLE observability.notification_failsafe_events CASCADE` 後再 apply E1 修正版 V114。否則下次 sqlx migrate 會重撞同 GRANT error。
+
+**Report**: 直接回 main session (本 task 不寫 report file)。

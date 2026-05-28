@@ -13177,3 +13177,33 @@ register + mod.rs setter）。
 - empirical evidence：23 → 24 replay.experiments rows / rows_24h=1 rows_7d=1 / last_age 410.1h → 0.0h / `[48]` FAIL → PASS / governance_audit_log 2 row (`_register_failed` + `_smoke_completed`)。
 - 報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-28--e1_m11_replay_runner_cron_install.md`
 - follow-up TODO：(1) OQ-1 Service principal swap (2) OQ-2 V### enum expand (3) OQ-3 Stage A → Stage B cohort wrapper (Sprint 3 Phase A)
+
+## 2026-05-28 — Wave 5 Packet C C1 email follow-up：lettre 0.11 + RealSmtpTransport（commit 9bf71423）
+- 任務：operator decision EA「三路冗餘真的三路」— C1-PC1 只留 DisabledTransport/StubTransport，本 follow-up 補真實 SMTP。
+- Cargo dep：workspace + engine 加 `lettre = "0.11"` default-features=false + `["smtp-transport","tokio1-rustls-tls","builder","ring"]`。**openssl=0 達標**（純 rustls 跨平台）。
+- 教訓 1（lettre rustls crypto provider）：lettre 0.11.22 `tokio1-rustls-tls` 預設會帶 rustls default → 拉 `aws_lc_rs`（需 CMake+C compiler，破壞零 sys-dep）。顯式加 lettre `ring` feature 對齊 workspace `rustls={features=["ring"]}`。**但 aws-lc-rs 仍在 tree（count=3）** — 經 `git stash` baseline 對比確認**是 pre-existing**（workspace rustls 沒設 default-features=false，其 default feature 開 aws_lc_rs，cargo feature unification 全 crate 共享）。非本 task 引入、非本 task scope；留 follow-up（若要清需 workspace rustls 加 default-features=false + 全 rustls 消費者驗證，影響面大）。
+- 教訓 2（git stash 吃掉 working-tree edit）：中途用 `git stash`/`git stash pop` 對比 baseline aws-lc count，pop 後 Cargo.toml 兩處 edit **被回退**（linter-note 顯示舊內容誤導），編譯報 `unresolved module lettre`。**反模式：dirty multi-session worktree 禁用 git stash 驗證 baseline**；改用 `cargo tree` 在加 dep 前先量、或臨時 checkout 到 detached HEAD。修復＝重新 apply 兩處 Edit。
+- impl：`RealSmtpTransport{config}` impl 既有 `SmtpTransport` trait（簽名不破）。port 465→`relay()` implicit TLS / 其餘→`starttls_relay()` STARTTLS；build/auth/handshake/連線任一 err→send false（fail-soft 不 panic，tracing::warn）。10s timeout 由上層 EmailDispatcher::send 的 tokio::time::timeout 包，Real 內不雙層計時。
+- wire：新增 `from_secret_file_real(path)` ctor（secret 在→Real / 缺→Disabled fallback），`from_default_path` 改走此路徑。**不改既有 `from_secret_file(path, transport)` 2-arg 簽名**（11 email test 靠它注入 Stub）。
+- test：T12 valid secret→Real 不 panic（build lazy 在 send，enable 階段不連 Gmail）/ T13 缺檔→Disabled fallback send false / T14 unreachable 127.0.0.1:1→fail-soft false（不連 Gmail，符合禁線）。
+- 結果：dispatchers 45 pass(42+3) / email 14(11+3) / 全 lib 3572(3569+3) 無退化 / clippy dispatchers 0 hit / openssl 0。
+- prompt schema 差異（flag 給 PM）：prompt Phase 3 寫 secret key `smtp_password_app_key`，但既有 C1 schema + 11 test 用 `smtp_app_password`（spec §2.2 亦此）。沿用既有 `smtp_app_password` 不改（改會破 11 test + 違 spec）。
+- 報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-28--e1_email_real_smtp_amend.md`
+
+## 2026-05-28 — V114 GRANT 排序 blocker + M11 install echo 文字（兩小修）
+
+**任務**：MIT Linux PG dry-run 抓 V114 apply abort blocker + E2 review 退回 M11 install LOW-2 echo 誤導。背景單 agent。
+
+### 教訓 1：TimescaleDB column-level GRANT 必在 enable compression 之前
+- **根因**：`ALTER TABLE ... SET (timescaledb.compress...)` 後 TimescaleDB 會建 compressed twin hypertable（`_compressed_hypertable_NN`），twin 只有壓縮格式 column（無原表 column）。此後做 column-level `GRANT UPDATE (col_a, col_b)` 會被 TimescaleDB **傳播到 twin** → twin 無該 column → `ERROR: column "<col>" of relation "_compressed_hypertable_NN" does not exist` → migration apply abort。
+- **關鍵分辨**：**table-level** `GRANT SELECT, INSERT` 不查 column 存在性 → 不受影響；**只有 column-level** `GRANT UPDATE (...)` 觸發。V109 無此 bug 因它整檔零 column-level GRANT。
+- **修法**：把整段 Step 5 GRANT/REVOKE（table GRANT + column-level GRANT UPDATE + GRANT USAGE ON SEQUENCE + REVOKE PUBLIC + role-exists guard）**整塊移到 enable compression 之前**（成為 Step 4，compression 降為 Step 5）。twin 尚未存在時 column-level grant 合法。schema 本身一字不動，只移 block 位置 + 改 step 編號 + 補 FIX 註解。
+- **反模式記錄**：未來任何 hypertable migration 若同時有 `enable compression` + `column-level GRANT/REVOKE`，GRANT 必排在 compression 前。靜態檢查 grep `GRANT.*\(.*\)` 行號必 < `timescaledb.compress` 行號。
+- **驗證限制**：Mac 無 PG，純靜態 SQL review（GRANT 行號 < compress 行號 + Guard A/B/C 不破）。需 MIT 重跑 4-step dry-run（含未驗的 Step 3 idempotency 雙跑）；operator 先 DROP Linux dirty 殘留表才 re-apply。per `feedback_v_migration_pg_dry_run`：靜態通過 ≠ runtime apply 通過。
+
+### 教訓 2：install script echo 文字必須對齊 wrapper 真實 auto-resolve（不要照 PA 範本抄 loopback）
+- **根因**：M11 install script echo 告訴 operator API base = `http://127.0.0.1:8000` + pre-flight 用 `curl -s http://127.0.0.1:8000/...`，但 wrapper 實際 `tailscale ip -4 | head -1` auto-resolve（uvicorn 在 trade-core 不 bind loopback，per `feedback_restart_bind_host_default`）。operator 照 echo 手貼 pre-flight 會 connection refused（cron 本身正常，因 wrapper auto-resolve）。
+- **修法**：echo 改成明示「API base 由 wrapper auto-resolve Tailscale IPv4；手動 pre-flight 用 `$(tailscale ip -4 | head -1):8000` 或實機綁定 IP，非 127.0.0.1」。`$(...)` 用 `\$(...)` 跳脫讓它印字面（給 operator 複製），不在 install runtime 展開。`bash -n` 通過。
+- **教訓**：install script 對 operator 的 echo 文字 = 文檔，必須對齊 wrapper 真實 resolve 邏輯，不能照 PA proposal 範本（範本常寫 loopback）直接抄。E2 adversarial review catch 此類文檔/行為失配。
+
+- 不 commit（鏈 E1→E2→E4→QA→PM）。報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-28--e1_v114_grant_fix_m11_echo_fix.md`（PM 統一 commit）
