@@ -44,6 +44,16 @@
 //!   - PA spec §4.4 Stage 1-4 ladder + §12 AC
 //!   - CLAUDE.md §二 原則 5/6/9（survival / fail-closed / 雙重防線）
 
+// Wave 5 Packet C IMPL 子模塊（per PA C spec 2026-05-28 hybrid PC.B 拍板）：
+// - `dispatchers`：3-way notification (Slack / Email / Console banner) 真實 impl
+// - `audit_emitter`：V114 `observability.notification_failsafe_events` PG INSERT
+// - `providers`：runtime 注入 PositionSnapshotProvider / ExchangeStopSync / FailsafeClock
+// 各子模塊獨立，pipeline_ctor wire（C4）+ GUI banner（C5）延 Sprint 3 Level 2 promotion
+// 一併做（per operator decision PC.B + grill-me Q3 「demo canary 另開 sprint」邏輯）。
+pub mod audit_emitter;
+pub mod dispatchers;
+pub mod providers;
+
 use async_trait::async_trait;
 use openclaw_core::sm::risk_gov::{
     active_lock_profit_per_position, PositionSnapshot, RiskEvent, RiskGovernorSm, RiskInitiator,
