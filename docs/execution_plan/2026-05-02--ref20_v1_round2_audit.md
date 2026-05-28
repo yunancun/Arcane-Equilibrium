@@ -227,3 +227,7 @@ E3 進階要求（NEW-01-04 補硬條款）：
 ## 附錄 B — agent 原始 finding 路徑
 
 完整原始發現（含每個 finding 的具體段落引用、修法、SQL probe 等）保留在主會話 transcript（2026-05-02 第二輪 7-agent dispatch）。本 audit 文件已綜合去重。若 V1.1 修訂需更細粒度，可重派同 7 agent 跑 short confirm。
+
+---
+
+> **NOTE 2026-05-28**：本 audit 引用的 `2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md` 已歸檔至 `docs/archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/`，由 v3 取代。Audit 內文未動，僅補本指標供後續追溯。
