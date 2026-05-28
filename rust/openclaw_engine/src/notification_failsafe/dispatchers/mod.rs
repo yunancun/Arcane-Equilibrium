@@ -19,4 +19,5 @@
 //!
 //! ref: docs/execution_plan/specs/2026-05-28--packet_c_3way_dispatcher_wire_spec.md
 
+pub mod email;
 pub mod slack;
