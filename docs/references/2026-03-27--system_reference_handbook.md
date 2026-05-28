@@ -213,7 +213,7 @@ docs/references/
   2026-03-27--layer2_ai_reasoning_engine_implementation_plan.md
     → Layer 2 实现计划
 
-docs/worklogs/control_api_gui/
+docs/archive/2026-05-28--worklog_control_api_gui_archived/   # 2026-05-28 歸檔
   2026-03-27--phase2_local_strategy_toolkit_engineering_log.md
     → Phase 2 完整工程日志
   2026-03-27--phase1_final_audited_engineering_log.md

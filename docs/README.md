@@ -25,14 +25,8 @@ This directory holds all engineering documents, logs, handoff records, and decis
 docs/
 ├── README.md                          ← 本文件（目录总览 + 规范 + 文档索引）
 │
-├── worklogs/                          ← 工作日志（按章节/模块分子目录）
-│   ├── chapters_a-g/                  ← A-G 章节：基础层 / 观察者 / 事件层
-│   ├── chapters_h-i/                  ← H-I 章节：本地判断内核 / AI 治理 / Decision Lease
-│   ├── chapters_j-k/                  ← J-K 章节：Transition Engine / Paper Gate / GitHub 迁移
-│   ├── control_api_gui/               ← Control API + GUI Operator Console 开发（2026-03-25~04-02）
-│   ├── phase5_arch_rc1/               ← Phase 5 / L3 整改 / ARCH-RC1 开发（2026-04-03~04-07）
-│   ├── learning/                      ← L 章节：自动学习管线 / 安全加固
-│   └── （顶层文件）                   ← 2026-04-08+ 最新工作日志（直接放根目录）
+├── worklogs/                          ← 工作日志（顶层为现役；歷史 phase packet 已歸檔 archive/）
+│   └── （顶层文件）                   ← 2026-04-08+ 最新工作日志（直接放根目录；歷史 phase packet 見 "Phase Packet Archive Index" 段）
 │
 ├── handoffs/                          ← 阶段交接文档（按日期+主题分文件夹）
 │   └── YYYY-MM-DD_主题名/
@@ -95,6 +89,12 @@ YYYY-MM-DD--功能描述.扩展名
 
 ```
 YYYY-MM-DD--HHmm--功能描述.扩展名
+```
+
+同日多份同类文档（PM proposal 2026-05-27 治理 amendment）：
+
+```
+YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mtime 已記時分
 ```
 
 规则：
@@ -859,132 +859,21 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `document_inventory.json` | R4 文档信息架构盘点结果：当前 cluster counts、目标 taxonomy、GUI 热交互候选、分阶段执行计划 |
 | `path_redirects.md` | 文档重命名/搬迁 redirect plan；当前仅规划，不代表文件已移动 |
 
-### worklogs/chapters_a-g/ — A-G 章节工作日志（2026-03-11 ~ 2026-03-19）
+### Phase Packet Archive Index — 2026-03 ~ 2026-04 早期 phase 工作日誌（2026-05-28 歸檔）
 
-| 文件 | 内容 |
-|------|------|
-| `2026-03-11--openclaw_bybit_进度日志.txt` | 03-11 项目启动，基础层搭建进度 |
-| `2026-03-12--openclaw_bybit_进度日志.txt` | 03-12 继续基础层开发 |
-| `2026-03-13--详细工作日志.txt` | 03-13 详细工作记录 |
-| `2026-03-13--三日补充综合日志.txt` | 03-11~13 三日补充综合回顾 |
-| `2026-03-17--chapter_g_工程记录.txt` | G 章工程记录（Revision 2） |
-| `2026-03-17--chapter_g_执行清单.txt` | G 章执行清单（Revision 2） |
-| `2026-03-17--engineering_log.txt` | 03-17 工程日志 |
-| `2026-03-19--补充记录1.txt` | 03-19 补充记录 |
-| `2026-03-19--当前进度图_校正后.txt` | 进度图校正版 |
-| `2026-03-19--工作记录_含0317至0319校正与修复.txt` | 03-17~19 校正与修复工作记录 |
-| `2026-03-19--完整版当前进度图.txt` | 完整版进度图（校正后） |
+下表 6 個目錄為 OpenClaw 早期 phase（A-K 章節 + Phase 5 + Control API/GUI + learning）工作日誌。**2026-05-28 phase 2 cleanup 統一歸檔至 `archive/2026-05-28--worklog_<topic>_archived/`**，原 detail 索引保留於各 archive 子目錄的 `_README.md`（grep 可命中）。
 
-### worklogs/chapters_h-i/ — H-I 章节工作日志（2026-03-20 ~ 2026-03-22）
+| Phase 目錄 | 期間 | 歸檔位置 | 檔數 |
+|---|---|---|---|
+| `chapters_a-g/` | 2026-03-11 ~ 03-19 | [`archive/2026-05-28--worklog_chapters_a-g_archived/`](archive/2026-05-28--worklog_chapters_a-g_archived/_README.md) | 11 |
+| `chapters_h-i/` | 2026-03-20 ~ 03-22 | [`archive/2026-05-28--worklog_chapters_h-i_archived/`](archive/2026-05-28--worklog_chapters_h-i_archived/_README.md) | 13 (README ghost +1) |
+| `chapters_j-k/` | 2026-03-22 ~ 03-24 | [`archive/2026-05-28--worklog_chapters_j-k_archived/`](archive/2026-05-28--worklog_chapters_j-k_archived/_README.md) | 8 |
+| `control_api_gui/` | 2026-03-25 ~ 04-02 | [`archive/2026-05-28--worklog_control_api_gui_archived/`](archive/2026-05-28--worklog_control_api_gui_archived/_README.md) | 50 |
+| `phase5_arch_rc1/` | 2026-04-03 ~ 04-07 | [`archive/2026-05-28--worklog_phase5_arch_rc1_archived/`](archive/2026-05-28--worklog_phase5_arch_rc1_archived/_README.md) | 5 (README ghost +15) |
+| `learning/` | 2026-03-26 | [`archive/2026-05-28--worklog_learning_archived/`](archive/2026-05-28--worklog_learning_archived/_README.md) | 1 |
 
-| 文件 | 内容 |
-|------|------|
-| `2026-03-20--openclaw_工作记录.txt` | 03-20 H-I 章节开始 |
-| `2026-03-20--超详细续接总报告.txt` | 超详细续接总报告 |
-| `2026-03-20--h0_本地判断核心蓝图_v1.txt` | H0 本地判断核心蓝图 v1 |
-| `2026-03-20--h_i_本地执行内核讨论备份.txt` | H-I 本地执行内核讨论备份 |
-| `2026-03-22--0320工作报告_新对话接手版.txt` | 03-20 工作报告（供新对话接手） |
-| `2026-03-22--a-i_接手摘要.txt` | A-I 全量接手摘要 |
-| `2026-03-22--h_i_正式完工对账报告.txt` | H-I 正式完工对账报告 |
-| `2026-03-22--h_i_兼容性对账清单.txt` | H-I 兼容性对账清单（新对话首步验证） |
-| `2026-03-22--全量整合总报告.txt` | 全量整合总报告 |
-| `2026-03-22--全量整合总报告_重新导出.txt` | 全量整合总报告（重新导出版） |
-| `2026-03-22--晚_工程记录.txt` | 03-22 晚间工程记录（Fix H-I） |
-| `2026-03-22--晚_新对话接手指示.txt` | 新对话接手指示 |
-| `2026-03-22--晚_新对话接手prompt.txt` | 新对话接手 Prompt |
-| `2026-03-22--晚_h1_no_call_semantics_patch.txt` | H1 no-call 语义补丁 bundle |
-
-### worklogs/chapters_j-k/ — J-K 章节 + GitHub 迁移（2026-03-22 ~ 2026-03-24）
-
-| 文件 | 内容 |
-|------|------|
-| `2026-03-22--项目总报告_含github核对.md` | 项目总报告（含 GitHub 核对） |
-| `2026-03-22--夜间_最终整合总报告.txt` | 夜间最终整合总报告 |
-| `2026-03-22--夜间_github迁移与诊断报告.txt` | GitHub 迁移与夜间诊断报告 |
-| `2026-03-22--夜间_新对话接手prompt_github版.txt` | 新对话接手 Prompt（GitHub 工作流版） |
-| `2026-03-24--工程总报告_结构迁移完成.txt` | 工程总报告：结构迁移完成 + 新工作流 |
-| `2026-03-24--交接日志.txt` | 03-24 晚交接日志 |
-| `2026-03-24--新对话启动prompt.txt` | 新对话启动 Prompt |
-| `2026-03-24--work_report_current_dialogue.md` | 当前对话工作报告 |
-
-### worklogs/control_api_gui/ — Control API + GUI 开发日志（2026-03-25 ~ 2026-04-02）
-
-| 文件 | 内容 |
-|------|------|
-| `2026-03-25--jk收口_单独接手文件.txt` | J-K 收口完成版接手文件 |
-| `2026-03-25--jk收口_完整工程记录.txt` | J-K 收口完成版完整工程记录 |
-| `2026-03-25--g到k详细复盘与程序总表.txt` | G~K 详细复盘与程序总表 |
-| `2026-03-25--新对话工作方式与带入文件清单.txt` | 新对话工作方式与带入文件清单 |
-| `2026-03-25--新对话启动prompt.txt` | 新对话启动 Prompt |
-| `2026-03-26--api_gui_全量工程报告.md` | API + GUI 全量工程报告 |
-| `2026-03-26--paper_trading_engine_完整工程日志.md` | Paper Trading Engine 完整工程日志（引擎核心 + 14 路由 + GUI + 43 测试） |
-| `2026-03-26--beta_pipeline_shadow_decision_metrics.md` | Beta 管线完善：实时行情 + 自动桥接 + 影子决策管线 + 性能指标（248 测试，73 路由） |
-| `2026-03-26--brainstorm_openclaw_agent_architecture.md` | Brainstorm 留档：OpenClaw 定位（通信层非大脑）+ Agent 智能化架构讨论 |
-| `2026-03-26--openclaw_fusion_console_systemd_服务化.md` | OpenClaw 融合 + 统一控制台 + systemd 服务化 + 远程访问方案规划 |
-| `2026-03-26--brainstorm_layer2_ai_reasoning_engine.md` | Brainstorm：Layer 2 AI 推理引擎设计（三层架构 + Agent 循环 + 工具箱 + 成本控制） |
-| `2026-03-27--layer2_ai_engine_design_session.md` | Layer 2 设计工作记录：搜索 Provider 方案调研决策 + 4 层降级体系 + 模型升级判断 + 自适应预算 + PnL 归因 |
-| `2026-03-27--phase1_risk_framework_implementation.md` | Phase 1 早期工程日志：S1-S5 安全修复 + 三层 P0/P1/P2 风控 + 8 路由（327→369） |
-| `2026-03-27--phase1_complete_engineering_log.md` | Phase 1 中期工程日志（第 1-2 轮审核后） |
-| `2026-03-27--phase1_final_audited_engineering_log.md` | ★ Phase 1 最终审核版：4 轮审核 + 25 问题修复 + 405 测试 + 93 路由 |
-| `2026-03-27--pre_phase1_audit_fixes.md` | Pre-Phase1 代码审核：metrics 完全重写 + SSRF 防护 + 成本追踪 race fix + adaptive 强制执行 |
-| `2026-03-27--phase2_local_strategy_toolkit_engineering_log.md` | ★ Phase 2 完整工程日志：K线管理器 + 6 指标 + 信号生成器 + 4 策略 + 编排器 + 11 路由 + 严格审核修复（620 测试） |
-| `2026-03-27--phase3_pipeline_bridge_engineering_log.md` | Phase 3 工程日志：管线桥接器 + 止损管理器 + 信号增强 + 策略增强（640 测试） |
-| `2026-03-27--full_system_audit_fix_engineering_log.md` | ★ 全系统审核修复工程日志：7C+19H+28M+16L + 路径统一 + I章去重 + mutator 3x→1x |
-| `2026-03-27--roadmap_B_to_I_engineering_log.md` | ★ 路线图 B-I 实现：cron+加权共识+volume+Grid几何+多TF+tick防护+持久化+Delta-Neutral套利（641测试） |
-| `2026-03-27--full_day_session_summary.md` | ★★ 完整工作日总结：13 commits + 644 测试 + 20 新文件 + GUI 待做清单 |
-| `2026-03-27--gui_three_layer_implementation.md` | GUI 三层架构：Grafana + TradingView + Bybit Demo + 登录系统 + 统一控制台 |
-| `2026-03-27--autonomous_agent_scanner_deployer.md` | ★ 自主交易 Agent：市场扫描器 650 符号 + 策略自动部署 + Demo 同步 + 登录系统 |
-| `2026-03-27--session2_audit_fix_and_agent_autonomy.md` | Session 2 总结：GUI三层 + Demo + 自主Agent + R1-R5修复 + 第4轮审核7C+10H |
-| `2026-03-27--session3_remaining_audit_fixes.md` | Session 3：残留审核全修（时间戳6处+浮点容差+TIF执行+Kahan求和+401刷屏+volume动态+测试修复=646测试） |
-| `2026-03-27--gui_10tab_restructure.md` | ★ GUI 10-Tab 全面重构：common.js+8新Tab+双层解释+三层信息密度+99 API端点覆盖 |
-| `2026-03-27--session4_gui_10tab_professional_console.md` | ★★ Session 4 完整日志：6 commits+17 files+3964 行+多供应商AI+可编辑风控+中文状态+确认弹窗 |
-| `2026-03-27--remote_access_and_security_hardening.md` | 远程访问配置 + 安全加固：Tailscale + secrets 权限 + API key 硬编码消除 |
-| `2026-03-27--session5_pipeline_launch_and_openclaw_analysis.md` | Session 5：管线启动验证 + OpenClaw 能力深挖 + systemd 自动重启确认 + Paper Trading 169 单 |
-| `2026-03-28--session6_halfday_data_analysis_and_fixes.md` | ★ Session 6：半天数据分析（胜率0%根因）+ 4项修复（扫描器过滤+置信度0.55+.orig stub+3张DB表） |
-| `2026-03-28--session7_system_audit_and_fixes.md` | ★★ Session 7：系统全面审核（8模块/12问题）+ 5项修复（市场流自动重启+unknown regime保护+trend cap+时间驱动+confidence对齐），646 测试通过 |
-| `2026-03-28--session8_functional_audit_report.md` | ★★★ Session 8：A-J 全面功能审核（25h/684fill/胜率0%）+ E1/G1/H1 三项修复（自动学习/连续亏损暂停/ATR止损接入），428 测试通过 |
-| `2026-03-28--session9_bug_fixes_and_verification.md` | ★★ Session 9：3项 bug 修复（net_realized_pnl字段/active_count+1/on_fill仓位同步链路）+ 18个验证测试，664 测试通过 |
-| `2026-03-28--session10_ai_cost_and_double_stop_fix.md` | ★★ Session 10：2项修复（total_ai_cost汇总/双重止损防护）+ 7个验证测试，664 测试通过 |
-| `2026-03-28--session11_regime_aware_stops.md` | ★★★ Session 11：regime感知止损/止盈/时间三维调整（REGIME_STOP/TP/TIME_MULTIPLIERS）+ 8个验证测试，33+428 测试通过 |
-| `2026-03-29--session12_data_analysis_and_bug_fixes.md` | ★★★ Session 12：数据分析发现 0% 胜率根因（fill碎片化+注意力税误关仓），修复 F1/F2/E1a/E1b + GUI G1-G6（活跃订单/价格精度/Demo对比/学习系统），432 测试通过 |
-| `2026-03-31--gui_tab_restructure_ollama_optimization.md` | ★★ GUI Tab 重构（Paper+Demo合并+实盘占位）+ Ollama 优化（9B/27B分配+think=False 4x提速+edge filter修复）+ 后台市场流常驻 + 周报时间表调整 |
-| `2026-03-31--position_sizing_dynamic_qty_rebalancer.md` | ★★ Position Sizing 重構：3% risk/trade + 25 symbols + 動態 qty（每單重算）+ 智能資本再分配（弱倉自動平倉讓位新機會）|
-| `2026-03-31--wave4_p2p3_security_audit_fixes.md` | ★★ Wave 4 P2/P3 批次：5 Sprint · P2-NEW-1~9 + FA-2/3/4 + P3-TECH-1~3（安全補齊 + 端點矩陣完整覆蓋 + NaN/inf 邊界值 + event loop 阻塞修復），2555 tests |
-| `2026-03-31--paper_demo_sync_fixes.md` | ★★★ Paper/Demo 同步修復：10 項分歧根源分析 · 3 CRITICAL 修復（止損同步+失敗標記+對賬參數名）· qty 統一四捨五入 · 對賬引擎首次真正運行 |
-| `2026-03-31--full_day_complete_engineering_log.md` | ★★★★ 2026-03-31 全天完整工程日誌（整合版）：7-Agent 全系統審計 · P0 CRITICAL×4 修復 · Wave 0-3 全系列 · H0 Gate Day 1-3 · Wave 4 Sprint 4a-4e · Wave 5a Position Sizing + 5b Paper/Demo 同步 · Wave 5 Sprint H鏈接通 · Wave 6 Sprint 0+1a+1b+2 + Cleanup · Phase 2 Batch 2A+2B，2624 tests |
-| `2026-04-01--phase2_batch2c_completion.md` | ★★★ Phase 2 Batch 2C 完成：接通 _register_pattern_claims 雙路徑 + backtest_routes.py API + 決策權重集成 · Git 分歧解決（rebase）· 3103 tests |
-| `2026-04-01--wave7_demo_sync_spot_category_pinned.md` | ★★★ Wave 7：Paper 內部平倉 Demo 同步 + stop_session 自動清倉 + Spot 品類全鏈路（Scanner+策略+Position）+ demo_reserved 解鎖 + GUI 品類標籤 + BTC/ETH 釘選幣種 |
-| `2026-04-01--wave7a_spot_symbol_category.md` | ★★★ Wave 7a Spot 品類啟用 + 方案 A/B symbol-category 映射：SPOT-1~5 全通 + _symbol_category_map 雙向注入 + SymbolCategoryRegistry 啟動填充，3103→3161 tests |
-| `2026-04-01--phase3_full_completion_and_wave7b.md` | ★★★★ Wave 7b Inverse 品類（INV-1~5）+ Phase 3 全完成（3A ExperimentLedger/Routes/EvolutionEngine + 3B TruthSourceRegistry持久化/AnalystAgent觀測/auto_seed + 3C EvolutionScheduler週進化/小時清理/GUI dashboard）· 3103→3330 tests |
-| `2026-04-01--governance_auth_restart_fix_and_order_unblock.md` | ★★ GovernanceHub 重啟後授權丟失根因診斷與修復：5 層診斷（state.json→audit→bridge stats→auth NONE）· get_status() auth_pending_approval 修復 · /session/reauth 端點 · startup 自動補授 · 首筆 FARTCOINUSDT 訂單解封成交 |
-| `2026-04-01--main_legacy_refactor_wave_a_to_e.md` | ★★★★ main_legacy.py 重構全記錄：5265→407 行（-92%），Wave A-E 共拆出 11 模塊，monkey-patch 延遲查找修復，E5 審查 build_review_queue bug 修復，§14 約定建立，3005 tests 零回歸 |
-| `2026-04-01--wave8_pa_reality_check_and_parallel_fix.md` | ★★★★ Wave 8 工作日誌：PA 69 項實況檢查 + 6 軌道×2 批並行修復 38/39 項 + strategist 拆分 + on_tick/mutator 拆分 + now_ms 統一 + +148 測試 |
-| `2026-04-02--batch9a_deterministic_adaptive_risk.md` | ★★★ Batch 9A 確定性自適應風控：QC 量化審查驅動 · ATR 雙窗口 + 成本感知入場門檻 + 追蹤止損成本約束 + round-trip 真實費用 · 修復 ATR 止損死代碼 bug · +66 測試 · 3703 passed |
-
-### worklogs/phase5_arch_rc1/ — Phase 5 / L3 整改 / ARCH-RC1 開發日誌（2026-04-03 ~ 2026-04-07）
-
-| 文件 | 内容 |
-|------|------|
-| `2026-04-03--daily_summary.md` | ★★★★ 2026-04-03 日匯總（12 Sessions · 28 Commits）：文檔治理 + Phase 0-3 全覽 + Rust R-00~R-04 |
-| `2026-04-04--daily_summary.md` | ★★★★ 2026-04-04 日匯總：V2 策略功能全面啟用（P0 緊急修復）+ Bybit API 基礎設施 |
-| `2026-04-04--td01_td02_td03_file_split.md` | Session 3：TD-01/02/03 Python 大文件拆分（Phase 1 前置技術債清零） |
-| `2026-04-04--session4_bybit_api_audit.md` | ★★★ Session 4：BB+E5+PA 三角色聯合審計 Bybit V5 API 層 + 完整 API 字典手冊 |
-| `2026-04-04--session5_bybit_full_integration.md` | ★★★ Session 5：9 項 API 整合改進 + 3 新模組 + Demo→Live 對齊（PM+PA+FA+BB 四角色） |
-| `2026-04-05--daily_summary.md` | ★★★★ 2026-04-05 日匯總（3 Sessions）：Phase 1 Full Rust 數據管線（G1-G4）+ Phase 2/3a/3b ML 基礎設施 + EXT-1 Exchange-as-Truth + RRC-1 設計 + 風控 GUI 補齊 + Demo 架構完成 |
-| `2026-04-06--daily_summary.md` | ★★★★ 2026-04-06 日匯總：L3 整改 R0/R1/R2 + Drift Detector 接線 + Phase 4 啟動 |
-| `2026-04-06--session10_r0_r1_remediation.md` | ★★★ Session 10：L3 414 findings → 63 tracker + R0 Week 1（7 P0 修復）+ R1 Wave 1（WP-B Security + WP-MIT DB/ML + idle writer） |
-| `2026-04-06--session11_p1_6_drift_detector.md` | Session 11：WP-MIT P1-6 drift_detector PG 接線（fetch_active_baselines / DriftMonitorState / PSI 滑動窗口） |
-| `2026-04-06--session11_r2_batch.md` | ★★★ Session 11：R1 收尾 + R2 批次（多項 L3 整改繼續推進） |
-| `2026-04-06--session11_precompact.md` | Session 11 Pre-Compact 快照：453 engine + 411 core + 35 ml_training · 0 failures |
-| `2026-04-06--session12_precompact.md` | Session 12 Pre-Compact 快照：474 engine + 413 core + 35 ml_training · 0 failures |
-| `2026-04-06--session13_precompact.md` | ★★★★ Session 13：I-22 event_consumer 拆分 + FA-GAP-2/4 接線（cost_ratio/Kelly ATR%）+ per-symbol 真實費率 + SEC-11 fail-closed + FA-GAP-8/9 dead code 清除 |
-| `2026-04-06--session_progress_2.md` | Session 進度快照（Session 2）|
-| `2026-04-07--daily_summary.md` | ★★★★ 2026-04-07 日匯總：Phase 4 完成 + ARCH-RC1 1A/1B/1C-1/1C-2 |
-| `2026-04-07--session_arch_rc1_1a_1b.md` | ARCH-RC1 1A + 1B：ConfigStore 單一寫入口 + StrategyParams JSON 接線 |
-| `2026-04-07--session_arch_rc1_1c1_1c2.md` | ARCH-RC1 1C-1 + 1C-2：IPC patch 接線 + hot-reload ArcSwap |
-| `2026-04-07--session_arch_rc1_1c2_complete.md` | ARCH-RC1 1C-2 完成：IPC 全鏈路驗收 |
-| `2026-04-07--session_phase4_1_complete.md` | Phase 4-1 完成日誌 |
-| `2026-04-07--session_phase4_complete.md` | Phase 4 全量完成日誌 |
+> 雙向 link：本表為順向入口；每個 archive 子目錄 `_README.md` 含原 README 對應段（grep `<檔 stem>` 仍命中）+ 逆向 link 回 `_indexes/path_redirects.md` Executed phase 2 段。
+> Pre-2026-04-08 phase work moved to archive/; new worklogs go to `worklogs/` root（見下方「頂層工作日誌」段）。
 
 ### worklogs/ — 頂層工作日志（2026-04-08+，daily_summary 為當日權威）
 
@@ -1001,12 +890,6 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-04-27--live_auth_watcher_event_consumer_spawn_fix.md` | ★★ P0 Silent Regression：LiveAuthWatcher respawn 路徑遺漏 `spawn_live_pipeline` → event_consumer 8 天未 spawn（2252 tests）· commits 588d207 / 0fa41b1 / merge 1fac9b1 |
 
 > 2026-04-14 worklog audit：所有舊碎片已合併至當日 `daily_summary.md` 並刪除；`2026-04-08--arch_rc1_1c_history_archive.md` 已移至 `docs/archive/`。
-
-### worklogs/learning/ — L 章学习系统开发日志（2026-03-26）
-
-| 文件 | 内容 |
-|------|------|
-| `2026-03-26--L章_自动学习管线与安全加固_完整工程日志.md` | L 章自动学习管线 + 安全加固全量工程日志（含审核包设计、96 测试、8 项安全修复） |
 
 ### handoffs/ — 阶段交接文档
 
@@ -1186,12 +1069,12 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 | 文件 | 内容 |
 |------|------|
-| `2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md` | REF-20 Paper Replay Lab 開發方案 v0.1：早期審查材料，指出 manifest、source tagging、calibration、auth、安全與 UX 等風險 |
-| `2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md` | REF-20 Paper Replay Lab 開發方案 V1：第一版開發基線，確認 manifest signature、route auth、replay registry、MLDE source guard、execution calibration、多重檢驗與 5-Agent 抽出等問題大多屬真實風險 |
+| `archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md` | REF-20 Paper Replay Lab 開發方案 v0.1：早期審查材料，指出 manifest、source tagging、calibration、auth、安全與 UX 等風險（2026-05-28 archived；由 v3 取代） |
+| `archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md` | REF-20 Paper Replay Lab 開發方案 V1：第一版開發基線，確認 manifest signature、route auth、replay registry、MLDE source guard、execution calibration、多重檢驗與 5-Agent 抽出等問題大多屬真實風險（2026-05-28 archived；由 v3 取代） |
 | `2026-05-02--ref20_v1_round2_audit.md` | REF-20 V1 第二輪 audit：對 V1 的安全、資料、量化、UX、API 審查意見；其中大多成立，但 P2 禁 IntentProcessor / Mac 禁 S2 public data 需在 V2 中反對或改寫 |
-| `2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md` | REF-20 Paper Replay Lab 開發方案 V2：整合 Round2 audit；已被 Round3/V2.1 收斂為更嚴格實作基線 |
+| `archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md` | REF-20 Paper Replay Lab 開發方案 V2：整合 Round2 audit；已被 Round3/V2.1 收斂為更嚴格實作基線（2026-05-28 archived；由 v3 取代） |
 | `2026-05-02--ref20_v2_round3_audit.md` | REF-20 V2 第三輪 audit：7-agent 審查 V2，指出 schema 物理欄位、MLDE retrofit、DB role guard、V### governance、P2 isolation、UX subdoc、Mac non-actionable policy 等 P0 gates |
-| `2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md` | REF-20 Paper Replay Lab 開發方案 V2.1 Round3：當前實作前基線；接受 Round3 真實問題，明確 schema/DB/migration/runner/quant/UX gates，保留 P2 isolated no-write TickPipeline/IntentProcessor 方案 |
+| `archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md` | REF-20 Paper Replay Lab 開發方案 V2.1 Round3：當前實作前基線；接受 Round3 真實問題，明確 schema/DB/migration/runner/quant/UX gates，保留 P2 isolated no-write TickPipeline/IntentProcessor 方案（2026-05-28 archived；由 v3 取代） |
 | `2026-05-02--ref20_ux_subdoc_v1.md` | REF-20 Paper Replay Lab UX Subdoc V1：P1 前必讀 UX contract；定義 Session/Replay/Compare/Handoff、mode badges、disabled states、no submit/cancel 與 handoff gating |
 | **`2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md`** | **★ SoT** REF-20 Paper Replay Lab 開發方案 V3：取代 V2.1 Round3 為當前 implementation baseline；§12 25 條 acceptance binding；§4.1 replay.experiments 22 col + replay.simulated_fills 17 col 規範表；§4.2 mlde_shadow_recommendations 三 column 雙路 CHECK |
 | `2026-05-03--ref20_implementation_workplan_v1.md` | REF-20 Implementation Workplan V1：9-Wave / 76-task atomic breakdown；§6 hard prereq table 7 條；總工時 12-14 sprint（不含 P5 LG 等期）|
@@ -1202,10 +1085,10 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-05-03--ref20_final_closure_and_deploy_guidance.md` | REF-20 Final IMPL closure + Operator Deploy Guidance；§4 14-step procedure (Phase A-G)；**注意**：line 99 「~3500+ PASS」是虛構數字（cold reality 3387 PASS，差 113-126；P2-FOLLOW-UP-5 訂正 ticket 待修）|
 | `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md` | REF-21 Full-Chain Replay Engine V1.3：active plan；修正 negative-edge fail-open，補 subprocess deploy path、V057/V058/V059/V060 DDL sketch + Linux PG dry-run、promotion FSM/signatures、Bybit SSOT URI、block bootstrap、survival/correlation/cost thresholds、baseline SLA |
 | `2026-05-06--ref21_gui_ux_spec_v1_1.md` | REF-21 Replay GUI/UX Spec V1.1：active GUI companion；補二次確認、cooldown、12-tab 一致性、a11y/i18n、agent quota UI、sign-off SOP |
-| `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md` | REF-21 Full-Chain Replay Engine V1.2：已被 V1.3 supersede，保留作第三輪 audit 追溯 |
-| `2026-05-06--ref21_gui_ux_spec_v1.md` | REF-21 Replay GUI/UX Spec V1：已被 V1.1 supersede，保留作 GUI 初版追溯 |
-| `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md` | REF-21 Full-Chain Replay Engine V1.1：已被 V1.2 supersede，保留作第二輪 audit 追溯 |
-| `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md` | REF-21 Full-Chain Replay Engine V1：已被 V1.1 supersede，保留作方向性 baseline 與 audit 追溯 |
+| `archive/2026-05-28--ref21_full_chain_replay_engine_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md` | REF-21 Full-Chain Replay Engine V1.2：已被 V1.3 supersede，保留作第三輪 audit 追溯（2026-05-28 archived） |
+| `archive/2026-05-28--ref21_gui_ux_spec_superseded/2026-05-06--ref21_gui_ux_spec_v1.md` | REF-21 Replay GUI/UX Spec V1：已被 V1.1 supersede，保留作 GUI 初版追溯（2026-05-28 archived） |
+| `archive/2026-05-28--ref21_full_chain_replay_engine_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md` | REF-21 Full-Chain Replay Engine V1.1：已被 V1.2 supersede，保留作第二輪 audit 追溯（2026-05-28 archived） |
+| `archive/2026-05-28--ref21_full_chain_replay_engine_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md` | REF-21 Full-Chain Replay Engine V1：已被 V1.1 supersede，保留作方向性 baseline 與 audit 追溯（2026-05-28 archived） |
 | `2026-05-XX--ref21_s1_recorder_spec_placeholder.md` | REF-21 S1 recorder placeholder：已被 REF-21 Full-Chain Replay V1 接管，保留作 REF-20 Wave 5 歷史 trace |
 | `2026-05-03--ref20_sprint3_track_i_linux_deploy_runbook.md` | REF-20 Sprint 3 Track I Linux deploy runbook |
 | `2026-05-03--ref20_sprint4_final_closure.md` | REF-20 Sprint 4 final closure |
