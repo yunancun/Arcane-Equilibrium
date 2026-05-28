@@ -183,11 +183,32 @@ impl SharedFailsafeWatcher {
     /// 週期性檢查 timer 是否過期；過期則執行完整副作用鏈。
     ///
     /// 為什麼拆三段（per spec §4.7 + §11.3 反對 3 mitigation）：
-    ///   1. **lock → 判定 expired → drop lock**（純邏輯，<1μs）；
+    ///   1. **lock → 判定 expired → 同鎖內 claim（set escalated=true）→ drop lock**
+    ///      （純邏輯，<1μs）；
     ///   2. **無鎖跑 `execute_failsafe_escalation`**（內含 SM transition + N exchange
     ///      sync + audit emit，可能秒級；持 `RiskGovernorSm` 由 caller 注入，
     ///      本 watcher 不持有 risk SM 鎖）；
-    ///   3. **re-lock → 標記 `escalated_for_current_arm = true`**（idempotent 守衛）。
+    ///   3. （已併入 Step 1）idempotent guard 在 Step 1 同鎖內就 claim 完成。
+    ///
+    /// 為什麼 idempotent guard 必須在 **Step 1 同一個 lock hold 內** set（MED-2 修法）：
+    ///   原本把 `set_escalated_for_current_arm(true)` 留到 Step 3 re-lock 才設。但
+    ///   `&self` 容許多個並發 `check_timer` 呼叫（C4 spawn 多 tick task / 重入），
+    ///   兩個並發呼叫可能都在 Step 1 看到 `timer_expired == true`（因 flag 尚未設），
+    ///   各自 drop 鎖去 await → double SM-04 transition + double audit。
+    ///   改為「lock 內判定 expired 後，立刻在同一鎖 hold 內 set flag 才 drop」：
+    ///   第二個並發呼叫 re-lock 時看到 flag 已 set → `timer_expired` 回 false → 不重觸發。
+    ///   這是「claim-before-await」模式，把判定與佔用原子化在同一鎖。
+    ///
+    /// escalate 失敗時 flag 不 reset（fail-safe 設計判斷）：
+    ///   survival 優先。即便 `execute_failsafe_escalation` 內部個別副作用失敗（exchange
+    ///   sync / audit emit），也不該把 flag reset 讓下一 tick re-fire — 重觸發會造成
+    ///   double SM transition / double audit 噪音，且 escalation 本身設計為「個別失敗
+    ///   不 rollback transition、報告回顯失敗」（見 `execute_failsafe_escalation` 不變量）。
+    ///   失敗細節由回傳的 `FailsafeExecutionReport`（sync_records / audit_error）承載，
+    ///   交由 caller / audit 記錄與告警，而非靠重觸發補救。
+    ///   timer 重新武裝只在 `evaluate_dispatch` 觀察到新一輪 AllFail→AllSuccess→AllFail
+    ///   或 operator ack 時才會 reset flag（見 mod.rs `evaluate_dispatch` /
+    ///   `record_operator_ack`）— 即「同一次武裝只 escalate 一次」語義由那條路徑保證。
     ///
     /// 不變量：步驟 2 全程不持 `state.lock`；任何 caller 持有的 pipeline write lock
     /// 也應在呼叫本 method 前 drop（C4 spawn task 負責確保）。
@@ -195,18 +216,24 @@ impl SharedFailsafeWatcher {
         &self,
         risk_sm: &mut RiskGovernorSm,
     ) -> Option<FailsafeExecutionReport> {
-        // Step 1: 判定是否到期 — lock 純邏輯，無 await
+        // Step 1: lock 內判定到期 + 立刻 claim（atomic 佔用）+ drop lock — 純邏輯無 await
         let now_ms = self.clock.now_ms();
-        let expired = {
-            let state = self.state.lock();
-            timer_expired(&state, now_ms, FailsafeConfig::DEFAULT_TIMEOUT_MS)
+        let claimed = {
+            let mut state = self.state.lock();
+            if timer_expired(&state, now_ms, FailsafeConfig::DEFAULT_TIMEOUT_MS) {
+                // 在同一鎖 hold 內立刻佔用 idempotent guard，杜絕並發雙觸發。
+                state.set_escalated_for_current_arm(true);
+                true
+            } else {
+                false
+            }
         }; // ← lock guard 此處 drop
 
-        if !expired {
+        if !claimed {
             return None;
         }
 
-        // Step 2: 無鎖跑完整副作用鏈
+        // Step 2: 無鎖跑完整副作用鏈（flag 已在 Step 1 set，不在此 re-lock）
         let report = execute_failsafe_escalation(
             risk_sm,
             self.positions.as_ref(),
@@ -216,12 +243,6 @@ impl SharedFailsafeWatcher {
             now_ms,
         )
         .await;
-
-        // Step 3: re-lock 標記 idempotent guard
-        {
-            let mut state = self.state.lock();
-            state.set_escalated_for_current_arm(true);
-        }
 
         Some(report)
     }
@@ -266,7 +287,8 @@ mod tests {
         ExchangeStopError, FailsafeAuditError, NotificationChannel,
     };
     use async_trait::async_trait;
-    use openclaw_core::sm::risk_gov::{PositionSnapshot, StopAdjustment};
+    use openclaw_core::sm::risk_gov::{PositionSnapshot, RiskGovernorSm, StopAdjustment};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Mutex as StdMutex;
 
     // ── 最小 mock：不實際下單 / 不寄訊息 ─────────────────────────────────────
@@ -301,6 +323,23 @@ mod tests {
             &self,
             _payload: serde_json::Value,
         ) -> Result<(), FailsafeAuditError> {
+            Ok(())
+        }
+    }
+
+    /// 計數型 audit emitter — MED-2 並發測試用：每次 escalation 會 emit 一次 audit；
+    /// 用 emit 計數驗「同一次武裝只 escalate 一次」（雙觸發會 emit 兩次）。
+    /// 用 `Arc` 共享計數器讓 test 端在 watcher 外讀取。
+    struct CountingAudit {
+        emit_count: Arc<AtomicU64>,
+    }
+    #[async_trait]
+    impl FailsafeAuditEmitter for CountingAudit {
+        async fn emit_auto_escalated(
+            &self,
+            _payload: serde_json::Value,
+        ) -> Result<(), FailsafeAuditError> {
+            self.emit_count.fetch_add(1, Ordering::SeqCst);
             Ok(())
         }
     }
@@ -466,6 +505,74 @@ mod tests {
         assert_send_sync::<NoopAudit>();
         assert_send_sync::<WallClock>();
         assert_send_sync::<Arc<SharedFailsafeWatcher>>();
+    }
+
+    /// T4.12（MED-2 到期 + 並發單觸發）：構造「已武裝且到期」場景，並發 check_timer
+    /// 只 escalate 一次。
+    ///
+    /// 構造法：clock 起點 0 → observe 武裝（armed_at=0）→ advance 過 timeout → 並發
+    /// check_timer。所有呼叫看到 timer 到期，但 idempotent guard 在 Step 1 同鎖 claim，
+    /// 故 audit emit 恰好 1 次、回 Some 恰好 1 次。
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn t4_12_concurrent_expired_escalates_exactly_once() {
+        // 用 Arc 持 clock 讓 observe 武裝後仍能 advance（watcher 內存 Box<dyn>，
+        // 但我們需要先武裝再前進；故 clock 用 Arc 包再各自持有一份）。
+        // SharedFailsafeWatcher::new 需要 Box<dyn FailsafeClock>；AdvanceableClock 不 Clone，
+        // 故改用一個 Arc-backed wrapper clock。
+        let inner = Arc::new(AtomicU64::new(0));
+        struct ArcClock(Arc<AtomicU64>);
+        impl FailsafeClock for ArcClock {
+            fn now_ms(&self) -> u64 {
+                self.0.load(Ordering::SeqCst)
+            }
+        }
+        let emit_count = Arc::new(AtomicU64::new(0));
+        let shared = Arc::new(SharedFailsafeWatcher::new(
+            Box::new(NoopDispatcher),
+            Box::new(EmptyPositions),
+            Box::new(NoopExchange),
+            Box::new(CountingAudit {
+                emit_count: emit_count.clone(),
+            }),
+            Box::new(ArcClock(inner.clone())),
+            FailsafeConfig::default(),
+        ));
+
+        // 武裝在 now=0
+        let armed = shared.observe_dispatch(DispatchOutcome::AllFail);
+        assert!(matches!(armed, FailsafeDecision::TimerArmed { .. }));
+
+        // 前進過 timeout → 武裝到期
+        inner.store(FailsafeConfig::DEFAULT_TIMEOUT_MS + 1, Ordering::SeqCst);
+
+        let mut handles = Vec::new();
+        for _ in 0..16 {
+            let s = shared.clone();
+            handles.push(tokio::spawn(async move {
+                let mut risk_sm = RiskGovernorSm::new();
+                s.check_timer(&mut risk_sm).await
+            }));
+        }
+        let mut some_count = 0_usize;
+        for h in handles {
+            if h.await.unwrap().is_some() {
+                some_count += 1;
+            }
+        }
+
+        assert_eq!(
+            some_count, 1,
+            "並發到期 check_timer 應恰好一次回 Some（idempotent claim 守衛）"
+        );
+        assert_eq!(
+            emit_count.load(Ordering::SeqCst),
+            1,
+            "audit emit 恰好 1 次 — 杜絕 double SM-04 transition + double audit"
+        );
+        // guard 已被 set，後續再 check 不重觸發
+        let mut risk_sm = RiskGovernorSm::new();
+        assert!(shared.check_timer(&mut risk_sm).await.is_none());
+        assert_eq!(emit_count.load(Ordering::SeqCst), 1);
     }
 
     // 為什麼有 unused StdMutex import 警告守衛：
