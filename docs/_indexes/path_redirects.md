@@ -111,4 +111,47 @@ High-value hot interaction candidates:
 
 - 至少保留 1 個 sprint cycle；超過後仍只 archive 不 delete
 - 每個 archive 子目錄含 `_README.md` stub
-- D5 phase packet 6 dir (`phase5_arch_rc1` / `control_api_gui` / `chapters_a-g` / `chapters_h-i` / `chapters_j-k` / `learning`) **未 archive**（PM DEFER；被 README L862-1009 主索引活引用）
+- D5 phase packet 6 dir (`phase5_arch_rc1` / `control_api_gui` / `chapters_a-g` / `chapters_h-i` / `chapters_j-k` / `learning`) **已於 phase 2 archive（2026-05-28）**；見下方 "Executed Redirects (2026-05-28 phase 2)" 段
+
+---
+
+## Executed Redirects (2026-05-28 phase 2)
+
+> 來源：doc cleanup phase 2（PA tech plan `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-28--doc_cleanup_phase2_tech_plan.md` + R4 review `docs/CCAgentWorkSpace/R4/workspace/reports/2026-05-28--phase_packet_index_refactor_review.md` APPROVE）
+> 執行 commit chain：P2-1 ~ P2-6（6 個 mv batch；每 dir 1 commit）+ P2-7（README 折疊 1461→1344）+ P2-8（補修 5 處活引用）+ P2-9（本段 + JSON regen）
+
+| Old path | New path | Reason | Stub |
+|---|---|---|---|
+| `docs/worklogs/learning/` | `docs/archive/2026-05-28--worklog_learning_archived/` | 歷史 phase 完結（2026-03-26 L 章設計）；30+ 天無讀寫 | `archive/.../_README.md` |
+| `docs/worklogs/phase5_arch_rc1/` | `docs/archive/2026-05-28--worklog_phase5_arch_rc1_archived/` | Phase 5 / ARCH-RC1 設計已落入 ADR-0009；README 索引列 20 但實 5（ghost link 15 條已治理） | `archive/.../_README.md` |
+| `docs/worklogs/chapters_j-k/` | `docs/archive/2026-05-28--worklog_chapters_j-k_archived/` | J-K 章節 + GitHub 遷移完結；新工作流已 active | `archive/.../_README.md` |
+| `docs/worklogs/chapters_a-g/` | `docs/archive/2026-05-28--worklog_chapters_a-g_archived/` | A-G 章基礎層設計已被 DOC-04 v2 + ADR-0001~0005 超越 | `archive/.../_README.md` |
+| `docs/worklogs/chapters_h-i/` | `docs/archive/2026-05-28--worklog_chapters_h-i_archived/` | H-I 核心設計已落入 DOC-02 H0 SLA + SM-04；README 列 14 但實 13（ghost link 1 條已治理） | `archive/.../_README.md` |
+| `docs/worklogs/control_api_gui/` | `docs/archive/2026-05-28--worklog_control_api_gui_archived/` | Phase 1-3 完整工程日誌；當前 SSOT 在 execution_plan + srv/services/control_api/ + git history | `archive/.../_README.md` |
+
+### Ghost link 治理 NOTE
+
+- `phase5_arch_rc1`：原 README L970-993 列 20 條目 vs 實檔 5；15 條 ghost 是 2026-04-14 worklog audit 壓縮後遺留（R4 memory 2026-04-24 記載）；本 phase 2 治理一致
+- `chapters_h-i`：原 README L896 列 `2026-03-22--全量整合总报告.txt` 不存在（實檔為 L897 `..._重新导出.txt`）；1 條 ghost 治理
+
+### Cross-ref additions (Class 3, inline phase 2)
+
+| File | Action |
+|---|---|
+| `docs/audits/2026-04-12--full_program_chain_audit.md` | 文末加 footer NOTE：「本 audit 引用 worklog 已 2026-05-28 歸檔；新 grep 用 archive 路徑」 |
+| `docs/archive/2026-05-28--worklog_control_api_gui_archived/2026-03-27--layer2_ai_engine_design_session.md` | L115-116 內部 self-ref 改為 archive 路徑 |
+| `docs/CLAUDE_REFERENCE.md` L79-98 | 11 entry 路徑改為 archive 路徑 |
+| `docs/references/2026-03-27--system_reference_handbook.md` L216-220 | 5 行區段路徑改為 archive |
+| `docs/governance_dev/changelogs/2026-03-29_T2.23_orig_file_cleanup.md` L106 | 1 行 self-ref 路徑改為 archive |
+
+### Retention policy (phase 2)
+
+- 沿 phase 1 policy：至少保留 1 個 sprint cycle；超過後仍只 archive 不 delete
+- 每個 archive 子目錄含 `_README.md` lineage stub
+- ghost link 治理紀錄保留於 archive `_README.md` 內，作為「為何實檔與當時 README 列表不一致」的歷史證據
+
+### README 折疊（phase 2 配套）
+
+- `docs/README.md` L28-35 樹狀圖 worklogs 子目錄列表收合（-6 行）
+- `docs/README.md` L862-987 + L1005-1009 phase packet 詳細索引（總 132 行）折疊為 L862 起 14 行 "Phase Packet Archive Index" 段
+- 總 README 減少 117 行（1461 → 1344，-8%）；保留 worklogs/ 頂層段（28 個 04-08+ 現役 daily_summary）
