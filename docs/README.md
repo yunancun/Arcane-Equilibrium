@@ -1186,12 +1186,12 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 
 | 文件 | 内容 |
 |------|------|
-| `2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md` | REF-20 Paper Replay Lab 開發方案 v0.1：早期審查材料，指出 manifest、source tagging、calibration、auth、安全與 UX 等風險 |
-| `2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md` | REF-20 Paper Replay Lab 開發方案 V1：第一版開發基線，確認 manifest signature、route auth、replay registry、MLDE source guard、execution calibration、多重檢驗與 5-Agent 抽出等問題大多屬真實風險 |
+| `archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md` | REF-20 Paper Replay Lab 開發方案 v0.1：早期審查材料，指出 manifest、source tagging、calibration、auth、安全與 UX 等風險（2026-05-28 archived；由 v3 取代） |
+| `archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md` | REF-20 Paper Replay Lab 開發方案 V1：第一版開發基線，確認 manifest signature、route auth、replay registry、MLDE source guard、execution calibration、多重檢驗與 5-Agent 抽出等問題大多屬真實風險（2026-05-28 archived；由 v3 取代） |
 | `2026-05-02--ref20_v1_round2_audit.md` | REF-20 V1 第二輪 audit：對 V1 的安全、資料、量化、UX、API 審查意見；其中大多成立，但 P2 禁 IntentProcessor / Mac 禁 S2 public data 需在 V2 中反對或改寫 |
-| `2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md` | REF-20 Paper Replay Lab 開發方案 V2：整合 Round2 audit；已被 Round3/V2.1 收斂為更嚴格實作基線 |
+| `archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md` | REF-20 Paper Replay Lab 開發方案 V2：整合 Round2 audit；已被 Round3/V2.1 收斂為更嚴格實作基線（2026-05-28 archived；由 v3 取代） |
 | `2026-05-02--ref20_v2_round3_audit.md` | REF-20 V2 第三輪 audit：7-agent 審查 V2，指出 schema 物理欄位、MLDE retrofit、DB role guard、V### governance、P2 isolation、UX subdoc、Mac non-actionable policy 等 P0 gates |
-| `2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md` | REF-20 Paper Replay Lab 開發方案 V2.1 Round3：當前實作前基線；接受 Round3 真實問題，明確 schema/DB/migration/runner/quant/UX gates，保留 P2 isolated no-write TickPipeline/IntentProcessor 方案 |
+| `archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md` | REF-20 Paper Replay Lab 開發方案 V2.1 Round3：當前實作前基線；接受 Round3 真實問題，明確 schema/DB/migration/runner/quant/UX gates，保留 P2 isolated no-write TickPipeline/IntentProcessor 方案（2026-05-28 archived；由 v3 取代） |
 | `2026-05-02--ref20_ux_subdoc_v1.md` | REF-20 Paper Replay Lab UX Subdoc V1：P1 前必讀 UX contract；定義 Session/Replay/Compare/Handoff、mode badges、disabled states、no submit/cancel 與 handoff gating |
 | **`2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md`** | **★ SoT** REF-20 Paper Replay Lab 開發方案 V3：取代 V2.1 Round3 為當前 implementation baseline；§12 25 條 acceptance binding；§4.1 replay.experiments 22 col + replay.simulated_fills 17 col 規範表；§4.2 mlde_shadow_recommendations 三 column 雙路 CHECK |
 | `2026-05-03--ref20_implementation_workplan_v1.md` | REF-20 Implementation Workplan V1：9-Wave / 76-task atomic breakdown；§6 hard prereq table 7 條；總工時 12-14 sprint（不含 P5 LG 等期）|
@@ -1202,10 +1202,10 @@ YYYY-MM-DD--HHmm--功能描述.扩展名
 | `2026-05-03--ref20_final_closure_and_deploy_guidance.md` | REF-20 Final IMPL closure + Operator Deploy Guidance；§4 14-step procedure (Phase A-G)；**注意**：line 99 「~3500+ PASS」是虛構數字（cold reality 3387 PASS，差 113-126；P2-FOLLOW-UP-5 訂正 ticket 待修）|
 | `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md` | REF-21 Full-Chain Replay Engine V1.3：active plan；修正 negative-edge fail-open，補 subprocess deploy path、V057/V058/V059/V060 DDL sketch + Linux PG dry-run、promotion FSM/signatures、Bybit SSOT URI、block bootstrap、survival/correlation/cost thresholds、baseline SLA |
 | `2026-05-06--ref21_gui_ux_spec_v1_1.md` | REF-21 Replay GUI/UX Spec V1.1：active GUI companion；補二次確認、cooldown、12-tab 一致性、a11y/i18n、agent quota UI、sign-off SOP |
-| `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md` | REF-21 Full-Chain Replay Engine V1.2：已被 V1.3 supersede，保留作第三輪 audit 追溯 |
-| `2026-05-06--ref21_gui_ux_spec_v1.md` | REF-21 Replay GUI/UX Spec V1：已被 V1.1 supersede，保留作 GUI 初版追溯 |
-| `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md` | REF-21 Full-Chain Replay Engine V1.1：已被 V1.2 supersede，保留作第二輪 audit 追溯 |
-| `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md` | REF-21 Full-Chain Replay Engine V1：已被 V1.1 supersede，保留作方向性 baseline 與 audit 追溯 |
+| `archive/2026-05-28--ref21_full_chain_replay_engine_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md` | REF-21 Full-Chain Replay Engine V1.2：已被 V1.3 supersede，保留作第三輪 audit 追溯（2026-05-28 archived） |
+| `archive/2026-05-28--ref21_gui_ux_spec_superseded/2026-05-06--ref21_gui_ux_spec_v1.md` | REF-21 Replay GUI/UX Spec V1：已被 V1.1 supersede，保留作 GUI 初版追溯（2026-05-28 archived） |
+| `archive/2026-05-28--ref21_full_chain_replay_engine_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md` | REF-21 Full-Chain Replay Engine V1.1：已被 V1.2 supersede，保留作第二輪 audit 追溯（2026-05-28 archived） |
+| `archive/2026-05-28--ref21_full_chain_replay_engine_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md` | REF-21 Full-Chain Replay Engine V1：已被 V1.1 supersede，保留作方向性 baseline 與 audit 追溯（2026-05-28 archived） |
 | `2026-05-XX--ref21_s1_recorder_spec_placeholder.md` | REF-21 S1 recorder placeholder：已被 REF-21 Full-Chain Replay V1 接管，保留作 REF-20 Wave 5 歷史 trace |
 | `2026-05-03--ref20_sprint3_track_i_linux_deploy_runbook.md` | REF-20 Sprint 3 Track I Linux deploy runbook |
 | `2026-05-03--ref20_sprint4_final_closure.md` | REF-20 Sprint 4 final closure |
