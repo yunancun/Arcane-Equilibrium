@@ -935,3 +935,14 @@ MIT AUDIT DONE: docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-27--v104_sup
 **遺留 dirty 狀態 (operator 必清)**: partial-apply 留下 `observability.notification_failsafe_events` 表 + hypertable + compression (0 row),但 V114 **未** 進 `_sqlx_migrations` (max 仍 113)。test row 已 DELETE 清掉。DROP TABLE 被 auto-mode classifier 擋 (用戶禁 trading_ai 破壞性 DROP),須 operator 手動 `DROP TABLE observability.notification_failsafe_events CASCADE` 後再 apply E1 修正版 V114。否則下次 sqlx migrate 會重撞同 GRANT error。
 
 **Report**: 直接回 main session (本 task 不寫 report file)。
+
+## 2026-05-29 V114 fixed dry-run — idempotency BLOCKER (NEW, 2nd-run only)
+
+- **背景**：V114 notification_failsafe_events hypertable。上輪 (2026-05-28) BLOCKER = column-level `GRANT UPDATE (acked_at_utc, acked_by)` 在 compression 之後 → 傳播到 compressed twin (twin 無該 column) → 1st-run abort。E1 fix `faf7c06c` 把 GRANT/REVOKE 移到 compression 之前。
+- **第一跑 (clean DB) PASS**：GRANT-before-compression 修好 1st-run；twin 尚未存在時 column-level grant 合法；all guards PASS，EXIT 0。schema 全對 (17 col / 7d chunk / 30d compress / 2 index / event_type CHECK 1 值)。INSERT+ack 語義對齊 audit_emitter (`WHERE acked_at_utc IS NULL` → 2nd ack UPDATE 0 不覆蓋 acked_by)。
+- **第二跑 (idempotency) FAIL — NEW BLOCKER**：`ERROR: column "acked_at_utc" of relation "_compressed_hypertable_96" does not exist` at line 240。RCA：1st-run 的 compression enable 建了 persistent compressed twin；2nd-run 重抵達 column-level GRANT 時 twin 已存在 → TimescaleDB 傳播 column-level grant 到 twin → 同樣 abort。**GRANT-before-compression 的 reorder 只解 1st-run，不解 re-apply**，因為 twin 跨 run 持久存在。
+- **根因類別**：V114 是全 repo 唯一同時用 column-level `GRANT UPDATE (cols)` + compressed hypertable 的 migration（V109 主 reference 無任何 GRANT）。此 pattern 前所未測；idempotency 交互未被 exercise。
+- **修復方向（給 E1，非自決）**：column-level GRANT 段需 idempotent-safe。選項：(a) 把 column-level GRANT 包進 `DO $$ ... EXCEPTION WHEN undefined_column THEN NULL` swallow twin 報錯；(b) GRANT 前先查 compressed twin 是否存在，存在則 skip column-level grant（grant 已在 1st-run 落 attacl，重跑無需再執行）；(c) 用 table-level GRANT UPDATE + 改用 BEFORE UPDATE trigger 強制 acked_* only（避開 column-level grant 對 twin 的傳播）。建議 (b) 最小改動。
+- **GRANT 語義副發現**：trading_admin = 表 OWNER + superuser → 隱式持全 column UPDATE（`information_schema.column_privileges` 顯示全 17 col UPDATE）。append-only column 限制只 bind 非-owner 非-super role；production GUI ack 路徑須用獨立受限 role 連線，不可用 trading_admin。當前 DB 無此受限 role（只有 replay_writer_role/sandbox_admin/trading_admin）。explicit column GRANT 仍正確落 `pg_attribute.attacl` (acked_at_utc/acked_by = w)。REVOKE PUBLIC UPDATE/DELETE 已執行 (PUBLIC 無 UPDATE/DELETE)。
+- **engine sqlx 風險**：表現留在 DB 含 compressed twin → engine restart 時 sqlx migrate 跑 V114 會重演 2nd-run abort → **migration 鏈卡死，engine 起不來**。故留表 = 危險。建議 DROP 等 E1 修 idempotent 後再 sqlx 統一 apply。
+- **Report**：直接回 main session（無 .md 報告檔，per 角色約束）。
