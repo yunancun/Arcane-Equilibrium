@@ -1,6 +1,8 @@
 # 工程日誌：LIVE-AUTH-WATCHER-EVENT-CONSUMER-SPAWN 修復
 # Engineering Log: Live Auth Watcher Event Consumer Spawn Fix
 
+> 對應 agent report: [docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-27--live_auth_watcher_event_consumer_spawn.md](../CCAgentWorkSpace/E1/workspace/reports/2026-04-27--live_auth_watcher_event_consumer_spawn.md)
+
 日期：2026-04-27
 作者：E1
 類型：P0 Silent Regression 修復 + 部署
