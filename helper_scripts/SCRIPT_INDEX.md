@@ -12,6 +12,13 @@
 | `cron/verify_pg_dump.sh` | round 1 — Bash sidecar 5-check：backup dir / latest dump mtime < 26h / size > 1MB / md5 對齊 JSONL entry / retention prune 生效。operator SSH ad-hoc 場景下不需 venv 快速跑 14-step drill；Python 版 `check_pg_dump_freshness.py` 才是 healthcheck pipeline 主要入口。 |
 | `canary/healthchecks/check_pg_dump_freshness.py` | round 2 — Python 主入口 7-check standalone（FA acceptance §E #7）：5 個對齊 `verify_pg_dump.sh` + 第 6 個 L0 schema coverage smoke（subprocess `pg_restore --list <latest> \| grep earn_movement_log` per FA §C.5）+ 第 7 個 governance_audit_log audit trail（last `pg_dump_completed` ts < 26h）。V113 未 apply / cron 未 fire → INSUFFICIENT_SAMPLE-skip fail-soft。stdlib + psycopg2 only；Linux only（`sys.platform` guard）。被 `passive_wait_healthcheck.checks_cron_heartbeat.check_80_pg_dump_freshness()` wrapper 引用。對齊 [80] healthcheck slot；JSON 輸出 + exit 0/1/2 對齊 `_common.py` 慣例。 |
 
+## 2026-05-28 M11 replay_runner Daily Stage A Smoke
+
+| 腳本 | 用途 |
+|------|------|
+| `cron/install_m11_replay_runner_cron.sh` | M11.a daily 04:00 UTC cron installer：對齊 `install_pg_dump_cron.sh` 模式（Linux only / idempotent guard / DRY-RUN 預設 / env value validate `[[:space:]%[:cntrl:]"'\\\$\`]` + 長度 ≤ 200 / pre-flight 4 項 (secrets env + API token + fixture + release binary)）。`OPENCLAW_M11_REPLAY_CRON_APPLY=1` 才實際寫 crontab。避撞時段已驗：03:00 pg_dump / 03:17 ml_training_maintenance / 04:00 ★ / 04:41 feature_baseline_writer / 06:00 counterfactual_daily / 09:00 replay_key_rotation_check。對齊 PA proposal `2026-05-28--m11_replay_runner_schedule_proposal.md` §4.4 + operator confirm Daily 04:00 UTC (= M11.a)。 |
+| `cron/m11_replay_runner_daily_cron.sh` | M11 Stage A single-fixture smoke heartbeat wrapper：POST `/api/v1/replay/experiments/register` + `/run` 走 in-tree `synthetic_btcusdt.json` fixture；Bearer auth 重用 operator API token（OQ-1 Service principal swap follow-up）；CSRF double-submit (cookie+header 同值 random 32B hex)；fail-soft exit 0 給 cron 避 mail spam。完成/失敗均 INSERT `learning.governance_audit_log` `event_type='audit_write_failed'` + `payload.alert_type='m11_replay_runner_smoke_completed/_register_failed/_failed'`（V035 未含 m11_* event；piggyback per `replay_key_rotation_check` pattern，Sprint 3 Phase A 同步擴 enum）。Linux only / lock dir / heartbeat sentinel `cron_heartbeat/m11_replay_runner_daily.last_fire` / JSONL audit。`[48]` healthcheck flip 預期：first fire 後 24h 內 FAIL → PASS（rows_24h ≥ 1 + rows_7d ≥ 1 條件達標）。 |
+
 ## 2026-05-27 P0-OPS-1 HTTPS / Secure cookie / CSRF / CSP Track A IMPL
 
 | 腳本 | 用途 |
