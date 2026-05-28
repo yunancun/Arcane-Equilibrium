@@ -81,3 +81,33 @@ High-value hot interaction candidates:
 - `docs/execution_plan/2026-05-06--openclaw_gateway_development_plan.md`
 - `docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md`
 - `docs/execution_plan/2026-05-06--ref21_gui_ux_spec_v1_1.md`
+
+---
+
+## Executed Redirects (2026-05-28)
+
+> 來源：doc cleanup phase 1（PM proposal `docs/governance_dev/2026-05-27--doc_governance_cleanup_proposal.md` + PM sign-off `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-28--doc_cleanup_phase1_signoff.md`）
+> 執行 commit：`3a7d21b5` (batch 1: 8 mv + 3 stubs + 1 cross-ref)
+
+| Old path | New path | Reason | Stub |
+|---|---|---|---|
+| `docs/execution_plan/2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md` | `docs/archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md` | superseded_by `2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md` | `archive/.../_README.md` |
+| `docs/execution_plan/2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md` | `docs/archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md` | superseded_by v3 | 同上 |
+| `docs/execution_plan/2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md` | `docs/archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v2.md` | superseded_by v3 | 同上 |
+| `docs/execution_plan/2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md` | `docs/archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v2_1_round3.md` | superseded_by v3 | 同上 |
+| `docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md` | `docs/archive/2026-05-28--ref21_full_chain_replay_engine_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1.md` | superseded_by `2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md` | `archive/.../_README.md` |
+| `docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md` | `docs/archive/2026-05-28--ref21_full_chain_replay_engine_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md` | superseded_by v1_3 | 同上 |
+| `docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md` | `docs/archive/2026-05-28--ref21_full_chain_replay_engine_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md` | superseded_by v1_3 | 同上 |
+| `docs/execution_plan/2026-05-06--ref21_gui_ux_spec_v1.md` | `docs/archive/2026-05-28--ref21_gui_ux_spec_superseded/2026-05-06--ref21_gui_ux_spec_v1.md` | superseded_by `2026-05-06--ref21_gui_ux_spec_v1_1.md` | `archive/.../_README.md` |
+
+### Cross-ref additions (Class 3, inline batch 1)
+
+| File | Action |
+|---|---|
+| `docs/worklogs/2026-04-27--live_auth_watcher_event_consumer_spawn_fix.md` | 頂部加 `> 對應 agent report: docs/CCAgentWorkSpace/E1/workspace/reports/2026-04-27--live_auth_watcher_event_consumer_spawn.md` |
+
+### Retention policy
+
+- 至少保留 1 個 sprint cycle；超過後仍只 archive 不 delete
+- 每個 archive 子目錄含 `_README.md` stub
+- D5 phase packet 6 dir (`phase5_arch_rc1` / `control_api_gui` / `chapters_a-g` / `chapters_h-i` / `chapters_j-k` / `learning`) **未 archive**（PM DEFER；被 README L862-1009 主索引活引用）
