@@ -507,16 +507,15 @@
      Default = Level 1 Conservative；Level 2 Standard 受 evidence baseline gating。 -->
 <div class="gov-section-label">Autonomy Posture / 自主程度</div>
 <div class="oc-card gov-full-row" id="autonomy-posture-card">
-  <!-- Preview-only banner：後端 endpoint + V099 schema 未 land，全區 mock data -->
+  <!-- Runtime banner：後端 endpoint + V099 schema 已接；切換仍受 evidence/TOTP/cooldown gate 限制 -->
   <div id="autonomy-preview-banner"
        style="margin-bottom:12px;padding:10px 12px;background:rgba(245,158,11,.12);
               border-left:4px solid #f59e0b;border-radius:0 6px 6px 0;
               color:#fbbf24;font-size:12px;line-height:1.6">
-    <strong>&#x26A0;&#xFE0F; PREVIEW ONLY / 預覽模式</strong>
-    後端 endpoint <code>/api/v1/governance/autonomy-level/*</code> 與
-    V099 schema（<code>system.autonomy_level_config</code>）尚未 land；
-    本區塊目前以 mock data 展示 UX 形態。切換按鈕停用直到後端 endpoint 接通
-    並通過 E3 安全審核。
+    <strong id="autonomy-runtime-banner-title">Loading Autonomy Posture / 載入中</strong>
+    <span id="autonomy-runtime-banner-body">
+      正在讀取 <code>/api/v1/governance/autonomy-level/state</code>。
+    </span>
   </div>
 
   <h3>&#x1F39B;&#xFE0F; Autonomy Posture / 自主程度設定
@@ -1489,6 +1488,7 @@ govLoadLiveAuthStatus({ force: true });
 startGovLiveAuthLoop();
 </script>
 
+<script src="/static/autonomy-posture.js"></script>
 <script src="/static/governance-tab.js"></script>
 
 
