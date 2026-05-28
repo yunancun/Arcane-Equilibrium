@@ -15,7 +15,7 @@ Environment="OPENCLAW_BASE_DIR=/opt/openclaw"
 # notify_renewal_failure.sh：spec §2.2 待 operator 提供 Telegram/Grafana 接點
 # 後再具體實作；本占位先寫 stderr + journal 標記。
 ExecStart=/bin/bash -c '\
-    echo "ALERT: openclaw TLS cert renewal FAILED at $(date -u +%FT%TZ)" >&2; \
+    echo "ALERT: openclaw TLS cert renewal FAILED at $(date -u +%%FT%%TZ)" >&2; \
     if [ -x "${OPENCLAW_BASE_DIR}/helper_scripts/notify_renewal_failure.sh" ]; then \
         "${OPENCLAW_BASE_DIR}/helper_scripts/notify_renewal_failure.sh"; \
     fi'

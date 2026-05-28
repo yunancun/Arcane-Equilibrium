@@ -40,6 +40,10 @@ Documentation=file:///__OPENCLAW_BASE_DIR__/docs/execution_plan/specs/2026-05-26
 After=network-online.target openclaw-engine.service
 Wants=network-online.target
 
+# systemd v245+ 將 StartLimit* 視為 [Unit] directive；放在 [Service] 會被忽略。
+StartLimitBurst=10
+StartLimitIntervalSec=600
+
 [Service]
 Type=simple
 User=__ENGINE_USER__
@@ -73,8 +77,6 @@ TimeoutStopSec=10
 # 重啟策略 — watchdog 自己必須極高可用性，crash 後 < 60s respawn
 Restart=always
 RestartSec=10
-StartLimitBurst=10
-StartLimitIntervalSec=600
 # Burst 10 / 10min — watchdog 不應 thrash；若 10 連 fail 表 python env 損毀，
 # systemd 進入 failed state → operator 需 journalctl 排查（per RTO §2.1）
 

@@ -37,6 +37,10 @@ Wants=network-online.target
 # PG 不在同機亦不阻 engine 啟動（engine 內含 PG retry/backoff）
 # 不設 Requires= — 故意無硬依賴，systemd 空值 directive 會 warn，整行省略才合法
 
+# systemd v245+ 將 StartLimit* 視為 [Unit] directive；放在 [Service] 會被忽略。
+StartLimitBurst=5
+StartLimitIntervalSec=300
+
 [Service]
 Type=simple
 User=__ENGINE_USER__
@@ -76,8 +80,6 @@ TimeoutStopSec=15
 #   → 配合 watchdog circuit-break 形成雙重防線（per AMD-2026-05-21-01 v2 §5.1）
 Restart=on-failure
 RestartSec=10
-StartLimitBurst=5
-StartLimitIntervalSec=300
 
 # 日誌 — engine 內部已 tracing::warn/info 寫 $OPENCLAW_DATA_DIR/engine.log；
 # systemd 額外 capture stdout/stderr 到 journal 供 journalctl 檢索
