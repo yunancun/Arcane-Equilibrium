@@ -99,6 +99,7 @@ High-value hot interaction candidates:
 | `docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md` | `docs/archive/2026-05-28--ref21_full_chain_replay_engine_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_1.md` | superseded_by v1_3 | 同上 |
 | `docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md` | `docs/archive/2026-05-28--ref21_full_chain_replay_engine_superseded/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_2.md` | superseded_by v1_3 | 同上 |
 | `docs/execution_plan/2026-05-06--ref21_gui_ux_spec_v1.md` | `docs/archive/2026-05-28--ref21_gui_ux_spec_superseded/2026-05-06--ref21_gui_ux_spec_v1.md` | superseded_by `2026-05-06--ref21_gui_ux_spec_v1_1.md` | `archive/.../_README.md` |
+| `docs/references/2026-04-12--g_sr1_signal_tightening_plan_v2.md` | `docs/archive/2026-05-28--g_sr1_signal_tightening_plan_superseded/2026-04-12--g_sr1_signal_tightening_plan_v2.md` | superseded_by `2026-04-12--g_sr1_signal_tightening_plan_v2.5.md` (v2.5 L5 明寫；batch 5b 補 mv) | `archive/.../_README.md` |
 
 ### Cross-ref additions (Class 3, inline batch 1)
 
