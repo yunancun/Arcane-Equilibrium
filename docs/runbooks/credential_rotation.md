@@ -1,7 +1,7 @@
 # Credential Rotation Runbook
 
-**狀態：** DRAFT v0.9（2026-05-27，P1-OPS-2-RUNBOOK draft；待 OP-1 first dry-run 收 timing 後 v1.0 patch）
-**版本：** v0.9（draft pre-dry-run）
+**狀態：** v1.0（2026-05-28，P1-OPS-2-RUNBOOK-V1.0-PATCH；A3 4 conditional items closed；Phase 2 cutover 待 D+14 = 2026-06-10）
+**版本：** v1.0（A3-aligned，Phase 2 SOP land）
 **Owner：** PA + E1（draft） → E3 + CC（review）→ PM（approve）→ BB（sign-off for exchange-facing impact）
 **上游契約：**
 - 設計：[`docs/execution_plan/specs/2026-05-26--p1-ops-2-secret-split-design.md`](../execution_plan/specs/2026-05-26--p1-ops-2-secret-split-design.md)
@@ -75,6 +75,15 @@ OpenClaw runtime 倚賴一組 long-lived secret material 維持 Live trading 5-h
 ### 4.2 Steps per class
 
 #### 4.2.1 P-1 / P-2（IPC HMAC + Live-auth signing）
+
+> ⚠️ **Phase 1 backward-compat exception（2026-05-27 ~ Phase 2 cutover D+14 = 2026-06-10）**
+>
+> 本 §4.2.1 描述的 urandom 獨立 material 屬 **Phase 2 cutover 後** 的正規 initial deploy 路徑。Phase 1 期間 `helper_scripts/restart_all.sh` 的 `prepare_runtime_secret_files` 在 `live_auth_signing_key.txt` 不存在時會自動 seed from `ipc_secret.txt`（`[ ! -f ]` guard，**首次** boot 才觸發），並 echo `>>> OPS-2 SECRET-SPLIT phase 1: seeded live_auth_signing_key.txt from ipc_secret.txt (backward compat; rotate to fresh urandom on next scheduled rotation per §5.2.2)`。
+>
+> - 此 seed 行為**不視為違反**本節 urandom 要求；屬 OPS-2 spec §3.1 Phase 1 設計 contract。
+> - **第一次 scheduled rotation（90d）必須 from urandom**，不可再次 seed-from-ipc（per OPS-2 spec §9.4 hidden risk + §5.2.2 cadence）。
+> - **Phase 2 cutover 後（≥2026-06-10）**：`restart_all` 不再 seed；`live_auth_signing_key.txt` missing = fail-closed engine startup panic（per §13.4 + spec §3.2 Rust `main.rs` 第二 panic block）。
+> - cross-ref：§13 Phase 2 Cutover SOP / §10.1.1 Phase 1 fallback WARN invariant。
 
 ```bash
 # 1. 生成 32-byte high-entropy material（urandom）
@@ -441,6 +450,20 @@ curl -s http://localhost:8001/api/v1/health \
 # expected: engine=running, ipc=connected, watcher=active
 ```
 
+#### 10.1.1 Phase 1 fallback WARN invariant（D+0 → Phase 2 cutover D+14 前每日跑）
+
+Phase 1 期間 `OPENCLAW_LIVE_AUTH_SIGNING_KEY` 已正確注入 spawn env，理論上 Rust `live_authorization.rs::read_live_auth_signing_key` fallback 分支**不應觸發**。任一觸發 = 新 env 未生效 / Rust live_authorization 走錯路徑 / 2 key 未正確分離 = Phase 2 BLOCK。屬 fail-closed observation invariant。
+
+```bash
+ssh trade-core "grep -c ops2_secret_split_phase1_fallback /tmp/openclaw/engine.log /tmp/openclaw/api.log"
+```
+
+| AC | 期望值 | 違反處理 |
+|---|---|---|
+| engine.log + api.log 累積計數 | 兩 file 各 = 0 | 任一 ≥ 1 → Phase 2 cutover **BLOCK**；檢查 `restart_all` 是否走到 spawn point + env 注入是否生效；ref §13.1 cutover preconditions |
+
+> Cross-ref：E1 IMPL 報告 §5.4 14d Soak Observable 表（同 invariant）+ §13 Phase 2 Cutover SOP。
+
 ### 10.2 API status
 
 ```bash
@@ -470,6 +493,61 @@ curl -s http://localhost:8001/api/v1/live/auth/trust-status \
 # expected: present=true + env match (mainnet|testnet|demo) + expires_in > 60
 ```
 
+### 10.5 Cross-language HMAC sanity check
+
+#### 動機
+
+OPS-2 P-2 live-auth signing 同 Wave D Earn HMAC flow 都倚賴雙端（Python signing path / Rust verify path）對 canonical_payload 完全 byte-identical 計算同一 HMAC-SHA256。Python 端用 `json.dumps(sort_keys=True, separators=(",",":"))` 標準化；Rust 端必用 `BTreeMap` 或顯式 sort 同序生成 canonical bytes。**任何 canonical 順序漂移 / separator drift / encoding drift = HMAC byte 不對齊 = 雙端 sig 失配 = Earn / live-auth flow silent fail**，且失敗 mode 是 fail-closed 拒授權（不會降級重試），operator 看到的會是 `BadSignature` 而非具體 cause。
+
+#### canonical_payload format 規格（pinned）
+
+| 屬性 | 值 |
+|---|---|
+| serialize | JSON |
+| key 順序 | `sort_keys=True`（lexicographic） |
+| separators | `(",",":")` (無 space) |
+| 字符 encoding | UTF-8 |
+| HMAC 算法 | HMAC-SHA256 |
+| 輸出格式 | lowercase hex（64 char） |
+
+> Wave D Earn 採 **pipe-delimited string** canonical (不是 JSON) 格式，見 `earn_routes.py:402 _verify_stage_0r_hmac`；TODO §6 `P1-EARN-WAVE-D-RUST-HMAC-CANONICAL-FORM` 條目要求 Wave D Rust IMPL 對齊。本 §10.5 主要 cover OPS-2 P-2 live-auth；Wave D Earn 走獨立 fixture，cross-ref Wave D spec。
+
+#### Pinned fixture（OPS-2 P-2 Phase 1 IMPL）
+
+- **fixture key**: `b'test-live-auth-signing-key-do-not-use-in-prod'`
+- **fixture canonical_payload**: `2|T0_ENTRY|1700000000000|1700086400000|ncyu|live_reserved|live_demo`
+- **pinned hex**: `1b2b18d7e212d0d1e8f943c25f6f070b2ba75013b8fd5c3a021800d11b8b78fc`
+
+該 fixture per E1 IMPL §報告 line 13 + 31 + 41，Rust + Python 同 fixture 算出同 hex；OPS-2 land 同時 pin 在雙端 unit test (`cross_lang_hmac_fixture_is_byte_identical` Rust + Python 對應 case)。
+
+#### Operator sanity one-liner
+
+```bash
+# Python (operator 或 CI 一鍵 paste；單行 stdlib 無依賴)
+python3 -c "import hmac,hashlib; print(hmac.new(b'test-live-auth-signing-key-do-not-use-in-prod', b'2|T0_ENTRY|1700000000000|1700086400000|ncyu|live_reserved|live_demo', hashlib.sha256).hexdigest())"
+# expected: 1b2b18d7e212d0d1e8f943c25f6f070b2ba75013b8fd5c3a021800d11b8b78fc
+```
+
+```bash
+# Rust（透過已 pin 的 cargo test 雙端對齊；ssh trade-core 跑）
+ssh trade-core "cd $OPENCLAW_BASE_DIR/rust/openclaw_engine && cargo test --release --quiet cross_lang_hmac_fixture_is_byte_identical -- --nocapture"
+# expected: test cross_lang_hmac_fixture_is_byte_identical ... ok（assert pinned hex 命中）
+```
+
+#### AC + 違反處理
+
+| AC | 期望值 | 違反處理 |
+|---|---|---|
+| Python one-liner output | `1b2b18d7e212d0d1e8f943c25f6f070b2ba75013b8fd5c3a021800d11b8b78fc` | 不等 → Python stdlib drift / 環境異常；**不可** rotation；先排查 |
+| Rust `cargo test` output | `... ok` （pinned hex 命中） | fail → Rust canonical_payload format 漂移 / HMAC algo 換 / hex encoding 換；**secret split 完整性破壞** → rollback per §7.2 + forensic |
+| Rust hex == Python hex == pinned hex（三向）| 三方完全相等 | 任一不等 = 上游 Earn first stake silent fail risk + live-auth verify silent fail risk → BLOCK rotation + raise forensic ticket |
+
+#### Cross-ref
+
+- Wave D Earn HMAC canonical form follow-up：TODO §6 `P1-EARN-WAVE-D-RUST-HMAC-CANONICAL-FORM`
+- E1 IMPL pinned hex 出處：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-27--ops_2_secret_split_impl.md` line 13 / 31 / 41 / 153 / 210
+- OPS-2 spec §8.5 E2 重點 #1（防 canonical drift）+ §1.2（防 Earn first stake silent fail）
+
 ---
 
 ## 11. 修訂歷史 / Revision History
@@ -477,6 +555,7 @@ curl -s http://localhost:8001/api/v1/live/auth/trust-status \
 | 版次 | 日期 | 修訂者 | 摘要 |
 |---|---|---|---|
 | **v0.9 (draft)** | 2026-05-27 | PA (P1-OPS-2-RUNBOOK draft) | mirror replay_signing_key_rotation.md 9-章；涵蓋 3 primary + 6 auxiliary；含 Initial deploy / Scheduled / Emergency / Fail+Rollback / Audit SQL / Operator SOP / Cross-system verify；待 OP-1 first dry-run timing 後 v1.0 patch |
+| **v1.0** | 2026-05-28 | PA (P1-OPS-2-RUNBOOK-V1.0-PATCH) | 4-patch land 對齊 A3 對抗性核驗 4 conditional items：(1) §4.2.1 Phase 1 backward-compat note（restart_all seed-from-ipc 不違反 urandom 要求，首次 90d rotation 後必獨立）；(2) §10.1.1 Phase 1 fallback WARN invariant（D+0 → D+14 每日 `grep -c ops2_secret_split_phase1_fallback /tmp/openclaw/{engine,api}.log = 0`）；(3) §10.5 Cross-language HMAC sanity check（pinned hex `1b2b...78fc` + Python stdlib one-liner + Rust `cross_lang_hmac_fixture_is_byte_identical` test）；(4) §13 Phase 2 Cutover SOP（D+14 = 2026-06-10 preconditions / Grafana 新字串 / PR dispatch / panic verify / rollback / post-cutover verify）。ref A3 SSOT [`docs/CCAgentWorkSpace/A3/workspace/reports/2026-05-27--ops_2_secret_split_adversarial_review.md`](../CCAgentWorkSpace/A3/workspace/reports/2026-05-27--ops_2_secret_split_adversarial_review.md) |
 
 ---
 
@@ -484,12 +563,125 @@ curl -s http://localhost:8001/api/v1/live/auth/trust-status \
 
 - 上游 spec：[`docs/execution_plan/specs/2026-05-26--p1-ops-2-secret-split-design.md`](../execution_plan/specs/2026-05-26--p1-ops-2-secret-split-design.md) §1-§12
 - 上游 audit：[`docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-26--p0-ops-2-credential-rotation-audit.md`](../CCAgentWorkSpace/E3/workspace/reports/2026-05-26--p0-ops-2-credential-rotation-audit.md) §C-1 / §D / §E
+- A3 對抗性核驗 SSOT（v1.0 patch 對齊源）：[`docs/CCAgentWorkSpace/A3/workspace/reports/2026-05-27--ops_2_secret_split_adversarial_review.md`](../CCAgentWorkSpace/A3/workspace/reports/2026-05-27--ops_2_secret_split_adversarial_review.md)
+- E1 Phase 1 IMPL SSOT（pinned hex / fallback WARN invariant 出處）：[`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-27--ops_2_secret_split_impl.md`](../CCAgentWorkSpace/E1/workspace/reports/2026-05-27--ops_2_secret_split_impl.md)
 - Sibling runbook（A-5）：[`docs/runbooks/replay_signing_key_rotation.md`](replay_signing_key_rotation.md)
+- Phase 2 cutover SOP：本 runbook §13（D+14 = 2026-06-10）
+- Phase 1 backward-compat note：本 runbook §4.2.1（box block）+ §10.1.1（WARN invariant）+ §10.5（cross-lang HMAC sanity）
 - Hard boundaries：`srv/CLAUDE.md §四`（5-hard-gate）+ `srv/CLAUDE.md §六`（Runtime Reality）
 - Root principles：`srv/CLAUDE.md §二`（#1 / #4 / #6 / #8 / #9）
 - Cross-platform：memory `feedback_cross_platform`（`$SECRETS_ROOT` 無 user-home hardcode）
 - Migration safety：memory `feedback_v_migration_pg_dry_run`（Mac mock 不夠，Linux runtime empirical）
 - Adversarial review：memory `feedback_impl_done_adversarial_review`（rotation IMPL 走 CC + E2 dual review）
+- Shell paste safety：memory `feedback_shell_paste_safety`（單行 one-liner，禁 heredoc）
 - Helper scripts：`helper_scripts/restart_all.sh`（secret prep + spawn env 注入）
+- TODO 上游條目：`P1-OPS-2-PHASE-2-CUTOVER`（D+14 PR）+ `P1-EARN-WAVE-D-RUST-HMAC-CANONICAL-FORM`（Wave D Rust canonical 對齊）
 
-**END OF RUNBOOK v0.9 DRAFT**
+---
+
+## 13. Phase 2 Cutover SOP
+
+> **適用時機**：Phase 1 land + 14d soak 0 WARN log 完成後（D+14 = **2026-06-10**），切到 fail-closed 強化模式（移 Rust fallback / 加第二 panic block / 刪舊 `AuthError::IpcSecretMissing` 變體 / Python reason rename）。
+>
+> **owner**：E1（IMPL）+ CC（review）+ BB（exchange-facing sign-off）+ PM（approve）。Operator 親手執行 §13.2 + §13.6 verify。
+>
+> **non-negotiable**：本節指令一律單行 one-liner（per memory `feedback_shell_paste_safety`）。
+
+### 13.1 前置 / Preconditions（D+14 readiness gate）
+
+| Gate | Check | 違反 |
+|---|---|---|
+| **14d soak fallback WARN = 0** | per §10.1.1：`ssh trade-core "grep -c ops2_secret_split_phase1_fallback /tmp/openclaw/engine.log /tmp/openclaw/api.log"` 累積 = 0 | 任一 ≥ 1 → cutover **BLOCK**；E1 排查 + soak 重起算 |
+| **≥1 次 /auth/renew 重簽記錄** | per E1 IMPL §5.4 Observable 表：API access log 或 `learning.live_auth_renewals` ≥ 1 row（soak 期間 operator 走過至少 1 次 renew） | 0 次 → operator 手動 trigger 一次 renew + 等 watcher 5s respawn 再驗 trust-status |
+| **`live_auth_signing_key.txt` 完整性** | `ssh trade-core "ls -la \$HOME/BybitOpenClaw/secrets/environment_files/live_auth_signing_key.txt"` mode 600 + 非零 byte + mtime 在 soak 區間 | mode drift → `sudo chmod 600`；missing → §7.2 rollback path |
+| **engine PID 穩定** | soak 期間 restart 計數無異常飆升 | 不穩 → cutover **BLOCK** |
+| **PM 確認 Sprint 4 first Live ≥ 2026-06-10**（A3 conditional #4） | TODO § / Linear ticket commit | 早於 D+14 安排 Live → 推遲或 cutover 前完成 |
+
+### 13.2 Operator 外部監控同步（Grafana / journald / log rules）
+
+> A3 §7 提示外部 alert rule 是 first-time GUI / operator 個人 monitoring stack 的盲區，本 repo grep 不可 audit。Phase 2 cutover 前 **operator 親手確認**外部系統能 catch 新字串。
+
+**新 alert pattern**（cutover 前加入外部 monitoring）：
+
+- log substring：`live_auth_signing_key_missing`
+- Rust error variant 名（trace / journald）：`AuthError::LiveAuthSigningKeyMissing`
+
+**parallel 保留（不立即移除）**：
+
+- 舊 substring：`ipc_secret_missing`（Phase 1 IMPL 保留並列；Phase 2 cutover commit 才刪 Rust 變體 + Python reason rename）
+- 舊 Rust 變體名：`AuthError::IpcSecretMissing`（Phase 2 PR 同次刪除；外部 alert rule 可留 14d soak buffer 再清）
+
+**Operator 確認 checklist**：
+
+- [ ] Grafana / journald alert rule 已加新字串 `live_auth_signing_key_missing` + `AuthError::LiveAuthSigningKeyMissing`
+- [ ] 舊字串 alert rule 保留 14d cutover buffer（cutover 後 D+14 才清）
+- [ ] alert routing 仍 page on-call（test fire 一次驗 channel）
+- [ ] operator 親簽 audit row：actor / action='ops2_phase2_external_alert_aligned' / ts
+
+### 13.3 PR dispatch（E1 IMPL）
+
+per OPS-2 spec §3.2 + spec §4.1.1-§4.1.4 + §4.2.1，Phase 2 PR 改動範圍：
+
+| 文件 | 改動 |
+|---|---|
+| `rust/openclaw_engine/src/live_authorization.rs` | fallback 分支整段刪除（spec §3.2）；`AuthError::IpcSecretMissing` 變體 + Display impl + `auth_error_kind` arm 刪除 |
+| `rust/openclaw_engine/src/main.rs:402` 後 | 加第二 panic block：Live + missing `OPENCLAW_LIVE_AUTH_SIGNING_KEY` → engine startup panic（fail-closed）|
+| `rust/openclaw_engine/src/live_auth_watcher_tests.rs` | line 195 / 199 teardown 只 set `OPENCLAW_LIVE_AUTH_SIGNING_KEY`（不再雙 set） |
+| `program_code/exchange_connectors/bybit_connector/control_api_v1/app/live_trust_routes.py:473` | reason 字串 `ipc_secret_missing` → `live_auth_signing_key_missing` |
+
+TODO 上游條目：§6 `P1-OPS-2-PHASE-2-CUTOVER`（D+14 PR）。PR dispatch chain：E1 IMPL → CC review → BB sign-off → PM approve → merge.
+
+### 13.4 Panic verify（sandbox / dry-run，禁 production 直觸）
+
+> **Production engine 直接 trigger panic 會 SIGABRT，蕩 live pipeline**。本步驟強制在 sandbox env / dry-run pattern 跑。
+
+**推薦 pattern**：
+
+```bash
+ssh trade-core "cd $OPENCLAW_BASE_DIR/rust/openclaw_engine && cargo test --release --quiet live_auth_signing_key_missing_panics_when_live -- --nocapture"
+```
+
+| AC | 期望值 | 違反 |
+|---|---|---|
+| Rust test 命中第二 panic block | `... ok`（panic message 含 `OPENCLAW_LIVE_AUTH_SIGNING_KEY` 字眼） | fail → spec §3.2 panic block 未生效 → PR **REJECT** |
+| `cargo test` 全 suite | 全 PASS（含舊 `live_auth_signing_key_missing_returns_specific_variant` Rust test 仍綠） | 任一 fail → PR **REJECT** |
+
+> sandbox env / Phase 2 PR CI 跑 cargo test 即等價 panic verify；不必 production engine 觸發。
+
+### 13.5 Rollback（D+14 cutover 失敗）
+
+per OPS-2 spec §3.3 Rollback table + 本 runbook §7.2 Rollback procedure：
+
+```bash
+# 1. stop engines
+ssh trade-core "bash $OPENCLAW_BASE_DIR/helper_scripts/stop_all.sh"
+
+# 2. 確認 live_auth_signing_key.txt 存在 chmod 600 + 非空（spec §3.3 Phase 2 D+14 後 panic 阻 boot row）
+ssh trade-core "ls -la \$HOME/BybitOpenClaw/secrets/environment_files/live_auth_signing_key.txt"
+
+# 3. 若不存在 → seed from ipc_secret.txt 暫救（緊急 fallback）
+ssh trade-core "sudo -u openclaw cp \$HOME/BybitOpenClaw/secrets/environment_files/ipc_secret.txt \$HOME/BybitOpenClaw/secrets/environment_files/live_auth_signing_key.txt && sudo chmod 600 \$HOME/BybitOpenClaw/secrets/environment_files/live_auth_signing_key.txt"
+
+# 4. 仍 panic → git revert Phase 2 commit 回 Phase 1 fallback 模式
+ssh trade-core "cd $OPENCLAW_BASE_DIR && git revert <phase2-commit-sha> && bash helper_scripts/restart_all.sh --rebuild"
+
+# 5. Audit row + 24h PM root-cause analysis（per §7.2 step 5-6）
+```
+
+**Rollback timeline target**：≤30 min from cutover failure detect → live pipeline 恢復 Phase 1 模式。
+
+### 13.6 Verify SOP（cutover 後 D+15 ~ D+44）
+
+| 觀察項 | 工具 | 期望值 |
+|---|---|---|
+| **engine PID 穩定 24h** | `ssh trade-core "pgrep -x openclaw-engine"` | PID 穩定，無 panic 觸發 |
+| **無 fallback WARN（永久）** | per §10.1.1 grep | 累積仍 = 0（fallback 路徑已刪不可能觸發；任何 grep > 0 = 有殘留代碼 P0） |
+| **trust-status reason 字串無 `ipc_secret_missing`** | `ssh trade-core "curl -s http://localhost:8001/api/v1/live/auth/trust-status \| grep -c ipc_secret_missing"` | = 0 |
+| **cross-lang HMAC sanity check 仍 PASS** | per §10.5 Python + Rust one-liner | 三向命中 pinned hex |
+| **fresh urandom rotate cadence 90d 從 cutover 日重啟計** | TODO 排程 + §5.1 cadence table | first scheduled rotation due = cutover + 90d = **2026-09-08**（per spec §3.1）；第一次必走 §5.2.2 urandom（**禁** seed-from-ipc，per §4.2.1 backward-compat note）|
+
+**Cutover sign-off**：D+44（cutover + 30d）PM review 上述 5 invariant 全綠 → `P1-OPS-2-PHASE-2-CUTOVER` closure → archive Phase 1 + Phase 2 lineage 到 `docs/audits/2026-06-10--ops2_phase2_cutover_signoff.md`。
+
+---
+
+**END OF RUNBOOK v1.0**
