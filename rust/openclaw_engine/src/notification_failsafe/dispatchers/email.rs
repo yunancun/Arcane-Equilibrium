@@ -17,22 +17,23 @@
 //!     "fingerprint": "<sha256 of smtp_app_password>"  // optional guard
 //!   }
 //!
-//! ## Dependency 決策（PM 拍板待回覆）
+//! ## Dependency 決策（operator EA 拍板 — 已落地）
 //!
-//! C1 階段 **不引入 lettre crate**（避免 unilateral 加 top-level dep）；改用
-//! `SmtpTransport` trait + 兩個內建實作：
-//!   - `DisabledTransport`：所有 send 回 false（fail-closed disabled）
+//! C1 階段先用 `SmtpTransport` trait + 兩個內建實作（DisabledTransport /
+//! StubTransport）佔位；本 follow-up（operator decision EA）加 lettre 0.11
+//! workspace dep + `RealSmtpTransport` 接真實 Gmail SMTP，三路冗餘真的三路：
+//!   - `DisabledTransport`：所有 send 回 false（fail-closed disabled / 缺 secret）
 //!   - `StubTransport`：測試用 in-memory 攔截，記錄 envelope + 永遠 success
-//!
-//! 真實 SMTP 走 lettre 的 work item 留給 PM 拍板後 follow-up commit
-//! （後續會在 `RealSmtpTransport` 注入；或改自寫 raw SMTP socket）。
+//!   - `RealSmtpTransport`：lettre `AsyncSmtpTransport<Tokio1Executor>` 真實寄送
 //!
 //! 不變量（per CLAUDE.md §二 + spec §2.3/§2.4）：
 //!   - Secret 缺檔 → `transport = DisabledTransport`，send 回 false（fail-closed）；
-//!   - per-dispatch timeout 10s（spec §2.3）；
-//!   - STARTTLS 必（後續 lettre wire 時強制）；禁 plaintext fallback；
+//!   - per-dispatch timeout 10s（spec §2.3，tokio::time::timeout 硬限）；
+//!   - port 587 走 STARTTLS、port 465 走 implicit TLS；禁 plaintext fallback；
 //!   - SMTP envelope from/to 與 header 一致；
-//!   - 不真實寄送 in test（StubTransport 全 in-memory）。
+//!   - RealSmtpTransport::send 任何 error → false（fail-soft 不 panic）；
+//!   - 不真實寄送 in test（StubTransport in-memory；RealSmtpTransport test 只連
+//!     unreachable host 驗 timeout fail-soft，不連 Gmail）。
 //!
 //! ref:
 //!   - docs/execution_plan/specs/2026-05-28--packet_c_3way_dispatcher_wire_spec.md §2
@@ -43,6 +44,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use lettre::message::{Mailbox, Message};
+use lettre::transport::smtp::authentication::Credentials;
+use lettre::{AsyncSmtpTransport, AsyncTransport, Tokio1Executor};
 use serde::Deserialize;
 
 /// Email config 檔案 schema。
@@ -136,6 +140,109 @@ impl SmtpTransport for StubTransport {
     }
 }
 
+/// 真實 SMTP transport — lettre `AsyncSmtpTransport<Tokio1Executor>` 包裝。
+///
+/// 為什麼：operator decision EA 拍板加 lettre 0.11，補上三路冗餘的真正第二路。
+/// 走 Gmail SMTP App Password（operator Q2.1）；port 587 STARTTLS / port 465
+/// implicit TLS；禁 plaintext fallback（spec §2.4）。
+///
+/// 不變量：
+///   - build relay 失敗 / 認證失敗 / TLS handshake 失敗 / 連線逾時 → send 回 false；
+///   - 不 panic、不 unwrap（fail-soft，hot path 安全）；
+///   - per-send 10s timeout 由上層 EmailDispatcher::send 的 tokio::time::timeout 包，
+///     本 struct 內 send 不另設 timeout（避免雙層計時語義混亂）。
+pub struct RealSmtpTransport {
+    config: EmailConfig,
+}
+
+impl RealSmtpTransport {
+    /// 從已校驗的 EmailConfig 建立。
+    ///
+    /// 注意：config 應已通過 `load_email_config` 校驗（host/user/password/port
+    /// 非空、backend=smtp_gmail、fingerprint 匹配）；本 ctor 不重複校驗。
+    pub fn new(config: EmailConfig) -> Self {
+        Self { config }
+    }
+
+    /// 依 smtp_port 決定 TLS 模式建出 lettre transport。
+    ///
+    /// 為什麼分 587/465：
+    ///   - 587 = submission port，先明文連線再 STARTTLS 升級（lettre `starttls_relay`）；
+    ///   - 465 = SMTPS，連線即 implicit TLS（lettre `relay`）；
+    ///   - 其餘 port 一律走 STARTTLS relay（保守 — 禁 plaintext）。
+    /// 任一步失敗回 Err，由 send 轉成 false。
+    fn build_transport(&self) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
+        let creds = Credentials::new(
+            self.config.smtp_username.clone(),
+            self.config.smtp_app_password.clone(),
+        );
+        let builder = if self.config.smtp_port == 465 {
+            // implicit TLS（SMTPS）：relay() 預設即 Tls::Wrapper
+            AsyncSmtpTransport::<Tokio1Executor>::relay(&self.config.smtp_host)
+                .map_err(|e| format!("smtp relay build failed: {e}"))?
+        } else {
+            // 587 或其他：STARTTLS（明文連線後強制升級 TLS；禁 plaintext fallback）
+            AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&self.config.smtp_host)
+                .map_err(|e| format!("smtp starttls relay build failed: {e}"))?
+        };
+        // relay()/starttls_relay() 已強制 TLS（Wrapper / Required），禁 plaintext
+        // fallback（spec §2.4）；故此處無需另設 Tls::None 防呆。
+        let transport = builder
+            .port(self.config.smtp_port)
+            .credentials(creds)
+            .build();
+        Ok(transport)
+    }
+
+    /// 把 EmailMessage 組成 lettre RFC 5322 Message。
+    ///
+    /// 不變量：from / 每個 to 都必須是合法 Mailbox，否則回 Err → send false。
+    fn build_message(&self, msg: &EmailMessage) -> Result<Message, String> {
+        let from: Mailbox = msg
+            .from
+            .parse()
+            .map_err(|e| format!("invalid from address: {e}"))?;
+        let mut builder = Message::builder().from(from).subject(msg.subject.clone());
+        for addr in &msg.to {
+            let to: Mailbox = addr
+                .parse()
+                .map_err(|e| format!("invalid to address {addr}: {e}"))?;
+            builder = builder.to(to);
+        }
+        builder
+            .body(msg.body.clone())
+            .map_err(|e| format!("message build failed: {e}"))
+    }
+}
+
+#[async_trait]
+impl SmtpTransport for RealSmtpTransport {
+    async fn send(&self, msg: &EmailMessage) -> bool {
+        let transport = match self.build_transport() {
+            Ok(t) => t,
+            Err(e) => {
+                tracing::warn!(error = %e, "RealSmtpTransport build_transport failed");
+                return false;
+            }
+        };
+        let message = match self.build_message(msg) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::warn!(error = %e, "RealSmtpTransport build_message failed");
+                return false;
+            }
+        };
+        match transport.send(message).await {
+            Ok(_) => true,
+            Err(e) => {
+                // SMTP 4xx/5xx / TLS handshake / 連線錯誤一律 fail-soft（spec §2.3）
+                tracing::warn!(error = %e, "RealSmtpTransport send failed");
+                false
+            }
+        }
+    }
+}
+
 /// Email 派發器。
 ///
 /// - `config = None` ⇒ disabled（缺 secret / 格式錯 / fingerprint mismatch）；
@@ -165,11 +272,35 @@ impl EmailDispatcher {
         }
     }
 
+    /// Production 自動接線：secret 存在且校驗通過 → `RealSmtpTransport`（真實寄送）；
+    /// 缺檔 / 格式錯 / fingerprint mismatch → `DisabledTransport`（fail-closed 不寄）。
+    ///
+    /// 為什麼新增此 ctor 而非改 `from_secret_file` 簽名：既有 11 email test 透過
+    /// `from_secret_file(path, transport)` 注入 StubTransport，簽名不可破。runtime
+    /// 端（C4 wire）改呼本 ctor 即接上真實 SMTP，三路冗餘真的三路。
+    ///
+    /// 不變量：config=None（缺檔/格式錯）必走 DisabledTransport，維持既有
+    /// fail-closed 語義（send 永遠 false）。
+    pub fn from_secret_file_real(path: &Path) -> Self {
+        let config = load_email_config(path);
+        let transport: Box<dyn SmtpTransport> = match &config {
+            Some(cfg) => Box::new(RealSmtpTransport::new(cfg.clone())),
+            None => Box::new(DisabledTransport),
+        };
+        Self {
+            config,
+            transport,
+            timeout: EMAIL_DISPATCH_TIMEOUT,
+        }
+    }
+
     /// 預設 secret 路徑：`$HOME/BybitOpenClaw/secrets/vault/email_config.json`
     /// 或 env var `OPENCLAW_EMAIL_SECRET_FILE` override。
-    /// transport 預設 `DisabledTransport`（真實 SMTP 待 PM 拍 lettre 後接）。
+    ///
+    /// operator EA 拍板後預設改用 `RealSmtpTransport`（secret 存在時真實寄送；
+    /// 缺檔仍 fail-closed DisabledTransport）。
     pub fn from_default_path() -> Self {
-        Self::from_secret_file(&default_secret_path(), Box::new(DisabledTransport))
+        Self::from_secret_file_real(&default_secret_path())
     }
 
     /// 是否可派發（config 載入 + transport 非 DisabledTransport）。
@@ -496,5 +627,60 @@ mod tests {
         assert!(d.is_enabled());
         let ok = d.send("subj", "body").await;
         assert!(!ok);
+    }
+
+    // ── T12: from_secret_file_real，secret 存在 → RealSmtpTransport 建立不 panic ──
+    // 為什麼不真實寄送：本 test 只驗 secret 存在時 production ctor 走 RealSmtpTransport
+    // 路徑、is_enabled()=true、且建構過程不 panic（build_transport lazy 在 send 才跑，
+    // 故 enable 階段不會連 Gmail）。
+
+    #[tokio::test]
+    async fn t12_real_transport_built_from_valid_secret() {
+        let f = write_secret(&valid_config_json("appPw1234567890x"));
+        let d = EmailDispatcher::from_secret_file_real(f.path());
+        assert!(
+            d.is_enabled(),
+            "valid secret 必走 RealSmtpTransport 且 is_enabled=true"
+        );
+    }
+
+    // ── T13: from_secret_file_real，secret 缺檔 → fallback DisabledTransport ──
+    // 維持既有 fail-closed 語義：缺檔 config=None → DisabledTransport → send false。
+
+    #[tokio::test]
+    async fn t13_real_missing_secret_falls_back_disabled() {
+        let d = EmailDispatcher::from_secret_file_real(Path::new("/nonexistent/email_real.json"));
+        assert!(!d.is_enabled(), "缺檔必 fail-closed disabled");
+        let ok = d.send("subj", "body").await;
+        assert!(!ok, "DisabledTransport fallback send 必 false");
+    }
+
+    // ── T14: RealSmtpTransport::send 對 unreachable host → false（fail-soft）─────
+    // 為什麼用 127.0.0.1:1：保證連線立即失敗（埠 1 無服務），驗 send 在連線/
+    // handshake 失敗時回 false 不 panic。10s timeout 上限不會被吃滿（連線拒絕秒回）。
+    // 不連 Gmail，符合「test 不真實寄送」禁線。
+
+    #[tokio::test]
+    async fn t14_real_send_unreachable_host_fail_soft() {
+        let cfg = EmailConfig {
+            backend: "smtp_gmail".to_string(),
+            smtp_host: "127.0.0.1".to_string(),
+            smtp_port: 1,
+            smtp_username: "x@example.com".to_string(),
+            smtp_app_password: "pw".to_string(),
+            from_address: "x@example.com".to_string(),
+            to_addresses: vec!["y@example.com".to_string()],
+            subject_prefix: "[OpenClaw Failsafe]".to_string(),
+            fingerprint: None,
+        };
+        let transport = RealSmtpTransport::new(cfg);
+        let msg = EmailMessage {
+            from: "x@example.com".to_string(),
+            to: vec!["y@example.com".to_string()],
+            subject: "[OpenClaw Failsafe] test".to_string(),
+            body: "body".to_string(),
+        };
+        let ok = transport.send(&msg).await;
+        assert!(!ok, "unreachable host send 必 fail-soft 回 false");
     }
 }
