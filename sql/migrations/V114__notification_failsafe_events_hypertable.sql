@@ -15,12 +15,15 @@
 --      + payload_jsonb + created_at)
 --   - create_hypertable(ts_ms, chunk_time_interval => 604800000) — 7d in ms;
 --     BIGINT partition column 用 ms cast (per V026 pattern)。
---   - add_compression_policy(30 days);
 --   - INDEX (event_type, ts_ms DESC) — query pattern: 按 event_type filter +
 --     time DESC (operator GUI banner / audit 排序)。
 --   - INDEX 第二條 partial: WHERE acked_at_utc IS NULL — unacked row 快速 GUI poll。
 --   - GRANT 對 trading_admin: SELECT/INSERT (全表) + UPDATE (限 acked_at_utc/acked_by);
 --     PUBLIC REVOKE UPDATE/DELETE (append-only enforcement)。
+--     注意: GRANT 必在 add_compression_policy 之前 (FIX MIT-2026-05-28 dry-run blocker)
+--     — enable compression 後 column-level GRANT UPDATE 會傳播到 compressed twin
+--     (_compressed_hypertable_NN) 而 twin 無 acked_at_utc column → apply abort。
+--   - add_compression_policy(30 days) — 在 GRANT 之後執行。
 --   - Guard A: schema 必存 + V113 baseline 已 land (V113 為 V114 前置 sqlx chain).
 --   - Guard B: chunk_time_interval BIGINT ms 對齊 (重 apply drift 防護).
 --   - Guard C: 17 column 完整性 + CHECK enum + hypertable + GRANT row。
@@ -198,8 +201,49 @@ CREATE INDEX IF NOT EXISTS idx_notification_failsafe_unacked
     WHERE acked_at_utc IS NULL;
 
 -- ============================================================
--- Main DDL Step 4: Compression policy (30d)
+-- Main DDL Step 4: GRANT (trading_admin) + REVOKE PUBLIC
+-- 為什麼 trading_admin: control_api GUI ack 路徑透過 trading_admin role UPDATE
+--   acked_at_utc/acked_by;對齊 operator Q5.3 拍板。
+-- 為什麼 column-level UPDATE GRANT: append-only 語義保留 — 其他 column 永遠 immutable
+-- 為什麼此 Step 必在 enable compression 之前 (FIX MIT-2026-05-28 dry-run blocker):
+--   TimescaleDB enable compression 後會建一 compressed twin hypertable
+--   (_compressed_hypertable_NN),其 column 為壓縮格式 (compressed segment) 而非原表
+--   column;column-level `GRANT UPDATE (acked_at_utc, acked_by)` 會被 TimescaleDB
+--   傳播到該 twin → twin 無 acked_at_utc column → `ERROR: column "acked_at_utc"
+--   of relation "_compressed_hypertable_NN" does not exist` → apply abort。
+--   table-level GRANT SELECT,INSERT 不查 column 存在性故不受影響;只有 column-level
+--   GRANT 觸發此 bug。將整段 GRANT/REVOKE 移到 compression enable 之前,
+--   twin 尚未存在時 column-level grant 合法。
+-- ============================================================
+DO $$
+BEGIN
+    -- trading_admin role 必存 (V001/V003 P0;若缺 RAISE NOTICE skip GRANT 由 DBA 後補)
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_roles WHERE rolname = 'trading_admin'
+    ) THEN
+        RAISE NOTICE
+            'V114: trading_admin role missing; skipping GRANT statements. '
+            'DBA must add GRANT manually after creating role.';
+        RETURN;
+    END IF;
+
+    -- SELECT/INSERT 全表
+    EXECUTE 'GRANT SELECT, INSERT ON observability.notification_failsafe_events TO trading_admin';
+    -- UPDATE 限 acked_at_utc + acked_by 2 column (append-only enforcement)
+    EXECUTE 'GRANT UPDATE (acked_at_utc, acked_by) ON observability.notification_failsafe_events TO trading_admin';
+    -- BIGSERIAL sequence 也需 GRANT (INSERT 用)
+    EXECUTE 'GRANT USAGE ON SEQUENCE observability.notification_failsafe_events_id_seq TO trading_admin';
+    RAISE NOTICE 'V114: granted SELECT/INSERT (full) + UPDATE (acked_* only) to trading_admin';
+
+    -- REVOKE PUBLIC UPDATE/DELETE (append-only enforcement)
+    EXECUTE 'REVOKE UPDATE, DELETE ON observability.notification_failsafe_events FROM PUBLIC';
+END $$;
+
+-- ============================================================
+-- Main DDL Step 5: Compression policy (30d)
 -- 對齊 V109 30d compression cadence; fail-safe event 罕見,30d 內保 hot read
+-- 注意: 本 Step 必在 Step 4 GRANT 之後 — enable compression 建 compressed twin
+--   後,column-level GRANT 會傳播失敗 (見 Step 4 FIX 註解)。
 -- ============================================================
 DO $$
 BEGIN
@@ -236,36 +280,6 @@ BEGIN
         RAISE NOTICE
             'V114: compression policy already present; skipping';
     END IF;
-END $$;
-
--- ============================================================
--- Main DDL Step 5: GRANT (trading_admin) + REVOKE PUBLIC
--- 為什麼 trading_admin: control_api GUI ack 路徑透過 trading_admin role UPDATE
---   acked_at_utc/acked_by;對齊 operator Q5.3 拍板。
--- 為什麼 column-level UPDATE GRANT: append-only 語義保留 — 其他 column 永遠 immutable
--- ============================================================
-DO $$
-BEGIN
-    -- trading_admin role 必存 (V001/V003 P0;若缺 RAISE NOTICE skip GRANT 由 DBA 後補)
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_roles WHERE rolname = 'trading_admin'
-    ) THEN
-        RAISE NOTICE
-            'V114: trading_admin role missing; skipping GRANT statements. '
-            'DBA must add GRANT manually after creating role.';
-        RETURN;
-    END IF;
-
-    -- SELECT/INSERT 全表
-    EXECUTE 'GRANT SELECT, INSERT ON observability.notification_failsafe_events TO trading_admin';
-    -- UPDATE 限 acked_at_utc + acked_by 2 column (append-only enforcement)
-    EXECUTE 'GRANT UPDATE (acked_at_utc, acked_by) ON observability.notification_failsafe_events TO trading_admin';
-    -- BIGSERIAL sequence 也需 GRANT (INSERT 用)
-    EXECUTE 'GRANT USAGE ON SEQUENCE observability.notification_failsafe_events_id_seq TO trading_admin';
-    RAISE NOTICE 'V114: granted SELECT/INSERT (full) + UPDATE (acked_* only) to trading_admin';
-
-    -- REVOKE PUBLIC UPDATE/DELETE (append-only enforcement)
-    EXECUTE 'REVOKE UPDATE, DELETE ON observability.notification_failsafe_events FROM PUBLIC';
 END $$;
 
 -- ============================================================
