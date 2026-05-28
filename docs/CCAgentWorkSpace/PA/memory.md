@@ -6467,3 +6467,14 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 - 派發 packet 必親 verify 既有代碼字面（risk_gov.rs 940 行 + line 180-187 Defensive）— 不可基於 spec 字面假設
 - 衝突分析必 grep TODO + Sprint 狀態（§15 #7 字面）— 不可基於記憶
 - self-contained packet template 是核心 deliverable — sub-agent 不需再讀 4 SSOT 也能 IMPL
+
+## 2026-05-28 — doc cleanup phase 2 tech plan
+
+- Report: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-28--doc_cleanup_phase2_tech_plan.md`
+- Worktree: `srv-doc-cleanup/` @ branch `doc-cleanup/2026-05-28` HEAD `57024d43`
+- 範圍：88 檔（不是 R4 prompt 寫的 89；88 = 1+5+8+11+13+50；89 含 ghost L896 entry 不存在檔）git mv 6 dir → archive；6 個 `_README.md` lineage stub；README L862-1015 折疊段 17 行；L29-34 樹狀圖刪 6 加 1 = -5；5 處活引用補修
+- Commit chain：11 commits（P2-0 plan land → P2-1~6 六批 mv → P2-7 README 折疊 → P2-8 補修 → P2-9 path_redirects + JSON regen → P2-10 final）
+- Ghost link 治理：phase5_arch_rc1（README 20 vs 實 5）+ chapters_h-i（README 14 vs 實 13）在 archive `_README.md` 內加 lineage NOTE
+- 重新數結果（PA `ls` 跑）：6 dir 實檔 1+5+8+11+13+50 = 88；R4 review §1 寫 89 為信任 prompt 慣性 + 含 ghost；**正確數字以 PA `ls` 驗為準（88）**
+- 紅線堅守：worklogs/ 根目錄 28 個 daily_summary 04-08+ 永不歸檔；README L1-861 + L1017-1466 不重組；audits/2026-04-12 內文不改只加 footer
+- 教訓：phase packet 折疊不僅 mv，必同時治理歷史 ghost link（R4 memory 2026-04-24 第 2 點記載的「索引分化」反模式可在此 batch 一次治理完）；不要把 ghost 治理推到下一個 phase
