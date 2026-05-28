@@ -194,6 +194,21 @@ impl FailsafeWatcherState {
     pub fn is_armed(&self) -> bool {
         self.timer_armed_at_ms.is_some()
     }
+
+    /// Wave 5 Packet C / C3 — 對 `providers::single_watcher` 模塊暴露 escalated
+    /// idempotent guard 的 setter。
+    ///
+    /// 為什麼存在：`SharedFailsafeWatcher::check_timer` 採「lock → drop → await →
+    /// re-lock」三段拆分（per spec §4.7 + §11.3 反對 3 mitigation），需要在第三段
+    /// re-lock 時把 `escalated_for_current_arm` 標記為 true 避免下一次 tick 重觸發。
+    /// `FailsafeWatcher`（原 single-task 版）內部直接寫欄位即可，但 `SharedFailsafeWatcher`
+    /// 透過 `parking_lot::Mutex` 持有 state，必須走 pub setter。
+    ///
+    /// `pub(crate)` 而非 `pub`：對 crate 外（GUI / IPC）關閉 — 這個 guard 是 watcher
+    /// 內部 idempotent 不變量，不該被外部修改。
+    pub(crate) fn set_escalated_for_current_arm(&mut self, escalated: bool) {
+        self.escalated_for_current_arm = escalated;
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
