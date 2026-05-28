@@ -251,3 +251,12 @@ PM proposal A.1 第 3 類預期可能有 ≥30 對；實際只 1 對。原因：
    - TW sub-agent 無 Bash 工具，需 main session/E1 代執行 git/Python 動作
 
 TW DOC DONE: report path: `docs/CCAgentWorkSpace/TW/workspace/reports/2026-05-28--doc_cleanup_phase1_candidates.md`
+
+---
+
+## Batch 5 — g_sr1 v2.5 supersedes audit (2026-05-28)
+
+- v2.5 是否存在：**YES**（`docs/references/2026-04-12--g_sr1_signal_tightening_plan_v2.5.md`）
+- v2.5 內 supersedes 關鍵字 grep：**命中 1 行**（L6: `**Supersedes**: v2 (same date)`）
+- 結論：**v2 archive**
+- 理由：v2.5 L1-L7 header block 明確自陳 `Status: FINAL — reviewed through 5 rounds (52 findings, all addressed). Ready for E1.` 並標 `Supersedes: v2 (same date)`；符合 PM proposal Class 4 5 條 heuristic 第 5 條（新版顯式 supersedes 標記）。建議 main session 在 batch 1 補做 `git mv docs/references/2026-04-12--g_sr1_signal_tightening_plan_v2.md docs/archive/2026-05-28--g_sr1_signal_tightening_plan_superseded/2026-04-12--g_sr1_signal_tightening_plan_v2.md` + 留 `_README.md` stub + path_redirects.md Executed 段補一條。TW 本輪不執行 mv（無 Bash）。
