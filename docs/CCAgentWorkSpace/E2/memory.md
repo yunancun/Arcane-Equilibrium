@@ -3901,3 +3901,56 @@ Review 對象：2 個新 cron script（install + daily wrapper）851 LOC，Stage
 7. **divergence (b) operator API token 重用 = least-privilege 違反**：單一 global actor（`auth.py:182-245`）預設持 operator role + `replay:write` + 連 `live:trade`/`live:authority`/`system:restart` 全 scope；cron 用全權限 token 做只需 replay:write 的事。不觸 CLAUDE §四 hard boundary（signed live authorization 另一機制），但 OQ-1 dedicated Service principal swap 應追 P3 follow-up（E3 owns）。MED。
 
 ---
+
+---
+
+## 2026-05-28 — Wave 5 Packet C 全 Rust (C1+C2+C3) 對抗審查 — APPROVE-WITH-CONDITIONS
+
+審查對象：11 commit (804392fc..3ba572ad + 9bf71423 + 4ac2b7a4 + 0521aaf4)；notification_failsafe/ 全 sub-mod (dispatchers/slack+email+console_banner+three_way + audit_emitter + providers/wall_clock+position_provider+exchange_stop_sync+single_watcher) + mod.rs setter。verdict = APPROVE-WITH-CONDITIONS (0 CRITICAL；1 HIGH design + 2 MED + 3 LOW；不阻 C1/C2/C3 land 但 HIGH 必在 C4 wire 前解)。
+
+**自驗結果**：
+- `cargo test -p openclaw_engine --lib notification_failsafe` = **104 passed / 0 failed**（prompt 預期 101，實際多 3，覆蓋更全）
+- `cargo clippy -p openclaw_engine --lib` = notification_failsafe scope **0 hit**（grep full output 0 nf 引用）。但 clippy 整體被 1 個 **pre-existing error** 擋（`openclaw_core/src/risk/price_tracker.rs:132` `#[deprecated(since="2026-04-22")]` 觸 rust-1.95.0 新 lint `deprecated_semver`，由 commit ece31b69 引入非 Packet C；342 warning 全是新 `doc_lazy_continuation` lint crate-wide 撞舊中文 doc comment，非 C scope）
+
+**ATR known-limitation 誠實性判定 = 誠實（PASS）**：
+- `RestPositionProvider` 硬設 `atr: 0.0`（position_provider.rs:174-176）；module note line 21-24 + field 註釋誠實標 known-limitation + C4 補 ATR 注入
+- 核驗 `active_lock_profit_per_position`（openclaw_core/src/sm/risk_gov.rs:339）確 `pos.atr <= 0.0 → continue` fail-closed → atr=0 時**每倉位全跳過 → 0 StopAdjustment → exchange sync 真 noop**
+- 無誤導性「看似收 SL 實 noop」：code 註釋如實標 + operator Q-B=BB defer ATR 到 C4 已拍板。**不造假 fill/lineage**
+
+**HIGH-1（design，退 PA/E1 在 C4 wire 前解）— console banner 本地寫近乎永真，AllFail 在真實「雙遠端通道掛」場景幾乎不可達**：
+- three_way.rs `compute_outcome` AllFail 需 3 路全 false；但 console banner = 本地檔寫（local disk），Slack+Email 雙掛時 console_ok 仍 true → 只 2 failed → `PartialFail` → `evaluate_dispatch` 不武裝 timer（mod.rs:308）
+- 後果：fail-safe 設計要保護的最關鍵場景（operator 兩個 push 通道全失聯）反被降級成「degraded but OK」不升級。1h escalation timer 實質不可達
+- root cause：console banner 是 **pull-based passive** channel（operator 要主動看 GUI），本地寫成功 ≠「operator 已被通知」；不該與 Slack/Email 兩個 **push** channel 同權計入 3-way 冗餘
+- 當前不阻 land：watcher 未 wire（C4/C5 deferred）+ dispatch 觸發點（incident_policy）deferred；latent 非 production runtime path。但 C4 wire 前 PA 必裁決：(a) AllFail 改成「兩遠端 push 全 fail」即觸發 (b) banner 不計入冗餘只當顯示 (c) 維持現狀但文檔明確「banner 永真所以 1h timer 實質靠 incident_policy 另判」
+
+**MED-1 — console banner tmp 檔名用 std::process::id() 跨並發碰撞**：console_banner.rs:165-169 `format!("{}.tmp.{}", BANNER_FILENAME, std::process::id())` pid 進程恆定；同進程內 write_banner（dispatch arm）與 clear_banner（ack arm）並發會寫同一 tmp path → atomic-rename 失效。C4 single-task select! 序列化可緩解但 ConsoleBannerDispatcher 是 &self pub API 無強制單寫者守衛。建議 tmp 名加 nanos/counter/uuid uniquifier。
+
+**MED-2 — SharedFailsafeWatcher::check_timer 三段拆鎖 idempotent guard 跨 lock-drop 窗口可被並發繞過**：single_watcher.rs:194-227 Phase1(lock 判 expired→drop)→Phase2(no-lock await escalation)→Phase3(re-lock set escalated=true)；兩個並發 check_timer(&self) 可都過 Phase1（escalated 尚未在 Phase3 設）→ 都跑完整 escalation → double SM-04 transition + double audit。mod.rs 原版 FailsafeWatcher::check_timer 持 &mut self 互斥無此問題；Shared 版 &self 內部可變故失互斥。C4 預期 single 30s task 序列呼故 latent；但 pub &self API 無 in-code 單呼者守衛。建議 Phase1 即 set escalated（claim 後再 await）或加 in-flight flag。
+
+**LOW-1 — EmailConfig derive(Debug) 持 smtp_app_password（latent secret leak）**：email.rs:53 `#[derive(Debug)]` + smtp_app_password: String；當前無人 {:?} log（RealSmtpTransport::send 只 log `error=%e` lettre error，非 config）但 Debug derive 在持密 struct 是潛在洩漏面。建議手寫 redacting Debug 或移除 derive。SlackDispatcher（存的那個 struct）無 Debug derive，clean；SlackSecretFile 是 transient parse struct。
+
+**LOW-2 — StubTransport（pub 非 #[cfg(test)]）內 .lock().unwrap()**：email.rs:124/138 mutex poison 才 panic；StubTransport 永不在 production hot path（prod 用 Real/Disabled）。非交易路徑非阻。
+
+**LOW-3 — 整 Packet C 目前 0 production caller（declared deferred dead code）**：grep 確認 main.rs/tasks.rs 0 處 instantiate SharedFailsafeWatcher/ThreeWayDispatcher/PgAuditEmitter/Rest*/Bybit*。EXPECTED（spec §8.1 C4/C5 deferred Sprint 3；mod.rs:47-52 明確）。對應 PA §11.2 自評「wire 完仍 dead code」。非 E2 code blocker（code 就是設計的 deferred slice）但 PM 必追 C4/C5 + incident_policy 觸發點落地否則 3-4 週 dead code。
+
+**§12 三重點審查**：
+- 重點1（tick loop 不被 SM transition 阻塞）：single_watcher check_timer 確拆鎖 await 在 lock-drop 後（但見 MED-2 idempotent 窗口）
+- 重點2（paper noop）：BybitExchangeStopSync **本身無 paper short-circuit**；module note line 46 明確 paper noop 延 C4 wire 時顯式短路（非本 struct）。C3 alone 不 enforce §6.3 守衛，C4 必補。已文檔化可接受但 C4 review 必驗
+- 重點3（per-pipeline SM 獨立）：C3 不 wire pipeline loop（C4 範圍），無法在 C3 驗；deferred
+
+**5-gate / 跨平台 / unsafe / unwrap grep**：5-gate relaxation 0 hit；硬編碼 home 0 hit（1 命中是「無硬編碼」註釋）；unsafe 0 塊（1 命中是 test fn 名）；production unwrap 0（全在 #[cfg(test)] mock 或 StubTransport LOW-2）
+
+**Rust↔V114 schema 對齊**：audit_emitter.rs INSERT 13 column（ts_ms/event_type/trigger/initiator/from_level/to_level/transition_succeeded/transition_skipped_reason/adjustments_count/sync_records/atr_buffer_multiplier/now_ms/payload_jsonb）對齊**實際 migration**（非 PA spec §5.2 proposal — spec 用 armed_at_utc/expired_at_utc timestamptz，實際 migration 用 ts_ms BIGINT；MIT 域，Rust 對齊已落地 migration 正確）。include_str! schema-lock test 8 條防 drift = 好範式
+
+**lettre 跨平台**：Cargo.toml:37 `default-features=false` + `tokio1-rustls-tls` + `ring`（0 openssl）— 確認；Apple Silicon arm64 build OK（aws-lc-rs pre-existing E1 flagged 不阻）
+
+**Multi-session race 5 條**：5a/5e origin/main HEAD=local HEAD=5097bd06，sibling window 全 Packet C + M11（b43481f7 另審，0 file overlap with notification_failsafe/）無衝突；5b/5d review scope Rust 全 commit clean；5c **V114 SQL 有 MIT 未 commit WIP（FIX MIT-2026-05-29 nested EXCEPTION undefined_column 冪等修）**— 不 revert（MIT 域 + 只動 GRANT 邏輯不動 column，不影響 Rust 對齊）。**C2 Rust merge 需與 V114 final land 協調（migration 尚未定稿）**
+
+**對抗 reasoning gain（沉澱）**：
+1. **「本地寫 channel 計入遠端冗餘」= fail-safe 反模式**：任何「N-way 冗餘通知」設計，pull-based local channel（檔/PG/GUI）的「寫成功」≠「人被通知」；不該與 push channel（Slack/Email/SMS）同權算 AllFail。下次任何 fail-safe escalation 設計必分 push/pull channel 權重
+2. **三段拆鎖 idempotent guard 的「claim 時機」**：lock→drop→await→re-lock 模式若 idempotent flag 在最後 re-lock 才設，await 窗口內並發呼叫全可繞過。正解 = Phase1 lock 內即 claim（set flag）再 drop 再 await（pessimistic claim）；或用 compare-and-swap in-flight token。&self interior-mutability API 比 &mut self 更需顯式並發守衛
+3. **deferred slice 的 dead-code 誠實性**：C1/C2/C3 全 0 production caller 是 EXPECTED 但必確認 (a) 明確文檔標 deferred (b) PM 有 C4/C5 follow-up ticket (c) 非殘缺半成品。三條齊 = 乾淨 stub 非 dead-code 反模式
+4. **clippy 被 pre-existing error 擋住時的核驗法**：`-- -A clippy::<pre-existing-lint>` 放行 pre-existing 讓 clippy 跑到 review scope；再 grep scope path 確認 scope 自身 0 hit。否則「clippy fail」會誤判成 review scope 問題
+5. **Debug derive on secret-bearing struct = latent leak**：即使當前無 log，持 password/token/webhook 的 struct derive(Debug) 是未來 {:?} 洩漏面；secret struct 應手寫 redacting Debug 或不 derive
+
+**Report**：本次回 main session 直述（E2 不寫 report .md per 指示）

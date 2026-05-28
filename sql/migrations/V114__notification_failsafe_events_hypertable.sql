@@ -214,6 +214,12 @@ CREATE INDEX IF NOT EXISTS idx_notification_failsafe_unacked
 --   table-level GRANT SELECT,INSERT 不查 column 存在性故不受影響;只有 column-level
 --   GRANT 觸發此 bug。將整段 GRANT/REVOKE 移到 compression enable 之前,
 --   twin 尚未存在時 column-level grant 合法。
+-- 為什麼 reorder 仍不夠 + nested EXCEPTION (FIX MIT-2026-05-29 idempotency blocker):
+--   reorder 只解 first-run。compressed twin 一旦由 first-run 的 compression enable
+--   建立即跨 migration run 持久存在;re-apply 場景 (engine restart sqlx migrate /
+--   雙跑 idempotency) 時 twin 已存在 → column-level GRANT 又被傳播 → 同 abort。
+--   故 column-level GRANT UPDATE 必包 nested BEGIN/EXCEPTION 吞 undefined_column:
+--   first-run 已落 pg_attribute.attacl,re-apply 無需再執行,skip 不破冪等。
 -- ============================================================
 DO $$
 BEGIN
@@ -227,10 +233,29 @@ BEGIN
         RETURN;
     END IF;
 
-    -- SELECT/INSERT 全表
+    -- SELECT/INSERT 全表 (table-level grant 不查 column 存在性,天然冪等且不傳播到 compressed twin)
     EXECUTE 'GRANT SELECT, INSERT ON observability.notification_failsafe_events TO trading_admin';
+
     -- UPDATE 限 acked_at_utc + acked_by 2 column (append-only enforcement)
-    EXECUTE 'GRANT UPDATE (acked_at_utc, acked_by) ON observability.notification_failsafe_events TO trading_admin';
+    -- 為什麼包 nested BEGIN/EXCEPTION (FIX MIT-2026-05-29 idempotency blocker, 2nd-run-only):
+    --   GRANT-before-compression 的 reorder 只解 first-run;但 compression enable 建的
+    --   compressed twin (_compressed_hypertable_NN) 跨 migration run 持久存在。
+    --   re-apply (engine restart sqlx migrate / 雙跑 idempotency) 時 twin 已存在 →
+    --   TimescaleDB 把 column-level GRANT 傳播到 twin → twin 只有壓縮格式 column 無
+    --   acked_at_utc → `ERROR: column "acked_at_utc" of relation
+    --   "_compressed_hypertable_NN" does not exist` (SQLSTATE 42703 undefined_column) → abort。
+    --   first-run 已把 grant 落 pg_attribute.attacl (acked_at_utc/acked_by = w),
+    --   re-apply 不需再執行;故 swallow undefined_column 即可保冪等,不破 first-run 正確性。
+    BEGIN
+        EXECUTE 'GRANT UPDATE (acked_at_utc, acked_by) ON observability.notification_failsafe_events TO trading_admin';
+    EXCEPTION
+        WHEN undefined_column THEN
+            -- compressed twin 已存在 (re-apply 場景);grant 已在 first-run 落 attacl,重跑無需再執行
+            RAISE NOTICE
+                'V114: column-level GRANT UPDATE skipped — compressed twin exists on '
+                're-apply (grant already in pg_attribute.attacl from first-run; idempotent)';
+    END;
+
     -- BIGSERIAL sequence 也需 GRANT (INSERT 用)
     EXECUTE 'GRANT USAGE ON SEQUENCE observability.notification_failsafe_events_id_seq TO trading_admin';
     RAISE NOTICE 'V114: granted SELECT/INSERT (full) + UPDATE (acked_* only) to trading_admin';

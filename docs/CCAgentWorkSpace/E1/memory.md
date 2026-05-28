@@ -13207,3 +13207,16 @@ register + mod.rs setter）。
 - **教訓**：install script 對 operator 的 echo 文字 = 文檔，必須對齊 wrapper 真實 resolve 邏輯，不能照 PA proposal 範本（範本常寫 loopback）直接抄。E2 adversarial review catch 此類文檔/行為失配。
 
 - 不 commit（鏈 E1→E2→E4→QA→PM）。報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-28--e1_v114_grant_fix_m11_echo_fix.md`（PM 統一 commit）
+
+## 2026-05-28 — V114 idempotency fix（GRANT-before-compression 還不夠，補 nested EXCEPTION）
+
+**任務**：MIT 第二輪 dry-run 雙跑抓到 V114 idempotency BLOCKER（上輪 GRANT 排序修法只解 first-run）。
+
+### 教訓 1：compressed twin 跨 migration run 持久 → reorder 不解 re-apply，必須吞 undefined_column
+- **根因**：column-level `GRANT UPDATE (cols)` + compressed hypertable 的交互。GRANT-before-compression reorder 只解 first-run（twin 未建時 grant 合法）；但 compression enable 建的 `_compressed_hypertable_NN` twin **跨 run 持久存在**。engine restart sqlx migrate / 雙跑 idempotency 時表已存在含 twin → column-level GRANT 又被 TimescaleDB 傳播到 twin → twin 無 user column → `ERROR: column "..." of relation "_compressed_hypertable_NN" does not exist`（SQLSTATE 42703 undefined_column）→ abort → migration 鏈卡死 engine 起不來。
+- **修法（採 MIT 建議 a）**：把 column-level `GRANT UPDATE` 單句包進 nested `BEGIN ... EXCEPTION WHEN undefined_column THEN RAISE NOTICE; END;`（PL/pgSQL 函數體內合法的巢狀 sub-block，外層已有一個 role-exists guard `DO $$`，不需新開 `DO $$`，直接 inline nested BEGIN）。first-run 已把 grant 落 `pg_attribute.attacl`（acked_at_utc/acked_by = w），re-apply 無需再執行，skip 即冪等且不破 first-run 正確性。
+- **為什麼選 (a) 而非 (b)/(c)**：(a) 直接捕捉精確錯誤條件（undefined_column），不靠 catalog introspection 預測 twin 存在性（跨 TimescaleDB 版本可能漂移）；handler 只 `WHEN undefined_column`，fresh table 上任何真正的 GRANT 失敗（role/object 缺）仍 fail-loud 不被吞。(b) 需可靠偵測 twin（版本相依）；(c) table-level GRANT + trigger 改動最大、動 append-only 強制機制、風險破 Guard C。最小改動 + 最 robust = (a)。
+- **反模式記錄**：未來 hypertable migration 同時有 column-level `GRANT (cols)` + compression，不僅 GRANT 要排在 compression 前（解 first-run），column-level GRANT 句還要包 `EXCEPTION WHEN undefined_column`（解 re-apply）。兩者缺一不可。
+- **靜態驗限制**：Mac 無生產 PG（本地有 /tmp:5432 但缺 TimescaleDB ext + observability schema + V113 baseline + trading_admin role，Guard A 會先 RAISE EXCEPTION）→ 不對任何 PG apply，純靜態：5 `DO $$`=5 `END $$;` 平衡（nested inner BEGIN/END 無 `$$` 不計）+ EXCEPTION handler line 251 + GRANT 行號全 < compress 行號 + schema 一字不動。MIT 第三輪 Linux trade-core 重跑 4-step dry-run（含雙跑 idempotency）才是冪等權威 sign-off；operator 已 DROP 第二輪 dirty 殘留表。
+- **C5 follow-up（不在本 task）**：trading_admin = OWNER + superuser 隱式持全 column UPDATE，column-level 限制只 bind 非-owner role；production GUI ack 路徑前置 = provision restricted role（e.g. `failsafe_ack_role` 只 column UPDATE acked_*）。當前 DB 無此 role，屬 C5 Sprint 3，本 task 不建。
+- 不 commit（鏈 E1→E2→E4→QA→PM）。報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-28--e1_v114_idempotency_fix.md`
