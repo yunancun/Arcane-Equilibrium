@@ -18,3 +18,5 @@
 //!   - per-dispatch timeout 硬限避免 hot path 卡住
 //!
 //! ref: docs/execution_plan/specs/2026-05-28--packet_c_3way_dispatcher_wire_spec.md
+
+pub mod slack;
