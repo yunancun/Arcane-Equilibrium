@@ -114,8 +114,10 @@ fi
 # verify 退出碼非 0 但 stdout/stderr 只含 Warning → 繼續安裝
 # 退出碼非 0 且含 Error → exit 11 拒絕半成型 unit
 if command -v systemd-analyze >/dev/null 2>&1; then
-    verify_output="$(systemd-analyze verify "$TMP_UNIT" 2>&1 || true)"
+    set +e
+    verify_output="$(systemd-analyze verify "$TMP_UNIT" 2>&1)"
     verify_rc=$?
+    set -e
     if [[ -n "$verify_output" ]]; then
         echo "$verify_output" >&2
     fi
