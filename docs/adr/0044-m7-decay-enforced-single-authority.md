@@ -116,6 +116,8 @@ per PA H-11 反向 attack：M7 decay signal 對 alpha-bearing strategy 觸發 DE
 | 反模式 | (a) 一次性全停（無 RECOVERY 機制）(b) 14d 窗口期間 operator approve 強制 enforce（繞 mitigation；違反 AMD-2026-05-21-01）(c) Protected scope strategy 走自動 14d 不經 operator（違反 protected 紀律）|
 | 落地 | M7 design spec §3-4 + V113 schema mitigation_state column + LAL Tier 3 對接 |
 
+**Wave 5 v2 sync（2026-05-28）**：M7 `DECAY_ENFORCED` / `RETIRED` 是 Autonomy Level auto path freeze trigger。Level 2 Standard 不允許繞過 14d × 50% mitigation、RETIRE finality、或 M1 LAL Tier 0 blocker；只在 owning gate 明確允許且 M7 state 非 freeze 狀態時，才可把特定 demote path 交給 fail-safe auto。
+
 ### Decision 6 — M7 ↔ M1 LAL：RETIRED → Tier 0 active blocker
 
 | 元素 | 設計 |

@@ -469,3 +469,10 @@ YYYY-MM-DD HH:MM TZ
 - verification: CC re-audit 7/7 HC PASS + 6/6 反模式 PASS + 2 BLOCKER 候選全解除 + Hard Boundaries 5/5 PASS；A 級合規評級；無 must-fix patch
 - 設計核心: 命名解誤讀（Layered ≠ Fully） / Autonomy Level Toggle 與 LAL 正交 / CLAUDE.md baseline 字面不動 amendment 並存 / 三路通知 fail escalation freeze+1h wait→SM-04 Defensive reuse + active 鎖利 hook（縮 SL 至 entry / sync exchange conditional）/ Emergency override rolling 30d + machine local time / Level 2 enable disabled until P0-EDGE-1 closure（21d demo + N≥30 + Wilson CI 正向）/ Fail-safe 復原 cooling 7d
 - boundary: docs/spec/AMD/audit-report only; no runtime code, V099 migration apply, GUI IMPL, Rust SM-04 patch, ADR-0034/0040/0042/0044/0045 cascade, deploy, rebuild, restart, auth, strategy/risk mutation, paper/live enable; Wave 5 cascade IMPL PENDING operator final sign-off
+
+2026-05-28 CEST
+- PM task: Wave 5 TOTP backend / Packet C E2-E4-ADR review and OPS residual reality check.
+- result: added fail-closed file-backed Autonomy Level TOTP verifier; route now delegates TOTP and blocks Level 2 on evidence before TOTP; ADR-0034/0040/0042/0044/0045 synced for Wave 5 v2 overlays; R4 report records Packet C source green but engine integration open.
+- verification: TOTP/governance pytest 10/10 PASS; `cargo test -p openclaw_core risk_gov --lib` 27/27 PASS; `cargo test -p openclaw_engine --lib` 3468/3468 PASS, 1 ignored; `git diff --check` planned before commit.
+- OPS outcome: `[80] pg_dump_freshness` fixed by real 4.6G dump + md5/audit/TOC PASS + 03:00 UTC cron install; `[48]` replay registry, `[74]` max-pending reject evidence, `[56]` signed live authorization remain real non-faked gates.
+- boundary: no production TOTP secret generated or read; no manual `authorization.json` write; no fake replay rows or close-maker reject samples; Packet C not marked integrated until engine caller + exchange SL sync + audit emit exist.
