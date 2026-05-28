@@ -5985,4 +5985,6 @@ CHANGELOG 最新條目為 2026-04-12 的 3 個條目（Earned-Trust / Phase 6 PM
 *審計人：A3 (UX/GUI Auditor)*
 *審計方法：靜態代碼分析（全量 onclick 交叉比對、API 端點驗證、CSS 一致性檢查、文件行數統計）*
 
+> NOTE (2026-05-28)：本 audit 引用的 worklog 路徑 `worklogs/control_api_gui/` / `worklogs/phase5_arch_rc1/` / `worklogs/chapters_j-k/` 等已於 2026-05-28 phase 2 cleanup 統一歸檔至 `docs/archive/2026-05-28--worklog_<topic>_archived/`。歷史 audit 證據不改內文；新 grep 應用 archive 路徑。詳見 `docs/README.md` § "Phase Packet Archive Index" + `docs/_indexes/path_redirects.md` Executed phase 2 段。
+
 --- END OF AUDIT ---
