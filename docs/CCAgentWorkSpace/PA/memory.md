@@ -6503,3 +6503,33 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 
 **Deliverable**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-28--ops_2_runbook_v1_0_patch.md`
 **Next**: PM commit + push timing; E2 LIGHT review optional (verify §10.5 pinned hex match E1 IMPL line 13/31/41); D+0~D+14 daily soak grep; D+14 = 2026-06-10 cutover.
+
+## 2026-05-28 — Sprint 2 Alpha Tournament entry checklist + ratify/reject gates
+
+**Trigger**: Operator menu [5]=a+b 平行跑 grill-me + PA Sprint 2 entry checklist 後 cross-verify；本 task 與 main session grill-me 並行；獨立產出後交叉驗證。
+
+**Method**: 讀 Alpha Tournament SSOT (`2026-05-26--alpha_tournament_ssot_spec.md`) + Sprint 2 dispatch packet + W2-A pre-spec finalize + v5.8 §10.5 P0 precondition + AMD-15-01 Stage 0R replay preflight + TODO v76 active state；SSH empirical 14d demo+live_demo fills by strategy (`ts` filter) + 7d avg_bps + replay.experiments age。
+
+**核心 verdict**: **CONDITIONAL GO** — Sprint 2 Wave 1+2 IMPL dispatch 不阻於任何 P0 closure；Wave 3 stage0_ready 出口須 6 Reject gate 收齊；Sprint 3+ Stage 0R→Stage 1 demo canary 晉升 HARD STOP waiting for full P0/治理債 closure。
+
+**Gate 分布**:
+- **Ratify (10)**: W2-A pre-spec / W1-A spec v1.1 / Alpha SSOT / dispatch packet / OPS-1+OPS-3+OPS-4 GAP-D / 5-gate inheritance / funding_arb retired / Conservative Level 1 default
+- **Reject (6)**: Stage 0R 6 sanity gate / M11 replay_runner schedule / W2-E E2 18 focus / W2-F MIT attribution_chain_ok 100% / AC-S2-A-3 ≥1 candidate 達 demo 7d / W3-C TW+PM sign-off
+- **Conditional (5)**: P0-LG-3 V104 / P0-OPS-2 Phase 2 / P0-OPS-4 first restore drill / Wave 5 Packet C wire / Live /auth/renew operator
+
+**核心洞察**:
+- Sprint 2 SSOT §6 four output lane（reject/draft_only/observe_more/stage0_ready）= 不必所有 candidate 達 stage0_ready；draft_only 也是 valid Sprint 2 closure
+- P0-EDGE-1 不是 Sprint 2 IMPL 阻塞而是 Sprint 4 first Live 阻塞；Sprint 2 是 P0-EDGE-1 路徑 (ii) closure 的 enabler 不是 evidence 本身
+- 14d demo accumulation + n≥30 是 Sprint 2 minimum bar；Sprint 3+ Stage 0R + Stage 1 demo canary 7d + Stage 2 14d = 共 35d 累積到 first Live；Sprint 2 不必扛 first Live 全部 evidence
+- Conservative (Level 1) Autonomy default + TOTP defer 完全與 Sprint 2 IMPL 解耦；Level 2 promotion 是 Sprint 3+ 議題
+- M11 Track C replay_runner 0 cron = 最強 push-back 但有 PA proposal ticket 派發路徑覆蓋；不是 Wave 1 dispatch blocker
+
+**5 候選策略 IMPL 結論**:
+- 既有 strategy: 0/5 進 tournament IMPL slot（全 B0 baseline/control；grid_trading 354 row 14d 但 7d −2.55 bps；ma_crossover 89 row -12.75 bps；bb_breakout/bb_reversion sample 不足；funding_arb retired）
+- 新 candidate: A1 funding_short_v2 + A2 liquidation_cascade_fade（W1-A spec v1.1 + W2-A finalize land；W2-B E1 IMPL ready per W2-A §11.3 12 action checklist）
+- DRAFT: A3 BTC/ETH cointegration（stats-first 不 Sprint 2 IMPL）
+- defer: A4 C13 options / A5 token unlock short
+
+**5 自評 push-back**: 治理債 8 並行 ≥ 7 ceiling / Sprint 2 命中率不確定 / M11 runner 0 cron 阻 stage0_ready 出口 / Sprint 2 W12-14.5 calendar 緊 / governance signaling SSOT vs IMPL state 模糊；全 mitigable；最強 = M11 runner 已有 ticket 派發路徑。
+
+**Report**: `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-28--sprint2_alpha_tournament_entry_checklist.md`
