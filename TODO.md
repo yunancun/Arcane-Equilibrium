@@ -1,9 +1,9 @@
 # 玄衡 TODO — 活躍派工佇列
 
-**版本**：v71（v70 + 2026-05-28 P0 runtime recovery + migration/register drift repair + OPS-1 enforcing-ready close + Wave 5 V099 physical apply/register）
+**版本**：v72（v71 + 2026-05-28 Wave 5 Packet B API/GUI fail-closed runtime deploy + OPS-1 closure demotion + passive healthcheck residual refresh）
 **日期**：2026-05-28
-**HEAD**：Mac / origin/main / Linux trade-core 全同步 `22466a81`（`fix(ops-1): close csrf shadow enforcing gaps`）；V099 DB apply/register 是 runtime hand-action，無新 repo diff。
-**Session**：D+1 PM takeover；完成 P0 engine/watchdog 復活、V31/34/84/86/90/100/101/102/103/106/107/112 checksum drift 修復、V109/V113 register 補登、OPS-1 A3 R2/R3/R4 收口、Wave 5 Packet A V099 runtime apply/register；下一步進 Wave 5 Packet B GUI + Packet C review/integration 或 Sprint 2 Alpha Tournament pre-IMPL。
+**HEAD**：Mac / origin/main / Linux trade-core code/runtime checkpoint `a07a08c0`（`feat(governance): wire autonomy posture api and ui`）；本 v72 TODO/report docs sync commit 為後續 branch tip（自含 commit 無法預寫自身 SHA，final PM 回報以 `git rev-parse HEAD` 為準）。
+**Session**：D+2 PM takeover（strict: D+0=2026-05-26）；完成 P0 engine/watchdog 復活、migration/register drift 修復、OPS-1 A3 R2/R3/R4 收口、Wave 5 Packet A V099 runtime apply/register、Packet B API+GUI fail-closed runtime deploy、Packet C source presence verify；下一步是 Wave 5 TOTP backend + Packet C E2/E4/integration/R4，並保留 OPS residual OP gates。
 **v65 archive**：`docs/archive/2026-05-26--todo_v65_archive.md`（待 archive；含 5 Strategy Stage roster / 5.1.1 H 級 ticket / W-AUDIT-4b retained / archive index 沿用）
 
 ---
@@ -24,14 +24,16 @@
 
 ## §0 三端同步 + Runtime 健康儀表
 
-**三端 sync**：Mac / origin/main / Linux trade-core 全 HEAD `22466a81`（2026-05-28 11:29 UTC SSH `git pull --ff-only`；OPS-1 enforcing-ready close 已同步 runtime repo）。
+**三端 sync**：Mac / origin/main / Linux trade-core code/runtime HEAD `a07a08c0`（2026-05-28 12:33 UTC SSH `git pull --ff-only` + API-only restart；本 TODO v72 docs sync 另作 branch-tip documentation commit）。
 
-**Runtime snapshot**（2026-05-28 11:34 UTC SSH verify）：
-- ✅ **Engine/API/watchdog alive** — `openclaw-engine` PID 1944136；uvicorn PID 1944278；user watchdog PID 1966871；`/api/v1/healthz` HTTP 200；`systemctl --user is-active openclaw-watchdog.service` = active。
+**Runtime snapshot**（2026-05-28 12:37 UTC SSH verify）：
+- ✅ **Engine/API/watchdog alive** — API-only deploy via `bash helper_scripts/restart_all.sh --api-only --keep-auth`；uvicorn PID 2003183；`/api/v1/healthz` HTTP 200；`systemctl --user is-active openclaw-watchdog.service` = active；`engine_watchdog.py --status` demo alive (`snapshot_age_seconds≈28` at verify)。
 - ⚠️ **system-level service caveat** — sudo password required，`openclaw-engine.service` / system watchdog unit 尚未安裝到 `/etc/systemd/system`；目前保護 = user-level `openclaw-watchdog.service` enabled + linger yes + manual engine process。system-level install 仍屬 operator hand-action。
 - ✅ **Migration/register drift clean** — `repair_migration_checksum --verify` 2026-05-28 11:34 UTC：`parsed_files=105 / db_rows=105 / drift_count=0`；V099/V100/V109/V113 row 均存在且 checksum 對齊。
 - ✅ **Wave 5 V099 physical state** — `system.autonomy_level_config` seed `CONSERVATIVE / system_default / cold_start_default_conservative`；`system.autonomy_level_switch_audit` 18 columns；ENUM values `CONSERVATIVE, STANDARD`；24h cooldown query uses `idx_autonomy_audit_switched_at_utc` Index Only Scan。
+- ✅ **Wave 5 Packet B route/UI load** — `GET /api/v1/governance/autonomy-level/state` unauth HTTP 401（route registered + auth enforced）；`autonomy-posture.js` deployed behind GUI auth boundary；switch path intentionally fails closed until real TOTP backend exists。
 - ✅ **OPS-1 shadow cutover check** — `helper_scripts/canary/healthchecks/csrf_shadow_zero_verify.sh` on `/tmp/openclaw` 近 7d：`verdict=PASS scanned_logs=15 csrf_shadow=0`。
+- ⚠️ **Passive healthcheck not green** — 2026-05-28 12:37 UTC `passive_wait_healthcheck.sh --quiet` exit 1：FAIL `[48] replay_manifest_registry_growth`, `[74] close_maker_reject_samples`, `[56] live_pipeline_active` (`authorization_json_missing`)；`[80] pg_dump_freshness` = INSUFFICIENT_SAMPLE；OPS-1 CSRF shadow 無 fail。這些是 OPS residual / live-auth / replay / close-maker evidence，不反轉 OPS-1 closure。
 
 **Cron schedule（unchanged from 2026-05-25 H-2 restore）**：10/13 enabled (5 Day -1 MUST + 2 SHOULD + 3 Day 0)；**OPS-4 GAP-D pg_dump cron install + first restore drill remain operator hand-actions**；3 defer（passive_wait_healthcheck / ref21_market_microstructure_recorder / blocked_symbols_30d_unblock）。
 
@@ -44,7 +46,7 @@
 | **P0-ENGINE-DEAD-2026-05-27** | ✅ **CLOSED 2026-05-28 runtime recovered** — engine/API/user watchdog alive；healthz 200；watchdog enabled user-level + linger yes | operator + E1 | AC met for immediate P0 unblock：engine PID + API PID + watchdog PID present；watchdog status `engine_alive=true`；healthz 200 | Residual: system-level unit install still needs sudo/operator password；root cause RCA not complete，but no longer blocks migration/register repair or OPS-1/Wave5 handoff |
 | **P0-EDGE-1** | 🔴 ACTIVE（SSH empirical 2026-05-26 22:00 UTC: 0/3 AC paths satisfied；2026-05-26 cohort reframed 5→4 textbook per AMD-2026-05-26-01）| QC + PA | (i) **4 textbook** ≥3 demo 7d avg_net>5bps + Wilson lower>0 + n≥30（funding_arb retired per AMD-2026-05-26-01）；**OR** (ii) ≥3 alpha-bearing 達同標；**OR** (iii) portfolio 7d gross 正向 | 唯一可預期 closure path = (ii) Sprint 2 Alpha Tournament W12-15 dispatch；當前 (i) **4/4 textbook** `insufficient_total_samples`（funding_arb 樣本不再累積：deprecated；ma_crossover / bb_breakout / bb_reversion / grid_trading runtime_bps −11~−42）；(iii) live_demo 7d net=-1.99 USDT |
 | **P0-LG-3** | ⚠️ PA verify ✅ + MIT V104 dry-run ✅ 9/9 PASS + 2 bonus / **IMPL DISPATCH gate (2) UNBLOCKED 2026-05-27** / gate (1) v56 P0 Layer B + 24h ~2026-05-30 待 | PA ✅ → MIT V104 dry-run ✅ → E1×N IMPL (gated) | **AMENDED 2026-05-26 / MIT dry-run 2026-05-27**：spec v2 V094→V104 1:1；2026-05-27 MIT BEGIN/ROLLBACK in trading_ai PG empirical PASS：21 col / 4 CHECK / hypertable 7day / compression 30d / retention 90d / V104 hole FREE confirmed / Guard A part 3 forbidden col 0 hit / 4 boundary INSERT check_violation rejected / 2nd apply NOTICE-skip 一致 V083/V084 gold；real dispatch precondition = (1) V104 spec scaffold ship ✅ (2) v56 P0 Layer B + 24h ⏳ ~2026-05-30 (3) MIT 4-step dry-run 9/9 PASS ✅ (4) Option B race-aware dispatch；§15 #1 FALSE dep reframed | LG-3 Wave 2.4.A earliest ~2026-05-30 UTC；ref V104 spec + verify report `2026-05-27--p0_lg3_spec_verify_and_todo_patch.md` + MIT dry-run `srv/docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-27--v104_supervised_live_audit_dry_run.md` |
-| **P0-OPS-1..4** | 🟢 **P0 source/runtime close enough for next phase** — OPS-1 enforcing-ready gaps closed commit `22466a81`; OPS-4 systemd unit source fixed commit `0100da7c`; migration drift clean; watchdog alive | E1+MIT+PA → E2+A3+E4+QA 全鏈 GREEN | OPS-1 A3 R2/R3/R4 close：CSRF 403 中文 toast + auto reload；cert trust runbook + install hint；CSRF/CSP shadow 14d→7d + `csrf_shadow_zero_verify.sh` PASS 0。OPS-4: V113/V109 register repaired + checksum drift 0；engine/watchdog alive。 | Remaining operator actions: system-level unit install (sudo), pg_dump cron install/apply, first restore drill, OPS-2 D+14 cutover/soak. These are OP gates, not current coding blockers. |
+| **P0-OPS-1..4** | 🟢 **OPS-1 CLOSED / OPS residual OP-gated** — OPS-1 enforcing-ready gaps closed commit `22466a81`; OPS-4 systemd/pg_dump/restore source chain GREEN but runtime passive healthcheck not all green | E1+MIT+PA → E2+A3+E4+QA 全鏈 GREEN | OPS-1 A3 R2/R3/R4 close：CSRF 403 中文 toast + auto reload；cert trust runbook + install hint；CSRF/CSP shadow 14d→7d + `csrf_shadow_zero_verify.sh` PASS 0。Migration drift clean；engine/API/watchdog alive。 | Remaining: system-level unit install (sudo), pg_dump cron install/apply + first restore drill, OPS-2 D+14 cutover/soak, `authorization_json_missing` live-auth renewal, replay_manifest/close-maker evidence. Not current coding blocker, but blocks “OPS all green”. |
 | **P0-FUNDING-ARB-DECISION-FORCE** | ✅ **CLOSED 2026-05-26**（operator decision = D） | operator + PA | operator chose (D) 3C TOML deprecation closure | **Cascade WORKFLOW F NEW**：PA deprecation spec + TW docs/README/AMD cascade + R4 cross-ref；ref §9 NEW row + §6 P1 entry |
 
 ---
@@ -65,7 +67,7 @@ Sub-IMPL M3 pre-readiness  ✅ DONE (2026-05-22)                                
 Sub-IMPL M3 metric emitter scaffold  ✅ PASS WITH 5 CARRY (2026-05-22 PM Phase 3e)      6 Track + 8 AC + 51/51 integration
 Sprint 4+ §4.1 + Stage A-F + Sprint 5+ Wave 1  ✅ ALL CLOSED (2026-05-23 PM-signed)      Wave A/B + V100/V101/V102 + B-2/B-3 + Stage E Linux deploy
 業務 Sprint 2 (Alpha Tournament)  🟡 SSOT SPEC-FINAL / IMPL NOT STARTED (W12-15 計畫)    Stream A funding short>30% + LCS fade + DRAFT BTC/ETH pairs
-Layered Autonomy v2 Wave 5  🟡 Packet A runtime-landed / Packet C source-landed / Packet B GUI pending     V099 physical apply+register done；next = GUI Autonomy Posture + SM-04 E2/E4/integration
+Layered Autonomy v2 Wave 5  🟡 Packet A+B runtime-landed fail-closed / Packet C source-landed              V099 physical apply+register done；API+GUI posture deployed；next = TOTP backend + SM-04 E2/E4/integration/R4
 ```
 
 **狀態語言**：
@@ -87,7 +89,7 @@ Layered Autonomy v2 Wave 5  🟡 Packet A runtime-landed / Packet C source-lande
 | ~~**E**~~ | ~~AMD-2026-05-25-02 v5.5 reframe cascade~~ | – | ✅ **CLOSED 2026-05-27** | – | PA Workflow E cascade 完成；report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_e_amd_25_02_cascade.md` |
 | ~~**F**~~ | ~~funding_arb (D) 3C TOML deprecation cascade~~ | – | ✅ **FULLY CLOSED 2026-05-26** | – | Phase 1 PA spec ✅ + Phase 2 TW (AMD-26-01 + 5 primary + 19 secondary) ✅ + R4 Pass A APPROVE-WITH-DRIFT ✅ + R4 Pass B APPROVE ✅；3 LOW carry-over defer D+7 |
 | **Earn Wave C** | OP-1 series → first stake $100-200 Flexible-only | T1: 7 hand OP + 5 可代做 post-1..5 | OP 30min + post-flow 30min | 3 (operator-gated) | OP-1 a-f hand actions |
-| **Layered Autonomy v2 Wave 5** | V099 + GUI + Rust SM-04 + 5 ADR sync + R4 | T1+T2 (Packet A runtime ✅ 2026-05-28; Packet C source ✅; Packet B GUI pending) | 81-126 hr | partial | ✅ **Packet A V099 physical apply/register DONE 2026-05-28**：V99 row + checksum `7b6e...aeff7`；`current_level=CONSERVATIVE` seed；`repair_migration_checksum --verify drift_count=0`；out-of-order V99<V100 accepted by PM/operator flow. ✅ **Packet C Rust SM-04 source land**：`NotificationFailsafeTimeout` + active lock-profit hook present in `risk_gov.rs` with prior cargo evidence. Pending next executable step = Packet B GUI Autonomy Posture + backend endpoints, plus Packet C E2/E4/integration audit. |
+| **Layered Autonomy v2 Wave 5** | V099 + GUI + Rust SM-04 + 5 ADR sync + R4 | T1+T2 (Packet A runtime ✅ 2026-05-28; Packet B API+GUI fail-closed ✅ 2026-05-28; Packet C source ✅ / review pending) | 81-126 hr | partial | ✅ **Packet A V099 physical apply/register DONE 2026-05-28**：V99 row + checksum `7b6e...aeff7`；`current_level=CONSERVATIVE` seed；`repair_migration_checksum --verify drift_count=0`。✅ **Packet B API+GUI posture deployed** commit `a07a08c0`：state/eligibility/status/switch endpoints + tab-governance posture; switch audit/fail-closed on missing TOTP backend; route auth verified on Linux. ✅ **Packet C Rust SM-04 source presence**：`NotificationFailsafeTimeout` + active lock-profit hook present in `risk_gov.rs`; `cargo test -p openclaw_core risk_gov --lib` 27/27 PASS. Pending = TOTP backend, Packet C E2/E4/integration, 5 ADR/R4 sync. |
 | **Sprint 2 業務 Alpha Tournament** | A1 funding short>30% + A2 LCS fade + A3 BTC/ETH pairs DRAFT | T1+T5: PA spec → E1 Rust×3 → MIT V108/V109/V111 → E2 → E4 → QC → BB → QA | 248-351 hr / 3w wall-clock | 4 (Sprint 2 dispatch) | Sprint 1A-γ V111 land |
 
 **Sub-agent dispatch hygiene SOP**（per memory `feedback_fetch_before_dispatch` + 2026-05-25 cargo test-after-atomic 教訓）：
@@ -164,6 +166,8 @@ Layered Autonomy v2 Wave 5  🟡 Packet A runtime-landed / Packet C source-lande
 | `P0-OPS-4-GAP-B-D-OPERATOR-DEPLOY` | 1 | **PARTIAL DONE 2026-05-28** — (1) engine/watchdog runtime recovered ✅ (2) `repair_migration_checksum --verify` drift_count=0 ✅ after V109/V113 register repair + V099 apply/register；remaining hand-actions: (3) pg_dump cron dry-run install (4) pg_dump cron apply (5) first 03:00 UTC fire monitor (6) `passive_wait_healthcheck.sh --quiet` with pg_dump freshness slot (7) first qualifying restore drill ~4 hr per MIT SOP scenario S1 + BB Earn cross-sign §11；ref QA report `srv/docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-27--ops_4_gap_bd_qa_e2e_acceptance.md` |
 | `P3-OPS-4-PG-DUMP-EVENT-EXTEND` | 4 | **NEW 2026-05-27 per PA mini-patch §10.C** — `pg_dump_retention_dropped` + `pg_dump_md5_drift` 2 future event_types；triggered if dump operationally need finer audit；non-blocker first-day live |
 | `P2-OPS-4-GAP-B-D-UNIT-TEST-GAP` | 3 | **NEW 2026-05-27 per E4 CARRY-OVER-2** — 743 LOC production code (3 cron + Python healthcheck + passive_wait wire) 0 unit test；governance gap；P1 backlog post first-day live |
+| `P1-WAVE5-TOTP-BACKEND` | 1 | **NEW 2026-05-28** — Autonomy switch API/UI is runtime-deployed but intentionally fail-closed: typed confirm and audit work, but `_verify_autonomy_totp()` returns `twofa_backend_down` until a real TOTP/2FA verifier is wired. AC: configured backend, negative/positive TOTP tests, audit rows for success/failure, cooldown lock still enforced, Linux auth route smoke. |
+| `P1-WAVE5-PACKET-C-E2-E4-INTEGRATION` | 1 | **NEW 2026-05-28** — Rust SM-04 source presence + `risk_gov` 27/27 PASS is not full Wave 5 close. Need E2 review, E4 regression/integration, and R4 ADR cross-ref for `NotificationFailsafeTimeout` + lock-profit hook before marking Packet C closed. |
 | `P1-LG-3-AC-CORRECTION` | – | ✅ **CLOSED 2026-05-26 / VERIFIED 2026-05-27** — PA delivered (1) spec v2 amendment 83 行 L1771-1851 (V094→V104 1:1 + V099/V100 移除 + §2.4A wording drift 移除) (2) V104 scaffold 378 行 `srv/docs/execution_plan/specs/2026-05-26--v104-lg3-supervised-live-audit-migration.md` (10 章 + 21 col + 4 CHECK + hypertable + Guard A/B/C + 4-step PG dry-run + V094→V104 replacement rule) (3) TODO §1 row reframe applied；**2026-05-27 PA verify pass**：3/3 drift FULLY COVERED + sql/migrations/ empirical V104 FREE；2 external gate remain = v56 P0 Layer B + 24h (~2026-05-30) + MIT V104 4-step empirical dry-run 9/9 PASS；ref close report `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-26--p0_lg3_ac_correction_and_v104_scaffold.md` + verify report `srv/docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--p0_lg3_spec_verify_and_todo_patch.md` |
 | `P1-FUNDING-ARB-DEPRECATION-CASCADE` | – | ✅ **FULLY CLOSED 2026-05-26** Phase 1+2 + R4 Pass A+B APPROVE — PA spec (551 行) + TW AMD-26-01 (372 行) + 5/5 primary + 19/19 secondary + R4 Pass A APPROVE-WITH-DRIFT + R4 Pass B APPROVE 0 dangling；commits `6a20b9ea` + `e913adbf` 三端同步；3 LOW carry-over defer D+7 (~2026-06-02 piggyback E1 `#[deprecated]` IMPL): (1) EA-3 hotfix spec SUPERSEDED header (2) SQL V033 enum header (`strategy_close_funding_arb`) (3) docs/README specs/ index 補 PA spec entry；後續 PENDING follow-up: E1 D+7 `#[deprecated]` IMPL + MIT D+30 PG retention + QC D+30 observation；ref §9 Workflow F + AMD-26-01 §11 cascade checklist + R4 Pass B report `docs/CCAgentWorkSpace/R4/workspace/reports/2026-05-26--workflow-f-cross-ref-audit-pass-b.md` |
 | `P2-OPS-2-HOTRELOAD` | 3 | **NEW 2026-05-26 per E3-HIGH-1 long-term** — `Arc<ArcSwap<BybitCredentials>>` + IPC reload handler = 5s rotation parity with authorization.json；消除 engine restart for Bybit key rotation；Owner: E1；ETA: Post-Sprint 4 |
@@ -206,7 +210,7 @@ Layered Autonomy v2 Wave 5  🟡 Packet A runtime-landed / Packet C source-lande
 |---|---|---|---|---|
 | ~~**D+0 NEW (2026-05-26)**~~ | ~~confirm AMD-2026-05-25-01 商業化邊界 + AMD-2026-05-25-02 v5.5 reframe~~ ✅ **DONE 2026-05-27** — 兩 AMD operator APPROVE；Workflow D (25-01) + E (25-02) cascade completed | — | — | — |
 | **D+0 NEW** | commit canary [67]→[80] rename 4 files | 5 min | E1 sub-agent ready | 阻 sync (已 commit cf61d1f0 ✅) |
-| ~~**D+1-D+2**~~ | ~~AMD-21-01 v2 Layered Autonomy 最終 sign-off~~ ✅ **DONE 2026-05-27** — operator APPROVE 三 AMD 同輪；Wave 5 packet master ready 待主會話派 E1+MIT+E1a | — | — | — |
+| ~~**D+1-D+2**~~ | ~~AMD-21-01 v2 Layered Autonomy 最終 sign-off + Wave 5 Packet A/B kickoff~~ ✅ **DONE 2026-05-28** — operator APPROVE 三 AMD 同輪；Packet A V099 + Packet B API/GUI posture landed；remaining TOTP backend + Packet C/R4 | — | — | — |
 | **D+2-D+3** | OP-1 a-f Bybit Web UI **mainnet** key 重發（per C-3 2026-05-26：現 2 demo key + 33d TTL，mainnet key 未發 → Sprint 4 first Live + Earn 雙線需）| 5-10 min | OP-1 pre-verify done | 阻 Sprint 4 first Live + Earn Wave C production deploy |
 | **D+2-D+3** | OP-2 Stage 0R Earn variant 仲裁（8 OQ）| 30-60 min | OP-1 完成 | 阻 first stake |
 | **D+2-D+3** | OP-3 first stake **$100-200 USDT Flexible-only** via tab-earn（per C-5 2026-05-26 拍板 USDT only 免幣價跌）| 5 min | OP-2 拍板 | 阻 `learning.earn_movement_log` rows>0 |
@@ -268,7 +272,7 @@ Layered Autonomy v2 Wave 5  🟡 Packet A runtime-landed / Packet C source-lande
 |---|---|---|---|
 | **AMD-2026-05-25-01** | docs/README AMD list / SPECIFICATION_REGISTER count / TODO §8 Stream 2 殘留 cleanup / AMD-04+05 supersede markers | PA Workflow D | ✅ **CLOSED 2026-05-27** Cascade executed — operator APPROVE 2026-05-27 via PM session AskUserQuestion；AMD-25-01 Status Active；docs/README + SPECIFICATION_REGISTER 已 land entry；AMD-04 §1 Stream 2 + AMD-05 Stream 2 retain 部分 supersede marker land；`monetization-demand-test-spec.md` superseded marker pre-existed；TODO 無 Stream 2 active task 殘留（active surface 0 / archive-only mention 11+ files）；report `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--workflow_d_amd_25_01_cascade.md` |
 | **AMD-2026-05-25-02** | docs/README AMD list / SPECIFICATION_REGISTER count / AMD-25-01 §3.2 cross-ref / ADR-0030 cross-ref / AMD Status Active + approval log / TODO §8.5 C2 cleanup | PA Workflow E | ✅ **CLOSED 2026-05-27** Cascade 完成；report `2026-05-27--workflow_e_amd_25_02_cascade.md` |
-| **AMD-2026-05-21-01 v2 Wave 5** | ADR-0034 LAL 對齊矩陣加 Autonomy Level / ADR-0040 §Decision 5 / ADR-0042/0044/0045 wording sync + V099 schema + GUI sub-section + Rust SM-04 patch | PA + E1 + E1a + MIT + R4 | ✅ **operator APPROVE 2026-05-27** + PA dispatch packet master 410 行 (`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--wave_5_dispatch_packet_master.md`)；Packet A V099 + Packet C Rust SM-04 IMMEDIATELY DISPATCHABLE；Packet B GUI gated 24-48h post A；待主會話派 E1+MIT+E1a |
+| **AMD-2026-05-21-01 v2 Wave 5** | ADR-0034 LAL 對齊矩陣加 Autonomy Level / ADR-0040 §Decision 5 / ADR-0042/0044/0045 wording sync + V099 schema + GUI sub-section + Rust SM-04 patch | PA + E1 + E1a + MIT + R4 | 🟡 **Packet A+B landed 2026-05-28** — V099 runtime apply/register + API/GUI posture deployed fail-closed at `a07a08c0`；remaining = TOTP backend + Packet C E2/E4/integration + ADR/R4 sync；PA packet master ref `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-27--wave_5_dispatch_packet_master.md` |
 | **ADR-0046 (Proposed)** | funding_arb.rs IMPL + V117 migration spec + Optuna search space update | PA + E1 + MIT | Sprint 1A-δ/ε 平行 land |
 | **drift audit 2026-05-25** | TODO active state update + v5.8 文檔 patches (DONE 10 patches) | PM | Cascade 完成 ✅ |
 | **operator decision 2026-05-26 (D) funding_arb deprecation** (Workflow F) | (1) PA spec (551 行) ✅ `2026-05-26--funding-arb-deprecation-cascade.md` (2) TW AMD-26-01 372 行 + 5 primary + 19 secondary ✅ `2026-05-26--AMD-2026-05-26-01-funding-arb-deprecation.md` (3) R4 Pass A APPROVE-WITH-DRIFT ✅ `2026-05-26--workflow-f-cross-ref-audit.md` (4) R4 Pass B APPROVE ✅ `2026-05-26--workflow-f-cross-ref-audit-pass-b.md` | PA → TW → R4 | ✅ **CLOSED 2026-05-26** Cascade 完成；3 LOW carry-over defer D+7 (~2026-06-02) |
@@ -302,7 +306,7 @@ Layered Autonomy v2 Wave 5  🟡 Packet A runtime-landed / Packet C source-lande
 
 ## §11 Layered Autonomy v2 Wave 5 Cascade Pointer（2026-05-22）
 
-**狀態**：✅ **DESIGN-DONE + CC APPROVE A 級** 2026-05-22 + ✅ **operator APPROVE 2026-05-27** + PA dispatch packet master ready；Wave 5 IMPL DISPATCH READY（Packet A V099 + Packet C Rust SM-04 即派；Packet B GUI 需 A land 24-48h）
+**狀態**：🟡 **Packet A+B source/runtime landed, fail-closed by design** 2026-05-28 + ✅ **operator APPROVE 2026-05-27** + CC APPROVE A 級；full Wave 5 close still requires TOTP backend, Packet C E2/E4/integration, and R4 ADR sync.
 
 **4 個 SSOT 文件指針**：
 1. **AMD-2026-05-21-01 v2** — `docs/governance_dev/amendments/2026-05-22--AMD-2026-05-21-01-autonomy-fully-with-failsafe.md`（684 行）
@@ -310,12 +314,12 @@ Layered Autonomy v2 Wave 5  🟡 Packet A runtime-landed / Packet C source-lande
 3. **V099 schema spec** — `docs/execution_plan/specs/2026-05-22--v099-autonomy-level-config.md`（568 行）
 4. **CC re-audit** — `docs/CCAgentWorkSpace/CC/workspace/reports/2026-05-22--layered_autonomy_v2_reaudit.md`（A 級 / 7 HC + 6 反模式 + 2 BLOCKER 候選解除）
 
-**Wave 5 cascade IMPL roadmap**（operator APPROVE 2026-05-27 + PA packet master 410 行 ready）：
-1. **Packet A V099 schema land** — E1 + MIT Linux PG empirical dry-run 13 條（8-12 hr）— **IMMEDIATELY DISPATCHABLE**
-2. **Packet B GUI Autonomy Posture sub-section** — E1a tab-governance.html / CONFIRM SWITCH typed-confirm / 14 path × 2 level panel（21-28 hr）— **DISPATCHABLE but e2e gate 需 Packet A land 24-48h**
-3. **Packet C Rust SM-04 patch** — `RiskEvent::NotificationFailsafeTimeout` 新 variant + active 鎖利 hook + 35+ transition rules verify（6-10 hr per packet master subset；52-86 hr 為 AMD §9.8 整體 cascade subset 含 R4+TW；PA + E1 + E4 三方 review）— **IMMEDIATELY DISPATCHABLE**
-4. 5 module ADR sync — ADR-0034 + ADR-0040 + ADR-0042/0044/0045 wording 對齊
-5. R4 cross-ref audit
+**Wave 5 cascade IMPL roadmap**（updated 2026-05-28）：
+1. **Packet A V099 schema land** — ✅ DONE physical apply/register + checksum drift 0.
+2. **Packet B GUI/API Autonomy Posture** — ✅ DONE commit `a07a08c0`: state/eligibility/status/switch endpoints, GUI posture panel, typed-confirm/audit/cooldown skeleton, Linux API-only deploy. Switch is intentionally blocked by missing TOTP backend and P0-EDGE evidence.
+3. **TOTP backend wire-up** — NEW active P1; required before any successful Level 1→2 switch path.
+4. **Packet C Rust SM-04 patch review/integration** — source presence + targeted cargo PASS; still needs E2/E4/integration audit before Wave 5 close.
+5. **5 module ADR sync + R4 cross-ref audit** — ADR-0034 + ADR-0040 + ADR-0042/0044/0045 wording 對齊.
 
 **3 並行 ceiling**（Wave-X2 per PM §5）
 
@@ -365,7 +369,7 @@ Layered Autonomy v2 Wave 5  🟡 Packet A runtime-landed / Packet C source-lande
 | 日期 / Sprint | 工作 | Gate |
 |---|---|---|
 | ~~**D+0 (2026-05-26)**~~ | ~~confirm AMD-25-01/02 + Cluster 1 五並行啟動~~ ✅ **DONE 2026-05-27** Cluster 1 6/6 全 CLOSED + 三 AMD operator APPROVE | — |
-| ~~**D+1-D+2**~~ | ~~AMD-21-01 v2 final sign-off + Wave 5 Packet A runtime land~~ ✅ **operator APPROVE 2026-05-27** + **V099 physical apply/register 2026-05-28** + Packet C Rust SM-04 source present | 下一步派 Packet B GUI Autonomy Posture + Packet C E2/E4/integration |
+| ~~**D+1-D+2**~~ | ~~AMD-21-01 v2 final sign-off + Wave 5 Packet A/B runtime land~~ ✅ **operator APPROVE 2026-05-27** + **V099 physical apply/register 2026-05-28** + **Packet B API/GUI fail-closed deploy 2026-05-28** + Packet C Rust SM-04 source present | 下一步：TOTP backend + Packet C E2/E4/integration + R4 ADR sync |
 | **2026-06-10** | OPS-2 Phase 2 cutover (D+14 soak end) | E1 PR move fallback + main.rs panic block + Python reason rename + AuthError variant delete |
 | **D+2-D+3** | OP-1 a-f + OP-2 + OP-3 Earn first stake | `learning.earn_movement_log` rows > 0 |
 | **D+5** | P0-EDGE-1 / LG-3 / OPS residual OP gates closure ETA | Sprint 4 first Live W18-21 unblock |
@@ -440,11 +444,13 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && PGHOST=localhost PGUSER=trading_admin 
 
 ## §-1 歷史 closure 摘要（≤14d；舊細節 → archive）
 
-- **2026-05-28 D+1 P0 收口 + Wave 5 V099 runtime land（commit `0100da7c` + `22466a81` + DB hand-action）**：
+- **2026-05-28 D+2 P0 收口 + Wave 5 Packet A/B runtime land（commits `0100da7c` + `22466a81` + `a07a08c0` + DB hand-action）**：
   - Engine/API/user watchdog recovered；healthz 200；system-level unit install still operator/sudo hand-action。
   - Migration/register drift closed：V109/V113 register 補登；V099 physical apply + `_sqlx_migrations` register；`repair_migration_checksum --verify drift_count=0`。
   - OPS-1 enforcing-ready gaps closed：CSRF 403 friendly toast + reload；cert trust runbook + install hint；7d shadow + `csrf_shadow_zero_verify.sh` PASS 0。
-  - Next true dev phase：Wave 5 Packet B GUI Autonomy Posture + Packet C E2/E4/integration；then Sprint 2 Alpha Tournament when ready。
+  - Wave 5 Packet B landed/deployed：autonomy state/eligibility/status/switch API + GUI Autonomy Posture；switch remains fail-closed on missing TOTP backend and P0-EDGE evidence，避免 fake autonomy success。
+  - Passive healthcheck still FAIL on `[48] replay_manifest_registry_growth`, `[74] close_maker_reject_samples`, `[56] live_pipeline_active authorization_json_missing`; `[80] pg_dump_freshness` insufficient sample。這些轉 OPS residual / evidence queue，不反轉 OPS-1 closure。
+  - Next true dev phase：TOTP backend + Packet C E2/E4/integration/R4；then Sprint 2 Alpha Tournament when P0-EDGE/LG/OPS residual gates are scheduled。
 - **2026-05-27 D+1 OPS-4 GAP B+D FULLY CLOSED via 3-round IMPL chain + E2/E4 r1+r2 + QA E2E + engine dead discovery**：
   - **Round 1 commit `1392c9e1`** PA spec amend (449→695) + E1 4/6 deliverable (3 cron + V113) + MIT 1/3 (post_restore_validation.sql 330 LOC)
   - **Round 2 commit `261d3956`** E1 round 2 補 (check_pg_dump_freshness.py 616 LOC + passive_wait wire) + MIT round 2 補 (pg_restore_drill_sop.md 572 LOC + template 239 LOC)

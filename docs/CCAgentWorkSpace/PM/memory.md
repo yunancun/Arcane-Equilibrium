@@ -1,5 +1,12 @@
 # PM Memory — 工作記憶
 
+## 2026-05-28 Wave 5 Packet B / OPS-1 Closure Lesson
+
+- Autonomy level switch must stay fail-closed until a real TOTP/2FA backend is wired; typed-confirm, audit, cooldown, and UI posture are useful only as a guarded skeleton, not as permission to switch levels.
+- On trade-core, API-only deploy should use `bash helper_scripts/restart_all.sh --api-only --keep-auth`; route registration can be smoke-tested by expecting unauth HTTP 401 on protected endpoints plus `/api/v1/healthz` HTTP 200.
+- OPS-1 closure is narrower than OPS all-green: CSRF shadow/enforcing can be closed while passive healthcheck still fails on replay manifest growth, close-maker evidence, live authorization, or pg_dump freshness.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-28--wave5_ops1_closure.md
+
 ## 2026-05-25 Sprint 1A -> 1B Recheck Lesson
 
 - 2026-05-25 recheck superseded part of the 2026-05-24 audit: C10 PnL and IntentType gaps are source-fixed, Earn Wave C branch is source-landed, and the running engine contains C10/Earn strings.
