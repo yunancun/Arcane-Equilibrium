@@ -724,6 +724,54 @@ def _check_sweep_returns_expected_cells(failures: list[str]) -> None:
         )
 
 
+def _check_sweep_parsed_cache_equivalence(failures: list[str]) -> None:
+    """P2-13 exact-vs-fast 契約 verify：parsed_rows 快取路徑 vs raw 解析路徑
+    必輸出 byte-identical sweep packet。
+
+    為什麼必驗：P2-13 優化把 row-derived feature 預解析一次傳入每 cell；若
+    快取路徑與 raw 路徑有任何 threshold 比較 / 欄位差異，sweep 數值會偏移。
+    本 test monkeypatch `prepare_parsed_rows` 回 None 以強制 raw 路徑，與
+    default 快取路徑做 JSON 對比，證明選 cell / metrics 完全不變。
+    """
+    import json as _json
+
+    try:
+        from . import liquidation_cluster_stage0r_metrics as _M
+    except ImportError:
+        import liquidation_cluster_stage0r_metrics as _M  # type: ignore
+
+    rows = _build_balanced_fixture(n_symbols=8, n_days=7, n_per_day_per_dir=4)
+    grid_kwargs = dict(
+        bb_demo_bias_confirmed=True,
+        k_grid=(2, 3), n_usd_grid=(5_000, 10_000), m_grid=(1, 2),
+        side_dom_grid=(0.7,), floor_grid=(10_000,), pct_grid=(0.95,),
+        quiet_grid=(0,), horizon_grid=(5,),
+        total_bucket_count=40_000,
+    )
+    fast = _M.compute_stage0r_sweep(rows, **grid_kwargs)
+
+    # 強制 raw 路徑：patch prepare_parsed_rows 回 None → 全程 parsed_rows=None。
+    _orig = _M.prepare_parsed_rows
+    _M.prepare_parsed_rows = lambda rows, *, cost_bps: None  # type: ignore
+    try:
+        slow = _M.compute_stage0r_sweep(rows, **grid_kwargs)
+    finally:
+        _M.prepare_parsed_rows = _orig
+
+    a = _json.dumps(fast, default=str, sort_keys=True)
+    b = _json.dumps(slow, default=str, sort_keys=True)
+    _assert(
+        a == b,
+        "parsed_rows 快取路徑與 raw 路徑 sweep 輸出不一致（P2-13 契約破壞）",
+        failures,
+    )
+    _assert(
+        len(fast["sweep_cells"]) == 8,
+        f"expected 8 cells (2×2×2), got {len(fast['sweep_cells'])}",
+        failures,
+    )
+
+
 def _check_sweep_bb_demo_bias_refuse(failures: list[str]) -> None:
     """BB demo bias not confirmed → sweep returns refusal packet。"""
     rows = _build_balanced_fixture()
@@ -1114,6 +1162,7 @@ def main() -> int:
 
     # sweep
     _check_sweep_returns_expected_cells(failures)
+    _check_sweep_parsed_cache_equivalence(failures)     # P2-13 exact-vs-fast 契約
     _check_sweep_bb_demo_bias_refuse(failures)
     _check_sweep_json_roundtrip(failures)
 

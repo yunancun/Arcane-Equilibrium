@@ -1201,3 +1201,284 @@ def test_strategy_params_toml_loader_engine_normalization(
     assert risk_demo is not None
     assert risk_demo["limits"]["open_positions_max"] == 25
     assert mod._load_production_risk_overrides_toml(engine="unknown") is None
+
+
+# ──────────────────────────────────────────────────────────────────────
+# P2-10：duplicate-spawn 並發覆蓋 + Linux-empirical evidence gate 分離
+#
+# 背景（cold audit Wave 4 P2-10）：上方 full-chain happy-path test 把
+# ``_do_pg_path_for_run_sync`` 整個 monkeypatch 掉（test 235 段 fake_run），
+# 因此 run_route.py:178-198 的真正 dedup 邏輯——PG advisory lock + per-actor/
+# global cap probe——從未被任何 Mac 單測執行。後果：Mac 全綠時，Linux PG /
+# subprocess 路徑可能已壞或會 duplicate-spawn 而沒人發現。
+#
+# 本段不再 mock 掉 dedup，而是用 fake route_helpers + fake PG cursor 真正驅動
+# ``_do_pg_path_for_run_sync``，讓兩次「並發」run 競爭同一 actor 的 cap，
+# 斷言只有第一次成功、第二次被 cap probe 擋下回 replay_per_actor_cap_exceeded
+# →409。驗的是 dedup 的「意圖」（重複 run 不得同時 register/spawn），不是把它
+# mock 走。
+#
+# 為什麼用「已提交狀態」共享而非真 thread race：真正的 race 互斥點在 PG
+# advisory lock（``try_acquire_pg_advisory_locks``，serializable xact 內），
+# 那是 PG runtime 語意，Mac sandbox 無 PG 抓不到。Mac 層能且只能驗
+# defense-in-depth 的 cap-count gate：第一個 run INSERT 'starting'/'running'
+# 後，第二個 run 的 ``count_active_runs_for_actor`` 必須看到 >=cap 並 fail-closed。
+# advisory-lock 互斥本身的 race 證明屬下方 LINUX-EMPIRICAL gate。
+# ──────────────────────────────────────────────────────────────────────
+
+
+class _FakeRunBody:
+    """duck-type body：``_do_pg_path_for_run_sync`` 只讀這兩個屬性。"""
+
+    def __init__(self, experiment_id: str, idempotency_key: str) -> None:
+        self.experiment_id = experiment_id
+        self.idempotency_key = idempotency_key
+
+
+class _FakeCursor:
+    """最小 PG cursor stub：execute 吞掉所有 SQL（dedup 邏輯不依賴回傳）。"""
+
+    def execute(self, *args: Any, **kwargs: Any) -> None:
+        return None
+
+
+class _FakeConn:
+    """context-manager PG conn stub；commit/rollback no-op。"""
+
+    def __init__(self, cursor: _FakeCursor) -> None:
+        self._cursor = cursor
+
+    def cursor(self) -> _FakeCursor:
+        return self._cursor
+
+    def commit(self) -> None:
+        return None
+
+    def rollback(self) -> None:
+        return None
+
+    def __enter__(self) -> "_FakeConn":
+        return self
+
+    def __exit__(self, *exc: Any) -> bool:
+        return False
+
+
+class _DedupFakeRouteHelpers:
+    """fake route_helpers，模擬 V045 active-run 帳本。
+
+    關鍵：``count_active_runs_for_actor`` 回傳「已成功啟動的 run 數」，使第二
+    次呼叫看到第一次留下的 'running' row → 觸發 real cap gate。advisory lock
+    一律放行（Mac 不模擬鎖互斥；那是 Linux gate）。
+    """
+
+    def __init__(self, *, manifest_uuid: str, fixture_path: Path) -> None:
+        self._manifest_uuid = manifest_uuid
+        self._fixture_path = fixture_path
+        self.active_for_actor = 0
+        self.spawn_calls = 0
+        self.lock_attempts = 0
+
+    def v045_table_present(self, cur: Any) -> bool:
+        return True
+
+    def try_acquire_pg_advisory_locks(self, cur: Any, actor_id: str):
+        # Mac 層：鎖永遠成功；真正的鎖互斥 race 在 Linux PG gate 驗。
+        self.lock_attempts += 1
+        return True, None
+
+    def count_active_runs_for_actor(self, cur: Any, actor_id: str) -> int:
+        return self.active_for_actor
+
+    def count_active_runs_global(self, cur: Any) -> int:
+        return self.active_for_actor
+
+    def lookup_registered_experiment_id(self, cur: Any, experiment_id: str):
+        return self._manifest_uuid
+
+    def resolve_artifact_output_dir(self, run_id: str) -> Path:
+        return self._fixture_path / run_id
+
+    def build_default_manifest_payload(self, **kwargs: Any) -> dict[str, Any]:
+        return {"experiment_id": kwargs.get("experiment_id")}
+
+    def write_manifest_fixture(self, **kwargs: Any) -> Path:
+        return self._fixture_path / "manifest.json"
+
+    def spawn_replay_runner(self, **kwargs: Any):
+        # 成功 spawn → 該 actor active 數 +1，使後續 run 落入 cap gate。
+        self.spawn_calls += 1
+        self.active_for_actor += 1
+        return 4321, None
+
+    def resolve_process_started_at_ms(self, pid: int) -> int:
+        return 1_700_000_000_000
+
+
+def test_pg_run_path_second_concurrent_run_blocked_by_cap_no_duplicate_spawn(
+    tmp_path: Path,
+) -> None:
+    """LOCAL 並發 dedup：第二個 run 撞 per-actor cap → 不 duplicate-spawn。
+
+    直接驅動 run_route._do_pg_path_for_run_sync（不 mock），兩次同 actor 呼叫
+    模擬並發提交。real cap probe（run_route.py:194）必須讓第二次回
+    replay_per_actor_cap_exceeded，且 spawn_replay_runner 僅被呼叫一次。
+    """
+    from replay import run_route as rrun  # type: ignore[import-not-found]
+
+    helpers = _DedupFakeRouteHelpers(
+        manifest_uuid=str(uuid.uuid4()),
+        fixture_path=tmp_path,
+    )
+
+    def get_pg_conn_fn():
+        return _FakeConn(_FakeCursor())
+
+    body = _FakeRunBody(
+        experiment_id=str(uuid.uuid4()),
+        idempotency_key="dedup-test-key",
+    )
+
+    # 第一個 run：cap=1、actor 目前 0 active → 應成功 spawn。
+    run_id_1, pid_1, err_1, _ = rrun._do_pg_path_for_run_sync(
+        body=body,
+        actor_id="dedup-actor",
+        get_pg_conn_fn=get_pg_conn_fn,
+        route_helpers=helpers,
+        statement_timeout_ms=2000,
+        per_actor_cap=1,
+        global_cap=1,
+    )
+    assert err_1 is None
+    assert run_id_1 is not None
+    assert pid_1 == 4321
+    assert helpers.spawn_calls == 1
+    assert helpers.active_for_actor == 1
+
+    # 第二個 run（同 actor、模擬並發提交）：actor 已有 1 active、cap=1
+    # → real cap gate 必須 fail-closed，且絕不可第二次 spawn。
+    run_id_2, pid_2, err_2, _ = rrun._do_pg_path_for_run_sync(
+        body=body,
+        actor_id="dedup-actor",
+        get_pg_conn_fn=get_pg_conn_fn,
+        route_helpers=helpers,
+        statement_timeout_ms=2000,
+        per_actor_cap=1,
+        global_cap=1,
+    )
+    assert err_2 == "replay_per_actor_cap_exceeded"
+    assert run_id_2 is None
+    assert pid_2 is None
+    # 核心 dedup 不變式：duplicate run 沒有觸發第二次 subprocess spawn。
+    assert helpers.spawn_calls == 1
+
+    # cap-exceeded → 409（不 fallback in-memory；PG 狀態 canonical）。
+    http_err = rrun.map_run_pg_error_to_http(err_2, experiment_id=body.experiment_id)
+    assert http_err is not None
+    status, detail = http_err
+    assert status == 409
+    assert "replay_per_actor_cap_exceeded" in detail["reason_codes"]
+
+
+def test_pg_run_path_global_cap_blocks_cross_actor_duplicate(
+    tmp_path: Path,
+) -> None:
+    """global cap：不同 actor 但 global active 已滿 → 第二個 run 被擋。
+
+    驗 run_route.py:196-198 的 global-cap defense-in-depth：actor B 即便自身
+    0 active，只要 global active >= global_cap 即 fail-closed，不 duplicate-spawn。
+    """
+    from replay import run_route as rrun  # type: ignore[import-not-found]
+
+    helpers = _DedupFakeRouteHelpers(
+        manifest_uuid=str(uuid.uuid4()),
+        fixture_path=tmp_path,
+    )
+
+    def get_pg_conn_fn():
+        return _FakeConn(_FakeCursor())
+
+    # actor A 先成功啟動 → global active = 1。
+    body_a = _FakeRunBody(experiment_id=str(uuid.uuid4()), idempotency_key="key-a")
+    _, _, err_a, _ = rrun._do_pg_path_for_run_sync(
+        body=body_a,
+        actor_id="actor-a",
+        get_pg_conn_fn=get_pg_conn_fn,
+        route_helpers=helpers,
+        statement_timeout_ms=2000,
+        per_actor_cap=5,  # per-actor 寬鬆，逼測試只命中 global gate
+        global_cap=1,
+    )
+    assert err_a is None
+    assert helpers.spawn_calls == 1
+
+    # actor B per-actor 0 active，但 global 已滿 → global cap gate 必須 fire。
+    body_b = _FakeRunBody(experiment_id=str(uuid.uuid4()), idempotency_key="key-b")
+    _, _, err_b, _ = rrun._do_pg_path_for_run_sync(
+        body=body_b,
+        actor_id="actor-b",
+        get_pg_conn_fn=get_pg_conn_fn,
+        route_helpers=helpers,
+        statement_timeout_ms=2000,
+        per_actor_cap=5,
+        global_cap=1,
+    )
+    assert err_b == "replay_global_cap_exceeded"
+    # 跨 actor duplicate 也不得 spawn 第二次。
+    assert helpers.spawn_calls == 1
+
+    status, detail = rrun.map_run_pg_error_to_http(
+        err_b, experiment_id=body_b.experiment_id,
+    )
+    assert status == 409
+    assert "replay_global_cap_exceeded" in detail["reason_codes"]
+
+
+# ──────────────────────────────────────────────────────────────────────
+# LINUX-EMPIRICAL EVIDENCE GATE（與上方 Mac 單測明確分離）
+#
+# 上方 Mac 單測只能驗 cap-count defense-in-depth gate（run_route.py:194-198）。
+# 真正抗並發 race 的互斥點是 PG advisory lock（try_acquire_pg_advisory_locks，
+# serializable xact 內），以及 subprocess 真實 spawn——兩者皆是 PG/OS runtime
+# 語意，Mac mock sandbox 無法觸及（CLAUDE.md「Data, Migrations, And
+# Validation」：Mac mocked pytest 抓不到 PG runtime semantics）。
+#
+# 下列斷言必須在 Linux trade-core 以真 PG empirical 驗證，預設 skip：
+#   1. 兩個真並發 HTTP /full-chain/run（同 actor）對打 advisory lock，
+#      恰一個拿到鎖 INSERT、另一個 lock_err 回 409，DB 內只有 1 條
+#      replay.run_state 'running' row（無 duplicate row）。
+#   2. spawn_replay_runner 真的只 fork 出一個 replay_runner subprocess
+#      （ps 計數 == 1），且第二次請求 0 subprocess。
+#   3. V045 (replay.run_state) 表存在；count_active_runs_* 對真 schema 回正確值。
+#
+# 啟用方式（Linux runtime，operator/E4 執行）：
+#   OPENCLAW_REPLAY_LINUX_PG_EMPIRICAL=1 pytest -q \
+#     tests/test_replay_full_chain_run_routes.py \
+#     -k linux_empirical_duplicate_spawn
+# 在 Mac CI / dev 此 test 永遠 skip，不阻塞綠燈，但也不偽裝已驗 PG race。
+# ──────────────────────────────────────────────────────────────────────
+
+
+def test_linux_empirical_duplicate_spawn_advisory_lock_gate() -> None:
+    """PG advisory-lock 並發 race 的真實證據門（Linux-only，預設 skip）。
+
+    為什麼必須 fail-closed skip 而非 mock：advisory-lock 互斥是 PG runtime
+    語意；若在 Mac 用 mock「假裝」驗過，會掩蓋 Linux PG 路徑壞掉或 duplicate-
+    spawn 的風險（正是 P2-10 要堵的洞）。此 gate 只在真 PG 環境跑。
+    """
+    import os
+
+    import pytest
+
+    if os.environ.get("OPENCLAW_REPLAY_LINUX_PG_EMPIRICAL") != "1":
+        pytest.skip(
+            "Linux PG empirical gate：需 OPENCLAW_REPLAY_LINUX_PG_EMPIRICAL=1 + "
+            "真 trade-core PG（advisory-lock 並發 race + subprocess 計數驗證）。"
+            "Mac mock sandbox 抓不到 PG runtime semantics，刻意不在此實作以免偽綠。"
+        )
+
+    pytest.fail(
+        "Linux PG empirical duplicate-spawn 證據尚未接線；請 E4 在 trade-core "
+        "以真 PG + 兩並發 /full-chain/run 驗 advisory-lock 互斥 + 單一 run_state "
+        "row + 單一 subprocess（見本檔 LINUX-EMPIRICAL gate 註解步驟 1-3）。"
+    )

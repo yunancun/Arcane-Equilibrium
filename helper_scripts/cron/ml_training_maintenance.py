@@ -54,6 +54,11 @@ AUDIT_JOBS = (
 VALID_JOBS = CORE_JOBS + AUDIT_JOBS
 DEFAULT_JOBS = ",".join(VALID_JOBS)
 DEFAULT_STRATEGIES = "grid_trading,ma_crossover,bb_breakout,bb_reversion,funding_arb"
+# P2-05 決策（cold audit）：排程監督/分位訓練刻意維持 demo-only，暫不開 live_demo
+# 加寬訓練 lane。理由：驗證加寬 lane 所需的晉級證據目前為空（model_performance=0、
+# drift_events=0、無 Stage-B replay）；live_demo 仍由 shadow advisor 消費並非浪費。
+# 重啟條件依序：P2-06 證據寫入 → Stage 0R/Stage-B 綠 → 另開 isolated lane ticket。
+# 政策權威見 docs/adr/0004-livedemo-no-degradation.md 附錄。
 DEFAULT_TRAINING_ENGINE_MODES = "demo"
 DEFAULT_SHADOW_ENGINE_MODES = "demo,live_demo"
 
