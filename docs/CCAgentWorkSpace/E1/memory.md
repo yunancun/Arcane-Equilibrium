@@ -13493,3 +13493,53 @@ register + mod.rs setter）。
 
 ### 旁註：ssh PG TCP auth 不通（環境 secrets 漂移）
 - `basic_system_services.env` 的 POSTGRES_PASSWORD 對 TCP 不 auth（docker exec peer/trust 可）。完整 runner end-to-end（psycopg2 TCP）留 E4 用 runtime env 跑。E1 用 docker exec SELECT + CSV offline harness 已 de-risk 全部 load-bearing 邏輯。
+
+## 2026-05-29 — FA gap audit G1/G2/G5 cosmetic cleanup（session-cleanup）
+
+worktree `../wt-gapfix` branch `fix/session-cleanup-g1g2g5`，未 commit（等 E2→E4→PM）。0 行為改變（cosmetic/inert）。
+
+- **G2（main.rs btc_lead_lag near-dead var）裁決 = (b) 保留+中文註釋**。`btc_lead_lag_paper_enabled_env = false`（main.rs ~L1110）D-hygiene 修 `should_spawn_btc_lead_lag_producer` 後不再 gate spawn，僅出現在兩條 spawn/skip tracing log 的 `paper_enabled_env` field。選保留非移除：(1) 它與上方 `paper_env_requested`（原始 env 請求）成「請求 vs 生效」observability 對照，看 log 能確認 PAPER 確被忽略；(2) 移除會破壞兩分支 log schema 結構非最小改動。inline 中文註釋明標「僅供 observability 非決策；spawn 唯一權威是 should_spawn_btc_lead_lag_producer」防未來誤讀。
+- **G5（single_watcher.rs stale 註解）**：L77-78 註解宣稱「無集中登記表」已過期 — `docs/architecture/singleton-registry.md §2.4`（commit a8ba146c）已登記 SHARED_WATCHER(§2.4.1) + FAILSAFE_FEED_SENDERS(§2.4.2)。改註解引 §2.4.2 + §2.4.1。純註解 0 code。**教訓：singleton「無集中登記表」這類 stale 自述會誤導後人重複造表 — 登記後必回填 source 註解引 registry §**。
+- **G1（risk.rs 822>800 split）裁決 = DO（clean pure-move）**。C4 escalate handler + 4 helper（PrebuiltSnapshots/InBandStopSync/NoopFailsafeAudit/compute_position_atr）+ 入口 `handle_notification_failsafe_escalate` 是推過閾值的 ~205 LOC 新增，clean 的關鍵驗證：
+  1. **caller 走 re-export 不走 `risk::`**：loop_handlers.rs L726 + 2 test 都呼 `handlers::handle_notification_failsafe_escalate`（經 mod.rs `pub(crate) use`），故只需把 mod.rs 的 `pub(crate) use risk::...` 改指 `notification_failsafe_escalate::...`，**caller 零改**。這是 split 安全的決定性因素。
+  2. **4 helper + C4-specific imports（L19-28：PgAuditEmitter/execute_failsafe_escalation/ExchangeStopSync/StopRequest/async_trait/PositionSnapshot/...）全僅此 block 用**（grep 確認 pre-618 非 import 0 hit、helper 全檔外 0 ref、risk.rs 無自有 `#[cfg(test)]`）→ import 隨遷不糾纏。
+  3. 搬移後 risk.rs **822→605**（<800）；新 module 231 行（含 MODULE_NOTE + 搬移 LOC）。
+  - **驗收**：lib test 3622 passed / 0 failed / 1 ignored（baseline 3622 → split 後 3622，pure-move count 不變）；release build Finished（1m01s）；clippy 0 新 warning 引用我改檔。pre-existing 噪音：release 3 warning（btc_lead_lag/db_writer unused import + single_watcher L114 C4 dormant dead-fields + ma_crossover make_intent）+ openclaw_core clippy `since` semver error（在未改 main tree 重現確認 pre-existing，非本 task）。
+  - **判定模式（do-if-clean-else-defer）**：FA 給 split 任務先 grep 三件事 — (a) caller 是否走 re-export（決定 caller 改不改）、(b) 待搬 helper/import 是否僅此 block 用（決定糾纏度）、(c) 搬完是否真 <800。三皆 clean 才做；否則 defer（不為 cosmetic 閾值冒 hot-path risk handler refactor regression）。本次三皆 clean → 做。
+- chain → E2 →（G1 split 屬結構移動）E4 regression。cosmetic/inert，commit 後不單獨 redeploy，隨下次 LG-3/incident-trigger rebuild 生效。
+
+## 2026-05-29 — P2-BASIS-PANEL-INFRA Rust writer IMPL（待 E2）
+- worktree `wt-basis` branch `feature/basis-panel-infra`；V115 由 MIT 寫好（不碰）。
+- 新 `panel_aggregator/basis.rs`（539 LOC）mirror funding_curve：BasisAggregator
+  (cohort filter + latest-value cache `HashMap<sym,(last,index)>` + flush ON CONFLICT)。
+  公式 `(last_price/index_price-1.0)*100.0` SIGNED（panel 存 signed，strategy 端
+  funding_short_v2/mod.rs:155 取 abs）；分子必 last_price 非 mark。
+- fail-closed 教訓：index≤0/缺失 → 不入 cache + flush 雙重防線 skip（不寫 0/NULL）。
+  「從未收過有效 index 的 sym 不入 cache」是關鍵不變式（避假 basis）。
+- latest-value cache **不 drain**（與 funding partial_state cache 同範式，跟
+  funding_curve buffer drain 不同）：index 只在 sparse snapshot frame 到，cache 須
+  跨 flush 保 last-known，否則下個 flush 全 sym 漏寫。
+- PanelAggregator wire：加 field（**不改 new 簽名** — 共用 cohort_symbols.clone()，
+  9 test caller + main.rs:1050 caller 0 破壞）+ basis_mut/basis accessor + run loop
+  1 行 dispatch + 1 行 flush arm。無 IPC slot（spec §6.4：offline replay only）。
+- freshness healthcheck（CLAUDE §七 gap）：`check_basis_panel_freshness` query
+  MAX(snapshot_ts_ms) age vs BASIS_PANEL_STALE_THRESHOLD_MS=180_000（3× 60s flush）；
+  fail-soft（pool 不可用→PoolUnavailable 不誤報 stale；無 row→NoData）。無既有 panel
+  freshness check 可 mirror，自含 mirror quality_writer is_stale 範式。
+- 反模式教訓：`include_str!` 自 grep `mark_price` 會誤抓自己的「不用 mark」解釋註釋
+  → negative substring test 脆。改測 on_ticker_update 簽名 + 正向公式 + perp_last_price
+  binding。
+- 驗收：cargo test lib 3635 passed/0 fail/1 ignored（含 12 新 basis test + 1 basis_mut
+  mod test + run dispatch index_price wire）；release Finished；clippy 改動檔 0 新 warn。
+- SSH SELECT 驗：V115 尚未 land（latest applied V114；MIT dry-run 驗過 idempotency 但
+  production apply 是 deploy-gated）→ E4 regression 做 migrate run + 60s flush row 實寫驗。
+
+## 2026-05-30 — P2-BASIS-PANEL-INFRA round 2（E2 RETURN 1 HIGH：dead Rust freshness → 改用既有 Python [66] 框架）
+- worktree `wt-basis` branch `feature/basis-panel-infra`（round 1 + V115 已在）；未 commit。
+- **E2 HIGH 根因 = pub 抑制 dead_code warning 的盲區**：round 1 我自含 Rust `check_basis_panel_freshness` pub fn，0 production caller = dead code。但 `pub` 讓 `dead_code` lint 不報 → 「clippy 0 warning」假綠騙過自評。sister panel funding_curve/oi_delta **無 Rust freshness fn**，所有 panel freshness 在 Python `[66] check_panel_freshness`（table-driven `panel_tables` loop）。**教訓：新增 pub fn/enum/const 前先 grep production caller；只有 test 引用 + 跨語言框架已有同類設施 = 該設施放錯語言層，不是「補 gap」。pub 不是「公開 API」的正當理由，會掩蓋 dead_code。**
+- **修法（最小化）**：(1) 刪 basis.rs 的 `check_basis_panel_freshness` fn + `BasisPanelFreshness` enum + `BASIS_PANEL_STALE_THRESHOLD_MS` const + 2 freshness test + MODULE_NOTE 對應行；(2) mod.rs re-export `pub use basis::{check_basis_panel_freshness, BasisAggregator, BasisPanelFreshness}` → `pub use basis::BasisAggregator`；(3) Python `checks_derived_ml_hygiene.py` `panel_tables` 加一行 `("panel.basis_panel", "basis")`（mirror funding/oi_delta tuple）+ docstring V085/V087→V085/V087/V115；(4) runner.py `[66]` index 行 + inline comment 提及 basis。
+- **刪 dead fn 不留殘 import 的核對**：刪前 grep `warn!`(2)/`Postgres`(3) 在 basis.rs 仍被 writer/flush 用 → import 不需動。刪後 `cargo check` 確認 0 新 unused warning（若 fn 是某 import 唯一使用者，刪 fn 會冒出 unused import warning，必連帶刪）。本例 import 共用 → 乾淨。
+- **ABSENT→PASS_SKIP 驗（不靠 mock，靠 runtime 實證 + 真函數）**：docker exec trading_postgres（role `trading_admin` / db `trading_ai`，**非** postgres/trading — env drift 教訓）`to_regclass` 確認 basis_panel=f（ABSENT）/ funding=t / oi=t。再用 worktree 修改後的真 `check_panel_freshness` 跑 fake cursor 餵這個實證 existence 狀態：混合情境 → overall PASS + `basis=ABSENT`（basis 不致 false FAIL/WARN）；全 ABSENT → PASS_SKIP pre-deploy。**比純 mock 強：existence 回應錨定 runtime 真值。**
+- **驗收**：`cargo test panel_aggregator::basis` 10 passed（writer 12→10，刪 2 freshness test）；`basis`-filter 33 passed 全綠；`cargo build --release` Finished；clippy/`cargo check` engine lib 3 warning（db_writer unused import / single_watcher C4 dormant fields / ma_crossover make_intent）全 pre-existing 他檔，0 referencing basis.rs/mod.rs；刪 dead fn 0 新 unused。openclaw_core `since` semver clippy error 仍 pre-existing baseline（main tree 重現）。
+- **scope 守住**：V115（MIT，untracked `??` 從未碰）/ writer 公式·fail-closed·cache（E2 已 PASS，0 改）/ runner A1 stub / market_tickers 全未碰。basis.rs 539→448 行。runner.py 純 doc。
+- chain → re-E2 → E4。
