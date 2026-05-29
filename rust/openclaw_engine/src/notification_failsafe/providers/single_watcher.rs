@@ -75,7 +75,8 @@ static SHARED_WATCHER: OnceLock<Arc<SharedFailsafeWatcher>> = OnceLock::new();
 ///   C5 GUI ack 取出 ack_tx。C4 自己不 send（誠實標記：機制 live，觸發 pending）。
 ///
 /// singleton 登記：本 OnceLock 隨 `spawn_notification_failsafe_watcher` 單點 init，
-/// 與 `SHARED_WATCHER` 同生命週期；登記在 PA/E2 report + TODO follow-up（無集中登記表）。
+/// 與 `SHARED_WATCHER` 同生命週期；已登記於 `docs/architecture/singleton-registry.md §2.4.2`
+/// （commit a8ba146c）。`SHARED_WATCHER` 見同文件 §2.4.1。
 static FAILSAFE_FEED_SENDERS: OnceLock<FailsafeFeedSenders> = OnceLock::new();
 
 /// outcome / ack 餵入端 sender bundle（Sprint 3 incident_policy + C5 GUI ack 取用）。

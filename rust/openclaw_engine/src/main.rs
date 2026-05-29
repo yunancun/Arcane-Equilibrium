@@ -1107,6 +1107,12 @@ async fn async_main(
             "OPENCLAW_ENABLE_PAPER=1 ignored for BtcLeadLagProducer; use OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1 for non-promotional diagnostics"
         );
     }
+    // 注意：`btc_lead_lag_paper_enabled_env` 僅供 observability（下方兩條 spawn/skip
+    // tracing log 的 `paper_enabled_env` field），不參與 spawn 決策。自 2026-05-23 起
+    // PAPER env 對 BtcLeadLagProducer 永遠 ignored，故恆為 false；保留此常量是為了讓
+    // runtime log 能明確標示「PAPER 確已被忽略」（與上方 paper_env_requested 的原始請求
+    // 形成「請求 vs 生效」對照）。spawn 決策的唯一權威是 should_spawn_btc_lead_lag_producer
+    // （D-hygiene 已修：只看 runtime binding，不再由此 var gate）。
     let btc_lead_lag_paper_enabled_env = false;
     let btc_lead_lag_diagnostic_enabled_env =
         openclaw_engine::panel_aggregator::btc_lead_lag_diagnostic_mode_enabled();

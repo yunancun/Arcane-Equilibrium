@@ -12,7 +12,7 @@
 //!
 //! ref:
 //!   - docs/execution_plan/specs/2026-05-29--packet-c-c4-pipeline-wire-spec.md §5.2
-//!   - handlers/risk.rs::handle_notification_failsafe_escalate
+//!   - handlers/notification_failsafe_escalate.rs::handle_notification_failsafe_escalate
 //!   - providers/single_watcher.rs::timer_expired_and_claim
 
 use super::{make_test_writer, seed_atr_klines};
