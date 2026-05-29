@@ -972,3 +972,40 @@ MIT AUDIT DONE: docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-27--v104_sup
 **Lesson**: TimescaleDB compressed twin (_compressed_hypertable_NN) 跨 migration run 持久；任何 enable compression + column-level GRANT 的 migration，column GRANT 必包 nested EXCEPTION WHEN undefined_column 才能雙跑/sqlx re-apply 冪等。V114 nested EXCEPTION pattern 應作為後續同類 migration 的 reference。
 
 **Report**: findings 直接回 main session (本次無獨立 report file)。
+
+## 2026-05-29 V115 basis_panel migration + Linux PG empirical dry-run (P2-BASIS-PANEL-INFRA hard-gate)
+
+**Trigger**: P2-BASIS-PANEL-INFRA V115 migration hard-gate；PA spec `2026-05-29--basis-panel-infra-spec.md`；A1 funding_short_v2 Stage 0R 前置 basis panel 持久化層。
+
+**Report**: `workspace/reports/2026-05-29--v115_basis_panel_dry_run.md`（同步 Operator/）
+
+**交付**:
+- V115 SQL: `/Users/ncyu/Projects/TradeBot/wt-basis/sql/migrations/V115__panel_basis_panel.sql`（430 行；worktree `wt-basis` on `feature/basis-panel-infra`，HEAD d2bbc79a）
+- Schema: `panel.basis_panel` 6 col（snapshot_ts_ms BIGINT / symbol TEXT / perp_last_price f8 / index_price f8 / basis_pct f8 SIGNED / source_tier TEXT default 'bybit_v5_ws_tickers'）；PK (snapshot_ts_ms, symbol)；**無 mark_price / 無 engine_mode**（market 共享平面，對齊 sister）；NOT NULL on 3 numeric（fail-closed 在 writer 端 index≤0 不寫 row）
+- mirror V085 funding_rates_panel / V087 oi_delta_panel pattern：1d chunk (86400000 ms)、panel.unix_now_ms() integer_now_func、14d retention (BIGINT 1209600000 ms)、**無 compression**（sister 皆無，surgical）、Guard A/B/C 完整
+
+**Linux PG dry-run（ssh trade-core, trading_ai, BEGIN/ROLLBACK double-apply）逐項 PASS**:
+- Guard A: CREATE TABLE IF NOT EXISTS 正確；6 col 全 NOT NULL 對齊 spec ✓
+- Hypertable: is_hypertable=1, chunk_interval=86400000 (1d), snapshot_ts_ms BIGINT epoch ms 軸 ✓
+- **double-apply idempotency**: APPLY 2 全 NOTICE-skip（schema/table/hypertable/retention/index 全 "already exists, skipping"），**0 RAISE**（V083/V084 gold pattern 對齊）✓
+- Retention: drop_after=1209600000 (14d) policy 掛上 ✓
+- integer_now_func: unix_now_ms 註冊到 dimension ✓
+- index: 3 個（PK + idx_basis_panel_ts_desc_symbol (ts DESC, symbol) + basis_panel_snapshot_ts_ms_idx (ts DESC)）✓
+- boundary index≤0 不寫 row: schema 用 NOT NULL on index_price 表契約底線；**MIT 裁決 schema 不需 CHECK (index_price>0)**（writer skip + NOT NULL 已 fail-closed；加 CHECK 會讓 batch flush 一條違反全 abort，反不利；對齊 sister 無 value-range CHECK）✓
+- **post-rollback residue=0**：basis_panel_table=0, max_migration=114 → trading_ai pristine 未污染 ✓
+
+**關鍵 empirical finding（非 bug）**:
+- `create_hypertable` **auto-create** `<table>_<timecol>_idx` = `basis_panel_snapshot_ts_ms_idx` on (snapshot_ts_ms DESC)，與 spec §3.1 line 103-104 explicit secondary index **byte-identical** → 我的 CREATE INDEX IF NOT EXISTS 正確 no-op skip。3 sister panel 全同此 auto-index pattern（funding_rates/oi_delta/btc_lead_lag 皆有 `_snapshot_ts_ms_idx`）→ V115 follow 既有 gold pattern。secondary index 是 redundant no-op 但無害，符合 spec 意圖。Mac mock 絕對抓不到此 TimescaleDB runtime semantic — 再證 V055/V114 教訓「Linux PG empirical mandatory」。
+
+**basis 公式 parity（E2 必驗，已 grep 對照）**: strategy live `funding_short_v2/mod.rs:155-157` compute_basis_pct(perp_price=ctx.price=last_price, ctx.index_price) = `((perp/ip)-1.0).abs()*100.0`（**取 abs**）。panel 存 **signed** `(last/index-1)*100`；consumer/Stage 0R runner 取 `ABS(basis_pct)` 比 gate。分子必 = last_price（非 mark_price）否則 Stage 0R 與 live 不可比。
+
+**sign-off**: V115 SQL **PASS — ready for E1 writer IMPL**（E1 在同 wt-basis 接 basis.rs + panel_aggregator wire + a1 runner SQL）。
+
+**給 E1 注意點**:
+1. writer fail-closed：index≤0 / 缺失 → **skip（不發 INSERT、不寫 0、不寫 NULL row）**；NOT NULL 已是 schema 防線但 INSERT 整批會 abort，writer 必先過濾
+2. basis_pct 存 **signed**（不取 abs）；source_tier 顯式寫 'bybit_v5_ws_tickers'
+3. ON CONFLICT (snapshot_ts_ms, symbol) DO UPDATE（idempotent flush）
+4. cohort 用 PanelAggregator 既有 cohort_symbols（單一 SSOT，避 8b round-1 RED self-imposed scarcity）
+5. latest-value cache：index_price 只在 ~1/8 frame 帶 → 跨 frame 保 last-known（對齊 funding_curve）；從未收過 index 的 sym 不入 cache
+6. V115 land 後 sqlx checksum：operator AUTO_MIGRATE 路徑正常 land（dry-run 未真 apply，max_migration 仍 114，無 hash drift 風險，與 V083/V084 手動 psql -f 場景不同）
+7. 無 IPC slot（spec §6.4 #5）；無 healthcheck 是 CLAUDE.md §七缺口 — E1 IMPL 時補 basis_panel freshness check
