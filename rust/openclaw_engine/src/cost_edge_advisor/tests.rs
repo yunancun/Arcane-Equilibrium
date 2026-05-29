@@ -349,14 +349,13 @@ fn advisor_arc_share_is_safe() {
 /// Serialised env-gate test (cargo runs tests in parallel by default; env
 /// var mutations race across tests if separated). Combines unset / set=1 /
 /// truthy-alias checks into one body that holds the lock for the whole
-/// duration. Mutex pattern avoids `#[serial_test]` external dep.
-/// 序列化 env-gate 測試（cargo 預設並行跑，env 寫入會 race）。Mutex pattern
+/// duration. 共用鎖（crate::test_env_lock）避免新加 `serial_test` 依賴。
+/// 序列化 env-gate 測試（cargo 預設並行跑，env 寫入會 race）；用 crate 共用鎖
 /// 避免新加 `serial_test` 依賴。
 #[test]
 fn env_gate_strict_one_semantics_serialised() {
-    use std::sync::Mutex;
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-    let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+    // P1-OPS-2-CI-FLAKINESS-TEST-LOCK：改用 crate 共用鎖，移除原 module-local ENV_LOCK。
+    let _g = crate::test_env_lock::guard();
 
     // (a) unset → false
     // (a) 未設 → false

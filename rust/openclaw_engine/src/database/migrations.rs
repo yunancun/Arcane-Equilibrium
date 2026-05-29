@@ -714,15 +714,15 @@ mod tests {
 
     // Flip `OPENCLAW_AUTO_MIGRATE` in-process mutates global env — cargo test
     // runs async tests on multiple threads by default, so we gate the two
-    // env-sensitive cases behind a process-wide mutex. Combined into a single
-    // `#[tokio::test]` to avoid the serial-test dep.
+    // env-sensitive cases behind the crate-wide shared mutex.
     // `OPENCLAW_AUTO_MIGRATE` 翻轉影響全局 env；cargo 預設多執行緒跑 async，
-    // 用 process-wide mutex 串行化，避免引入 serial-test 依賴。
-    static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // 用 crate 共用鎖 `crate::test_env_lock::guard()` 串行化，避免引入
+    // serial-test 依賴（P1-OPS-2-CI-FLAKINESS-TEST-LOCK：移除原 module-local
+    // ENV_MUTEX）。
 
     #[tokio::test]
     async fn disabled_and_enabled_no_pool() {
-        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let _lock = crate::test_env_lock::guard();
         let tmp = tempdir().unwrap();
 
         // Phase 1: env var unset → Disabled, regardless of pool.

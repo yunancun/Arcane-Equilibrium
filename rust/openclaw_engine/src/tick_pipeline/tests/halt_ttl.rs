@@ -11,7 +11,9 @@
 //   - 該清 → return true + paper_paused=false + halt_kind=None + halt_set_ts_ms=0
 
 use super::super::*;
-use crate::event_consumer::paper_state_restore::env_test_lock as env_lock;
+// P1-OPS-2-CI-FLAKINESS-TEST-LOCK：共用鎖從 paper_state_restore 遷至
+// crate::test_env_lock，保留 env_lock 別名讓 callsite 不變。
+use crate::test_env_lock::guard as env_lock;
 use crate::halt_audit::HaltKind;
 
 /// MUST-FIX-1 Round 2（2026-05-19/20）：健壯 JSONL 解析器。

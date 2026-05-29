@@ -382,7 +382,9 @@ fn iso8601_from_ts_ms(ts_ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event_consumer::paper_state_restore::env_test_lock as env_lock;
+    // P1-OPS-2-CI-FLAKINESS-TEST-LOCK：共用鎖從 paper_state_restore 遷至
+    // crate::test_env_lock，保留 env_lock 別名讓 callsite 不變。
+    use crate::test_env_lock::guard as env_lock;
 
     #[test]
     fn classify_daily_loss() {

@@ -133,15 +133,11 @@ mod tests {
     use super::*;
     use crate::tick_pipeline::{PipelineKind, TickPipeline};
     use std::fs;
-    use std::sync::Mutex;
 
-    /// Serialise tests that mutate `OPENCLAW_BASE_DIR` so concurrent test
-    /// runners don't observe each other's env state. cargo runs tests within
-    /// one process in parallel by default; mutating env vars is unsafe across
-    /// threads without external locking.
-    /// 測試級互斥鎖：序列化會 mutate `OPENCLAW_BASE_DIR` 的測試，避免 cargo
-    /// 預設多執行緒並行下相互觀察 env 狀態。
-    static ENV_GUARD: Mutex<()> = Mutex::new(());
+    // 序列化會 mutate `OPENCLAW_BASE_DIR` 的測試：改用 crate 共用鎖
+    // `crate::test_env_lock::guard()`，避免 cargo 預設多執行緒並行下相互觀察
+    // env 狀態（P1-OPS-2-CI-FLAKINESS-TEST-LOCK：移除原 module-local ENV_GUARD，
+    // 統一跨 module 串行）。
 
     /// Build a minimal sample edge estimates JSON for tests.
     /// 為測試構建最小 sample edge estimates JSON。
@@ -164,10 +160,8 @@ mod tests {
         TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, kind)
     }
 
-    /// Set `OPENCLAW_BASE_DIR` to a tempdir, write the requested `settings/<filename>`
-    /// JSON file, and return the tempdir path. Caller must hold the ENV_GUARD lock.
     /// 將 `OPENCLAW_BASE_DIR` 設為 tempdir、寫入請求的 `settings/<filename>` JSON
-    /// 檔案，回 tempdir 路徑。呼叫端必須持 ENV_GUARD 鎖。
+    /// 檔案，回 tempdir 路徑。呼叫端必須持 `crate::test_env_lock::guard()` 共用鎖。
     fn write_estimates(filename: &str, json: &str) -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("tempdir");
         let settings = dir.path().join("settings");
@@ -184,7 +178,7 @@ mod tests {
     ///   保留前份 estimates 不 panic 不 fail-close。
     #[test]
     fn reload_returns_none_when_file_missing() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         let dir = tempfile::tempdir().expect("tempdir");
         std::env::set_var("OPENCLAW_BASE_DIR", dir.path());
         // No settings/edge_estimates.json written; load_for_mode returns empty.
@@ -201,7 +195,7 @@ mod tests {
     /// 中: F6 fail-soft — 損毀 JSON 視為空載入 → handler 跳過 rebind 回 None。
     #[test]
     fn reload_returns_none_when_json_corrupt() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         let _dir = write_estimates("edge_estimates.json", "not valid json {[");
         let mut pipeline = build_pipeline(PipelineKind::Demo);
         let result = handle_reload_edge_estimates(&mut pipeline);
@@ -216,7 +210,7 @@ mod tests {
     ///   成功，回 Some(n_cells)。
     #[test]
     fn reload_populated_demo_returns_n_cells() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         let _dir = write_estimates(
             "edge_estimates.json",
             &sample_json("ma_crossover::BTCUSDT", 3.5, 1.2),
@@ -235,7 +229,7 @@ mod tests {
     ///   回空，不會誤讀。
     #[test]
     fn reload_paper_isolation_ignores_production_file() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         let dir = tempfile::tempdir().expect("tempdir");
         let settings = dir.path().join("settings");
         fs::create_dir_all(&settings).expect("mkdir settings");
@@ -263,7 +257,7 @@ mod tests {
     ///   存在時 live 載入為空、走 fail-soft skip。
     #[test]
     fn reload_live_isolation_ignores_paper_file() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         let dir = tempfile::tempdir().expect("tempdir");
         let settings = dir.path().join("settings");
         fs::create_dir_all(&settings).expect("mkdir settings");
@@ -290,7 +284,7 @@ mod tests {
     ///   成功重載，回 Some(n_cells)。
     #[test]
     fn reload_paper_reads_paper_file_when_present() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         let _dir = write_estimates(
             "edge_estimates_paper.json",
             &sample_json("grid_trading::ETHUSDT", -8.0, -2.5),
@@ -313,7 +307,7 @@ mod tests {
     ///   （daemon 核心不變式）。
     #[test]
     fn reload_picks_up_disk_update_on_second_call() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         // First write: 1 cell at 3.5 bps.
         // 首次寫入：1 格子 3.5 bps。
         let dir = write_estimates(

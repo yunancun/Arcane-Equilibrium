@@ -263,9 +263,12 @@ mod tests {
     // 測試 7：無 API key 的 AnthropicClient fail-closed。
     #[tokio::test]
     async fn test_anthropic_client_no_api_key_fail_closed() {
-        // SAFETY: tests run single-threaded per #[tokio::test] runtime,
-        // and we restore the env immediately. Cross-platform safe.
-        // SAFETY：tokio::test 單執行緒運行，立即還原環境變量，跨平台安全。
+        // 持共用鎖與所有 env-mutating lib test 串行：本 test 對
+        // ANTHROPIC_API_KEY 做 process-global remove_var/set_var，雖與 Group A
+        // 的 env var disjoint，仍持同一把鎖以維持「所有 mutate process env 的
+        // lib test 都持 crate::test_env_lock::guard()」這個 lib 不變式乾淨。
+        // guard 在任何 env 操作之前取得，活到 test 結束覆蓋讀寫與還原全程。
+        let _g = crate::test_env_lock::guard();
         let prev = std::env::var("ANTHROPIC_API_KEY").ok();
         std::env::remove_var("ANTHROPIC_API_KEY");
 

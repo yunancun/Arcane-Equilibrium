@@ -584,6 +584,12 @@ mod tests {
     // 測試 1：預設值與 V010 INSERT 種子一致。
     #[tokio::test]
     async fn test_budget_config_load_default() {
+        // 持共用鎖與所有 env-mutating lib test 串行：set_test_pricing_path() 內
+        // 對 OPENCLAW_PRICING_PATH 做 process-global set_var。guard 必須在呼叫端
+        // （而非 helper 內）取得，否則會在 helper return 時即釋放，無法覆蓋此處
+        // 對該 env 的後續讀取臨界區。雖與 Group A env var disjoint，仍持同一把
+        // 鎖以維持 lib「所有 mutate process env 的 test 都持 guard」不變式乾淨。
+        let _g = crate::test_env_lock::guard();
         set_test_pricing_path();
         let pool = empty_pool().await;
         let tracker = BudgetTracker::new(pool).await.unwrap();

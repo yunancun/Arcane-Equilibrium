@@ -18,25 +18,10 @@ use crate::tick_pipeline::TickPipeline;
 use std::path::PathBuf;
 use tracing::{info, warn};
 
-/// MUST-FIX-1 / 2 Round 2（2026-05-19/20）：test-only 全 crate 共用的
-/// env-mutating test 互鎖。
-///
-/// 為什麼必要：cargo test 默認多執行緒；`std::env::set_var` / `remove_var`
-/// 是 process 全局，halt_audit::tests 與 tick_pipeline::tests::halt_ttl 兩處
-/// 都會操作 OPENCLAW_HALT_AUDIT_LOG / OPENCLAW_DATA_DIR。
-/// 兩 module 內各自宣告 Mutex 等於兩個獨立鎖，跨 module 仍互踩；本鎖放這裡
-/// 提供 cross-module 串行入口。
-///
-/// 路徑選擇：放在已 pub(crate) 的 paper_state_restore module，
-/// 不增加新 module；cfg(test) 限定，prod build 無代價。
-#[cfg(test)]
-pub(crate) static ENV_TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// 取 ENV_TEST_MUTEX，poisoned 時用 into_inner 強解（test 場景不影響 prod）。
-#[cfg(test)]
-pub(crate) fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
-    ENV_TEST_MUTEX.lock().unwrap_or_else(|p| p.into_inner())
-}
+// P1-OPS-2-CI-FLAKINESS-TEST-LOCK（2026-05-29）：原放此 module 的全 crate 共用
+// env-mutating 測試互鎖（ENV_TEST_MUTEX / env_test_lock）已遷至 crate root 的
+// `crate::test_env_lock`（更貼切的 test-support 家），所有 callsite 改用
+// `crate::test_env_lock::guard()`。本 domain module 不再持有該設施。
 
 /// EN: Restore cumulative paper_state counters for the given pipeline from
 ///     `trading.fills`. Runs once at engine boot before the first tick. The
