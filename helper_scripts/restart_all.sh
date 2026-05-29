@@ -155,8 +155,16 @@ prepare_runtime_secret_files() {
     # Phase 2（D+14+）operator 須走 OPS-2 runbook §3 generate new key from urandom；
     # 此 seed 路徑是 migration-only shortcut（spec §9.4 hidden risk Phase 1 vs urandom）。
     if [ ! -f "$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE" ] && [ -f "$OPENCLAW_IPC_SECRET_FILE" ]; then
-        cp "$OPENCLAW_IPC_SECRET_FILE" "$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE"
-        chmod 600 "$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE"
+        # 為什麼 atomic：裸 cp 非原子，SIGTERM 落在 cp 中途會留下 partial / 空的
+        # signing key file（內容被截斷），破壞 live auth 簽章。改為先 cp 到 PID-suffix
+        # 臨時檔（避免並發 boot 撞名），在 mv 前先 chmod 600，再以同 filesystem 的
+        # mv -f 原子 rename 出現 final file——final 一現身即為完整內容且已 600，
+        # 消除「檔已現身但仍 partial / 權限仍 644」的窗口。
+        seed_tmp="${OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE}.tmp.$$"
+        cp "$OPENCLAW_IPC_SECRET_FILE" "$seed_tmp" \
+            && chmod 600 "$seed_tmp" \
+            && mv -f "$seed_tmp" "$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE" \
+            || { rm -f "$seed_tmp"; echo "ERROR: OPS-2 SECRET-SPLIT phase 1 seed failed" >&2; exit 1; }
         echo ">>> OPS-2 SECRET-SPLIT phase 1: seeded $OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE from ipc_secret.txt (same material; rotate independently per OPS-2 runbook)"
     fi
     if [ -f "$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE" ]; then
