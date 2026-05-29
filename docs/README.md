@@ -406,6 +406,7 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 | `archive/2026-05-21--sprint_1a_alpha_repair_closure.md` | Sprint 1A α+修補+β+γ+δ canonical closure narrative §A-§K |
 | `archive/2026-05-21--sprint_1a_delta_dup_artifacts/README.md` | Sprint 1A-δ multi-session dual write 棄置 file 歸檔說明 (5 file archived per R4 + PA dedup audit 2026-05-21；M5/V114/V115/M13/V116 棄置版本 + dedup decision narrative) |
 | `archive/2026-05-21--todo_v60_archive.md` | TODO v60 archive：v57 12 prefix DONE + W-AUDIT-4b retained + H+I 批 closure + 9 批 narrative (v61 起以 v5.8 為主軸) |
+| `archive/2026-05-29--cold_audit_p1_p2_p3_closure_archive.md` | v80 cold audit 全閉環歸檔：17 P1 + 15/17 P2 + 7/7 P3 source-done 逐項 + commit map (b93d3210/11b9531f/7909ca3d/dc2a15aa/f2b020e5) + review chain catch；P2-06/07 design-deferred；runtime deploy-gate 殘留 |
 
 ### 2026-05-21 v5.7/v5.8 reference ADR list (baseline cross-ref per R4 NEW-M-5)
 
