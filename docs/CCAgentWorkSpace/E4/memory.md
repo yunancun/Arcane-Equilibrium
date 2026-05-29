@@ -8,6 +8,44 @@
 
 ## 工作記憶
 
+### 2026-05-28 Wave 5 Packet C (C1+C2+C3) + M11 cron + MED/LOW hardening E4 全 regression — PASS
+
+**對象**：HEAD `575a0a94`。累積範圍 = C1 dispatchers (slack/email/console_banner/three_way + RealSmtpTransport lettre 0.11) + C2 audit_emitter (PgAuditEmitter + V114 17-col hypertable) + C3 providers (wall_clock/position/exchange_stop_sync/single_watcher) + E2 review fix MED-1/MED-2/LOW-1 + M11 cron install。
+
+**結果**：
+| 檢查 | 結果 |
+|---|---|
+| `cargo test -p openclaw_engine --lib` run1/run2 | 3575/0/1ign（兩遍同綠 non-flaky）— baseline 3569 → +6（email 3 + MED/LOW 3）✅ |
+| `cargo test --lib notification_failsafe` | 107/0（104 + T11 banner + T4.12 watcher + T15 email redact）✅ |
+| `cargo test -p openclaw_core --lib risk_gov` | 27/0（不變）✅ |
+| `cargo build -p openclaw_engine` (dev, Mac arm64) | PASS（1 pre-existing dead_code `spawn_position_reconciler`）|
+| Linux x86_64 `cargo build --release -p openclaw_engine` (ssh trade-core) | PASS 44.92s（lettre+aws-lc-rs 在 x86_64 編 clean）|
+| `cargo tree` openssl / native-tls | 0 / 0 ✅；lettre v0.11.22；aws-lc=3 pre-existing（rustls default feature 非 lettre 引入）|
+| default `cargo clippy --lib` notification_failsafe filter | 0 hit ✅ |
+| #[ignore] / 刪測試 | 0 新增 ignore / 0 測試刪除（16 檔全 addition +4230/-1）|
+
+**MED-2 T4.12 對抗 test 真實性核驗（重要教訓）**：
+- T4.12 是真並發：`#[tokio::test(flavor="multi_thread", worker_threads=4)]` + 16 個真 `tokio::spawn` 共享一個 `Arc<SharedFailsafeWatcher>`（共享 mutex state）；clock 在 spawn 前 advance 過 timeout，16 task 真競爭「armed+expired」。
+- 斷言真實：`some_count==1` + CountingAudit `emit_count==1`（fetch_add 真計數非 stub 假回）+ 後續 re-check None 且 count 仍 1。
+- **E4 親自做對抗 reproduction**：臨時把 claim 還原成 buggy 版（claim 移到 await 後 Step 3 re-lock + 加 `yield_now()` 放大窗口）→ T4.12 FAIL `left: 16, right: 1` —— 精確復現 E1 報告的「16 escalations instead of 1」。隨即 `git diff` 確認零殘留還原。**證明 test 抓得到 race，非 mock 假過**。
+- StubTransport / CountingAudit / NoopXxx 全是 IO-sink mock（捕捉 envelope + 回 `!force_fail` / fetch_add 計數），業務邏輯（claim-before-await guard / config 校驗 / timeout 包裝）真跑 — 符合 mock safety rule（mock IO 不 mock 業務）。
+
+**V114 17-col schema 對齊**：audit_emitter.rs INSERT 供 13 column（engine-writable），4 DB-controlled（id BIGSERIAL / acked_at_utc / acked_by / created_at DEFAULT now()）正確省略；`test_insert_sql_locked_columns_match_v114_schema` include_str! grep 13 column + table name + 13 placeholder = drift guard（已在 107 內綠）。V114 runtime idempotency 雙跑由 MIT 第三輪 Linux dry-run 驗（不在 E4 範圍）。
+
+**email.rs:199 doc_lazy_continuation**：default clippy = 0 hit；只在 `--no-deps` 升級 lint config 下 fire。git blame = `9bf71423`（本 Wave email amend）非 pre-existing。判定 = cosmetic doc 縮排，**標 E1 cosmetic follow-up**（E4 不改鏈內 source file，守 E4 邊界），加一行空白即解。
+
+**教訓**：
+1. **E4 對抗 test 必親跑 reproduction 才信「真綠」**：E1 報告「buggy 16 / fix 1」是 E1 自證；E4 用 Edit 還原 buggy → 跑 → 看 FAIL `16 vs 1` → git diff 確認零殘留還原，才確立 test 非 false-pass。這是 protocol「跑兩遍 + mock 不掩蓋邏輯」的延伸：並發 fix 加碼「對抗 reproduction」一步。
+2. **clippy 數字看 lint config**：`cargo clippy --lib`（default）vs `--no-deps`（可能帶 pedantic/doc lint）數字差很大。protocol baseline 用 default set；email.rs:199 在 default = 0 hit，報告必標明在哪個 config 下 fire 否則誤判 regression。
+3. **新 top-level dep 必 Linux x86_64 build 驗**：lettre + aws-lc-rs（aws-lc-sys 需 CMake+C compiler）在 Mac arm64 編過 ≠ x86_64 編過。ssh trade-core `bash -lc cargo build --release` 確認雙平台；openssl=0/native-tls=0 守「純 rustls 零 sys-dep openssl」目標。
+4. **module addition regression 看 diff stat 確認 0 既有測試動**：16 檔全 +addition / -1（Cargo.toml 行移）= 純新增模塊；無既有 test 修改/刪除/ignore，baseline ratchet +6 全來自新 test，不是改既有 assertion 遮蓋。
+
+**Verdict**：**PASS** — 全綠；可進 QA / PM commit。Carry-over：email.rs:199 cosmetic（E1）+ V114 runtime idempotency 雙跑（MIT 第三輪 Linux）+ C5 `failsafe_ack_role` restricted role（Sprint 3）。
+
+**Report path**：`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-28--e4_packet_c_m11_full_regression.md`
+
+---
+
 ### 2026-05-27 OPS-4 systemd (GAP-A + GAP-F + minor fix) E4 regression — PASS（含 3 carry-over）
 
 **對象**：`65e78437` (OPS-4 IMPL) + `07027493` (OPS-4 minor fix 4 條：MED-1 空 Requires= 刪 / LOW-2 verify warn vs error / LOW-3 root user guard exit 12 / LOW-4 README reset-failed)。E2 APPROVE-WITH-MINOR + 4 minor fix DONE。

@@ -196,6 +196,7 @@ impl RealSmtpTransport {
     ///   - 587 = submission port，先明文連線再 STARTTLS 升級（lettre `starttls_relay`）；
     ///   - 465 = SMTPS，連線即 implicit TLS（lettre `relay`）；
     ///   - 其餘 port 一律走 STARTTLS relay（保守 — 禁 plaintext）。
+    ///
     /// 任一步失敗回 Err，由 send 轉成 false。
     fn build_transport(&self) -> Result<AsyncSmtpTransport<Tokio1Executor>, String> {
         let creds = Credentials::new(
