@@ -204,10 +204,11 @@ fn clear_test_env() {
     std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY");
 }
 
-// Serialize all watcher tests to avoid env-var contention between
-// parallel tests in the same binary.
-// 串行化所有 watcher 測試，避免同 binary 內並行爭 env var。
-static ENV_GUARD: StdMutex<()> = StdMutex::new(());
+// P3-OPS-2-CI-FLAKINESS-BIN-CRATE-LOCK：移除原 module-local `static ENV_GUARD`，
+// 改用 bin crate 共用鎖 `crate::test_env_lock::guard()`。原本本 module 與
+// main_boot_tasks 各自一把獨立鎖在同一 bin 測試 binary 內不互斥 → 兩 module 同時
+// mutate process-global env 仍 race；共用單鎖才能跨 module 真正串行。
+// 注意：StdMutex import 仍由 MockSpawner.script 使用，故保留。
 
 fn drop_auth_file(secrets_dir: &std::path::Path, auth: &LiveAuthorization) {
     let live_dir = secrets_dir.join("live");
@@ -239,7 +240,7 @@ fn now_ms() -> u64 {
 
 #[tokio::test]
 async fn watcher_respawns_when_auth_becomes_valid() {
-    let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::test_env_lock::guard();
     let tmp = tempfile::tempdir().unwrap();
     set_test_env(tmp.path());
     let shutdown = CancellationToken::new();
@@ -289,7 +290,7 @@ async fn watcher_respawns_when_auth_becomes_valid() {
 
 #[tokio::test]
 async fn watcher_tears_down_when_auth_invalidates() {
-    let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::test_env_lock::guard();
     let tmp = tempfile::tempdir().unwrap();
     set_test_env(tmp.path());
     let shutdown = CancellationToken::new();
@@ -338,7 +339,7 @@ async fn watcher_tears_down_when_auth_invalidates() {
 
 #[tokio::test]
 async fn watcher_respects_backoff_on_spawn_failure() {
-    let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::test_env_lock::guard();
     let tmp = tempfile::tempdir().unwrap();
     set_test_env(tmp.path());
     let shutdown = CancellationToken::new();
@@ -389,7 +390,7 @@ async fn watcher_respects_backoff_on_spawn_failure() {
 
 #[tokio::test]
 async fn watcher_breaks_on_engine_shutdown() {
-    let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::test_env_lock::guard();
     let tmp = tempfile::tempdir().unwrap();
     set_test_env(tmp.path());
     let shutdown = CancellationToken::new();
@@ -423,7 +424,7 @@ async fn ipc_trigger_coalesces_when_full() {
     // must succeed, second must return Ok(false) (coalesced) — not an
     // error. This exercises the `TrySendError::Full` arm.
     // 連發兩次 trigger。第一次成功；第二次 Ok(false) 合併 — 不是錯誤。
-    let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::test_env_lock::guard();
     let tmp = tempfile::tempdir().unwrap();
     set_test_env(tmp.path());
     let shutdown = CancellationToken::new();
@@ -455,7 +456,7 @@ async fn ipc_trigger_errors_when_watcher_dropped() {
     // Drop the watcher (and its receiver) — next trigger must
     // return Err(()) so callers can log loudly.
     // drop watcher/receiver — 下次 trigger 回 Err(())，讓呼叫端大聲 log。
-    let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::test_env_lock::guard();
     let tmp = tempfile::tempdir().unwrap();
     set_test_env(tmp.path());
     let shutdown = CancellationToken::new();
@@ -486,7 +487,7 @@ async fn spawn_output_already_spawned_treated_as_success() {
     // backoff reset. No teardown should fire on this path.
     // 腳本化 AlreadySpawned 應被 debug log 吞掉、重設退避，
     // 不觸發 teardown。
-    let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::test_env_lock::guard();
     let tmp = tempfile::tempdir().unwrap();
     set_test_env(tmp.path());
     let shutdown = CancellationToken::new();
@@ -630,7 +631,7 @@ impl SpawnOp for HappyPathSpawnMock {
 /// （mock 回 None），但 watcher 仍需正確驅動 loop。
 #[tokio::test]
 async fn watcher_with_spawner_handles_build_returned_none() {
-    let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::test_env_lock::guard();
     let tmp = tempfile::tempdir().unwrap();
     set_test_env(tmp.path());
     let shutdown = CancellationToken::new();
@@ -691,7 +692,7 @@ async fn watcher_with_spawner_handles_build_returned_none() {
 /// 不注入 spawner（Phase 3 路徑）時 handle slot 永遠為 None。
 #[tokio::test]
 async fn watcher_without_spawner_keeps_handle_slot_empty() {
-    let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::test_env_lock::guard();
     let tmp = tempfile::tempdir().unwrap();
     set_test_env(tmp.path());
     let shutdown = CancellationToken::new();
@@ -756,7 +757,7 @@ async fn watcher_without_spawner_keeps_handle_slot_empty() {
 /// `(Some(spawner), Some(handle_slot))` arm。
 #[tokio::test]
 async fn spawner_callback_invoked_and_handle_slot_populated_on_ok_some() {
-    let _guard = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+    let _guard = crate::test_env_lock::guard();
     let tmp = tempfile::tempdir().unwrap();
     set_test_env(tmp.path());
     let shutdown = CancellationToken::new();
