@@ -5,7 +5,9 @@
 //!   把 `openclaw_core::sm::risk_gov::RiskEvent::NotificationFailsafeTimeout` 從純
 //!   variant 接到 engine 真實副作用鏈：
 //!     1. 觀察三路通知（Slack / Email / Console banner）派發結果；
-//!     2. 三路 AllFail → 武裝 1h timer；AllSuccess 或 operator ack → 解除；
+//!     2. 兩 push channel（Slack+Email）皆失 → AllFail → 武裝 1h timer；
+//!        AllSuccess 或 operator ack → 解除；（banner 為 visibility 不計 delivery 冗餘，
+//!        per PA ruling 2026-05-29，見 `dispatchers::three_way::compute_outcome`）
 //!     3. timer 過期 → 走 SM-04 transition 進 Defensive
 //!        (initiator=RiskGovernor / reason=`auto_escalated_to_sm04_defensive`)；
 //!     4. 呼 `active_lock_profit_per_position` 縮 SL 至 entry + ATR-buffer；
@@ -27,8 +29,9 @@
 //!   - `ExchangeStopSync` 個別失敗不 rollback SM-04 transition（survival > exchange
 //!     consistency，per §二 原則 5）；
 //!   - 任何 trait 失敗 fail-soft，不 panic、不 unwrap；
-//!   - `PartialFail` 不武裝 timer，亦不解除（per spec 三路冗餘語義：全 fail 才入
-//!     fail-safe；部分 fail 為「正常 degraded」由 incident_policy 處理）。
+//!   - `PartialFail` 不武裝 timer，亦不解除（push delivery 冗餘語義：兩 push channel
+//!     皆失才入 fail-safe；至少一 push channel 送達為「正常 degraded」由 incident_policy
+//!     處理。banner 為 last-resort visibility 不計 delivery 冗餘，per PA ruling 2026-05-29）。
 //!
 //! 切片範圍（minimal slice 2026-05-28）：
 //!   - 純邏輯 + trait seam + 單元/整合測試（mock dispatcher / exchange / audit / clock）；
@@ -128,9 +131,12 @@ impl NotificationChannel {
 pub enum DispatchOutcome {
     /// 三路皆送達。
     AllSuccess,
-    /// 部分通道失敗（其餘成功）。spec 語義為 degraded 但非 fail-safe 觸發條件。
+    /// 至少一 push channel 送達（degraded 但非 fail-safe 觸發條件）。
+    /// `failed` 仍含所有失敗通道（含 banner）供 audit。
     PartialFail { failed: Vec<NotificationChannel> },
-    /// 三路皆失敗 — 觸發 1h timer 武裝。
+    /// 兩 push channel（Slack+Email）皆失 — 觸發 1h timer 武裝。
+    /// banner 成功與否不影響此判定（per PA ruling 2026-05-29，banner 為 visibility
+    /// 不計 delivery 冗餘）；判定維度見 `dispatchers::three_way::compute_outcome`。
     AllFail,
 }
 
@@ -276,8 +282,8 @@ pub enum FailsafeAuditError {
 ///
 /// 規則（per spec §4.4 Stage 1-3）：
 ///   - `AllSuccess` ⇒ 若已武裝：解除 + `TimerCancelled(NotificationRecovered)`；否則 `NoAction`
-///   - `AllFail` ⇒ 若未武裝：武裝 + `TimerArmed`；若已武裝：保持，`NoAction`（timeout 判定走 `check_timer_expiry`）
-///   - `PartialFail` ⇒ `NoAction`（不武裝、不解除；spec 三路冗餘語義）
+///   - `AllFail`（兩 push channel 皆失）⇒ 若未武裝：武裝 + `TimerArmed`；若已武裝：保持，`NoAction`（timeout 判定走 `check_timer_expiry`）
+///   - `PartialFail`（至少一 push channel 送達）⇒ `NoAction`（不武裝、不解除；push delivery 冗餘語義）
 pub fn evaluate_dispatch(
     state: &mut FailsafeWatcherState,
     outcome: DispatchOutcome,

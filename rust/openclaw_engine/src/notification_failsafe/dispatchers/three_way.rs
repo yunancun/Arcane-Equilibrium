@@ -7,9 +7,11 @@
 //!
 //! 不變量（per AMD-2026-05-21-01 v2 §Decision 3.1 + PA spec §0 fail-soft 規則）：
 //!   - 三路 **並發** 呼叫（`tokio::join!`），不序列；
-//!   - 任一路成功（即使其餘失敗）→ `PartialFail{failed:[...]}` 或
+//!   - 兩 push channel（Slack+Email）皆失 → `AllFail`（此 outcome 觸發 1h timer 武裝
+//!     邏輯在 watcher 端）；banner 為 last-resort visibility 不計 delivery 冗餘，
+//!     per PA ruling 2026-05-29（見 `compute_outcome` 註解）；
+//!   - 至少一 push channel 成功（即使其餘失敗）→ `PartialFail{failed:[...]}` 或
 //!     `AllSuccess`；
-//!   - 三路全失敗 → `AllFail`（此 outcome 觸發 1h timer 武裝邏輯在 watcher 端）；
 //!   - 個別 dispatcher 各自 fail-soft + per-dispatch timeout 包好，本層只看 bool；
 //!   - 不 panic、不 unwrap。
 //!
@@ -78,7 +80,8 @@ impl NotificationDispatcher for ThreeWayDispatcher {
     ///   1. `tokio::join!` 三路並發；
     ///   2. 收三個 bool；
     ///   3. 計失敗通道；
-    ///   4. AllSuccess / PartialFail / AllFail 對齊 既有 `DispatchOutcome` enum。
+    ///   4. 以 push delivery 冗餘判 AllSuccess / PartialFail / AllFail（見
+    ///      `compute_outcome`：banner 不計入 delivery 冗餘）。
     ///
     /// banner 訊息與 Slack/Email 訊息一致；email subject 用「failsafe escalation」
     /// 固定字串（subject_prefix 由 EmailDispatcher 自動加）。
@@ -97,11 +100,33 @@ impl NotificationDispatcher for ThreeWayDispatcher {
 
 /// 純函數 — 三 bool 算 outcome。
 ///
-/// 邏輯（per spec §1-3 + DispatchOutcome 既有定義）：
+/// 判定維度是「通道類別（push delivery vs pull visibility）」，不是「失敗通道數量」：
+///   - Slack / Email 是 **push delivery**：fire 後主動投遞到 operator（≤10s / ≤60s）。
+///   - Console banner 是 **last-resort visibility**（pull-based passive）：只把 payload
+///     atomic-write 到 vault 檔，等 GUI poll 顯示；它不主動送任何東西給人，且正常檔系統
+///     幾乎永遠寫成功。
+///
+/// 為什麼 banner 不計入 delivery 冗餘（fail-safe 核心修正）：
+///   fail-safe 要保護的場景 = 「operator 收不到任何主動通知」。當 Slack ∧ Email 兩個
+///   push channel 皆失 = 兩條真正能送達人的管道都斷 = 該場景已發生 → 必須武裝 1h timer
+///   → 升 SM-04 Defensive。此刻 banner 寫檔成功只代表「若有人正盯著 Console 就看得到」，
+///   而「有人盯著 Console」恰恰是 fail-safe 不能假設的前提（能假設人在看，整個 push 冗餘
+///   設計就多餘）。把永遠成功的本地寫檔當第三票否決武裝，會讓 fail-safe 在最該觸發時被
+///   結構性靜音 —— 與 AMD §2.2 thesis（autonomy 安全基石是自動 fail-safe 非人類兜底）矛盾。
+///
+/// 規則：
 ///   - 全 true → AllSuccess
-///   - 全 false → AllFail
-///   - 混合 → PartialFail { failed: 失敗清單 }
+///   - 兩 push channel（Slack+Email）皆失 → AllFail（banner 成功與否不影響此判定；
+///     banner 仍進 `failed` 清單供 audit / GUI 顯示）
+///   - 其餘混合 → PartialFail { failed: 失敗清單 }（單 push 掛＝另一 push 仍送達＝
+///     degraded 但不武裝；banner 偶發寫失敗亦不誤武裝）
+///
+/// 依據：PA ruling 2026-05-29
+/// （docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-29--packetc_high1_banner_channel_weight_ruling.md）
+/// + AMD-2026-05-21-01 v2 §3.1 原意（banner 在 AMD 原文已定性為 visibility 非 delivery）。
+/// 此為「把實作對齊 AMD 原意」的 code fix，非語意層級改變，不需 AMD amendment。
 pub fn compute_outcome(slack_ok: bool, email_ok: bool, console_ok: bool) -> DispatchOutcome {
+    // 收集失敗清單（banner 仍記錄，供 audit + GUI 顯示）。
     let mut failed = Vec::new();
     if !slack_ok {
         failed.push(NotificationChannel::Slack);
@@ -112,10 +137,18 @@ pub fn compute_outcome(slack_ok: bool, email_ok: bool, console_ok: bool) -> Disp
     if !console_ok {
         failed.push(NotificationChannel::ConsoleBanner);
     }
-    match failed.len() {
-        0 => DispatchOutcome::AllSuccess,
-        3 => DispatchOutcome::AllFail,
-        _ => DispatchOutcome::PartialFail { failed },
+
+    // ── 核心：fail-safe 武裝由「push delivery 冗餘」決定，banner 不計入 ──
+    // 兩個 push channel 皆失 = operator 收不到任何主動通知 = fail-safe 核心保護場景。
+    let push_delivery_all_failed = !slack_ok && !email_ok;
+
+    if failed.is_empty() {
+        DispatchOutcome::AllSuccess
+    } else if push_delivery_all_failed {
+        // banner 成功與否不影響此判定（banner 仍在 failed 清單 iff console_ok == false）。
+        DispatchOutcome::AllFail
+    } else {
+        DispatchOutcome::PartialFail { failed }
     }
 }
 
@@ -123,9 +156,7 @@ pub fn compute_outcome(slack_ok: bool, email_ok: bool, console_ok: bool) -> Disp
 mod tests {
     use super::*;
     use crate::notification_failsafe::dispatchers::console_banner::ConsoleBannerDispatcher;
-    use crate::notification_failsafe::dispatchers::email::{
-        DisabledTransport, EmailDispatcher, StubTransport,
-    };
+    use crate::notification_failsafe::dispatchers::email::{EmailDispatcher, StubTransport};
     use crate::notification_failsafe::dispatchers::slack::SlackDispatcher;
     use std::io::Write;
     use tempfile::{NamedTempFile, TempDir};
@@ -164,42 +195,42 @@ mod tests {
         assert_eq!(compute_outcome(false, false, false), DispatchOutcome::AllFail);
     }
 
-    // ── T3: 9 種組合驗 outcome (3^2 - 全成功 - 全失敗) ──────────────────────
+    // ── T3: push-channel-weighted 組合驗 outcome ────────────────────────────
+    // 判定維度 = push delivery 冗餘（Slack+Email），banner 不計入。
+    // per PA ruling 2026-05-29（packetc_high1_banner_channel_weight_ruling）。
 
     #[test]
     fn t3_partial_fail_combinations() {
-        // 只 slack fail
+        // 只 slack fail（email 仍送達 → degraded 不武裝）
         match compute_outcome(false, true, true) {
             DispatchOutcome::PartialFail { failed } => {
                 assert_eq!(failed, vec![NotificationChannel::Slack]);
             }
             o => panic!("expected PartialFail, got {o:?}"),
         }
-        // 只 email fail
+        // 只 email fail（slack 仍送達 → degraded 不武裝）
         match compute_outcome(true, false, true) {
             DispatchOutcome::PartialFail { failed } => {
                 assert_eq!(failed, vec![NotificationChannel::Email]);
             }
             o => panic!("expected PartialFail, got {o:?}"),
         }
-        // 只 banner fail
+        // 只 banner fail（兩 push 皆送達 → banner 偶發寫失敗不誤武裝）
         match compute_outcome(true, true, false) {
             DispatchOutcome::PartialFail { failed } => {
                 assert_eq!(failed, vec![NotificationChannel::ConsoleBanner]);
             }
             o => panic!("expected PartialFail, got {o:?}"),
         }
-        // slack + email fail
-        match compute_outcome(false, false, true) {
-            DispatchOutcome::PartialFail { failed } => {
-                assert_eq!(
-                    failed,
-                    vec![NotificationChannel::Slack, NotificationChannel::Email]
-                );
-            }
-            o => panic!("expected PartialFail, got {o:?}"),
-        }
-        // slack + banner fail
+        // ★ 核心場景：slack + email fail + banner ok → AllFail（武裝 1h timer）。
+        // 翻轉點：舊規則（通道計數 != 3）判 PartialFail；新規則（push delivery 全失）
+        // 判 AllFail。雙 push 掛 = operator 收不到任何主動通知 = fail-safe 必觸發。
+        assert_eq!(
+            compute_outcome(false, false, true),
+            DispatchOutcome::AllFail,
+            "雙 push channel 全失（banner ok）必須回 AllFail 以武裝 fail-safe"
+        );
+        // slack + banner fail（email 仍送達 → degraded 不武裝）
         match compute_outcome(false, true, false) {
             DispatchOutcome::PartialFail { failed } => {
                 assert_eq!(
@@ -209,7 +240,7 @@ mod tests {
             }
             o => panic!("expected PartialFail, got {o:?}"),
         }
-        // email + banner fail
+        // email + banner fail（slack 仍送達 → degraded 不武裝）
         match compute_outcome(true, false, false) {
             DispatchOutcome::PartialFail { failed } => {
                 assert_eq!(
@@ -221,10 +252,48 @@ mod tests {
         }
     }
 
-    // ── T4: dispatch_3way with all-disabled secrets → AllFail ───────────────
+    // ── T3b: 雙 push 掛 vs 單 push 掛的對照（fail-safe 武裝邊界）─────────────
+    // 證明判定維度是「push 類別」而非「通道數量」：
+    //   - 雙 push 掛（不論 banner 死活）→ AllFail（武裝）
+    //   - 單 push 掛（另一 push 送達，不論 banner 死活）→ PartialFail（不武裝）
+
+    #[test]
+    fn t3b_push_delivery_arm_boundary() {
+        // 雙 push 掛 + banner ok → AllFail（fail-safe 武裝；本 ruling 核心場景）
+        assert_eq!(
+            compute_outcome(false, false, true),
+            DispatchOutcome::AllFail
+        );
+        // 雙 push 掛 + banner 也掛 → AllFail（原本就對；三路全掛）
+        assert_eq!(
+            compute_outcome(false, false, false),
+            DispatchOutcome::AllFail
+        );
+
+        // 單 push 掛（slack ok, email fail, banner ok）→ PartialFail（不武裝：slack 仍送達）
+        assert!(matches!(
+            compute_outcome(true, false, true),
+            DispatchOutcome::PartialFail { .. }
+        ));
+        // 單 push 掛（slack fail, email ok, banner ok）→ PartialFail（不武裝：email 仍送達）
+        assert!(matches!(
+            compute_outcome(false, true, true),
+            DispatchOutcome::PartialFail { .. }
+        ));
+        // 單 push 掛 + banner 也掛（slack ok, email fail, banner fail）→ 仍 PartialFail
+        // （slack 仍送達；banner 失敗不把它升成 AllFail，避免 false-positive 升 Defensive）
+        assert!(matches!(
+            compute_outcome(true, false, false),
+            DispatchOutcome::PartialFail { .. }
+        ));
+    }
+
+    // ── T4: dispatch_3way 雙 push 掛 + banner ok → AllFail ──────────────────
+    // 端到端驗 dispatch_3way（非僅純函數）：兩 push channel 全失但 banner 寫檔成功，
+    // 新 push-channel-weighted 規則回 AllFail（舊規則因 banner ok 誤判 PartialFail）。
 
     #[tokio::test]
-    async fn t4_dispatch_all_disabled_returns_all_fail() {
+    async fn t4_dispatch_double_push_fail_banner_ok_returns_all_fail() {
         // Slack: 缺檔 disabled → false
         let slack = SlackDispatcher::from_secret_file(std::path::Path::new("/nonexistent_slack"));
         // Email: 缺檔 disabled → false
@@ -232,31 +301,29 @@ mod tests {
             std::path::Path::new("/nonexistent_email"),
             Box::new(StubTransport::new()),
         );
-        // Banner: 路徑無寫權限 → 寫到 read-only dir 模擬 fail
-        // 用 tmpdir → write_banner 應 success，所以這條 partial fail
+        // Banner: 寫到 tmpdir → write_banner 成功（visibility 寫檔幾乎永遠成功）
         let tmp = TempDir::new().unwrap();
         let banner = ConsoleBannerDispatcher::new(tmp.path().to_path_buf());
 
         let d = ThreeWayDispatcher::new(slack, email, banner);
         let outcome = d.dispatch_3way("test message").await;
-        match outcome {
-            DispatchOutcome::PartialFail { failed } => {
-                // slack + email 失敗，banner 成功
-                assert!(failed.contains(&NotificationChannel::Slack));
-                assert!(failed.contains(&NotificationChannel::Email));
-                assert!(!failed.contains(&NotificationChannel::ConsoleBanner));
-            }
-            o => panic!("expected PartialFail (slack+email), got {o:?}"),
-        }
+        assert_eq!(
+            outcome,
+            DispatchOutcome::AllFail,
+            "雙 push 掛（banner 成功）必須端到端回 AllFail 以武裝 fail-safe"
+        );
+        // banner 確實寫成功（驗 banner 仍被 dispatch 呼叫、visibility 不被移除）
+        assert!(banner_exists(tmp.path()));
     }
 
-    // ── T5: dispatch_3way with banner only success → PartialFail ────────────
+    // ── T5: dispatch_3way 單 push 掛 + banner ok → PartialFail（不武裝）──────
+    // 對照 T4：slack 掛但 email 仍送達 → degraded 但不武裝 fail-safe。
 
     #[tokio::test]
-    async fn t5_only_banner_succeeds_partial_fail() {
+    async fn t5_single_push_fail_banner_ok_partial_fail() {
         let slack = SlackDispatcher::from_explicit_url("http://localhost:1/hook".to_string()); // 拒
         let f = write_secret(&valid_email_config("pw")); // config valid
-        let email = EmailDispatcher::from_secret_file(f.path(), Box::new(DisabledTransport)); // transport disabled
+        let email = EmailDispatcher::from_secret_file(f.path(), Box::new(StubTransport::new())); // email 送達
         let tmp = TempDir::new().unwrap();
         let banner = ConsoleBannerDispatcher::new(tmp.path().to_path_buf());
 
@@ -264,12 +331,13 @@ mod tests {
         let outcome = d.dispatch_3way("msg").await;
         match outcome {
             DispatchOutcome::PartialFail { failed } => {
+                // slack 掛，email + banner 成功 → 不武裝（另一 push 仍送達）
                 assert!(failed.contains(&NotificationChannel::Slack));
-                assert!(failed.contains(&NotificationChannel::Email));
+                assert!(!failed.contains(&NotificationChannel::Email));
                 assert!(!failed.contains(&NotificationChannel::ConsoleBanner));
-                assert_eq!(failed.len(), 2);
+                assert_eq!(failed.len(), 1);
             }
-            o => panic!("expected PartialFail, got {o:?}"),
+            o => panic!("expected PartialFail (slack only), got {o:?}"),
         }
     }
 
