@@ -65,6 +65,35 @@ EVIDENCE_SOURCE_TIER_ALLOWLIST: tuple[str, ...] = (
     "mlde_advisor",
 )
 
+# P3-03：synthetic_replay 為「合成回放」證據，並非真實成交 / 真實 outcome。
+# 為什麼預設排除（fail-closed / 不計為真）：CLAUDE.md「不得偽造證據」精神 +
+# Root Principle 6（不確定預設保守）。合成回放可模糊證據品質，不應與真實證據
+# silently 等價計入 demo-applier 的升級證據。故拆出可辨識的 synthetic bucket，
+# 預設不接受；唯有顯式 opt-in（allow_synthetic=True，由 caller 明確開啟）才納入。
+# 注意：此處只收緊 applier runtime allowlist，不改 V036/V040 DB CHECK enum
+# （EVIDENCE_SOURCE_TIER_ALLOWLIST 仍對齊 enum 作為儲存值 single source of truth）。
+SYNTHETIC_EVIDENCE_SOURCE_TIERS: tuple[str, ...] = ("synthetic_replay",)
+
+# Demo-applier 預設接受的證據 tier（排除 synthetic bucket）。
+# Default tiers the demo applier accepts (synthetic excluded by default).
+DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST: tuple[str, ...] = tuple(
+    tier
+    for tier in EVIDENCE_SOURCE_TIER_ALLOWLIST
+    if tier not in SYNTHETIC_EVIDENCE_SOURCE_TIERS
+)
+
+
+def resolve_accepted_tiers(*, allow_synthetic: bool = False) -> list[str]:
+    """回傳 demo-applier 實際接受的 evidence tier 清單。
+
+    為什麼：synthetic_replay 預設不計為真實升級證據（P3-03）。只有 caller
+    顯式 allow_synthetic=True 時才把 synthetic bucket 併回。保守、絕不放寬。
+    """
+    accepted = list(DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST)
+    if allow_synthetic:
+        accepted.extend(SYNTHETIC_EVIDENCE_SOURCE_TIERS)
+    return accepted
+
 
 def evidence_filter_capabilities(cur: Any) -> dict[str, bool]:
     """Probe schema for forward-compat REF-20 P4-S11 column / table presence.
@@ -152,6 +181,8 @@ def evidence_filter_capabilities(cur: Any) -> dict[str, bool]:
 
 def build_evidence_source_filter(
     caps: dict[str, bool],
+    *,
+    allow_synthetic: bool = False,
 ) -> tuple[str, list[Any]]:
     """Build surgical WHERE-fragment + extra params for REF-20 P4-S11.
     建構 REF-20 P4-S11 的外科 WHERE-fragment + 額外參數。
@@ -178,12 +209,13 @@ def build_evidence_source_filter(
     fragments: list[str] = []
     extra_params: list[Any] = []
 
-    # Block A: evidence_source_tier IN (allowlist)
-    # Block A：evidence_source_tier 必在白名單內
+    # Block A: evidence_source_tier IN (accepted tiers)
+    # Block A：evidence_source_tier 必在接受清單內。
+    # 預設排除 synthetic_replay（P3-03）；唯有 allow_synthetic=True 才納入。
     fragments.append(
         "AND COALESCE(evidence_source_tier, 'real_outcome') = ANY(%s)"
     )
-    extra_params.append(list(EVIDENCE_SOURCE_TIER_ALLOWLIST))
+    extra_params.append(resolve_accepted_tiers(allow_synthetic=allow_synthetic))
 
     # Block B: replay_experiment_id NULL allowed (legacy non-replay rows
     # = real_outcome) OR points at active manifest in replay.experiments
@@ -246,6 +278,7 @@ def fetch_pending_sql_and_params(
     min_confidence: float,
     min_samples: int,
     max_recommendations: int,
+    allow_synthetic: bool = False,
 ) -> tuple[str, tuple[Any, ...]]:
     """Build SELECT sql + params for ``mlde_demo_applier._fetch_pending``.
     建構 ``mlde_demo_applier._fetch_pending`` 用 SELECT sql + params。
@@ -255,9 +288,13 @@ def fetch_pending_sql_and_params(
 
     本函數為 P4-S11 evidence-source filter 接線唯一 SoT；
     ``_fetch_pending`` 僅 `cur.execute(sql, params)` + `fetchall()`。
+
+    allow_synthetic 預設 False：synthetic_replay 不計為真實升級證據（P3-03）。
     """
     caps = evidence_filter_capabilities(cur)
-    extra_filter, extra_params = build_evidence_source_filter(caps)
+    extra_filter, extra_params = build_evidence_source_filter(
+        caps, allow_synthetic=allow_synthetic
+    )
     # REF-20 Sprint C2 R7-T7 Part B (per MIT §1.5 + AI-E 推薦)：
     # observability log — 每 cycle dump active capabilities + Block A/B mode。
     # block_a = 'on' / 'skip'（has_evidence_source_tier 是否啟用）。
@@ -285,11 +322,15 @@ def fetch_pending_sql_and_params(
     else:
         block_b_label = "skip"
     caps_count = sum(1 for v in caps.values() if v)
+    # synthetic bucket 模式 observability（P3-03）：預設 'excluded'，
+    # 顯式 opt-in 時 'opt_in'。
+    synthetic_label = "opt_in" if allow_synthetic else "excluded"
     logger.info(
-        "evidence_filter capability dump: caps=%d/6 block_a=%s block_b=%s",
+        "evidence_filter capability dump: caps=%d/6 block_a=%s block_b=%s synthetic=%s",
         caps_count,
         block_a_label,
         block_b_label,
+        synthetic_label,
     )
 
     sql = """
@@ -318,6 +359,9 @@ def fetch_pending_sql_and_params(
 
 __all__ = [
     "EVIDENCE_SOURCE_TIER_ALLOWLIST",
+    "SYNTHETIC_EVIDENCE_SOURCE_TIERS",
+    "DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST",
+    "resolve_accepted_tiers",
     "evidence_filter_capabilities",
     "build_evidence_source_filter",
     "fetch_pending_sql_and_params",
