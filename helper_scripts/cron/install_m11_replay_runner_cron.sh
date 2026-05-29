@@ -15,8 +15,10 @@
 #   - daily 04:00 UTC（per PA proposal §4.3 避撞 03:00 pg_dump / 03:17
 #     ml_training_maintenance / 04:41 feature_baseline_writer / 06:00
 #     counterfactual_daily / 09:00 replay_key_rotation_check）
-#   - 跑 m11_replay_runner_daily_cron.sh：register synthetic_btcusdt fixture
-#     → run dispatch → 寫 replay.experiments row 一條/天（單一 fixture smoke）
+#   - 跑 m11_replay_runner_daily_cron.sh：register-only — register
+#     synthetic_btcusdt fixture 寫 replay.experiments row 一條/天（單一 fixture
+#     heartbeat）。不 dispatch run（避免 run_state zombie 觸 [50]；per
+#     P2-M11-SMOKE-ZOMBIE-DESIGN-FIX 2026-05-29）
 #   - log + JSONL audit 進 $OPENCLAW_DATA_DIR/logs/
 #   - heartbeat sentinel + lock + governance_audit_log INSERT
 #
@@ -64,7 +66,9 @@ if [[ ! -f "$FIXTURE_PATH" ]]; then
     echo "ERROR: M11 synthetic fixture missing: $FIXTURE_PATH" >&2
     exit 4
 fi
-# replay_runner binary release path 必存（server 端 /run handler 會 spawn）
+# replay_runner binary release path 必存（[47] replay_runner_binary healthcheck
+# 對齊 + Stage B cohort nightly 需要；register-only heartbeat 本身不 spawn
+# 子進程，但保留此 preflight 守 [47] 一致性 + Stage A→B 升級就緒）
 RUNNER_BIN="$OPENCLAW_BASE_DIR/rust/target/release/replay_runner"
 if [[ ! -x "$RUNNER_BIN" ]]; then
     echo "WARN: replay_runner release binary not executable: $RUNNER_BIN" >&2
@@ -160,9 +164,10 @@ if [[ "${OPENCLAW_M11_REPLAY_CRON_APPLY:-0}" != "1" ]]; then
     echo "       curl -s \"http://\$(tailscale ip -4 | head -1):8000/api/v1/replay/status\" → 200"
     echo "     （wrapper 內部同樣 auto-resolve；OPENCLAW_API_BASE_URL env 可覆寫）"
     echo "  2. replay_runner binary 跑得通（[47] healthcheck PASS）"
-    echo "  3. 手動跑 wrapper dry-run 一次驗 register + run dispatch："
+    echo "  3. 手動跑 wrapper dry-run 一次驗 register-only（不 dispatch run）："
     echo "     bash $WRAPPER"
-    echo "  4. 驗 replay.experiments 多一 row + governance_audit_log alert_type='m11_replay_runner_smoke_completed' row"
+    echo "  4. 驗 replay.experiments 多一 row + governance_audit_log alert_type='m11_replay_runner_register_only_completed' row"
+    echo "     + replay.run_state 無新增 status='running' row（register-only 不製造 zombie）"
     exit 0
 fi
 

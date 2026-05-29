@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# m11_replay_runner_daily_cron.sh — M11 Stage A daily smoke heartbeat wrapper
+# m11_replay_runner_daily_cron.sh — M11 Stage A daily register-only heartbeat wrapper
 #
 # 配對 install script:
 #   $HOME/BybitOpenClaw/srv/helper_scripts/cron/install_m11_replay_runner_cron.sh
@@ -17,11 +17,31 @@
 #     Decision 2 line 74 M11 as 5th signal「daily_divergence_aggregate_30d」
 #   operator confirm 2026-05-28 cadence = Daily 04:00 UTC (= M11.a)
 #
+# DESIGN-FIX 2026-05-29（ticket P2-M11-SMOKE-ZOMBIE-DESIGN-FIX）：
+#   原版 smoke 做 register → run dispatch → 寫 replay.experiments row（keep
+#   [48]）+ POST /replay/run 啟動真實 replay 子進程。但 run 子進程 hang/死不寫
+#   completed_at/exit_code → replay.run_state 留下 'running' zombie row → 4h 後
+#   `[50] replay_run_state_health` FAIL。首例 zombie 6532fc38（install smoke）
+#   已 operator cancel cleanup。每日 04:00 cron fire 會持續累積 zombie。
+#
+#   **修法（operator + PM 拍 register-only minimal）**：smoke 改 register-only。
+#   保留 register（寫 experiments row → keep [48]），**移除 run dispatch**
+#   （不 POST /replay/run，不製造 run_state zombie）。
+#
+#   理由：`[48]` healthcheck 只查 replay.experiments row growth（register 寫的），
+#   不依賴 run_state 完成（per checks_replay_maintenance.py:348-428 只 query
+#   replay.experiments total/rows_7d/rows_24h/created_at）。daily heartbeat 的
+#   evidence value 在「runner 鏈 + register endpoint alive」非「真實 replay
+#   執行」；run dispatch 製造 zombie 得不償失。真實 replay 執行（cohort nightly
+#   含完成 + exit_code 追蹤）是 M11 Track C / Stage B 範圍（Sprint 3 Phase A），
+#   非 daily heartbeat。
+#
 # 設計重點:
-#   1. **Stage A single-fixture smoke heartbeat 模式**：每天跑 1 個 fixture
-#      (synthetic_btcusdt.json) 走完 register → run → poll status。目的只在
-#      於累積 replay.experiments row 與證明 runner 鏈活著，並讓 `[48]` rows_7d
-#      條件穩定為 PASS；不是 Stage B 全 cohort nightly（待 Sprint 3 Phase A）。
+#   1. **Stage A single-fixture register-only heartbeat 模式**：每天 register 1
+#      個 fixture (synthetic_btcusdt.json) 寫 replay.experiments row。目的只在
+#      於累積 replay.experiments row 與證明 register 鏈活著，並讓 `[48]` rows_7d
+#      條件穩定為 PASS；**不 dispatch run**（避免 run_state zombie 觸 [50]）；
+#      不是 Stage B 全 cohort nightly（待 Sprint 3 Phase A）。
 #   2. **不擴 V035 enum**：governance_audit_log 對齊 replay_key_rotation_check.sh
 #      pattern（per PA OQ-2 (a)），piggyback event_type='audit_write_failed' +
 #      payload.alert_type 識別 M11 smoke 事件；後續 Sprint 3 Phase A 同步擴。
@@ -30,9 +50,9 @@
 #      （OQ-1 PENDING follow-up；現階段重用 operator token 不觸 hard
 #      boundary—signed live authorization 是另一套機制，API session
 #      token 屬 GUI/programmatic API 認證）。
-#   4. **fail-soft**：register/run/poll 任何階段 fail 不退非 0 給 cron
-#      （避免 mail 噪音），改寫 audit + log + JSONL；exit 0 給 cron。
-#      `[50]` failed_rate 偵測 + `[48]` rows_24h WARN 已 cover 多日連續 fail。
+#   4. **fail-soft**：register 階段 fail 不退非 0 給 cron（避免 mail 噪音），
+#      改寫 audit + log + JSONL；exit 0 給 cron。`[48]` rows_24h WARN /
+#      rows_7d FAIL 已 cover 多日連續 register fail。
 #
 # 模式對齊 trading_ai_pg_dump_cron.sh / feature_baseline_writer_cron.sh 風格：
 #   - 平台守門：Linux only；Mac dev refuse exit 2
@@ -154,7 +174,7 @@ fi
 trap 'rmdir "$LOCK_DIR" 2>/dev/null || true' EXIT
 
 START_EPOCH=$(date -u +%s)
-echo "[$(ts)] === M11 replay_runner Stage A smoke START (BASE=$BASE API=$API_BASE FIXTURE=$FIXTURE_PATH) ===" >> "$LOG"
+echo "[$(ts)] === M11 replay_runner Stage A register-only heartbeat START (BASE=$BASE API=$API_BASE FIXTURE=$FIXTURE_PATH) ===" >> "$LOG"
 
 # ─── governance_audit_log INSERT helper（best-effort）─────────────
 # 對齊 replay_key_rotation_check.sh §219-285 pattern：V035 CHECK enum 未含
@@ -162,7 +182,7 @@ echo "[$(ts)] === M11 replay_runner Stage A smoke START (BASE=$BASE API=$API_BAS
 # 'audit_write_failed' + payload.alert_type 識別。Sprint 3 Phase A 同步擴
 # enum 後改用專屬 event_type。
 emit_governance_audit() {
-    local alert_type="$1"      # 'm11_replay_runner_smoke_completed' / '_failed' / '_register_failed'
+    local alert_type="$1"      # 'm11_replay_runner_register_only_completed' / '_register_failed'
     local payload_extra="$2"   # JSON object 字段（不含外層 {}）
     local payload
     payload=$(printf '{"alert_type":"%s","source":"m11_replay_runner_daily_cron",%s}' \
@@ -265,7 +285,7 @@ if [[ "$REGISTER_HTTP" != "200" && "$REGISTER_HTTP" != "201" ]]; then
     emit_governance_audit 'm11_replay_runner_smoke_register_failed' \
         "$(printf '"http":%s,"duration_sec":%s,"datestamp":"%s"' \
             "$REGISTER_HTTP" "$DUR" "$DATESTAMP")" || true
-    echo "[$(ts)] === M11 replay_runner Stage A smoke END FAIL (register) dur=${DUR}s ===" >> "$LOG"
+    echo "[$(ts)] === M11 replay_runner Stage A register-only heartbeat END FAIL (register) dur=${DUR}s ===" >> "$LOG"
     # fail-soft exit 0（避免 cron mail spam；[48] WARN/FAIL 由 healthcheck cover）。
     exit 0
 fi
@@ -297,75 +317,29 @@ fi
 
 echo "[$(ts)] OK register http=$REGISTER_HTTP experiment_id=$EXPERIMENT_ID" >> "$LOG"
 
-# ─── Step 2: POST /replay/run 啟動 run ───────────────────────────
-# /run body 對齊 ReplayRunRequest（per replay_routes.py:385+）；只需
-# experiment_id + idempotency_key。run_id 由 server 生成。
-RUN_BODY=$(printf '{"experiment_id":"%s","idempotency_key":"m11-run-%s"}' \
-    "$EXPERIMENT_ID" "$DATESTAMP")
-RUN_TMP=$(mktemp "${DATA}/m11_run_response.XXXXXX.json")
-trap 'rmdir "$LOCK_DIR" 2>/dev/null || true; rm -f "$REGISTER_TMP" "$RUN_TMP" 2>/dev/null || true' EXIT
-
-echo "[$(ts)] POST ${API_BASE}/api/v1/replay/run experiment_id=$EXPERIMENT_ID" >> "$LOG"
-RUN_HTTP=$(curl -sS -o "$RUN_TMP" -w '%{http_code}' \
-    -X POST "${API_BASE}/api/v1/replay/run" \
-    -H "Authorization: Bearer ${API_TOKEN}" \
-    -H "Content-Type: application/json" \
-    -H "X-CSRF-Token: ${CSRF_TOKEN}" \
-    -b "oc_csrf=${CSRF_TOKEN}" \
-    -d "$RUN_BODY" 2>>"$LOG" || echo "000")
-
-if [[ "$RUN_HTTP" != "200" && "$RUN_HTTP" != "201" ]]; then
-    END_EPOCH=$(date -u +%s)
-    DUR=$((END_EPOCH - START_EPOCH))
-    RESP_BODY=$(head -c 500 "$RUN_TMP" 2>/dev/null || echo "")
-    echo "[$(ts)] FAIL run http=$RUN_HTTP dur=${DUR}s body=$RESP_BODY" >> "$LOG"
-    printf '{"ts":"%s","status":"fail","stage":"run","http":%s,"experiment_id":"%s","duration_sec":%s}\n' \
-        "$(ts)" "$RUN_HTTP" "$EXPERIMENT_ID" "$DUR" >> "$JSONL"
-    emit_governance_audit 'm11_replay_runner_smoke_failed' \
-        "$(printf '"http":%s,"experiment_id":"%s","duration_sec":%s,"stage":"run","datestamp":"%s"' \
-            "$RUN_HTTP" "$EXPERIMENT_ID" "$DUR" "$DATESTAMP")" || true
-    # register row 已寫進 replay.experiments → [48] healthcheck 仍 flip 到 PASS
-    # （rows_7d 條件達標）。fail-soft exit 0。
-    exit 0
-fi
-
-# 解析 run_id + status：subprocess 可能已在 poll grace 內完成（per
-# replay_routes.py:442 subprocess_completed_in_poll = subprocess_pid is None）。
-RUN_ID=$(python3 -c "
-import json, sys
-try:
-    data = json.load(open('$RUN_TMP'))
-    payload = data.get('data', data)
-    print(payload.get('run_id', ''))
-except Exception:
-    sys.exit(0)
-" 2>/dev/null || echo "")
-RUN_STATUS=$(python3 -c "
-import json, sys
-try:
-    data = json.load(open('$RUN_TMP'))
-    payload = data.get('data', data)
-    print(payload.get('status', ''))
-except Exception:
-    sys.exit(0)
-" 2>/dev/null || echo "")
-
-echo "[$(ts)] OK run http=$RUN_HTTP run_id=$RUN_ID initial_status=$RUN_STATUS" >> "$LOG"
-
-# Smoke 場景下 single-fixture wall clock < 2 min；不 poll status terminal
-# state（避免 cron 內 30s 級別等待；replay subprocess 在 server 端非同步跑
-# 完，無需 cron 端阻塞）。`[50]` healthcheck 偵測 zombie 'running' > 1h。
-
+# ─── register-only heartbeat 完成 ─────────────────────────────────
+# DESIGN-FIX 2026-05-29（P2-M11-SMOKE-ZOMBIE-DESIGN-FIX）：原版此處 POST
+# /api/v1/replay/run 啟動真實 replay 子進程，子進程 hang/死不寫
+# completed_at/exit_code → replay.run_state 'running' zombie row → 4h 後
+# `[50] replay_run_state_health` FAIL。已移除 run dispatch + run_id/status
+# 解析 + smoke_completed audit；改為 register-only。
+#
+# 為什麼 register-only 足夠：`[48] replay_manifest_registry_growth` 只查
+# replay.experiments row growth（register endpoint 寫的 row），不依賴
+# run_state 完成（per checks_replay_maintenance.py:348-428 query 範圍）。
+# register 成功即 keep [48] PASS；且 register endpoint thin handler 不 spawn
+# replay 子進程 → 0 新 run_state row → 0 zombie。真實 replay 執行（含完成 +
+# exit_code 追蹤）是 M11 Track C / Stage B 範圍（Sprint 3 Phase A）。
 END_EPOCH=$(date -u +%s)
 DUR=$((END_EPOCH - START_EPOCH))
-echo "[$(ts)] OK m11_replay_runner_daily_cron experiment_id=$EXPERIMENT_ID run_id=$RUN_ID dur=${DUR}s" >> "$LOG"
-printf '{"ts":"%s","status":"ok","experiment_id":"%s","run_id":"%s","initial_run_status":"%s","duration_sec":%s,"datestamp":"%s"}\n' \
-    "$(ts)" "$EXPERIMENT_ID" "$RUN_ID" "$RUN_STATUS" "$DUR" "$DATESTAMP" >> "$JSONL"
+echo "[$(ts)] OK m11_replay_runner_daily_cron register-only experiment_id=$EXPERIMENT_ID dur=${DUR}s" >> "$LOG"
+printf '{"ts":"%s","status":"ok","mode":"register_only","experiment_id":"%s","duration_sec":%s,"datestamp":"%s"}\n' \
+    "$(ts)" "$EXPERIMENT_ID" "$DUR" "$DATESTAMP" >> "$JSONL"
 
-# governance_audit_log: smoke_completed（register + run dispatch 均通）
-emit_governance_audit 'm11_replay_runner_smoke_completed' \
-    "$(printf '"experiment_id":"%s","run_id":"%s","initial_run_status":"%s","duration_sec":%s,"datestamp":"%s"' \
-        "$EXPERIMENT_ID" "$RUN_ID" "$RUN_STATUS" "$DUR" "$DATESTAMP")" || true
+# governance_audit_log: register_only_completed（register 通；不 dispatch run）。
+emit_governance_audit 'm11_replay_runner_register_only_completed' \
+    "$(printf '"experiment_id":"%s","duration_sec":%s,"datestamp":"%s","mode":"register_only"' \
+        "$EXPERIMENT_ID" "$DUR" "$DATESTAMP")" || true
 
-echo "[$(ts)] === M11 replay_runner Stage A smoke END OK dur=${DUR}s ===" >> "$LOG"
+echo "[$(ts)] === M11 replay_runner Stage A register-only heartbeat END OK dur=${DUR}s ===" >> "$LOG"
 exit 0
