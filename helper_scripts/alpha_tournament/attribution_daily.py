@@ -249,6 +249,11 @@ def main(argv: list[str] | None = None) -> int:
         "expected_engine_modes": list(EXPECTED_ENGINE_MODES),
         "candidates": list(CANDIDATE_STRATEGIES),
         "dry_run": args.dry_run,
+        # P1-16：明確 scaffold 標記。本輸出是 Stage-A daily attribution smoke，
+        # 不是 Stage-B promotion evidence。下游/運維/審計絕不可把此 JSON 當晉升憑證。
+        # 真實 PG wire-up 由 W2-F PA 接續（見下方 wire_up_pending 路徑）。
+        "promotion_evidence": False,
+        "stage": "A_smoke_scaffold",
     }
 
     sql = build_bucket_split_query()

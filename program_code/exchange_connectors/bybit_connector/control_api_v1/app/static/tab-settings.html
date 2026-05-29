@@ -154,12 +154,26 @@
 <div id="subtab-system" class="oc-subtab-content" data-settings-pane="true"
   role="tabpanel" aria-labelledby="subtab-btn-system" hidden>
 
-<!-- ═══ Scheduled Restart ═══ -->
-<div class="oc-card" style="border-color:rgba(239,68,68,0.25)">
-  <h3>&#x1F504; 計劃重啟 / Scheduled Restart</h3>
-  <div style="font-size:12px;color:var(--text-dim);margin-bottom:12px">重新載入最新代碼，可選在重啟前清倉。/ Reload latest code, optionally liquidate before restart.</div>
-  <div id="restart-status"></div>
-  <button class="oc-btn oc-btn-danger" onclick="openRestartModal()" style="margin-top:4px">&#x26A0; 計劃重啟服務器</button>
+<!-- ═══ Scheduled Restart（已停用）═══ -->
+<!-- P2-14 (v80 冷審 Wave 3, 2026-05-29)：後端 /system/scheduled-restart 已停用
+     （control_legacy_routes.py 回 HTTP 410，DAPI-007 Batch E 禁止 API worker 內 spawn uvicorn）。
+     原「計劃重啟服務器」按鈕點擊後永遠失敗，屬死控制項。
+     改為 disabled-state 佔位：保留 IA 入口讓 operator 認得，但明確說明已停用 + 正確替代路徑，
+     不再呈現可點擊但無效的危險按鈕。修改僅前端；後端 410 維持不動。 -->
+<div class="oc-card" style="border-color:rgba(71,85,105,0.35);opacity:0.85"
+     role="region" aria-label="計劃重啟（已停用）">
+  <h3 style="color:var(--text-dim)">&#x1F504; 計劃重啟 / Scheduled Restart
+    <span class="oc-chip" style="font-size:11px;background:rgba(71,85,105,0.3);margin-left:6px">已停用 / Disabled</span>
+  </h3>
+  <div style="font-size:12px;color:var(--text-dim);margin-bottom:10px;line-height:1.6">
+    GUI 內的計劃重啟已停用：重啟編排只能由 service manager（launchctl / systemctl）
+    或 <code>helper_scripts/restart_all.sh</code> 執行，不在 API 請求處理內進行。<br>
+    Scheduled restart from the GUI is disabled; use the service manager or
+    <code>restart_all.sh</code>.
+  </div>
+  <button class="oc-btn oc-btn-danger" disabled aria-disabled="true"
+          title="此控制項已停用，請改用 service manager 或 restart_all.sh"
+          style="margin-top:4px;opacity:0.5;cursor:not-allowed">&#x26A0; 計劃重啟服務器（已停用）</button>
 </div>
 
 <!-- W-AUDIT-7c (2026-05-09): restart modal 已從本 sub-tab 抽出移至檔尾，
@@ -580,6 +594,11 @@ let _restartDelay = 10;
 let _restartLiquidate = false;
 
 function openRestartModal() {
+  // 為什麼 fail-closed：P2-14 已停用排程重啟流程（按鈕已 disabled / 後端回 HTTP 410）。
+  // 此 modal 與相關 JS 暫保留（整塊清理屬更大範圍工作），故加守衛防止被重新接線後靜默復活。
+  console.warn('[P2-14] 排程重啟流程已停用：後端回 HTTP 410，不開啟 modal、不發 POST。');
+  return;
+  // eslint-disable-next-line no-unreachable
   document.getElementById('restartModal').classList.remove('hidden');
   document.getElementById('restart-step-1').style.display = '';
   document.getElementById('restart-step-2').style.display = 'none';

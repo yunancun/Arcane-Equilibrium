@@ -5,6 +5,25 @@
 **Status**: SPEC-FINAL / IMPL-PENDING  
 **Operator directive**: 補齊 v5.8 Sprint 2 Alpha Tournament 缺口；先確定現在能確定的盈利主線，不再讓後續 agent 只看單一文檔而漏治理邊界。
 
+> **狀態拆分（P1-16 防誤判，2026-05-29 TW）**：本 SSOT 的 `IMPL-PENDING` 指
+> Alpha Tournament 主邏輯與 candidate IMPL 仍未動工，不可被 SCRIPT_INDEX 中
+> 「scaffold done」字樣升級為「mostly done」。逐項真實狀態：
+> - **source scaffold = done**：`alpha_tournament/` package + `attribution_daily.py`
+>   + `tournament_orchestrator.py`（Sprint 2 stub return 0）+ `14d_bucket_split.sql`
+>   已落地（見 `helper_scripts/SCRIPT_INDEX.md` 2026-05-25 區塊）。
+> - **active = false**：tournament 尚未啟動評選；`tournament_orchestrator.py` 仍是
+>   stub，未產生任何 candidate verdict。
+> - **Stage 0R evidence = pending**：尚無任一 candidate 通過 §5 evidence gates 取得
+>   Stage 0R replay preflight 證據。
+> - **M11 Stage-A smoke cron = installed**：runtime crontab `0 4 * * *
+>   m11_replay_runner_daily_cron.sh` 已安裝，僅作 `[48]` liveness heartbeat。
+> - **M11 Stage-B divergence output = pending**：`replay.experiments` 已積但
+>   `completed=0` / `replay_divergence_log=0`，divergence 物化未完成。
+>
+> **硬邊界**：M11 Stage-A smoke 只證明 cron 還活著（liveness-only），**不是**
+> promotion / divergence evidence。任何 Stage 0R 或 Stage 1 升級不得引用 Stage-A
+> smoke 心跳作為證據；scaffold 落地 ≠ 評選結果 ≠ replay divergence 結論。
+
 ---
 
 ## 0. Read This First

@@ -6,7 +6,7 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 **软更名口径（2026-05-06）**：
 - 正式项目名：**玄衡 · Arcane Equilibrium**。
 - **OpenClaw** 保留为控制平面 / Gateway / Console / 通信服务族名称。
-- **Bybit** 保留为唯一交易所 adapter / connector 名称。
+- **Bybit** 为唯一**下单/执行**交易所 adapter / connector；ADR 已批准的非 Bybit **只读行情**例外存在（Binance market-data-only，per ADR-0033/0040）。
 - 短期不改 `openclaw_engine`、`OPENCLAW_*`、`/tmp/openclaw`、GitHub 仓库名、Linux runtime 路径等运行面名称。
 
 ---

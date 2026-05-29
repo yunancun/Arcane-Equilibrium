@@ -55,6 +55,11 @@
 
 ## 2026-05-25 Sprint 2 W2-B Alpha Tournament Stream A scaffold
 
+> **scaffold ≠ done（P1-16，2026-05-29 TW）**：以下為 source scaffold，非
+> Alpha Tournament 完成。`tournament_orchestrator.py` 仍是 Sprint 2 stub return
+> 0，active = false，尚無 candidate verdict / Stage 0R evidence。SSOT 狀態見
+> `docs/execution_plan/2026-05-26--alpha_tournament_ssot_spec.md`（IMPL-PENDING）。
+
 | 腳本 | 用途 |
 |------|------|
 | `alpha_tournament/__init__.py` | helper package entry + MODULE_NOTE；標註 ADR-0026 track='direct_exploit' + V100/V103 actual schema + engine_mode IN ('demo','live_demo') hard invariants；read-only SELECT only。 |

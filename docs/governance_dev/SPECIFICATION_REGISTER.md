@@ -120,7 +120,7 @@
 | ARCH-02 | OpenClaw Control Plane Repositioning | docs/architecture/2026-05-06--openclaw_control_plane_repositioning.md | ✅ Active | OpenClaw is communication/control-plane/Gateway/proposal relay only, not trading conductor and not second GUI |
 | ARCH-03 | Agent Decision Spine Architecture | docs/architecture/multi_agent_rework_2026-05-05/ENGINEERING_PLAN.md<br>docs/architecture/multi_agent_rework_2026-05-05/2026-05-07--mag030_agent_spine_rust_module_design.md | ✅ Active | Typed StrategySignal -> StrategistDecision -> GuardianVerdict -> ExecutionPlan -> Decision Lease/idempotency -> ExecutionReport lineage |
 | ARCH-04 | Alpha Source Architecture Upgrade | docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_loss_architectural_root_cause_redesign.md<br>docs/adr/0021-alpha-source-architecture-upgrade.md<br>docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md | 🟠 Proposed | R-1..R-5 architectural amendments (AlphaSurface Bundle / Strategist scope / Hypothesis Pipeline / Per-alpha-source Live Promotion / Spec-as-Code). operator partial accept: W-AUDIT-8a SPEC + W-AUDIT-9 graduated canary started. Supersedes LG-X-02..05 system-wide promotion design (baseline IMPL still required as substrate). |
-| ARCH-05 | Alpha Tournament SSOT | docs/execution_plan/2026-05-26--alpha_tournament_ssot_spec.md | ✅ Active / IMPL-PENDING | Sprint 2 profit-spine SSOT. Fills v5.8 implicit Alpha Tournament slot with required read order, candidate pool, fee-adjusted scoring, minimum evidence gates, Stage output lanes, role chain, and cross-document pointers. Does not grant trading authority or relax Stage/5-gate constraints. |
+| ARCH-05 | Alpha Tournament SSOT | docs/execution_plan/2026-05-26--alpha_tournament_ssot_spec.md | ✅ Active / IMPL-PENDING | Sprint 2 profit-spine SSOT. Fills v5.8 implicit Alpha Tournament slot with required read order, candidate pool, fee-adjusted scoring, minimum evidence gates, Stage output lanes, role chain, and cross-document pointers. Does not grant trading authority or relax Stage/5-gate constraints. **狀態拆分（P1-16）**：source scaffold = done（`alpha_tournament/` package）；active = false（orchestrator 仍 stub）；Stage 0R evidence = pending；M11 Stage-A smoke cron = installed（liveness-only）；M11 Stage-B divergence output = pending（`replay_divergence_log=0`）。scaffold 落地非「mostly done」，Stage-A smoke 非 promotion/divergence evidence。 |
 
 ### Architecture Decision Records (ADR-0034 ~ ADR-0045)
 
@@ -160,6 +160,12 @@
 | M11 | Counterfactual Replay Automation | Sprint 1A-β DESIGN / Sprint 1A-ζ Track C IMPL prototype / Sprint 2+ full | 🟡 Design + Prototype |
 | M12 | Adaptive Order Routing (Y3+ stub) | Sprint 1A-δ Rust trait stub IMPL | 🟡 Trait Stub |
 | M13 | Multi-asset Class / Multi-venue Capacity (Y3+ stub) | Sprint 1A-δ Rust trait stub IMPL | 🟡 Trait Stub |
+
+> **M11 狀態拆分（P1-16，2026-05-29 TW）**：Stage-A smoke cron
+> `m11_replay_runner_daily_cron.sh`（`0 4 * * *`）= installed，僅作 `[48]`
+> liveness heartbeat；Stage-B divergence output = pending（`replay.completed=0`
+> / `replay_divergence_log=0`，divergence 未物化）。Stage-A smoke 心跳 **不是**
+> promotion / divergence evidence，不得用於 Stage 0R / Stage 1 升級。
 
 ---
 

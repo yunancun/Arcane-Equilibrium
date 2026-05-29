@@ -24,7 +24,8 @@ in reports/archive. Do not mirror long status paragraphs here.
 - Formal product: `玄衡 · Arcane Equilibrium`.
 - `OpenClaw` is the control-plane / Gateway / Console / communication service
   family, not the total product name.
-- Bybit is the only exchange target.
+- Bybit is the only EXECUTION exchange; ADR-approved non-Bybit read-only
+  market-data exceptions exist (Binance market-data-only per ADR-0033/0040).
 - Rust `openclaw_engine` is the trading, risk, strategy-config, and execution
   authority.
 - Python/FastAPI is the control plane, GUI backend, bridge, replay surface, and

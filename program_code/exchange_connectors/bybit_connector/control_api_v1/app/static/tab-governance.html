@@ -242,7 +242,9 @@
   <span title="EX-04 對賬状态 / EX-04 reconciliation status">Recon: <strong id="qs-recon">--</strong></span>
   <span style="color:var(--border)">|</span>
   <span title="學習層级 / Learning tier">Learning: <strong id="qs-learning">--</strong></span>
-  <button class="oc-btn" style="margin-left:auto;padding:2px 8px;font-size:11px" onclick="loadGovernance()">&#x1F504;</button>
+  <!-- P2-14 (v80 冷審 Wave 3, 2026-05-29)：原呼叫 loadGovernance() 未定義，刷新按鈕無效；
+       真正的整頁刷新函數是 governance-tab.js 的 loadAll()，改呼此函數修復死按鈕。 -->
+  <button class="oc-btn" style="margin-left:auto;padding:2px 8px;font-size:11px" onclick="loadAll()" title="刷新 / Refresh">&#x1F504;</button>
 </div>
 
 <!-- ═══ Core State Machines / 核心狀態機 ═══ -->
