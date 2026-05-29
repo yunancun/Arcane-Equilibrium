@@ -715,6 +715,23 @@ pub(super) async fn handle_pipeline_command(
                 }
             }
         }
+        // P2-PACKET-C-C4-PIPELINE-WIRE：通知 fail-safe in-band 升級。handler 含 await
+        // （exchange sync via stop channel + V114 audit emit），故在此 async 攔截，
+        // 與 CancelAllOrders / ResetDrawdownBaseline 同模式（handle_paper_command 同步）。
+        // owner task 內跑 SM-04 transition + ATR 注入鎖利 + 交易所雙軌 sync。
+        PipelineCommand::NotificationFailsafeEscalate {
+            reason,
+            response_tx,
+        } => {
+            handlers::handle_notification_failsafe_escalate(
+                reason,
+                response_tx,
+                pipeline,
+                snapshot_writer,
+                audit_pool,
+            )
+            .await;
+        }
         other => {
             handlers::handle_paper_command(
                 other,

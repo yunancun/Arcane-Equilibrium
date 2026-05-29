@@ -630,6 +630,22 @@ impl TickPipeline {
         self.stop_request_tx = Some(tx);
     }
 
+    /// P2-PACKET-C-C4-PIPELINE-WIRE · 取得 server-side stop channel（fail-safe 鎖利
+    /// 用既有雙軌止損通道同步交易所 conditional SL，不另建第二個 PositionManager）。
+    ///
+    /// 為什麼復用此通道而非新構 `BybitExchangeStopSync(Arc<PositionManager>)`：
+    ///   owner pipeline 不持有 `PositionManager`（它私有在 `bootstrap.rs` 的 StopRequest
+    ///   consumer task 內）。新構第二個 PositionManager = 對同一交易所建第二個 client，
+    ///   違反 Root Principle 1（單一寫入口）。改走 `stop_request_tx` → 既有 consumer →
+    ///   `PositionManager::set_trading_stop`，是已驗的雙軌止損路徑（Root Principle 9），
+    ///   且天然 paper-safe（paper 無 client，consumer log-only）。
+    ///
+    /// 回 `None` 時（paper / `server_side_stops` 關閉）呼叫端僅跑本地 SM-04 + 鎖利計算，
+    /// 不打交易所（fail-safe 降為單線本地保護，誠實標記於 handler）。
+    pub fn stop_channel(&self) -> Option<&tokio::sync::mpsc::UnboundedSender<StopRequest>> {
+        self.stop_request_tx.as_ref()
+    }
+
     /// Set channel for dispatching orders to exchange API.
     /// 設定訂單派發通道到交易所 API。
     pub fn set_shadow_channel(

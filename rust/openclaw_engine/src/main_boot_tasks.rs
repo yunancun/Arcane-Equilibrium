@@ -140,6 +140,12 @@ pub(crate) fn spawn_position_reconcilers(
             "position_reconciler skipped (no exchange pipelines) / 持倉對帳器跳過（無交易所管線）"
         );
     }
+
+    // P2-PACKET-C-C4-PIPELINE-WIRE：緊接 reconciler spawn 後起通知 fail-safe watcher
+    // （同批 boot-time wiring，吃同樣的 db_pool / cancel / demo_cmd_slot / live_cmd_slot）。
+    // 單例 external task；對 demo/live slot 發 in-band escalate command（paper 結構性排除）。
+    // ⚠️ 機制 live、incident-trigger 待 Sprint 3（C4 spec §5.1）。
+    tasks::spawn_notification_failsafe_watcher(db_pool, cancel, demo_cmd_slot, live_cmd_slot);
 }
 
 /// StrategistScheduler boot: DB restore of last-applied tuned params, then
