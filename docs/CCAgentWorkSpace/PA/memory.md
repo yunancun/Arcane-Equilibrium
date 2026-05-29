@@ -6691,3 +6691,21 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 3. P2-01 stub guard must key on stub SIGNAL not current zero-values, else it re-opens the moment the stub returns non-zero.
 
 **Only genuine operator decision**: P1-11 canonical-source (recommend fills V094, retire table). EDGE_TTL=48h is PA default. Rest PM-pre-decided.
+
+## 2026-05-29 — PHYS-LOCK zero-position reduce-only close loop RCA (TRXUSDT demo)
+
+**現象**：13:57 CEST cold-audit --rebuild 後 demo engine 對 TRXUSDT 每秒 ~1.4 次發 reduce-only close，Bybit 回 110017「current position is zero」；7411+ 次。reason=`risk_close:phys_lock_gate4_giveback`，est_net_bps=None，edge_source=fallback，qty=0.0。
+
+**根因（推翻 PM 前提）**：PM 稱 demo_state.json `positions: {}` 為空 — 實際是 PARSE 錯誤。`positions` 是 **list 不是 dict**，demo_state.json（mtime 16:46，當前）含 1 個 TRXUSDT 倉：qty=2907、is_long=true、entry_price=0.34204、owner_strategy=`strategy_close:grid_close_short`、entry_ts=11:58 UTC（≈restart 同窗）。所以**不是 in-memory phantom，是 persisted 真倉**。Bybit demo 端實際無此倉（110017）→ 本地/persisted vs exchange 不一致。
+
+**機制**：(1) grid short 開倉 → grid_close 觸發（owner 已轉 strategy_close:grid_close_short）但 exchange close 未成交確認 → 本地倉殘留。(2) exchange-mode close 路徑（step_6_risk_checks.rs:381-410）只 dispatch reduce-only 給交易所，**不本地 positions_remove**；靠 confirmed fill（commands.rs:617 apply_confirmed_fill → fill_engine positions_remove）才清。(3) 110017 reject = 無 fill → 倉永不清。(4) 每 tick PHYS-LOCK gate4_giveback 重評（倉在 paper_state.positions() 內）→ 再 dispatch。(5) `pending_close_symbols` 本應抑制重發（commands.rs:1031 insert），但 R-02 `reconcile_pending_exchange_orders`（commands.rs:1219）只清「不在 positions() 的 symbol」— TRXUSDT 仍在 positions() → 不清；且 110017 reject path 不 insert pending（dispatch 入隊成功但 exchange reject 在 event_consumer 端，pending 早已被…需查 reject 後是否 remove pending）→ 迴圈自持。
+
+**qty=0.0 來源（非 bug，是設計）**：`close_dispatch_qty_for_full_close`（close_sizing.rs:26-36）對 primary exchange full close 回 0.0 = Bybit `qty=0 + reduceOnly + closeOnTrigger` flatten form（2026-04-30 dust residual fix 引入）。對「有倉」正確；對「無倉」→ 110017。
+
+**110017 misclassification（defense gap）**：dispatch.rs:223 `classify_business_retcode` 中 110017 落入 `_ => Structural`（no retry，不清倉）。對比 110001/110009 = NoOp（「position not found on close → 等效成功」會清）。110017 語意等同「無倉」卻被當 Structural failure → 不 NoOp 不清理 → 永久 loop。WP-10（2026-05-16 commit ef6ea79f）只加 `ReduceOnlyReject=110017` enum variant + 字典 row，**沒改 classifier 分類也沒接 reconcile**。
+
+**restart 能否清**：**不能**（持久源 demo_state.json）。restart 會 reload TRXUSDT。需 (a) IPC ipc_close_symbol/dust clear（但同樣會 110017）或 (b) 手動編輯 demo_state.json 移除（engine stop 時）或 (c) 修 code 後讓 reconcile 對 110017/exchange-zero 清本地倉。
+
+**prior art**：與 BUSDT/funding_arb V2 110017 reject loop（BB memory:200-202，archive 2026-04-30 dust residual）同族 — exchange-zero residual + 110017 reject。非全新 bug；是已知族在 grid_close + PHYS-LOCK 重評下的新觸發實例。
+
+**修法設計（未 impl）**：主修 = dispatch 層收 110017（及 reduce-only-zero 族）視為 NoOp/已平 → 觸發本地 positions_remove + pending clear（對齊 110001/110009 語意）。Defense = (D1) execute_position_close emit 前 assert get_position(symbol).qty>0（無倉直接 drop 不 dispatch）；(D2) R-02 reconcile 加「exchange 回報 zero-position 的 symbol 即使 local 有倉也 remove + 記 reconcile drift」；(D3) dispatch 層 reduce-only + 110017 N 連發同 symbol → 強制本地 flatten（fail-safe 收斂）。Layer：主修在 dispatch classifier，D1 在 commands.execute_position_close，D2 在 reconcile_pending_exchange_orders / position_reconciler。
