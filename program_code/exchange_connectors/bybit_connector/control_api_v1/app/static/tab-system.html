@@ -725,9 +725,18 @@ async function executeModeChange() {
       rev
     );
     const result = await ocApi('/api/v1/input/config-change', { method: 'POST', body: envelope });
-    if (result && result.action_result === 'success') {
-      ocToast('✅ 全局模式已切換為 ' + (MODE_CONFIRM[mode] ? MODE_CONFIRM[mode].label : mode), 'success');
+    // P1-17：後端 set_system_mode IPC 失敗時會回 action_result='partial_failure'
+    // + data.rust_synced=false + data.ipc_error，不得再讀到 'success' 就顯綠。
+    // classifyLiveMutation 統一判讀 partial_failure / rust_synced，IPC 未同步顯失敗/警示。
+    const r = classifyLiveMutation(result);
+    const modeLabel = (MODE_CONFIRM[mode] ? MODE_CONFIRM[mode].label : mode);
+    if (r.severity === 'success' && result && result.action_result === 'success') {
+      ocToast('✅ 全局模式已切換為 ' + modeLabel, 'success');
       // Market feed is auto-managed by Rust engine; no manual start needed
+    } else if (r.residualRisk) {
+      // A3 HIGH：IPC 未同步 / 部分失敗代表 Rust 與 GUI 狀態不一致（可能仍有 live 倉位活躍），
+      // 屬殘留風險。改常駐橫幅，setTimeout(loadAll) 重繪不會清除它。
+      ocResidualRiskBanner('mode-switch', '⚠ 模式切換未確認 — ' + r.message + '（Rust 引擎狀態未同步，可能仍有 live 倉位，請手動確認）');
     } else {
       const codes = result && result.reason_codes ? result.reason_codes.join(', ') : '未知錯誤';
       ocToast('❌ 模式切換失敗：' + codes, 'error');

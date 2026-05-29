@@ -217,6 +217,15 @@ pub enum PipelineCommand {
         hint_is_long: Option<bool>,
         hint_qty: Option<f64>,
     },
+    /// P1-03（cold audit pkg B）：帳戶範圍 cancel-all（運維/Stop 流孤兒掛單清掃）。
+    /// Fire-and-forget（無 response_tx，與 CloseAll 同形狀）：風險遞減（cancel only），
+    /// 由引擎 order authority 經 OrderManager::cancel_all_scoped 發 /v5/order/cancel-all。
+    /// 不需 Decision Lease，且 execution_authority revoke 後仍須可用（cancel 不開新倉）。
+    /// 取代原 Python live `_sweep_live_orphan_orders` 的直接 REST 寫（operator P1-03）。
+    CancelAllOrders {
+        category: String,
+        settle_coin: String,
+    },
     /// Reset paper state — clear positions, reset balance.
     /// 重置紙盤狀態 — 清倉、重置餘額。
     Reset { new_balance: f64 },
@@ -830,6 +839,10 @@ pub struct TickPipeline {
     /// Channel to dispatch shadow orders to Bybit Demo API.
     /// 派發影子訂單到 Bybit Demo API 的通道。
     order_dispatch_tx: Option<tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>>,
+    /// P1-03（cold audit pkg B）：cancel-all 用的共享 OrderManager handle。
+    /// 與 spawn_order_dispatch 內建立的 order_mgr 共用同一 Arc（reuse shared live client），
+    /// 供 CancelAllOrders IPC 命令發 /v5/order/cancel-all。Paper 模式無客戶端 → None。
+    cancel_all_order_mgr: Option<Arc<crate::order_manager::OrderManager>>,
     /// Phase 1: Channel to dispatch market data to async PG writer.
     /// Phase 1：派發市場數據到異步 PG 寫入器的通道。
     market_data_tx: Option<tokio::sync::mpsc::Sender<crate::database::MarketDataMsg>>,

@@ -101,11 +101,16 @@ def perform_recheck(envelope: RequestEnvelope, actor: AuthenticatedActor, chapte
     def mutator(state: dict[str, Any]) -> dict[str, Any]:
         ts = now_ms()
         target = state["capability_matrix"][chapter]
+        # P1-05：recheck 不執行 runtime/replay/IPC 驗證，僅 operator 手動標記。
+        # 故狀態用 "manual_marked"（非 "passed"）+ evidence 標記，readiness gate
+        # 不得把 manual_mark 當證據解鎖（INV-A3）。
         if kind == "canonical":
-            target["canonical_recheck_state"] = "passed"
+            target["canonical_recheck_state"] = "manual_marked"
+            target["canonical_recheck_evidence"] = "manual_mark"
             target["canonical_recheck_last_verified_ts_ms"] = ts
         else:
-            target["closeout_state"] = "passed"
+            target["closeout_state"] = "manual_marked"
+            target["closeout_evidence"] = "manual_mark"
             target["closeout_last_verified_ts_ms"] = ts
 
         state["chapter_status"][chapter]["last_verified_ts_ms"] = ts
@@ -114,8 +119,8 @@ def perform_recheck(envelope: RequestEnvelope, actor: AuthenticatedActor, chapte
             action_type=f"{chapter.lower()}_{kind}_recheck",
             operator_id=actor.actor_id,
             request_id=envelope.request_id,
-            result="success",
-            reason_codes=[],
+            result="manual_mark",
+            reason_codes=["evidence_manual_mark_not_verified"],
             is_control_action=True,
         )
         _bump_revision(state)
@@ -125,7 +130,9 @@ def perform_recheck(envelope: RequestEnvelope, actor: AuthenticatedActor, chapte
             "data": {
                 "chapter": chapter,
                 "recheck_kind": kind,
-                "recheck_state": "passed",
+                "recheck_state": "manual_marked",
+                "evidence": "manual_mark",
+                "verified": False,
                 "last_verified_ts_ms": ts,
                 "chapter_snapshot": copy.deepcopy(compiled["chapter_status"][chapter]),
                 "pinned_runtime_snapshot_id": _base.build_source_context(compiled).pinned_runtime_snapshot_id,
@@ -142,13 +149,15 @@ def perform_recheck(envelope: RequestEnvelope, actor: AuthenticatedActor, chapte
         "data": {
             "chapter": chapter,
             "recheck_kind": kind,
-            "recheck_state": "passed",
+            "recheck_state": "manual_marked",
+            "evidence": "manual_mark",
+            "verified": False,
             "last_verified_ts_ms": final_state["chapter_status"][chapter]["last_verified_ts_ms"],
             "chapter_snapshot": final_state["chapter_status"][chapter],
             "pinned_runtime_snapshot_id": source.pinned_runtime_snapshot_id,
         },
         "snapshot": final_state,
-    }, "success"
+    }, "manual_mark"
 
 
 def perform_validate(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tuple[dict[str, Any], str]:
@@ -169,9 +178,12 @@ def perform_validate(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tu
         demo["demo_arm_last_evaluated_ts_ms"] = ts
         demo["demo_enable_last_evaluated_ts_ms"] = ts
         demo["demo_relock_last_evaluated_ts_ms"] = ts
+        # P1-05：demo-validate 只是 operator 手動標記評估時間，未跑實際驗證；
+        # 結果用 manual_mark + verified=False，readiness gate 不得當證據（INV-A3）。
         demo["demo_last_action_type"] = "validate"
-        demo["demo_last_action_result"] = "success"
-        demo["demo_last_action_reason_codes"] = []
+        demo["demo_last_action_result"] = "manual_mark"
+        demo["demo_last_action_evidence"] = "manual_mark"
+        demo["demo_last_action_reason_codes"] = ["evidence_manual_mark_not_verified"]
         demo["demo_last_action_ts_ms"] = ts
 
         audit_ref = _write_audit_fields(
@@ -179,8 +191,8 @@ def perform_validate(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tu
             action_type="demo_validate",
             operator_id=actor.actor_id,
             request_id=envelope.request_id,
-            result="success",
-            reason_codes=[],
+            result="manual_mark",
+            reason_codes=["evidence_manual_mark_not_verified"],
             is_control_action=True,
         )
         _bump_revision(state)
@@ -188,6 +200,8 @@ def perform_validate(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tu
         response = {
             "audit_ref": audit_ref,
             "data": {
+                "evidence": "manual_mark",
+                "verified": False,
                 "demo_state_switch": compiled["control_plane"]["demo_control"]["demo_state_switch"],
                 "demo_prerequisites_gate_state": compiled["control_plane"]["demo_control"]["demo_prerequisites_gate_state"],
                 "demo_prerequisites_reason_codes": compiled["control_plane"]["demo_control"]["demo_prerequisites_reason_codes"],
@@ -209,6 +223,8 @@ def perform_validate(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tu
     return {
         "audit_ref": final_state["audit_context"]["last_control_action_audit_ref"],
         "data": {
+            "evidence": "manual_mark",
+            "verified": False,
             "demo_state_switch": final_state["control_plane"]["demo_control"]["demo_state_switch"],
             "demo_prerequisites_gate_state": final_state["control_plane"]["demo_control"]["demo_prerequisites_gate_state"],
             "demo_prerequisites_reason_codes": final_state["control_plane"]["demo_control"]["demo_prerequisites_reason_codes"],
@@ -221,7 +237,7 @@ def perform_validate(envelope: RequestEnvelope, actor: AuthenticatedActor) -> tu
             "pinned_runtime_snapshot_id": source.pinned_runtime_snapshot_id,
         },
         "snapshot": final_state,
-    }, "success"
+    }, "manual_mark"
 
 
 def perform_demo_transition(envelope: RequestEnvelope, actor: AuthenticatedActor, action: str) -> tuple[dict[str, Any], str]:
@@ -328,10 +344,15 @@ def perform_safe_bundle(envelope: RequestEnvelope, actor: AuthenticatedActor) ->
 
     def mutator(state: dict[str, Any]) -> dict[str, Any]:
         ts = now_ms()
+        # P1-05：safe-recheck bundle 只是批次手動標記，未跑 runtime/replay/IPC 驗證；
+        # 全部用 manual_marked / manual_mark + verified=False，不得被 readiness gate
+        # 當證據（INV-A3）。
         for chapter in ("J", "K"):
-            state["capability_matrix"][chapter]["canonical_recheck_state"] = "passed"
+            state["capability_matrix"][chapter]["canonical_recheck_state"] = "manual_marked"
+            state["capability_matrix"][chapter]["canonical_recheck_evidence"] = "manual_mark"
             state["capability_matrix"][chapter]["canonical_recheck_last_verified_ts_ms"] = ts
-            state["capability_matrix"][chapter]["closeout_state"] = "passed"
+            state["capability_matrix"][chapter]["closeout_state"] = "manual_marked"
+            state["capability_matrix"][chapter]["closeout_evidence"] = "manual_mark"
             state["capability_matrix"][chapter]["closeout_last_verified_ts_ms"] = ts
             state["chapter_status"][chapter]["last_verified_ts_ms"] = ts
 
@@ -342,8 +363,9 @@ def perform_safe_bundle(envelope: RequestEnvelope, actor: AuthenticatedActor) ->
         demo["demo_enable_last_evaluated_ts_ms"] = ts
         demo["demo_relock_last_evaluated_ts_ms"] = ts
         demo["demo_last_action_type"] = "safe_recheck_bundle"
-        demo["demo_last_action_result"] = "success"
-        demo["demo_last_action_reason_codes"] = []
+        demo["demo_last_action_result"] = "manual_mark"
+        demo["demo_last_action_evidence"] = "manual_mark"
+        demo["demo_last_action_reason_codes"] = ["evidence_manual_mark_not_verified"]
         demo["demo_last_action_ts_ms"] = ts
 
         audit_ref = _write_audit_fields(
@@ -351,22 +373,25 @@ def perform_safe_bundle(envelope: RequestEnvelope, actor: AuthenticatedActor) ->
             action_type="safe_recheck_bundle",
             operator_id=actor.actor_id,
             request_id=envelope.request_id,
-            result="success",
-            reason_codes=[],
+            result="manual_mark",
+            reason_codes=["evidence_manual_mark_not_verified"],
             is_control_action=True,
         )
         _bump_revision(state)
         compiled = _compile_for_response(state)
+        _step_rc = ["evidence_manual_mark_not_verified"]
         steps = [
-            {"step_name": "j-canonical", "action_result": "success", "reason_codes": [], "audit_ref": audit_ref},
-            {"step_name": "k-canonical", "action_result": "success", "reason_codes": [], "audit_ref": audit_ref},
-            {"step_name": "j-closeout", "action_result": "success", "reason_codes": [], "audit_ref": audit_ref},
-            {"step_name": "k-closeout", "action_result": "success", "reason_codes": [], "audit_ref": audit_ref},
-            {"step_name": "demo-validate", "action_result": "success", "reason_codes": [], "audit_ref": audit_ref},
+            {"step_name": "j-canonical", "action_result": "manual_mark", "evidence": "manual_mark", "reason_codes": _step_rc, "audit_ref": audit_ref},
+            {"step_name": "k-canonical", "action_result": "manual_mark", "evidence": "manual_mark", "reason_codes": _step_rc, "audit_ref": audit_ref},
+            {"step_name": "j-closeout", "action_result": "manual_mark", "evidence": "manual_mark", "reason_codes": _step_rc, "audit_ref": audit_ref},
+            {"step_name": "k-closeout", "action_result": "manual_mark", "evidence": "manual_mark", "reason_codes": _step_rc, "audit_ref": audit_ref},
+            {"step_name": "demo-validate", "action_result": "manual_mark", "evidence": "manual_mark", "reason_codes": _step_rc, "audit_ref": audit_ref},
         ]
         response = {
             "audit_ref": audit_ref,
             "data": {
+                "evidence": "manual_mark",
+                "verified": False,
                 "bundle_base_snapshot_id": snapshot["meta"]["snapshot_id"],
                 "bundle_final_snapshot_id": compiled["meta"]["snapshot_id"],
                 "bundle_committed": True,
@@ -378,22 +403,26 @@ def perform_safe_bundle(envelope: RequestEnvelope, actor: AuthenticatedActor) ->
         return compiled
 
     final_state = _base.STORE.mutate(mutator)
+    _audit_ref = final_state["audit_context"]["last_control_action_audit_ref"]
+    _step_rc = ["evidence_manual_mark_not_verified"]
     return {
-        "audit_ref": final_state["audit_context"]["last_control_action_audit_ref"],
+        "audit_ref": _audit_ref,
         "data": {
+            "evidence": "manual_mark",
+            "verified": False,
             "bundle_base_snapshot_id": snapshot["meta"]["snapshot_id"],
             "bundle_final_snapshot_id": final_state["meta"]["snapshot_id"],
             "bundle_committed": True,
             "steps": [
-                {"step_name": "j-canonical", "action_result": "success", "reason_codes": [], "audit_ref": final_state["audit_context"]["last_control_action_audit_ref"]},
-                {"step_name": "k-canonical", "action_result": "success", "reason_codes": [], "audit_ref": final_state["audit_context"]["last_control_action_audit_ref"]},
-                {"step_name": "j-closeout", "action_result": "success", "reason_codes": [], "audit_ref": final_state["audit_context"]["last_control_action_audit_ref"]},
-                {"step_name": "k-closeout", "action_result": "success", "reason_codes": [], "audit_ref": final_state["audit_context"]["last_control_action_audit_ref"]},
-                {"step_name": "demo-validate", "action_result": "success", "reason_codes": [], "audit_ref": final_state["audit_context"]["last_control_action_audit_ref"]},
+                {"step_name": "j-canonical", "action_result": "manual_mark", "evidence": "manual_mark", "reason_codes": _step_rc, "audit_ref": _audit_ref},
+                {"step_name": "k-canonical", "action_result": "manual_mark", "evidence": "manual_mark", "reason_codes": _step_rc, "audit_ref": _audit_ref},
+                {"step_name": "j-closeout", "action_result": "manual_mark", "evidence": "manual_mark", "reason_codes": _step_rc, "audit_ref": _audit_ref},
+                {"step_name": "k-closeout", "action_result": "manual_mark", "evidence": "manual_mark", "reason_codes": _step_rc, "audit_ref": _audit_ref},
+                {"step_name": "demo-validate", "action_result": "manual_mark", "evidence": "manual_mark", "reason_codes": _step_rc, "audit_ref": _audit_ref},
             ],
         },
         "snapshot": final_state,
-    }, "success"
+    }, "manual_mark"
 
 
 def apply_input_action(envelope: RequestEnvelope, actor: AuthenticatedActor, action: str) -> tuple[dict[str, Any], str]:
@@ -501,32 +530,86 @@ def apply_config_change(envelope: RequestEnvelope, actor: AuthenticatedActor) ->
 
     final_state = _base.STORE.mutate(mutator)
 
-    # If global_execution_mode_switch was accepted, push the new mode to Rust engine.
-    # Fail-soft: engine may not be running; it will sync from snapshot on next start.
-    # 如果 global_execution_mode_switch 被接受，將新模式推送到 Rust 引擎。
-    # 失敗時靜默：引擎可能未運行；下次啟動時將從快照同步。
+    # P1-17：若接受了 global_execution_mode_switch，推送新模式到 Rust 引擎，並
+    # 如實反映同步結果——絕不在 IPC 失敗後仍回 "success"（INV-A2）。
+    # - IPC 成功：rust_synced=True；live-capable 模式需 get_state 回讀確認。
+    # - IPC 失敗（含引擎未運行）：rust_synced=False + partial_failure=True +
+    #   ipc_error；頂層 action result 改 "partial_failure"，不可 plain success。
+    # 為何不再 fail-soft 吞錯：GUI 會把 "success" 渲染成綠色，誤導 operator 以為
+    # Rust 已切換，但實際引擎仍在舊模式。
     _MODE_PATH = "global_runtime.controls.global_execution_mode_switch"
+    # live-capable 模式（未來 live_reserved / live）回讀為強制；非 live 模式
+    # （disabled/observe_only/shadow_only/demo_reserved）引擎可選，回讀非強制。
+    _LIVE_CAPABLE_MODES = frozenset({"live_reserved", "live"})
+    result_status = "success"
+    mode_sync: dict[str, Any] | None = None
+
     if _MODE_PATH in accepted_paths:
         new_mode = final_state.get("global_runtime", {}).get("controls", {}).get(
             "global_execution_mode_switch", ""
         )
         if new_mode:
+            require_readback = new_mode in _LIVE_CAPABLE_MODES
             try:
                 sync_ipc_call("set_system_mode", {"mode": new_mode})
                 logger.info(
                     "system_mode synced to Rust engine: %s / 系統模式已同步到 Rust 引擎: %s",
                     new_mode, new_mode,
                 )
-            except Exception:  # noqa: BLE001
-                # Best-effort only — engine may be stopped, mode will sync on restart.
-                # 盡力而為 — 引擎可能已停止，重啟後將自動同步。
-                pass
+                if require_readback:
+                    # live-capable：必須 get_state 回讀確認引擎已切換，否則 fail-closed。
+                    rb = sync_ipc_call("get_state", {})
+                    rb_mode = str((rb or {}).get("system_mode", ""))
+                    if rb_mode != new_mode:
+                        logger.error(
+                            "system_mode readback mismatch: requested=%s engine=%s",
+                            new_mode, rb_mode,
+                        )
+                        result_status = "partial_failure"
+                        mode_sync = {
+                            "rust_synced": False,
+                            "partial_failure": True,
+                            "ipc_error": "readback_mode_mismatch",
+                            "requested_mode": new_mode,
+                            "engine_mode": rb_mode,
+                            "reason": "engine did not confirm requested live mode",
+                        }
+                    else:
+                        mode_sync = {"rust_synced": True, "partial_failure": False, "engine_mode": rb_mode}
+                else:
+                    mode_sync = {"rust_synced": True, "partial_failure": False}
+            except Exception as exc:  # noqa: BLE001
+                # IPC 失敗（含引擎未運行）：fail-closed，不靜默。
+                from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+                logger.warning(
+                    "set_system_mode IPC failed (mode=%s); rust NOT synced: %s",
+                    new_mode, exc,
+                )
+                result_status = "partial_failure"
+                mode_sync = {
+                    "rust_synced": False,
+                    "partial_failure": True,
+                    "ipc_error": sanitize_exc_for_detail(exc, "ipc_error"),
+                    "requested_mode": new_mode,
+                    "reason": "engine may be stopped; mode will sync from snapshot on next start "
+                              "(NOT yet applied to running engine)",
+                }
+                if require_readback:
+                    # live-capable 模式在 IPC 失敗時絕不可被視為已套用。
+                    mode_sync["live_mode_not_applied"] = True
+
+    data: dict[str, Any] = {"accepted_paths": accepted_paths, "rejected_paths": rejected_paths}
+    if mode_sync is not None:
+        data["mode_sync"] = mode_sync
+        data["rust_synced"] = mode_sync["rust_synced"]
+        if mode_sync.get("partial_failure"):
+            data["partial_failure"] = True
 
     return {
         "audit_ref": final_state["audit_context"]["last_write_action_audit_ref"],
-        "data": {"accepted_paths": accepted_paths, "rejected_paths": rejected_paths},
+        "data": data,
         "snapshot": final_state,
-    }, "success"
+    }, result_status
 
 
 # ── 产品族配置写接口 / Product Family Config Write ───────────────────────────

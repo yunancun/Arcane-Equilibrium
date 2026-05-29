@@ -43,7 +43,9 @@ def test_overview_contract_shape():
     assert payload["data"]["global_runtime"]["runtime_still_protected"] is True
 
 
-def test_validate_returns_success_envelope():
+def test_validate_returns_manual_mark_envelope():
+    # P1-05：demo-validate 不再回 "success"，改 "manual_mark"（無運行時驗證證據）；
+    # 回應 data 帶 evidence="manual_mark" + verified=False，readiness gate 不得當證據。
     client = build_client()
     overview = client.get("/api/v1/system/overview", headers=auth_headers()).json()
     response = client.post(
@@ -62,8 +64,10 @@ def test_validate_returns_success_envelope():
     )
     assert response.status_code == 200
     payload = response.json()
-    assert payload["action_result"] == "success"
+    assert payload["action_result"] == "manual_mark"
     assert "demo_prerequisites_gate_state" in payload["data"]
+    assert payload["data"]["evidence"] == "manual_mark"
+    assert payload["data"]["verified"] is False
 
 
 def test_config_change_whitelist():

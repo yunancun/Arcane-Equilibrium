@@ -735,11 +735,19 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         // （根原則 #9 雙軌止損：本地止損 + 交易所止損）。
         // 紙盤模式無客戶端僅記錄；Demo/Live 調用 Bybit API。
         let stop_client = shared_client.clone();
+        // P1-06（cold audit pkg B）：PositionManager 現需 instrument cache 做 trading-stop
+        // tick 取整。與 OrderManager 共用同一引擎 cache（shared_instruments）。
+        let stop_instruments = shared_instruments.clone();
 
         tokio::spawn(async move {
-            // Create PositionManager once if exchange client is available.
-            // 若交易所客戶端可用，一次性創建 PositionManager。
-            let pos_mgr = stop_client.map(crate::position_manager::PositionManager::new);
+            // Create PositionManager once if exchange client AND instrument cache available.
+            // 交易所客戶端與 instrument cache 皆可用時，一次性創建 PositionManager。
+            let pos_mgr = match (stop_client, stop_instruments) {
+                (Some(client), Some(instruments)) => Some(
+                    crate::position_manager::PositionManager::new(client, instruments),
+                ),
+                _ => None,
+            };
 
             while let Some(req) = stop_rx.recv().await {
                 info!(
@@ -764,6 +772,8 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
                         trailing_stop: None,
                         active_price: None,
                         position_idx: Some(0), // one-way mode / 單向模式
+                        // P1-06：方向供 SL 保守取整（多頭 floor / 空頭 ceil）。
+                        side_is_long: Some(req.is_long),
                     };
                     match mgr.set_trading_stop(stop_req).await {
                         Ok(()) => {

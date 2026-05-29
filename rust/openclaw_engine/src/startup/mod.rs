@@ -638,7 +638,12 @@ pub(crate) async fn build_exchange_pipeline(
     {
         use openclaw_engine::order_manager::OrderCategory;
         use openclaw_engine::position_manager::PositionManager;
-        let pos_mgr = PositionManager::new(Arc::clone(&client_arc));
+        // P1-06（cold audit pkg B）：此 pos_mgr 僅做啟動期 get_positions 種子查詢，不呼
+        // set_trading_stop，但構造簽名統一需 instrument cache → 用空 default cache。
+        let pos_mgr = PositionManager::new(
+            Arc::clone(&client_arc),
+            Arc::new(openclaw_engine::instrument_info::InstrumentInfoCache::default()),
+        );
         match pos_mgr.get_positions(OrderCategory::Linear, None).await {
             Ok(positions) => {
                 for pos in &positions {

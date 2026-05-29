@@ -553,6 +553,120 @@ function _ocRepositionToasts() {
   }
 }
 
+// ─── Persistent Residual-Risk Banner ─────────────────────────────────────────
+// 為什麼需要：不可逆 Live 寫操作（停止 / 平倉 / 緊急停止 / 模式切換）部分失敗時，
+// 「仍有持倉/掛單殘留，請手動確認 Bybit」這類警示若用 3.5s 自動消失的 toast 呈現，
+// 受壓操作員會錯過 → 然後 refreshPage() 重繪畫面顯「一切就緒」掩蓋殘留風險。
+// 本 banner 是常駐的（fixed 置頂，只能點擊關閉），且 append 到 document.body，
+// 不掛在任何被 refreshPage() 重繪的容器內 → refreshPage 不會把它清掉。
+// 同 actionKey 重複呼叫時更新內容而非堆疊，避免操作員連點產生多條殘留橫幅。
+const _ocResidualBanners = {};
+function ocResidualRiskBanner(actionKey, msg) {
+  const key = ocSanitizeClass(String(actionKey || 'live')) || 'live';
+  let banner = _ocResidualBanners[key];
+  if (!banner || !banner.isConnected) {
+    banner = document.createElement('div');
+    banner.className = 'oc-residual-banner';
+    banner.setAttribute('role', 'alert');
+    banner.setAttribute('aria-live', 'assertive');
+    // 文字節點全程 ocEsc / textContent，杜絕後端 error 字串 XSS 注入。
+    const txt = document.createElement('span');
+    txt.className = 'oc-residual-banner-text';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'oc-residual-banner-close';
+    closeBtn.type = 'button';
+    closeBtn.textContent = '我已確認 · 關閉';
+    closeBtn.setAttribute('aria-label', '關閉殘留風險警示');
+    closeBtn.onclick = function() {
+      banner.remove();
+      delete _ocResidualBanners[key];
+      _ocRepositionResidualBanners();
+    };
+    banner.appendChild(txt);
+    banner.appendChild(closeBtn);
+    document.body.appendChild(banner);
+    _ocResidualBanners[key] = banner;
+  }
+  banner.querySelector('.oc-residual-banner-text').textContent = String(msg || '');
+  _ocRepositionResidualBanners();
+  return banner;
+}
+// 多條殘留橫幅垂直堆疊置頂，避免互相遮蓋。
+function _ocRepositionResidualBanners() {
+  let top = 12;
+  Object.keys(_ocResidualBanners).forEach(function(k) {
+    const b = _ocResidualBanners[k];
+    if (!b || !b.isConnected) { delete _ocResidualBanners[k]; return; }
+    b.style.top = top + 'px';
+    top += (b.offsetHeight || 44) + 8;
+  });
+}
+
+// ─── Live Mutation Classifier ────────────────────────────────────────────────
+// 為什麼需要：close-all / cancel-all / emergency-stop / 全局模式切換 等寫操作的
+// 後端 envelope 已在 top-level 回報 partial_failure / closed_all / status /
+// rust_synced；但前端歷史上各自讀錯巢狀欄位（如 d.data.close_result.errors），
+// 在「部分失敗、仍有殘留風險」時誤顯綠色成功 → fake-success 反模式。
+// 本 helper 是單一真相來源：任何部分失敗 / 未同步 Rust 都歸類為 error/blocking，
+// 只有完全乾淨才回 success。符合 CLAUDE.md「GUI 寫面必反映 Rust 權威，不得假成功」。
+//
+// P1-04（close-all / emergency-stop）、P1-17（全局模式切換）共用此 helper。
+//
+// 契約：傳入 ocPost / ocApi 的回傳 envelope d。Live 回應被 _live_response 包了一層
+// data，真實 payload 在 d.data；control 回應有時直接平鋪在 d。兩種都兼容。
+// 回傳 { severity: 'success' | 'error', message: String, residualRisk: Boolean }。
+
+// 收集所有可能殘留風險來源的錯誤訊息（多巢狀路徑冗餘）。
+function _ocCollectMutationErrors(p) {
+  const out = [];
+  if (!p || typeof p !== 'object') return out;
+  // 平鋪 errors
+  if (Array.isArray(p.errors)) out.push.apply(out, p.errors);
+  // close_result.errors（close-all 平倉結果）
+  if (p.close_result && Array.isArray(p.close_result.errors)) {
+    out.push.apply(out, p.close_result.errors);
+  }
+  // orphan_sweep：清掃孤兒倉/掛單；skipped / errors 任一非空都算殘留風險
+  const sweep = p.orphan_sweep;
+  if (sweep && typeof sweep === 'object') {
+    if (Array.isArray(sweep.errors)) out.push.apply(out, sweep.errors);
+    if (Array.isArray(sweep.skipped) && sweep.skipped.length) {
+      // skipped 不是純錯誤字串陣列時，標記為殘留掃描項
+      sweep.skipped.forEach(function(s) {
+        out.push('orphan_sweep skipped: ' + (typeof s === 'string' ? s : JSON.stringify(s)));
+      });
+    }
+  }
+  // IPC 未同步錯誤（模式切換）
+  if (p.ipc_error) out.push('IPC: ' + p.ipc_error);
+  // 用 String() 正規化非字串錯誤項，避免 [object Object]
+  return out.map(function(e) { return (typeof e === 'string') ? e : JSON.stringify(e); });
+}
+
+function classifyLiveMutation(d) {
+  // d 不存在 = ocPost 已判定非 OK（fail-closed）
+  if (!d) return { severity: 'error', message: '命令失敗，請檢查引擎狀態', residualRisk: true };
+  // Live 回應 payload 在 d.data；control 回應可能平鋪在 d 本身
+  const p = (d.data && typeof d.data === 'object') ? d.data : d;
+  if (!p || typeof p !== 'object') {
+    return { severity: 'error', message: '命令回應格式異常', residualRisk: true };
+  }
+  // 任一旗標為「部分失敗 / 未完成 / Rust 未同步」都視為失敗（不可顯綠）
+  const partial = (p.partial_failure === true) ||
+                  (p.closed_all === false) ||
+                  (p.status === 'partial_failure') ||
+                  (p.action_result === 'partial_failure') ||
+                  (p.rust_synced === false);
+  const errs = _ocCollectMutationErrors(p);
+  if (partial || errs.length) {
+    let msg = '部分失敗，可能殘留風險';
+    if (p.rust_synced === false) msg = '未同步至 Rust 引擎，狀態未確認';
+    if (errs.length) msg += '：' + errs.join('; ');
+    return { severity: 'error', message: msg, residualRisk: true };
+  }
+  return { severity: 'success', message: (p.message || '完成'), residualRisk: false };
+}
+
 // ─── Tab Page Base CSS (injected by each tab) ────────────────────────────────
 function ocInjectBaseCSS() {
   if (document.getElementById('oc-base-css')) return;
@@ -738,6 +852,22 @@ function ocInjectBaseCSS() {
     .oc-toast-info { background: #1f2937; color: var(--text); border: 1px solid var(--border); }
     .oc-toast-success { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
     .oc-toast-error { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+    /* warn = 黃色「需注意」語意；之前缺此 class → 'warn' toast 退回無樣式（透明背景無邊框）。
+       對應 --yellow token，與 success(綠)/error(紅)/info(灰) 視覺區分。 */
+    .oc-toast-warn { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid rgba(210,153,34,0.4); }
+
+    /* Persistent Residual-Risk Banner / 常駐殘留風險橫幅 — 只能點擊關閉，refreshPage 不清除 */
+    .oc-residual-banner { position: fixed; left: 50%; transform: translateX(-50%);
+      max-width: 720px; width: calc(100% - 24px); z-index: 10000;
+      background: rgba(248,81,73,0.16); border: 1px solid var(--red); border-radius: 8px;
+      padding: 12px 16px; display: flex; align-items: center; gap: 14px;
+      box-shadow: 0 4px 18px rgba(0,0,0,0.5); }
+    .oc-residual-banner-text { color: var(--red); font-size: 13px; font-weight: 600;
+      line-height: 1.5; flex: 1; word-break: break-word; }
+    .oc-residual-banner-close { background: rgba(248,81,73,0.2); border: 1px solid var(--red);
+      color: var(--red); border-radius: 6px; padding: 6px 12px; font-size: 12px;
+      font-weight: 600; cursor: pointer; white-space: nowrap; flex-shrink: 0; }
+    .oc-residual-banner-close:hover { background: rgba(248,81,73,0.32); }
 
     /* Danger Zone */
     .oc-danger-zone { background: rgba(248,81,73,0.04); border: 1px solid rgba(248,81,73,0.15);

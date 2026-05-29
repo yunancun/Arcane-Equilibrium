@@ -207,6 +207,33 @@ pub(crate) async fn dispatch_request(
             let tx = extract_engine_tx(&req.params, cmd_channels);
             handle_paper_cmd(id, &tx, PipelineCommand::CloseAll, "close_all_sent")
         }
+        "cancel_all_orders" => {
+            // P1-03（cold audit pkg B）：帳戶範圍 cancel-all，鏡像 close_all_positions。
+            // category 預設 linear（目前唯一範圍）；settle_coin 預設 USDT（帳戶範圍）。
+            // Fire-and-forget（無 response_tx），由引擎 order authority 發 cancel-all。
+            let category = req
+                .params
+                .get("category")
+                .and_then(|v| v.as_str())
+                .unwrap_or("linear")
+                .to_string();
+            let settle_coin = req
+                .params
+                .get("settle_coin")
+                .and_then(|v| v.as_str())
+                .unwrap_or("USDT")
+                .to_string();
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_paper_cmd(
+                id,
+                &tx,
+                PipelineCommand::CancelAllOrders {
+                    category,
+                    settle_coin,
+                },
+                "cancel_all_sent",
+            )
+        }
         "close_position" => {
             let symbol = req
                 .params

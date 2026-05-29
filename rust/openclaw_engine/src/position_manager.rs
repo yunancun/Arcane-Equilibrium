@@ -9,9 +9,10 @@
 //!   所有方法為異步，使用 Arc<BybitRestClient> 線程安全共享。
 
 use crate::bybit_rest_client::{BybitRestClient, BybitResult};
+use crate::instrument_info::{normalize_trading_stop_price, InstrumentInfoCache};
 use crate::order_manager::OrderCategory;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 // ---------------------------------------------------------------------------
 // Position structs / 持倉結構
@@ -81,6 +82,10 @@ pub struct TradingStopRequest {
     /// Position index: 0=one-way, 1=buy-side, 2=sell-side
     /// 持倉索引：0=單向，1=買側，2=賣側
     pub position_idx: Option<i32>,
+    /// P1-06（cold audit pkg B）：持倉方向，供 SL 保守取整方向判定。
+    /// Some(true)=多頭 SL floor / Some(false)=空頭 SL ceil / None=回退最近 round。
+    /// TP/trailing/active 不依方向（永遠最近 round）。
+    pub side_is_long: Option<bool>,
 }
 
 /// Closed PnL record for a completed trade.
@@ -127,13 +132,19 @@ pub struct ClosedPnlInfo {
 pub struct PositionManager {
     /// Shared REST client / 共享 REST 客戶端
     client: Arc<BybitRestClient>,
+    /// P1-06（cold audit pkg B）：共享 instrument cache，供 trading-stop 價格 tick 取整。
+    /// 與 OrderManager 共用同一引擎 cache（bootstrap 注入），無 spec 時 fail-closed。
+    instruments: Arc<InstrumentInfoCache>,
 }
 
 impl PositionManager {
     /// Create a new PositionManager.
     /// 創建新的持倉管理器。
-    pub fn new(client: Arc<BybitRestClient>) -> Self {
-        Self { client }
+    pub fn new(client: Arc<BybitRestClient>, instruments: Arc<InstrumentInfoCache>) -> Self {
+        Self {
+            client,
+            instruments,
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -229,11 +240,51 @@ impl PositionManager {
             "symbol": req.symbol,
         });
 
-        if let Some(tp) = req.take_profit {
-            body["takeProfit"] = serde_json::Value::String(format!("{}", tp));
-        }
+        // P1-06（cold audit pkg B）：每個價格欄位先經 normalize_trading_stop_price 做
+        // 方向保守的 tick 取整；spec 缺失（None）→ 跳過該欄位的交易所止損並 warn，依賴
+        // 本地 StopManager（root principle 9 雙軌），絕不送原始未取整值。
+        // SL 用方向保守取整（多頭 floor / 空頭 ceil）；TP/trailing/active 用最近 round。
         if let Some(sl) = req.stop_loss {
-            body["stopLoss"] = serde_json::Value::String(format!("{}", sl));
+            match normalize_trading_stop_price(
+                &self.instruments,
+                &req.symbol,
+                sl,
+                req.side_is_long,
+                true,
+            ) {
+                Some(v) => {
+                    body["stopLoss"] = serde_json::Value::String(format!("{}", v));
+                }
+                None => {
+                    warn!(
+                        symbol = req.symbol.as_str(),
+                        raw_stop_loss = sl,
+                        "P1-06: stop_loss tick-normalize failed (spec missing) — exchange SL skipped, local stop active \
+                         / stop_loss 取整失敗（缺規格）— 跳過交易所 SL，本地止損生效"
+                    );
+                }
+            }
+        }
+        if let Some(tp) = req.take_profit {
+            match normalize_trading_stop_price(
+                &self.instruments,
+                &req.symbol,
+                tp,
+                req.side_is_long,
+                false,
+            ) {
+                Some(v) => {
+                    body["takeProfit"] = serde_json::Value::String(format!("{}", v));
+                }
+                None => {
+                    warn!(
+                        symbol = req.symbol.as_str(),
+                        raw_take_profit = tp,
+                        "P1-06: take_profit tick-normalize failed (spec missing) — exchange TP skipped \
+                         / take_profit 取整失敗（缺規格）— 跳過交易所 TP"
+                    );
+                }
+            }
         }
         if let Some(ref tptb) = req.tp_trigger_by {
             body["tpTriggerBy"] = serde_json::Value::String(tptb.clone());
@@ -242,10 +293,46 @@ impl PositionManager {
             body["slTriggerBy"] = serde_json::Value::String(sltb.clone());
         }
         if let Some(ts) = req.trailing_stop {
-            body["trailingStop"] = serde_json::Value::String(format!("{}", ts));
+            match normalize_trading_stop_price(
+                &self.instruments,
+                &req.symbol,
+                ts,
+                req.side_is_long,
+                false,
+            ) {
+                Some(v) => {
+                    body["trailingStop"] = serde_json::Value::String(format!("{}", v));
+                }
+                None => {
+                    warn!(
+                        symbol = req.symbol.as_str(),
+                        raw_trailing_stop = ts,
+                        "P1-06: trailing_stop tick-normalize failed (spec missing) — skipped \
+                         / trailing_stop 取整失敗（缺規格）— 跳過"
+                    );
+                }
+            }
         }
         if let Some(ap) = req.active_price {
-            body["activePrice"] = serde_json::Value::String(format!("{}", ap));
+            match normalize_trading_stop_price(
+                &self.instruments,
+                &req.symbol,
+                ap,
+                req.side_is_long,
+                false,
+            ) {
+                Some(v) => {
+                    body["activePrice"] = serde_json::Value::String(format!("{}", v));
+                }
+                None => {
+                    warn!(
+                        symbol = req.symbol.as_str(),
+                        raw_active_price = ap,
+                        "P1-06: active_price tick-normalize failed (spec missing) — skipped \
+                         / active_price 取整失敗（缺規格）— 跳過"
+                    );
+                }
+            }
         }
         if let Some(idx) = req.position_idx {
             body["positionIdx"] = serde_json::Value::Number(serde_json::Number::from(idx));
@@ -835,11 +922,13 @@ mod tests {
             trailing_stop: Some(500.0),
             active_price: Some(66000.0),
             position_idx: Some(0),
+            side_is_long: Some(true),
         };
         let json = serde_json::to_string(&req).unwrap();
         let deser: TradingStopRequest = serde_json::from_str(&json).unwrap();
         assert_eq!(deser.symbol, "BTCUSDT");
         assert!((deser.take_profit.unwrap() - 70000.0).abs() < 1e-10);
         assert_eq!(deser.position_idx, Some(0));
+        assert_eq!(deser.side_is_long, Some(true));
     }
 }

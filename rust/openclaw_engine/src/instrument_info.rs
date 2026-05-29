@@ -746,6 +746,48 @@ impl InstrumentInfoCache {
     }
 }
 
+/// P1-06（cold audit pkg B）：交易所端 trading-stop 價格規範化 —— 依方向保守取整到
+/// tick；無 instrument spec 時回 `None`（caller fail-closed）。
+///
+/// 為什麼：`/v5/position/trading-stop` 的 SL/TP 必須 tick 對齊，否則 Bybit 拒（sub-tick）
+/// 或語意漂移。原 `set_trading_stop` 用 `format!("{}", value)` 發未取整的原始值。
+///
+/// 保守方向（不放鬆保護性止損）：
+/// - SL + 多頭（side_is_long=true）→ `floor_price`（向下，不把止損抬向價格）。
+/// - SL + 空頭（side_is_long=false）→ `ceil_price`（向上）。
+/// - TP / trailing / active_price（is_stop_loss=false）→ 最近 `round_price`（非求生關鍵，
+///   只需 tick 對齊）。
+/// - `side_is_long=None`：無方向時回退最近 `round_price`（仍 tick 對齊，永不發原始值），
+///   避免缺方向就誤 fail-closed。
+///
+/// 不變量：spec 缺失 → `None`，caller 必 fail-closed（跳過交易所止損，保留本地
+/// StopManager，root principle 9 雙軌）。取整後若得 0.0（tick_size 或 price 非法）亦回
+/// `None`，絕不送 0/原始值。
+pub fn normalize_trading_stop_price(
+    cache: &InstrumentInfoCache,
+    symbol: &str,
+    price: f64,
+    side_is_long: Option<bool>,
+    is_stop_loss: bool,
+) -> Option<f64> {
+    if !(price.is_finite() && price > 0.0) {
+        return None;
+    }
+    let spec = cache.get(symbol)?;
+    let rounded = match (is_stop_loss, side_is_long) {
+        (true, Some(true)) => spec.floor_price(price),
+        (true, Some(false)) => spec.ceil_price(price),
+        // SL 缺方向 或 TP/trailing/active → 最近 tick。
+        _ => spec.round_price(price),
+    };
+    // floor/ceil/round 在 tick_size 或 price 非法時回 0.0 → fail-closed。
+    if rounded.is_finite() && rounded > 0.0 {
+        Some(rounded)
+    } else {
+        None
+    }
+}
+
 impl Default for InstrumentInfoCache {
     fn default() -> Self {
         Self::new()

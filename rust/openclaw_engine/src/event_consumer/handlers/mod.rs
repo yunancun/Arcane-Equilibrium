@@ -63,6 +63,20 @@ pub fn handle_paper_command(
             pipeline,
             snapshot_writer,
         ),
+        // P1-03（cold audit pkg B）：CancelAllOrders 在 loop_handlers::handle_pipeline_command
+        // 的 async 上下文被攔截處理（需 await REST），生產不會到達此同步 facade。此 arm 僅為
+        // match 窮盡性 + 防禦性 log（若意外到達，no-op：cancel-all 是 async REST 不可在此 await）。
+        PipelineCommand::CancelAllOrders {
+            category,
+            settle_coin,
+        } => {
+            tracing::warn!(
+                category = %category,
+                settle_coin = %settle_coin,
+                "CancelAllOrders reached sync facade — should be intercepted in handle_pipeline_command \
+                 / CancelAllOrders 到達同步 facade — 應在 handle_pipeline_command 攔截"
+            );
+        }
         PipelineCommand::Reset { new_balance } => {
             lifecycle::handle_reset(new_balance, pipeline, snapshot_writer, pending_orders)
         }

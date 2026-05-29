@@ -1032,9 +1032,18 @@ async function liveStart() {
   }).catch(function() { return false; });
   if (!ok) return;
   const d = await ocPost('/api/v1/live/session/start', {});
-  if (d) {
-    const msg = (d.data && d.data.message) || d.message || '已啟動';
-    ocToast('⚠ ' + msg, 'warn');
+  // A3 MEDIUM：啟動不可只 `if (d)` 就顯「已啟動」（fake-success 反模式）。
+  // P1-02 後端在 live gate 未滿足時回 partial_failure / rust_synced:false，
+  // 必須經 classifyLiveMutation 判讀；未確認時誠實顯「啟動未確認 — 引擎未授權」。
+  const r = classifyLiveMutation(d);
+  if (!d) {
+    ocToast('啟動失敗，請檢查引擎狀態', 'error');
+  } else if (r.severity === 'success') {
+    ocToast('⚠ ' + r.message, 'warn');
+    await refreshPage();
+  } else {
+    // 啟動未通過完整 live gate / 未同步 Rust：常駐橫幅明說未授權，不可讓操作員誤以為已啟動。
+    ocResidualRiskBanner('live-start', '⚠ 啟動未確認 — 引擎未授權：' + r.message + '（請確認 5 道 live gate 與 authorization.json）');
     await refreshPage();
   }
 }
@@ -1054,15 +1063,17 @@ async function doLiveStop() {
   }).catch(function() { return false; });
   if (!ok) return;
   const d = await ocPost('/api/v1/live/session/stop', {});
-  if (d) {
-    const errors = (d.data && d.data.errors) || d.errors;
-    if (errors && errors.length) {
-      ocToast('已停止（部分錯誤: ' + errors.join('; ') + '）', 'warn');
-    } else {
-      ocToast('Live 實盤 授權租約 已停止，倉位已平', 'success');
-    }
-    await refreshPage();
+  // P1-04：統一用 classifyLiveMutation 判讀 partial_failure / closed_all / orphan_sweep，
+  // 部分失敗時顯紅（殘留風險），不再因只讀 d.data.errors 而漏判。
+  const r = classifyLiveMutation(d);
+  if (r.severity === 'success') {
+    ocToast('Live 實盤 授權租約 已停止，倉位已平', 'success');
+  } else {
+    // A3 HIGH：殘留風險不可用 3.5s 自動消失 toast；改常駐橫幅（只能點擊關閉），
+    // refreshPage() 不會清除它，操作員不會錯過「可能仍有持倉/掛單」警示。
+    ocResidualRiskBanner('live-stop', '⚠ 停止未完全：' + r.message + '（Live 倉位/掛單可能殘留，請手動確認 Bybit）');
   }
+  if (d) await refreshPage();
 }
 
 async function doEmergencyStop() {
@@ -1080,11 +1091,18 @@ async function doEmergencyStop() {
   }).catch(function() { return false; });
   if (!ok) return;
   const d = await ocPost('/api/v1/live/session/stop', {});
-  if (d) {
-    ocToast('🚨 緊急停止已執行', 'error');
+  // P1-04：緊急停止本身視覺為 error 色（紅）；但須區分「已執行乾淨」與「部分失敗仍有殘留」，
+  // 殘留時必須明說殘留風險，操作員不得誤以為已全平。
+  const r = classifyLiveMutation(d);
+  if (!d) {
+    ocToast('緊急停止命令失敗，請手動操作', 'error');
+  } else if (r.residualRisk) {
+    // A3 HIGH：緊急停止部分失敗 = 最高殘留風險場景，必用常駐橫幅，不可 3.5s 消失。
+    ocResidualRiskBanner('emergency-stop', '🚨 緊急停止部分失敗 — ' + r.message + '（倉位/掛單可能殘留，請立即手動確認 Bybit）');
     await refreshPage();
   } else {
-    ocToast('緊急停止命令失敗，請手動操作', 'error');
+    ocToast('🚨 緊急停止已執行', 'error');
+    await refreshPage();
   }
 }
 
@@ -1103,17 +1121,19 @@ async function doLiveCloseAll() {
   }).catch(function() { return false; });
   if (!ok) return;
   const d = await ocPost('/api/v1/live/close-all-positions', {});
-  if (d) {
-    const msg = (d.data && d.data.message) || d.message || '已平倉';
-    const errors = d.data && d.data.close_result && d.data.close_result.errors;
-    if (errors && errors.length) {
-      ocToast('平倉完成（部分錯誤: ' + errors.join('; ') + '）', 'warn');
-    } else {
-      ocToast('✓ ' + msg, 'success');
-    }
+  // P1-04 root cause：舊版只讀 d.data.close_result.errors，忽略 top-level
+  // partial_failure / closed_all 與 orphan_sweep → 部分失敗時誤顯綠色成功。
+  // 改走 classifyLiveMutation 統一判讀；任一殘留風險都顯紅 blocking。
+  const r = classifyLiveMutation(d);
+  if (!d) {
+    ocToast('平倉指令失敗，請檢查引擎狀態', 'error');
+  } else if (r.severity === 'success') {
+    ocToast('✓ ' + r.message, 'success');
     await refreshPage();
   } else {
-    ocToast('平倉指令失敗，請檢查引擎狀態', 'error');
+    // A3 HIGH：平倉未完成 = 仍有持倉/掛單殘留，必用常駐橫幅，refreshPage 不清除。
+    ocResidualRiskBanner('close-all', '⚠ 平倉未完成 — ' + r.message + '（仍有持倉/掛單，請手動確認 Bybit）');
+    await refreshPage();
   }
 }
 

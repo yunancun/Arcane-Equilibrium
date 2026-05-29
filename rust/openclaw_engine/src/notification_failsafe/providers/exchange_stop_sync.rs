@@ -89,6 +89,13 @@ impl BybitExchangeStopSync {
             trailing_stop: None,
             active_price: None,
             position_idx: None,
+            // P1-06：side "Buy"=long / "Sell"=short，供 SL 保守取整方向；未知 → None
+            // 回退最近 round（仍 tick 對齊，永不發原始值）。
+            side_is_long: match adjustment.side {
+                "Buy" => Some(true),
+                "Sell" => Some(false),
+                _ => None,
+            },
         }
     }
 }
@@ -238,6 +245,12 @@ mod tests {
                     trailing_stop: None,
                     active_price: None,
                     position_idx: None,
+                    // P1-06：side "Buy"=long / "Sell"=short / 其他 None。
+                    side_is_long: match adj.side {
+                        "Buy" => Some(true),
+                        "Sell" => Some(false),
+                        _ => None,
+                    },
                 }
             }
         }
@@ -252,6 +265,8 @@ mod tests {
         assert!(req.trailing_stop.is_none());
         assert!(req.active_price.is_none());
         assert!(req.position_idx.is_none());
+        // P1-06：Buy → side_is_long=Some(true)（SL floor 保守）。
+        assert_eq!(req.side_is_long, Some(true));
     }
 
     /// T3.6：`Rejected` 與 `Transport` 變體 `Display` 不混淆（debug 訊息可區分）。
