@@ -1,7 +1,15 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-27（P0-OPS-4 GAP-D Track A round 2 — 新增 `canary/healthchecks/check_pg_dump_freshness.py` Python 主入口 7-check（5 verify_pg_dump.sh + L0 schema coverage + governance audit trail） + wire `passive_wait_healthcheck/checks_cron_heartbeat.py` 加 `check_80_pg_dump_freshness()` wrapper；E1 IMPL DONE 待 E2 sign-off。同日保留 P0-OPS-1 HTTPS Track A IMPL + P0-OPS-4 first-day-live runbook GAP A + GAP F IMPL 索引 + 2026-05-25 Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron + W2-B Alpha Tournament scaffold + Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
+最後更新：2026-05-29（P2-OPS-2-GITLEAKS — 新增 `git_hooks/` secret-scan pre-commit hook 基礎設施：canonical hook + installer + gitleaks config；E1 IMPL DONE 待 E2 sign-off。歷史更新：2026-05-27（P0-OPS-4 GAP-D Track A round 2 — 新增 `canary/healthchecks/check_pg_dump_freshness.py` Python 主入口 7-check（5 verify_pg_dump.sh + L0 schema coverage + governance audit trail） + wire `passive_wait_healthcheck/checks_cron_heartbeat.py` 加 `check_80_pg_dump_freshness()` wrapper；E1 IMPL DONE 待 E2 sign-off。同日保留 P0-OPS-1 HTTPS Track A IMPL + P0-OPS-4 first-day-live runbook GAP A + GAP F IMPL 索引 + 2026-05-25 Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron + W2-B Alpha Tournament scaffold + Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引））
+
+## 2026-05-29 P2-OPS-2-GITLEAKS secret-scan pre-commit hook 基礎設施
+
+| 腳本 | 用途 |
+|------|------|
+| `git_hooks/pre-commit` | canonical pre-commit hook：gitleaks 在 PATH → `gitleaks protect --staged --redact`（+ `--config git_hooks/.gitleaks.toml`），有 finding 即 exit 1 擋 commit（對 secret fail-closed）；gitleaks 不在 PATH → 印中文 WARN + SKIP → exit 0 放行（不因缺工具卡死所有人的 commit；真正 gate 是有人跑 installer，hook 本可 `--no-verify` 繞過）。`.git/hooks/` 不入版控，由 `install_git_hooks.sh` 複製落地。用 `git rev-parse --show-toplevel` 定位 config，不硬編碼路徑。 |
+| `git_hooks/install_git_hooks.sh` | 把 `git_hooks/pre-commit` 複製進本 repo `.git/hooks/pre-commit` + chmod +x。鏡像 `systemd/install_*.sh` 風格（set -euo pipefail / `[install][OK\|FAIL\|WARN]` / 退出碼分級）。用 `git rev-parse --show-toplevel` + `--git-dir` 定位（不硬編碼路徑；支援 worktree 相對 git-dir 正規化）。既有 pre-commit 內容不一致時 refuse 無聲覆蓋；`--force` 才覆寫（先 backup 成 `.pre-commit.bak`）；內容一致則 idempotent 重裝。 |
+| `git_hooks/.gitleaks.toml` | gitleaks config 起手版：`[extend] useDefault = true` 繼承內建 ruleset；`[allowlist]` regex 排除 cross-language HMAC test fixture 假陽性（pinned hex `1b2b18d7…b78fc` + 測試 signing key `test-live-auth-signing-key-do-not-use-in-prod`，OPS-2 runbook §10.5 byte-identical 測試向量，非真 credential）+ path 豁免 `credential_rotation.md`。Mac 未裝 gitleaks 無法實跑 → 標為起手版，首次實跑 + FP 調校待 gitleaks 安裝後 follow-up。 |
 
 ## 2026-05-27 P0-OPS-4 GAP-D PG dump cron + healthcheck IMPL
 
