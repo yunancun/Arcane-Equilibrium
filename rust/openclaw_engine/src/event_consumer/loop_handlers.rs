@@ -488,6 +488,52 @@ pub(super) fn handle_pending_registration(
                 "order_dispatch_failed",
             );
         }
+    } else if let Some(PendingOrderEvent::ExchangeZeroClose {
+        order_link_id,
+        symbol,
+        is_long,
+        strategy,
+        ts_ms,
+    }) = reg
+    {
+        // P1-110017-POSITION-DRIFT-CLOSE-LOOP：交易所對 reduce-only 平倉回
+        // 110017（current position is zero），以交易所 truth 收斂本地漂移倉
+        // 為 flat，斷開「每 tick 重發 close → 110017」自持迴圈。
+        // 同步移除 pending_orders 追蹤列（若有），避免 sweep 殘留。
+        let removed_pending = state.pending_orders.remove(&order_link_id).is_some();
+        let removed_position = pipeline.converge_exchange_zero_close(&symbol, is_long, ts_ms);
+        tracing::warn!(
+            order_link_id = %order_link_id,
+            symbol = %symbol,
+            is_long = is_long,
+            strategy = %strategy,
+            removed_position = removed_position,
+            removed_pending = removed_pending,
+            "exchange-zero close convergence applied (Bybit 110017) \
+             / 依交易所 110017 收斂本地漂移倉"
+        );
+        // 寫一筆審計 OrderStateChange：close 因交易所端無倉而終態，標記
+        // exchange_zero 以利後續 drift 歸因。to_status=Cancelled（交易所未成交，
+        // 但已達終態），reason 帶 110017 收斂上下文。
+        if let Some(tx) = order_tx {
+            let em = pipeline.effective_engine_mode().to_string();
+            let _ = crate::database::try_send_trading_msg(
+                tx,
+                crate::database::TradingMsg::OrderStateChange {
+                    order_id: order_link_id,
+                    ts_ms,
+                    from_status: Some("Working".into()),
+                    to_status: "Cancelled".into(),
+                    filled_qty: None,
+                    avg_price: None,
+                    reason: Some(format!(
+                        "exchange_zero_close_converge:110017; removed_position={removed_position}"
+                    )),
+                    engine_mode: em,
+                },
+                "exchange_zero_close_converge",
+            );
+        }
     }
 }
 

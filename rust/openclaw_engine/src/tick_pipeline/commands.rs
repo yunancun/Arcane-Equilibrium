@@ -1235,6 +1235,79 @@ impl TickPipeline {
         }
     }
 
+    /// P1-110017-POSITION-DRIFT-CLOSE-LOOP：以交易所 110017「current position
+    /// is zero」為權威信號，把本地殘倉收斂為 flat。
+    ///
+    /// 為什麼用 upsert_position_from_exchange(size=0)：這是既有「交易所 WS
+    /// PositionUpdate size=0」的收斂路徑（loop_exchange.rs:550），只做
+    /// positions_remove + mirror 同步、**不**寫 realized PnL / 不碰 Kelly
+    /// stats（record_trade）。110017 場景下交易所早已在未知時刻/價格平倉，
+    /// 合成一筆 close PnL 會污染 edge 樣本與 Kelly 統計；漂移收斂的正確語意
+    /// 是「跟隨交易所 truth 移除本地倉」，而非補一筆假成交。
+    ///
+    /// 同步 clear pending_close_symbols：否則 R-02 reconcile 只信本地
+    /// positions()，移除倉後若 flag 殘留會與下一 tick 的 contains 檢查互相
+    /// 佐證造成自洽假象（PA RCA §1 步驟 7）。
+    ///
+    /// 對所有 engine_mode（demo/live_demo/live）生效：live 真倉送 close 收到
+    /// 110017 = 交易所確認該倉已不在（如手動平倉 / DCP / 條件單觸發），本地
+    /// 跟隨 flat 是正確的；BB MANDATORY guard（is_primary ∧ is_close ∧ reduce_only
+    /// ∧ **qty==0 全平 form** ∧ 110017，全在 dispatch.rs send_exchange_zero_close）
+    /// 已在上游排除誤刪真倉的 C-1（qty>size）case，故此函數收到事件時可信任
+    /// 「交易所端該倉已 zero」。
+    ///
+    /// G-3 hedge-mode 前提守衛（BB 2026-05-29 §3）：**本收斂僅在 Bybit one-way
+    /// mode 安全**。one-way mode 下 corner case C-2（hedge positionIdx/方向不符回
+    /// 110017 但倉仍在）結構性不存在；is_long 反向比對在 one-way 下不會誤判。
+    /// ⚠️ 若未來啟用 hedge mode（switch_position_mode 被接線、OrderDispatchRequest
+    /// 加 positionIdx），此收斂路徑 = MANDATORY re-review：C-2 會復活，須加
+    /// positionIdx-aware 比對否則會誤刪 buy/sell 對側真倉。
+    /// 報告：docs/CCAgentWorkSpace/BB/workspace/reports/
+    /// 2026-05-29--retcode_110017_convergence_semantics.md
+    pub(crate) fn converge_exchange_zero_close(
+        &mut self,
+        symbol: &str,
+        is_long: bool,
+        ts_ms: u64,
+    ) -> bool {
+        // 僅在交易所管線（Demo/Live）收斂；Paper 無交易所倉位概念。
+        if !self.pipeline_kind.is_exchange() {
+            self.pending_close_symbols.remove(symbol);
+            return false;
+        }
+        let had_position = self.paper_state.get_position(symbol).is_some();
+        // size=0 → upsert_position_from_exchange 走 positions_remove（含 mirror
+        // 同步），不記 PnL。avg_price 在 size==0 分支前未被讀，傳 0.0 安全。
+        let removed = self
+            .paper_state
+            .upsert_position_from_exchange(symbol, is_long, 0.0, 0.0, ts_ms);
+        // 無論本地倉是否存在，都清 pending-close flag（防自洽迴圈殘留）。
+        self.pending_close_symbols.remove(symbol);
+        if removed {
+            tracing::warn!(
+                symbol,
+                is_long,
+                "converge_exchange_zero_close: removed drifted local position on exchange 110017 \
+                 / 依交易所 110017 收斂本地漂移倉（移除）"
+            );
+        } else if had_position {
+            // get_position 為 Some 但 upsert 回 false 理論上不發生（size=0 路徑
+            // 對既有倉必 remove）；保留分支以暴露未來語意漂移。
+            tracing::warn!(
+                symbol,
+                "converge_exchange_zero_close: position present but not removed (unexpected) \
+                 / 倉位存在卻未移除（非預期）"
+            );
+        } else {
+            tracing::debug!(
+                symbol,
+                "converge_exchange_zero_close: no local position to remove (already flat) \
+                 / 本地無倉可移除（已 flat）"
+            );
+        }
+        removed
+    }
+
     /// IPC-triggered close-all: exchange mode (Demo/Live) dispatches reduce_only market orders
     /// via the shadow channel; paper mode clears paper_state directly.
     /// Returns the number of positions acted on.
