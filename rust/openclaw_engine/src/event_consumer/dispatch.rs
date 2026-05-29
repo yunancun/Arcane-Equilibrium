@@ -25,13 +25,9 @@ use tracing::{debug, error, info, warn};
 // Retry policy (DISPATCH-RETRY-1, 2026-04-19) / 重試策略
 // ---------------------------------------------------------------------------
 
-/// Exponential backoff delays between retry attempts for OPEN intents (ms).
-/// Index i = delay BEFORE retry attempt (i+1). Total up to 3 retries
-/// (= 4 total attempts: 1 initial + 3 retries; worst-case ~4.2 s sleep).
-///
-/// 開倉意圖的指數退避延遲（毫秒）。索引 i = 第 (i+1) 次重試前的延遲。
-/// 最多重試 3 次（= 1 次初始 + 3 次重試共 4 次嘗試；worst-case ~4.2s 睡眠）。
-pub(super) const RETRY_DELAY_MS: [u64; 3] = [200, 800, 3200];
+// P1-07（cold audit pkg B）：OPEN（create）重試已移除 — operator decision STRICT
+// FAIL-CLOSED。OPEN 路徑現以空 delay slice 走 run_dispatch_retry（單次嘗試，0 重試）。
+// 原 RETRY_DELAY_MS = [200, 800, 3200]（3 重試）已刪除（無生產 caller）。
 
 /// Tighter retry budget for CLOSE intents: 2 retries max, 500 ms total sleep.
 /// DISPATCH-RETRY-1 (E2 review 2026-04-19, Q2): slow-retrying a close amplifies
@@ -462,6 +458,9 @@ pub(super) fn spawn_order_dispatch(
     // 以 Arc 包裹：重試 closure 每次嘗試可複製 Arc 而不消耗捕獲綁定
     // （FnMut 要求可重複呼叫）。DISPATCH-RETRY-1（E2 後續 2026-04-19）。
     let order_mgr = Arc::new(OrderManager::new(Arc::clone(client), Arc::clone(icache)));
+    // P1-03（cold audit pkg B）：把同一 order_mgr Arc 注入 pipeline 供 CancelAllOrders
+    // IPC 命令使用（reuse shared live client，不另建客戶端）。在 move 進 spawn 前 clone。
+    pipeline.set_cancel_all_order_mgr(Arc::clone(&order_mgr));
     let icache_for_check = Arc::clone(icache);
     let (pending_reg_tx, pending_reg_rx) = mpsc::unbounded_channel::<PendingOrderEvent>();
 
@@ -616,24 +615,39 @@ pub(super) fn spawn_order_dispatch(
                 sl_trigger_by: None,
             };
             let dispatch_type = if req.is_primary { "primary" } else { "shadow" };
-            // DISPATCH-RETRY-1 (2026-04-19): retry loop via run_dispatch_retry helper.
-            //   - Open intents use RETRY_DELAY_MS (3 retries, ~4.2 s worst-case sleep).
+            // DISPATCH-RETRY-1 (2026-04-19) + P1-07 (2026-05-29): retry loop via
+            // run_dispatch_retry helper.
+            //   - Open (create) intents: NO retry (empty delay slice → single attempt,
+            //     fail-closed; P1-07 STRICT FAIL-CLOSED, ambiguous create never re-sent).
             //   - Close intents use CLOSE_RETRY_DELAY_MS (2 retries, 500 ms; Q2 fix
-            //     avoids amplifying PnL bleed during bleeding-exit retries).
+            //     avoids amplifying PnL bleed; documented idempotent reduce-only exception).
             //   - Same `create_req` cloned per attempt (order_link_id unchanged =
             //     Bybit idempotency key; `reduce_only=true` adds secondary safety
             //     on close retries).
             //
-            // DISPATCH-RETRY-1（2026-04-19）：透過 run_dispatch_retry helper 重試。
-            //   - 開倉意圖使用 RETRY_DELAY_MS（3 次重試，worst-case ~4.2s 睡眠）。
-            //   - 關倉意圖使用 CLOSE_RETRY_DELAY_MS（2 次重試，500ms；Q2 修復以
-            //     避免出血倉重試放大 PnL）。
+            // DISPATCH-RETRY-1（2026-04-19）+ P1-07（2026-05-29）：透過 run_dispatch_retry。
+            //   - 開倉（create）意圖：不重試（空 delay slice → 單次嘗試，fail-closed；
+            //     P1-07 STRICT FAIL-CLOSED，曖昧 create 絕不重發）。
+            //   - 關倉意圖使用 CLOSE_RETRY_DELAY_MS（2 次重試，500ms；Q2 修復以避免
+            //     出血倉重試放大 PnL；文檔化的 reduce-only 冪等例外）。
             //   - 每次嘗試複製同一 `create_req`（order_link_id 不變 = Bybit 冪等鍵；
             //     關倉重試 `reduce_only=true` 提供二級保護）。
+            // P1-07（cold audit pkg B；operator decision STRICT FAIL-CLOSED）：
+            //   - OPEN（create）意圖：單次嘗試（空 delay slice → run_dispatch_retry 在
+            //     attempt(0) >= len(0) 時立即回 TransientExhausted，等於 0 重試）。任何
+            //     timeout / parse / transport / nonzero retCode 直接 fail-closed，
+            //     Decision Lease 以非-Consumed（Failed）釋放，不發第二筆 create。
+            //     為什麼：mutating create 回應曖昧（timeout/parse/transport）時絕不可重發
+            //     —— order_link_id 冪等是 Bybit 側緩解，不是隱藏重試交易效果的許可
+            //     （CLAUDE.md §四）。曖昧 create 由 reconciler / pending tracking 對帳。
+            //   - CLOSE（reduce-only）意圖：保留有界冪等重試預算（CLOSE_RETRY_DELAY_MS），
+            //     是文檔化的唯一例外（root principle 5 survival > profit）：fail-close 一筆
+            //     close 會留下未平的活倉，比重試 reduce-only 更危險。
+            const OPEN_NO_RETRY: [u64; 0] = [];
             let delays: &[u64] = if req.is_close {
                 &CLOSE_RETRY_DELAY_MS
             } else {
-                &RETRY_DELAY_MS
+                &OPEN_NO_RETRY
             };
             let retry_result =
                 run_dispatch_retry(delays, &req.symbol, &req.order_link_id, |_attempt| {

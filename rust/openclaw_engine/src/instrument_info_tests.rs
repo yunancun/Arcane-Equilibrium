@@ -981,3 +981,67 @@ async fn test_ensure_symbol_force_still_respects_singleflight() {
     );
     assert!(cache.get("FORCERACE").is_some());
 }
+
+// ---------------------------------------------------------------------------
+// P1-06（cold audit pkg B）：normalize_trading_stop_price 測試
+// ---------------------------------------------------------------------------
+
+/// 建一個含 BTCUSDT spec（tick_size=0.10）的 cache 供 normalizer 測試。
+fn cache_with_btc() -> InstrumentInfoCache {
+    let cache = InstrumentInfoCache::new();
+    {
+        let mut map = cache.cache.write();
+        map.insert("BTCUSDT".to_string(), sample_btc_spec());
+    }
+    cache
+}
+
+#[test]
+fn test_normalize_stop_long_sl_floors() {
+    let cache = cache_with_btc();
+    // 多頭 SL：floor 到 tick（0.10）。60000.17 → 60000.10。
+    let v = normalize_trading_stop_price(&cache, "BTCUSDT", 60_000.17, Some(true), true);
+    assert!((v.unwrap() - 60_000.10).abs() < 1e-6, "long SL must floor");
+}
+
+#[test]
+fn test_normalize_stop_short_sl_ceils() {
+    let cache = cache_with_btc();
+    // 空頭 SL：ceil 到 tick。60000.13 → 60000.20。
+    let v = normalize_trading_stop_price(&cache, "BTCUSDT", 60_000.13, Some(false), true);
+    assert!((v.unwrap() - 60_000.20).abs() < 1e-6, "short SL must ceil");
+}
+
+#[test]
+fn test_normalize_tp_uses_nearest_round() {
+    let cache = cache_with_btc();
+    // TP（is_stop_loss=false）：最近 round。70000.14 → 70000.10。
+    let v = normalize_trading_stop_price(&cache, "BTCUSDT", 70_000.14, Some(true), false);
+    assert!((v.unwrap() - 70_000.10).abs() < 1e-6, "TP uses nearest round");
+}
+
+#[test]
+fn test_normalize_no_side_falls_back_to_round() {
+    let cache = cache_with_btc();
+    // SL 缺方向（None）→ 最近 round（仍 tick 對齊，不發原始值）。
+    let v = normalize_trading_stop_price(&cache, "BTCUSDT", 60_000.16, None, true);
+    assert!((v.unwrap() - 60_000.20).abs() < 1e-6, "no side → nearest round");
+}
+
+#[test]
+fn test_normalize_missing_spec_returns_none() {
+    let cache = cache_with_btc();
+    // 缺 spec → None（caller fail-closed，跳過交易所止損保留本地止損）。
+    let v = normalize_trading_stop_price(&cache, "NOTLISTEDUSDT", 100.0, Some(true), true);
+    assert!(v.is_none(), "missing spec must fail-closed to None");
+}
+
+#[test]
+fn test_normalize_invalid_price_returns_none() {
+    let cache = cache_with_btc();
+    assert!(normalize_trading_stop_price(&cache, "BTCUSDT", 0.0, Some(true), true).is_none());
+    assert!(normalize_trading_stop_price(&cache, "BTCUSDT", -5.0, Some(true), true).is_none());
+    assert!(
+        normalize_trading_stop_price(&cache, "BTCUSDT", f64::NAN, Some(true), true).is_none()
+    );
+}

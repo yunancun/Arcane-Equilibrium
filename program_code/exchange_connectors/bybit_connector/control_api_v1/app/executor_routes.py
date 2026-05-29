@@ -83,7 +83,9 @@ from pydantic import BaseModel, Field
 
 from . import main_legacy as base
 from .ipc_dispatch import one_shot_ipc_call
-from .secret_runtime import get_secret_value
+
+# P1-01：authorization.json HMAC 驗證已搬到 live_preflight（用 live-auth 簽名 key），
+# 本檔不再直讀 OPENCLAW_IPC_SECRET，故移除 get_secret_value import。
 
 logger = logging.getLogger(__name__)
 
@@ -290,142 +292,26 @@ def _current_bybit_endpoint_label() -> str:
 def _verify_authorization_json_or_raise(slot_dir: Path, endpoint_label: str, actor: Any) -> None:
     """Verify authorization.json schema + HMAC + expiry + env_allowed.
 
-    Reuses the canonical-payload + sign helpers from live_trust_routes (lazy
-    import) — same code path as `_write_signed_live_authorization` produces.
-    Mirrors Rust `live_authorization::verify` checks.
+    P1-01：驗簽本體已搬至 live_preflight.verify_signed_authorization（唯一真相），
+    並把 HMAC key 從 OPENCLAW_IPC_SECRET（IPC transport 域）改為
+    live_auth_signing_key()（live-auth 簽名域，含 Phase-1 fallback），對齊 signer
+    （live_trust_routes._write_signed_live_authorization）與 Rust
+    live_authorization::verify。本 wrapper 保留是為了讓既有唯一 caller（:261）
+    與 _gate_failure taxonomy 完全不變。
 
-    Failure reasons are surfaced as distinct `gate_failed` values:
-      - authorization_missing  : file does not exist
-      - authorization_malformed: parse / required-field error
-      - authorization_schema   : unsupported schema version / mode
-      - authorization_signature: HMAC mismatch
-      - authorization_expired  : expires_at_ms < now
-      - authorization_env_mismatch : current bybit_endpoint not in env_allowed
+    Failure reasons（沿用 live_preflight 中的細分）：
+      - authorization            : 檔不存在 / 缺 signing key
+      - authorization_malformed  : parse / required-field error
+      - authorization_schema     : 不支援的 schema 版本 / approved_system_mode 非 live_reserved
+      - authorization_signature  : HMAC 不符
+      - authorization_expired    : 已過期
+      - authorization_env_mismatch : 當前 bybit_endpoint 不在 env_allowed
 
     驗證 authorization.json schema + 簽名 + 期效 + env_allowed；失敗原因細分回報。
     """
-    import hashlib
-    import hmac as _hmac
-    import json
+    from . import live_preflight  # noqa: PLC0415
 
-    auth_path = slot_dir / "authorization.json"
-    if not auth_path.exists():
-        logger.warning(
-            "executor.shadow-toggle live gate FAIL gate=authorization actor=%s reason=missing path=%s",
-            getattr(actor, "actor_id", "?"), auth_path,
-        )
-        raise _gate_failure(
-            "authorization",
-            f"authorization.json missing at {auth_path}; "
-            "run /api/v1/live/auth/renew (Operator) first.",
-        )
-
-    try:
-        record = json.loads(auth_path.read_text(encoding="utf-8"))
-        version = int(record["version"])
-        tier = str(record["tier"])
-        issued_at_ms = int(record["issued_at_ms"])
-        expires_at_ms = int(record["expires_at_ms"])
-        operator_id = str(record["operator_id"])
-        env_allowed = list(record["env_allowed"])
-        sig_recorded = str(record["sig"])
-    except (OSError, KeyError, ValueError, json.JSONDecodeError) as exc:
-        logger.warning(
-            "executor.shadow-toggle live gate FAIL gate=authorization actor=%s reason=malformed err=%s",
-            getattr(actor, "actor_id", "?"), exc,
-        )
-        raise _gate_failure(
-            "authorization_malformed",
-            f"authorization.json parse error: {exc}",
-        )
-
-    from . import live_trust_routes as ltr
-
-    if version != ltr._AUTHORIZATION_SCHEMA_VERSION:
-        logger.warning(
-            "executor.shadow-toggle live gate FAIL gate=authorization_schema actor=%s version=%s",
-            getattr(actor, "actor_id", "?"), version,
-        )
-        raise _gate_failure(
-            "authorization_schema",
-            f"authorization.json version={version} unsupported; "
-            f"expected {ltr._AUTHORIZATION_SCHEMA_VERSION}. Run /api/v1/live/auth/renew.",
-        )
-    approved_system_mode = str(record.get("approved_system_mode", ""))
-    if approved_system_mode != ltr._REQUIRED_LIVE_GLOBAL_MODE:
-        logger.warning(
-            "executor.shadow-toggle live gate FAIL gate=authorization_schema actor=%s approved_system_mode=%s",
-            getattr(actor, "actor_id", "?"), approved_system_mode,
-        )
-        raise _gate_failure(
-            "authorization_schema",
-            "authorization.json approved_system_mode must be live_reserved. "
-            "Run /api/v1/live/auth/renew while Global Mode is live_reserved.",
-        )
-
-    # HMAC verify — must match Rust compute_signature + Python _sign_authorization_payload.
-    # HMAC 驗證 — 必須對齊 Rust 與 Python 既有實作。
-    ipc_secret = (get_secret_value("OPENCLAW_IPC_SECRET") or "").strip()
-    if not ipc_secret:
-        # Treat as authorization gate failure: signature cannot be verified
-        # without the secret, so we MUST refuse rather than fail-open.
-        # 視為授權 gate 失敗：缺 secret 無法驗 HMAC，必須拒絕，不可 fail-open。
-        logger.warning(
-            "executor.shadow-toggle live gate FAIL gate=authorization actor=%s reason=ipc_secret_missing",
-            getattr(actor, "actor_id", "?"),
-        )
-        raise _gate_failure(
-            "authorization",
-            "OPENCLAW_IPC_SECRET unset — cannot verify HMAC; set in engine env.",
-        )
-    envs_sorted = sorted(set(env_allowed))
-    payload = ltr._canonical_authorization_payload(
-        version=version,
-        tier=tier,
-        issued_at_ms=issued_at_ms,
-        expires_at_ms=expires_at_ms,
-        operator_id=operator_id,
-        approved_system_mode=approved_system_mode,
-        env_allowed=envs_sorted,
-    )
-    sig_expected = _hmac.new(
-        ipc_secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
-    if not _hmac.compare_digest(sig_expected, sig_recorded):
-        logger.warning(
-            "executor.shadow-toggle live gate FAIL gate=authorization_signature actor=%s",
-            getattr(actor, "actor_id", "?"),
-        )
-        raise _gate_failure(
-            "authorization_signature",
-            "authorization.json HMAC mismatch — secret rotated or file tampered. "
-            "Run /api/v1/live/auth/renew to re-sign.",
-        )
-
-    # Expiry check.
-    now_ms = int(time.time() * 1000)
-    if expires_at_ms <= now_ms:
-        logger.warning(
-            "executor.shadow-toggle live gate FAIL gate=authorization_expired actor=%s expires_at_ms=%d now_ms=%d",
-            getattr(actor, "actor_id", "?"), expires_at_ms, now_ms,
-        )
-        raise _gate_failure(
-            "authorization_expired",
-            f"authorization.json expired at ts_ms={expires_at_ms} (now={now_ms}). "
-            "Run /api/v1/live/auth/renew.",
-        )
-
-    # env_allowed must contain current endpoint label.
-    if endpoint_label not in env_allowed:
-        logger.warning(
-            "executor.shadow-toggle live gate FAIL gate=authorization_env_mismatch actor=%s endpoint=%s env_allowed=%s",
-            getattr(actor, "actor_id", "?"), endpoint_label, env_allowed,
-        )
-        raise _gate_failure(
-            "authorization_env_mismatch",
-            f"authorization env_allowed={env_allowed} does not contain current "
-            f"endpoint={endpoint_label!r}. Re-issue authorization for the right env.",
-        )
+    live_preflight.verify_signed_authorization(slot_dir, endpoint_label, actor)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

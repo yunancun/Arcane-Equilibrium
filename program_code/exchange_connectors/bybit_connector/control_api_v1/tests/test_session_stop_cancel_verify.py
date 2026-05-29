@@ -173,9 +173,11 @@ def test_sweep_orphan_orders_handles_cancel_failure():
 
 @pytest.mark.asyncio
 async def test_live_stop_cancels_orders_before_close(monkeypatch):
-    """Critical contract: cancel-all REST fires BEFORE close_all_positions IPC.
+    """Critical contract (P1-03): cancel-all IPC fires BEFORE close_all_positions IPC.
 
-    若先 close 再 cancel，平倉途中 TP/SL 條件單可能誤觸發開新倉。順序倒置 = 設計失敗。
+    P1-03 後 live 取消掛單改走 Rust IPC `cancel_all_orders`（不再 Python REST）。
+    順序契約不變：cancel-all 必須在 close_all_positions 之前；若先 close 再 cancel，
+    平倉途中 TP/SL 條件單可能誤觸發開新倉。
     """
     call_order: list[str] = []
 
@@ -183,13 +185,6 @@ async def test_live_stop_cancels_orders_before_close(monkeypatch):
         positions=[{"symbol": "BTCUSDT", "size": "0.1", "side": "Buy"}],
         orders=[{"symbol": "BTCUSDT", "orderId": "limit-1"}],
     )
-
-    def _cancel_all_orders(*a, **kw):
-        call_order.append("cancel_all_orders")
-        rc._orders = []
-        return [{"orderId": "limit-1", "orderLinkId": "link-1"}]
-
-    rc.cancel_all_orders = _cancel_all_orders  # type: ignore[assignment]
 
     monkeypatch.setattr(lsr, "_require_operator", lambda actor: None)
     monkeypatch.setattr(lsr, "_set_execution_authority", lambda authority: None)
@@ -204,8 +199,10 @@ async def test_live_stop_cancels_orders_before_close(monkeypatch):
 
     async def _ipc(method, params):
         call_order.append(f"ipc:{method}")
-        # After close_all_positions, simulate fills clearing positions
-        # close_all_positions 後模擬成交清空持倉
+        # P1-03：cancel_all_orders 與 close_all_positions 皆走 IPC。
+        # 模擬引擎效果：cancel-all 清空掛單、close-all 清空持倉，供後續 verify 輪詢。
+        if method == "cancel_all_orders":
+            rc._orders = []
         if method == "close_all_positions":
             rc.clear_positions()
         return {"ok": True}
@@ -222,20 +219,23 @@ async def test_live_stop_cancels_orders_before_close(monkeypatch):
         actor=_operator_actor("live:trade"),
     )
 
-    # Order-of-operations contract / 順序契約
-    assert call_order[0] == "cancel_all_orders", (
-        f"cancel-all must run FIRST, got order: {call_order}"
+    # Order-of-operations contract (P1-03: both via IPC) / 順序契約：皆走 IPC
+    assert call_order[0] == "ipc:cancel_all_orders", (
+        f"cancel-all IPC must run FIRST, got order: {call_order}"
     )
     assert "ipc:close_all_positions" in call_order
-    assert call_order.index("cancel_all_orders") < call_order.index(
+    assert call_order.index("ipc:cancel_all_orders") < call_order.index(
         "ipc:close_all_positions"
     )
+    # P1-03：live 取消掛單不再走 Python REST cancel_all_orders。
+    assert "cancel_all_orders" not in [c for c in call_order if not c.startswith("ipc:")]
 
     # Response carries new fields / 回應帶新欄位
     data = response["data"]
     assert "cancel_orders" in data
     assert "verify" in data
-    assert data["cancel_orders"]["cancelled"] == 1
+    # cancel_orders 現為 IPC result（{"ok": True}），不再是 REST 的 {"cancelled": N}
+    assert data["cancel_orders"].get("ok") is True
     assert data["verify"]["clean"] is True
     assert data["closed_all"] is True
     assert data["partial_failure"] is False

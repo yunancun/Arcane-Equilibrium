@@ -119,10 +119,11 @@ fn test_close_maker_fallback_market_preflight_failure_emits_terminal_event() {
 
 #[test]
 fn test_retry_delay_constants() {
-    // Lock in the retry budget: 3 retries with exponential backoff 200/800/3200 ms.
-    // 鎖定重試預算：3 次重試，指數退避 200/800/3200 ms。
-    assert_eq!(RETRY_DELAY_MS, [200u64, 800, 3200]);
-    assert_eq!(RETRY_DELAY_MS.len(), 3);
+    // P1-07（2026-05-29）：OPEN（create）重試已移除（RETRY_DELAY_MS 已刪）。
+    // 唯一保留的重試預算是 CLOSE：2 次重試，100/400 ms（documented reduce-only 例外）。
+    // 鎖定 close 預算。
+    assert_eq!(CLOSE_RETRY_DELAY_MS, [100u64, 400]);
+    assert_eq!(CLOSE_RETRY_DELAY_MS.len(), 2);
 }
 
 #[test]
@@ -462,12 +463,16 @@ async fn test_run_dispatch_retry_noop_on_second_attempt_records_attempts_2() {
 #[tokio::test]
 async fn test_run_dispatch_retry_transient_exhaustion_returns_last_error() {
     use std::cell::RefCell;
-    // 4 transient errors → exhaust RETRY_DELAY_MS (3 retries → 4 total
-    // attempts). TransientExhausted.last_error must be the FINAL attempt's
-    // error (#4), not the first.
+    // Helper-level test: 4 transient errors against an explicit 3-slot delay
+    // schedule → exhaust (3 retries → 4 total attempts). The helper still
+    // supports multi-retry for the CLOSE path; this verifies the helper itself,
+    // not the OPEN production policy (which is now single-attempt, see
+    // test_open_dispatch_uses_empty_retry_schedule).
+    // TransientExhausted.last_error must be the FINAL attempt's error (#4).
     //
-    // 4 個 transient 錯誤 → 耗盡 RETRY_DELAY_MS（3 次重試 → 4 次總嘗試）。
-    // TransientExhausted.last_error 必須是最終嘗試的錯誤（#4），非首次。
+    // helper 級測試：對顯式 3 槽 delay schedule 餵 4 個 transient → 耗盡（3 重試
+    // → 4 次嘗試）。helper 仍支援 CLOSE 路徑多重試；本測試驗 helper 本身，非 OPEN
+    // 生產政策（後者現為單次嘗試，見 test_open_dispatch_uses_empty_retry_schedule）。
     let results: RefCell<Vec<Result<(), BybitApiError>>> = RefCell::new(vec![
         Err(biz(10006, "rate limit #1")),
         Err(biz(10006, "rate limit #2")),
@@ -534,6 +539,61 @@ async fn test_run_dispatch_retry_close_budget_caps_at_3_attempts() {
     assert_eq!(*call_count.borrow(), 3);
 }
 
+#[tokio::test]
+async fn test_open_dispatch_uses_empty_retry_schedule_single_attempt() {
+    use std::cell::RefCell;
+    // P1-07（cold audit pkg B；STRICT FAIL-CLOSED）：OPEN（create）生產路徑傳空
+    // delay slice → run_dispatch_retry 在 attempt(0) >= len(0) 時立即回
+    // TransientExhausted（單次嘗試，0 重試）。timeout / parse / transport / nonzero
+    // retCode 任一都 fail-closed，不發第二筆 create。本測試模擬生產的空 schedule，
+    // 對單一 transport-class transient（10006 rate-limit）斷言：恰 1 次 place 呼叫、
+    // attempts==1、回 TransientExhausted（→ 生產端以 LeaseOutcome::Failed 釋放 lease，
+    // 非 Consumed，見 dispatch.rs TransientExhausted/Structural 分支）。
+    let call_count = RefCell::new(0u32);
+    let open_no_retry: [u64; 0] = [];
+    let result = run_dispatch_retry::<(), _, _>(&open_no_retry, "BTCUSDT", "oLid-open", |_| {
+        *call_count.borrow_mut() += 1;
+        async move { Err::<(), BybitApiError>(biz(10006, "rate limit on create")) }
+    })
+    .await;
+    match result {
+        DispatchRetryResult::TransientExhausted { attempts, .. } => {
+            assert_eq!(
+                attempts, 1,
+                "OPEN create must be a single attempt (P1-07 STRICT FAIL-CLOSED, 0 retries)"
+            );
+        }
+        other => panic!("expected TransientExhausted (single attempt), got {:?}", other),
+    }
+    assert_eq!(
+        *call_count.borrow(),
+        1,
+        "no second create may be sent on an ambiguous/transient OPEN failure"
+    );
+}
+
+#[tokio::test]
+async fn test_open_dispatch_structural_single_attempt_no_retry() {
+    use std::cell::RefCell;
+    // P1-07：即使是 structural 業務拒單，OPEN 路徑仍只試一次（structural 本就不重試，
+    // 此處鎖定 empty-slice 不改變 structural 立即終止語意）。
+    let call_count = RefCell::new(0u32);
+    let open_no_retry: [u64; 0] = [];
+    let result = run_dispatch_retry::<(), _, _>(&open_no_retry, "BTCUSDT", "oLid-open2", |_| {
+        *call_count.borrow_mut() += 1;
+        // 10001（非 "duplicate"）→ structural 在本分類下；確保不重試。
+        async move { Err::<(), BybitApiError>(biz(110007, "insufficient balance")) }
+    })
+    .await;
+    match result {
+        DispatchRetryResult::Structural { attempts, .. } => {
+            assert_eq!(attempts, 1, "structural OPEN failure = single attempt");
+        }
+        other => panic!("expected Structural, got {:?}", other),
+    }
+    assert_eq!(*call_count.borrow(), 1);
+}
+
 #[test]
 fn test_close_retry_delay_constants() {
     // Q2 (E2 review 2026-04-19): close retries use [100, 400] = 500 ms
@@ -543,14 +603,11 @@ fn test_close_retry_delay_constants() {
     // 2 次重試。鎖定常數以偵測意外放寬。
     assert_eq!(CLOSE_RETRY_DELAY_MS, [100u64, 400]);
     assert_eq!(CLOSE_RETRY_DELAY_MS.len(), 2);
-    // Invariant: close budget must be strictly smaller than open budget
-    // 不變式：關倉預算必須嚴格小於開倉預算
-    assert!(CLOSE_RETRY_DELAY_MS.len() < RETRY_DELAY_MS.len());
-    let close_total: u64 = CLOSE_RETRY_DELAY_MS.iter().sum();
-    let open_total: u64 = RETRY_DELAY_MS.iter().sum();
+    // P1-07（2026-05-29）不變式：OPEN（create）已 0 重試（RETRY_DELAY_MS 已刪），
+    // CLOSE 是唯一保留重試的路徑（documented reduce-only 例外）。close 預算非空但有界。
     assert!(
-        close_total < open_total,
-        "close retry sleep total must be < open retry sleep total (Q2 invariant)"
+        !CLOSE_RETRY_DELAY_MS.is_empty(),
+        "close retry budget is the sole retained retry path (P1-07 idempotent exception)"
     );
 }
 

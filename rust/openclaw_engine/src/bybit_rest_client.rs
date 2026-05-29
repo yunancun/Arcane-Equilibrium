@@ -274,6 +274,11 @@ struct RateLimitState {
     /// Per-group remaining (Order, Position, Account, Market, Asset, Other)
     /// 分組剩餘（索引按 enum 順序）
     group_remaining: [AtomicI64; 6],
+    /// P2-03（cold audit pkg B）：每組獨立的重置時間戳（毫秒），與 group_remaining 平行。
+    /// 為什麼需要：舊版 wait_if_rate_limited 只看全局 reset_ms，mutating Order 組
+    /// （10 req/s）可能近上限而全局計數仍健康 → 對 /v5/order/* 撞 10006 可避免。
+    /// 0 = 未知 → preflight 回退到全局 reset_ms。
+    group_reset_ms: [AtomicU64; 6],
 }
 
 impl Default for RateLimitState {
@@ -288,6 +293,14 @@ impl Default for RateLimitState {
                 AtomicI64::new(120), // Market
                 AtomicI64::new(5),   // Asset
                 AtomicI64::new(10),  // Other
+            ],
+            group_reset_ms: [
+                AtomicU64::new(0), // Order
+                AtomicU64::new(0), // Position
+                AtomicU64::new(0), // Account
+                AtomicU64::new(0), // Market
+                AtomicU64::new(0), // Asset
+                AtomicU64::new(0), // Other
             ],
         }
     }
@@ -923,13 +936,22 @@ impl BybitRestClient {
         // 從環境派生 secret 槽位：Demo/Testnet → "demo"，Mainnet → "live"
         let slot = env.secret_slot();
 
-        // LIVE-GUARD-1 gate #2: on Mainnet skip env-var credential fallback.
+        // P1-08（cold audit pkg B）：env-var 憑證回退依「是否 live slot」收緊，而非只看
+        // is_mainnet。LiveDemo 映射到 "live" 槽位但 is_mainnet==false，舊邏輯下任何能設
+        // 進程 env 的路徑都可覆寫 operator 管理的 live slot 憑證，繞過 live-slot 來源/審計。
+        // 為什麼 fail-closed：LiveDemo 是 live-grade 控制流（CLAUDE.md §四），憑證來源必須與
+        // Mainnet 同等嚴格 — 任何 live slot 客戶端都不接受 env var 憑證。
+        // 注意：OPENCLAW_ALLOW_MAINNET 門控與空憑證 fail-closed 仍鍵於 is_mainnet（真金白銀
+        // 專屬），不擴大到 LiveDemo。
+        let is_live_slot = slot == "live";
+
+        // LIVE-GUARD-1 gate #2: live-slot clients skip env-var credential fallback.
         // Closes the "any process with env access bypasses secret slot" attack.
-        // LIVE-GUARD-1 門 #2：Mainnet 禁用 env var 憑證回退（封閉「能設 env 即繞 slot」攻擊）。
+        // LIVE-GUARD-1 門 #2：live slot 客戶端禁用 env var 憑證回退（封閉「能設 env 即繞 slot」攻擊）。
         let api_key = api_key
             .filter(|s| !s.is_empty())
             .or_else(|| {
-                if is_mainnet {
+                if is_live_slot {
                     None
                 } else {
                     std::env::var("BYBIT_API_KEY")
@@ -943,7 +965,7 @@ impl BybitRestClient {
         let api_secret = api_secret
             .filter(|s| !s.is_empty())
             .or_else(|| {
-                if is_mainnet {
+                if is_live_slot {
                     None
                 } else {
                     std::env::var("BYBIT_API_SECRET")
@@ -1102,7 +1124,7 @@ impl BybitRestClient {
             format!("{}{}?{}", self.base_url, path, query_string)
         };
 
-        self.wait_if_rate_limited().await;
+        self.wait_if_rate_limited(path).await;
         debug!(
             method = "GET",
             path = path,
@@ -1162,7 +1184,7 @@ impl BybitRestClient {
 
         let url = format!("{}{}", self.base_url, path);
 
-        self.wait_if_rate_limited().await;
+        self.wait_if_rate_limited(path).await;
         debug!(
             method = "POST",
             path = path,
@@ -1271,24 +1293,54 @@ impl BybitRestClient {
         self.rate_limit.group_remaining[idx].load(Ordering::Relaxed) <= threshold
     }
 
-    /// Proactively wait if global rate limit is nearly exhausted.
-    /// 若全局限流接近耗盡，主動等待至重置時間（上限 2 秒）。
+    /// P2-03（cold audit pkg B）：依組別決定 preflight 退讓的 remaining 閾值。
+    /// Order/Position/Account 都是 10 req/s 的窄組 → 低閾值（2）才退讓，避免過早 sleep；
+    /// Market 120 req/s 寬鬆 → 高閾值（10）；Asset 5 req/s → 低閾值（2）。
+    fn group_backoff_threshold(group: RateLimitGroup) -> i64 {
+        match group {
+            RateLimitGroup::Market => 10,
+            RateLimitGroup::Order
+            | RateLimitGroup::Position
+            | RateLimitGroup::Account
+            | RateLimitGroup::Asset
+            | RateLimitGroup::Other => 2,
+        }
+    }
+
+    /// Proactively wait if the request path's rate-limit group (or the global
+    /// limit) is nearly exhausted.
+    /// 若請求路徑所屬限流分組（或全局限流）接近耗盡，主動等待至重置時間（上限 2 秒）。
     ///
     /// Called before every GET/POST to avoid sending into a 429.
-    /// Waits until `reset_ms` + 50ms buffer, capped at 2 000ms.
-    /// No-op when reset_ms is unknown (0) or already in the past.
+    /// P2-03：先做精確的 per-group 檢查（mutating Order 組近上限即退讓，即使全局健康），
+    /// 再做全局粗粒度檢查作為防禦外層。等待至對應 reset_ms + 50ms 緩衝，最多 2 秒。
+    /// group reset 未知（0）時回退到全局 reset_ms。reset 未知或已過期時跳過。
     /// 每次 GET/POST 前調用以避免觸發 429。
-    /// 等待至 reset_ms + 50ms 緩衝，最多 2 秒。reset_ms 未知（0）或已過期時跳過。
-    async fn wait_if_rate_limited(&self) {
-        const THRESHOLD: i64 = 10;
+    async fn wait_if_rate_limited(&self, path: &str) {
+        const GLOBAL_THRESHOLD: i64 = 10;
         const MAX_WAIT_MS: u64 = 2_000;
         const BUFFER_MS: u64 = 50;
 
-        if !self.is_near_rate_limit(THRESHOLD) {
+        // 內層精確守衛（per-group）：解析 path → group，近組上限即退讓。
+        let group = RateLimitGroup::from_path(path);
+        let gidx = group as usize;
+        let group_threshold = Self::group_backoff_threshold(group);
+        let group_near = self.rate_limit.group_remaining[gidx].load(Ordering::Relaxed)
+            <= group_threshold;
+        // 外層粗粒度守衛（global）：作為 per-group header 缺失時的防禦。
+        let global_near = self.is_near_rate_limit(GLOBAL_THRESHOLD);
+
+        if !group_near && !global_near {
             return;
         }
 
-        let reset_ms = self.rate_limit.reset_ms.load(Ordering::Relaxed);
+        // reset 時間：優先用 per-group reset，缺（0）則回退全局 reset_ms。
+        let group_reset = self.rate_limit.group_reset_ms[gidx].load(Ordering::Relaxed);
+        let reset_ms = if group_reset != 0 {
+            group_reset
+        } else {
+            self.rate_limit.reset_ms.load(Ordering::Relaxed)
+        };
         if reset_ms == 0 {
             return;
         }
@@ -1304,8 +1356,11 @@ impl BybitRestClient {
 
         let wait_ms = ((reset_ms - now_ms) + BUFFER_MS).min(MAX_WAIT_MS);
         let remaining = self.rate_limit.remaining.load(Ordering::Relaxed);
+        let group_remaining = self.rate_limit.group_remaining[gidx].load(Ordering::Relaxed);
         warn!(
             remaining = remaining,
+            group = ?group,
+            group_remaining = group_remaining,
             wait_ms = wait_ms,
             "Rate limit near threshold — backing off / 接近限流閾值，主動退讓"
         );
@@ -1315,15 +1370,24 @@ impl BybitRestClient {
     /// Update per-group rate limit from the last request.
     /// 根據最近的請求更新分組限流。
     fn update_group_rate_limit(&self, path: &str, resp: &reqwest::Response) {
+        let group = RateLimitGroup::from_path(path);
+        let idx = group as usize;
         if let Some(remaining) = resp
             .headers()
             .get("x-bapi-limit-status")
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse::<i64>().ok())
         {
-            let group = RateLimitGroup::from_path(path);
-            let idx = group as usize;
             self.rate_limit.group_remaining[idx].store(remaining, Ordering::Relaxed);
+        }
+        // P2-03：同時把 reset 時間戳存進對應 group slot，供 preflight 做 per-group 等待。
+        if let Some(reset_ts) = resp
+            .headers()
+            .get("x-bapi-limit-reset-timestamp")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+        {
+            self.rate_limit.group_reset_ms[idx].store(reset_ts, Ordering::Relaxed);
         }
     }
 }

@@ -639,6 +639,21 @@ impl TickPipeline {
         self.order_dispatch_tx = Some(tx);
     }
 
+    /// P1-03（cold audit pkg B）：注入 cancel-all 用的共享 OrderManager handle。
+    /// 由 spawn_order_dispatch 用 order_mgr 同一 Arc 呼叫，避免另建客戶端。
+    pub fn set_cancel_all_order_mgr(
+        &mut self,
+        mgr: std::sync::Arc<crate::order_manager::OrderManager>,
+    ) {
+        self.cancel_all_order_mgr = Some(mgr);
+    }
+
+    /// P1-03：取得 cancel-all OrderManager handle（交易所模式有；Paper None）。
+    /// loop_handlers 攔截 CancelAllOrders 命令時 clone 此 Arc 出 borrow 後 await。
+    pub fn cancel_all_order_mgr(&self) -> Option<std::sync::Arc<crate::order_manager::OrderManager>> {
+        self.cancel_all_order_mgr.clone()
+    }
+
     /// EXT-1: Set trading mode (paper_only or exchange).
     // 3E-4: set_trading_mode() REMOVED — pipeline identity is immutable.
     // 3E-4：set_trading_mode() 已移除 — 管線身份不可變。

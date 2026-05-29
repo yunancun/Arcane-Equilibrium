@@ -83,11 +83,12 @@
   </div>
 
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
-    <button class="oc-btn oc-btn-primary" onclick="demoAction('validate')">&#x2714; Validate</button>
+    <!-- P1-05：Validate / Safe Recheck 是「手動標記」動作（非驗證），標題加註避免誤認為已驗證就緒 -->
+    <button class="oc-btn oc-btn-primary" onclick="demoAction('validate')" title="手動標記，非真實驗證 / manual mark, not proven readiness">&#x2714; 手動標記 Validate（非驗證）</button>
     <button class="oc-btn" onclick="demoAction('arm')">&#x1F512; Arm Demo</button>
     <button class="oc-btn oc-btn-success" onclick="demoAction('enable')">&#x2705; Enable Demo</button>
     <button class="oc-btn oc-btn-danger" onclick="demoAction('relock')">&#x1F510; Relock</button>
-    <button class="oc-btn" onclick="bundleRecheck()">&#x1F504; Safe Recheck Bundle</button>
+    <button class="oc-btn" onclick="bundleRecheck()" title="手動標記，非真實驗證 / manual mark, not proven readiness">&#x1F504; 手動標記 Safe Recheck（非驗證）</button>
   </div>
 
   <div id="action-result" style="margin-top:10px"></div>
@@ -667,10 +668,31 @@ async function demoAction(action) {
   const body = ocEnvelope({}, stateRevision);
   const d = await ocPost('/api/v1/control/demo/' + action, body);
   if (d) {
-    ocToast('Demo ' + action + ' OK', 'success');
-    if (d.state_revision) stateRevision = d.state_revision;
-    ocSetHtml('action-result', '<div class="oc-chip oc-chip-good">' + action + ' completed</div>');
-    loadControlPlane();
+    // P1-05：validate 是「手動標記」動作，後端回 evidence:"manual_mark" / verified:false，
+    // 並非真實證據驗證。UI 不得把蓋章狀態呈現為「已驗證就緒」，否則誤導操作員。
+    // 其餘 demo 動作（arm/enable/relock）維持原語意。
+    const payload = (d.data && typeof d.data === 'object') ? d.data : d;
+    const isManualMark = (payload && payload.evidence === 'manual_mark') ||
+                         (payload && payload.verified === false);
+    if (action === 'validate' && isManualMark) {
+      ocToast('已手動標記 Demo validate（非驗證 / manual mark, not verified）', 'warn');
+      if (d.state_revision) stateRevision = d.state_revision;
+      ocSetHtml('action-result',
+        '<div class="oc-chip oc-chip-warn">validate 已手動標記（非驗證）/ manual mark, not proven readiness</div>');
+      loadControlPlane();
+    } else if (action === 'validate') {
+      // 後端尚未標記 evidence 時，保守顯示為「已標記」而非「OK / completed」，
+      // 避免在契約未對齊前回退到 fake-success 文案。
+      ocToast('Demo validate 已標記（待後端確認 evidence 類型）', 'warn');
+      if (d.state_revision) stateRevision = d.state_revision;
+      ocSetHtml('action-result', '<div class="oc-chip oc-chip-warn">validate 已標記（非驗證）</div>');
+      loadControlPlane();
+    } else {
+      ocToast('Demo ' + action + ' OK', 'success');
+      if (d.state_revision) stateRevision = d.state_revision;
+      ocSetHtml('action-result', '<div class="oc-chip oc-chip-good">' + action + ' completed</div>');
+      loadControlPlane();
+    }
   } else {
     ocToast('Demo ' + action + ' failed', 'error');
     ocSetHtml('action-result', '<div class="oc-chip oc-chip-bad">' + action + ' failed</div>');
@@ -680,8 +702,14 @@ async function demoAction(action) {
 async function bundleRecheck() {
   const body = ocEnvelope({}, stateRevision);
   const d = await ocPost('/api/v1/control/safe-recheck-bundle', body);
-  if (d) { ocToast('Recheck bundle OK', 'success'); loadAll(); }
-  else ocToast('Recheck failed', 'error');
+  // P1-05：safe-recheck-bundle 是「手動標記」動作（後端回 evidence:"manual_mark"），
+  // 不是 runtime/replay/IPC 證據；UI 不得呈現「passed / 已驗證就緒」。
+  if (d) {
+    ocToast('Recheck bundle 已手動標記（非驗證 / manual mark, not verified）', 'warn');
+    loadAll();
+  } else {
+    ocToast('Recheck failed', 'error');
+  }
 }
 
 async function configAction(action) {

@@ -599,6 +599,76 @@ pub(super) async fn handle_pipeline_command(
             };
             let _ = response_tx.send(reply);
         }
+        // P1-03（cold audit pkg B）：cancel-all 須在 async 上下文做真實 REST 呼叫
+        // （與 ResetDrawdownBaseline 同模式於此攔截），handle_paper_command 為同步無法
+        // await。Paper 模式無 OrderManager → log only（與 handle_close_all paper 分支
+        // 對齊）。為什麼不經 execution_authority 門控：cancel 風險遞減（不開新倉），且
+        // authority revoke 後（Stop 流 Phase 1）仍須能清掃孤兒掛單。
+        PipelineCommand::CancelAllOrders {
+            category,
+            settle_coin,
+        } => {
+            match pipeline.cancel_all_order_mgr() {
+                None => {
+                    // Paper 模式：無交易所客戶端，僅記錄（風險遞減 no-op）。
+                    tracing::info!(
+                        category = %category,
+                        settle_coin = %settle_coin,
+                        "IPC cancel_all_orders: no exchange client (paper) — log only \
+                         / IPC cancel_all_orders：無交易所客戶端（紙盤）僅記錄"
+                    );
+                }
+                Some(mgr) => {
+                    let order_category = match category.as_str() {
+                        "linear" => Some(crate::order_manager::OrderCategory::Linear),
+                        "spot" => Some(crate::order_manager::OrderCategory::Spot),
+                        "inverse" => Some(crate::order_manager::OrderCategory::Inverse),
+                        // 未知 category fail-closed：不發未定義範圍的 cancel-all（None）。
+                        _ => None,
+                    };
+                    match order_category {
+                        None => {
+                            tracing::warn!(
+                                category = %category,
+                                "IPC cancel_all_orders: unknown category — skipped fail-closed \
+                                 / IPC cancel_all_orders：未知 category — fail-closed 跳過"
+                            );
+                        }
+                        Some(order_category) => {
+                            // 帳戶範圍 cancel-all（settleCoin），不 per-symbol 迴圈。
+                            let settle = if settle_coin.is_empty() {
+                                None
+                            } else {
+                                Some(settle_coin.as_str())
+                            };
+                            match mgr.cancel_all_scoped(order_category, None, settle).await {
+                                Ok(cancelled) => {
+                                    tracing::info!(
+                                        category = %category,
+                                        settle_coin = %settle_coin,
+                                        count = cancelled.len(),
+                                        "IPC cancel_all_orders dispatched via Rust authority \
+                                         / IPC cancel_all_orders 經 Rust authority 派發"
+                                    );
+                                }
+                                Err(e) => {
+                                    // Fail-closed 記錄：cancel-all 失敗不重試（mutating 寫，對齊
+                                    // CLAUDE.md §四 不加隱藏重試）；上層 Python Stop 流會 append
+                                    // error 並維持 fail-closed posture。
+                                    tracing::warn!(
+                                        category = %category,
+                                        settle_coin = %settle_coin,
+                                        error = %e,
+                                        "IPC cancel_all_orders failed (no retry) \
+                                         / IPC cancel_all_orders 失敗（不重試）"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         other => {
             handlers::handle_paper_command(
                 other,

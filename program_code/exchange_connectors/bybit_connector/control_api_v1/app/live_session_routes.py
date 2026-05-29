@@ -683,31 +683,12 @@ async def _sweep_live_orphan_positions(errors: list[str]) -> dict:
     return result
 
 
-def _sweep_live_orphan_orders(errors: list[str]) -> dict:
-    """Cancel **all** USDT linear orders via REST cancel-all (live slot).
-
-    Mirrors `_sweep_live_orphan_positions` policy — uses the live API key
-    slot (resolved via `_get_rust_client_safe()`). Calls Bybit
-    /v5/order/cancel-all with settleCoin=USDT in a single request, so no
-    pending limit / conditional / TP-SL order survives a Live Stop,
-    regardless of whether it was tracked by paper_state or placed
-    externally.
-
-    Mirror live 槽 _sweep_live_orphan_positions — 用 _get_rust_client_safe()
-    取得 live 槽 BybitClient，REST 端 settleCoin=USDT 單次清掃所有 USDT
-    linear 掛單，不受策略 symbol 數量限制。
-
-    Note: REST cancel is risk-reducing only (no order placement), so the
-    `_LIVE_REST_FALLBACK_DISABLED` policy that blocks Python REST writes
-    does NOT apply here — cancel-all is fail-safe by definition.
-    註：cancel-all 屬於風險收縮（取消掛單），永遠 fail-safe，不適用 LIVE-REST-FALLBACK
-    禁止 Python 寫單的政策（後者目的是禁止 Python 繞 Rust 下新單）。
-    """
-    # Lazy-import to reuse demo-side helper for actual REST work.
-    # 懶加載 demo 端 helper 共用 REST 邏輯。
-    from .strategy_ai_routes import _sweep_orphan_orders  # noqa: PLC0415
-    rc = _get_rust_client_safe()
-    return _sweep_orphan_orders(rc, "live", errors)
+# P1-03：原 `_sweep_live_orphan_orders`（live 槽 Python REST cancel-all）已移除。
+# Live 取消掛單改走 Rust IPC `cancel_all_orders {engine:"live"}`（見
+# live_session_endpoints.post_live_session_stop Phase 1）。舊版「cancel-all 是
+# fail-safe 所以 Python REST 可繞 Rust」的論述被 operator/CC 裁定推翻：所有 live
+# 寫入（含風險收縮取消單）必須過 Rust 執行權威。demo 端 `_sweep_orphan_orders` /
+# `_sweep_demo_orphan_orders` 保留（demo 是學習/資料 lane，不在 P1-03 範圍）。
 
 
 def _grant_execution_authority_internal() -> None:

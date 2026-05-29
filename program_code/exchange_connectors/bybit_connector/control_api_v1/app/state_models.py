@@ -19,7 +19,14 @@ from pydantic import BaseModel, Field
 # Type Aliases / 類型別名
 # ═══════════════════════════════════════════════════════════════════════════════
 
-ActionResult = Literal["success", "failed", "blocked", "replayed"]
+# P1-05/P1-17 新增 action_result 值：
+#   - "manual_mark"：operator 手動標記，非運行時/replay/IPC 驗證證據（不得解鎖
+#     readiness gate）。
+#   - "partial_failure"：寫操作部分失敗（如 set_system_mode IPC 失敗），絕不能
+#     回 "success" 誤導 operator。
+ActionResult = Literal[
+    "success", "failed", "blocked", "replayed", "manual_mark", "partial_failure"
+]
 ConnectionState = Literal["ready", "degraded", "down", "unknown"]
 RuntimeConnectionState = Literal["healthy", "degraded", "down", "unknown"]
 CompletenessState = Literal["complete", "partial", "missing", "unknown"]
@@ -87,12 +94,19 @@ class RecheckResultData(BaseModel):
     chapter: str
     recheck_kind: str
     recheck_state: str
+    # P1-05：recheck 是手動標記非驗證證據；evidence/verified 讓 operator 與下游
+    # readiness gate 都能識別「未經驗證」。
+    evidence: str = "manual_mark"
+    verified: bool = False
     last_verified_ts_ms: int
     chapter_snapshot: dict[str, Any]
     pinned_runtime_snapshot_id: str
 
 
 class DemoValidateData(BaseModel):
+    # P1-05：demo-validate 為手動標記，非運行時驗證。
+    evidence: str = "manual_mark"
+    verified: bool = False
     demo_state_switch: DemoState
     demo_prerequisites_gate_state: GateState
     demo_prerequisites_reason_codes: list[str] = Field(default_factory=list)
@@ -116,11 +130,16 @@ class DemoTransitionData(BaseModel):
 class SafeBundleStepResult(BaseModel):
     step_name: str
     action_result: ActionResult
+    # P1-05：bundle 每步為手動標記。
+    evidence: str = "manual_mark"
     reason_codes: list[str] = Field(default_factory=list)
     audit_ref: str | None = None
 
 
 class SafeBundleData(BaseModel):
+    # P1-05：整批 bundle 為手動標記，非驗證證據。
+    evidence: str = "manual_mark"
+    verified: bool = False
     bundle_base_snapshot_id: str
     bundle_final_snapshot_id: str
     bundle_committed: bool
@@ -135,6 +154,12 @@ class InputAcceptedData(BaseModel):
 class ConfigChangeAcceptedData(BaseModel):
     accepted_paths: list[str] = Field(default_factory=list)
     rejected_paths: list[str] = Field(default_factory=list)
+    # P1-17：當變更含 global_execution_mode_switch 並推送 set_system_mode 時，
+    # 如實回報 Rust 同步結果。rust_synced=False 代表引擎未確認（IPC 失敗/未運行/
+    # live 模式回讀不符），此時 action_result 為 "partial_failure"，不可顯示成功。
+    rust_synced: bool | None = None
+    partial_failure: bool | None = None
+    mode_sync: dict[str, Any] | None = None
 
 
 class LearningOverviewData(BaseModel):

@@ -62,6 +62,7 @@ impl TickPipeline {
             instrument_cache: None,
             use_maker_close: false,
             order_dispatch_tx: None,
+            cancel_all_order_mgr: None,
             market_data_tx: None,
             feature_tx: None,
             trading_tx: None,

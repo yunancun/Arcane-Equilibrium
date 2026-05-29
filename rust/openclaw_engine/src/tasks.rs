@@ -826,7 +826,16 @@ pub(crate) fn spawn_position_reconciler_with_cmd_provider(
     use openclaw_engine::position_manager::PositionManager;
     use openclaw_engine::position_reconciler::run_position_reconciler;
 
-    let pos_mgr = Arc::new(PositionManager::new(Arc::clone(shared_client)));
+    // P1-06（cold audit pkg B）：PositionManager 現需 instrument cache（trading-stop tick
+    // 取整）。reconciler 走 position 查詢/平倉路徑不呼 set_trading_stop，但構造簽名統一需
+    // cache；有則共用真 cache，無則用空 cache（trading-stop 仍 fail-closed-on-missing-spec）。
+    let pos_mgr_instruments = shared_instruments.clone().unwrap_or_else(|| {
+        Arc::new(openclaw_engine::instrument_info::InstrumentInfoCache::default())
+    });
+    let pos_mgr = Arc::new(PositionManager::new(
+        Arc::clone(shared_client),
+        pos_mgr_instruments,
+    ));
     let reconciler_audit_pool = db_pool.get().cloned();
     let reconciler_cancel = cancel.clone();
     let reconciler_instruments = shared_instruments.clone();

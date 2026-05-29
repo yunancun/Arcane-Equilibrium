@@ -51,6 +51,17 @@ from .live_session_governance import (
 logger = logging.getLogger(__name__)
 
 
+def core_preflight():
+    """Lazy import live_preflight module.
+
+    為何 lazy + 函數包裝：與本檔既有「走 module attr 取得 sibling」的 monkeypatch
+    安全模式一致；測試可 monkeypatch 本函數回傳的模組屬性（如 engine_mode_readback /
+    all_five_live_gates_ok）而不需 patch import。
+    """
+    from . import live_preflight  # noqa: PLC0415
+    return live_preflight
+
+
 def _require_live_trade(actor: Any) -> None:
     """Batch B live session write gate: Operator + live trade scope."""
     base.require_scope_and_operator(actor, "live:trade")
@@ -140,44 +151,114 @@ async def post_live_session_start(
     POST /api/v1/live/session/start
     啟動 Live session。
 
-    Guard: Operator role auth is the single gate (no separate execution_authority check).
-    engine_kind is read for logging/context only — engine config controls actual routing.
+    P1-02 ordering：gate → IPC → readback → stamp。Python 控制面狀態僅 advisory，
+    永不權威化 live readiness（PA ruling §0 INV-A1）。authority:"granted" /
+    session_state:"active" 只能在「完整五門通過 + IPC resume 成功（不吞錯）+
+    引擎回讀確認」後回傳；任一環節失敗即 fail-closed，撤銷 authority。
 
-    保護：Operator 角色認證是唯一門控，不設獨立 execution_authority 二次確認。
+    Guard: Operator role + live_reserved（精確） + OPENCLAW_ALLOW_MAINNET（Mainnet）
+    + secret slot + 簽名 authorization.json（require_authz=True）。
     engine_kind 僅用於日誌/上下文，引擎配置控制實際訂單路由。
     """
     _require_live_trade(actor)
+    actor_id = getattr(actor, "actor_id", "live_operator")
 
-    # Gate: global_mode_state must be exactly live_reserved. Substring checks
-    # can accept unintended future modes and are not a live write boundary.
-    # 門控：global_mode_state 必須精確等於 live_reserved。
-    global_mode = core._get_global_mode_state()
-    if global_mode != "live_reserved":
+    # Gate：完整 live 五門（含精確 live_reserved + 簽名授權），與 executor / Rust
+    # spawn gate 對齊。失敗即拒絕，不 set authority。
+    ok, reason_codes = core_preflight().all_five_live_gates_ok(actor, require_authz=True)
+    if not ok:
         logger.warning(
-            "Live session start BLOCKED: global_mode=%s (not live_reserved) — actor=%s",
-            global_mode, getattr(actor, "actor_id", "?"),
+            "Live session start BLOCKED: gate_failed=%s — actor=%s",
+            reason_codes, actor_id,
         )
         raise HTTPException(
             status_code=409,
-            detail=f"Live session blocked: global_mode={global_mode!r}. "
-                   "Switch Global Mode to live_reserved in the System Overview tab first.",
+            detail={
+                "error": "live_gate_failed",
+                "gate_failed": reason_codes,
+                "authority": "denied",
+                "session_state": "inactive",
+                "rust_synced": False,
+                "partial_failure": True,
+                "message": "Live session blocked — live preflight gate failed. "
+                           "Ensure Global Mode=live_reserved, secret slot configured, "
+                           "and a valid signed authorization (renew if needed).",
+            },
         )
 
     engine_kind = core._get_live_engine_kind()
 
-    # Auto-grant execution_authority on session start.
-    # Double gate (Operator role + live_reserved global mode) is already verified above.
-    # No separate manual grant step required — cleared on stop / process restart (fail-closed).
-    # 啟動時自動授予 execution_authority。
-    # 雙重門控（Operator 角色 + live_reserved global mode）已在上方驗證。
-    # 無需另行手動 grant — stop 時 / 進程重啟後清零（fail-closed）。
+    # IPC：恢復引擎管線。INV-A1 — 不可吞錯：resume 失敗則不 grant、不 active。
+    # 如果管線因上次 stop 而暫停，恢復管線。
+    try:
+        result = await core._ipc_command("resume_paper", {"engine": "live"})
+    except Exception as exc:
+        logger.error("Live session start BLOCKED: IPC resume_paper failed — actor=%s err=%s", actor_id, exc)
+        core._set_execution_authority(None)  # fail-closed：確保無 orphan granted
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "ipc_resume_failed",
+                "authority": "denied",
+                "session_state": "inactive",
+                "rust_synced": False,
+                "partial_failure": True,
+                "ipc_error": sanitize_exc_for_detail(exc, "ipc_error"),
+                "message": "Live session start failed: engine did not accept resume. "
+                           "execution_authority NOT granted (fail-closed).",
+            },
+        )
+
+    # Readback：確認引擎實際 posture（system_mode == live_reserved）。
+    # INV-A1 — IPC 成功還不夠，必須回讀確認；stale/缺 snapshot 當失敗。
+    try:
+        readback = await core_preflight().engine_mode_readback()
+    except Exception as exc:
+        logger.error("Live session start BLOCKED: engine_mode_readback failed — actor=%s err=%s", actor_id, exc)
+        core._set_execution_authority(None)
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "readback_failed",
+                "authority": "denied",
+                "session_state": "inactive",
+                "rust_synced": False,
+                "partial_failure": True,
+                "ipc_error": sanitize_exc_for_detail(exc, "ipc_error"),
+                "message": "Live session start failed: could not read back engine state. "
+                           "execution_authority NOT granted (fail-closed).",
+            },
+        )
+    if readback.get("system_mode") != "live_reserved":
+        logger.error(
+            "Live session start BLOCKED: readback system_mode=%r != live_reserved — actor=%s",
+            readback.get("system_mode"), actor_id,
+        )
+        core._set_execution_authority(None)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "readback_mode_mismatch",
+                "authority": "denied",
+                "session_state": "inactive",
+                "rust_synced": False,
+                "partial_failure": True,
+                "readback": readback,
+                "message": "Live session start failed: engine posture is not live_reserved. "
+                           "execution_authority NOT granted (fail-closed).",
+            },
+        )
+
+    # Stamp：門控 + IPC + 回讀全部通過後才授予 authority + active。
+    # 啟動時授予 execution_authority；stop 時 / 進程重啟後清零（fail-closed）。
     core._set_execution_authority("granted")  # EA-PERSIST: session start → grant + persist
     core._LIVE_USER_STOPPED = False
     core._live_contraction_state = "normal"
 
     # Submit live governance request for operator audit trail (non-blocking)
     # 提交實盤治理申請用於操作員審計留痕（非阻塞）
-    actor_id = getattr(actor, "actor_id", "live_operator")
     _submit_live_governance_request(actor_id)
 
     # Hook: earned-trust engine — record session start / 信任引擎 session 啟動鉤子
@@ -189,14 +270,6 @@ async def post_live_session_start(
     except Exception as _te_exc:
         logger.debug("EarnedTrustEngine start hook (non-fatal): %s", _te_exc)
 
-    # Resume engine pipeline if it was paused by a previous stop
-    # 如果管線因上次 stop 而暫停，恢復管線
-    result: dict = {}
-    try:
-        result = await core._ipc_command("resume_paper", {"engine": "live"})
-    except Exception as exc:
-        logger.warning("IPC resume_paper skipped (engine may already be running): %s", exc)
-
     # Start drawdown contraction monitor (cancel any stale task first)
     # 啟動回撤縮倉監控（先取消舊 task）
     if core._live_monitor_task is not None and not core._live_monitor_task.done():
@@ -205,15 +278,17 @@ async def post_live_session_start(
 
     logger.warning(
         "⚠ LIVE SESSION STARTED — engine_kind=%s execution_authority=granted "
-        "contraction_monitor=active warn=%.0f%% halt=%.0f%% — actor=%s",
+        "rust_synced=true contraction_monitor=active warn=%.0f%% halt=%.0f%% — actor=%s",
         engine_kind, core.CONTRACTION_WARN_PCT, core.CONTRACTION_HALT_PCT,
-        getattr(actor, "actor_id", "?"),
+        actor_id,
     )
     return core._live_response({
         "message": "Live session started / 實盤 session 已啟動",
         "source": "rust_engine",
         "engine_kind": engine_kind,
         "authority": "granted",
+        "rust_synced": True,
+        "readback": readback,
         "ipc_result": result,
         "session": {"session_state": "active", "session_id": "rust_engine_live"},
         "contraction": {
@@ -272,14 +347,31 @@ async def post_live_session_stop(
     orphan_result: dict = {}
     verify_result: dict = {}
     if rust_online:
-        # Phase 1 — Cancel all pending USDT linear orders via REST cancel-all
-        # (live slot, settleCoin=USDT) BEFORE close. This kills any limit /
-        # conditional / TP-SL order on the account so close-position market
-        # orders cannot race a triggering TP/SL fill.
-        # execution_authority is already revoked above, so the engine cannot
-        # place new orders during this window.
-        # 第一步：先全帳戶取消掛單。execution_authority 已撤銷，引擎此時不會下新單。
-        cancel_orders_result = core._sweep_live_orphan_orders(errors)
+        # Phase 1 — Cancel all pending USDT linear orders via the Rust engine
+        # (IPC cancel_all_orders, engine=live, settleCoin=USDT) BEFORE close.
+        # P1-03：取消掛單改走 Rust 執行權威，不再由 Python 直接打 Bybit
+        # /v5/order/cancel-all（CC/operator 裁定 live 寫入必過 Rust）。同 close
+        # path 的 fail-closed 處理：live IPC 通道不存在時 skip + 記 error，
+        # 不降級到 REST。execution_authority 已撤銷，引擎此時不會下新單。
+        try:
+            cancel_orders_result = await core._ipc_command(
+                "cancel_all_orders", {"engine": "live"}
+            )
+        except Exception as exc:
+            if core._is_live_channel_unavailable_error(exc):
+                logger.error(
+                    "live session stop cancel BLOCKED: live IPC channel unavailable; REST fallback disabled"
+                )
+                cancel_orders_result = {
+                    "skipped": True,
+                    "reason": "live_pipeline_not_authorized",
+                    "rest_fallback_disabled": True,
+                }
+                errors.append("live_channel_unavailable")
+            else:
+                errors.append(f"cancel_all_orders: {exc}")
+                logger.error("IPC cancel_all_orders failed (live stop): %s", exc)
+                cancel_orders_result = {"skipped": True, "reason": "cancel_all_orders_failed"}
         # Phase 2 — Close tracked positions via IPC.
         # 第二步：通過 IPC 平倉 paper_state 追蹤的持倉。
         try:
@@ -412,49 +504,108 @@ async def post_live_session_resume(
     POST /api/v1/live/session/resume
     恢復 Live session — 從暫停狀態恢復策略下單
 
-    Gate: Operator role + live_reserved global mode (same as start).
-    門控：Operator 角色 + live_reserved global mode（與 start 相同）。
+    P1-02 ordering：gate → IPC → readback → stamp（與 start 相同）。修正點：
+      - 舊版用 substring `"live" not in global_mode` → 改精確五門（含
+        live_reserved 精確匹配，live_demo_observe 等含 "live" 子串者被擋）。
+      - 舊版先 grant authority 再呼 IPC → 改為門控 + IPC 成功 + 回讀後才 grant；
+        失敗一律 fail-closed 撤銷 authority、不回 active。
     """
     _require_live_trade(actor)
+    actor_id = getattr(actor, "actor_id", "live_operator")
 
-    # Gate: global_mode_state must still be live_reserved
-    # 門控：global_mode_state 仍需為 live_reserved
-    global_mode = core._get_global_mode_state()
-    if "live" not in global_mode:
+    # Gate：完整 live 五門（精確 live_reserved + 簽名授權）。
+    ok, reason_codes = core_preflight().all_five_live_gates_ok(actor, require_authz=True)
+    if not ok:
+        logger.warning("Live session resume BLOCKED: gate_failed=%s — actor=%s", reason_codes, actor_id)
         raise HTTPException(
             status_code=409,
-            detail=f"Live session resume blocked: global_mode={global_mode!r}. "
-                   "Switch Global Mode to live_reserved first.",
+            detail={
+                "error": "live_gate_failed",
+                "gate_failed": reason_codes,
+                "authority": "denied",
+                "session_state": "inactive",
+                "rust_synced": False,
+                "partial_failure": True,
+                "message": "Live session resume blocked — live preflight gate failed.",
+            },
         )
 
-    # Re-grant execution_authority and restart monitor on resume
-    # 恢復時重新授予 execution_authority 並重啟縮倉監控
+    # IPC：恢復下單。失敗則不 grant、不 active（fail-closed）。
+    try:
+        result = await core._ipc_command("resume_paper", {"engine": "live"})
+    except Exception as exc:
+        logger.error("Live session resume BLOCKED: IPC resume_paper failed — actor=%s err=%s", actor_id, exc)
+        core._set_execution_authority(None)
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "ipc_resume_failed",
+                "authority": "denied",
+                "session_state": "inactive",
+                "rust_synced": False,
+                "partial_failure": True,
+                "ipc_error": sanitize_exc_for_detail(exc, "ipc_error"),
+                "message": "Live session resume failed: engine did not accept resume (fail-closed).",
+            },
+        )
+
+    # Readback：確認引擎 posture。
+    try:
+        readback = await core_preflight().engine_mode_readback()
+    except Exception as exc:
+        logger.error("Live session resume BLOCKED: engine_mode_readback failed — actor=%s err=%s", actor_id, exc)
+        core._set_execution_authority(None)
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "readback_failed",
+                "authority": "denied",
+                "session_state": "inactive",
+                "rust_synced": False,
+                "partial_failure": True,
+                "ipc_error": sanitize_exc_for_detail(exc, "ipc_error"),
+                "message": "Live session resume failed: could not read back engine state (fail-closed).",
+            },
+        )
+    if readback.get("system_mode") != "live_reserved":
+        logger.error(
+            "Live session resume BLOCKED: readback system_mode=%r != live_reserved — actor=%s",
+            readback.get("system_mode"), actor_id,
+        )
+        core._set_execution_authority(None)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "readback_mode_mismatch",
+                "authority": "denied",
+                "session_state": "inactive",
+                "rust_synced": False,
+                "partial_failure": True,
+                "readback": readback,
+                "message": "Live session resume failed: engine posture is not live_reserved (fail-closed).",
+            },
+        )
+
+    # Stamp：全部通過後 re-grant + 重啟縮倉監控。
     core._set_execution_authority("granted")  # EA-PERSIST: resume → re-grant + persist
     core._LIVE_USER_STOPPED = False
     core._live_contraction_state = "normal"
-
-    # Restart contraction monitor (cancel stale task if any)
     if core._live_monitor_task is not None and not core._live_monitor_task.done():
         core._live_monitor_task.cancel()
     core._live_monitor_task = asyncio.create_task(core._live_contraction_monitor())
 
-    try:
-        result = await core._ipc_command("resume_paper", {"engine": "live"})
-        return core._live_response({
-            "message": "Live session resumed / 實盤 session 已恢復",
-            "source": "rust_engine",
-            "ipc_result": result,
-            "session": {"session_state": "active", "session_id": "rust_engine_live"},
-            "contraction": {"state": "normal", "warn_pct": core.CONTRACTION_WARN_PCT, "halt_pct": core.CONTRACTION_HALT_PCT},
-        })
-    except Exception as exc:
-        # WP-05 Real Fix
-        logger.exception("IPC resume_paper failed (live resume)")
-        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
-        raise HTTPException(
-            status_code=502,
-            detail=sanitize_exc_for_detail(exc, "ipc_error"),
-        )
+    return core._live_response({
+        "message": "Live session resumed / 實盤 session 已恢復",
+        "source": "rust_engine",
+        "authority": "granted",
+        "rust_synced": True,
+        "readback": readback,
+        "ipc_result": result,
+        "session": {"session_state": "active", "session_id": "rust_engine_live"},
+        "contraction": {"state": "normal", "warn_pct": core.CONTRACTION_WARN_PCT, "halt_pct": core.CONTRACTION_HALT_PCT},
+    })
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -473,21 +624,78 @@ async def grant_execution_authority(
     Clears on process restart (fail-closed). Used for pre-live demo testing
     and future supervised live gate (Phase M).
 
+    P1-02：手動 grant 不再無條件 stamp granted。依 PA 建議 (a)，先跑完整 live
+    五門（含簽名授權）+ 引擎回讀，全部通過才授予；否則 fail-closed 拒絕，不留
+    orphan granted。Python 控制面狀態僅 advisory（PA ruling §0 INV-A1）。
+
     Operator 顯式授予 execution_authority（記憶體中）。
     重啟後清零（fail-closed）。用於實盤前 demo 測試及未來 M 章受監督實盤門控。
     """
     _require_live_authority(actor)
-    core._set_execution_authority("granted")  # EA-PERSIST: manual grant + persist
     actor_id = getattr(actor, "actor_id", "?")
+
+    # Gate：完整 live 五門（含簽名授權）。
+    ok, reason_codes = core_preflight().all_five_live_gates_ok(actor, require_authz=True)
+    if not ok:
+        logger.warning("execution_authority grant BLOCKED: gate_failed=%s — actor=%s", reason_codes, actor_id)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "live_gate_failed",
+                "gate_failed": reason_codes,
+                "execution_authority": "not_granted",
+                "rust_synced": False,
+                "partial_failure": True,
+                "message": "execution_authority grant blocked — live preflight gate failed.",
+            },
+        )
+
+    # Readback：確認引擎 posture（不可只憑門控就 stamp granted）。
+    try:
+        readback = await core_preflight().engine_mode_readback()
+    except Exception as exc:
+        logger.error("execution_authority grant BLOCKED: readback failed — actor=%s err=%s", actor_id, exc)
+        from .error_sanitize import sanitize_exc_for_detail  # noqa: PLC0415
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "error": "readback_failed",
+                "execution_authority": "not_granted",
+                "rust_synced": False,
+                "partial_failure": True,
+                "ipc_error": sanitize_exc_for_detail(exc, "ipc_error"),
+                "message": "execution_authority grant failed: could not read back engine state (fail-closed).",
+            },
+        )
+    if readback.get("system_mode") != "live_reserved":
+        logger.error(
+            "execution_authority grant BLOCKED: readback system_mode=%r != live_reserved — actor=%s",
+            readback.get("system_mode"), actor_id,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "readback_mode_mismatch",
+                "execution_authority": "not_granted",
+                "rust_synced": False,
+                "partial_failure": True,
+                "readback": readback,
+                "message": "execution_authority grant failed: engine posture is not live_reserved (fail-closed).",
+            },
+        )
+
+    core._set_execution_authority("granted")  # EA-PERSIST: manual grant + persist
     # Also create + approve live SM-1 authorization so governance center shows mode=live.
     # 同步創建並批准 live SM-1 授權，讓治理中心顯示 mode=live。
     _submit_live_governance_request(actor_id)
     logger.warning(
-        "⚠ execution_authority GRANTED by actor=%s — live session now unlocked",
+        "⚠ execution_authority GRANTED by actor=%s rust_synced=true — live session now unlocked",
         actor_id,
     )
     return core._live_response({
         "execution_authority": "granted",
+        "rust_synced": True,
+        "readback": readback,
         "message": "execution_authority granted — live session unlocked",
         "actor": actor_id,
     })

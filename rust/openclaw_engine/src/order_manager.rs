@@ -505,6 +505,46 @@ impl OrderManager {
         parse_order_response_list(&resp.result)
     }
 
+    /// P1-03（cold audit pkg B）：帳戶範圍 cancel-all（依 settleCoin），對齊原 Python
+    /// `_sweep_orphan_orders` 的 `cancel_all_orders("linear", settle_coin="USDT")` 語意。
+    /// `symbol` 與 `settle_coin` 二擇一：給 symbol 則按單一交易對；給 settle_coin 則
+    /// 帳戶範圍單次取消（不 per-symbol 迴圈 — 沿用原 helper 的單次帳戶範圍意圖）。
+    ///
+    /// 為什麼移到 Rust：cancel-all 是 mutating 交易所寫操作，須走 Rust execution
+    /// authority 而非 Python REST（operator decision P1-03 MOVE TO RUST AUTHORITY）。
+    /// 風險遞減（cancel only），不需 Decision Lease，且 authority revoke 後仍須可用。
+    ///
+    /// POST /v5/order/cancel-all
+    pub async fn cancel_all_scoped(
+        &self,
+        category: OrderCategory,
+        symbol: Option<&str>,
+        settle_coin: Option<&str>,
+    ) -> BybitResult<Vec<OrderResponse>> {
+        let mut body = serde_json::json!({
+            "category": category.as_str(),
+        });
+        if let Some(sym) = symbol {
+            body["symbol"] = serde_json::Value::String(sym.to_string());
+        }
+        if let Some(coin) = settle_coin {
+            body["settleCoin"] = serde_json::Value::String(coin.to_string());
+        }
+
+        info!(
+            category = category.as_str(),
+            symbol = symbol.unwrap_or(""),
+            settle_coin = settle_coin.unwrap_or(""),
+            "cancelling all orders (scoped) / 帳戶範圍取消所有訂單"
+        );
+
+        let resp = self
+            .client
+            .post_checked("/v5/order/cancel-all", &body)
+            .await?;
+        parse_order_response_list(&resp.result)
+    }
+
     // -----------------------------------------------------------------------
     // Amend order / 修改訂單
     // -----------------------------------------------------------------------
@@ -533,23 +573,56 @@ impl OrderManager {
         if let Some(ref link_id) = req.order_link_id {
             body["orderLinkId"] = serde_json::Value::String(link_id.clone());
         }
+
+        // P2-02（cold audit pkg B）：amend 攜帶任何 price/qty 敏感欄位時，必須先確認
+        // instrument spec 可用，否則 fail-closed Err（不再 unwrap_or(raw) 發 off-tick/
+        // off-step 的原始值）。為什麼 fail-closed：amend 是 mutating 寫操作，sub-tick/
+        // sub-step 值被交易所拒（Bybit retCode）或更糟被靜默成交在錯誤精度上；instrument
+        // cache 正常熱載，cache-miss amend 屬降級路徑，必須 fail loud 對齊 create 路徑語意。
+        let needs_spec = req.qty.is_some()
+            || req.price.is_some()
+            || req.trigger_price.is_some()
+            || req.take_profit.is_some()
+            || req.stop_loss.is_some();
+        let spec = if needs_spec {
+            match self.instruments.get(&req.symbol) {
+                Some(s) => Some(s),
+                None => {
+                    return Err(BybitApiError::Business {
+                        ret_code: -1,
+                        ret_msg: format!(
+                            "amend rejected: instrument spec missing for {} — fail-closed / amend 拒絕：缺少品種規格 {} — fail-closed",
+                            req.symbol, req.symbol
+                        ),
+                        response: serde_json::json!(null),
+                    });
+                }
+            }
+        } else {
+            None
+        };
+
         if let Some(q) = req.qty {
-            // Round qty if instrument info available / 有合約信息時取整
-            let rounded = self.instruments.round_qty(&req.symbol, q).unwrap_or(q);
+            // spec 已在上方 needs_spec 保證存在 / spec guaranteed present above
+            let rounded = spec.as_ref().map(|s| s.round_qty(q)).unwrap_or(q);
             body["qty"] = serde_json::Value::String(format_qty(rounded));
         }
         if let Some(p) = req.price {
-            let rounded = self.instruments.round_price(&req.symbol, p).unwrap_or(p);
+            let rounded = spec.as_ref().map(|s| s.round_price(p)).unwrap_or(p);
             body["price"] = serde_json::Value::String(format_price(rounded));
         }
+        // P2-02：trigger/TP/SL 同樣經 tick 取整（舊版 format_price 直發未取整）。
         if let Some(tp) = req.trigger_price {
-            body["triggerPrice"] = serde_json::Value::String(format_price(tp));
+            let rounded = spec.as_ref().map(|s| s.round_price(tp)).unwrap_or(tp);
+            body["triggerPrice"] = serde_json::Value::String(format_price(rounded));
         }
         if let Some(tp) = req.take_profit {
-            body["takeProfit"] = serde_json::Value::String(format_price(tp));
+            let rounded = spec.as_ref().map(|s| s.round_price(tp)).unwrap_or(tp);
+            body["takeProfit"] = serde_json::Value::String(format_price(rounded));
         }
         if let Some(sl) = req.stop_loss {
-            body["stopLoss"] = serde_json::Value::String(format_price(sl));
+            let rounded = spec.as_ref().map(|s| s.round_price(sl)).unwrap_or(sl);
+            body["stopLoss"] = serde_json::Value::String(format_price(rounded));
         }
 
         debug!(
