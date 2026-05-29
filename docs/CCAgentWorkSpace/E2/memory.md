@@ -6,6 +6,29 @@
 - 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
 - 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
 
+## 2026-05-29 — Track D Rust hygiene 2-item (btc_lead_lag spawn gate + bin env-lock) · 2/2 APPROVE → E4
+
+**對象**：worktree `wt-d-hygiene` branch `fix/d-rust-hygiene`，未提交 diff（4 files, +76/-39），base=origin/main `2b65ffe6`。
+**Verdict**：**Item 1 APPROVE · Item 2 APPROVE → E4**（0 finding；1 deferred LOW non-blocking）。
+**Report**：直接回傳 parent（未寫檔）。
+
+**Item 1 archive-policy 解讀對抗確認（修 source 是對的，不是修 test）**：
+- 證據鏈完整對齊 E1 診斷：`875de212`(2026-05-23) `--stat` 證明**只改 integration test 188 行、0 觸 source/main.rs**；source `should_spawn` 最後語意改動是 `eb181d70`(2026-05-15) 加 diagnostic gate 但**保留 PAPER match 殘留**→ test/source drift。
+- 治理 SSOT = `docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md` v1.5 §6.2 line 333-337 **逐字 reference impl**：`let should_spawn = diagnostic_enabled;`。E1 fix body = `btc_lead_lag_diagnostic_mode_enabled()` 完全等價。line 342「paper-only no-op 不得自動 spawn」+ line 344「目的=避免 demo/live 期樣本污染 ML pipeline」。
+- **「demo/live 需要它」前提是錯的（task note 反向）**：原 source `!has_demo && !has_live` 對 demo/live 本就回 false（從不 auto-spawn）；archive verdict `2026-05-15--a4c_btc_alt_lead_lag_archive_verdict.md` 只保留為 diagnostic infra + `[57]` health；Layer 1 `effective_engine_mode()` 已保 demo/live surface=None。修 source = 移除裝飾性 PAPER spawn，**無 demo/live regression**（demo/live 行為前後都不 auto-spawn；唯一 spawn 路徑 = explicit diagnostic env）。
+- main.rs:1110 `btc_lead_lag_paper_enabled_env=false`（pre-existing `1f0354cf`，非 E1 引入）僅 tracing field，always-false 與「PAPER ignored」一致、不 mislead；E1 標 follow-up 不擴 scope = 正確 surgical discipline（deferred LOW，不阻 E4）。
+
+**Item 2 bin 共用鎖正確**：
+- lib/bin crate boundary 正確：`btc_lead_lag.rs`(lib module) 的 `crate::test_env_lock::guard()` 是 main 既存、解析到 lib.rs:125（**未被本 diff 觸碰**）；新 bin-crate `test_env_lock`(main.rs mod root) 服務 bin test modules，兩者獨立。
+- callsite 全改：main_boot_tasks 12 + live_auth_watcher_tests 11 全轉 `crate::test_env_lock::guard()`；0 stale `static ENV_GUARD` / `OnceLock env_lock`（剩餘 grep hit 全是說明性注釋）；StdMutex import 保留正確（MockSpawner.script 仍用，非 dead import）。
+
+**驗證**：integration test `btc_lead_lag_panel_fence_integration` 9/9 PASS（含原 FAIL 的 `layer_2_fence_archive_policy_diagnostic_only` → PASS）；bin 67/67；lib panel_aggregator 80/80 + should_spawn 2/2。0 hardcoded path / 0 hard-boundary touch / 0 unsafe/unwrap 新增 / 中文注釋合規 / file size 全內。§5 race：base + origin/main review 前後皆 `2b65ffe6` 無 sibling push；working tree clean 僅 4 file。
+
+**Lessons captured**：
+1. **「test 改了 source 沒改」是 source 退化真 bug 的高信號 pattern，不是 test 過期**：對抗手法 = `git show <test-commit> --stat` 確認該 commit **是否同時觸 source**；若只觸 test 且治理 SSOT 站 test 邊 → 修 source 才對。本案 875de212 only-test + a4c spec v1.5 逐字 ref impl 雙證。
+2. **task note 的「X 需要它」前提必獨立驗，不採信**：本案 prompt 說「demo/live 需要 btc_lead_lag spawn」，但 original source + archive verdict + spec line 344 三方證明 demo/live 從不 auto-spawn 且設計上禁止（污染 ML）。對抗 reviewer 對任何「修錯方向會固化」的 framing 都要回到 governance SSOT + 原 source 行為交叉驗，不接受 caller framing。
+3. **lib/bin 雙 crate 同名 `test_env_lock` 是合法刻意 pattern**：bin crate 與 lib 是不同 compilation unit，`pub(crate)` 互不可見；同名兩鎖各自串行各自 binary，不是重複/race。確認法 = 看哪個 crate 的 module 引用（lib module → lib.rs；bin root/sibling → main.rs）。
+
 ## 2026-05-29 — v80 cold audit Wave 1 PkgB Rust (P1-03/06/07/08 + P2-02/03) · APPROVE → E4
 
 **對象**：未提交 Rust diff（17 files, +650/-68），HEAD `02ef4cb7`。Python/GUI 由另一 E2 審。

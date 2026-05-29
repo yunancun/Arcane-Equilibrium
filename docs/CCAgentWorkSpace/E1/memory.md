@@ -13427,3 +13427,40 @@ register + mod.rs setter）。
 - **G-3 hedge 前提**：one-way mode；key() 用 symbol|side 已 hedge-aware，one-way 每 symbol 單 side 無誤判。process_ghosts doc + ConvergeExchangeZero variant doc 都重申 hedge 啟用 = MANDATORY re-review（引 commands.rs:1259 BB G-3 註）。
 - **驗收**：lib 3614 passed/0 failed/1 ignored（+6 ghost tests）；release Finished；clippy 24 warning 全 pre-existing 他檔（risk/governance_core/lease_scope/sm 等），0 referencing process_ghosts/dispatch_ghost_converge/ConvergeExchangeZero/last_ghost_keys 或我改的 6 檔。diff 452+/1- 跨 7 檔，commands.rs/dispatch.rs 0 改動。
 - chain → BB（exchange truth 信任邊界 + 拍板 2-cycle streak mandatory）→ E2 → E4。
+
+## 2026-05-29 Track D Rust hygiene（P3-BTCLEADLAG-FENCE-TEST-DRIFT + P3-OPS-2-BIN-CRATE-LOCK）
+
+- **worktree**：`../wt-d-hygiene` branch `fix/d-rust-hygiene`，未 commit（等 E2→E4→PM）。
+
+### Item 1 — test drift 判定方法論（test 對 / source 退化，非「修 test 對齊 source」陷阱）
+- **直覺陷阱**：integration test L300 斷言「PAPER=1 不 spawn」與 source `should_spawn_btc_lead_lag_producer` L67-68「PAPER=1 → true」矛盾。表面像「test 過期，改 test 對齊 source」。**但這是錯的**。
+- **判定流程（git -S 三步定位真理）**：(1) `git log -p` 看 source gate 演進 — eb181d70(5/15) 只加 diagnostic override，PAPER=1→true 是原始設計沒動。(2) `git log -S "must spawn"` + `-S "must not spawn"` 定位翻轉 commit = 875de212「Earn Wave B」(5/23)。(3) `git show 875de212 --stat` 證明它**只改 test 檔、完全沒碰 source gate** — 與 commit 主題（Earn Wave B）無關的 collateral test 重寫（dirty multi-session sub-agent 殘留嫌疑）。
+- **決定性證據 = caller 意圖**：main.rs:1060-1093 自 2026-05-23 已實作「archive policy」(L1065 `PAPER=1 → ignored since 2026-05-23` + L1085 `paper_enabled_env=false`)。但 caller 只在外層發 warn「ignored」+ 硬 false 一個**只用於 log 的變數**，真正的 spawn 決策 L1092-1093 仍呼叫 `should_spawn(has_demo,has_live)`，而該函數內部**仍自己讀 PAPER env → =1 回 true**。**裝飾性 warn = 真實生產 bug：印「ignored」後函數還是 spawn 了**。test（archive policy）才是對齊 caller 意圖的真理；source 從未跟上 5/23 policy。
+- **判定 = (b) source 退化**。修 source：`should_spawn` 簡化為「只有 diagnostic env=1 才 spawn」（`let _=(has_demo,has_live); btc_lead_lag_diagnostic_mode_enabled()`），runtime shape 不參與決策。保留 signature 因 caller + test 矩陣仍以 demo/live 組合呼叫（驗一律不 spawn）。
+- **避免破壞 module-local test 的核對**：source 同檔 `mod tests` 是作者維護、與 source 同步的真理基準。改 source 前先 grep 它的斷言矩陣 — 本例 2 個 module-local test 只測 PAPER=0 + diag override，archive policy 下仍 PASS（不依賴舊 PAPER=1→true 或 env-unset fallback）。
+- **教訓**：「test vs source 矛盾」不要預設改哪側。先找 caller 生產意圖（caller 已實作的 policy = 真理錨點）+ git -S 定位翻轉 commit 是否同步改 source。**翻轉 commit 只動 test 沒動 source = test 漂移成「期望但未實作的 policy」；caller 已實作該 policy 但共用函數沒跟上 = source 退化（真 bug）**。
+
+### Item 2 — bin crate 共用 env-test mutex（對齊 lib test_env_lock pattern）
+- 接續 lib.rs:120-123 邊界註釋已 flag 的 follow-up：bin crate（main.rs `mod` 兄弟）是獨立 compilation unit + 獨立測試 process，無法存取 lib `crate::test_env_lock`（pub(crate) 對 bin 不可見），故 main_boot_tasks(644) + live_auth_watcher_tests(210) 各有獨立 `static ENV_GUARD` → 同一 bin 測試 binary 內兩鎖不互斥 → process-global env mutation latent race。
+- **修法**：main.rs 加 bin-level `#[cfg(test)] pub(crate) mod test_env_lock { static ENV_TEST_LOCK + guard() }`（poison-tolerant into_inner，照抄 lib pattern）。兩 module 的 local guard 全刪，callsite 改 `crate::test_env_lock::guard()`（bin crate `crate::` = main.rs root，sibling mod 可達）。main_boot_tasks 12 callsite + live_auth_watcher_tests 11 callsite。
+- **import 連帶處理**：main_boot_tasks 的 `use std::sync::Mutex` 專用於 ENV_GUARD → 連帶刪。live_auth_watcher_tests 的 `StdMutex` 還被 MockSpawner.script 用 → **保留 import**（grep 確認用量再決定刪不刪）。
+- **wiring 確認**：live_auth_watcher_tests.rs 透過 live_auth_watcher.rs:994 `#[path][cfg(test)] mod tests` 掛入 = `live_auth_watcher::tests`；live_auth_watcher 是 main.rs 的 mod 兄弟 → `crate::test_env_lock` 可達。
+
+### 驗收
+- lib：3619 passed / 0 failed / 1 ignored（baseline 3609→3619，本 worktree 含其他 in-flight sibling work base）。
+- integration btc_lead_lag_panel_fence：9 passed（`layer_2_fence_archive_policy_diagnostic_only` FAIL→PASS）。
+- bin：67 passed（edge_reload_tests + live_auth_watcher::tests 共用鎖）。
+- module-local btc_lead_lag::tests：2 passed。release build Finished。
+- warning：db_writer.rs:13 unused import LEAD_WINDOW_SECS_MAIN + tasks.rs:788 spawn_position_reconciler dead_code 均 pre-existing（git show HEAD 證實 + 我 diff 只動 4 檔不含 db_writer/tasks）。
+
+## 2026-05-29 · P2-PACKET-C-C4-PIPELINE-WIRE（通知 fail-safe in-band wire）
+
+- **架構教訓（母 spec fossil model）**：2026-05-28 母 spec §4 假設 `Vec<Arc<RwLock<TickPipeline>>>` + watcher 直持 `&mut RiskGovernorSm` — runtime 無合法 caller（TickPipeline 由 run_event_consumer move-own，governance 是 owned 欄位非 Arc）。C4 spec §0.2 修正 = 復用 reconciler 已驗的 **in-band PipelineCommand 升級通道**（與 D2 ConvergeExchangeZero 同 pattern）。實作確認 0 個 `Arc<RwLock<TickPipeline>>`。
+- **async handler 攔截點**：`handle_paper_command` 是同步，含 await 的 variant（exchange sync + audit emit）必須在 `loop_handlers::handle_pipeline_command`（async）攔截，與 `CancelAllOrders`/`ResetDrawdownBaseline` 同模式。新 enum variant 仍要在 `handle_paper_command` 加 unreachable fail-loud arm 保 match 窮盡。
+- **exchange sync 復用既有雙軌通道**：owner pipeline 不持 `PositionManager`（私有在 bootstrap.rs StopRequest consumer task）。新構第二個 PositionManager = 第二 client 違反 Root Principle 1。改 send 既有 `stop_request_tx`（StopRequest）→ consumer → set_trading_stop。天然 paper-safe（paper 無 client log-only）+ 已驗雙軌。加 `pipeline.stop_channel()` accessor。
+- **ATR 注入**：`kline_manager.get_ohlcv(sym,"1m",Some(20))` + `indicators::atr(h,l,c,14).atr`（**絕對值** `.atr` 非 `.atr_percent`）。<15 bars → None → 0.0 → 下游 `active_lock_profit_per_position` fail-closed 跳過（缺 ATR 鎖利空轉但 SM-04 仍升）。PaperPosition 無 current_sl 欄位 → snapshot current_sl=None。
+- **claim-before-await**：新 `single_watcher::timer_expired_and_claim()`（同鎖判定+set flag）取代 runtime 端 `check_timer(&mut risk_sm)`（後者改 `#[cfg(test)]`，imports 也要 cfg(test) gate 否則 unused warning）。
+- **select! busy-loop 陷阱**：watcher select! 的 `Some(x)=rx.recv()` 臂，若 tx 端被 drop → channel 關 → recv() 回 None → 模式不匹配 → 臂禁用後 busy-spin。解法 = outcome_tx/ack_tx 存進 OnceLock slot 保活（`FAILSAFE_FEED_SENDERS`，同時供 Sprint 3 incident_policy + C5 取用，非 dead-wire）。
+- **誠實邊界**：C4 = 機制 live、incident-trigger pending（Sprint 3 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER`）。outcome_rx 在 incident_policy 實裝前永遠空。不可標「fail-safe 全功能 live」。
+- **驗收**：3622 lib tests pass（+3 C4，baseline 3619）；release Finished；clippy 改動檔 0 hit（openclaw_core `deprecated since` clippy error 是 pre-existing baseline，非 C4）。對抗驗證：破 paper noop gate → e2e_c4_paper_skips_exchange_sync FAIL；破 claim-before-await → e2e_c4_watcher_allfail_arms_then_claims_once FAIL；均還原。
+- **新 singleton**：`FAILSAFE_FEED_SENDERS`（OnceLock）+ 既有 `SHARED_WATCHER`，登記在 report + 待 TODO follow-up（無集中登記表）。worktree `../wt-c4` branch `fix/packet-c-c4-wire`，未 commit。
