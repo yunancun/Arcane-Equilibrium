@@ -209,6 +209,46 @@ per GUI Bybit-first PnL refactor Phase 2；backend-only endpoint `/api/v1/strate
 
 ---
 
+### §2.4 Notification Fail-Safe Wire — Rust（C4 pipeline wire 2026-05-29，commit `a8ba146c`）
+
+per `P2-PACKET-C-C4-PIPELINE-WIRE`；把自主通知 fail-safe（AMD-2026-05-21-01 v2）接進 runtime。**注意：C4 = 半 wire**，incident-trigger（`P2-INCIDENT-POLICY-DISPATCH-TRIGGER` Sprint 3）未接前 escalate dormant；兩 singleton 此期間 0 副作用。
+
+#### 2.4.1 `SHARED_WATCHER`
+
+| 欄位 | 值 |
+|---|---|
+| name | `SHARED_WATCHER`（`SharedFailsafeWatcher`）|
+| type_signature | `OnceLock<SharedFailsafeWatcher>`；內部單一 timer state（`timer_armed_at_ms` + `escalated_for_current_arm`）|
+| location | `rust/openclaw_engine/src/notification_failsafe/providers/single_watcher.rs`；`SharedFailsafeWatcher::init` boot 單點 |
+| owner_lifecycle | `spawn_notification_failsafe_watcher`（`tasks.rs`）boot 構造一次，唯一 caller `main_boot_tasks.rs`（緊接 reconciler spawn）；engine process 生命週期；cancel token cascade 退出 |
+| cross_task_pattern | producer: incident-trigger（Sprint 3，當前無）經 outcome feed `observe_dispatch(AllFail)` 武裝 timer；consumer: watcher select! loop `timer_expired_and_claim()`（claim-before-await，恰一次）→ 對 demo/live slot 發 `PipelineCommand::NotificationFailsafeEscalate` → owner task SM-04 transition |
+| lock_primitive | 內部 `Mutex` guarded state；claim 在同一 lock hold 內判 + set，並發 idempotent |
+| visibility | crate-internal；watcher loop 專用 |
+| caller_chain | spawn: `tasks.rs::spawn_notification_failsafe_watcher`；escalate handler: `event_consumer/handlers/risk.rs::handle_notification_failsafe_escalate` |
+| health_monitoring | NO（當前 dormant；Sprint 3 incident-trigger 接上後評估 M3 emit）|
+| registered_date | 2026-05-29 |
+| governance_authority | spec `docs/execution_plan/specs/2026-05-29--packet-c-c4-pipeline-wire-spec.md` + E2 APPROVE-WITH-CONDITIONS C2 + QA ACCEPT C2 |
+| migration_plan | Sprint 3 接 incident-trigger 後 watcher 真實武裝；屆時 BB mandatory re-review（set_trading_stop 真觸發）|
+
+#### 2.4.2 `FAILSAFE_FEED_SENDERS`
+
+| 欄位 | 值 |
+|---|---|
+| name | `FAILSAFE_FEED_SENDERS` |
+| type_signature | `OnceLock<{ outcome_tx, ack_tx }>`（mpsc senders）|
+| location | `rust/openclaw_engine/src/tasks.rs`（init 於 spawn watcher 時）|
+| owner_lifecycle | boot 一次；保活 sender 端使 `outcome_rx`/`ack_rx` channel 不關（防 watcher select! busy-loop spin）|
+| cross_task_pattern | 預留 seam：Sprint 3 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` 取 `outcome_tx` 餵 dispatch outcome；C5 GUI ack 取 `ack_tx`。**當前 0 production caller**（getter 無人呼）→ `outcome_rx` 永空 → timer 永不武裝（dormant 安全核心）|
+| lock_primitive | OnceLock（set-once）|
+| visibility | crate-internal getter |
+| caller_chain | 當前無 production caller（dormant）；Sprint 3 incident_policy + C5 GUI ack 接入 |
+| health_monitoring | NO |
+| registered_date | 2026-05-29 |
+| governance_authority | 同 2.4.1 |
+| migration_plan | Sprint 3 / C5 接 producer 後 active |
+
+---
+
 ## §3 Registration Rules
 
 ### §3.1 新登記前必做（PA / E1 / E2 共同）

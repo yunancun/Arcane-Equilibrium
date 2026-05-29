@@ -1040,3 +1040,32 @@ S-1 mirror 有方向 → S-5 streak≥2（C-3 race）→ S-6 點查 ConfirmedZer
 2. `P2-RECONCILER-GET-POSITIONS-PAGINATION` follow-up 是否 PM 登記（修法 B + 字典補錄）
 3. 若 live universe 放開 > 20 symbol，D2 已安全（點查 gate 擋穩態截斷），但 Orphan 偵測盲區需修法 B 才完整
 4. ConvergeExchangeZero handler 端 `converge_exchange_zero_close` is_exchange() 守衛（paper noop）維持
+
+---
+
+## 2026-05-29 C4 fail-safe wire · set_trading_stop 交易所信任邊界（worktree `wt-c4` branch `fix/packet-c-c4-wire`）
+
+### Verdict: **APPROVE-WITH-GUARD**（交易所面安全；1 非阻 G-1 字典補錄）
+
+E2 APPROVE-WITH-CONDITIONS 把 set_trading_stop 交易所面深審交 BB。6 項全過。
+
+### 6 裁決點
+
+1. **既有路徑非新 client ✓**：`InBandStopSync::sync_stop`（risk.rs:660-675）只 `stop_tx.send(StopRequest)`，復用既有 `stop_request_tx`（pipeline_helpers.rs:629-646）→ bootstrap.rs:752 consumer → position_manager.rs:237 `set_trading_stop`。與既有開倉 SL 路徑（step_4_5_dispatch.rs:1298）共用同一 channel/consumer/`set_trading_stop`。StopRequest struct/consumer/set_trading_stop **C4 全未改**。owner pipeline 不持 PositionManager → 故走 channel 不新構 client（Root Principle 1）。0 第二 client。
+2. **SL 語義/方向/誤平 ✓（含 G-1）**：(a) lock-profit（risk_gov.rs:327，buffer 0.5）Buy `new_sl=entry+atr×0.5`（entry **上方**）/ Sell `entry-atr×0.5`（下方）——這是**鎖利**，方向故意相反於既有開倉 SL（Buy `entry×(1-pct)` 下方）；設計正確非 bug。(b) **誤平結構路徑為空**：Bybit V5 long SL 須 < lastPrice，否則**拒單**（34040/10001 "expect Rising but trigger<=current"）**非立即市價平倉**；未獲利倉 lock-profit SL 在 market 上方 → Bybit fail 掉 → consumer 回 Err fail-closed → 倉不誤平（代價僅鎖利靜默設不上，可接受，雙軌兜底）。(c) positionIdx=Some(0) one-way 正確；slTriggerBy=LastPrice；tpslMode 未送=Full 整倉，繼承既有；normalize tick floor/ceil 繼承 P1-06。
+   - ★ **G-1 advisory（非阻）**：lock-profit 計算只用 entry+current_sl，**不讀 current market price** → 無本地「SL 錯側即跳過」預檢，靠 Bybit 拒單兜底（安全）。字典 §set_trading_stop（line 559+）應補方向約束 + 「未獲利倉 lock-profit SL 被拒屬預期 fail-closed，勿誤加 retry」。
+3. **retCode fail-closed ✓**：C4 **0 新 retry**。consumer（bootstrap.rs:778-794）Err→warn+本地 stop，不重試不假成功；post_checked nonzero/timeout→Err（CLAUDE §四）；sync_stop fire-and-forget，channel 關回 Transport Err 不 rollback transition（survival）。
+4. **paper 不誤觸 ✓（三層）**：watcher loop 只迭代 [demo,live] 不含 paper（tasks.rs:932）；sync_stop `engine_mode=="paper"→Ok(())` 不 send（risk.rs:665）；paper 無 exchange client log-only。test e2e_c4_paper_skips_exchange_sync 斷言 0 StopRequest。
+5. **rate-limit/ToS 0 風險 ✓**：Position group 20 r/s（字典 1254）；觸發極罕見（3路fail+1h）+ incident-trigger 未接 → 當前實際頻率 0；收緊自己倉 SL 合規。
+6. **半 wire → deploy 交易所面 0 影響 ✓ [FACT]**：斷點 = 武裝 timer 唯一入口 `observe_dispatch(AllFail)` 的 outcome 來源 `outcome_rx`（tasks.rs:923）的 `outcome_tx` 註冊進 `FAILSAFE_FEED_SENDERS` OnceLock **供 Sprint 3 取用，C4 0 producer**。故 outcome_rx 永空 → timer_armed_at_ms=None → timer_expired（mod.rs:345 None=>false）→ timer_expired_and_claim 永 false → escalate 永不發 → set_trading_stop 永不被 C4 呼。**deploy 安全**；watcher task 30s 空轉 select! 0 副作用。
+
+### 機制側已 live（非交易所面）
+SM-04 transition / lock-profit 計算 / 雙軌 sync 通道 / paper noop / claim-before-await idempotent 全 land + e2e test（demo escalate / paper skip / arm-then-claim-once）。Sprint 3 接 outcome producer 即全功能 live。
+
+### 下次啟動查驗項
+1. G-1 字典 §set_trading_stop 補方向約束（併 BB1 backlog，非阻）
+2. ★ **Sprint 3 incident-trigger（P2-INCIDENT-POLICY-DISPATCH-TRIGGER）接上時 BB mandatory re-review**：set_trading_stop 真實觸發；驗 incident 頻率 vs Position rate budget、market 錯側 SL 被拒比例 vs 鎖利覆蓋率、live slot respawn cmd_tx 不 stale（LIVE-AUTH-WATCHER 教訓）
+3. live 首次 escalate 前確認 one-way 前提（hedge 啟用復活 positionIdx corner case 須重審）
+
+### Report path
+`srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-29--c4_set_trading_stop_trust.md`（worktree wt-c4 內）
