@@ -6751,3 +6751,53 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 **誠實邊界**：本報告未跑 A1/A2 call-path leak-free grep（check 1）+ runtime-boundary grep（check 6）→ 兩項只列「待證實」不作 PASS（per PA profile P0/P1 leak/look-ahead finding 必附 grep）。
 
 **Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-29--sprint2_stage0r_preflight_readiness.md`（+ Operator copy）
+
+## 2026-05-29 — Packet C C4 pipeline-wire spec（design only）
+
+**Task**: PA 出 `P2-PACKET-C-C4-PIPELINE-WIRE` IMPL spec（HIGH-1 已解 `3423f0f7`；C1/C2/C3 已 land v79）。
+**Spec**: `docs/execution_plan/specs/2026-05-29--packet-c-c4-pipeline-wire-spec.md`
+
+**最關鍵發現（推翻 2026-05-28 母 spec §4 wire 模型）**：母 spec 假設 `Vec<Arc<RwLock<TickPipeline>>>` + watcher 直持 `&mut RiskGovernorSm` 跑 `check_timer(&mut p.governance.risk)`。**runtime 不成立**：`TickPipeline` 由 `run_event_consumer` 內部 owned（demo=tokio task / live=獨立 OS thread+runtime / paper `paper_enabled=false` 無實體），`governance: GovernanceCore` 是 owned 欄位非 Arc。→ `single_watcher.rs::check_timer(risk_sm)` 在 runtime **無合法 caller**（只 test 用 `RiskGovernorSm::new()`）。
+
+**正確模型 = 復用 reconciler in-band PipelineCommand 升級通道**（已驗 prod pattern）：reconciler 外部 task 持 cmd_tx slot → `cmd_tx.send(ReconcilerEscalate)` → `handlers/risk.rs:526 handle_reconciler_escalate` → owner task 內 `governance.risk.reconciler_escalate_to` → `loop_handlers.rs:553` command 後自動同步 `shared_risk_level` atomic。C4 watcher 走同骨架，**SM-04 不由 watcher 直跑**，發新 `PipelineCommand::NotificationFailsafeEscalate` 進 owner task。自然消除母 spec §11.3「RwLock<TickPipeline> 寫鎖跨 tick」反對（根本無此鎖）。
+
+**4 殘前置處置**：
+1. ATR 注入（前置2 BB）：核心修法 = **倉位 snapshot + ATR 填值整段下放 owner task handler**（owner task `pipeline.kline_manager.get_ohlcv(sym,"1m",Some(20)).and_then(atr 14).map(r.atr)` — 絕對 ATR 非 atr_percent；`risk_gov.rs:327` 公式 `entry±atr×buffer`，atr<=0 fail-closed 跳過）。**不在 watcher 端 REST**（watcher 無 kline_manager）。倉位來源 `pipeline.paper_state.positions()` 取代 C3 `RestPositionProvider`（後者退為 optional out-of-band probe，不刪）。缺 ATR → 鎖利空轉但 SM-04 仍升（per HIGH-1 ruling §4）。
+2. 新 variant 而非復用 `ReconcilerEscalate`：audit reason 不同（`auto_escalated_to_sm04_defensive` vs `reconciler_auto_escalate`）+ RiskEvent 不同（`NotificationFailsafeTimeout`）+ 須跑 `active_lock_profit_per_position`（reconciler escalate 不跑）。
+3. outcome 路徑（前置3 PC3.Q4）：**接 mpsc observe_dispatch（選項B）不用 dispatch_and_observe**——C4 不接觸發點，主動 dispatch 無事件源 = 母 spec 否決的選項 A；被動 observe 對齊未來 incident_policy 餵 outcome。single_watcher 需新 `timer_expired_and_claim()->bool`（保 claim-before-await，抽出 SM 那段），原 `check_timer(&mut risk_sm)` 標 test-only。
+4. paper noop（前置4）：**結構性 noop**——watcher escalate loop 只迭代 `[demo_cmd_slot,live_cmd_slot]` 不含 paper（paper drain task reject command）；+ handler `effective_engine_mode()=="paper"` skip exchange sync defense-in-depth。
+
+**pipeline_ctor wire**：`tasks.rs::spawn_notification_failsafe_watcher` + `main_boot_tasks.rs` 緊接 `spawn_position_reconcilers`（同吃 demo/live cmd slot + db_pool + cancel）。單例 `SharedFailsafeWatcher::init` OnceLock + boot 單點呼一次（E2 grep 1 caller）。live slot 每次發送前 `.read().as_ref().cloned()`（禁 by-value stale，LIVE-AUTH-WATCHER 教訓）。
+
+**非 dead-wire 誠實標記**：C4 wire 後仍**半空 wire**——不接 incident trigger → outcome_rx 永空 → timer 永不武裝（違反 feedback_no_dead_params 精神，同母 spec §11.2）。C4 範圍真 wire 證明 = 1 條 integration（直 `outcome_tx.send(AllFail)` → timer → command → owner SM-04 → 鎖利 → sync → V114 row）。強制開 Sprint 3 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER`；TODO 須標「機制 live / 觸發 pending」不可宣稱 fail-safe 全功能 live。
+
+**LOC**: ~500-640 全 Rust（4 切片 C4-a owner handler / C4-b watcher seam / C4-c spawn wire / C4-d integration）。比母 spec ~250 高（新 variant+owner handler），但風險更低（復用已驗 in-band pattern）。**chain**: PA→E1(串行推薦,C4-a 定 variant 契約先)→**BB(set_trading_stop demo/live endpoint fence + retCode fail-closed)**→E2→E4→QA→PM。E4 baseline ~3619(D2後)+4~6。
+**E2 三審**: owner-task snapshot 取代 watcher REST(check_timer 無 prod caller) / paper 雙重 noop / live slot 每次取 snapshot + claim-before-await。
+**batched deploy**: C4 不單獨 deploy，與 Track C D2(`a5e1ded1`)+HIGH-1(`3423f0f7`) 同次 `restart_all --rebuild --keep-auth`（operator 批次拍板）。
+
+**硬邊界**: 0 觸碰——新 variant 收緊風控(reduce-only 方向)不開新倉不需 lease；live_execution_allowed/max_retries/OPENCLAW_ALLOW_MAINNET/authorization.json 全不改。
+**教訓**: 母 spec 在「無 runtime 讀證」下假設共享 Arc<RwLock<TickPipeline>>；實際 event_consumer owns pipeline。C3 IMPL 已踩到——`single_watcher::check_timer(risk_sm)` 簽名是 design 假設的化石，runtime 無 caller。PA 在 C4 必讀 main_pipelines/event_consumer 才抓到；design-time 不讀 ownership model 會讓 E1 撞死。
+
+## 2026-05-29 — P2-WATCHDOG-STATUS-JSON-WRITER decision: REMOVE/CLOSE-AS-VESTIGIAL (not write)
+- grep proof: ZERO repo consumers open/stat `watchdog_status.json`. All hits are reports/specs describing the gap + `get_watchdog_status()` (called only by `test_canary.py:388`, never by API/console/healthcheck).
+- passive_wait_healthcheck suite has NO check referencing watchdog_status.json (greped helper_scripts/db/passive_wait_healthcheck/ entire dir). So the "stale healthcheck" framing is itself imprecise — no healthcheck ever expected it.
+- watchdog DESIGN: writes `watchdog_state.json` (restart-strike state, lazy/on-event), `canary_events.jsonl`, `watchdog.lock`, `watchdog.log`, `watchdog_inert_state.json`. `--status` computes on-the-fly from snapshots → stdout, NEVER persists a file. By design.
+- runtime (ssh trade-core, PID 35076): only watchdog.lock/.log/_inert_state.json present; even watchdog_state.json absent (healthy run → no restart event → no state file). watchdog_status.json was never a writer target.
+- API already has file-based engine-liveness observability WITHOUT watchdog_status.json: `ipc_state_reader.py` + `grafana_data_writer.py` read `pipeline_snapshot.json` (same source get_watchdog_status reads). So GAP-H "file-based observability" desire is already satisfied by the snapshot the GUI reads.
+- DECISION: remove the false expectation. Close TODO P2-WATCHDOG-STATUS-JSON-WRITER as won't-implement; downgrade runbook GAP-H to "use --status / existing snapshot observability". Writing a periodic status file = new infra duplicating snapshot, adds a freshness liability (a second thing that can go stale), violates 最小正確 + 原則 6 (less moving parts to fail). Forensic "last status before death" value is marginal: canary_events.jsonl + watchdog.log + watchdog_state.json already capture crash/restart forensics; healthy-state snapshot is redundant with pipeline_snapshot.json.
+- Lesson: a "missing file healthcheck failure" must be traced to an ACTUAL reader before deciding to write the file. Here there was no reader — the artifact was synthetic, born only in audit-report prose. Default to removing phantom expectations, not feeding them.
+
+## 2026-05-29 — A1/A2 Stage 0R candidate runner spec v2 (QC 方向修正後重設計)
+- v1 設計「A1 復用 8b harness」結構性錯誤；QC pre-check 三裁決全成立, PA cat 8b source 逐條核實:
+  - #1 方向接反: v1 接 8b `crowded_short_squeeze`(z<=-z_hi funding 負低側→做多, metrics line 388-394); A1=funding 正高>30% annualized→做空 fade, 對映 `crowded_long_fade`(line 380-387 z>=z_hi→dir=-1)。180° 反。
+  - #2 本質不等價: 8b gate 全用 funding_zscore_25sym + percentile + oi + prior(cross-sectional); A1=絕對 funding_ann>30% + basis_pct<0.3% + short-only + 動態 OR 出場。8b 無 absolute threshold/basis/動態出場。
+  - #3 2 vs 25 衝突: 8b MIN_STAGE0R_SYMBOLS=25 是 _candidate_fail_reasons line 1050 + sweep line 1368 hard fail; z-score 由 SQL `PARTITION BY signal_ts_ms`(features.sql line 76-99) 全 cohort median/std 算→2-sym n=2 恒 ±0.707 無意義。
+- **A2/8c 同檢結論(PA 補查, QC 只查 A1)**: 8c 本就 per-event/per-bucket, **無 cross-sectional cohort stat**(features.sql 唯一 percent_rank 是 PARTITION BY symbol per-symbol 時序, leak-free), 方向與 A2 一致(expected_dir=+1 long_liq→up = A2 fade long), **無 symbol_count<25 hard RED**(other_red_reasons line 1473-1511 無此 gate)。8c 可沿用 per-event 路徑不新建 SQL。
+- **8c 唯一兩 gap (adapter 必修)**: (a) k_new=max(25,n)*11664 line 1388 是研究 sweep 的 DSR penalty inflation→candidate 固定單閾值必須 override k_total(否則 DSR 永 fail, silent 統計錯 mock 不抓); (b) 8c 固定 horizon mark ≠ A2 動態出場(TP1.5/SL2/1h/reverse), 採 B 方案=固定 60m proxy 明文標 dynamic_exit_not_modeled, 保守偏低估 alpha。
+- **v2 路徑**: A1=專屬 metrics(a1_funding_short_metrics.py)+專屬 SQL(新 leak-free query, 無 PARTITION BY signal_ts_ms cohort, funding/basis LATERAL as-of, fwd 嚴格未來 bar); A2=8c per-event adapter(a2_cascade_adapter.py, pin $500k/$300k + 2-sym + k_total override)。兩者只復用 8b/8c 純統計原語(PSR/DSR/PBO/bootstrap/Wilson/n_eff, direction-agnostic leak-free)。
+- **2-symbol 統計可行性(QC 必驗)**: symbol-cross-section CSCV(需≥10 cells)不適用→改 time-block CSCV(day-block train/test, 需≥4 distinct days, 否則 pbo=None→observe_more); 2-sym pooled n_eff floor 降為診斷指標非 reject gate; DSR k_total=candidate 真實 trial count(A1≈2, A2≈4)+k_prior(從 SSOT 讀)。
+- **誠實邊界(QC #5)**: 2-sym+demo 短窗+active=false→n_eff 遠低 floor→預期 observe_more(sample insufficient)非 reject; runner sample_sufficiency 欄位明文分 sample_insufficient(n 小 PSR/DSR None) vs signal_failure(n 足但確證負)。
+- **A1 最大新風險**: basis_panel 表存在性未證([ASSUME] §3.4)→E1a 第一步 ssh probe; 缺則 A1 BLOCKED 標 draft_only(infra gap 非 signal failure)。8b 無 basis 欄位故 A1 必須新 basis 源。
+- LOC ~740-1010(較 v1 420-560 大, 因 A1 新 metrics+SQL); chain PA→E1(可拆 E1a A1路徑 / E1b A2 adapter+runner 殼 並行)→QC stat review(chain hard gate, 不過不進 E2)→A3+E2 並行→E4 ssh PG 實跑。
+- 教訓: 「復用既有 harness」前必須 cat 該 harness 的 signal gate + cohort 維度 + hard-fail gate, 確認 candidate 的方向/閾值/cohort size 三者都相容; v1 PA 假設 8b 通用未驗 branch 方向 = 與 QC 同類盲區(mock test 不抓語意/方向錯)。
+- spec: docs/execution_plan/specs/2026-05-29--a1a2-stage0r-candidate-runner-spec.md (v2 SUPERSEDES v1)
