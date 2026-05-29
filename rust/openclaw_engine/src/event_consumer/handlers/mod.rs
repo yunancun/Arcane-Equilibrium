@@ -25,6 +25,9 @@ use std::collections::HashMap;
 pub(crate) mod edge_estimates;
 pub(crate) mod edge_predictor;
 mod lifecycle;
+// FA gap audit G1（2026-05-29）：C4 通知 fail-safe escalate handler + helper 從 risk.rs
+// 純搬移至獨立 module，讓 risk.rs 回 <800 review 門檻（0 邏輯改）。
+mod notification_failsafe_escalate;
 mod risk;
 mod strategy_params;
 
@@ -33,7 +36,7 @@ mod strategy_params;
 pub use edge_predictor::handle_disable_edge_predictor_all;
 // P2-PACKET-C-C4-PIPELINE-WIRE：fail-safe in-band 升級 handler（async，含 exchange
 // sync + V114 audit），由 loop_handlers::handle_pipeline_command 攔截後呼叫。
-pub(crate) use risk::handle_notification_failsafe_escalate;
+pub(crate) use notification_failsafe_escalate::handle_notification_failsafe_escalate;
 // `handle_reload_edge_predictor` is pub(crate) for tests only — keep the
 // parent-module visibility path `handlers::handle_reload_edge_predictor`
 // intact so unit tests can call it as `super::handle_reload_edge_predictor`.
