@@ -378,8 +378,16 @@ async function sessionAction(action) {
     body = bal > 0 ? { initial_balance: bal } : {};
   }
   const d = await ocPost('/api/v1/paper/session/' + action, body);
+  // P2-15：stop 路徑後端會在 errors 非空時回 partial_failure，不可一律顯綠。
+  // 用共用 classifyLiveMutation 單一真相判定，殘留風險渲染為 error。
+  if (action === 'stop') {
+    const r = classifyLiveMutation(d);
+    ocToast(r.severity === 'success' ? 'Paper 引擎已停止 (持倉已平)' : r.message, r.severity);
+    if (d) setTimeout(loadAll, 1000);
+    return;
+  }
   if (d) {
-    const labels = { start: '引擎已啟動', stop: 'Paper 引擎已停止 (持倉已平)' };
+    const labels = { start: '引擎已啟動' };
     ocToast(labels[action] || ('操作: ' + action), 'success');
     // Wait briefly for engine state to settle before reloading
     // 等待引擎狀態穩定後再重新加載
@@ -394,12 +402,11 @@ async function sessionStopAll() {
   // 雙引擎聯停：平掉 Paper + Demo 倉位，暫停兩個引擎。
   if (!await openConfirmModal("paper-stop-all")) return;
   const d = await ocPost('/api/v1/paper/session/stop-all', {});
-  if (d) {
-    ocToast('Paper + Demo 雙引擎已停止', 'success');
-    setTimeout(loadAll, 1000);
-  } else {
-    ocToast('雙停操作失敗', 'error');
-  }
+  // P2-15：雙停後端會在 errors 非空時回 partial_failure，不可一律顯綠。
+  // 用共用 classifyLiveMutation 單一真相判定，殘留風險渲染為 error。
+  const r = classifyLiveMutation(d);
+  ocToast(r.severity === 'success' ? 'Paper + Demo 雙引擎已停止' : r.message, r.severity);
+  if (d) setTimeout(loadAll, 1000);
 }
 
 // REF-20 R20-P1-U3: manual order JS handlers retired (3 fns: togglePrice + 2 order handlers)

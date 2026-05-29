@@ -337,12 +337,12 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 |------|------|
 | `execution_plan/2026-05-21--m5_online_learning_design_spec.md` | M5 ModelClient Interface DESIGN spec (461 行；6 method per ADR-0035 Decision 1；Y3+ defer；KEEP per R4 dedup) |
 | `execution_plan/2026-05-21--m12_order_router_design_spec.md` | M12 OrderRouter DESIGN spec (905 行；6-method trait per ADR-0039 §Decision 1 + maker_fill_rate_30d) |
-| `execution_plan/2026-05-21--m13_multi_venue_asset_class_design_spec.md` | M13 Multi-Venue / AssetClass DESIGN spec (427 行；AssetClass + Venue enum + DEX/Hyperliquid hardcode rejection + 6 trade gate；KEEP pending merge with parallel) |
-| `execution_plan/2026-05-21--m13_asset_class_venue_design_spec.md` | M13 design parallel session (624 行；5 AssetClass + AUM threshold；pending MERGE per R4) |
+| `archive/2026-05-21--sprint_1a_delta_dup_artifacts/2026-05-21--m13_multi_venue_asset_class_design_spec.md` | M13 Multi-Venue / AssetClass DESIGN spec (427 行；AssetClass + Venue enum + DEX/Hyperliquid hardcode rejection + 6 trade gate)；**已歸檔 dup artifact**（R4 dedup KEEP parallel session 版本）|
+| `execution_plan/2026-05-21--m13_asset_class_venue_design_spec.md` | M13 design parallel session（624 行；5 AssetClass + AUM threshold）；**R4 dedup KEEP active 版本** |
 | `execution_plan/2026-05-21--v114_m5_model_versions_streaming_schema_spec.md` | V114 M5 EXTEND `learning.model_versions` PLACEHOLDER (190 行；ADR-0035 Decision 2 對齊；KEEP per R4 dedup) |
 | `execution_plan/2026-05-21--v115_m12_order_router_audit_schema_spec.md` | V115 M12 OrderRouter Adaptive Routing Audit PLACEHOLDER (288 行；ADR-0039 §Decision 3；KEEP per R4 dedup) |
-| `execution_plan/2026-05-21--v116_m13_multi_venue_reserved_schema_spec.md` | V116 multi-venue reserved (101 行；routing.venue_lifecycle hint；pending operator 仲裁) |
-| `execution_plan/2026-05-21--v116_m13_asset_venue_dim_schema_spec.md` | V116 asset/venue dim (288 行；parallel；reference.asset_class_dim + venue_dim + Y1 seed；pending operator 仲裁) |
+| `archive/2026-05-21--sprint_1a_delta_dup_artifacts/2026-05-21--v116_m13_multi_venue_reserved_schema_spec.md` | V116 multi-venue reserved (101 行；routing.venue_lifecycle hint)；**已歸檔 dup artifact**（R4 dedup KEEP asset/venue dim 版本）|
+| `execution_plan/2026-05-21--v116_m13_asset_venue_dim_schema_spec.md` | V116 asset/venue dim（288 行；reference.asset_class_dim + venue_dim + Y1 seed）；**R4 dedup KEEP active 版本** |
 
 ### 2026-05-21 Sprint 1A-ε deliverables (4 spec; R4+CC+PA+MIT 三化審計)
 
@@ -1338,6 +1338,8 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 | `2026-05-16--todo_v36_completion_cleanup_archive.md` | TODO v36 completion cleanup archive：v35 / 2026-05-15..16 completed detail, closed wave rows, DONE P0/P1/P2 rows, and stale C1 running wording moved out of active TODO |
 | `2026-05-16--close_maker_first_phase_1b_round1_archive.md` | Close-Maker-First Phase 1b Round 1 archive：design/governance/review history and active gates moved out of active TODO |
 | `2026-05-16--stage1_demo_a4c_tombstone_cleanup.md` | Stage 1 Demo + A4-C tombstone cleanup archive：old W3 paper cohort / A4-C promotion markers removed from active docs while diagnostic tombstone remains |
+| `2026-05-19--todo_v55_translation_archive.md` | TODO v55 translation archive：v55 中譯/重排過渡內容歸檔 |
+| `2026-05-20--todo_v57_3_closure_cleanup_archive.md` | TODO v57.3 closure cleanup archive：v5.7 dispatch-safe patch 收尾 closed rows 清理歸檔 |
 | `2026-05-21--todo_v57_5_route_change_purge.md` | TODO v57.5 route change purge archive：v5.7 dispatch-safe patch 收斂前過時 active route 清除 |
 | `2026-05-21--todo_v58_layout_refactor_archive.md` | TODO v58 layout refactor archive：reverse-chronological dispatch view → grouped-by-module/wave view 重組過渡記錄 |
 | `2026-05-21--todo_v60_archive.md` | TODO v60 archive：Sprint N+1 / Sprint A 收尾與已完成內容歸檔；v61 起以 v5.8 13-module thesis 為主軸（含 §A v5.7 12 prefix DONE / §B W-AUDIT-4b retained / §C H+I 批 P2/P3 closure / §D 過去 14d 9 批 closure narrative） |

@@ -425,15 +425,27 @@ async def post_session_stop(
         close_result = pause_result = {"skipped": True, "reason": "engine_offline"}
         verify_result = {"skipped": True, "reason": "engine_offline"}
         logger.info("Rust engine offline — skipping IPC (already stopped)")
-    return _paper_response({
-        "message": "Paper engine stopped — positions closed / Paper 引擎已停止，倉位已平",
-        "source": "rust_engine",
-        "paper_close": close_result,
-        "paper_pause": pause_result,
-        "verify": verify_result,
-        "errors": errors if errors else None,
-        "session": {"session_state": "stopped", "session_id": "rust_engine"},
-    })
+    # P2-15：errors 非空代表停止過程有殘留/失敗，不可回傳 success 綠燈。
+    # 鏡像 Wave-1 P1-04（live close-all）partial_failure 契約，GUI 必須渲染警告。
+    partial_failure = bool(errors)
+    return _paper_response(
+        {
+            "message": (
+                "Paper engine stop partially failed — check residual / Paper 停止部分失敗，請檢查殘留"
+                if partial_failure else
+                "Paper engine stopped — positions closed / Paper 引擎已停止，倉位已平"
+            ),
+            "source": "rust_engine",
+            "status": "partial_failure" if partial_failure else "stopped",
+            "partial_failure": partial_failure,
+            "paper_close": close_result,
+            "paper_pause": pause_result,
+            "verify": verify_result,
+            "errors": errors if errors else None,
+            "session": {"session_state": "stopped", "session_id": "rust_engine"},
+        },
+        action_result="partial_failure" if partial_failure else "success",
+    )
 
 
 @paper_router.post("/session/stop-all")
@@ -528,18 +540,30 @@ async def post_session_stop_all(
         close_result = demo_close_result = pause_result = {"skipped": True, "reason": "engine_offline"}
         demo_cancel_orders = paper_verify = demo_verify = {"skipped": True, "reason": "engine_offline"}
         logger.info("Rust engine offline — skipping IPC (already stopped)")
-    return _paper_response({
-        "message": "Both engines stopped — orders cancelled + positions closed / 雙引擎已停止，掛單已取消、倉位已平",
-        "source": "rust_engine",
-        "demo_cancel_orders": demo_cancel_orders,
-        "paper_close": close_result,
-        "demo_close": demo_close_result,
-        "paper_pause": pause_result,
-        "paper_verify": paper_verify,
-        "demo_verify": demo_verify,
-        "errors": errors if errors else None,
-        "session": {"session_state": "stopped", "session_id": "rust_engine"},
-    })
+    # P2-15：errors 非空代表雙引擎停止過程有殘留/失敗，不可回傳 success 綠燈。
+    # 鏡像 Wave-1 P1-04（live close-all）partial_failure 契約，GUI 必須渲染警告。
+    partial_failure = bool(errors)
+    return _paper_response(
+        {
+            "message": (
+                "Dual-engine stop partially failed — check residual / 雙引擎停止部分失敗，請檢查殘留"
+                if partial_failure else
+                "Both engines stopped — orders cancelled + positions closed / 雙引擎已停止，掛單已取消、倉位已平"
+            ),
+            "source": "rust_engine",
+            "status": "partial_failure" if partial_failure else "stopped",
+            "partial_failure": partial_failure,
+            "demo_cancel_orders": demo_cancel_orders,
+            "paper_close": close_result,
+            "demo_close": demo_close_result,
+            "paper_pause": pause_result,
+            "paper_verify": paper_verify,
+            "demo_verify": demo_verify,
+            "errors": errors if errors else None,
+            "session": {"session_state": "stopped", "session_id": "rust_engine"},
+        },
+        action_result="partial_failure" if partial_failure else "success",
+    )
 
 
 @paper_router.get("/session/status")

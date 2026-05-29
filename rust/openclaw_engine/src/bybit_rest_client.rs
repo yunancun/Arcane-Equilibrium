@@ -219,11 +219,11 @@ impl BybitResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[repr(usize)]
 pub enum RateLimitGroup {
-    /// Order creation/amendment/cancellation (10 req/s) / 訂單操作
+    /// Order creation/amendment/cancellation (20 req/s per UID) / 訂單操作
     Order,
-    /// Position queries and configuration (10 req/s) / 持倉操作
+    /// Position queries and configuration (20 req/s per UID) / 持倉操作
     Position,
-    /// Account queries (10 req/s) / 帳戶查詢
+    /// Account queries (20 req/s per UID) / 帳戶查詢
     Account,
     /// Market data queries (10-120 req/s depending on endpoint) / 市場數據
     Market,

@@ -820,13 +820,11 @@ Client 創建：`PlatformClient::new(client: Arc<BybitRestClient>)`
 
 ---
 
-#### pre_check_order
-- **服務**: 訂單預檢——驗證訂單參數但不實際提交。注意：Bybit 沒有專門的預檢端點，此方法實際調用 POST /v5/order/create 並返回原始回應，需要調用方自行判斷結果。
-- **調用**: `client.pre_check_order(params)`
-- **Bybit 路徑**: `POST /v5/order/create`（dry-run 概念）
-- **Input**: `params: serde_json::Value` — 與 place_order 相同的 JSON body
-- **Output**: `BybitResult<serde_json::Value>`（原始回應）
-- **關聯程式**: `platform_client.rs:362`
+#### ~~pre_check_order~~ — **已移除（FIX-20）**
+- **狀態**: 已從 source 移除（`platform_client.rs:356-359` 註記 FIX-20）。Bybit 沒有
+  dry-run 預檢端點；原實作實際調用真實 `POST /v5/order/create`，**Live 模式下有意外
+  下單風險**，故移除。不存在安全的假預檢路徑——需要驗證訂單參數時請靠本地過濾器
+  （`instrument cache` 精度/限額）與下單後 WS `order.rejectReason`，不得回退到 create 端點假裝預檢。
 
 ---
 
@@ -1118,9 +1116,9 @@ Topic 生成函數（`multi_interval_topics.rs` — 2026-04-19 E5-P2-3 rename）
 
 **訂閱（環境感知，由 `BybitEnvironment::private_ws_topics()` 決定）**：
 - **Mainnet**：`["order", "execution.fast", "position", "wallet", "dcp"]`（`execution.fast` ~50ms）
-- **Demo / LiveDemo / Testnet**：`["order", "execution", "position", "wallet", "dcp"]`（demo 端點**不支援** `execution.fast`）
+- **Demo / LiveDemo / Testnet**：`["order", "execution", "position", "wallet"]`（demo 端點**不支援** `execution.fast`，亦**不支援** `dcp`）
 
-⚠️ **execution.fast 是 mainnet-only 功能**。Bybit demo 對 `execution.fast` 訂閱會返回 `success:true` 但永遠不推送資料 → `total_fills` 永遠為 0。詳見 `gotchas` 第 3 條。2026-04-11 B-2 根因發現。
+⚠️ **execution.fast 與 dcp 都是 mainnet-only**（source `bybit_rest_client.rs:119-128` 為準）。Bybit demo 對 `execution.fast` 訂閱會返回 `success:true` 但永遠不推送資料 → `total_fills` 永遠為 0；對 `dcp` 訂閱則被明確拒絕 "topic does not exist"。DCP（cancel-on-disconnect）本就是 mainnet-only 伺服器端機制。詳見 `gotchas` 第 3 條。2026-04-11 B-2 根因發現。
 
 事件通過 `mpsc::Sender<PrivateWsEvent>` 發送。
 
@@ -1327,10 +1325,10 @@ pub struct ShadowOrderRequest {
 5. **confirm-pending-mmr 替代 set-risk-limit** — 舊端點 `/v5/position/set-risk-limit` 已被 Bybit 移除；現用 `POST /v5/position/confirm-pending-mmr` 確認 MMR 變更。注意 Bybit 文檔頁 URL slug 寫 `confirm-mmr`（https://bybit-exchange.github.io/docs/v5/position/confirm-mmr）但實際 endpoint path 是 `confirm-pending-mmr`，勿照 doc URL slug 抄成 endpoint。`/v5/position/confirm-pending-mmr` is the actual endpoint (Bybit doc URL slug `confirm-mmr` is doc-page identifier only, do not copy as endpoint path).
 6. **subscribe 批次大小** — Spot 每次最多 10 topics；Linear 無硬性限制（總字元上限 21,000）。代碼保守地分批 10 個。
 6b. **broken topic 毒化連接** — 訂閱不存在的 topic（如 liquidation/price-limit/adl-notice）返回 "handler not found"，會導致整個連接零數據。連接和心跳正常但無行情。已在 `29fc1ef` 移除。
-7. **DCP 必須配置** — 不配置 DCP 意味著斷連後掛單持續有效，風險極高。
+7. **DCP 必須配置（mainnet-only）** — 不配置 DCP 意味著斷連後掛單持續有效，風險極高。**注意**：`dcp` private WS topic 與伺服器端 cancel-on-disconnect 機制僅 mainnet 支援；demo/testnet/live-demo 訂閱 `dcp` 會被拒絕 "topic does not exist"，故 `private_ws_topics()` demo 集不含 `dcp`（source `bybit_rest_client.rs:121-128`）。
 8. **recv_window = 5000ms** — 本地與 Bybit 時差超過 5 秒會被拒簽。
 9. **Instrument cache 需定期刷新** — Bybit 偶爾調整合約精度/限額，建議每 4 小時 refresh 一次。
-10. **pre_check_order 不是真正的預檢** — Bybit 無專門端點，代碼用 POST /v5/order/create 模擬。
+10. **pre_check_order 已移除（FIX-20）** — Bybit 無 dry-run 預檢端點；原實作會調用真實 `POST /v5/order/create`，Live 模式下有意外下單風險，故已從 source 移除（`platform_client.rs:356-359`）。**不要重新加回任何用 create 端點假裝預檢的路徑**；參數驗證靠本地 instrument cache 過濾器 + 下單後 WS `order.rejectReason`。
 11. **PostOnly 越過 book 無 REST retCode** — PostOnly 觸發 taker 路徑時 REST 仍回 `retCode=0`，拒絕透過 Private WS `order.rejectReason=EC_PostOnlyWillTakeLiquidity` 傳遞。**切勿**將 `110003`（PriceOutOfRange，合約過濾器）誤認為 PostOnly-cross。詳見 §4.2 與 §4.2.1（2026-04-20 EDGE-P2-3 Phase 1B-1）。
 12. **cancel/fill 無排序保證** — REST `cancel_order` 回應與 WS `order` 最終狀態無先後保證。cancel 僅 advisory，部位一律以 WS 最終狀態為準（不得用 cancel 回傳減倉）。
 13. **orderLinkId 冪等優先** — 對 PostOnly 掛單用 `cancel_order_by_link_id` 取消（客戶端鑄造 id 跨重啟/WS 延遲存活）；`cancel_order` 依賴 REST 回傳的 `orderId`，在重啟/競爭下可能拿不到。

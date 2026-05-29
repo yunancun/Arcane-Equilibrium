@@ -762,7 +762,8 @@ async def get_demo_balance(
     if rc is None:
         return _envelope({"enabled": False, "source": "rust_engine"})
     try:
-        wallet = rc.refresh_balance()
+        # 為什麼 to_thread：BybitClient 為阻塞 httpx.Client，直接呼叫會卡住事件迴圈。
+        wallet = await asyncio.to_thread(rc.refresh_balance)
     except Exception as exc:
         # WP-05 Real Fix
         logger.exception("Bybit balance fetch failed")
@@ -1065,8 +1066,10 @@ async def get_demo_positions(
     if rc is None:
         return _envelope({"enabled": False, "source": "rust_engine"})
     try:
-        positions = rc.get_positions("linear")
-        positions = _attach_owner_strategy(positions, engine="demo")
+        # 為什麼 to_thread：get_positions 為阻塞 httpx；_attach_owner_strategy 內含阻塞
+        # _fetch_min_notional，二者均不可在事件迴圈線程上同步執行。
+        positions = await asyncio.to_thread(rc.get_positions, "linear")
+        positions = await asyncio.to_thread(_attach_owner_strategy, positions, engine="demo")
         return _envelope({"source": "rust_engine", "list": positions, "count": len(positions)})
     except Exception as exc:
         # WP-05 Real Fix
@@ -1116,7 +1119,8 @@ async def get_demo_orders(
     if rc is None:
         return _envelope({"enabled": False, "source": "rust_engine"})
     try:
-        raw_orders = rc.get_active_orders("linear")
+        # 為什麼 to_thread：get_active_orders 為阻塞 httpx，不可卡住事件迴圈。
+        raw_orders = await asyncio.to_thread(rc.get_active_orders, "linear")
         orders = [_normalize_order(o) for o in raw_orders]
         conditional_count = sum(
             1 for o in orders
@@ -1202,6 +1206,8 @@ def _fetch_strategy_by_order_id(
         return {}
     try:
         cur = conn.cursor()
+        # 為什麼設語句逾時：GUI 讀路徑不得被慢查詢阻塞事件迴圈線程池；與 :2187 一致。
+        cur.execute("SET LOCAL statement_timeout = %s", (_GUI_READ_STATEMENT_TIMEOUT_MS,))
         cur.execute(
             "SELECT DISTINCT ON (order_id) order_id, strategy_name, realized_pnl "
             "FROM trading.fills "
@@ -1349,6 +1355,8 @@ def _fetch_pg_closed_pnl_fallback(
             params.append(symbol)
         params.extend([limit + 1, offset])
         cur = conn.cursor()
+        # 為什麼設語句逾時：GUI 讀路徑不得被慢查詢阻塞事件迴圈線程池；與 :2187 一致。
+        cur.execute("SET LOCAL statement_timeout = %s", (_GUI_READ_STATEMENT_TIMEOUT_MS,))
         cur.execute(
             "SELECT ts, order_id, symbol, side, qty, price, fee, realized_pnl, strategy_name "
             f"FROM trading.fills WHERE {where} ORDER BY ts DESC LIMIT %s OFFSET %s",
@@ -1614,7 +1622,8 @@ async def post_demo_close_position(
     rc = _get_rust_client()
     if rc is not None:
         try:
-            positions = rc.get_positions("linear")
+            # 為什麼 to_thread：get_positions 為阻塞 httpx，不可卡住事件迴圈。
+            positions = await asyncio.to_thread(rc.get_positions, "linear")
             for p in positions:
                 if p.get("symbol") == sym:
                     size = float(p.get("size") or p.get("qty") or 0)
@@ -1761,7 +1770,8 @@ async def _sweep_demo_orphan_positions(errors: list[str]) -> dict:
 
     positions: list = []
     try:
-        positions = rc.get_positions("linear") or []
+        # 為什麼 to_thread：get_positions 為阻塞 httpx，不可卡住事件迴圈。
+        positions = await asyncio.to_thread(rc.get_positions, "linear") or []
     except Exception as exc:
         # P2-WP05-FUP-1：client 返 stable reason_code，例外只進 log。
         logger.warning("Orphan sweep: get_positions failed: %s", exc)
@@ -1868,7 +1878,9 @@ async def _sweep_demo_orphan_orders(errors: list[str]) -> dict:
     """Demo-side wrapper around _sweep_orphan_orders using demo BybitClient.
     Demo 側 wrapper，用 demo BybitClient 走全帳戶 cancel-all。
     """
-    return _sweep_orphan_orders(_get_rust_client(), "demo", errors)
+    # 為什麼 to_thread：_sweep_orphan_orders 內含阻塞 httpx（get_active_orders /
+    # cancel_all_orders），不可在事件迴圈線程上同步執行。
+    return await asyncio.to_thread(_sweep_orphan_orders, _get_rust_client(), "demo", errors)
 
 
 def _verify_clean_max_attempts() -> int:
@@ -1918,8 +1930,10 @@ async def _verify_account_clean(
     started = asyncio.get_event_loop().time()
     for attempt in range(1, attempts_cap + 1):
         try:
-            positions = rc.get_positions("linear") or []
-            orders = rc.get_active_orders("linear") or []
+            # 為什麼 to_thread：get_positions / get_active_orders 為阻塞 httpx，
+            # 此輪詢迴圈不可在事件迴圈線程上同步阻塞。
+            positions = await asyncio.to_thread(rc.get_positions, "linear") or []
+            orders = await asyncio.to_thread(rc.get_active_orders, "linear") or []
         except Exception as exc:
             logger.warning(
                 "%s verify poll attempt %d exception: %s", env_label, attempt, exc,
@@ -2240,7 +2254,9 @@ async def get_demo_fills(
     try:
         safe_side = side if side in {"Buy", "Sell"} else None
         fetch_limit = min(max(limit + offset + 1, limit), 100)
-        raw = [_normalize_execution(f) for f in rc.get_executions("linear", limit=fetch_limit)]
+        # 為什麼 to_thread：get_executions 為阻塞 httpx，不可卡住事件迴圈。
+        executions = await asyncio.to_thread(rc.get_executions, "linear", limit=fetch_limit)
+        raw = [_normalize_execution(f) for f in executions]
         if safe_side:
             raw = [f for f in raw if f.get("side") == safe_side]
         fills = raw[offset:offset + limit]
