@@ -348,8 +348,29 @@ def _run_quantile_pipeline(
     # INFRA-PREBUILD-1 B 部：寫 learning.model_registry，讓 Rust OnnxModelManager
     # 可以查 DB 取「這個 slot 的 latest production model」，不必只依賴 _current
     # symlink。DB 不可用或 verdict=no_ship 時跳過。
+    # P1-14：对 live-readiness-bearing 工件（should_ship / shadow_only + 已写盘
+    # 三件套）注册持久化是强制要求，DB 不可用必须 fail-loud；no_ship / unknown
+    # 仍是非致命的合法跳过。caller 侧先做连通性预检以区分「DB 不可用」与「verdict
+    # 跳过 / slot 锁定」，避免改 register_model 签名（更小爆炸半径）。
+    from program_code.ml_training.model_registry import (
+        register_quantile_trio_from_onnx_out,
+        has_required_persistence_artifact,
+        check_db_connectivity,
+        RegistryPersistenceError,
+    )
+    registry_required = has_required_persistence_artifact(
+        onnx_out=onnx_out, verdict=result.verdict
+    )
+    if registry_required and not check_db_connectivity(dsn=config.dsn):
+        # 为什么 fail-loud：required 工件无法落库即 registry 静默陈旧，
+        # canary_promoter 取不到候选；训练绝不能在此情况下报成功。
+        result.stages_completed.append("registry_persistence_failed")
+        raise RegistryPersistenceError(
+            f"required registry persistence unavailable for "
+            f"{config.strategy_type}/{config.engine_mode} verdict={result.verdict}: "
+            "DB connectivity precheck failed"
+        )
     try:
-        from program_code.ml_training.model_registry import register_quantile_trio_from_onnx_out
         registry_ids = register_quantile_trio_from_onnx_out(
             onnx_out=onnx_out,
             strategy=config.strategy_type,
@@ -363,9 +384,20 @@ def _run_quantile_pipeline(
         )
         if registry_ids:
             result.stages_completed.append(f"model_registry_wrote_{len(registry_ids)}")
+        elif registry_required:
+            # required 工件 + DB 已连通却 0 行：非 DB 原因（slot 锁定 promoting/
+            # production 是合法 no-op，记 INFO；no_ship/unknown 不会进到这里）。
+            logger.info(
+                "model_registry: required artifact returned 0 rows (likely slot "
+                "locked in promoting/production) for %s/%s",
+                config.strategy_type, config.engine_mode,
+            )
+            result.stages_completed.append("model_registry_skipped_slot_locked")
         else:
             result.stages_completed.append("model_registry_skipped")
-    except Exception as e:  # noqa: BLE001 — registry write is audit-only
+    except RegistryPersistenceError:
+        raise
+    except Exception as e:  # noqa: BLE001 — non-required registry write is audit-only
         logger.warning("model_registry write failed (non-fatal): %s", e)
         result.stages_completed.append("model_registry_error")
 

@@ -1,6 +1,14 @@
 """
-Strategy Promotion Pipeline — LEARNING -> PAPER_SHADOW -> DEMO_ACTIVE -> LIVE_PENDING -> LIVE_ACTIVE
-策略漸進放權管線 — 學習 -> 紙盤觀察 -> Demo 激活 -> Live 待審 -> Live 激活
+Strategy Promotion Pipeline — LEARNING -> PAPER_SHADOW -> [FROZEN] -> DEMO_ACTIVE -> LIVE_PENDING -> LIVE_ACTIVE
+策略漸進放權管線 — 學習 -> 紙盤觀察 -> [已凍結] -> Demo 激活 -> Live 待審 -> Live 激活
+
+凍結說明（CLAUDE.md §四，P1-10 cold audit）：
+  PAPER_SHADOW -> DEMO_ACTIVE 這條晉升路徑已被凍結。Paper 不是 active
+  promotion evidence lane，除非未來 operator 顯式決定重開。上方箭頭圖中
+  LEARNING -> PAPER_SHADOW -> DEMO_ACTIVE 的「紙盤畢業」段落現為 aspirational/
+  frozen：enum 與審計記錄保留以維持編譯與歷史，但 promote() 的 DEMO_ACTIVE
+  分支會硬性 fail-closed（見 promote()）。重開的單一接縫由
+  OPENCLAW_REOPEN_PAPER_PROMOTION 命名標記（目前未實作）。
 
 MODULE_NOTE (English):
   Implements 6-01~03 progressive authorization for strategy/model deployment.
@@ -516,9 +524,19 @@ class PromotionGate:
                 # LEARNING -> PAPER_SHADOW: always allowed (just register).
                 pass
             elif target_stage == PromotionStage.DEMO_ACTIVE:
-                eligible, reasons = self._check_paper_gates(entry)
-                if not eligible:
-                    return False, f"gates_not_met:{','.join(reasons)}"
+                # P1-10 凍結（CLAUDE.md §四）：PAPER_SHADOW -> DEMO_ACTIVE 是
+                # 唯一一條用 paper 指標晉升的路徑。Paper 不是 active promotion
+                # evidence lane，這裡硬性 fail-closed，不評估 _check_paper_gates，
+                # 以免 paper 證據成為晉升憑據。
+                #
+                # 重開接縫（reopen seam）：未來 operator 若顯式決定重開 paper
+                # lane，這是唯一需要翻轉的地方 —— 解開下列 freeze 並改回門檻檢查。
+                # 由環境變數 OPENCLAW_REOPEN_PAPER_PROMOTION 命名（目前未實作，
+                # 僅作為單一翻轉點的標記）。
+                return (
+                    False,
+                    "paper_lane_frozen:demo_promotion_requires_explicit_operator_reopen",
+                )
             elif target_stage == PromotionStage.LIVE_PENDING:
                 eligible, reasons = self._check_demo_gates(entry)
                 if not eligible:

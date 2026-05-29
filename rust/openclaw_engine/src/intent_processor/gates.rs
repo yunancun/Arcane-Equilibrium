@@ -3,6 +3,11 @@
 
 use super::*;
 
+/// P1-09 測試固定時鐘（epoch 秒，2026-05-29T00:00:00Z 附近）。測試 fixture 的
+/// `_meta.updated_at` 相對此值構造 fresh / stale 場景，避免依賴 wallclock。
+#[cfg(test)]
+pub(super) const TEST_NOW_SECS: i64 = 1_780_000_000;
+
 impl IntentProcessor {
     /// PH5-WIRE-1: Paper/demo mode cost gate helper.
     /// Positive JS estimate → check EV vs fee (block if below).
@@ -113,7 +118,8 @@ impl IntentProcessor {
         volume_24h: f64,
     ) -> Option<ExchangeGateResult> {
         let slippage = lookup_slippage(&self.risk_config.slippage, volume_24h);
-        self.cost_gate_moderate_with_slippage(strategy, symbol, fee_rate, slippage)
+        // 測試 wrapper：注入固定 now（與 TEST_NOW_SECS fixture 對齊）。
+        self.cost_gate_moderate_with_slippage(strategy, symbol, fee_rate, slippage, TEST_NOW_SECS)
     }
 
     pub(super) fn cost_gate_moderate_with_slippage(
@@ -122,6 +128,7 @@ impl IntentProcessor {
         symbol: &str,
         fee_rate: f64,
         slippage: f64,
+        now_secs: i64,
     ) -> Option<ExchangeGateResult> {
         let slippage_cfg = &self.risk_config.slippage;
         let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;
@@ -168,6 +175,24 @@ impl IntentProcessor {
                 None
             }
             Some(cell) if cell.shrunk_bps > 0.0 => {
+                // P1-09 demo 非對稱：正 edge 若 stale / 非 runtime-derived / 未驗證，
+                // 路由到探索模式（放行 + log），NOT reject。理由：demo 是學習資料源
+                // （memory feedback_demo_loose_live_strict_policy），對 unvalidated-positive
+                // 採 fail-close 會重現 Phase 5 99.98% reject 死循環。live 同情況改為拒絕。
+                let ttl = slippage_cfg.edge_estimate_ttl_secs;
+                let fresh = self.edge_estimates.is_fresh(now_secs, ttl);
+                if !fresh || !cell.from_runtime_field || !cell.validation_passed {
+                    tracing::info!(
+                        strategy,
+                        symbol,
+                        estimated_edge_bps = cell.shrunk_bps,
+                        fresh,
+                        has_runtime = cell.from_runtime_field,
+                        validated = cell.validation_passed,
+                        "cost_gate(JS-demo): positive edge unproven — exploration mode / 正 edge 未驗證探索模式"
+                    );
+                    return None;
+                }
                 // Positive JS estimate: same threshold as live (win-rate weighted)
                 // G7-07: floor + safety multiplier from `risk.slippage.*`.
                 // 正 JS 估計：與 live 相同門檻（勝率加權）。G7-07：改讀 TOML。
@@ -223,7 +248,8 @@ impl IntentProcessor {
         volume_24h: f64,
     ) -> Option<ExchangeGateResult> {
         let slippage = lookup_slippage(&self.risk_config.slippage, volume_24h);
-        self.cost_gate_live_with_slippage(strategy, symbol, fee_rate, slippage)
+        // 測試 wrapper：注入固定 now（與 TEST_NOW_SECS fixture 對齊）。
+        self.cost_gate_live_with_slippage(strategy, symbol, fee_rate, slippage, TEST_NOW_SECS)
     }
 
     pub(super) fn cost_gate_live_with_slippage(
@@ -232,6 +258,7 @@ impl IntentProcessor {
         symbol: &str,
         fee_rate: f64,
         slippage: f64,
+        now_secs: i64,
     ) -> Option<ExchangeGateResult> {
         let slippage_cfg = &self.risk_config.slippage;
         // Round-trip cost in bps including slippage
@@ -239,6 +266,27 @@ impl IntentProcessor {
         let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;
         match self.edge_estimates.get_cell(strategy, symbol) {
             Some(cell) if cell.shrunk_bps > 0.0 => {
+                // P1-09 生產新鮮度門：正 edge 僅在 fresh + runtime-derived + validated
+                // 三者全真時才允許進入門檻比較。任一不成立 → live fail-closed 拒絕
+                // （根原則 #5/#6：陳舊 / 舊格式 / 未驗證的正 edge 不可授權 live）。
+                // `now_secs` 由 caller 注入，TTL 讀 config 而非字面量。
+                let ttl = slippage_cfg.edge_estimate_ttl_secs;
+                let fresh = self.edge_estimates.is_fresh(now_secs, ttl);
+                if !fresh || !cell.from_runtime_field || !cell.validation_passed {
+                    let age_secs = self
+                        .edge_estimates
+                        .updated_at()
+                        .map(|u| now_secs.saturating_sub(u));
+                    return Some(ExchangeGateResult::rejected(
+                        RejectionCode::CostGateJsLiveStaleOrUnvalidated {
+                            age_secs,
+                            ttl_secs: ttl,
+                            has_runtime: cell.from_runtime_field,
+                            validated: cell.validation_passed,
+                        }
+                        .format(),
+                    ));
+                }
                 // Win-rate weighted threshold (aligned with Python cost_gate.py)
                 // G7-07: floor + safety multiplier from `risk.slippage.*`.
                 // 勝率加權門檻（對齊 Python cost_gate.py）。G7-07：改讀 TOML。

@@ -1165,8 +1165,22 @@ fn test_cost_gate_live_low_sample_negative_still_fails_closed() {
 #[test]
 fn test_cost_gate_live_postonly_cost_excludes_taker_slippage() {
     let mut proc = IntentProcessor::new();
-    let json = r#"{"grid_trading::BTCUSDT": {"shrunk_bps": 10.0, "win_rate": 1.0, "n": 100, "std_bps": 2.0}}"#;
-    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    // P1-09: this test pins the slippage-math intent, so the cell must satisfy
+    // the new freshness gate (fresh + runtime + validated) — otherwise live
+    // would reject on freshness before reaching the threshold compare.
+    // P1-09：本測試釘住滑點數學意圖，cell 須通過新鮮度門（fresh+runtime+validated），
+    // 否則 live 會在門檻比較前因新鮮度先行拒絕。
+    let now = super::gates::TEST_NOW_SECS;
+    let json = format!(
+        r#"{{
+            "_meta": {{"grand_mean_bps": 1.0, "updated_at": "{ts}"}},
+            "grid_trading::BTCUSDT": {{"runtime_bps": 10.0, "shrunk_bps": 10.0, "win_rate": 1.0, "n": 100, "std_bps": 2.0, "validation_passed": true}}
+        }}"#,
+        ts = chrono::DateTime::<chrono::Utc>::from_timestamp(now, 0)
+            .unwrap()
+            .to_rfc3339(),
+    );
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(&json).unwrap();
     proc.set_edge_estimates(estimates);
 
     let postonly_cost = proc.cost_gate_live_with_slippage(
@@ -1174,9 +1188,10 @@ fn test_cost_gate_live_postonly_cost_excludes_taker_slippage() {
         "BTCUSDT",
         0.0002, // maker fee
         0.0,    // PostOnly maker path: no taker-style slippage tier
+        now,
     );
     let taker_slippage_cost =
-        proc.cost_gate_live_with_slippage("grid_trading", "BTCUSDT", 0.00055, 0.0030);
+        proc.cost_gate_live_with_slippage("grid_trading", "BTCUSDT", 0.00055, 0.0030, now);
 
     assert!(
         postonly_cost.is_none(),
@@ -1208,6 +1223,156 @@ fn test_cost_gate_moderate_high_sample_negative_still_blocks() {
         reason.contains("demo") && reason.contains("blocked"),
         "expected demo-negative block reason, got: {}",
         reason
+    );
+}
+
+// ─── P1-09 (2026-05-29): positive-edge freshness gate ───
+// 正 edge 新鮮度門：fresh + runtime-derived + validated 才允許過生產門；
+// live → reject / demo → exploration（非對稱）。`now` 注入 TEST_NOW_SECS。
+
+/// P1-09 fixture：構造一個正 edge cell，可選 fresh / runtime / validated。
+/// `age_secs` = now - updated_at（None → 不寫 updated_at，模擬舊快照無時間戳）。
+fn p1_09_estimates(
+    age_secs: Option<i64>,
+    has_runtime: bool,
+    validated: bool,
+) -> crate::edge_estimates::EdgeEstimates {
+    let now = super::gates::TEST_NOW_SECS;
+    let meta = match age_secs {
+        Some(age) => format!(
+            r#""_meta": {{"grand_mean_bps": 1.0, "updated_at": "{ts}"}},"#,
+            ts = chrono::DateTime::<chrono::Utc>::from_timestamp(now - age, 0)
+                .unwrap()
+                .to_rfc3339(),
+        ),
+        None => String::from(r#""_meta": {"grand_mean_bps": 1.0},"#),
+    };
+    // 高正 edge（50 bps）確保不會因門檻比較失敗；只測新鮮度分支。
+    let bps_field = if has_runtime {
+        r#""runtime_bps": 50.0, "shrunk_bps": 50.0"#
+    } else {
+        r#""shrunk_bps": 50.0"#
+    };
+    let json = format!(
+        r#"{{
+            {meta}
+            "ma_crossover::BTCUSDT": {{{bps}, "win_rate": 0.6, "n": 100, "std_bps": 5.0, "validation_passed": {val}}}
+        }}"#,
+        meta = meta,
+        bps = bps_field,
+        val = validated,
+    );
+    crate::edge_estimates::EdgeEstimates::load_from_str(&json).unwrap()
+}
+
+#[test]
+fn test_p1_09_live_all_three_fresh_runtime_validated_passes() {
+    let mut proc = IntentProcessor::new();
+    proc.set_edge_estimates(p1_09_estimates(Some(3_600), true, true)); // 1h old
+    let result = proc.cost_gate_live("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_none(),
+        "fresh + runtime + validated positive edge must pass live"
+    );
+}
+
+#[test]
+fn test_p1_09_live_stale_positive_rejected() {
+    let mut proc = IntentProcessor::new();
+    // age 49h > 48h TTL → stale.
+    proc.set_edge_estimates(p1_09_estimates(Some(49 * 3_600), true, true));
+    let result = proc.cost_gate_live("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    let reason = result
+        .expect("stale positive edge must reject in live")
+        .rejected_reason
+        .unwrap();
+    assert!(
+        reason.contains("JS-live") && reason.contains("fail-closed"),
+        "expected stale-or-unvalidated live reject, got: {reason}"
+    );
+}
+
+#[test]
+fn test_p1_09_live_missing_runtime_field_rejected() {
+    let mut proc = IntentProcessor::new();
+    // fresh + validated but legacy shrunk_bps only (no runtime_bps).
+    proc.set_edge_estimates(p1_09_estimates(Some(3_600), false, true));
+    let result = proc.cost_gate_live("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    let reason = result
+        .expect("legacy-only positive edge must reject in live")
+        .rejected_reason
+        .unwrap();
+    assert!(
+        reason.contains("has_runtime=false"),
+        "expected has_runtime=false in reason, got: {reason}"
+    );
+}
+
+#[test]
+fn test_p1_09_live_validation_failed_rejected() {
+    let mut proc = IntentProcessor::new();
+    // fresh + runtime but validation_passed=false.
+    proc.set_edge_estimates(p1_09_estimates(Some(3_600), true, false));
+    let result = proc.cost_gate_live("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    let reason = result
+        .expect("unvalidated positive edge must reject in live")
+        .rejected_reason
+        .unwrap();
+    assert!(
+        reason.contains("validated=false"),
+        "expected validated=false in reason, got: {reason}"
+    );
+}
+
+#[test]
+fn test_p1_09_live_no_timestamp_rejected() {
+    let mut proc = IntentProcessor::new();
+    // 舊快照無 _meta.updated_at → is_fresh False → reject（age=none）。
+    proc.set_edge_estimates(p1_09_estimates(None, true, true));
+    let result = proc.cost_gate_live("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    let reason = result
+        .expect("no-timestamp positive edge must reject in live")
+        .rejected_reason
+        .unwrap();
+    assert!(
+        reason.contains("age=none"),
+        "expected age=none in reason, got: {reason}"
+    );
+}
+
+#[test]
+fn test_p1_09_demo_stale_positive_enters_exploration_not_reject() {
+    let mut proc = IntentProcessor::new();
+    // 同樣 stale 正 edge：demo 路徑必須走探索（None），NOT reject。
+    // 這是 Phase 5 死循環防護的核心非對稱。
+    proc.set_edge_estimates(p1_09_estimates(Some(49 * 3_600), true, true));
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_none(),
+        "demo stale positive edge must enter exploration (None), not reject"
+    );
+}
+
+#[test]
+fn test_p1_09_demo_unvalidated_positive_enters_exploration_not_reject() {
+    let mut proc = IntentProcessor::new();
+    proc.set_edge_estimates(p1_09_estimates(Some(3_600), false, false));
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_none(),
+        "demo legacy/unvalidated positive edge must enter exploration, not reject"
+    );
+}
+
+#[test]
+fn test_p1_09_demo_all_three_proven_still_threshold_checked() {
+    let mut proc = IntentProcessor::new();
+    // fresh + runtime + validated 正 edge（50 bps）→ 通過新鮮度門後做門檻比較 → pass。
+    proc.set_edge_estimates(p1_09_estimates(Some(3_600), true, true));
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_none(),
+        "demo proven high positive edge must pass threshold check"
     );
 }
 

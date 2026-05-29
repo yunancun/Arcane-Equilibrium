@@ -35,7 +35,80 @@ from program_code.ml_training.model_registry import (
     _file_size_and_sha256,
     register_model,
     transition_canary_status,
+    has_required_persistence_artifact,
+    check_db_connectivity,
+    RegistryPersistenceError,
 )
+
+
+# ───── P1-14: required-artifact persistence criteria + fail-loud ─────
+
+
+def _onnx_out_with(written: bool, path: str = "/tmp/q.onnx") -> dict:
+    return {
+        "train_date": "2026-05-29",
+        "artifacts": {
+            "q10": {"written": written, "path": path if written else ""},
+            "q50": {"written": written, "path": path if written else ""},
+            "q90": {"written": written, "path": path if written else ""},
+        },
+    }
+
+
+def test_required_artifact_true_for_shadow_only_written_trio():
+    assert has_required_persistence_artifact(
+        onnx_out=_onnx_out_with(True), verdict=VERDICT_SHADOW_ONLY
+    ) is True
+
+
+def test_required_artifact_true_for_should_ship():
+    assert has_required_persistence_artifact(
+        onnx_out=_onnx_out_with(True), verdict=VERDICT_SHOULD_SHIP
+    ) is True
+
+
+def test_required_artifact_false_for_no_ship():
+    # no_ship 不属于 required —— 合法跳过，绝不 fail-loud。
+    assert has_required_persistence_artifact(
+        onnx_out=_onnx_out_with(True), verdict=VERDICT_NO_SHIP
+    ) is False
+
+
+def test_required_artifact_false_when_trio_not_written():
+    assert has_required_persistence_artifact(
+        onnx_out=_onnx_out_with(False), verdict=VERDICT_SHADOW_ONLY
+    ) is False
+
+
+def test_check_db_connectivity_false_when_db_unavailable(monkeypatch):
+    monkeypatch.delenv("OPENCLAW_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DSN", raising=False)
+    monkeypatch.delenv("POSTGRES_USER", raising=False)
+    monkeypatch.delenv("POSTGRES_DB", raising=False)
+    assert check_db_connectivity() is False
+
+
+def test_check_db_connectivity_true_with_fake_conn():
+    class FakeCursor:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def execute(self, *a): pass
+        def fetchone(self): return (1,)
+
+    class FakeConn:
+        def __enter__(self): return self
+        def __exit__(self, *a): return False
+        def cursor(self): return FakeCursor()
+        def close(self): pass
+
+    with patch("program_code.ml_training.model_registry._connect",
+               return_value=FakeConn()):
+        assert check_db_connectivity() is True
+
+
+def test_registry_persistence_error_is_runtime_error():
+    # fail-loud 必须是真异常（可被 scheduler 捕获为非零退出），不是静默 None。
+    assert issubclass(RegistryPersistenceError, RuntimeError)
 
 
 # ───── Constants alignment ──────────────────────────────────────────

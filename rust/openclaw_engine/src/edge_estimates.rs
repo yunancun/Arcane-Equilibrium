@@ -39,6 +39,16 @@ pub struct CellEstimate {
     /// Human-readable validation rejection/pass reason.
     /// 驗證通過/拒絕原因。
     pub validation_reason: String,
+    /// P1-09: true ONLY when the JSON `runtime_bps` key was present for this
+    /// cell. False means `shrunk_bps` came from the legacy `shrunk_bps` fallback.
+    /// The production freshness gate requires a runtime-derived bps before a
+    /// positive edge may authorize — a legacy-only positive `shrunk_bps` (no
+    /// `runtime_bps`, no validation) must not pass the live gate (root #5/#6).
+    /// P1-09：僅當此 cell 的 JSON 含 `runtime_bps` key 時為 true。False 代表
+    /// `shrunk_bps` 來自舊格式 `shrunk_bps` 回退。生產新鮮度門要求 bps 為
+    /// runtime-derived 才允許正 edge 授權——舊格式正 `shrunk_bps`（無 `runtime_bps`、
+    /// 無驗證）不可過 live 門（根原則 #5/#6）。
+    pub from_runtime_field: bool,
 }
 
 /// Shrunk realized-edge estimates per (strategy, symbol) cell.
@@ -54,6 +64,14 @@ pub struct EdgeEstimates {
     /// Number of cells with estimates.
     /// 有估計的格子數。
     n_cells: usize,
+    /// P1-09: `_meta.updated_at` parsed RFC3339 → epoch seconds. None when the
+    /// field is absent or unparseable; a None snapshot is treated as NOT fresh
+    /// by `is_fresh`, so a legacy snapshot with no timestamp fails the freshness
+    /// gate (live → reject) rather than silently passing.
+    /// P1-09：`_meta.updated_at` 解析 RFC3339 → epoch 秒。欄位缺失或無法解析時
+    /// 為 None；`is_fresh` 將 None 視為「非新鮮」，舊格式無時間戳快照無法通過
+    /// 新鮮度門（live → 拒絕）而非靜默放行。
+    updated_at: Option<i64>,
 }
 
 impl EdgeEstimates {
@@ -74,55 +92,7 @@ impl EdgeEstimates {
         let parsed: serde_json::Value = serde_json::from_str(&content).ok()?;
         let obj = parsed.as_object()?;
 
-        let mut data = HashMap::new();
-        let mut grand_mean_bps = 0.0;
-
-        if let Some(meta) = obj.get("_meta").and_then(|v| v.as_object()) {
-            grand_mean_bps = meta
-                .get("grand_mean_bps")
-                .and_then(|v| v.as_f64())
-                .unwrap_or(0.0);
-        }
-
-        for (key, val) in obj {
-            if key.starts_with('_') {
-                continue;
-            }
-            if let Some(bps) = val
-                .get("runtime_bps")
-                .or_else(|| val.get("shrunk_bps"))
-                .and_then(|v| v.as_f64())
-            {
-                let win_rate = val
-                    .get("win_rate_shrunk")
-                    .or_else(|| val.get("win_rate"))
-                    .and_then(|v| v.as_f64())
-                    .unwrap_or(0.5)
-                    .clamp(0.0, 1.0);
-                let n_trades = val.get("n").and_then(|v| v.as_u64()).unwrap_or(0);
-                let std_bps = val.get("std_bps").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                let validation_passed = val
-                    .get("validation_passed")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false);
-                let validation_reason = val
-                    .get("validation_reason")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                data.insert(
-                    key.clone(),
-                    CellEstimate {
-                        shrunk_bps: bps,
-                        win_rate,
-                        n_trades,
-                        std_bps,
-                        validation_passed,
-                        validation_reason,
-                    },
-                );
-            }
-        }
+        let (data, grand_mean_bps, updated_at) = Self::parse_object(obj);
 
         let n_cells = data.len();
         tracing::info!(
@@ -136,33 +106,50 @@ impl EdgeEstimates {
             data,
             grand_mean_bps,
             n_cells,
+            updated_at,
         })
     }
 
-    /// Load from a JSON string (convenience for tests and inline initialization).
-    /// 從 JSON 字符串加載（測試和內聯初始化的便捷方法）。
-    pub fn load_from_str(json: &str) -> Option<Self> {
-        let parsed: serde_json::Value = serde_json::from_str(json).ok()?;
-        let obj = parsed.as_object()?;
-
+    /// P1-09: shared parse of the JSON top-level object into
+    /// (cells, grand_mean_bps, updated_at). Extracted so `load_from_file` and
+    /// `load_from_str` share one source of truth for the new `from_runtime_field`
+    /// and `_meta.updated_at` semantics (previously the two loops were duplicated
+    /// and could drift). `from_runtime_field` is true ONLY when the JSON
+    /// `runtime_bps` key is present; `updated_at` parses `_meta.updated_at`
+    /// (RFC3339 → epoch secs) and is None when absent/unparseable.
+    /// P1-09：抽出共用解析，將 JSON 頂層物件轉成 (cells, grand_mean_bps,
+    /// updated_at)，讓 `load_from_file` 與 `load_from_str` 對 `from_runtime_field`
+    /// 與 `_meta.updated_at` 共用單一真相來源（先前兩份迴圈重複易漂移）。
+    fn parse_object(
+        obj: &serde_json::Map<String, serde_json::Value>,
+    ) -> (HashMap<String, CellEstimate>, f64, Option<i64>) {
         let mut data = HashMap::new();
         let mut grand_mean_bps = 0.0;
+        let mut updated_at: Option<i64> = None;
 
         if let Some(meta) = obj.get("_meta").and_then(|v| v.as_object()) {
             grand_mean_bps = meta
                 .get("grand_mean_bps")
                 .and_then(|v| v.as_f64())
                 .unwrap_or(0.0);
+            // RFC3339 → epoch 秒。解析失敗 / 缺失 → None（is_fresh 視為非新鮮）。
+            updated_at = meta
+                .get("updated_at")
+                .and_then(|v| v.as_str())
+                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                .map(|dt| dt.timestamp());
         }
 
         for (key, val) in obj {
             if key.starts_with('_') {
                 continue;
             }
-            if let Some(bps) = val
-                .get("runtime_bps")
-                .or_else(|| val.get("shrunk_bps"))
-                .and_then(|v| v.as_f64())
+            // P1-09：先判定 runtime_bps key 是否存在（決定 from_runtime_field），
+            // 再回退到舊格式 shrunk_bps。
+            let runtime_field = val.get("runtime_bps").and_then(|v| v.as_f64());
+            let from_runtime_field = runtime_field.is_some();
+            if let Some(bps) =
+                runtime_field.or_else(|| val.get("shrunk_bps").and_then(|v| v.as_f64()))
             {
                 let win_rate = val
                     .get("win_rate_shrunk")
@@ -190,16 +177,29 @@ impl EdgeEstimates {
                         std_bps,
                         validation_passed,
                         validation_reason,
+                        from_runtime_field,
                     },
                 );
             }
         }
+
+        (data, grand_mean_bps, updated_at)
+    }
+
+    /// Load from a JSON string (convenience for tests and inline initialization).
+    /// 從 JSON 字符串加載（測試和內聯初始化的便捷方法）。
+    pub fn load_from_str(json: &str) -> Option<Self> {
+        let parsed: serde_json::Value = serde_json::from_str(json).ok()?;
+        let obj = parsed.as_object()?;
+
+        let (data, grand_mean_bps, updated_at) = Self::parse_object(obj);
 
         let n_cells = data.len();
         Some(Self {
             data,
             grand_mean_bps,
             n_cells,
+            updated_at,
         })
     }
 
@@ -276,6 +276,34 @@ impl EdgeEstimates {
     /// 所有格子的全域均值收縮 bps。
     pub fn grand_mean_bps(&self) -> f64 {
         self.grand_mean_bps
+    }
+
+    /// P1-09: snapshot `_meta.updated_at` as epoch seconds, or None when the
+    /// field was absent / unparseable.
+    /// P1-09：快照 `_meta.updated_at`（epoch 秒），缺失或無法解析時為 None。
+    pub fn updated_at(&self) -> Option<i64> {
+        self.updated_at
+    }
+
+    /// P1-09: whether the snapshot is fresh relative to `now` (epoch secs) and
+    /// `ttl` (secs). A None `updated_at` is NOT fresh — a legacy snapshot with no
+    /// timestamp must fail the production freshness gate rather than pass
+    /// silently. Pure function: `now` is injected by the caller (never read from
+    /// wallclock here) so the gate stays deterministic and unit-testable.
+    /// P1-09：快照相對 `now`（epoch 秒）與 `ttl`（秒）是否新鮮。None `updated_at`
+    /// 視為非新鮮——無時間戳的舊快照必須無法通過生產新鮮度門而非靜默放行。
+    /// 純函數：`now` 由呼叫端注入（此處絕不讀 wallclock），確保門 determinism 與可測。
+    pub fn is_fresh(&self, now: i64, ttl: i64) -> bool {
+        // 防禦：now <= 0 視為非新鮮（fail-closed）。舊 process() 路徑會以 now=0
+        // 委派，若不擋則 0.saturating_sub(updated_at) 下溢成大值並 <= ttl 判 TRUE，
+        // 令 STALE cell 誤判為 FRESH。生產不可達，但補此 guard 杜絕潛在 fail-open。
+        if now <= 0 {
+            return false;
+        }
+        match self.updated_at {
+            Some(updated_at) => now.saturating_sub(updated_at) <= ttl,
+            None => false,
+        }
     }
 }
 
@@ -440,5 +468,87 @@ mod tests {
         // Live mode shares production estimates with demo.
         let e = EdgeEstimates::load_for_mode("/nonexistent_base", "live");
         assert!(!e.is_populated());
+    }
+
+    // ─── P1-09: freshness / runtime-derived parse + is_fresh ───
+    // P1-09：新鮮度 / runtime-derived 解析 + is_fresh
+
+    #[test]
+    fn test_updated_at_parses_rfc3339() {
+        let json = r#"{
+            "_meta": {"grand_mean_bps": 1.0, "updated_at": "2026-05-29T00:00:00+00:00"},
+            "strat::SYM": {"runtime_bps": 5.0, "validation_passed": true, "n": 50}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        // 2026-05-29T00:00:00Z = 1780012800 epoch secs.
+        assert_eq!(e.updated_at(), Some(1_780_012_800));
+    }
+
+    #[test]
+    fn test_updated_at_none_when_meta_missing_field() {
+        let json = r#"{
+            "_meta": {"grand_mean_bps": 1.0},
+            "strat::SYM": {"runtime_bps": 5.0, "n": 50}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        assert!(e.updated_at().is_none());
+    }
+
+    #[test]
+    fn test_updated_at_none_when_unparseable() {
+        let json = r#"{
+            "_meta": {"updated_at": "not-a-timestamp"},
+            "strat::SYM": {"runtime_bps": 5.0, "n": 50}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        assert!(e.updated_at().is_none());
+    }
+
+    #[test]
+    fn test_from_runtime_field_true_only_when_runtime_bps_present() {
+        let json = r#"{
+            "with_rt::SYM": {"runtime_bps": 5.0, "shrunk_bps": 9.0, "n": 50},
+            "legacy::SYM": {"shrunk_bps": 9.0, "n": 50}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        assert!(e.get_cell("with_rt", "SYM").unwrap().from_runtime_field);
+        assert!(!e.get_cell("legacy", "SYM").unwrap().from_runtime_field);
+    }
+
+    #[test]
+    fn test_is_fresh_within_ttl() {
+        let json = r#"{
+            "_meta": {"updated_at": "2026-05-29T00:00:00+00:00"},
+            "strat::SYM": {"runtime_bps": 5.0, "n": 50}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        let updated = 1_780_012_800;
+        let ttl = 172_800; // 48h
+        // 正好等於 TTL 邊界 → fresh（<= 比較）。
+        assert!(e.is_fresh(updated + ttl, ttl));
+        // 超過 TTL 1 秒 → not fresh。
+        assert!(!e.is_fresh(updated + ttl + 1, ttl));
+    }
+
+    #[test]
+    fn test_is_fresh_false_when_no_updated_at() {
+        // 無 updated_at 的舊快照永遠視為非新鮮（fail-closed 預設）。
+        let json = r#"{"strat::SYM": {"runtime_bps": 5.0, "n": 50}}"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        assert!(!e.is_fresh(1_779_667_200, 172_800));
+    }
+
+    #[test]
+    fn test_is_fresh_false_when_now_non_positive() {
+        // now <= 0（如舊 process() 委派 now=0）即使 updated_at 很新也判非新鮮，
+        // 杜絕 0.saturating_sub 下溢造成 STALE 誤判 FRESH 的 fail-open。
+        let json = r#"{
+            "_meta": {"updated_at": "2026-05-29T00:00:00+00:00"},
+            "strat::SYM": {"runtime_bps": 5.0, "n": 50}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        let ttl = 172_800; // 48h
+        assert!(!e.is_fresh(0, ttl));
+        assert!(!e.is_fresh(-1, ttl));
     }
 }

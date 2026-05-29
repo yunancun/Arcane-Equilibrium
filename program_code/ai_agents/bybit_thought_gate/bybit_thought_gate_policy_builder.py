@@ -329,7 +329,10 @@ def build_report() -> dict[str, Any]:
     else:
         max_ai_call_tier = tighter_tier(budget_latency_cap, data_quality_cap)
         if max_ai_call_tier == "standard":
-            policy_state = "policy_ready_standard_allowed"
+            # P1-12 enum 归一化：标准 policy_state 为 policy_ready_standard，
+            # 去掉历史 _allowed 后缀，与 policy_ready_light_only 命名保持一致；
+            # 否则 selector(:303) allowlist 不接受会在已决定调用 AI 后静默 skip。
+            policy_state = "policy_ready_standard"
             allow_progress_to_h1c_decision = True
             recommended_action = "may_progress_to_h1c_decision"
         elif max_ai_call_tier == "light":

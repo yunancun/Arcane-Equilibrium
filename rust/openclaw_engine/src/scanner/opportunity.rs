@@ -390,6 +390,7 @@ mod tests {
             std_bps: 20.0,
             validation_passed: true,
             validation_reason: "test".to_string(),
+            from_runtime_field: true,
         };
         let decision = evaluate_opportunity(
             "ma_crossover",
