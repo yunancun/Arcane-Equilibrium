@@ -146,6 +146,12 @@ pub struct ReconcilerState {
     /// 用於 evaluate_actions 與 check_rest_failure_escalation 在
     /// STARTUP_GRACE_MS 寬限期內抑制自動升級。
     pub startup_ms: u64,
+    /// P2-110017-D2-RECONCILE · 上一輪被判定為 `DriftVerdict::Ghost` 的
+    /// (symbol|side) 集合。D2 收斂要求**連續 2 cycle** 都判 Ghost 才動本地倉
+    /// （C-3 結算 race 防護：cycle N+1 Bybit 短暫不回某 symbol 的結算延遲不可
+    /// 立即誤刪真倉）。每輪以「本輪 Ghost keys」整體覆蓋（非 streak 計數），
+    /// 故 Ghost 消失自動清除，無需過期 GC。本地集合、非熱路徑，成本極低。
+    pub last_ghost_keys: std::collections::HashSet<String>,
 }
 
 impl ReconcilerState {
@@ -163,6 +169,7 @@ impl ReconcilerState {
             burst_drift_streak: 0,
             pending_orphan_closes: HashMap::new(),
             startup_ms: 0,
+            last_ghost_keys: std::collections::HashSet::new(),
         }
     }
 }

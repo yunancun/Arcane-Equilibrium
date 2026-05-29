@@ -682,3 +682,409 @@ fn orphan_dispatched_when_engine_side_mismatches() {
         other => panic!("expected CloseSymbol, got {:?}", other),
     }
 }
+
+// ── P2-110017-D2-RECONCILE: process_ghosts converge tests ───────────────────
+//
+// 安全核心：Ghost 收斂 = 跨「本地 truth ↔ exchange truth」刪本地倉。誤刪真倉
+// = 災難（Root Principle 5）。下列測試對抗性覆蓋收斂 AND 條件 S-1..S-5。
+
+/// Helper: pre-seed `state.last_ghost_keys` so the 2-cycle streak (S-5) is met,
+/// and seed `state.baseline` so the audit baseline_qty is non-zero.
+/// 預植 last_ghost_keys 滿足 2-cycle streak + baseline 供 audit qty。
+fn make_ghost_state_streak_met(key: &str) -> ReconcilerState {
+    let mut state = make_state();
+    state.last_ghost_keys.insert(key.to_string());
+    state
+        .baseline
+        .insert(key.to_string(), pv("BTCUSDT", "Buy", 0.05));
+    state
+}
+
+/// round 2 mock 點查驗證器工廠：對任一 symbol 恆回固定 `GhostPointQuery`。
+/// 用於三分支對抗性驗證 S-6 gate；不需真實 PositionManager / BybitRestClient。
+fn pq_const(result: GhostPointQuery) -> impl Fn(String) -> std::future::Ready<GhostPointQuery> {
+    move |_symbol: String| std::future::ready(result)
+}
+
+#[tokio::test]
+async fn ghost_converged_happy_path_dispatches_converge_exchange_zero() {
+    // S-1 mirror 有倉（提供 is_long）+ S-2/S-3/S-4 由 Ghost verdict 表達（本函數
+    // 只在 Ok-fetch arm 被呼叫，Ghost = Bybit 確認 size==0）+ S-5 streak 已滿
+    // → 派 ConvergeExchangeZero，Ghost 從 kept 移除。
+    let mirror = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+    mirror.write().insert("BTCUSDT".into(), true); // 本地多單
+    let oh_cfg = build_orphan_cfg_for_test(Arc::clone(&mirror));
+    let mut state = make_ghost_state_streak_met("BTCUSDT|Buy");
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::Ghost)];
+    let (tx, mut rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::PipelineCommand>();
+    let audit_pool: Option<sqlx::PgPool> = None;
+
+    // S-6 點查回 ConfirmedZero（真 Ghost）→ happy path 收斂。
+    let kept = process_ghosts(
+        drifts,
+        &oh_cfg,
+        &tx,
+        &audit_pool,
+        "test",
+        &mut state,
+        pq_const(GhostPointQuery::ConfirmedZero),
+    )
+    .await;
+
+    assert!(
+        kept.is_empty(),
+        "converged ghost must be removed from drifts (no double escalation)"
+    );
+    let cmd = rx
+        .try_recv()
+        .expect("ConvergeExchangeZero must be dispatched on happy path");
+    match cmd {
+        crate::tick_pipeline::PipelineCommand::ConvergeExchangeZero {
+            symbol, is_long, ..
+        } => {
+            assert_eq!(symbol, "BTCUSDT");
+            assert!(is_long, "is_long must come from engine mirror (Buy=true)");
+        }
+        other => panic!("expected ConvergeExchangeZero, got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn ghost_not_converged_when_streak_not_met_first_cycle() {
+    // 誤刪防護（S-5）：本輪首見 Ghost（last_ghost_keys 不含此 key）→ 不收斂。
+    // C-3 結算 race：cycle N+1 Bybit 短暫不回某 symbol 不可立即誤刪真倉。
+    let mirror = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+    mirror.write().insert("BTCUSDT".into(), true);
+    let oh_cfg = build_orphan_cfg_for_test(Arc::clone(&mirror));
+    let mut state = make_state(); // last_ghost_keys 空 = streak 未滿
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::Ghost)];
+    let (tx, mut rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::PipelineCommand>();
+    let audit_pool: Option<sqlx::PgPool> = None;
+
+    // streak 未滿在點查前先擋；即使點查回 ConfirmedZero 也不得收斂。
+    let kept = process_ghosts(
+        drifts,
+        &oh_cfg,
+        &tx,
+        &audit_pool,
+        "test",
+        &mut state,
+        pq_const(GhostPointQuery::ConfirmedZero),
+    )
+    .await;
+
+    assert_eq!(
+        kept.len(),
+        1,
+        "first-cycle ghost must be kept (deferred), not converged"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "no converge command must be dispatched on first cycle (streak unmet)"
+    );
+    assert!(
+        state.last_ghost_keys.contains("BTCUSDT|Buy"),
+        "this cycle's ghost key must be recorded so the next cycle can meet streak"
+    );
+}
+
+#[tokio::test]
+async fn ghost_not_converged_when_engine_mirror_has_no_position() {
+    // 誤刪防護（S-1）：mirror 不含該 symbol（引擎本地無倉/無方向）→ 不收斂。
+    // 對應「Bybit 回 size>0 但引擎不真持有」的不確定情境：無本地 truth 不刪。
+    let mirror = Arc::new(parking_lot::RwLock::new(HashMap::new())); // 空鏡像
+    let oh_cfg = build_orphan_cfg_for_test(Arc::clone(&mirror));
+    let mut state = make_ghost_state_streak_met("BTCUSDT|Buy"); // streak 即使滿
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::Ghost)];
+    let (tx, mut rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::PipelineCommand>();
+    let audit_pool: Option<sqlx::PgPool> = None;
+
+    // mirror 無方向在點查前先擋；即使點查回 ConfirmedZero 也不得收斂。
+    let kept = process_ghosts(
+        drifts,
+        &oh_cfg,
+        &tx,
+        &audit_pool,
+        "test",
+        &mut state,
+        pq_const(GhostPointQuery::ConfirmedZero),
+    )
+    .await;
+
+    assert_eq!(
+        kept.len(),
+        1,
+        "ghost without engine-mirror direction must be kept, not converged"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "no converge command when engine has no local position (S-1 fail-closed)"
+    );
+}
+
+#[tokio::test]
+async fn ghost_converge_never_dispatches_close_symbol() {
+    // 反模式守衛：D2 路徑絕不發 CloseSymbol（避免 reduce-only re-dispatch 再撞
+    // 110017 重入迴圈）。Drain channel 確認唯一命令是 ConvergeExchangeZero。
+    let mirror = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+    mirror.write().insert("BTCUSDT".into(), true);
+    let oh_cfg = build_orphan_cfg_for_test(Arc::clone(&mirror));
+    let mut state = make_ghost_state_streak_met("BTCUSDT|Buy");
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::Ghost)];
+    let (tx, mut rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::PipelineCommand>();
+    let audit_pool: Option<sqlx::PgPool> = None;
+
+    let _ = process_ghosts(
+        drifts,
+        &oh_cfg,
+        &tx,
+        &audit_pool,
+        "test",
+        &mut state,
+        pq_const(GhostPointQuery::ConfirmedZero),
+    )
+    .await;
+
+    while let Ok(cmd) = rx.try_recv() {
+        if let crate::tick_pipeline::PipelineCommand::CloseSymbol { .. } = cmd {
+            panic!("D2 ghost converge MUST NOT dispatch CloseSymbol (re-enter loop risk)");
+        }
+    }
+}
+
+#[tokio::test]
+async fn ghost_process_passes_through_non_ghost_drifts() {
+    // 非 Ghost drift（MajorDrift / Orphan / SideFlip）必須原樣穿過，由既有
+    // process_orphans / evaluate_actions 處理；process_ghosts 不得吞掉。
+    let mirror = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+    mirror.write().insert("BTCUSDT".into(), true);
+    let oh_cfg = build_orphan_cfg_for_test(Arc::clone(&mirror));
+    let mut state = make_state();
+    let drifts = vec![
+        ("BTCUSDT|Buy".into(), DriftVerdict::MajorDrift),
+        ("ETHUSDT|Sell".into(), DriftVerdict::Orphan),
+    ];
+    let (tx, _rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::PipelineCommand>();
+    let audit_pool: Option<sqlx::PgPool> = None;
+
+    let kept = process_ghosts(
+        drifts,
+        &oh_cfg,
+        &tx,
+        &audit_pool,
+        "test",
+        &mut state,
+        pq_const(GhostPointQuery::ConfirmedZero),
+    )
+    .await;
+
+    assert_eq!(kept.len(), 2, "non-ghost drifts must pass through untouched");
+}
+
+#[tokio::test]
+async fn ghost_streak_self_clears_when_ghost_disappears() {
+    // last_ghost_keys 整體覆蓋語意：上輪有 Ghost，本輪無 Ghost（drift 為非 Ghost）
+    // → last_ghost_keys 自動清空。下次同 symbol 再判 Ghost 須重新累積 streak
+    // （防 stale streak 殘留導致過早收斂）。
+    let mirror = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+    mirror.write().insert("BTCUSDT".into(), true);
+    let oh_cfg = build_orphan_cfg_for_test(Arc::clone(&mirror));
+    let mut state = make_state();
+    state.last_ghost_keys.insert("BTCUSDT|Buy".into()); // 上輪 Ghost
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::MajorDrift)]; // 本輪非 Ghost
+    let (tx, _rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::PipelineCommand>();
+    let audit_pool: Option<sqlx::PgPool> = None;
+
+    let _ = process_ghosts(
+        drifts,
+        &oh_cfg,
+        &tx,
+        &audit_pool,
+        "test",
+        &mut state,
+        pq_const(GhostPointQuery::ConfirmedZero),
+    )
+    .await;
+
+    assert!(
+        state.last_ghost_keys.is_empty(),
+        "last_ghost_keys must clear when no ghost seen this cycle"
+    );
+}
+
+// ── P2-110017-D2-RECONCILE round 2: S-6 單 symbol 點查 gate（BB CRITICAL 修法 A）──
+//
+// 核心：主 fetch get_positions(None) 受 Bybit V5 limit=20 + 分頁截斷。持倉 > 20 時
+// 第 21+ 真倉「不在回應頁」→ 初判 Ghost。S-6 收斂前發單 symbol 點查（不受分頁截斷）
+// 作為權威 gate。下列三分支 + 對抗驗證直接覆蓋 BB CRITICAL regression。
+
+#[tokio::test]
+async fn ghost_pagination_truncation_false_ghost_not_converged() {
+    // ★ BB CRITICAL 直接 regression：模擬「mirror 有倉 BTCUSDT + 主 fetch（截斷）
+    // current map 無 BTCUSDT（→ 初判 Ghost）+ streak 已滿 + 單 symbol 點查回 size>0
+    // （真倉）」→ 斷言不收斂（真倉保留 + log pagination_false_ghost），無 converge 命令。
+    let mirror = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+    mirror.write().insert("BTCUSDT".into(), true); // 引擎本地確實有倉（S-1 滿）
+    let oh_cfg = build_orphan_cfg_for_test(Arc::clone(&mirror));
+    let mut state = make_ghost_state_streak_met("BTCUSDT|Buy"); // S-5 streak 已滿
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::Ghost)];
+    let (tx, mut rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::PipelineCommand>();
+    let audit_pool: Option<sqlx::PgPool> = None;
+
+    // 點查回 StillHasPosition = 分頁截斷假 Ghost（交易所仍有真倉）。
+    let kept = process_ghosts(
+        drifts,
+        &oh_cfg,
+        &tx,
+        &audit_pool,
+        "test",
+        &mut state,
+        pq_const(GhostPointQuery::StillHasPosition),
+    )
+    .await;
+
+    assert_eq!(
+        kept.len(),
+        1,
+        "pagination-truncated false ghost (point-query size>0) MUST be kept, not converged \
+         — deleting a real live position is the BB CRITICAL defect"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "no ConvergeExchangeZero may be dispatched when point-query confirms a real position"
+    );
+}
+
+#[tokio::test]
+async fn ghost_point_query_confirmed_zero_converges() {
+    // happy path 保留：點查回 ConfirmedZero（真 Ghost）+ S-1/S-5 滿 → 正常收斂。
+    let mirror = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+    mirror.write().insert("BTCUSDT".into(), true);
+    let oh_cfg = build_orphan_cfg_for_test(Arc::clone(&mirror));
+    let mut state = make_ghost_state_streak_met("BTCUSDT|Buy");
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::Ghost)];
+    let (tx, mut rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::PipelineCommand>();
+    let audit_pool: Option<sqlx::PgPool> = None;
+
+    let kept = process_ghosts(
+        drifts,
+        &oh_cfg,
+        &tx,
+        &audit_pool,
+        "test",
+        &mut state,
+        pq_const(GhostPointQuery::ConfirmedZero),
+    )
+    .await;
+
+    assert!(
+        kept.is_empty(),
+        "confirmed-zero ghost must be converged and removed from drifts"
+    );
+    assert!(
+        matches!(
+            rx.try_recv()
+                .expect("ConvergeExchangeZero must be dispatched when point-query confirms size==0"),
+            crate::tick_pipeline::PipelineCommand::ConvergeExchangeZero { .. }
+        ),
+        "dispatched command must be ConvergeExchangeZero on confirmed-zero point-query"
+    );
+}
+
+#[tokio::test]
+async fn ghost_point_query_failed_fail_closed_not_converged() {
+    // fail-closed：點查失敗 / timeout → 查不到不刪（Root Principle 6），不收斂。
+    let mirror = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+    mirror.write().insert("BTCUSDT".into(), true);
+    let oh_cfg = build_orphan_cfg_for_test(Arc::clone(&mirror));
+    let mut state = make_ghost_state_streak_met("BTCUSDT|Buy");
+    let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::Ghost)];
+    let (tx, mut rx) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::PipelineCommand>();
+    let audit_pool: Option<sqlx::PgPool> = None;
+
+    let kept = process_ghosts(
+        drifts,
+        &oh_cfg,
+        &tx,
+        &audit_pool,
+        "test",
+        &mut state,
+        pq_const(GhostPointQuery::QueryFailed),
+    )
+    .await;
+
+    assert_eq!(
+        kept.len(),
+        1,
+        "ghost with failed point-query must be kept (fail-closed), not converged"
+    );
+    assert!(
+        rx.try_recv().is_err(),
+        "no converge command when point-query fails (cannot rule out a real position)"
+    );
+}
+
+#[tokio::test]
+async fn ghost_point_query_gate_is_load_bearing() {
+    // 對抗驗證：證明 S-6 點查 gate 是 load-bearing。同一個分頁截斷情境（真倉，
+    // 點查回 size>0），若 gate 「形同虛設」（用 ConfirmedZero 模擬拿掉 gate）就會
+    // 誤刪真倉 → 收斂並發 ConvergeExchangeZero。對照 StillHasPosition 必不收斂。
+    // 這刻意對比兩個 point_query 結果，鎖住「gate 必須能改變收斂結果」這條不變量。
+    let build = || {
+        let mirror = Arc::new(parking_lot::RwLock::new(HashMap::new()));
+        mirror.write().insert("BTCUSDT".into(), true);
+        let oh_cfg = build_orphan_cfg_for_test(Arc::clone(&mirror));
+        let state = make_ghost_state_streak_met("BTCUSDT|Buy");
+        let drifts = vec![("BTCUSDT|Buy".into(), DriftVerdict::Ghost)];
+        (oh_cfg, state, drifts)
+    };
+
+    // 拿掉 gate（=點查恆 ConfirmedZero）→ 截斷真倉被誤刪：收斂 + 發命令。
+    let (oh_cfg_a, mut state_a, drifts_a) = build();
+    let (tx_a, mut rx_a) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::PipelineCommand>();
+    let pool: Option<sqlx::PgPool> = None;
+    let kept_a = process_ghosts(
+        drifts_a,
+        &oh_cfg_a,
+        &tx_a,
+        &pool,
+        "test",
+        &mut state_a,
+        pq_const(GhostPointQuery::ConfirmedZero),
+    )
+    .await;
+    assert!(
+        kept_a.is_empty() && rx_a.try_recv().is_ok(),
+        "without an effective point-query gate, a pagination-truncated real position would be \
+         wrongly converged (this is exactly the BB CRITICAL defect)"
+    );
+
+    // gate 生效（點查回 StillHasPosition）→ 同情境真倉保留：不收斂、無命令。
+    let (oh_cfg_b, mut state_b, drifts_b) = build();
+    let (tx_b, mut rx_b) =
+        tokio::sync::mpsc::unbounded_channel::<crate::tick_pipeline::PipelineCommand>();
+    let kept_b = process_ghosts(
+        drifts_b,
+        &oh_cfg_b,
+        &tx_b,
+        &pool,
+        "test",
+        &mut state_b,
+        pq_const(GhostPointQuery::StillHasPosition),
+    )
+    .await;
+    assert!(
+        kept_b.len() == 1 && rx_b.try_recv().is_err(),
+        "point-query gate MUST flip the outcome to no-converge for the same truncated scenario"
+    );
+}

@@ -301,3 +301,37 @@ pub(super) fn handle_adopt_orphan(
         snapshot_writer.force_write(&pipeline.snapshot());
     }
 }
+
+/// P2-110017-D2-RECONCILE · EN: Converge a Ghost-drift local position to flat
+///   after the reconciler has confirmed via Bybit `/v5/position/list` that the
+///   symbol carries size==0 on the exchange. Routes through D1's
+///   `converge_exchange_zero_close` (positions_remove + mirror sync, no PnL /
+///   no Kelly) — never through `ipc_close_symbol`, so a qty>0 close-maker drift
+///   position cannot re-hit 110017 and re-enter the dispatch loop.
+/// P2-110017-D2-RECONCILE · 中文：對帳器經 Bybit position query 確認該 symbol
+///   交易所端 size==0 後，將本地 Ghost 漂移倉收斂為 flat。走 D1 的
+///   converge_exchange_zero_close（positions_remove + mirror 同步，不記 PnL /
+///   不碰 Kelly），**絕不**走 ipc_close_symbol，避免 qty>0 close-maker 倉再撞
+///   110017 重入迴圈。
+///
+/// engine_mode 行為：paper 由 converge_exchange_zero_close 內 `is_exchange()`
+/// 守衛回 false（noop，paper 無交易所倉概念）；demo / live_demo / live 生效。
+/// 收斂冪等：對已移除倉 upsert_position_from_exchange(size=0) no-op，無雙刪
+/// （與 D1 即時收斂匯流安全，無 double realized）。
+pub(super) fn handle_converge_exchange_zero(
+    symbol: String,
+    is_long: bool,
+    ts_ms: u64,
+    pipeline: &mut TickPipeline,
+    snapshot_writer: &mut DualStateWriter,
+) {
+    let removed = pipeline.converge_exchange_zero_close(&symbol, is_long, ts_ms);
+    info!(
+        symbol = symbol.as_str(),
+        is_long, removed, "IPC converge_exchange_zero (D2 reconcile) / IPC 漂移倉收斂（D2 對帳）"
+    );
+    // 只有實際移除倉位時才 flush 快照，避免 no-op 重入的多餘寫入。
+    if removed {
+        snapshot_writer.force_write(&pipeline.snapshot());
+    }
+}

@@ -595,6 +595,22 @@ pub enum PipelineCommand {
         enabled: bool,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
+    /// P2-110017-D2-RECONCILE · 對帳器確認 Bybit 端該倉已 size==0，請本地收斂。
+    /// 由 position_reconciler 在判定 `DriftVerdict::Ghost`（本地基線有倉 ∧ 本輪
+    /// Bybit fetch 成功且該 symbol 不在 position list）並通過連續 streak 防護後派發。
+    ///
+    /// 反模式守衛：D2 **絕不**走 `CloseSymbol` → `ipc_close_symbol` → reduce-only
+    /// dispatch，否則 qty>0 close-maker drift 倉會再撞 110017 形成重入迴圈
+    /// （RCA §3a）。本變體 handler 直接調 D1 已 land 的
+    /// `converge_exchange_zero_close`：size==0 收斂走 positions_remove + mirror
+    /// 同步，0 record_trade / 0 realized PnL / 0 Kelly 污染。
+    /// `is_long` 取自 engine_positions_mirror（本地方向；Bybit 已無倉故無方向）。
+    /// Fire-and-forget — 與 AdoptOrphan 同形狀，無 response_tx。
+    ConvergeExchangeZero {
+        symbol: String,
+        is_long: bool,
+        ts_ms: u64,
+    },
     /// PH5-WIRE-1 RELOAD (F6, 2026-04-26): re-load on-disk edge estimates
     /// snapshot for this pipeline's mode and inject into IntentProcessor.
     /// Fire-and-forget — no `response_tx`. Reload daemon

@@ -387,6 +387,18 @@ pub fn handle_paper_command(
             pipeline,
             snapshot_writer,
         ),
+        // P2-110017-D2-RECONCILE · 對帳器確認 Bybit size==0 → 本地收斂漂移倉。
+        PipelineCommand::ConvergeExchangeZero {
+            symbol,
+            is_long,
+            ts_ms,
+        } => lifecycle::handle_converge_exchange_zero(
+            symbol,
+            is_long,
+            ts_ms,
+            pipeline,
+            snapshot_writer,
+        ),
         // ── DYNAMIC-RISK-1: Sharpe-aware sizer status + toggle ──
         PipelineCommand::GetDynamicRiskStatus { response_tx } => {
             risk::handle_get_dynamic_risk_status(response_tx, pipeline)
