@@ -18,6 +18,8 @@ use openclaw_engine::event_consumer::SYMBOLS;
 use openclaw_engine::ipc_server::{
     AuditPoolSlot, BudgetTrackerSlot, EngineCommandChannels, TeacherLoopSlot,
 };
+// P2-PACKET-C-C4-PIPELINE-WIRE：fail-safe watcher 持 demo/live cmd_tx slot。
+use openclaw_engine::ipc_server::{DemoCmdSenderSlot, LiveCmdSenderSlot};
 use openclaw_engine::scanner::registry::SymbolRegistry;
 use openclaw_engine::tick_pipeline::PipelineCommand;
 use std::sync::Arc;
@@ -872,6 +874,135 @@ pub(crate) fn spawn_position_reconciler_with_cmd_provider(
         orphan_handler_config,
     ));
     info!("position_reconciler task spawned (Phase 6 auto-contraction) / 持倉對帳器任務已啟動（Phase 6 自動降級）");
+}
+
+/// P2-PACKET-C-C4-PIPELINE-WIRE · 起一條長運行 watcher task，把 C1/C2/C3 已 land 的
+/// 通知 fail-safe 機制接進 demo + live pipeline，讓 fail-safe runtime-live。
+///
+/// 模型（C4 spec §0.2 + §2.2）：watcher 不持 `&mut RiskGovernorSm`（runtime 無合法
+/// caller），改持 demo/live cmd_tx slot + 用 in-band `PipelineCommand::NotificationFailsafeEscalate`
+/// 驅動 owner task 跑 SM-04。watcher 本身只：
+///   - `observe_dispatch(outcome)`：被動收 incident_policy（Sprint 3）餵的 outcome → 武裝/解除 timer；
+///   - `timer_expired_and_claim()`：每 30s tick 判定 timer 到期 + 同鎖 claim（claim-before-await）；
+///     claim 成功 → 對每個有 cmd_tx 的 engine 發一次 escalate command；
+///   - `record_operator_ack()`：收 C5 GUI ack → 解除 timer。
+///
+/// paper noop（C4 spec §3.1 結構性最強防線）：escalate loop 只迭代 `[demo, live]` slot，
+/// **根本不含 paper**（paper `paper_enabled=false` 無 TickPipeline，cmd channel 被 drain）。
+/// 第二層防禦在 owner handler 的 `engine_mode == "paper"` short-circuit（理論不可達）。
+///
+/// live slot 跟隨 respawn（C4 spec §4.3）：每次發送前 `slot.read().as_ref().cloned()` 取
+/// 最新 sender（LiveAuthWatcher 輪替 authorization 時 respawn cmd_tx），**禁** by-value
+/// 持有 stale cmd_tx（LIVE-AUTH-WATCHER memory 教訓）。
+///
+/// 單例 + 不洩漏 task：`SharedFailsafeWatcher::init`（OnceLock）保證 state 單例；本 spawn
+/// 函數只在 main_boot_tasks 呼一次（boot-time 單點）；`tokio::select!` 第一臂
+/// `cancel.cancelled() => break` cascade，task 不洩漏。
+///
+/// ⚠️ 誠實標記（C4 spec §5.1）：C4 不接 incident trigger → `outcome_rx` 在 Sprint 3
+/// `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` 實裝前永遠空，timer 永不武裝，escalate 永不發。
+/// C4 = 機制 live，觸發 pending；非「fail-safe 全功能 live」。
+pub(crate) fn spawn_notification_failsafe_watcher(
+    db_pool: &Arc<DbPool>,
+    cancel: &CancellationToken,
+    demo_cmd_slot: &DemoCmdSenderSlot,
+    live_cmd_slot: &LiveCmdSenderSlot,
+) {
+    use openclaw_engine::notification_failsafe::dispatchers::three_way::ThreeWayDispatcher;
+    use openclaw_engine::notification_failsafe::providers::single_watcher::{
+        init_failsafe_feed_senders, FailsafeFeedSenders, NoopAuditEmitter, NoopExchangeStopSync,
+        NoopPositionProvider, SharedFailsafeWatcher,
+    };
+    use openclaw_engine::notification_failsafe::providers::wall_clock::WallClock;
+    use openclaw_engine::notification_failsafe::FailsafeConfig;
+
+    // 單例 init：dispatcher 從預設 secret 路徑載入（缺檔 fail-closed disabled）；
+    // position / exchange / audit 注入 Noop（真值下放 owner task handler，per spec §1.3）。
+    let watcher = SharedFailsafeWatcher::init(
+        Box::new(ThreeWayDispatcher::from_default_paths()),
+        Box::new(NoopPositionProvider),
+        Box::new(NoopExchangeStopSync),
+        Box::new(NoopAuditEmitter),
+        Box::new(WallClock::new()),
+        FailsafeConfig::default(),
+    );
+
+    // outcome / ack 餵入 channel：tx 端註冊進單例 slot（Sprint 3 incident_policy + C5 GUI
+    // ack 取用），保活避免 select! busy-loop（tx 不被 drop）；rx 端進 watcher loop。
+    let (outcome_tx, mut outcome_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (ack_tx, mut ack_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
+    let _registered = init_failsafe_feed_senders(FailsafeFeedSenders { outcome_tx, ack_tx });
+
+    let _ = db_pool; // C4：audit emit 已下放 owner handler（用 owner audit_pool），watcher 端不需 pool。
+    let cancel = cancel.clone();
+    let demo_slot = Arc::clone(demo_cmd_slot);
+    let live_slot = Arc::clone(live_cmd_slot);
+
+    tokio::spawn(async move {
+        // 30s timer tick（per spec §2.2）。
+        let mut timer_check = tokio::time::interval(std::time::Duration::from_secs(30));
+        timer_check.tick().await; // 跳過首次立即 tick
+        info!(
+            "notification fail-safe watcher started (mechanism live, incident-trigger pending Sprint 3) \
+             / 通知 fail-safe watcher 已啟動（機制 live，觸發待 Sprint 3）"
+        );
+        loop {
+            tokio::select! {
+                _ = cancel.cancelled() => {
+                    info!("notification fail-safe watcher stopping (cancel) / 通知 fail-safe watcher 停止");
+                    break;
+                }
+                _ = timer_check.tick() => {
+                    // claim-before-await：純邏輯判定到期 + 同鎖 claim；claim 成功才發 command。
+                    if watcher.timer_expired_and_claim() {
+                        warn!(
+                            "notification fail-safe timer EXPIRED — escalating SM-04 Defensive in-band \
+                             / 通知 fail-safe timer 到期 — in-band 升級 SM-04 Defensive"
+                        );
+                        // 對 demo + live 各自 slot 發一次 escalate command（paper 結構性排除）。
+                        // 每次發送前取 slot snapshot（跟隨 live respawn，禁 stale by-value）。
+                        for (label, slot) in [("demo", &demo_slot), ("live", &live_slot)] {
+                            let Some(tx) = slot.read().as_ref().cloned() else {
+                                continue; // 該 engine 未綁定（如 live 未簽 authorization）→ skip。
+                            };
+                            let (rtx, rrx) = tokio::sync::oneshot::channel();
+                            let send_res = tx.send(
+                                openclaw_engine::tick_pipeline::PipelineCommand::NotificationFailsafeEscalate {
+                                    reason: "notification_3way_fail_1h_timeout".to_string(),
+                                    response_tx: rtx,
+                                },
+                            );
+                            if send_res.is_err() {
+                                warn!(engine = label, "fail-safe escalate command send failed (channel closed) \
+                                    / fail-safe 升級命令發送失敗（channel 已關）");
+                                continue;
+                            }
+                            // 不阻塞 watcher loop：spawn 出去 log owner handler 回應。
+                            let label_owned = label.to_string();
+                            tokio::spawn(async move {
+                                match rrx.await {
+                                    Ok(Ok(report)) => info!(engine = %label_owned, %report,
+                                        "fail-safe in-band escalate ok / fail-safe in-band 升級完成"),
+                                    Ok(Err(e)) => warn!(engine = %label_owned, error = %e,
+                                        "fail-safe in-band escalate handler err / 升級 handler 回錯"),
+                                    Err(e) => warn!(engine = %label_owned, error = %e,
+                                        "fail-safe escalate response dropped / 升級回應遺失"),
+                                }
+                            });
+                        }
+                    }
+                }
+                Some(outcome) = outcome_rx.recv() => {
+                    // Sprint 3 incident_policy 餵 outcome；C4 留接口（runtime 暫無 producer）。
+                    let _decision = watcher.observe_dispatch(outcome);
+                }
+                Some(()) = ack_rx.recv() => {
+                    // C5 GUI ack 餵；C4 留接口。
+                    let _decision = watcher.record_operator_ack();
+                }
+            }
+        }
+    });
 }
 
 /// Spawn the periodic decision outcome backfill task (FIX-34).

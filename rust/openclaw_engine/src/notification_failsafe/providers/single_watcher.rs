@@ -40,15 +40,19 @@
 
 use std::sync::{Arc, OnceLock};
 
-use openclaw_core::sm::risk_gov::RiskGovernorSm;
 use parking_lot::Mutex;
 
 use crate::notification_failsafe::{
-    evaluate_dispatch, execute_failsafe_escalation, record_operator_ack, timer_expired,
-    DispatchOutcome, ExchangeStopSync, FailsafeAuditEmitter, FailsafeClock, FailsafeConfig,
-    FailsafeDecision, FailsafeExecutionReport, FailsafeWatcherState, NotificationDispatcher,
-    PositionSnapshotProvider,
+    evaluate_dispatch, record_operator_ack, timer_expired, DispatchOutcome, ExchangeStopSync,
+    FailsafeAuditEmitter, FailsafeClock, FailsafeConfig, FailsafeDecision, FailsafeWatcherState,
+    NotificationDispatcher, PositionSnapshotProvider,
 };
+// C4：`check_timer`（含 SM transition + report）改 `#[cfg(test)]`，runtime 走
+// `timer_expired_and_claim` + in-band command。以下型別僅 test 端使用。
+#[cfg(test)]
+use crate::notification_failsafe::{execute_failsafe_escalation, FailsafeExecutionReport};
+#[cfg(test)]
+use openclaw_core::sm::risk_gov::RiskGovernorSm;
 
 // ════════════════════════════════════════════════════════════════════════════
 // 全域單例 storage
@@ -60,6 +64,39 @@ use crate::notification_failsafe::{
 ///   - `OnceLock` 保證 thread-safe initialization「最多一次」；
 ///   - `Arc` 讓所有呼叫端拿到同一份指標（read share），符合 Q4.1 拍板「共享」語義。
 static SHARED_WATCHER: OnceLock<Arc<SharedFailsafeWatcher>> = OnceLock::new();
+
+/// P2-PACKET-C-C4-PIPELINE-WIRE · outcome / ack 餵入端 sender 的單例存放點。
+///
+/// 為什麼存在（非 dead-wire + 防 select! busy-loop）：
+///   C4 watcher 的 `tokio::select!` 監聽 `outcome_rx` / `ack_rx`。若 tx 端在 spawn 後
+///   被 drop，channel 關閉 → `recv()` 立即回 `None` → `Some(..) = recv()` 模式不匹配 →
+///   該 select 臂被永久禁用後 loop 退化為 busy-spin。把 sender 存進此 OnceLock 保活 +
+///   供 Sprint 3 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` 取出 outcome_tx 接 dispatch 觸發、
+///   C5 GUI ack 取出 ack_tx。C4 自己不 send（誠實標記：機制 live，觸發 pending）。
+///
+/// singleton 登記：本 OnceLock 隨 `spawn_notification_failsafe_watcher` 單點 init，
+/// 與 `SHARED_WATCHER` 同生命週期；登記在 PA/E2 report + TODO follow-up（無集中登記表）。
+static FAILSAFE_FEED_SENDERS: OnceLock<FailsafeFeedSenders> = OnceLock::new();
+
+/// outcome / ack 餵入端 sender bundle（Sprint 3 incident_policy + C5 GUI ack 取用）。
+#[derive(Clone)]
+pub struct FailsafeFeedSenders {
+    /// incident_policy（Sprint 3）偵測需通知事件 → dispatch → 經此餵 outcome。
+    pub outcome_tx: tokio::sync::mpsc::UnboundedSender<DispatchOutcome>,
+    /// C5 GUI ack 經此餵（operator 點 banner ack）。
+    pub ack_tx: tokio::sync::mpsc::UnboundedSender<()>,
+}
+
+/// 註冊 outcome / ack sender（boot-time 單點，`spawn_notification_failsafe_watcher` 呼）。
+/// 第二次呼叫不覆蓋（OnceLock 語義），回現存（或本次）bundle clone。
+pub fn init_failsafe_feed_senders(senders: FailsafeFeedSenders) -> FailsafeFeedSenders {
+    FAILSAFE_FEED_SENDERS.get_or_init(|| senders).clone()
+}
+
+/// 取得 outcome / ack sender bundle（Sprint 3 incident_policy / C5 取用）；未 init 回 `None`。
+pub fn failsafe_feed_senders() -> Option<FailsafeFeedSenders> {
+    FAILSAFE_FEED_SENDERS.get().cloned()
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // SharedFailsafeWatcher — trait-object 封裝
@@ -131,6 +168,23 @@ impl SharedFailsafeWatcher {
             .clone()
     }
 
+    /// 測試用公開 ctor — 不走全域 OnceLock 單例（避免 cross-test 污染）。
+    ///
+    /// 為什麼存在：C4 端到端 wire 測試（event_consumer/tests）需構造一個帶自訂 clock /
+    /// Noop provider 的 watcher 驗 `observe_dispatch` → `timer_expired_and_claim` seam，
+    /// 但 `new` 是私有。`#[cfg(test)]` gate 確保 production binary 不暴露。
+    #[cfg(test)]
+    pub fn new_for_test(
+        dispatcher: Box<dyn NotificationDispatcher>,
+        positions: Box<dyn PositionSnapshotProvider>,
+        exchange: Box<dyn ExchangeStopSync>,
+        audit: Box<dyn FailsafeAuditEmitter>,
+        clock: Box<dyn FailsafeClock>,
+        cfg: FailsafeConfig,
+    ) -> Self {
+        Self::new(dispatcher, positions, exchange, audit, clock, cfg)
+    }
+
     /// 取得已初始化單例；若尚未初始化回 `None`。
     ///
     /// 為什麼 `Option`：C4 spawn task 才呼 `init`；測試 / 其他 caller 可能在
@@ -180,7 +234,43 @@ impl SharedFailsafeWatcher {
         record_operator_ack(&mut state)
     }
 
+    /// P2-PACKET-C-C4-PIPELINE-WIRE · 純判定 timer 是否到期 + 同鎖 claim（claim-before-await）。
+    ///
+    /// 為什麼新增此方法取代 runtime 端 `check_timer(&mut risk_sm)`（C4 spec §0.2 + §2.2）：
+    ///   `check_timer` 假設 watcher 持 `&mut RiskGovernorSm`。但 runtime 中 `RiskGovernorSm`
+    ///   是 owner pipeline 的 owned 欄位（非 `Arc`），watcher 是 external task 無合法管道
+    ///   持其可變引用。正確模型 = watcher 只判定「timer 到期」並 claim，SM-04 transition
+    ///   由 `cmd_tx.send(PipelineCommand::NotificationFailsafeEscalate)` 進 owner task 跑。
+    ///
+    /// claim-before-await 不變量（保留 C3 §4.7 idempotent 守衛）：
+    ///   在**同一個 lock hold 內**判定 expired 後立刻 set `escalated_for_current_arm`，
+    ///   再 drop lock。多個並發 tick（理論上 watcher 單 task 序列，但防禦性）只有第一個
+    ///   看到 expired==true 並 claim；後續看到 flag 已 set → `timer_expired` 回 false。
+    ///   這保證「同一次武裝只發一次 escalate command」（demo/live 各自 slot 是另一維度，
+    ///   見 spawn loop：對每個 engine slot 各發一次，是設計上的 per-engine 獨立升級）。
+    ///
+    /// 為什麼純邏輯無 await：本方法只 lock → 判定 → set flag → drop，<1μs；真正的副作用
+    /// （SM transition + exchange sync + audit）全在 owner task handler 跑，watcher 不阻塞。
+    ///
+    /// 回 `true` = 本次 claim 成功（呼叫端應對每個 engine cmd_tx 發 escalate command）；
+    /// 回 `false` = 未到期 或 已被 claim（不重發）。
+    pub fn timer_expired_and_claim(&self) -> bool {
+        let now_ms = self.clock.now_ms();
+        let mut state = self.state.lock();
+        if timer_expired(&state, now_ms, FailsafeConfig::DEFAULT_TIMEOUT_MS) {
+            // 同鎖 hold 內 claim — atomic 佔用，杜絕並發重發。
+            state.set_escalated_for_current_arm(true);
+            true
+        } else {
+            false
+        }
+    }
+
     /// 週期性檢查 timer 是否過期；過期則執行完整副作用鏈。
+    ///
+    /// **C4 後僅供測試**（`#[cfg(test)]`）：runtime 改走 `timer_expired_and_claim` +
+    /// in-band `PipelineCommand::NotificationFailsafeEscalate`（C4 spec §0.2）。保留此
+    /// 方法供 T4.12 並發 idempotent test 與 mod.rs `FailsafeWatcher` 泛型 test 對齊。
     ///
     /// 為什麼拆三段（per spec §4.7 + §11.3 反對 3 mitigation）：
     ///   1. **lock → 判定 expired → 同鎖內 claim（set escalated=true）→ drop lock**
@@ -212,6 +302,7 @@ impl SharedFailsafeWatcher {
     ///
     /// 不變量：步驟 2 全程不持 `state.lock`；任何 caller 持有的 pipeline write lock
     /// 也應在呼叫本 method 前 drop（C4 spawn task 負責確保）。
+    #[cfg(test)]
     pub async fn check_timer(
         &self,
         risk_sm: &mut RiskGovernorSm,
@@ -260,6 +351,55 @@ impl SharedFailsafeWatcher {
     #[allow(dead_code)]
     fn doc_only_test_note() {
         // 見上方註解；測試走 new pattern 而非 reset。
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// P2-PACKET-C-C4-PIPELINE-WIRE · runtime watcher-end Noop providers
+// ════════════════════════════════════════════════════════════════════════════
+//
+// 為什麼 runtime watcher 端的 position / exchange / audit provider 是 Noop（C4 spec §1.3 + §2.2）：
+//   C4 修正模型把「組 PositionSnapshot + ATR 注入 + 鎖利 + exchange sync + audit」整段
+//   下放到 owner task 的 `handle_notification_failsafe_escalate`（因 watcher 是 external
+//   task，無 owner pipeline 的 kline_manager / paper_state / PositionManager）。watcher 端
+//   runtime 只用 `clock`（`observe_dispatch` / `timer_expired_and_claim`）+（未來）dispatcher
+//   （Sprint 3 incident_policy 經 `observe_dispatch` 餵 outcome）。但 `SharedFailsafeWatcher::init`
+//   簽名要求全 5 trait object，故 position / exchange / audit 注入 Noop 占位（runtime 不被呼叫；
+//   `check_timer` / `dispatch_and_observe` 才會用到，且 `check_timer` 已 `#[cfg(test)]`）。
+
+use crate::notification_failsafe::{ExchangeStopError, FailsafeAuditError};
+use async_trait::async_trait;
+use openclaw_core::sm::risk_gov::{PositionSnapshot, StopAdjustment};
+
+/// 倉位 provider Noop（runtime watcher 端不組 snapshot；真值由 owner task handler 取
+/// `paper_state.positions()`）。回空 Vec。
+pub struct NoopPositionProvider;
+impl PositionSnapshotProvider for NoopPositionProvider {
+    fn snapshot_positions(&self) -> Vec<PositionSnapshot> {
+        Vec::new()
+    }
+}
+
+/// 交易所 sync Noop（runtime watcher 端不直 sync；真 sync 在 owner handler 走既有
+/// server-side stop 雙軌通道）。回 `Ok(())`。
+pub struct NoopExchangeStopSync;
+#[async_trait]
+impl ExchangeStopSync for NoopExchangeStopSync {
+    async fn sync_stop(&self, _adjustment: &StopAdjustment) -> Result<(), ExchangeStopError> {
+        Ok(())
+    }
+}
+
+/// Audit Noop（runtime watcher 端不 emit；audit 在 owner handler 用 `PgAuditEmitter`
+/// 寫 V114，因 transition / sync 結果在 owner task 內最完整，per spec §2.3 option a）。
+pub struct NoopAuditEmitter;
+#[async_trait]
+impl FailsafeAuditEmitter for NoopAuditEmitter {
+    async fn emit_auto_escalated(
+        &self,
+        _payload: serde_json::Value,
+    ) -> Result<(), FailsafeAuditError> {
+        Ok(())
     }
 }
 

@@ -611,6 +611,38 @@ pub enum PipelineCommand {
         is_long: bool,
         ts_ms: u64,
     },
+    /// P2-PACKET-C-C4-PIPELINE-WIRE · 通知三路全 fail 1h timeout 後的自動升級命令。
+    /// 由 `spawn_notification_failsafe_watcher`（external task）在 timer 到期且 claim
+    /// 成功後，對每個有 cmd_tx 的引擎（demo / live）發一次此命令。
+    ///
+    /// 為什麼是 in-band command 而非 watcher 直跑 SM transition（C4 spec §0.2）：
+    ///   `TickPipeline` 由 `run_event_consumer` 內部擁有（move into task），`governance`
+    ///   是 owned 欄位非 `Arc`；watcher 是 external task 沒有合法管道持 `&mut RiskGovernorSm`。
+    ///   正確模型 = 復用 reconciler 已驗的 in-band 升級通道：watcher 持 cmd_tx slot →
+    ///   send 此命令 → owner task handler 在 task 內跑 transition + ATR 注入 + 鎖利 +
+    ///   exchange sync。與 `ReconcilerEscalate` / `ConvergeExchangeZero` 同 pattern。
+    ///
+    /// 為什麼不復用 `ReconcilerEscalate`（C4 spec §1.4）：
+    ///   - audit 語義不同：fail-safe 須寫 `auto_escalated_to_sm04_defensive`（V114 對齊），
+    ///     reconciler 寫 `reconciler_auto_escalate`；混用污染 audit trace。
+    ///   - transition 路徑不同：fail-safe 走 core `transition(Defensive,
+    ///     NotificationFailsafeTimeout, RiskGovernor, ...)`，reconciler 走專用
+    ///     `reconciler_escalate_to`（不同 RiskEvent）。
+    ///   - 鎖利 hook：reconciler escalate 不跑 `active_lock_profit_per_position`；fail-safe
+    ///     必須跑（雙重防線：本地 SM-04 + 交易所 conditional SL）。
+    ///
+    /// 硬邊界（C4 spec §1.4）：本命令是風控**收緊**（Normal→Defensive，reduce_only +
+    /// 停新倉 + 鎖利），不開新倉、不碰 `live_execution_allowed` / `max_retries` /
+    /// `OPENCLAW_ALLOW_MAINNET` / `authorization.json`。idempotent 由 watcher 端
+    /// claim-before-await + handler 端 `from < Defensive` guard 雙層保證。
+    ///
+    /// 須在 `loop_handlers::handle_pipeline_command`（async）攔截，因 handler 含 await
+    /// （exchange sync + audit emit），`handle_paper_command` 為同步無法 await（與
+    /// `CancelAllOrders` / `ResetDrawdownBaseline` 同攔截模式）。
+    NotificationFailsafeEscalate {
+        reason: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
     /// PH5-WIRE-1 RELOAD (F6, 2026-04-26): re-load on-disk edge estimates
     /// snapshot for this pipeline's mode and inject into IntentProcessor.
     /// Fire-and-forget — no `response_tx`. Reload daemon

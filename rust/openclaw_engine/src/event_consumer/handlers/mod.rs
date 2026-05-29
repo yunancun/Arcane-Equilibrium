@@ -31,6 +31,9 @@ mod strategy_params;
 // Re-exports for external callers (event_consumer/mod.rs and tests).
 // 對外再出口：event_consumer/mod.rs 攔截路徑 + tests.rs 直接呼叫。
 pub use edge_predictor::handle_disable_edge_predictor_all;
+// P2-PACKET-C-C4-PIPELINE-WIRE：fail-safe in-band 升級 handler（async，含 exchange
+// sync + V114 audit），由 loop_handlers::handle_pipeline_command 攔截後呼叫。
+pub(crate) use risk::handle_notification_failsafe_escalate;
 // `handle_reload_edge_predictor` is pub(crate) for tests only — keep the
 // parent-module visibility path `handlers::handle_reload_edge_predictor`
 // intact so unit tests can call it as `super::handle_reload_edge_predictor`.
@@ -414,6 +417,21 @@ pub fn handle_paper_command(
         // 引擎絕不 fail-close。
         PipelineCommand::ReloadEdgeEstimates => {
             let _ = edge_estimates::handle_reload_edge_estimates(pipeline);
+        }
+        // P2-PACKET-C-C4-PIPELINE-WIRE：此變體必在 loop_handlers::handle_pipeline_command
+        // 的 async 上層攔截（含 await，本同步 dispatch 無法處理）。若到達此處代表上層攔截
+        // 漏接 — fail-loud（不靜默 drop fail-safe 升級命令）。response_tx 回 Err 讓 watcher
+        // 端記錄，倉位仍由其他防線保護。
+        PipelineCommand::NotificationFailsafeEscalate {
+            reason: _,
+            response_tx,
+        } => {
+            let _ = response_tx.send(Err(
+                "NotificationFailsafeEscalate must be intercepted in async \
+                 handle_pipeline_command (sync handle_paper_command cannot await) \
+                 / 必須在 async 上層攔截"
+                    .to_string(),
+            ));
         }
     }
 }

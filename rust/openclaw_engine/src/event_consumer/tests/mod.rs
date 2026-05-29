@@ -11,6 +11,7 @@
 
 // ── Per-category submodules (G5-07 split) ──
 // ── 按類別拆分的子模組（G5-07 拆分） ──
+mod c4_failsafe_wire_tests;
 mod cross_engine_tests;
 mod exit_config_ipc_tests;
 mod funding_settlement_tests;
@@ -278,6 +279,39 @@ pub(super) fn authorize(p: &mut crate::tick_pipeline::TickPipeline) {
     p.governance
         .grant_paper_authorization(None)
         .expect("grant paper auth");
+}
+
+/// P2-PACKET-C-C4-PIPELINE-WIRE：種入 1m 已收盤 K 線供 `kline_manager.get_ohlcv` +
+/// `indicators::atr(...,14)` 算出絕對 ATR ≈ `atr_abs`（fail-safe handler ATR 注入路徑）。
+///
+/// 構造法：30 根 closed bar，每根 high-low = `atr_abs`（true range = atr_abs），
+/// close 圍繞 `base_price`。Wilder ATR14 在等幅 TR 序列上收斂到 atr_abs。
+/// >= 15 bars 才出 ATR（否則冷啟動 None → handler 回 0.0 fail-closed）。
+pub(super) fn seed_atr_klines(
+    p: &mut crate::tick_pipeline::TickPipeline,
+    symbol: &str,
+    base_price: f64,
+    atr_abs: f64,
+) {
+    use openclaw_core::klines::KlineBar;
+    let mut bars = Vec::new();
+    for i in 0..30u64 {
+        let open_t = i * 60_000;
+        bars.push(KlineBar {
+            open_time_ms: open_t,
+            close_time_ms: open_t + 59_999,
+            open: base_price,
+            high: base_price + atr_abs / 2.0,
+            low: base_price - atr_abs / 2.0,
+            close: base_price,
+            volume: 1.0,
+            turnover: base_price,
+            tick_count: 1,
+            is_closed: true,
+        });
+    }
+    let seeded = p.kline_manager.seed_bars(symbol, "1m", bars);
+    assert!(seeded >= 15, "test setup: seeded {seeded} 1m bars (need >=15 for ATR14)");
 }
 
 pub(super) fn run_reconciler_escalate(

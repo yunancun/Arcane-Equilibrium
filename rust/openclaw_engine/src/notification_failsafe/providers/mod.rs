@@ -36,3 +36,6 @@ pub use exchange_stop_sync::BybitExchangeStopSync;
 pub use position_provider::RestPositionProvider;
 pub use single_watcher::SharedFailsafeWatcher;
 pub use wall_clock::WallClock;
+// P2-PACKET-C-C4-PIPELINE-WIRE：runtime watcher 端 Noop providers（真 snapshot /
+// sync / audit 下放 owner task handler，per C4 spec §1.3 + §2.3）。
+pub use single_watcher::{NoopAuditEmitter, NoopExchangeStopSync, NoopPositionProvider};
