@@ -946,3 +946,29 @@ MIT AUDIT DONE: docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-27--v104_sup
 - **GRANT 語義副發現**：trading_admin = 表 OWNER + superuser → 隱式持全 column UPDATE（`information_schema.column_privileges` 顯示全 17 col UPDATE）。append-only column 限制只 bind 非-owner 非-super role；production GUI ack 路徑須用獨立受限 role 連線，不可用 trading_admin。當前 DB 無此受限 role（只有 replay_writer_role/sandbox_admin/trading_admin）。explicit column GRANT 仍正確落 `pg_attribute.attacl` (acked_at_utc/acked_by = w)。REVOKE PUBLIC UPDATE/DELETE 已執行 (PUBLIC 無 UPDATE/DELETE)。
 - **engine sqlx 風險**：表現留在 DB 含 compressed twin → engine restart 時 sqlx migrate 跑 V114 會重演 2nd-run abort → **migration 鏈卡死，engine 起不來**。故留表 = 危險。建議 DROP 等 E1 修 idempotent 後再 sqlx 統一 apply。
 - **Report**：直接回 main session（無 .md 報告檔，per 角色約束）。
+
+## 2026-05-29 V114 idempotency-fixed Round 3 Linux PG dry-run — DEPLOY-READY (BLOCKER cleared)
+
+**Trigger**: V114 notification_failsafe_events hypertable 第三輪 empirical dry-run。R1 抓 GRANT-after-compression blocker；R2 reorder 修 first-run 但雙跑揭露 compressed twin 跨 run 持久 → re-apply column-level GRANT 撞 twin → abort；R3 驗證 E1 第三修 (`b9648764`, nested EXCEPTION WHEN undefined_column) 是否徹底修好。
+
+**Method**: ssh trade-core → docker exec trading_postgres (DB trading_ai, user trading_admin = OWNER + SUPERUSER)；psql -f V114 × 3 runs + reverse verify + INSERT/ack semantics。HEAD `575a0a94`。
+
+**Verdict: PASS — V114 DEPLOY-READY (前兩輪 BLOCKER 徹底修好)**
+
+**Step 1-7 全 PASS**:
+- S1 clean start: regclass NULL / sqlx max=113 / (15 pre-existing twins 來自其他 hypertable 非 V114)
+- S2 run1 EXIT 0: Guard A/B/C PASS, hypertable id 97, first-run column GRANT 成功 (twin 未建, nested EXCEPTION 不 fire), compression enable + 30d policy
+- **S3 run2 EXIT 0 (關鍵 — R1/R2 都 fail 在這)**: nested EXCEPTION 捕捉 undefined_column (42703) → NOTICE「column-level GRANT UPDATE skipped — compressed twin exists on re-apply (grant already in pg_attribute.attacl from first-run; idempotent)」→ 不 abort；CREATE/hypertable/index/compression 全 skip 冪等
+- S4 run3 EXIT 0: 輸出 byte-identical to run2，穩定冪等不只兩跑
+- S5 reverse: 17 col / chunk 604800000 (7d ms) / compression_enabled=t / 2 explicit index (+PK +TS auto _ts_ms_idx) / event_type CHECK 1 值 / compression policy compress_after 2592000000 (30d ms)。**GRANT**: attacl `{trading_admin=w}` on acked_at_utc+acked_by 落 pg_attribute (column GRANT first-run 持久) ✓。**REVOKE PUBLIC**: public UPDATE/DELETE/SELECT 全 f ✓
+- S6 INSERT 13-binding (對齊 audit_emitter.rs $1-$13) → id=1；ack UPDATE#1 → 1 row；ack UPDATE#2 → 0 row (acked_at_utc IS NULL guard 冪等, acked_by 不被覆寫) 對齊 `ack_failsafe_event` Ok(rows_affected==1)；DELETE 1 cleanup → 0 row remain
+- S7 artifact: table_exists=true / sqlx_max=113 / v114_in_sqlx=false / row_count=0 / v114_twin_exists=true
+
+**關鍵發現 (adversarial)**:
+- trading_admin 是 table OWNER + SUPERUSER (rolsuper=t)。has_*_privilege 對 trading_admin 全 column UPDATE 回 t 是 superuser bypass，**不是** append-only enforcement 失效。真正 enforcement 邊界 = PUBLIC REVOKE (對非 owner/非 superuser role 生效) + column-level attacl (定義非 superuser grant floor)。append-only 對 trading_admin 本身靠 application-layer (audit_emitter 只 INSERT + ack_failsafe_event 只 UPDATE acked_*)，非 DB privilege 硬擋。**設計正確但須 PM 知此語義**。
+
+**留表 vs DROP 建議**: **留表安全 (idempotency 修好後)**。理由：next engine restart sqlx (AUTO_MIGRATE=1) 跑 V114 = 即 S3/S4 已三證 EXIT 0 場景 (table+twin exist → CREATE/hypertable/index skip, column GRANT nested EXCEPTION skip, compression skip, Guard C PASS) → 成功 record V114 進 _sqlx_migrations。**checksum 無 drift 風險**：V114 從未經 sqlx 路徑 land (純 psql -f)，無 prior checksum 可漂 (對比 P0 sqlx hash drift incident 5/2 是「sqlx-applied 後 file 改」才漂；本案不同)。建議：留表，下次 engine deploy sqlx 統一 apply。
+
+**Lesson**: TimescaleDB compressed twin (_compressed_hypertable_NN) 跨 migration run 持久；任何 enable compression + column-level GRANT 的 migration，column GRANT 必包 nested EXCEPTION WHEN undefined_column 才能雙跑/sqlx re-apply 冪等。V114 nested EXCEPTION pattern 應作為後續同類 migration 的 reference。
+
+**Report**: findings 直接回 main session (本次無獨立 report file)。
