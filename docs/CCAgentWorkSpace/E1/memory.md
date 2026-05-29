@@ -13310,3 +13310,45 @@ register + mod.rs setter）。
 - 可測性重構：H1-F 賬本治理分叉內聯在 main() 無法單測 → 抽純函數 apply_ledger_governance(payload, ledger_result, blocking_reasons, warning_flags)，付費 ok=False 阻斷 / 本地 ok=True+errors best-effort warn。最小手術，邏輯單點。
 - cost_log 治理門控測法：腳本從 runtime dir 讀 5 份 JSON，用 subprocess + OPENCLAW_SRV_ROOT=tmp + PYTHONPATH 加 misc_tools 驅動，讀回報告斷言（pricing_not_bound_for_paid_call：付費+未定價 log_ok=False；免費+未定價 warn-only）。
 - Mac 無 psycopg：賬本 DB 測試一律 _conn_factory 注入 fake DB，禁連真 PG。
+
+## 2026-05-29 — P2-09 Guardian scoring constants (Option B)
+- PA flagged guardian.rs:26-32 as hard-coded literals, but those are GuardianConfig STRUCT FIELDS already hot-reloaded via apply_risk_snapshot (ARCH-RC1 1C-4 E-Merge-4). 教訓：先讀 wiring 再判斷，PA 指的行號可能指向已可調的欄位。
+- 真正的 P2-09 magic numbers 是 review() 內的「評分權重 / 邊界比例 / 否決門檻」(0.4/0.3/0.4/0.15/0.35, >2.0/>1.0, >=0.3, 1.0 cap)。
+- 選 Option B：這些是 fail-closed 安全底線的計分校準，開放 runtime 覆蓋會違反 Root Principle 4/6。提取為具名 const + 中文 rationale + 2 lock tests（值鎖定 + 計分行為鎖定）。
+- cargo test -p openclaw_core: 425+ pass / 0 fail (Mac advisory)。
+
+## 2026-05-29 — P2-10 full-chain duplicate-spawn 並發覆蓋 + Linux-empirical gate 分離
+- 任務：cold audit Wave 4 P2-10。full-chain happy-path test 把 `_do_pg_path_for_run_sync` 整個 monkeypatch（fake_run），導致 run_route.py:178-198 真正 dedup（PG advisory lock + per-actor/global cap probe）從未被 Mac 單測執行 → Mac 全綠時 Linux PG/subprocess 可能壞掉或 duplicate-spawn 沒人發現。純 test 覆蓋 + gating fix，不改 route 業務邏輯。
+- dedup 邏輯判定 SOUND（先讀 wiring 再判）：三層 = (1) try_acquire_pg_advisory_locks serializable xact 互斥（真 race guard）+ (2) count_active_runs_for_actor/global cap probe defense-in-depth（持鎖時廉價檢查）+ (3) idempotency_key INSERT。無需 E1 修。
+- 教訓（不 mock 掉被測對象）：新 test 直接驅動 _do_pg_path_for_run_sync（不 monkeypatch 它），用 fake route_helpers 的 active-run 帳本讓兩次同 actor 呼叫共享「已提交」狀態，斷言第二次回 replay_per_actor_cap_exceeded + spawn_calls==1（核心 dedup 不變式：duplicate run 不得第二次 spawn）。
+- 教訓（Mac 能驗什麼 / 不能驗什麼）：Mac 層只能驗 cap-count gate（cap probe 看到 >=cap 後 fail-closed）；advisory-lock 互斥本身的 race + subprocess fork 計數是 PG/OS runtime 語意，Mac mock 抓不到 → 拆成獨立 LINUX-EMPIRICAL gate test（OPENCLAW_REPLAY_LINUX_PG_EMPIRICAL=1 才跑，否則 pytest.skip 並寫明「刻意不 mock 以免偽綠」+ 三步驗證清單給 E4）。
+- 對抗驗證（必做）：臨時把 cap probe 改回永遠 0（壞 dedup）→ spawn_calls==2（duplicate-spawn 發生）→ 證明新 test 的 assert spawn_calls==1 抓得到 bug。光看修法版 PASS 不足。
+- 結果：18 passed（15 舊 + 3 新 Mac）/ 1 skipped（Linux gate 正確 skip）。+281 LOC，只動 test 檔。
+
+## 2026-05-29 — v80 cold audit Wave 3 (P2-12 / P2-15 / P1-16)
+- PA report line numbers drift; 必 grep 重定位（`rc.get_positions`/`get_active_orders`/`get_executions`/`refresh_balance` 為阻塞 httpx callsite）。
+- P2-12：async handler 直呼阻塞 BybitClient → `await asyncio.to_thread(...)`；PG 讀缺 statement_timeout 補 `cur.execute("SET LOCAL statement_timeout = %s", (_GUI_READ_STATEMENT_TIMEOUT_MS,))` 鏡像 :2187。教訓：sync helper（`_attach_owner_strategy` 內含 `_fetch_min_notional`、`_sweep_orphan_orders`）也要一併 to_thread，否則 offload 不完整。`_fetch_closed_pnl_bybit_history_page` 已 wrap 不重複。
+- P2-15：paper stop / stop-all 用 `paper_response(..., action_result="partial_failure")` + top-level `partial_failure`/`status`/`errors`，鏡像 P1-04 live close-all 契約。GUI 用既有 `classifyLiveMutation`（common.js）單一真相判定，不要自寫 errors 解析。
+- P1-16：attribution_daily.py summary 加 `promotion_evidence=False` + `stage="A_smoke_scaffold"`，誠實標記非 Stage-B 晉升憑證。
+- 沒有既有 test 直打 paper /session/stop[-all] endpoint；test_session_stop_cancel_verify 打 live/demo + sweep helper，57 passed。
+
+## 2026-05-29 — P2-11 Rust 2000行硬上限拆分（兩種 split 慣例並存）
+- 教訓：同一 codebase 有兩種 inline-test 拆分慣例，必須先讀目標目錄既有 pattern 再選：
+  1. `#[cfg(test)] #[path="X_tests.rs"] mod tests;`（event_consumer/dispatch.rs ＋ tick_pipeline/on_tick/step_4_5_dispatch.rs 用此）— `super::` 解析不變。
+  2. `include!("tests_<topic>.rs")` 內聯進同一 `mod tests`（intent_processor/tests.rs 用此，檔尾已有 tests_predictor_router.rs / tests_sprint1b_earn.rs）— `super::*` ＋ 共用 fixture 解析不變。
+- step_4_5_dispatch.rs 路徑陷阱：PA report 寫 event_consumer/，實際在 tick_pipeline/on_tick/。先 `find` 再動。
+- 純機械平移驗收：cargo test --lib count 前後必須 byte-identical（3598 passed/1 ignored）。大段刪除用 python slice 比 sed 安全可讀。
+
+## 2026-05-29 · P2-13 Stage 0R sweep 解析快取（offline 優化）
+- 任務：`helper_scripts/reports/w_audit_8c/liquidation_cluster_stage0r_metrics.py` 的 8-D sweep（11664 cells）對每 cell 重跑 `_extract_trigger_rows`（×3 calls/cell：主抽取 + baseline_lift tight/loose），每次都對全 raw row 重做 `_safe_int`/`_safe_float` 解析 + gross/net bps。row-derived feature 只依賴 row 與 cost_bps（整 sweep 常數）→ 11664× 重複純浪費。
+- 解法：新增 `prepare_parsed_rows(rows, cost_bps=)` 在 sweep loop 外解析一次；`_extract_trigger_rows` / `compute_stage0r` / `_compute_baseline_lift` 加 optional `parsed_rows` 參數走 fast path（只做 threshold 比較 + per-cell passthrough horizon_min/quiet_sec）。None element = deterministic skip（缺欄位/不合法），任何 cell 都不會通過 → 直接跳過。
+- exact-vs-fast 契約：fast path 的 `_safe_*` 解析、合法性 guard、gross/net 公式與 raw path 逐行對應 → 數值 byte-identical。`_build_exclusion_counts` 故意不改（其 stale/mixed/quiet 分類 ordering 與 prepare_parsed_rows 的 None 語意不同，且 counts 依 threshold per-cell 變動，cache 不到單值）。
+- 驗證：smoke 新增 `_check_sweep_parsed_cache_equivalence`（monkeypatch prepare_parsed_rows 回 None 強制 raw path，JSON sort_keys 對比 = IDENTICAL）。隔離 extract hot-loop 在 63k row 實測 3.0x（74.8ms→24.7ms/cell）。
+- 教訓：offline 腳本優化「不改數值」最安全的證明＝同一公開入口跑 fast vs forced-slow 兩路 JSON byte 對比，比逐函數審 diff 更可信。bootstrap-dominated 的端到端 speedup 看起來小（1.13x），但 P2-13 真正 target 是 extraction 成本，要隔離量測才看得到 3x。
+
+##  — v80 cold audit P3-02/04/05 cleanup (comments/doc only)
+- PA path drift: grid_helpers.rs 實際在 openclaw_engine/src/strategies/ 非 openclaw_core；務必先 find 再改。
+- P3-02: compute_ou_step 早已被 WP-03 改成 residual sigma；過期的是 G7-06 OuResidualSigma doc 仍宣稱 compute_ou_step 用 raw-Δx σ。修 doc 對齊現況。
+- P3-04: backtest/portfolio 無 engine production caller 但已被 tests/golden_extreme.rs + inline tests 行使 → 判定 (a) reserved library API（非死碼），加 pub mod doc 註記，不刪。main.rs portfolio_cache 是另一條 health emitter，與 openclaw_core::portfolio 無關（易誤判）。
+- P3-05: 泛型 FailsafeWatcher 只在 #[cfg(test)] 構造，production 走 SharedFailsafeWatcher → 標 doc 為 test/local-API。dispatcher default_secret_path 三處差異大（不同 env var/檔 vs 目錄）→ 抽取非最小正確，改記在 report 不強抽。
+- 注釋全中文（廢 bilingual）；comment-only edit 不丟測試：core green / engine lib 3598 pass.

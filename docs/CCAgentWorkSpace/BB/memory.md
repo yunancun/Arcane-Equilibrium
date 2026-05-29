@@ -900,3 +900,32 @@ BB 5/8 → 5/9 → 5/21 → 5/23 → 5/26 五次 carry-over：`docs/governance_d
 
 `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-26--p0-ops-3-bybit-tos-geo-kyc-audit.md`
 （同檔複製 `docs/CCAgentWorkSpace/Operator/`，因 5 operator confirm 屬 P0 SHIP-STOP severity）
+
+---
+
+## 2026-05-29 v80 cold audit Wave 1 PkgB pre-deploy spot-check (commit `b93d3210`, HEAD `9b18f348`)
+
+### Verdict: **APPROVE-WITH-CONDITIONS** (6/6 items source-correct vs Bybit V5; 1 P3 doc drift, 0 ship-stop)
+
+PkgB Rust exchange-authority hardening verified READ-ONLY against Bybit V5 official docs + dict v1.3. No live calls.
+
+- **P1-03 cancel-all → Rust authority: PASS.** `order_manager.rs:518 cancel_all_scoped` body = `{category:linear, settleCoin:USDT}` single account-scope call (no per-symbol loop) — matches Bybit V5 cancel-all (settleCoin valid for linear; priority symbol>baseCoin>settleCoin; official doc confirmed). Runs in `loop_handlers.rs:607` async, NOT gated by execution_authority (risk-reducing, must work post-revoke per Stop Phase 1) — correct. Grep: live REST cancel-all GONE (`live_session_routes.py:686`=removed comment, `live_session_endpoints.py:358`=IPC). Only demo `_sweep_orphan_orders` + paper_trading_routes demo + `bybit_rest_client.py:681` helper retained — correct scope.
+- **P1-06 trading-stop tick: PASS.** `normalize_trading_stop_price` (instrument_info.rs:766) side-aware: long SL floor / short SL ceil / TP+trailing+active nearest round_price; missing-spec→None→fail-closed skip exchange stop (local StopManager retained, dual-rail). Validates Bybit 10001 "Price invalid" off-tick rejection (cross-endpoint priceFilter applies to trading-stop). trailingStop tick-aligned via round_price — correct (Bybit needs tick alignment even for distance).
+- **P1-07 retry: PASS.** `dispatch.rs:646 OPEN_NO_RETRY:[u64;0]` → OPEN single-attempt fail-closed on any timeout/parse/transport/nonzero retCode; CLOSE keeps `CLOSE_RETRY_DELAY_MS` bounded reduce-only retry. Aligns Bybit reality: no order-create idempotency key by default → single-attempt correct; order_link_id is mitigation not retry license (CLAUDE.md §四).
+- **P1-08 LiveDemo cred: PASS.** `is_live_slot = slot=="live"` (bybit_rest_client.rs:946) covers Mainnet+LiveDemo → disables env-var fallback. LiveDemo uses `api-demo.bybit.com` REST + `stream-demo.bybit.com` WS but live secret slot provenance enforced. OPENCLAW_ALLOW_MAINNET + empty-cred fail-closed correctly stay keyed on is_mainnet (real-money only).
+- **P2-02 amend: PASS.** `order_manager.rs:587` fail-closed Err on cache-miss when any qty/price/trigger/TP/SL present; rounds all price fields. No raw off-tick/off-step.
+- **P2-03 rate-limit: PASS.** `wait_if_rate_limited(path)` group-aware (from_path → Order/Position/Account/Market/Asset/Other) + per-group `group_reset_ms[6]` w/ global fallback. Threshold Order/Pos/Acct/Asset=2, Market=10 (vs 20/120 r/s caps) — conservative, 10006 avoidance correct.
+
+### CONDITION (1 P3 doc/comment drift — feeds TW P2-04 batch)
+- `bybit_rest_client.rs:222-227` RateLimitGroup enum comments still say "10 req/s" for Order/Position/Account; dict v1.3 (line 291/1243/1255) + runtime correctly = **20 req/s**. Stale comment only (threshold logic correct, not load-bearing). TW: sync enum doc-comment to 20 r/s in P2-04 patch. Non-blocking.
+
+### Bybit V5 alignment
+- 30d changelog: 0 breaking change (inherited; PkgB 0 new endpoint).
+- cancel-all settleCoin: confirmed Bybit V5 official.
+- trading-stop tick: 10001 off-tick rejection confirmed via ccxt/pybit issue corpus.
+- 0 ToS / 0 KYC / 0 geo / 0 rate-budget risk (PkgB = authority hardening, no new traffic).
+
+### 下次啟動需查驗項
+1. TW P2-04 patch: enum comment 10→20 r/s + PA's pre_check_order/demo-dcp drift items landed
+2. P1-03 IPC end-to-end (cancel_all_orders reaches engine) requires operator-gated non-mutating IPC probe on Linux — deferred per PA §Linux empirical
+3. Linux cargo test PASS confirmed in commit body (Rust 3584/0) — re-verify on next deploy --rebuild

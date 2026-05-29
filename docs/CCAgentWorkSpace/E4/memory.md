@@ -4856,3 +4856,13 @@ verify round 3 P0 Q3 SQL fix + 3 MED runtime behavior post E1 round 3 + MIT roun
 - Mock-audit: 4/4 真實。ledger dedup 用 _PkAwareCursor 真實 PK set 模 ON CONFLICT DO NOTHING，斷言寫兩次=每表1行（now() 舊實現會 double-count）；paper-freeze 設過門指標仍斷言 not ok + paper_lane_frozen + 階段不前進；route-binder e2e subprocess 真跑 bind_active_route_env.sh 斷言 provider 綁定；edge-gate fail-closed 真 call gate。皆只 mock IO 邊界。
 - 教訓: control_api_v1 內 test 混用相對(sys.path conftest)與絕對(program_code.*) import；後者只在 srv root + PYTHONPATH 下可解，subdir 跑必 fail。判 pre-existing 必看 import target 是否 touch Wave2 file。
 - VERDICT: GREEN。
+
+## 2026-05-29 — v80 cold-audit Wave 3 regression (Mac, uncommitted)
+- Ran on Mac (HEAD 9b18f348, Wave 3 dirty/uncommitted). No commit/push/deploy/Bybit/AI calls.
+- Rust openclaw_core: 468 passed / 0 failed (2 runs identical, not flaky). New lock tests green: test_position_count_zero_margin_locked, test_scoring_constants_locked, test_scoring_behavior_locked. P2-09 = named consts extraction, NO value drift.
+- Rust openclaw_engine --lib: 3599 passed / 0 failed (== Wave2 baseline; bybit_rest_client comment-only fix no break).
+- Python control_api route tests (Wave-3 relevant): 153 passed / 0 failed; 2nd pass 131 passed / 0 failed. No dedicated test files at top-level tests/ for these routes — coverage lives in control_api_v1/tests/.
+- Pre-existing artifact (NOT Wave-3): tests/misc_tools/test_pure_utils.py vs tests/local_model_tools/test_pure_utils.py duplicate basename → collection error under default import-mode. Workaround: --import-mode=importlib. Do NOT attribute to Wave 3.
+- node --check: tab-paper.html / tab-settings.html / tab-governance.html inline JS all OK.
+- Mock-audit: partial_failure tests (test_session_stop_cancel_verify.py) inject real residual / real orphan-sweep error, mock only IO boundary (_ipc_command, _sweep_*), assert handler classifies status=="partial_failure" + partial_failure is True + closed_all is False. Genuine, not mocked-away. Guardian zero-margin test pins risk_score==0.3==threshold → Rejected (calibration-drift catch), not tautological.
+- VERDICT: GREEN. No test-count regression vs Wave1/Wave2 baseline.
