@@ -1277,10 +1277,10 @@ pub struct ShadowOrderRequest {
 | 110004 | WalletInsufficient | 錢包餘額不足（該幣種暫停） | No | No | balance_block |
 | 110007 | AvailableInsufficient | 可用餘額不足（該幣種暫停） | No | No | balance_block |
 | 110008 | OrderCompletedOrCancelled | 訂單已完成或已取消（生命週期競爭） | No | **Yes** | - |
-| 110009 | PositionNotFound | 持倉不存在 | No | No | - |
+| 110009 | PositionNotFound | 持倉不存在（⚠️ doc 版本歧義，見下方註記） | No | No | - |
 | 110010 | OrderAlreadyCancelled | 訂單已取消 | No | **Yes** | - |
 | 110012 | InsufficientBalance | 餘額不足 | No | No | balance_block |
-| 110017 | ReduceOnlyReject | Reduce-only 訂單被拒（倉位不存在或方向不匹配） | No | No | - |
+| 110017 | ReduceOnlyReject | Reduce-only 被拒族碼（無倉 / 方向反 / qty>size）；**非零倉專屬**。本系統 one-way + close + qty==0 全平 form 下視為「exchange 已平」可安全收斂（見下方 110017 註記） | No | No | - |
 | 110043 | LeverageNotModified | 槓桿已是目標值 | No | **Yes** | - |
 | 110049 | PriceTickInvalid | 價格刻度非法（透過 InstrumentInfoCache 四捨五入後重試一次） | No | No | instrument_filter |
 | 110074 | ContractNotLive | 合約未上線（下架/暫停）→ 從掃描器宇宙移除 | No | No | - |
@@ -1292,7 +1292,19 @@ pub struct ShadowOrderRequest {
 
 **⚠️ PostOnly 越過 book 不是 REST retCode**：PostOnly 限價單觸及 book 時 Bybit 仍回傳 `retCode=0`（訂單建立成功），拒絕訊息透過 Private WS `order` 事件的 `rejectReason=EC_PostOnlyWillTakeLiquidity` 傳遞。**切勿**將 `110003`（PriceOutOfRange）誤認為 PostOnly-cross — 前者屬於合約過濾器（`is_instrument_filter`，需重算 tick_size/price_limit），後者屬於 book 狀態（`is_exchange_backoff`，策略 cooldown）。詳見 `docs/audits/2026-04-20--edge_p2_3_phase1b_bybit_postonly_audit.md`。
 
-**⚠️ 110017 ReduceOnlyReject 非 idempotent silent success**：reduce-only 訂單失敗常見 trigger：(a) 無倉位 / (b) 方向反 / (c) qty > position size。終態（不可重試）、非 noop、非餘額不足、非 exchange backoff、非 instrument filter。client 必先檢查 position state 再下，重試前 state 沒變的話必再撞 — **切勿視為 idempotent silent success**。源自 Bybit V5 官方錯誤代碼表；Rust 端對應 `BybitRetCode::ReduceOnlyReject = 110017`（commit `ef6ea79f`，2026-05-16 WP-10 Wave 2-3 BB-A-1 IMPL）。實證背景：funding_arb BUSDT 110017 reject loop RCA — 見 memory `project_funding_arb_v2_deprecation_path`（2026-05-02 / 2026-05-08）。
+**⚠️ 110017 ReduceOnlyReject 是「reduce-only rule 不滿足」族碼，非零倉專屬**：常見 trigger：(a) 無倉位 / (b) 方向反 / (c) qty > position size。終態（不可重試）、非 noop、非餘額不足、非 exchange backoff、非 instrument filter。源自 Bybit V5 官方錯誤代碼表；Rust 端對應 `BybitRetCode::ReduceOnlyReject = 110017`（commit `ef6ea79f`，2026-05-16 WP-10 Wave 2-3 BB-A-1 IMPL）。
+
+**為什麼不可裸刪倉**：110017 ≠ 可靠等價「exchange 端零倉」。在「實際仍有倉」時也會回 110017——C-1 qty>position size（送顯式大 qty 撞 stale 倉）、C-2 hedge mode positionIdx/方向不符（buy-side 倉送 sell-side reduce-only）。直接「收到 110017 就刪本地倉」會誤刪真倉 = 災難（Root Principle 5/9）。
+
+**本系統的安全收斂語意（已實作確認）**：在 **one-way mode + close intent + reduce-only + qty==0 全平 form** 前提下，110017 可靠等價「exchange 已平」→ 安全收斂本地倉。兩層處理：
+- **D1（已 land · commit `caf008b6`）**：`dispatch.rs` 110017 在 qty==0 guard 下 → NoOp + `converge_exchange_zero_close`（即時清本地殘倉 + `pending_close_symbols.remove`）。qty==0 form 下 Bybit 不可能因「qty>size」回 110017（無顯式 qty）→ C-1 從風險面移除；one-way 排除 C-2。
+- **D2（spec pending IMPL · `docs/execution_plan/specs/2026-05-29--retcode-110017-d2-reconcile-spec.md`）**：close-maker PostOnly 走 explicit qty>0 的 drift 倉 D1 故意不收斂（防 C-1 誤刪）；D2 改由 `position_reconciler` 30s 週期 ghost 偵測兜底——必先 Bybit position query 確認 `size==0` 再 remove，並要求 2-cycle 連續確認防 race。
+
+**guard（缺一不可收斂）**：僅 close intent ∧ reduce_only==true ∧（D1：qty==0 全平 form｜D2：Bybit position query 確認 size==0 + 2-cycle）才本地 remove，防 C-1 qty>size 誤刪真倉。**one-way mode 是前提**——若未來啟用 hedge mode（`switch_position_mode` 被接線），C-2 positionIdx 不符會復活，本收斂路徑 **mandatory re-review**。
+
+**裸 110017 仍不可視為 silent success**：顯式 qty / hedge mode 下的 110017 不在上述安全語意域，client 必先檢查 position state 再下，重試前 state 沒變必再撞。實證背景：funding_arb BUSDT 110017 reject loop RCA（memory `project_funding_arb_v2_deprecation_path`，2026-05-02 / 2026-05-08）；PHYS-LOCK zero-position close loop 收斂安全審查 — 見 `docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-29--retcode_110017_convergence_semantics.md`（G-1..G-5 / C-1/C-2/C-3）。SSOT：code 為真，新行為 land 後字典隨之對齊。
+
+**⚠️ 110009 doc 版本歧義（待 BB 向 Bybit 核實 · owner=BB）**：官方 error 表存在兩版本表述 —「110009 = PositionNotFound（持倉不存在）」vs「110009 = stop orders 超過上限」。本系統 `dispatch.rs` 採 **PositionNotFound→NoOp** 語意（close 時持倉已不在 → 等效成功）。**風險**：若 110009 實為「stop orders 超上限」，落 NoOp 會**靜默吞掉一個該 fail 的 SL/TP 設置失敗**（違反 fail-loud + 本地止損保護 Root Principle 9）。此為**既有潛在風險**，2026-05-29 110017 修法不引入但順帶 flag。**尚未下結論**——待 BB 向 Bybit 核實當前 V5 對 110009 的權威定義後決定是否調整 dispatch 分類。ref：`docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-29--retcode_110017_convergence_semantics.md` §5 follow-up #2。
 
 ### 4.2.1 WS `order` 事件 `rejectReason` 正式字串
 

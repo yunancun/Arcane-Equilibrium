@@ -6709,3 +6709,45 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 **prior art**：與 BUSDT/funding_arb V2 110017 reject loop（BB memory:200-202，archive 2026-04-30 dust residual）同族 — exchange-zero residual + 110017 reject。非全新 bug；是已知族在 grid_close + PHYS-LOCK 重評下的新觸發實例。
 
 **修法設計（未 impl）**：主修 = dispatch 層收 110017（及 reduce-only-zero 族）視為 NoOp/已平 → 觸發本地 positions_remove + pending clear（對齊 110001/110009 語意）。Defense = (D1) execute_position_close emit 前 assert get_position(symbol).qty>0（無倉直接 drop 不 dispatch）；(D2) R-02 reconcile 加「exchange 回報 zero-position 的 symbol 即使 local 有倉也 remove + 記 reconcile drift」；(D3) dispatch 層 reduce-only + 110017 N 連發同 symbol → 強制本地 flatten（fail-safe 收斂）。Layer：主修在 dispatch classifier，D1 在 commands.execute_position_close，D2 在 reconcile_pending_exchange_orders / position_reconciler。
+
+---
+
+## 2026-05-29 — P2-110017-D2-RECONCILE-QTY-GT-ZERO-DRIFT spec（design only）
+
+**ticket**：D1（commit caf008b6）已 land qty==0 全平 form 110017 即時收斂。D2 補 qty>0 close-maker drift（demo `risk_config_demo.toml:229 use_maker_close=true` → close-maker PostOnly 走 explicit qty>0，D1 guard 故意排除以防 C-1 誤刪）。live `use_maker_close=false` → live 正常路徑由 D1 覆蓋，D2 對 live 是 defense-in-depth（liquidation/手動平倉 drift）。
+
+**關鍵架構發現（治本省 LOC）**：`position_reconciler/mod.rs` 已存在且每 30s polls `/v5/position/list`（Bybit truth）+ 已有 `engine_positions_mirror`（symbol→is_long 本地倉鏡像）。reconciler 既有 `DriftVerdict::Ghost`（baseline 有/Bybit 無）= **正好就是「本地有倉 + exchange 已平」的 drift**，但目前 Ghost **只寫 V014 audit、無 action**。D2 = 給 Ghost 加收斂 action。
+
+**設計選擇**：
+1. 觸發 = 週期 reconcile（復用 reconciler 30s），**不採連發計數**（BB G-5 自己 DEFER；連發計數需 dispatch 熱路徑 per-symbol counter；reconcile 不需新熱路徑狀態 + 覆蓋靜止 drift）。
+2. 安全 gate = reconciler 既有 Bybit fetch **天生就是 position-query confirm**；REST 失敗 → cycle fail-open（mod.rs:423）= 「查不到就不刪」天然 fail-closed for delete，**無需新 timeout 處理**（get_checked 自帶）。收斂 AND 條件：mirror 有倉 ∧ Bybit 本輪回該 symbol size==0（Ghost）∧ fetch 成功 ∧ dust filter 後仍 Ghost。建議 2-cycle streak 防 C-3 結算 race（ReconcilerState 加小 HashSet，非熱路徑）。
+3. 落點 = reconciler 新 `process_ghosts`（對稱 process_orphans）。**反模式警告**：絕不可用 `PipelineCommand::CloseSymbol`（→ ipc_close_symbol → 同條 reduce-only dispatch → 再撞 110017 重入迴圈，RCA §3a 已證）。必須新 `PipelineCommand::ConvergeExchangeZero` → handler 直調 **D1 已 land 的 `converge_exchange_zero_close`（commands.rs:1267，0 改動）** → upsert_position_from_exchange(size=0)，0 record_trade/Kelly。
+4. live 安全 = D2 只在 Bybit 自己回 size==0 才刪（顯式 query 比 D1 form 推斷更強）；真倉 query 回 size>0 → 不判 Ghost → 不收斂。C-1 對 D2 結構性不適用（不看 reject qty 只看 query）。
+5. audit **避坑** = D1 follow-up P3-110017-CONVERGE-AUDIT-OBSERVABILITY 揭露：D1 寫 trading.order_state_changes 但查無（合成 order_id 該表不收）。D2 改寫 `observability.engine_events`（reconciler 既有通道已驗可落地）event_type=`reconcile_ghost_converge`，**不寫 order_state_changes**。
+6. 與 D1 = **補充非 superset**；兩者匯流同一冪等函數 → 無雙刪（upsert size=0 對已 remove 倉 no-op）。
+7. **無 V### migration**（復用 engine_events，無新表/column）。
+
+**LOC**：~120-160 全 Rust，單 E1 串行，0 碰 dispatch.rs/converge_exchange_zero_close（D1 路徑零回歸）。chain：PA→E1→BB（exchange truth 信任）→E2→E4。E2 三審：誤刪真倉 negative case（fetch-fail/真倉 size>0 不刪）/ 不重入 close 迴圈（grep 無 execute_position_close）/ 冪等不雙刪 + Ghost 攔截後從 drifts 移除防 evaluate_actions 重複升級。
+
+**spec**：docs/execution_plan/specs/2026-05-29--retcode-110017-d2-reconcile-spec.md
+
+## 2026-05-29 — Sprint 2 Stage 0R replay preflight readiness（read-only preflight）
+
+**Trigger**: PM 派 Stage 0R replay preflight 推進評估（P0-EDGE-1 唯一可預期 closure path 前置）。read-only ssh SELECT/cat。
+
+**3 核心 fact**：
+1. **今日 04:00 cron 沒漏跑**：crontab = 04:00 CEST = **02:00 UTC**；停機窗 03:37–10:33 UTC（之後）。`replay.experiments` 確有 02:00:01 UTC register row。背景 prompt「可能漏跑」假設被推翻——cron 在停機前 ~1.6h fire 完。operator 無需手動補跑。`[48]/[50]` PASS、`run_state` 0 running（0 zombie，register-only DESIGN-FIX `d696b1f2`+`1f33301a` 生效）。
+2. **`learning.replay_divergence_log` 0 row = 設計，非故障**：divergence 是 M11 Stage B（Sprint 3 Phase A）產物；register-only Stage A heartbeat 不寫。不阻 Sprint 2 Stage 0R。
+3. **6 sanity check（AMD-15-01 §3.3）現況**：2 可跑（DSR/PSR + PBO/bootstrap，已實作於 `w_audit_8b/funding_skew_stage0r_metrics.py` psr_bailey_ldp/dsr_with_k/_pbo/block_bootstrap_ci，threshold PSR/DSR=0.95 PBO=0.20）/ 2 半（leak·bias，8c 有 max_day_share/max_symbol_share guard，需對 candidate 接線）/ 2 governance 斷言（data-tier·runtime-boundary，grep+設計核對）。**缺共同件 = A1/A2 candidate Stage 0R runner（把 8b/8c harness 收斂讀 A1/A2 cohort）**。
+
+**關鍵架構發現**：A1 spec line 763 + A2 spec line 879 明文「Stage 0R verdict = Sprint 3+ 範圍」。**現在沒有 runnable「跑 candidate Stage 0R」artifact**——只有前身 W-AUDIT-8b/8c 研究 harness。candidate `active=false`（30d demo fills=0，預期）。Stage 0R 不依賴 candidate live fills（offline replay on `market.funding_rates`/`market.liquidations`，[FACT] 16:30 UTC 全新鮮）。
+
+**W3-C 6 Reject gate**：M11 cron ✅ DONE / W2-E E2 ✅ / Stage 0R sanity(candidate runner 未接) 阻 / W2-F MIT(依賴 fills) 阻 / AC-S2-A-3(candidate 需先活躍) 阻 / W3-C sign-off 終局阻。**雞蛋次序**：Stage 0R green → operator approve candidate 進 demo → AC-S2-A-3 evidence(~2026-06-11 最早) → W2-F → W3-C(~D+18-21)。軟化 = 出 `draft_only` 提早 closure。
+
+**下一步派工**（PA 推薦次序）：(2) read-only leak/lookahead + runtime-boundary call-path grep proof 補本報告「待證實」項 2-4hr → (1) A1/A2 Stage 0R candidate runner IMPL 並行不阻 ~12-20hr（PA spec→E1→E2+E4）→ (3) operator/PM Stage 0R green 後 approve demo canary decision。**M11 cron 無殘工**。
+
+**架構教訓再用 29**（memory line 4567）：8b round 1 RED 因 strategy gate self-imposed scarcity（primary n=7 vs baseline n=39,181）。A1/A2 runner 須並列 baseline 採樣率，避免「sample insufficient」誤判「signal failure」。
+
+**誠實邊界**：本報告未跑 A1/A2 call-path leak-free grep（check 1）+ runtime-boundary grep（check 6）→ 兩項只列「待證實」不作 PASS（per PA profile P0/P1 leak/look-ahead finding 必附 grep）。
+
+**Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-29--sprint2_stage0r_preflight_readiness.md`（+ Operator copy）

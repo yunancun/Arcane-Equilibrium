@@ -964,3 +964,46 @@ live 真倉送 qty=0 全平不會回 110017（會正常成交）；只有 exchan
 
 ### Report path
 `/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-29--retcode_110017_convergence_semantics.md`
+
+---
+
+## 2026-05-29 D2 reconcile Ghost = exchange-truth 信任邊界審查（Track C P2-110017-D2-RECONCILE）
+
+### Verdict: **RETURN**（1 CRITICAL ship-stop）
+
+worktree `wt-c-d2` / branch `fix/retcode-110017-d2-reconcile`（working-tree only，無 commit；prompt 引用的 spec 檔在 worktree 不存在）。
+
+### ★ CRITICAL 教訓（durable）：D2 與 D1 的安全地基根本不同
+
+- **D1（110017 reactive）安全來源** = 「qty=0 全平 form 撞 110017 = 交易所**主動針對該 symbol** 自證倉已不在」，不依賴列舉完整性。
+- **D2（reconciler proactive）安全來源** = 「該 symbol **不在** 一次 `/v5/position/list` fetch 回應」→ 把「列舉完整性」變成 silent 安全前提。
+- **破口**：`get_positions(Linear, None)`（position_manager.rs:158）單次 `get_checked` + `settleCoin=USDT`，**無 cursor 迴圈、無顯式 limit**；`parse_position_list`（:545）**只讀 result.list，丟棄 nextPageCursor**。
+- **Bybit V5 官方 [FACT]**：`/v5/position/list` default `limit=20`、max 200、分頁 nextPageCursor；`symbol=null+settleCoin` 只回 size>0 且可被分頁截斷。
+- **scanner_config.toml `[universe] max_symbols=40`** → 持倉 > 20 時 page 1 截斷 → 第 21+ 真倉不在 current → 判 Ghost → 收斂刪真倉。
+- **streak/fail-closed 擋不住**：截斷是**穩態**（每輪截同一批尾端 symbol），非抖動 → streak 必滿；fail-closed 只在 REST `Err` arm，截斷回 `Ok(20條)` 走 happy path。
+- **live 真錢生效**：reconciler 對 Mainnet|LiveDemo 也 spawn（tasks.rs:860-864），D2 env-agnostic 共用碼 → 結構性誤刪 live 真倉 + 失本地止損（違 Root Principle 5/9）。
+
+### 各裁決點
+
+1. **Ghost=真無倉**：size==0 本身可靠 ✅；但「不在回應 ≠ size==0」分頁陷阱**成立**=CRITICAL（1b）。one-way/hedge 當前安全，G-3 守衛已對齊 D1 ✅。
+2. **2-cycle streak**：≥2 正確 + 維持 mandatory，不需加碼；防 C-3 暫態綽綽有餘（perp position 結算 <1s）。但**澄清能力邊界**：streak 防抖動不防穩態，不可當 (1b) 補償。
+3. **live 誤刪防護**：暫態足夠 ✅；穩態分頁截斷**不足** ❌。
+4. **rate-limit**：process_ghosts 復用同一 fetch + IPC 收斂 = **0 額外 REST** ✅。
+
+### 修復條件（RETURN → APPROVE 最小集）
+
+- MUST 二擇一：**修法 A** 收斂前 `get_positions(Linear, Some(symbol))` 單 symbol 點查確認 size==0（不受 limit=20 截斷）；**修法 B（BB 偏好）** `get_positions` 加 nextPageCursor 分頁 + 顯式 limit=200（同時修 reconciler Orphan/baseline 完整性盲區，SSOT 更乾淨）。
+- SHOULD：補「baseline 有 / current 截斷頁缺 → 不收斂」test（當前 6 新 test 全在 process_ghosts 下游已分類 drifts，**0 覆蓋分頁截斷上游**）；spec S-2 改「**完整列舉**確認 size==0」。
+- 已背書無需改：streak≥2 mandatory / fail-closed-on-Err / 走 converge_exchange_zero_close 不走 ipc_close_symbol / mirror 無方向不收斂 / G-3 hedge re-review 註解 / 0 rate-limit。
+
+### 下次啟動需查驗項
+
+1. D2 fetch 完整性修法（A 或 B）是否 land；修法 B 是否同步修 `get_positions(None)` 全 caller（Orphan/baseline）
+2. 分頁截斷 test 是否補（baseline 有 / current 截斷缺 → 不誤刪）
+3. 字典 §get_positions（line 527-542）是否補「default limit=20 / nextPageCursor / 單頁不翻頁、caller 不可假設已列舉全部」
+4. D2 spec 落檔後 S-2 是否改「完整列舉確認 size==0」
+5. 若 live universe 放開 > 20 symbol，D2 修法必須先 land（不可靠「現在持倉少」偶然安全 ship）
+
+### Report path
+
+`srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-29--d2_reconcile_ghost_exchange_truth.md`（CRITICAL 已複製 Operator/）
