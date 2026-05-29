@@ -409,7 +409,7 @@ Execution / cost sentinels added after F7:
   [59] h0_block_acceptance                (LG1-T2 — PA tech plan §1.4 T2 H0 hard-block production caller acceptance; reads pipeline_snapshot_{demo,live_demo}.json h0_gate_stats + risk_manager_config.runtime.h0_shadow_mode, cross-joins trading.fills 1h entry fills; 4 sub-check: snapshot fresh / shadow_mode / sample size / block leakage; OPENCLAW_H0_BLOCK_HEALTH_REQUIRED=1 escalates WARN→FAIL)
   [64] unblock_candidates_drift           (W5-E1-C P1-DYNAMIC-UNBLOCK-CHECK-1 2026-05-10 Sprint N+1 — spec §6.2 4 sub-check: stale candidate / yo-yo detection / sign-off completeness / unfrozen rows count; pairs with V090 governance.unblock_candidates + 30d cycle writer)
   [65] chain_integrity_post_audit_4b_m3   (MIT W6-1 RFC SHOULD 7 2026-05-10 — W-AUDIT-4b M3 producer post-deploy chain integrity sentinel; era filter `f.ts > '2026-05-09 09:22 UTC'` excludes pre-M3 historical orphan; PASS ≥ 95% / WARN 80-95% / FAIL < 80% / WARN_LOW_SAMPLE n<30; per-strategy drill-down annotation)
-  [66] panel_freshness                     (W1 sub-task 3 — panel.funding_rates_panel + panel.oi_delta_panel freshness)
+  [66] panel_freshness                     (W1 sub-task 3 — panel.funding_rates_panel + panel.oi_delta_panel + panel.basis_panel (P2-BASIS-PANEL-INFRA) freshness; V115 未 deploy 時 basis ABSENT→PASS_SKIP)
   [67] feature_baseline_readiness          (W-AUDIT-4b retained INSERT table readiness — active feature_baselines >0 + 34-dim vector contract; drift_events burn-in remains intact)
   [68] portfolio_resting_exposure_lineage  (P2-PORTFOLIO-RESTING-58-HEALTHCHECK 2026-05-16 P1-PORTFOLIO-RESTING-EXPOSURE-1 follow-up; 升 P1 per FA Stage 1 demo 啟前 mandatory; 監測 effective(filled+resting) vs filled-only leverage chain semantic drift; per engine 4 sub-check: long/short notional vs cap × {80%,100%} + divergence vs {50%,100%} + per-symbol resting/filled vs {80%,150%}; OPENCLAW_PORTFOLIO_RESTING_HEALTH_REQUIRED=1 escalates WARN→FAIL; ID note: PA spec/TODO 標 [58] 但 [58]=W-AUDIT-9 T4 已占用，取 [68] free slot, name preserved)
   [69] wp03_ou_sigma_deploy_gate            (P1-WP03-DEPLOY-GATE-IMPL 2026-05-16 — WP-03 OU sigma residual fix `ef6ea79f` / v35 rebuild `2026-05-16T01:00:00Z` post-deploy 24h+ monitoring + revert flag; 監測 grid_trading 在 demo+live_demo 的 avg_net_bps 三窗 12h/24h/7d trigger (T1=-10bps fast-fail / T2=-5bps primary / T3=baseline-3bps cumulative drift / ZERO_FILLS 24h n=0 dormancy); 任一觸發寫 `$OPENCLAW_DATA_DIR/wp03_revert_flag` advisory per ADR-0020 manual-only; pre-deploy/age<1h/table-absent/baseline-insufficient → PASS-skip 或 WARN 不阻塞; OPENCLAW_WP03_DEPLOY_GATE_REQUIRED=1 → approach WARN→FAIL 升級; OPENCLAW_WP03_DEPLOY_GATE_LOOKBACK_HOURS=N → 覆寫 T2 24h 窗)
@@ -1177,8 +1177,9 @@ def main() -> int:
 
             # [66] W1 sub-task 3 (E1-γ, 2026-05-11): panel.* freshness sentinel
             # 監控 PanelAggregator (W-AUDIT-8a Phase B Tier 2) 寫入 panel.funding_rates_panel
-            # + panel.oi_delta_panel 的 snapshot 新鮮度。
-            # PASS < 5min / WARN 5-15min / FAIL > 15min。V085/V087 未 deploy → PASS_SKIP。
+            # + panel.oi_delta_panel + panel.basis_panel (P2-BASIS-PANEL-INFRA) 的
+            # snapshot 新鮮度。
+            # PASS < 5min / WARN 5-15min / FAIL > 15min。V085/V087/V115 未 deploy → PASS_SKIP。
             # 對應 cron: helper_scripts/cron/panel_aggregator_health_cron.sh（雙保險）
             s, m = check_panel_freshness(cur)
             results.append(("[66] panel_freshness", s, m))

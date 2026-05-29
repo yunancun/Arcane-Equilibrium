@@ -40,6 +40,7 @@
 //! - V085 SQL: `srv/sql/migrations/V085__panel_funding_curve.sql`
 //! - V087 SQL: `srv/sql/migrations/V087__panel_oi_delta_panel.sql`
 
+pub mod basis;
 pub mod btc_lead_lag;
 pub mod funding_curve;
 pub mod liquidation_pulse;
@@ -56,6 +57,10 @@ pub use btc_lead_lag::{
 pub use btc_lead_lag::{
     create_btc_orderbook_slot, spawn_btc_orderbook_ingest_task, BtcOrderbookSlot,
 };
+// P2-BASIS-PANEL-INFRA (2026-05-29) — perp-index basis aggregator re-export
+// （V115 panel.basis_panel writer；無 IPC slot，純 offline replay 服務）。freshness
+// 走 Python `[66] check_panel_freshness` table-driven 框架，不在 Rust 自含 fn。
+pub use basis::BasisAggregator;
 pub use funding_curve::FundingCurveAggregator;
 pub use liquidation_pulse::LiquidationPulseAggregator;
 pub use oi_delta::OIDeltaAggregator;
@@ -105,6 +110,15 @@ pub struct PanelAggregator {
     /// `PriceEventKind::Ticker.open_interest` field 給 `oi_delta_aggregator`
     /// （sub-task 3 wire-up）。flush 走同 60s timer，snapshot_ts_ms 對齊。
     oi_delta_aggregator: OIDeltaAggregator,
+    /// P2-BASIS-PANEL-INFRA (2026-05-29) — perp-index basis panel aggregator wire。
+    ///
+    /// 與 funding_curve/oi_delta 共用同一 cohort + db_pool（spec §4.4 SSOT）；
+    /// run_loop event drain 內 dispatch `PriceEventKind::Ticker` 的 last_price +
+    /// index_price 給 `basis_aggregator.on_ticker_update`，flush 走同 60s timer，
+    /// snapshot_ts_ms 對齊。basis_pct = (last/index-1)*100 SIGNED，index≤0/缺失
+    /// fail-closed 不寫 row。**無 IPC slot**（spec §6.4 #5：strategy live 已用
+    /// in-memory cache 即時算 basis，basis_panel 純為 A1 Stage 0R offline replay）。
+    basis_aggregator: BasisAggregator,
     /// PG pool（fail-soft：pool 不可用時 sub-aggregator 自行降級）。
     /// 預留供未來 sub-aggregator（btc_lead_lag）共用 pool 句柄。
     #[allow(dead_code)]
@@ -148,10 +162,13 @@ impl PanelAggregator {
     ) -> Self {
         let funding_curve_aggregator =
             FundingCurveAggregator::new(db_pool.clone(), cohort_symbols.clone());
+        // P2-BASIS-PANEL-INFRA：basis 共用同一 cohort（spec §4.4 SSOT，避 scarcity）。
+        let basis_aggregator = BasisAggregator::new(db_pool.clone(), cohort_symbols.clone());
         let oi_delta_aggregator = OIDeltaAggregator::new(db_pool.clone(), cohort_symbols);
         Self {
             funding_curve_aggregator,
             oi_delta_aggregator,
+            basis_aggregator,
             db_pool,
             cancel,
             funding_curve_slot,
@@ -187,6 +204,20 @@ impl PanelAggregator {
     /// 取 oi_delta aggregator 不可變引用（test + observability 用）。
     pub fn oi_delta(&self) -> &OIDeltaAggregator {
         &self.oi_delta_aggregator
+    }
+
+    /// P2-BASIS-PANEL-INFRA — 取 basis aggregator 可變引用（run_loop dispatch + 整合 test）。
+    ///
+    /// 設計理由：run_loop drain Ticker variant 後呼叫
+    /// `aggregator.on_ticker_update(symbol, last_price, index_price)`（mirror
+    /// funding_curve_mut / oi_delta_mut）。
+    pub fn basis_mut(&mut self) -> &mut BasisAggregator {
+        &mut self.basis_aggregator
+    }
+
+    /// P2-BASIS-PANEL-INFRA — 取 basis aggregator 不可變引用（test + observability 用）。
+    pub fn basis(&self) -> &BasisAggregator {
+        &self.basis_aggregator
     }
 
     /// W-AUDIT-8a Phase B B-2：startup-only OI REST backfill。
@@ -336,7 +367,8 @@ impl PanelAggregator {
             target: "panel_aggregator",
             funding_curve_cohort_size = self.funding_curve_aggregator.cohort_size(),
             oi_delta_cohort_size = self.oi_delta_aggregator.cohort_size(),
-            "PanelAggregator run loop start (W1 sub-task 3 wired)"
+            basis_cohort_size = self.basis_aggregator.cohort_size(),
+            "PanelAggregator run loop start (W1 sub-task 3 + P2-BASIS-PANEL-INFRA wired)"
         );
 
         let mut flush_timer = tokio::time::interval(Duration::from_secs(FLUSH_INTERVAL_SECS));
@@ -346,6 +378,8 @@ impl PanelAggregator {
         let mut total_events: u64 = 0;
         let mut funding_updates: u64 = 0;
         let mut oi_updates: u64 = 0;
+        // P2-BASIS-PANEL-INFRA — basis dispatch 計數（observability）。
+        let mut basis_updates: u64 = 0;
         let mut flush_cycles: u64 = 0;
 
         loop {
@@ -356,6 +390,7 @@ impl PanelAggregator {
                         total_events = total_events,
                         funding_updates = funding_updates,
                         oi_updates = oi_updates,
+                        basis_updates = basis_updates,
                         flush_cycles = flush_cycles,
                         "PanelAggregator cancelled, shutting down"
                     );
@@ -406,6 +441,10 @@ impl PanelAggregator {
                     }
                     let (oi_ok, oi_fail) = self.oi_delta_aggregator.flush(snapshot_ts_ms).await;
 
+                    // ── basis：latest-value cache 不 drain（跨 sparse index frame 保
+                    //    last-known index）；無 IPC slot（spec §6.4 #5），純寫 PG ──
+                    let (basis_ok, basis_fail) = self.basis_aggregator.flush(snapshot_ts_ms).await;
+
                     flush_cycles = flush_cycles.saturating_add(1);
                     info!(
                         target: "panel_aggregator",
@@ -415,6 +454,8 @@ impl PanelAggregator {
                         funding_fail = fc_fail,
                         oi_ok = oi_ok,
                         oi_fail = oi_fail,
+                        basis_ok = basis_ok,
+                        basis_fail = basis_fail,
                         "panel flush cycle complete"
                     );
                 }
@@ -448,6 +489,17 @@ impl PanelAggregator {
                                     );
                                     oi_updates = oi_updates.saturating_add(1);
                                 }
+                                // P2-BASIS-PANEL-INFRA：basis update — 每 Ticker frame
+                                // 傳 last_price + index_price（Option）。index_price 只在
+                                // snapshot frame 帶值，delta frame None；aggregator 內
+                                // latest-value cache 跨 frame 保 last-known index，
+                                // 從未收過有效 index 的 sym fail-closed 不入 cache。
+                                self.basis_aggregator.on_ticker_update(
+                                    &price_event.symbol,
+                                    price_event.last_price,
+                                    price_event.index_price,
+                                );
+                                basis_updates = basis_updates.saturating_add(1);
                             }
                         }
                         None => {
@@ -538,6 +590,26 @@ mod tests {
         assert_eq!(agg.funding_curve().buffer_len(), 0);
         assert_eq!(agg.oi_delta().cohort_size(), 2);
         assert_eq!(agg.oi_delta().history_len(), 0);
+        // P2-BASIS-PANEL-INFRA：basis 共用同一 cohort SSOT（spec §4.4）
+        assert_eq!(agg.basis().cohort_size(), 2);
+        assert_eq!(agg.basis().cache_len(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_basis_mut_accessor_dispatch() {
+        // PASS：basis_mut() 可 dispatch on_ticker_update 進 cache（有效 index）
+        // 驗 run_loop 整合 dispatch path 不 broken（mirror funding_curve / oi_delta test）
+        let pool = make_disconnected_pool().await;
+        let cancel = CancellationToken::new();
+        let cohort = vec!["BTCUSDT".to_string()];
+        let (fc_slot, oi_slot) = make_slots();
+        let mut agg = PanelAggregator::new(pool, cohort, cancel, fc_slot, oi_slot);
+        agg.basis_mut()
+            .on_ticker_update("BTCUSDT", 65_000.0, Some(64_990.0));
+        assert_eq!(agg.basis().cache_len(), 1);
+        // 缺 index（delta frame）且從未收過有效 index 的 sym → 不入 cache（fail-closed）
+        agg.basis_mut().on_ticker_update("ETHUSDT", 3_500.0, None);
+        assert_eq!(agg.basis().cache_len(), 1, "never-seen-index sym fail-closed");
     }
 
     #[tokio::test]
@@ -709,6 +781,8 @@ mod tests {
         ev.funding_rate = Some(0.0001);
         ev.next_funding_ms = Some(1_700_000_028_800_000);
         ev.open_interest = Some(12345.6);
+        // P2-BASIS-PANEL-INFRA：index_price 帶值 → basis dispatch 路徑被觸發
+        ev.index_price = Some(64990.0);
         event_tx
             .send(Arc::new(ev))
             .await

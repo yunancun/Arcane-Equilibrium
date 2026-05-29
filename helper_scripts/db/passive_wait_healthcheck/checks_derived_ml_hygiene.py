@@ -390,14 +390,15 @@ def check_panel_freshness(cur) -> tuple[str, str]:
     """[66] panel.* freshness sentinel — W1 sub-task 3 (E1-γ, 2026-05-11)。
 
     Verifies PanelAggregator (W-AUDIT-8a Phase B Tier 2 collector) is producing
-    fresh snapshots into panel.funding_rates_panel + panel.oi_delta_panel.
+    fresh snapshots into panel.funding_rates_panel + panel.oi_delta_panel +
+    panel.basis_panel (P2-BASIS-PANEL-INFRA, 2026-05-29).
 
     Three-state verdict per table（取 worst case 為 overall）:
       PASS: max(snapshot_ts_ms) age < 5min
       WARN: 5-15min（PanelAggregator slow / BB WS lagging）
       FAIL: > 15min（panel collector dead 或 WS subscription 斷）
     Special:
-      ABSENT: V085/V087 未 deploy → PASS_SKIP（pre-deploy 不阻塞）
+      ABSENT: V085/V087/V115 未 deploy → PASS_SKIP（pre-deploy 不阻塞）
       NO_ROWS: 表存在但無 row → PASS_SKIP（首次 deploy 後 60s 內預期）
 
     Cron entry sister: helper_scripts/cron/panel_aggregator_health_cron.sh
@@ -412,6 +413,9 @@ def check_panel_freshness(cur) -> tuple[str, str]:
     panel_tables = [
         ("panel.funding_rates_panel", "funding"),
         ("panel.oi_delta_panel", "oi_delta"),
+        # P2-BASIS-PANEL-INFRA (2026-05-29) — basis_panel freshness 走同框架；
+        # V115 未 deploy → existence check ABSENT → PASS_SKIP（pre-deploy 不阻塞）。
+        ("panel.basis_panel", "basis"),
     ]
     statuses: list[tuple[str, str]] = []  # [(label, verdict), ...]
     skip_count = 0
