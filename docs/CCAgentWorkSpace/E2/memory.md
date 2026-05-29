@@ -3998,3 +3998,28 @@ Review 對象：2 個新 cron script（install + daily wrapper）851 LOC，Stage
 - Option B justified: GuardianConfig threshold fields (max_leverage etc.) ARE config-derived — confirmed wiring at tick_pipeline/pipeline_config.rs:88 + event_consumer/setup.rs:63 build GuardianConfig from RiskConfig.limits.leverage_max / anti_cluster.max_same_direction via apply_risk_snapshot hot-reload. PA's cited "lines 26-32" = struct fields already tunable; real literals are scoring weights inside review(). E1's read correct.
 - Lock tests non-tautological: test_scoring_behavior_locked drives actual review() per-path (Default max_lev=20: lev30→ratio1.5 modify, lev50→ratio2.5 reject) — pins behavior not just const equality. 8/8 guardian::tests pass (Mac advisory).
 - Direct fix: bybit_rest_client.rs RateLimitGroup Order/Position/Account comment 10→20 req/s per UID (Bybit V5 correct; backoff logic threshold-based, comment-only). cargo check -p openclaw_engine clean.
+
+## 2026-05-29 — OPS-2 3-pack hygiene (CI-FLAKINESS-TEST-LOCK / RESTART-ALL-CP-ATOMIC / GITLEAKS) · RETURN E1 (1 HIGH)
+
+**對象**：未提交 dirty tree（restart_all.sh + 12 Rust test files + lib.rs + git_hooks/ 3 新檔 + SCRIPT_INDEX.md）。HEAD=origin/main ac5ce387 (0/0)。
+**Verdict**：(b) restart_all cp-atomic = **APPROVE**；(c) gitleaks = **APPROVE**；(a) CI-flakiness lock = **RETURN E1** 1 HIGH（殘留 race，ticket 範圍內該修）。
+
+durable lessons / 對抗驗證要點：
+- **「合併 env-test lock」類 ticket 必窮舉 process-global env mutator，不能只改「已有鎖」的 callsite**。E1 把 9 個 per-module Mutex 合併到 `lib.rs::test_env_lock`（單 static + poison-tolerant guard），但漏了 `bybit_private_ws_status_writer::test_writer_config_from_env_honours_srv_root`：它 **無鎖** `remove_var("OPENCLAW_BASE_DIR")`，而 Group A 的 `edge_estimates.rs` 測試（持鎖）`set_var("OPENCLAW_BASE_DIR", tempdir)` 後讀它 → 同 process 同 var race。鎖只排除「持鎖者」，無鎖的同 var mutator 直接打穿保證。
+- **判定「無鎖 test 是否該本輪修」的硬方法 = grep 出每個無鎖 test 的 env var 名，與 Group A 已鎖 var 求交集**。交集非空 = 本輪修；disjoint = follow-up。本次 3 個 E1 自承無鎖：bybit_writer(`OPENCLAW_SRV_ROOT`+**`OPENCLAW_BASE_DIR`**=重疊) / claude_teacher(`ANTHROPIC_API_KEY`=disjoint) / ai_budget(`OPENCLAW_PRICING_PATH`=disjoint)。E1 把 3 個全當 disjoint follow-up 是錯的，1/3 重疊。
+- **「tests pass」(3598 passed) ≠ race 消除**。env race 是 latent（interleave window 窄），測試計數無法證偽；靜態 var-overlap 分析才是 proof。對抗立場：不接受「跑綠了所以沒事」。
+- **bybit_private_ws_status_writer.rs:592 註釋自證有罪**：「serial_test-style isolation isn't needed because the test writes to a scoped TempDir」是錯的——`remove_var` 是 process-global 非 TempDir-scoped。這種「合理化」註釋正是 race 被遺漏的根因，修時須一併改正。
+- **lib/bin test binary 邊界**：`crate::test_env_lock` 是 lib-crate `#[cfg(test)] pub(crate)` 項；`main_boot_tasks` / `live_auth_watcher_tests` 由 main.rs `mod` 宣告（bin crate，Cargo.toml [[bin]] src/main.rs），獨立 test process，`crate::` 解析到 bin root 而非 lib，無法共享 → 兩個殘留 `static ENV_GUARD` 是合法 follow-up（uncertainty ii 成立）。`grep "static.*Mutex<()>"` 確認 lib 內只剩 1 個本體。
+- **restart_all cp→atomic 驗證範式**：tmp 用 `${final}.tmp.$$` 與 final 同目錄 → 同 fs → `mv` 是真 rename；chmod 600 在 mv 前 → final 一現身即 600 無 644 窗口；`cp && chmod && mv || { rm; exit 1; }` 在 `set -e` 下：`&&/||` chain 非最後一項的失敗不觸 errexit，正確 route 到 `||` fail-loud。實測 happy(600+match+0 leftover) / cp-fail(exit 1) / 已 rotate key 不被覆蓋(idempotent) 三路 PASS。fail-loud exit 1 不是 idempotent 重啟回歸——舊 `set -e` 下 cp 失敗本就 abort，新版只是顯式化 + 加診斷。
+
+## 2026-05-29 — P1-OPS-2-CI-FLAKINESS-TEST-LOCK round 2 re-confirm · APPROVE（HIGH closed）
+
+round 1 RETURN 的 1 HIGH（env race 殘留）round 2 已修。逐項對抗確認 PASS：
+- **HIGH closed**：`bybit_private_ws_status_writer.rs:604` `let _g = crate::test_env_lock::guard();` 取得在第一行，**早於** :609/:610 的 set_var/remove_var 與 :620-626 restore，且具名綁定 `_g`（非 `let _ =` 立即 drop），活到 test 結束覆蓋 mutate→read→restore 全程。重疊變量 `OPENCLAW_BASE_DIR` 現在持同一把鎖，與 Group A edge_estimates 真正串行。誤導性 TempDir 註釋已改中文說明 process-global + 必持鎖。
+- **ai_budget caller-guard 判斷正確**：grep `set_test_pricing_path` 確認唯一 caller = `test_budget_config_load_default`（:593）。guard 放 caller 第一行（:592）早於 `set_test_pricing_path()` 呼叫，覆蓋「helper set_var(OPENCLAW_PRICING_PATH) → BudgetTracker::new 讀 config」整段臨界區。若放 helper 內則 helper return 即釋放、無法覆蓋呼叫端後續讀 → E1 判斷正確。helper 無第二 caller，無洞。
+- **claude_teacher**：guard :271 早於 :273 remove_var，`_g` 具名綁定，覆蓋 mutate+restore。env var `ANTHROPIC_API_KEY` 與 Group A disjoint 但持同鎖維持 all-or-nothing 不變式。
+- **無 scope creep**：3 檔改動全在 `#[cfg(test)]` mod 內，無 production 邏輯改動、無新依賴。
+- **lib 唯一鎖本體**：`grep static.*Mutex<()>` → lib.rs:127 唯一；main_boot_tasks.rs:644 + live_auth_watcher_tests.rs:210 由 main.rs:12-13 `mod` 宣告（bin crate，獨立 compilation unit + test process），不在 lib `crate::test_env_lock` 鎖範圍，合法 follow-up。
+- 驗收：`cargo build --lib --tests` clean（僅 2 個 pre-existing bin-crate warning）；3 個 guarded test 各跑 PASS（3 passed / 0 failed）。
+- 教訓：caller-vs-helper guard 放置——env mutation 在 helper 時 guard 必在 caller 第一行，否則 helper return 即釋放鎖、無法覆蓋呼叫端後續對該 env 的讀取臨界區。re-confirm 時務必 grep 證 helper 唯一 caller，否則 helper 其他無鎖 caller 仍是洞。
+- **gitleaks toml 起手版**：`[extend] useDefault=true` + `[allowlist]{description,regexes,paths}` 合法 gitleaks v8 schema（`[allowlist]` 單數在 v8.19+ 被 `[[allowlists]]` 取代但仍兼容，E1 註釋已自承 first-cut + FP 調校 follow-up）。allowlist 的 pinned hex + test key 已 grep 驗證真實存在於 live_authorization.rs + python test + runbook（非捏造 fixture）。warn-and-pass 設計（缺工具 exit 0 / 有 finding exit 1）正確；installer worktree-safe（`git -C root rev-parse --git-dir` 處理相對 git-dir）+ refuse-clobber（cmp -s）+ --force backup。`.git/hooks/` 仍只 .sample = installer 未執行。
