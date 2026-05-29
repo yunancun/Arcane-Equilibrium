@@ -879,6 +879,75 @@ def _classify_symbols_by_tier(
 # ============================================================================
 
 
+def prepare_parsed_rows(
+    rows: Sequence[Mapping[str, object]],
+    *,
+    cost_bps: float,
+) -> list[dict[str, object] | None]:
+    """P2-13 sweep 優化：把每個 raw row 之 row-derived feature 預先解析一次。
+
+    為什麼：compute_stage0r_sweep 對 11664 個 grid cell 各呼一次
+    `_extract_trigger_rows`，每次都對所有 raw row 重跑 `_safe_int` /
+    `_safe_float` 解析 + gross/net bps 計算。但這些值只依賴 row 本身與
+    `cost_bps`（整個 sweep 為常數），與 grid threshold 無關 → 重算 11664 次
+    純屬浪費。本函數把它抽到 loop 外算一次。
+
+    回傳 list 與 rows 等長、順序對齊；element 為 None 表該 row 缺必要欄位或
+    direction/expected_dir/entry/exit 不合法（deterministic skip，任何 grid
+    cell 都不會通過）→ caller 直接 short-circuit 跳過，不再重判。
+
+    exact-vs-fast 契約：解析邏輯與舊 `_extract_trigger_rows` row-derived 區段
+    逐行對應（同樣的 `_safe_*` 呼叫、同樣的合法性 guard、同樣的 gross/net 公式），
+    故 sweep 數值輸出完全不變，只省去重複解析。
+    """
+    parsed: list[dict[str, object] | None] = []
+    for row in rows:
+        ec = _safe_int(row.get("event_count_5m"))
+        cn = _safe_float(row.get("cluster_notional_5m"))
+        dec = _safe_int(row.get("dominant_event_count"))
+        if ec is None or cn is None or dec is None:
+            parsed.append(None)
+            continue
+        # notional_pct_24h / side_dominance_ratio 為 threshold-dependent gate
+        # 的左值，但解析本身與 threshold 無關 → 預先解析快取。
+        notional_pct = _safe_float(row.get("notional_pct_24h"))
+        sdr = _safe_float(row.get("side_dominance_ratio"))
+        dominant_side = str(row.get("dominant_side") or "")
+        if dominant_side not in ("long_liquidated", "short_liquidated"):
+            parsed.append(None)
+            continue
+        expected_dir = _safe_int(row.get("expected_dir"))
+        if expected_dir not in (-1, +1):
+            parsed.append(None)
+            continue
+        entry_mid = _safe_float(row.get("entry_mid"))
+        exit_mid = _safe_float(row.get("exit_mid"))
+        if entry_mid is None or exit_mid is None or entry_mid <= 0 or exit_mid <= 0:
+            parsed.append(None)
+            continue
+        signal_ts_ms = _safe_int(row.get("bucket_end_ts_ms"))
+        if signal_ts_ms is None:
+            parsed.append(None)
+            continue
+        gross_bps = 10000.0 * expected_dir * (exit_mid - entry_mid) / entry_mid
+        parsed.append({
+            "symbol": str(row.get("symbol") or ""),
+            "signal_ts_ms": signal_ts_ms,
+            "direction": dominant_side,
+            "expected_dir": expected_dir,
+            "cluster_notional_5m": cn,
+            "event_count_5m": ec,
+            "dominant_event_count": dec,
+            "side_dominance_ratio": sdr,
+            "notional_pct_24h": notional_pct,
+            "entry_mid": entry_mid,
+            "exit_mid": exit_mid,
+            "gross_bps": gross_bps,
+            "net_bps": gross_bps - cost_bps,
+        })
+    return parsed
+
+
 def _extract_trigger_rows(
     rows: Sequence[Mapping[str, object]],
     *,
@@ -891,6 +960,7 @@ def _extract_trigger_rows(
     quiet_sec: int,
     horizon_min: int,
     cost_bps: float,
+    parsed_rows: Sequence[dict[str, object] | None] | None = None,
 ) -> list[dict[str, object]]:
     """從 panel rows 提通過 density + magnitude + dominance + quiet 門檻的
     trigger 候選，並計算 gross/net bps。
@@ -904,8 +974,52 @@ def _extract_trigger_rows(
 
     為什麼 net_bps 由 caller 預計算：保持 SQL CTE 與 Python 的 cost model
     一致；本函數重新驗 cost_bps 是否被 caller 套用，並可重 override。
+
+    parsed_rows（P2-13 sweep 優化）：若 caller 傳入 `prepare_parsed_rows`
+    產生之預解析快取（與 rows 等長對齊），則跳過 per-row 重複解析，只套
+    threshold 比較 + 每 cell passthrough（horizon_min / quiet_sec）。None
+    element 代表 deterministic skip（缺欄位 / 不合法）→ 直接跳過。快取為
+    純解析結果，比較與輸出與舊路徑逐欄一致 → sweep 數值完全不變。
     """
     out: list[dict[str, object]] = []
+    # P2-13 fast path：用預解析快取，跳過重複 `_safe_*` 解析。
+    if parsed_rows is not None:
+        for pr in parsed_rows:
+            if pr is None:
+                continue  # deterministic skip：任何 grid cell 都不可能通過
+            # 過 density floor + magnitude floor + notional_pct + side dominance。
+            if (
+                pr["event_count_5m"] < k_event_count
+                or pr["cluster_notional_5m"] < n_usd
+                or pr["dominant_event_count"] < m_dominant
+                or pr["cluster_notional_5m"] < floor_usd
+            ):
+                continue
+            notional_pct = pr["notional_pct_24h"]
+            if notional_pct is None or notional_pct < notional_pct_floor:
+                continue
+            sdr = pr["side_dominance_ratio"]
+            if sdr is None or sdr < side_dom:
+                continue
+            # passthrough horizon_min / quiet_sec（per cell 變動）；其餘直接複用快取。
+            out.append({
+                "symbol": pr["symbol"],
+                "signal_ts_ms": pr["signal_ts_ms"],
+                "direction": pr["direction"],
+                "expected_dir": pr["expected_dir"],
+                "cluster_notional_5m": pr["cluster_notional_5m"],
+                "event_count_5m": pr["event_count_5m"],
+                "dominant_event_count": pr["dominant_event_count"],
+                "side_dominance_ratio": sdr,
+                "notional_pct_24h": notional_pct,
+                "entry_mid": pr["entry_mid"],
+                "exit_mid": pr["exit_mid"],
+                "gross_bps": pr["gross_bps"],
+                "net_bps": pr["net_bps"],
+                "horizon_min": horizon_min,
+                "quiet_sec": quiet_sec,
+            })
+        return out
     for row in rows:
         # 過 density floor。
         ec = _safe_int(row.get("event_count_5m"))
@@ -1037,6 +1151,7 @@ def _compute_baseline_lift(
     quiet_sec: int,
     notional_pct_floor: float,
     side_dom: float,
+    parsed_rows: Sequence[dict[str, object] | None] | None = None,
 ) -> dict[str, object]:
     """Baseline lift vs single-event-bucket noise baseline，per spec v0.3 line 253。
 
@@ -1061,6 +1176,7 @@ def _compute_baseline_lift(
         floor_usd=10_000, notional_pct_floor=notional_pct_floor,
         side_dom=side_dom, quiet_sec=quiet_sec,
         horizon_min=horizon_min, cost_bps=cost_bps,
+        parsed_rows=parsed_rows,
     )
     loose = _extract_trigger_rows(
         rows,
@@ -1068,6 +1184,7 @@ def _compute_baseline_lift(
         floor_usd=0, notional_pct_floor=0.0,
         side_dom=0.0, quiet_sec=quiet_sec,
         horizon_min=horizon_min, cost_bps=cost_bps,
+        parsed_rows=parsed_rows,
     )
     tight_nets = [float(t["net_bps"]) for t in tight if _safe_float(t.get("net_bps")) is not None]
     loose_nets = [float(t["net_bps"]) for t in loose if _safe_float(t.get("net_bps")) is not None]
@@ -1167,8 +1284,13 @@ def compute_stage0r(
     after_k_count: int | None = None,
     after_n_count: int | None = None,
     after_m_count: int | None = None,
+    parsed_rows: Sequence[dict[str, object] | None] | None = None,
 ) -> dict[str, object]:
     """Compute Stage 0R full-cell metrics + 4-value verdict。
+
+    parsed_rows（P2-13）：sweep caller 可傳入 `prepare_parsed_rows(rows,
+    cost_bps=...)` 之結果以跳過 per-cell 重複解析；不傳則內部走原 raw 路徑，
+    行為與輸出完全不變。
 
     Input rows: SQL CTE 5 final_signals 結果（per PA design §2.3）。
 
@@ -1226,6 +1348,7 @@ def compute_stage0r(
         quiet_sec=quiet_sec,
         horizon_min=horizon_min,
         cost_bps=cost_bps,
+        parsed_rows=parsed_rows,
     )
 
     n_per_cell = len(triggers)
@@ -1324,6 +1447,7 @@ def compute_stage0r(
         quiet_sec=quiet_sec,
         notional_pct_floor=notional_pct_floor,
         side_dom=side_dom,
+        parsed_rows=parsed_rows,
     )
     exclusion_counts = _build_exclusion_counts(
         rows,
@@ -1656,6 +1780,9 @@ def compute_stage0r_sweep(
         }
 
     sweep_cells: list[dict[str, object]] = []
+    # P2-13 sweep 優化：row-derived feature 只依賴 row 與 cost_bps（整個 sweep
+    # 為常數）→ 預解析一次，傳給每 cell 的 compute_stage0r 跳過 11664× 重複解析。
+    parsed_rows = prepare_parsed_rows(rows, cost_bps=cost_bps)
     # E2 round-1 CRIT-1 + HIGH-3 fix：8-D loop（加 pct 軸）。
     for k in k_grid:
         for n in n_usd_grid:
@@ -1682,6 +1809,7 @@ def compute_stage0r_sweep(
                                         rng_seed=rng_seed,
                                         bb_demo_bias_confirmed=True,
                                         total_bucket_count=total_bucket_count,
+                                        parsed_rows=parsed_rows,
                                     )
                                     # 為 sweep_cells 加 explicit grid coords。
                                     cell_result["grid_coords"] = {
@@ -1700,6 +1828,7 @@ def compute_stage0r_sweep(
         floor_usd=10_000, notional_pct_floor=0.95,  # E2 round-1 CRIT-1 fix
         side_dom=0.80, quiet_sec=30,
         horizon_min=PRIMARY_HORIZON_MIN, cost_bps=cost_bps,
+        parsed_rows=parsed_rows,
     )
     symbol_tiers = _classify_symbols_by_tier(default_triggers)
 
