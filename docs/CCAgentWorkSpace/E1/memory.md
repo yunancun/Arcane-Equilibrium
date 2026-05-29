@@ -13464,3 +13464,32 @@ register + mod.rs setter）。
 - **誠實邊界**：C4 = 機制 live、incident-trigger pending（Sprint 3 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER`）。outcome_rx 在 incident_policy 實裝前永遠空。不可標「fail-safe 全功能 live」。
 - **驗收**：3622 lib tests pass（+3 C4，baseline 3619）；release Finished；clippy 改動檔 0 hit（openclaw_core `deprecated since` clippy error 是 pre-existing baseline，非 C4）。對抗驗證：破 paper noop gate → e2e_c4_paper_skips_exchange_sync FAIL；破 claim-before-await → e2e_c4_watcher_allfail_arms_then_claims_once FAIL；均還原。
 - **新 singleton**：`FAILSAFE_FEED_SENDERS`（OnceLock）+ 既有 `SHARED_WATCHER`，登記在 report + 待 TODO follow-up（無集中登記表）。worktree `../wt-c4` branch `fix/packet-c-c4-wire`，未 commit。
+
+## 2026-05-29 — A1/A2 Stage 0R candidate runner（Track B reduced scope）
+
+**任務**：實作 alpha tournament candidate Stage 0R runner（spec v2）。worktree `feature/a1a2-stage0r-runner`（`../wt-b-runner`），不 commit。
+
+### 教訓 1：reduced scope 由 PG empirical 證實決定，不盲信 spec [ASSUME]
+- spec v2 §3.4 標 `panel.basis_panel` [ASSUME] 待驗；PM 先 probe 證不存在。E1 docker exec psql 再實證：panel schema 只有 btc_lead_lag_panel / funding_rates_panel / oi_delta_panel；`%basis%` 表 0 hit / 欄位 0 hit。→ A1 的 basis<0.3% entry gate 無資料源 → **A1 cohort 不可建（建了 = dead code，違 feedback_no_dead_params）**。A1 只硬標 `draft_only(basis_panel_infra_missing)`（infra gap 非 signal failure），不寫任何 A1 funding/basis cohort SQL/filter。開 `P2-BASIS-PANEL-INFRA` 給 PM 登記。
+- 反模式：若按 spec 原 §3 建 A1 SQL + metrics 會產出對不存在源算的 dead code。先 probe 後實作省一整路徑工。
+
+### 教訓 2：8c k_total inflation 必在 call 後重算 DSR（不能傳參 override）
+- 8c `compute_stage0r` 內部 `k_new = max(25, n_symbols) × 11664`（line 1388），`k_total = k_prior + k_new`，DSR = `dsr_with_k(net, k_total)`。**無參數可 override k_total**。candidate 固定單閾值真實 trial count ≈ 4（2sym × 2dir × 1thr × 1horizon），沿用 inflation（√(2 ln 291600)≈5.0）→ DSR 永 fail = silent stat 錯（mock 不抓）。
+- 修法：adapter 用同源 net 序列（`prepare_parsed_rows` 出的 net_bps，與 8c 內部逐欄一致）+ `dsr_with_k(net, candidate_k_total)` 重算，蓋過 packet 的 dsr/k_total，並保存 `dsr_8c_inflated_preserved` 透明度。
+
+### 教訓 3：2-symbol 不可用 8b/8c symbol-cross-section CSCV
+- 8b/8c `_pbo` 需 ≥10 candidate keys（sweep grid 多 cell），candidate 是固定單一 cell + 2-symbol → 無法成立。自建 time-block CSCV：day-block train/test split，train_avg>0 但 test per-day median<0 視 bad split；<4 distinct days → pbo=None → observe_more（sample insufficient 非 fail）。
+
+### 教訓 4：sample_insufficient vs signal_failure 必分（避免誤 reject）
+- 2-symbol + demo 短窗 + active=false → n_eff 預期遠低 floor（real run n_eff=7 ≪ 300）。verdict lane 優先判 sample_insufficient → observe_more，即使 avg_net 負（real -2.45bps）也不 reject。spec §5.3 + 架構教訓 29 honesty 要求。
+
+### 教訓 5：800 行軟上限 → 拆 metrics/IO 兩層（mirror 8c）
+- runner 初版 892 行越警告線。拆 PG 取數 + argparse + JSON render 至 sibling `candidate_stage0r_report.py`（mirror 8c metrics.py/report.py），純 offline 計算留 `candidate_stage0r_runner.py`（680 行）。shim 改委派 report.main。
+
+### empirical（read-only docker exec / 8c SQL 實跑）
+- market.liquidations 14d：BTC 11795（age 3min）/ ETH 8527（age 7min），83578 rows / 57 sym，fresh。
+- 8c SQL with runner 寬 pre-filter + BTC/ETH 14d：1466 trigger rows（BTC 761 / ETH 705），13 distinct days。raw_buckets count = 1478（both-direction floor 分母）。
+- real-row offline harness（CSV → run_candidates）：A2 observe_more（n_filtered 109 / n_net 91 / avg_net -2.45 / n_eff 7 / days 13 / sample_insufficient），A1 draft_only，overall observe_more。
+
+### 旁註：ssh PG TCP auth 不通（環境 secrets 漂移）
+- `basic_system_services.env` 的 POSTGRES_PASSWORD 對 TCP 不 auth（docker exec peer/trust 可）。完整 runner end-to-end（psycopg2 TCP）留 E4 用 runtime env 跑。E1 用 docker exec SELECT + CSV offline harness 已 de-risk 全部 load-bearing 邏輯。
