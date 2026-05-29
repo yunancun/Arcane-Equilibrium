@@ -169,6 +169,7 @@ Layered Autonomy v2 Wave 5  🟡 Packet A+B runtime + TOTP source + ADR sync / P
 
 | ID | 優先 | 任務 | AC / Next Action |
 |---|---:|---|---|
+| `P1-110017-POSITION-DRIFT-CLOSE-LOOP` | 1 | 🔴 **NEW 2026-05-29 / RCA DONE (PA) / active demo loop** — 13:57 cold-restart downtime 期 TRXUSDT 一筆 grid_close 平倉未收 confirmed fill → reload「本地有倉 qty=2907 / Bybit 已平」**drift 殘倉**。exchange-mode close 只在 confirmed fill 才本地刪倉，Bybit 回 **110017「position is zero」**永不成交 → 每 tick PHYS-LOCK `gate4_giveback` 重發 reduce-only close（`qty=0` 全平 form，**非 bug**）→ ~1.4/sec 自持迴圈（7411+ since 13:57）。**僅 demo/live_demo，無真錢**（live 缺 auth）。**restart 清不掉**（persisted demo_state.json 倉，已驗跨重啟存活）。**根因 = `WP-10 (ef6ea79f)` 只加 110017 enum variant，沒修 classifier 分類 + 沒接本地收斂**；同族 prior = BUSDT/funding_arb 110017 loop。harm = demo edge 樣本污染 + log 5.7GB 膨脹 + Bybit demo API 浪費；**擴散風險中**（結構性非 TRXUSDT 專屬）。**修法（PA design）**：主修 `dispatch.rs classify_business_retcode` 110017 `Structural`→`NoOp/already-closed` + 消費端 `positions_remove + pending clear`（**需 BB review** 110017 exchange-facing 語意）；D2 reconcile 納 exchange truth（連發 110017 強制本地 remove + log drift）；D1/D3 止血層。部署此修即自動收斂清掉當前 loop（不需手編 state / 不需重啟）。止血替代 = engine stop + 手編 demo_state.json 移除 TRXUSDT 倉（一次性，需停 engine）。**Owner**: E1（classifier+convergence）+ BB（110017 語意）+ E2 + E4；chain PM→PA✅→E1→E2→BB→E4→QA。**ref** `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-29--phys_lock_zero_position_close_loop_rca.md` |
 | `P1-OPS-1-E1-DISPATCH` | – | ✅ **IMPL DONE 2026-05-27 commit `65e78437`** round 1；ref `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-27--ops_1_https_secure_cookie_impl.md` |
 | `P1-OPS-1-E1-ROUND-2` | – | ✅ **CLOSED 2026-05-28 commit `22466a81` supersedes `07027493` enforcing gaps** — original round 2 8 fix + A3 R2/R3/R4 close：CSRF 403 friendly toast + auto reload, cert trust runbook + install hint, CSRF/CSP shadow 7d + `csrf_shadow_zero_verify.sh` PASS 0；target tests 34/34 PASS；Linux runtime repo pulled |
 | `P1-OPS-1-PROXY-HEADER-SPOOF-RISK` | – | ✅ **CLOSED 2026-05-27 by E2 verify PASS** — `auth_routes_common.py:60-94` `_proxy_headers_trusted()` env gate fail-closed verified；偽造 X-Forwarded-Proto 無效；regression batch B 10/10 PASS |
@@ -480,6 +481,11 @@ ssh trade-core "cd ~/BybitOpenClaw/srv && PGHOST=localhost PGUSER=trading_admin 
 
 ## §-1 歷史 closure 摘要（≤14d；舊細節 → archive）
 
+- **2026-05-29 operator-requested runtime recovery 確認 + 110017 close-loop RCA**：
+  - **背景**：operator 今日卡 sudo 密碼（system-level unit）→ 維護重啟未即時跑完整 restart；要求確認 Linux 全恢復。
+  - **確認 ✅ 全進程/服務正確啟動**：engine PID 27582（deploy intact）/ uvicorn ×4 healthz 200 / ollama PID 1081（實測回應）/ user watchdog active + linger=yes / PG reachable（僅 benign collation-version notice）/ demo+live pipeline alive paper disabled / 6 cron 全裝 / mem 117Gi avail。無半啟動殘留。
+  - **發現 active bug → 派 PA RCA（operator 選「先查根因不重啟」）**：`P1-110017-POSITION-DRIFT-CLOSE-LOOP`。根因 = 13:57 cold-restart downtime grid_close 平倉未確認 → reload「本地 qty=2907 / Bybit 已平」drift 倉 → 110017 永不成交 → PHYS-LOCK 每 tick 重發 reduce-only close ~1.4/sec 自持迴圈。**僅 demo，無真錢；restart 清不掉（persisted 倉）；根因 = WP-10 classifier 缺口**。修法 PA design 完成（dispatch.rs 110017 reclassify + 本地收斂，需 BB review）→ 見 §6 P1 row。
+  - **PM 判讀更正（誠實）**：先前報「positions:{} 空 / phantom / oc_risk_dm」三處判讀錯（positions 是 JSON list 非 dict；dm=demo tag），PA RCA 更正為真 drift 倉。
 - **2026-05-29 PM 接手 — #1 LG-3 dispatch ARMED + #2 P2/P3 cleanup batch（operator「先1後2」）**：
   - **#1 LG-3 dispatch 預備 ARMED**：pre-dispatch freeze CLEAN（無 lg3 branch / 無 IMPL commit / V104 still FREE / T1+T4 NEW path absent）；Gate 2 MIT V104 dry-run ✅ done；Gate 1 v56 Layer B +24h ON TRACK ~2026-05-30 ~12:00 UTC（[69] PASS + halt_audit.log absent + 0 real panic「44 panic 全為 cryptopanic provider 名」+ PID 27582 stable since deploy）。dispatch packet 直接照用 PA verify §5.3（Wave 2.4.A = E1-T1 Rust SM core + E1-T4 V104 audit，Option B race-aware）。**Gate 1 一清即派**（PM 明日 re-verify 後 fire）。詳見 §1 P0-LG-3 row。
   - **#2 P2/P3 cleanup batch — 4 ticket 全收**（E1×3 IMPL + E2 2-round adversarial）：
