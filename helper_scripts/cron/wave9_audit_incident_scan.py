@@ -286,7 +286,8 @@ def _scan_audit_write_failed_other(
                                'replay_artifact_prune_ttl',
                                'replay_artifact_prune_storage_cap',
                                'replay_key_archive_expired',
-                               'replay_no_live_mutation_violation'
+                               'replay_no_live_mutation_violation',
+                               'm11_replay_runner_register_only_completed'
                            )
                        )
                    )
@@ -303,7 +304,8 @@ def _scan_audit_write_failed_other(
                        'replay_artifact_prune_ttl',
                        'replay_artifact_prune_storage_cap',
                        'replay_key_archive_expired',
-                       'replay_no_live_mutation_violation'
+                       'replay_no_live_mutation_violation',
+                       'm11_replay_runner_register_only_completed'
                    )
                )
            );
