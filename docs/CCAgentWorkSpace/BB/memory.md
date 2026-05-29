@@ -929,3 +929,38 @@ PkgB Rust exchange-authority hardening verified READ-ONLY against Bybit V5 offic
 1. TW P2-04 patch: enum comment 10→20 r/s + PA's pre_check_order/demo-dcp drift items landed
 2. P1-03 IPC end-to-end (cancel_all_orders reaches engine) requires operator-gated non-mutating IPC probe on Linux — deferred per PA §Linux empirical
 3. Linux cargo test PASS confirmed in commit body (Rust 3584/0) — re-verify on next deploy --rebuild
+
+---
+
+## 2026-05-29 retCode 110017 收斂語意安全審查（PHYS-LOCK zero-position close loop 治本）
+
+### Trigger
+PA RCA `2026-05-29--phys_lock_zero_position_close_loop_rca.md` §5 主修需 BB exchange-facing 背書：TRXUSDT 本地殘倉 + Bybit 端已平 → reduce-only close 每 tick 回 110017 → engine 把 110017 當 Structural（no retry、不本地收斂）→ 倉永不刪、~1.4/sec 自持迴圈。修法擬把 110017 Structural→NoOp + 消費端本地 positions_remove。
+
+### Verdict: APPROVE-WITH-MANDATORY-GUARD
+**不可「無條件收到 110017 就本地刪倉」。** 方向正確但 110017 在 Bybit V5 非零倉專屬碼，須加 guard。
+
+### 關鍵 FACT
+- **110017 ≠ 可靠等價零倉**：官方 + 字典 §4.2 line 1295 三 trigger「(a)無倉 (b)方向反 (c)qty>size」。BB WP-10 自己標「切勿視為 idempotent silent success」。裸刪倉 = 誤刪真倉災難風險。
+- **本系統 = one-way mode（4 指紋驗）**：(1) OrderDispatchRequest 無 positionIdx 欄位 (2) order create body 不送 positionIdx (3) `switch_position_mode`（position_manager.rs:356）**0 production caller** (4) demo_state TRXUSDT position_idx=None。→ corner case C-2（hedge positionIdx 不符）結構性不存在。
+- **qty=0 全平 form（close_sizing.rs）消除 C-1**：qty=0 無顯式 qty → 不可能因 qty>size 回 110017 → 110017 在 qty=0 form 下可靠等價零倉。
+- **現有 NoOp 消費端（dispatch.rs:708-734）只發 LeaseOutcome::Consumed + log，不本地刪倉**。所以「110017→NoOp」單獨改 classifier **無法斷迴圈**；PA 主修「消費端 positions_remove」是新行為，對 110001/110009 也是行為變更，E2 須確認無 regression。
+- close side 正確反向：commands.rs:982 `is_long: !is_long`（one-way 下正確）。
+
+### E1 安全收斂條件（一句話）
+僅當 `is_close==true` ∧ `reduce_only==true` ∧ qty=0 全平 form ∧（建議）同 symbol 連續 ≥2 次 110017，才本地 positions_remove + pending_close_symbols.remove；one-way 為前提（hedge 啟用須重審）；110017 不可裸放進 `110001|110009` arm，須帶 guard 分支。
+最小安全集 = G-1(close) ∧ G-2(reduce_only) ∧ G-4路徑a(qty=0 form)；G-3(one-way 前提守衛) + G-5(連發熔斷防 race) 建議納入。
+
+### live 安全性: 在 guard 齊備下誤刪真倉結構路徑為空
+live 真倉送 qty=0 全平不會回 110017（會正常成交）；只有 exchange 確已無倉（手動/強平/liquidation）才回 → 收斂=對齊真相正確。不違 fail-closed 開倉語意（110017→NoOp 仍 no-retry）。
+
+### rate-limit/ToS: 0 風險
+1.4 req/s = 7% Order group 20 r/s cap；非 wash/spoof/multi-account；同 BUSDT funding_arb 110017 reject loop 性質（memory line 200-202 正常拒單非 ToS 違規）。真實成本 = demo edge 污染 + 27k log 噪音（治理 P1，非合規）。
+
+### follow-up
+1. 字典 §4.2 110017 row 修法 land 後補「one-way+qty=0 form 可安全收斂」新語意（現只警告不可 silent success，會與新 code drift）
+2. ★ **110009 doc 版本歧義**：官方 error 表有「110009=PositionNotFound」vs「110009=stop orders 超上限」兩版本；本系統 dispatch 採 PositionNotFound 落 NoOp。若 110009 真是 stop 上限 → NoOp 會靜默吞 SL/TP 設置失敗（既有潛在風險，本修法不引入但應順查）。
+3. G-3 hedge-mode 前提：one-way 是收斂安全前提，未來啟 hedge → 收斂路徑 mandatory re-review。
+
+### Report path
+`/Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-29--retcode_110017_convergence_semantics.md`

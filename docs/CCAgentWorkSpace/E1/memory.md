@@ -13380,3 +13380,25 @@ register + mod.rs setter）。
 - 教訓 2：guard 取得位置陷阱——env mutation 在 helper（ai_budget set_test_pricing_path）時，不能在 helper 內取 guard，否則 helper return 即釋放，無法覆蓋呼叫端 test 對該 env 的後續讀取。必須在呼叫端 test 第一行取。先 grep helper 所有 caller（本例只 1 個 test_budget_config_load_default）。
 - 教訓 3：誤導性註釋藏 race——原註釋「寫進 scoped TempDir 所以不需 isolation」合理化了 race，但 remove_var 是 process-global 非 TempDir-scoped。修 race 時務必同步改掉合理化它的註釋。
 - 驗收：grep static.*Mutex<()> 會撈到 main_boot_tasks / live_auth_watcher_tests 的 bin crate guard，但依 lib.rs:120-123 邊界註釋它們是獨立 compilation unit 無法存取 lib pub(crate)，不算 lib 範圍；lib 內唯一 env-lock 本體 = lib.rs:127 ENV_TEST_LOCK。
+
+## 2026-05-29 P1-110017-POSITION-DRIFT-CLOSE-LOOP — exchange-zero close 本地收斂治本
+
+- **根因（PA RCA）**：本地 persisted 殘倉 + 交易所已平；exchange-mode close 只 dispatch 不本地刪倉、靠 confirmed fill 才刪；Bybit 回 110017「position is zero」被 `_ => Structural`（no-retry 但不收斂）→ 倉永不刪 → 每 tick PHYS-LOCK 重發 reduce-only close → ~1.4/sec 自持迴圈（TRXUSDT demo）。
+- **關鍵教訓 1 — classifier 改 NoOp 不足以斷迴圈**：既有 NoOp 消費端（dispatch.rs run_dispatch_retry → DispatchRetryResult::NoOp）只發 `send_decision_lease_release(Consumed)`，**不觸發 positions_remove**。110001/110009 也是如此（NoOp 但不收斂）。所以單改 110017→NoOp 仍不刪本地倉。必須新增收斂事件 + 消費端 remove。
+- **設計**：(1) classifier 110017→NoOp（加註與 110001/110009 差異）。(2) 新 `PendingOrderEvent::ExchangeZeroClose{symbol,is_long,strategy,order_link_id,ts_ms}`。(3) dispatch.rs NoOp 分支經 `send_exchange_zero_close` guard（`is_primary && is_close && ret_code==110017`）才發事件 — 僅 110017，110001/110009 不發（防回歸）。(4) consumer `handle_pending_registration` 新 arm → `pipeline.converge_exchange_zero_close`。(5) 收斂 = 復用 `paper_state.upsert_position_from_exchange(symbol,is_long,0.0,0.0,ts)`（size=0 走 positions_remove + mirror 同步，**不記 PnL/不碰 Kelly record_trade**）+ `pending_close_symbols.remove`。
+- **關鍵教訓 2 — 收斂禁記 PnL**：110017 場景交易所早已在未知時刻/價格平倉，合成一筆 close PnL 會污染 edge 樣本 + Kelly。正確語意 = drift correction（跟隨交易所 truth 移除），不是補假成交。直接復用既有「WS PositionUpdate size=0」收斂路徑（loop_exchange.rs:550）= 天然不碰 Kelly，是 E2 review point #2 的最佳對齊。
+- **關鍵教訓 3 — break-loop 斷言要打迴圈「源頭」**：第一版測試用 `close_position_after_exchange_dispatch` 斷言「不再 enqueue」失敗 — 因該 helper 在 exchange mode 無條件先 enqueue（execute_position_close 不查倉存在）。生產迴圈源頭是 `step_6_risk_checks` 迭代 `paper_state.positions()`。倉被 remove 後 positions() 變空 = 風控迭代選不到 = 迴圈源頭斷。斷言改打 `positions()` 為空才正確。
+- **對抗驗證**：暫時把 converge 改 `removed=false`（不 remove 不 clear）→ regression test 正確 FAILED（「110017 收斂必須回報移除」）→ 還原 → PASS。證明 test 有效。
+- **guard 教訓**：dispatch_tests fixture 用 `"risk_close:phys_lock_gate4_giveback"` literal 觸發 RUST-DOUBLE-PREFIX-1 guard test（禁裸 literal 於 helpers.rs 外）。改用 `crate::tick_pipeline::build_risk_close_tag("phys_lock_gate4_giveback")`。
+- **驗收**：lib 3606 passed/0 failed/1 ignored（+10 新測試）；release build 過；clippy 我的新 identifier + 新行範圍 0 warning（openclaw_core price_tracker.rs:132 deprecated_semver 是 pre-existing，-A 繞過）。
+- **待 BB**：BB 報告（retcode_110017_convergence_semantics）動手時未出。按最小安全條件實作（限 reduce-only primary close + 110017），report 標明「待 BB 條件 reconcile」（如限 one-way mode / 收斂前 position-query 確認 size=0）。寧可保守。
+- **worktree**：`../wt-110017` branch `fix/retcode-110017-convergence`，未 commit（等 E2→E4→PM）。
+
+## 2026-05-29 P1-110017 round 2 — BB mandatory qty==0 guard
+- 110017 不是零倉專屬碼，是 ReduceOnlyReject 族（無倉/方向反/qty>size）。round 1 收斂 guard 只查 is_primary+is_close，會把 qty>0 partial reduce-only close 收到 110017（C-1，倉可能仍在）誤判為零倉而誤刪真倉（災難）。
+- 教訓：exchange retCode 語意不可望文生義（「current position is zero」retMsg 也可能在 qty>size 時回）。任何「收到某碼就刪本地 state」必先確認 dispatch form 排除歧義 trigger。
+- 修法核心：send_exchange_zero_close 加 mandatory `req.qty == 0.0`（qty=0 全平 form：reduceOnly+closeOnTrigger 交易所自行 flatten，無顯式 qty ⇒ Bybit 不可能回 qty>size ⇒ 110017 在此 form 下可靠等價零倉）。PostOnly limit close 帶 explicit qty>0，故收到 110017 不收斂（正確保守，非回歸）。
+- 本系統無 OrderDispatchRequest.reduce_only 欄位；reduce_only 由 create_req `is_close ⇒ Some(true)` 推導。BB 要求顯式對齊 → 加 noop_is_reduce_only_close helper 把不變量集中為 SSOT（當前等價 is_close）。
+- ≥2 連續計數（BB G-5 recommended）DEFER：upsert_position_from_exchange(size=0) 冪等 + apply_confirmed_fill 對已移除倉 realized=0 不雙記 ⇒ 即使單發誤收斂也會被下一筆 WS PositionUpdate 自癒；加 per-symbol 計數需顯著新可變狀態，不值。
+- 對抗驗證範式：把 qty==0 guard 拿掉跑 C-1 測試 → 確認 FAIL（證明 guard 有效）→ 還原。比只看「測試綠」更能證明 guard load-bearing。
+- 結果：cargo test --lib 3608/0（round 1 3606 +2）；release Finished；clippy 0 新 warning（366 全 pre-existing 他檔）。
