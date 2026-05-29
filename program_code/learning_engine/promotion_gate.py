@@ -122,7 +122,12 @@ class SelectionBiasPromotionGate:
         verdict: PromotionVerdict
         if dsr_verdict == "block" or pbo_verdict == "block":
             verdict = "block"
-        elif pbo_verdict in ("missing_cpcv_returns", "defer_data"):
+        elif dsr_verdict == "defer_data" or pbo_verdict in (
+            "missing_cpcv_returns",
+            "defer_data",
+        ):
+            # DSR 樣本不足（min-observation guard, P3-01）視同 PBO 不足 power：
+            # 整體 DEFER，不得升級。
             verdict = "defer_data"
         elif dsr_verdict == "borderline":
             verdict = "borderline"

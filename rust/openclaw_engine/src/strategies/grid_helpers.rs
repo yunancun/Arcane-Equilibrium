@@ -186,34 +186,29 @@ pub fn compute_ou_step_with_cost_floor(
 // G7-06 — OU 殘差 σ 估計器（Phase A：估計器 + 單測，未接 hot path）。
 // ---------------------------------------------------------------------------
 
-/// G7-06 (2026-04-24): Residual-based σ estimator for an Ornstein-Uhlenbeck
-/// (OU) process `dx_t = θ(μ - x_{t-1})dt + σ dW_t`.
+/// G7-06 (2026-04-24): Ornstein-Uhlenbeck (OU) 過程
+/// `dx_t = θ(μ − x_{t-1})dt + σ dW_t` 的殘差 σ 估計器。
 ///
-/// The existing `compute_ou_step` uses `σ = sqrt(Σ Δx² / n)`, which is the
-/// stdev of raw price changes. That number conflates the deterministic
-/// mean-reversion drift `θ(μ - x_{t-1})` with the white-noise innovation
-/// `σ dW_t`, and is biased high. The residual estimator below subtracts the
-/// fitted drift first:
+/// 動機：原始 `σ = sqrt(Σ Δx² / n)`（raw Δx 標準差）把確定性的
+/// mean-reversion drift `θ(μ − x_{t-1})` 和白噪 innovation `σ dW_t` 混在一起，
+/// σ 偏高。本估計器先扣掉擬合 drift 再算殘差：
 ///
 /// ```text
 ///   ε_t = Δx_t − θ̂ (μ̂ − x_{t-1})
-///   σ̂  = sqrt( Σ ε_t² / (n − 1) )       // unbiased
+///   σ̂  = sqrt( Σ ε_t² / (n − 1) )       // 無偏（n-1 分母）
 /// ```
 ///
-/// `θ̂` and `μ̂` come from the same OLS fit `Δx_t = a + b · x_{t-1} + ε_t`
-/// already performed in `compute_ou_step` (with `θ̂ = -b̂` and
-/// `μ̂ = -â / b̂`). The shape of the estimator mirrors a Yule-Walker /
-/// AR(1) residual fit and gives a strictly correct σ for the OU
-/// innovation — which is what `σ · √(2/θ)` (the optimal grid spacing) is
-/// supposed to consume.
+/// `θ̂` / `μ̂` 來自 OLS 擬合 `Δx_t = a + b · x_{t-1} + ε_t`（`θ̂ = -b̂`、
+/// `μ̂ = -â / b̂`）。形式對齊 Yule-Walker / AR(1) 殘差擬合，對 OU innovation
+/// 給出嚴格正確的 σ — 正是 `σ · √(2/θ)`（最佳網格間距）要消費的量。
 ///
-/// This Phase A drop does **not** rewire `compute_ou_step` — the call site
-/// stays on the raw-Δx σ path until Phase B wires `RiskConfig.grid_ou`.
-/// `defaults preserve runtime behavior bit-for-bit`.
-///
-/// G7-06：OU 殘差 σ 估計器。`σ = sqrt(Σ Δx²/n)` 把 mean-reversion drift
-/// 也算進 σ 是高估；本估計器先扣掉 drift `θ̂(μ̂ − x_{t-1})`，再用
-/// `σ̂ = sqrt(Σ ε²/(n-1))`（無偏）。Phase A 不接 hot path。
+/// 與 `compute_ou_step` 的關係（WP-03 後更新）：`compute_ou_step` 自身已在
+/// 同檔上方改用 OLS 殘差 σ（先扣 drift `a + b·x_{t-1}`，n-2 自由度，見
+/// 上方 `compute_ou_step_with_cost_floor` 內 `ss_resid` 段），故 hot path 已
+/// 不再走舊的 raw-Δx σ。本 `OuResidualSigma` 為獨立、可串流（`update()`）、
+/// 對外 reserved 的估計器封裝（n-1 自由度版本），與 `compute_ou_step` 的
+/// n-2 in-line 計算互為交叉驗證（見 tests `directional_consistency`），尚未
+/// 取代它成為唯一實作。
 #[derive(Debug, Clone)]
 pub struct OuResidualSigma {
     /// Fitted mean-reversion speed `θ̂` (positive for genuine mean-reversion;

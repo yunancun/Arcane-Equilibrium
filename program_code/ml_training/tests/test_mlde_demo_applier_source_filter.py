@@ -35,10 +35,13 @@ import pytest
 
 from ml_training.mlde_demo_applier import DemoApplierConfig, _fetch_pending
 from ml_training.mlde_demo_applier_evidence_filter import (
+    DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST,
     EVIDENCE_SOURCE_TIER_ALLOWLIST,
+    SYNTHETIC_EVIDENCE_SOURCE_TIERS,
     build_evidence_source_filter,
     evidence_filter_capabilities,
     fetch_pending_sql_and_params,
+    resolve_accepted_tiers,
 )
 
 
@@ -153,7 +156,10 @@ def test_case1_evidence_source_tier_allowlist_allows_5_valid_tiers():
     # Block A：tier filter 必出現
     # Block A: tier filter MUST appear
     assert "AND COALESCE(evidence_source_tier, 'real_outcome') = ANY(%s)" in fragment
-    assert extra[0] == list(EVIDENCE_SOURCE_TIER_ALLOWLIST)
+    # P3-03：預設不接受 synthetic_replay；Block A param 為 default allowlist。
+    # Default accepted tiers exclude synthetic_replay (P3-03).
+    assert extra[0] == list(DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST)
+    assert "synthetic_replay" not in extra[0]
 
     # Block B：active manifest gate 必含 expires_at + status NOT IN 三 tier
     # Block B: active manifest gate must reference expires_at + status NOT IN
@@ -274,7 +280,8 @@ def test_forward_compat_partial_schema_only_tier_filter():
     # Block B 不應出現
     # Block B must not appear
     assert "replay_experiment_id IS NULL" not in fragment
-    assert extra == [list(EVIDENCE_SOURCE_TIER_ALLOWLIST)]
+    # P3-03：預設 allowlist 排除 synthetic_replay。
+    assert extra == [list(DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST)]
 
 
 # ─── End-to-end: _fetch_pending applies SQL via helper ───────────────────
@@ -305,9 +312,9 @@ def test_fetch_pending_full_schema_executes_filtered_sql():
     assert "FROM learning.mlde_shadow_recommendations" in final_sql
     assert "evidence_source_tier" in final_sql
     assert "expires_at > now()" in final_sql
-    # tier allowlist 必為 SQL params 之一
-    # tier allowlist must be one of the SQL params
-    assert list(EVIDENCE_SOURCE_TIER_ALLOWLIST) in [list(p) if isinstance(p, list) else p for p in final_params]
+    # tier allowlist 必為 SQL params 之一（預設排除 synthetic_replay，P3-03）
+    # default accepted tiers (synthetic excluded) must be one of the SQL params
+    assert list(DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST) in [list(p) if isinstance(p, list) else p for p in final_params]
 
 
 def test_fetch_pending_legacy_schema_falls_back_to_unfiltered_sql():
@@ -396,3 +403,93 @@ def test_evidence_filter_capabilities_full_schema():
     assert caps["has_replay_experiments"] is True
     assert caps["replay_experiments_has_expires_at"] is True
     assert caps["replay_experiments_has_status"] is True
+
+
+# ─── P3-03: synthetic_replay opt-in bucket ───────────────────────────────
+
+
+def test_synthetic_excluded_from_default_allowlist():
+    """P3-03：synthetic_replay 不在 demo-applier 預設接受清單內。
+    synthetic_replay must not be in the default accepted-tier set.
+    """
+    # 完整 enum 仍含 synthetic（對齊 V036/V040 CHECK，作為儲存值 SoT）。
+    assert "synthetic_replay" in EVIDENCE_SOURCE_TIER_ALLOWLIST
+    # 但 demo-applier 預設不接受 synthetic（不計為真實升級證據）。
+    assert "synthetic_replay" not in DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST
+    assert SYNTHETIC_EVIDENCE_SOURCE_TIERS == ("synthetic_replay",)
+
+
+def test_resolve_accepted_tiers_default_excludes_synthetic():
+    """預設 resolve_accepted_tiers 不含 synthetic_replay。
+    Default resolve_accepted_tiers excludes synthetic_replay.
+    """
+    accepted = resolve_accepted_tiers()
+    assert "synthetic_replay" not in accepted
+    assert "real_outcome" in accepted
+    assert accepted == list(DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST)
+
+
+def test_resolve_accepted_tiers_opt_in_includes_synthetic():
+    """顯式 allow_synthetic=True 才把 synthetic_replay 併回。
+    Only explicit allow_synthetic=True re-includes synthetic_replay.
+    """
+    accepted = resolve_accepted_tiers(allow_synthetic=True)
+    assert "synthetic_replay" in accepted
+    # 仍含全部其他 default tier。
+    for tier in DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST:
+        assert tier in accepted
+
+
+def test_build_filter_default_excludes_synthetic_param():
+    """build_evidence_source_filter 預設 Block A param 不含 synthetic_replay。
+    Default Block A param excludes synthetic_replay.
+    """
+    caps = {
+        "has_evidence_source_tier": True,
+        "has_replay_experiment_id": False,
+        "has_manifest_hash": False,
+        "has_replay_experiments": False,
+        "replay_experiments_has_expires_at": False,
+        "replay_experiments_has_status": False,
+    }
+    _, extra = build_evidence_source_filter(caps)
+    assert "synthetic_replay" not in extra[0]
+
+
+def test_build_filter_opt_in_includes_synthetic_param():
+    """allow_synthetic=True → Block A param 含 synthetic_replay。
+    allow_synthetic=True → Block A param includes synthetic_replay.
+    """
+    caps = {
+        "has_evidence_source_tier": True,
+        "has_replay_experiment_id": False,
+        "has_manifest_hash": False,
+        "has_replay_experiments": False,
+        "replay_experiments_has_expires_at": False,
+        "replay_experiments_has_status": False,
+    }
+    _, extra = build_evidence_source_filter(caps, allow_synthetic=True)
+    assert "synthetic_replay" in extra[0]
+
+
+def test_fetch_pending_helper_defaults_to_excluding_synthetic():
+    """fetch_pending_sql_and_params 預設不接受 synthetic（caller 不傳 flag）。
+    The helper defaults to excluding synthetic when caller omits the flag.
+    """
+    cur = _ProbeCursor(
+        probe_responses=[
+            [("evidence_source_tier",)],  # tier column landed, no replay meta
+        ],
+    )
+    _, params = fetch_pending_sql_and_params(
+        cur,
+        lookback_hours=72,
+        engine_mode="demo",
+        min_confidence=0.4,
+        min_samples=5,
+        max_recommendations=12,
+    )
+    # tier allowlist param 不含 synthetic_replay。
+    tier_params = [p for p in params if isinstance(p, list)]
+    assert tier_params, "expected a tier allowlist list param"
+    assert "synthetic_replay" not in tier_params[0]

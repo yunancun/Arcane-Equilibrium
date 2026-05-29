@@ -83,6 +83,17 @@ BORDERLINE_LOWER: float = 0.90
 # Euler-Mascheroni 常數，用於 E[max SR_k] 近似。
 EULER_GAMMA: float = 0.5772156649015329
 
+# DSR 最小觀察數門檻（min-observation guard）。
+# 為什麼 fail-closed / defer：PSR/DSR 公式只要求 n_observations >= 2 才不會 crash
+# （分母 sqrt(T-1)），但 T 極小時 DSR 機率估計極不穩定，可能在僅數筆樣本下就回報
+# deflated_sharpe > 0.95 而誤判 'promote'（P3-01）。最終 promotion 仍受 PBO 保護，
+# 但 DSR 組件報告本身不應在樣本不足時宣稱可升級。低於此門檻時 DSR 組件 DEFER
+# （回 'defer_data'，passes_threshold 強制 False），絕不放寬。
+# 釐清：30 是「退化輸入 fail-closed 地板」（防止低 N 誤報 promote），
+# 不是統計檢定力 / 樣本充分性的界線。真正的升級檢定力與樣本充分性由
+# 上游 trade-count gate（>= 200 筆交易）負責，不由此 DSR 組件 guard 把關。
+DEFAULT_DSR_MIN_OBSERVATIONS: int = 30
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Result dataclass / 結果 dataclass
@@ -108,6 +119,9 @@ class DsrResult:
                            K 個 Gaussian trial 之預期最大 SR。
         passes_threshold: True if deflated_sharpe > DSR threshold. /
                           deflated_sharpe > DSR 閾值時為 True。
+        insufficient_observations: True 當 n_observations < min-observation
+                          門檻；此時 DSR 組件 DEFER，不視為可升級證據。 /
+                          n_observations 低於門檻時為 True，組件 DEFER。
     """
 
     observed_sharpe: float
@@ -116,6 +130,8 @@ class DsrResult:
     psr_at_threshold: float
     trials_max_sharpe: float
     passes_threshold: bool
+    # 預設 False 以保留既有 6 欄位 positional 構造相容（測試與呼叫端）。
+    insufficient_observations: bool = False
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -338,7 +354,11 @@ class DsrGate:
         verdict = gate.gate(result)  # 'promote' / 'borderline' / 'block'
     """
 
-    def __init__(self, threshold: float = DEFAULT_DSR_THRESHOLD) -> None:
+    def __init__(
+        self,
+        threshold: float = DEFAULT_DSR_THRESHOLD,
+        min_observations: int = DEFAULT_DSR_MIN_OBSERVATIONS,
+    ) -> None:
         """Initialize gate with configurable threshold.
 
         以可配置閾值初始化 gate。
@@ -346,10 +366,17 @@ class DsrGate:
         Args / 引數:
             threshold: DSR threshold for promotion (V3 §8.3 default 0.95). /
                        升級用 DSR 閾值（V3 §8.3 預設 0.95）。
+            min_observations: 低於此 n_observations 門檻時 DSR 組件 DEFER
+                       （min-observation guard, P3-01）。 /
+                       n_observations 低於此門檻時組件 DEFER。
         """
         if not 0.0 < threshold < 1.0:
             raise ValueError(f"threshold={threshold} must be in (0, 1)")
+        # PSR 數學底線 T>=2；min_observations 必不小於該底線。
+        if min_observations < 2:
+            raise ValueError(f"min_observations={min_observations} must be >= 2")
         self.threshold = float(threshold)
+        self.min_observations = int(min_observations)
 
     def compute_dsr(
         self,
@@ -432,7 +459,18 @@ class DsrGate:
             excess_kurtosis=excess_kurtosis,
         )
 
-        passes = deflated > self.threshold
+        # min-observation guard（P3-01）：n_observations 低於門檻時 DSR 證據不足，
+        # 組件 DEFER — 即使 deflated > threshold 也強制 passes_threshold=False，
+        # 避免在僅數筆樣本下誤報可升級。保守、絕不放寬。
+        insufficient_obs = n_observations < self.min_observations
+        passes = (deflated > self.threshold) and not insufficient_obs
+        if insufficient_obs:
+            logger.warning(
+                "DSR insufficient observations: n_observations=%s < min=%s; "
+                "DSR component defers (passes_threshold forced False)",
+                n_observations,
+                self.min_observations,
+            )
 
         return DsrResult(
             observed_sharpe=float(observed_sharpe),
@@ -441,14 +479,19 @@ class DsrGate:
             psr_at_threshold=float(psr_at_zero),
             trials_max_sharpe=float(trials_max),
             passes_threshold=bool(passes),
+            insufficient_observations=bool(insufficient_obs),
         )
 
-    def gate(self, dsr_result: DsrResult) -> Literal["promote", "block", "borderline"]:
+    def gate(
+        self, dsr_result: DsrResult
+    ) -> Literal["promote", "block", "borderline", "defer_data"]:
         """Decide promotion verdict from DsrResult.
 
         從 DsrResult 決定升級判決。
 
         Verdict logic / 判決邏輯:
+          - insufficient_observations → 'defer_data'（樣本不足，組件 DEFER，優先於
+            其他判決，絕不回 'promote'）
           - DSR > self.threshold (default 0.95) → 'promote'
           - DSR ∈ [BORDERLINE_LOWER, self.threshold] → 'borderline' (review needed)
           - DSR < BORDERLINE_LOWER → 'block'
@@ -457,8 +500,11 @@ class DsrGate:
             dsr_result: DsrResult from compute_dsr(). / 來自 compute_dsr() 的結果。
 
         Returns / 回傳:
-            'promote' | 'block' | 'borderline'.
+            'promote' | 'block' | 'borderline' | 'defer_data'.
         """
+        # defer_data 優先：樣本不足時，DSR 組件不得宣稱可升級。
+        if dsr_result.insufficient_observations:
+            return "defer_data"
         if dsr_result.passes_threshold:
             return "promote"
         if dsr_result.deflated_sharpe >= BORDERLINE_LOWER:
@@ -477,12 +523,13 @@ def compute_dsr(
     n_observations: int = 100,
     threshold: float = DEFAULT_DSR_THRESHOLD,
     trial_sharpes: Optional[Sequence[float]] = None,
+    min_observations: int = DEFAULT_DSR_MIN_OBSERVATIONS,
 ) -> DsrResult:
     """Module-level shortcut for DsrGate.compute_dsr.
 
     DsrGate.compute_dsr 的模組級捷徑。
     """
-    return DsrGate(threshold=threshold).compute_dsr(
+    return DsrGate(threshold=threshold, min_observations=min_observations).compute_dsr(
         observed_sharpe=observed_sharpe,
         n_trials=n_trials,
         n_observations=n_observations,

@@ -524,21 +524,24 @@
     <abbr title="System-wide policy controlling which protected/opt-in paths go LAL auto vs operator approve manual. AMD-2026-05-21-01 v2 §Decision 1."
           style="font-size:10px;color:var(--text-dim);cursor:help">AMD v2</abbr>
   </h3>
-  <div class="subtitle">系統級 governance 政策 — Level 1 Conservative / Level 2 Standard 切換</div>
+  <div class="subtitle">系統要多自主？— 保守自主（門檻較高）／ 標準自主（門檻較低）切換</div>
   <div class="gov-sm-note">
-    Autonomy Level 與 LAL 0-4（per-decision approval depth）+ Stage 0R-4（per-strategy promotion）
-    三維度正交。Level 只動 path 集合邊界，不動 §Decision 2 5 條 fail-safe hard requirements。
+    這個設定決定「系統哪些動作可以自己做、哪些一定要你點頭」。能力本身不變，
+    切到「標準自主」只是把允許自動執行的範圍放寬；切到「保守自主」則更多動作要你親自核准。
+    最關鍵的安全閘門（如上實盤、換交易所）兩個等級都永遠需要你手動核准。
   </div>
 
   <details class="gov-learn">
-    <summary>了解更多 / Learn more</summary>
+    <summary>了解更多 / 兩個等級差在哪</summary>
     <div class="gov-learn-body">
-      <strong>Level 1 (Conservative · CC stance)</strong>：6 條 protected/opt-in path 走 operator manual
-      （含 5-gate + venue change 永鎖）；<br/>
-      <strong>Level 2 (Standard · PM Path B)</strong>：13 條 path 走 auto with §Decision 2 fail-safe
-      （5-gate + venue change 兩 level 都 manual 永鎖）。<br/>
-      切換需 Operator role + 2FA TOTP + typed-confirm「CONFIRM SWITCH」+
-      ≥30 字元 reason + 24h cooldown + 三路通知（Slack + email + Console banner）。
+      <strong>保守自主（Level 1 · Conservative）</strong>：較多受保護動作需要你手動核准
+      （含 5 道安全閘門 + 換交易所，永遠上鎖）。<br/>
+      <strong>標準自主（Level 2 · Standard）</strong>：較多動作可自動執行，但仍受失效保護機制兜底
+      （5 道安全閘門 + 換交易所兩個等級都永遠需手動核准）。<br/>
+      切換需要：Operator 身份 + 兩步驟驗證（2FA TOTP）+ 打字確認「CONFIRM SWITCH」+
+      至少 30 字理由 + 24 小時冷卻期 + 三路通知（Slack + Email + Console 橫幅）。<br/>
+      <span style="color:var(--text-dim);font-size:10px">技術備註：自主程度與 LAL 0-4（每筆決策核准深度）+ Stage 0R-4（每策略升級階段）三維度正交；
+      Level 只動 path 集合邊界，不動 §Decision 2 的 5 條 fail-safe hard requirements。</span>
     </div>
   </details>
 
@@ -616,21 +619,21 @@
               border:1px solid var(--border);border-radius:8px">
     <div style="font-size:11px;color:var(--text-dim);font-weight:700;
                 letter-spacing:0.06em;text-transform:uppercase;margin-bottom:8px">
-      Notification Channels / 三路通知（最近一次切換）
+      通知管道 / 最近一次切換的三路通知
     </div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:12px" id="autonomy-notification-row">
-      <span>Slack: <strong id="autonomy-notif-slack">--</strong>
-        <span style="color:var(--text-dim);font-size:10px">(SLA ≤10s)</span></span>
+      <span>Slack：<strong id="autonomy-notif-slack">--</strong>
+        <span style="color:var(--text-dim);font-size:10px">(最慢 10 秒內送達)</span></span>
       <span style="color:var(--border)">|</span>
-      <span>Email: <strong id="autonomy-notif-email">--</strong>
-        <span style="color:var(--text-dim);font-size:10px">(SLA ≤60s)</span></span>
+      <span>Email：<strong id="autonomy-notif-email">--</strong>
+        <span style="color:var(--text-dim);font-size:10px">(最慢 60 秒內送達)</span></span>
       <span style="color:var(--border)">|</span>
-      <span>Console banner: <strong id="autonomy-notif-banner">--</strong>
-        <span style="color:var(--text-dim);font-size:10px">(SLA ≤5s)</span></span>
+      <span>Console 橫幅：<strong id="autonomy-notif-banner">--</strong>
+        <span style="color:var(--text-dim);font-size:10px">(最慢 5 秒內送達)</span></span>
     </div>
     <div id="autonomy-notification-escalation" style="margin-top:6px;font-size:11px;color:var(--text-dim)">
-      Escalation result: <strong>--</strong>
-      <span style="font-size:10px">（三路全 fail → 1h wait → SM-04 Defensive · per AMD §Decision 3.1 + PA spec §4.4）</span>
+      升級結果：<strong>--</strong>
+      <span style="font-size:10px">（三路通知全失敗 → 等待 1 小時 → 自動切到 SM-04 防禦模式）</span>
     </div>
   </div>
 </div>

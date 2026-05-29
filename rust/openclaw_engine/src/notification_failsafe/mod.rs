@@ -502,13 +502,23 @@ where
 // FailsafeWatcher — 把 state + traits 綁在一起
 // ════════════════════════════════════════════════════════════════════════════
 
-/// 整合 watcher — runtime 端持有單一實例，由 caller 顯式呼叫三個入口：
+/// 泛型整合 watcher — 由 caller 顯式呼叫三個入口：
 ///   1. `observe_dispatch(outcome)` — 派發後呼叫
 ///   2. `record_operator_ack()` — Operator GUI ack 後呼叫
 ///   3. `check_timer(risk_sm)` — 週期性檢查 timer 是否過期
 ///
+/// **不是 production 路徑（P3-05, v80 cold audit, 2026-05-29）**：
+///   production runtime 持有的是 `providers::single_watcher::SharedFailsafeWatcher`
+///   （`Mutex<FailsafeWatcherState>` + `Arc<dyn ...>` trait 物件、claim-before-await
+///   並發保護）。本泛型結構僅在 `#[cfg(test)] mod tests` 內以具體 Mock 型別構造
+///   （見本檔 tests `make_watcher`），無任何 production caller（`FailsafeWatcher::new`
+///   只出現在測試）。保留它是為了讓核心 timer / dispatch / ack 邏輯能以泛型 +
+///   Mock 做純單元測試，不依賴 `Arc`/`Mutex` runtime 包裝；勿誤認為 live failsafe
+///   執行路徑。生產語義與並發不變量以 `SharedFailsafeWatcher` 為準。
+///
 /// 為什麼不內建 tokio::spawn：避免 minimal slice 跨「runtime 接線」邊界（per
-/// 操作員指示「不碰 live，不造 runtime evidence」）；長運行 task 留下一 wave 接。
+/// 操作員指示「不碰 live，不造 runtime evidence」）；長運行 task 由
+/// `SharedFailsafeWatcher` 端的 spawn 負責。
 pub struct FailsafeWatcher<D, P, E, A, C>
 where
     D: NotificationDispatcher,

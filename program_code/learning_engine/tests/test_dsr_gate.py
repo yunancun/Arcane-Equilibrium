@@ -21,6 +21,7 @@ import pytest
 
 from program_code.learning_engine.dsr_gate import (
     BORDERLINE_LOWER,
+    DEFAULT_DSR_MIN_OBSERVATIONS,
     DEFAULT_DSR_THRESHOLD,
     DsrGate,
     DsrResult,
@@ -255,6 +256,71 @@ def test_module_shortcut_matches_class():
     assert math.isclose(a.deflated_sharpe, b.deflated_sharpe, abs_tol=1e-12)
     assert a.n_trials_K == b.n_trials_K
     assert a.passes_threshold == b.passes_threshold
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# P3-01: min-observation defer / 最小觀察數 DEFER
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_low_n_defers_even_when_dsr_high():
+    """P3-01：n_observations 低於門檻時，即使 DSR 高也不得回 'promote'。
+
+    強觀察 Sharpe + 少 trials 在小 T 下可能 deflated > 0.95，但樣本不足，
+    DSR 組件必須 DEFER（passes_threshold False + verdict 'defer_data'）。
+    """
+    gate = DsrGate(threshold=0.95, min_observations=DEFAULT_DSR_MIN_OBSERVATIONS)
+    # T=10 < 預設 min 30；observed 很強 + K=2 → 若無 guard 會誤報 promote。
+    result = gate.compute_dsr(
+        observed_sharpe=5.0,
+        n_trials=2,
+        n_observations=10,
+    )
+    assert result.insufficient_observations is True
+    assert result.passes_threshold is False
+    assert gate.gate(result) == "defer_data"
+
+
+def test_sufficient_n_does_not_defer():
+    """n_observations >= 門檻時不 DEFER（行為與舊版一致）。"""
+    gate = DsrGate(threshold=0.95, min_observations=DEFAULT_DSR_MIN_OBSERVATIONS)
+    result = gate.compute_dsr(
+        observed_sharpe=4.0,
+        n_trials=2,
+        n_observations=1000,
+    )
+    assert result.insufficient_observations is False
+    assert gate.gate(result) != "defer_data"
+
+
+def test_min_observations_boundary():
+    """恰好等於門檻時不 DEFER；門檻 -1 時 DEFER。"""
+    n_min = DEFAULT_DSR_MIN_OBSERVATIONS
+    gate = DsrGate(threshold=0.95, min_observations=n_min)
+    at_min = gate.compute_dsr(observed_sharpe=4.0, n_trials=2, n_observations=n_min)
+    assert at_min.insufficient_observations is False
+    below = gate.compute_dsr(observed_sharpe=4.0, n_trials=2, n_observations=n_min - 1)
+    assert below.insufficient_observations is True
+    assert gate.gate(below) == "defer_data"
+
+
+def test_invalid_min_observations_raises():
+    """min_observations < 2 必拋（不得低於 PSR T>=2 底線）。"""
+    with pytest.raises(ValueError):
+        DsrGate(min_observations=1)
+
+
+def test_dsr_result_default_insufficient_observations_false():
+    """既有 6-欄位 positional 構造仍相容（新欄位預設 False）。"""
+    result = DsrResult(
+        observed_sharpe=2.0,
+        deflated_sharpe=0.97,
+        n_trials_K=2,
+        psr_at_threshold=0.99,
+        trials_max_sharpe=0.4,
+        passes_threshold=True,
+    )
+    assert result.insufficient_observations is False
 
 
 def test_borderline_band_returned():

@@ -68,6 +68,24 @@ def test_composite_gate_blocks_low_dsr():
     assert "dsr_block" in result.reasons
 
 
+def test_composite_gate_defers_on_low_dsr_observations():
+    """P3-01：DSR n_observations 不足時整體 DEFER，即使 PBO 通過也不得升級。"""
+    result = _cheap_gate().evaluate(
+        observed_sharpe=5.0,
+        n_trials=2,
+        n_observations=10,  # < DSR min-observation 門檻
+        candidate_oos_returns=_persistent_alpha_candidates(),
+    )
+
+    assert not result.passes
+    assert result.verdict == "defer_data"
+    assert result.dsr_verdict == "defer_data"
+    assert result.dsr.insufficient_observations is True
+    # to_dict 應序列化新欄位供 audit。
+    report = result.to_dict()
+    assert report["dsr"]["insufficient_observations"] is True
+
+
 def test_composite_gate_defers_insufficient_pbo_power_and_serializes_nan():
     result = SelectionBiasPromotionGate().evaluate(
         observed_sharpe=4.0,

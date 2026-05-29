@@ -15,6 +15,11 @@ pub mod alpha_surface;
 // 七個 legacy 模塊原為平行 cognition/trading 大腦設計，現確認無任何 production
 // caller（grep "openclaw_core::(attention|...)" 為空，scanner::opportunity 是另一
 // 個獨立模塊），依 ADR-0015 結構性退役。如需重啟某能力，請於新模塊重做。
+// P3-04 (v80 cold audit, 2026-05-29)：reserved library API — 引擎 hot path 目前
+// 無 production caller（engine 不跑回測；回測屬 research / 未來 promotion 評估能
+// 力）。保留為 library 契約，由 inline `#[cfg(test)] mod tests` 與整合測試
+// `tests/golden_extreme.rs`（BacktestEngine / compute_sharpe / compute_max_drawdown）
+// 持續行使，確保「保留而非死碼」。如要接 hot path，於新模組顯式接線。
 pub mod backtest;
 pub mod cost_gate;
 pub mod execution;
@@ -45,6 +50,12 @@ pub mod lease_scope;
 // Rust 端只算 statistic（pure compute，無 PG I/O）；DRAFT writeback 走 Python
 // 端 helper_scripts/m4/ 寫入 learning.hypotheses 表（V100 + V103 EXTEND 6 column）。
 pub mod m4_miner;
+// P3-04 (v80 cold audit, 2026-05-29)：reserved library API — 引擎 hot path 目前
+// 無 production caller（注意 main.rs 的 `portfolio_cache` 是另一條 health emitter
+// 路徑，與 `openclaw_core::portfolio::check_portfolio_risk` 無關）。保留為
+// library 契約，由 inline `#[cfg(test)] mod tests` 與整合測試
+// `tests/golden_extreme.rs`（PortfolioConfig / check_portfolio_risk）持續行使，
+// 確保「保留而非死碼」。如要接 hot path，於新模組顯式接線。
 pub mod portfolio;
 pub mod risk;
 pub mod signals;
