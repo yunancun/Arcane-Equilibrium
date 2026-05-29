@@ -1,0 +1,47 @@
+# .gitleaks.toml — secret-scan config（P2-OPS-2-GITLEAKS）
+#
+# 模塊用途：gitleaks pre-commit / CI 掃描的規則設定。以 gitleaks 內建 default
+#   ruleset 為基礎，外加 allowlist 排除已知 test fixture 假陽性。
+#
+# 狀態：起手版（first cut）。Mac 開發機未安裝 gitleaks，無法實跑找出所有
+#   假陽性 → 本 config 的 allowlist 只放「已確知」的 test fixture。首次在裝有
+#   gitleaks 的環境實跑後，需依實際 finding 做 FP 調校（follow-up）。
+#
+# 規則來源：gitleaks 內建 default ruleset（useDefault = true）。
+# 硬邊界：
+#   - allowlist 只放 test fixture / pinned 測試向量，**不可**放真 credential。
+#   - 任何新 allowlist entry 須在此檔註明「為什麼是假陽性」。
+
+title = "OpenClaw gitleaks config (P2-OPS-2-GITLEAKS, first cut)"
+
+[extend]
+# 繼承 gitleaks 內建 default ruleset（涵蓋常見 cloud key / token / private key /
+# 高熵字串等）。我們只在其上加 allowlist，不自定義 detection rule（起手階段）。
+useDefault = true
+
+# ----- 全域 allowlist：已知 test fixture 假陽性 -----
+# 為什麼需要 allowlist：以下為 cross-language HMAC 測試的「byte-identical 固定向量」，
+# 是 test 常數（測試用的 signing key + 對應算出的 pinned signature），不是真 credential。
+# 任何環境都不得拿這些值做真實簽章；它們僅存在於 unit test / runbook 驗證步驟。
+# 來源：OPS-2 secret-split runbook §10.5 cross-language HMAC sanity check。
+[allowlist]
+description = "test fixtures and pinned HMAC sanity vectors (非真 credential)"
+
+# 用 regex 排除 pinned HMAC signature hex 與測試 signing key 字串。
+# 這兩個常數同時出現在：
+#   - rust/openclaw_engine/src/live_authorization.rs（cross_lang_hmac_fixture_is_byte_identical test）
+#   - program_code/.../tests/test_live_trust_routes_secret_split.py
+#   - docs/runbooks/credential_rotation.md（§10.5 sanity check 步驟）
+regexes = [
+    # pinned HMAC-SHA256 sanity 向量（key+payload 算出的固定 64-char hex 測試常數）。
+    '''1b2b18d7e212d0d1e8f943c25f6f070b2ba75013b8fd5c3a021800d11b8b78fc''',
+    # 測試用 signing key 字串（名稱即聲明 do-not-use-in-prod）。
+    '''test-live-auth-signing-key-do-not-use-in-prod''',
+]
+
+# path-based allowlist：runbook 文件含上述 sanity 向量的驗證步驟，整檔豁免噪音。
+# 注意：這是文件（操作步驟說明），非 source secret；regexes 已覆蓋主要值，
+# path 豁免僅降低 runbook 內其他衍生片段的假陽性噪音。
+paths = [
+    '''docs/runbooks/credential_rotation\.md''',
+]
