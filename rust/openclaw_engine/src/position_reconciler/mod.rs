@@ -70,6 +70,24 @@ use tracing::{info, warn};
 pub type ReconcilerCommandTxProvider =
     Arc<dyn Fn() -> Option<UnboundedSender<crate::tick_pipeline::PipelineCommand>> + Send + Sync>;
 
+/// P2-110017-D2-RECONCILE round 2 · 單 symbol 點查結果（BB CRITICAL 修法 A）。
+///
+/// 為什麼需要：主 fetch `get_positions(Linear, None)` 受 Bybit V5 `/v5/position/list`
+/// default limit=20 + 分頁截斷影響（丟棄 `nextPageCursor`）。持倉 > 20 時第 21+ 個
+/// 真倉不在回應 → 該 symbol 不在 `current` map → 初判 `DriftVerdict::Ghost`。若直接
+/// 收斂 = 誤刪真倉 + 失本地止損（違 Root Principle 5/9）。因此收斂前對每個 Ghost
+/// 候選發單 symbol 點查（`get_positions(Linear, Some(symbol))` 精準命中、不受 limit=20
+/// 分頁截斷）作為**權威 gate**，三分支裁決是否收斂。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GhostPointQuery {
+    /// 點查確認 Bybit 端該 symbol size==0（或無 entry）→ 真 Ghost，可收斂。
+    ConfirmedZero,
+    /// 點查回 size>0 = 交易所仍有真倉（主 fetch 分頁截斷造成的假 Ghost）→ 不收斂。
+    StillHasPosition,
+    /// 點查失敗 / timeout → 查不到不刪，fail-closed 不收斂（Root Principle 6）。
+    QueryFailed,
+}
+
 /// Reconciler polling interval — 30s per user spec (B2).
 /// 對帳輪詢間隔 — 30 秒（B2 用戶決定）。
 pub const RECONCILE_INTERVAL_SECS: u64 = 30;
@@ -525,9 +543,28 @@ pub async fn run_position_reconciler(
                                         &mut rc_state,
                                         now,
                                     );
+
+                                    // -- P2-110017-D2-RECONCILE: intercept Ghost drifts --
+                                    // -- P2-110017-D2-RECONCILE：攔截 Ghost 漂移收斂本地倉 --
+                                    // round 2（BB CRITICAL 修法 A）：注入單 symbol 點查驗證器，
+                                    // 收斂前精準確認交易所端 size==0（抵禦主 fetch limit=20 分頁截斷誤判）。
+                                    let pos_mgr_for_query = Arc::clone(&pos_mgr);
+                                    drifts = process_ghosts(
+                                        drifts,
+                                        oh_cfg,
+                                        &cmd_tx,
+                                        &audit_pool,
+                                        &engine_label,
+                                        &mut rc_state,
+                                        move |symbol: String| {
+                                            let pm = Arc::clone(&pos_mgr_for_query);
+                                            async move { ghost_point_query(&pm, &symbol).await }
+                                        },
+                                    )
+                                    .await;
                                 }
 
-                                // -- Phase 6: evaluate and dispatch actions (orphans already handled) --
+                                // -- Phase 6: evaluate and dispatch actions (orphans + ghosts already handled) --
                                 let actions = evaluate_actions(
                                     &mut rc_state, current_level, &drifts, now,
                                 );
@@ -700,6 +737,199 @@ fn process_orphans(
             kept.push((key, verdict));
         }
     }
+    kept
+}
+
+/// P2-110017-D2-RECONCILE round 2 · 生產用單 symbol 點查驗證器（BB CRITICAL 修法 A）。
+///
+/// 對 Ghost 候選發 `get_positions(Linear, Some(symbol))`：Bybit V5 帶 `symbol` filter
+/// 精準命中該倉、**不受 default limit=20 + 分頁截斷**影響，故能權威區分「真無倉」與
+/// 「主 fetch 截斷造成的假 Ghost」。映射規則沿用 `position_info_to_view` 的空倉語意
+/// （`size <= 0 || side == "None"`）：
+///   - 回應中存在任一非空 entry → `StillHasPosition`（交易所仍有真倉，不收斂）。
+///   - 回應全為空倉 / 空列表 → `ConfirmedZero`（真 Ghost，可收斂）。
+///   - REST `Err`（timeout / nonzero retCode）→ `QueryFailed`（fail-closed 不收斂，
+///     Bybit timeout/nonzero 一律 fail-closed，CLAUDE §四）。
+async fn ghost_point_query(pos_mgr: &PositionManager, symbol: &str) -> GhostPointQuery {
+    match pos_mgr
+        .get_positions(OrderCategory::Linear, Some(symbol))
+        .await
+    {
+        Ok(positions) => {
+            // 任一非空倉 entry = 交易所仍有真倉（分頁截斷假 Ghost）。
+            if positions.iter().any(|p| position_info_to_view(p).is_some()) {
+                GhostPointQuery::StillHasPosition
+            } else {
+                GhostPointQuery::ConfirmedZero
+            }
+        }
+        Err(e) => {
+            warn!(
+                error = %e, symbol = %symbol,
+                "ghost point-query REST failed (fail-closed, will not converge) \
+                 / ghost 點查 REST 失敗（fail-closed，不收斂）"
+            );
+            GhostPointQuery::QueryFailed
+        }
+    }
+}
+
+/// P2-110017-D2-RECONCILE Phase D2: route each `DriftVerdict::Ghost`（本地基線
+/// 有倉但 Bybit 已無倉）through exchange-zero convergence, and return the drift
+/// list with converged Ghost entries removed（so `evaluate_actions()` does not
+/// double-escalate, mirroring `process_orphans`' kept pattern）.
+///
+/// 收斂 AND 條件（全滿足才動本地倉，缺一不收斂 — 誤刪真倉 = 災難）：
+///   S-1 引擎本地確實有倉：`engine_positions_mirror` 含該 symbol（提供 is_long）。
+///   S-2 Bybit 本輪 fetch 成功且該 symbol size==0：由 `DriftVerdict::Ghost`
+///       表達（baseline=Some / current=None；current 已過濾 size<=0||side=="None"）。
+///   S-3 fetch 未失敗：本函數**只在 `Ok(raw_positions)` arm 被呼叫**；REST 失敗
+///       走 `Err` arm 整輪 fail-open（baseline 保留、不分類、不收斂）=
+///       fail-closed for delete（查不到就不刪，Root Principle 6）。
+///   S-4 dust filter 後仍判 Ghost：`filter_dust` 已在分類前先跑。
+///   S-5 連續 2 cycle 都判 Ghost（C-3 結算 race 防護）：`last_ghost_keys`
+///       命中本輪 key 才收斂；單 cycle 短暫結算延遲不立即誤刪。
+///   S-6 單 symbol 點查確認交易所端 size==0（BB CRITICAL round 2 修法 A，**權威 gate**）：
+///       主 fetch `get_positions(None)` 受 limit=20 + 分頁截斷影響，「該 symbol 不在
+///       回應頁」會被誤判 Ghost。收斂前對候選發 `get_positions(Some(symbol))`（精準
+///       命中、不受分頁截斷）：`ConfirmedZero` 才收斂；`StillHasPosition`（分頁截斷
+///       假 Ghost，交易所仍有真倉）不收斂；`QueryFailed` fail-closed 不收斂。
+///       S-6 疊在 S-1..S-5 之上：streak 防 C-3 暫態；點查防分頁截斷穩態誤判（streak
+///       對「每輪都截斷同一 symbol」零作用，必須由點查擋）。
+///
+/// engine_mode：paper 不啟 reconciler（spawn gate 在 shared_client）；即使到達，
+/// `converge_exchange_zero_close` 內 `is_exchange()` 守衛二重保護回 noop。
+/// G-3 hedge 前提：本系統 one-way mode；`key()` 用 `symbol|side` 已 hedge-aware，
+/// one-way 下每 symbol 單 side 無誤判。⚠️ 若未來啟用 hedge mode，本路徑 +
+/// `converge_exchange_zero_close` = MANDATORY re-review（見 commands.rs:1259 G-3 註）。
+///
+/// `point_query` 為注入的單 symbol 點查驗證器（async）：生產接
+/// `pos_mgr.get_positions(Linear, Some(symbol))` 並映射成 `GhostPointQuery`；測試注入
+/// mock 覆蓋三分支。注入而非直接持 `PositionManager`：後者包真實 `BybitRestClient`
+/// 無法在單測 mock，注入 closure 才能對抗性驗證 S-6 gate 是 load-bearing。
+async fn process_ghosts<F, Fut>(
+    drifts: Vec<(String, DriftVerdict)>,
+    oh_cfg: &OrphanHandlerConfig,
+    cmd_tx: &tokio::sync::mpsc::UnboundedSender<crate::tick_pipeline::PipelineCommand>,
+    audit_pool: &Option<sqlx::PgPool>,
+    engine_label: &str,
+    state: &mut ReconcilerState,
+    point_query: F,
+) -> Vec<(String, DriftVerdict)>
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = GhostPointQuery>,
+{
+    // S-1 來源：每週期快照引擎自持鏡像一次（symbol → is_long）。空鏡像 =
+    // 無從確認本地方向 → 不收斂（保守）。
+    // S-1 source: snapshot the engine's own positions mirror once per cycle.
+    let engine_mirror_snapshot: HashMap<String, bool> = {
+        let guard = oh_cfg.engine_positions_mirror.read();
+        guard.clone()
+    };
+
+    let mut kept: Vec<(String, DriftVerdict)> = Vec::with_capacity(drifts.len());
+    // 本輪所有 Ghost key（用於更新 last_ghost_keys；不論是否收斂都記，下一輪
+    // 才能形成 2-cycle streak 判定）。
+    let mut current_ghost_keys: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+
+    for (key, verdict) in drifts {
+        if !matches!(verdict, DriftVerdict::Ghost) {
+            kept.push((key, verdict));
+            continue;
+        }
+        current_ghost_keys.insert(key.clone());
+
+        // 從 key "SYMBOL|SIDE" 還原欄位。
+        let (sym, side) = match key.split_once('|') {
+            Some((s, d)) => (s, d),
+            None => {
+                warn!(key = %key, "ghost key malformed; preserving verdict / ghost key 格式異常；保留 verdict");
+                kept.push((key, verdict));
+                continue;
+            }
+        };
+
+        // S-1：mirror 必須持有該 symbol 才知道本地方向；缺則不收斂（保守，
+        // 保留 verdict 讓既有升級階梯處理）。
+        let Some(&is_long) = engine_mirror_snapshot.get(sym) else {
+            info!(
+                symbol = sym, side = side,
+                "ghost not converged: engine mirror has no local direction / ghost 不收斂：鏡像無本地方向"
+            );
+            kept.push((key, verdict));
+            continue;
+        };
+
+        // S-5：C-3 結算 race 防護 — 要求連續 2 cycle 都判 Ghost。本輪首見
+        // （上輪 last_ghost_keys 無此 key）只記不收斂，留 verdict 給下游。
+        if !state.last_ghost_keys.contains(&key) {
+            info!(
+                symbol = sym, side = side,
+                "ghost streak not met (1st cycle); deferring converge / ghost streak 未滿（首輪），延後收斂"
+            );
+            kept.push((key, verdict));
+            continue;
+        }
+
+        // S-6：單 symbol 點查權威 gate（BB CRITICAL round 2 修法 A）。主 fetch 受
+        // limit=20 分頁截斷 → 「不在回應頁」會被誤判 Ghost。收斂前精準點查確認交易所
+        // 端 size==0 才動本地倉。三分支：
+        //   StillHasPosition → 分頁截斷假 Ghost（交易所仍有真倉）→ 不收斂、移出 Ghost。
+        //   QueryFailed      → 查不到不刪，fail-closed 不收斂（Root Principle 6）。
+        //   ConfirmedZero    → 真 Ghost，落入下方收斂。
+        match point_query(sym.to_string()).await {
+            GhostPointQuery::StillHasPosition => {
+                warn!(
+                    symbol = sym, side = side,
+                    reason = "pagination_false_ghost",
+                    "ghost not converged: single-symbol point-query returned size>0 \
+                     (real position; main fetch was pagination-truncated) \
+                     / ghost 不收斂：單 symbol 點查回 size>0（真倉；主 fetch 分頁截斷誤判）"
+                );
+                kept.push((key, verdict));
+                continue;
+            }
+            GhostPointQuery::QueryFailed => {
+                warn!(
+                    symbol = sym, side = side,
+                    "ghost not converged: point-query failed (fail-closed, real position cannot be ruled out) \
+                     / ghost 不收斂：點查失敗（fail-closed，無法排除真倉）"
+                );
+                kept.push((key, verdict));
+                continue;
+            }
+            GhostPointQuery::ConfirmedZero => {
+                // 點查確認 size==0 → 真 Ghost，落入下方收斂。
+            }
+        }
+
+        // 全 AND 條件滿足（S-1..S-6）→ 派發 exchange-zero 收斂。
+        let baseline_qty = state.baseline.get(&key).map(|v| v.qty).unwrap_or(0.0);
+        let sent = orphan_handler::dispatch_ghost_converge(sym, is_long, cmd_tx);
+        if sent {
+            // removed_position 由 handler 端 converge_exchange_zero_close 決定；
+            // 此處 audit 記「派發成功」，removed bool 以 baseline 有倉推定 true
+            // （冪等：若 D1 已先收斂則 handler 回 false，但 audit 仍記派發事實）。
+            orphan_handler::spawn_ghost_converge_audit(
+                audit_pool,
+                sym,
+                side,
+                baseline_qty,
+                engine_label,
+                true,
+            );
+            // 收斂成功 → 從 drifts 移除，避免 evaluate_actions 對「已收斂 Ghost」
+            // 重複 governor 升級（false escalation；對齊 process_orphans kept 模式）。
+        } else {
+            // 派發失敗 → 還原 Ghost drift，讓升級階梯仍能將其作為證據。
+            kept.push((key, verdict));
+        }
+    }
+
+    // 整體覆蓋上一輪 Ghost 集合：Ghost 消失自動清除，無需過期 GC。
+    state.last_ghost_keys = current_ghost_keys;
     kept
 }
 

@@ -438,6 +438,95 @@ pub fn dispatch_orphan_adopt(
     }
 }
 
+/// P2-110017-D2-RECONCILE · 派發 `PipelineCommand::ConvergeExchangeZero` 讓
+/// event_consumer 經 D1 的 `converge_exchange_zero_close` 收斂本地 Ghost 漂移倉。
+///
+/// **反模式守衛**：刻意**不**走 `dispatch_orphan_close`（CloseSymbol →
+/// ipc_close_symbol → reduce-only dispatch），否則 qty>0 close-maker drift 倉
+/// 會再撞 110017 形成重入迴圈（RCA §3a）。D2 已由 reconciler 經 Bybit position
+/// query 確認該 symbol size==0，故直接收斂本地倉，不再發任何交易所平倉單。
+///
+/// `is_long` 取自 engine_positions_mirror（本地方向）；Bybit 已無倉故無方向可取。
+/// 成功送入通道返回 true。
+pub fn dispatch_ghost_converge(
+    symbol: &str,
+    is_long: bool,
+    cmd_tx: &UnboundedSender<PipelineCommand>,
+) -> bool {
+    let ts_ms = openclaw_core::now_ms();
+    match cmd_tx.send(PipelineCommand::ConvergeExchangeZero {
+        symbol: symbol.to_string(),
+        is_long,
+        ts_ms,
+    }) {
+        Ok(_) => {
+            warn!(
+                symbol = %symbol,
+                is_long = is_long,
+                "ghost converged: removed drifted local position (Bybit size==0) \
+                 / ghost 收斂：移除本地漂移倉（Bybit 端 size==0）"
+            );
+            true
+        }
+        Err(e) => {
+            warn!(
+                error = %e,
+                symbol = %symbol,
+                "failed to dispatch ghost converge / ghost 收斂發送失敗"
+            );
+            false
+        }
+    }
+}
+
+/// P2-110017-D2-RECONCILE · ghost_converge 事件的 V014 審計（fire-and-forget）。
+///
+/// 寫 `observability.engine_events`（reconciler 既有通道，已驗可落地），
+/// event_type=`reconcile_ghost_converge`。**不寫** `trading.order_state_changes`：
+/// D1 follow-up `P3-110017-CONVERGE-AUDIT-OBSERVABILITY` 已揭該表不收純 position
+/// 收斂（無真實 close order_id），D2 純 drift 收斂故避坑。
+pub fn spawn_ghost_converge_audit(
+    audit_pool: &Option<sqlx::PgPool>,
+    symbol: &str,
+    side: &str,
+    baseline_qty: f64,
+    engine_label: &str,
+    removed_position: bool,
+) {
+    let Some(pool) = audit_pool.clone() else {
+        return;
+    };
+    let payload = serde_json::json!({
+        "symbol": symbol,
+        "side": side,
+        "baseline_qty": baseline_qty,
+        "engine": engine_label,
+        "removed_position": removed_position,
+    });
+    let engine_owned = engine_label.to_string();
+    let ts_ms = openclaw_core::now_ms() as i64;
+    tokio::spawn(async move {
+        if let Err(e) = sqlx::query(
+            "INSERT INTO observability.engine_events
+             (ts_ms, event_type, source, config_name, old_version, new_version, payload)
+             VALUES ($1, $2, $3, $4, NULL, NULL, $5)",
+        )
+        .bind(ts_ms)
+        .bind("reconcile_ghost_converge")
+        .bind("position_reconciler")
+        .bind("trading.positions")
+        .bind(&payload)
+        .execute(&pool)
+        .await
+        {
+            warn!(
+                error = %e, engine = %engine_owned,
+                "reconcile_ghost_converge audit insert failed / ghost 收斂審計寫入失敗"
+            );
+        }
+    });
+}
+
 /// Fire-and-forget audit row for orphan_handled events.
 /// orphan_handled 事件的 V014 審計（fire-and-forget）。
 pub fn spawn_orphan_audit(
