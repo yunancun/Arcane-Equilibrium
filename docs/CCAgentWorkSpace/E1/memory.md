@@ -13352,3 +13352,31 @@ register + mod.rs setter）。
 - P3-04: backtest/portfolio 無 engine production caller 但已被 tests/golden_extreme.rs + inline tests 行使 → 判定 (a) reserved library API（非死碼），加 pub mod doc 註記，不刪。main.rs portfolio_cache 是另一條 health emitter，與 openclaw_core::portfolio 無關（易誤判）。
 - P3-05: 泛型 FailsafeWatcher 只在 #[cfg(test)] 構造，production 走 SharedFailsafeWatcher → 標 doc 為 test/local-API。dispatcher default_secret_path 三處差異大（不同 env var/檔 vs 目錄）→ 抽取非最小正確，改記在 report 不強抽。
 - 注釋全中文（廢 bilingual）；comment-only edit 不丟測試：core green / engine lib 3598 pass.
+
+## 2026-05-29 — P2-OPS-2-GITLEAKS: secret-scan pre-commit hook 基礎設施 IMPL
+
+新增 `helper_scripts/git_hooks/`（3 檔）+ SCRIPT_INDEX.md 一條。`.git/hooks/` 不入版控 → canonical hook 放版控 + installer 落地的範式。
+
+教訓：
+1. **warn-and-pass on missing tool 是正確 default**：pre-commit hook 本可 `git commit --no-verify` 繞過，硬擋缺工具（exit 1）只會逼大家 --no-verify 反而失去掃描覆蓋；真正 gate 是「有人跑 installer」。缺工具 → WARN + exit 0；掃到真 secret → exit 1（fail-closed 點落在 secret 而非工具存在性）。
+2. **installer refuse 無聲覆蓋**：鏡像 cron/install_pg_dump_cron.sh 的 idempotent guard 思路。用 `cmp -s` 判定既有 hook 是否本 repo 版本：一致→idempotent 重裝；不一致→refuse + 提示 --force（--force 才 backup .pre-commit.bak 後覆寫）。避免吃掉 operator 自訂 hook。
+3. **git rev-parse --git-dir 可能回相對路徑**：worktree / 不同 cwd 場景下 `--git-dir` 回相對值。用 `git -C "$REPO_ROOT" rev-parse --git-dir` 取相對 repo root 的值，再判 `[[ "$x" = /* ]]` 正規化成絕對路徑，否則拼錯 hooks dir。
+4. **gitleaks allowlist 用 regex 排 test fixture**：cross-lang HMAC pinned hex `1b2b18d7...b78fc` + 測試 signing key `test-live-auth-signing-key-do-not-use-in-prod` 是 byte-identical 測試常數（出現在 live_authorization.rs / test_live_trust_routes_secret_split.py / credential_rotation.md），gitleaks default ruleset 會把 64-char hex 當 high-entropy/generic-key flag。allowlist 走 `[extend] useDefault=true` + `[allowlist] regexes/paths`。
+5. **Mac 裝不了 gitleaks → config 標起手版**：無法實跑找全部 FP，allowlist 只放已確知 fixture，首次實跑 + FP 調校列 follow-up（待 gitleaks 安裝後）。
+
+## P1-OPS-2-CI-FLAKINESS-TEST-LOCK — 合併 env-test mutex（2026-05-29）
+
+- **任務**：把 openclaw_engine lib crate 內分散的 per-module env-test mutex 合併成單一 crate-level 共用鎖。
+- **關鍵架構發現（bin/lib split 決定 race 邊界）**：`openclaw_engine` crate 分兩個 compilation unit — lib（lib.rs 的 `pub mod`）+ bin（main.rs 的 `mod` 兄弟：main_boot_tasks / live_auth_watcher / startup / tasks）。`cargo test --lib` 只編 lib 成「單一」測試 binary（多執行緒並行 → 真 race 面）；bin 測試是「另一個 process」（`cargo test --bin`）。兩 process 不共享 static、不互相 race。lib 的 `#[cfg(test)] pub(crate)` 項對 bin 不可見（lib 作為 bin 的依賴時 cfg(test) 碼不編入）。**教訓：判斷 Rust 「process-global env race」邊界，先確認 module 屬 lib 還是 bin compilation unit；不同 binary 的 mutex 物理上不可能互斥也不可能 race。ticket 把 `live_authorization`(lib) vs `live_auth_watcher`(bin) 當成 race pair 是誤判 — 兩者在不同 binary。**
+- **設計**：lib.rs 加 `#[cfg(test)] pub(crate) mod test_env_lock { static ENV_TEST_LOCK + fn guard() -> MutexGuard }`（poison-tolerant `unwrap_or_else(|e| e.into_inner())`）。8 個 lib module 的 local mutex（ENV_TEST_LOCK / ENV_GUARD ×3 / ENV_MUTEX / LIVE_GUARD_ENV_LOCK / ENV_LOCK / OnceLock env_lock）全刪，callsite 改 `crate::test_env_lock::guard()`。
+- **既有 crate-level lock 處理**：發現 `event_consumer::paper_state_restore::env_test_lock`（已是 crate 共用，3 user：halt_audit / halt_ttl / per_symbol_price_pnl）。把它遷到新 `crate::test_env_lock`（更貼切的 home），3 user 改用 `use crate::test_env_lock::guard as env_lock` 別名 → callsite 完全不動。最終 lib 只剩 1 把 mutex（lib.rs:127）。
+- **scope 守紀律**：no-mutex 的 env-mutating lib 測試（bybit_private_ws_status_writer / claude_teacher / ai_budget/tracker / startup(bin)）**沒加鎖** — ticket 是「合併現有鎖」非「給沒鎖的加鎖」，加鎖=改測試邏輯=擴 scope。改在報告 flag 給 PA/E2 當 follow-up。
+- **驗收**：`cargo test -p openclaw_engine --lib` = 3598 passed / 0 failed / 1 ignored。clippy 因 openclaw_core 的 pre-existing `deprecated_semver`(price_tracker.rs:132 `since="2026-04-22"` 非 semver) 報 error 中斷；`-A clippy::deprecated_semver` 繞過後我改的行範圍 0 新 warning。
+- **Mac 限制**：`cargo test --lib` 過 ≠ 證明 race 消除（race 罕見）。真驗證需 Linux `--lib` 並發多輪 by E4。
+
+## 2026-05-29 P1-OPS-2-CI-FLAKINESS-TEST-LOCK round 2 (env race 殘留修復)
+- E2 退回 1 HIGH：round 1 合併 env-lock 後，bybit_private_ws_status_writer.rs test_writer_config_from_env_honours_srv_root 仍無鎖 remove_var("OPENCLAW_BASE_DIR")，與 Group A edge_estimates 持鎖 set_var 同變量重疊 → 無鎖 mutate 穿透鎖，正是要消的 race。round 1 的 3598 passed 不能證偽罕見窗口 race。
+- 教訓 1：env-lock 的鎖只排除「其他持鎖者」。任一無鎖 set_var/remove_var 直接穿透。要消 race 必須所有 mutate process env 的 test 都持同一把鎖（lib 不變式：all-or-nothing）。
+- 教訓 2：guard 取得位置陷阱——env mutation 在 helper（ai_budget set_test_pricing_path）時，不能在 helper 內取 guard，否則 helper return 即釋放，無法覆蓋呼叫端 test 對該 env 的後續讀取。必須在呼叫端 test 第一行取。先 grep helper 所有 caller（本例只 1 個 test_budget_config_load_default）。
+- 教訓 3：誤導性註釋藏 race——原註釋「寫進 scoped TempDir 所以不需 isolation」合理化了 race，但 remove_var 是 process-global 非 TempDir-scoped。修 race 時務必同步改掉合理化它的註釋。
+- 驗收：grep static.*Mutex<()> 會撈到 main_boot_tasks / live_auth_watcher_tests 的 bin crate guard，但依 lib.rs:120-123 邊界註釋它們是獨立 compilation unit 無法存取 lib pub(crate)，不算 lib 範圍；lib 內唯一 env-lock 本體 = lib.rs:127 ENV_TEST_LOCK。
