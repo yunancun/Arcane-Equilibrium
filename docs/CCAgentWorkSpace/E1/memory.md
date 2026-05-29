@@ -13260,3 +13260,53 @@ register + mod.rs setter）。
 - install_m11_replay_runner_cron.sh（echo 提到 run 才改）：Stage A 描述改 register-only / 第 3 步 dry-run 提示改「不 dispatch run」+ 第 4 步驗 register_only_completed + run_state 無新 running row / binary preflight 註解改「register-only 不 spawn 但保留守 [47] + Stage B 就緒」
 - 兩檔 bash -n 通過（Mac + remote 均驗）
 - 不 commit（鏈 E1→E2→E4→QA→PM）。報告：reports/2026-05-29--e1_m11_smoke_register_only_fix.md
+
+## 2026-05-29 — Cold audit pkg B（Rust side）：P1-03/06/07/08 + P2-02/03 IMPL
+
+**任務**：v80 cold audit Bybit 寫語意 + authority。Rust-only（Python call-site 由另一 E1 owns）。PA spec `2026-05-29--cold_audit_pkgB_exchange_semantics_spec.md`。
+
+- 教訓 1（P1-03 OrderManager handle 可達性 — PA flagged unknown）：`pipeline.ipc_close_all()` 是經 `order_dispatch_tx`（OrderDispatchRequest channel）**enqueue**，不持 OrderManager。cancel-all 是 `/v5/order/cancel-all`（帳戶範圍 POST），**不是 OrderDispatchRequest**，無法走同一 channel。解法：在 `spawn_order_dispatch` 建 `order_mgr` Arc 後、move 進 spawn task 前，clone 注入 pipeline（`set_cancel_all_order_mgr`）→ **reuse 同一 shared live client**（不另建），對齊 PA「reuse bootstrap.rs:742 shared client」。
+- 教訓 2（P1-03 同步 vs 異步攔截 — deviation from spec）：PA spec 寫 route 經 `handlers/mod.rs` match arm，但 `handle_paper_command` 是**同步**（無法 await REST）。cancel-all 是真實 async REST 呼叫（非 enqueue），故在 `loop_handlers::handle_pipeline_command`（async）攔截，**與 ResetDrawdownBaseline / DisableEdgePredictorAll 同模式**。`handlers/mod.rs` 仍補一 defensive log-only arm 滿足 match 窮盡性（生產不會到達）。已 flag deviation。
+- 教訓 3（match 窮盡性陷阱）：新 enum variant 後 `cargo build`（無 test cfg）可能過，但 `cargo test --lib` 編譯 test path 會撞非窮盡 match。新增 PipelineCommand variant 必同步補 `handle_paper_command` arm（即使生產被上游攔截）。
+- 教訓 4（loop_handlers match arm 內 `return` 反模式）：`handle_pipeline_command` match 後有 governor risk sync + CircuitBreaker broadcast。arm 內早退 `return;` 會 skip 這些。改用 nested `match Option` 自然落底，不 early-return。
+- 教訓 5（P1-07）：OPEN create fail-closed 用空 slice `const OPEN_NO_RETRY: [u64;0]=[]` 走 `run_dispatch_retry`（attempt0>=len0 立即 TransientExhausted=1 嘗試）。lease release 不用改 — Structural/TransientExhausted arm 本就 `LeaseOutcome::Failed`（非 Consumed）。CLOSE 保留 `CLOSE_RETRY_DELAY_MS`（reduce-only 冪等例外，principle 5）。刪 `RETRY_DELAY_MS` const + 改 test_retry_delay_constants/test_close_retry_delay_constants（移除對已刪 const 的引用）。
+- 教訓 6（P1-08）：`is_live_slot = slot=="live"` 取代 `is_mainnet` 守 env-cred fallback（LiveDemo 也是 live slot 但 is_mainnet=false）。OPENCLAW_ALLOW_MAINNET 門 + 空憑證 fail-closed **仍鍵 is_mainnet**（真金白銀專屬，不擴 LiveDemo）。
+- 教訓 7（P1-06 constructor fan-out）：`PositionManager::new` 加 `instruments: Arc<InstrumentInfoCache>`，4 caller：bootstrap（dual-rail，傳真 cache + side_is_long=req.is_long）/ exchange_stop_sync build（side "Buy"→Some(true)）/ tasks.rs reconciler + startup seed（只 get_positions 不 set_trading_stop → 用 `InstrumentInfoCache::default()` 空 cache，trading-stop 仍 fail-closed-on-missing-spec）。step_4_5_dispatch **無需改** — 它只 build StopRequest（已帶 is_long），side 在 bootstrap consumer 落地。
+- 教訓 8（P1-06 normalizer fail-closed）：`normalize_trading_stop_price` 取整後若得 0.0（floor/ceil/round 在 tick_size 或 price 非法時回 0.0）也回 None，絕不送 0/原始值。SL 方向保守（多 floor / 空 ceil）；TP/trailing/active 最近 round；side None 回退最近 round。
+- 教訓 9（P2-02 amend）：`needs_spec` 任一 price/qty 欄位存在即查 `instruments.get()`，miss → Business Err（不 unwrap_or raw）。trigger/TP/SL 也補 round_price（舊版 format_price 直發未取整）。
+- 教訓 10（P2-03）：`group_reset_ms: [AtomicU64;6]` 平行 group_remaining；`wait_if_rate_limited(path)` 先 per-group（Order/Position/Account/Asset 閾值 2，Market 10）再 global 粗守；group reset 0 回退 global reset_ms。`update_group_rate_limit` 同存 group reset header。兩 call site（get/post 內，皆有 path）。
+- 結果：cargo build PASS / `cargo test -p openclaw_engine --lib` 3583 passed 0 failed（baseline 3569 + 8 新 + 既有）；clippy --no-deps 我的 diff 行 0 hit（pipeline_helpers:657 + commands:1606 兩 empty-line-after-doc 為 pre-existing 孤兒 doc comment，在我 diff 外，不順手修）。Mac cargo 為 advisory；E4 Linux 為權威回歸。
+- 不 commit（鏈 E1→E2→E4→QA→PM）。
+
+## 2026-05-29 — v80 cold audit Package A (P1-01/02/03/04/05/17, Python only)
+- 新 helper `live_preflight.py`：`live_auth_signing_key()` / `verify_signed_authorization()`（驗簽本體從 executor_routes 搬入，HMAC key 改 live-auth 域）/ `engine_mode_readback()`（包 IPC get_state）/ `all_five_live_gates_ok(require_authz)`。
+- P1-01：executor `_verify_authorization_json_or_raise` 改 thin wrapper 委派 live_preflight；移除 get_secret_value import。Phase-1 fallback 保留 → 舊測試只設 IPC_SECRET 仍 parity 過。
+- P1-02：start/resume/grant 一律 gate→IPC→readback→stamp；resume 改精確 == live_reserved（棄 substring）；失敗 fail-closed 撤 authority。
+- P1-03：live stop Phase1 取消掛單改走 IPC cancel_all_orders{engine:live}（Rust 端 method 由另一 E1 在 pkgB 實作，Mac 上尚未存在）；刪 `_sweep_live_orphan_orders` 死 wrapper + 「cancel-all fail-safe 可繞 Rust」註釋；demo `_sweep_orphan_orders` 保留。
+- P1-05：recheck/validate/safe_bundle 狀態改 `manual_marked` + evidence="manual_mark"/verified=False；action_result 改 "manual_mark"。**關鍵**：grep 證實無外部 readiness gate 讀 canonical_recheck_state/closeout_state/demo_last_action_result 當解鎖條件（reader set 不超出 control_ops），故不需 STOP 報 PM。
+- P1-17：apply_config_change set_system_mode swallow 改結構化捕捉；IPC 失敗→partial_failure + rust_synced=false + ipc_error；live-capable 模式強制 get_state 回讀。
+- **契約改動**：state_models.py `ActionResult` Literal 增 "manual_mark"/"partial_failure"；RecheckResultData/DemoValidateData/SafeBundle*/ConfigChangeAcceptedData 加 evidence/verified/mode_sync/rust_synced 欄位（Pydantic 預設丟棄未宣告欄位，不加會靜默吞掉新欄位）。
+- 教訓（測試環境）：Mac 無 pytest；用 /tmp venv + slowapi+numpy。寫端測試需 `OPENCLAW_CSRF_SHADOW=1` 否則全 403 csrf_token_mismatch（非 regression）。完整目錄 4224 passed；唯一真改的舊契約測試 test_validate_returns_success_envelope 已更新為 manual_mark。
+
+## 2026-05-29 — v80 cold audit Wave2 P1-09 edge-gate freshness（Rust）
+- P1-09：cost_gate 正 edge 加三條 admission（fresh + from_runtime_field + validation_passed）。`gates.rs` live → reject（新 RejectionCode::CostGateJsLiveStaleOrUnvalidated），demo → 探索（return None）非對稱；理由 fail-close demo 重現 Phase 5 99.98% reject 死循環。
+- **now 注入不讀 wallclock**：gate 加 `now_secs: i64` param，router 由 `now_ms/1000` 注入（now_ms 是 fee staleness 用的 epoch-ms wallclock）；測試 wrapper 用 `TEST_NOW_SECS` const。保持 gate 純函數可測。
+- `edge_estimates.rs`：抽 `parse_object` 共用 helper（原 load_from_file/load_from_str 兩份重複迴圈易漂移）；`from_runtime_field` 僅當 JSON `runtime_bps` key 存在為 true；`updated_at: Option<i64>`（RFC3339→epoch，None 即非 fresh）；`is_fresh(now, ttl)` None→false fail-closed。
+- TTL config 化：`risk.slippage.edge_estimate_ttl_secs` 預設 172800（48h），validate >= 1，非 gate 內字面量。
+- **教訓（regression 陷阱）**：加 admission 後，舊正 edge 測試 fixture（無 runtime_bps/validated/updated_at）live 會被新門攔截。`test_cost_gate_live_postonly` 意圖是滑點數學，須補 fresh+runtime+validated fixture 才不被新鮮度先攔。demo 正 edge 測試因改走探索 return None，多數仍 pass 不需動。
+- **教訓（struct literal call site）**：新增 struct 欄位後 `cargo build`（lib）過但 `cargo test`（lib test）才暴露 test-only struct 字面量缺欄位（risk_config_slippage.rs:318 SlippageConfig / scanner/opportunity.rs:386 CellEstimate）。改 struct 必跑 --lib test 不只 build。
+- 教訓（epoch 常數）：硬編 RFC3339→epoch 對照值易錯（2026-05-29T00:00:00Z=1780012800 非 1779667200）；測試先跑取真值再回填。
+- 結果：cargo build 0 error 0 new warning；cargo test --lib 3597 passed / 0 failed（Mac advisory，Linux E4 authoritative）。
+
+## 2026-05-29 — Cold Audit Pkg D (P1-12/13/14 + P2-08) AI/ML cost & lineage
+- P1-12 enum 归一化：policy_ready_standard（去 _allowed）/ route_c_escalated_standard。除 PA 列的 3 处外，发现并修了未列的额外消费者 bybit_thought_gate_decision_builder.py:174（H1-C 也消费 policy_state）——教训：enum 归一化必 grep 全 producer/consumer，不只信 spec 列的清单。
+- P1-13 教训：H1-F 是 ai_agents 独立 CLI，无法 import control_api_v1 app 包内的 record_ai_invocation（依赖 .db_pool 相对导入）。决策=新建 bybit_ai_invocation_ledger.py 用相同 SQL 契约（V003+V015 / V010）独立写两表，而非跨包硬耦合。付费 fail-closed / 本地 best-effort。
+- P1-14：caller-side connectivity precheck（check_db_connectivity + has_required_persistence_artifact + RegistryPersistenceError）比改 register_model 签名爆炸半径小。三种 None 因区分：no_ship→skip / slot locked→INFO / DB unavailable→fail-loud。
+- P2-08(c) 教训：binder 内嵌 Python 只从 .env 文件读 provider 配置，不读 OS env——e2e 测试 opt-in 必写入 .env 文件而非 subprocess env。
+
+## 2026-05-29 — Wave2 PkgD MED-1/MED-2 condition-clear（cost-correctness ledger dedup）
+- 教訓（MED-1）：兩張賬本表 PK 含時間列（agent.ai_invocations(invocation_id, ts) / learning.ai_usage_log(time, scope, request_id)），時間列若用 now() 則重試時 ts 漂移 → ON CONFLICT DO NOTHING 永不命中 → 重試寫第二行 → MTD 預算賬本 double-count。修法：deterministic_event_ts(idempotency_key) 由 key 確定性推導時間（優先解析 "h1f_<ms>" 內嵌毫秒保 MTD 月份正確，外部 key 退化為「當月內」hash 偏移），無 migration（PK 不變，只把時間值從 now() 改為綁定 key 的確定值）。
+- 教訓（測試掩蓋 bug）：舊 test_ai_invocation_ledger 只斷言 idempotency_key 在 params 裡，無法驗 PK 跨重試穩定，正好掩蓋 now() bug。新增 _PkAwareCursor 模擬 PK+ON CONFLICT DO NOTHING，斷言「寫兩次=每表一行」；已驗證對非確定性 ts 會失敗（2 行）。
+- 可測性重構：H1-F 賬本治理分叉內聯在 main() 無法單測 → 抽純函數 apply_ledger_governance(payload, ledger_result, blocking_reasons, warning_flags)，付費 ok=False 阻斷 / 本地 ok=True+errors best-effort warn。最小手術，邏輯單點。
+- cost_log 治理門控測法：腳本從 runtime dir 讀 5 份 JSON，用 subprocess + OPENCLAW_SRV_ROOT=tmp + PYTHONPATH 加 misc_tools 驅動，讀回報告斷言（pricing_not_bound_for_paid_call：付費+未定價 log_ok=False；免費+未定價 warn-only）。
+- Mac 無 psycopg：賬本 DB 測試一律 _conn_factory 注入 fake DB，禁連真 PG。

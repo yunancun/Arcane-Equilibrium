@@ -6641,3 +6641,53 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 **Cross-ref**: AMD-2026-05-21-01 v2 §Decision 2.5 / 3.1 / Q3 / Q4；source baseline `notification_failsafe/mod.rs` 14 mock test；CLAUDE.md §二 原則 5/6/9/14。
 
 **未動 SSOT**: 不改 pipeline_ctor.rs / tasks.rs / main_pipelines.rs（spec only，design only）。
+
+---
+
+## 2026-05-29 — Cold Audit Package B (Bybit exchange write semantics + authority) IMPL spec
+
+**Task**: PA IMPL spec for fix-plan Package B per operator decisions (P1-03 MOVE-TO-RUST, P1-07 STRICT-FAIL-CLOSED) + P1-06/P1-08/P2-02/P2-03/P2-04.
+
+**Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-29--cold_audit_pkgB_exchange_semantics_spec.md`
+
+**Key findings / decisions**:
+- **Fix-plan line cite drift caught**: P1-03 real REST cancel-all body is `strategy_ai_routes.py:1813 _sweep_orphan_orders` (calls `rc.cancel_all_orders("linear", settle_coin="USDT")`), NOT `bybit_rest_client.py:681-715` as cited. Live wrapper = `live_session_routes.py:686-710`; actual Stop call-site = `live_session_endpoints.py:282`.
+- **P1-03 IPC design**: new JSON-RPC method `cancel_all_orders {engine,category,settle_coin}` → new `PipelineCommand::CancelAllOrders` (fire-and-forget like CloseAll, no response_tx) → new `lifecycle::handle_cancel_all_orders` → existing `OrderManager::cancel_all` extended to settle-coin scope. Mirrors the already-migrated `close_all_positions`/`close_position` IPC path (position sweep already moved to Rust at `:286`/`:657`). Python call-site swaps to `await _ipc_command("cancel_all_orders",{"engine":"live"})` with same live-channel-unavailable fail-closed handling as close. Delete dead `_sweep_live_orphan_orders` + its "cancel-all is fail-safe so Python REST OK" comment (that rationalization is exactly what operator overrode). Demo `_sweep_orphan_orders` KEPT (out of scope).
+- **P1-07 retry spec**: OPEN/create = single attempt (empty delay slice, reuse run_dispatch_retry machinery) fail-closed on timeout/parse/transport/nonzero retCode; lease released NON-Consumed (must verify no leak). CLOSE (reduce_only) KEEPS bounded retry as documented idempotent exception (principle 5 survival > profit — failing a close closed leaves live position un-reduced). RETRY_DELAY_MS becomes dead → delete. NoOp classifications (10001 duplicate, 110001/9/43) stay.
+- **P1-06 normalizer**: `floor_price`/`ceil_price` already exist on SymbolSpec (side-aware conservative). New `normalize_trading_stop_price(cache,symbol,price,side_is_long,is_stop_loss)->Option` returns None on missing spec → caller fail-closed (skip exchange stop, keep local StopManager, dual-rail). PositionManager struct gains `instruments: Arc<InstrumentInfoCache>` (currently only holds client) → constructor fan-out at bootstrap.rs:742 + exchange_stop_sync. Add `side_is_long` to TradingStopRequest.
+- **P1-08**: swap two `if is_mainnet` env-fallback guards (bybit_rest_client.rs:932,946) to `is_live_slot = env.secret_slot()=="live"` (covers Mainnet+LiveDemo). Keep OPENCLAW_ALLOW_MAINNET + empty-cred fail-closed keyed on is_mainnet only.
+- **P2-02**: amend `.unwrap_or(q/p)` (order_manager.rs:538,542) → fail-closed Err on cache miss; round SL/TP/trigger.
+- **P2-03**: group state EXISTS (RateLimitGroup/from_path/group_remaining[6]) but wait_if_rate_limited only checks GLOBAL remaining+reset_ms. Add per-group reset_ms array + `wait_if_rate_limited(path)`.
+- **P2-04** (TW, doc): `pre_check_order` REMOVED in source FIX-20 (platform_client.rs:355-359) but doc:823-829 still documents it live; demo `dcp` topic in doc:1121 but source private_ws_topics excludes dcp for demo. Doc must match source.
+
+**E1 lanes**: B1(P1-03 HIGH), B2(P1-07 HIGH), B3(P1-06+P2-02 MED-HIGH), B4(P1-08+P2-03), B5(P2-04 TW). order_manager.rs overlap B1↔B3 → serialize or single owner. bootstrap.rs B3-only.
+
+**E2 top 3**: cancel-all not behind execution_authority + no Python REST fallback; OPEN fail-closed lease released non-Consumed + CLOSE exception documented; P1-06 dual-rail fail-closed keeps local stop + constructor fan-out compiles.
+
+**Linux empirical**: cargo test/build authoritative on trade-core only (Mac advisory); IPC end-to-end + any trading call deploy/operator-gated.
+
+**Lesson**: position sweep already migrated to Rust IPC (close_position/close_all_positions); cancel-all was the LAST Python live exchange-mutating write — the migration template already exists in-tree, lowering P1-03 risk. The PositionManager-has-no-instrument-cache gap is the structural root of P1-06 (create path has cache, stop path doesn't).
+
+---
+
+## 2026-05-29 — Cold Audit Package C (Evidence & promotion gates) IMPL spec
+
+**Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-29--cold_audit_pkgC_evidence_promotion_spec.md` (+ Operator mirror)
+**Findings**: P1-09, P1-10, P1-11, P1-16, P2-01, P2-05, P2-06, P2-07. PM pre-decided paper-freeze / scaffold-not-evidence / demo-only.
+
+**Key call-path proofs**:
+- **P1-09**: `_meta.updated_at` parsed in `edge_estimates.rs:80-85` but ONLY for grand_mean_bps — NEVER into struct (no TTL field). `validation_passed` parsed (`:104`) but gate `gates.rs:240-272` matches only `shrunk_bps>0.0`, never reads validation/freshness. `runtime_bps.or(shrunk_bps)` fallback (`:91`) lets legacy positive shrunk_bps pass. Fix = freshness(48h TTL config) + from_runtime_field bool + validation_passed; **live→reject / demo→exploration** (NOT demo-reject, avoids Phase 5 dead-loop). now injected not wallclock-in-gate.
+- **P1-10**: `promote():518-521` DEMO_ACTIVE branch calls `_check_paper_gates` = the paper→demo transition. Freeze AT GATE (`return False,"paper_lane_frozen..."`), keep enum (LIVE_PENDING/ACTIVE still compile). Rewrite happy-path test `:142-144` + new regression. One named reopen seam `OPENCLAW_REOPEN_PAPER_PROMOTION` (not impl).
+- **P1-11 RESOLVED = stale spec artifact, NOT a real gap**: close-maker evidence persists as `trading.fills` V094 columns (`close_maker_attempt`+`close_maker_fallback_reason` 10-enum CHECK+partial index). Writer = Rust `commands.rs:659`→`step_4_5_dispatch.rs:891/1373`. Readers = `checks_close_maker_audit.py` (`FROM trading.fills WHERE close_maker_attempt=TRUE`) + healthchecks [62][63][64][66][71]. `learning.close_maker_audit` table has ZERO writer/reader in source. **PA recommend: amend spec/TODO to make fills V094 canonical, do NOT create dead table.** Fallback migration only if PM insists (MIT Linux dry-run + operator-deploy-gated).
+- **P1-16**: `attribution_daily.py:283-299` explicit W2-B scaffold (`status=wire_up_pending_w2f_pa`, n=0, return 0). 5-fact doc split: source-scaffold DONE / active FALSE / Stage 0R PENDING / M11 Stage A smoke INSTALLED ([48] only) / Stage B divergence PENDING. E1 add `promotion_evidence=False` marker so wrapper keys on field not exit-code.
+- **P2-01**: `backtest_engine.py` already self-labels STUB (zero+warning). Real defect = `backtest_routes.py:358` auto-injects TruthSourceRegistry on `sharpe>1.0 & trades>=10` with NO stub guard. Currently dead but one mis-wire leaks. Fix = guard on `warning contains "stubbed"`/`get_status().stub`.
+- **P2-05**: `ml_training_maintenance.py:57` training demo-only vs `:58` shadow demo,live_demo. PA recommend KEEP demo-only intentionally (document), defer live_demo lane to post-P2-06/P2-07 (memory feedback_live_no_degradation: live_demo fills valid but widening lane before evidence tables populated + Stage 0R green is premature).
+- **P2-06**: drift/model_performance empty → enable writer after burn-in (deploy-gated) + gate live packets fail-closed on zero mode-scoped rows.
+- **P2-07**: Stage B cohort replay design-only (cohort wrapper not exist; completion+veto materialization; zombie-row fix). DEFER impl.
+
+**Lessons**:
+1. P1-11 is the textbook "audit finding that is actually stale spec drift" — the MISSING to_regclass was real but the conclusion (table needed) was wrong; the working lane is fills-columns. PA call-path grep (writer + reader) flipped it from "deploy migration" to "doc reclassify". Without grepping BOTH writer and reader I'd have spec'd a dead table.
+2. P1-09 demo/live asymmetry is load-bearing: fail-closing demo on unvalidated-positive recreates the documented Phase 5 99.98%-reject dead-loop. Live fail-closed, demo→exploration.
+3. P2-01 stub guard must key on stub SIGNAL not current zero-values, else it re-opens the moment the stub returns non-zero.
+
+**Only genuine operator decision**: P1-11 canonical-source (recommend fills V094, retire table). EDGE_TTL=48h is PA default. Rest PM-pre-decided.

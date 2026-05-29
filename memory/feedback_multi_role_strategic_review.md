@@ -21,6 +21,12 @@ originSessionId: 25389af3-8301-4de1-aa7d-c7b1230b551b
 - 主 session self-audit 已修 3 bug（F1 wording / F2 stats / B3 Python parity），但**5 FAIL + 6 WARN 全部都是 multi-role audit 才浮現**；F3 被 retract 是因 FA agent 抓到 look-ahead bias，主 session 連同 self-audit 都漏了
 - 結論：multi-role 不只用於 strategic decisions，**research/implementation 收尾 closeout 也應派**，否則 false-positive findings 會落地進 TODO/CLAUDE.md/Rust code
 
+**(3) 2026-05-28 Sprint 2 entry — grill-me（互動質詢 operator）+ 獨立背景 PA agent 平行 → cross-verify 範式**：
+operator 拍「a+b 同時做然後交叉驗證」：(a) PM 用 grill-me skill 一題一題質詢 operator 鎖 5 個 decision branch；(b) 同時背景派 PA agent **獨立**出 entry checklist（prompt 明令「勿讀 grill-me partial output 保持獨立」）。兩端產出後 PM 對照。
+- **價值**：cross-verify 抓到 4 共識 + 1 **重大分歧**（Q4 策略選擇：operator grill 答 grid+ma 進 Stage 0R；PA 獨立 verdict A1+A2 新 candidate + 5 textbook 全 baseline 不投，附 runtime evidence grid avg_bps=−2.55 結構性負）。單走 grill 或單走 agent 都不會浮現此分歧 → operator 拍 hybrid 方案 C 解（兩軌並存）。
+- **關鍵設計**：(i) 兩端**真獨立**（agent prompt 禁讀對方 partial，否則污染）；(ii) grill 給 operator 推薦答案但逼明說，agent 給對抗性 verdict + 自評 push-back；(iii) 不揭示 agent 結論給 operator 直到 grill 答完（否則 operator 被污染失 cross-verify 意義）。
+- **適用**：高 stakes planning（Sprint/Wave entry、framing 拍板、scope 決策）operator 願深度參與時；比純多 agent review 多一層「人的直覺 vs agent 證據」對撞。
+
 **How to apply**：
 - **觸發場景**：策略 live 化 / 退場層 design change / Phase promotion / policy change / 撤換核心組件；「要不要改 runtime 行為」的決策
 - **角色分工**：

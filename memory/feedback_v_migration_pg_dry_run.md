@@ -1,6 +1,6 @@
 ---
 name: V### migration must validate against real PG before E1 IMPL design
-description: Mac mock pytest + static review cannot catch PG runtime semantic differences (PL/pgSQL constraints, empirical reflection function behavior, schema column existence). V### migrations must do Linux PG dry-run before E1 IMPL.
+description: Mac mock pytest + static review cannot catch PG runtime semantic differences (PL/pgSQL constraints, reflection function behavior, schema column existence, TimescaleDB compressed-twin grant propagation). V### migrations must do Linux PG dry-run before E1 IMPL — AND the idempotency double-apply is a load-bearing gate (first-apply PASS ≠ re-apply safe; see 2026-05-28 V114 3-round case).
 type: feedback
 originSessionId: ed3e3c59-83a5-44e5-8b28-0f3b83e516a0
 ---
@@ -39,3 +39,21 @@ REF-20 Sprint C R6-T0' V055 retrofit took 5 rounds (E1 round 1-5 + E2 round 1-5)
 **Related**: P0-PROCESS-1 (Mac Python 3.10 / Linux Python 3.12 FastAPI lazy ForwardRef difference, Sprint A R3) — same Mac vs Linux drift class. V### migration is a new instance of the same anti-pattern.
 
 **Bake into governance**: Update CLAUDE.md §七 SQL migration 規範 to include "PG dry-run mandatory before E1 IMPL design" — pending operator decision on whether to make this hard rule or recommended practice.
+
+---
+
+**2026-05-28 V114 — 升級教訓：first-apply PASS ≠ idempotent；double-apply gate 是 load-bearing 不是裝飾**
+
+V114 (`observability.notification_failsafe_events` TimescaleDB hypertable) MIT 跑了 **3 輪** dry-run 才綠，每輪都靠「雙跑」抓到 first-apply 看不到的 bug：
+- R1：column-level `GRANT UPDATE (acked_at_utc, acked_by)` 寫在 `enable compression` **之後** → TimescaleDB 把 column-level grant 傳播到壓縮 twin `_compressed_hypertable_NN`（twin 只有壓縮格式 column 無 `acked_at_utc`）→ first-apply 即 abort。
+- R2：E1 把 GRANT 移到 compression 前 → **first-apply PASS**，但 **double-apply FAIL** — first-run 的 compression enable 建了**跨 run 持久存在**的 twin；第二跑重抵 column-level GRANT 撞已存在 twin → 同樣 abort。**reorder 只解 first-run，問題本質沒消失只位移。**
+- R3：E1 把 column-level GRANT 包 `BEGIN ... EXCEPTION WHEN undefined_column THEN RAISE NOTICE; END;`（精確捕捉 42703；twin 存在時 skip，grant 已在 first-run 落 `pg_attribute.attacl`）→ 三跑 EXIT 0 終於綠。
+
+**致命後果若漏 double-apply**：engine restart → sqlx migrate 跑 V114 → 表已存在含 twin → 重演 R2 abort → **migration 鏈卡死、engine 起不來**。R2 若沒驗 double-apply 直接 deploy，下次 restart 全系統掛。
+
+**How to apply（升級）**：
+1. **idempotency double-apply 是強制 gate 不是可選** — CLAUDE.md §Data 已寫「applying twice」，但實務上容易因 first-apply PASS 就宣告 done。本案三輪每輪都是 double-apply（或更早 first-apply）抓的，缺一不可。
+2. **first-apply PASS 只證「fresh DB 能建」，不證「re-apply 安全」** — 任何建 cross-run 持久物件（compressed twin / MV / sequence / 其他 migration 副產物）的 migration，re-apply 路徑與 first-apply 路徑不同，必分別驗。
+3. **TimescaleDB landmine**：compressed hypertable + column-level GRANT 是地雷組合（V114 是全 repo 首例）；compressed twin 無 base table 的非壓縮 column，column-level grant/DDL 傳播會撞。避法：column-level GRANT 包 `EXCEPTION WHEN undefined_column` 或改 table-level GRANT + trigger。
+4. **dirty 殘留必清**：psql -f dry-run apply 後 table + twin 留在 DB 但不進 `_sqlx_migrations`；每輪 re-test 前 operator 須 `DROP TABLE ... CASCADE` 清 twin，否則重撞同 error。
+5. **正式 record 路徑**：dry-run 用 psql -f 不寫 `_sqlx_migrations`；deploy posture `OPENCLAW_AUTO_MIGRATE=0`（deliberate）下，正式記錄 = 暫設 AUTO_MIGRATE=1 → restart（migrator Applied(N) 記 checksum）→ 還原 0。checksum-safe 因從未 sqlx-applied（區別於 2026-05-02 P0 hash-drift incident 需 repair_migration_checksum）。
