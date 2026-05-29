@@ -3991,3 +3991,10 @@ Review 對象：2 個新 cron script（install + daily wrapper）851 LOC，Stage
 3. **install echo vs wrapper reality cross-check 是 M11 reproducible LOW**：2026-05-28 review 點 #6 已 catch 一次（loopback echo 誤導），本 round 又 catch line 143 alert_type echo drift。任何改 emit string 的 cron PR，必 grep install script 全部 echo banner（不只 DRY-RUN block）找舊 string 殘留：`grep -nE "<old_alert_type>|<old_event_string>" install_*.sh`。
 
 **Report**：本次回 main session 直述（E2 不寫 report .md per 指示）
+
+## 2026-05-29 — P2-09 Guardian scoring const extraction (v80 cold audit Wave 3)
+- E1 chose Option B: kept Guardian scoring weights as INVARIANT `const` (fail-closed safety floor) not RiskConfig-tunable. APPROVE.
+- Behavior-preserving verified: all 11 consts == original literals (0.4/0.3/0.4/0.15/0.35, 2.0/1.0, 0.3, 1.0). Zero numeric drift.
+- Option B justified: GuardianConfig threshold fields (max_leverage etc.) ARE config-derived — confirmed wiring at tick_pipeline/pipeline_config.rs:88 + event_consumer/setup.rs:63 build GuardianConfig from RiskConfig.limits.leverage_max / anti_cluster.max_same_direction via apply_risk_snapshot hot-reload. PA's cited "lines 26-32" = struct fields already tunable; real literals are scoring weights inside review(). E1's read correct.
+- Lock tests non-tautological: test_scoring_behavior_locked drives actual review() per-path (Default max_lev=20: lev30→ratio1.5 modify, lev50→ratio2.5 reject) — pins behavior not just const equality. 8/8 guardian::tests pass (Mac advisory).
+- Direct fix: bybit_rest_client.rs RateLimitGroup Order/Position/Account comment 10→20 req/s per UID (Bybit V5 correct; backoff logic threshold-based, comment-only). cargo check -p openclaw_engine clean.
