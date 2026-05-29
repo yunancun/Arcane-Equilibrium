@@ -175,6 +175,24 @@ pub enum PendingOrderEvent {
         reason: String,
         ts_ms: u64,
     },
+    /// P1-110017-POSITION-DRIFT-CLOSE-LOOP：交易所對 reduce-only 平倉回
+    /// 110017「current position is zero」，代表本地 persisted 倉與交易所
+    /// position truth 漂移（本地殘倉 + 交易所已平）。dispatch task 在 NoOp
+    /// 消費端確認 `is_close + is_primary + ret_code==110017` 後發此事件，
+    /// 通知 event consumer 把本地倉收斂為 flat（remove + clear pending），
+    /// 斷開「每 tick 重發 reduce-only close → 110017」自持迴圈。
+    ///
+    /// 為什麼需獨立事件而非沿用 DispatchFailed：DispatchFailed 走的是
+    /// structural/transient 終態的「平倉失敗」語意（保留本地倉等 sweep）；
+    /// 110017 相反 — 交易所確認倉已不在，本地必須跟隨交易所 flat。
+    /// 僅 110017 觸發；110001/110009 維持原 NoOp 不收斂行為（不回歸）。
+    ExchangeZeroClose {
+        order_link_id: String,
+        symbol: String,
+        is_long: bool,
+        strategy: String,
+        ts_ms: u64,
+    },
 }
 
 /// Dependencies bundle for the event consumer (W1 fix: avoids 9+ parameter function).

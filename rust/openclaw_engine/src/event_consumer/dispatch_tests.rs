@@ -224,6 +224,30 @@ fn test_classify_position_not_found_is_noop() {
 }
 
 #[test]
+fn test_classify_110017_reduce_only_reject_is_noop() {
+    // P1-110017-POSITION-DRIFT-CLOSE-LOOP：110017「current position is zero」
+    // 由 Structural 改為 NoOp（同 110001/110009 平倉時倉位已不在族）。
+    // 為什麼：舊 `_ => Structural` 使本地殘倉 + 交易所已平的漂移倉每 tick
+    // 重發 reduce-only close → 110017 → 倉永不刪 → 自持迴圈。NoOp + 消費端
+    // 收斂才能斷迴圈。
+    let e = biz(110017, "current position is zero");
+    assert_eq!(classify_dispatch_error(&e), DispatchOutcome::NoOp);
+}
+
+#[test]
+fn test_classify_110001_110009_unchanged_noop_no_regression() {
+    // 回歸守衛：主修只動 110017，110001/110009 必須維持原 NoOp 分類。
+    assert_eq!(
+        classify_dispatch_error(&biz(110001, "order not exists")),
+        DispatchOutcome::NoOp
+    );
+    assert_eq!(
+        classify_dispatch_error(&biz(110009, "position idx not match")),
+        DispatchOutcome::NoOp
+    );
+}
+
+#[test]
 fn test_classify_insufficient_balance_is_structural() {
     let e = biz(110012, "insufficient available balance");
     assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
@@ -620,4 +644,155 @@ fn test_close_attempt_timeout_constant_is_500ms() {
 fn test_close_dispatch_timeout_error_is_transient() {
     let e = close_dispatch_timeout_error(CLOSE_ATTEMPT_TIMEOUT_MS);
     assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Transient);
+}
+
+// -----------------------------------------------------------------
+// P1-110017-POSITION-DRIFT-CLOSE-LOOP：send_exchange_zero_close guard tests
+// 110017 reduce-only close → ExchangeZeroClose 收斂事件的觸發/抑制守衛
+// -----------------------------------------------------------------
+
+/// 構造一筆 reduce-only 平倉 OrderDispatchRequest（market），預設 is_primary。
+/// `is_primary` / `is_close` / `qty` 由參數覆寫以驗 guard。
+/// qty=0.0 = 全平 form（qty=0 + reduceOnly + closeOnTrigger）；qty>0 = partial
+/// reduce-only close（用於 C-1 安全測試，BB 要求此情況收 110017 絕不收斂）。
+fn close_dispatch_req_for_zero(is_primary: bool, is_close: bool, qty: f64) -> OrderDispatchRequest {
+    OrderDispatchRequest {
+        symbol: "TRXUSDT".into(),
+        is_long: true,
+        qty,
+        price: 0.342,
+        // RUST-DOUBLE-PREFIX-1：PHYS-LOCK reason 須經 build_risk_close_tag 構造，
+        // 不可裸寫 "risk_close:phys_lock_" literal（guard test 強制）。
+        strategy: crate::tick_pipeline::build_risk_close_tag("phys_lock_gate4_giveback"),
+        paper_fill_ts: 1_700_000_000_000,
+        is_close,
+        order_link_id: "oc_risk_dm_zero".into(),
+        decision_lease_id: None,
+        is_primary,
+        stop_loss: None,
+        take_profit: None,
+        context_id: "ctx-trx".into(),
+        order_type: "market".into(),
+        limit_price: None,
+        time_in_force: None,
+        maker_timeout_ms: None,
+        close_maker_audit: None,
+        reference_price: Some(0.342),
+        reference_ts_ms: Some(1_700_000_000_000),
+        reference_source: Some("dispatch_last_fallback".into()),
+        spine_order_plan_id: None,
+        spine_decision_id: None,
+        spine_verdict_id: None,
+        spine_stub_report_id: None,
+        intent_id: None,
+    }
+}
+
+#[test]
+fn test_send_exchange_zero_close_emits_on_primary_close_110017() {
+    // 主路徑：primary reduce-only close + 110017 → 發 ExchangeZeroClose，
+    // 攜帶 symbol / is_long / strategy / order_link_id 供 consumer 本地收斂。
+    let (tx, mut rx) = mpsc::unbounded_channel::<PendingOrderEvent>();
+    let req = close_dispatch_req_for_zero(true, true, 0.0);
+    let err = biz(110017, "current position is zero");
+    send_exchange_zero_close(&tx, &req, &err);
+
+    match rx.try_recv().expect("ExchangeZeroClose event") {
+        PendingOrderEvent::ExchangeZeroClose {
+            order_link_id,
+            symbol,
+            is_long,
+            strategy,
+            ..
+        } => {
+            assert_eq!(order_link_id, "oc_risk_dm_zero");
+            assert_eq!(symbol, "TRXUSDT");
+            assert!(is_long);
+            assert_eq!(
+                strategy,
+                crate::tick_pipeline::build_risk_close_tag("phys_lock_gate4_giveback")
+            );
+        }
+        other => panic!("expected ExchangeZeroClose, got {other:?}"),
+    }
+}
+
+#[test]
+fn test_send_exchange_zero_close_suppressed_for_110001() {
+    // 回歸守衛：110001（order not exists）雖也是 NoOp，但不觸發本地收斂事件
+    // （只有 110017 = exchange position zero 才收斂）。
+    let (tx, mut rx) = mpsc::unbounded_channel::<PendingOrderEvent>();
+    let req = close_dispatch_req_for_zero(true, true, 0.0);
+    send_exchange_zero_close(&tx, &req, &biz(110001, "order not exists"));
+    send_exchange_zero_close(&tx, &req, &biz(110009, "position idx not match"));
+    assert!(
+        rx.try_recv().is_err(),
+        "110001/110009 must NOT emit ExchangeZeroClose (no regression on existing NoOp)"
+    );
+}
+
+#[test]
+fn test_send_exchange_zero_close_suppressed_for_non_primary() {
+    // 安全 guard：paper shadow（is_primary=false）即使收 110017 也不收斂
+    // 真倉（shadow 路徑 fire-and-forget，無交易所倉位）。
+    let (tx, mut rx) = mpsc::unbounded_channel::<PendingOrderEvent>();
+    let req = close_dispatch_req_for_zero(false, true, 0.0);
+    send_exchange_zero_close(&tx, &req, &biz(110017, "current position is zero"));
+    assert!(
+        rx.try_recv().is_err(),
+        "non-primary (paper shadow) must NOT emit ExchangeZeroClose"
+    );
+}
+
+#[test]
+fn test_send_exchange_zero_close_suppressed_for_non_close() {
+    // 安全 guard：非 close（open）方向即使理論上收 110017 也不收斂 —— 收斂
+    // 僅限 reduce-only close 路徑（誤刪真倉是災難，保守 fail-closed）。
+    let (tx, mut rx) = mpsc::unbounded_channel::<PendingOrderEvent>();
+    let req = close_dispatch_req_for_zero(true, false, 0.0);
+    send_exchange_zero_close(&tx, &req, &biz(110017, "current position is zero"));
+    assert!(
+        rx.try_recv().is_err(),
+        "non-close intent must NOT emit ExchangeZeroClose"
+    );
+}
+
+#[test]
+fn test_send_exchange_zero_close_suppressed_for_qty_gt_zero_partial_close() {
+    // BB MANDATORY GUARD C-1 安全測試（最關鍵）：partial reduce-only close
+    // （qty>0 但 > 實際倉量）收到 110017 時，交易所端倉**可能仍在**——110017
+    // 此情況是 (c) qty>position size 觸發，不是「無倉」。若收斂 = 誤刪真倉
+    // （災難）。故 qty>0 的 primary reduce-only close + 110017 必須 **不** 發
+    // ExchangeZeroClose（本地倉保留，維持 NoOp/no-retry 即可）。
+    //
+    // 對抗驗證：若 send_exchange_zero_close 拿掉 `is_qty_zero_full_close` guard，
+    // 此測試應 FAIL（會誤發收斂事件）——證明 qty==0 guard 是有效防誤刪屏障。
+    let (tx, mut rx) = mpsc::unbounded_channel::<PendingOrderEvent>();
+    let req = close_dispatch_req_for_zero(true, true, 5.0); // qty>0 partial close
+    send_exchange_zero_close(&tx, &req, &biz(110017, "current position is zero"));
+    assert!(
+        rx.try_recv().is_err(),
+        "qty>0 partial reduce-only close + 110017 must NOT converge (position may still exist; C-1 anti-mis-delete guard)"
+    );
+}
+
+#[test]
+fn test_send_exchange_zero_close_emits_only_on_qty_zero_full_close() {
+    // 正反對照：同為 primary reduce-only close + 110017，qty==0 全平 form 收斂、
+    // qty>0 partial close 不收斂。鎖定「qty==0 form 是收斂的 mandatory 前提」。
+    let err = biz(110017, "current position is zero");
+
+    let (tx0, mut rx0) = mpsc::unbounded_channel::<PendingOrderEvent>();
+    send_exchange_zero_close(&tx0, &close_dispatch_req_for_zero(true, true, 0.0), &err);
+    assert!(
+        rx0.try_recv().is_ok(),
+        "qty==0 full-close form must converge"
+    );
+
+    let (tx1, mut rx1) = mpsc::unbounded_channel::<PendingOrderEvent>();
+    send_exchange_zero_close(&tx1, &close_dispatch_req_for_zero(true, true, 5.0), &err);
+    assert!(
+        rx1.try_recv().is_err(),
+        "qty>0 partial close must NOT converge"
+    );
 }

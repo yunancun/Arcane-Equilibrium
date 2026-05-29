@@ -1002,3 +1002,103 @@ fn test_exchange_close_success_enqueues_before_local_flatten() {
         "pending_close must be set after successful primary enqueue"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// P1-110017-POSITION-DRIFT-CLOSE-LOOP：本地收斂迴歸測試
+// 本地殘倉 + reduce-only close 收到 110017（交易所 zero）→ converge → 本地倉
+// remove + pending clear + 不再重發。這是 ~1.4/sec 自持迴圈的 regression 守衛。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// 迴圈 regression：模擬 PA RCA 的 TRXUSDT 漂移倉場景 —— 本地 persisted 有倉、
+/// pending_close 已標、交易所端已平（110017）。converge_exchange_zero_close 後
+/// 應 (1) 本地倉被 remove (2) pending_close 被 clear，使下一 tick 的 close 決策
+/// 找不到倉可平 → 不再重發 reduce-only close（斷迴圈）。
+#[test]
+fn test_converge_exchange_zero_close_removes_drift_position_and_breaks_loop() {
+    let mut pipeline = TickPipeline::with_kind(&["TRXUSDT"], 10_000.0, PipelineKind::Demo);
+    // 種一個本地殘倉（模擬 grid_close 後未被清除的漂移倉）。
+    pipeline
+        .paper_state
+        .apply_fill("TRXUSDT", true, 2907.0, 0.34204, 0.0, 1_000, "grid_close_short");
+    pipeline.paper_state.set_latest_price("TRXUSDT", 0.34);
+    // 模擬已派發 reduce-only close（pending_close 標記，正是迴圈自洽佐證）。
+    pipeline.pending_close_symbols.insert("TRXUSDT".to_string());
+
+    assert!(
+        pipeline.paper_state.get_position("TRXUSDT").is_some(),
+        "前置：本地漂移倉存在"
+    );
+
+    // 交易所回 110017 → consumer 觸發收斂。
+    let removed = pipeline.converge_exchange_zero_close("TRXUSDT", true, 1_700_000_000_000);
+
+    assert!(removed, "110017 收斂必須回報移除了本地漂移倉");
+    assert!(
+        pipeline.paper_state.get_position("TRXUSDT").is_none(),
+        "收斂後本地倉必須被移除（跟隨交易所 flat）"
+    );
+    assert!(
+        !pipeline.pending_close_symbols.contains("TRXUSDT"),
+        "收斂後 pending_close flag 必須清除（斷自洽迴圈）"
+    );
+
+    // 斷迴圈驗證：生產迴圈源頭是 step_6_risk_checks 迭代 paper_state.positions()
+    // 對每個倉重評 close 決策（PA RCA §1 步驟 1-2）。收斂後 positions() 不再含
+    // TRXUSDT → 風控迭代選不到它 → 不再產生 close 決策 → 不再 enqueue
+    // reduce-only close。這正是迴圈被打斷的根本證明。
+    let open_symbols: Vec<String> = pipeline
+        .paper_state
+        .positions()
+        .iter()
+        .map(|p| p.symbol.clone())
+        .collect();
+    assert!(
+        !open_symbols.iter().any(|s| s == "TRXUSDT"),
+        "收斂後風控迭代源 positions() 不應再含漂移倉 → 迴圈源頭已斷"
+    );
+    assert!(
+        open_symbols.is_empty(),
+        "本案唯一倉收斂後 positions() 應為空"
+    );
+}
+
+/// 對抗驗證（收斂邏輯關掉的反例）：若 NOT 收斂（即不呼 converge，只清 lease），
+/// 本地殘倉仍在、pending_close 經 R-02 reconcile 也清不掉（因 R-02 只信本地
+/// positions()，倉還在 → flag 保留），下一 tick 仍會重發 reduce-only close。
+/// 此測試證明上面的收斂測試「真的有效」——沒有收斂時迴圈確實持續。
+#[test]
+fn test_without_convergence_drift_position_and_loop_persist() {
+    let mut pipeline = TickPipeline::with_kind(&["TRXUSDT"], 10_000.0, PipelineKind::Demo);
+    pipeline
+        .paper_state
+        .apply_fill("TRXUSDT", true, 2907.0, 0.34204, 0.0, 1_000, "grid_close_short");
+    pipeline.paper_state.set_latest_price("TRXUSDT", 0.34);
+    pipeline.pending_close_symbols.insert("TRXUSDT".to_string());
+
+    // 不收斂：只跑 R-02 reconcile（修前唯一的「清理」機制）。
+    pipeline.reconcile_pending_exchange_orders();
+
+    // 反例斷言：R-02 只信本地 positions()，倉仍在 → flag 仍在 → 漂移倉殘留。
+    assert!(
+        pipeline.paper_state.get_position("TRXUSDT").is_some(),
+        "未收斂時 R-02 reconcile 清不掉漂移倉（只信本地 positions）"
+    );
+    assert!(
+        pipeline.pending_close_symbols.contains("TRXUSDT"),
+        "未收斂時 pending_close flag 因本地倉仍在而保留（迴圈自洽）"
+    );
+
+    // 迴圈源頭仍在：風控迭代源 positions() 仍含 TRXUSDT → 下一 tick 仍會對它
+    // 重評 close → 重新 enqueue reduce-only close → 再收 110017（迴圈持續）。
+    // 這證明上面收斂測試的「positions() 變空」斷言確實是迴圈是否續存的關鍵。
+    let open_symbols: Vec<String> = pipeline
+        .paper_state
+        .positions()
+        .iter()
+        .map(|p| p.symbol.clone())
+        .collect();
+    assert!(
+        open_symbols.iter().any(|s| s == "TRXUSDT"),
+        "未收斂時 positions() 仍含漂移倉 → 迴圈源頭未斷（收斂測試有效）"
+    );
+}

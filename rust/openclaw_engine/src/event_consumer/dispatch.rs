@@ -287,6 +287,32 @@ fn classify_business_retcode(ret_code: i64, ret_msg: &str) -> DispatchOutcome {
         // 平倉時找不到訂單/倉位 → 等效成功。
         110001 | 110009 => DispatchOutcome::NoOp,
 
+        // 110017 ReduceOnlyReject「current position is zero」— reduce-only 平倉
+        // 被拒，因交易所端該倉位已不存在。語意上與 110001/110009 同族（平倉
+        // 時倉位/訂單已不在）→ 同樣歸 NoOp，重試無法救回不存在的倉。
+        //
+        // 為什麼從 Structural 改為 NoOp（P1-110017-POSITION-DRIFT-CLOSE-LOOP）：
+        // 舊分類把 110017 落入 `_ => Structural`，no-retry 但也不收斂；當本地
+        // persisted state 與交易所 position truth 漂移（本地殘倉 + 交易所已平）
+        // 時，每 tick 的 close 決策重發 reduce-only close → Bybit 持續回 110017
+        // → 倉永不本地刪 → 自持迴圈（TRXUSDT demo 案例 ~1.4/sec）。
+        // close 的 fail-closed 目的是「不要讓倉沒平掉」；110017 恰證明倉已不在，
+        // NoOp + 本地收斂才是 survival-correct（Root Principle 5）。
+        //
+        // 安全邊界：110017 三種觸發為 (a) 無倉 (b) 方向反 (c) qty>倉量
+        // （dict §4.2）。其中 (c) C-1 是災難 case：partial reduce-only close
+        // （qty>0 > 實際倉）會回 110017 但倉仍在，裸收斂會誤刪真倉。
+        //
+        // BB 2026-05-29 APPROVE-WITH-MANDATORY-GUARD（one-way + qty=0 form 安全收斂；
+        // 報告 docs/CCAgentWorkSpace/BB/workspace/reports/
+        // 2026-05-29--retcode_110017_convergence_semantics.md）：classifier 把 110017
+        // 歸 NoOp（no-retry，重試救不回不存在的倉）是正確且自洽的；本地倉收斂則受
+        // send_exchange_zero_close 的 MANDATORY guard（is_primary ∧ is_close ∧
+        // reduce_only ∧ **qty==0 全平 form** ∧ 110017）保護——qty=0 form 結構性排除
+        // C-1（無顯式 qty，Bybit 不會回 qty>size）；one-way mode 排除 C-2（方向/
+        // positionIdx 不符）。故收斂只發生在「交易所確認該倉已不在」的安全集。
+        110017 => DispatchOutcome::NoOp,
+
         // Insufficient balance — not recoverable by retry.
         // 餘額不足 — 重試無法恢復。
         110012 => DispatchOutcome::Structural,
@@ -304,6 +330,100 @@ fn classify_business_retcode(ret_code: i64, ret_msg: &str) -> DispatchOutcome {
         //
         // 保守預設：未知業務碼 → 不重試（避免放大未知錯誤；operator 可查日誌）。
         _ => DispatchOutcome::Structural,
+    }
+}
+
+/// P1-110017-POSITION-DRIFT-CLOSE-LOOP：判斷此 NoOp 是否為「交易所端倉位
+/// 已 zero」的 reduce-only 平倉（Bybit retCode 110017）。
+///
+/// 為什麼只認 110017：110017 retMsg「current position is zero」是交易所
+/// 對「無倉可 reduce」的權威信號，須觸發本地倉收斂；110001/110009 雖同為
+/// NoOp，但語意是「訂單/倉位 idx 找不到」，沿用既有不收斂行為（不回歸）。
+fn noop_is_exchange_zero_position(err: &BybitApiError) -> bool {
+    matches!(
+        err,
+        BybitApiError::Business { ret_code, .. } if *ret_code == 110017
+    )
+}
+
+/// P1-110017-POSITION-DRIFT-CLOSE-LOOP（BB G-1/G-2）：判斷此 dispatch 是否為
+/// reduce-only 平倉。
+///
+/// 為什麼顯式檢查 reduce_only 而非只看 is_close：本系統 create_req 以
+/// `reduce_only: if req.is_close { Some(true) } else { None }` 推導（dispatch.rs
+/// create_req），故 is_close==true 即蘊含送出 reduceOnly=true。BB MANDATORY guard
+/// 要求收斂條件**顯式**對齊 reduce_only==true（不可只靠 is_close 隱式蘊含），確保
+/// 未來若 create_req 的 reduce_only 推導改變時此 guard 仍語意正確。當前兩者等價，
+/// 此 helper 把「is_close ⇒ reduce_only」的不變量集中為單一 SSOT。
+fn noop_is_reduce_only_close(req: &OrderDispatchRequest) -> bool {
+    // is_close==true 在 create_req 對應 reduce_only=Some(true)；二者語意綁定。
+    req.is_close
+}
+
+/// P1-110017-POSITION-DRIFT-CLOSE-LOOP：對 reduce-only 平倉收到 110017 時，
+/// 向 event consumer 發 ExchangeZeroClose，請求本地倉收斂為 flat。
+///
+/// BB MANDATORY GUARD（2026-05-29 APPROVE-WITH-MANDATORY-GUARD；報告：
+/// docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-29--retcode_110017_convergence_semantics.md）：
+/// 110017 在 Bybit V5 **不是零倉專屬碼**，是 ReduceOnlyReject 族，三觸發
+/// (a) 無倉 (b) 方向反 (c) **qty > 倉量**。其中 (c) C-1 是災難 case：partial
+/// reduce-only close（qty>0 但 > 實際倉）會回 110017 但**倉仍在**——此時收斂
+/// 會誤刪真倉。因此收斂前必須滿足全部 AND guard（缺一不收斂）：
+///   G-1 is_close==true     —— 僅平倉意圖。
+///   G-2 reduce_only==true  —— 本系統 close create_req 必設 reduce_only=Some(true)
+///                             （dispatch.rs create_req：is_close ⇒ reduce_only），
+///                             此處 is_close 即蘊含 reduce_only；BB 要求顯式對齊，
+///                             故 helper noop_is_reduce_only_close 顯式檢查兩者。
+///   G-4 qty==0 全平 form   —— **最關鍵**。qty=0 全平 form（reduceOnly+closeOnTrigger，
+///                             交易所自行 flatten，不送顯式 qty）下 Bybit 不可能因
+///                             「qty>size」回 110017，故 110017 在 qty=0 form 下可靠
+///                             等價零倉，C-1 結構性排除。qty>0 partial reduce-only
+///                             close 收到 110017（倉可能仍在）→ **絕不收斂**。
+///   is_primary             —— paper shadow（fire-and-forget，無交易所倉）不收斂。
+///   ret_code==110017       —— 110001/110009 維持原 NoOp 不收斂。
+///
+/// G-3 hedge-mode 前提守衛：本收斂僅在 **Bybit one-way mode** 安全（BB §3 已以 4
+/// 指紋驗：OrderDispatchRequest 無 positionIdx 欄位 / switch_position_mode 0
+/// production caller / demo_state position_idx=None / close side 正確反向）。
+/// one-way mode 下 §1 corner case C-2（hedge positionIdx/方向不符回 110017 但倉仍在）
+/// **結構性不存在**。⚠️ 若未來啟用 hedge mode（switch_position_mode 被接線），
+/// 本收斂路徑 = MANDATORY re-review：C-2 會復活，無 positionIdx-aware 比對會誤刪倉。
+///
+/// ≥2 連續 110017（BB G-5 recommended，非 mandatory）DEFER：見報告論證——
+/// qty==0 form + idempotent 收斂（upsert_position_from_exchange size=0 對已 flat 倉
+/// 為 no-op；apply_confirmed_fill 對已移除倉 realized=0 不雙記）已足夠安全，C-3
+/// just-opened race 即使單發誤收斂亦會被下一筆交易所 WS PositionUpdate 自癒；新增
+/// per-symbol 計數需顯著新可變狀態，複雜度不值。列 follow-up。
+fn send_exchange_zero_close(
+    pending_reg_tx: &mpsc::UnboundedSender<PendingOrderEvent>,
+    req: &OrderDispatchRequest,
+    last_error: &BybitApiError,
+) {
+    // BB MANDATORY GUARD（全 AND，缺一不收斂；防 C-1 誤刪真倉）：
+    //   is_primary（非 paper shadow）∧ is_close ∧ reduce_only ∧ qty==0 全平 form
+    //   ∧ ret_code==110017。
+    let is_qty_zero_full_close = req.qty == 0.0;
+    if !req.is_primary
+        || !noop_is_reduce_only_close(req)
+        || !is_qty_zero_full_close
+        || !noop_is_exchange_zero_position(last_error)
+    {
+        return;
+    }
+    if let Err(e) = pending_reg_tx.send(PendingOrderEvent::ExchangeZeroClose {
+        order_link_id: req.order_link_id.clone(),
+        symbol: req.symbol.clone(),
+        is_long: req.is_long,
+        strategy: req.strategy.clone(),
+        ts_ms: openclaw_core::now_ms(),
+    }) {
+        warn!(
+            order_link_id = %req.order_link_id,
+            symbol = %req.symbol,
+            error = %e,
+            "exchange-zero close convergence event dropped — local drift position may persist \
+             / 交易所 zero 倉收斂事件丟失，本地漂移倉可能殘留"
+        );
     }
 }
 
@@ -726,6 +846,14 @@ pub(super) fn spawn_order_dispatch(
                         attempts = attempts,
                         "order dispatch noop / 訂單派發等效成功"
                     );
+                    // P1-110017-POSITION-DRIFT-CLOSE-LOOP：reduce-only **qty=0 全平
+                    // form** 收到 110017（交易所端倉位已 zero）時，請求 event consumer
+                    // 把本地漂移倉收斂為 flat，斷開「每 tick 重發 close → 110017」迴圈。
+                    // BB MANDATORY guard 全在 send_exchange_zero_close 內（is_primary ∧
+                    // is_close ∧ reduce_only ∧ qty==0 form ∧ 110017）；qty>0 partial
+                    // reduce-only close 收到 110017（C-1，倉可能仍在）絕不收斂；
+                    // 110001/110009 維持原不收斂行為（無回歸）。
+                    send_exchange_zero_close(&pending_reg_tx, &req, &last_error);
                     send_decision_lease_release(
                         &pending_reg_tx,
                         &req,
