@@ -24,6 +24,31 @@ mod spawn_backoff;
 mod startup;
 mod tasks;
 
+// MODULE_NOTE
+// 模塊用途：bin crate（main.rs + sibling `mod`）測試共用的 env-mutating 互鎖。
+// 主要函數：guard() → MutexGuard，所有改 process env 的 bin 測試統一鎖它。
+// 依賴：std::sync::Mutex。硬邊界：僅涵蓋 bin 測試 binary。
+//
+// 為什麼需要本 module（P3-OPS-2-CI-FLAKINESS-BIN-CRATE-LOCK）：
+//   bin crate 是與 lib 不同的 compilation unit + 不同測試 process，無法存取
+//   lib 的 `crate::test_env_lock`（pub(crate) 對 bin 不可見）。bin 內原本
+//   main_boot_tasks 與 live_auth_watcher_tests 各自宣告獨立 `static ENV_GUARD`：
+//   A module 持自己的鎖不會排除 B module 持「另一把」鎖 → 兩者同時 mutate
+//   process-global env（set_var/remove_var）仍 race（latent UB）。本 module
+//   提供 bin 內單一入口，兩個 `#[cfg(test)]` module 統一鎖它，跨 module 真正
+//   串行。對齊 lib.rs 的 `test_env_lock` pattern。
+#[cfg(test)]
+pub(crate) mod test_env_lock {
+    /// 全 bin 測試 binary 唯一的 env-mutating 測試互鎖。
+    static ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// 取共用鎖；poisoned（前一測試 panic 留下）時用 `into_inner` 強解 —
+    /// 測試場景下毒化不影響 prod，且強解才能讓後續測試繼續串行而非連鎖 panic。
+    pub(crate) fn guard() -> std::sync::MutexGuard<'static, ()> {
+        ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}
+
 use openclaw_engine::bybit_rest_client::{live_bybit_environment, BybitEnvironment};
 use openclaw_engine::config::{ConfigManager, ConfigStore};
 use openclaw_engine::ipc_server::{

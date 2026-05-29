@@ -637,11 +637,11 @@ fn try_send_reload(
 #[cfg(test)]
 mod edge_reload_tests {
     use super::*;
-    use std::sync::Mutex;
 
-    /// Serialise tests that mutate ENV_EDGE_RELOAD_FLAG / interval env-var.
-    /// 序列化會 mutate env 變數的測試。
-    static ENV_GUARD: Mutex<()> = Mutex::new(());
+    // P3-OPS-2-CI-FLAKINESS-BIN-CRATE-LOCK：移除原 module-local `static ENV_GUARD`，
+    // 改用 bin crate 共用鎖 `crate::test_env_lock::guard()`。原本 main_boot_tasks 與
+    // live_auth_watcher_tests 各自一把獨立鎖在同一 bin 測試 binary 內不互斥 →
+    // process-global env mutation 仍 race；共用單鎖才能跨 module 真正串行。
 
     fn make_cmd_channel() -> (
         tokio::sync::mpsc::UnboundedSender<PipelineCommand>,
@@ -660,7 +660,7 @@ mod edge_reload_tests {
 
     #[tokio::test]
     async fn spawner_returns_none_when_env_disabled() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         std::env::remove_var(ENV_EDGE_RELOAD_FLAG);
         let cancel = CancellationToken::new();
         let (paper_tx, _paper_rx) = make_cmd_channel();
@@ -673,7 +673,7 @@ mod edge_reload_tests {
 
     #[tokio::test]
     async fn spawner_rejects_non_strict_one_values() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         for val in ["true", "yes", "on", "0", " 1", "1 "] {
             std::env::set_var(ENV_EDGE_RELOAD_FLAG, val);
             let cancel = CancellationToken::new();
@@ -691,7 +691,7 @@ mod edge_reload_tests {
 
     #[tokio::test]
     async fn spawner_returns_none_when_no_pipelines_bound() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
         let cancel = CancellationToken::new();
         let result = spawn_edge_estimates_reloader_if_enabled(None, None, None, &cancel);
@@ -704,7 +704,7 @@ mod edge_reload_tests {
 
     #[tokio::test]
     async fn spawner_returns_sender_when_enabled_with_pipeline() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
         std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "60");
         let cancel = CancellationToken::new();
@@ -720,7 +720,7 @@ mod edge_reload_tests {
 
     #[tokio::test]
     async fn manual_trigger_fans_out_to_bound_pipelines() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
         std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "3600");
         let cancel = CancellationToken::new();
@@ -762,7 +762,7 @@ mod edge_reload_tests {
     /// 3. trigger 後 demo 收到 ReloadEdgeEstimates（並非 boot-time 值捕獲）
     #[tokio::test]
     async fn manual_trigger_reads_demo_slot_dynamically() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
         std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "3600");
         let cancel = CancellationToken::new();
@@ -818,7 +818,7 @@ mod edge_reload_tests {
 
     #[tokio::test]
     async fn manual_trigger_reads_live_slot_dynamically() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
         std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "3600");
         let cancel = CancellationToken::new();
@@ -856,7 +856,7 @@ mod edge_reload_tests {
 
     #[tokio::test]
     async fn manual_trigger_coalesces_rapid_requests() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
         std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "3600");
         let cancel = CancellationToken::new();
@@ -916,7 +916,7 @@ mod edge_reload_tests {
 
     #[test]
     fn resolve_reload_interval_respects_env_override() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "300");
         let interval = resolve_reload_interval();
         assert_eq!(interval, Duration::from_secs(300));
@@ -925,7 +925,7 @@ mod edge_reload_tests {
 
     #[test]
     fn resolve_reload_interval_floors_below_minimum() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         for sub_floor in ["0", "1", "30", "59"] {
             std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, sub_floor);
             let interval = resolve_reload_interval();
@@ -940,7 +940,7 @@ mod edge_reload_tests {
 
     #[test]
     fn resolve_reload_interval_falls_back_on_garbage() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         std::env::set_var(ENV_EDGE_RELOAD_INTERVAL_SECS, "not_a_number");
         let interval = resolve_reload_interval();
         assert_eq!(interval, DEFAULT_EDGE_RELOAD_INTERVAL);
@@ -949,7 +949,7 @@ mod edge_reload_tests {
 
     #[test]
     fn is_edge_reload_enabled_strict_one_only() {
-        let _guard = ENV_GUARD.lock().expect("env guard not poisoned");
+        let _guard = crate::test_env_lock::guard();
         std::env::set_var(ENV_EDGE_RELOAD_FLAG, "1");
         assert!(is_edge_reload_enabled());
         for val in ["true", "0", "yes", " 1", "1 ", ""] {

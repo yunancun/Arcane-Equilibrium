@@ -59,16 +59,27 @@ pub fn btc_lead_lag_source_tier_for_mode(diagnostic_mode: bool) -> &'static str 
     }
 }
 
+/// Layer 2 fence：BtcLeadLagProducer spawn gate（archive policy，2026-05-23 起）。
+///
+/// 為什麼只認 diagnostic env：btc_lead_lag 是 cross-asset 市場數據診斷 producer，
+/// 非交易路徑。spec v1.2 §6.2 的「paper-only fence」已 archived（main.rs:1060-1067
+/// 記錄 policy）：自 2026-05-23，`OPENCLAW_ENABLE_PAPER=1` 不再觸發 spawn，paper-only
+/// legacy runtime 一律 archived，唯一合法的顯式 spawn gate 是
+/// `OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC=1`（Stage 0R diagnostic，rows 標
+/// `cross_asset_btc_lead_lag_diagnostic` non-promotional，AMD-2026-05-15-01 S2.2）。
+///
+/// 不變量：`has_demo` / `has_live` 在 archive policy 下不影響決策（任何 runtime shape
+/// 在無 diagnostic env 時都 SKIP spawn）。保留參數簽名只為與 main.rs caller + Layer 2
+/// fence 測試矩陣對齊（測試以各種 demo/live 組合驗證一律不 spawn）。
+///
+/// 退化修復（P3-BTCLEADLAG-FENCE-TEST-DRIFT）：原實作在此函數內部仍讀
+/// `OPENCLAW_ENABLE_PAPER`，`=1` 時回 true。main.rs 雖在 caller 層 warn「ignored」，
+/// 但真正的 spawn 決策仍呼叫本函數 → `PAPER=1` 實際上仍會 spawn（裝飾性 warn 不生效）。
+/// 此處移除 PAPER env 讀取，讓本函數本體即落實 archive policy。
 pub fn should_spawn_btc_lead_lag_producer(has_demo: bool, has_live: bool) -> bool {
-    if btc_lead_lag_diagnostic_mode_enabled() {
-        return true;
-    }
-
-    match std::env::var(OPENCLAW_ENABLE_PAPER_ENV) {
-        Ok(value) => value.trim() == "1",
-        Err(std::env::VarError::NotPresent) => !has_demo && !has_live,
-        Err(std::env::VarError::NotUnicode(_)) => false,
-    }
+    // archive policy：runtime shape 不參與決策，顯式消費避免 unused_variables。
+    let _ = (has_demo, has_live);
+    btc_lead_lag_diagnostic_mode_enabled()
 }
 
 #[cfg(test)]
