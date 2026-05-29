@@ -332,10 +332,12 @@ W3-B 14d ALT gate verdict（PA + PM if escalate）
 
 ### §6.4 close_maker_audit missing P1 — 必須在 Sprint 2 內 land 嗎？
 
-**PA verdict**：**屬 Sprint 1B follow-up 而非 Sprint 2 cross-cutting**
+> 2026-05-29 supersede note: cold-audit Package C reclassified this item as spec drift, not a missing runtime table. Canonical close-maker evidence is V094 `trading.fills.close_maker_attempt` + `close_maker_fallback_reason`, with writer/readers/healthchecks already on that surface. A separate `learning.close_maker_audit` table has zero writer/reader in source and must not be created as dead schema. Ref `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-29--cold_audit_pkgC_evidence_promotion_spec.md` §3.
+
+**PA verdict（historical, superseded 2026-05-29）**：**屬 Sprint 1B follow-up 而非 Sprint 2 cross-cutting**
 
 理由：
-- per QA 5/25 verify report：`learning.close_maker_audit` table NOT deployed PG empirical
+- per QA 5/25 verify report：`learning.close_maker_audit` table NOT deployed PG empirical（2026-05-29 PA recheck: true but non-actionable because the canonical surface is V094 `trading.fills`）
 - Sprint 1B audit 已標 P1 但 NOT BLOCKING Sprint 2 evidence path
 - AC-19 monitor 直接讀 `trading.fills`（close_maker_attempt / close_maker_fallback_reason 兩列已 land）—> 不依賴 close_maker_audit lineage table
 - close_maker_audit table 是 V094 SHOULD-FIX 而非 MUST-FIX；P1 carry-over D+5~D+15 內 land 不阻 Sprint 2 evidence

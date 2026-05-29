@@ -55,7 +55,7 @@
 - [三環境風控 config 獨立](feedback_env_config_independence.md) — paper/live/demo risk_config*.toml 故意分開，禁「純衛生」合併（2026-04-19）
 - [Shell 指令必須抗貼上](feedback_shell_paste_safety.md) — 給 operator 手貼的 shell 一律單行 one-liner，禁 heredoc / 多行 for / 複雜變數注引號；複雜邏輯寫檔案（2026-04-21）
 - [Rolling-window breach look-ahead bias (2026-04-24)](feedback_indicator_lookahead_bias.md) — `rolling(N).max()` 含 current bar → breach=「current 是 N-bar max」必然 mean-revert；任何 sweep/研究必並列 leak-free shift(1) 對比
-- [V### migration PG dry-run mandatory (2026-05-05)](feedback_v_migration_pg_dry_run.md) — Mac mock pytest + static review cannot catch PG runtime semantic (PL/pgSQL constraints, empirical reflection function output, schema drift); V055 5-round loop 教訓：必先 Linux PG empirical query 再 E1 IMPL 設計
+- [V### migration PG dry-run mandatory (2026-05-05 / +V114 2026-05-28)](feedback_v_migration_pg_dry_run.md) — Mac mock 抓不到 PG runtime semantic；V055 5-round + V114 3-round 教訓：先 Linux PG empirical；**idempotency double-apply 是 load-bearing gate（first-apply PASS ≠ re-apply 安全；TimescaleDB compressed-twin column-level GRANT 地雷）**
 - [注釋默認只寫中文 (2026-05-05)](feedback_chinese_only_comments.md) — 新代碼注釋默認只寫中文（廢除舊 bilingual mandate）；原有中英對照不主動清，修改時移除英文只保留中文；E2 不再要求英文版；token + LOC 成本顯著降低
 - [GUI sign-off SOP 必跑 node --check (2026-05-09)](feedback_gui_node_check_sop.md) — 前端 JS / inline-JS 變動 sign-off 強制 `node --check`；靜態 brace/paren/bracket diff = 0 不能代替；W-AUDIT-7c Round 1 governance-tab.js lexical scope shadow 證明 brace count 是盲區
 - [GitHub Actions cost policy (2026-05-09)](feedback_github_actions_cost.md) — Private repo 2000min/月免費；macOS 10x 倍率；macOS 不再 push-trigger，僅 PR + 週一 cron；同步寫入 `.codex/MEMORY.md`
@@ -66,8 +66,8 @@
 - [強制先評估 sub-agent 拆分](feedback_subagent_first.md) — 收到任務先思考能否拆成後台並行 sub-agent
 - [Sub-agent 可寫碼（2026-04-18 驗證通過）](feedback_subagent_code_writing_refusal.md) — 2026-04-07 refuse pattern 已解除，2/2 probe 成功；E1 可派並行 sub-agent 寫碼
 - [Meta-doc 改動用 git commit --only 隔絕 index race](feedback_git_commit_only_for_metadoc.md) — CLAUDE.md/TODO.md/docs/memory 等 meta-doc 必用 `git commit --only <file>`；multi-session 下 `git add + commit` 不安全（2026-04-23 同 session 吸收 operator WIP 兩次）
-- [多角色 adversarial review (2026-04-24)](feedback_multi_role_strategic_review.md) — 關鍵決策派 QC+FA+FM+PM 並行獨立 review；實證 EDGE-DIAG-1 Phase 2 catch 3 個 unique blind spots
-- [派 sub-agent 前 fetch + 查遠端 branch (2026-04-24)](feedback_fetch_before_dispatch.md) — Multi-agent 派發前必 `git fetch` + `git branch -r | grep <topic>`；G6-01 被重派教訓（隔壁已開 feature branch 做完）
+- [多角色 adversarial review (2026-04-24 / +grill×agent 2026-05-28)](feedback_multi_role_strategic_review.md) — 關鍵決策派並行獨立 review catch blind spots；新增 grill-me（互動質詢 operator）+ 獨立背景 agent → cross-verify 範式（Sprint 2 Q4 抓人直覺 vs agent 證據分歧）
+- [派 sub-agent 前 fetch + 查遠端 branch + git-log-grep ticket (2026-04-24 / +2026-05-28)](feedback_fetch_before_dispatch.md) — 派 IMPL 前必 `git fetch` + branch grep + **`git log --all | grep <ticket>`**；TODO Phase Banner 可 stale 數天（W2-B 已 merge 3 天仍標 pending 被重派）；dispatch prompt 留 NO-OP exit path
 - [Sub-agent IMPL DONE 必走 A3+E2 對抗性核驗 (2026-05-09)](feedback_impl_done_adversarial_review.md) — 高風險 IMPL（GUI / IPC / 寫操作 / 共用 helper）sub-agent 自評 IMPL DONE 不接受單獨 sign-off；強制派 A3+E2 並行核驗；E4 regression 不能取代；W-AUDIT-7c 三方獨立 catch governance-tab.js SyntaxError 救 prod GUI 案例
 
 ## Code & architecture rules

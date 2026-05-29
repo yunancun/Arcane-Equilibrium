@@ -1,6 +1,6 @@
 ---
-name: 派 sub-agent 前 fetch + 查遠端 branch
-description: Multi-agent 派發前必 `git fetch` + `git branch -r | grep <topic>` 查隔壁 session 是否已開 feature branch 做同題目，避免重複工作 + branch topology 混亂
+name: 派 sub-agent 前 fetch + 查遠端 branch + git-log-grep ticket
+description: Multi-agent 派發前必 `git fetch` + `git branch -r | grep <topic>` + `git log --oneline --all | grep <ticket-keyword>`；TODO 的「pending」Phase Banner 可能 stale 數天，工作可能已 merge 進 main，派 IMPL 前必 git-log 驗，不可盲信 TODO 狀態
 type: feedback
 originSessionId: 1d6c6364-1fdb-4b51-a62a-b4624f0fa446
 ---
@@ -26,3 +26,10 @@ git log --oneline origin/main -10  # 看隔壁剛推什麼
 - 單 session 線性工作可略（無隔壁併發）
 - 派發前一次 fetch 成本遠低於派發後發現重複的處理成本（branch 歸屬討論 / commit 拓撲修復）
 - 亦適用：operator 說「隔壁 session 已派 X」時，不要盲信完成狀態，fetch + log 確認實際進度
+
+**2026-05-28 第二次踩雷（升級教訓：不只查 branch，查 ticket 是否已 merge）**：
+派 E1 去做 Sprint 2「W2-B IMPL」（TODO Phase Banner 標 IMPL NOT STARTED），但 E1 disk + `git log` 發現 W2-B 早於 **3 天前** 已完整 land（`817de10a` funding_short_v2 + liquidation_cascade_fade +3737 LOC）+ E2 R2/R3 APPROVE + E4 regression PASS。同輪派的背景 PA agent 也只讀 SSOT/dispatch packet/TODO Phase Banner，**沒 git-log grep ticket keyword**，照樣回報「dispatch ready」誤導。
+- **Root cause**：TODO 的 Phase Banner 與 git 真相漂移數天；PA agent 與 PM 都信任 TODO「pending」標籤沒驗 disk。
+- **救援**：E1 sub-agent 自己 disk check 後做 **NO-OP closure**（不重做 30-40hr），證明 dispatch prompt 留 NO-OP exit path 的價值 — 派 IMPL 的 prompt 應允許 agent「發現已完成則 NO-OP 回報」而非硬寫。
+- **升級規則**：派任何 IMPL（非只 review）前，除 branch grep 外，**必** `git log --oneline --all | grep -iE '<ticket-keyword|主要檔名|strategy-name>'` 確認 main 上沒做過；TODO Phase Banner 不是 git 真相，commit 落地時必同步更新 Phase Banner（否則下一個 session 重派）。
+- 同樣適用 PA / 任何 planning agent：dispatch prompt 應強制「先 git-log grep，TODO 狀態僅參考」。

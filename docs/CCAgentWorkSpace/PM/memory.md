@@ -1,5 +1,12 @@
 # PM Memory — 工作記憶
 
+## 2026-05-29 Cold Audit Wave1/Wave2 Handoff Lesson
+
+- Cold-audit source checkpoints can be green on Mac but still not deploy-ready: PkgB is Bybit-facing and still needs a BB-style pre-deploy spot-check, while PkgD ledger idempotency depends on Linux PG `ON CONFLICT` semantics and needs empirical verification before runtime deploy.
+- Do not create a table just because a cold audit `to_regclass` is missing. P1-11 proved the actionable question is writer+reader call-path ownership: close-maker evidence already lives on V094 `trading.fills.close_maker_*`, so `learning.close_maker_audit` is stale spec drift and would be dead schema.
+- Operator mirrors should be either pointer/stub files or byte-identical copies of canonical reports with an explicit `cmp` check before sign-off.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-29--cold_audit_wave1_wave2_handoff.md
+
 ## 2026-05-28 Wave 5 Packet B / OPS-1 Closure Lesson
 
 - Autonomy level switch must stay fail-closed until a real TOTP/2FA backend is wired; typed-confirm, audit, cooldown, and UI posture are useful only as a guarded skeleton, not as permission to switch levels.

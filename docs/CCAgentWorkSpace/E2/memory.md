@@ -6,6 +6,20 @@
 - 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
 - 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
 
+## 2026-05-29 — v80 cold audit Wave 1 PkgB Rust (P1-03/06/07/08 + P2-02/03) · APPROVE → E4
+
+**對象**：未提交 Rust diff（17 files, +650/-68），HEAD `02ef4cb7`。Python/GUI 由另一 E2 審。
+**Verdict**：**APPROVE → E4**（0 finding）。cargo build PASS + `cargo test --lib` **3583 passed / 0 failed / 1 ignored**（與 E1 honest 數字完全吻合）。
+**Report**：本次直接回傳 parent（未寫檔）。
+
+durable lessons / 對抗驗證要點：
+- **async-intercept 不是 double-execution 陷阱**：cancel-all 在 `loop_handlers::handle_pipeline_command` 顯式 arm 攔截（與 ResetDrawdownBaseline 同模式），排在 `other =>` fall-through 之前 → 不會二次落到同步 `handle_paper_command`。同步 facade 的 arm 僅 match 窮盡性 + 防禦 warn。驗 fire-and-forget 失敗只 warn 不重試（符合 fail-safe + CLAUDE.md §四 no hidden retry）。
+- **cancel-all authority 正解 = 不在 IPC 層 gate execution_authority，而是 paper 模式無 order_mgr → None → log-only**。若在 IPC gate authority 反而會在 Stop 流 revoke 後阻斷 cancel（錯）。`cancel_all_order_mgr()` getter clone Arc 出 borrow 再 await，無跨 await borrow race。
+- **P1-07 lease 釋放驗法**：OPEN 空 slice → `run_dispatch_retry` attempt0>=len0 立即回 `TransientExhausted` → dispatch.rs `TransientExhausted`/`Structural` 兩 arm 均 `LeaseOutcome::Failed`（非 Consumed），僅 Ok/NoOp → Consumed。確認 dispatch_tests 移除 open-budget invariant、新增 2 OPEN single-attempt 測試、無任何測試仍 assert create-retry。
+- **P1-06 SL 方向保守正確性**：long SL floor（往價格下方 = 更寬 = 不提前觸發）；short SL ceil。fail-closed = 缺 spec / 0.0 / 非 finite → None → caller 只跳過交易所該欄位、保留本地 StopManager（雙軌不丟）。tests 覆蓋 None/0/-5/NaN edge。
+- **constructor fan-out 4 site 全 compile**：bootstrap 用真 shared cache；tasks/startup 非-stop 路徑用空 default cache（這些路徑不呼 set_trading_stop，fail-closed 仍成立）。
+- **pre-existing 雜訊辨識**：`spawn_position_reconciler`(:788) dead_code warning 非 E1 引入（production 走 `_with_cmd_provider`），342 repo-wide clippy 與 diff 無交集。stash@{0..2}（Cargo.lock dep WIP + 舊 branch）非本 session，§5c 不動。
+
 ## 2026-05-25 — W2-E dual review M4 (W1-C) + V109 (W1-F) · M4 RETURN-TO-E1 / V109 APPROVE
 
 **對象**：commit `ae9a2dd8` (W1-C M4 IMPL Rust 1511 + Python 1900 LOC) + commit `16796d13` (W1-F V109 832 LOC schema)
@@ -3952,5 +3966,28 @@ Review 對象：2 個新 cron script（install + daily wrapper）851 LOC，Stage
 3. **deferred slice 的 dead-code 誠實性**：C1/C2/C3 全 0 production caller 是 EXPECTED 但必確認 (a) 明確文檔標 deferred (b) PM 有 C4/C5 follow-up ticket (c) 非殘缺半成品。三條齊 = 乾淨 stub 非 dead-code 反模式
 4. **clippy 被 pre-existing error 擋住時的核驗法**：`-- -A clippy::<pre-existing-lint>` 放行 pre-existing 讓 clippy 跑到 review scope；再 grep scope path 確認 scope 自身 0 hit。否則「clippy fail」會誤判成 review scope 問題
 5. **Debug derive on secret-bearing struct = latent leak**：即使當前無 log，持 password/token/webhook 的 struct derive(Debug) 是未來 {:?} 洩漏面；secret struct 應手寫 redacting Debug 或不 derive
+
+---
+
+## 2026-05-29 — M11 smoke register-only fix (d696b1f2) 對抗審查 — APPROVE-WITH-CONDITIONS
+
+審查對象：commit `d696b1f2` `fix(m11-cron): smoke register-only`（M11 daily cron 移除 POST /replay/run + poll，保留 register；消除 replay.run_state zombie = `[50]` FAIL 根因）。輕量 risk-reducing 簡化。verdict = APPROVE-WITH-CONDITIONS（0 BLOCKER；1 LOW in-scope + 1 MEDIUM pre-existing）。deploy clearance = **YES**（04:00 UTC fire 前可部署；fix 達成 zombie 消除目標 + 不 regress）。
+
+**run dispatch 移除乾淨確認**：grep `RUN_TMP|RUN_HTTP|RUN_ID|RUN_STATUS|RUN_BODY|/replay/run|run_id|poll|smoke_completed` 在 wrapper 只命中 DESIGN-FIX 註釋（line 22/29/322-325），0 live code。orphan `RUN_TMP` mktemp + 第二個 trap（含 RUN_TMP cleanup）已連帶移除；surviving trap (line 267) 只清 REGISTER_TMP+lock 正確。register 段 (209-318) + 兩 fail-soft exit 0 分支 + idempotency_key 全保留。`bash -n` 兩檔 PASS。
+
+**`[48]` 不破壞確認**：`check_48_replay_manifest_registry_growth` (checks_replay_maintenance.py:348-428) 只 query `replay.experiments`（count/rows_7d/rows_24h/created_at），0 處碰 `replay.run_state`。register-only 寫 experiments row → `[48]` keep PASS（E1 dry-run total 24→25 + `[48] PASS` 實證）。root cause（zombie 源）真除非 symptom-mask。
+
+**governance audit event_type — PG SAFE 但 incident scanner NOT clean**：
+- PG CHECK SAFE：INSERT 寫 `event_type='audit_write_failed'`（既有 V035 enum），`m11_replay_runner_register_only_completed` 只在 `payload->>'alert_type'`；不需註冊 V035/V113 enum；piggyback 對齊 replay_key_rotation_check.sh pattern。
+- **MEDIUM-1（pre-existing — 修正我 2026-05-28 review 結論）**：`audit_write_failed` 有 production consumer = `wave9_audit_incident_scan.py`（06:30 daily cron per SCRIPT_INDEX.md:148）。`_scan_audit_write_failed_other` (262-326) 用 5-item NOT-IN allowlist 把不在 list 的 `alert_type` 標 medium incident → `main()` return 1 (INCIDENT VIOLATION) + UPSERT `replay.audit_incident_summaries`。`m11_*register_only_completed` 不在 allowlist → **每日 M11 成功 fire 觸 daily false medium incident + 污染 audit_incident_summaries**。設計不對稱根因：sibling cron 只在 ALERT/violation emit audit row（replay_key_rotation_check.sh:331「OK: silent」），M11 在 SUCCESS emit。pre-existing（舊 smoke_completed 同樣不在 allowlist）非本 commit regress。修法：(a) M11 success alert_type 加進 wave9 allowlist OR (b) M11 success silent（drop PG audit emit 只留 JSONL/log，但要確認 `[48]` row growth 是 intended success evidence）。
+
+**LOW-1（in-scope，install echo drift）**：`install_m11_replay_runner_cron.sh:143`（always-printed banner「Audit row:」行）仍寫 `alert_type='m11_replay_runner_smoke_completed/_failed'`；wrapper 已改 `register_only_completed`。E1 modify-list 稱「三處」但漏這第四處 echo（在 banner block 非 E1 改的 DRY-RUN block line 169）。誤導 operator。退 E1 改 line 143。
+
+**Multi-session race 5 條**：5a/5e HEAD=d696b1f2 領先 origin/main=b2e06510（剛好 M11 commit），sibling window 全 Packet C/V114 0 file overlap M11 cron 二檔；5b/5d M11 commit 全 land；5c working tree 有隔壁 WIP（PA/memory.md / common.js / 3 cold-audit spec untracked）非本 scope，不 revert。0 race blocker。
+
+**對抗 reasoning gain（沉澱）**：
+1. **「success-emit governance_audit_log」+ 「incident scanner NOT-IN allowlist」= daily false alarm 反模式**：任何 cron piggyback `audit_write_failed` 在 SUCCESS 寫 row，必查 `wave9_audit_incident_scan.py` 的 `_scan_audit_write_failed_other` allowlist 是否含該 alert_type。sibling 紀律 = 只在 ALERT emit（silent success）。下次任何新 cron 走 audit_write_failed piggyback 必跑：`grep -A20 "_scan_audit_write_failed_other" wave9_audit_incident_scan.py` 看 allowlist + 確認 emit 時機是 alert-only 還是 success。
+2. **piggyback audit consumer grep 必含 incident scanner**：我 2026-05-28 review 點 #2「0 production consumer 把 audit_write_failed 當 alarm」結論 incomplete — 漏了 wave9_audit_incident_scan.py。正確 grep = `grep -rnE "event_type\s*(=|==|IN).*audit_write_failed|WHERE.*audit_write_failed" program_code helper_scripts rust`（不只 grep literal，要 grep SELECT/WHERE alarm consumer）。教訓：grep 範圍要含「掃 governance_audit_log 當 incident feed」的 cron 而非只看 emit 端。
+3. **install echo vs wrapper reality cross-check 是 M11 reproducible LOW**：2026-05-28 review 點 #6 已 catch 一次（loopback echo 誤導），本 round 又 catch line 143 alert_type echo drift。任何改 emit string 的 cron PR，必 grep install script 全部 echo banner（不只 DRY-RUN block）找舊 string 殘留：`grep -nE "<old_alert_type>|<old_event_string>" install_*.sh`。
 
 **Report**：本次回 main session 直述（E2 不寫 report .md per 指示）

@@ -402,3 +402,17 @@ HTML 不能直接 node --check；用 `re.findall(r'<script[^>]*>(.*?)</script>',
 
 ### LOC delta net=0 ≠ governance free pass
 本次 -50 (tab-live) -13 (canary) +63 (common) = net 0，但 common.js 2135 → 2198 觸發 §九 governance：pre-existing baseline 已超 2000 硬上限，exception clause 允許「baseline + 5 LOC」寬容，**+63 超寬容**。需 PM Sign-off 明文記錄 exception 理由（SDK consolidation > 多 ad-hoc）+ 同時開 P2 ticket 處理 common.js 拆檔。**規律**：governance LOC 不看 net delta 看 per-file；SDK 增強雖然抵消多檔成本，per-file 仍要 PM exception 簽。
+
+## v80 cold audit Wave 1 PkgA — A3 condition-clear（殘留風險常駐橫幅）(2026-05-29)
+
+### 殘留風險警示禁用 3.5s auto-dismiss toast → 常駐橫幅（dismiss-on-click）
+A3 HIGH：不可逆 live 寫操作（doLiveStop / doEmergencyStop / doLiveCloseAll / switchSystemMode / liveStart）部分失敗時，「倉位/掛單可能殘留，請手動確認 Bybit」若用 `ocToast(..., 'error')`（3.5s 自動消失）呈現，受壓操作員會錯過，然後 refreshPage() 重繪畫面顯「一切就緒」掩蓋殘留。解法 = common.js 新 helper `ocResidualRiskBanner(actionKey, msg)`：fixed 置頂常駐橫幅，只能點「我已確認 · 關閉」按鈕關閉。**規律**：殘留風險/不可逆失敗的警示必須是 persistent dismiss-on-click，不能是定時消失的 toast；toast 只配「成功/一般資訊/可重試錯誤」。
+
+### 常駐橫幅必 append 到 document.body 才能 survive refreshPage / loadAll 重繪
+refreshPage()（tab-live）與 setTimeout(loadAll)（tab-system）只重繪特定容器 ID 的內容；橫幅 append 到 `document.body` 而非任何被重繪的容器 → 重繪不會清掉它。同 actionKey 重複呼叫時 `_ocResidualBanners[key]` 更新文字而非堆疊，避免連點產生多條殘留橫幅；多 actionKey 則垂直堆疊置頂。**規律**：要 survive 局部重繪的 UI 元素必掛在重繪範圍之外（body 直屬），並用 key-dedupe map 防連點堆疊（同 Agent Tracker 90d banner、F5 trust-status-bar 雙 ID 教訓一脈）。
+
+### liveStart fake-success：`if (d)` 顯「已啟動」是 pre-fix 反模式
+liveStart 舊碼 `if (d) ocToast('已啟動','warn')` 完全沒讀 P1-02 後端回的 partial_failure / rust_synced:false → live gate 未滿足仍顯善意「已啟動」。修法同 doLiveStop：先 `classifyLiveMutation(d)`，residual 時常駐橫幅「啟動未確認 — 引擎未授權」。**規律**：所有 live 寫操作 caller 一律走 classifyLiveMutation，禁 `if (d)` 直接報成功；新增 live 寫操作時 grep `if (d)` 確認沒漏網。
+
+### 'warn' toast type 缺 CSS class → 退回無樣式（透明背景無邊框）
+common.js toast 只有 info/success/error 三 class；多處 `ocToast(..., 'warn')`（liveStart / P1-05 manual-mark）渲染成 `oc-toast-warn` 但無對應 CSS rule → 透明無邊框幾乎看不見。補 `.oc-toast-warn` = `--yellow` (#d29922) rgba 背景 + 邊框，與綠/紅/灰區分。**規律**：新增 toast type 字串時必同步加對應 `.oc-toast-<type>` CSS；grep `ocToast(.*'<type>')` 確認所有用到的 type 都有 class。

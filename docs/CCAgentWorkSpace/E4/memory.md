@@ -4837,3 +4837,22 @@ verify round 3 P0 Q3 SQL fix + 3 MED runtime behavior post E1 round 3 + MIT roun
 
 ### Report
 `srv/docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-27--ops_4_gap_bd_e4_regression_round_2.md` (前次 GREEN 結論 valid + 新增 §12 re-dispatch confirmation)
+
+## 2026-05-29 — v80 cold audit Wave 1 regression (PkgA Python+GUI / PkgB Rust)
+- Wave 1 source 為 Mac-only uncommitted（Linux trade-core working tree CLEAN，`live_preflight.py` 在 app/ 不存在於 Linux）。Rust cargo + Python pytest 全在 Mac 跑（dev-only），不 commit/push/deploy。
+- Python control_api_v1：canonical 模式 OPENCLAW_CSRF_SHADOW=1 → 4229 passed / 6 failed / 12 skipped。6 failed 全為 test_ops1_csrf_middleware.py 的 403-enforce 斷言（需 shadow OFF），unset 後 18 passed → 純 env artifact，非 Wave 1。教訓：CSRF 測試是雙模互斥（write-endpoint 200 需 shadow ON；csrf middleware 403 需 shadow OFF），不能單一 env 跑全綠。Wave 1 兩 test 檔（test_api_contract + test_session_stop_cancel_verify）shadow ON 下 30 passed。
+- 大量 socket/PG 連線 fail（engine.sock not found / PG 15432 refused）是 Mac dev-only 預期，非回歸。
+- Rust lib：3584 passed / 0 failed / 1 ignored（E1 claim 3583 +1 = 第二個新 dispatch test）。跑兩遍同綠，非 flaky。
+- create-single-attempt 政策驗證：RETRY_DELAY_MS const 已完全刪除（無生產 caller，僅歷史註釋）；dispatch.rs OPEN→OPEN_NO_RETRY 空 slice（單次嘗試 fail-closed），CLOSE→CLOSE_RETRY_DELAY_MS（2 retries，documented reduce-only 例外）。2 新測 test_open_dispatch_uses_empty_retry_schedule_single_attempt + test_open_dispatch_structural_single_attempt_no_retry 精確鎖定。
+- cancel-all coverage gap（記錄不阻擋）：OrderManager::cancel_all_scoped + IPC handler + loop_handlers CancelAllOrders（含 unknown-category fail-closed 分支）無專屬 unit test。但 sibling CloseAll/close_all_positions 同樣無測（codebase 既定 pattern）；body-building 為 trivial 2-branch JSON，post_checked 緊接無 pre-HTTP seam，加測會是 tautology 或需 mock server/refactor（禁）。category 映射由 test_order_category_as_str + 窮舉 match `_ => None` 鎖定。判定不強加 hollow test（反 mock-hiding 原則）。
+- 浮點 1e-4：Wave 1 touched 全為 control-flow/order-mgmt，無 indicator 數值跨 Rust↔Python，無適用 surface。
+- VERDICT: GREEN。
+
+## 2026-05-29 — v80 cold audit Wave 2 regression (PkgC-Rust/PkgC-Py/PkgD-Py) — GREEN
+- Source: Mac-only uncommitted (HEAD b93d3210). Linux trade-core HEAD 02ef4cb7 = 無 Wave1 也無 Wave2，全在 Mac dev-only 跑。不 commit/push/deploy/restart。
+- Rust lib (2 passes 同): 3599 passed / 0 failed / 1 ignored。P1-09 freshness 7 case 全present且真跑 cost_gate_live/cost_gate_moderate（無 mock），鎖 rejection reason（stale→JS-live fail-closed / missing-runtime→has_runtime=false / validation_failed→validated=false / no-ts→age=none / demo stale+unvalidated→exploration None / now<=0→is_fresh(0)&is_fresh(-1) false）。
+- PkgD AI (ledger/route/cost/governance) + model_registry: 42 passed (2 passes 同)。
+- PkgC-Py promotion+backtest: 62 passed / 1 failed (2 passes 同)。唯一 fail = test_runtime_apply_chain_w_audit_6d_4 line785 `from program_code.ml_training.promotion_evidence` ModuleNotFoundError —— 從 control_api_v1 subdir 跑的 sys.path artifact，pre-existing，touches promotion_evidence 非 Wave2 file，E1/E2 已 flag。非 Wave-2-attributable。
+- Mock-audit: 4/4 真實。ledger dedup 用 _PkAwareCursor 真實 PK set 模 ON CONFLICT DO NOTHING，斷言寫兩次=每表1行（now() 舊實現會 double-count）；paper-freeze 設過門指標仍斷言 not ok + paper_lane_frozen + 階段不前進；route-binder e2e subprocess 真跑 bind_active_route_env.sh 斷言 provider 綁定；edge-gate fail-closed 真 call gate。皆只 mock IO 邊界。
+- 教訓: control_api_v1 內 test 混用相對(sys.path conftest)與絕對(program_code.*) import；後者只在 srv root + PYTHONPATH 下可解，subdir 跑必 fail。判 pre-existing 必看 import target 是否 touch Wave2 file。
+- VERDICT: GREEN。

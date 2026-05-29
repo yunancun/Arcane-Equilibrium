@@ -130,12 +130,12 @@
 |------|------|------|--------|--------------|
 | ADR-0034 | Decision Lease Layered Approval (LAL) | docs/adr/0034-decision-lease-layered-approval-lal.md | ✅ Active | Sprint 1A-β land |
 | ADR-0035 | M5 Online Learning Interface Reserved | docs/adr/0035-m5-online-learning-interface-reserved.md | ✅ Active | Sprint 1A-δ |
-| ADR-0036 | M8 Anomaly + M10 Tier D Blacklist | docs/adr/0036-m8-anomaly-m10-tier-d-blacklist.md | ✅ Active | Sprint 1A-修補 |
-| ADR-0037 | M9 A/B Framework | docs/adr/0037-m9-ab-framework.md | ✅ Active | Sprint 1A-修補 |
-| ADR-0038 | M11 Continuous Counterfactual Replay | docs/adr/0038-m11-continuous-counterfactual-replay.md | ✅ Active | Sprint 1A-β land |
-| ADR-0039 | M12 OrderRouter Trait + maker_fill_rate | docs/adr/0039-m12-orderrouter-trait-maker-fill-rate.md | ✅ Active | Sprint 1A-δ |
-| ADR-0040 | M13 Multi-Venue Gate Y3+ | docs/adr/0040-m13-multi-venue-gate-y3.md | ✅ Active | Sprint 1A-δ |
-| ADR-0041 | ContextDistiller v4 + DOC-08 AI Cost Cap Amendment | docs/adr/0041-context-distiller-v4-doc-08-ai-cost-cap.md | ✅ Active | Sprint 1A-修補 |
+| ADR-0036 | M8 Anomaly + M10 Tier D Blacklist | docs/adr/0036-m8-anomaly-detection-and-m10-tier-d-model-blacklist.md | ✅ Active | Sprint 1A-修補 |
+| ADR-0037 | M9 A/B Framework | docs/adr/0037-m9-ab-framework-and-statistical-methodology.md | ✅ Active | Sprint 1A-修補 |
+| ADR-0038 | M11 Continuous Counterfactual Replay | docs/adr/0038-m11-continuous-counterfactual-replay-and-liquidations-source.md | ✅ Active | Sprint 1A-β land |
+| ADR-0039 | M12 OrderRouter Trait + maker_fill_rate | docs/adr/0039-m12-order-router-trait-and-maker-fill-rate-metric.md | ✅ Active | Sprint 1A-δ |
+| ADR-0040 | M13 Multi-Venue Gate Y3+ | docs/adr/0040-multi-venue-gate-spec.md | ✅ Active | Sprint 1A-δ |
+| ADR-0041 | ContextDistiller v4 + DOC-08 AI Cost Cap Amendment | docs/adr/0041-context-distiller-v4-and-ai-cost-cap-amendment.md | ✅ Active | Sprint 1A-修補 |
 | ADR-0042 | M3 Health Monitoring | docs/adr/0042-m3-health-monitoring.md | ✅ Active | Sprint 1A-γ |
 | ADR-0043 | M6 Bayesian Reward Weight | docs/adr/0043-m6-bayesian-reward-weight.md | ✅ Active | Sprint 1A-γ |
 | ADR-0044 | M7 Decay Enforced Single Authority | docs/adr/0044-m7-decay-enforced-single-authority.md | ✅ Active | Sprint 1A-γ |
