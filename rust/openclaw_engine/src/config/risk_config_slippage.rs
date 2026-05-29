@@ -58,6 +58,23 @@ pub struct SlippageConfig {
     /// 預設 30（≈ CLT 門檻）。Validate 限制 [1, 1000]。
     #[serde(default = "default_cost_gate_min_n_trades_for_block")]
     pub cost_gate_min_n_trades_for_block: u64,
+    /// P1-09 (2026-05-29): TTL（秒）for a positive production edge cell to count
+    /// as "fresh". A cell with `shrunk_bps > 0` may only pass a production cost
+    /// gate if `now - _meta.updated_at <= edge_estimate_ttl_secs`. Beyond the TTL
+    /// the snapshot is treated as stale: live → reject (fail-closed), demo →
+    /// exploration. Default 172800 (48h) — the producer
+    /// (`edge_estimator_scheduler`) refreshes hourly and the reload daemon reloads
+    /// 1h, so 48h tolerates a one-day scheduler/cron outage + weekend gap before
+    /// a fresh-but-positive cell silently keeps authorizing live. Config-driven
+    /// (NOT a literal in the gate) per Rust-config authority. Validated 1 ≤ x.
+    /// P1-09：正生產 edge cell 計為「新鮮」的 TTL（秒）。`shrunk_bps > 0` 的 cell
+    /// 僅在 `now - _meta.updated_at <= edge_estimate_ttl_secs` 時可過生產成本門。
+    /// 逾期視為陳舊：live → 拒絕（fail-closed），demo → 探索。預設 172800（48h）—
+    /// 生產端每小時刷新、reload daemon 1h 重載，48h 容忍一日 scheduler/cron 中斷
+    /// 加週末空檔，避免陳舊正 cell 持續授權 live。Config 驅動（非 gate 內字面量），
+    /// 對齊 Rust-config 權威。Validate 限制 1 ≤ x。
+    #[serde(default = "default_edge_estimate_ttl_secs")]
+    pub edge_estimate_ttl_secs: i64,
 }
 
 /// One row of the slippage volume-tier table.
@@ -115,6 +132,10 @@ fn default_cost_gate_min_n_trades_for_block() -> u64 {
     30
 }
 
+fn default_edge_estimate_ttl_secs() -> i64 {
+    172_800 // 48h — P1-09 positive-edge freshness window
+}
+
 impl Default for SlippageConfig {
     fn default() -> Self {
         Self {
@@ -123,6 +144,7 @@ impl Default for SlippageConfig {
             cost_gate_win_rate_floor: default_cost_gate_win_rate_floor(),
             cost_gate_safety_multiplier: default_cost_gate_safety_multiplier(),
             cost_gate_min_n_trades_for_block: default_cost_gate_min_n_trades_for_block(),
+            edge_estimate_ttl_secs: default_edge_estimate_ttl_secs(),
         }
     }
 }
@@ -148,6 +170,11 @@ impl SlippageConfig {
             return Err(
                 "risk.slippage.cost_gate_min_n_trades_for_block must be in [1, 1000]".into(),
             );
+        }
+        // P1-09：TTL 必須為正秒數；0 或負值會讓任何 cell 立即「過期」造成
+        // live 全拒、demo 全探索的退化行為。
+        if self.edge_estimate_ttl_secs < 1 {
+            return Err("risk.slippage.edge_estimate_ttl_secs must be >= 1 (seconds)".into());
         }
         let mut prev_floor: Option<f64> = None;
         for (i, tier) in self.tiers.iter().enumerate() {
@@ -297,6 +324,7 @@ mod tests {
             cost_gate_win_rate_floor: 0.4,
             cost_gate_safety_multiplier: 1.5,
             cost_gate_min_n_trades_for_block: 30,
+            edge_estimate_ttl_secs: 172_800,
         };
         assert!(cfg.validate().is_ok());
         assert_eq!(cfg.lookup_rate(1_000_000.0), 0.0008);

@@ -171,7 +171,9 @@ def build_report() -> dict[str, Any]:
         blocking_reasons.append("input_state_not_ready")
     if not allow_progress_to_h1b_policy:
         blocking_reasons.append("input_gate_not_ready")
-    if policy_state not in {"policy_ready_light_only", "policy_ready_standard_allowed"}:
+    # P1-12 enum 归一化：H1-C 消费 policy_state 必须用标准 policy_ready_standard，
+    # 否则 H1-B 改为标准命名后此处会把合法 standard 误判为 not_ready。
+    if policy_state not in {"policy_ready_light_only", "policy_ready_standard"}:
         blocking_reasons.append("policy_state_not_ready")
     if not allow_progress_to_h1c_decision:
         blocking_reasons.append("policy_does_not_allow_h1c")

@@ -136,6 +136,42 @@ def _connect(dsn: Optional[str] = None):
         return None
 
 
+class RegistryPersistenceError(RuntimeError):
+    """P1-14：live-readiness 工件要求注册持久化但 DB 不可用时抛出。
+
+    为什么 fail-loud：should_ship / shadow_only + 完整 q10/q50/q90 三件套是
+    canary_promoter 的晋升候选来源；DB 不可用时若静默 skip，registry 会悄悄
+    陈旧（runtime 实测曾出现 0 条新行），训练却报成功 → 掩盖断链。
+    no_ship / unknown verdict 不属于 required，不触发本错误。
+    """
+
+
+def check_db_connectivity(dsn: Optional[str] = None) -> bool:
+    """轻量探测 registry DB 是否可连。
+
+    为什么单独探测：register_model 的 None 返回混淆了三种原因
+    （verdict 跳过 / slot 锁定 / DB 不可用）。caller 在存在 required 工件时
+    先用本函数判定 DB 是否可达，可在不改 register_model 签名的前提下，
+    把「DB 不可用」这一原因单独识别为 fail-loud。
+    """
+    conn = _connect(dsn)
+    if conn is None:
+        return False
+    try:
+        with conn, conn.cursor() as cur:
+            cur.execute("SELECT 1")
+            cur.fetchone()
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.warning("model_registry: connectivity probe failed: %s", e)
+        return False
+    finally:
+        try:
+            conn.close()
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def register_model(
     *,
     strategy: str,
@@ -261,6 +297,24 @@ def register_model(
             conn.close()
         except Exception:  # noqa: BLE001
             pass
+
+
+def has_required_persistence_artifact(*, onnx_out: Dict[str, Any], verdict: str) -> bool:
+    """P1-14：判定本次 onnx_out 是否含「要求注册持久化」的工件。
+
+    定义（live-readiness-bearing）：verdict ∈ {should_ship, shadow_only}
+    且至少一个 q10/q50/q90 已写盘（entry["written"]==True 且 path 非空）。
+    no_ship / unknown verdict → 非 required（合法跳过，不 fail-loud）。
+    """
+    if verdict not in (VERDICT_SHOULD_SHIP, VERDICT_SHADOW_ONLY):
+        return False
+    artifacts = onnx_out.get("artifacts", {}) or {}
+    for qname, entry in artifacts.items():
+        if qname not in ("q10", "q50", "q90"):
+            continue
+        if entry.get("written", False) and entry.get("path", ""):
+            return True
+    return False
 
 
 def register_quantile_trio_from_onnx_out(

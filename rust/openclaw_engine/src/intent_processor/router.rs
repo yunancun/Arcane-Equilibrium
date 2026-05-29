@@ -1037,18 +1037,23 @@ impl IntentProcessor {
                     // Validation (Demo) → moderate: allows cold-start, blocks negative edge
                     // Production (Live) → strict: fail-closed without positive estimate
                     // 按 profile 選擇 cost gate：Validation 中等，Production 嚴格
+                    // P1-09：注入 epoch 秒供新鮮度門使用（now_ms 為 fee staleness
+                    // 用的 wallclock epoch-ms，÷1000 得 epoch 秒）。gate 內不讀 wallclock。
+                    let now_secs = (now_ms / 1000) as i64;
                     let gate_result = match profile {
                         GovernanceProfile::Validation => self.cost_gate_moderate_with_slippage(
                             &intent.strategy,
                             &intent.symbol,
                             fee_rate,
                             slippage_rate,
+                            now_secs,
                         ),
                         GovernanceProfile::Production => self.cost_gate_live_with_slippage(
                             &intent.strategy,
                             &intent.symbol,
                             fee_rate,
                             slippage_rate,
+                            now_secs,
                         ),
                         GovernanceProfile::Exploration => None,
                     };

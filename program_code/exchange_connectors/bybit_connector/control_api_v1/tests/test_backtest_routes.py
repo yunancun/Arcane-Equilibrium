@@ -437,6 +437,73 @@ class TestBacktestTruthRegistryInjection:
         assert data.get("truth_registered") is False, \
             "Low-quality result should have truth_registered=False"
 
+    def test_stub_result_blocks_truth_injection(self):
+        """
+        P2-01 回歸：stub 回測結果（warning 含 'stubbed' 或 get_status().stub）即使
+        sharpe/trades 達標也絕不可注入 TruthSourceRegistry，避免偽造學習證據。
+        """
+        from app.truth_source_registry import TruthSourceRegistry
+
+        app = _make_test_app(_operator_actor())
+        # 高 sharpe/trades，但結果標記為 stub
+        mock_engine = _make_mock_engine(sharpe_ratio=2.0, total_trades=25, win_rate=0.65)
+        mock_engine.run.return_value.warning = (
+            "backtest stubbed — run in Rust openclaw_core::backtest"
+        )
+        mock_engine.get_status.return_value = {"stub": True, "last_run_ts": None}
+
+        registry = TruthSourceRegistry()
+        registry.register_claim = MagicMock()
+        mock_analyst = MagicMock()
+        mock_analyst._truth_registry = registry
+
+        with patch("app.backtest_routes.get_backtest_engine", return_value=mock_engine), \
+             patch("app.phase2_strategy_routes.ANALYST_AGENT", mock_analyst, create=True):
+            client = TestClient(app)
+            resp = client.post("/api/v1/backtest/run", json={
+                "symbol": "BTCUSDT",
+                "timeframe": "5m",
+                "strategy_name": "ma_crossover",
+                "backtest_mode": True,
+            })
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("truth_registered") is False, \
+            "stub 結果不得注入 TruthRegistry"
+        registry.register_claim.assert_not_called()
+
+    def test_non_stub_high_quality_still_injects(self):
+        """
+        P2-01 回歸（守護下游）：非 stub 的高品質結果（warning 為空、sharpe>1、
+        trades>=10）仍應正常注入，stub guard 只封鎖 stub。
+        """
+        from app.truth_source_registry import TruthSourceRegistry
+
+        app = _make_test_app(_operator_actor())
+        mock_engine = _make_mock_engine(sharpe_ratio=1.5, total_trades=20, win_rate=0.6)
+        # 明確標記為非 stub
+        mock_engine.run.return_value.warning = ""
+        mock_engine.get_status.return_value = {"stub": False, "last_run_ts": None}
+
+        registry = TruthSourceRegistry()
+        registry.register_claim = MagicMock()
+        mock_analyst = MagicMock()
+        mock_analyst._truth_registry = registry
+
+        with patch("app.backtest_routes.get_backtest_engine", return_value=mock_engine), \
+             patch("app.phase2_strategy_routes.ANALYST_AGENT", mock_analyst, create=True):
+            client = TestClient(app)
+            resp = client.post("/api/v1/backtest/run", json={
+                "symbol": "BTCUSDT",
+                "timeframe": "5m",
+                "strategy_name": "ma_crossover",
+                "backtest_mode": True,
+            })
+
+        assert resp.status_code == 200
+        registry.register_claim.assert_called_once()
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # R7: BacktestEngine internal exception → 500

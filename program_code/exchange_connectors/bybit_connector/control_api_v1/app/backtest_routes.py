@@ -29,13 +29,16 @@ MODULE_NOTE (English):
   Safety invariants:
   - backtest_mode is forced True to prevent misuse in live trading (enforced by BacktestEngine)
   - POST /run requires Operator role authentication (write action gate)
-  - When BacktestResult.sharpe_ratio > 1.0 and total_trades >= 10, auto-inject TruthSourceRegistry
+  - When a NON-STUB BacktestResult has sharpe_ratio > 1.0 and total_trades >= 10,
+    auto-inject TruthSourceRegistry. stub 結果（Python BacktestEngine 目前為 stub）
+    永遠被 P2-01 stub guard 封鎖，不得注入學習/真值平面。
   - TruthRegistry injection failure is non-fatal (fail-open, logs warning and continues)
 
   Principle alignment:
   - Principle 7: Backtest plane isolated from Live plane (backtest_mode=True enforced)
   - Principle 8: Each backtest is reproducible (BacktestResult.to_dict() has full config + results)
-  - Principle 12: Backtest results auto-inject TruthSourceRegistry (continuous evolution pipeline)
+  - Principle 12: Non-stub backtest results auto-inject TruthSourceRegistry (continuous
+    evolution pipeline); stub 結果被封鎖，避免偽造證據。
 """
 
 import asyncio
@@ -355,7 +358,24 @@ async def run_backtest(
     # 將高品質回測結果注入 TruthSourceRegistry 以驅動學習管線（原則 12）。
     # fail-open：任何異常僅記錄 warning，不影響 API 響應。
     truth_registered = False
-    if result.sharpe_ratio > 1.0 and result.total_trades >= 10:
+    # P2-01 stub guard（CLAUDE.md：禁止偽造證據）：Python BacktestEngine 目前是
+    # stub（真值源在 Rust openclaw_core::backtest），其輸出帶 warning="...stubbed..."
+    # 且 get_status()["stub"] is True。stub 結果絕不可注入 TruthSourceRegistry，
+    # 否則會把零值/假值當成學習管線證據（原則 12）。這裡 key 在 stub 信號而非
+    # 當前的零值，因此即使未來 stub 被部分接線回非零，仍然守得住。
+    result_is_stub = "stubbed" in str(getattr(result, "warning", "") or "")
+    if not result_is_stub:
+        try:
+            result_is_stub = bool(engine.get_status().get("stub"))
+        except Exception:  # noqa: BLE001
+            result_is_stub = False
+    if result_is_stub:
+        logger.info(
+            "backtest stub — TruthRegistry injection blocked (not real evidence) "
+            "for %s/%s strategy=%s / 回测 stub，封锁 TruthRegistry 注入（非真实证据）",
+            body.symbol, body.timeframe, body.strategy_name,
+        )
+    if (not result_is_stub) and result.sharpe_ratio > 1.0 and result.total_trades >= 10:
         try:
             from .phase2_strategy_routes import ANALYST_AGENT  # noqa: PLC0415
             registry = getattr(ANALYST_AGENT, "_truth_registry", None)

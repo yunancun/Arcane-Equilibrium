@@ -126,6 +126,19 @@ pub(super) enum RejectionCode {
     /// Gate 3 cost-gate JS variant — live mode cold-start fail-closed.
     /// Gate 3 cost-gate JS — live 冷啟動失敗關閉。
     CostGateJsLiveColdStart,
+
+    /// P1-09: Gate 3 cost-gate JS variant — live mode positive edge rejected
+    /// because the snapshot is stale, the bps is not runtime-derived, or the
+    /// cell is unvalidated. fail-closed (root #5/#6). `age_secs` is None when
+    /// the snapshot had no parseable `_meta.updated_at`.
+    /// P1-09：live 正 edge 因快照陳舊 / 非 runtime-derived / 未驗證而拒絕，
+    /// fail-closed（根原則 #5/#6）。`age_secs` 在無可解析時間戳時為 None。
+    CostGateJsLiveStaleOrUnvalidated {
+        age_secs: Option<i64>,
+        ttl_secs: i64,
+        has_runtime: bool,
+        validated: bool,
+    },
 }
 
 impl RejectionCode {
@@ -241,6 +254,22 @@ impl RejectionCode {
                 "cost_gate(JS-live): no edge estimate — fail-closed (cold-start) / 無估計失敗關閉"
                     .to_string()
             }
+
+            RejectionCode::CostGateJsLiveStaleOrUnvalidated {
+                age_secs,
+                ttl_secs,
+                has_runtime,
+                validated,
+            } => format!(
+                "cost_gate(JS-live): positive edge not admissible — age={}s > ttl={}s \
+                 OR has_runtime={} OR validated={} — fail-closed / 陳舊或未驗證正 edge 失敗關閉",
+                age_secs
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|| "none".to_string()),
+                ttl_secs,
+                has_runtime,
+                validated,
+            ),
         }
     }
 
@@ -287,6 +316,7 @@ impl RejectionCode {
                 | RejectionCode::CostGateJsLiveThreshold { .. }
                 | RejectionCode::CostGateJsLiveNegative { .. }
                 | RejectionCode::CostGateJsLiveColdStart
+                | RejectionCode::CostGateJsLiveStaleOrUnvalidated { .. }
         )
     }
 
@@ -343,7 +373,8 @@ impl RejectionCode {
             | RejectionCode::CostGateJsDemoNegative { .. }
             | RejectionCode::CostGateJsLiveThreshold { .. }
             | RejectionCode::CostGateJsLiveNegative { .. }
-            | RejectionCode::CostGateJsLiveColdStart => "cost_gate",
+            | RejectionCode::CostGateJsLiveColdStart
+            | RejectionCode::CostGateJsLiveStaleOrUnvalidated { .. } => "cost_gate",
         }
     }
 }

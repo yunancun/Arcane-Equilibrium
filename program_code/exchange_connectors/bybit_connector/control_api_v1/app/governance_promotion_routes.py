@@ -234,13 +234,17 @@ def promote_strategy(
         gate_info: dict[str, Any] = {}
 
         if target_stage == PromotionStage.DEMO_ACTIVE and current_stage == PromotionStage.PAPER_SHADOW:
-            eligible, reasons = gate.check_paper_graduation(strategy_name)
-            gate_info = {"paper_graduation_eligible": eligible, "gate_failures": reasons}
-            if not eligible:
-                return GovernanceResponse.success(
-                    data={"promoted": False, "reason": "paper_gates_not_met", **gate_info},
-                    message="promotion_blocked"
-                )
+            # P1-10 凍結（CLAUDE.md §四）：PAPER_SHADOW -> DEMO_ACTIVE 已凍結。
+            # 在 GUI 顯示明確的凍結原因，而非走 check_paper_graduation 報出
+            # 通用的 gate 失敗。底層 gate.promote() 也對此分支硬性 fail-closed。
+            return GovernanceResponse.success(
+                data={
+                    "promoted": False,
+                    "reason": "paper_lane_frozen",
+                    "detail": "paper_lane_frozen:demo_promotion_requires_explicit_operator_reopen",
+                },
+                message="promotion_blocked"
+            )
 
         if target_stage == PromotionStage.LIVE_PENDING and current_stage == PromotionStage.DEMO_ACTIVE:
             eligible, reasons = gate.check_demo_graduation(strategy_name)

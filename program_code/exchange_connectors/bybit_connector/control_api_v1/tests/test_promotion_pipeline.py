@@ -123,25 +123,25 @@ class TestPipelineStateMachine:
         assert msg == "not_registered"
 
     def test_full_pipeline_happy_path(self, gate: PromotionGate):
-        """Full LEARNING -> ... -> LIVE_ACTIVE with all gates passing."""
+        """Demo -> ... -> LIVE_ACTIVE 路徑，所有門檻通過。
+
+        P1-10 凍結（CLAUDE.md §四）：PAPER_SHADOW -> DEMO_ACTIVE 已凍結，不再
+        是 happy path。為了繼續覆蓋下游 DEMO_ACTIVE -> LIVE_PENDING -> LIVE_ACTIVE
+        各階段，這裡先做 LEARNING -> PAPER_SHADOW，再直接把 entry 種子到
+        DEMO_ACTIVE（繞過已凍結的轉換），而非透過 promote()。
+        紙盤凍結本身另由 test_paper_cannot_promote_demo 回歸測試守護。
+        """
         gate.register_strategy("full_test")
 
-        # LEARNING -> PAPER_SHADOW
+        # LEARNING -> PAPER_SHADOW（仍然允許）
         ok, _ = gate.promote("full_test", PromotionStage.PAPER_SHADOW)
         assert ok
 
-        # Set paper metrics that pass gates
-        gate.update_paper_metrics(
-            "full_test", trades=150, win_rate=0.55,
-            net_pnl_pct=5.0, max_drawdown_pct=7.0, sharpe=1.2,
-        )
-        # Backdate paper_start_ts to pass duration gate
+        # 直接把 entry 種子到 DEMO_ACTIVE，繞過已凍結的 PAPER_SHADOW -> DEMO_ACTIVE
+        # 轉換，以保留下游階段的測試覆蓋。
         with gate._lock:
-            gate._entries["full_test"].paper_start_ts = time.time() - 15 * 86400
-
-        # PAPER_SHADOW -> DEMO_ACTIVE
-        ok, _ = gate.promote("full_test", PromotionStage.DEMO_ACTIVE)
-        assert ok
+            gate._entries["full_test"].current_stage = PromotionStage.DEMO_ACTIVE
+        assert gate.get_stage("full_test") == PromotionStage.DEMO_ACTIVE
 
         # Set demo metrics that pass gates
         gate.update_demo_metrics(
@@ -173,6 +173,31 @@ class TestPipelineStateMachine:
         ok, _ = gate.promote("full_test", PromotionStage.LIVE_ACTIVE)
         assert ok
         assert gate.get_stage("full_test") == PromotionStage.LIVE_ACTIVE
+
+    def test_paper_cannot_promote_demo(self, gate: PromotionGate):
+        """P1-10 回歸：PAPER_SHADOW -> DEMO_ACTIVE 永遠凍結（CLAUDE.md §四）。
+
+        即使設定了在舊門檻下會通過的 paper 指標，promote() 仍必須 fail-closed，
+        並回傳 paper_lane_frozen，且策略階段不前進。
+        """
+        gate.register_strategy("frozen_test")
+        ok, _ = gate.promote("frozen_test", PromotionStage.PAPER_SHADOW)
+        assert ok
+
+        # 設定在舊紙盤門檻下會通過的指標
+        gate.update_paper_metrics(
+            "frozen_test", trades=150, win_rate=0.55,
+            net_pnl_pct=5.0, max_drawdown_pct=7.0, sharpe=1.2,
+        )
+        with gate._lock:
+            gate._entries["frozen_test"].paper_start_ts = time.time() - 15 * 86400
+
+        # 即便指標達標，凍結仍硬性 fail-closed
+        ok, msg = gate.promote("frozen_test", PromotionStage.DEMO_ACTIVE)
+        assert not ok
+        assert "paper_lane_frozen" in msg
+        # 階段不可前進
+        assert gate.get_stage("frozen_test") == PromotionStage.PAPER_SHADOW
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

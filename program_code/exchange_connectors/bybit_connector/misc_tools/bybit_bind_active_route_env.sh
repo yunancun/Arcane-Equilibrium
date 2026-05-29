@@ -85,7 +85,14 @@ max_output_tokens = ""
 route_tier = "skip"
 
 if route_plan == "route_a_light":
-    provider_target = env.get("BYBIT_ROUTE_A_PROVIDER_TARGET", "anthropic_native")
+    # P2-08(c) / 根原则 14：Route A「便宜快速通道」默认走 LOCAL/FREE（Ollama L1），
+    # 付费云只在 BYBIT_ROUTE_A_PAID_OPT_IN=1 时显式 opt-in，保证基线无需付费服务可运行。
+    paid_opt_in = env.get("BYBIT_ROUTE_A_PAID_OPT_IN", "0").strip() in {"1", "true", "TRUE", "yes"}
+    default_route_a_target = "ollama_local"
+    if paid_opt_in:
+        # opt-in 时才允许用配置的付费 provider；未配置则回退仍为本地，避免静默付费。
+        default_route_a_target = env.get("BYBIT_ROUTE_A_PROVIDER_TARGET", "ollama_local")
+    provider_target = default_route_a_target
     model_name = env.get("BYBIT_ROUTE_A_MODEL", "")
     max_output_tokens = env.get("BYBIT_AI_MAX_OUTPUT_TOKENS_LIGHT", "220")
     route_tier = "light"
@@ -94,7 +101,7 @@ elif route_plan in {"route_b_standard", "route_b"}:
     model_name = env.get("BYBIT_ROUTE_B_MODEL", "")
     max_output_tokens = env.get("BYBIT_AI_MAX_OUTPUT_TOKENS_STANDARD", "400")
     route_tier = "standard"
-elif route_plan in {"route_c_strong", "route_c_escalated", "route_c"}:
+elif route_plan in {"route_c_escalated_standard", "route_c_strong", "route_c_escalated", "route_c"}:
     provider_target = env.get("BYBIT_ROUTE_C_PROVIDER_TARGET", "openai_native")
     model_name = env.get("BYBIT_ROUTE_C_MODEL", "")
     max_output_tokens = env.get("BYBIT_AI_MAX_OUTPUT_TOKENS_STRONG", "700")

@@ -100,6 +100,12 @@ def main() -> None:
     if model_name is None:
         blocking_reasons.append("model_name_missing")
 
+    # P2-08(a)：付费 provider-native 调用若 pricing table 未绑定，无法证明自身在
+    # 预算上限内，因此 fail-closed。本地/免费路径（no_call_path_accepted）仍只警告。
+    # 为什么 fail-closed：未定价的付费调用一旦被 cost gate 当作 recorded 通过，
+    # 等于让无法核算成本的真实付费支出绕过预算门控。
+    paid_provider = provider_target in {"openai_native", "anthropic_native"}
+
     if not no_call_path_accepted:
         if attempt_result.get("invocation_attempted") is not True:
             blocking_reasons.append("invocation_not_attempted")
@@ -107,6 +113,8 @@ def main() -> None:
             blocking_reasons.append("provider_response_missing")
         if not isinstance(usage_summary, dict) or not usage_summary:
             blocking_reasons.append("usage_summary_missing")
+        if paid_provider and not pricing_table_bound:
+            blocking_reasons.append("pricing_not_bound_for_paid_call")
 
     log_ok = not blocking_reasons
 

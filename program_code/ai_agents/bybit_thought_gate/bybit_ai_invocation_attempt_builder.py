@@ -293,6 +293,40 @@ def invoke_anthropic_native(
     return text, dumped, usage_summary
 
 
+def apply_ledger_governance(
+    payload: Dict[str, Any],
+    ledger_result: Dict[str, Any],
+    blocking_reasons: List[str],
+    warning_flags: List[str],
+) -> None:
+    """根据账本写入结果，就地更新 payload / blocking_reasons / warning_flags（H1-F 治理决策）。
+
+    为什么集中成纯函数（MED-2 可测性）：付费 vs 本地的 fail-closed/best-effort 分叉
+    是治理关键路径，原先内联在 main() 里无法单测。ledger_result["ok"] 已编码该分叉——
+    付费写失败时 writer 返回 ok=False（必阻断）；本地写失败返回 ok=True + errors（仅警告）。
+    本函数据此：ok=False → 加 blocker、禁止进度（fail-closed）；ok=True+errors → best-effort warn。
+    """
+    payload["ledger_summary"] = {
+        "ledger_state": ledger_result.get("ledger_state"),
+        "rows_written": ledger_result.get("rows_written", []),
+        "paid": ledger_result.get("paid"),
+        "errors": ledger_result.get("errors", []),
+    }
+
+    # 付费调用账本写失败：fail-closed —— 标记状态、加 blocker、禁止进度。
+    if not ledger_result.get("ok", False):
+        payload["invocation_state"] = "invocation_ledger_write_failed"
+        payload["allow_progress_to_h1g_response_check"] = False
+        blocking_reasons.append("invocation_ledger_write_failed")
+        payload["blocking_reasons"] = blocking_reasons
+        payload["report_ok"] = False
+        payload["recommended_action"] = "resolve_ledger_write_failure_before_h1g"
+    elif ledger_result.get("errors"):
+        # 本地路径写失败：best-effort 警告，不阻断。
+        warning_flags.append("ai_invocation_ledger_local_best_effort_warn")
+        payload["warning_flags"] = warning_flags
+
+
 def main() -> None:
     now_ms = int(time.time() * 1000)
     start_ts = time.perf_counter()
@@ -511,6 +545,45 @@ def main() -> None:
             "without using legacy H1F compatibility variables."
         ),
     }
+
+    # ----------------------------------------------------------------------
+    # P1-13：post-call 持久化账本写入。provider 端调用 resolve 后（成功或异常），
+    # 把本次调用同时落库到 agent.ai_invocations + learning.ai_usage_log。
+    # 付费 provider 账本写失败 → 升级为 blocker 并禁止进度（fail-closed at governance）；
+    # 本地/免费 / no-call 路径 best-effort（根原则 14）。
+    # 只有真正发起过 provider 调用（invocation_attempted）才写账本。
+    # ----------------------------------------------------------------------
+    if invocation_attempted and provider_target in {"openai_native", "anthropic_native", "ollama_local"}:
+        try:
+            from bybit_ai_invocation_ledger import write_invocation_ledger
+
+            ledger_result = write_invocation_ledger(
+                idempotency_key=idempotency_key or f"h1f_{now_ms}",
+                provider_target=provider_target,
+                model_name=model_name,
+                selected_ai_tier=selected_ai_tier,
+                route_plan=request_summary.get("route_plan"),
+                invocation_state=invocation_state,
+                usage_summary=usage_summary,
+                cost_usd=None,  # H1-F 不定价；定价 / 未定价付费阻断在 H5-A cost_log
+                latency_ms=latency_ms,
+                prompt_material=(system_prompt or "") + (user_prompt or ""),
+                response_material=ai_response_text,
+                engine_mode=env_str("OPENCLAW_ENGINE_MODE", ""),
+                details={
+                    "route_reason": request_summary.get("route_reason"),
+                    "stage": "H1-F",
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            ledger_result = {
+                "ok": provider_target == "ollama_local",
+                "ledger_state": "invocation_ledger_write_failed",
+                "paid": provider_target in {"openai_native", "anthropic_native"},
+                "errors": [f"ledger_helper_exception:{exc.__class__.__name__}"],
+            }
+
+        apply_ledger_governance(payload, ledger_result, blocking_reasons, warning_flags)
 
     write_json(OUTPUT_LATEST_PATH, payload)
     dated_path = OUTPUT_LATEST_PATH.with_name(

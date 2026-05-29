@@ -34,10 +34,12 @@ INPUT_PATH = Path(
 OUTPUT_DIR = INPUT_PATH.parent
 LATEST_OUTPUT_PATH = OUTPUT_DIR / "bybit_thought_gate_policy_contract_latest.json"
 
+# P1-12 enum 归一化：标准 policy_state 集合去掉历史 _allowed 后缀，
+# 与 selector(:303) 的 allowlist 对齐，避免正向调用决策后字符串不匹配静默 skip。
 ALLOWED_POLICY_STATES = {
     "policy_blocked",
     "policy_ready_light_only",
-    "policy_ready_standard_allowed",
+    "policy_ready_standard",
 }
 
 ALLOWED_AI_TIERS = {
