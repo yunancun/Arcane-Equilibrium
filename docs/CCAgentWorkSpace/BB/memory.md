@@ -1007,3 +1007,36 @@ worktree `wt-c-d2` / branch `fix/retcode-110017-d2-reconcile`（working-tree onl
 ### Report path
 
 `srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-29--d2_reconcile_ghost_exchange_truth.md`（CRITICAL 已複製 Operator/）
+
+---
+
+## 2026-05-29 Round 2 re-confirm — D2 CRITICAL 分頁截斷誤刪真倉（worktree `wt-c-d2` branch `fix/retcode-110017-d2-reconcile`）
+
+### Verdict: **APPROVE**（round 1 的 1 CRITICAL 結構性關閉）
+
+E1 round 2 採我的修法 A（S-6 單 symbol 點查 gate），不採修法 B（get_positions 分頁）。CRITICAL 結構性消除確認。
+
+### CRITICAL 關閉根基驗證（3 點全 ✓）
+
+1. **單 symbol query 不受 limit=20 截斷 ✓**：`position_manager.rs:158-178` `get_positions(Linear, Some(symbol))` 在 `Some(sym)` arm 真實 `params.push(("symbol", sym))`（line 164-165）→ Bybit V5 `/v5/position/list` 帶 symbol filter 只回該 symbol 單一 entry，不觸 default limit=20 + nextPageCursor 分頁（單一 symbol one-way 永遠 ≤1 entry，無「第 21+ 個被截斷」可能）。修法 A 安全根基成立。
+2. **三分支正確 ✓**：`ghost_point_query`（mod.rs:101-123）映射用 `position_info_to_view`（mod.rs:224-227 `size <= 0.0 || side == "None"` → None）。`positions.iter().any(|p| position_info_to_view(p).is_some())` = 任一非空倉 entry（size>0 任一 side）→ `StillHasPosition`（不收斂）；全空/空列表 → `ConfirmedZero`（收斂）；`Err`（timeout/nonzero retCode）→ `QueryFailed`（fail-closed 不收斂，CLAUDE §四）。涵蓋所有「非空倉」情況。
+3. **CRITICAL 結構性消除 ✓**：分頁截斷假 Ghost（真倉在 page 2+）→ S-6 點查命中該 symbol 回 size>0 → `StillHasPosition` → `kept.push` 保留 + log `pagination_false_ghost`（mod.rs:231-241），不發 `ConvergeExchangeZero`。streak（C-3 暫態）擋不住穩態截斷，由點查 gate 擋（comment S-6 明寫「streak 對每輪都截斷同一 symbol 零作用，必須由點查擋」）。真錢誤刪路徑關閉。
+
+### 防護疊加正確（S-1..S-6 全 AND）
+
+S-1 mirror 有方向 → S-5 streak≥2（C-3 race）→ S-6 點查 ConfirmedZero（分頁截斷）三層全滿足才 `dispatch_ghost_converge`。S-6 疊在 S-1..S-5 之上（非取代）。`dispatch_ghost_converge` 走 `ConvergeExchangeZero`（本地收斂）不走 `CloseSymbol`/reduce-only（反 110017 重入迴圈守衛，orphan_handler.rs:295-334）。
+
+### Test 覆蓋（對抗驗證 load-bearing）
+
+新增 4 個 S-6 test：`ghost_pagination_truncation_false_ghost_not_converged`（★ BB CRITICAL 直接 regression，StillHasPosition → 不收斂 + 無命令）/ `ghost_point_query_confirmed_zero_converges` / `ghost_point_query_failed_fail_closed_not_converged` / `ghost_point_query_gate_is_load_bearing`（對比 ConfirmedZero 誤刪 vs StillHasPosition 不收斂，鎖「gate 必須能改變收斂結果」不變量）。注入 closure（`F: Fn(String) -> Fut`）非直接持 PositionManager，可單測 mock 三分支。lib 3618/0（E1 報）。
+
+### 修法 B 降 follow-up — 同意 ✓
+
+採 A 後 D2 收斂路徑本身已安全（每個 Ghost 候選收斂前必過點查）。修法 B（get_positions(None) 分頁 + 字典 §get_positions limit=20/nextPageCursor 警告）降為治本既有 Orphan/baseline 盲區的**非阻** follow-up `P2-RECONCILER-GET-POSITIONS-PAGINATION`（PM 登記）。理由：`get_positions(None)` 截斷仍會讓 Orphan 偵測（exchange 有/baseline 無）漏報 page 2+ 的 orphan，及 baseline 完整性盲區——但這些不會誤刪真倉（漏報 ≠ 誤刪），故非 ship-stop。字典補錄（§get_positions line 527-542 缺 limit/分頁語意）併入該 follow-up。
+
+### 下次啟動需查驗項
+
+1. `fix/retcode-110017-d2-reconcile` merge 後 lib 3618/0 是否 Linux 復現（Mac sign-off ≠ runtime）
+2. `P2-RECONCILER-GET-POSITIONS-PAGINATION` follow-up 是否 PM 登記（修法 B + 字典補錄）
+3. 若 live universe 放開 > 20 symbol，D2 已安全（點查 gate 擋穩態截斷），但 Orphan 偵測盲區需修法 B 才完整
+4. ConvergeExchangeZero handler 端 `converge_exchange_zero_close` is_exchange() 守衛（paper noop）維持
