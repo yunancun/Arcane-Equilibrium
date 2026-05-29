@@ -13232,3 +13232,31 @@ register + mod.rs setter）。
 - 教訓 6（clippy pre-existing 隔離）：`cargo clippy --no-deps` 隔離 openclaw_core pre-existing（price_tracker deprecated_semver）；本 task 唯一 hit email.rs:199 doc_lazy_continuation 經 git diff hunk header 確認在我的 diff 外（pre-existing commit 9bf71423），不順手修（最小影響）。判斷「是否本 task 引入」用 `git diff <file> | grep '^@@'` 對比行號 vs hit 行號。
 - 結果：notification_failsafe 107 passed（104 baseline + T11 banner / T4.12 watcher / T15 email）；我改的 3 檔 clippy 0 hit。
 - 不 commit（鏈 E1→E2→E4→QA→PM）。報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-28--e1_med_low_hardening.md`
+
+## 2026-05-29 — M11 smoke zombie design-fix（register+run → register-only minimal）
+
+**任務**：P2-M11-SMOKE-ZOMBIE-DESIGN-FIX。M11 daily cron wrapper 原做 register + run dispatch；register 寫 `replay.experiments` 滿足 `[48]`，但 run 啟動真實 replay 子進程 hang/死不寫 completed_at/exit_code → `replay.run_state` 'running' zombie → 4h 後 `[50] replay_run_state_health` FAIL。每日 04:00 cron fire 會累積 zombie。operator+PM 拍 (a) register-only minimal。
+
+### 教訓 1：`[48]` 只依賴 experiments row growth，不依賴 run_state 完成
+- `check_48_replay_manifest_registry_growth`（checks_replay_maintenance.py:348-428）只 query `replay.experiments` total/rows_7d/rows_24h/created_at；**完全不碰 replay.run_state**。所以 register-only（POST /experiments/register 寫 experiments row）足以 keep `[48]` PASS，run dispatch 純粹是製造 run_state zombie 的負擔，得不償失。daily heartbeat 的 evidence value 在「register endpoint + runner 鏈 alive」，不在真實 replay 執行（後者是 M11 Track C / Stage B / Sprint 3 Phase A 範圍）。
+
+### 教訓 2：PA spec 原意是 register + run + poll；register-only 是 deviation（已 flag）
+- PA proposal §4.2 contract item 4-6 + §5.2 timeline 明寫 register → run → poll status 5min timeout。wrapper MODULE_NOTE 原文也寫「走完 register → run → poll status」。所以 register-only 是 **對 PA spec 的 deviation**，理由 = [48] 只需 experiments row growth + run 製造 zombie。已在 report + wrapper MODULE_NOTE DESIGN-FIX 段明示 deviation + 理由。PA spec §5.4 自己也提「[50] zombie 'running' > 1h 偵測」但低估了 single-fixture run hang 的實際頻率（首次 install smoke 即留 zombie 6532fc38）。
+
+### 教訓 3：register endpoint thin handler 本身不 spawn 子進程；只有 /replay/run 會
+- POST /api/v1/replay/experiments/register 純寫 row（無 spawn）；POST /api/v1/replay/run 才 spawn replay subprocess（per replay_routes.py /run handler）。所以移除 run dispatch = 0 新 run_state row = 0 zombie，乾淨。
+
+### 教訓 4：dirty multi-session 下做 register-only dry-run 不污染 tracked 檔
+- runtime host wrapper 是舊版（register+run）。為驗 register-only 又不 commit / 不動 tracked 檔：`scp` 改版到 trade-core `/tmp/m11_register_only_dryrun.sh` 跑，跑完 `rm`。tracked wrapper 全程 unchanged（git status porcelain 空）。比直接 overwrite runtime 檔安全。
+
+### dry-run empirical（trade-core 2026-05-29）
+- baseline: run_state running=0（舊 zombie 6532fc38 已 operator cancel→cancelled=1）/ experiments total=24 24h=1 7d=1
+- register-only run: exit 0 / `OK register http=200 experiment_id=be8bd4b4` / JSONL `mode=register_only`（無 run_id）/ log 無 POST /replay/run 無 OK run 行 / governance_audit_log `m11_replay_runner_register_only_completed` 1 row
+- post: run_state running=**0**（無新 zombie）/ run_state max(created_at)=05-28 18:53（無新 run_state row）/ experiments total=**25** 24h=2 7d=2 / `[48]` = **PASS** `registry growth healthy`
+- run_state status breakdown: cancelled=1 completed=17 failed=6 running=0
+
+### 改動
+- wrapper m11_replay_runner_daily_cron.sh：移除 Step 2 POST /replay/run + run_id/status 解析 + smoke_completed audit；改為 register-only success path（emit `m11_replay_runner_register_only_completed`）；MODULE_NOTE 加 DESIGN-FIX 段說明 register-only + 為什麼（zombie 避免）；START/END log + fail-soft 註解 + helper alert_type 註解同步改
+- install_m11_replay_runner_cron.sh（echo 提到 run 才改）：Stage A 描述改 register-only / 第 3 步 dry-run 提示改「不 dispatch run」+ 第 4 步驗 register_only_completed + run_state 無新 running row / binary preflight 註解改「register-only 不 spawn 但保留守 [47] + Stage B 就緒」
+- 兩檔 bash -n 通過（Mac + remote 均驗）
+- 不 commit（鏈 E1→E2→E4→QA→PM）。報告：reports/2026-05-29--e1_m11_smoke_register_only_fix.md
