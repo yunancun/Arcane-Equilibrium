@@ -105,3 +105,30 @@ pub mod ws_unknown_handler_guard;
 
 pub use openclaw_core;
 pub use openclaw_types;
+
+// P1-OPS-2-CI-FLAKINESS-TEST-LOCK（2026-05-29）：全 crate 共用的 env-mutating
+// 測試互鎖。
+//
+// 為什麼必要：`cargo test --lib` 把 lib crate 的所有 `#[cfg(test)]` 測試編進
+// 「單一」測試 binary，預設多執行緒並行跑。`std::env::set_var` /
+// `std::env::remove_var` 是 process 全局且非執行緒安全（Rust 2024 起更直接
+// 標 set_var 為 unsafe）。若各 module 各自宣告一把 local Mutex，A module 持
+// 自己的鎖並不會排除 B module 持「另一把」鎖 → 兩者同時改 process env 仍 race
+// （latent；24/24 實測未觸但 UB 存在）。本 module 提供單一入口，所有 lib 測試
+// 統一鎖它，跨 module 真正串行。
+//
+// 邊界：僅涵蓋 lib 測試 binary。bin crate（main.rs + main_boot_tasks /
+// live_auth_watcher / startup 等 `mod` 兄弟）是「獨立」compilation unit + 獨立
+// 測試 process，無法存取本 `#[cfg(test)]` pub(crate) 項，也不與 lib 測試共享
+// static，故不在此鎖範圍內（各自仍用其 module-local guard）。
+#[cfg(test)]
+pub(crate) mod test_env_lock {
+    /// 全 crate（lib 測試 binary）唯一的 env-mutating 測試互鎖。
+    static ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// 取共用鎖；poisoned（前一測試 panic 留下）時用 `into_inner` 強解 —
+    /// 測試場景下毒化不影響 prod，且強解才能讓後續測試繼續串行而非連鎖 panic。
+    pub(crate) fn guard() -> std::sync::MutexGuard<'static, ()> {
+        ENV_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}

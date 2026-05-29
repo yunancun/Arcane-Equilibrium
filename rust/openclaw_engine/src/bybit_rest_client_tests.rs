@@ -672,9 +672,9 @@ async fn test_timeout_fires_on_hung_server_fail_closed() {
 // 這些測試修改全局 env var，通過共享 Mutex 串行化，並 snapshot/restore。
 // -------------------------------------------------------------------
 
-/// Serialize env-sensitive tests. Acquire at test start.
-/// 序列化 env-敏感測試。測試開頭獲取。
-static LIVE_GUARD_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+// 序列化 env-敏感測試：改用 crate 共用鎖 `crate::test_env_lock::guard()`，
+// 測試開頭獲取（P1-OPS-2-CI-FLAKINESS-TEST-LOCK：移除原 module-local
+// LIVE_GUARD_ENV_LOCK，統一跨 module 串行 + poison-tolerant）。
 
 /// Snapshot-and-restore helper for env vars touched by a test.
 /// Keeps originals, overwrites with given values, restores on Drop.
@@ -723,7 +723,7 @@ fn empty_secrets_dir() -> tempfile::TempDir {
 /// 門 #1：未設 OPENCLAW_ALLOW_MAINNET → 構造必須 Err。
 #[test]
 fn test_mainnet_blocked_without_allow_env() {
-    let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+    let _lock = crate::test_env_lock::guard();
     let snap = EnvSnapshot::new(&[
         "OPENCLAW_ALLOW_MAINNET",
         "BYBIT_API_KEY",
@@ -746,7 +746,7 @@ fn test_mainnet_blocked_without_allow_env() {
 /// 門 #1：錯誤值（"0"/"true"/"yes"）拒絕，只接受 "1"。
 #[test]
 fn test_mainnet_blocked_with_wrong_allow_value() {
-    let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+    let _lock = crate::test_env_lock::guard();
     let snap = EnvSnapshot::new(&[
         "OPENCLAW_ALLOW_MAINNET",
         "BYBIT_API_KEY",
@@ -769,7 +769,7 @@ fn test_mainnet_blocked_with_wrong_allow_value() {
 /// 門 #3：allow=1 但無任何憑證 → Err（不再 warn!）。
 #[test]
 fn test_mainnet_blocked_without_credentials() {
-    let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+    let _lock = crate::test_env_lock::guard();
     let snap = EnvSnapshot::new(&[
         "OPENCLAW_ALLOW_MAINNET",
         "BYBIT_API_KEY",
@@ -801,7 +801,7 @@ fn test_mainnet_blocked_without_credentials() {
 /// 門 #2：env var 有值、slot 無 → 仍 Err（驗證 Mainnet 繞過被封閉）。
 #[test]
 fn test_mainnet_ignores_env_var_credentials() {
-    let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+    let _lock = crate::test_env_lock::guard();
     let snap = EnvSnapshot::new(&[
         "OPENCLAW_ALLOW_MAINNET",
         "BYBIT_API_KEY",
@@ -832,7 +832,7 @@ fn test_mainnet_ignores_env_var_credentials() {
 /// 門 #1+#2 通過：顯式 param 憑證 + allow=1 → 構造成功。
 #[test]
 fn test_mainnet_accepts_explicit_param_creds() {
-    let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+    let _lock = crate::test_env_lock::guard();
     let snap = EnvSnapshot::new(&[
         "OPENCLAW_ALLOW_MAINNET",
         "BYBIT_API_KEY",
@@ -859,7 +859,7 @@ fn test_mainnet_accepts_explicit_param_creds() {
 /// 回歸守衛：Demo 環境 env var 憑證仍可用。
 #[test]
 fn test_demo_env_var_creds_still_work() {
-    let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+    let _lock = crate::test_env_lock::guard();
     let snap = EnvSnapshot::new(&[
         "OPENCLAW_ALLOW_MAINNET",
         "BYBIT_API_KEY",
@@ -882,7 +882,7 @@ fn test_demo_env_var_creds_still_work() {
 /// 回歸守衛：Testnet 完全繞過 Mainnet guard。
 #[test]
 fn test_testnet_no_guard_check() {
-    let _lock = LIVE_GUARD_ENV_LOCK.lock().unwrap();
+    let _lock = crate::test_env_lock::guard();
     let snap = EnvSnapshot::new(&[
         "OPENCLAW_ALLOW_MAINNET",
         "BYBIT_API_KEY",

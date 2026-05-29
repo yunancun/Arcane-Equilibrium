@@ -74,12 +74,8 @@ pub fn should_spawn_btc_lead_lag_producer(has_demo: bool, has_live: bool) -> boo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
+    // P1-OPS-2-CI-FLAKINESS-TEST-LOCK：移除原 module-local OnceLock env_lock()，
+    // 改用 crate 共用鎖 `crate::test_env_lock::guard()` 統一跨 module 串行。
 
     fn clear_gate_env() {
         std::env::remove_var(OPENCLAW_ENABLE_PAPER_ENV);
@@ -88,7 +84,7 @@ mod tests {
 
     #[test]
     fn should_spawn_btc_lead_lag_diagnostic_overrides_paper_disabled_runtime() {
-        let _guard = env_lock().lock().expect("env mutex poisoned");
+        let _guard = crate::test_env_lock::guard();
         clear_gate_env();
         std::env::set_var(OPENCLAW_ENABLE_PAPER_ENV, "0");
         std::env::set_var(OPENCLAW_ENABLE_BTC_LEAD_LAG_DIAGNOSTIC_ENV, "1");
@@ -104,7 +100,7 @@ mod tests {
 
     #[test]
     fn should_not_spawn_btc_lead_lag_when_paper_disabled_without_diagnostic() {
-        let _guard = env_lock().lock().expect("env mutex poisoned");
+        let _guard = crate::test_env_lock::guard();
         clear_gate_env();
         std::env::set_var(OPENCLAW_ENABLE_PAPER_ENV, "0");
 

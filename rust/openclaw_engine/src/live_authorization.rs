@@ -725,9 +725,9 @@ mod tests {
 
     const TEST_LIVE_AUTH_KEY: &str = "test-live-auth-signing-key-do-not-use-in-prod";
 
-    /// 多個 OPS-2 SECRET-SPLIT test 改 process-wide env vars；同 test binary 並行
-    /// 會交錯 → 用 ENV_TEST_LOCK 串行（對齊 live_auth_watcher_tests::ENV_GUARD pattern）。
-    static ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // 多個 OPS-2 SECRET-SPLIT test 改 process-wide env vars；同 test binary 並行
+    // 會交錯 → 用 crate 共用鎖 `crate::test_env_lock::guard()` 串行
+    // （P1-OPS-2-CI-FLAKINESS-TEST-LOCK：合併原 module-local ENV_TEST_LOCK）。
 
     /// Cross-language HMAC byte-identical fixture：固定 input 對應固定 sig。
     /// 與 Python `_sign_authorization_payload` 用同一 canonical payload + 同一 key
@@ -802,9 +802,7 @@ mod tests {
     #[test]
     fn phase1_fallback_reads_ipc_secret_when_live_auth_unset() {
         // Phase 1 backward-compat：未設 LIVE_AUTH 時走 IPC_SECRET fallback。
-        let _guard = ENV_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::test_env_lock::guard();
         let prev_la = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY").ok();
         let prev_la_file = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE").ok();
         let prev_ipc = std::env::var("OPENCLAW_IPC_SECRET").ok();
@@ -841,9 +839,7 @@ mod tests {
     #[test]
     fn live_auth_signing_key_primary_wins_over_ipc_fallback() {
         // 兩 env 都設且值不同 → 必走 primary（LIVE_AUTH），不走 IPC fallback。
-        let _guard = ENV_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::test_env_lock::guard();
         let prev_la = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY").ok();
         let prev_ipc = std::env::var("OPENCLAW_IPC_SECRET").ok();
 
@@ -867,9 +863,7 @@ mod tests {
     #[test]
     fn live_auth_signing_key_missing_returns_specific_variant() {
         // 兩 env 都未設 → 必 LiveAuthSigningKeyMissing（非舊 IpcSecretMissing）。
-        let _guard = ENV_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::test_env_lock::guard();
         let prev_la = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY").ok();
         let prev_la_file = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE").ok();
         let prev_ipc = std::env::var("OPENCLAW_IPC_SECRET").ok();
@@ -919,9 +913,7 @@ mod tests {
     fn load_and_verify_uses_live_auth_signing_key_when_set() {
         // 接 load_and_verify_reads_file_via_env_override 改造變體：當新 env 設置
         // 時，verify 必須以新 env 為簽名 key 來源（不走 fallback）。
-        let _guard = ENV_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::test_env_lock::guard();
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -976,12 +968,10 @@ mod tests {
 
     #[test]
     fn load_and_verify_reads_file_via_env_override() {
-        // 為什麼用 ENV_TEST_LOCK：OPS-2 SECRET-SPLIT 新增 LIVE_AUTH primary path 後
+        // 為什麼用共用鎖：OPS-2 SECRET-SPLIT 新增 LIVE_AUTH primary path 後
         // 並行 test 可能在 IPC/LIVE_AUTH env 之間留殘餘，導致此 test 走 primary path
         // 用錯 key 解 → BadSignature。串行所有 env-mutating test 消除 race。
-        let _guard = ENV_TEST_LOCK
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let _guard = crate::test_env_lock::guard();
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)

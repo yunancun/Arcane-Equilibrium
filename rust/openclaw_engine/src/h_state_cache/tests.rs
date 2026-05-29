@@ -120,7 +120,7 @@ fn gateway_default_off_unless_env_strict_one() {
     // SAFETY: tests are explicitly serialized for env mutation by sharing
     // a single mutex below. We restore prev on every branch.
     // SAFETY：env 改動透過下方共用 mutex 序列化；每條分支都會 restore prev。
-    let _guard = ENV_TEST_LOCK.lock().expect("env test lock");
+    let _guard = crate::test_env_lock::guard();
 
     std::env::remove_var(ENV_GATEWAY_FLAG);
     assert!(!is_gateway_enabled(), "unset env must be DEFAULT-OFF");
@@ -202,8 +202,6 @@ fn default_cache_state() {
     assert!(!status.gateway_enabled);
 }
 
-// Process-wide mutex for env-mutating tests so parallel `cargo test` runs
-// don't race on `std::env::set_var`. Test-only.
-// env-mutating 測試共用的 process-wide mutex，避免並行 `cargo test` 競爭。
-// 僅測試用。
-static ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+// env-mutating 測試改用 crate 共用鎖 `crate::test_env_lock::guard()`
+// （P1-OPS-2-CI-FLAKINESS-TEST-LOCK：移除原 module-local ENV_TEST_LOCK，
+// 統一跨 module 串行）。

@@ -588,13 +588,21 @@ mod tests {
         assert_eq!(parsed["message_count"], 42);
     }
 
-    /// `WriterConfig::from_env` honours env-var precedence: SRV_ROOT over
-    /// BASE_DIR over fallback `.`. (Uses env-var mutation — serial_test-style
-    /// isolation isn't needed because the test writes to a scoped TempDir.)
-    /// `WriterConfig::from_env` 尊重 env var 優先序。
+    /// `WriterConfig::from_env` 尊重 env var 優先序：SRV_ROOT 蓋過 BASE_DIR，
+    /// 兩者皆無時 fallback 到 `.`。
+    ///
+    /// 為什麼持鎖：本 test 對 `OPENCLAW_BASE_DIR` / `OPENCLAW_SRV_ROOT` 做
+    /// process-global 的 set_var/remove_var（非 TempDir-scoped）。其中
+    /// `OPENCLAW_BASE_DIR` 與 Group A 的 event_consumer/handlers/edge_estimates
+    /// 測試重疊——那些 test 持 `crate::test_env_lock::guard()` 後 set_var 同一變量。
+    /// 鎖只排除其他持鎖者，故本 test 必須一併持同一把鎖、與所有 env-mutating
+    /// lib test 串行，否則此處的 remove_var 會穿透並破壞並發 test 的 env 假設。
     #[test]
     fn test_writer_config_from_env_honours_srv_root() {
-        // Preserve + restore any existing env state / 保存並還原既有 env 狀態。
+        // 整段 env 操作臨界區必須串行：guard 在任何 set_var/remove_var 之前取得，
+        // 並活到 test 結束（含 restore），覆蓋讀寫全程。
+        let _g = crate::test_env_lock::guard();
+        // 保存並還原既有 env 狀態。
         let prior_srv = std::env::var("OPENCLAW_SRV_ROOT").ok();
         let prior_base = std::env::var("OPENCLAW_BASE_DIR").ok();
 

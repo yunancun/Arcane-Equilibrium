@@ -234,14 +234,11 @@ pub fn revoke_live_authorization(decision: &RevokeDecision) -> RevokeOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex as StdMutex;
 
-    // Tests that mutate `OPENCLAW_SECRETS_DIR` must serialize to avoid
-    // colliding with each other and with `live_authorization` tests in the
-    // same binary. Pattern lifted from `live_auth_watcher::tests::ENV_GUARD`.
-    //
-    // 改動 OPENCLAW_SECRETS_DIR 的測試串行化，避免互相污染。
-    static ENV_GUARD: StdMutex<()> = StdMutex::new(());
+    // 改動 OPENCLAW_SECRETS_DIR 的測試串行化，避免互相污染：用 crate 共用鎖
+    // `crate::test_env_lock::guard()`（P1-OPS-2-CI-FLAKINESS-TEST-LOCK：合併原
+    // module-local ENV_GUARD，因 live_authorization 同樣改 OPENCLAW_SECRETS_DIR，
+    // 兩 module 各自一把鎖無法跨 module 互斥）。
 
     // ── should_revoke (pure) ───────────────────────────────────────────
 
@@ -307,7 +304,7 @@ mod tests {
     /// 中文：檔案存在時，刪除並回傳 Removed。
     #[test]
     fn revoke_removes_existing_file() {
-        let _g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = crate::test_env_lock::guard();
         let tmp = tempfile::tempdir().unwrap();
         let prev_secrets = std::env::var("OPENCLAW_SECRETS_DIR").ok();
         std::env::set_var("OPENCLAW_SECRETS_DIR", tmp.path());
@@ -341,7 +338,7 @@ mod tests {
     /// 中文：檔案不存在時回傳 AlreadyRevoked（冪等）。
     #[test]
     fn revoke_is_idempotent_when_file_missing() {
-        let _g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = crate::test_env_lock::guard();
         let tmp = tempfile::tempdir().unwrap();
         let prev_secrets = std::env::var("OPENCLAW_SECRETS_DIR").ok();
         std::env::set_var("OPENCLAW_SECRETS_DIR", tmp.path());
@@ -365,7 +362,7 @@ mod tests {
     /// 中文：第二次呼叫回 AlreadyRevoked，確認冪等行為跨呼叫一致。
     #[test]
     fn revoke_twice_is_safe() {
-        let _g = ENV_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let _g = crate::test_env_lock::guard();
         let tmp = tempfile::tempdir().unwrap();
         let prev_secrets = std::env::var("OPENCLAW_SECRETS_DIR").ok();
         std::env::set_var("OPENCLAW_SECRETS_DIR", tmp.path());
