@@ -97,6 +97,9 @@ pub mod risk_checks;
 pub mod risk_cusum;
 pub mod scanner;
 pub mod secret_env;
+// P0-LG-3 Wave 2.4.A T4：supervised-live 不可變稽核軌跡 writer（V104 supervised_live_audit）。
+// T1 後續另加 `pub mod supervised_live_sm;`（SM 核心），兩者檔案零 overlap。
+pub mod supervised_live_audit_writer;
 pub mod strategies;
 pub mod strategist_scheduler;
 // LG-3 Wave 2.4.A T1（2026-05-30）：supervised-live 7-state 狀態機核心。
