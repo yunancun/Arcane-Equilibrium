@@ -551,8 +551,16 @@
       var data = resp.data || resp;
       var submitted = !!(data && data.submitted);
       if (submitted) {
-        ocToast('✓ Earn stake 已提交（intent_id=' + (data.intent_id || '?')
-              + '；movement_id=' + (data.movement_id || '?') + '）', 'success');
+        // A3-GUI-009：Bybit IPC 已呼叫但 IntentProcessor 尚未補齊 intent_id/movement_id 時，
+        // 後端回 wave_d_pending=true（intent_id==null && movement_id==null && submitted==true）。
+        // 此為「已發出但鏈路未閉合」的中間態，不得與完整成功混為一談，故顯橙色 warn 而非綠色 ✓。
+        var waveDPending = !!(data && data.wave_d_pending);
+        if (waveDPending) {
+          ocToast('✓ Stake 已發出（Wave D pending — intent_id 待引擎補齊，請稍後確認 positions）', 'warn');
+        } else {
+          ocToast('✓ Earn stake 已提交（intent_id=' + (data.intent_id || '?')
+                + '；movement_id=' + (data.movement_id || '?') + '）', 'success');
+        }
         // 清空表單 + 立即刷新 records + positions + balance
         _el('earn-amount').value = '';
         _el('earn-rationale').value = '';
