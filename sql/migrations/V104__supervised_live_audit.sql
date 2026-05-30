@@ -39,8 +39,8 @@
 --     signal_id 等 ML/training column；防 ML pipeline 誤接此 audit 表（MIT MUST-5）。
 --   - idempotency double-apply 安全：所有 DDL IF NOT EXISTS / ADD CONSTRAINT IF NOT EXISTS /
 --     DO-block 守衛；第二次 apply 必 NOTICE-skip 0 RAISE（V083/V084 NOTICE-skip gold standard）。
---   - V104 為 V103→V106 之間 free hole；新增不影響既有 V099-V115 checksum
---     （sqlx 按 version sort，補洞合法；不可動任何既有 migration 檔避免 hash drift）。
+--   - V104 為 V103→V106 之間 free hole；新增不影響其他既有已 apply migration 的 checksum
+--     （sqlx 按 version sort，補洞合法；不可動任何其他既有 migration 檔避免 hash drift）。
 --   - PG WARNING `column "event_id" should be used for segmenting or ordering` 是 informational：
 --     spec §2.3 選 session_id segmentby 是 hot-read pattern 正確設計，非 error（MIT push back 已確認）。
 -- ============================================================
