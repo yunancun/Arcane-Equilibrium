@@ -485,6 +485,9 @@ pub fn dispatch_ghost_converge(
 /// event_type=`reconcile_ghost_converge`。**不寫** `trading.order_state_changes`：
 /// D1 follow-up `P3-110017-CONVERGE-AUDIT-OBSERVABILITY` 已揭該表不收純 position
 /// 收斂（無真實 close order_id），D2 純 drift 收斂故避坑。
+///
+/// `confirmed=false` 表示此 row 只證明 `ConvergeExchangeZero` 已成功送入 engine
+/// channel，不證明 handler 端已實際移除本地倉；真實 removal 由 handler 端決定。
 pub fn spawn_ghost_converge_audit(
     audit_pool: &Option<sqlx::PgPool>,
     symbol: &str,
@@ -492,9 +495,15 @@ pub fn spawn_ghost_converge_audit(
     baseline_qty: f64,
     engine_label: &str,
     removed_position: bool,
+    confirmed: bool,
 ) {
     let Some(pool) = audit_pool.clone() else {
         return;
+    };
+    let removed_position_semantics = if confirmed {
+        "handler-confirmed"
+    } else {
+        "dispatched-not-confirmed"
     };
     let payload = serde_json::json!({
         "symbol": symbol,
@@ -502,6 +511,8 @@ pub fn spawn_ghost_converge_audit(
         "baseline_qty": baseline_qty,
         "engine": engine_label,
         "removed_position": removed_position,
+        "confirmed": confirmed,
+        "removed_position_semantics": removed_position_semantics,
     });
     let engine_owned = engine_label.to_string();
     let ts_ms = openclaw_core::now_ms() as i64;

@@ -137,6 +137,8 @@ impl ExchangeStopSync for BybitExchangeStopSync {
 ///   - `Transport(..)` / `NoCredentials` / `SigningError(..)` / `JsonParse(..)`
 ///     → `Transport(message)`（外部不可達 / 配置 / 解析 — 對 fail-safe 都是「無法
 ///     同步」一類）
+///   - `Other(..)` → `Transport(message)`（client-side invariant failure，例如分頁
+///     cursor 異常；同屬「無法可信同步」）
 pub(crate) fn map_bybit_error(err: BybitApiError) -> ExchangeStopError {
     match err {
         BybitApiError::Business {
@@ -151,6 +153,9 @@ pub(crate) fn map_bybit_error(err: BybitApiError) -> ExchangeStopError {
         }
         BybitApiError::SigningError(s) => {
             ExchangeStopError::Transport(format!("hmac signing: {s}"))
+        }
+        BybitApiError::Other(s) => {
+            ExchangeStopError::Transport(format!("client-side invariant: {s}"))
         }
     }
 }
@@ -220,6 +225,19 @@ mod tests {
         match map_bybit_error(err) {
             ExchangeStopError::Transport(msg) => {
                 assert!(msg.contains("json parse"));
+            }
+            other => panic!("expected Transport, got {other:?}"),
+        }
+    }
+
+    /// T3.4b：`Other` → `Transport`（client-side invariant failure，同屬無法可信同步）。
+    #[test]
+    fn map_client_side_invariant_to_transport() {
+        let err = BybitApiError::Other("pagination cursor did not advance".to_string());
+        match map_bybit_error(err) {
+            ExchangeStopError::Transport(msg) => {
+                assert!(msg.contains("client-side invariant"));
+                assert!(msg.contains("pagination cursor"));
             }
             other => panic!("expected Transport, got {other:?}"),
         }

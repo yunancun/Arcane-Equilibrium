@@ -209,6 +209,9 @@ pub(super) fn classify_dispatch_error(err: &BybitApiError) -> DispatchOutcome {
         // 憑證/簽名 — 配置問題，重試無意義。
         BybitApiError::NoCredentials => DispatchOutcome::Structural,
         BybitApiError::SigningError(_) => DispatchOutcome::Structural,
+        // Client-side invariant failure（例如分頁 cursor 不前進 / 超頁數上限）不是交易所
+        // 暫時錯，也不是 retCode；重試同一請求只會重撞同一壞狀態，故按 Structural fail-closed。
+        BybitApiError::Other(_) => DispatchOutcome::Structural,
 
         BybitApiError::Business {
             ret_code, ret_msg, ..

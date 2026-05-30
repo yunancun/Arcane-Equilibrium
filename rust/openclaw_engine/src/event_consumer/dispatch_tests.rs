@@ -182,6 +182,12 @@ fn test_classify_signing_error() {
 }
 
 #[test]
+fn test_classify_client_side_invariant_error() {
+    let e = BybitApiError::Other("pagination cursor did not advance".into());
+    assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
+}
+
+#[test]
 fn test_classify_ip_rate_limit_is_transient() {
     let e = biz(10006, "Too many requests");
     assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Transient);

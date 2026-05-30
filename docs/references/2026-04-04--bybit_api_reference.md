@@ -531,6 +531,8 @@ Client 創建：`PositionManager::new(client: Arc<BybitRestClient>)`
 - **Input**:
   - `category: OrderCategory`
   - `symbol: Option<&str>`
+  - `symbol=Some(_)`: single-symbol point query，單次請求，不走分頁；D2 ghost 收斂 S-6 gate 依賴此路徑確認真倉是否仍存在。
+  - `symbol=None`: full baseline scan，必帶 `settleCoin=USDT` + `limit=200`，並用 response `nextPageCursor` 迴圈取齊；Bybit 預設單頁 20、最大 200，缺 cursor 會漏 page2+ position。
 - **Output**: `BybitResult<Vec<PositionInfo>>`
   ```
   PositionInfo { symbol, side, size: f64, avg_price: f64, mark_price: f64,
@@ -539,6 +541,9 @@ Client 創建：`PositionManager::new(client: Arc<BybitRestClient>)`
                  trailing_stop: f64, position_value: f64, cum_realised_pnl: f64,
                  created_time, updated_time }
   ```
+- **Pagination contract**:
+  - `nextPageCursor` 空字串或缺失 = 無下一頁；非空 token 原樣回傳（可能含 `%3A` / `%2C`，HTTP client 不可 double-encode）。
+  - full scan 遇到非 0 retCode / timeout、cursor 不前進、或超過 50 頁仍有 cursor，必須 fail-closed 返回錯誤，不能靜默截斷 baseline。
 - **關聯程式**: `position_manager.rs:159`
 
 ---
