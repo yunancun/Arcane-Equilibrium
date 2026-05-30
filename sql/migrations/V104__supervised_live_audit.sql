@@ -354,7 +354,7 @@ DO $$
 DECLARE
     v_check_count INTEGER;
     v_action_def TEXT;
-    v_chunk_interval BIGINT;
+    v_chunk_interval DOUBLE PRECISION;
     v_index_count INTEGER;
 BEGIN
     -- 4 CHECK constraint 全在
@@ -384,14 +384,19 @@ BEGIN
             'V104 Guard C FAIL: action CHECK missing required enum values. Actual: %.', v_action_def;
     END IF;
 
-    -- hypertable chunk = 7d（以 µs/ms BIGINT integer_interval 表示；7d = 604800000000 µs）
-    SELECT integer_interval INTO v_chunk_interval
+    -- hypertable chunk = 7d（timestamptz 維度使用 time_interval；對齊 V106/V107 模式）
+    SELECT EXTRACT(EPOCH FROM time_interval) INTO v_chunk_interval
     FROM timescaledb_information.dimensions
     WHERE hypertable_schema = 'learning'
       AND hypertable_name = 'supervised_live_audit'
       AND column_name = 'created_at';
     IF v_chunk_interval IS NULL THEN
         RAISE EXCEPTION 'V104 Guard C FAIL: hypertable not created on created_at.';
+    END IF;
+    IF v_chunk_interval <> 604800 THEN
+        RAISE EXCEPTION
+            'V104 Guard C FAIL: chunk_time_interval = % sec (expected 604800 = 7 days).',
+            v_chunk_interval;
     END IF;
 
     -- 4 named index 到位
