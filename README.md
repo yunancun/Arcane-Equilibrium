@@ -67,7 +67,7 @@ srv/
 ├── TODO.md                        ← ★ Active dispatch queue（實時工作狀態）
 ├── CONTEXT.md                     ← ★ 领域词汇表（domain glossary，2026-05-06 引入）
 ├── docs/
-│   ├── adr/                       ← ★ 14 条架构决策记录（2026-05-06 引入）
+│   ├── adr/                       ← ★ 架构决策记录系列（ADR 0001-0046；2026-05-06 引入）
 │   └── ...                        ← 工程文档（20+ 份日志/审核/设计）
 ├── program_code/
 │   ├── exchange_connectors/

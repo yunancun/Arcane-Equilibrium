@@ -35,6 +35,14 @@
 | `Caddyfile.template` | OPS-1 Track A — Caddy 反向代理設定模板。`envsubst` 處理：HTTPS bind tailnet IPv4 + Tailscale cert + reverse_proxy `127.0.0.1:8000` + X-Forwarded-Proto 傳遞。`admin off` 不暴露 :2019。HSTS header 在反代邊界加。 |
 | `install_caddy.sh` | OPS-1 Track A — 一次性 Linux/macOS 部署：preflight Tailscale + 安裝 Caddy + envsubst 生 Caddyfile + `tailscale cert` 首次拉證書 + 安裝 systemd unit/timer + curl 驗證 + 首次 HTTPS cert trust checkpoint 提示。預設 `--dry-run`；`--apply` 才實際寫 `/etc/caddy/Caddyfile`。跨平台分支 (Linux apt / macOS brew + launchd 指引)。 |
 | `canary/healthchecks/csrf_shadow_zero_verify.sh` | OPS-1 enforcing cutover gate — 掃描 `${OPENCLAW_DATA_DIR:-/tmp/openclaw}` 近 7d API/log JSONL 中 `csrf_shadow:` violation；0 → PASS，>0 → FAIL，無可掃 log → INSUFFICIENT_SAMPLE。用於 `OPENCLAW_CSRF_SHADOW=1` shadow soak 後 unset 前的自動化檢查。 |
+
+> **測試環境變數 — `OPENCLAW_CSRF_SHADOW=1`（canonical test env，per E4 F-NEW-1）**：跑
+> `program_code/exchange_connectors/bybit_connector/control_api_v1/tests/` 整個 pytest 套件時，
+> **必須**設 `OPENCLAW_CSRF_SHADOW=1`。原因：CSRF enforcement 預設 fail-closed；測試 client 多數不帶
+> double-submit cookie+header token，未設此旗標時約有 **66 個 false failure**（被 CSRF 擋下，非真 regression）。
+> shadow 模式只記錄 `csrf_shadow:` violation 而不阻擋請求，讓測試針對被測邏輯而非 CSRF middleware。
+> 範例：`OPENCLAW_CSRF_SHADOW=1 pytest control_api_v1/tests/`。注意：此旗標**僅供測試 / shadow soak**；
+> production cutover 必 unset（fail-closed），unset 前以上方 `csrf_shadow_zero_verify.sh` 驗 0 violation。
 | `systemd/openclaw-caddy.service` | OPS-1 Track A — Caddy reverse proxy systemd unit（`Type=notify` + `Restart=always` 5s 復活 + `CAP_NET_BIND_SERVICE` 不需 root 綁 443）。 |
 | `systemd/openclaw-tls-renew.service` | OPS-1 Track A — Tailscale cert renewal `Type=oneshot`，由 sibling timer 觸發。引用 `lib/tls_cert.sh` 走 14d threshold 判定 + 拉新 cert + chown caddy + `systemctl reload openclaw-caddy.service`。`OnFailure=` 接 notify service。 |
 | `systemd/openclaw-tls-renew.timer` | OPS-1 Track A — 每日 03:00 UTC `OnCalendar` 觸發 renew service。`Persistent=true` 機器關機跨午夜後補跑。 |
