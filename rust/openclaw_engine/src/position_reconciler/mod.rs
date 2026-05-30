@@ -909,9 +909,10 @@ where
         let baseline_qty = state.baseline.get(&key).map(|v| v.qty).unwrap_or(0.0);
         let sent = orphan_handler::dispatch_ghost_converge(sym, is_long, cmd_tx);
         if sent {
-            // removed_position 由 handler 端 converge_exchange_zero_close 決定；
-            // 此處 audit 記「派發成功」，removed bool 以 baseline 有倉推定 true
-            // （冪等：若 D1 已先收斂則 handler 回 false，但 audit 仍記派發事實）。
+            // removed_position 的事實結果由 handler 端 converge_exchange_zero_close 決定；
+            // 此處只能確認「派發成功」，不能同步知道 handler 是否真的移除了本地倉。
+            // 因此保留 removed_position=true 作 baseline 推定，但用 confirmed=false +
+            // removed_position_semantics 標明 dispatched-not-confirmed，避免 audit 撒謊。
             orphan_handler::spawn_ghost_converge_audit(
                 audit_pool,
                 sym,
@@ -919,6 +920,7 @@ where
                 baseline_qty,
                 engine_label,
                 true,
+                false,
             );
             // 收斂成功 → 從 drifts 移除，避免 evaluate_actions 對「已收斂 Ghost」
             // 重複 governor 升級（false escalation；對齊 process_orphans kept 模式）。
