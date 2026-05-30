@@ -151,30 +151,97 @@ impl PositionManager {
     // Get positions / 查詢持倉
     // -----------------------------------------------------------------------
 
+    /// Bybit linear `/v5/position/list` 單頁筆數上限（Bybit 預設 20，最大 200）。
+    /// 全量 baseline 掃描固定取 200，以最少 REST 往返抓齊全量。
+    const FULL_SCAN_PAGE_LIMIT: &'static str = "200";
+    /// 全量分頁迴圈頁數硬上限（防無限迴圈）。200 筆/頁 × 50 頁 = 10000 倉，遠超實際
+    /// 帳戶規模；觸頂代表交易所異常分頁或 cursor 邏輯失常，須 fail-closed 拋錯而非
+    /// 靜默截斷（截斷本身就是 baseline 盲區，正是本票 P2-RECONCILER-GET-POSITIONS-
+    /// PAGINATION 要修的問題）。
+    const FULL_SCAN_MAX_PAGES: u32 = 50;
+
     /// Get all positions for a category, optionally filtered by symbol.
     /// 查詢某品類的所有持倉，可選按交易對過濾。
     ///
     /// GET /v5/position/list
+    ///
+    /// 為什麼全量路徑要分頁（P2-RECONCILER-GET-POSITIONS-PAGINATION 修法 B）：
+    /// Bybit linear 全量查詢預設單頁僅 20 筆，持倉 > 20 時 page2+ 會被漏報，導致
+    /// reconciler 把第 2 頁的真實持倉看不見 → Orphan 誤判 + baseline 完整性盲區。
+    /// 全量（symbol=None）路徑顯式 limit=200 並用 nextPageCursor 迴圈抓齊全頁。
+    /// single-symbol point-query（symbol=Some，S-6 D2 收斂 gate 用）只回單筆、無
+    /// 分頁，維持原單次取數行為不動。
     pub async fn get_positions(
         &self,
         category: OrderCategory,
         symbol: Option<&str>,
     ) -> BybitResult<Vec<PositionInfo>> {
-        let mut params: Vec<(&str, &str)> = vec![("category", category.as_str())];
+        // single-symbol point-query 路徑：Bybit 回單筆、無分頁，保持原單次取數行為。
+        // S-6 D2 收斂 gate 依賴此路徑，勿動。
         if let Some(sym) = symbol {
-            params.push(("symbol", sym));
-        } else {
-            // Bybit requires symbol OR settleCoin when listing all positions.
-            // Linear perp positions are always settled in USDT.
-            // Bybit 列出所有倉位時要求 symbol 或 settleCoin 二擇一；linear 永遠以 USDT 結算。
-            params.push(("settleCoin", "USDT"));
+            let params: Vec<(&str, &str)> =
+                vec![("category", category.as_str()), ("symbol", sym)];
+            let resp = self
+                .client
+                .get_checked("/v5/position/list", &params)
+                .await?;
+            // point-query 忽略 cursor（只回單 symbol，無第二頁）
+            let (positions, _cursor) = parse_position_list_with_cursor(&resp.result)?;
+            return Ok(positions);
         }
 
-        let resp = self
-            .client
-            .get_checked("/v5/position/list", &params)
-            .await?;
-        parse_position_list(&resp.result)
+        // 全量 baseline 路徑：顯式 limit=200 + nextPageCursor 分頁迴圈抓齊全頁。
+        // Bybit 列出所有倉位時要求 symbol 或 settleCoin 二擇一；linear 永遠以 USDT 結算。
+        let mut all_positions: Vec<PositionInfo> = Vec::new();
+        let mut cursor: Option<String> = None;
+        let mut prev_cursor: Option<String> = None;
+
+        for page in 1..=Self::FULL_SCAN_MAX_PAGES {
+            let mut params: Vec<(&str, &str)> = vec![
+                ("category", category.as_str()),
+                ("settleCoin", "USDT"),
+                ("limit", Self::FULL_SCAN_PAGE_LIMIT),
+            ];
+            if let Some(ref cur) = cursor {
+                params.push(("cursor", cur.as_str()));
+            }
+
+            // 非 0 retCode / timeout 由 get_checked fail-closed 上拋；不可當「無持倉」吞。
+            let resp = self
+                .client
+                .get_checked("/v5/position/list", &params)
+                .await?;
+            let (positions, next_cursor) = parse_position_list_with_cursor(&resp.result)?;
+            all_positions.extend(positions);
+
+            // cursor 為 None（空字串已正規化）→ 無更多頁，正常結束。
+            let Some(next) = next_cursor else {
+                debug!(
+                    page = page,
+                    total = all_positions.len(),
+                    "get_positions full-scan pagination complete / 全量分頁完成"
+                );
+                return Ok(all_positions);
+            };
+
+            // 防無限迴圈：cursor 與上一頁相同代表交易所分頁異常，fail-closed 拋錯
+            // 而非靜默截斷。
+            if prev_cursor.as_deref() == Some(next.as_str()) {
+                return Err(crate::bybit_rest_client::BybitApiError::Other(format!(
+                    "get_positions pagination cursor did not advance at page {page} (fail-closed) \
+                     / 分頁 cursor 未推進，fail-closed"
+                )));
+            }
+            prev_cursor = cursor.take();
+            cursor = Some(next);
+        }
+
+        // 觸及頁數上限仍有 cursor：異常分頁，fail-closed 不可靜默截斷。
+        Err(crate::bybit_rest_client::BybitApiError::Other(format!(
+            "get_positions full-scan exceeded {} page cap with cursor remaining (fail-closed: \
+             prevents infinite loop + baseline truncation blindspot) / 全量分頁超頁數上限仍未取盡",
+            Self::FULL_SCAN_MAX_PAGES
+        )))
     }
 
     // -----------------------------------------------------------------------
@@ -543,6 +610,21 @@ pub fn parse_position_list_pub(result: &serde_json::Value) -> BybitResult<Vec<Po
 /// Parse a list of PositionInfo from Bybit position query result.
 /// 從 Bybit 持倉查詢結果解析 PositionInfo 列表。
 fn parse_position_list(result: &serde_json::Value) -> BybitResult<Vec<PositionInfo>> {
+    // 復用帶 cursor 的解析，丟棄 cursor（保留供 PyO3 橋接的原簽名不變）。
+    let (positions, _cursor) = parse_position_list_with_cursor(result)?;
+    Ok(positions)
+}
+
+/// 解析持倉列表並回傳 nextPageCursor（P2-RECONCILER-GET-POSITIONS-PAGINATION 修法 B）。
+///
+/// 為什麼回傳 cursor：全量 baseline 掃描須跨頁取齊，呼叫端用本函數回傳的
+/// nextPageCursor 決定是否續抓下一頁。
+/// 約定（迴圈終止關鍵不變式）：cursor 為空字串或缺失 → 回 None（無更多頁）；
+/// 非空 → 回 Some(token)。把空字串正規化成 None，避免 Bybit 回 "" 時被誤當有效
+/// cursor 而無限請求同一末頁。
+fn parse_position_list_with_cursor(
+    result: &serde_json::Value,
+) -> BybitResult<(Vec<PositionInfo>, Option<String>)> {
     let list = result
         .get("list")
         .and_then(|v| v.as_array())
@@ -553,7 +635,15 @@ fn parse_position_list(result: &serde_json::Value) -> BybitResult<Vec<PositionIn
     for item in &list {
         positions.push(parse_position_item(item));
     }
-    Ok(positions)
+
+    // nextPageCursor 提取：空字串 / 缺失正規化為 None（= 無更多頁）
+    let next_cursor = result
+        .get("nextPageCursor")
+        .and_then(|c| c.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    Ok((positions, next_cursor))
 }
 
 /// Parse a single PositionInfo item from Bybit response.
@@ -749,6 +839,52 @@ mod tests {
         assert_eq!(positions[1].symbol, "ETHUSDT");
         assert_eq!(positions[1].side, "Sell");
         assert!((positions[1].size - 1.5).abs() < 1e-10);
+    }
+
+    // --- P2-RECONCILER-GET-POSITIONS-PAGINATION：cursor 提取單元測試 ---
+
+    #[test]
+    fn cursor_nonempty_returned_verbatim() {
+        // 非空 cursor 須原樣回傳驅動下一頁；含 %3A escape，驗證不被改寫
+        // （HTTP client 端負責不 double-encode）。
+        let result = serde_json::json!({
+            "list": [{ "symbol": "BTCUSDT", "side": "Buy", "size": "1.0",
+                       "avgPrice": "1.0", "markPrice": "1.0", "positionIdx": 0 }],
+            "nextPageCursor": "page2token%3Aabc",
+        });
+        let (positions, cursor) = parse_position_list_with_cursor(&result).unwrap();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(cursor.as_deref(), Some("page2token%3Aabc"));
+    }
+
+    #[test]
+    fn cursor_empty_string_normalized_to_none() {
+        // 空字串 cursor 必須正規化為 None（迴圈終止關鍵不變式，防無限請求末頁）。
+        let result = serde_json::json!({ "list": [], "nextPageCursor": "" });
+        let (_positions, cursor) = parse_position_list_with_cursor(&result).unwrap();
+        assert_eq!(cursor, None);
+    }
+
+    #[test]
+    fn cursor_missing_field_is_none() {
+        // result 缺 nextPageCursor 欄位也視為無更多頁（None），不可 panic。
+        let result = serde_json::json!({ "list": [] });
+        let (_positions, cursor) = parse_position_list_with_cursor(&result).unwrap();
+        assert_eq!(cursor, None);
+    }
+
+    #[test]
+    fn parse_list_delegates_and_drops_cursor() {
+        // 既有 parse_position_list 委派新函數但丟棄 cursor，行為對齊原語意。
+        let result = serde_json::json!({
+            "list": [{ "symbol": "ETHUSDT", "side": "Sell", "size": "2.5",
+                       "avgPrice": "1.0", "markPrice": "1.0", "positionIdx": 0 }],
+            "nextPageCursor": "ignored-cursor",
+        });
+        let positions = parse_position_list(&result).unwrap();
+        assert_eq!(positions.len(), 1);
+        assert_eq!(positions[0].symbol, "ETHUSDT");
+        assert_eq!(positions[0].side, "Sell");
     }
 
     #[test]

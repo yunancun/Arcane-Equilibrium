@@ -54,6 +54,13 @@ pub enum BybitApiError {
     /// Signing error / 簽名錯誤
     #[error("HMAC signing error: {0}")]
     SigningError(String),
+
+    /// 其他 client 端 fail-closed 錯誤（非交易所回應，如分頁迴圈異常）。
+    /// 為什麼需要：P2-RECONCILER-GET-POSITIONS-PAGINATION 全量分頁的防無限迴圈
+    /// 與超頁數上限屬 client 端不變式違反，非 Bybit retCode，須有獨立 fail-closed
+    /// 變體而非塞進 Business（無真實 retCode/response）。
+    #[error("client-side error: {0}")]
+    Other(String),
 }
 
 /// Result type alias for BybitApiError.
