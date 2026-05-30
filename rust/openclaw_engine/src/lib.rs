@@ -99,6 +99,11 @@ pub mod scanner;
 pub mod secret_env;
 pub mod strategies;
 pub mod strategist_scheduler;
+// LG-3 Wave 2.4.A T1（2026-05-30）：supervised-live 7-state 狀態機核心。
+// supervised-live session 的 control-plane meta state（SoT #1）+ 30s 5-SoT 對賬
+// reconciler。純狀態機，不下單、不繞 5-gate live 邊界、不繞 Decision Lease；
+// audit 經 `AuditSink` trait seam 接 T4 的 V104 writer（T1 不寫 V104/writer 本體）。
+pub mod supervised_live_sm;
 pub mod tick_pipeline;
 pub mod ws_client;
 pub mod ws_unknown_handler_guard;
