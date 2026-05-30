@@ -122,9 +122,11 @@
 | ARCH-04 | Alpha Source Architecture Upgrade | docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-09--full_loss_architectural_root_cause_redesign.md<br>docs/adr/0021-alpha-source-architecture-upgrade.md<br>docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md | 🟠 Proposed | R-1..R-5 architectural amendments (AlphaSurface Bundle / Strategist scope / Hypothesis Pipeline / Per-alpha-source Live Promotion / Spec-as-Code). operator partial accept: W-AUDIT-8a SPEC + W-AUDIT-9 graduated canary started. Supersedes LG-X-02..05 system-wide promotion design (baseline IMPL still required as substrate). |
 | ARCH-05 | Alpha Tournament SSOT | docs/execution_plan/2026-05-26--alpha_tournament_ssot_spec.md | ✅ Active / IMPL-PENDING | Sprint 2 profit-spine SSOT. Fills v5.8 implicit Alpha Tournament slot with required read order, candidate pool, fee-adjusted scoring, minimum evidence gates, Stage output lanes, role chain, and cross-document pointers. Does not grant trading authority or relax Stage/5-gate constraints. **狀態拆分（P1-16）**：source scaffold = done（`alpha_tournament/` package）；active = false（orchestrator 仍 stub）；Stage 0R evidence = pending；M11 Stage-A smoke cron = installed（liveness-only）；M11 Stage-B divergence output = pending（`replay_divergence_log=0`）。scaffold 落地非「mostly done」，Stage-A smoke 非 promotion/divergence evidence。 |
 
-### Architecture Decision Records (ADR-0034 ~ ADR-0045)
+### Architecture Decision Records (ADR-0034 ~ ADR-0046)
 
-> v5.8 13-module thesis Sprint 1A 系列 ADR：M1 LAL 起步 / M5/M12/M13 Y3+ trait stub / M8+M10 安全機制 / M9 A/B / M11 counterfactual replay / ContextDistiller v4 / M3/M6/M7 health+reward+decay / M4 hypothesis discovery。
+> v5.8 13-module thesis Sprint 1A 系列 ADR：M1 LAL 起步 / M5/M12/M13 Y3+ trait stub / M8+M10 安全機制 / M9 A/B / M11 counterfactual replay / ContextDistiller v4 / M3/M6/M7 health+reward+decay / M4 hypothesis discovery / funding_arb V3 redesign slot。
+>
+> **註**：ADR-0001 ~ ADR-0033 直接索引於 `docs/adr/`（檔名即 ID），不在本 register 重複登錄；本表僅追蹤 ADR-0034+（v5.8 系列）。完整 ADR 清單見 `docs/adr/` 目錄與 `docs/README.md` 索引。
 
 | Code | Name | Path | Status | Sprint Phase |
 |------|------|------|--------|--------------|
@@ -140,6 +142,7 @@
 | ADR-0043 | M6 Bayesian Reward Weight | docs/adr/0043-m6-bayesian-reward-weight.md | ✅ Active | Sprint 1A-γ |
 | ADR-0044 | M7 Decay Enforced Single Authority | docs/adr/0044-m7-decay-enforced-single-authority.md | ✅ Active | Sprint 1A-γ |
 | ADR-0045 | M4 Hypothesis Discovery Governance | docs/adr/0045-m4-hypothesis-discovery-governance.md | ✅ Active | Sprint 1A-ε |
+| ADR-0046 | funding_arb V3 Redesign Slot (Basis Observation vs Execution Split) | docs/adr/0046-funding-arb-v3-redesign-slot.md | 🟠 Proposed | Sprint 1A-δ/ε（revive-gate placeholder per AMD-2026-05-26-01；decision TBD，未 Accepted） |
 
 ### v5.8 13-Module Thesis (M1 ~ M13)
 
@@ -221,9 +224,11 @@
 | Active REF specifications | 19 |
 | Active ARCH specifications | 5 |
 | Active AUDIT entries | 13 |
-| Total code references | 335+ |
-| Implementing modules | 22 |
-| Test coverage | 2,308+ Rust lib tests + Python pytest（持續增加） |
+| Total code references | 見代碼內 spec-tag grep（數量持續增加，不在此固定計數） |
+| Implementing modules | 見各 spec row 對應模組（數量持續增加，不在此固定計數） |
+| Test coverage | 持續增加；live 數字見 `TODO.md` runtime evidence（早期靜態值 2,308+ Rust lib tests 已過期，現 cargo workspace 約 3,600+ Rust lib tests + Python pytest，以 TODO 實測為準） |
+
+> **計數註（去數字化）**：上表三項原為靜態硬編碼數字（335+ refs / 22 modules / 2,308+ tests），易隨開發 drift。現改為指向 live 來源（代碼 grep + `TODO.md`），避免 register 自帶過期數字誤導讀者估算治理面大小。如需快照數字，請註明 collection date 並以當日實測為準。
 
 ---
 

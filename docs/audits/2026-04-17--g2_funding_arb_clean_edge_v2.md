@@ -1,5 +1,7 @@
 # G-2 FundingArb Clean Edge Audit — demo 引擎
 
+> **SUPERSEDED / HISTORICAL（2026-05-26）**：funding_arb V2 已 **Retired closed**，per AMD-2026-05-26-01（`docs/governance_dev/amendments/2026-05-26--AMD-2026-05-26-01-funding-arb-deprecation.md`）+ ADR-0018。本報告（v2）為退役決策的**歷史證據 / 最終 closeout**，**不是 active 建議**；文中「升 R-02 重評 / 考慮停用」屬當時情境，現已由 retired-closed 決議取代（V2 在 Bybit 結構性無法 break-even，非參數問題）。任何 funding_arb revive 須走 ADR-0046 (Proposed) revive gate，不得以本報告作為「繼續調參」依據。
+
 **生成時間：** 2026-04-18T17:00:17+00:00
 **樣本期：** 2026-04-17 20:20:57 UTC → 至今
 **樣本數：** 13 個 demo strategy_exit 平倉（目標 20）
