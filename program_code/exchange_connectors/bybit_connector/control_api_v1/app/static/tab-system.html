@@ -645,16 +645,25 @@ async function executeConfirmed() {
   if (!action) return;
 
   if (action === 'paper') {
+    // A3-GUI-010：之前無條件翻轉 _paperActive + 顯綠 toast，即使 ocPost 回 null（HTTP 錯誤 / IPC 失敗）
+    // 也會讓按鈕假裝「已啟動 / 已停止」。改為 gate 在 ocPost 回應之內：僅 truthy 回應才翻狀態 + 顯綠；
+    // 失敗則保留原狀態並顯 error，避免 operator 誤判 Paper 真實運行狀態。
+    let d;
     if (_paperActive) {
-      await ocPost('/api/v1/paper/session/stop', {});
+      d = await ocPost('/api/v1/paper/session/stop', {});
     } else {
-      await ocPost('/api/v1/paper/session/start', { initial_balance: 100000 });
+      d = await ocPost('/api/v1/paper/session/start', { initial_balance: 100000 });
     }
-    _paperActive = !_paperActive;
-    $('qa-paper-dot').className = 'qa-dot ' + (_paperActive ? 'qa-dot-on' : 'qa-dot-off');
-    // Update Paper button label to reflect current state / 更新按鈕文字
-    if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模擬 Paper';
-    ocToast('Paper 模擬 ' + (_paperActive ? '已啟動' : '已停止'), 'success');
+    if (d) {
+      _paperActive = !_paperActive;
+      $('qa-paper-dot').className = 'qa-dot ' + (_paperActive ? 'qa-dot-on' : 'qa-dot-off');
+      // Update Paper button label to reflect current state / 更新按鈕文字
+      if ($('qa-paper-label')) $('qa-paper-label').textContent = _paperActive ? '停止 Paper ⏹' : '模擬 Paper';
+      ocToast('Paper 模擬 ' + (_paperActive ? '已啟動' : '已停止'), 'success');
+    } else {
+      // 不翻轉 _paperActive；1s 後 loadAll() 會以 server readback 校正顯示
+      ocToast('Paper ' + (_paperActive ? '停止' : '啟動') + '失敗 — 引擎未回應，狀態未改變', 'error');
+    }
   } else if (action === 'feed') {
     ocToast('行情流由 Rust 引擎管理（自動運行）', 'info');
   } else if (action === 'demo') {

@@ -139,8 +139,17 @@ fn default_threshold_full() -> f64 {
 impl MaCrossoverParams {
     /// Build ConfluenceConfig from TOML params (trend profile).
     /// 從 TOML 參數構建 ConfluenceConfig（趨勢配置）。
+    ///
+    /// QC P2 fail-closed 守衛：strategist DB / TOML row 的權重可能髒（曾觀測到
+    /// ma_crossover 權重和 73≠65）。ConfluenceConfig::validate() 原本只在程式碼預設
+    /// 構建時跑，此 DB/TOML 載入路徑從不驗證 → 靜默扭曲匯流評分。此處組裝候選後
+    /// 立即 validate()；非法（和≠65 或超範圍）則退回已驗證的趨勢預設
+    /// ConfluenceConfig::default()，並記 warn（含策略名與壞權重和）。
+    /// 為什麼 fail-closed：寧可用已驗證的預設權重，也不可讓非法權重和進入評分；
+    /// DB 本身由 operator/MIT 另行修正，此守衛只保證引擎在修正前安全退回，不改 DB、
+    /// 不改任何預設權重值。
     pub fn build_confluence_config(&self) -> confluence::ConfluenceConfig {
-        confluence::ConfluenceConfig {
+        let candidate = confluence::ConfluenceConfig {
             weight_adx: self.weight_adx,
             weight_regime: self.weight_regime,
             weight_volume: self.weight_volume,
@@ -151,6 +160,17 @@ impl MaCrossoverParams {
             threshold_light: self.confluence_threshold_light,
             threshold_full: self.confluence_threshold_full,
             confluence_as_gate: true,
+        };
+        match candidate.validate() {
+            Ok(()) => candidate,
+            Err(e) => {
+                tracing::warn!(
+                    strategy = "ma_crossover",
+                    error = %e,
+                    "拒絕 strategist 來源匯流權重（驗證失敗），退回趨勢預設 ConfluenceConfig"
+                );
+                confluence::ConfluenceConfig::default()
+            }
         }
     }
 }
@@ -263,8 +283,15 @@ fn default_hurst_regime_boost() -> f64 {
 }
 
 impl BbReversionParams {
+    /// 從 TOML 參數構建 ConfluenceConfig（均值回歸配置）。
+    ///
+    /// QC P2 fail-closed 守衛：DB/TOML 來源權重非法（和≠65 或超範圍）時退回已驗證的
+    /// 均值回歸預設 ConfluenceConfig::reversion()，並記 warn。理由同趨勢配置：不可讓
+    /// 髒權重進入評分；DB 由 operator/MIT 另修，此處只保證安全退回，不改 DB、不改預設值。
+    /// 注意 invert_adx 沿用 self.adx_inverted（均值回歸語意），退回時由 reversion() 提供
+    /// 正確的 invert_adx=true。
     pub fn build_confluence_config(&self) -> confluence::ConfluenceConfig {
-        confluence::ConfluenceConfig {
+        let candidate = confluence::ConfluenceConfig {
             weight_adx: self.weight_adx,
             weight_regime: self.weight_regime,
             weight_volume: self.weight_volume,
@@ -275,6 +302,17 @@ impl BbReversionParams {
             threshold_light: self.confluence_threshold_light,
             threshold_full: self.confluence_threshold_full,
             confluence_as_gate: true,
+        };
+        match candidate.validate() {
+            Ok(()) => candidate,
+            Err(e) => {
+                tracing::warn!(
+                    strategy = "bb_reversion",
+                    error = %e,
+                    "拒絕 strategist 來源匯流權重（驗證失敗），退回均值回歸預設 ConfluenceConfig"
+                );
+                confluence::ConfluenceConfig::reversion()
+            }
         }
     }
 }
@@ -508,8 +546,13 @@ impl BbBreakoutParams {
 
     /// Build ConfluenceConfig from TOML params (breakout profile: qty modifier, not gate).
     /// 從 TOML 參數構建 ConfluenceConfig（突破配置：倉位修正器,非門檻）。
+    ///
+    /// QC P2 fail-closed 守衛：DB/TOML 來源權重非法時退回已驗證的突破預設權重
+    /// （ConfluenceConfig::breakout()），並記 warn。注意僅權重退回；DB 控制的
+    /// confluence_as_gate（門控 / 僅 qty 調整）語意保留，不因權重髒而被翻轉，
+    /// 故退回時以 ..breakout() 補齊權重但顯式保留 self.confluence_as_gate。
     pub fn build_confluence_config(&self) -> confluence::ConfluenceConfig {
-        confluence::ConfluenceConfig {
+        let candidate = confluence::ConfluenceConfig {
             weight_adx: self.weight_adx,
             weight_regime: self.weight_regime,
             weight_volume: self.weight_volume,
@@ -520,6 +563,20 @@ impl BbBreakoutParams {
             threshold_light: self.confluence_threshold_light,
             threshold_full: self.confluence_threshold_full,
             confluence_as_gate: self.confluence_as_gate,
+        };
+        match candidate.validate() {
+            Ok(()) => candidate,
+            Err(e) => {
+                tracing::warn!(
+                    strategy = "bb_breakout",
+                    error = %e,
+                    "拒絕 strategist 來源匯流權重（驗證失敗），退回突破預設 ConfluenceConfig"
+                );
+                confluence::ConfluenceConfig {
+                    confluence_as_gate: self.confluence_as_gate,
+                    ..confluence::ConfluenceConfig::breakout()
+                }
+            }
         }
     }
 }

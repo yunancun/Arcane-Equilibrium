@@ -751,12 +751,25 @@ async function configAction(action) {
   const d = await ocPost('/api/v1/input/config-change', body);
 
   if (btn) btn.disabled = false;
-  if (d) {
+  if (btn) btn.textContent = btn.textContent.replace(' ...', '');
+
+  // A3-GUI-011：configAction POST 與 system-tab 的全局模式切換走同一個 /input/config-change，
+  // 後端 set_system_mode IPC 失敗時回 HTTP 200 + action_result='partial_failure' + rust_synced=false。
+  // 之前僅 if(d) 判 truthy 就顯綠（fake-success，違反 INV-A2）；改用 classifyLiveMutation 對齊
+  // tab-system.html executeModeChange 的判讀：success 顯綠、residualRisk 顯常駐橫幅、其餘顯 error。
+  const r = classifyLiveMutation(d);
+  if (r.severity === 'success' && d && d.action_result === 'success') {
     ocToast('Config change OK', 'success');
     if (d.state_revision) stateRevision = d.state_revision;
     await loadAll();
+  } else if (r.residualRisk) {
+    ocResidualRiskBanner('settings-config-change',
+      '⚠ 配置變更未確認 — ' + r.message + '（Rust 引擎狀態未同步，請手動確認模式）');
+    if (d && d.state_revision) stateRevision = d.state_revision;
+    await loadAll();
   } else {
-    if (btn) btn.textContent = btn.textContent.replace(' ...', '');
+    const codes = d && d.reason_codes ? d.reason_codes.join(', ') : (r.message || '未知錯誤');
+    ocToast('配置變更失敗：' + codes, 'error');
   }
 }
 
