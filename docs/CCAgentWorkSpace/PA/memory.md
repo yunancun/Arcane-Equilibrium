@@ -1,5 +1,27 @@
 # PA Memory — 工作記憶
 
+## 2026-05-30 — P0-LG-3 reality-check：supervised migration 從未存在（operator 前提 + TODO 行 72 雙雙錯）
+
+**觸發**：LG-3 Wave 2.4.A 今日 ~16:00 UTC Gate 1 一過即派；operator 稱「TODO freeze 文字與磁碟矛盾」，要查清防止誤派重建已 apply 的 migration → sqlx hash drift。
+
+**核心結論（與 operator 前提 + 現行 TODO 行 72 全部相反，全 empirical）**：
+1. **supervised_live_audit migration 從未被寫過**。`sql/migrations/`（repo 根 canonical，非 `openclaw_engine/sql/migrations/`）由 V103 直接跳 V106 — V104 是真空洞；`git log --all -S supervised_live_audit` 全史 0 hit；`grep -il supervised sql/migrations/*.sql` = 0。
+2. **operator 說的「V114 = supervised v2」是撞名誤認**：`V114__notification_failsafe_events_hypertable.sql` 是 Wave 5 Packet C 的通知 failsafe 表（header 親讀），與 supervised 無關。不存在 supervised v1/v2 雙檔 → 無撞表。
+3. **PG max=115 ≠ supervised 已 apply**：max 是真，但 115 個版本是 V099/.../V113/V114(notification)/V115(basis)，0 個 supervised。
+4. **現行 TODO 行 72「freeze 過期修正 2026-05-30：V104+V114 supervised 均已存在且已 apply → T4 migration 部分 DONE 禁重建」整段是錯誤資訊**，極可能是某 session 看到 `V114__` 檔 + max=115 就推斷 supervised 已 land，但沒讀 V114 header、沒 grep 內容。必須 revert，否則誤導 E1 跳過寫 V104。
+5. **真實風險反過來**：不是「誤派重建已 apply」，而是「幻覺 V104 已做 → 跳過寫」。sqlx hash drift 在此不適用（supervised 還沒 apply 無 checksum 可 drift）；真紅線 = V104 是 free 號要**新寫**，但**禁動 V099-V115 任何既有檔**。
+6. **MIT 2026-05-27 dry-run 9/9 PASS 的正確語意**：MIT 用「依 spec 手寫的 candidate SQL」在 trading_ai BEGIN/ROLLBACK 驗 schema 可成立，全程未 commit、repo 無真檔。dry-run PASS ≠ migration 已存在。E1 寫出 V104 真檔後須 MIT 再跑一次（含 idempotency double-apply）。
+
+**真實剩餘**：T1 Rust SM core 5 NEW（`rust/openclaw_engine/src/supervised_live_sm/`，~1700 LOC）+ T4 4 NEW（V104 SQL 新寫 + audit writer.rs + healthcheck.py + grep guard.sh，~980 LOC）。`live_session_routes.py` 已存在於 `program_code/exchange_connectors/bybit_connector/control_api_v1/app/`（T3/T5/T7 EXTEND）；`repair_migration_checksum.rs` 已存在 `rust/openclaw_engine/src/bin/`。
+
+**反模式教訓（雙層）**：(a) operator 的「我已確認的事實」5 條錯 4 條 — PA reality-check 價值就在不照單全收，用 `ls` 全列 + V114 header 親讀 + git pickaxe + repo-wide grep 逐條證偽。(b) **更深層教訓 = TODO active state 自身可被「半勘查」污染**：行 72 的錯來自看檔名/看 max 不看內容；驗 migration 存在性必 (i) `ls` 確認檔名 (ii) grep 內容確認語意 (iii) git pickaxe 確認 land 史，三者缺一即可能把 notification 表當成 supervised。**Mac 不可直驗 PG 逐版本內容 → max=115 不含 supervised 屬 inference，dispatch 前須 ssh trade-core 終驗。**
+
+**工具環境註記**：本次 Mac Bash 通道間歇靜默（部分指令執行成功無 stdout）；結論全取自有確實回傳的指令。
+
+**證據路徑**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-30--lg3_reality_check_and_corrected_packet.md`（已複製 Operator/）
+
+---
+
 ## Workflow D — AMD-25-01 Commercialization Exchange-Native Only cascade（2026-05-27）
 
 **觸發**：Operator 2026-05-27 APPROVE AMD-2026-05-25-01 via PM session AskUserQuestion；4-6 hr cascade。
@@ -6801,3 +6823,40 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 - LOC ~740-1010(較 v1 420-560 大, 因 A1 新 metrics+SQL); chain PA→E1(可拆 E1a A1路徑 / E1b A2 adapter+runner 殼 並行)→QC stat review(chain hard gate, 不過不進 E2)→A3+E2 並行→E4 ssh PG 實跑。
 - 教訓: 「復用既有 harness」前必須 cat 該 harness 的 signal gate + cohort 維度 + hard-fail gate, 確認 candidate 的方向/閾值/cohort size 三者都相容; v1 PA 假設 8b 通用未驗 branch 方向 = 與 QC 同類盲區(mock test 不抓語意/方向錯)。
 - spec: docs/execution_plan/specs/2026-05-29--a1a2-stage0r-candidate-runner-spec.md (v2 SUPERSEDES v1)
+
+---
+
+## 2026-05-30 · C4 incident-policy dispatch trigger spec — fail-safe 從 dormant 轉生效的最後一塊
+
+**ticket**：P2-INCIDENT-POLICY-DISPATCH-TRIGGER（Sprint 3）。設計 design-only spec：什麼 runtime 事件觸發 3-way dispatch + 餵 outcome 武裝 C4 的 1h fail-safe timer。
+
+**最 load-bearing 發現（修正 prompt 過期前提）**：prompt 述「C4 a8ba146c 非 build ec995160 祖先、source 未進 build、dormant、需與 incident-trigger 一起部署」。git 實測**已過期**：(1) HEAD 實際 14361a66 不是 prompt 的 5e23da77（後者不存在）；(2) `git merge-base --is-ancestor a8ba146c ec995160`=TRUE → **C4 source 已在 build**（a8ba146c=05-29 21:34 早於 ec995160=05-30 00:18）。C4 dormant 是純 runtime（0 producer→outcome_rx 永空→timer 不武裝），非 source 缺席。對 deploy 依賴章節影響：不是「C4+trigger 一起部署」，而是「trigger（Rust 代碼）自己進下個 --rebuild 即武裝既有 build 內 C4」。已請 PM 修正 TODO §6 deploy 描述。
+
+**環境教訓**：本 srv/ 是 scoped fixture checkout——git 僅追蹤 4 檔（.gitignore/TODO.md/PA memory×2）；openclaw_engine/ 磁碟空 stub；引擎 tree/blob partial clone 不可讀（a8ba146c^{tree}=not a tree object）。**但 commit graph 可讀**（merge-base/log -1 對 sha 有效），故能驗 ancestry 卻不能讀源碼。design-only spec 用 seam contract（prompt+C4 spec 盤上文字，已驗 C4 spec 含 FAILSAFE_FEED×4）即可；producer 精確 file:line 全標「待 IMPL 證實」由 E1 在 build worktree grep 自證。誠實標記 evidence gap 不 fake-read。harness 本次 Read/Bash 大量 stdout 間歇性 drop，靠 tempfile+短 cat 繞過。
+
+**policy 取捨核心**：寧晚勿抖。ArmTimer 收緊到只認真 outage（sustained 窗口+高閾值：bybit 連續8/滑窗15、SM 卡120s、auth 30s），模糊地帶全下放 NotifyOnly；漏接靠通知面兜底不靠武裝面。5 類接（auth_invalid/bybit_fail_closed/sm_halt_stuck = ArmTimer；position_drift = NotifyOnly 因已有降級 paper 止血；engine_dead = 建議先 NotifyOnly-only）+ 3 類不接（migration drift/單次風控拒單/cost_gate）。
+
+**3 架構發現/新增設計**：
+1. C4 seam 三缺口：無 throttle/無 7d cooling/無 disarm。前兩者 producer 側 in-memory ledger 補（class 級 incident_key，不含 symbol/ts 否則 cooling 失效變洪水）；**disarm 是本 ticket 新增設計**（self-heal 清 armed，否則任何 AllFail 必升 Defensive 違反「給 operator 反應時間」原意）。
+2. **engine_dead 自指悖論**：引擎死了 feed sender 也死，FAILSAFE_FEED_SENDERS 是進程內 OnceLock，watchdog 無法直接 send → 先 NotifyOnly-only（watchdog 獨立發通知，堵「engine 死 operator 一定收到」最關鍵漏接），ArmTimer 拆 follow-up（watchdog 側 Defensive 不經 engine P0/P1 風險最高）。
+3. producer 調用序：不是「偵測即 send 空殼」，而是 detect→dispatch(回含三路 *_ok 的 outcome)→send outcome；producer 同時負責呼 dispatch + 轉發 outcome，observe_dispatch 只判 AllFail&&ArmTimer→武裝。
+
+**BB mandatory re-review（接線後 set_trading_stop 真會觸發，C4 舊 APPROVE-WITH-GUARD 前提失效）**：真觸發頻率（bybit 30-60s 抖動是否誤升 Defensive，壓測閾值）/ live slot respawn cmd_tx 不 stale（incident 多發於 auth/engine 異常=slot 剛 respawn 高危交互，沿 LIVE-AUTH-WATCHER P1 教訓）/ 持倉三態 lock_profit 安全 / engine_dead watchdog Defensive 路徑單獨 review。
+
+**AMD**：不違反 AMD-21-01 v2，無需新 AMD；唯 disarm 是 §3/§4 隱含未明寫 → 建議加 §3a clarification（minor amendment，PM/CC 決）。
+
+**file overlap**：worktree feature/incident-policy-trigger。LG-3（signal/indicator）無 overlap；reconciler 修法 B（reconcile/*.rs）潛在 overlap → position_drift producer 等修法 B merge 後再開工。E1 波次 W1 CORE → W2 auth/bybit/SM/watchdog 並行 → W3 drift。
+
+**報告**：docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-30--c4_incident_policy_dispatch_trigger_spec.md（同步複製 Operator/）。
+
+### 2026-05-30 修正（同日 C4 incident-policy spec 自我糾錯，覆蓋上條兩處錯誤）
+
+上條 memory + spec 第一版犯兩個 RCA 級錯誤，最終 spec 已改正，記錄教訓：
+1. **錯認環境為 fixture stub**：上條寫「srv/ 是 scoped fixture，openclaw_engine/ 磁碟空、引擎只在 git 歷史、tree 不可讀」。**錯**——我查錯路徑：引擎在 `rust/openclaw_engine/src/`（不是 `openclaw_engine/`），488 .rs 全在磁碟可讀。single_watcher.rs 30236 bytes/671 行確實存在。教訓：`find openclaw_engine` 回空就斷定「無全樹」是 Mac RCA 盲點重演（不驗證就採納便利結論），應先 `find . -name lib.rs -path '*openclaw*'` 定位真實樹根。
+2. **把 prompt 的 seam 符號名當真實碼**：prompt 述 seam=`FAILSAFE_FEED_SENDERS`/`observe_dispatch`/`outcome_tx`/`outcome_rx`/`SharedFailsafeWatcher`。`grep -rn` 真實樹 = **0 matches**。這些是 prompt/母 spec(920f8299 + 2026-05-28 wire spec §4.5 文字)詞彙，**非** C4(a8ba146c)落地符號。C4 修正母 spec fossil model，用 in-band `PipelineCommand::NotificationFailsafeEscalate`，seam 在 single_watcher.rs + event_consumer/handlers/{notification_failsafe_escalate,risk}.rs + dispatchers/three_way.rs + V114。教訓：design spec 引用 prompt 給的符號名前必 grep 真實碼，否則 E1 照假符號接線。
+
+**deploy 事實更正**：C4 a8ba146c **已是 build ec995160 祖先**（05-29 21:34 < 05-30 00:18）=source 已在 build，TODO line 214 標 DEPLOY BATCHED。dormant 純 runtime（0 producer）。deploy 依賴=incident-trigger(Rust)進下個 --rebuild 即武裝既有 build 內 C4，**非**「C4+trigger 一起部署」。HEAD 實測 14361a66（非 prompt 5e23da77）。
+
+**工具教訓**：本 session 後段對 rust/openclaw_engine/src/ 子樹 Read + Bash stdout 間歇性 0 回傳（檔案確認存在），導致無法 seam 逐行精讀 → spec §0.6 誠實標 evidence gap，producer file:line + 真實 API 全下放 E1 在可讀環境 grep 自證，不 fake-read。
+
+policy 設計本身不受影響（只依賴武裝語意 + arm/notify 語意 + AMD §3.1，這些從 C4 spec + AMD 已確認）：5 接(auth/bybit/sm_halt=ArmTimer, position_drift=NotifyOnly, engine_dead=NotifyOnly-only 先行)+3 不接，sustained 去抖+class 級 throttle+7d cooling+新增 disarm。寧晚勿抖，漏接靠 NotifyOnly 通知面兜底。spec 已重寫覆蓋。
