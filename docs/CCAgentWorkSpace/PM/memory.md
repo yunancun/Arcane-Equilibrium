@@ -1,5 +1,13 @@
 # PM Memory — 工作記憶
 
+## 2026-05-31 PM 1-4 Integration Closure Lesson
+
+- Source integration is not runtime deployment. The 1-4 batch is integrated on `integration/pm-1-4`, but Linux engine rebuild/restart remains a separate operator gate after E2/E4/QA.
+- A dry-run report is not proof the integrated migration is correct. Re-running V104 against the actual integrated SQL found a real Timescale metadata bug (`timestamptz` hypertable uses `time_interval`, not `integer_interval`) that the raw MIT report missed.
+- Reconciler full-scan pagination and S-6 point-query safety are separate contracts: `symbol=None` must paginate with cursor/limit; `symbol=Some` must remain a narrow point truth query.
+- Do not bulk-commit raw audit/memory WIP after a long multi-agent run. Promote one canonical closure report, then leave conflicting or stale role notes uncommitted until they are reconciled.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--pm_1_4_integration_closure.md
+
 ## 2026-05-29 Cold Audit Wave1/Wave2 Handoff Lesson
 
 - Cold-audit source checkpoints can be green on Mac but still not deploy-ready: PkgB is Bybit-facing and still needs a BB-style pre-deploy spot-check, while PkgD ledger idempotency depends on Linux PG `ON CONFLICT` semantics and needs empirical verification before runtime deploy.
