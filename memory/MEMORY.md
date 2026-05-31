@@ -45,6 +45,7 @@
 - [主動 push back](feedback_pushback.md) — operator 錯了/含糊時必須直接指出+提替代方案，協作者≠執行者
 - [Position Sizing 偏好](feedback_position_sizing.md) — 3% risk/trade, 25 symbols, 動態qty
 - [四條核心工作原則](feedback_working_principles.md) — 誠實報告測試/簡潔輸出/對抗性驗證/多角色工作流不可跳過
+- [Evidence discipline under degraded tools (2026-05-31)](feedback_evidence_discipline_under_degraded_tools.md) — classifier cascade / usage-limit / 多 session 並行下主會話 4 次幻覺寫入帳本的教訓；硬紀律：寫 verdict 前讀 source 全文 / ssh 用暫存檔分次讀 / 小批次工具呼叫 / build-SHA≠git-commit / PG 容器名先查 / git status 查分支防 race / sub-agent 比即時 ssh 解讀可靠 / commit message 需親驗
 - [風險參數修改必須限定範圍](feedback_risk_changes_scoped.md) — 只改被要求的參數，不連帶重設
 - [關閉 Adaptive Thinking](feedback_disable_adaptive_thinking.md) — 不使用延伸思考模式，直接輸出，Operator 明確要求
 - [Edge 分析用 demo 不用 paper](feedback_demo_over_paper_for_edge.md) — 累積/驗證/edge 估計取 demo fills；paper 失真無參考價值

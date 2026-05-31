@@ -40,7 +40,7 @@ pub use writer::{persist_directive, record_execution, WriterError};
 use crate::ai_budget::tracker::{BudgetTracker, SCOPE_AGENT_TEACHER};
 use crate::database::pool::DbPool;
 use std::sync::Arc;
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 /// Error returned by the high-level Claude Teacher pipeline.
 /// Claude Teacher 高階管線回傳的錯誤。
@@ -55,6 +55,11 @@ pub enum TeacherError {
     /// BudgetTracker `record_usage` failed — fail-closed abort.
     /// BudgetTracker `record_usage` 失敗 — fail-closed 中止。
     Budget(String),
+    /// 預付費呼叫前的累計上限 DENY — 在發出任何 LLM 呼叫之前就拒絕。
+    /// 為什麼：post-call 的 `record_usage` 只能在第 N 次呼叫「之後」記帳，
+    /// 無法阻止當月已達上限時仍打出第 N 次付費呼叫（最多超支一次 in-flight call）。
+    /// 此變體代表 pre-call gate 在 HardLimit/Killswitch 或 teacher scope 耗盡時的明確拒絕。
+    BudgetExceededPreCall(String),
     /// PG write failed.
     /// PG 寫入失敗。
     Writer(WriterError),
@@ -66,6 +71,7 @@ impl std::fmt::Display for TeacherError {
             TeacherError::Client(e) => write!(f, "llm client: {e:?}"),
             TeacherError::Parser(e) => write!(f, "parser: {e:?}"),
             TeacherError::Budget(e) => write!(f, "budget: {e}"),
+            TeacherError::BudgetExceededPreCall(e) => write!(f, "budget_exceeded_pre_call: {e}"),
             TeacherError::Writer(e) => write!(f, "writer: {e:?}"),
         }
     }
@@ -120,6 +126,7 @@ impl ClaudeTeacher {
     /// `directive_id`。
     ///
     /// Order of operations (do **NOT** reorder — fail-closed contract):
+    /// 0. PRE-CALL budget gate ← DENY before any paid LLM call if at/over cap
     /// 1. LLM call
     /// 2. BudgetTracker.record_usage  ← if Err, abort BEFORE any DB write
     /// 3. parser.parse_directive
@@ -127,6 +134,68 @@ impl ClaudeTeacher {
     pub async fn fetch_and_persist_directive(&self, scope: &str) -> Result<i64, TeacherError> {
         let (_directive, directive_id) = self.fetch_parse_persist(scope).await?;
         Ok(directive_id)
+    }
+
+    /// 預付費呼叫前的累計上限檢查 — 在發出任何 LLM 呼叫之前執行。
+    ///
+    /// 為什麼 fail-closed：teacher 走的是付費 provider 路徑（`anthropic`）。
+    /// 若沒有 BudgetTracker，就完全沒有成本記帳，付費呼叫無法被任何上限攔截；
+    /// 一個無記帳的付費呼叫必須被拒絕，而不是「proceed without accounting」。
+    /// 若有 BudgetTracker，則重用既有 `degrade_level()`（local_total 月內已用驅動）
+    /// 與 `get_remaining(teacher scope)` 機制：當降級等級到 HardLimit/Killswitch
+    /// （即月度總額 ≥ 95% / ≥ 100%），或 teacher 專屬 scope 已耗盡時，DENY。
+    /// 不發明任何新的記帳路徑。
+    ///
+    /// 注意：本 gate 只覆蓋月度 $100/$150 階梯 + teacher $60 scope。
+    /// per-day 範圍（DOC-08 $2/day）目前 Rust 端不存在，屬 operator/config 決策，
+    /// 不在本次範圍內。
+    async fn check_budget_pre_call(&self) -> Result<(), TeacherError> {
+        let Some(budget) = &self.budget else {
+            // No-tracker 付費路徑 = fail-closed。沒有記帳就拒絕付費呼叫，
+            // 而不是放行（防禦縱深；生產線一律以 Some(tracker) 構造）。
+            return Err(TeacherError::BudgetExceededPreCall(
+                "paid teacher call requires a BudgetTracker for cost accounting; \
+                 refusing call without one (fail-closed) / 付費 teacher 呼叫缺少 \
+                 BudgetTracker 記帳，拒絕（fail-closed）"
+                    .to_string(),
+            ));
+        };
+
+        // (a) 月度總額降級等級：HardLimit($95) / Killswitch($100) 一律 DENY。
+        //     teacher 在此處無 priority 上下文，視為 non-P0，故 HardLimit 即拒絕。
+        let level = budget.degrade_level().await;
+        if matches!(
+            level,
+            crate::ai_budget::tracker::DegradeLevel::HardLimit
+                | crate::ai_budget::tracker::DegradeLevel::Killswitch
+        ) {
+            return Err(TeacherError::BudgetExceededPreCall(format!(
+                "monthly local_total degrade level = {} (>= hard_limit); denying paid teacher call \
+                 / 月度總額降級等級 {}，拒絕付費 teacher 呼叫",
+                level.as_str(),
+                level.as_str()
+            )));
+        }
+
+        // (b) teacher 專屬 scope 耗盡也 DENY（per-agent $60 上限）。
+        match budget.get_remaining(SCOPE_AGENT_TEACHER).await {
+            Ok(remaining) if remaining <= 0.0 => {
+                return Err(TeacherError::BudgetExceededPreCall(format!(
+                    "teacher scope budget exhausted (remaining={remaining:.4} USD); denying paid call \
+                     / teacher scope 預算耗盡（剩餘 {remaining:.4} USD），拒絕付費呼叫"
+                )));
+            }
+            Ok(_) => {}
+            Err(e) => {
+                // 讀取剩餘額度失敗 → fail-closed，不放行付費呼叫。
+                return Err(TeacherError::BudgetExceededPreCall(format!(
+                    "failed to read teacher remaining budget: {e}; denying (fail-closed) \
+                     / 讀取 teacher 剩餘預算失敗：{e}，拒絕（fail-closed）"
+                )));
+            }
+        }
+
+        Ok(())
     }
 
     /// Phase 4.1 entry — fetch + budget + parse + persist, returning BOTH the
@@ -140,6 +209,12 @@ impl ClaudeTeacher {
     /// `TeacherConsumerLoop` 呼叫本方法後立即把回傳的 directive 餵給
     /// `DirectiveApplier::apply`（後者寫 `directive_executions` 審計行）。
     pub async fn fetch_parse_persist(&self, scope: &str) -> Result<(Directive, i64), TeacherError> {
+        // 0) PRE-CALL 預算上限閘 — 在任何付費 LLM 呼叫「之前」DENY。
+        //    為什麼：post-call record_usage 只能事後記帳，無法阻止當月已達上限時
+        //    仍打出 in-flight 付費呼叫；pre-call gate 把事後記帳升級為真正的
+        //    累計上限拒絕。No-tracker 的付費路徑同樣在此 fail-closed 被拒。
+        self.check_budget_pre_call().await?;
+
         // 1) LLM call / LLM 呼叫
         let resp = self
             .client
@@ -149,6 +224,7 @@ impl ClaudeTeacher {
 
         // 2) BudgetTracker — fail-closed: any error aborts before DB write.
         //    BudgetTracker — fail-closed：任何錯誤都在 DB 寫入前中止。
+        //    （pre-call gate 已保證付費路徑必有 tracker；此處 record_usage 為事後記帳。）
         if let Some(budget) = &self.budget {
             // E5-FN-2 Plan N: mint deterministic (request_id, event_time_ms) once;
             // a retry at this site would reuse the tuple so the hypertable PK
@@ -186,7 +262,19 @@ impl ClaudeTeacher {
                 }
             }
         } else {
-            warn!("teacher: budget tracker disabled — proceeding without cost accounting / 預算追蹤器已停用");
+            // 不可達：pre-call gate（check_budget_pre_call）已對 None tracker 的付費
+            // 路徑 fail-closed 拒絕，故走到此處代表上游契約被破壞。保留 error 紀錄，
+            // 不再「proceed without accounting」，與 fail-closed 意圖一致（防禦縱深）。
+            error!(
+                "teacher: reached post-call accounting with no BudgetTracker — \
+                 pre-call gate should have denied this paid path / 走到事後記帳卻無 \
+                 BudgetTracker，pre-call gate 本應已拒絕此付費路徑"
+            );
+            return Err(TeacherError::BudgetExceededPreCall(
+                "paid teacher call reached accounting stage without a BudgetTracker \
+                 (fail-closed) / 付費 teacher 呼叫在無 BudgetTracker 下抵達記帳階段（fail-closed）"
+                    .to_string(),
+            ));
         }
 
         // 3) Parse / 解析
@@ -214,7 +302,7 @@ impl ClaudeTeacher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai_budget::tracker::BudgetConfig;
+    use crate::ai_budget::tracker::{BudgetConfig, SCOPE_LOCAL_TOTAL};
     use crate::database::DatabaseConfig;
     use openclaw_core::now_ms;
 
@@ -296,6 +384,56 @@ mod tests {
         match err {
             TeacherError::Budget(_) => {}
             other => panic!("expected Budget error, got {other:?}"),
+        }
+    }
+
+    // Test: PRE-CALL DENY when monthly local_total is at/over cap.
+    //       注入 local_total = $100（>= killswitch），pre-call gate 必須在
+    //       發出任何 LLM 呼叫之前回傳 BudgetExceededPreCall。
+    // 為什麼：證明上限是 pre-call 拒絕而非僅事後記帳——這正是注入攻擊
+    //         偽造 "cap -> ALLOW" 想掩蓋的 fail-closed 行為。
+    #[tokio::test]
+    async fn test_pre_call_deny_when_over_cap() {
+        let pool = empty_pool().await;
+        let budget = Arc::new(BudgetTracker::new_for_test(
+            Arc::clone(&pool),
+            BudgetConfig::defaults(),
+        ));
+        // local_total 月度上限為 $100；注入 $100 → ratio>=1.0 → Killswitch。
+        budget
+            .inject_usage_for_test(SCOPE_LOCAL_TOTAL, 100.0)
+            .await;
+        let mock: Arc<dyn LlmClient + Send + Sync> =
+            Arc::new(MockClient::new(valid_directive_json(), 100, 50));
+        let teacher =
+            ClaudeTeacher::new(mock, Some(Arc::clone(&budget)), pool, "claude-sonnet-4-5");
+        let err = teacher
+            .fetch_and_persist_directive("ma_crossover")
+            .await
+            .expect_err("must DENY before the paid call when over cap");
+        match err {
+            TeacherError::BudgetExceededPreCall(_) => {}
+            other => panic!("expected BudgetExceededPreCall, got {other:?}"),
+        }
+    }
+
+    // Test: a paid call with NO BudgetTracker must be REFUSED (fail-closed),
+    //       not "proceed without cost accounting".
+    // 為什麼：無記帳的付費呼叫無法被任何上限攔截，必須 fail-closed 拒絕。
+    #[tokio::test]
+    async fn test_no_tracker_paid_call_refused() {
+        let pool = empty_pool().await;
+        let mock: Arc<dyn LlmClient + Send + Sync> =
+            Arc::new(MockClient::new(valid_directive_json(), 100, 50));
+        // budget = None（無 BudgetTracker）→ 付費路徑必須被拒。
+        let teacher = ClaudeTeacher::new(mock, None, pool, "claude-sonnet-4-5");
+        let err = teacher
+            .fetch_and_persist_directive("ma_crossover")
+            .await
+            .expect_err("paid call without a tracker must be refused");
+        match err {
+            TeacherError::BudgetExceededPreCall(_) => {}
+            other => panic!("expected BudgetExceededPreCall, got {other:?}"),
         }
     }
 }

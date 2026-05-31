@@ -43,6 +43,31 @@
 - 先清 8 項 Rust P0（2-3 週）→ P1 性能（1-2 週）→ P2 可讀性持續
 - 與 P0-2 21d demo 穩定期（至 ~2026-05-07）並行，不影響 Live gate
 
+## 2026-05-30 optimization_readability_performance_audit 教訓
+
+**報告**：`docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-30--E5--optimization_readability_performance_audit.md`
+
+**Verdict**：P0=0 / P1=1（延續）/ P2=2（新）/ P3=3（新）
+
+**前次修復持久性**：4/9 finding 已修復（step_4_5_dispatch 測試抽出、asyncio.to_thread、statement_timeout、intent_processor/tests.rs）；strategy_ai_routes.py P1 未修復且略增（2536→2552）。
+
+**risk.rs split（commit 46e0e825）評估：REAL COMPLEXITY REDUCTION**
+- risk.rs 822 → 605（-26%）；notification_failsafe_escalate.rs 新建 231 行
+- 職責分離清晰（風控 handler vs failsafe 委派）；re-export 保 caller 零感知
+- 結論：非「僅搬移」，是真實域分離。E5 APPROVE
+
+**BasisAggregator 熱路徑評估：安全**
+- `on_ticker_update` 位於 panel_aggregator event drain loop（非 tick_pipeline on_tick）
+- O(1) HashSet lookup + HashMap insert；60s flush 在 tokio timer arm
+- 唯一優化機會：HashMap entry API 避免 cohort hit 路徑 String key 重複分配（P3）
+- 60s flush 設計與 funding_curve/oi_delta 一致；三 aggregator 串行 flush，設計正確
+
+**新教訓**：
+1. **panel_aggregator 每加新 panel +70-100 LOC 到 mod.rs** → 整合模式導致 mod.rs 快速增長（800 警告 → 825 跨線）；多 panel 整合模塊必制定「測試抽 sibling」規範，每個 panel 整合後即清理
+2. **commands.rs 1972 / governance_routes.py 1978 / intent_processor/mod.rs 1968** 三個「距 2000 硬上限 <32 行」的文件形成系統性風險；下個日常提交即可觸發 merge block；審計必優先警示「距硬上限 <5%」的文件
+3. **文件大小趨勢比絕對值更重要**：strategy_ai_routes.py 2 sprint 均未拆分且持續增長（+16 行），是「P1 忽視模式」；E5 應在報告中標記「連續未修復 sprint 數」以升壓
+4. **HashMap insert vs entry API**：每次呼叫 `insert(key.to_string(), ...)` 在 key 已存在時仍需分配新 String；高頻 ticker path 可用 entry API 消除 warm hit 分配；記入 Rust hot-path allocation checklist
+
 ## 報告索引
 
 | 日期 | 任務 | 文件位置 |
@@ -59,6 +84,7 @@
 | 2026-05-11 | Wave 2.2 LG-1 + LG-2 (8 task) perf+LOC+refactor review | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-11--wave2_2_e5_perf.md` |
 | 2026-05-21 | P1-LG1-DEMO-SLA-VIOLATION H0 hot-path RCA（demo max=2454μs > 1ms SLA）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-21--p1_lg1_demo_sla_violation_hotpath_audit.md` |
 | 2026-05-25 | Pre Sprint 2 runtime hygiene audit (FD 200 leak + 13 cron disabled + path mismatch) | `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-25--runtime_hygiene_audit_pre_sprint_2.md` |
+| 2026-05-30 | 2026-05-17 campaign re-run；risk.rs split 評估 + BasisAggregator 熱路徑 + file-size violation sweep（P1=1 / P2=2 / P3=3）| `docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-30--E5--optimization_readability_performance_audit.md` |
 
 ## 2026-05-10 W-C Caveat 1+2+3 fix perf review 教訓
 
