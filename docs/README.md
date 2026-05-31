@@ -159,6 +159,15 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 
 ## 文档索引 (Document Index)
 
+### 2026-05-31 Alpha-Edge Regime Evidence Governance / AEG-S0
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-05-31--aeg_s0_contracts.md` | AEG-S0 PM-local contract draft：Evidence Storage Contract、Regime Classifier Freeze、Bybit Endpoint Contract、TODO Archive Plan；明確禁止 E1 backfill / retention mutation / endpoint IMPL / alpha scoring 直到 PA/MIT/QC/BB/TW/CC formal review pass。|
+| `execution_plan/2026-05-31--alpha_edge_regime_evidence_engineering_arrangement.md` | Alpha-Edge governance arrangement；現已指向 AEG-S0 contract draft，並保留「PM-local draft 不等於 formal role sign-off」邊界。|
+| `adr/0047-alpha-edge-regime-evidence-governance.md` | ADR-0047：Alpha-Edge promotion evidence 必須 math-primary；bull data 可用但必須標籤化；S4 是全局 falsification overlay；Bybit market APIs 是 raw state input。|
+| `governance_dev/amendments/2026-05-31--AMD-2026-05-31-01-alpha-edge-evidence-governance.md` | AMD-2026-05-31-01：operator clarification；禁止把 bull data ban、Bybit trend oracle、narrative primary evidence 三種錯誤解讀帶入後續實作。|
+
 ### 2026-05-26 Sprint 2 Alpha Tournament SSOT
 
 | 文件 | 内容 |

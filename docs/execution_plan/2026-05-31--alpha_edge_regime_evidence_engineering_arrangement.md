@@ -1,7 +1,7 @@
 # Alpha-Edge Regime Evidence Engineering Arrangement
 
 Date: 2026-05-31
-Status: **PM 2 APPROVED / AEG-S0 READY**
+Status: **PM 2 APPROVED / AEG-S0 PM-LOCAL CONTRACT DRAFTED**
 Owner: PM -> PA/QC/MIT/BB -> E1 only after AEG-S0 contracts pass
 Scope: Alpha-history provenance, breadth automation, local trend/state classification, global regime robustness, side-evidence boundary.
 
@@ -11,11 +11,16 @@ S4 is no longer a standalone 2024 bull-data proof track. It is a global S1-Sx re
 
 Bull data is allowed, but must be labeled. Bybit market APIs are raw state inputs, not prediction. Trend/state labels are generated locally from leak-free, point-in-time features. News / X / Reddit / market-summary agents are secondary side evidence only.
 
-Direct E1 backfill is blocked until AEG-S0 contracts pass.
+Direct E1 backfill is blocked until AEG-S0 contracts pass. PM-local contract
+draft is now `docs/execution_plan/2026-05-31--aeg_s0_contracts.md`; this is
+not a substitute for independent PA/MIT/QC/BB/TW/CC review.
 
 ## 1. AEG-S0 Contract Sprint（NOW）
 
 Purpose: freeze the contracts before implementation. No code, migration, DB, runtime, or backfill work.
+
+Current draft: `docs/execution_plan/2026-05-31--aeg_s0_contracts.md`.
+Formal pass still requires the owner-chain reviews below.
 
 | Session | Owner chain | Output | Acceptance |
 |---|---|---|---|
