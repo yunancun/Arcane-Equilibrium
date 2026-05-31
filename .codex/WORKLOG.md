@@ -476,3 +476,10 @@ YYYY-MM-DD HH:MM TZ
 - verification: TOTP/governance pytest 10/10 PASS; `cargo test -p openclaw_core risk_gov --lib` 27/27 PASS; `cargo test -p openclaw_engine --lib` 3468/3468 PASS, 1 ignored; `git diff --check` planned before commit.
 - OPS outcome: `[80] pg_dump_freshness` fixed by real 4.6G dump + md5/audit/TOC PASS + 03:00 UTC cron install; `[48]` replay registry, `[74]` max-pending reject evidence, `[56]` signed live authorization remain real non-faked gates.
 - boundary: no production TOTP secret generated or read; no manual `authorization.json` write; no fake replay rows or close-maker reject samples; Packet C not marked integrated until engine caller + exchange SL sync + audit emit exist.
+
+2026-06-01 CEST
+- PM task: AEG-S1-FND-1 storage/retention/provenance change-control package after operator authorized two parallel sub-agents.
+- dispatch chain: PM(default) local synthesis + MIT(explorer) read-only storage audit + PA(explorer) read-only change-control/provenance audit.
+- result: FND-1 package landed in `docs/execution_plan/2026-06-01--aeg_s1_fnd1_storage_retention_provenance_change_control.md`; PM report and Operator brief record `market.klines` 1095d + DB provenance ledger recommendation and dedicated research-history storage recommendation for funding/OI/long-short.
+- verification: Linux read-only reflection confirmed current `market.klines=365d`, funding/OI/long-short `=180d`, `_sqlx_migrations` head V115; `git diff --check` PASS.
+- boundary: docs/design/read-only only; no DB write, migration apply, retention mutation, runtime deploy, auth, order, endpoint ingestion, collector runtime, backfill run, alpha scoring, or promotion verdict.

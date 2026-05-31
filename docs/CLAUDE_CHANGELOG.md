@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-01（TODO v101 three-end source sync checkpoint + v100 AEG blocked-item resolution packet + v99 AEG-S0 formal review PASS + v98 AEG-S0 role-review must-fix patch + v97 AEG-S0 PM-local contract draft + v96 V5.8 preservation audit + v95 prune audit + v94 AEG cleanup + v92/v93 version-increment 遷入；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-01（TODO v102 AEG-S1-FND-1 storage change-control package + v101 three-end source sync checkpoint + v100 AEG blocked-item resolution packet + v99 AEG-S0 formal review PASS + v98 AEG-S0 role-review must-fix patch + v97 AEG-S0 PM-local contract draft + v96 V5.8 preservation audit + v95 prune audit + v94 AEG cleanup + v92/v93 version-increment 遷入；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v102 增量（2026-06-01 AEG-S1-FND-1 storage change-control package）**：在 operator 授權兩個並行 sub-agent 後，PM 以 `MIT(explorer)` + `PA(explorer)` 並行 read-only audit 加本地 Linux reflection 完成 `AEG-S1-FND-1`。新增 `docs/execution_plan/2026-06-01--aeg_s1_fnd1_storage_retention_provenance_change_control.md`、PM integration report 與 Operator brief。結論：V002 permanent-retention comment 不是真實 policy；V006 + Linux runtime 仍是 `market.klines=365d`、funding/OI/long-short `=180d`。推薦 `market.klines` 1095d + DB provenance ledger 作為 OHLCV path，funding/OI/long-short 走 dedicated research-history storage；raw-table-only extension 不足以成為 promotion-grade provenance。FND-1 作為 decision package 完成，但 runtime retention mutation、new schema/provenance ledger、Bybit historical writer、18mo backfill、endpoint ingestion、collector IMPL、alpha scoring 仍 blocked。
 
 **v101 增量（2026-06-01 three-end source sync checkpoint）**：operator 要求三端同步後，PM 將 Mac `main`、origin `main`、Linux `trade-core` `/home/ncyu/BybitOpenClaw/srv` fast-forward 到同一 source head；本輪只做 source/docs/governance sync，無 rebuild/restart、DB、auth、order、execution、collector、strategy 改動。下一步仍是 AEG-S1 Foundation docs/design/read-only dispatch：`AEG-S1-FND-1..4` + `S2-GATE-B-PREP`；backfill writer、retention runtime mutation、endpoint ingestion、collector IMPL、alpha scoring 保持 blocked。
 
