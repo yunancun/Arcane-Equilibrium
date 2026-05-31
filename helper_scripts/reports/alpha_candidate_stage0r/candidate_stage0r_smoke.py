@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
-"""Smoke test — Alpha Tournament Candidate Stage 0R Runner（Track B reduced scope）。
+"""Smoke test — Alpha Tournament Candidate Stage 0R Runner（Track B）。
 
 MODULE_NOTE
 模塊用途：對 candidate_stage0r_runner + a2_cascade_adapter 的純合成數據驗證。
 為什麼用合成數據而非 PG dry-run：PG empirical 留給 E4 regression（Linux ssh）；
 本檔僅驗 (1) A2 functional 路徑能跑出 packet (2) 6-check 三態結構 (3)
-sample_sufficiency split (4) A1 draft_only stub (5) AMD §3.2 forbidden-output
+sample_sufficiency split (4) A1 functional/fallback split (5) AMD §3.2 forbidden-output
 紀律 (6) k_total override DSR 重算 (fast vs raw equivalence) (7) time-block
 CSCV PBO 行為。
 
 主要 cases：
   - A2 happy-ish path：合成 2-symbol 過 threshold rows → packet 結構完整。
   - A2 sample_insufficient：少樣本 → observe_more（非 reject）。
-  - A1 draft_only：硬標 basis_panel_infra_missing + infra_gap=True + 無 cohort code。
+  - A1 functional：basis/funding rows 可用時不走 stale stub，且 net_bps 含 funding carry。
+  - A1 fallback：source unavailable 時才標 basis_panel_infra_missing + infra_gap=True。
   - forbidden-output assert：整 packet JSON 0 hit forbidden token（AMD §3.2）。
   - k_total override：DSR 用 candidate k_total（4+k_prior）非 8c 291600 inflation。
   - time-block CSCV：≥4 days → pbo 非 None；<4 days → pbo None observe_more。
@@ -46,6 +47,9 @@ try:
     from .candidate_stage0r_runner import (  # type: ignore
         A1_BASIS_INFRA_MISSING_REASON,
         A1_BASIS_PREREQ_TICKET,
+        A1_ALPHA_SOURCE_ID,
+        A1_HOLD_HOURS,
+        a1_candidate_packet,
         a1_draft_only_packet,
         run_candidates,
         _time_block_cscv_pbo,
@@ -65,6 +69,9 @@ except ImportError:
     from candidate_stage0r_runner import (  # type: ignore
         A1_BASIS_INFRA_MISSING_REASON,
         A1_BASIS_PREREQ_TICKET,
+        A1_ALPHA_SOURCE_ID,
+        A1_HOLD_HOURS,
+        a1_candidate_packet,
         a1_draft_only_packet,
         run_candidates,
         _time_block_cscv_pbo,
@@ -138,6 +145,42 @@ def _build_a2_panel(*, n_days: int, per_day: int, fwd_bps: float, btc_notional: 
                              direction=direction, cluster_notional=btc_notional, fwd_bps=fwd_bps))
             rows.append(_row(symbol="ETHUSDT", day_offset=d, minute_offset=i * 7 + 3,
                              direction=direction, cluster_notional=eth_notional, fwd_bps=fwd_bps))
+    return rows
+
+
+def _a1_row(
+    *,
+    symbol: str,
+    day_offset: int,
+    funding_rate_bps: float = 20.0,
+    basis_pct: float = 0.10,
+    price_gross_bps: float = -10.0,
+    funding_carry_bps: float = 40.0,
+    cost_bps: float = 22.0,
+) -> dict[str, Any]:
+    """合成一個 A1 SQL row；net 必含 funding carry."""
+    ts_ms = _BASE_MS + day_offset * 86_400_000
+    return {
+        "symbol": symbol,
+        "signal_ts_ms": ts_ms,
+        "funding_snapshot_ts_ms": ts_ms - 60_000,
+        "funding_rate_bps": funding_rate_bps,
+        "funding_annualized": funding_rate_bps / 10_000.0 * 1095.0,
+        "basis_snapshot_ts_ms": ts_ms - 60_000,
+        "basis_pct": basis_pct,
+        "exit_ts_ms": ts_ms + A1_HOLD_HOURS * 3_600_000,
+        "price_gross_bps": price_gross_bps,
+        "funding_carry_bps": funding_carry_bps,
+        "funding_settlement_count": 3,
+        "net_bps": price_gross_bps + funding_carry_bps - cost_bps,
+    }
+
+
+def _build_a1_panel(*, n_days: int) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for d in range(n_days):
+        rows.append(_a1_row(symbol="BTCUSDT", day_offset=d))
+        rows.append(_a1_row(symbol="ETHUSDT", day_offset=d, funding_carry_bps=45.0))
     return rows
 
 
@@ -218,8 +261,8 @@ def _check_per_symbol_threshold_filter(failures: list[str]) -> None:
         failures.append(f"per-symbol threshold 過濾錯: n_filtered_rows={res.get('n_filtered_rows')} (應=1)")
 
 
-def _check_a1_draft_only(failures: list[str]) -> None:
-    """A1 stub：draft_only(basis_panel_infra_missing) + infra_gap + 無 cohort。"""
+def _check_a1_source_unavailable_draft_only(failures: list[str]) -> None:
+    """A1 source unavailable 時才 draft_only(basis_panel_infra_missing)。"""
     p = a1_draft_only_packet()
     if p.get("verdict") != "draft_only":
         failures.append(f"a1 verdict 錯: {p.get('verdict')}")
@@ -235,12 +278,48 @@ def _check_a1_draft_only(failures: list[str]) -> None:
         failures.append(f"a1 path 應標明無 cohort: {p.get('path')}")
 
 
+def _check_a1_functional_packet_includes_funding_carry(failures: list[str]) -> None:
+    """A1 functional path：不再 stale stub；net_bps 必包含 funding carry。"""
+    rows = _build_a1_panel(n_days=5)
+    p = a1_candidate_packet(rows, k_prior=10, k_prior_source="manual")
+    if p.get("alpha_source_id") != A1_ALPHA_SOURCE_ID:
+        failures.append(f"a1 alpha_source_id 錯: {p.get('alpha_source_id')}")
+    if p.get("path") != "dedicated_a1_funding_short_with_funding_carry":
+        failures.append(f"a1 path 不應是 stub: {p.get('path')}")
+    if p.get("infra_gap") is not False:
+        failures.append("a1 functional path infra_gap 應 False")
+    if A1_BASIS_INFRA_MISSING_REASON in (p.get("fail_reasons") or []):
+        failures.append("a1 functional path 不應再輸出 basis_panel_infra_missing")
+    stats = p.get("stats") or {}
+    if not isinstance(stats, dict) or int(stats.get("n") or 0) <= 0:
+        failures.append("a1 functional path 應選出合成 signals")
+    gate = p.get("gate_diagnostics") or {}
+    if not isinstance(gate, dict) or int(gate.get("selected_signals") or 0) <= 0:
+        failures.append("a1 gate_diagnostics.selected_signals 應 >0")
+    if not isinstance(gate, dict) or float(gate.get("edge_break_even_funding_rate_bps") or 0.0) <= 0.0:
+        failures.append("a1 gate_diagnostics 應揭露 edge break-even funding bps")
+    # 合成 row price_gross=-10, funding_carry=40, cost=22 → net=+8；
+    # 若漏 funding carry，會是 -32。這鎖住核心回歸。
+    avg_net = stats.get("avg_net_bps") if isinstance(stats, dict) else None
+    if avg_net is None or float(avg_net) <= 0:
+        failures.append(f"a1 net 應因 funding carry 為正，got {avg_net}")
+
+
 def _check_full_packet_and_forbidden_output(failures: list[str]) -> None:
     """整 packet 跑通 + AMD §3.2 forbidden-output JSON 0 hit。"""
     panel = _build_a2_panel(n_days=6, per_day=4, fwd_bps=40.0,
                             btc_notional=600_000.0, eth_notional=400_000.0)
+    a1_rows = _build_a1_panel(n_days=5)
     cfg = A2CandidateConfig()
-    packet = run_candidates(panel, a2_total_bucket_count=1478, window_days=14, a2_cfg=cfg)
+    packet = run_candidates(
+        panel,
+        a2_total_bucket_count=1478,
+        window_days=14,
+        a1_feature_rows=a1_rows,
+        a1_k_prior=10,
+        a1_k_prior_source="manual",
+        a2_cfg=cfg,
+    )
     # 結構。
     if packet.get("runner_version") != "candidate_stage0r.v2":
         failures.append("runner_version 錯")
@@ -256,9 +335,8 @@ def _check_full_packet_and_forbidden_output(failures: list[str]) -> None:
         failures.append("governance_attest.forbidden_output_present 應 False")
     if ga.get("no_toml_mutation") is not True:
         failures.append("governance_attest.no_toml_mutation 應 True")
-    # prereq ticket。
-    if not any(t.get("ticket") == A1_BASIS_PREREQ_TICKET for t in packet.get("prereq_tickets", [])):
-        failures.append("packet 缺 P2-BASIS-PANEL-INFRA prereq ticket")
+    if any(t.get("ticket") == A1_BASIS_PREREQ_TICKET for t in packet.get("prereq_tickets", [])):
+        failures.append("A1 functional source 可用時不應輸出 P2-BASIS-PANEL-INFRA prereq ticket")
     # forbidden-output：整 JSON 0 hit（排除 governance_attest 自我宣告欄位的合法 token）。
     blob = json.dumps(packet, ensure_ascii=False)
     # governance_attest 欄位名含 no_stage1_pass/no_auto_promote 等是合法宣告，
@@ -282,7 +360,13 @@ def _check_sample_insufficient_observe_more(failures: list[str]) -> None:
     panel = _build_a2_panel(n_days=1, per_day=2, fwd_bps=40.0,
                             btc_notional=600_000.0, eth_notional=400_000.0)
     cfg = A2CandidateConfig()
-    packet = run_candidates(panel, a2_total_bucket_count=50, window_days=14, a2_cfg=cfg)
+    packet = run_candidates(
+        panel,
+        a2_total_bucket_count=50,
+        window_days=14,
+        a1_feature_rows=[],
+        a2_cfg=cfg,
+    )
     a2 = packet["candidates"]["A2_liquidation_cascade_fade"]
     if a2.get("verdict") != "observe_more":
         failures.append(f"少樣本應 observe_more, got {a2.get('verdict')}")
@@ -291,7 +375,7 @@ def _check_sample_insufficient_observe_more(failures: list[str]) -> None:
     ss = a2.get("sample_sufficiency") or {}
     if ss.get("classification") not in ("sample_insufficient",):
         failures.append(f"少樣本 classification 應 sample_insufficient, got {ss.get('classification')}")
-    # 整體 verdict 也應 observe_more（A2 主導，A1 draft_only 不阻）。
+    # 整體 verdict 也應 observe_more（A2 sample 不足；A1 空 rows 不阻）。
     if packet.get("verdict") != "observe_more":
         failures.append(f"整體 verdict 應 observe_more, got {packet.get('verdict')}")
 
@@ -328,17 +412,12 @@ def _check_time_block_cscv(failures: list[str]) -> None:
         failures.append("pbo method 應 time_block_cscv")
 
 
-def _check_no_a1_cohort_code(failures: list[str]) -> None:
-    """確認 A1 無 cohort dead code：無 a1_funding_short_metrics.py / a1 SQL。
-
-    spec v2 §3 + task brief §3：basis 無源 → A1 cohort 不建（dead code 禁）。
-    """
+def _check_a1_sql_exists_after_basis_land(failures: list[str]) -> None:
+    """basis_panel 已 land 後，A1 SQL 必存在，避免 stale infra stub 回歸。"""
     pkg_dir = Path(__file__).resolve().parent
-    if (pkg_dir / "a1_funding_short_metrics.py").exists():
-        failures.append("禁止：a1_funding_short_metrics.py 存在（basis 無源 = dead code）")
     sql_dir = pkg_dir.parents[2] / "sql" / "queries"
-    if (sql_dir / "alpha_candidate_a1_funding_short_features.sql").exists():
-        failures.append("禁止：alpha_candidate_a1_funding_short_features.sql 存在（A1 dead SQL）")
+    if not (sql_dir / "alpha_candidate_a1_funding_short_features.sql").exists():
+        failures.append("alpha_candidate_a1_funding_short_features.sql 缺失；A1 會退回 stale stub")
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -481,12 +560,13 @@ def main(argv: list[str] | None = None) -> int:
     _check_a2_packet_structure(failures)
     _check_k_total_override(failures)
     _check_per_symbol_threshold_filter(failures)
-    _check_a1_draft_only(failures)
+    _check_a1_source_unavailable_draft_only(failures)
+    _check_a1_functional_packet_includes_funding_carry(failures)
     _check_full_packet_and_forbidden_output(failures)
     _check_sample_insufficient_observe_more(failures)
     _check_sample_sufficiency_classify(failures)
     _check_time_block_cscv(failures)
-    _check_no_a1_cohort_code(failures)
+    _check_a1_sql_exists_after_basis_land(failures)
     _check_k_prior_auto_query_present(failures)
     _check_k_prior_fail_closed_unavailable(failures)
     _check_k_prior_unavailable_downgrades_verdict(failures)
