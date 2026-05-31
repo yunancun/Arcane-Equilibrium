@@ -1,5 +1,12 @@
 # PM Memory — 工作記憶
 
+## 2026-05-31 Alpha-Edge NOW 3 Dispatch Lesson
+
+- Track 1 and Track 4 retention gates are coupled. Extending `market.klines` to 1095d only unlocks multi-day price history; funding-directional replay also needs a `market.funding_rates` 180d retention/storage decision before 2024 bull funding rows can persist.
+- Gate-A execution reachability is not alpha proof. S2 listing fade can proceed past the maker-fill kill gate, but production collector IMPL still needs a longer BB PreLaunch phase-transition probe plus capture-only isolation review.
+- Backfill collection and analysis breadth should be separated: collect the full survivorship-corrected 18mo universe, but start Track 1 analysis with core25 unless cross-sectional momentum reports breadth-limited.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--alpha_edge_now_three_parallel_dispatch.md
+
 ## 2026-05-31 PM 1-4 Integration Closure Lesson
 
 - Source integration is not runtime deployment. The 1-4 batch is integrated on `integration/pm-1-4`, but Linux engine rebuild/restart remains a separate operator gate after E2/E4/QA.

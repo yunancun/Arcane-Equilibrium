@@ -4,7 +4,7 @@
 |------|------|
 | Date | 2026-05-31 |
 | Author | PA (Project Architect) |
-| Status | **PA DESIGN — awaiting PM 2nd sign-off**（PM 1st sign-off 已收 QC 解決方案研究提議 + 3 條強調）|
+| Status | **PM 2 PASS / NOW DISPATCHED 2026-05-31**（S1/S2/S4 results recorded in `TODO.md` §6.1；original PA design retained below）|
 | Ticket family | `ALPHA-EDGE-*`（program-level；本計劃定義 4 track + wave/session 拆分）|
 | 改動風險 | 計劃本身=文檔（低）；下轄 session 含 **高**（collector listing-capture Rust + WS 訂閱面、M7 V116 schema/detector）與 **中**（backfill 腳本、回測 harness）；硬邊界 **0 觸碰**（全 read-only research + capture-only 旁路）|
 | Upstream evidence | `docs/audits/2026-05-31--p0_edge_cost_wall_investigation.md`（PM 全 session findings 匯報）；3 E1-ready spec（§6 整合表）；戰略決策 `TODO.md` v92（commit `3a7c4853`）|
