@@ -1,8 +1,8 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-**版本** v95 ｜ **日期** 2026-05-31 ｜ **source HEAD** v95 doc checkpoint after prune audit；runtime unchanged from latest v87 deploy snapshot.
+**版本** v96 ｜ **日期** 2026-05-31 ｜ **source HEAD** v96 doc checkpoint after V5.8 preservation audit；runtime unchanged from latest v87 deploy snapshot.
 **當前主線**：P0-EDGE-1 Alpha-Edge Regime Evidence Governance。AEG-S0 contract sprint 是唯一可派的 Alpha-Edge next action；E1 backfill / DB retention / endpoint IMPL / alpha scoring 全部 blocked until AEG-S0 passes.
-**v95 audit note**：v94 清理方向正確但 active 面砍過頭；本版補回仍有 gate / trigger / owner 的舊基礎，不恢復歷史敘事。
+**v96 audit note**：V5.8 設計未被刪除；它作為長期 13-module autonomy architecture 保留，active TODO 只保留可派工 posture。詳見 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--v58_design_progress_preservation_audit.md`。
 **歷史詳情**：version log `docs/CLAUDE_CHANGELOG.md`；v94 prune audit `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--todo_v94_prune_audit.md`；pre-cleanup archive `docs/archive/2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`；older v92 archive `docs/archive/2026-05-31--todo_v92_archive.md`。
 
 ---
@@ -11,7 +11,7 @@
 
 | Area | Current state | Next action |
 |---|---|---|
-| Source sync | Mac `main` is the active source branch; v95 is docs/TODO audit only. | Commit + push, then fast-forward Linux source. |
+| Source sync | Mac `main` is the active source branch; v96 is docs/TODO audit only. | Commit + push, then fast-forward Linux source. |
 | Runtime | Latest verified deploy remains v87 2026-05-31: Linux engine/API/watchdog healthy; engine PID 968350 in archived snapshot; healthz 200; no runtime rebuild in AEG governance/TODO batches. | No deploy in this batch. Refresh only before runtime-affecting work. |
 | Runtime caveat | system-level `openclaw-engine.service` / system watchdog install still sudo/operator-gated; current protection is user watchdog + linger + manual engine process. | Operator schedules system-level install window. |
 | Passive health residual | `[48] replay_manifest_registry_growth`, `[74] close_maker_reject_samples`, `[56] live_pipeline_active` remain OPS residual / evidence queue; not OPS-1 reversal. | Keep explicit in OPS queue; do not mark all-green until resolved or accepted. |
@@ -108,6 +108,8 @@ AEG is not a replacement of the prior design. It integrates and constrains these
 | `Sprint 2 / Stage 0R legacy alpha` | SUBORDINATE to AEG | Keep runner/evidence waits visible; no promotion outside AEG gates. |
 
 ### §3.1 M1-M13 Compact Matrix
+
+Preservation checkpoint: V5.8 full design files are retained in `docs/execution_plan/2026-05-20--execution-plan-v5.8.md`, module specs, ADR-0034..0045, and `docs/README.md`; current audit is `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--v58_design_progress_preservation_audit.md`. Do not expand TODO back into the full V5.8 ledger; keep only active posture and gates here.
 
 | Module | Current posture | Gate / next action |
 |---|---|---|
