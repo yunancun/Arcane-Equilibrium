@@ -12,6 +12,19 @@
 
 ---
 
+## -1. Operator Amendments After NOW Dispatch（2026-05-31）
+
+**Authority**: operator decision after S1-W1-S1 / S2-W0-S1 / S4-W0-S1 reports.
+
+1. **S1 retention/window approved**: `market.klines` retention extension `365d -> 1095d` is approved in principle; Track 1 primary backfill window is **18mo**. If execution happens on 2026-06-01, the 18mo analytical window is approximately **2024-12-01 -> 2026-06-01**; supplemental regime/stress slices may explicitly include 2024-11 but cannot dominate verdicts.
+2. **Breadth is automated evidence, not manual judgment**: collect the full survivorship-corrected universe, start primary analysis with core25, and add an automated breadth-ladder pass before S1-W2/S1-W3 verdict. Required ladder: core25, scanner-active, top-liquidity 40-50, and full survivorship/cohort diagnostics where sample quality permits. Required rerun triggers: initial post-backfill, monthly when ≥30d new data accrues, universe drift >10%, and before any promotion claim.
+3. **S4 is downgraded**: 2024 bull funding data is useful for falsification/regime sensitivity only. It must not be used as standalone alpha proof or promotion evidence.
+4. **Regime robustness applies to S1-Sx, not only S4**: every alpha candidate verdict must report bull/range/bear/chop/high-vol slices where data supports them, stale-data sensitivity, and whether positive performance is a directional market-rally artifact. Bull-only positive results are classified as regime-bet / learning-only unless cross-regime robustness is separately proven.
+
+Immediate next packet before E1 implementation: PA/MIT must amend the execution plan for alpha-history storage, breadth-ladder automation, and global regime robustness gates.
+
+---
+
 ## 0. PM 2nd sign-off 該檢查的 5 條（最 load-bearing）
 
 > 這 5 條是本計劃最容易出錯、最影響後續 dispatch 正確性的判斷。PM 2 簽前逐條核。

@@ -1,5 +1,11 @@
 # PM Memory — 工作記憶
 
+## 2026-05-31 Alpha-Edge Operator Amendment Lesson
+
+- Operator accepted `market.klines` 1095d + 18mo + full survivorship collection / core25 primary analysis, but explicitly required breadth to become automated evidence rather than an ad hoc later PM call. Future S1 work needs a breadth-ladder runner/report before verdict.
+- S4 was downgraded because bull-only 2024 data can create false confidence and may be stale. The durable rule is broader: all S1-Sx alpha verdicts need cross-regime robustness/falsification, not just Track 4.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--alpha_edge_operator_decisions.md
+
 ## 2026-05-31 Alpha-Edge NOW 3 Dispatch Lesson
 
 - Track 1 and Track 4 retention gates are coupled. Extending `market.klines` to 1095d only unlocks multi-day price history; funding-directional replay also needs a `market.funding_rates` 180d retention/storage decision before 2024 bull funding rows can persist.
