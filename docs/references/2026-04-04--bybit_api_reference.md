@@ -70,8 +70,8 @@ Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
 - **調用**: `client.get_mark_price_klines(category, symbol, interval, start, end, limit)`
 - **Bybit 路徑**: `GET /v5/market/mark-price-kline`
 - **Input**: 同 `get_klines`
-- **Output**: `BybitResult<Vec<KlineBar>>`（同上）
-- **關聯程式**: `market_data_client.rs:348`
+- **Output**: price-only candle list `[startTime, openPrice, highPrice, lowPrice, closePrice]`，**沒有** volume / turnover；不得重用 standard `KlineBar` parser/schema。
+- **關聯程式**: 本地 client/parser 尚未 verified；AEG-S1 前需 BB review。
 
 ---
 
@@ -80,8 +80,8 @@ Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
 - **調用**: `client.get_premium_index_klines(category, symbol, interval, start, end, limit)`
 - **Bybit 路徑**: `GET /v5/market/premium-index-price-kline`
 - **Input**: 同 `get_klines`
-- **Output**: `BybitResult<Vec<KlineBar>>`（同上）
-- **關聯程式**: `market_data_client.rs:376`
+- **Output**: price-only candle list `[startTime, openPrice, highPrice, lowPrice, closePrice]`，**沒有** volume / turnover；不得重用 standard `KlineBar` parser/schema。
+- **關聯程式**: 本地 client/parser 尚未 verified；AEG-S1 前需 BB review。
 
 ---
 
@@ -90,8 +90,8 @@ Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
 - **調用**: `client.get_index_price_klines(category, symbol, interval, start, end, limit)`
 - **Bybit 路徑**: `GET /v5/market/index-price-kline`
 - **Input**: 同 `get_klines`
-- **Output**: `BybitResult<Vec<KlineBar>>`（同上）
-- **關聯程式**: `market_data_client.rs:876`
+- **Output**: price-only candle list `[startTime, openPrice, highPrice, lowPrice, closePrice]`，**沒有** volume / turnover；不得重用 standard `KlineBar` parser/schema。
+- **關聯程式**: 本地 client/parser 尚未 verified；AEG-S1 前需 BB review。
 
 ---
 

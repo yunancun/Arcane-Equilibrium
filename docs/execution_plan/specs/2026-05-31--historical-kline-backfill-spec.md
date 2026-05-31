@@ -1,9 +1,15 @@
 # Spec — Historical Kline Backfill (Bybit Daily + 4h, >=12mo) for Multi-Day Trend Robust Test
 
-**Date**: 2026-05-31 · **Author**: MIT (ML & DB Auditor) · **Status**: E1-READY (spec only; 0 code, 0 schema change, 0 backfill executed)
-**Chain**: MIT spec -> E1 (backfill script + BB API check) -> E1 run (Linux) -> MIT data-quality verify -> MIT re-run multi-day diagnostic on deep window
+**Date**: 2026-05-31 · **Author**: MIT (ML & DB Auditor) · **Status**: AEG-BLOCKED / SPEC ONLY (former executable posture is superseded by AEG-S0; 0 code, 0 schema change, 0 backfill executed)
+**Chain**: MIT spec -> AEG-S0/S1 gate -> E1 (only after PM opens a scoped task) -> MIT data-quality verify -> MIT re-run multi-day diagnostic on deep window
 **Trigger**: operator directive — invest in data infra to unblock cost-wall-escape category #2 (low-turnover multi-day perp TREND). Fastest path to robust TSMOM/cross-sectional test.
 **Upstream evidence**: `docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-31--cost_wall_escape_2_multiday_trend_diagnostic.md` (R-2b): dilution mechanism VALIDATED (multi-day gross 389-1213 bps, all-in cost ~3-4% of move); edge NOT establishable because `market.klines` is only **56 days** (collector onset 2026-04-05 hard lower bound) => ~8 independent weekly periods << SSOT §5 n>=30 gate. **Bottleneck is historical depth, not mechanism.** §7 HINT: backfill Bybit daily/4h history (read-only, Bybit-native) is the single highest-leverage unblock vs waiting for live collector accumulation (~2026-10).
+
+> **AEG gate override (2026-05-31)**: this spec is not executable as an E1
+> ticket until `docs/execution_plan/2026-05-31--aeg_s0_contracts.md` passes
+> formal PA/MIT/QC/BB/TW/CC review and PM opens an AEG-S1 scoped task. E1 must
+> not run a backfill writer, mutate retention, implement endpoints, or write DB
+> data from this spec alone.
 
 ---
 
@@ -76,14 +82,14 @@
   - 18-24mo backfill (2024-05/11 -> now): months 13-24 are **already past `drop_after`** and will be dropped on the **next daily retention fire** (within 24h). RISK: CRITICAL — most of the deep history is loaded then immediately deleted. The diagnostic would see <=12mo, defeating the 18-24mo goal.
 - **This is a pre-backfill blocker. E1 MUST NOT run the >12mo backfill until ONE of these is resolved (operator/MIT decision, see §7-A):**
   1. **(RECOMMENDED) Carve a retention exemption for the deep-history timeframes.** TimescaleDB retention is per-hypertable, not per-timeframe; so a same-table exemption is not natively granular. Cleanest options:
-     - 1a. **Remove/extend `policy_retention` on `klines`** to e.g. `drop_after=1095d` (3y) so 24mo survives. This is a one-line `remove_retention_policy('market.klines')` + `add_retention_policy(..., INTERVAL '1095 days')`. Operator-run, reversible. **Trade-off**: the high-volume 1m/5m rows also keep 3y -> PG growth. Mitigate: 1m at ~1.3M rows/56d => ~8.6M/yr => ~26M for 3y for 1m alone; with compression after 14d this is acceptable on the 40TB NAS but MUST be sized by MIT/operator before commit (see §3 capacity).
+     - 1a. **Remove/extend `policy_retention` on `klines`** to e.g. `drop_after=1095d` (3y) so 24mo survives. Under AEG this is **not** an operator one-liner: it requires MIT migration/change-control design, Linux PG dry-run, double-apply safety, E2/E4 review, rollback/verify evidence, and PM gate. **Trade-off**: the high-volume 1m/5m rows also keep 3y -> PG growth. Mitigate: 1m at ~1.3M rows/56d => ~8.6M/yr => ~26M for 3y for 1m alone; with compression after 14d this is acceptable on the 40TB NAS but MUST be sized by MIT/operator before commit (see §3 capacity).
      - 1b. **Dedicated separate hypertable for deep history** (e.g. `market.klines_history`, daily+4h only, no retention) — but this is a schema change (MIT migration, out of THIS spec's E1 scope) and forks the diagnostic's query surface. Defer unless 1a's PG-growth is unacceptable.
   2. **Accept 12mo only** (not 18-24mo) AND set retention so 12mo is safe (e.g. `drop_after=400d` buffer). 12mo daily = ~50 independent weekly periods => clears SSOT §5 n>=30 for weekly-or-longer. This is the MINIMUM viable unblock and the lowest-risk. R-2b §7 asks for ">=6 months ... (>=50-100 independent 14-day periods)"; 12mo daily gives ~26 non-overlapping 14-day periods (borderline) or ~50 weekly — **MIT recommends 18mo as the sweet spot if retention is extended, else 12mo as floor.**
 - **MIT default recommendation**: option **1a (extend retention to 1095d)** + backfill **18 months** daily + 4h. Rationale: 18mo daily = ~39 non-overlapping 14-day periods + ~78 weekly periods => robustly clears n>=30 and gives headroom for DSR deflation of the 8-cell parameter search R-2b flagged. Extending retention is reversible and operator-gated.
 
 ### 1.5 audit_migrations / Guard note (FACT)
 - This spec proposes **NO new V### migration** (no schema change; backfill is pure data INSERT into an existing table via the existing column set). Therefore Guard A/B/C are N/A for the backfill itself.
-- **IF** operator chooses §1.4 option 1b (separate `klines_history` table) OR §4 chooses to add a provenance column, **THAT becomes a separate MIT/E2 migration with full Guard A/B/C + Linux PG dry-run (CLAUDE.md "Data, Migrations, And Validation")** — explicitly out of this E1 backfill spec's scope and a precondition handed back to PM.
+- **IF** operator chooses §1.4 option 1a retention mutation, option 1b separate `klines_history` table, OR §4 chooses to add a provenance column/ledger, **THAT becomes a separate MIT/E2 migration or change-control package with full Guard A/B/C + Linux PG dry-run (CLAUDE.md "Data, Migrations, And Validation")** — explicitly out of this E1 backfill spec's scope and a precondition handed back to PM.
 
 ---
 
@@ -95,8 +101,8 @@
 | Window (RECOMMENDED) | **18 months** (2024-11-30 -> 2026-05-31) | ~39 non-overlapping 14d periods + ~78 weekly => clears SSOT §5 n>=30 + DSR headroom. REQUIRES §1.4 retention extension. |
 | Window (FLOOR if retention not extended) | **12 months** (2025-05-31 -> 2026-05-31) | ~26 non-overlapping 14d / ~50 weekly. Minimum to clear n>=30 for weekly. Needs retention `drop_after>=400d`. |
 | Window (STRETCH) | 24 months | Only if §1.4-1a applied with 1095d retention AND §3 capacity signed off. Diminishing returns vs 18mo for current goal. |
-| Symbols | **core 25 (current scanner universe) as the MUST set; OPTIONAL extend to the liquid majors present in the 137-142 symbol universe** | R-2b sweep used 10 liquid symbols; cross-sectional needs breadth. 25 = current active scanner set (per RiskConfig universe — E1 confirm the live list, do not hardcode). Extending to ~40-50 liquid perps improves cross-sectional breadth but period-count (~8 today, ~78 at 18mo) remains the binding constraint per R-2b §3, so 25 is sufficient for the FIRST deep test; breadth is a second-order improvement. |
-| Symbol source | live scanner universe / RiskConfig (E1 query at runtime) | Do NOT hardcode a 25-symbol list in the script (cross-platform + survivorship — see §5). Pull from the same source the engine uses; record the exact list + as-of timestamp in the run report. |
+| Symbols | **core 25 operational overlap plus PIT/survivorship-aware cohorts** | R-2b sweep used 10 liquid symbols; cross-sectional needs breadth. Core25 can be the first analysis cohort, but collection/evidence must not be current-survivor-only. |
+| Symbol source | `market.symbol_universe_snapshots` PIT builder + scanner-active overlap | Do NOT hardcode a 25-symbol list in the script. Build from `market.symbol_universe_snapshots`, include active/delisted/closed status where the window requires it, and record scanner-active overlap as a cohort, not as the whole universe. |
 
 **Survivorship note (FACT from R-2b §5)**: restricting to currently-active symbols introduces mild survivorship bias (delisted perps absent). At the multi-day horizon over 18mo this is non-trivial if any core symbol was listed mid-window (its history starts late) or delisted. **E1 MUST**: (a) for each symbol, record `min(ts)` actually returned by Bybit (listing date) — a symbol listed 8 months ago cannot supply 18mo; (b) NOT silently pad missing early history; (c) the diagnostic (step 6) will compute n_independent per symbol from real coverage, not assume full window. This is the survivorship discipline R-2b §5 flagged.
 
@@ -141,7 +147,7 @@ ON CONFLICT (symbol, timeframe, ts) DO NOTHING;
 
 ### 4.3 Provenance (DECISION — pick one, default = co-mingle-by-timeframe)
 Because there is no source column (§0.1) and live-1m is the sensitive surface:
-- **DEFAULT (no schema change, RECOMMENDED for speed)**: backfill writes ONLY `1d` (new namespace) + `4h` (gap-fill). It never writes `1m`/`5m`/`15m`/`1h`. => the live 1m/5m/15m/1h ML/decision surface is provenance-clean by construction; daily/4h are research surfaces not fed to the live ML pipeline today. Document in the run report that all `1d` rows and any pre-2026-04-05 `4h` rows are backfill-origin (derivable by `ts < '2026-04-05'` for 4h, or `timeframe='1d'` entirely).
+- **Former default, now gated by AEG**: backfill writes ONLY `1d` (new namespace) + `4h` (gap-fill). It never writes `1m`/`5m`/`15m`/`1h`. This may be acceptable only after AEG-S0/S1 decides whether timeframe namespace is enough for OHLCV provenance. E1 must not choose this default unilaterally.
 - **OPTIONAL (if PM wants explicit provenance)**: a separate tiny ledger `market.kline_backfill_provenance(symbol, timeframe, min_ts, max_ts, source, fetched_at, n_rows)` written once per backfill run. This is a NEW table = MIT/E2 migration with Guard A/B/C + Linux PG dry-run => **out of E1 backfill scope**; hand back to PM if required. Do NOT add a column to `market.klines` inline.
 
 ### 4.4 tick_count for backfill rows
@@ -169,10 +175,10 @@ Because there is no source column (§0.1) and live-1m is the sensitive surface:
 
 | Step | Owner | Deliverable | Effort (est) |
 |---|---|---|---|
-| 1. Spec (this doc) | MIT | E1-ready spec + empirical klines schema + retention blocker | DONE |
-| 2. **PRE-BACKFILL DECISION** (§7-A retention) | operator + MIT | retention policy decision (extend to 1095d for 18mo / 400d for 12mo) + window sign-off (12/18/24mo) | ~0.5h operator + MIT advisory |
-| 3. Backfill script + BB API self-check | E1 | standalone read-only fetcher: paginate `GET /v5/market/kline` (D + 240), throttle <=2-5 req/s + 10006 backoff, `ON CONFLICT DO NOTHING` batch INSERT, fail-closed per-symbol, coverage report. BB API check: confirm `D`/`240` interval + start/end pagination + Market rate group against `docs/references/2026-04-04--bybit_api_reference.md`. | ~3-4h |
-| 4. Run backfill (Linux) | E1 | execute on `trade-core`; emit per-symbol coverage report | single-digit minutes runtime + ~0.5h supervise |
+| 1. Spec (this doc) | MIT | spec + empirical klines schema + retention blocker | DONE |
+| 2. **PRE-BACKFILL DECISION** (§7-A retention) | PM + operator + MIT + E2/E4 as needed | retention/storage/provenance decision (1095d / 400d / dedicated history table / ledger) + window sign-off (12/18/24mo) | gated by AEG-S1 |
+| 3. Backfill script + BB API self-check | E1 only after PM opens scope | standalone read-only fetcher: paginate `GET /v5/market/kline` (D + 240), throttle <=2-5 req/s + 10006 backoff, `ON CONFLICT DO NOTHING` batch INSERT, fail-closed per-symbol, coverage report. BB API check: confirm `D`/`240` interval + start/end pagination + Market rate group against `docs/references/2026-04-04--bybit_api_reference.md`. | blocked until AEG gate |
+| 4. Run backfill (Linux) | E1 only after PM opens scope | execute on `trade-core`; emit per-symbol coverage report | blocked until AEG gate |
 | 5. Data-quality verify | MIT | empirical PG verify: coverage_pct per symbol/timeframe; gap audit; leak-free re-confirm (closed bars only); confirm retention did NOT reap (re-check min(ts) post next daily job); confirm no live-1m contamination; confirm `1d` string + dedup integrity | ~2h |
 | 6. Re-run multi-day diagnostic on deep window | MIT | re-run R-2b's exact leak-free SQL on the deep window: (N,M) sweep + cross-sectional + funding reality + DSR deflation now that n>=30 is clearable; QC+MIT joint alpha go/no-go | ~3-4h |
 
@@ -186,7 +192,7 @@ Because there is no source column (§0.1) and live-1m is the sensitive surface:
 
 **7-A. RETENTION (BLOCKER — must resolve before step 4).**
 - `klines` has `drop_after=365d` daily retention. >12mo backfill is reaped unless extended.
-- MIT recommends: `remove_retention_policy('market.klines')` then `add_retention_policy('market.klines', INTERVAL '1095 days')` (operator-run, reversible), enabling 18-24mo. Confirm PG-growth acceptable (§3 capacity: 1m alone ~26M rows/3y, compressed after 14d — size on the 40TB NAS / 4-8GB PG working set before commit).
+- MIT's earlier candidate path was `remove_retention_policy('market.klines')` then `add_retention_policy('market.klines', INTERVAL '1095 days')`, enabling 18-24mo. Under AEG this must be converted into a reviewed migration/change-control plan before any PG mutation. Confirm PG-growth acceptable (§3 capacity: 1m alone ~26M rows/3y, compressed after 14d — size on the 40TB NAS / 4-8GB PG working set before commit).
 - Alternative (lowest risk): keep retention but set `drop_after=400d` and backfill 12mo only (floor unblock).
 
 **7-B. WINDOW.** 12mo (floor, ~26 14d-periods) vs **18mo (MIT default, ~39 14d-periods + DSR headroom)** vs 24mo (stretch). Tied to 7-A.

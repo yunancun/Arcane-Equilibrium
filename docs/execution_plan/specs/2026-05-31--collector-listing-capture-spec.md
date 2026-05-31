@@ -2,11 +2,18 @@
 
 **Date**: 2026-05-31
 **Author**: PA
-**Status**: PA DESIGN — IMPL-ready
+**Status**: PA DESIGN — AEG-BLOCKED / not implementation-ready until PM opens scoped work
 **Ticket**: `COLLECTOR-LISTING-CAPTURE`（alpha 資料地基 / D1 授權範圍，非 autonomy 13 模組凍結範圍）
 **Scope**: 讓 collector 的 WS kline 訂閱清單由 listing calendar 驅動 — 新上市/PreLaunch perp 在 `listed_at`（理想：PreLaunch 階段）即被訂閱，從第一根 traded minute kline 抓起，解鎖 listing pump-fade alpha 類別
 **Trigger**: R-2a feasibility — listing pump-fade alpha 在當前資料**測不了**：有權威 listing SoT（`market.symbol_universe_snapshots.listed_at`，56d 內 52 新上市）但 **0 個被 1m klines 捕捉到上市瞬間**（collector 訂閱清單與新上市集合 disjoint）
 **Constraint**: design + read-only；不寫 feature code；不改既有 doc；不碰已 applied SQL（V001-V115）；跨平台無硬編碼；不破壞現有 25-sym 核心採集；fail-closed
+
+> **AEG gate override (2026-05-31)**：本 spec 的舊 implementation-ready 姿態已被
+> `docs/execution_plan/2026-05-31--aeg_s0_contracts.md` 覆蓋。E1 不得從本
+> 文件直接開始 collector/listing-capture implementation、runtime deploy、DB
+> write、retention change 或 alpha scoring。允許的下一步只有 read-only
+> design/client-gap review，直到 AEG-S0 formal review pass 且 PM 開出明確
+> AEG-S1/Sx scoped task。
 
 ---
 

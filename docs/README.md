@@ -32,7 +32,7 @@ docs/
 │   └── YYYY-MM-DD_主题名/
 │
 ├── decisions/                         ← 重大架构/设计决策记录 + 治理源文件（DOC/SM/EX .docx）
-├── adr/                               ← 架构决策记录（ADR 0001-0046）
+├── adr/                               ← 架构决策记录（ADR 0001-0047）
 │
 ├── architecture/                      ← 架構設計文件（系統層面設計決策）
 │
@@ -163,8 +163,14 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 
 | 文件 | 内容 |
 |------|------|
-| `execution_plan/2026-05-31--aeg_s0_contracts.md` | AEG-S0 PM-local contract draft：Evidence Storage Contract、Regime Classifier Freeze、Bybit Endpoint Contract、TODO Archive Plan；明確禁止 E1 backfill / retention mutation / endpoint IMPL / alpha scoring 直到 PA/MIT/QC/BB/TW/CC formal review pass。|
-| `execution_plan/2026-05-31--alpha_edge_regime_evidence_engineering_arrangement.md` | Alpha-Edge governance arrangement；現已指向 AEG-S0 contract draft，並保留「PM-local draft 不等於 formal role sign-off」邊界。|
+| `execution_plan/2026-05-31--aeg_s0_contracts.md` | AEG-S0 formal PASS contract：Evidence Storage Contract、Regime Classifier Freeze、Bybit Endpoint Contract、TODO Archive Plan；只開 AEG-S1 Foundation limited scope，仍禁止 backfill run / DB mutation / endpoint ingestion / collector runtime / alpha scoring until scoped gates。|
+| `execution_plan/2026-05-31--alpha_edge_regime_evidence_engineering_arrangement.md` | Alpha-Edge governance arrangement；現已指向 AEG-S0 formal closure，並保留 S1 limited-open 邊界。|
+| `execution_plan/specs/2026-05-31--historical-kline-backfill-spec.md` | Historical kline backfill spec；原 executable posture 已被 AEG gate override，retention/backfill 只能在 AEG-S0/S1 gate 後開 scope。|
+| `execution_plan/specs/2026-05-31--collector-listing-capture-spec.md` | Collector listing-capture design；原 implementation-ready posture 已被 AEG gate override，collector IMPL 仍 blocked。|
+| `references/2026-04-04--bybit_api_reference.md` | Bybit API reference；AEG round-1 BB review 修正 mark/index/premium price-kline 為 price-only candles，禁止重用 standard KlineBar parser/schema。|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-31--aeg_s0_contract_sprint_pm_local.md` | PM-local AEG-S0 contract sprint report；記錄草案形成、remaining gates、no-runtime/no-DB/no-trading 邊界。|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-31--aeg_s0_formal_review_round1_integration.md` | PM integration report for PA/MIT/QC/BB/TW/CC round-1 conditional review；記錄 must-fix 已納入且 re-review 仍 required。|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-05-31--aeg_s0_formal_review_closure.md` | PM closure report：PA/MIT/QC/BB/TW/CC re-review PASS；AEG-S1 Foundation limited-open；backfill/DB/endpoint/collector/scoring 仍 gate-blocked。|
 | `adr/0047-alpha-edge-regime-evidence-governance.md` | ADR-0047：Alpha-Edge promotion evidence 必須 math-primary；bull data 可用但必須標籤化；S4 是全局 falsification overlay；Bybit market APIs 是 raw state input。|
 | `governance_dev/amendments/2026-05-31--AMD-2026-05-31-01-alpha-edge-evidence-governance.md` | AMD-2026-05-31-01：operator clarification；禁止把 bull data ban、Bybit trend oracle、narrative primary evidence 三種錯誤解讀帶入後續實作。|
 

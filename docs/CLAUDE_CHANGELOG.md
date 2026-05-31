@@ -1,13 +1,17 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-31（TODO v97 AEG-S0 PM-local contract draft + v96 V5.8 preservation audit + v95 prune audit + v94 AEG cleanup + v92/v93 version-increment 遷入；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-05-31（TODO v99 AEG-S0 formal review PASS + v98 AEG-S0 role-review must-fix patch + v97 AEG-S0 PM-local contract draft + v96 V5.8 preservation audit + v95 prune audit + v94 AEG cleanup + v92/v93 version-increment 遷入；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v99 增量（2026-05-31 AEG-S0 formal review PASS）**：PA/MIT/QC/BB/TW/CC 六角色 re-review 全部 PASS，新增 PM closure `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--aeg_s0_formal_review_closure.md`。TODO 改為 AEG-S0 formal PASS，開 AEG-S1 Foundation **limited scope only**：S1-W1-S1 storage/retention/provenance design + MIT sizing/change-control drafting、S1-W1-S3 PIT universe builder design/scoped prep、S1-W1-S4 side-evidence artifact contract/design。仍 blocked：S1-W1-S2 backfill writer、DB/retention mutation、funding/OI/long-short 18mo ingestion、mark/index/premium ingestion、listing-capture runtime IMPL、alpha scoring/promotion verdict。本輪 doc/governance only，無 runtime/DB/auth/trading 改動。
+
+**v98 增量（2026-05-31 AEG-S0 formal review round-1 must-fix patch）**：使用 operator 明確授權的 sub-agent fanout 取得 PA/MIT/QC/BB/TW/CC 六角色 conditional-pass review；未把 conditional pass 誤標為 AEG-S0 PASS。補強 `docs/execution_plan/2026-05-31--aeg_s0_contracts.md`：child artifact digest、`git_dirty`/diff digest、coverage hard gates、PIT feature lineage、deterministic classifier conventions、high-vol overlay、verdict matrix schema、PSR/DSR/PBO/n_independent/freshness/non-bull promotion gates、funding/OI/long-short provenance要求、Bybit price-kline parser/client gap、Rust public-only facade/strict parser要求。覆寫舊 specs 的 executable-ready posture：historical kline backfill 與 collector listing-capture 仍 AEG-blocked。更新 TODO source sync、engineering arrangement、Bybit reference、docs index、PM report evidence note、PM memory。E1 backfill / retention mutation / endpoint IMPL / collector IMPL / alpha scoring 仍 blocked pending re-review；本輪 doc/governance only，無 runtime/DB/auth/trading 改動。
 
 **v97 增量（2026-05-31 AEG-S0 PM-local contract draft）**：新增 `docs/execution_plan/2026-05-31--aeg_s0_contracts.md`，把 AEG-S0-W0-S1..S4 收斂為可審查 contract：alpha-history manifest/coverage/universe artifact、`aeg_regime_v0.1.0` classifier freeze、Bybit endpoint adoption matrix、TODO archive plan。更新 engineering arrangement、TODO、PM memory、PM report、docs index；明確標記 PM-local draft **不等於** PA/MIT/QC/BB/TW/CC formal sign-off。下一步是 formal role review；E1 backfill / retention mutation / endpoint IMPL / collector IMPL / alpha scoring 仍 blocked。本輪 doc/governance only，無 runtime/DB/auth/trading 改動。
 
