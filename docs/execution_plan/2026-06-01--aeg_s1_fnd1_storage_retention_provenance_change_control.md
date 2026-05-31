@@ -1,13 +1,19 @@
 # AEG-S1-FND-1 Storage / Retention / Provenance Change-Control
 
 Date: 2026-06-01
-Status: PM package complete; operator decision and implementation gates still pending
+Status: PM package complete; operator storage decision approved; implementation gates still pending
 Owner chain: PM -> MIT + PA -> E2/E4 review prep -> E1 only after a separate implementation scope
 Mode: docs/design/read-only. No DB write, migration apply, retention mutation, runtime deploy, auth, order, collector runtime, backfill run, endpoint ingestion, alpha scoring, or promotion verdict.
 
 ## Verdict
 
 AEG-S1-FND-1 is complete at the change-control decision-package layer.
+
+Operator decision on 2026-06-01: approved the recommended storage branch:
+`market.klines` `1095 days` plus DB provenance ledger for OHLCV, and dedicated
+research-history storage for funding, open interest, and long-short history.
+This approval does not authorize migration apply, DB mutation, writer
+implementation, backfill, endpoint ingestion, or scoring.
 
 Recommended path:
 
@@ -156,9 +162,10 @@ These remain excluded from 18mo Alpha-Edge promotion evidence:
 
 Before any migration, writer, or retention mutation:
 
-1. Operator signs the storage choice:
-   `market.klines 1095d` yes/no, and funding/OI/long-short dedicated research
-   storage vs raw-table+ledger fallback.
+1. Operator storage-branch decision is recorded as approved on 2026-06-01:
+   `market.klines 1095d` plus DB provenance ledger, and dedicated
+   research-history storage for funding/OI/long-short. This is not execution
+   approval.
 2. MIT updates sizing using Linux reflection: Timescale jobs, policies, chunks,
    table sizes, min/max timestamps, row rates, compression, and disk headroom.
 3. BB approves endpoint semantics and rate discipline for the future writer.
@@ -220,18 +227,19 @@ Coverage gates inherited from AEG-S0:
 
 ## 5. Operator Decision Card
 
-The next unlock decision is:
+Recorded decision on 2026-06-01:
 
-1. Approve `market.klines` retention extension to `1095 days` for OHLCV history?
-2. Approve dedicated research-history tables for funding/OI/long-short, instead
-   of extending raw tables alone?
-3. Confirm first S1 collection scope: 18mo full survivorship-corrected
+1. `market.klines` retention extension to `1095 days` for OHLCV history is the
+   approved design branch.
+2. Dedicated research-history tables for funding/OI/long-short are the approved
+   design branch.
+3. First S1 collection scope remains full 18mo survivorship-corrected
    collection, with core25 as the primary first analysis cohort.
-4. Confirm `S1-W1-S2` writer remains locked until the chosen storage path has a
-   reviewed V###/rollback/verification packet.
+4. `S1-W1-S2` writer remains locked until the chosen storage path has a
+   reviewed V###/rollback/verification packet and explicit execution approval.
 
-If any answer is negative, FND-1 stays design-only and the writer/scoring chain
-remains blocked.
+If a future sizing or review gate rejects this path, FND-1 returns to design
+review and the writer/scoring chain remains blocked.
 
 ## 6. Completion Status
 
