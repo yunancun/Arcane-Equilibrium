@@ -1,8 +1,9 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-**版本** v94 ｜ **日期** 2026-05-31 ｜ **source HEAD** latest git log after this doc checkpoint；runtime unchanged
-**當前主線**：P0-EDGE-1 Alpha-Edge Regime Evidence Governance。E1 backfill / DB retention / endpoint IMPL / alpha scoring 全部 blocked until AEG-S0 contract sprint passes.
-**歷史詳情**：version log `docs/CLAUDE_CHANGELOG.md`；pre-cleanup archive `docs/archive/2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`；older v92 archive `docs/archive/2026-05-31--todo_v92_archive.md`。
+**版本** v95 ｜ **日期** 2026-05-31 ｜ **source HEAD** v95 doc checkpoint after prune audit；runtime unchanged from latest v87 deploy snapshot.
+**當前主線**：P0-EDGE-1 Alpha-Edge Regime Evidence Governance。AEG-S0 contract sprint 是唯一可派的 Alpha-Edge next action；E1 backfill / DB retention / endpoint IMPL / alpha scoring 全部 blocked until AEG-S0 passes.
+**v95 audit note**：v94 清理方向正確但 active 面砍過頭；本版補回仍有 gate / trigger / owner 的舊基礎，不恢復歷史敘事。
+**歷史詳情**：version log `docs/CLAUDE_CHANGELOG.md`；v94 prune audit `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--todo_v94_prune_audit.md`；pre-cleanup archive `docs/archive/2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`；older v92 archive `docs/archive/2026-05-31--todo_v92_archive.md`。
 
 ---
 
@@ -10,9 +11,11 @@
 
 | Area | Current state | Next action |
 |---|---|---|
-| Source sync | Mac `main` is the active source branch; current batch is docs/governance only. | Commit + push, then fast-forward Linux source. |
-| Runtime | Linux engine/API/watchdog were healthy in latest v87 snapshot; this batch does not rebuild/restart runtime. | No deploy in this batch. |
-| Operator-gated ops | system-level unit install, first restore drill, live-auth renewal remain hand actions. | Operator chooses low-risk window / auth timing. |
+| Source sync | Mac `main` is the active source branch; v95 is docs/TODO audit only. | Commit + push, then fast-forward Linux source. |
+| Runtime | Latest verified deploy remains v87 2026-05-31: Linux engine/API/watchdog healthy; engine PID 968350 in archived snapshot; healthz 200; no runtime rebuild in AEG governance/TODO batches. | No deploy in this batch. Refresh only before runtime-affecting work. |
+| Runtime caveat | system-level `openclaw-engine.service` / system watchdog install still sudo/operator-gated; current protection is user watchdog + linger + manual engine process. | Operator schedules system-level install window. |
+| Passive health residual | `[48] replay_manifest_registry_growth`, `[74] close_maker_reject_samples`, `[56] live_pipeline_active` remain OPS residual / evidence queue; not OPS-1 reversal. | Keep explicit in OPS queue; do not mark all-green until resolved or accepted. |
+| Operator-gated ops | first restore drill, system-level units, live-auth renewal, Earn first stake remain hand actions. | Operator chooses low-risk window / auth timing. |
 
 ---
 
@@ -20,9 +23,9 @@
 
 | ID | Status | Owner chain | Acceptance / Gate | Next action |
 |---|---|---|---|---|
-| `P0-EDGE-1` | 🔴 ACTIVE | PM -> PA/QC/MIT/BB -> E1 after gate | Closure requires Alpha-Edge evidence path: ≥3 alpha-bearing candidates meeting net/cost/statistical gates, or other accepted P0-EDGE criteria. Bull-only/stale-only/narrative-only positives cannot promote. | Run **AEG-S0 contract sprint** only. PM 2nd sign-off approved AEG-S0, not E1 backfill. |
+| `P0-EDGE-1` | 🔴 ACTIVE | PM -> PA/QC/MIT/BB -> E1 after gate | Closure requires accepted Alpha-Edge evidence: >=3 alpha-bearing candidates meeting net/cost/statistical gates, or another accepted P0-EDGE path. Bull-only/stale-only/survivor-only/narrative-only positives cannot promote. | Run `AEG-S0` contract sprint only. PM 2nd sign-off approved contracts, not E1 backfill. |
 | `P0-LG-3` | 🟡 SOURCE INTEGRATED / runtime not deployed | PM -> E2 -> E4 -> QA -> operator deploy gate | Review integrated commits `deb3f3af..0802d52b`; V104 checksum discipline; Linux migration dry-run/AUTO_MIGRATE plan; supervised_live tests green. | Run review chain before any deploy/rebuild. |
-| `P0-OPS residual` | 🟢 OPS-1 CLOSED / residual OP-gated | Operator + PM/E1/MIT as needed | Restore drill, system-level units, live-auth renewal, replay manifest feed, close-maker max-pending evidence. | Wait for operator hand-action windows; not current coding blocker. |
+| `P0-OPS residual` | 🟢 OPS-1 CLOSED / residual OP-gated | Operator + PM/E1/MIT as needed | Restore drill, system-level units, live-auth renewal, replay manifest feed, close-maker max-pending evidence. | Wait for operator hand-action windows; keep residual rows visible below. |
 
 ---
 
@@ -39,10 +42,10 @@
 **Non-negotiable rules**:
 
 - Bull data is allowed only when explicitly labeled.
-- S4 is a global S1-Sx regime/falsification overlay.
-- Bybit market APIs are raw state inputs, not prediction.
+- S4 is a global S1-Sx regime/falsification overlay, not a standalone 2024 bull proof.
+- Bybit market APIs are raw market-state inputs, not prediction.
 - Trend/regime labels must be local, leak-free, point-in-time, and fixed before alpha scoring.
-- News/X/Reddit agents are side evidence only.
+- News/X/Reddit agents are secondary side evidence only; the promotion core remains mathematical.
 
 ### §2.1 NOW: AEG-S0 Contract Sprint
 
@@ -51,7 +54,7 @@
 | `AEG-S0-W0-S1` Evidence Storage Contract | PM -> PA+MIT -> QC | alpha-history manifest, coverage/provenance, regime/breadth/side-evidence artifact contract | Includes `run_id`, `git_sha`, `session_id`, window, symbols, universe, cost model, endpoint list, classifier version; excludes 14d `panel.*` as 18mo history. |
 | `AEG-S0-W0-S2` Regime Classifier Freeze | PM -> QC+PA -> MIT | bull/range/bear/chop/high-vol taxonomy + overlay flags | Rules fixed before alpha scoring; closed bars only; all features lagged / `shift(1)`. |
 | `AEG-S0-W0-S3` Bybit Endpoint Contract | PM -> MIT+BB -> PA | endpoint adoption plan | Covers pagination, retention, rate limits, client gaps, and BB review for kline/funding/OI/long-short/mark-index-premium/ticker/orderbook/IV. |
-| `AEG-S0-W0-S4` TODO Archive Plan | PM -> TW/CC -> PM | active TODO cleanup plan | Active TODO keeps next actions; historical evidence stays in reports/archive. |
+| `AEG-S0-W0-S4` TODO Archive Plan | PM -> TW/CC -> PM | active TODO cleanup map | Active TODO keeps next actions; historical evidence stays in reports/archive. |
 
 Parallelism: 4 sessions can run together; project ceiling remains 7.
 
@@ -68,7 +71,22 @@ E1 must not start any of the following before AEG-S0 passes and PM opens AEG-S1:
 
 Allowed before AEG-S0 pass: read-only probes and sizing estimates only.
 
-### §2.3 Post-Gate Roadmap
+### §2.3 Preserved Foundations
+
+AEG is not a replacement of the prior design. It integrates and constrains these existing foundations:
+
+| Foundation | Use under AEG |
+|---|---|
+| `market.klines` + approved 1095d retention | Primary OHLCV source after safe retention/backfill gate. |
+| `market.symbol_universe_snapshots` | PIT survivorship control; current-survivor-only universe is rejected. |
+| `market.funding_rates`, `market.open_interest`, `market.long_short_ratio` | Regime/side evidence inputs; retention/storage gaps must be solved before 18mo use. |
+| `market.regime_snapshots`, `market.regime_transitions` | Prior regime storage lineage; AEG classifier must version and not tune on candidates. |
+| `market.news_signals` | Side-evidence lineage only; excluded from promotion gates. |
+| `AlphaSurface.regime` + `HurstHysteresis` | Existing local math components to assess for trend/state classifier reuse. |
+| `panel.basis_panel` | Forward-only A1 basis input; historical basis remains limited until ticker/index persistence is fixed. |
+| Sprint 2 / Alpha Tournament artifacts | Retained as evidence and runner lineage, but promotion must pass AEG regime/breadth/freshness matrix. |
+
+### §2.4 Post-Gate Roadmap
 
 | Sprint | Purpose | Parallelism |
 |---|---|---|
@@ -79,31 +97,98 @@ Allowed before AEG-S0 pass: read-only probes and sizing estimates only.
 
 ---
 
-## §3 Active Engineering Queue
+## §3 Active Workflows + Module Posture
 
-| ID | Priority | Status | Next action |
-|---|---:|---|---|
-| `P2-RECONCILER-GET-POSITIONS-PAGINATION` | 2 | SOURCE DONE on `integration/pm-1-4`; not deployed | BB/E2/E4 review with LG-3 source batch. |
-| `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` | 3 | SOURCE DONE with reconciler pagination batch | E2/E4 review with same batch. |
-| `P1-OPS-2-PHASE-2-CUTOVER` | 1 | WAITING for D+14 soak end 2026-06-10 | If 14d logs clean, E1 PR removes fallback and stale panic/reason variants. |
-| `P1-OPS-2-14D-SOAK-OBSERVE` | 1 | ACTIVE passive wait | Daily WARN count must remain 0; at least one `/auth/renew` still operator-blocked. |
-| `P0-OPS-4-GAP-B-D-OPERATOR-DEPLOY` | 1 | PARTIAL DONE / OP-gated | Operator schedules first restore drill and system-level units. |
-| `P1-A1A2-STAGE0R-RUNNER-IMPL` | 2 | A2 REVISE/HOLD; auth fix branch exists | E2 -> E4 -> PM deploy/runtime verify before trusting runner output. |
-| `P2-A1-RUNNER-WIRE-TO-BASIS` | 3 | WAITING for basis_panel >=14d | Trigger around 2026-06-13; then wire A1 as-of basis cohort. |
-| `P3-MARKET-TICKERS-INDEX-MARK-DEAD-PERSISTENCE` | 4 | LATENT BUG | Decide fix/bypass before historical basis/index work. |
-| `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` | 2 | PA spec done; IMPL pending | E1 -> BB -> E2 -> E4 -> QA when Sprint 3 resumes. |
-| `P2-PACKET-C-C5-GUI-BANNER-ACK-ROLE` | 2 | DEFERRED until C4 | Provision restricted `failsafe_ack_role`, then GUI ack endpoint. |
-| `P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` | 2 | SOURCE CLOSED / OPERATOR-BLOCKED | OP-1 key refresh + OP-2 Earn variant + OP-3 first stake. |
-| `P1-EARN-WAVE-D-RUST-HMAC-CANONICAL-FORM` | 1 | SPEC/IMPL pending | PA spec must require Rust/Python byte-identical canonical HMAC. |
-| `P2-EARN-WAVE-D-CONTRACT-INTEGRATION-TEST` | 2 | WAITING for Wave D Rust IPC | Add full frontend -> backend -> Rust IPC integration test. |
+| Workflow | State | Next action |
+|---|---|---|
+| `Alpha-Edge / AEG` | ACTIVE mainline | Dispatch `AEG-S0` only; no E1 implementation before PM gate. |
+| `Workflow B` ADR-0046 basis observation/execution split | ACTIVE but not Alpha-blocking | PA design -> E1 Rust -> MIT V117 -> E2 -> E4 -> BB -> QA. |
+| `Earn Wave C` | OPERATOR-GATED | OP-1 key refresh -> OP-2 Earn variant -> OP-3 first $100-200 USDT Flexible stake. |
+| `Layered Autonomy v2 Wave 5` | FROZEN active-IMPL per v92 D1 | Packet A+B runtime and TOTP source exist; Packet C core E4 green; runtime TOTP enrollment + engine integration wait until promotion gate. |
+| `Sprint 2 / Stage 0R legacy alpha` | SUBORDINATE to AEG | Keep runner/evidence waits visible; no promotion outside AEG gates. |
+
+### §3.1 M1-M13 Compact Matrix
+
+| Module | Current posture | Gate / next action |
+|---|---|---|
+| M1 Decision Lease LAL | DESIGN-DONE; Track A spike source; active-IMPL frozen | Unfreeze only after first net-positive alpha-bearing `stage0_ready`. |
+| M2 Overlay enable SM | DESIGN-DONE; IMPL-PENDING frozen | Wait for alpha evidence gate. |
+| M3 Health monitoring | DESIGN-DONE; emitter scaffold PASS with carry-over | Residual health rows tracked in OPS queue. |
+| M4 Self-supervised discovery | V100 + Stage 1 source/PG no-writeback empirical done; production writeback blocked by lease/schema mismatch | Keep draft-only until governance/lease path is resolved. |
+| M5 Online learning interface | Trait stub done | Y3+ / AUM gate; no active IMPL. |
+| M6 Bayesian reward weight | DESIGN-DONE; IMPL-PENDING frozen | Wait for alpha evidence gate. |
+| M7 Decay/retirement | V116 spec done; IMPL held | Unfreeze after first candidate reaches `stage0_ready`. |
+| M8 Anomaly detection | DESIGN-DONE; IMPL-PENDING frozen | Wait for alpha evidence gate. |
+| M9 A/B framework | DESIGN-DONE; IMPL-PENDING frozen | Wait for alpha evidence gate. |
+| M10 Discovery pipeline | Tier A baseline done; B-E pending | AEG can feed future Tier B+, but not before evidence contracts. |
+| M11 Counterfactual replay | V107 schema/source land; runtime proof incomplete | Replay manifest residual tracked in OPS queue. |
+| M12 Adaptive order routing | Trait stub done | Future maker/taker and slicing work; no active IMPL. |
+| M13 Multi-asset/venue | Trait stub done; Y3+ earliest | No active IMPL. |
 
 ---
 
-## §4 Operator Action Checklist
+## §4 Safety Invariants Snapshot
+
+| Invariant | Active meaning |
+|---|---|
+| 5-gate live boundary | Any live/demo promotion still requires full boundary checks. |
+| Signed authorization | Python renew/approve path remains OP-gated; no silent downgrade. |
+| LiveDemo safety | Demo endpoint must not weaken authorization, TTL, risk, or audit semantics. |
+| Mainnet env fallback closed | `OPENCLAW_ALLOW_MAINNET=1` must come from controlled secrets path. |
+| Bybit fail-closed | Timeout or non-zero `retCode` cannot fabricate rows/fills/evidence. |
+| Denylist is not auth | `execution_authority=denylist` never equals positive authorization. |
+| GovernanceHub + Decision Lease | Learning/dream/executor/strategist paths cannot bypass lease boundaries. |
+| No fake evidence | No fake AI calls, fills, lineage, healthcheck, trading, or test evidence. |
+| Paper evidence limit | Paper is not active promotion evidence; Stage 0R replay and demo evidence stay separated. |
+
+---
+
+## §5 Active Engineering Queue
+
+| ID | P | Status | Next action |
+|---|---:|---|---|
+| `P2-RECONCILER-GET-POSITIONS-PAGINATION` | 2 | SOURCE DONE on `integration/pm-1-4`; not deployed | BB/E2/E4 review with LG-3 source batch. |
+| `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` | 3 | SOURCE DONE with reconciler pagination batch | E2/E4 review with same batch. |
+| `P3-110017-CONVERGE-AUDIT-OBSERVABILITY` | 3 | Deploy verification residual | MIT/E1 verify missing `exchange_zero_close_converge` audit row and ~63s stop timing; function already cleared position. |
+| `P3-110017-BB-DOC-FOLLOWUPS` | 3 | BB/TW doc follow-up | Update 110017 dictionary semantics; verify 110009 doc-version ambiguity before relying on mapping. |
+| `P1-OPS-2-PHASE-2-CUTOVER` | 1 | WAITING for D+14 soak end 2026-06-10 | If 14d logs clean, E1 PR removes fallback and stale panic/reason variants. |
+| `P1-OPS-2-14D-SOAK-OBSERVE` | 1 | ACTIVE passive wait | Daily WARN count must remain 0; at least one `/auth/renew` still operator-blocked. |
+| `P1-OPS-2-DRY-RUN` | 1 | WAITING for OP-1 | Use OP-1 as first end-to-end OPS-2 SOP dry-run; record timing/fail modes into runbook v1.1. |
+| `P0-OPS-4-GAP-B-D-OPERATOR-DEPLOY` | 1 | PARTIAL DONE / OP-gated | Operator schedules first restore drill and system-level units. |
+| `P3-OPS-4-PG-DUMP-EVENT-EXTEND` | 4 | DEFERRED optional event typing | Add `pg_dump_retention_dropped` / `pg_dump_md5_drift` only if dump audit needs finer events. |
+| `P2-OPS-4-GAP-B-D-UNIT-TEST-GAP` | 2 | Backlog governance gap | Add tests for pg_dump/passive health production code after first-day live priorities. |
+| `P1-WAVE5-TOTP-BACKEND` | 1 | DEFERRED by operator | Runtime TOTP enrollment waits until full formal go-live / Level 2 promotion gate. |
+| `P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH` | 1 | Legacy alpha evidence wait | Around 2026-06-11 check AC-S2-A-3 candidate evidence; subordinate result to AEG gates. |
+| `P1-A1A2-STAGE0R-RUNNER-IMPL` | 2 | A2 REVISE/HOLD; auth fix branch exists | E2 -> E4 -> PM deploy/runtime verify before trusting runner output. |
+| `P2-A1-RUNNER-WIRE-TO-BASIS` | 3 | WAITING for basis_panel >=14d | Trigger around 2026-06-13; wire A1 as-of basis cohort with QC leak-free gate. |
+| `P3-MARKET-TICKERS-INDEX-MARK-DEAD-PERSISTENCE` | 4 | LATENT BUG | Decide fix/bypass before historical basis/index work. |
+| `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK` | 4 | Scheduled watch | On 2026-06-27 decide Stage 0R baseline vs M7 retire for bb_breakout/bb_reversion. |
+| `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` | 2 | PA spec done; IMPL pending | E1 -> BB -> E2 -> E4 -> QA when Sprint 3 resumes. |
+| `P2-PACKET-C-C5-GUI-BANNER-ACK-ROLE` | 2 | DEFERRED until C4 | Provision restricted `failsafe_ack_role`, then GUI ack endpoint. |
+| `P1-OPS-2-HOTRELOAD` | 3 | Post-Sprint 4 | Implement `Arc<ArcSwap<BybitCredentials>>` + IPC reload parity with authorization.json. |
+| `P2-OPS-2-AUDIT-ENDPOINT` | 3 | Post-Sprint 4 | Add `POST /api/v1/security/ipc-secret/rotate` + governance audit row. |
+| `P2-OPS-2-CRON-DRIFT` | 3 | Post-Sprint 4 | Add long-lived secret drift cron report/alert. |
+| `P2-OPS-2-RUNBOOK-HEALTHCHECK-SQL` | 3 | Runbook gap | Implement or correct missing `passive_wait_healthcheck.py --check secret_rotation` assumption before citing cutover §10.3. |
+| `P3-OPS-2-RUNBOOK-EMERGENCY-AUDIT-CONTRACT` | 4 | Runbook/audit contract gap | Specify audit rows for emergency revoke and old-key revoke paths. |
+| `P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` | 2 | SOURCE CLOSED / OPERATOR-BLOCKED | OP-1 key refresh + OP-2 Earn variant + OP-3 first stake. |
+| `P1-EARN-WAVE-D-RUST-HMAC-CANONICAL-FORM` | 1 | SPEC/IMPL pending | PA spec must require Rust/Python byte-identical canonical HMAC. |
+| `P2-EARN-WAVE-D-CONTRACT-INTEGRATION-TEST` | 2 | WAITING for Wave D Rust IPC | Add full frontend -> backend -> Rust IPC integration test. |
+| `P1-OP1-BYBIT-ENDPOINT-FILE-MISCONFIG` | 1 | WAITING for OP-1 secret swap | Change live slot endpoint file from `demo` to `mainnet` during key refresh. |
+| `P3-WORKFLOW-F-D7-CARRYOVER` | 4 | Due ~2026-06-02 | E1 piggyback deprecation/doc headers; R4 verify. |
+| `P1-LG-5` | 4 | Reviewer maturity watch | 90d cadence review; source active with review_live_candidate defer rows. |
+| `P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1` | 3 | Passive wait | `halt_audit.log` armed; review 2026-08-21 unless healthcheck regresses. |
+| `P1-LEASE-1` | 3 | WAITING on P0-LG-3 | Clean `lease.rs:303` + HashMap leak after LG-3 dispatch. |
+| `P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP` | 4 | Deferred until Phase 2a Demo PASS | Add full dynamic backoff state machine. |
+| `P1-INTENTYPE-FIELD-VISIBILITY-DEFER` | 4 | Deferred refactor | PA builder pattern spec before changing `OrderIntent` visibility. |
+| `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC` | 3 | SOP debt | Update dispatch prompt template: Linux cargo test after atomic build requires explicit rebuild or carry-over. |
+
+---
+
+## §6 Operator Action Checklist
 
 | Action | Trigger | Impact |
 |---|---|---|
-| OP-1 Bybit mainnet key refresh | Operator availability | Blocks Earn Wave C production path and live-auth renewal. |
+| OP-1 Bybit mainnet key refresh | Operator availability | Blocks Earn Wave C production path, live-auth renewal, OPS-2 dry-run, and endpoint-file correction. |
 | OP-2 Stage 0R Earn variant decision | After OP-1 | Blocks first stake. |
 | OP-3 first stake $100-200 USDT Flexible-only | After OP-2 | Creates first `learning.earn_movement_log` evidence. |
 | Restore drill window | Low-trading 4h window | Blocks OPS all-green. |
@@ -111,22 +196,41 @@ Allowed before AEG-S0 pass: read-only probes and sizing estimates only.
 
 ---
 
-## §5 Deferred / Scheduled Watch
+## §7 Deferred / Scheduled Watch
 
 | ID | Trigger date / condition |
 |---|---|
+| C10 funding harvest 7d demo sample | 2026-06-01 |
+| 14d bucket-split AC verdict | 2026-06-02 |
 | `P3-WORKFLOW-F-D7-CARRYOVER` | ~2026-06-02 |
+| `P1-OBS-PLACEMENT-BBO-V094` | after Phase 1b 14d freeze (~2026-06-01) |
 | `P1-CONDITIONAL-WATCH` TONUSDT | 2026-06-09 |
 | `P1-OPS-2-PHASE-2-CUTOVER` | 2026-06-10 |
 | `P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH` evidence check | ~2026-06-11 |
 | `P2-A1-RUNNER-WIRE-TO-BASIS` | ~2026-06-13 |
 | `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK` | 2026-06-27 |
+| `P2-CLIPPY-CLEANUP-1` | active cleanup backlog; E1 4-6h when sprint bandwidth opens |
+| `P2-WP05-CSP-UNSAFE-INLINE` | raise before live gate |
+| `P3-H0GATE-FILE-SPLIT` | independent file-size wave |
 | `P2-FALLBACK-DEAD-ENUM-90D-AUDIT` | 2026-08-21 |
 | `P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1` | 2026-08-21 |
+| Sprint 4 first Live $500 | W18-21 (~2026-09) after P0-EDGE-1 + LG-3 + OPS residual gates close |
+| Y1/Y2/Y3 autonomy horizons | Long-range only; no active IMPL before evidence gates |
 
 ---
 
-## §6 Handoff Rules
+## §8 Cascade / Governance Watch
+
+| Source | Status | Next action |
+|---|---|---|
+| AMD-2026-05-21-01 v2 Wave 5 | Packet A+B + TOTP source + ADR/R4 landed; active-IMPL frozen | Do not dispatch runtime TOTP enrollment or Packet C engine integration until promotion gate. |
+| ADR-0046 Proposed | basis observation/execution split still live | PA design chain remains valid; coordinate with AEG endpoint/storage decisions. |
+| v92 V### reconcile | doc-side note pending; SQL head remains V115 | TW can update doc notes without touching applied SQL. |
+| AMD-2026-05-31-01 / ADR-0047 | Accepted / active | Every Alpha-Edge verdict must include regime, breadth, freshness, survivorship, execution realism. |
+
+---
+
+## §9 Handoff Rules
 
 - Feature/bug chain: `PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM`.
 - Quant/data chain: `PM -> QC -> MIT -> AI-E if model-cost relevant -> PM`.
