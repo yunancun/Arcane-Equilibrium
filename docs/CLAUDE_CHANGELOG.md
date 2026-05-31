@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-31（TODO v95 prune audit + v94 AEG cleanup + v92/v93 version-increment 遷入；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-05-31（TODO v96 V5.8 preservation audit + v95 prune audit + v94 AEG cleanup + v92/v93 version-increment 遷入；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v96 增量（2026-05-31 V5.8 preservation audit）**：PM 重讀 V5.8 主檔、Sprint 2 dispatch packet、Alpha Tournament SSOT、V1→V5.8 drift audit、PM/PA v58 verdict/consolidation、M1-M13 module specs、ADR-0034..0047、README index、SQL migration head，結論 = V5.8 未被刪除，合理保留為長期 13-module autonomy architecture；active TODO 不應恢復全量設計 ledger，但必須保留 M1-M13 compact posture、Sprint2/Stage0R subordinate-to-AEG、M4 no-writeback blocker、M11 Stage-A smoke vs divergence-output distinction、V### reconcile debt。新增 report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--v58_design_progress_preservation_audit.md`，並在 TODO v96 加 preservation checkpoint。本輪 doc/TODO only，無 runtime/DB/auth/trading 改動。
 
 **v95 增量（2026-05-31 TODO prune audit）**：PM 對照 `HEAD^:TODO.md` v93 446 行與 v94 149 行，結論 = v94 清理方向正確但 active handoff 砍過頭。新增 PM audit report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--todo_v94_prune_audit.md`；TODO v95 補回壓縮版 Workflow B / Earn Wave C / Layered Autonomy / Sprint 2 Stage0R 姿態、M1-M13 module freeze matrix、9 safety invariants、110017/OPS/Earn/LG/lease/debt active rows、scheduled watches、cascade/governance watch。AEG-S0 仍是唯一 Alpha-Edge next action；E1 backfill/DB retention/endpoint IMPL/collector/alpha scoring 仍 hard-blocked before AEG-S0 pass。本輪 doc/TODO only，無 runtime/DB/auth/trading 改動。
 
