@@ -214,7 +214,7 @@ position_cap_usd = 100.0              # Stage 1 hard ceiling absolute USD
 active = false
 cooldown_ms = 28800000                # 8h cooldown per symbol（1 funding cycle）
 allowed_symbols = ["BTCUSDT", "ETHUSDT"]  # Stage 1 限定 BTC/ETH only
-funding_threshold_annualized = 0.30   # 30% annualized hard gate (QC break-even ~22 bps cost)
+funding_threshold_annualized = 0.30   # 30% APR hard gate; compute_edge break-even is 22/1.5=14.67 bps per 8h
 funding_exit_annualized = 0.05        # exit when annualized < 5%（hysteresis）
 max_basis_pct = 0.5                   # exit basis > 0.5%
 entry_basis_ratio = 0.6               # entry basis < 0.5% × 0.6 = 0.3%（tight）

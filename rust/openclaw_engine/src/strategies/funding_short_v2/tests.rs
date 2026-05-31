@@ -125,8 +125,8 @@ fn compute_edge_positive_at_high_funding() {
     let s = FundingShortV2::new();
     // funding = 0.0005 (≈ 55% annualized)；total_cost=22, expected_periods=1.5
     // amortized_cost = 22/10000/1.5 ≈ 0.001467
-    // edge = 0.0005 - 0.001467 ≈ -0.000967 < 0 (因為 0.0005 < amortized_cost)
-    // 提高 funding 到 0.002（~220% annualized）
+    // edge = 0.0005 - 0.001467 ≈ -0.000967 < 0；30% APR gate alone is not enough.
+    // 提高 funding 到 0.002（20 bps/8h, ~219% annualized）。
     let edge = s.compute_edge(0.002);
     assert!(edge > 0.0, "expected positive edge, got {edge}");
 }

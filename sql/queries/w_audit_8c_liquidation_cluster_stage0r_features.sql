@@ -114,7 +114,9 @@
 --      entry_mid / exit_ts / exit_mid 各一）；本 IMPL 合併為 2 個 LEFT JOIN
 --      LATERAL（一次取 (ts, open) tuple），避免 market.klines 索引被掃 4 次。
 --   5. 參數綁定 PA 用 `$name` 語法（PG 原生 prepare）；本 IMPL 改用
---      `%(name)s` psycopg2 named-param 語法，與 8b precedent 對齊。
+--      psycopg2 named-param 語法，與 8b precedent 對齊。
+--      注意：不要在註釋中寫未綁定的 percent-placeholder 範例；psycopg2 會
+--      掃描註釋並嘗試代入，導致 KeyError。
 --   6. （round 2）新增 notional_pct_floor 參數 + magnitude_ok 第三層 gate，
 --      補回 spec v0.3 line 191 mandate；trigger_candidates 拆兩層因
 --      percent_rank() 在 WHERE 不能直接用。
@@ -310,7 +312,7 @@ final_signals AS (
     --   default 12 bps 與 8b 對齊；下游 Python sweep 可重派 18/25 做成本
     --   保守敏感性。
     -- day_bucket：date_trunc('day', bucket_end_ts) — 下游 Python 用此計算
-    --   per-cell × per-tier max_day_share（單日集中度地板 ≤ 25%，per spec
+    --   per-cell × per-tier max_day_share（單日集中度地板 <= 25 percent，per spec
     --   v0.3 § + 8b INJUSDT lesson）。
     SELECT
         fr.symbol,

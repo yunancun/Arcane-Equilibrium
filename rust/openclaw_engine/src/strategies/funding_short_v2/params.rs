@@ -23,7 +23,9 @@ use crate::strategies::params::{ParamRange, StrategyParams};
 // 預設常量：與 W1-A spec §3.1 / Step X PM closure 對齊
 // ──────────────────────────────────────────────────────────────────────────
 
-/// 入場 annualized funding rate 下界：30%（QC 量化分析 break-even threshold）。
+/// 入場 annualized funding rate 下界：30%（hard APR gate）。
+/// 注意：真正生效的 funding break-even 還會被 compute_edge 收緊；
+/// 22 bps / 1.5 cycles = 14.67 bps per 8h，約 160.6% APR。
 pub const DEFAULT_FUNDING_THRESHOLD_ANNUALIZED: f64 = 0.30;
 
 /// 平倉 annualized funding rate 下界：5%（hysteresis 防進出場抖動）。
@@ -49,7 +51,8 @@ pub const DEFAULT_EXPECTED_PERIODS: f64 = 1.5;
 pub const DEFAULT_COOLDOWN_MS: u64 = 8 * 3_600_000;
 
 /// Floor on funding_threshold_annualized to guard against IPC tunable patches
-/// dropping below break-even threshold (per spec §9 #2 對抗式 review focus)。
+/// dropping below the APR hard gate (per spec §9 #2 對抗式 review focus).
+/// Break-even cost is enforced separately by compute_edge().
 /// 不變量：IPC patch funding_threshold < 0.20 (20% annualized) 必 fail-closed reject。
 pub const FUNDING_THRESHOLD_FLOOR: f64 = 0.20;
 

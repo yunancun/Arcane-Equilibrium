@@ -8,6 +8,7 @@ render IO 層。與 8c metrics.py / report.py 同樣的「純計算層 + IO 編�
 跑 8c SQL、組 config、輸出 JSON）。
 
 主要類/函數：_get_conn / fetch_k_prior / _read_8c_sql / _fetch_a2_panel_rows /
+            _read_a1_sql / _fetch_a1_feature_rows /
             _apply_k_prior_to_packet / _clean_json / main。
 k_prior（QC round 2 blocker）：--k-prior default None → auto-query
             learning.strategy_trial_ledger（mirror 8c fetch_k_prior）；fail-closed
@@ -32,7 +33,7 @@ from typing import Any, Sequence
 
 # K_prior query mode（mirror 8c K_PRIOR_MODES）：strict-liquidation 為 A2
 # (liquidation_cascade_fade) 自身 family，default 採 undercount-safe strict 口徑。
-K_PRIOR_MODES = ("strict-liquidation", "liquidation-related", "all")
+K_PRIOR_MODES = ("strict-liquidation", "liquidation-related", "strict-funding-short", "funding-related", "all")
 
 try:
     from .candidate_stage0r_runner import run_candidates  # type: ignore
@@ -121,6 +122,26 @@ def fetch_k_prior(conn, *, mode: str) -> tuple[int, dict[str, object]]:
                 OR candidate_key ILIKE '%%liquid%%'
             )
             """
+        elif mode == "strict-funding-short":
+            where_sql = """
+            candidate_key IS NOT NULL
+            AND (
+                strategy_name = 'funding_short_v2'
+                OR trial_family = 'funding_short_v2'
+                OR candidate_key ILIKE 'funding_short_v2%%'
+                OR evidence->>'alpha_source_id' = 'funding_short_v2'
+            )
+            """
+        elif mode == "funding-related":
+            where_sql = """
+            candidate_key IS NOT NULL
+            AND (
+                strategy_name ILIKE '%%funding%%'
+                OR trial_family ILIKE '%%funding%%'
+                OR candidate_key ILIKE '%%funding%%'
+                OR evidence->>'alpha_source_id' ILIKE '%%funding%%'
+            )
+            """
         elif mode == "all":
             where_sql = "candidate_key IS NOT NULL"
         else:
@@ -153,6 +174,54 @@ def _read_8c_sql() -> str:
         / "w_audit_8c_liquidation_cluster_stage0r_features.sql"
     )
     return path.read_text(encoding="utf-8")
+
+
+def _read_a1_sql() -> str:
+    """讀 A1 funding_short_v2 feature SQL（read-only）。"""
+    path = (
+        _repo_root() / "sql" / "queries"
+        / "alpha_candidate_a1_funding_short_features.sql"
+    )
+    return path.read_text(encoding="utf-8")
+
+
+def _basis_panel_available(conn) -> bool:
+    """A1 source availability probe；basis table missing should not block A2."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT to_regclass('panel.basis_panel') IS NOT NULL")
+        row = cur.fetchone()
+        return bool(row and row[0])
+
+
+def _fetch_a1_feature_rows(
+    conn,
+    *,
+    window_days: int,
+    cohort: Sequence[str],
+    cost_bps: float,
+    hold_hours: int,
+) -> list[dict[str, Any]] | None:
+    """Fetch A1 funding_short_v2 feature rows.
+
+    Returns None when panel.basis_panel is absent, so A1 can be marked as an
+    infra gap while A2 still runs. Other SQL errors propagate fail-closed.
+    """
+    if not _basis_panel_available(conn):
+        return None
+    sql = _read_a1_sql()
+    hold_ms = int(hold_hours) * 3_600_000
+    with conn.cursor() as cur:
+        cur.execute(
+            sql,
+            {
+                "window_days": window_days,
+                "symbols": list(cohort),
+                "hold_ms": hold_ms,
+                "cost_bps": cost_bps,
+            },
+        )
+        columns = [d[0] for d in cur.description]
+        return [dict(zip(columns, row)) for row in cur.fetchall()]
 
 
 def _fetch_a2_panel_rows(
@@ -290,8 +359,8 @@ def _clean_json(value):
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Alpha Tournament Candidate Stage 0R Runner（A1 stub draft_only / "
-                    "A2 functional via 8c adapter；read-only offline）",
+        description="Alpha Tournament Candidate Stage 0R Runner（A1 funding_short_v2 / "
+                    "A2 via 8c adapter；read-only offline）",
     )
     parser.add_argument("--window-days", type=int, default=14)
     parser.add_argument(
@@ -299,6 +368,18 @@ def main(argv: list[str] | None = None) -> int:
         help="candidate cohort（A2 2-symbol；default BTC/ETH）",
     )
     parser.add_argument("--cost-bps", type=float, default=12.0)
+    parser.add_argument(
+        "--a1-cost-bps",
+        type=float,
+        default=22.0,
+        help="A1 funding_short_v2 full round-trip cost bps used in net_bps outcome",
+    )
+    parser.add_argument(
+        "--a1-hold-hours",
+        type=int,
+        default=24,
+        help="A1 fixed hold proxy in hours; default mirrors funding_short_v2 max_hold_ms",
+    )
     parser.add_argument(
         "--horizon-min", type=int, default=60,
         help="A2 fixed-horizon proxy（default 60m = A2 max_hold time-stop）",
@@ -321,6 +402,18 @@ def main(argv: list[str] | None = None) -> int:
         "--k-prior-mode", choices=K_PRIOR_MODES, default="strict-liquidation",
         help="K_prior auto-query mode（mirror 8c；default strict-liquidation "
              "undercount-safe，僅在 --k-prior 未顯式傳入時生效）",
+    )
+    parser.add_argument(
+        "--a1-k-prior",
+        type=int,
+        default=None,
+        help="A1 DSR k_prior manual override; default auto-query funding-related ledger",
+    )
+    parser.add_argument(
+        "--a1-k-prior-mode",
+        choices=K_PRIOR_MODES,
+        default="funding-related",
+        help="A1 K_prior auto-query mode when --a1-k-prior is absent",
     )
     parser.add_argument("--bootstrap-iters", type=int, default=400)
     parser.add_argument("--rng-seed", type=int, default=20260529)
@@ -358,6 +451,27 @@ def main(argv: list[str] | None = None) -> int:
             # ledger 表存在=ledger；不存在(available=False)=unavailable infra gap。
             k_prior_source = "ledger" if k_prior_meta.get("available") else "unavailable"
 
+        if args.a1_k_prior is not None:
+            a1_k_prior = int(args.a1_k_prior)
+            a1_k_prior_source = "manual"
+            a1_k_prior_meta: dict[str, Any] = {
+                "mode": "manual",
+                "source": "--a1-k-prior",
+                "available": True,
+                "where": None,
+            }
+        else:
+            a1_k_prior, a1_k_prior_meta = fetch_k_prior(conn, mode=args.a1_k_prior_mode)
+            a1_k_prior_source = "ledger" if a1_k_prior_meta.get("available") else "unavailable"
+
+        a1_rows = _fetch_a1_feature_rows(
+            conn,
+            window_days=args.window_days,
+            cohort=cohort,
+            cost_bps=args.a1_cost_bps,
+            hold_hours=args.a1_hold_hours,
+        )
+
         a2_rows, a2_total_buckets = _fetch_a2_panel_rows(
             conn, window_days=args.window_days, cohort=cohort,
             cost_bps=args.cost_bps, horizon_min=args.horizon_min,
@@ -393,10 +507,18 @@ def main(argv: list[str] | None = None) -> int:
         a2_rows,
         a2_total_bucket_count=a2_total_buckets,
         window_days=args.window_days,
+        a1_feature_rows=a1_rows,
+        a1_k_prior=int(a1_k_prior),
+        a1_k_prior_source=a1_k_prior_source,
+        a1_hold_hours=args.a1_hold_hours,
         a2_cfg=cfg,
         bootstrap_iters=args.bootstrap_iters,
         rng_seed=args.rng_seed,
     )
+    packet["a1_k_prior"] = int(a1_k_prior)
+    packet["a1_k_prior_source"] = a1_k_prior_source
+    packet["a1_k_prior_mode"] = args.a1_k_prior_mode
+    packet["a1_k_prior_meta"] = a1_k_prior_meta
     # report-layer：把 k_prior provenance 寫進 packet + ledger 缺時降保守 verdict。
     _apply_k_prior_to_packet(
         packet, k_prior=k_prior, k_prior_source=k_prior_source,
