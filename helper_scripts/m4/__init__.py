@@ -6,6 +6,7 @@ MODULE_NOTE
 
 主要 entry：
    - pattern_miner_stage_1.py: 主 entry（cron 呼）
+   - stage1_production_runner.py: non-dry-run source read / candidate compute / gated DRAFT writeback
    - sources/*.py: 4 PG loader + 1 stub
    - algorithms/*.py: cross-correlation + event-window + Bonferroni K=2500
    - attribute_enforcer.py: 6 attribute gate
@@ -18,9 +19,10 @@ MODULE_NOTE
    - I-2 黑名單 method 禁用：HMM / Markov-switching / GARCH（grep 必 0 hit）
    - I-3 Bonferroni K=2500：所有 sub-test 必經 algorithms.bonferroni
    - I-4 N>=30 硬 gate
-   - I-5 DRAFT writeback 不 auto-promote past 'preregistered'
+   - I-5 DRAFT writeback 不 auto-promote past 'preregistered'；analysis lane
+     'exploratory' must map to PG status 'draft'
    - engine_mode IN ('live', 'live_demo')：禁 'paper'（per CLAUDE.md §四 + memory
      `project_engine_mode_tag_live_demo`）
 """
 
-__version__ = "0.1.0-w1c-scaffold"
+__version__ = "0.2.0-stage1-production-runner"

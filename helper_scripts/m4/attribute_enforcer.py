@@ -70,8 +70,9 @@ def determine_hypothesis_status(
 def is_promotable(status_candidate: str) -> bool:
     """判斷 status_candidate 是否可由 M4 miner 自動寫入。
 
-    不變量：只有 'draft' / 'exploratory' / 'preregistered' 三狀態可由 M4 自動寫入；
-    'live' / 'promoted' / 'rejected' 必經 operator manual Console click
+    不變量：只有 V100 PG enum 中的 'draft' / 'preregistered' 可由 M4 自動寫入；
+    analysis lane 'exploratory' 必先映射成 PG 'draft'，不能直接寫入
+    learning.hypotheses.status。'live' / 'promoted' / 'rejected' 必經 operator manual Console click
     （per AMD-2026-05-21-01 protected scope (a)）。
     """
-    return status_candidate in ("draft", "exploratory", "preregistered")
+    return status_candidate in ("draft", "preregistered")
