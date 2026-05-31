@@ -21,7 +21,6 @@ use openclaw_engine::ipc_server::{
 // P2-PACKET-C-C4-PIPELINE-WIRE：fail-safe watcher 持 demo/live cmd_tx slot。
 use openclaw_engine::ipc_server::{DemoCmdSenderSlot, LiveCmdSenderSlot};
 use openclaw_engine::scanner::registry::SymbolRegistry;
-use openclaw_engine::tick_pipeline::PipelineCommand;
 use std::sync::Arc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
@@ -785,32 +784,6 @@ pub(crate) async fn spawn_db_writers(
     )
 }
 
-/// Spawn position reconciler with Phase 6 auto-contraction action layer.
-/// Phase 6：spawn 持倉對帳器（含自動降級動作層）。
-pub(crate) fn spawn_position_reconciler(
-    shared_client: &Arc<BybitRestClient>,
-    db_pool: &Arc<DbPool>,
-    cancel: &CancellationToken,
-    reconciler_cmd_tx: tokio::sync::mpsc::UnboundedSender<PipelineCommand>,
-    shared_instruments: &Option<Arc<openclaw_engine::instrument_info::InstrumentInfoCache>>,
-    shared_risk_level: &Arc<std::sync::atomic::AtomicU8>,
-    bybit_env: BybitEnvironment,
-    orphan_handler_config: Option<openclaw_engine::position_reconciler::OrphanHandlerConfig>,
-) {
-    let cmd_tx_provider: openclaw_engine::position_reconciler::ReconcilerCommandTxProvider =
-        Arc::new(move || Some(reconciler_cmd_tx.clone()));
-    spawn_position_reconciler_with_cmd_provider(
-        shared_client,
-        db_pool,
-        cancel,
-        cmd_tx_provider,
-        shared_instruments,
-        shared_risk_level,
-        bybit_env,
-        orphan_handler_config,
-    );
-}
-
 /// Spawn position reconciler with a per-dispatch command sender provider.
 /// Live uses this variant so the reconciler follows LiveAuthWatcher respawns.
 /// 使用每次分發前取 snapshot 的 command sender provider 啟動對帳器；Live 以此
@@ -1019,9 +992,9 @@ pub(crate) fn spawn_outcome_backfiller(db_pool: &Arc<DbPool>, cancel: &Cancellat
 }
 
 /// EN: Map a u8 atomic value to RiskLevel enum (fail-safe to ManualReview).
-///     Extracted from spawn_position_reconciler for testability.
+///     Extracted from spawn_position_reconciler_with_cmd_provider for testability.
 /// 中文: 將 u8 原子值映射到 RiskLevel 枚舉（未知值安全回退至 ManualReview）。
-///       從 spawn_position_reconciler 提取以便測試。
+///       從 spawn_position_reconciler_with_cmd_provider 提取以便測試。
 #[cfg(test)]
 pub(crate) fn risk_level_from_u8(val: u8) -> openclaw_core::sm::risk_gov::RiskLevel {
     use openclaw_core::sm::risk_gov::RiskLevel;
