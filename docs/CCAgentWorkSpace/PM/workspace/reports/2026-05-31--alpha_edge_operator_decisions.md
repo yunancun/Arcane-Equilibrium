@@ -5,6 +5,8 @@ Role: PM(default)
 Scope: operator decisions after S1-W1-S1 / S2-W0-S1 / S4-W0-S1 dispatch.
 Mode: decision record + planning amendment; no runtime deploy, no DB write, no live/auth/order/execution change.
 
+Superseding governance: ADR-0047 + AMD-2026-05-31-01 + PM second sign-off now make the next executable work `AEG-S0` contract sprint only. Direct E1 backfill from the older Alpha-Edge plan is blocked.
+
 ## Decisions
 
 PM SIGN-OFF: **CONDITIONAL / READY FOR PA-MIT AMENDMENT**.

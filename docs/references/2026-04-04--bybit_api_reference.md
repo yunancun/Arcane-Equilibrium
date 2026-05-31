@@ -18,7 +18,7 @@
 > **SSOT 規則 / SSOT Rule**：本檔為 Bybit endpoint 唯一字典；新增/修改端點時 **同 commit** 更新本檔。
 > This file is the single source of truth for Bybit endpoints; add/modify endpoints in same commit as dictionary update.
 
-**版本**: v1.4 | **日期**: 2026-04-04（SSOT 標記 + confirm-mmr 路徑修正：2026-04-26；F-27 字典 drift 修正：2026-05-09；EDGE-P2-3 Phase 1b close-maker-first 6 處更新：2026-05-16 Wave 3b BB1；**Funding Rate 公式 + upperFundingRate/lowerFundingRate/fundingInterval cap 欄位段補 + kline×6 doc drift 標 cleanup debt：2026-05-31 TW per BB curl 實查**）| **審計**: BB+E5+PA 三輪通過 + TW G9-01 路徑修正 + BB Wave 3b 6 處更新 + BB 2026-05-31 funding cap 實查
+**版本**: v1.5 | **日期**: 2026-04-04（SSOT 標記 + confirm-mmr 路徑修正：2026-04-26；F-27 字典 drift 修正：2026-05-09；EDGE-P2-3 Phase 1b close-maker-first 6 處更新：2026-05-16 Wave 3b BB1；**Funding Rate 公式 + upperFundingRate/lowerFundingRate/fundingInterval cap 欄位段補 + kline×6 doc drift 標 cleanup debt：2026-05-31 TW per BB curl 實查**；**Alpha-Evidence governance note：Bybit market endpoints are raw state inputs, not prediction oracle，2026-05-31 PM**）| **審計**: BB+E5+PA 三輪通過 + TW G9-01 路徑修正 + BB Wave 3b 6 處更新 + BB 2026-05-31 funding cap 實查
 
 ---
 
@@ -28,6 +28,8 @@
 
 所有端點為公開（無需認證），Rate Group: **Market**。
 Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
+
+> **Alpha-Evidence rule（ADR-0047）**：本節 market endpoints 只提供 raw market-state inputs。Kline / ticker / orderbook / funding / OI / long-short ratio / IV 可作本地 feature，但不得被寫成 Bybit「預判」或 promotion oracle。Trend/regime labels 必須由本地 leak-free、point-in-time math layer 生成；新 endpoint 採用仍需同 commit 更新本 SSOT 並走 BB review。
 
 ---
 
