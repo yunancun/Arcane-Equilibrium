@@ -238,6 +238,58 @@ fn now_ms() -> u64 {
 
 // ── tests ────────────────────────────────────────────────────────
 
+#[test]
+fn auth_invalid_incident_ignores_cold_empty_missing_auth() {
+    let shutdown = CancellationToken::new();
+    let mock = MockSlotOp::new(vec![ScriptedSpawn::Ok]);
+    let (mut watcher, _handle) = LiveAuthWatcher::with_params(
+        Arc::clone(&mock) as Arc<dyn SpawnOp>,
+        test_config(),
+        BybitEnvironment::LiveDemo,
+        shutdown,
+        Duration::from_millis(50),
+        Duration::from_millis(10),
+        Duration::from_millis(100),
+    );
+
+    assert!(
+        !watcher.mark_auth_invalid_reportable(false),
+        "cold boot with Empty Live slot and missing auth is idle, not an incident"
+    );
+    assert!(!watcher.auth_invalid_incident_active);
+}
+
+#[test]
+fn auth_invalid_incident_remains_active_after_mid_session_teardown_until_resolved() {
+    let shutdown = CancellationToken::new();
+    let mock = MockSlotOp::new(vec![ScriptedSpawn::Ok]);
+    let (mut watcher, _handle) = LiveAuthWatcher::with_params(
+        Arc::clone(&mock) as Arc<dyn SpawnOp>,
+        test_config(),
+        BybitEnvironment::LiveDemo,
+        shutdown,
+        Duration::from_millis(50),
+        Duration::from_millis(10),
+        Duration::from_millis(100),
+    );
+
+    assert!(
+        watcher.mark_auth_invalid_reportable(true),
+        "mid-session invalidation must open the incident"
+    );
+    assert!(watcher.auth_invalid_incident_active);
+    assert!(
+        watcher.mark_auth_invalid_reportable(false),
+        "after teardown, the same invalid auth should keep reporting until resolved"
+    );
+    assert!(watcher.clear_auth_invalid_incident_if_active());
+    assert!(!watcher.auth_invalid_incident_active);
+    assert!(
+        !watcher.clear_auth_invalid_incident_if_active(),
+        "second resolve edge must be a no-op"
+    );
+}
+
 #[tokio::test]
 async fn watcher_respawns_when_auth_becomes_valid() {
     let _guard = crate::test_env_lock::guard();

@@ -426,6 +426,183 @@ fn test_bybit_ret_code_phase1b_extensions() {
     assert!(!BybitRetCode::ReduceOnlyReject.is_balance_block());
 }
 
+/// incident policy source：連續 retCode fail-closed 達 8 次才觸發 bybit incident。
+#[test]
+fn test_ret_code_counter_triggers_bybit_fail_closed_after_consecutive_threshold() {
+    let counter = RetCodeCounter::new();
+    let err = BybitApiError::Business {
+        ret_code: 110017,
+        ret_msg: "reduce-only rule not satisfied".to_string(),
+        response: serde_json::json!({}),
+    };
+
+    for _ in 0..7 {
+        assert_eq!(counter.record_for_error(&err), None);
+    }
+    let trigger = counter
+        .record_for_error(&err)
+        .expect("8th consecutive retCode should trigger incident");
+    assert_eq!(trigger.consecutive_fail_closed, 8);
+    assert_eq!(counter.consecutive_fail_closed(), 8);
+    assert_eq!(
+        counter.record_for_error(&err),
+        None,
+        "hot incident must not spawn a duplicate report on every following error"
+    );
+
+    assert!(
+        !counter.record_success(),
+        "single success must not resolve while the 60s failure window is still hot"
+    );
+    assert!(
+        !counter.record_success(),
+        "second success is still below recovery streak threshold"
+    );
+    counter.clear_retcode_samples_for_test();
+    assert!(
+        counter.record_success(),
+        "third consecutive success after the window cools should report recovery edge"
+    );
+    assert_eq!(counter.consecutive_fail_closed(), 0);
+    assert!(
+        !counter.record_success(),
+        "second success after reset is not another recovery edge"
+    );
+}
+
+/// incident policy source：60s window 內 15 次 retCode fail-closed 也觸發，即使非單一路徑。
+#[test]
+fn test_ret_code_counter_triggers_bybit_fail_closed_after_window_threshold() {
+    let counter = RetCodeCounter::new();
+    let err = BybitApiError::Business {
+        ret_code: 10001,
+        ret_msg: "bad request".to_string(),
+        response: serde_json::json!({}),
+    };
+
+    let mut last = None;
+    for _ in 0..15 {
+        last = counter.record_for_error(&err);
+        counter.record_success();
+    }
+    let trigger = last.expect("15 failures in 60s window should trigger incident");
+    assert_eq!(trigger.window_4xx, 15);
+    assert_eq!(trigger.window_5xx, 0);
+}
+
+/// 未達 incident 閾值的短失敗序列，成功只重置 consecutive，不應回報 self-heal。
+#[test]
+fn test_ret_code_counter_success_does_not_resolve_before_incident_threshold() {
+    let counter = RetCodeCounter::new();
+    let err = BybitApiError::Business {
+        ret_code: 110017,
+        ret_msg: "reduce-only rule not satisfied".to_string(),
+        response: serde_json::json!({}),
+    };
+
+    assert_eq!(counter.record_for_error(&err), None);
+    assert!(
+        !counter.record_success(),
+        "success after a non-triggering failure must not emit incident recovery"
+    );
+    assert_eq!(counter.consecutive_fail_closed(), 0);
+}
+
+/// 滑窗型 incident 觸發後，單次成功不能在 60s failure window 仍高時解除。
+#[test]
+fn test_ret_code_counter_window_incident_requires_window_to_cool_before_recovery() {
+    let counter = RetCodeCounter::new();
+    let err = BybitApiError::Business {
+        ret_code: 10001,
+        ret_msg: "bad request".to_string(),
+        response: serde_json::json!({}),
+    };
+
+    for _ in 0..14 {
+        assert_eq!(counter.record_for_error(&err), None);
+        assert!(!counter.record_success());
+    }
+    assert!(
+        counter.record_for_error(&err).is_some(),
+        "15th failure in 60s window should trigger incident"
+    );
+    assert!(
+        !counter.record_success(),
+        "single success must not resolve while the 60s fail-closed window is still above threshold"
+    );
+    counter.clear_retcode_samples_for_test();
+    assert!(
+        !counter.record_success(),
+        "second success is still below the stable recovery threshold"
+    );
+    assert!(
+        counter.record_success(),
+        "third consecutive success after the window cools should resolve"
+    );
+}
+
+/// 已 open 的 incident 只回報首次跨閾值 edge，避免 REST hot path 每個錯誤都 spawn task。
+#[test]
+fn test_ret_code_counter_open_incident_suppresses_duplicate_triggers_until_recovery() {
+    let counter = RetCodeCounter::new();
+    let err = BybitApiError::Business {
+        ret_code: 110017,
+        ret_msg: "reduce-only rule not satisfied".to_string(),
+        response: serde_json::json!({}),
+    };
+
+    for _ in 0..7 {
+        assert_eq!(counter.record_for_error(&err), None);
+    }
+    assert!(
+        counter.record_for_error(&err).is_some(),
+        "8th consecutive failure opens incident"
+    );
+    assert_eq!(
+        counter.record_for_error(&err),
+        None,
+        "already-open incident must not emit a duplicate trigger"
+    );
+
+    counter.clear_retcode_samples_for_test();
+    assert!(!counter.record_success());
+    assert!(!counter.record_success());
+    assert!(counter.record_success());
+
+    for _ in 0..7 {
+        assert_eq!(counter.record_for_error(&err), None);
+    }
+    assert!(
+        counter.record_for_error(&err).is_some(),
+        "after stable recovery a new threshold crossing should emit a fresh edge"
+    );
+}
+
+/// noop retCode 不是 venue/client fault，且必須切斷「連續 fail-closed」序列。
+#[test]
+fn test_ret_code_counter_noop_resets_consecutive_fail_closed() {
+    let counter = RetCodeCounter::new();
+    let err = BybitApiError::Business {
+        ret_code: 110017,
+        ret_msg: "reduce-only rule not satisfied".to_string(),
+        response: serde_json::json!({}),
+    };
+    let noop = BybitApiError::Business {
+        ret_code: 110001,
+        ret_msg: "order not found".to_string(),
+        response: serde_json::json!({}),
+    };
+
+    for _ in 0..7 {
+        assert_eq!(counter.record_for_error(&err), None);
+    }
+    assert_eq!(counter.consecutive_fail_closed(), 7);
+    assert_eq!(counter.record_for_error(&noop), None);
+    assert_eq!(counter.consecutive_fail_closed(), 0);
+    assert_eq!(counter.record_for_error(&err), None);
+    assert_eq!(counter.consecutive_fail_closed(), 1);
+}
+
 /// Test BybitApiError Display formatting.
 /// 測試 BybitApiError Display 格式化。
 #[test]

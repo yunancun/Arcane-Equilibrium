@@ -71,18 +71,18 @@ static SHARED_WATCHER: OnceLock<Arc<SharedFailsafeWatcher>> = OnceLock::new();
 ///   C4 watcher 的 `tokio::select!` 監聽 `outcome_rx` / `ack_rx`。若 tx 端在 spawn 後
 ///   被 drop，channel 關閉 → `recv()` 立即回 `None` → `Some(..) = recv()` 模式不匹配 →
 ///   該 select 臂被永久禁用後 loop 退化為 busy-spin。把 sender 存進此 OnceLock 保活 +
-///   供 Sprint 3 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` 取出 outcome_tx 接 dispatch 觸發、
-///   C5 GUI ack 取出 ack_tx。C4 自己不 send（誠實標記：機制 live，觸發 pending）。
+///   供 `incident_policy` 取出 outcome_tx 接 dispatch 觸發、C5 GUI ack 取出 ack_tx。
+///   C4 watcher 自己不產生 incident；producer 全在 policy / GUI ack 端。
 ///
 /// singleton 登記：本 OnceLock 隨 `spawn_notification_failsafe_watcher` 單點 init，
 /// 與 `SHARED_WATCHER` 同生命週期；已登記於 `docs/architecture/singleton-registry.md §2.4.2`
 /// （commit a8ba146c）。`SHARED_WATCHER` 見同文件 §2.4.1。
 static FAILSAFE_FEED_SENDERS: OnceLock<FailsafeFeedSenders> = OnceLock::new();
 
-/// outcome / ack 餵入端 sender bundle（Sprint 3 incident_policy + C5 GUI ack 取用）。
+/// outcome / ack 餵入端 sender bundle（incident_policy + C5 GUI ack 取用）。
 #[derive(Clone)]
 pub struct FailsafeFeedSenders {
-    /// incident_policy（Sprint 3）偵測需通知事件 → dispatch → 經此餵 outcome。
+    /// incident_policy 偵測需通知事件 → dispatch → 經此餵 outcome。
     pub outcome_tx: tokio::sync::mpsc::UnboundedSender<DispatchOutcome>,
     /// C5 GUI ack 經此餵（operator 點 banner ack）。
     pub ack_tx: tokio::sync::mpsc::UnboundedSender<()>,
@@ -94,7 +94,7 @@ pub fn init_failsafe_feed_senders(senders: FailsafeFeedSenders) -> FailsafeFeedS
     FAILSAFE_FEED_SENDERS.get_or_init(|| senders).clone()
 }
 
-/// 取得 outcome / ack sender bundle（Sprint 3 incident_policy / C5 取用）；未 init 回 `None`。
+/// 取得 outcome / ack sender bundle（incident_policy / C5 取用）；未 init 回 `None`。
 pub fn failsafe_feed_senders() -> Option<FailsafeFeedSenders> {
     FAILSAFE_FEED_SENDERS.get().cloned()
 }
@@ -227,6 +227,24 @@ impl SharedFailsafeWatcher {
         let now_ms = self.clock.now_ms();
         let mut state = self.state.lock();
         evaluate_dispatch(&mut state, outcome, now_ms)
+    }
+
+    /// 主動派發一次三路通知，但不直接改 watcher state。
+    ///
+    /// 為什麼給 incident_policy 使用：arm-vs-notify 由 incident_policy 決定。
+    /// notify-only 類事件必須通知 operator 但不可把 `AllFail` 寫進 watcher；
+    /// arm 類事件也要先通過 secret-enabled gate，再經 `FAILSAFE_FEED_SENDERS`
+    /// 餵 outcome。此方法保留既有 dispatcher 注入，不新增第二套通知路徑。
+    pub async fn dispatch_3way_only(&self, message: &str) -> DispatchOutcome {
+        self.dispatcher.dispatch_3way(message).await
+    }
+
+    /// 回報 Slack / Email push channel 是否已啟用。
+    ///
+    /// `None` 代表 dispatcher 不知道；runtime `ThreeWayDispatcher` 回 `Some`。
+    /// incident_policy 用此 gate 防止缺 secret 時 arm 類 incident 直接武裝 timer。
+    pub fn push_channels_enabled(&self) -> Option<(bool, bool)> {
+        self.dispatcher.push_channels_enabled()
     }
 
     /// Operator GUI ack — 解除已武裝 timer。
@@ -363,8 +381,8 @@ impl SharedFailsafeWatcher {
 //   C4 修正模型把「組 PositionSnapshot + ATR 注入 + 鎖利 + exchange sync + audit」整段
 //   下放到 owner task 的 `handle_notification_failsafe_escalate`（因 watcher 是 external
 //   task，無 owner pipeline 的 kline_manager / paper_state / PositionManager）。watcher 端
-//   runtime 只用 `clock`（`observe_dispatch` / `timer_expired_and_claim`）+（未來）dispatcher
-//   （Sprint 3 incident_policy 經 `observe_dispatch` 餵 outcome）。但 `SharedFailsafeWatcher::init`
+//   runtime 只用 `clock`（`observe_dispatch` / `timer_expired_and_claim`）+ dispatcher
+//   （incident_policy 經 `observe_dispatch` 餵 outcome）。但 `SharedFailsafeWatcher::init`
 //   簽名要求全 5 trait object，故 position / exchange / audit 注入 Noop 占位（runtime 不被呼叫；
 //   `check_timer` / `dispatch_and_observe` 才會用到，且 `check_timer` 已 `#[cfg(test)]`）。
 
@@ -564,7 +582,10 @@ mod tests {
             FailsafeConfig::default(),
         );
         // 同 `Arc` 指向同一 allocation
-        assert!(Arc::ptr_eq(&a, &b), "init double-call should return same Arc");
+        assert!(
+            Arc::ptr_eq(&a, &b),
+            "init double-call should return same Arc"
+        );
 
         // instance() 也應拿到同一份
         let c = SharedFailsafeWatcher::instance().expect("instance should exist after init");

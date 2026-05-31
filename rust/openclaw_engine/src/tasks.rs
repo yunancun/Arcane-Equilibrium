@@ -882,7 +882,7 @@ pub(crate) fn spawn_position_reconciler_with_cmd_provider(
 /// 模型（C4 spec §0.2 + §2.2）：watcher 不持 `&mut RiskGovernorSm`（runtime 無合法
 /// caller），改持 demo/live cmd_tx slot + 用 in-band `PipelineCommand::NotificationFailsafeEscalate`
 /// 驅動 owner task 跑 SM-04。watcher 本身只：
-///   - `observe_dispatch(outcome)`：被動收 incident_policy（Sprint 3）餵的 outcome → 武裝/解除 timer；
+///   - `observe_dispatch(outcome)`：被動收 incident_policy 餵的 outcome → 武裝/解除 timer；
 ///   - `timer_expired_and_claim()`：每 30s tick 判定 timer 到期 + 同鎖 claim（claim-before-await）；
 ///     claim 成功 → 對每個有 cmd_tx 的 engine 發一次 escalate command；
 ///   - `record_operator_ack()`：收 C5 GUI ack → 解除 timer。
@@ -899,9 +899,9 @@ pub(crate) fn spawn_position_reconciler_with_cmd_provider(
 /// 函數只在 main_boot_tasks 呼一次（boot-time 單點）；`tokio::select!` 第一臂
 /// `cancel.cancelled() => break` cascade，task 不洩漏。
 ///
-/// ⚠️ 誠實標記（C4 spec §5.1）：C4 不接 incident trigger → `outcome_rx` 在 Sprint 3
-/// `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` 實裝前永遠空，timer 永不武裝，escalate 永不發。
-/// C4 = 機制 live，觸發 pending；非「fail-safe 全功能 live」。
+/// ⚠️ 誠實標記（C4 spec §5.1）：C4 watcher 是唯一 timer / SM-04 Defensive path。
+/// `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` 初步接入 auth invalid + Bybit fail-closed
+/// producers；其餘 SM-stuck / drift / watchdog producers 仍待後續。
 pub(crate) fn spawn_notification_failsafe_watcher(
     db_pool: &Arc<DbPool>,
     cancel: &CancellationToken,
@@ -927,7 +927,7 @@ pub(crate) fn spawn_notification_failsafe_watcher(
         FailsafeConfig::default(),
     );
 
-    // outcome / ack 餵入 channel：tx 端註冊進單例 slot（Sprint 3 incident_policy + C5 GUI
+    // outcome / ack 餵入 channel：tx 端註冊進單例 slot（incident_policy + C5 GUI
     // ack 取用），保活避免 select! busy-loop（tx 不被 drop）；rx 端進 watcher loop。
     let (outcome_tx, mut outcome_rx) = tokio::sync::mpsc::unbounded_channel();
     let (ack_tx, mut ack_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
@@ -943,8 +943,8 @@ pub(crate) fn spawn_notification_failsafe_watcher(
         let mut timer_check = tokio::time::interval(std::time::Duration::from_secs(30));
         timer_check.tick().await; // 跳過首次立即 tick
         info!(
-            "notification fail-safe watcher started (mechanism live, incident-trigger pending Sprint 3) \
-             / 通知 fail-safe watcher 已啟動（機制 live，觸發待 Sprint 3）"
+            "notification fail-safe watcher started (mechanism live, incident policy partially wired) \
+             / 通知 fail-safe watcher 已啟動（機制 live，incident policy 部分接線）"
         );
         loop {
             tokio::select! {
@@ -993,7 +993,7 @@ pub(crate) fn spawn_notification_failsafe_watcher(
                     }
                 }
                 Some(outcome) = outcome_rx.recv() => {
-                    // Sprint 3 incident_policy 餵 outcome；C4 留接口（runtime 暫無 producer）。
+                    // incident_policy 餵 outcome；C4 watcher 只負責觀察結果和計時。
                     let _decision = watcher.observe_dispatch(outcome);
                 }
                 Some(()) = ack_rx.recv() => {

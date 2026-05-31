@@ -6,9 +6,9 @@
 //!   整鏈真接上、非 dead-wire。不引入 testcontainers PG（Mac 開發環境）：audit 路徑用
 //!   `audit_pool=None`（fail-soft noop），其餘鏈路全真實。
 //!
-//! 誠實邊界：C4 不接 incident trigger（Sprint 3 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER`）。
-//!   本測試手動 `observe_dispatch(AllFail)` 模擬未來 incident_policy 餵的 outcome，
-//!   證明組件接上；production 自發觸發 pending。
+//! C4 後續接上 incident trigger 後，本檔同時保留 watcher seam 測與真 producer path
+//! 測：`incident_policy` dispatch → outcome feed → watcher timer claim → in-band command
+//! handler → SM-04 Defensive。
 //!
 //! ref:
 //!   - docs/execution_plan/specs/2026-05-29--packet-c-c4-pipeline-wire-spec.md §5.2
@@ -16,9 +16,15 @@
 //!   - providers/single_watcher.rs::timer_expired_and_claim
 
 use super::{make_test_writer, seed_atr_klines};
-use crate::notification_failsafe::providers::single_watcher::SharedFailsafeWatcher;
+use crate::notification_failsafe::incident_policy::{
+    report_incident_with_test_watcher, IncidentClass, IncidentDispatchMode, IncidentPolicyResult,
+};
+use crate::notification_failsafe::providers::single_watcher::{
+    FailsafeFeedSenders, NoopAuditEmitter, NoopExchangeStopSync, NoopPositionProvider,
+    SharedFailsafeWatcher,
+};
 use crate::notification_failsafe::{DispatchOutcome, FailsafeConfig, FailsafeDecision};
-use crate::tick_pipeline::{PipelineKind, StopRequest, TickPipeline};
+use crate::tick_pipeline::{PipelineCommand, PipelineKind, StopRequest, TickPipeline};
 use openclaw_core::sm::risk_gov::RiskLevel;
 
 /// 建一個 Demo 模式 pipeline（fail-safe 對 demo/live 升級；paper 結構性排除）。
@@ -82,7 +88,9 @@ async fn e2e_c4_failsafe_inband_escalate_demo() {
     );
 
     // 3) 交易所雙軌 sync：stop channel 收到鎖利 StopRequest（demo 走真實 sync 路徑）。
-    let stop_req = stop_rx.try_recv().expect("owner handler 應發 StopRequest 到雙軌通道");
+    let stop_req = stop_rx
+        .try_recv()
+        .expect("owner handler 應發 StopRequest 到雙軌通道");
     assert_eq!(stop_req.symbol, "BTCUSDT");
     assert!(stop_req.is_long, "多頭倉 StopRequest is_long=true");
     // 鎖利公式 Buy: new_sl = entry + atr × 0.5 = 50000 + 500×0.5 = 50250 > entry。
@@ -157,6 +165,120 @@ async fn e2e_c4_watcher_allfail_arms_then_claims_once() {
         watcher.timer_expired_and_claim(),
         "新一輪武裝到期後可再 claim"
     );
+}
+
+/// C4-e 真 producer path：incident_policy 產生 AllFail → outcome feed → watcher claim →
+/// in-band PipelineCommand handler → Demo SM-04 Defensive + stop sync。
+#[tokio::test]
+async fn e2e_c4_incident_policy_allfail_to_defensive_demo() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Arc;
+
+    struct ArcClock(Arc<AtomicU64>);
+    impl crate::notification_failsafe::FailsafeClock for ArcClock {
+        fn now_ms(&self) -> u64 {
+            self.0.load(Ordering::SeqCst)
+        }
+    }
+
+    struct AllFailDispatcher;
+    #[async_trait::async_trait]
+    impl crate::notification_failsafe::NotificationDispatcher for AllFailDispatcher {
+        async fn dispatch_3way(&self, _message: &str) -> DispatchOutcome {
+            DispatchOutcome::AllFail
+        }
+
+        fn push_channels_enabled(&self) -> Option<(bool, bool)> {
+            Some((true, true))
+        }
+    }
+
+    let clock = Arc::new(AtomicU64::new(1_000));
+    let watcher = SharedFailsafeWatcher::new_for_test(
+        Box::new(AllFailDispatcher),
+        Box::new(NoopPositionProvider),
+        Box::new(NoopExchangeStopSync),
+        Box::new(NoopAuditEmitter),
+        Box::new(ArcClock(Arc::clone(&clock))),
+        FailsafeConfig::default(),
+    );
+    let (outcome_tx, mut outcome_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (ack_tx, _ack_rx) = tokio::sync::mpsc::unbounded_channel();
+    let senders = FailsafeFeedSenders { outcome_tx, ack_tx };
+
+    let result = report_incident_with_test_watcher(
+        IncidentClass::BybitFailClosed,
+        "retCode fail-closed acceptance path".to_string(),
+        1_000,
+        &watcher,
+        Some(senders),
+    )
+    .await;
+    assert!(matches!(
+        result,
+        IncidentPolicyResult::Dispatched {
+            class: IncidentClass::BybitFailClosed,
+            mode: IncidentDispatchMode::ArmTimer,
+            outcome: DispatchOutcome::AllFail,
+            fed_to_watcher: true
+        }
+    ));
+
+    let outcome = outcome_rx
+        .recv()
+        .await
+        .expect("producer fed watcher outcome");
+    assert!(matches!(
+        watcher.observe_dispatch(outcome),
+        FailsafeDecision::TimerArmed { .. }
+    ));
+    clock.store(
+        1_000 + FailsafeConfig::DEFAULT_TIMEOUT_MS + 1,
+        Ordering::SeqCst,
+    );
+    assert!(watcher.timer_expired_and_claim(), "watcher timer claims");
+
+    let mut p = make_demo_pipeline();
+    let mut w = make_test_writer();
+    let (stop_tx, mut stop_rx) = tokio::sync::mpsc::unbounded_channel::<StopRequest>();
+    p.set_stop_channel(stop_tx);
+    p.paper_state.set_latest_price("BTCUSDT", 50_000.0);
+    p.paper_state
+        .apply_fill("BTCUSDT", true, 0.01, 50_000.0, 0.0, 0, "external_test");
+    seed_atr_klines(&mut p, "BTCUSDT", 50_000.0, 500.0);
+    assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::Normal);
+
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    let cmd = PipelineCommand::NotificationFailsafeEscalate {
+        reason: "notification_3way_fail_1h_timeout".to_string(),
+        response_tx,
+    };
+    let PipelineCommand::NotificationFailsafeEscalate {
+        reason,
+        response_tx,
+    } = cmd
+    else {
+        unreachable!("test constructs the fail-safe command variant");
+    };
+    crate::event_consumer::handlers::handle_notification_failsafe_escalate(
+        reason,
+        response_tx,
+        &mut p,
+        &mut w,
+        None,
+    )
+    .await;
+
+    response_rx
+        .await
+        .expect("handler responded")
+        .expect("report ok");
+    assert_eq!(p.governance.risk.snapshot_level(), RiskLevel::Defensive);
+    let stop_req = stop_rx
+        .try_recv()
+        .expect("Defensive escalation should sync a lock-profit stop");
+    assert_eq!(stop_req.symbol, "BTCUSDT");
+    assert!(stop_req.stop_loss > 50_000.0);
 }
 
 /// C4-d paper noop 對抗測：paper 模式 owner handler 跑 SM-04 但**不發 StopRequest**
