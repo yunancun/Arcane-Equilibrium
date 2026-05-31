@@ -49,13 +49,22 @@ Required for S1-Sx verdicts:
 - Classify bull-only positive performance as regime-bet / learning-only unless cross-regime robustness is separately proven.
 - Do not allow 2024 bull-only results to satisfy P0-EDGE promotion evidence.
 
+## Supplemental Clarification
+
+Bull data is allowed, but agents must label it explicitly. A result based on bull-market data is still useful evidence, but every metric and verdict must say that the sample is bull-heavy, rally-only, or stale-year-dominated when applicable.
+
+Market trend/state should be judged by a local math-first layer. Bybit API data is treated as raw market-state input, not a prediction oracle. The next PA/MIT packet should evaluate kline/index/mark/premium kline, ticker, orderbook, funding history, open interest, long/short ratio, and option historical volatility where relevant, then specify a leak-free local trend/state classifier. Any newly adopted Bybit endpoint must update the repo Bybit reference and receive BB review.
+
+Future news / X / Reddit / market-summary agents may provide corroborating context, but they are not primary signal sources. Narrative evidence cannot override failed quantitative gates and cannot be the main basis for strategy promotion.
+
 ## Next Executable Work
 
 Do not dispatch E1 backfill implementation directly from the old plan. First dispatch PA/MIT to amend the execution packet for:
 
 1. alpha-history storage implementation details,
 2. breadth-ladder automation,
-3. global regime robustness gates,
-4. funding-history storage path after S4 downgrade.
+3. local market trend/state classifier,
+4. global regime robustness gates,
+5. funding-history storage path after S4 downgrade.
 
 After that amendment, E1 can implement the public Bybit history backfill writer with idempotent inserts and coverage reports.
