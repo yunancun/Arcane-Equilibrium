@@ -1,7 +1,7 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-**版本** v99 ｜ **日期** 2026-05-31 ｜ **source HEAD** ca4c569c base + v99 docs closure batch；runtime unchanged from latest v87 deploy snapshot.
-**當前主線**：P0-EDGE-1 Alpha-Edge Regime Evidence Governance。AEG-S0 formal review PASS after PA/MIT/QC/BB/TW/CC re-review. AEG-S1 Foundation is limited-open for storage/provenance design, PIT universe builder, and side-evidence artifact only. E1 backfill writer / DB retention mutation / endpoint ingestion / collector IMPL / alpha scoring remain blocked until separately scoped.
+**版本** v100 ｜ **日期** 2026-06-01 ｜ **source HEAD** 089967b7 base + v100 AEG blocked-item resolution packet；runtime unchanged from latest v87 deploy snapshot.
+**當前主線**：P0-EDGE-1 Alpha-Edge Regime Evidence Governance。AEG-S0 formal review PASS; AEG-S1 Foundation blocker packet landed. Safe next work is docs/design/read-only `AEG-S1-FND-1..4` plus `S2-GATE-B-PREP`. E1 backfill writer / DB retention mutation / endpoint ingestion / collector IMPL / alpha scoring remain blocked until separately scoped.
 **v96 audit note**：V5.8 設計未被刪除；它作為長期 13-module autonomy architecture 保留，active TODO 只保留可派工 posture。詳見 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--v58_design_progress_preservation_audit.md`。
 **歷史詳情**：version log `docs/CLAUDE_CHANGELOG.md`；v94 prune audit `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--todo_v94_prune_audit.md`；pre-cleanup archive `docs/archive/2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`；older v92 archive `docs/archive/2026-05-31--todo_v92_archive.md`。
 
@@ -11,7 +11,7 @@
 
 | Area | Current state | Next action |
 |---|---|---|
-| Source sync | Mac `main` is the active source branch; this v99 closure is docs/governance only on top of `ca4c569c`. Linux fast-forward to the post-v99 docs commit is not verified in this batch. | Commit + push v99 docs/governance closure; no runtime sync unless operator requests it. |
+| Source sync | Mac `main` is the active source branch; this v100 blocker-resolution packet is docs/governance only on top of `089967b7`. Linux fast-forward to the post-v100 docs commit is not verified in this batch. | Commit + push v100 docs/governance packet; no runtime sync unless operator requests it. |
 | Runtime | Latest verified deploy remains v87 2026-05-31: Linux engine/API/watchdog healthy; engine PID 968350 in archived snapshot; healthz 200; no runtime rebuild in AEG governance/TODO batches. | No deploy in this batch. Refresh only before runtime-affecting work. |
 | Runtime caveat | system-level `openclaw-engine.service` / system watchdog install still sudo/operator-gated; current protection is user watchdog + linger + manual engine process. | Operator schedules system-level install window. |
 | Passive health residual | `[48] replay_manifest_registry_growth`, `[74] close_maker_reject_samples`, `[56] live_pipeline_active` remain OPS residual / evidence queue; not OPS-1 reversal. | Keep explicit in OPS queue; do not mark all-green until resolved or accepted. |
@@ -23,7 +23,7 @@
 
 | ID | Status | Owner chain | Acceptance / Gate | Next action |
 |---|---|---|---|---|
-| `P0-EDGE-1` | 🔴 ACTIVE | PM -> PA/QC/MIT/BB -> E1 after gate | Closure requires accepted Alpha-Edge evidence: >=3 alpha-bearing candidates meeting net/cost/statistical gates, or another accepted P0-EDGE path. Bull-only/stale-only/survivor-only/narrative-only positives cannot promote. | Run limited AEG-S1 Foundation planning/design only; no backfill writer or scoring. |
+| `P0-EDGE-1` | 🔴 ACTIVE | PM -> PA/QC/MIT/BB -> E1 after gate | Closure requires accepted Alpha-Edge evidence: >=3 alpha-bearing candidates meeting net/cost/statistical gates, or another accepted P0-EDGE path. Bull-only/stale-only/survivor-only/narrative-only positives cannot promote. | Run `AEG-S1-FND-1..4` + `S2-GATE-B-PREP` docs/design/read-only; no backfill writer or scoring. |
 | `P0-LG-3` | 🟡 SOURCE INTEGRATED / runtime not deployed | PM -> E2 -> E4 -> QA -> operator deploy gate | Review integrated commits `deb3f3af..0802d52b`; V104 checksum discipline; Linux migration dry-run/AUTO_MIGRATE plan; supervised_live tests green. | Run review chain before any deploy/rebuild. |
 | `P0-OPS residual` | 🟢 OPS-1 CLOSED / residual OP-gated | Operator + PM/E1/MIT as needed | Restore drill, system-level units, live-auth renewal, replay manifest feed, close-maker max-pending evidence. | Wait for operator hand-action windows; keep residual rows visible below. |
 
@@ -37,7 +37,9 @@
 - Amendment: `docs/governance_dev/amendments/2026-05-31--AMD-2026-05-31-01-alpha-edge-evidence-governance.md`
 - Findings: `docs/audits/2026-05-31--alpha_edge_regime_evidence_governance_findings.md`
 - Engineering arrangement: `docs/execution_plan/2026-05-31--alpha_edge_regime_evidence_engineering_arrangement.md`
+- S1 unblock packet: `docs/execution_plan/2026-06-01--aeg_s1_foundation_unblock_packet.md`
 - PM 2nd sign-off: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--alpha_edge_regime_evidence_pm_second_signoff.md`
+- PM blocked-item verification: `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_blocked_items_resolution_verification.md`
 
 **Non-negotiable rules**:
 
@@ -47,9 +49,9 @@
 - Trend/regime labels must be local, leak-free, point-in-time, and fixed before alpha scoring.
 - News/X/Reddit agents are secondary side evidence only; the promotion core remains mathematical.
 
-**Current contract artifact**: `docs/execution_plan/2026-05-31--aeg_s0_contracts.md` covers AEG-S0-W0-S1..S4. PA/MIT/QC/BB/TW/CC re-review PASS; PM closure is `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--aeg_s0_formal_review_closure.md`. Next executable action is limited AEG-S1 Foundation scope below; E1 backfill/scoring remains blocked.
+**Current contract artifact**: `docs/execution_plan/2026-05-31--aeg_s0_contracts.md` covers AEG-S0-W0-S1..S4. PA/MIT/QC/BB/TW/CC re-review PASS; PM closure is `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--aeg_s0_formal_review_closure.md`. The vague blocked queue is now classified by `docs/execution_plan/2026-06-01--aeg_s1_foundation_unblock_packet.md`: design/read-only Foundation work can proceed; runtime/DB/backfill/scoring remains blocked.
 
-### §2.1 NOW: AEG-S0 Contract Sprint
+### §2.1 CLOSED: AEG-S0 Contract Sprint
 
 | Session | Owner chain | Output | Acceptance |
 |---|---|---|---|
@@ -60,14 +62,17 @@
 
 Formal review parallelism: 4 sessions can run together after operator/tool authorization; project ceiling remains 7.
 
-### §2.2 AEG-S1 Limited Open / E1 Hard Block
+### §2.2 NOW: AEG-S1 Foundation Blocker Resolution
 
-Allowed now after AEG-S0 PASS:
+Allowed now after AEG-S0 PASS + v100 blocker classification:
 
-- `AEG-S1-W1-S1` storage/retention/provenance design and MIT sizing package.
-- `AEG-S1-W1-S3` PIT universe builder design / scoped implementation prep.
-- `AEG-S1-W1-S4` side-evidence artifact contract/design.
-- Read-only sizing, client-gap design, and migration/change-control drafting.
+| ID | Owner chain | Allowed output |
+|---|---|---|
+| `AEG-S1-FND-1` | PM -> MIT+PA -> E2/E4 review prep | Storage/retention/provenance change-control package for `market.klines` 1095d vs research storage, plus funding/OI/long-short storage branch. |
+| `AEG-S1-FND-2` | PM -> MIT -> PA | PIT universe builder contract using `market.symbol_universe_snapshots`; seed evidence is the 797-row survivorship CSV. |
+| `AEG-S1-FND-3` | PM -> PA+QC | Side-evidence artifact contract; secondary-only and excluded from promotion gates. |
+| `AEG-S1-FND-4` | PM -> BB+PA -> MIT | Public endpoint runner/client-gap + persistence map: kline, funding, OI, long-short, mark/index/premium price-only klines, ticker/orderbook, and `P3-MARKET-TICKERS-INDEX-MARK-DEAD-PERSISTENCE` fix-vs-bypass design. |
+| `S2-GATE-B-PREP` | PM -> BB+MIT -> QC | 24h isolated PreLaunch phase-transition probe plan and capture-only collector design. |
 
 Still blocked until separately scoped and reviewed:
 
@@ -79,7 +84,8 @@ Still blocked until separately scoped and reviewed:
 - alpha scoring / promotion report.
 
 Allowed work must remain docs/design/read-only unless PM opens a specific S1
-implementation task with its own owner chain.
+implementation task with its own owner chain. Current verification result:
+blocker classification is complete; implementation completion is false.
 
 ### §2.3 Preserved Foundations
 
@@ -100,7 +106,7 @@ AEG is not a replacement of the prior design. It integrates and constrains these
 
 | Sprint | Purpose | Parallelism |
 |---|---|---|
-| `AEG-S1` Foundation | retention + alpha-history storage; public Bybit backfill writer; PIT universe builder; side-evidence artifact | LIMITED OPEN: S1-W1-S1/S3/S4 planning/design may proceed; backfill writer waits for storage + endpoint contracts |
+| `AEG-S1` Foundation | retention + alpha-history storage; public Bybit backfill writer; PIT universe builder; side-evidence artifact | LIMITED OPEN: FND-1..4 docs/design/read-only + S2 Gate-B prep; backfill writer waits for storage/provenance + endpoint implementation scope |
 | `AEG-S2` Evidence automation | regime label runner; breadth ladder runner; robustness matrix builder | regime + breadth parallel; matrix waits for both |
 | `AEG-S3` Alpha research | TSMOM, cross-sectional momentum, S4/Sx falsification overlay, S2 PreLaunch probe | up to 4 parallel |
 | `AEG-S4` Decision | CP-2 candidate verdict and operator decision | serial PM -> QC/MIT -> PA -> Operator |
@@ -111,7 +117,7 @@ AEG is not a replacement of the prior design. It integrates and constrains these
 
 | Workflow | State | Next action |
 |---|---|---|
-| `Alpha-Edge / AEG` | ACTIVE mainline | Limited AEG-S1 Foundation planning/design; no backfill writer or scoring before PM opens a scoped S1 task. |
+| `Alpha-Edge / AEG` | ACTIVE mainline | AEG-S1 Foundation FND-1..4 docs/design/read-only plus S2 Gate-B prep; no backfill writer or scoring before PM opens a scoped S1 task. |
 | `Workflow B` ADR-0046 basis observation/execution split | ACTIVE but not Alpha-blocking | PA design -> E1 Rust -> MIT V117 -> E2 -> E4 -> BB -> QA. |
 | `Earn Wave C` | OPERATOR-GATED | OP-1 key refresh -> OP-2 Earn variant -> OP-3 first $100-200 USDT Flexible stake. |
 | `Layered Autonomy v2 Wave 5` | FROZEN active-IMPL per v92 D1 | Packet A+B runtime and TOTP source exist; Packet C core E4 green; runtime TOTP enrollment + engine integration wait until promotion gate. |
@@ -173,7 +179,7 @@ Preservation checkpoint: V5.8 full design files are retained in `docs/execution_
 | `P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH` | 1 | Legacy alpha evidence wait | Around 2026-06-11 check AC-S2-A-3 candidate evidence; subordinate result to AEG gates. |
 | `P1-A1A2-STAGE0R-RUNNER-IMPL` | 2 | A2 REVISE/HOLD; auth fix branch exists | E2 -> E4 -> PM deploy/runtime verify before trusting runner output. |
 | `P2-A1-RUNNER-WIRE-TO-BASIS` | 3 | WAITING for basis_panel >=14d | Trigger around 2026-06-13; wire A1 as-of basis cohort with QC leak-free gate. |
-| `P3-MARKET-TICKERS-INDEX-MARK-DEAD-PERSISTENCE` | 4 | LATENT BUG | Decide fix/bypass before historical basis/index work. |
+| `P3-MARKET-TICKERS-INDEX-MARK-DEAD-PERSISTENCE` | 4 | LATENT BUG / folded into AEG-S1-FND-4 | Decide fix/bypass before historical basis/index work; do not use sparse/dead ticker persistence as promotion evidence. |
 | `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK` | 4 | Scheduled watch | On 2026-06-27 decide Stage 0R baseline vs M7 retire for bb_breakout/bb_reversion. |
 | `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` | 2 | PA spec done; IMPL pending | E1 -> BB -> E2 -> E4 -> QA when Sprint 3 resumes. |
 | `P2-PACKET-C-C5-GUI-BANNER-ACK-ROLE` | 2 | DEFERRED until C4 | Provision restricted `failsafe_ack_role`, then GUI ack endpoint. |
@@ -205,6 +211,8 @@ Preservation checkpoint: V5.8 full design files are retained in `docs/execution_
 | OP-3 first stake $100-200 USDT Flexible-only | After OP-2 | Creates first `learning.earn_movement_log` evidence. |
 | Restore drill window | Low-trading 4h window | Blocks OPS all-green. |
 | System-level service install | sudo/operator | Improves runtime protection beyond user watchdog. |
+| AEG-S1-OP-1 `market.klines` 1095d decision | After `AEG-S1-FND-1` package | Determines whether 18mo kline backfill can persist in `market.klines` or needs research storage. |
+| AEG-S1-OP-2 funding-history storage choice | After `AEG-S1-FND-1` package | Blocks S4/funding-history persistence: extend `market.funding_rates` or create dedicated research storage. |
 
 ---
 
