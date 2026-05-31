@@ -13,8 +13,8 @@
 
 use crate::common::bybit_signer::sign_rest_v5;
 use reqwest::Client;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
@@ -348,6 +348,14 @@ impl Default for RateLimitState {
 const REST_LATENCY_WINDOW_SECS: u64 = 60;
 /// retCode 樣本最大年齡（60s rolling window per packet §1.1 工作項 (2)）。
 const RET_CODE_WINDOW_SECS: u64 = 60;
+/// 連續 retCode fail-closed incident 閾值。
+const RET_CODE_CONSECUTIVE_TRIGGER: u32 = 8;
+/// 60s retCode fail-closed rolling-window incident 閾值。
+const RET_CODE_WINDOW_TRIGGER: u32 = 15;
+/// 已觸發 incident 後需要連續成功數，避免單次 OK 掩蓋 hot failure window。
+const RET_CODE_RECOVERY_SUCCESS_STREAK: u32 = 3;
+/// 恢復時 window 需低於連續觸發閾值；8 筆熱失敗仍不得 self-heal。
+const RET_CODE_RECOVERY_MAX_WINDOW: u32 = RET_CODE_CONSECUTIVE_TRIGGER - 1;
 /// REST 樣本緩衝上限（防 unbounded growth；60s × 假設 100 call/s = 6000 上限）。
 const REST_LATENCY_BUFFER_CAP: usize = 8192;
 /// retCode 樣本緩衝上限。
@@ -450,7 +458,9 @@ impl RestLatencyHistogram {
             // 為什麼 nearest-rank percentile（非 linear interp）：
             //   - 對 6000 sample 兩種方法差異 < 1ms；nearest-rank 更直觀且
             //     對齊 SLO instrumentation 行業慣例（Prometheus / Datadog 同）。
-            let idx = ((q * (n as f64)).ceil() as usize).saturating_sub(1).min(n - 1);
+            let idx = ((q * (n as f64)).ceil() as usize)
+                .saturating_sub(1)
+                .min(n - 1);
             latencies[idx].min(u32::MAX as u64) as u32
         };
         (pick(0.50), pick(0.95), pick(0.99))
@@ -510,6 +520,20 @@ pub struct RetCodeCounter {
     samples_4xx: Mutex<Vec<Instant>>,
     /// 5xx 樣本。
     samples_5xx: Mutex<Vec<Instant>>,
+    /// retCode!=0 連續 fail-closed 次數；成功回應重置。
+    consecutive_fail_closed: AtomicU32,
+    /// 是否已觸發過 bybit_fail_closed incident，等待穩定成功解除。
+    fail_closed_incident_open: AtomicBool,
+    /// incident open 後的連續成功數；任一 fail-closed / noop 會打斷。
+    successes_after_fail_closed_incident: AtomicU32,
+}
+
+/// Bybit fail-closed incident trigger snapshot。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BybitFailClosedSnapshot {
+    pub consecutive_fail_closed: u32,
+    pub window_4xx: u32,
+    pub window_5xx: u32,
 }
 
 impl Default for RetCodeCounter {
@@ -524,6 +548,9 @@ impl RetCodeCounter {
         Self {
             samples_4xx: Mutex::new(Vec::with_capacity(64)),
             samples_5xx: Mutex::new(Vec::with_capacity(64)),
+            consecutive_fail_closed: AtomicU32::new(0),
+            fail_closed_incident_open: AtomicBool::new(false),
+            successes_after_fail_closed_incident: AtomicU32::new(0),
         }
     }
 
@@ -573,7 +600,11 @@ impl RetCodeCounter {
         let cutoff = now
             .checked_sub(Duration::from_secs(RET_CODE_WINDOW_SECS))
             .unwrap_or(now);
-        samples.iter().filter(|t| **t >= cutoff).count().min(u32::MAX as usize) as u32
+        samples
+            .iter()
+            .filter(|t| **t >= cutoff)
+            .count()
+            .min(u32::MAX as usize) as u32
     }
 
     /// 60s 內 5xx 累積計數。
@@ -586,7 +617,11 @@ impl RetCodeCounter {
         let cutoff = now
             .checked_sub(Duration::from_secs(RET_CODE_WINDOW_SECS))
             .unwrap_or(now);
-        samples.iter().filter(|t| **t >= cutoff).count().min(u32::MAX as usize) as u32
+        samples
+            .iter()
+            .filter(|t| **t >= cutoff)
+            .count()
+            .min(u32::MAX as usize) as u32
     }
 
     /// test-only accessor：注入指定 `Instant` 時間戳的 4xx sample（per E2 round 1
@@ -609,6 +644,17 @@ impl RetCodeCounter {
         }
     }
 
+    /// test-only accessor：清空 rolling samples，模擬 60s window 已冷卻。
+    #[cfg(test)]
+    fn clear_retcode_samples_for_test(&self) {
+        if let Ok(mut samples) = self.samples_4xx.lock() {
+            samples.clear();
+        }
+        if let Ok(mut samples) = self.samples_5xx.lock() {
+            samples.clear();
+        }
+    }
+
     /// 從 `BybitApiError` 對映到 4xx / 5xx 並 record。
     ///
     /// 為什麼 helper 在 client 端 而非 caller 端：
@@ -625,24 +671,79 @@ impl RetCodeCounter {
     ///     完成」非 venue fault；既不計 4xx 也不計 5xx，直接 return。
     ///   - 若繼續計 5xx 會把 lifecycle race（caller 補打 cancel 時訂單已成交）
     ///     誤升 venue fault，污染 emitter cascade 觀測。
-    pub fn record_for_error(&self, err: &BybitApiError) {
+    pub fn record_for_error(&self, err: &BybitApiError) -> Option<BybitFailClosedSnapshot> {
         match err {
             BybitApiError::Business { ret_code, .. } => {
                 // noop guard：lifecycle race / 已套用設定 等「動作已完成」碼
                 // 非 venue fault；直接跳過計數（per ADR-0042 cascade gate 語意）。
                 if Self::is_noop_retcode(*ret_code) {
-                    return;
+                    self.consecutive_fail_closed.store(0, Ordering::Relaxed);
+                    self.successes_after_fail_closed_incident
+                        .store(0, Ordering::Relaxed);
+                    return None;
                 }
+                self.successes_after_fail_closed_incident
+                    .store(0, Ordering::Relaxed);
                 if Self::is_client_fault_retcode(*ret_code) {
                     self.record_4xx();
                 } else {
                     self.record_5xx();
                 }
+                let consecutive = self
+                    .consecutive_fail_closed
+                    .fetch_add(1, Ordering::Relaxed)
+                    .saturating_add(1);
+                let snapshot = BybitFailClosedSnapshot {
+                    consecutive_fail_closed: consecutive,
+                    window_4xx: self.count_4xx(),
+                    window_5xx: self.count_5xx(),
+                };
+                let window_total = snapshot.window_4xx.saturating_add(snapshot.window_5xx);
+                if (snapshot.consecutive_fail_closed >= RET_CODE_CONSECUTIVE_TRIGGER
+                    || window_total >= RET_CODE_WINDOW_TRIGGER)
+                    && !self.fail_closed_incident_open.swap(true, Ordering::Relaxed)
+                {
+                    Some(snapshot)
+                } else {
+                    None
+                }
             }
             // Transport / JsonParse / NoCredentials / SigningError 不計入 4xx/5xx
             // counter；屬 wrapper 層 fault 而非 venue 端 fault。
-            _ => {}
+            _ => None,
         }
+    }
+
+    /// 成功 retCode=0 回應會重置連續 fail-closed 計數。
+    /// 回 `true` 代表剛從已觸發 incident 恢復，caller 可回報 self-heal。
+    pub fn record_success(&self) -> bool {
+        self.consecutive_fail_closed.store(0, Ordering::Relaxed);
+        if !self.fail_closed_incident_open.load(Ordering::Relaxed) {
+            self.successes_after_fail_closed_incident
+                .store(0, Ordering::Relaxed);
+            return false;
+        }
+        let success_streak = self
+            .successes_after_fail_closed_incident
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+        if success_streak < RET_CODE_RECOVERY_SUCCESS_STREAK {
+            return false;
+        }
+        let window_total = self.count_4xx().saturating_add(self.count_5xx());
+        if window_total > RET_CODE_RECOVERY_MAX_WINDOW {
+            return false;
+        }
+        self.fail_closed_incident_open
+            .store(false, Ordering::Relaxed);
+        self.successes_after_fail_closed_incident
+            .store(0, Ordering::Relaxed);
+        true
+    }
+
+    /// 目前連續 fail-closed 次數（測試 / 診斷）。
+    pub fn consecutive_fail_closed(&self) -> u32 {
+        self.consecutive_fail_closed.load(Ordering::Relaxed)
     }
 
     /// 判斷 retCode 是否為 client fault（4xx 對映）。
@@ -656,7 +757,10 @@ impl RetCodeCounter {
     ///   其他 110xxx 業務碼（balance / position / order lifecycle）走 5xx
     ///   （venue-side state；非 client fault）；保守對映。
     fn is_client_fault_retcode(ret_code: i64) -> bool {
-        matches!(ret_code, 10001 | 10002 | 10003 | 10004 | 10005 | 10006 | 10010)
+        matches!(
+            ret_code,
+            10001 | 10002 | 10003 | 10004 | 10005 | 10006 | 10010
+        )
     }
 
     /// 判斷 retCode 是否為 noop（動作已完成；非 venue/client fault）。
@@ -1165,12 +1269,32 @@ impl BybitRestClient {
         // instrument_info 等 raw caller 走 `client.get(...)` 後手動檢 retCode（不
         // 走 `_checked`），若觀測停在 `_checked` 端會 bypass > 50% caller 流量。
         // 本路徑覆蓋所有 caller；`_checked` 端不再重複 record 避雙重計。
-        if !parsed.is_ok() {
-            self.ret_code_counter.record_for_error(&BybitApiError::Business {
+        if parsed.is_ok() {
+            if self.ret_code_counter.record_success() {
+                crate::notification_failsafe::incident_policy::report_resolved(
+                    crate::notification_failsafe::incident_policy::IncidentClass::BybitFailClosed,
+                );
+            }
+        } else {
+            let err = BybitApiError::Business {
                 ret_code: parsed.ret_code,
                 ret_msg: parsed.ret_msg.clone(),
                 response: serde_json::to_value(&parsed).unwrap_or_default(),
-            });
+            };
+            if let Some(snapshot) = self.ret_code_counter.record_for_error(&err) {
+                crate::notification_failsafe::incident_policy::spawn_report_incident(
+                    crate::notification_failsafe::incident_policy::IncidentClass::BybitFailClosed,
+                    format!(
+                        "ret_code={} ret_msg={} consecutive={} window_4xx={} window_5xx={} path={}",
+                        parsed.ret_code,
+                        parsed.ret_msg,
+                        snapshot.consecutive_fail_closed,
+                        snapshot.window_4xx,
+                        snapshot.window_5xx,
+                        path
+                    ),
+                );
+            }
         }
         Ok(parsed)
     }
@@ -1221,12 +1345,32 @@ impl BybitRestClient {
 
         // PA-DRIFT-4 round 1 H-3 fix：retCode 觀測下沉至 `get` / `post` 內部
         // （見 `get` 同節注釋）。POST 端同 GET 處理，覆蓋所有 raw caller。
-        if !parsed.is_ok() {
-            self.ret_code_counter.record_for_error(&BybitApiError::Business {
+        if parsed.is_ok() {
+            if self.ret_code_counter.record_success() {
+                crate::notification_failsafe::incident_policy::report_resolved(
+                    crate::notification_failsafe::incident_policy::IncidentClass::BybitFailClosed,
+                );
+            }
+        } else {
+            let err = BybitApiError::Business {
                 ret_code: parsed.ret_code,
                 ret_msg: parsed.ret_msg.clone(),
                 response: serde_json::to_value(&parsed).unwrap_or_default(),
-            });
+            };
+            if let Some(snapshot) = self.ret_code_counter.record_for_error(&err) {
+                crate::notification_failsafe::incident_policy::spawn_report_incident(
+                    crate::notification_failsafe::incident_policy::IncidentClass::BybitFailClosed,
+                    format!(
+                        "ret_code={} ret_msg={} consecutive={} window_4xx={} window_5xx={} path={}",
+                        parsed.ret_code,
+                        parsed.ret_msg,
+                        snapshot.consecutive_fail_closed,
+                        snapshot.window_4xx,
+                        snapshot.window_5xx,
+                        path
+                    ),
+                );
+            }
         }
         Ok(parsed)
     }
@@ -1332,8 +1476,8 @@ impl BybitRestClient {
         let group = RateLimitGroup::from_path(path);
         let gidx = group as usize;
         let group_threshold = Self::group_backoff_threshold(group);
-        let group_near = self.rate_limit.group_remaining[gidx].load(Ordering::Relaxed)
-            <= group_threshold;
+        let group_near =
+            self.rate_limit.group_remaining[gidx].load(Ordering::Relaxed) <= group_threshold;
         // 外層粗粒度守衛（global）：作為 per-group header 缺失時的防禦。
         let global_near = self.is_near_rate_limit(GLOBAL_THRESHOLD);
 

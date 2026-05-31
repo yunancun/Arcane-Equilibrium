@@ -209,9 +209,9 @@ per GUI Bybit-first PnL refactor Phase 2；backend-only endpoint `/api/v1/strate
 
 ---
 
-### §2.4 Notification Fail-Safe Wire — Rust（C4 pipeline wire 2026-05-29，commit `a8ba146c`）
+### §2.4 Notification Fail-Safe Wire — Rust（C4 pipeline wire 2026-05-29，incident trigger 2026-05-31）
 
-per `P2-PACKET-C-C4-PIPELINE-WIRE`；把自主通知 fail-safe（AMD-2026-05-21-01 v2）接進 runtime。**注意：C4 = 半 wire**，incident-trigger（`P2-INCIDENT-POLICY-DISPATCH-TRIGGER` Sprint 3）未接前 escalate dormant；兩 singleton 此期間 0 副作用。
+per `P2-PACKET-C-C4-PIPELINE-WIRE` + `P2-INCIDENT-POLICY-DISPATCH-TRIGGER`；把自主通知 fail-safe（AMD-2026-05-21-01 v2）接進 runtime。C4 watcher 仍是唯一 timer / SM-04 Defensive path；incident trigger 只餵 dispatch outcome。
 
 #### 2.4.1 `SHARED_WATCHER`
 
@@ -221,14 +221,14 @@ per `P2-PACKET-C-C4-PIPELINE-WIRE`；把自主通知 fail-safe（AMD-2026-05-21-
 | type_signature | `OnceLock<SharedFailsafeWatcher>`；內部單一 timer state（`timer_armed_at_ms` + `escalated_for_current_arm`）|
 | location | `rust/openclaw_engine/src/notification_failsafe/providers/single_watcher.rs`；`SharedFailsafeWatcher::init` boot 單點 |
 | owner_lifecycle | `spawn_notification_failsafe_watcher`（`tasks.rs`）boot 構造一次，唯一 caller `main_boot_tasks.rs`（緊接 reconciler spawn）；engine process 生命週期；cancel token cascade 退出 |
-| cross_task_pattern | producer: incident-trigger（Sprint 3，當前無）經 outcome feed `observe_dispatch(AllFail)` 武裝 timer；consumer: watcher select! loop `timer_expired_and_claim()`（claim-before-await，恰一次）→ 對 demo/live slot 發 `PipelineCommand::NotificationFailsafeEscalate` → owner task SM-04 transition |
+| cross_task_pattern | producer: `incident_policy` 經 outcome feed `observe_dispatch(AllFail)` 武裝 timer；consumer: watcher select! loop `timer_expired_and_claim()`（claim-before-await，恰一次）→ 對 demo/live slot 發 `PipelineCommand::NotificationFailsafeEscalate` → owner task SM-04 transition |
 | lock_primitive | 內部 `Mutex` guarded state；claim 在同一 lock hold 內判 + set，並發 idempotent |
 | visibility | crate-internal；watcher loop 專用 |
 | caller_chain | spawn: `tasks.rs::spawn_notification_failsafe_watcher`；escalate handler: `event_consumer/handlers/risk.rs::handle_notification_failsafe_escalate` |
-| health_monitoring | NO（當前 dormant；Sprint 3 incident-trigger 接上後評估 M3 emit）|
+| health_monitoring | NO（producer coverage 擴完後再評估 M3 emit）|
 | registered_date | 2026-05-29 |
 | governance_authority | spec `docs/execution_plan/specs/2026-05-29--packet-c-c4-pipeline-wire-spec.md` + E2 APPROVE-WITH-CONDITIONS C2 + QA ACCEPT C2 |
-| migration_plan | Sprint 3 接 incident-trigger 後 watcher 真實武裝；屆時 BB mandatory re-review（set_trading_stop 真觸發）|
+| migration_plan | incident-trigger 初步接入 auth invalid + Bybit fail-closed；SM-stuck / drift / watchdog producer 仍待後續；BB mandatory re-review（set_trading_stop 真觸發）|
 
 #### 2.4.2 `FAILSAFE_FEED_SENDERS`
 
@@ -238,14 +238,31 @@ per `P2-PACKET-C-C4-PIPELINE-WIRE`；把自主通知 fail-safe（AMD-2026-05-21-
 | type_signature | `OnceLock<{ outcome_tx, ack_tx }>`（mpsc senders）|
 | location | `rust/openclaw_engine/src/tasks.rs`（init 於 spawn watcher 時）|
 | owner_lifecycle | boot 一次；保活 sender 端使 `outcome_rx`/`ack_rx` channel 不關（防 watcher select! busy-loop spin）|
-| cross_task_pattern | 預留 seam：Sprint 3 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` 取 `outcome_tx` 餵 dispatch outcome；C5 GUI ack 取 `ack_tx`。**當前 0 production caller**（getter 無人呼）→ `outcome_rx` 永空 → timer 永不武裝（dormant 安全核心）|
+| cross_task_pattern | `incident_policy` 取 `outcome_tx` 餵 dispatch outcome；C5 GUI ack 取 `ack_tx`。arm 類 incident 只有三路 dispatch 回 `AllFail` 且 push secret gate 通過時才餵；notify-only 不餵 |
 | lock_primitive | OnceLock（set-once）|
 | visibility | crate-internal getter |
-| caller_chain | 當前無 production caller（dormant）；Sprint 3 incident_policy + C5 GUI ack 接入 |
+| caller_chain | producer: `notification_failsafe/incident_policy.rs`; source callers: `live_auth_watcher.rs` auth invalid/resolved, `bybit_rest_client.rs` retCode fail-closed/resolved；C5 GUI ack pending |
 | health_monitoring | NO |
 | registered_date | 2026-05-29 |
 | governance_authority | 同 2.4.1 |
-| migration_plan | Sprint 3 / C5 接 producer 後 active |
+| migration_plan | C5 GUI ack pending；producer coverage 後續補 SM-stuck / drift / watchdog notify-only |
+
+#### 2.4.3 `INCIDENT_POLICY_LEDGER`
+
+| 欄位 | 值 |
+|---|---|
+| name | `INCIDENT_POLICY_LEDGER` |
+| type_signature | `OnceLock<parking_lot::Mutex<PolicyLedger>>`；內部 class-level `HashMap<IncidentClass, IncidentState>` + `current_armed_class` |
+| location | `rust/openclaw_engine/src/notification_failsafe/incident_policy.rs` |
+| owner_lifecycle | lazy init on first incident producer call；engine process lifetime；restart 清零（incident 若仍持續會重新 sustained） |
+| cross_task_pattern | producer: auth watcher / Bybit REST async tasks call `report_incident` / `report_resolved`; consumer: same module decides sustained / throttle / 7d cooling / self-heal gating before feeding watcher |
+| lock_primitive | `parking_lot::Mutex`；lock only covers ledger mutation, never held across notification dispatch await |
+| visibility | private static；public helper functions expose constrained operations |
+| caller_chain | `live_auth_watcher.rs::decide_once` auth invalid/resolved; `bybit_rest_client.rs::{get,post}` retCode fail-closed/resolved; dispatch target `SharedFailsafeWatcher::dispatch_3way_only` + `FAILSAFE_FEED_SENDERS.outcome_tx` |
+| health_monitoring | NO（incident audit/GUI path remains V114 notification fail-safe audit + C5 pending） |
+| registered_date | 2026-05-31 |
+| governance_authority | PA spec `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-30--c4_incident_policy_dispatch_trigger_spec.md` + AMD-2026-05-21-01 v2 §3/§5 |
+| migration_plan | If restart-persistent incident cooling is later required, add PG-backed ledger via new V### migration and Linux PG dry-run; current in-memory ledger matches PA §4.3 acceptance |
 
 ---
 

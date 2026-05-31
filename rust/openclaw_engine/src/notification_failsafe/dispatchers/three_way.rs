@@ -96,6 +96,10 @@ impl NotificationDispatcher for ThreeWayDispatcher {
 
         compute_outcome(slack_ok, email_ok, console_ok)
     }
+
+    fn push_channels_enabled(&self) -> Option<(bool, bool)> {
+        Some(self.channels_enabled())
+    }
 }
 
 /// 純函數 — 三 bool 算 outcome。

@@ -331,6 +331,19 @@ pub type LivePipelineSpawnResult = Result<std::thread::JoinHandle<()>, String>;
 /// Fn（非 FnMut / FnOnce）讓我們每次成功 respawn 都能呼叫。
 pub type LivePipelineSpawner = Arc<dyn Fn(SpawnOutput) -> LivePipelineSpawnResult + Send + Sync>;
 
+fn report_auth_invalid_incident(error_kind: &str, error: &dyn std::fmt::Display) {
+    openclaw_engine::notification_failsafe::incident_policy::spawn_report_incident(
+        openclaw_engine::notification_failsafe::incident_policy::IncidentClass::AuthInvalid,
+        format!("kind={} error={}", error_kind, error),
+    );
+}
+
+fn report_auth_resolved() {
+    openclaw_engine::notification_failsafe::incident_policy::report_resolved(
+        openclaw_engine::notification_failsafe::incident_policy::IncidentClass::AuthInvalid,
+    );
+}
+
 /// Live authorization watcher.
 ///
 /// Holds the Live slot, the engine config manager (for fresh
@@ -391,6 +404,9 @@ pub struct LiveAuthWatcher {
     /// 給 build_exchange_pipeline pricing binding assertion 用。
     /// `None` 時走 `PricingConfig::default()`（單測 + pre-2026-05-11 callers）。
     risk_live_store: Option<Arc<ConfigStore<RiskConfig>>>,
+    /// auth_invalid incident 只在 Live 曾經 spawned 後才打開。
+    /// 冷啟動沒有 authorization.json 是正常 idle，不是 operator-unreachable incident。
+    auth_invalid_incident_active: bool,
 }
 
 impl LiveAuthWatcher {
@@ -458,6 +474,7 @@ impl LiveAuthWatcher {
                 // LG-2 T2 (2026-05-11)：with_params 為單測 + pre-2026-05-11 callers
                 // 入口，None 表示 watcher 不知 risk_live → respawn 走 default PricingConfig。
                 risk_live_store: None,
+                auth_invalid_incident_active: false,
             },
             IpcTriggerHandle { tx },
         )
@@ -581,6 +598,29 @@ impl LiveAuthWatcher {
             live_cmd_slot,
             live_event_slot,
             risk_live_store,
+            auth_invalid_incident_active: false,
+        }
+    }
+
+    fn mark_auth_invalid_reportable(&mut self, slot_spawned: bool) -> bool {
+        if slot_spawned {
+            self.auth_invalid_incident_active = true;
+            return true;
+        }
+        self.auth_invalid_incident_active
+    }
+
+    fn clear_auth_invalid_incident_if_active(&mut self) -> bool {
+        if !self.auth_invalid_incident_active {
+            return false;
+        }
+        self.auth_invalid_incident_active = false;
+        true
+    }
+
+    fn report_auth_resolved_if_active(&mut self) {
+        if self.clear_auth_invalid_incident_if_active() {
+            report_auth_resolved();
         }
     }
 
@@ -699,8 +739,12 @@ impl LiveAuthWatcher {
             // Both down → idle, waiting for operator to renew.
             // 兩者皆 down → idle，等 operator renew。
             (false, Err(e)) => {
+                let kind = auth_error_kind(&e);
+                if self.mark_auth_invalid_reportable(false) {
+                    report_auth_invalid_incident(kind, &e);
+                }
                 debug!(
-                    error_kind = auth_error_kind(&e),
+                    error_kind = kind,
                     error = %e,
                     "LiveAuthWatcher: slot Empty + auth invalid → idle \
                      / 槽空 + 授權無效 → idle"
@@ -709,6 +753,7 @@ impl LiveAuthWatcher {
             // Both up → happy path, log at debug.
             // 兩者皆上 → 快樂路徑，debug log。
             (true, Ok(auth)) => {
+                self.report_auth_resolved_if_active();
                 debug!(
                     tier = %auth.tier,
                     operator_id = %auth.operator_id,
@@ -720,6 +765,7 @@ impl LiveAuthWatcher {
             // Auth valid, slot Empty → try respawn.
             // 授權有效，槽空 → 嘗試 respawn。
             (false, Ok(auth)) => {
+                self.report_auth_resolved_if_active();
                 if !self.backoff.is_ready() {
                     debug!(
                         tier = %auth.tier,
@@ -878,9 +924,13 @@ impl LiveAuthWatcher {
             // Auth invalid, slot Spawned → teardown immediately (never gated).
             // 授權無效，槽 Spawned → 立即 teardown（絕不經退避閘）。
             (true, Err(e)) => {
+                let kind = auth_error_kind(&e);
+                if self.mark_auth_invalid_reportable(true) {
+                    report_auth_invalid_incident(kind, &e);
+                }
                 warn!(
                     env = ?self.env,
-                    error_kind = auth_error_kind(&e),
+                    error_kind = kind,
                     error = %e,
                     "LIVE AUTHORIZATION INVALIDATED MID-SESSION — tearing down Live slot \
                      only (demo/paper continue). Operator: renew via \

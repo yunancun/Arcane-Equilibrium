@@ -55,6 +55,7 @@
 // 一併做（per operator decision PC.B + grill-me Q3 「demo canary 另開 sprint」邏輯）。
 pub mod audit_emitter;
 pub mod dispatchers;
+pub mod incident_policy;
 pub mod providers;
 
 use async_trait::async_trait;
@@ -227,6 +228,15 @@ pub trait NotificationDispatcher: Send + Sync {
     /// 派發訊息至三路通道並回報結果。
     /// runtime 端負責 timeout / retry；本層只取 outcome。
     async fn dispatch_3way(&self, message: &str) -> DispatchOutcome;
+
+    /// Slack / Email 兩個 push channel 的啟用狀態。
+    ///
+    /// 預設 `None` 代表 dispatcher 未暴露此資訊；runtime `ThreeWayDispatcher`
+    /// 會回 `Some((slack, email))`，incident policy 用它避免 secret 未配置時
+    /// 把 arm 類 incident 直接打成 `AllFail` 武裝。
+    fn push_channels_enabled(&self) -> Option<(bool, bool)> {
+        None
+    }
 }
 
 /// 倉位快照來源。runtime 從 paper_state / Bybit REST 拉真實倉位後 map 為
