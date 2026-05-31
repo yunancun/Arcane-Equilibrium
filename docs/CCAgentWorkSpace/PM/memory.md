@@ -4,6 +4,7 @@
 
 - Operator accepted `market.klines` 1095d + 18mo + full survivorship collection / core25 primary analysis, but explicitly required breadth to become automated evidence rather than an ad hoc later PM call. Future S1 work needs a breadth-ladder runner/report before verdict.
 - S4 was downgraded because bull-only 2024 data can create false confidence and may be stale. The durable rule is broader: all S1-Sx alpha verdicts need cross-regime robustness/falsification, not just Track 4.
+- Clarification: bull data is not forbidden, but agents must label bull-data-heavy evidence as such. Market trend/state should be inferred locally from math-first Bybit market data, while future news/X/Reddit agents are secondary corroboration only and never the main signal or promotion source.
 - Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--alpha_edge_operator_decisions.md
 
 ## 2026-05-31 Alpha-Edge NOW 3 Dispatch Lesson
