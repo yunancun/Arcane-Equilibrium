@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-31（TODO v94 AEG cleanup + v92/v93 version-increment 遷入；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-05-31（TODO v95 prune audit + v94 AEG cleanup + v92/v93 version-increment 遷入；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
-> per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（§1 blockers / §2 banner / §4 module matrix / §6.1 alpha-edge 派工）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+> per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v95 增量（2026-05-31 TODO prune audit）**：PM 對照 `HEAD^:TODO.md` v93 446 行與 v94 149 行，結論 = v94 清理方向正確但 active handoff 砍過頭。新增 PM audit report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--todo_v94_prune_audit.md`；TODO v95 補回壓縮版 Workflow B / Earn Wave C / Layered Autonomy / Sprint 2 Stage0R 姿態、M1-M13 module freeze matrix、9 safety invariants、110017/OPS/Earn/LG/lease/debt active rows、scheduled watches、cascade/governance watch。AEG-S0 仍是唯一 Alpha-Edge next action；E1 backfill/DB retention/endpoint IMPL/collector/alpha scoring 仍 hard-blocked before AEG-S0 pass。本輪 doc/TODO only，無 runtime/DB/auth/trading 改動。
 
 **v94 增量（2026-05-31 AEG cleanup）**：新增 ADR-0047 + AMD-2026-05-31-01，將 operator 對 bull data、S4、S1-Sx、Bybit API、新聞/X/Reddit side evidence 的規則升為 governance anchor；新增 findings report、PM first/second sign-off、AEG engineering arrangement。TODO 從 446 行收斂為 active dispatch queue，歷史敘事移到 `docs/archive/2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`，目前唯一 Alpha-Edge next action = AEG-S0 contract sprint；E1 backfill/DB retention/endpoint IMPL/alpha scoring 在 AEG-S0 pass 前硬 blocked。本輪 doc/governance only，無 runtime/DB/auth/trading 改動。
 
