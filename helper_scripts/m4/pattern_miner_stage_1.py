@@ -13,6 +13,7 @@ per W1-B spec §5.2：
 CLI usage：
    python3 -m helper_scripts.m4.pattern_miner_stage_1 --dry-run
    python3 -m helper_scripts.m4.pattern_miner_stage_1 --no-dry-run
+   python3 -m helper_scripts.m4.pattern_miner_stage_1 --no-dry-run --out /tmp/m4.json
 
 不變量：
    - --dry-run 不連 PG / 不寫 PG（per W1-B spec AC-S2-B-2）
@@ -26,11 +27,13 @@ Mac scaffold 階段：本 entry 在 Mac 上跑 --dry-run 不會連 PG；producti
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import sys
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 # 為什麼 module-level logger：CLAUDE.md §七 安全代碼規範 logger %s format
@@ -207,6 +210,12 @@ def main() -> int:
         default="BTCUSDT,ETHUSDT",
         help="逗號分隔 symbol list（baseline BTCUSDT,ETHUSDT）",
     )
+    parser.add_argument(
+        "--out",
+        type=str,
+        default=None,
+        help="將 batch summary 寫成 JSON artifact；方便 Linux PG empirical 留證",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
@@ -234,6 +243,12 @@ def main() -> int:
     except (RuntimeError, ValueError) as exc:
         logger.error("M4 Stage 1 failed: %s", exc)
         return 2
+    if args.out:
+        Path(args.out).write_text(
+            json.dumps(summary, ensure_ascii=False, indent=2, sort_keys=False),
+            encoding="utf-8",
+        )
+        logger.info("Stage 1 batch summary written: %s", args.out)
     logger.info("Stage 1 batch summary: %s", summary)
     return 0
 
