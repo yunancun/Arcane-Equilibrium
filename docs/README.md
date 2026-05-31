@@ -159,6 +159,13 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 
 ## 文档索引 (Document Index)
 
+### 2026-06-01 AEG-S1 Foundation Blocker Resolution
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-06-01--aeg_s1_foundation_unblock_packet.md` | AEG-S1 Foundation unblock packet；把 AEG blocked list 分成可立即派發的 docs/design/read-only FND-1..4 + S2 Gate-B prep，以及仍禁止的 backfill writer / DB retention mutation / endpoint ingestion / collector runtime / alpha scoring；FND-4 包含 index/mark ticker persistence fix-vs-bypass。|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_blocked_items_resolution_verification.md` | PM verification report；確認 blocker classification 已完成，但 runtime/DB/backfill/collector/scoring outcomes 未完成，不能標成 full implementation complete。|
+
 ### 2026-05-31 Alpha-Edge Regime Evidence Governance / AEG-S0
 
 | 文件 | 内容 |

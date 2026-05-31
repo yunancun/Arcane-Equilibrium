@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-31（TODO v99 AEG-S0 formal review PASS + v98 AEG-S0 role-review must-fix patch + v97 AEG-S0 PM-local contract draft + v96 V5.8 preservation audit + v95 prune audit + v94 AEG cleanup + v92/v93 version-increment 遷入；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-01（TODO v100 AEG blocked-item resolution packet + v99 AEG-S0 formal review PASS + v98 AEG-S0 role-review must-fix patch + v97 AEG-S0 PM-local contract draft + v96 V5.8 preservation audit + v95 prune audit + v94 AEG cleanup + v92/v93 version-increment 遷入；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v100 增量（2026-06-01 AEG blocked-item resolution packet）**：新增 `docs/execution_plan/2026-06-01--aeg_s1_foundation_unblock_packet.md` 與 PM verification report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_blocked_items_resolution_verification.md`，將 AEG blocked list 拆成可派發的 docs/design/read-only `AEG-S1-FND-1..4` + `S2-GATE-B-PREP`，以及仍 blocked 的 Bybit historical backfill writer、`market.klines` runtime retention mutation、funding/OI/long-short ingestion、mark/index/premium ingestion、listing collector IMPL、alpha scoring/promotion report；另把 `P3-MARKET-TICKERS-INDEX-MARK-DEAD-PERSISTENCE` folded into FND-4 fix-vs-bypass design。核實結果：AEG-S0 PASS、S1-W1-S1 advisory + 797-row survivorship universe、S2 Gate-A、S4 preflight 已完成；runtime/DB/backfill/collector/scoring outcomes 未完成，不能標為 full implementation complete。本輪 doc/governance only，無 runtime/DB/auth/trading 改動。
 
 **v99 增量（2026-05-31 AEG-S0 formal review PASS）**：PA/MIT/QC/BB/TW/CC 六角色 re-review 全部 PASS，新增 PM closure `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--aeg_s0_formal_review_closure.md`。TODO 改為 AEG-S0 formal PASS，開 AEG-S1 Foundation **limited scope only**：S1-W1-S1 storage/retention/provenance design + MIT sizing/change-control drafting、S1-W1-S3 PIT universe builder design/scoped prep、S1-W1-S4 side-evidence artifact contract/design。仍 blocked：S1-W1-S2 backfill writer、DB/retention mutation、funding/OI/long-short 18mo ingestion、mark/index/premium ingestion、listing-capture runtime IMPL、alpha scoring/promotion verdict。本輪 doc/governance only，無 runtime/DB/auth/trading 改動。
 

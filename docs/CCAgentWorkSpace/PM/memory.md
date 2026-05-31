@@ -1,5 +1,20 @@
 # PM Memory — 工作記憶
 
+## 2026-06-01 AEG Blocked-Item Resolution Lesson
+
+- Resolving a blocked queue can mean classifying and routing it, not pretending
+  the runtime outcome is complete. For AEG, the safe completion was a Foundation
+  unblock packet plus explicit "still blocked" clauses for DB retention,
+  backfill writer, endpoint ingestion, collector runtime, and alpha scoring.
+- S1 and S4 storage gates are coupled: `market.klines` 1095d is necessary for
+  18mo price history, but bull-regime funding work also needs a
+  `market.funding_rates` retention/storage decision or a dedicated research
+  history path.
+- A S2 Gate-A pass is only reachability evidence. Listing collector IMPL still
+  needs Gate-B phase-transition probing and capture-only isolation before any
+  production collector work.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_blocked_items_resolution_verification.md
+
 ## 2026-05-31 AEG-S0 Formal Closure Lesson
 
 - AEG-S0 PASS opens contracts, not data movement. Even after PA/MIT/QC/BB/TW/CC
