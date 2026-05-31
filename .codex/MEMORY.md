@@ -140,6 +140,15 @@ implementation work without explicit risk acceptance.
 - Edge analysis uses demo data, not paper, unless a task is explicitly about
   paper diagnostics.
 - `live_demo` remains live-grade and does not relax controls.
+- Funding-cap for funding-harvest / funding-threshold strategies is the
+  exchange `instruments-info.upperFundingRate` (SSOT), not the max of a
+  funding/history sample window (which always sits inside one regime and
+  mis-estimates the cap). 2026-05-31 lesson: a funding_short_v2 audit read the
+  +0.0001 IR-baseline floor of a low-premium window as a +10.9% APR structural
+  cap and wrongly called the strategy permanently DOA; Bybit real caps are
+  +547~2190% APR, so funding_short_v2 is regime-dormant (fires under bull
+  premium), not structurally infeasible — see
+  `docs/audits/2026-05-31--p0_edge_cost_wall_investigation.md`.
 
 ## TODO Rules
 

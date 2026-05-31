@@ -1069,3 +1069,55 @@ claimed-live.
 - **6b cross-branch 一致性（item 3）DEFERRED**：T1 `SmAction.as_str()` 17 值源碼**不存在於任何 ref**（lg3-t1 tip==base / wt-lg3t1 無 SmAction / test sm_action_strings_match_v104 0 hit / main HEAD 0 hit）。SQL 端逐字比對無對照物。V104 canonical 17-enum baseline 已記入報告 §6b（順序 = as_str() 必輸出順序）。T1 IMPL DONE 後 MIT 須重跑 item3（T1 自帶 test 必要不充分）。
 
 **PG empirical method 教訓再強化**: 17 command + redirect /tmp 暫存檔分次讀（SSH 輸出常 interleave/garble，憑記憶報數字危險）；ON_ERROR_STOP=0 的負向 prereq-mutation test 是 prod 污染地雷（本次親身觸發 + 清理）。
+
+## 2026-05-31 Cost-wall escape #2 — low-turnover multi-day perp TREND (TSMOM) read-only diagnostic
+
+**Trigger**: operator 拍板即時跑成本牆逃逸類別 #2（低 turnover 多日持倉，把 11-27bps 往返成本攤到多日 100s-1000s bps move）。read-only PG（docker exec），0 寫 0 部署。Alpha SSOT §4/§5 framing；TSMOM 不在 §3 candidate pool（這是 fresh 探路）。
+
+**Verdict: OBSERVE_MORE（樣本嚴重不足）+ 一個 structural HINT 值得在資料變深後追**。
+- **Feasibility 一句話**：dilution thesis 機械上成立（gross multi-day move 遠 >> 成本牆），但 56d 窗口最多只給 ~8 個獨立時間週期 → 任何 weekly+ 策略 effective N_independent ≈ 8，無法 robustly validate edge。**不能從稀樣本宣稱 edge**。
+
+**核心 empirical（PG live 2026-05-31, market.klines）**:
+1. **窗口 = 56 天**（2026-04-05 collector onset → 2026-05-31）。142 symbols 收 1m/5m/15m/1h；137 sym 收 4h（6262 row）。
+2. **1m 有 gap**：BTCUSDT/ETHUSDT 平均 1259 bars/day（vs 1440 full），56d 內只 36 full days。daily close 取「每 UTC day 最後一根 closed 1m bar」可用但是 research-grade-with-gaps，非 pristine。
+3. **TSMOM per-symbol N/M sweep（10 liquid sym, non-overlapping, leak-free）**：
+   - 7/7: n=47 gross-70bps t-0.43 | 14/7: n=37 +60bps t0.31 | **14/14: n=15 +267bps t0.70 win47%**
+   - 30/7: n=18 -235bps t-2.22 | 30/14: n=6 -375bps t-1.58 | 14/21: n=7 +591bps t2.67 **win100%（degenerate, n=7 紅旗非信號）**
+   - **abs_move 389-1213 bps 跨全 cell** → 成本 15bps+M funding ≈ 占 gross move 3-4%。**成本攤薄假設機械成立**。但 sign 跨 N/M 不一致（real TSMOM 該有 coherent sign structure）→ 看起來是 noise 不是 signal。
+4. **Cross-sectional momentum（14 sym, rank top/bottom tercile）**：14/14 → 只 **2 個 rebalance 週期** n_legs=14 gross-321bps t-0.49；7/5（最大化週期數）→ **8 個 rebalance 週期** n_legs=59 gross+54 net+34bps t0.29 win49%。**8 = 此窗口 weekly+ 策略獨立時間週期上限**（binding constraint 是時間週期數非 symbol 數）。
+5. **Funding（market.funding_rates, 25 sym, 1890 row）**：avg daily drag 0.14-0.79 bps/day（signed），avg abs per-settle 0.38-0.73 bps。多日 horizon 下 funding 是 rounding error（再證攤薄）。我 sweep 用 1bp/day 近似 = 略保守（對成本側 generous）。
+
+**Leak-free 保證（已實證, dump BTCUSDT 兩筆）**: trailing return 只用 entry day 及之前 closed bar（lookback_before_entry=t）；forward return 嚴格 entry→exit（exit_after_entry=t）；daily close = DISTINCT ON ... close_ts_ms DESC = 每日最後一根 closed 1m bar（無 partial-bar leak）；non-overlapping entry via `(rn - (N+1)) % M = 0`。6 leakage 類型全綠。
+
+**Alpha SSOT scorecard 對照**: data_window 56d / n_events 6-59（**全 < 30 robust 線，除 7/7 cross-sect n=59 但僅 8 獨立週期**）→ **Sample gate FAIL → observe_more**。Fee gate: 機械 pass（成本 << move）但 edge 不顯著故 moot。trend 是擁擠 published anomaly（McLean-Pontiff decay）→ DSR deflate 需要，但 56d 不足以 robust validate，誠實標。
+
+**HINT（值得追，非結論）**: 成本攤薄機制是真的（這是逃逸 #2 的核心假設驗證 PASS）；缺的是「歷史深度」不是「機制」。需 ≥ 6-12 個月日線資料（≥ 50-100 個獨立 14d 週期）才能 robust 估 TSMOM edge。短期不可行；列為「資料變深後重跑」候選。當前**不建議**進 Alpha Tournament IMPL（A1/A2 優先）。
+
+**Report**: `workspace/reports/2026-05-31--cost_wall_escape_2_multiday_trend_diagnostic.md`（+ Operator copy）
+
+## 2026-05-31 Historical kline backfill spec (E1-ready) — unblock cost-wall-escape #2 multi-day trend
+
+**Trigger**: operator directive — invest data infra + fastest path to robustly test multi-day perp TREND (TSMOM/cross-sectional). R-2b (`2026-05-31--cost_wall_escape_2_multiday_trend_diagnostic.md`) validated dilution mechanism (gross 389-1213 bps, cost ~3-4% of move) but edge unverifiable because klines only 56d (~8 independent weekly periods << n>=30 gate). Bottleneck = historical depth, not mechanism.
+
+**Spec**: `docs/execution_plan/specs/2026-05-31--historical-kline-backfill-spec.md` (209 lines). Backfill Bybit daily(`1d`)+4h >=12mo (MIT default 18mo) via public `GET /v5/market/kline`.
+
+**Empirical klines schema (this run, `\d market.klines` + timescaledb_information on trade-core)**:
+1. **PK = `(symbol, timeframe, ts)`** = dedup key. **NO source/provenance column** (12 cols, none is origin) — live-WS row and backfill row indistinguishable at row level.
+2. Live writer (`market_writer.rs:268`) = `ON CONFLICT (symbol, timeframe, ts) DO NOTHING` (non-destructive, first-writer-wins). Backfill MUST reuse identical clause => idempotent + gap-fill-only + never clobbers live rows.
+3. **RETENTION TRAP (HIGH/BLOCKER)**: `policy_retention drop_after=365d` runs DAILY on klines (hypertable_id=4). >12mo backfill is auto-reaped within 24h (months 13-24 already past drop boundary) — silent data loss (V023-spirit: job doesn't error, just drops chunks). MIT default fix = operator `remove_retention_policy` + `add_retention_policy(... '1095 days')` (reversible) BEFORE backfill. This blocks the run-step.
+4. **`'1d'` is a NEW timeframe value** — current distinct = `1m/5m/15m/1h/4h` only, no `1d`. Bybit `D` -> store `'1d'`. Additive: `outcome_backfiller.rs:54-84` hardcodes `1m/5m/1h/4h`, won't match `1d` (no breakage). 4h already has 6262 incomplete live rows (R-2b: BTC ~91%, most far less) — backfill gap-fills via DO NOTHING.
+5. chunk=7d, compress_after=14d, OHLC=`real`(float4). Chunk count NOT a blocker (~104 weekly chunks for 24mo, tiny daily/4h volume). Bybit kline endpoint has no tick_count -> set NULL (honest, not fake 0).
+
+**API**: `GET /v5/market/kline` public/no-auth, newest-first, 1000/page, Market group 120 req/s. 18mo/25sym ~= 125 requests ~= single-digit minutes at throttled 2 req/s. retCode 10006 IpRateLimit retryable w/ backoff; all other non-zero = fail-closed loud per-symbol.
+
+**ADR compliance**: Bybit-native read-only public market data — does NOT invoke ADR-0033/0040 cross-venue gate (that governs *Binance*; Bybit market data is baseline, never restricted). No execution, no non-Bybit venue, no auth/secrets.
+
+**Provenance firewall (MIT key insight)**: backfill writes ONLY `1d`(new)+`4h`(gap-fill), never `1m` => the sensitive live-1m ML/decision_outcomes surface is provenance-clean BY CONSTRUCTION (timeframe namespace), no schema change needed. Optional provenance ledger table = separate MIT/E2 migration (Guard A/B/C) out of E1 scope.
+
+**Chain**: MIT spec -> E1 backfill script (+ BB API check) -> E1 run (Linux) -> MIT data-quality verify (incl. confirm retention didn't reap post next daily job + no live-1m contamination) -> MIT re-run R-2b leak-free SQL on deep window + DSR deflation (alpha go/no-go = QC+MIT joint).
+
+**5 open decisions to PM/operator**: 7-A retention (BLOCKER, extend to 1095d) / 7-B window (12 floor / **18 default** / 24 stretch) / 7-C symbols (25 sufficient — period-count binding not breadth) / 7-D provenance (default co-mingle-by-tf) / 7-E confirm `1d` string.
+
+**Survivorship discipline (R-2b §5 carried forward)**: E1 must record real Bybit min(ts) per symbol (listing date); not pad missing early history; diagnostic computes n_independent from real coverage. Restricting to active symbols = mild survivorship, material if symbol listed mid-window.
+
+**Boundary**: read-only spec; 0 code / 0 schema / 0 backfill; git fetch + NO-OP existence check passed before write.
