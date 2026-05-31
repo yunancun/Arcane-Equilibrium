@@ -18,7 +18,7 @@
 > **SSOT 規則 / SSOT Rule**：本檔為 Bybit endpoint 唯一字典；新增/修改端點時 **同 commit** 更新本檔。
 > This file is the single source of truth for Bybit endpoints; add/modify endpoints in same commit as dictionary update.
 
-**版本**: v1.3 | **日期**: 2026-04-04（SSOT 標記 + confirm-mmr 路徑修正：2026-04-26；F-27 字典 drift 修正：2026-05-09；EDGE-P2-3 Phase 1b close-maker-first 6 處更新：2026-05-16 Wave 3b BB1）| **審計**: BB+E5+PA 三輪通過 + TW G9-01 路徑修正 + BB Wave 3b 6 處更新
+**版本**: v1.4 | **日期**: 2026-04-04（SSOT 標記 + confirm-mmr 路徑修正：2026-04-26；F-27 字典 drift 修正：2026-05-09；EDGE-P2-3 Phase 1b close-maker-first 6 處更新：2026-05-16 Wave 3b BB1；**Funding Rate 公式 + upperFundingRate/lowerFundingRate/fundingInterval cap 欄位段補 + kline×6 doc drift 標 cleanup debt：2026-05-31 TW per BB curl 實查**）| **審計**: BB+E5+PA 三輪通過 + TW G9-01 路徑修正 + BB Wave 3b 6 處更新 + BB 2026-05-31 funding cap 實查
 
 ---
 
@@ -159,6 +159,39 @@ Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
   FundingRecord { symbol, funding_rate, funding_rate_timestamp }
   ```
 - **關聯程式**: `market_data_client.rs:512`
+
+---
+
+#### ★ Funding Rate 公式 + 每 symbol 上下限（2026-05-31 補；funding-harvest / funding-門檻策略設計必讀）
+
+> **為什麼補這段**：2026-05-31 funding_short_v2 審計把 funding/history 樣本窗的 max(+0.0001) 誤當成 Bybit 結構 cap，得出「正側封頂 +10.9% APR」的錯誤死因。實情是 +0.0001 為公式的 **IR baseline（floor）**，真 cap 在 `upperFundingRate` 欄位且高達 +547~2190% APR。**任何依賴 funding cap 的判斷必查本段欄位，禁從 history 樣本 max 反推 cap。**
+
+**結算機制**：linear perp 預設每 8h 結算一次（`fundingInterval` 以分鐘表示，可為 480 / 240 等）；正費率 = 多方付空方，負費率 = 空方付多方。
+
+**結算費率公式**：
+
+```
+F = clamp[ P + clamp(I − P, ±0.05%), upperFundingRate, lowerFundingRate ]
+
+  P = Premium Index（永續 vs 現貨指數溢價；premium 偏離越大，funding 越偏離 baseline）
+  I = Interest Rate = 0.03% ÷ (24 / fundingInterval_h)
+      8h 結算時 I = 0.03% ÷ 3 = 0.01%/8h = +0.0001 = +10.9% APR
+  外層 clamp = 每 symbol 動態硬上下限（見下），非固定值
+```
+
+- **+0.0001（+10.9% APR）是 I（IR baseline / floor），不是 cap**：當 premium P ≈ 0（低-premium regime），F 退化為 I = +0.0001。低-premium 窗（如 2026 春那 66 天）正側 max 全 = 精確 +0.0001 是 **IR floor 指紋**，不代表觸頂。bull premium regime 下 P 拉高，F 遠超 +0.0001（2024-11 1000PEPE 69% 結算 > 30% APR；BTC max +118.9% APR）。
+
+**三個 cap / interval 欄位（SSOT — 取自 `GET /v5/market/instruments-info?category=linear`）**：
+
+| 欄位 | 意義 | 2026-05-31 實查範例 |
+|------|------|---------------------|
+| `upperFundingRate` | 該 symbol **正側硬上限**（單期，非 APR） | BTC / SOL = +0.5%/8h（+547% APR）；DOGE = +0.58%/8h（+635% APR）；1000PEPE = +1.0%/8h（+1095% APR）；WIF = +1.0%/4h（+2190% APR） |
+| `lowerFundingRate` | 該 symbol **負側硬下限**（單期） | 對稱負值（WIF 實際結算曾達 -0.776%/期 ≈ -85% APR） |
+| `fundingInterval` | 結算間隔（分鐘） | 480（8h，多數）；240（4h，如 WIF） |
+
+- **`upperFundingRate` 推導係數**：Bybit 文檔給的 `upper = min((IMR − MMR) × 0.75, MMR)`；審計裡看到的「±0.75%」其實是這個 **0.75 係數**，不是 cap 值本身。
+- **APR 換算**：`APR = 單期費率 × (24 / fundingInterval_h) × 365`。8h → ×1095；4h → ×2190。
+- **關聯程式**：cap 欄位目前未被 Rust poller 主動拉取（`get_instruments_info` 取的是 lotSizeFilter / priceFilter / leverageFilter，未含 funding cap）；如未來策略需 funding cap，須在 `get_instruments_info` 解析路徑補 `upperFundingRate` / `lowerFundingRate` / `fundingInterval` 三欄並同 commit 更新本字典（cleanup debt，見文末）。
 
 ---
 
@@ -1100,6 +1133,8 @@ PostOnly Limit 下單時若 limit price 偏離 mid 不足 → 觸 BBO spread 內
 
 **默認訂閱**（`full_subscription_list`）：kline×6 + ticker + orderbook + publicTrade = **9/symbol**
 **擴展訂閱**（`extended_subscription_list`）：= 默認（broken topics 已移除）= **9/symbol**
+
+> **⚠️ DOC DRIFT cleanup debt（2026-05-31 BB 發現 · owner=E2/TW · 只註記未改 code）**：上兩行的「kline×6 = 9/symbol」與 code 不符。`multi_interval_topics.rs:57` `DEFAULT_INTERVALS = [Min1, Min5, Min15, Hour1]` 為 **4 個** interval（test `test_kline_topics_default` 斷言 `topics.len() == 4`，topics = kline.1/5/15/60）；故實際默認訂閱 = **kline×4 + ticker + orderbook + publicTrade = 7/symbol**，非 6 / 9。下次觸及本段時將「×6 / 9」更正為「×4 / 7」並同 commit；本輪 funding-cap 更正不順手改 code/字典主數字以免擴大 diff 範圍。
 
 > **2026-04-05 發現**: Bybit V5 公共 WS 對不存在的 topic 返回 `{"success":false,"ret_msg":"error:handler not found"}`。
 > 這會導致**同一連接上所有其他訂閱停止接收數據**（零 tick），但連接和心跳保持正常。極難排查。

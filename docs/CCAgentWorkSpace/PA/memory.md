@@ -6860,3 +6860,108 @@ multi-session cargo race — QA Stage 0R / E4 regression sub-agent 在 engine st
 **工具教訓**：本 session 後段對 rust/openclaw_engine/src/ 子樹 Read + Bash stdout 間歇性 0 回傳（檔案確認存在），導致無法 seam 逐行精讀 → spec §0.6 誠實標 evidence gap，producer file:line + 真實 API 全下放 E1 在可讀環境 grep 自證，不 fake-read。
 
 policy 設計本身不受影響（只依賴武裝語意 + arm/notify 語意 + AMD §3.1，這些從 C4 spec + AMD 已確認）：5 接(auth/bybit/sm_halt=ArmTimer, position_drift=NotifyOnly, engine_dead=NotifyOnly-only 先行)+3 不接，sustained 去抖+class 級 throttle+7d cooling+新增 disarm。寧晚勿抖，漏接靠 NotifyOnly 通知面兜底。spec 已重寫覆蓋。
+
+---
+
+## 2026-05-31 — v5.8 M1-M13 IMPL reality audit + critical-path re-derivation (read-only)
+
+**任務**：對照 v5.8 plan audit M1-M13 真實 IMPL 狀態，重推 critical path，矯正排期。read-only。
+
+**最高價值發現（TODO/plan ↔ 源碼 drift）**：
+- **V### migration drift（plan stale 10 天）**：v5.8 §9 line 779（寫於 2026-05-21）聲稱「sql/migrations git tree head = V098；V099-V116 spec 未 SQL IMPL」。**實際 main on-disk = V099-V115 全部已 commit 含真 DDL**（V104/V106/V107/V109/V112/V113/V114/V115 等逐一 git log 命中 feat commit）。runtime `_sqlx_migrations max=115 / count=108 / version104=true`（per TODO §0 v87）。→ plan §9/§10.5 P0 table 的「V098 head」陳述已過期，不可採信；TODO §4 matrix 已正確反映 V### land。
+- **M1 LAL「feature-live」標籤誇大**：TODO §4 稱 M1「Track A spike runtime feature-live」。源碼 `governance/lal/mod.rs` 565 LOC 真實存在，但 `git grep 'lal::'`（排除自身+tests）= **0 命中**：LAL 模組無任何 runtime caller，Tier 2/3/4 = `unimplemented!()`，Tier0FillBlocker/LalTransition 僅 tests 觸發。→ 正確分類 = **PARTIAL-IMPL（isolated, NOT wired）**，非 feature-live。qualifier「LAL_0_AUTO=0 未證 runtime grant」屬實但 headline 過樂觀。
+- **M11 divergence writer 不存在**：V107 `replay_divergence_log` 表已 land 但 `git grep replay_divergence_log -- '*.rs'` = 0 writer。`bin/replay_runner.rs`（643 LOC）是 replay.experiments runner（register-only cron），**不是** divergence logger。→ TODO「Track C spike SOURCE-LAND but rows=0 runtime-not-proven」屬實，但更準確說法 = divergence writer source 都還沒寫。
+
+**逐模組分類（源碼證據）**：
+- FEATURE-LIVE (runtime-wired)：**M3** health emitter（`spawn_metric_emitter_scheduler` @ main.rs:1555 真 spawn；6 domain；metric_emitter 1363 LOC）；**C4** notification_failsafe（`spawn_notification_failsafe_watcher` @ tasks.rs:878，v87 deploy log 確認 started）。
+- TRAIT-STUB (compiles + tests, no caller)：**M5** model_client.rs 277 LOC（6 unimplemented!）；**M12** order_router.rs 393 LOC（6 unimplemented!，依賴 openclaw_types::{Venue,AssetClass}）；**M13** openclaw_types/src/asset_venue.rs 151 LOC enums。皆 commit `4350dba9`。
+- PARTIAL-IMPL：**M1** LAL（上述，isolated）；**M4** stage1_production_runner.py 865 LOC（source on main，writeback fail-closed default off，exploratory→draft mapping，GovernanceHubDecisionLeaseProvider seam @ commit ec11544a；production writeback 被 UUID column vs `lease:<id>` canonical ID mismatch 阻；Linux PG no-writeback empirical PASS）；**M11** replay_runner（experiments register-only LIVE via cron `b43481f7`，但 divergence writer 缺）；**M10** Tier A（v5.7 baseline）。
+- DESIGN-ONLY：**M2 / M6 / M7 / M8 / M9**（spec+ADR+schema land，0 Rust IMPL）。
+
+**LG3 / P0-LG-3 runtime 真相**：supervised_live_sm + supervised_live_audit_writer 模組已在 main（lib.rs `pub mod`），V104 file + Rust writer 都在 main。但 `git grep supervised_live_sm::`（排除 mod decl+tests）= **0 runtime caller** → SM 核心 source-integrated 但 **未接 runtime**（lib.rs:101 註解自承「SM 核心」）。TODO「SOURCE INTEGRATED / runtime not deployed」屬實。
+
+**分支拓撲**：main HEAD = `02f1efa7`。`integration/pm-1-4` / `feature/m4-stage1-production-draft-runner` / `fix/c4-incident-policy-trigger` ahead=**0**（已併 main via ff/squash）。`feature/lg3-t1`(+1) / `lg3-t4`(+5) / `reconciler-pagination`(+6) / `a2-runner-pg-auth`(+1) 的 branch tip 顯示 ahead 但**實質 code 已在 main**（領先的全是 doc/comment-reword commit）。reconciler pagination 修法 B 在 main position_manager.rs:171-202（settleCoin=USDT+limit=200+nextPageCursor）。
+
+**alpha-candidate 方法學驗證（call-path proof，per PA leak/look-ahead discipline）**：A3 `_replay_shift1_zscore_pairs` @ a3_pairs_precheck.py:271-299：`entry_index = i+1`（signal bar 之後一 bar 入場）+ `_shift1_zscores`。M4 `_forward_returns_bps` + leakage_scan_pass。→ **genuinely leak-free，無 rolling(N).max() 含 current bar 反模式**。A2 reject(touch 49.07%<50%) / A3 reject(corr 0.53 / half-life 4110 bars / avg_net -24.28bps) 負結論**非 look-ahead 高估造成**，credible。→ 強化「P0-EDGE-1 是真 binding constraint 非量測 artifact」。
+
+**critical-path 結論**：PM 初判**正確**。P0-EDGE-1 = hard binding constraint（4/4 textbook insufficient samples + runtime_bps -11~-42；A1 blocked basis accumulation ~D+14；A2/A3 reject；M4 可產 exploratory DRAFT 但非 promotion evidence）。Sprint 1A-β/γ full IMPL（M1/M6/M7/M8/M9 Rust 主體）**確實尚未動工**（DESIGN-ONLY），過去 10 天真實工作 = alpha 診斷(A1/A2/A3) + M4 lease seam + OPS(110017/reconciler/c4) + bug fix，與 v5.8 §4 排定的 module IMPL 軌**脫節但合理**——因為在 P0-EDGE-1 未閉合前推進 autonomy module IMPL 是 build-on-sand。
+
+**矯正排期建議（report 詳）**：P0-EDGE-1 closure 為唯一應全力資源點；M3/M11 已 live 的部分繼續 hardening；M1/M2/M6/M7/M8/M9 full IMPL 應**暫緩**至 edge 閉合（避免 dead-code 債）；唯一例外 = M7 decay detector 可提前（與 edge 診斷協同，幫助識別 alpha-deficient 策略）。Sprint 4 first Live (~W18-21/2026-09) ETA 已脫節，務實 = operator 選項 B（LiveDemo 降級）或推遲。
+
+**report**：直接回 parent（無獨立 .md，per 指示）。
+
+### 2026-05-31 — M7 decay DETECTOR V116 E1-ready dispatch packet + schema spec（autonomy freeze 唯一例外）
+
+**任務**：產出 M7 decay detector 提前 IMPL 的 E1-ready spec（v5.8 autonomy 13 模組凍結下 operator 拍板唯一例外）。寫 1 新 spec 檔 `docs/execution_plan/specs/2026-05-31--v116-m7-decay-detector-spec.md`，不改既有 doc / 不寫 feature code / 不碰 applied SQL。
+
+**最 load-bearing 架構判斷（修正 V113 doc schema 張力）**：2026-05-21 V113 placeholder doc §8 full DDL 把 `lifecycle_state` 6-enum 放在 `decay_signals`（多 module 共寫的 signal ledger）上——這與 ADR-0044 Decision 1「strategy_lifecycle 寫入權 M7 唯一」**衝突**（lifecycle state 寫在共寫表上 = single-authority enforcement 破功）。PA 拍定 V116 採 single-authority 分離（覆蓋 V113 §8 column placement）：`decay_signals`=純 signal ledger 無 lifecycle column；`strategy_lifecycle`=唯一 FSM state 表 + `decision_authority='M7'` CHECK hard-lock。M1 LAL `DecayStateProvider`（lal/mod.rs:179）是 schema-agnostic trait，未來 query `strategy_lifecycle.current_state`（不是 decay_signals）→ 對齊 ADR-0044 Decision 6。V113 doc §8 標 cleanup debt。
+
+**scope 紅線（detector-only）**：IN = 4 signal 計算（Sharpe 30d/DD 7d/OOS deg/N-consec-loss）+ M11 ingest as 5th + 寫 decay_signals + FSM 只接 `NORMAL_LIVE→DECAY_DETECTED`（2+ signal → alert + 14d clock，**零 sizing 改動**）+ 單 signal→DRAFT advisory。OUT 全凍（enum land 但 transition `unimplemented!()`，mirror M1 LAL Tier2/3/4 範式 lal/mod.rs:34）：DEMOTE_PROPOSED / **DECAY_ENFORCED 50%-cut（=autonomy active path #6 §11.5 需 LAL approval）** / RECOVERY / RETIRED halt / M1 LAL Tier0 RETIRED blocker wire。**不碰 lal/mod.rs**（OUT-6）。
+
+**環境真相已 grep 自證（沿用 2026-05-30 教訓——引擎在 rust/openclaw_engine/src/ 488 .rs 可讀）**：(1) on-disk + runtime migration head=V115，V116 free，V117 保留 ADR-0046 funding_arb V3 不碰；(2) decay_signals/strategy_lifecycle 在 V107/V112 僅註解引用，**無 table 定義**，V116 首建；(3) M7 Rust DESIGN-ONLY（0 caller，除 LAL stub trait）。
+
+**V104 timestamptz Guard C 教訓納入（v86 增量）**：timestamptz hypertable Guard C 必用 `EXTRACT(EPOCH FROM time_interval)` from timescaledb_information.dimensions（對齊 V104:387-400 + V107:632-644），**絕不用 integer_interval**（後者只對 BIGINT/epoch-ms time column 有值，timestamptz 讀 NULL → 誤判 false-pass/fail）。Guard A（extension+V107 WARN-not-FAIL）/ B（不適用，新建表非 ALTER）/ C（time_interval + 5-source + 6-state + M7-authority CHECK + 2 policy jobs）齊全。
+
+**first-detection deadlock 防護（§5 關鍵設計）**：detector-only scope 下 DECAY_DETECTED 往前出口（→DEMOTE_PROPOSED）被 OUT-1 凍結，若不設計往後 auto-clear 邊 → 策略**永久卡 DECAY_DETECTED**（bb_breakout FIX-26-DEADLOCK-1 等價重演）。故 detector **必 IMPL `DECAY_DETECTED→NORMAL_LIVE` auto-clear**（純狀態回退 + alert clear，不改 sizing，落 IN scope）。三語意：AC-1 signal 退(<2 連 7d)→回 NORMAL_LIVE；**AC-2 14d clock 過期但 signal 仍≥2 → 不能進 DEMOTE（凍）改 emit M3 CRITICAL advisory + audit row，狀態維持但「可見 pending-human」非靜默死鎖**（防死狀態核心）；AC-3 過期且 signal 退→回 NORMAL_LIVE。append-only INSERT 不 UPDATE（保 audit）+ nightly sweep cron 掃 idx_clock_expiry。
+
+**PG dry-run mandate（§7）**：MIT Linux PG double-apply（first+re-apply 都 PASS）為 sign-off 前置（feedback_v_migration_pg_dry_run；V055/V114 教訓）+ empirical CHECK reject 驗（非-M7 INSERT + 第7 state）+ engine restart 實測（cargo test PASS≠sqlx runtime 驗，2026-05-02 hash drift 教訓）。
+
+**E1 dispatch（§11）**：W1 V116 SQL（E1-a 新檔，MIT dry-run 卡 W2 sign-off）→ W2-1 signals.rs + W2-2 fsm.rs **並行**（不同檔）→ W2-3 mod.rs+scheduler spawn（組裝，串行末，mirror M3 spawn_metric_emitter_scheduler @ main.rs:1555）。全新目錄 learning/decay_detector/ 0 既有檔重疊。Role chain：E1→MIT→E2(50%-cut真OUT+deadlock scan)→E4(FSM proptest 6-state+dead-state scan)→CC 16-root→PM。
+
+**副作用清單**：0 API schema 改 / 0 IPC schema 改 / 0 live sizing 改（detector-only 核心保證 AC-6/8 grep 證）/ sqlx prepare 注意 .sqlx cache / 新 singleton 註冊 authority table。
+
+**git**：fetch 確認無既有 M7/V116 branch/commit/spec 檔（NO-OP 不觸發）。report 直接回 parent（per 指示不寫獨立 .md）。
+
+### 2026-05-31 — COLLECTOR-LISTING-CAPTURE E1-ready spec（listing pump-fade alpha 資料地基，seed-now-harvest-Q4）
+
+**任務**：spec collector 採集修改——新上市 perp 在 listed_at（理想 PreLaunch）即訂閱、從第一根 1m kline 抓起，解鎖 listing pump-fade alpha。寫 1 新 spec `docs/execution_plan/specs/2026-05-31--collector-listing-capture-spec.md`，不寫 feature code / 不改既有 doc / 不碰 applied SQL。D1 授權範圍（非 autonomy 13 模組凍結）。
+
+**最 load-bearing 根因發現（disjoint 真因，全 grep 自證）**：collector 訂閱清單是 **ticker-driven 不是 listing-driven**。`ScannerRunner::run()`（scanner/runner.rs:114-349）每 cycle 拉全 linear perp ticker（runner.rs:144 get_tickers），評分→hard filter→correlation→registry.apply_scan_result（runner.rs:213）→發 WsTopicChange（runner.rs:222-235）。**新上市過不了 hard filter `min_turnover_24h_usdt=$50M`（scanner/config.rs:136-138）**：剛上市 turnover≈0 被淘汰→永不進 active universe→永不訂閱。等漲到 $50M 時 pump 已過（R-2a：5 個有 kline 的新上市都 +8~126h 才開始）。這就是 R-2a「listing SoT 有 52 新上市但 0 被 1m kline 捕捉到上市瞬間」的根因。
+
+**4 個關鍵 FACT（修正/澄清）**：
+1. **listing SoT 已存在但只在 Python，Rust 0 reader**：market.symbol_universe_snapshots（V058:31-50）由 Python cron 每小時寫（helper_scripts/cron/ref21_symbol_universe_snapshot_cron.sh → ref21_backfill_v058_v059.py）；listed_at = Bybit launchTime（ref21_backfill_v058_v059.py:201）；status 已含 **PreLaunch**（STATUSES="Trading,PreLaunch,Delivering,Closed"，:32）。`grep symbol_universe_snapshots rust/ = 0`。
+2. **Rust 已每 4h 拉 instruments-info 但丟了 launchTime/status**：InstrumentInfoCache.refresh（main_instruments.rs:140 startup + :216-218 spawn_instrument_refresh 4h）打同一 /v5/market/instruments-info，但 SymbolSpec（instrument_info.rs:27）只存 tick_size/qty_step，不 parse launchTime/status。→ listing 資訊在 response payload 內被丟。這是 Path B（推薦）的切入點。
+3. **kline retention 已是 365 天，不是 56d**：market.klines hypertable（V002:121），retention=365d（V006:66），compression 14d（V006:32）。R-2a 的「klines 窗僅 ~56d」是 **runtime 實際資料量**（2026-04-05 起採集至今~56d），非 retention 上限。→ operator「延長 retention」考慮點對 perp 1m **已滿足**，MVP 0 migration。真牆 = forward accumulation + 不可 retro-backfill（internal data 沒存）。
+4. **SymbolRegistry 無 listing fast-path API**：只有 pinned（靜態 registry.rs:34/84）+ apply_scan_result（評分 registry.rs:98）。需新增繞過 turnover hard filter 的注入路徑。
+
+**設計裁定（Path B）**：3 路徑（A=Rust query Python-written SoT；B=Rust 4h refresh response 新增 parse launchTime+status + 獨立 5min listing-poll cycle；C=新 WS/REST poller）。**選 B**——自包含（原則 14，不依賴 Python cron 存活）+ 0 新 REST endpoint（同 instruments-info）+ PreLaunch status 直接可得 + fail-closed 最易。Path A 留 fallback。
+- 新模組 rust/openclaw_engine/src/listing_capture/{detector,state,mod}.rs（0 既有檔重疊，mirror M3 metric_emitter / M7 decay_detector spawn pattern）。
+- **capture-only 隔離（防污染核心，原則 5）**：registry 分 trading_symbols（餵 strategy）與 capture_only_symbols（**只訂閱 WS + 寫 klines，不餵 strategy intent**）。snapshot 給 WS 回聯集、給 pipeline 只回 trading。**否決方案 2「capture 即可交易」**（未驗證波動標的不開倉）。
+- finer granularity：Bybit public WS kline 最細 1m；秒級靠 publicTrade。capture 訂閱 = kline.1 + publicTrade（2 topics），不訂 orderbook.50。
+- 生命週期防 deadlock（沿 first-detection deadlock 教訓）：退出條件 1=capture window 過期（7d）→remove；條件 2=turnover 漲過 hard filter→升格 trading symbol（WS 無縫銜接）。append-only ledger 防重複 add。
+
+**硬邊界**：0 觸碰。capture-only 不下單/不開倉/不餵 intent → 不涉 live_execution_allowed/max_retries/OPENCLAW_ALLOW_MAINNET/authorization.json/Decision Lease。純資料採集旁路。MVP 0 migration（若後續 ledger 落 PG → V118，因 V116=M7 / V117=ADR-0046 funding_arb 已保留 per git log 7aeaad2b）。
+
+**forward-accumulation 現實（明寫 §5）**：不可 retro-backfill（klines 從 2026-04-05 起採，過去 52 上市的瞬間 1m 沒存）；n≥30 有效 pump-fade 樣本 ~Q4 2026（56d 內 52 新上市但多數無實質 pump，有效 ~6-10/月）。**交付機制非 alpha 證明**，alpha 等 Q4 樣本 + QC/MIT Stage 0R 驗（可能驗出無 edge，機制仍有殘值）。里程碑 D+0 deploy / D+14 healthcheck（klines 出現 launchTime±5min 第一根 bar）/ ~Q4 alpha re-run。
+
+**doc drift 順手抓**：bybit_api_reference.md:1101 寫「kline×6→9/symbol」但代碼 multi_interval_topics.rs:57-62 DEFAULT_INTERVALS 只 4 個（1/5/15/60）→ 7-8 topics/symbol。標 cleanup debt 不在本 spec 改。
+
+**chain**：PA→E1(W1 並行 E1-a detector+state / E1-b registry 2 method+隔離；W2 串行 mod+spawn+main 接線)→E2→E4→**BB(WS 訂閱配額 §11)**→deploy(restart_all --rebuild)。LOC ~400-550 全 Rust。
+**E2 三審**：(1) capture-only 絕不漏進 strategy intent（grep 所有 registry.snapshot() consumer + call-path proof）/(2) deadlock-free 生命週期 proptest /(3) fail-closed 不破壞 25-sym 核心。
+**BB 必查**：單連接總 topic 上限（現~1136+capture 40，ref 未載需補錄）/ 是否需獨立 WS 連接 / subscribe rate / retCode fail-closed / **PreLaunch symbol kline.1+publicTrade 訂閱是否 handler-not-found 毒連接（24h 隔離 probe，mirror W-AUDIT-8a C1 liquidation）**。
+
+**教訓**：R-2a 報告的「56d 窗」措辭易被誤讀為 retention 限制，實際是 runtime 採集起點——查 V006 retention policy 才知是 365d。spec 必須區分「schema 設定」vs「runtime 實際資料量」，否則 E1 會誤去改 retention SQL（白工 + 觸 applied-SQL 紅線）。E1 開工第一步須在 build worktree grep SymbolSpec 確認 launchTime parse 插入點（Mac scoped checkout 已讀到結構但 build tree 為準）。git fetch + NO-OP 確認無既有 spec/branch/ticket。report 直接回 parent（per 指示不寫獨立 .md）。
+
+---
+
+## 2026-05-31 — Alpha-Edge Research Execution Plan（QC 提議 → 正式 dispatch packet；PM 2-簽前）
+
+**任務**：把 QC 已 PM-1-簽的「解決方案研究提議」（4 track）寫成正式工程安排（wave/sprint/session + work-chain + acceptance + 並行圖 + gate 表）。寫新檔 `docs/execution_plan/2026-05-31--alpha_edge_research_execution_plan.md`，不寫 feature code / 不改 TODO（PM 整合）。
+
+**最 load-bearing 架構判斷（survivorship 硬修，grep 自證 → 覆蓋 backfill spec）**：backfill spec（MIT 寫）§2「Symbol source = live scanner universe」會引入致命倖存者偏差（Track 1 唯一致命污染）。PA grep 自證 **delisted SoT 已存在 DB**：`market.symbol_universe_snapshots`（V058:31-50）已含 `status/listed_at/delisted_at/is_delisted_at_asof`；cron `DEFAULT_INSTRUMENT_STATUSES=("Trading","PreLaunch","Delivering","Closed")`（`ref21_backfill_v058_v059.py:32`）已採集 delisted。→ 計劃 **覆蓋** backfill spec §2，AC-S1-W1-S1.3 明定 symbol 清單 = active ∪ delisted（`is_delisted_at_asof=true` / `status IN ('Delivering','Closed')`）∪ Bybit-historical，純 survivor-only = FAIL。backfill spec §2 標 cleanup（PM 整合時派 MIT 補或 dispatch prompt 覆蓋）。
+
+**Taxonomy 拍定（對齊專案 + 新增 Track 層）**：Track（新增，研究主線，有獨立機率/kill/CP）> Sprint（多週階段，對齊 Sprint 1-4，Track↔Sprint 一對一）> Wave（sprint 內並行子組，對齊 W1-W9）> Session（單次 dispatch unit）。標號 `S<n>-W<n>-S<n>`。
+
+**並行設計（≤7 ceiling，memory `feedback_impl_done_adversarial_review` + REF-20 9-wave 反模式）**：NOW 只 3 並行（S1-W1-S1 回填前置 / S2-W0-S1 Gate-A feasibility kill-gate / S4-W0-S1 bull 回填）；最大並行 4（週 2-7：S1-W2 兩回測 + 可能 collector IMPL）。高風險 IMPL（S2-W1-S1 collector）強制 A3+E2 對抗核驗。
+
+**三條硬依賴 + kill-gate（繼承 PM 1-簽 3 條）**：(1) Track 2 Gate-A maker-fill<30% → KILL（省 collector 高風險 Rust IMPL + 5-6mo 累積；可達性 kill-gate 先於 demo 週期，A2 教訓）；(2) Track 3 硬依賴 Track 1 載體確立（S1-W3-S1.2 GO），Track 1 NO-GO → Track 3 不啟；(3) retention 365d daily 是 operator hand-action gate 硬卡回填執行前（>12mo 不延 24h 內 reap）。每回測 session acceptance 第一條恆為 leak-free shift(1) 並列 + 指紋 grep（成本牆壓 edge 到 1-3bps，任何 look-ahead 偽造 edge）。
+
+**既有資產整合位置**：M7 V116（held；解凍 gate = 首個 candidate 達 stage0_ready 即 S1-W3-S1 GO，不在 4-track 內）/ collector spec（Track 2 Gate-B 前置，Gate-A PASS 後解凍）/ backfill spec（Track 1 前置，須補 delisted）/ V### reconcile（本計劃 0 新 migration——backfill 純 data INSERT、collector MVP in-memory ledger；唯一可能 = collector audit ledger V118+ 或 M7 V116 解凍，走 PG dry-run double-apply）。
+
+**16 根原則**：A 級；硬邊界 0 觸碰（全 read-only research + capture-only 旁路不下單/不餵 intent + M7 detector-only held）。
+
+**NO-OP 確認**：`git fetch` 已跑；無同名計劃檔 / 無 alpha.edge/tsmom/listing.capture/kline.backfill branch / `git log --all | grep` = 0。
+
+**教訓**：(a) MIT spec 的 symbol source 可漏 survivorship——PA 把 spec 拿來做 dispatch packet 時必獨立驗資料源（grep V058 + cron 確認 delisted 已採集，發現 SoT 早存在但 spec 沒接）。(b) 研究型 program 需在專案 Sprint/Wave 之上補 Track 層，否則 4 條獨立機率/kill 線的研究主線塞進單一 sprint 會混淆依賴。(c) kill-gate 排序（feasibility 先於 IMPL）是省成本的關鍵設計，不是流程裝飾——Gate-A<30% 省一個高風險 Rust 模組 + 半年累積。
+
+**Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-31--alpha_edge_research_execution_plan.md`（+ Operator copy）

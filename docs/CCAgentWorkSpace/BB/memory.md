@@ -1069,3 +1069,58 @@ SM-04 transition / lock-profit 計算 / 雙軌 sync 通道 / paper noop / claim-
 
 ### Report path
 `srv/docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-29--c4_set_trading_stop_trust.md`（worktree wt-c4 內）
+
+---
+
+## 2026-05-31 funding_short_v2 結構性 NO-GO 斷言 — BB 反證 REJECTED audit cap 詮釋
+
+### Trigger
+
+PM 對抗性質疑 `srv/docs/audits/2026-05-31--funding_short_v2_structural_infeasibility.md` §2.4 的核心斷言：「Bybit linear perp 正側 funding **結構性封頂 +0.01%/8h (+10.9% APR)**，連 memecoin 亦然，0 筆破 30% gate」。PM 懷疑這是低-premium regime 觀察，非結構性 cap。BB 用官方文件 + 實際 curl 查證。
+
+### Verdict: **audit §2.4 結構性封頂斷言 ERRONEOUS（過度詮釋）**。正側 funding **NOT** 鎖在 <30% APR。真實 per-symbol cap 遠超 30%，bull regime 下歷史頻繁破 30%。
+
+### 決定性證據（官方文件 + 實證 curl，非記憶）
+
+1. **官方 funding 公式**（Bybit Help Center, via WebSearch）：
+   `F = clamp[ P + clamp(I − P, +0.05%, −0.05%), upperFundingRate, lowerFundingRate ]`
+   - I (interest rate) = 0.03%/day = **0.01%/8h**（BTCUSD 例）。premium P≈0 時 `F = clamp(0.01%, ±0.05%) = +0.01%`。
+   - ★ **audit 觀察到的「4 symbol 正側 max 全 = 精確 +0.0001」就是 IR baseline，NOT cap**。低-premium regime 下 funding 落在 IR=+0.01% 是公式必然，不是上限。
+   - cap 公式係數 0.75（記憶 ±0.75% 方向對但非 cap 本身）：`upper = min((IMR−MMR)×0.75, MMR)`，high-divergence 時 0.75 可調 0.5~1.0。
+
+2. **`/v5/market/instruments-info` 暴露 per-symbol cap 欄位**（audit 完全沒查）：
+   - `upperFundingRate` = "Upper limit of funding date"（= 正側 cap，per-symbol 真實欄位）
+   - `lowerFundingRate` = 負側 cap；`fundingInterval` = 結算間隔（分鐘）
+   - 實 curl api.bybit.com（2026-05-31）：
+
+   | Symbol | upperFundingRate | = APR | fundingInterval |
+   |--------|------------------|-------|-----------------|
+   | BTCUSDT | +0.005 (0.5%/8h) | **+547.5% APR** | 480 (8h) |
+   | SOLUSDT | +0.005 | **+547.5%** | 480 |
+   | DOGEUSDT | +0.0058 | **+635%** | 480 |
+   | 1000PEPEUSDT | +0.01 | **+1095%** | 480 |
+   | WIFUSDT | +0.01 | **+2190%** | 240 (4h!) |
+
+   → 真實正側 cap 是 audit 宣稱「10.9% 封頂」的 **50×~200×**。
+
+3. **歷史反證**（實 curl funding/history，2024 bull 窗）：
+   - BTCUSDT 2024-03（突破前高）：n=43 **全部 > +0.0001**，max +0.001128 = **123.5% APR**
+   - BTCUSDT 2024-11（川普當選 bull）：max +0.001086 = 118.9% APR，**32/106 筆 > +30% APR**
+   - DOGEUSDT 2024-11：max +0.001146 = 125.5% APR，**53/106 破 30%**
+   - 1000PEPEUSDT 2024-11：max +0.001228 = **134.5% APR，73/106 (69%) 破 30%**
+   → audit「0 筆破 30%」純因 ~66 天樣本落在低-premium regime；換 bull 窗 alt 半數以上時間破門檻。
+
+### audit 其他錯誤
+
+- WIFUSDT fundingInterval=240（4h，一天 6 次結算非 3 次）；audit 用統一 8h×3×365 算 WIF -85% APR 倍率錯（應 ×6×365）。
+- audit §2.3「三源一致 max +1.0 bps」只證明**我方 pipeline 無 clamp 且當前 regime 確實低**（這部分 BB 認同，數據忠實），但被誤推成「結構性 cap」。pipeline 忠實 ≠ 結構封頂。
+
+### 對 funding_short_v2 NO-GO 結論的影響
+
+- audit 的 NO-GO **結論可能仍成立，但理由錯**：不是「物理上永遠無法 fire」（bull regime 可破 30%），而是「需賭 bull/high-premium regime，低-premium 期 0 機會 + break-even 160% APR 門檻過高（160% < BTC cap 547% 但 > 多數實際 funding）」。這是 **regime-dependent 低頻策略**，非「數學上永遠不可能」。正確 reframe 應交 QC：策略入場頻率取決於 bull regime 出現頻率 + 160% break-even 在歷史 bull 窗的實際命中率（2024-11 BTC max 118.9% < 160% break-even → 即使該 bull 窗 break-even 仍未過，但 30% 入場 gate 過了 32 次；門檻間 30%~160% 的 gap 是真問題，但屬 QC 成本/門檻設計，非 Bybit 結構封頂）。
+
+### 下次啟動需查驗項
+
+1. audit `2026-05-31--funding_short_v2_structural_infeasibility.md` §2.4 是否更正「結構性封頂 10.9%」措辭（建議標 erratum：cap 是 per-symbol upperFundingRate 0.5%~1.0%/8h，非 +0.01%）。
+2. `quant-strategy-design` checklist 建議改為「查 `instruments-info.upperFundingRate` per-symbol cap」而非靠 funding/history 樣本窗 max 推斷 cap（樣本窗會落在 regime 內，必誤判）。
+3. 字典手冊 §1 funding 章節是否補 `upperFundingRate`/`lowerFundingRate`/`fundingInterval` 三欄位 + 完整 clamp 公式（含 IR baseline = +0.01% 的 floor 語意，防後續 agent 再犯同樣 cap 誤判）。
