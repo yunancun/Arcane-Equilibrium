@@ -13,6 +13,7 @@ if str(SRV_ROOT) not in sys.path:
     sys.path.insert(0, str(SRV_ROOT))
 
 from helper_scripts.m4.stage1_production_runner import (  # noqa: E402
+    GovernanceHubDecisionLeaseProvider,
     generate_stage1_candidates,
     map_analysis_lane_to_pg_status,
     run_production_stage1,
@@ -75,6 +76,23 @@ class FakeConnection:
 
     def rollback(self) -> None:
         self.rollbacks += 1
+
+
+class FakeGovernanceBridge:
+    def __init__(self, lease_ids: list[str]) -> None:
+        self.lease_ids = lease_ids
+        self.acquire_calls: list[dict] = []
+        self.release_calls: list[dict] = []
+
+    def acquire(self, **kwargs):
+        self.acquire_calls.append(dict(kwargs))
+        if not self.lease_ids:
+            return None
+        return self.lease_ids.pop(0)
+
+    def release(self, **kwargs):
+        self.release_calls.append(dict(kwargs))
+        return True
 
 
 def _kline_rows(n: int = 160) -> list[dict]:
@@ -173,3 +191,60 @@ def test_writeback_inserts_pg_safe_status_with_lease():
     assert params["status"] in {"draft", "preregistered"}
     assert params["status"] != "exploratory"
     assert params["decision_lease_draft_id"] == str(lease_id)
+
+
+def test_writeback_can_acquire_uuid_lease_through_governance_provider():
+    lease_id = uuid.uuid4()
+    bridge = FakeGovernanceBridge([str(lease_id)])
+    provider = GovernanceHubDecisionLeaseProvider(
+        acquire_func=bridge.acquire,
+        release_func=bridge.release,
+    )
+    conn = FakeConnection(_source_rows())
+    summary = run_production_stage1(
+        conn=conn,
+        symbols=("BTCUSDT",),
+        lookback_days=30,
+        max_drafts=1,
+        enable_writeback=True,
+        lease_provider=provider,
+    )
+
+    assert summary["n_drafts"] == 1
+    assert conn.commits == 1
+    assert conn.inserted_params[0]["decision_lease_draft_id"] == str(lease_id)
+    assert bridge.acquire_calls[0]["scope"] == "M4_DRAFT_WRITEBACK"
+    assert bridge.acquire_calls[0]["profile"] == "Production"
+    assert bridge.release_calls == [
+        {"lease_id": str(lease_id), "consumed": True, "timeout_seconds": 5.0}
+    ]
+
+
+def test_governance_provider_releases_non_uuid_lease_and_refuses_insert():
+    bridge = FakeGovernanceBridge(["lease:abc123def456"])
+    provider = GovernanceHubDecisionLeaseProvider(
+        acquire_func=bridge.acquire,
+        release_func=bridge.release,
+    )
+    conn = FakeConnection(_source_rows())
+
+    with pytest.raises(RuntimeError, match="UUID-compatible"):
+        run_production_stage1(
+            conn=conn,
+            symbols=("BTCUSDT",),
+            lookback_days=30,
+            max_drafts=1,
+            enable_writeback=True,
+            lease_provider=provider,
+        )
+
+    assert conn.inserted_params == []
+    assert conn.commits == 0
+    assert conn.rollbacks == 1
+    assert bridge.release_calls == [
+        {
+            "lease_id": "lease:abc123def456",
+            "consumed": False,
+            "timeout_seconds": 5.0,
+        }
+    ]
