@@ -1,5 +1,12 @@
 # PM Memory — 工作記憶
 
+## 2026-05-31 AEG-S0 Contract Sprint PM-Local Lesson
+
+- AEG-S0 is a contract gate, not an implementation gate. A PM-local contract draft can clarify evidence storage, regime classifier, endpoint, and TODO archive rules, but it must not be reported as formal PA/MIT/QC/BB/TW/CC sign-off.
+- Tooling/process boundary: if sub-agent fanout is not explicitly authorized, mark the output as PM-local and keep the formal role review as the next gate instead of simulating independent review.
+- The most important S0 preservation rule is negative: E1 backfill, retention mutation, endpoint implementation, collector implementation, and alpha scoring remain blocked until reviewed contracts pass.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--aeg_s0_contract_sprint_pm_local.md
+
 ## 2026-05-31 Alpha-Edge Operator Amendment Lesson
 
 - Operator accepted `market.klines` 1095d + 18mo + full survivorship collection / core25 primary analysis, but explicitly required breadth to become automated evidence rather than an ad hoc later PM call. Future S1 work needs a breadth-ladder runner/report before verdict.

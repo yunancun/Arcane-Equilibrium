@@ -1,7 +1,7 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-**版本** v96 ｜ **日期** 2026-05-31 ｜ **source HEAD** v96 doc checkpoint after V5.8 preservation audit；runtime unchanged from latest v87 deploy snapshot.
-**當前主線**：P0-EDGE-1 Alpha-Edge Regime Evidence Governance。AEG-S0 contract sprint 是唯一可派的 Alpha-Edge next action；E1 backfill / DB retention / endpoint IMPL / alpha scoring 全部 blocked until AEG-S0 passes.
+**版本** v97 ｜ **日期** 2026-05-31 ｜ **source HEAD** v97 doc checkpoint after AEG-S0 PM-local contract draft；runtime unchanged from latest v87 deploy snapshot.
+**當前主線**：P0-EDGE-1 Alpha-Edge Regime Evidence Governance。AEG-S0 PM-local contract draft 已落地；下一步是 formal PA/MIT/QC/BB/TW/CC review。E1 backfill / DB retention / endpoint IMPL / alpha scoring 全部 blocked until reviewed AEG-S0 passes.
 **v96 audit note**：V5.8 設計未被刪除；它作為長期 13-module autonomy architecture 保留，active TODO 只保留可派工 posture。詳見 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--v58_design_progress_preservation_audit.md`。
 **歷史詳情**：version log `docs/CLAUDE_CHANGELOG.md`；v94 prune audit `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--todo_v94_prune_audit.md`；pre-cleanup archive `docs/archive/2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`；older v92 archive `docs/archive/2026-05-31--todo_v92_archive.md`。
 
@@ -23,7 +23,7 @@
 
 | ID | Status | Owner chain | Acceptance / Gate | Next action |
 |---|---|---|---|---|
-| `P0-EDGE-1` | 🔴 ACTIVE | PM -> PA/QC/MIT/BB -> E1 after gate | Closure requires accepted Alpha-Edge evidence: >=3 alpha-bearing candidates meeting net/cost/statistical gates, or another accepted P0-EDGE path. Bull-only/stale-only/survivor-only/narrative-only positives cannot promote. | Run `AEG-S0` contract sprint only. PM 2nd sign-off approved contracts, not E1 backfill. |
+| `P0-EDGE-1` | 🔴 ACTIVE | PM -> PA/QC/MIT/BB -> E1 after gate | Closure requires accepted Alpha-Edge evidence: >=3 alpha-bearing candidates meeting net/cost/statistical gates, or another accepted P0-EDGE path. Bull-only/stale-only/survivor-only/narrative-only positives cannot promote. | Review PM-local `AEG-S0` contract draft; no E1 backfill until formal review passes. |
 | `P0-LG-3` | 🟡 SOURCE INTEGRATED / runtime not deployed | PM -> E2 -> E4 -> QA -> operator deploy gate | Review integrated commits `deb3f3af..0802d52b`; V104 checksum discipline; Linux migration dry-run/AUTO_MIGRATE plan; supervised_live tests green. | Run review chain before any deploy/rebuild. |
 | `P0-OPS residual` | 🟢 OPS-1 CLOSED / residual OP-gated | Operator + PM/E1/MIT as needed | Restore drill, system-level units, live-auth renewal, replay manifest feed, close-maker max-pending evidence. | Wait for operator hand-action windows; keep residual rows visible below. |
 
@@ -47,16 +47,18 @@
 - Trend/regime labels must be local, leak-free, point-in-time, and fixed before alpha scoring.
 - News/X/Reddit agents are secondary side evidence only; the promotion core remains mathematical.
 
+**Current contract artifact**: `docs/execution_plan/2026-05-31--aeg_s0_contracts.md` is a PM-local draft covering AEG-S0-W0-S1..S4. It is not an independent PA/MIT/QC/BB/TW/CC sign-off. Next executable action is formal role review; E1 remains blocked.
+
 ### §2.1 NOW: AEG-S0 Contract Sprint
 
 | Session | Owner chain | Output | Acceptance |
 |---|---|---|---|
-| `AEG-S0-W0-S1` Evidence Storage Contract | PM -> PA+MIT -> QC | alpha-history manifest, coverage/provenance, regime/breadth/side-evidence artifact contract | Includes `run_id`, `git_sha`, `session_id`, window, symbols, universe, cost model, endpoint list, classifier version; excludes 14d `panel.*` as 18mo history. |
-| `AEG-S0-W0-S2` Regime Classifier Freeze | PM -> QC+PA -> MIT | bull/range/bear/chop/high-vol taxonomy + overlay flags | Rules fixed before alpha scoring; closed bars only; all features lagged / `shift(1)`. |
-| `AEG-S0-W0-S3` Bybit Endpoint Contract | PM -> MIT+BB -> PA | endpoint adoption plan | Covers pagination, retention, rate limits, client gaps, and BB review for kline/funding/OI/long-short/mark-index-premium/ticker/orderbook/IV. |
-| `AEG-S0-W0-S4` TODO Archive Plan | PM -> TW/CC -> PM | active TODO cleanup map | Active TODO keeps next actions; historical evidence stays in reports/archive. |
+| `AEG-S0-W0-S1` Evidence Storage Contract | PM -> PA+MIT -> QC | PM-local draft done in `2026-05-31--aeg_s0_contracts.md`; role review pending | Includes `run_id`, `git_sha`, `session_id`, window, symbols, universe, cost model, endpoint list, classifier version; excludes 14d `panel.*` as 18mo history. |
+| `AEG-S0-W0-S2` Regime Classifier Freeze | PM -> QC+PA -> MIT | PM-local draft done; role review pending | Rules fixed before alpha scoring; closed bars only; all features lagged / `shift(1)`. |
+| `AEG-S0-W0-S3` Bybit Endpoint Contract | PM -> MIT+BB -> PA | PM-local draft done; role review pending | Covers pagination, retention, rate limits, client gaps, and BB review for kline/funding/OI/long-short/mark-index-premium/ticker/orderbook/IV. |
+| `AEG-S0-W0-S4` TODO Archive Plan | PM -> TW/CC -> PM | PM-local draft done; role review pending | Active TODO keeps next actions; historical evidence stays in reports/archive. |
 
-Parallelism: 4 sessions can run together; project ceiling remains 7.
+Formal review parallelism: 4 sessions can run together after operator/tool authorization; project ceiling remains 7.
 
 ### §2.2 E1 Hard Block
 
@@ -101,7 +103,7 @@ AEG is not a replacement of the prior design. It integrates and constrains these
 
 | Workflow | State | Next action |
 |---|---|---|
-| `Alpha-Edge / AEG` | ACTIVE mainline | Dispatch `AEG-S0` only; no E1 implementation before PM gate. |
+| `Alpha-Edge / AEG` | ACTIVE mainline | Formal review of `AEG-S0` PM-local contract draft; no E1 implementation before PM gate. |
 | `Workflow B` ADR-0046 basis observation/execution split | ACTIVE but not Alpha-blocking | PA design -> E1 Rust -> MIT V117 -> E2 -> E4 -> BB -> QA. |
 | `Earn Wave C` | OPERATOR-GATED | OP-1 key refresh -> OP-2 Earn variant -> OP-3 first $100-200 USDT Flexible stake. |
 | `Layered Autonomy v2 Wave 5` | FROZEN active-IMPL per v92 D1 | Packet A+B runtime and TOTP source exist; Packet C core E4 green; runtime TOTP enrollment + engine integration wait until promotion gate. |
