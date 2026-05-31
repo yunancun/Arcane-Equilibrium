@@ -4,7 +4,7 @@
 |------|------|
 | Date | 2026-05-31 |
 | Author | PA (Project Architect) |
-| Status | **PM 2 PASS / NOW DISPATCHED 2026-05-31**（S1/S2/S4 results recorded in `TODO.md` §6.1；original PA design retained below）|
+| Status | **PM 2 PASS / NOW DISPATCHED 2026-05-31 / SUPERSEDED FOR NEXT IMPLEMENTATION BY AEG ARRANGEMENT**（S1/S2/S4 results recorded in `TODO.md`；original PA design retained below）|
 | Ticket family | `ALPHA-EDGE-*`（program-level；本計劃定義 4 track + wave/session 拆分）|
 | 改動風險 | 計劃本身=文檔（低）；下轄 session 含 **高**（collector listing-capture Rust + WS 訂閱面、M7 V116 schema/detector）與 **中**（backfill 腳本、回測 harness）；硬邊界 **0 觸碰**（全 read-only research + capture-only 旁路）|
 | Upstream evidence | `docs/audits/2026-05-31--p0_edge_cost_wall_investigation.md`（PM 全 session findings 匯報）；3 E1-ready spec（§6 整合表）；戰略決策 `TODO.md` v92（commit `3a7c4853`）|
@@ -24,7 +24,7 @@
 6. **Market trend/state must become a local mathematical feature layer**: Bybit public API should be treated as raw market-state input, not a prediction oracle. PA/MIT must evaluate Bybit-provided inputs such as kline/index/mark/premium kline, ticker, orderbook, funding history, open interest, long/short ratio, and option historical volatility where relevant; then define a local, leak-free trend/state classifier using project math rules. If any new Bybit endpoint is adopted, update `docs/references/2026-04-04--bybit_api_reference.md` and route through BB review.
 7. **External narrative is side evidence only**: future news/X/Reddit/market-summary agents may collect sentiment and event context as corroborating evidence, but strategy and promotion evidence must remain math-primary. Narrative feeds cannot be the main signal source, cannot override failing quantitative gates, and must be labeled as secondary context.
 
-Immediate next packet before E1 implementation: PA/MIT must amend the execution plan for alpha-history storage, breadth-ladder automation, local trend/state classification, external-narrative side-evidence boundaries, and global regime robustness gates.
+Immediate next packet before E1 implementation: use `docs/execution_plan/2026-05-31--alpha_edge_regime_evidence_engineering_arrangement.md`. Direct E1 backfill from this old plan is blocked until AEG-S0 contracts pass.
 
 ---
 

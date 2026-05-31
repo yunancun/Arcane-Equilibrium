@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-31（TODO v92+v93 version-increment 遷入 — PM cost-wall investigation + alpha-edge pivot；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-05-31（TODO v94 AEG cleanup + v92/v93 version-increment 遷入；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（§1 blockers / §2 banner / §4 module matrix / §6.1 alpha-edge 派工）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v94 增量（2026-05-31 AEG cleanup）**：新增 ADR-0047 + AMD-2026-05-31-01，將 operator 對 bull data、S4、S1-Sx、Bybit API、新聞/X/Reddit side evidence 的規則升為 governance anchor；新增 findings report、PM first/second sign-off、AEG engineering arrangement。TODO 從 446 行收斂為 active dispatch queue，歷史敘事移到 `docs/archive/2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`，目前唯一 Alpha-Edge next action = AEG-S0 contract sprint；E1 backfill/DB retention/endpoint IMPL/alpha scoring 在 AEG-S0 pass 前硬 blocked。本輪 doc/governance only，無 runtime/DB/auth/trading 改動。
 
 **v93 增量（2026-05-31 PM 收尾）**：(1) **TODO 638→430 行歸檔**（已 CLOSED/DONE 明細 + v75-91 版本史 → `docs/archive/2026-05-31--todo_v92_archive.md`）。(2) **alpha-edge 4-track 工程安排整合進 §6.1**（PM 2 次簽收 PASS；SSOT `docs/execution_plan/2026-05-31--alpha_edge_research_execution_plan.md`；NOW 3 並行 session = S1-W1-S1 / S2-W0-S1 / S4-W0-S1）。(3) **治理更正**：平行 session `funding_short_v2_structural_infeasibility.md` §2.4「Bybit 正側 funding 結構封頂 +10.9% APR」被 BB 否證 = **regime-dormant 非結構 cap**（真 cap=`upperFundingRate` +547~2190% APR；+0.0001 是 IR floor；真問題=160% break-even 屬 QC 範疇）；erratum + Bybit 字典 + quant-strategy-design skill + `.codex/MEMORY` 已更。(4) **findings 匯報** `docs/audits/2026-05-31--p0_edge_cost_wall_investigation.md`。本輪全 read-only research + doc，無 code/runtime 改動。
 

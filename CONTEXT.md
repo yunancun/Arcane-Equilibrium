@@ -70,6 +70,18 @@ _Avoid_: "experiment" (loses governance weight), "test" (generic).
 The proposed (ADR-0021 R-4) replacement for "system-wide live_reserved" promotion model. LiveBudget(alpha_source_id, slice) allocates capital_cap_usd / max_concurrent_positions / max_drawdown_pct per alpha source. Each alpha source has independent promotion clock concurrent to others.
 _Avoid_: "per-strategy live promotion" (alpha-source != strategy), "live budget" alone.
 
+**Alpha Evidence Governance**:
+The ADR-0047 evidence contract for Alpha-Edge S1-Sx. Promotion evidence must be math-primary and must report regime, breadth, freshness, survivorship, and execution realism. Bull-market data is allowed only when explicitly labeled; bull-only or stale-only positive results are not proof of durable alpha.
+_Avoid_: "market narrative proof", "bull proof", "aggregate Sharpe proof" without evidence slices.
+
+**Regime/Falsification Overlay**:
+The S4/Sx cross-track layer that labels bull / range / bear / chop / high-vol and tests whether a candidate is a durable alpha or a regime bet. It consumes local math-first features from Bybit market data; it does not treat Bybit or narrative feeds as prediction oracles.
+_Avoid_: "S4 bull alpha", "exchange prediction", "regime oracle".
+
+**Narrative Side Evidence**:
+News, X, Reddit, market-commentary, and event-summary inputs used only to annotate context or explain event risk. These feeds are inference/context, not primary strategy evidence, and cannot override quantitative gates.
+_Avoid_: "sentiment signal" when it implies promotion authority, "news alpha proof".
+
 ### Autonomy expansion taxonomy (v5.8)
 
 These 12 terms are added by v5.8 13-module autonomy expansion thesis (執行計畫 v5.8 + ADR-0034..0044 + AMD-2026-05-21-01). Every new prose discussing autonomy / health / decay / replay / A/B / scope governance must use these names exactly — do not collapse them into "tier," "gate," "stage," "level," or generic "approval."

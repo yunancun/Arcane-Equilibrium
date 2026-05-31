@@ -98,6 +98,19 @@ then read `TODO.md` and the linked report/archive needed for the task.
   operator decision reopens it. Stage 1 alpha-bearing promotion is Demo-only
   after a green Stage 0R replay preflight.
 
+## Alpha Evidence Governance
+
+- Alpha promotion evidence is math-primary. News, X, Reddit, and market-commentary
+  agents may provide corroborating context only; they cannot be the main signal,
+  cannot override failed quantitative gates, and cannot directly drive trading.
+- Bull-market data is allowed, but every bull-heavy, rally-only, 2024-dominated,
+  or stale-year-dominated result must be labeled as such. Bull-only positive
+  results are `regime-bet / learning-only`, not promotion proof.
+- Bybit market APIs provide raw state inputs, not prediction. Trend/regime
+  labels must be computed locally from leak-free, point-in-time features.
+- S4 is a global S1-Sx regime/falsification overlay. It is not a standalone
+  bull-data alpha proof track.
+
 ## 五、Architecture Pointers
 
 Stable architecture belongs outside memory:

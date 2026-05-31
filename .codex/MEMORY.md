@@ -93,6 +93,9 @@ Known paths:
   results.
 - Bybit API timeout / nonzero `retCode` fails closed; no hidden trading retry
   paths.
+- Alpha promotion evidence is math-primary: bull data is allowed only with
+  explicit regime/freshness labels; Bybit market APIs are raw state inputs, not
+  prediction; news/X/Reddit agents are secondary corroboration only.
 
 ## Operating Rules
 
