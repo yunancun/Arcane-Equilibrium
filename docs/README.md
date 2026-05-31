@@ -163,9 +163,15 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 
 | 文件 | 内容 |
 |------|------|
-| `execution_plan/2026-06-01--aeg_s1_fnd1_storage_retention_provenance_change_control.md` | AEG-S1-FND-1 storage/retention/provenance change-control package；建議 `market.klines` 1095d + DB provenance ledger 作為 OHLCV path，funding/OI/long-short 走 dedicated research-history storage；明確保留 writer/DB mutation/backfill/scoring blocked。|
-| `CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_s1_fnd1_storage_change_control_integration.md` | PM integration report；整合 MIT/PA 並行 read-only audit + Linux reflection，標記 FND-1 package complete / implementation still blocked，列下一步 operator storage decision 與 V###/E2/E4 gates。|
-| `CCAgentWorkSpace/Operator/2026-06-01--aeg_s1_fnd1_storage_change_control_integration.md` | Operator brief；濃縮 FND-1 需要拍板的 storage branch、Linux runtime baseline、仍 blocked 範圍。|
+| `execution_plan/2026-06-01--aeg_s1_fnd1_storage_retention_provenance_change_control.md` | AEG-S1-FND-1 storage/retention/provenance change-control package；operator 已批准設計分支：`market.klines` 1095d + DB provenance ledger 作為 OHLCV path，funding/OI/long-short 走 dedicated research-history storage；明確保留 writer/DB mutation/backfill/scoring blocked。|
+| `execution_plan/2026-06-01--aeg_s1_fnd2_pit_universe_builder_contract.md` | AEG-S1-FND-2 PIT universe builder contract；指定 `market.symbol_universe_snapshots` 為 PIT source，797-row survivorship CSV 僅作 seed/regression，current-survivor shortcut 自動 FAIL。|
+| `execution_plan/2026-06-01--aeg_s1_fnd4_public_endpoint_runner_client_gap_persistence_map.md` | AEG-S1-FND-4 public endpoint runner/client-gap + persistence map；建議延伸 isolated Python public replay client，mark/index/premium price-only kline 不可重用 OHLCV parser，historical basis/index bypass `market_tickers`。|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_s1_fnd1_storage_change_control_integration.md` | PM integration report；整合 MIT/PA 並行 read-only audit + Linux reflection，標記 FND-1 package complete / implementation still blocked，原下一步為 operator storage decision 與 V###/E2/E4 gates。|
+| `CCAgentWorkSpace/Operator/2026-06-01--aeg_s1_fnd1_storage_change_control_integration.md` | Operator brief；濃縮 FND-1 storage branch、Linux runtime baseline、仍 blocked 範圍；storage branch 已由後續 operator decision brief 記錄批准。|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_s1_operator_storage_decision.md` | PM report；記錄 operator 批准 FND-1 storage branch，並開 FND-2/FND-4 docs/design 並行。|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_s1_fnd2_fnd4_parallel_integration.md` | PM integration report；整合 MIT/BB sub-agent read-only 回報，確認 FND-2 contract + FND-4 map complete，列下一步 FND-3、S2 Gate-B、MIT migration-design。|
+| `CCAgentWorkSpace/Operator/2026-06-01--aeg_s1_operator_storage_decision.md` | Operator brief；記錄 FND-1 approved design branch 與 FND-2/FND-4 open scope，保留 execution blocked 邊界。|
+| `CCAgentWorkSpace/Operator/2026-06-01--aeg_s1_fnd2_fnd4_parallel_integration.md` | Operator brief；濃縮 FND-2/FND-4 並行 checkpoint、`market_tickers` historical bypass 決策、仍未授權事項與下一步排程。|
 | `execution_plan/2026-06-01--aeg_s1_foundation_unblock_packet.md` | AEG-S1 Foundation unblock packet；把 AEG blocked list 分成可立即派發的 docs/design/read-only FND-1..4 + S2 Gate-B prep，以及仍禁止的 backfill writer / DB retention mutation / endpoint ingestion / collector runtime / alpha scoring；FND-4 包含 index/mark ticker persistence fix-vs-bypass。|
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_blocked_items_resolution_verification.md` | PM verification report；確認 blocker classification 已完成，但 runtime/DB/backfill/collector/scoring outcomes 未完成，不能標成 full implementation complete。|
 
@@ -1371,3 +1377,7 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 | `2026-05-21--todo_v57_5_route_change_purge.md` | TODO v57.5 route change purge archive：v5.7 dispatch-safe patch 收斂前過時 active route 清除 |
 | `2026-05-21--todo_v58_layout_refactor_archive.md` | TODO v58 layout refactor archive：reverse-chronological dispatch view → grouped-by-module/wave view 重組過渡記錄 |
 | `2026-05-21--todo_v60_archive.md` | TODO v60 archive：Sprint N+1 / Sprint A 收尾與已完成內容歸檔；v61 起以 v5.8 13-module thesis 為主軸（含 §A v5.7 12 prefix DONE / §B W-AUDIT-4b retained / §C H+I 批 P2/P3 closure / §D 過去 14d 9 批 closure narrative） |
+| `2026-05-23--gui_bybit_first_pnl_refactor.md` | GUI Bybit first-PnL refactor archive：早期 GUI / Bybit PnL 顯示與重構歷史歸檔 |
+| `2026-05-23--sprint_4plus_5plus_wave1_closure.md` | Sprint 4+ / 5+ Wave 1 closure archive：closure narrative 與過時 active TODO 內容歸檔 |
+| `2026-05-31--todo_v92_archive.md` | TODO v92 archive：v75-91 歷史增量與 P0-EDGE cost-wall / alpha redirection / V### reconcile 決策歸檔 |
+| `2026-05-31--todo_v93_pre_aeg_cleanup_archive.md` | TODO v93 pre-AEG cleanup archive：AEG cleanup 前 active TODO 快照與歷史敘事歸檔 |

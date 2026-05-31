@@ -483,3 +483,10 @@ YYYY-MM-DD HH:MM TZ
 - result: FND-1 package landed in `docs/execution_plan/2026-06-01--aeg_s1_fnd1_storage_retention_provenance_change_control.md`; PM report and Operator brief record `market.klines` 1095d + DB provenance ledger recommendation and dedicated research-history storage recommendation for funding/OI/long-short.
 - verification: Linux read-only reflection confirmed current `market.klines=365d`, funding/OI/long-short `=180d`, `_sqlx_migrations` head V115; `git diff --check` PASS.
 - boundary: docs/design/read-only only; no DB write, migration apply, retention mutation, runtime deploy, auth, order, endpoint ingestion, collector runtime, backfill run, alpha scoring, or promotion verdict.
+
+2026-06-01 CEST
+- PM task: record operator approval of FND-1 storage branch, continue FND-2, and open FND-4 in parallel.
+- dispatch chain: PM(default) local integration + MIT(explorer) Cicero read-only PIT universe contract audit + BB(explorer) Aristotle read-only endpoint/client/persistence audit.
+- result: FND-1 document updated from recommendation to approved design branch; FND-2 PIT universe builder contract and FND-4 public endpoint runner/client-gap + persistence map landed; PM and Operator integration briefs added; TODO advanced to v103.
+- verification: sub-agents reported no file/git/DB/runtime changes; `git diff --check` PASS; `python3 -m pytest tests/structure/test_docs_readme_index_static.py -q` = 5 passed.
+- boundary: docs/design/read-only only; no migration apply, DB write, retention mutation, endpoint ingestion, backfill writer/run, runtime deploy, auth, order, collector runtime, alpha scoring, or promotion verdict.

@@ -1,5 +1,18 @@
 # PM Memory — 工作記憶
 
+## 2026-06-01 AEG-S1-FND-2/FND-4 Parallel Checkpoint Lesson
+
+- Operator approval of a storage branch unlocks design sequencing, not DB
+  execution. The next safe packet is migration design/review, not migration
+  apply.
+- PIT universe must be generated from `market.symbol_universe_snapshots`; the
+  797-row survivorship CSV is valuable as seed/regression evidence but cannot
+  become the standing source of truth.
+- Historical basis/index work must bypass `market_tickers`. Bybit `tickers` is
+  snapshot-only, and local `market_tickers` is forward evidence only even after
+  a future P3 propagation fix.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_s1_fnd2_fnd4_parallel_integration.md
+
 ## 2026-06-01 AEG-S1-FND-1 Storage Change-Control Lesson
 
 - Schema comments are not policy truth. `V002` still says market history is
@@ -11,7 +24,7 @@
   storage or an equally strong append-only DB provenance ledger.
 - A completed FND package is not implementation clearance. Writer, DB mutation,
   backfill, endpoint ingestion, collector runtime, and scoring stay blocked
-  until operator storage decision + V###/E2/E4/BB gates pass.
+  until storage design, V###, E2/E4, BB, and PM execution gates pass.
 - Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_s1_fnd1_storage_change_control_integration.md
 
 ## 2026-06-01 AEG Blocked-Item Resolution Lesson
