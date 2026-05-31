@@ -163,6 +163,9 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 
 | 文件 | 内容 |
 |------|------|
+| `execution_plan/2026-06-01--aeg_s1_fnd1_storage_retention_provenance_change_control.md` | AEG-S1-FND-1 storage/retention/provenance change-control package；建議 `market.klines` 1095d + DB provenance ledger 作為 OHLCV path，funding/OI/long-short 走 dedicated research-history storage；明確保留 writer/DB mutation/backfill/scoring blocked。|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_s1_fnd1_storage_change_control_integration.md` | PM integration report；整合 MIT/PA 並行 read-only audit + Linux reflection，標記 FND-1 package complete / implementation still blocked，列下一步 operator storage decision 與 V###/E2/E4 gates。|
+| `CCAgentWorkSpace/Operator/2026-06-01--aeg_s1_fnd1_storage_change_control_integration.md` | Operator brief；濃縮 FND-1 需要拍板的 storage branch、Linux runtime baseline、仍 blocked 範圍。|
 | `execution_plan/2026-06-01--aeg_s1_foundation_unblock_packet.md` | AEG-S1 Foundation unblock packet；把 AEG blocked list 分成可立即派發的 docs/design/read-only FND-1..4 + S2 Gate-B prep，以及仍禁止的 backfill writer / DB retention mutation / endpoint ingestion / collector runtime / alpha scoring；FND-4 包含 index/mark ticker persistence fix-vs-bypass。|
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_blocked_items_resolution_verification.md` | PM verification report；確認 blocker classification 已完成，但 runtime/DB/backfill/collector/scoring outcomes 未完成，不能標成 full implementation complete。|
 

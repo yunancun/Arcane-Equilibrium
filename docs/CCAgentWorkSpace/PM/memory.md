@@ -1,5 +1,19 @@
 # PM Memory — 工作記憶
 
+## 2026-06-01 AEG-S1-FND-1 Storage Change-Control Lesson
+
+- Schema comments are not policy truth. `V002` still says market history is
+  permanent, but `V006` plus Linux Timescale reflection proves current
+  retention is `market.klines=365d` and funding/OI/long-short `=180d`.
+- OHLCV and funding/OI/long-short should not be unlocked as one blob. A
+  reviewed `market.klines` 1095d path can be acceptable for OHLCV only with a
+  DB provenance ledger; funding/OI/long-short need dedicated research-history
+  storage or an equally strong append-only DB provenance ledger.
+- A completed FND package is not implementation clearance. Writer, DB mutation,
+  backfill, endpoint ingestion, collector runtime, and scoring stay blocked
+  until operator storage decision + V###/E2/E4/BB gates pass.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_s1_fnd1_storage_change_control_integration.md
+
 ## 2026-06-01 AEG Blocked-Item Resolution Lesson
 
 - Resolving a blocked queue can mean classifying and routing it, not pretending
