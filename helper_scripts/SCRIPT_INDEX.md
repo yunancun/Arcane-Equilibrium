@@ -1,7 +1,13 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-29（P2-OPS-2-GITLEAKS — 新增 `git_hooks/` secret-scan pre-commit hook 基礎設施：canonical hook + installer + gitleaks config；E1 IMPL DONE 待 E2 sign-off。歷史更新：2026-05-27（P0-OPS-4 GAP-D Track A round 2 — 新增 `canary/healthchecks/check_pg_dump_freshness.py` Python 主入口 7-check（5 verify_pg_dump.sh + L0 schema coverage + governance audit trail） + wire `passive_wait_healthcheck/checks_cron_heartbeat.py` 加 `check_80_pg_dump_freshness()` wrapper；E1 IMPL DONE 待 E2 sign-off。同日保留 P0-OPS-1 HTTPS Track A IMPL + P0-OPS-4 first-day-live runbook GAP A + GAP F IMPL 索引 + 2026-05-25 Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron + W2-B Alpha Tournament scaffold + Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引））
+最後更新：2026-05-31（M4 Stage 1 production DRAFT runner — 新增 `m4/stage1_production_runner.py` non-dry-run source read / candidate compute / gated writeback；writeback 必須每 row 提供真實 Decision Lease UUID，analysis lane `exploratory` 映射成 PG status `draft`。歷史更新：2026-05-29（P2-OPS-2-GITLEAKS — 新增 `git_hooks/` secret-scan pre-commit hook 基礎設施：canonical hook + installer + gitleaks config；E1 IMPL DONE 待 E2 sign-off。2026-05-27（P0-OPS-4 GAP-D Track A round 2 — 新增 `canary/healthchecks/check_pg_dump_freshness.py` Python 主入口 7-check（5 verify_pg_dump.sh + L0 schema coverage + governance audit trail） + wire `passive_wait_healthcheck/checks_cron_heartbeat.py` 加 `check_80_pg_dump_freshness()` wrapper；E1 IMPL DONE 待 E2 sign-off。同日保留 P0-OPS-1 HTTPS Track A IMPL + P0-OPS-4 first-day-live runbook GAP A + GAP F IMPL 索引 + 2026-05-25 Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron + W2-B Alpha Tournament scaffold + Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引））
+
+## 2026-05-31 M4 Stage 1 production DRAFT runner
+
+| 腳本 | 用途 |
+|------|------|
+| `m4/stage1_production_runner.py` | M4 Stage 1 non-dry-run core：透過既有 kline/fills/liquidations/funding source-loader SQL 讀 PG，生成 shift(1) leak-free cross-correlation + funding/liquidation event-window candidates。預設只計算不寫庫；`pattern_miner_stage_1.py --enable-writeback` 時每個 DRAFT row 必須提供一個真實 `decision_lease_draft_id` UUID，否則 fail-closed 不 INSERT。analysis lane `exploratory` 不直接寫 `learning.hypotheses.status`，統一映射為 V100 enum 可接受的 `draft`。 |
 
 ## 2026-05-29 P2-OPS-2-GITLEAKS secret-scan pre-commit hook 基礎設施
 

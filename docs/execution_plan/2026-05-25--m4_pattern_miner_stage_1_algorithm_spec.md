@@ -52,6 +52,12 @@ hardware refs:
 - I-4: Event-window N ≥ 30 硬 gate;不足 → `status='exploratory'` + event-rate constrained flag
 - I-5: DRAFT writeback **不** trigger live order (per 16 原則 #7 學習 ≠ live);**不** auto-promote past `'preregistered'`
 
+**Implementation amendment 2026-05-31 (source branch `feature/m4-stage1-production-draft-runner`)**:
+- `helper_scripts/m4/pattern_miner_stage_1.py --no-dry-run` now supports the 4-PG-source production read/compute path; token unlocks remain a Sprint 3+ fail-loud stub.
+- DRAFT writeback remains fail-closed unless the caller explicitly passes `--enable-writeback` and one real `decision_lease_draft_id` UUID per row. The old `GovernanceHubInterface` random-UUID stub is not accepted for production writes.
+- V100 `learning.hypotheses.status` does **not** include `exploratory`; current executable contract treats `exploratory` as an analysis lane and maps it to PG status `draft`. Only `draft` / `preregistered` may be passed into `draft_writer.build_writeback_payload`.
+- Any pseudo-SQL below that references `m4_attribute_*` columns or direct `status='exploratory'` is superseded by the empirical V100+V103 writer contract in `helper_scripts/m4/draft_writer.py` and `helper_scripts/m4/stage1_production_runner.py`.
+
 **Out of scope** (本 spec 不寫):
 - Stage 2 cross-sectional clustering (Sprint 8)
 - M9 A/B integration (Sprint 6-7)

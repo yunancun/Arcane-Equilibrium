@@ -511,10 +511,10 @@ def test_determine_status_graveyard_flag_does_not_block():
 
 
 def test_is_promotable_whitelist():
-    """不變量 I-5：M4 只可寫 draft/exploratory/preregistered。"""
+    """不變量 I-5：M4 只可寫 V100 PG status draft/preregistered。"""
     assert is_promotable("draft")
-    assert is_promotable("exploratory")
     assert is_promotable("preregistered")
+    assert not is_promotable("exploratory")  # analysis lane, not PG enum
     assert not is_promotable("live")
     assert not is_promotable("promoted")
     assert not is_promotable("rejected")
@@ -670,6 +670,14 @@ def test_governance_hub_lease_type_is_m4_draft_writeback():
 def test_governance_hub_lease_ttl_max_5_min():
     """不變量：lease TTL <= 5 min（短 lease 避過長持有）。"""
     assert GovernanceHubInterface.DEFAULT_LEASE_TTL_SECONDS <= 300
+
+
+def test_governance_hub_placeholder_acquire_fails_closed():
+    """未接 production IPC 前不可回 random UUID 假裝 lease。"""
+    import pytest
+
+    with pytest.raises(NotImplementedError, match="production IPC"):
+        GovernanceHubInterface().acquire_lease()
 
 
 # =============================================================================

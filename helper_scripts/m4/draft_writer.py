@@ -27,7 +27,8 @@ Schema 對齊（W1-C Round 3 empirical PG reflect 2026-05-25 — `\\d learning.h
 
 不變量（per W1-B spec §0 I-5 + 16 原則 #7）：
    - DRAFT writeback 不 trigger live order
-   - 不 auto-promote past 'preregistered'（status ∈ {'draft', 'exploratory', 'preregistered'}）
+   - 不 auto-promote past 'preregistered'（PG status ∈ {'draft', 'preregistered'}；
+     analysis lane 'exploratory' 由 caller 映射成 PG 'draft'）
    - hypothesis_source_module 必顯式 'M4_AUTO'（不依 DEFAULT 'OPERATOR'）
    - leakage_scan_pass 必顯式設（per §3.3 結果），DEFAULT FALSE fail-closed
    - decision_lease_draft_id 必 backref Lease ID（per §9.5 audit chain）
@@ -101,7 +102,7 @@ class DraftWritebackPayload:
        pre_reg_ts                -- V100 base TIMESTAMPTZ NOT NULL（M4 用 created_at 同值；
                                     pre-registration time == DRAFT writeback time）
        pre_reg_hash              -- V100 base TEXT NOT NULL（SHA-256 of spec params canonical JSON）
-       status                    -- V100 base TEXT NOT NULL CHECK 11 enum；M4 限 {draft,exploratory,preregistered}
+       status                    -- V100 base TEXT NOT NULL CHECK 11 enum；M4 限 {draft,preregistered}
        engine_mode               -- V100 base TEXT NOT NULL CHECK 4 enum；M4 限 {live,live_demo}
        n_observations            -- → min_sample_size INTEGER（V100 base optional；
                                     per W1-A §7.3 attribute_n mapping）
@@ -115,7 +116,7 @@ class DraftWritebackPayload:
        cowork_review_status      -- V103 EXTEND TEXT；M4 限 'NONE'（Y1 不啟 Cowork review）
 
     不變量：
-       - status ∈ {'draft', 'exploratory', 'preregistered'}
+       - status ∈ {'draft', 'preregistered'}；不可直接寫 analysis lane 'exploratory'
        - engine_mode ∈ {'live', 'live_demo'}（per CLAUDE.md §七）
        - decision_lease_draft_id 不可 NULL（per audit chain）
        - leakage_scan_pass 不可 NULL（DEFAULT FALSE per V103 EXTEND fail-closed）
@@ -129,7 +130,7 @@ class DraftWritebackPayload:
     strategy_name: str
     pre_reg_ts: datetime
     pre_reg_hash: str
-    status: str  # 'draft' / 'exploratory' / 'preregistered'
+    status: str  # 'draft' / 'preregistered'
     engine_mode: str  # 'live' / 'live_demo'
     n_observations: int
     leakage_scan_pass: bool
@@ -235,7 +236,7 @@ def build_writeback_payload(
         n_observations: 觀察樣本量（→ min_sample_size，W1-A §7.3 attribute_n mapping）
         raw_p_value: 原始 p-value（用於 bonferroni_corrected_p ≤ 1 clamp + audit log）
         cohens_d: Cohen's d effect size（→ replicability_score composite）
-        status_candidate: 'draft' / 'exploratory' / 'preregistered'（白名單檢查）
+        status_candidate: 'draft' / 'preregistered'（V100 PG enum 白名單檢查）
         subperiod_pass: sub-period stability boolean（→ replicability_score composite）
         graveyard_flag: 圖庫匹配警告（warning only，不寫 PG）
         silhouette: cluster silhouette（→ replicability_score composite）
@@ -247,11 +248,13 @@ def build_writeback_payload(
        ValueError: status_candidate 不在白名單；或 decision_lease_draft_id 為 None；
            或 engine_mode 不在 IN ('live','live_demo')
     """
-    # 不變量：M4 不可寫 'live' / 'promoted' / 'rejected'
+    # 不變量：M4 不可寫 'live' / 'promoted' / 'rejected'，也不可直接寫
+    # analysis lane 'exploratory'（V100 CHECK enum 不含該值）。
     # (per 16 原則 #7 + AMD-2026-05-21-01 protected scope (a)).
-    if status_candidate not in ("draft", "exploratory", "preregistered"):
+    if status_candidate not in ("draft", "preregistered"):
         raise ValueError(
-            f"M4 DRAFT writeback 不能 promote past 'preregistered'，"
+            f"M4 DRAFT writeback status 必須是 V100 PG enum 中的 'draft' 或 "
+            f"'preregistered'，"
             f"got status_candidate='{status_candidate}'"
         )
     if decision_lease_draft_id is None:
@@ -359,11 +362,11 @@ def build_audit_metadata(payload: DraftWritebackPayload) -> dict:
     }
 
 
-# Decision Lease 介面 stub — Sprint 2 末週由 W2-D MIT 接 GovernanceHub IPC。
-# 為什麼用 stub：Mac scaffold 階段不能呼 Linux runtime GovernanceHub；
-# 真實 lease acquire/release 走 ai_service.py IPC（per W1-B spec §5.2）。
+# Decision Lease 介面 placeholder — Sprint 2 末週由 W2-D MIT 接 GovernanceHub IPC。
+# 為什麼 fail-closed：Mac scaffold 階段不能呼 Linux runtime GovernanceHub；
+# 隨機 UUID 不能當 production Decision Lease audit proof。
 class GovernanceHubInterface:
-    """GovernanceHub Decision Lease 介面 — Sprint 2 scaffold 階段 stub。
+    """GovernanceHub Decision Lease 介面 — 未 wire 前 fail-closed。
 
     Sprint 3 接 production：用 helper_scripts.lib.ipc_client 連 ai_service.py
     JSON-RPC 2.0 over Unix domain socket（per srv/CLAUDE.md §六 + ipc 規範）。
@@ -378,12 +381,17 @@ class GovernanceHubInterface:
     DEFAULT_LEASE_TTL_SECONDS: int = 300  # 5 min
 
     def acquire_lease(self, actor: str = "m4_pattern_miner") -> uuid.UUID:
-        """Acquire DRAFT writeback lease（per W1-B spec §4.1）。
+        """Acquire DRAFT writeback lease（per W1-B spec §4.1）.
 
-        scaffold 階段 stub 回 random UUID；production wire-up 走 IPC。
+        Production IPC is not implemented in this interface yet. Callers must pass
+        pre-acquired real lease UUIDs into the Stage 1 runner instead of using a
+        synthetic UUID.
         """
-        # Scaffold 階段：local UUID — production 接 ai_service.py 後改 IPC call。
-        return uuid.uuid4()
+        del actor
+        raise NotImplementedError(
+            "GovernanceHubInterface.acquire_lease is not wired to production IPC; "
+            "pass a real decision_lease_draft_id UUID to the Stage 1 runner"
+        )
 
     def release_lease(self, lease_id: uuid.UUID, outcome: str = "SUCCESS") -> None:
         """Release lease（per W1-B spec §4.1）。

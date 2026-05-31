@@ -438,6 +438,21 @@ def test_draft_writer_engine_mode_validation_blocks_paper():
         )
 
 
+def test_draft_writer_rejects_exploratory_pg_status():
+    """analysis lane exploratory 不可直接寫 learning.hypotheses.status。"""
+    import uuid as uuid_mod
+
+    with pytest.raises(ValueError, match="draft.*preregistered"):
+        build_writeback_payload(
+            strategy_name="grid",
+            n_observations=100,
+            raw_p_value=0.5,
+            cohens_d=0.0,
+            status_candidate="exploratory",
+            decision_lease_draft_id=uuid_mod.uuid4(),
+        )
+
+
 def test_draft_writer_replicability_score_composite_range():
     """replicability_score composite 必在 [0,1] (V103 EXTEND CHECK constraint)。"""
     import uuid as uuid_mod
@@ -464,7 +479,7 @@ def test_draft_writer_replicability_score_composite_range():
         n_observations=100,
         raw_p_value=0.5,
         cohens_d=0.0,
-        status_candidate="exploratory",
+        status_candidate="draft",
         decision_lease_draft_id=uuid_mod.uuid4(),
         subperiod_pass=False,
         silhouette=0.0,
@@ -483,7 +498,7 @@ def test_draft_writer_bonferroni_p_clamped_to_unit_interval():
         n_observations=100,
         raw_p_value=2.5,
         cohens_d=0.5,
-        status_candidate="exploratory",
+        status_candidate="draft",
         decision_lease_draft_id=uuid_mod.uuid4(),
     )
     assert payload_over.bonferroni_corrected_p == 1.0
@@ -494,7 +509,7 @@ def test_draft_writer_bonferroni_p_clamped_to_unit_interval():
         n_observations=100,
         raw_p_value=-0.1,
         cohens_d=0.5,
-        status_candidate="exploratory",
+        status_candidate="draft",
         decision_lease_draft_id=uuid_mod.uuid4(),
     )
     assert payload_neg.bonferroni_corrected_p == 0.0
