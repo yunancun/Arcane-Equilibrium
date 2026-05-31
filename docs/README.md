@@ -994,6 +994,7 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 | `2026-04-11--3e_arch_phase_g_reaudit.md` | ★★ 3E-ARCH Phase G 重審：9/9 PASS — 0 BLOCKER |
 | `2026-04-12--full_program_chain_audit.md` | ★★★★ 全程序鏈審計總報告：12 角色合併 · 58 findings（8 P0 · 17 P1 · 28 P2 · 5 P3） |
 | `2026-04-12--full_audit_fix_plan_pm_confirmed.md` | ★★★ PM 確認修復計劃：P0~P3 分級修復排期 + PM 簽核 |
+| `2026-05-31--funding_short_v2_structural_infeasibility.md` | ★★ A1 funding_short_v2 修復核驗（f7271405 三程序 bug 屬實且修對）+ 結構性可行性審計：Bybit 正側 funding 硬上限 +10.9% APR < 策略 30% 入場門檻 → 結構性 NO-GO 永久（自抓 Bybit API + MIT PG 驗證） |
 
 ### KNOWN_ISSUES.md
 
