@@ -18,7 +18,8 @@ CLI usage：
 不變量：
    - --dry-run 不連 PG / 不寫 PG（per W1-B spec AC-S2-B-2）
    - --no-dry-run 會讀 PG source；DRAFT writeback 必須額外帶 --enable-writeback
-     且每 row 提供一個真實 decision_lease_draft_id UUID
+     且每 row 提供一個真實 decision_lease_draft_id UUID，或顯式 opt-in
+     `--acquire-governance-leases` 經 GovernanceHub IPC 取 lease
    - Sprint 2 cron 預設 disabled（per W1-B spec §12 dispatch checklist）
 
 Mac scaffold 階段：本 entry 在 Mac 上跑 --dry-run 不會連 PG；production 路徑
@@ -48,6 +49,7 @@ def run_stage_1(
     conn: Any | None = None,
     enable_writeback: bool = False,
     decision_lease_draft_ids: tuple[uuid.UUID | str, ...] = (),
+    acquire_governance_leases: bool = False,
     max_drafts: int = 3,
     engine_mode: str = "live_demo",
 ) -> dict:
@@ -112,7 +114,21 @@ def run_stage_1(
         conn = opened_conn
 
     try:
-        from helper_scripts.m4.stage1_production_runner import run_production_stage1
+        from helper_scripts.m4.stage1_production_runner import (
+            GovernanceHubDecisionLeaseProvider,
+            run_production_stage1,
+        )
+
+        if acquire_governance_leases and decision_lease_draft_ids:
+            raise ValueError(
+                "use either --acquire-governance-leases or "
+                "--decision-lease-draft-id, not both"
+            )
+        lease_provider = (
+            GovernanceHubDecisionLeaseProvider()
+            if acquire_governance_leases
+            else None
+        )
 
         summary = run_production_stage1(
             conn=conn,
@@ -121,6 +137,7 @@ def run_stage_1(
             max_drafts=max_drafts,
             enable_writeback=enable_writeback,
             decision_lease_draft_ids=decision_lease_draft_ids,
+            lease_provider=lease_provider,
             engine_mode=engine_mode,
         )
         logger.info("M4 Stage 1 complete: %s", summary)
@@ -178,13 +195,18 @@ def main() -> int:
     parser.add_argument(
         "--enable-writeback",
         action="store_true",
-        help="允許 INSERT learning.hypotheses；必須提供每 row 一個 Decision Lease UUID",
+        help="允許 INSERT learning.hypotheses；必須提供每 row 一個 Decision Lease UUID 或啟用 GovernanceHub lease 取得",
     )
     parser.add_argument(
         "--decision-lease-draft-id",
         action="append",
         default=[],
         help="預先取得的 Decision Lease UUID；writeback 每個 DRAFT row 需要一個",
+    )
+    parser.add_argument(
+        "--acquire-governance-leases",
+        action="store_true",
+        help="writeback 時經 GovernanceHub IPC 取得 Decision Lease；非 UUID-compatible lease 會 fail-closed 不 INSERT",
     )
     parser.add_argument(
         "--max-drafts",
@@ -237,6 +259,7 @@ def main() -> int:
             lookback_days=args.lookback_days,
             enable_writeback=args.enable_writeback,
             decision_lease_draft_ids=decision_lease_ids,
+            acquire_governance_leases=args.acquire_governance_leases,
             max_drafts=args.max_drafts,
             engine_mode=args.engine_mode,
         )

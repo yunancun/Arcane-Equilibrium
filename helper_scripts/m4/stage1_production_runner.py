@@ -4,7 +4,8 @@ M4 Stage 1 production runner core.
 This module keeps the non-dry-run path testable without opening a database
 connection at import time. It reads the existing source-loader SQL through an
 injected connection, computes a small leak-free candidate set, and writes DRAFT
-rows only when the caller provides explicit Decision Lease UUIDs.
+rows only when the caller provides explicit Decision Lease UUIDs or explicitly
+opts into GovernanceHub lease acquisition.
 """
 from __future__ import annotations
 
@@ -16,7 +17,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Iterable, Iterator, Mapping, Sequence
+from typing import Any, Callable, Iterable, Iterator, Mapping, Protocol, Sequence
 
 from helper_scripts.m4.algorithms.cross_correlation import corr_to_p_value, pearson_corr
 from helper_scripts.m4.algorithms.effect_size import cohens_d
@@ -116,6 +117,109 @@ class StaticLeaseProvider:
         self.released.append((lease_id, outcome))
 
 
+class Stage1LeaseProvider(Protocol):
+    """Minimal lease provider contract used by M4 writeback."""
+
+    def require_capacity(self, required: int) -> None:
+        ...
+
+    def acquire_lease(self, candidate: Stage1Candidate) -> uuid.UUID:
+        ...
+
+    def release_lease(self, lease_id: uuid.UUID, outcome: str) -> None:
+        ...
+
+
+class GovernanceHubDecisionLeaseProvider:
+    """Acquire M4 DRAFT leases through the GovernanceHub IPC bridge.
+
+    The current V103 column type is UUID, while the Rust/Python Decision Lease
+    state machines usually emit string IDs like ``lease:abcd``. This provider
+    therefore accepts only UUID-compatible active leases. A non-UUID lease is
+    immediately released as failed and the writeback is refused before INSERT.
+    """
+
+    DEFAULT_SCOPE = "M4_DRAFT_WRITEBACK"
+    DEFAULT_TTL_SECONDS = 300.0
+    DEFAULT_PROFILE = "Production"
+    DEFAULT_SOURCE_STAGE = "m4_stage1_pattern_miner"
+
+    def __init__(
+        self,
+        *,
+        acquire_func: Callable[..., str | None] | None = None,
+        release_func: Callable[..., bool] | None = None,
+        scope: str = DEFAULT_SCOPE,
+        ttl_seconds: float = DEFAULT_TTL_SECONDS,
+        profile: str = DEFAULT_PROFILE,
+        source_stage: str = DEFAULT_SOURCE_STAGE,
+        timeout_seconds: float = 5.0,
+    ) -> None:
+        self._acquire_func = acquire_func or _governance_bridge_acquire
+        self._release_func = release_func or _governance_bridge_release
+        self.scope = scope
+        self.ttl_seconds = ttl_seconds
+        self.profile = profile
+        self.source_stage = source_stage
+        self.timeout_seconds = timeout_seconds
+        self._raw_by_uuid: dict[uuid.UUID, str] = {}
+        self.released: list[tuple[uuid.UUID, str, bool]] = []
+        self.raw_released: list[tuple[str, str, bool]] = []
+
+    def require_capacity(self, required: int) -> None:
+        if required < 0:
+            raise ValueError("required must be >= 0")
+
+    def acquire_lease(self, candidate: Stage1Candidate) -> uuid.UUID:
+        intent_id = _candidate_lease_intent_id(candidate)
+        raw_lease_id = self._acquire_func(
+            intent_id=intent_id,
+            scope=self.scope,
+            ttl_seconds=self.ttl_seconds,
+            profile=self.profile,
+            source_stage=self.source_stage,
+            timeout_seconds=self.timeout_seconds,
+        )
+        if not raw_lease_id:
+            raise RuntimeError(
+                "M4 writeback refused: GovernanceHub did not return an active "
+                "Decision Lease"
+            )
+
+        raw_value = str(raw_lease_id)
+        try:
+            lease_uuid = _parse_uuid(raw_value)
+        except (TypeError, ValueError) as exc:
+            self._release_raw(raw_value, "FAILED")
+            raise RuntimeError(
+                "M4 writeback refused: GovernanceHub lease id is not "
+                "UUID-compatible with learning.hypotheses.decision_lease_draft_id"
+            ) from exc
+
+        self._raw_by_uuid[lease_uuid] = raw_value
+        return lease_uuid
+
+    def release_lease(self, lease_id: uuid.UUID, outcome: str) -> None:
+        raw_lease_id = self._raw_by_uuid.pop(lease_id, str(lease_id))
+        ok = self._release_raw(raw_lease_id, outcome)
+        self.released.append((lease_id, outcome, ok))
+
+    def _release_raw(self, raw_lease_id: str, outcome: str) -> bool:
+        consumed = outcome == "SUCCESS"
+        try:
+            ok = bool(
+                self._release_func(
+                    lease_id=raw_lease_id,
+                    consumed=consumed,
+                    timeout_seconds=self.timeout_seconds,
+                )
+            )
+        except Exception:
+            ok = False
+        self.raw_released.append((raw_lease_id, outcome, ok))
+        return ok
+
+
 def map_analysis_lane_to_pg_status(analysis_lane: str) -> str:
     """Map M4 analysis lanes to the V100-compatible PG status enum."""
     if analysis_lane == "preregistered":
@@ -132,6 +236,7 @@ def run_production_stage1(
     max_drafts: int = 3,
     enable_writeback: bool = False,
     decision_lease_draft_ids: Iterable[uuid.UUID | str] = (),
+    lease_provider: Stage1LeaseProvider | None = None,
     engine_mode: str = "live_demo",
 ) -> dict[str, Any]:
     """Execute the non-dry-run Stage 1 path against an injected PG connection."""
@@ -147,9 +252,14 @@ def run_production_stage1(
     )
     selected = rank_candidates(candidates)[:max_drafts]
     inserted: list[dict[str, Any]] = []
+    static_lease_ids = tuple(decision_lease_draft_ids)
 
     if enable_writeback and selected:
-        provider = StaticLeaseProvider(decision_lease_draft_ids)
+        if lease_provider is not None and static_lease_ids:
+            raise ValueError(
+                "provide either decision_lease_draft_ids or lease_provider, not both"
+            )
+        provider = lease_provider or StaticLeaseProvider(static_lease_ids)
         provider.require_capacity(len(selected))
         inserted = write_candidates_to_pg(
             conn=conn,
@@ -274,7 +384,7 @@ def rank_candidates(candidates: Sequence[Stage1Candidate]) -> list[Stage1Candida
 def write_candidates_to_pg(
     conn: Any,
     candidates: Sequence[Stage1Candidate],
-    lease_provider: StaticLeaseProvider,
+    lease_provider: Stage1LeaseProvider,
     engine_mode: str,
 ) -> list[dict[str, Any]]:
     """Write selected candidates into learning.hypotheses inside one transaction."""
@@ -687,6 +797,37 @@ def _parse_uuid(value: uuid.UUID | str) -> uuid.UUID:
     if isinstance(value, uuid.UUID):
         return value
     return uuid.UUID(str(value))
+
+
+def _candidate_lease_intent_id(candidate: Stage1Candidate) -> str:
+    payload = "|".join(
+        [
+            candidate.strategy_name,
+            candidate.symbol,
+            candidate.pattern_type,
+            str(candidate.n_observations),
+            f"{candidate.raw_p_value:.12g}",
+            f"{candidate.score:.12g}",
+            datetime.now(tz=timezone.utc).isoformat(),
+        ]
+    )
+    return f"m4_stage1:{uuid.uuid5(uuid.NAMESPACE_URL, payload)}"
+
+
+def _governance_bridge_acquire(**kwargs: Any) -> str | None:
+    from program_code.exchange_connectors.bybit_connector.control_api_v1.app.governance_lease_bridge import (
+        acquire_lease_via_ipc,
+    )
+
+    return acquire_lease_via_ipc(**kwargs)
+
+
+def _governance_bridge_release(**kwargs: Any) -> bool:
+    from program_code.exchange_connectors.bybit_connector.control_api_v1.app.governance_lease_bridge import (
+        release_lease_via_ipc,
+    )
+
+    return bool(release_lease_via_ipc(**kwargs))
 
 
 def _extract_hypothesis_id(row: Any) -> Any:
