@@ -1,7 +1,7 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-**版本** v97 ｜ **日期** 2026-05-31 ｜ **source HEAD** v97 doc checkpoint after AEG-S0 PM-local contract draft；runtime unchanged from latest v87 deploy snapshot.
-**當前主線**：P0-EDGE-1 Alpha-Edge Regime Evidence Governance。AEG-S0 PM-local contract draft 已落地；下一步是 formal PA/MIT/QC/BB/TW/CC review。E1 backfill / DB retention / endpoint IMPL / alpha scoring 全部 blocked until reviewed AEG-S0 passes.
+**版本** v99 ｜ **日期** 2026-05-31 ｜ **source HEAD** ca4c569c base + v99 docs closure batch；runtime unchanged from latest v87 deploy snapshot.
+**當前主線**：P0-EDGE-1 Alpha-Edge Regime Evidence Governance。AEG-S0 formal review PASS after PA/MIT/QC/BB/TW/CC re-review. AEG-S1 Foundation is limited-open for storage/provenance design, PIT universe builder, and side-evidence artifact only. E1 backfill writer / DB retention mutation / endpoint ingestion / collector IMPL / alpha scoring remain blocked until separately scoped.
 **v96 audit note**：V5.8 設計未被刪除；它作為長期 13-module autonomy architecture 保留，active TODO 只保留可派工 posture。詳見 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--v58_design_progress_preservation_audit.md`。
 **歷史詳情**：version log `docs/CLAUDE_CHANGELOG.md`；v94 prune audit `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--todo_v94_prune_audit.md`；pre-cleanup archive `docs/archive/2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`；older v92 archive `docs/archive/2026-05-31--todo_v92_archive.md`。
 
@@ -11,7 +11,7 @@
 
 | Area | Current state | Next action |
 |---|---|---|
-| Source sync | Mac `main` is the active source branch; v96 is docs/TODO audit only. | Commit + push, then fast-forward Linux source. |
+| Source sync | Mac `main` is the active source branch; this v99 closure is docs/governance only on top of `ca4c569c`. Linux fast-forward to the post-v99 docs commit is not verified in this batch. | Commit + push v99 docs/governance closure; no runtime sync unless operator requests it. |
 | Runtime | Latest verified deploy remains v87 2026-05-31: Linux engine/API/watchdog healthy; engine PID 968350 in archived snapshot; healthz 200; no runtime rebuild in AEG governance/TODO batches. | No deploy in this batch. Refresh only before runtime-affecting work. |
 | Runtime caveat | system-level `openclaw-engine.service` / system watchdog install still sudo/operator-gated; current protection is user watchdog + linger + manual engine process. | Operator schedules system-level install window. |
 | Passive health residual | `[48] replay_manifest_registry_growth`, `[74] close_maker_reject_samples`, `[56] live_pipeline_active` remain OPS residual / evidence queue; not OPS-1 reversal. | Keep explicit in OPS queue; do not mark all-green until resolved or accepted. |
@@ -23,7 +23,7 @@
 
 | ID | Status | Owner chain | Acceptance / Gate | Next action |
 |---|---|---|---|---|
-| `P0-EDGE-1` | 🔴 ACTIVE | PM -> PA/QC/MIT/BB -> E1 after gate | Closure requires accepted Alpha-Edge evidence: >=3 alpha-bearing candidates meeting net/cost/statistical gates, or another accepted P0-EDGE path. Bull-only/stale-only/survivor-only/narrative-only positives cannot promote. | Review PM-local `AEG-S0` contract draft; no E1 backfill until formal review passes. |
+| `P0-EDGE-1` | 🔴 ACTIVE | PM -> PA/QC/MIT/BB -> E1 after gate | Closure requires accepted Alpha-Edge evidence: >=3 alpha-bearing candidates meeting net/cost/statistical gates, or another accepted P0-EDGE path. Bull-only/stale-only/survivor-only/narrative-only positives cannot promote. | Run limited AEG-S1 Foundation planning/design only; no backfill writer or scoring. |
 | `P0-LG-3` | 🟡 SOURCE INTEGRATED / runtime not deployed | PM -> E2 -> E4 -> QA -> operator deploy gate | Review integrated commits `deb3f3af..0802d52b`; V104 checksum discipline; Linux migration dry-run/AUTO_MIGRATE plan; supervised_live tests green. | Run review chain before any deploy/rebuild. |
 | `P0-OPS residual` | 🟢 OPS-1 CLOSED / residual OP-gated | Operator + PM/E1/MIT as needed | Restore drill, system-level units, live-auth renewal, replay manifest feed, close-maker max-pending evidence. | Wait for operator hand-action windows; keep residual rows visible below. |
 
@@ -47,22 +47,29 @@
 - Trend/regime labels must be local, leak-free, point-in-time, and fixed before alpha scoring.
 - News/X/Reddit agents are secondary side evidence only; the promotion core remains mathematical.
 
-**Current contract artifact**: `docs/execution_plan/2026-05-31--aeg_s0_contracts.md` is a PM-local draft covering AEG-S0-W0-S1..S4. It is not an independent PA/MIT/QC/BB/TW/CC sign-off. Next executable action is formal role review; E1 remains blocked.
+**Current contract artifact**: `docs/execution_plan/2026-05-31--aeg_s0_contracts.md` covers AEG-S0-W0-S1..S4. PA/MIT/QC/BB/TW/CC re-review PASS; PM closure is `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--aeg_s0_formal_review_closure.md`. Next executable action is limited AEG-S1 Foundation scope below; E1 backfill/scoring remains blocked.
 
 ### §2.1 NOW: AEG-S0 Contract Sprint
 
 | Session | Owner chain | Output | Acceptance |
 |---|---|---|---|
-| `AEG-S0-W0-S1` Evidence Storage Contract | PM -> PA+MIT -> QC | PM-local draft done in `2026-05-31--aeg_s0_contracts.md`; role review pending | Includes `run_id`, `git_sha`, `session_id`, window, symbols, universe, cost model, endpoint list, classifier version; excludes 14d `panel.*` as 18mo history. |
-| `AEG-S0-W0-S2` Regime Classifier Freeze | PM -> QC+PA -> MIT | PM-local draft done; role review pending | Rules fixed before alpha scoring; closed bars only; all features lagged / `shift(1)`. |
-| `AEG-S0-W0-S3` Bybit Endpoint Contract | PM -> MIT+BB -> PA | PM-local draft done; role review pending | Covers pagination, retention, rate limits, client gaps, and BB review for kline/funding/OI/long-short/mark-index-premium/ticker/orderbook/IV. |
-| `AEG-S0-W0-S4` TODO Archive Plan | PM -> TW/CC -> PM | PM-local draft done; role review pending | Active TODO keeps next actions; historical evidence stays in reports/archive. |
+| `AEG-S0-W0-S1` Evidence Storage Contract | PM -> PA+MIT -> QC | PASS after re-review | Includes `run_id`, `git_sha`, `git_dirty`, child artifact digests, window, PIT universe, cost model, endpoint list, classifier version; excludes 14d `panel.*` as 18mo history. |
+| `AEG-S0-W0-S2` Regime Classifier Freeze | PM -> QC+PA -> MIT | PASS after re-review | Rules fixed before alpha scoring; closed bars only; all features lagged / `shift(1)`; `durable-alpha` requires non-bull independent support. |
+| `AEG-S0-W0-S3` Bybit Endpoint Contract | PM -> MIT+BB -> PA | PASS after re-review | Covers pagination, retention, rate limits, strict parser failures, public-only client isolation, and BB review for kline/funding/OI/long-short/mark-index-premium/ticker/orderbook/IV. |
+| `AEG-S0-W0-S4` TODO Archive Plan | PM -> TW/CC -> PM | PASS after re-review | Active TODO keeps next actions; historical evidence stays in reports/archive. |
 
 Formal review parallelism: 4 sessions can run together after operator/tool authorization; project ceiling remains 7.
 
-### §2.2 E1 Hard Block
+### §2.2 AEG-S1 Limited Open / E1 Hard Block
 
-E1 must not start any of the following before AEG-S0 passes and PM opens AEG-S1:
+Allowed now after AEG-S0 PASS:
+
+- `AEG-S1-W1-S1` storage/retention/provenance design and MIT sizing package.
+- `AEG-S1-W1-S3` PIT universe builder design / scoped implementation prep.
+- `AEG-S1-W1-S4` side-evidence artifact contract/design.
+- Read-only sizing, client-gap design, and migration/change-control drafting.
+
+Still blocked until separately scoped and reviewed:
 
 - Bybit historical backfill writer.
 - `market.klines` retention/runtime PG mutation.
@@ -71,7 +78,8 @@ E1 must not start any of the following before AEG-S0 passes and PM opens AEG-S1:
 - listing-capture collector IMPL.
 - alpha scoring / promotion report.
 
-Allowed before AEG-S0 pass: read-only probes and sizing estimates only.
+Allowed work must remain docs/design/read-only unless PM opens a specific S1
+implementation task with its own owner chain.
 
 ### §2.3 Preserved Foundations
 
@@ -79,7 +87,7 @@ AEG is not a replacement of the prior design. It integrates and constrains these
 
 | Foundation | Use under AEG |
 |---|---|
-| `market.klines` + approved 1095d retention | Primary OHLCV source after safe retention/backfill gate. |
+| `market.klines` + proposed/gated 1095d retention path | Primary OHLCV source only after safe retention/backfill gate; current V006 reality is 365d until reviewed mutation lands. |
 | `market.symbol_universe_snapshots` | PIT survivorship control; current-survivor-only universe is rejected. |
 | `market.funding_rates`, `market.open_interest`, `market.long_short_ratio` | Regime/side evidence inputs; retention/storage gaps must be solved before 18mo use. |
 | `market.regime_snapshots`, `market.regime_transitions` | Prior regime storage lineage; AEG classifier must version and not tune on candidates. |
@@ -92,7 +100,7 @@ AEG is not a replacement of the prior design. It integrates and constrains these
 
 | Sprint | Purpose | Parallelism |
 |---|---|---|
-| `AEG-S1` Foundation | retention + alpha-history storage; public Bybit backfill writer; PIT universe builder; side-evidence artifact | S1-W1-S1/S3/S4 parallel; backfill writer waits for storage + endpoint contracts |
+| `AEG-S1` Foundation | retention + alpha-history storage; public Bybit backfill writer; PIT universe builder; side-evidence artifact | LIMITED OPEN: S1-W1-S1/S3/S4 planning/design may proceed; backfill writer waits for storage + endpoint contracts |
 | `AEG-S2` Evidence automation | regime label runner; breadth ladder runner; robustness matrix builder | regime + breadth parallel; matrix waits for both |
 | `AEG-S3` Alpha research | TSMOM, cross-sectional momentum, S4/Sx falsification overlay, S2 PreLaunch probe | up to 4 parallel |
 | `AEG-S4` Decision | CP-2 candidate verdict and operator decision | serial PM -> QC/MIT -> PA -> Operator |
@@ -103,7 +111,7 @@ AEG is not a replacement of the prior design. It integrates and constrains these
 
 | Workflow | State | Next action |
 |---|---|---|
-| `Alpha-Edge / AEG` | ACTIVE mainline | Formal review of `AEG-S0` PM-local contract draft; no E1 implementation before PM gate. |
+| `Alpha-Edge / AEG` | ACTIVE mainline | Limited AEG-S1 Foundation planning/design; no backfill writer or scoring before PM opens a scoped S1 task. |
 | `Workflow B` ADR-0046 basis observation/execution split | ACTIVE but not Alpha-blocking | PA design -> E1 Rust -> MIT V117 -> E2 -> E4 -> BB -> QA. |
 | `Earn Wave C` | OPERATOR-GATED | OP-1 key refresh -> OP-2 Earn variant -> OP-3 first $100-200 USDT Flexible stake. |
 | `Layered Autonomy v2 Wave 5` | FROZEN active-IMPL per v92 D1 | Packet A+B runtime and TOTP source exist; Packet C core E4 green; runtime TOTP enrollment + engine integration wait until promotion gate. |

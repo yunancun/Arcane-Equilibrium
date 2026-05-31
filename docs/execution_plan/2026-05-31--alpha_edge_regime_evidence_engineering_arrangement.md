@@ -1,7 +1,7 @@
 # Alpha-Edge Regime Evidence Engineering Arrangement
 
 Date: 2026-05-31
-Status: **PM 2 APPROVED / AEG-S0 PM-LOCAL CONTRACT DRAFTED**
+Status: **PM 2 APPROVED / AEG-S0 FORMAL PASS / AEG-S1 FOUNDATION LIMITED-OPEN**
 Owner: PM -> PA/QC/MIT/BB -> E1 only after AEG-S0 contracts pass
 Scope: Alpha-history provenance, breadth automation, local trend/state classification, global regime robustness, side-evidence boundary.
 
@@ -11,16 +11,20 @@ S4 is no longer a standalone 2024 bull-data proof track. It is a global S1-Sx re
 
 Bull data is allowed, but must be labeled. Bybit market APIs are raw state inputs, not prediction. Trend/state labels are generated locally from leak-free, point-in-time features. News / X / Reddit / market-summary agents are secondary side evidence only.
 
-Direct E1 backfill is blocked until AEG-S0 contracts pass. PM-local contract
-draft is now `docs/execution_plan/2026-05-31--aeg_s0_contracts.md`; this is
-not a substitute for independent PA/MIT/QC/BB/TW/CC review.
+AEG-S0 contracts passed after PA/MIT/QC/BB/TW/CC re-review. Contract work lives
+in `docs/execution_plan/2026-05-31--aeg_s0_contracts.md`; PM closure is
+`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--aeg_s0_formal_review_closure.md`.
+S1 is limited-open only for Foundation scope. Direct E1 backfill, DB mutation,
+runtime deploy, collector IMPL, and alpha scoring remain blocked until their
+own scoped gates open.
 
 ## 1. AEG-S0 Contract Sprint（NOW）
 
 Purpose: freeze the contracts before implementation. No code, migration, DB, runtime, or backfill work.
 
 Current draft: `docs/execution_plan/2026-05-31--aeg_s0_contracts.md`.
-Formal pass still requires the owner-chain reviews below.
+Formal pass completed after owner-chain re-review. This section remains as the
+contract record.
 
 | Session | Owner chain | Output | Acceptance |
 |---|---|---|---|
@@ -44,11 +48,11 @@ E1 must not start:
 
 Allowed: read-only probes and sizing estimates only.
 
-## 3. AEG-S1 Foundation Sprint（二簽後）
+## 3. AEG-S1 Foundation Sprint（after AEG-S0 contracts pass）
 
 | Session | Owner chain | Dependency | Acceptance |
 |---|---|---|---|
-| `AEG-S1-W1-S1 Retention + Alpha-History Storage` | PM -> E1+MIT -> E2/E4 | `AEG-S0-W0-S1` | `market.klines` 1095d landed safely; funding/OI/long-short retention or dedicated research storage decided; rollback and verify plan has evidence. |
+| `AEG-S1-W1-S1 Retention + Alpha-History Storage` | PM -> E1+MIT -> E2/E4 | `AEG-S0-W0-S1` | `market.klines` retention/storage path decided and landed safely if chosen; funding/OI/long-short retention or dedicated research storage decided; rollback and verify plan has evidence. |
 | `AEG-S1-W1-S2 Public Bybit Backfill Writer` | PM -> E1+BB -> MIT -> E2/E4 | S1-W1-S1 + endpoint contract | Idempotent; fail-closed; closed candles only; `retCode != 0` creates no fabricated row; every run emits manifest, coverage, and provenance. |
 | `AEG-S1-W1-S3 Symbol Universe PIT Builder` | PM -> MIT -> PA | Storage contract | Uses `market.symbol_universe_snapshots`; includes active + delisted/closed; current-survivor-only universe is rejected. |
 | `AEG-S1-W1-S4 Side Evidence Artifact` | PM -> PA/E1 -> QC | Storage contract | News/X/Reddit context is linked to `run_id`, marked secondary, and excluded from promotion gates. |
@@ -88,4 +92,7 @@ Acceptance:
 
 ## 7. PM 2nd Sign-off
 
-PM second sign-off approves this arrangement and opens AEG-S0 only. It does not authorize E1 backfill, DB mutation, runtime deploy, collector IMPL, or promotion scoring.
+PM second sign-off approved this arrangement and opened AEG-S0 only. Subsequent
+PA/MIT/QC/BB/TW/CC re-review passed AEG-S0 and opens AEG-S1 Foundation in
+limited scope. This document still does not authorize E1 backfill, DB mutation,
+runtime deploy, collector IMPL, or promotion scoring.

@@ -1,5 +1,28 @@
 # PM Memory — 工作記憶
 
+## 2026-05-31 AEG-S0 Formal Closure Lesson
+
+- AEG-S0 PASS opens contracts, not data movement. Even after PA/MIT/QC/BB/TW/CC
+  re-review PASS, only Foundation planning/design scopes are open unless PM
+  explicitly scopes a concrete S1 implementation task.
+- Keep S1-W1-S2 backfill writer separate from S1-W1-S1 storage/provenance.
+  Passing the endpoint contract does not mean existing clients are safe for
+  ingestion; public-only facade, strict parser, pagination guards, coverage,
+  and manifest/provenance gates must land together.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--aeg_s0_formal_review_closure.md
+
+## 2026-05-31 AEG-S0 Role Review Lesson
+
+- Conditional-pass reviews are not closure. If every role says "conditional",
+  PM must convert must-fix items into concrete contract changes and keep E1
+  blocked until re-review passes.
+- Old specs can bypass new governance by stale executable status labels. When
+  AEG gates supersede an old ready-to-implement document, patch the old spec
+  header with an explicit gate override instead of relying on TODO alone.
+- For Alpha-Edge promotion, qualitative warnings are insufficient. Bull-only,
+  stale-only, survivor-only, narrative-only, low-coverage, or leak-prone
+  positives need machine-checkable verdict gates and final labels.
+
 ## 2026-05-31 AEG-S0 Contract Sprint PM-Local Lesson
 
 - AEG-S0 is a contract gate, not an implementation gate. A PM-local contract draft can clarify evidence storage, regime classifier, endpoint, and TODO archive rules, but it must not be reported as formal PA/MIT/QC/BB/TW/CC sign-off.

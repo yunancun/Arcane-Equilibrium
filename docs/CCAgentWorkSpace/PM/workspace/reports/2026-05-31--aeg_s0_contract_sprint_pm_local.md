@@ -51,7 +51,7 @@ the formal role review chain approves or amends the contracts.
 
 Local source files:
 
-- `TODO.md` v96
+- `TODO.md` v96 as input; output updated to TODO v97 in commit `ca4c569c`
 - `docs/adr/0047-alpha-edge-regime-evidence-governance.md`
 - `docs/governance_dev/amendments/2026-05-31--AMD-2026-05-31-01-alpha-edge-evidence-governance.md`
 - `docs/execution_plan/2026-05-31--alpha_edge_regime_evidence_engineering_arrangement.md`
