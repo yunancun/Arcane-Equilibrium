@@ -1,7 +1,19 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
-> 從 CLAUDE.md 遷出的 Wave/Sprint/Batch 歷史記錄。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-05-22（Sprint 1A-α..ζ + 1A-ε P1/P2 + 1B early IMPL + Sprint 2 pre-readiness + AMD-2026-05-21-01 v1/v2 commit chain backfill）
+> 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
+> 最後更新：2026-05-31（TODO v92+v93 version-increment 遷入 — PM cost-wall investigation + alpha-edge pivot；per todo-maintenance「masthead 不放增量敘事」原則）
+
+---
+
+## TODO Version-Increment Log
+
+> per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（§1 blockers / §2 banner / §4 module matrix / §6.1 alpha-edge 派工）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v93 增量（2026-05-31 PM 收尾）**：(1) **TODO 638→430 行歸檔**（已 CLOSED/DONE 明細 + v75-91 版本史 → `docs/archive/2026-05-31--todo_v92_archive.md`）。(2) **alpha-edge 4-track 工程安排整合進 §6.1**（PM 2 次簽收 PASS；SSOT `docs/execution_plan/2026-05-31--alpha_edge_research_execution_plan.md`；NOW 3 並行 session = S1-W1-S1 / S2-W0-S1 / S4-W0-S1）。(3) **治理更正**：平行 session `funding_short_v2_structural_infeasibility.md` §2.4「Bybit 正側 funding 結構封頂 +10.9% APR」被 BB 否證 = **regime-dormant 非結構 cap**（真 cap=`upperFundingRate` +547~2190% APR；+0.0001 是 IR floor；真問題=160% break-even 屬 QC 範疇）；erratum + Bybit 字典 + quant-strategy-design skill + `.codex/MEMORY` 已更。(4) **findings 匯報** `docs/audits/2026-05-31--p0_edge_cost_wall_investigation.md`。本輪全 read-only research + doc，無 code/runtime 改動。
+
+**v92 增量（2026-05-31 PM V5.8 audit + 成本牆 + alpha 重定向）**：PM 對照 V5.8 派 PA/QC/FA 三獨立審計 + MIT A1/oi_delta 診斷 + QC 成本牆分析。**Operator 三項戰略決策**：(D1) **凍結 autonomy 13 模組 active-IMPL**（M1/M2/M6/M8/M9 保留 DESIGN/schema/stub，不派 Rust IMPL），主力轉系統性 alpha-source 主線；解凍 gate = 首個 net-positive alpha-bearing candidate 達 stage0_ready（demo 7d avg_net>+5bps + Wilson lower>0 + n≥30 + leak-free grep + Stage0R green）；M7 decay detector 唯一例外（V116 spec done 但 **E1 IMPL 暫按住**——成本牆下無 alpha 可保護使其偏早）。(D2) **Sprint 4 走 LiveDemo 降級**（§10.5 選項 B；5-gate 已 4/5，缺 signed `authorization.json` = operator hand-action via `/auth/renew`）。(D3) **成本牆姿態 = 現有約束內走窄路、目標仍真盈利**。**關鍵發現（成本牆）**：alpha-source R-1a oi_delta cross-sectional = **reject 但失敗層次是「成本」非「資訊」**——訊號真實 leak-free（n=80393，as-of + shift(1) lag-1 對照 +1.96 vs +1.94bps 證實）但 gross 1.9-2.9bps ≪ Bybit VIP0 taker 往返 11-27bps → net −8~−20bps；A1 = NO-GO（>30% annualized funding 56d×25sym 觸發 **0 次**，max +10.95%/yr）；A2/A3 structural reject。**6 週 4 候選 + 4 textbook 全死於同一道成本牆**（edge 量級 1-3bps < 成本量級 11-27bps，結構性非參數；maker 需 fill≥60%+adverse<3.5，A2 實證 49% 不可達；VIP 對 $10k chicken-egg 鎖 VIP0）。**翻牆兩條路**：① 事件驅動大 move（listing pump fade，成本占比<5%）② 低 turnover 多日 perp trend/funding-tilt（demo 無 spot lending 殺 cash-and-carry，perp-only directional 活）。**alpha 重定向**：oi_delta 降級為 multi-factor ensemble feature（不當 standalone）；**R-2 REJECT btc_lead_lag 短持倉 → 重定向 listing pump-dump fade（首選 ~50-65%）+ funding-extreme directional（A1 改 funding percentile rank 連續訊號）**。**V### reconcile**：真實 `sql/migrations/` head=**V115**（非 V5.8 §9 起草時的 V098）；M7 用 free 的 **V116**；V117 留 ADR-0046；M5/M7/M12/M13 reserve 改 **V118-124**（doc cascade C-1..C-6 pending TW；已 applied SQL 內容不動，僅 doc-side note）。**本輪純 audit + 決策 + 記憶，無 code/runtime 改動**（R-1a/A1/oi_delta 診斷全 read-only PG）；三審計 + 成本牆報告 = sub-agent inline（建議落檔 QC/PA/Operator workspace）。M7 V116 spec：`docs/execution_plan/specs/2026-05-31--v116-m7-decay-detector-spec.md`。R-2 listing-fade 資料可行性診斷 dispatched。
+
+---
 
 ### Sprint 2 pre-readiness + Sprint 1A-ε P2 + Sprint 1B early IMPL + Sprint 1A-ζ Phase 3 — 2026-05-22
 
