@@ -21,6 +21,40 @@ or a second memory file.
 - stable project overview
 - architecture background that belongs in README/ADR/docs
 - agent personality or workflow rules that belong in memory
+- version-increment narratives (the per-version "vN 增量: …" change paragraphs) —
+  these belong in `docs/CLAUDE_CHANGELOG.md`, not the TODO header (see Header /
+  masthead)
+
+## Header / masthead
+
+The TODO header is a compact masthead, not a change log. Keep it to a few
+scannable lines:
+
+- current version number + date
+- source HEAD commit + a one-line runtime pointer (runtime detail lives in the
+  §0 health section, not the header)
+- a one-line current-mainline/posture pointer into the active sections (which
+  blocker is in §1, where the active dispatch queue is)
+- links: the version-increment changelog + the latest dated archive
+
+Version-increment narratives — the per-version "vN 增量: …" paragraphs
+describing what changed — do NOT live in the TODO header. They go to
+`docs/CLAUDE_CHANGELOG.md` ("TODO Version-Increment Log"; a dev-history
+changelog new sessions do not need to read). When bumping the TODO version:
+
+1. Append the new version's increment narrative to `docs/CLAUDE_CHANGELOG.md`
+   (newest-first).
+2. Keep the masthead to current version + pointers only — do not accumulate
+   increment paragraphs.
+3. Ensure the active STATE the increment describes is reflected in the
+   structured sections (§1 blockers / §2 banner / §4 matrix / §6 queue). The
+   increment is history; the structured sections are the source of active
+   state.
+
+Rationale: increment paragraphs crammed into the header are change-log
+narrative (which TODO does not own, per Scope), grow into a dense unreadable
+wall, and duplicate the structured sections. A masthead that fits in a few
+lines lets the next agent orient in seconds.
 
 ## Required shape
 
