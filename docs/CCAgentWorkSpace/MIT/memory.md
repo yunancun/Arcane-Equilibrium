@@ -1009,3 +1009,63 @@ MIT AUDIT DONE: docs/CCAgentWorkSpace/MIT/workspace/reports/2026-05-27--v104_sup
 5. latest-value cache：index_price 只在 ~1/8 frame 帶 → 跨 frame 保 last-known（對齊 funding_curve）；從未收過 index 的 sym 不入 cache
 6. V115 land 後 sqlx checksum：operator AUTO_MIGRATE 路徑正常 land（dry-run 未真 apply，max_migration 仍 114，無 hash drift 風險，與 V083/V084 手動 psql -f 場景不同）
 7. 無 IPC slot（spec §6.4 #5）；無 healthcheck 是 CLAUDE.md §七缺口 — E1 IMPL 時補 basis_panel freshness check
+
+## 2026-05-30 DB+ML foundation re-audit (Phase 2 PM cold audit) — frozen baseline 187704f6
+
+**Report**: `workspace/reports/2026-05-30--MIT--db_ml_foundation_audit.md` (+ Operator copy)
+**Verdict**: P0=0 / P1=0 / P2=2 (deferred-by-design) / P3=1 (mitigated). Prior v84 cold-audit remediation HELD.
+**ML stage (explicit)**: SHADOW/ADVISORY + DEMO-APPLY; live ML BLOCKED — unchanged & correct.
+
+**FRESH-CONFIRMED (direct runtime, durable facts)**:
+- **e9f01569 is the engine BINARY content SHA, NOT a git commit.** Proof: `ssh trade-core readlink
+  /proc/251791/exe` = `.../rust/target/release/openclaw-engine`; `sha256sum` of it = `e9f015696f795b97...`
+  (prefix == e9f01569). `git cat-file -t e9f01569` = `Not a valid object name` on BOTH Mac and Linux. Real
+  build commit = `ec995160`. v85 self-correction VINDICATED. **Lesson: never run git-ancestry on a /proc/exe
+  SHA; binary-content-hash != git-ref is a recurring confusion — check `readlink /proc/PID/exe` + sha256sum.**
+- **V104 supervised.live_audit NEVER EXISTED** (free hole). `git log --all -S supervised_live_audit --
+  '*.sql' '*.rs'` EMPTY; src grep EMPTY; sql/migrations V103->V106 gap (no V104/V105 file). The 2026-05-27
+  MIT v104 dry-run report (8345 bytes) reviewed a NON-EXISTENT migration = **now SUPERSEDED/VOID**. v84
+  "V104 checksum frozen" = part of the same-day hallucination (commit d9128e22), reversed by 8d1890a8 + new
+  Gate 2b. **Lesson: a "dry-run sign-off" report is NOT proof the migration file exists — verify file on disk +
+  git-log -S before signing. This is the V023/P0-sqlx-hash-drift discipline; team self-caught it = process win.**
+- **V115 panel.basis_panel source EXEMPLARY**: Guard A/B/C, idempotent, hypertable (1d chunk BIGINT
+  snapshot_ts_ms) + integer_now_func + 14d retention. **basis_panel has NO engine_mode column + NO IPC slot BY
+  DESIGN** — it is market-data/market-truth (not per-engine), offline-replay-only; live A1 uses in-memory
+  index cache. NOT NULL fail-closed (index<=0 => no row). Writer = BasisAggregator panel_aggregator/basis.rs,
+  Bybit WS->PG 60s flush. **No Binance fetcher** (SHARED FACT). **Lesson: do NOT flag panel.* market-data
+  tables for missing engine_mode CHECK — the engine_mode-IN-rule governs learning/training tables only.**
+- **Source-code delta baseline 187704f6 -> HEAD fe8393e2 = ZERO non-docs** (7 files, all docs/agent-reports).
+  Mac HEAD == Linux HEAD == fe8393e2. TODO v85 banner `e63a00e0` is stale (minor doc-hygiene, non-load-bearing).
+
+**INHERITED-RECORD (could NOT re-run — non-interactive SSH has EMPTY DATABASE_URL; PG in container on socket
+/var/run/postgresql/.s.PGSQL.5432; env in environment_files/+secret_files/ not sourced)**: _sqlx_migrations
+max=115, basis_panel 25 sym/60s/age~36s, model_performance=0. Filed as disclosed Blocker for MIT/E4 live re-run.
+**Lesson: read-only psql over ssh trade-core needs the engine env sourced (systemd EnvironmentFile), not a bare
+non-interactive shell — plain `psql "$DATABASE_URL"` resolves to the empty local socket and fails.**
+
+**P2-06 (model_performance evaluator-writer) + P2-07 (Stage-B cohort replay)**: CONFIRMED HONEST design-
+complete/impl-deferred — tables exist (V004), no dead table, 0-rows correctly disclosed as Foundation-only, not
+claimed-live.
+
+## 2026-05-30 V104 真檔 Gate 2b idempotency double-apply dry-run — APPROVE
+
+**Report**: `workspace/reports/2026-05-30--v104_real_file_gate2b_dry_run.md`
+
+**Trigger**: P0-LG-3 部署前強制 gate；E1-T4 寫出 V104 真檔（branch `feature/lg3-t4`@`45a23068`，worktree `/tmp/wt-lg3t4`，416 LOC，sha256 `afceb98e...`）。規則：真檔必重跑 dry-run，不可沿用 2026-05-27 candidate 9/9（那是手寫 candidate，repo 當時無真檔，per PA reality-check）。
+
+**Verdict: APPROVE — V104 真檔可進部署。**
+
+**核心結果**:
+1. **double-apply 0 RAISE / 0 ERROR / 0 EXCEPTION**，兩路徑（existing-path re-apply + fresh-path drop-in-tx CREATE）各 round 全 NOTICE-skip，"all guards PASS" ×2/路徑。
+2. **9-query reflection 9/9 PASS**：21 col / 4 CHECK（action 17-enum / result 3 / engine_mode (live,live_demo) 拒 paper / ts_ms>0）/ chunk 604800000000µs=7d / segmentby session_id / compress 30d / retention 90d / 4 named idx / forbidden ML col 0（non-training surface invariant 達成）/ table=learning.supervised_live_audit。
+3. **drift 防護 PASS**：`git diff cc6c54d0 feature/lg3-t4 -- sql/migrations/` = 只 `A V104`，0 既有 migration 改；V104 是 V103↔V105 free hole（version-sort 補洞合法）。
+4. **Guard A 三段 empirical 有效**：part1 missing-prereq RAISE / part2 column-count-drift(22≠21) RAISE / part3 forbidden-ML-col detection SQL 正確（A3_detects_forbidden=signal_id）。
+5. **_sqlx_migrations max=115 count=105 未污染**（前後一致，V104 ABSENT；deploy 時 sqlx 註冊 count→106）。
+
+**重要環境發現**: prod PG **supervised_live_audit table 已實體存在**（21col/4CHECK/hypertable/6idx/comp+ret job/0row）— 先前手動 `psql -f` apply 過但 sqlx 未註冊。故 deploy `AUTO_MIGRATE=1` 走 sqlx 會註冊 V104；因全 idempotent → NOTICE-skip 安全。**若 V104 file 再 edit 必跑 `bin/repair_migration_checksum --target V104`**（per project_2026_05_02_p0_sqlx_hash_drift）。
+
+**2 非阻塞註記**:
+- **6a dry-run 衛生事故（已自我清理）**：Guard A part1 negative test 的 psql script 漏 `\set ON_ERROR_STOP on`，`RENAME governance_audit_log` 在 V104 RAISE 前自動 commit，洩漏空表 `governance_audit_log_tmp_mit`（0row）；已用 guarded DO-block（驗 real 在 + tmp 0row 才 drop）安全清；最終 `any_mit_leak_tables=NONE` / real gov 完整（2idx/0row）。**durable lesson：負向 Guard test 若改 prod prereq 表，必包 SAVEPOINT + `\set ON_ERROR_STOP on`；更佳是純 to_regclass 邏輯測（不動真表，如 part3 isolated test）。BEGIN/ROLLBACK 不夠 — psql 無 ON_ERROR_STOP 時 DDL 可能在 RAISE 前已落地。**
+- **6b cross-branch 一致性（item 3）DEFERRED**：T1 `SmAction.as_str()` 17 值源碼**不存在於任何 ref**（lg3-t1 tip==base / wt-lg3t1 無 SmAction / test sm_action_strings_match_v104 0 hit / main HEAD 0 hit）。SQL 端逐字比對無對照物。V104 canonical 17-enum baseline 已記入報告 §6b（順序 = as_str() 必輸出順序）。T1 IMPL DONE 後 MIT 須重跑 item3（T1 自帶 test 必要不充分）。
+
+**PG empirical method 教訓再強化**: 17 command + redirect /tmp 暫存檔分次讀（SSH 輸出常 interleave/garble，憑記憶報數字危險）；ON_ERROR_STOP=0 的負向 prereq-mutation test 是 prod 污染地雷（本次親身觸發 + 清理）。

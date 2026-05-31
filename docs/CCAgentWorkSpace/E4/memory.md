@@ -8,6 +8,110 @@
 
 ## 工作記憶
 
+### 2026-05-31 b85ac3f3 confluence DB-load guard — E4 PASS
+
+**對象**: commit `b85ac3f3`（fix(gui,strategy): avoid fake success and fail-closed confluence weights）。P3 test-debt close。
+
+**Rust lib 實跑結果**:
+| Run | passed | failed | ignored | 穩定? |
+|---|---|---|---|---|
+| Run 1 | 3688 | 0 | 1 | - |
+| Run 2 | 3689 | 0 | 1 | YES (1-ct delta = parallel non-det in debug profile; 0 regression) |
+
+**新增測試**: `test_build_confluence_config_invalid_weights_falls_back_to_default`
+- 位置: `rust/openclaw_engine/src/strategies/tests.rs`
+- Commit: `78153db1`
+- 覆蓋三路: MaCrossoverParams→default()、BbReversionParams→reversion()、BbBreakoutParams→breakout()+confluence_as_gate 保留
+- 正常路徑: 合法和=65 直通驗證
+
+**教訓**: cargo test debug profile 下 passed 計數可因 parallel thread 排序差 1（3688 vs 3689）；兩次均 0 failed = 真穩定，計數差不是 flaky。實跑 baseline 3688/3689 vs 任務說的 3633 差 55 = 中間其他 commit 增加的 tests。
+
+**Verdict**: PASS
+
+**Report**: inline (no separate report file per E4 instruction)
+
+---
+
+### 2026-05-31 Deep-Dive #8 Test Blind Spots — BLIND-SPOTS-FOUND (minor, PASS-ADEQUATE)
+
+**對象**: HEAD `187704f6`（同上，zero source delta）。深挖任務 = 實跑 targeted suites + 7-class 盲點矩陣 + mock-hides-logic + 新功能覆蓋確認。
+
+**關鍵更正（先前 2026-05-30 first-pass 錯誤）**：
+- F-001「dispatch retry on Transient P1 未修」= **錯誤**。cold-audit Wave1 `b93d3210` P1-07 已修：`OPEN_NO_RETRY = [u64; 0]`，OPEN 路徑 0 重試，strict fail-closed。dispatch_tests.rs:567 + :600 兩測試鎖定。F-001 **CLOSED**。
+- F-003「paper-freeze test 未確認」= **已確認 CLOSED**。`test_promotion_pipeline.py:177` `test_paper_cannot_promote_demo` 明確 assert `paper_lane_frozen` in msg + stage stays PAPER_SHADOW，46/0 PASS。
+
+**實跑結果**:
+| Suite | Run 1 | Run 2 | 穩定? |
+|---|---|---|---|
+| Rust `openclaw_engine --lib` | 3633/0/1ign | 3633/0/1ign | YES |
+| Python `control_api_v1/tests/` (`OPENCLAW_CSRF_SHADOW=1`) | 4234/6/13 | 4234/6/13 | YES |
+| dispatch subset (171) | 171/0 | (stable) | YES |
+| live_authorization (24) | 24/0 | (stable) | YES |
+| basis/BasisAggregator (33) | 33/0 | (stable) | YES |
+| reconciler (104) | 104/0 | (stable) | YES |
+| notification_failsafe (108) | 108/0 | (stable) | YES |
+| stage_0r earn_routes (4) | 4/0 | (stable) | YES |
+
+**7-class 盲點矩陣**:
+| Class | 狀態 |
+|---|---|
+| Fail-Closed | COVERED (OPEN single-attempt, basis fail-closed, paper-freeze) |
+| Timeout | COVERED (機制共享 OPEN single-attempt path；無獨立 timeout-OPEN test，LOW gap) |
+| Bybit retCode | COVERED (30+ classify tests；unknown retCode substring path = LOW blind spot) |
+| Concurrency | COVERED (env-test lock + C4 T4.12 adversarial；Linux ≥5-round carry-over) |
+| Stale Data | COVERED (basis sparse cache + cost gate freshness 7 cases + Python stale tests) |
+| Auth Expiry | COVERED (24 live_auth tests + `expired_authorization_rejected` PASS) |
+| Replay/Promotion Boundary | COVERED (paper-freeze F-003 CLOSED + stage_0r 4 tests PASS) |
+
+**開放 findings**:
+- **F-002** (P2 carry-over): Stage-0R helper script 無 unit tests。A2 REVISE/HOLD 降 blast radius。
+- **F-NEW-1** (P3): CSRF env (`OPENCLAW_CSRF_SHADOW=1`) 未在 pytest.ini 記錄，開發者跑全量看 66 false failures 容易誤判。
+
+**Mock safety**: 6 重要路徑審查全 PASS，無 mock-hides-logic。
+
+**關鍵教訓**:
+1. **Prior P1 dispatch retry = false alarm**：靜態 grep `Transient` 發現 enum variant，誤以為 retry 仍存在。正確做法：看 `run_dispatch_retry` 的 caller delay slice 參數（`OPEN_NO_RETRY = [u64; 0]`），才知 OPEN 路徑 0 重試。commit 留原始 enum variant 是因 CLOSE 路徑仍用同一函數但帶非空 delay。
+2. **CSRF env = canonical baseline 的隱性前提**：`OPENCLAW_CSRF_SHADOW=1` 是 write-endpoint test 通過的必要前提，不是 optional。4229→4234 的 +5 delta 是 cold-audit wave2-4 新增 test，非 regression。
+3. **實跑 vs 靜態推算**：Rust 靜態推算 3634，實跑 3633（差 1 = commit msg 計算誤差）。實跑永遠比靜態推算更權威。
+
+**Verdict**: COVERAGE-ADEQUATE (Mac-side) / NEEDS-LINUX (concurrency ≥5-round + DB-side stale).
+
+**Report path**: `docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-30--E4--deepdive_test_blind_spots.md`
+
+---
+
+### 2026-05-30 Full-Chain Test Audit (campaign 2026-05-17) — FAIL (P1 persists)
+
+**對象**: HEAD `187704f6`（全 5 post-baseline commit 為 `[skip ci]` docs-only，zero source delta）。Campaign label "2026-05-17"，實際執行 2026-05-30。
+
+**結果**:
+| 項目 | 結果 |
+|---|---|
+| P0 | 0 |
+| P1 | 1 — F-001 dispatch retry on Transient (carry-over from prior E4-FCT-001, 未修) |
+| P2 | 2 — F-002 Stage-0R runner 無 pytest 覆蓋；F-003 promotion-freeze test alignment 未確認 |
+| P3 | 1 — F-004 BasisAggregator 無 Python 端 test |
+| Rust lib count (靜態推算) | ~3634/0（ec995160 commit msg；未實跑，需 Linux 確認）|
+| Python pytest count | ~6042/28/45（2026-05-22 sprint 2 wave 2；未實跑）|
+| 實跑命令 | 0（budget 限制；全靜態 grep+commit msg 證據）|
+| env-test lock 單鎖 (P1-OPS-2) | HELD：`crate::test_env_lock::guard()` lib.rs:125，12+ 模塊全用；Mac 3x clean；Linux ≥5-round carry-over |
+| 110017 D1+D2 | 有測試：dispatch_tests.rs:227 + position_reconciler/tests.rs 8+ ghost tests；mock safety OK |
+| BasisAggregator | 9 Rust unit tests（1e-12 公式對齊；disconnected pool mock = IO-only）；無 Python 端 |
+| risk.rs byte-equivalent split | 無新 test 需求（pure move + re-export，c4 e2e 3/3 cover）|
+| C4 failsafe wire | 107/0（2026-05-28 memory）；T4.12 adversarial reproduction 確立；dormant by design |
+| E4-FCT-002 paper→demo freeze | 源碼修復 DONE（pipeline.py:527-538 `paper_lane_frozen`）；test 對齊未確認 → P2 |
+
+**Verdict**: FAIL — P1 dispatch retry 未解除。所有 2026-05-29/30 source change 覆蓋充足，prior P1 E4-FCT-001 是唯一阻塞點。
+
+**教訓**:
+1. **Static audit budget-cap**：任務明確說 ≤25 tool calls / 全 cargo build 重且慢 → 靜態 grep + commit msg 是 acceptable fallback；但最終計數必須 Linux 實跑確認，不能以靜態推算作 PM commit gate。
+2. **Carry-over P1 不會自動消除**：dispatch retry vs fail-closed 是 policy 問題，需 PA arbitrate 再 E1 實作，E4 不能代為關閉。
+3. **test alignment 確認必顯式**：源碼改 behavior（paper-freeze）後必在同一 round 確認對應 test 也改，否則留 P2 gap。
+
+**Report path**: `docs/CCAgentWorkSpace/E4/workspace/reports/2026-05-30--E4--full_chain_test_audit.md`
+
+---
+
 ### 2026-05-28 Wave 5 Packet C (C1+C2+C3) + M11 cron + MED/LOW hardening E4 全 regression — PASS
 
 **對象**：HEAD `575a0a94`。累積範圍 = C1 dispatchers (slack/email/console_banner/three_way + RealSmtpTransport lettre 0.11) + C2 audit_emitter (PgAuditEmitter + V114 17-col hypertable) + C3 providers (wall_clock/position/exchange_stop_sync/single_watcher) + E2 review fix MED-1/MED-2/LOW-1 + M11 cron install。

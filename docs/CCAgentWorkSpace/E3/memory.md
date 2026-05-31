@@ -225,3 +225,53 @@
 - **secret_files/ 是 OpenClaw 既有 gitignored secret pattern**：與 secret_files/bybit/ 風格對齊（subdir/<name>/<key_file>）；不要新發明 secrets/.env
 
 報告：`docs/CCAgentWorkSpace/E3/workspace/reports/2026-05-22--sprint_1a_epsilon_sandbox_admin_role.md`
+
+### 2026-05-30 深挖 #3 Live/LiveDemo boundary（deepdive — CONFIRMED-CLEAN，0 new finding）
+
+報告：`reports/2026-05-30--E3--deepdive_live_boundary.md`（baseline 187704f6；Mac HEAD 3f805a61 =
+baseline + 11 個 docs(todo) commit；源碼 delta=0）。目標=列舉「主 executor 以外」所有 order-submit /
+live-param-mutate path 並逐一證明上門控（first-pass 已證主路徑，本次補全其它入口）。
+
+模組根（修正 first-pass 縮寫路徑）：`program_code/exchange_connectors/bybit_connector/control_api_v1/app/`。
+
+關鍵 order/live-param → gate map（file:line 全本 run 親讀）：
+- **兩個共用門控函數**：`_verify_live_gate`（executor_routes.py，**僅 1 個 def**＝無 shadow；
+  executor :450 + strategist_promote_routes :462-463 `from .executor_routes import` 共用）；
+  `all_five_live_gates_ok(actor, require_authz)`（live_preflight.py:247-327，**body 親讀**＝正規
+  5-gate AND fail-closed 短路）→ live_session_endpoints :168/:517/:638 三處全 `require_authz=True`。
+- **唯一驗簽 SSOT** `live_preflight.verify_signed_authorization`（:62）：HMAC mismatch :175 / expired :187
+  / env-match :191 / schema+mode :126-137。兩門控函數都 delegate 它 → forge/replay/expiry 集中擋；
+  其它 authorization.json reader 只是 signer（live_trust_routes）或 read-only status/display，不能授權 live。
+- **Rust OMS 單一寫入口** `order_manager.rs:354 place_order`，**只**被 event_consumer/dispatch.rs:789,799
+  + handlers/lifecycle.rs:168 handle_submit_order 呼叫（不散落）。
+- ExecutorAgent live=shadow→Paper（executor_agent.py:603）；live 時 :722 送 SubmitOrder IPC 入 OMS；
+  `openclaw_authority_contracts.py:124 "can_submit_orders": False` 預設拒。
+
+**O-1（本 run RESOLVED，非 finding）— 重要教訓「平行門控副本」**：Earn 有平行門控。Python
+`earn_routes.py:578-652 _check_gate_a..e` 是 Sprint-1B **soft preflight/display**（gate_b 只查
+`LIVE_AUTHORIZATION is not None`，**不**驗 HMAC/expiry/env）。乍看像漏洞，**但** binding 強制在
+**Rust 9-gate** `earn_router.rs:262-625 dispatch_earn_intent`：E-3 `if !governance.is_authorized()
+{ rejected }`（:305，註「Gate 1 等價」）+ E-4 `LeaseScope::EarnStake/Redeem
+requires_operator_authority` 60s TTL（:309-336）+ Gate b(ALLOW_MAINNET) 在 BybitRestClient 構造時把關
+（:602-604）+ module-doc「5-gate inheritance hard fail-closed」:8 /「ADR-0030 5-gate live boundary」:62。
+Earn write 另由 IPC `_hmac_sig`(OPENCLAW_IPC_SECRET) + typed_confirm phrase HMAC + `_ipc_call_strict`
+fail-closed 503/504 保護；Earn=yield staking（/v5/earn/place-order，非 perp，無 withdraw，[100,200] USDT 硬鎖）。
+→ 正確的 Rust-authority pattern（CLAUDE §一），CLEAN。**教訓：審計平行門控時，Python soft gate 不等於
+漏洞——必須讀到 Rust 端 binding gate 才能下判；反之若只看 Python 會誤報，只看 Rust 會漏掉 IPC 偽造面。**
+
+**反模式自捕（最重要的 process 教訓）**：本 run 一度因 zsh 在 repo root 把未引號 `--include=*.py`
+glob 展開（cwd 無 *.py）→ `zsh: no matches found` → 整個 **parallel** batch 被 cancel → 看似空輸出 →
+我一度誤判「harness outage / NEEDS-MORE」並寫進報告草稿。實為 **shell 引號問題非工具壞**。換引號
+`--include="*.py"` 後全部正常。**SOP：(1) grep glob 永遠加引號；(2) 看到整批空輸出先換引號/換單命令
+重試，勿急下 outage 結論；(3) 絕不從空/可疑讀出 ship finding 或 clean verdict**（呼應 first-pass 的
+phantom「program_code git-ignored」教訓——同一類「被工具假象帶偏」的坑）。已在報告 retract 該誤判。
+
+其它本 run 確認（全 CLEAN）：secret-slot resolution = env(空忽略)→file(0600)→None 無 permissive default
+（live_preflight.py:240-244 + 300-312，require api_key AND api_secret，OSError→both False）；
+ALLOW_MAINNET 三個獨立檢查點（executor :229 / all_five :295 / earn gate_c :616-625）unset/0 一律 DENY；
+`_current_bybit_endpoint_label` 未知→mainnet（取嚴不降級）；LiveDemo 只跳 Gate3(mainnet-only)其餘 1/2/4/5
+全保留（無真降級）；no-withdraw 結構成立（bybit_rest_client 只有 cancel_order:655 + place_order:801，
+`grep /v5/asset/withdraw` 空）。`place_order` LIVE-GATE-FALLBACK-1（:797-800）= reduce_only 緊急平倉，
+但 reduce_only 參數**預設 False 且方法本身不自我強制**，靠 call site（clean_restart_flatten + operator
+平倉鈕）+ route gate——若未來有人繞 route 直呼 place_order 非 reduce_only，這是潛在 widening 點（目前無此 caller）。
+OPS-2 Phase-1 fallback 仍 tracked（P1-OPS-2-PHASE-2-CUTOVER 2026-06-10），first-pass runtime 0/0，本 run 未重 ssh。

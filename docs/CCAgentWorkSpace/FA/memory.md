@@ -6,6 +6,12 @@
 - 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
 - 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
 
+## 2026-05-30 cold audit re-run (baseline 187704f6) — P0=0/P1=0/P2=0/P3=1
+- **D2 ghost-converge reconciler = LIVE/wired，非 gated-off**（解 BB 兩 run 矛盾，run#1 對 / run#2 錯）。鏈：`main.rs:844`→`main_boot_tasks.rs:71` spawn Live+Demo→`tasks.rs:866 tokio::spawn(run_position_reconciler)`→`mod.rs:552 process_ghosts.await`→`mod.rs:910 dispatch_ghost_converge`（ConfirmedZero, 903）→`orphan_handler.rs:457 cmd_tx.send(ConvergeExchangeZero)`→consumer `handlers/mod.rs:401 handle_converge_exchange_zero`。**無 feature flag / 無 reconcile_enabled env**；S-1/S-5/S-6 是收斂前保守確認（非 happy path 走 KEEP+warn），易被誤讀為「warn-only」= run#2 出錯主因。教訓：**「多層 KEEP+warn 安全閘」≠「永不執行」，必追 happy-path 分支到 channel send + consumer，才能下 LIVE/dead 定論。**
+- **V104 從未存在 = 證實 MIT**（`sql/migrations/` V103→V106 跳號，find V104*/V105* 空）；且 TODO 已自我修正到 **v85**（TODO:4/74 記 commit `8d1890a8` forward-fix）。教訓：初稿憑一次 flaky grep 誤判「TODO 仍宣稱 V104 ACTIVE」→ 差點 ship 假 P2；**flaky 環境下 claim-vs-reality 必複讀 TODO 頭部（版本行）才能確認修正是否已 land。**
+- **basis_panel writer 非 dead**：`BasisAggregator` 是 `PanelAggregator` 欄位（mod.rs:121/166），`run()` spawn 於 `main.rs:1073`，flush→insert_basis_snapshot→V115 表；mod.rs:120 註明「純 A1 Stage 0R offline replay」= deferred consumer，非死碼。唯一 runtime-unproven = A1 replay 是否讀過 fresh rows（Linux 查）。
+- **環境陷阱**：migrations 在 `sql/migrations/`（非 `rust/.../migrations` 也非 `db/migrations`）；basis 在 `panel_aggregator/basis.rs`（非 `basis/panel_writer.rs`）。「No such file」要先確認路徑對不對再下「碼不存在」結論。
+
 ## 項目功能狀態快照（2026-03-31，Wave 5 完成後更新）
 
 ```
