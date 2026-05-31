@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-01（TODO v100 AEG blocked-item resolution packet + v99 AEG-S0 formal review PASS + v98 AEG-S0 role-review must-fix patch + v97 AEG-S0 PM-local contract draft + v96 V5.8 preservation audit + v95 prune audit + v94 AEG cleanup + v92/v93 version-increment 遷入；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-01（TODO v101 three-end source sync checkpoint + v100 AEG blocked-item resolution packet + v99 AEG-S0 formal review PASS + v98 AEG-S0 role-review must-fix patch + v97 AEG-S0 PM-local contract draft + v96 V5.8 preservation audit + v95 prune audit + v94 AEG cleanup + v92/v93 version-increment 遷入；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v101 增量（2026-06-01 three-end source sync checkpoint）**：operator 要求三端同步後，PM 將 Mac `main`、origin `main`、Linux `trade-core` `/home/ncyu/BybitOpenClaw/srv` fast-forward 到同一 source head；本輪只做 source/docs/governance sync，無 rebuild/restart、DB、auth、order、execution、collector、strategy 改動。下一步仍是 AEG-S1 Foundation docs/design/read-only dispatch：`AEG-S1-FND-1..4` + `S2-GATE-B-PREP`；backfill writer、retention runtime mutation、endpoint ingestion、collector IMPL、alpha scoring 保持 blocked。
 
 **v100 增量（2026-06-01 AEG blocked-item resolution packet）**：新增 `docs/execution_plan/2026-06-01--aeg_s1_foundation_unblock_packet.md` 與 PM verification report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_blocked_items_resolution_verification.md`，將 AEG blocked list 拆成可派發的 docs/design/read-only `AEG-S1-FND-1..4` + `S2-GATE-B-PREP`，以及仍 blocked 的 Bybit historical backfill writer、`market.klines` runtime retention mutation、funding/OI/long-short ingestion、mark/index/premium ingestion、listing collector IMPL、alpha scoring/promotion report；另把 `P3-MARKET-TICKERS-INDEX-MARK-DEAD-PERSISTENCE` folded into FND-4 fix-vs-bypass design。核實結果：AEG-S0 PASS、S1-W1-S1 advisory + 797-row survivorship universe、S2 Gate-A、S4 preflight 已完成；runtime/DB/backfill/collector/scoring outcomes 未完成，不能標為 full implementation complete。本輪 doc/governance only，無 runtime/DB/auth/trading 改動。
 

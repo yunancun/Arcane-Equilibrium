@@ -1,6 +1,6 @@
 # 玄衡 TODO — Active Dispatch Queue
 
-**版本** v100 ｜ **日期** 2026-06-01 ｜ **source HEAD** 089967b7 base + v100 AEG blocked-item resolution packet；runtime unchanged from latest v87 deploy snapshot.
+**版本** v101 ｜ **日期** 2026-06-01 ｜ **source HEAD** v101 three-end source sync checkpoint after `1ce1abaa` AEG blocked-item packet；runtime unchanged from latest v87 deploy snapshot.
 **當前主線**：P0-EDGE-1 Alpha-Edge Regime Evidence Governance。AEG-S0 formal review PASS; AEG-S1 Foundation blocker packet landed. Safe next work is docs/design/read-only `AEG-S1-FND-1..4` plus `S2-GATE-B-PREP`. E1 backfill writer / DB retention mutation / endpoint ingestion / collector IMPL / alpha scoring remain blocked until separately scoped.
 **v96 audit note**：V5.8 設計未被刪除；它作為長期 13-module autonomy architecture 保留，active TODO 只保留可派工 posture。詳見 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--v58_design_progress_preservation_audit.md`。
 **歷史詳情**：version log `docs/CLAUDE_CHANGELOG.md`；v94 prune audit `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--todo_v94_prune_audit.md`；pre-cleanup archive `docs/archive/2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`；older v92 archive `docs/archive/2026-05-31--todo_v92_archive.md`。
@@ -11,7 +11,7 @@
 
 | Area | Current state | Next action |
 |---|---|---|
-| Source sync | Mac `main` is the active source branch; this v100 blocker-resolution packet is docs/governance only on top of `089967b7`. Linux fast-forward to the post-v100 docs commit is not verified in this batch. | Commit + push v100 docs/governance packet; no runtime sync unless operator requests it. |
+| Source sync | Mac `main`, origin `main`, and Linux `trade-core` `/home/ncyu/BybitOpenClaw/srv` are synchronized after the v101 source-sync checkpoint. This is docs/governance source sync only. | No rebuild/restart from this sync. Next work is AEG-S1 Foundation docs/design/read-only dispatch. |
 | Runtime | Latest verified deploy remains v87 2026-05-31: Linux engine/API/watchdog healthy; engine PID 968350 in archived snapshot; healthz 200; no runtime rebuild in AEG governance/TODO batches. | No deploy in this batch. Refresh only before runtime-affecting work. |
 | Runtime caveat | system-level `openclaw-engine.service` / system watchdog install still sudo/operator-gated; current protection is user watchdog + linger + manual engine process. | Operator schedules system-level install window. |
 | Passive health residual | `[48] replay_manifest_registry_growth`, `[74] close_maker_reject_samples`, `[56] live_pipeline_active` remain OPS residual / evidence queue; not OPS-1 reversal. | Keep explicit in OPS queue; do not mark all-green until resolved or accepted. |
