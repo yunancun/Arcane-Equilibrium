@@ -717,3 +717,84 @@ fn test_edge_p2_3_1b31_maker_timeout_factory_passes_through_in_range() {
         "factory must pass 60_000 through unchanged, got {json}"
     );
 }
+
+// ── b85ac3f3 confluence DB-load guard 回歸測試 ──────────────────────────────
+
+/// DB/TOML 來源的非法權重（和≠65）必須觸發 fail-closed 退回預設值。
+/// 驗證三個策略的 build_confluence_config() 在非法輸入下均安全退回。
+/// 額外驗證：bb_breakout 退回時保留 confluence_as_gate 語意（不翻轉）。
+#[test]
+fn test_build_confluence_config_invalid_weights_falls_back_to_default() {
+    // ── ma_crossover：權重和 73≠65，預期退回 ConfluenceConfig::default() ──
+    let mut ma_p = MaCrossoverParams::default();
+    ma_p.weight_adx = 30.0; // 30+20+12+8 = 70 ≠ 65
+    let cfg_ma = ma_p.build_confluence_config();
+    let expected_ma = confluence::ConfluenceConfig::default();
+    assert!(
+        (cfg_ma.weight_adx - expected_ma.weight_adx).abs() < 1e-10,
+        "ma_crossover 非法權重應退回預設 weight_adx={}, got {}",
+        expected_ma.weight_adx,
+        cfg_ma.weight_adx
+    );
+    assert!(
+        (cfg_ma.weight_regime - expected_ma.weight_regime).abs() < 1e-10,
+        "ma_crossover 非法權重應退回預設 weight_regime={}, got {}",
+        expected_ma.weight_regime,
+        cfg_ma.weight_regime
+    );
+    assert_eq!(
+        cfg_ma.confluence_as_gate, expected_ma.confluence_as_gate,
+        "ma_crossover 退回時 confluence_as_gate 應為 true"
+    );
+
+    // ── bb_reversion：權重和 80≠65，預期退回 ConfluenceConfig::reversion() ──
+    let mut bbr_p = BbReversionParams::default();
+    bbr_p.weight_regime = 45.0; // 15+45+10+10 = 80 ≠ 65
+    let cfg_bbr = bbr_p.build_confluence_config();
+    let expected_bbr = confluence::ConfluenceConfig::reversion();
+    assert!(
+        (cfg_bbr.weight_adx - expected_bbr.weight_adx).abs() < 1e-10,
+        "bb_reversion 非法權重應退回 reversion weight_adx={}, got {}",
+        expected_bbr.weight_adx,
+        cfg_bbr.weight_adx
+    );
+    assert!(
+        (cfg_bbr.weight_regime - expected_bbr.weight_regime).abs() < 1e-10,
+        "bb_reversion 非法權重應退回 reversion weight_regime={}, got {}",
+        expected_bbr.weight_regime,
+        cfg_bbr.weight_regime
+    );
+    // invert_adx 由 reversion() 提供 true
+    assert!(
+        cfg_bbr.invert_adx,
+        "bb_reversion 退回時 invert_adx 應為 true"
+    );
+
+    // ── bb_breakout：權重和 60≠65，confluence_as_gate=true 語意必須保留 ──
+    let mut bbb_p = BbBreakoutParams::default();
+    bbb_p.weight_adx = 20.0; // 20+20+12+8 = 60 ≠ 65
+    bbb_p.confluence_as_gate = true; // 故意設成非默認值以驗證語意保留
+    let cfg_bbb = bbb_p.build_confluence_config();
+    // 權重應退回 ConfluenceConfig::breakout() 的預設權重
+    let expected_bbb = confluence::ConfluenceConfig::breakout();
+    assert!(
+        (cfg_bbb.weight_adx - expected_bbb.weight_adx).abs() < 1e-10,
+        "bb_breakout 非法權重應退回 breakout weight_adx={}, got {}",
+        expected_bbb.weight_adx,
+        cfg_bbb.weight_adx
+    );
+    // confluence_as_gate 保留 self 的值（true），不被退回邏輯翻轉
+    assert!(
+        cfg_bbb.confluence_as_gate,
+        "bb_breakout 退回時 confluence_as_gate 語意必須保留（self.confluence_as_gate=true）"
+    );
+
+    // ── 正常路徑驗證：合法權重（和=65）直通不退回 ──
+    let valid_p = MaCrossoverParams::default(); // 25+20+12+8 = 65
+    let cfg_valid = valid_p.build_confluence_config();
+    assert!(
+        (cfg_valid.weight_adx - 25.0).abs() < 1e-10,
+        "合法權重應直通，weight_adx 應為 25.0, got {}",
+        cfg_valid.weight_adx
+    );
+}
