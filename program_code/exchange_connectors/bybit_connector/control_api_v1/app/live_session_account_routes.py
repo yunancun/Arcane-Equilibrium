@@ -531,10 +531,10 @@ async def get_live_closed_pnl(
     if guard is not None:
         return guard
 
-    from .strategy_ai_routes import _closed_pnl_history_cursor_payload  # noqa: PLC0415
+    from . import strategy_ai_routes  # noqa: PLC0415
 
     sym = symbol.upper().strip() if symbol else None
-    payload = await _closed_pnl_history_cursor_payload(
+    payload = await strategy_ai_routes._closed_pnl_history_cursor_payload(
         rc=core._get_rust_client_safe(),
         limit=limit,
         cursor=cursor if isinstance(cursor, str) and cursor else None,
@@ -544,6 +544,13 @@ async def get_live_closed_pnl(
         lookback_days=lookback_days,
         engine_modes=("live", "live_demo"),
         client_unavailable_reason="live_bybit_client_unavailable",
+        # 注入 strategy_ai_routes 的 failure-state / owner-map 縫：重構前本函數定義於
+        # strategy_ai_routes，閉包讀該模塊的 _CLOSED_PNL_BYBIT_FAILURES 與 _engine_owner_strategy_map，
+        # 故 Live 與 Demo 一直「共用同一份 failure-state + owner-map」。此處注入相同單例以保行為不變，
+        # 不另立 Live 專屬狀態。lambda 於呼叫時解析當前綁定，保留 route 層 monkeypatch 語意。
+        engine_owner_lookup=lambda engine: strategy_ai_routes._engine_owner_strategy_map(engine),
+        record_failure=strategy_ai_routes._record_closed_pnl_bybit_failure,
+        clear_failures=strategy_ai_routes._clear_closed_pnl_bybit_failures,
     )
     return core._live_response(payload)
 
