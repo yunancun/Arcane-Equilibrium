@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-01 10:30 CEST
+- completed docs/design-only AEG-S1-FND-3, S2 Gate-B prep, and MIT storage migration-design packet in parallel after operator-approved sub-agent fanout
+- added FND-3 side-evidence contract, S2 isolated PreLaunch probe plan, V125 storage migration-design packet, PM integration report, and Operator checkpoint
+- no SQL file, migration apply, DB mutation, retention change, endpoint ingestion, collector runtime, backfill, scoring, rebuild, or restart
+- next safe work: E2/E4/MIT review of V125 design and optional separately scoped artifact-only Gate-B probe implementation/run
+
 2026-05-26 10:45 CEST
 - added `docs/execution_plan/2026-05-26--alpha_tournament_ssot_spec.md` as the Sprint 2 Alpha Tournament SSOT
 - synchronized pointers across v5.8, Sprint 2 dispatch packet, TODO, docs README, and SPECIFICATION_REGISTER so future agents do not miss governance boundaries
