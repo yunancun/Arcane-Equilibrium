@@ -19,6 +19,7 @@ import pytest
 import ml_training.linucb_trainer as linucb_trainer
 from ml_training.linucb_trainer import (
     CANONICAL_FEATURE_NAMES_V1,
+    DEFAULT_PG_STATEMENT_TIMEOUT_MS,
     LinUcbTrainConfig,
     TrainResult,
     _le_bytes_to_ndarray,
@@ -27,7 +28,9 @@ from ml_training.linucb_trainer import (
     compute_feature_schema_hash,
     engine_mode_scope,
     enumerate_v1_15_arm_ids,
+    fetch_arm_observations,
     train_arm,
+    train_all_arms,
     upsert_arm_state,
 )
 
@@ -99,6 +102,12 @@ def test_scale_reward_bps_uses_configurable_denominator():
     assert _scale_reward_bps(-10.0, 50.0) == pytest.approx(-0.2)
     with pytest.raises(ValueError):
         _scale_reward_bps(1.0, 0.0)
+
+
+def test_train_config_defaults_to_bounded_pg_statement_timeout():
+    """Scheduler safety default: LinUCB PG reads must be bounded.
+    Scheduler 安全預設：LinUCB PG 讀查詢必須有 timeout。"""
+    assert LinUcbTrainConfig().statement_timeout_ms == DEFAULT_PG_STATEMENT_TIMEOUT_MS
 
 
 # ---------------------------------------------------------------------------
@@ -309,12 +318,96 @@ def test_upsert_arm_state_persists_cumulative_reward(monkeypatch):
         1.25,
     )
 
-    assert len(calls) == 1
-    sql, params = calls[0]
+    assert len(calls) == 2
+    timeout_sql, timeout_params = calls[0]
+    assert "SET LOCAL statement_timeout" in timeout_sql
+    assert timeout_params == (DEFAULT_PG_STATEMENT_TIMEOUT_MS,)
+
+    sql, params = calls[1]
     assert "cumulative_reward" in sql
     assert "cumulative_reward = EXCLUDED.cumulative_reward" in sql
     assert params[6] == pytest.approx(1.25)
     assert params[7] == "sha256:test"
+
+
+def test_fetch_arm_observations_sets_statement_timeout_before_mlde_view(monkeypatch):
+    """V031 MLDE view reads must SET LOCAL timeout before the SELECT.
+    讀 V031 MLDE view 前必先設定 statement_timeout。"""
+    calls = []
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params=None):
+            calls.append((sql, params))
+
+        def fetchall(self):
+            return [([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], 25.0)]
+
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def cursor(self):
+            return FakeCursor()
+
+    class FakePsycopg2:
+        @staticmethod
+        def connect(dsn, connect_timeout=2):
+            assert dsn == "postgresql://unit-test"
+            assert connect_timeout == 2
+            return FakeConn()
+
+    monkeypatch.setattr(linucb_trainer, "psycopg2", FakePsycopg2)
+
+    rows = fetch_arm_observations(
+        "postgresql://unit-test",
+        "trending__ma_crossover",
+        since_ts_ms=None,
+        engine_mode="demo_live_demo",
+        statement_timeout_ms=1234,
+    )
+
+    assert rows == [([1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], pytest.approx(0.25))]
+    assert len(calls) == 2
+    timeout_sql, timeout_params = calls[0]
+    assert "SET LOCAL statement_timeout" in timeout_sql
+    assert timeout_params == (1234,)
+    select_sql, select_params = calls[1]
+    assert "FROM learning.mlde_edge_training_rows" in select_sql
+    assert select_params[0] == "trending__ma_crossover"
+    assert select_params[1] == ["demo", "live_demo"]
+
+
+def test_train_all_arms_passes_statement_timeout_to_pg_helpers(monkeypatch):
+    """Driver must propagate timeout into per-arm fetch/upsert calls.
+    driver 必須把 timeout 傳到每個 arm 的 fetch/upsert。"""
+    fetch_timeouts = []
+    upsert_timeouts = []
+
+    def fake_fetch(*args, **kwargs):
+        fetch_timeouts.append(kwargs.get("statement_timeout_ms"))
+        return [([1.0] * 8, 0.5)]
+
+    def fake_upsert(*args, **kwargs):
+        upsert_timeouts.append(kwargs.get("statement_timeout_ms"))
+
+    monkeypatch.setattr(linucb_trainer, "fetch_arm_observations", fake_fetch)
+    monkeypatch.setattr(linucb_trainer, "upsert_arm_state", fake_upsert)
+
+    cfg = LinUcbTrainConfig(statement_timeout_ms=3456, min_samples_per_arm=1)
+    results = train_all_arms("postgresql://unit-test", cfg)
+
+    assert len(results) == 15
+    assert fetch_timeouts == [3456] * 15
+    assert upsert_timeouts == [3456] * 15
 
 
 def test_enumerate_v1_15_returns_15_unique_ids():
