@@ -1,0 +1,2449 @@
+{
+  "_schema": {
+    "description": "SM-01/02/04 跨語言對等契約向量（4a 里程碑）。Rust + Python harness 共讀。",
+    "fields": {
+      "sm": "auth | lease | risk_gov",
+      "from_state": "起始狀態 / 等級（enum .value 或 IntEnum .name）",
+      "to_state": "目標狀態 / 等級",
+      "initiator": "發起者 enum .value",
+      "approved_by": "審批人（null = 未提供）",
+      "expect.allowed": "transition 是否成功（Rust Ok / Python 不 raise）",
+      "expect.requires_approval": "規則 approval flag（僅 allowed 向量有意義）",
+      "expect.error_kind": "allowed=false 時的 Rust SmError 變體；Python 弱分類",
+      "tag": "rust_only | py_only（排除等值斷言，計入 tagged-count）",
+      "reason": "drift 分類與理由",
+      "note": "向量用途標籤"
+    },
+    "harness_contract": {
+      "risk_gov_min_hold_ms": 0,
+      "note": "harness 必把 SM-04 min_hold 設 0，使 de-escalation allowed 只反映 rule+initiator+approval。"
+    }
+  },
+  "_counts": {
+    "total": 190,
+    "by_sm": {
+      "auth": 54,
+      "lease": 63,
+      "risk_gov": 73
+    },
+    "tagged_total": 4,
+    "tagged_rust_only": 4,
+    "tagged_py_only": 0
+  },
+  "vectors": [
+    {
+      "sm": "auth",
+      "from_state": "ACTIVE",
+      "to_state": "DRAFT",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InvalidTransition"
+      },
+      "note": "invalid_not_in_table"
+    },
+    {
+      "sm": "auth",
+      "from_state": "ACTIVE",
+      "to_state": "EXPIRED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "ACTIVE",
+      "to_state": "EXPIRED",
+      "initiator": "IncidentPolicy",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "ACTIVE",
+      "to_state": "FROZEN",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "ACTIVE",
+      "to_state": "FROZEN",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "ACTIVE",
+      "to_state": "RESTRICTED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "ACTIVE",
+      "to_state": "RESTRICTED",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "ACTIVE",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "auth",
+      "from_state": "ACTIVE",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "auth",
+      "from_state": "ACTIVE",
+      "to_state": "REVOKED",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "DRAFT",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "Forbidden"
+      },
+      "note": "forbidden_pair"
+    },
+    {
+      "sm": "auth",
+      "from_state": "DRAFT",
+      "to_state": "EXPIRED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InvalidTransition"
+      },
+      "note": "invalid_not_in_table"
+    },
+    {
+      "sm": "auth",
+      "from_state": "DRAFT",
+      "to_state": "PENDING_APPROVAL",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "DRAFT",
+      "to_state": "PENDING_APPROVAL",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "DRAFT",
+      "to_state": "REJECTED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "DRAFT",
+      "to_state": "REJECTED",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "EXPIRED",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "auth",
+      "from_state": "EXPIRED",
+      "to_state": "DRAFT",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "terminal_source"
+    },
+    {
+      "sm": "auth",
+      "from_state": "EXPIRED",
+      "to_state": "RESTRICTED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "auth",
+      "from_state": "FROZEN",
+      "to_state": "ACTIVE",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "FROZEN",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "auth",
+      "from_state": "FROZEN",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "auth",
+      "from_state": "FROZEN",
+      "to_state": "DRAFT",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InvalidTransition"
+      },
+      "note": "invalid_not_in_table"
+    },
+    {
+      "sm": "auth",
+      "from_state": "FROZEN",
+      "to_state": "EXPIRED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "FROZEN",
+      "to_state": "EXPIRED",
+      "initiator": "IncidentPolicy",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "FROZEN",
+      "to_state": "RESTRICTED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "FROZEN",
+      "to_state": "RESTRICTED",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "auth",
+      "from_state": "FROZEN",
+      "to_state": "RESTRICTED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "auth",
+      "from_state": "FROZEN",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "auth",
+      "from_state": "FROZEN",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "auth",
+      "from_state": "FROZEN",
+      "to_state": "REVOKED",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "PENDING_APPROVAL",
+      "to_state": "ACTIVE",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "auth",
+      "from_state": "PENDING_APPROVAL",
+      "to_state": "ACTIVE",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "auth",
+      "from_state": "PENDING_APPROVAL",
+      "to_state": "ACTIVE",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "PENDING_APPROVAL",
+      "to_state": "DRAFT",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InvalidTransition"
+      },
+      "note": "invalid_not_in_table"
+    },
+    {
+      "sm": "auth",
+      "from_state": "PENDING_APPROVAL",
+      "to_state": "REJECTED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "PENDING_APPROVAL",
+      "to_state": "REJECTED",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "REJECTED",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "auth",
+      "from_state": "REJECTED",
+      "to_state": "DRAFT",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "terminal_source"
+    },
+    {
+      "sm": "auth",
+      "from_state": "REJECTED",
+      "to_state": "PENDING_APPROVAL",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "auth",
+      "from_state": "RESTRICTED",
+      "to_state": "ACTIVE",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "RESTRICTED",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "auth",
+      "from_state": "RESTRICTED",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "auth",
+      "from_state": "RESTRICTED",
+      "to_state": "DRAFT",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InvalidTransition"
+      },
+      "note": "invalid_not_in_table"
+    },
+    {
+      "sm": "auth",
+      "from_state": "RESTRICTED",
+      "to_state": "EXPIRED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "RESTRICTED",
+      "to_state": "EXPIRED",
+      "initiator": "IncidentPolicy",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "RESTRICTED",
+      "to_state": "FROZEN",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "RESTRICTED",
+      "to_state": "FROZEN",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "RESTRICTED",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "auth",
+      "from_state": "RESTRICTED",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "auth",
+      "from_state": "RESTRICTED",
+      "to_state": "REVOKED",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "auth",
+      "from_state": "REVOKED",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "auth",
+      "from_state": "REVOKED",
+      "to_state": "DRAFT",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "terminal_source"
+    },
+    {
+      "sm": "auth",
+      "from_state": "REVOKED",
+      "to_state": "RESTRICTED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "lease",
+      "from_state": "ACTIVE",
+      "to_state": "BRIDGED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "ACTIVE",
+      "to_state": "BRIDGED",
+      "initiator": "I",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "ACTIVE",
+      "to_state": "CONSUMED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InvalidTransition"
+      },
+      "note": "invalid_not_in_table"
+    },
+    {
+      "sm": "lease",
+      "from_state": "ACTIVE",
+      "to_state": "EXPIRED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "ACTIVE",
+      "to_state": "EXPIRED",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "ACTIVE",
+      "to_state": "FROZEN",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "ACTIVE",
+      "to_state": "FROZEN",
+      "initiator": "ExecutionClosureFlow",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "ACTIVE",
+      "to_state": "REJECTED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "ACTIVE",
+      "to_state": "REJECTED",
+      "initiator": "ExecutionClosureFlow",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "ACTIVE",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "lease",
+      "from_state": "ACTIVE",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "lease",
+      "from_state": "ACTIVE",
+      "to_state": "REVOKED",
+      "initiator": "ExecutionClosureFlow",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "BRIDGED",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InvalidTransition"
+      },
+      "note": "invalid_not_in_table"
+    },
+    {
+      "sm": "lease",
+      "from_state": "BRIDGED",
+      "to_state": "CONSUMED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "BRIDGED",
+      "to_state": "CONSUMED",
+      "initiator": "ExecutionClosureFlow",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "BRIDGED",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "lease",
+      "from_state": "BRIDGED",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "lease",
+      "from_state": "BRIDGED",
+      "to_state": "REVOKED",
+      "initiator": "ExecutionClosureFlow",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "CONSUMED",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "lease",
+      "from_state": "CONSUMED",
+      "to_state": "BRIDGED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "lease",
+      "from_state": "CONSUMED",
+      "to_state": "DRAFT",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "terminal_source"
+    },
+    {
+      "sm": "lease",
+      "from_state": "DRAFT",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "Forbidden"
+      },
+      "note": "forbidden_pair"
+    },
+    {
+      "sm": "lease",
+      "from_state": "DRAFT",
+      "to_state": "BRIDGED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "Forbidden"
+      },
+      "note": "forbidden_pair"
+    },
+    {
+      "sm": "lease",
+      "from_state": "DRAFT",
+      "to_state": "CONSUMED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "Forbidden"
+      },
+      "note": "forbidden_pair"
+    },
+    {
+      "sm": "lease",
+      "from_state": "DRAFT",
+      "to_state": "EXPIRED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InvalidTransition"
+      },
+      "note": "invalid_not_in_table"
+    },
+    {
+      "sm": "lease",
+      "from_state": "DRAFT",
+      "to_state": "REGISTERED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "DRAFT",
+      "to_state": "REGISTERED",
+      "initiator": "I",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "DRAFT",
+      "to_state": "REJECTED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "DRAFT",
+      "to_state": "REJECTED",
+      "initiator": "I",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "EXPIRED",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "lease",
+      "from_state": "EXPIRED",
+      "to_state": "BRIDGED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "lease",
+      "from_state": "EXPIRED",
+      "to_state": "DRAFT",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "terminal_source"
+    },
+    {
+      "sm": "lease",
+      "from_state": "FROZEN",
+      "to_state": "ACTIVE",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "FROZEN",
+      "to_state": "ACTIVE",
+      "initiator": "I",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "lease",
+      "from_state": "FROZEN",
+      "to_state": "ACTIVE",
+      "initiator": "I",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "lease",
+      "from_state": "FROZEN",
+      "to_state": "BRIDGED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InvalidTransition"
+      },
+      "note": "invalid_not_in_table"
+    },
+    {
+      "sm": "lease",
+      "from_state": "FROZEN",
+      "to_state": "EXPIRED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "FROZEN",
+      "to_state": "EXPIRED",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "FROZEN",
+      "to_state": "REGISTERED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "FROZEN",
+      "to_state": "REGISTERED",
+      "initiator": "I",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "lease",
+      "from_state": "FROZEN",
+      "to_state": "REGISTERED",
+      "initiator": "I",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "lease",
+      "from_state": "FROZEN",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "lease",
+      "from_state": "FROZEN",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "lease",
+      "from_state": "FROZEN",
+      "to_state": "REVOKED",
+      "initiator": "ExecutionClosureFlow",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REGISTERED",
+      "to_state": "ACTIVE",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REGISTERED",
+      "to_state": "ACTIVE",
+      "initiator": "I",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REGISTERED",
+      "to_state": "BRIDGED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "Forbidden"
+      },
+      "note": "forbidden_pair"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REGISTERED",
+      "to_state": "CONSUMED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InvalidTransition"
+      },
+      "note": "invalid_not_in_table"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REGISTERED",
+      "to_state": "EXPIRED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REGISTERED",
+      "to_state": "EXPIRED",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REGISTERED",
+      "to_state": "FROZEN",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REGISTERED",
+      "to_state": "FROZEN",
+      "initiator": "ExecutionClosureFlow",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REGISTERED",
+      "to_state": "REJECTED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REGISTERED",
+      "to_state": "REJECTED",
+      "initiator": "ExecutionClosureFlow",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REGISTERED",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REGISTERED",
+      "to_state": "REVOKED",
+      "initiator": "AuthorizationGovernance",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REGISTERED",
+      "to_state": "REVOKED",
+      "initiator": "ExecutionClosureFlow",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REJECTED",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REJECTED",
+      "to_state": "DRAFT",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "terminal_source"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REJECTED",
+      "to_state": "REGISTERED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REVOKED",
+      "to_state": "ACTIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REVOKED",
+      "to_state": "BRIDGED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "forbidden_pair_shadowed_by_terminal"
+    },
+    {
+      "sm": "lease",
+      "from_state": "REVOKED",
+      "to_state": "DRAFT",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "TerminalState"
+      },
+      "note": "terminal_source"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CAUTIOUS",
+      "to_state": "CIRCUIT_BREAKER",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CAUTIOUS",
+      "to_state": "CIRCUIT_BREAKER",
+      "initiator": "HealthMonitor",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CAUTIOUS",
+      "to_state": "CIRCUIT_BREAKER",
+      "initiator": "Reconciler",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "tag": "rust_only",
+      "reason": "RiskInitiator::Reconciler 僅存在於 Rust risk_gov.rs（Phase-6 對帳器自動收縮）；Python RiskInitiator enum 無此成員（genuine-gap，待 4b）。",
+      "note": "drift_reconciler_initiator"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CAUTIOUS",
+      "to_state": "DEFENSIVE",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CAUTIOUS",
+      "to_state": "DEFENSIVE",
+      "initiator": "HealthMonitor",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CAUTIOUS",
+      "to_state": "MANUAL_REVIEW",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CAUTIOUS",
+      "to_state": "MANUAL_REVIEW",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CAUTIOUS",
+      "to_state": "NORMAL",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CAUTIOUS",
+      "to_state": "NORMAL",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CAUTIOUS",
+      "to_state": "NORMAL",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CAUTIOUS",
+      "to_state": "NORMAL",
+      "initiator": "Reconciler",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "tag": "rust_only",
+      "reason": "RiskInitiator::Reconciler 僅存在於 Rust risk_gov.rs（Phase-6 對帳器自動收縮）；Python RiskInitiator enum 無此成員（genuine-gap，待 4b）。",
+      "note": "drift_reconciler_initiator"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CAUTIOUS",
+      "to_state": "REDUCED",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CAUTIOUS",
+      "to_state": "REDUCED",
+      "initiator": "HealthMonitor",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CIRCUIT_BREAKER",
+      "to_state": "CAUTIOUS",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InvalidTransition"
+      },
+      "note": "invalid_not_in_table"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CIRCUIT_BREAKER",
+      "to_state": "DEFENSIVE",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CIRCUIT_BREAKER",
+      "to_state": "DEFENSIVE",
+      "initiator": "HealthMonitor",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "INV-C_cb_recover_operator_only"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CIRCUIT_BREAKER",
+      "to_state": "DEFENSIVE",
+      "initiator": "IncidentPolicy",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "INV-C_cb_recover_operator_only"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CIRCUIT_BREAKER",
+      "to_state": "DEFENSIVE",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CIRCUIT_BREAKER",
+      "to_state": "DEFENSIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CIRCUIT_BREAKER",
+      "to_state": "DEFENSIVE",
+      "initiator": "RiskGovernor",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "INV-C_cb_recover_operator_only"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CIRCUIT_BREAKER",
+      "to_state": "MANUAL_REVIEW",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "CIRCUIT_BREAKER",
+      "to_state": "MANUAL_REVIEW",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "DEFENSIVE",
+      "to_state": "CAUTIOUS",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "DEFENSIVE",
+      "to_state": "CAUTIOUS",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "DEFENSIVE",
+      "to_state": "CAUTIOUS",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "DEFENSIVE",
+      "to_state": "CIRCUIT_BREAKER",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "DEFENSIVE",
+      "to_state": "CIRCUIT_BREAKER",
+      "initiator": "HealthMonitor",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "DEFENSIVE",
+      "to_state": "MANUAL_REVIEW",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "DEFENSIVE",
+      "to_state": "MANUAL_REVIEW",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "DEFENSIVE",
+      "to_state": "NORMAL",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InvalidTransition"
+      },
+      "note": "invalid_not_in_table"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "DEFENSIVE",
+      "to_state": "REDUCED",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "DEFENSIVE",
+      "to_state": "REDUCED",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "DEFENSIVE",
+      "to_state": "REDUCED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "CAUTIOUS",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "CAUTIOUS",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "CAUTIOUS",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "CIRCUIT_BREAKER",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InvalidTransition"
+      },
+      "note": "invalid_not_in_table"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "DEFENSIVE",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "DEFENSIVE",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "DEFENSIVE",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "NORMAL",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "NORMAL",
+      "initiator": "HealthMonitor",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "INV-C_manual_review_recover_operator_only"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "NORMAL",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "NORMAL",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "NORMAL",
+      "initiator": "RiskGovernor",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "INV-C_manual_review_recover_operator_only"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "REDUCED",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "REDUCED",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "MANUAL_REVIEW",
+      "to_state": "REDUCED",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "NORMAL",
+      "to_state": "CAUTIOUS",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "NORMAL",
+      "to_state": "CAUTIOUS",
+      "initiator": "HealthMonitor",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "NORMAL",
+      "to_state": "CAUTIOUS",
+      "initiator": "Reconciler",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "tag": "rust_only",
+      "reason": "RiskInitiator::Reconciler 僅存在於 Rust risk_gov.rs（Phase-6 對帳器自動收縮）；Python RiskInitiator enum 無此成員（genuine-gap，待 4b）。",
+      "note": "drift_reconciler_initiator"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "NORMAL",
+      "to_state": "CIRCUIT_BREAKER",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "NORMAL",
+      "to_state": "CIRCUIT_BREAKER",
+      "initiator": "HealthMonitor",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "NORMAL",
+      "to_state": "DEFENSIVE",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "NORMAL",
+      "to_state": "DEFENSIVE",
+      "initiator": "HealthMonitor",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "INV-A_escalation_auto_no_approval"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "NORMAL",
+      "to_state": "DEFENSIVE",
+      "initiator": "HealthMonitor",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "NORMAL",
+      "to_state": "DEFENSIVE",
+      "initiator": "RiskGovernor",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "tag": "rust_only",
+      "reason": "RiskEvent::NotificationFailsafeTimeout + FAILSAFE_DEFENSIVE_COOLING_MS(7d) + active_lock_profit_per_position 為 engine-only failsafe（AMD-2026-05-21-01 §Decision），Python SM 無對應 event/常數/hook（legit-engine-only）。",
+      "note": "drift_notification_failsafe_event"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "NORMAL",
+      "to_state": "MANUAL_REVIEW",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "NORMAL",
+      "to_state": "MANUAL_REVIEW",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "NORMAL",
+      "to_state": "REDUCED",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "NORMAL",
+      "to_state": "REDUCED",
+      "initiator": "HealthMonitor",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "REDUCED",
+      "to_state": "CAUTIOUS",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "REDUCED",
+      "to_state": "CAUTIOUS",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "REDUCED",
+      "to_state": "CAUTIOUS",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "REDUCED",
+      "to_state": "CIRCUIT_BREAKER",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "REDUCED",
+      "to_state": "CIRCUIT_BREAKER",
+      "initiator": "HealthMonitor",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "REDUCED",
+      "to_state": "DEFENSIVE",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "REDUCED",
+      "to_state": "DEFENSIVE",
+      "initiator": "HealthMonitor",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "REDUCED",
+      "to_state": "MANUAL_REVIEW",
+      "initiator": "ExpiryGuardian",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": false,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "REDUCED",
+      "to_state": "MANUAL_REVIEW",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": true,
+        "requires_approval": false
+      },
+      "note": "rule_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "REDUCED",
+      "to_state": "NORMAL",
+      "initiator": "ExpiryGuardian",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "InitiatorNotAllowed"
+      },
+      "note": "initiator_not_allowed"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "REDUCED",
+      "to_state": "NORMAL",
+      "initiator": "Operator",
+      "approved_by": null,
+      "expect": {
+        "allowed": false,
+        "requires_approval": true,
+        "error_kind": "ApprovalRequired"
+      },
+      "note": "approval_required_missing_approver"
+    },
+    {
+      "sm": "risk_gov",
+      "from_state": "REDUCED",
+      "to_state": "NORMAL",
+      "initiator": "Operator",
+      "approved_by": "operator_x",
+      "expect": {
+        "allowed": true,
+        "requires_approval": true
+      },
+      "note": "rule_allowed_with_approval"
+    }
+  ]
+}
