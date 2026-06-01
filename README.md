@@ -90,18 +90,20 @@ srv/
 │   │           │   ├── telegram_alerter.py      ← Telegram 告警
 │   │           │   └── static/                  ← GUI (login + OpenClaw Control Console tabs)
 │   │           └── tests/
-│   ├── local_model_tools/         ← 策略工具包（HTTP 路由层，无交易逻辑）
-│   ├── governance/                ← Phase 2 治理状态机（授权/风控/租约/对账/审计）
-│   ├── ai_agents/                 ← H1-H5 AI 治理层
-│   ├── risk_control/              ← H0 本地判断
-│   └── trade_executor/            ← I 决策租约
+│   ├── local_model_tools/         ← 策略工具包 stub-shim（计算已收编 Rust，仅保留 import 表面）
+│   ├── ai_agents/                 ← H1-H5 AI 治理层（冷路径 5-Agent host）
+│   ├── learning_engine/           ← 学习管线（Observation→Lesson→Hypothesis→Experiment→Verdict）
+│   ├── ml_training/               ← ML/DL 训练（Teacher-Student + LightGBM + Optuna）
+│   └── market_data_processor/     ← 市场数据清洗 / 加工
+│   ↳ 旧 governance/ · risk_control（H0）· trade_executor（Decision Lease）已迁移至 Rust
+│     （openclaw_core: governance_core.rs · h0_gate.rs · sm/risk_gov.rs），Python 目录已删除
 ├── docker_projects/
 │   ├── monitoring_services/       ← Grafana + 5 仪表盘
 │   └── trading_services/          ← PostgreSQL
 ├── rust/                          ← ★ Rust 交易引擎（交易 / 风控 / 策略配置 / 执行权威）
 │   ├── Cargo.toml                 ← Workspace: 3 crates
 │   ├── openclaw_types/            ← 10 shared types + serde (36 tests)
-│   ├── openclaw_core/             ← 24 modules: SM/indicators/signals/risk/backtest (~400 tests)
+│   ├── openclaw_core/             ← 24 modules: SM/indicators/signals/risk (~400 tests；backtest/portfolio 为 reserved-library，未接 API)
 │   ├── openclaw_engine/           ← 12+ modules: tick pipeline/strategies/paper state/canary (~2400 tests)
 │   └── schemas/                   ← Golden JSON schema (10 types)
 ├── helper_scripts/                ← ★ 详见 helper_scripts/SCRIPT_INDEX.md
