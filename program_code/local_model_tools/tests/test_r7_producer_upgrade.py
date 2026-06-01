@@ -435,10 +435,14 @@ def test_mlde_shadow_advisor_calibrated_replay_path(monkeypatch):
     )
 
     assert inserted == 1
-    # 2 execute call: SELECT V049 + V036 INSERT
-    assert len(cur.execute_calls) == 2
+    # 3 execute call: SET LOCAL timeout + SELECT V049 + V036 INSERT
+    assert len(cur.execute_calls) == 3
 
-    sql_insert, params_insert = cur.execute_calls[1]
+    timeout_sql, timeout_params = cur.execute_calls[0]
+    assert "SET LOCAL statement_timeout" in timeout_sql
+    assert timeout_params == (msa_mod.DEFAULT_PG_STATEMENT_TIMEOUT_MS,)
+
+    sql_insert, params_insert = cur.execute_calls[2]
     assert "verify_replay_evidence_and_insert" in sql_insert
     # mlde_shadow_advisor params 順序：
     # (engine_mode, symbol, strategy, source, rec_type, expected_bps,

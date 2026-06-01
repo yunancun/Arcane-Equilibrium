@@ -133,6 +133,7 @@ PBO_GATE = 0.5
 DSR_GATE = 0.95
 
 VALID_ENGINE_MODES = ("paper", "demo", "live", "live_demo")
+DEFAULT_PG_STATEMENT_TIMEOUT_MS = 2_000
 SCANNER_TEXT_FIELDS = (
     "scanner_market_regime",
     "scanner_trend_phase",
@@ -169,6 +170,7 @@ class ShadowAdvisorConfig:
     reward_scale_bps: float = 100.0
     confidence_cap: float = 0.85
     max_recommendations: int = 64
+    statement_timeout_ms: Optional[int] = DEFAULT_PG_STATEMENT_TIMEOUT_MS
 
 
 @dataclass(frozen=True)
@@ -195,6 +197,7 @@ def config_from_env(engine_mode: str = "demo") -> ShadowAdvisorConfig:
       OPENCLAW_MLDE_SHADOW_NEGATIVE_VETO_BPS
       OPENCLAW_MLDE_SHADOW_CONFIDENCE_CAP
       OPENCLAW_MLDE_SHADOW_MAX_RECOMMENDATIONS
+      OPENCLAW_MLDE_SHADOW_STATEMENT_TIMEOUT_MS
     """
 
     def _int(name: str, default: int) -> int:
@@ -230,6 +233,10 @@ def config_from_env(engine_mode: str = "demo") -> ShadowAdvisorConfig:
         negative_veto_bps=_float("OPENCLAW_MLDE_SHADOW_NEGATIVE_VETO_BPS", -2.0),
         confidence_cap=max(0.05, min(1.0, _float("OPENCLAW_MLDE_SHADOW_CONFIDENCE_CAP", 0.85))),
         max_recommendations=max(1, _int("OPENCLAW_MLDE_SHADOW_MAX_RECOMMENDATIONS", 64)),
+        statement_timeout_ms=_int(
+            "OPENCLAW_MLDE_SHADOW_STATEMENT_TIMEOUT_MS",
+            DEFAULT_PG_STATEMENT_TIMEOUT_MS,
+        ),
     )
 
 
@@ -243,6 +250,16 @@ def _engine_mode_scope(engine_mode: str) -> tuple[str, ...]:
     if engine_mode == "live":
         return ("live", "live_demo")
     return (engine_mode,)
+
+
+def _set_local_statement_timeout(cur: Any, statement_timeout_ms: Optional[int]) -> None:
+    """Set per-transaction PG statement timeout when enabled."""
+    if statement_timeout_ms is None:
+        return
+    timeout_ms = int(statement_timeout_ms)
+    if timeout_ms <= 0:
+        return
+    cur.execute("SET LOCAL statement_timeout = %s", (timeout_ms,))
 
 
 def _confidence(sample_count: int, avg_bps: float, cfg: ShadowAdvisorConfig) -> float:
@@ -311,6 +328,7 @@ def _fetch_aggregate_rows(dsn: str, cfg: ShadowAdvisorConfig) -> list[dict[str, 
         raise RuntimeError("psycopg2 not installed")
     with psycopg2.connect(dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path
         with conn.cursor() as cur:
+            _set_local_statement_timeout(cur, cfg.statement_timeout_ms)
             available_columns = _fetch_training_view_columns(cur)
             scanner_selects = _scanner_context_select_sql(available_columns)
             sql = f"""
@@ -409,6 +427,7 @@ def _persist_recommendations(
     replay_experiment_id_provider: Optional[
         Callable[[ShadowRecommendation], Optional[str]]
     ] = None,
+    statement_timeout_ms: Optional[int] = DEFAULT_PG_STATEMENT_TIMEOUT_MS,
 ) -> int:
     """REF-20 Sprint C2 R7-T1.5（PA §2B 漏列補位）：升級 calibrated_replay
     tier-aware insert。
@@ -473,6 +492,7 @@ def _persist_recommendations(
 
     with psycopg2.connect(dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path
         with conn.cursor() as cur:
+            _set_local_statement_timeout(cur, statement_timeout_ms)
             for rec in recommendations:
                 # R7-T1.5 metadata 構造（fail-soft）
                 tier_arg = "real_outcome"
@@ -571,7 +591,15 @@ def generate_shadow_recommendations(
         return {"skipped": "no_database_url", "inserted": 0, "recommendations": 0}
     rows = _fetch_aggregate_rows(resolved_dsn, cfg)
     recs = build_recommendations(rows, cfg)
-    inserted = 0 if dry_run else _persist_recommendations(resolved_dsn, recs)
+    inserted = (
+        0
+        if dry_run
+        else _persist_recommendations(
+            resolved_dsn,
+            recs,
+            statement_timeout_ms=cfg.statement_timeout_ms,
+        )
+    )
     return {
         "engine_mode": cfg.engine_mode,
         "aggregate_rows": len(rows),
@@ -892,6 +920,7 @@ def rank_and_veto_replay_candidates(
 
 __all__ = [
     "COST_EDGE_RATIO_GATE",
+    "DEFAULT_PG_STATEMENT_TIMEOUT_MS",
     "DSR_GATE",
     "PBO_GATE",
     "RankAndVetoGateInputs",
