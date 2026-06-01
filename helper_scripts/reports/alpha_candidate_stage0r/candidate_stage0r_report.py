@@ -45,6 +45,15 @@ except ImportError:
     from candidate_stage0r_runner import run_candidates  # type: ignore
     from a2_cascade_adapter import A2CandidateConfig  # type: ignore
 
+# 共享 PG 連線 helper（E5 finding #4 整併）。三段 fallback 理由同 metrics 模塊。
+try:
+    from helper_scripts.lib.pg_connect import connect_report_pg
+except ImportError:
+    _RR = Path(__file__).resolve().parents[3]
+    if str(_RR) not in sys.path:
+        sys.path.insert(0, str(_RR))
+    from helper_scripts.lib.pg_connect import connect_report_pg
+
 
 def _repo_root() -> Path:
     """解析 repo 根目錄，禁硬編碼路徑（feedback_cross_platform.md 跨平台原則）。"""
@@ -56,24 +65,16 @@ def _repo_root() -> Path:
 
 
 def _get_conn():
-    """連 PG read-only。mirror 8b/8c report wrapper（禁硬編碼 hostname）。"""
-    import psycopg2  # type: ignore
+    """連 PG read-only（委派共享 connect_report_pg；禁硬編碼 hostname）。
 
-    dsn = (
-        os.environ.get("OPENCLAW_DATABASE_URL")
-        or f"postgresql://{os.environ.get('POSTGRES_USER','')}"
-        f":{os.environ.get('POSTGRES_PASSWORD','')}"
-        f"@{os.environ.get('POSTGRES_HOST','127.0.0.1')}"
-        f":{os.environ.get('POSTGRES_PORT','5432')}"
-        f"/{os.environ.get('POSTGRES_DB','')}"
+    連線口徑與 8b/8c report wrapper 相同（共用 helper），僅 application_name 與
+    預設 timeout（180000ms）不同；psycopg2 連線失敗仍 fail-loud 由 caller
+    既有 exit-code 2 path propagate（不吞）。
+    """
+    return connect_report_pg(
+        "openclaw_alpha_candidate_stage0r",
+        statement_timeout_ms_default=180000,
     )
-    conn = psycopg2.connect(dsn, application_name="openclaw_alpha_candidate_stage0r")
-    with conn.cursor() as cur:
-        cur.execute(
-            "SET statement_timeout = %s",
-            (int(os.environ.get("OPENCLAW_STAGE0R_STATEMENT_TIMEOUT_MS", "180000")),),
-        )
-    return conn
 
 
 def fetch_k_prior(conn, *, mode: str) -> tuple[int, dict[str, object]]:

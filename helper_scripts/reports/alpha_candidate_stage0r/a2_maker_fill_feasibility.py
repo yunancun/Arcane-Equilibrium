@@ -24,6 +24,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+# 共享統計公式（E5 finding #3 整併）。本檔原有同邏輯的 local ``_safe_float``，
+# 改 re-export canonical。三段 fallback 理由同 8b/8c：既被 ``python -m`` 從 repo
+# root 跑，也被 smoke 以「script 目錄在 sys.path」直跑模式匯入。
+try:
+    from helper_scripts.lib import stats_common as _sc
+except ImportError:  # 直跑（非 -m）：補 repo root 後重試
+    _REPO_ROOT = Path(__file__).resolve().parents[3]
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+    from helper_scripts.lib import stats_common as _sc
+
 
 A2_ALPHA_SOURCE_ID = "liquidation_cascade_fade"
 RUNNER_VERSION = "a2_maker_fill_feasibility.v1"
@@ -757,14 +768,9 @@ def _median(values: Sequence[float]) -> float | None:
     return (ordered[midpoint - 1] + ordered[midpoint]) / 2.0
 
 
-def _safe_float(value: Any) -> float | None:
-    try:
-        result = float(value)
-    except (TypeError, ValueError):
-        return None
-    if not math.isfinite(result):
-        return None
-    return result
+# _safe_float 整併至 helper_scripts.lib.stats_common（與原 local 實作 byte-equiv：
+# float() 轉換失敗或非 finite → None）。re-export 保留本檔內既有 _safe_float 呼叫點。
+_safe_float = _sc._safe_float
 
 
 def _ts_sort_key(value: Any) -> float:

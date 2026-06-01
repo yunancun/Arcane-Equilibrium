@@ -7,14 +7,42 @@ from ``sql/queries/w_audit_8b_funding_skew_stage0r_features.sql``.
 from __future__ import annotations
 
 import math
-import random
 import statistics
+import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from itertools import combinations
-from statistics import NormalDist
+from pathlib import Path
 from typing import Iterable, Mapping, Sequence
+
+# 共享統計公式（E5 finding #3 整併）。8b / 8c / alpha_candidate 的共用統計從此
+# 取得單一真相源。為什麼三段 fallback：本模塊既被 ``python -m`` 從 repo root 跑
+# （helper_scripts.lib 直接可達），也被報告 / smoke 以「script 自身目錄在 sys.path」
+# 的直跑模式匯入（此時需把 repo root 補進 sys.path 才能定位 helper_scripts.lib）。
+try:
+    from helper_scripts.lib import stats_common as _sc
+except ImportError:  # 直跑（非 -m）：補 repo root 後重試
+    _REPO_ROOT = Path(__file__).resolve().parents[3]
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+    from helper_scripts.lib import stats_common as _sc
+
+# 直接 re-export（8b / 8c byte-identical，無 seed / 公式 divergence）。
+# 為什麼 re-export 而非只 import：下游 ``funding_skew_stage0r_smoke`` 與
+# ``alpha_candidate_stage0r.candidate_stage0r_runner`` 直接 `from ...metrics import`
+# 這些名字，必須保留在本模塊命名空間，否則破壞既有匯入。
+_safe_float = _sc._safe_float
+_safe_int = _sc._safe_int
+_normal_cdf = _sc._normal_cdf
+_skew = _sc._skew
+_kurtosis = _sc._kurtosis
+psr_bailey_ldp = _sc.psr_bailey_ldp
+dsr_with_k = _sc.dsr_with_k
+wilson_ci_95 = _sc.wilson_ci_95
+# ``_n_eff`` 8b 舊名 → canonical ``n_eff_horizon_overlap``（採 math.ceil 修正
+# 8b 原 ``// 5`` floor latent bug；canonical grid 15/30/60 結果不變，見
+# stats_common MODULE 註解 §3）。
+_n_eff = _sc.n_eff_horizon_overlap
+_day_bucket = _sc.day_bucket
 
 
 Z_GRID = (1.5, 2.0, 2.5)
@@ -80,73 +108,6 @@ class CandidateKey:
         )
 
 
-def _safe_float(value: object) -> float | None:
-    try:
-        out = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-    return out if math.isfinite(out) else None
-
-
-def _safe_int(value: object) -> int | None:
-    try:
-        return int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-
-
-def _normal_cdf(x: float) -> float:
-    return NormalDist().cdf(x)
-
-
-def _skew(values: Sequence[float]) -> float | None:
-    if len(values) < 3:
-        return None
-    mean = statistics.mean(values)
-    var = sum((v - mean) ** 2 for v in values) / len(values)
-    if var <= 0:
-        return None
-    sd = math.sqrt(var)
-    return sum(((v - mean) / sd) ** 3 for v in values) / len(values)
-
-
-def _kurtosis(values: Sequence[float]) -> float | None:
-    if len(values) < 4:
-        return None
-    mean = statistics.mean(values)
-    var = sum((v - mean) ** 2 for v in values) / len(values)
-    if var <= 0:
-        return None
-    sd = math.sqrt(var)
-    return sum(((v - mean) / sd) ** 4 for v in values) / len(values)
-
-
-def psr_bailey_ldp(values: Sequence[float], sr_benchmark: float = 0.0) -> float | None:
-    clean = [v for v in values if math.isfinite(v)]
-    if len(clean) < 4:
-        return None
-    sd = statistics.stdev(clean)
-    if sd <= 0:
-        return None
-    sr_hat = statistics.mean(clean) / sd
-    skew = _skew(clean)
-    kurt = _kurtosis(clean)
-    if skew is None or kurt is None:
-        return None
-    denom_sq = 1.0 - skew * sr_hat + ((kurt - 1.0) / 4.0) * (sr_hat**2)
-    if denom_sq <= 0:
-        return None
-    z = (sr_hat - sr_benchmark) * math.sqrt(len(clean) - 1) / math.sqrt(denom_sq)
-    return _normal_cdf(z)
-
-
-def dsr_with_k(values: Sequence[float], k_total: int) -> float | None:
-    if k_total <= 1:
-        return None
-    sr_benchmark = math.sqrt(2.0 * math.log(k_total))
-    return psr_bailey_ldp(values, sr_benchmark=sr_benchmark)
-
-
 def block_bootstrap_ci(
     values: Sequence[float],
     *,
@@ -154,22 +115,17 @@ def block_bootstrap_ci(
     iterations: int = 400,
     seed: int = 20260515,
 ) -> tuple[float, float] | None:
-    clean = [v for v in values if math.isfinite(v)]
-    if len(clean) < block_size:
-        return None
-    rng = random.Random(seed)
-    means: list[float] = []
-    blocks_per_iter = max(1, math.ceil(len(clean) / block_size))
-    for _ in range(iterations):
-        sample: list[float] = []
-        for _b in range(blocks_per_iter):
-            start = rng.randint(0, len(clean) - block_size)
-            sample.extend(clean[start:start + block_size])
-        means.append(statistics.mean(sample[:len(clean)]))
-    means.sort()
-    lo = max(0, int(0.025 * iterations))
-    hi = min(iterations - 1, int(0.975 * iterations))
-    return means[lo], means[hi]
+    """8b block bootstrap CI wrapper — 委派 stats_common，pin 8b 歷史 seed。
+
+    為什麼保留此薄 wrapper 而非直接 re-export：8b 歷史 default seed=20260515
+    （與 8c 的 20260518 不同），整併後必須維持 8b 報告的 byte-level 數值；
+    canonical ``stats_common.block_bootstrap_ci`` 的 seed 為必填無預設，由此處
+    pin 入 8b 值。block_size 預設 PRIMARY；caller（_summary_stats）仍可覆蓋成
+    FUNDING_BOOTSTRAP_BLOCK_SIZE。
+    """
+    return _sc.block_bootstrap_ci(
+        values, block_size=block_size, iterations=iterations, seed=seed
+    )
 
 
 def _summary_stats(
@@ -206,14 +162,6 @@ def _summary_stats(
     return summary
 
 
-def _day_bucket(signal_ts_ms: int) -> str:
-    return datetime.fromtimestamp(signal_ts_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
-
-
-def _n_eff(n: int, horizon_min: int) -> int:
-    return int(n / max(1, horizon_min // 5))
-
-
 def _k_new_min_for_z_grid(z_grid: Sequence[float]) -> int:
     return (
         MIN_STAGE0R_SYMBOLS
@@ -223,21 +171,6 @@ def _k_new_min_for_z_grid(z_grid: Sequence[float]) -> int:
         * len(OI_GRID)
         * len(HORIZONS)
     )
-
-
-def wilson_ci_95(n: int, n_eff: int) -> tuple[float, float] | None:
-    if n <= 0 or n_eff < 0 or n_eff > n:
-        return None
-    z = 1.96
-    p_hat = n_eff / n
-    z_sq = z * z
-    denom = 1.0 + z_sq / n
-    center = (p_hat + z_sq / (2 * n)) / denom
-    inner = p_hat * (1.0 - p_hat) / n + z_sq / (4 * n * n)
-    if inner < 0.0:
-        return None
-    margin = z * math.sqrt(inner) / denom
-    return max(0.0, center - margin), min(1.0, center + margin)
 
 
 def _funding_interval_by_symbol(rows: Sequence[Mapping[str, object]]) -> dict[str, int | None]:
@@ -552,75 +485,12 @@ def _plateau_check(
 
 
 def _pbo(candidates: Mapping[str, Mapping[str, float]], *, max_splits: int = 240) -> dict[str, object]:
-    days = sorted({day for daily in candidates.values() for day in daily})
-    candidate_keys = list(candidates)
-    if len(days) < 4 or len(candidate_keys) < 10:
-        return {
-            "value": None,
-            "method": "day_block_cscv",
-            "usable_splits": 0,
-            "reason": "insufficient_days_or_candidates",
-            "day_count": len(days),
-            "candidate_count": len(candidate_keys),
-        }
-    train_size = len(days) // 2
-    combo_count = math.comb(len(days), train_size)
-    if combo_count <= max_splits:
-        combos = list(combinations(days, train_size))
-    else:
-        rng = random.Random(20260516)
-        seen: set[tuple[str, ...]] = set()
-        combos = []
-        attempts = 0
-        while len(combos) < max_splits and attempts < max_splits * 20:
-            train = tuple(sorted(rng.sample(days, train_size)))
-            if train not in seen:
-                seen.add(train)
-                combos.append(train)
-            attempts += 1
-    splits = [(set(train), set(days) - set(train)) for train in combos]
-    bad = 0
-    usable = 0
-    for train_days, test_days in splits:
-        train_scores: dict[str, float] = {}
-        test_scores: dict[str, float] = {}
-        for key, daily in candidates.items():
-            train_vals = [daily[d] for d in train_days if d in daily]
-            test_vals = [daily[d] for d in test_days if d in daily]
-            if train_vals and test_vals:
-                train_scores[key] = statistics.mean(train_vals)
-                test_scores[key] = statistics.mean(test_vals)
-        if len(train_scores) < 10 or len(test_scores) < 10:
-            continue
-        best = max(train_scores, key=train_scores.get)
-        ranked = sorted(test_scores.values())
-        best_test = test_scores.get(best)
-        if best_test is None:
-            continue
-        median_rank = ranked[len(ranked) // 2]
-        bad += int(best_test < median_rank)
-        usable += 1
-    if usable == 0:
-        return {
-            "value": None,
-            "method": "day_block_cscv",
-            "usable_splits": 0,
-            "reason": "no_usable_cscv_splits",
-            "day_count": len(days),
-            "candidate_count": len(candidate_keys),
-            "requested_splits": len(splits),
-        }
-    return {
-        "value": bad / usable,
-        "method": "day_block_cscv",
-        "usable_splits": usable,
-        "day_count": len(days),
-        "candidate_count": len(candidate_keys),
-        "requested_splits": len(splits),
-        "train_day_count": train_size,
-        "test_day_count": len(days) - train_size,
-        "reason": None,
-    }
+    """8b PBO（CSCV）wrapper — 委派 stats_common，pin 8b 歷史 seed=20260516。
+
+    為什麼 wrapper：當 day combination > max_splits 走亂數抽樣時結果依賴 seed；
+    8b 歷史用 20260516（與 8c 的 20260518 不同），整併後必須維持 8b 報告數值。
+    """
+    return _sc.pbo_cscv(candidates, seed=20260516, max_splits=max_splits)
 
 
 def compute_stage0r(
