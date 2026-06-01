@@ -79,6 +79,12 @@ htmlcov/
 coverage.xml
 
 # -----------------------------
+# DB dumps / backups（政策：DB 导出归 NAS / backup_files，不入 git）
+# -----------------------------
+*.dump
+backups/*.sql
+
+# -----------------------------
 # OS / Editor / SMB
 # -----------------------------
 .DS_Store
