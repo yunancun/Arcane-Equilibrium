@@ -1102,3 +1102,66 @@ fn test_without_convergence_drift_position_and_loop_persist() {
         "未收斂時 positions() 仍含漂移倉 → 迴圈源頭未斷（收斂測試有效）"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// QTY-ZERO-SKIP-1：exchange-precision round-to-zero「靜默 skip 不 reject」counter
+//
+// 設計（CC P0 guard）：gate 已批准（approved_qty > 0）但交易所精度取整後 final_qty
+// → 0（高價幣取整噪音）時，dispatch 不寫 reject label / 不污染 decision_features，
+// 僅累計 stats.qty_zero_skips 低基數 counter（step_4_5_dispatch.rs `if final_qty
+// <= 0.0` 分支）。
+//
+// 註：完整「strategy Open → 全 gate 批准 → round_qty → 0 → skip」端到端路徑需先
+// 餵 14+ klines（ATR_14 > 0，否則 cost_gate SEC-11 fail-closed）+ fee rates（否則
+// cold-boot fail-closed）+ 過 Guardian/cost_gate_moderate，屬 gate-chain 冷啟動
+// scaffolding。step_4_5_dispatch.rs MODULE_NOTE 明令該 dispatch 測試檔不引入端到端
+// pipeline 腳手架，且本倉所有 entry-path 測試皆以 apply_fill 直接種倉、無既有
+// approved-entry 配方。端到端 skip 行為交 E4 replay / runtime 覆蓋；此處鎖定本次
+// 新增的可觀察契約：counter 欄位 default = 0、serde 向後相容（舊 snapshot 缺欄位
+// deserialize 退 0）、且暴露於 snapshot.stats。
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// QTY-ZERO-SKIP-1：新 counter 欄位 default = 0，且透過 `snapshot()` 暴露在
+/// `stats.qty_zero_skips`（監控可讀）。
+#[test]
+fn test_qty_zero_skips_counter_defaults_zero_and_exposed_in_snapshot() {
+    let pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    assert_eq!(
+        pipeline.stats.qty_zero_skips, 0,
+        "fresh pipeline 的 qty_zero_skips 必為 0"
+    );
+    let snap = pipeline.snapshot();
+    assert_eq!(
+        snap.stats.qty_zero_skips, 0,
+        "snapshot.stats 必須暴露 qty_zero_skips（監控面）"
+    );
+}
+
+/// QTY-ZERO-SKIP-1：`TickStats` 缺 `qty_zero_skips` 的舊版 snapshot JSON 必須仍能
+/// deserialize（`#[serde(default)]` 向後相容）。沒這條保護，引擎重啟讀舊
+/// CanaryRecord / PipelineStatus 會 deserialize 失敗。
+#[test]
+fn test_tick_stats_deserializes_legacy_json_without_qty_zero_skips() {
+    // 舊版 schema：無 qty_zero_skips 欄位。
+    let legacy = r#"{
+        "total_ticks": 7,
+        "total_intents": 3,
+        "total_fills": 2,
+        "total_stops": 1,
+        "last_tick_ms": 1700000000000
+    }"#;
+    let stats: TickStats =
+        serde_json::from_str(legacy).expect("legacy TickStats JSON 必須能 deserialize");
+    assert_eq!(stats.total_ticks, 7);
+    assert_eq!(stats.total_intents, 3);
+    assert_eq!(
+        stats.qty_zero_skips, 0,
+        "缺欄位時 serde(default) 必須退回 0"
+    );
+
+    // round-trip：序列化後新欄位存在，再 deserialize 一致。
+    let json = serde_json::to_string(&stats).expect("serialize");
+    let back: TickStats = serde_json::from_str(&json).expect("round-trip deserialize");
+    assert_eq!(back.qty_zero_skips, 0);
+    assert_eq!(back.total_ticks, 7);
+}

@@ -112,6 +112,11 @@ pub struct BbReversion {
     /// W-AUDIT-6d #6 — MA 種類（sma_20 / sma_50 / ema_12 / ema_26）。
     /// W-AUDIT-6d #6: MA kind for confirmation gate.
     pub(crate) ma_confirmation_kind: String,
+    /// Track B (2026-06-01) — Hurst regime 入場硬 gate flag，預設 true。
+    /// 穩定 regime != AntiPersistent（mean_reverting）→ skip entry；Hurst 不可得
+    /// → fail-closed skip。accumulate-only，與 `hurst_regime_boost` 正交。
+    /// 語義詳見 `BbReversionParams::require_mean_reverting_regime`。
+    pub(crate) require_mean_reverting_regime: bool,
 }
 
 impl BbReversion {
@@ -146,6 +151,8 @@ impl BbReversion {
             // W-AUDIT-6d #6 (AMD-2026-05-09-02 §3): default ON。
             require_ma_confirmation: true,
             ma_confirmation_kind: "sma_50".to_string(),
+            // Track B (2026-06-01): Hurst regime 入場硬 gate 預設 ON。
+            require_mean_reverting_regime: true,
         }
     }
 
@@ -234,6 +241,8 @@ impl BbReversion {
         // W-AUDIT-6d #6 (AMD-2026-05-09-02 §3): hot-reload MA pair confirmation。
         self.require_ma_confirmation = params.require_ma_confirmation;
         self.ma_confirmation_kind = params.ma_confirmation_kind;
+        // Track B (2026-06-01): hot-reload Hurst regime 入場硬 gate。
+        self.require_mean_reverting_regime = params.require_mean_reverting_regime;
         info!(strategy = "bb_reversion", "params updated / 參數已更新");
         Ok(())
     }
@@ -267,6 +276,8 @@ impl BbReversion {
             // W-AUDIT-6d #6 (AMD-2026-05-09-02 §3): round-trip MA pair gate config。
             require_ma_confirmation: self.require_ma_confirmation,
             ma_confirmation_kind: self.ma_confirmation_kind.clone(),
+            // Track B (2026-06-01): round-trip Hurst regime 入場硬 gate config。
+            require_mean_reverting_regime: self.require_mean_reverting_regime,
         }
     }
 
@@ -533,6 +544,48 @@ impl Strategy for BbReversion {
                 }
 
                 if let Some(is_long) = signal {
+                    // Track B (2026-06-01) — Hurst regime 入場硬 gate。
+                    // 為什麼：診斷顯示 bb_reversion 僅在 mean_reverting（Hurst
+                    // `AntiPersistent`）regime 有正向 forward edge（OOS 兩半 mean+median
+                    // 均 > 成本），其他 regime 賠掉淨值。把既有 regime 從 confidence
+                    // boost（:442-450，保留不動）升級為 entry 硬 gate：
+                    //   1. gate 關閉（require_mean_reverting_regime=false）→ 回退舊行為。
+                    //   2. Hurst 不可得（ind.hurst=None，warm-up 不足/退化）→ fail-closed
+                    //      skip（§二 原則 6；比舊行為「None→boost=0 但仍交易」更保守）。
+                    //   3. 穩定 regime != AntiPersistent（mean_reverting）→ skip entry。
+                    // leak-free：復用 :444 的同一判斷，只讀 `ind.hurst.regime` 既有
+                    // point-in-time 值（上游 R/S trailing window + HysteresisDetector
+                    // trailing lag 算好），不重算、不窺視任何當前 bar 之後的未來資訊。
+                    // 無 first-detection deadlock：每 tick 重讀當前 snapshot，regime 切回
+                    // mean_reverting 後立即重新 fire（無 is_none() 永久 guard）。
+                    // accumulate-only：僅讓策略在對的 regime 累積乾淨樣本，非 promotion。
+                    if self.require_mean_reverting_regime {
+                        let regime_allows = match &ind.hurst {
+                            Some(h) => {
+                                crate::regime::RegimeLabel::from_legacy_str(&h.regime)
+                                    == crate::regime::RegimeLabel::AntiPersistent
+                            }
+                            // fail-closed：Hurst 不可得 → 不交易。
+                            None => false,
+                        };
+                        if !regime_allows {
+                            let regime_label = ind
+                                .hurst
+                                .as_ref()
+                                .map(|h| h.regime.as_str())
+                                .unwrap_or("none");
+                            tracing::debug!(
+                                target: "bb_reversion",
+                                symbol = %ctx.symbol,
+                                is_long = is_long,
+                                regime = regime_label,
+                                "skip entry: Hurst regime gate requires mean_reverting (Track B)"
+                            );
+                            // persistence 已 check 過，clear 以免下次誤判已滿足持續性。
+                            self.persistence.clear(ctx.symbol);
+                            return intents;
+                        }
+                    }
                     if !btc_lead_lag_allows_reversion_entry(is_long, btc_lead_lag_signal.as_ref()) {
                         self.persistence.clear(ctx.symbol);
                         let expected_dir = btc_lead_lag_signal

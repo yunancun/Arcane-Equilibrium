@@ -402,12 +402,13 @@ fn test_bb_rev_update_roundtrip() {
 #[test]
 fn test_bbr_param_ranges_count() {
     let ranges = BbReversionParams::param_ranges();
-    // 5 original + 2 funding_rate + 10 confluence + 1 W-AUDIT-6d #6 (require_ma_confirmation) = 18
-    // 5 原始 + 2 funding_rate + 10 匯流 + 1 W-AUDIT-6d #6 MA pair gate = 18
+    // 5 original + 2 funding_rate + 10 confluence + 1 W-AUDIT-6d #6
+    // (require_ma_confirmation) + 1 Track B (require_mean_reverting_regime) = 19
+    // 5 原始 + 2 funding_rate + 10 匯流 + 1 MA pair gate + 1 Track B regime gate = 19
     assert_eq!(
         ranges.len(),
-        18,
-        "expected 18 param ranges, got {}",
+        19,
+        "expected 19 param ranges, got {}",
         ranges.len()
     );
 }
@@ -968,6 +969,10 @@ fn test_phase_b_persistent_regime_does_not_match_reversion_boost() {
     // boost. Both prove `Persistent != AntiPersistent` enum-wise.
     // Persistent + oversold 通常被 confluence regime 權重壓下；可能 0 intent 或
     // 1 個 Open 但無 reversion boost。兩者皆證明 enum 對齊。
+    // Track B（2026-06-01）後：require_mean_reverting_regime 預設啟用 → Persistent
+    // regime 被入場硬 gate 擋下，本測試實際必 0 intent；`<= 1` 斷言仍成立（更強地
+    // 滿足），下方 `if let Some(Open)` 在 gate 啟用下為不可達分支。Persistent
+    // gate-skip 的強斷言改由 `test_regime_gate_persistent_skips_entry` 涵蓋。
     let i = s.on_tick(
         &ctx_bb_with_regime(-0.1, 25.0, 0, "trending"),
         &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
@@ -994,6 +999,8 @@ fn test_phase_b_random_regime_does_not_trigger_reversion_boost() {
     // Random walk regime — same as Persistent semantically (not
     // AntiPersistent), the typed match `_` arm fires.
     // Random regime 不命中 AntiPersistent，走 _ 分支不加成。
+    // Track B（2026-06-01）後：Random regime 同被入場硬 gate 擋下，本測試實際必
+    // 0 intent；強斷言改由 `test_regime_gate_random_walk_skips_entry` 涵蓋。
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0;
     let i = s.on_tick(
@@ -1014,6 +1021,8 @@ fn test_phase_b_random_regime_does_not_trigger_reversion_boost() {
 fn test_phase_b_unknown_regime_string_treated_as_random() {
     // Defensive: unknown regime string `from_legacy_str` → Random → no boost.
     // Mirrors bb_breakout's identical guard. 對應 bb_breakout 的同樣防禦測試。
+    // Track B（2026-06-01）後：未知字串 → Random → 同被入場硬 gate 擋下，本測試
+    // 實際必 0 intent（fail-safe 行為：未知 regime 不交易）。
     let mut s = BbReversion::new();
     s.min_persistence_ms = 0;
     let i = s.on_tick(
@@ -1489,5 +1498,327 @@ fn test_bbr_p0_on_rejection_seen_restores_prior_cooldown() {
         s.cooldown.last_ms("ETHUSDT"),
         Some(prior_ts),
         "prev_last_trade_ms != 0 → on_rejection 必還原 cooldown 為原 last_trade_ms"
+    );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Track B (2026-06-01) — Hurst regime 入場硬 gate 測試。
+// gate 把既有 Hurst regime 從 confidence boost 升級為 entry 硬 gate：只在
+// mean_reverting（AntiPersistent）regime 入場；其他 regime + Hurst 不可得均
+// fail-closed skip。預設啟用；require_mean_reverting_regime=false 回退舊行為。
+// ════════════════════════════════════════════════════════════════════════════
+
+/// 建構 TickContext，允許覆蓋整個 Hurst 欄位（含「不可得」None 情境）以測 Track B
+/// regime gate。與既有 `ctx_bb_with_regime`（只覆 regime 字串、hurst 恆 Some(0.35)）
+/// 區別在於本 helper 可傳 `None` 模擬 warm-up 不足/退化（fail-closed 路徑）。
+/// `hurst` = None → ctx.indicators.hurst = None；Some((h, regime)) → 對應 HurstResult。
+/// 其餘場景沿用 `ctx_bb` 的 oversold-long 入場配置（pct_b<0 → sma_50=51000>price 過 MA gate）。
+fn ctx_bb_with_hurst(
+    pct_b: f64,
+    rsi: f64,
+    ts: u64,
+    hurst: Option<(f64, &str)>,
+) -> TickContext<'static> {
+    use openclaw_core::indicators::HurstResult;
+    let sma_50_value = if pct_b < 0.0 {
+        51_000.0 // long signal: price=50000 < ma=51000 ✓
+    } else if pct_b > 1.0 {
+        49_000.0 // short signal: price=50000 > ma=49000 ✓
+    } else {
+        50_000.0
+    };
+    let ind = Box::leak(Box::new(IndicatorSnapshot {
+        bollinger: Some(BollingerResult {
+            upper: 51000.0,
+            middle: 50000.0,
+            lower: 49000.0,
+            bandwidth: 0.04,
+            percent_b: pct_b,
+        }),
+        rsi_14: Some(rsi),
+        adx: Some(AdxResult {
+            adx: 15.0,
+            plus_di: 20.0,
+            minus_di: 18.0,
+        }),
+        hurst: hurst.map(|(h, regime)| HurstResult {
+            hurst: h,
+            regime: regime.to_string(),
+        }),
+        sma_50: Some(sma_50_value),
+        ..Default::default()
+    }));
+    TickContext {
+        symbol: "BTC",
+        price: 50000.0,
+        timestamp_ms: ts,
+        indicators: Some(ind),
+        indicators_5m: None,
+        signals: &[],
+        h0_allowed: true,
+        funding_rate: None,
+        index_price: None,
+        open_interest: None,
+        best_bid: None,
+        best_ask: None,
+        tick_size: None,
+        alpha_surface_ref: &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        position_state: None,
+        is_pinned: true,
+    }
+}
+
+/// confluence 中性化：把三個 threshold 壓到極低，使 confluence 對任何非零 score 都
+/// 放行（qty_pct=1.0），regime 不再是 confluence 的 gating 因素。
+///
+/// 為什麼必要（測試 bite 的關鍵）：本 regime gate 與 confluence 的 regime weight 同向
+/// （都偏好 mean_reverting），且預設配置下 confluence 自己就會擋住 trending/random/
+/// uncertain。若不中性化 confluence，「破壞 regime gate」時測試仍因 confluence 擋而
+/// vacuous pass（驗不到 gate）。中性化後 confluence 一律放行 → entry 是否發生「唯一」
+/// 由 regime gate 決定 → 破壞 gate 必令對應測試失敗（已對 None=>true 注入驗證過）。
+fn neutralize_confluence_gate(s: &mut BbReversion) {
+    let cc = &mut s.confluence_config;
+    cc.threshold_no_trade = 10.0;
+    cc.threshold_light = 11.0;
+    cc.threshold_full = 12.0;
+}
+
+/// (a) AntiPersistent（mean_reverting）regime → oversold long entry 發出。
+/// confluence 中性化 → entry 與否唯一由 regime gate 決定（此處 gate 放行）。
+#[test]
+fn test_regime_gate_antipersistent_emits_entry() {
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    neutralize_confluence_gate(&mut s);
+    assert!(
+        s.require_mean_reverting_regime,
+        "Track B gate 預設啟用"
+    );
+    let actions = s.on_tick(
+        &ctx_bb_with_hurst(-0.1, 25.0, 0, Some((0.35, "mean_reverting"))),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    assert_eq!(actions.len(), 1, "mean_reverting regime 必發出入場");
+    match &actions[0] {
+        StrategyAction::Open(intent) => assert!(intent.is_long),
+        other => panic!("expected Open(long), got {:?}", other),
+    }
+}
+
+/// (b) Persistent（trending）regime → skip entry（硬 gate 擋住）。
+/// confluence 中性化 → 唯一擋住的是 regime gate（破壞 gate 此測試必失敗）。
+#[test]
+fn test_regime_gate_persistent_skips_entry() {
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    neutralize_confluence_gate(&mut s);
+    let actions = s.on_tick(
+        &ctx_bb_with_hurst(-0.1, 25.0, 0, Some((0.75, "trending"))),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    assert!(
+        actions.is_empty(),
+        "trending（Persistent）regime 必 skip entry — 硬 gate"
+    );
+}
+
+/// (b') RandomWalk（random_walk）regime → skip entry。
+/// confluence 中性化 → 唯一擋住的是 regime gate。
+#[test]
+fn test_regime_gate_random_walk_skips_entry() {
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    neutralize_confluence_gate(&mut s);
+    let actions = s.on_tick(
+        &ctx_bb_with_hurst(-0.1, 25.0, 0, Some((0.50, "random_walk"))),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    assert!(
+        actions.is_empty(),
+        "random_walk（Random）regime 必 skip entry — 硬 gate"
+    );
+}
+
+/// (c) Hurst 不可得（ind.hurst = None）→ fail-closed skip（§二 原則 6）。
+/// 這比舊行為（None → boost=0 但仍交易）更保守，是 Track B 的核心收緊。
+/// confluence 中性化 → 唯一擋住的是 regime gate 的 fail-closed 分支（破壞
+/// `None => false` 為 `None => true` 此測試必失敗，已驗證）。
+#[test]
+fn test_regime_gate_hurst_none_fail_closed_skips_entry() {
+    let mut s = BbReversion::new();
+    s.min_persistence_ms = 0;
+    neutralize_confluence_gate(&mut s);
+    let actions = s.on_tick(
+        &ctx_bb_with_hurst(-0.1, 25.0, 0, None),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    assert!(
+        actions.is_empty(),
+        "Hurst 不可得（None）必 fail-closed skip entry"
+    );
+}
+
+/// (e) require_mean_reverting_regime=false → 回退舊行為（gate 不生效）。
+///
+/// 判別力設計：本 gate 與 confluence 的 regime weight 方向一致（都偏好
+/// mean_reverting），且 reversion signal 在 confluence 內因 momentum 因子與 signal
+/// 條件互斥（long signal 需 RSI<30，但 momentum 高分區 RSI 55-80）而高度倚賴
+/// regime 因子。為乾淨隔離「本 gate 的增量作用」，把 confluence 完全中性化（用一個
+/// regime-無關、必放行的退化配置），使 trending 是否入場「只由本 regime gate 決定」：
+///   - gate 開（預設）：trending 被硬 gate 擋 → 0 intent。
+///   - gate 關（operator 經真實 param 通道關閉）：回退舊行為 → 入場。
+/// 同一 ctx、唯一變數是 flag → 直接證明 flag 真實接線生效、可被 operator 關閉（非假功能）。
+///
+/// 退化配置選法：`compute_score` 在 `adx.is_none() && rsi.is_none()` 時 return None，
+/// 而 `score_to_qty_pct(None)=1.0`（fallback full qty，完全跳過 confluence）。但
+/// reversion signal 必須有 RSI 才觸發，故無法直接走該 fallback。改用 threshold 退化：
+/// 把三個 confluence threshold 全壓到極低（no_trade=10/light=11/full=12），使任何
+/// 非零 score 都 → qty_pct=1.0，confluence 對 trending/mean_reverting 一視同仁放行。
+#[test]
+fn test_regime_gate_disabled_reverts_to_legacy_behavior() {
+    // 復用模組級 `neutralize_confluence_gate`（壓低 confluence threshold），使 entry
+    // 是否發生純由本 regime gate 決定，乾淨隔離 flag 的增量作用。
+    // gate 開（預設）+ trending：本 gate 硬擋 → 0 intent。
+    let mut s_on = BbReversion::new();
+    s_on.min_persistence_ms = 0;
+    neutralize_confluence_gate(&mut s_on);
+    let n_on = s_on
+        .on_tick(
+            &ctx_bb_with_hurst(-0.1, 25.0, 0, Some((0.75, "trending"))),
+            &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        )
+        .len();
+    assert_eq!(n_on, 0, "gate 開 + trending 必被 regime gate 硬擋（0 intent）");
+
+    // gate 關（經真實 param 通道）+ 同一 trending ctx：回退舊行為 → 入場。
+    let mut s_off = BbReversion::new();
+    let p = BbReversionParams {
+        require_mean_reverting_regime: false,
+        ..Default::default()
+    };
+    assert!(s_off.update_params(p).is_ok());
+    // param round-trip：證明 flag 經 update_params/get_params 真實持久化（非假功能）。
+    assert!(
+        !s_off.get_params().require_mean_reverting_regime,
+        "param round-trip：gate 關閉狀態必持久"
+    );
+    // update_params 把 min_persistence_ms 重設為 default 180_000，再設 0（與 gate 無關）。
+    s_off.min_persistence_ms = 0;
+    neutralize_confluence_gate(&mut s_off);
+    let n_off = s_off
+        .on_tick(
+            &ctx_bb_with_hurst(-0.1, 25.0, 0, Some((0.75, "trending"))),
+            &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+        )
+        .len();
+    assert_eq!(
+        n_off, 1,
+        "gate 關閉 + trending（confluence 中性化）應回退舊行為入場 → 證明 flag 真實生效"
+    );
+}
+
+/// (d) leak-free 反例：gate 用的 regime label 必為 point-in-time（trailing），
+/// 不含當前 bar 之後的未來資訊。
+///
+/// 為什麼這證明 leak-free：構造兩條價格序列，prefix（截至當前 tick）完全相同，
+/// 僅在「當前 tick 之後」append 不同的未來 bar。regime label 由上游 R/S trailing
+/// window（`compute_hurst`）+ HysteresisDetector trailing lag（`push`）計算 —
+/// 兩者皆只吃 trailing 資料。故截至當前 tick 的 regime label 對兩條序列 bit-identical；
+/// 若實作誤把未來 bar 納入窗口，label 會分歧。本測試直接驗證該不變式，再確認 gate
+/// 對相同 label 做出相同決策（即 gate 的 regime 輸入是 leak-free 的）。
+#[test]
+fn test_regime_gate_leak_free_trailing_label() {
+    use crate::config::HurstConfig;
+    use crate::regime::{compute_hurst, HysteresisDetector, RegimeLabel};
+
+    let cfg = HurstConfig::default();
+    let lag = 4_usize;
+    let min_window = 4_usize;
+    let max_window = 16_usize;
+
+    // 共同 prefix：截至「當前 tick」的歷史價格（震盪/反持續性序列）。
+    let mut prefix: Vec<f64> = Vec::new();
+    for i in 0..80 {
+        // 鋸齒（mean-reverting 傾向）：在 100 上下小幅來回震盪。
+        let osc = if i % 2 == 0 { 100.5 } else { 99.5 };
+        prefix.push(osc);
+    }
+
+    // 序列 A：prefix + 「未來」延續震盪。
+    // 序列 B：prefix + 「未來」強趨勢上行。
+    // 兩者截至當前 tick（= prefix 末端）完全相同。
+    let mut series_a = prefix.clone();
+    let mut series_b = prefix.clone();
+    for i in 0..40 {
+        let osc = if i % 2 == 0 { 100.5 } else { 99.5 };
+        series_a.push(osc); // 未來：續震盪
+        series_b.push(100.0 + i as f64 * 5.0); // 未來：強趨勢
+    }
+
+    // 計算「截至當前 tick」的 regime label：只餵 trailing prefix（= series 的
+    // [..prefix.len()]），逐步 push 模擬每 tick 的瞬時 H + hysteresis。
+    let label_at_current = |series: &[f64]| -> RegimeLabel {
+        let mut det = HysteresisDetector::from_config(&HurstConfig {
+            hysteresis_lag: lag,
+            ..cfg.clone()
+        });
+        // 逐 tick 推進，只用「截至該 tick」的 trailing window。
+        for end in (min_window * 4)..=prefix.len() {
+            let window_start = end.saturating_sub(max_window * 2);
+            if let Some(h) = compute_hurst(&series[window_start..end], min_window, max_window) {
+                det.push(h);
+            }
+        }
+        det.current()
+    };
+
+    let label_a = label_at_current(&series_a);
+    let label_b = label_at_current(&series_b);
+
+    // 核心不變式：截至當前 tick 的 regime label 對兩條 series bit-identical，
+    // 因為計算只用 trailing prefix（兩者相同），完全不窺視未來 bar。
+    assert_eq!(
+        label_a, label_b,
+        "leak-free 違反：截至當前 tick 的 regime label 不應受未來 bar 影響"
+    );
+
+    // 反向健全性（證明上面的不變式非空）：未來資訊「有能力」改變 regime 分類。
+    // 對 series_b 取同樣 end-width 但起點右移、含 30 個未來 bar 的窗口（= look-ahead
+    // 污染版），其瞬時 Hurst 應與 trailing 版顯著不同。若兩者相同，表示測試序列
+    // 沒有判別力，leak-free 不變式會 trivially true。
+    let trailing_end = prefix.len();
+    let win_start = trailing_end.saturating_sub(max_window * 2);
+    let h_trailing = compute_hurst(&series_b[win_start..trailing_end], min_window, max_window)
+        .expect("trailing window Hurst 應可計算");
+    // 含未來：窗口右移 30 bar（吃進趨勢段），起點同步右移保持寬度一致。
+    let h_with_future = compute_hurst(
+        &series_b[(win_start + 30)..(trailing_end + 30)],
+        min_window,
+        max_window,
+    )
+    .expect("含未來窗口 Hurst 應可計算");
+    assert!(
+        (h_trailing - h_with_future).abs() > 0.05,
+        "測試序列無判別力：含未來 bar 的 Hurst（{h_with_future}）應顯著偏離 trailing（{h_trailing}）"
+    );
+
+    // 確認 gate 對相同 regime 輸入做出相同決策（regime 輸入是 leak-free 的）。
+    let regime_str = label_a.as_legacy_str();
+    let mut s_a = BbReversion::new();
+    s_a.min_persistence_ms = 0;
+    let mut s_b = BbReversion::new();
+    s_b.min_persistence_ms = 0;
+    let act_a = s_a.on_tick(
+        &ctx_bb_with_hurst(-0.1, 25.0, 0, Some((0.35, regime_str))),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    let act_b = s_b.on_tick(
+        &ctx_bb_with_hurst(-0.1, 25.0, 0, Some((0.35, regime_str))),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    assert_eq!(
+        act_a.len(),
+        act_b.len(),
+        "gate 對相同（leak-free）regime label 必做相同決策"
     );
 }

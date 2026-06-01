@@ -1376,6 +1376,58 @@ fn test_p1_09_demo_all_three_proven_still_threshold_checked() {
     );
 }
 
+// ─── A-4 (B2, 2026-06-01)：移除 Python edge 歸零後的雙路徑接管鎖死 ───
+//
+// 背景 root cause：james_stein_estimator.py 原本對「未過驗證的正 edge」做歸零
+// (runtime_bps=0.0)。歸零後 Rust edge_estimates.rs:149 優先讀 runtime_bps →
+// CellEstimate.shrunk_bps=0.0 → demo gate(gates.rs:177 `shrunk_bps > 0.0`) 為
+// false → 跳過 demo 探索臂(:177-194)，誤落 :216 當負 edge 阻擋。B2 移除 Python
+// 歸零，讓 runtime_bps 保留真實正值，靠 Rust demo/live 非對稱接管。
+//
+// 以下兩測試模擬「移除歸零後」的真實快照形態 = runtime_bps 帶真實正值
+// (has_runtime=true) + validation_passed=false，鎖死非對稱契約：
+//   - live：fail-closed 仍 reject（不被連帶鬆動，根原則 #5 生存 > 利潤）。
+//   - demo：探索臂正確觸發回 None（不再誤落負阻擋），demo-loose 設計復原。
+// 二者皆不依賴 Python 歸零，純靠 gates.rs 對 validation_passed 的檢查。
+
+#[test]
+fn test_a4_live_unvalidated_positive_runtime_still_rejects() {
+    // A-4 live fail-closed 鎖：cell 為「正 edge(runtime_bps>0) + 未驗證」——
+    // 即移除 Python 歸零後 live 仍會遇到的形態。cost_gate_live 必 reject
+    // (CostGateJsLiveStaleOrUnvalidated, gates.rs:275)，證明 live 不靠歸零保護。
+    // fresh=true + has_runtime=true 隔離掉新鮮度 / 舊格式分支，使 reject 唯一
+    // 歸因於 validation_passed=false。
+    let mut proc = IntentProcessor::new();
+    proc.set_edge_estimates(p1_09_estimates(Some(3_600), true, false));
+    let result = proc.cost_gate_live("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    let reason = result
+        .expect("A-4: live unvalidated positive (runtime_bps>0) must fail-closed")
+        .rejected_reason
+        .unwrap();
+    assert!(
+        reason.contains("validated=false"),
+        "A-4: live reject 必歸因 validation_passed=false（不依賴 Python 歸零），got: {reason}"
+    );
+}
+
+#[test]
+fn test_a4_demo_mature_unvalidated_positive_runtime_enters_exploration() {
+    // A-4 demo-loose 復原鎖：同一 cell（mature n=100 ≥ min_n(30) + 正 edge
+    // runtime_bps>0 + 未驗證）在 demo cost_gate_moderate 必回 None（探索放行），
+    // 證明移除歸零後 demo 探索臂(gates.rs:184)正確觸發、不再因 shrunk_bps=0.0
+    // 誤落 :216 負阻擋。這是修復前被架空的那條臂。
+    // 注意：p1_09_estimates 內 n=100（> 預設 min_n=30），故走的是「正 edge
+    // 未驗證 → 探索」臂(:184)，而非低樣本臂(:163)；二者皆 None 但路徑不同，
+    // 本測試鎖的是成熟 cell 的非對稱（demo None vs 同 cell live reject）。
+    let mut proc = IntentProcessor::new();
+    proc.set_edge_estimates(p1_09_estimates(Some(3_600), true, false));
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_none(),
+        "A-4: demo mature unvalidated positive(runtime_bps>0) 必入探索(None)，不誤落負阻擋"
+    );
+}
+
 #[test]
 fn test_process_with_exploration_profile() {
     let proc = IntentProcessor::new();

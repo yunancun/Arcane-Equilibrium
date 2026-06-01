@@ -81,6 +81,20 @@ pub struct BbReversionParams {
     /// W-AUDIT-6d #6: MA selection for confirmation gate. Default "sma_50".
     #[serde(default = "default_ma_confirmation_kind")]
     pub ma_confirmation_kind: String,
+
+    /// Track B (2026-06-01) — Hurst regime 入場硬 gate，預設 `true`。
+    /// 為什麼：診斷顯示 bb_reversion 僅在 mean_reverting（Hurst `AntiPersistent`）
+    /// regime 有正向 forward edge（OOS 兩半 mean+median 均 > 成本），其他 regime
+    /// 賠掉淨值。本 gate 把既有的 Hurst regime 從「confidence boost」升級為 entry
+    /// 硬 gate：穩定 regime != AntiPersistent → skip entry；Hurst 不可得（warm-up
+    /// 不足/退化 → `ctx.indicators.hurst = None`）→ fail-closed skip（§二 原則 6）。
+    /// 這是 accumulate-only（讓策略只在對的 regime 累積乾淨樣本供後續 QC 驗證），
+    /// 非 promotion，不含任何晉升/放量邏輯。預期副作用：fills 變少（僅 mean_reverting
+    /// 交易），這是預期且正確。`false` 僅供 operator 顯式關閉以回退舊行為（gate 不
+    /// 生效，regime 僅維持原 boost 語義）；agent 不可自關（治理層硬 gate）。
+    /// 與 `hurst_regime_boost` 正交：gate 決定能否進場，boost 微調 confidence。
+    #[serde(default = "default_require_mean_reverting_regime")]
+    pub require_mean_reverting_regime: bool,
 }
 
 /// W-AUDIT-6d #6 — MA pair confirmation 預設啟用（per AMD-2026-05-09-02 §3）。
@@ -91,6 +105,11 @@ fn default_require_ma_confirmation() -> bool {
 /// W-AUDIT-6d #6 — 預設 MA 種類為 SMA50（中期趨勢，與 ma_crossover RC-02 對齊）。
 fn default_ma_confirmation_kind() -> String {
     "sma_50".to_string()
+}
+
+/// Track B — Hurst regime 入場硬 gate 預設啟用（accumulate-only，僅對的 regime 交易）。
+fn default_require_mean_reverting_regime() -> bool {
+    true
 }
 
 /// G7-09c Phase 1: default buffer = 1 tick (one tick inside the inside quote).
@@ -129,6 +148,8 @@ impl Default for BbReversionParams {
             // W-AUDIT-6d #6 (AMD-2026-05-09-02 §3) — 預設啟用 MA pair confirmation。
             require_ma_confirmation: true,
             ma_confirmation_kind: "sma_50".to_string(),
+            // Track B (2026-06-01) — 預設啟用 Hurst regime 入場硬 gate。
+            require_mean_reverting_regime: true,
         }
     }
 }
@@ -285,6 +306,17 @@ impl StrategyParams for BbReversionParams {
             // rollback 路徑或 operator 顯式批准才能切換。db_persisted=true 留歷史。
             ParamRange {
                 name: "require_ma_confirmation".into(),
+                min: 0.0,
+                max: 1.0,
+                step: Some(1.0),
+                agent_adjustable: false,
+                db_persisted: true,
+            },
+            // Track B (2026-06-01) — Hurst regime 入場硬 gate 是治理層強制 gate；
+            // agent 不可自關（agent_adjustable=false），僅 operator 顯式關閉回退舊
+            // 行為。db_persisted=true 持久化（TOML/IPC round-trip + DB）。
+            ParamRange {
+                name: "require_mean_reverting_regime".into(),
                 min: 0.0,
                 max: 1.0,
                 step: Some(1.0),
