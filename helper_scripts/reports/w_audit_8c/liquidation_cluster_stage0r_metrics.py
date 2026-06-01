@@ -23,10 +23,11 @@ Stage 0R promotion-floor metrics。Stage 0R 是 Stage 1 Demo canary 上線前的
     legitimately RED 不應 auto-RED 整 cell）。
 
 依賴：
-  - 純 stdlib（math / random / statistics / dataclasses / collections /
-    datetime / itertools / typing）。
-  - 8b precedent 函數直接複用（DSR / PSR / Wilson CI / block-bootstrap /
-    CSCV PBO）；標示 "8b 鏡像" attribution comment。
+  - 純 stdlib（math / statistics / dataclasses / collections / datetime /
+    typing）+ helper_scripts.lib.stats_common（共用統計公式整併層）。
+  - DSR / PSR / Wilson CI / block-bootstrap / CSCV PBO 等統計公式已整併至
+    stats_common（E5 finding #3），本模塊頂部 re-export 並以薄 wrapper pin 8c
+    歷史 seed；random / itertools 隨整併移至 stats_common，本模塊不再直接 import。
 
 硬邊界（per srv/CLAUDE.md §四 + spec v0.3）：
   - 純 math layer：無 DB / 無 file IO / 無 live state 修改。
@@ -54,14 +55,42 @@ liquidation_cluster_stage0r_report.py 實作（本 worktree 不負責）。
 from __future__ import annotations
 
 import math
-import random
 import statistics
+import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from itertools import combinations
-from statistics import NormalDist
+from pathlib import Path
 from typing import Iterable, Mapping, Sequence
+
+# 共享統計公式（E5 finding #3 整併）。8b / 8c / alpha_candidate 共用統計的單一
+# 真相源。三段 fallback 理由同 8b：本模塊既被 ``python -m`` 從 repo root 跑，也被
+# 報告 / smoke 以「script 自身目錄在 sys.path」直跑模式匯入。
+try:
+    from helper_scripts.lib import stats_common as _sc
+except ImportError:  # 直跑（非 -m）：補 repo root 後重試
+    _REPO_ROOT = Path(__file__).resolve().parents[3]
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+    from helper_scripts.lib import stats_common as _sc
+
+# 直接 re-export（與 8b byte-identical，無公式 divergence）。為什麼 re-export：
+# 下游 ``liquidation_cluster_stage0r_smoke`` 與 ``alpha_candidate_stage0r.
+# a2_cascade_adapter`` 直接 `from ...metrics import` 這些名字，須保留於本命名空間。
+# 同時 ``_n_eff_horizon_overlap`` / ``_safe_int`` 亦被本模塊內 8c-specific 的
+# ``_n_eff_cluster_aware`` 引用。
+_safe_float = _sc._safe_float
+_safe_int = _sc._safe_int
+_normal_cdf = _sc._normal_cdf
+_skew = _sc._skew
+_kurtosis = _sc._kurtosis
+psr_bailey_ldp = _sc.psr_bailey_ldp
+dsr_with_k = _sc.dsr_with_k
+wilson_ci_95 = _sc.wilson_ci_95
+_day_bucket = _sc.day_bucket
+# 8c 原 ``_n_eff_horizon_overlap`` 已採 math.ceil（即 canonical），故直接 alias；
+# 行為與整併前 8c 完全一致（canonical 即取自 8c 的正確版，見 stats_common §3）。
+_n_eff_horizon_overlap = _sc.n_eff_horizon_overlap
 
 
 # ============================================================================
@@ -197,109 +226,9 @@ class CandidateCell:
 
 
 # ============================================================================
-# 安全 cast helpers（8b 鏡像 — 為什麼複製：8b 用同一公式，純 stdlib，
-# 避免跨模塊 import 增加 IPC / 部署複雜度）
-# ============================================================================
-
-
-def _safe_float(value: object) -> float | None:
-    """Cast to finite float or None；NaN / Inf → None。
-
-    為什麼 fail-closed：metrics 計算中 NaN propagation 會污染 PSR/DSR/CI；
-    上游一律返回 None 強迫 caller 顯式處理。
-    """
-    try:
-        out = float(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-    return out if math.isfinite(out) else None
-
-
-def _safe_int(value: object) -> int | None:
-    try:
-        return int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-
-
-def _normal_cdf(x: float) -> float:
-    return NormalDist().cdf(x)
-
-
-# ============================================================================
-# 統計分布輔助（8b 鏡像 — skew / kurtosis；用於 PSR Bailey & López de Prado）
-# ============================================================================
-
-
-def _skew(values: Sequence[float]) -> float | None:
-    if len(values) < 3:
-        return None
-    mean = statistics.mean(values)
-    var = sum((v - mean) ** 2 for v in values) / len(values)
-    if var <= 0:
-        return None
-    sd = math.sqrt(var)
-    return sum(((v - mean) / sd) ** 3 for v in values) / len(values)
-
-
-def _kurtosis(values: Sequence[float]) -> float | None:
-    if len(values) < 4:
-        return None
-    mean = statistics.mean(values)
-    var = sum((v - mean) ** 2 for v in values) / len(values)
-    if var <= 0:
-        return None
-    sd = math.sqrt(var)
-    return sum(((v - mean) / sd) ** 4 for v in values) / len(values)
-
-
-# ============================================================================
-# PSR / DSR（8b 鏡像 attribution — Bailey & López de Prado 2014 公式）
-# ============================================================================
-
-
-def psr_bailey_ldp(values: Sequence[float], sr_benchmark: float = 0.0) -> float | None:
-    """Probabilistic Sharpe Ratio (PSR) per Bailey & López de Prado 2014。
-
-    為什麼用 PSR 而非 Sharpe：textbook Sharpe 假設 normal returns，liquidation
-    cluster return 顯然 heavy-tailed + skewed；PSR 顯式調 skew / kurtosis。
-
-    sr_benchmark = 0.0 → PSR(0)；> 0 → PSR(sr_benchmark)；
-    後者用於 DSR：sr_benchmark = √(2 ln K_total)。
-    """
-    clean = [v for v in values if math.isfinite(v)]
-    if len(clean) < 4:
-        return None
-    sd = statistics.stdev(clean)
-    if sd <= 0:
-        return None
-    sr_hat = statistics.mean(clean) / sd
-    skew = _skew(clean)
-    kurt = _kurtosis(clean)
-    if skew is None or kurt is None:
-        return None
-    denom_sq = 1.0 - skew * sr_hat + ((kurt - 1.0) / 4.0) * (sr_hat**2)
-    if denom_sq <= 0:
-        return None
-    z = (sr_hat - sr_benchmark) * math.sqrt(len(clean) - 1) / math.sqrt(denom_sq)
-    return _normal_cdf(z)
-
-
-def dsr_with_k(values: Sequence[float], k_total: int) -> float | None:
-    """Deflated Sharpe Ratio per Bailey & López de Prado 2014。
-
-    為什麼用 DSR：多重比較 penalty；K_total = 嘗試過的 candidate cell 數。
-    sr_benchmark = √(2 × ln K_total) 是 expected max Sharpe from random
-    trials assuming Gaussian。
-    """
-    if k_total <= 1:
-        return None
-    sr_benchmark = math.sqrt(2.0 * math.log(k_total))
-    return psr_bailey_ldp(values, sr_benchmark=sr_benchmark)
-
-
-# ============================================================================
-# Block bootstrap CI（8b 鏡像 — 抗 autocorrelation 的 95% bootstrap lower）
+# 統計公式（_safe_float / _safe_int / _normal_cdf / _skew / _kurtosis /
+# psr_bailey_ldp / dsr_with_k）已整併至 helper_scripts.lib.stats_common，於模塊
+# 頂部 re-export（8b / 8c byte-identical，無 divergence）。
 # ============================================================================
 
 
@@ -310,27 +239,15 @@ def block_bootstrap_ci(
     iterations: int = 400,
     seed: int = 20260518,
 ) -> tuple[float, float] | None:
-    """Stationary block bootstrap 95% CI。
+    """8c block bootstrap CI wrapper — 委派 stats_common，pin 8c 歷史 seed。
 
-    為什麼 block：i.i.d. bootstrap 在 autocorr 樣本 (liquidation cascade)
-    over-confident；block 保持 within-block 序列相關性。
+    為什麼保留薄 wrapper：8c 歷史 default seed=20260518（與 8b 的 20260515
+    不同）；整併後必須維持 8c 報告的 byte-level 數值。canonical 的 seed 為必填，
+    由此處 pin 入 8c 值。
     """
-    clean = [v for v in values if math.isfinite(v)]
-    if len(clean) < block_size:
-        return None
-    rng = random.Random(seed)
-    means: list[float] = []
-    blocks_per_iter = max(1, math.ceil(len(clean) / block_size))
-    for _ in range(iterations):
-        sample: list[float] = []
-        for _b in range(blocks_per_iter):
-            start = rng.randint(0, len(clean) - block_size)
-            sample.extend(clean[start:start + block_size])
-        means.append(statistics.mean(sample[:len(clean)]))
-    means.sort()
-    lo = max(0, int(0.025 * iterations))
-    hi = min(iterations - 1, int(0.975 * iterations))
-    return means[lo], means[hi]
+    return _sc.block_bootstrap_ci(
+        values, block_size=block_size, iterations=iterations, seed=seed
+    )
 
 
 # ============================================================================
@@ -338,45 +255,14 @@ def block_bootstrap_ci(
 # ============================================================================
 
 
-def wilson_ci_95(n: int, n_eff: int) -> tuple[float, float] | None:
-    """Wilson score interval 95%。
-
-    為什麼用 Wilson 而非 normal approx：n_eff / n 比例在小樣本下 normal
-    approx over-confident；Wilson 對 boundary (p_hat→0 或 →1) 更穩定。
-    """
-    if n <= 0 or n_eff < 0 or n_eff > n:
-        return None
-    z = 1.96
-    p_hat = n_eff / n
-    z_sq = z * z
-    denom = 1.0 + z_sq / n
-    center = (p_hat + z_sq / (2 * n)) / denom
-    inner = p_hat * (1.0 - p_hat) / n + z_sq / (4 * n * n)
-    if inner < 0.0:
-        return None
-    margin = z * math.sqrt(inner) / denom
-    return max(0.0, center - margin), min(1.0, center + margin)
-
-
 # ============================================================================
 # Cluster-aware n_eff（**8c NEW per MIT 8b SHOULD-3 forward-applicable**）
 # ============================================================================
-
-
-def _n_eff_horizon_overlap(n: int, horizon_min: int) -> int:
-    """8b 鏡像：horizon-overlap-only n_eff（MIT round-1 MUST-FIX：math.ceil 取代 //）。
-
-    為什麼保留：作為 cluster-aware 公式的 input 之一（min 之三）；
-    亦保留 8b 同公式的 backward compatibility。
-
-    為什麼 math.ceil 而非整數除：MIT 2026-05-18 dual review §2.1.4 dormant bug：
-    `horizon_min // 5` 在 horizon=6/10/14 時 floor 至 1/2/2 → 漏算 sub-5m bar
-    overlap penalty。math.ceil 對 canonical grid (1/5/15) 結果不變（dormant
-    fix），但抗 grid expansion（10/14/30 sensitivity sweep）regression。
-    """
-    # math.ceil(horizon_min / 5)：horizon=5 → 1（no overlap），horizon=30 → 6（6:1），
-    # horizon=6 → 2（正確扣 20% sub-bar overlap），horizon=14 → 3（正確）
-    return int(n / max(1, math.ceil(horizon_min / 5)))
+# 註：``_n_eff_horizon_overlap``（math.ceil 版，MIT round-1 MUST-FIX）已抽至
+# helper_scripts.lib.stats_common.n_eff_horizon_overlap 作為 canonical（8b 舊
+# `// 5` floor latent bug 即以此根除），於模塊頂部 alias 回 ``_n_eff_horizon_overlap``。
+# 下方 ``_n_eff_cluster_aware`` 為 8c 專有（min of horizon-overlap / distinct-days /
+# distinct-60min-clusters），繼續引用該 alias。
 
 
 def _n_eff_cluster_aware(
@@ -480,11 +366,6 @@ def _n_eff_cluster_aware(
 # ============================================================================
 # Concentration checks（NEW for 8c per 8b INJUSDT 87% lesson）
 # ============================================================================
-
-
-def _day_bucket(signal_ts_ms: int) -> str:
-    """Convert ms epoch to UTC YYYY-MM-DD string；8b 鏡像。"""
-    return datetime.fromtimestamp(signal_ts_ms / 1000, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
 def _single_day_concentration_check(
@@ -756,80 +637,12 @@ def _false_positive_rate(
 
 
 def _pbo(candidates: Mapping[str, Mapping[str, float]], *, max_splits: int = 240) -> dict[str, object]:
-    """Combinatorially Symmetric Cross-Validation Probability of Backtest Overfitting。
+    """8c PBO（CSCV）wrapper — 委派 stats_common，pin 8c 歷史 seed=20260518。
 
-    為什麼用 CSCV：標準 K-fold 對 backtest 不適；PBO 看 train-set best 在
-    test-set 是否 below median；high PBO → strategy 是 overfit。
+    為什麼 wrapper：當 day combination > max_splits 走亂數抽樣時結果依賴 seed；
+    8c 歷史用 20260518（與 8b 的 20260516 不同），整併後維持 8c 報告數值。
     """
-    days = sorted({day for daily in candidates.values() for day in daily})
-    candidate_keys = list(candidates)
-    if len(days) < 4 or len(candidate_keys) < 10:
-        return {
-            "value": None,
-            "method": "day_block_cscv",
-            "usable_splits": 0,
-            "reason": "insufficient_days_or_candidates",
-            "day_count": len(days),
-            "candidate_count": len(candidate_keys),
-        }
-    train_size = len(days) // 2
-    combo_count = math.comb(len(days), train_size)
-    if combo_count <= max_splits:
-        combos = list(combinations(days, train_size))
-    else:
-        rng = random.Random(20260518)
-        seen: set[tuple[str, ...]] = set()
-        combos = []
-        attempts = 0
-        while len(combos) < max_splits and attempts < max_splits * 20:
-            train = tuple(sorted(rng.sample(days, train_size)))
-            if train not in seen:
-                seen.add(train)
-                combos.append(train)
-            attempts += 1
-    splits = [(set(train), set(days) - set(train)) for train in combos]
-    bad = 0
-    usable = 0
-    for train_days, test_days in splits:
-        train_scores: dict[str, float] = {}
-        test_scores: dict[str, float] = {}
-        for key, daily in candidates.items():
-            train_vals = [daily[d] for d in train_days if d in daily]
-            test_vals = [daily[d] for d in test_days if d in daily]
-            if train_vals and test_vals:
-                train_scores[key] = statistics.mean(train_vals)
-                test_scores[key] = statistics.mean(test_vals)
-        if len(train_scores) < 10 or len(test_scores) < 10:
-            continue
-        best = max(train_scores, key=train_scores.get)
-        ranked = sorted(test_scores.values())
-        best_test = test_scores.get(best)
-        if best_test is None:
-            continue
-        median_rank = ranked[len(ranked) // 2]
-        bad += int(best_test < median_rank)
-        usable += 1
-    if usable == 0:
-        return {
-            "value": None,
-            "method": "day_block_cscv",
-            "usable_splits": 0,
-            "reason": "no_usable_cscv_splits",
-            "day_count": len(days),
-            "candidate_count": len(candidate_keys),
-            "requested_splits": len(splits),
-        }
-    return {
-        "value": bad / usable,
-        "method": "day_block_cscv",
-        "usable_splits": usable,
-        "day_count": len(days),
-        "candidate_count": len(candidate_keys),
-        "requested_splits": len(splits),
-        "train_day_count": train_size,
-        "test_day_count": len(days) - train_size,
-        "reason": None,
-    }
+    return _sc.pbo_cscv(candidates, seed=20260518, max_splits=max_splits)
 
 
 # ============================================================================

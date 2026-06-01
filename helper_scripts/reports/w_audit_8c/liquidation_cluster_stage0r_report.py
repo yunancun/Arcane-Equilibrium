@@ -58,6 +58,15 @@ except ImportError:
         compute_stage0r_sweep,
     )
 
+# 共享 PG 連線 helper（E5 finding #4 整併）。三段 fallback 理由同 metrics 模塊。
+try:
+    from helper_scripts.lib.pg_connect import connect_report_pg
+except ImportError:
+    _RR = Path(__file__).resolve().parents[3]
+    if str(_RR) not in sys.path:
+        sys.path.insert(0, str(_RR))
+    from helper_scripts.lib.pg_connect import connect_report_pg
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # Spec v0.3 預設常數（見 docs/execution_plan/2026-05-16--w_audit_8c_liquidation_cluster_strategy_spec.md）
@@ -98,29 +107,15 @@ def _repo_root() -> Path:
 
 
 def _get_conn():
-    """連 PG read-only。優先 OPENCLAW_DATABASE_URL，否則拼 POSTGRES_* env。
+    """連 PG read-only（委派共享 connect_report_pg）。
 
-    為什麼這樣寫：禁止硬編碼 hostname（feedback_cross_platform.md）；同時
-    與 sibling 8b funding_skew_stage0r_report.py 完全相同的連線模式，保持
-    operator 操作慣性。
+    為什麼禁硬編碼 hostname：feedback_cross_platform.md。連線口徑與 sibling 8b
+    完全相同（共用 helper），僅 application_name 與預設 timeout（180000ms）不同。
     """
-    import psycopg2  # type: ignore
-
-    dsn = (
-        os.environ.get("OPENCLAW_DATABASE_URL")
-        or f"postgresql://{os.environ.get('POSTGRES_USER','')}"
-        f":{os.environ.get('POSTGRES_PASSWORD','')}"
-        f"@{os.environ.get('POSTGRES_HOST','127.0.0.1')}"
-        f":{os.environ.get('POSTGRES_PORT','5432')}"
-        f"/{os.environ.get('POSTGRES_DB','')}"
+    return connect_report_pg(
+        "openclaw_w_audit_8c_stage0r",
+        statement_timeout_ms_default=180000,
     )
-    conn = psycopg2.connect(dsn, application_name="openclaw_w_audit_8c_stage0r")
-    with conn.cursor() as cur:
-        cur.execute(
-            "SET statement_timeout = %s",
-            (int(os.environ.get("OPENCLAW_STAGE0R_STATEMENT_TIMEOUT_MS", "180000")),),
-        )
-    return conn
 
 
 def _read_sql() -> str:

@@ -79,6 +79,7 @@ try:
         _day_bucket,
         _n_eff,
         _safe_float as _safe_float_8b,  # noqa: F401  保留 import 對齊 spec §2 復用清單
+        _safe_int,
     )
 except ImportError:
     _HERE1 = Path(__file__).resolve().parent
@@ -93,6 +94,7 @@ except ImportError:
         _day_bucket,
         _n_eff,
         _safe_float as _safe_float_8b,  # noqa: F401
+        _safe_int,
     )
 
 
@@ -371,13 +373,6 @@ def a1_draft_only_packet() -> dict[str, object]:
 # ──────────────────────────────────────────────────────────────────────────
 # A1 functional path（funding_short_v2）
 # ──────────────────────────────────────────────────────────────────────────
-
-
-def _safe_int(value: object) -> int | None:
-    try:
-        return int(value)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
 
 
 def _a1_edge_bps_per_period(funding_rate_bps: float) -> float:

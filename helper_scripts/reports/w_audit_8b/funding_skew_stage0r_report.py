@@ -16,6 +16,15 @@ try:
 except ImportError:
     from funding_skew_stage0r_metrics import compute_stage0r, compute_stage0r_sweep  # type: ignore
 
+# 共享 PG 連線 helper（E5 finding #4 整併）。三段 fallback 理由同 metrics 模塊。
+try:
+    from helper_scripts.lib.pg_connect import connect_report_pg
+except ImportError:
+    _RR = Path(__file__).resolve().parents[3]
+    if str(_RR) not in sys.path:
+        sys.path.insert(0, str(_RR))
+    from helper_scripts.lib.pg_connect import connect_report_pg
+
 
 DEFAULT_WINDOW_DAYS = 7
 DEFAULT_COST_BPS = 12.0
@@ -31,23 +40,11 @@ def _repo_root() -> Path:
 
 
 def _get_conn():
-    import psycopg2  # type: ignore
-
-    dsn = (
-        os.environ.get("OPENCLAW_DATABASE_URL")
-        or f"postgresql://{os.environ.get('POSTGRES_USER','')}"
-        f":{os.environ.get('POSTGRES_PASSWORD','')}"
-        f"@{os.environ.get('POSTGRES_HOST','127.0.0.1')}"
-        f":{os.environ.get('POSTGRES_PORT','5432')}"
-        f"/{os.environ.get('POSTGRES_DB','')}"
+    # 委派共享 connect_report_pg；保留 8b 歷史 application_name 與預設 timeout（120000ms）。
+    return connect_report_pg(
+        "openclaw_w_audit_8b_stage0r",
+        statement_timeout_ms_default=120000,
     )
-    conn = psycopg2.connect(dsn, application_name="openclaw_w_audit_8b_stage0r")
-    with conn.cursor() as cur:
-        cur.execute(
-            "SET statement_timeout = %s",
-            (int(os.environ.get("OPENCLAW_STAGE0R_STATEMENT_TIMEOUT_MS", "120000")),),
-        )
-    return conn
 
 
 def _read_sql() -> str:
