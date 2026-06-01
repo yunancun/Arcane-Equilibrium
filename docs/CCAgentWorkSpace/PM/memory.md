@@ -1,5 +1,18 @@
 # PM Memory — 工作記憶
 
+## 2026-06-01 AEG-S1-FND-3/S2/V125 Design Checkpoint Lesson
+
+- Side evidence is useful only if the contract makes the negative rule
+  machine-checkable: secondary-only, no promotion gate input, no final-label
+  override, and no rescue of a mathematical failure.
+- S2 Gate-B must distinguish connection safety from phase-transition proof. A
+  24h run with no real PreLaunch transition is inconclusive, not a collector
+  implementation pass.
+- V### selection has to respect visible planning reservations even when SQL
+  files do not exist yet. For AEG storage, `V125` is safer than `V118` because
+  V116/V117/V118-124 are already documented as held/reserved planning slots.
+- Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-01--aeg_s1_fnd3_s2_gate_b_storage_migration_design_integration.md
+
 ## 2026-06-01 AEG-S1-FND-2/FND-4 Parallel Checkpoint Lesson
 
 - Operator approval of a storage branch unlocks design sequencing, not DB
