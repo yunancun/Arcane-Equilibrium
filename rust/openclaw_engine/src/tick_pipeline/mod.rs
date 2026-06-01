@@ -845,6 +845,12 @@ pub struct TickStats {
     pub total_fills: u64,
     pub total_stops: u64,
     pub last_tick_ms: u64,
+    /// QTY-ZERO-SKIP-1：exchange gate 已批准（`approved_qty > 0`）但交易所精度取整後
+    /// `final_qty → 0` 的「靜默跳過」計數（高價幣如 BTCUSDT 的取整噪音）。此路徑刻意
+    /// 不寫 reject label / decision_features，僅累計此低基數 counter 供觀察。
+    /// `#[serde(default)]`：舊版 snapshot 無此欄位時 deserialize 退回 0（向後相容）。
+    #[serde(default)]
+    pub qty_zero_skips: u64,
 }
 
 /// Core tick pipeline — owns all processing state / 核心 tick 管線 — 擁有所有處理狀態。

@@ -105,6 +105,23 @@ pub trait Strategy: Send {
     /// 無 default impl：5 既存策略 explicit declare 強制 migration。
     fn declared_alpha_sources(&self) -> &[AlphaSourceTag];
 
+    /// BB-OI-DECOUPLE-1：本策略是否「硬依賴」OI panel（不可得時必須 fail-closed
+    /// 跳過整個 tick）。
+    ///
+    /// 為什麼是 default false：dispatch 端（step_4_5_dispatch.rs）原先對 bb_breakout
+    /// 無條件 probe `oi_panel_delta_5m_pct`，Err 即 `continue` 跳過整 tick——但這與
+    /// 策略自身的降級語意脫鉤（bb_breakout 在 `enable_oi_signal=false` 時 score 修飾
+    /// 本就不參與 OI）。OI cohort（25）< scanner universe（40）導致落 cohort 外的幣
+    /// 恆 `symbol_missing`，於是 OI 預設關閉時仍被整批跳過。
+    ///
+    /// 改以本 trait 方法讓「是否硬依賴 OI」回歸各策略自述：default false 確保其他
+    /// 4 個策略零改動、dispatch 端不對它們 probe（非 cross-cutting）；只有 bb_breakout
+    /// override 為 `self.enable_oi_signal`，使 dispatch 的 fail-closed probe 僅在
+    /// 真正開啟 OI 信號時生效。
+    fn requires_oi_panel(&self) -> bool {
+        false
+    }
+
     /// Process a tick and return strategy actions (Open or Close).
     /// 處理 tick 並返回策略動作（Open 或 Close）。
     /// W-AUDIT-8a Phase A：簽名升級 + `surface: &AlphaSurface<'_>`。Tier 1 仍由

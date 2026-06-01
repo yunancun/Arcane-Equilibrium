@@ -135,10 +135,16 @@ fn prime_panel_backed_squeeze(strat: &mut BbBreakout) {
     );
 }
 
+// BB-OI-DECOUPLE-1：以下三個 fail-closed 測試現在顯式設 `enable_oi_signal = true`。
+// 為什麼：解耦後「OI 不可得」的 fail-closed 只在策略硬依賴 OI（flag=true）時生效；
+// flag=false（demo 預設）時 OI 不可得屬良性、照常交易（見
+// `test_oi_flag_off_empty_surface_still_emits`）。這三個測試驗證的是 flag=true 下
+// missing / stale / symbol-missing 三種 OI 缺失仍嚴格 fail-closed（語意不變）。
 #[test]
 fn test_oi_panel_missing_fail_closed() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0;
+    s.enable_oi_signal = true;
     prime_panel_backed_squeeze(&mut s);
 
     let actions = s.on_tick(
@@ -152,6 +158,7 @@ fn test_oi_panel_missing_fail_closed() {
 fn test_oi_panel_stale_fail_closed() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0;
+    s.enable_oi_signal = true;
     prime_panel_backed_squeeze(&mut s);
     let stale_surface = super::test_oi_surface(&["BTC"], &[0.02], 0);
 
@@ -173,6 +180,7 @@ fn test_oi_panel_stale_fail_closed() {
 fn test_oi_panel_symbol_missing_fail_closed() {
     let mut s = BbBreakout::new();
     s.min_persistence_ms = 0;
+    s.enable_oi_signal = true;
     prime_panel_backed_squeeze(&mut s);
     let eth_only_surface = super::test_oi_surface(&["ETH"], &[0.02], i64::MAX / 4);
 
@@ -184,6 +192,81 @@ fn test_oi_panel_symbol_missing_fail_closed() {
         actions.is_empty(),
         "symbol-missing OI panel must fail closed"
     );
+}
+
+/// BB-OI-DECOUPLE-1：flag=false（demo 預設）+ 空 OI surface（symbol 不在 OI cohort
+/// 內，等同 runtime 落 cohort 外的幣）→ 策略仍應發出 signal，不因 OI 不可得而被整
+/// tick 跳過。這是本次解耦的核心驗收：OI cohort（25）< scanner universe（40）導致的
+/// 恆 `symbol_missing` 不應在 OI 預設關閉時阻斷交易。
+#[test]
+fn test_oi_flag_off_empty_surface_still_emits() {
+    let mut s = BbBreakout::new();
+    s.min_persistence_ms = 0;
+    assert!(!s.enable_oi_signal, "本測試前提：OI 信號預設關閉");
+
+    // Squeeze 登記階段也走同一 OI 路徑；flag=false 時即使空 surface 也不 fail-closed。
+    let _ = s.on_tick(
+        &ctx_full_entry(0.01, 0.5, 1.0, 0, 50_000.0, None),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    let actions = s.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51_000.0, None),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    assert!(
+        !actions.is_empty(),
+        "flag=false + 空 OI surface 必須仍發 signal（OI 不可得屬良性，照常交易）"
+    );
+}
+
+/// BB-OI-DECOUPLE-1：flag=false + 空 OI surface 下的 score 必須與 flag=false +
+/// 完整 OI surface bit-identical —— 證明 OI panel 可得與否在 flag=false 時對 score
+/// 零影響（降級語意：不加修飾）。
+#[test]
+fn test_oi_flag_off_score_identical_regardless_of_panel() {
+    let mut with_panel = BbBreakout::new();
+    with_panel.min_persistence_ms = 0;
+    let mut without_panel = BbBreakout::new();
+    without_panel.min_persistence_ms = 0;
+    assert!(!with_panel.enable_oi_signal && !without_panel.enable_oi_signal);
+
+    // Squeeze 登記。
+    with_panel.on_tick(
+        &ctx_full_entry(0.01, 0.5, 1.0, 0, 50_000.0, None),
+        super::fresh_oi_surface(),
+    );
+    without_panel.on_tick(
+        &ctx_full_entry(0.01, 0.5, 1.0, 0, 50_000.0, None),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+
+    // 突破 tick：一個帶完整 OI panel，一個空 surface。
+    let i_with = with_panel.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51_000.0, None),
+        super::fresh_oi_surface(),
+    );
+    let i_without = without_panel.on_tick(
+        &ctx_full_entry(0.05, 1.1, 2.0, 700_000, 51_000.0, None),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    );
+    assert_eq!(i_with.len(), 1);
+    assert_eq!(i_without.len(), 1);
+    let (sw, swo) = match (&i_with[0], &i_without[0]) {
+        (StrategyAction::Open(a), StrategyAction::Open(b)) => {
+            (a.confluence_score, b.confluence_score)
+        }
+        _ => panic!("expected Open intents"),
+    };
+    match (sw, swo) {
+        (Some(a), Some(b)) => assert_eq!(
+            a.to_bits(),
+            b.to_bits(),
+            "flag=false 時 score 必須與 OI panel 可得與否無關（bit-identical）"
+        ),
+        (None, None) => {}
+        other => panic!("confluence_score mismatch: {:?}", other),
+    }
 }
 
 #[test]

@@ -375,7 +375,17 @@ impl TickPipeline {
                     .as_ref()
                     .and_then(|i| i.bollinger.as_ref())
                     .is_some();
-            if strategy.name() == "bb_breakout" && bb_breakout_has_ta {
+            // BB-OI-DECOUPLE-1：OI probe 的 fail-closed `continue` 只在策略「硬依賴」
+            // OI panel 時生效（`requires_oi_panel()`，bb_breakout = `enable_oi_signal`）。
+            //
+            // 為什麼：OI cohort（25）< scanner universe（40），落 cohort 外的幣對
+            // `oi_panel_delta_5m_pct` 恆回 `symbol_missing`。原本無條件 probe + `continue`
+            // 在 OI 預設關閉（demo `enable_oi_signal=false`）時，仍把這些幣的整個 tick
+            // 跳過 —— 但策略自身 :774 score 修飾在 flag=false 時本就不消費 OI。改由
+            // `requires_oi_panel()` 判斷後，flag=false 直接跳過 probe（OI 不可得屬良性，
+            // 不產生 false `oi_panel_unavailable` 遙測、不阻斷交易）；flag=true 時行為
+            // 與既往 byte-identical：probe 失敗即 emit 遙測 + fail-closed `continue`。
+            if strategy.requires_oi_panel() && bb_breakout_has_ta {
                 if let Err(cause) = crate::strategies::bb_breakout::oi_panel_delta_5m_pct(
                     &alpha_surface,
                     sym,
@@ -664,39 +674,39 @@ impl TickPipeline {
                                     gate.approved_qty
                                 };
 
-                                // P0-2 fix: Skip if qty rounded to zero / 數量取整為零則跳過
+                                // QTY-ZERO-SKIP-1（CC P0 guard，skip-not-reject）：
+                                // gate 已批准（`approved_qty > 0`）但交易所精度取整後
+                                // `final_qty → 0`（高價幣如 BTCUSDT，p1_max_qty = balance×
+                                // risk_pct/price ≈ 0.0005 → round_qty 取整為 0）。
+                                //
+                                // 為什麼靜默 skip 而非 reject：14.4 萬筆 qty_zero reject 中
+                                // 99.9% 是 BTCUSDT 取整噪音，污染 trading.intents 的
+                                // rejected label 與 learning.decision_features 負樣本，扭曲
+                                // ML 訓練與 Guardian pass-rate。skip = 不下單，比 reject 更
+                                // 保守（CC guard b），且不移除 PNL-1「qty=0 永不下單」語意
+                                // （final_qty=0 一律不派單，CC guard c）。
+                                //
+                                // 嚴禁 floor-up：不得把 final_qty 抬到 min_qty、不得碰
+                                // p1_max_qty / sizing 上限（CC guard a）。
+                                //
+                                // 仍呼叫 `strategy.on_rejection`：這是策略內部 eager-mutate
+                                // 狀態（bb_breakout entry_price / trailing_stop）的 rollback
+                                // hook，不是污染源；不回滾會讓策略誤以為已開倉（W6 hot-loop
+                                // 類 bug）。污染源 `record_pre_risk_rejection` /
+                                // `emit_decision_feature_intent_rejected` 已移除。
                                 if final_qty <= 0.0 {
                                     let reason = exchange_qty_rounded_to_zero_reason(
                                         gate.approved_qty,
                                         final_qty,
                                     );
                                     strategy.on_rejection(intent, &reason);
-                                    record_pre_risk_rejection(
-                                        &self.trading_tx,
-                                        &mut self.recent_intents,
-                                        em,
-                                        event.ts_ms,
-                                        &signal_id,
-                                        &context_id,
-                                        intent,
-                                        event.last_price,
-                                        scanner_ctx.as_ref(),
-                                        Some(&scanner_gate_audit),
-                                        &reason,
-                                    );
-                                    self.intent_processor.emit_decision_feature_intent_rejected(
-                                        intent,
-                                        &features,
-                                        &context_id,
-                                        event.ts_ms,
-                                        &reason,
-                                    );
-                                    warn!(
+                                    self.stats.qty_zero_skips += 1;
+                                    tracing::debug!(
                                         symbol = %intent.symbol,
                                         approved_qty = gate.approved_qty,
                                         final_qty,
                                         reason = %reason,
-                                        "exchange order skipped: qty=0 after rounding"
+                                        "QTY-ZERO-SKIP-1: exchange order silently skipped (qty=0 after rounding); not recorded as reject / 取整為 0 靜默跳過，不寫 reject"
                                     );
                                     continue;
                                 }

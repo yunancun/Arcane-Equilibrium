@@ -348,6 +348,13 @@ impl Strategy for BbBreakout {
         TAGS
     }
 
+    /// BB-OI-DECOUPLE-1：僅在 `enable_oi_signal=true` 時硬依賴 OI panel。
+    /// flag=false（demo 預設）時 OI 不參與 score 修飾，dispatch 端不應因 OI 不可得
+    /// 而跳過整 tick；flag=true 時 OI 是合流信號的一部分，不可得即 fail-closed。
+    fn requires_oi_panel(&self) -> bool {
+        self.enable_oi_signal
+    }
+
     /// 外部平倉（風控止損）清 strategy-internal state（與 position lifecycle 強耦合的欄位）。
     ///
     /// P0 Option A-Lite（2026-05-11）後 `position` 欄位移除 → `position direction` 統一查
@@ -478,20 +485,32 @@ impl Strategy for BbBreakout {
         // Whole-struct snapshot = exact pre-tick state (or None if unseen).
         // RC-04：於任何變更前快照該 symbol 整包狀態（None = 本 tick 之前未見）。
         let sym = ctx.symbol;
-        let oi_panel_delta_pct = match oi_panel_delta_5m_pct(surface, sym, ctx.timestamp_ms) {
-            Ok(delta) => delta,
-            Err(cause) => {
-                tracing::debug!(
-                    target: "bb_breakout.oi",
-                    strategy = "bb_breakout",
-                    symbol = %sym,
-                    reason = "oi_panel_unavailable",
-                    cause = %cause,
-                    "bb_breakout fail-closed: oi_panel_unavailable"
-                );
-                return vec![];
-            }
-        };
+        // BB-OI-DECOUPLE-1：OI panel 取值與降級語意。
+        //   * `enable_oi_signal=true` + OI 不可得 → fail-closed（return vec![]），OI 是
+        //     合流信號的一部分，缺失時不交易（保留原嚴格語意）。
+        //   * `enable_oi_signal=false`（demo 預設）+ OI 不可得 → `None`，由下方
+        //     `if self.enable_oi_signal` 分支自然處理（OI 不參與 score 修飾，照常交易）。
+        // 改 `Option<f64>` 的根因：OI cohort（25）< scanner universe（40），落 cohort
+        // 外的幣恆 `symbol_missing`；原 `Err → return vec![]` 在 OI 預設關閉時仍把整
+        // tick 跳過，與 :774 score 修飾的正確降級脫鉤。
+        let oi_panel_delta_pct: Option<f64> =
+            match oi_panel_delta_5m_pct(surface, sym, ctx.timestamp_ms) {
+                Ok(delta) => Some(delta),
+                Err(cause) => {
+                    if self.enable_oi_signal {
+                        tracing::debug!(
+                            target: "bb_breakout.oi",
+                            strategy = "bb_breakout",
+                            symbol = %sym,
+                            reason = "oi_panel_unavailable",
+                            cause = %cause,
+                            "bb_breakout fail-closed: oi_panel_unavailable (enable_oi_signal=true)"
+                        );
+                        return vec![];
+                    }
+                    None
+                }
+            };
         self.prev_state
             .insert(sym.to_string(), self.symbols.get(sym).cloned());
         let last_ms = self.cooldown.last_ms(sym).unwrap_or(0);
@@ -771,11 +790,17 @@ impl Strategy for BbBreakout {
                         // 開啟且 surface.oi_delta_panel 有有效 delta 時：方向一致加 bonus，背離則扣 bonus。
                         // score=None（上游合流停用）時不憑 OI 偽造 score。
                         // FUP：需 `|d| > oi_min_delta_pct` 才套 bonus；預設 0.0 保留 pre-FUP 行為。
+                        // BB-OI-DECOUPLE-1：`oi_panel_delta_pct` 現為 `Option<f64>`。
+                        // 進到 `enable_oi_signal=true` 分支時，上方 fail-closed 已保證 OI
+                        // 可得（`Some`）；此處 `match (score, oi_panel_delta_pct)` 仍顯式覆蓋
+                        // `None`（理論上不可達）以保持型別安全且永不偽造 OI 修飾。
                         let score = if self.enable_oi_signal {
-                            match score {
-                                Some(s) if oi_panel_delta_pct.abs() > self.oi_min_delta_pct => {
-                                    let confirms = (oi_panel_delta_pct > 0.0 && is_long)
-                                        || (oi_panel_delta_pct < 0.0 && !is_long);
+                            match (score, oi_panel_delta_pct) {
+                                (Some(s), Some(delta))
+                                    if delta.abs() > self.oi_min_delta_pct =>
+                                {
+                                    let confirms = (delta > 0.0 && is_long)
+                                        || (delta < 0.0 && !is_long);
                                     let adj = if confirms {
                                         self.oi_confluence_bonus
                                     } else {

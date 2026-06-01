@@ -316,9 +316,16 @@ def run_james_stein(
             p_value_bonferroni=1.0,
             m_tests=max(len(validation_stats), 1),
         )
+        # A-4 (B2)：不在此把「未過驗證的正 edge」歸零。
+        # 為什麼移除：歸零後 runtime_bps=0.0 寫進 edge_estimates.json，Rust
+        # edge_estimates.rs:149 優先讀 runtime_bps → CellEstimate.shrunk_bps=0.0
+        # → 對 demo gate(gates.rs:177 `shrunk_bps > 0.0`) 為 false，跳過「demo 放行
+        # 未驗證正 edge 探索臂」(:177-194)，誤落 :216 當負 edge 阻擋，架空了 Rust
+        # 本就正確的 demo-loose 設計。fail-closed 由 Rust 雙路徑非對稱接管，不靠歸零：
+        #   - live  gates.rs:275：正 edge + 未驗證 → reject(CostGateJsLiveStaleOrUnvalidated)
+        #   - demo  gates.rs:184：正 edge + 未驗證 → return None（探索放行，學習資料源）
+        # validation_passed 旗標隨 results[k] 一併寫出，Rust 兩路徑各自據此判斷。
         runtime_bps = shrunk_values[i]
-        if not validation.validation_passed and runtime_bps > 0.0:
-            runtime_bps = 0.0
         results[k] = {
             "strategy_name": strategy,
             "symbol": symbol,
@@ -535,8 +542,8 @@ def _write_json_snapshot(
             # Primary signal for Rust cost_gate (WIRE-1): shrunk realized edge bps.
             # Rust cost_gate 主信號（WIRE-1）：收縮實現邊際 bps。
             "shrunk_bps": round(r["shrunk_bps"], 4),
-            # Runtime signal: positive edge is zeroed unless validation passed.
-            # 運行時信號：未通過驗證的正 edge 會被歸零。
+            # 運行時信號：A-4(B2) 後不再對未驗證正 edge 歸零，runtime_bps 等於
+            # shrunk_bps 真實值（fail-closed 由 Rust gates.rs demo/live 雙路徑接管）。
             "runtime_bps": round(r.get("runtime_bps", r["shrunk_bps"]), 4),
             "raw_bps": round(r["raw_bps"], 4),
             "n": r["n_observations"],

@@ -142,6 +142,8 @@ pub(super) fn write_test_snapshot() -> (Arc<PathBuf>, tempfile::TempDir) {
             total_fills: 3,
             total_stops: 1,
             last_tick_ms: 1700000050000,
+            // QTY-ZERO-SKIP-1：新增 round-to-zero 靜默 skip counter。
+            qty_zero_skips: 0,
         },
         source: "rust_engine".into(),
         indicators: HashMap::new(),
