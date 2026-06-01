@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import pytest
 
+import ml_training.mlde_shadow_advisor as mlde_shadow_advisor
 from ml_training.mlde_shadow_advisor import (
+    DEFAULT_PG_STATEMENT_TIMEOUT_MS,
     ShadowAdvisorConfig,
+    ShadowRecommendation,
     build_recommendations,
     config_from_env as shadow_config_from_env,
 )
@@ -45,6 +48,18 @@ def test_mode_specific_min_samples_env_overrides_generic(monkeypatch):
     assert shadow_config_from_env("live_demo").min_samples == 5
     assert dream_config_from_env("demo").min_samples == 2
     assert dream_config_from_env("live_demo").min_samples == 5
+
+
+def test_shadow_advisor_config_defaults_to_bounded_pg_statement_timeout(monkeypatch):
+    monkeypatch.delenv("OPENCLAW_MLDE_SHADOW_STATEMENT_TIMEOUT_MS", raising=False)
+
+    assert (
+        shadow_config_from_env("demo").statement_timeout_ms
+        == DEFAULT_PG_STATEMENT_TIMEOUT_MS
+    )
+
+    monkeypatch.setenv("OPENCLAW_MLDE_SHADOW_STATEMENT_TIMEOUT_MS", "1234")
+    assert shadow_config_from_env("demo").statement_timeout_ms == 1234
 
 
 def test_shadow_advisor_builds_rank_and_veto_recommendations():
@@ -99,6 +114,127 @@ def test_shadow_advisor_builds_rank_and_veto_recommendations():
     rank = next(r for r in recs if r.recommendation_type == "rank")
     assert rank.payload["scanner_context"]["scanner_trend_phase"] == "clean_trend"
     assert rank.payload["scanner_context"]["scanner_f_bkout"] == 0.74
+
+
+def test_shadow_advisor_fetch_sets_statement_timeout_before_mlde_view(monkeypatch):
+    calls = []
+
+    class FakeCursor:
+        description = None
+
+        def __init__(self):
+            self._rows = []
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params=None):
+            calls.append((sql, params))
+            if "information_schema.columns" in sql:
+                self._rows = [("scanner_market_regime",)]
+                self.description = [("column_name",)]
+            else:
+                self._rows = []
+                self.description = [("engine_mode",)]
+
+        def fetchall(self):
+            return self._rows
+
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def cursor(self):
+            return FakeCursor()
+
+    class FakePsycopg2:
+        @staticmethod
+        def connect(dsn, connect_timeout=2):
+            assert dsn == "postgresql://unit-test"
+            assert connect_timeout == 2
+            return FakeConn()
+
+    monkeypatch.setattr(mlde_shadow_advisor, "psycopg2", FakePsycopg2)
+
+    cfg = ShadowAdvisorConfig(statement_timeout_ms=2345)
+    assert mlde_shadow_advisor._fetch_aggregate_rows("postgresql://unit-test", cfg) == []
+
+    assert len(calls) == 3
+    timeout_sql, timeout_params = calls[0]
+    assert "SET LOCAL statement_timeout" in timeout_sql
+    assert timeout_params == (2345,)
+    assert "information_schema.columns" in calls[1][0]
+    assert "FROM learning.mlde_edge_training_rows" in calls[2][0]
+
+
+def test_shadow_advisor_persist_sets_statement_timeout_before_insert(monkeypatch):
+    calls = []
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params=None):
+            calls.append((sql, params))
+
+    class FakeConn:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def cursor(self):
+            return FakeCursor()
+
+        def commit(self):
+            pass
+
+    class FakePsycopg2:
+        class Error(Exception):
+            pass
+
+        @staticmethod
+        def connect(dsn, connect_timeout=2):
+            assert dsn == "postgresql://unit-test"
+            assert connect_timeout == 2
+            return FakeConn()
+
+    monkeypatch.setattr(mlde_shadow_advisor, "psycopg2", FakePsycopg2)
+    monkeypatch.setattr(mlde_shadow_advisor, "Json", lambda value: value)
+
+    rec = ShadowRecommendation(
+        engine_mode="demo",
+        source="ml_shadow",
+        recommendation_type="rank",
+        strategy_name="grid_trading",
+        symbol=None,
+        expected_net_bps=4.5,
+        confidence=0.75,
+        sample_count=8,
+        payload={"policy": "shadow_advisory_only"},
+    )
+    inserted = mlde_shadow_advisor._persist_recommendations(
+        "postgresql://unit-test",
+        [rec],
+        statement_timeout_ms=3456,
+    )
+
+    assert inserted == 1
+    assert len(calls) == 2
+    timeout_sql, timeout_params = calls[0]
+    assert "SET LOCAL statement_timeout" in timeout_sql
+    assert timeout_params == (3456,)
+    assert "verify_replay_evidence_and_insert" in calls[1][0]
 
 
 def test_dream_summary_emits_parameter_proposals_for_negative_edge():
