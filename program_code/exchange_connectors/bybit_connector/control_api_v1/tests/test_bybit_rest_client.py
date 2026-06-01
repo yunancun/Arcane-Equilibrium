@@ -26,6 +26,7 @@ from app.bybit_rest_client import (
     BybitBusinessError,
     BybitClient,
     BybitCredentialsMissing,
+    BybitMainnetOrderRefused,
     BybitTransportError,
     _decimals_from_step,
     _format_number,
@@ -676,6 +677,100 @@ def test_place_order_retcode_error():
             qty=0.001, category="linear",
         )
     assert exc_info.value.ret_code == 110007
+    c.close()
+
+
+# ---------------------------------------------------------------------------
+# place_order — B-1 mainnet fail-closed guard
+# place_order — B-1 主網 fail-closed 守衛
+# ---------------------------------------------------------------------------
+
+def test_place_order_mainnet_refused_no_http(monkeypatch):
+    """B-1：client 指向主網端點時 place_order 無條件拒絕，且不發任何 HTTP。
+    Mainnet client place_order refuses unconditionally and issues NO HTTP request."""
+    # OPENCLAW_ALLOW_MAINNET=1 + 顯式憑證 → 通過 ctor 的 LIVE-GUARD-1 三道門，
+    # 讓我們能單獨驗證新加的 place_order 入口守衛（否則會被 ctor 先擋下）。
+    monkeypatch.setenv("OPENCLAW_ALLOW_MAINNET", "1")
+    c = BybitClient(api_key="k", api_secret="s", environment="mainnet")
+    assert c.base_url() == "https://api.bybit.com"
+
+    # 若守衛失效而真的嘗試發 HTTP，handler 會 fail 測試（守衛必須在發 HTTP 前攔截）。
+    def _explode(req: httpx.Request) -> httpx.Response:  # pragma: no cover - 不應被呼叫
+        raise AssertionError("place_order must NOT issue HTTP on mainnet")
+
+    recorded = _install_mock_transport(c, _explode)
+    with pytest.raises(BybitMainnetOrderRefused):
+        c.place_order(
+            symbol="BTCUSDT", side="Buy", order_type="Market",
+            qty=0.001, category="linear", reduce_only=True,
+        )
+    assert recorded == []   # 確認零 HTTP 請求被送出
+    c.close()
+
+
+def test_place_order_mainnet_refused_via_live_alias(monkeypatch):
+    """B-1：'live' 別名經 _normalize_env 收斂為 'mainnet'，同樣被守衛拒絕。
+    The 'live' alias normalizes to 'mainnet' and is refused identically."""
+    monkeypatch.setenv("OPENCLAW_ALLOW_MAINNET", "1")
+    c = BybitClient(api_key="k", api_secret="s", environment="live")
+    assert c.base_url() == "https://api.bybit.com"
+
+    # 守衛失效則 handler fail 測試（必須在發 HTTP 前攔截，避免對真主網發單）。
+    def _explode(req: httpx.Request) -> httpx.Response:  # pragma: no cover - 不應被呼叫
+        raise AssertionError("place_order must NOT issue HTTP on mainnet (live alias)")
+
+    recorded = _install_mock_transport(c, _explode)
+    with pytest.raises(BybitMainnetOrderRefused):
+        c.place_order(
+            symbol="BTCUSDT", side="Sell", order_type="Market",
+            qty=0.001, category="linear", reduce_only=True,
+        )
+    assert recorded == []   # 確認零 HTTP 請求被送出
+    c.close()
+
+
+def test_place_order_demo_allowed_passes_guard():
+    """B-1：demo 端點不受守衛影響，place_order 正常下單（mock HTTP success）。
+    Demo client passes the guard and places the order normally (mocked success)."""
+    c = _make_client(env="demo")
+    captured_body: dict[str, Any] = {}
+
+    def _handler(req: httpx.Request) -> httpx.Response:
+        captured_body.update(json.loads(req.content))
+        return httpx.Response(
+            200,
+            json=_ok_envelope({"orderId": "DEMO-1", "orderLinkId": "DEMO-LINK-1"}),
+        )
+
+    _install_mock_transport(c, _handler)
+    resp = c.place_order(
+        symbol="BTCUSDT", side="Sell", order_type="Market",
+        qty=0.001, category="linear", reduce_only=True,
+    )
+    # 守衛放行 → HTTP 正常送出 → reduce_only flatten 與 B-1 前行為一致。
+    assert captured_body["reduceOnly"] is True
+    assert resp["order_id"] == "DEMO-1"
+    c.close()
+
+
+def test_place_order_live_demo_allowed_passes_guard(monkeypatch):
+    """B-1：LiveDemo（live 槽憑證 + demo 端點）是合法 Live 模式，守衛必放行。
+    LiveDemo targets the demo endpoint and must pass the guard (not be killed)."""
+    # live_demo 用 'live' secret slot，但端點是 api-demo.bybit.com。
+    c = BybitClient(api_key="k", api_secret="s", environment="live_demo")
+    assert c.base_url() == "https://api-demo.bybit.com"
+
+    def _handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json=_ok_envelope({"orderId": "LD-1", "orderLinkId": "LD-LINK-1"}),
+        )
+
+    _install_mock_transport(c, _handler)
+    resp = c.place_order(
+        symbol="BTCUSDT", side="Buy", order_type="Market",
+        qty=0.001, category="linear", reduce_only=True,
+    )
+    assert resp["order_id"] == "LD-1"
     c.close()
 
 
