@@ -15,8 +15,16 @@ _CONTROL_API_DIR = _TEST_DIR.parent
 if str(_CONTROL_API_DIR) not in sys.path:
     sys.path.insert(0, str(_CONTROL_API_DIR))
 
-from app import governance_routes as gr
-from app.governance_routes import governance_router
+# P2a 重構：autonomy 業務邏輯與路由已遷至 governance_autonomy_service；
+# patch 目標（_get_autonomy_pg_conn / _autonomy_eligibility_payload /
+# _autonomy_totp_backend_configured / _verify_autonomy_totp）現位於該模塊。
+#
+# 必須先 import governance_routes（套件中央模塊）：它在模塊底部以 side-effect
+# 方式載入並向 governance_router 註冊 autonomy 路由。直接先 import 葉模塊
+# governance_autonomy_service 會觸發既有的雙向循環導入契約（與
+# governance_extended_routes 同），故沿用「先 routes 後取 service」順序。
+from app.governance_routes import governance_router  # noqa: F401 — 先載入中央模塊並註冊路由
+from app import governance_autonomy_service as gr  # autonomy 符號（patch 目標）現居此模塊
 
 
 def _actor() -> SimpleNamespace:
