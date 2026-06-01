@@ -57,6 +57,7 @@ CANONICAL_FEATURE_NAMES_V1 = [
 
 VALID_ENGINE_MODES = ("paper", "demo", "live", "live_demo", "demo_live_demo")
 VALID_OBSERVATION_SOURCES = ("mlde_edge_training_rows", "legacy_decision_context")
+DEFAULT_PG_STATEMENT_TIMEOUT_MS = 2_000
 
 
 # ---------------------------------------------------------------------------
@@ -95,6 +96,8 @@ class LinUcbTrainConfig:
             默認 100 bps = 1.0，後續 agent 可調。
         max_age_days: optional recent-window bound for V031 view rows.
             可調近期窗口；None 表示不按天數截斷。
+        statement_timeout_ms: per-statement PG timeout for scheduler safety.
+            每條 PG 語句 timeout；避免慢 view 阻塞 edge scheduler。
     """
 
     arm_space_version: str = "v1_15"
@@ -108,6 +111,7 @@ class LinUcbTrainConfig:
     engine_mode: str = "demo"
     reward_scale_bps: float = 100.0
     max_age_days: Optional[int] = 90
+    statement_timeout_ms: Optional[int] = DEFAULT_PG_STATEMENT_TIMEOUT_MS
 
 
 @dataclass
@@ -230,6 +234,16 @@ def _scale_reward_bps(net_bps_after_fee: float, reward_scale_bps: float) -> floa
     return float(net_bps_after_fee) / scale
 
 
+def _set_local_statement_timeout(cur, statement_timeout_ms: Optional[int]) -> None:
+    """Apply a bounded PG statement timeout for this transaction. / 設定本交易 timeout。"""
+    if statement_timeout_ms is None:
+        return
+    timeout_ms = int(statement_timeout_ms)
+    if timeout_ms <= 0:
+        return
+    cur.execute("SET LOCAL statement_timeout = %s", (timeout_ms,))
+
+
 # ---------------------------------------------------------------------------
 # PG IO — psycopg2 fetch + upsert
 # PG IO — psycopg2 讀取與 upsert
@@ -246,6 +260,7 @@ def fetch_arm_observations(
     engine_mode: str = "demo",
     reward_scale_bps: float = 100.0,
     max_age_days: Optional[int] = 90,
+    statement_timeout_ms: Optional[int] = DEFAULT_PG_STATEMENT_TIMEOUT_MS,
 ) -> list[tuple[list[float], float]]:
     """Fetch (context_features, reward) tuples for a single arm.
     為單個 arm 取出 (context_features, reward) 三元組。
@@ -264,6 +279,7 @@ def fetch_arm_observations(
     out: list[tuple[list[float], float]] = []
     with psycopg2.connect(dsn, connect_timeout=2) as conn:  # pragma: no cover — live path
         with conn.cursor() as cur:
+            _set_local_statement_timeout(cur, statement_timeout_ms)
             if observation_source == "mlde_edge_training_rows":
                 engine_modes = list(engine_mode_scope(engine_mode))
                 sql = """
@@ -322,6 +338,7 @@ def upsert_arm_state(
     b,
     n_pulls: int,
     cumulative_reward: float,
+    statement_timeout_ms: Optional[int] = DEFAULT_PG_STATEMENT_TIMEOUT_MS,
 ) -> None:
     """Upsert sufficient statistics into learning.linucb_state.
     將充分統計量 upsert 進 learning.linucb_state。
@@ -354,6 +371,7 @@ def upsert_arm_state(
     """
     with psycopg2.connect(dsn, connect_timeout=2) as conn:  # pragma: no cover — live path
         with conn.cursor() as cur:
+            _set_local_statement_timeout(cur, statement_timeout_ms)
             cur.execute(
                 sql,
                 (
@@ -412,6 +430,7 @@ def train_all_arms(dsn: str, cfg: LinUcbTrainConfig) -> list[TrainResult]:
                 engine_mode=cfg.engine_mode,
                 reward_scale_bps=cfg.reward_scale_bps,
                 max_age_days=cfg.max_age_days,
+                statement_timeout_ms=cfg.statement_timeout_ms,
             )
         except Exception as exc:  # pragma: no cover — DB error path
             logger.error("fetch_arm_observations failed arm=%s err=%s", arm_id, exc)
@@ -421,7 +440,17 @@ def train_all_arms(dsn: str, cfg: LinUcbTrainConfig) -> list[TrainResult]:
         converged = n_pulls >= cfg.min_samples_per_arm
 
         try:
-            upsert_arm_state(dsn, arm_id, cfg.arm_space_version, schema_hash, A, b, n_pulls, cum_r)
+            upsert_arm_state(
+                dsn,
+                arm_id,
+                cfg.arm_space_version,
+                schema_hash,
+                A,
+                b,
+                n_pulls,
+                cum_r,
+                statement_timeout_ms=cfg.statement_timeout_ms,
+            )
         except Exception as exc:  # pragma: no cover — DB error path
             logger.error("upsert_arm_state failed arm=%s err=%s", arm_id, exc)
             continue

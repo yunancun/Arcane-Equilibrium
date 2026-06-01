@@ -19,6 +19,8 @@ Principles honoured / 遵循原則：
 from __future__ import annotations
 
 import logging
+import sys
+import types
 from typing import Any, Optional
 from unittest.mock import MagicMock, patch
 
@@ -106,6 +108,64 @@ def _fake_get_pg_conn(conn):
         yield conn
 
     return _cm
+
+
+def test_mlde_unblock_passes_linucb_statement_timeout_env(monkeypatch):
+    """MLDE unblock must pass the LinUCB PG timeout from env into trainer config.
+    MLDE 啟用流程必須把 env timeout 傳進 LinUCB 訓練配置。"""
+    sched = _make_scheduler(modes=("demo",))
+
+    import ml_training.linucb_trainer as linucb_trainer
+    import program_code.exchange_connectors.bybit_connector.control_api_v1.app.edge_estimator_scheduler as mod
+
+    captured: dict[str, Any] = {}
+
+    def fake_train_all_arms(dsn, cfg):
+        captured["dsn"] = dsn
+        captured["statement_timeout_ms"] = cfg.statement_timeout_ms
+        return []
+
+    fake_shadow = types.ModuleType("ml_training.mlde_shadow_advisor")
+    fake_shadow.config_from_env = lambda engine_mode: {"engine_mode": engine_mode}  # type: ignore[attr-defined]
+    fake_shadow.generate_shadow_recommendations = (  # type: ignore[attr-defined]
+        lambda dsn, cfg: {"engine_mode": cfg["engine_mode"], "inserted": 0}
+    )
+    fake_dream = types.ModuleType("local_model_tools.dream_engine")
+    fake_dream.persist_dream_insights = lambda dsn, engine_mode: {"inserted": 0}  # type: ignore[attr-defined]
+    fake_opportunity = types.ModuleType("local_model_tools.opportunity_tracker")
+    fake_opportunity.persist_regret_summary = (  # type: ignore[attr-defined]
+        lambda dsn, engine_mode: {"inserted": 0, "skipped": "test"}
+    )
+    fake_demo_applier = types.ModuleType("ml_training.mlde_demo_applier")
+    fake_demo_applier.config_from_env = lambda: {"engine_mode": "demo"}  # type: ignore[attr-defined]
+    fake_demo_applier.run_mlde_demo_applier = (  # type: ignore[attr-defined]
+        lambda dsn, cfg: {"enabled": True, "applied": 0}
+    )
+
+    monkeypatch.setenv("OPENCLAW_MLDE_LINUCB_STATEMENT_TIMEOUT_MS", "4321")
+    monkeypatch.setattr(
+        mod,
+        "get_secret_value",
+        lambda name: "postgresql://unit-test" if name == "OPENCLAW_DATABASE_URL" else None,
+    )
+    monkeypatch.setattr(linucb_trainer, "train_all_arms", fake_train_all_arms)
+    monkeypatch.setitem(sys.modules, "ml_training.mlde_shadow_advisor", fake_shadow)
+    monkeypatch.setitem(sys.modules, "local_model_tools.dream_engine", fake_dream)
+    monkeypatch.setitem(sys.modules, "local_model_tools.opportunity_tracker", fake_opportunity)
+    monkeypatch.setitem(sys.modules, "ml_training.mlde_demo_applier", fake_demo_applier)
+
+    out = sched._run_mlde_unblock("demo")
+
+    assert captured == {
+        "dsn": "postgresql://unit-test",
+        "statement_timeout_ms": 4321,
+    }
+    assert out["linucb"] == {
+        "engine_mode": "demo_live_demo",
+        "arms": 0,
+        "total_pulls": 0,
+        "converged_arms": 0,
+    }
 
 
 # ---------------------------------------------------------------------------
