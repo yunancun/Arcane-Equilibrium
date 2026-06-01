@@ -86,6 +86,19 @@ class BybitCredentialsMissing(BybitError):
     私有端點呼叫時缺少 API key / secret。"""
 
 
+class BybitMainnetOrderRefused(BybitError):
+    """place_order() refused because the client targets the Bybit mainnet endpoint.
+    place_order() 因 client 指向 Bybit 主網端點而拒絕下單。
+
+    為什麼 fail-closed（B-1 防禦縱深）：所有 live/mainnet 開倉/平倉的權威路徑都在
+    Rust execution authority（經 5-gate 授權 + Decision Lease）。Python httpx client
+    依設計只用於 demo 平倉（clean_restart_flatten.py reduce_only），永遠不是主網下單
+    通道。因此「從 Python client 對主網 place_order」一定是錯的呼叫 → 無條件拒絕，
+    且必須拋出明確例外（絕不靜默成功）。此守衛不放鬆任何邊界（CLAUDE.md §四），
+    僅把原本只在 caller 端（clean_restart_flatten.py）的保證下沉到 client 層，
+    使其與哪個 caller 無關都成立。"""
+
+
 # ---------------------------------------------------------------------------
 # Environment mapping / 環境映射
 # ---------------------------------------------------------------------------
@@ -830,7 +843,25 @@ class BybitClient:
             (Rust serialized as snake_case; Bybit raw response is camelCase):
               {"order_id": "...", "order_link_id": "...",
                "orderId": "...", "orderLinkId": "..."}
+
+        Raises:
+            BybitMainnetOrderRefused: 若 client 指向主網端點（self._env == "mainnet"）。
         """
+        # B-1 防禦縱深 fail-closed 守衛：client 指向主網端點時無條件拒絕下單。
+        # 判別依據用 self._env（_normalize_env 已把 "live" 別名收斂為 "mainnet"；
+        # "live_demo" 維持 demo 端點不受影響），而非 secret slot — 因 LiveDemo 用 live
+        # 槽憑證但連 demo 伺服器，是合法 Live 模式，不可誤殺（見 memory: LiveDemo guard）。
+        # 無 env-flag 逃生口：Python client 永遠不是主網下單通道，主網開/平倉走 Rust
+        # execution authority（5-gate + Decision Lease）。cancel_order / cancel_all_orders
+        # 是降風險操作不在此守衛範圍。
+        if self._env == "mainnet":
+            raise BybitMainnetOrderRefused(
+                "place_order refused: Python client targets Bybit MAINNET endpoint "
+                f"({self._base_url}). Mainnet order placement must go through the Rust "
+                "execution authority, not Python. / place_order 被拒：Python client 指向 "
+                "Bybit 主網端點，主網下單必須走 Rust execution authority。"
+            )
+
         body: dict[str, Any] = {
             "category": category,
             "symbol": symbol,
