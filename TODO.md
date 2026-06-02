@@ -1,7 +1,7 @@
 # 玄衡 TODO — 主動派工佇列
 
-**版本** v109 ｜ **日期** 2026-06-02 ｜ **來源 HEAD** `e6aa5e37`；v108 = AEG 研究基礎設施部署狀態刷新（V125 儲存 + daily-kline 14505 + Gate-B 探針於 `c1c017b0`）；**v109 = 主線校準**：(1) 候選 2 多日 trend/TSMOM 樞紐診斷收斂為 🔴 **NO-GO-TREND**（`a99ef886` + MIT 方法論 `b0b50cc9`，4-reviewer；20 perp/730d 日線：per-symbol 自相關 0/20、HAC 唯一過閾 k40 孤立雜訊 + k90 顯著反轉、表面 0.66 Sharpe 拆為 short-side 厚尾/funding harvest 非方向 alpha；backfill 救不了）→ verdict 主路改 **listing fade**（主路）+ **funding/OI history backfill**（P0 基礎，現 funding 僅 ~58 天是多日持倉硬約束）。(2) `P5-SM` E1b done（`e6aa5e37`，已 push，E4 Linux 133 passed）→ 卡 soak gate。(3) funding/OI backfill Rust WIP 進行中（平行 session，Mac-local 未提交，勿碰）。
-**當前主線**：P0-EDGE-1 Alpha-Edge 體制證據治理。AEG 研究基礎設施已全鏈部署（V125 儲存 + daily-kline 14505 + Gate-B 探針，`c1c017b0`），非 alpha proof，P0-EDGE-1 仍開。**候選 2 多日 trend/TSMOM 已關閉（NO-GO-TREND，`a99ef886`）**——4-reviewer 收斂判定無可偵測 tradeable edge，backfill 救不了，不進 Phase 2。verdict 重定向兩條：**（主路）listing fade**——Gate-B 隔離探針已部署（R-0 zero-leak、Linux smoke EXIT=0），待 operator-timed 24h 真捕捉；**（P0 基礎）funding/OI history backfill**——複用已部署 daily-kline pattern，cap 永查 `upperFundingRate` SSOT（funding_short_v2 教訓），Rust WIP 平行 session 進行中（Mac-local 未提交）。候選 4 oi_delta ensemble、候選 5 funding revive 排後。verdict：`docs/CCAgentWorkSpace/QC/workspace/reports/2026-06-02--multiday_trend_diagnostic_verdict.md`。
+**版本** v110 ｜ **日期** 2026-06-03 ｜ **來源 HEAD** `5b80c2f7`；v109 = 主線校準（候選 2 trend NO-GO + P5 E1b done + funding/OI WIP）；**v110 = funding/OI backfill 落地**：(1) 候選 2 多日 trend/TSMOM = 🔴 **NO-GO-TREND**（`a99ef886`，4-reviewer）→ verdict 主路改 **listing fade**（主路）+ **funding/OI history backfill**（P0 基礎，現 funding 僅 ~58 天硬約束）。(2) **funding/OI backfill writer 接手孤兒 Codex WIP → 走正規鏈收尾並 commit `5b80c2f7`**（2085 行新 Rust，鏡像 daily_kline；E2 對抗審查 PASS〔client 簽名 byte-identity 親驗、strict-parse mutation 證 bite〕+ E4 回歸 PASS〔Mac+Linux lib **3757/0/1** 一致、funding_oi 36 測試真跑〕；三端同步）。next = `--apply` 真回填〔operator-gated DB-write，apply 前須 Linux dry-run smoke 驗 ON CONFLICT 冪等 + 真網分頁〕。(3) `P5-SM` E1b done（`e6aa5e37`）→ 卡 soak gate（operator-timed Linux rebuild+flag-on）。
+**當前主線**：P0-EDGE-1 Alpha-Edge 體制證據治理。AEG 研究基礎設施已全鏈部署（V125 儲存 + daily-kline 14505 + Gate-B 探針，`c1c017b0`），非 alpha proof，P0-EDGE-1 仍開。**候選 2 多日 trend/TSMOM 已關閉（NO-GO-TREND，`a99ef886`）**——4-reviewer 收斂判定無可偵測 tradeable edge，backfill 救不了，不進 Phase 2。verdict 重定向兩條：**（主路）listing fade**——Gate-B 隔離探針已部署（R-0 zero-leak、Linux smoke EXIT=0），待 operator-timed 24h 真捕捉；**（P0 基礎）funding/OI history backfill**——複用已部署 daily-kline pattern，cap 永查 `upperFundingRate` SSOT（funding_short_v2 教訓），**程式碼已 committed `5b80c2f7`（接手孤兒 Codex WIP，E2+E4 PASS，三端同步）；`--apply` 真回填 operator-gated**。候選 4 oi_delta ensemble、候選 5 funding revive 排後。verdict：`docs/CCAgentWorkSpace/QC/workspace/reports/2026-06-02--multiday_trend_diagnostic_verdict.md`。
 **v96 審計註記**：V5.8 設計未被刪除；它作為長期 13 模組自主架構保留，進行中 TODO 只保留可派工態勢。詳見 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--v58_design_progress_preservation_audit.md`。
 **歷史詳情**：版本紀錄 `docs/CLAUDE_CHANGELOG.md`；v94 修剪審計 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--todo_v94_prune_audit.md`；清理前封存 `docs/archive/2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`；較早的 v92 封存 `docs/archive/2026-05-31--todo_v92_archive.md`。
 
@@ -11,8 +11,8 @@
 
 | 區域 | 當前狀態 | 下一步 |
 |---|---|---|
-| 來源同步 | **三端同步**（Mac=origin=Linux `trade-core`=`e6aa5e37`，本 session 親驗 Linux clean 0-dirty）。含 P5 step-i `a99bfa1d` + E1b `e6aa5e37`。本 TODO 更新 commit 後再同步一次。 | 維持三端同步；P5 step-ii+ 續推時同步。**funding/OI backfill Rust WIP 為平行 session Mac-local 未提交**（勿碰；E2 已標 unknown WIP 不 revert）；他 session 未提交 meta-doc 不在本次範圍。 |
-| Runtime | Linux `trade-core` source 為 `e6aa5e37`（本 session 親驗）。P5 step-i 為 flag-OFF additive，**未 rebuild/未部署 = 未生效**，soak 未起。Paper snapshot stale 但非本批主線。 | QA post-deploy 檢查 A-1/A-2/B/A-4 四項；P5 soak 需 operator 開 Linux `--rebuild`+flag-on 窗口；任何 rebuild/restart 仍需明確 scope。 |
+| 來源同步 | **三端同步**（Mac=origin=Linux `trade-core`=`5b80c2f7`，本 session 親驗 Linux ff+回歸）。含 P5 step-i `a99bfa1d` + E1b `e6aa5e37` + **funding/OI backfill `5b80c2f7`（孤兒 Codex WIP 接手收尾）**。 | 維持三端同步；P5 step-ii+ 續推時同步。他 session 未提交 meta-doc（agent memory 等）仍 dirty，不在本次範圍（勿碰）。 |
+| Runtime | Linux `trade-core` source 為 `5b80c2f7`（本 session 親驗 ff + cargo regression 3757/0/1）。P5 step-i 為 flag-OFF additive，**未 rebuild/未部署 = 未生效**，soak 未起。funding/OI backfill 為新 bin，**未 `--apply` = DB 未回填**（V125 history 表仍空）。Paper snapshot stale 但非本批主線。 | QA post-deploy 檢查 A-1/A-2/B/A-4 四項；P5 soak 需 operator 開 Linux `--rebuild`+flag-on 窗口；funding/OI `--apply` 須先 Linux dry-run smoke；任何 rebuild/restart 仍需明確 scope。 |
 | Runtime 注意事項 | 系統層 `openclaw-engine.service` / 系統 watchdog 安裝仍受 sudo/操作員閘控；當前保護為使用者 watchdog + linger + 手動 engine 程序。 | 操作員安排系統層安裝窗口。 |
 | 被動健康殘留 | `[48] replay_manifest_registry_growth`、`[74] close_maker_reject_samples`、`[56] live_pipeline_active` 仍為 OPS 殘留／證據佇列；非 OPS-1 反轉。 | 在 OPS 佇列保持明示；在解決或接受前不要標記為全綠。 |
 | 操作員閘控操作 | 首次還原演練、系統層 units、live-auth 更新、Earn 首筆質押仍為手動操作。 | 操作員選擇低風險窗口／auth 時機。 |
@@ -23,7 +23,7 @@
 
 | ID | 狀態 | 負責鏈 | 驗收／閘門 | 下一步 |
 |---|---|---|---|---|
-| `P0-EDGE-1` | 🔴 進行中 | PM -> PA/QC/MIT/BB -> gate 後 E1 | 結案需要被接受的 Alpha-Edge 證據：>=3 個帶 alpha 的候選滿足 net/cost/統計 gate，或另一條被接受的 P0-EDGE 路徑。僅 Bull／僅陳舊／僅倖存者／僅敘事的正面結果不能晉升。 | AEG 研究基礎設施已部署（`c1c017b0`：V125 儲存 + daily-kline 14505 + Gate-B 探針，非 alpha proof，P0-EDGE-1 仍開）。**候選 2 多日 trend 已關閉（NO-GO-TREND `a99ef886`）**，不進 Phase 2。verdict 重定向：**（主路）listing fade** Gate-B 探針已部署，待 operator-timed 24h 真捕捉（~Q4）；**（P0 基礎）funding/OI history backfill**（Rust WIP 平行 session 進行中，複用 daily-kline pattern，cap 查 `upperFundingRate` SSOT）。候選 4 oi_delta、候選 5 funding revive 排後。V126 DB 清理（909MB）待 CC+dry-run；QA 續追 A-1/A-2/B/A-4 與 `bb_reversion` 30d。記憶 `project_2026_06_02_aeg_trend_listing_infra_deployed`；verdict `…/QC/…/2026-06-02--multiday_trend_diagnostic_verdict.md`。 |
+| `P0-EDGE-1` | 🔴 進行中 | PM -> PA/QC/MIT/BB -> gate 後 E1 | 結案需要被接受的 Alpha-Edge 證據：>=3 個帶 alpha 的候選滿足 net/cost/統計 gate，或另一條被接受的 P0-EDGE 路徑。僅 Bull／僅陳舊／僅倖存者／僅敘事的正面結果不能晉升。 | AEG 研究基礎設施已部署（`c1c017b0`：V125 儲存 + daily-kline 14505 + Gate-B 探針，非 alpha proof，P0-EDGE-1 仍開）。**候選 2 多日 trend 已關閉（NO-GO-TREND `a99ef886`）**，不進 Phase 2。verdict 重定向：**（主路）listing fade** Gate-B 探針已部署，待 operator-timed 24h 真捕捉（~Q4）；**（P0 基礎）funding/OI history backfill**（程式碼已 committed `5b80c2f7`，E2+E4 PASS；`--apply` 真回填 gated）。候選 4 oi_delta、候選 5 funding revive 排後。V126 DB 清理（909MB）待 CC+dry-run；QA 續追 A-1/A-2/B/A-4 與 `bb_reversion` 30d。記憶 `project_2026_06_02_aeg_trend_listing_infra_deployed`；verdict `…/QC/…/2026-06-02--multiday_trend_diagnostic_verdict.md`。 |
 | `P0-LG-3` | 🟡 原始碼已整合 / runtime 未部署 | PM -> E2 -> E4 -> QA -> 操作員 deploy gate | 審查已整合 commits `deb3f3af..0802d52b`；V104 checksum 紀律；Linux migration dry-run/AUTO_MIGRATE 計畫；supervised_live 測試綠燈。 | 任何 deploy/rebuild 前先跑審查鏈。 |
 | `P0-OPS` 殘留 | 🟢 OPS-1 已關閉 / 殘留操作員閘控 | 操作員 + 視需要 PM/E1/MIT | 還原演練、系統層 units、live-auth 更新、replay manifest 饋送、close-maker max-pending 證據。 | 等待操作員手動操作窗口；下方保持殘留行可見。 |
 
@@ -96,7 +96,7 @@
 - mark/index/premium kline client 實作；listing-capture production collector IMPL。
 - Gate-B **24h 真捕捉 run**（operator-timed ~Q4；探針就緒但未跑真捕捉）。
 
-進行中（平行 session）：funding/OI history backfill writer Rust WIP（NO-GO-TREND verdict 點名 P0 基礎；複用 daily-kline pattern；Mac-local 未提交，達 checkpoint 後走 E2/E4/BB 審查）。
+已 commit（`5b80c2f7`，三端同步）：funding/OI history backfill writer（Rust bin，NO-GO-TREND verdict 點名 P0 基礎；複用 daily-kline pattern；E2 對抗審查 + E4 Mac+Linux 回歸 PASS）。**未 `--apply` = V125 history 表仍空**；真回填為 operator-gated DB-write，apply 前須 Linux dry-run smoke。
 
 允許的工作必須維持文檔／設計／唯讀，除非 PM 以其自身負責鏈開立特定 S1
 實作任務。當前驗證結果：FND-1 設計分支已獲批且 V125 migration-design packet 已完成；FND-2、FND-3、FND-4、S2 Gate-B prep 契約／映射／計劃已完成。
@@ -132,7 +132,7 @@ AEG 不是對先前設計的取代。它整合並約束以下既有基礎：
 
 | 工作流 | 狀態 | 下一步 |
 |---|---|---|
-| `Alpha-Edge / AEG` | 進行中主線 | AEG 基礎設施已部署（V125 + daily-kline 14505 + Gate-B 探針 `c1c017b0`）。**候選 2 多日 trend/TSMOM 已關閉＝NO-GO-TREND（`a99ef886`）。** 下一步主線＝（主路）listing fade Gate-B 24h 真捕捉（operator-timed）+（P0 基礎）funding/OI backfill（Rust WIP 平行 session in-flight）；候選 4 oi_delta ensemble、候選 5 funding revive 排後。 |
+| `Alpha-Edge / AEG` | 進行中主線 | AEG 基礎設施已部署（V125 + daily-kline 14505 + Gate-B 探針 `c1c017b0`）。**候選 2 多日 trend/TSMOM 已關閉＝NO-GO-TREND（`a99ef886`）。** 下一步主線＝（主路）listing fade Gate-B 24h 真捕捉（operator-timed）+（P0 基礎）funding/OI backfill（程式碼已 committed `5b80c2f7`，E2+E4 PASS；`--apply` gated）；候選 4 oi_delta ensemble、候選 5 funding revive 排後。 |
 | `Workflow B` ADR-0046 basis 觀察／執行拆分 | 進行中但不阻塞 Alpha | PA 設計 -> E1 Rust -> MIT V117 -> E2 -> E4 -> BB -> QA。 |
 | `Earn Wave C` | 操作員閘控 | OP-1 金鑰更新 -> OP-2 Earn 變體 -> OP-3 首筆 $100-200 USDT Flexible 質押。 |
 | `Layered Autonomy v2 Wave 5` | 依 v92 D1 凍結（active-IMPL） | Packet A+B runtime 與 TOTP 來源存在；Packet C 核心 E4 綠燈；runtime TOTP 註冊 + engine 整合等到晉升 gate。 |
@@ -197,7 +197,7 @@ AEG 不是對先前設計的取代。它整合並約束以下既有基礎：
 | `P0-EDGE-1-POST-DEPLOY-QA-A1A2BA4` | 1 | `324001c3` 已部署 / QA 驗證待跑 | 驗 A-1 bb_breakout cohort 外幣恢復交易、A-2 qty_zero skip counter++ 且 0 reject row、A-4 下輪 cron `runtime_bps` 不歸零、B bb_reversion 僅 mean_reverting fire + accumulate-only。 |
 | `P0-EDGE-1-CAND2-V125-IMPL-SCOPE` | 2 | ✅ 已部署（`c1c017b0`）/ 候選 2 strategy NO-GO | V125 alpha 儲存 SQL（6 表/3 hypertable）已 apply 並三端同步；儲存層保留為研究資產。其餵養的候選 2 trend strategy 已 NO-GO（`a99ef886`），無 active scoring 消費者。 |
 | `P0-EDGE-1-CAND2-DAILY-KLINE-BACKFILL-WRITER` | 2 | ✅ 已部署（`c1c017b0`，--apply 14505 日線）| daily-kline backfill writer（Rust bin）已落 14505 日線/20 perp/730d；trend 診斷已用其判 NO-GO。pattern 現複用於 funding/OI backfill（見下列）。 |
-| `P0-EDGE-1-CAND-FUNDING-OI-BACKFILL` | 1 | 🟡 Rust WIP / 平行 session Mac-local 未提交 | NO-GO-TREND verdict 點名 P0 基礎：現 funding 覆蓋僅 ~58 天是所有多日持倉硬約束。公開 Bybit funding/OI history backfill writer，複用 daily-kline pattern；cap 永查 `upperFundingRate` SSOT（禁從 history max 反推，funding_short_v2 教訓）；artifact + DB provenance、PIT/survivorship caveat 明示、不得 alpha scoring。**勿碰平行 session WIP**（E2 已標 unknown WIP 不 revert）；待其達 checkpoint 後走 E2/E4/BB 審查鏈。BB endpoint spec：`docs/CCAgentWorkSpace/BB/workspace/reports/2026-06-02--funding_oi_backfill_endpoint_spec.md`。 |
+| `P0-EDGE-1-CAND-FUNDING-OI-BACKFILL` | 1 | ✅ 程式碼 committed `5b80c2f7`（E2+E4 PASS，三端同步）/ `--apply` gated | NO-GO-TREND verdict 點名 P0 基礎：現 funding 覆蓋僅 ~58 天是多日持倉硬約束。接手孤兒 Codex WIP → 走正規鏈：funding/OI history backfill writer（Rust bin，2085 行，鏡像 daily_kline）；strict-parse VARIANT（funding/OI「欄位存在 AND finite」非 >0 floor，保留真 0.0/負）；cap 紀律守（禁碰 `upperFundingRate`）。E2 對抗審查 PASS（client 簽名 byte-identity + strict-parse mutation 證 bite）+ E4 Mac+Linux lib 3757/0/1 一致。**next = `--apply` 真回填**（operator-gated DB-write；apply 前須 Linux dry-run smoke 驗 ON CONFLICT 冪等 + 真網分頁，mock 抓不到）。2 LOW deferred（funding ledger request_start honesty / page ledger 僅 retCode=0 頁）。spec：`…/BB/…/2026-06-02--funding_oi_backfill_endpoint_spec.md`。 |
 | `P3-MARKET-TICKERS-INDEX-MARK-DEAD-PERSISTENCE` | 4 | 設計已定（於 FND-4） / 前向 P3 fix 延後 | 歷史 basis/index 繞過；稍後修 Rust/forward recorder 對 `mark_price`/`index_price`/`funding_rate`/`open_interest` 的傳遞，仍為僅前向證據。 |
 | `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK` | 4 | 排程觀察 / `bb_reversion` gate 已部署 | 在 2026-06-27 決定 bb_breakout/bb_reversion 採 Stage 0R 基線或 M7 退役；`bb_reversion@mean_reverting` 需看樣本是否足夠，若 n<100 需延長或另設放寬方案。 |
 | `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` | 2 | PA 規格完成；待實作 | Sprint 3 恢復時 E1 -> BB -> E2 -> E4 -> QA。 |
@@ -235,7 +235,7 @@ AEG 不是對先前設計的取代。它整合並約束以下既有基礎：
 | 系統層服務安裝 | sudo／操作員 | 提升 runtime 保護，超越使用者 watchdog。 |
 | AEG-S1 儲存設計分支 | 完成 2026-06-01 | 獲批 `market.klines` 1095d + 用於 OHLCV 的 DB 來源血緣帳本，以及 funding/OI/long-short 專用研究歷史儲存。 |
 | AEG-S1 V125 + daily-kline backfill | ✅ 已部署 `c1c017b0`（gate 已過） | V125 儲存 + daily-kline 14505 日線已落並三端同步。 |
-| funding/OI backfill DB write/run 核准 | Rust writer WIP（平行 session）達 checkpoint + E2/E4/BB PASS 後 | 才可跑實際 DB write/backfill run；artifact-only/public-only，cap 查 `upperFundingRate` SSOT。 |
+| funding/OI backfill `--apply` 真回填 | 程式碼已 committed `5b80c2f7`（E2+E4 PASS）；operator 核准 + 先過 Linux dry-run smoke 後 | 才可跑實際 DB write 回填 V125 history 表；artifact + provenance，cap 查 `upperFundingRate` SSOT。 |
 | S2 Gate-B 24h 真捕捉 run | 探針已部署 `c1c017b0`（R-0 zero-leak）；operator 安排真實 PreLaunch 上幣窗口 | 跑 24h isolated capture＝listing fade 主路第一證據；仍不可連 production WS/scanner/strategy/DB/order/auth。 |
 | P5-SM step-i soak 部署 | operator 開 Linux `--rebuild` + flag-on 窗口 | 起 24-48h soak（0 divergence）；gate 過後 step-ii→step-iii cutover。 |
 
