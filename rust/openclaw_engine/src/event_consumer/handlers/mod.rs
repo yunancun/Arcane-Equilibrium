@@ -24,6 +24,9 @@ use std::collections::HashMap;
 
 pub(crate) mod edge_estimates;
 pub(crate) mod edge_predictor;
+// SM Option-2 收斂 step (i)（2026-06-02）：治理 lease + 唯讀投影 IPC handler
+// （ADDITIVE / dormant；Python flag 打開前不被路由）。
+mod governance;
 mod lifecycle;
 // FA gap audit G1（2026-05-29）：C4 通知 fail-safe escalate handler + helper 從 risk.rs
 // 純搬移至獨立 module，讓 risk.rs 回 <800 review 門檻（0 邏輯改）。
@@ -420,6 +423,46 @@ pub fn handle_paper_command(
         // 引擎絕不 fail-close。
         PipelineCommand::ReloadEdgeEstimates => {
             let _ = edge_estimates::handle_reload_edge_estimates(pipeline);
+        }
+        // ── SM Option-2 收斂 step (i)（2026-06-02）：治理 lease + 唯讀投影 ──
+        // ADDITIVE / dormant：Python flag OPENCLAW_LEASE_PYTHON_IPC_ENABLED 打開前
+        // 不被路由；全 fail-closed（任何錯誤回 Err，Python 端據此拒絕）。
+        PipelineCommand::AcquireLease {
+            intent_id,
+            scope,
+            ttl_ms,
+            profile,
+            source_stage,
+            response_tx,
+        } => governance::handle_acquire_lease(
+            intent_id,
+            scope,
+            ttl_ms,
+            profile,
+            source_stage,
+            response_tx,
+            pipeline,
+        ),
+        PipelineCommand::ReleaseLease {
+            lease_id,
+            outcome,
+            response_tx,
+        } => governance::handle_release_lease(lease_id, outcome, response_tx, pipeline),
+        PipelineCommand::GetLease {
+            lease_id,
+            response_tx,
+        } => governance::handle_get_lease(lease_id, response_tx, pipeline),
+        PipelineCommand::IsAuthorized { response_tx } => {
+            governance::handle_is_authorized(response_tx, pipeline)
+        }
+        PipelineCommand::GetGovStatus { response_tx } => {
+            governance::handle_get_gov_status(response_tx, pipeline)
+        }
+        PipelineCommand::ListLeases { response_tx } => {
+            governance::handle_list_leases(response_tx, pipeline)
+        }
+        PipelineCommand::GetRiskState { response_tx } => {
+            governance::handle_get_risk_state(response_tx, pipeline)
         }
         // P2-PACKET-C-C4-PIPELINE-WIRE：此變體必在 loop_handlers::handle_pipeline_command
         // 的 async 上層攔截（含 await，本同步 dispatch 無法處理）。若到達此處代表上層攔截

@@ -45,7 +45,10 @@ pub(in crate::ipc_server) use dynamic_risk::{
 };
 pub(in crate::ipc_server) use fee_source::handle_query_fee_source;
 pub(in crate::ipc_server) use governance::{
-    handle_force_governor_looser, handle_force_governor_tighter, handle_set_system_mode_broadcast,
+    // SM Option-2 收斂 step (i)（2026-06-02）：治理 lease + 唯讀投影 IPC handler。
+    handle_acquire_lease, handle_force_governor_looser, handle_force_governor_tighter,
+    handle_get_lease, handle_get_risk_state, handle_get_status, handle_is_authorized,
+    handle_list_leases, handle_release_lease, handle_set_system_mode_broadcast,
 };
 pub(in crate::ipc_server) use h_state::{
     handle_get_h_state_status, handle_invalidate_h_state, handle_query_h_state_full,

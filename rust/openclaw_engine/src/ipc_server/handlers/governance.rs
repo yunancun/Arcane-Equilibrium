@@ -214,6 +214,285 @@ fn spawn_governor_audit_row(
     });
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// SM Option-2 收斂 step (i)（2026-06-02）：治理 lease + 唯讀投影 IPC dispatch
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// 為什麼這些 handler 走 `pipeline_cmd_tx` + oneshot round-trip：IPC server 沒有直接
+// 的 `GovernanceCore` handle（per-pipeline GovernanceCore 由 tick actor 獨佔），故
+// 鏡像既有 `handle_force_governor_tighter` 模式：解 JSON-RPC params → 構造
+// PipelineCommand → 等 oneshot → format JSON 回覆。
+//
+// fail-CLOSED 規則（鏡像既有 governance handler）：
+//   - cmd channel 未配置 / send 失敗 / oneshot dropped / timeout → JSON-RPC error
+//     （ERR_INTERNAL）；tick-actor 回 Err(String) → JSON-RPC error（ERR_INVALID_REQUEST）。
+//   - 絕不把任一錯誤路徑解讀為 permissive / empty-success。
+//   - Python 端（governance_lease_bridge.py / governance_hub.py）收到 JSON-RPC error
+//     後 fail-closed：acquire→None、release→False、is_authorized→False、
+//     status→FROZEN+stale。
+//
+// 與 governance_lease_bridge.py / lease_ipc_schema.py 契約對齊（method 名 + param
+// 鍵 + response 形狀，E1 親驗，見 dispatch arm 註釋）。
+//
+// ADDITIVE / dormant：dispatch arm 存在但 Python flag 打開前不主動呼叫；
+// 不碰 execution_authority / live_reserved / 5 道 live-auth gate。
+
+/// step (i) · 共用：取 primary pipeline 的 cmd tx（lease + 投影皆走 primary
+/// pipeline 的 GovernanceCore，與 `set_system_mode` 取 primary 同理；read 為
+/// per-pipeline 視圖，符合 3-config 獨立）。None → fail-closed error。
+fn governance_primary_tx(
+    cmd_channels: &EngineCommandChannels,
+) -> Result<tokio::sync::mpsc::UnboundedSender<PipelineCommand>, JsonRpcResponseErrorParts> {
+    cmd_channels.primary().ok_or(JsonRpcResponseErrorParts {
+        code: ERR_INTERNAL,
+        message: "no command channel configured (engine down) / 無命令通道（引擎未運行）"
+            .to_string(),
+    })
+}
+
+/// step (i) · 共用：等 oneshot 回覆並把 `Result<String, String>` 轉成
+/// JSON-RPC 回覆。`json_str` 為 tick-actor 回的 JSON payload 字串；解析後原樣
+/// 放入 result。所有錯誤路徑都 fail-closed 成 JSON-RPC error。
+async fn await_governance_reply(
+    id: serde_json::Value,
+    resp_rx: tokio::sync::oneshot::Receiver<Result<String, String>>,
+) -> JsonRpcResponse {
+    match tokio::time::timeout(std::time::Duration::from_secs(5), resp_rx).await {
+        Ok(Ok(Ok(json_str))) => match serde_json::from_str::<serde_json::Value>(&json_str) {
+            Ok(v) => JsonRpcResponse::success(id, v),
+            Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("parse reply: {e}")),
+        },
+        // tick-actor 回 Err(String)：fail-closed → JSON-RPC error（非 permissive）。
+        Ok(Ok(Err(e))) => JsonRpcResponse::error(id, ERR_INVALID_REQUEST, e),
+        Ok(Err(_)) => JsonRpcResponse::error(id, ERR_INTERNAL, "response channel dropped"),
+        Err(_) => JsonRpcResponse::error(id, ERR_INTERNAL, "timeout waiting for tick actor"),
+    }
+}
+
+/// 內部用的 error 部件（避免在 `?` 早退時直接構造 JsonRpcResponse 需要 id）。
+struct JsonRpcResponseErrorParts {
+    code: i64,
+    message: String,
+}
+
+/// step (i) · `governance.acquire_lease` dispatch。
+///
+/// 契約對齊 lease_ipc_schema.build_acquire_request_params（method
+/// `governance.acquire_lease`；params 鍵 `intent_id`/`scope`/`ttl_ms`/`profile`/
+/// `source_stage`）與 parse_acquire_response（response `{lease_id, outcome}`，
+/// outcome ∈ {"Active","Bypass"}）。
+pub(in crate::ipc_server) async fn handle_acquire_lease(
+    id: serde_json::Value,
+    cmd_channels: &EngineCommandChannels,
+    params: &serde_json::Value,
+) -> JsonRpcResponse {
+    let tx = match governance_primary_tx(cmd_channels) {
+        Ok(tx) => tx,
+        Err(e) => return JsonRpcResponse::error(id, e.code, e.message),
+    };
+    let intent_id = match params.get("intent_id").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing/empty intent_id"),
+    };
+    let scope = match params.get("scope").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing/empty scope"),
+    };
+    // ttl_ms 為 u32；超界由 GovernanceCore::acquire_lease fail-closed 拒絕
+    // （InvalidTtl，單一真實來源 = Rust spec）。此處只驗存在 + u32 範圍。
+    let ttl_ms = match params.get("ttl_ms").and_then(|v| v.as_u64()) {
+        Some(n) if n <= u32::MAX as u64 => n as u32,
+        _ => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing/invalid ttl_ms"),
+    };
+    let profile = match params.get("profile").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing/empty profile"),
+    };
+    // source_stage 為遙測標籤，缺省給空字串（不致命）。
+    let source_stage = params
+        .get("source_stage")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PipelineCommand::AcquireLease {
+        intent_id,
+        scope,
+        ttl_ms,
+        profile,
+        source_stage,
+        response_tx: resp_tx,
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    await_governance_reply(id, resp_rx).await
+}
+
+/// step (i) · `governance.release_lease` dispatch。
+///
+/// 契約對齊 lease_ipc_schema.build_release_request_params（method
+/// `governance.release_lease`；params 鍵 `lease_id`/`outcome`，outcome ∈
+/// {"Consumed","Failed","Cancelled"}）與 parse_release_response（response
+/// `{ok: true}`）。
+pub(in crate::ipc_server) async fn handle_release_lease(
+    id: serde_json::Value,
+    cmd_channels: &EngineCommandChannels,
+    params: &serde_json::Value,
+) -> JsonRpcResponse {
+    let tx = match governance_primary_tx(cmd_channels) {
+        Ok(tx) => tx,
+        Err(e) => return JsonRpcResponse::error(id, e.code, e.message),
+    };
+    let lease_id = match params.get("lease_id").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing/empty lease_id"),
+    };
+    let outcome = match params.get("outcome").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing/empty outcome"),
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PipelineCommand::ReleaseLease {
+        lease_id,
+        outcome,
+        response_tx: resp_tx,
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    await_governance_reply(id, resp_rx).await
+}
+
+/// step (i) · `governance.get_lease` dispatch。
+///
+/// 契約對齊 lease_ipc_schema.build_get_request_params（method
+/// `governance.get_lease`；params 鍵 `lease_id`）與 parse_get_response（response
+/// = 序列化 LeaseObject，含 `lease_id` 欄位；not found → JSON-RPC error → Python None）。
+pub(in crate::ipc_server) async fn handle_get_lease(
+    id: serde_json::Value,
+    cmd_channels: &EngineCommandChannels,
+    params: &serde_json::Value,
+) -> JsonRpcResponse {
+    let tx = match governance_primary_tx(cmd_channels) {
+        Ok(tx) => tx,
+        Err(e) => return JsonRpcResponse::error(id, e.code, e.message),
+    };
+    let lease_id = match params.get("lease_id").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s.to_string(),
+        _ => return JsonRpcResponse::error(id, ERR_INVALID_REQUEST, "missing/empty lease_id"),
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PipelineCommand::GetLease {
+        lease_id,
+        response_tx: resp_tx,
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    await_governance_reply(id, resp_rx).await
+}
+
+/// step (i) · `governance.is_authorized` 唯讀投影 dispatch。
+///
+/// 新定義契約（並行 Python work 須對齊）：
+///   - method：`governance.is_authorized`
+///   - params：`{}`（無）
+///   - response：`{"authorized": bool}`
+///   - fail-closed：任一 IPC error → Python 端回 False（deny），絕不回 True。
+pub(in crate::ipc_server) async fn handle_is_authorized(
+    id: serde_json::Value,
+    cmd_channels: &EngineCommandChannels,
+) -> JsonRpcResponse {
+    let tx = match governance_primary_tx(cmd_channels) {
+        Ok(tx) => tx,
+        Err(e) => return JsonRpcResponse::error(id, e.code, e.message),
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PipelineCommand::IsAuthorized {
+        response_tx: resp_tx,
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    await_governance_reply(id, resp_rx).await
+}
+
+/// step (i) · `governance.get_status` 唯讀投影 dispatch。
+///
+/// 新定義契約（並行 Python work 須對齊）：
+///   - method：`governance.get_status`
+///   - params：`{}`（無）
+///   - response：`{enabled: bool, mode: "NORMAL"|"RESTRICTED"|"FROZEN"|
+///     "MANUAL_REVIEW", risk_level: "NORMAL"|...|"MANUAL_REVIEW",
+///     auth_effective_count: int, auth_pending_approval: int,
+///     lease_live_count: int, oms_active_count: int}`
+///   - fail-closed：IPC error → Python 投影為 mode=FROZEN + stale=true，絕不 NORMAL。
+pub(in crate::ipc_server) async fn handle_get_status(
+    id: serde_json::Value,
+    cmd_channels: &EngineCommandChannels,
+) -> JsonRpcResponse {
+    let tx = match governance_primary_tx(cmd_channels) {
+        Ok(tx) => tx,
+        Err(e) => return JsonRpcResponse::error(id, e.code, e.message),
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PipelineCommand::GetGovStatus {
+        response_tx: resp_tx,
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    await_governance_reply(id, resp_rx).await
+}
+
+/// step (i) · `governance.list_leases` 唯讀投影 dispatch。
+///
+/// 新定義契約（並行 Python work 須對齊）：
+///   - method：`governance.list_leases`
+///   - params：`{}`（無）
+///   - response：`[LeaseObject, ...]`（serde array；空集合回 `[]`）
+///   - fail-closed：IPC error → Python 回空列表 + stale 標記（不偽造 lease）。
+pub(in crate::ipc_server) async fn handle_list_leases(
+    id: serde_json::Value,
+    cmd_channels: &EngineCommandChannels,
+) -> JsonRpcResponse {
+    let tx = match governance_primary_tx(cmd_channels) {
+        Ok(tx) => tx,
+        Err(e) => return JsonRpcResponse::error(id, e.code, e.message),
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PipelineCommand::ListLeases {
+        response_tx: resp_tx,
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    await_governance_reply(id, resp_rx).await
+}
+
+/// step (i) · `governance.get_risk_state` 唯讀投影 dispatch。
+///
+/// 新定義契約（並行 Python work 須對齊）：
+///   - method：`governance.get_risk_state`
+///   - params：`{}`（無）
+///   - response：`{level: str, level_value: int, level_entered_at_ms: int,
+///     held_ms: int, consecutive_escalations: int, version: int,
+///     constraints: {new_entries_allowed, position_size_multiplier, reduce_only,
+///     active_de_risking, emergency_stops, requires_operator},
+///     transitions_tail: [TransitionRecord, ...] (最近 ≤8 筆)}`
+///   - fail-closed：IPC error → Python 投影 risk≥CAUTIOUS sentinel + stale=true。
+pub(in crate::ipc_server) async fn handle_get_risk_state(
+    id: serde_json::Value,
+    cmd_channels: &EngineCommandChannels,
+) -> JsonRpcResponse {
+    let tx = match governance_primary_tx(cmd_channels) {
+        Ok(tx) => tx,
+        Err(e) => return JsonRpcResponse::error(id, e.code, e.message),
+    };
+    let (resp_tx, resp_rx) = tokio::sync::oneshot::channel();
+    if let Err(e) = tx.send(PipelineCommand::GetRiskState {
+        response_tx: resp_tx,
+    }) {
+        return JsonRpcResponse::error(id, ERR_INTERNAL, format!("channel send failed: {e}"));
+    }
+    await_governance_reply(id, resp_rx).await
+}
+
 // 3E-3: handle_add_engine_mode and handle_switch_engine_mode REMOVED.
 // In 3E-ARCH, pipelines are spawned at startup with fixed PipelineKind.
 // Dynamic mode switching is replaced by per-pipeline command routing.
