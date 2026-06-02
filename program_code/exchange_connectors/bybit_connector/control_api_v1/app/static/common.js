@@ -199,6 +199,10 @@ async function ocApi(path, opts) {
   }
 
   const method = (opts && opts.method) || 'GET';
+  const toastOnError = !(opts && opts.toastOnError === false);
+  const timeoutMsRaw = opts && opts.timeoutMs;
+  const timeoutMsNum = Number(timeoutMsRaw);
+  const timeoutMs = Number.isFinite(timeoutMsNum) && timeoutMsNum > 0 ? timeoutMsNum : 8000;
   const headers = {};
   if (opts && opts.body) headers['Content-Type'] = 'application/json';
 
@@ -216,7 +220,7 @@ async function ocApi(path, opts) {
       headers: headers,
       credentials: 'same-origin',  // Send HttpOnly cookie automatically / 自動發送 HttpOnly cookie
       body: opts && opts.body ? JSON.stringify(opts.body) : undefined,
-      signal: AbortSignal.timeout(8000),  // 8s timeout prevents GUI freeze on slow API / 8 秒超時防止 API 慢時 GUI 卡死
+      signal: AbortSignal.timeout(timeoutMs),  // 預設 8s；慢只讀面板可 opt into 較長 timeout
     });
     if (!r.ok) {
       if (await ocHandleUnauthenticatedResponse(r)) return null;
@@ -244,7 +248,7 @@ async function ocApi(path, opts) {
       console.warn('[ocApi] ' + method + ' ' + path + ' → ' + r.status + ': ' + errMsg);
       if (method === 'POST') {
         ocToast(errMsg + ' (' + r.status + ')', 'error');
-      } else {
+      } else if (toastOnError) {
         const key = method + ':' + path.split('?')[0] + ':' + r.status;
         const now = Date.now();
         if ((now - (_ocGetErrorToastAt[key] || 0)) > 30000) {
@@ -257,8 +261,13 @@ async function ocApi(path, opts) {
     _ocAuthFails = 0;
     return await r.json();
   } catch (e) {
+    const errorName = e && e.name ? String(e.name) : '';
+    if (errorName === 'AbortError') {
+      console.info('[ocApi] Request aborted: ' + path, e);
+      return null;
+    }
     console.warn('[ocApi] Network error: ' + path, e);
-    if (method === 'GET') {
+    if (method === 'GET' && toastOnError) {
       const key = method + ':' + path.split('?')[0] + ':network';
       const now = Date.now();
       if ((now - (_ocGetErrorToastAt[key] || 0)) > 30000) {
