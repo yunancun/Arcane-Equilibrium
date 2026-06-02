@@ -181,12 +181,26 @@ impl MarketDataClient {
     /// 獲取持倉量歷史 — 市場整體情緒。
     ///
     /// GET /v5/market/open-interest
+    ///
+    /// 參數 `start` / `end` / `cursor`（2026-06-02 funding_oi_backfill 擴展）：
+    ///   原方法只送 category/symbol/intervalTime/limit，無法取「歷史窗口」（只回最近 N 筆）。
+    ///   新增三個可選參數使呼叫端能 walk endTime backward + nextPageCursor 分頁取整段歷史
+    ///   （BB spec §2）。Bybit request key：startTime / endTime / cursor。
+    ///   現有呼叫端（get_open_interest_batch、rest_poller cold-start）傳 None，行為不變。
+    ///
+    /// 注意：此方法用 `parse_str_f64`（.unwrap_or(0.0)）解析 openInterest — 對「取最近快照」
+    ///   的呼叫端足夠，但 **不可用於 alpha 歷史回填的 strict-parse**：OI 缺失欄位與真實
+    ///   小值在此都會塌成 0.0，回填器需區分 missing vs finite，故走 backfill 模塊內
+    ///   直接 get_checked + 原始 JSON strict-parse 路徑（funding_oi_backfill.rs）。
     pub async fn get_open_interest(
         &self,
         category: &str,
         symbol: &str,
         interval: &str,
         limit: Option<u32>,
+        start: Option<u64>,
+        end: Option<u64>,
+        cursor: Option<&str>,
     ) -> BybitResult<Vec<OpenInterestRecord>> {
         debug!(symbol = symbol, "fetching open interest / 獲取持倉量");
         let mut params: Vec<(&str, String)> = vec![
@@ -196,6 +210,15 @@ impl MarketDataClient {
         ];
         if let Some(l) = limit {
             params.push(("limit", l.to_string()));
+        }
+        if let Some(s) = start {
+            params.push(("startTime", s.to_string()));
+        }
+        if let Some(e) = end {
+            params.push(("endTime", e.to_string()));
+        }
+        if let Some(c) = cursor {
+            params.push(("cursor", c.to_string()));
         }
         let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
         let resp = self
@@ -218,6 +241,47 @@ impl MarketDataClient {
         Ok(records)
     }
 
+    /// Raw open interest fetch — 回傳未解析的 BybitResponse（供 alpha 歷史回填 strict-parse）。
+    ///
+    /// 為什麼存在（與 get_open_interest 並存）：get_open_interest 用 parse_str_f64
+    ///   把 openInterest 塌成 f64（missing → 0.0），回填器需從「原始 JSON」區分
+    ///   missing-field vs 真實 finite 值（含 0.0），故走原始回應路徑（funding_oi_backfill.rs
+    ///   的 strict_parse_oi_list）。本方法只負責「建 param + 取原始回應 + retCode 檢查」，
+    ///   不做任何欄位解析（不偽造 0.0）。param 形狀與 get_open_interest 完全一致。
+    pub async fn get_open_interest_raw(
+        &self,
+        category: &str,
+        symbol: &str,
+        interval: &str,
+        limit: Option<u32>,
+        start: Option<u64>,
+        end: Option<u64>,
+        cursor: Option<&str>,
+    ) -> BybitResult<crate::bybit_rest_client::BybitResponse> {
+        debug!(symbol = symbol, "fetching open interest (raw) / 獲取持倉量（原始）");
+        let mut params: Vec<(&str, String)> = vec![
+            ("category", category.to_string()),
+            ("symbol", symbol.to_string()),
+            ("intervalTime", interval.to_string()),
+        ];
+        if let Some(l) = limit {
+            params.push(("limit", l.to_string()));
+        }
+        if let Some(s) = start {
+            params.push(("startTime", s.to_string()));
+        }
+        if let Some(e) = end {
+            params.push(("endTime", e.to_string()));
+        }
+        if let Some(c) = cursor {
+            params.push(("cursor", c.to_string()));
+        }
+        let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        self.client
+            .get_checked("/v5/market/open-interest", &param_refs)
+            .await
+    }
+
     /// Batch open-interest history helper for panel cold-start.
     ///
     /// W-AUDIT-8a Phase B uses this once at startup for the fixed 25-symbol
@@ -235,7 +299,7 @@ impl MarketDataClient {
         for symbol in symbols {
             for interval in intervals {
                 let result = self
-                    .get_open_interest(category, symbol, interval, limit)
+                    .get_open_interest(category, symbol, interval, limit, None, None, None)
                     .await;
                 out.push((symbol.clone(), (*interval).to_string(), result));
             }
@@ -296,6 +360,44 @@ impl MarketDataClient {
             });
         }
         Ok(records)
+    }
+
+    /// Raw funding history fetch — 回傳未解析的 BybitResponse（供 alpha 歷史回填 strict-parse）。
+    ///
+    /// 為什麼存在（與 get_funding_history 並存）：get_funding_history 用 parse_str_f64 把
+    ///   fundingRate 塌成 f64（missing → 0.0）。但 fundingRate 合法為 0.0（低 premium）且可負，
+    ///   回填器須區分「真 0.0 / 負」vs「missing-field 0.0」，故走原始 JSON strict-parse
+    ///   （funding_oi_backfill.rs 的 strict_parse_funding_list）。
+    ///
+    /// ★ BB spec §1 關鍵約束：funding/history 為 time-window 分頁（無 nextPageCursor），且
+    ///   **只傳 startTime 會 Bybit error** → 回填分頁只傳 endTime。本方法照傳呼叫端給的
+    ///   start/end（不強制），由分頁器（paginate_funding_history）負責「只傳 endTime」。
+    pub async fn get_funding_history_raw(
+        &self,
+        category: &str,
+        symbol: &str,
+        start: Option<u64>,
+        end: Option<u64>,
+        limit: Option<u32>,
+    ) -> BybitResult<crate::bybit_rest_client::BybitResponse> {
+        debug!(symbol = symbol, "fetching funding history (raw) / 獲取資金費率歷史（原始）");
+        let mut params: Vec<(&str, String)> = vec![
+            ("category", category.to_string()),
+            ("symbol", symbol.to_string()),
+        ];
+        if let Some(s) = start {
+            params.push(("startTime", s.to_string()));
+        }
+        if let Some(e) = end {
+            params.push(("endTime", e.to_string()));
+        }
+        if let Some(l) = limit {
+            params.push(("limit", l.to_string()));
+        }
+        let param_refs: Vec<(&str, &str)> = params.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        self.client
+            .get_checked("/v5/market/funding/history", &param_refs)
+            .await
     }
 
     // -----------------------------------------------------------------------

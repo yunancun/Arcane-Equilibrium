@@ -88,7 +88,7 @@ pub fn spawn_rest_pollers(
                     _ = c.cancelled() => break,
                     _ = interval.tick() => {
                         for sym in &syms {
-                            match mdc.get_open_interest("linear", sym, "5min", Some(1)).await {
+                            match mdc.get_open_interest("linear", sym, "5min", Some(1), None, None, None).await {
                                 Ok(items) if !items.is_empty() => {
                                     let item = &items[0];
                                     let ts = item.timestamp.parse::<u64>().unwrap_or_else(|_| now_ms());

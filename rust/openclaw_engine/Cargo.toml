@@ -163,6 +163,16 @@ path = "src/bin/feature_baseline_writer.rs"
 name = "daily_kline_backfill"
 path = "src/bin/daily_kline_backfill.rs"
 
+# funding + OI 歷史回填（2026-06-02）：funding rate（/v5/market/funding/history）+ open
+# interest（/v5/market/open-interest, intervalTime=1h）歷史回填 CLI。dry-run 預設 +
+# --apply/env gate（鏡像 daily_kline_backfill）。V125 preflight fail-closed（2 history +
+# 2 ledger 表缺即退出）。寫 alpha_funding_rates_history / alpha_open_interest_history +
+# alpha_history_ingest_runs/pages 帳本。★ strict-parse VARIANT：讀原始 JSON，「欄位存在 AND
+# finite」而非 >0 floor — 保留真 0.0/負 funding，只擋 missing/non-finite。禁碰 cap。
+[[bin]]
+name = "funding_oi_backfill"
+path = "src/bin/funding_oi_backfill.rs"
+
 # REF-20 Wave 1 R20-P0-T2 — replay_runner binary scaffold.
 # Wave 1: scaffold only (`#![cfg(feature = "replay_isolated")]` + `panic!`).
 # Wave 3 R20-P2b-S7/S8/S9/S10 lands runtime IMPL (Isolated profile,

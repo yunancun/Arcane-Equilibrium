@@ -131,19 +131,22 @@ Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
 
 #### get_open_interest
 - **服務**: 查詢合約未平倉量（Open Interest）歷史。OI 反映市場中尚未平倉的合約總量，是衡量市場參與度和趨勢確認的重要指標。OI 上升+價格上升=趨勢強化；OI 下降+價格上升=軋空/弱勢上漲。
-- **調用**: `client.get_open_interest(category, symbol, interval, limit, start, end)`
+- **調用**: `client.get_open_interest(category, symbol, interval, limit, start, end, cursor)`
 - **Bybit 路徑**: `GET /v5/market/open-interest`
 - **Input**:
   - `category: &str` — 品類
   - `symbol: &str` — 交易對
   - `interval: &str` — Rust 方法參數；發送到 Bybit 時必須映射為 request key `intervalTime`，不是 `interval`。值域：("5min", "15min", "30min", "1h", "4h", "1d")。
-  - `limit: Option<u32>` — 數量
-  - `start: Option<u64>`, `end: Option<u64>` — 時間範圍 ms
+  - `limit: Option<u32>` — 數量。**default = 50，max = 200**（注意 default 非 200；歷史回填送 200 以最小化頁數）。
+  - `start: Option<u64>`, `end: Option<u64>` — 時間範圍 ms（request key `startTime`/`endTime`）。
+  - `cursor: Option<&str>` — 分頁游標（request key `cursor`）。**2026-06-02 funding_oi_backfill 擴展**：原方法只送 category/symbol/intervalTime/limit，無法取歷史窗口；新增 start/end/cursor 使呼叫端能 walk endTime backward + nextPageCursor 分頁取整段歷史。現有呼叫端（get_open_interest_batch、rest_poller cold-start）傳 None，行為不變。
+- **分頁**: cursor + time-window 都有。回應含 `nextPageCursor`（可用作「無更多頁」終止輔助）。lookback 到 symbol launch time。
 - **Output**: `BybitResult<Vec<OpenInterestRecord>>`
   ```
   OpenInterestRecord { open_interest: f64, timestamp: String }
   ```
-- **關聯程式**: `market_data_client.rs:461`
+- **★ strict-parse（alpha 歷史回填用）**: `get_open_interest` 用 `parse_str_f64`（missing → 0.0），對「取最近快照」足夠但**不可用於歷史回填**（無法區分 missing-field vs 真實值）。回填走 `get_open_interest_raw`（回原始 `BybitResponse`）+ `funding_oi_backfill.rs::strict_parse_oi_list`：「欄位存在 AND finite」即收（不設數值 floor），只 reject missing/non-finite/壞 ts。
+- **關聯程式**: `market_data_client/mod.rs:184`（get_open_interest）、`market_data_client/mod.rs` get_open_interest_raw、`backfill/funding_oi_backfill.rs`、`bin/funding_oi_backfill.rs`
 
 ---
 
@@ -154,13 +157,15 @@ Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
 - **Input**:
   - `category: &str` — 品類
   - `symbol: &str` — 交易對
-  - `start: Option<u64>`, `end: Option<u64>` — 時間範圍 ms
-  - `limit: Option<u32>` — 數量，最大 200
+  - `start: Option<u64>`, `end: Option<u64>` — 時間範圍 ms（request key `startTime`/`endTime`）。
+  - `limit: Option<u32>` — 數量。**default = 200，max = 200**。
+- **分頁**: **time-window ONLY（無 nextPageCursor）**。**★ 關鍵約束：只傳 startTime 會 Bybit error** → 取歷史窗口須傳 endTime（或 both/neither）。回填 walk endTime backward：每頁傳 endTime=cursor_end，下頁 cursor_end = (該頁最早 fundingRateTimestamp) − 1。
 - **Output**: `BybitResult<Vec<FundingRecord>>`
   ```
   FundingRecord { symbol, funding_rate, funding_rate_timestamp }
   ```
-- **關聯程式**: `market_data_client.rs:512`
+- **★ strict-parse（alpha 歷史回填用）**: `get_funding_history` 用 `parse_str_f64`（missing → 0.0）。但 `fundingRate` 合法為 0.0（低 premium regime）且合法為負（空付多），不可當 missing 簽名。回填走 `get_funding_history_raw`（回原始 `BybitResponse`）+ `funding_oi_backfill.rs::strict_parse_funding_list`：「欄位存在 AND finite」即收（含真 0.0 / 負，**無 >0 floor**），只 reject missing-field/non-finite/壞 ts。**禁從 history 樣本 max(fundingRate) 反推 cap**（cap SSOT 見下節 instruments-info `upperFundingRate`）。
+- **關聯程式**: `market_data_client/mod.rs:254`（get_funding_history）、`market_data_client/mod.rs` get_funding_history_raw、`backfill/funding_oi_backfill.rs`、`bin/funding_oi_backfill.rs`
 
 ---
 
