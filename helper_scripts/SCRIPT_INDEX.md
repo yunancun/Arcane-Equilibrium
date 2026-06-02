@@ -1,7 +1,35 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-05-31（M4 Stage 1 GovernanceHub lease provider seam — `m4/stage1_production_runner.py` 新增 opt-in GovernanceHub IPC lease provider；只接受 UUID-compatible lease，非 UUID lease 立即 release FAILED 並拒絕 INSERT。歷史更新：同日 A2 maker-fill feasibility diagnostic — 新增 `reports/alpha_candidate_stage0r/a2_maker_fill_feasibility.py` + smoke，以 read-only `market.liquidations` + `market.market_tickers` BBO 檢查 cascade trigger 後 60s PostOnly offset touch rate；只輸出 `reject` / `draft_only` / `observe_more`，不下單不寫庫。同日 M4 Stage 1 production DRAFT runner — 新增 `m4/stage1_production_runner.py` non-dry-run source read / candidate compute / gated writeback；writeback 必須每 row 提供真實 Decision Lease UUID，analysis lane `exploratory` 映射成 PG status `draft`。2026-05-29 P2-OPS-2-GITLEAKS — 新增 `git_hooks/` secret-scan pre-commit hook 基礎設施：canonical hook + installer + gitleaks config；E1 IMPL DONE 待 E2 sign-off。2026-05-27 P0-OPS-4 GAP-D Track A round 2 — 新增 `canary/healthchecks/check_pg_dump_freshness.py` Python 主入口 7-check（5 verify_pg_dump.sh + L0 schema coverage + governance audit trail） + wire `passive_wait_healthcheck/checks_cron_heartbeat.py` 加 `check_80_pg_dump_freshness()` wrapper；E1 IMPL DONE 待 E2 sign-off。同日保留 P0-OPS-1 HTTPS Track A IMPL + P0-OPS-4 first-day-live runbook GAP A + GAP F IMPL 索引 + 2026-05-25 Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron + W2-B Alpha Tournament scaffold + Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
+最後更新：2026-06-02（多日 trend 樞紐診斷 harness — `research/multiday_trend_diagnostic/` 新增 QC 協議 Phase 1 fail-fast 早期決策樹診斷：read-only PG（market.klines/funding_rates/symbol_universe_snapshots/regime_snapshots）+ 4 信號族 leak-free/naive 雙軌 + 多日成本（含 funding 累積）+ Step0 effective N + 正確尺度 TSMOM coherence gate（過去 k 日→未來 k 日 + Newey-West overlap-corrected t-stat，verdict 依據；daily-lag Ljung-Box 降級為 data_quality 廣度統計）+ ADF/KPSS/JB/ARCH 純 numpy 統計；輸出 JSON+markdown artifact，不寫庫不 commit。E1 IMPL DONE 待 E2 審查；真跑 verdict=NO-GO-TREND（正確尺度無相干 momentum：k40 孤立顯著無相鄰對 + k90 反轉 + 0/20 正自相關，表面 Sharpe 為 short-side 厚尾/funding artifact）。歷史更新：2026-05-31 M4 Stage 1 GovernanceHub lease provider seam — `m4/stage1_production_runner.py` 新增 opt-in GovernanceHub IPC lease provider；只接受 UUID-compatible lease，非 UUID lease 立即 release FAILED 並拒絕 INSERT。歷史更新：同日 A2 maker-fill feasibility diagnostic — 新增 `reports/alpha_candidate_stage0r/a2_maker_fill_feasibility.py` + smoke，以 read-only `market.liquidations` + `market.market_tickers` BBO 檢查 cascade trigger 後 60s PostOnly offset touch rate；只輸出 `reject` / `draft_only` / `observe_more`，不下單不寫庫。同日 M4 Stage 1 production DRAFT runner — 新增 `m4/stage1_production_runner.py` non-dry-run source read / candidate compute / gated writeback；writeback 必須每 row 提供真實 Decision Lease UUID，analysis lane `exploratory` 映射成 PG status `draft`。2026-05-29 P2-OPS-2-GITLEAKS — 新增 `git_hooks/` secret-scan pre-commit hook 基礎設施：canonical hook + installer + gitleaks config；E1 IMPL DONE 待 E2 sign-off。2026-05-27 P0-OPS-4 GAP-D Track A round 2 — 新增 `canary/healthchecks/check_pg_dump_freshness.py` Python 主入口 7-check（5 verify_pg_dump.sh + L0 schema coverage + governance audit trail） + wire `passive_wait_healthcheck/checks_cron_heartbeat.py` 加 `check_80_pg_dump_freshness()` wrapper；E1 IMPL DONE 待 E2 sign-off。同日保留 P0-OPS-1 HTTPS Track A IMPL + P0-OPS-4 first-day-live runbook GAP A + GAP F IMPL 索引 + 2026-05-25 Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron + W2-B Alpha Tournament scaffold + Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
+
+## 2026-06-02 多日 trend/momentum 樞紐診斷 harness（`research/multiday_trend_diagnostic/`）
+
+QC 證偽優先協議（`docs/CCAgentWorkSpace/QC/workspace/reports/2026-06-02--multiday_trend_diagnostic_protocol.md`）
+的 **Phase 1 fail-fast 早期決策樹** 實作。對「多日 trend 有 edge」抱持懷疑、要求它證明
+自己；INCONCLUSIVE/NO-GO 是合法且最可能結果。**唯讀 PG**（只 SELECT，絕不寫 production
+表），結果寫研究 artifact（`${OPENCLAW_DATA_DIR:-/tmp/openclaw}/multiday_trend_diagnostic_runs/<run_id>/`
+的 JSON + markdown）。leak-free shift(1) 鐵律 + naive 雙軌並列（協議 §2.2）。**不依賴
+scipy/statsmodels**（Linux runtime 缺，全部統計純 numpy 自實作）。**verdict 依據 = 正確
+尺度 TSMOM coherence gate**：過去 k 日報酬符號 vs 未來 k 日報酬，pooled 全 symbol、
+Newey-West overlap-corrected t-stat（lag=k-1），k∈{20,30,40,60,90}；需 significant-positive k
+中**至少一對相鄰**形成連續尺度 plateau 且無顯著反轉才算相干正動量（daily-lag Ljung-Box
+測錯時間尺度，已降級為 data_quality 報告統計，非 verdict 依據）。真跑（20 perp × 730 日
+2024-06→2026-06，read-only PG）verdict=**NO-GO-TREND**：唯一顯著正僅 k40 孤立（無相鄰對）
++ k90 顯著反轉 + 0/20 symbol 正自相關 → 無相干 momentum；表面 0.66 Sharpe 是 short-side
+厚尾/funding-credit artifact（long net ~0bps、short net 扛全部）。Step0 effective N=237≥60 通過、
+PCA n_eff=2.09（PC1=68.7% BTC beta）= binding constraint（longer-history backfill 對 trend
+upside 有限）。E1 IMPL DONE 待 E2 審查 → MIT leak 審計 → QC 複核。
+
+| 腳本 | 用途 |
+|------|------|
+| `research/multiday_trend_diagnostic/harness.py` | 編排器 + CLI：跑 DATA TASK 1-5 + Step0 effective N + 正確尺度 TSMOM coherence gate（取代舊 daily-Ljung-Box gate）/ leak-free-naive / net-Sharpe-cost 早期門檻，輸出 JSON+markdown。`--dry-run [--synthetic-trending]` 用合成資料（Mac 可跑不連 PG）；正式跑連 read-only PG。fail-fast 順序：Step0 → TSMOM coherence → leak/naive → cost；第一個命中的門檻即 verdict（INCONCLUSIVE-A / NO-GO-TREND / NO-GO-B / NO-GO-C / SURVIVES_EARLY_GATES_NEEDS_PHASE_2）。 |
+| `research/multiday_trend_diagnostic/signals.py` | 4 信號族（A TSMOM / B vol-scaled / C MA-cross / D x-sectional），每族同算 leak-free（shift(1) 正式）+ naive（含 current bar 診斷）雙軌。`count_trial_budget()` 從枚舉算 K=24（改 grid 忘更新 K 自檢抓到）。 |
+| `research/multiday_trend_diagnostic/cost_model.py` | 多日成本：fee（taker RT 11bps / maker RT 4bps）+ slippage（RT 10bps）+ funding 按時間累積（協議 §3 樞紐，非按交易次數攤薄）；多單付正 funding、空單收 funding；cost_edge_ratio 分級。 |
+| `research/multiday_trend_diagnostic/pnl.py` | trade 構造（open-to-open，禁 t 日收盤執行 t 日信號）+ 2 持有期變體（daily / flip_hold_min H_min=5）+ 方向翻轉計數（effective N 原料）+ per-trade gross/net + 多空 + regime + funding 拆解。 |
+| `research/multiday_trend_diagnostic/stats.py` | **純 numpy** 統計（無 scipy/statsmodels）：`tsmom_significance`（**verdict 依據**：正確尺度過去 k 日→未來 k 日 + Newey-West overlap-corrected t-stat，含相對離散度地板 fail-closed 防退化輸入 false-GO）/ Ljung-Box（降級為日尺度 data_quality 廣度統計）/ ADF / KPSS / Jarque-Bera（厚尾→PSR 非 normal）/ ARCH-LM / PCA effective N=(Σλ)²/Σλ² / 年化 ×365。χ²/常態臨界值查表。與既有 `lib/stats_common.py`（PSR/DSR/bootstrap）互補不重疊。 |
+| `research/multiday_trend_diagnostic/data_loader.py` | 唯讀載入器（強制 `set_session(readonly=True)`）：日線 OHLC + funding 代表性均值（覆蓋僅 ~58 天→標 INCONCLUSIVE-on-coverage）+ listed_at survivorship + **本地 rule-based regime**（regime_snapshots 空 → BTC 200日MA+vol tercile，禁 HMM，leak-free PIT）。DSN 用 `lib.pg_connect.resolve_report_dsn()` 跨平台不硬編碼。 |
+| `research/tests/test_multiday_trend_diagnostic.py` | 36 測試（synthetic，Mac 可跑）。**最重要**=證 leak-free shift(1) 有 bite（注入 look-ahead → naive Sharpe 顯著高於 leak-free + inflation>30%）；另覆蓋 funding 累積/多空符號、effective N 翻轉計數、PCA 高相關降維、正確尺度 TSMOM 顯著性（真 momentum 有 bite / 隨機漫步 null / HAC≤naive / **退化 ramp fail-closed 不 false-GO**）、TSMOM coherence 相鄰判定（孤立單 k / 相鄰對 / **非相鄰兩端** / 反轉破壞相干）、Ljung-Box/JB/ADF 在已知性質上判定、決策樹 fail-fast（端到端 NO-GO-TREND）、唯讀 SQL 靜態檢查、禁 HMM。`python3 -m pytest helper_scripts/research/tests/test_multiday_trend_diagnostic.py -q`。 |
 
 ## 2026-06-02 Gate-B 隔離 listing-capture 探針（`research/gate_b_*` + entry）
 
