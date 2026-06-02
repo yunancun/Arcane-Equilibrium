@@ -11,8 +11,8 @@
 
 | 區域 | 當前狀態 | 下一步 |
 |---|---|---|
-| 來源同步 | **三端同步**（Mac=origin=Linux `trade-core`=`5b80c2f7`，本 session 親驗 Linux ff+回歸）。含 P5 step-i `a99bfa1d` + E1b `e6aa5e37` + **funding/OI backfill `5b80c2f7`（孤兒 Codex WIP 接手收尾）**。 | 維持三端同步；P5 step-ii+ 續推時同步。他 session 未提交 meta-doc（agent memory 等）仍 dirty，不在本次範圍（勿碰）。 |
-| Runtime | Linux `trade-core` source 為 `5b80c2f7`（本 session 親驗 ff + cargo regression 3757/0/1）。P5 step-i 為 flag-OFF additive，**未 rebuild/未部署 = 未生效**，soak 未起。funding/OI backfill 為新 bin，**未 `--apply` = DB 未回填**（V125 history 表仍空）。Paper snapshot stale 但非本批主線。 | QA post-deploy 檢查 A-1/A-2/B/A-4 四項；P5 soak 需 operator 開 Linux `--rebuild`+flag-on 窗口；funding/OI `--apply` 須先 Linux dry-run smoke；任何 rebuild/restart 仍需明確 scope。 |
+| 來源同步 | **三端同步**（Mac=origin=Linux `trade-core`=`b8c258b4`，本 session 親驗）。含 P5 step-i `a99bfa1d` + E1b `e6aa5e37` + funding/OI backfill `5b80c2f7`（孤兒 Codex WIP 接手收尾）+ 平行 session 記憶批次 `b8c258b4`。 | 維持三端同步；P5 step-ii+ 續推時同步。工作樹全 clean（0-dirty 三端）。 |
+| Runtime | Linux `trade-core` **engine 已 rebuild+restart 到 `b8c258b4`**（6/3 00:40，PID 2269678，release build 39.92s，本 session 親驗 watchdog engine/demo/live alive、ticks 流動）。**P5 step-i Rust IPC 已編入 running engine 但仍 flag-OFF/dormant**（soak 前置 `--rebuild` 順帶完成，**只剩 flag-on 即可起 24-48h soak**）。funding/OI engine 改動已上線（行為等價）+ `funding_oi_backfill` release bin ready，但 **未 `--apply` = V125 history 表仍空**。 | P5 soak 只需 operator flag-on 即起；funding/OI `--apply` 須先 Linux dry-run smoke；QA post-deploy 檢查 A-1/A-2/B/A-4；paper lane restart 後翻 alive 待復查（預設 OFF，疑為 fresh-snapshot 非 pipeline 啟動）。 |
 | Runtime 注意事項 | 系統層 `openclaw-engine.service` / 系統 watchdog 安裝仍受 sudo/操作員閘控；當前保護為使用者 watchdog + linger + 手動 engine 程序。 | 操作員安排系統層安裝窗口。 |
 | 被動健康殘留 | `[48] replay_manifest_registry_growth`、`[74] close_maker_reject_samples`、`[56] live_pipeline_active` 仍為 OPS 殘留／證據佇列；非 OPS-1 反轉。 | 在 OPS 佇列保持明示；在解決或接受前不要標記為全綠。 |
 | 操作員閘控操作 | 首次還原演練、系統層 units、live-auth 更新、Earn 首筆質押仍為手動操作。 | 操作員選擇低風險窗口／auth 時機。 |
