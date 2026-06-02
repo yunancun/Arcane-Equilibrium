@@ -91,6 +91,7 @@ from .lease_ipc_schema import (
     DEFAULT_SOURCE_STAGE_PY_EXECUTOR,
     METHOD_ACQUIRE_LEASE,
     METHOD_GET_LEASE,
+    METHOD_IS_AUTHORIZED,
     METHOD_RELEASE_LEASE,
     OUTCOME_ACTIVE,
     OUTCOME_BYPASS,
@@ -104,6 +105,7 @@ from .lease_ipc_schema import (
     make_shadow_bypass_lease_id,
     parse_acquire_response,
     parse_get_response,
+    parse_is_authorized_response,
     parse_release_response,
 )
 
@@ -519,6 +521,40 @@ def get_lease_via_ipc(
     return parse_get_response(raw_result)
 
 
+def is_authorized_via_ipc(
+    *,
+    timeout_seconds: float = 5.0,
+    dispatcher: Optional[IPCDispatcher] = None,
+) -> Optional[bool]:
+    """經 IPC 讀 Rust 的 ``governance.is_authorized`` 唯讀投影（auth-axis 比對源）。
+
+    Read the Rust ``governance.is_authorized`` projection via IPC.
+
+    P5 step-(i) auth-axis comparator 用：與 Python 本地 ``hub.is_authorized()``
+    對撞，讓「Rust 放行而 Python auth 會拒（或反向）」的分歧可被觀測。仿
+    ``get_lease_via_ipc`` 的 read 形狀（params={}、fail-closed）。
+
+    fail-closed 語義：IPC 中斷 / 超時 / 畸形 payload / 非 bool → 回 ``None``，
+    語義為「無法比對」（comparator 不記分歧；**絕不**把 None 解讀為授權）。這
+    是純觀測讀，不影響任何 live 回傳值，亦不 gate。
+
+    fail-closed semantics: IPC outage / timeout / malformed / non-bool → returns
+    ``None`` ("undecidable" — the comparator skips, NEVER reads None as
+    authorized). Pure observation read; does not gate or alter any live result.
+
+    Returns / 回傳:
+        ``True`` / ``False`` 當 Rust 回 strict bool；否則 ``None``（無法比對）。
+    """
+    dispatch = dispatcher or _default_dispatcher()
+    # params={}：與 Rust handle_is_authorized 契約一致（無參數）。
+    # params={}: matches the Rust handle_is_authorized contract (no params).
+    coro = dispatch(METHOD_IS_AUTHORIZED, {}, timeout_seconds)
+    raw_result = _run_async_blocking(coro, timeout=timeout_seconds + 1.0)
+    if not isinstance(raw_result, Mapping):
+        return None
+    return parse_is_authorized_response(raw_result)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Caller-side shadow short-circuit / caller 端 shadow 短路
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -582,5 +618,6 @@ __all__ = [
     "acquire_lease_via_ipc",
     "release_lease_via_ipc",
     "get_lease_via_ipc",
+    "is_authorized_via_ipc",
     "shadow_short_circuit_acquire",
 ]

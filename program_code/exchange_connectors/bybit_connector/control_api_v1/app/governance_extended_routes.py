@@ -419,6 +419,17 @@ def governance_health_check(
             "incident_count": status.incident_count,
         }
 
+        # P5 step-(i): surface the Rust-IPC vs Python-shadow divergence counter so
+        # the Linux soak can query "0 divergence over N ops" (design §5 step-(i)).
+        # 純讀計數器，flag-OFF 時 total 恆 0（acquire/release/get 不走 IPC 比對路徑）。
+        # P5 step-(i)：暴露 Rust-IPC 與 Python-shadow 的 divergence 計數，供 Linux
+        # soak 查詢「N 筆 0 divergence」；純讀，flag-OFF 時 total 恆 0。
+        try:
+            from .governance_divergence import get_divergence_counters  # noqa: PLC0415
+            health["lease_ipc_divergence"] = get_divergence_counters()
+        except Exception as _div_e:  # noqa: BLE001 — 觀測欄位缺失不可讓 health-check 失敗
+            logger.debug("divergence counters unavailable: %s", _div_e)
+
         return GovernanceResponse.success(data=health, message="health_check")
     except Exception as e:
         logger.error("Error in health check: %s", e)

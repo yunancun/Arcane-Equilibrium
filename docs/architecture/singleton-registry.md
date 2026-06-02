@@ -266,6 +266,65 @@ per `P2-PACKET-C-C4-PIPELINE-WIRE` + `P2-INCIDENT-POLICY-DISPATCH-TRIGGER`；把
 
 ---
 
+### §2.5 SM Option 2 收斂 step-(i) — Python divergence comparator sink（2026-06-02）
+
+per `docs/CCAgentWorkSpace/Operator/2026-06-02--sm_option2_convergence_migration_design.md` §5 step-(i)：`governance_hub` lease 操作（acquire/release/get）+ acquire 開頭 auth-axis 比對在 flag-ON（`OPENCLAW_LEASE_PYTHON_IPC_ENABLED=1`）時以 Rust IPC 結果為權威，同時 *影子* 計算 Python SM 判定並送進本 comparator。comparator sink 是 module-level 可變狀態（in-memory ring buffer + 計數器），設計對齊 `governance_lease_bridge._DUAL_WRITE_MIRROR`（package-private、`threading.Lock` 保護、無 TTL/LRU/DB、僅透過 helper 變更）。step (iv) cleanup 會連同 dual-write mirror 一起移除本 sink。
+
+> 同檔 `governance_lease_bridge._DUAL_WRITE_MIRROR` / `_DUAL_WRITE_LOCK`（Sprint 3 H E-3）為相同 pattern 的既有 sink，仍待補登（§6 carry-over hygiene；非本 E1b scope）。
+
+#### 2.5.1 `_DIVERGENCE_RING`
+
+| 欄位 | 值 |
+|---|---|
+| name | `_DIVERGENCE_RING` |
+| type_signature | `list[dict[str, Any]]`（module-level）；FIFO ring，cap `_RING_CAP=2048` |
+| location | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/governance_divergence.py:68`（cap 定義 `_RING_CAP` 同檔 :66）|
+| owner_lifecycle | import 時建空 list；API worker process-local；uvicorn worker exit 時隨 module drop。`reset_divergence_state()` 僅供測試隔離清空 |
+| cross_task_pattern | producer: `record_divergence()`（由 `GovernanceHub.acquire_lease`/`release_lease`/`get_lease` flag-ON 路徑 + acquire 開頭 auth-axis 比對呼叫；同 worker 多 sync thread 可並發）；consumer: `get_divergence_snapshot()` / `get_mismatch_snapshot()`（healthcheck + soak 取證 + 測試）|
+| lock_primitive | `threading.Lock`（`_DIVERGENCE_LOCK`）；append + FIFO evict 在同一 lock hold 內；無跨 await（純 sync）|
+| visibility | private module binding（package-private；僅透過 `record_divergence` / `get_*` / `reset_divergence_state` helper 存取）|
+| caller_chain | producer: `governance_hub.GovernanceHub._compare_auth_axis`（auth-axis）+ `acquire_lease`/`release_lease`/`get_lease` flag-ON 影子比對；consumer: soak/healthcheck 取 `get_divergence_counters`/`get_mismatch_snapshot`（step-(i) gate 讀 `divergences==0` 且 `total>=N`）|
+| health_monitoring | NO — soak 期觀測儀器；step-(iv) cleanup 移除；非 M3 health row target |
+| registered_date | 2026-06-02 |
+| governance_authority | SM Option 2 convergence design §5 step-(i) + §3 |
+| migration_plan | step (iv) cleanup 移除（與 dual-write mirror 同時）；soak 0 divergence 後排程退役 |
+
+#### 2.5.2 `_COUNTERS`
+
+| 欄位 | 值 |
+|---|---|
+| name | `_COUNTERS` |
+| type_signature | `dict[str, int]`（keys: `total` / `matches` / `divergences`）；單調累加，不隨 ring FIFO evict 失真 |
+| location | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/governance_divergence.py:73` |
+| owner_lifecycle | 同 `_DIVERGENCE_RING`（import 建、worker drop、`reset_divergence_state()` 測試清零）|
+| cross_task_pattern | producer: `record_divergence()` 於 `_DIVERGENCE_LOCK` 內 `+=`；consumer: `get_divergence_counters()`（step-(i) gate 判讀）|
+| lock_primitive | 共用 `_DIVERGENCE_LOCK`（與 ring 同鎖，原子更新）|
+| visibility | private module binding |
+| caller_chain | 同 §2.5.1 |
+| health_monitoring | NO |
+| registered_date | 2026-06-02 |
+| governance_authority | 同 §2.5.1 |
+| migration_plan | step (iv) cleanup 移除 |
+
+#### 2.5.3 `_DIVERGENCE_LOCK`
+
+| 欄位 | 值 |
+|---|---|
+| name | `_DIVERGENCE_LOCK` |
+| type_signature | `threading.Lock` |
+| location | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/governance_divergence.py:69` |
+| owner_lifecycle | import 時建；worker drop |
+| cross_task_pattern | 守護 `_DIVERGENCE_RING` + `_COUNTERS` 的並發 append/evict/累加/snapshot；同 worker 多 sync thread 競用 |
+| lock_primitive | `threading.Lock`（非 reentrant；helper 內無巢狀取鎖）|
+| visibility | private module binding |
+| caller_chain | 所有 §2.5.1 / §2.5.2 helper 內部持有 |
+| health_monitoring | NO |
+| registered_date | 2026-06-02 |
+| governance_authority | 同 §2.5.1 |
+| migration_plan | step (iv) cleanup 移除 |
+
+---
+
 ## §3 Registration Rules
 
 ### §3.1 新登記前必做（PA / E1 / E2 共同）

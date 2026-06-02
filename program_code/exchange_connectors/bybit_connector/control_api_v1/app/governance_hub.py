@@ -90,6 +90,7 @@ from .governance_hub_event_handlers import (  # E5-P1-9: callback factories + wi
 from .governance_lease_bridge import (  # Sprint 3 H E-3: Decision Lease IPC bridge
     acquire_lease_via_ipc,
     get_lease_via_ipc,
+    is_authorized_via_ipc,  # P5 step-(i): auth-axis 唯讀投影（比對源）
     is_lease_ipc_enabled,
     record_dual_write_acquire,
     record_dual_write_release,
@@ -100,6 +101,17 @@ from .lease_ipc_schema import (  # Sprint 3 H E-3: schema constants for outcome 
     OUTCOME_CONSUMED,
     OUTCOME_FAILED,
     is_shadow_bypass_lease_id,
+)
+from .governance_divergence import (  # P5 step-(i): Rust-IPC vs Python-shadow 比對器
+    OP_ACQUIRE,
+    OP_GET,
+    OP_IS_AUTHORIZED,
+    OP_RELEASE,
+    OUTCOME_BYPASS,
+    OUTCOME_DENIED,
+    OUTCOME_GRANTED,
+    OUTCOME_UNKNOWN,
+    record_divergence,
 )
 from .recovery_approval_gate import RecoveryApprovalGate
 from .governance_events import risk_event, recon_event, auth_event, lease_event
@@ -768,6 +780,166 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
             )
             return False
 
+    # ── P5 step-(i): 影子比對輔助（無副作用，僅供 IPC 權威路徑做 divergence 比對）──
+    # ── P5 step-(i): shadow-compute helpers (side-effect free; used only by the
+    #    IPC-authoritative path to compute Rust-vs-Python divergence) ──
+
+    @staticmethod
+    def _rust_acquire_outcome(lease_id: Optional[str]) -> str:
+        """把 Rust IPC acquire 回傳的 lease_id 正規化成 divergence outcome 標籤。
+
+        Normalise the Rust-IPC acquire return into a divergence outcome label.
+
+        Rust E-1 facade 對 Validation/Exploration profile 回字面 "bypass"
+        lease_id（見 test_bypass_outcome_returned_as_lease_id）；SHADOW_BYPASS
+        sentinel 同視為 bypass。None → denied / fail-closed。其餘字串 → granted。
+        """
+        if lease_id is None:
+            return OUTCOME_DENIED
+        if lease_id == "bypass" or is_shadow_bypass_lease_id(lease_id):
+            return OUTCOME_BYPASS
+        return OUTCOME_GRANTED
+
+    def _shadow_local_acquire_outcome(self, scope: str) -> str:
+        """無副作用地計算「本地 Python SM 對此 acquire 的『完整』獨立判定」。
+
+        E2 HIGH #5 修正：本影子必須是 Python 端「完整」的 acquire 決策，與
+        flag-OFF 路徑（Step 2 hot-path auth gate + Step 4 local-SM scope gate）
+        在「放行 / 拒絕」上等價，才能讓比對器同時觀測到 auth 軸與 scope 軸的分歧。
+        舊版只讀 ``get_effective()`` + scope，遺漏了 ``is_authorized()`` 內的
+        ``_enabled`` / ``_mode==FROZEN`` 條件，且因 acquire 在 flag-ON 時已被
+        Step-2 在 IPC 前擋下，比對器只看得到 *已被 Python 授權* 的子空間 → 最危險
+        的「Rust 放行而 Python auth 會拒」分歧被結構性過濾掉。
+
+        為什麼要把 Step-2 納入影子（而非只在 acquire 入口閘）：flag-ON 時 Rust 是
+        auth 權威，Python 的 Step-2 在權威路徑上是冗餘閘；把它「降級」成影子的一部分
+        後，acquire 不再於 IPC 前被 Python 拒，IPC 永遠會被呼叫，Python 的完整決策
+        （含 auth-effective）才能與 Rust 的完整決策對撞。
+
+        本函式是純 READ：
+          - ``is_authorized()`` 只讀 ``_enabled`` / ``_mode`` / TTL 快取 /
+            ``_authorization_sm.get_effective()``（快取寫入屬 memoization，非 SM
+            狀態變更），不建立/註冊/啟動任何 lease。
+          - scope 判定走既有 ``_auth_permits_scope``（純讀 auth_dict）。
+        故 ``_lease_sm`` 在 soak 期間完全不被本影子污染（CC 已驗 side-effect-free）。
+
+        Side-effect-free computation of the LOCAL Python SM's FULL independent
+        acquire decision, equivalent (grant/deny) to the flag-OFF path's Step-2
+        hot-path auth gate AND Step-4 local-SM scope gate combined. Pure READ; it
+        does NOT create / register / activate any lease. This is the E2 HIGH #5
+        fix that makes the auth-axis divergence (Rust grants while Python auth
+        would deny) observable instead of pre-filtered by the Step-2 gate.
+
+        Returns / 回傳:
+            OUTCOME_GRANTED 若 Python 完整判定會放行；否則 OUTCOME_DENIED。
+        """
+        try:
+            # 第一軸：auth-effective（與 flag-OFF Step-2 hot-path gate 等價）。
+            # is_authorized() 已含 _enabled / FROZEN / effective-auth 全部條件。
+            if not self.is_authorized():
+                return OUTCOME_DENIED
+            # 第二軸：scope-permit（與 flag-OFF Step-4 local-SM gate 等價，純讀）。
+            with self._lock:
+                if self._authorization_sm is None:
+                    return OUTCOME_DENIED
+                effective_auths = self._authorization_sm.get_effective()
+                if not effective_auths:
+                    return OUTCOME_DENIED
+                auth_dict = effective_auths[0].to_dict()
+                return (
+                    OUTCOME_GRANTED
+                    if self._auth_permits_scope(auth_dict, scope)
+                    else OUTCOME_DENIED
+                )
+        except Exception:  # noqa: BLE001 — 影子計算 best-effort，絕不影響權威回傳
+            return OUTCOME_DENIED
+
+    def _shadow_local_lease_presence(self, lease_id: str) -> str:
+        """無副作用地讀「本地 Python SM 對此 lease presence 的『獨立』判定」。
+
+        E2 HIGH #5 修正：本影子回的是 Python *獨立* 判定，**不再回 None 讓 caller
+        echo Rust outcome**（舊版 ``python = local_view if local_view is not None
+        else rust_outcome`` 在 flag-ON 下因本地不持有 Rust lease → 永遠 echo Rust →
+        ``match=True`` 恆成立 → 通道無法 fire）。改回三態詞彙：
+
+          - OUTCOME_GRANTED：本地真的持有且狀態 live。
+          - OUTCOME_DENIED：本地真的持有但已是終態（REVOKED/EXPIRED/REJECTED/
+            CONSUMED）。
+          - OUTCOME_UNKNOWN：本地完全不持有此 lease（flag-ON steady-state 的常態，
+            因 lease 在 Rust）。
+
+        關鍵：UNKNOWN 是 Python「無獨立意見」的*顯式*標籤，由 ``record_divergence``
+        視為「非分歧但計入 total」（既非 echo 的假 match，也非假 divergence）。
+        因此：(a) 常態（Rust 持有、本地無意見）記為 UNKNOWN，不誤報分歧；(b) 一旦
+        本地 SM 真的持有此 lease 且與 Rust 判定相反（例如本地以為 live，Rust 說不
+        存在 → DENIED），通道即 fire — 通道恢復「可 fire on a real divergence」。
+
+        Side-effect-free READ of the LOCAL Python SM's INDEPENDENT presence
+        verdict (pure ``_lease_sm.get`` — no transition, no mutation). Returns a
+        three-valued label and NEVER echoes the Rust outcome (the E2 HIGH #5 fix
+        that lets the release/get channel fire on a genuine divergence). UNKNOWN
+        marks "Python has no independent opinion" (the flag-ON steady state) and
+        is treated by ``record_divergence`` as non-divergent-but-counted.
+
+        Returns / 回傳:
+            OUTCOME_GRANTED / OUTCOME_DENIED / OUTCOME_UNKNOWN（見上）。
+        """
+        try:
+            with self._lock:
+                if self._lease_sm is None:
+                    return OUTCOME_UNKNOWN
+                lease_obj = self._lease_sm.get(lease_id)
+            if lease_obj is None:
+                return OUTCOME_UNKNOWN
+            # live 判定：用 state.name 對照終態集合（避免 import 終態 enum 造成耦合）。
+            # live check via state.name against terminal set (avoids importing
+            # the terminal enum and coupling to it).
+            state = getattr(lease_obj, "state", None)
+            state_name = getattr(state, "name", str(state))
+            terminal = {"REVOKED", "EXPIRED", "REJECTED", "CONSUMED"}
+            return OUTCOME_DENIED if state_name in terminal else OUTCOME_GRANTED
+        except Exception:  # noqa: BLE001 — 影子讀取 best-effort，絕不影響權威回傳
+            return OUTCOME_UNKNOWN
+
+    def _compare_auth_axis(self, intent_id: str, scope: str) -> None:
+        """acquire 開頭的 best-effort auth-axis 比對（E2 HIGH #5 修正的核心）。
+
+        為什麼這是 step-(i) 真正能 fire 的主分歧通道：``acquire_lease`` 的 Step-2
+        ``is_authorized()`` gate 在 flag-ON 時仍會在 IPC 之前 ``return None``，把
+        「Rust 授予但 Python auth 會拒」的最危險分歧*預先過濾*掉 — comparator
+        永遠看不到。本方法在 Step-2 *之前* 跑一條*獨立*的比對：
+
+          - Rust 軸：``is_authorized_via_ipc()``（讀 Rust ``governance.is_authorized``
+            唯讀投影；IPC 失敗回 None = 無法比對）。
+          - Python 軸：``self.is_authorized()``（本地 SM 的 effective-auth 判定）。
+
+        兩軸皆有定論（Rust 非 None）且不一致 → 記一筆 ``op="is_authorized"`` 分歧。
+        Rust 回 None（IPC down / 畸形）→ 視為「無法比對」，不記分歧（fail-closed
+        的觀測語義：絕不把 None 當 authorized=True）。
+
+        **純觀測，零 live 影響**：本方法只記錄，不 gate、不 raise、不改任何回傳值。
+        它獨立於 Step-2 而*在其之前*跑，故即使 Step-2 之後 ``return None``，auth-axis
+        分歧也已被觀測 — 這正是解掉 E2 核心 HIGH #5（comparator 不再近盲）的關鍵。
+        ``is_authorized()`` 與 IPC read 皆純讀，``_lease_sm`` / SM 狀態完全不被污染。
+        """
+        try:
+            rust_auth = is_authorized_via_ipc(dispatcher=self._lease_ipc_dispatcher)
+            # Rust 無定論（IPC 失敗 / 畸形 / 非 bool）→ 無法比對，不記分歧。
+            if rust_auth is None:
+                return
+            python_auth = bool(self.is_authorized())
+            rust_outcome = OUTCOME_GRANTED if rust_auth else OUTCOME_DENIED
+            python_outcome = OUTCOME_GRANTED if python_auth else OUTCOME_DENIED
+            record_divergence(
+                op=OP_IS_AUTHORIZED,
+                rust_outcome=rust_outcome,
+                python_outcome=python_outcome,
+                intent_id=intent_id,
+                scope=scope,
+            )
+        except Exception:  # noqa: BLE001 — auth-axis 觀測 best-effort，絕不影響權威路徑
+            return
+
     def acquire_lease(self, intent_id: str, scope: str, ttl_seconds: float = 30.0) -> Optional[str]:
         """
         Acquire a decision lease for a specific intent.
@@ -828,27 +1000,64 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
                 )
             return sentinel
 
+        # Step 1.5: auth-axis 比對（E2 HIGH #5 修正）— flag-ON 時、Step-2 *之前*、
+        # 純觀測。獨立比對 Rust ``is_authorized`` IPC vs Python ``is_authorized()``，
+        # 把「Rust 授予但 Python auth 會拒」的分歧在 Step-2 預先過濾它之前就*記錄*
+        # 下來。**完全不改 live 行為**：不 gate、不 raise、不影響回傳值；Step-2 仍
+        # 照舊 gate、Step-3 IPC branch 仍權威。flag-OFF 時完全不跑（byte-unchanged）。
+        # Step 1.5: auth-axis compare (E2 HIGH #5 fix) — flag-ON, BEFORE Step-2,
+        # observation only. Independently compares Rust ``is_authorized`` (IPC)
+        # vs Python ``is_authorized()`` so the "Rust grants but Python auth would
+        # deny" divergence is recorded BEFORE Step-2 pre-filters it. Live
+        # behavior is unchanged (no gate / raise / return-value change); Step-2
+        # still gates and Step-3 IPC stays authoritative. Skipped when flag OFF.
+        if is_lease_ipc_enabled():
+            self._compare_auth_axis(intent_id, scope)
+
         # Step 2: standard authorization gating (unchanged across both paths).
         # 步驟 2：標準授權閘（兩條路徑共用，不變）。
         if not self._enabled or not self._initialized or not self.is_authorized():
             return None
 
-        # Step 3: IPC bridge (env-gated). On any IPC failure → return None
-        # (fail-closed); we do NOT silently fall through to local SM, which
-        # would break the dual-write canonical contract (PA partition §1
-        # "Rust = single source of truth"). Operators flip the env flag
-        # back to 0 if IPC needs to be bypassed temporarily.
-        # 步驟 3：IPC 橋接（env-gated）。IPC 失敗 → 回 None（fail-closed）；
-        # 不靜默 fall through 至 local SM（會破壞 dual-write canonical 契約 —
-        # PA partition §1 "Rust = single source of truth"）。需臨時繞過 IPC
-        # 時，operator 將 env flag flip 回 0。
+        # Step 3: IPC bridge (env-gated) — AUTHORITATIVE path (P5 step-(i)).
+        # When the flag is ON, the Rust IPC result IS the authoritative returned
+        # result. On any IPC failure → return None (deny / fail-closed, design
+        # §3b); we do NOT silently fall through to local SM (would break the
+        # canonical "Rust = single source of truth" contract). The local Python
+        # SM is now a safety-net that SHADOW-computes in parallel (NO side
+        # effect on the returned result) so the runtime comparator can detect
+        # Rust-vs-Python divergence over the soak window (design §5 step-(i)).
+        # 步驟 3：IPC 橋接（env-gated）— 權威路徑（P5 step-(i)）。
+        # flag ON 時 Rust IPC 結果即為權威回傳值；IPC 失敗 → 回 None
+        # （拒絕 / fail-closed，design §3b）；不靜默 fall through 至 local SM
+        # （否則破壞 "Rust = 單一真實來源" 契約）。本地 Python SM 此時為
+        # safety-net，在旁 *影子* 計算（不影響回傳值），供 runtime 比對器在 soak
+        # 視窗偵測 Rust-vs-Python divergence（design §5 step-(i)）。
         if is_lease_ipc_enabled():
-            return acquire_lease_via_ipc(
+            rust_lease_id = acquire_lease_via_ipc(
                 intent_id=intent_id,
                 scope=scope,
                 ttl_seconds=ttl_seconds,
                 dispatcher=self._lease_ipc_dispatcher,
             )
+            # 影子比對（best-effort，事後觀測；絕不阻塞或改變權威回傳值）。
+            # shadow compare (best-effort, post-hoc observation; never blocks or
+            # alters the authoritative return value).
+            rust_outcome = self._rust_acquire_outcome(rust_lease_id)
+            python_outcome = self._shadow_local_acquire_outcome(scope)
+            # Bypass 是 Rust profile-driven 的合法 short-circuit（Validation/
+            # Exploration），本地 auth-gate 無此概念；視為非分歧（不比對）。
+            # Bypass is a legitimate Rust profile-driven short-circuit; the local
+            # auth-gate has no such concept → treat as non-divergent (skip).
+            if rust_outcome != OUTCOME_BYPASS:
+                record_divergence(
+                    op=OP_ACQUIRE,
+                    rust_outcome=rust_outcome,
+                    python_outcome=python_outcome,
+                    intent_id=intent_id,
+                    scope=scope,
+                )
+            return rust_lease_id
 
         # Step 4: legacy local SM path (Phase 1 baseline; 100% backward-compat).
         # 步驟 4：legacy local SM 路徑（Phase 1 baseline；100% 向後兼容）。
@@ -941,18 +1150,39 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
         if not self._enabled or not self._initialized:
             return False
 
-        # IPC path (env-gated). Fail-soft: IPC failure → False (caller may
-        # observe and decide; existing executor_agent.py path tolerates False
-        # since release happens after order submit and the lease is short-TTL).
-        # IPC 路徑（env-gated）。fail-soft：IPC 失敗 → False（caller 觀察決定；
-        # 既有 executor_agent.py 路徑容許 False，因 release 發生在 order submit
-        # 之後且 lease 為短 TTL）。
+        # IPC path (env-gated) — AUTHORITATIVE (P5 step-(i)). Fail-soft: IPC
+        # failure → False (design §3b release contract; caller may observe and
+        # decide — existing executor_agent.py path tolerates False since release
+        # happens after order submit and the lease is short-TTL). The Rust
+        # result is authoritative; the local SM shadow-computes for divergence.
+        # IPC 路徑（env-gated）— 權威（P5 step-(i)）。fail-soft：IPC 失敗 → False
+        # （design §3b release 契約）；Rust 結果為權威，本地 SM 影子比對。
         if is_lease_ipc_enabled():
-            return release_lease_via_ipc(
+            rust_ok = release_lease_via_ipc(
                 lease_id=lease_id,
                 consumed=consumed,
                 dispatcher=self._lease_ipc_dispatcher,
             )
+            # 影子比對（best-effort，弱通道）。release/get 是 *presence echo* 弱
+            # 通道：flag-ON steady-state 下 lease 在 Rust，本地 Python SM 不持有 →
+            # 影子回 OUTCOME_UNKNOWN（顯式「無獨立意見」），由 record_divergence 視為
+            # no-opinion（計入 total、不算 divergence、不發 WARN）— 修掉 E2 的
+            # 「python=unknown → 每次 release 假報分歧」over-fire。只有本地*真的*持有
+            # 此 lease 且與 Rust 判定相反時才形成真分歧。主分歧偵測靠 acquire 開頭
+            # 的 auth-axis（OP_IS_AUTHORIZED）+ acquire 的 scope-axis 影子。
+            # Weak channel (presence echo): in flag-ON steady state the lease
+            # lives in Rust and the local Python SM does not hold it → the shadow
+            # returns OUTCOME_UNKNOWN (explicit no-opinion), which
+            # record_divergence excludes from divergence (the A3 over-fire fix).
+            rust_outcome = OUTCOME_GRANTED if rust_ok else OUTCOME_DENIED
+            python_outcome = self._shadow_local_lease_presence(lease_id)
+            record_divergence(
+                op=OP_RELEASE,
+                rust_outcome=rust_outcome,
+                python_outcome=python_outcome,
+                lease_id=lease_id,
+            )
+            return rust_ok
 
         # Legacy local SM path (Phase 1 baseline, unchanged).
         # legacy local SM 路徑（Phase 1 baseline，不變）。
@@ -998,10 +1228,27 @@ class GovernanceHub(GovernanceHubStatusCascadeMixin, GovernanceHubEventHandlersM
             return None
 
         if is_lease_ipc_enabled():
-            return get_lease_via_ipc(
+            # AUTHORITATIVE (P5 step-(i)): Rust serde dict (or None) is the
+            # returned result; the local SM shadow-computes presence for
+            # divergence. 權威：Rust serde dict（或 None）為回傳值，本地 SM 影子
+            # 比對 presence。
+            rust_lease = get_lease_via_ipc(
                 lease_id=lease_id,
                 dispatcher=self._lease_ipc_dispatcher,
             )
+            # 弱通道（presence echo）：本地不持有 Rust lease → 影子回 OUTCOME_UNKNOWN
+            # （no-opinion，record_divergence 不算分歧）。同 release，修掉 over-fire。
+            # Weak channel: local SM has no opinion on a Rust-held lease →
+            # OUTCOME_UNKNOWN no-opinion (record_divergence excludes it).
+            rust_outcome = OUTCOME_GRANTED if rust_lease is not None else OUTCOME_DENIED
+            python_outcome = self._shadow_local_lease_presence(lease_id)
+            record_divergence(
+                op=OP_GET,
+                rust_outcome=rust_outcome,
+                python_outcome=python_outcome,
+                lease_id=lease_id,
+            )
+            return rust_lease
 
         with self._lock:
             if self._lease_sm is None:

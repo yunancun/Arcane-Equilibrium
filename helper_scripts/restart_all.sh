@@ -707,6 +707,14 @@ restart_api() {
     # 與 Rust 端 main_boot_tasks::spawn_h_state_poller_if_enabled 共享同一嚴格 "1" 比對。
     local h_state_gateway_api
     h_state_gateway_api="${OPENCLAW_H_STATE_GATEWAY:-$(grep '^OPENCLAW_H_STATE_GATEWAY=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    # P5 step-(i) SM Option 2 收斂：Decision Lease IPC 權威路徑 env-gate（API 側）。
+    # Python governance_lease_bridge.is_lease_ipc_enabled() 嚴格比對 "1"：ON 時 hub
+    # 的 lease acquire/release/get 以 Rust IPC 結果為權威，並影子比對本地 Python SM
+    # 偵測 divergence（soak 儀器）；blank/absent 保持 code 預設 OFF（legacy local SM
+    # 路徑，行為 byte-unchanged）。operator env 優先（一次性 soak 測試），否則讀
+    # basic_system_services.env（跨 restart 持久）。對齊 cost_edge_advisor/h_state 模式。
+    local lease_python_ipc_enabled
+    lease_python_ipc_enabled="${OPENCLAW_LEASE_PYTHON_IPC_ENABLED:-$(grep '^OPENCLAW_LEASE_PYTHON_IPC_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     local anthropic_api_key openai_api_key deepseek_api_key
     anthropic_api_key="$(resolve_provider_secret_env ANTHROPIC_API_KEY anthropic anthropic_api_key)"
     openai_api_key="$(resolve_provider_secret_env OPENAI_API_KEY openai openai_api_key)"
@@ -723,6 +731,7 @@ restart_api() {
         OPENCLAW_REPLAY_SIGNING_KEY_FILE="$replay_signing_key_file" \
         OPENCLAW_COST_EDGE_ADVISOR="${cost_edge_advisor_api}" \
         OPENCLAW_H_STATE_GATEWAY="${h_state_gateway_api}" \
+        OPENCLAW_LEASE_PYTHON_IPC_ENABLED="${lease_python_ipc_enabled}" \
         ANTHROPIC_API_KEY="${anthropic_api_key}" \
         OPENAI_API_KEY="${openai_api_key}" \
         DEEPSEEK_API_KEY="${deepseek_api_key}" \
