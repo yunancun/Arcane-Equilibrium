@@ -12,6 +12,9 @@ pub mod account_manager;
 pub mod agent_spine;
 pub mod ai_budget;
 pub mod ai_service_client;
+// PA daily-kline backfill（2026-06-02）：日線歷史回填（timeframe='1d'）— 分頁取數 +
+// C-3 strict-parse（fake-zero/非有限/損壞 bar 不寫）+ market.klines/provenance 寫層。
+pub mod backfill;
 // Sprint 1B Earn first stake B3（2026-05-23）：Flexible Saving only / 5 endpoint
 // 走共用 BybitRestClient（HMAC + rate limit + retCode 觀測）。
 pub mod bybit_earn_client;
