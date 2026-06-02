@@ -154,6 +154,15 @@ path = "src/bin/repair_migration_checksum.rs"
 name = "feature_baseline_writer"
 path = "src/bin/feature_baseline_writer.rs"
 
+# PA daily-kline backfill（2026-06-02）：日線（timeframe='1d'）歷史回填 CLI。
+# dry-run 預設 + --apply/env gate（鏡像 feature_baseline_writer）。V125 preflight
+# fail-closed（research.alpha_klines_provenance 缺表退出）。寫 market.klines（與 live
+# 1m-1h disjoint, ON CONFLICT DO NOTHING）+ append-only provenance 帳本。C-3 strict-parse
+# 拒 fake-zero/非有限 bar，絕不寫 0.0。
+[[bin]]
+name = "daily_kline_backfill"
+path = "src/bin/daily_kline_backfill.rs"
+
 # REF-20 Wave 1 R20-P0-T2 — replay_runner binary scaffold.
 # Wave 1: scaffold only (`#![cfg(feature = "replay_isolated")]` + `panic!`).
 # Wave 3 R20-P2b-S7/S8/S9/S10 lands runtime IMPL (Isolated profile,

@@ -1,0 +1,44 @@
+# MODULE_NOTE
+# 用途：日線（timeframe='1d'）K 線回填的固定流動標的集。daily_kline_backfill CLI 讀此檔
+#   決定回填哪些 symbol。
+# 結構：[backfill_universe] category + symbols + 窗口/分頁參數。
+# 硬邊界：純配置，無風控/授權語意；不影響 live 交易 universe（event_consumer/types.rs::SYMBOLS）。
+#
+# ============================================================================
+# 【待 QC / MIT 復核】此清單為「常見高流動 perp」的初版工程預設，liquidity cutoff
+# （以何門檻納入/剔除：24h turnover、open interest、上市時長、tick size 等）尚未經
+# QC / MIT 量化復核。納入低流動標的會引入回填 OHLCV 的微結構噪音（寬價差/跳空），
+# 污染 alpha 證據。正式啟用前必由 QC / MIT 依 PIT 流動性指標確定 cutoff 並修訂本清單。
+# ============================================================================
+
+[backfill_universe]
+# Bybit 線性永續類別（linear）。回填只取 perp 日線。
+category = "linear"
+
+# 回填預設窗口（天）：從 now 往前回溯的天數。CLI 可用 --lookback-days 覆蓋。
+lookback_days = 730
+
+# 固定流動標的（top-20 常見高流動 USDT perp，按市值/成交量直覺排序，非量化排名）。
+# 待 QC/MIT 復核 cutoff 後修訂。
+symbols = [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "BNBUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "ADAUSDT",
+    "AVAXUSDT",
+    "LINKUSDT",
+    "TONUSDT",
+    "TRXUSDT",
+    "DOTUSDT",
+    "POLUSDT",  # 原 MATICUSDT，2024-09 MATIC→POL 遷移後 Bybit 已下架 MATICUSDT perp（BB 2026-06-02 核實）
+    "LTCUSDT",
+    "BCHUSDT",
+    "NEARUSDT",
+    "APTUSDT",
+    "ARBUSDT",
+    "OPUSDT",
+    "SUIUSDT",
+]
