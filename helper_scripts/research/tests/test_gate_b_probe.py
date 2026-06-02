@@ -557,6 +557,159 @@ def test_verdict_isolation_warning_does_not_change_capture_verdict() -> None:
     assert verdict["isolation_health_warning"] is True
 
 
+# ── parquet 鏡像（Part A 非阻斷 + Part B 關聯式 API） ────────────────────────
+
+
+def _write_jsonl(run_dir, channel: str, rows: list[dict]) -> None:
+    """把幾行 dict 寫成某 channel 的真實 JSONL（用 artifact 的 channel→檔名映射）。"""
+    fname = artifact._CHANNEL_FILES[channel]
+    with open(run_dir / fname, "w", encoding="utf-8") as fh:
+        for r in rows:
+            fh.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+
+def test_mirror_jsonl_to_parquet_real_roundtrip(tmp_path) -> None:
+    """Part B 正向：真實寫 JSONL → mirror → 回 ok + parquet 檔生成 + row count 對。
+
+    為什麼補這條：先前單元測試全用 mock/dry-run 跳過真 JSONL→parquet 轉換，導致
+    Linux smoke 才暴露 ``COPY (...) TO ?`` 的 IOException（COPY-TO-param 不支援）。
+    此測試在能裝 duckdb 的環境真跑關聯式 API，鎖死回歸。
+    """
+    duckdb = pytest.importorskip("duckdb")  # noqa: F841 - Mac dev 無 duckdb 則 skip
+    run_dir = tmp_path / "run1"
+    run_dir.mkdir()
+    _write_jsonl(
+        run_dir,
+        "rest",
+        [
+            {"symbol": "NEWUSDT", "status": "PreLaunch", "event_ts_exchange_ms": 1717200000000},
+            {"symbol": "NEWUSDT", "status": "Trading", "event_ts_exchange_ms": 1717200060000},
+        ],
+    )
+    _write_jsonl(
+        run_dir,
+        "publictrade",
+        [{"symbol": "NEWUSDT", "price": 10.0, "event_ts_exchange_ms": 1717200061000}],
+    )
+
+    res = artifact.mirror_jsonl_to_parquet(run_dir)
+
+    assert res["parquet_mirror"] == "ok", res
+    assert res["channels_failed"] == []
+    # 鏡像輸出 {channel}.parquet（與 _CHANNEL_FILES key 對應）。
+    assert (run_dir / "rest.parquet").exists()
+    assert (run_dir / "publictrade.parquet").exists()
+    assert (run_dir / "topic_summary.csv").exists()
+    assert (run_dir / "topic_summary.parquet").exists()
+    # row count 必須與寫入行數一致（rest=2 / publictrade=1）。
+    assert res["channels"]["rest"] == 2, res["channels"]
+    assert res["channels"]["publictrade"] == 1, res["channels"]
+    # 空 channel 計 0 且算成功（非失敗）。
+    assert res["channels"]["kline"] == 0
+    assert "kline" in res["channels_ok"]
+
+
+def test_mirror_parquet_readback_matches_jsonl(tmp_path) -> None:
+    """Part B 完整性：寫出的 parquet 讀回 row count 與原始 JSONL 一致（非空殼檔）。"""
+    duckdb = pytest.importorskip("duckdb")
+    run_dir = tmp_path / "run_rb"
+    run_dir.mkdir()
+    _write_jsonl(
+        run_dir,
+        "capture_lag",
+        [
+            {"symbol": "AUSDT", "capture_lag_ms": 60_000},
+            {"symbol": "BUSDT", "capture_lag_ms": 120_000},
+            {"symbol": "CUSDT", "capture_lag_ms": 30_000},
+        ],
+    )
+    res = artifact.mirror_jsonl_to_parquet(run_dir)
+    assert res["parquet_mirror"] == "ok", res
+    con = duckdb.connect(database=":memory:")
+    try:
+        back = con.execute(
+            "SELECT COUNT(*) FROM read_parquet(?)",
+            [str(run_dir / "capture_lag.parquet")],
+        ).fetchone()
+    finally:
+        con.close()
+    assert back[0] == 3
+
+
+def test_mirror_skips_when_duckdb_missing(monkeypatch, tmp_path) -> None:
+    """Part A 非阻斷：duckdb 缺失時回 skipped，絕不 raise（Mac dev 路徑）。
+
+    用 monkeypatch 強制 import duckdb 失敗（即使環境裝了 duckdb 也模擬缺套件），
+    驗證 ImportError 分支回 skipped。
+    """
+    import builtins
+
+    real_import = builtins.__import__
+
+    def _fake_import(name, *args, **kwargs):
+        if name == "duckdb":
+            raise ImportError("simulated_missing_duckdb")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", _fake_import)
+    run_dir = tmp_path / "run_noduck"
+    run_dir.mkdir()
+    _write_jsonl(run_dir, "rest", [{"a": 1}])
+    res = artifact.mirror_jsonl_to_parquet(run_dir)
+    assert res == {"parquet_mirror": "skipped", "reason": "duckdb_not_available"}
+
+
+def test_mirror_corrupt_jsonl_partial_not_raise(tmp_path) -> None:
+    """Part A 對抗：一個 channel 的 JSONL 壞掉 → 回 partial 不 raise，其他 channel 仍成功。
+
+    這是 Part A 的 bite：先前 per-channel COPY loop 的 try/finally（finally 只關 con
+    不 catch）會讓 duckdb IOException 傳播炸掉 _finalize。新作逐 channel 隔離，壞檔記
+    channels_failed，好檔照常產出 parquet。
+    """
+    duckdb = pytest.importorskip("duckdb")  # noqa: F841
+    run_dir = tmp_path / "run_corrupt"
+    run_dir.mkdir()
+    # rest channel：完全非 JSON 的垃圾，duckdb read_json 應失敗。
+    (run_dir / artifact._CHANNEL_FILES["rest"]).write_text(
+        "<<< this is not json at all >>>\n!!!garbage!!!\n", encoding="utf-8"
+    )
+    # publictrade channel：合法 JSONL，必須仍成功（channel 隔離）。
+    _write_jsonl(
+        run_dir, "publictrade", [{"symbol": "OKUSDT", "event_ts_exchange_ms": 1}]
+    )
+
+    res = artifact.mirror_jsonl_to_parquet(run_dir)
+
+    # 絕不 raise；回 partial（有成功有失敗）。
+    assert res["parquet_mirror"] == "partial", res
+    assert "rest" in res["channels_failed"], res
+    # 好 channel 仍產出 parquet 且列入 channels_ok。
+    assert "publictrade" in res["channels_ok"], res
+    assert (run_dir / "publictrade.parquet").exists()
+    # 壞 channel 不得有 parquet（轉換失敗）。
+    assert not (run_dir / "rest.parquet").exists()
+
+
+def test_mirror_unwritable_dir_failed_not_raise(tmp_path) -> None:
+    """Part A 對抗：run_dir 不可寫（無法落 csv/parquet）→ 回 failed 不 raise。
+
+    模擬磁碟唯讀 / 權限不足。鏡像層級失敗（topic_summary.csv 都寫不出）必須收斂成
+    failed 回報，絕不傳播給 _finalize 致探針非零退出。
+    """
+    duckdb = pytest.importorskip("duckdb")  # noqa: F841
+    import os
+
+    run_dir = tmp_path / "run_ro"
+    run_dir.mkdir()
+    _write_jsonl(run_dir, "rest", [{"a": 1}])
+    os.chmod(run_dir, 0o555)  # r-x：禁寫
+    try:
+        res = artifact.mirror_jsonl_to_parquet(run_dir)
+    finally:
+        os.chmod(run_dir, 0o755)  # 還原以便 tmp_path 清理
+    assert res["parquet_mirror"] in ("partial", "failed"), res
+
+
 def test_artifact_writer_creates_run_dir_and_manifest(tmp_path) -> None:
     writer = artifact.GateBArtifactWriter("testrun", artifact_root=tmp_path, clock_ms=lambda: 123)
     w = writer.writer_for("capture_lag")

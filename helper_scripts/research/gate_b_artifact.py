@@ -28,11 +28,14 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 
 # verdict 枚舉（封閉集合）。為什麼 INCONCLUSIVE 是一等公民：listing phase 轉移稀有，
@@ -294,53 +297,99 @@ def mirror_jsonl_to_parquet(run_dir: Path) -> dict[str, Any]:
     為什麼可選 skip：duckdb/pyarrow 在 Mac dev 不一定裝；缺套件時回 skipped，不阻斷
     主流程（JSONL 才是 SoT，parquet 只是研究便利鏡像）。延遲 import 維持 import-time
     無重依賴。
+
+    非阻斷契約（硬邊界）：parquet 鏡像是研究便利層，JSONL 才是 SoT。**任何**失敗
+    （缺套件 / duckdb IO 錯 / 壞 JSONL / 不可寫路徑）都必須被吞並以結構化結果回報，
+    絕不 raise——否則 24h run 收尾會在 ``_finalize`` 崩潰退非零（verdict 雖已先寫，
+    但探針進程整體 traceback 退出）。單一 channel 轉換失敗也不得連累其他 channel 或
+    verdict：逐 channel 隔離，失敗者記入 ``channels_failed``，成功者照常產出。
+    回報語義：``ok``=全部成功；``partial``=至少一 channel 失敗但有成功；
+    ``failed``=全部失敗或鏡像層級失敗（如連線建立失敗）。
     """
     try:
         import duckdb  # 延遲 import；Linux runtime 已驗可用。
     except ImportError:
         return {"parquet_mirror": "skipped", "reason": "duckdb_not_available"}
 
-    summary_rows: list[tuple[str, int]] = []
-    con = duckdb.connect(database=":memory:")
+    # 整個鏡像層級的保護：連線建立、csv 落地、topic_summary 等任一環節若拋例外，
+    # 都收斂成 failed 回報而非傳播（Part A 非阻斷紅線）。
     try:
-        for channel, fname in _CHANNEL_FILES.items():
-            jsonl_path = run_dir / fname
-            if not jsonl_path.exists() or jsonl_path.stat().st_size == 0:
-                summary_rows.append((channel, 0))
-                continue
-            parquet_path = run_dir / f"{channel}.parquet"
-            # read_json_auto 推斷 schema；COPY 出 parquet 鏡像。
-            con.execute(
-                "COPY (SELECT * FROM read_json_auto(?)) TO ? (FORMAT PARQUET)",
-                [str(jsonl_path), str(parquet_path)],
-            )
-            cnt = con.execute(
-                "SELECT COUNT(*) FROM read_json_auto(?)", [str(jsonl_path)]
-            ).fetchone()
-            summary_rows.append((channel, int(cnt[0]) if cnt else 0))
-    finally:
-        con.close()
+        summary_rows: list[tuple[str, int]] = []
+        channels_ok: list[str] = []
+        channels_failed: list[str] = []
+        # 為什麼用 read_json().write_parquet() 關聯式 API 而非 COPY (...) TO ?：
+        # duckdb 的 ``COPY (...) TO ?`` 對 TO 目標**不支援 ? bind 參數**（會把 ?
+        # 當字面 glob 路徑解析 → 比對不到任何檔 → IOException "No files found"），
+        # 且 read_json_auto(?) 的 input 參數化亦同病。關聯式 API 以 Python str 直接
+        # 傳路徑，避開 COPY-TO-param 限制（Linux duckdb 1.5.1 / Mac 1.5.3 皆驗）。
+        con = duckdb.connect(database=":memory:")
+        try:
+            for channel, fname in _CHANNEL_FILES.items():
+                jsonl_path = run_dir / fname
+                if not jsonl_path.exists() or jsonl_path.stat().st_size == 0:
+                    summary_rows.append((channel, 0))
+                    channels_ok.append(channel)
+                    continue
+                parquet_path = run_dir / f"{channel}.parquet"
+                try:
+                    rel = con.read_json(str(jsonl_path))
+                    rel.write_parquet(str(parquet_path))
+                    cnt = con.read_json(str(jsonl_path)).count("*").fetchone()
+                    summary_rows.append((channel, int(cnt[0]) if cnt else 0))
+                    channels_ok.append(channel)
+                except (duckdb.Error, OSError, ValueError) as exc:
+                    # 單 channel 失敗（壞 JSONL / schema 推斷失敗 / 寫檔失敗）：隔離記錄，
+                    # 不連累其他 channel 與 verdict。row_count 記 0 佔位，summary 仍完整。
+                    summary_rows.append((channel, 0))
+                    channels_failed.append(channel)
+        finally:
+            con.close()
 
-    # topic_summary.csv + parquet。
-    csv_path = run_dir / "topic_summary.csv"
-    with open(csv_path, "w", encoding="utf-8", newline="") as fh:
-        writer = csv.writer(fh)
-        writer.writerow(["channel", "row_count"])
-        for ch, cnt in summary_rows:
-            writer.writerow([ch, cnt])
+        # topic_summary.csv + parquet。csv 始終寫（純標準庫），parquet 為便利鏡像。
+        csv_path = run_dir / "topic_summary.csv"
+        with open(csv_path, "w", encoding="utf-8", newline="") as fh:
+            writer = csv.writer(fh)
+            writer.writerow(["channel", "row_count"])
+            for ch, cnt in summary_rows:
+                writer.writerow([ch, cnt])
 
-    # 同時輸出 parquet 版 topic_summary（duckdb 直接從 csv 轉）。
-    try:
-        con2 = duckdb.connect(database=":memory:")
-        con2.execute(
-            "COPY (SELECT * FROM read_csv_auto(?)) TO ? (FORMAT PARQUET)",
-            [str(csv_path), str(run_dir / "topic_summary.parquet")],
-        )
-        con2.close()
-    except Exception as exc:  # noqa: BLE001 - 鏡像失敗不阻斷主流程，記原因即可
-        return {"parquet_mirror": "partial", "reason": f"topic_summary_parquet_failed:{exc}"}
+        # 同時輸出 parquet 版 topic_summary。read_csv_auto 同樣改關聯式 read_csv。
+        topic_summary_ok = True
+        try:
+            con2 = duckdb.connect(database=":memory:")
+            try:
+                con2.read_csv(str(csv_path)).write_parquet(
+                    str(run_dir / "topic_summary.parquet")
+                )
+            finally:
+                con2.close()
+        except (duckdb.Error, OSError, ValueError) as exc:
+            topic_summary_ok = False
+            logger.warning("gate_b topic_summary parquet 鏡像失敗: %s", exc)
 
-    return {"parquet_mirror": "ok", "channels": {ch: cnt for ch, cnt in summary_rows}}
+        if channels_failed or not topic_summary_ok:
+            return {
+                "parquet_mirror": "partial",
+                "reason": (
+                    "topic_summary_parquet_failed"
+                    if not topic_summary_ok and not channels_failed
+                    else "channel_mirror_failed"
+                ),
+                "channels_ok": channels_ok,
+                "channels_failed": channels_failed,
+                "topic_summary_ok": topic_summary_ok,
+                "channels": {ch: cnt for ch, cnt in summary_rows},
+            }
+        return {
+            "parquet_mirror": "ok",
+            "channels_ok": channels_ok,
+            "channels_failed": channels_failed,
+            "channels": {ch: cnt for ch, cnt in summary_rows},
+        }
+    except Exception as exc:  # noqa: BLE001 - 鏡像層級失敗不阻斷主流程（JSONL 才是 SoT）
+        # 連線建立或其他未預期錯誤：fail-safe 回報 failed，絕不傳播給 _finalize。
+        logger.warning("gate_b parquet 鏡像整體失敗（不阻斷，JSONL 為 SoT）: %s", exc)
+        return {"parquet_mirror": "failed", "reason": f"mirror_failed:{exc}"}
 
 
 __all__ = [
