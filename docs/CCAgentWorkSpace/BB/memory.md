@@ -1124,3 +1124,41 @@ PM 對抗性質疑 `srv/docs/audits/2026-05-31--funding_short_v2_structural_infe
 1. audit `2026-05-31--funding_short_v2_structural_infeasibility.md` §2.4 是否更正「結構性封頂 10.9%」措辭（建議標 erratum：cap 是 per-symbol upperFundingRate 0.5%~1.0%/8h，非 +0.01%）。
 2. `quant-strategy-design` checklist 建議改為「查 `instruments-info.upperFundingRate` per-symbol cap」而非靠 funding/history 樣本窗 max 推斷 cap（樣本窗會落在 regime 內，必誤判）。
 3. 字典手冊 §1 funding 章節是否補 `upperFundingRate`/`lowerFundingRate`/`fundingInterval` 三欄位 + 完整 clamp 公式（含 IR baseline = +0.01% 的 floor 語意，防後續 agent 再犯同樣 cap 誤判）。
+
+---
+
+## 2026-06-02 funding + OI history backfill writer — Bybit endpoint spec for E1 (AEG-S1 V125 fill)
+
+### Trigger
+PM 派 BB spec funding-rate + open-interest history backfill writer 的 Bybit 端點語義（QC 多日持倉策略線 P0 基礎，複用已部署 daily_kline_backfill 模式 commit 0f19c861 回填到 V125 research.alpha_funding_rates_history + research.alpha_open_interest_history，目前空）。READ-ONLY，不寫碼。
+
+### 三方核實（Bybit 官方 WebFetch + dict + code）
+- **funding/history**：官方確認 = **time-window 分頁（NO cursor）**，limit max=200/default=200，「**只傳 startTime 會 error**；只傳 endTime 回 200 筆 up-till-endTime」。code `get_funding_history(category,symbol,start,end,limit)` 已送 startTime/endTime/limit（mod.rs:254）。8h 結算 → 18mo ≈ 1644 筆/symbol → ⌈1644/200⌉ = **9 頁/symbol** → 20 symbol = **~180 req** 一次性。Market group 120 req/s，sequential 0 burst。
+- **open-interest**：官方確認 = **同時有 cursor（nextPageCursor）+ startTime/endTime window**，limit max=200/**default=50**，lookback = symbol launch time。**但 code `get_open_interest(category,symbol,interval,limit)` 只送 category/symbol/intervalTime/limit，NOT start/end/cursor**（mod.rs:184-219）→ dict line 141 列 start/end 是 **drift（client 簽名無此參數）**。OI backfill 需 **E1 擴 client**（加 startTime/endTime/cursor）才能回填歷史窗（與 funding 不同：funding client 已 ready，OI client 不 ready）。
+- **intervalTime 建議 = 1h**（多日策略成本模型）：18mo×1h = ~13140 筆/symbol → ⌈13140/200⌉=66 頁/symbol → 20 sym = **~1320 req**；1d = 547 筆/sym = 3 頁/sym = 60 req 但顆粒太粗（成本模型/listing fade 需 intraday OI 變動）。1h 是量/顆粒平衡點。
+
+### 關鍵 BB 發現（spec 交付重點）
+1. **【CRITICAL for E1】fake-zero 地雷同 kline**：`get_funding_history` 用 `parse_str_f64(item,"fundingRate")`（parsers.rs:24-28 `.unwrap_or(0.0)`）；`get_open_interest` 用 `parse_str_f64(item,"openInterest")`。V125 C-3 funding_rate/open_interest 都是 NOT NULL；**E1 必複刻 daily_kline strict-parse 範式**：parse-fail → reject row（不寫 0.0），coverage 降 partial/failed。**funding rate 合法可為 0.0/負**（與 OHLC 恆>0 不同）→ strict 判定不能用「>0」，要用「**原始 JSON 欄位存在且 parse 成功**」（區分「真 0.0 funding」vs「缺值 default 0.0」），須在 parser 層分辨 None vs Some(0.0)，不可沿用 kline 的 >0 斷言。OI 同理（OI 可為極小但通常>0；仍以「欄位存在且 parse 成功」為準，非數值門檻）。
+2. **funding 分頁方向**：官方「只傳 startTime error」→ E1 分頁必走 **endTime 向後回溯**（cursor_end = 上頁最早 fundingRateTimestamp − 1），與 daily_kline paginate_daily_klines 的 shrinking-end 範式一致；終止三閘（空頁/游標不進/MAX_PAGES）照抄。
+3. **OI 分頁有 cursor**：與 funding 不同，OI 可用 nextPageCursor（更穩）或 endTime-window；建議 E1 用 **endTime-window 回溯**（與 funding/kline 統一範式，避免兩套分頁碼）+ cursor 作終止輔助。V125 alpha_open_interest_history 有 cursor_lineage 欄可記。
+4. **timestamp 都是 string ms**：funding fundingRateTimestamp / OI timestamp 都是字串毫秒，E1 須 parse → TIMESTAMPTZ（funding_ts / ts），parse-fail reject（不落 1970 epoch，抄 writer.rs utc_from_ms None 範式）。
+5. **【cap 紀律】此 backfill 回填已實現 funding history（成本估計）≠ funding cap**。cap SSOT = instruments-info `upperFundingRate`/`lowerFundingRate`/`fundingInterval`（dict §167-196 已記，funding_short_v2 教訓）。**E1 此任務不碰 cap**，禁從 history max 反推。已實現 funding 是成本輸入，cap 是另一個 endpoint（get_instruments_info，目前未拉 cap 欄）。
+6. **signed-GET-via-demo**：funding/OI 走 get_checked（HMAC signed GET，demo slot），非 no-auth public（與 daily_kline 同；demo 空憑證 request-time fail-closed，非建構期）。Market group 公共端點但 client 統一簽名。
+7. **V125 schema 映射**：
+   - funding → alpha_funding_rates_history：funding_rate（DOUBLE NOT NULL，C-3）/ funding_ts（TIMESTAMPTZ from fundingRateTimestamp）/ category='linear' / symbol / source_endpoint='GET /v5/market/funding/history' / funding_interval_minutes（可從 instruments-info fundingInterval 取，或留 NULL；**非 cap**）/ run_id+provenance。PK (category,symbol,funding_ts,run_id)。
+   - OI → alpha_open_interest_history：open_interest（DOUBLE NOT NULL，C-3）/ ts（TIMESTAMPTZ from timestamp）/ interval_time TEXT（'1h'）/ category / symbol / source_endpoint='GET /v5/market/open-interest' / cursor_lineage（可記 nextPageCursor）/ run_id。PK (category,symbol,interval_time,ts,run_id)。
+8. **rate/ToS**：read-only market data，0 KYC/地理/wash/broker-rebate 風險；180（funding）+1320（OI 1h）req 一次性遠 < Market 120 req/s 持續 cap；sequential per-symbol 0 burst；退避走既有 wait_if_rate_limited（Market threshold=10）。ToS 合規退避重試已由 client 層 fail-closed（retCode!=0 不重試）。
+
+### 字典更新需求（drift）
+- **dict line 141 OI start/end 標 client-not-wired**：dict 列 `start/end` 為 get_open_interest input，但 code 簽名無此參。E1 擴 client 加 start/end/cursor 後，同 commit 更新 dict §132-146（標 client 已送 startTime/endTime/cursor + nextPageCursor 分頁 + default limit=50/max=200 + lookback=symbol launch）。**此為 BB 交付的 dict cleanup debt，E1 IMPL 時連帶修**。
+- funding §150-163 基本準確；補 limit default=200 + 「只傳 startTime error」+ time-window（no cursor）分頁註。
+- 兩者皆「引入新端點用法」（backfill 歷史回溯分頁），E1 IMPL 後須更新 bybit_api_reference.md。
+
+### Verdict: SPEC DELIVERED — funding client ready / OI client 需擴 start+end+cursor / 兩者 fake-zero 須 strict-parse（funding/OI 用「欄位存在且 parse 成功」非 >0）/ cap 不碰。
+
+### 下次啟動需查驗項
+1. E1 OI backfill 是否擴了 get_open_interest client 簽名（加 startTime/endTime/cursor）+ 同 commit 更新 dict line 141
+2. E1 funding/OI strict-parser 是否用「JSON 欄位存在且 parse 成功」判定（非 kline >0），守住「真 0.0/負 funding」vs「缺值 default 0.0」區分
+3. timestamp string→TIMESTAMPTZ parse-fail 是否 reject（不落 epoch）
+4. backfill 是否誤碰 funding cap（應只回已實現 history）
+5. dict §132-146 OI + §150-163 funding 分頁/limit 註是否同 IMPL commit 更新
