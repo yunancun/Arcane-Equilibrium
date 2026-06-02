@@ -743,3 +743,30 @@ C4 + D-hygiene 都改 `main_boot_tasks.rs`，看似衝突風險。實測 C4 改 
 
 ### 5. 任務 framing 的 deploy 狀態可能 stale — 必 ssh 驗 running binary mtime vs source ancestry
 任務說「D2 deploy-batched / 將與 C4 一起 deploy」，但 ssh 實測 Linux main HEAD=`af92e2ca` 已含 D2+D-hygiene+HIGH-1，running binary（PID 113386, mtime 17:51 CEST）post-date 三者 → D2/D-hygiene **可能已隨 17:51 rebuild 進 binary**。C4 才是唯一 net-new source。QA 報告須據實寫「C4 是 batch 內唯一未 deploy source」而非繼承任務的「三者一起首次 deploy」framing。running binary mtime == process start time 是判斷「上次 rebuild 含哪些 commit」的關鍵信號。
+
+## 2026-06-02 P5 SM Option2 step-i chain-level E2E acceptance（HEAD e6aa5e37）
+
+| 報告 | 日期 | 關鍵發現 |
+|---|---|---|
+| 2026-06-02 P5 step-i 業務鏈端到端驗收 | 2026-06-02 | **PASS（soak runtime gate operator-timed 除外）**。step-i 整條 lease IPC 權威路徑逐環接上、無 bug/gap/邏輯錯/斷線接線。Mac+Linux 雙端 133 passed/1 skipped（同 skip 同 warning，cross-arch parity）；Rust governance_ipc 13 passed + sm_contract 1 passed（Linux release 權威）。設計 doc 在 HEAD 344025f9 標的兩個 half-wire gap（§0.1 Rust 無 lease dispatch arm；§0.2 flag 不在 restart_all.sh）都被 a99bfa1d+e6aa5e37 關閉。flag-OFF 為當前 production 真實態（API PID 1804292 env empty/absent，basic_system_services.env 無此 flag）= dormant byte-unchanged。報告直接在主 session 輸出（未寫 .md）。 |
+
+### 1. 「設計 doc 寫 half-wire」≠「現 HEAD 仍 half-wire」— PA design doc 的 HEAD 戳記是關鍵
+SM Option2 migration design doc 自身標 `@ main HEAD 344025f9`，其 §0 "load-bearing reality corrections" 列「Rust 無 lease dispatch arm」「flag 不在 restart_all.sh」兩個 half-wire。但驗收標的 HEAD 是 `e6aa5e37`（design doc 之後 +2 commit：a99bfa1d Rust + e6aa5e37 Python）。QA 不能直接採信 design doc 的 reality correction 當現狀——必須對**驗收 HEAD** 重 grep：`dispatch.rs` 現有 7 個 `governance.*` arm；`restart_all.sh:717/734` 現讀+export flag 到 uvicorn。教訓：design doc 的「現狀描述」帶 HEAD 戳記，跨 commit 後即過期；驗收必以標的 HEAD 的源碼為準。
+
+### 2. comparator「3 軸」死角分析必算「兩側皆有意見才算分歧」的覆蓋空間
+governance_divergence.record_divergence 核心：`no_opinion = (rust==UNKNOWN or python==UNKNOWN); match = no_opinion or rust==python`。三軸覆蓋：(a) **auth-axis**（acquire 開頭 Step-2 前，is_authorized IPC vs 本地，雙向 grant/deny 全覆蓋，解 E2 HIGH#5 近盲）；(b) **acquire scope-axis**（rust acquire outcome vs Python 完整影子=is_authorized AND auth_permits_scope，雙向）；(c) **release/get presence**（steady-state Python 無意見=UNKNOWN→no-opinion 不算分歧，A3 修 over-fire；本地真持有相反才 fire）。**無死角**：acquire 時授權空間（auth + scope）被 a+b 雙向覆蓋；release/get 弱通道的 UNKNOWN 是「Python 在 flag-ON 下對 Rust-held lease 真的無獨立意見」的正確語義，記分歧才是 false-positive。驗收必跑 bite test 證每軸真能 fire：`test_auth_axis_rust_grants_python_denies...production_path`（NO monkeypatch，真 production 路徑，divergences==1）+ `test_flag_on_forced_divergence_bite...`（acquire-axis，divergences==1）。
+
+### 3. soak instrument readiness = counter+consumer+sink+gate 四件全接，且 flag-OFF 時 total 恆 0
+step-i 完成 gate 靠「0 divergence over N」，必驗：(a) `_COUNTERS{total,matches,divergences}` 單調不隨 ring FIFO 失真（cap 2048 但 counter 先累加）；(b) consumer = `/governance/health-check` POST route `governance_extended_routes.py:428-429` 真 surface `health["lease_ipc_divergence"]=get_divergence_counters()`，且包 try/except 不讓缺 comparator 弄崩 health-check；(c) sink+counter+lock 三 singleton 已登記 `singleton-registry.md §2.5`；(d) gate 讀法 = `divergences==0 and total>=N`。flag-OFF 時 acquire/release/get 不走 IPC 比對分支 → total 恆 0（route 仍回欄位但全 0）。
+
+### 4. flag-ON + engine-down 下每筆 acquire 都記 divergence(rust=denied/python=granted) 是 feature 非 bug
+`test_flag_on_ipc_error_fail_closed_records_deny_outcome`：IPC down → acquire 回 None（fail-closed，不靜默 fallback local SM）+ comparator 記 rust=DENIED vs python=GRANTED 分歧。這正確：soak 期間 engine 不健康會被 divergence counter 大聲 surface，**阻擋 step-ii/iii 晉升**——這是 soak gate 的設計目的。QA 不可把它誤判成 comparator over-fire bug。
+
+### 5. step-i vs step-ii scope 邊界：Rust 把 7 method 全建好（additive），Python 只接 step-i 需要的 4 個
+Rust dispatch 有全部 7 arm（3 lease + is_authorized + get_status + list_leases + get_risk_state）且全 13 test 過。但 Python 端只 wire 了 4 個：acquire/release/get（lease 操作路由）+ is_authorized（auth-axis comparator 源）。`get_status`/`list_leases`/`get_risk_state` **Python 無 METHOD 常數、無 _via_ipc consumer**，`hub.get_status()`（governance_hub_cascades.py:118）仍讀 local SM。這**不是 step-i gap**——design §5 step-(ii) 才是「Python projection 切讀 Rust」。Rust 提前建好（additive/dormant/tested）讓 step-ii 變純 Python change。QA 驗收這類 staged migration 必對照 design 的 step 切分判「未接 = 該 step 不需要」vs「未接 = 真 gap」，不能見 Rust 有 arm 而 Python 沒接就報 dead-wire。
+
+### 6. drive_lease_expiry 在 step-i flag-ON 下仍驅本地 SM（空集），expiry 真權威在 Rust tick actor — step-ii 收尾項非 step-i bug
+`governance_hub.drive_lease_expiry()` step-i 未改，仍 `_lease_sm.check_expiry()`。flag-ON 下 Rust-acquired lease 不在 local SM → 回 []。benign：Rust `GovernanceCore::check_expiry` 每 tick 跑 = expiry 真權威。design §1.3 標 step-ii/iii 把它降 no-op/projection。step-i「local SM 作 safety-net 並行」by-design，故未改 expiry 不是斷點。
+
+### 7. cross-arch acceptance：Mac+Linux 同 test count/skip/warning 是 parity 證；ssh cargo 需 ~/.cargo/bin 全路徑
+本次 Mac 133 passed/1 skipped/3 warning == Linux 完全一致（pytest-asyncio 9afb811a 已關 Linux async skip 洞，step-i async 測試兩端皆 run）。Rust 權威跑 Linux release：`ssh trade-core` non-interactive 不載 .bashrc → `cargo` 不在 PATH，須 `~/.cargo/bin/cargo`；workspace 在 `srv/rust/`（非 srv 根）。inline-module test（src/.../tests/governance_ipc_tests.rs）走 `Running unittests src/lib.rs` 段，整合 tests/ 目錄 0 matched 是正常（filter 不命中整合 bin）。

@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-01 22:xx CEST
+- calibrated TODO after operator parallel repairs: origin/Linux are on alpha hygiene deploy commit `324001c3`, while Mac is ahead with local SM parity/helper commits and still has uncommitted maintenance WIP
+- confirmed V5.8 remains preserved but active-IMPL stays gated by P0-EDGE-1; new repairs do not unlock the 13-module autonomy IMPL track
+- found and fixed a local WIP wiring gap in the governance autonomy service split; route symbols are re-bound and focused tests pass
+- next safe development schedule: candidate 2 multi-day trend/TSMOM via V125 SQL implementation scope + daily/4h kline backfill writer; candidate 3/4/5 follow after their gates
+
 2026-06-01 10:30 CEST
 - completed docs/design-only AEG-S1-FND-3, S2 Gate-B prep, and MIT storage migration-design packet in parallel after operator-approved sub-agent fanout
 - added FND-3 side-evidence contract, S2 isolated PreLaunch probe plan, V125 storage migration-design packet, PM integration report, and Operator checkpoint

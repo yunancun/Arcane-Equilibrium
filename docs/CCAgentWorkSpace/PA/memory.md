@@ -1,5 +1,52 @@
 # PA Memory — 工作記憶
 
+## 2026-06-02 — SM Option 2 收斂遷移設計（DESIGN-ONLY；ssh UP + 全源可讀，非 fixture checkout）
+
+**觸發**：operator 2026-06-02 拍板 SM 單源 end-state = **Option 2**（Rust `sm/{auth,lease,risk_gov}.rs` 唯一權威；刪 Python 3 SM transition logic + `state_machine_base.py`；Python 降為 read-only projection + GovernanceHub control-plane + 5 live-auth gate）。承接 2026-06-01 收斂設計（當時我推 Option 1 變體，operator 覆寫為 Option 2 end-state）。
+
+**最 load-bearing 的反轉（grep/ssh 親證，推翻 brief「IPC seam 已 live」前提）**：
+1. **lease IPC seam 是 HALF-WIRED 非 live**：Python client 側存在（`governance_lease_bridge.acquire_lease_via_ipc/release/get`），但 **Rust `ipc_server/dispatch.rs` 無 `governance.acquire_lease/release_lease/get_lease` arm**（full `grep '" =>'` 證實無；unknown→`ERR_METHOD_NOT_FOUND`→Python fail-closed None）。`GovernanceCore::acquire_lease` 只被 in-process tick path 呼（intent_processor/router.rs Gate 1.4 + earn_router.rs），未走 one-shot IPC socket。
+2. **flag OFF 且 API 從未收到**：`OPENCLAW_LEASE_PYTHON_IPC_ENABLED` **不在 `restart_all.sh`**（ssh 親證）→ Python API 永遠拿不到 → `is_lease_ipc_enabled()=False` → lease acquire/release **今天跑 legacy local Python SM**（governance_hub.py:853-905/957-982）。今天 lease runtime 權威 = Python-local-SM 非 Rust。（`OPENCLAW_LEASE_ROUTER_GATE_ENABLED` 是另一 flag，engine 側，已 wire）。
+3. **IPC server 無 GovernanceCore handle**：dispatch.rs 只持 `pipeline_cmd_tx`/`EngineCommandChannels`→`PipelineCommand`→tick actor（tick actor 才擁 per-pipeline GovernanceCore）。`grep GovernanceCore` in dispatch/mod/server = 0。→ 任何 projection read / lease IPC / operator-command 必走 `PipelineCommand` round-trip + oneshot reply（既有範式 `ForceGovernorTighter`/`get_risk_runtime_status`）。
+4. **operator escalate/de-escalate IPC 已存在但 target engine tick-actor RiskGovernorSm 非 facade**：`force_governor_tier_tighter/looser`→`PipelineCommand::ForceGovernorTighter/Looser`（handlers/governance.rs，V014 audit success+rejected 都寫）。**SM-01 operator freeze/revoke + lease ops 的 IPC facade 不存在**，須新建。
+5. **Python SM logic 只經 GovernanceHub + 2 mixin + audit_persistence(replay) + 小 route re-point set 觸達**：無 production code import SM class 直接 call transition()，全透過 `hub._authorization_sm.`/`_lease_sm.`/`_risk_governor_sm.` member。re-point set（grep 全列，排除 test）= governance_routes.py:691/701/770/776/932 + governance_extended_routes.py:206-220 + paper_trading_wiring.py:145/171/200/224 + audit_persistence.py:494/497。此 containment = Option 2 可行性根基。
+6. **cutover 不丟 Python-unique enforcement**：4a fixture `EXPECTED_RUST_ONLY=4`(Reconciler×3+NotificationFailsafe×1)/`EXPECTED_PY_ONLY=0`；0 divergent allow/deny；INV-D constraint 表已鎖。Rust SM unit 覆蓋強（auth~28/lease~20/risk_gov~47 test）。
+
+**設計淨效應**：遷移不是「flip flag + 刪 Python」，而是「**先建 Rust IPC surface（lease dispatch + auth-read/risk-read projection + operator freeze/revoke command）→ wire dispatch → parity-gate → 才刪**」。destructive delete 是最後一步，前置 explicit operator sign-off gate。
+
+**5 步遷移（每步 behavior-preserving + parity-gated；(iii) 前 = point of no return）**：(i) wire Rust IPC surface + Python 走 IPC（local SM shadow-compute 比對，0 divergence soak）→ (ii) projection 改讀 Rust + reconcile re-point → (iii) **CUTOVER 刪 Python transition logic**（HARD gate：soak 0 div + audit-schema Linux 驗 lease+auth+risk + CC + E2 + BB + operator sign-off）→ (iv) cleanup mirror/comparator。
+
+**最高殘留風險（flag 給 PM）**：(R1) **audit lineage gap** — 須 Linux 親驗 Rust event_consumer 是否已寫 Python 寫過的 auth/risk transition row；若無 = cutover 前必補（否則丟 lineage 違 principle 8/DOC-08）。(R2) 新 Rust auth-command IPC（freeze/revoke）= 高風險 authority code，full E2/CC/BB。(R3) in-flight Rust `tick_pipeline/mod.rs` WIP 消費 RiskGovernorSm → 本工 Rust SM enum/API 改動須 sequence 在 WIP 後或 additive-only。
+
+**engine-down 解（4b 主論點）**：5 live-auth gate 是 Python 且不依賴 engine → engine down ⇒ 無 Rust pipeline 跑 ⇒ 無 order path ⇒「Python 無 SM projection」不造成 live hole（結構性答案）。projection engine-down → fail-CLOSED（is_authorized=False / mode=FROZEN sentinel + stale=true），永不 fabricate permissive。
+
+**硬約束達成**：(a) 5 gate 在 live-session/auth-routes 層，與 3 SM 檔結構分離，delete set 只碰 `*_state_machine.py`+base；(b) 每 projection/command IPC fail → 保守 deny，無 permissive default；(c) operator freeze/revoke 變新 IPC command（`governance.freeze/revoke_authorization`→新 PipelineCommand→tick actor core.auth.*），operator-role gate 仍 Python 前置；(d) INV-A..E 只 Rust enforce，4a 留 byte-parity lock（建議留 frozen test-only Python reference SM ~150 LOC 保 cross-lang 等值）；(e) audit-schema parity Linux 驗 + 擴 4a 加 audit-row-shape vector；(f) 3-config 獨立由 Rust per-pipeline EscalationThresholds 保，projection 須 per-pipeline 讀。
+
+**反模式教訓**：(a) **本 srv 非 fixture checkout**（4989 tracked file，全源可讀）——與 2026-06-01「scoped fixture 僅 4 檔」記憶相反，本次 Mac 可直讀全 Rust+Python 源，但 IPC/PG runtime 仍須 ssh。(b) brief 給的「IPC seam 已 live / 'Rust SM is single source of truth' 註釋」是 **code-aspiration 非 runtime-fact**——grep dispatch table + ssh restart_all.sh 才知 server 側未 wire + flag 從未啟。**設計 IPC 遷移前必 grep server-side dispatch arm + 查 runtime flag 是否真傳進 process**，否則照註釋會設計出「flip flag 即切換」的假步驟（實際 flip 會 fail-closed 因 server 無 handler）。
+
+**報告**：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-02--sm_option2_convergence_migration_design.md`（已複製 Operator/）。
+
+---
+
+## 2026-06-01 — SM 雙源收斂 + place_order 移除 + 5 重構設計（DESIGN-ONLY；ssh DOWN Mac 靜態）
+
+**觸發**：operator 批准工作清單（A SM 單源收斂 centerpiece / B 移 place_order / C 5 重構 / D 死碼 / E 排序）。承接 [[project_2026_06_01_rust_python_boundary_simplification_audit]]（PA/FA/E5 三審）。全 Mac 靜態（`ssh trade-core` 本 session DOWN）。
+
+**最 load-bearing 的反轉（推翻 brief + 前審前提）**：
+1. **B「place_order 0 caller 休眠」是錯的**。exhaustive grep：`bybit_rest_client.py:801 place_order()` 有 **2 個 LIVE caller** = `helper_scripts/clean_restart_flatten.py:137,178`（reduce_only 市價平倉），而該 helper 被 **`clean_restart.sh:271` + `fresh_start.sh:252`**（README 列的生產生命週期腳本）呼叫。`cancel_order`(1 caller :121) / `cancel_all_orders`(1 caller `strategy_ai_routes.py:1849 _sweep_orphan_orders`) 同檔亦活。安全機制 = `clean_restart_flatten.py:36-42` mainnet mutation 硬 disable（只 demo），line 797 註釋自證 LIVE-GATE-FALLBACK-1。**結論：不能裸刪 place_order，否則斷 flatten；改設計為「保留方法 + 加 demo-only/mainnet-fail-closed assertion 強化」或「下推 IPC」需 operator 重決**。前審記憶「0 caller 休眠」需修正。
+2. **A 不是對稱雙源**：Python 側（`risk_governor/decision_lease/authorization_state_machine.py`）已做乾淨 shared-base 重構（`state_machine_base.py` 抽 5 guards + audit + CAL，~350-400 行去重）；Rust 側（`sm/{auth,lease,risk_gov}.rs`）用 static `match` lookup_rule，由 `governance_core.rs` 持 4 SM（tick actor 獨佔，hot path enforcer）。**Rust SM-04 已 DIVERGED**：Rust 多 `Reconciler` initiator + 4 Reconciler 事件 + `NotificationFailsafeTimeout` + `active_lock_profit_per_position` hook + `FAILSAFE_DEFENSIVE_COOLING_MS`（per AMD-2026-05-21-01 v2 / Packet C），Python 全無。SM-02 亦漂：Python 多 `BRIDGE_REJECTED/AUTHORIZATION_REVOKED/INCIDENT_FREEZE` 事件 Rust 無。= FA「silent drift」實證。
+3. **runtime SoT 已是 Rust**：`governance_hub.py:acquire_lease` Step 3 `OPENCLAW_LEASE_PYTHON_IPC_ENABLED=1` → IPC 到 Rust（註釋「Rust = single source of truth」+ dual-write reconcile）；Step 4 legacy local Python SM 僅 Phase 1 baseline fallback。lease_transitions DB 由 Rust event_consumer 寫（README）。
+
+**推薦收斂架構 = Option 1 變體「Rust 權威 + 單一 spec codegen 防漂 + Python 降薄投影」混合**：短期不刪任一側（Rust hot-path 不能 call Python；Python 必持 5 live-auth gate），先補 **cross-language contract/parity test**（同一組 transition 三元組在 Py + Rust 跑出相同 allow/deny/approval/initiator）鎖住現有漂移並阻止新漂移；中期把 enum + transition validity 抽到單一 YAML spec → codegen Rust `match` + Python dict（消除手抄）。drift 已存在 → parity test 第一步會 RED，揭示需先把 Reconciler/Failsafe 補進 Python 投影或明確標記為 Rust-only engine-enforcement（Python 控制平面不需要）。**此決策屬 operator（呈 options table）**。
+
+**E 隔離**：A/B/C/D 目標檔與 dirty WIP（`james_stein_estimator.py` + Rust `strategies/bb_*` + `tick_pipeline/mod.rs` + `intent_processor` + `ipc_server` tests）**0 重疊**。但 **A 若動 Rust SM enum/API → 與 in-flight `tick_pipeline/mod.rs` WIP 序列衝突**（tick_pipeline 消費 RiskGovernorSm）→ A 的 Rust 側改動須等 WIP 落地或只做 Python+test 側。
+
+**反模式教訓**：brief/前審「0 caller」未含 helper_scripts/*.sh→*.py 間接鏈；exhaustive caller grep 必含 `helper_scripts/` 的 shell→python 呼叫，否則誤判生產路徑為死碼（與 [[project_2026_06_01_fail_closed_gate_stack_root_cause]]「代碼審計易過度歸因/排序錯」同源）。
+
+**報告**：本 session 直接 inline 回 PM（無獨立 report 檔，per DESIGN-ONLY 指示）。
+
+---
+
 ## 2026-05-30 — P0-LG-3 reality-check：supervised migration 從未存在（operator 前提 + TODO 行 72 雙雙錯）
 
 **觸發**：LG-3 Wave 2.4.A 今日 ~16:00 UTC Gate 1 一過即派；operator 稱「TODO freeze 文字與磁碟矛盾」，要查清防止誤派重建已 apply 的 migration → sqlx hash drift。
@@ -6965,3 +7012,73 @@ policy 設計本身不受影響（只依賴武裝語意 + arm/notify 語意 + AM
 **教訓**：(a) MIT spec 的 symbol source 可漏 survivorship——PA 把 spec 拿來做 dispatch packet 時必獨立驗資料源（grep V058 + cron 確認 delisted 已採集，發現 SoT 早存在但 spec 沒接）。(b) 研究型 program 需在專案 Sprint/Wave 之上補 Track 層，否則 4 條獨立機率/kill 線的研究主線塞進單一 sprint 會混淆依賴。(c) kill-gate 排序（feasibility 先於 IMPL）是省成本的關鍵設計，不是流程裝飾——Gate-A<30% 省一個高風險 Rust 模組 + 半年累積。
 
 **Report**: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-31--alpha_edge_research_execution_plan.md`（+ Operator copy）
+
+### 2026-06-01 — Rust-ification authority-boundary static audit（read-only，回應 operator「是否誤留 Python 該寫 Rust」）
+
+**任務**：靜態審計 15 個名稱與 Rust authority 模組撞名的 Python 檔，分類 A(合法 Python)/B(該寫 Rust 的誤放)/C(死碼)。母 agent 綜合用，不改碼。
+
+**call-path 鐵證（per PA leak/look-ahead discipline，每個分類附 grep）**：15 個 suspect **無一被 Rust-facing hot-path 模組 import**，全部只被 FastAPI route 檔 / strategy_wiring.py(agent 接線) / governance_hub.py(合法協調器) import。→ 結構上不可能是 trading-truth。
+
+**結論：0 個真 (B) 誤放。** operator 的擔憂在當前 main 上不成立——Rust-ification 在 authority 邊界做得乾淨。看似可疑全是 (a) 合法 cold-path/coordinator/read-only-projection，或 (b) 已被 Rust 取代的死碼殘留。
+
+**最高價值的 near-miss（值得記住，但非 active 違規）**：`bybit_rest_client.py:801 place_order → POST /v5/order/create`（Python 真能下單！）+ `cancel_order`/`cancel_all_orders`。但 **exhaustive grep: place_order 0 runtime caller**（只有自身 def + docstring），標 `LIVE-GATE-FALLBACK-1 reduce_only 緊急平倉`，dormant。cancel_all_orders 唯一 caller = strategy_ai_routes.py:1849 `_sweep_orphan_orders`（stop pipeline 善後清掃 settleCoin=USDT，operator/stop 觸發，非自主下單，對齊原則 9 交易所側清理）。live_session_routes.py:278 構造的 BybitClient 只調 get_positions(只讀儀表板)。→ 分類 A-with-caveat：保留一個 dormant 真實下單能力，建議 operator 確認是否該移除或加 lease/operator gate 守衛（防未來被接線繞過 Rust execution authority）。
+
+**(C) 死碼 delete candidates（已被 Rust 取代但未刪）**：
+1. `h0_gate.py`(971)——Rust `openclaw_core/src/h0_gate.rs`(1243) 註解明寫「移植自 Python h0_gate.py(832 行)」。Python 版**只**被 paper_trading_wiring.py import（paper 預設 OFF，PAPER-DISABLE-1）。live/demo tick 走 Rust step_0_5_h0_gate.rs 獨佔。= 純 paper-only 殘留 + Rust 已是權威。
+2. `risk_manager.py`(52)——已是 ARCH-RC1 1C-3-D 死 shim（原 1633 行 Python RiskManager 收編進 Rust ConfigStore+intent_processor+position_risk_evaluator），檔內自寫「禁止再加任何邏輯」「歷史 import 點向後相容」。教科書 (C)。
+3. `bybit_rest_client.py` place_order/cancel 路徑——Rust `bybit_rest_client.rs`(1591) 是 live 下單權威；Python place_order dead（見上）。
+
+**(A) 合法 Python 一覽（grep 證每個為何非 trading-truth）**：
+- `governance_hub.py`(1236) — 真 coordinator，acquire_lease 查 _authorization_sm.get_effective() + FROZEN→revoke fail-closed = 真 lease 機制（契約明列合法）。
+- `risk_governor_state_machine.py`(855) — SM-04 治理平面 risk state；callers 全在 governance_hub/routes/cascades，**非** tick path。Rust risk_gov.rs(1289)+risk_checks.rs 才是 hot-path enforcer。Python 是 engine 反應的治理態(degrade→paper)，非 live 風控執行者。
+- `guardian_agent.py`(1458，**inventory 587 已 stale**) — Python 5-Agent Guardian，gate 的是 *agent-proposal* pipeline(Strategist→Guardian→Executor via MessageBus emit APPROVED_INTENT)，非 live trading-truth。真 hot-path veto = Rust intent_processor Gate 2 「Guardian 4 vetos」+step_6_risk_checks.rs。契約明列 5-Agent=合法 cold-path Python。
+- `executor_agent.py`(1031) — **red#1「_shadow_mode=True hardcoded」已修**(G3-03 Phase B ExecutorConfigCache 從 Rust IPC 讀 RiskConfig.executor.shadow_mode，fail-close shadow=True)。execute_order 非 shadow 時也不直接下 Bybit：acquire_lease()→_execute_via_ipc→_ipc_command("submit_paper_order")→Rust。= 合法 coordinator+lease+IPC bridge。
+- `reconciliation_engine.py`(948) — reconcile() read+compare 數學；_execute_actions 只 call _incident_callback(advisory FREEZE_TRADING/ALERT 字串)，不下單不寫 authority。契約 EX-04=合法 Python。
+- `edge_estimator_scheduler.py`(995) — cold-path 學習 daemon，算 James-Stein edge 寫 edge_estimates.json(+engine_events INSERT)。docstring 明寫「file-only NOT bound to cost_gate；engine startup 讀一次不熱重載」。Rust edge_estimates.rs 是 hot-path consumer。= 合法 learning producer。
+- `prelive_edge_gate_trends.py`(1239) — docstring「read-only trend reader，鏡像 passive healthcheck [33]/[38]/[40]，不碰 runtime/strategy params/execution」。全 _fetch_*_gate SELECT。= 純 GUI projection。
+- `trade_attribution.py`(958) — 完成交易事後分解 ALPHA/TIMING/SIZING/EXECUTION/COST/LUCK(原則 8/12)。讀+算，不下單。= cold-path analytics。
+- `promotion_pipeline.py`(865) — 5-stage 晉升 gate；PAPER→DEMO frozen fail-closed，LIVE「no auto-promotion requires operator」。治理態 tracker/advisory，不 flip live authority。= 合法 coordinator。
+- `risk_routes.py`(1140) — 明寫 route→RiskViewClient→patch_risk_config IPC→Rust ConfigStore.replace()；Python RiskManager「no longer touched」。= 純 parse→IPC→format。
+- `ai_service_dispatch.py`(844)/`multi_agent_framework.py`(535，**inventory 1137 stale**)/`layer2_tools.py`(1054) — IPC bridge / MessageBus infra / L2 工具(submit_recommendation 非 submit_order)。全合法。
+
+**inventory stale 點（標給母 agent）**：(1) red#1 executor shadow-hardcoded 已 G3-03 Phase B 修；(2) guardian_agent 587→1458 / multi_agent_framework 1137→535 LOC 大幅重構；(3) red#2 edge startup-only 是 architecture wart 非 misplacement（Python 正確產 file、Rust 正確 consume）。
+
+**教訓（呼應 2026-06-01 fail-closed gate 過度歸因教訓）**：docstring 帶「hot path」「deterministic gate」「<1ms SLA」字眼最易誘導 over-attribute（h0_gate.py / risk_governor_state_machine.py 都有），但 call-path grep 一查就知 Python 版不在 live tick path。靜態審計**必先 grep caller 再讀內文**，否則照名字+docstring 會誤報一堆 (B)。本次若只看名字會誤報 6-8 個 (B)，實際 0。
+
+**report**：直接回 parent（per 指示不寫獨立 .md；母 agent 綜合）。
+
+### 2026-06-02 — Daily-kline backfill writer + provenance E1 dispatch design (AEG candidate-2 multi-day trend execution件)
+
+**任務**：設計歷史日線(interval=D) kline backfill writer + Bybit public kline REST client（operator 批 scope），寫 market.klines(timeframe='1d') + research.alpha_klines_provenance（V125 表）。只設計 + E1 拆分，不寫 feature code。
+
+**最 load-bearing 發現（grep 自證，省掉一半工作量）**：
+1. **endpoint client 已存在且完全對齊 brief 簽名** — `MarketDataClient::get_klines(category, symbol, interval, start, end, limit)`（market_data_client/mod.rs:87-121）已實作，含 `parse_kline_list`（parsers.rs:38）+ start/end 游標 + limit。brief「設計 client」幾乎是 NO-OP，E1 只需薄包裝 paging loop（非新 client）。
+2. **paging + leak-free closed-bar guard 已有 production 範式** — bootstrap.rs:874-927 cold-start backfill：`get_klines("linear",sym,interval,None,None,Some(200))` → filter `b.start_time + period_ms <= now_ms`（**這就是 leak-free closed-bar 守衛，已驗範式**）→ map core_bars。backfill writer = 這個 loop 加 start/end 游標分頁 + DB 寫（取代 in-memory seed_bars）。
+3. **one-shot CLI 範式已有** — src/bin/feature_baseline_writer.rs：dry-run 預設 / `--apply`+env gate 才寫 DB / EXIT_OK|ARG|DB exit code / DbPool / secret_env。backfill CLI 鏡像此 shape（Rust-first，memory feedback_new_code_rust_first）。其他 bin precedent：repair_migration_checksum / replay_runner。
+
+**MIT-flag 的 unique key 親查結論（Linux PG trading_ai 親驗，非假設）**：
+- `market.klines` PK = **`(symbol, timeframe, ts)`**（V002:134 + 親查 pg_constraint `klines_pkey` 一致）。columns=(ts, open_ts_ms, close_ts_ms, symbol, timeframe, open, high, low, close, volume, turnover, tick_count)，OHLC 存 **f32**。
+- 既有 live writer upsert = **`ON CONFLICT (symbol, timeframe, ts) DO NOTHING`**（market_writer.rs:268）。
+- **"誰贏" 問題其實不存在**：live WS 只訂 1m/5m/15m/1h（KlineInterval enum 只 Min1/5/15/Hour1，multi_interval_topics.rs:31-52，**無 D**）。backfill 寫 timeframe='1d' = 與 live 完全 disjoint PK 分區。1d 衝突只可能 backfill-vs-backfill，永不撞 live writer。→ upsert 用 `ON CONFLICT (symbol,timeframe,ts) DO NOTHING`（對齊既有 live 範式 + 重跑冪等 + 絕不覆蓋 live 1m-4h）。
+
+**C-3 fake-zero PIT 污染風險（最關鍵防護，grep 揭露真實地雷）**：既有 `parse_kline_list`（parsers.rs:55-68）對 parse 失敗用 **`.unwrap_or(0.0)`**；live writer 又用 `sanitize_f64_or_zero(bar.open) as f32`（market_writer.rs:259-262）= **雙重 fake-zero 路徑**。backfill **絕不可直接複用** 這個 0.0-coercion 寫 1d——必須：(a) 加 strict 解析變體（parse 失敗→該 bar 標 coverage failure 不寫），(b) Bybit list 空/缺 bar → provenance coverage_status='partial'/'failed'，**不寫 fake-zero row**。否則 silent PIT 污染（brief C-3 binding）。
+
+**compression 風險親查結論**：TimescaleDB **2.26.1** + `timescaledb.enable_dml_decompression = on`（親查）→ INSERT ON CONFLICT 進 compressed chunk 自動解壓，**不 fail**。klines 6 compressed chunks（>14d），1095d 日線會寫進壓縮塊但 DML decompression on 撐得住。**仍須 Linux dry-run 驗 1d 寫壓縮塊的 latency/lock**（非 blocker，flag）。
+
+**survivorship 對齊（修正先前 active∪delisted 裁定）**：PM 本次明指 **fixed liquid top-N perp 固定集**（標準 TSMOM 做法）非動態 universe。與我 2026-05-31 active∪delisted 裁定不衝突——TSMOM 固定集本身規避「25 天 universe onset 2026-05-07 血緣不足」survivorship（固定集成員資格不隨時間漂移）。symbol 來源 = **硬編碼 config TOML 固定流動集**（BTC/ETH/top alts，非 scanner universe，非 symbol_universe_snapshots 動態查），避開 R-2a forward-accumulation 牆（日線 Bybit 有歷史，1m 才沒有）。固定集清單與選取準則須 QC/MIT 復核（流動性 cutoff + 是否含已 delisted 大幣留作 robustness）。
+
+**硬依賴順序（明寫 dispatch）**：backfill writer **硬依賴 V125 已 apply**（research.alpha_klines_provenance 表存在；MIT 親查 research schema **absent**）。部署序：V125 migration（另案 operator 批，MIT packet 已備）先 → backfill writer 後。V125 未 apply 前 backfill 寫 provenance 會炸 → CLI 開頭須 to_regclass probe research.alpha_klines_provenance，缺表 fail-closed 退出（非靜默跳過）。
+
+**E1 拆分（最大並行，檔不重疊）**：
+- E1-a（Rust paging client wrapper + closed-bar/strict-parse）：新 src/backfill/daily_kline_backfill.rs，包 get_klines paging（start/end 游標，limit=1000，~2 req/sym/1095d）+ strict parse 變體（parse-fail→coverage failure，不 0.0）+ closed-bar filter（沿 bootstrap.rs:894 範式）+ rate-limit 退避（read-only market data 退避重試 OK，對齊既有 get_open_interest_batch sequential 範式 mod.rs:227 防 burst）。
+- E1-b（Rust DB writer + provenance）：market.klines INSERT ON CONFLICT DO NOTHING（鏡像 market_writer flush_klines）+ research.alpha_klines_provenance 寫（run_id/git_sha/git_dirty/payload_sha256/coverage_status/window）。**檔不重疊 E1-a**（a 產 parsed bars + coverage verdict，b 消費寫 DB）。
+- E1-c（Rust CLI bin）：src/bin/daily_kline_backfill.rs 鏡像 feature_baseline_writer（dry-run 預設 + --apply/env gate + exit code + V125 to_regclass preflight + 固定集 config 讀取）。依賴 a+b。
+- 並行：a 與 b interface-first 並行（先定 ParsedKlinePage + CoverageVerdict struct contract），c 串接最後。≤3 並行。
+
+**16 原則 + 硬邊界**：A 級預判，**0 觸碰**。純 read-only market-data 回填 + append-only provenance，不下單/不餵 strategy intent/不碰 live_execution_allowed/max_retries/OPENCLAW_ALLOW_MAINNET/authorization.json/Decision Lease/IntentProcessor。觸資料攝入 → operator/CC sign-off 點：(1) 新寫 market.klines（雖 disjoint 1d 分區）(2) V125 部署批准 (3) 固定集 symbol 清單 (4) Bybit public REST 配額（BB 過目，public no-auth 但仍佔 shared market rate-limit group）。
+
+**須 Linux 預驗**：(1) V125 dry-run double-apply（MIT packet §8 已備）(2) 1d 寫 compressed chunk 的 ON CONFLICT latency/lock 實測 (3) f32 精度對日線 close 是否足夠（日線價格大數，f32 ~7 位有效數字，BTC 6 萬級 OK 但須確認非 alpha-breaking 量化）。
+
+**NO-OP 確認**：git fetch 已跑；無 backfill/kline/provenance/V125/tsmom branch；`git log --all|grep` 僅 2e809b96（V125 design checkpoint doc，非 code/branch）。
+
+**教訓**：(a) brief 說「設計 client」但 grep 一查 client 早存在（get_klines 完整）——PA 必先 grep 既有再設計，否則 E1 重造輪子。(b) C-3 fake-zero 不是抽象風險——既有 parse_kline_list `.unwrap_or(0.0)` + sanitize_f64_or_zero 是真實雙重地雷，backfill 直接複用 = silent PIT 污染。(c) 「誰贏」upsert 衝突問題經 KlineInterval enum grep 證實根本不存在（live 無 D）——查清資料分區比設計衝突規則省事。

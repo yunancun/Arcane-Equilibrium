@@ -43,6 +43,39 @@
 - 先清 8 項 Rust P0（2-3 週）→ P1 性能（1-2 週）→ P2 可讀性持續
 - 與 P0-2 21d demo 穩定期（至 ~2026-05-07）並行，不影響 Live gate
 
+## 2026-06-01 簡潔性/優雅性靜態審計（operator-directed elegance review）教訓
+
+**任務**：operator 問「哪裡可更精簡優雅、避免無意義膨脹」。HEAD `2e809b96`，純靜態唯讀（P0-EDGE-1 設計/文檔凍結窗口，無 runtime 動作）。
+
+**規模結論（不要再被「兩半各 ~半」誤導）**：
+- Rust prod 200,860 LOC / test 63,868（ratio 0.31，健康）。
+- Python control_api `app/` prod 103,151 / tests dir 97,266（~0.94:1，**全 repo 唯一測試集中區**，其餘 ml_training 0.75 / learning 0.62 / helper_scripts 0.33 / local_model_tools 0.41 全健康）。
+- **硬上限 >2000 違反全 repo 只剩 1 個**：`strategy_ai_routes.py` 2552（第 3 次 carry-over，每 sprint +16 行）。Rust 0 個 hard 違反（commands.rs 1972 / intent_processor/mod.rs 1968 是 99% 貼限但 UNDER；PA 2026-05-30 裁定 §九 是「review convention + documented-exception escape」非 hard boundary → P2-watch）。
+- >800 警告：Rust prod 70 / Python prod 70（對稱），絕大多數是 cohesive route/handler/test，非 tangled state。
+
+**結論：codebase 是 lean-with-hotspots，不是膨脹**。真正值得動的是「route 紀律 + helper 抽取」而非拆大檔搬行。
+
+**最高 ROI 三項（payoff × confidence）**：
+1. **governance_routes.py（1978）autonomy-level 子域抽 service**：第一個 route 在 line **960**，前 960 行是 ~30 helper（含 `_perform_autonomy_switch` 115 行 / `_build_autonomy_state_payload` 131 行 / 自家 `_get_autonomy_pg_conn`）。抽 `governance_autonomy_service.py` 同時瘦檔 + 修 route 紀律（handler 變 parse→call→format）。LOW risk（純搬 + re-export），-700~800 LOC 出主檔。
+2. **strategy_ai_routes.py（2552，唯一破 hard cap）**：17 route + 46 私有 helper，closed-PnL cursor 分頁引擎（`_closed_pnl_*` ~line 49-270 + `_fetch_pg_closed_pnl_fallback` + `_demo_snapshot_*_payload`）是內聯業務邏輯。抽 `demo_snapshot_service.py` + `closed_pnl_service.py`。MED risk（route 多），但**唯一硬違反 + 連續 3 sprint 增長**，應升壓。
+3. **helper_scripts/reports stage0r 統計 helper 抽 lib**：`w_audit_8b/funding_skew_*_metrics.py`（1805）與 `w_audit_8c/liquidation_cluster_*_metrics.py`（1943）共享 **16 個同名 fn**（`_kurtosis`/`_skew`/`_normal_cdf`/`block_bootstrap_ci`/`dsr_with_k`/`psr_bailey_ldp`/`wilson_ci_95`/`_pbo`/`_safe_float`/`_safe_int`/`_day_bucket`...）。`helper_scripts/lib` 只有 2 個 shell 檔，**無 Python 共享 lib** → 每個 report 重 roll ~400-600 LOC 統計+PG+coerce。抽 `helper_scripts/lib/stage0r_stats.py`。MED risk（要確認字面一致），-800~1000 LOC repo-wide，且修「統計公式漂移」隱患（改一處算法 N 處不同步）。
+
+**過度抽象 / 投機代碼判定（全部證偽為「不是 bloat」）**：
+- `pipeline_slot.rs`（908）**非投機**：live-scoped teardown 載重基礎設施，drawdown_revoke / live_auth_watcher / main_shutdown 都用。
+- `ipc_server/slots.rs`（287）**非投機**：boot-order 依賴反轉（IpcServer 在 DB pool 前構造），fail-soft uninitialized。是 LG-1 memo 標的「Slot late-inject N=4 macro」整併候選（P3，等 N≥6），非死碼。
+- dream/cognitive/opportunity（dream_engine 1063 等）**有 prod importer**（strategist_cognitive / strategist_agent / mlde_shadow_advisor）→ 仍 wired，是 R-X redesign 載體，**不要 sunset**（延續 2026-05-09 v3 教訓）。
+- env flag（OPENCLAW_*）絕大多數是 operational toggle（mainnet/paper/auto-migrate），非 coded-but-dead feature。
+
+**重複 helper 量化**：13 個 distinct `_safe_float`/`_num` float-coerce 散落；helper_scripts 內 ≥8 個 distinct PG-connect fn（`connect_db`/`get_db_connection`/`connect_pg`/`_open_pg_conn`/`_connect_pg`/`_pg_connect`...）；governance_routes 還自帶第 N 個 `_get_autonomy_pg_conn`。
+
+**測試 bloat 真相**：`*_coverage.py` 系列（test_governance_routes_coverage **1418** ≈ 被測 route 檔 1978 的 72% / test_p3_low_coverage 508 / test_phase2_strategy_routes_coverage 469）是「打行數覆蓋」而非「驗 intent」，且 governance 已有 7 個其他測試檔。是唯一 redundancy-prune 候選，但需逐 assert 確認無載重斷言（**不可一刀切刪**，違反「測試驗 intent」原則）。`__pycache__` 不在 git（已驗 `git ls-files` 0），磁碟 wc 灌水但 repo 乾淨。
+
+**新教訓**：
+1. **「測試集中區」用 per-area ratio 抓**：全 repo 看 100K test 嚇人，但 0.31~0.94 分布顯示只有 control_api 一區接近 1:1；ratio-per-area 比總量誠實。
+2. **route 檔大小有兩種完全不同病理**：governance_routes（19 route 但首 route 在 960 行 = 業務邏輯前置）vs replay_full_chain_routes（1931 行只有 **2** route = 巨型內聯編排）；strategy_ai_routes（17 route + 46 helper = 內聯 data-shaping）。「40 個瘦 handler」是低優先，「2 個胖 handler / 大量前置 helper」才是真痛點 — **數 route 數 + 首 route 行號** 比看總 LOC 準。
+3. **「near-cap cluster」每次審計重算**：commands.rs 1972 / intent_processor 1968 / governance_routes 1978 仍是「日常一次提交即破 2000」系統性風險，但拆它們（尤其 intent_processor 受 NLL borrow 鎖定）low-payoff/high-risk；正解是抽 helper/test 而非搬主邏輯。
+4. **`*_coverage.py` 命名是 test-bloat 指紋**：以行覆蓋為目的的測試檔通常 assert 薄、與既有 intent 測試重疊；prune 前逐檔讀 assert。
+
 ## 2026-05-30 optimization_readability_performance_audit 教訓
 
 **報告**：`docs/CCAgentWorkSpace/E5/workspace/reports/2026-05-30--E5--optimization_readability_performance_audit.md`
