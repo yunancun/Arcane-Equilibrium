@@ -1121,3 +1121,73 @@ claimed-live.
 **Survivorship discipline (R-2b §5 carried forward)**: E1 must record real Bybit min(ts) per symbol (listing date); not pad missing early history; diagnostic computes n_independent from real coverage. Restricting to active symbols = mild survivorship, material if symbol listed mid-window.
 
 **Boundary**: read-only spec; 0 code / 0 schema / 0 backfill; git fetch + NO-OP existence check passed before write.
+
+## 2026-06-02 V125 + V126 Linux PG double-apply dry-run (authoritative gate)
+
+**Trigger**: V125 (research.alpha_* AEG storage) + V126 (schema hygiene DROP) hard-gate before any production apply. Layered safety: V125 §A-§C in sandbox double-apply; V125 §D + V126 全 DROP = production read-only reflection + logic audit only (NO production DROP / NO retention-replace).
+
+**Verdict**: **V125 BLOCKER (return-to-E1) / V126 PASS (logic-audit GO) / BEGIN-COMMIT 裁決 = SAFE**
+
+**Method**: ssh trade-core → docker exec trading_postgres psql. Role = `trading_admin` (NOT openclaw/postgres — env POSTGRES_USER). DB trading_ai. Sandbox = `v125_dryrun_sandbox` created `TEMPLATE template0` (template1 collation-version mismatch blocks plain CREATE DATABASE — reusable trick). TSDB 2.26.1 both prod + sandbox. Sandbox dropped after.
+
+**V125 §A-§C sandbox double-apply (逐斷言)**:
+- 6 tables / 3 hypertable (chunk=604800s=7d all) / 3 compression segmentby=symbol(segidx=1) / 3 retention=1095d — ALL PASS
+- C-3 NOT NULL: funding_rate/open_interest/buy_ratio/sell_ratio all is_nullable=NO; boundary INSERT NULL → not_null_violation at chunk level; valid insert ok; 0 leaked rows — PASS
+- **Idempotency body PERFECT**: apply 1 + apply 2 both COMMIT with 0 RAISE; re-apply = schema/table/index "already exists skipping", hypertable "already a hypertable", compression "already enabled; skipping ALTER" (the ELSE branch of EXISTS-guard at line 609-611 fires — nested BEGIN/EXCEPTION twin-handler is defensive backup, primary idempotency = EXISTS guard), add_compression/retention_policy "already exists skipping" (if_not_exists works)
+
+**V125 BLOCKER (real bug, fails production too)**:
+- §E post-COMMIT Guard C lines 839-840: `SELECT segmentby INTO v_segmentby FROM timescaledb_information.compression_settings` → **ERROR: column "segmentby" does not exist** on TSDB 2.26.1. Reproduces identically on apply 1 AND 2 (deterministic, version-specific).
+- TSDB 2.26.1 compression_settings cols = `hypertable_schema, hypertable_name, attname, segmentby_column_index, orderby_column_index, orderby_asc, orderby_nullsfirst`. NO `segmentby` col. Correct introspection = `attname WHERE segmentby_column_index IS NOT NULL`.
+- §C EXISTS-checks (lines 593/628/662) dodge it (only `SELECT 1 ... WHERE schema/name`); only §E column-SELECT trips.
+- **Production failure mode (load-bearing)**: explicit COMMIT (line 778) commits sqlx outer tx EARLY (before sqlx's own INSERT _sqlx_migrations + before §E). §A-§C DDL → durable. §E errors in autocommit → `conn.execute()` Err → `migrator.run(pool).await?` (migrations.rs:193) `?` propagates → **engine auto-migrate startup ABORTS**. sqlx never records V125 row → next restart re-applies → §A-§C idempotent skip → §E errors AGAIN → **permanent crash-loop** until E1 fixes §E. Functional intent (compression+retention) IS correct — only the verification query is broken.
+- Bonus: TSDB advisory `WARNING: column "category" should be used for segmenting or ordering` (PK leading col not in segmentby/orderby) — non-fatal cosmetic.
+
+**BEGIN/COMMIT 裁決 = SAFE (E1 flag 解除)**:
+- migrations.rs:336/380: sqlx Migrator `no_tx=false`; per-migration `no_tx = sql.starts_with("-- no-transaction")`. V125/V126 不走 opt-out → sqlx wraps each in its own tx.
+- Empirical (outer-BEGIN sim around V125 sandbox): inner `BEGIN` → `WARNING: there is already a transaction in progress` (NOT error); inner `COMMIT` commits outer tx; post-COMMIT SELECT runs in autocommit (proven: marker SELECT succeeded after §E error → connection NOT in aborted-tx).
+- Precedent confirmed: V115/V113/V097/V092/V090 all have explicit body BEGIN/COMMIT + all applied successfully via runner (V115 commit ec995160). E1 concern was correct to flag but the precedent + empirical both say显式 BEGIN/COMMIT under sqlx wrapper = harmless WARNING. **NOT a V125/V126 blocker.** (Caveat: it's exactly the early-COMMIT behavior that makes the §E BLOCKER fail post-COMMIT in autocommit rather than rolling back — fixing §E is still mandatory.)
+
+**V126 production read-only reflection + logic audit = PASS (GO, no apply)**:
+- Packet 1: 4 damaged tables exist, exact counts fills=17265 / intents=7684 / orders=4509 / risk_verdicts=4,181,398 (903MB). pg_depend relation-dependents=0 each. Guard intentionally count-skip (故意非空), pg_depend-only — correct for evidence-backup tables.
+- Packet 2: 6 legacy tables exist, all count=0, pg_depend dependents=0 each. count=0 + pg_depend guards correct.
+- Packet 3: 7 target cols all exist on trading.decision_context_snapshots; column-level view-refs on the 7 = 0 (safe drop); recent_sequences view-refs=1 (referenced by `learning.scorer_training_features` — CC BLOCKER exclusion CORRECT).
+- **Stale-comment finding (non-blocking)**: V126:411-415 claims decision_context_snapshots IS a hypertable (V003:96) + lists "hypertable DROP COLUMN" as must-verify. Production reflection: `dcs_is_hypertable=FALSE` (plain table now). De-risks the compressed-chunk DROP COLUMN hazard entirely; but SQL comment is factually wrong → E1 should correct comment (was it never converted, or de-converted? — V003 says create_hypertable; current state plain). DROP COLUMN on plain table is trivially safe.
+- All 10 DROP-table guards will NOT RAISE (dependents=0 verified) → drops proceed clean. V126 logic correct against current production state.
+
+**V125 §D production read-only reflection + logic audit = PASS (GO, no apply)**:
+- market.klines: 1 retention job @365d + 1 compression job @14d (exactly as packet claims).
+- §D: `remove_retention_policy('market.klines', if_exists)` + `add_retention_policy(1095d, if_not_exists)`. Correct: removes 365d, adds 1095d, leaves 14d compression (compression = `policy_compression` proc, retention removal can't touch it). Post-replace = exactly 1 retention @1095d. Logic sound. (Note: §D itself runs INSIDE the committed body BEFORE the broken §E guard — so on a fixed-§E V125, §D would apply correctly.)
+
+**Zero-mutation proof (post-cleanup)**: research absent / max_migration=115 / klines 365d+14d unchanged / sandbox gone / 4 damaged + 6 legacy intact. All work read-only on prod + isolated sandbox.
+
+**Action**: V125 → E1 fix §E lines 839-850 (`SELECT segmentby` → `attname WHERE segmentby_column_index IS NOT NULL`, or check segmentby presence via `EXISTS(... WHERE attname='symbol' AND segmentby_column_index IS NOT NULL)`). Re-run sandbox double-apply after fix (must reach `V125: all guards PASS` NOTICE with 0 ERROR). V126 + V125-§D logic GREEN, no SQL change needed (V126 optional: correct stale hypertable comment). BEGIN/COMMIT no change.
+
+**Report**: returned inline to PM (no separate report file per task instruction).
+
+**Lesson reinforced**: V055/V114 mandate validated AGAIN — `timescaledb_information.*` view column names are version-specific and only exist on real TSDB; Mac mock pytest cannot surface `column does not exist`. Post-COMMIT guard blocks in forward-only sqlx migrations are doubly dangerous: DDL commits, guard crashes, startup crash-loops with no rollback. Any V### Guard C that SELECTs a TSDB introspection column (not just EXISTS) MUST be Linux-empirically dry-run.
+
+## 2026-06-02 TSMOM 正確尺度方法論確認（E1 daily-LB 尺度錯置修正核驗）— PASS / NO-GO-TREND robust
+
+**Trigger**: E1 把上輪 MIT 指出的「daily-lag Ljung-Box 尺度錯置」改為正確尺度 TSMOM 檢定。MIT 為 HAC/leakage/CV 主責，確認方法論 + coherence gate verdict 正確性。read-only，real-PG（ssh trade-core，docker pw 建 DSN）親跑 harness + 獨立 HAC 敏感度 + 33 test。
+
+**Verdict: 全 4 項 PASS，NO-GO-TREND 方法論 robust，背書 coherence gate 定義 + 孤立-k40 判定。**
+
+**模組**: `helper_scripts/research/multiday_trend_diagnostic/{stats.py,harness.py}`（24 變體 A/B/C/D，daily klines 730d/20 perp）。real-PG run `mit_verify_20260602` verdict=NO-GO-TREND EXIT=0。
+
+**1. HAC lag=k-1（item 1）PASS + bandwidth 接受**: `_newey_west_mean_tstat`（stats.py:395-427）Bartlett 權重 LRV，lag=k-1 正確處理 overlapping returns（逐日滑動 k 日前瞻 = MA(k-1) 結構，autocov 理論上 lag>k-1 消失）。親算 bandwidth 敏感度（real-PG）：k40 naive=9.646 → HAC lag=k-1(39)=**2.715** / 2(k-1)(78)=2.622 / 1.5k(60)=2.620 / Andrews短規則(13)=3.480。**關鍵**：往更長 bandwidth 幾乎不動（2.62 vs 2.72）→ 證 lag=k-1 已捕完重疊自相關，naive 9.65→2.72（3.55x 壓縮）完全合理。短 Andrews rule(13) 反而 under-correct（無視已知 k-1 overlap）→ E1 用 k-1 是對的、且偏保守。**不需改 Andrews 自動選**（k 已知時固定 k-1 比 data-driven 更穩、更可辯護）。
+
+**2. ★ coherence gate（item 2，verdict 決定性）— 明確背書**: `_summarize_tsmom`（harness.py:372-419）gate 依據 = `coherent_positive_momentum` = (≥2 個 k 達 mean>0 且 HAC|t|≥2) **且** (無任一 k 顯著反轉 HAC t≤-2 且 mean<0)。real-PG: sig_pos=['k40'], sig_reversal=['k90'], coherent=False → NO-GO-TREND。**MIT 背書理由**：真 TSMOM（MOP 2012）相鄰尺度應 sign-coherent / plateau（單調），不是單尖峰 + 長尺度反轉。孤立 k40(t=2.72) 過 Bonferroni 5-k(2.576) 但 k60 不顯著 + k90 顯著反轉(-2.60, mean -623bps) = 在 N_eff=2.087（PC1=0.687 BTC beta，20 sym 僅 ~2 獨立流）+ 24 變體 multiple-testing 下的雜訊取樣，非結構性 momentum。**「≥2 相鄰 k 顯著正 + 無反轉」是正確、非過嚴的 coherence 定義**；單 k 過 naive-2.0 不可作 verdict。
+
+**3. Bonferroni 雙層正確（不混淆）**: gate 內 Bonferroni 用 `len(evaluated)`=5 k-scales → t_crit=2.576（harness.py:396 查表）= 對 5 個 TSMOM 尺度的 family-wise；verdict 文字另提「K=24」= 24 個 Sharpe 變體的 DSR correction（Phase 2 用，更大、更嚴）。**兩者是不同 family、未被混為一談**——gate 對 k-scale 用 5-Bonferroni（k40 仍勉強過 2.576 故 `significant_positive_ks_bonferroni`=['k40']），但 coherence（孤立+反轉）才是攔截理由，非 Bonferroni。設計正確。
+
+**4. per-symbol LB universe 廣度（item 3）正確植入**: `ljung_box_universe`（stats.py:548）real-PG: n_evaluated=20 / n_positive_autocorr=**0/20** / per_symbol=20 全列 / pooled present / median_rho1=0.017。我上輪代跑的 0/20 已正確植入。(n_significant=2 是 2 symbol LB 顯著但 rho 為負=mean-reversion，非正自相關，與無 trend 一致。) daily-LB 已正確降級為 data_quality 旁證（非 verdict 依據）。
+
+**5. survivorship/PIT/regime（item 4，上輪 PASS）未被破壞**: survivorship_source=`symbol_universe_snapshots.listed_at` PIT；tsmom_significance 要求 entry t **與** forward-end t+k 都已上市（stats.py:484）；leak-free 構造 lookback=ln(C_{t-1}/C_{t-1-k}) 只用 t-1 及更早，forward=ln(C_{t+k}/C_t) 嚴格未來，feature/target 視窗不重疊。daily klines 730d 深度（min 2024-06-02，635-730 row/sym）。regime=rule_based local（禁 HMM）。6 leakage 類型全綠，未回退。
+
+**Step 0 反轉教訓（新）**: 與 56d round 不同——daily 粒度給 1000+ trades，max_effective_n=236.67 ≥ 60 floor（15/24 變體過）→ **binding gate 不再是 sample-size（56d 時 N≈8 是 binding），而是 TSMOM coherence（gate 2）**。即 backfill 已解 power 不足問題，但揭露「即使 power 夠也無 coherent momentum」——比 observe_more 更強的 NO-GO 證據。`_power_caveat` 誠實標 N_eff=2.087 低（high BTC beta）是 binding constraint，更多 crypto history 加 cascade/mean-reversion regime 非正動量 → 建議在現證據關閉 multi-day trend，除非出現結構性更獨立的 universe/instrument。MIT AGREE。
+
+**測試鎖定**: 33/33 pass（含 test_summarize_tsmom_isolated_single_k_is_not_coherent 直接重現 real-PG k40/k90 形態 assert coherent=False；test_tsmom_hac_tstat_below_naive_under_overlap；survivorship excludes pre-listing）。
+
+**方法 lesson**: real-PG harness 親跑（非靜態讀碼）+ 獨立重算 HAC bandwidth 敏感度是本次背書的關鍵——若只讀碼會錯過「往長 bandwidth 不動」這個證 lag=k-1 充分的決定性證據。docker pw 建 DSN 繞過 non-interactive SSH 空 env（PW=$(docker exec trading_postgres printenv POSTGRES_PASSWORD)，不 echo pw）。
+
+**Boundary**: read-only；0 寫 0 schema 0 deploy（psycopg2 readonly session 強制）；artifact 寫 /tmp（非 repo）。findings 直接回 PM（無獨立 report file，per task）。
