@@ -654,6 +654,83 @@ pub enum PipelineCommand {
     /// 快照並注入 IntentProcessor。Fire-and-forget — 無 response_tx。
     /// Mode 隔離結構性保證；空 / 損毀走 fail-soft 保留前份。
     ReloadEdgeEstimates,
+    // ── SM Option-2 收斂 step (i)（2026-06-02）：治理 lease + 唯讀投影 IPC ──
+    //
+    // 為什麼用 PipelineCommand round-trip：IPC server（dispatch.rs / server.rs）
+    // 只持 `pipeline_cmd_tx` / `EngineCommandChannels`，**沒有**直接的
+    // `GovernanceCore` handle（per-pipeline 的 GovernanceCore 由 tick actor 獨佔）。
+    // 因此每個 lease 操作與唯讀投影都必須經 cmd channel → tick actor → oneshot 回覆，
+    // 鏡像既有的 `ForceGovernorTighter` / `GetRiskRuntimeStatus` 模式。
+    //
+    // ADDITIVE：這些變體在 Python flag `OPENCLAW_LEASE_PYTHON_IPC_ENABLED` 打開前
+    // 是 dormant 的（dispatch arm 存在但 Python 端尚未路由），不改動任何既有 SM 邏輯。
+    //
+    // 硬邊界：不碰 execution_authority / live_reserved / 5 道 live-auth gate；
+    // lease acquire 對 Production profile 仍受 GovernanceCore `is_authorized()` 硬
+    // fail-closed gate 約束（governance_core.rs acquire_lease）。
+
+    /// SM step (i) · 經 IPC 取得 Decision Lease（鏡像 governance_lease_bridge.py
+    /// `acquire_lease_via_ipc` / `lease_ipc_schema.METHOD_ACQUIRE_LEASE`）。
+    /// handler 調 `core.acquire_lease(intent_id, scope, ttl_ms, profile, source_stage)`
+    /// 並把 `LeaseId` 序列化為 `{lease_id, outcome}`（Active(s)→{s,"Active"}；
+    /// Bypass→{"bypass","Bypass"}）回傳，與 Python parser 契約一致。
+    /// 失敗（auth 未生效 / TTL 不合法 / SM 內部拒）回 `Err(String)`，
+    /// Python 端 fail-closed 回 None（絕不視為許可）。
+    AcquireLease {
+        intent_id: String,
+        scope: String,
+        /// 每意圖 TTL（毫秒，100..=300_000），由 Python `ttl_seconds × 1000` 轉得。
+        ttl_ms: u32,
+        /// "Production" / "Validation" / "Exploration"（GovernanceProfile 字串）。
+        profile: String,
+        /// audit 遙測標籤，例如 "executor_agent_python" / "router"。
+        source_stage: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// SM step (i) · 經 IPC 釋放 Decision Lease（鏡像 `release_lease_via_ipc` /
+    /// `METHOD_RELEASE_LEASE`）。outcome ∈ {"Consumed","Failed","Cancelled"}。
+    /// handler 以 `LeaseId::Active(lease_id)` 重建後調 `core.release_lease`，
+    /// 成功回 `Ok("{\"ok\":true}")`；失敗回 `Err(String)`（Python 回 ok=false）。
+    ReleaseLease {
+        lease_id: String,
+        outcome: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// SM step (i) · 經 IPC 依 lease_id 查 LeaseObject（鏡像 `get_lease_via_ipc` /
+    /// `METHOD_GET_LEASE`）。handler 調 `core.get_lease_by_id` 並 serde 序列化
+    /// LeaseObject（含 `lease_id` 欄位）為 JSON 回傳；not found 回 `Err(String)`，
+    /// Python parser 視為 None。
+    GetLease {
+        lease_id: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// SM step (i) · 唯讀投影：系統是否被授權運營（fail-closed）。handler 調
+    /// `core.is_authorized()` 回 `{"authorized": bool}`。IPC 失敗時 Python 端
+    /// fail-closed 回 False（deny），絕不回 True。
+    IsAuthorized {
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// SM step (i) · 唯讀投影：治理狀態快照（`core.status()` + auth pending 計數）。
+    /// 供 Python `hub.get_status()`（9 個 route 消費者）使用。
+    /// 回 `{enabled, mode, risk_level, auth_effective_count, auth_pending_approval,
+    /// lease_live_count, oms_active_count}`。IPC 失敗時 Python 投影為最保守視圖
+    /// （mode=FROZEN + stale=true），絕不回 NORMAL。
+    GetGovStatus {
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// SM step (i) · 唯讀投影：列出本管線所有「live」lease 的 LeaseObject。
+    /// 供 governance_extended_routes lease list GUI 使用。回 JSON array of
+    /// LeaseObject serde。IPC 失敗時 Python 回空列表 + stale 標記（不偽造）。
+    ListLeases {
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
+    /// SM step (i) · 唯讀投影：RiskGovernor 狀態（level / level_entered_at_ms /
+    /// held_ms / constraints / 最近 transition tail）。供 risk GUI 與
+    /// `hub.get_status()["risk"]` 使用。回 GovernorState-equivalent dict。
+    /// IPC 失敗時 Python 投影為 risk≥CAUTIOUS sentinel + stale=true。
+    GetRiskState {
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
 }
 
 /// Server-side stop request dispatched from tick_pipeline to Bybit API (Item 1).

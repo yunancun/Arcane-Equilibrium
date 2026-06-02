@@ -349,6 +349,27 @@ pub(crate) async fn dispatch_request(
             let tx = extract_engine_tx(&req.params, cmd_channels);
             handle_force_governor_looser(id, &tx, &req.params, audit_pool).await
         }
+        // ── SM Option-2 收斂 step (i)（2026-06-02）：治理 lease + 唯讀投影 ──
+        // 封閉 governance_lease_bridge.py 的 half-wire（先前 Rust 無對應 arm →
+        // ERR_METHOD_NOT_FOUND → Python fail-closed None）。全走 primary pipeline
+        // 的 GovernanceCore（cmd round-trip + oneshot），dispatch 只 parse→送→等→format。
+        // ADDITIVE / dormant：Python flag OPENCLAW_LEASE_PYTHON_IPC_ENABLED 打開前
+        // 不主動呼叫；不碰 execution_authority / live_reserved / 5 道 live-auth gate。
+        //
+        // 3 個 lease method 的 request/response 契約與 lease_ipc_schema.py 完全一致
+        // （E1 親驗：method 名 + param 鍵 + response 形狀）。4 個唯讀投影 method 的
+        // 契約由 handlers/governance.rs 各 handler doc 定義，並行 Python work 對齊。
+        "governance.acquire_lease" => {
+            handle_acquire_lease(id, cmd_channels, &req.params).await
+        }
+        "governance.release_lease" => {
+            handle_release_lease(id, cmd_channels, &req.params).await
+        }
+        "governance.get_lease" => handle_get_lease(id, cmd_channels, &req.params).await,
+        "governance.is_authorized" => handle_is_authorized(id, cmd_channels).await,
+        "governance.get_status" => handle_get_status(id, cmd_channels).await,
+        "governance.list_leases" => handle_list_leases(id, cmd_channels).await,
+        "governance.get_risk_state" => handle_get_risk_state(id, cmd_channels).await,
         // ARCH-RC1 1C-3-F: External paper-side order submission (shadow_decision_builder etc.)
         "submit_paper_order" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);

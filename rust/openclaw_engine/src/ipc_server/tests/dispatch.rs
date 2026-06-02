@@ -280,6 +280,128 @@ async fn test_dispatch_agent_spine_channel_metrics() {
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// SM Option-2 收斂 step (i)（2026-06-02）：治理 lease + 唯讀投影 dispatch arm 測試。
+//
+// 驗證 (1) 新 method 不再 ERR_METHOD_NOT_FOUND（封閉 half-wire）；(2) 無命令通道
+// （EngineCommandChannels::default() → primary()=None，鏡像引擎未運行）時 fail-closed
+// 成 ERR_INTERNAL 而非 permissive；(3) lease method 缺必需 param 時 ERR_INVALID_REQUEST。
+// 完整 round-trip（真實 GovernanceCore）由 event_consumer/tests/governance_ipc_tests.rs
+// 的 handler 測試覆蓋（dispatch 測試無法注入 live tick actor）。
+// ─────────────────────────────────────────────────────────────────────────
+
+/// 共用：以無命令通道（default）跑一個 dispatch 請求。
+async fn dispatch_no_channel(req: &str) -> JsonRpcResponse {
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    dispatch_request(
+        req,
+        &config,
+        &dd,
+        &EngineCommandChannels::default(),
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await
+}
+
+#[tokio::test]
+async fn test_governance_lease_methods_no_longer_method_not_found() {
+    // 封閉 half-wire：3 個 lease method + 4 個投影 method 都不再 ERR_METHOD_NOT_FOUND。
+    // 無通道時應是 ERR_INTERNAL（engine down fail-closed），而非 -32601。
+    for method in [
+        "governance.acquire_lease",
+        "governance.release_lease",
+        "governance.get_lease",
+        "governance.is_authorized",
+        "governance.get_status",
+        "governance.list_leases",
+        "governance.get_risk_state",
+    ] {
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","method":"{method}","params":{{}},"id":1}}"#
+        );
+        let resp = dispatch_no_channel(&req).await;
+        let err = resp.error.expect("error present (no channel)");
+        assert_ne!(
+            err.code, ERR_METHOD_NOT_FOUND,
+            "{method} must be wired (not method-not-found)"
+        );
+        assert_eq!(
+            err.code, ERR_INTERNAL,
+            "{method} no-channel → fail-closed ERR_INTERNAL, got {}",
+            err.code
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_governance_acquire_lease_missing_params_invalid_request() {
+    // acquire 缺必需 param（intent_id/scope/ttl_ms/profile）→ ERR_INVALID_REQUEST。
+    // 注意：default channel 的 primary()=None 會先撞 ERR_INTERNAL，所以這裡需要一個
+    // 有 paper 通道但無 tick actor 的場景來測 param 驗證。改用「通道存在但 send 後
+    // 無人回」不可行（會 timeout）。故 param 驗證測試改在「通道存在」下做：見下方
+    // 用 wired paper 通道的測試。此處只確認無通道優先 fail-closed。
+    let req = r#"{"jsonrpc":"2.0","method":"governance.acquire_lease","params":{},"id":2}"#;
+    let resp = dispatch_no_channel(req).await;
+    let err = resp.error.expect("error present");
+    // 無通道 → ERR_INTERNAL（engine down 優先於 param 驗證，fail-closed）。
+    assert_eq!(err.code, ERR_INTERNAL);
+}
+
+#[tokio::test]
+async fn test_governance_acquire_param_validation_with_channel() {
+    // 有 paper 通道（但 receiver drop 後不回）時，param 驗證先於 send 發生。
+    // 缺 intent_id → ERR_INVALID_REQUEST（在 send 前攔截，不會 timeout）。
+    let config = make_test_config();
+    let dd = make_test_data_dir();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let channels = EngineCommandChannels {
+        paper: Some(tx),
+        ..Default::default()
+    };
+    let req = r#"{"jsonrpc":"2.0","method":"governance.acquire_lease","params":{"scope":"TRADE_ENTRY","ttl_ms":60000,"profile":"Production"},"id":3}"#;
+    let resp = dispatch_request(
+        req,
+        &config,
+        &dd,
+        &channels,
+        &empty_budget_slot(),
+        &empty_teacher_slot(),
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &None,
+        &empty_h_state_cache_slot(),
+        &None,
+        &None,
+        &empty_cost_edge_advisor_slot(),
+        &empty_account_manager_slot(),
+    )
+    .await;
+    let err = resp.error.expect("error present (missing intent_id)");
+    assert_eq!(
+        err.code, ERR_INVALID_REQUEST,
+        "missing intent_id → invalid request (param validated before send)"
+    );
+    assert!(err.message.contains("intent_id"), "error names intent_id");
+}
+
 #[test]
 fn test_jsonrpc_response_serialization() {
     let resp = JsonRpcResponse::success(serde_json::json!(1), serde_json::json!("pong"));
