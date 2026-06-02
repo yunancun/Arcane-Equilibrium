@@ -1,7 +1,7 @@
 # 玄衡 TODO — 主動派工佇列
 
-**版本** v105 ｜ **日期** 2026-06-01 ｜ **來源 HEAD** v104 `e5818585`；v105 = FND-3、S2 Gate-B prep、MIT V125 storage migration-design packet（僅文檔/設計/唯讀，無 runtime 影響，部署快照仍為 v87）。
-**當前主線**：P0-EDGE-1 Alpha-Edge 體制證據治理。AEG-S0 正式審查 PASS；FND-1 儲存分支作為設計獲批，FND-2 PIT universe、FND-3 side-evidence、FND-4 endpoint runner/persistence map 皆已以文檔/設計完成；`S2-GATE-B-PREP` 與 MIT `V125__aeg_alpha_history_storage.sql` migration-design packet 也已完成。安全下一步是 E2/E4/MIT 審查 V125 設計與 dry-run checklist；若另行批准，才開 artifact-only Gate-B probe 實作/24h run。E1 backfill writer／DB retention mutation／endpoint ingestion／collector IMPL／alpha scoring 在另行界定範圍前仍封鎖。
+**版本** v107 ｜ **日期** 2026-06-02 ｜ **來源 HEAD** v105 `2e809b96`；v106 = 併入 operator 並行修復後的排程校準（alpha hygiene `324001c3` 已在 origin/Linux）；**v107 = 代碼精簡 effort P0-P5 收斂記錄 + 三端同步校準**（通盤審計 follow-up：P0-P4 + async-infra 全 commit+Linux-verified+三端同步；D 經查為 dormant 保留能力故關閉不動；P5 SM 單源收斂拍 Option 2、step-i Rust IPC surface `a99bfa1d` 已 done；HEAD 進至治理 IPC commit 鏈）。
+**當前主線**：P0-EDGE-1 Alpha-Edge 體制證據治理。AEG-S1 FND-1..4、S2 Gate-B prep、MIT V125 storage design 已完成；operator 後續修復已把 4 個 gate/接線 hygiene bug 部署到 Linux（A-1/A-2/B/A-4），但這只是恢復乾淨測量與啟動 `bb_reversion@mean_reverting` 累積，**不是 alpha proof**。V125 review 已在新修復記憶中收斂為 `APPROVED-WITH-CONCERNS`，安全最快新 edge 路徑改為「候選 2 多日 trend/TSMOM」：先開 V125 SQL implementation scope + daily/4h kline backfill writer scope；候選 3 listing、候選 4 oi_delta ensemble、候選 5 funding revive 依序排後且各有 gate。
 **v96 審計註記**：V5.8 設計未被刪除；它作為長期 13 模組自主架構保留，進行中 TODO 只保留可派工態勢。詳見 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--v58_design_progress_preservation_audit.md`。
 **歷史詳情**：版本紀錄 `docs/CLAUDE_CHANGELOG.md`；v94 修剪審計 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--todo_v94_prune_audit.md`；清理前封存 `docs/archive/2026-05-31--todo_v93_pre_aeg_cleanup_archive.md`；較早的 v92 封存 `docs/archive/2026-05-31--todo_v92_archive.md`。
 
@@ -11,8 +11,8 @@
 
 | 區域 | 當前狀態 | 下一步 |
 |---|---|---|
-| 來源同步 | Mac `main`、origin `main`、Linux `trade-core` `/home/ncyu/BybitOpenClaw/srv` 為文檔/治理檢查點維持來源同步。此處僅為來源同步。 | 此次同步不做 rebuild/restart。下一步工作是 V125 設計審查與可選 Gate-B probe scope；無 runtime 執行。 |
-| Runtime | 最新驗證部署仍為 v87 2026-05-31：Linux engine/API/watchdog 健康；歸檔快照中 engine PID 968350；healthz 200；AEG 治理/TODO 批次無 runtime rebuild。 | 此批次無部署。僅在影響 runtime 的工作前刷新。 |
+| 來源同步 | **三端同步**（Mac=origin=Linux `trade-core`）。代碼精簡 effort 全已 commit+push+Linux pull：Phase0/P0/P1/P2a/P2b/P3/async-infra/P4 + P5 step-i 治理 IPC surface `a99bfa1d`。本 TODO 更新 commit 後再同步一次。 | 維持三端同步；P5 step-ii+ 續推時同步。他 session 未提交 meta-doc（memory 等）不在本次範圍。 |
+| Runtime | Linux `trade-core` source 為 `324001c3`；watchdog 2026-06-01 只讀查驗：engine alive，demo/live alive，PID 1655039。Paper snapshot stale 但非本批主線。 | QA post-deploy 檢查 A-1/A-2/B/A-4 四項；任何 rebuild/restart 仍需明確 scope。 |
 | Runtime 注意事項 | 系統層 `openclaw-engine.service` / 系統 watchdog 安裝仍受 sudo/操作員閘控；當前保護為使用者 watchdog + linger + 手動 engine 程序。 | 操作員安排系統層安裝窗口。 |
 | 被動健康殘留 | `[48] replay_manifest_registry_growth`、`[74] close_maker_reject_samples`、`[56] live_pipeline_active` 仍為 OPS 殘留／證據佇列；非 OPS-1 反轉。 | 在 OPS 佇列保持明示；在解決或接受前不要標記為全綠。 |
 | 操作員閘控操作 | 首次還原演練、系統層 units、live-auth 更新、Earn 首筆質押仍為手動操作。 | 操作員選擇低風險窗口／auth 時機。 |
@@ -23,7 +23,7 @@
 
 | ID | 狀態 | 負責鏈 | 驗收／閘門 | 下一步 |
 |---|---|---|---|---|
-| `P0-EDGE-1` | 🔴 進行中 | PM -> PA/QC/MIT/BB -> gate 後 E1 | 結案需要被接受的 Alpha-Edge 證據：>=3 個帶 alpha 的候選滿足 net/cost/統計 gate，或另一條被接受的 P0-EDGE 路徑。僅 Bull／僅陳舊／僅倖存者／僅敘事的正面結果不能晉升。 | FND-1..4、S2 Gate-B prep、MIT V125 migration-design 已完成於文檔/設計層。下一步：E2/E4/MIT 審查 V125 packet；若另行批准，開 isolated Gate-B probe artifact-only 實作/24h run；不做 migration apply、backfill writer、endpoint ingestion、collector runtime 或 scoring。 |
+| `P0-EDGE-1` | 🔴 進行中 | PM -> PA/QC/MIT/BB -> gate 後 E1 | 結案需要被接受的 Alpha-Edge 證據：>=3 個帶 alpha 的候選滿足 net/cost/統計 gate，或另一條被接受的 P0-EDGE 路徑。僅 Bull／僅陳舊／僅倖存者／僅敘事的正面結果不能晉升。 | `324001c3` 已部署 4 個 hygiene fix，但不是 alpha proof。下一步主線：V125 SQL implementation scope + daily/4h kline backfill writer scope（候選 2 多日 trend/TSMOM）；同時 QA 追 A-1/A-2/B/A-4 deploy-gated 驗證與 `bb_reversion` 30d 累積。 |
 | `P0-LG-3` | 🟡 原始碼已整合 / runtime 未部署 | PM -> E2 -> E4 -> QA -> 操作員 deploy gate | 審查已整合 commits `deb3f3af..0802d52b`；V104 checksum 紀律；Linux migration dry-run/AUTO_MIGRATE 計畫；supervised_live 測試綠燈。 | 任何 deploy/rebuild 前先跑審查鏈。 |
 | `P0-OPS` 殘留 | 🟢 OPS-1 已關閉 / 殘留操作員閘控 | 操作員 + 視需要 PM/E1/MIT | 還原演練、系統層 units、live-auth 更新、replay manifest 饋送、close-maker max-pending 證據。 | 等待操作員手動操作窗口；下方保持殘留行可見。 |
 
@@ -78,7 +78,7 @@
 
 | ID | 負責鏈 | 允許產出 |
 |---|---|---|
-| `AEG-S1-FND-1` | PM -> MIT+PA -> E2/E4 審查準備 | 完成／已核准 作為設計分支：`market.klines` 1095d + 用於 OHLCV 的 DB 來源血緣帳本，funding/OI/long-short 專用研究歷史儲存；MIT migration-design packet 完成並建議使用 `V125__aeg_alpha_history_storage.sql`，實作前仍需 E2/E4/MIT review、Linux dry-run checklist、PM/operator execution gate。 |
+| `AEG-S1-FND-1` | PM -> MIT+PA -> E2/E4 審查準備 | 完成／已核准 作為設計分支：`market.klines` 1095d + 用於 OHLCV 的 DB 來源血緣帳本，funding/OI/long-short 專用研究歷史儲存；MIT migration-design packet 完成並建議使用 `V125__aeg_alpha_history_storage.sql`。新修復記憶顯示 V125 review 已 `APPROVED-WITH-CONCERNS`；實作前仍需明確開 SQL implementation scope、E1 落 Guard/C-3/C-5 修正、Linux double-apply dry-run、PM/operator execution gate。 |
 | `AEG-S1-FND-2` | PM -> MIT -> PA | 完成 作為 PIT universe builder 契約：來源是 `market.symbol_universe_snapshots`；797 列倖存者 CSV 僅為種子／回歸；當前倖存者捷徑失敗。 |
 | `AEG-S1-FND-3` | PM -> PA+QC | 完成 作為 `side_evidence.json` 契約：旁證僅次要、可選、需 run-id/digest linkage，且排除於晉升 gate 之外；不能改 final label 或救回 math FAIL。 |
 | `AEG-S1-FND-4` | PM -> BB+PA -> MIT | 完成 作為公開 endpoint runner/client-gap + persistence map：擴充隔離的 Python 公開 replay client；僅價格 mark/index/premium 不能重用 OHLCV parser；歷史 basis/index 繞過 `market_tickers`，並將 P3 fix 延到前向擷取。 |
@@ -93,10 +93,11 @@
 - listing-capture collector IMPL。
 - Gate-B probe 實作／24h run，除非另行開 artifact-only public REST/WS scope。
 - alpha scoring / promotion report。
+- 候選 2 historical backfill/writer/V125 SQL apply，除非 PM/operator 明確開 implementation scope。
 
 允許的工作必須維持文檔／設計／唯讀，除非 PM 以其自身負責鏈開立特定 S1
 實作任務。當前驗證結果：FND-1 設計分支已獲批且 V125 migration-design packet 已完成；FND-2、FND-3、FND-4、S2 Gate-B prep 契約／映射／計劃已完成。
-Runtime/DB/backfill/collector/scoring 實作完成度為否。
+Runtime/DB/backfill/collector/scoring 實作完成度為否；alpha hygiene runtime deploy 完成但仍待 QA post-deploy 驗證與樣本累積。
 
 ### §2.3 保留的基礎
 
@@ -117,7 +118,7 @@ AEG 不是對先前設計的取代。它整合並約束以下既有基礎：
 
 | Sprint | 用途 | 並行度 |
 |---|---|---|
-| `AEG-S1` 基礎 | 保留 + alpha 歷史儲存；公開 Bybit backfill writer；PIT universe builder；旁證工件 | FND-1/FND-2/FND-3/FND-4 文檔決策完成；MIT V125 migration-design 完成；S2 Gate-B prep 完成。下一步僅 V125 review/dry-run checklist 與可選 isolated Gate-B probe scope；backfill writer 等待 V125/E2/E4/PM 執行核准 + endpoint 實作範圍。 |
+| `AEG-S1` 基礎 | 保留 + alpha 歷史儲存；公開 Bybit backfill writer；PIT universe builder；旁證工件 | FND-1/FND-2/FND-3/FND-4 文檔決策完成；MIT V125 migration-design 完成；V125 review 在新修復記憶中為 `APPROVED-WITH-CONCERNS`。下一步是開 V125 SQL implementation + daily/4h kline backfill writer scope；Gate-B probe 排候選 3。 |
 | `AEG-S2` 證據自動化 | 體制標籤 runner；廣度階梯 runner；穩健性矩陣 builder | 體制 + 廣度並行；矩陣等兩者 |
 | `AEG-S3` Alpha 研究 | TSMOM、橫截面動量、S4/Sx 證偽 overlay、S2 PreLaunch 探測 | 最多 4 並行 |
 | `AEG-S4` 決策 | CP-2 候選判定與操作員決策 | 序列 PM -> QC/MIT -> PA -> 操作員 |
@@ -128,7 +129,7 @@ AEG 不是對先前設計的取代。它整合並約束以下既有基礎：
 
 | 工作流 | 狀態 | 下一步 |
 |---|---|---|
-| `Alpha-Edge / AEG` | 進行中主線 | FND-1..4、S2 Gate-B prep、MIT V125 migration-design packet 已完成於文檔/設計層。下一步 E2/E4/MIT review V125 + 可選 Gate-B probe scope；在 PM 開立界定範圍的 S1 任務前，不做 migration apply、backfill writer、endpoint ingestion、collector runtime 或 scoring。 |
+| `Alpha-Edge / AEG` | 進行中主線 | FND-1..4、S2 Gate-B prep、MIT V125 migration-design packet 已完成；4 個 alpha hygiene fix 已部署但非 alpha proof。下一步主線是候選 2 多日 trend/TSMOM 所需的 V125 SQL implementation + daily/4h kline backfill writer scope；候選 3 listing Gate-B、候選 4 oi_delta ensemble、候選 5 funding revive 排後。 |
 | `Workflow B` ADR-0046 basis 觀察／執行拆分 | 進行中但不阻塞 Alpha | PA 設計 -> E1 Rust -> MIT V117 -> E2 -> E4 -> BB -> QA。 |
 | `Earn Wave C` | 操作員閘控 | OP-1 金鑰更新 -> OP-2 Earn 變體 -> OP-3 首筆 $100-200 USDT Flexible 質押。 |
 | `Layered Autonomy v2 Wave 5` | 依 v92 D1 凍結（active-IMPL） | Packet A+B runtime 與 TOTP 來源存在；Packet C 核心 E4 綠燈；runtime TOTP 註冊 + engine 整合等到晉升 gate。 |
@@ -190,8 +191,11 @@ AEG 不是對先前設計的取代。它整合並約束以下既有基礎：
 | `P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH` | 1 | Legacy alpha 證據等待 | 約 2026-06-11 檢查 AC-S2-A-3 候選證據；結果服從 AEG 閘門。 |
 | `P1-A1A2-STAGE0R-RUNNER-IMPL` | 2 | A2 修訂／暫緩；auth fix 分支存在 | E2 -> E4 -> PM deploy/runtime 驗證後才信任 runner 輸出。 |
 | `P2-A1-RUNNER-WIRE-TO-BASIS` | 3 | 等待（basis_panel >=14d） | 約 2026-06-13 觸發；以 QC 無洩漏 gate 接 A1 as-of basis cohort。 |
+| `P0-EDGE-1-POST-DEPLOY-QA-A1A2BA4` | 1 | `324001c3` 已部署 / QA 驗證待跑 | 驗 A-1 bb_breakout cohort 外幣恢復交易、A-2 qty_zero skip counter++ 且 0 reject row、A-4 下輪 cron `runtime_bps` 不歸零、B bb_reversion 僅 mean_reverting fire + accumulate-only。 |
+| `P0-EDGE-1-CAND2-V125-IMPL-SCOPE` | 1 | 待 PM/operator 開 scope | E1 寫 `V125__aeg_alpha_history_storage.sql`，納入 review concerns：data columns NOT NULL/parse-reject、compression segmentby、accepted-run filter、sqlx-path double apply、exactly-one retention job、避免 compressed twin。 |
+| `P0-EDGE-1-CAND2-DAILY-KLINE-BACKFILL-WRITER` | 1 | 待 V125 implementation scope | 公開 Bybit daily/4h kline backfill writer；先 daily 或 4h->1d resample，artifact + DB provenance，PIT/survivorship caveats 明示；不得做 alpha scoring。 |
 | `P3-MARKET-TICKERS-INDEX-MARK-DEAD-PERSISTENCE` | 4 | 設計已定（於 FND-4） / 前向 P3 fix 延後 | 歷史 basis/index 繞過；稍後修 Rust/forward recorder 對 `mark_price`/`index_price`/`funding_rate`/`open_interest` 的傳遞，仍為僅前向證據。 |
-| `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK` | 4 | 排程觀察 | 在 2026-06-27 決定 bb_breakout/bb_reversion 採 Stage 0R 基線或 M7 退役。 |
+| `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK` | 4 | 排程觀察 / `bb_reversion` gate 已部署 | 在 2026-06-27 決定 bb_breakout/bb_reversion 採 Stage 0R 基線或 M7 退役；`bb_reversion@mean_reverting` 需看樣本是否足夠，若 n<100 需延長或另設放寬方案。 |
 | `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` | 2 | PA 規格完成；待實作 | Sprint 3 恢復時 E1 -> BB -> E2 -> E4 -> QA。 |
 | `P2-PACKET-C-C5-GUI-BANNER-ACK-ROLE` | 2 | 延後至 C4 | 配置受限 `failsafe_ack_role`，再做 GUI ack endpoint。 |
 | `P1-OPS-2-HOTRELOAD` | 3 | Sprint 4 之後 | 實作 `Arc<ArcSwap<BybitCredentials>>` + 與 authorization.json 對等的 IPC reload。 |
@@ -210,6 +214,9 @@ AEG 不是對先前設計的取代。它整合並約束以下既有基礎：
 | `P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP` | 4 | 延後至 Phase 2a Demo PASS | 加完整動態 backoff 狀態機。 |
 | `P1-INTENTYPE-FIELD-VISIBILITY-DEFER` | 4 | 延後重構 | 在改 `OrderIntent` 可見性前先做 PA builder pattern 規格。 |
 | `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC` | 3 | SOP 債務 | 更新 dispatch prompt 範本：atomic build 後的 Linux cargo test 需明確 rebuild 或延續。 |
+| `CODE-SIMPLIFY-P0-P4` | 2 | ✅ 全 committed + 三端同步 + Linux-verified（無 follow-up） | 代碼精簡 effort `b3f8a02c..344025f9`：Phase0 docs漂移/dump untrack、P0 SM contract test(4a Mac+Linux PASS)、P1 helper lib(−314 LOC,揪 _n_eff over-PASS bias bug)、P2a governance_routes 1978→1346、P2b strategy_ai 2552→1541(E2 抓修破 Live `/api/v1/live/closed-pnl` 的 CRITICAL)、P3 place_order endpoint-keyed mainnet 守衛(E2+BB)、async-infra pytest-asyncio==1.3.0(+43 test 由 skip→run,關閉 authoritative box coverage 洞)、P4 replay 1931→953(byte-identical output)。每階段 E1→E2(→BB/E4)鏈。 |
+| `CODE-SIMPLIFY-D-CLOSED` | 3 | ✅ 關閉=保留現狀（operator 拍板） | D 死碼縮減經 runtime+接線查驗判定為 **dormant 保留能力非死碼**：h0_gate.py(paper H0,paper OFF→H0_GATE=None)、reconciliation_engine(operator 手動對賬 governance route :1102 + 未 spawn 的 ReconciliationWorker,Linux audit 0 invocation)。移除=砍能力,違「不影響功能」。 |
+| `P5-SM-OPTION2-CONVERGENCE` | 1 | 🟡 進行中 / step-i Rust done | SM 單源收斂 = **Option 2**(Rust 唯一權威、刪 Python SM transition、Python 降唯讀投影 + 留 5 live-auth 閘 + GovernanceHub)。step-i Rust IPC surface `a99bfa1d`(7 PipelineCommand round-trip,3 lease method 契約 byte-match Python client,fail-closed,additive/dormant flag-OFF;E2+CC A 級 PASS;Mac 3734+16 + Linux cargo exit0)。**next=E1b**(Python hub IPC 路由+shadow-compute+divergence comparator+4a 擴充)→step-ii projection→🔴step-iii CUTOVER(point-of-no-return;閘=operator sign-off + R1 Linux 驗 Rust 寫 auth/risk transition audit 行 + CC/E2/BB/E4)→soak 24-48h。設計:`docs/CCAgentWorkSpace/Operator/2026-06-02--sm_option2_convergence_migration_design.md`。 |
 
 ---
 
@@ -223,8 +230,9 @@ AEG 不是對先前設計的取代。它整合並約束以下既有基礎：
 | 還原演練窗口 | 低交易 4h 窗口 | 封鎖 OPS 全綠。 |
 | 系統層服務安裝 | sudo／操作員 | 提升 runtime 保護，超越使用者 watchdog。 |
 | AEG-S1 儲存設計分支 | 完成 2026-06-01 | 獲批 `market.klines` 1095d + 用於 OHLCV 的 DB 來源血緣帳本，以及 funding/OI/long-short 專用研究歷史儲存。 |
-| AEG-S1 儲存執行核准 | MIT V125 設計 + E2/E4/MIT 審查 + Linux dry-run checklist 之後 | 任何 migration apply、retention mutation、DB 來源血緣帳本、研究歷史 table creation、writer 或 backfill run 之前必需。 |
-| S2 Gate-B isolated probe | 另行批准 artifact-only public REST/WS scope 後 | 才可實作／跑 24h PreLaunch probe；不可連 production WS/scanner/strategy/DB/order/auth。 |
+| AEG-S1 V125 implementation scope | operator/PM 明確開 scope 後 | 才可建立 SQL file；需滿足 E2/E4/MIT concerns、Linux dry-run double-apply、rollback、exactly-one retention job。 |
+| Candidate 2 daily/4h kline backfill writer | V125 scope 開立並通過初步 dry-run 後 | 才可寫 artifact-only/public-only writer；DB write/backfill run 仍需下一層執行核准。 |
+| S2 Gate-B isolated probe | 候選 3 時另行批准 artifact-only public REST/WS scope 後 | 才可實作／跑 24h PreLaunch probe；不可連 production WS/scanner/strategy/DB/order/auth。 |
 
 ---
 
@@ -257,7 +265,7 @@ AEG 不是對先前設計的取代。它整合並約束以下既有基礎：
 |---|---|---|
 | AMD-2026-05-21-01 v2 Wave 5 | Packet A+B + TOTP 來源 + ADR/R4 落地；active-IMPL 凍結 | 在晉升 gate 前不要派工 runtime TOTP 註冊或 Packet C engine 整合。 |
 | ADR-0046 提議中 | basis 觀察／執行拆分仍 live | PA 設計鏈仍有效；與 AEG endpoint／儲存決策協調。 |
-| v92 V### 對帳 | 文檔側註記待處理；SQL head 仍為 V115；AEG storage design 採 `V125` 以保留 V116/V117/V118-124 既有規劃槽 | TW 可更新文檔註記，不觸碰已套用的 SQL；V125 仍只是 design reservation，不是 SQL file/apply。 |
+| v92 V### 對帳 | 文檔側註記待處理；SQL head 仍為 V115；AEG storage design 採 `V125` 以保留 V116/V117/V118-124 既有規劃槽；DB hygiene 清理改排 `V126` | TW 可更新文檔註記，不觸碰已套用的 SQL；V125/V126 都不是已 apply SQL。 |
 | AMD-2026-05-31-01 / ADR-0047 | 已接受 / 進行中 | 每個 Alpha-Edge 判定必須含 regime、breadth、freshness、survivorship、execution realism。 |
 
 ---
