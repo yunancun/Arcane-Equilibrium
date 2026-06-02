@@ -1229,7 +1229,7 @@ async function loadLivePnlSeries() {
   let payload = null;
   let points = [];
   try {
-    const d = await ocApi('/api/v1/live/pnl-series?range=' + encodeURIComponent(_livePnlRange));
+    const d = await ocApi('/api/v1/live/pnl-series?range=' + encodeURIComponent(_livePnlRange), { toastOnError: false, timeoutMs: 15000 });
     payload = d && d.data;
     if (_isPhantomViewError(payload)) {
       const msg = ocEsc(payload.error_zh || payload.error || 'Live slot not configured');
@@ -1397,7 +1397,7 @@ function _renderReadiness(payload) {
 }
 
 async function loadPreLiveEdgeGates() {
-  const d = await ocApi('/api/v1/strategy/prelive/edge-gates?window_days=7');
+  const d = await ocApi('/api/v1/strategy/prelive/edge-gates?window_days=7', { toastOnError: false, timeoutMs: 15000 });
   const payload = d && d.data;
   const gateBox = document.getElementById('live-edge-gates');
   if (!gateBox) return;
