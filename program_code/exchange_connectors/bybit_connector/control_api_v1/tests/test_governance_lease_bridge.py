@@ -35,6 +35,7 @@ import pytest
 
 # E-3 module under test / 受測模組
 from program_code.exchange_connectors.bybit_connector.control_api_v1.app import (
+    governance_divergence as divergence,  # P5 step-(i): Rust-IPC vs Python-shadow 比對器
     governance_lease_bridge as bridge,
     lease_ipc_schema as schema,
 )
@@ -756,3 +757,493 @@ class TestLeaseIpcUnicodeByteEqualContract:
         # Raw UTF-8 测试 present in payload bytes.
         # raw UTF-8 测试 在 payload bytes 內。
         assert "测试".encode("utf-8") in wire_bytes
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P5 step-(i): governance_divergence comparator unit tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestDivergenceComparatorUnit:
+    """Direct unit tests for the divergence comparator sink (no hub).
+    比對器 sink 的直接單元測試（不經 hub）。"""
+
+    def setup_method(self):
+        divergence.reset_divergence_state()
+
+    def test_match_recorded_no_divergence(self):
+        """rust == python → match True, counter divergences stays 0, total +1.
+        rust == python → match=True，divergences 維持 0，total +1。"""
+        m = divergence.record_divergence(
+            op=divergence.OP_ACQUIRE,
+            rust_outcome=divergence.OUTCOME_GRANTED,
+            python_outcome=divergence.OUTCOME_GRANTED,
+            intent_id="i-1", scope="TRADE_ENTRY",
+        )
+        assert m is True
+        c = divergence.get_divergence_counters()
+        assert c == {"total": 1, "matches": 1, "divergences": 0}
+
+    def test_mismatch_recorded_as_divergence_with_bite(self):
+        """rust != python → match False, divergences +1, differing_fields filled,
+        mismatch snapshot surfaces the entry. 比對器有 bite。
+        rust != python → match=False，divergences +1，differing_fields 已填，
+        mismatch snapshot 取得該筆。"""
+        m = divergence.record_divergence(
+            op=divergence.OP_ACQUIRE,
+            rust_outcome=divergence.OUTCOME_GRANTED,
+            python_outcome=divergence.OUTCOME_DENIED,
+            intent_id="i-2", scope="TRADE_ENTRY",
+        )
+        assert m is False
+        c = divergence.get_divergence_counters()
+        assert c["divergences"] == 1
+        assert c["total"] == 1
+        mismatches = divergence.get_mismatch_snapshot()
+        assert len(mismatches) == 1
+        assert mismatches[0]["rust_outcome"] == divergence.OUTCOME_GRANTED
+        assert mismatches[0]["python_outcome"] == divergence.OUTCOME_DENIED
+        assert mismatches[0]["differing_fields"] == ["outcome"]
+        assert mismatches[0]["intent_id"] == "i-2"
+
+    def test_snapshot_is_defensive_copy(self):
+        """Mutating a snapshot row does not corrupt the live ring.
+        修改 snapshot row 不污染 live ring。"""
+        divergence.record_divergence(
+            op=divergence.OP_ACQUIRE,
+            rust_outcome=divergence.OUTCOME_GRANTED,
+            python_outcome=divergence.OUTCOME_GRANTED,
+            intent_id="i-3",
+        )
+        snap = divergence.get_divergence_snapshot()
+        snap[0]["intent_id"] = "tampered"
+        live = divergence.get_divergence_snapshot()
+        assert live[0]["intent_id"] == "i-3"
+
+    def test_reset_clears_ring_and_counters(self):
+        """reset zeroes both ring + counters (test isolation contract).
+        reset 同時清空 ring + counters。"""
+        divergence.record_divergence(
+            op=divergence.OP_RELEASE,
+            rust_outcome=divergence.OUTCOME_GRANTED,
+            python_outcome=divergence.OUTCOME_DENIED,
+        )
+        assert divergence.get_divergence_counters()["total"] == 1
+        divergence.reset_divergence_state()
+        assert divergence.get_divergence_counters() == {"total": 0, "matches": 0, "divergences": 0}
+        assert divergence.get_divergence_snapshot() == []
+
+    def test_record_never_raises_on_bad_input(self):
+        """Comparator best-effort: an internal error must not raise into caller
+        (returns True = not counted as divergence). 比對器 best-effort：內部錯誤
+        不可向 caller 拋（回 True，不計為 divergence）。"""
+        # differing_fields 給非 list 的怪型別也不可炸（防禦）。
+        m = divergence.record_divergence(
+            op=divergence.OP_GET,
+            rust_outcome=divergence.OUTCOME_GRANTED,
+            python_outcome=divergence.OUTCOME_GRANTED,
+            differing_fields="not-a-list",  # type: ignore[arg-type]
+        )
+        assert m is True  # match path; no raise
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P5 step-(i): GovernanceHub authoritative routing + shadow-compute divergence
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _authorize_hub(hub: GovernanceHub) -> None:
+    """Drive the hub's auth SM to ACTIVE so the acquire auth-gate passes.
+    把 hub 的 auth SM 驅到 ACTIVE，使 acquire 的 auth-gate 通過。"""
+    auth_obj = hub._authorization_sm.create_draft(
+        title="Test Auth",
+        scope={"lease_scopes": ["TRADE_ENTRY"]},
+        created_by="test",
+        expires_at_ms=int(time.time() * 1000) + 3600_000,
+    )
+    hub._authorization_sm.submit_for_approval(auth_obj.authorization_id)
+    hub._authorization_sm.approve(auth_obj.authorization_id, approved_by="operator")
+
+
+class TestHubAuthoritativeRoutingAndDivergence:
+    """Flag ON → Rust IPC authoritative + local Python SM shadow-compute compared;
+    flag OFF → byte-unchanged + comparator silent. fail-closed on IPC error.
+    Flag ON → Rust IPC 權威 + 本地 Python SM 影子比對；flag OFF → 行為不變且
+    比對器靜默。IPC 錯誤 fail-closed。"""
+
+    def setup_method(self):
+        bridge.reset_dual_write_mirror()
+        divergence.reset_divergence_state()
+
+    def test_flag_off_comparator_silent_and_behavior_unchanged(self, tmp_audit_dir):
+        """Flag OFF → legacy local SM path; comparator records NOTHING (total=0).
+        Flag OFF → legacy local SM 路徑；比對器零記錄（total=0）。"""
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(bridge.LEASE_IPC_ENABLED_ENV, None)
+            hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+            hub._ensure_initialized()
+            _authorize_hub(hub)
+
+            lease_id = hub.acquire_lease(intent_id="i-1", scope="TRADE_ENTRY", ttl_seconds=30.0)
+            assert isinstance(lease_id, str) and lease_id
+            assert not lease_id.startswith("SHADOW_BYPASS:")
+            assert hub.release_lease(lease_id=lease_id, consumed=False) is True
+
+            # Comparator must be untouched on the flag-OFF path.
+            # flag-OFF 路徑比對器必完全未動。
+            assert divergence.get_divergence_counters()["total"] == 0
+
+    def test_flag_on_agreement_records_match_no_divergence(self, tmp_audit_dir):
+        """Flag ON + Rust grants + local auth ACTIVE → both the auth-axis compare
+        and the acquire-axis compare agree → 2 match rows, 0 divergence.
+        Flag ON + Rust 放行 + 本地 auth ACTIVE → auth 軸與 acquire 軸皆一致 →
+        2 筆 match，0 divergence。"""
+        async def dispatcher(method, params, timeout):
+            # Step-1.5 auth-axis compare reads is_authorized first; then acquire.
+            # Step-1.5 auth-axis 先讀 is_authorized；隨後才 acquire。
+            if method == "governance.is_authorized":
+                return {"authorized": True}
+            assert method == "governance.acquire_lease"
+            return {"lease_id": "lease:rs-1", "outcome": "Active"}
+
+        with patch.dict(os.environ, {bridge.LEASE_IPC_ENABLED_ENV: "1"}):
+            hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+            hub._ensure_initialized()
+            _authorize_hub(hub)
+            hub.set_lease_ipc_dispatcher(dispatcher)
+
+            lease_id = hub.acquire_lease(intent_id="i-agree", scope="TRADE_ENTRY", ttl_seconds=30.0)
+            assert lease_id == "lease:rs-1"  # Rust result is authoritative
+
+            c = divergence.get_divergence_counters()
+            assert c["total"] == 2  # auth-axis (match) + acquire-axis (match)
+            assert c["divergences"] == 0
+            assert c["matches"] == 2
+
+    def test_flag_on_forced_divergence_bite_rust_grants_python_denies(self, tmp_audit_dir):
+        """FORCED-DIVERGENCE BITE: Rust grants acquire but the local Python SM
+        auth-gate DENIES (no ACTIVE auth) → comparator records exactly 1
+        divergence. Proves the shadow-compare is not a no-op.
+
+        強制分歧 bite：Rust 放行 acquire，但本地 Python SM auth-gate 拒絕
+        （無 ACTIVE auth）→ 比對器恰記 1 筆 divergence。證明影子比對非空轉。
+
+        NOTE: the hub's own Step-2 auth-gate (is_authorized) would normally block
+        before IPC; we inject an is_authorized override so the IPC path is reached
+        while the local *lease auth-permits-scope* shadow still denies (no
+        effective auth) — isolating the comparator's bite from the Step-2 gate.
+        注意：hub 自身 Step-2 auth-gate 通常會在 IPC 前擋下；此處覆寫
+        is_authorized 讓 IPC 路徑可達，而本地 lease auth 影子仍拒絕（無 effective
+        auth），以隔離比對器 bite 與 Step-2 gate。"""
+        async def dispatcher(method, params, timeout):
+            return {"lease_id": "lease:rs-2", "outcome": "Active"}
+
+        with patch.dict(os.environ, {bridge.LEASE_IPC_ENABLED_ENV: "1"}):
+            hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+            hub._ensure_initialized()
+            # NO _authorize_hub() → local auth-gate has no effective auth → shadow DENIES.
+            # 不呼叫 _authorize_hub() → 本地無 effective auth → 影子判 DENIED。
+            hub.set_lease_ipc_dispatcher(dispatcher)
+            # Bypass only the Step-2 hot-path gate so we reach the IPC + shadow.
+            # 僅繞過 Step-2 hot-path gate，使流程到達 IPC + 影子。
+            hub.is_authorized = lambda: True  # type: ignore[method-assign]
+
+            lease_id = hub.acquire_lease(intent_id="i-diverge", scope="TRADE_ENTRY", ttl_seconds=30.0)
+            assert lease_id == "lease:rs-2"  # authoritative Rust result still returned
+
+            c = divergence.get_divergence_counters()
+            assert c["total"] == 1
+            assert c["divergences"] == 1, "forced divergence must be detected (comparator bite)"
+            mismatches = divergence.get_mismatch_snapshot()
+            assert len(mismatches) == 1
+            assert mismatches[0]["op"] == "acquire"
+            assert mismatches[0]["rust_outcome"] == divergence.OUTCOME_GRANTED
+            assert mismatches[0]["python_outcome"] == divergence.OUTCOME_DENIED
+            assert mismatches[0]["intent_id"] == "i-diverge"
+
+    def test_flag_on_ipc_error_fail_closed_records_deny_outcome(self, tmp_audit_dir):
+        """IPC error under flag ON → acquire returns None (fail-closed, §3b); the
+        comparator still records the op with rust_outcome=denied (and since local
+        auth is ACTIVE → python granted → this is itself a divergence the soak
+        would surface: Rust-down vs Python-would-grant).
+        flag ON 下 IPC 錯誤 → acquire 回 None（fail-closed §3b）；比對器仍記該操作
+        （rust=denied）。"""
+        async def dead_dispatcher(method, params, timeout):
+            raise ConnectionError("rust engine offline")
+
+        with patch.dict(os.environ, {bridge.LEASE_IPC_ENABLED_ENV: "1"}):
+            hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+            hub._ensure_initialized()
+            _authorize_hub(hub)
+            hub.set_lease_ipc_dispatcher(dead_dispatcher)
+
+            lease_id = hub.acquire_lease(intent_id="i-down", scope="TRADE_ENTRY", ttl_seconds=30.0)
+            assert lease_id is None  # fail-closed: no silent fallback to local SM
+
+            c = divergence.get_divergence_counters()
+            assert c["total"] == 1  # op was compared
+            # rust denied (IPC down) vs python granted (auth ACTIVE) → divergence.
+            mismatches = divergence.get_mismatch_snapshot()
+            assert len(mismatches) == 1
+            assert mismatches[0]["rust_outcome"] == divergence.OUTCOME_DENIED
+            assert mismatches[0]["python_outcome"] == divergence.OUTCOME_GRANTED
+
+    def test_flag_on_bypass_outcome_not_counted_as_divergence(self, tmp_audit_dir):
+        """Rust Bypass (Validation/Exploration profile short-circuit) → NOT
+        compared (local auth-gate has no Bypass concept). total stays 0.
+        Rust Bypass（profile short-circuit）→ 不比對（本地 auth-gate 無 Bypass
+        概念）；total 維持 0。"""
+        async def dispatcher(method, params, timeout):
+            return {"lease_id": "bypass", "outcome": "Bypass"}
+
+        with patch.dict(os.environ, {bridge.LEASE_IPC_ENABLED_ENV: "1"}):
+            hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+            hub._ensure_initialized()
+            _authorize_hub(hub)
+            hub.set_lease_ipc_dispatcher(dispatcher)
+
+            lease_id = hub.acquire_lease(intent_id="i-bypass", scope="TRADE_ENTRY", ttl_seconds=30.0)
+            assert lease_id == "bypass"
+            # Bypass is a legitimate Rust short-circuit → excluded from divergence.
+            assert divergence.get_divergence_counters()["total"] == 0
+
+    def test_flag_on_release_records_comparison(self, tmp_audit_dir):
+        """release under flag ON records a comparison; the local SM has NO opinion
+        on a Rust-held lease → OUTCOME_UNKNOWN (no-opinion, A3) → counted in total
+        but NOT a divergence (over-fire fix). release/get is a weak presence-echo
+        channel; primary detection is the acquire-head auth-axis compare.
+        flag ON 下 release 記一筆比對；本地 SM 對 Rust lease 無意見 → UNKNOWN
+        （no-opinion，A3）→ 計入 total 但*不*算分歧（over-fire 修正）。release/get
+        是弱通道；主分歧偵測靠 acquire 開頭的 auth-axis 比對。"""
+        async def dispatcher(method, params, timeout):
+            if method == "governance.release_lease":
+                return {"ok": True}
+            return {"lease_id": "lease:rs-3", "outcome": "Active"}
+
+        with patch.dict(os.environ, {bridge.LEASE_IPC_ENABLED_ENV: "1"}):
+            hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+            hub._ensure_initialized()
+            _authorize_hub(hub)
+            hub.set_lease_ipc_dispatcher(dispatcher)
+
+            ok = hub.release_lease(lease_id="lease:rs-held-by-rust", consumed=True)
+            assert ok is True
+            c = divergence.get_divergence_counters()
+            assert c["total"] == 1
+            # local SM has no opinion on this Rust lease → UNKNOWN no-opinion →
+            # NOT a divergence (this is the A3 over-fire fix the bug exposed).
+            # 本地對 Rust lease 無意見 → UNKNOWN no-opinion → 非分歧（A3 修正）。
+            assert c["divergences"] == 0
+            # The recorded row must be flagged no_opinion (not a true match).
+            # 該筆須標記 no_opinion（非真 match），供 soak 區分。
+            rows = divergence.get_divergence_snapshot()
+            assert len(rows) == 1
+            assert rows[0]["op"] == "release"
+            assert rows[0]["python_outcome"] == divergence.OUTCOME_UNKNOWN
+            assert rows[0]["no_opinion"] is True
+            assert rows[0]["match"] is True  # no-opinion counts as match (not divergence)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P5 step-(i) E2 HIGH #5 fix: acquire-head auth-axis comparator (production path)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestAcquireAuthAxisComparator:
+    """A1: the auth-axis comparator runs at acquire-head (flag-ON, BEFORE Step-2),
+    independently of the Step-2 gate, so the "Rust grants but Python auth would
+    deny" divergence is OBSERVED instead of pre-filtered. These tests do NOT
+    monkeypatch is_authorized — they exercise the real production path.
+
+    A1：auth-axis 比對器在 acquire 開頭（flag-ON、Step-2 *之前*）獨立於 Step-2 跑，
+    讓「Rust 授予但 Python auth 會拒」的分歧被*觀測*而非預先過濾。本組測試*不*
+    monkeypatch is_authorized — 走真實 production path。"""
+
+    def setup_method(self):
+        bridge.reset_dual_write_mirror()
+        divergence.reset_divergence_state()
+
+    def test_auth_axis_rust_grants_python_denies_records_divergence_production_path(
+        self, tmp_audit_dir,
+    ):
+        """CORE A4: Rust ``is_authorized``=True (IPC) while Python ``is_authorized()``
+        =False (no ACTIVE auth) → the acquire-head auth-axis comparator records
+        exactly 1 ``is_authorized`` divergence. NO monkeypatch of is_authorized:
+        the divergence is captured BEFORE Step-2 (which then legitimately denies
+        the acquire). This proves the comparator is no longer near-blind.
+
+        核心 A4：Rust is_authorized=True（IPC）而 Python is_authorized()=False
+        （無 ACTIVE auth）→ acquire 開頭的 auth-axis 比對器恰記 1 筆 is_authorized
+        分歧。*不* monkeypatch is_authorized：分歧在 Step-2（隨後合法拒絕 acquire）
+        *之前*被捕捉。證明 comparator 不再近盲。"""
+        async def dispatcher(method, params, timeout):
+            if method == "governance.is_authorized":
+                # Rust 端授予；Python 端因無 ACTIVE auth 會拒 → 真分歧。
+                return {"authorized": True}
+            # acquire 不該被呼叫到（Step-2 會先 deny），給個保險回應。
+            return {"lease_id": "lease:rs-x", "outcome": "Active"}
+
+        with patch.dict(os.environ, {bridge.LEASE_IPC_ENABLED_ENV: "1"}):
+            hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+            hub._ensure_initialized()
+            # NO _authorize_hub() → Python is_authorized() is naturally False.
+            # 不呼叫 _authorize_hub() → Python is_authorized() 自然為 False。
+            # NO is_authorized monkeypatch — real production path.
+            hub.set_lease_ipc_dispatcher(dispatcher)
+
+            # Sanity: Python really denies (so the divergence is genuine, not staged).
+            assert hub.is_authorized() is False
+
+            lease_id = hub.acquire_lease(intent_id="i-auth-div", scope="TRADE_ENTRY")
+            # Step-2 legitimately denies (Python not authorized) → live behavior
+            # unchanged (returns None). 但 auth-axis 分歧已在 Step-2 前被記錄。
+            assert lease_id is None
+
+            c = divergence.get_divergence_counters()
+            assert c["divergences"] == 1, (
+                "auth-axis comparator must capture Rust-grant/Python-deny on the "
+                "production path (BEFORE Step-2), proving it is not near-blind"
+            )
+            mismatches = divergence.get_mismatch_snapshot()
+            assert len(mismatches) == 1
+            assert mismatches[0]["op"] == "is_authorized"
+            assert mismatches[0]["rust_outcome"] == divergence.OUTCOME_GRANTED
+            assert mismatches[0]["python_outcome"] == divergence.OUTCOME_DENIED
+            assert mismatches[0]["intent_id"] == "i-auth-div"
+
+    def test_auth_axis_agreement_no_divergence(self, tmp_audit_dir):
+        """Rust is_authorized=True AND Python is_authorized()=True (ACTIVE auth) →
+        auth-axis agrees → no divergence on that axis. (acquire then proceeds to
+        IPC; the acquire-axis with matching outcomes also yields 0 divergence.)
+        Rust=True 且 Python=True（ACTIVE auth）→ auth-axis 一致 → 該軸無分歧。"""
+        async def dispatcher(method, params, timeout):
+            if method == "governance.is_authorized":
+                return {"authorized": True}
+            return {"lease_id": "lease:rs-ok", "outcome": "Active"}
+
+        with patch.dict(os.environ, {bridge.LEASE_IPC_ENABLED_ENV: "1"}):
+            hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+            hub._ensure_initialized()
+            _authorize_hub(hub)  # Python is_authorized() → True
+            hub.set_lease_ipc_dispatcher(dispatcher)
+
+            lease_id = hub.acquire_lease(intent_id="i-agree2", scope="TRADE_ENTRY")
+            assert lease_id == "lease:rs-ok"
+            c = divergence.get_divergence_counters()
+            # auth-axis match (1) + acquire-axis match (1) = 2 rows, 0 divergence.
+            assert c["divergences"] == 0
+            assert c["total"] == 2  # is_authorized compare + acquire compare
+
+    def test_auth_axis_rust_ipc_down_skips_compare_fail_closed(self, tmp_audit_dir):
+        """Rust ``is_authorized`` IPC error → is_authorized_via_ipc returns None →
+        auth-axis compare SKIPS (None is "undecidable", NEVER read as granted).
+        No is_authorized divergence is recorded from a dead IPC. fail-closed
+        observation semantics. (The acquire IPC also fails → None, fail-closed.)
+        Rust is_authorized IPC 錯誤 → 回 None → auth-axis 比對*跳過*（None=無法
+        判定，絕不當授予）。死 IPC 不產生 is_authorized 分歧。"""
+        async def dead_dispatcher(method, params, timeout):
+            raise ConnectionError("rust engine offline")
+
+        with patch.dict(os.environ, {bridge.LEASE_IPC_ENABLED_ENV: "1"}):
+            hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+            hub._ensure_initialized()
+            _authorize_hub(hub)  # Python is_authorized() → True
+            hub.set_lease_ipc_dispatcher(dead_dispatcher)
+
+            lease_id = hub.acquire_lease(intent_id="i-ipc-down", scope="TRADE_ENTRY")
+            assert lease_id is None  # acquire IPC down → fail-closed
+
+            # No is_authorized-op divergence (compare skipped on Rust None).
+            # 無 is_authorized 軸分歧（Rust None → 比對跳過）。
+            is_auth_rows = [
+                r for r in divergence.get_divergence_snapshot()
+                if r["op"] == "is_authorized"
+            ]
+            assert is_auth_rows == []
+
+    def test_auth_axis_not_run_when_flag_off(self, tmp_audit_dir):
+        """Flag OFF → auth-axis comparator does NOT run (byte-unchanged path);
+        comparator stays silent (total=0). The dispatcher must never be hit.
+        Flag OFF → auth-axis 比對器不跑（byte-unchanged）；比對器靜默（total=0）。"""
+        called = []
+
+        async def dispatcher(method, params, timeout):
+            called.append(method)
+            return {"authorized": True}
+
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop(bridge.LEASE_IPC_ENABLED_ENV, None)
+            hub = GovernanceHub(audit_dir=tmp_audit_dir, enabled=True)
+            hub._ensure_initialized()
+            _authorize_hub(hub)
+            hub.set_lease_ipc_dispatcher(dispatcher)
+
+            lease_id = hub.acquire_lease(intent_id="i-off", scope="TRADE_ENTRY")
+            assert isinstance(lease_id, str) and not lease_id.startswith("SHADOW_BYPASS:")
+            # Flag OFF → no IPC of any kind, comparator untouched.
+            assert called == []
+            assert divergence.get_divergence_counters()["total"] == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P5 step-(i): is_authorized_via_ipc bridge client + schema parser unit tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestIsAuthorizedViaIpc:
+    """Bridge-level unit tests for the auth-axis read client (fail-closed).
+    auth-axis 唯讀 client 的 bridge 層單元測試（fail-closed）。"""
+
+    def test_method_name_canonical(self):
+        """Method constant locks the Rust dispatch arm name (drift sentinel)."""
+        assert schema.METHOD_IS_AUTHORIZED == "governance.is_authorized"
+
+    def test_happy_path_true(self):
+        """Rust {"authorized": true} → True."""
+        fake = _make_async_dispatcher(return_value={"authorized": True})
+        assert bridge.is_authorized_via_ipc(dispatcher=fake) is True
+
+    def test_happy_path_false(self):
+        """Rust {"authorized": false} → False (a real deny, distinct from None)."""
+        fake = _make_async_dispatcher(return_value={"authorized": False})
+        assert bridge.is_authorized_via_ipc(dispatcher=fake) is False
+
+    def test_wrapped_in_result(self):
+        """one_shot {"result": {"authorized": true}} wrapping → True."""
+        fake = _make_async_dispatcher(return_value={"result": {"authorized": True}})
+        assert bridge.is_authorized_via_ipc(dispatcher=fake) is True
+
+    def test_ipc_outage_returns_none(self):
+        """Dispatcher raising → None (undecidable; NEVER True). fail-closed.
+        派發器拋例外 → None（無法判定；絕不 True）。"""
+        fake = _make_async_dispatcher(raise_exc=ConnectionError("down"))
+        assert bridge.is_authorized_via_ipc(dispatcher=fake) is None
+
+    def test_ipc_timeout_returns_none(self):
+        """Dispatcher slower than timeout → None."""
+        fake = _make_async_dispatcher(sleep=0.5)
+        assert bridge.is_authorized_via_ipc(timeout_seconds=0.1, dispatcher=fake) is None
+
+    def test_malformed_payload_returns_none(self):
+        """Junk / missing key → None (undecidable)."""
+        assert bridge.is_authorized_via_ipc(
+            dispatcher=_make_async_dispatcher(return_value={"foo": "bar"})
+        ) is None
+        assert bridge.is_authorized_via_ipc(
+            dispatcher=_make_async_dispatcher(return_value={})
+        ) is None
+
+    def test_non_bool_authorized_returns_none_strict(self):
+        """Strict bool: "true" / 1 are NOT accepted → None (never coerced True).
+        嚴格 bool："true" / 1 不接受 → None（絕不強轉 True）。"""
+        assert bridge.is_authorized_via_ipc(
+            dispatcher=_make_async_dispatcher(return_value={"authorized": "true"})
+        ) is None
+        assert bridge.is_authorized_via_ipc(
+            dispatcher=_make_async_dispatcher(return_value={"authorized": 1})
+        ) is None
+
+    def test_parse_is_authorized_response_direct(self):
+        """parse_is_authorized_response strict-bool contract (schema unit)."""
+        assert schema.parse_is_authorized_response({"authorized": True}) is True
+        assert schema.parse_is_authorized_response({"authorized": False}) is False
+        assert schema.parse_is_authorized_response({"result": {"authorized": True}}) is True
+        assert schema.parse_is_authorized_response({}) is None
+        assert schema.parse_is_authorized_response({"authorized": "true"}) is None
+        assert schema.parse_is_authorized_response({"authorized": 1}) is None

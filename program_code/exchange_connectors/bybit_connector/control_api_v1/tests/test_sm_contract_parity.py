@@ -429,3 +429,159 @@ def test_inv_b_deescalation_requires_hold_time():
     with pytest.raises(Exception) as ei:
         sm.de_escalate_to(RiskLevel.NORMAL, approved_by="op", reason="r")
     assert "before de-escalation" in str(ei.value)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# §3e：lease 審計列形狀對等（Rust LeaseTransitionMsg→V054 row keys
+#       == Python _build_transition_record keys for a lease transition）
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 為什麼新增（P5 step-(i) / design §3e）：SM Option 2 cutover 後 Rust event_consumer +
+# lease_transition_writer.rs 是 learning.lease_transitions 的唯一寫入者。刪 Python
+# 寫入路徑前，必須鎖死「Rust 寫的列形狀 == Python 歷史寫的列形狀」，否則 cutover
+# 靜默丟失 audit lineage（違反 root principle 8 / DOC-08 inv）。本 test 是該不變量的
+# 回歸鎖（Mac 靜態鎖 key 映射；真正的 PG 值語意 dry-run 由 Linux soak 補，design §3e）。
+#
+# 範圍界定：本 test 鎖「鍵集合 / 語意映射」對等，不是「逐 row 值 byte-equal」（值
+# 對等需 Linux PG empirical，見 design §3e 第一點）。auth/risk audit-row 對等是
+# 另一個 gate（design §3e 末 R1），非本 task。
+
+# Rust 端權威欄位集 = lease_transition_writer.rs 的 INSERT 欄位 +
+# LeaseTransitionMsg struct 欄位（兩者必一致；Rust test_insert_sql_locked_columns 已守）。
+# 此處轉錄為期望集，並由 _parse_rust_insert_columns() 從 Rust 源碼重抓做漂移哨兵。
+_EXPECTED_RUST_LEASE_ROW_FIELDS = {
+    "transition_id",
+    "lease_id",
+    "from_state",
+    "to_state",
+    "event",
+    "initiator",
+    "reason_codes",
+    "requires_approval",
+    "approved_by",
+    "profile",
+    "engine_mode",
+    "context_id",
+    "ts_ms",
+}
+
+# 語意映射：Rust/V054 欄位 → Python _build_transition_record 鍵。
+# None = 該 Rust 欄位在 Python lease 審計記錄「不存在」（Rust-only，cutover 後由 Rust
+# 於 emit 時填；Python 歷史列本就沒有 → 非 lineage 丟失）。
+_RUST_TO_PY_LEASE_KEY_MAP: dict[str, str | None] = {
+    "transition_id": "transition_id",
+    "lease_id": "lease_id",                       # object_id_key="lease_id"
+    "from_state": "previous_status",
+    "to_state": "next_status",
+    "event": "trigger_event_type",
+    "initiator": "initiated_by",
+    "reason_codes": "transition_reason_codes",
+    "requires_approval": "approval_required",
+    "approved_by": "approved_by",
+    "profile": None,        # Rust-only：GovernanceProfile（Python 記錄無）
+    "engine_mode": None,    # Rust-only：engine_mode tag（Python 記錄無）
+    "context_id": None,     # Rust-only：context id（Python 記錄無）
+    "ts_ms": "effective_at_ms",
+}
+
+# Python lease 記錄中、不對應任何 V054 欄位的鍵（Python-only 內部欄位；cutover 後
+# Rust 不寫這些，但它們本就不是 V054 列的一部分 → 非 lineage 丟失）。
+# 逐一登記，使「未登記的新 Python 鍵」會讓本 test fail（漂移哨兵）。
+_PY_ONLY_LEASE_RECORD_KEYS = {
+    "trigger_event_id",   # Python 內部事件 id（V054 無此欄）
+    "audit_event_ref",    # Python 內部審計引用（V054 無此欄）
+    "version_before",     # Python 物件版本（V054 無此欄）
+    "version_after",      # Python 物件版本（V054 無此欄）
+}
+
+
+def _parse_rust_insert_columns() -> set[str]:
+    """從 lease_transition_writer.rs 源碼抓 INSERT 欄位集（漂移哨兵）。
+
+    對齊 Rust test_insert_sql_locked_columns：若 Rust 改了 INSERT 欄位但沒同步
+    本 Python 期望集，本函式抓到的集合會 != _EXPECTED_RUST_LEASE_ROW_FIELDS → fail。
+    """
+    writer = (
+        Path(__file__).resolve().parents[5]
+        / "rust" / "openclaw_engine" / "src" / "database" / "lease_transition_writer.rs"
+    )
+    src = writer.read_text(encoding="utf-8")
+    # 抓 "INSERT INTO learning.lease_transitions (col, col, ...) " 內的欄位列。
+    import re  # noqa: PLC0415 — test-only local import
+
+    m = re.search(
+        r"INSERT INTO learning\.lease_transitions\s*\\?\s*\((.*?)\)\s*\\?\s*VALUES",
+        src,
+        re.DOTALL,
+    )
+    assert m, "找不到 Rust INSERT INTO learning.lease_transitions 欄位列"
+    cols_blob = m.group(1)
+    # 去掉行續接 "\"、換行、空白後 split。
+    cols = [c.strip() for c in cols_blob.replace("\\", "").replace("\n", " ").split(",")]
+    return {c for c in cols if c}
+
+
+def _drive_real_python_lease_record() -> dict:
+    """驅動一條「真實」的 Python lease transition，回傳 _build_transition_record 輸出。
+
+    走真實 DecisionLeaseStateMachine.transition()（DRAFT→REGISTERED），記錄被 append
+    到 lease.transitions[-1]。這就是 cutover 前 Python 寫進 audit pipeline 的列形狀。
+    """
+    sm = DecisionLeaseStateMachine()
+    obj = sm.create_draft(intent={"intent_id": "i-3e", "scope": "TRADE_ENTRY"},
+                          created_by="contract", expires_at_ms=2**62)
+    lid = obj.lease_id
+    lease = sm.register(lid)  # DRAFT→REGISTERED：一條 1:1 真實 transition
+    # register() 回傳更新後的 lease 物件；最後一筆 transition 即該次 _build_transition_record。
+    return lease.transitions[-1]
+
+
+def test_lease_audit_row_shape_parity():
+    """§3e：Rust LeaseTransitionMsg→V054 row keys 與 Python _build_transition_record
+    鍵集合在語意映射下對等（cutover audit-lineage 回歸鎖）。"""
+    # 1) Rust 欄位集從源碼重抓 == 期望集（Rust 端漂移哨兵）。
+    rust_cols = _parse_rust_insert_columns()
+    assert rust_cols == _EXPECTED_RUST_LEASE_ROW_FIELDS, (
+        f"Rust INSERT 欄位集漂移：源碼={sorted(rust_cols)} "
+        f"期望={sorted(_EXPECTED_RUST_LEASE_ROW_FIELDS)}。"
+        "若 Rust 有意改 lease_transitions 欄位，請同步本期望集 + 語意映射 + V054。"
+    )
+
+    # 2) 映射表的鍵集合 == Rust 欄位集（映射完整，無遺漏 Rust 欄位）。
+    assert set(_RUST_TO_PY_LEASE_KEY_MAP.keys()) == _EXPECTED_RUST_LEASE_ROW_FIELDS, (
+        "Rust→Python 語意映射的鍵集合必等於 Rust 欄位集（每個 Rust 欄位都要有對應或標 None）"
+    )
+
+    # 3) 驅動真實 Python lease 記錄，取其鍵集合。
+    py_record = _drive_real_python_lease_record()
+    py_keys = set(py_record.keys())
+
+    # 4) 每個「映射到 Python 的 Rust 欄位」其目標鍵必真實存在於 Python 記錄。
+    missing_in_py = [
+        (rust_f, py_k)
+        for rust_f, py_k in _RUST_TO_PY_LEASE_KEY_MAP.items()
+        if py_k is not None and py_k not in py_keys
+    ]
+    assert not missing_in_py, (
+        "Rust 欄位映射到的 Python 鍵不存在於真實 _build_transition_record 輸出："
+        + ", ".join(f"{r}→{k}" for r, k in missing_in_py)
+        + f"。實際 Python 鍵={sorted(py_keys)}"
+    )
+
+    # 5) 反向：每個 Python 記錄鍵必為 (a) 某 Rust 欄位的映射目標，或 (b) 已登記的
+    #    Python-only 鍵。未登記的新鍵 → fail（漂移哨兵，防 cutover 靜默丟 lineage）。
+    mapped_py_targets = {
+        v for v in _RUST_TO_PY_LEASE_KEY_MAP.values() if v is not None
+    }
+    unaccounted = py_keys - mapped_py_targets - _PY_ONLY_LEASE_RECORD_KEYS
+    assert not unaccounted, (
+        f"Python lease 記錄出現未登記鍵 {sorted(unaccounted)}；"
+        "若有意新增，請更新 _RUST_TO_PY_LEASE_KEY_MAP（若 Rust 也寫）或 "
+        "_PY_ONLY_LEASE_RECORD_KEYS（若僅 Python 內部）。"
+    )
+
+    print(
+        f"[lease_audit_shape] rust_cols={len(rust_cols)} py_keys={len(py_keys)} "
+        f"mapped={len(mapped_py_targets)} py_only={len(_PY_ONLY_LEASE_RECORD_KEYS)} "
+        f"rust_only={sum(1 for v in _RUST_TO_PY_LEASE_KEY_MAP.values() if v is None)}"
+    )

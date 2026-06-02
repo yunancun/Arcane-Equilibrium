@@ -70,6 +70,16 @@ METHOD_ACQUIRE_LEASE: str = "governance.acquire_lease"
 METHOD_RELEASE_LEASE: str = "governance.release_lease"
 METHOD_GET_LEASE: str = "governance.get_lease"
 
+# P5 step-(i) auth-axis 唯讀投影方法（E1a a99bfa1d 已建 Rust dispatch arm）。
+# 契約：params={}；response={"authorized": bool}（或 one_shot 包裝在 "result" 殼內）。
+# 供 governance_hub.acquire_lease 在 Step-2 之前做 best-effort auth-axis 比對，
+# 讓「Rust 放行而 Python auth 會拒」的分歧可被 comparator 觀測（純觀測，不 gate）。
+# P5 step-(i) auth-axis read-only projection method (Rust dispatch arm landed in
+# E1a a99bfa1d). Contract: params={}; response={"authorized": bool} (possibly
+# wrapped in a "result" shell by one_shot). Used by the acquire-head auth-axis
+# comparator (observation only).
+METHOD_IS_AUTHORIZED: str = "governance.is_authorized"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Request param keys (canonical) / 請求參數鍵（canonical）
@@ -111,6 +121,10 @@ RESPONSE_KEY_OUTCOME: str = "outcome"        # Acquire only
 # Release response: {"ok": true} or error envelope; no positive payload field.
 # Release 回應：{"ok": true} 或錯誤封包；無正向 payload 欄位。
 RESPONSE_KEY_OK: str = "ok"
+
+# is_authorized response: {"authorized": bool}（Rust handle_is_authorized 契約）。
+# is_authorized 回應：{"authorized": bool}（Rust handle_is_authorized 契約）。
+RESPONSE_KEY_AUTHORIZED: str = "authorized"
 
 # Get response: serialized LeaseObject (Rust serde of LeaseObject struct).
 # Schema follows decision_lease_state_machine.LeaseObject equivalent fields:
@@ -399,11 +413,47 @@ def parse_get_response(result: Mapping[str, Any]) -> Optional[Mapping[str, Any]]
     return payload
 
 
+def parse_is_authorized_response(result: Mapping[str, Any]) -> Optional[bool]:
+    """解析 governance.is_authorized 的 JSON-RPC result，回傳 strict bool 或 None。
+
+    Parse the JSON-RPC result for governance.is_authorized.
+
+    契約 / Contract: ``{"authorized": bool}``（或 one_shot 包裝在 ``"result"``
+    殼內）。**只接受 strict ``bool``**；payload 畸形、缺鍵、或型別非 bool（含
+    ``"true"`` 字串、``1``）→ 回 ``None``。
+
+    回 ``None`` 的語義是「無法判定 / fail-closed」，由 auth-axis 比對器視為
+    「無 Rust 意見 → 不比對」（**絕不**把 None 解讀為 authorized=True）。這對齊
+    design §3b：任何 IPC timeout / ERR_METHOD_NOT_FOUND / 畸形 payload 都不得
+    被解讀為放行。
+
+    Returns ``None`` to mean "undecidable / fail-closed" (the auth-axis
+    comparator treats it as no Rust opinion and skips the comparison — it is
+    NEVER read as authorized=True). Only a strict ``bool`` payload yields
+    True/False.
+    """
+    if not isinstance(result, Mapping):
+        return None
+    payload: Mapping[str, Any] = result
+    inner = result.get("result")
+    if isinstance(inner, Mapping) and RESPONSE_KEY_AUTHORIZED in inner:
+        payload = inner
+    val = payload.get(RESPONSE_KEY_AUTHORIZED)
+    # strict bool：拒 "true" / 1 等非 bool（與 parse_release_response 的 ok 同嚴格）。
+    # strict bool: reject "true" / 1 etc. (same strictness as the release ok parse).
+    if val is True:
+        return True
+    if val is False:
+        return False
+    return None
+
+
 __all__ = [
     # Method names
     "METHOD_ACQUIRE_LEASE",
     "METHOD_RELEASE_LEASE",
     "METHOD_GET_LEASE",
+    "METHOD_IS_AUTHORIZED",
     # Acquire keys
     "ACQUIRE_KEY_INTENT_ID",
     "ACQUIRE_KEY_SCOPE",
@@ -418,6 +468,7 @@ __all__ = [
     "RESPONSE_KEY_LEASE_ID",
     "RESPONSE_KEY_OUTCOME",
     "RESPONSE_KEY_OK",
+    "RESPONSE_KEY_AUTHORIZED",
     # Outcome / Profile constants
     "OUTCOME_ACTIVE",
     "OUTCOME_BYPASS",
@@ -440,4 +491,5 @@ __all__ = [
     "parse_acquire_response",
     "parse_release_response",
     "parse_get_response",
+    "parse_is_authorized_response",
 ]
