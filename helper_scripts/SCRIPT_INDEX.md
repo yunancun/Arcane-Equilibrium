@@ -3,6 +3,28 @@
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
 最後更新：2026-05-31（M4 Stage 1 GovernanceHub lease provider seam — `m4/stage1_production_runner.py` 新增 opt-in GovernanceHub IPC lease provider；只接受 UUID-compatible lease，非 UUID lease 立即 release FAILED 並拒絕 INSERT。歷史更新：同日 A2 maker-fill feasibility diagnostic — 新增 `reports/alpha_candidate_stage0r/a2_maker_fill_feasibility.py` + smoke，以 read-only `market.liquidations` + `market.market_tickers` BBO 檢查 cascade trigger 後 60s PostOnly offset touch rate；只輸出 `reject` / `draft_only` / `observe_more`，不下單不寫庫。同日 M4 Stage 1 production DRAFT runner — 新增 `m4/stage1_production_runner.py` non-dry-run source read / candidate compute / gated writeback；writeback 必須每 row 提供真實 Decision Lease UUID，analysis lane `exploratory` 映射成 PG status `draft`。2026-05-29 P2-OPS-2-GITLEAKS — 新增 `git_hooks/` secret-scan pre-commit hook 基礎設施：canonical hook + installer + gitleaks config；E1 IMPL DONE 待 E2 sign-off。2026-05-27 P0-OPS-4 GAP-D Track A round 2 — 新增 `canary/healthchecks/check_pg_dump_freshness.py` Python 主入口 7-check（5 verify_pg_dump.sh + L0 schema coverage + governance audit trail） + wire `passive_wait_healthcheck/checks_cron_heartbeat.py` 加 `check_80_pg_dump_freshness()` wrapper；E1 IMPL DONE 待 E2 sign-off。同日保留 P0-OPS-1 HTTPS Track A IMPL + P0-OPS-4 first-day-live runbook GAP A + GAP F IMPL 索引 + 2026-05-25 Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron + W2-B Alpha Tournament scaffold + Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
 
+## 2026-06-02 Gate-B 隔離 listing-capture 探針（`research/gate_b_*` + entry）
+
+AEG Gate-B：以**完全獨立**的進程驗證「上市捕捉管線是否就緒」——量測新 symbol 從
+PreLaunch→Trading 轉移時，本地 public WS 對首筆成交的 capture_lag 與 trigger 後
++30/+60/+300s markout。R-0 隔離紅線：絕不 import 任何生產模組（openclaw_engine /
+SymbolRegistry / KlineManager / governance_hub / 生產 bybit client / scanner /
+strategy / intent / decision_lease），零 auth / 零 order / 零 DB write，只打 public
+market REST + public WS。SoT = live REST `GET /v5/market/instruments-info?...&status=PreLaunch`
+（前瞻 launchTime / curAuctionPhase / preListingInfo.phases，**不**用 symbol_universe_snapshots
+的過去 listed_at）。verdict 必含 `INCONCLUSIVE_NO_TRANSITION`（phase 轉移稀有，無事件
+非 fail）+ `TRANSITION_BUT_NO_CAPTURE`（轉移發生卻有 symbol 沒抓到首成交，集合完備性
+fail-closed，total-miss + partial-miss 同歸此判，絕不誤報 PASS_CAPTURE）。E2/E3/BB sign-off
+通過；探針本身尚未執行（手動觸發留待後續，capture_lag/alpha 定論需 ~Q4 真實上市樣本）。
+
+| 腳本 | 用途 |
+|------|------|
+| `research/aeg_gate_b_probe.py` | entry 組裝器：WS 背景執行緒跑 event loop + 主執行緒固定間隔輪詢 REST，把 PreLaunch 候選同步給 WS 動態訂閱、餵 launchTime 給 capture_lag 基準；到 `--duration-seconds`（預設 24h）收尾寫 manifest/summary/verdict/parquet。`--dry-run` 只建目錄寫 INCONCLUSIVE verdict（結構驗證，不連 WS/不打 REST）。匯入零副作用（只有 main/run_probe 才連線）。 |
+| `research/gate_b_rest.py` | SoT 層：純 urllib（仿 `replay/bybit_public_client.py` 隔離模式但不 import 它）+ endpoint allowlist 輪詢 instruments-info，PreLaunch→Trading 純記憶體 phase 狀態機，落 `rest_phase_poll.jsonl`，回報需 WS 訂閱的候選集合。無 auth/簽名/下單/DB。 |
+| `research/gate_b_ws.py` | 捕捉管線層：`websocket-client`（延遲 import；Linux runtime 已驗）獨立連 `wss://stream.bybit.com/v5/public/linear`，只在 symbol 進 PreLaunch 候選才動態 sub `kline.1.{sym}`+`publicTrade.{sym}`（分批 ≤10/則）+ 固定訂 BTC `publicTrade.BTCUSDT` 作 liveness/unpoisoned 哨兵（2026-04-05 handler-not-found 毒化教訓）。算 capture_lag（first publicTrade event_ts − launchTime；≤5min=PASS_CAPTURE）+ in-memory mid ring 回填 markout。每 row 帶 leak-free provenance（ingest_ts_local / event_ts_exchange / 差值）。 |
+| `research/gate_b_artifact.py` | 封裝/裁決層：跨平台 artifact root `${OPENCLAW_DATA_DIR:-/tmp/openclaw}/aeg_gate_b_runs/<run_id>/`（禁硬編碼）、各 channel JSONL writer、manifest（point_in_time=true + 隔離聲明 + provenance 規格）、duckdb parquet 鏡像（延遲 import，缺套件 skip 不阻斷）、verdict（含 `INCONCLUSIVE_NO_TRANSITION`）。duckdb 只寫本地 parquet，非生產 PG。 |
+| `research/tests/test_gate_b_probe.py` | 32 測試。**最重要**=import 隔離自證（子進程乾淨 sys.modules + 路徑式檢查：任一載入 module 的 `__file__` 不得落在 `program_code/`/`rust/`，對應 E3 grep I1-I4）；另覆蓋靜態 auth/order/DB 呼叫面=0、phase 狀態機、capture_lag PASS/SLOW（5min 閾值）、MidPriceRing markout 回填、BTC control unpoisoned、verdict 含 INCONCLUSIVE、artifact root 跨平台。`python3 -m pytest helper_scripts/research/tests/test_gate_b_probe.py -q`。 |
+
 ## 2026-06-01 helper_scripts/lib/ Python 共享 library（E5 finding #3 + #4 整併）
 
 | 腳本 | 用途 |
