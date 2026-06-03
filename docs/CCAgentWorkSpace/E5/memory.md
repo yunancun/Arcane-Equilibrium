@@ -518,3 +518,34 @@ E1 P1-FILL-LINEAGE-MONITOR follow-up（接 counter 到 IPC + healthcheck [55]/[N
 5. **三環境 PricingConfig 跨 invariant test 是 contract pinning 過勝**：LG2-T1 真實 TOML disk load 跨三環境 invariant test = 防回歸最強；+99% LOC 但每行對應一個 assert，**E5 強烈認可**
 6. **`fee_source` rule 3 浮點精確比對是隱性 algorithmic invariant**：依賴 seed_default_fee_rates 直接賦 DEFAULT_* 常量無中間運算；若未來改實作為 `xxx * 1.0` → 精確比對失敗 → 分類錯成 BybitApi；LG2-T3 加 test 偵測 regression 是正確 algorithmic invariant lock
 
+## 2026-06-03 funding_oi_backfill「收尾 lingering ~6min」RCA — 前提證偽（無 lingering，6min 是整跑網路分頁）
+
+**任務**：查 funding_oi_backfill run `18b3c2f8` 一次性回填的「最後資料線到 exit lingering ~6min」根因（疑 DB finalization / update_run_status lock / buffered write）。不改業務碼。
+
+**Verdict：前提（lingering）證偽。無收尾停頓。6m20s 是整個跑批的網路分頁時間，均勻分佈，非「最後一行之後才花掉」。**
+
+**決定性 runtime 證據（page ledger `fetched_at` 重建時間線，Linux PG read-only）**：
+- run 跨度 6m20s（01:18:58 → 01:25:19，created_at vs completed_at）。
+- 1985 page 的 `fetched_at` 跨 6m17s（01:19:02 → 01:25:19）**均勻分佈**；最後 symbol SUIUSDT OI 寫於 01:25:19，與 run 標 accepted 同一秒（差 3ms）。
+- **`update_run_status` 證偽為瓶頸**：最後 page 寫入 01:25:19.43 → run accepted 01:25:19.44，間隔 **3ms**。不是卡 lock。
+- 每 symbol cadence：OI 88 page ≈ 15.7s（穩態）+ funding 11 page ≈ 2.0s ≈ 17.7s/symbol × 20 + 暖機前 3 個 symbol OI 偏慢（25/23/18s）= ~6m20s。
+- **每頁 ~178ms 均勻 round-trip**（OI 88p/15.7s、funding 11p/2.0s 同量級），是純序列 HTTP GET→parse→ledger INSERT；**無 2s rate-limit backoff 尖峰**（若 wait_if_rate_limited 觸發會見 2s 跳變，全程無）。
+
+**根因 = 序列分頁網路 round-trip × 頁數**，不是 DB / finalization / lock / buffered flush：
+- pagination（`paginate_*`）把一個 symbol 全部頁的網路請求**先跑完**才開始 DB 寫；line print 在 commit 之後（writer `tx.commit().await?` → `print_*_line`）。資料線真的在 01:25:19 才印（非 ~3:18）。
+- 「lines printed by ~3:18」是 **monitor 誤判**：Rust stdout 被 pipe 到檔案（非 TTY）時是 **block-buffered**，行會成塊 flush，看起來像早早全印完；ledger `fetched_at` 推翻此錯覺。
+- DbPool / MarketDataClient / BybitRestClient **無 tokio::spawn / JoinHandle / 背景 task**；`#[tokio::main(flavor = "current_thread")]` 無背景 worker thread；reqwest 預設 keep-alive idle conn 不阻 `std::process::exit`。退出本身立即。
+
+**嚴重性 = 一次性 backfill 小事（資料無損、0 rejected、totals 對）。但日後掛 cron --apply 值得優化**：
+1. **頁內並發（最高 ROI，但動分頁器）**：OI 88 page 純序列，每頁等上頁回應才發下頁（cursor 反向 walk endTime 強制序列）→ 改不了序列性除非按時間切段並發。**真正可並發的是 symbol 間**（現 `for symbol in &symbols` 嚴格序列，注釋說「禁跨 symbol 並行防 burst rate-limit」）。若 cron 化，可用 `buffer_unordered(N=2~3)` 跨 symbol 並發 + 共享 client rate-limit state 自然退讓（client 已有 per-group backoff）→ 預估 20 symbol 6m20s → ~2-3m。**需 PA/BB 評估 rate-limit 安全**（demo group limit），E5 不擅自定 N。
+2. **per-page ledger INSERT 合批（中 ROI）**：1985 個獨立 `insert_ingest_page`（各自 autocommit），可合成每 symbol 一個 tx 或 batch INSERT；但每頁 ~178ms 主導是網路非此 INSERT，省不到大頭。**低優先**。
+3. **history INSERT 已是單 tx/symbol**（write_*_points_strict 開一個 tx loop bind commit）；17521 行/symbol 在該 tx 內，非瓶頸（symbol 內 funding+oi ledger span 00:00:00）。**不動**。
+4. **stdout 改 line-buffered / 加逐行時戳**（觀測性，非性能）：cron 化後 log 應每行 flush（或寫 structured log 帶 ts），避免下次再誤判時間結構。**低成本建議**。
+
+**新教訓（durable）**：
+1. **「最後一行到 exit 的 lingering」先用 per-page ledger `fetched_at` 重建真實時間線，再下根因** — println 順序 + block-buffered stdout 會製造「早早印完」假象；append-only provenance 的 `now()` 時戳是 ground truth。本案 monitor 誤判被 ledger 推翻，與「代碼審計過度歸因、runtime 查驗推翻」同模式（記憶庫多次教訓）。
+2. **stdout 非 TTY = block-buffered**：任何「log 看起來在 X 時間全印完但進程活到 Y」的觀測，先排除 stdout buffering（管道/重導向時 Rust/C stdout 預設 block-buffer，TTY 才 line-buffer）。
+3. **序列分頁的 wall-clock = Σ(頁數 × per-page RTT)**，per-symbol 序列又疊乘 symbol 數；估這類 backfill 時間先數「總頁數 × ~180ms」（demo Bybit round-trip 量級），不要假設 DB 是大頭。
+4. **`update_run_status` 單 UPDATE WHERE pk 在無並發寫同列時 ~3ms**；懷疑「終態 UPDATE 卡 lock」要先看它與前一個寫操作的時戳差（本案 3ms 直接證偽），不要假設。
+5. **current_thread tokio runtime + 無 spawn + reqwest keep-alive**：這組合下 `std::process::exit` 立即，idle HTTP 連線不阻退出；排查「慢退出」可快速排除背景 task / runtime drain 這條線。
+
