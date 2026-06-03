@@ -2,7 +2,33 @@
 """
 SM Option 2 收斂 — P-EQUIV 真實樣本驅動器（lease_ipc_equiv_sampler）。
 
-MODULE_NOTE:
+!!! DEPRECATED — DO NOT WIRE TO PRODUCTION（operator 拍板 (b)+(b-i)，2026-06-03）!!!
+    本 sampler 在 Option 2 下**語意不可達**，已從 soak gate 路徑移除。保留檔案僅為
+    防止他人誤以為「P-EQUIV 缺 runtime 腿」而重寫同一個會卡死 gate 的設計。
+
+    為何不可達（E2 HIGH-2 + PA reconciliation
+    `2026-06-03--p5_sm_soak_equiv_sampler_reconciliation.md`）：
+      - sampler 拿**歷史** Rust-authoritative GRANTED row 對撞 Python hub 的**當前**
+        auth state。Option 2 下熱路徑 Rust-only、Python hub 不在熱路徑 → steady-state
+        Python hub 結構上未授權（`is_authorized()` 為 False）→ 每筆歷史 GRANTED row 的
+        Python 影子回 DENIED → record_divergence 判 divergence → comparator gate 永遠
+        卡死無法轉綠。這是 **Option 2 架構下「歷史 replay 驅動 contemporaneous
+        comparator」這個設計本身的語意不可達**（lease_transitions/V054 無 per-row
+        auth/scope 快照，無法重建歷史 auth context），非 sampler 實作 bug。
+      - 既已不接 gate，**HIGH-1（bypass-skip 未對齊 :1052）與 MEDIUM-1（dead event
+        分支指錯表 + acquire 雙計）刻意不修**——修無意義。下方 classify_rust_outcome /
+        replay_sample_through_comparator 保留原樣僅供歷史參照與 deprecated 測試，**勿據此
+        重新接 production**。
+
+    cutover gate 新定義 = **4a CI 綠**（`sm_contract.rs` + `test_sm_contract_parity.py`
+    離線全分支 parity，authoritative SM 等價證明）**AND P-LIVE soak 健康**
+    （`learning.lease_transitions` Rust 權威路徑真跑 + fresh，見
+    `passive_wait_healthcheck/checks_governance_lease_ipc.py`）。comparator 降為觀測性
+    信號（非 gate）。runtime 落地保真度由 P-LIVE 覆蓋，不需 sampler。
+
+    （以下原 MODULE_NOTE 保留作歷史背景；其「O-2 keep-as-gate 前提」已被 (b)+(b-i) 推翻。）
+
+MODULE_NOTE（歷史，已 DEPRECATED）:
     模塊用途：解 PA 設計 `2026-06-03--p5_sm_soak_observability_redesign.md` §2
     Fork ②-EQUIV / §5 R5 的核心缺陷——steady-state 下 Python GovernanceHub organic
     觸發率 ≈ 0（熱路徑 ~408k lease 從不進 Python hub），故 comparator 的 N 永遠到
@@ -12,8 +38,8 @@ MODULE_NOTE:
     （governance_divergence.record_divergence），產生**真實樣本驅動**的 divergence
     count，取代合成猜測（Fork ① 被 PA 廢棄）。
 
-    這是 O-2（operator 拍板 comparator keep-as-gate）的前提：comparator 既是硬 gate，
-    其 N 必須由真實樣本餵養，而非 organic-only 空轉。
+    這曾是 O-2（operator 一度拍板 comparator keep-as-gate）的前提；O-2 已於
+    2026-06-03 被 (b)+(b-i) 取代（comparator 降觀測性信號）。
 
     主要函數：
       - ``fetch_recent_lease_transitions``：read-only SELECT 近期 lease_transitions

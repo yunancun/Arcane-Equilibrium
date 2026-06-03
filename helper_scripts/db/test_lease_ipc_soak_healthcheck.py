@@ -1,24 +1,31 @@
 #!/usr/bin/env python3
-"""Unit tests for P5-SM-OPTION2 B-3 soak healthcheck `[81]` + EQUIV sampler.
+"""Unit tests for P5-SM-OPTION2 B-3 soak healthcheck `[81]`（rework (b)+(b-i)）。
 
-P5-SM-OPTION2 B-3 soak healthcheck `[81]` + EQUIV sampler 單元測試。
+P5-SM-OPTION2 B-3 soak healthcheck `[81]` 單元測試（rework (b)+(b-i)）。
 
-覆蓋（G-1 fail-closed + sampler 真實樣本驅動）：
-  healthcheck `[81]`:
-    - V128 snapshot 表缺 → FAIL（投影層未部署不當綠燈）。
-    - snapshot row 缺失 → FAIL（flusher 從沒寫）。
-    - flag_enabled=false → FAIL（legacy local SM，comparator 不 fire）。
-    - snapshot stale（age >= threshold）→ FAIL（flusher 死，R2 緩解；**G-1 核心**：
-      stale 絕不當綠燈）。
-    - divergences > 0 → FAIL（P-EQUIV gate；O-2 keep-as-gate）。
-    - total < N → FAIL（樣本不足）。
-    - P-LIVE：lease_transitions 缺 / 0 row / stale → FAIL。
-    - 全 gate 滿足 → PASS。
-  EQUIV sampler:
-    - classify_rust_outcome 正規化（acquire_success/fail/bypass/非 acquire→None）。
-    - replay 真實 rows 驅動 comparator（rust 來自 row，python 來自影子）。
-    - 無 hub → 影子 UNKNOWN no-opinion（不偽造判定）。
-    - read-only：fetch 只 SELECT，無 INSERT/UPDATE。
+**rework 背景（operator 拍板 (b)+(b-i)，2026-06-03）**：comparator 從硬 gate 降為觀測性
+信號（Option 2 下歷史 replay vs contemporaneous comparator 語意不可達，見
+`2026-06-03--p5_sm_soak_equiv_sampler_reconciliation.md`）。故：
+  - healthcheck `[81]` gate（FAIL 條件）**只剩 P-LIVE**：lease_transitions 表存在 + 窗內
+    有 row + fresh。任一不滿足 → FAIL（G-1 紀律對 P-LIVE 仍適用）。
+  - comparator counter（total / divergences / snapshot freshness / flag_enabled）→ **觀測欄**
+    （在 msg 報數值，**不再 FAIL**）。讀不到（V128 缺 / row 缺 / stale）→ 觀測欄缺值，
+    照常 PASS（gate 由 P-LIVE 定）。
+
+覆蓋：
+  healthcheck `[81]` P-LIVE gate（G-1 fail-closed）：
+    - P-LIVE：lease_transitions 表缺 → FAIL（Rust 權威路徑不可確認）。
+    - P-LIVE：0 row → FAIL（Rust 權威路徑未 emit）。
+    - P-LIVE：stale（age >= threshold）→ FAIL（Rust 權威路徑 silent-dead）。
+    - 查詢例外 → fail-closed FAIL。
+    - P-LIVE 健康 → PASS（msg 附 comparator 觀測欄）。
+  healthcheck `[81]` comparator 觀測欄（**非 gate**，rework 核心斷言）：
+    - divergences > 0：只要 P-LIVE 健康 → **PASS**（divergence 在觀測欄報數值，不 FAIL）。
+    - V128 snapshot 表缺：P-LIVE 健康 → **PASS**（觀測欄報 unavailable，不 FAIL）。
+    - snapshot row 缺：P-LIVE 健康 → **PASS**（觀測欄報 unavailable，不 FAIL）。
+    - flag_enabled=false：P-LIVE 健康 → **PASS**（觀測欄報 flag=OFF，不 FAIL）。
+    - snapshot stale：P-LIVE 健康 → **PASS**（觀測欄照報，不 FAIL）。
+  EQUIV sampler：DEPRECATED（(b)+(b-i) 後已不接 gate，語意不可達）→ 測試 skip。
 
 Mac dev / Linux runtime：
     cd "$OPENCLAW_BASE_DIR" && ./venvs/mac_dev/bin/python -m pytest \\
@@ -29,7 +36,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
-from typing import Any, Optional
+from typing import Any
 from unittest.mock import MagicMock
 
 # srv root on sys.path（鏡像 test_lg5_healthchecks.py）。
@@ -40,14 +47,7 @@ sys.path.insert(0, _SRV_ROOT)
 
 from helper_scripts.db.passive_wait_healthcheck.checks_governance_lease_ipc import (  # noqa: E402
     LIVE_TRANSITION_FRESHNESS_MAX_SECONDS,
-    SNAPSHOT_FRESHNESS_MAX_SECONDS,
-    SOAK_MIN_TOTAL,
     check_81_lease_ipc_soak,
-)
-from helper_scripts.db.lease_ipc_equiv_sampler import (  # noqa: E402
-    classify_rust_outcome,
-    fetch_recent_lease_transitions,
-    replay_sample_through_comparator,
 )
 
 
@@ -60,103 +60,46 @@ def _cursor(fetches: list[Any]) -> MagicMock:
     return cur
 
 
-# fetch 序列順序（healthcheck check_81 的 SQL 呼叫順序）：
-#   1. to_regclass(snapshot) IS NOT NULL
-#   2. snapshot row: (total, matches, divergences, flag_enabled, age_s)
-#   3. to_regclass(lease_transitions) IS NOT NULL
-#   4. lease_transitions: (count, age_ms)
-# 視提前 return 而定，後續 fetch 不被消費。
+# fetch 序列順序（rework 後 check_81 的 SQL 呼叫順序）：
+#   P-LIVE gate（先判）：
+#     1. to_regclass(lease_transitions) IS NOT NULL
+#     2. lease_transitions: (count, age_ms)
+#   comparator 觀測欄（後讀，best-effort，不 gate；只在 P-LIVE 通過後才跑）：
+#     3. to_regclass(snapshot) IS NOT NULL
+#     4. snapshot row: (total, matches, divergences, flag_enabled, age_s)
+# 視提前 return（P-LIVE FAIL）而定，觀測欄 fetch 不被消費。
+
+# 便利常量：一組「P-LIVE 健康」的前兩筆 fetch（表在、count>0、age 5s fresh）。
+_PLIVE_OK = [(True,), (12345, 5000)]
+# 便利常量：一組「comparator 觀測欄完整」的後兩筆 fetch（snapshot 表在 + 一筆 row）。
+def _observed(total: int, matches: int, divergences: int, flag: bool, age_s: int) -> list[Any]:
+    return [(True,), (total, matches, divergences, flag, age_s)]
 
 
-class TestCheck81FailClosed(unittest.TestCase):
-    """[81] G-1 fail-closed 各路徑。"""
-
-    def test_snapshot_table_missing_fail(self) -> None:
-        cur = _cursor([(False,)])  # to_regclass(snapshot) → NULL
-        status, msg = check_81_lease_ipc_soak(cur)
-        self.assertEqual(status, "FAIL")
-        self.assertIn("V128 not applied", msg)
-
-    def test_snapshot_row_missing_fail(self) -> None:
-        cur = _cursor([(True,), None])  # 表在，但無 'singleton' row
-        status, msg = check_81_lease_ipc_soak(cur)
-        self.assertEqual(status, "FAIL")
-        self.assertIn("no snapshot row", msg)
-
-    def test_flag_off_fail(self) -> None:
-        # 表在；row: total 充足、0 div、但 flag_enabled=False。
-        cur = _cursor([(True,), (500, 500, 0, False, 10)])
-        status, msg = check_81_lease_ipc_soak(cur)
-        self.assertEqual(status, "FAIL")
-        self.assertIn("flag_enabled=false", msg)
-
-    def test_snapshot_stale_fail(self) -> None:
-        # flag-ON、0 div、total 充足，但 snapshot age 超過 threshold（flusher 死）。
-        stale_age = SNAPSHOT_FRESHNESS_MAX_SECONDS + 1
-        cur = _cursor([(True,), (500, 500, 0, True, stale_age)])
-        status, msg = check_81_lease_ipc_soak(cur)
-        self.assertEqual(status, "FAIL")
-        self.assertIn("stale", msg)
-
-    def test_divergences_positive_fail(self) -> None:
-        # flag-ON、fresh、total 充足，但 divergences=3 > 0。
-        cur = _cursor([(True,), (500, 497, 3, True, 10)])
-        status, msg = check_81_lease_ipc_soak(cur)
-        self.assertEqual(status, "FAIL")
-        self.assertIn("divergences=3", msg)
-
-    def test_insufficient_total_fail(self) -> None:
-        # flag-ON、fresh、0 div，但 total < N。
-        low = SOAK_MIN_TOTAL - 1
-        cur = _cursor([(True,), (low, low, 0, True, 10)])
-        status, msg = check_81_lease_ipc_soak(cur)
-        self.assertEqual(status, "FAIL")
-        self.assertIn("insufficient sample", msg)
+class TestCheck81PliveGate(unittest.TestCase):
+    """[81] P-LIVE gate（G-1 fail-closed；rework 後唯一 FAIL 軸）。"""
 
     def test_plive_lease_transitions_missing_fail(self) -> None:
-        # P-EQUIV 全過，但 lease_transitions 表缺。
-        cur = _cursor([
-            (True,), (500, 500, 0, True, 10),  # P-EQUIV pass
-            (False,),                           # lease_transitions 缺
-        ])
+        cur = _cursor([(False,)])  # to_regclass(lease_transitions) → NULL
         status, msg = check_81_lease_ipc_soak(cur)
         self.assertEqual(status, "FAIL")
         self.assertIn("P-LIVE FAIL", msg)
         self.assertIn("lease_transitions missing", msg)
 
     def test_plive_zero_rows_fail(self) -> None:
-        cur = _cursor([
-            (True,), (500, 500, 0, True, 10),  # P-EQUIV pass
-            (True,),                            # lease_transitions 在
-            (0, 0),                             # count=0
-        ])
+        cur = _cursor([(True,), (0, 0)])  # 表在但 count=0
         status, msg = check_81_lease_ipc_soak(cur)
         self.assertEqual(status, "FAIL")
         self.assertIn("0 lease_transitions rows", msg)
 
     def test_plive_stale_fail(self) -> None:
         stale_ms = (LIVE_TRANSITION_FRESHNESS_MAX_SECONDS + 10) * 1000
-        cur = _cursor([
-            (True,), (500, 500, 0, True, 10),  # P-EQUIV pass
-            (True,),                            # lease_transitions 在
-            (12345, stale_ms),                  # count>0 but stale
-        ])
+        cur = _cursor([(True,), (12345, stale_ms)])  # count>0 but stale
         status, msg = check_81_lease_ipc_soak(cur)
         self.assertEqual(status, "FAIL")
         self.assertIn("silent-dead", msg)
 
-    def test_all_gates_pass(self) -> None:
-        cur = _cursor([
-            (True,), (500, 500, 0, True, 10),   # P-EQUIV pass
-            (True,),                             # lease_transitions 在
-            (12345, 5000),                       # count>0, age 5s fresh
-        ])
-        status, msg = check_81_lease_ipc_soak(cur)
-        self.assertEqual(status, "PASS")
-        self.assertIn("soak healthy", msg)
-        self.assertIn("divergences=0", msg)
-
-    def test_query_exception_fail_closed(self) -> None:
+    def test_plive_existence_query_exception_fail_closed(self) -> None:
         cur = MagicMock()
         cur.connection = MagicMock()
         cur.connection.rollback = MagicMock()
@@ -164,100 +107,101 @@ class TestCheck81FailClosed(unittest.TestCase):
         status, msg = check_81_lease_ipc_soak(cur)
         self.assertEqual(status, "FAIL")
 
-
-class TestClassifyRustOutcome(unittest.TestCase):
-    """EQUIV sampler：Rust event/to_state → OUTCOME 標籤正規化。"""
-
-    def test_acquire_success_granted(self) -> None:
-        self.assertEqual(classify_rust_outcome("lease_acquire_success", "ACTIVE"), "granted")
-
-    def test_acquire_fail_denied(self) -> None:
-        self.assertEqual(classify_rust_outcome("lease_acquire_fail", "REJECTED"), "denied")
-
-    def test_bypass(self) -> None:
-        self.assertEqual(classify_rust_outcome("lease_acquire_bypass", "BRIDGED"), "bypass")
-
-    def test_non_acquire_event_none(self) -> None:
-        # release / sm_transition / 中間態 → None（caller 跳過）。
-        self.assertIsNone(classify_rust_outcome("lease_release_consumed", "CONSUMED"))
-        self.assertIsNone(classify_rust_outcome("lease_sm_transition", "FROZEN"))
+    def test_plive_healthy_passes_with_observed(self) -> None:
+        # P-LIVE 健康 + comparator 觀測欄完整（0 div）→ PASS，msg 含觀測欄。
+        cur = _cursor(_PLIVE_OK + _observed(500, 500, 0, True, 10))
+        status, msg = check_81_lease_ipc_soak(cur)
+        self.assertEqual(status, "PASS")
+        self.assertIn("soak healthy (P-LIVE gate)", msg)
+        self.assertIn("lease_transitions count=12345", msg)
+        # comparator 觀測欄（非 gate）出現在 msg。
+        self.assertIn("observed[comparator non-gate]", msg)
+        self.assertIn("divergences=0", msg)
+        self.assertIn("flag=ON", msg)
 
 
-class TestReplaySampler(unittest.TestCase):
-    """EQUIV sampler：真實 rows 驅動 comparator（dry-run 統計不污染 counter）。"""
+class TestCheck81ComparatorNonGate(unittest.TestCase):
+    """[81] comparator 觀測欄非 gate（rework (b)+(b-i) 核心斷言）。
 
-    def test_dry_run_classifies_without_recording(self) -> None:
-        rows = [
-            {"lease_id": "l1", "event": "lease_acquire_success", "to_state": "ACTIVE",
-             "profile": "Production", "engine_mode": "demo", "ts_ms": 1},
-            {"lease_id": "l2", "event": "lease_release_consumed", "to_state": "CONSUMED",
-             "profile": "Production", "engine_mode": "demo", "ts_ms": 2},
-        ]
-        # hub=None → python 影子 UNKNOWN → no-opinion（不偽造判定）。
-        stats = replay_sample_through_comparator(rows, hub=None, dry_run=True)
-        self.assertEqual(stats["sampled"], 2)
-        self.assertEqual(stats["replayed"], 1)           # 只 acquire-outcome 那筆
-        self.assertEqual(stats["skipped_non_acquire"], 1)  # release 那筆跳過
-        self.assertEqual(stats["no_opinion"], 1)          # hub=None → UNKNOWN no-opinion
+    只要 P-LIVE 健康，comparator 的任何狀態（divergence>0 / 缺表 / 缺 row / flag-OFF /
+    stale）都**不 FAIL**——它已降為觀測性信號，僅在 msg 報數值。
+    """
 
-    def test_replay_drives_comparator_with_real_rows(self) -> None:
-        """非 dry-run：真實 row 驅動 comparator record_divergence（rust 來自 row）。"""
-        from program_code.exchange_connectors.bybit_connector.control_api_v1.app import (
-            governance_divergence as divergence,
-        )
-        divergence.reset_divergence_state()
+    def test_divergences_positive_does_not_fail(self) -> None:
+        # P-LIVE 健康 + comparator divergences=3 → 仍 PASS（divergence 在觀測欄報，不 gate）。
+        cur = _cursor(_PLIVE_OK + _observed(500, 497, 3, True, 10))
+        status, msg = check_81_lease_ipc_soak(cur)
+        self.assertEqual(status, "PASS")
+        self.assertIn("divergences=3", msg)  # 報數值供 triage
 
-        # 一個 hub stub：影子永遠回 granted（模擬現役 Python SM 判定）。
-        hub = MagicMock()
-        hub._shadow_local_acquire_outcome.return_value = "granted"
+    def test_snapshot_table_missing_does_not_fail(self) -> None:
+        # P-LIVE 健康 + V128 snapshot 表缺 → PASS（觀測欄報 unavailable，不 gate）。
+        cur = _cursor(_PLIVE_OK + [(False,)])  # 觀測：snapshot 表缺
+        status, msg = check_81_lease_ipc_soak(cur)
+        self.assertEqual(status, "PASS")
+        self.assertIn("unavailable", msg)
+        self.assertIn("V128 snapshot table absent", msg)
 
-        rows = [
-            # rust granted vs python granted → match
-            {"lease_id": "l1", "event": "lease_acquire_success", "to_state": "ACTIVE",
-             "profile": "Production", "engine_mode": "demo", "ts_ms": 1},
-            # rust denied vs python granted → divergence
-            {"lease_id": "l2", "event": "lease_acquire_fail", "to_state": "REJECTED",
-             "profile": "Production", "engine_mode": "demo", "ts_ms": 2},
-        ]
-        stats = replay_sample_through_comparator(rows, hub=hub, dry_run=False)
-        self.assertEqual(stats["replayed"], 2)
-        # comparator 真實計入（flusher 再投影到 PG）。
-        counters = divergence.get_divergence_counters()
-        self.assertEqual(counters["total"], 2)
-        self.assertEqual(counters["divergences"], 1)  # l2 rust=denied vs python=granted
-        self.assertEqual(counters["matches"], 1)      # l1 rust=granted vs python=granted
-        divergence.reset_divergence_state()
+    def test_snapshot_row_missing_does_not_fail(self) -> None:
+        # P-LIVE 健康 + snapshot 表在但無 'singleton' row → PASS（觀測欄報 unavailable）。
+        cur = _cursor(_PLIVE_OK + [(True,), None])
+        status, msg = check_81_lease_ipc_soak(cur)
+        self.assertEqual(status, "PASS")
+        self.assertIn("no snapshot row", msg)
 
+    def test_flag_off_does_not_fail(self) -> None:
+        # P-LIVE 健康 + comparator flag_enabled=False → PASS（觀測欄報 flag=OFF，不 gate）。
+        cur = _cursor(_PLIVE_OK + _observed(500, 500, 0, False, 10))
+        status, msg = check_81_lease_ipc_soak(cur)
+        self.assertEqual(status, "PASS")
+        self.assertIn("flag=OFF", msg)
 
-class TestFetchReadOnly(unittest.TestCase):
-    """EQUIV sampler：fetch 只 SELECT（read-only，無 INSERT/UPDATE/DELETE）。"""
+    def test_snapshot_stale_does_not_fail(self) -> None:
+        # P-LIVE 健康 + comparator snapshot 很舊 → PASS（觀測欄照報 age，不 gate）。
+        cur = _cursor(_PLIVE_OK + _observed(500, 500, 0, True, 99999))
+        status, msg = check_81_lease_ipc_soak(cur)
+        self.assertEqual(status, "PASS")
+        self.assertIn("snapshot_age=99999s", msg)
 
-    def test_fetch_emits_select_only(self) -> None:
+    def test_observed_query_exception_does_not_fail(self) -> None:
+        # P-LIVE 健康；comparator 觀測查詢拋例外 → PASS（觀測欄報 error，不 gate）。
         cur = MagicMock()
         cur.connection = MagicMock()
         cur.connection.rollback = MagicMock()
-        cur.fetchall.return_value = [
-            ("l1", "lease_acquire_success", "ACTIVE", "Production", "demo", 1),
-        ]
-        rows = fetch_recent_lease_transitions(cur, limit=10)
-        self.assertEqual(len(rows), 1)
-        self.assertEqual(rows[0]["lease_id"], "l1")
-        # 驗 SQL 是 SELECT、含 shadow 過濾、無寫操作關鍵字。
-        sql = cur.execute.call_args[0][0]
-        self.assertIn("SELECT", sql)
-        self.assertIn("FROM learning.lease_transitions", sql)
-        self.assertIn("engine_mode <> 'shadow'", sql)
-        upper = sql.upper()
-        for forbidden in ("INSERT", "UPDATE ", "DELETE", "DROP", "ALTER"):
-            self.assertNotIn(forbidden, upper)
+        # 前 2 次 fetch（P-LIVE）正常；第 3 次（觀測 existence）execute 拋例外。
+        cur.fetchone.side_effect = [(True,), (12345, 5000)]
 
-    def test_fetch_query_failure_returns_empty(self) -> None:
-        cur = MagicMock()
-        cur.connection = MagicMock()
-        cur.connection.rollback = MagicMock()
-        cur.execute.side_effect = RuntimeError("pg boom")
-        rows = fetch_recent_lease_transitions(cur, limit=10)
-        self.assertEqual(rows, [])  # fail-soft
+        call_state = {"n": 0}
+
+        def _execute(*_a: Any, **_k: Any) -> None:
+            call_state["n"] += 1
+            # 第 3 個 execute = 觀測欄的 to_regclass(snapshot)，拋例外。
+            if call_state["n"] >= 3:
+                raise RuntimeError("observed boom")
+
+        cur.execute.side_effect = _execute
+        status, msg = check_81_lease_ipc_soak(cur)
+        self.assertEqual(status, "PASS")
+        self.assertIn("unavailable", msg)
+
+
+@unittest.skip(
+    "EQUIV sampler DEPRECATED — operator (b)+(b-i) 2026-06-03：Option 2 下歷史 replay vs "
+    "contemporaneous comparator 語意不可達（E2 HIGH-2 + PA reconciliation），sampler 已從 "
+    "soak gate 路徑移除、不接 production。保留檔案防重寫；不再對其行為斷言。"
+)
+class TestEquivSamplerDeprecated(unittest.TestCase):
+    """EQUIV sampler 行為測試 —— 已 DEPRECATED（(b)+(b-i)），整類 skip。
+
+    sampler（lease_ipc_equiv_sampler.py）在 Option 2 下語意不可達，已不接 gate（comparator
+    降觀測性信號）。原本驗 classify_rust_outcome / replay_sample_through_comparator /
+    fetch read-only 的測試對「已棄用、不接 production」的程式碼斷言無價值，整類 skip。
+    sampler 檔案保留作歷史參照（含 HIGH-1/MEDIUM-1 已知缺陷，刻意不修）。
+    """
+
+    def test_deprecated_placeholder(self) -> None:
+        # skip 由 class decorator 觸發；此 placeholder 僅讓 skip 有掛載點。
+        self.fail("should be skipped (sampler deprecated)")
 
 
 if __name__ == "__main__":
