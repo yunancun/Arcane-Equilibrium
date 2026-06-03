@@ -47,7 +47,7 @@ class Trade:
     t_out: int
     holding_days: int
     gross_price_bps: float  # open-to-open 純價格 × side（不含 funding），bps
-    funding_pnl_bps: float  # 跨結算 Σ side×F（逐結算對齊），bps
+    funding_pnl_bps: float  # 跨結算 Σ (−side)×F（逐結算對齊，多付空收），bps
     n_settlements: int
     regime_in: Optional[str] = None
 
@@ -167,7 +167,7 @@ def _close_segment(trades, symbol, side, t_in, t_out, open_px, open_ts_utc,
                    funding_ts, funding_rate, regimes) -> None:
     """把一段持倉 [t_in, t_out) 收成一筆 Trade（協議 §3.0 會計三項）。
 
-    gross_price = side × ln(O_out/O_in)；funding_pnl = 逐結算對齊持有窗 Σ side×F。
+    gross_price = side × ln(O_out/O_in)；funding_pnl = 逐結算對齊持有窗 Σ (−side)×F（多付空收）。
     """
     if t_in >= t_out:
         return
@@ -205,7 +205,7 @@ def daily_returns_from_positions(
     協議 §3.0：net = gross_price + funding_pnl − (fee+slip)。position[t] 是「t 日開盤→
     t+1 日開盤」持有，當日 gross_price = position[t]×ln(O_{t+1}/O_t)。換倉（position 改變）
     當日扣一次 side fee+slip（turnover proxy）。funding_pnl 逐日對齊 [open_ts[t], open_ts[t+1])
-    內真實結算（符號：side×F，多付空收）。include_funding=False → 純 gross_price（leak/naive
+    內真實結算（符號：−side×F，多付空收）。include_funding=False → 純 gross_price（leak/naive
     look-ahead 診斷用，§2.1 純看 price-side look-ahead 不混 funding）。
     回 (gross_price_daily, net_daily)，長度 n。
     """

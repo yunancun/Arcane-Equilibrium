@@ -6,8 +6,8 @@ MODULE_NOTE:
   ★ 會計約定（§3.0，與 trend cost_model 不同）：
     ``net_edge = gross_price + funding_pnl − cost``，其中
       - ``gross_price`` = 純價格 open-to-open 報酬 × side（**不含 funding**）。
-      - ``funding_pnl`` = 持有期跨越結算的 Σ side × F_realized（**單獨一項**，可正可負，
-        逐結算對齊**非均值**）。
+      - ``funding_pnl`` = 持有期跨越結算的 Σ (−side) × F_realized（**單獨一項**，可正可負，
+        逐結算對齊**非均值**；負號=會計符號約定，見下）。
       - ``cost`` = fee + slippage（**不含 funding**）。
     為什麼 funding 要從 cost 提出來當獨立 PnL 項：本協議 funding **是信號本身**——若把
     它算成正成本（drag），會雙重懲罰；若 gross 已含 funding carry 而 cost 又扣一次，會
@@ -43,7 +43,7 @@ class TradeAccounting:
     """單筆 round-trip 會計三項（全部 bps，相對名目）— 協議 §3.0。"""
 
     gross_price_bps: float  # 純價格 open-to-open × side（不含 funding）
-    funding_pnl_bps: float  # 跨結算 Σ side×F（獨立項，>0=收 carry，<0=付 funding）
+    funding_pnl_bps: float  # 跨結算 Σ (−side)×F（獨立項，>0=收 carry，<0=付 funding）
     cost_bps: float         # fee + slippage（不含 funding）
     net_bps: float          # gross_price + funding_pnl − cost
     side: int               # +1 long / -1 short
@@ -72,7 +72,7 @@ def funding_pnl_bps_for_settlements(
 ) -> tuple[float, int]:
     """逐結算對齊的 funding PnL（bps）— 協議 §3.3（非均值近似，相對 trend 的升級）。
 
-    funding_pnl = Σ(持有期跨越的每個結算) side × F_realized_settlement × 1e4。
+    funding_pnl = Σ(持有期跨越的每個結算) (−side) × F_realized_settlement × 1e4。
     符號：多單（side=+1）付正 funding → funding_pnl 為負（成本）；空單（side=-1）在正
     funding 下收 funding → funding_pnl 為正（補貼/收割）。
     settlement_rates: 持有期內真實跨越的結算費率序列（分數），由 pnl 模塊用各 symbol
