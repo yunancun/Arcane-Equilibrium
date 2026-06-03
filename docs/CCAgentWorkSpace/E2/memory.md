@@ -4607,3 +4607,43 @@ Scope: backfill/funding_oi_backfill.rs(795) + funding_oi_writer.rs(391) + bin/fu
 2. 只有 retCode=0 的頁進 page ledger（nonzero→Err 不留頁行，只 symbol-level failed coverage）。與 daily_kline 風格一致，可接受；若要 page 級失敗痕跡需另設計（非本任務範圍）。
 
 教訓：孤兒 WIP 無 E1 報告時，mutation-test 是唯一能證「strict-parse 測試真有 bite」的手段——本次親手注入 BB 警告的確切 bug 確認 7 test 轉紅，比採信測試名可靠。
+
+---
+
+## 2026-06-03 — Dream 管線 Option A（語意清晰化 additive 註解+payload-key）對抗審查 → PASS to commit（無需 E4）
+
+範圍：2 檔 uncommitted（HEAD 188e9ec6 未動，git dirty 恰 2 檔）。`dream_engine.py`(+5/-0：1 dict key `expected_net_bps_kind="heuristic_recovery_projection"` + 4 行中文註) + `mlde_demo_applier_evidence_filter.py`(+7/-0：tier 語意純中文註解塊)。RCA 確認 `mlde_shadow_recommendations.expected_net_bps`(source='dream_engine') 是啟發式回收投影非實測 edge，Option A = 純語意標記不改 tier/值/邏輯，demo-only advisory blast radius。§5 race 5/5（5a HEAD==origin/main==188e9ec6 fetch 後一致、2h 窗無衝突 sibling、5c 無 stash、5b scope 乾淨僅 2 宣告檔、5d read-only、5e review 中無 push）。
+
+**PASS（0 BLOCKER/0 HIGH/0 MED/0 LOW）。可 commit。判定無需 E4——unit test + 本審查已足。**
+
+親驗證據（非採信 E1）：
+- **additive 純度 numstat 鐵證**：`git diff --numstat` = `5 0` + `7 0`；`grep "^-"` exit=1（**0 removed line**）。純插入，無一行被改/刪。formula `abs(avg_bps)×min(0.5,conf)`、tier_arg、`applied=false`、`verify_replay_evidence_and_insert` 19-arg 調用全在 additive hunk 外、結構未動。
+- **persist 路徑親驗成立（推翻「schema 擋 key」假設）**：`Json(insight)`(persist:570) 綁到 `%s -- p_payload`（tuple 第 6 位對應第 6 個 %s）。SQL function 定義在 **V055**(`verify_replay_evidence_function_full_insert.sql`:457)=`INSERT ... payload VALUES COALESCE(p_payload,'{}'::jsonb)` 原樣寫入 JSONB column。5 個 RAISE EXCEPTION(:338/:347/:357/:364/:382/:388) **只驗 tier-allowlist / source-allowlist / replay 複合契約 / TTL，無一檢查 payload key 內容**。JSONB column 接受任意 key → 新 key 不可能致 INSERT 失敗。E1「不需改 persist」claim 屬實。
+- **consumer 0 破壞**：applier(`mlde_demo_applier.py`) 全程 selective `.get(key)`（:293/:302/:303/:304/:439/:444 取 proposed_params/suggested_change_pct/direction/param_name/risk_patch/net_regret_direction）+ `payload->>'fingerprint'` SQL，**從不 iterate 全 key 或 whole-dict 相等比對** → additive key 對所有 selective reader 隱形。grep `== insight|insight ==|== payload|assertEqual(insight` 0 命中。test fixture 只有單 key 正向斷言（`insight["expected_improvement_bps"]==approx(4.0)`，test_mlde_shadow_advisor:275）非整 dict ==，新 key 不破壞。
+- **回歸親跑**：system python3 pytest 9.0.2 跑 `test_r7_producer_upgrade.py + test_mlde_shadow_advisor.py` = **16 passed in 0.07s**（涵蓋 build_dream_summary 輸出斷言 + dream producer persist-tier path）。E1 報「6+8」實 16，覆蓋且超出。
+- **註釋規範**：skill 大段英文 added-line regex exit=1（純中文，僅技術識別子 expected_net_bps/mlde_shadow_recommendations/expected_net_bps_kind/heuristic_recovery_projection 保留）。既有 REF-20 P4-S11 bilingual block(:52-61) **未動**（Chinese-first：未觸及不清理），新塊純中文 append 其後，0 mangle。語意準確（「證據基底為真」vs「expected_net_bps 啟發式」區分正確、非誤導、正確指向 payload.expected_net_bps_kind）。
+- **scope/硬邊界**：added-line grep `live_execution|execution_authority|system_mode|mainnet|OPENCLAW_ALLOW` exit=1；`/home/ncyu|/Users/` exit=1。`_estimate_candidate_edge`/`generate_replay_candidates` 未碰（diff 外）。
+
+**E4 判定理由（明確建議無需 E4）**：(a) 0 removed line 純 additive；(b) 0 控制流/公式/值/參數變動；(c) 新 key 不進任何 typed column 只進 JSONB free-form payload，無 schema/CHECK/whitelist 可拒；(d) 全下游 selective-get 對 additive key 隱形，consumer 面已 grep+test 雙證；(e) blast radius = demo-only advisory，無 live/execution path 觸點；(f) 註解改動對 runtime 0 影響。本審查 + 16 passed unit test 已覆蓋全 surface，full E4 regression 邊際價值 ≈ 0。**commit 後直接收口。**
+
+**教訓沉澱**：(1) **「additive key 進 JSONB payload」最危險假設是『某處 schema/whitelist 擋掉致 INSERT 失敗』——必親查 SQL function 定義（本案 V055）確認 payload 是 `COALESCE(p_payload,'{}'::jsonb)` 原樣寫入、RAISE 塊不檢 payload key 內容**；JSONB column 本質接受任意 key，但若 function 有 `jsonb ? 'key'` 白名單或 jsonb_typeof 強檢就會炸——本案逐 RAISE 確認只驗 tier/source/replay/TTL 故安全。(2) **consumer 破壞性看『讀 payload 的方式』**：selective `.get(key)` → additive 隱形不破壞；whole-dict `==` / iterate-all-keys / 嚴格 JSON schema 才破壞。grep `== <dictvar>` + `assertEqual(<dictvar>` 是判 fixture 硬比對的標準手法。(3) **numstat `N 0`（0 removed）是 additive-only 的鐵證**——比逐行讀 diff 判「有無夾帶邏輯」更快更硬；配 `grep "^-"` exit=1 雙確認。(4) **無需 E4 的明確條件**：0 removed line + 0 控制流/公式變動 + 新值只進 free-form JSONB（無 typed-column/CHECK）+ 下游 selective-read + demo-only blast radius + 註解級 runtime-0-impact → unit test+審查足，full regression 邊際 0。此判據可進 additive-comment/payload-key 改動的 E4-skip template。
+
+## 2026-06-03 — funding-tilt 診斷 harness (6aefa576) 對抗審查 → PASS (NO-GO-C 真實負判定)
+
+**對象**: commit 6aefa576 funding_tilt_diagnostic/ (data_loader/signals/cost_model/pnl/stats/harness 6檔 + 32 test)。任務假設「假陰性: 符號錯/leak-fix 過度懲罰把真 carry 壓成負」。HEAD==origin/main==6aefa576 working tree clean §5 race 5/5。
+
+**核心對抗結論: NO-GO-C 是真實負判定, 非 bug 假陰性 — 數學+數據雙重鎖死**:
+- run artifact aggregate: gross_price=+24.73 / funding_pnl=+5.39 / cost=21 / **net=+9.12(正!)** / carry_cost_ratio=3.896 / carry_share=0.179。net 正但 carry 只貢獻 17.9%, 82% 來自裸價格方向。
+- **per-leg 決定性**: LONG(做多最負funding) gross_price=−63.38/funding_pnl=0.88/net=−83.5(做多alt價格大跌災難, 幾乎收不到carry); SHORT(做空最正funding) gross_price=+88.64/funding_pnl=8.66/net=+76.3(碎正net全來自alt下跌beta非carry, carry_share=0.089)。**=MEMORY 反覆的「down-market beta 偽裝 edge」「bull short-side squeeze 偽裝 carry」**。
+- **決定性數據** (docker exec trading_postgres psql -U trading_admin -d trading_ai): canonical run realized **median|F|=0.8527bps/settle** mean=0.9057 n=46539。spec line 116 break-even 需 median|F|≳1bp → **實測 0.85<1 物理命中 §3.4 最可能失敗模式**。carry 量級被 realized funding 物理上限鎖死, 信號 off-by-one 不改 funding 收益(只改選股), 要跨 21bps 牆需 |F| 翻倍=數據物理不可能。
+
+**符號 bug (E1 自抓 +side×F→−side×F) 修對且完整**: 三處獨立實作全 `−side×F` 一致 — cost_model.py:89 `total += -side*float(r)*1e4` / pnl.py:232 `fund_pnl += -float(p)*float(r)` / harness.py:381 `sum(-side*float(r) for r in rates)`。grep 0 殘留 +side×F。per-leg 符號自證: short-leg funding_pnl=+8.66(正,空收正funding)、long-leg=+0.88(正小) → 若符號反這裡會是負。**符號 bug 不可能造此假陰性: 若有殘留 short carry 會變負反而強化「無 edge」結論, 不會藏真 carry edge**。
+
+**verdict 命脈 OK (避開 multiday_trend 坑)**: _decision_tree 在 run_diagnostic:686 內調用寫 report["decision_tree"], main():1152 只讀不 override。NO-GO-C 觸發 line 773 `amortization_fails OR cost_wall`: net_turns_positive=True→amortization_fails=False, 但 cost_wall=(3.896>=0.8)=True → True 進 NO-GO-C ✓ verdict 正確。32 test 全綠, naive-bite(spike 注入 naive[5]咬)/forward-sig 雙向 bite/K=8 自檢/readonly SQL 靜態(489-497 掃 INSERT/UPDATE/DELETE + set_session斷言) 全有 bite。
+
+**Findings (退 E1, 全非阻 verdict)**:
+- LOW-1 leak-free 邊界 off-by-one 過度排除 (signals.py:108-112): `lf_cut=open−eps(eps=1完整interval=480min)` 配 bisect_left → 排除前一日16:00 結算。**spec line 68 明確要「只能用前一日16:00 **及更早**」(用 ≤ 號 + ε=1interval 讓「≤前一日16:00」=含它); 基準 AEG-S0 §2.3 `feature_ts ≤ t−one_complete_bar` 也是 ≤**。E1 用 `<`(bisect_left)破壞 spec 的 ≤。修: bisect_left→bisect_right on (open−eps) 或直接 bisect_left on open。**對 verdict 無實質影響**(信號滯後8h只改選股不改 carry 量級; carry 量級被 median|F|=0.85bps 鎖死)。test:120-124 註釋把「排除第9日16:00」固化為預期=**測試鎖死了錯誤行為**, 修 code 須同步改 test。
+- LOW-2 NO-GO-C reason 字串自相矛盾 (harness.py:778, E1 flag#1): 寫死「amortization disproven net stays ≤0」但同句列印 net_turns_positive_with_horizon=True。真 binding=cost_wall(carry_cost_ratio=3.896)。verdict 正確、字串誤導。修: reason 按 amortization_fails/cost_wall 哪個 True 分支生成。
+- LOW-3 docstring 符號表述殘留 (cost_model.py:9/47/75 line161 "Σ side×F" / pnl.py:49 _close_segment:170 "Σ side×F"): 代碼是 −side×F, docstring 多處仍寫正號 Σ side×F(E1 修符號時 docstring 未同步)。讀者誤導, 修為 −side×F 或註明會計符號。
+
+**教訓**: (1) 負判定 harness 審「假陰性」最有力武器=查被判項的**物理量級上界**(realized funding median|F|), 一旦量級被數據鎖死, 任何信號/邊界 bug 都不可能翻 verdict — 比逐行追符號更決定性。(2) **per-leg 分解是 down-market beta 偽裝 carry 的照妖鏡**: aggregate 正 net 拆 long/short leg 後 short-leg gross_price>>funding_pnl 立即暴露「碎正 net 來自方向 beta 非 carry」。(3) test 把 off-by-one 邊界當預期固化=「測試綠」對邊界正確性是假安心(承 multiday_trend 教訓延伸: 不只查 verdict 命脈, 邊界 test 也要對 spec 核而非對 code 核)。

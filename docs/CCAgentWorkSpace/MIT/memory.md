@@ -1206,3 +1206,43 @@ claimed-live.
 **結論：0 項 NOT-RESOLVED，0 項需 reinstate 回 active。** 攻面打不破：dup/NULL/fake-zero/OHLC-invariant/orphan-run/wrong-symbol/date-gap/PK-dup/provenance-stub/C3-runtime-reject/zero-leak-static 全過。唯二 minor provenance-completeness gap（git_sha NULL on klines provenance；funding_interval_minutes NULL）= cosmetic lineage 欠缺非 data-integrity 破口，不影響 PIT 證據可信度。POLUSDT 晚上市簽名在 klines/funding/OI 三處一致 = 最強真實性指紋（stub 不可能複製）。
 
 **教訓（對抗性審計正面案例）**：本次 v111「DONE」聲稱經 ground-truth 全部成立——與多數 audit「代碼審計過度歸因 / commit≠runtime live」相反，此處 commit + runtime + data 三層一致。關鍵證偽手法：(a) per-symbol 重算 14505/348153 對賬而非信 aggregate；(b) POLUSDT 晚上市三表交叉驗（最難偽造）；(c) 親跑 NULL INSERT 測 C-3 runtime reject 而非只讀 DDL is_nullable；(d) 親跑 dry-run 重現 smoke EXIT=0 而非信口頭；(e) 讀 ws_control.jsonl mtime+size 證 WS 真活而非信 pgrep 存在。
+
+## 2026-06-03 Dream 反事實評估器對抗審計 (blocked-signal edge 研究)
+
+**Trigger**: 主會話 12h monitor + blocked-signal 反事實研究；operator 要嚴格深挖每個 gate 是否扼殺可回收 edge。獨立審計 `trade-core:/tmp/openclaw/monitor_12h/dream_counterfactual.py` + `cf_24h.json`。
+
+**Report**: workspace/reports/2026-06-03--dream_counterfactual_leakage_pipeline_audit.md (本次)
+
+**核心裁決 — grid_short_60m 旗標 = ARTIFACT (market beta), 不是 edge**:
+- MIT 獨立寫 `beta_quant.py` 做 side-adjusted market-beta 分解 (n=1469 grid_short blocked, H60m, 同 cf_24h 窗口):
+  - raw signal_ret +20.55bps t=5.77
+  - side-adj market_beta +21.80bps t=8.11
+  - **demeaned residual (signal-specific alpha) = -1.25bps t=-0.56 51.4%pos = 統計零, 微負**
+  - beta coef = 1.036; market 貢獻 = **106%** of raw return
+- 對稱鏡像確認 (next_bar 重跑同窗): grid_short side=-1 +20.53 t=5.71 **vs** side=+1 -25.44 t=-5.69。short/long 完美隨方向翻號 = 下跌市場的 directional beta 簽名, 非 gate-discriminating alpha。真 cost_gate 誤殺不會隨倉位方向完美翻號。
+- 同窗所有 60m blocked cohort 都正 (atr_unavailable +62, duplicate_position +234 n=1) = 全吃同一 beta, 證明非 grid 專屬。
+- t=5.8 假性顯著根因: 同 15min bucket 內 **20/22 symbol 同時 fire** (cross-sectional 強相關), dedup 不破 beta 依賴；effective independent blocks ~86 不是 1279。
+
+**Leakage 審計 dream_counterfactual.py (4 findings)**:
+1. **HIGH 已暴露非主因**: signal_bar entry 用「信號分鐘 close」= intra-bar look-ahead (grid 信號 cluster 在 sec 0-5, entry 卻用 sec59 close → ~58s 未來 intra-bar 資訊)。但 next_bar 重跑 grid_short_60m 幾乎不變 (+20.53 vs +22.65) → 此 leak 非 artifact 來源, beta 才是。**建議預設 next_bar (乾淨), signal_bar 僅作敏感度對照**。
+2. **CRITICAL 方法論**: 無 market-beta 中性化 → 60m horizon 收的是 universe drift 非 signal alpha。fixed-horizon close-to-close 對分鐘級 grid (剝頭皮) 用 60m = horizon-strategy mismatch, 必混入 beta。
+3. **MED 偽複製**: 15min 桶 dedup 破同 symbol 重複, 但**不破 cross-symbol 同窗 beta 污染** (20 symbol 同窗)。t-stat 需 cluster-robust SE (按 15min time-block clustering) 或 block-bootstrap, 不能用 naive iid t。
+4. **MED survivorship/kline**: Bybit start=bar 開盤 ms 對齊正確 (cache[t]=close, t//60*60*1000)；skipped 336/2621 (~13%) 是 kline 缺口/新上市無歷史 → 潛在 survivorship (只評到有 kline 的 symbol)。
+
+**既有 dream/mlde 管線可信度判定 = 結構性不能回答 operator 問題**:
+- `learning.mlde_shadow_recommendations` 16332 筆 `evidence_source_tier='real_outcome'` **mislabel**: dream_engine parameter_proposal 7455 筆的 `expected_net_bps = build_dream_summary 的 round(abs(avg_bps)*min(0.5,conf),4)` (dream_engine.py:283) = 當前已實現 avg net bps 的啟發式變換, **非** forward prediction, **非** blocked-signal 反事實。且 R7 provider 異常 fallback 硬寫 tier='real_outcome' (dream_engine.py:~533)。
+- `_estimate_candidate_edge` (dream_engine.py:813-815) = `base_edge_bps(-2.0 硬編) + sign*param_drift + noise=uniform(-1,1)` = 合成先驗+隨機噪音, 0 真實市場 outcome。
+- V031 view `mlde_edge_training_rows`: `net_bps_after_fee = df.label_net_edge_bps`; valid row 要 `attribution_chain_ok=true AND label_net_edge_bps IS NOT NULL` — 只 FILLED+realized exit 有。V084 對 blocked 寫 `label_net_edge_bps=0.0 + label_close_tag='rejected_governance'` 佔位 (實測 24h: 364263 row has_tag=t/is_zero=t)。**view 結構上排除 blocked 反事實, 只有佔位 0**。→ 既有管線**不能**回答「blocked 放行盈虧」, dream_counterfactual 這條獨立路徑是對的方向但需修 beta+horizon。
+
+**T+12h 嚴格評估設計建議 (給主會話)**:
+1. **beta 中性化必做**: 每信號減 side-adj 同窗 universe 等權報酬 (或對 BTC/ETH 回歸取殘差)；只 demeaned residual 才是 signal alpha。
+2. **horizon 配持有期**: grid/bb_reversion 分鐘級用 H=5/15 上限, 不用 60m (60m 是 beta 收集器)。理想用 dream_engine replay 真 exit 邏輯非固定 horizon。
+3. **cluster-robust 顯著性**: 按 15min time-block clustering SE 或 stationary block-bootstrap (block=持有期)；naive iid t 因 cross-sectional corr 高估 ~3-5×。
+4. **多重檢定**: 18 segment 掃描 → Bonferroni/BH-FDR 或 Deflated Sharpe (QC C1.b)；單窗口必出假陽性。
+5. **purge+embargo**: blocked vs passed 對照若進 ML, train/test 按 ts split + embargo ≥ max horizon (60m)；同窗 blocked/passed 不可跨 split。
+6. **data drift**: 跨 12h 窗口 vs 24h pilot 做 BTC realized-vol PSI + regime label, 確認 window 非單一下跌 regime artifact (本次明顯 down-regime)。
+7. **min sample per segment**: grid 過, ma/bb 全 n<50 (33/19/6/3) 無統計力, 標 insufficient 不下結論。
+
+**對 operator 問題「cost_gate 是否扼殺可回收 edge」的 MIT 階段性回答**: 目前**無證據** cost_gate 錯殺真 edge。唯一旗標 grid_short_60m 經 beta 分解後 signal-specific alpha = -1.25bps (零)；cost_gate 擋的是「負 net edge」的負 alpha 信號, 與 2026-06-01 fail-closed gate RCA (cost_gate 14d 拒 90.5% 被拒 estimate 100% 真負, 0 誤殺正 edge) 收斂。blocked 空間若有可回收 edge, 必須在 beta-neutral + 持有期對齊 + cluster-robust 下重驗才算數。
+
+**教訓**: fixed-horizon close-to-close 反事實對「方向性策略 + 長 horizon」必然把 market beta 誤計為 signal edge；任何 blocked-signal edge 主張須先做 side-adjusted beta 分解 (本次 demeaned t=-0.56 直接證偽 t=5.8 假象)。對稱鏡像測試 (long vs short 同窗翻號) 是廉價有力的 beta 偵測法。
