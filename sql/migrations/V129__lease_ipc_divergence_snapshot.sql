@@ -1,5 +1,5 @@
 -- ============================================================
--- V128: learning.lease_ipc_divergence_snapshot
+-- V129: learning.lease_ipc_divergence_snapshot
 --       — SM Option 2 收斂 soak 可觀測性（P5-SM-OPTION2 B-3）的 PG 投影表
 --
 --   SM Option 2 step-(i) soak 的「可觀測性橋接」。Python comparator
@@ -23,7 +23,7 @@
 --   Template: sql/migrations/V054__lease_transitions_audit_writer.sql（Guard A + Guard C
 --     CREATE INDEX IF NOT EXISTS + CHECK 條件式加既有 pattern）。
 --
--- 範圍 / Scope (V128):
+-- 範圍 / Scope (V129):
 --   §A CREATE SCHEMA IF NOT EXISTS learning（idempotent；早於 V054 已建，第二次 no-op）
 --   §B CREATE TABLE IF NOT EXISTS learning.lease_ipc_divergence_snapshot + Guard A
 --      （既有表缺必要欄 → RAISE）
@@ -97,9 +97,10 @@
 --   - 本表純觀測投影；step-(iv) cleanup 會連同 comparator + dual-write mirror 一起退役
 --     （soak 0 divergence 後）。屆時可 DROP 本表（見 §E）。
 --
--- migration latest: V127 → V128（Linux _sqlx_migrations head 預期含 V125/V126/V127；
---   V116-124 held 給 M5/M7/M12/M13 + funding_arb V3，V128 避撞；breadth ladder 是
---   artifact-only 不佔號，故 V128 collision-safe）。
+-- migration latest: V127 → V129（Linux _sqlx_migrations head 預期含 V125/V126/V127；
+--   V116-124 held 給 M5/M7/M12/M13 + funding_arb V3；前一序號讓給並行 session 的
+--   listing-capture collector（sqlx 不容同號），本 soak 表 renumber 至 V129；breadth
+--   ladder 是 artifact-only 不佔號，故 V129 collision-safe）。
 -- ============================================================
 
 -- 全 migration 包在單一 transaction（原子 all-or-nothing；對齊 V054 critical-section
@@ -141,11 +142,11 @@ BEGIN
         );
         IF v_missing IS NOT NULL AND array_length(v_missing, 1) > 0 THEN
             RAISE EXCEPTION
-                'V128 Guard A FAIL: learning.lease_ipc_divergence_snapshot exists but missing '
+                'V129 Guard A FAIL: learning.lease_ipc_divergence_snapshot exists but missing '
                 'required columns: %. 解決 legacy schema drift（DROP + re-apply 或 ALTER ADD）'
-                '後重跑 V128.', v_missing;
+                '後重跑 V129.', v_missing;
         END IF;
-        RAISE NOTICE 'V128 Guard A: learning.lease_ipc_divergence_snapshot already present with all required columns';
+        RAISE NOTICE 'V129 Guard A: learning.lease_ipc_divergence_snapshot already present with all required columns';
     END IF;
 END $$;
 
@@ -186,9 +187,9 @@ BEGIN
         ALTER TABLE learning.lease_ipc_divergence_snapshot
             ADD CONSTRAINT chk_lease_ipc_div_snapshot_nonneg
             CHECK (total >= 0 AND matches >= 0 AND divergences >= 0);
-        RAISE NOTICE 'V128: added CHECK chk_lease_ipc_div_snapshot_nonneg (counters non-negative)';
+        RAISE NOTICE 'V129: added CHECK chk_lease_ipc_div_snapshot_nonneg (counters non-negative)';
     ELSE
-        RAISE NOTICE 'V128: chk_lease_ipc_div_snapshot_nonneg already present; skipping';
+        RAISE NOTICE 'V129: chk_lease_ipc_div_snapshot_nonneg already present; skipping';
     END IF;
 
     IF NOT EXISTS (
@@ -199,9 +200,9 @@ BEGIN
         ALTER TABLE learning.lease_ipc_divergence_snapshot
             ADD CONSTRAINT chk_lease_ipc_div_snapshot_total_ge
             CHECK (total >= matches + divergences);
-        RAISE NOTICE 'V128: added CHECK chk_lease_ipc_div_snapshot_total_ge (total >= matches + divergences)';
+        RAISE NOTICE 'V129: added CHECK chk_lease_ipc_div_snapshot_total_ge (total >= matches + divergences)';
     ELSE
-        RAISE NOTICE 'V128: chk_lease_ipc_div_snapshot_total_ge already present; skipping';
+        RAISE NOTICE 'V129: chk_lease_ipc_div_snapshot_total_ge already present; skipping';
     END IF;
 END $$;
 
@@ -220,17 +221,17 @@ BEGIN
     ) INTO v_has_pk;
     IF NOT v_has_pk THEN
         RAISE EXCEPTION
-            'V128 Guard C FAIL: learning.lease_ipc_divergence_snapshot 缺 PRIMARY KEY '
+            'V129 Guard C FAIL: learning.lease_ipc_divergence_snapshot 缺 PRIMARY KEY '
             '(snapshot_key) — UPSERT ON CONFLICT 目標必須存在.';
     END IF;
-    RAISE NOTICE 'V128 Guard C: PRIMARY KEY(snapshot_key) present (UPSERT target OK)';
+    RAISE NOTICE 'V129 Guard C: PRIMARY KEY(snapshot_key) present (UPSERT target OK)';
 END $$;
 
 -- ============================================================
 -- §COMMENT 語義文檔（idempotent: COMMENT ON 可重跑）
 -- ============================================================
 COMMENT ON TABLE learning.lease_ipc_divergence_snapshot IS
-    'SM Option 2 soak 可觀測性（P5-SM-OPTION2 B-3，V128）：governance_divergence.py '
+    'SM Option 2 soak 可觀測性（P5-SM-OPTION2 B-3，V129）：governance_divergence.py '
     'in-memory comparator 計數器（total/matches/divergences）的 best-effort PG 投影。'
     'API process 內 fail-soft flusher 週期 UPSERT（snapshot_key=''singleton''，至多 1 row）；'
     'passive_wait_healthcheck cron 以 SQL-cursor 讀此表 + updated_at freshness 判 soak '

@@ -6,7 +6,7 @@ MODULE_NOTE:
     模塊用途：把 governance_divergence.py 的 in-memory comparator 計數器
     （``_COUNTERS``：total/matches/divergences，API worker process-local 記憶體）
     best-effort 週期 UPSERT 到 PG 表 ``learning.lease_ipc_divergence_snapshot``
-    （V128），讓獨立的 passive_wait_healthcheck cron process 能以 SQL-cursor 讀到
+    （V129），讓獨立的 passive_wait_healthcheck cron process 能以 SQL-cursor 讀到
     soak 信號（cron 既讀不到 API worker 記憶體、counter 也不落 PG → 需此橋接）。
 
     主要類/函數：
@@ -57,7 +57,7 @@ logger = logging.getLogger(__name__)
 # 通常 >> 30s）。對齊 reconciler_alert_monitor 的 30s poll cadence。
 _FLUSH_INTERVAL_S: int = 30
 
-# UPSERT 目標 key（V128 表 snapshot_key 預設值）；單一 leader writer 永遠寫此 key。
+# UPSERT 目標 key（V129 表 snapshot_key 預設值）；單一 leader writer 永遠寫此 key。
 _SNAPSHOT_KEY: str = "singleton"
 
 # 強制非 leader 的 env（對齊 OPENCLAW_RECON_ALERT_MONITOR_LEADER 慣例）。

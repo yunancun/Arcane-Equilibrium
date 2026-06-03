@@ -192,7 +192,7 @@ from .checks_governance_lease_ipc import (
     # P5-SM-OPTION2 B-3 (2026-06-03，rework (b)+(b-i)) — `[81]` SM Option 2
     # step-(i) soak gate。gate 唯一條件 = P-LIVE（V054 learning.lease_transitions
     # Rust 權威路徑真跑 + fresh）。fail-closed（G-1，僅對 P-LIVE）：lease_transitions
-    # 表缺 / 0 row / stale → FAIL（非 WARN）。comparator counter（V128
+    # 表缺 / 0 row / stale → FAIL（非 WARN）。comparator counter（V129
     # learning.lease_ipc_divergence_snapshot）降為**觀測欄**（msg 報數值，非 gate）——
     # Option 2 下歷史 replay vs contemporaneous comparator 語意不可達（E2 HIGH-2 +
     # PA reconciliation 2026-06-03）。cutover gate = 4a CI 綠 AND P-LIVE soak 健康。
@@ -1282,7 +1282,7 @@ def main() -> int:
             # [81] P5-SM-OPTION2 B-3 (2026-06-03，rework (b)+(b-i)): SM Option 2
             # step-(i) soak gate。gate 唯一條件 = P-LIVE（V054 learning.lease_transitions
             # Rust 權威路徑真跑 + fresh）；fail-closed（G-1）：表缺 / 0 row / stale →
-            # FAIL（非 WARN，不讀不到當綠燈）。comparator counter（V128 snapshot）降為
+            # FAIL（非 WARN，不讀不到當綠燈）。comparator counter（V129 snapshot）降為
             # 觀測欄（msg 報數值，非 gate）——Option 2 下歷史 replay vs contemporaneous
             # comparator 語意不可達（E2 HIGH-2 + PA reconciliation）。cutover gate =
             # 4a CI 綠 AND P-LIVE soak 健康。純 SQL，cursor 區塊內跑。配對 flusher

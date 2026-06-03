@@ -23,7 +23,7 @@ gate」**降為觀測性信號（非 gate）**。
 
 依賴：
   - ``learning.lease_transitions``（V054，Rust writer 寫，read-only）—— **gate 唯一資料源**。
-  - ``learning.lease_ipc_divergence_snapshot``（V128，flusher 寫）—— **僅觀測**：comparator
+  - ``learning.lease_ipc_divergence_snapshot``（V129，flusher 寫）—— **僅觀測**：comparator
     counter（total / matches / divergences / snapshot freshness / flag_enabled）在 message
     報數值供 operator triage，**不再是 FAIL 條件**。讀取失敗 / 缺表 / stale 一律降級為
     觀測欄缺值（不致 FAIL）。
@@ -65,7 +65,7 @@ def check_81_lease_ipc_soak(cur: Any) -> tuple[str, str]:
         （Rust 權威路徑可能 silent-dead）。
       * P-LIVE 全滿足 → PASS（Rust 真跑且 fresh）。msg 附 comparator 觀測欄供 triage。
 
-    comparator 觀測欄（**非 gate**，best-effort 讀 V128 snapshot；讀不到報缺值不致 FAIL）：
+    comparator 觀測欄（**非 gate**，best-effort 讀 V129 snapshot；讀不到報缺值不致 FAIL）：
       total / matches / divergences / snapshot_age / flag_enabled —— 供 operator 觀測
       comparator 在 organic 控制面流量下是否偵測到分歧；Option 2 steady-state 多半為
       organic≈0（counter 不累積），這是預期，非 soak 失敗。
@@ -122,7 +122,7 @@ def check_81_lease_ipc_soak(cur: Any) -> tuple[str, str]:
             f"may be silent-dead",
         )
 
-    # ── comparator 觀測欄（非 gate）：best-effort 讀 V128 snapshot 報數值供 triage ──
+    # ── comparator 觀測欄（非 gate）：best-effort 讀 V129 snapshot 報數值供 triage ──
     # rework (b)+(b-i)：comparator 已降為觀測性信號（Option 2 下語意不可達，不作 gate）。
     # 讀取失敗 / 缺表 / 缺 row / stale 一律降級為觀測欄缺值（report-only），**不致 FAIL**。
     observed = _read_comparator_observed(cur)
@@ -136,16 +136,16 @@ def check_81_lease_ipc_soak(cur: Any) -> tuple[str, str]:
 
 
 def _read_comparator_observed(cur: Any) -> str:
-    """best-effort 讀 V128 snapshot comparator counter，回 observability 字串（**非 gate**）。
+    """best-effort 讀 V129 snapshot comparator counter，回 observability 字串（**非 gate**）。
 
     為什麼 best-effort 而非 fail-closed：rework (b)+(b-i) 後 comparator 是觀測性信號，
     非 cutover gate 條件。Option 2 steady-state comparator organic≈0（sampler 語意不可達，
-    見 module docstring），counter 不累積是預期，不該致 soak FAIL。任何讀取失敗（V128
+    見 module docstring），counter 不累積是預期，不該致 soak FAIL。任何讀取失敗（V129
     缺 / row 缺 / stale / 查詢例外）→ 回缺值描述字串，caller 照常 PASS（gate 由 P-LIVE 定）。
 
     回字串範例：
       ``total=12 matches=12 divergences=0 snapshot_age=8s flag=ON``
-      ``unavailable: V128 snapshot table absent``
+      ``unavailable: V129 snapshot table absent``
       ``unavailable: no snapshot row (flusher not yet written)``
     """
     # 防禦性 rollback（前一 P-LIVE query 後重置 tx 狀態，避免污染本觀測查詢）。
@@ -162,7 +162,7 @@ def _read_comparator_observed(cur: Any) -> str:
     except Exception as exc:  # noqa: BLE001 — 觀測讀取失敗不致 FAIL
         return f"unavailable: snapshot existence check error ({exc})"
     if not exists_row or not exists_row[0]:
-        return "unavailable: V128 snapshot table absent"
+        return "unavailable: V129 snapshot table absent"
 
     try:
         cur.execute(
