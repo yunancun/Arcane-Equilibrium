@@ -1,32 +1,41 @@
-"""SM Option 2 收斂 soak 可觀測性 healthcheck `[81]`（P5-SM-OPTION2 B-3）。
+"""SM Option 2 收斂 soak 可觀測性 healthcheck `[81]`（P5-SM-OPTION2 B-3，rework (b)+(b-i)）。
 
-模塊用途：cron-side（SQL-cursor）讀 V128 `learning.lease_ipc_divergence_snapshot`
-（comparator 計數器的 PG 投影）+ `learning.lease_transitions`（Rust 權威路徑落地），
-以**雙信號** gate 判 SM Option 2 step-(i) soak 是否健康：
+模塊用途：cron-side（SQL-cursor）判 SM Option 2 step-(i) soak 是否健康。
 
-  - **P-EQUIV 信號**（comparator 真實樣本下 0 divergence）：讀 snapshot row，gate =
-    ``flag_enabled AND divergences==0 AND total>=N AND snapshot_freshness<threshold``。
-  - **P-LIVE 信號**（Rust 權威路徑真跑）：讀 lease_transitions row count + freshness
-    證明 Rust writer 在跑、無 fail-soft drop 堆積。
+**rework 背景（operator 拍板 (b)+(b-i)，2026-06-03）**：E2 HIGH-2 + PA reconciliation
+（`2026-06-03--p5_sm_soak_equiv_sampler_reconciliation.md`）證實——Option 2 下「歷史
+replay 驅動 contemporaneous comparator」語意不可達：sampler 拿歷史 Rust-GRANTED row
+對撞 Python hub「當前」auth state，steady-state Python hub 結構上未授權 → 每筆歷史
+GRANTED → Python 影子 DENIED → comparator divergence 永遠卡死。故 comparator 從「硬
+gate」**降為觀測性信號（非 gate）**。
 
-per PA 設計 `2026-06-03--p5_sm_soak_observability_redesign.md` §2 recommend（Fork
-②-LIVE + ②-EQUIV）+ §3 B-3 + operator O-1（cutover gate = P-LIVE AND P-EQUIV）
-+ O-2（comparator keep-as-gate，故 P-EQUIV 是硬 gate）。
+**cutover gate 新定義 = 4a CI 綠 AND P-LIVE soak 健康**（不含 comparator counter）：
+  - **4a 離線全分支 parity**（`sm_contract.rs` + `test_sm_contract_parity.py`，190-vector
+    兩獨立實作）是 P-EQUIV 的 authoritative proof，**CI 物（非本 soak healthcheck）**。
+  - **P-LIVE 信號**（本 healthcheck 唯一 gate）：讀 `learning.lease_transitions` row
+    count + freshness，證 Rust 權威路徑（真實 engine + serde + IPC + PG writer +
+    profile/engine_mode 解析）熱路徑在跑且健康。**這徹底解原 fake-pass**：gate 改讀
+    真實熱路徑 `lease_transitions`（Rust 真寫），非空轉的 comparator counter（Option 2
+    steady-state organic≈0、sampler 語意不可達）。
 
 主要函數：``check_81_lease_ipc_soak``（``(cur) -> (status, msg)``，與既有 checks_*.py
 同契約）。
 
-依賴：``learning.lease_ipc_divergence_snapshot``（V128，flusher 寫）+
-``learning.lease_transitions``（V054，Rust writer 寫，read-only）。
+依賴：
+  - ``learning.lease_transitions``（V054，Rust writer 寫，read-only）—— **gate 唯一資料源**。
+  - ``learning.lease_ipc_divergence_snapshot``（V128，flusher 寫）—— **僅觀測**：comparator
+    counter（total / matches / divergences / snapshot freshness / flag_enabled）在 message
+    報數值供 operator triage，**不再是 FAIL 條件**。讀取失敗 / 缺表 / stale 一律降級為
+    觀測欄缺值（不致 FAIL）。
 
-硬邊界（fail-closed — G-1）：
-  - **stale snapshot / flag-OFF / snapshot 缺失 / V128 未 apply → 一律非 PASS（FAIL）。**
-    對症原「讀不到當綠燈」空轉偽 pass：snapshot row 凍結（flusher 死）→ freshness
-    gate FAIL；flag_enabled=false（legacy local SM，comparator 不 fire）→ FAIL；
-    snapshot 缺失（flusher 從沒寫）→ FAIL。
-  - freshness gate 是 R2 stale-snapshot 偽 pass 緩解核心：counter 單調，但 flusher 若
-    死，stale row 的 divergences==0 會偽 pass → 強制 updated_at 新鮮度 < threshold。
-  - 真 divergence（divergences > 0）→ FAIL（comparator gate；O-2 keep-as-gate）。
+硬邊界（fail-closed — G-1，僅對 P-LIVE 適用）：
+  - **P-LIVE 任一不滿足 → FAIL（exit 1）非 WARN**：lease_transitions 表缺（V054 未 apply）
+    / 窗內 0 row / 最新 row stale（age >= threshold）。Rust 權威路徑死 → soak 不健康，
+    必 fail-closed（不可當綠燈）。
+  - freshness threshold 容忍低交易期短暫安靜（預設 3600s，O-3 ops param，operator 可調），
+    但「表缺 / 0 row / 長期 stale」= 引擎或 Rust 權威路徑死 → FAIL。
+  - comparator 觀測欄**不 fail-closed**：它已非 gate（Option 2 下語意不可達），讀不到只是
+    觀測缺值；把它當 gate 正是原 fake-pass 根因，rework 已移除。
   - 純觀測 sentinel；不碰 live 決策 / 訂單 / 任一 5 live-auth gate。step-(iv) cleanup
     連同 comparator 退役後本 check 可移除。
 """
@@ -34,43 +43,36 @@ from __future__ import annotations
 
 from typing import Any
 
-# ── soak gate 閾值（per PA §5 R5：N 與 freshness threshold 取值，operator 可調）──
-
-# P-EQUIV：comparator 須累積至少 N 筆真實樣本（EQUIV sampler 驅動）才算 soak 有效。
-# 預設 200（O-3「N≥數百 lease ops」的保守下界）。organic-only 永遠到不了此 N，
-# 故 N 來源必須是 EQUIV sampler（真實樣本回放，per PA §5 R5）。
-SOAK_MIN_TOTAL: int = 200
-
-# snapshot 新鮮度上限（秒）：flusher cadence 30s（governance_divergence_flush._FLUSH_
-# INTERVAL_S）；threshold 取 300s = 10× cadence，容忍偶發 flush miss / executor 抖動，
-# 但 flusher 真死（>5min 無更新）必觸發 stale FAIL。**這是 G-1 / R2 緩解的核心 gate。**
-SNAPSHOT_FRESHNESS_MAX_SECONDS: int = 300
+# ── soak gate 閾值（per PA §5 R5 + operator O-3：freshness threshold operator 可調）──
 
 # P-LIVE：lease_transitions 新鮮度上限（秒）。Rust 權威路徑 steady-state 應持續 emit；
-# 此處取較寬 3600s（1h）——soak 期間 lease emit 率受市場活躍度影響，1h 無任何 Rust
-# lease transition 視為權威路徑可能 silent-dead（P-LIVE FAIL）。
+# 此處取 3600s（1h）——soak 期間 lease emit 率受市場活躍度影響，低交易期可能 row 少，
+# 1h 容忍短暫安靜；但 1h 內無任何 Rust lease transition 視為權威路徑可能 silent-dead
+# （P-LIVE FAIL）。**operator 可依市場活躍度調整此預設（O-3 ops param）。**
 LIVE_TRANSITION_FRESHNESS_MAX_SECONDS: int = 3600
 
 
 def check_81_lease_ipc_soak(cur: Any) -> tuple[str, str]:
-    """[81] lease_ipc_soak — SM Option 2 step-(i) soak 雙信號 gate（P-EQUIV + P-LIVE）。
+    """[81] lease_ipc_soak — SM Option 2 step-(i) soak gate（P-LIVE only；comparator 觀測）。
 
-    Verdict（G-1 fail-closed，全部非 PASS 即 FAIL，無 WARN 軟化）：
-      * V128 snapshot 表不存在 → FAIL（flusher 投影層未部署，不可當綠燈）。
-      * snapshot row 缺失（flusher 從沒成功寫）→ FAIL。
-      * flag_enabled=false → FAIL（legacy local SM，comparator 不 fire，counter 無意義）。
-      * snapshot stale（updated_at 老於 SNAPSHOT_FRESHNESS_MAX_SECONDS）→ FAIL（flusher
-        死，stale divergences==0 偽 pass 防護；R2 緩解）。
-      * divergences > 0 → FAIL（comparator 偵測到真分歧；O-2 keep-as-gate）。
-      * total < SOAK_MIN_TOTAL → FAIL（樣本不足，soak 未達 N；organic-only 不可達，
-        須 EQUIV sampler 驅動）。
-      * P-LIVE：lease_transitions 表缺 / 0 row / 最新 row stale → FAIL（Rust 權威路徑
-        未跑 / silent-dead）。
-      * 全部滿足 → PASS（P-EQUIV 0 divergence over N fresh + P-LIVE Rust 真跑）。
+    **rework (b)+(b-i)**：gate 唯一條件 = P-LIVE（lease_transitions Rust 權威路徑健康）。
+    comparator counter 降為觀測欄（在 msg 報數值，不再 FAIL）。
+
+    Verdict（G-1 fail-closed，僅對 P-LIVE；任一不滿足即 FAIL，無 WARN 軟化）：
+      * P-LIVE：lease_transitions 表缺（V054 未 apply）→ FAIL（Rust 權威路徑不可確認）。
+      * P-LIVE：窗內 0 row → FAIL（Rust 權威路徑未 emit 任何 lease transition）。
+      * P-LIVE：最新 row stale（age >= LIVE_TRANSITION_FRESHNESS_MAX_SECONDS）→ FAIL
+        （Rust 權威路徑可能 silent-dead）。
+      * P-LIVE 全滿足 → PASS（Rust 真跑且 fresh）。msg 附 comparator 觀測欄供 triage。
+
+    comparator 觀測欄（**非 gate**，best-effort 讀 V128 snapshot；讀不到報缺值不致 FAIL）：
+      total / matches / divergences / snapshot_age / flag_enabled —— 供 operator 觀測
+      comparator 在 organic 控制面流量下是否偵測到分歧；Option 2 steady-state 多半為
+      organic≈0（counter 不累積），這是預期，非 soak 失敗。
 
     Returns:
-        ``(status, msg)``。msg 含 total/divergences/snapshot age + lease_transitions
-        count/age，供 operator triage；FAIL 標明哪個 gate 未過。
+        ``(status, msg)``。msg 含 P-LIVE lease_transitions count/age（gate）+ comparator
+        觀測欄（observed:...）；FAIL 標明 P-LIVE 哪個條件未過。
     """
     # 防禦性 rollback（鏡 checks_governance 既有 pattern）。
     try:
@@ -78,83 +80,7 @@ def check_81_lease_ipc_soak(cur: Any) -> tuple[str, str]:
     except Exception:  # noqa: BLE001 — 防禦性，rollback 失敗非致命
         pass
 
-    # ── P-EQUIV 信號：讀 V128 snapshot row + freshness ──
-    # V128 存在性檢查（未 apply → FAIL，投影層缺不可當綠燈）。
-    try:
-        cur.execute(
-            "SELECT to_regclass('learning.lease_ipc_divergence_snapshot') IS NOT NULL"
-        )
-        exists_row = cur.fetchone()
-    except Exception as exc:  # noqa: BLE001
-        return ("FAIL", f"[81] lease_ipc_divergence_snapshot existence check failed: {exc}")
-    if not exists_row or not exists_row[0]:
-        return (
-            "FAIL",
-            "[81] learning.lease_ipc_divergence_snapshot missing — V128 not applied "
-            "(soak observability projection absent; fail-closed, NOT a green light)",
-        )
-
-    # 讀 snapshot row + DB-side freshness（用 EXTRACT(EPOCH FROM now()-updated_at) 算
-    # age，避免 cron host 與 DB clock skew 影響 freshness 判定 — freshness 權威是
-    # DB now() vs DB updated_at）。
-    try:
-        cur.execute(
-            "SELECT total, matches, divergences, flag_enabled, "
-            "       EXTRACT(EPOCH FROM (now() - updated_at))::BIGINT AS age_s "
-            "FROM learning.lease_ipc_divergence_snapshot "
-            "WHERE snapshot_key = 'singleton'"
-        )
-        snap = cur.fetchone()
-    except Exception as exc:  # noqa: BLE001
-        return ("FAIL", f"[81] snapshot row query failed: {exc}")
-
-    if snap is None:
-        return (
-            "FAIL",
-            "[81] no snapshot row (flusher never wrote 'singleton') — "
-            "fail-closed (cannot treat absent counter as 0 divergence)",
-        )
-
-    total = int(snap[0] or 0)
-    divergences = int(snap[2] or 0)
-    flag_enabled = bool(snap[3])
-    snap_age_s = int(snap[4] or 0)
-
-    # flag-OFF → FAIL（comparator 不 fire，counter 無意義；不可當綠燈，G-1）。
-    if not flag_enabled:
-        return (
-            "FAIL",
-            "[81] flag_enabled=false (OPENCLAW_LEASE_PYTHON_IPC_ENABLED != '1') — "
-            "legacy local SM, comparator not firing; soak NOT in progress (fail-closed)",
-        )
-
-    # snapshot stale → FAIL（flusher 死，stale divergences==0 偽 pass 防護；R2 緩解，G-1）。
-    if snap_age_s >= SNAPSHOT_FRESHNESS_MAX_SECONDS:
-        return (
-            "FAIL",
-            f"[81] snapshot stale: updated_at age={snap_age_s}s "
-            f">= {SNAPSHOT_FRESHNESS_MAX_SECONDS}s — flusher likely dead; "
-            f"stale divergences==0 must NOT pass (fail-closed, R2 mitigation)",
-        )
-
-    # 真 divergence → FAIL（comparator gate；O-2 keep-as-gate）。
-    if divergences > 0:
-        return (
-            "FAIL",
-            f"[81] P-EQUIV FAIL: divergences={divergences} > 0 over total={total} "
-            f"(Rust-IPC vs Python-shadow disagreement; inspect get_mismatch_snapshot)",
-        )
-
-    # 樣本不足 → FAIL（soak 未達 N；organic-only 不可達，須 EQUIV sampler 驅動）。
-    if total < SOAK_MIN_TOTAL:
-        return (
-            "FAIL",
-            f"[81] P-EQUIV insufficient sample: total={total} < N={SOAK_MIN_TOTAL} "
-            f"(soak not yet matured; drive comparator via EQUIV sampler — "
-            f"organic Python-hub rate is ~0)",
-        )
-
-    # ── P-LIVE 信號：lease_transitions Rust 權威路徑真跑（read-only）──
+    # ── P-LIVE 信號（gate 唯一條件）：lease_transitions Rust 權威路徑真跑（read-only）──
     try:
         cur.execute("SELECT to_regclass('learning.lease_transitions') IS NOT NULL")
         lt_exists = cur.fetchone()
@@ -168,7 +94,7 @@ def check_81_lease_ipc_soak(cur: Any) -> tuple[str, str]:
         )
 
     # 最新 lease_transition 的 freshness（ts_ms 是 facade emit epoch ms）。空表 / stale
-    # → FAIL（Rust 權威路徑未跑 / silent-dead；P-LIVE 是 soak gate 必要信號）。
+    # → FAIL（Rust 權威路徑未跑 / silent-dead；P-LIVE 是 soak gate 唯一信號）。
     try:
         cur.execute(
             "SELECT COUNT(*), "
@@ -196,18 +122,75 @@ def check_81_lease_ipc_soak(cur: Any) -> tuple[str, str]:
             f"may be silent-dead",
         )
 
-    # ── 全 gate 通過：P-EQUIV（0 div over N fresh）AND P-LIVE（Rust 真跑）──
+    # ── comparator 觀測欄（非 gate）：best-effort 讀 V128 snapshot 報數值供 triage ──
+    # rework (b)+(b-i)：comparator 已降為觀測性信號（Option 2 下語意不可達，不作 gate）。
+    # 讀取失敗 / 缺表 / 缺 row / stale 一律降級為觀測欄缺值（report-only），**不致 FAIL**。
+    observed = _read_comparator_observed(cur)
+
+    # ── P-LIVE 通過 → PASS（gate 滿足）；msg 附 comparator 觀測欄 ──
     return (
         "PASS",
-        f"[81] soak healthy: P-EQUIV total={total} divergences=0 "
-        f"snapshot_age={snap_age_s}s flag=ON; "
-        f"P-LIVE lease_transitions count={lt_count} newest_age={lt_age_s}s",
+        f"[81] soak healthy (P-LIVE gate): lease_transitions count={lt_count} "
+        f"newest_age={lt_age_s}s; observed[comparator non-gate]: {observed}",
+    )
+
+
+def _read_comparator_observed(cur: Any) -> str:
+    """best-effort 讀 V128 snapshot comparator counter，回 observability 字串（**非 gate**）。
+
+    為什麼 best-effort 而非 fail-closed：rework (b)+(b-i) 後 comparator 是觀測性信號，
+    非 cutover gate 條件。Option 2 steady-state comparator organic≈0（sampler 語意不可達，
+    見 module docstring），counter 不累積是預期，不該致 soak FAIL。任何讀取失敗（V128
+    缺 / row 缺 / stale / 查詢例外）→ 回缺值描述字串，caller 照常 PASS（gate 由 P-LIVE 定）。
+
+    回字串範例：
+      ``total=12 matches=12 divergences=0 snapshot_age=8s flag=ON``
+      ``unavailable: V128 snapshot table absent``
+      ``unavailable: no snapshot row (flusher not yet written)``
+    """
+    # 防禦性 rollback（前一 P-LIVE query 後重置 tx 狀態，避免污染本觀測查詢）。
+    try:
+        cur.connection.rollback()
+    except Exception:  # noqa: BLE001 — 防禦性
+        pass
+
+    try:
+        cur.execute(
+            "SELECT to_regclass('learning.lease_ipc_divergence_snapshot') IS NOT NULL"
+        )
+        exists_row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001 — 觀測讀取失敗不致 FAIL
+        return f"unavailable: snapshot existence check error ({exc})"
+    if not exists_row or not exists_row[0]:
+        return "unavailable: V128 snapshot table absent"
+
+    try:
+        cur.execute(
+            "SELECT total, matches, divergences, flag_enabled, "
+            "       EXTRACT(EPOCH FROM (now() - updated_at))::BIGINT AS age_s "
+            "FROM learning.lease_ipc_divergence_snapshot "
+            "WHERE snapshot_key = 'singleton'"
+        )
+        snap = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001 — 觀測讀取失敗不致 FAIL
+        return f"unavailable: snapshot row query error ({exc})"
+
+    if snap is None:
+        return "unavailable: no snapshot row (flusher not yet written)"
+
+    total = int(snap[0] or 0)
+    matches = int(snap[1] or 0)
+    divergences = int(snap[2] or 0)
+    flag_enabled = bool(snap[3])
+    snap_age_s = int(snap[4] or 0)
+    flag_str = "ON" if flag_enabled else "OFF"
+    return (
+        f"total={total} matches={matches} divergences={divergences} "
+        f"snapshot_age={snap_age_s}s flag={flag_str}"
     )
 
 
 __all__ = [
     "check_81_lease_ipc_soak",
-    "SOAK_MIN_TOTAL",
-    "SNAPSHOT_FRESHNESS_MAX_SECONDS",
     "LIVE_TRANSITION_FRESHNESS_MAX_SECONDS",
 ]

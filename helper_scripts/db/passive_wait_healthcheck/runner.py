@@ -189,14 +189,15 @@ from .checks_governance import (
     check_64_unblock_candidates_drift,
 )
 from .checks_governance_lease_ipc import (
-    # P5-SM-OPTION2 B-3 (2026-06-03) — `[81]` SM Option 2 step-(i) soak
-    # 可觀測性雙信號 gate（P-EQUIV comparator 真實樣本 0 divergence + P-LIVE
-    # Rust 權威路徑 lease_transitions 真跑）。讀 V128
-    # learning.lease_ipc_divergence_snapshot（flusher 投影）+ V054
-    # learning.lease_transitions。fail-closed（G-1）：stale snapshot /
-    # flag-OFF / snapshot 缺失 / divergences>0 / total<N / P-LIVE silent-dead
-    # 一律 FAIL（非 WARN）。配對 flusher
-    # governance_divergence_flush.py + EQUIV sampler lease_ipc_equiv_sampler.py。
+    # P5-SM-OPTION2 B-3 (2026-06-03，rework (b)+(b-i)) — `[81]` SM Option 2
+    # step-(i) soak gate。gate 唯一條件 = P-LIVE（V054 learning.lease_transitions
+    # Rust 權威路徑真跑 + fresh）。fail-closed（G-1，僅對 P-LIVE）：lease_transitions
+    # 表缺 / 0 row / stale → FAIL（非 WARN）。comparator counter（V128
+    # learning.lease_ipc_divergence_snapshot）降為**觀測欄**（msg 報數值，非 gate）——
+    # Option 2 下歷史 replay vs contemporaneous comparator 語意不可達（E2 HIGH-2 +
+    # PA reconciliation 2026-06-03）。cutover gate = 4a CI 綠 AND P-LIVE soak 健康。
+    # 配對 flusher governance_divergence_flush.py（仍投影 comparator 供觀測）；
+    # EQUIV sampler lease_ipc_equiv_sampler.py 已 DEPRECATED（不接 gate）。
     check_81_lease_ipc_soak,
 )
 from .checks_pricing_binding import (
