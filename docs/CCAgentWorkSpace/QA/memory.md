@@ -770,3 +770,24 @@ Rust dispatch 有全部 7 arm（3 lease + is_authorized + get_status + list_leas
 
 ### 7. cross-arch acceptance：Mac+Linux 同 test count/skip/warning 是 parity 證；ssh cargo 需 ~/.cargo/bin 全路徑
 本次 Mac 133 passed/1 skipped/3 warning == Linux 完全一致（pytest-asyncio 9afb811a 已關 Linux async skip 洞，step-i async 測試兩端皆 run）。Rust 權威跑 Linux release：`ssh trade-core` non-interactive 不載 .bashrc → `cargo` 不在 PATH，須 `~/.cargo/bin/cargo`；workspace 在 `srv/rust/`（非 srv 根）。inline-module test（src/.../tests/governance_ipc_tests.rs）走 `Running unittests src/lib.rs` 段，整合 tests/ 目錄 0 matched 是正常（filter 不命中整合 bin）。
+
+## 2026-06-03 alpha hygiene 4-fix post-deploy 驗收教訓（A-1/A-2/B/A-4，commit 324001c3）
+
+| 報告 | 日期 | verdict |
+|---|---|---|
+| 2026-06-03 alpha hygiene A-1/A-2/B/A-4 post-deploy | 2026-06-03 | A-2 PASS（直接 runtime 證據）/ A-4 PASS（不變量證據，無正 cell 可激）/ B INCONCLUSIVE-needs-more-runtime（gate 行為一致但 0 post-gate fire；複查 2026-06-10）/ A-1 INCONCLUSIVE + 前提證偽（intents 數據顯示 bb_breakout 一直是 non-BTC 主導，非「卡 BTC only」；複查 2026-06-10）|
+
+### 1. deploy 邊界要從 commit timestamp + engine restart log 推，不能信 prompt 給的「engine 6/3 00:40 重啟」單點
+prompt 說 engine 6/3 00:40 restart（PID 2269678）→ 直覺以為 4 fix 只跑了 ~1h。實查 `git log -S require_mean_reverting_regime` 揭 4 fix 全在**單一 commit 324001c3（2026-06-01 21:19:35）**，engine-log mtime 顯示 6/1 21:24 就有一次 restart（commit 後 5 分）。A-2 的 `reject_other` 在 6/1 21:21 精準停寫＝6/1 21:24 engine 已帶 fix。**真 evidence window 是 ~1.2 天（6/1 21:24→now），不是 1h。** 6/3 00:40 rebuild 只是把同 commit 帶進新 binary。SOP：post-deploy 驗收先 `git log -S <fix-token>` 找 fix 真正落哪個 commit + `ls /tmp/openclaw/engine_logs/` 看 restart 時間軸，再對齊 DB 行為轉折點，不要單信 prompt 的「重啟時間」。
+
+### 2. A-2 qty_zero 噪音的 reject_reason_code 是 `reject_other`（catch-all），不是字面 `qty_zero`
+qty_zero reason 字串（router PNL-1 `qty_zero: final_qty=...` / 交易所取整 `qty_zero: exchange_precision_rounding_to_zero...`）不匹配 V086 12-enum 任一 prefix → 全落 `reject_other`（reject_reason_code.rs:138 catch-all）。驗證命中：`learning.decision_features` `reject_other` all-time 318768，其中 **BTCUSDT 313196（98.25%）**＝確認歷史噪音是 BTC 精度取整；`reject_other` last ts **2026-06-01 21:21**（fix deploy 點精準停）；6/3 00:40 後 0。同期 cost_gate reject 仍 01:46 活躍＝reject-write 路徑沒死，只是 qty_zero 停。**教訓：驗 reject 是否停寫，要先 grep Rust `map_reject_reason_to_code` 確認該 reason 映到哪個 code（多半 catch-all），不能直接 `WHERE reason ILIKE '%qty_zero%'`（trading.intents details 無 reason key，rejects 早就不寫 intents 了）。** qty_zero_skips counter 在 pipeline_snapshot stats（live=9/demo=0），確認 skip-not-reject 真生效。
+
+### 3. A-4 edge_estimates 是 JSON 檔不是 DB 表；「無正 cell」時用 runtime_bps==shrunk_bps 不變量證明歸零已移除
+`settings/edge_estimates.json`（demo，Rust 讀）+ `edge_estimates_live_demo.json`，非 PG。A-4 移除 Python 歸零後新碼 `runtime_bps = shrunk_values[i]`。當前 demo grand_mean −12bps → **0 個正 cell**＝歸零分支（shrunk>0 & unvalidated）根本不被激。但仍可證：兩檔 **runtime_bps==shrunk_bps 100%（192/192 + 174/174，0 mismatch）+ 0 個 OLD-BUG signature（shrunk>0 & runtime==0）** + cron updated_at fresh（6/3 01:42）＝歸零邏輯確定移除。**教訓：preventive fix 在「無觸發樣本」時不要硬判 INCONCLUSIVE；找一個「fix 在則必成立」的不變量（此處 rb==sb 恆等）即可給 PASS，並明標「當前無正 cell 故未在差異化場景下實測」。**
+
+### 4. B regime gate 讀 in-memory Hurst regime，DB 無持久化 → 靠 pipeline_snapshot indicators 的 hurst regime 分布做行為一致性推斷
+bb_reversion gate 讀 `ctx.indicators.hurst.regime`（"mean_reverting"=AntiPersistent，hurst.rs:70/83），**不持久化**：`market.regime_snapshots` all-time **0 row**（producer flush_regime_snapshots 沒在跑）；`trading.intents.details.scanner.market_regime` 是**另一套 scanner 分類**（range_bound/quiet/trending/one_way_shock），非 Hurst 標籤，不能當 gate 輸入證據。可用證據＝ `pipeline_snapshot_demo.json` indicators 31 symbol hurst regime 分布：random_walk 26 / trending 4 / **mean_reverting 1**。gate fail-closed（非 mean_reverting + None 全 skip）＝當下只 1/31 symbol 可入場 → 完美解釋「6/3 00:40 rebuild 後 bb_reversion 0 fire」。**但這是行為一致性（gate 邏輯+regime mix 解釋 0 fire），非正向確認（0 post-gate fire 無法觀測 accept 路徑真的在 mean_reverting 放行）。** Hurst 指標 31/31 非 None＝gate 有真輸入。verdict INCONCLUSIVE-needs-more-runtime（code/test 級已 PASS by E1/E2/E4，runtime 正向 fire 需更多時間）；複查 2026-06-10。
+
+### 5. A-1 premise（bb_breakout 卡 BTC only）被 production intents 數據證偽——QA 要查 premise 真偽不能照單接受
+prompt 說 bb_breakout「先前被某 gate 卡死只剩 BTC」。實查 35 天日線 BTC vs non-BTC intent：**每一天都是 non-BTC 壓倒性主導**（5/7 non-BTC 197 跨 6 symbol / 5/8 164），全期 **BTCUSDT 僅 4 筆**。bb_breakout 從來不是「只剩 BTC」，反而 BTC 幾乎不 fire。且 `enable_oi_signal=false`（demo/live/paper TOML 全 false）＝OI gate 的 `return vec![]` 阻斷路徑（舊碼在 false 時仍 skip OI-cohort-missing 的 non-BTC）邏輯上 fix 對，但 non-BTC 既然一直在 fire，OI gate 顯非 intents 層的 binding constraint。近期 bb_breakout 近全休眠（7d 僅 1 intent ICPUSDT 6/2，已是 non-BTC）＝cost_gate/confluence 不對齊主導，非 OI gate。**教訓：QA 收到帶 premise 的驗收任務（"先前被 X 卡死"），必先用 production 數據驗 premise 本身；本次 premise 證偽 → A-1 fix code 正確但「外幣恢復」無正向 runtime 證據可立（bb_breakout 活動量太低且本就 non-BTC）。signal 層（pre-cost-gate）OI gate 影響不落 decision_features（只記 post-cost-gate-eval）也不落 snapshot signals（那是 scanner 信號非 strategy 信號）＝OI gate 的 vec![] 抑制在現有持久化面不可觀測，只能靠 code+test。**
