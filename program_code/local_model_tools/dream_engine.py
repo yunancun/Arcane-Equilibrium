@@ -281,6 +281,11 @@ def build_dream_summary(rows: list[dict[str, Any]], cfg: DreamConfig) -> dict[st
             "sample_count": n,
             "current_avg_net_bps": round(avg_bps, 4),
             "expected_improvement_bps": round(abs(avg_bps) * min(0.5, conf), 4),
+            # expected_improvement_bps = abs(avg_net_bps) × min(0.5, conf) 是「可能回收
+            # 一半損失」的啟發式投影，會寫入 mlde_shadow_recommendations.expected_net_bps
+            # （dream_engine source）。此值非實測 edge 也非 forward 預測；下面的 kind 欄位
+            # 供 consumer / reader 識別其性質，勿解讀為已實現或可預測的 edge 量級。
+            "expected_net_bps_kind": "heuristic_recovery_projection",
             "confidence": conf,
             **proposal,
             "policy": "read_only_parameter_proposal",

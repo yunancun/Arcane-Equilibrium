@@ -57,6 +57,13 @@ logger = logging.getLogger(__name__)
 # V038-V040 retrofit (column NOT NULL + CHECK enum). 'mlde_advisor' is
 # kept as forward-compat alias; remove once upstream producer switches
 # to 'ml_shadow'.
+#
+# tier 語意注意（source='dream_engine' row）：evidence_source_tier='real_outcome'
+# 描述的是「證據基底」為真——即 avg_net_bps 來自真實 filled cell；但該 row 的
+# expected_net_bps 本身是啟發式回收投影（見 payload.expected_net_bps_kind =
+# 'heuristic_recovery_projection'），非實測 edge。filter 接受此 tier 是因「基底為真」，
+# 而非「expected_net_bps 已驗證」。consumer 勿從 expected_net_bps 推論已實現 /
+# forward edge 量級。
 EVIDENCE_SOURCE_TIER_ALLOWLIST: tuple[str, ...] = (
     "real_outcome",
     "calibrated_replay",
