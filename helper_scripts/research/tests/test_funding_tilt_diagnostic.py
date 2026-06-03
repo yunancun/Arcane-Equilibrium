@@ -117,14 +117,15 @@ def test_tiltscore_uses_past_l_settlements_mean():
     # 遞增 funding：index j 的 rate = (j+1)*1e-5。
     f_rate = np.array([(j + 1) * 1e-5 for j in range(n_days * 3)])
     ts = signals.compute_tiltscore_series(f_ts, f_rate, open_ts, 3, interval_minutes=480)
-    # 第10日 00:00：leak-free 截斷 < open−480min。open_ts[10]=第10日00:00，−ε=第9日16:00。
-    # 第9日16:00 結算 index = 9*3+2 = 29；bisect_left 找第一個 >= 第9日16:00 → index 29
-    # （因 funding_ts[29]=第9日16:00 正好等於截斷點，bisect_left 回 29 → 取 [26,27,28] 即
-    # 第9日00:00/08:00... 不含 16:00）。確認用過去 3 個 < 截斷點的結算。
+    # 第10日 00:00：leak-free 截斷 ≤ open−480min（含邊界，協議 §2.1 line 68 / AEG-S0 §2.3）。
+    # open_ts[10]=第10日00:00，−ε=第9日16:00。第9日16:00 結算 index = 9*3+2 = 29；
+    # bisect_right 找第一個 > 第9日16:00 → index 30 → 取 [27,28,29] 即第9日00:00/08:00/16:00
+    # （含「前一日 16:00」邊界筆，只排除與開盤同時的第10日00:00 結算）。
     assert np.isfinite(ts.leakfree[10])
-    # 值應為 3 個連續結算均值（驗確實是均值非單點）。
+    # 值須為 index 27/28/29 三個結算均值（釘死含邊界筆，非單點、非漏邊界）。
     val = ts.leakfree[10]
-    assert val > 0  # 遞增正序列均值為正
+    expected = float(np.mean([(j + 1) * 1e-5 for j in (27, 28, 29)]))
+    assert np.isclose(val, expected), f"leak-free 須含前一日 16:00 邊界結算 (得 {val}, 期 {expected})"
 
 
 # ── §3.0 funding 雙面會計（防雙重計入）──────────────────────────────────────

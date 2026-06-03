@@ -771,16 +771,35 @@ def _decision_tree(report, all_evals, step0, max_eff_n, best_key, best_ev) -> di
     cost_wall = (agg_ccr is not None and agg_ccr >= cost_model.CARRY_COST_RATIO_ABANDON)
     amortization_fails = (not scan.get("net_turns_positive_with_horizon", False))
     if amortization_fails or cost_wall:
+        # reason 按實際 binding 分支動態生成：amortization_fails 與 cost_wall 各自獨立成立，
+        # 不可寫死「amortization disproven net stays ≤0」——真跑可能 net 隨 horizon 轉正
+        # （net_turns_positive_with_horizon=True）但 carry_cost_ratio≥0.8 仍 binding（carry
+        # 付不起自己的成本）。E2 退回 LOW-2：固定字串與 §4.5 scan 結果矛盾，須據實。
+        reasons = []
+        if amortization_fails:
+            reasons.append(
+                f"amortization disproven: net stays ≤0 across H_min scan "
+                f"{scan.get('scan_hmins')} (net@max_horizon={scan.get('net_at_max_horizon_bps')}bps), "
+                f"net_turns_positive_with_horizon={scan.get('net_turns_positive_with_horizon')}"
+            )
+        if cost_wall:
+            reasons.append(
+                f"cost wall: aggregate carry_cost_ratio={agg_ccr} ≥ abandon "
+                f"{cost_model.CARRY_COST_RATIO_ABANDON} (carry cannot pay its own fee+slip)"
+            )
+        binding = ("amortization_fails" if amortization_fails else "") + (
+            "+cost_wall" if (amortization_fails and cost_wall) else ("cost_wall" if cost_wall else "")
+        )
         return {
             "verdict": "NO-GO-C",
             "stopped_at": "horizon_cost_amortization",
+            "binding_condition": binding,
             "reason": (
-                f"amortization disproven: net stays ≤0 across H_min scan "
-                f"{scan.get('scan_hmins')} (net@max_horizon={scan.get('net_at_max_horizon_bps')}bps), "
-                f"net_turns_positive_with_horizon={scan.get('net_turns_positive_with_horizon')}; "
-                f"aggregate carry_cost_ratio={agg_ccr} "
-                f"(abandon≥{cost_model.CARRY_COST_RATIO_ABANDON}). Carry magnitude cannot amortize "
-                "fee+slip even at longer horizon (the most likely failure mode, §3.4)."
+                "; ".join(reasons)
+                + f". net_turns_positive_with_horizon={scan.get('net_turns_positive_with_horizon')}, "
+                f"aggregate carry_cost_ratio={agg_ccr} (abandon≥{cost_model.CARRY_COST_RATIO_ABANDON}). "
+                "Carry magnitude insufficient against fee+slip even at longer horizon "
+                "(the most likely failure mode, §3.4)."
             ),
             "horizon_cost_scan": scan,
             "best_variant": best_key,

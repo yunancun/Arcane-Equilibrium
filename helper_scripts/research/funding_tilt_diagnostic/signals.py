@@ -104,10 +104,13 @@ def compute_tiltscore_series(
     eps = _dt.timedelta(minutes=epsilon_settlements * interval)
     for i in range(t):
         open_ts = open_ts_utc[i]
-        # leak-free 截斷點：funding_ts < open_ts − ε（嚴格）。
+        # leak-free 截斷點：funding_ts ≤ open_ts − ε（含截斷點）。
+        # 為什麼含等號：協議 §2.1 line 68 + AEG-S0 §2.3 = feature_ts ≤ t − one_complete_bar。
+        # 進場日 00:00 開盤、ε=1 結算間隔 → 前一日 16:00 結算正好落在 open−ε 上，是「前一日
+        # 16:00 及更早」可用集合的邊界筆，必須含入；只排除與開盤同時的當日 00:00 結算。
         lf_cut = open_ts - eps
-        # bisect_left 找第一個 >= lf_cut 的索引 → 之前的全 < lf_cut（嚴格小於）。
-        lf_hi = bisect.bisect_left(funding_ts, lf_cut)
+        # bisect_right 找第一個 > lf_cut 的索引 → 之前的全 ≤ lf_cut（含邊界筆）。
+        lf_hi = bisect.bisect_right(funding_ts, lf_cut)
         if lf_hi >= lookback_settlements:
             seg = funding_rate[lf_hi - lookback_settlements: lf_hi]
             if np.all(np.isfinite(seg)):
