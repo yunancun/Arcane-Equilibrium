@@ -1,5 +1,32 @@
 # E2 Memory — 工作記憶
 
+## 2026-06-03 — FND-2 PIT universe builder 對抗審查（commit ccc7f4b7，E1 socket-dead PM 救回，verdict PASS → MIT）
+
+**對象**：`helper_scripts/research/fnd2_pit_universe/{__init__,builder,data_loader,cohorts,artifact,harness}.py` + `tests/test_fnd2_pit_universe.py`（19 test）+ SCRIPT_INDEX。**Verdict：PASS → MIT**（0 BLOCKER / 0 HIGH / 0 MED；3 LOW 觀察非阻塞）。**注意 prompt 給的 `30116afb` 是 docs-status commit；真 IMPL commit = `ccc7f4b7`**（git show --stat 確認 diff scope = 7 新檔 + SCRIPT_INDEX，0 runtime / 0 migration，與 PA dispatch packet 逐檔吻合無 scope creep）。報告直接回 parent（未寫檔）。
+
+**對抗驗證方法論（高價值，可複用於任何「純函數 builder + synthetic test」review）**：
+1. **mutation testing 是證 test-bite 的黃金手段**（不靠肉眼讀 assert）：把 committed source copy 到 /tmp 建 mutant package，逐個注入「最像 E1 會犯的錯」再跑 test 確認 FAIL。本案 6 mutant 全被抓：(M1) R-1 `eff_listed coalesce 到 first_seen_ts` → T5 抓（T2b 因 listed_at 非 NULL 未觸發該分支，但 T5 count drift 抓到=integration 高 bite）；(M1b) alive_from 直接用 first_seen_ts → T2b/T3a/T5 抓；(M2) survivor FAIL 分支恆 PASS → T3b 精確抓；(M3) digest 注入 now() → T4 抓；(M4) alive_from min 而非 max → T2/T2b 抓；(M5) unknown_lifetime AND→OR → T7a/T7d/T8 抓。**教訓：synthetic test 跑綠不夠，必須 mutant 證每條 load-bearing claim 有 bite**。
+2. **R-1（lifetime 邊界源）不能只信「真跑 unknown_lifetime=0」**（PA 親囑「非剛好資料無 NULL」）：對抗手法 = 撈 real artifact universe.csv 算「first_seen_ts 比 listed_at 晚 >60d 的 symbol 數」=**766/829（92%）正是 R-1 trap 場景**，逐行驗 `alive_from == max(listed_at, window_start)` → **0 miscomputed**、`alive_from == first_seen_ts while listed earlier`（bug 指紋）=**0**。即邏輯在 92% 真 row 上被實際 exercise 證對，非 vacuous。**比「跑綠」+「mutant」更強的第三層 = 真資料對賬 bug 指紋計數**。
+3. **forbidden-route 不能只信 T6**：自跑 grep `_fetch_historical_universe_snapshot_sync|max_symbols|current_scanner_fallback|LIMIT|control_api_v1` 全 source，確認命中全在 docstring/MODULE_NOTE prose（硬邊界註記，是好事），唯一真 SQL LIMIT = `_load_scanner_active` 的 `LIMIT 1`（latest-snapshot metadata 非 universe 截斷，T6 也單獨守此）。
+4. **determinism 要跨「fresh process」驗**（非同 process 兩跑）：`for i in 1 2; do python3 -c "...build_universe..."` 比對 universe_id → 相同。防的是 PYTHONHASHSEED/dict-order/now() 非確定性。digest 靠 `sorted(rows, by symbol)` + 固定 `_DIGEST_COLUMNS` tuple + `%.12g` float fmt + 排除 run_id/universe_id 自身（避免循環），結構性穩定。
+5. **core25 凍結常數對賬 seed**：`csv.DictReader` 撈 seed `in_core25_pinned=t` 25 行 vs `cohorts.CORE25_PINNED` → set EXACT MATCH（OQ-2「以 seed 為準」滿足，E1 0 自創）。
+6. **真 artifact DoD 對賬**（ssh trade-core 讀 summary.json）：`survivor_rejection_status=PASS` / `delisted_proof_count=255≥200`（且 == counts_by_status.closed=255 內部一致）/ `unknown_lifetime=0` / included=829/excluded=23（全 lifetime_outside_window，0 wrongly excluded）/ parquet 103KB 852 row（**未 COPY-TO 崩**，read_csv().write_parquet() 解法對，回應 2026-06-02 post-deploy parquet 崩潰教訓）/ manifest universe_sources 含 3 表 PIT gate。
+
+**3 LOW 觀察（非阻塞，不退）**：
+- (L1) **「3 個 is_delisted_at_asof XOR delisted_at-present 不一致」是 source-data 特性非 bug**：GNOUSDT/OLUSDT/REQUSDT 仍 `status=Trading`/`is_delisted=false`/`statuses_seen=["Trading"]`，但有 `delisted_at=2026-06-03T09:00`（**asof 00:00 之後的「已公告未來下市」時間**）。`seen_delisted=bool_or(...)=false` 正確不算 delisted-proof；`included=true` 正確；關鍵 **`alive_to=least(delisted_at, window_end)=window_end`**（00:00，非未來 09:00）→ Step F clip 正確未提前截斷（撈全 artifact 驗「included 有未來 delisted_at 但 alive_to 未 clip 到 window_end」=0）。PA reflection「lifecycle 100% 一致」是 latest-projection 視角；此 3 個是 aggregate `max(delisted_at)` 撈到未來公告值，與 latest `is_delisted_at_asof` 視角差，by-design。**對抗教訓：「未來 delisted_at on still-trading symbol」是真實 Bybit 資料形狀，builder 的 window-clip 正好防住，是設計亮點不是缺陷**。
+- (L2) 3 個 `except Exception` 全 fail-soft observability/optional-IO（parquet 鏡像非阻斷 + git provenance + DSN import fallback），無一吞交易/正確性路徑；logger 用 `%s`（artifact.py:98）非 f-string；合規。
+- (L3) M1 mutant（coalesce 到 first_seen_ts 的「契約 §3 字面」形式）只 fail T5 不 fail T2b——因 T2b 的 listed_at 非 NULL。**建議 follow-up（非阻塞）**：可加一條「listed_at=NULL 但 first_seen_ts 有值 + delisted_at 有值」case 直接鎖死「缺 listed_at 時 alive_from 不得退 first_seen_ts」這條最隱微的契約 §3 trap 分支（目前靠 unknown_lifetime=both-NULL 守，但「只缺 listed_at」走 `eff_listed=ws` 分支，T2b 未直接覆蓋此分支的 first_seen 反例）。real-data unknown=0 故無 runtime 風險，純 test 完備性。
+
+**§5 multi-session race**：fetch 後 `origin/main...HEAD`=`0	0`（HEAD==origin，FND-2 commit 已在 origin/main）；`git status --porcelain` 僅 1 untracked = 隔壁 session memory（`project_2026_06_03_blocked_signal_and_cascade_fade_nogo.md`，與 review scope disjoint，未碰）；3 pre-existing stash 全標「非我的」未碰（§5c 禁 revert）；review 期間無 sibling push 觸 FND-2 file scope。
+
+**結論**：FND-2 可作 AEG-S2 (b) breadth / (c) robustness 的可信 PIT universe 基礎——survivorship 控制真實（255 delisted included，survivor-rejection gate 有 bite）、R-1 lifetime 邊界源正確（92% real row exercise 0 miscompute）、determinism 跨 process 穩定、read-only fail-closed、0 禁用捷徑。**E1 不自簽正確：交 MIT universe-row 審（contract §7 末）**。
+
+**durable lessons**：
+1. **「純函數 builder + synthetic test」的對抗三層**：(a) 跑綠（必要不充分）→ (b) mutant 注入每條 load-bearing claim 證 test FAIL（證 bite）→ (c) 真 artifact 撈 bug-signature 計數證邏輯在真資料上 exercise（證非 vacuous）。三層缺一不可，尤其 (c) 破「資料剛好沒觸發 buggy 分支」的假陽性。
+2. **PA「算法權威 = 設計報告 §4 非契約 §3 字面」時，E2 必對齊 §4 而非契約**：本案契約 §3 的 `coalesce(listed_at, first_seen_ts)` 是 trap（snapshot ts 只 27d），PA §4 Step D 改為「listed_at 唯一權威，缺則 unknown 不 coalesce」。review 站 PA §4，且用 real-data 證 §4 對、契約 §3 字面會錯（766 symbol 受害）。
+3. **「資料不一致」先分清 aggregate-view vs latest-view**：is_delisted_at_asof（latest）vs max(delisted_at)（aggregate）差異可能是「未來公告下市」這種真實資料形狀，不是 source corruption；驗法 = 看 statuses_seen + alive_to 是否被 window-clip 正確處理。
+4. **parquet 鏡像用 `duckdb.read_csv().write_parquet()` 不用 COPY-TO ?**——回應 2026-06-02 post-deploy COPY-TO-? bind 崩潰教訓；Linux 真跑 852-row parquet 成功落地是這條 fix 的 runtime 證據。
+
 ## 2026-06-01 — P2a governance autonomy 子域抽取 behavior-preserving 重構 review（verdict PASS → E4）
 
 **對象**：未提交工作樹（多任務髒樹）。governance_routes.py 1978→1346 LOC，autonomy 子域抽至新 `governance_autonomy_service.py` 706 LOC；test rename `test_governance_autonomy_level_routes.py`→`test_governance_autonomy_service.py`。**Verdict：PASS → E4**（0 BLOCKER / 0 HIGH / 0 MED；3 LOW 觀察非阻塞）。報告直接回傳 parent（未寫檔）。
