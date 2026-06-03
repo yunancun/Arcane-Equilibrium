@@ -188,6 +188,17 @@ from .checks_governance import (
     # 配對 V090: governance.unblock_candidates。
     check_64_unblock_candidates_drift,
 )
+from .checks_governance_lease_ipc import (
+    # P5-SM-OPTION2 B-3 (2026-06-03) — `[81]` SM Option 2 step-(i) soak
+    # 可觀測性雙信號 gate（P-EQUIV comparator 真實樣本 0 divergence + P-LIVE
+    # Rust 權威路徑 lease_transitions 真跑）。讀 V128
+    # learning.lease_ipc_divergence_snapshot（flusher 投影）+ V054
+    # learning.lease_transitions。fail-closed（G-1）：stale snapshot /
+    # flag-OFF / snapshot 缺失 / divergences>0 / total<N / P-LIVE silent-dead
+    # 一律 FAIL（非 WARN）。配對 flusher
+    # governance_divergence_flush.py + EQUIV sampler lease_ipc_equiv_sampler.py。
+    check_81_lease_ipc_soak,
+)
 from .checks_pricing_binding import (
     # REF-20 Sprint C R6-T7 (2026-05-05) — `[45]` LG-3 provider pricing
     # binding sentinel. Implements RFC §IMPL T2 healthcheck output
@@ -1266,6 +1277,16 @@ def main() -> int:
 
             s, m = check_close_maker_reject_samples(cur)
             results.append(("[74] close_maker_reject_samples", s, m))
+
+            # [81] P5-SM-OPTION2 B-3 (2026-06-03): SM Option 2 step-(i) soak
+            # 雙信號 gate。P-EQUIV（comparator 真實樣本 0 divergence over N，讀
+            # V128 snapshot + freshness）AND P-LIVE（Rust 權威路徑 lease_transitions
+            # 真跑）。fail-closed（G-1）：snapshot 缺失/stale、flag-OFF、divergences>0、
+            # total<N、P-LIVE silent-dead 一律 FAIL（不讀不到當綠燈）。純 SQL，
+            # cursor 區塊內跑。配對 flusher governance_divergence_flush.py +
+            # EQUIV sampler lease_ipc_equiv_sampler.py。
+            s, m = check_81_lease_ipc_soak(cur)
+            results.append(("[81] lease_ipc_soak", s, m))
     finally:
         conn.close()
 
