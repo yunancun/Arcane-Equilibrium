@@ -7091,3 +7091,21 @@ policy 設計本身不受影響（只依賴武裝語意 + arm/notify 語意 + AM
 - **副作用=極低**：全新 package-dir 0 既有 caller，research/ 非 package（conftest sys.path）不會 runtime 誤 import，純 sync 無 async，0 endpoint/IPC/schema/DB-write（set_session readonly + artifact 寫本地檔非 PG）。不碰既有兩 harness（已跑完 verdict）+ 不動被 mock 的 `_fetch_historical_universe_snapshot_sync`（test_replay_full_chain:469）。
 - **E2 重點審查 3 點**：①lifetime 邊界源（alive_from 用 listed_at 非 first_seen_ts，最易錯）②survivor-rejection 真 bite + SQL 無 LIMIT/max_symbols/turnover 截斷 ③determinism（同 input 同 universe_id）+ readonly fail-closed。
 - 單一 E1（檔互不重疊但 builder↔artifact↔harness 共享 row schema 邏輯耦合，拆並行反增協調成本）。報告：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-03--fnd2_pit_universe_builder_impl_design.md`。
+
+---
+
+## 2026-06-03 — Production listing capture-only collector 設計（COLLECTOR-LISTING-CAPTURE-PROD）
+
+**背景**：6 週 5 alpha 候選全 NO-GO（同根因 down-market beta），listing-fade 是唯一未死線（Gate-A maker-fill 88.1% PROCEED，QC 2026-05-31）。零歷史 listing-instant 資料（klines 都在上市後 8h-5d 才開始）→ 必須前向捕獲累積 n≥30。operator 拍板建 production 持續 collector。
+
+**最 load-bearing 發現（推翻 2026-05-31 舊 spec 的 Rust-in-engine 路徑）**：
+- 既有 24h Gate-B 探針（commits eae0b890/c1c017b0）已是 3-layer Python（gate_b_rest 輪詢+phase SM / gate_b_ws 隔離 WS+capture_lag+markout+BTC poison 哨兵 / gate_b_artifact 落地+verdict）+ 32 測試（含 import 隔離自證）。**捕獲難點全做完**，production 化 = 加持久層+持續性+PG 寫，不是重寫。
+- **ref21_market_microstructure_recorder.py + ref21_*_cron.sh 是 canonical production 模板**：standalone Python、cron、fcntl.flock process lock、env-sourced DB、寫 market.* 表、retention companion。前向累積 public 市場資料的既有生產範式。collector 比照它，**非 Rust-in-engine**（舊 spec 的 SymbolRegistry 注入路徑改否決——耦合下單熱路徑、capture-only 不需進交易 universe）。
+- **market.klines PK=(symbol,timeframe,ts) + ON CONFLICT DO NOTHING** → 獨立 collector 寫同表對 listing symbol 與 engine 寫天然 dedup。dedup 鍵現成。
+- **探針致命 production gap**：(1) ws_control.jsonl 43h 漲到 **346MB**（BTC 哨兵每筆 trade 寫 JSONL = firehose）；(2) 一次性 --duration-seconds 跑完即止；(3) 不寫 PG；(4) 無 restart-resume；(5) 24h 窗常零真上市（本窗只有 BPUSDT/SPCXUSDT 兩 PreLaunch 從未轉 Trading，capture_lag=SLOW 是 launchTime 在未來的假象）。
+
+**設計裁定**：production collector = 新 cron-recorder（比照 ref21）reuse 探針三 layer 的純邏輯（phase SM / capture_lag / poison 哨兵 / provenance），**但**：①BTC 哨兵改成只更新 in-memory liveness counter，**不落 JSONL**（殺 346MB firehose）；②捕獲事件雙寫 market.klines（ON CONFLICT）+ 新 PG 表 research.listing_capture_events（逐筆 publicTrade + phase transition + capture_lag，audit/provenance）；③持續性用 long-running daemon via systemd（非 cron one-shot，因 WS 需常駐），restart 自動從 instruments-info 重建 PreLaunch 候選 resume 訂閱（in-memory 即可，PreLaunch 集合天然從 REST 重算）；④WS 隔離沿用探針獨立連線 + 強制 BTC 哨兵 + unknown-handler forced reconnect。
+
+**無洩漏**：純資料採集旁路，0 orders/0 strategy intent/0 IPC/0 live/0 execution_authority。寫 PG 是 read-only-to-live 的 research schema + market.klines additive（與 engine 同表 dedup，不改 engine）。
+
+**教訓**：接到「建 production X」先查有無既有 probe/research 原型 + 既有同類 production 範式（ref21）；多數情況是「原型加固」非「從零設計」。舊 PA spec（2026-05-31）的 Rust 路徑在新證據下被自己後續設計否決——spec 會 stale，IMPL 前重查 runtime 現狀。
