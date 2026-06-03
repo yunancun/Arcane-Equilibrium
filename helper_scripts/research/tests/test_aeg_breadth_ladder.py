@@ -17,7 +17,14 @@ MODULE_NOTE:
     T-forbidden-route    — read-only 靜態（0 control_api / 0 DB write / OPENCLAW_DATA_DIR）
     T-manifest-index     — artifact 完整 + provenance 鏈
     + healthcheck        — survivorship PIT artifact 檢查三態
-  依賴：pytest + 標準庫（conftest 已把 research/ 加 sys.path）。
+    + HIGH-1（re-E2）    — survivorship 真繼承 + 破 tautology bite：
+        * non_inheriting_adapter_sets_false_and_healthcheck_fail — 壞 adapter→False+FAIL
+        * well_behaved_adapter_yields_true — 對照 True（推導非常數）
+        * adapter_clamps_dead_symbol_zero_holdings_after_delist — DEADUSDT delist 後 0 持倉
+        * count_seen_delisted_real_uses_alive_mask — _count_seen_delisted 真用 alive_mask
+        * harness_healthcheck_gate_raises_on_non_inheriting — healthcheck wiring load-bearing
+    + NIT               — _fmt_num(-0.0) 正規化 determinism
+  依賴：pytest + 標準庫 + numpy（HIGH-1 synthetic panel）（conftest 已把 research/ 加 sys.path）。
 """
 
 from __future__ import annotations
@@ -61,8 +68,9 @@ def _u_row(symbol, cohort_ids, *, included=True, alive_from="2024-06-03T00:00:00
 
 
 def _tr(tier, *, breadth, net_bps=None, n_independent=40, sample_unit="non_overlapping_holding_window",
-        seen_delisted=0, gross_bps=None, long_bps=None, short_bps=None, t_hac=None):
-    """synthetic TierResult。"""
+        seen_delisted=0, gross_bps=None, long_bps=None, short_bps=None, t_hac=None,
+        survivorship_mask_applied=True):
+    """synthetic TierResult（預設 survivorship_mask_applied=True = well-behaved 候選）。"""
     return TierResult(
         tier=tier, breadth_symbol_count=breadth, seen_delisted_count=seen_delisted,
         net_bps=net_bps, gross_bps=gross_bps, cost_bps=11.0,
@@ -70,6 +78,7 @@ def _tr(tier, *, breadth, net_bps=None, n_independent=40, sample_unit="non_overl
         n_independent=n_independent, sample_unit=sample_unit, t_stat_hac=t_hac,
         long_leg_net_bps=long_bps, short_leg_net_bps=short_bps,
         pit_mask_source="fnd2_alive_from_alive_to", leak_free_signal=True,
+        survivorship_mask_applied=survivorship_mask_applied,
     )
 
 
@@ -638,6 +647,255 @@ def test_run_ladder_end_to_end_with_stub(tmp_path):
     status, msg = hc_mod.check_aeg_breadth_universe_pit(
         Path(written["breadth_ladder_summary"]), fnd2_dir / "universe_summary.json")
     assert status == "PASS", msg
+    # run_ladder 內建 healthcheck gate 也回 PASS（load-bearing）。
+    assert result["healthcheck"]["status"] == "PASS", result["healthcheck"]
+
+
+# ───────── HIGH-1：survivorship 真繼承 + 破 tautology bite（re-E2）─────────
+
+class _NonInheritingEvaluator:
+    """bite：漏用 alive_mask / 漏 alive_to 上界的壞 adapter（survivorship_mask_applied=False）。
+
+    模擬一個收了 alive_mask 卻**從不 apply**、PnL 跑在 listed_at-only survivorship 的
+    候選——必須讓 summary 推導 survivorship_inherited_from_fnd2=False 且 healthcheck FAIL。
+    """
+
+    candidate_id = "non_inheriting_bad_adapter"
+
+    def __init__(self, results_by_tier: dict):
+        self._results = results_by_tier
+
+    def evaluate(self, *, tier, universe, alive_mask):
+        from dataclasses import replace
+        base = self._results.get(tier)
+        if base is None:
+            return TierResult(
+                tier=tier, breadth_symbol_count=len(universe), seen_delisted_count=0,
+                n_independent=0, sample_unit="bad_no_result",
+                survivorship_mask_applied=None,
+            )
+        # 關鍵 bite：明確標 False（收了 alive_mask 卻不 apply）。
+        return replace(base, survivorship_mask_applied=False)
+
+
+def test_high1_non_inheriting_adapter_sets_false_and_healthcheck_fail(tmp_path):
+    """★ bite：非繼承 adapter → survivorship_inherited_from_fnd2=False + healthcheck FAIL。
+
+    證明繼承自證**不是寫死 True 的 tautology**：壞 adapter（不 apply alive_mask）必被抓。
+    對照 well-behaved 路徑（_tr 預設 mask_applied=True）會回 True（見其他 test）。
+    """
+    tiers_by_name = {
+        tiers_mod.TIER_CORE25_PINNED: frozenset({"BTCUSDT"}),
+        tiers_mod.TIER_FULL_SURVIVORSHIP: frozenset({"BTCUSDT", "DEADUSDT"}),
+        tiers_mod.TIER_TOP_LIQUIDITY_40_50: frozenset({"BTCUSDT"}),
+        tiers_mod.TIER_SCANNER_ACTIVE_ASOF: frozenset(),
+    }
+    bad = _NonInheritingEvaluator({
+        tiers_mod.TIER_CORE25_PINNED: _tr("core25_pinned", breadth=1, net_bps=10.0, n_independent=40),
+        tiers_mod.TIER_TOP_LIQUIDITY_40_50: _tr("top_liquidity_40_50", breadth=1, net_bps=9.0,
+                                                n_independent=40),
+        tiers_mod.TIER_FULL_SURVIVORSHIP: _tr("full_survivorship", breadth=2, net_bps=8.0,
+                                              n_independent=40),
+    })
+    alive_mask = {
+        "BTCUSDT": (None, None),
+        "DEADUSDT": (None, None),
+    }
+    res = assemble_tier_results(bad, tiers_by_name=tiers_by_name, alive_mask=alive_mask,
+                               seen_delisted_map={"DEADUSDT": True})
+    _rows, summary = ladder_mod.build_ladder(res, **_full_meta_args(res, candidate_id=bad.candidate_id))
+    # 推導非寫死：壞 adapter → False。
+    assert summary["survivorship_inherited_from_fnd2"] is False
+
+    # 寫 artifact 後 healthcheck 對此 summary FAIL（繼承斷言抓到非繼承）。
+    written = artifact_mod.write_all(
+        _rows, summary, run_id="bad_run", candidate_id=bad.candidate_id,
+        fnd2_universe_id="uid_bad", fnd2_run_id="fnd2_bad",
+        source_tables=["market.klines"], repo_root=Path("."), runtime_host="test",
+        artifact_root=tmp_path,
+    )
+    fnd2 = tmp_path / "universe_summary.json"
+    fnd2.write_text(json.dumps({"survivor_rejection_status": "PASS"}), encoding="utf-8")
+    status, msg = hc_mod.check_aeg_breadth_universe_pit(
+        Path(written["breadth_ladder_summary"]), fnd2)
+    assert status == "FAIL", msg
+    assert "繼承" in msg or "inherit" in msg.lower() or "mask" in msg.lower()
+
+
+def test_high1_well_behaved_adapter_yields_true():
+    """對照：mask_applied=True 的 well-behaved 候選 → survivorship_inherited_from_fnd2=True
+    （證明推導**有兩種輸出**，非常數 False）。"""
+    res = {
+        tiers_mod.TIER_CORE25_PINNED: _tr("core25_pinned", breadth=25, net_bps=10.0, n_independent=40),
+        tiers_mod.TIER_FULL_SURVIVORSHIP: _tr("full_survivorship", breadth=800, net_bps=8.0,
+                                              n_independent=40),
+    }
+    _rows, summary = ladder_mod.build_ladder(res, **_full_meta_args(res))
+    assert summary["survivorship_inherited_from_fnd2"] is True
+
+
+def _synthetic_panel_with_dead_symbol(n_days=120, dead_alive_to_idx=60):
+    """建 synthetic multiday Panel：BTCUSDT 全窗存活；DEADUSDT 價格全窗有、但中途 delist。
+
+    DEADUSDT 的 panel.survivorship（listed_at-only 模擬）刻意全 True（價格全有）→ 用來
+    證明：唯有套 FND-2 alive_mask 的 alive_to 上界才能讓 delist 後 surv=False。
+    """
+    import datetime as _dt
+    import numpy as _np
+    from multiday_trend_diagnostic.data_loader import Panel
+
+    base = _dt.date(2024, 6, 3)
+    dates = [base + _dt.timedelta(days=i) for i in range(n_days)]
+    # 簡單上升+雜訊（確定性 seed），讓 TSMOM 有可算觀測。
+    rng = _np.random.default_rng(42)
+    btc = 100.0 * _np.cumprod(1.0 + 0.001 + 0.01 * rng.standard_normal(n_days))
+    dead = 50.0 * _np.cumprod(1.0 + 0.0005 + 0.01 * rng.standard_normal(n_days))
+    close = {"BTCUSDT": btc, "DEADUSDT": dead}
+    # listed_at-only survivorship：兩者全 True（價格全有；無 delist 上界）。
+    surv = {"BTCUSDT": _np.ones(n_days, dtype=bool), "DEADUSDT": _np.ones(n_days, dtype=bool)}
+    empty = {s: _np.full(n_days, _np.nan) for s in close}
+    return Panel(
+        dates=dates, close=close, open_=dict(empty), high=dict(empty), low=dict(empty),
+        volume=dict(empty), survivorship=surv, regime=_np.array(["chop"] * n_days, dtype=object),
+        funding_mean_per_8h={s: 0.0 for s in close}, coverage_notes={},
+    ), dates, dead_alive_to_idx
+
+
+def test_high1_adapter_clamps_dead_symbol_zero_holdings_after_delist():
+    """★ HIGH-1 核心：真 adapter 用 alive_mask 把 DEADUSDT 在 delist 後持倉 clip 成 0。
+
+    panel.survivorship[DEADUSDT] 全 True（listed_at-only 無上界）；FND-2 alive_mask 給
+    alive_to=date[60]。斷言：
+      (1) adapter 的 clamped survivorship 在 delist 後（date>alive_to）全 False；
+      (2) 用 clamped survivorship 跑 tsmom，DEADUSDT 在 delist 後的進場觀測=0
+          （持倉=0 / 0 PnL 貢獻）；對照 listed_at-only 會有 >0 後段觀測（證 clamp 有 bite）。
+    """
+    import datetime as _dt
+    import numpy as _np
+    from aeg_breadth_ladder.evaluator import MultidayTrendReferenceEvaluator
+    from multiday_trend_diagnostic import stats
+
+    panel, dates, dead_idx = _synthetic_panel_with_dead_symbol(n_days=120, dead_alive_to_idx=60)
+    alive_to = dates[dead_idx]
+    alive_mask = {
+        "BTCUSDT": (None, None),
+        "DEADUSDT": (
+            _dt.datetime(2024, 6, 3, tzinfo=_dt.timezone.utc),
+            _dt.datetime(alive_to.year, alive_to.month, alive_to.day, tzinfo=_dt.timezone.utc),
+        ),
+    }
+    ev = MultidayTrendReferenceEvaluator(panel, k=10)
+    tier_syms = ("BTCUSDT", "DEADUSDT")
+    clamped = ev._clamped_survivorship(tier_syms, alive_mask, panel)
+
+    # (1) DEADUSDT delist 後全 False。
+    dead_surv = clamped["DEADUSDT"]
+    for i, d in enumerate(dates):
+        if d > alive_to:
+            assert not dead_surv[i], f"DEADUSDT 在 delist 後 date={d} 仍標存活（未 clip）"
+    # delist 前仍有存活日（不是全砍）。
+    assert dead_surv[: dead_idx + 1].any()
+
+    # (2) 用 clamped survivorship 跑 tsmom：DEADUSDT delist 後進場觀測=0。
+    k = 10
+    dead_close = _np.asarray(panel.close["DEADUSDT"], dtype=float)
+    n = len(dead_close)
+
+    def _post_delist_entries(surv_arr):
+        cnt = 0
+        for t in range(k + 1, n - k):
+            if t <= dead_idx:
+                continue  # 只數 delist 後的進場日
+            if surv_arr is not None and (not surv_arr[t] or not surv_arr[t + k]):
+                continue
+            cnt += 1
+        return cnt
+
+    # clamped → delist 後 0 進場（0 持倉 / 0 PnL 貢獻）。
+    assert _post_delist_entries(clamped["DEADUSDT"]) == 0
+    # 對照 listed_at-only（panel 原值，全 True）→ delist 後有 >0 進場（證 clamp 真有 bite）。
+    assert _post_delist_entries(panel.survivorship["DEADUSDT"]) > 0
+
+    # 整段 tsmom 觀測數：clamped < listed_at-only（dead symbol 後段被砍）。
+    surv_clamped = {"DEADUSDT": clamped["DEADUSDT"]}
+    surv_naive = {"DEADUSDT": panel.survivorship["DEADUSDT"]}
+    close_only_dead = {"DEADUSDT": panel.close["DEADUSDT"]}
+    t_clamped = stats.tsmom_significance(close_only_dead, surv_clamped, k)
+    t_naive = stats.tsmom_significance(close_only_dead, surv_naive, k)
+    assert t_clamped["n_obs"] < t_naive["n_obs"], (t_clamped["n_obs"], t_naive["n_obs"])
+
+    # adapter.evaluate 端到端：full tier 自證 mask_applied + delisted_clipped_count>=1。
+    tr = ev.evaluate(tier="full_survivorship", universe=tier_syms, alive_mask=alive_mask)
+    assert tr.survivorship_mask_applied is True
+    assert tr.notes.get("delisted_clipped_count", 0) >= 1
+
+
+def test_high1_count_seen_delisted_real_uses_alive_mask():
+    """★ _count_seen_delisted 真用 alive_mask 數 delist-after-clip（非佔位 0）。"""
+    import datetime as _dt
+    from aeg_breadth_ladder.evaluator import MultidayTrendReferenceEvaluator
+
+    panel, dates, dead_idx = _synthetic_panel_with_dead_symbol(n_days=120, dead_alive_to_idx=60)
+    alive_to = dates[dead_idx]
+    alive_mask = {
+        "BTCUSDT": (None, None),  # 仍上市（alive_to=None）→ 不算 delist
+        "DEADUSDT": (None, _dt.datetime(alive_to.year, alive_to.month, alive_to.day,
+                                        tzinfo=_dt.timezone.utc)),
+    }
+    ev = MultidayTrendReferenceEvaluator(panel, k=10)
+    # DEADUSDT alive_to 早於 panel 末日 → 計 1；BTCUSDT alive_to=None → 不計。
+    assert ev._count_seen_delisted(("BTCUSDT", "DEADUSDT"), alive_mask, panel) == 1
+    assert ev._count_seen_delisted(("BTCUSDT",), alive_mask, panel) == 0
+
+
+def test_high1_harness_healthcheck_gate_raises_on_non_inheriting(tmp_path):
+    """★ healthcheck wiring load-bearing：run_ladder 對非繼承 adapter raise（非 silent-dead）。"""
+    fnd2_dir = tmp_path / "fnd2_run"
+    fnd2_dir.mkdir()
+    import csv as _csv
+    cols = ua_mod._REQUIRED_FND2_COLUMNS + ("universe_id",)
+    with open(fnd2_dir / "universe.csv", "w", encoding="utf-8", newline="") as fh:
+        w = _csv.writer(fh)
+        w.writerow(list(cols))
+        w.writerow(["BTCUSDT", '["full_survivorship","core25_pinned"]', "true",
+                    "2024-06-03T00:00:00+00:00", "2026-06-03T00:00:00+00:00", "false",
+                    "core25_pinned", "false", "uid_g"])
+        w.writerow(["DEADUSDT", '["full_survivorship","historical_delisted"]', "true",
+                    "2024-07-03T00:00:00+00:00", "2025-01-01T00:00:00+00:00", "true",
+                    "full_survivorship", "false", "uid_g"])
+    (fnd2_dir / "universe_summary.json").write_text(json.dumps({
+        "universe_id": "uid_g", "run_id": "fnd2_run_g", "survivor_rejection_status": "PASS",
+    }), encoding="utf-8")
+
+    bad = _NonInheritingEvaluator({
+        tiers_mod.TIER_CORE25_PINNED: _tr("core25_pinned", breadth=0, net_bps=10.0, n_independent=40),
+        tiers_mod.TIER_TOP_LIQUIDITY_40_50: _tr("top_liquidity_40_50", breadth=0, net_bps=9.0,
+                                                n_independent=40),
+        tiers_mod.TIER_FULL_SURVIVORSHIP: _tr("full_survivorship", breadth=0, net_bps=8.0,
+                                              n_independent=40),
+    })
+
+    class _Args:
+        run_id = "breadth_gate"
+        fnd2_run_dir = str(fnd2_dir)
+        asof = "2026-06-03T00:00:00Z"
+        window_start = "2024-06-03T00:00:00Z"
+        window_end = "2026-06-03T00:00:00Z"
+        artifact_root = str(tmp_path / "out")
+        session_id = None
+        created_by_role = "E1"
+
+    with pytest.raises(RuntimeError) as ei:
+        run_ladder(_Args(), evaluator=bad)
+    assert "healthcheck FAIL" in str(ei.value)
+
+
+def test_nit_fmt_num_negative_zero_normalized():
+    """NIT：_fmt_num(-0.0) 正規化為 '0'（signed-zero determinism）。"""
+    assert ladder_mod._fmt_num(-0.0) == "0"
+    assert ladder_mod._fmt_num(0.0) == "0"
+    # -0.0 與 0.0 進 digest 一致（不因 signed-zero 漂移）。
+    assert ladder_mod._canonical_cell(-0.0) == ladder_mod._canonical_cell(0.0)
 
 
 if __name__ == "__main__":

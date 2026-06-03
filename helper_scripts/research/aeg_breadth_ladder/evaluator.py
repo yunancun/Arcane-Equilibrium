@@ -17,8 +17,11 @@ MODULE_NOTE:
     - **n_independent 是 time-cluster-bound NOT symbol-scaled**：adapter 計算
       n_independent 時用 time-period count 取 min（PA §4 Step 3-4），**不沿用** multiday
       ``eff_n = pooled_flips × cluster_factor``（symbol-contaminated）。
-    - survivorship 繼承：adapter 把 FND-2 ``alive_mask`` 傳給候選 loader（候選只在
-      [alive_from, alive_to] 內持倉）；(b) 0 自寫 listed_at 查詢。
+    - survivorship 繼承（★ HIGH-1）：adapter 把候選 panel.survivorship（listed_at 下界）
+      與 FND-2 ``alive_mask``（含 alive_to delist 上界）**取交集**後才餵 PnL，候選只在
+      [alive_from, alive_to] 內持倉（delist 後 0 持倉 / 0 PnL）；(b) 0 自寫 listed_at 查詢。
+      adapter 經 ``survivorship_mask_applied`` 自證確有套 mask（summary 由此推導
+      ``survivorship_inherited_from_fnd2``，非寫死 True）。
     - read-only：adapter 委派候選 harness 既有 ``set_session(readonly=True)`` loader。
   依賴：標準庫 + numpy（adapter 計算）；multiday 候選 harness（adapter 內延遲 import，
     research/ sys.path 由 conftest 或 harness 自補）。import-time 零 DB 依賴。
@@ -68,6 +71,12 @@ class TierResult:
     # PIT / leak 自證：
     pit_mask_source: str = "fnd2_alive_from_alive_to"  # 繼承證據
     leak_free_signal: bool = False          # 候選自證 leak-free（leak-free vs naive 已驗）
+    # survivorship 繼承自證（★ 破 tautology，re-E2 HIGH-1）：候選評估器是否**真的**
+    # 把 FND-2 ``alive_mask`` 的 ``[alive_from, alive_to]`` 套上 PnL（含 delist 上界），
+    # 而非只跑在 listed_at-only 的 panel.survivorship（會多算 delist 後死 symbol 的 PnL）。
+    # summary 由此欄聚合推導 ``survivorship_inherited_from_fnd2``，**不寫死 True**：漏用
+    # alive_mask / 漏 alive_to 上界的 adapter 必回 False（或保留 None）→ healthcheck FAIL。
+    survivorship_mask_applied: Optional[bool] = None
     notes: dict = field(default_factory=dict)
 
 
@@ -129,10 +138,18 @@ class MultidayTrendReferenceEvaluator:
         # 只取 tier ∩ panel 有 close 的 symbol（panel 可能未覆蓋全 FND-2 universe）。
         tier_syms = tuple(s for s in universe if s in panel.close)
         close_by_symbol = {s: panel.close[s] for s in tier_syms}
-        surv_by_symbol = {s: panel.survivorship[s] for s in tier_syms if s in panel.survivorship}
+        # ★ HIGH-1：survivorship 必須是 panel.survivorship（listed_at 下界）∩ FND-2
+        # alive_mask（含 alive_to delist 上界）。只用 panel.survivorship 會多算 delist 後
+        # 死 symbol（如 DEADUSDT）的 PnL（panel 只有 listed_at 下界、無上界）。交集後
+        # delist 後的 bar surv=False → tsmom_significance 跳過 → 該 symbol delist 後持倉=0。
+        surv_by_symbol = self._clamped_survivorship(tier_syms, alive_mask, panel)
+        # adapter **真的**套了 alive_mask 的 [alive_from, alive_to] → 自證繼承（非寫死）。
+        mask_applied = self._mask_was_applied(tier_syms, alive_mask)
 
         breadth_count = len(tier_syms)
-        seen_delisted = self._count_seen_delisted(tier_syms, alive_mask, panel)
+        # delist-after-clip：tier 內 alive_to 早於 panel 末日（窗內真 delist）的 symbol 數
+        # （★ 真用 alive_mask 數，非佔位 0）。供 notes 佐證 + 自證 mask 確有 delist 上界。
+        delisted_clipped = self._count_seen_delisted(tier_syms, alive_mask, panel)
 
         # leak-free TSMOM signed-forward 顯著性（time-cluster-aware：n_eff_non_overlapping
         # = n_obs / k 是 holding-period overlap 校正後的非重疊有效樣本；time-bound）。
@@ -141,13 +158,15 @@ class MultidayTrendReferenceEvaluator:
             return TierResult(
                 tier=tier,
                 breadth_symbol_count=breadth_count,
-                seen_delisted_count=seen_delisted,
+                seen_delisted_count=0,  # artifact 權威值由 ladder 層覆寫（見 MODULE_NOTE）
                 n_independent=0,
                 sample_unit="non_overlapping_holding_window",
                 pit_mask_source="fnd2_alive_from_alive_to",
                 leak_free_signal=True,
+                survivorship_mask_applied=mask_applied,
                 notes={"reason": "insufficient_observations_at_scale", "k": k,
-                       "n_obs": (tsmom or {}).get("n_obs", 0)},
+                       "n_obs": (tsmom or {}).get("n_obs", 0),
+                       "delisted_clipped_count": delisted_clipped},
             )
 
         # n_independent = time-cluster-bound：non-overlapping holding-period windows。
@@ -171,7 +190,7 @@ class MultidayTrendReferenceEvaluator:
         return TierResult(
             tier=tier,
             breadth_symbol_count=breadth_count,
-            seen_delisted_count=seen_delisted,
+            seen_delisted_count=0,   # artifact 權威值由 ladder 層覆寫（見 MODULE_NOTE）
             net_bps=round(net_bps, 4) if net_bps is not None else None,
             gross_bps=round(gross_bps, 4) if gross_bps is not None else None,
             cost_bps=round(rt_cost_bps, 4),
@@ -187,12 +206,14 @@ class MultidayTrendReferenceEvaluator:
                                if short_bps is not None else None),
             pit_mask_source="fnd2_alive_from_alive_to",
             leak_free_signal=True,   # tsmom_significance 用 C_{t-1} lookback（leak-free）
+            survivorship_mask_applied=mask_applied,
             notes={
                 "k": k,
                 "n_obs_pooled": tsmom.get("n_obs"),
                 "n_eff_non_overlapping_pooled": tsmom.get("n_eff_non_overlapping"),
                 "hit_rate": tsmom.get("hit_rate"),
                 "significant_positive_momentum": tsmom.get("significant_positive_momentum"),
+                "delisted_clipped_count": delisted_clipped,
             },
         )
 
@@ -205,6 +226,17 @@ class MultidayTrendReferenceEvaluator:
         加寬只增 symbol 數，**不增時間軸**；time-period count 只受窗長/holding k 決定，
         故 core25 與 full 應得相同 n_independent（這是 breadth≠n_independent 的機械保證，
         T-breadth-not-nindep bite test）。不重疊：除以 holding k（前瞻 k 日視窗不重疊）。
+
+        impl-spec 偏離記錄（re-E2 MED；對齊 PA §4 字面 ``window/k``）：
+          spec 字面是「分析窗長 / k」；本實作用「**單 symbol 最長可用 tradable days** // k」
+          （cross-symbol 上確界），而非整段分析窗長。為什麼 production-safe：core25 成員是
+          最老 / 最 liquid 的 perp，其單 symbol 可用史已是 universe 內最長者；更寬 tier
+          只會引入**更短或等長**史的 symbol（晚上市 / 中途 delist），不會引入更長史 →
+          max_tradable_days 不因 breadth 加寬而漲 → n_independent 仍 breadth-invariant。
+          取最長（而非分析窗名目長）反而更保守地反映「最佳 symbol 實際有多少不重疊窗」，
+          不會因某 symbol 史短而虛報整窗樣本。
+          注意：promotion 端更嚴的 effective-N（跨 symbol 共用時間軸的真有效獨立窗數、
+          cross-sectional 收縮）屬 (c) / QC scope，非本 (b) 診斷層職責。
         """
         import numpy as np  # 延遲 import
         max_tradable_days = 0
@@ -224,17 +256,86 @@ class MultidayTrendReferenceEvaluator:
         return max(0, max_tradable_days // k)
 
     @staticmethod
-    def _count_seen_delisted(tier_syms: tuple, alive_mask: dict, panel) -> int:
-        """tier 內被 FND-2 標 delisted（artifact seen_delisted）的 symbol 數。
+    def _alive_window_dates(alive_mask: dict, symbol: str) -> tuple:
+        """取 symbol 的 alive_mask 窗（轉成 date 上下界）。回 ``(alive_from_date, alive_to_date)``。
 
-        以 alive_mask 為準的補充：FND-2 artifact 已標 seen_delisted；本 adapter 由
-        universe_artifact 傳入的 ``seen_delisted_by_symbol``（在 alive_mask.notes 之外，
-        見 ladder.run）解析。此處保守：alive_mask 不含 delisted flag 時回 0（真值由
-        universe_artifact 在組 TierResult 後覆寫；見 ladder.assemble_tier_results）。
+        alive_from/alive_to 為 tz-aware UTC datetime（或 None=無界）。轉成 date 以對齊
+        panel.dates（datetime.date）。None → None（該側不設界）。
         """
-        # adapter 不獨立判 delisted（artifact 是權威）；真 seen_delisted_count 由
-        # universe_artifact 提供並在 ladder 層覆寫，這裡回 0 佔位（不偽造）。
-        return 0
+        af, at = alive_mask.get(symbol, (None, None))
+        af_d = af.date() if af is not None else None
+        at_d = at.date() if at is not None else None
+        return af_d, at_d
+
+    @classmethod
+    def _clamped_survivorship(cls, tier_syms: tuple, alive_mask: dict, panel) -> dict:
+        """survivorship = panel.survivorship（listed_at 下界）∩ alive_mask [alive_from, alive_to]。
+
+        為什麼交集（★ HIGH-1）：panel.survivorship 只有 listed_at 下界、**無 delist 上界**
+        （data_loader 只查 listed_at）；FND-2 alive_mask 帶 alive_to delist 上界。交集後
+        delist 後的 bar surv=False，候選只在 [alive_from, alive_to] 內持倉（delist 後 0
+        持倉 / 0 PnL 貢獻，MIT b.2）。symbol 不在 alive_mask（無界）→ 退回 panel 原值
+        （保守，不擴大持倉窗）。
+        """
+        import numpy as np  # 延遲 import
+        out: dict = {}
+        dates = panel.dates
+        for s in tier_syms:
+            base = panel.survivorship.get(s)
+            if base is None:
+                continue
+            surv = np.asarray(base, dtype=bool).copy()
+            af_d, at_d = cls._alive_window_dates(alive_mask, s)
+            if af_d is None and at_d is None:
+                out[s] = surv  # 無 alive_mask 界 → 退回 panel 原值（不擴大窗）
+                continue
+            # 套上下界：alive_from 前 / alive_to 後的 bar 視為未存活（surv=False）。
+            for i, d in enumerate(dates):
+                if af_d is not None and d < af_d:
+                    surv[i] = False
+                if at_d is not None and d > at_d:
+                    surv[i] = False
+            out[s] = surv
+        return out
+
+    @classmethod
+    def _mask_was_applied(cls, tier_syms: tuple, alive_mask: dict):
+        """adapter 是否**真的**對此 tier 套了 FND-2 alive_mask（自證繼承，破 tautology）。
+
+        回 ``Optional[bool]``（summary 端聚合時只看非 None 的已評估 tier）：
+          - 空 tier（如 scanner overlap 常為空）→ **None**：無 symbol 可套 mask，非繼承
+            訊號（不該拖累整體繼承判定）。
+          - 非空 tier 但 alive_mask 無此 tier 任一 symbol → **False**：mask 缺、adapter
+            無從繼承（誠實標記，不偽造 True）→ 拉低整體判定。
+          - 非空 tier 且 alive_mask 至少有一 symbol 條目 → **True**：``_clamped_survivorship``
+            會據此 clip（含 alive_to delist 上界）→ 真的繼承。
+        為什麼不要求每個 symbol 都有界：core25 等 tier 可能含 alive_to=None（仍上市）的
+        symbol，但只要 mask 有提供條目、adapter 有據此 clip，即屬「真的繼承」。
+        """
+        if not tier_syms:
+            return None
+        return any(s in alive_mask for s in tier_syms)
+
+    @classmethod
+    def _count_seen_delisted(cls, tier_syms: tuple, alive_mask: dict, panel) -> int:
+        """tier 內**真 delist-after-clip** 的 symbol 數（★ 真用 alive_mask 數，非佔位 0）。
+
+        定義：symbol 在 alive_mask 有 alive_to 上界、且該上界**早於 panel 末交易日**
+        → 代表此 symbol 在分析窗內真的下市（其 survivorship 被 alive_to clip 掉一段）。
+        為什麼這樣數：driver 是「mask 的 delist 上界確實對某 symbol 生效」的機械證據，與
+        artifact 的 seen_delisted flag 互補（seen_delisted_count 仍由 ladder 層用 artifact
+        權威值覆寫；本數值入 notes 佐證 mask 真有 delist 上界、非佔位）。
+        """
+        dates = panel.dates
+        if not dates:
+            return 0
+        last_date = dates[-1]
+        count = 0
+        for s in tier_syms:
+            _af_d, at_d = cls._alive_window_dates(alive_mask, s)
+            if at_d is not None and at_d < last_date:
+                count += 1
+        return count
 
 
 class StubEvaluator:
@@ -251,6 +352,8 @@ class StubEvaluator:
     def evaluate(self, *, tier: str, universe: tuple, alive_mask: dict) -> TierResult:
         base = self._results.get(tier)
         if base is None:
+            # 無預設 result → 誠實標記未套 mask（survivorship_mask_applied=None），
+            # 讓 summary 推導 survivorship_inherited_from_fnd2=False（非偽造 True）。
             return TierResult(
                 tier=tier, breadth_symbol_count=len(universe), seen_delisted_count=0,
                 n_independent=0, sample_unit="stub_no_result",

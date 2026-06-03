@@ -76,10 +76,15 @@ def _fmt_num(x: Optional[float]) -> Optional[str]:
 
     為什麼 %.12g：net_bps / t_stat 等浮點跨平台 repr 可能差異；%.12g 給足精度又消除
     尾差，進 digest 穩定（mirror FND-2 builder._fmt_num；R-4 determinism）。
+    為什麼正規化 -0.0（re-E2 NIT）：``%.12g`` 對 -0.0 產出 ``"-0"``，signed-zero 會讓
+    「同數值不同符號零」digest 不穩（如 round() 偶得 -0.0 vs 0.0）→ 統一把 -0.0 視為 0.0。
     """
     if x is None:
         return None
-    return "%.12g" % float(x)
+    xf = float(x)
+    if xf == 0.0:
+        xf = 0.0  # 把 -0.0 正規化為 0.0（== 對 ±0 皆 True，再賦正零）
+    return "%.12g" % xf
 
 
 def _canonical_cell(value) -> str:
@@ -365,6 +370,7 @@ def build_ladder(
         rows, run_id=run_id, candidate_id=candidate_id, ladder_id=ladder_id,
         asof_utc=asof_utc, window_start_utc=window_start_utc, window_end_utc=window_end_utc,
         fnd2_universe_id=fnd2_universe_id, fnd2_run_id=fnd2_run_id,
+        tier_results=tier_results,
     )
     return rows, summary
 
@@ -380,8 +386,13 @@ def _build_summary(
     window_end_utc: str,
     fnd2_universe_id: str,
     fnd2_run_id: str,
+    tier_results: Optional[dict] = None,
 ) -> dict:
-    """summary dict（PA §5 breadth_ladder_summary.json）。"""
+    """summary dict（PA §5 breadth_ladder_summary.json）。
+
+    tier_results：``{tier_name: TierResult}``——用來**推導** survivorship 繼承自證
+    （HIGH-1），不再寫死 True。
+    """
     # nested tier（monotonicity 主軸）。
     # 為什麼用 tier-design 排除而非全 excluded_from_promotion 排除：promotion 排除有兩源
     # — (1) tier-design diagnostic-only（top_liquidity asof_constant / scanner overlap，
@@ -400,6 +411,9 @@ def _build_summary(
     per_tier_breadth = {r["breadth_cohort"]: r["breadth_symbol_count"] for r in rows}
     delisted_proof_total = sum(int(r["seen_delisted_count"] or 0) for r in rows)
 
+    # survivorship 繼承自證（HIGH-1：從候選 TierResult 真實行為推導，不寫死 True）。
+    survivorship_inherited = _derive_survivorship_inherited(tier_results)
+
     return {
         "run_id": run_id,
         "ladder_id": ladder_id,
@@ -416,9 +430,37 @@ def _build_summary(
         "per_tier_breadth": per_tier_breadth,
         "monotonicity": monotonicity,
         "delisted_proof_total": delisted_proof_total,
-        "survivorship_inherited_from_fnd2": True,
+        "survivorship_inherited_from_fnd2": survivorship_inherited,
         "verdict_hint": monotonicity["verdict_hint"],
     }
+
+
+def _derive_survivorship_inherited(tier_results: Optional[dict]) -> bool:
+    """從候選 TierResult 真實行為推導 ``survivorship_inherited_from_fnd2``（★ 破 tautology）。
+
+    為什麼不寫死 True（HIGH-1）：寫死會讓 healthcheck 的繼承斷言變恆真、抓不到「漏用
+    alive_mask / 漏 alive_to 上界」的非繼承 adapter。改由每個 tier 的
+    ``survivorship_mask_applied`` 聚合推導——adapter 唯有**真的**把 FND-2 alive_mask 的
+    [alive_from, alive_to]（含 delist 上界）套上 PnL 才回 True。
+
+    判定（fail-closed）：只看「已評估 tier」（``survivorship_mask_applied is not None``；
+    空 tier 如 scanner overlap 回 None 不計）——須**至少一個**已評估 tier，且**全部**
+    為 True → True；任一已評估 tier 回 False（mask 缺 / 未套）→ False。0 已評估 tier
+    或 tier_results 缺 → False（無證據不主張繼承，誠實 fail-closed → healthcheck FAIL
+    而非偽 PASS）。
+    為什麼排除 None（空 tier）：scanner_active_asof overlap 常為空，其「無 symbol 可套
+    mask」不是非繼承訊號，不該拖累整體判定（否則真跑必恆 False）。
+    """
+    if not tier_results:
+        return False
+    flags = [
+        getattr(tr, "survivorship_mask_applied", None)
+        for tr in tier_results.values()
+    ]
+    evaluated = [f for f in flags if f is not None]
+    if not evaluated:
+        return False
+    return all(f is True for f in evaluated)
 
 
 def ordered_tier_digest(rows: list) -> str:

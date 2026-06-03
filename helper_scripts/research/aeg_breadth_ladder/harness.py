@@ -6,7 +6,12 @@ MODULE_NOTE:
     顯式窗）→ universe_artifact 讀 FND-2 artifact → tiers.assemble_tiers（cohort_ids
     nested）→ build_alive_mask（survivorship 繼承）→ per-tier candidate.evaluate（預設
     multiday reference adapter，OQ-B2）→ ladder.build_ladder → artifact.write_all →
-    印 summary。**無隱式 now()**（窗口為顯式參數）。
+    **survivorship PIT healthcheck 即時 gate（FAIL → raise）** → 印 summary。
+    **無隱式 now()**（窗口為顯式參數）。
+    healthcheck 接入（MIT M-2 / E2 LOW）：在 run path 產 artifact 後立即把
+    ``healthcheck.check_aeg_breadth_universe_pit`` 當 gate（FAIL=非繼承 / current-survivor
+    truncate → run 非 0 退出），使其 load-bearing 而非 silent-dead；cron / AEG run
+    orchestration 級別的排程接入屬 (c) / AEG run orchestration（PM follow-up TODO）。
   主要函數：``main`` / ``run_ladder`` / ``assemble_tier_results``。
   CLI 範例（首跑用 FND-2 同窗，OQ-B5）：
     python3 -m aeg_breadth_ladder.harness \\
@@ -38,6 +43,7 @@ try:
     from . import universe_artifact as ua_mod
     from . import ladder as ladder_mod
     from . import artifact as artifact_mod
+    from . import healthcheck as hc_mod
     from .evaluator import MultidayTrendReferenceEvaluator, StubEvaluator
 except ImportError:  # pragma: no cover - 直接執行檔案路徑時
     _here = Path(__file__).resolve()
@@ -48,6 +54,7 @@ except ImportError:  # pragma: no cover - 直接執行檔案路徑時
     from aeg_breadth_ladder import universe_artifact as ua_mod  # type: ignore
     from aeg_breadth_ladder import ladder as ladder_mod  # type: ignore
     from aeg_breadth_ladder import artifact as artifact_mod  # type: ignore
+    from aeg_breadth_ladder import healthcheck as hc_mod  # type: ignore
     from aeg_breadth_ladder.evaluator import (  # type: ignore
         MultidayTrendReferenceEvaluator, StubEvaluator,
     )
@@ -183,8 +190,24 @@ def run_ladder(args: argparse.Namespace, *, evaluator=None) -> dict:
         created_by_role=args.created_by_role,
         artifact_root=artifact_root,
     )
+
+    # 8) survivorship PIT healthcheck 即時 gate（MIT M-2 + E2 LOW：原函數無人 call =
+    # silent-dead；在此產 artifact 後立即當 gate 接入，使其 load-bearing）。
+    # FAIL → raise（fail-loud，run 非 0 退出，不讓 truncate/非繼承 artifact 靜默通過）。
+    # WARN/PASS → 繼續（WARN=artifact/上游 summary 缺，非 (b) 缺陷）。
+    hc_status, hc_msg = hc_mod.check_aeg_breadth_universe_pit(
+        Path(written["breadth_ladder_summary"]),
+        fnd2_run_dir / "universe_summary.json",
+    )
+    if hc_status == "FAIL":
+        raise RuntimeError(
+            f"breadth ladder survivorship healthcheck FAIL：{hc_msg}（"
+            f"artifact={written['breadth_ladder_summary']}）"
+        )
+
     return {"summary": summary, "written": written, "row_count": len(ladder_rows),
-            "tiers": {k: len(v) for k, v in tiers_by_name.items()}}
+            "tiers": {k: len(v) for k, v in tiers_by_name.items()},
+            "healthcheck": {"status": hc_status, "message": hc_msg}}
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -234,6 +257,7 @@ def main(argv: Optional[list] = None) -> int:
         "verdict_hint": summary["verdict_hint"],
         "delisted_proof_total": summary["delisted_proof_total"],
         "survivorship_inherited_from_fnd2": summary["survivorship_inherited_from_fnd2"],
+        "survivorship_healthcheck": result.get("healthcheck"),
         "artifact_dir": result["written"]["run_dir"],
         "parquet_result": result["written"]["parquet_result"],
     }
