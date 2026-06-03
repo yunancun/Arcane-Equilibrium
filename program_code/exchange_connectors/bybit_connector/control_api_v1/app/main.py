@@ -584,7 +584,7 @@ async def _startup_integrity_check() -> None:
 
     # ── P5-SM-OPTION2 B-3: lease IPC divergence counter → PG snapshot flusher ──
     # SM Option 2 soak 可觀測性：把 comparator in-memory 計數器週期 best-effort
-    # UPSERT 到 learning.lease_ipc_divergence_snapshot（V128），讓獨立 cron
+    # UPSERT 到 learning.lease_ipc_divergence_snapshot（V129），讓獨立 cron
     # healthcheck 能以 SQL 讀 soak 信號。leader-elected 單一 writer；fail-soft，
     # 絕不影響權威 lease 路徑 / comparator（G-2）。asyncio.create_task 非阻塞。
     try:

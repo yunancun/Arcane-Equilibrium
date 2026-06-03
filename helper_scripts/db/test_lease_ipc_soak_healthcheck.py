@@ -9,7 +9,7 @@ P5-SM-OPTION2 B-3 soak healthcheck `[81]` 單元測試（rework (b)+(b-i)）。
   - healthcheck `[81]` gate（FAIL 條件）**只剩 P-LIVE**：lease_transitions 表存在 + 窗內
     有 row + fresh。任一不滿足 → FAIL（G-1 紀律對 P-LIVE 仍適用）。
   - comparator counter（total / divergences / snapshot freshness / flag_enabled）→ **觀測欄**
-    （在 msg 報數值，**不再 FAIL**）。讀不到（V128 缺 / row 缺 / stale）→ 觀測欄缺值，
+    （在 msg 報數值，**不再 FAIL**）。讀不到（V129 缺 / row 缺 / stale）→ 觀測欄缺值，
     照常 PASS（gate 由 P-LIVE 定）。
 
 覆蓋：
@@ -21,7 +21,7 @@ P5-SM-OPTION2 B-3 soak healthcheck `[81]` 單元測試（rework (b)+(b-i)）。
     - P-LIVE 健康 → PASS（msg 附 comparator 觀測欄）。
   healthcheck `[81]` comparator 觀測欄（**非 gate**，rework 核心斷言）：
     - divergences > 0：只要 P-LIVE 健康 → **PASS**（divergence 在觀測欄報數值，不 FAIL）。
-    - V128 snapshot 表缺：P-LIVE 健康 → **PASS**（觀測欄報 unavailable，不 FAIL）。
+    - V129 snapshot 表缺：P-LIVE 健康 → **PASS**（觀測欄報 unavailable，不 FAIL）。
     - snapshot row 缺：P-LIVE 健康 → **PASS**（觀測欄報 unavailable，不 FAIL）。
     - flag_enabled=false：P-LIVE 健康 → **PASS**（觀測欄報 flag=OFF，不 FAIL）。
     - snapshot stale：P-LIVE 健康 → **PASS**（觀測欄照報，不 FAIL）。
@@ -135,12 +135,12 @@ class TestCheck81ComparatorNonGate(unittest.TestCase):
         self.assertIn("divergences=3", msg)  # 報數值供 triage
 
     def test_snapshot_table_missing_does_not_fail(self) -> None:
-        # P-LIVE 健康 + V128 snapshot 表缺 → PASS（觀測欄報 unavailable，不 gate）。
+        # P-LIVE 健康 + V129 snapshot 表缺 → PASS（觀測欄報 unavailable，不 gate）。
         cur = _cursor(_PLIVE_OK + [(False,)])  # 觀測：snapshot 表缺
         status, msg = check_81_lease_ipc_soak(cur)
         self.assertEqual(status, "PASS")
         self.assertIn("unavailable", msg)
-        self.assertIn("V128 snapshot table absent", msg)
+        self.assertIn("V129 snapshot table absent", msg)
 
     def test_snapshot_row_missing_does_not_fail(self) -> None:
         # P-LIVE 健康 + snapshot 表在但無 'singleton' row → PASS（觀測欄報 unavailable）。
