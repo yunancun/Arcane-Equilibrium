@@ -4674,3 +4674,33 @@ Scope: backfill/funding_oi_backfill.rs(795) + funding_oi_writer.rs(391) + bin/fu
 - LOW-3 docstring 符號表述殘留 (cost_model.py:9/47/75 line161 "Σ side×F" / pnl.py:49 _close_segment:170 "Σ side×F"): 代碼是 −side×F, docstring 多處仍寫正號 Σ side×F(E1 修符號時 docstring 未同步)。讀者誤導, 修為 −side×F 或註明會計符號。
 
 **教訓**: (1) 負判定 harness 審「假陰性」最有力武器=查被判項的**物理量級上界**(realized funding median|F|), 一旦量級被數據鎖死, 任何信號/邊界 bug 都不可能翻 verdict — 比逐行追符號更決定性。(2) **per-leg 分解是 down-market beta 偽裝 carry 的照妖鏡**: aggregate 正 net 拆 long/short leg 後 short-leg gross_price>>funding_pnl 立即暴露「碎正 net 來自方向 beta 非 carry」。(3) test 把 off-by-one 邊界當預期固化=「測試綠」對邊界正確性是假安心(承 multiday_trend 教訓延伸: 不只查 verdict 命脈, 邊界 test 也要對 spec 核而非對 code 核)。
+
+## 2026-06-03 V127 (aeg_regime_labels + aeg_regime_transitions) 對抗審查 — PASS to E4（獨立 Linux sandbox dry-run 親跑）
+
+**Verdict**: PASS（0 BLOCKER / 0 HIGH / 0 MED / 1 LOW 觀察）。AEG-S2 component (a) regime-labels 儲存層 V127，untracked 待 PM commit。E1 乾淨完成（非 socket 中斷）。E4 正式 double-apply 在 operator 真 apply 時跑。
+
+**改動範圍**：純新增 `sql/migrations/V127__aeg_regime_labels.sql`（625 行 < 800）。`git diff HEAD --stat -- sql/migrations/` 空 = **0 既有 migration 被改**（無 V083/V084-style checksum drift）。untracked 正確（defer commit）。grep `/home|/Users|secret|hmac|token` exit 1 clean。BIGINT 僅出現在 comment + Guard C var decl（無 BIGINT-ms time interval）。
+
+**獨立 Linux sandbox dry-run（scp → v127_e2_dryrun DB，TSDB 2.26.1，零碰 live trading_ai）**：
+- Apply #1 EXIT=0，all guards PASS。Apply #2 EXIT=0 全 no-op（schema/table/hypertable/index "already exists skipping"；compression 走 IF NOT EXISTS guard 的 ELSE 分支「already enabled; skipping ALTER」非 nested EXCEPTION；policy if_not_exists 回 -1）。**冪等 double-apply 證實**。
+- **§F Guard C 兩 apply 皆 RAISE-able 但都 PASS**（V125 §E post-COMMIT validation-that-can-raise 的 fail mode，無 crash-loop）。
+- 經驗 schema 對 MIT §a.2 **逐欄/逐 PK/逐 CHECK byte-match**：labels 25 欄、transitions 9 欄；10 feature 全 `real|nullable=YES`；main_regime/context_bars/feature_rules_digest/git_* NOT NULL；market_anchor_regime + trigger_feature NULL-able。
+- **PK 軸經驗確認**：labels `(classifier_version,symbol,timeframe,signal_ts,run_id)` classifier_version **position 1**；transitions 同。
+- CHECK 經驗：main_regime/from/to 6-enum、timeframe 2-enum。
+- compression 經驗：兩表 symbol segmentby_column_index=1；orderby = `<time> DESC, classifier_version, run_id`（run_id 在 orderby 非 segmentby）；compress 30d / retention 1095d 各 1 job。
+
+**對抗 INSERT 探針（dry-run 不覆蓋的 fail-closed 語義）**：
+- 10 feature 全 NULL 的 insufficient_context row → INSERT 0 1（E1 decision #3 REAL-NULL 正確）；main_regime NULL → reject（NOT NULL）；main_regime='TRENDING_UP'（V002 詞表）→ CHECK reject（S0 §1.7 防混雜經驗證）；同 key 不同 classifier_version → coexist（immutability 軸）；exact dup PK → reject（無 silent overwrite）。
+- **Guard A drift 探針**：DROP feature_rules_digest 後 re-apply → `ERROR: V127 Guard A FAIL ... missing {feature_rules_digest}`，證 Guard A 真 fail-loud（非 V023 silent-noop；CREATE TABLE IF NOT EXISTS 本會靜默 skip drifted table，Guard A 先攔）。
+
+**E1 三個 V125-pattern 推導決策全 sound**：(a) compress_segmentby=symbol ✓ (b) orderby=`signal_ts DESC, classifier_version, run_id` ✓（經驗反射確認）(c) 10 feature REAL 允許 NULL ✓（符 MIT 明示 + insufficient_context 語義；對比 V125 C-3 fail-closed data-value DOUBLE NOT NULL 的差異 E1 註解正確）。
+
+**§F 反射軸硬繼承 V125 §E crash-loop fix**：`compression_settings.attname='symbol' AND segmentby_column_index IS NOT NULL`（非 `.segmentby` 欄）+ `dimensions.time_interval` + `jobs.config->>'drop_after'`，與 V125:848-857 結構 byte-identical。§F dimensions query 有 `column_name=v_timecol` filter → 單 time dim，無 multi-dim scalar trap。
+
+**清理**：sandbox DROP DATABASE + rm /tmp 檔；live head 仍 126、research.aeg_* count=0（零碰 live 確認）。
+
+**LOW-1（觀察非阻塞）**：TSDB advisory `WARNING: column "timeframe" should be used for segmenting or ordering`（timeframe 在 PK 不在 segmentby/orderby）。非 ERROR、不破 apply；timeframe 僅 2-enum 低基數，留在 PK 已足 query；與 V125 同類 PK-非-segmentby 欄處理一致。無需改。
+
+**§5 race check**：5a fetch+sibling window clean（HEAD=origin/main=54947d7d，sibling 窗無 sql/migrations 衝突）；5b status 僅本 scope（V127 untracked + E1/memory + 既有 project memory）；5c 看到舊 stash 未 touch；5d/5e N/A（PM commit 階段）。
+
+**教訓**：(1) migration 審查 = 靜態對齊 V125 先例 + **獨立 sandbox 親跑 double-apply + 經驗 schema 反射 + 對抗 INSERT 探針**，三層才足；E1 自報 dry-run 結果可信但 E2 親跑才是 ground。(2) §F post-COMMIT Guard C 是「會 RAISE 的真驗證」非 NOTICE-only → 必親驗兩 apply 都 PASS（否則 crash-loop fail mode）。(3) feature REAL-NULL vs data-value NOT NULL 的語義分界 = 「分類器內部診斷產物（NULL 不污染證據）」vs「fail-closed 交易資料值（0.0 fake-zero 污染 PIT）」，審 schema NOT NULL 決策須問「此欄缺值的語義是 diagnostic-gap 還是 data-corruption」。
