@@ -109,10 +109,20 @@ class GateBWsProbe:
         ws_app_factory: Optional[Callable[..., Any]] = None,
         clock_ms: Callable[[], int] = lambda: int(time.time() * 1000),
         ws_url: str = _BYBIT_PUBLIC_WS_URL,
+        persist_control_ticks: bool = True,
     ) -> None:
         # jsonl_writers: 各 artifact 檔的寫入回呼（kline / publictrade / control /
         # capture_lag / markout）。注入式，方便測試與由 artifact 層接管落地。
         self._writers = jsonl_writers or {}
+        # persist_control_ticks（G1 firehose 殺手）：是否把每筆 BTC control 哨兵 tick
+        # 落盤（_emit("control", control_trade)）。預設 True 保探針行為不變（向後相容，
+        # 32 既有測試仍綠）；production collector 傳 False → control tick 只更新
+        # in-memory liveness counter（_control_last_seen_ms/_control_tick_count），不
+        # 落盤，避免探針觀測到的 346MB/43h firehose（PA 設計 §3.1 / G1）。
+        # 為什麼只關 control 落盤不影響其他：control symbol（BTCUSDT）在 _handle_public
+        # _trade 早 continue，不進 capture_lag/markout/候選 publictrade 路徑；liveness
+        # counter 在 _emit 之前已更新，故 poison 哨兵 control_liveness() 完全不受影響。
+        self._persist_control_ticks = persist_control_ticks
         self._ws_app_factory = ws_app_factory
         self._clock_ms = clock_ms
         self._ws_url = ws_url
@@ -287,18 +297,23 @@ class GateBWsProbe:
 
             # control 哨兵 tick（不寫進候選 capture_lag/markout，只更新 liveness）。
             if symbol == _CONTROL_SYMBOL:
+                # liveness counter 永遠更新（poison 哨兵的真實依據；與是否落盤無關）。
                 self._control_last_seen_ms = ingest_ts_local_ms
                 self._control_tick_count += 1
-                self._emit(
-                    "control",
-                    {
-                        "kind": "control_trade",
-                        "ts_local_ms": ingest_ts_local_ms,
-                        "event_ts_ms": event_ts,
-                        "price": price,
-                        "tick_count": self._control_tick_count,
-                    },
-                )
+                # G1：production 模式（persist_control_ticks=False）不逐筆落盤，避免
+                # BTC 高頻成交灌爆 control JSONL（探針觀測 346MB/43h firehose）。
+                # 探針預設 True 維持逐筆 control_trade 落盤（向後相容）。
+                if self._persist_control_ticks:
+                    self._emit(
+                        "control",
+                        {
+                            "kind": "control_trade",
+                            "ts_local_ms": ingest_ts_local_ms,
+                            "event_ts_ms": event_ts,
+                            "price": price,
+                            "tick_count": self._control_tick_count,
+                        },
+                    )
                 continue
 
             self._emit(
@@ -311,6 +326,10 @@ class GateBWsProbe:
                         "price": price,
                         "side": tr.get("S"),
                         "size": self._coerce_float(tr.get("v")),
+                        # OQ-3：Bybit publicTrade trade_id `i`（全 symbol 唯一）。collector
+                        # pg_sink 用它進 PK 防 listing pump 同價同毫秒誤併。探針不讀此欄
+                        # 不受影響（additive；其 artifact JSONL 多一欄無害）。
+                        "trade_id": tr.get("i"),
                     },
                     ingest_ts_local_ms,
                     event_ts,
