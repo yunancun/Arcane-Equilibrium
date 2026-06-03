@@ -7,18 +7,20 @@
 
 ---
 
+> **【2026-06-03 LOW-1 fix 後 QC RE-CONFIRMATION 更新】** 原判定基於 commit `6aefa576`。E1 修 E2 退回的 LOW-1 leak-free 邊界（`bisect_left`→`bisect_right`，含回前一 interval 邊界結算，協議 §2.1/AEG-S0 §2.3 的 `≤` 語意；保守-正確、零洩漏）後重跑（`e863853a` / run `low_fix_verify_20260603`），數字位移、**一條否決腿翻 pass**，QC 獨立 re-confirm（agent a77caab6）**verdict 仍 NO-GO-C**。下方 §1 已更新為修正後數字（PM JSON 原檔親驗 binding_condition=`cost_wall`、DSR 0.0、PSR 0.8429、HAC 2.17）。
+
 ## 一句話
-逃逸路②的 funding 維度**正當關閉**——carry 量級（best variant 5.4bps/trade）連自己 21bps 的交易成本都付不起（carry_cost_ratio 3.896），正向 net 是 short-leg 裸價格方向（down-market short-beta）偽裝的 carry（aggregate carry_share 僅 0.179），forward HAC t=1.64 不顯著；三重否決互相獨立佐證；**無殘留變體值得在關閉前再試**。
+逃逸路②的 funding 維度**正當關閉** — LOW-1 邊界修正後 forward HAC t 從 1.64 翻至 **2.17（harness 標顯著正）**，但 verdict **仍 NO-GO-C**，binding gate = **carry_cost_ratio 3.640 ≥ 0.8**（carry ~5.6bps 付不起 ~20bps 成本，需翻 4.55× 不可能）。翻 pass 的 net **+20.41bps 是 down-regime directional**（gross_price 35.64 主導、carry_share 仍低、N_eff tiltscore 2.021≈price 2.087 不獨立），即便 reframe 成 directional 也撞死 DSR/PSR deflation → 不可晉升。**無殘留變體值得在關閉前再試**。
 
-## 1. NO-GO-C = 三重獨立否決（PM JSON 原檔對賬 ✓）
+## 1. NO-GO-C = 三重獨立否決（修正後，PM JSON 原檔對賬 ✓）
 
-| 否決 | 數值（raw JSON 親驗） | 含義 |
+| 否決 | 數值（raw JSON 親驗 `low_fix_verify_20260603`）| 含義 |
 |---|---|---|
-| **carry_cost_ratio** | best variant **3.896** ≥ 0.8（A_L3 更差到 13.88）| carry 5.4bps 付不起 21bps 成本（門檻 4.87×，非邊緣失格）|
-| **forward HAC t** | **1.6393** < 2（naive 1.895，HAC<naive 有 bite）| funding-tiltscore 對未來報酬無顯著 cross-sectional 預測力 |
-| **DSR(K=8)** | **0.0**（pass=False）+ bootstrap CI 下界<0 | deflate 後信號完全不 survive（地板值，非差一點）|
+| **carry_cost_ratio** | best variant **3.640** ≥ 0.8（binding_condition=`cost_wall`）| carry ~5.6bps 付不起 ~20bps 成本（門檻 4.55×，binding gate）|
+| **DSR(K=8)** | **0.0**（pass=False）+ bootstrap CI 下界<0 | deflate 後信號完全不 survive（地板值，K=8 噪音冠軍）|
+| **PSR** | **0.8429** < 0.95 | 即便不 deflate，單一 Sharpe 顯著>0 機率仍不過門檻 |
 
-三道門檻**任一單獨都擋下**，三道一致 = 結論 robust。`net_turns_positive_with_horizon=True`（H14 net 微正）證實 binding 是 **cost-wall 腿**非攤薄失敗腿（MIT framing 校正：見 §3）。
+三道門檻**任一單獨都擋下**，三道一致 = 結論 robust。**forward HAC t（1.64→2.17）已退出否決腿**——它本就非決策樹 fail-fast 門檻（決策樹停在 cost_wall），僅 §4.1 verdict 佐證；翻 pass 不改 NO-GO-C 路徑。`net_turns_positive_with_horizon=True` 證實 binding 是 **cost-wall 腿**（MIT framing 校正：見 §3）。t=2.17 顯著是單檢定 in-sample，K=8 deflate 後 DSR 歸零（QC 反假陰性三角證偽：down-beta directional / 失 deflation / carry_share 低，見 §QC re-confirm）。
 
 ## 2. ★ per-leg「directional 偽裝 carry」判定（本診斷最有價值發現，正確）
 
