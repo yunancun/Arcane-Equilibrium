@@ -323,6 +323,25 @@ per `docs/CCAgentWorkSpace/Operator/2026-06-02--sm_option2_convergence_migration
 | governance_authority | 同 §2.5.1 |
 | migration_plan | step (iv) cleanup 移除 |
 
+#### 2.5.4 `_FLUSHER_LEADER_LOCK_FD`（P5-SM-OPTION2 B-3，2026-06-03）
+
+per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-03--p5_sm_soak_observability_redesign.md` §3 B-3：把 §2.5.2 comparator `_COUNTERS` best-effort 週期 UPSERT 到 PG 投影表 `learning.lease_ipc_divergence_snapshot`（V129），讓獨立 passive_wait_healthcheck cron 能以 SQL 讀 soak 信號。flusher 為 leader-elected 單一 writer，避免多 uvicorn worker 重複寫同一 'singleton' row。
+
+| 欄位 | 值 |
+|---|---|
+| name | `_FLUSHER_LEADER_LOCK_FD` |
+| type_signature | `int \| None`（module-level；flock 持有的檔案描述符，None=未取得/非 leader）|
+| location | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/governance_divergence_flush.py` |
+| owner_lifecycle | lazy：首次 `_acquire_flusher_leader_lock()` 取得（flock `LOCK_EX\|LOCK_NB`）；API worker process lifetime；worker exit 隨 process 釋放。`_reset_flusher_leader_lock_for_tests()` 僅供測試清空 |
+| cross_task_pattern | 單一 leader worker 持有；`divergence_snapshot_flusher` 背景協程每 30s 經 executor 跑 `flush_divergence_snapshot_once`（讀 §2.5.2 `_COUNTERS` snapshot → UPSERT V129 表）。非 leader worker 不 flush。對齊 `paper_trading_wiring._RECONCILER_ALERT_LOCK_FD` flock 範式 |
+| lock_primitive | OS `fcntl.flock`（檔案鎖 `$OPENCLAW_DATA_DIR/lease_ipc_divergence_flusher.leader.lock`）；非 in-process lock。`OPENCLAW_LEASE_DIVERGENCE_FLUSHER_LEADER=0` 可強制本 worker 非 leader |
+| visibility | private module binding（僅 `_acquire_flusher_leader_lock` / `_reset_flusher_leader_lock_for_tests` 變更）|
+| caller_chain | producer: `main.py @app.on_event("startup")` → `asyncio.create_task(divergence_snapshot_flusher())` → `_acquire_flusher_leader_lock()`；consumer: cron `passive_wait_healthcheck` `[81] check_81_lease_ipc_soak` 讀 PG 投影（非讀此 fd）|
+| health_monitoring | NO — soak 期觀測儀器；flusher 死 → snapshot stale → `[81]` freshness gate FAIL（R2 緩解）；step-(iv) cleanup 移除 |
+| registered_date | 2026-06-03 |
+| governance_authority | P5-SM-OPTION2 soak redesign §3 B-3 + operator O-1/O-2 |
+| migration_plan | step (iv) cleanup 連同 comparator sink（§2.5.1-3）+ dual-write mirror 一起移除（soak 0 divergence 後）；屆時 DROP V129 表 |
+
 ---
 
 ## §3 Registration Rules
