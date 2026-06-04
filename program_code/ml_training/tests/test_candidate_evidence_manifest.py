@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 import pytest
 
 from ml_training.candidate_evidence_manifest import (
@@ -38,7 +41,19 @@ def _valid_residual_alpha_report(**overrides) -> dict:
     return report
 
 
+def _canonical_sha256(value: dict) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def _valid_manifest(**overrides) -> dict:
+    residual_report = _valid_residual_alpha_report()
     manifest = {
         "schema_version": CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
         "verdict": PROMOTION_READY,
@@ -46,6 +61,8 @@ def _valid_manifest(**overrides) -> dict:
         "family_id": "family-alpha",
         "spec_hash": "a" * 64,
         "replay_experiment_id": "replay-exp-1",
+        "replay_manifest_hash": "c" * 64,
+        "demo_residual_alpha_report_hash": _canonical_sha256(residual_report),
         "hidden_oos": {
             "split_hash": "b" * 64,
             "window_start": "2026-05-01T00:00:00Z",
@@ -84,6 +101,10 @@ def test_manifest_hash_is_key_order_stable():
     manifest_a = _valid_manifest()
     manifest_b = {
         "hidden_oos": dict(reversed(list(manifest_a["hidden_oos"].items()))),
+        "demo_residual_alpha_report_hash": manifest_a[
+            "demo_residual_alpha_report_hash"
+        ],
+        "replay_manifest_hash": manifest_a["replay_manifest_hash"],
         "replay_experiment_id": manifest_a["replay_experiment_id"],
         "spec_hash": manifest_a["spec_hash"],
         "family_id": manifest_a["family_id"],
@@ -134,6 +155,14 @@ def test_nested_manifest_hash_tamper_is_invalid():
         (
             lambda manifest: manifest.pop("replay_experiment_id"),
             "replay_experiment_id_missing",
+        ),
+        (
+            lambda manifest: manifest.pop("replay_manifest_hash"),
+            "replay_manifest_hash_missing",
+        ),
+        (
+            lambda manifest: manifest.pop("demo_residual_alpha_report_hash"),
+            "demo_residual_alpha_report_hash_missing",
         ),
         (lambda manifest: manifest.pop("manifest_hash"), "manifest_hash_missing"),
     ],
@@ -193,6 +222,17 @@ def test_core_diagnostic_residual_report_is_invalid():
     assert validation.promotion_ready is False
     assert validation.verdict == INVALID
     assert validation.reason.startswith("residual_alpha:forbidden_reason:")
+
+
+def test_residual_report_hash_mismatch_is_invalid():
+    validation = validate_candidate_evidence_manifest(
+        _valid_manifest(),
+        residual_report=_valid_residual_alpha_report(raw_mean_bps=3.0),
+    )
+
+    assert validation.promotion_ready is False
+    assert validation.verdict == INVALID
+    assert validation.reason == "demo_residual_alpha_report_hash_mismatch"
 
 
 @pytest.mark.parametrize("verdict", [RESEARCH_ONLY, PENDING_SCHEMA, INVALID])

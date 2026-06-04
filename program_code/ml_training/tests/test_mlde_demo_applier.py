@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 import pytest
 
 from ml_training.mlde_demo_applier import (
@@ -117,7 +120,19 @@ def _valid_residual_alpha_report(**overrides) -> dict:
     return report
 
 
+def _canonical_sha256(value: dict) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def _valid_candidate_evidence_manifest(**overrides) -> dict:
+    residual_report = _valid_residual_alpha_report()
     manifest = {
         "schema_version": CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
         "verdict": PROMOTION_READY,
@@ -125,6 +140,8 @@ def _valid_candidate_evidence_manifest(**overrides) -> dict:
         "family_id": "family-alpha",
         "spec_hash": "a" * 64,
         "replay_experiment_id": "replay-exp-1",
+        "replay_manifest_hash": "c" * 64,
+        "demo_residual_alpha_report_hash": _canonical_sha256(residual_report),
         "hidden_oos": {
             "split_hash": "b" * 64,
             "window_start": "2026-05-01T00:00:00Z",
@@ -155,6 +172,24 @@ def _candidate_manifest_source_payload(**overrides) -> dict:
     }
     payload.update(overrides)
     return payload
+
+
+def _registry_source_fields(**overrides) -> dict:
+    fields = {
+        "evidence_source_tier": "calibrated_replay",
+        "replay_experiment_id": "replay-exp-1",
+        "manifest_hash": "c" * 64,
+        "replay_registry_status": "completed",
+        "replay_registry_expires_at": "2999-01-01T00:00:00+00:00",
+        "replay_registry_manifest_hash": "c" * 64,
+        "replay_registry_manifest_jsonb": {"registry": "manifest"},
+        "replay_registry_oos_label_window_start": "2026-05-01T00:00:00Z",
+        "replay_registry_oos_label_window_end": "2026-05-08T00:00:00Z",
+        "replay_registry_oos_embargo_seconds": 86400,
+        "replay_registry_total_candidates_k": 12,
+    }
+    fields.update(overrides)
+    return fields
 
 
 def test_execute_read_fail_soft_rolls_back_to_savepoint_for_real_pg_cursor():
@@ -261,6 +296,7 @@ def test_live_candidate_requires_strong_demo_evidence():
             "expected_net_bps": 7.0,
             "confidence": 0.8,
             "sample_count": 40,
+            **_registry_source_fields(),
             RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
         },
@@ -271,6 +307,7 @@ def test_live_candidate_requires_strong_demo_evidence():
             "expected_net_bps": 7.0,
             "confidence": 0.6,
             "sample_count": 40,
+            **_registry_source_fields(),
             RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
         },
@@ -326,6 +363,7 @@ def test_live_candidate_requires_valid_residual_report():
     assert should_create_live_candidate(
         {
             **threshold_passing,
+            **_registry_source_fields(),
             "payload": {
                 RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
                 CANDIDATE_EVIDENCE_MANIFEST_FIELD: (
@@ -347,6 +385,7 @@ def test_live_candidate_requires_promotion_ready_manifest():
         "expected_net_bps": 7.0,
         "confidence": 0.8,
         "sample_count": 40,
+        **_registry_source_fields(),
         RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
     }
 
@@ -382,8 +421,7 @@ def test_live_candidate_builder_accepts_complete_source_fields():
             "expected_net_bps": 7.0,
             "confidence": 0.8,
             "sample_count": 40,
-            "replay_experiment_id": "replay-exp-1",
-            "manifest_hash": bytes.fromhex("c" * 64),
+            **_registry_source_fields(manifest_hash=bytes.fromhex("c" * 64)),
             "payload": {
                 **_candidate_manifest_source_payload(),
                 RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
@@ -405,8 +443,7 @@ def test_live_candidate_builder_downgrade_does_not_pass():
             "expected_net_bps": 7.0,
             "confidence": 0.8,
             "sample_count": 40,
-            "replay_experiment_id": "replay-exp-1",
-            "manifest_hash": "c" * 64,
+            **_registry_source_fields(),
             "payload": {
                 "candidate_id": "candidate-alpha-1",
                 RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
@@ -428,7 +465,7 @@ def test_live_candidate_builder_missing_replay_hash_does_not_pass():
             "expected_net_bps": 7.0,
             "confidence": 0.8,
             "sample_count": 40,
-            "replay_experiment_id": "replay-exp-1",
+            **_registry_source_fields(manifest_hash=""),
             "payload": {
                 **_candidate_manifest_source_payload(),
                 RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
@@ -692,6 +729,11 @@ def test_insert_live_candidate_payload_carries_schema_version_and_lg5_subkeys(
         "expected_net_bps": 6.5,
         "confidence": 0.78,
         "sample_count": 50,
+        **_registry_source_fields(),
+        "payload": {
+            RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
+            CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
+        },
     }
     _insert_live_candidate(
         _CaptureCursor(),
@@ -719,6 +761,10 @@ def test_insert_live_candidate_payload_carries_schema_version_and_lg5_subkeys(
 
     assert payload["demo_cost_baseline"] == fake_baseline
     assert payload["demo_realized_window"] == fake_window
+    assert payload[RESIDUAL_ALPHA_REPORT_FIELD]["passes"] is True
+    assert payload[CANDIDATE_EVIDENCE_MANIFEST_FIELD]["replay_manifest_hash"] == (
+        "c" * 64
+    )
     # MIT MF-M2：dict 不是 scalar，5 keys 全在。
     assert payload["demo_attribution_chain_ratio_by_strategy"] == fake_attribution
     assert set(payload["demo_attribution_chain_ratio_by_strategy"].keys()) == set(
@@ -1217,8 +1263,8 @@ def test_payload_includes_attribution_window_days(monkeypatch):
     assert payload["schema_version"] == _LIVE_CANDIDATE_EVAL_SCHEMA_VERSION
 
 
-def test_payload_carries_source_residual_alpha_report(monkeypatch):
-    """Payload builder 只 pass-through source 內已有的真實 residual report。"""
+def test_payload_carries_contract_verified_residual_alpha_report(monkeypatch):
+    """Payload builder 只附帶通過 producer source contract 的 residual report。"""
     fake_baseline = {
         "as_of_ts": "2026-05-02T12:00:00+00:00",
         "engine_mode": "demo",
@@ -1278,6 +1324,7 @@ def test_payload_carries_source_residual_alpha_report(monkeypatch):
             "id": 12,
             "symbol": "ETHUSDT",
             "strategy_name": "ma_crossover",
+            **_registry_source_fields(),
             "payload": {
                 RESIDUAL_ALPHA_REPORT_FIELD: report,
                 CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest,
@@ -1316,6 +1363,7 @@ def test_payload_carries_source_residual_alpha_report(monkeypatch):
             "id": 14,
             "symbol": "ETHUSDT",
             "strategy_name": "ma_crossover",
+            **_registry_source_fields(),
             "payload": {
                 RESIDUAL_ALPHA_REPORT_FIELD: report,
                 CANDIDATE_EVIDENCE_MANIFEST_FIELD: bad_manifest,
@@ -1335,6 +1383,7 @@ def test_payload_carries_source_residual_alpha_report(monkeypatch):
             "id": 15,
             "symbol": "ETHUSDT",
             "strategy_name": "ma_crossover",
+            **_registry_source_fields(),
             "payload": {CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest},
         },
         application_id=336,
@@ -1352,8 +1401,7 @@ def test_payload_carries_source_residual_alpha_report(monkeypatch):
             "id": 16,
             "symbol": "ETHUSDT",
             "strategy_name": "ma_crossover",
-            "replay_experiment_id": "replay-exp-1",
-            "manifest_hash": bytes.fromhex("c" * 64),
+            **_registry_source_fields(manifest_hash=bytes.fromhex("c" * 64)),
             "payload": {
                 **_candidate_manifest_source_payload(),
                 RESIDUAL_ALPHA_REPORT_FIELD: report,
@@ -1376,8 +1424,7 @@ def test_payload_carries_source_residual_alpha_report(monkeypatch):
             "id": 17,
             "symbol": "ETHUSDT",
             "strategy_name": "ma_crossover",
-            "replay_experiment_id": "replay-exp-1",
-            "manifest_hash": "c" * 64,
+            **_registry_source_fields(),
             "payload": {
                 "candidate_id": "candidate-alpha-1",
                 RESIDUAL_ALPHA_REPORT_FIELD: report,
@@ -1397,7 +1444,7 @@ def test_payload_carries_source_residual_alpha_report(monkeypatch):
             "id": 18,
             "symbol": "ETHUSDT",
             "strategy_name": "ma_crossover",
-            "replay_experiment_id": "replay-exp-1",
+            **_registry_source_fields(manifest_hash=""),
             "payload": {
                 **_candidate_manifest_source_payload(),
                 RESIDUAL_ALPHA_REPORT_FIELD: report,

@@ -136,13 +136,11 @@ from ml_training.mlde_demo_applier_evidence_filter import (  # noqa: E402
 from ml_training.candidate_evidence_manifest import (  # noqa: E402
     CANDIDATE_EVIDENCE_MANIFEST_FIELD,
 )
-from ml_training.candidate_evidence_manifest_builder import (  # noqa: E402
-    build_candidate_evidence_manifest_from_source,
+from ml_training.candidate_evidence_source_contract import (  # noqa: E402
+    build_live_candidate_evidence_from_source,
 )
 from ml_training.residual_alpha_report_contract import (  # noqa: E402
     RESIDUAL_ALPHA_REPORT_FIELD,
-    extract_demo_residual_alpha_report,
-    validate_demo_residual_alpha_report,
 )
 
 logger = logging.getLogger(__name__)
@@ -484,18 +482,6 @@ def build_risk_patch(
             _put_nested(patch, path, bounded)
     return patch
 
-def _extract_demo_residual_alpha_report_from_source_row(
-    row: dict[str, Any],
-) -> Optional[dict[str, Any]]:
-    """從 recommendation row 或其 payload 取真實 residual alpha report。"""
-    report = extract_demo_residual_alpha_report(row)
-    if isinstance(report, dict):
-        return report
-    payload = _as_dict(row.get("payload"))
-    report = extract_demo_residual_alpha_report(payload)
-    return report if isinstance(report, dict) else None
-
-
 def should_create_live_candidate(row: dict[str, Any], cfg: DemoApplierConfig) -> bool:
     try:
         expected = float(row.get("expected_net_bps") or 0.0)
@@ -510,16 +496,8 @@ def should_create_live_candidate(row: dict[str, Any], cfg: DemoApplierConfig) ->
     ):
         return False
 
-    report = _extract_demo_residual_alpha_report_from_source_row(row)
-    ok, _reason = validate_demo_residual_alpha_report(report)
-    if not ok:
-        return False
-
-    manifest_build = build_candidate_evidence_manifest_from_source(
-        source_row=row,
-        residual_report=report,
-    )
-    return manifest_build.validation.promotion_ready
+    evidence_build = build_live_candidate_evidence_from_source(row)
+    return evidence_build.validation.promotion_ready
 
 def _fingerprint(kind: str, target: str, patch: dict[str, Any]) -> str:
     payload = json.dumps({"kind": kind, "target": target, "patch": patch}, sort_keys=True, separators=(",", ":"))
@@ -1282,7 +1260,7 @@ def _build_live_candidate_payload(
         strategy_name=strategy_name,
         source_payload=source_payload,
     )
-    residual_report = _extract_demo_residual_alpha_report_from_source_row(source_row)
+    evidence_build = build_live_candidate_evidence_from_source(source_row)
     payload = {
         "policy": "live_governed_promotion_candidate",
         "schema_version": _LIVE_CANDIDATE_EVAL_SCHEMA_VERSION,
@@ -1309,14 +1287,11 @@ def _build_live_candidate_payload(
         ),
         "demo_sample_count_strategy_cell": sample_count_strategy_cell,
     }
-    if residual_report is not None:
-        payload[RESIDUAL_ALPHA_REPORT_FIELD] = residual_report
-    manifest_build = build_candidate_evidence_manifest_from_source(
-        source_row=source_row,
-        residual_report=residual_report,
-    )
-    if manifest_build.validation.promotion_ready and manifest_build.manifest is not None:
-        payload[CANDIDATE_EVIDENCE_MANIFEST_FIELD] = manifest_build.manifest
+    if evidence_build.validation.promotion_ready:
+        if evidence_build.residual_report is not None:
+            payload[RESIDUAL_ALPHA_REPORT_FIELD] = evidence_build.residual_report
+        if evidence_build.manifest is not None:
+            payload[CANDIDATE_EVIDENCE_MANIFEST_FIELD] = evidence_build.manifest
     return payload
 
 

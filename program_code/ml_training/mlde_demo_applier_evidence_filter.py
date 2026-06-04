@@ -113,6 +113,12 @@ def evidence_filter_capabilities(cur: Any) -> dict[str, bool]:
       - has_replay_experiments    (V041 stub or P2b fixture)
       - replay_experiments_has_expires_at (P2b fixture only)
       - replay_experiments_has_status     (P2b fixture only)
+      - replay_experiments_has_manifest_hash
+      - replay_experiments_has_manifest_jsonb
+      - replay_experiments_has_oos_label_window_start
+      - replay_experiments_has_oos_label_window_end
+      - replay_experiments_has_oos_embargo_seconds
+      - replay_experiments_has_total_candidates_k
 
     Each capability missing → caller falls back gracefully (skip filter
     on that column with comment marking forward-compat per dispatch §
@@ -131,6 +137,12 @@ def evidence_filter_capabilities(cur: Any) -> dict[str, bool]:
         "has_replay_experiments": False,
         "replay_experiments_has_expires_at": False,
         "replay_experiments_has_status": False,
+        "replay_experiments_has_manifest_hash": False,
+        "replay_experiments_has_manifest_jsonb": False,
+        "replay_experiments_has_oos_label_window_start": False,
+        "replay_experiments_has_oos_label_window_end": False,
+        "replay_experiments_has_oos_embargo_seconds": False,
+        "replay_experiments_has_total_candidates_k": False,
     }
     # 1) probe mlde_shadow_recommendations columns
     # 1) 探 mlde_shadow_recommendations 的欄位
@@ -175,7 +187,16 @@ def evidence_filter_capabilities(cur: Any) -> dict[str, bool]:
                AND table_name = 'experiments'
                AND column_name = ANY(%s)
             """,
-            (["expires_at", "status"],),
+            ([
+                "expires_at",
+                "status",
+                "manifest_hash",
+                "manifest_jsonb",
+                "oos_label_window_start",
+                "oos_label_window_end",
+                "oos_embargo_seconds",
+                "total_candidates_k",
+            ],),
         )
         rep_rows = cur.fetchall() or []
     except Exception:  # noqa: BLE001
@@ -183,6 +204,20 @@ def evidence_filter_capabilities(cur: Any) -> dict[str, bool]:
     rep_cols = {str(r[0]) for r in rep_rows if r and r[0] is not None}
     caps["replay_experiments_has_expires_at"] = "expires_at" in rep_cols
     caps["replay_experiments_has_status"] = "status" in rep_cols
+    caps["replay_experiments_has_manifest_hash"] = "manifest_hash" in rep_cols
+    caps["replay_experiments_has_manifest_jsonb"] = "manifest_jsonb" in rep_cols
+    caps["replay_experiments_has_oos_label_window_start"] = (
+        "oos_label_window_start" in rep_cols
+    )
+    caps["replay_experiments_has_oos_label_window_end"] = (
+        "oos_label_window_end" in rep_cols
+    )
+    caps["replay_experiments_has_oos_embargo_seconds"] = (
+        "oos_embargo_seconds" in rep_cols
+    )
+    caps["replay_experiments_has_total_candidates_k"] = (
+        "total_candidates_k" in rep_cols
+    )
     return caps
 
 
@@ -234,9 +269,11 @@ def build_evidence_source_filter(
     # expires_at + status 時)。
     if (
         caps.get("has_replay_experiment_id")
+        and caps.get("has_manifest_hash")
         and caps.get("has_replay_experiments")
         and caps.get("replay_experiments_has_expires_at")
         and caps.get("replay_experiments_has_status")
+        and caps.get("replay_experiments_has_manifest_hash")
     ):
         fragments.append(
             "AND ("
@@ -316,8 +353,10 @@ def fetch_pending_sql_and_params(
     )
     all_block_b_caps_true = (
         has_fk_only
+        and bool(caps.get("has_manifest_hash"))
         and bool(caps.get("replay_experiments_has_expires_at"))
         and bool(caps.get("replay_experiments_has_status"))
+        and bool(caps.get("replay_experiments_has_manifest_hash"))
     )
     block_a_label = "on" if has_evidence_source_tier else "skip"
     if not has_evidence_source_tier:
@@ -333,8 +372,9 @@ def fetch_pending_sql_and_params(
     # 顯式 opt-in 時 'opt_in'。
     synthetic_label = "opt_in" if allow_synthetic else "excluded"
     logger.info(
-        "evidence_filter capability dump: caps=%d/6 block_a=%s block_b=%s synthetic=%s",
+        "evidence_filter capability dump: caps=%d/%d block_a=%s block_b=%s synthetic=%s",
         caps_count,
+        len(caps),
         block_a_label,
         block_b_label,
         synthetic_label,
@@ -354,6 +394,64 @@ def fetch_pending_sql_and_params(
         if caps.get("has_manifest_hash")
         else "NULL::text AS manifest_hash"
     )
+    has_registry_join = (
+        bool(caps.get("has_replay_experiment_id"))
+        and bool(caps.get("has_replay_experiments"))
+    )
+    registry_join = (
+        "LEFT JOIN replay.experiments e "
+        "ON e.experiment_id = learning.mlde_shadow_recommendations.replay_experiment_id"
+        if has_registry_join
+        else ""
+    )
+    registry_status_select = (
+        "e.status::text AS replay_registry_status"
+        if caps.get("replay_experiments_has_status")
+        and has_registry_join
+        else "NULL::text AS replay_registry_status"
+    )
+    registry_expires_at_select = (
+        "e.expires_at AS replay_registry_expires_at"
+        if caps.get("replay_experiments_has_expires_at")
+        and has_registry_join
+        else "NULL::timestamptz AS replay_registry_expires_at"
+    )
+    registry_manifest_hash_select = (
+        "encode(e.manifest_hash, 'hex') AS replay_registry_manifest_hash"
+        if caps.get("replay_experiments_has_manifest_hash")
+        and has_registry_join
+        else "NULL::text AS replay_registry_manifest_hash"
+    )
+    registry_manifest_jsonb_select = (
+        "e.manifest_jsonb AS replay_registry_manifest_jsonb"
+        if caps.get("replay_experiments_has_manifest_jsonb")
+        and has_registry_join
+        else "NULL::jsonb AS replay_registry_manifest_jsonb"
+    )
+    registry_oos_start_select = (
+        "e.oos_label_window_start AS replay_registry_oos_label_window_start"
+        if caps.get("replay_experiments_has_oos_label_window_start")
+        and has_registry_join
+        else "NULL::timestamptz AS replay_registry_oos_label_window_start"
+    )
+    registry_oos_end_select = (
+        "e.oos_label_window_end AS replay_registry_oos_label_window_end"
+        if caps.get("replay_experiments_has_oos_label_window_end")
+        and has_registry_join
+        else "NULL::timestamptz AS replay_registry_oos_label_window_end"
+    )
+    registry_embargo_select = (
+        "e.oos_embargo_seconds AS replay_registry_oos_embargo_seconds"
+        if caps.get("replay_experiments_has_oos_embargo_seconds")
+        and has_registry_join
+        else "NULL::bigint AS replay_registry_oos_embargo_seconds"
+    )
+    registry_k_select = (
+        "e.total_candidates_K AS replay_registry_total_candidates_k"
+        if caps.get("replay_experiments_has_total_candidates_k")
+        and has_registry_join
+        else "NULL::integer AS replay_registry_total_candidates_k"
+    )
 
     sql = """
         SELECT id, ts, engine_mode, source, recommendation_type, strategy_name,
@@ -362,8 +460,17 @@ def fetch_pending_sql_and_params(
                {evidence_source_tier_select},
                {replay_experiment_id_select},
                {manifest_hash_select},
+               {registry_status_select},
+               {registry_expires_at_select},
+               {registry_manifest_hash_select},
+               {registry_manifest_jsonb_select},
+               {registry_oos_start_select},
+               {registry_oos_end_select},
+               {registry_embargo_select},
+               {registry_k_select},
                payload
           FROM learning.mlde_shadow_recommendations
+          {registry_join}
          WHERE ts >= now() - (%s::int || ' hours')::interval
            AND engine_mode = %s
            AND NOT applied
@@ -377,6 +484,15 @@ def fetch_pending_sql_and_params(
         evidence_source_tier_select=evidence_source_tier_select,
         replay_experiment_id_select=replay_experiment_id_select,
         manifest_hash_select=manifest_hash_select,
+        registry_join=registry_join,
+        registry_status_select=registry_status_select,
+        registry_expires_at_select=registry_expires_at_select,
+        registry_manifest_hash_select=registry_manifest_hash_select,
+        registry_manifest_jsonb_select=registry_manifest_jsonb_select,
+        registry_oos_start_select=registry_oos_start_select,
+        registry_oos_end_select=registry_oos_end_select,
+        registry_embargo_select=registry_embargo_select,
+        registry_k_select=registry_k_select,
     )
     params: list[Any] = [
         lookback_hours,
