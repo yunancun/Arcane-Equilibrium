@@ -339,10 +339,30 @@ def fetch_pending_sql_and_params(
         block_b_label,
         synthetic_label,
     )
+    evidence_source_tier_select = (
+        "evidence_source_tier::text AS evidence_source_tier"
+        if caps.get("has_evidence_source_tier")
+        else "NULL::text AS evidence_source_tier"
+    )
+    replay_experiment_id_select = (
+        "replay_experiment_id::text AS replay_experiment_id"
+        if caps.get("has_replay_experiment_id")
+        else "NULL::text AS replay_experiment_id"
+    )
+    manifest_hash_select = (
+        "encode(manifest_hash, 'hex') AS manifest_hash"
+        if caps.get("has_manifest_hash")
+        else "NULL::text AS manifest_hash"
+    )
 
     sql = """
         SELECT id, ts, engine_mode, source, recommendation_type, strategy_name,
-               symbol, expected_net_bps, confidence, sample_count, payload
+               symbol, expected_net_bps, confidence, sample_count,
+               context_id, intent_id,
+               {evidence_source_tier_select},
+               {replay_experiment_id_select},
+               {manifest_hash_select},
+               payload
           FROM learning.mlde_shadow_recommendations
          WHERE ts >= now() - (%s::int || ' hours')::interval
            AND engine_mode = %s
@@ -352,7 +372,12 @@ def fetch_pending_sql_and_params(
            {evidence_filter}
          ORDER BY confidence DESC NULLS LAST, sample_count DESC NULLS LAST, ts DESC
          LIMIT %s
-    """.format(evidence_filter=extra_filter)
+    """.format(
+        evidence_filter=extra_filter,
+        evidence_source_tier_select=evidence_source_tier_select,
+        replay_experiment_id_select=replay_experiment_id_select,
+        manifest_hash_select=manifest_hash_select,
+    )
     params: list[Any] = [
         lookback_hours,
         engine_mode,

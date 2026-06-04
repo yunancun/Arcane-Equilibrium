@@ -135,8 +135,9 @@ from ml_training.mlde_demo_applier_evidence_filter import (  # noqa: E402
 )
 from ml_training.candidate_evidence_manifest import (  # noqa: E402
     CANDIDATE_EVIDENCE_MANIFEST_FIELD,
-    extract_candidate_evidence_manifest,
-    validate_candidate_evidence_manifest,
+)
+from ml_training.candidate_evidence_manifest_builder import (  # noqa: E402
+    build_candidate_evidence_manifest_from_source,
 )
 from ml_training.residual_alpha_report_contract import (  # noqa: E402
     RESIDUAL_ALPHA_REPORT_FIELD,
@@ -495,15 +496,6 @@ def _extract_demo_residual_alpha_report_from_source_row(
     return report if isinstance(report, dict) else None
 
 
-def _extract_candidate_evidence_manifest_from_source_row(row: dict[str, Any]) -> Any:
-    """從 recommendation row 或 payload 取 canonical EvidenceManifest。"""
-    manifest = extract_candidate_evidence_manifest(row)
-    if manifest is not None:
-        return manifest
-    payload = _as_dict(row.get("payload"))
-    return extract_candidate_evidence_manifest(payload)
-
-
 def should_create_live_candidate(row: dict[str, Any], cfg: DemoApplierConfig) -> bool:
     try:
         expected = float(row.get("expected_net_bps") or 0.0)
@@ -523,12 +515,11 @@ def should_create_live_candidate(row: dict[str, Any], cfg: DemoApplierConfig) ->
     if not ok:
         return False
 
-    manifest = _extract_candidate_evidence_manifest_from_source_row(row)
-    manifest_validation = validate_candidate_evidence_manifest(
-        manifest,
+    manifest_build = build_candidate_evidence_manifest_from_source(
+        source_row=row,
         residual_report=report,
     )
-    return manifest_validation.promotion_ready
+    return manifest_build.validation.promotion_ready
 
 def _fingerprint(kind: str, target: str, patch: dict[str, Any]) -> str:
     payload = json.dumps({"kind": kind, "target": target, "patch": patch}, sort_keys=True, separators=(",", ":"))
@@ -1320,13 +1311,12 @@ def _build_live_candidate_payload(
     }
     if residual_report is not None:
         payload[RESIDUAL_ALPHA_REPORT_FIELD] = residual_report
-    manifest = _extract_candidate_evidence_manifest_from_source_row(source_row)
-    manifest_validation = validate_candidate_evidence_manifest(
-        manifest,
+    manifest_build = build_candidate_evidence_manifest_from_source(
+        source_row=source_row,
         residual_report=residual_report,
     )
-    if manifest_validation.promotion_ready:
-        payload[CANDIDATE_EVIDENCE_MANIFEST_FIELD] = manifest
+    if manifest_build.validation.promotion_ready and manifest_build.manifest is not None:
+        payload[CANDIDATE_EVIDENCE_MANIFEST_FIELD] = manifest_build.manifest
     return payload
 
 

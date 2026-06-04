@@ -139,6 +139,24 @@ def _valid_candidate_evidence_manifest(**overrides) -> dict:
     return manifest
 
 
+def _candidate_manifest_source_payload(**overrides) -> dict:
+    payload = {
+        "candidate_id": "candidate-alpha-1",
+        "candidate_family_id": "family-alpha",
+        "signal_spec_hash": "a" * 64,
+        "hidden_oos": {
+            "split_hash": "b" * 64,
+            "window_start": "2026-05-01T00:00:00Z",
+            "window_end": "2026-05-08T00:00:00Z",
+            "embargo": "1d",
+            "trial_count": 12,
+            "passes": True,
+        },
+    }
+    payload.update(overrides)
+    return payload
+
+
 def test_execute_read_fail_soft_rolls_back_to_savepoint_for_real_pg_cursor():
     cur = _RealishPsycopgCursor()
 
@@ -347,6 +365,74 @@ def test_live_candidate_requires_promotion_ready_manifest():
         {
             **threshold_passing,
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest,
+        },
+        cfg,
+    )
+
+
+def test_live_candidate_builder_accepts_complete_source_fields():
+    cfg = DemoApplierConfig(
+        live_candidate_min_net_bps=5.0,
+        live_candidate_min_confidence=0.65,
+        live_candidate_min_samples=30,
+    )
+
+    assert should_create_live_candidate(
+        {
+            "expected_net_bps": 7.0,
+            "confidence": 0.8,
+            "sample_count": 40,
+            "replay_experiment_id": "replay-exp-1",
+            "manifest_hash": bytes.fromhex("c" * 64),
+            "payload": {
+                **_candidate_manifest_source_payload(),
+                RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
+            },
+        },
+        cfg,
+    )
+
+
+def test_live_candidate_builder_downgrade_does_not_pass():
+    cfg = DemoApplierConfig(
+        live_candidate_min_net_bps=5.0,
+        live_candidate_min_confidence=0.65,
+        live_candidate_min_samples=30,
+    )
+
+    assert not should_create_live_candidate(
+        {
+            "expected_net_bps": 7.0,
+            "confidence": 0.8,
+            "sample_count": 40,
+            "replay_experiment_id": "replay-exp-1",
+            "manifest_hash": "c" * 64,
+            "payload": {
+                "candidate_id": "candidate-alpha-1",
+                RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
+            },
+        },
+        cfg,
+    )
+
+
+def test_live_candidate_builder_missing_replay_hash_does_not_pass():
+    cfg = DemoApplierConfig(
+        live_candidate_min_net_bps=5.0,
+        live_candidate_min_confidence=0.65,
+        live_candidate_min_samples=30,
+    )
+
+    assert not should_create_live_candidate(
+        {
+            "expected_net_bps": 7.0,
+            "confidence": 0.8,
+            "sample_count": 40,
+            "replay_experiment_id": "replay-exp-1",
+            "payload": {
+                **_candidate_manifest_source_payload(),
+                RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
+            },
         },
         cfg,
     )
@@ -1204,7 +1290,7 @@ def test_payload_carries_source_residual_alpha_report(monkeypatch):
     )
 
     assert payload[RESIDUAL_ALPHA_REPORT_FIELD] is report
-    assert payload[CANDIDATE_EVIDENCE_MANIFEST_FIELD] is manifest
+    assert payload[CANDIDATE_EVIDENCE_MANIFEST_FIELD] == manifest
 
     alias_payload = _build_live_candidate_payload(
         _NoopCursor(),
@@ -1259,6 +1345,71 @@ def test_payload_carries_source_residual_alpha_report(monkeypatch):
 
     assert RESIDUAL_ALPHA_REPORT_FIELD not in missing_residual_payload
     assert CANDIDATE_EVIDENCE_MANIFEST_FIELD not in missing_residual_payload
+
+    built_manifest_payload = _build_live_candidate_payload(
+        _NoopCursor(),
+        source_row={
+            "id": 16,
+            "symbol": "ETHUSDT",
+            "strategy_name": "ma_crossover",
+            "replay_experiment_id": "replay-exp-1",
+            "manifest_hash": bytes.fromhex("c" * 64),
+            "payload": {
+                **_candidate_manifest_source_payload(),
+                RESIDUAL_ALPHA_REPORT_FIELD: report,
+            },
+        },
+        application_id=337,
+        application_type="strategy_params",
+        patch={"sma_fast": 11},
+        strategy_name="ma_crossover",
+    )
+
+    built_manifest = built_manifest_payload[CANDIDATE_EVIDENCE_MANIFEST_FIELD]
+    assert built_manifest["candidate_id"] == "candidate-alpha-1"
+    assert built_manifest["replay_manifest_hash"] == "c" * 64
+    assert built_manifest["manifest_hash"] != "c" * 64
+
+    insufficient_manifest_payload = _build_live_candidate_payload(
+        _NoopCursor(),
+        source_row={
+            "id": 17,
+            "symbol": "ETHUSDT",
+            "strategy_name": "ma_crossover",
+            "replay_experiment_id": "replay-exp-1",
+            "manifest_hash": "c" * 64,
+            "payload": {
+                "candidate_id": "candidate-alpha-1",
+                RESIDUAL_ALPHA_REPORT_FIELD: report,
+            },
+        },
+        application_id=338,
+        application_type="strategy_params",
+        patch={"sma_fast": 12},
+        strategy_name="ma_crossover",
+    )
+
+    assert CANDIDATE_EVIDENCE_MANIFEST_FIELD not in insufficient_manifest_payload
+
+    missing_replay_hash_payload = _build_live_candidate_payload(
+        _NoopCursor(),
+        source_row={
+            "id": 18,
+            "symbol": "ETHUSDT",
+            "strategy_name": "ma_crossover",
+            "replay_experiment_id": "replay-exp-1",
+            "payload": {
+                **_candidate_manifest_source_payload(),
+                RESIDUAL_ALPHA_REPORT_FIELD: report,
+            },
+        },
+        application_id=339,
+        application_type="strategy_params",
+        patch={"sma_fast": 13},
+        strategy_name="ma_crossover",
+    )
+
+    assert CANDIDATE_EVIDENCE_MANIFEST_FIELD not in missing_replay_hash_payload
 
 
 def test_payload_includes_per_strategy_sample_count(monkeypatch):

@@ -42,6 +42,7 @@ import os
 import pytest
 
 from ml_training.mlde_demo_applier_evidence_filter import (
+    DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST,
     EVIDENCE_SOURCE_TIER_ALLOWLIST,
     build_evidence_source_filter,
     evidence_filter_capabilities,
@@ -155,7 +156,8 @@ def test_case1_full_capability_all_true_emits_full_block_b():
 
     # Block A 必出現
     assert "AND COALESCE(evidence_source_tier, 'real_outcome') = ANY(%s)" in fragment
-    assert extra[0] == list(EVIDENCE_SOURCE_TIER_ALLOWLIST)
+    assert extra[0] == list(DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST)
+    assert "synthetic_replay" not in extra[0]
 
     # Block B 完整版三條件全在
     assert "manifest_hash IS NOT NULL" in fragment
@@ -220,7 +222,7 @@ def test_case3_block_a_only_evidence_source_tier_allowlist_no_block_b():
 
     # Block A 必在
     assert "AND COALESCE(evidence_source_tier, 'real_outcome') = ANY(%s)" in fragment
-    assert extra == [list(EVIDENCE_SOURCE_TIER_ALLOWLIST)]
+    assert extra == [list(DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST)]
 
     # Block B 完全略過：不應含任何 replay.experiments / EXISTS / manifest_hash
     # 任何子查詢 token

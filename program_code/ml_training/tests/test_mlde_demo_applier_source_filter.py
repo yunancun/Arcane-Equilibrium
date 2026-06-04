@@ -311,6 +311,9 @@ def test_fetch_pending_full_schema_executes_filtered_sql():
     final_sql, final_params = cur.executed[-1]
     assert "FROM learning.mlde_shadow_recommendations" in final_sql
     assert "evidence_source_tier" in final_sql
+    assert "evidence_source_tier::text AS evidence_source_tier" in final_sql
+    assert "replay_experiment_id::text AS replay_experiment_id" in final_sql
+    assert "encode(manifest_hash, 'hex') AS manifest_hash" in final_sql
     assert "expires_at > now()" in final_sql
     # tier allowlist 必為 SQL params 之一（預設排除 synthetic_replay，P3-03）
     # default accepted tiers (synthetic excluded) must be one of the SQL params
@@ -336,7 +339,10 @@ def test_fetch_pending_legacy_schema_falls_back_to_unfiltered_sql():
     assert rows == []
     final_sql, final_params = cur.executed[-1]
     assert "FROM learning.mlde_shadow_recommendations" in final_sql
-    assert "evidence_source_tier" not in final_sql
+    assert "NULL::text AS evidence_source_tier" in final_sql
+    assert "NULL::text AS replay_experiment_id" in final_sql
+    assert "NULL::text AS manifest_hash" in final_sql
+    assert "COALESCE(evidence_source_tier" not in final_sql
 
 
 def test_fetch_pending_helper_accepts_required_kwargs():
