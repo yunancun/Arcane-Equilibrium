@@ -21,8 +21,10 @@ from dataclasses import dataclass
 from typing import Any
 
 try:
+    from .candidate_signal_spec import validate_signal_spec
     from .residual_alpha_report_contract import validate_demo_residual_alpha_report
 except ImportError:  # pragma: no cover - direct script execution fallback
+    from candidate_signal_spec import validate_signal_spec  # type: ignore
     from residual_alpha_report_contract import (  # type: ignore
         validate_demo_residual_alpha_report,
     )
@@ -69,6 +71,7 @@ def validate_candidate_evidence_manifest(
     manifest: Any,
     *,
     residual_report: Any = None,
+    signal_spec: Any = None,
 ) -> CandidateEvidenceManifestValidation:
     """驗證 manifest 是否可作 promotion/live-candidate gate。
 
@@ -105,6 +108,15 @@ def validate_candidate_evidence_manifest(
         reasons.append("spec_hash_missing")
     elif not _is_stable_hash(spec_hash):
         reasons.append("spec_hash_malformed")
+
+    signal_spec_validation = validate_signal_spec(
+        signal_spec,
+        expected_spec_hash=spec_hash,
+        candidate_id=_text(manifest.get("candidate_id")),
+        family_id=_text(manifest.get("family_id")),
+    )
+    if not signal_spec_validation.ok:
+        reasons.append(f"signal_spec:{signal_spec_validation.reason}")
 
     replay_experiment_id = _text(manifest.get("replay_experiment_id"))
     if not replay_experiment_id:

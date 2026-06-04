@@ -115,6 +115,15 @@ except ModuleNotFoundError:  # pragma: no cover - app runtime path fallback
         validate_candidate_evidence_manifest,
     )
 
+try:
+    from program_code.ml_training.candidate_signal_spec import extract_signal_spec
+except ModuleNotFoundError:  # pragma: no cover - app runtime path fallback
+    try:
+        from . import _path_setup  # noqa: F401
+    except Exception:  # noqa: BLE001
+        pass
+    from ml_training.candidate_signal_spec import extract_signal_spec  # type: ignore
+
 logger = logging.getLogger(__name__)
 
 
@@ -1361,9 +1370,11 @@ def review_live_candidate(
         return verdict
 
     manifest = extract_candidate_evidence_manifest(payload)
+    signal_spec = extract_signal_spec(payload)
     manifest_validation = validate_candidate_evidence_manifest(
         manifest,
         residual_report=residual_report,
+        signal_spec=signal_spec,
     )
     if not manifest_validation.promotion_ready:
         decision, reason = _classify_candidate_evidence_manifest_failure(

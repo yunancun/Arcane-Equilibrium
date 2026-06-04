@@ -16,6 +16,10 @@ from ml_training.candidate_evidence_manifest import (
     extract_candidate_evidence_manifest,
     validate_candidate_evidence_manifest,
 )
+from ml_training.candidate_signal_spec import (
+    SIGNAL_SPEC_SCHEMA_VERSION,
+    compute_signal_spec_hash,
+)
 
 
 def _valid_residual_alpha_report(**overrides) -> dict:
@@ -52,14 +56,42 @@ def _canonical_sha256(value: dict) -> str:
     ).hexdigest()
 
 
+def _valid_signal_spec(**overrides) -> dict:
+    spec = {
+        "schema_version": SIGNAL_SPEC_SCHEMA_VERSION,
+        "candidate_id": "candidate-alpha-1",
+        "family_id": "family-alpha",
+        "hypothesis": "funding and orderbook imbalance residual alpha",
+        "horizon": {"bars": 12, "unit": "1m"},
+        "inputs": ["funding_rate", "orderbook_imbalance_top5", "BTCUSDT_return"],
+        "pit_contract": {
+            "point_in_time": True,
+            "future_data_allowed": False,
+        },
+        "universe_ref": {"source": "research.alpha_symbol_universe", "hash": "u"},
+        "regime_ref": {"source": "research.aeg_regime_labels", "hash": "r"},
+        "feature_schema": {"version": "edge17"},
+        "cost_model_ref": {"source": "demo_cost_baseline", "version": "v1"},
+        "residualization": {
+            "method": "ols",
+            "factors": ["BTCUSDT_return", "pit_universe_equal_weight_return"],
+        },
+        "failure_taxonomy": ["beta_edge", "cost_defeat", "data_leak"],
+        "hidden_oos_policy": {"state_required": "sealed", "open_once": True},
+    }
+    spec.update(overrides)
+    return spec
+
+
 def _valid_manifest(**overrides) -> dict:
     residual_report = _valid_residual_alpha_report()
+    signal_spec = _valid_signal_spec()
     manifest = {
         "schema_version": CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
         "verdict": PROMOTION_READY,
         "candidate_id": "candidate-alpha-1",
         "family_id": "family-alpha",
-        "spec_hash": "a" * 64,
+        "spec_hash": compute_signal_spec_hash(signal_spec),
         "replay_experiment_id": "replay-exp-1",
         "replay_manifest_hash": "c" * 64,
         "demo_residual_alpha_report_hash": _canonical_sha256(residual_report),
@@ -81,6 +113,7 @@ def test_valid_manifest_is_promotion_ready():
     validation = validate_candidate_evidence_manifest(
         _valid_manifest(),
         residual_report=_valid_residual_alpha_report(),
+        signal_spec=_valid_signal_spec(),
     )
 
     assert validation.promotion_ready is True
@@ -125,6 +158,7 @@ def test_manifest_hash_mismatch_is_invalid():
     validation = validate_candidate_evidence_manifest(
         manifest,
         residual_report=_valid_residual_alpha_report(),
+        signal_spec=_valid_signal_spec(),
     )
 
     assert validation.promotion_ready is False
@@ -139,6 +173,7 @@ def test_nested_manifest_hash_tamper_is_invalid():
     validation = validate_candidate_evidence_manifest(
         manifest,
         residual_report=_valid_residual_alpha_report(),
+        signal_spec=_valid_signal_spec(),
     )
 
     assert validation.promotion_ready is False
@@ -174,6 +209,7 @@ def test_missing_required_fields_are_pending_schema(mutator, expected_reason):
     validation = validate_candidate_evidence_manifest(
         manifest,
         residual_report=_valid_residual_alpha_report(),
+        signal_spec=_valid_signal_spec(),
     )
 
     assert validation.promotion_ready is False
@@ -196,6 +232,7 @@ def test_hidden_oos_reuse_is_research_only():
     validation = validate_candidate_evidence_manifest(
         manifest,
         residual_report=_valid_residual_alpha_report(),
+        signal_spec=_valid_signal_spec(),
     )
 
     assert validation.promotion_ready is False
@@ -204,7 +241,10 @@ def test_hidden_oos_reuse_is_research_only():
 
 
 def test_missing_residual_report_is_invalid():
-    validation = validate_candidate_evidence_manifest(_valid_manifest())
+    validation = validate_candidate_evidence_manifest(
+        _valid_manifest(),
+        signal_spec=_valid_signal_spec(),
+    )
 
     assert validation.promotion_ready is False
     assert validation.verdict == INVALID
@@ -217,6 +257,7 @@ def test_core_diagnostic_residual_report_is_invalid():
         residual_report=_valid_residual_alpha_report(
             reasons=["pbo_missing_candidate_returns_core_diagnostic_only"],
         ),
+        signal_spec=_valid_signal_spec(),
     )
 
     assert validation.promotion_ready is False
@@ -228,6 +269,7 @@ def test_residual_report_hash_mismatch_is_invalid():
     validation = validate_candidate_evidence_manifest(
         _valid_manifest(),
         residual_report=_valid_residual_alpha_report(raw_mean_bps=3.0),
+        signal_spec=_valid_signal_spec(),
     )
 
     assert validation.promotion_ready is False
@@ -240,6 +282,7 @@ def test_non_promotion_verdict_never_passes(verdict):
     validation = validate_candidate_evidence_manifest(
         _valid_manifest(verdict=verdict),
         residual_report=_valid_residual_alpha_report(),
+        signal_spec=_valid_signal_spec(),
     )
 
     assert validation.promotion_ready is False

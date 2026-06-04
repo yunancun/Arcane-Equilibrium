@@ -71,6 +71,7 @@ class CandidateEvidenceSourceContractBuild:
 
     manifest: dict[str, Any] | None
     residual_report: dict[str, Any] | None
+    signal_spec: dict[str, Any] | None
     validation: CandidateEvidenceManifestValidation
     manifest_build: CandidateEvidenceManifestBuild | None
     source_tier: str
@@ -189,6 +190,7 @@ def build_live_candidate_evidence_from_source(
         return CandidateEvidenceSourceContractBuild(
             manifest=None,
             residual_report=residual_report,
+            signal_spec=manifest_build.signal_spec,
             validation=manifest_build.validation,
             manifest_build=manifest_build,
             source_tier=source_tier,
@@ -245,6 +247,7 @@ def build_live_candidate_evidence_from_source(
     return CandidateEvidenceSourceContractBuild(
         manifest=manifest,
         residual_report=residual_report,
+        signal_spec=manifest_build.signal_spec,
         validation=manifest_build.validation,
         manifest_build=manifest_build,
         source_tier=source_tier,
@@ -537,6 +540,7 @@ def _contract_result(
     return CandidateEvidenceSourceContractBuild(
         manifest=None,
         residual_report=residual_report,
+        signal_spec=manifest_build.signal_spec if manifest_build else None,
         validation=validation,
         manifest_build=manifest_build,
         source_tier=source_tier,

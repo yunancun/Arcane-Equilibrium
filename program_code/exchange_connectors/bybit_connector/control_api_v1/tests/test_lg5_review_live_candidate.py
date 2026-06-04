@@ -30,6 +30,11 @@ from ml_training.candidate_evidence_manifest import (
     PROMOTION_READY,
     compute_candidate_evidence_manifest_hash,
 )
+from ml_training.candidate_signal_spec import (
+    SIGNAL_SPEC_FIELD,
+    SIGNAL_SPEC_SCHEMA_VERSION,
+    compute_signal_spec_hash,
+)
 from app.governance_hub_live_candidate_review import (
     R1_MAKER_FILL_FLOOR,
     R1_MAKER_FILL_RATIO,
@@ -89,14 +94,42 @@ def _canonical_sha256(value: dict) -> str:
     ).hexdigest()
 
 
+def _valid_signal_spec(**overrides) -> dict:
+    spec = {
+        "schema_version": SIGNAL_SPEC_SCHEMA_VERSION,
+        "candidate_id": "candidate-alpha-1",
+        "family_id": "family-alpha",
+        "hypothesis": "funding and orderbook imbalance residual alpha",
+        "horizon": {"bars": 12, "unit": "1m"},
+        "inputs": ["funding_rate", "orderbook_imbalance_top5", "BTCUSDT_return"],
+        "pit_contract": {
+            "point_in_time": True,
+            "future_data_allowed": False,
+        },
+        "universe_ref": {"source": "research.alpha_symbol_universe", "hash": "u"},
+        "regime_ref": {"source": "research.aeg_regime_labels", "hash": "r"},
+        "feature_schema": {"version": "edge17"},
+        "cost_model_ref": {"source": "demo_cost_baseline", "version": "v1"},
+        "residualization": {
+            "method": "ols",
+            "factors": ["BTCUSDT_return", "pit_universe_equal_weight_return"],
+        },
+        "failure_taxonomy": ["beta_edge", "cost_defeat", "data_leak"],
+        "hidden_oos_policy": {"state_required": "sealed", "open_once": True},
+    }
+    spec.update(overrides)
+    return spec
+
+
 def _valid_candidate_evidence_manifest(**overrides) -> dict:
     residual_report = _valid_residual_alpha_report()
+    signal_spec = _valid_signal_spec()
     manifest = {
         "schema_version": CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
         "verdict": PROMOTION_READY,
         "candidate_id": "candidate-alpha-1",
         "family_id": "family-alpha",
-        "spec_hash": "a" * 64,
+        "spec_hash": compute_signal_spec_hash(signal_spec),
         "replay_experiment_id": "replay-exp-1",
         "replay_manifest_hash": "c" * 64,
         "demo_residual_alpha_report_hash": _canonical_sha256(residual_report),
@@ -504,6 +537,7 @@ class TestReviewLiveCandidateRound2:
         approve path)."""
         return {
             "schema_version": "live_candidate_eval_v1",
+            SIGNAL_SPEC_FIELD: _valid_signal_spec(),
             "demo_residual_alpha_report": _valid_residual_alpha_report(),
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
             "demo_cost_baseline": {
@@ -964,6 +998,7 @@ class TestRMetaSampleThreshold:
         建構含 grid_trading sample count 的 R-meta payload。"""
         return {
             "schema_version": "live_candidate_eval_v1",
+            SIGNAL_SPEC_FIELD: _valid_signal_spec(),
             "demo_residual_alpha_report": _valid_residual_alpha_report(),
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
             "demo_cost_baseline": {
@@ -1052,6 +1087,7 @@ class TestRMetaSampleThreshold:
         # Old-format payload（無 demo_attribution_sample_count_by_strategy）
         old_payload = {
             "schema_version": "live_candidate_eval_v1",
+            SIGNAL_SPEC_FIELD: _valid_signal_spec(),
             "demo_residual_alpha_report": _valid_residual_alpha_report(),
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
             "demo_cost_baseline": {
@@ -1084,6 +1120,7 @@ class TestRMetaSampleThreshold:
 
         mixed_payload = {
             "schema_version": "live_candidate_eval_v1",
+            SIGNAL_SPEC_FIELD: _valid_signal_spec(),
             "demo_residual_alpha_report": _valid_residual_alpha_report(),
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
             "demo_cost_baseline": {
