@@ -136,6 +136,7 @@ from ml_training.mlde_demo_applier_evidence_filter import (  # noqa: E402
 from ml_training.candidate_evidence_manifest import (  # noqa: E402
     CANDIDATE_EVIDENCE_MANIFEST_FIELD,
 )
+from ml_training.candidate_signal_spec import SIGNAL_SPEC_FIELD  # noqa: E402
 from ml_training.candidate_evidence_source_contract import (  # noqa: E402
     build_live_candidate_evidence_from_source,
 )
@@ -1288,6 +1289,8 @@ def _build_live_candidate_payload(
         "demo_sample_count_strategy_cell": sample_count_strategy_cell,
     }
     if evidence_build.validation.promotion_ready:
+        if evidence_build.signal_spec is not None:
+            payload[SIGNAL_SPEC_FIELD] = evidence_build.signal_spec
         if evidence_build.residual_report is not None:
             payload[RESIDUAL_ALPHA_REPORT_FIELD] = evidence_build.residual_report
         if evidence_build.manifest is not None:

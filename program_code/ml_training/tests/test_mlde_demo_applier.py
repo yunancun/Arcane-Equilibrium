@@ -36,6 +36,11 @@ from ml_training.candidate_evidence_manifest import (
     PROMOTION_READY,
     compute_candidate_evidence_manifest_hash,
 )
+from ml_training.candidate_signal_spec import (
+    SIGNAL_SPEC_FIELD,
+    SIGNAL_SPEC_SCHEMA_VERSION,
+    compute_signal_spec_hash,
+)
 from ml_training.residual_alpha_report_contract import RESIDUAL_ALPHA_REPORT_FIELD
 from ml_training.candidate_evidence_source_contract import (
     HIDDEN_OOS_STATE_SCHEMA_VERSION,
@@ -135,14 +140,42 @@ def _canonical_sha256(value: dict) -> str:
     ).hexdigest()
 
 
+def _valid_signal_spec(**overrides) -> dict:
+    spec = {
+        "schema_version": SIGNAL_SPEC_SCHEMA_VERSION,
+        "candidate_id": "candidate-alpha-1",
+        "family_id": "family-alpha",
+        "hypothesis": "funding and orderbook imbalance residual alpha",
+        "horizon": {"bars": 12, "unit": "1m"},
+        "inputs": ["funding_rate", "orderbook_imbalance_top5", "BTCUSDT_return"],
+        "pit_contract": {
+            "point_in_time": True,
+            "future_data_allowed": False,
+        },
+        "universe_ref": {"source": "research.alpha_symbol_universe", "hash": "u"},
+        "regime_ref": {"source": "research.aeg_regime_labels", "hash": "r"},
+        "feature_schema": {"version": "edge17"},
+        "cost_model_ref": {"source": "demo_cost_baseline", "version": "v1"},
+        "residualization": {
+            "method": "ols",
+            "factors": ["BTCUSDT_return", "pit_universe_equal_weight_return"],
+        },
+        "failure_taxonomy": ["beta_edge", "cost_defeat", "data_leak"],
+        "hidden_oos_policy": {"state_required": "sealed", "open_once": True},
+    }
+    spec.update(overrides)
+    return spec
+
+
 def _valid_candidate_evidence_manifest(**overrides) -> dict:
     residual_report = _valid_residual_alpha_report()
+    signal_spec = _valid_signal_spec()
     manifest = {
         "schema_version": CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
         "verdict": PROMOTION_READY,
         "candidate_id": "candidate-alpha-1",
         "family_id": "family-alpha",
-        "spec_hash": "a" * 64,
+        "spec_hash": compute_signal_spec_hash(signal_spec),
         "replay_experiment_id": "replay-exp-1",
         "replay_manifest_hash": "c" * 64,
         "demo_residual_alpha_report_hash": _canonical_sha256(residual_report),
@@ -164,7 +197,7 @@ def _candidate_manifest_source_payload(**overrides) -> dict:
     payload = {
         "candidate_id": "candidate-alpha-1",
         "candidate_family_id": "family-alpha",
-        "signal_spec_hash": "a" * 64,
+        SIGNAL_SPEC_FIELD: _valid_signal_spec(),
         "hidden_oos": {
             "split_hash": "b" * 64,
             "window_start": "2026-05-01T00:00:00Z",
@@ -332,6 +365,7 @@ def test_live_candidate_requires_strong_demo_evidence():
             "confidence": 0.8,
             "sample_count": 40,
             **_registry_source_fields(),
+            SIGNAL_SPEC_FIELD: _valid_signal_spec(),
             RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
         },
@@ -343,6 +377,7 @@ def test_live_candidate_requires_strong_demo_evidence():
             "confidence": 0.6,
             "sample_count": 40,
             **_registry_source_fields(),
+            SIGNAL_SPEC_FIELD: _valid_signal_spec(),
             RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
         },
@@ -400,6 +435,7 @@ def test_live_candidate_requires_valid_residual_report():
             **threshold_passing,
             **_registry_source_fields(),
             "payload": {
+                SIGNAL_SPEC_FIELD: _valid_signal_spec(),
                 RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
                 CANDIDATE_EVIDENCE_MANIFEST_FIELD: (
                     _valid_candidate_evidence_manifest()
@@ -766,6 +802,7 @@ def test_insert_live_candidate_payload_carries_schema_version_and_lg5_subkeys(
         "sample_count": 50,
         **_registry_source_fields(),
         "payload": {
+            SIGNAL_SPEC_FIELD: _valid_signal_spec(),
             RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
         },
@@ -796,6 +833,7 @@ def test_insert_live_candidate_payload_carries_schema_version_and_lg5_subkeys(
 
     assert payload["demo_cost_baseline"] == fake_baseline
     assert payload["demo_realized_window"] == fake_window
+    assert payload[SIGNAL_SPEC_FIELD]["schema_version"] == SIGNAL_SPEC_SCHEMA_VERSION
     assert payload[RESIDUAL_ALPHA_REPORT_FIELD]["passes"] is True
     assert payload[CANDIDATE_EVIDENCE_MANIFEST_FIELD]["replay_manifest_hash"] == (
         "c" * 64
@@ -1361,6 +1399,7 @@ def test_payload_carries_contract_verified_residual_alpha_report(monkeypatch):
             "strategy_name": "ma_crossover",
             **_registry_source_fields(),
             "payload": {
+                SIGNAL_SPEC_FIELD: _valid_signal_spec(),
                 RESIDUAL_ALPHA_REPORT_FIELD: report,
                 CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest,
             },
@@ -1372,6 +1411,7 @@ def test_payload_carries_contract_verified_residual_alpha_report(monkeypatch):
     )
 
     assert payload[RESIDUAL_ALPHA_REPORT_FIELD] is report
+    assert payload[SIGNAL_SPEC_FIELD] == _valid_signal_spec()
     assert payload[CANDIDATE_EVIDENCE_MANIFEST_FIELD] == manifest
 
     alias_payload = _build_live_candidate_payload(
@@ -1400,6 +1440,7 @@ def test_payload_carries_contract_verified_residual_alpha_report(monkeypatch):
             "strategy_name": "ma_crossover",
             **_registry_source_fields(),
             "payload": {
+                SIGNAL_SPEC_FIELD: _valid_signal_spec(),
                 RESIDUAL_ALPHA_REPORT_FIELD: report,
                 CANDIDATE_EVIDENCE_MANIFEST_FIELD: bad_manifest,
             },
@@ -1419,7 +1460,10 @@ def test_payload_carries_contract_verified_residual_alpha_report(monkeypatch):
             "symbol": "ETHUSDT",
             "strategy_name": "ma_crossover",
             **_registry_source_fields(),
-            "payload": {CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest},
+            "payload": {
+                SIGNAL_SPEC_FIELD: _valid_signal_spec(),
+                CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest,
+            },
         },
         application_id=336,
         application_type="strategy_params",

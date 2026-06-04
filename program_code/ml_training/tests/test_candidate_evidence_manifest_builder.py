@@ -12,6 +12,11 @@ from ml_training.candidate_evidence_manifest import (
     RESEARCH_ONLY,
     compute_candidate_evidence_manifest_hash,
 )
+from ml_training.candidate_signal_spec import (
+    SIGNAL_SPEC_FIELD,
+    SIGNAL_SPEC_SCHEMA_VERSION,
+    compute_signal_spec_hash,
+)
 from ml_training.candidate_evidence_manifest_builder import (
     build_candidate_evidence_manifest_from_source,
 )
@@ -51,14 +56,42 @@ def _canonical_sha256(value: dict) -> str:
     ).hexdigest()
 
 
+def _valid_signal_spec(**overrides) -> dict:
+    spec = {
+        "schema_version": SIGNAL_SPEC_SCHEMA_VERSION,
+        "candidate_id": "candidate-alpha-1",
+        "family_id": "family-alpha",
+        "hypothesis": "funding and orderbook imbalance residual alpha",
+        "horizon": {"bars": 12, "unit": "1m"},
+        "inputs": ["funding_rate", "orderbook_imbalance_top5", "BTCUSDT_return"],
+        "pit_contract": {
+            "point_in_time": True,
+            "future_data_allowed": False,
+        },
+        "universe_ref": {"source": "research.alpha_symbol_universe", "hash": "u"},
+        "regime_ref": {"source": "research.aeg_regime_labels", "hash": "r"},
+        "feature_schema": {"version": "edge17"},
+        "cost_model_ref": {"source": "demo_cost_baseline", "version": "v1"},
+        "residualization": {
+            "method": "ols",
+            "factors": ["BTCUSDT_return", "pit_universe_equal_weight_return"],
+        },
+        "failure_taxonomy": ["beta_edge", "cost_defeat", "data_leak"],
+        "hidden_oos_policy": {"state_required": "sealed", "open_once": True},
+    }
+    spec.update(overrides)
+    return spec
+
+
 def _valid_manifest(**overrides) -> dict:
     residual_report = _valid_residual_alpha_report()
+    signal_spec = _valid_signal_spec()
     manifest = {
         "schema_version": CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
         "verdict": PROMOTION_READY,
         "candidate_id": "candidate-alpha-1",
         "family_id": "family-alpha",
-        "spec_hash": "a" * 64,
+        "spec_hash": compute_signal_spec_hash(signal_spec),
         "replay_experiment_id": "replay-exp-1",
         "replay_manifest_hash": "c" * 64,
         "demo_residual_alpha_report_hash": _canonical_sha256(residual_report),
@@ -80,7 +113,7 @@ def _source_row_from_fields(**payload_overrides) -> dict:
     payload = {
         "candidate_id": "candidate-alpha-1",
         "candidate_family_id": "family-alpha",
-        "signal_spec_hash": "a" * 64,
+        SIGNAL_SPEC_FIELD: _valid_signal_spec(),
         "hidden_oos": {
             "split_hash": "b" * 64,
             "window_start": "2026-05-01T00:00:00Z",
@@ -103,7 +136,12 @@ def test_builder_passes_through_canonical_payload_manifest():
     manifest = _valid_manifest()
 
     build = build_candidate_evidence_manifest_from_source(
-        source_row={"payload": {CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest}},
+        source_row={
+            "payload": {
+                CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest,
+                SIGNAL_SPEC_FIELD: _valid_signal_spec(),
+            }
+        },
         residual_report=_valid_residual_alpha_report(),
     )
 
@@ -120,6 +158,7 @@ def test_builder_source_row_manifest_has_priority_over_payload_manifest():
     build = build_candidate_evidence_manifest_from_source(
         source_row={
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: row_manifest,
+            SIGNAL_SPEC_FIELD: _valid_signal_spec(),
             "payload": {CANDIDATE_EVIDENCE_MANIFEST_FIELD: payload_manifest},
         },
         residual_report=_valid_residual_alpha_report(),
@@ -241,3 +280,32 @@ def test_builder_missing_residual_report_is_invalid():
     assert build.manifest is None
     assert build.validation.verdict == INVALID
     assert build.validation.reason == "residual_alpha:not_dict"
+
+
+def test_builder_requires_canonical_signal_spec_body():
+    row = _source_row_from_fields()
+    row["payload"].pop(SIGNAL_SPEC_FIELD)
+    row["payload"]["signal_spec_hash"] = compute_signal_spec_hash(_valid_signal_spec())
+
+    build = build_candidate_evidence_manifest_from_source(
+        source_row=row,
+        residual_report=_valid_residual_alpha_report(),
+    )
+
+    assert build.manifest is None
+    assert build.validation.verdict == PENDING_SCHEMA
+    assert build.validation.reason == "signal_spec:signal_spec_missing"
+
+
+def test_builder_rejects_signal_spec_hash_mismatch():
+    row = _source_row_from_fields()
+    row["payload"][SIGNAL_SPEC_FIELD] = _valid_signal_spec(candidate_id="other")
+
+    build = build_candidate_evidence_manifest_from_source(
+        source_row=row,
+        residual_report=_valid_residual_alpha_report(),
+    )
+
+    assert build.manifest is None
+    assert build.validation.verdict == INVALID
+    assert build.validation.reason == "signal_spec:candidate_id_mismatch"

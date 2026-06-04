@@ -9,6 +9,11 @@ from ml_training.candidate_evidence_manifest import (
     PROMOTION_READY,
     compute_candidate_evidence_manifest_hash,
 )
+from ml_training.candidate_signal_spec import (
+    SIGNAL_SPEC_FIELD,
+    SIGNAL_SPEC_SCHEMA_VERSION,
+    compute_signal_spec_hash,
+)
 from ml_training.candidate_evidence_source_contract import (
     HIDDEN_OOS_STATE_SCHEMA_VERSION,
     REGISTRY_RESIDUAL_ALPHA_HASH_FIELD,
@@ -51,14 +56,42 @@ def _canonical_sha256(value: dict) -> str:
     ).hexdigest()
 
 
+def _valid_signal_spec(**overrides) -> dict:
+    spec = {
+        "schema_version": SIGNAL_SPEC_SCHEMA_VERSION,
+        "candidate_id": "candidate-alpha-1",
+        "family_id": "family-alpha",
+        "hypothesis": "funding and orderbook imbalance residual alpha",
+        "horizon": {"bars": 12, "unit": "1m"},
+        "inputs": ["funding_rate", "orderbook_imbalance_top5", "BTCUSDT_return"],
+        "pit_contract": {
+            "point_in_time": True,
+            "future_data_allowed": False,
+        },
+        "universe_ref": {"source": "research.alpha_symbol_universe", "hash": "u"},
+        "regime_ref": {"source": "research.aeg_regime_labels", "hash": "r"},
+        "feature_schema": {"version": "edge17"},
+        "cost_model_ref": {"source": "demo_cost_baseline", "version": "v1"},
+        "residualization": {
+            "method": "ols",
+            "factors": ["BTCUSDT_return", "pit_universe_equal_weight_return"],
+        },
+        "failure_taxonomy": ["beta_edge", "cost_defeat", "data_leak"],
+        "hidden_oos_policy": {"state_required": "sealed", "open_once": True},
+    }
+    spec.update(overrides)
+    return spec
+
+
 def _valid_manifest(**overrides) -> dict:
     residual_report = _valid_residual_alpha_report()
+    signal_spec = _valid_signal_spec()
     manifest = {
         "schema_version": CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
         "verdict": PROMOTION_READY,
         "candidate_id": "candidate-alpha-1",
         "family_id": "family-alpha",
-        "spec_hash": "a" * 64,
+        "spec_hash": compute_signal_spec_hash(signal_spec),
         "replay_experiment_id": "replay-exp-1",
         "replay_manifest_hash": "c" * 64,
         "demo_residual_alpha_report_hash": _canonical_sha256(residual_report),
@@ -122,6 +155,7 @@ def _source_row(**overrides) -> dict:
         "replay_registry_oos_embargo_seconds": 86400,
         "replay_registry_total_candidates_k": 12,
         "payload": {
+            SIGNAL_SPEC_FIELD: _valid_signal_spec(),
             RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_manifest(),
         },
@@ -135,6 +169,7 @@ def test_source_contract_accepts_row_level_replay_lineage():
 
     assert build.validation.promotion_ready is True
     assert build.residual_report is not None
+    assert build.signal_spec is not None
     assert build.manifest is not None
     assert build.source_tier == "calibrated_replay"
     assert build.replay_experiment_id == "replay-exp-1"
@@ -160,6 +195,18 @@ def test_source_contract_rejects_missing_source_tier():
     assert build.validation.reason == (
         "evidence_source_tier_not_promotion_ready:missing"
     )
+
+
+def test_source_contract_requires_signal_spec_body():
+    row = _source_row()
+    row["payload"].pop(SIGNAL_SPEC_FIELD)
+    row["payload"]["signal_spec_hash"] = compute_signal_spec_hash(_valid_signal_spec())
+
+    build = build_live_candidate_evidence_from_source(row)
+
+    assert build.validation.promotion_ready is False
+    assert build.validation.verdict == "pending_schema"
+    assert build.validation.reason == "signal_spec:signal_spec_missing"
 
 
 def test_source_contract_rejects_synthetic_source_tier():
@@ -329,6 +376,7 @@ def test_source_contract_rejects_manifest_replay_hash_mismatch():
 
     build = build_live_candidate_evidence_from_source(
         _source_row(payload={
+            SIGNAL_SPEC_FIELD: _valid_signal_spec(),
             RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest,
         })
@@ -352,6 +400,7 @@ def test_source_contract_rejects_hidden_oos_registry_window_mismatch():
 
     build = build_live_candidate_evidence_from_source(
         _source_row(payload={
+            SIGNAL_SPEC_FIELD: _valid_signal_spec(),
             RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest,
         })
@@ -362,10 +411,15 @@ def test_source_contract_rejects_hidden_oos_registry_window_mismatch():
 
 
 def test_source_contract_rejects_hidden_oos_family_mismatch():
-    manifest = _valid_manifest(family_id="renamed-family")
+    signal_spec = _valid_signal_spec(family_id="renamed-family")
+    manifest = _valid_manifest(
+        family_id="renamed-family",
+        spec_hash=compute_signal_spec_hash(signal_spec),
+    )
 
     build = build_live_candidate_evidence_from_source(
         _source_row(payload={
+            SIGNAL_SPEC_FIELD: signal_spec,
             RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest,
         })

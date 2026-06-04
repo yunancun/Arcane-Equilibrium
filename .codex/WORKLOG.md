@@ -564,3 +564,10 @@ YYYY-MM-DD HH:MM TZ
 - result: `candidate_evidence_source_contract.py` 要求 `replay_registry_manifest_jsonb.demo_residual_alpha_report_hash` 存在並等於 canonical `demo_residual_alpha_report` hash；`register_experiment()` 的 alpha `hidden_oos_state` 路徑同步要求該 hash 存在且為 64 hex；缺 hash `pending_schema` / 400，mismatch `invalid`。
 - verification: `program_code/ml_training/tests` = `507 passed, 31 skipped`；control_api replay subdir `114 passed, 7 skipped`；LG5 + replay full-chain routes `77 passed, 1 skipped`；replay register focused `25 passed`；touched Python `py_compile` PASS。
 - boundary/risk: source/test/report only；no DB migration, DB write/apply, runtime deploy, rebuild/restart, auth/order/risk config mutation, paper/live enable, or promotion state mutation。本 checkpoint 不是 durable residual report registry；只把 residual report hash 承諾拉進 replay registry manifest。
+
+2026-06-04 CEST
+- PM task: 推進 `P1-D-SIGNALSPEC-METADATA-CONTRACT`，把 Candidate EvidenceManifest `spec_hash` 從任意穩定字串收緊到 canonical `signal_spec` body hash。
+- dispatch chain: PM(default) local implementation + E2(explorer) Linnaeus durable registry/source-boundary 前置審計 -> PM(default) integration；未另派 E1/E4，因本批 no-migration narrow source/test checkpoint，由 PM 本地 patch + regression。
+- result: 新增 `candidate_signal_spec.py`；manifest validator / builder / source contract / MLDE producer / LG-5 reviewer 均要求 canonical `signal_spec`，並驗 candidate/family、PIT、universe/regime/cost lineage、residualization、failure taxonomy、hidden OOS policy 與 `spec_hash` 一致；只有 `signal_spec_hash` / `factor_spec_hash` 不再 promotion-ready。
+- verification: SignalSpec + manifest/source focused `56 passed`；MLDE applier + LG5 focused `86 passed`；`program_code/ml_training/tests` = `516 passed, 31 skipped`；LG5 + replay full-chain routes `77 passed, 1 skipped`；touched Python `py_compile` PASS；`git diff --check` PASS。
+- boundary/risk: source/test/report only；no DB migration, DB write/apply, runtime deploy, rebuild/restart, auth/order/risk config mutation, paper/live enable, or promotion state mutation。本 checkpoint 不是 DSL、不是 durable hidden OOS state machine、不是 durable residual report registry，也不證明 alpha edge 已解決。

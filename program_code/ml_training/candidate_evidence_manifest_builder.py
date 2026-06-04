@@ -20,6 +20,10 @@ from dataclasses import dataclass
 from typing import Any
 
 try:
+    from .candidate_signal_spec import (
+        compute_signal_spec_hash,
+        extract_signal_spec,
+    )
     from .candidate_evidence_manifest import (
         CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
         PROMOTION_READY,
@@ -29,6 +33,10 @@ try:
         validate_candidate_evidence_manifest,
     )
 except ImportError:  # pragma: no cover - direct script execution fallback
+    from candidate_signal_spec import (  # type: ignore
+        compute_signal_spec_hash,
+        extract_signal_spec,
+    )
     from candidate_evidence_manifest import (  # type: ignore
         CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
         PROMOTION_READY,
@@ -46,6 +54,7 @@ class CandidateEvidenceManifestBuild:
     manifest: dict[str, Any] | None
     validation: CandidateEvidenceManifestValidation
     source: str
+    signal_spec: dict[str, Any] | None = None
     downgrade_reason: str | None = None
 
 
@@ -64,12 +73,14 @@ def build_candidate_evidence_manifest_from_source(
       manifest 的 ``manifest_hash``。
     """
     source_payload = _mapping(source_row.get("payload"))
+    signal_spec = _extract_signal_spec_from_sources(source_row, source_payload)
 
     row_manifest = extract_candidate_evidence_manifest(source_row)
     if row_manifest is not None:
         return _build_from_existing_manifest(
             row_manifest,
             residual_report=residual_report,
+            signal_spec=signal_spec,
             source="source_row_manifest",
         )
 
@@ -78,10 +89,16 @@ def build_candidate_evidence_manifest_from_source(
         return _build_from_existing_manifest(
             payload_manifest,
             residual_report=residual_report,
+            signal_spec=signal_spec,
             source="payload_manifest",
         )
 
-    draft = _draft_manifest_from_fields(source_row, source_payload, residual_report)
+    draft = _draft_manifest_from_fields(
+        source_row,
+        source_payload,
+        residual_report,
+        signal_spec=signal_spec,
+    )
     if "replay_manifest_hash" not in draft:
         validation = CandidateEvidenceManifestValidation(
             promotion_ready=False,
@@ -94,23 +111,27 @@ def build_candidate_evidence_manifest_from_source(
             manifest=None,
             validation=validation,
             source="source_fields_downgraded",
+            signal_spec=signal_spec,
             downgrade_reason=validation.reason,
         )
     draft["manifest_hash"] = compute_candidate_evidence_manifest_hash(draft)
     validation = validate_candidate_evidence_manifest(
         draft,
         residual_report=residual_report,
+        signal_spec=signal_spec,
     )
     if validation.promotion_ready:
         return CandidateEvidenceManifestBuild(
             manifest=draft,
             validation=validation,
             source="source_fields",
+            signal_spec=signal_spec,
         )
     return CandidateEvidenceManifestBuild(
         manifest=None,
         validation=validation,
         source="source_fields_downgraded",
+        signal_spec=signal_spec,
         downgrade_reason=validation.reason,
     )
 
@@ -119,17 +140,20 @@ def _build_from_existing_manifest(
     manifest: Any,
     *,
     residual_report: Mapping[str, Any] | None,
+    signal_spec: dict[str, Any] | None,
     source: str,
 ) -> CandidateEvidenceManifestBuild:
     validation = validate_candidate_evidence_manifest(
         manifest,
         residual_report=residual_report,
+        signal_spec=signal_spec,
     )
     manifest_dict = copy.deepcopy(dict(manifest)) if isinstance(manifest, Mapping) else None
     return CandidateEvidenceManifestBuild(
         manifest=manifest_dict if validation.promotion_ready else None,
         validation=validation,
         source=source,
+        signal_spec=signal_spec,
         downgrade_reason=None if validation.promotion_ready else validation.reason,
     )
 
@@ -138,15 +162,17 @@ def _draft_manifest_from_fields(
     source_row: Mapping[str, Any],
     source_payload: Mapping[str, Any],
     residual_report: Mapping[str, Any] | None,
+    *,
+    signal_spec: dict[str, Any] | None,
 ) -> dict[str, Any]:
     candidate_spec = _mapping(source_payload.get("candidate_spec"))
-    signal_spec = _mapping(source_payload.get("signal_spec"))
+    signal_spec_mapping = _mapping(signal_spec)
 
     hidden_oos = _first_mapping(
         source_payload.get("hidden_oos"),
         source_payload.get("candidate_hidden_oos"),
         candidate_spec.get("hidden_oos"),
-        signal_spec.get("hidden_oos"),
+        signal_spec_mapping.get("hidden_oos"),
     )
 
     manifest: dict[str, Any] = {
@@ -176,14 +202,15 @@ def _draft_manifest_from_fields(
     _put_if_present(
         manifest,
         "spec_hash",
-        _first_text(
+        compute_signal_spec_hash(signal_spec_mapping)
+        if signal_spec_mapping
+        else _first_text(
             source_row.get("spec_hash"),
             source_row.get("signal_spec_hash"),
             source_payload.get("spec_hash"),
             source_payload.get("signal_spec_hash"),
             source_payload.get("factor_spec_hash"),
             candidate_spec.get("spec_hash"),
-            signal_spec.get("spec_hash"),
         ),
     )
     _put_if_present(
@@ -207,6 +234,19 @@ def _draft_manifest_from_fields(
     residual_hash = _canonical_sha256(dict(residual_report)) if residual_report else ""
     _put_if_present(manifest, "demo_residual_alpha_report_hash", residual_hash)
     return manifest
+
+
+def _extract_signal_spec_from_sources(
+    source_row: Mapping[str, Any],
+    source_payload: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    row_signal_spec = extract_signal_spec(source_row)
+    if isinstance(row_signal_spec, Mapping):
+        return copy.deepcopy(dict(row_signal_spec))
+    payload_signal_spec = extract_signal_spec(source_payload)
+    if isinstance(payload_signal_spec, Mapping):
+        return copy.deepcopy(dict(payload_signal_spec))
+    return None
 
 
 def _mapping(value: Any) -> Mapping[str, Any]:
