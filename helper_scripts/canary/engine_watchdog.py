@@ -495,20 +495,93 @@ def _append_canary_event(data_dir: str, event: dict) -> None:
         logger.warning("Failed to append canary event: %s", e)
 
 
-def should_restart(data_dir: str, now: float) -> tuple[bool, str]:
+def emit_restart_skipped_if_new(
+    data_dir: str, reason_key: str, reason_detail: str, now: float
+) -> bool:
+    """RESTART_SKIPPED canary 去重寫入（FINDING #2 2026-06-05 + HIGH-1 修正）。
+
+    為什麼節流：on_engine_crash 的 retry 改 LEVEL-triggered 後，每次處於
+    engine_crash 狀態的 stale poll（POLL_INTERVAL=2s）只要 should_restart 回 False
+    就會想寫一條 RESTART_SKIPPED。一旦 circuit_broken=True（終態，可持續數小時，
+    參 2026-06-05 incident 引擎 down ~20h），等於每天約 4.3 萬條 RESTART_SKIPPED
+    灌進 canary_events.jsonl，把我們真正要看的那一條 RESTART_CIRCUIT_BROKEN 淹沒
+    （該檔無 rotation，是未來告警要保持乾淨的訊號源）。
+
+    HIGH-1 去重必須用 reason_KEY 而非人類字串：should_restart 的 backoff 分支
+    detail 內含 per-poll 遞減的倒數秒（"300s remaining"→"298s…"），每 poll 都不同，
+    若用 detail 去重則整段 backoff window 每 poll 都寫一條（實測 300s 灌 150 條、
+    熔斷前約 540 條），等於對正常爬升到熔斷的路徑完全失去節流。改用穩定的 key
+    去重：同一狀態整段窗口只發 ≤1 條；key 變化（backoff→circuit_broken→maintenance）
+    才再發一條。marker 持久化在 watchdog_state.json 的 last_restart_skipped_reason
+    （存的是 KEY），跨 poll 比對。成功重啟 / 引擎恢復時由 clear_restart_skipped_marker
+    清掉，讓之後真正的 skip 能再發一次（避免吞掉新事件）。
+
+    注意：reason_detail 仍寫進 canary event payload（保留人類可讀資訊），per-poll
+    的 logger.warning 也由 caller 用 detail 輸出（log 會 rotate，本地可見性無虞）。
+    本函數只節流 JSONL append；RESTART_FAILED（天然 1/backoff-window）與
+    RESTART_CIRCUIT_BROKEN（one-shot）不在此節流，照舊由 trigger_restart 寫。
+
+    Args:
+        reason_key: should_restart 回的穩定分類鍵，去重判定唯一依據。
+        reason_detail: 人類可讀字串，寫進 event payload（不參與去重）。
+
+    Returns:
+        True  本次有寫 JSONL（key 為新）；False 去重 skip。
+    """
+    state = load_state(data_dir)
+    last_key = state.get("last_restart_skipped_reason")
+    if last_key == reason_key:
+        return False
+    state["last_restart_skipped_reason"] = reason_key
+    state["last_restart_skipped_emit_ts"] = now
+    save_state(data_dir, state)
+    _append_canary_event(data_dir, {
+        "ts": now, "event": "RESTART_SKIPPED",
+        "reason_key": reason_key, "reason": reason_detail,
+    })
+    return True
+
+
+def clear_restart_skipped_marker(data_dir: str) -> None:
+    """清掉 RESTART_SKIPPED 去重 marker（FINDING #2 2026-06-05）。
+
+    為什麼要清：成功重啟或引擎恢復後，下一輪若再進入 skip 狀態應重新發一條
+    RESTART_SKIPPED（而非因 marker 殘留被永久去重吞掉）。在 trigger_restart 成功
+    分支與 on_engine_recovery 呼叫，標誌一個 skip-emit 週期的結束。
+    只在 marker 實際存在時才寫盤，避免無謂 I/O。
+    """
+    state = load_state(data_dir)
+    if state.get("last_restart_skipped_reason") is None and \
+            "last_restart_skipped_emit_ts" not in state:
+        return
+    state.pop("last_restart_skipped_reason", None)
+    state.pop("last_restart_skipped_emit_ts", None)
+    save_state(data_dir, state)
+
+
+def should_restart(data_dir: str, now: float) -> tuple[bool, str, str]:
     """
     Decide whether an auto-restart is allowed right now.
-    Returns (allowed, reason). Reason is human-readable for logs + canary events.
     決定此刻是否允許自動重啟。
+
+    回傳 (allowed, reason_key, reason_detail)：
+      - reason_key 是 STABLE 分類鍵（"maintenance"/"circuit_broken"/"backoff"/"ok"），
+        per-poll 不變，給 RESTART_SKIPPED 去重節流用（FINDING #2-HIGH-1 2026-06-05）。
+      - reason_detail 是人類可讀字串，給 log + canary event payload 用。
+    為什麼要拆 key/detail：backoff 分支的 detail 內含 per-poll 遞減的倒數秒
+    （"300s remaining"→"298s remaining"…），每 2s poll 都產生不同字串。若節流
+    去重用 detail，整個 backoff window 每 poll 都會寫一條 RESTART_SKIPPED
+    （實測 300s 窗口灌 150 條），把 RESTART_CIRCUIT_BROKEN 訊號淹沒。改用 key
+    去重後，同一狀態整段窗口只發 ≤1 條，狀態切換（backoff→circuit_broken）才再發。
     """
     # Safeguard #2: maintenance flag → operator intent wins / 維護旗標 → 尊重 operator 意圖
     flag_path = Path(data_dir) / MAINTENANCE_FLAG
     if flag_path.exists():
-        return False, f"maintenance flag present at {flag_path}"
+        return False, "maintenance", f"maintenance flag present at {flag_path}"
 
     state = load_state(data_dir)
     if state.get("circuit_broken", False):
-        return False, (
+        return False, "circuit_broken", (
             f"circuit broken after {state.get('consecutive_failures', 0)} consecutive failures "
             "— manual intervention required"
         )
@@ -516,9 +589,10 @@ def should_restart(data_dir: str, now: float) -> tuple[bool, str]:
     next_allowed = float(state.get("next_allowed_restart_ts", 0.0))
     if now < next_allowed:
         remaining = next_allowed - now
-        return False, f"backoff window active, {remaining:.0f}s remaining"
+        # detail 保留 per-poll 倒數秒供 log/payload；節流由穩定的 "backoff" key 去重。
+        return False, "backoff", f"backoff window active, {remaining:.0f}s remaining"
 
-    return True, "ok"
+    return True, "ok", "ok"
 
 
 def trigger_restart(data_dir: str) -> bool:
@@ -543,9 +617,44 @@ def trigger_restart(data_dir: str) -> bool:
         # cwd must be repo root so restart_all.sh can resolve its own relative paths.
         # cwd 必須為 repo 根以讓 restart_all.sh 解析相對路徑。
         repo_root = Path(__file__).resolve().parents[2]
+        # WATCHDOG-BINDHOST-SANITIZE-1 (2026-06-05): 為什麼必須在這裡正規化
+        # OPENCLAW_BIND_HOST——若 watchdog 自身 env 帶著 resolver 會 exit=2 硬拒
+        # 的值，子進程會繼承它，restart_all.sh 內 `resolve_openclaw_api_bind_host`
+        # （helper_scripts/lib/api_bind_host.sh）直接 exit=2 拒絕，導致每次重啟都
+        # 失敗 → 自愈永久卡死（2026-06-05 incident：引擎 down ~20h 的成因之一）。
+        #
+        # 正規化集合 = resolver 會 exit=2 硬拒的 bind-host 值集合（all-interfaces
+        # 0.0.0.0/:: + 空 + tailscale-unavailable {tailscale, tailscale-ip, ts}）→
+        # auto，確保自愈子程序不被 bind-host 卡死；具體 IP / 合法值原樣放行；
+        # 不繞過/不削弱安全守衛。malformed host:port 形式由 resolver `*)` 負責，
+        # 非本集合範圍。
+        #
+        # 為什麼用 auto 當正規化目標：auto 永不 exit=2——resolver 在 tailscale
+        # 不可用時 fallback 127.0.0.1，可用時綁 tailscale IP，因此 watchdog 的重啟
+        # 子進程不可能被一個 resolver 會拒絕的 bind-host 值卡死。
+        # 關鍵紀律：此處只動「自愈子進程自己的 recovery env」——把危險值正規化成
+        # 安全的 auto 餵給守衛，而非繞過或弱化守衛；不碰 api_bind_host.sh /
+        # restart_all.sh。operator 手動發起的重啟（manual restart / deploy / API）
+        # 仍照舊在 0.0.0.0 / tailscale-unavailable 上 fail-closed-and-loud。
+        # 為什麼把 {tailscale, tailscale-ip, ts} 也納入（FINDING #1 2026-06-05）：
+        # 這幾個值在 tailscale 不在 PATH / 無 IPv4 時同樣 exit=2，會像 0.0.0.0 一樣
+        # 卡死自愈；故 watchdog 的 recovery 子進程一律降到 never-fail 的 auto。
+        sanitized_env = dict(os.environ)
+        # resolver 的 exit=2 拒絕集合（與 api_bind_host.sh case 分支對齊）。
+        DANGEROUS_BIND_HOSTS = {"0.0.0.0", "::", "", "tailscale", "tailscale-ip", "ts"}
+        if "OPENCLAW_BIND_HOST" in sanitized_env:
+            if sanitized_env.get("OPENCLAW_BIND_HOST", "").strip() in DANGEROUS_BIND_HOSTS:
+                logger.warning(
+                    "Sanitizing dangerous inherited OPENCLAW_BIND_HOST=%r → 'auto' for restart "
+                    "/ 正規化被污染的 OPENCLAW_BIND_HOST=%r → 'auto' 以解除自愈卡死",
+                    sanitized_env.get("OPENCLAW_BIND_HOST"),
+                    sanitized_env.get("OPENCLAW_BIND_HOST"),
+                )
+                sanitized_env["OPENCLAW_BIND_HOST"] = "auto"
         result = subprocess.run(
             RESTART_COMMAND,
             cwd=str(repo_root),
+            env=sanitized_env,
             timeout=RESTART_TIMEOUT_SECONDS,
             capture_output=True,
             text=True,
@@ -566,6 +675,10 @@ def trigger_restart(data_dir: str) -> bool:
         state["circuit_broken"] = False
         state["next_allowed_restart_ts"] = 0.0
         state["last_failure_reason"] = ""
+        # FINDING #2：成功重啟結束一個 skip-emit 週期，清 marker 讓之後真正的
+        # skip 能再發一次（同一 dict 內清，不另開 load/save）。
+        state.pop("last_restart_skipped_reason", None)
+        state.pop("last_restart_skipped_emit_ts", None)
         save_state(data_dir, state)
         logger.info("Auto-restart succeeded / 自動重啟成功")
         _append_canary_event(data_dir, {
@@ -620,7 +733,7 @@ def on_engine_crash(
     Handle engine crash detection.
     處理引擎崩潰檢測。
 
-    Returns: action taken ("fallback" | "rollback" | "network_outage" | "none")
+    Returns: action taken ("fallback" | "rollback" | "network_outage")
 
     WATCHDOG-DNS-CLASSIFY-1 (2026-04-20) + NETOUTAGE-CLASSIFIER-FIX
     (2026-05-21): when log_path is given, inspect the engine.log tail; a pure
@@ -633,97 +746,136 @@ def on_engine_crash(
     no strike is counted, no auto-restart is attempted (restart can't fix DNS
     and would burn the circuit-breaker). engine_alive still flips to False so
     that the recovery path fires normally once the network comes back.
+
+    WATCHDOG-RETRY-LEVELTRIGGER-1 (2026-06-05): 為什麼移除舊的
+    `if not state.engine_alive: return "none"` 早退——那是 2026-06-05 incident
+    的死鎖成因之二。舊邏輯下一旦 engine_alive 翻 False（首次偵測 stale）且重啟
+    持續失敗，就不會再寫出新鮮快照，on_engine_recovery 永遠不會把 engine_alive
+    翻回 True，於是之後每次 poll 都在這裡早退「none」，永遠不再重試重啟，讓引擎
+    卡在第一次失敗，連 should_restart 的退避 + MAX_CONSECUTIVE_FAILURES=5 熔斷都
+    永遠到不了 5。
+    修正後語義（嚴格區分兩個維度）：
+      - 計數（COUNTING）維持 EDGE-triggered：total_crashes / crash_timestamps /
+        total_network_outages / engine_alive=False 翻轉，只在「下行轉移」那一刻
+        發生（即 state.engine_alive 仍為 True 時），重複 poll 不重複計數。
+      - 重啟重試（RETRY）改為 LEVEL-triggered：每次處於 engine_crash 狀態的 stale
+        poll 都呼叫 should_restart→trigger_restart。should_restart 已以退避窗口 +
+        circuit_broken 為閘，故不會 storm——依 [60,120,300,600,3600] 排程重試，
+        滿 5 次熔斷後停止。
+      - network_outage 維持原設計：永不 trigger_restart（重啟治不了 DNS，且會
+        燒掉熔斷計數）；每次 poll 重新分類沒問題，只是 network_outage 永不重啟。
     """
-    if not state.engine_alive:
-        return "none"  # Already in crash state / 已在崩潰狀態
+    # 記錄進入本次 poll 前的存活狀態，用於區分 edge（下行轉移）vs level（持續 down）。
+    # 為什麼先存：下面會無條件把 engine_alive 設 False，必須在那之前抓到「是否為轉移」。
+    was_alive = state.engine_alive
 
     # Classify first. A null log_path preserves the pre-DNS-CLASSIFY-1 behavior
     # (always engine_crash), keeping existing callers unaffected.
     # 先分類；log_path=None 時維持舊行為（總是 engine_crash）以不影響既有呼叫者。
+    # 為什麼每次 poll 都重分類：log tail 可能變化（DNS 恢復後出現 panic 等）；
+    # 重分類安全，network_outage 分支本就不重啟。
     classification = "engine_crash"
     if log_path is not None:
         classification = classify_engine_failure(log_path)
 
     if classification == "network_outage":
-        state.engine_alive = False
-        state.total_network_outages += 1
-        state.network_outage_timestamps.append(time.time())
-        logger.warning(
-            "NETWORK_OUTAGE classified — snapshot age=%.1fs, total outages=%d "
-            "(strike NOT counted, auto-restart skipped) "
-            "/ 網路中斷分類 — 快照年齡=%.1f秒，總次數=%d（不計 strike，跳過自動重啟）",
-            snapshot_age, state.total_network_outages,
-            snapshot_age, state.total_network_outages,
-        )
-        if data_dir:
-            _append_canary_event(data_dir, {
-                "ts": time.time(),
-                "event": "NETWORK_OUTAGE",
-                "snapshot_age_seconds": snapshot_age,
-                "total_outages": state.total_network_outages,
-            })
+        # 計數只在下行轉移時做一次（edge）；已 down 的重複 poll 不重複計數。
+        if was_alive:
+            state.engine_alive = False
+            state.total_network_outages += 1
+            state.network_outage_timestamps.append(time.time())
+            logger.warning(
+                "NETWORK_OUTAGE classified — snapshot age=%.1fs, total outages=%d "
+                "(strike NOT counted, auto-restart skipped) "
+                "/ 網路中斷分類 — 快照年齡=%.1f秒，總次數=%d（不計 strike，跳過自動重啟）",
+                snapshot_age, state.total_network_outages,
+                snapshot_age, state.total_network_outages,
+            )
+            if data_dir:
+                _append_canary_event(data_dir, {
+                    "ts": time.time(),
+                    "event": "NETWORK_OUTAGE",
+                    "snapshot_age_seconds": snapshot_age,
+                    "total_outages": state.total_network_outages,
+                })
+        # network_outage 永不重啟（每次 poll 都 return，不落到下面的 retry 區塊）。
         return "network_outage"
 
-    state.engine_alive = False
-    state.total_crashes += 1
-    state.crash_timestamps.append(time.time())
+    # ── engine_crash 分支 ──
+    # 計數 / strike bookkeeping 只在下行轉移時做一次（edge）。
+    if was_alive:
+        state.engine_alive = False
+        state.total_crashes += 1
+        state.crash_timestamps.append(time.time())
+        logger.error(
+            "ENGINE_CRASH detected — snapshot age=%.1fs, total crashes=%d "
+            "/ 檢測到引擎崩潰 — 快照年齡=%.1f秒，總崩潰數=%d",
+            snapshot_age, state.total_crashes, snapshot_age, state.total_crashes,
+        )
 
-    logger.error(
-        "ENGINE_CRASH detected — snapshot age=%.1fs, total crashes=%d "
-        "/ 檢測到引擎崩潰 — 快照年齡=%.1f秒，總崩潰數=%d",
-        snapshot_age, state.total_crashes, snapshot_age, state.total_crashes,
-    )
-
-    # Fix 2 (2026-04-14): attempt auto-restart BEFORE strike logic. Rationale:
-    # a successful restart yields a fresh snapshot on the next poll, which
-    # naturally transitions us back via on_engine_recovery(). Strike counting
-    # remains as a secondary safety net for restart-storm scenarios.
-    # 修復 2：嘗試自動重啟先於 strike 判定。成功重啟後下次 poll 會看到新鮮快照，
-    # 自然走 on_engine_recovery() 復原；strike 計數作為重啟風暴的次級安全網。
+    # WATCHDOG-RETRY-LEVELTRIGGER-1 (2026-06-05): 重啟重試改為 LEVEL-triggered，
+    # 每次 engine_crash 狀態的 stale poll 都跑（含已 down 的重複 poll），不再被
+    # 早退吞掉。should_restart 已用退避窗口 + circuit_broken 閘，故不會 storm。
+    # 維持 Fix 2 (2026-04-14) rationale：成功重啟後下次 poll 看到新鮮快照，自然走
+    # on_engine_recovery() 復原；strike 計數作為重啟風暴的次級安全網。
     if data_dir:
         now = time.time()
-        allowed, reason = should_restart(data_dir, now)
+        allowed, reason_key, reason_detail = should_restart(data_dir, now)
         if allowed:
             trigger_restart(data_dir)
         else:
+            # logger.warning 用 detail 保留 per-poll 本地可見性（log 會 rotate）。
             logger.warning(
-                "Auto-restart skipped: %s / 跳過自動重啟：%s", reason, reason,
+                "Auto-restart skipped: %s / 跳過自動重啟：%s",
+                reason_detail, reason_detail,
             )
-            _append_canary_event(data_dir, {
-                "ts": now, "event": "RESTART_SKIPPED", "reason": reason,
-            })
+            # FINDING #2-HIGH-1：RESTART_SKIPPED canary 用穩定的 reason_key 去重，
+            # 避免 backoff 倒數秒每 poll 變字串而失去節流（detail 仍寫進 payload）；
+            # circuit_broken 終態下也不會每 2s 灌一條把 RESTART_CIRCUIT_BROKEN 淹沒。
+            emit_restart_skipped_if_new(data_dir, reason_key, reason_detail, now)
 
-    # Check 3-strike rule / 檢查三振規則
-    prune_old_strikes(state, STRIKE_WINDOW_SECONDS)
-    if len(state.crash_timestamps) >= MAX_STRIKES:
-        logger.critical(
-            "3-STRIKE TRIGGERED — %d crashes in %.0fs window → runtime rollback "
-            "/ 三振觸發 — %d 次崩潰在 %.0f 秒窗口內 → 運行時回滾",
-            len(state.crash_timestamps), STRIKE_WINDOW_SECONDS,
-            len(state.crash_timestamps), STRIKE_WINDOW_SECONDS,
+    # 3-strike 回滾檢查維持 edge-triggered（與 crash 計數綁定）：只在剛發生轉移時評估。
+    # 為什麼綁 was_alive：crash_timestamps 只在轉移時 append，已 down 的重複 poll 不應
+    # 重新觸發 rollback 判定（避免在持續 down 期間每次 poll 都報 rollback）。
+    if was_alive:
+        prune_old_strikes(state, STRIKE_WINDOW_SECONDS)
+        if len(state.crash_timestamps) >= MAX_STRIKES:
+            logger.critical(
+                "3-STRIKE TRIGGERED — %d crashes in %.0fs window → runtime rollback "
+                "/ 三振觸發 — %d 次崩潰在 %.0f 秒窗口內 → 運行時回滾",
+                len(state.crash_timestamps), STRIKE_WINDOW_SECONDS,
+                len(state.crash_timestamps), STRIKE_WINDOW_SECONDS,
+            )
+            state.rollback_triggered = True
+            return "rollback"
+
+        logger.warning(
+            "Activating Python fallback (strike %d/%d) "
+            "/ 啟動 Python 降級（第 %d/%d 振）",
+            len(state.crash_timestamps), MAX_STRIKES,
+            len(state.crash_timestamps), MAX_STRIKES,
         )
-        state.rollback_triggered = True
-        return "rollback"
 
-    logger.warning(
-        "Activating Python fallback (strike %d/%d) "
-        "/ 啟動 Python 降級（第 %d/%d 振）",
-        len(state.crash_timestamps), MAX_STRIKES,
-        len(state.crash_timestamps), MAX_STRIKES,
-    )
     return "fallback"
 
 
-def on_engine_recovery(state: WatchdogState) -> None:
+def on_engine_recovery(state: WatchdogState, data_dir: str = "") -> None:
     """
     Handle engine recovery detection.
     處理引擎恢復檢測。
+
+    FINDING #2 (2026-06-05)：data_dir 給定時，恢復也清 RESTART_SKIPPED 去重 marker。
+    為什麼：恢復可能來自 operator 手動重啟引擎或網路回復（非 watchdog 自身成功重啟），
+    這條路徑 trigger_restart 不會跑成功分支，仍需在這裡結束 skip-emit 週期，
+    讓之後若再進入 skip 能重新發一次事件。
     """
     if state.engine_alive:
         return  # Already alive / 已恢復
 
     state.engine_alive = True
     state.last_recovery_ts = time.time()
+    if data_dir:
+        clear_restart_skipped_marker(data_dir)
     logger.info(
         "ENGINE_RECOVERED — Rust engine snapshot is fresh again "
         "/ 引擎已恢復 — Rust 引擎快照恢復新鮮",
@@ -1362,7 +1514,7 @@ def run_watchdog(
         age = best_age
 
         if is_fresh:
-            on_engine_recovery(state)
+            on_engine_recovery(state, data_dir=str(data_path))
         else:
             # Grace period: ignore stale snapshots during startup window, do not count strikes
             # 寬限期：啟動窗口內忽略過期快照，不計入 strike 計數
