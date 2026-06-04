@@ -11,6 +11,7 @@ from ml_training.candidate_evidence_manifest import (
 )
 from ml_training.candidate_evidence_source_contract import (
     HIDDEN_OOS_STATE_SCHEMA_VERSION,
+    REGISTRY_RESIDUAL_ALPHA_HASH_FIELD,
     build_live_candidate_evidence_from_source,
 )
 from ml_training.residual_alpha_report_contract import RESIDUAL_ALPHA_REPORT_FIELD
@@ -94,6 +95,18 @@ def _valid_hidden_oos_state(**overrides) -> dict:
     return state
 
 
+def _valid_registry_manifest(**overrides) -> dict:
+    manifest = {
+        "registry": "manifest",
+        "hidden_oos_state": _valid_hidden_oos_state(),
+        REGISTRY_RESIDUAL_ALPHA_HASH_FIELD: _canonical_sha256(
+            _valid_residual_alpha_report()
+        ),
+    }
+    manifest.update(overrides)
+    return manifest
+
+
 def _source_row(**overrides) -> dict:
     row = {
         "id": 12,
@@ -103,10 +116,7 @@ def _source_row(**overrides) -> dict:
         "replay_registry_status": "completed",
         "replay_registry_expires_at": "2999-01-01T00:00:00+00:00",
         "replay_registry_manifest_hash": "c" * 64,
-        "replay_registry_manifest_jsonb": {
-            "registry": "manifest",
-            "hidden_oos_state": _valid_hidden_oos_state(),
-        },
+        "replay_registry_manifest_jsonb": _valid_registry_manifest(),
         "replay_registry_oos_label_window_start": "2026-05-01T00:00:00Z",
         "replay_registry_oos_label_window_end": "2026-05-08T00:00:00Z",
         "replay_registry_oos_embargo_seconds": 86400,
@@ -201,7 +211,11 @@ def test_source_contract_rejects_missing_registry_snapshot():
 
 def test_source_contract_requires_hidden_oos_state_in_registry_manifest():
     build = build_live_candidate_evidence_from_source(
-        _source_row(replay_registry_manifest_jsonb={"registry": "manifest"})
+        _source_row(
+            replay_registry_manifest_jsonb=_valid_registry_manifest(
+                hidden_oos_state=None
+            )
+        )
     )
 
     assert build.validation.promotion_ready is False
@@ -209,12 +223,43 @@ def test_source_contract_requires_hidden_oos_state_in_registry_manifest():
     assert build.validation.reason == "hidden_oos_state_missing"
 
 
+def test_source_contract_requires_registry_residual_report_hash():
+    registry_manifest = _valid_registry_manifest()
+    registry_manifest.pop(REGISTRY_RESIDUAL_ALPHA_HASH_FIELD)
+
+    build = build_live_candidate_evidence_from_source(
+        _source_row(replay_registry_manifest_jsonb=registry_manifest)
+    )
+
+    assert build.validation.promotion_ready is False
+    assert build.validation.verdict == "pending_schema"
+    assert build.validation.reason == (
+        "replay_registry_demo_residual_alpha_report_hash_missing"
+    )
+
+
+def test_source_contract_rejects_registry_residual_report_hash_mismatch():
+    build = build_live_candidate_evidence_from_source(
+        _source_row(
+            replay_registry_manifest_jsonb=_valid_registry_manifest(
+                **{REGISTRY_RESIDUAL_ALPHA_HASH_FIELD: "d" * 64}
+            )
+        )
+    )
+
+    assert build.validation.promotion_ready is False
+    assert build.validation.verdict == "invalid"
+    assert build.validation.reason == (
+        "replay_registry_demo_residual_alpha_report_hash_mismatch"
+    )
+
+
 def test_source_contract_rejects_opened_hidden_oos_state():
     build = build_live_candidate_evidence_from_source(
         _source_row(
-            replay_registry_manifest_jsonb={
-                "hidden_oos_state": _valid_hidden_oos_state(state="opened")
-            }
+            replay_registry_manifest_jsonb=_valid_registry_manifest(
+                hidden_oos_state=_valid_hidden_oos_state(state="opened")
+            )
         )
     )
 
@@ -226,9 +271,9 @@ def test_source_contract_rejects_opened_hidden_oos_state():
 def test_source_contract_rejects_nonzero_hidden_oos_open_count():
     build = build_live_candidate_evidence_from_source(
         _source_row(
-            replay_registry_manifest_jsonb={
-                "hidden_oos_state": _valid_hidden_oos_state(open_count=1)
-            }
+            replay_registry_manifest_jsonb=_valid_registry_manifest(
+                hidden_oos_state=_valid_hidden_oos_state(open_count=1)
+            )
         )
     )
 
@@ -240,11 +285,11 @@ def test_source_contract_rejects_nonzero_hidden_oos_open_count():
 def test_source_contract_rejects_hidden_oos_state_window_mismatch():
     build = build_live_candidate_evidence_from_source(
         _source_row(
-            replay_registry_manifest_jsonb={
-                "hidden_oos_state": _valid_hidden_oos_state(
+            replay_registry_manifest_jsonb=_valid_registry_manifest(
+                hidden_oos_state=_valid_hidden_oos_state(
                     window_start="2026-06-01T00:00:00Z"
                 )
-            }
+            )
         )
     )
 

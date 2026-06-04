@@ -39,6 +39,7 @@ from ml_training.candidate_evidence_manifest import (
 from ml_training.residual_alpha_report_contract import RESIDUAL_ALPHA_REPORT_FIELD
 from ml_training.candidate_evidence_source_contract import (
     HIDDEN_OOS_STATE_SCHEMA_VERSION,
+    REGISTRY_RESIDUAL_ALPHA_HASH_FIELD,
 )
 
 
@@ -196,6 +197,18 @@ def _valid_hidden_oos_state(**overrides) -> dict:
     return state
 
 
+def _valid_registry_manifest(**overrides) -> dict:
+    manifest = {
+        "registry": "manifest",
+        "hidden_oos_state": _valid_hidden_oos_state(),
+        REGISTRY_RESIDUAL_ALPHA_HASH_FIELD: _canonical_sha256(
+            _valid_residual_alpha_report()
+        ),
+    }
+    manifest.update(overrides)
+    return manifest
+
+
 def _registry_source_fields(**overrides) -> dict:
     fields = {
         "evidence_source_tier": "calibrated_replay",
@@ -204,10 +217,7 @@ def _registry_source_fields(**overrides) -> dict:
         "replay_registry_status": "completed",
         "replay_registry_expires_at": "2999-01-01T00:00:00+00:00",
         "replay_registry_manifest_hash": "c" * 64,
-        "replay_registry_manifest_jsonb": {
-            "registry": "manifest",
-            "hidden_oos_state": _valid_hidden_oos_state(),
-        },
+        "replay_registry_manifest_jsonb": _valid_registry_manifest(),
         "replay_registry_oos_label_window_start": "2026-05-01T00:00:00Z",
         "replay_registry_oos_label_window_end": "2026-05-08T00:00:00Z",
         "replay_registry_oos_embargo_seconds": 86400,

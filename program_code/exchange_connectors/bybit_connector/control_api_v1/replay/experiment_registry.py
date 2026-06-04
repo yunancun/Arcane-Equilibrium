@@ -163,6 +163,7 @@ V049_EXECUTION_CONFIDENCE_ALLOWED = frozenset({"none", "limited", "calibrated"})
 V049_STATUS_CREATED = "created"
 HIDDEN_OOS_STATE_SCHEMA_VERSION = "hidden_oos_state_v1"
 HIDDEN_OOS_PROMOTION_STATE = "sealed"
+REGISTRY_RESIDUAL_ALPHA_HASH_FIELD = "demo_residual_alpha_report_hash"
 
 # manifest_jsonb size cap (bytes). Aligned with Track C P0-5b artifact 256 KB
 # read cap so a registered manifest can always be read back.
@@ -984,6 +985,11 @@ def _extract_alpha_hidden_oos_v049_fields(
         return null_fields, "alpha_hidden_oos_state_family_id_missing"
     if not str(state.get("split_hash") or "").strip():
         return null_fields, "alpha_hidden_oos_state_split_hash_missing"
+    residual_hash = str(manifest_jsonb.get(REGISTRY_RESIDUAL_ALPHA_HASH_FIELD) or "")
+    if not residual_hash:
+        return null_fields, "alpha_hidden_oos_state_residual_hash_missing"
+    if not _is_hex64(residual_hash):
+        return null_fields, "alpha_hidden_oos_state_residual_hash_malformed"
     if _int_or_none(state.get("open_count")) != 0:
         return null_fields, "alpha_hidden_oos_state_open_count_nonzero"
     for flag in ("opened_for_iteration", "consumed", "invalidated"):
@@ -1115,6 +1121,11 @@ def _truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_hex64(value: str) -> bool:
+    text = value.strip()
+    return len(text) == 64 and all(ch in "0123456789abcdef" for ch in text)
 
 
 # ─── Public helper: register_experiment / 公開 API：register_experiment ─
