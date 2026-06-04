@@ -550,3 +550,10 @@ YYYY-MM-DD HH:MM TZ
 - result: `replay_registry_manifest_jsonb.hidden_oos_state` 成為 MLDE live-candidate promotion-ready 的硬條件；要求 `hidden_oos_state_v1`、`state=sealed`、`open_count=0`、未 opened/consumed/invalidated、split_hash/family_id/window/embargo/K 與 registry/candidate manifest 一致；source-fields draft 改由 committed hidden_oos_state hydrate hidden_oos，不再用 replay manifest hash 代替 split hash。
 - verification: `program_code/ml_training/tests` = `505 passed, 31 skipped`；LG5 review focused `59 passed`；touched Python `py_compile` PASS。
 - boundary/risk: source/test/report only；no DB migration, DB write/apply, runtime deploy, rebuild/restart, auth/order/risk config mutation, paper/live enable, or promotion state mutation。本 checkpoint 不是 durable hidden OOS state machine；opened/consumed/invalidated 的 DB 狀態轉移仍需後續 migration/API/audit 設計。
+
+2026-06-04 CEST
+- PM task: 推進 `P1-B2-REPLAY-REGISTER-HIDDEN-OOS-REGISTRY-FIELDS`，修正 V049 register helper 在 alpha hidden_oos_state 路徑仍寫 NULL 的真實缺口。
+- dispatch chain: PM(default) local implementation + regression；未另派 agent，因本批不加 migration，只改 register helper 與 hermetic tests。
+- result: `register_experiment()` 在 `manifest_jsonb.hidden_oos_state` 存在時要求 `hidden_oos_state_v1` / `state=sealed` / `open_count=0` / family+split / train+OOS+candidate window / embargo / K，並把 train/candidate/embargo/K 寫入 V049 既有欄位；legacy replay manifest 無 `hidden_oos_state` 時保持 NULL 行為；`alpha_hidden_oos_state_*` 錯誤映射為 400。
+- verification: replay register focused `24 passed`；strategy/risk blob round-trip `6 passed`；control_api replay subdir `114 passed, 7 skipped`；replay full-chain routes `18 passed, 1 skipped`；touched Python `py_compile` PASS。
+- boundary/risk: source/test/report only；no DB migration, DB write/apply, runtime deploy, rebuild/restart, auth/order/risk config mutation, paper/live enable, or promotion state mutation。本 checkpoint 仍不是 durable hidden OOS state machine；只是讓 register path 寫出 P1-B producer gate 需要的 registry snapshot。
