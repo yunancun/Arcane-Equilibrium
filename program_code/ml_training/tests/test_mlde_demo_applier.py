@@ -27,6 +27,12 @@ from ml_training.mlde_demo_applier import (
 from ml_training.live_candidate_lineage import (
     LIVE_CANDIDATE_LINEAGE_SCHEMA_VERSION,
 )
+from ml_training.candidate_evidence_manifest import (
+    CANDIDATE_EVIDENCE_MANIFEST_FIELD,
+    CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
+    PROMOTION_READY,
+    compute_candidate_evidence_manifest_hash,
+)
 from ml_training.residual_alpha_report_contract import RESIDUAL_ALPHA_REPORT_FIELD
 
 
@@ -109,6 +115,28 @@ def _valid_residual_alpha_report(**overrides) -> dict:
     }
     report.update(overrides)
     return report
+
+
+def _valid_candidate_evidence_manifest(**overrides) -> dict:
+    manifest = {
+        "schema_version": CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
+        "verdict": PROMOTION_READY,
+        "candidate_id": "candidate-alpha-1",
+        "family_id": "family-alpha",
+        "spec_hash": "a" * 64,
+        "replay_experiment_id": "replay-exp-1",
+        "hidden_oos": {
+            "split_hash": "b" * 64,
+            "window_start": "2026-05-01T00:00:00Z",
+            "window_end": "2026-05-08T00:00:00Z",
+            "embargo": "1d",
+            "trial_count": 12,
+            "passes": True,
+        },
+    }
+    manifest.update(overrides)
+    manifest["manifest_hash"] = compute_candidate_evidence_manifest_hash(manifest)
+    return manifest
 
 
 def test_execute_read_fail_soft_rolls_back_to_savepoint_for_real_pg_cursor():
@@ -216,6 +244,7 @@ def test_live_candidate_requires_strong_demo_evidence():
             "confidence": 0.8,
             "sample_count": 40,
             RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
+            CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
         },
         cfg,
     )
@@ -225,6 +254,7 @@ def test_live_candidate_requires_strong_demo_evidence():
             "confidence": 0.6,
             "sample_count": 40,
             RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
+            CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
         },
         cfg,
     )
@@ -243,6 +273,13 @@ def test_live_candidate_requires_valid_residual_report():
     }
 
     assert not should_create_live_candidate(threshold_passing, cfg)
+    assert not should_create_live_candidate(
+        {
+            **threshold_passing,
+            RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
+        },
+        cfg,
+    )
     assert not should_create_live_candidate(
         {
             **threshold_passing,
@@ -272,8 +309,44 @@ def test_live_candidate_requires_valid_residual_report():
         {
             **threshold_passing,
             "payload": {
-                RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report()
+                RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
+                CANDIDATE_EVIDENCE_MANIFEST_FIELD: (
+                    _valid_candidate_evidence_manifest()
+                ),
             },
+        },
+        cfg,
+    )
+
+
+def test_live_candidate_requires_promotion_ready_manifest():
+    cfg = DemoApplierConfig(
+        live_candidate_min_net_bps=5.0,
+        live_candidate_min_confidence=0.65,
+        live_candidate_min_samples=30,
+    )
+    threshold_passing = {
+        "expected_net_bps": 7.0,
+        "confidence": 0.8,
+        "sample_count": 40,
+        RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
+    }
+
+    assert not should_create_live_candidate(
+        {
+            **threshold_passing,
+            CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(
+                verdict="research_only",
+            ),
+        },
+        cfg,
+    )
+    manifest = _valid_candidate_evidence_manifest()
+    manifest["manifest_hash"] = "0" * 64
+    assert not should_create_live_candidate(
+        {
+            **threshold_passing,
+            CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest,
         },
         cfg,
     )
@@ -1112,13 +1185,17 @@ def test_payload_carries_source_residual_alpha_report(monkeypatch):
             return []
 
     report = _valid_residual_alpha_report()
+    manifest = _valid_candidate_evidence_manifest()
     payload = _build_live_candidate_payload(
         _NoopCursor(),
         source_row={
             "id": 12,
             "symbol": "ETHUSDT",
             "strategy_name": "ma_crossover",
-            "payload": {RESIDUAL_ALPHA_REPORT_FIELD: report},
+            "payload": {
+                RESIDUAL_ALPHA_REPORT_FIELD: report,
+                CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest,
+            },
         },
         application_id=333,
         application_type="strategy_params",
@@ -1127,6 +1204,7 @@ def test_payload_carries_source_residual_alpha_report(monkeypatch):
     )
 
     assert payload[RESIDUAL_ALPHA_REPORT_FIELD] is report
+    assert payload[CANDIDATE_EVIDENCE_MANIFEST_FIELD] is manifest
 
     alias_payload = _build_live_candidate_payload(
         _NoopCursor(),
@@ -1143,6 +1221,44 @@ def test_payload_carries_source_residual_alpha_report(monkeypatch):
     )
 
     assert RESIDUAL_ALPHA_REPORT_FIELD not in alias_payload
+
+    bad_manifest = _valid_candidate_evidence_manifest()
+    bad_manifest["manifest_hash"] = "0" * 64
+    invalid_manifest_payload = _build_live_candidate_payload(
+        _NoopCursor(),
+        source_row={
+            "id": 14,
+            "symbol": "ETHUSDT",
+            "strategy_name": "ma_crossover",
+            "payload": {
+                RESIDUAL_ALPHA_REPORT_FIELD: report,
+                CANDIDATE_EVIDENCE_MANIFEST_FIELD: bad_manifest,
+            },
+        },
+        application_id=335,
+        application_type="strategy_params",
+        patch={"sma_fast": 9},
+        strategy_name="ma_crossover",
+    )
+
+    assert CANDIDATE_EVIDENCE_MANIFEST_FIELD not in invalid_manifest_payload
+
+    missing_residual_payload = _build_live_candidate_payload(
+        _NoopCursor(),
+        source_row={
+            "id": 15,
+            "symbol": "ETHUSDT",
+            "strategy_name": "ma_crossover",
+            "payload": {CANDIDATE_EVIDENCE_MANIFEST_FIELD: manifest},
+        },
+        application_id=336,
+        application_type="strategy_params",
+        patch={"sma_fast": 10},
+        strategy_name="ma_crossover",
+    )
+
+    assert RESIDUAL_ALPHA_REPORT_FIELD not in missing_residual_payload
+    assert CANDIDATE_EVIDENCE_MANIFEST_FIELD not in missing_residual_payload
 
 
 def test_payload_includes_per_strategy_sample_count(monkeypatch):

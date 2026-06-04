@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-04 16:03 CEST
+- completed Alpha-Edge P1 `candidate_evidence_manifest` fail-closed gate as a source/test/docs-only checkpoint
+- added shared manifest validator and wired MLDE live-candidate producer plus LG-5 reviewer so missing/alias/invalid/research_only/pending_schema manifests cannot create or approve live candidates
+- dispatch chain: CC(default) + FA(default) + PA(default) scope review, E1(worker) no-write with PM補位, E2(explorer) ACCEPT_WITH_RISK, E4(worker) PASS
+- verification: focused manifest/MLDE/LG5 suite 99 passed, py_compile PASS, git diff --check PASS; full `program_code/ml_training/tests` still has the known 2 unrelated `synthetic_replay` allowlist failures
+- next P1 work is real manifest producer / hidden OOS registry / row-level lineage persistence; this checkpoint intentionally does not generate fake manifest or change DB/runtime
+
 2026-06-01 22:xx CEST
 - calibrated TODO after operator parallel repairs: origin/Linux are on alpha hygiene deploy commit `324001c3`, while Mac is ahead with local SM parity/helper commits and still has uncommitted maintenance WIP
 - confirmed V5.8 remains preserved but active-IMPL stays gated by P0-EDGE-1; new repairs do not unlock the 13-module autonomy IMPL track
