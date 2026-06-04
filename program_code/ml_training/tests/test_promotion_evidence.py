@@ -30,11 +30,35 @@ def _js_results():
     }
 
 
+def _valid_residual_alpha_report(**overrides):
+    report = {
+        "passes": True,
+        "verdict": "pass",
+        "reasons": [],
+        "raw_mean_bps": 2.0,
+        "residual_mean_bps": 1.4,
+        "r_beta_retention": 0.7,
+        "beta_edge_share": 0.3,
+        "psr_raw": 0.97,
+        "psr_residual": 0.98,
+        "dsr_raw": 0.96,
+        "dsr_residual": 0.97,
+        "pbo_raw": 0.20,
+        "pbo_residual": 0.10,
+        "factor_panel_hash": "sha256:factor-panel",
+        "fit_window": {"train_end": 79, "eval_start": 80},
+        "coverage": {"train": 0.90, "eval": 0.85},
+    }
+    report.update(overrides)
+    return report
+
+
 class _FakeGate:
     def __init__(self):
         self.registered: list[str] = []
         self.selection_calls: list[dict] = []
         self.tail_calls: list[dict] = []
+        self.residual_calls: list[dict] = []
 
     def register_strategy(self, strategy_name: str, *args, **kwargs):
         self.registered.append(strategy_name)
@@ -50,6 +74,10 @@ class _FakeGate:
             "passes": False,
             "reasons": ["stress_exposures_missing"],
         }
+
+    def update_demo_residual_alpha_evidence(self, strategy_name: str, report: dict):
+        self.residual_calls.append({"strategy_name": strategy_name, "report": report})
+        return True, report
 
 
 def test_build_strategy_promotion_evidence_uses_real_raw_series():
@@ -82,6 +110,66 @@ def test_push_updates_gate_with_trial_sharpes_and_pbo_returns():
     assert len(ma_call["candidate_oos_returns"]) == 2
     tail_call = next(c for c in gate.tail_calls if c["strategy_name"] == "ma_crossover")
     assert tail_call["stress_exposures"] == {"crypto_beta": 0.02, "liquidity": 0.01}
+
+
+def test_push_updates_gate_with_residual_report_and_summary():
+    rows = _js_results()
+    report = _valid_residual_alpha_report()
+    rows[("ma_crossover", "BTCUSDT")]["demo_residual_alpha_report"] = report
+    gate = _FakeGate()
+
+    summary = push_promotion_evidence_from_js_results(
+        rows,
+        engine_mode="demo",
+        gate=gate,
+    )
+
+    assert len(gate.residual_calls) == 1
+    assert gate.residual_calls[0]["strategy_name"] == "ma_crossover"
+    assert gate.residual_calls[0]["report"] is report
+    detail = summary["details"]["ma_crossover"]
+    assert detail["residual_missing"] is False
+    assert detail["residual_verdict"] == "pass"
+    assert detail["residual_passes"] is True
+    assert detail["residual_reason"] is None
+
+
+def test_push_missing_residual_report_does_not_synthesize_gate_call():
+    gate = _FakeGate()
+
+    summary = push_promotion_evidence_from_js_results(
+        _js_results(),
+        engine_mode="demo",
+        gate=gate,
+    )
+
+    assert gate.residual_calls == []
+    detail = summary["details"]["ma_crossover"]
+    assert detail["residual_missing"] is True
+    assert detail["residual_verdict"] == "missing"
+    assert detail["residual_passes"] is False
+    assert detail["residual_reason"] == "missing"
+
+
+def test_push_alias_only_residual_report_is_missing():
+    rows = _js_results()
+    rows[("ma_crossover", "BTCUSDT")]["residual_alpha_report"] = (
+        _valid_residual_alpha_report()
+    )
+    gate = _FakeGate()
+
+    summary = push_promotion_evidence_from_js_results(
+        rows,
+        engine_mode="demo",
+        gate=gate,
+    )
+
+    assert gate.residual_calls == []
+    detail = summary["details"]["ma_crossover"]
+    assert detail["residual_missing"] is True
+    assert detail["residual_verdict"] == "missing"
+    assert detail["residual_passes"] is False
+    assert detail["residual_reason"] == "missing"
 
 
 def test_push_without_stress_exposure_is_honest_fail_closed_not_fake_pass():
@@ -178,6 +266,7 @@ def test_push_persists_trial_ledger_and_reports_when_v079_exists(monkeypatch):
     sql_text = "\n".join(sql for sql, _ in conn.cur.executed)
     assert "learning.strategy_trial_ledger" in sql_text
     assert "demo_selection_bias_report" in sql_text
+    assert "demo_residual_alpha_report" not in sql_text
     update_params = [
         params
         for sql, params in conn.cur.executed
