@@ -137,7 +137,7 @@ def _capturing_cursor():
                 persisted["experiment_id"] = (
                     "55555555-5555-5555-5555-555555555555"
                 )
-                persisted["manifest_jsonb"] = json.loads(params[12])
+                persisted["manifest_jsonb"] = json.loads(params[18])
                 self._next = (
                     persisted["experiment_id"],
                     datetime.now(timezone.utc),

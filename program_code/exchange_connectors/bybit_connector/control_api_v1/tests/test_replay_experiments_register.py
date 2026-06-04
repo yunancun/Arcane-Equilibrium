@@ -68,6 +68,8 @@ from replay import experiment_registry as _er  # noqa: E402
 # REF-20 Sprint A R2 round 2 fix M-3：每 register 測試必設
 # OPENCLAW_ENGINE_BINARY_SHA 否則 linux_trade_core fail-closed 會觸發。
 _DUMMY_ENGINE_SHA = "0" * 64
+V049_INSERT_MANIFEST_JSONB_PARAM_INDEX = 18
+V049_INSERT_MANIFEST_HASH_PARAM_INDEX = 19
 
 
 @pytest.fixture(autouse=True)
@@ -146,6 +148,29 @@ def _minimal_register_body(**overrides) -> dict:
     return base
 
 
+def _alpha_hidden_oos_state(**overrides) -> dict:
+    state = {
+        "schema_version": "hidden_oos_state_v1",
+        "state": "sealed",
+        "family_id": "family-alpha",
+        "split_hash": "b" * 64,
+        "calibration_train_window_start": "2026-03-01T00:00:00Z",
+        "calibration_train_window_end": "2026-03-31T23:59:00Z",
+        "window_start": "2026-04-01T00:00:00Z",
+        "window_end": "2026-04-30T23:59:00Z",
+        "candidate_window_start": "2026-05-01T00:00:00Z",
+        "candidate_window_end": "2026-05-07T00:00:00Z",
+        "embargo_seconds": 86400,
+        "total_candidates_k": 12,
+        "open_count": 0,
+        "opened_for_iteration": False,
+        "consumed": False,
+        "invalidated": False,
+    }
+    state.update(overrides)
+    return state
+
+
 @contextmanager
 def _stub_get_pg_conn_for_insert(insert_records: list, fetchone_returns: list):
     """Stub get_pg_conn yielding a cursor whose execute records SQL +
@@ -210,6 +235,76 @@ def test_register_minimal_payload_creates_row(monkeypatch):
     # Assert an INSERT INTO replay.experiments was issued.
     insert_sqls = [s for s, _ in insert_records if "INSERT INTO replay.experiments" in s]
     assert len(insert_sqls) == 1, f"expected 1 INSERT, got: {len(insert_sqls)}"
+
+
+def test_register_alpha_hidden_oos_state_persists_v049_windows(monkeypatch):
+    """Alpha hidden_oos_state path writes V049 train/candidate/embargo/K.
+    Alpha hidden_oos_state 路徑必寫 V049 train/candidate/embargo/K。
+    """
+    insert_records: list = []
+
+    def _get_pg_conn_factory():
+        from datetime import datetime, timezone
+        ts = datetime(2026, 5, 4, 12, 0, 0, tzinfo=timezone.utc)
+        return _stub_get_pg_conn_for_insert(
+            insert_records,
+            [("22222222-2222-2222-2222-222222222222", ts)],
+        )
+
+    monkeypatch.setattr("app.replay_routes.get_pg_conn", _get_pg_conn_factory)
+
+    manifest = _minimal_register_body()["manifest_jsonb"]
+    manifest["hidden_oos_state"] = _alpha_hidden_oos_state()
+    client = _build_client(_operator_actor_alice)
+    resp = client.post(
+        "/api/v1/replay/experiments/register",
+        json=_minimal_register_body(manifest_jsonb=manifest, embargo_days=1.0),
+    )
+
+    assert resp.status_code == 200, resp.text
+    insert_calls = [
+        (s, p) for s, p in insert_records if "INSERT INTO replay.experiments" in s
+    ]
+    assert len(insert_calls) == 1
+    _sql, params = insert_calls[0]
+
+    assert params[10].isoformat() == "2026-03-01T00:00:00+00:00"
+    assert params[11].isoformat() == "2026-03-31T23:59:00+00:00"
+    assert params[12].isoformat() == "2026-04-01T00:00:00+00:00"
+    assert params[13].isoformat() == "2026-04-30T23:59:00+00:00"
+    assert params[14].isoformat() == "2026-05-01T00:00:00+00:00"
+    assert params[15].isoformat() == "2026-05-07T00:00:00+00:00"
+    assert params[16] == 86400
+    assert params[17] == 12
+
+
+def test_register_alpha_hidden_oos_state_missing_candidate_window_400(monkeypatch):
+    """hidden_oos_state 缺 candidate window → register fail-closed."""
+    insert_records: list = []
+
+    def _get_pg_conn_factory():
+        return _stub_get_pg_conn_for_insert(insert_records, [])
+
+    monkeypatch.setattr("app.replay_routes.get_pg_conn", _get_pg_conn_factory)
+
+    state = _alpha_hidden_oos_state()
+    del state["candidate_window_start"]
+    manifest = _minimal_register_body()["manifest_jsonb"]
+    manifest["hidden_oos_state"] = state
+
+    client = _build_client(_operator_actor_alice)
+    resp = client.post(
+        "/api/v1/replay/experiments/register",
+        json=_minimal_register_body(manifest_jsonb=manifest, embargo_days=1.0),
+    )
+
+    assert resp.status_code == 400, resp.text
+    detail = resp.json().get("detail", {})
+    assert "replay_register_alpha_hidden_oos_state_candidate_window_start_missing" in (
+        detail.get("reason_codes", [])
+    )
+    insert_sqls = [s for s, _ in insert_records if "INSERT INTO replay.experiments" in s]
+    assert len(insert_sqls) == 0
 
 
 # ─── Case 2: idempotency cache hit ────────────────────────────────────
@@ -471,16 +566,17 @@ def test_register_db_row_self_consistent_hash(monkeypatch):
     response_data = resp.json()["data"]
     response_hash = response_data["manifest_hash"]
 
-    # Find the INSERT call and extract params[12] = manifest_jsonb json string.
+    # Find the INSERT call and extract manifest_jsonb json string.
     # Per the SQL VALUES order: experiment_id, actor_id, runtime, git_sha,
     # engine_sha, strat_sha, risk_sha, timeframe, data_tier, exec_conf,
-    # win_start, win_end, manifest_jsonb_str, manifest_hash_bytes, ...
-    # 找 INSERT call，取 params[12] = manifest_jsonb json 字串。
+    # train window, oos window, candidate window, embargo/K,
+    # manifest_jsonb_str, manifest_hash_bytes, ...
+    # 找 INSERT call，取 manifest_jsonb json 字串。
     insert_calls = [(s, p) for s, p in insert_records
                     if "INSERT INTO replay.experiments" in s]
     assert len(insert_calls) == 1
     _sql, params = insert_calls[0]
-    persisted_jsonb_str = params[12]
+    persisted_jsonb_str = params[V049_INSERT_MANIFEST_JSONB_PARAM_INDEX]
 
     # H-1 invariant: persisted JSONB must NOT contain '_idempotency_key' key.
     # H-1 不變式：persisted JSONB 不可含 ``_idempotency_key`` key。
@@ -1031,11 +1127,11 @@ def test_register_blob_path_preserves_jsonb_hash_invariant(monkeypatch):
 
     # INSERT param positional layout (matches register_experiment
     # cur.execute call):
-    #   [12] manifest_jsonb (json.dumps str)
-    #   [13] manifest_hash (bytes)
+    #   [18] manifest_jsonb (json.dumps str)
+    #   [19] manifest_hash (bytes)
     # INSERT 參數位置。
-    persisted_jsonb_str = captured[0][12]
-    persisted_hash_bytes = captured[0][13]
+    persisted_jsonb_str = captured[0][V049_INSERT_MANIFEST_JSONB_PARAM_INDEX]
+    persisted_hash_bytes = captured[0][V049_INSERT_MANIFEST_HASH_PARAM_INDEX]
     persisted_jsonb_dict = json.loads(persisted_jsonb_str)
     # Augmented body must contain reserved keys.
     # 注入後 body 必含保留 key。

@@ -227,11 +227,20 @@ class _E2EChainCursor:
         return [self._current_response] if self._current_response is not None else []
 
 
-# Capability probe full schema 6/6（per W2 _ProbeCursor pattern）
+# Capability probe full schema 12/12（P1-A registry snapshot contract）
 _PROBE_FULL_SCHEMA_RESPONSES = [
     [("evidence_source_tier",), ("replay_experiment_id",), ("manifest_hash",)],
     (True,),
-    [("expires_at",), ("status",)],
+    [
+        ("expires_at",),
+        ("status",),
+        ("manifest_hash",),
+        ("manifest_jsonb",),
+        ("oos_label_window_start",),
+        ("oos_label_window_end",),
+        ("oos_embargo_seconds",),
+        ("total_candidates_k",),
+    ],
 ]
 # Partial schema：column 在但 stub 缺 expires_at/status
 _PROBE_PARTIAL_RESPONSES = [
@@ -378,8 +387,8 @@ def test_r7_e2e_block_b_capability_full_v_partial(
 
     觀測 W2 R7-T7 Part B observability log（fetch_pending_sql_and_params 內
     line 288-293 logger.info）：
-      - full: 'caps=6/6 block_a=on block_b=full'
-      - partial (4/6): 'caps=4/6 block_a=on block_b=partial'
+      - full: 'caps=12/12 block_a=on block_b=full'
+      - partial (4/12): 'caps=4/12 block_a=on block_b=partial'
     """
     # ─── 子場景 A：full schema ──────────────────────────────────
     # 對齊 W2 既有 test_observability_log_* pattern — 用 caplog.at_level
@@ -419,8 +428,8 @@ def test_r7_e2e_block_b_capability_full_v_partial(
         f"實際 logs={full_msgs}"
     )
     full_msg = full_dumps[-1]
-    assert "caps=6/6" in full_msg, (
-        f"full schema 必含 caps=6/6（實際 msg={full_msg!r}）"
+    assert "caps=12/12" in full_msg, (
+        f"full schema 必含 caps=12/12（實際 msg={full_msg!r}）"
     )
     assert "block_a=on" in full_msg
     assert "block_b=full" in full_msg
@@ -464,10 +473,10 @@ def test_r7_e2e_block_b_capability_full_v_partial(
         f"partial schema 路徑必 emit 1+ INFO log；實際 logs={partial_msgs}"
     )
     partial_msg = partial_dumps[-1]
-    # partial = 4/6 (3 column on MSR + has_replay_experiments=True；缺
-    # expires_at + status)
-    assert "caps=4/6" in partial_msg, (
-        f"partial schema 必含 caps=4/6（實際 msg={partial_msg!r}）"
+    # partial = 4/12 (3 column on MSR + has_replay_experiments=True；缺
+    # registry snapshot columns)
+    assert "caps=4/12" in partial_msg, (
+        f"partial schema 必含 caps=4/12（實際 msg={partial_msg!r}）"
     )
     assert "block_a=on" in partial_msg
     assert "block_b=partial" in partial_msg

@@ -85,7 +85,7 @@ import logging
 import os
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator
@@ -161,6 +161,8 @@ V049_RUNTIME_ENV_ALLOWED = ("linux_trade_core", "mac_dev_smoke_test_only")
 V049_EXECUTION_CONFIDENCE_DEFAULT = "none"  # Sprint A R3 default per plan §6.R6
 V049_EXECUTION_CONFIDENCE_ALLOWED = frozenset({"none", "limited", "calibrated"})  # R6-T6
 V049_STATUS_CREATED = "created"
+HIDDEN_OOS_STATE_SCHEMA_VERSION = "hidden_oos_state_v1"
+HIDDEN_OOS_PROMOTION_STATE = "sealed"
 
 # manifest_jsonb size cap (bytes). Aligned with Track C P0-5b artifact 256 KB
 # read cap so a registered manifest can always be read back.
@@ -942,6 +944,179 @@ def _verify_signature_or_raise(
     )
 
 
+def _extract_alpha_hidden_oos_v049_fields(
+    *,
+    manifest_jsonb: dict[str, Any],
+    body: ReplayExperimentRegisterRequest,
+) -> tuple[dict[str, Any], Optional[str]]:
+    """把 alpha hidden_oos_state 映射成 V049 既有欄位。
+
+    普通 replay manifest 不帶 ``hidden_oos_state`` 時保持 legacy NULL 行為。
+    一旦帶上該 state，就視為 alpha candidate evidence path：必須把
+    train/candidate/OOS embargo/K 全部持久化到 replay.experiments，否則
+    下游 source contract 會拿不到 registry snapshot。
+    """
+    null_fields = {
+        "calibration_train_window_start": None,
+        "calibration_train_window_end": None,
+        "candidate_window_start": None,
+        "candidate_window_end": None,
+        "oos_embargo_seconds": None,
+        "total_candidates_k": None,
+    }
+    raw_state = manifest_jsonb.get("hidden_oos_state")
+    if raw_state is None:
+        return null_fields, None
+    if not isinstance(raw_state, dict):
+        return null_fields, "alpha_hidden_oos_state_not_mapping"
+
+    state = raw_state
+    schema_version = str(state.get("schema_version") or "").strip()
+    if schema_version != HIDDEN_OOS_STATE_SCHEMA_VERSION:
+        return null_fields, "alpha_hidden_oos_state_schema_version_unknown"
+    state_label = str(state.get("state") or "").strip()
+    if state_label != HIDDEN_OOS_PROMOTION_STATE:
+        return (
+            null_fields,
+            f"alpha_hidden_oos_state_not_sealed:{state_label or 'missing'}",
+        )
+    if not str(state.get("family_id") or "").strip():
+        return null_fields, "alpha_hidden_oos_state_family_id_missing"
+    if not str(state.get("split_hash") or "").strip():
+        return null_fields, "alpha_hidden_oos_state_split_hash_missing"
+    if _int_or_none(state.get("open_count")) != 0:
+        return null_fields, "alpha_hidden_oos_state_open_count_nonzero"
+    for flag in ("opened_for_iteration", "consumed", "invalidated"):
+        if _truthy(state.get(flag)):
+            return null_fields, f"alpha_hidden_oos_state_{flag}"
+
+    required_datetime_fields = (
+        "calibration_train_window_start",
+        "calibration_train_window_end",
+        "window_start",
+        "window_end",
+        "candidate_window_start",
+        "candidate_window_end",
+    )
+    parsed: dict[str, datetime] = {}
+    for field in required_datetime_fields:
+        parsed_value = _parse_manifest_datetime(state.get(field))
+        if parsed_value is None:
+            return null_fields, f"alpha_hidden_oos_state_{field}_missing"
+        parsed[field] = parsed_value
+
+    if not _datetime_before(
+        parsed["calibration_train_window_start"],
+        parsed["calibration_train_window_end"],
+    ):
+        return null_fields, "alpha_hidden_oos_state_calibration_window_invalid"
+    if not _datetime_before(
+        parsed["candidate_window_start"],
+        parsed["candidate_window_end"],
+    ):
+        return null_fields, "alpha_hidden_oos_state_candidate_window_invalid"
+    if not _same_instant(
+        parsed["window_start"],
+        body.data_window_start,
+    ) or not _same_instant(
+        parsed["window_end"],
+        body.data_window_end,
+    ):
+        return null_fields, "alpha_hidden_oos_state_oos_window_mismatch"
+
+    embargo_seconds = _int_or_none(state.get("embargo_seconds"))
+    if embargo_seconds is None:
+        return null_fields, "alpha_hidden_oos_state_embargo_seconds_missing"
+    body_embargo_seconds = int(round(float(body.embargo_days) * 86400))
+    if embargo_seconds != body_embargo_seconds:
+        return null_fields, "alpha_hidden_oos_state_embargo_seconds_mismatch"
+
+    total_candidates_k = _int_or_none(
+        _first_present(
+            state.get("total_candidates_k"),
+            state.get("total_candidates_K"),
+            state.get("trial_count"),
+            state.get("K"),
+            state.get("k"),
+        )
+    )
+    if total_candidates_k is None:
+        return null_fields, "alpha_hidden_oos_state_total_candidates_k_missing"
+    if total_candidates_k <= 0:
+        return null_fields, "alpha_hidden_oos_state_total_candidates_k_nonpositive"
+
+    return (
+        {
+            "calibration_train_window_start": parsed["calibration_train_window_start"],
+            "calibration_train_window_end": parsed["calibration_train_window_end"],
+            "candidate_window_start": parsed["candidate_window_start"],
+            "candidate_window_end": parsed["candidate_window_end"],
+            "oos_embargo_seconds": embargo_seconds,
+            "total_candidates_k": total_candidates_k,
+        },
+        None,
+    )
+
+
+def _parse_manifest_datetime(value: Any) -> Optional[datetime]:
+    if isinstance(value, datetime):
+        ts = value
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return None
+        try:
+            ts = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
+
+
+def _same_instant(left: datetime, right: datetime) -> bool:
+    return _normalize_datetime(left) == _normalize_datetime(right)
+
+
+def _datetime_before(left: datetime, right: datetime) -> bool:
+    return _normalize_datetime(left) < _normalize_datetime(right)
+
+
+def _normalize_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if value is not None and str(value).strip():
+            return value
+    return None
+
+
+def _int_or_none(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 # ─── Public helper: register_experiment / 公開 API：register_experiment ─
 
 
@@ -1077,6 +1252,13 @@ def register_experiment(
             effective_risk_sha = hashlib.sha256(risk_canonical).hexdigest()
             manifest_to_persist["_replay_risk_overrides"] = body.risk_overrides
 
+    alpha_v049_fields, alpha_hidden_oos_err = _extract_alpha_hidden_oos_v049_fields(
+        manifest_jsonb=manifest_to_persist,
+        body=body,
+    )
+    if alpha_hidden_oos_err is not None:
+        return None, alpha_hidden_oos_err
+
     # Step 2: canonical bytes + manifest hash (over the AUGMENTED body if
     # blobs were injected; legacy path: unmodified body).
     # 步驟 2：canonical bytes + manifest hash（注入後的 augmented body 或原 body）。
@@ -1202,10 +1384,10 @@ def register_experiment(
             %s, %s, %s,
             %s, %s,
             %s, %s, %s,
-            NULL, NULL,
             %s, %s,
-            NULL, NULL,
-            NULL, NULL,
+            %s, %s,
+            %s, %s,
+            %s, %s,
             %s::jsonb, %s, %s,
             %s, NULL, %s, NULL,
             %s, %s
@@ -1221,7 +1403,13 @@ def register_experiment(
             # 優先使用 server 算的 sha；無 blob 時退回 client 提供值。
             effective_strategy_sha, effective_risk_sha,
             body.timeframe, body.data_tier, V049_EXECUTION_CONFIDENCE_DEFAULT,
+            alpha_v049_fields["calibration_train_window_start"],
+            alpha_v049_fields["calibration_train_window_end"],
             body.data_window_start, body.data_window_end,
+            alpha_v049_fields["candidate_window_start"],
+            alpha_v049_fields["candidate_window_end"],
+            alpha_v049_fields["oos_embargo_seconds"],
+            alpha_v049_fields["total_candidates_k"],
             json.dumps(manifest_to_persist, sort_keys=True, ensure_ascii=False),
             bytes.fromhex(manifest_hash_hex),
             bytes.fromhex(body.signature_hex) if body.signature_hex else None,
@@ -1370,6 +1558,11 @@ def map_register_error_to_http(err: Optional[str]) -> Optional[Tuple[int, dict[s
     if err.startswith("manifest_runtime_field_mismatch"):
         return 400, {
             "reason_codes": ["replay_register_manifest_runtime_field_mismatch"],
+            "message": err,
+        }
+    if err.startswith("alpha_hidden_oos_state_"):
+        return 400, {
+            "reason_codes": [f"replay_register_{err}"],
             "message": err,
         }
     # R2 round 2 fix H-2: idempotency replay attack → 409 Conflict.
