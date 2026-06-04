@@ -85,6 +85,21 @@ except Exception:  # pragma: no cover - keep LG-5 review available without progr
         lineage = payload.get(LINEAGE_PAYLOAD_KEY)
         return lineage if isinstance(lineage, dict) else {}
 
+try:
+    from program_code.ml_training.residual_alpha_report_contract import (
+        extract_demo_residual_alpha_report,
+        validate_demo_residual_alpha_report,
+    )
+except ModuleNotFoundError:  # pragma: no cover - app runtime path fallback
+    try:
+        from . import _path_setup  # noqa: F401
+    except Exception:  # noqa: BLE001
+        pass
+    from ml_training.residual_alpha_report_contract import (  # type: ignore
+        extract_demo_residual_alpha_report,
+        validate_demo_residual_alpha_report,
+    )
+
 logger = logging.getLogger(__name__)
 
 
@@ -898,6 +913,46 @@ def _with_lineage_snapshot(
     return snapshot
 
 
+def _classify_residual_alpha_failure(
+    report: Any,
+    validation_reason: str,
+) -> tuple[Literal["reject", "defer"], str]:
+    """把 residual alpha validator reason 映射為 LG-5 verdict reason。"""
+    if report is None:
+        return "defer", "defer_residual_alpha_missing"
+    if not isinstance(report, dict):
+        return "reject", "reject_residual_alpha_invalid"
+
+    verdict = str(report.get("verdict") or "")
+    if verdict == "defer_data":
+        return "defer", "defer_residual_alpha_data_insufficient"
+    if verdict == "fail":
+        return "reject", "reject_residual_alpha_failed"
+
+    if validation_reason.startswith("forbidden_reason:"):
+        if "core_diagnostic" in validation_reason:
+            return "reject", "reject_residual_alpha_invalid"
+        if "pbo_missing_candidate_returns" in validation_reason or (
+            "pbo_not_computed" in validation_reason
+        ):
+            return "defer", "defer_residual_alpha_data_insufficient"
+        return "reject", "reject_residual_alpha_invalid"
+
+    if validation_reason.startswith("metric_missing:pbo_"):
+        return "defer", "defer_residual_alpha_data_insufficient"
+    if validation_reason.startswith("metric_missing:"):
+        return "reject", "reject_residual_alpha_invalid"
+    if validation_reason in {
+        "not_dict",
+        "factor_panel_hash_missing",
+        "fit_window_missing",
+        "fit_window_not_prior",
+        "coverage_invalid",
+    } or validation_reason.startswith("coverage_"):
+        return "reject", "reject_residual_alpha_invalid"
+    return "reject", "reject_residual_alpha_failed"
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Pure rule evaluators / 純函數規則評估器 — no DB access, easy to unit test
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1245,6 +1300,36 @@ def review_live_candidate(
         candidate_row=candidate,
         source_recommendation=source_rec,
     )
+
+    residual_report = extract_demo_residual_alpha_report(payload)
+    residual_ok, residual_reason = validate_demo_residual_alpha_report(
+        residual_report
+    )
+    if not residual_ok:
+        decision, reason = _classify_residual_alpha_failure(
+            residual_report,
+            residual_reason,
+        )
+        verdict = _make_verdict(
+            decision,
+            reason,
+            rule_failures=["residual_alpha"],
+            expected_net_bps_demo=expected_net_bps_demo,
+            payload_snapshot=_with_lineage_snapshot(
+                {
+                    "residual_alpha_validation_reason": residual_reason,
+                    "residual_alpha_verdict": (
+                        residual_report.get("verdict")
+                        if isinstance(residual_report, dict)
+                        else None
+                    ),
+                },
+                lineage_snapshot,
+            ),
+            decided_by=decided_by_full,
+        )
+        _emit_audit_row("review_live_candidate", candidate_id, verdict)
+        return verdict
 
     # ── Step 2: read live regime / R6 snapshots / pending pool (NO hub lock) ──
     live_regime = _fetch_live_cost_regime()

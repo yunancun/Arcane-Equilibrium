@@ -53,6 +53,29 @@ def _persistent_alpha_candidates(
     ]
 
 
+def _valid_residual_alpha_report(**overrides) -> dict:
+    report = {
+        "passes": True,
+        "verdict": "pass",
+        "reasons": [],
+        "raw_mean_bps": 2.0,
+        "residual_mean_bps": 1.4,
+        "r_beta_retention": 0.7,
+        "beta_edge_share": 0.3,
+        "psr_raw": 0.97,
+        "psr_residual": 0.98,
+        "dsr_raw": 0.96,
+        "dsr_residual": 0.97,
+        "pbo_raw": 0.20,
+        "pbo_residual": 0.10,
+        "factor_panel_hash": "sha256:factor-panel",
+        "fit_window": {"train_end": 79, "eval_start": 80},
+        "coverage": {"train": 0.90, "eval": 0.85},
+    }
+    report.update(overrides)
+    return report
+
+
 def _add_passing_selection_bias(
     gate: PromotionGate,
     strategy_name: str = "test",
@@ -82,6 +105,16 @@ def _add_passing_tail_risk(
         seed=42,
     )
     assert ok, report
+    return report
+
+
+def _add_passing_residual_alpha(
+    gate: PromotionGate,
+    strategy_name: str = "test",
+) -> dict:
+    report = _valid_residual_alpha_report()
+    ok, stored = gate.update_demo_residual_alpha_evidence(strategy_name, report)
+    assert ok, stored
     return report
 
 
@@ -154,6 +187,7 @@ class TestPipelineStateMachine:
 
         _add_passing_selection_bias(gate, "full_test")
         _add_passing_tail_risk(gate, "full_test")
+        _add_passing_residual_alpha(gate, "full_test")
 
         # DEMO_ACTIVE -> LIVE_PENDING
         ok, _ = gate.promote("full_test", PromotionStage.LIVE_PENDING)
@@ -419,9 +453,51 @@ class TestGraduationGates:
             gate._entries["test"].demo_start_ts = time.time() - 22 * 86400
         _add_passing_selection_bias(gate, "test")
         _add_passing_tail_risk(gate, "test")
+        _add_passing_residual_alpha(gate, "test")
         eligible, reasons = gate.check_demo_graduation("test")
         assert eligible
         assert len(reasons) == 0
+
+    def test_demo_gates_fail_without_residual_alpha_evidence(self, gate: PromotionGate):
+        gate.register_strategy("test")
+        with gate._lock:
+            gate._entries["test"].current_stage = PromotionStage.DEMO_ACTIVE
+        gate.update_demo_metrics(
+            "test", trades=250, win_rate=0.6, net_pnl_pct=8.0,
+            max_drawdown_pct=5.0, sharpe=1.5,
+            avg_slippage_bps=10.0, api_reliability=0.99,
+        )
+        with gate._lock:
+            gate._entries["test"].demo_start_ts = time.time() - 22 * 86400
+        _add_passing_selection_bias(gate, "test")
+        _add_passing_tail_risk(gate, "test")
+
+        eligible, reasons = gate.check_demo_graduation("test")
+
+        assert not eligible
+        assert "residual_alpha:no_evidence" in reasons
+
+    def test_demo_residual_alpha_core_diagnostic_blocks(self, gate: PromotionGate):
+        gate.register_strategy("test")
+        with gate._lock:
+            gate._entries["test"].current_stage = PromotionStage.DEMO_ACTIVE
+        report = _valid_residual_alpha_report(
+            reasons=["pbo_missing_candidate_returns_core_diagnostic_only"],
+        )
+
+        ok, diagnostic = gate.update_demo_residual_alpha_evidence("test", report)
+        eligible, reasons = gate.check_demo_graduation("test")
+
+        assert ok is False
+        assert diagnostic["reason"] == (
+            "forbidden_reason:"
+            "pbo_missing_candidate_returns_core_diagnostic_only"
+        )
+        assert not eligible
+        assert any(
+            reason.startswith("residual_alpha:forbidden_reason:")
+            for reason in reasons
+        )
 
     def test_wrong_stage_for_paper_grad(self, gate: PromotionGate):
         gate.register_strategy("test")
@@ -474,6 +550,7 @@ class TestLiveApproval:
         gate.register_strategy("test")
         with gate._lock:
             gate._entries["test"].current_stage = PromotionStage.LIVE_PENDING
+        _add_passing_residual_alpha(gate, "test")
         gate.set_operator_decision(
             "test", "APPROVED",
             capital_pct=15.0, max_leverage=10.0,
@@ -485,6 +562,74 @@ class TestLiveApproval:
         assert entry.current_stage == PromotionStage.LIVE_ACTIVE
         assert entry.approved_capital_pct == 15.0
         assert entry.approved_max_leverage == 10.0
+
+    def test_operator_approved_without_residual_not_recorded(self, gate: PromotionGate):
+        gate.register_strategy("test")
+        with gate._lock:
+            gate._entries["test"].current_stage = PromotionStage.LIVE_PENDING
+
+        ok, msg = gate.set_operator_decision("test", "APPROVED")
+        entry = gate.get_entry("test")
+
+        assert ok is False
+        assert "residual_alpha_required:no_evidence" in msg
+        assert entry.operator_decision is None
+
+    def test_operator_approve_accepts_evaluation_report_residual(
+        self,
+        gate: PromotionGate,
+    ):
+        gate.register_strategy("test")
+        with gate._lock:
+            gate._entries["test"].current_stage = PromotionStage.LIVE_PENDING
+
+        ok, msg = gate.set_operator_decision(
+            "test",
+            "APPROVED",
+            evaluation_report={
+                "demo_residual_alpha_report": _valid_residual_alpha_report(),
+            },
+        )
+
+        assert ok is True
+        assert msg == "decision_recorded:APPROVED"
+
+    def test_operator_approve_rejects_alias_only_evaluation_report_residual(
+        self,
+        gate: PromotionGate,
+    ):
+        gate.register_strategy("test")
+        with gate._lock:
+            gate._entries["test"].current_stage = PromotionStage.LIVE_PENDING
+
+        ok, msg = gate.set_operator_decision(
+            "test",
+            "APPROVED",
+            evaluation_report={
+                "residual_alpha_report": _valid_residual_alpha_report(),
+            },
+        )
+        entry = gate.get_entry("test")
+
+        assert ok is False
+        assert "residual_alpha_required:no_evidence" in msg
+        assert entry.operator_decision is None
+
+    def test_live_active_rechecks_old_approved_missing_residual(
+        self,
+        gate: PromotionGate,
+    ):
+        gate.register_strategy("test")
+        with gate._lock:
+            entry = gate._entries["test"]
+            entry.current_stage = PromotionStage.LIVE_PENDING
+            # 模擬舊版 in-memory / restored row：已有 APPROVED 但缺 residual。
+            entry.operator_decision = "APPROVED"
+
+        ok, msg = gate.promote("test", PromotionStage.LIVE_ACTIVE)
+
+        assert ok is False
+        assert "residual_alpha_required:no_evidence" in msg
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -524,6 +669,7 @@ class TestSerialization:
         assert rows[0]["model_name"] == "kama_v2"
         assert rows[0]["demo_selection_bias_report"] is None
         assert rows[0]["demo_tail_risk_report"] is None
+        assert rows[0]["demo_residual_alpha_report"] is None
 
     def test_load_from_db_rows(self):
         gate = PromotionGate()
@@ -542,6 +688,7 @@ class TestSerialization:
                 "paper_sharpe": 0.9,
                 "demo_selection_bias_report": {"passes": True, "verdict": "promote"},
                 "demo_tail_risk_report": {"passes": True, "verdict": "promote"},
+                "demo_residual_alpha_report": _valid_residual_alpha_report(),
             },
         ]
         gate.load_from_db_rows(rows)
@@ -551,6 +698,7 @@ class TestSerialization:
         assert entry.paper_trades == 200
         assert entry.demo_selection_bias_report == {"passes": True, "verdict": "promote"}
         assert entry.demo_tail_risk_report == {"passes": True, "verdict": "promote"}
+        assert entry.demo_residual_alpha_report["verdict"] == "pass"
 
     def test_load_from_db_rows_normalizes_timestamptz(self):
         gate = PromotionGate()
@@ -830,6 +978,7 @@ class TestWAudit6dRuntimeApplySpec:
 
         # 加 selection_bias evidence 後，整鏈 check_demo_graduation 一致。
         _add_passing_selection_bias(gate, "test")
+        _add_passing_residual_alpha(gate, "test")
         eligible, reasons = gate.check_demo_graduation("test")
         # tail_risk 是否通過依 mild 樣本實際分布；本 spec test 重在
         # **rare reason types** 不應出現（無接線 bug 時）。
@@ -866,6 +1015,7 @@ class TestWAudit6dRuntimeApplySpec:
         )
         # graduation 應失敗，但 reason 必含 defer_data 而非 block。
         _add_passing_selection_bias(gate, "test")
+        _add_passing_residual_alpha(gate, "test")
         eligible, reasons = gate.check_demo_graduation("test")
         assert not eligible
         defer_reasons = [r for r in reasons if "defer_data" in r]
@@ -879,6 +1029,7 @@ class TestWAudit6dRuntimeApplySpec:
         基準路徑：W-AUDIT-6c spec invariant）。"""
         self._setup_demo_active(gate, "test")
         _add_passing_selection_bias(gate, "test")
+        _add_passing_residual_alpha(gate, "test")
         # 故意不調 update_demo_tail_risk_evidence。
         eligible, reasons = gate.check_demo_graduation("test")
         assert not eligible

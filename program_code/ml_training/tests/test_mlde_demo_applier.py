@@ -27,6 +27,7 @@ from ml_training.mlde_demo_applier import (
 from ml_training.live_candidate_lineage import (
     LIVE_CANDIDATE_LINEAGE_SCHEMA_VERSION,
 )
+from ml_training.residual_alpha_report_contract import RESIDUAL_ALPHA_REPORT_FIELD
 
 
 class _Cursor:
@@ -85,6 +86,29 @@ class _RealishPsycopgCursor:
 
 
 _RealishPsycopgCursor.__module__ = "psycopg2.extras"
+
+
+def _valid_residual_alpha_report(**overrides) -> dict:
+    report = {
+        "passes": True,
+        "verdict": "pass",
+        "reasons": [],
+        "raw_mean_bps": 2.0,
+        "residual_mean_bps": 1.4,
+        "r_beta_retention": 0.7,
+        "beta_edge_share": 0.3,
+        "psr_raw": 0.97,
+        "psr_residual": 0.98,
+        "dsr_raw": 0.96,
+        "dsr_residual": 0.97,
+        "pbo_raw": 0.20,
+        "pbo_residual": 0.10,
+        "factor_panel_hash": "sha256:factor-panel",
+        "fit_window": {"train_end": 79, "eval_start": 80},
+        "coverage": {"train": 0.90, "eval": 0.85},
+    }
+    report.update(overrides)
+    return report
 
 
 def test_execute_read_fail_soft_rolls_back_to_savepoint_for_real_pg_cursor():
@@ -187,11 +211,70 @@ def test_live_candidate_requires_strong_demo_evidence():
     )
 
     assert should_create_live_candidate(
-        {"expected_net_bps": 7.0, "confidence": 0.8, "sample_count": 40},
+        {
+            "expected_net_bps": 7.0,
+            "confidence": 0.8,
+            "sample_count": 40,
+            RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
+        },
         cfg,
     )
     assert not should_create_live_candidate(
-        {"expected_net_bps": 7.0, "confidence": 0.6, "sample_count": 40},
+        {
+            "expected_net_bps": 7.0,
+            "confidence": 0.6,
+            "sample_count": 40,
+            RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
+        },
+        cfg,
+    )
+
+
+def test_live_candidate_requires_valid_residual_report():
+    cfg = DemoApplierConfig(
+        live_candidate_min_net_bps=5.0,
+        live_candidate_min_confidence=0.65,
+        live_candidate_min_samples=30,
+    )
+    threshold_passing = {
+        "expected_net_bps": 7.0,
+        "confidence": 0.8,
+        "sample_count": 40,
+    }
+
+    assert not should_create_live_candidate(threshold_passing, cfg)
+    assert not should_create_live_candidate(
+        {
+            **threshold_passing,
+            "residual_alpha_report": _valid_residual_alpha_report(),
+        },
+        cfg,
+    )
+    assert not should_create_live_candidate(
+        {
+            **threshold_passing,
+            "payload": {
+                "residual_alpha_report": _valid_residual_alpha_report()
+            },
+        },
+        cfg,
+    )
+    assert not should_create_live_candidate(
+        {
+            **threshold_passing,
+            RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(
+                reasons=["pbo_missing_candidate_returns_core_diagnostic_only"]
+            ),
+        },
+        cfg,
+    )
+    assert should_create_live_candidate(
+        {
+            **threshold_passing,
+            "payload": {
+                RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report()
+            },
+        },
         cfg,
     )
 
@@ -973,6 +1056,93 @@ def test_payload_includes_attribution_window_days(monkeypatch):
     # backward compat: schema_version 不 bump
     # backward compat: schema_version unchanged (stays v1)
     assert payload["schema_version"] == _LIVE_CANDIDATE_EVAL_SCHEMA_VERSION
+
+
+def test_payload_carries_source_residual_alpha_report(monkeypatch):
+    """Payload builder 只 pass-through source 內已有的真實 residual report。"""
+    fake_baseline = {
+        "as_of_ts": "2026-05-02T12:00:00+00:00",
+        "engine_mode": "demo",
+        "maker_fill_rate_7d": 0.30,
+        "fee_drop_only_7d": 0.50,
+        "avg_realized_net_bps_7d": 4.0,
+        "avg_realized_fee_bps_7d": 2.5,
+        "avg_realized_slippage_bps_7d": 1.0,
+        "sample_count": 200,
+        "source_healthchecks": ["[33]", "[40]"],
+    }
+    fake_window = {
+        "start_ts": "2026-04-25T12:00:00+00:00",
+        "end_ts": "2026-05-02T12:00:00+00:00",
+        "n_fills": 200,
+        "n_strategy_fills": 80,
+        "window_days": 7,
+    }
+    fake_attribution = {k: 0.55 for k in _ATTRIBUTION_STRATEGY_KEYS}
+    fake_sample_counts = {k: 25 for k in _ATTRIBUTION_STRATEGY_KEYS}
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_cost_baseline",
+        lambda _cur: fake_baseline,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_realized_window",
+        lambda _cur, _strategy=None: fake_window,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_attribution_chain_ratio_by_strategy",
+        lambda _cur: fake_attribution,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_attribution_sample_count_by_strategy",
+        lambda _cur: fake_sample_counts,
+    )
+    monkeypatch.setattr(
+        "ml_training.mlde_demo_applier._compute_demo_sample_count_strategy_cell",
+        lambda _cur, _strategy: 80,
+    )
+
+    class _NoopCursor:
+        def execute(self, sql, params=()):
+            pass
+
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            return []
+
+    report = _valid_residual_alpha_report()
+    payload = _build_live_candidate_payload(
+        _NoopCursor(),
+        source_row={
+            "id": 12,
+            "symbol": "ETHUSDT",
+            "strategy_name": "ma_crossover",
+            "payload": {RESIDUAL_ALPHA_REPORT_FIELD: report},
+        },
+        application_id=333,
+        application_type="strategy_params",
+        patch={"sma_fast": 7},
+        strategy_name="ma_crossover",
+    )
+
+    assert payload[RESIDUAL_ALPHA_REPORT_FIELD] is report
+
+    alias_payload = _build_live_candidate_payload(
+        _NoopCursor(),
+        source_row={
+            "id": 13,
+            "symbol": "ETHUSDT",
+            "strategy_name": "ma_crossover",
+            "payload": {"residual_alpha_report": report},
+        },
+        application_id=334,
+        application_type="strategy_params",
+        patch={"sma_fast": 8},
+        strategy_name="ma_crossover",
+    )
+
+    assert RESIDUAL_ALPHA_REPORT_FIELD not in alias_payload
 
 
 def test_payload_includes_per_strategy_sample_count(monkeypatch):

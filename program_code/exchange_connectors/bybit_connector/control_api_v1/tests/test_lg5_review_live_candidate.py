@@ -47,6 +47,29 @@ from app.governance_hub_live_candidate_review import (
 )
 
 
+def _valid_residual_alpha_report(**overrides) -> dict:
+    report = {
+        "passes": True,
+        "verdict": "pass",
+        "reasons": [],
+        "raw_mean_bps": 2.0,
+        "residual_mean_bps": 1.4,
+        "r_beta_retention": 0.7,
+        "beta_edge_share": 0.3,
+        "psr_raw": 0.97,
+        "psr_residual": 0.98,
+        "dsr_raw": 0.96,
+        "dsr_residual": 0.97,
+        "pbo_raw": 0.20,
+        "pbo_residual": 0.10,
+        "factor_panel_hash": "sha256:factor-panel",
+        "fit_window": {"train_end": 79, "eval_start": 80},
+        "coverage": {"train": 0.90, "eval": 0.85},
+    }
+    report.update(overrides)
+    return report
+
+
 def test_live_cost_regime_sql_uses_entry_only_fill_predicate() -> None:
     """Live cost regime mirror must use the same entry-only filters as [33]."""
     source = inspect.getsource(mod._fetch_live_cost_regime)
@@ -437,6 +460,7 @@ class TestReviewLiveCandidateRound2:
         approve path)."""
         return {
             "schema_version": "live_candidate_eval_v1",
+            "demo_residual_alpha_report": _valid_residual_alpha_report(),
             "demo_cost_baseline": {
                 "maker_fill_rate_7d": 0.30,
                 "avg_realized_fee_bps_7d": 1.0,
@@ -560,6 +584,106 @@ class TestReviewLiveCandidateRound2:
         assert atomic_cand == 99
         assert atomic_lease == "lease-approve-1"
         assert atomic_verdict.decision == "approve"
+
+    def test_old_v1_payload_missing_residual_defers_no_lease(self, monkeypatch) -> None:
+        """v1 不 bump；但缺 demo_residual_alpha_report 必須 defer 且不拿 lease。"""
+        from app.governance_hub_live_candidate_review import review_live_candidate
+
+        payload = self._approve_path_payload()
+        payload.pop("demo_residual_alpha_report")
+        mod, emitted, atomic_calls = self._patch_module(
+            monkeypatch,
+            daily_snapshots={"n_snapshots": 7, "n_negative": 3},
+            payload=payload,
+        )
+        hub = self._FakeHub()
+
+        verdict = review_live_candidate(hub, candidate_id=99)
+
+        assert verdict.decision == "defer"
+        assert verdict.reason == "defer_residual_alpha_missing"
+        assert "residual_alpha" in verdict.rule_failures
+        assert hub.acquire_calls == []
+        assert atomic_calls == []
+        assert emitted[0][2].reason == "defer_residual_alpha_missing"
+
+    def test_alias_only_residual_report_defers_no_lease(self, monkeypatch) -> None:
+        """alias-only residual report 不可繞過 canonical required field。"""
+        from app.governance_hub_live_candidate_review import review_live_candidate
+
+        payload = self._approve_path_payload()
+        report = payload.pop("demo_residual_alpha_report")
+        payload["residual_alpha_report"] = report
+        mod, emitted, atomic_calls = self._patch_module(
+            monkeypatch,
+            daily_snapshots={"n_snapshots": 7, "n_negative": 3},
+            payload=payload,
+        )
+        hub = self._FakeHub()
+
+        verdict = review_live_candidate(hub, candidate_id=99)
+
+        assert verdict.decision == "defer"
+        assert verdict.reason == "defer_residual_alpha_missing"
+        assert "residual_alpha" in verdict.rule_failures
+        assert hub.acquire_calls == []
+        assert atomic_calls == []
+        assert emitted[0][2].reason == "defer_residual_alpha_missing"
+
+    @pytest.mark.parametrize(
+        ("report", "expected_decision", "expected_reason"),
+        [
+            (
+                _valid_residual_alpha_report(passes=False, verdict="fail"),
+                "reject",
+                "reject_residual_alpha_failed",
+            ),
+            (
+                _valid_residual_alpha_report(
+                    passes=False,
+                    verdict="defer_data",
+                    pbo_raw=None,
+                    pbo_residual=None,
+                    reasons=["pbo_missing_candidate_returns"],
+                ),
+                "defer",
+                "defer_residual_alpha_data_insufficient",
+            ),
+            (
+                _valid_residual_alpha_report(
+                    reasons=[
+                        "pbo_missing_candidate_returns_core_diagnostic_only"
+                    ],
+                ),
+                "reject",
+                "reject_residual_alpha_invalid",
+            ),
+        ],
+    )
+    def test_residual_fail_defer_core_diagnostic_blocks_no_lease(
+        self,
+        monkeypatch,
+        report,
+        expected_decision,
+        expected_reason,
+    ) -> None:
+        from app.governance_hub_live_candidate_review import review_live_candidate
+
+        payload = self._approve_path_payload()
+        payload["demo_residual_alpha_report"] = report
+        mod, emitted, atomic_calls = self._patch_module(
+            monkeypatch,
+            daily_snapshots={"n_snapshots": 7, "n_negative": 3},
+            payload=payload,
+        )
+        hub = self._FakeHub()
+
+        verdict = review_live_candidate(hub, candidate_id=99)
+
+        assert verdict.decision == expected_decision
+        assert verdict.reason == expected_reason
+        assert hub.acquire_calls == []
+        assert atomic_calls == []
 
     def test_approve_audit_snapshot_carries_lineage(self, monkeypatch) -> None:
         """Lineage payload survives review and reaches the approve audit snapshot."""
@@ -720,6 +844,7 @@ class TestRMetaSampleThreshold:
         建構含 grid_trading sample count 的 R-meta payload。"""
         return {
             "schema_version": "live_candidate_eval_v1",
+            "demo_residual_alpha_report": _valid_residual_alpha_report(),
             "demo_cost_baseline": {
                 "maker_fill_rate_7d": 0.30,
                 "avg_realized_fee_bps_7d": 1.0,
@@ -806,6 +931,7 @@ class TestRMetaSampleThreshold:
         # Old-format payload（無 demo_attribution_sample_count_by_strategy）
         old_payload = {
             "schema_version": "live_candidate_eval_v1",
+            "demo_residual_alpha_report": _valid_residual_alpha_report(),
             "demo_cost_baseline": {
                 "maker_fill_rate_7d": 0.30,
                 "avg_realized_fee_bps_7d": 1.0,
@@ -836,6 +962,7 @@ class TestRMetaSampleThreshold:
 
         mixed_payload = {
             "schema_version": "live_candidate_eval_v1",
+            "demo_residual_alpha_report": _valid_residual_alpha_report(),
             "demo_cost_baseline": {
                 "maker_fill_rate_7d": 0.30,
                 "avg_realized_fee_bps_7d": 1.0,

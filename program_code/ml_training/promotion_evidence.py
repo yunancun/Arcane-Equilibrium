@@ -22,6 +22,17 @@ from typing import Any, Mapping, Optional, Protocol, Sequence
 
 import numpy as np
 
+try:
+    from program_code.ml_training.residual_alpha_report_contract import (
+        extract_demo_residual_alpha_report,
+        validate_demo_residual_alpha_report,
+    )
+except ModuleNotFoundError:  # pragma: no cover - direct app runtime fallback
+    from ml_training.residual_alpha_report_contract import (  # type: ignore
+        extract_demo_residual_alpha_report,
+        validate_demo_residual_alpha_report,
+    )
+
 logger = logging.getLogger(__name__)
 
 
@@ -78,6 +89,7 @@ class StrategyPromotionEvidence:
     candidate_oos_returns: tuple[tuple[float, ...], ...]
     portfolio_returns: tuple[float, ...]
     candidates: tuple[CandidateEvidence, ...]
+    demo_residual_alpha_report: Optional[dict[str, Any]] = None
 
 
 def _safe_float(value: Any) -> Optional[float]:
@@ -101,6 +113,28 @@ def _return_series_from_bps(raw_bps_series: Any) -> tuple[float, ...]:
         if bps is not None:
             out.append(bps / 10_000.0)
     return tuple(out)
+
+
+def _dict_from_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _extract_residual_report_from_row(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
+    """從 JS row 或 row.payload pass-through 真實 residual alpha report。"""
+    report = extract_demo_residual_alpha_report(row)
+    if isinstance(report, dict):
+        return report
+    payload = _dict_from_payload(row.get("payload"))
+    report = extract_demo_residual_alpha_report(payload)
+    return report if isinstance(report, dict) else None
 
 
 def _sharpe(returns: Sequence[float]) -> float:
@@ -131,6 +165,7 @@ def build_strategy_promotion_evidence(
 ) -> dict[str, StrategyPromotionEvidence]:
     """Build DSR/PBO/tail-risk inputs from real James-Stein cycle results."""
     grouped: dict[str, list[CandidateEvidence]] = {}
+    residual_reports: dict[str, dict[str, Any]] = {}
     for key, row in js_results.items():
         if not isinstance(row, Mapping):
             continue
@@ -139,6 +174,9 @@ def build_strategy_promotion_evidence(
         strategy, symbol = _row_strategy_symbol(key, row)
         if not strategy or not symbol:
             continue
+        residual_report = _extract_residual_report_from_row(row)
+        if residual_report is not None and strategy not in residual_reports:
+            residual_reports[strategy] = residual_report
         returns = _return_series_from_bps(row.get("raw_bps_series"))
         if len(returns) < min_candidate_observations:
             continue
@@ -169,6 +207,7 @@ def build_strategy_promotion_evidence(
             candidate_oos_returns=tuple(candidate.returns for candidate in candidates),
             portfolio_returns=tuple(all_returns),
             candidates=tuple(candidates),
+            demo_residual_alpha_report=residual_reports.get(strategy),
         )
     return snapshots
 
@@ -239,6 +278,33 @@ def _tail_report_without_gate(
             "reasons": [f"tail_risk_invalid:{exc}"],
         }
     return bool(report.get("passes")), report
+
+
+def _residual_summary_report(
+    report: Optional[dict[str, Any]],
+) -> tuple[bool, dict[str, Any]]:
+    """回傳 residual alpha summary；缺 report 不合成 evidence。"""
+    if report is None:
+        return False, {
+            "verdict": "missing",
+            "passes": False,
+            "reason": "missing",
+            "reasons": ["missing"],
+        }
+    ok, reason = validate_demo_residual_alpha_report(report)
+    if ok:
+        return True, {
+            "verdict": report.get("verdict"),
+            "passes": True,
+            "reason": "ok",
+            "reasons": [],
+        }
+    return False, {
+        "verdict": report.get("verdict") or "invalid",
+        "passes": False,
+        "reason": reason,
+        "reasons": [reason],
+    }
 
 
 def _connect_dsn(dsn: str):
@@ -459,6 +525,9 @@ def push_promotion_evidence_from_js_results(
                             candidate_oos_returns=evidence.candidate_oos_returns,
                             portfolio_returns=evidence.portfolio_returns,
                             candidates=evidence.candidates,
+                            demo_residual_alpha_report=(
+                                evidence.demo_residual_alpha_report
+                            ),
                         )
                     ledger_rows += _persist_trial_ledger(cur, evidence, source=source)
                 except Exception as exc:  # noqa: BLE001
@@ -494,6 +563,21 @@ def push_promotion_evidence_from_js_results(
                     n_bootstrap=n_bootstrap,
                     seed=seed,
                 )
+                residual_report = evidence.demo_residual_alpha_report
+                if (
+                    residual_report is not None
+                    and hasattr(gate, "update_demo_residual_alpha_evidence")
+                ):
+                    residual_ok, residual_gate_report = (
+                        gate.update_demo_residual_alpha_evidence(
+                            strategy,
+                            residual_report,
+                        )
+                    )
+                else:
+                    residual_ok, residual_gate_report = _residual_summary_report(
+                        residual_report
+                    )
             else:
                 selection_ok, selection_report = _selection_report_without_gate(evidence)
                 tail_ok, tail_report = _tail_report_without_gate(
@@ -501,6 +585,9 @@ def push_promotion_evidence_from_js_results(
                     stress_exposures=stress_exposures,
                     n_bootstrap=n_bootstrap,
                     seed=seed,
+                )
+                residual_ok, residual_gate_report = _residual_summary_report(
+                    evidence.demo_residual_alpha_report
                 )
 
             if cur is not None:
@@ -530,6 +617,10 @@ def push_promotion_evidence_from_js_results(
                 "selection_passes": bool(selection_ok),
                 "tail_verdict": tail_report.get("verdict"),
                 "tail_passes": bool(tail_ok),
+                "residual_missing": evidence.demo_residual_alpha_report is None,
+                "residual_verdict": residual_gate_report.get("verdict"),
+                "residual_passes": bool(residual_ok),
+                "residual_reason": residual_gate_report.get("reason"),
             }
 
         if conn is not None:

@@ -133,6 +133,11 @@ from ml_training.mlde_demo_applier_evidence_filter import (  # noqa: E402
     EVIDENCE_SOURCE_TIER_ALLOWLIST,
     fetch_pending_sql_and_params,
 )
+from ml_training.residual_alpha_report_contract import (  # noqa: E402
+    RESIDUAL_ALPHA_REPORT_FIELD,
+    extract_demo_residual_alpha_report,
+    validate_demo_residual_alpha_report,
+)
 
 logger = logging.getLogger(__name__)
 IpcCall = Callable[[str, dict[str, Any], float], Awaitable[dict[str, Any]]]
@@ -473,6 +478,18 @@ def build_risk_patch(
             _put_nested(patch, path, bounded)
     return patch
 
+def _extract_demo_residual_alpha_report_from_source_row(
+    row: dict[str, Any],
+) -> Optional[dict[str, Any]]:
+    """從 recommendation row 或其 payload 取真實 residual alpha report。"""
+    report = extract_demo_residual_alpha_report(row)
+    if isinstance(report, dict):
+        return report
+    payload = _as_dict(row.get("payload"))
+    report = extract_demo_residual_alpha_report(payload)
+    return report if isinstance(report, dict) else None
+
+
 def should_create_live_candidate(row: dict[str, Any], cfg: DemoApplierConfig) -> bool:
     try:
         expected = float(row.get("expected_net_bps") or 0.0)
@@ -480,11 +497,16 @@ def should_create_live_candidate(row: dict[str, Any], cfg: DemoApplierConfig) ->
         samples = int(row.get("sample_count") or 0)
     except (TypeError, ValueError):
         return False
-    return (
+    if not (
         expected >= cfg.live_candidate_min_net_bps
         and confidence >= cfg.live_candidate_min_confidence
         and samples >= cfg.live_candidate_min_samples
-    )
+    ):
+        return False
+
+    report = _extract_demo_residual_alpha_report_from_source_row(row)
+    ok, _reason = validate_demo_residual_alpha_report(report)
+    return ok
 
 def _fingerprint(kind: str, target: str, patch: dict[str, Any]) -> str:
     payload = json.dumps({"kind": kind, "target": target, "patch": patch}, sort_keys=True, separators=(",", ":"))
@@ -1247,7 +1269,8 @@ def _build_live_candidate_payload(
         strategy_name=strategy_name,
         source_payload=source_payload,
     )
-    return {
+    residual_report = _extract_demo_residual_alpha_report_from_source_row(source_row)
+    payload = {
         "policy": "live_governed_promotion_candidate",
         "schema_version": _LIVE_CANDIDATE_EVAL_SCHEMA_VERSION,
         LINEAGE_PAYLOAD_KEY: lineage,
@@ -1273,6 +1296,9 @@ def _build_live_candidate_payload(
         ),
         "demo_sample_count_strategy_cell": sample_count_strategy_cell,
     }
+    if residual_report is not None:
+        payload[RESIDUAL_ALPHA_REPORT_FIELD] = residual_report
+    return payload
 
 
 def _insert_live_candidate(

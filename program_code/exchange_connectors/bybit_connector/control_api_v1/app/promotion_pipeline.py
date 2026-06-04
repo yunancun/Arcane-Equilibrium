@@ -51,12 +51,57 @@ from typing import Any, Callable, Optional, Sequence
 
 logger = logging.getLogger(__name__)
 
+try:
+    from program_code.ml_training.residual_alpha_report_contract import (
+        RESIDUAL_ALPHA_REPORT_FIELD,
+        extract_demo_residual_alpha_report,
+        validate_demo_residual_alpha_report,
+    )
+except ModuleNotFoundError:  # pragma: no cover - app runtime path fallback
+    try:
+        from . import _path_setup  # noqa: F401
+    except Exception:  # noqa: BLE001
+        pass
+    from ml_training.residual_alpha_report_contract import (  # type: ignore
+        RESIDUAL_ALPHA_REPORT_FIELD,
+        extract_demo_residual_alpha_report,
+        validate_demo_residual_alpha_report,
+    )
+
 
 def _timestamp_seconds(value: Any) -> Any:
     """Normalize DB timestamptz values to the in-memory epoch-seconds shape."""
     if isinstance(value, datetime):
         return value.timestamp()
     return value
+
+
+def _select_valid_residual_alpha_report(
+    entry: "PipelineEntry",
+    *,
+    override_mapping: Optional[dict] = None,
+) -> tuple[bool, str, Optional[dict]]:
+    """選出可作 promotion evidence 的 residual alpha report。
+
+    evaluation_report 內的 canonical 欄位與 entry 直存 report 任一有效即可；
+    但兩者都缺或無效時，caller 必 fail-closed，不得用 operator approval
+    繞過 residual alpha gate。
+    """
+    first_reason: Optional[str] = None
+    candidates = [
+        extract_demo_residual_alpha_report(override_mapping),
+        extract_demo_residual_alpha_report(entry.evaluation_report),
+        entry.demo_residual_alpha_report,
+    ]
+    for report in candidates:
+        if report is None:
+            continue
+        ok, reason = validate_demo_residual_alpha_report(report)
+        if ok and isinstance(report, dict):
+            return True, "ok", report
+        if first_reason is None:
+            first_reason = reason
+    return False, first_reason or "no_evidence", None
 
 
 def _selection_bias_gate_cls():
@@ -184,6 +229,7 @@ class PipelineEntry:
     demo_api_reliability: Optional[float] = None
     demo_selection_bias_report: Optional[dict] = None
     demo_tail_risk_report: Optional[dict] = None
+    demo_residual_alpha_report: Optional[dict] = None
 
     # Live approval / Live 審批
     evaluation_report: Optional[dict] = None
@@ -455,6 +501,40 @@ class PromotionGate:
 
         return bool(report.get("passes")), report
 
+    def update_demo_residual_alpha_evidence(
+        self,
+        strategy_name: str,
+        report: dict,
+    ) -> tuple[bool, dict]:
+        """更新 DEMO_ACTIVE 畢業用 residual alpha 真實報告。
+
+        此方法只 pass-through 已由離線 gate 產出的 report，不在 promotion
+        path 計算 residual alpha；invalid/core diagnostic 報告仍存入 entry
+        供狀態檢查顯示，但 gate 必 fail-closed。
+        """
+        ok, reason = validate_demo_residual_alpha_report(report)
+        with self._lock:
+            entry = self._entries.get(strategy_name)
+            if entry is None:
+                return False, {
+                    "verdict": "block",
+                    "passes": False,
+                    "reason": "not_registered",
+                    "reasons": ["not_registered"],
+                }
+            if isinstance(report, dict):
+                entry.demo_residual_alpha_report = report
+            entry.updated_ts = time.time()
+
+        if ok:
+            return True, report
+        return False, {
+            "verdict": "block",
+            "passes": False,
+            "reason": reason,
+            "reasons": [reason],
+        }
+
     # ------------------------------------------------------------------
     # Graduation checks / 畢業檢查
     # ------------------------------------------------------------------
@@ -546,6 +626,11 @@ class PromotionGate:
                 # 6-03：需要 operator 批准 — 通過 operator_decision 檢查。
                 if entry.operator_decision != "APPROVED":
                     return False, "operator_approval_required"
+                residual_ok, residual_reason, _ = _select_valid_residual_alpha_report(
+                    entry
+                )
+                if not residual_ok:
+                    return False, f"residual_alpha_required:{residual_reason}"
 
             # Apply promotion / 執行晉升
             old_stage = entry.current_stage
@@ -593,6 +678,18 @@ class PromotionGate:
                 return False, "not_registered"
             if entry.current_stage != PromotionStage.LIVE_PENDING:
                 return False, f"wrong_stage:{entry.current_stage.name}"
+
+            if decision == "APPROVED":
+                residual_ok, residual_reason, residual_report = (
+                    _select_valid_residual_alpha_report(
+                        entry,
+                        override_mapping=evaluation_report,
+                    )
+                )
+                if not residual_ok:
+                    return False, f"residual_alpha_required:{residual_reason}"
+                if isinstance(residual_report, dict):
+                    entry.demo_residual_alpha_report = residual_report
 
             entry.operator_decision = decision
             entry.approved_capital_pct = capital_pct
@@ -750,6 +847,15 @@ class PromotionGate:
             else:
                 failures.append(f"tail_risk:{verdict}")
 
+        residual_report = entry.demo_residual_alpha_report
+        residual_ok, residual_reason = validate_demo_residual_alpha_report(
+            residual_report
+        )
+        if not isinstance(residual_report, dict):
+            failures.append("residual_alpha:no_evidence")
+        elif not residual_ok:
+            failures.append(f"residual_alpha:{residual_reason}")
+
         return len(failures) == 0, failures
 
     # ------------------------------------------------------------------
@@ -819,6 +925,7 @@ class PromotionGate:
                     "demo_api_reliability": entry.demo_api_reliability,
                     "demo_selection_bias_report": entry.demo_selection_bias_report,
                     "demo_tail_risk_report": entry.demo_tail_risk_report,
+                    RESIDUAL_ALPHA_REPORT_FIELD: entry.demo_residual_alpha_report,
                     "evaluation_report": entry.evaluation_report,
                     "operator_decision": entry.operator_decision,
                     "approved_capital_pct": entry.approved_capital_pct,
@@ -856,6 +963,7 @@ class PromotionGate:
                     demo_api_reliability=row.get("demo_api_reliability"),
                     demo_selection_bias_report=row.get("demo_selection_bias_report"),
                     demo_tail_risk_report=row.get("demo_tail_risk_report"),
+                    demo_residual_alpha_report=extract_demo_residual_alpha_report(row),
                     evaluation_report=row.get("evaluation_report"),
                     operator_decision=row.get("operator_decision"),
                     approved_capital_pct=row.get("approved_capital_pct"),
