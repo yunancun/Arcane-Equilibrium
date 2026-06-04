@@ -4,7 +4,8 @@ MODULE_NOTE
 主要類/函數：CandidateEvidenceSourceContractBuild、
 build_live_candidate_evidence_from_source。
 依賴：candidate manifest builder / validator 與 residual alpha report 契約；
-不讀 DB、不查 replay registry、不連 runtime。
+不自行讀 DB、不連 runtime；只驗證 caller 已 JOIN 到 row 的 replay registry
+snapshot。
 硬邊界：live candidate producer 只接受 row-level replay lineage 與 canonical
 residual report；payload lineage / alias / synthetic / real_outcome 不可升級成
 promotion-ready evidence。
@@ -14,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import datetime as _dt
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -55,6 +57,9 @@ PROMOTION_EVIDENCE_SOURCE_TIERS: tuple[str, ...] = (
     "counterfactual_replay",
 )
 PROMOTION_REPLAY_REGISTRY_STATUSES: tuple[str, ...] = ("completed",)
+HIDDEN_OOS_STATE_SCHEMA_VERSION = "hidden_oos_state_v1"
+HIDDEN_OOS_PROMOTION_STATE = "sealed"
+_HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
 @dataclass(frozen=True)
@@ -137,7 +142,26 @@ def build_live_candidate_evidence_from_source(
             lineage_downgraded=verdict == PENDING_SCHEMA,
         )
 
-    hydrated_source_row = _source_row_with_registry_hidden_oos(source_row)
+    hidden_oos_state, hidden_oos_state_validation = _load_hidden_oos_state_snapshot(
+        source_row
+    )
+    if hidden_oos_state_validation is not None:
+        reason, verdict = hidden_oos_state_validation
+        return _contract_result(
+            reason=reason,
+            verdict=verdict,
+            residual_report=residual_report,
+            source_tier=source_tier,
+            replay_experiment_id=replay_experiment_id,
+            replay_manifest_hash=replay_manifest_hash,
+            lineage_downgraded=verdict == PENDING_SCHEMA,
+        )
+    assert hidden_oos_state is not None
+
+    hydrated_source_row = _source_row_with_registry_hidden_oos(
+        source_row,
+        hidden_oos_state=hidden_oos_state,
+    )
     manifest_build = build_candidate_evidence_manifest_from_source(
         source_row=hydrated_source_row,
         residual_report=residual_report,
@@ -154,9 +178,23 @@ def build_live_candidate_evidence_from_source(
         )
 
     manifest = manifest_build.manifest
-    if not _manifest_hidden_oos_matches_registry(manifest, source_row):
+    if not _manifest_hidden_oos_matches_registry(
+        manifest,
+        source_row,
+        hidden_oos_state=hidden_oos_state,
+    ):
         return _contract_result(
-            reason="hidden_oos_registry_window_mismatch",
+            reason="hidden_oos_registry_state_mismatch",
+            verdict=INVALID,
+            residual_report=residual_report,
+            manifest_build=manifest_build,
+            source_tier=source_tier,
+            replay_experiment_id=replay_experiment_id,
+            replay_manifest_hash=replay_manifest_hash,
+        )
+    if _text(manifest.get("family_id")) != _text(hidden_oos_state.get("family_id")):
+        return _contract_result(
+            reason="hidden_oos_state_family_id_mismatch",
             verdict=INVALID,
             residual_report=residual_report,
             manifest_build=manifest_build,
@@ -199,16 +237,41 @@ def build_live_candidate_evidence_from_source(
 def _manifest_hidden_oos_matches_registry(
     manifest: Mapping[str, Any],
     source_row: Mapping[str, Any],
+    *,
+    hidden_oos_state: Mapping[str, Any],
 ) -> bool:
     hidden = manifest.get("hidden_oos")
     if not isinstance(hidden, Mapping):
         return False
-    return _time_equivalent(
-        hidden.get("window_start"),
-        source_row.get("replay_registry_oos_label_window_start"),
-    ) and _time_equivalent(
-        hidden.get("window_end"),
-        source_row.get("replay_registry_oos_label_window_end"),
+    split_ref = _text(hidden.get("split_hash")) or _text(hidden.get("split_id"))
+    return (
+        split_ref == _text(hidden_oos_state.get("split_hash"))
+        and _time_equivalent(
+            hidden.get("window_start"),
+            source_row.get("replay_registry_oos_label_window_start"),
+        )
+        and _time_equivalent(
+            hidden.get("window_end"),
+            source_row.get("replay_registry_oos_label_window_end"),
+        )
+        and _int_equivalent(
+            _first_present(
+                hidden.get("trial_count"),
+                hidden.get("total_candidates_K"),
+                hidden.get("total_candidates_k"),
+                hidden.get("K"),
+                hidden.get("k"),
+            ),
+            source_row.get("replay_registry_total_candidates_k"),
+        )
+        and _embargo_equivalent(
+            _first_present(
+                hidden.get("embargo"),
+                hidden.get("purge"),
+                hidden.get("purge_days"),
+            ),
+            source_row.get("replay_registry_oos_embargo_seconds"),
+        )
     )
 
 
@@ -251,20 +314,138 @@ def _validate_replay_registry_snapshot(
     return None
 
 
+def _load_hidden_oos_state_snapshot(
+    source_row: Mapping[str, Any],
+) -> tuple[dict[str, Any] | None, tuple[str, str] | None]:
+    """驗證 replay manifest 內 committed hidden OOS state。
+
+    這不是 durable state table；它是 P1-B 的 migration-free producer gate：
+    沒有在 registry manifest hash 內承諾 sealed state，就不能升級成
+    live candidate evidence。
+    """
+    registry_manifest = source_row.get("replay_registry_manifest_jsonb")
+    if not isinstance(registry_manifest, Mapping):
+        return None, ("replay_registry_manifest_jsonb_missing", PENDING_SCHEMA)
+    raw_state = registry_manifest.get("hidden_oos_state")
+    if not isinstance(raw_state, Mapping):
+        return None, ("hidden_oos_state_missing", PENDING_SCHEMA)
+
+    state = dict(raw_state)
+    schema_version = _text(state.get("schema_version"))
+    if schema_version != HIDDEN_OOS_STATE_SCHEMA_VERSION:
+        return None, ("hidden_oos_state_schema_version_unknown", PENDING_SCHEMA)
+
+    state_label = _text(state.get("state"))
+    if not state_label:
+        return None, ("hidden_oos_state_state_missing", PENDING_SCHEMA)
+    if state_label != HIDDEN_OOS_PROMOTION_STATE:
+        return None, (f"hidden_oos_state_not_sealed:{state_label}", RESEARCH_ONLY)
+
+    open_count = _int_value(state.get("open_count"))
+    if open_count is None:
+        return None, ("hidden_oos_state_open_count_missing", PENDING_SCHEMA)
+    if open_count != 0:
+        return None, ("hidden_oos_state_open_count_nonzero", RESEARCH_ONLY)
+    if _truthy(state.get("opened_for_iteration")):
+        return None, ("hidden_oos_state_opened_for_iteration", RESEARCH_ONLY)
+    if _truthy(state.get("consumed")):
+        return None, ("hidden_oos_state_consumed", RESEARCH_ONLY)
+    if _truthy(state.get("invalidated")):
+        return None, ("hidden_oos_state_invalidated", RESEARCH_ONLY)
+
+    split_hash = _text(state.get("split_hash"))
+    if not split_hash:
+        return None, ("hidden_oos_state_split_hash_missing", PENDING_SCHEMA)
+    if not _is_stable_hash(split_hash):
+        return None, ("hidden_oos_state_split_hash_malformed", INVALID)
+
+    if not _text(state.get("family_id")):
+        return None, ("hidden_oos_state_family_id_missing", PENDING_SCHEMA)
+
+    for field in ("window_start", "window_end"):
+        if not _text(state.get(field)):
+            return None, (f"hidden_oos_state_{field}_missing", PENDING_SCHEMA)
+    if not _time_equivalent(
+        state.get("window_start"),
+        source_row.get("replay_registry_oos_label_window_start"),
+    ) or not _time_equivalent(
+        state.get("window_end"),
+        source_row.get("replay_registry_oos_label_window_end"),
+    ):
+        return None, ("hidden_oos_state_window_mismatch", INVALID)
+
+    state_embargo_seconds = _int_value(
+        _first_present(
+            state.get("embargo_seconds"),
+            state.get("oos_embargo_seconds"),
+            state.get("embargo"),
+        )
+    )
+    registry_embargo_seconds = _int_value(
+        source_row.get("replay_registry_oos_embargo_seconds")
+    )
+    if state_embargo_seconds is None:
+        return None, ("hidden_oos_state_embargo_seconds_missing", PENDING_SCHEMA)
+    if registry_embargo_seconds is None:
+        return None, ("replay_registry_oos_embargo_seconds_malformed", INVALID)
+    if state_embargo_seconds != registry_embargo_seconds:
+        return None, ("hidden_oos_state_embargo_seconds_mismatch", INVALID)
+
+    state_total_k = _int_value(
+        _first_present(
+            state.get("total_candidates_k"),
+            state.get("total_candidates_K"),
+            state.get("trial_count"),
+            state.get("K"),
+            state.get("k"),
+        )
+    )
+    registry_total_k = _int_value(source_row.get("replay_registry_total_candidates_k"))
+    if state_total_k is None:
+        return None, ("hidden_oos_state_total_candidates_k_missing", PENDING_SCHEMA)
+    if registry_total_k is None:
+        return None, ("replay_registry_total_candidates_k_malformed", INVALID)
+    if state_total_k != registry_total_k:
+        return None, ("hidden_oos_state_total_candidates_k_mismatch", INVALID)
+    if state_total_k <= 0:
+        return None, ("hidden_oos_state_total_candidates_k_nonpositive", INVALID)
+
+    return state, None
+
+
 def _source_row_with_registry_hidden_oos(
     source_row: Mapping[str, Any],
+    *,
+    hidden_oos_state: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """用 replay.experiments snapshot 覆寫 hidden_oos 欄位。"""
+    """用 replay manifest 中的 sealed hidden_oos_state 覆寫 hidden_oos。"""
     row = dict(source_row)
     payload = source_row.get("payload")
     payload_dict = copy.deepcopy(dict(payload)) if isinstance(payload, Mapping) else {}
+    total_k = _int_value(
+        _first_present(
+            hidden_oos_state.get("total_candidates_k"),
+            hidden_oos_state.get("total_candidates_K"),
+            hidden_oos_state.get("trial_count"),
+        )
+    )
+    embargo_seconds = _int_value(
+        _first_present(
+            hidden_oos_state.get("embargo_seconds"),
+            hidden_oos_state.get("oos_embargo_seconds"),
+            hidden_oos_state.get("embargo"),
+        )
+    )
     payload_dict["hidden_oos"] = {
-        "split_hash": _text(source_row.get("replay_registry_manifest_hash")),
-        "window_start": _text(source_row.get("replay_registry_oos_label_window_start")),
-        "window_end": _text(source_row.get("replay_registry_oos_label_window_end")),
-        "embargo": f"{_text(source_row.get('replay_registry_oos_embargo_seconds'))}s",
-        "trial_count": _text(source_row.get("replay_registry_total_candidates_k")),
+        "split_hash": _text(hidden_oos_state.get("split_hash")),
+        "window_start": _text(hidden_oos_state.get("window_start")),
+        "window_end": _text(hidden_oos_state.get("window_end")),
+        "embargo": f"{embargo_seconds}s",
+        "trial_count": total_k,
         "passes": True,
+        "state": HIDDEN_OOS_PROMOTION_STATE,
+        "open_count": 0,
+        "opened_for_iteration": False,
     }
     row["payload"] = payload_dict
     return row
@@ -323,6 +504,61 @@ def _text(value: Any) -> str:
     return str(value).strip()
 
 
+def _first_present(*values: Any) -> Any:
+    for value in values:
+        if _text(value):
+            return value
+    return None
+
+
+def _int_value(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    text = _text(value).lower()
+    if not text:
+        return None
+    try:
+        if text.endswith("s"):
+            return int(float(text[:-1]))
+        if text.endswith("d"):
+            return int(float(text[:-1]) * 86400)
+        return int(text)
+    except ValueError:
+        return None
+
+
+def _int_equivalent(left: Any, right: Any) -> bool:
+    left_int = _int_value(left)
+    right_int = _int_value(right)
+    return left_int is not None and right_int is not None and left_int == right_int
+
+
+def _embargo_equivalent(left: Any, right_seconds: Any) -> bool:
+    left_int = _int_value(left)
+    right_int = _int_value(right_seconds)
+    return left_int is not None and right_int is not None and left_int == right_int
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return _text(value).lower() in {"1", "true", "yes", "on"}
+
+
+def _is_hex64(value: str) -> bool:
+    return bool(_HEX64_RE.match(value))
+
+
+def _is_stable_hash(value: str) -> bool:
+    return _is_hex64(value) or (
+        value.startswith("sha256:") and len(value) > len("sha256:")
+    )
+
+
 def _is_expired(value: Any) -> bool:
     if isinstance(value, _dt.datetime):
         ts = value
@@ -365,6 +601,8 @@ def _parse_datetime(value: Any) -> _dt.datetime | None:
 
 
 __all__ = [
+    "HIDDEN_OOS_STATE_SCHEMA_VERSION",
+    "HIDDEN_OOS_PROMOTION_STATE",
     "PROMOTION_EVIDENCE_SOURCE_TIERS",
     "PROMOTION_REPLAY_REGISTRY_STATUSES",
     "CandidateEvidenceSourceContractBuild",

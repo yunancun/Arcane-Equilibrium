@@ -543,3 +543,10 @@ YYYY-MM-DD HH:MM TZ
 - result: 新增 `candidate_evidence_source_contract.py`；candidate manifest validator 要求 `replay_manifest_hash` + `demo_residual_alpha_report_hash`；MLDE producer 只在 source contract promotion-ready 時附 residual report + manifest；fetch helper LEFT JOIN `replay.experiments` 帶出 registry status/expires/manifest/OOS snapshot；`real_outcome`/`synthetic_replay`/缺 registry snapshot fail-closed。
 - verification: `program_code/ml_training/tests` = `500 passed, 31 skipped`；LG5 review focused `59 passed`；touched Python `py_compile` PASS。
 - boundary/risk: source/test/report only；no DB migration, DB write/apply, runtime deploy, rebuild/restart, auth/order/risk config mutation, paper/live enable, or promotion state mutation。residual report durable registry 與 hidden OOS sealed/opened/consumed 狀態機仍是後續 P1-B/P1-C，不得把本 checkpoint 誤報成 alpha edge 已解決。
+
+2026-06-04 CEST
+- PM task: 推進 `P1-B-HIDDEN-OOS-SEALED-STATE-SOURCE-CONTRACT`，在 P1-A source contract 上加入 migration-free hidden OOS sealed-state producer gate。
+- dispatch chain: PM(default) local implementation + regression；未另派 agent，因本批是 narrow follow-up 且不碰 DB migration/runtime。
+- result: `replay_registry_manifest_jsonb.hidden_oos_state` 成為 MLDE live-candidate promotion-ready 的硬條件；要求 `hidden_oos_state_v1`、`state=sealed`、`open_count=0`、未 opened/consumed/invalidated、split_hash/family_id/window/embargo/K 與 registry/candidate manifest 一致；source-fields draft 改由 committed hidden_oos_state hydrate hidden_oos，不再用 replay manifest hash 代替 split hash。
+- verification: `program_code/ml_training/tests` = `505 passed, 31 skipped`；LG5 review focused `59 passed`；touched Python `py_compile` PASS。
+- boundary/risk: source/test/report only；no DB migration, DB write/apply, runtime deploy, rebuild/restart, auth/order/risk config mutation, paper/live enable, or promotion state mutation。本 checkpoint 不是 durable hidden OOS state machine；opened/consumed/invalidated 的 DB 狀態轉移仍需後續 migration/API/audit 設計。
