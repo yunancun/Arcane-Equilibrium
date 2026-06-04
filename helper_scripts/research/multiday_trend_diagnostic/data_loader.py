@@ -9,8 +9,8 @@ MODULE_NOTE:
     - 日線：20 symbol × 730 日（POLUSDT 635），2024-06-02→2026-06-01，覆蓋完整。
     - funding：僅 ~58 天（2026-04-05→2026-06-02）→ **用 per-symbol 已實現均值**，
       harness 標 funding INCONCLUSIVE-on-coverage。
-    - regime_snapshots：**完全空表** → 本地 rule-based（BTC 200日MA 上下 + realized
-      vol tercile，禁 HMM，leak-free PIT），協議 §4b fallback。
+    - regime_snapshots：**完全空表** → 本地 rule-based（BTC 200日MA 上下 + expanding/prior-365
+      realized vol tercile，禁 HMM，leak-free PIT），協議 §4b fallback。
     - symbol_universe_snapshots：僅 ~24 天，但 listed_at 可信（POLUSDT 2024-09-05 與
       其 635 日線起點一致）→ 用 listed_at 做 survivorship mask。
   主要函數：``load_panel`` / ``compute_rule_based_regime`` / ``representative_funding``。
@@ -44,6 +44,8 @@ BTC_SYMBOL = "BTCUSDT"
 # rule-based regime 參數（協議 §4b，禁 HMM）。
 REGIME_TREND_MA_DAYS = 200  # BTC 200 日 MA（leak-free：用 shift(1)）
 REGIME_VOL_WINDOW = 30  # realized vol 視窗
+# 高 vol 門檻只用當日前 prior-N rolling vols；禁止 full-sample quantile 偷看未來。
+REGIME_VOL_TERCILE_PRIOR_DAYS = 365
 
 
 @dataclass
@@ -146,7 +148,10 @@ def load_panel(
     coverage_notes = {
         "kline_coverage": kline_cov,
         "funding_coverage": funding_cov,
-        "regime_source": "rule_based_local_btc_200dma_vol_tercile (regime_snapshots empty)",
+        "regime_source": (
+            "rule_based_local_btc_200dma_expanding_prior365_vol_tercile "
+            "(regime_snapshots empty; vol-tercile leak fixed)"
+        ),
         "survivorship_source": "symbol_universe_snapshots.listed_at",
         "funding_window_vs_signal_window": (
             "funding covers only recent window; mean-per-8h applied across full "
@@ -262,6 +267,9 @@ def compute_rule_based_regime(btc_close: Optional[np.ndarray], dates: list) -> n
       - 其餘（橫盤 / 高 vol 不明確）→ 'chop'
     為什麼 BTC 驅動全市場 regime：crypto 高相關，BTC 是市場 beta 主軸（協議 §4.6 PC1）。
     warmup（前 200 日）未滿 → 'chop'（保守，不偽造方向）。
+
+    vol-tercile leak fix：高 vol 門檻用 expanding/prior-365，只看當前日期之前的 finite
+    rolling vols；prior 樣本不足時回 'chop'，不使用 full-sample quantile 偷看未來。
     """
     t = len(dates)
     out = np.array(["chop"] * t, dtype=object)
@@ -279,13 +287,6 @@ def compute_rule_based_regime(btc_close: Optional[np.ndarray], dates: list) -> n
         if np.any(~np.isfinite(seg)):
             continue
         ma = float(seg.mean())
-        # realized vol（過去 30 日 prev 報酬 std）。
-        vlo = i - REGIME_VOL_WINDOW
-        vol = np.nan
-        if vlo >= 1:
-            r = np.diff(np.log(prev[vlo: i + 1])) if np.all(np.isfinite(prev[vlo: i + 1]) & (prev[vlo: i + 1] > 0)) else None
-            if r is not None and len(r) > 1:
-                vol = float(np.std(r, ddof=1))
         c = prev[i]
         if not np.isfinite(c) or not np.isfinite(ma):
             continue
@@ -293,18 +294,26 @@ def compute_rule_based_regime(btc_close: Optional[np.ndarray], dates: list) -> n
             out[i] = "bull"
         else:
             out[i] = "bear"
-    # vol tercile 細分：高 vol 時 bull/bear 降級為 chop（高不確定 → 保守）。
+    # vol tercile 細分（leak-free expanding/prior-365）：高 vol 時 bull/bear 降級為 chop。
     vols = _rolling_vol_series(btc_close)
-    finite_vols = vols[np.isfinite(vols)]
-    if len(finite_vols) > 10:
-        hi_thr = np.quantile(finite_vols, 2.0 / 3.0)
-        for i in range(t):
-            if np.isfinite(vols[i]) and vols[i] >= hi_thr:
-                out[i] = "chop"
+    for i in range(t):
+        if not np.isfinite(vols[i]):
+            continue
+        # 高 vol 門檻只用過去 [i-365, i-1] 的分布；不足時降為 chop，避免用未來補樣本。
+        win_lo = max(0, i - REGIME_VOL_TERCILE_PRIOR_DAYS)
+        prior_vols = vols[win_lo:i]
+        prior_finite = prior_vols[np.isfinite(prior_vols)]
+        if len(prior_finite) < 30:
+            out[i] = "chop"
+            continue
+        hi_thr = float(np.quantile(prior_finite, 2.0 / 3.0))
+        if vols[i] >= hi_thr:
+            out[i] = "chop"
     return out
 
 
 def _rolling_vol_series(btc_close: np.ndarray) -> np.ndarray:
+    """過去 30 日 prior 報酬 realized vol（out[i] 只用到 i-1）。"""
     t = len(btc_close)
     out = np.full(t, np.nan)
     prev = np.full(t, np.nan)

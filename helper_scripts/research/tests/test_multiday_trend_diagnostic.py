@@ -16,6 +16,8 @@ MODULE_NOTE:
 
 from __future__ import annotations
 
+import datetime as dt
+
 import numpy as np
 import pytest
 
@@ -623,7 +625,7 @@ def test_data_loader_sql_is_read_only():
 
 
 def test_rule_based_regime_no_hmm():
-    """regime 計算禁 HMM（協議 §4b）；用 BTC 200日MA + vol tercile（rule-based）。
+    """regime 計算禁 HMM（協議 §4b）；用 BTC 200日MA + expanding/prior vol tercile。
 
     檢查執行邏輯不依賴 HMM 機制（hmmlearn / GaussianHMM / viterbi / baum-welch），
     且確實用 200日MA + tercile rule。docstring 提及「禁 HMM」是說明，不算違規。
@@ -636,3 +638,37 @@ def test_rule_based_regime_no_hmm():
     # 確認用 rule-based 元件。
     assert "regime_trend_ma_days" in src or "200" in src
     assert "bull" in src and "bear" in src and "chop" in src
+    # 確認 vol-tercile 門檻不再是 full-sample quantile。
+    assert "prior" in src or "expanding" in src or "win_lo" in src
+
+
+def test_rule_based_regime_append_future_extreme_vol_does_not_change_past_labels():
+    """回歸測試：序列尾部追加未來極端高波動，不得改變既有日期 regime label。
+
+    舊 full-sample vol quantile 會把未來 tail 的 vol 分布納入早期門檻；新的
+    expanding/prior-365 實作只看 index 之前的 rolling vols，所以 base prefix 必須逐項相同。
+    """
+    rng = np.random.default_rng(20260604)
+    base_n = 520
+    tail_n = 180
+    base_dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i) for i in range(base_n)]
+    extended_dates = [dt.date(2024, 1, 1) + dt.timedelta(days=i)
+                      for i in range(base_n + tail_n)]
+
+    # base：整體上行以產生 bull/bear 基礎標籤，中段加入中等波動，讓 full-sample 門檻有 bite。
+    base_returns = rng.normal(0.0015, 0.004, base_n)
+    base_returns[260:340] += rng.normal(0.0, 0.025, 80)
+    base_close = np.exp(np.log(100.0) + np.cumsum(base_returns))
+
+    # tail：只存在於未來，波動極端放大；leak-free regime 不可讓它污染 base prefix。
+    tail_returns = rng.normal(0.0, 0.12, tail_n)
+    tail_close = base_close[-1] * np.exp(np.cumsum(tail_returns))
+    extended_close = np.concatenate([base_close, tail_close])
+
+    regime_base = data_loader.compute_rule_based_regime(base_close, base_dates)
+    regime_extended = data_loader.compute_rule_based_regime(extended_close, extended_dates)
+
+    assert np.any(regime_base[250:] != "chop"), "測試資料需含非中性 regime，避免只測到 warmup"
+    assert list(regime_base) == list(regime_extended[:base_n]), (
+        "regime label 必須只依賴當日前 prior window；追加未來極端 vol 不可改變過去 label"
+    )

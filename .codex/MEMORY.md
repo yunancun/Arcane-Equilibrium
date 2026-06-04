@@ -40,6 +40,10 @@ source of truth, choose local work vs dispatch, and keep boundaries visible.
 Operator-facing responses should be Chinese-first. The operator needs judgment,
 pushback, and clear uncertainty, not blind execution.
 
+文檔與注釋同樣中文優先：新增或修改的設計文檔、報告、實施筆記、
+代碼注釋應默認使用中文；只有在 operator 明確要求英文、文件本身已
+鎖定英文格式，或必須保留精確 API / protocol wording 時才使用英文。
+
 ## Source Of Truth
 
 - `CLAUDE.md`: shared operating rules and hard boundaries
