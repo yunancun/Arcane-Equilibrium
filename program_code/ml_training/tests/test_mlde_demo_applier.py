@@ -37,6 +37,9 @@ from ml_training.candidate_evidence_manifest import (
     compute_candidate_evidence_manifest_hash,
 )
 from ml_training.residual_alpha_report_contract import RESIDUAL_ALPHA_REPORT_FIELD
+from ml_training.candidate_evidence_source_contract import (
+    HIDDEN_OOS_STATE_SCHEMA_VERSION,
+)
 
 
 class _Cursor:
@@ -174,6 +177,25 @@ def _candidate_manifest_source_payload(**overrides) -> dict:
     return payload
 
 
+def _valid_hidden_oos_state(**overrides) -> dict:
+    state = {
+        "schema_version": HIDDEN_OOS_STATE_SCHEMA_VERSION,
+        "state": "sealed",
+        "family_id": "family-alpha",
+        "split_hash": "b" * 64,
+        "window_start": "2026-05-01T00:00:00Z",
+        "window_end": "2026-05-08T00:00:00Z",
+        "embargo_seconds": 86400,
+        "total_candidates_k": 12,
+        "open_count": 0,
+        "opened_for_iteration": False,
+        "consumed": False,
+        "invalidated": False,
+    }
+    state.update(overrides)
+    return state
+
+
 def _registry_source_fields(**overrides) -> dict:
     fields = {
         "evidence_source_tier": "calibrated_replay",
@@ -182,7 +204,10 @@ def _registry_source_fields(**overrides) -> dict:
         "replay_registry_status": "completed",
         "replay_registry_expires_at": "2999-01-01T00:00:00+00:00",
         "replay_registry_manifest_hash": "c" * 64,
-        "replay_registry_manifest_jsonb": {"registry": "manifest"},
+        "replay_registry_manifest_jsonb": {
+            "registry": "manifest",
+            "hidden_oos_state": _valid_hidden_oos_state(),
+        },
         "replay_registry_oos_label_window_start": "2026-05-01T00:00:00Z",
         "replay_registry_oos_label_window_end": "2026-05-08T00:00:00Z",
         "replay_registry_oos_embargo_seconds": 86400,
