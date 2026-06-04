@@ -557,3 +557,10 @@ YYYY-MM-DD HH:MM TZ
 - result: `register_experiment()` 在 `manifest_jsonb.hidden_oos_state` 存在時要求 `hidden_oos_state_v1` / `state=sealed` / `open_count=0` / family+split / train+OOS+candidate window / embargo / K，並把 train/candidate/embargo/K 寫入 V049 既有欄位；legacy replay manifest 無 `hidden_oos_state` 時保持 NULL 行為；`alpha_hidden_oos_state_*` 錯誤映射為 400。
 - verification: replay register focused `24 passed`；strategy/risk blob round-trip `6 passed`；control_api replay subdir `114 passed, 7 skipped`；replay full-chain routes `18 passed, 1 skipped`；touched Python `py_compile` PASS。
 - boundary/risk: source/test/report only；no DB migration, DB write/apply, runtime deploy, rebuild/restart, auth/order/risk config mutation, paper/live enable, or promotion state mutation。本 checkpoint 仍不是 durable hidden OOS state machine；只是讓 register path 寫出 P1-B producer gate 需要的 registry snapshot。
+
+2026-06-04 CEST
+- PM task: 推進 `P1-C-RESIDUAL-REPORT-REGISTRY-COMMITMENT`，把 residual alpha report hash 從 payload 自證收緊到 replay registry manifest commitment。
+- dispatch chain: PM(default) local implementation + regression；未另派 agent，因本批仍是 migration-free source/register contract follow-up。
+- result: `candidate_evidence_source_contract.py` 要求 `replay_registry_manifest_jsonb.demo_residual_alpha_report_hash` 存在並等於 canonical `demo_residual_alpha_report` hash；`register_experiment()` 的 alpha `hidden_oos_state` 路徑同步要求該 hash 存在且為 64 hex；缺 hash `pending_schema` / 400，mismatch `invalid`。
+- verification: `program_code/ml_training/tests` = `507 passed, 31 skipped`；control_api replay subdir `114 passed, 7 skipped`；LG5 + replay full-chain routes `77 passed, 1 skipped`；replay register focused `25 passed`；touched Python `py_compile` PASS。
+- boundary/risk: source/test/report only；no DB migration, DB write/apply, runtime deploy, rebuild/restart, auth/order/risk config mutation, paper/live enable, or promotion state mutation。本 checkpoint 不是 durable residual report registry；只把 residual report hash 承諾拉進 replay registry manifest。

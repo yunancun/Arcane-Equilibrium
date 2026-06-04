@@ -15,6 +15,8 @@ from __future__ import annotations
 
 import copy
 import datetime as _dt
+import hashlib
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -59,6 +61,7 @@ PROMOTION_EVIDENCE_SOURCE_TIERS: tuple[str, ...] = (
 PROMOTION_REPLAY_REGISTRY_STATUSES: tuple[str, ...] = ("completed",)
 HIDDEN_OOS_STATE_SCHEMA_VERSION = "hidden_oos_state_v1"
 HIDDEN_OOS_PROMOTION_STATE = "sealed"
+REGISTRY_RESIDUAL_ALPHA_HASH_FIELD = "demo_residual_alpha_report_hash"
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -132,6 +135,22 @@ def build_live_candidate_evidence_from_source(
     )
     if registry_validation is not None:
         reason, verdict = registry_validation
+        return _contract_result(
+            reason=reason,
+            verdict=verdict,
+            residual_report=residual_report,
+            source_tier=source_tier,
+            replay_experiment_id=replay_experiment_id,
+            replay_manifest_hash=replay_manifest_hash,
+            lineage_downgraded=verdict == PENDING_SCHEMA,
+        )
+
+    residual_registry_validation = _validate_registry_residual_report_hash(
+        source_row=source_row,
+        residual_report=residual_report,
+    )
+    if residual_registry_validation is not None:
+        reason, verdict = residual_registry_validation
         return _contract_result(
             reason=reason,
             verdict=verdict,
@@ -311,6 +330,38 @@ def _validate_replay_registry_snapshot(
         if not _text(source_row.get(field)):
             return f"{field}_missing", PENDING_SCHEMA
 
+    return None
+
+
+def _validate_registry_residual_report_hash(
+    *,
+    source_row: Mapping[str, Any],
+    residual_report: Mapping[str, Any] | None,
+) -> tuple[str, str] | None:
+    """驗 replay manifest 是否承諾同一份 residual alpha report。
+
+    只比對 hash，不信任 registry manifest 內的 report body；report body 仍由
+    canonical ``demo_residual_alpha_report`` 欄位提供並由 validator 檢查。
+    """
+    registry_manifest = source_row.get("replay_registry_manifest_jsonb")
+    if not isinstance(registry_manifest, Mapping):
+        return "replay_registry_manifest_jsonb_missing", PENDING_SCHEMA
+    registry_hash = _text(registry_manifest.get(REGISTRY_RESIDUAL_ALPHA_HASH_FIELD))
+    if not registry_hash:
+        return f"replay_registry_{REGISTRY_RESIDUAL_ALPHA_HASH_FIELD}_missing", (
+            PENDING_SCHEMA
+        )
+    if not _is_hex64(registry_hash):
+        return f"replay_registry_{REGISTRY_RESIDUAL_ALPHA_HASH_FIELD}_malformed", (
+            INVALID
+        )
+    if not isinstance(residual_report, Mapping):
+        return "residual_alpha:not_dict", INVALID
+    expected_hash = _canonical_sha256(dict(residual_report))
+    if registry_hash != expected_hash:
+        return f"replay_registry_{REGISTRY_RESIDUAL_ALPHA_HASH_FIELD}_mismatch", (
+            INVALID
+        )
     return None
 
 
@@ -504,6 +555,16 @@ def _text(value: Any) -> str:
     return str(value).strip()
 
 
+def _canonical_sha256(value: Any) -> str:
+    canonical = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
 def _first_present(*values: Any) -> Any:
     for value in values:
         if _text(value):
@@ -603,6 +664,7 @@ def _parse_datetime(value: Any) -> _dt.datetime | None:
 __all__ = [
     "HIDDEN_OOS_STATE_SCHEMA_VERSION",
     "HIDDEN_OOS_PROMOTION_STATE",
+    "REGISTRY_RESIDUAL_ALPHA_HASH_FIELD",
     "PROMOTION_EVIDENCE_SOURCE_TIERS",
     "PROMOTION_REPLAY_REGISTRY_STATUSES",
     "CandidateEvidenceSourceContractBuild",

@@ -70,6 +70,7 @@ from replay import experiment_registry as _er  # noqa: E402
 _DUMMY_ENGINE_SHA = "0" * 64
 V049_INSERT_MANIFEST_JSONB_PARAM_INDEX = 18
 V049_INSERT_MANIFEST_HASH_PARAM_INDEX = 19
+_DUMMY_RESIDUAL_ALPHA_HASH = "c" * 64
 
 
 @pytest.fixture(autouse=True)
@@ -255,6 +256,7 @@ def test_register_alpha_hidden_oos_state_persists_v049_windows(monkeypatch):
 
     manifest = _minimal_register_body()["manifest_jsonb"]
     manifest["hidden_oos_state"] = _alpha_hidden_oos_state()
+    manifest["demo_residual_alpha_report_hash"] = _DUMMY_RESIDUAL_ALPHA_HASH
     client = _build_client(_operator_actor_alice)
     resp = client.post(
         "/api/v1/replay/experiments/register",
@@ -291,6 +293,7 @@ def test_register_alpha_hidden_oos_state_missing_candidate_window_400(monkeypatc
     del state["candidate_window_start"]
     manifest = _minimal_register_body()["manifest_jsonb"]
     manifest["hidden_oos_state"] = state
+    manifest["demo_residual_alpha_report_hash"] = _DUMMY_RESIDUAL_ALPHA_HASH
 
     client = _build_client(_operator_actor_alice)
     resp = client.post(
@@ -301,6 +304,33 @@ def test_register_alpha_hidden_oos_state_missing_candidate_window_400(monkeypatc
     assert resp.status_code == 400, resp.text
     detail = resp.json().get("detail", {})
     assert "replay_register_alpha_hidden_oos_state_candidate_window_start_missing" in (
+        detail.get("reason_codes", [])
+    )
+    insert_sqls = [s for s, _ in insert_records if "INSERT INTO replay.experiments" in s]
+    assert len(insert_sqls) == 0
+
+
+def test_register_alpha_hidden_oos_state_missing_residual_hash_400(monkeypatch):
+    """hidden_oos_state 缺 residual report hash → register fail-closed."""
+    insert_records: list = []
+
+    def _get_pg_conn_factory():
+        return _stub_get_pg_conn_for_insert(insert_records, [])
+
+    monkeypatch.setattr("app.replay_routes.get_pg_conn", _get_pg_conn_factory)
+
+    manifest = _minimal_register_body()["manifest_jsonb"]
+    manifest["hidden_oos_state"] = _alpha_hidden_oos_state()
+
+    client = _build_client(_operator_actor_alice)
+    resp = client.post(
+        "/api/v1/replay/experiments/register",
+        json=_minimal_register_body(manifest_jsonb=manifest, embargo_days=1.0),
+    )
+
+    assert resp.status_code == 400, resp.text
+    detail = resp.json().get("detail", {})
+    assert "replay_register_alpha_hidden_oos_state_residual_hash_missing" in (
         detail.get("reason_codes", [])
     )
     insert_sqls = [s for s, _ in insert_records if "INSERT INTO replay.experiments" in s]
