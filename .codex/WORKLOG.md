@@ -18,6 +18,13 @@ YYYY-MM-DD HH:MM TZ
 - verification: focused manifest/MLDE/LG5 suite 99 passed, py_compile PASS, git diff --check PASS; full `program_code/ml_training/tests` still has the known 2 unrelated `synthetic_replay` allowlist failures
 - next P1 work is real manifest producer / hidden OOS registry / row-level lineage persistence; this checkpoint intentionally does not generate fake manifest or change DB/runtime
 
+2026-06-04 16:30 CEST
+- continued Alpha-Edge P1 with a producer-facing `candidate_evidence_manifest_builder` source/test checkpoint
+- wired MLDE `should_create_live_candidate()` and live candidate payload builder through the same builder, while keeping missing replay manifest hash / lineage gaps fail-closed
+- `_fetch_pending` now carries row-level replay metadata into Python with forward-compatible NULL aliases; no DB migration/runtime/deploy
+- E2 initially BLOCKed missing replay-manifest-hash downgrade; PM fixed it and E2 re-reviewed PASS
+- verification: focused builder/MLDE/source-filter suite 77 passed/1 skipped, LG5 59 passed, full `program_code/ml_training/tests` 484 passed/31 skipped, py_compile and diff-check PASS
+
 2026-06-01 22:xx CEST
 - calibrated TODO after operator parallel repairs: origin/Linux are on alpha hygiene deploy commit `324001c3`, while Mac is ahead with local SM parity/helper commits and still has uncommitted maintenance WIP
 - confirmed V5.8 remains preserved but active-IMPL stays gated by P0-EDGE-1; new repairs do not unlock the 13-module autonomy IMPL track
