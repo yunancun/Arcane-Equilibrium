@@ -111,9 +111,32 @@ def validate_candidate_evidence_manifest(
         reasons.append("replay_experiment_id_missing")
         lineage_downgraded = True
 
+    replay_manifest_hash = _text(manifest.get("replay_manifest_hash"))
+    if not replay_manifest_hash:
+        reasons.append("replay_manifest_hash_missing")
+        lineage_downgraded = True
+    elif not _is_stable_hash(replay_manifest_hash):
+        reasons.append("replay_manifest_hash_malformed")
+
     hidden_ok, hidden_reason = _validate_hidden_oos(manifest.get("hidden_oos"))
     if not hidden_ok:
         reasons.append(hidden_reason)
+
+    residual_ok, residual_reason = validate_demo_residual_alpha_report(residual_report)
+    if not residual_ok:
+        reasons.append(f"residual_alpha:{residual_reason}")
+    else:
+        residual_hash = _text(manifest.get("demo_residual_alpha_report_hash"))
+        if not residual_hash:
+            reasons.append("demo_residual_alpha_report_hash_missing")
+        elif not _is_hex64(residual_hash):
+            reasons.append("demo_residual_alpha_report_hash_malformed")
+        elif isinstance(residual_report, Mapping):
+            expected = _canonical_sha256(dict(residual_report))
+            if residual_hash != expected:
+                reasons.append("demo_residual_alpha_report_hash_mismatch")
+        else:
+            reasons.append("demo_residual_alpha_report_hash_unverifiable")
 
     manifest_hash = _text(manifest.get("manifest_hash"))
     if not manifest_hash:
@@ -123,21 +146,6 @@ def validate_candidate_evidence_manifest(
         reasons.append("manifest_hash_malformed")
     elif not reasons and manifest_hash != compute_candidate_evidence_manifest_hash(manifest):
         reasons.append("manifest_hash_mismatch")
-
-    residual_ok, residual_reason = validate_demo_residual_alpha_report(residual_report)
-    if not residual_ok:
-        reasons.append(f"residual_alpha:{residual_reason}")
-
-    residual_hash = _text(manifest.get("demo_residual_alpha_report_hash"))
-    if residual_hash:
-        if not _is_hex64(residual_hash):
-            reasons.append("demo_residual_alpha_report_hash_malformed")
-        elif isinstance(residual_report, Mapping):
-            expected = _canonical_sha256(dict(residual_report))
-            if residual_hash != expected:
-                reasons.append("demo_residual_alpha_report_hash_mismatch")
-        else:
-            reasons.append("demo_residual_alpha_report_hash_unverifiable")
 
     if reasons:
         verdict = _failure_verdict(reasons)

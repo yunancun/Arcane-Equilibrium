@@ -114,7 +114,16 @@ class _ProbeCursor:
 PROBE_FULL_SCHEMA = [
     [("evidence_source_tier",), ("replay_experiment_id",), ("manifest_hash",)],
     (True,),
-    [("expires_at",), ("status",)],
+    [
+        ("expires_at",),
+        ("status",),
+        ("manifest_hash",),
+        ("manifest_jsonb",),
+        ("oos_label_window_start",),
+        ("oos_label_window_end",),
+        ("oos_embargo_seconds",),
+        ("total_candidates_k",),
+    ],
 ]
 
 # Phase 2 — V040 landed but replay metadata columns NOT YET added.
@@ -150,6 +159,7 @@ def test_case1_evidence_source_tier_allowlist_allows_5_valid_tiers():
         "has_replay_experiments": True,
         "replay_experiments_has_expires_at": True,
         "replay_experiments_has_status": True,
+        "replay_experiments_has_manifest_hash": True,
     }
     fragment, extra = build_evidence_source_filter(caps)
 
@@ -181,6 +191,7 @@ def test_case2_expired_manifest_filter_excludes_expired_row():
         "has_replay_experiments": True,
         "replay_experiments_has_expires_at": True,
         "replay_experiments_has_status": True,
+        "replay_experiments_has_manifest_hash": True,
     }
     fragment, _ = build_evidence_source_filter(caps)
 
@@ -207,6 +218,7 @@ def test_case3_cancelled_status_filter_excludes_cancelled_row():
         "has_replay_experiments": True,
         "replay_experiments_has_expires_at": True,
         "replay_experiments_has_status": True,
+        "replay_experiments_has_manifest_hash": True,
     }
     fragment, _ = build_evidence_source_filter(caps)
     # status NOT IN ('cancelled','expired','compromised') 必出現
@@ -228,6 +240,7 @@ def test_case4_null_replay_experiment_id_legacy_row_allowed():
         "has_replay_experiments": True,
         "replay_experiments_has_expires_at": True,
         "replay_experiments_has_status": True,
+        "replay_experiments_has_manifest_hash": True,
     }
     fragment, _ = build_evidence_source_filter(caps)
 
@@ -314,7 +327,13 @@ def test_fetch_pending_full_schema_executes_filtered_sql():
     assert "evidence_source_tier::text AS evidence_source_tier" in final_sql
     assert "replay_experiment_id::text AS replay_experiment_id" in final_sql
     assert "encode(manifest_hash, 'hex') AS manifest_hash" in final_sql
+    assert "LEFT JOIN replay.experiments e" in final_sql
     assert "expires_at > now()" in final_sql
+    assert "e.status::text AS replay_registry_status" in final_sql
+    assert "encode(e.manifest_hash, 'hex') AS replay_registry_manifest_hash" in final_sql
+    assert "e.manifest_jsonb AS replay_registry_manifest_jsonb" in final_sql
+    assert "e.oos_label_window_start AS replay_registry_oos_label_window_start" in final_sql
+    assert "e.total_candidates_K AS replay_registry_total_candidates_k" in final_sql
     # tier allowlist 必為 SQL params 之一（預設排除 synthetic_replay，P3-03）
     # default accepted tiers (synthetic excluded) must be one of the SQL params
     assert list(DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST) in [list(p) if isinstance(p, list) else p for p in final_params]
@@ -342,7 +361,33 @@ def test_fetch_pending_legacy_schema_falls_back_to_unfiltered_sql():
     assert "NULL::text AS evidence_source_tier" in final_sql
     assert "NULL::text AS replay_experiment_id" in final_sql
     assert "NULL::text AS manifest_hash" in final_sql
+    assert "NULL::text AS replay_registry_status" in final_sql
+    assert "NULL::jsonb AS replay_registry_manifest_jsonb" in final_sql
     assert "COALESCE(evidence_source_tier" not in final_sql
+
+
+def test_fetch_pending_without_row_fk_does_not_reference_registry_alias():
+    """row FK 欄位不存在時，不能 SELECT e.* registry alias。"""
+    cur = _ProbeCursor(
+        probe_responses=[
+            [("evidence_source_tier",)],  # no replay_experiment_id column
+            (True,),
+            [
+                ("expires_at",),
+                ("status",),
+                ("manifest_hash",),
+                ("manifest_jsonb",),
+            ],
+        ],
+        fetch_rows=[],
+    )
+    _fetch_pending(cur, DemoApplierConfig())
+
+    final_sql, _ = cur.executed[-1]
+    assert "LEFT JOIN replay.experiments e" not in final_sql
+    assert " e." not in final_sql
+    assert "NULL::text AS replay_registry_status" in final_sql
+    assert "NULL::jsonb AS replay_registry_manifest_jsonb" in final_sql
 
 
 def test_fetch_pending_helper_accepts_required_kwargs():
@@ -377,8 +422,8 @@ def test_fetch_pending_helper_accepts_required_kwargs():
 
 
 def test_evidence_filter_capabilities_returns_all_keys():
-    """``evidence_filter_capabilities`` 回 dict 必含 6 個 schema-presence key。
-    The cap dict must always include 6 schema-presence keys for caller
+    """``evidence_filter_capabilities`` 回 dict 必含 schema-presence key。
+    The cap dict must always include stable schema-presence keys for caller
     branching.
     """
     cur = _ProbeCursor(probe_responses=[
@@ -392,6 +437,12 @@ def test_evidence_filter_capabilities_returns_all_keys():
         "has_replay_experiments",
         "replay_experiments_has_expires_at",
         "replay_experiments_has_status",
+        "replay_experiments_has_manifest_hash",
+        "replay_experiments_has_manifest_jsonb",
+        "replay_experiments_has_oos_label_window_start",
+        "replay_experiments_has_oos_label_window_end",
+        "replay_experiments_has_oos_embargo_seconds",
+        "replay_experiments_has_total_candidates_k",
     }
     assert set(caps.keys()) == expected_keys
     # legacy schema → all False
@@ -400,7 +451,7 @@ def test_evidence_filter_capabilities_returns_all_keys():
 
 
 def test_evidence_filter_capabilities_full_schema():
-    """Full schema → all 6 caps True / 完整 schema → 6 caps 全 True。"""
+    """Full schema → all caps True / 完整 schema → caps 全 True。"""
     cur = _ProbeCursor(probe_responses=PROBE_FULL_SCHEMA)
     caps = evidence_filter_capabilities(cur)
     assert caps["has_evidence_source_tier"] is True
@@ -409,6 +460,12 @@ def test_evidence_filter_capabilities_full_schema():
     assert caps["has_replay_experiments"] is True
     assert caps["replay_experiments_has_expires_at"] is True
     assert caps["replay_experiments_has_status"] is True
+    assert caps["replay_experiments_has_manifest_hash"] is True
+    assert caps["replay_experiments_has_manifest_jsonb"] is True
+    assert caps["replay_experiments_has_oos_label_window_start"] is True
+    assert caps["replay_experiments_has_oos_label_window_end"] is True
+    assert caps["replay_experiments_has_oos_embargo_seconds"] is True
+    assert caps["replay_experiments_has_total_candidates_k"] is True
 
 
 # ─── P3-03: synthetic_replay opt-in bucket ───────────────────────────────

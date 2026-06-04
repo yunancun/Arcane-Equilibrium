@@ -16,7 +16,9 @@ mocked DB) are deferred to LG-5-IMPL-4 (E4) per RFC §6 ownership split.
 
 from __future__ import annotations
 
+import hashlib
 import inspect
+import json
 import math
 
 import pytest
@@ -76,7 +78,19 @@ def _valid_residual_alpha_report(**overrides) -> dict:
     return report
 
 
+def _canonical_sha256(value: dict) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
 def _valid_candidate_evidence_manifest(**overrides) -> dict:
+    residual_report = _valid_residual_alpha_report()
     manifest = {
         "schema_version": CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
         "verdict": PROMOTION_READY,
@@ -84,6 +98,8 @@ def _valid_candidate_evidence_manifest(**overrides) -> dict:
         "family_id": "family-alpha",
         "spec_hash": "a" * 64,
         "replay_experiment_id": "replay-exp-1",
+        "replay_manifest_hash": "c" * 64,
+        "demo_residual_alpha_report_hash": _canonical_sha256(residual_report),
         "hidden_oos": {
             "split_hash": "b" * 64,
             "window_start": "2026-05-01T00:00:00Z",

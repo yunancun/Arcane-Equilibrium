@@ -2,10 +2,10 @@
 
 模組目的：
     驗證 ``mlde_demo_applier_evidence_filter`` 的 4-gate capability
-    probe + Block A/B 構造邏輯在 6 個 case 下行為符合 MIT §1.1 6-key
+    probe + Block A/B 構造邏輯在 6 個 case 下行為符合 registry snapshot key
     + AI-E §9.3 規格：
 
-      Case 1 — Full capability (6/6 true)：完整 Block B 含
+      Case 1 — Full capability (12/12 true)：完整 Block B 含
               `manifest_hash NOT NULL` + `expires_at > now()` +
               `status NOT IN ('cancelled','expired','compromised')`。
       Case 2 — Partial capability (`replay_experiments_has_expires_at=
@@ -27,7 +27,7 @@
       _source_filter 4-level gate) + line 240-323 (fetch_pending_sql_
       and_params 含 R7-T7 Part B observability log)。
     - AI-E advisory §9.3 capability probe spec。
-    - MIT §1.1 6-key 4-gate naming。
+    - MIT §1.1 capability 4-gate naming。
 
 Hard contracts:
     - 純 unit test：mock cursor + fail-soft fallback；0 PG hit（除 Case 6）。
@@ -59,7 +59,7 @@ class _ProbeCursor:
     Probe 流程依序：
       1. mlde_shadow_recommendations 欄位 probe (fetchall)
       2. replay.experiments regclass 探（fetchone, returns (True,) or (False,)）
-      3. replay.experiments expires_at + status 欄位 probe (fetchall)
+      3. replay.experiments registry 欄位 probe (fetchall)
     """
 
     def __init__(
@@ -108,11 +108,20 @@ class _ProbeCursor:
 
 # ─── Probe response 預設常量 ───────────────────────────────────────────
 
-# Full schema：6/6 capability all true
+# Full schema：12/12 capability all true
 PROBE_FULL_SCHEMA = [
     [("evidence_source_tier",), ("replay_experiment_id",), ("manifest_hash",)],
     (True,),  # replay.experiments table 存在
-    [("expires_at",), ("status",)],
+    [
+        ("expires_at",),
+        ("status",),
+        ("manifest_hash",),
+        ("manifest_jsonb",),
+        ("oos_label_window_start",),
+        ("oos_label_window_end",),
+        ("oos_embargo_seconds",),
+        ("total_candidates_k",),
+    ],
 ]
 
 # Partial schema：column 在但 stub 缺 expires_at + status
@@ -137,11 +146,11 @@ PROBE_LEGACY_NONE = [
 ]
 
 
-# ─── Case 1：Full capability (6/6 true) → 完整 Block B ───────────────────
+# ─── Case 1：Full capability (12/12 true) → 完整 Block B ──────────────────
 
 
 def test_case1_full_capability_all_true_emits_full_block_b():
-    """Case 1：6/6 capability 全 true → Block B 含 manifest_hash NOT NULL +
+    """Case 1：12/12 capability 全 true → Block B 含 manifest_hash NOT NULL +
     expires_at > now() + status NOT IN 三 tier 完整版。
     """
     caps = {
@@ -151,6 +160,7 @@ def test_case1_full_capability_all_true_emits_full_block_b():
         "has_replay_experiments": True,
         "replay_experiments_has_expires_at": True,
         "replay_experiments_has_status": True,
+        "replay_experiments_has_manifest_hash": True,
     }
     fragment, extra = build_evidence_source_filter(caps)
 
@@ -342,11 +352,14 @@ def test_case6_real_pg_smoke_full_block_b_fires():
     with psycopg2.connect(dsn) as conn:
         with conn.cursor() as cur:
             caps = evidence_filter_capabilities(cur)
-            # Real PG 應 land 6/6 capability
+            # Real PG 應 land registry capability
             assert caps["has_evidence_source_tier"], "V040 evidence_source_tier 未 land"
             assert caps["has_replay_experiment_id"], "V051 replay_experiment_id 未 land"
             assert caps["has_manifest_hash"], "V051 manifest_hash 未 land"
             assert caps["has_replay_experiments"], "V049 replay.experiments 未 land"
+            assert caps["replay_experiments_has_manifest_hash"], (
+                "V049 replay.experiments.manifest_hash 未 land"
+            )
             assert caps["replay_experiments_has_expires_at"], (
                 "V049 replay.experiments.expires_at 未 land"
             )
@@ -387,14 +400,14 @@ def test_observability_log_full_capability(caplog):
             max_recommendations=50,
         )
 
-    # 必有一條 INFO log 含 caps=*/6 + block_a / block_b
+    # 必有一條 INFO log 含 caps=*/12 + block_a / block_b
     log_msgs = [r.getMessage() for r in caplog.records]
     capability_dumps = [m for m in log_msgs if "evidence_filter capability dump" in m]
     assert len(capability_dumps) >= 1, (
         f"missing capability dump log; all logs={log_msgs}"
     )
     dump = capability_dumps[0]
-    assert "caps=6/6" in dump
+    assert "caps=12/12" in dump
     assert "block_a=on" in dump
     assert "block_b=full" in dump
 
@@ -421,7 +434,7 @@ def test_observability_log_partial_capability(caplog):
     dump = capability_dumps[0]
     # 4 個 true：has_evidence_source_tier + has_replay_experiment_id +
     # has_manifest_hash + has_replay_experiments
-    assert "caps=4/6" in dump
+    assert "caps=4/12" in dump
     assert "block_a=on" in dump
     assert "block_b=partial" in dump
 
@@ -448,6 +461,6 @@ def test_observability_log_legacy_schema_skip(caplog):
     capability_dumps = [m for m in log_msgs if "evidence_filter capability dump" in m]
     assert len(capability_dumps) >= 1
     dump = capability_dumps[0]
-    assert "caps=0/6" in dump
+    assert "caps=0/12" in dump
     assert "block_a=skip" in dump
     assert "block_b=skip" in dump
