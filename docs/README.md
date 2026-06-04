@@ -1386,3 +1386,4 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 | `2026-05-23--sprint_4plus_5plus_wave1_closure.md` | Sprint 4+ / 5+ Wave 1 closure archive：closure narrative 與過時 active TODO 內容歸檔 |
 | `2026-05-31--todo_v92_archive.md` | TODO v92 archive：v75-91 歷史增量與 P0-EDGE cost-wall / alpha redirection / V### reconcile 決策歸檔 |
 | `2026-05-31--todo_v93_pre_aeg_cleanup_archive.md` | TODO v93 pre-AEG cleanup archive：AEG cleanup 前 active TODO 快照與歷史敘事歸檔 |
+| `2026-06-03--todo_v110_pre_cleanup_archive.md` | TODO v110 pre-cleanup archive：funding/OI backfill 落地後 active TODO 快照與 AEG/P0-EDGE 歷史敘事歸檔 |

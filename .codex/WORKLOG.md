@@ -502,3 +502,16 @@ YYYY-MM-DD HH:MM TZ
 - result: FND-1 document updated from recommendation to approved design branch; FND-2 PIT universe builder contract and FND-4 public endpoint runner/client-gap + persistence map landed; PM and Operator integration briefs added; TODO advanced to v103.
 - verification: sub-agents reported no file/git/DB/runtime changes; `git diff --check` PASS; `python3 -m pytest tests/structure/test_docs_readme_index_static.py -q` = 5 passed.
 - boundary: docs/design/read-only only; no migration apply, DB write, retention mutation, endpoint ingestion, backfill writer/run, runtime deploy, auth, order, collector runtime, alpha scoring, or promotion verdict.
+
+2026-06-04 CEST
+- PM task: 基於 Claude 記憶 + PM second-pass 外部框架/自審報告，派發 agent 研究 `P0-EDGE-1` 後續改進實現方案，並補 Codex 記憶中的文檔/注釋中文優先規則。
+- dispatch chain: PM(default) -> QC(default) alpha/統計閘門設計 + MIT(default) data/schema/evidence 設計 + PA(default) module/interface 架構方案 + BB(default) Bybit/RevolutX 冪等性方案 + CC(default) root-principle/hard-boundary 審查 -> PM(default) 整合。
+- expected result: 中文 implementation-plan synthesis，覆蓋 `beta_residualizer` / `R_beta`、hidden OOS、`SignalSpec`/evidence manifest、evidence-lineage downgrade、regime leak fix、postmortem cost-defeat、Bybit `orderLinkId` auto-mint。
+- boundary: investigation/docs only；不改交易代碼、策略/風控配置、DB migration、runtime、auth、order path 或 live/demo 狀態。
+
+2026-06-04 CEST
+- PM task: 推進 `P0-A-REGIME-LEAK-FIX` 與 `P0-B-RESIDUAL-ALPHA-GATE-CORE` 首批實作 checkpoint。
+- dispatch chain: PM(default) -> E1(worker) Anscombe for P0-A + E1a(worker) Huygens/Bohr/Jason for P0-B -> E2(explorer) Kuhn/Banach/Euclid adversarial review -> E4(worker) Pascal/Beauvoir/Hilbert verification -> PM(default) integration.
+- result: `compute_rule_based_regime` high-vol tercile 改為 expanding/prior-365，新增 future extreme vol prefix invariance test；新增離線 `ResidualAlphaGate` core diagnostic，含 residual beta、PSR/DSR/PBO 欄位、fit window/factor hash/coverage/verdict/reasons，並補 PBO peer eval-window scope regression。
+- verification: local + E4 green：multiday trend diagnostic `37 passed`；residual alpha focused `14 passed`；learning_engine tests `178 passed`；`py_compile` PASS；untracked-aware trailing whitespace check PASS。E2 final verdict `ACCEPT_WITH_RISK` with no blockers。
+- boundary/risk: P0-B is core diagnostic only, not promotion-ready；PBO/DSR 仍是近似，`allow_missing_pbo_for_core_tests=True` 不得進 production promotion path；no DB migration, runtime deploy, auth/order/risk config, paper/live enable, or promotion state change.
