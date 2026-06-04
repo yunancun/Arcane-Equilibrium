@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -41,12 +42,14 @@ from canary_comparator import (
     MISSING,
     BOUNDARY_DIVERGENCE,
 )
+import engine_watchdog
 from engine_watchdog import (
     check_snapshot_freshness,
     classify_engine_failure,
     get_watchdog_status,
     on_engine_crash,
     on_engine_recovery,
+    trigger_restart,
     WatchdogState,
     run_watchdog,
 )
@@ -406,11 +409,18 @@ class TestWatchdogCrashRecovery(unittest.TestCase):
         self.assertFalse(state.engine_alive)
         self.assertEqual(state.total_crashes, 1)
 
-    def test_duplicate_crash_ignored(self):
-        """Crash while already in crash state → none / 已在崩潰狀態再崩潰 → 無動作"""
+    def test_duplicate_crash_does_not_recount(self):
+        """WATCHDOG-RETRY-LEVELTRIGGER-1：已在崩潰狀態再 poll → 不重複計 strike。
+
+        修正後語義：計數是 edge-triggered，已 down（engine_alive=False）的重複
+        poll 不再 append crash_timestamps、不再 increment total_crashes；但不再
+        早退「none」（那是死鎖成因）。無 data_dir 時不跑重試、不算轉移 → 回 fallback。"""
         state = WatchdogState(engine_alive=False)
         action = on_engine_crash(state, 15.0)
-        self.assertEqual(action, "none")
+        self.assertEqual(action, "fallback")
+        # 關鍵不變量：重複 poll 不重複計數
+        self.assertEqual(state.total_crashes, 0)
+        self.assertEqual(len(state.crash_timestamps), 0)
 
     def test_three_strikes_triggers_rollback(self):
         """3 crashes in window → rollback / 窗口內 3 次崩潰 → 回滾"""
@@ -874,16 +884,359 @@ class TestOnEngineCrashClassification(unittest.TestCase):
         self.assertEqual(state.total_crashes, 1)
         self.assertEqual(state.total_network_outages, 0)
 
-    def test_repeat_outage_while_in_outage_state_returns_none(self):
-        """Second outage while engine_alive=False is a no-op (dedup guard).
-        已在中斷狀態時再次 on_engine_crash → none"""
+    def test_repeat_outage_while_in_outage_state_does_not_recount(self):
+        """WATCHDOG-RETRY-LEVELTRIGGER-1：已在中斷狀態時再 poll → 重分類為
+        network_outage 但不重複計數，且永不重啟。
+
+        修正後語義：network_outage 每次 poll 重分類（level），但 total_network_outages
+        只在下行轉移時 +1（edge）。已 down（engine_alive=False）的重複 poll 回
+        network_outage、計數不變、不觸 trigger_restart。"""
         state = WatchdogState(engine_alive=False)
         log_path = self._write_log([
             f"ERROR Temporary failure in name resolution {i}" for i in range(8)
         ])
         action = on_engine_crash(state, 30.0, data_dir=self._tmpdir.name, log_path=log_path)
-        self.assertEqual(action, "none")
+        self.assertEqual(action, "network_outage")
+        # 關鍵不變量：重複 poll 不重複計數
         self.assertEqual(state.total_network_outages, 0)
+        self.assertEqual(len(state.network_outage_timestamps), 0)
+
+    # ─── WATCHDOG-RETRY-LEVELTRIGGER-1 (2026-06-05) 死鎖修復回歸 ───
+
+    def test_already_down_crash_retries_restart_when_allowed(self):
+        """REGRESSION（死鎖核心）：engine_alive=False（已從 crash down）+ stale +
+        should_restart→True ⇒ trigger_restart 必被呼叫。
+
+        修正前：早退「none」，trigger_restart 永不被呼叫 → 引擎卡在第一次失敗，
+        熔斷計數永遠到不了 5。修正後：retry 是 level-triggered，已 down 的重複
+        poll 仍跑 should_restart→trigger_restart。"""
+        state = WatchdogState(engine_alive=False)
+        # engine_crash log（非 network_outage），確保走 retry 區塊
+        log_path = self._write_log(["ERROR something broke", "thread 'main' panicked at 'boom'"])
+        with mock.patch.object(engine_watchdog, "should_restart",
+                               return_value=(True, "ok", "ok")) as m_should, \
+                mock.patch.object(engine_watchdog, "trigger_restart", return_value=True) as m_trigger:
+            action = on_engine_crash(state, 99.0, data_dir=self._tmpdir.name, log_path=log_path)
+        # retry 必被觸發（這是修正前 NOT called 的關鍵差異）
+        m_should.assert_called_once()
+        m_trigger.assert_called_once_with(self._tmpdir.name)
+        # 已 down 的重複 poll 不重複計數
+        self.assertEqual(state.total_crashes, 0)
+        self.assertEqual(action, "fallback")
+
+    def test_already_down_crash_does_not_restart_when_circuit_broken(self):
+        """level-triggered retry 仍受 should_restart 閘控：circuit_broken →
+        trigger_restart 不被呼叫（證明不會 storm）。"""
+        state = WatchdogState(engine_alive=False)
+        log_path = self._write_log(["ERROR something broke"])
+        with mock.patch.object(engine_watchdog, "should_restart",
+                               return_value=(False, "circuit_broken", "circuit broken")) as m_should, \
+                mock.patch.object(engine_watchdog, "trigger_restart") as m_trigger:
+            on_engine_crash(state, 99.0, data_dir=self._tmpdir.name, log_path=log_path)
+        m_should.assert_called_once()
+        m_trigger.assert_not_called()
+
+    def test_network_outage_never_restarts_even_on_repeated_polls(self):
+        """network_outage 永不重啟（重啟治不了 DNS + 會燒熔斷），即使重複 poll。"""
+        log_path = self._write_log([
+            f"ERROR Temporary failure in name resolution {i}" for i in range(8)
+        ])
+        with mock.patch.object(engine_watchdog, "should_restart",
+                               return_value=(True, "ok", "ok")) as m_should, \
+                mock.patch.object(engine_watchdog, "trigger_restart") as m_trigger:
+            # 第一次 poll（轉移）
+            state = WatchdogState()
+            self.assertEqual(
+                on_engine_crash(state, 30.0, data_dir=self._tmpdir.name, log_path=log_path),
+                "network_outage",
+            )
+            # 第二次 poll（已 down，level 重分類）
+            self.assertEqual(
+                on_engine_crash(state, 30.0, data_dir=self._tmpdir.name, log_path=log_path),
+                "network_outage",
+            )
+        # network_outage 分支永不落到 retry 區塊
+        m_should.assert_not_called()
+        m_trigger.assert_not_called()
+        # 轉移計數一次，重複 poll 不再 +1
+        self.assertEqual(state.total_network_outages, 1)
+
+    def test_two_consecutive_crash_polls_count_one_strike(self):
+        """No double-count：兩次連續 engine_crash poll 只 +1 total_crashes（edge）。"""
+        log_path = self._write_log(["ERROR something broke"])
+        with mock.patch.object(engine_watchdog, "should_restart",
+                               return_value=(False, "backoff", "backoff window active")), \
+                mock.patch.object(engine_watchdog, "trigger_restart"):
+            state = WatchdogState()
+            on_engine_crash(state, 50.0, data_dir=self._tmpdir.name, log_path=log_path)
+            on_engine_crash(state, 50.0, data_dir=self._tmpdir.name, log_path=log_path)
+        self.assertEqual(state.total_crashes, 1)
+        self.assertEqual(len(state.crash_timestamps), 1)
+
+    # ─── FINDING #2 (2026-06-05) RESTART_SKIPPED canary 去重節流回歸 ───
+
+    def _count_canary_events(self, event_name: str) -> int:
+        """數 canary_events.jsonl 中指定 event 的條數。"""
+        events_path = os.path.join(self._tmpdir.name, "canary_events.jsonl")
+        if not os.path.exists(events_path):
+            return 0
+        with open(events_path, "r", encoding="utf-8") as f:
+            return sum(
+                1 for line in f
+                if line.strip() and json.loads(line).get("event") == event_name
+            )
+
+    def test_held_skip_state_emits_restart_skipped_at_most_once(self):
+        """FINDING #2 核心：N 次連續 poll 處於同一 skip key（held circuit_broken）
+        ⇒ 至多 1 條 RESTART_SKIPPED canary 事件（避免終態下每 2s 灌一條淹沒
+        RESTART_CIRCUIT_BROKEN）。
+
+        以 engine_alive=False 起始確保每次 poll 都跑 level-triggered retry → skip
+        分支；should_restart 用 CONSTANT 3-tuple 模擬 held circuit_broken。此測試
+        守的是「完全沒節流」這個 mutation；per-poll 字串變化的盲區由下面
+        test_backoff_window_emits_restart_skipped_at_most_once 用真 should_restart
+        驅動覆蓋。"""
+        log_path = self._write_log(["ERROR something broke"])
+        with mock.patch.object(
+            engine_watchdog, "should_restart",
+            return_value=(False, "circuit_broken",
+                          "circuit broken after 5 consecutive failures"),
+        ), mock.patch.object(engine_watchdog, "trigger_restart") as m_trigger:
+            state = WatchdogState(engine_alive=False)
+            for _ in range(10):
+                on_engine_crash(state, 99.0, data_dir=self._tmpdir.name, log_path=log_path)
+        # held circuit_broken 永不重啟
+        m_trigger.assert_not_called()
+        # 10 次 poll 同一 key → 只寫 1 條 RESTART_SKIPPED
+        self.assertEqual(self._count_canary_events("RESTART_SKIPPED"), 1)
+
+    def test_restart_skipped_reason_change_emits_again(self):
+        """FINDING #2：reason_key CHANGE 仍要再發一次（不可被去重 marker 永久吞掉）。
+
+        先 held backoff key 數 poll（1 條），再切到 circuit_broken key
+        （第 2 條），證明 marker 是「key 改變才發」而非「發過就永遠不發」。"""
+        log_path = self._write_log(["ERROR something broke"])
+        state = WatchdogState(engine_alive=False)
+        # 階段一：held backoff window key（detail 帶倒數秒，但去重看 key）
+        with mock.patch.object(
+            engine_watchdog, "should_restart",
+            return_value=(False, "backoff", "backoff window active, 120s remaining"),
+        ), mock.patch.object(engine_watchdog, "trigger_restart"):
+            for _ in range(4):
+                on_engine_crash(state, 99.0, data_dir=self._tmpdir.name, log_path=log_path)
+        self.assertEqual(self._count_canary_events("RESTART_SKIPPED"), 1)
+        # 階段二：key 切換為 circuit_broken → 必須再發一條
+        with mock.patch.object(
+            engine_watchdog, "should_restart",
+            return_value=(False, "circuit_broken",
+                          "circuit broken after 5 consecutive failures"),
+        ), mock.patch.object(engine_watchdog, "trigger_restart"):
+            for _ in range(4):
+                on_engine_crash(state, 99.0, data_dir=self._tmpdir.name, log_path=log_path)
+        self.assertEqual(self._count_canary_events("RESTART_SKIPPED"), 2)
+
+    def test_recovery_resets_skip_marker_so_later_skip_re_emits(self):
+        """FINDING #2：成功恢復清 marker → 之後同 key 再 skip 仍能再發一次。
+
+        模擬：held skip（1 條）→ on_engine_recovery 清 marker → 再 held 同 key
+        （因 marker 已清，再發第 2 條）。證明 reset-on-recovery 正確。"""
+        log_path = self._write_log(["ERROR something broke"])
+        with mock.patch.object(
+            engine_watchdog, "should_restart",
+            return_value=(False, "circuit_broken",
+                          "circuit broken after 5 consecutive failures"),
+        ), mock.patch.object(engine_watchdog, "trigger_restart"):
+            state = WatchdogState(engine_alive=False)
+            for _ in range(3):
+                on_engine_crash(state, 99.0, data_dir=self._tmpdir.name, log_path=log_path)
+            self.assertEqual(self._count_canary_events("RESTART_SKIPPED"), 1)
+            # 引擎恢復（清 marker），再轉回 down
+            on_engine_recovery(state, data_dir=self._tmpdir.name)
+            state.engine_alive = False
+            for _ in range(3):
+                on_engine_crash(state, 99.0, data_dir=self._tmpdir.name, log_path=log_path)
+        self.assertEqual(self._count_canary_events("RESTART_SKIPPED"), 2)
+
+    # ─── FINDING #2-HIGH-1 (2026-06-05) 真 should_restart 驅動（per-poll 變字串盲區）───
+    # E2 抓到：上面的去重測試 mock should_restart 回 CONSTANT 字串，看不到 backoff
+    # 分支 detail 內倒數秒 per-poll 遞減的事實。下面兩個測試 NOT mock should_restart
+    # 的 reason，直接擺好 state（next_allowed_restart_ts / consecutive_failures）讓
+    # 真 backoff window 生效，證明 ≤1 條 RESTART_SKIPPED；並驗 key 變化會再發。
+
+    def _poll_clock(self):
+        """回傳 (advance, fake_time)：fake_time 在單一 poll 內回固定值，advance()
+        把時鐘推進一個 POLL_INTERVAL（2s）。
+
+        為什麼不直接用 side_effect 列表：on_engine_crash 的 engine_crash 路徑每 poll
+        會多次呼叫 time.time()（classify_engine_failure 內 mtime / rotated-log 掃描也
+        呼叫），call 次數依路徑而變，用固定長度 side_effect 會 StopIteration。本 clock
+        讓「同一 poll 內所有 time.time() 回同值、poll 間才遞增」，與內部 call 次數解耦，
+        從而真實逼出 backoff detail 的 per-poll 倒數秒變化。"""
+        cur = {"t": 100000.0}
+
+        def fake_time():
+            return cur["t"]
+
+        def advance():
+            cur["t"] += 2.0  # POLL_INTERVAL=2s
+
+        return advance, fake_time
+
+    def test_backoff_window_emits_restart_skipped_at_most_once(self):
+        """HIGH-1 核心：真 backoff window 整段只發 ≤1 條 RESTART_SKIPPED。
+
+        擺一個遠在未來的 next_allowed_restart_ts，使 should_restart 真的走 backoff
+        分支（detail 含 per-poll 遞減的 "Ns remaining"）。連續 N 次 poll（now 每 poll
+        遞增 2s，故每 poll 的倒數字串都不同），should_restart NOT mock。修正前（用
+        detail 字串去重）會每 poll 各寫一條；修正後（用 "backoff" key 去重）整段只 1 條。
+
+        mutation-bite：把 emit_restart_skipped_if_new 的去重從 key 改回 detail 字串
+        ⇒ N 條 RESTART_SKIPPED，本測試紅（已實機驗證，見 E1 報告）。"""
+        log_path = self._write_log(["ERROR something broke"])
+        advance, fake_time = self._poll_clock()
+        # 擺好真 backoff state：未熔斷、退避窗口遠在未來（base+10000）。
+        engine_watchdog.save_state(self._tmpdir.name, {
+            "engine_alive": False,
+            "consecutive_failures": 2,
+            "circuit_broken": False,
+            "next_allowed_restart_ts": 100000.0 + 10000.0,
+        })
+        poll_count = 8
+        seen_details = set()
+        # trigger_restart 仍 mock，避免萬一 allowed 時真的跑子進程；should_restart
+        # 維持「真」（本測試重點）。time.time 用 poll-clock（同 poll 內固定、poll 間 +2s）。
+        with mock.patch.object(engine_watchdog, "trigger_restart") as m_trigger, \
+                mock.patch.object(engine_watchdog.time, "time", side_effect=fake_time):
+            state = WatchdogState(engine_alive=False)
+            for _ in range(poll_count):
+                # 自證：每 poll 真 should_restart 的 detail 不同（否則退化成常字串、失去 bite）。
+                allowed, key, detail = engine_watchdog.should_restart(
+                    self._tmpdir.name, engine_watchdog.time.time())
+                self.assertFalse(allowed)
+                self.assertEqual(key, "backoff")
+                seen_details.add(detail)
+                on_engine_crash(state, 99.0, data_dir=self._tmpdir.name, log_path=log_path)
+                advance()
+        # backoff 期間永不重啟
+        m_trigger.assert_not_called()
+        # 倒數秒 detail 確實 per-poll 變化（否則本測試沒抓到 string-throttle 盲區）。
+        self.assertGreater(len(seen_details), 1, "backoff detail 必須 per-poll 變化才有 bite")
+        # 整段 backoff window 同一 "backoff" key → 只 1 條 RESTART_SKIPPED
+        self.assertEqual(self._count_canary_events("RESTART_SKIPPED"), 1)
+
+    def test_restart_skipped_reason_key_change_emits_again(self):
+        """HIGH-1：真 backoff → circuit_broken 轉移時，key 變化必再發一條。
+
+        先擺真 backoff（窗口在未來）跑數 poll（detail per-poll 變但 key 穩 → 1 條），
+        再把 state 推成 circuit_broken（consecutive_failures 達 MAX + circuit_broken=
+        True），should_restart 全程 NOT mock，驗第 2 條在 key 由 "backoff"→
+        "circuit_broken" 時被寫出。"""
+        log_path = self._write_log(["ERROR something broke"])
+        advance, fake_time = self._poll_clock()
+        engine_watchdog.save_state(self._tmpdir.name, {
+            "engine_alive": False,
+            "consecutive_failures": 2,
+            "circuit_broken": False,
+            "next_allowed_restart_ts": 100000.0 + 10000.0,
+        })
+        state = WatchdogState(engine_alive=False)
+        # 階段一：真 backoff window，數 poll → 1 條（key 全程 "backoff"）。
+        with mock.patch.object(engine_watchdog, "trigger_restart"), \
+                mock.patch.object(engine_watchdog.time, "time", side_effect=fake_time):
+            _, key_a, _ = engine_watchdog.should_restart(
+                self._tmpdir.name, engine_watchdog.time.time())
+            self.assertEqual(key_a, "backoff")
+            for _ in range(4):
+                on_engine_crash(state, 99.0, data_dir=self._tmpdir.name, log_path=log_path)
+                advance()
+        self.assertEqual(self._count_canary_events("RESTART_SKIPPED"), 1)
+        # 推成 circuit_broken（保留剛被 emit 寫進的 last_restart_skipped_reason marker）。
+        st = engine_watchdog.load_state(self._tmpdir.name)
+        st["circuit_broken"] = True
+        st["consecutive_failures"] = engine_watchdog.MAX_CONSECUTIVE_FAILURES
+        engine_watchdog.save_state(self._tmpdir.name, st)
+        _, key_b, _ = engine_watchdog.should_restart(self._tmpdir.name, 100000.0)
+        self.assertEqual(key_b, "circuit_broken")
+        # 階段二：key 變 circuit_broken → 必再發一條。
+        with mock.patch.object(engine_watchdog, "trigger_restart"), \
+                mock.patch.object(engine_watchdog.time, "time", side_effect=fake_time):
+            for _ in range(4):
+                on_engine_crash(state, 99.0, data_dir=self._tmpdir.name, log_path=log_path)
+                advance()
+        self.assertEqual(self._count_canary_events("RESTART_SKIPPED"), 2)
+
+
+class TestTriggerRestartBindHostSanitize(unittest.TestCase):
+    """WATCHDOG-BINDHOST-SANITIZE-1 (2026-06-05)：trigger_restart 餵安全 bind-host。
+
+    為什麼測 env= kwarg：被污染的父 env 帶 OPENCLAW_BIND_HOST=0.0.0.0 會被
+    restart_all.sh 內 resolve_openclaw_api_bind_host exit=2 拒絕 → 自愈永久卡死。
+    修復把危險值正規化成 auto（安全預設），合法值原樣放行。"""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _run_and_capture_env(self) -> dict:
+        """跑 trigger_restart（mock subprocess.run），回傳傳給 subprocess 的 env=。"""
+        fake_result = mock.Mock()
+        fake_result.returncode = 0
+        fake_result.stderr = ""
+        with mock.patch.object(engine_watchdog.subprocess, "run",
+                               return_value=fake_result) as m_run:
+            trigger_restart(self._tmpdir.name)
+        self.assertEqual(m_run.call_count, 1)
+        env = m_run.call_args.kwargs.get("env")
+        self.assertIsNotNone(env, "subprocess.run must receive an explicit env=")
+        return env
+
+    def test_dangerous_bind_host_normalized_to_auto(self):
+        """OPENCLAW_BIND_HOST=0.0.0.0 → 子進程 env 變 auto。"""
+        with mock.patch.dict(os.environ, {"OPENCLAW_BIND_HOST": "0.0.0.0"}, clear=False):
+            env = self._run_and_capture_env()
+        self.assertEqual(env.get("OPENCLAW_BIND_HOST"), "auto")
+
+    def test_ipv6_any_and_empty_normalized_to_auto(self):
+        """:: 與空字串同屬危險集，皆正規化 auto。"""
+        for bad in ("::", "", "  "):
+            with self.subTest(bad=bad):
+                with mock.patch.dict(os.environ, {"OPENCLAW_BIND_HOST": bad}, clear=False):
+                    env = self._run_and_capture_env()
+                self.assertEqual(env.get("OPENCLAW_BIND_HOST"), "auto")
+
+    def test_tailscale_unavailable_set_normalized_to_auto(self):
+        """FINDING #1 (2026-06-05)：{tailscale, tailscale-ip, ts} 在 tailscale 不在
+        PATH / 無 IPv4 時同樣被 resolver exit=2 拒絕，會像 0.0.0.0 一樣卡死自愈；
+        故 watchdog 的 recovery 子進程把這些值也正規化成 never-fail 的 auto。
+
+        為什麼納入這三個：對齊 api_bind_host.sh case 分支 "tailscale"|"tailscale-ip"|"ts"
+        的 exit=2 路徑（tailscale 不可用時）。這只動自愈子進程的 recovery env，
+        operator 手動發起的重啟仍照舊 fail-closed-and-loud（未碰 api_bind_host.sh）。"""
+        for ts_val in ("tailscale", "tailscale-ip", "ts"):
+            with self.subTest(ts_val=ts_val):
+                with mock.patch.dict(os.environ, {"OPENCLAW_BIND_HOST": ts_val}, clear=False):
+                    env = self._run_and_capture_env()
+                self.assertEqual(env.get("OPENCLAW_BIND_HOST"), "auto")
+
+    def test_legit_bind_host_passes_through(self):
+        """合法值（具體 Tailscale IP / auto / 127.0.0.1）原樣放行。
+
+        注意：'tailscale'/'tailscale-ip'/'ts' 已移入 exit=2 拒絕集（見
+        test_tailscale_unavailable_set_normalized_to_auto），不再屬於 pass-through。"""
+        for good in ("100.64.1.2", "auto", "127.0.0.1"):
+            with self.subTest(good=good):
+                with mock.patch.dict(os.environ, {"OPENCLAW_BIND_HOST": good}, clear=False):
+                    env = self._run_and_capture_env()
+                self.assertEqual(env.get("OPENCLAW_BIND_HOST"), good)
+
+    def test_unset_bind_host_stays_unset(self):
+        """未設置 OPENCLAW_BIND_HOST → 保持未設置（不強加 auto）。"""
+        env_no_bind = {k: v for k, v in os.environ.items() if k != "OPENCLAW_BIND_HOST"}
+        with mock.patch.dict(os.environ, env_no_bind, clear=True):
+            env = self._run_and_capture_env()
+        self.assertNotIn("OPENCLAW_BIND_HOST", env)
 
 
 if __name__ == "__main__":
