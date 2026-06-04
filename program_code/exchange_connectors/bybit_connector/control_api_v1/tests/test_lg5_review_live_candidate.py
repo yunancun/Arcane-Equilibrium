@@ -22,6 +22,12 @@ import math
 import pytest
 
 import app.governance_hub_live_candidate_review as mod
+from ml_training.candidate_evidence_manifest import (
+    CANDIDATE_EVIDENCE_MANIFEST_FIELD,
+    CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
+    PROMOTION_READY,
+    compute_candidate_evidence_manifest_hash,
+)
 from app.governance_hub_live_candidate_review import (
     R1_MAKER_FILL_FLOOR,
     R1_MAKER_FILL_RATIO,
@@ -68,6 +74,28 @@ def _valid_residual_alpha_report(**overrides) -> dict:
     }
     report.update(overrides)
     return report
+
+
+def _valid_candidate_evidence_manifest(**overrides) -> dict:
+    manifest = {
+        "schema_version": CANDIDATE_EVIDENCE_MANIFEST_SCHEMA_VERSION,
+        "verdict": PROMOTION_READY,
+        "candidate_id": "candidate-alpha-1",
+        "family_id": "family-alpha",
+        "spec_hash": "a" * 64,
+        "replay_experiment_id": "replay-exp-1",
+        "hidden_oos": {
+            "split_hash": "b" * 64,
+            "window_start": "2026-05-01T00:00:00Z",
+            "window_end": "2026-05-08T00:00:00Z",
+            "embargo": "1d",
+            "trial_count": 12,
+            "passes": True,
+        },
+    }
+    manifest.update(overrides)
+    manifest["manifest_hash"] = compute_candidate_evidence_manifest_hash(manifest)
+    return manifest
 
 
 def test_live_cost_regime_sql_uses_entry_only_fill_predicate() -> None:
@@ -461,6 +489,7 @@ class TestReviewLiveCandidateRound2:
         return {
             "schema_version": "live_candidate_eval_v1",
             "demo_residual_alpha_report": _valid_residual_alpha_report(),
+            CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
             "demo_cost_baseline": {
                 "maker_fill_rate_7d": 0.30,
                 "avg_realized_fee_bps_7d": 1.0,
@@ -629,6 +658,81 @@ class TestReviewLiveCandidateRound2:
         assert hub.acquire_calls == []
         assert atomic_calls == []
         assert emitted[0][2].reason == "defer_residual_alpha_missing"
+
+    def test_missing_candidate_evidence_manifest_defers_no_lease(
+        self,
+        monkeypatch,
+    ) -> None:
+        """缺 canonical EvidenceManifest 不可進入 R1-R6 approve path。"""
+        from app.governance_hub_live_candidate_review import review_live_candidate
+
+        payload = self._approve_path_payload()
+        payload.pop(CANDIDATE_EVIDENCE_MANIFEST_FIELD)
+        mod, emitted, atomic_calls = self._patch_module(
+            monkeypatch,
+            daily_snapshots={"n_snapshots": 7, "n_negative": 3},
+            payload=payload,
+        )
+        hub = self._FakeHub()
+
+        verdict = review_live_candidate(hub, candidate_id=99)
+
+        assert verdict.decision == "defer"
+        assert verdict.reason == "defer_candidate_evidence_manifest_missing"
+        assert "candidate_evidence_manifest" in verdict.rule_failures
+        assert hub.acquire_calls == []
+        assert atomic_calls == []
+        assert emitted[0][2].reason == "defer_candidate_evidence_manifest_missing"
+
+    def test_alias_candidate_evidence_manifest_defers_no_lease(
+        self,
+        monkeypatch,
+    ) -> None:
+        """alias-only EvidenceManifest 不可繞過 canonical required field。"""
+        from app.governance_hub_live_candidate_review import review_live_candidate
+
+        payload = self._approve_path_payload()
+        manifest = payload.pop(CANDIDATE_EVIDENCE_MANIFEST_FIELD)
+        payload["evidence_manifest"] = manifest
+        mod, emitted, atomic_calls = self._patch_module(
+            monkeypatch,
+            daily_snapshots={"n_snapshots": 7, "n_negative": 3},
+            payload=payload,
+        )
+        hub = self._FakeHub()
+
+        verdict = review_live_candidate(hub, candidate_id=99)
+
+        assert verdict.decision == "defer"
+        assert verdict.reason == "defer_candidate_evidence_manifest_missing"
+        assert "candidate_evidence_manifest" in verdict.rule_failures
+        assert hub.acquire_calls == []
+        assert atomic_calls == []
+        assert emitted[0][2].reason == "defer_candidate_evidence_manifest_missing"
+
+    def test_invalid_candidate_evidence_manifest_rejects_no_lease(
+        self,
+        monkeypatch,
+    ) -> None:
+        """Manifest hash mismatch 不可拿 lease。"""
+        from app.governance_hub_live_candidate_review import review_live_candidate
+
+        payload = self._approve_path_payload()
+        payload[CANDIDATE_EVIDENCE_MANIFEST_FIELD]["manifest_hash"] = "0" * 64
+        mod, emitted, atomic_calls = self._patch_module(
+            monkeypatch,
+            daily_snapshots={"n_snapshots": 7, "n_negative": 3},
+            payload=payload,
+        )
+        hub = self._FakeHub()
+
+        verdict = review_live_candidate(hub, candidate_id=99)
+
+        assert verdict.decision == "reject"
+        assert verdict.reason == "reject_candidate_evidence_manifest_invalid"
+        assert "candidate_evidence_manifest" in verdict.rule_failures
+        assert hub.acquire_calls == []
+        assert atomic_calls == []
 
     @pytest.mark.parametrize(
         ("report", "expected_decision", "expected_reason"),
@@ -845,6 +949,7 @@ class TestRMetaSampleThreshold:
         return {
             "schema_version": "live_candidate_eval_v1",
             "demo_residual_alpha_report": _valid_residual_alpha_report(),
+            CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
             "demo_cost_baseline": {
                 "maker_fill_rate_7d": 0.30,
                 "avg_realized_fee_bps_7d": 1.0,
@@ -932,6 +1037,7 @@ class TestRMetaSampleThreshold:
         old_payload = {
             "schema_version": "live_candidate_eval_v1",
             "demo_residual_alpha_report": _valid_residual_alpha_report(),
+            CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
             "demo_cost_baseline": {
                 "maker_fill_rate_7d": 0.30,
                 "avg_realized_fee_bps_7d": 1.0,
@@ -963,6 +1069,7 @@ class TestRMetaSampleThreshold:
         mixed_payload = {
             "schema_version": "live_candidate_eval_v1",
             "demo_residual_alpha_report": _valid_residual_alpha_report(),
+            CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_candidate_evidence_manifest(),
             "demo_cost_baseline": {
                 "maker_fill_rate_7d": 0.30,
                 "avg_realized_fee_bps_7d": 1.0,

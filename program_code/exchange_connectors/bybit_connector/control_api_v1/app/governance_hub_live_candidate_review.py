@@ -100,6 +100,21 @@ except ModuleNotFoundError:  # pragma: no cover - app runtime path fallback
         validate_demo_residual_alpha_report,
     )
 
+try:
+    from program_code.ml_training.candidate_evidence_manifest import (
+        extract_candidate_evidence_manifest,
+        validate_candidate_evidence_manifest,
+    )
+except ModuleNotFoundError:  # pragma: no cover - app runtime path fallback
+    try:
+        from . import _path_setup  # noqa: F401
+    except Exception:  # noqa: BLE001
+        pass
+    from ml_training.candidate_evidence_manifest import (  # type: ignore
+        extract_candidate_evidence_manifest,
+        validate_candidate_evidence_manifest,
+    )
+
 logger = logging.getLogger(__name__)
 
 
@@ -953,6 +968,20 @@ def _classify_residual_alpha_failure(
     return "reject", "reject_residual_alpha_failed"
 
 
+def _classify_candidate_evidence_manifest_failure(
+    verdict: str,
+    reason: str,
+) -> tuple[Literal["reject", "defer"], str]:
+    """把 candidate EvidenceManifest validator reason 映射為 LG-5 verdict。"""
+    if reason == "manifest_missing":
+        return "defer", "defer_candidate_evidence_manifest_missing"
+    if verdict == "pending_schema":
+        return "defer", "defer_candidate_evidence_manifest_pending_schema"
+    if verdict == "research_only":
+        return "reject", "reject_candidate_evidence_manifest_research_only"
+    return "reject", "reject_candidate_evidence_manifest_invalid"
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Pure rule evaluators / 純函數規則評估器 — no DB access, easy to unit test
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1322,6 +1351,43 @@ def review_live_candidate(
                         residual_report.get("verdict")
                         if isinstance(residual_report, dict)
                         else None
+                    ),
+                },
+                lineage_snapshot,
+            ),
+            decided_by=decided_by_full,
+        )
+        _emit_audit_row("review_live_candidate", candidate_id, verdict)
+        return verdict
+
+    manifest = extract_candidate_evidence_manifest(payload)
+    manifest_validation = validate_candidate_evidence_manifest(
+        manifest,
+        residual_report=residual_report,
+    )
+    if not manifest_validation.promotion_ready:
+        decision, reason = _classify_candidate_evidence_manifest_failure(
+            manifest_validation.verdict,
+            manifest_validation.reason,
+        )
+        verdict = _make_verdict(
+            decision,
+            reason,
+            rule_failures=["candidate_evidence_manifest"],
+            expected_net_bps_demo=expected_net_bps_demo,
+            payload_snapshot=_with_lineage_snapshot(
+                {
+                    "candidate_evidence_manifest_validation_reason": (
+                        manifest_validation.reason
+                    ),
+                    "candidate_evidence_manifest_verdict": (
+                        manifest_validation.verdict
+                    ),
+                    "candidate_evidence_manifest_reasons": list(
+                        manifest_validation.reasons
+                    ),
+                    "candidate_evidence_manifest_lineage_downgraded": (
+                        manifest_validation.lineage_downgraded
                     ),
                 },
                 lineage_snapshot,
