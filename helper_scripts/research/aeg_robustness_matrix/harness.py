@@ -29,6 +29,9 @@ def _repo_root() -> Path:
 def build_and_write(args: argparse.Namespace) -> dict:
     regime = builder_mod.load_regime_artifact(Path(args.regime_run_dir))
     breadth = builder_mod.load_breadth_artifact(Path(args.breadth_run_dir))
+    candidate_metrics = builder_mod.load_candidate_metrics_artifact(
+        Path(args.candidate_metrics_run_dir) if args.candidate_metrics_run_dir else None
+    )
     execution = builder_mod.load_execution_realism(
         Path(args.execution_realism_json) if args.execution_realism_json else None
     )
@@ -39,6 +42,7 @@ def build_and_write(args: argparse.Namespace) -> dict:
         execution_realism=execution,
         strategy_family=args.strategy_family,
         parameter_cell_id=args.parameter_cell_id,
+        candidate_metrics=candidate_metrics,
     )
     written = artifact_mod.write_all(
         rows,
@@ -61,6 +65,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--run-id", required=True, dest="run_id")
     p.add_argument("--regime-run-dir", required=True, dest="regime_run_dir")
     p.add_argument("--breadth-run-dir", required=True, dest="breadth_run_dir")
+    p.add_argument("--candidate-metrics-run-dir", default=None, dest="candidate_metrics_run_dir")
     p.add_argument("--execution-realism-json", default=None, dest="execution_realism_json")
     p.add_argument("--strategy-family", default="unknown", dest="strategy_family")
     p.add_argument("--parameter-cell-id", default="default", dest="parameter_cell_id")

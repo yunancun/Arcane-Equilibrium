@@ -72,6 +72,16 @@ def load_breadth_artifact(run_dir: Path) -> dict[str, Any]:
     return {"run_dir": run_dir, "rows": rows, "summary": summary}
 
 
+def load_candidate_metrics_artifact(run_dir: Optional[Path]) -> dict[str, Any]:
+    """讀 candidate metrics artifact；缺失時回空 payload。"""
+    if run_dir is None:
+        return {"run_dir": None, "rows": [], "summary": {}}
+    run_dir = Path(run_dir)
+    rows = _read_csv(run_dir / "candidate_regime_metrics.csv")
+    summary = _read_json(run_dir / "candidate_metrics_summary.json")
+    return {"run_dir": run_dir, "rows": rows, "summary": summary}
+
+
 def load_execution_realism(path: Optional[Path]) -> dict[str, Any]:
     """讀 execution_realism.json；缺失時回 fail-closed payload。"""
     if path is None:
@@ -164,10 +174,71 @@ def _survivorship_mode(breadth_summary: dict[str, Any]) -> str:
     return "current_survivor_or_unverified"
 
 
-def _reject_reasons(
+def _candidate_metric_index(candidate_metrics: dict[str, Any]) -> dict[str, dict[str, str]]:
+    out: dict[str, dict[str, str]] = {}
+    for row in candidate_metrics.get("rows") or []:
+        regime = (row.get("regime") or "").strip()
+        if regime:
+            out[regime] = row
+    return out
+
+
+def _cell_metrics(
     *,
     breadth_row: dict[str, str],
     slice_row: dict[str, Any],
+    candidate_metric: Optional[dict[str, str]],
+) -> dict[str, Any]:
+    if slice_row["is_aggregate"]:
+        return {
+            "gross_bps": breadth_row.get("gross_bps"),
+            "cost_bps": breadth_row.get("cost_bps"),
+            "net_bps": breadth_row.get("net_bps"),
+            "net_to_cost_ratio": breadth_row.get("net_to_cost_ratio"),
+            "is_sharpe": breadth_row.get("is_sharpe"),
+            "oos_sharpe": breadth_row.get("oos_sharpe"),
+            "psr_0": breadth_row.get("psr_0"),
+            "dsr_k": breadth_row.get("dsr_k"),
+            "pbo": breadth_row.get("pbo"),
+            "k_trials": breadth_row.get("k_trials"),
+            "n_independent": breadth_row.get("n_independent"),
+            "sample_unit": breadth_row.get("sample_unit"),
+            "excluded_from_promotion": breadth_row.get("excluded_from_promotion"),
+            "freshness_bucket": "unmeasured",
+            "recent_90d_net_bps": None,
+            "recent_180d_net_bps": None,
+        }
+    if not candidate_metric:
+        return {
+            "freshness_bucket": "unmeasured",
+            "recent_90d_net_bps": None,
+            "recent_180d_net_bps": None,
+        }
+    return {
+        "gross_bps": candidate_metric.get("gross_bps"),
+        "cost_bps": candidate_metric.get("cost_bps"),
+        "net_bps": candidate_metric.get("net_bps"),
+        "net_to_cost_ratio": candidate_metric.get("net_to_cost_ratio"),
+        "is_sharpe": candidate_metric.get("annualized_net_sharpe"),
+        "oos_sharpe": candidate_metric.get("oos_sharpe"),
+        "psr_0": candidate_metric.get("psr_0"),
+        "dsr_k": candidate_metric.get("dsr_k"),
+        "pbo": candidate_metric.get("pbo"),
+        "k_trials": candidate_metric.get("k_trials"),
+        # 不把 n_days 冒充為 n_independent；若候選真的有 cluster-adjusted N，必須顯式給。
+        "n_independent": candidate_metric.get("n_independent"),
+        "sample_unit": candidate_metric.get("sample_unit"),
+        "freshness_bucket": candidate_metric.get("freshness_bucket") or "unmeasured",
+        "recent_90d_net_bps": candidate_metric.get("recent_90d_net_bps"),
+        "recent_180d_net_bps": candidate_metric.get("recent_180d_net_bps"),
+    }
+
+
+def _reject_reasons(
+    *,
+    slice_row: dict[str, Any],
+    cell_metrics: dict[str, Any],
+    candidate_metric: Optional[dict[str, str]],
     coverage_gate_status: str,
     feature_lineage_status: str,
     survivorship_mode: str,
@@ -181,20 +252,14 @@ def _reject_reasons(
     if slice_row["is_aggregate"]:
         reasons.append("aggregate_not_regime_slice")
     else:
-        # breadth runner 目前沒有 per-regime candidate PnL；不能把 aggregate edge 塞進 regime slice。
-        reasons.append("missing_regime_slice_metrics")
+        if candidate_metric is None:
+            reasons.append("missing_regime_slice_metrics")
+        elif str(candidate_metric.get("metric_status", "")).upper() != "PASS":
+            reasons.append("candidate_metric_not_pass")
 
-    net_bps = _float_or_none(breadth_row.get("net_bps")) if slice_row["is_aggregate"] else None
-    net_to_cost = (
-        _float_or_none(breadth_row.get("net_to_cost_ratio"))
-        if slice_row["is_aggregate"]
-        else None
-    )
-    n_independent = (
-        _int_or_none(breadth_row.get("n_independent"))
-        if slice_row["is_aggregate"]
-        else None
-    )
+    net_bps = _float_or_none(cell_metrics.get("net_bps"))
+    net_to_cost = _float_or_none(cell_metrics.get("net_to_cost_ratio"))
+    n_independent = _int_or_none(cell_metrics.get("n_independent"))
 
     if net_bps is None:
         reasons.append("missing_net_bps")
@@ -210,17 +275,19 @@ def _reject_reasons(
         reasons.append("n_independent_below_30")
 
     for metric in ("psr_0", "dsr_k", "pbo", "is_sharpe", "oos_sharpe"):
-        if _float_or_none(breadth_row.get(metric)) is None:
+        if _float_or_none(cell_metrics.get(metric)) is None:
             reasons.append(f"missing_{metric}")
 
-    reasons.append("missing_recent_90d_net_bps")
-    reasons.append("missing_recent_180d_net_bps")
+    if _float_or_none(cell_metrics.get("recent_90d_net_bps")) is None:
+        reasons.append("missing_recent_90d_net_bps")
+    if _float_or_none(cell_metrics.get("recent_180d_net_bps")) is None:
+        reasons.append("missing_recent_180d_net_bps")
 
     if survivorship_mode == "current_survivor_or_unverified":
         reasons.append("survivorship_not_pit_verified")
     if str(execution_realism.get("status", "")).upper() != "PASS":
         reasons.append(execution_realism.get("reject_reason") or "execution_realism_not_pass")
-    if breadth_row.get("excluded_from_promotion") == "true":
+    if str(cell_metrics.get("excluded_from_promotion") or "").lower() == "true":
         reasons.append("breadth_row_excluded_from_promotion")
     return list(dict.fromkeys(reasons))
 
@@ -249,6 +316,7 @@ def build_matrix(
     execution_realism: dict[str, Any],
     strategy_family: str,
     parameter_cell_id: str,
+    candidate_metrics: Optional[dict[str, Any]] = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """生成 verdict matrix rows + summary。"""
     regime_summary = regime_artifact["summary"]
@@ -256,19 +324,27 @@ def build_matrix(
     coverage = _coverage_status(regime_summary, breadth_summary)
     lineage = _feature_lineage_status(regime_summary)
     survivorship = _survivorship_mode(breadth_summary)
+    candidate_metrics = candidate_metrics or {"rows": [], "summary": {}}
+    candidate_by_regime = _candidate_metric_index(candidate_metrics)
 
     rows: list[dict[str, Any]] = []
     for breadth_row in breadth_artifact["rows"]:
         for slice_row in regime_slices(regime_artifact):
-            reasons = _reject_reasons(
+            candidate_metric = None if slice_row["is_aggregate"] else candidate_by_regime.get(slice_row["regime"])
+            cell_metrics = _cell_metrics(
                 breadth_row=breadth_row,
                 slice_row=slice_row,
+                candidate_metric=candidate_metric,
+            )
+            reasons = _reject_reasons(
+                slice_row=slice_row,
+                cell_metrics=cell_metrics,
+                candidate_metric=candidate_metric,
                 coverage_gate_status=coverage,
                 feature_lineage_status=lineage,
                 survivorship_mode=survivorship,
                 execution_realism=execution_realism,
             )
-            aggregate = slice_row["is_aggregate"]
             row = {
                 "run_id": run_id,
                 "candidate_id": breadth_summary.get("candidate_id") or breadth_row.get("candidate_id"),
@@ -280,26 +356,26 @@ def build_matrix(
                 "market_anchor_regime": slice_row["market_anchor_regime"],
                 "overlay_flags": _json_cell(slice_row["overlay_flags"]),
                 "breadth_cohort": breadth_row.get("breadth_cohort"),
-                "freshness_bucket": "unmeasured",
+                "freshness_bucket": cell_metrics.get("freshness_bucket") or "unmeasured",
                 "survivorship_mode": survivorship,
                 "execution_realism_mode": execution_realism.get("execution_realism_mode"),
                 "coverage_gate_status": coverage,
                 "feature_lineage_status": lineage,
-                "gross_bps": breadth_row.get("gross_bps") if aggregate else None,
-                "cost_bps": breadth_row.get("cost_bps") if aggregate else None,
-                "net_bps": breadth_row.get("net_bps") if aggregate else None,
-                "net_to_cost_ratio": breadth_row.get("net_to_cost_ratio") if aggregate else None,
-                "is_sharpe": breadth_row.get("is_sharpe") if aggregate else None,
-                "oos_sharpe": breadth_row.get("oos_sharpe") if aggregate else None,
-                "psr_0": breadth_row.get("psr_0") if aggregate else None,
-                "dsr_k": breadth_row.get("dsr_k") if aggregate else None,
-                "pbo": breadth_row.get("pbo") if aggregate else None,
+                "gross_bps": cell_metrics.get("gross_bps"),
+                "cost_bps": cell_metrics.get("cost_bps"),
+                "net_bps": cell_metrics.get("net_bps"),
+                "net_to_cost_ratio": cell_metrics.get("net_to_cost_ratio"),
+                "is_sharpe": cell_metrics.get("is_sharpe"),
+                "oos_sharpe": cell_metrics.get("oos_sharpe"),
+                "psr_0": cell_metrics.get("psr_0"),
+                "dsr_k": cell_metrics.get("dsr_k"),
+                "pbo": cell_metrics.get("pbo"),
                 "multiple_test_family": breadth_summary.get("candidate_id"),
-                "k_trials": breadth_row.get("k_trials") if aggregate else None,
-                "n_independent": breadth_row.get("n_independent") if aggregate else None,
-                "sample_unit": breadth_row.get("sample_unit") if aggregate else None,
-                "recent_90d_net_bps": None,
-                "recent_180d_net_bps": None,
+                "k_trials": cell_metrics.get("k_trials"),
+                "n_independent": cell_metrics.get("n_independent"),
+                "sample_unit": cell_metrics.get("sample_unit"),
+                "recent_90d_net_bps": cell_metrics.get("recent_90d_net_bps"),
+                "recent_180d_net_bps": cell_metrics.get("recent_180d_net_bps"),
                 "non_bull_independent_pass": False,
                 "final_label": _final_label(reasons, breadth_summary),
                 "reject_reasons": _json_cell(reasons),
@@ -319,6 +395,12 @@ def build_matrix(
         "feature_lineage_status": lineage,
         "survivorship_mode": survivorship,
         "execution_realism_mode": execution_realism.get("execution_realism_mode"),
+        "candidate_metrics_status_counts": dict(sorted(
+            Counter(
+                str(row.get("metric_status") or "UNKNOWN").upper()
+                for row in candidate_metrics.get("rows") or []
+            ).items()
+        )),
         "non_bull_independent_pass": any(
             row["final_label"] == "durable-alpha candidate" and row["regime"] in NON_BULL_REGIMES
             for row in rows
@@ -330,6 +412,7 @@ def build_matrix(
             "fnd2_universe_id": (
                 breadth_summary.get("fnd2_universe_id") or regime_summary.get("fnd2_universe_id")
             ),
+            "candidate_metrics_run_id": (candidate_metrics.get("summary") or {}).get("run_id"),
         },
     }
     return rows, summary
