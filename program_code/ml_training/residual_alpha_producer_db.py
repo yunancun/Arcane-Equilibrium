@@ -258,6 +258,119 @@ def _sort_key(value: Any) -> float:
 
 
 # ---------------------------------------------------------------------------
+# 非重疊 bucket 路徑（QC/MIT 2026-06-05 對抗審定稿）= v1 主路徑
+# ---------------------------------------------------------------------------
+# 為什麼改 bucket：per-round-trip 報酬會重疊（grid 並行持多腿）→ 序列自相關 →
+# PSR/DSR 的 sqrt(N) 高估獨立性 → beta 偽裝能過閘（=本模組要防的失敗模式從後門
+# 重現）。改成非重疊 bucket：①報酬按 **exit_ts** 歸屬（一筆 trip 只進它的 exit
+# 桶，已實現於 exit→無前視，duration leak 結構性消失）②factor=同桶 BTC 報酬
+# ③embargo 變乾淨的 bucket gap。i.i.d. 違反大幅緩解；R-1 的 entry-keyed embargo
+# 在非重疊桶 ts 上即正確，R-1 無需改。
+
+DEFAULT_BUCKET_SEC: float = 4 * 3600.0  # 4h；demo ~49 天 → ~294 桶，n_eval 充足
+
+
+def bucket_floor(ts: float, bucket_sec: float = DEFAULT_BUCKET_SEC) -> float:
+    """把 epoch 秒 floor 到 bucket 網格起點（UTC-aligned：epoch 0 即 4h 邊界）。"""
+    return math.floor(ts / bucket_sec) * bucket_sec
+
+
+def bucket_round_trips_by_exit(
+    round_trips: Sequence[Mapping[str, Any]],
+    bucket_sec: float = DEFAULT_BUCKET_SEC,
+) -> tuple[dict[float, float], dict[float, int]]:
+    """依 **exit_ts** 把 round-trips 歸入非重疊 bucket。
+
+    bucket 報酬 = 桶內各 trip net_bps 之和（已實現於 exit → 無前視）。回
+    ``({bucket_ts: sum_net_bps}, {bucket_ts: count})``。exit 缺失/非法、或
+    exit<=entry 者跳過。
+    """
+    sums: dict[float, float] = {}
+    counts: dict[float, int] = {}
+    for rt in round_trips:
+        exit_ = _finite(rt.get("exit_ts"))
+        net = _finite(rt.get("net_bps"))
+        if exit_ is None or net is None:
+            continue
+        entry = _finite(rt.get("entry_ts"))
+        if entry is not None and exit_ <= entry:
+            continue
+        bucket = bucket_floor(exit_, bucket_sec)
+        sums[bucket] = sums.get(bucket, 0.0) + net
+        counts[bucket] = counts.get(bucket, 0) + 1
+    return sums, counts
+
+
+def bucketed_btc_factor(
+    btc_klines: Sequence[Mapping[str, Any]],
+    bucket_sec: float = DEFAULT_BUCKET_SEC,
+) -> dict[float, dict[str, float]]:
+    """從 BTC bucket klines（對應 timeframe，如 4h）建 bucket factor。
+
+    bucket_ts 用 ``bucket_floor(kline.ts)`` 對齊到與 trips 同網格（穩健於邊界偏移）。
+    回 ``{bucket_ts: {"btc": bps}}``；一桶多根時取最早 open、最晚 close。
+    """
+    by_bucket: dict[float, list[tuple[float, Mapping[str, Any]]]] = {}
+    for bar in btc_klines:
+        ts = _finite(bar.get("ts"))
+        if ts is None:
+            continue
+        by_bucket.setdefault(bucket_floor(ts, bucket_sec), []).append((ts, bar))
+    factor: dict[float, dict[str, float]] = {}
+    for bucket_ts, bars in by_bucket.items():
+        bars.sort(key=lambda item: item[0])
+        first_open = _finite(bars[0][1].get("open"))
+        last_close = _finite(bars[-1][1].get("close"))
+        if first_open is None or last_close is None or first_open <= 0.0:
+            continue
+        factor[bucket_ts] = {"btc": (last_close / first_open - 1.0) * 10_000.0}
+    return factor
+
+
+def build_bucketed_residual_report(
+    round_trips: Sequence[Mapping[str, Any]],
+    btc_klines: Sequence[Mapping[str, Any]],
+    *,
+    n_trials: int,
+    bucket_sec: float = DEFAULT_BUCKET_SEC,
+    embargo_buckets: int = 1,
+    peer_oos_returns: Sequence[Any] | None = None,
+    min_train_observations: int = 20,
+    min_eval_observations: int = 8,
+    **gate_kwargs: Any,
+) -> tuple[ResidualAlphaProducerResult, dict[str, float]]:
+    """非重疊 bucket BTC-only residual report（v1 主路徑）。
+
+    embargo_buckets：train↔eval 接縫 purge 的 bucket 數（防相鄰桶自相關）。
+    回 ``(result, diag)``；diag 含 bucket 數與 per-bucket trip 計數摘要。
+    """
+    candidate, counts = bucket_round_trips_by_exit(round_trips, bucket_sec)
+    factor = bucketed_btc_factor(btc_klines, bucket_sec)
+    aligned = sorted(set(candidate) & set(factor))
+    diag = {
+        "round_trips": float(len(round_trips)),
+        "candidate_buckets": float(len(candidate)),
+        "factor_buckets": float(len(factor)),
+        "aligned_buckets": float(len(aligned)),
+        "mean_trips_per_bucket": (sum(counts.values()) / len(counts)) if counts else 0.0,
+    }
+    result = build_residual_alpha_report(
+        candidate,
+        factor,
+        n_trials=n_trials,
+        peer_oos_returns=peer_oos_returns,
+        required_factors=("btc",),
+        # +0.5 桶：讓 R-1 的 ts-embargo cutoff 落在桶與桶之間，剛好 purge
+        # embargo_buckets 個緊鄰 train 桶（grid-aligned 下避免 off-by-one）。
+        embargo_gap=(embargo_buckets + 0.5) * bucket_sec if embargo_buckets > 0 else 0.0,
+        min_train_observations=min_train_observations,
+        min_eval_observations=min_eval_observations,
+        **gate_kwargs,
+    )
+    return result, diag
+
+
+# ---------------------------------------------------------------------------
 # DB 查詢層（Linux runtime 驗證）—— 只讀；BTC-only v1 不需 PIT basket
 # ---------------------------------------------------------------------------
 
@@ -341,34 +454,37 @@ def build_strategy_residual_report(
     *,
     engine_mode: str = "demo",
     since: datetime,
-    embargo_gap: float,
     n_trials: int,
     peer_oos_returns: Sequence[Any] | None = None,
-    required_factors: tuple[str, ...] = ("btc",),
-    klines_pad_sec: float = 7200.0,
+    bucket_sec: float = DEFAULT_BUCKET_SEC,
+    embargo_buckets: int = 1,
+    klines_timeframe: str = "4h",
+    klines_pad_sec: float = DEFAULT_BUCKET_SEC,
     **gate_kwargs: Any,
-) -> tuple[ResidualAlphaProducerResult | None, dict[str, int]]:
-    """單策略 BTC-only residual report（v1）：載 round-trips + BTC klines → R-1。
+) -> tuple[ResidualAlphaProducerResult | None, dict[str, float]]:
+    """單策略 BTC-only **非重疊 bucket** residual report（v1 主路徑）。
 
+    載 FIFO round-trips + BTC bucket klines（預設 4h）→ 按 exit 歸桶 → R-1。
     peers / n_trials 由 caller（cycle orchestrator）提供；peers 缺則 gate 因無
     PBO evidence 而 defer（honest，非 bug）。只讀；不碰 runtime / order / risk。
     """
     round_trips = load_round_trips(conn, strategy_name, engine_mode=engine_mode, since=since)
     if not round_trips:
-        return None, {"input": 0, "aligned": 0}
+        return None, {"round_trips": 0.0, "aligned_buckets": 0.0}
     min_entry = min(rt["entry_ts"] for rt in round_trips)
     max_exit = max(rt["exit_ts"] for rt in round_trips)
     start_dt = datetime.fromtimestamp(min_entry - klines_pad_sec, tz=timezone.utc)
     end_dt = datetime.fromtimestamp(max_exit + klines_pad_sec, tz=timezone.utc)
-    klines = {BTC_SYMBOL: load_btc_klines(conn, start_ts=start_dt, end_ts=end_dt)}
-    return build_residual_report_from_data(
+    btc_klines = load_btc_klines(
+        conn, start_ts=start_dt, end_ts=end_dt, timeframe=klines_timeframe
+    )
+    return build_bucketed_residual_report(
         round_trips,
-        klines,
-        {},
+        btc_klines,
         n_trials=n_trials,
-        embargo_gap=embargo_gap,
+        bucket_sec=bucket_sec,
+        embargo_buckets=embargo_buckets,
         peer_oos_returns=peer_oos_returns,
-        required_factors=required_factors,
         **gate_kwargs,
     )
 
@@ -376,11 +492,16 @@ def build_strategy_residual_report(
 __all__ = [
     "BTC_SYMBOL",
     "KLINES_1M_INTERVAL_SEC",
+    "DEFAULT_BUCKET_SEC",
     "to_epoch_seconds",
     "contained_bar_return_bps",
     "pit_active_symbols",
     "assemble_residual_inputs",
     "build_residual_report_from_data",
+    "bucket_floor",
+    "bucket_round_trips_by_exit",
+    "bucketed_btc_factor",
+    "build_bucketed_residual_report",
     "load_round_trips",
     "load_btc_klines",
     "build_strategy_residual_report",

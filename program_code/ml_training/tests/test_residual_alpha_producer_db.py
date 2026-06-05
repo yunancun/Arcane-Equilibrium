@@ -265,3 +265,61 @@ def test_load_round_trips_filters_strategy_and_exit(monkeypatch):
     assert out[0]["net_bps"] == 5.0
     assert out[0]["entry_ts"] == pytest.approx(entry.timestamp())
     assert out[0]["exit_ts"] == pytest.approx(exit_.timestamp())
+
+
+# ---- 非重疊 bucket 路徑（QC/MIT 2026-06-05 定稿）----
+
+from program_code.ml_training.residual_alpha_producer_db import (  # noqa: E402
+    bucket_floor,
+    bucket_round_trips_by_exit,
+    bucketed_btc_factor,
+    build_bucketed_residual_report,
+)
+
+
+def test_bucket_floor_aligns_to_grid():
+    assert bucket_floor(0.0, 14400.0) == 0.0
+    assert bucket_floor(14399.0, 14400.0) == 0.0
+    assert bucket_floor(14400.0, 14400.0) == 14400.0
+    assert bucket_floor(14401.0, 14400.0) == 14400.0
+
+
+def test_bucket_round_trips_by_exit_attribution_and_sum():
+    rts = [
+        {"entry_ts": 100.0, "exit_ts": 1000.0, "net_bps": 3.0},    # 桶 0
+        {"entry_ts": 200.0, "exit_ts": 5000.0, "net_bps": 2.0},    # 桶 0
+        {"entry_ts": 300.0, "exit_ts": 20000.0, "net_bps": 7.0},   # 桶 14400
+        {"entry_ts": 400.0, "exit_ts": None, "net_bps": 9.0},      # 無 exit → skip
+        {"entry_ts": 500.0, "exit_ts": 400.0, "net_bps": 1.0},     # exit<entry → skip
+    ]
+    sums, counts = bucket_round_trips_by_exit(rts, 14400.0)
+    assert sums == {0.0: 5.0, 14400.0: 7.0}
+    assert counts == {0.0: 2, 14400.0: 1}
+
+
+def test_bucketed_btc_factor_open_to_close_floored():
+    klines = [
+        {"ts": 0.0, "open": 100.0, "close": 105.0},
+        {"ts": 14400.0, "open": 105.0, "close": 110.0},
+    ]
+    factor = bucketed_btc_factor(klines, 14400.0)
+    assert set(factor.keys()) == {0.0, 14400.0}
+    assert factor[0.0]["btc"] == pytest.approx((105.0 / 100.0 - 1.0) * 10_000.0)
+    assert factor[14400.0]["btc"] == pytest.approx((110.0 / 105.0 - 1.0) * 10_000.0)
+
+
+def test_build_bucketed_smoke_feeds_r1():
+    bucket = 14400.0
+    rts = [
+        {"entry_ts": i * bucket + 100.0, "exit_ts": i * bucket + 200.0, "net_bps": 2.0 + (i % 4)}
+        for i in range(60)
+    ]
+    klines = [{"ts": i * bucket, "open": 100.0, "close": 100.5} for i in range(60)]
+    result, diag = build_bucketed_residual_report(
+        rts, klines, n_trials=5, embargo_buckets=1,
+        min_train_observations=20, min_eval_observations=8, min_coverage=0.8,
+    )
+    assert diag["aligned_buckets"] == 60.0
+    assert diag["mean_trips_per_bucket"] == 1.0
+    assert hasattr(result, "report") and hasattr(result, "promotion_ready")
+    assert "verdict" in result.report
