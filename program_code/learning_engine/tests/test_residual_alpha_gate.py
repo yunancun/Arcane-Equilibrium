@@ -41,20 +41,29 @@ def _timestamped_pbo_peer(mean: float) -> dict[int, float]:
     return {ts: mean for ts in range(80, 120)}
 
 
+# 預設 eval 窗 80..119（40 obs）；eval_end 可加寬以滿足 CSCV PBO 檢定力
+# （total_trades = T*候選數 >= 320）。total 預設 140 保留既有 caller 行為。
+_DEFAULT_EVAL_START = 80
+_DEFAULT_EVAL_END = 119
+
+
 def _factor_panel(
     *,
     eval_shift_btc: float = 0.0,
     eval_shift_market: float = 0.0,
     future_shock: float = 0.0,
+    total: int = 140,
+    eval_start: int = _DEFAULT_EVAL_START,
+    eval_end: int = _DEFAULT_EVAL_END,
 ) -> list[dict[str, float | int]]:
     rows: list[dict[str, float | int]] = []
-    for ts in range(140):
+    for ts in range(total):
         btc = 4.0 if ts % 2 == 0 else -4.0
         market = 3.0 if (ts // 2) % 2 == 0 else -3.0
-        if 80 <= ts <= 119:
+        if eval_start <= ts <= eval_end:
             btc += eval_shift_btc
             market += eval_shift_market
-        if ts >= 120:
+        if ts > eval_end:
             btc += future_shock
             market -= future_shock
         rows.append({"timestamp": ts, "btc": btc, "market": market})
@@ -68,14 +77,16 @@ def _candidate_returns(
     beta_btc: float,
     beta_market: float,
     eval_noise_bps: float = 0.0,
+    eval_start: int = _DEFAULT_EVAL_START,
+    eval_end: int = _DEFAULT_EVAL_END,
 ) -> list[dict[str, float | int]]:
     returns: list[dict[str, float | int]] = []
     for row in factor_panel:
         ts = int(row["timestamp"])
-        if ts > 119:
+        if ts > eval_end:
             continue
         value = alpha_bps + beta_btc * float(row["btc"]) + beta_market * float(row["market"])
-        if 80 <= ts <= 119:
+        if eval_start <= ts <= eval_end:
             value += eval_noise_bps
         returns.append({"timestamp": ts, "return_bps": value})
     return returns
@@ -104,36 +115,66 @@ def test_beta_trap_raw_positive_but_residual_fails():
 
 
 def test_true_alpha_residual_passes():
-    """true alpha：factor beta 可存在，但 residual edge 應保留並 pass。"""
-    factors = _factor_panel()
+    """true alpha：factor beta 可存在，但 residual edge 應保留並 pass。
+
+    用真 DsrGate / PboGate 後此 case 需滿足兩件事才算「真 alpha 過關」：
+    (1) raw DSR(K=4) >= 0.95 — 原 beta_btc=0.4/beta_market=-0.2 的 raw Sharpe
+        被真 DSR deflate 到 0.727（< 0.95），故把 beta 調弱（0.2 / -0.1）讓 raw
+        edge 在正確 DSR 下仍顯著；residual edge（=alpha=2bps）不變。
+    (2) CSCV PBO 檢定力足夠 — eval 窗加寬到 80 obs（80..159），4 條序列
+        （候選 + 3 peer）→ total_trades = 80*4 = 320 >= min_total_trades，
+        否則 PboGate 回 insufficient_power → defer（這正是真 CSCV 的正確行為）。
+    這不是放寬 gate，而是讓合成 alpha 強到能通過正確統計。
+    """
+    eval_start, eval_end = 80, 159
+    factors = _factor_panel(total=180, eval_start=eval_start, eval_end=eval_end)
     candidate = _candidate_returns(
         factors,
         alpha_bps=2.0,
-        beta_btc=0.4,
-        beta_market=-0.2,
+        beta_btc=0.2,
+        beta_market=-0.1,
+        eval_start=eval_start,
+        eval_end=eval_end,
+    )
+    # 與 eval 窗對齊的 timestamped peer；gate 自動 scope 到 eval 窗。
+    peers = tuple(
+        {ts: float(mean) for ts in range(eval_start, eval_end + 1)}
+        for mean in (0.2, 0.5, 1.0)
     )
 
     report = ResidualAlphaGate().evaluate(
         candidate,
         factors,
-        _protocol(candidate_oos_returns=_pbo_peers(0.2, 0.5, 1.0)),
+        _protocol(
+            fit_window=ResidualAlphaFitWindow(
+                train_start=0,
+                train_end=79,
+                eval_start=eval_start,
+                eval_end=eval_end,
+                label="unit_test_prior_fit_wide",
+            ),
+            candidate_oos_returns=peers,
+        ),
     )
 
     assert report.passes
     assert report.verdict == "pass"
     assert report.reasons == ()
+    # 真 PSR(含 skew/kurt)：raw/residual 在此強 alpha 下皆 ~1.0。
     assert report.psr_raw is not None and report.psr_raw >= 0.95
-    assert report.psr_residual == pytest.approx(1.0, abs=1e-12)
+    assert report.psr_residual == pytest.approx(1.0, abs=1e-9)
+    # 真 DSR(E[max SR_k], K=4)：弱 beta 後 raw DSR 也 >= 0.95（實測 ~1.0）。
     assert report.dsr_raw is not None and report.dsr_raw >= 0.95
-    assert report.dsr_residual == pytest.approx(1.0, abs=1e-12)
+    assert report.dsr_residual == pytest.approx(1.0, abs=1e-9)
+    # 真 CSCV PBO（檢定力足夠，total_trades=320）：raw/residual 皆 0.0。
     assert report.pbo_raw == pytest.approx(0.0, abs=1e-12)
     assert report.pbo_residual == pytest.approx(0.0, abs=1e-12)
     assert report.raw_mean_bps == pytest.approx(2.0, abs=1e-9)
     assert report.residual_mean_bps == pytest.approx(2.0, abs=1e-9)
     assert report.r_beta_retention == pytest.approx(1.0, abs=1e-9)
     assert report.beta_edge_share == pytest.approx(0.0, abs=1e-9)
-    assert report.beta_loadings["btc"] == pytest.approx(0.4, abs=1e-9)
-    assert report.beta_loadings["market"] == pytest.approx(-0.2, abs=1e-9)
+    assert report.beta_loadings["btc"] == pytest.approx(0.2, abs=1e-9)
+    assert report.beta_loadings["market"] == pytest.approx(-0.1, abs=1e-9)
     assert report.r_squared > 0.99
 
 
@@ -232,13 +273,18 @@ def test_future_pbo_peer_rows_after_eval_end_do_not_change_report():
 
 
 def test_untimestamped_pbo_peer_sequence_still_requires_eval_length():
-    """無 timestamp 的純 numeric peer：維持舊契約，長度必須等於 eval_len。"""
+    """無 timestamp 的純 numeric peer：維持舊契約，長度必須等於 eval_len。
+
+    弱 beta（0.2 / -0.1）讓 raw DSR 在真 DsrGate 下 >= 0.95（核心指標過關），
+    使本 case 的 defer 純粹由「peer 長度不符 → pbo_not_computed」驅動，而非
+    DSR 不足；否則無法檢驗長度契約。
+    """
     factors = _factor_panel()
     candidate = _candidate_returns(
         factors,
         alpha_bps=2.0,
-        beta_btc=0.4,
-        beta_market=-0.2,
+        beta_btc=0.2,
+        beta_market=-0.1,
     )
 
     report = ResidualAlphaGate().evaluate(
@@ -299,36 +345,45 @@ def test_non_finite_input_fails_closed():
 
 
 def test_missing_pbo_evidence_defer_not_pass_even_when_core_metrics_pass():
-    """PBO 缺失：核心 residual 指標過關也不得 promotion-ready。"""
+    """PBO 缺失：核心 residual 指標過關也不得 promotion-ready。
+
+    弱 beta（0.2 / -0.1）讓 raw DSR 在真 DsrGate 下 >= 0.95，確保核心 PSR/DSR
+    指標確實全過（語意前提成立），再驗「缺 PBO peer → defer，不得 pass」。
+    """
     factors = _factor_panel()
     candidate = _candidate_returns(
         factors,
         alpha_bps=2.0,
-        beta_btc=0.4,
-        beta_market=-0.2,
+        beta_btc=0.2,
+        beta_market=-0.1,
     )
 
     report = ResidualAlphaGate().evaluate(candidate, factors, _protocol())
 
     assert not report.passes
     assert report.verdict == "defer_data"
-    assert report.psr_raw is not None
-    assert report.psr_residual is not None
-    assert report.dsr_raw is not None
-    assert report.dsr_residual is not None
+    # 核心 PSR/DSR 確實全過（不是 None、且 >= 門檻），defer 純由缺 PBO 驅動。
+    assert report.psr_raw is not None and report.psr_raw >= 0.95
+    assert report.psr_residual is not None and report.psr_residual >= 0.95
+    assert report.dsr_raw is not None and report.dsr_raw >= 0.95
+    assert report.dsr_residual is not None and report.dsr_residual >= 0.95
     assert report.pbo_raw is None
     assert report.pbo_residual is None
     assert "pbo_missing_candidate_returns" in report.reasons
 
 
 def test_allow_missing_pbo_is_core_diagnostic_only():
-    """core diagnostic 例外：必須顯式標註，不得默默當成完整 promotion evidence。"""
+    """core diagnostic 例外：必須顯式標註，不得默默當成完整 promotion evidence。
+
+    弱 beta（0.2 / -0.1）讓 raw DSR 在真 DsrGate 下 >= 0.95，使核心指標確實全過，
+    再驗 allow_missing_pbo_for_core_tests 旗標下「core-only 過關但顯式標註」。
+    """
     factors = _factor_panel()
     candidate = _candidate_returns(
         factors,
         alpha_bps=2.0,
-        beta_btc=0.4,
-        beta_market=-0.2,
+        beta_btc=0.2,
+        beta_market=-0.1,
     )
 
     report = ResidualAlphaGate().evaluate(

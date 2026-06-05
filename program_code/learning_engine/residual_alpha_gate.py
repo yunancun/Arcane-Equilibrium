@@ -15,6 +15,20 @@ from typing import Any, Hashable, Literal, Mapping, Sequence
 
 import numpy as np
 
+# 用倉內已審核的 DsrGate / PboGate 取代本檔手寫（且有誤）的 PSR/DSR/PBO。
+# 為什麼：手寫 _normal_approx_psr 是純 mean-t→Φ（丟掉 skew/kurtosis，對加密幣
+# 左偏厚尾高估顯著性）、_deflated_psr 是 Bonferroni cliff（K>=10 飽和到 0，非真
+# DSR）、_probability_of_backtest_overfit 是 peer-mean 比例（非 CSCV）。DsrGate
+# 提供 Bailey-Lopez de Prado 2014 真 PSR(含 skew/kurt)+ 真 DSR(E[max SR_k])；
+# PboGate.compute_pbo 提供 CSCV PBO 與 insufficient_power 判定。匯入沿用本套件
+# 既有 fallback pattern（package import 失敗時退 learning_engine 平面路徑直跑）。
+try:  # 套件式 import（app runtime）
+    from program_code.learning_engine.dsr_gate import DsrGate as _DsrGate
+    from program_code.learning_engine.pbo_gate import compute_pbo as _cscv_pbo
+except ModuleNotFoundError:  # pragma: no cover - 直跑 fallback
+    from learning_engine.dsr_gate import DsrGate as _DsrGate  # type: ignore
+    from learning_engine.pbo_gate import compute_pbo as _cscv_pbo  # type: ignore
+
 
 ReturnUnit = Literal["bps", "fraction"]
 ResidualAlphaVerdict = Literal["pass", "fail", "defer_data"]
@@ -248,10 +262,8 @@ class ResidualAlphaGate:
 
         r_beta_retention = _safe_ratio(residual_mean_bps, raw_mean_bps)
         beta_edge_share = _safe_beta_edge_share(raw_mean_bps, residual_mean_bps)
-        psr_raw = _normal_approx_psr(eval_y, protocol)
-        psr_residual = _normal_approx_psr(residual_eval, protocol)
-        dsr_raw = _deflated_psr(psr_raw, protocol.n_trials)
-        dsr_residual = _deflated_psr(psr_residual, protocol.n_trials)
+        psr_raw, dsr_raw = _psr_dsr_via_gate(eval_y, protocol)
+        psr_residual, dsr_residual = _psr_dsr_via_gate(residual_eval, protocol)
         pbo_raw, pbo_residual, pbo_report_reasons, pbo_blocking_reasons = _compute_pbo(
             eval_y=eval_y,
             residual_eval=residual_eval,
@@ -657,21 +669,64 @@ def _from_bps(value: float, return_unit: ReturnUnit) -> float:
     return value
 
 
-def _normal_approx_psr(
+def _psr_dsr_via_gate(
     returns: np.ndarray,
     protocol: ResidualAlphaProtocol,
-) -> float | None:
-    if len(returns) <= 0:
-        return None
+) -> tuple[float | None, float | None]:
+    """用倉內 vetted DsrGate 算真 PSR(含 skew/kurtosis) + 真 DSR(E[max SR_k])。
+
+    為什麼：取代手寫 _normal_approx_psr（純 mean-t→Φ，丟 skew/kurt，對加密幣
+    左偏厚尾高估顯著性）與 _deflated_psr（Bonferroni cliff，K>=10 飽和到 0）。
+    回 (psr, dsr)；資料退化（n<2 或 std≈0）時回退化機率（保留舊行為），避免
+    DsrGate 對 sqrt(T-1)/std 的數值要求 crash。
+    """
+    n = len(returns)
+    if n <= 0:
+        return None, None
     benchmark = _from_bps(protocol.psr_benchmark_bps, protocol.return_unit)
     mean = float(np.mean(returns))
-    if len(returns) < 2:
-        return _degenerate_probability(mean, benchmark)
+    if n < 2:
+        p = _degenerate_probability(mean, benchmark)
+        return p, p
     std = float(np.std(returns, ddof=1))
     if std <= _EPSILON:
-        return _degenerate_probability(mean, benchmark)
-    z_score = (mean - benchmark) / (std / math.sqrt(float(len(returns))))
-    return _normal_cdf(z_score)
+        # 常數序列：Sharpe 無定義；mean 與 benchmark 的關係直接決定機率。
+        p = _degenerate_probability(mean, benchmark)
+        return p, p
+    observed_sharpe = (mean - benchmark) / std
+    skew, ex_kurt = _sample_moments(returns)
+    res = _DsrGate().compute_dsr(
+        observed_sharpe=observed_sharpe,
+        n_trials=protocol.n_trials,
+        n_observations=n,
+        skew=skew,
+        excess_kurtosis=ex_kurt,
+    )
+    # honor DsrGate 的 P3-01 insufficient_observations 守衛（min_observations
+    # 預設 30）：樣本不足時 PSR(sqrt(T-1)) / DSR 在低 N 會過度樂觀。回 None 讓
+    # contract 因 metric_missing 而 defer（fail-closed），不依賴下游 PBO
+    # power gate 兜底（E2 LOW-1：避免低 N DSR 過度樂觀的潛在 footgun）。
+    if res.insufficient_observations:
+        return None, None
+    # psr_at_threshold = 真 PSR(0)、deflated_sharpe = 真 DSR(E[max SR_k])。
+    return float(res.psr_at_threshold), float(res.deflated_sharpe)
+
+
+def _sample_moments(returns: np.ndarray) -> tuple[float, float]:
+    """以 population z-moments 回 (skew γ3, excess kurtosis γ4-3)。
+
+    為什麼用 population（ddof=0）標準化：與 Bailey-Lopez de Prado PSR 公式的
+    γ3 / γ4 定義一致；n<3 或常數序列回 (0, 0)（高斯預設，不做不可信的高階矩）。
+    """
+    n = len(returns)
+    if n < 3:
+        return 0.0, 0.0
+    mean = float(np.mean(returns))
+    std = float(np.std(returns))  # population ddof=0
+    if std <= _EPSILON:
+        return 0.0, 0.0
+    z = (np.asarray(returns, dtype=np.float64) - mean) / std
+    return float(np.mean(z ** 3)), float(np.mean(z ** 4) - 3.0)
 
 
 def _degenerate_probability(mean: float, benchmark: float) -> float:
@@ -680,18 +735,6 @@ def _degenerate_probability(mean: float, benchmark: float) -> float:
     if mean < benchmark:
         return 0.0
     return 0.5
-
-
-def _normal_cdf(z_score: float) -> float:
-    probability = 0.5 * (1.0 + math.erf(z_score / math.sqrt(2.0)))
-    return max(0.0, min(1.0, probability))
-
-
-def _deflated_psr(psr: float | None, n_trials: int) -> float | None:
-    if psr is None:
-        return None
-    adjusted_failure = min(1.0, (1.0 - psr) * float(n_trials))
-    return max(0.0, min(1.0, 1.0 - adjusted_failure))
 
 
 def _compute_pbo(
@@ -732,12 +775,16 @@ def _compute_pbo(
         reasons.append("pbo_not_computed")
         return None, None, _dedupe(reasons), ["pbo_not_computed"]
 
-    return (
-        _probability_of_backtest_overfit(eval_y, raw_peers),
-        _probability_of_backtest_overfit(residual_eval, residual_peers),
-        _dedupe(reasons),
-        [],
-    )
+    pbo_raw_val = _pbo_via_cscv(eval_y, raw_peers)
+    pbo_res_val = _pbo_via_cscv(residual_eval, residual_peers)
+    # insufficient_power（含 T<s_slices nan、total_trades 不足 320、組合數 < min_K）
+    # 任一成立即 defer：CSCV 樣本檢定力不足時不得宣稱 PBO evidence。沿用既有
+    # pbo_not_computed defer 流程（_is_defer_only_reason），保守不放寬。
+    if pbo_raw_val is None or pbo_res_val is None:
+        reasons.append("pbo_insufficient_power")
+        return None, None, _dedupe(reasons), ["pbo_insufficient_power"]
+
+    return (pbo_raw_val, pbo_res_val, _dedupe(reasons), [])
 
 
 def _coerce_pbo_peer(
@@ -788,16 +835,22 @@ def _coerce_pbo_peer(
     return np.asarray(parsed, dtype=np.float64), _dedupe(reasons)
 
 
-def _probability_of_backtest_overfit(
-    observed: np.ndarray,
-    peers: Sequence[np.ndarray],
-) -> float:
-    observed_mean = float(np.mean(observed))
-    peer_means = [float(np.mean(peer)) for peer in peers]
-    if not peer_means:
-        return 1.0
-    not_outperforming = sum(1 for peer_mean in peer_means if peer_mean >= observed_mean)
-    return float(not_outperforming) / float(len(peer_means))
+def _pbo_via_cscv(
+    candidate: np.ndarray,
+    peers: list[np.ndarray],
+) -> float | None:
+    """用倉內 vetted PboGate.compute_pbo（CSCV）算真 PBO。
+
+    為什麼：取代手寫 _probability_of_backtest_overfit（只是 peer-mean 比例，
+    非 Bailey-Borwein-LdP-Zhu 2014 CSCV）。[candidate, *peers] 至少 2 條序列
+    （caller 已保證 peers 非空），滿足 CSCV ranking 需求。insufficient_power
+    （T<s_slices 回 nan、或 total_trades/組合數不足）或非 finite → 回 None，由
+    caller 走 defer 流程，CSCV 檢定力不足時不得宣稱 PBO evidence。
+    """
+    res = _cscv_pbo([candidate, *peers])
+    if res.insufficient_power or not math.isfinite(res.pbo):
+        return None
+    return float(res.pbo)
 
 
 def _metric_reasons(
@@ -893,6 +946,9 @@ def _is_defer_only_reason(reason: str) -> bool:
     return reason in {
         "pbo_missing_candidate_returns",
         "pbo_not_computed",
+        # CSCV 檢定力不足（T<s_slices / total_trades / 組合數）→ defer，非 hard fail，
+        # 與 pbo_not_computed 同類：缺 PBO evidence 但非 alpha 證偽。
+        "pbo_insufficient_power",
     }
 
 
