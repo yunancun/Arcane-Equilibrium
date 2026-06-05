@@ -161,6 +161,45 @@ def test_overfitting_dsr_uses_score_not_k_budget():
     assert rows[0]["k_trials"] == 8
 
 
+def test_direct_candidate_regime_metrics_block_is_supported():
+    rows, summary = builder_mod.build_candidate_metrics(
+        {
+            "candidate_regime_metrics": [
+                {
+                    "regime": "chop",
+                    "n_days": 90,
+                    "gross_bps": 6.0,
+                    "cost_bps": 2.0,
+                    "net_bps": 4.0,
+                    "mean_daily_bps": 0.2,
+                    "annualized_net_sharpe": 0.7,
+                    "oos_sharpe": 0.4,
+                    "psr_0": 0.96,
+                    "dsr_k": 0.95,
+                    "pbo": 0.2,
+                    "k_trials": 8,
+                    "n_independent": 45,
+                    "sample_unit": "non_overlapping_holding_window",
+                    "recent_90d_net_bps": 1.5,
+                    "recent_180d_net_bps": 1.2,
+                }
+            ],
+            "date_span": ["2025-12-01", "2026-06-01"],
+            "selected_variant": "listing_fade_v0",
+        },
+        run_id="metrics_run",
+        candidate_id="cand_listing",
+        strategy_family="listing_fade",
+        parameter_cell_id="v0",
+    )
+
+    assert summary["source_report_type"] == "aeg_candidate_metrics_direct"
+    assert summary["selected_variant"] == "listing_fade_v0"
+    assert summary["metric_status_counts"] == {"PASS": 1}
+    assert rows[0]["regime"] == "chop"
+    assert rows[0]["net_to_cost_ratio"] == 2.0
+
+
 def test_artifact_write_creates_index_and_manifest(tmp_path):
     rows, summary = builder_mod.build_candidate_metrics(
         _report_with_per_regime(include_net_and_freshness=True, include_matrix_fields=True),

@@ -13,15 +13,17 @@ mean_daily_bps 冒充為 matrix net_bps**；缺 `net_bps` 或 `recent_90d_net_bp
 `recent_180d_net_bps`，或缺 `net_to_cost_ratio`、`n_independent`、PSR/DSR/PBO、
 OOS Sharpe 等 matrix-critical 欄位時 row 直接 `metric_status=FAIL`，把「還缺什麼」
 變成機械證據。它也**不把 n_days 冒充為 n_independent**；DSR 讀分數，不讀
-K budget。artifact-only，0 DB / 0 runtime / 0 trading path。
+K budget。v0.2 也支援 AEG-S3 harness 直接輸出 top-level `candidate_regime_metrics`
+block（不必塞進舊 `signal_evaluation` 形狀）。artifact-only，0 DB / 0 runtime /
+0 trading path。
 
 | 檔 | 職責 |
 |---|---|
 | `research/aeg_candidate_metrics/__init__.py` | candidate regime metrics schema / runner 版本（v0.2 含 matrix-critical 欄位）。 |
-| `research/aeg_candidate_metrics/builder.py` | 純函數 adapter：偵測 report type、選 selected/best variant、抽 per-regime metrics、標 freshness/net_bps/n_independent/PSR/DSR/PBO/OOS 缺口。 |
+| `research/aeg_candidate_metrics/builder.py` | 純函數 adapter：偵測 report type、選 selected/best variant 或 direct candidate metrics block、抽 per-regime metrics、標 freshness/net_bps/n_independent/PSR/DSR/PBO/OOS 缺口。 |
 | `research/aeg_candidate_metrics/artifact.py` | `candidate_regime_metrics.csv` SoT + summary/manifest/index。 |
 | `research/aeg_candidate_metrics/harness.py` | CLI：`--diagnostic-report-json` → artifact-only run dir。 |
-| `research/tests/test_aeg_candidate_metrics.py` | synthetic bite tests：現有診斷缺 net/freshness 必 fail、net+freshness 但缺 matrix-critical 欄位仍 fail、完整欄位才 pass、DSR score 不被 K budget 污染、best-variant fallback、manifest/index、靜態禁 DB/runtime route。 |
+| `research/tests/test_aeg_candidate_metrics.py` | synthetic bite tests：現有診斷缺 net/freshness 必 fail、net+freshness 但缺 matrix-critical 欄位仍 fail、完整欄位才 pass、direct candidate metrics block、DSR score 不被 K budget 污染、best-variant fallback、manifest/index、靜態禁 DB/runtime route。 |
 
 ## 2026-06-05 AEG execution realism builder（`research/aeg_execution_realism/`）
 
