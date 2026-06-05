@@ -55,8 +55,11 @@ from .layer2_types import (
     TOOL_CHECK_DERIVATIVES,
     TOOL_FETCH_URL,
     TOOL_GET_ACCOUNT_STATE,
+    TOOL_GET_CVD,
     TOOL_GET_EXPERIENCE,
+    TOOL_GET_LIQUIDATIONS,
     TOOL_GET_MARKET_STATE,
+    TOOL_GET_ORDERBOOK,
     TOOL_GET_RECENT_DECISIONS,
     TOOL_QUERY_ONCHAIN,
     TOOL_RECORD_INSIGHT,
@@ -83,6 +86,25 @@ logger = logging.getLogger(__name__)
 from .layer2_tools_g3_07 import (
     check_derivatives as _g3_07_check_derivatives,
     query_onchain as _g3_07_query_onchain,
+)
+
+# G3-08 (2026-06-05): get_orderbook / get_cvd / get_liquidations 微結構工具
+# 實作在 sibling layer2_tools_g3_08.py（同 G3-07 sibling 範式，schema + handler
+# 留主檔，fetch/parse 在 sibling）。
+# G3-08（2026-06-05）：微結構工具實作於 sibling，主檔僅保留 caller surface。
+from .layer2_tools_g3_08 import (
+    DEFAULT_CVD_WINDOW_BARS,
+    DEFAULT_LIQ_WINDOW_MINUTES,
+    DEFAULT_ORDERBOOK_DEPTH,
+    MAX_CVD_WINDOW_BARS,
+    MAX_LIQ_WINDOW_MINUTES,
+    MAX_ORDERBOOK_DEPTH,
+    MIN_CVD_WINDOW_BARS,
+    MIN_LIQ_WINDOW_MINUTES,
+    MIN_ORDERBOOK_DEPTH,
+    get_cvd as _g3_08_get_cvd,
+    get_liquidations as _g3_08_get_liquidations,
+    get_orderbook as _g3_08_get_orderbook,
 )
 
 
@@ -369,6 +391,96 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
                     },
                     "description": "Metrics to fetch (subset of supported list)",
                     "default": list(sorted(DERIV_METRIC_VALID)),
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
+    # ─────────────────────────────────────────────────────────
+    # G3-08 (2026-06-05): three microstructure tools (read-only).
+    # G3-08（2026-06-05）：三個微結構工具（一律唯讀）。
+    # get_orderbook：唯一走外部 Bybit 公開端點，預設關閉（env-gate）。
+    # get_cvd / get_liquidations：讀本地 PG，免費唯讀，預設開啟。
+    # ─────────────────────────────────────────────────────────
+    {
+        "name": TOOL_GET_ORDERBOOK,
+        "description": (
+            "Fetch a Bybit V5 public orderbook snapshot (top-N levels) for a symbol: "
+            "bids/asks, bid-ask spread (bps), and top-N bid imbalance ratio. Read-only, "
+            "no order placement. DEFAULT-OFF: must be enabled via "
+            "OPENCLAW_L2_TOOL_ORDERBOOK_ENABLED=1. Fail-closed: error string + zeros on any failure. "
+            "取得 symbol 的 Bybit V5 公開 orderbook 快照（買賣盤 / 價差 bps / 買盤失衡比）。唯讀，不下單。"
+            "預設關閉，需設 OPENCLAW_L2_TOOL_ORDERBOOK_ENABLED=1。失敗時回 error + 零值。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Trading symbol, e.g. BTCUSDT",
+                },
+                "depth": {
+                    "type": "integer",
+                    "description": "Number of price levels per side (1-25)",
+                    "default": DEFAULT_ORDERBOOK_DEPTH,
+                    "minimum": MIN_ORDERBOOK_DEPTH,
+                    "maximum": MAX_ORDERBOOK_DEPTH,
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": TOOL_GET_CVD,
+        "description": (
+            "Cumulative volume delta (buy_volume - sell_volume) over the last N 1-minute "
+            "bars, from our own PG market.trade_agg_1m. Read-only, free local read. "
+            "Empty window is legal (zeros, no error). DEFAULT-ON (disable via "
+            "OPENCLAW_L2_TOOL_CVD_ENABLED=0). "
+            "取 symbol 最近 N 根 1 分鐘 bar 的累積成交量差（CVD）。讀本地 PG，唯讀免費。"
+            "零筆視窗為合法（回零值，非錯誤）。預設開啟，可設 OPENCLAW_L2_TOOL_CVD_ENABLED=0 關閉。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Trading symbol, e.g. BTCUSDT",
+                },
+                "window_bars": {
+                    "type": "integer",
+                    "description": "Number of 1-minute bars to aggregate (1-60)",
+                    "default": DEFAULT_CVD_WINDOW_BARS,
+                    "minimum": MIN_CVD_WINDOW_BARS,
+                    "maximum": MAX_CVD_WINDOW_BARS,
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
+    {
+        "name": TOOL_GET_LIQUIDATIONS,
+        "description": (
+            "Liquidation stats over the last window_minutes, grouped by side, from our own "
+            "PG market.liquidations: buy/sell liq qty + count, net qty, largest single. "
+            "Read-only, free local read. Empty window is legal (zeros, no error). DEFAULT-ON "
+            "(disable via OPENCLAW_L2_TOOL_LIQUIDATIONS_ENABLED=0). "
+            "取 symbol 最近 window_minutes 分鐘的強平統計（依 side 分組）。讀本地 PG，唯讀免費。"
+            "零筆視窗為合法（回零值，非錯誤）。預設開啟，可設 OPENCLAW_L2_TOOL_LIQUIDATIONS_ENABLED=0 關閉。"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Trading symbol, e.g. BTCUSDT",
+                },
+                "window_minutes": {
+                    "type": "integer",
+                    "description": "Lookback window in minutes (1-60)",
+                    "default": DEFAULT_LIQ_WINDOW_MINUTES,
+                    "minimum": MIN_LIQ_WINDOW_MINUTES,
+                    "maximum": MAX_LIQ_WINDOW_MINUTES,
                 },
             },
             "required": ["symbol"],
@@ -736,6 +848,10 @@ class ToolExecutor:
             # G3-07 (2026-04-26) / G3-07（2026-04-26）
             TOOL_QUERY_ONCHAIN: self._query_onchain,
             TOOL_CHECK_DERIVATIVES: self._check_derivatives,
+            # G3-08 (2026-06-05) — 微結構工具 / microstructure tools
+            TOOL_GET_ORDERBOOK: self._get_orderbook,
+            TOOL_GET_CVD: self._get_cvd,
+            TOOL_GET_LIQUIDATIONS: self._get_liquidations,
         }
         handler = handlers.get(tool_name)
         if handler is None:
@@ -1052,3 +1168,39 @@ class ToolExecutor:
         薄包裝 —— 委派給 layer2_tools_g3_07 sibling。
         """
         return await _g3_07_check_derivatives(args)
+
+    # ─────────────────────────────────────────────────────────
+    # G3-08 (2026-06-05) — get_orderbook / get_cvd / get_liquidations handlers
+    # G3-08（2026-06-05）—— 微結構工具處理器（薄包裝，真實作在 g3_08 sibling）
+    #
+    # 與 G3-07 同範式：schema + dispatch 留主檔，fetch/parse 在 sibling，
+    # 讓 layer2_tools.py 遠低於 §九 2000 行硬上限。
+    # ─────────────────────────────────────────────────────────
+
+    async def _get_orderbook(self, args: dict[str, Any]) -> dict[str, Any]:
+        """
+        Thin wrapper — delegate to layer2_tools_g3_08 sibling.
+        薄包裝 —— 委派給 layer2_tools_g3_08 sibling。
+
+        為什麼做 depth→limit 橋接：對外（LLM schema）以 `depth` 命名語意較清楚，
+        但 sibling 的 get_orderbook 讀 args["limit"]（Bybit V5 端點原生參數名）。
+        若不橋接，LLM 帶的 depth 會被默默丟棄而落回預設值。橋接時不覆蓋已存在的
+        `limit`（呼叫端若直接給 limit 仍尊重），clamp 由 sibling 統一處理。
+        """
+        if "depth" in args and "limit" not in args:
+            args = {**args, "limit": args["depth"]}
+        return await _g3_08_get_orderbook(args)
+
+    async def _get_cvd(self, args: dict[str, Any]) -> dict[str, Any]:
+        """
+        Thin wrapper — delegate to layer2_tools_g3_08 sibling.
+        薄包裝 —— 委派給 layer2_tools_g3_08 sibling。
+        """
+        return await _g3_08_get_cvd(args)
+
+    async def _get_liquidations(self, args: dict[str, Any]) -> dict[str, Any]:
+        """
+        Thin wrapper — delegate to layer2_tools_g3_08 sibling.
+        薄包裝 —— 委派給 layer2_tools_g3_08 sibling。
+        """
+        return await _g3_08_get_liquidations(args)

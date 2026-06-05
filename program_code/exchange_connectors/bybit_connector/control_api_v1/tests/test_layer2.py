@@ -44,7 +44,10 @@ from app.layer2_types import (
     SESSION_STATE_RUNNING,
     SEARCH_PROVIDER_PERPLEXITY,
     SEARCH_PROVIDER_WEBPILOT,
+    TOOL_GET_CVD,
+    TOOL_GET_LIQUIDATIONS,
     TOOL_GET_MARKET_STATE,
+    TOOL_GET_ORDERBOOK,
     TOOL_SUBMIT_RECOMMENDATION,
     TOOL_WEB_SEARCH,
     AdaptiveBudgetState,
@@ -681,9 +684,12 @@ class TestToolSchemas:
         assert TOOL_GET_MARKET_STATE in names
         assert TOOL_SUBMIT_RECOMMENDATION in names
         assert TOOL_WEB_SEARCH in names
-        # G3-07 (2026-04-26): added query_onchain + check_derivatives → 10 tools.
-        # G3-07（2026-04-26）：新增 query_onchain + check_derivatives → 10 個工具。
-        assert len(TOOL_SCHEMAS) == 10
+        # G3-08 (2026-06-05): 三個微結構工具必須出現在 schema（否則 LLM 看不見）。
+        assert TOOL_GET_ORDERBOOK in names
+        assert TOOL_GET_CVD in names
+        assert TOOL_GET_LIQUIDATIONS in names
+        # G3-07 → 10 tools；G3-08 又加 3 個微結構 → 13。
+        assert len(TOOL_SCHEMAS) == 13
 
     def test_schemas_have_required_fields(self):
         for schema in TOOL_SCHEMAS:
@@ -1023,9 +1029,8 @@ class TestSafetyInvariants:
             Recommendation(action="buy")  # Missing required fields
 
     def test_tool_schemas_count(self):
-        # G3-07 (2026-04-26): added query_onchain + check_derivatives → 10 tools.
-        # G3-07（2026-04-26）：新增 query_onchain + check_derivatives → 10 個工具。
-        assert len(TOOL_SCHEMAS) == 10
+        # G3-07 → 10 tools；G3-08 又加 3 個微結構工具 → 13。
+        assert len(TOOL_SCHEMAS) == 13
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -101,6 +101,14 @@ TOOL_RECORD_INSIGHT = "record_insight"
 # G3-07（2026-04-26）：兩個新工具讓 L2 自主推理可查 on-chain 與衍生品訊號。預設關閉。
 TOOL_QUERY_ONCHAIN = "query_onchain"
 TOOL_CHECK_DERIVATIVES = "check_derivatives"
+# G3-08 (2026-06-05): 三個微結構工具名稱。
+#   - get_orderbook     — 外部 Bybit V5 orderbook（預設關閉）
+#   - get_cvd           — 本地 PG market.trade_agg_1m 滾動買賣量差（預設開啟，免費）
+#   - get_liquidations  — 本地 PG market.liquidations 視窗統計（預設開啟，免費）
+# 工具一律 READ-ONLY；env-gate 與 CriticVerdict 常量見下方 G3-08 區塊。
+TOOL_GET_ORDERBOOK = "get_orderbook"
+TOOL_GET_CVD = "get_cvd"
+TOOL_GET_LIQUIDATIONS = "get_liquidations"
 
 # Onchain metric whitelist (G3-07)
 # Onchain 指標白名單（G3-07）
@@ -126,6 +134,42 @@ DERIV_METRIC_VALID: set[str] = {
     DERIV_METRIC_FUNDING,
     DERIV_METRIC_NEXT_FUNDING_TS,
     DERIV_METRIC_OI_24H_CHANGE_PCT,
+}
+
+# ─────────────────────────────────────────────────────────
+# G3-08 (2026-06-05) — env-gate 名稱 + CriticVerdict 常量
+#
+# 為什麼集中在 layer2_types：B（critic / lesson store）與 C（微結構工具）
+# 兩條工作流都依賴同一組 env-gate 名稱與 verdict 字串；放在型別模組讓
+# 引擎、工具、critic 三方共用單一來源，避免字串散落漂移。
+#
+# 預設策略（fail-closed / 預設安全）：
+#   - ORDERBOOK 預設關閉（外部 Bybit HTTP）；CVD / LIQUIDATIONS 讀本地 PG，
+#     免費且唯讀，預設開啟。
+#   - CRITIC / LESSON_STORE 預設關閉：未設旗標 → 引擎行為 byte-identical，
+#     不發任何額外 LLM 呼叫、不寫 agent.lessons。
+# ─────────────────────────────────────────────────────────
+
+# 工具 env-gate 名稱（truthy 值 ∈ {"1","true","yes","on"} 才視為開啟）
+ENV_L2_TOOL_ORDERBOOK_ENABLED = "OPENCLAW_L2_TOOL_ORDERBOOK_ENABLED"
+ENV_L2_TOOL_CVD_ENABLED = "OPENCLAW_L2_TOOL_CVD_ENABLED"
+ENV_L2_TOOL_LIQUIDATIONS_ENABLED = "OPENCLAW_L2_TOOL_LIQUIDATIONS_ENABLED"
+
+# B 工作流 env-gate 名稱
+ENV_L2_CRITIC_ENABLED = "OPENCLAW_L2_CRITIC_ENABLED"
+ENV_L2_LESSON_STORE_ENABLED = "OPENCLAW_L2_LESSON_STORE_ENABLED"
+
+# CriticVerdict — critic 對「是否繼續推理」的三態判定。
+#   - CONTINUE：繼續正常迴圈（fail-soft 預設；任何解析失敗都退回此值）
+#   - REPLAN  ：在 messages 追加一則 user 提示，要 agent 重新規劃（不刪既有訊息）
+#   - STOP    ：提早收斂為 COMPLETED（非 FAILED），不再迭代
+CRITIC_VERDICT_CONTINUE = "continue"
+CRITIC_VERDICT_REPLAN = "replan"
+CRITIC_VERDICT_STOP = "stop"
+CRITIC_VERDICT_VALID: set[str] = {
+    CRITIC_VERDICT_CONTINUE,
+    CRITIC_VERDICT_REPLAN,
+    CRITIC_VERDICT_STOP,
 }
 
 # Max agent loop iterations / Agent 循环最大迭代次数
