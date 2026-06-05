@@ -1,7 +1,7 @@
 # 玄衡 TODO — 主動派工佇列
 
-**版本** v111 ｜ **日期** 2026-06-03 ｜ **來源 HEAD** `ab4d6e40`（本 TODO commit 後再同步）｜ runtime 詳見 §0。
-**當前主線**：`P0-EDGE-1` Alpha-Edge 體制證據治理（§1）。候選 2 多日 trend = 🔴 **NO-GO-TREND**（關閉）→ 主路 = **listing fade**（Gate-B 探針已部署，待 24h 真捕捉）+ **funding/OI history backfill**（✅ code + `--apply` DONE，V125 history 已填 730d）。活躍工程佇列 §5；操作員行動 §6；排程 §7。**2026-06-03 更新**：逃逸路②`funding-tilt` 全 harness 跑完＝🔴 **NO-GO-C 關閉**（E1+E2/MIT/QC 全鏈，第 5 個結構性候選死於同根因 down-market beta 偽裝 edge）→ **主路回 listing fade（路①，Gate-B 探針待 operator 24h 真捕捉）**；`AEG-S2` 證據自動化基建（MIT 設計，V002→V127 衝突 + FND-2 critical-path）待 IMPL scope，可並行；詳 §5。
+**版本** v112 ｜ **日期** 2026-06-05 ｜ **來源 HEAD** `4332d3bb`（三端同步）｜ runtime 詳見 §0。
+**當前主線**：`P0-EDGE-1` Alpha-Edge 體制證據治理（§1）。候選 2 多日 trend = 🔴 **NO-GO-TREND**（關閉）；逃逸路② funding-tilt = 🔴 **NO-GO-C**（關閉）；主路 = **listing fade**（Gate-B 探針已部署，待 24h 真捕捉）+ 已完成的 AEG-S2 證據自動化 runner 基建（§2/§5）。活躍工程佇列 §5；操作員行動 §6；排程 §7。
 **指針**：版本敘事 `docs/CLAUDE_CHANGELOG.md`（TODO Version-Increment Log）；**v110 pre-cleanup 全量封存** `docs/archive/2026-06-03--todo_v110_pre_cleanup_archive.md`；V5.8 設計保存 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--v58_design_progress_preservation_audit.md`。
 
 ---
@@ -10,7 +10,7 @@
 
 | 區域 | 當前狀態 | 下一步 |
 |---|---|---|
-| 來源同步 | **三端同步**（Mac=origin=Linux `trade-core`；2026-06-03 接手 session 多 commit 後 push+ff，最終 HEAD 見 git log；engine binary 已 rebuild 至 `7bc2f9ee`-code）。 | 維持三端同步；工作樹三端 0-dirty。 |
+| 來源同步 | **三端同步**（Mac=origin=Linux `trade-core`；2026-06-05 Alpha-Edge S2 runner checkpoints push+ff，HEAD `4332d3bb`；engine binary 仍沿用前次 runtime build，未在本輪重啟）。 | 維持三端同步；Mac 仍有既有無關 memory/docs dirty，Linux source clean。 |
 | Runtime | Linux engine **rebuild+restart 2026-06-03**（code `7bc2f9ee`，自 `b8c258b4` 起全 doc-only commit 故 binary 功能等價；release build OK 3 benign warn；engine PID **2358043** / API PID **2358149**〔4 workers〕/ bind tailnet `100.91.109.86:8000`；watchdog engine+demo+live alive、ticks 9998791 流動、paused=False、本 session 親驗；paper OFF 預期；restart 清掉 stale non-OpenClaw orphan pid 2269678）。funding/OI `--apply` DONE（V125 history funding 46539 + OI 348153，accepted）。 | **P5 step-i soak 已由本次全量 restart 結束**（flag revert OFF 如預期）。**⚠ 重啟 soak 前須先重設計**（2026-06-03 PM 發現：gate=`divergences==0 AND total>=N`〔`governance_divergence.py:33`〕，但 comparator(`record_divergence`)只在 Python `GovernanceHub.acquire/release/get`(hub.py:933/1053/1179)觸發、主 caller=`executor_agent.py:554`〔**shadow 默認**〕非 Rust 熱路徑〔408k lease=Rust event_consumer〕→ Python shadow-hub 無 organic 流量時 total≈0「0 divergence」為**空轉偽 pass**；且 `total` 只能經 CSRF-gated GUI endpoint 讀=soak 監測缺口）。重啟前置：(a) 驅動 lease ops 過 Python hub 或 instrument Rust 權威路徑；(b) 為 soak 腳本加 CSRF-exempt/localhost 的 total 讀法。**re-auth**：full restart 寫 manual sentinel → live-demo lane 可能需 operator 重授權（demo lane 續收）。QA A-1/A-2/B/A-4 done(re-check 6/10)。 |
 | 系統層保護 | 系統 `openclaw-engine.service` / watchdog 安裝仍 sudo/操作員閘控；當前=使用者 watchdog + linger + 手動 engine 程序。 | 操作員安排系統層安裝窗口。 |
 | 被動健康殘留 | `[48] replay_manifest_registry_growth`、`[74] close_maker_reject_samples`、`[56] live_pipeline_active` 仍為 OPS 殘留／證據佇列。 | 在 OPS 佇列保持明示；解決或接受前不標全綠。 |
@@ -43,6 +43,8 @@
 **§2.3 保留的基礎**（AEG 整合並約束既有基礎，非取代）：`market.klines`（1095d 閘控後為主 OHLCV 源，現 365d）；`symbol_universe_snapshots`（PIT 倖存者控制，拒當前倖存者捷徑）；`funding_rates`/`open_interest`/`long_short_ratio`（體制/旁證，18mo 缺口須先解）；`regime_snapshots`/`transitions`（分類器須版本化、禁候選上調參）；`news_signals`（僅旁證，排除晉升）；`AlphaSurface.regime`+`HurstHysteresis`（評估重用）；`basis_panel`（僅前向 A1，歷史受限至 ticker/index 持久化修好）；Sprint 2 工件（保留證據，晉升須過 AEG 矩陣）。
 
 **§2.4 Gate 後路線圖**：`AEG-S1` 基礎 ✅（部署完成，見上）→ `AEG-S2` 證據自動化（體制標籤 + 廣度階梯 + 穩健性矩陣，前二並行）→ `AEG-S3` Alpha 研究（TSMOM〔已 NO-GO〕、橫截面動量、S4 證偽 overlay、S2 PreLaunch 探測，≤4 並行）→ `AEG-S4` 決策（CP-2 候選判定，序列 PM->QC/MIT->PA->操作員）。
+
+**2026-06-05 PM checkpoint**：`AEG-S2` runner 基建已三端同步完成：V131 residual report registry、V132 hidden OOS state registry、(a) `aeg_regime_runner`、(b) `aeg_breadth_ladder`（含 summary 持久化 survivorship healthcheck）、(c) `aeg_robustness_matrix`。Linux artifact-only smoke：regime `aeg_regime_smoke_20260605`、breadth `breadth_smoke_20260605_healthcheck`、robustness `robustness_smoke_20260605`；research tests Linux `167 passed`。矩陣結果按預期全 `insufficient evidence`（缺 per-regime PnL / freshness / execution realism），不可當 promotion proof。
 
 ---
 
