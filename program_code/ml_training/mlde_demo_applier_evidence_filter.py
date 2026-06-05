@@ -119,6 +119,11 @@ def evidence_filter_capabilities(cur: Any) -> dict[str, bool]:
       - replay_experiments_has_oos_label_window_end
       - replay_experiments_has_oos_embargo_seconds
       - replay_experiments_has_total_candidates_k
+      - has_residual_alpha_reports
+      - residual_alpha_reports_has_report_hash
+      - residual_alpha_reports_has_report_jsonb
+      - residual_alpha_reports_has_strategy_name
+      - residual_alpha_reports_has_engine_mode
 
     Each capability missing → caller falls back gracefully (skip filter
     on that column with comment marking forward-compat per dispatch §
@@ -143,6 +148,11 @@ def evidence_filter_capabilities(cur: Any) -> dict[str, bool]:
         "replay_experiments_has_oos_label_window_end": False,
         "replay_experiments_has_oos_embargo_seconds": False,
         "replay_experiments_has_total_candidates_k": False,
+        "has_residual_alpha_reports": False,
+        "residual_alpha_reports_has_report_hash": False,
+        "residual_alpha_reports_has_report_jsonb": False,
+        "residual_alpha_reports_has_strategy_name": False,
+        "residual_alpha_reports_has_engine_mode": False,
     }
     # 1) probe mlde_shadow_recommendations columns
     # 1) 探 mlde_shadow_recommendations 的欄位
@@ -218,6 +228,39 @@ def evidence_filter_capabilities(cur: Any) -> dict[str, bool]:
     caps["replay_experiments_has_total_candidates_k"] = (
         "total_candidates_k" in rep_cols
     )
+
+    # 3) V131 residual alpha report durable registry。此表缺失不破 SELECT，
+    # 但 source contract 會在 durable snapshot 欄位為 NULL 時 fail-closed。
+    try:
+        cur.execute(
+            "SELECT to_regclass('learning.demo_residual_alpha_reports') IS NOT NULL"
+        )
+        residual_row = cur.fetchone()
+    except Exception:  # noqa: BLE001
+        return caps
+    if not residual_row or not residual_row[0]:
+        return caps
+    caps["has_residual_alpha_reports"] = True
+
+    try:
+        cur.execute(
+            """
+            SELECT column_name
+              FROM information_schema.columns
+             WHERE table_schema = 'learning'
+               AND table_name = 'demo_residual_alpha_reports'
+               AND column_name = ANY(%s)
+            """,
+            (["report_hash", "report_jsonb", "strategy_name", "engine_mode"],),
+        )
+        residual_rows = cur.fetchall() or []
+    except Exception:  # noqa: BLE001
+        return caps
+    residual_cols = {str(r[0]) for r in residual_rows if r and r[0] is not None}
+    caps["residual_alpha_reports_has_report_hash"] = "report_hash" in residual_cols
+    caps["residual_alpha_reports_has_report_jsonb"] = "report_jsonb" in residual_cols
+    caps["residual_alpha_reports_has_strategy_name"] = "strategy_name" in residual_cols
+    caps["residual_alpha_reports_has_engine_mode"] = "engine_mode" in residual_cols
     return caps
 
 
@@ -371,13 +414,24 @@ def fetch_pending_sql_and_params(
     # synthetic bucket 模式 observability（P3-03）：預設 'excluded'，
     # 顯式 opt-in 時 'opt_in'。
     synthetic_label = "opt_in" if allow_synthetic else "excluded"
+    has_residual_registry_join = (
+        bool(caps.get("has_residual_alpha_reports"))
+        and bool(caps.get("residual_alpha_reports_has_report_hash"))
+        and bool(caps.get("residual_alpha_reports_has_report_jsonb"))
+        and bool(caps.get("residual_alpha_reports_has_strategy_name"))
+        and bool(caps.get("residual_alpha_reports_has_engine_mode"))
+        and bool(caps.get("replay_experiments_has_manifest_jsonb"))
+        and has_fk_only
+    )
+    residual_registry_label = "on" if has_residual_registry_join else "missing"
     logger.info(
-        "evidence_filter capability dump: caps=%d/%d block_a=%s block_b=%s synthetic=%s",
+        "evidence_filter capability dump: caps=%d/%d block_a=%s block_b=%s synthetic=%s residual_registry=%s",
         caps_count,
         len(caps),
         block_a_label,
         block_b_label,
         synthetic_label,
+        residual_registry_label,
     )
     evidence_source_tier_select = (
         "evidence_source_tier::text AS evidence_source_tier"
@@ -402,6 +456,15 @@ def fetch_pending_sql_and_params(
         "LEFT JOIN replay.experiments e "
         "ON e.experiment_id = learning.mlde_shadow_recommendations.replay_experiment_id"
         if has_registry_join
+        else ""
+    )
+    residual_registry_join = (
+        "LEFT JOIN learning.demo_residual_alpha_reports drar "
+        "ON drar.report_hash = "
+        "  (e.manifest_jsonb ->> 'demo_residual_alpha_report_hash') "
+        "AND drar.strategy_name = learning.mlde_shadow_recommendations.strategy_name "
+        "AND drar.engine_mode = learning.mlde_shadow_recommendations.engine_mode"
+        if has_residual_registry_join
         else ""
     )
     registry_status_select = (
@@ -452,6 +515,16 @@ def fetch_pending_sql_and_params(
         and has_registry_join
         else "NULL::integer AS replay_registry_total_candidates_k"
     )
+    durable_residual_hash_select = (
+        "drar.report_hash AS durable_residual_alpha_report_hash"
+        if has_residual_registry_join
+        else "NULL::text AS durable_residual_alpha_report_hash"
+    )
+    durable_residual_jsonb_select = (
+        "drar.report_jsonb AS durable_residual_alpha_report_jsonb"
+        if has_residual_registry_join
+        else "NULL::jsonb AS durable_residual_alpha_report_jsonb"
+    )
 
     sql = """
         SELECT id, ts, engine_mode, source, recommendation_type, strategy_name,
@@ -468,9 +541,12 @@ def fetch_pending_sql_and_params(
                {registry_oos_end_select},
                {registry_embargo_select},
                {registry_k_select},
+               {durable_residual_hash_select},
+               {durable_residual_jsonb_select},
                payload
           FROM learning.mlde_shadow_recommendations
           {registry_join}
+          {residual_registry_join}
          WHERE ts >= now() - (%s::int || ' hours')::interval
            AND engine_mode = %s
            AND NOT applied
@@ -485,6 +561,7 @@ def fetch_pending_sql_and_params(
         replay_experiment_id_select=replay_experiment_id_select,
         manifest_hash_select=manifest_hash_select,
         registry_join=registry_join,
+        residual_registry_join=residual_registry_join,
         registry_status_select=registry_status_select,
         registry_expires_at_select=registry_expires_at_select,
         registry_manifest_hash_select=registry_manifest_hash_select,
@@ -493,6 +570,8 @@ def fetch_pending_sql_and_params(
         registry_oos_end_select=registry_oos_end_select,
         registry_embargo_select=registry_embargo_select,
         registry_k_select=registry_k_select,
+        durable_residual_hash_select=durable_residual_hash_select,
+        durable_residual_jsonb_select=durable_residual_jsonb_select,
     )
     params: list[Any] = [
         lookback_hours,

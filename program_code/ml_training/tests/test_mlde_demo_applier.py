@@ -43,6 +43,8 @@ from ml_training.candidate_signal_spec import (
 )
 from ml_training.residual_alpha_report_contract import RESIDUAL_ALPHA_REPORT_FIELD
 from ml_training.candidate_evidence_source_contract import (
+    DURABLE_RESIDUAL_ALPHA_HASH_FIELD,
+    DURABLE_RESIDUAL_ALPHA_REPORT_FIELD,
     HIDDEN_OOS_STATE_SCHEMA_VERSION,
     REGISTRY_RESIDUAL_ALPHA_HASH_FIELD,
 )
@@ -243,6 +245,8 @@ def _valid_registry_manifest(**overrides) -> dict:
 
 
 def _registry_source_fields(**overrides) -> dict:
+    residual_report = _valid_residual_alpha_report()
+    residual_hash = _canonical_sha256(residual_report)
     fields = {
         "evidence_source_tier": "calibrated_replay",
         "replay_experiment_id": "replay-exp-1",
@@ -255,6 +259,8 @@ def _registry_source_fields(**overrides) -> dict:
         "replay_registry_oos_label_window_end": "2026-05-08T00:00:00Z",
         "replay_registry_oos_embargo_seconds": 86400,
         "replay_registry_total_candidates_k": 12,
+        DURABLE_RESIDUAL_ALPHA_HASH_FIELD: residual_hash,
+        DURABLE_RESIDUAL_ALPHA_REPORT_FIELD: residual_report,
     }
     fields.update(overrides)
     return fields

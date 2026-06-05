@@ -5,7 +5,7 @@
     probe + Block A/B 構造邏輯在 6 個 case 下行為符合 registry snapshot key
     + AI-E §9.3 規格：
 
-      Case 1 — Full capability (12/12 true)：完整 Block B 含
+      Case 1 — Full capability (17/17 true)：完整 Block B 含
               `manifest_hash NOT NULL` + `expires_at > now()` +
               `status NOT IN ('cancelled','expired','compromised')`。
       Case 2 — Partial capability (`replay_experiments_has_expires_at=
@@ -108,7 +108,7 @@ class _ProbeCursor:
 
 # ─── Probe response 預設常量 ───────────────────────────────────────────
 
-# Full schema：12/12 capability all true
+# Full schema：17/17 capability all true
 PROBE_FULL_SCHEMA = [
     [("evidence_source_tier",), ("replay_experiment_id",), ("manifest_hash",)],
     (True,),  # replay.experiments table 存在
@@ -122,6 +122,8 @@ PROBE_FULL_SCHEMA = [
         ("oos_embargo_seconds",),
         ("total_candidates_k",),
     ],
+    (True,),
+    [("report_hash",), ("report_jsonb",), ("strategy_name",), ("engine_mode",)],
 ]
 
 # Partial schema：column 在但 stub 缺 expires_at + status
@@ -131,6 +133,7 @@ PROBE_PARTIAL_FK_ONLY = [
     [("evidence_source_tier",), ("replay_experiment_id",), ("manifest_hash",)],
     (True,),
     [],  # 0 expires_at / 0 status
+    (False,),
 ]
 
 # Block A only：evidence_source_tier 在但 replay_experiment_id 不在
@@ -146,11 +149,11 @@ PROBE_LEGACY_NONE = [
 ]
 
 
-# ─── Case 1：Full capability (12/12 true) → 完整 Block B ──────────────────
+# ─── Case 1：Full capability (17/17 true) → 完整 Block B ──────────────────
 
 
 def test_case1_full_capability_all_true_emits_full_block_b():
-    """Case 1：12/12 capability 全 true → Block B 含 manifest_hash NOT NULL +
+    """Case 1：17/17 capability 全 true → Block B 含 manifest_hash NOT NULL +
     expires_at > now() + status NOT IN 三 tier 完整版。
     """
     caps = {
@@ -283,10 +286,10 @@ def test_case5_capability_re_probed_each_cycle():
         min_samples=10,
         max_recommendations=50,
     )
-    # cursor1 應收到 3 次 probe execute 呼叫 + 0 final SELECT (caller 沒 execute sql)
-    # probe 共三次：column probe / regclass / experiments column probe
-    assert cur1.probe_call_count == 3, (
-        f"cycle 1 probe_call_count={cur1.probe_call_count}, expected 3"
+    # cursor1 應收到 5 次 probe execute 呼叫 + 0 final SELECT (caller 沒 execute sql)
+    # probe：MSR column / replay regclass / replay columns / residual regclass / residual columns
+    assert cur1.probe_call_count == 5, (
+        f"cycle 1 probe_call_count={cur1.probe_call_count}, expected 5"
     )
 
     # 第二 cycle 完全獨立 — capability 必再 probe
@@ -298,15 +301,15 @@ def test_case5_capability_re_probed_each_cycle():
         min_samples=10,
         max_recommendations=50,
     )
-    assert cur2.probe_call_count == 3, (
-        f"cycle 2 probe_call_count={cur2.probe_call_count}, expected 3"
+    assert cur2.probe_call_count == 5, (
+        f"cycle 2 probe_call_count={cur2.probe_call_count}, expected 5"
     )
 
     # 兩 cycle 同 schema → 結構應一致（Block B 完整版兩邊都在）
     assert "expires_at > now()" in sql1
     assert "expires_at > now()" in sql2
 
-    # 同一 cursor 連跑兩 cycle：probe 必觸發 6 次（每 cycle 3 次，0 cache）
+    # 同一 cursor 連跑兩 cycle：probe 必觸發 10 次（每 cycle 5 次，0 cache）
     cur3 = _ProbeCursor(list(PROBE_FULL_SCHEMA) + list(PROBE_FULL_SCHEMA))
     fetch_pending_sql_and_params(
         cur3,
@@ -324,9 +327,9 @@ def test_case5_capability_re_probed_each_cycle():
         min_samples=10,
         max_recommendations=50,
     )
-    assert cur3.probe_call_count == 6, (
+    assert cur3.probe_call_count == 10, (
         f"two cycles same cursor probe_call_count={cur3.probe_call_count}, "
-        f"expected 6 (re-probe each cycle, no cache)"
+        f"expected 10 (re-probe each cycle, no cache)"
     )
 
 
@@ -407,9 +410,10 @@ def test_observability_log_full_capability(caplog):
         f"missing capability dump log; all logs={log_msgs}"
     )
     dump = capability_dumps[0]
-    assert "caps=12/12" in dump
+    assert "caps=17/17" in dump
     assert "block_a=on" in dump
     assert "block_b=full" in dump
+    assert "residual_registry=on" in dump
 
 
 def test_observability_log_partial_capability(caplog):
@@ -434,9 +438,10 @@ def test_observability_log_partial_capability(caplog):
     dump = capability_dumps[0]
     # 4 個 true：has_evidence_source_tier + has_replay_experiment_id +
     # has_manifest_hash + has_replay_experiments
-    assert "caps=4/12" in dump
+    assert "caps=4/17" in dump
     assert "block_a=on" in dump
     assert "block_b=partial" in dump
+    assert "residual_registry=missing" in dump
 
 
 def test_observability_log_legacy_schema_skip(caplog):
@@ -461,6 +466,6 @@ def test_observability_log_legacy_schema_skip(caplog):
     capability_dumps = [m for m in log_msgs if "evidence_filter capability dump" in m]
     assert len(capability_dumps) >= 1
     dump = capability_dumps[0]
-    assert "caps=0/12" in dump
+    assert "caps=0/17" in dump
     assert "block_a=skip" in dump
     assert "block_b=skip" in dump

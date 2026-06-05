@@ -15,6 +15,8 @@ from ml_training.candidate_signal_spec import (
     compute_signal_spec_hash,
 )
 from ml_training.candidate_evidence_source_contract import (
+    DURABLE_RESIDUAL_ALPHA_HASH_FIELD,
+    DURABLE_RESIDUAL_ALPHA_REPORT_FIELD,
     HIDDEN_OOS_STATE_SCHEMA_VERSION,
     REGISTRY_RESIDUAL_ALPHA_HASH_FIELD,
     build_live_candidate_evidence_from_source,
@@ -141,6 +143,8 @@ def _valid_registry_manifest(**overrides) -> dict:
 
 
 def _source_row(**overrides) -> dict:
+    residual_report = _valid_residual_alpha_report()
+    residual_hash = _canonical_sha256(residual_report)
     row = {
         "id": 12,
         "evidence_source_tier": "calibrated_replay",
@@ -154,9 +158,11 @@ def _source_row(**overrides) -> dict:
         "replay_registry_oos_label_window_end": "2026-05-08T00:00:00Z",
         "replay_registry_oos_embargo_seconds": 86400,
         "replay_registry_total_candidates_k": 12,
+        DURABLE_RESIDUAL_ALPHA_HASH_FIELD: residual_hash,
+        DURABLE_RESIDUAL_ALPHA_REPORT_FIELD: residual_report,
         "payload": {
             SIGNAL_SPEC_FIELD: _valid_signal_spec(),
-            RESIDUAL_ALPHA_REPORT_FIELD: _valid_residual_alpha_report(),
+            RESIDUAL_ALPHA_REPORT_FIELD: residual_report,
             CANDIDATE_EVIDENCE_MANIFEST_FIELD: _valid_manifest(),
         },
     }
@@ -299,6 +305,44 @@ def test_source_contract_rejects_registry_residual_report_hash_mismatch():
     assert build.validation.reason == (
         "replay_registry_demo_residual_alpha_report_hash_mismatch"
     )
+
+
+def test_source_contract_requires_durable_residual_report_snapshot():
+    row = _source_row()
+    row.pop(DURABLE_RESIDUAL_ALPHA_HASH_FIELD)
+    row.pop(DURABLE_RESIDUAL_ALPHA_REPORT_FIELD)
+
+    build = build_live_candidate_evidence_from_source(row)
+
+    assert build.validation.promotion_ready is False
+    assert build.validation.verdict == "pending_schema"
+    assert build.validation.reason == "durable_residual_alpha_report_hash_missing"
+
+
+def test_source_contract_rejects_durable_residual_body_hash_mismatch():
+    row = _source_row()
+    row[DURABLE_RESIDUAL_ALPHA_REPORT_FIELD] = _valid_residual_alpha_report(
+        residual_mean_bps=1.8
+    )
+
+    build = build_live_candidate_evidence_from_source(row)
+
+    assert build.validation.promotion_ready is False
+    assert build.validation.verdict == "invalid"
+    assert build.validation.reason == "durable_residual_alpha_report_body_hash_mismatch"
+
+
+def test_source_contract_rejects_payload_mismatch_before_durable_gate():
+    row = _source_row()
+    row["payload"][RESIDUAL_ALPHA_REPORT_FIELD] = _valid_residual_alpha_report(
+        raw_mean_bps=2.5
+    )
+
+    build = build_live_candidate_evidence_from_source(row)
+
+    assert build.validation.promotion_ready is False
+    assert build.validation.verdict == "invalid"
+    assert build.validation.reason == "replay_registry_demo_residual_alpha_report_hash_mismatch"
 
 
 def test_source_contract_rejects_opened_hidden_oos_state():
