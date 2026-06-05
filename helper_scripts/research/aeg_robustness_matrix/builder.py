@@ -260,6 +260,11 @@ def _reject_reasons(
     net_bps = _float_or_none(cell_metrics.get("net_bps"))
     net_to_cost = _float_or_none(cell_metrics.get("net_to_cost_ratio"))
     n_independent = _int_or_none(cell_metrics.get("n_independent"))
+    is_sharpe = _float_or_none(cell_metrics.get("is_sharpe"))
+    oos_sharpe = _float_or_none(cell_metrics.get("oos_sharpe"))
+    psr_0 = _float_or_none(cell_metrics.get("psr_0"))
+    dsr_k = _float_or_none(cell_metrics.get("dsr_k"))
+    pbo = _float_or_none(cell_metrics.get("pbo"))
 
     if net_bps is None:
         reasons.append("missing_net_bps")
@@ -274,9 +279,26 @@ def _reject_reasons(
     elif n_independent < 30:
         reasons.append("n_independent_below_30")
 
-    for metric in ("psr_0", "dsr_k", "pbo", "is_sharpe", "oos_sharpe"):
-        if _float_or_none(cell_metrics.get(metric)) is None:
-            reasons.append(f"missing_{metric}")
+    if is_sharpe is None:
+        reasons.append("missing_is_sharpe")
+    elif is_sharpe <= 0:
+        reasons.append("is_sharpe_non_positive")
+    if oos_sharpe is None:
+        reasons.append("missing_oos_sharpe")
+    elif oos_sharpe <= 0:
+        reasons.append("oos_sharpe_non_positive")
+    if psr_0 is None:
+        reasons.append("missing_psr_0")
+    elif psr_0 < 0.95:
+        reasons.append("psr_0_below_0_95")
+    if dsr_k is None:
+        reasons.append("missing_dsr_k")
+    elif dsr_k < 0.95:
+        reasons.append("dsr_k_below_0_95")
+    if pbo is None:
+        reasons.append("missing_pbo")
+    elif pbo >= 0.5:
+        reasons.append("pbo_at_or_above_0_5")
 
     if _float_or_none(cell_metrics.get("recent_90d_net_bps")) is None:
         reasons.append("missing_recent_90d_net_bps")

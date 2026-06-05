@@ -192,6 +192,59 @@ def _candidate_metrics_dir(tmp_path: Path) -> Path:
     return run_dir
 
 
+def _complete_candidate_metrics_dir(tmp_path: Path, *, bad_stats: bool = False) -> Path:
+    run_dir = tmp_path / ("candidate_metrics_bad_stats" if bad_stats else "candidate_metrics_complete")
+    run_dir.mkdir()
+    rows = []
+    for regime in ("bull", "chop"):
+        row = {
+            "run_id": "candidate_metrics_complete",
+            "candidate_id": "cand_x",
+            "strategy_family": "listing_fade",
+            "parameter_cell_id": "v0",
+            "source_report_type": "aeg_candidate_metrics_direct",
+            "selected_variant": "listing_fade_v0",
+            "regime": regime,
+            "n_days": "120",
+            "gross_bps": "8.0",
+            "cost_bps": "2.0",
+            "net_bps": "5.0",
+            "net_to_cost_ratio": "2.5",
+            "mean_daily_bps": "0.2",
+            "annualized_net_sharpe": "0.7",
+            "oos_sharpe": "0.4",
+            "psr_0": "0.96",
+            "dsr_k": "0.95",
+            "pbo": "0.2",
+            "k_trials": "8",
+            "n_independent": "45",
+            "sample_unit": "non_overlapping_holding_window",
+            "recent_90d_net_bps": "1.5",
+            "recent_180d_net_bps": "1.2",
+            "freshness_bucket": "recent_90_180_measured",
+            "metric_status": "PASS",
+            "reject_reasons": "[]",
+        }
+        rows.append(row)
+    if bad_stats:
+        rows[1]["psr_0"] = "0.90"
+        rows[1]["dsr_k"] = "0.80"
+        rows[1]["pbo"] = "0.70"
+    _write_csv(run_dir / "candidate_regime_metrics.csv", REGIME_METRIC_COLUMNS, rows)
+    (run_dir / "candidate_metrics_summary.json").write_text(
+        json.dumps({
+            "run_id": "candidate_metrics_complete",
+            "candidate_id": "cand_x",
+            "strategy_family": "listing_fade",
+            "parameter_cell_id": "v0",
+            "row_count": 2,
+            "metric_status_counts": {"PASS": 2},
+        }),
+        encoding="utf-8",
+    )
+    return run_dir
+
+
 def test_matrix_fail_closed_when_regime_slice_metrics_missing(tmp_path):
     regime = builder_mod.load_regime_artifact(_regime_dir(tmp_path))
     breadth = builder_mod.load_breadth_artifact(_breadth_dir(tmp_path))
@@ -258,6 +311,57 @@ def test_matrix_consumes_candidate_metrics_without_unit_substitution(tmp_path):
     assert "missing_net_to_cost_ratio" in reasons
     assert "missing_n_independent" in reasons
     assert chop["final_label"] == "insufficient evidence"
+
+
+def test_matrix_marks_complete_non_bull_slice_as_durable_candidate(tmp_path):
+    regime = builder_mod.load_regime_artifact(_regime_dir(tmp_path))
+    breadth = builder_mod.load_breadth_artifact(_breadth_dir(tmp_path))
+    candidate_metrics = builder_mod.load_candidate_metrics_artifact(_complete_candidate_metrics_dir(tmp_path))
+    rows, summary = builder_mod.build_matrix(
+        run_id="matrix_run",
+        regime_artifact=regime,
+        breadth_artifact=breadth,
+        candidate_metrics=candidate_metrics,
+        execution_realism={
+            "status": "PASS",
+            "execution_realism_mode": "calibrated_live_demo_fills_maker",
+        },
+        strategy_family="listing_fade",
+        parameter_cell_id="v0",
+    )
+
+    chop = next(row for row in rows if row["regime"] == "chop")
+    assert json.loads(chop["reject_reasons"]) == []
+    assert chop["final_label"] == "durable-alpha candidate"
+    assert summary["non_bull_independent_pass"] is True
+
+
+def test_matrix_rejects_complete_rows_when_selection_bias_stats_fail(tmp_path):
+    regime = builder_mod.load_regime_artifact(_regime_dir(tmp_path))
+    breadth = builder_mod.load_breadth_artifact(_breadth_dir(tmp_path))
+    candidate_metrics = builder_mod.load_candidate_metrics_artifact(
+        _complete_candidate_metrics_dir(tmp_path, bad_stats=True)
+    )
+    rows, summary = builder_mod.build_matrix(
+        run_id="matrix_run",
+        regime_artifact=regime,
+        breadth_artifact=breadth,
+        candidate_metrics=candidate_metrics,
+        execution_realism={
+            "status": "PASS",
+            "execution_realism_mode": "calibrated_live_demo_fills_maker",
+        },
+        strategy_family="listing_fade",
+        parameter_cell_id="v0",
+    )
+
+    chop = next(row for row in rows if row["regime"] == "chop")
+    reasons = json.loads(chop["reject_reasons"])
+    assert "psr_0_below_0_95" in reasons
+    assert "dsr_k_below_0_95" in reasons
+    assert "pbo_at_or_above_0_5" in reasons
+    assert chop["final_label"] == "insufficient evidence"
+    assert summary["non_bull_independent_pass"] is False
 
 
 def test_matrix_marks_unverified_survivorship_as_reject_reason(tmp_path):
