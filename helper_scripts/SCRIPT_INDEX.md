@@ -43,19 +43,21 @@ latency p95 `<=2000ms`、participation p95 `<=5%`、adverse-selection p95 `<=3.5
 ## 2026-06-05 AEG-S2 (c) robustness matrix builder（`research/aeg_robustness_matrix/`）
 
 AEG-S2 component (c) robustness matrix builder：artifact-only batch module，
-消費 (a) regime labels artifact + (b) breadth ladder artifact，產 S0 §2.9
-`verdict_matrix.csv/.parquet`。第一版嚴格 fail-closed：若缺 per-regime candidate
-PnL、freshness rolling net 或 execution_realism.json，就把該 cell 標為
-`insufficient evidence` 並寫入 `reject_reasons`，不把 aggregate breadth edge 冒充成
-regime-sliced alpha。0 DB write / 0 migration / 0 IPC / 0 order。
+消費 (a) regime labels artifact + (b) breadth ladder artifact + optional
+`aeg_candidate_metrics` per-regime metrics artifact，產 S0 §2.9
+`verdict_matrix.csv/.parquet`。嚴格 fail-closed：若缺 per-regime candidate
+PnL、freshness rolling net、cluster-adjusted `n_independent` 或 execution_realism.json，
+就把該 cell 標為 `insufficient evidence` 並寫入 `reject_reasons`；不把
+aggregate breadth edge 或 `mean_daily_bps` 冒充成 regime-sliced `net_bps`。
+0 DB write / 0 migration / 0 IPC / 0 order。
 
 | 檔 | 職責 |
 |---|---|
 | `research/aeg_robustness_matrix/__init__.py` | verdict gate / schema 版本、S0 最小欄位、final label set。 |
-| `research/aeg_robustness_matrix/builder.py` | 純函數核心：載入上游 artifact payload → 生成 regime × breadth × freshness × survivorship × execution-realism matrix rows；缺證據 fail-closed。 |
+| `research/aeg_robustness_matrix/builder.py` | 純函數核心：載入上游 artifact payload → 生成 regime × breadth × candidate metrics × freshness × survivorship × execution-realism matrix rows；缺證據 fail-closed。 |
 | `research/aeg_robustness_matrix/artifact.py` | `verdict_matrix.csv` SoT、optional parquet mirror、summary、manifest、artifact_index。 |
-| `research/aeg_robustness_matrix/harness.py` | CLI 編排：`--regime-run-dir` + `--breadth-run-dir` + optional `--execution-realism-json` → artifact。 |
-| `research/tests/test_aeg_robustness_matrix.py` | Synthetic bite tests：缺 per-regime metrics 不可 promote、survivorship 未驗證必進 reject reason、manifest/index 完整、靜態禁 runtime/DB write route。 |
+| `research/aeg_robustness_matrix/harness.py` | CLI 編排：`--regime-run-dir` + `--breadth-run-dir` + optional `--candidate-metrics-run-dir` + optional `--execution-realism-json` → artifact。 |
+| `research/tests/test_aeg_robustness_matrix.py` | Synthetic bite tests：缺 per-regime metrics 不可 promote、candidate metrics 接入不可單位偷換、survivorship 未驗證必進 reject reason、manifest/index 完整、靜態禁 runtime/DB write route。 |
 
 ## 2026-06-05 AEG-S2 (a) regime label runner（`research/aeg_regime_runner/`）
 

@@ -11,6 +11,7 @@ import csv
 import json
 from pathlib import Path
 
+from aeg_candidate_metrics import REGIME_METRIC_COLUMNS
 from aeg_breadth_ladder.ladder import LADDER_COLUMNS
 from aeg_regime_runner.artifact import LABEL_COLUMNS
 from aeg_robustness_matrix import MATRIX_COLUMNS
@@ -132,6 +133,65 @@ def _breadth_dir(tmp_path: Path, *, survivorship_pass: bool = True) -> Path:
     return run_dir
 
 
+def _candidate_metrics_dir(tmp_path: Path) -> Path:
+    run_dir = tmp_path / "candidate_metrics_run"
+    run_dir.mkdir()
+    _write_csv(
+        run_dir / "candidate_regime_metrics.csv",
+        REGIME_METRIC_COLUMNS,
+        [
+            {
+                "run_id": "candidate_metrics_run",
+                "candidate_id": "cand_x",
+                "strategy_family": "multiday_trend",
+                "parameter_cell_id": "k40",
+                "source_report_type": "multiday_trend_diagnostic",
+                "selected_variant": "tsmom_k40__daily",
+                "regime": "bull",
+                "n_days": "120",
+                "net_bps": "3.5",
+                "mean_daily_bps": "0.4",
+                "annualized_net_sharpe": "0.8",
+                "recent_90d_net_bps": "1.1",
+                "recent_180d_net_bps": "0.9",
+                "freshness_bucket": "recent_90_180_measured",
+                "metric_status": "PASS",
+                "reject_reasons": "[]",
+            },
+            {
+                "run_id": "candidate_metrics_run",
+                "candidate_id": "cand_x",
+                "strategy_family": "multiday_trend",
+                "parameter_cell_id": "k40",
+                "source_report_type": "multiday_trend_diagnostic",
+                "selected_variant": "tsmom_k40__daily",
+                "regime": "chop",
+                "n_days": "80",
+                "net_bps": "1.0",
+                "mean_daily_bps": "0.1",
+                "annualized_net_sharpe": "0.3",
+                "recent_90d_net_bps": "0.2",
+                "recent_180d_net_bps": "0.4",
+                "freshness_bucket": "recent_90_180_measured",
+                "metric_status": "PASS",
+                "reject_reasons": "[]",
+            },
+        ],
+    )
+    (run_dir / "candidate_metrics_summary.json").write_text(
+        json.dumps({
+            "run_id": "candidate_metrics_run",
+            "candidate_id": "cand_x",
+            "strategy_family": "multiday_trend",
+            "parameter_cell_id": "k40",
+            "row_count": 2,
+            "metric_status_counts": {"PASS": 2},
+        }),
+        encoding="utf-8",
+    )
+    return run_dir
+
+
 def test_matrix_fail_closed_when_regime_slice_metrics_missing(tmp_path):
     regime = builder_mod.load_regime_artifact(_regime_dir(tmp_path))
     breadth = builder_mod.load_breadth_artifact(_breadth_dir(tmp_path))
@@ -164,6 +224,40 @@ def test_matrix_fail_closed_when_regime_slice_metrics_missing(tmp_path):
     chop_reasons = json.loads(chop["reject_reasons"])
     assert chop["net_bps"] is None
     assert "missing_regime_slice_metrics" in chop_reasons
+
+
+def test_matrix_consumes_candidate_metrics_without_unit_substitution(tmp_path):
+    regime = builder_mod.load_regime_artifact(_regime_dir(tmp_path))
+    breadth = builder_mod.load_breadth_artifact(_breadth_dir(tmp_path))
+    candidate_metrics = builder_mod.load_candidate_metrics_artifact(_candidate_metrics_dir(tmp_path))
+    rows, summary = builder_mod.build_matrix(
+        run_id="matrix_run",
+        regime_artifact=regime,
+        breadth_artifact=breadth,
+        candidate_metrics=candidate_metrics,
+        execution_realism={
+            "status": "PASS",
+            "execution_realism_mode": "calibrated_live_demo_fills_maker",
+        },
+        strategy_family="multiday_trend",
+        parameter_cell_id="k40",
+    )
+
+    assert summary["candidate_metrics_status_counts"] == {"PASS": 2}
+    assert summary["upstream"]["candidate_metrics_run_id"] == "candidate_metrics_run"
+    chop = next(row for row in rows if row["regime"] == "chop")
+    reasons = json.loads(chop["reject_reasons"])
+    assert chop["net_bps"] == "1.0"
+    assert chop["is_sharpe"] == "0.3"
+    assert chop["recent_90d_net_bps"] == "0.2"
+    assert chop["recent_180d_net_bps"] == "0.4"
+    assert chop["freshness_bucket"] == "recent_90_180_measured"
+    assert "missing_regime_slice_metrics" not in reasons
+    assert "missing_recent_90d_net_bps" not in reasons
+    assert "missing_recent_180d_net_bps" not in reasons
+    assert "missing_net_to_cost_ratio" in reasons
+    assert "missing_n_independent" in reasons
+    assert chop["final_label"] == "insufficient evidence"
 
 
 def test_matrix_marks_unverified_survivorship_as_reject_reason(tmp_path):
