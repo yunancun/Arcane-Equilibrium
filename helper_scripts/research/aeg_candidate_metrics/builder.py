@@ -37,6 +37,8 @@ def _int_or_none(value: Any) -> Optional[int]:
 
 
 def detect_report_type(report: dict[str, Any]) -> str:
+    if report.get("candidate_regime_metrics") is not None:
+        return "aeg_candidate_metrics_direct"
     if report.get("diagnostic") == "funding_tilt_carry":
         return "funding_tilt_diagnostic"
     if report.get("phase") == "phase_1_fail_fast_early_gates":
@@ -62,6 +64,28 @@ def _select_variant(report: dict[str, Any]) -> tuple[Optional[str], Optional[dic
             best_key = key
             best_ev = ev
     return best_key, best_ev
+
+
+def _direct_metric_variant(report: dict[str, Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    direct = report.get("candidate_regime_metrics")
+    if isinstance(direct, dict):
+        rows = direct
+    elif isinstance(direct, list):
+        rows = {
+            str(row.get("regime") or "").strip(): row
+            for row in direct
+            if isinstance(row, dict) and str(row.get("regime") or "").strip()
+        }
+    else:
+        return None, None
+    if not rows:
+        return None, None
+    selected = report.get("selected_variant") or report.get("variant") or "__direct_candidate_metrics__"
+    ev = {
+        "per_regime_net": rows,
+        "regime_metric_defaults": report.get("candidate_metric_defaults") or {},
+    }
+    return str(selected), ev
 
 
 def _freshness_value(ev: dict[str, Any], report: dict[str, Any], key: str) -> Optional[float]:
@@ -232,7 +256,9 @@ def build_candidate_metrics(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """從 diagnostic report 正規化 per-regime metrics rows + summary。"""
     report_type = detect_report_type(report)
-    selected_variant, ev = _select_variant(report)
+    selected_variant, ev = _direct_metric_variant(report)
+    if ev is None:
+        selected_variant, ev = _select_variant(report)
     rows: list[dict[str, Any]] = []
     if ev is not None:
         per_regime = ev.get("per_regime_net") or {}
