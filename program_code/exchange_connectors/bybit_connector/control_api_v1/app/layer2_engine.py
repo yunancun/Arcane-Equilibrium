@@ -43,8 +43,11 @@ import time
 from typing import Any
 
 from .layer2_types import (
+    CRITIC_VERDICT_REPLAN,
+    CRITIC_VERDICT_STOP,
     DEFAULT_SESSION_BUDGET_OPUS_USD,
     DEFAULT_SESSION_BUDGET_SONNET_USD,
+    ENV_L2_LESSON_STORE_ENABLED,
     MAX_AGENT_ITERATIONS,
     MODEL_HAIKU,
     MODEL_IDS,
@@ -67,6 +70,10 @@ from .layer2_cost_tracker import Layer2CostTracker
 from .layer2_tools import TOOL_SCHEMAS, ToolExecutor
 from .local_llm_factory import get_local_llm_client
 from . import provider_client as _pc
+# B 工作流（Reflexion critic + lesson store）：critic / 教訓庫的純邏輯層。
+# 旗標預設關閉時下方 hook 全部短路，行為與原碼 byte-identical。
+from . import layer2_critic as _critic
+from .layer2_tools_g3_07 import is_tool_enabled as _is_flag_enabled
 
 logger = logging.getLogger(__name__)
 
@@ -502,6 +509,24 @@ class Layer2Engine:
 
         try:
             base_provider = config.default_provider or _pc.PROVIDER_ANTHROPIC
+
+            # ── B-Hook 1：lesson store 檢索（旗標開啟才跑）──
+            # 為什麼只追加到 context 字串：不改 _build_user_message 內部結構，
+            # 把過往教訓當作「額外脈絡」前置注入，旗標關閉時這段完全不執行。
+            if _is_flag_enabled(ENV_L2_LESSON_STORE_ENABLED):
+                try:
+                    lessons = await _critic.retrieve_lessons(
+                        symbol=symbol,
+                        context_hint=context or symbol,
+                    )
+                    lesson_text = self._format_lessons_for_context(lessons)
+                    if lesson_text:
+                        context = (
+                            f"{context}\n{lesson_text}" if context else lesson_text
+                        )
+                except Exception as exc:  # noqa: BLE001 — 檢索失敗不得阻斷 session
+                    logger.warning("B-Hook lesson retrieval skipped: %s", exc)
+
             user_message = self._build_user_message(symbol=symbol, context=context)
             messages: list[dict[str, Any]] = [
                 {"role": "user", "content": user_message},
@@ -574,6 +599,12 @@ class Layer2Engine:
 
                 # 處理 tool calls
                 tool_results: list[dict[str, Any]] = []
+                # B-Hook：本輪 critic 判定（None=未跑 critic 或一律 continue）。
+                # 在 tool 迴圈外初始化；迴圈內以「最嚴重」聚合（stop>replan>continue，
+                # 見 _critic.merge_critic_verdict），迴圈後統一處置（見 B-Hook 3）。
+                # 為什麼不 last-wins：同輪某 tool 判 STOP 後又有 tool 判 CONTINUE 時，
+                # last-wins 會蓋掉 STOP 而漏煞車。
+                critic_result = None
                 for tu in response.tool_uses:
                     call_start = time.time()
                     result_str = await executor.execute(tu.name, tu.input)
@@ -585,6 +616,23 @@ class Layer2Engine:
                         output=result_str[:500] if len(result_str) > 500 else result_str,
                         latency_ms=round(call_latency, 1),
                     ))
+
+                    # ── B-Hook 2：Reflexion critic（旗標開啟且未被 skip 才發 LLM）──
+                    # should_skip_critic 內已含旗標判斷；放在 ToolCallRecord append 之後，
+                    # 確保 tool-call 計數已含當前這筆。任何失敗 run_critic 回 CONTINUE。
+                    try:
+                        if not _critic.should_skip_critic(
+                            tu.name, result_str, session, config,
+                        ):
+                            this_tool_verdict = await _critic.run_critic(
+                                self, session, tu.name, tu.input, result_str,
+                            )
+                            # 以最嚴重聚合：本 tool 的判定不可降級先前已得的更嚴重判定。
+                            critic_result = _critic.merge_critic_verdict(
+                                critic_result, this_tool_verdict,
+                            )
+                    except Exception as exc:  # noqa: BLE001 — critic 不得拋進迴圈
+                        logger.warning("B-Hook critic skipped: %s", exc)
 
                     if tu.name == TOOL_WEB_SEARCH:
                         try:
@@ -621,6 +669,29 @@ class Layer2Engine:
                 # 由 adapter 把 tool_results 變成 provider 對應格式（Anthropic blocks / OpenAI tool msgs）
                 provider.append_tool_results(messages, tool_results)
 
+                # ── B-Hook 3：依 critic 判定處置（旗標關閉時 critic_result 恆 None）──
+                # REPLAN：只「追加」一則 user 提示，絕不 pop/改動既有 messages，
+                #   讓 agent 帶著 critic note 重新規劃。
+                # STOP：提早收斂為 COMPLETED（非 FAILED），break 跳出迴圈且不進
+                #   else 分支（不會被標成 max-iterations）。
+                # critic 永遠不能下單，至多追加訊息或收斂 session。
+                if critic_result is not None:
+                    try:
+                        if critic_result.verdict == CRITIC_VERDICT_REPLAN:
+                            messages.append({
+                                "role": "user",
+                                "content": f"CRITIC NOTE: {critic_result.reason}",
+                            })
+                        elif critic_result.verdict == CRITIC_VERDICT_STOP:
+                            session.state = SESSION_STATE_COMPLETED
+                            if not session.final_summary:
+                                session.final_summary = (
+                                    f"Critic stopped session: {critic_result.reason}"
+                                )
+                            break
+                    except Exception as exc:  # noqa: BLE001 — 處置失敗不得阻斷迴圈
+                        logger.warning("B-Hook critic verdict handling skipped: %s", exc)
+
             else:
                 # Max iterations reached
                 session.state = SESSION_STATE_COMPLETED
@@ -642,6 +713,16 @@ class Layer2Engine:
 
         # Record session
         self._cost_tracker.record_session(session)
+
+        # ── B-Hook 4：lesson store 落庫（旗標開啟才寫）──
+        # 把本 session 的 insight 落為 agent.lessons row。session.insights 已在
+        # finally 區塊填好；symbol 取 run_session 參數。寫入失敗 fail-soft，
+        # 不影響 session 回傳。旗標關閉時完全不執行（無 DB 寫入）。
+        if _is_flag_enabled(ENV_L2_LESSON_STORE_ENABLED):
+            try:
+                await _critic.persist_lessons(session.insights, session, symbol)
+            except Exception as exc:  # noqa: BLE001 — 落庫失敗不得阻斷回傳
+                logger.warning("B-Hook lesson persist skipped: %s", exc)
 
         return session
 
@@ -785,6 +866,25 @@ class Layer2Engine:
             compact_context = self._context_distiller.distill_for_prompt(context, max_chars=2000)
             parts.insert(1, f"Additional context: {compact_context}")
         return "\n".join(parts)
+
+    @staticmethod
+    def _format_lessons_for_context(lessons: list[dict[str, Any]]) -> str:
+        """
+        把撈回的教訓格式化為一段精簡文字（B-Hook 1 用，唯讀）。
+
+        為什麼是 staticmethod 且 bounded：教訓只是「額外脈絡」，最多取 5 條、
+        每條截斷，避免吃掉 prompt 預算；空 list 回空字串（呼叫端不會注入）。
+        """
+        if not lessons:
+            return ""
+        lines = ["Past lessons (most relevant first):"]
+        for item in lessons[:5]:
+            content = str(item.get("content", "")).strip()
+            if not content:
+                continue
+            lines.append(f"- {content[:240]}")
+        # 只有標題沒有任何有效 content → 視為無教訓。
+        return "\n".join(lines) if len(lines) > 1 else ""
 
     def _build_triage_context(self, context: dict[str, Any] | None = None) -> str:
         """Build the bounded L1 triage context payload."""

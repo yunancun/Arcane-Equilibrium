@@ -614,8 +614,8 @@ class TestToolExecutorWiring:
         names = {s["name"] for s in TOOL_SCHEMAS}
         assert TOOL_QUERY_ONCHAIN in names
         assert TOOL_CHECK_DERIVATIVES in names
-        # Pre-G3-07 was 8 tools; now 10
-        assert len(TOOL_SCHEMAS) == 10
+        # Pre-G3-07 was 8 tools; G3-07 → 10; G3-08 added 3 microstructure → 13.
+        assert len(TOOL_SCHEMAS) == 13
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
