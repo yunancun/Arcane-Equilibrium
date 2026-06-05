@@ -103,3 +103,56 @@ def test_evaluate_cell_no_data():
     assert res.status == "no_data"
     assert res.promotion_ready is False
     assert res.report is None
+
+
+# ---- R-3 attach primitive + env-flag ----
+
+from datetime import datetime, timezone  # noqa: E402
+
+from program_code.ml_training import residual_alpha_cycle as _cyc  # noqa: E402
+from program_code.ml_training.residual_alpha_cycle import (  # noqa: E402
+    attach_residual_reports,
+    residual_producer_enabled,
+)
+
+
+def test_residual_producer_enabled_env(monkeypatch):
+    monkeypatch.delenv("OPENCLAW_RESIDUAL_ALPHA_PRODUCER", raising=False)
+    assert residual_producer_enabled() is False  # 預設 OFF
+    monkeypatch.setenv("OPENCLAW_RESIDUAL_ALPHA_PRODUCER", "1")
+    assert residual_producer_enabled() is True
+    monkeypatch.setenv("OPENCLAW_RESIDUAL_ALPHA_PRODUCER", "0")
+    assert residual_producer_enabled() is False
+
+
+class _Rec:
+    def __init__(self, strategy, symbol):
+        self.strategy_name = strategy
+        self.symbol = symbol
+        self.payload = {}
+
+
+def test_attach_residual_reports_maps_to_payload(monkeypatch):
+    recs = [_Rec("grid_trading", "BTCUSDT"), _Rec("ma_crossover", "ETHUSDT")]
+
+    def _fake_cycle(conn, cells, **kw):
+        return {
+            c["cell_key"]: CellResidualResult(
+                cell_key=c["cell_key"], status="single_config_defer",
+                promotion_ready=False, reason="pbo_not_applicable_single_candidate",
+                n_trials=10, n_trials_derivation="...",
+                report={"verdict": "defer_data", "pbo_status": "not_applicable_single_candidate"},
+                diag={},
+            )
+            for c in cells
+        }
+
+    monkeypatch.setattr(_cyc, "build_cycle_residual_reports", _fake_cycle)
+    n = attach_residual_reports(recs, conn=None, since=datetime(2026, 6, 1, tzinfo=timezone.utc))
+    assert n == 2
+    assert recs[0].payload["demo_residual_alpha_report"]["verdict"] == "defer_data"
+    assert recs[1].payload["demo_residual_alpha_report"]["pbo_status"] == "not_applicable_single_candidate"
+
+
+def test_attach_empty_returns_zero():
+    assert attach_residual_reports([], conn=None, since=datetime(2026, 6, 1, tzinfo=timezone.utc)) == 0

@@ -16,9 +16,13 @@ MODULE_NOTE
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping, Sequence
+
+RESIDUAL_PRODUCER_ENV = "OPENCLAW_RESIDUAL_ALPHA_PRODUCER"
+RESIDUAL_ALPHA_REPORT_FIELD = "demo_residual_alpha_report"
 
 try:  # 套件式 import（app runtime）
     from program_code.learning_engine.residual_alpha_producer import (
@@ -252,11 +256,79 @@ def build_cycle_residual_reports(
     return out
 
 
+# ---------------------------------------------------------------------------
+# R-3 接線 primitive（env-flag 預設 OFF）—— 把 report 附到 recommendation payload
+# ---------------------------------------------------------------------------
+
+
+def residual_producer_enabled() -> bool:
+    """env-flag（預設 OFF）：未明確設 ``OPENCLAW_RESIDUAL_ALPHA_PRODUCER=1`` 一律
+    不附 report。部署即關（fail-closed），不改現有晉升行為，待 operator 啟用。
+    """
+    return os.environ.get(RESIDUAL_PRODUCER_ENV, "0").strip() == "1"
+
+
+def attach_residual_reports(
+    recommendations: Sequence[Any],
+    conn: Any,
+    *,
+    since: datetime,
+    n_symbols_screened: int = 1,
+    report_field: str = RESIDUAL_ALPHA_REPORT_FIELD,
+    **cycle_kwargs: Any,
+) -> int:
+    """為每個 recommendation（須有 ``.strategy_name`` / ``.symbol`` / ``.payload``）算
+    residual report 並附到其 ``payload[report_field]``（in-memory mutate）。回 attached 數。
+
+    caller 須先檢查 ``residual_producer_enabled()``。只讀 DB；單一配置 demo 下
+    report 為診斷性 defer（晉升閘仍 fail-closed），故附了也不會放行——這是 by design。
+    不碰 runtime / order / risk / auth。
+    """
+    if not recommendations:
+        return 0
+    cells: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for rec in recommendations:
+        strategy = getattr(rec, "strategy_name", None)
+        symbol = getattr(rec, "symbol", None)
+        if not strategy:
+            continue
+        key = f"{strategy}::{symbol}"
+        if key not in seen:
+            seen.add(key)
+            cells.append(
+                {"cell_key": key, "strategy_name": str(strategy), "n_param_variants": 1}
+            )
+    if not cells:
+        return 0
+    results = build_cycle_residual_reports(
+        conn, cells, since=since, n_symbols_screened=n_symbols_screened, **cycle_kwargs
+    )
+    attached = 0
+    for rec in recommendations:
+        strategy = getattr(rec, "strategy_name", None)
+        symbol = getattr(rec, "symbol", None)
+        payload = getattr(rec, "payload", None)
+        cell_result = results.get(f"{strategy}::{symbol}")
+        if (
+            cell_result is not None
+            and cell_result.report is not None
+            and isinstance(payload, dict)
+        ):
+            payload[report_field] = cell_result.report
+            attached += 1
+    return attached
+
+
 __all__ = [
     "PBO_NOT_APPLICABLE_SINGLE",
     "DEFAULT_N_TRIALS_FLOOR",
+    "RESIDUAL_PRODUCER_ENV",
+    "RESIDUAL_ALPHA_REPORT_FIELD",
     "derive_n_trials",
     "CellResidualResult",
     "evaluate_cell",
     "build_cycle_residual_reports",
+    "residual_producer_enabled",
+    "attach_residual_reports",
 ]
