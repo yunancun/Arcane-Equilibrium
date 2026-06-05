@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-05（TODO v114 Alpha-Edge candidate metrics adapter checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-05（TODO v115 Alpha-Edge robustness matrix candidate-metrics 接入 checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v115 增量（2026-06-05 Alpha-Edge robustness matrix candidate-metrics 接入 checkpoint）**：三端同步至實作 head `1a5982a2`。`aeg_robustness_matrix` 已接入 optional `aeg_candidate_metrics` artifact：regime-slice rows 可消費明確的 `net_bps`、annualized net Sharpe、recent 90/180d freshness 等欄位；缺 candidate metrics、缺 cluster-adjusted `n_independent`、缺 PSR/DSR/PBO、缺 execution realism 仍 fail-closed。測試新增 synthetic bite，確認 matrix 不把 aggregate breadth 或 `mean_daily_bps` 冒充 regime-sliced `net_bps`。Mac+Linux focused robustness tests `5 passed`，三工具組 `15 passed`，research regression `178 passed`，Mac+Linux `compileall` 通過。下一步不是 promotion，而是派 AEG-S3 候選接口（listing fade / oi_delta / funding revive）產真 `candidate_regime_metrics.csv` rows：`net_bps`、recent-window freshness、cluster-adjusted `n_independent`、PSR/DSR/PBO。
 
 **v114 增量（2026-06-05 Alpha-Edge candidate metrics adapter checkpoint）**：三端同步至實作 head `aa8be090`。新增 `aeg_candidate_metrics` artifact-only adapter：從 trend/funding diagnostic report 的 selected/best variant 抽 `per_regime_net`，輸出 `candidate_regime_metrics.csv` + summary/manifest/index；刻意不把 `mean_daily_bps` 冒充為 matrix `net_bps`，缺 `net_bps` 或 recent 90/180d freshness 時 row `metric_status=FAIL`，把候選級 PnL/freshness 缺口機械化。Mac+Linux focused tests `5 passed`，Mac+Linux research regression `177 passed`。下一步是把 `candidate_regime_metrics.csv` 接入 robustness matrix，並讓 AEG-S3 候選產生真 `net_bps` + recent-window freshness。
 
