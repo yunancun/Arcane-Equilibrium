@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-05（TODO v113 Alpha-Edge execution-realism + dispatch retry boundary checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-05（TODO v114 Alpha-Edge candidate metrics adapter checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v114 增量（2026-06-05 Alpha-Edge candidate metrics adapter checkpoint）**：三端同步至實作 head `aa8be090`。新增 `aeg_candidate_metrics` artifact-only adapter：從 trend/funding diagnostic report 的 selected/best variant 抽 `per_regime_net`，輸出 `candidate_regime_metrics.csv` + summary/manifest/index；刻意不把 `mean_daily_bps` 冒充為 matrix `net_bps`，缺 `net_bps` 或 recent 90/180d freshness 時 row `metric_status=FAIL`，把候選級 PnL/freshness 缺口機械化。Mac+Linux focused tests `5 passed`，Mac+Linux research regression `177 passed`。下一步是把 `candidate_regime_metrics.csv` 接入 robustness matrix，並讓 AEG-S3 候選產生真 `net_bps` + recent-window freshness。
 
 **v113 增量（2026-06-05 Alpha-Edge execution-realism + dispatch retry boundary checkpoint）**：三端同步至 `4bc93b56`。完成 Bybit open/create dispatch retry boundary hardening（`061d3c8c`）：把 open 0-retry schedule 抽為可測 helper，close 保留有界 reduce-only retry；Mac+Linux `openclaw_engine --lib` 均 `3758 passed / 1 ignored`，source-only 語義等價，engine binary 未重啟。新增 AEG execution-realism artifact builder（`4bc93b56`）：輸入費率/滑點/maker-fill/adverse-selection/latency/participation/capacity/order availability 證據，重新計算 PASS/FAIL，不信任輸入 status，輸出 `execution_realism.json` 供 robustness matrix 消費。Mac+Linux research tests `172 passed`；Linux artifact smoke `/tmp/openclaw/alpha_history_runs/aeg_exec_realism_smoke_20260605` PASS，matrix loader 讀回 `calibrated_live_demo_fills_maker` / p95 round-trip cost 9bps。AEG-S2 基建完成但仍非 promotion proof：下一步缺的是候選級 per-regime PnL 與 recent 90/180d freshness。
 
