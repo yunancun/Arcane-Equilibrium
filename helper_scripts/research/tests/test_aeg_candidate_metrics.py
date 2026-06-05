@@ -9,14 +9,32 @@ from aeg_candidate_metrics import artifact as artifact_mod
 from aeg_candidate_metrics import builder as builder_mod
 
 
-def _report_with_per_regime(*, include_net_and_freshness: bool = False) -> dict:
+def _report_with_per_regime(
+    *,
+    include_net_and_freshness: bool = False,
+    include_matrix_fields: bool = False,
+) -> dict:
     per_regime = {
         "bull": {"n_days": 120, "mean_daily_bps": 0.4, "annualized_net_sharpe": 0.8},
         "chop": {"n_days": 80, "mean_daily_bps": -0.1, "annualized_net_sharpe": -0.2},
     }
     if include_net_and_freshness:
+        per_regime["bull"]["net_bps"] = 3.5
+        per_regime["chop"]["net_bps"] = 1.0
+    if include_matrix_fields:
         for value in per_regime.values():
-            value["net_bps"] = value["mean_daily_bps"]
+            value.update({
+                "gross_bps": 7.0,
+                "cost_bps": 2.0,
+                "net_to_cost_ratio": 1.75,
+                "oos_sharpe": 0.42,
+                "psr_0": 0.96,
+                "dsr_k": 0.95,
+                "pbo": 0.2,
+                "k_trials": 8,
+                "n_independent": 45,
+                "sample_unit": "non_overlapping_holding_window",
+            })
     return {
         "phase": "phase_1_fail_fast_early_gates",
         "date_span": ["2024-06-03", "2026-06-03"],
@@ -58,7 +76,7 @@ def test_existing_diagnostic_per_regime_missing_net_and_freshness_fails_closed()
     assert bull["net_bps"] is None
 
 
-def test_explicit_net_and_recent_windows_can_pass():
+def test_explicit_net_and_recent_windows_without_matrix_fields_still_fails_closed():
     rows, summary = builder_mod.build_candidate_metrics(
         _report_with_per_regime(include_net_and_freshness=True),
         run_id="metrics_run",
@@ -67,13 +85,36 @@ def test_explicit_net_and_recent_windows_can_pass():
         parameter_cell_id="k40",
     )
 
-    assert summary["metric_status_counts"] == {"PASS": 2}
+    assert summary["metric_status_counts"] == {"FAIL": 2}
     assert summary["freshness_buckets"] == {"recent_90_180_measured": 2}
-    assert all(json.loads(row["reject_reasons"]) == [] for row in rows)
+    bull = next(row for row in rows if row["regime"] == "bull")
+    reasons = json.loads(bull["reject_reasons"])
+    assert bull["net_bps"] == 3.5
+    assert "missing_n_independent" in reasons
+    assert "missing_psr_0" in reasons
+    assert "missing_dsr_k" in reasons
+    assert "missing_pbo" in reasons
+
+
+def test_complete_matrix_fields_can_pass_without_using_n_days_as_n_independent():
+    rows, summary = builder_mod.build_candidate_metrics(
+        _report_with_per_regime(include_net_and_freshness=True, include_matrix_fields=True),
+        run_id="metrics_run",
+        candidate_id="cand_trend",
+        strategy_family="multiday_trend",
+        parameter_cell_id="k40",
+    )
+
+    assert summary["metric_status_counts"] == {"PASS": 2}
+    bull = next(row for row in rows if row["regime"] == "bull")
+    assert bull["n_days"] == 120
+    assert bull["n_independent"] == 45
+    assert bull["sample_unit"] == "non_overlapping_holding_window"
+    assert json.loads(bull["reject_reasons"]) == []
 
 
 def test_falls_back_to_max_sharpe_when_decision_tree_lacks_best_variant():
-    report = _report_with_per_regime(include_net_and_freshness=True)
+    report = _report_with_per_regime(include_net_and_freshness=True, include_matrix_fields=True)
     report["diagnostic"] = "funding_tilt_carry"
     report["phase"] = None
     report["decision_tree"] = {"verdict": "NO-GO-C"}
@@ -90,9 +131,39 @@ def test_falls_back_to_max_sharpe_when_decision_tree_lacks_best_variant():
     assert len(rows) == 2
 
 
+def test_overfitting_dsr_uses_score_not_k_budget():
+    report = _report_with_per_regime(include_net_and_freshness=True)
+    for value in report["signal_evaluation"]["tsmom_k40__daily"]["per_regime_net"].values():
+        value.update({
+            "gross_bps": 7.0,
+            "cost_bps": 2.0,
+            "oos_sharpe": 0.42,
+            "n_independent": 45,
+            "sample_unit": "non_overlapping_holding_window",
+        })
+    report["trial_budget_K"] = 8
+    report["overfitting"] = {
+        "psr_0": 0.96,
+        "dsr_k": 8,
+        "dsr": 0.77,
+        "pbo": {"value": 0.2},
+    }
+    rows, summary = builder_mod.build_candidate_metrics(
+        report,
+        run_id="metrics_run",
+        candidate_id="cand_trend",
+        strategy_family="multiday_trend",
+        parameter_cell_id="k40",
+    )
+
+    assert summary["metric_status_counts"] == {"PASS": 2}
+    assert rows[0]["dsr_k"] == 0.77
+    assert rows[0]["k_trials"] == 8
+
+
 def test_artifact_write_creates_index_and_manifest(tmp_path):
     rows, summary = builder_mod.build_candidate_metrics(
-        _report_with_per_regime(include_net_and_freshness=True),
+        _report_with_per_regime(include_net_and_freshness=True, include_matrix_fields=True),
         run_id="metrics_run",
         candidate_id="cand_trend",
         strategy_family="multiday_trend",

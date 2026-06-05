@@ -3,15 +3,16 @@
 MODULE_NOTE:
   模塊用途：把候選診斷報告中的 selected variant / per-regime PnL 指標正規化成
     artifact rows，作為 robustness matrix 後續接入的候選級 metrics contract。
-  邊界：不把 mean_daily_bps 冒充為 matrix net_bps；缺 net_bps 或 90/180d freshness
-    時 fail-closed 標記。artifact-only，0 DB / 0 runtime / 0 trading path。
+  邊界：不把 mean_daily_bps 冒充為 matrix net_bps，也不把 n_days 冒充為
+    n_independent；缺 matrix-critical 欄位時 fail-closed 標記。artifact-only，
+    0 DB / 0 runtime / 0 trading path。
 """
 
 from __future__ import annotations
 
-RUNNER_VERSION = "aeg_candidate_metrics.v0.1"
-REGIME_METRICS_SCHEMA_VERSION = "aeg.candidate_regime_metrics.v0.1"
-SUMMARY_SCHEMA_VERSION = "aeg.candidate_metrics_summary.v0.1"
+RUNNER_VERSION = "aeg_candidate_metrics.v0.2"
+REGIME_METRICS_SCHEMA_VERSION = "aeg.candidate_regime_metrics.v0.2"
+SUMMARY_SCHEMA_VERSION = "aeg.candidate_metrics_summary.v0.2"
 MANIFEST_SCHEMA_VERSION = "aeg.alpha_history_run_manifest.v0.1"
 
 REGIME_METRIC_COLUMNS = (
@@ -23,9 +24,19 @@ REGIME_METRIC_COLUMNS = (
     "selected_variant",
     "regime",
     "n_days",
+    "gross_bps",
+    "cost_bps",
     "net_bps",
+    "net_to_cost_ratio",
     "mean_daily_bps",
     "annualized_net_sharpe",
+    "oos_sharpe",
+    "psr_0",
+    "dsr_k",
+    "pbo",
+    "k_trials",
+    "n_independent",
+    "sample_unit",
     "recent_90d_net_bps",
     "recent_180d_net_bps",
     "freshness_bucket",
