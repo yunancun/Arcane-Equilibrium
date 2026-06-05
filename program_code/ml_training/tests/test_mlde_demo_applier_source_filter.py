@@ -126,6 +126,8 @@ PROBE_FULL_SCHEMA = [
     ],
     (True,),
     [("report_hash",), ("report_jsonb",), ("strategy_name",), ("engine_mode",)],
+    (True,),
+    [("replay_experiment_id",), ("replay_manifest_hash",), ("state_jsonb",), ("state",)],
 ]
 
 # Phase 2 — V040 landed but replay metadata columns NOT YET added.
@@ -340,6 +342,9 @@ def test_fetch_pending_full_schema_executes_filtered_sql():
     assert "LEFT JOIN learning.demo_residual_alpha_reports drar" in final_sql
     assert "drar.report_hash AS durable_residual_alpha_report_hash" in final_sql
     assert "drar.report_jsonb AS durable_residual_alpha_report_jsonb" in final_sql
+    assert "LEFT JOIN learning.hidden_oos_state_registry hos" in final_sql
+    assert "hos.state::text AS durable_hidden_oos_state" in final_sql
+    assert "hos.state_jsonb AS durable_hidden_oos_state_jsonb" in final_sql
     # tier allowlist 必為 SQL params 之一（預設排除 synthetic_replay，P3-03）
     # default accepted tiers (synthetic excluded) must be one of the SQL params
     assert list(DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST) in [list(p) if isinstance(p, list) else p for p in final_params]
@@ -454,6 +459,11 @@ def test_evidence_filter_capabilities_returns_all_keys():
         "residual_alpha_reports_has_report_jsonb",
         "residual_alpha_reports_has_strategy_name",
         "residual_alpha_reports_has_engine_mode",
+        "has_hidden_oos_state_registry",
+        "hidden_oos_registry_has_replay_experiment_id",
+        "hidden_oos_registry_has_replay_manifest_hash",
+        "hidden_oos_registry_has_state_jsonb",
+        "hidden_oos_registry_has_state",
     }
     assert set(caps.keys()) == expected_keys
     # legacy schema → all False
@@ -482,6 +492,11 @@ def test_evidence_filter_capabilities_full_schema():
     assert caps["residual_alpha_reports_has_report_jsonb"] is True
     assert caps["residual_alpha_reports_has_strategy_name"] is True
     assert caps["residual_alpha_reports_has_engine_mode"] is True
+    assert caps["has_hidden_oos_state_registry"] is True
+    assert caps["hidden_oos_registry_has_replay_experiment_id"] is True
+    assert caps["hidden_oos_registry_has_replay_manifest_hash"] is True
+    assert caps["hidden_oos_registry_has_state_jsonb"] is True
+    assert caps["hidden_oos_registry_has_state"] is True
 
 
 # ─── P3-03: synthetic_replay opt-in bucket ───────────────────────────────

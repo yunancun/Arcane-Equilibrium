@@ -18,6 +18,7 @@ from ml_training.mlde_demo_applier import (
     _compute_demo_cost_baseline,
     _compute_demo_realized_window,
     _compute_demo_sample_count_strategy_cell,
+    _consume_hidden_oos_state,
     _execute_read_fail_soft,
     _insert_live_candidate,
     _noop_audit_payload,
@@ -43,6 +44,8 @@ from ml_training.candidate_signal_spec import (
 )
 from ml_training.residual_alpha_report_contract import RESIDUAL_ALPHA_REPORT_FIELD
 from ml_training.candidate_evidence_source_contract import (
+    DURABLE_HIDDEN_OOS_STATE_FIELD,
+    DURABLE_HIDDEN_OOS_STATE_JSONB_FIELD,
     DURABLE_RESIDUAL_ALPHA_HASH_FIELD,
     DURABLE_RESIDUAL_ALPHA_REPORT_FIELD,
     HIDDEN_OOS_STATE_SCHEMA_VERSION,
@@ -247,6 +250,7 @@ def _valid_registry_manifest(**overrides) -> dict:
 def _registry_source_fields(**overrides) -> dict:
     residual_report = _valid_residual_alpha_report()
     residual_hash = _canonical_sha256(residual_report)
+    hidden_oos_state = _valid_hidden_oos_state()
     fields = {
         "evidence_source_tier": "calibrated_replay",
         "replay_experiment_id": "replay-exp-1",
@@ -261,6 +265,8 @@ def _registry_source_fields(**overrides) -> dict:
         "replay_registry_total_candidates_k": 12,
         DURABLE_RESIDUAL_ALPHA_HASH_FIELD: residual_hash,
         DURABLE_RESIDUAL_ALPHA_REPORT_FIELD: residual_report,
+        DURABLE_HIDDEN_OOS_STATE_FIELD: "sealed",
+        DURABLE_HIDDEN_OOS_STATE_JSONB_FIELD: hidden_oos_state,
     }
     fields.update(overrides)
     return fields
@@ -550,6 +556,66 @@ def test_live_candidate_builder_missing_replay_hash_does_not_pass():
         },
         cfg,
     )
+
+
+class _ConsumeHiddenOosCursor:
+    def __init__(self, fetchone_row=(7,)):
+        self.executed: list[tuple[str, tuple]] = []
+        self.fetchone_row = fetchone_row
+
+    def execute(self, sql, params=()):
+        self.executed.append((sql, tuple(params)))
+
+    def fetchone(self):
+        row = self.fetchone_row
+        self.fetchone_row = None
+        return row
+
+
+def test_consume_hidden_oos_state_marks_sealed_row_consumed():
+    cur = _ConsumeHiddenOosCursor()
+
+    ok = _consume_hidden_oos_state(
+        cur,
+        {
+            "id": 42,
+            "replay_experiment_id": "11111111-1111-1111-1111-111111111111",
+            "manifest_hash": bytes.fromhex("c" * 64),
+        },
+        application_id=999,
+        target_name="grid_trading",
+        patch={"cooldown_ms": 144_000},
+    )
+
+    assert ok is True
+    sql, params = cur.executed[0]
+    assert "UPDATE learning.hidden_oos_state_registry" in sql
+    assert "state = 'sealed'" in sql
+    assert "open_count = 0" in sql
+    assert "consumed IS FALSE" in sql
+    evidence = json.loads(params[0])
+    assert evidence["application_id"] == 999
+    assert evidence["source_recommendation_id"] == 42
+    assert params[1] == "11111111-1111-1111-1111-111111111111"
+    assert params[2] == "c" * 64
+
+
+def test_consume_hidden_oos_state_returns_false_when_no_sealed_row():
+    cur = _ConsumeHiddenOosCursor(fetchone_row=None)
+
+    ok = _consume_hidden_oos_state(
+        cur,
+        {
+            "id": 42,
+            "replay_experiment_id": "11111111-1111-1111-1111-111111111111",
+            "manifest_hash": "c" * 64,
+        },
+        application_id=999,
+        target_name="grid_trading",
+        patch={},
+    )
+
+    assert ok is False
 
 
 def test_noop_audit_payload_reports_threshold_context():

@@ -227,7 +227,7 @@ class _E2EChainCursor:
         return [self._current_response] if self._current_response is not None else []
 
 
-# Capability probe full schema 17/17（P1-A registry snapshot + V131 durable residual contract）
+# Capability probe full schema 22/22（P1-A registry + V131 residual + V132 hidden OOS）
 _PROBE_FULL_SCHEMA_RESPONSES = [
     [("evidence_source_tier",), ("replay_experiment_id",), ("manifest_hash",)],
     (True,),
@@ -243,6 +243,8 @@ _PROBE_FULL_SCHEMA_RESPONSES = [
     ],
     (True,),
     [("report_hash",), ("report_jsonb",), ("strategy_name",), ("engine_mode",)],
+    (True,),
+    [("replay_experiment_id",), ("replay_manifest_hash",), ("state_jsonb",), ("state",)],
 ]
 # Partial schema：column 在但 stub 缺 expires_at/status
 _PROBE_PARTIAL_RESPONSES = [
@@ -390,8 +392,8 @@ def test_r7_e2e_block_b_capability_full_v_partial(
 
     觀測 W2 R7-T7 Part B observability log（fetch_pending_sql_and_params 內
     line 288-293 logger.info）：
-      - full: 'caps=17/17 block_a=on block_b=full'
-      - partial (4/17): 'caps=4/17 block_a=on block_b=partial'
+      - full: 'caps=22/22 block_a=on block_b=full'
+      - partial (4/22): 'caps=4/22 block_a=on block_b=partial'
     """
     # ─── 子場景 A：full schema ──────────────────────────────────
     # 對齊 W2 既有 test_observability_log_* pattern — 用 caplog.at_level
@@ -431,12 +433,13 @@ def test_r7_e2e_block_b_capability_full_v_partial(
         f"實際 logs={full_msgs}"
     )
     full_msg = full_dumps[-1]
-    assert "caps=17/17" in full_msg, (
-        f"full schema 必含 caps=17/17（實際 msg={full_msg!r}）"
+    assert "caps=22/22" in full_msg, (
+        f"full schema 必含 caps=22/22（實際 msg={full_msg!r}）"
     )
     assert "block_a=on" in full_msg
     assert "block_b=full" in full_msg
     assert "residual_registry=on" in full_msg
+    assert "hidden_oos_registry=on" in full_msg
 
     # 驗 SQL fragment 含完整 Block B（manifest_hash NOT NULL + expires_at >
     # now() + status NOT IN）
@@ -444,6 +447,7 @@ def test_r7_e2e_block_b_capability_full_v_partial(
     assert "expires_at > now()" in sql_full
     assert "status NOT IN" in sql_full
     assert "LEFT JOIN learning.demo_residual_alpha_reports drar" in sql_full
+    assert "LEFT JOIN learning.hidden_oos_state_registry hos" in sql_full
 
     # ─── 子場景 B：partial schema ───────────────────────────────
     cur_partial = _E2EChainCursor(
@@ -478,14 +482,15 @@ def test_r7_e2e_block_b_capability_full_v_partial(
         f"partial schema 路徑必 emit 1+ INFO log；實際 logs={partial_msgs}"
     )
     partial_msg = partial_dumps[-1]
-    # partial = 4/17 (3 column on MSR + has_replay_experiments=True；缺
+    # partial = 4/22 (3 column on MSR + has_replay_experiments=True；缺
     # registry snapshot columns)
-    assert "caps=4/17" in partial_msg, (
-        f"partial schema 必含 caps=4/17（實際 msg={partial_msg!r}）"
+    assert "caps=4/22" in partial_msg, (
+        f"partial schema 必含 caps=4/22（實際 msg={partial_msg!r}）"
     )
     assert "block_a=on" in partial_msg
     assert "block_b=partial" in partial_msg
     assert "residual_registry=missing" in partial_msg
+    assert "hidden_oos_registry=missing" in partial_msg
 
     # 驗 SQL fragment 走 EXISTS subquery degraded gate（W2 partial 路徑）
     assert "EXISTS" in sql_partial

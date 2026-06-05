@@ -64,6 +64,8 @@ HIDDEN_OOS_PROMOTION_STATE = "sealed"
 REGISTRY_RESIDUAL_ALPHA_HASH_FIELD = "demo_residual_alpha_report_hash"
 DURABLE_RESIDUAL_ALPHA_HASH_FIELD = "durable_residual_alpha_report_hash"
 DURABLE_RESIDUAL_ALPHA_REPORT_FIELD = "durable_residual_alpha_report_jsonb"
+DURABLE_HIDDEN_OOS_STATE_FIELD = "durable_hidden_oos_state"
+DURABLE_HIDDEN_OOS_STATE_JSONB_FIELD = "durable_hidden_oos_state_jsonb"
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -195,6 +197,22 @@ def build_live_candidate_evidence_from_source(
             lineage_downgraded=verdict == PENDING_SCHEMA,
         )
     assert hidden_oos_state is not None
+
+    durable_hidden_oos_validation = _validate_durable_hidden_oos_state_snapshot(
+        source_row=source_row,
+        hidden_oos_state=hidden_oos_state,
+    )
+    if durable_hidden_oos_validation is not None:
+        reason, verdict = durable_hidden_oos_validation
+        return _contract_result(
+            reason=reason,
+            verdict=verdict,
+            residual_report=residual_report,
+            source_tier=source_tier,
+            replay_experiment_id=replay_experiment_id,
+            replay_manifest_hash=replay_manifest_hash,
+            lineage_downgraded=verdict == PENDING_SCHEMA,
+        )
 
     hydrated_source_row = _source_row_with_registry_hidden_oos(
         source_row,
@@ -424,12 +442,6 @@ def _validate_durable_residual_report_snapshot(
     durable_body_hash = _canonical_sha256(dict(durable_report))
     if durable_body_hash != durable_hash:
         return "durable_residual_alpha_report_body_hash_mismatch", INVALID
-
-    if not isinstance(residual_report, Mapping):
-        return "residual_alpha:not_dict", INVALID
-    payload_hash = _canonical_sha256(dict(residual_report))
-    if payload_hash != durable_hash:
-        return "durable_residual_alpha_report_payload_mismatch", INVALID
     return None
 
 
@@ -530,6 +542,38 @@ def _load_hidden_oos_state_snapshot(
         return None, ("hidden_oos_state_total_candidates_k_nonpositive", INVALID)
 
     return state, None
+
+
+def _validate_durable_hidden_oos_state_snapshot(
+    *,
+    source_row: Mapping[str, Any],
+    hidden_oos_state: Mapping[str, Any],
+) -> tuple[str, str] | None:
+    durable_state_label = _text(source_row.get(DURABLE_HIDDEN_OOS_STATE_FIELD))
+    if not durable_state_label:
+        return f"{DURABLE_HIDDEN_OOS_STATE_FIELD}_missing", PENDING_SCHEMA
+    if durable_state_label != HIDDEN_OOS_PROMOTION_STATE:
+        return f"{DURABLE_HIDDEN_OOS_STATE_FIELD}_not_sealed:{durable_state_label}", RESEARCH_ONLY
+
+    durable_state = source_row.get(DURABLE_HIDDEN_OOS_STATE_JSONB_FIELD)
+    if not isinstance(durable_state, Mapping):
+        return f"{DURABLE_HIDDEN_OOS_STATE_JSONB_FIELD}_missing", PENDING_SCHEMA
+
+    if _text(durable_state.get("schema_version")) != HIDDEN_OOS_STATE_SCHEMA_VERSION:
+        return "durable_hidden_oos_state_schema_version_unknown", PENDING_SCHEMA
+    if _text(durable_state.get("state")) != HIDDEN_OOS_PROMOTION_STATE:
+        return "durable_hidden_oos_state_body_not_sealed", RESEARCH_ONLY
+    if _int_value(durable_state.get("open_count")) != 0:
+        return "durable_hidden_oos_state_open_count_nonzero", RESEARCH_ONLY
+    for flag in ("opened_for_iteration", "consumed", "invalidated"):
+        if _truthy(durable_state.get(flag)):
+            return f"durable_hidden_oos_state_{flag}", RESEARCH_ONLY
+
+    if _canonical_sha256(dict(durable_state)) != _canonical_sha256(
+        dict(hidden_oos_state)
+    ):
+        return "durable_hidden_oos_state_body_mismatch", INVALID
+    return None
 
 
 def _source_row_with_registry_hidden_oos(

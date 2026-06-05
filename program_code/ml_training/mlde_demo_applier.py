@@ -500,6 +500,66 @@ def should_create_live_candidate(row: dict[str, Any], cfg: DemoApplierConfig) ->
     evidence_build = build_live_candidate_evidence_from_source(row)
     return evidence_build.validation.promotion_ready
 
+
+def _hex_text(value: Any) -> str:
+    if isinstance(value, bytes):
+        return value.hex()
+    return str(value or "").strip()
+
+
+def _consume_hidden_oos_state(
+    cur: Any,
+    row: dict[str, Any],
+    *,
+    application_id: int,
+    target_name: str,
+    patch: dict[str, Any],
+) -> bool:
+    replay_experiment_id = str(row.get("replay_experiment_id") or "").strip()
+    replay_manifest_hash = _hex_text(row.get("manifest_hash"))
+    if not replay_experiment_id or not replay_manifest_hash:
+        return False
+    try:
+        cur.execute(
+            """
+            UPDATE learning.hidden_oos_state_registry
+            SET state = 'consumed',
+                open_count = open_count + 1,
+                opened_for_iteration = TRUE,
+                consumed = TRUE,
+                updated_at = NOW(),
+                source = 'mlde_demo_applier',
+                transition_reason = 'live_candidate_emitted',
+                evidence = %s::jsonb
+            WHERE replay_experiment_id = %s::uuid
+              AND replay_manifest_hash = %s
+              AND state = 'sealed'
+              AND open_count = 0
+              AND opened_for_iteration IS FALSE
+              AND consumed IS FALSE
+              AND invalidated IS FALSE
+            RETURNING state_id
+            """,
+            (
+                json.dumps(
+                    {
+                        "application_id": application_id,
+                        "source_recommendation_id": row.get("id"),
+                        "target_name": target_name,
+                        "patch_keys": sorted(patch.keys()),
+                    },
+                    sort_keys=True,
+                ),
+                replay_experiment_id,
+                replay_manifest_hash,
+            ),
+        )
+        return cur.fetchone() is not None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("hidden OOS state consume failed: %s", exc)
+        return False
+
+
 def _fingerprint(kind: str, target: str, patch: dict[str, Any]) -> str:
     payload = json.dumps({"kind": kind, "target": target, "patch": patch}, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
@@ -1521,28 +1581,8 @@ async def _apply_one(
     )
     _mark_recommendation_applied(cur, int(row["id"]), status in {"applied", "dry_run"})
     live_candidate = False
+    live_candidate_skip_reason = None
     if status == "applied" and should_create_live_candidate(row, cfg):
-        _insert_live_candidate(
-            cur,
-            source_row=row,
-            application_id=app_id,
-            application_type=kind,
-            patch=patch,
-        )
-        # CRITICAL (LG-5 IMPL-1 round 2)：consumer
-        # ``GovernanceHub.review_live_candidate`` reads from
-        # ``mlde_param_applications`` (RFC v2 §2.2 line 140), NOT from
-        # ``mlde_shadow_recommendations``. The payload here MUST carry the
-        # full LG-5 §2.1 contract (schema_version + 4 sub-keys) or consumer
-        # defers / rejects ``schema_unknown`` and the entire pipeline goes
-        # silently inert. Build via shared helper so two writers stay 1:1.
-        # CRITICAL (LG-5 IMPL-1 round 2)：consumer
-        # ``GovernanceHub.review_live_candidate`` 讀的是
-        # ``mlde_param_applications``（RFC v2 §2.2 line 140），不是
-        # ``mlde_shadow_recommendations``；payload 必須帶完整 LG-5 §2.1
-        # contract（schema_version + 4 sub-key），否則 consumer 對所有
-        # candidate defer / reject ``schema_unknown``，整條 pipeline 失效。
-        # 透過共用 helper 建構，與另一寫入點保持 1:1。
         live_candidate_payload = _build_live_candidate_payload(
             cur,
             source_row=row,
@@ -1551,22 +1591,41 @@ async def _apply_one(
             patch=patch,
             strategy_name=str(row.get("strategy_name") or "") or None,
         )
-        _record_application(
+        if _consume_hidden_oos_state(
             cur,
-            row={**row, "engine_mode": "live"},
-            application_type="live_promotion_candidate",
+            row,
+            application_id=app_id,
             target_name=target,
             patch=patch,
-            prev_snapshot={},
-            ipc_response={},
-            status="candidate",
-            reason="positive_demo_evidence_governed_live_candidate",
-            requires_governance=True,
-            payload=live_candidate_payload,
-        )
-        live_candidate = True
-    return {"status": status, "application_type": kind, "target": target,
-            "patch_keys": sorted(patch.keys()), "live_candidate": live_candidate}
+        ):
+            _insert_live_candidate(
+                cur,
+                source_row=row,
+                application_id=app_id,
+                application_type=kind,
+                patch=patch,
+            )
+            _record_application(
+                cur,
+                row={**row, "engine_mode": "live"},
+                application_type="live_promotion_candidate",
+                target_name=target,
+                patch=patch,
+                prev_snapshot={},
+                ipc_response={},
+                status="candidate",
+                reason="positive_demo_evidence_governed_live_candidate",
+                requires_governance=True,
+                payload=live_candidate_payload,
+            )
+            live_candidate = True
+        else:
+            live_candidate_skip_reason = "hidden_oos_state_not_consumed"
+    result = {"status": status, "application_type": kind, "target": target,
+              "patch_keys": sorted(patch.keys()), "live_candidate": live_candidate}
+    if live_candidate_skip_reason is not None:
+        result["live_candidate_skip_reason"] = live_candidate_skip_reason
+    return result
 
 async def _run_async(
     dsn: str,
