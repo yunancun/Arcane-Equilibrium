@@ -5,13 +5,15 @@ MODULE_NOTE:
   模塊用途：breadth ladder runner 的 CLI 入口。parse args（run_id / fnd2 artifact dir /
     顯式窗）→ universe_artifact 讀 FND-2 artifact → tiers.assemble_tiers（cohort_ids
     nested）→ build_alive_mask（survivorship 繼承）→ per-tier candidate.evaluate（預設
-    multiday reference adapter，OQ-B2）→ ladder.build_ladder → artifact.write_all →
-    **survivorship PIT healthcheck 即時 gate（FAIL → raise）** → 印 summary。
+    multiday reference adapter，OQ-B2）→ ladder.build_ladder →
+    **survivorship PIT healthcheck 寫入 summary（FAIL → raise）** → artifact.write_all →
+    印 summary。
     **無隱式 now()**（窗口為顯式參數）。
-    healthcheck 接入（MIT M-2 / E2 LOW）：在 run path 產 artifact 後立即把
-    ``healthcheck.check_aeg_breadth_universe_pit`` 當 gate（FAIL=非繼承 / current-survivor
-    truncate → run 非 0 退出），使其 load-bearing 而非 silent-dead；cron / AEG run
-    orchestration 級別的排程接入屬 (c) / AEG run orchestration（PM follow-up TODO）。
+    healthcheck 接入（MIT M-2 / E2 LOW）：在 run path 寫 artifact 前用 payload-level
+    ``healthcheck.check_aeg_breadth_universe_pit_payload`` 計算 gate 並持久化到 summary
+    （FAIL=非繼承 / current-survivor truncate → run 非 0 退出），使其 load-bearing 而非
+    silent-dead；cron / AEG run orchestration 級別的排程接入屬 (c) / AEG run orchestration
+    （PM follow-up TODO）。
   主要函數：``main`` / ``run_ladder`` / ``assemble_tier_results``。
   CLI 範例（首跑用 FND-2 同窗，OQ-B5）：
     python3 -m aeg_breadth_ladder.harness \\
@@ -175,7 +177,29 @@ def run_ladder(args: argparse.Namespace, *, evaluator=None) -> dict:
         promotion_exclusion_by_name=exclusion,
     )
 
-    # 7) 寫 artifact。
+    # 7) healthcheck 先寫入 summary，再寫 artifact，避免 CLI stdout 有結果但 summary
+    # artifact 本身不可審計。
+    fnd2_summary_path = fnd2_run_dir / "universe_summary.json"
+    if not fnd2_summary_path.exists():
+        hc_status, hc_msg = (
+            "WARN",
+            f"FND-2 universe_summary.json 缺：{fnd2_summary_path}",
+        )
+    else:
+        try:
+            fnd2_summary = json.loads(fnd2_summary_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as exc:
+            hc_status, hc_msg = (
+                "WARN",
+                f"FND-2 universe_summary.json 讀取失敗：{fnd2_summary_path} ({exc})",
+            )
+        else:
+            hc_status, hc_msg = hc_mod.check_aeg_breadth_universe_pit_payload(
+                summary, fnd2_summary,
+            )
+    summary["survivorship_healthcheck"] = {"status": hc_status, "message": hc_msg}
+
+    # 8) 寫 artifact。
     artifact_root = Path(args.artifact_root) if args.artifact_root else None
     written = artifact_mod.write_all(
         ladder_rows, summary,
@@ -191,14 +215,8 @@ def run_ladder(args: argparse.Namespace, *, evaluator=None) -> dict:
         artifact_root=artifact_root,
     )
 
-    # 8) survivorship PIT healthcheck 即時 gate（MIT M-2 + E2 LOW：原函數無人 call =
-    # silent-dead；在此產 artifact 後立即當 gate 接入，使其 load-bearing）。
-    # FAIL → raise（fail-loud，run 非 0 退出，不讓 truncate/非繼承 artifact 靜默通過）。
-    # WARN/PASS → 繼續（WARN=artifact/上游 summary 缺，非 (b) 缺陷）。
-    hc_status, hc_msg = hc_mod.check_aeg_breadth_universe_pit(
-        Path(written["breadth_ladder_summary"]),
-        fnd2_run_dir / "universe_summary.json",
-    )
+    # 9) FAIL → raise（fail-loud，run 非 0 退出，不讓 truncate/非繼承 artifact 靜默通過）。
+    # WARN/PASS → 繼續（WARN=上游 summary 缺或讀取失敗，非 (b) 自身缺陷）。
     if hc_status == "FAIL":
         raise RuntimeError(
             f"breadth ladder survivorship healthcheck FAIL：{hc_msg}（"
@@ -207,7 +225,7 @@ def run_ladder(args: argparse.Namespace, *, evaluator=None) -> dict:
 
     return {"summary": summary, "written": written, "row_count": len(ladder_rows),
             "tiers": {k: len(v) for k, v in tiers_by_name.items()},
-            "healthcheck": {"status": hc_status, "message": hc_msg}}
+            "healthcheck": summary["survivorship_healthcheck"]}
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
