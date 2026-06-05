@@ -127,6 +127,22 @@ fn test_retry_delay_constants() {
 }
 
 #[test]
+fn test_dispatch_retry_delays_helper_open_is_empty_close_is_bounded() {
+    // P1-07 hardening：production call-site 透過 helper 選 retry budget。
+    // open/create 必須永遠是空 slice（0 重試）；close 才能使用 reduce-only
+    // 生存例外的有界重試表。
+    assert!(
+        dispatch_retry_delays_for_intent(false).is_empty(),
+        "open/create dispatch 必須保持 0 重試預算"
+    );
+    assert_eq!(
+        dispatch_retry_delays_for_intent(true),
+        CLOSE_RETRY_DELAY_MS.as_slice(),
+        "close dispatch 才是唯一保留的重試預算"
+    );
+}
+
+#[test]
 fn test_classify_transport_error() {
     // Deterministic construction of a reqwest::Error without real network I/O:
     // issue a `send()` with a 1 ns timeout against localhost; it reliably errors
@@ -593,7 +609,10 @@ async fn test_open_dispatch_uses_empty_retry_schedule_single_attempt() {
                 "OPEN create must be a single attempt (P1-07 STRICT FAIL-CLOSED, 0 retries)"
             );
         }
-        other => panic!("expected TransientExhausted (single attempt), got {:?}", other),
+        other => panic!(
+            "expected TransientExhausted (single attempt), got {:?}",
+            other
+        ),
     }
     assert_eq!(
         *call_count.borrow(),
