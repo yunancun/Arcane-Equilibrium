@@ -5,7 +5,7 @@ MODULE_NOTE
 build_live_candidate_evidence_from_source。
 依賴：candidate manifest builder / validator 與 residual alpha report 契約；
 不自行讀 DB、不連 runtime；只驗證 caller 已 JOIN 到 row 的 replay registry
-snapshot。
+snapshot 與 durable residual registry snapshot。
 硬邊界：live candidate producer 只接受 row-level replay lineage 與 canonical
 residual report；payload lineage / alias / synthetic / real_outcome 不可升級成
 promotion-ready evidence。
@@ -62,6 +62,8 @@ PROMOTION_REPLAY_REGISTRY_STATUSES: tuple[str, ...] = ("completed",)
 HIDDEN_OOS_STATE_SCHEMA_VERSION = "hidden_oos_state_v1"
 HIDDEN_OOS_PROMOTION_STATE = "sealed"
 REGISTRY_RESIDUAL_ALPHA_HASH_FIELD = "demo_residual_alpha_report_hash"
+DURABLE_RESIDUAL_ALPHA_HASH_FIELD = "durable_residual_alpha_report_hash"
+DURABLE_RESIDUAL_ALPHA_REPORT_FIELD = "durable_residual_alpha_report_jsonb"
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -152,6 +154,22 @@ def build_live_candidate_evidence_from_source(
     )
     if residual_registry_validation is not None:
         reason, verdict = residual_registry_validation
+        return _contract_result(
+            reason=reason,
+            verdict=verdict,
+            residual_report=residual_report,
+            source_tier=source_tier,
+            replay_experiment_id=replay_experiment_id,
+            replay_manifest_hash=replay_manifest_hash,
+            lineage_downgraded=verdict == PENDING_SCHEMA,
+        )
+
+    durable_residual_validation = _validate_durable_residual_report_snapshot(
+        source_row=source_row,
+        residual_report=residual_report,
+    )
+    if durable_residual_validation is not None:
+        reason, verdict = durable_residual_validation
         return _contract_result(
             reason=reason,
             verdict=verdict,
@@ -365,6 +383,53 @@ def _validate_registry_residual_report_hash(
         return f"replay_registry_{REGISTRY_RESIDUAL_ALPHA_HASH_FIELD}_mismatch", (
             INVALID
         )
+    return None
+
+
+def _validate_durable_residual_report_snapshot(
+    *,
+    source_row: Mapping[str, Any],
+    residual_report: Mapping[str, Any] | None,
+) -> tuple[str, str] | None:
+    """驗 durable residual registry 是否能反查同一份 report body。"""
+    registry_manifest = source_row.get("replay_registry_manifest_jsonb")
+    if not isinstance(registry_manifest, Mapping):
+        return "replay_registry_manifest_jsonb_missing", PENDING_SCHEMA
+
+    registry_hash = _text(registry_manifest.get(REGISTRY_RESIDUAL_ALPHA_HASH_FIELD))
+    if not registry_hash:
+        return f"replay_registry_{REGISTRY_RESIDUAL_ALPHA_HASH_FIELD}_missing", (
+            PENDING_SCHEMA
+        )
+
+    durable_hash = _text(source_row.get(DURABLE_RESIDUAL_ALPHA_HASH_FIELD))
+    if not durable_hash:
+        return f"{DURABLE_RESIDUAL_ALPHA_HASH_FIELD}_missing", PENDING_SCHEMA
+    if not _is_hex64(durable_hash):
+        return f"{DURABLE_RESIDUAL_ALPHA_HASH_FIELD}_malformed", INVALID
+    if durable_hash != registry_hash:
+        return f"{DURABLE_RESIDUAL_ALPHA_HASH_FIELD}_mismatch", INVALID
+
+    durable_report = source_row.get(DURABLE_RESIDUAL_ALPHA_REPORT_FIELD)
+    if not isinstance(durable_report, Mapping):
+        return f"{DURABLE_RESIDUAL_ALPHA_REPORT_FIELD}_missing", PENDING_SCHEMA
+
+    durable_ok, durable_reason = validate_demo_residual_alpha_report(durable_report)
+    if not durable_ok:
+        return (
+            f"durable_residual_alpha_report_invalid:{durable_reason}",
+            INVALID,
+        )
+
+    durable_body_hash = _canonical_sha256(dict(durable_report))
+    if durable_body_hash != durable_hash:
+        return "durable_residual_alpha_report_body_hash_mismatch", INVALID
+
+    if not isinstance(residual_report, Mapping):
+        return "residual_alpha:not_dict", INVALID
+    payload_hash = _canonical_sha256(dict(residual_report))
+    if payload_hash != durable_hash:
+        return "durable_residual_alpha_report_payload_mismatch", INVALID
     return None
 
 

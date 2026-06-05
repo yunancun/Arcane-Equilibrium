@@ -13,6 +13,7 @@ No trading parameter, auth, order, or live-mode mutation is performed here.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -34,6 +35,19 @@ except ModuleNotFoundError:  # pragma: no cover - direct app runtime fallback
     )
 
 logger = logging.getLogger(__name__)
+
+_RESIDUAL_ALPHA_METRIC_FIELDS: tuple[str, ...] = (
+    "raw_mean_bps",
+    "residual_mean_bps",
+    "r_beta_retention",
+    "beta_edge_share",
+    "psr_raw",
+    "psr_residual",
+    "dsr_raw",
+    "dsr_residual",
+    "pbo_raw",
+    "pbo_residual",
+)
 
 
 class PromotionGateLike(Protocol):
@@ -125,6 +139,16 @@ def _dict_from_payload(value: Any) -> dict[str, Any]:
             return {}
         return parsed if isinstance(parsed, dict) else {}
     return {}
+
+
+def _canonical_sha256(value: Any) -> str:
+    canonical = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def _extract_residual_report_from_row(row: Mapping[str, Any]) -> Optional[dict[str, Any]]:
@@ -409,12 +433,97 @@ def _persist_trial_ledger(
     return len(rows)
 
 
+def _persist_residual_alpha_report(
+    cur: Any,
+    evidence: StrategyPromotionEvidence,
+    *,
+    source: str,
+) -> Optional[str]:
+    if evidence.demo_residual_alpha_report is None:
+        return None
+    if not _has_table(cur, "learning.demo_residual_alpha_reports"):
+        return None
+
+    report = evidence.demo_residual_alpha_report
+    ok, reason = validate_demo_residual_alpha_report(report)
+    if not ok:
+        logger.info(
+            "skip residual alpha report registry write for %s: %s",
+            evidence.strategy_name,
+            reason,
+        )
+        return None
+
+    metrics: dict[str, float] = {}
+    for field in _RESIDUAL_ALPHA_METRIC_FIELDS:
+        value = _safe_float(report.get(field))
+        if value is None:
+            return None
+        metrics[field] = value
+
+    report_hash = _canonical_sha256(report)
+    fit_window_raw = report.get("fit_window")
+    coverage_raw = report.get("coverage")
+    fit_window = fit_window_raw if isinstance(fit_window_raw, dict) else {}
+    coverage = coverage_raw if isinstance(coverage_raw, dict) else {}
+    factor_panel_hash = str(report.get("factor_panel_hash") or "").strip()
+    cur.execute(
+        """
+        INSERT INTO learning.demo_residual_alpha_reports
+            (strategy_name, engine_mode, report_hash, report_jsonb,
+             raw_mean_bps, residual_mean_bps, r_beta_retention, beta_edge_share,
+             psr_raw, psr_residual, dsr_raw, dsr_residual, pbo_raw, pbo_residual,
+             factor_panel_hash, fit_window, coverage, source, evidence)
+        VALUES
+            (%s, %s, %s, %s::jsonb,
+             %s, %s, %s, %s,
+             %s, %s, %s, %s, %s, %s,
+             %s, %s::jsonb, %s::jsonb, %s, %s::jsonb)
+        ON CONFLICT (strategy_name, engine_mode, report_hash)
+        DO UPDATE SET
+            last_seen_ts = NOW(),
+            source = EXCLUDED.source,
+            evidence = EXCLUDED.evidence
+        """,
+        (
+            evidence.strategy_name,
+            evidence.engine_mode,
+            report_hash,
+            json.dumps(report, sort_keys=True),
+            metrics["raw_mean_bps"],
+            metrics["residual_mean_bps"],
+            metrics["r_beta_retention"],
+            metrics["beta_edge_share"],
+            metrics["psr_raw"],
+            metrics["psr_residual"],
+            metrics["dsr_raw"],
+            metrics["dsr_residual"],
+            metrics["pbo_raw"],
+            metrics["pbo_residual"],
+            factor_panel_hash,
+            json.dumps(fit_window, sort_keys=True),
+            json.dumps(coverage, sort_keys=True),
+            source,
+            json.dumps(
+                {
+                    "return_unit": "bps",
+                    "source": source,
+                    "hash_algorithm": "sha256_canonical_json",
+                },
+                sort_keys=True,
+            ),
+        ),
+    )
+    return report_hash
+
+
 def _persist_promotion_reports(
     cur: Any,
     evidence: StrategyPromotionEvidence,
     *,
     selection_report: Mapping[str, Any],
     tail_report: Mapping[str, Any],
+    residual_report_hash: Optional[str] = None,
 ) -> bool:
     if not _has_table(cur, "learning.promotion_pipeline"):
         return False
@@ -425,6 +534,12 @@ def _persist_promotion_reports(
         ("demo_selection_bias_report", "demo_tail_risk_report"),
     ):
         return False
+    has_residual_hash_column = _has_columns(
+        cur,
+        "learning",
+        "promotion_pipeline",
+        ("demo_residual_alpha_report_hash",),
+    )
 
     cur.execute(
         """
@@ -437,35 +552,46 @@ def _persist_promotion_reports(
         (evidence.strategy_name,),
     )
     row = cur.fetchone()
+    selection_json = json.dumps(selection_report)
+    tail_json = json.dumps(tail_report)
     if row:
-        cur.execute(
+        hash_set = ""
+        params: tuple[Any, ...] = (selection_json, tail_json, row[0])
+        if has_residual_hash_column:
+            hash_set = """
+                    demo_residual_alpha_report_hash = COALESCE(
+                        %s,
+                        demo_residual_alpha_report_hash
+                    ),
             """
+            params = (selection_json, tail_json, residual_report_hash, row[0])
+        cur.execute(
+            f"""
             UPDATE learning.promotion_pipeline
             SET demo_selection_bias_report = %s::jsonb,
                 demo_tail_risk_report = %s::jsonb,
-                updated_ts = NOW()
+{hash_set}                updated_ts = NOW()
             WHERE pipeline_id = %s
             """,
-            (
-                json.dumps(selection_report),
-                json.dumps(tail_report),
-                row[0],
-            ),
+            params,
         )
         return True
 
+    hash_column = ""
+    hash_value = ""
+    params = (evidence.strategy_name, selection_json, tail_json)
+    if has_residual_hash_column:
+        hash_column = ", demo_residual_alpha_report_hash"
+        hash_value = ", %s"
+        params = (evidence.strategy_name, selection_json, tail_json, residual_report_hash)
     cur.execute(
-        """
+        f"""
         INSERT INTO learning.promotion_pipeline
             (strategy_name, current_stage, demo_selection_bias_report,
-             demo_tail_risk_report, updated_ts)
-        VALUES (%s, 'LEARNING', %s::jsonb, %s::jsonb, NOW())
+             demo_tail_risk_report{hash_column}, updated_ts)
+        VALUES (%s, 'LEARNING', %s::jsonb, %s::jsonb{hash_value}, NOW())
         """,
-        (
-            evidence.strategy_name,
-            json.dumps(selection_report),
-            json.dumps(tail_report),
-        ),
+        params,
     )
     return True
 
@@ -506,6 +632,7 @@ def push_promotion_evidence_from_js_results(
     details: dict[str, dict[str, Any]] = {}
     ledger_rows = 0
     persisted_reports = 0
+    residual_report_registry_rows = 0
     selection_passes = 0
     tail_passes = 0
     try:
@@ -590,13 +717,23 @@ def push_promotion_evidence_from_js_results(
                     evidence.demo_residual_alpha_report
                 )
 
+            residual_report_hash = None
             if cur is not None:
                 try:
+                    residual_report_hash = _persist_residual_alpha_report(
+                        cur,
+                        evidence,
+                        source=source,
+                    )
+                    residual_report_registry_rows += int(
+                        residual_report_hash is not None
+                    )
                     if _persist_promotion_reports(
                         cur,
                         evidence,
                         selection_report=selection_report,
                         tail_report=tail_report,
+                        residual_report_hash=residual_report_hash,
                     ):
                         persisted_reports += 1
                 except Exception as exc:  # noqa: BLE001
@@ -621,6 +758,7 @@ def push_promotion_evidence_from_js_results(
                 "residual_verdict": residual_gate_report.get("verdict"),
                 "residual_passes": bool(residual_ok),
                 "residual_reason": residual_gate_report.get("reason"),
+                "residual_report_hash": residual_report_hash,
             }
 
         if conn is not None:
@@ -644,6 +782,7 @@ def push_promotion_evidence_from_js_results(
         "tail_passes": tail_passes,
         "ledger_rows": ledger_rows,
         "persisted_reports": persisted_reports,
+        "residual_report_registry_rows": residual_report_registry_rows,
         "updated_at": datetime.now(tz=timezone.utc).isoformat(),
         "details": details,
     }

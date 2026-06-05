@@ -124,6 +124,8 @@ PROBE_FULL_SCHEMA = [
         ("oos_embargo_seconds",),
         ("total_candidates_k",),
     ],
+    (True,),
+    [("report_hash",), ("report_jsonb",), ("strategy_name",), ("engine_mode",)],
 ]
 
 # Phase 2 — V040 landed but replay metadata columns NOT YET added.
@@ -132,6 +134,7 @@ PROBE_LEGACY_TIER_ONLY = [
     [("evidence_source_tier",)],  # only tier landed
     (True,),  # replay.experiments stub exists (V041)
     [],  # but no expires_at / status
+    (False,),
 ]
 
 
@@ -334,6 +337,9 @@ def test_fetch_pending_full_schema_executes_filtered_sql():
     assert "e.manifest_jsonb AS replay_registry_manifest_jsonb" in final_sql
     assert "e.oos_label_window_start AS replay_registry_oos_label_window_start" in final_sql
     assert "e.total_candidates_K AS replay_registry_total_candidates_k" in final_sql
+    assert "LEFT JOIN learning.demo_residual_alpha_reports drar" in final_sql
+    assert "drar.report_hash AS durable_residual_alpha_report_hash" in final_sql
+    assert "drar.report_jsonb AS durable_residual_alpha_report_jsonb" in final_sql
     # tier allowlist 必為 SQL params 之一（預設排除 synthetic_replay，P3-03）
     # default accepted tiers (synthetic excluded) must be one of the SQL params
     assert list(DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST) in [list(p) if isinstance(p, list) else p for p in final_params]
@@ -443,6 +449,11 @@ def test_evidence_filter_capabilities_returns_all_keys():
         "replay_experiments_has_oos_label_window_end",
         "replay_experiments_has_oos_embargo_seconds",
         "replay_experiments_has_total_candidates_k",
+        "has_residual_alpha_reports",
+        "residual_alpha_reports_has_report_hash",
+        "residual_alpha_reports_has_report_jsonb",
+        "residual_alpha_reports_has_strategy_name",
+        "residual_alpha_reports_has_engine_mode",
     }
     assert set(caps.keys()) == expected_keys
     # legacy schema → all False
@@ -466,6 +477,11 @@ def test_evidence_filter_capabilities_full_schema():
     assert caps["replay_experiments_has_oos_label_window_end"] is True
     assert caps["replay_experiments_has_oos_embargo_seconds"] is True
     assert caps["replay_experiments_has_total_candidates_k"] is True
+    assert caps["has_residual_alpha_reports"] is True
+    assert caps["residual_alpha_reports_has_report_hash"] is True
+    assert caps["residual_alpha_reports_has_report_jsonb"] is True
+    assert caps["residual_alpha_reports_has_strategy_name"] is True
+    assert caps["residual_alpha_reports_has_engine_mode"] is True
 
 
 # ─── P3-03: synthetic_replay opt-in bucket ───────────────────────────────

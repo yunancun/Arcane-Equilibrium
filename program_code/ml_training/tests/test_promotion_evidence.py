@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -51,6 +52,17 @@ def _valid_residual_alpha_report(**overrides):
     }
     report.update(overrides)
     return report
+
+
+def _canonical_sha256(value: dict) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 class _FakeGate:
@@ -204,12 +216,23 @@ class _FakeCursor:
         if "to_regclass" in sql:
             self._fetchone_queue.append((True,))
         elif "information_schema.columns" in sql:
-            self._fetchall_queue.append(
-                [
-                    ("demo_selection_bias_report",),
-                    ("demo_tail_risk_report",),
-                ]
-            )
+            requested = set(params[2]) if params and len(params) >= 3 else set()
+            table = params[1] if params and len(params) >= 2 else ""
+            present_by_table = {
+                "promotion_pipeline": {
+                    "demo_selection_bias_report",
+                    "demo_tail_risk_report",
+                    "demo_residual_alpha_report_hash",
+                },
+                "demo_residual_alpha_reports": {
+                    "report_hash",
+                    "report_jsonb",
+                    "strategy_name",
+                    "engine_mode",
+                },
+            }
+            present = present_by_table.get(str(table), set())
+            self._fetchall_queue.append([(col,) for col in requested & present])
         elif "SELECT pipeline_id" in sql:
             self._fetchone_queue.append((123,))
         elif "SELECT observed_sharpe" in sql:
@@ -266,7 +289,8 @@ def test_push_persists_trial_ledger_and_reports_when_v079_exists(monkeypatch):
     sql_text = "\n".join(sql for sql, _ in conn.cur.executed)
     assert "learning.strategy_trial_ledger" in sql_text
     assert "demo_selection_bias_report" in sql_text
-    assert "demo_residual_alpha_report" not in sql_text
+    assert "demo_residual_alpha_report_hash" in sql_text
+    assert "learning.demo_residual_alpha_reports" not in sql_text
     update_params = [
         params
         for sql, params in conn.cur.executed
@@ -274,3 +298,42 @@ def test_push_persists_trial_ledger_and_reports_when_v079_exists(monkeypatch):
     ][0]
     json.loads(update_params[0])
     json.loads(update_params[1])
+
+
+def test_push_persists_valid_residual_report_registry_when_v131_exists(monkeypatch):
+    rows = _js_results()
+    report = _valid_residual_alpha_report()
+    rows[("ma_crossover", "BTCUSDT")]["demo_residual_alpha_report"] = report
+    expected_hash = _canonical_sha256(report)
+    conn = _FakeConn()
+    monkeypatch.setattr(
+        "program_code.ml_training.promotion_evidence._connect_dsn",
+        lambda dsn: conn,
+    )
+
+    summary = push_promotion_evidence_from_js_results(
+        rows,
+        engine_mode="demo",
+        dsn="postgresql://unit-test",
+        n_bootstrap=24,
+        seed=7,
+    )
+
+    assert summary["residual_report_registry_rows"] == 1
+    assert summary["details"]["ma_crossover"]["residual_report_hash"] == expected_hash
+    sql_text = "\n".join(sql for sql, _ in conn.cur.executed)
+    assert "learning.demo_residual_alpha_reports" in sql_text
+    assert "ON CONFLICT (strategy_name, engine_mode, report_hash)" in sql_text
+    residual_insert_params = [
+        params
+        for sql, params in conn.cur.executed
+        if "INSERT INTO learning.demo_residual_alpha_reports" in sql
+    ][0]
+    assert residual_insert_params[2] == expected_hash
+    assert json.loads(residual_insert_params[3])["verdict"] == "pass"
+    update_params = [
+        params
+        for sql, params in conn.cur.executed
+        if "UPDATE learning.promotion_pipeline" in sql
+    ][0]
+    assert update_params[2] == expected_hash
