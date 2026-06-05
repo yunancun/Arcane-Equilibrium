@@ -24,10 +24,10 @@ def _ts(i: int) -> int:
 
 
 def _factor_returns(
-    *, eval_shift_btc: float = 0.0, eval_shift_market: float = 0.0
+    *, n: int = 140, eval_shift_btc: float = 0.0, eval_shift_market: float = 0.0
 ) -> dict[int, dict[str, float]]:
     out: dict[int, dict[str, float]] = {}
-    for i in range(140):
+    for i in range(n):
         btc = 4.0 if i % 2 == 0 else -4.0
         market = 3.0 if (i // 2) % 2 == 0 else -3.0
         if 80 <= i <= 119:
@@ -40,13 +40,14 @@ def _factor_returns(
 def _candidate_returns(
     factor_returns: dict[int, dict[str, float]],
     *,
+    n: int = 120,
     alpha_bps: float,
     beta_btc: float,
     beta_market: float,
     eval_noise_bps: float = 0.0,
 ) -> dict[int, float]:
     out: dict[int, float] = {}
-    for i in range(120):  # 候選只覆蓋 i=0..119
+    for i in range(n):  # 候選覆蓋 i=0..n-1
         row = factor_returns[_ts(i)]
         value = alpha_bps + beta_btc * row["btc"] + beta_market * row["market"]
         if 80 <= i <= 119:
@@ -62,8 +63,10 @@ def _ts_peers(candidate: dict[int, float], *means: float) -> tuple[dict[int, flo
 
 
 def test_true_alpha_promotion_ready():
-    factors = _factor_returns()
-    candidate = _candidate_returns(factors, alpha_bps=2.0, beta_btc=0.4, beta_market=-0.2)
+    # 真數學（DsrGate/PboGate）下 CSCV 需 total_trades >= 320 → eval >= 80；故用 280
+    # 候選（70/30 切 → eval≈84）+ 弱 beta（0.2/-0.1）讓真 DSR(K=4) 確實過 0.95。
+    factors = _factor_returns(n=300)
+    candidate = _candidate_returns(factors, n=280, alpha_bps=2.0, beta_btc=0.2, beta_market=-0.1)
     res = build_residual_alpha_report(
         candidate,
         factors,
@@ -78,7 +81,7 @@ def test_true_alpha_promotion_ready():
     assert res.report["passes"] is True
     assert res.report["verdict"] == "pass"
     assert res.report["residual_mean_bps"] > 0.0
-    assert res.aligned_observations == 120
+    assert res.aligned_observations == 280
 
 
 def test_beta_trap_not_promotion_ready():
