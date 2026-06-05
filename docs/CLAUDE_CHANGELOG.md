@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-05（TODO v112 Alpha-Edge S2 runner implementation checkpoint + v107-v111 合併增量；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-05（TODO v113 Alpha-Edge execution-realism + dispatch retry boundary checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v113 增量（2026-06-05 Alpha-Edge execution-realism + dispatch retry boundary checkpoint）**：三端同步至 `4bc93b56`。完成 Bybit open/create dispatch retry boundary hardening（`061d3c8c`）：把 open 0-retry schedule 抽為可測 helper，close 保留有界 reduce-only retry；Mac+Linux `openclaw_engine --lib` 均 `3758 passed / 1 ignored`，source-only 語義等價，engine binary 未重啟。新增 AEG execution-realism artifact builder（`4bc93b56`）：輸入費率/滑點/maker-fill/adverse-selection/latency/participation/capacity/order availability 證據，重新計算 PASS/FAIL，不信任輸入 status，輸出 `execution_realism.json` 供 robustness matrix 消費。Mac+Linux research tests `172 passed`；Linux artifact smoke `/tmp/openclaw/alpha_history_runs/aeg_exec_realism_smoke_20260605` PASS，matrix loader 讀回 `calibrated_live_demo_fills_maker` / p95 round-trip cost 9bps。AEG-S2 基建完成但仍非 promotion proof：下一步缺的是候選級 per-regime PnL 與 recent 90/180d freshness。
 
 **v112 增量（2026-06-05 Alpha-Edge S2 runner implementation checkpoint）**：本輪主線推進 `2026-06-04 Alpha-Edge 改進實現方案派發綜合`。三端同步至 `4332d3bb`。完成 V131 durable residual report registry（`c785208c5`）、V132 hidden OOS state registry（`5a84230b`，同一 hidden OOS split 禁跨 manifest 重用）、AEG-S2 (a) regime label runner（`00677e7d`，artifact-only 默認、`--write-db` 才寫 V127）、AEG-S2 (b) breadth ladder Linux smoke + summary 持久化 survivorship healthcheck（`3ba7c70d`）、AEG-S2 (c) robustness matrix builder（`4332d3bb`，artifact-only `verdict_matrix`，缺 per-regime PnL/freshness/execution-realism 時 fail-closed）。Linux 驗證：V131/V132 PG rollback dry-run、ML tests `525 passed / 31 skipped`、migrations `218 passed / 2 skipped`、research tests `167 passed`；artifact smoke paths：`/tmp/openclaw/alpha_history_runs/aeg_regime_smoke_20260605`、`breadth_smoke_20260605_healthcheck`、`robustness_smoke_20260605`。robustness matrix 結果全 `insufficient evidence` 是正確防線，不是 alpha promotion proof。
 
