@@ -1064,6 +1064,99 @@ def _extract_alpha_hidden_oos_v049_fields(
     )
 
 
+def _persist_hidden_oos_state_registry(
+    cur: Any,
+    *,
+    experiment_id: str,
+    manifest_hash_hex: str,
+    manifest_jsonb: dict[str, Any],
+    actor_id: str,
+) -> Optional[str]:
+    """把 alpha hidden_oos_state 寫入 durable state registry。"""
+    raw_state = manifest_jsonb.get("hidden_oos_state")
+    if raw_state is None:
+        return None
+    if not isinstance(raw_state, dict):
+        return "alpha_hidden_oos_state_not_mapping"
+
+    residual_hash = str(manifest_jsonb.get(REGISTRY_RESIDUAL_ALPHA_HASH_FIELD) or "")
+    train_start = _parse_manifest_datetime(raw_state.get("calibration_train_window_start"))
+    train_end = _parse_manifest_datetime(raw_state.get("calibration_train_window_end"))
+    candidate_start = _parse_manifest_datetime(raw_state.get("candidate_window_start"))
+    candidate_end = _parse_manifest_datetime(raw_state.get("candidate_window_end"))
+    window_start = _parse_manifest_datetime(raw_state.get("window_start"))
+    window_end = _parse_manifest_datetime(raw_state.get("window_end"))
+    embargo_seconds = _int_or_none(raw_state.get("embargo_seconds"))
+    total_candidates_k = _int_or_none(
+        _first_present(
+            raw_state.get("total_candidates_k"),
+            raw_state.get("total_candidates_K"),
+            raw_state.get("trial_count"),
+            raw_state.get("K"),
+            raw_state.get("k"),
+        )
+    )
+    if None in (
+        train_start,
+        train_end,
+        candidate_start,
+        candidate_end,
+        window_start,
+        window_end,
+        embargo_seconds,
+        total_candidates_k,
+    ):
+        return "alpha_hidden_oos_state_registry_fields_missing"
+
+    cur.execute(
+        """
+        INSERT INTO learning.hidden_oos_state_registry (
+            replay_experiment_id, replay_manifest_hash, family_id, split_hash,
+            state, open_count, opened_for_iteration, consumed, invalidated,
+            calibration_train_window_start, calibration_train_window_end,
+            candidate_window_start, candidate_window_end,
+            window_start, window_end, embargo_seconds, total_candidates_k,
+            residual_alpha_report_hash, state_jsonb, actor_id, source,
+            transition_reason, evidence
+        ) VALUES (
+            %s::uuid, %s, %s, %s,
+            'sealed', 0, FALSE, FALSE, FALSE,
+            %s, %s,
+            %s, %s,
+            %s, %s, %s, %s,
+            %s, %s::jsonb, %s, 'replay_experiment_register',
+            'register_sealed', %s::jsonb
+        )
+        ON CONFLICT (replay_experiment_id) DO NOTHING
+        """,
+        (
+            experiment_id,
+            manifest_hash_hex,
+            str(raw_state.get("family_id") or "").strip(),
+            str(raw_state.get("split_hash") or "").strip(),
+            train_start,
+            train_end,
+            candidate_start,
+            candidate_end,
+            window_start,
+            window_end,
+            embargo_seconds,
+            total_candidates_k,
+            residual_hash,
+            json.dumps(raw_state, sort_keys=True, ensure_ascii=False),
+            actor_id,
+            json.dumps(
+                {
+                    "manifest_hash": manifest_hash_hex,
+                    "source": "replay_experiment_register",
+                },
+                sort_keys=True,
+            ),
+        ),
+    )
+    return None
+
+
 def _parse_manifest_datetime(value: Any) -> Optional[datetime]:
     if isinstance(value, datetime):
         ts = value
@@ -1433,6 +1526,16 @@ def register_experiment(
     if inserted is None:
         return None, "register_insert_no_row_returned"
     inserted_id, inserted_created_at = inserted
+
+    hidden_oos_registry_err = _persist_hidden_oos_state_registry(
+        cur,
+        experiment_id=inserted_id,
+        manifest_hash_hex=manifest_hash_hex,
+        manifest_jsonb=manifest_to_persist,
+        actor_id=actor_id,
+    )
+    if hidden_oos_registry_err is not None:
+        return None, hidden_oos_registry_err
 
     created_at_iso = (
         inserted_created_at.isoformat()

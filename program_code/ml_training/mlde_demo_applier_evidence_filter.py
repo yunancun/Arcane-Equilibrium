@@ -124,6 +124,11 @@ def evidence_filter_capabilities(cur: Any) -> dict[str, bool]:
       - residual_alpha_reports_has_report_jsonb
       - residual_alpha_reports_has_strategy_name
       - residual_alpha_reports_has_engine_mode
+      - has_hidden_oos_state_registry
+      - hidden_oos_registry_has_replay_experiment_id
+      - hidden_oos_registry_has_replay_manifest_hash
+      - hidden_oos_registry_has_state_jsonb
+      - hidden_oos_registry_has_state
 
     Each capability missing → caller falls back gracefully (skip filter
     on that column with comment marking forward-compat per dispatch §
@@ -153,6 +158,11 @@ def evidence_filter_capabilities(cur: Any) -> dict[str, bool]:
         "residual_alpha_reports_has_report_jsonb": False,
         "residual_alpha_reports_has_strategy_name": False,
         "residual_alpha_reports_has_engine_mode": False,
+        "has_hidden_oos_state_registry": False,
+        "hidden_oos_registry_has_replay_experiment_id": False,
+        "hidden_oos_registry_has_replay_manifest_hash": False,
+        "hidden_oos_registry_has_state_jsonb": False,
+        "hidden_oos_registry_has_state": False,
     }
     # 1) probe mlde_shadow_recommendations columns
     # 1) 探 mlde_shadow_recommendations 的欄位
@@ -261,6 +271,43 @@ def evidence_filter_capabilities(cur: Any) -> dict[str, bool]:
     caps["residual_alpha_reports_has_report_jsonb"] = "report_jsonb" in residual_cols
     caps["residual_alpha_reports_has_strategy_name"] = "strategy_name" in residual_cols
     caps["residual_alpha_reports_has_engine_mode"] = "engine_mode" in residual_cols
+
+    # 4) V132 hidden OOS durable state registry。缺失時 SELECT 仍可跑，
+    # source contract 會以 pending_schema 擋 promotion-ready。
+    try:
+        cur.execute(
+            "SELECT to_regclass('learning.hidden_oos_state_registry') IS NOT NULL"
+        )
+        hidden_row = cur.fetchone()
+    except Exception:  # noqa: BLE001
+        return caps
+    if not hidden_row or not hidden_row[0]:
+        return caps
+    caps["has_hidden_oos_state_registry"] = True
+
+    try:
+        cur.execute(
+            """
+            SELECT column_name
+              FROM information_schema.columns
+             WHERE table_schema = 'learning'
+               AND table_name = 'hidden_oos_state_registry'
+               AND column_name = ANY(%s)
+            """,
+            (["replay_experiment_id", "replay_manifest_hash", "state_jsonb", "state"],),
+        )
+        hidden_rows = cur.fetchall() or []
+    except Exception:  # noqa: BLE001
+        return caps
+    hidden_cols = {str(r[0]) for r in hidden_rows if r and r[0] is not None}
+    caps["hidden_oos_registry_has_replay_experiment_id"] = (
+        "replay_experiment_id" in hidden_cols
+    )
+    caps["hidden_oos_registry_has_replay_manifest_hash"] = (
+        "replay_manifest_hash" in hidden_cols
+    )
+    caps["hidden_oos_registry_has_state_jsonb"] = "state_jsonb" in hidden_cols
+    caps["hidden_oos_registry_has_state"] = "state" in hidden_cols
     return caps
 
 
@@ -424,14 +471,25 @@ def fetch_pending_sql_and_params(
         and has_fk_only
     )
     residual_registry_label = "on" if has_residual_registry_join else "missing"
+    has_hidden_oos_registry_join = (
+        bool(caps.get("has_hidden_oos_state_registry"))
+        and bool(caps.get("hidden_oos_registry_has_replay_experiment_id"))
+        and bool(caps.get("hidden_oos_registry_has_replay_manifest_hash"))
+        and bool(caps.get("hidden_oos_registry_has_state_jsonb"))
+        and bool(caps.get("hidden_oos_registry_has_state"))
+        and bool(caps.get("replay_experiments_has_manifest_hash"))
+        and has_fk_only
+    )
+    hidden_oos_registry_label = "on" if has_hidden_oos_registry_join else "missing"
     logger.info(
-        "evidence_filter capability dump: caps=%d/%d block_a=%s block_b=%s synthetic=%s residual_registry=%s",
+        "evidence_filter capability dump: caps=%d/%d block_a=%s block_b=%s synthetic=%s residual_registry=%s hidden_oos_registry=%s",
         caps_count,
         len(caps),
         block_a_label,
         block_b_label,
         synthetic_label,
         residual_registry_label,
+        hidden_oos_registry_label,
     )
     evidence_source_tier_select = (
         "evidence_source_tier::text AS evidence_source_tier"
@@ -465,6 +523,14 @@ def fetch_pending_sql_and_params(
         "AND drar.strategy_name = learning.mlde_shadow_recommendations.strategy_name "
         "AND drar.engine_mode = learning.mlde_shadow_recommendations.engine_mode"
         if has_residual_registry_join
+        else ""
+    )
+    hidden_oos_registry_join = (
+        "LEFT JOIN learning.hidden_oos_state_registry hos "
+        "ON hos.replay_experiment_id = "
+        "  learning.mlde_shadow_recommendations.replay_experiment_id "
+        "AND hos.replay_manifest_hash = encode(e.manifest_hash, 'hex')"
+        if has_hidden_oos_registry_join
         else ""
     )
     registry_status_select = (
@@ -525,6 +591,16 @@ def fetch_pending_sql_and_params(
         if has_residual_registry_join
         else "NULL::jsonb AS durable_residual_alpha_report_jsonb"
     )
+    durable_hidden_oos_state_select = (
+        "hos.state::text AS durable_hidden_oos_state"
+        if has_hidden_oos_registry_join
+        else "NULL::text AS durable_hidden_oos_state"
+    )
+    durable_hidden_oos_jsonb_select = (
+        "hos.state_jsonb AS durable_hidden_oos_state_jsonb"
+        if has_hidden_oos_registry_join
+        else "NULL::jsonb AS durable_hidden_oos_state_jsonb"
+    )
 
     sql = """
         SELECT id, ts, engine_mode, source, recommendation_type, strategy_name,
@@ -543,10 +619,13 @@ def fetch_pending_sql_and_params(
                {registry_k_select},
                {durable_residual_hash_select},
                {durable_residual_jsonb_select},
+               {durable_hidden_oos_state_select},
+               {durable_hidden_oos_jsonb_select},
                payload
           FROM learning.mlde_shadow_recommendations
           {registry_join}
           {residual_registry_join}
+          {hidden_oos_registry_join}
          WHERE ts >= now() - (%s::int || ' hours')::interval
            AND engine_mode = %s
            AND NOT applied
@@ -562,6 +641,7 @@ def fetch_pending_sql_and_params(
         manifest_hash_select=manifest_hash_select,
         registry_join=registry_join,
         residual_registry_join=residual_registry_join,
+        hidden_oos_registry_join=hidden_oos_registry_join,
         registry_status_select=registry_status_select,
         registry_expires_at_select=registry_expires_at_select,
         registry_manifest_hash_select=registry_manifest_hash_select,
@@ -572,6 +652,8 @@ def fetch_pending_sql_and_params(
         registry_k_select=registry_k_select,
         durable_residual_hash_select=durable_residual_hash_select,
         durable_residual_jsonb_select=durable_residual_jsonb_select,
+        durable_hidden_oos_state_select=durable_hidden_oos_state_select,
+        durable_hidden_oos_jsonb_select=durable_hidden_oos_jsonb_select,
     )
     params: list[Any] = [
         lookback_hours,

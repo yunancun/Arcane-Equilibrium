@@ -279,6 +279,22 @@ def test_register_alpha_hidden_oos_state_persists_v049_windows(monkeypatch):
     assert params[16] == 86400
     assert params[17] == 12
 
+    hidden_calls = [
+        (s, p)
+        for s, p in insert_records
+        if "INSERT INTO learning.hidden_oos_state_registry" in s
+    ]
+    assert len(hidden_calls) == 1
+    _hidden_sql, hidden_params = hidden_calls[0]
+    assert hidden_params[0] == "22222222-2222-2222-2222-222222222222"
+    assert hidden_params[2] == "family-alpha"
+    assert hidden_params[3] == "b" * 64
+    assert hidden_params[10] == 86400
+    assert hidden_params[11] == 12
+    assert hidden_params[12] == _DUMMY_RESIDUAL_ALPHA_HASH
+    assert json.loads(hidden_params[13])["state"] == "sealed"
+    assert hidden_params[14] == "alice"
+
 
 def test_register_alpha_hidden_oos_state_missing_candidate_window_400(monkeypatch):
     """hidden_oos_state 缺 candidate window → register fail-closed."""

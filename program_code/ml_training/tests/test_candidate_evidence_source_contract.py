@@ -15,6 +15,8 @@ from ml_training.candidate_signal_spec import (
     compute_signal_spec_hash,
 )
 from ml_training.candidate_evidence_source_contract import (
+    DURABLE_HIDDEN_OOS_STATE_FIELD,
+    DURABLE_HIDDEN_OOS_STATE_JSONB_FIELD,
     DURABLE_RESIDUAL_ALPHA_HASH_FIELD,
     DURABLE_RESIDUAL_ALPHA_REPORT_FIELD,
     HIDDEN_OOS_STATE_SCHEMA_VERSION,
@@ -145,6 +147,7 @@ def _valid_registry_manifest(**overrides) -> dict:
 def _source_row(**overrides) -> dict:
     residual_report = _valid_residual_alpha_report()
     residual_hash = _canonical_sha256(residual_report)
+    hidden_oos_state = _valid_hidden_oos_state()
     row = {
         "id": 12,
         "evidence_source_tier": "calibrated_replay",
@@ -160,6 +163,8 @@ def _source_row(**overrides) -> dict:
         "replay_registry_total_candidates_k": 12,
         DURABLE_RESIDUAL_ALPHA_HASH_FIELD: residual_hash,
         DURABLE_RESIDUAL_ALPHA_REPORT_FIELD: residual_report,
+        DURABLE_HIDDEN_OOS_STATE_FIELD: "sealed",
+        DURABLE_HIDDEN_OOS_STATE_JSONB_FIELD: hidden_oos_state,
         "payload": {
             SIGNAL_SPEC_FIELD: _valid_signal_spec(),
             RESIDUAL_ALPHA_REPORT_FIELD: residual_report,
@@ -357,6 +362,54 @@ def test_source_contract_rejects_opened_hidden_oos_state():
     assert build.validation.promotion_ready is False
     assert build.validation.verdict == "research_only"
     assert build.validation.reason == "hidden_oos_state_not_sealed:opened"
+
+
+def test_source_contract_requires_durable_hidden_oos_state():
+    row = _source_row()
+    row.pop(DURABLE_HIDDEN_OOS_STATE_FIELD)
+    row.pop(DURABLE_HIDDEN_OOS_STATE_JSONB_FIELD)
+
+    build = build_live_candidate_evidence_from_source(row)
+
+    assert build.validation.promotion_ready is False
+    assert build.validation.verdict == "pending_schema"
+    assert build.validation.reason == "durable_hidden_oos_state_missing"
+
+
+def test_source_contract_rejects_consumed_durable_hidden_oos_state():
+    build = build_live_candidate_evidence_from_source(
+        _source_row(
+            **{
+                DURABLE_HIDDEN_OOS_STATE_FIELD: "consumed",
+                DURABLE_HIDDEN_OOS_STATE_JSONB_FIELD: _valid_hidden_oos_state(
+                    state="consumed",
+                    open_count=1,
+                    opened_for_iteration=True,
+                    consumed=True,
+                ),
+            }
+        )
+    )
+
+    assert build.validation.promotion_ready is False
+    assert build.validation.verdict == "research_only"
+    assert build.validation.reason == "durable_hidden_oos_state_not_sealed:consumed"
+
+
+def test_source_contract_rejects_durable_hidden_oos_body_mismatch():
+    build = build_live_candidate_evidence_from_source(
+        _source_row(
+            **{
+                DURABLE_HIDDEN_OOS_STATE_JSONB_FIELD: _valid_hidden_oos_state(
+                    window_end="2026-05-09T00:00:00Z"
+                ),
+            }
+        )
+    )
+
+    assert build.validation.promotion_ready is False
+    assert build.validation.verdict == "invalid"
+    assert build.validation.reason == "durable_hidden_oos_state_body_mismatch"
 
 
 def test_source_contract_rejects_nonzero_hidden_oos_open_count():
