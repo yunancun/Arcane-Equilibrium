@@ -649,6 +649,11 @@ def test_run_ladder_end_to_end_with_stub(tmp_path):
     assert status == "PASS", msg
     # run_ladder 內建 healthcheck gate 也回 PASS（load-bearing）。
     assert result["healthcheck"]["status"] == "PASS", result["healthcheck"]
+    persisted_summary = json.loads(
+        Path(written["breadth_ladder_summary"]).read_text(encoding="utf-8")
+    )
+    # summary artifact 必須持久化 healthcheck；否則 CLI stdout PASS 不能被事後審計。
+    assert persisted_summary["survivorship_healthcheck"] == result["healthcheck"]
 
 
 # ───────── HIGH-1：survivorship 真繼承 + 破 tautology bite（re-E2）─────────

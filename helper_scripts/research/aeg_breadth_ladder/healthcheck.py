@@ -61,7 +61,11 @@ def check_aeg_breadth_universe_pit(
         return ("WARN", f"breadth_ladder_summary.json 缺：{breadth_summary_path}")
     if fnd2 is None:
         return ("WARN", f"FND-2 universe_summary.json 缺：{fnd2_summary_path}")
+    return check_aeg_breadth_universe_pit_payload(breadth, fnd2)
 
+
+def check_aeg_breadth_universe_pit_payload(breadth: dict, fnd2: dict) -> tuple:
+    """payload-level survivorship PIT 健康檢查；供 harness 寫 artifact 前使用。"""
     # 1) survivorship 繼承自證（(b) 沒自寫 mask）。
     inherited = breadth.get("survivorship_inherited_from_fnd2")
     if inherited is not True:
@@ -96,4 +100,7 @@ def check_aeg_breadth_universe_pit(
     )
 
 
-__all__ = ["check_aeg_breadth_universe_pit"]
+__all__ = [
+    "check_aeg_breadth_universe_pit",
+    "check_aeg_breadth_universe_pit_payload",
+]
