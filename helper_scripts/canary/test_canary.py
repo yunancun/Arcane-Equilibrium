@@ -1323,13 +1323,12 @@ class TestWatchdogAlertWiring(unittest.TestCase):
             self.assertIsNone(cleared.get("last_engine_down_alert_key"))
             self.assertNotIn("engine_down_since_ts", cleared)
 
-            # 新一輪宕機：仍熔斷（consecutive 已 >= MAX），但 marker 已清 → 再發第 2 條。
-            again = mock.Mock()
-            again.returncode = 1
-            again.stderr = "boom"
-            with mock.patch.object(engine_watchdog.subprocess, "run", return_value=again):
-                trigger_restart(self.dir)
-        # circuit_broken 告警共 2 條（marker-clear 讓再 down 能再發）。
+            # 新一輪宕機：WATCHDOG-INERT-STORM-FIX-1 後 on_engine_recovery 完全 re-arm
+            # （consecutive_failures / circuit_broken / restarts_since_recovery 全歸零），
+            # 故新 down episode 需重新累積到熔斷（連續 MAX 次失敗）才再發 circuit_broken。
+            # marker 已被恢復清空 → 新熔斷可再發第 2 條（驗證 marker-clear 讓再 down 能再發）。
+            self._drive_to_circuit_broken()
+        # circuit_broken 告警共 2 條（marker-clear + recovery re-arm 讓再 down 能再熔斷再發）。
         self.assertEqual(self._count_alert_sent("circuit_broken"), 2)
 
     # ─── 整合 3：持續宕機 re-alert 每 RE_ALERT_INTERVAL_SECONDS 窗口恰一次 ───
@@ -1471,6 +1470,248 @@ class TestTriggerRestartBindHostSanitize(unittest.TestCase):
         with mock.patch.dict(os.environ, env_no_bind, clear=True):
             env = self._run_and_capture_env()
         self.assertNotIn("OPENCLAW_BIND_HOST", env)
+
+
+class TestWatchdogInertStorm(unittest.TestCase):
+    """WATCHDOG-INERT-STORM-FIX-1 (2026-06-05)：exit=0 但引擎 inert 的重啟風暴止血。
+
+    2026-06-05 LIVE bug：restart_all 退出 0（進程已起）但引擎保持 INERT（快照永不刷新），
+    每次重啟都「成功」→ trigger_restart 清零 consecutive_failures + 退避 → 下個 2s poll 仍
+    stale → 立即再重啟 → 無限風暴；退出碼熔斷（consecutive>=5）因每次都成功永不觸發。
+    兩道修復：(1) 每次重啟後 90s 沉降窗口恢復間隔；(2) restarts_since_recovery 達 3 即
+    inert 熔斷 + 告警，止住風暴。
+
+    通則沿用 TestWatchdogAlertWiring：mock subprocess.run（控制退出碼，走真 trigger_restart
+    狀態機）、mock _send_alert_best_effort（不發真 HTTP，可斷言 severity），canary 檔走真路徑。
+    用可控時鐘（patch engine_watchdog.time.time）讓沉降窗口時序可決定。"""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.dir = self._tmpdir.name
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _count_canary(self, event_name):
+        """數指定 event 的 canary 條數。"""
+        path = os.path.join(self.dir, "canary_events.jsonl")
+        if not os.path.exists(path):
+            return 0
+        n = 0
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                if json.loads(line).get("event") == event_name:
+                    n += 1
+        return n
+
+    def _last_canary(self, event_name):
+        """回傳指定 event 的最後一條（dict），無則 None。"""
+        path = os.path.join(self.dir, "canary_events.jsonl")
+        if not os.path.exists(path):
+            return None
+        found = None
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                ev = json.loads(line)
+                if ev.get("event") == event_name:
+                    found = ev
+        return found
+
+    def _count_alert_sent(self, alert_key=None):
+        path = os.path.join(self.dir, "canary_events.jsonl")
+        if not os.path.exists(path):
+            return 0
+        n = 0
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                ev = json.loads(line)
+                if ev.get("event") != "ENGINE_DOWN_ALERT_SENT":
+                    continue
+                if alert_key is None or ev.get("alert_key") == alert_key:
+                    n += 1
+        return n
+
+    def _exit_zero(self):
+        """subprocess.run 回退出碼 0（restart_all「成功」但引擎可能仍 inert）。"""
+        ok = mock.Mock()
+        ok.returncode = 0
+        ok.stderr = ""
+        return ok
+
+    def _simulate_inert_storm(self, clock):
+        """模擬真 poll 迴圈在「engine 永遠 stale + restart_all 永遠 exit=0」下的重啟決策。
+
+        每 poll：should_restart(dir, clock) → 若 allowed 則 trigger_restart(exit=0)，記錄該次
+        重啟的時鐘值；推進時鐘 POLL_INTERVAL（2s）。回傳實際發生重啟的時鐘序列。
+        重點：成功(exit=0)路徑清退避為 0，唯一還在強制間隔的閘是沉降窗口——故重啟必被沉降
+        隔開，且 restarts_since_recovery 累計到 INERT_RESTART_LIMIT 後 should_restart 因
+        circuit_broken 回 False，迴圈不再重啟。"""
+        restart_clocks = []
+        # 上限保護：理論最多 INERT_RESTART_LIMIT 次重啟後熔斷；給足 poll 數讓沉降窗口跨過。
+        max_polls = int(
+            (engine_watchdog.POST_RESTART_SETTLE_SECONDS + 10)
+            / engine_watchdog.POLL_INTERVAL_SECONDS
+        ) * (engine_watchdog.INERT_RESTART_LIMIT + 2)
+        with mock.patch.object(engine_watchdog.subprocess, "run", return_value=self._exit_zero()), \
+                mock.patch.object(engine_watchdog.time, "time", side_effect=lambda: clock["t"]):
+            for _ in range(max_polls):
+                allowed, _key, _detail = engine_watchdog.should_restart(self.dir, clock["t"])
+                if allowed:
+                    trigger_restart(self.dir)
+                    restart_clocks.append(clock["t"])
+                clock["t"] += engine_watchdog.POLL_INTERVAL_SECONDS
+        return restart_clocks
+
+    def test_inert_storm_is_spaced_then_circuit_broken_and_alerts(self):
+        """整合①（storm-stopped）：restart_all 永遠 exit=0 + 快照永不刷新 ⇒
+        (a) 重啟被沉降窗口隔開（非每 2s poll 一次）；
+        (b) 達 INERT_RESTART_LIMIT 後 circuit_broken=True；
+        (c) INERT_CIRCUIT_BROKEN canary 恰一條（含 restarts_since_recovery / last_failure_reason）；
+        (d) engine-down 告警以 key='inert_circuit_broken' 發出且 severity=CRITICAL；
+        (e) 此後不再有重啟（should_restart 因 circuit_broken 回 False）。
+
+        mutation-bite（移除 inert 熔斷）：把 trigger_restart 成功路徑的
+        `inert_break = restarts_since_recovery >= INERT_RESTART_LIMIT` 改成 `inert_break = False`
+        ⇒ circuit_broken 永不被設、風暴無上限（restart_clocks 撐滿 max_polls）⇒ 本測試紅。"""
+        clock = {"t": 100000.0}
+        with mock.patch.object(engine_watchdog, "_send_alert_best_effort") as m_send:
+            restart_clocks = self._simulate_inert_storm(clock)
+
+        # (a) 重啟被沉降隔開：相鄰重啟間隔 >= 沉降窗口（證明不是每 2s poll 一次）。
+        self.assertGreaterEqual(len(restart_clocks), 2, "至少要發生數次重啟才能驗間隔")
+        for prev, nxt in zip(restart_clocks, restart_clocks[1:]):
+            self.assertGreaterEqual(
+                nxt - prev, engine_watchdog.POST_RESTART_SETTLE_SECONDS,
+                f"相鄰重啟須被沉降窗口({engine_watchdog.POST_RESTART_SETTLE_SECONDS}s)隔開，"
+                f"實得間隔 {nxt - prev}s",
+            )
+        # (b) 重啟次數恰為 INERT_RESTART_LIMIT（達上限即熔斷，不再重啟），且有界。
+        self.assertEqual(
+            len(restart_clocks), engine_watchdog.INERT_RESTART_LIMIT,
+            f"風暴應在 {engine_watchdog.INERT_RESTART_LIMIT} 次無恢復重啟後止住，"
+            f"實得 {len(restart_clocks)} 次",
+        )
+        st = engine_watchdog.load_state(self.dir)
+        self.assertTrue(st.get("circuit_broken"), "達 inert 上限後須 circuit_broken=True")
+        self.assertEqual(st.get("restarts_since_recovery"), engine_watchdog.INERT_RESTART_LIMIT)
+        # (c) INERT_CIRCUIT_BROKEN canary 恰一條，payload 帶診斷欄位。
+        self.assertEqual(self._count_canary("INERT_CIRCUIT_BROKEN"), 1)
+        inert_ev = self._last_canary("INERT_CIRCUIT_BROKEN")
+        self.assertEqual(inert_ev.get("restarts_since_recovery"), engine_watchdog.INERT_RESTART_LIMIT)
+        self.assertIn("last_failure_reason", inert_ev)
+        # (d) engine-down 告警以 inert_circuit_broken key 發出、CRITICAL，恰一條。
+        self.assertEqual(self._count_alert_sent("inert_circuit_broken"), 1)
+        crit_calls = [c for c in m_send.call_args_list if c.args[2] == "CRITICAL"]
+        self.assertEqual(len(crit_calls), 1, "inert 熔斷須恰發一條 CRITICAL 告警")
+        # (e) 熔斷後 should_restart 回 False（circuit_broken），不再重啟。
+        allowed, key, _ = engine_watchdog.should_restart(self.dir, clock["t"] + 100000.0)
+        self.assertFalse(allowed)
+        self.assertEqual(key, "circuit_broken")
+
+    def test_settle_window_blocks_restart_until_expiry(self):
+        """整合②（settle spacing）：trigger_restart 後，沉降窗口內 should_restart 回
+        (False,"settle",...)，窗口外才放行。
+
+        mutation-bite（移除沉降閘）：刪掉 should_restart 內
+        `if now < settle_until: return False,"settle",...` 整段 ⇒ 沉降窗口內 should_restart
+        立即回 (True,"ok") ⇒ 本測試在「窗口內應為 settle/blocked」的斷言處紅。"""
+        base = 100000.0
+        # 用 exit=0 跑一次真 trigger_restart，讓 post_restart_settle_until 被設成 base+SETTLE。
+        with mock.patch.object(engine_watchdog.subprocess, "run", return_value=self._exit_zero()), \
+                mock.patch.object(engine_watchdog.time, "time", return_value=base):
+            trigger_restart(self.dir)
+        st = engine_watchdog.load_state(self.dir)
+        settle_until = st.get("post_restart_settle_until")
+        self.assertAlmostEqual(settle_until, base + engine_watchdog.POST_RESTART_SETTLE_SECONDS)
+        # 窗口正中：should_restart 必回 (False, "settle", ...)。
+        mid = base + engine_watchdog.POST_RESTART_SETTLE_SECONDS / 2
+        allowed, key, detail = engine_watchdog.should_restart(self.dir, mid)
+        self.assertFalse(allowed, "沉降窗口內不得放行重啟")
+        self.assertEqual(key, "settle")
+        self.assertIn("settle", detail)
+        # 窗口邊界前 1s：仍 blocked。
+        allowed_edge, key_edge, _ = engine_watchdog.should_restart(self.dir, settle_until - 1.0)
+        self.assertFalse(allowed_edge)
+        self.assertEqual(key_edge, "settle")
+        # 窗口過後：放行（exit=0 成功路徑已清退避，故為 ok）。
+        allowed_after, key_after, _ = engine_watchdog.should_restart(self.dir, settle_until + 1.0)
+        self.assertTrue(allowed_after, "沉降窗口過後須放行")
+        self.assertEqual(key_after, "ok")
+
+    def test_recovery_rearms_after_inert_circuit_break(self):
+        """整合③（recovery re-arms）：inert 熔斷後，on_engine_recovery 完全 re-arm
+        （restarts_since_recovery=0 + circuit_broken=False + consecutive_failures=0 +
+        post_restart_settle_until=0 + next_allowed_restart_ts=0）⇒ 新一輪宕機可再重啟。
+
+        mutation-bite（恢復不清 circuit_broken）：把 on_engine_recovery re-arm 區塊裡
+        `_rearm["circuit_broken"] = False` 刪掉 ⇒ 恢復後仍 circuit_broken=True ⇒ should_restart
+        永遠回 False、無法 re-arm ⇒ 本測試在「恢復後 should_restart 應放行」的斷言處紅。"""
+        clock = {"t": 100000.0}
+        with mock.patch.object(engine_watchdog, "_send_alert_best_effort"):
+            self._simulate_inert_storm(clock)
+        # 前置：已 inert 熔斷。
+        broken = engine_watchdog.load_state(self.dir)
+        self.assertTrue(broken.get("circuit_broken"))
+        self.assertEqual(broken.get("restarts_since_recovery"), engine_watchdog.INERT_RESTART_LIMIT)
+
+        # 引擎真恢復（新鮮快照）→ on_engine_recovery 完全 re-arm。
+        with mock.patch.object(engine_watchdog, "_send_alert_best_effort"):
+            state = WatchdogState(engine_alive=False)
+            on_engine_recovery(state, data_dir=self.dir)
+        rearmed = engine_watchdog.load_state(self.dir)
+        self.assertFalse(rearmed.get("circuit_broken"), "真恢復須清 circuit_broken")
+        self.assertEqual(rearmed.get("restarts_since_recovery"), 0)
+        self.assertEqual(rearmed.get("consecutive_failures"), 0)
+        self.assertEqual(rearmed.get("post_restart_settle_until"), 0.0)
+        self.assertEqual(rearmed.get("next_allowed_restart_ts"), 0.0)
+        # 新一輪宕機：should_restart 在 re-arm 後（無沉降、無熔斷、無退避）立即放行。
+        allowed, key, _ = engine_watchdog.should_restart(self.dir, clock["t"] + 1.0)
+        self.assertTrue(allowed, "恢復 re-arm 後新宕機須能再重啟")
+        self.assertEqual(key, "ok")
+
+    def test_normal_recovery_within_settle_no_spurious_restart(self):
+        """整合④（normal recovery within settle）：重啟 → 引擎在沉降窗口內變健康 →
+        on_engine_recovery 完全 re-arm，且沉降窗口內無多餘重啟。
+
+        驗證健康路徑：一次 exit=0 重啟後引擎及時恢復（這是正常情況，非 inert 風暴），
+        沉降窗口在恢復前本就擋住任何額外重啟（不會在引擎開機途中又殺一次）。恢復後狀態乾淨。
+
+        mutation-bite（移除沉降閘）：刪掉 should_restart 的 settle 分支 ⇒ 沉降窗口內
+        should_restart 立即放行 ⇒ 本測試在「恢復前沉降窗口內 should_restart 應 blocked」處紅。"""
+        base = 100000.0
+        clock = {"t": base}
+        # 一次重啟（exit=0），設下沉降窗口。
+        with mock.patch.object(engine_watchdog.subprocess, "run", return_value=self._exit_zero()), \
+                mock.patch.object(engine_watchdog.time, "time", side_effect=lambda: clock["t"]):
+            trigger_restart(self.dir)
+        st = engine_watchdog.load_state(self.dir)
+        self.assertEqual(st.get("restarts_since_recovery"), 1)
+        # 沉降窗口內（引擎還在開機）：should_restart 必 blocked，不會殺正在開機的引擎。
+        clock["t"] = base + engine_watchdog.POST_RESTART_SETTLE_SECONDS / 2
+        allowed, key, _ = engine_watchdog.should_restart(self.dir, clock["t"])
+        self.assertFalse(allowed, "沉降窗口內、引擎開機中，不得再重啟")
+        self.assertEqual(key, "settle")
+        # 引擎在沉降窗口內變健康（新鮮快照）→ on_engine_recovery 完全 re-arm。
+        with mock.patch.object(engine_watchdog, "_send_alert_best_effort") as m_send, \
+                mock.patch.object(engine_watchdog.time, "time", side_effect=lambda: clock["t"]):
+            state = WatchdogState(engine_alive=False)
+            on_engine_recovery(state, data_dir=self.dir)
+        rearmed = engine_watchdog.load_state(self.dir)
+        self.assertTrue(state.engine_alive)
+        self.assertEqual(rearmed.get("restarts_since_recovery"), 0)
+        self.assertEqual(rearmed.get("post_restart_settle_until"), 0.0)
+        self.assertFalse(rearmed.get("circuit_broken"))
+        # 正常恢復：從未發過 down-alert（單次成功重啟未觸熔斷）→ 無 INFO all-clear、無 CRITICAL。
+        self.assertEqual(m_send.call_count, 0)
+        # 全程無 inert 熔斷、無 INERT_CIRCUIT_BROKEN。
+        self.assertEqual(self._count_canary("INERT_CIRCUIT_BROKEN"), 0)
+        self.assertEqual(self._count_alert_sent("inert_circuit_broken"), 0)
 
 
 if __name__ == "__main__":

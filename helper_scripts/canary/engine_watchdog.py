@@ -71,6 +71,19 @@ RESTART_BACKOFF_SECONDS: list[float] = [60.0, 120.0, 300.0, 600.0, 3600.0]
 # Consecutive failures before circuit-breaking (stop trying + alert).
 # circuit-break 前最大連續失敗次數（超過則停止嘗試 + 升級告警）。
 MAX_CONSECUTIVE_FAILURES = 5
+# WATCHDOG-INERT-STORM-FIX-1 (2026-06-05): 重啟後沉降窗口（秒）。
+# 為什麼需要：restart_all 退出 0（引擎進程已起）但引擎保持 INERT（快照永不刷新）時，
+# 每次重啟都「成功」→ trigger_restart 清零 consecutive_failures + next_allowed_restart_ts=0
+# （無退避）→ 下個 2s poll 快照仍 stale → 立即再重啟 → 風暴（2026-06-05 實測 6× RESTART_SUCCESS
+# 重疊開機，退出碼熔斷因每次都「成功」永不觸發）。沉降窗口在每次 trigger_restart 後強制
+# 間隔，讓 booting 引擎有時間寫出第一個快照，不被殺在開機途中。90s = 引擎開機 + 首個快照所需。
+POST_RESTART_SETTLE_SECONDS = 90.0
+# WATCHDOG-INERT-STORM-FIX-1 (2026-06-05): 無恢復（inert）熔斷上限。
+# 為什麼獨立於 MAX_CONSECUTIVE_FAILURES：退出碼熔斷只在重啟「失敗」（exit≠0）時累計，
+# 但 inert 風暴是重啟「成功」（exit=0）卻引擎不活，退出碼熔斷永不到 5。此計數在每次
+# trigger_restart 都遞增（不論退出碼），達上限即熔斷並告警，把風暴在 ~3 次無恢復後止住
+# （配 90s 沉降約 4.5 分鐘），而非永遠空轉。只在 on_engine_recovery（真恢復）歸零。
+INERT_RESTART_LIMIT = 3
 # Prolonged-down re-alert cadence (seconds). While the circuit stays broken,
 # re-ping at most once per this window (key changes per window → dedup allows one).
 # 持續宕機重發告警間隔（秒）。熔斷期間每個窗口最多重發一次（key 隨窗口變化）。
@@ -811,6 +824,57 @@ def _build_engine_down_payload(data_dir: str, now: float) -> tuple[str, str]:
     return subject, body
 
 
+def _build_inert_down_payload(
+    data_dir: str, restarts_since_recovery: int, now: float
+) -> tuple[str, str]:
+    """INERT 熔斷的 engine-down 告警 payload（subject, body）。
+
+    與 _build_engine_down_payload 區隔：inert 風暴是「重啟一直成功(exit=0)但引擎從不變健康」，
+    措辭強調「重啟 N 次卻從未恢復、自愈放棄、需人工介入」，與「連續 N 次重啟失敗」語義不同。
+    不讀任何憑證 / 硬邊界；只用 restarts_since_recovery / last_failure_reason / down-since。
+    """
+    state = load_state(data_dir)
+    last_reason = state.get("last_failure_reason", "") or "engine started but stayed inert"
+    down_since = state.get("engine_down_since_ts", now)
+    duration = _format_down_duration(now - down_since)
+    subject = "OpenClaw engine INERT — manual intervention required"
+    body = (
+        "engine: rust openclaw_engine\n"
+        f"down for: {duration}\n"
+        f"engine restarted {restarts_since_recovery} times but never became healthy "
+        "— auto-recovery gave up, manual intervention required\n"
+        f"last failure: {last_reason}\n"
+        "action: ssh trade-core; check engine.log; verify snapshot freshness; manual restart_all"
+    )
+    return subject, body
+
+
+def _emit_inert_circuit_broken(
+    data_dir: str, restarts_since_recovery: int, now: float
+) -> None:
+    """INERT 熔斷的 canary + engine-down 告警（WATCHDOG-INERT-STORM-FIX-1 2026-06-05）。
+
+    為什麼獨立於 RESTART_CIRCUIT_BROKEN：inert 熔斷的觸發維度不同（重啟成功但引擎不活，
+    非連續重啟失敗），canary event 名 INERT_CIRCUIT_BROKEN 區隔，供告警消費者分辨成因。
+    告警走既有 B 路徑 emit_engine_down_alert_if_new，key="inert_circuit_broken"（與 exit-code
+    熔斷的 "circuit_broken" key 不同，故兩者各自去重、互不淹沒）。呼叫端須先 save_state 落盤
+    （payload 內 load_state 讀 last_failure_reason / down-since）。
+    """
+    last_reason = load_state(data_dir).get("last_failure_reason", "") or "inert"
+    logger.critical(
+        "INERT CIRCUIT BROKEN — engine restarted %d times but never became healthy, "
+        "auto-recovery gave up / INERT 熔斷 — 重啟 %d 次引擎仍未健康，自愈放棄，需人工介入",
+        restarts_since_recovery, restarts_since_recovery,
+    )
+    _append_canary_event(data_dir, {
+        "ts": now, "event": "INERT_CIRCUIT_BROKEN",
+        "restarts_since_recovery": restarts_since_recovery,
+        "last_failure_reason": last_reason,
+    })
+    subject, body = _build_inert_down_payload(data_dir, restarts_since_recovery, now)
+    emit_engine_down_alert_if_new(data_dir, "inert_circuit_broken", subject, body, now)
+
+
 def should_restart(data_dir: str, now: float) -> tuple[bool, str, str]:
     """
     Decide whether an auto-restart is allowed right now.
@@ -838,6 +902,16 @@ def should_restart(data_dir: str, now: float) -> tuple[bool, str, str]:
             "— manual intervention required"
         )
 
+    # WATCHDOG-INERT-STORM-FIX-1 (2026-06-05): 重啟後沉降窗口。
+    # 為什麼放在 circuit_broken 之後、backoff 之前：circuit_broken 是終態必須優先回報；
+    # 沉降是暫態間隔閘。inert 風暴的成功路徑下 backoff 被清成 0（無退避），沉降是此情境下
+    # 唯一還在強制間隔的閘——若 now 仍在沉降窗口內，拒絕本次重啟，讓 booting 引擎能寫快照。
+    settle_until = float(state.get("post_restart_settle_until", 0.0))
+    if now < settle_until:
+        remaining = settle_until - now
+        # detail 保留 per-poll 倒數秒供 log/payload；節流由穩定的 "settle" key 去重。
+        return False, "settle", f"post-restart settle, {remaining:.0f}s remaining"
+
     next_allowed = float(state.get("next_allowed_restart_ts", 0.0))
     if now < next_allowed:
         remaining = next_allowed - now
@@ -857,6 +931,16 @@ def trigger_restart(data_dir: str) -> bool:
     state = load_state(data_dir)
     consecutive = int(state.get("consecutive_failures", 0))
     now = time.time()
+
+    # WATCHDOG-INERT-STORM-FIX-1 (2026-06-05): 每次 trigger_restart（不論退出碼）都
+    # 設沉降窗口 + 遞增 restarts_since_recovery。
+    # 為什麼無條件：inert 風暴的成功路徑（exit=0）下，下面的成功分支會清 next_allowed_restart_ts=0
+    # （無退避），若不在這裡設沉降，下個 2s poll 快照仍 stale 就會立即再重啟 → 風暴。沉降在
+    # 成功與失敗兩條路徑都恢復了「最小間隔」。restarts_since_recovery 計「自上次真恢復以來的
+    # 重啟次數」，是 inert 熔斷的計數（退出碼熔斷的 consecutive_failures 只算失敗，抓不到 inert）。
+    restarts_since_recovery = int(state.get("restarts_since_recovery", 0)) + 1
+    state["restarts_since_recovery"] = restarts_since_recovery
+    state["post_restart_settle_until"] = now + POST_RESTART_SETTLE_SECONDS
 
     logger.warning(
         "Triggering auto-restart (attempt %d, timeout=%.0fs) / 觸發自動重啟（嘗試 %d，超時 %.0f秒）",
@@ -922,6 +1006,9 @@ def trigger_restart(data_dir: str) -> bool:
         failure_reason = f"subprocess error: {e}"
 
     if success:
+        # 退出碼語義：exit=0 重啟「成功」，清退出碼維度的失敗計數（consecutive_failures）。
+        # 為什麼 NOT 清 restarts_since_recovery：這是 inert 維度，只有「真恢復」（on_engine_recovery
+        # 看到新鮮快照）才算數。exit=0 但引擎 inert 時 restarts_since_recovery 持續累計到熔斷。
         state["consecutive_failures"] = 0
         state["last_restart_success_ts"] = now
         state["circuit_broken"] = False
@@ -931,12 +1018,21 @@ def trigger_restart(data_dir: str) -> bool:
         # skip 能再發一次（同一 dict 內清，不另開 load/save）。
         state.pop("last_restart_skipped_reason", None)
         state.pop("last_restart_skipped_emit_ts", None)
+        # WATCHDOG-INERT-STORM-FIX-1：成功(exit=0)路徑也檢 inert 熔斷——這正是 2026-06-05
+        # 風暴的成因（每次重啟都 exit=0、退出碼熔斷永不觸發，但快照從不刷新）。達 INERT_RESTART_LIMIT
+        # 即在剛被清為 False 的 circuit_broken 上覆寫回 True，止住風暴。
+        inert_break = restarts_since_recovery >= INERT_RESTART_LIMIT
+        if inert_break:
+            state["circuit_broken"] = True
         save_state(data_dir, state)
         logger.info("Auto-restart succeeded / 自動重啟成功")
         _append_canary_event(data_dir, {
             "ts": now, "event": "RESTART_SUCCESS",
             "consecutive_failures_before": consecutive,
         })
+        if inert_break:
+            _emit_inert_circuit_broken(data_dir, restarts_since_recovery, now)
+            return False
         return True
 
     # Failure path / 失敗路徑
@@ -1145,6 +1241,12 @@ def on_engine_recovery(state: WatchdogState, data_dir: str = "") -> None:
     為什麼：恢復可能來自 operator 手動重啟引擎或網路回復（非 watchdog 自身成功重啟），
     這條路徑 trigger_restart 不會跑成功分支，仍需在這裡結束 skip-emit 週期，
     讓之後若再進入 skip 能重新發一次事件。
+
+    WATCHDOG-INERT-STORM-FIX-1 (2026-06-05)：真恢復（看到新鮮快照）必須「完全 re-arm」
+    重啟狀態機——歸零 restarts_since_recovery / post_restart_settle_until / circuit_broken /
+    consecutive_failures / next_allowed_restart_ts。為什麼：恢復＝引擎再次健康，未來若再宕機
+    應從乾淨狀態重新計數（含 inert 與 exit-code 兩個熔斷維度）。這也讓「部署撞車觸發 inert
+    熔斷後，部署完成 + 引擎恢復」時 watchdog 自動 re-arm（無需人工 reset）。
     """
     if state.engine_alive:
         return  # Already alive / 已恢復
@@ -1153,6 +1255,14 @@ def on_engine_recovery(state: WatchdogState, data_dir: str = "") -> None:
     state.last_recovery_ts = time.time()
     if data_dir:
         clear_restart_skipped_marker(data_dir)
+        # 完全 re-arm 重啟狀態機（見 docstring）。單獨 load/save，與下方告警 marker 清理解耦。
+        _rearm = load_state(data_dir)
+        _rearm["restarts_since_recovery"] = 0
+        _rearm["post_restart_settle_until"] = 0.0
+        _rearm["circuit_broken"] = False
+        _rearm["consecutive_failures"] = 0
+        _rearm["next_allowed_restart_ts"] = 0.0
+        save_state(data_dir, _rearm)
         # WATCHDOG-ALERT-WIRE：恢復全清告警 —— 僅在先前確實發過 down-alert 時才發。
         # 為什麼有條件：若引擎一直健康（從未告警），恢復路徑不應憑空發 INFO；只有走過
         # 熔斷 / 宕機告警的恢復才值得通知「已恢復」。讀 marker（含 down-since）後再清，
