@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-05（TODO v116 Alpha-Edge candidate metrics v0.2 matrix-critical contract checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-05（TODO v117 Alpha-Edge candidate metrics direct rows interface checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v117 增量（2026-06-05 Alpha-Edge candidate metrics direct rows interface checkpoint）**：三端同步至實作 head `f3d4a29e`。`aeg_candidate_metrics` 現可消費 AEG-S3 harness 直接輸出的 top-level `candidate_regime_metrics` block，不必硬塞進舊 `signal_evaluation/per_regime_net` 診斷形狀；v0.2 fail-closed contract 仍照常套用。Mac+Linux focused candidate metrics tests `8 passed`，三工具組 `18 passed`，research regression `181 passed`，Mac+Linux `compileall` 通過。這只是候選接口鋪路，仍不是 promotion proof；下一步是 listing fade / oi_delta / funding revive 產真 rows。
 
 **v116 增量（2026-06-05 Alpha-Edge candidate metrics v0.2 matrix-critical contract checkpoint）**：三端同步至實作 head `eb002ced`。`aeg_candidate_metrics` schema 升 v0.2，新增 matrix-critical 欄位：gross/cost/net-to-cost、OOS Sharpe、PSR、DSR(K) 分數、PBO、K trials、cluster-adjusted `n_independent`、`sample_unit`。adapter 仍 artifact-only 且 fail-closed：不把 `mean_daily_bps` 冒充 `net_bps`，不把 `n_days` 冒充 `n_independent`，不把 funding overfitting block 的 `dsr_k` trial budget 冒充 DSR 分數。Mac+Linux focused candidate metrics tests `7 passed`，三工具組 `17 passed`，research regression `180 passed`，Mac+Linux `compileall` 通過。下一步仍不是 promotion，而是讓 AEG-S3 候選接口輸出真 `candidate_regime_metrics.csv` rows。
 
