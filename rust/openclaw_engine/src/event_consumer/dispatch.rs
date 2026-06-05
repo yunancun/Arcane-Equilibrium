@@ -28,6 +28,7 @@ use tracing::{debug, error, info, warn};
 // P1-07（cold audit pkg B）：OPEN（create）重試已移除 — operator decision STRICT
 // FAIL-CLOSED。OPEN 路徑現以空 delay slice 走 run_dispatch_retry（單次嘗試，0 重試）。
 // 原 RETRY_DELAY_MS = [200, 800, 3200]（3 重試）已刪除（無生產 caller）。
+pub(super) const OPEN_NO_RETRY: [u64; 0] = [];
 
 /// Tighter retry budget for CLOSE intents: 2 retries max, 500 ms total sleep.
 /// DISPATCH-RETRY-1 (E2 review 2026-04-19, Q2): slow-retrying a close amplifies
@@ -45,6 +46,18 @@ pub(super) const CLOSE_RETRY_DELAY_MS: [u64; 2] = [100, 400];
 /// Ensures "fast-exit" close retry budget is real wall-clock, not only sleep.
 /// 關倉單次派發硬逾時（毫秒），避免「快退場」只限制 sleep 而不限制請求等待。
 pub(super) const CLOSE_ATTEMPT_TIMEOUT_MS: u64 = 500;
+
+/// 根據 intent 類型選擇 dispatch retry budget。
+///
+/// 為什麼獨立成 helper：P1-07 的安全邊界是「open/create 永遠 0 重試」，
+/// 不能只靠 call-site 註釋。測試直接鎖此 helper，防止未來把 OPEN 重試表悄悄接回。
+pub(super) fn dispatch_retry_delays_for_intent(is_close: bool) -> &'static [u64] {
+    if is_close {
+        &CLOSE_RETRY_DELAY_MS
+    } else {
+        &OPEN_NO_RETRY
+    }
+}
 
 fn send_decision_lease_release(
     pending_reg_tx: &mpsc::UnboundedSender<PendingOrderEvent>,
@@ -766,12 +779,7 @@ pub(super) fn spawn_order_dispatch(
             //   - CLOSE（reduce-only）意圖：保留有界冪等重試預算（CLOSE_RETRY_DELAY_MS），
             //     是文檔化的唯一例外（root principle 5 survival > profit）：fail-close 一筆
             //     close 會留下未平的活倉，比重試 reduce-only 更危險。
-            const OPEN_NO_RETRY: [u64; 0] = [];
-            let delays: &[u64] = if req.is_close {
-                &CLOSE_RETRY_DELAY_MS
-            } else {
-                &OPEN_NO_RETRY
-            };
+            let delays: &[u64] = dispatch_retry_delays_for_intent(req.is_close);
             let retry_result =
                 run_dispatch_retry(delays, &req.symbol, &req.order_link_id, |_attempt| {
                     let req_for_attempt = create_req.clone();
