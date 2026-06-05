@@ -49,6 +49,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from . import alert_config as _alert_cfg
+
 logger = logging.getLogger(__name__)
 
 # BLOCKER-7 fix: Module-level asyncio.Lock serialising save_api_key so that
@@ -61,6 +63,13 @@ logger = logging.getLogger(__name__)
 # Bybit 驗證網路 I/O 在鎖內進行，最壞情況第二個寫入等約 2-3 秒 —
 # 這是 operator-only 端點，代價可接受。
 _save_api_key_lock: asyncio.Lock = asyncio.Lock()
+
+# Alert config: per-process throttle for the /alerts/test endpoint so a real
+# outbound alert cannot be hammered. monotonic 時間戳，最小間隔見 _ALERT_TEST_MIN_INTERVAL。
+# 告警 config：/alerts/test 端點的 per-process 節流，避免真實外送告警被連發。
+_ALERT_TEST_MIN_INTERVAL_SECONDS = 10.0
+_alert_test_last_ts: float = 0.0
+_alert_test_lock: asyncio.Lock = asyncio.Lock()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Router / 路由器
@@ -307,6 +316,56 @@ def _write_env_file_value(path: Path, key: str, value: str) -> None:
     os.chmod(tmp, stat.S_IRUSR | stat.S_IWUSR)
     tmp.replace(path)
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)
+
+
+# ── Alert config helpers / 告警配置輔助函數 ──
+
+
+def _alert_data_dir() -> str:
+    """告警 config 的儲存目錄 —— 與 watchdog / 引擎共用 OPENCLAW_DATA_DIR。
+
+    為什麼共用：watchdog（獨立進程）與 app 都讀同一個
+    <OPENCLAW_DATA_DIR>/alert_config.json，operator 在 GUI 寫一次即生效兩端。
+    """
+    return os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
+
+
+def _alert_config_masked_view(cfg: dict[str, Any]) -> dict[str, Any]:
+    """把內部 config 轉成對外安全視圖（永不回明文 token / secret）。
+
+    chat_id 與 urls 屬識別碼 / 端點（非機密），明文回；token / secret 只回
+    *_configured 布林 + 遮罩 hint。any_channel_active 反映 enabled 且憑證齊全。
+    """
+    tg = cfg.get("telegram", {})
+    wh = cfg.get("webhook", {})
+    tg_token = tg.get("bot_token", "")
+    tg_chat = tg.get("chat_id", "")
+    wh_urls = wh.get("urls", [])
+    wh_secret = wh.get("secret", "")
+
+    telegram_active = bool(tg.get("enabled")) and bool(tg_token) and bool(tg_chat)
+    webhook_active = bool(wh.get("enabled")) and len(wh_urls) > 0
+
+    updated_at = cfg.get("updated_at", 0)
+    last_modified = int(updated_at) if updated_at else None
+
+    return {
+        "telegram": {
+            "enabled": bool(tg.get("enabled")),
+            "bot_token_configured": bool(tg_token),
+            "bot_token_hint": _alert_cfg.mask_secret(tg_token),
+            "chat_id": tg_chat,
+        },
+        "webhook": {
+            "enabled": bool(wh.get("enabled")),
+            "urls": list(wh_urls),
+            "secret_configured": bool(wh_secret),
+            "secret_hint": _alert_cfg.mask_secret(wh_secret),
+        },
+        "any_channel_active": telegram_active or webhook_active,
+        "config_present": bool(updated_at),
+        "last_modified": last_modified,
+    }
 
 
 def _resolve_repo_root() -> Path:
@@ -965,6 +1024,29 @@ class DevelopmentSupportSettingRequest(BaseModel):
     )
 
 
+# ── Alert config request models / 告警配置請求模型 ──
+# PARTIAL-SAFE 語義：bot_token / secret 留空字串 = 保留原值；sentinel "__CLEAR__" = 清除。
+# 所有欄位皆 optional —— operator 可只更新單一通道。
+
+
+class AlertTelegramRequest(BaseModel):
+    enabled: bool | None = Field(default=None)
+    bot_token: str | None = Field(default=None, max_length=512)
+    chat_id: str | None = Field(default=None, max_length=128)
+
+
+class AlertWebhookRequest(BaseModel):
+    enabled: bool | None = Field(default=None)
+    urls: list[str] | None = Field(default=None)
+    secret: str | None = Field(default=None, max_length=512)
+
+
+class AlertConfigSaveRequest(BaseModel):
+    """Request body for POST /api/v1/settings/alerts."""
+    telegram: AlertTelegramRequest | None = Field(default=None)
+    webhook: AlertWebhookRequest | None = Field(default=None)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Endpoints / 端點
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1224,3 +1306,253 @@ async def save_development_mode_setting(
         getattr(actor, "actor_id", "?"),
     )
     return payload
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Alert config endpoints / 告警配置端點
+# ═══════════════════════════════════════════════════════════════════════════════
+# operator 在 GUI 設定 Telegram / Webhook 憑證，寫進 <data_dir>/alert_config.json；
+# app alerter 與獨立 watchdog 都從這個檔讀。GET 永不回明文；POST partial-safe。
+
+
+@settings_router.get("/alerts")
+async def get_alert_config(
+    actor: Any = Depends(_get_auth_actor),
+) -> dict:
+    """
+    GET /api/v1/settings/alerts
+    返回告警配置狀態（遮罩 token / secret，永不回明文）。
+
+    bot_token / secret 只回 *_configured + 遮罩 hint；chat_id / urls 屬識別碼明文回。
+    """
+    cfg = _alert_cfg.load_alert_config(_alert_data_dir())
+    return _alert_config_masked_view(cfg)
+
+
+@settings_router.post("/alerts")
+async def save_alert_config_endpoint(
+    body: AlertConfigSaveRequest,
+    actor: Any = Depends(_require_operator_auth),
+) -> dict:
+    """
+    POST /api/v1/settings/alerts
+    保存告警配置（partial-safe，寫入 chmod 600）。
+
+    PARTIAL-SAFE：bot_token / secret 留空字串 = 保留原值（與 stored 合併）；
+    sentinel "__CLEAR__" = 清除該值。驗證：
+      - telegram.enabled → 合併後 token + chat_id 皆非空
+      - webhook.enabled → urls 非空，每個 url 通過 SSRF 守衛 validate_webhook_url
+      - 拒絕控制字元 \\n \\r \\x00；urls ≤ 10
+    驗證失敗回 400（安全訊息，永不 echo 明文）。
+    """
+    data_dir = _alert_data_dir()
+    # 讀出 stored 作為 partial-merge 基底；env-fallback 已併入（不影響合併語義）。
+    stored = _alert_cfg.load_alert_config(data_dir)
+
+    merged_tg = dict(stored["telegram"])
+    merged_wh = dict(stored["webhook"])
+
+    # ── Telegram 合併 ──
+    if body.telegram is not None:
+        tg = body.telegram
+        if tg.enabled is not None:
+            merged_tg["enabled"] = bool(tg.enabled)
+        merged_tg["bot_token"] = _merge_secret_field(
+            tg.bot_token, merged_tg.get("bot_token", ""), field="bot_token",
+        )
+        if tg.chat_id is not None:
+            chat = tg.chat_id.strip()
+            if _alert_cfg.has_control_chars(chat):
+                raise HTTPException(status_code=400, detail="chat_id contains invalid characters")
+            merged_tg["chat_id"] = "" if chat == _alert_cfg.CLEAR_SENTINEL else chat
+
+    # ── Webhook 合併 ──
+    if body.webhook is not None:
+        wh = body.webhook
+        if wh.enabled is not None:
+            merged_wh["enabled"] = bool(wh.enabled)
+        merged_wh["secret"] = _merge_secret_field(
+            wh.secret, merged_wh.get("secret", ""), field="secret",
+        )
+        if wh.urls is not None:
+            merged_wh["urls"] = _sanitize_webhook_urls(wh.urls)
+
+    # ── enabled 前置條件驗證（fail-closed：要啟用必須憑證齊全且 URL 安全）──
+    if merged_tg.get("enabled"):
+        if not merged_tg.get("bot_token") or not merged_tg.get("chat_id"):
+            raise HTTPException(
+                status_code=400,
+                detail="Telegram requires both bot_token and chat_id to be set",
+            )
+    if merged_wh.get("enabled"):
+        urls = merged_wh.get("urls", [])
+        if not urls:
+            raise HTTPException(status_code=400, detail="Webhook requires at least one URL")
+        for url in urls:
+            ok, reason = _alert_cfg.validate_webhook_url(url)
+            if not ok:
+                # reason 為安全原因碼（不含使用者輸入回顯）。
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid webhook URL ({reason})",
+                )
+
+    new_cfg = {
+        "version": 1,
+        "telegram": merged_tg,
+        "webhook": merged_wh,
+    }
+    try:
+        _alert_cfg.save_alert_config(data_dir, new_cfg)
+    except (OSError, PermissionError) as exc:
+        logger.error("Failed to persist alert config: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to persist alert config")
+
+    logger.info(
+        "Alert config updated telegram_enabled=%s webhook_enabled=%s actor=%s",
+        merged_tg.get("enabled"),
+        merged_wh.get("enabled"),
+        getattr(actor, "actor_id", "?"),
+    )
+    # 回讀（含原子寫入後的 updated_at），轉成遮罩視圖。
+    saved = _alert_cfg.load_alert_config(data_dir)
+    view = _alert_config_masked_view(saved)
+    view["saved"] = True
+    return view
+
+
+@settings_router.post("/alerts/test")
+async def test_alert_config(
+    actor: Any = Depends(_require_operator_auth),
+) -> dict:
+    """
+    POST /api/v1/settings/alerts/test
+    透過已啟用通道發送一條真實的良性測試告警（走 app 同一 alerter 路徑）。
+
+    per-process 節流 ≥ 10 秒；error 經過 sanitize + 截斷 ≤ 200 字元。
+    """
+    global _alert_test_last_ts
+    async with _alert_test_lock:
+        now = time.monotonic()
+        if now - _alert_test_last_ts < _ALERT_TEST_MIN_INTERVAL_SECONDS:
+            wait = _ALERT_TEST_MIN_INTERVAL_SECONDS - (now - _alert_test_last_ts)
+            raise HTTPException(
+                status_code=429,
+                detail=f"Test alert rate-limited; retry in {wait:.0f}s",
+            )
+        _alert_test_last_ts = now
+
+    cfg = _alert_cfg.load_alert_config(_alert_data_dir())
+    tg = cfg.get("telegram", {})
+    wh = cfg.get("webhook", {})
+    tg_active = bool(tg.get("enabled")) and bool(tg.get("bot_token")) and bool(tg.get("chat_id"))
+    wh_active = bool(wh.get("enabled")) and len(wh.get("urls", [])) > 0
+
+    result = {
+        "telegram": {"attempted": tg_active, "ok": False, "error": None},
+        "webhook": {"attempted": wh_active, "ok": False, "error": None},
+    }
+
+    # 走 app 同一 alerter 路徑：用 GUI config 直接構造一次性 alerter，send() 同步回布林。
+    # 為什麼一次性構造而非用全域 ALERT_ROUTER：ALERT_ROUTER 在進程啟動時建立，可能
+    # 早於 operator 在 GUI 寫憑證；測試端點必須反映「當前檔內配置」是否真能送出。
+    if tg_active:
+        ok, err = await asyncio.to_thread(_send_test_telegram, tg)
+        result["telegram"]["ok"] = ok
+        result["telegram"]["error"] = err
+    if wh_active:
+        ok, err = await asyncio.to_thread(_send_test_webhook, wh)
+        result["webhook"]["ok"] = ok
+        result["webhook"]["error"] = err
+
+    logger.info(
+        "Alert test fired telegram=%s/%s webhook=%s/%s actor=%s",
+        tg_active, result["telegram"]["ok"],
+        wh_active, result["webhook"]["ok"],
+        getattr(actor, "actor_id", "?"),
+    )
+    return result
+
+
+def _merge_secret_field(incoming: str | None, stored: str, *, field: str) -> str:
+    """Partial-safe 合併單一機密欄位（bot_token / secret）。
+
+    None 或空字串 → 保留 stored（「不變更」）；sentinel "__CLEAR__" → 清空；
+    其他 → 採新值（先擋控制字元）。
+    """
+    if incoming is None:
+        return stored
+    value = incoming.strip()
+    if value == "":
+        return stored
+    if value == _alert_cfg.CLEAR_SENTINEL:
+        return ""
+    if _alert_cfg.has_control_chars(value):
+        raise HTTPException(status_code=400, detail=f"{field} contains invalid characters")
+    return value
+
+
+def _sanitize_webhook_urls(urls: list[str]) -> list[str]:
+    """清洗 webhook urls：去空白 / 空項，擋控制字元，限制 ≤ 10。
+
+    sentinel ["__CLEAR__"] 視為清空（回 []）。實際 SSRF 驗證在 enabled 前置條件做
+    （只在要啟用時阻擋內網位址，避免 disabled 草稿也被 DNS 解析卡住）。
+    """
+    if not isinstance(urls, list):
+        raise HTTPException(status_code=400, detail="urls must be a list")
+    if len(urls) == 1 and isinstance(urls[0], str) and urls[0].strip() == _alert_cfg.CLEAR_SENTINEL:
+        return []
+    cleaned: list[str] = []
+    for u in urls:
+        if not isinstance(u, str):
+            raise HTTPException(status_code=400, detail="urls must be strings")
+        s = u.strip()
+        if not s:
+            continue
+        if _alert_cfg.has_control_chars(s):
+            raise HTTPException(status_code=400, detail="webhook URL contains invalid characters")
+        cleaned.append(s)
+    if len(cleaned) > 10:
+        raise HTTPException(status_code=400, detail="At most 10 webhook URLs are allowed")
+    return cleaned
+
+
+def _safe_alert_error(exc: Exception) -> str:
+    """把 alerter 例外轉成安全、截斷的錯誤字串（≤ 200，不外洩憑證）。"""
+    msg = str(exc) if exc else "send_failed"
+    return msg[:200]
+
+
+def _send_test_telegram(tg: dict[str, Any]) -> tuple[bool, str | None]:
+    """用 GUI config 構造一次性 TelegramAlerter，發送測試告警（同步）。
+
+    走 app 同一 alerter 的 send() 路徑（非便捷 send_async，因測試需同步回布林）。
+    """
+    try:
+        from .telegram_alerter import TelegramAlerter
+
+        alerter = TelegramAlerter(
+            bot_token=tg.get("bot_token", ""),
+            chat_id=tg.get("chat_id", ""),
+        )
+        ok = alerter.send("🔔 <b>System</b>\nTEST\n<i>OpenClaw alert test</i>")
+        return bool(ok), None if ok else "telegram_send_returned_false"
+    except Exception as exc:  # noqa: BLE001 - 測試端點不得因 alerter 例外而 500
+        return False, _safe_alert_error(exc)
+
+
+def _send_test_webhook(wh: dict[str, Any]) -> tuple[bool, str | None]:
+    """用 GUI config 構造一次性 WebhookAlerter，發送測試告警（同步）。"""
+    try:
+        from .webhook_alerter import WebhookAlerter
+
+        alerter = WebhookAlerter(
+            urls=list(wh.get("urls", [])),
+            secret=wh.get("secret", ""),
+        )
+        ok = alerter.send({
+            "type": "system", "event": "TEST", "detail": "OpenClaw alert test",
+            "timestamp_ms": int(time.time() * 1000),
+        })
+        return bool(ok), None if ok else "webhook_send_returned_false"
+    except Exception as exc:  # noqa: BLE001 - 測試端點不得因 alerter 例外而 500
+        return False, _safe_alert_error(exc)

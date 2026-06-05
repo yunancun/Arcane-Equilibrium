@@ -36,6 +36,24 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _load_config_creds(data_dir: str | None) -> tuple[list[str], str]:
+    """從 alert_config.json 讀 Webhook 憑證（best-effort，永不拋）。
+
+    為什麼包 try/except 並吞掉所有例外：alerter 構造絕不能因壞檔而拋（會中斷
+    ALERT_ROUTER 初始化 → 影響 app 啟動）。失敗回 ([],"")，自然落到 env-fallback。
+    """
+    try:
+        from . import alert_config as _ac
+
+        cfg = _ac.load_alert_config(data_dir or os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"))
+        wh = cfg.get("webhook", {})
+        if wh.get("enabled") and wh.get("urls"):
+            return list(wh["urls"]), wh.get("secret", "")
+    except Exception:  # noqa: BLE001 - alerter 構造必須 fail-safe
+        logger.debug("alert_config webhook load failed (non-fatal)")
+    return [], ""
+
+
 class WebhookAlerter:
     """
     Sends JSON alerts to one or more webhook endpoints.
@@ -50,10 +68,18 @@ class WebhookAlerter:
         rate_limit_per_min: int = 30,
         timeout_seconds: int = 10,
         enabled: bool = True,
+        data_dir: str | None = None,
     ) -> None:
-        raw = urls or os.getenv("OPENCLAW_WEBHOOK_URLS", "").split(",")
+        # 憑證來源優先序：顯式參數 > alert_config.json（GUI 寫）> env（back-compat）。
+        file_urls, file_secret = _load_config_creds(data_dir)
+        if urls:
+            raw = urls
+        elif file_urls:
+            raw = file_urls
+        else:
+            raw = os.getenv("OPENCLAW_WEBHOOK_URLS", "").split(",")
         self._urls = [u.strip() for u in raw if u.strip()]
-        self._secret = secret or os.getenv("OPENCLAW_WEBHOOK_SECRET", "")
+        self._secret = secret or file_secret or os.getenv("OPENCLAW_WEBHOOK_SECRET", "")
         self._enabled = enabled and len(self._urls) > 0
         self._rate_limit = rate_limit_per_min
         self._timeout = timeout_seconds

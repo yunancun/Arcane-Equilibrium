@@ -39,6 +39,25 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 
+def _load_config_creds(data_dir: str | None) -> tuple[str, str]:
+    """從 alert_config.json 讀 Telegram 憑證（best-effort，永不拋）。
+
+    為什麼包 try/except 並吞掉所有例外：alerter 構造絕不能因壞檔而拋（會中斷
+    ALERT_ROUTER 初始化 → 影響 app 啟動）。失敗回 ("","")，自然落到 env-fallback。
+    enabled 仍由憑證齊全推導，故只需在 enabled=True 時回非空。
+    """
+    try:
+        from . import alert_config as _ac
+
+        cfg = _ac.load_alert_config(data_dir or os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"))
+        tg = cfg.get("telegram", {})
+        if tg.get("enabled") and tg.get("bot_token") and tg.get("chat_id"):
+            return tg["bot_token"], tg["chat_id"]
+    except Exception:  # noqa: BLE001 - alerter 構造必須 fail-safe
+        logger.debug("alert_config telegram load failed (non-fatal)")
+    return "", ""
+
+
 class TelegramAlerter:
     """
     Sends alerts to Telegram via Bot API.
@@ -52,9 +71,14 @@ class TelegramAlerter:
         *,
         rate_limit_per_min: int = 20,
         enabled: bool = True,
+        data_dir: str | None = None,
     ) -> None:
-        self._token = bot_token or os.getenv("OPENCLAW_TELEGRAM_BOT_TOKEN", "")
-        self._chat_id = chat_id or os.getenv("OPENCLAW_TELEGRAM_CHAT_ID", "")
+        # 憑證來源優先序：顯式參數 > alert_config.json（GUI 寫）> env（back-compat）。
+        # 為什麼 file-primary：operator 在 GUI 設定的憑證寫進 <data_dir>/alert_config.json，
+        # app 與獨立 watchdog 共用該檔；env-fallback 保留既有 RISK 告警在無檔時的行為。
+        file_token, file_chat = _load_config_creds(data_dir)
+        self._token = bot_token or file_token or os.getenv("OPENCLAW_TELEGRAM_BOT_TOKEN", "")
+        self._chat_id = chat_id or file_chat or os.getenv("OPENCLAW_TELEGRAM_CHAT_ID", "")
         self._enabled = enabled and bool(self._token) and bool(self._chat_id)
         self._rate_limit = rate_limit_per_min
         self._send_times: list[float] = []

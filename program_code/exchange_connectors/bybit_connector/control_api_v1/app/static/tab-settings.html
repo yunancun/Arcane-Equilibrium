@@ -334,6 +334,95 @@
   </div>
 </div>
 
+<!-- ═══ 告警通知 / Alert Notifications ═══ -->
+<!-- 引擎宕機告警通知配置（Telegram + Webhook）。此卡片是 2026-06-05 引擎宕機 20h
+     無人知曉事故所缺的「告警消費者」：watchdog 偵測 circuit-broken → 走這裡配的通道推送。
+     後端契約 LOCKED（巢狀 schema，非扁平）：
+     GET /api/v1/settings/alerts 回
+       telegram.{enabled, bot_token_configured, bot_token_hint, chat_id}、
+       webhook.{enabled, urls[], secret_configured, secret_hint}、
+       any_channel_active（= enabled 且憑證齊全）、config_present、last_modified；
+       永不回明文 token/secret。
+     POST 採 partial-safe 語義：token/secret 空字串 = 不變，"__CLEAR__" = 清除；
+       啟用但憑證不齊全時後端回 400。
+     遮罩 / 清空敏感欄位 / 提交後立即清 DOM 三條與 API Key 卡片同 pattern。
+     M1：狀態 chip 反映「真能告警」（enabled AND credentialed = armed），不只反映 enabled flag。 -->
+<div class="oc-card" style="border-color:rgba(56,139,253,0.3)">
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+    <h3 style="margin:0">&#x1F514; 告警通知 / Alert Notifications</h3>
+    <span class="oc-chip oc-chip-warn" id="alert-status-chip" style="margin-left:auto">載入中…</span>
+  </div>
+  <div style="font-size:12px;color:var(--text-dim);margin-bottom:14px">
+    引擎宕機（engine-down）時透過 Telegram 或 Webhook 推送告警。GUI 僅顯示遮罩 hint，永不暴露明文 token/secret。留空表示「不變」，按「清除」可移除已存值。<br>
+    Engine-down alerts via Telegram or Webhook. GUI shows masked hint only — plaintext token/secret never exposed. Leave blank to keep unchanged; use "Clear" to remove a stored value.
+  </div>
+
+  <!-- 載入前 / 失敗時的佔位；renderAlertConfig() 成功後顯示 #alert-config-body -->
+  <div id="alert-config-loading" class="oc-loading">Loading...</div>
+
+  <div id="alert-config-body" style="display:none">
+    <!-- ── Telegram ── -->
+    <div style="background:var(--card-bg);border:1px solid rgba(56,139,253,0.2);border-radius:8px;padding:14px;margin-bottom:14px">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;margin-bottom:10px;cursor:pointer">
+        <input type="checkbox" id="alert-tg-enabled" />
+        <span>&#x2708; Telegram</span>
+        <span class="oc-chip" id="alert-tg-state-chip" style="margin-left:auto;font-size:11px"></span>
+      </label>
+      <div style="display:grid;gap:10px">
+        <div>
+          <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">Chat ID</label>
+          <input class="oc-input" id="alert-tg-chat-id" type="text" placeholder="例如 -1001234567890" autocomplete="off" style="width:100%;font-family:monospace" />
+        </div>
+        <div>
+          <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">Bot Token</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="oc-input" id="alert-tg-token" type="password" placeholder="未設定" autocomplete="new-password" style="flex:1;font-family:monospace" />
+            <button class="oc-btn" type="button" style="font-size:11px;white-space:nowrap" id="alert-tg-token-clear" onclick="alertMarkClear('tg-token')">清除 / Clear</button>
+          </div>
+          <div style="font-size:10px;color:var(--text-dim);margin-top:4px" id="alert-tg-token-note"></div>
+        </div>
+        <!-- N3：一行 Telegram 設定指引，降低 operator 不知如何取得 Token / Chat ID 的門檻。 -->
+        <div style="font-size:10px;color:var(--text-dim);line-height:1.5">
+          &#x1F4A1; 透過 <code>@BotFather</code> 建立 bot 取得 Token；用 <code>@userinfobot</code> 查 Chat ID。<br>
+          Create a bot via <code>@BotFather</code>; get Chat ID from <code>@userinfobot</code>.
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Webhook ── -->
+    <div style="background:var(--card-bg);border:1px solid rgba(56,139,253,0.2);border-radius:8px;padding:14px;margin-bottom:14px">
+      <label style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13px;margin-bottom:10px;cursor:pointer">
+        <input type="checkbox" id="alert-wh-enabled" />
+        <span>&#x1F517; Webhook</span>
+        <span class="oc-chip" id="alert-wh-state-chip" style="margin-left:auto;font-size:11px"></span>
+      </label>
+      <div style="display:grid;gap:10px">
+        <div>
+          <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px">URL（每行一個 / one per line）</label>
+          <textarea class="oc-input" id="alert-wh-urls" rows="3" placeholder="https://example.com/hook" autocomplete="off" style="width:100%;font-family:monospace;resize:vertical"></textarea>
+        </div>
+        <div>
+          <!-- N4：HMAC 屬技術細節，從主 label 移到 tooltip/hint，避免嚇到不熟簽章的 operator。 -->
+          <label style="font-size:11px;color:var(--text-dim);display:block;margin-bottom:4px"
+            title="選填。若填入，告警 webhook 會帶 HMAC-SHA256 X-OpenClaw-Signature 標頭供接收端驗簽。/ Optional HMAC-SHA256 signing key.">Secret（簽章用，可留空 / signing key, optional）</label>
+          <div style="display:flex;gap:8px;align-items:center">
+            <input class="oc-input" id="alert-wh-secret" type="password" placeholder="未設定" autocomplete="new-password" style="flex:1;font-family:monospace" />
+            <button class="oc-btn" type="button" style="font-size:11px;white-space:nowrap" id="alert-wh-secret-clear" onclick="alertMarkClear('wh-secret')">清除 / Clear</button>
+          </div>
+          <div style="font-size:10px;color:var(--text-dim);margin-top:4px" id="alert-wh-secret-note"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="alert-config-status" style="font-size:12px;min-height:18px;margin-bottom:10px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="oc-btn oc-btn-primary" type="button" id="alert-save-btn" onclick="saveAlertConfig()">&#x2714; 保存 / Save</button>
+      <button class="oc-btn" type="button" id="alert-test-btn" onclick="sendAlertTest()">&#x1F4E8; 發送測試告警 / Send test alert</button>
+      <span style="font-size:10px;color:var(--text-dim);align-self:center" id="alert-last-modified"></span>
+    </div>
+  </div>
+</div>
+
 <!-- W-AUDIT-7c (2026-05-09): API Key Replace Dialog 已從本 sub-tab 抽出移至檔尾，
      避免 sub-tab `[hidden]` 影響 fixed-position overlay 渲染。
      The API Key Replace Dialog is moved to the end of the document so that
@@ -994,7 +1083,8 @@ async function loadAll() {
     loadDebug(),
     loadPaperEngineStatus(),
     loadDevelopmentSupportStatus(),
-    loadApiKeyStatus()
+    loadApiKeyStatus(),
+    loadAlertConfig()
   ]);
 }
 
@@ -1233,6 +1323,469 @@ async function doSaveApiKey() {
     statusEl.innerHTML = '<span style="color:#f87171">✗ ' + ocEsc(errMsg) + '</span>';
     saveBtn.disabled = false;
   }
+}
+
+// ─── 告警通知 / Alert Notifications ──────────────────────────────────────────
+// 引擎宕機告警配置（Telegram + Webhook）。對齊 API Key 卡片的 masked-render +
+// partial-safe + clear-after-submit pattern。後端契約 LOCKED（巢狀 schema）：
+//   GET  /api/v1/settings/alerts        → telegram.{enabled,bot_token_configured,
+//                                          bot_token_hint,chat_id}、webhook.{enabled,
+//                                          urls[],secret_configured,secret_hint}、
+//                                          any_channel_active、config_present、last_modified
+//   POST /api/v1/settings/alerts        → token/secret 空字串=不變，"__CLEAR__"=清除；
+//                                          啟用但憑證不齊全 → 400 detail
+//   POST /api/v1/settings/alerts/test   → 逐 channel 回 {attempted, ok, error}
+// 安全：明文 token/secret 永不回傳也不 log；提交後立即清 DOM password 欄位。
+// M1（不撒謊原則）：chip 反映「真能告警」= enabled AND 憑證齊全（armed），不只 enabled flag；
+//   勾選但缺憑證 → 紅 chip「不會送出告警」+ 送出前攔截。
+// M2（誠實錯因）：load/save 失敗用 _alertFetch 取得真實 HTTP status，404 →「後端尚未啟用」，
+//   其他 echo 後端 detail，連線中斷 →「連線中斷」；不讓所有失敗看起來一樣。
+const _OC_ALERT_CLEAR_SENTINEL = '__CLEAR__';
+// 記錄哪些敏感欄位被按過「清除」。空輸入預設=「不變」（送 ""）；
+// 只有顯式按清除才送 "__CLEAR__"。任何重新輸入會取消 clear 標記。
+const _ocAlertClearMarks = { 'tg-token': false, 'wh-secret': false };
+// 最近一次 GET 視圖（含 *_configured）。送出前 guard 用它判斷「已存憑證」是否存在，
+// 以區分「留空=沿用已存值」與「留空=根本沒憑證」。null = 尚未成功載入。
+let _ocAlertLastView = null;
+
+/**
+ * 告警卡專用的 raw fetch（M2）。
+ *
+ * 為什麼不直接用 ocApi/ocPost：那兩者把所有失敗（404 / 400 / 連線中斷 / timeout）
+ * 一律塌縮成 null，真實 HTTP status 與後端 detail 只進 toast/console，呼叫端拿不到。
+ * 本卡片必須在卡內誠實區分「後端尚未部署(404)」「驗證失敗(400 detail)」「連線中斷」，
+ * 否則告警設定失敗會看起來都一樣 —— 這正是 20h 宕機無人知的同類盲區。
+ * 沿用 ocApi 的 same-origin cookie + CSRF header，授權行為不變。
+ *
+ * @returns {Promise<{ok:boolean, status:number, data:any, detail:string|null, networkError:boolean}>}
+ *   ok=HTTP 2xx；status=0 代表連線中斷/timeout（networkError=true）。
+ */
+async function _alertFetch(path, body) {
+  const method = body ? 'POST' : 'GET';
+  const headers = {};
+  if (body) headers['Content-Type'] = 'application/json';
+  // 寫操作附 CSRF（與 ocApi 相同來源），讀操作不附。
+  if (body && typeof window !== 'undefined' && typeof window.ocCsrfHeaders === 'function') {
+    window.ocCsrfHeaders(method, headers);
+  }
+  try {
+    const r = await fetch(path, {
+      method: method,
+      headers: headers,
+      credentials: 'same-origin',
+      body: body ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(8000),
+    });
+    let data = null;
+    let detail = null;
+    try {
+      data = await r.json();
+      // FastAPI HTTPException 的錯因在 detail；可能是字串或物件。
+      if (data && typeof data === 'object' && data.detail != null) {
+        detail = (typeof data.detail === 'string') ? data.detail : JSON.stringify(data.detail);
+      }
+    } catch (_) { /* 無 JSON body（例如某些 404/502）*/ }
+    return { ok: r.ok, status: r.status, data: data, detail: detail, networkError: false };
+  } catch (e) {
+    // AbortError(timeout) 與真實網路錯誤都歸為連線中斷：status=0。
+    return { ok: false, status: 0, data: null, detail: null, networkError: true };
+  }
+}
+
+/** 在卡內 status 區顯示一行訊息（color: 'dim'|'green'|'red'）。文字節點走 ocEsc 防 XSS。 */
+function _alertCardStatus(text, color) {
+  const el = document.getElementById('alert-config-status');
+  if (!el) return;
+  const c = color === 'green' ? 'var(--green)' : (color === 'red' ? '#f87171' : 'var(--text-dim)');
+  el.innerHTML = '<span style="color:' + c + '">' + ocEsc(text) + '</span>';
+}
+
+/**
+ * 把 _alertFetch 的失敗結果轉成 operator 看得懂的中文原因（M2）。
+ * 404 → 後端尚未部署；連線中斷 → 連線中斷；其他 → echo 後端 detail / HTTP status。
+ */
+function _alertFailReason(res) {
+  if (!res || res.networkError) return '連線中斷 / network drop';
+  if (res.status === 404) return '此功能尚未在後端啟用 / Backend not deployed yet';
+  if (res.detail) return res.detail;  // 後端安全 detail（已不含明文）
+  return 'HTTP ' + (res.status || '?');
+}
+
+/**
+ * 操作員按「清除」時標記該敏感欄位，提交時送 "__CLEAR__" 移除已存值。
+ * 為什麼用標記而非直接寫 sentinel 進 input：input 仍是 password 型且須保持空，
+ * 顯示文字提示比把 "__CLEAR__" 塞進 value 更不易誤解、也避免被遮罩看不出狀態。
+ */
+function alertMarkClear(fieldKey) {
+  if (!(fieldKey in _ocAlertClearMarks)) return;
+  _ocAlertClearMarks[fieldKey] = true;
+  const noteId = fieldKey === 'tg-token' ? 'alert-tg-token-note' : 'alert-wh-secret-note';
+  const inputId = fieldKey === 'tg-token' ? 'alert-tg-token' : 'alert-wh-secret';
+  const input = document.getElementById(inputId);
+  if (input) { input.value = ''; input.placeholder = '已標記清除 — 保存後移除'; }
+  ocSetText(noteId, '⚠ 已標記清除：保存後將移除已存值。重新輸入可取消。');
+  const noteEl = document.getElementById(noteId);
+  if (noteEl) noteEl.style.color = '#f87171';
+}
+
+/**
+ * 載入告警配置並渲染（hook 進 loadAll 的 Promise.allSettled）。
+ * 失敗時保留 loading 佔位 + 顯示錯誤，不假裝有配置。
+ */
+async function loadAlertConfig() {
+  const loadingEl = document.getElementById('alert-config-loading');
+  const bodyEl = document.getElementById('alert-config-body');
+  if (!loadingEl || !bodyEl) return;  // 不在 settings tab DOM 時直接返回
+
+  // M2：用 _alertFetch 取得真實 status，404（後端未部署）與連線中斷顯示不同原因。
+  const res = await _alertFetch('/api/v1/settings/alerts');
+  if (!res.ok || !res.data || typeof res.data !== 'object') {
+    const reason = _alertFailReason(res);
+    loadingEl.style.display = '';
+    loadingEl.textContent = '無法載入告警配置：' + reason;
+    loadingEl.style.color = '#f87171';
+    bodyEl.style.display = 'none';
+    const chip = document.getElementById('alert-status-chip');
+    if (chip) {
+      // 404 = 後端尚未啟用（中性灰，非「警告」）；其他失敗 = 黃色警告。
+      chip.textContent = (res.status === 404) ? '後端尚未啟用' : '載入失敗';
+      chip.className = 'oc-chip ' + ((res.status === 404) ? 'oc-chip-neutral' : 'oc-chip-warn');
+    }
+    return;
+  }
+  loadingEl.style.color = '';  // 還原（前次失敗可能染紅）
+  renderAlertConfig(res.data);
+}
+
+/**
+ * 渲染告警配置。明文欄位（chat_id / urls）預填；password 欄位（token / secret）
+ * 永遠留空，placeholder 反映 *_configured 狀態（已設定顯遮罩 hint + 「留空不變」）。
+ */
+function renderAlertConfig(cfg) {
+  const loadingEl = document.getElementById('alert-config-loading');
+  const bodyEl = document.getElementById('alert-config-body');
+  if (!loadingEl || !bodyEl) return;
+  loadingEl.style.display = 'none';
+  bodyEl.style.display = '';
+
+  // 快取最新視圖供送出前 guard 用（判斷已存憑證是否存在）。
+  _ocAlertLastView = cfg;
+
+  // 每次重新渲染都重置 clear 標記（剛從後端取得最新狀態）
+  _ocAlertClearMarks['tg-token'] = false;
+  _ocAlertClearMarks['wh-secret'] = false;
+
+  const tg = (cfg && cfg.telegram) || {};
+  const wh = (cfg && cfg.webhook) || {};
+
+  // ── Telegram ──
+  const tgEnabled = document.getElementById('alert-tg-enabled');
+  if (tgEnabled) tgEnabled.checked = !!tg.enabled;
+  const tgChat = document.getElementById('alert-tg-chat-id');
+  if (tgChat) tgChat.value = tg.chat_id ? String(tg.chat_id) : '';  // 明文預填
+  const tgToken = document.getElementById('alert-tg-token');
+  if (tgToken) {
+    tgToken.value = '';  // password 欄位永遠留空
+    tgToken.placeholder = tg.bot_token_configured
+      ? ('已設定 ' + (tg.bot_token_hint || '••••') + '，留空不變')
+      : '未設定';
+  }
+  _alertSetConfiguredNote('alert-tg-token-note', !!tg.bot_token_configured, tg.bot_token_hint);
+
+  // ── Webhook ──
+  const whEnabled = document.getElementById('alert-wh-enabled');
+  if (whEnabled) whEnabled.checked = !!wh.enabled;
+  const whUrls = document.getElementById('alert-wh-urls');
+  if (whUrls) whUrls.value = Array.isArray(wh.urls) ? wh.urls.join('\n') : '';  // 明文預填，一行一個
+  const whSecret = document.getElementById('alert-wh-secret');
+  if (whSecret) {
+    whSecret.value = '';  // password 欄位永遠留空
+    whSecret.placeholder = wh.secret_configured
+      ? ('已設定 ' + (wh.secret_hint || '••••') + '，留空不變')
+      : '未設定';
+  }
+  _alertSetConfiguredNote('alert-wh-secret-note', !!wh.secret_configured, wh.secret_hint);
+
+  // ── 狀態 chip / 各 channel state chip ──
+  _alertRenderStatus(cfg);
+
+  // ── 最後更新時間（後端回 unix 秒，可能為 null）──
+  const lmEl = document.getElementById('alert-last-modified');
+  if (lmEl) {
+    if (cfg.last_modified) {
+      const dt = new Date(Number(cfg.last_modified) * 1000);
+      lmEl.textContent = '最後更新 ' + dt.toLocaleString();
+    } else {
+      lmEl.textContent = '';
+    }
+  }
+}
+
+/** 設定 password 欄位下方的「已設定/未設定」中性提示（非 clear 標記時）。 */
+function _alertSetConfiguredNote(noteId, configured, hint) {
+  const el = document.getElementById(noteId);
+  if (!el) return;
+  el.style.color = 'var(--text-dim)';
+  if (configured) {
+    // hint 來自後端，已遮罩（如 ••••1234）；仍用 ocEsc 包裝防意外字符
+    el.textContent = '目前已設定（' + ocEsc(hint || '••••') + '）。留空保持不變，或按清除移除。';
+  } else {
+    el.textContent = '尚未設定。';
+  }
+}
+
+/**
+ * M1：判斷某通道是否「真能告警」(armed) = enabled 且憑證齊全。
+ *   Telegram credentialed = bot_token_configured 且 chat_id 非空；
+ *   Webhook  credentialed = urls 至少一個（secret 選填）。
+ * 為什麼：只看 enabled flag 會把「勾了但沒填憑證」誤顯為綠色「已啟用」，
+ *   這是 soft fake-success —— 該通道根本送不出告警，卻看起來就緒。
+ * @returns {{enabled:boolean, credentialed:boolean, armed:boolean}}
+ */
+function _alertChannelArmed(channel, kind) {
+  const c = channel || {};
+  const enabled = !!c.enabled;
+  let credentialed;
+  if (kind === 'telegram') {
+    credentialed = !!c.bot_token_configured && !!(c.chat_id && String(c.chat_id).trim());
+  } else {  // webhook
+    credentialed = Array.isArray(c.urls) && c.urls.length > 0;
+  }
+  return { enabled: enabled, credentialed: credentialed, armed: enabled && credentialed };
+}
+
+/** 套用單一通道 chip 的三態文案 + 顏色（armed / enabled-未齊全 / 未啟用）。 */
+function _alertApplyChannelChip(chipId, st) {
+  const chip = document.getElementById(chipId);
+  if (!chip) return;
+  if (st.armed) {
+    chip.textContent = '已啟用';
+    chip.className = 'oc-chip oc-chip-good';
+  } else if (st.enabled) {
+    // 勾選但缺憑證：紅色 + 明說不會送出，杜絕假就緒。
+    chip.textContent = '已啟用但未完成設定 — 不會送出告警';
+    chip.className = 'oc-chip oc-chip-bad';
+  } else {
+    chip.textContent = '未啟用';
+    chip.className = 'oc-chip oc-chip-neutral';
+  }
+}
+
+/**
+ * M1：依「真能告警」(armed) 渲染狀態 chip，而非 raw enabled flag。
+ * 頂部 chip 的 armed 狀態以後端 any_channel_active 為準（= enabled 且憑證齊全）。
+ */
+function _alertRenderStatus(cfg) {
+  const tgSt = _alertChannelArmed((cfg && cfg.telegram) || {}, 'telegram');
+  const whSt = _alertChannelArmed((cfg && cfg.webhook) || {}, 'webhook');
+
+  // 頂部 chip：以 any_channel_active（後端權威 armed 判定）決定綠 / 警示。
+  const chip = document.getElementById('alert-status-chip');
+  if (chip) {
+    const armedNames = [];
+    if (tgSt.armed) armedNames.push('Telegram');
+    if (whSt.armed) armedNames.push('Webhook');
+    // enabled 但未齊全的通道（需警示 operator「看起來開了但送不出」）。
+    const misconfigured = (tgSt.enabled && !tgSt.credentialed) || (whSt.enabled && !whSt.credentialed);
+
+    if (cfg.any_channel_active && armedNames.length) {
+      chip.textContent = armedNames.join(' + ') + ' 已啟用';
+      chip.className = 'oc-chip oc-chip-good';
+    } else if (misconfigured) {
+      chip.textContent = '已啟用但未完成設定 — 不會送出告警';
+      chip.className = 'oc-chip oc-chip-bad';
+    } else {
+      chip.textContent = '未啟用';
+      chip.className = 'oc-chip oc-chip-neutral';
+    }
+  }
+
+  _alertApplyChannelChip('alert-tg-state-chip', tgSt);
+  _alertApplyChannelChip('alert-wh-state-chip', whSt);
+}
+
+/**
+ * 計算敏感欄位提交值（partial-safe）：
+ *   有輸入        → 送輸入值（更新）
+ *   被標記清除    → 送 "__CLEAR__"（移除）
+ *   既沒輸入也沒清除 → 送 ""（不變）
+ * 註：輸入值不 trim 內部空白以外的差異 — 但 token/secret 不應含前後空白，故 trim。
+ */
+function _alertSensitiveValue(inputId, clearKey) {
+  const input = document.getElementById(inputId);
+  const typed = input ? input.value.trim() : '';
+  if (typed) return typed;
+  if (_ocAlertClearMarks[clearKey]) return _OC_ALERT_CLEAR_SENTINEL;
+  return '';
+}
+
+/**
+ * M1 送出前 guard：勾選某通道但缺憑證時，回中文錯誤訊息（阻擋 POST），否則回 null。
+ *
+ * 「缺憑證」判定（與後端 400 條件一致，給即時誠實回饋而非 round-trip）：
+ *   Telegram 勾選 → 必須有「剛輸入的 token」或「已存 token(bot_token_configured)」，
+ *     且 chat_id 非空；
+ *   Webhook 勾選 → 必須至少一個 URL。
+ * 註：被標記「清除」的 token/secret 不算「已存」（送出後會被移除）。
+ */
+function _alertPresubmitGuard(payload) {
+  const view = _ocAlertLastView || {};
+  // Telegram
+  if (payload.telegram.enabled) {
+    const typedToken = payload.telegram.bot_token && payload.telegram.bot_token !== _OC_ALERT_CLEAR_SENTINEL;
+    const storedToken = !!((view.telegram || {}).bot_token_configured) && !_ocAlertClearMarks['tg-token'];
+    if (!typedToken && !storedToken) {
+      return '⚠ Telegram 已勾選但缺少 Bot Token — 請填入或取消勾選 / enabled but Bot Token missing';
+    }
+    if (!payload.telegram.chat_id) {
+      return '⚠ Telegram 已勾選但缺少 Chat ID — 請填入或取消勾選 / enabled but Chat ID missing';
+    }
+  }
+  // Webhook
+  if (payload.webhook.enabled && payload.webhook.urls.length === 0) {
+    return '⚠ Webhook 已勾選但未填任何 URL — 請填入或取消勾選 / enabled but no URL';
+  }
+  return null;
+}
+
+/**
+ * 保存告警配置。提交後立即清 DOM password 欄位（對齊 doSaveApiKey）、toast、
+ * 重新載入以顯示更新後的遮罩狀態。
+ * M1：送出前 guard 攔截「勾選但缺憑證」；M2：失敗顯真實原因（404 / detail / 連線中斷）。
+ */
+async function saveAlertConfig() {
+  const saveBtn = document.getElementById('alert-save-btn');
+
+  const urlsRaw = document.getElementById('alert-wh-urls');
+  const urls = urlsRaw
+    ? urlsRaw.value.split('\n').map(u => u.trim()).filter(u => u.length > 0)
+    : [];
+
+  const payload = {
+    telegram: {
+      enabled: !!document.getElementById('alert-tg-enabled').checked,
+      bot_token: _alertSensitiveValue('alert-tg-token', 'tg-token'),
+      chat_id: (document.getElementById('alert-tg-chat-id').value || '').trim()
+    },
+    webhook: {
+      enabled: !!document.getElementById('alert-wh-enabled').checked,
+      urls: urls,
+      secret: _alertSensitiveValue('alert-wh-secret', 'wh-secret')
+    }
+  };
+
+  // M1：缺憑證直接卡在前端（後端也會 400，但這裡給即時誠實回饋，免 round-trip）。
+  const guardMsg = _alertPresubmitGuard(payload);
+  if (guardMsg) {
+    _alertCardStatus(guardMsg, 'red');
+    ocToast(guardMsg, 'warn');
+    return;  // 不送出、不禁用按鈕
+  }
+
+  if (saveBtn) saveBtn.disabled = true;
+  _alertCardStatus('⏳ 正在保存…', 'dim');
+
+  const res = await _alertFetch('/api/v1/settings/alerts', payload);
+
+  // 立即清除 DOM 中的敏感字段（即使保存失敗也清，避免明文殘留）
+  const tgTokenEl = document.getElementById('alert-tg-token');
+  if (tgTokenEl) tgTokenEl.value = '';
+  const whSecretEl = document.getElementById('alert-wh-secret');
+  if (whSecretEl) whSecretEl.value = '';
+  _ocAlertClearMarks['tg-token'] = false;
+  _ocAlertClearMarks['wh-secret'] = false;
+
+  const saved = res.ok && res.data && res.data.saved === true;
+  if (saved) {
+    _alertCardStatus('✓ 已保存', 'green');
+    ocToast('告警配置已更新', 'success');
+    renderAlertConfig(res.data);  // 回應 = GET 同 shape + saved，直接重渲染顯示新遮罩狀態
+  } else {
+    // M2：POST 為 null/非預期時顯示真實原因（404 後端未部署 / 後端 detail / 連線中斷）。
+    _alertCardStatus('保存失敗：' + _alertFailReason(res), 'red');
+  }
+  if (saveBtn) saveBtn.disabled = false;
+}
+
+// N1：測試按鈕冷卻計時器 id（每進程單一；重啟頁面自然清掉）。
+let _ocAlertTestCooldownIv = null;
+
+/**
+ * N1：測試按鈕冷卻倒數（沿用 startRestartCountdown idiom）。
+ * 禁用按鈕並顯示「冷卻中… Ns」，到 0 還原按鈕文字。後端 rate-limit ≥10s 為兜底。
+ */
+function _alertStartTestCooldown(seconds) {
+  const btn = document.getElementById('alert-test-btn');
+  if (!btn) return;
+  const original = btn.getAttribute('data-orig-label') || btn.innerHTML;
+  btn.setAttribute('data-orig-label', original);
+  btn.disabled = true;
+  if (_ocAlertTestCooldownIv) clearInterval(_ocAlertTestCooldownIv);
+  const endAt = Date.now() + seconds * 1000;
+  const tick = function() {
+    const remaining = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+    if (remaining <= 0) {
+      clearInterval(_ocAlertTestCooldownIv);
+      _ocAlertTestCooldownIv = null;
+      btn.disabled = false;
+      btn.innerHTML = original;
+      return;
+    }
+    // 純數字 + 固定模板，無外部資料；textContent 安全。
+    btn.textContent = '冷卻中… ' + remaining + 's / Cooling down ' + remaining + 's';
+  };
+  tick();
+  _ocAlertTestCooldownIv = setInterval(tick, 1000);
+}
+
+/**
+ * 發送測試告警。逐 channel toast 結果（✓/✗ + 後端回的 error）。
+ * N1：無任何 armed 通道時不送出、不冷卻（不為 no-op 鎖按鈕）；送出後才進冷卻倒數。
+ */
+async function sendAlertTest() {
+  // N1：依最近視圖判斷是否有「真能送出」的通道（armed = 已保存 enabled 且憑證齊全）。
+  //   測試端點測的是「已保存」配置，故用 _ocAlertLastView（非當前未保存的勾選框）。
+  const view = _ocAlertLastView || {};
+  const tgArmed = _alertChannelArmed(view.telegram || {}, 'telegram').armed;
+  const whArmed = _alertChannelArmed(view.webhook || {}, 'webhook').armed;
+  if (!tgArmed && !whArmed) {
+    ocToast('未啟用任何告警通道 — 請先勾選並保存 / no active channel — enable and save first', 'warn');
+    return;  // 不送出、不冷卻 no-op
+  }
+
+  const res = await _alertFetch('/api/v1/settings/alerts/test', {});
+
+  if (!res.ok || !res.data || typeof res.data !== 'object') {
+    // M2：測試端點失敗顯真實原因（429 rate-limit detail / 404 / 連線中斷）。
+    ocToast('測試告警失敗：' + _alertFailReason(res), 'error');
+    // 429（後端節流）也進冷卻，避免連點；其餘失敗不鎖按鈕讓 operator 可重試。
+    if (res.status === 429) _alertStartTestCooldown(10);
+    return;
+  }
+  const d = res.data;
+
+  let anyAttempted = false;
+  [['telegram', 'Telegram'], ['webhook', 'Webhook']].forEach(function(pair) {
+    const key = pair[0];
+    const label = pair[1];
+    const r = d[key] || {};
+    if (!r.attempted) return;  // 未啟用 / 未配置的 channel 不報
+    anyAttempted = true;
+    if (r.ok) {
+      ocToast('✓ ' + label + ' 測試告警已送出', 'success');
+    } else {
+      const err = r.error ? (' — ' + r.error) : '';
+      ocToast('✗ ' + label + ' 測試失敗' + err, 'error');
+    }
+  });
+
+  if (!anyAttempted) {
+    // 後端權威：實際一個都沒送（已保存配置無 armed 通道）→ 不冷卻 no-op。
+    ocToast('未啟用任何告警通道 — 請先勾選並保存 / no active channel — enable and save first', 'warn');
+    return;
+  }
+  // 真的送出了 → 進冷卻倒數（後端 rate-limit ≥10s 為兜底）。
+  _alertStartTestCooldown(10);
 }
 
 loadAll();
