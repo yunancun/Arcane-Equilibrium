@@ -337,6 +337,8 @@ from .scanner_rate_limiter import ScannerRateLimiter  # noqa: E402
 SCANNER_RATE_LIMITER = ScannerRateLimiter()
 
 # T8.06: Initialize and inject TelegramAlerter into GovernanceHub
+# 憑證來源：alert_config.json（GUI 寫，file-primary）> env（back-compat）。
+# 無參數構造即啟用該 seam；alert_config 讀取 best-effort，壞檔不會讓構造拋例外。
 from .telegram_alerter import TelegramAlerter  # noqa: E402
 TELEGRAM_ALERTER = TelegramAlerter()
 if TELEGRAM_ALERTER.is_enabled:

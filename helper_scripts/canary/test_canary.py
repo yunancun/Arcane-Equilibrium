@@ -1166,6 +1166,240 @@ class TestOnEngineCrashClassification(unittest.TestCase):
         self.assertEqual(self._count_canary_events("RESTART_SKIPPED"), 2)
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# WATCHDOG-ALERT-WIRE (2026-06-05) HIGH-1：告警「接線」整合測試（驅動真狀態機）
+#
+# 為什麼這個 class 是 HIGH-1 的核心：emit_engine_down_alert_if_new /
+# _send_alert_best_effort 的單元行為已在 test_watchdog_alert.py 證過，但「告警有沒有
+# 真的被狀態機 trigger_restart / on_engine_crash / on_engine_recovery 在對的轉移點呼到」
+# 沒被守。E2 證明兩個 seam mutation（刪掉 trigger_restart 的熔斷 emit 呼叫、把
+# prolonged-down 的 key 釘死）都能讓整個既有測試套件 100% 全綠 —— 那正是這個功能要
+# 防的「靜默宕機」失敗模式。以下三條直接驅動真狀態機（不 mock emit/標記函數，只 mock
+# _send_alert_best_effort 與 subprocess/trigger_restart 以免發真 HTTP / 跑真子進程），
+# 每條都附 seam-mutation 紅燈證明（見 E1 報告）。
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class TestWatchdogAlertWiring(unittest.TestCase):
+    """告警接線整合：熔斷 emit-once / 恢復清 marker 後可再 emit / 持續宕機每窗口一次。
+
+    通則：mock _send_alert_best_effort（避免真 HTTP，且可斷言被呼次數/severity），
+    但 emit_engine_down_alert_if_new / clear_engine_down_alert_marker / 去重 marker
+    全走真路徑 —— 這樣才測得到「接線」而非孤立函數。canary ENGINE_DOWN_ALERT_SENT
+    計數是 emit 真的發生過的稽核證據。"""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.dir = self._tmpdir.name
+        self._pathlib = __import__("pathlib")
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def _write_log(self, lines):
+        path = os.path.join(self.dir, "engine.log")
+        with open(path, "w", encoding="utf-8") as f:
+            if lines:
+                f.write("\n".join(lines) + "\n")
+        return self._pathlib.Path(path)
+
+    def _count_alert_sent(self, alert_key=None):
+        """數 ENGINE_DOWN_ALERT_SENT canary 事件（可選按 alert_key 過濾）。"""
+        path = os.path.join(self.dir, "canary_events.jsonl")
+        if not os.path.exists(path):
+            return 0
+        n = 0
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                ev = json.loads(line)
+                if ev.get("event") != "ENGINE_DOWN_ALERT_SENT":
+                    continue
+                if alert_key is None or ev.get("alert_key") == alert_key:
+                    n += 1
+        return n
+
+    def _alert_keys_sent(self):
+        """回傳所有 ENGINE_DOWN_ALERT_SENT 的 alert_key 序列（按寫入順序）。"""
+        path = os.path.join(self.dir, "canary_events.jsonl")
+        keys = []
+        if not os.path.exists(path):
+            return keys
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                ev = json.loads(line)
+                if ev.get("event") == "ENGINE_DOWN_ALERT_SENT":
+                    keys.append(ev.get("alert_key"))
+        return keys
+
+    def _drive_to_circuit_broken(self):
+        """用真 trigger_restart 連續失敗驅動到 circuit_broken（不 mock trigger_restart）。
+
+        mock subprocess.run 回非零（真失敗路徑），故每次 trigger_restart 都遞增
+        consecutive_failures；第 MAX_CONSECUTIVE_FAILURES 次翻 circuit_broken=True，
+        熔斷分支的 emit_engine_down_alert_if_new("circuit_broken", ...) 才被觸發。
+        trigger_restart 本身不檢 backoff（那是 should_restart 的事），故可直接連呼。"""
+        fail = mock.Mock()
+        fail.returncode = 1
+        fail.stderr = "boom"
+        with mock.patch.object(engine_watchdog.subprocess, "run", return_value=fail):
+            for _ in range(engine_watchdog.MAX_CONSECUTIVE_FAILURES):
+                trigger_restart(self.dir)
+
+    # ─── 整合 1：熔斷 emit-once（再 poll 仍熔斷 → 不重發）───
+
+    def test_circuit_break_emits_alert_exactly_once(self):
+        """HIGH-1 整合①：連續重啟失敗到 circuit_broken ⇒ 恰好一條 circuit_broken
+        告警；仍熔斷時再呼 trigger_restart ⇒ 不再發（去重）。
+
+        驅動真 trigger_restart 狀態機（subprocess 失敗），只 mock _send_alert_best_effort。
+        斷言：(a) _send_alert_best_effort 恰被呼一次、severity=CRITICAL；
+        (b) ENGINE_DOWN_ALERT_SENT canary 恰一條、alert_key='circuit_broken'；
+        (c) emit_engine_down_alert_if_new 在熔斷時被真的呼到一次（接線存在）。
+
+        seam-mutation（E2 要求的 bite）：刪掉 trigger_restart 熔斷分支裡那行
+        emit_engine_down_alert_if_new(...) ⇒ 本測試紅（0 條告警）。已實機驗證見 E1 報告。"""
+        with mock.patch.object(engine_watchdog, "_send_alert_best_effort") as m_send, \
+                mock.patch.object(
+                    engine_watchdog, "emit_engine_down_alert_if_new",
+                    wraps=engine_watchdog.emit_engine_down_alert_if_new) as m_emit:
+            self._drive_to_circuit_broken()
+            # 確認真的熔斷了（前置條件）。
+            self.assertTrue(engine_watchdog.load_state(self.dir).get("circuit_broken"))
+            # 接線：熔斷分支真的呼到 emit（key='circuit_broken'）。
+            emit_calls = [c for c in m_emit.call_args_list if c.args[1] == "circuit_broken"]
+            self.assertEqual(len(emit_calls), 1, "熔斷時 emit 必被呼且僅一次")
+            # 仍熔斷時再 poll（再失敗）⇒ 同 key 去重，不再發第二條。
+            again = mock.Mock()
+            again.returncode = 1
+            again.stderr = "boom"
+            with mock.patch.object(engine_watchdog.subprocess, "run", return_value=again):
+                trigger_restart(self.dir)
+                trigger_restart(self.dir)
+        # _send_alert_best_effort 恰一次、CRITICAL。
+        self.assertEqual(m_send.call_count, 1)
+        self.assertEqual(m_send.call_args.args[2], "CRITICAL")
+        # canary 稽核：恰一條 circuit_broken。
+        self.assertEqual(self._count_alert_sent("circuit_broken"), 1)
+        self.assertEqual(self._count_alert_sent(), 1)
+
+    # ─── 整合 2：恢復清 marker → all-clear 告警 + 新一輪宕機可再發 ───
+
+    def test_recovery_clears_marker_and_new_episode_re_emits(self):
+        """HIGH-1 整合②：熔斷發過告警後引擎恢復（新鮮快照）⇒ 發 RECOVERED all-clear
+        告警且 clear_engine_down_alert_marker 真的執行（marker 清空）；隨後新一輪宕機
+        ⇒ circuit_broken 告警再次發出（因 marker 已被清）。
+
+        驅動真 trigger_restart→熔斷（第 1 條 down 告警）→on_engine_recovery（真路徑，
+        清 marker + 發 INFO）→再 trigger_restart 失敗（仍熔斷）→第 2 條 down 告警。
+
+        seam-mutation（E2 要求的 bite）：把 on_engine_recovery 裡的
+        clear_engine_down_alert_marker(data_dir) 改成 no-op（marker 殘留）⇒ 新一輪
+        宕機被永久去重吞掉 ⇒ 第 2 條告警不發 ⇒ 本測試紅。已實機驗證見 E1 報告。"""
+        with mock.patch.object(engine_watchdog, "_send_alert_best_effort") as m_send:
+            # 第一輪：驅動到熔斷 → 第 1 條 down 告警。
+            self._drive_to_circuit_broken()
+            self.assertEqual(self._count_alert_sent("circuit_broken"), 1)
+            down_send_calls = m_send.call_count
+            self.assertGreaterEqual(down_send_calls, 1)
+            # marker 已落盤（down-alert 已發）。
+            self.assertEqual(
+                engine_watchdog.load_state(self.dir).get("last_engine_down_alert_key"),
+                "circuit_broken",
+            )
+
+            # 引擎恢復（真路徑：on_engine_recovery 清 marker + 發 INFO all-clear）。
+            state = WatchdogState(engine_alive=False)
+            on_engine_recovery(state, data_dir=self.dir)
+            self.assertTrue(state.engine_alive)
+            # all-clear 告警有發（severity=INFO），且確實多了一通。
+            self.assertEqual(m_send.call_count, down_send_calls + 1)
+            self.assertEqual(m_send.call_args.args[2], "INFO")
+            # clear_engine_down_alert_marker 真的執行：marker 被清空。
+            cleared = engine_watchdog.load_state(self.dir)
+            self.assertIsNone(cleared.get("last_engine_down_alert_key"))
+            self.assertNotIn("engine_down_since_ts", cleared)
+
+            # 新一輪宕機：仍熔斷（consecutive 已 >= MAX），但 marker 已清 → 再發第 2 條。
+            again = mock.Mock()
+            again.returncode = 1
+            again.stderr = "boom"
+            with mock.patch.object(engine_watchdog.subprocess, "run", return_value=again):
+                trigger_restart(self.dir)
+        # circuit_broken 告警共 2 條（marker-clear 讓再 down 能再發）。
+        self.assertEqual(self._count_alert_sent("circuit_broken"), 2)
+
+    # ─── 整合 3：持續宕機 re-alert 每 RE_ALERT_INTERVAL_SECONDS 窗口恰一次 ───
+
+    def test_prolonged_down_re_alerts_once_per_window_not_per_poll(self):
+        """HIGH-1 整合③：熔斷終態下，on_engine_crash 每 2s poll 不會每 poll 都重發；
+        而是每 RE_ALERT_INTERVAL_SECONDS（4h）窗口恰發一條 re-ping（key 隨整數小時變化）。
+
+        擺好真 circuit_broken state（含 engine_down_since_ts / last_engine_down_alert_ts），
+        用 poll-clock 推進跨多個 4h 窗口，每窗口內也跑數個 2s poll。should_restart 走
+        circuit_broken 分支（不重啟），trigger_restart mock，_send_alert_best_effort mock。
+
+        斷言：總 re-ping 數 == 窗口數（非 poll 數）；key 形如 circuit_broken_reping_<h>
+        且每窗口的整數小時各異（4/8/12...）。
+
+        seam-mutation（E2 要求的 bite，也正是 E2 證過的那個）：把 on_engine_crash
+        re-alert 的 key 從 f"circuit_broken_reping_{hours_down}" 釘死成常數
+        （如 "circuit_broken_reping_0"）⇒ 第一窗口後 key 永不變 → 去重永久吞掉後續窗口
+        ⇒ 只剩 1 條 ⇒ 本測試紅。已實機驗證見 E1 報告。"""
+        log_path = self._write_log(["ERROR something broke"])
+        interval = engine_watchdog.RE_ALERT_INTERVAL_SECONDS
+        base = 100000.0
+        # 起始：已熔斷、已發過初次告警（last_engine_down_alert_ts=base），down-since=base。
+        engine_watchdog.save_state(self.dir, {
+            "engine_alive": False,
+            "circuit_broken": True,
+            "consecutive_failures": engine_watchdog.MAX_CONSECUTIVE_FAILURES,
+            "engine_down_since_ts": base,
+            "last_engine_down_alert_ts": base,
+            "last_engine_down_alert_key": "circuit_broken",
+        })
+
+        cur = {"t": base}
+
+        def fake_time():
+            return cur["t"]
+
+        windows = 3  # 跨 3 個 4h 窗口
+        polls_per_window = 4  # 每窗口內額外跑幾個 2s poll（證明不是每 poll 都發）
+        # trigger_restart mock（避免真子進程；circuit_broken 下 should_restart 本也不會 allow，
+        # 但保險起見 mock 掉，且確保它不會改 circuit_broken）。_send_alert_best_effort mock。
+        with mock.patch.object(engine_watchdog, "trigger_restart") as m_trigger, \
+                mock.patch.object(engine_watchdog, "_send_alert_best_effort") as m_send, \
+                mock.patch.object(engine_watchdog.time, "time", side_effect=fake_time):
+            state = WatchdogState(engine_alive=False)
+            for w in range(windows):
+                # 推進到下一個窗口邊界（+interval），觸發該窗口的 re-ping。
+                cur["t"] = base + interval * (w + 1)
+                on_engine_crash(state, 99.0, data_dir=self.dir, log_path=log_path)
+                # 同窗口內再跑幾個 2s poll：距上次告警 < interval → 不應再發。
+                for _ in range(polls_per_window):
+                    cur["t"] += engine_watchdog.POLL_INTERVAL_SECONDS
+                    on_engine_crash(state, 99.0, data_dir=self.dir, log_path=log_path)
+        # circuit_broken 終態下絕不重啟。
+        m_trigger.assert_not_called()
+        # 每窗口恰一條 re-ping（共 windows 條），不是每 poll 一條。
+        reping_keys = [k for k in self._alert_keys_sent() if k.startswith("circuit_broken_reping_")]
+        self.assertEqual(
+            len(reping_keys), windows,
+            f"應每窗口恰一條 re-ping（共 {windows}），實得 {reping_keys}",
+        )
+        # key 隨整數小時變化（4/8/12...），各窗口互異 → 證明非釘死常數。
+        self.assertEqual(len(set(reping_keys)), windows, f"各窗口 key 應互異：{reping_keys}")
+        hours_step = int(interval // 3600)
+        expected = [f"circuit_broken_reping_{hours_step * (w + 1)}" for w in range(windows)]
+        self.assertEqual(reping_keys, expected)
+        # _send_alert_best_effort 也恰被呼 windows 次（每窗口一條 CRITICAL）。
+        self.assertEqual(m_send.call_count, windows)
+
+
 class TestTriggerRestartBindHostSanitize(unittest.TestCase):
     """WATCHDOG-BINDHOST-SANITIZE-1 (2026-06-05)：trigger_restart 餵安全 bind-host。
 

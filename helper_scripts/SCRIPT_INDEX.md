@@ -357,6 +357,7 @@ fail-closed，total-miss + partial-miss 同歸此判，絕不誤報 PASS_CAPTURE
 | `canary/engine_watchdog.py` | Layer B（spec v0.2 §4）擴增：新增 TRADING_INERT_PROLONGED 業務心跳探測；獨立於 ENGINE_CRASH 路徑（severity=WARNING，不重啟 engine）；trigger conditions = paper_paused 持續超 threshold OR recent_intents 滾動窗口無增長；per-engine 獨立 state；cooldown 防 alarm spam；TRADING_INERT_CLEARED transition log；in-memory + on-disk state（spec B-5：watchdog restart 不重置 incident）；CLI 加 `--disable-inert-probe` / `--inert-probe-config` 兩 flag。 |
 | `canary/watchdog_inert_probe.toml` | Layer B per-env threshold 配置：demo=60min/20min（學習資料源 / grid-dominant aware）、live_demo=30min/15min（中間嚴格）、live=15min/10min（最敏感）、paper=demo defaults（dormant default）。fail-loud RAISE on TOML parse error；缺檔 fallback 預設值。 |
 | `canary/test_engine_watchdog.py` | Layer B 32 unit tests：resolve_engine_label / load_inert_probe_config / detect_paper_paused_stuck / detect_intents_zero_delta / evaluate_inert_probe / state persistence / run_inert_probe_once；spec B-1/B-1a/B-2/B-3/B-4/B-5/B-7 全覆蓋。Mac unittest + pytest 32/32 PASS。 |
+| `canary/test_watchdog_alert.py` | WATCHDOG-ALERT-WIRE（2026-06-05）22 unit tests：共用 alert_config loader（file-primary / env-fallback / 壞檔安全 / save round-trip 0600 / mask_secret）、SSRF 守衛（阻擋 metadata 169.254.169.254 / loopback / RFC1918 / link-local，拒 http，放行 public https）、watchdog emit 去重（≤1/key）+ recovery 清 marker + 未配置 no-op 不拋 + 告警掛起不拖主循環。Mac pytest 22/22 PASS。 |
 
 ## 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX Layer A Round 2
 

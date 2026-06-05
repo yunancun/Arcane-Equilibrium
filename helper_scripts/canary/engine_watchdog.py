@@ -20,13 +20,17 @@ from __future__ import annotations
 
 import argparse
 import fcntl
+import hashlib
+import hmac
 import json
 import logging
 import os
 import signal
 import subprocess
 import sys
+import threading
 import time
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
@@ -67,6 +71,11 @@ RESTART_BACKOFF_SECONDS: list[float] = [60.0, 120.0, 300.0, 600.0, 3600.0]
 # Consecutive failures before circuit-breaking (stop trying + alert).
 # circuit-break 前最大連續失敗次數（超過則停止嘗試 + 升級告警）。
 MAX_CONSECUTIVE_FAILURES = 5
+# Prolonged-down re-alert cadence (seconds). While the circuit stays broken,
+# re-ping at most once per this window (key changes per window → dedup allows one).
+# 持續宕機重發告警間隔（秒）。熔斷期間每個窗口最多重發一次（key 隨窗口變化）。
+# 預設 4h；2026-06-05 incident 引擎 down ~20h 無人知，4h 重發可在長宕機時持續提醒。
+RE_ALERT_INTERVAL_SECONDS = 14400.0
 # Restart command — invoked via subprocess with timeout.
 # 重啟命令 — 透過 subprocess 呼叫帶 timeout。
 RESTART_COMMAND = ["bash", "helper_scripts/restart_all.sh", "--engine-only"]
@@ -76,6 +85,13 @@ MAINTENANCE_FLAG = "engine_maintenance.flag"
 WATCHDOG_LOCK_FILE = "watchdog.lock"
 WATCHDOG_STATE_FILE = "watchdog_state.json"
 CANARY_EVENTS_FILE = "canary_events.jsonl"
+# GUI-configurable alert credentials, shared with the FastAPI app's alert_config.py.
+# GUI 可配置告警憑證檔，與 app 的 alert_config.py 共用同一 schema / key 名。
+# watchdog 端內聯讀取（不 import app，維持零 app 依賴）。
+ALERT_CONFIG_FILE = "alert_config.json"
+# Alert HTTP timeout — stricter than the app's 10s; the watchdog must never stall.
+# 告警 HTTP 超時 — 比 app 的 10s 更嚴；watchdog 絕不可被告警卡住。
+ALERT_HTTP_TIMEOUT_SECONDS = 5.0
 ENGINE_LOG_FILENAME = "engine.log"
 ENGINE_LOG_ROTATED_DIRNAME = "engine_logs"
 ENGINE_LOG_ROTATED_GLOB = "engine-*.log"
@@ -559,6 +575,242 @@ def clear_restart_skipped_marker(data_dir: str) -> None:
     save_state(data_dir, state)
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# WATCHDOG-ALERT-WIRE (2026-06-05): engine-down 非靜默告警
+# 為什麼在 watchdog 內聯（而非 import app alerter）：watchdog 是恢復元件，必須維持
+# 零 app 依賴（不得把 FastAPI / sqlx / governance 拉進恢復迴圈）。憑證來源與 app 的
+# alert_config.py 完全共用 —— 讀同一個 <data_dir>/alert_config.json（file-primary，
+# env-fallback），故 schema / key 名單一來源。此處只內聯 ~15 行讀取拷貝 + stdlib
+# urllib 送出，不依賴 app 套件。
+# 失敗隔離（load-bearing）：所有送出皆 daemon thread fire-and-forget + 5s timeout +
+# catch-all；告警呼叫一律在 restart/recovery 邏輯「之後」，絕不在重啟關鍵路徑上。
+# 監控迴圈的正確性不依賴任何告警成功。
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# 一次性「無通道」警告旗標 —— 未配置時只 warn 一次，避免每次 poll 灌 log。
+_alert_unconfigured_warned = False
+
+
+def _load_alert_creds(data_dir: str) -> dict:
+    """讀 alert_config.json 的告警憑證（file-primary，env-fallback；best-effort，永不拋）。
+
+    這是 app alert_config.load_alert_config 的內聯精簡拷貝（只讀，不含 save/validate/mask），
+    維持 watchdog 零 app 依賴。壞檔 / 缺檔回安全空殼後套 env-fallback。
+    回傳 {"telegram":{enabled,bot_token,chat_id}, "webhook":{enabled,urls,secret}}。
+    """
+    cfg = {
+        "telegram": {"enabled": False, "bot_token": "", "chat_id": ""},
+        "webhook": {"enabled": False, "urls": [], "secret": ""},
+    }
+    raw = None
+    try:
+        with open(Path(data_dir) / ALERT_CONFIG_FILE, "r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError, OSError, ValueError):
+        raw = None
+    except Exception:  # noqa: BLE001 - 憑證讀取必須 fail-safe
+        raw = None
+
+    if isinstance(raw, dict):
+        tg = raw.get("telegram")
+        if isinstance(tg, dict):
+            cfg["telegram"]["bot_token"] = tg.get("bot_token", "") if isinstance(tg.get("bot_token"), str) else ""
+            cfg["telegram"]["chat_id"] = tg.get("chat_id", "") if isinstance(tg.get("chat_id"), str) else ""
+            cfg["telegram"]["enabled"] = bool(tg.get("enabled", False))
+        wh = raw.get("webhook")
+        if isinstance(wh, dict):
+            urls_raw = wh.get("urls")
+            urls = [u.strip() for u in urls_raw if isinstance(u, str) and u.strip()] if isinstance(urls_raw, list) else []
+            cfg["webhook"]["urls"] = urls
+            cfg["webhook"]["secret"] = wh.get("secret", "") if isinstance(wh.get("secret"), str) else ""
+            cfg["webhook"]["enabled"] = bool(wh.get("enabled", False))
+
+    # env-fallback（back-compat）：檔內憑證為空時，從既有 env 變量補。
+    if not cfg["telegram"]["bot_token"] and not cfg["telegram"]["chat_id"]:
+        env_token = os.getenv("OPENCLAW_TELEGRAM_BOT_TOKEN", "").strip()
+        env_chat = os.getenv("OPENCLAW_TELEGRAM_CHAT_ID", "").strip()
+        # LOW-1 (E2 2026-06-05) 對齊 app alert_config._apply_env_fallback：閘用 OR
+        # （任一非空就吸收），enabled 由「雙非空」推導。今日兩寫法等價（只 token 或只
+        # chat 時 tg_active 仍 False = 不送），但對齊可消除 drift，避免日後語義分叉。
+        if env_token or env_chat:
+            cfg["telegram"] = {
+                "enabled": bool(env_token and env_chat),
+                "bot_token": env_token,
+                "chat_id": env_chat,
+            }
+    if not cfg["webhook"]["urls"]:
+        env_urls = [u.strip() for u in os.getenv("OPENCLAW_WEBHOOK_URLS", "").split(",") if u.strip()]
+        if env_urls:
+            cfg["webhook"] = {
+                "enabled": True, "urls": env_urls,
+                "secret": os.getenv("OPENCLAW_WEBHOOK_SECRET", "").strip(),
+            }
+    return cfg
+
+
+def _post_telegram_alert(token: str, chat_id: str, text: str) -> None:
+    """stdlib urllib 送一則 Telegram 訊息；catch-all，永不拋（在 daemon thread 內呼叫）。"""
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = json.dumps({"chat_id": chat_id, "text": text}).encode("utf-8")
+        req = urllib.request.Request(url, data=payload, headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=ALERT_HTTP_TIMEOUT_SECONDS):
+            pass
+    except Exception as exc:  # noqa: BLE001 - 告警失敗不得影響 watchdog
+        logger.debug("Telegram alert send failed (non-fatal): %s", exc)
+
+
+def _post_webhook_alert(urls: list, secret: str, body_obj: dict) -> None:
+    """stdlib urllib 送 webhook（多端點扇出）；HMAC-SHA256 簽名（鏡像 webhook_alerter._sign）。
+
+    catch-all per-URL，永不拋（在 daemon thread 內呼叫）。
+    """
+    try:
+        body = json.dumps(body_obj, default=str).encode("utf-8")
+        signature = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest() if secret else ""
+        for url in urls:
+            try:
+                headers = {"Content-Type": "application/json"}
+                if signature:
+                    headers["X-OpenClaw-Signature"] = signature
+                req = urllib.request.Request(url, data=body, headers=headers)
+                with urllib.request.urlopen(req, timeout=ALERT_HTTP_TIMEOUT_SECONDS):
+                    pass
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Webhook alert send failed (non-fatal): %s", exc)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Webhook alert build failed (non-fatal): %s", exc)
+
+
+def _send_alert_best_effort(subject: str, body: str, severity: str, data_dir: str = "") -> None:
+    """best-effort 發告警：file/env 讀憑證，daemon thread fire-and-forget，5s timeout，catch-all。
+
+    為什麼 fire-and-forget + 永不拋：告警必須與 watchdog 恢復迴圈完全解耦 —— 任何
+    掛起 / 失敗 / 缺端點都不得拖住 poll 或阻塞重啟。無任一通道配置時靜默 no-op，
+    僅一次性 logger.warning（避免每 poll 灌 log）。憑證只讀進記憶體，絕不寫進
+    canary_events.jsonl / log / payload（log 通道名，不 log token）。
+    """
+    global _alert_unconfigured_warned
+    try:
+        creds = _load_alert_creds(data_dir or os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"))
+    except Exception as exc:  # noqa: BLE001 - 憑證讀取必須 fail-safe
+        logger.debug("alert creds load failed (non-fatal): %s", exc)
+        return
+
+    tg = creds["telegram"]
+    wh = creds["webhook"]
+    tg_active = bool(tg["enabled"]) and bool(tg["bot_token"]) and bool(tg["chat_id"])
+    wh_active = bool(wh["enabled"]) and len(wh["urls"]) > 0
+
+    if not tg_active and not wh_active:
+        if not _alert_unconfigured_warned:
+            logger.warning(
+                "Alert channels unconfigured — engine-down alerts disabled "
+                "/ 告警通道未配置 — engine-down 告警停用",
+            )
+            _alert_unconfigured_warned = True
+        return
+
+    text = f"[{severity}] {subject}\n{body}"
+    if tg_active:
+        threading.Thread(
+            target=_post_telegram_alert,
+            args=(tg["bot_token"], tg["chat_id"], text),
+            daemon=True,
+        ).start()
+    if wh_active:
+        body_obj = {
+            "type": "system", "event": subject, "severity": severity,
+            "detail": body, "timestamp_ms": int(time.time() * 1000),
+        }
+        threading.Thread(
+            target=_post_webhook_alert,
+            args=(list(wh["urls"]), wh["secret"], body_obj),
+            daemon=True,
+        ).start()
+
+
+def emit_engine_down_alert_if_new(
+    data_dir: str, alert_key: str, subject: str, body: str, now: float
+) -> bool:
+    """engine-down 告警去重發送（鏡像 emit_restart_skipped_if_new 語義）。
+
+    比對穩定的 alert_key 與持久化的 last_engine_down_alert_key（存於 watchdog_state.json）；
+    key 不變則去重 return False（同一狀態整段窗口只發 ≤1 條）。新 key 時：寫 marker +
+    last_engine_down_alert_ts，記錄 engine_down_since_ts（首次 down-alert 才記，供算宕機時長），
+    透過 _send_alert_best_effort 送出，並 append ENGINE_DOWN_ALERT_SENT canary 供稽核。
+
+    為什麼用 key 去重而非時間：circuit_broken 終態可持續數小時（2026-06-05 down ~20h），
+    若每 poll 都發等於灌爆告警通道；prolonged-down 的 key 隨窗口變化，故每窗口仍能恰好
+    重發一次（neither spam nor miss）。
+
+    Returns:
+        True 本次有送（key 為新）；False 去重 skip。
+    """
+    state = load_state(data_dir)
+    if state.get("last_engine_down_alert_key") == alert_key:
+        return False
+    state["last_engine_down_alert_key"] = alert_key
+    state["last_engine_down_alert_ts"] = now
+    # 首次 down-alert 記下 down-since，供 payload 與恢復訊息算宕機時長；已有則不覆蓋。
+    if "engine_down_since_ts" not in state:
+        state["engine_down_since_ts"] = now
+    save_state(data_dir, state)
+    _send_alert_best_effort(subject, body, "CRITICAL", data_dir)
+    _append_canary_event(data_dir, {
+        "ts": now, "event": "ENGINE_DOWN_ALERT_SENT", "alert_key": alert_key,
+    })
+    return True
+
+
+def clear_engine_down_alert_marker(data_dir: str) -> None:
+    """清掉 engine-down 告警去重 marker（鏡像 clear_restart_skipped_marker）。
+
+    為什麼要清：引擎恢復後，未來再次 down-transition 應能重新發告警（而非被殘留 marker
+    永久去重吞掉）。只在 marker 實際存在時寫盤，避免無謂 I/O。同時清 engine_down_since_ts。
+    """
+    state = load_state(data_dir)
+    if (
+        state.get("last_engine_down_alert_key") is None
+        and "last_engine_down_alert_ts" not in state
+        and "engine_down_since_ts" not in state
+    ):
+        return
+    state.pop("last_engine_down_alert_key", None)
+    state.pop("last_engine_down_alert_ts", None)
+    state.pop("engine_down_since_ts", None)
+    save_state(data_dir, state)
+
+
+def _format_down_duration(seconds: float) -> str:
+    """把秒數格式化成 "<H>h <M>m"（供 payload 人類可讀）。"""
+    if seconds < 0:
+        seconds = 0
+    total_min = int(seconds // 60)
+    return f"{total_min // 60}h {total_min % 60}m"
+
+
+def _build_engine_down_payload(data_dir: str, now: float) -> tuple[str, str]:
+    """從 watchdog_state.json 既有欄位組裝 engine-down 告警 payload（subject, body）。
+
+    不讀任何憑證 / 硬邊界；只用 consecutive_failures / last_failure_reason / down-since。
+    """
+    state = load_state(data_dir)
+    consecutive = state.get("consecutive_failures", 0)
+    last_reason = state.get("last_failure_reason", "") or "unknown"
+    down_since = state.get("engine_down_since_ts", now)
+    duration = _format_down_duration(now - down_since)
+    subject = "OpenClaw engine DOWN — manual intervention required"
+    body = (
+        "engine: rust openclaw_engine\n"
+        f"down for: {duration}\n"
+        f"auto-restart: circuit broken after {consecutive} consecutive failures\n"
+        f"last failure: {last_reason}\n"
+        "action: ssh trade-core; check engine.log; manual restart_all"
+    )
+    return subject, body
+
+
 def should_restart(data_dir: str, now: float) -> tuple[bool, str, str]:
     """
     Decide whether an auto-restart is allowed right now.
@@ -720,6 +972,15 @@ def trigger_restart(data_dir: str) -> bool:
         })
 
     save_state(data_dir, state)
+
+    # WATCHDOG-ALERT-WIRE：熔斷（自動恢復放棄）才告警 —— 這是真正需要人工介入的訊號。
+    # 必須在 save_state 之後：emit 內以 load_state 讀 consecutive_failures / last_failure_reason
+    # 組裝 payload，需先落盤才正確。key="circuit_broken" 確保整段熔斷期只發一次（去重）。
+    # 不在 RESTART_FAILED 路徑告警（那是退避中自癒的暫態，會在正常重啟循環中刷屏）。
+    if state.get("circuit_broken"):
+        subject, body = _build_engine_down_payload(data_dir, now)
+        emit_engine_down_alert_if_new(data_dir, "circuit_broken", subject, body, now)
+
     return False
 
 
@@ -834,6 +1095,22 @@ def on_engine_crash(
             # circuit_broken 終態下也不會每 2s 灌一條把 RESTART_CIRCUIT_BROKEN 淹沒。
             emit_restart_skipped_if_new(data_dir, reason_key, reason_detail, now)
 
+        # WATCHDOG-ALERT-WIRE：持續宕機重發告警（level-triggered）。
+        # 為什麼需要：2026-06-05 引擎 down ~20h；熔斷後 circuit_broken 是終態，初次
+        # 告警之後不會再有狀態轉移觸發新告警。這裡每 RE_ALERT_INTERVAL_SECONDS 窗口
+        # 重發一次提醒（key 隨整數小時變化 → 去重恰好每窗口一條，不每 poll 刷屏）。
+        # 閘在 circuit_broken：退避中（未熔斷）仍可能自癒，不重發。
+        _state = load_state(data_dir)
+        if _state.get("circuit_broken"):
+            last_alert_ts = _state.get("last_engine_down_alert_ts", 0.0)
+            if now - last_alert_ts >= RE_ALERT_INTERVAL_SECONDS:
+                down_since = _state.get("engine_down_since_ts", now)
+                hours_down = int((now - down_since) // 3600)
+                subject, body = _build_engine_down_payload(data_dir, now)
+                emit_engine_down_alert_if_new(
+                    data_dir, f"circuit_broken_reping_{hours_down}", subject, body, now,
+                )
+
     # 3-strike 回滾檢查維持 edge-triggered（與 crash 計數綁定）：只在剛發生轉移時評估。
     # 為什麼綁 was_alive：crash_timestamps 只在轉移時 append，已 down 的重複 poll 不應
     # 重新觸發 rollback 判定（避免在持續 down 期間每次 poll 都報 rollback）。
@@ -876,6 +1153,22 @@ def on_engine_recovery(state: WatchdogState, data_dir: str = "") -> None:
     state.last_recovery_ts = time.time()
     if data_dir:
         clear_restart_skipped_marker(data_dir)
+        # WATCHDOG-ALERT-WIRE：恢復全清告警 —— 僅在先前確實發過 down-alert 時才發。
+        # 為什麼有條件：若引擎一直健康（從未告警），恢復路徑不應憑空發 INFO；只有走過
+        # 熔斷 / 宕機告警的恢復才值得通知「已恢復」。讀 marker（含 down-since）後再清，
+        # 順序不可顛倒（先清會丟失宕機時長）。
+        _down_state = load_state(data_dir)
+        if _down_state.get("last_engine_down_alert_key") is not None:
+            now = time.time()
+            down_since = _down_state.get("engine_down_since_ts", now)
+            duration = _format_down_duration(now - down_since)
+            _send_alert_best_effort(
+                "OpenClaw engine RECOVERED",
+                f"snapshot fresh again (was down {duration})",
+                "INFO",
+                data_dir,
+            )
+        clear_engine_down_alert_marker(data_dir)
     logger.info(
         "ENGINE_RECOVERED — Rust engine snapshot is fresh again "
         "/ 引擎已恢復 — Rust 引擎快照恢復新鮮",
