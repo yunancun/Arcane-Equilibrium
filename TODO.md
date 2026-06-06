@@ -1,6 +1,6 @@
 # 玄衡 TODO — 主動派工佇列
 
-**版本** v119 ｜ **日期** 2026-06-06 ｜ **來源實作 HEAD** `f33b5e7f`（P2 #6/#7 已提交於 `feature/l2-critic-lessons-tools`，**未 push/未同步/未部署**；前序 `7494126a` AEG 為三端同步）｜ runtime 詳見 §0。
+**版本** v119 ｜ **日期** 2026-06-06 ｜ **來源實作 HEAD** main（P2 #6 `a59a7f60` + #7 `e0dc2a14` 已 cherry-pick 上 **main** 並 push；operator 選 **push-only 不 rebuild**；engine 仍 June-3 binary → #6 待 rebuild、#7 待 API restart 才生效）｜ ⚠ main 另有其他 session 今日合併、**尚未部署**之 residual-producer + L2 + watchdog（含未套用 migration **V131/V132/V133**），下次 main rebuild 會一併部署 → 須先補各 migration Linux PG dry-run｜ runtime 詳見 §0。
 **當前主線**：`P0-EDGE-1` Alpha-Edge 體制證據治理（§1）。候選 2 多日 trend = 🔴 **NO-GO-TREND**（關閉）；逃逸路② funding-tilt = 🔴 **NO-GO-C**（關閉）；主路 = **listing fade**（Gate-B 探針已部署，待 24h 真捕捉）+ 已完成的 AEG-S2 證據自動化 runner 基建（§2/§5）。活躍工程佇列 §5；操作員行動 §6；排程 §7。
 **指針**：版本敘事 `docs/CLAUDE_CHANGELOG.md`（TODO Version-Increment Log）；**v110 pre-cleanup 全量封存** `docs/archive/2026-06-03--todo_v110_pre_cleanup_archive.md`；V5.8 設計保存 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--v58_design_progress_preservation_audit.md`。
 
@@ -127,7 +127,7 @@
 | OP-2 Stage 0R Earn 變體決策 → OP-3 首筆質押 $100-200 USDT 僅 Flexible | OP-1 之後 | 建立首個 `learning.earn_movement_log` 證據。 |
 | 還原演練窗口（低交易 4h） / 系統層服務安裝（sudo） | 操作員 | 封鎖 OPS 全綠；提升 runtime 保護超越使用者 watchdog。 |
 | ~~P5-SM step-i soak flag-on~~ | ✅ DONE 2026-06-03（soak RUNNING，§5） | 24-48h 0-divergence gate；soak 期間避免全量 `restart_all`。 |
-| **P2 #6/#7 deploy（operator 已選 push+rebuild）— 🔴 BLOCKED** | operator 2026-06-06 選 push+rebuild，本環境受阻 | **兩重阻塞**：(1) **github.com:22 從本環境不可達**（push 逾時 `Connection timed out during banner exchange`；`ssh trade-core` tailscale 路可通）→ 無法 push。(2) **rebuild 會連帶部署整條 L2 feature + 套用 `V133__agent_lessons.sql`**（V133 header 自註「Linux PG 實證 dry-run 仍 owed」）→ 違反 mandatory V-migration dry-run，且屬 L2 concern 部署決策非 #6/#7。Linux 現於 `main@627b4772`（非本 feature 分支）。**安全路徑**（需 github 連線環境）：(a) L2 整體部署（含 V133 Linux dry-run×2 + L2 sign-off）連 #6/#7 一起 rebuild，或 (b) 把 #6/#7 cherry-pick 到 main 隔離部署（不帶 L2/V133）。#6 純 source 語義（binary 行為差異僅 rebuild 後生效）；#7 純 Python（API restart 即生效，無需 rebuild）。 |
+| **P2 #6/#7 已上 main（operator 選 push-only 不 rebuild）** | ✅ 2026-06-06 cherry-pick `a59a7f60`(#6)+`e0dc2a14`(#7) 上 main + push（ssh-over-443，github:22 firewall 繞過）| operator 選 Option-1：只 push 不 rebuild。**校正先前誤報**：engine 健康（PID 3801475，June-3 binary，actively ticking；先前「engine down」是搜錯 binary 名 `openclaw_engine`→實為 `openclaw-engine`；先前「concurrent deploy」是誤讀 21h 前 canary）。main `4b97d344..627b4772` **0 個 .rs 變動**（residual/L2 皆 Python+migration）→ #6 dispatch.rs 在與 E4 驗證相同的 Rust tree 上、編譯一致。**#6/#7 生效待下次 main rebuild**（#6 Rust 需 rebuild、#7 Python 待 API restart）。⚠ 下次 main rebuild 會一併部署其他 session 的 residual/L2 + **V131/V132/V133（latest applied=130，全未套用；V133 dry-run owed）**→ 由 owning session/operator 排程並補 migration dry-run，非本 track。 |
 | ~~P2 #8 AST 解凍決策~~ | ✅ operator 2026-06-06 選 (A) 接受 defer | #8 留 blueprint，待 `feature/residual-producer` merge+deploy+schema freeze 後解凍（producer 線本身尚有 signal_spec producer/hidden_oos sealer/mlde hook 未完成，見 `project_2026_06_05_residual_producer_build`）。 |
 
 ---
