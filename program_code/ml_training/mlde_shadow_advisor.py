@@ -575,6 +575,64 @@ def _persist_recommendations(
     return inserted
 
 
+def _maybe_attach_residual_evidence(dsn, recs, cfg) -> int:
+    """R-3 啟用 hook：為每個 recommendation 附 residual report + signal_spec 到 payload。
+
+    硬安全：
+      ① env-flag `OPENCLAW_RESIDUAL_ALPHA_PRODUCER` 未開 → 立即回 0（**零行為改變**）。
+      ② **fail-soft**：residual producer 是 additive 證據；其任何錯誤只 log、**絕不
+         中斷 recommendation cycle**（壞了不能拖垮主管線）。
+      ③ **唯讀** conn（producer 只 SELECT）。
+    """
+    try:
+        from program_code.ml_training.residual_alpha_cycle import (
+            attach_residual_reports,
+            residual_producer_enabled,
+        )
+    except ModuleNotFoundError:  # pragma: no cover - 直跑 fallback
+        try:
+            from ml_training.residual_alpha_cycle import (  # type: ignore
+                attach_residual_reports,
+                residual_producer_enabled,
+            )
+        except ModuleNotFoundError:
+            return 0
+    if not residual_producer_enabled():
+        return 0
+
+    import psycopg2  # type: ignore[import]
+    from datetime import datetime, timedelta, timezone
+
+    try:
+        lookback_days = int(os.environ.get("OPENCLAW_RESIDUAL_LOOKBACK_DAYS", "45"))
+    except (TypeError, ValueError):
+        lookback_days = 45
+    since = datetime.now(timezone.utc) - timedelta(days=max(1, lookback_days))
+    conn = None
+    try:
+        conn = psycopg2.connect(dsn)
+        conn.set_session(readonly=True, autocommit=True)
+        attached = attach_residual_reports(
+            recs, conn, since=since, engine_mode=cfg.engine_mode
+        )
+        logger.info(
+            "residual evidence attached to %d/%d recommendations (engine_mode=%s)",
+            attached,
+            len(recs),
+            cfg.engine_mode,
+        )
+        return attached
+    except Exception as exc:  # noqa: BLE001 — fail-soft：絕不中斷 recommendation cycle
+        logger.warning("residual evidence attach skipped (producer error): %s", exc)
+        return 0
+    finally:
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:  # noqa: BLE001
+                pass
+
+
 def generate_shadow_recommendations(
     dsn: Optional[str] = None,
     cfg: Optional[ShadowAdvisorConfig] = None,
@@ -591,6 +649,9 @@ def generate_shadow_recommendations(
         return {"skipped": "no_database_url", "inserted": 0, "recommendations": 0}
     rows = _fetch_aggregate_rows(resolved_dsn, cfg)
     recs = build_recommendations(rows, cfg)
+    # R-3 啟用 hook（env-flag OFF 預設、fail-soft、唯讀）：附 residual report + signal_spec
+    # 到 payload，供下游 manifest/LG-5 evidence gate 取用。dry_run 不附。
+    residual_attached = 0 if dry_run else _maybe_attach_residual_evidence(resolved_dsn, recs, cfg)
     inserted = (
         0
         if dry_run
@@ -605,6 +666,7 @@ def generate_shadow_recommendations(
         "aggregate_rows": len(rows),
         "recommendations": len(recs),
         "inserted": inserted,
+        "residual_attached": residual_attached,
         "dry_run": dry_run,
     }
 
