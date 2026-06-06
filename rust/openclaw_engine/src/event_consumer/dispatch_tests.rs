@@ -270,6 +270,101 @@ fn test_classify_110001_110009_unchanged_noop_no_regression() {
 }
 
 #[test]
+fn test_classify_110072_duplicate_order_link_id_is_structural() {
+    // P2-ORDERLINKID-110072：classify 層維持 Structural（fail-closed）保護
+    // OPEN path——open 撞 110072 = id 撞歷史 = 開倉未成功，絕不可當成功。
+    // close retry 的冪等成功 upgrade 在 consumption Structural 分支以 is_close
+    // guard 處理（見 close_dup_is_idempotent_success），不在 classify 層。
+    // 此測試錨定顯式 110072 arm（防回退到 `_ => Structural` 後失去可發現性）。
+    let e = biz(110072, "OrderLinkedID is duplicate");
+    assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
+}
+
+#[test]
+fn test_close_dup_is_idempotent_success_close_110072_true() {
+    // close req（is_close=true）+ 110072 → 冪等成功（首次 close attempt 已達
+    // Bybit、response 丟失，retry 重發同一 order_link_id 撞此碼）。
+    let req = close_dispatch_req_for_zero(true, true, 0.0);
+    let err = biz(110072, "OrderLinkedID is duplicate");
+    assert!(
+        close_dup_is_idempotent_success(&req, &err),
+        "close + 110072 應判為冪等成功"
+    );
+}
+
+#[test]
+fn test_close_dup_is_idempotent_success_open_110072_false() {
+    // BB MANDATORY guard 關鍵測試：open req（is_close=false）+ 110072 → false。
+    // open 單次無重試（OPEN_NO_RETRY），撞 110072 只可能是 id 撞歷史 = 開倉
+    // 未成功，絕不可當成功（會掩蓋未開倉的真相）。
+    // 對抗驗證：若 close_dup_is_idempotent_success 拿掉 `req.is_close` guard，
+    // 此測試應 FAIL（open 110072 會被誤判為成功）——證明 is_close guard 是
+    // open path fail-closed 的有效屏障。
+    let req = close_dispatch_req_for_zero(true, false, 0.0); // is_close=false (open)
+    let err = biz(110072, "OrderLinkedID is duplicate");
+    assert!(
+        !close_dup_is_idempotent_success(&req, &err),
+        "open + 110072 絕不可當成功（id 撞歷史 = 開倉未成功）"
+    );
+}
+
+#[test]
+fn test_close_dup_is_idempotent_success_other_retcode_false() {
+    // close req + 其他業務碼（如 110001）→ false。僅 110072 觸發此冪等路徑；
+    // 110001/110009 由既有 NoOp 路徑處理，不走 Structural 冪等 upgrade。
+    let req = close_dispatch_req_for_zero(true, true, 0.0);
+    assert!(
+        !close_dup_is_idempotent_success(&req, &biz(110001, "order not exists")),
+        "close + 110001 不是 110072 冪等成功"
+    );
+    assert!(
+        !close_dup_is_idempotent_success(&req, &biz(110012, "insufficient available balance")),
+        "close + 110012 不是 110072 冪等成功"
+    );
+}
+
+#[test]
+fn test_close_dup_is_idempotent_success_non_business_error_false() {
+    // close req + 非 Business err（如 NoCredentials / Other client-side fault）
+    // → false。冪等 upgrade 僅認 Bybit Business retCode 110072；非交易所回應的
+    // client 端錯誤（配置/分頁不變式違反）維持 fail-closed。
+    let req = close_dispatch_req_for_zero(true, true, 0.0);
+    assert!(
+        !close_dup_is_idempotent_success(&req, &BybitApiError::NoCredentials),
+        "close + NoCredentials 不是 110072 冪等成功"
+    );
+    assert!(
+        !close_dup_is_idempotent_success(
+            &req,
+            &BybitApiError::Other("pagination cursor stalled".into())
+        ),
+        "close + Other(client-side) 不是 110072 冪等成功"
+    );
+}
+
+#[test]
+fn test_110072_does_not_trigger_local_position_convergence() {
+    // BB MANDATORY guard：110072 與 110017 不同，**不**觸發本地倉收斂。
+    // 鎖定 noop_is_exchange_zero_position 對 110072 回 false（110072 絕不可
+    // 加入收斂集；倉位真相由首次成功 attempt 的 WS fill/position update 回填）。
+    assert!(
+        !noop_is_exchange_zero_position(&biz(110072, "OrderLinkedID is duplicate")),
+        "110072 must NOT trigger ExchangeZeroClose local convergence (only 110017 converges)"
+    );
+}
+
+#[test]
+fn test_open_retry_budget_unchanged_after_110072_change() {
+    // 回歸錨點（BB guard 可追溯）：110072 改動不得碰 open retry 預算。
+    // open/create 仍是空 slice（0 重試）；110072 的冪等 upgrade 是 NoOp-style
+    // 成功收尾，**不**是 retry（NoOp ≠ retry）。亦由
+    // test_dispatch_retry_delays_helper_open_is_empty_close_is_bounded 覆蓋，
+    // 此處顯式重申以鎖定 BB OPEN_NO_RETRY 不變量。
+    assert_eq!(dispatch_retry_delays_for_intent(false), OPEN_NO_RETRY.as_slice());
+    assert!(dispatch_retry_delays_for_intent(false).is_empty());
+}
+
+#[test]
 fn test_classify_insufficient_balance_is_structural() {
     let e = biz(110012, "insufficient available balance");
     assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);

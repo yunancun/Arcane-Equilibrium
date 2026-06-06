@@ -337,6 +337,18 @@ fn classify_business_retcode(ret_code: i64, ret_msg: &str) -> DispatchOutcome {
         // 槓桿未修改 = 已為目標值。
         110043 => DispatchOutcome::NoOp,
 
+        // 110072 OrderLinkedID is duplicate — Bybit 專屬「重複 orderLinkId」碼。
+        // 預設 Structural（fail-closed）保護 OPEN path：open 單次無重試（OPEN_NO_RETRY），
+        // 撞 110072 只可能是 id 撞歷史 = 開倉未成功，絕不可當成功。
+        // close retry 場景（首次 attempt 已成功但 response 丟失、retry 重發同一 id 撞此碼）
+        // 的冪等成功 upgrade 在 consumption Structural 分支以 is_close guard 處理
+        // （見本檔 DispatchRetryResult::Structural 分支 + close_dup_is_idempotent_success）。
+        // 與 110017 不同：110072 **不**觸發本地倉收斂，只把 lease 釋放為 Consumed。
+        // BB 2026-06-06 APPROVE-WITH-MANDATORY-GUARD：docs/CCAgentWorkSpace/BB/workspace/reports/
+        // 內 110072 報告。語意上與舊 `_ => Structural` 對 110072 相同，顯式化讓
+        // classify test 可錨定 + 可發現。
+        110072 => DispatchOutcome::Structural,
+
         // Dust / min qty / exceed max qty — structural.
         // 粉塵/最小數量/超過最大數量 — 結構性。
         170124 | 170210 => DispatchOutcome::Structural,
@@ -374,6 +386,19 @@ fn noop_is_exchange_zero_position(err: &BybitApiError) -> bool {
 fn noop_is_reduce_only_close(req: &OrderDispatchRequest) -> bool {
     // is_close==true 在 create_req 對應 reduce_only=Some(true)；二者語意綁定。
     req.is_close
+}
+
+/// P2-ORDERLINKID-110072：判斷此 Structural 結果是否為「close 重發撞 110072
+/// （重複 order_link_id）」= 冪等成功（首次 close attempt 已達 Bybit）。
+/// 僅 close intent 成立；open path 維持 fail-closed（見 classify_business_retcode
+/// 110072 arm）——open 單次無重試（OPEN_NO_RETRY），撞 110072 只可能是 id 撞歷史
+/// = 開倉未成功，絕不可當成功（BB 2026-06-06 MANDATORY guard）。
+/// 注意：110072 **不**觸發本地倉收斂——不加入 noop_is_exchange_zero_position；
+/// 此處只把 lease 釋放為 Consumed（成功），倉位真相由首次成功 attempt 的
+/// WS fill / position update 自然回填。
+fn close_dup_is_idempotent_success(req: &OrderDispatchRequest, err: &BybitApiError) -> bool {
+    req.is_close
+        && matches!(err, BybitApiError::Business { ret_code, .. } if *ret_code == 110072)
 }
 
 /// P1-110017-POSITION-DRIFT-CLOSE-LOOP：對 reduce-only 平倉收到 110017 時，
@@ -876,57 +901,83 @@ pub(super) fn spawn_order_dispatch(
                     last_error,
                     attempts,
                 } => {
-                    let (ret_code_opt, ret_msg_opt): (Option<i64>, Option<String>) =
-                        match &last_error {
-                            BybitApiError::Business {
-                                ret_code, ret_msg, ..
-                            } => (Some(*ret_code), Some(ret_msg.clone())),
-                            _ => (None, None),
-                        };
-                    error!(
-                        symbol = %req.symbol,
-                        qty = req.qty,
-                        order_link_id = %req.order_link_id,
-                        dispatch_type = dispatch_type,
-                        close = req.is_close,
-                        ret_code = ret_code_opt,
-                        ret_msg = ret_msg_opt.as_deref(),
-                        error = %last_error,
-                        attempts = attempts,
-                        "order dispatch failed (structural, no retry) / 訂單派發失敗（結構性，不重試）"
-                    );
-                    if req.is_primary {
-                        let reason =
-                            format!("dispatch_structural: attempts={attempts}; error={last_error}");
-                        if let Err(e) = pending_reg_tx.send(PendingOrderEvent::DispatchFailed {
-                            order_link_id: req.order_link_id.clone(),
-                            symbol: req.symbol.clone(),
-                            is_long: req.is_long,
-                            qty: req.qty,
-                            strategy: req.strategy.clone(),
-                            context_id: req.context_id.clone(),
-                            is_close: req.is_close,
-                            order_type: req.order_type.clone(),
-                            time_in_force: req.time_in_force,
-                            maker_timeout_ms: req.maker_timeout_ms,
-                            close_maker_audit: req.close_maker_audit.clone(),
-                            terminal_status: "Rejected".to_string(),
-                            reason,
-                            ts_ms: openclaw_core::now_ms(),
-                        }) {
-                            warn!(
-                                order_link_id = %req.order_link_id,
-                                error = %e,
-                                "dispatch failure terminal event dropped — pending state may require sweep \
-                                 / 派發失敗 terminal event 發送失敗 — pending 狀態可能需 sweep"
-                            );
-                        }
+                    // P2-ORDERLINKID-110072：close 重發撞 110072（重複 order_link_id）
+                    // = 冪等成功（首次 close attempt 已達 Bybit、response 丟失，retry
+                    // 重發同一 id 撞此碼）。走成功收尾（**不**發 DispatchFailed、**不**
+                    // 收斂本地倉），鏡像 Ok/NoOp 成功路徑。
+                    // open path 維持 fail-closed：close_dup_is_idempotent_success 僅
+                    // is_close 成立（open 撞 110072 = id 撞歷史，開倉未成功，落 else
+                    // 失敗路徑）。BB 2026-06-06 APPROVE-WITH-MANDATORY-GUARD。
+                    // last_error 在本分支僅被借用（match &last_error / Display），
+                    // helper 取 &req,&last_error 在 extract 之前，無 move 衝突。
+                    if close_dup_is_idempotent_success(&req, &last_error) {
+                        info!(
+                            symbol = %req.symbol,
+                            order_link_id = %req.order_link_id,
+                            dispatch_type = dispatch_type,
+                            close = req.is_close,
+                            attempts = attempts,
+                            "close duplicate order_link_id (110072) — idempotent success / 平倉重複 order_link_id（110072）等效成功"
+                        );
                         send_decision_lease_release(
                             &pending_reg_tx,
                             &req,
-                            LeaseOutcome::Failed,
-                            "exchange_dispatch_structural_failed",
+                            LeaseOutcome::Consumed,
+                            "exchange_dispatch_close_duplicate_idempotent",
                         );
+                    } else {
+                        let (ret_code_opt, ret_msg_opt): (Option<i64>, Option<String>) =
+                            match &last_error {
+                                BybitApiError::Business {
+                                    ret_code, ret_msg, ..
+                                } => (Some(*ret_code), Some(ret_msg.clone())),
+                                _ => (None, None),
+                            };
+                        error!(
+                            symbol = %req.symbol,
+                            qty = req.qty,
+                            order_link_id = %req.order_link_id,
+                            dispatch_type = dispatch_type,
+                            close = req.is_close,
+                            ret_code = ret_code_opt,
+                            ret_msg = ret_msg_opt.as_deref(),
+                            error = %last_error,
+                            attempts = attempts,
+                            "order dispatch failed (structural, no retry) / 訂單派發失敗（結構性，不重試）"
+                        );
+                        if req.is_primary {
+                            let reason =
+                                format!("dispatch_structural: attempts={attempts}; error={last_error}");
+                            if let Err(e) = pending_reg_tx.send(PendingOrderEvent::DispatchFailed {
+                                order_link_id: req.order_link_id.clone(),
+                                symbol: req.symbol.clone(),
+                                is_long: req.is_long,
+                                qty: req.qty,
+                                strategy: req.strategy.clone(),
+                                context_id: req.context_id.clone(),
+                                is_close: req.is_close,
+                                order_type: req.order_type.clone(),
+                                time_in_force: req.time_in_force,
+                                maker_timeout_ms: req.maker_timeout_ms,
+                                close_maker_audit: req.close_maker_audit.clone(),
+                                terminal_status: "Rejected".to_string(),
+                                reason,
+                                ts_ms: openclaw_core::now_ms(),
+                            }) {
+                                warn!(
+                                    order_link_id = %req.order_link_id,
+                                    error = %e,
+                                    "dispatch failure terminal event dropped — pending state may require sweep \
+                                     / 派發失敗 terminal event 發送失敗 — pending 狀態可能需 sweep"
+                                );
+                            }
+                            send_decision_lease_release(
+                                &pending_reg_tx,
+                                &req,
+                                LeaseOutcome::Failed,
+                                "exchange_dispatch_structural_failed",
+                            );
+                        }
                     }
                 }
                 DispatchRetryResult::TransientExhausted {

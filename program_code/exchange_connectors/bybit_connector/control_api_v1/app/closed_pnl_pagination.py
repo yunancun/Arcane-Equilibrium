@@ -36,7 +36,20 @@ from fastapi import HTTPException
 logger = logging.getLogger(__name__)
 
 # ── Closed-PnL 讀模型常量（與 strategy_ai_routes 原值一致）──
-_OPENCLAW_LINK_RE = re.compile(r"^oc_(?:close_[a-z0-9_]+_)?(?:risk_)?(?P<engine>dm|ld)(?:_|$)", re.I)
+# 對齊 Rust 真實 order_link_id 鑄造前綴 grammar（已 grep 核對非文檔假設）：
+#   開倉  step_4_5_dispatch.rs:662      oc_{em}_{ts}_{seq}
+#   風控平 commands.rs:931+988         oc_risk_{em}_{ts}_{seq}（影子軌為 sh_risk_，不入此讀模型）
+#   maker fallback 平 commands.rs:1112 oc_close_mf_fb_{em}_{ts}_{seq}
+#   IPC 平 commands.rs:1350/1547       oc_ipc_close_{em}_{ts}_{seq}
+# em = order_link_mode_tag()（pipeline_ctor.rs:317）∈ {dm=demo, ld=live_demo, lv=live, xx=paper-defensive}。
+# 為何中綴 alternation 把 ipc_close_ / close_mf_fb_ 排在泛 close_[a-z0-9_]+_ 前：
+#   泛規則會先吃掉 oc_ipc_close_ 的 "ipc_close_"（"ipc" 命中 [a-z0-9_]+）導致 em 錯位，
+#   故更具體前綴必先匹配。lv 不入 owner-map 時與 dm/ld 一致 fall-through 至 unknown，
+#   非 oc_ 或 em∉{dm,ld,lv}（含 xx）則整體不 match → external/unknown，與舊行為相容。
+_OPENCLAW_LINK_RE = re.compile(
+    r"^oc_(?:risk_|ipc_close_|close_mf_fb_|close_[a-z0-9_]+_)?(?P<engine>dm|ld|lv)(?:_|$)",
+    re.I,
+)
 _CLOSED_PNL_DAY_MS = 24 * 60 * 60 * 1000
 _CLOSED_PNL_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 _CLOSED_PNL_ALL_HISTORY_DAYS = 730
@@ -268,7 +281,11 @@ def _strategy_from_order_link_id(
     match = _OPENCLAW_LINK_RE.match(link)
     if not link or not match:
         return "external_manual", "bybit_unknown"
-    engine = "live_demo" if match.group("engine").lower() == "ld" else "demo"
+    # em 兩字元標籤 → engine 名顯式映射；lv（live mainnet）必須映射為 "live"，
+    # 不可 fall-through 誤判為 demo（會污染 live 訂單歸屬）。未知 em 不會發生
+    # （正則已限定 dm|ld|lv），保險起見以 "demo" 兜底維持舊行為。
+    _ENGINE_BY_TAG = {"dm": "demo", "ld": "live_demo", "lv": "live"}
+    engine = _ENGINE_BY_TAG.get(match.group("engine").lower(), "demo")
     owner = engine_owner_lookup(engine).get(symbol)
     if owner:
         return owner, "pg_link_id"
