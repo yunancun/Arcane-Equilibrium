@@ -152,6 +152,11 @@ def test_attach_residual_reports_maps_to_payload(monkeypatch):
     assert n == 2
     assert recs[0].payload["demo_residual_alpha_report"]["verdict"] == "defer_data"
     assert recs[1].payload["demo_residual_alpha_report"]["pbo_status"] == "not_applicable_single_candidate"
+    # signal_spec 同時被附，且通過 validator
+    from program_code.ml_training.candidate_signal_spec import validate_signal_spec
+    spec0 = recs[0].payload["signal_spec"]
+    v0 = validate_signal_spec(spec0, candidate_id="grid_trading::BTCUSDT", family_id="grid_trading")
+    assert v0.ok is True
 
 
 def test_attach_empty_returns_zero():

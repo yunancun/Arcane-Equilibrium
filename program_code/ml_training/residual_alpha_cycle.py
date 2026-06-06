@@ -49,6 +49,14 @@ except ModuleNotFoundError:  # pragma: no cover - 直跑 fallback
         load_round_trips,
     )
 
+try:  # signal_spec producer（可選；缺則只附 residual）
+    from program_code.ml_training.candidate_signal_spec_producer import build_signal_spec
+except ModuleNotFoundError:  # pragma: no cover - 直跑 fallback
+    try:
+        from ml_training.candidate_signal_spec_producer import build_signal_spec  # type: ignore
+    except ModuleNotFoundError:  # pragma: no cover
+        build_signal_spec = None  # type: ignore
+
 
 PBO_NOT_APPLICABLE_SINGLE = "not_applicable_single_candidate"
 DEFAULT_N_TRIALS_FLOOR = 10
@@ -275,17 +283,22 @@ def attach_residual_reports(
     since: datetime,
     n_symbols_screened: int = 1,
     report_field: str = RESIDUAL_ALPHA_REPORT_FIELD,
+    signal_spec_field: str = "signal_spec",
+    attach_signal_spec: bool = True,
     **cycle_kwargs: Any,
 ) -> int:
     """為每個 recommendation（須有 ``.strategy_name`` / ``.symbol`` / ``.payload``）算
-    residual report 並附到其 ``payload[report_field]``（in-memory mutate）。回 attached 數。
+    residual report + signal_spec 並附到其 payload（in-memory mutate）。回 attached 數。
 
-    caller 須先檢查 ``residual_producer_enabled()``。只讀 DB；單一配置 demo 下
-    report 為診斷性 defer（晉升閘仍 fail-closed），故附了也不會放行——這是 by design。
+    同候選的 residual report 與 signal_spec 一致（spec 的 residualization 綁 report 的
+    factor_panel_hash）。hidden_oos 走 replay registry（非 payload），由 deploy 階段接。
+    caller 須先檢查 ``residual_producer_enabled()``。只讀 DB；單一配置 demo 下 report
+    為診斷性 defer（晉升閘仍 fail-closed），附了也不會放行——by design。
     不碰 runtime / order / risk / auth。
     """
     if not recommendations:
         return 0
+    bucket_sec = float(cycle_kwargs.get("bucket_sec", DEFAULT_BUCKET_SEC))
     cells: list[dict[str, Any]] = []
     seen: set[str] = set()
     for rec in recommendations:
@@ -309,13 +322,23 @@ def attach_residual_reports(
         strategy = getattr(rec, "strategy_name", None)
         symbol = getattr(rec, "symbol", None)
         payload = getattr(rec, "payload", None)
-        cell_result = results.get(f"{strategy}::{symbol}")
+        key = f"{strategy}::{symbol}"
+        cell_result = results.get(key)
         if (
             cell_result is not None
             and cell_result.report is not None
             and isinstance(payload, dict)
         ):
             payload[report_field] = cell_result.report
+            if attach_signal_spec and build_signal_spec is not None:
+                payload[signal_spec_field] = build_signal_spec(
+                    candidate_id=key,
+                    family_id=str(strategy),
+                    strategy_name=str(strategy),
+                    symbol=str(symbol),
+                    bucket_sec=bucket_sec,
+                    residual_report=cell_result.report,
+                )
             attached += 1
     return attached
 
