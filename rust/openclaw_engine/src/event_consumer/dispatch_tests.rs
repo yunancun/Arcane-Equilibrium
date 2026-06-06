@@ -210,9 +210,19 @@ fn test_classify_ip_rate_limit_is_transient() {
 }
 
 #[test]
-fn test_classify_duplicate_order_link_id_is_noop() {
-    let e = biz(10001, "duplicate order_link_id rejected");
-    assert_eq!(classify_dispatch_error(&e), DispatchOutcome::NoOp);
+fn test_classify_duplicate_order_link_id_10001_is_structural() {
+    // P2-ORDERLINKID-110072 follow-up（2026-06-07，E2/BB flag）：10001+duplicate
+    // 的 classify 行為由 NoOp **改為 Structural**，與 110072 arm 對齊。
+    // 為什麼改：原無條件 NoOp 把 open 與 close 都當成功；open 撞重複 order_link_id
+    // 只可能是 id 撞歷史 = 開倉未成功，silent-success 是 fail-open 漏洞。
+    // close 的冪等成功 upgrade 下移到 consumption Structural 分支
+    // （close_dup_is_idempotent_success）——對 close 是同一 observable 成功結果。
+    // 大小寫不敏感（classify 用 to_ascii_lowercase）：lowercase 與 uppercase 同歸
+    // Structural（duplicate 偵測本身的 case 處理由 close_dup helper 測試覆蓋）。
+    let lower = biz(10001, "duplicate order_link_id rejected");
+    assert_eq!(classify_dispatch_error(&lower), DispatchOutcome::Structural);
+    let upper = biz(10001, "Duplicate orderLinkId rejected");
+    assert_eq!(classify_dispatch_error(&upper), DispatchOutcome::Structural);
 }
 
 #[test]
@@ -353,6 +363,67 @@ fn test_110072_does_not_trigger_local_position_convergence() {
     );
 }
 
+// ── 2026-06-07 follow-up（E2/BB flag）：close_dup_is_idempotent_success 擴
+// 涵蓋 10001+duplicate（與 110072 同類「重複 order_link_id」）──
+
+#[test]
+fn test_close_dup_is_idempotent_success_close_10001_duplicate_true() {
+    // close req（is_close=true）+ 10001+"duplicate" → 冪等成功。與 110072 同類：
+    // 首次 close attempt 已達 Bybit、response 丟失，retry 重發同一 id 撞此泛碼。
+    let req = close_dispatch_req_for_zero(true, true, 0.0);
+    let err = biz(10001, "duplicate order_link_id rejected");
+    assert!(
+        close_dup_is_idempotent_success(&req, &err),
+        "close + 10001+duplicate 應判為冪等成功"
+    );
+    // 大小寫不敏感（helper 用 to_ascii_lowercase）：uppercase 變體同樣 true。
+    let err_upper = biz(10001, "Duplicate orderLinkId rejected");
+    assert!(
+        close_dup_is_idempotent_success(&req, &err_upper),
+        "close + 10001+Duplicate（大寫）應判為冪等成功"
+    );
+}
+
+#[test]
+fn test_close_dup_is_idempotent_success_open_10001_duplicate_false() {
+    // **open path fail-closed 關鍵測試**：open req（is_close=false）+ 10001+duplicate
+    // → false。open 單次無重試（OPEN_NO_RETRY），撞重複 order_link_id 只可能是
+    // id 撞歷史 = 開倉未成功，絕不可當成功（這正是 follow-up 收斂的 silent-success
+    // 漏洞）。對抗驗證：若 helper 拿掉 `req.is_close` guard，此測試應 FAIL。
+    let req = close_dispatch_req_for_zero(true, false, 0.0); // is_close=false (open)
+    let err = biz(10001, "duplicate order_link_id rejected");
+    assert!(
+        !close_dup_is_idempotent_success(&req, &err),
+        "open + 10001+duplicate 絕不可當成功（id 撞歷史 = 開倉未成功）"
+    );
+}
+
+#[test]
+fn test_close_dup_is_idempotent_success_close_10001_non_duplicate_false() {
+    // close req + 10001 但 retMsg **不含** "duplicate"（真結構性錯誤，如格式錯/
+    // qty 非法）→ false。verifies helper 對 10001 仍需 retMsg 比對，不把所有
+    // 10001 當冪等成功（否則會掩蓋真正壞掉的 close 請求）。
+    let req = close_dispatch_req_for_zero(true, true, 0.0);
+    assert!(
+        !close_dup_is_idempotent_success(&req, &biz(10001, "invalid order_link_id format")),
+        "close + 10001+非duplicate（格式錯）不是冪等成功"
+    );
+    assert!(
+        !close_dup_is_idempotent_success(&req, &biz(10001, "invalid param: qty must be > 0")),
+        "close + 10001+非duplicate（qty 非法）不是冪等成功"
+    );
+}
+
+#[test]
+fn test_10001_duplicate_does_not_trigger_local_position_convergence() {
+    // 與 110072 一致：10001+duplicate **不**觸發本地倉收斂（只有 110017 收斂）。
+    // 鎖定 noop_is_exchange_zero_position 對 10001 回 false。
+    assert!(
+        !noop_is_exchange_zero_position(&biz(10001, "duplicate order_link_id rejected")),
+        "10001+duplicate must NOT trigger ExchangeZeroClose local convergence (only 110017 converges)"
+    );
+}
+
 #[test]
 fn test_open_retry_budget_unchanged_after_110072_change() {
     // 回歸錨點（BB guard 可追溯）：110072 改動不得碰 open retry 預算。
@@ -435,21 +506,17 @@ fn test_classify_unmatched_ip_is_structural() {
 
 #[test]
 fn test_classify_10001_invalid_order_link_id_format_is_structural() {
-    // E2 review 2026-04-19: substring match narrowed from
-    // {"duplicate", "order_link_id"} to {"duplicate"} only. Previously a
-    // retMsg like "invalid order_link_id format" would fall through the
-    // `order_link_id` substring arm → NoOp, silently success-equivalent
-    // for a genuinely structural client-side bug. Now correctly Structural.
-    //
-    // E2 審查 2026-04-19：子串收窄為僅 {"duplicate"}。之前 "invalid
-    // order_link_id format" 會誤判為 NoOp（靜默回報成功，實為 client 側
-    // 結構性錯誤），現正確歸為 Structural。
+    // 非-duplicate 的 10001（"invalid order_link_id format"，client 側格式錯）
+    // 為真結構性錯誤 → Structural。此分支 follow-up 後不變。
     let e = biz(10001, "invalid order_link_id format");
     assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
-    // Additional narrow check: case-insensitive "DUPLICATE" still matches.
-    // 補充：大寫 "DUPLICATE" 仍匹配（子串比對前 to_ascii_lowercase）。
+    // P2-ORDERLINKID-110072 follow-up（2026-06-07）：原本此處斷言大寫
+    // "DUPLICATE order_link_id" → NoOp（10001+duplicate 舊行為）。follow-up 後
+    // 10001+duplicate（含大小寫變體）改為 **Structural**（與 110072 對齊；open
+    // fail-closed，close 冪等 upgrade 下移到 consumption 層）。誠實改斷言為
+    // Structural，反映 classify 層 duplicate 與非-duplicate 的 10001 同歸 Structural。
     let e_upper = biz(10001, "DUPLICATE order_link_id");
-    assert_eq!(classify_dispatch_error(&e_upper), DispatchOutcome::NoOp);
+    assert_eq!(classify_dispatch_error(&e_upper), DispatchOutcome::Structural);
 }
 
 #[test]
@@ -563,14 +630,17 @@ async fn test_run_dispatch_retry_structural_breaks_without_retry() {
 #[tokio::test]
 async fn test_run_dispatch_retry_noop_on_second_attempt_records_attempts_2() {
     use std::cell::RefCell;
-    // Sequence: transient → NoOp (duplicate). Noop must break retry loop
-    // without consuming further attempts.
+    // 序列：transient → NoOp（110001 order-not-found）。NoOp 必須中斷重試迴圈，
+    // 不再消耗後續嘗試。
     //
-    // 序列：transient → NoOp（duplicate）。NoOp 必須中斷重試迴圈，不再消耗
-    // 後續嘗試。
+    // 註（2026-06-07）：本測試驗 run_dispatch_retry helper 的「NoOp 中斷重試」
+    // 路徑（與 Structural 中斷由 test_run_dispatch_retry_structural_breaks_without_retry
+    // 各自覆蓋）。原以 10001+duplicate 作 NoOp 觸發碼，但 follow-up 已把
+    // 10001+duplicate 改為 Structural；改用 110001（穩定 NoOp 碼）保留本測試
+    // 對 NoOp 路徑的覆蓋意圖不變。
     let results: RefCell<Vec<Result<(), BybitApiError>>> = RefCell::new(vec![
         Err(biz(10006, "rate limit")),
-        Err(biz(10001, "duplicate order_link_id rejected")),
+        Err(biz(110001, "order not exists")),
         Err(biz(99999, "should_not_be_reached")), // guard — NoOp must stop here
     ]);
     let result = run_dispatch_retry::<(), _, _>(&[5, 5, 5], "BTCUSDT", "oLid", |_| {
@@ -585,10 +655,10 @@ async fn test_run_dispatch_retry_noop_on_second_attempt_records_attempts_2() {
         } => {
             assert_eq!(attempts, 2, "NoOp on 2nd attempt must record attempts=2");
             match last_error {
-                BybitApiError::Business { ret_msg, .. } => {
-                    assert!(
-                        ret_msg.to_ascii_lowercase().contains("duplicate"),
-                        "last_error should be the NoOp-triggering duplicate"
+                BybitApiError::Business { ret_code, .. } => {
+                    assert_eq!(
+                        ret_code, 110001,
+                        "last_error should be the NoOp-triggering order-not-found code"
                     );
                 }
                 _ => panic!("expected Business error"),

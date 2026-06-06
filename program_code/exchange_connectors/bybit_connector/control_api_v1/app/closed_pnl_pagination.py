@@ -50,6 +50,9 @@ _OPENCLAW_LINK_RE = re.compile(
     r"^oc_(?:risk_|ipc_close_|close_mf_fb_|close_[a-z0-9_]+_)?(?P<engine>dm|ld|lv)(?:_|$)",
     re.I,
 )
+# orderLinkId em 兩字元標籤 → engine 名映射（module-level const，避免每次呼叫重建）。
+# lv（live mainnet）必須映射為 "live"，不可誤判為 demo（會污染 live 訂單歸屬）。
+_ENGINE_BY_TAG = {"dm": "demo", "ld": "live_demo", "lv": "live"}
 _CLOSED_PNL_DAY_MS = 24 * 60 * 60 * 1000
 _CLOSED_PNL_MAX_WINDOW_MS = 7 * 24 * 60 * 60 * 1000
 _CLOSED_PNL_ALL_HISTORY_DAYS = 730
@@ -281,10 +284,8 @@ def _strategy_from_order_link_id(
     match = _OPENCLAW_LINK_RE.match(link)
     if not link or not match:
         return "external_manual", "bybit_unknown"
-    # em 兩字元標籤 → engine 名顯式映射；lv（live mainnet）必須映射為 "live"，
-    # 不可 fall-through 誤判為 demo（會污染 live 訂單歸屬）。未知 em 不會發生
-    # （正則已限定 dm|ld|lv），保險起見以 "demo" 兜底維持舊行為。
-    _ENGINE_BY_TAG = {"dm": "demo", "ld": "live_demo", "lv": "live"}
+    # em 兩字元標籤 → engine 名顯式映射（_ENGINE_BY_TAG，module-level）。未知 em
+    # 不會發生（正則已限定 dm|ld|lv），保險起見以 "demo" 兜底維持舊行為。
     engine = _ENGINE_BY_TAG.get(match.group("engine").lower(), "demo")
     owner = engine_owner_lookup(engine).get(symbol)
     if owner:
