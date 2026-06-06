@@ -1,6 +1,6 @@
 # 玄衡 TODO — 主動派工佇列
 
-**版本** v118 ｜ **日期** 2026-06-05 ｜ **來源實作 HEAD** `7494126a`（三端同步；本版本文檔收口提交在其後）｜ runtime 詳見 §0。
+**版本** v119 ｜ **日期** 2026-06-06 ｜ **來源實作 HEAD** `f33b5e7f`（P2 #6/#7 已提交於 `feature/l2-critic-lessons-tools`，**未 push/未同步/未部署**；前序 `7494126a` AEG 為三端同步）｜ runtime 詳見 §0。
 **當前主線**：`P0-EDGE-1` Alpha-Edge 體制證據治理（§1）。候選 2 多日 trend = 🔴 **NO-GO-TREND**（關閉）；逃逸路② funding-tilt = 🔴 **NO-GO-C**（關閉）；主路 = **listing fade**（Gate-B 探針已部署，待 24h 真捕捉）+ 已完成的 AEG-S2 證據自動化 runner 基建（§2/§5）。活躍工程佇列 §5；操作員行動 §6；排程 §7。
 **指針**：版本敘事 `docs/CLAUDE_CHANGELOG.md`（TODO Version-Increment Log）；**v110 pre-cleanup 全量封存** `docs/archive/2026-06-03--todo_v110_pre_cleanup_archive.md`；V5.8 設計保存 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--v58_design_progress_preservation_audit.md`。
 
@@ -83,6 +83,10 @@
 | `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` | 3 | 原始碼完成 隨 reconciler 批次 | E2/E4 隨同批次審查。 |
 | `P3-110017-CONVERGE-AUDIT-OBSERVABILITY` | 3 | 部署驗證殘留 | MIT/E1 驗證缺失 `exchange_zero_close_converge` audit 列 + ~63s 停止計時。 |
 | `P3-110017-BB-DOC-FOLLOWUPS` | 3 | BB/TW 文檔跟進 | 更新 110017 dictionary 語意；驗證 110009 doc-version 模糊性。 |
+| `P2-ORDERLINKID-HARDENING` (#6) | 2 | ✅ DONE 2026-06-06（commit `35b2175a`，**未 push**；Linux cargo regression owed post-commit）| Bybit 110072（duplicate orderLinkId）close-path 等價冪等成功、open-path fail-closed、不收斂倉。鏈 PA→BB(APPROVE-WITH-MANDATORY-GUARD)→E1(Rust+Py)→E2(ACCEPT 雙)→E4(PASS, lib 3765/0)。`dispatch.rs` `close_dup_is_idempotent_success` guard + `closed_pnl_pagination.py` regex 對齊真實前綴 + `lv→live`（順帶修 `oc_ipc_close_` 歷史誤歸屬）。Bybit reference 110072 row 已補。17-case 跨語言 grammar 對賬 ALL MATCH。cosmetic debt：`_ENGINE_BY_TAG` 可提 module-level（非阻塞）。 |
+| `P2-POSTMORTEM-CLASSIFIER` (#7) | 2 | ✅ DONE 2026-06-06（commit `f33b5e7f`，**未 push**）| `learning_engine/signal_postmortem.py` 純離線 8-taxonomy 失敗分類器（消費既有 vetted gate report，不重算統計）。鏈 PA→E1→E2(PASS)→E4(PASS, learning_engine 178→202, 0 mock)。0 caller/0 DB/0 live（root principle 7）；deterministic cascade（sample_insufficient 嚴先於 no_edge）。**第二版 deferred**：DB evidence 聚合器 + research-scheduler/proposal-prior consumer（consumer 模組尚不存在；DB 聚合 blocked-on residual producer 落地）。 |
+| `P2-AST-SIGNALSPEC-CONFORMANCE` (#8) | 3 | 🔴 DEFERRED / NO-GO（PA 2026-06-06 裁決）| SignalSpec producer 只在未合併/未部署/零 caller/flag-OFF 的 `feature/residual-producer` 分支；HEAD 僅 validator，schema 未凍結（horizon/inputs/residualization 形態 fixture↔branch 不一致）。**解凍 gate**：residual-producer merge+deploy+schema freeze。設計藍圖已備（真實 schema 是 flat manifest 非 expression tree→operators/max-depth N/A，正名「SignalSpec schema/lineage conformance checker」）。operator 決策見 §6。 |
+| `P3-110072-10001-DUP-OPEN-FAILCLOSED-EVAL` | 3 | 觀察（E2/BB 順帶 flag）| 既有 `10001 + retMsg "duplicate"` → NoOp 無 close guard（open 撞 10001-duplicate 也會被當成功，近不可達但與 110072 同類）。評估是否一併 narrow 為 open fail-closed。 |
 | `P1-OPS-2-PHASE-2-CUTOVER` | 1 | 等待（D+14 soak 結束 2026-06-10） | 若 14d logs 乾淨，E1 PR 移除 fallback 與陳舊 panic/reason 變體。 |
 | `P1-OPS-2-14D-SOAK-OBSERVE` | 1 | 進行中被動等待 | 每日 WARN 計數維持 0；至少一個 `/auth/renew` 仍操作員阻擋。 |
 | `P1-OPS-2-DRY-RUN` | 1 | 等待（OP-1） | 以 OP-1 作首個端到端 OPS-2 SOP dry-run；計時/失敗模式記入 runbook v1.1。 |
@@ -123,6 +127,8 @@
 | OP-2 Stage 0R Earn 變體決策 → OP-3 首筆質押 $100-200 USDT 僅 Flexible | OP-1 之後 | 建立首個 `learning.earn_movement_log` 證據。 |
 | 還原演練窗口（低交易 4h） / 系統層服務安裝（sudo） | 操作員 | 封鎖 OPS 全綠；提升 runtime 保護超越使用者 watchdog。 |
 | ~~P5-SM step-i soak flag-on~~ | ✅ DONE 2026-06-03（soak RUNNING，§5） | 24-48h 0-divergence gate；soak 期間避免全量 `restart_all`。 |
+| **P2 #6/#7 push + Linux cargo regression** | P2 #6/#7 已本地提交（`35b2175a`/`f33b5e7f`，未 push）| 決定是否 push `feature/l2-critic-lessons-tools` + Linux `cargo test -p openclaw_engine` 補回歸（#6 為 dispatch 執行路徑改動，Mac 3765/0 已過，Linux 為權威確認）。#6 純 source 語義（無 migration/無 binary 行為差異），是否需 rebuild 由 operator 定。 |
+| **P2 #8 AST 解凍決策** | PA 2026-06-06 NO-GO/defer（SignalSpec producer 在未合併分支、schema 未凍結）| 二選一：(A) 接受 defer，#8 留 blueprint 待 `feature/residual-producer` merge+schema freeze 後解凍；(B) 先推進 residual-producer 線（merge+deploy+凍結 schema）以解鎖 #8。建議 (A)（producer 線本身尚有 signal_spec producer/hidden_oos sealer/mlde hook 未完成，見 `project_2026_06_05_residual_producer_build`）。 |
 
 ---
 
