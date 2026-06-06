@@ -19,13 +19,20 @@ registry」的接線缺口（FACT 3 sealer flat-key + FACT 5 OOS 第三窗 carve
     路徑 Operator+replay:write）；不碰 runtime / order / risk / auth / lease。
   - **env-flag 預設 OFF**（``residual_producer_enabled()``）：OFF 立即
     ``(None, "disabled")`` 零寫入（fail-closed，部署預設不改現役行為）。
-  - **leak-free**（三道，MED-2 後精確化）：①exit_ts 落在 OOS 窗（>= oos_start，
+  - **leak-free**（四道，HIGH-1 後精確化）：①exit_ts 落在 OOS 窗（>= oos_start，
     嚴格 ``exit_ts < oos_start`` 才算非 OOS）的 round-trip 整筆排除，永不進
     residual 計算；②BTC klines 載入終點夾到 ``min(max_exit+pad, oos_start)``，
     **strictly < oos_start**（非僅 max_exit；否則 4h pad 會在 oos_start 非桶對齊時
-    把 ts>=oos_start 的 bar 載進邊界桶的 factor）；③只保留**完全在 OOS 之前結束**
-    的桶 ``b + bucket_sec <= oos_start``（半開區間 [b,b+bucket_sec) 不得跨進 OOS）
-    → train/eval 切分與三窗只由完全非 OOS 的桶衍生。
+    把 ts>=oos_start 的 bar 載進邊界桶的 factor）；③★HIGH-1：在 **DATA 層**（呼
+    evaluate_cell **之前**）逐出「跨界桶」——任何 ``bucket_floor(exit_ts)+bucket_sec
+    > oos_start`` 的 round-trip 與 ``bucket_floor(ts)+bucket_sec > oos_start`` 的 BTC
+    bar 一律丟棄。為什麼必須在 DATA 層：被封存/hash 的 report 由 evaluate_cell **獨立
+    重新分桶**算出（無邊界過濾），只過濾 step-6 的 window 標籤無法清除 evaluate_cell
+    已算進邊界桶的洩漏（oos_start 非桶對齊時，open<oos_start／close>=oos_start 的 bar
+    通過 ②的 open-time clamp 仍進邊界桶 → 二階前視）；④三窗由**同一 cleaned 桶集**
+    衍生（單一真相來源）→ 封存的 candidate_window_end 必等於 residual 計算實際擬合的
+    最大桶尾端且 <= oos_start。step-6 仍保留逐桶 ``b+bucket_sec<=oos_start`` 冗餘
+    backstop（防未來 refactor 移除 DATA 層過濾）。
   - **三窗由 bucket 邊界 epoch→ISO datetime 衍生**，**不**用 report 的 fit_window
     字串（那是 float-string，experiment_registry `_parse_manifest_datetime` 回
     None）；三窗嚴格遞增以滿足 V132 windows_chk。
@@ -54,6 +61,7 @@ try:  # 套件式 import（app runtime）
     )
     from program_code.ml_training.residual_alpha_producer_db import (
         DEFAULT_BUCKET_SEC,
+        bucket_floor,
         bucket_round_trips_by_exit,
         bucketed_btc_factor,
         load_btc_klines,
@@ -73,6 +81,7 @@ except ModuleNotFoundError:  # pragma: no cover - 直跑 fallback
     )
     from ml_training.residual_alpha_producer_db import (  # type: ignore
         DEFAULT_BUCKET_SEC,
+        bucket_floor,
         bucket_round_trips_by_exit,
         bucketed_btc_factor,
         load_btc_klines,
@@ -138,6 +147,20 @@ def partition_round_trips_by_oos(
     return non_oos, oos
 
 
+def _bucket_admissible(ts_epoch: float, oos_start_epoch: float, bucket_sec: float) -> bool:
+    """桶 b（= ``bucket_floor(ts)``）是否「完全在 OOS 之前」=可進 residual 計算。
+
+    為什麼這是 PART 2 leak 的核心判據（HIGH-1）：桶 b 覆蓋半開區間
+    ``[b, b+bucket_sec)``。只有 ``b + bucket_sec <= oos_start_epoch`` 時該桶尾端才
+    在 OOS 起點之前——亦即桶內不含任何 ts>=oos_start 的 bar/trip。當 oos_start **非
+    桶對齊**時會出現「跨界桶」（straddle bucket）：``bucket_floor(oos_start)`` 的尾端
+    ``floor+bucket_sec > oos_start``，其 BTC factor 由開盤<oos_start 但收盤>=oos_start
+    的 bar 算出（``load_btc_klines`` 用 bar **open**-time 夾止，4h bar 收盤仍跨 OOS）→
+    二階前視洩漏。此判據與 evaluate_cell / window 衍生**完全一致**地排除跨界桶。
+    """
+    return bucket_floor(ts_epoch, bucket_sec) + bucket_sec <= oos_start_epoch
+
+
 def register_residual_candidate_experiment(
     conn: Any,
     *,
@@ -170,14 +193,16 @@ def register_residual_candidate_experiment(
     """把一個 residual-candidate cell 算 + 封存 + 註冊成 replay experiment。
 
     流程（PART 2 §3.3）：env-flag gate → 載 round_trips（只讀）→ OOS carve-out
-    （唯一切點）→ 載 BTC klines（範圍夾止 < oos_start）→ ``evaluate_cell`` 算
-    residual（只在 non-OOS）→ bucket 邊界衍生三窗 ISO datetime → embargo 對賬
+    （唯一切點）→ 載 BTC klines（範圍夾止 < oos_start）→ ★HIGH-1：在 DATA 層逐出
+    跨界桶（trip + bar，呼 evaluate_cell 之前）→ ``evaluate_cell`` 算 residual（只在
+    cleaned 非 OOS 桶）→ 由**同一 cleaned 桶集**衍生三窗 ISO datetime → embargo 對賬
     → ``build_hidden_oos_state`` 封存 → 組 ``manifest_jsonb`` → 組
     ``ReplayExperimentRegisterRequest``（unsigned）→ 呼注入的 ``register_fn``
     （唯一寫入）。回 ``register_fn`` 的 ``(result, err)``。
 
-    任一前置失敗（flag OFF / 無非 OOS trip / 對齊不足 / embargo<=0 / 三窗非遞增）
-    一律 fail-closed 回 ``(None, err)``，**不**送非法資料去撞 V132 CHECK。
+    任一前置失敗（flag OFF / 無非 OOS trip / 跨界桶過濾後無 admissible trip / 對齊
+    不足 / embargo<=0 / 三窗非遞增）一律 fail-closed 回 ``(None, err)``，**不**送非法
+    資料去撞 V132 CHECK。
     """
     # 1) env-flag：預設 OFF → 零寫入。
     if not residual_producer_enabled():
@@ -205,6 +230,12 @@ def register_residual_candidate_experiment(
     #     永不撞 V132 embargo_seconds>0 CHECK）。embargo 只依賴 embargo_buckets/
     #     bucket_sec，與 round-trip/factor 無關，故當前置 input 驗證最穩健（PA §3.5/
     #     trap #3：此處比 §3.3 step-7 提前是等價且不被資料不足遮蔽的 fail-fast）。
+    #     MED-2 語意界線：此 embargo_seconds 是封存進 state 的**內部 train→eval purge**，
+    #     **非** candidate→OOS 邊界 embargo。PART 2 的 OOS hold-out 有效性靠 strict
+    #     ``exit < oos_start`` carve-out + 跨界桶 DATA 過濾（step-4b），不需邊界 purge
+    #     band。**未來（PART 3 / 真晉升）當封存的 OOS 被 OPEN 來做 promotion 時**，第一
+    #     批 post-oos_start 的 trip 應加 purge band ``[oos_start - embargo, oos_start)``
+    #     以避免跨界自相關——那是 **promotion-time gate**，OUT OF PART-2 scope，此處不實作。
     embargo_seconds = (
         int(round((embargo_buckets + 0.5) * bucket_sec)) if embargo_buckets > 0 else 0
     )
@@ -231,7 +262,31 @@ def register_residual_candidate_experiment(
         conn, start_ts=start_dt, end_ts=end_dt, timeframe=klines_timeframe
     )
 
-    # 5) 算 residual（只在 non-OOS）。
+    # 4b) ★ HIGH-1 修復：在 DATA 層逐出「跨界桶」，再餵給 evaluate_cell。
+    #     為什麼必須在 evaluate_cell 之前過濾 DATA（而非只過濾 step-6 的 window 標籤）：
+    #     evaluate_cell（residual_alpha_cycle:125-126）對 rts_non_oos + btc_klines
+    #     **獨立重新分桶**（無邊界過濾），其產出的 report 才是被封存/hash 的那份。
+    #     step-6 的 ``aligned`` 過濾只改三窗標籤，**不**改 evaluate_cell 已算的 report。
+    #     當 oos_start 非桶對齊時，``bucket_floor(oos_start)`` 跨界桶（尾端跨進 OOS）
+    #     會帶著 ts<oos_start 的 boundary trip（carve-out 保留它，因 exit<oos_start）
+    #     + open<oos_start／close>=oos_start 的 BTC bar 進入 evaluate_cell 的殘差計算
+    #     → 二階前視洩漏（aligned_observations/eval_observations 多 1，封存的 report
+    #     與真正非 OOS 的擬合資料不符）。在此 DATA 層用**同一**桶判據逐出，使
+    #     evaluate_cell 的獨立重分桶只剩完全非 OOS 的桶；三窗亦由同一 cleaned 桶集衍生
+    #     （單一真相來源）。klines clamp（step-4 end_epoch）仍保留為第一道防線，但不再
+    #     是唯一守衛。
+    rts_non_oos = [
+        rt for rt in rts_non_oos
+        if _bucket_admissible(rt["exit_ts"], oos_start_epoch, bucket_sec)
+    ]
+    if not rts_non_oos:
+        return None, "no_admissible_round_trips"
+    btc_klines = [
+        bar for bar in btc_klines
+        if _bucket_admissible(bar["ts"], oos_start_epoch, bucket_sec)
+    ]
+
+    # 5) 算 residual（只在 non-OOS、且只在完全非 OOS 的桶）。
     cell_key = f"{strategy}::{symbol}"
     result = evaluate_cell(
         cell_key,
@@ -253,14 +308,18 @@ def register_residual_candidate_experiment(
     #    字串——那是 float-string，experiment_registry parse 回 None）。
     #    train/eval 切分規則與 producer _build_fit_window 完全一致
     #    （train_fraction 0.7：n_train = max(1, min(floor(0.7*n), n-1))）。
+    #    HIGH-1 後 rts_non_oos / btc_klines 已於 step-4b 在 DATA 層用 _bucket_admissible
+    #    逐出跨界桶，故此處的重分桶與 evaluate_cell 算 report 用的是**同一 cleaned 桶集**
+    #    （單一真相來源）：封存的 candidate_window_end = aligned 最大桶尾端，必等於
+    #    residual 計算實際擬合的最大桶尾端，且 <= oos_start。
     buckets, _counts = bucket_round_trips_by_exit(rts_non_oos, bucket_sec)
     factor = bucketed_btc_factor(btc_klines, bucket_sec)
     aligned = sorted(set(buckets) & set(factor))
-    # MED-2：只接受**完全在 OOS 之前**結束的桶。桶 b 覆蓋半開區間
-    # [b, b+bucket_sec)；b+bucket_sec>oos_start_epoch 代表該桶尾端跨進 OOS 區，
-    # 其 factor/報酬可能含 ts>=oos_start 的 bar → 排除（PIT-clean）。如此 train/
-    # eval 切分與三窗只由完全非 OOS 的桶衍生；過濾後若清空則 fail-closed。
-    aligned = [b for b in aligned if b + bucket_sec <= oos_start_epoch]
+    # 冗餘 backstop（資料已於 step-4b 過濾，此處 list-comp 預期不再剔除任何桶）：
+    # 仍逐桶斷言「完全在 OOS 之前結束」，雙保險防未來 refactor 把 step-4b 移除。
+    aligned = [
+        b for b in aligned if _bucket_admissible(b, oos_start_epoch, bucket_sec)
+    ]
     if len(aligned) < 2:
         return None, "insufficient_aligned_buckets"
     n_aligned = len(aligned)

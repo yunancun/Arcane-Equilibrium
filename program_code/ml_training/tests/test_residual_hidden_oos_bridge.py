@@ -771,11 +771,16 @@ def test_t11_med2_non_bucket_aligned_oos_start_no_overlap_and_klines_clamped():
 
 
 def test_t11b_med2_filter_emptying_aligned_fails_closed():
-    """MED-2 fail-closed：若桶過濾把 aligned 清空（全部桶尾端跨 OOS）→ 不註冊，
-    回 insufficient_aligned_buckets（不送非法/洩漏窗去撞 register）。
+    """MED-2/HIGH-1 fail-closed：若跨界桶過濾把資料清空（全部 trip 桶尾端跨 OOS）→
+    不註冊（不送非法/洩漏窗去撞 register）。
 
     構造：所有 in-trip 都落在 oos_start 前同一桶內、且該桶尾端跨 OOS（oos_start
     非桶對齊，桶 floor 在 oos_start 前但 floor+bucket_sec>oos_start）→ 過濾後空。
+
+    HIGH-1 後 fail-closed 點**提前**到 DATA 層（step-4b）：跨界桶的 trip 在呼
+    evaluate_cell 之前即被逐出，全部 trip 都跨界 → ``no_admissible_round_trips``
+    （比舊 ``insufficient_aligned_buckets`` 更早、更精確；舊點在 step-6 window 衍生
+    後才擋）。intent 不變：fail-closed、register 從未被呼到、無 manifest 持久化。
     """
     oos_start_epoch = 50.0 * _BUCKET + 3000.0  # 非對齊；桶 floor=50*BUCKET
     oos_start = datetime.fromtimestamp(oos_start_epoch, tz=timezone.utc)
@@ -790,9 +795,9 @@ def test_t11b_med2_filter_emptying_aligned_fails_closed():
         loaded_round_trips=in_rts, btc_klines=btc,
         oos_start=oos_start, data_end=data_end,
     )
-    # bridge fail-closed（過濾後 aligned 空），register 從未被呼到。
+    # bridge fail-closed（step-4b DATA 層過濾後無 admissible trip），register 從未被呼到。
     assert cap["bridge_result"] is None
-    assert cap["bridge_err"] == "insufficient_aligned_buckets"
+    assert cap["bridge_err"] == "no_admissible_round_trips"
     assert "manifest_persisted" not in cap
 
 
@@ -817,3 +822,119 @@ def test_t12_med3_sealed_embargo_equals_evaluate_cell_purge():
         # 浮點 (eb+0.5)*bs 使用，兩者描述同一 purge；此處比對封存整數秒 == 由相同
         # 公式 derive 的整數秒（MED-3 要求兩邊 byte-精確相等的對賬量）。
         assert sealed_embargo == purge_used, (eb, sealed_embargo, purge_used)
+
+
+def test_t12b_med3_embargo_zero_with_4h_bucket_fail_closed():
+    """t12b（E2 早先非阻塞建議，補 MED-3 回歸）：embargo_buckets=0 + **4h** bucket
+    （非 t4 的 bucket_sec=1.0）→ 仍 fail-closed，不呼 register_fn。
+
+    為什麼補這條：t4 的 eb=0 路徑只用 bucket_sec=1.0 驗（int(round(0.5))=0）。生產
+    預設 bucket_sec=14400（4h）。MED-3 前 bridge 用無條件 ``(0+0.5)*14400=7200`` 會
+    封存 7200s（與 evaluate_cell eb=0 的 0 purge 不符）並送進 register。對齊後 eb=0
+    ⇒ embargo_seconds=0 ⇒ ``>=1`` fail-closed，與 bucket_sec 無關。此測釘住 4h 桶
+    這條最貼近生產的回歸路徑。
+    """
+    import os
+
+    calls = {"n": 0}
+
+    def _fake_register_fn(get_pg_conn_fn, actor, body, *, manifest_signer_module=None):
+        calls["n"] += 1
+        return {"experiment_id": "x"}, None
+
+    def _fake_load_round_trips(conn, strategy, *, engine_mode, since):
+        return _in_oos_round_trips()
+
+    def _fake_load_btc_klines(conn, *, start_ts, end_ts, timeframe):
+        return _btc_klines_4h()
+
+    restore = (bridge.load_round_trips, bridge.load_btc_klines)
+    bridge.load_round_trips = _fake_load_round_trips
+    bridge.load_btc_klines = _fake_load_btc_klines
+    os.environ[RESIDUAL_PRODUCER_ENV] = "1"
+    try:
+        result, err = bridge.register_residual_candidate_experiment(
+            object(),
+            strategy="grid_trading", symbol="BTCUSDT", timeframe="4h",
+            family_id="family-alpha",
+            since=datetime.fromtimestamp(0.0, tz=timezone.utc),
+            oos_start=_OOS_START, data_end=_DATA_END,
+            n_param_variants=1, n_symbols_screened=1, n_strategies_screened=1,
+            actor=_operator_actor(),
+            strategy_config_sha256="a" * 64, risk_config_sha256="b" * 64,
+            get_pg_conn_fn=lambda: None,
+            register_fn=_fake_register_fn,
+            embargo_buckets=0, bucket_sec=14400.0,  # 4h（生產預設）
+        )
+    finally:
+        os.environ.pop(RESIDUAL_PRODUCER_ENV, None)
+        bridge.load_round_trips, bridge.load_btc_klines = restore
+
+    assert result is None
+    assert err == "embargo_seconds_non_positive"
+    assert calls["n"] == 0  # 4h 桶下 eb=0 仍零寫入，未撞 V132 CHECK
+
+
+# ─── T13：HIGH-1 整合 bite（leak 閉合於計算，非僅標籤）────────────────────
+#
+# 為什麼這條與 t10/t11 不同（PART 2 的核心）：t10 用**桶對齊** oos_start，跨界桶
+# 不存在；t11 只斷言 candidate_window_end（step-6 window 標籤）<= oos_start，**不**
+# 斷言被封存/hash 的 report 是否乾淨。HIGH-1 的洩漏在 evaluate_cell 對 rts_non_oos +
+# btc_klines 的**獨立重分桶**：oos_start 非桶對齊時，``bucket_floor(oos_start)`` 跨界
+# 桶帶 boundary trip（exit<oos_start，carve-out 保留它）+ open<oos_start／close>=
+# oos_start 的 BTC bar（通過 open-time clamp）進入 evaluate_cell 算的 report → 二階
+# 前視，封存的 hash 被污染。本測釘住「report/hash 在計算層乾淨」，非僅標籤乾淨。
+
+
+def test_t13_high1_sealed_hash_byte_identical_under_non_aligned_boundary_trip():
+    """HIGH-1（重現 MIT 案例）：non-bucket-aligned oos_start + 一筆 boundary trip
+    （exit ∈ [bucket_floor(oos_start), oos_start)，極端 net_bps）。
+
+    斷言：
+      (1) 驅動 FULL register，**有 vs 無**該 boundary trip 兩次，封存進持久化
+          manifest 的 ``demo_residual_alpha_report_hash`` **byte-identical**
+          （boundary trip 落在跨界桶 → step-4b DATA 層逐出 → 不進 evaluate_cell
+          算 report → hash 不變）。
+      (2) 封存的 ``candidate_window_end`` <= oos_start（窗亦由 cleaned 桶集衍生）。
+
+    這是 leak 閉合於**計算**（evaluate_cell 的 report/hash）而非僅標籤的證明。
+    若移除 step-4b 的 DATA 層過濾（mutation），boundary trip 進跨界桶 →
+    aligned_observations/eval_observations +1 → report 變 → 兩 hash 分歧 → 本測 FAIL。
+    """
+    oos_start_epoch = 100.0 * _BUCKET + 5000.0  # 非 4h 對齊（5000s into 桶 100）
+    oos_start = datetime.fromtimestamp(oos_start_epoch, tz=timezone.utc)
+    data_end = datetime.fromtimestamp(oos_start_epoch + 30 * _BUCKET, tz=timezone.utc)
+    # in-trips 跨桶 10..19（皆完全非 OOS）。
+    in_rts = _in_oos_round_trips()
+    # boundary trip：exit 落在 [bucket_floor(oos_start)=100*BUCKET, oos_start) 內，
+    # exit<oos_start 故 carve-out 保留，但其桶 floor=100*BUCKET 尾端 101*BUCKET>oos_start
+    # = 跨界桶。帶極端 net_bps 使「若洩漏則 report 必變」。
+    boundary_trip = {
+        "entry_ts": 100.0 * _BUCKET + 500.0,
+        "exit_ts": 100.0 * _BUCKET + 1000.0,  # < oos_start_epoch（=...+5000）
+        "net_bps": 123456.0,
+    }
+    assert boundary_trip["exit_ts"] < oos_start_epoch  # carve-out 會保留它
+    assert bucket_floor(boundary_trip["exit_ts"], _BUCKET) + _BUCKET > oos_start_epoch  # 跨界桶
+    btc = _btc_klines_4h()  # 覆蓋桶 ~9..138（含跨界桶 100 的 factor bar）
+
+    cap_without = _drive_full_bridge_capture_manifest(
+        loaded_round_trips=in_rts, btc_klines=btc,
+        oos_start=oos_start, data_end=data_end,
+    )
+    cap_with = _drive_full_bridge_capture_manifest(
+        loaded_round_trips=in_rts + [boundary_trip], btc_klines=btc,
+        oos_start=oos_start, data_end=data_end,
+    )
+    assert cap_without["register_err"] is None, cap_without["register_err"]
+    assert cap_with["register_err"] is None, cap_with["register_err"]
+
+    hash_without = cap_without["manifest_persisted"][REGISTRY_RESIDUAL_ALPHA_HASH_FIELD]
+    hash_with = cap_with["manifest_persisted"][REGISTRY_RESIDUAL_ALPHA_HASH_FIELD]
+    # (1) boundary trip 在跨界桶 → DATA 層逐出 → 封存 hash byte-identical。
+    assert hash_without == hash_with, (hash_without, hash_with)
+
+    # (2) 封存的 candidate_window_end <= oos_start（窗由 cleaned 桶集衍生）。
+    cand_end_iso = cap_with["manifest_persisted"]["hidden_oos_state"]["candidate_window_end"]
+    cand_end_epoch = datetime.fromisoformat(cand_end_iso).timestamp()
+    assert cand_end_epoch <= oos_start_epoch, (cand_end_epoch, oos_start_epoch)
