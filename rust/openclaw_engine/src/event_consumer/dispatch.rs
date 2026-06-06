@@ -246,31 +246,30 @@ fn classify_business_retcode(ret_code: i64, ret_msg: &str) -> DispatchOutcome {
         // Bybit 伺服器維護/過載族 — 暫時性。
         10016 | 10017 | 10018 | 10019 => DispatchOutcome::Transient,
 
-        // InvalidParam — usually structural, but Bybit returns 10001 for
-        // duplicate order_link_id which (thanks to idempotency guarantee) is
-        // equivalent to "already placed" → NoOp.
+        // InvalidParam — 通常結構性。Bybit 對重複 order_link_id 也可能回
+        // 10001（泛 InvalidParam 帶 retMsg "duplicate"），與 110072（專屬重複碼）
+        // 同類。
         //
-        // E2 review 2026-04-19: narrowed substring match from {"duplicate",
-        // "order_link_id"} to {"duplicate"} ONLY. The bare "order_link_id"
-        // match was overly permissive — e.g. retMsg "invalid order_link_id
-        // format" is structural (bad client-side format) but would be
-        // misclassified as NoOp under the old rule, silently succeeding on a
-        // genuinely broken request.
+        // P2-ORDERLINKID-110072 follow-up（2026-06-07，E2/BB flag）：10001+duplicate
+        // 由無條件 NoOp 改為 **Structural**，與 110072 arm 對齊。為什麼：原 NoOp
+        // 把 open 與 close 都當成功，但 open 單次無重試（OPEN_NO_RETRY），撞重複
+        // order_link_id 只可能是 id 撞歷史 = 開倉未成功，絕不可靜默回報成功
+        // （silent-success 風險）。預設 Structural 保護 open path fail-closed；
+        // close retry 的冪等成功 upgrade（首次 attempt 已達 Bybit、response 丟失，
+        // retry 重發同一 id 撞此碼）在 consumption Structural 分支由
+        // close_dup_is_idempotent_success 以 is_close guard 處理（見本檔
+        // DispatchRetryResult::Structural 分支 + close_dup_is_idempotent_success，
+        // 該 helper 同時涵蓋 110072 與 10001+duplicate）。對 close 是同一 observable
+        // 成功結果（lease Consumed），無回歸。
         //
-        // InvalidParam — 通常結構性，但 Bybit 對重複 order_link_id 也回 10001；
-        // 因為冪等保證，視為「已下單」→ NoOp。
-        //
-        // E2 審查 2026-04-19：子串匹配從 {"duplicate", "order_link_id"} 收窄為
-        // 僅 {"duplicate"}。裸 "order_link_id" 匹配過寬 — 例如 "invalid
-        // order_link_id format" 是結構性錯誤（client 側格式錯）卻會在舊規則下
-        // 誤判為 NoOp，對一個實際壞掉的請求靜默回報成功。
-        10001 => {
-            if ret_msg.to_ascii_lowercase().contains("duplicate") {
-                DispatchOutcome::NoOp
-            } else {
-                DispatchOutcome::Structural
-            }
-        }
+        // 歷史背景：E2 審查 2026-04-19 曾把 duplicate 子串匹配從
+        // {"duplicate", "order_link_id"} 收窄為僅 {"duplicate"}，以避免
+        // "invalid order_link_id format"（結構性 client 格式錯）被誤判。follow-up
+        // 後 duplicate 與非-duplicate 的 10001 同歸 Structural，故 classify 層
+        // 不再需要區分子串；duplicate 的偵測下移到 consumption 層的
+        // close_dup_is_idempotent_success（僅該處需要 close+duplicate 的細分以
+        // upgrade 成冪等成功）。retMsg 在此 arm 不再被讀。
+        10001 => DispatchOutcome::Structural,
 
         // 10002 — InvalidRequest / recv_window.
         // Generic 10002 is structural (malformed request). But Bybit also uses
@@ -388,17 +387,31 @@ fn noop_is_reduce_only_close(req: &OrderDispatchRequest) -> bool {
     req.is_close
 }
 
-/// P2-ORDERLINKID-110072：判斷此 Structural 結果是否為「close 重發撞 110072
-/// （重複 order_link_id）」= 冪等成功（首次 close attempt 已達 Bybit）。
-/// 僅 close intent 成立；open path 維持 fail-closed（見 classify_business_retcode
-/// 110072 arm）——open 單次無重試（OPEN_NO_RETRY），撞 110072 只可能是 id 撞歷史
-/// = 開倉未成功，絕不可當成功（BB 2026-06-06 MANDATORY guard）。
-/// 注意：110072 **不**觸發本地倉收斂——不加入 noop_is_exchange_zero_position；
+/// P2-ORDERLINKID-110072（+ 2026-06-07 follow-up）：判斷此 Structural 結果是否為
+/// 「close 重發撞重複 order_link_id」= 冪等成功（首次 close attempt 已達 Bybit、
+/// response 丟失，retry 重發同一 id 撞此碼）。
+///
+/// 涵蓋兩個 duplicate retCode（皆為「重複 order_link_id」同類）：
+///   - 110072：Bybit 專屬「OrderLinkedID is duplicate」碼。
+///   - 10001 + retMsg contains "duplicate"：泛 InvalidParam 帶 duplicate 訊息。
+///     需顯式比對 retMsg；非-duplicate 的 10001（如 "invalid order_link_id
+///     format"、"qty must be > 0"）為真結構性錯誤，**不**屬冪等成功。
+///
+/// 僅 close intent 成立（req.is_close）；open path 維持 fail-closed——open 單次
+/// 無重試（OPEN_NO_RETRY），撞重複 order_link_id 只可能是 id 撞歷史 = 開倉未成功，
+/// 絕不可當成功（BB 2026-06-06 MANDATORY guard；110072 與 10001+duplicate 同此語意）。
+/// 注意：兩碼皆 **不**觸發本地倉收斂——不加入 noop_is_exchange_zero_position；
 /// 此處只把 lease 釋放為 Consumed（成功），倉位真相由首次成功 attempt 的
 /// WS fill / position update 自然回填。
 fn close_dup_is_idempotent_success(req: &OrderDispatchRequest, err: &BybitApiError) -> bool {
     req.is_close
-        && matches!(err, BybitApiError::Business { ret_code, .. } if *ret_code == 110072)
+        && match err {
+            BybitApiError::Business { ret_code, .. } if *ret_code == 110072 => true,
+            BybitApiError::Business {
+                ret_code, ret_msg, ..
+            } if *ret_code == 10001 => ret_msg.to_ascii_lowercase().contains("duplicate"),
+            _ => false,
+        }
 }
 
 /// P1-110017-POSITION-DRIFT-CLOSE-LOOP：對 reduce-only 平倉收到 110017 時，
@@ -901,23 +914,34 @@ pub(super) fn spawn_order_dispatch(
                     last_error,
                     attempts,
                 } => {
-                    // P2-ORDERLINKID-110072：close 重發撞 110072（重複 order_link_id）
-                    // = 冪等成功（首次 close attempt 已達 Bybit、response 丟失，retry
-                    // 重發同一 id 撞此碼）。走成功收尾（**不**發 DispatchFailed、**不**
-                    // 收斂本地倉），鏡像 Ok/NoOp 成功路徑。
+                    // P2-ORDERLINKID-110072（+ 2026-06-07 follow-up）：close 重發撞
+                    // 重複 order_link_id（110072 專屬碼，或 10001+retMsg "duplicate"
+                    // 泛 InvalidParam）= 冪等成功（首次 close attempt 已達 Bybit、
+                    // response 丟失，retry 重發同一 id 撞此碼）。走成功收尾（**不**發
+                    // DispatchFailed、**不**收斂本地倉），鏡像 Ok/NoOp 成功路徑。
                     // open path 維持 fail-closed：close_dup_is_idempotent_success 僅
-                    // is_close 成立（open 撞 110072 = id 撞歷史，開倉未成功，落 else
-                    // 失敗路徑）。BB 2026-06-06 APPROVE-WITH-MANDATORY-GUARD。
+                    // is_close 成立（open 撞重複 id = id 撞歷史，開倉未成功，落 else
+                    // 失敗路徑）。BB 2026-06-06 APPROVE-WITH-MANDATORY-GUARD；helper
+                    // 同時涵蓋 110072 與 10001+duplicate（見其 docstring）。
                     // last_error 在本分支僅被借用（match &last_error / Display），
                     // helper 取 &req,&last_error 在 extract 之前，無 move 衝突。
                     if close_dup_is_idempotent_success(&req, &last_error) {
+                        let (ret_code_opt, ret_msg_opt): (Option<i64>, Option<String>) =
+                            match &last_error {
+                                BybitApiError::Business {
+                                    ret_code, ret_msg, ..
+                                } => (Some(*ret_code), Some(ret_msg.clone())),
+                                _ => (None, None),
+                            };
                         info!(
                             symbol = %req.symbol,
                             order_link_id = %req.order_link_id,
                             dispatch_type = dispatch_type,
                             close = req.is_close,
+                            ret_code = ret_code_opt,
+                            ret_msg = ret_msg_opt.as_deref(),
                             attempts = attempts,
-                            "close duplicate order_link_id (110072) — idempotent success / 平倉重複 order_link_id（110072）等效成功"
+                            "close duplicate order_link_id — idempotent success / 平倉重複 order_link_id 等效成功"
                         );
                         send_decision_lease_release(
                             &pending_reg_tx,
