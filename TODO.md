@@ -127,8 +127,8 @@
 | OP-2 Stage 0R Earn 變體決策 → OP-3 首筆質押 $100-200 USDT 僅 Flexible | OP-1 之後 | 建立首個 `learning.earn_movement_log` 證據。 |
 | 還原演練窗口（低交易 4h） / 系統層服務安裝（sudo） | 操作員 | 封鎖 OPS 全綠；提升 runtime 保護超越使用者 watchdog。 |
 | ~~P5-SM step-i soak flag-on~~ | ✅ DONE 2026-06-03（soak RUNNING，§5） | 24-48h 0-divergence gate；soak 期間避免全量 `restart_all`。 |
-| **P2 #6/#7 push + Linux cargo regression** | P2 #6/#7 已本地提交（`35b2175a`/`f33b5e7f`，未 push）| 決定是否 push `feature/l2-critic-lessons-tools` + Linux `cargo test -p openclaw_engine` 補回歸（#6 為 dispatch 執行路徑改動，Mac 3765/0 已過，Linux 為權威確認）。#6 純 source 語義（無 migration/無 binary 行為差異），是否需 rebuild 由 operator 定。 |
-| **P2 #8 AST 解凍決策** | PA 2026-06-06 NO-GO/defer（SignalSpec producer 在未合併分支、schema 未凍結）| 二選一：(A) 接受 defer，#8 留 blueprint 待 `feature/residual-producer` merge+schema freeze 後解凍；(B) 先推進 residual-producer 線（merge+deploy+凍結 schema）以解鎖 #8。建議 (A)（producer 線本身尚有 signal_spec producer/hidden_oos sealer/mlde hook 未完成，見 `project_2026_06_05_residual_producer_build`）。 |
+| **P2 #6/#7 deploy（operator 已選 push+rebuild）— 🔴 BLOCKED** | operator 2026-06-06 選 push+rebuild，本環境受阻 | **兩重阻塞**：(1) **github.com:22 從本環境不可達**（push 逾時 `Connection timed out during banner exchange`；`ssh trade-core` tailscale 路可通）→ 無法 push。(2) **rebuild 會連帶部署整條 L2 feature + 套用 `V133__agent_lessons.sql`**（V133 header 自註「Linux PG 實證 dry-run 仍 owed」）→ 違反 mandatory V-migration dry-run，且屬 L2 concern 部署決策非 #6/#7。Linux 現於 `main@627b4772`（非本 feature 分支）。**安全路徑**（需 github 連線環境）：(a) L2 整體部署（含 V133 Linux dry-run×2 + L2 sign-off）連 #6/#7 一起 rebuild，或 (b) 把 #6/#7 cherry-pick 到 main 隔離部署（不帶 L2/V133）。#6 純 source 語義（binary 行為差異僅 rebuild 後生效）；#7 純 Python（API restart 即生效，無需 rebuild）。 |
+| ~~P2 #8 AST 解凍決策~~ | ✅ operator 2026-06-06 選 (A) 接受 defer | #8 留 blueprint，待 `feature/residual-producer` merge+deploy+schema freeze 後解凍（producer 線本身尚有 signal_spec producer/hidden_oos sealer/mlde hook 未完成，見 `project_2026_06_05_residual_producer_build`）。 |
 
 ---
 
