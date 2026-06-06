@@ -95,6 +95,17 @@ def build_hidden_oos_state(
         "calibration_window": {"start": calibration_window[0], "end": calibration_window[1]},
         "candidate_window": {"start": candidate_window[0], "end": candidate_window[1]},
         "oos_window": {"start": oos_window[0], "end": oos_window[1]},
+        # flat key（純加性，對齊 V132 column + experiment_registry._extract 的
+        # required_datetime_fields）：experiment_registry `_extract` / `_persist`
+        # 只認 flat calibration_train_*/candidate_*，不讀 nested；故必須額外給出
+        # flat 版。**不**進 compute_split_hash payload（split_hash 須 byte-identical），
+        # nested key 同時保留（source_contract durable gate 比對整 dict canonical
+        # sha256，兩邊同物件故仍相等，且人讀友好）。
+        "calibration_train_window_start": calibration_window[0],
+        "calibration_train_window_end": calibration_window[1],
+        "candidate_window_start": candidate_window[0],
+        "candidate_window_end": candidate_window[1],
+        # OOS 窗對外 = window_start/end（既有；source_contract 只讀 flat 此二鍵）
         "window_start": oos_window[0],
         "window_end": oos_window[1],
         "embargo_seconds": int(embargo_seconds),

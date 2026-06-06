@@ -56,6 +56,34 @@ def test_state_is_sealed_unopened():
     assert state["window_end"] == state["oos_window"]["end"]
 
 
+def test_flat_window_keys_match_nested_and_split_hash_frozen():
+    """T1（PART 2 §2）：flat key 純加性補齊 + split_hash byte-identical 凍結。
+
+    為什麼：experiment_registry `_extract`/`_persist` 只認 flat
+    calibration_train_*/candidate_* 而非 nested（FACT 3 schema mismatch）；
+    補 flat key 必須與 nested 對應值一致，且**不得**改變 split_hash（flat key
+    不在 compute_split_hash payload，故補齊前後 split_hash 必 byte-identical）。
+    """
+    state = _state()
+    # 4 個新 flat key 等於其 nested 對應值
+    assert state["calibration_train_window_start"] == state["calibration_window"]["start"]
+    assert state["calibration_train_window_end"] == state["calibration_window"]["end"]
+    assert state["candidate_window_start"] == state["candidate_window"]["start"]
+    assert state["candidate_window_end"] == state["candidate_window"]["end"]
+    # 既有 OOS flat key 仍對齊 nested
+    assert state["window_start"] == state["oos_window"]["start"]
+    assert state["window_end"] == state["oos_window"]["end"]
+    # nested key 仍保留（durable gate canonical sha256 比對需同物件）
+    assert "calibration_window" in state
+    assert "candidate_window" in state
+    assert "oos_window" in state
+    # split_hash 凍結值（補 flat key 前後 byte-identical；payload 不含 flat key）
+    assert (
+        state["split_hash"]
+        == "ebbb4000fb6d315e0d68075fdc82afbd8c5a8e3e9e3ac0c3a3c9a989af53135e"
+    )
+
+
 def test_window_mismatch_is_rejected():
     state = _state()
     fields = dict(hidden_oos_source_row_fields(state))
