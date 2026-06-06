@@ -343,11 +343,13 @@ def test_t4_windows_strictly_increasing_and_iso_round_trip():
 
 
 def test_t4_embargo_zero_fail_closed_no_check_hit():
-    """embargo_buckets=0 → embargo_seconds=int(round(0.5*bucket)) ... 但須 fail-closed
-    在送進 V132 CHECK 之前；用 register_fn spy 證明 0-embargo 路徑不寫入。
+    """embargo_buckets=0 → embargo_seconds=0（MED-3 對齊 evaluate_cell：eb=0 purge
+    0 秒）→ 須 fail-closed 在送進 V132 CHECK 之前；register_fn spy 證 0-embargo
+    路徑不寫入。
 
-    註：bucket_sec=4h 時 embargo_buckets=0 → (0.5)*14400=7200>0，不會觸發
-    embargo<=0；故另用極小 bucket_sec 使 embargo_seconds 落到 0 來證 fail-closed。
+    MED-3 前 bridge 用無條件 ``(eb+0.5)*bs``，bucket_sec=4h 時 eb=0 → 7200s（與
+    evaluate_cell 的 0 purge 不符且會誤述封存 embargo）。對齊後 eb=0 ⇒ 0 ⇒
+    fail-closed，與 bucket_sec 無關；此處沿用 bucket_sec=1.0 一併夾住。
     """
     import os
 
@@ -609,3 +611,209 @@ def test_t9_manifest_hash_includes_hidden_oos_state():
     with_state = dict(base)
     with_state["hidden_oos_state"] = state
     assert compute_manifest_hash(without_state) != compute_manifest_hash(with_state)
+
+
+# ─── MED-1/MED-2/MED-3 整合測（驅動 FULL bridge → 真 register_experiment）────
+#
+# 為什麼這組與 T3/T4 不同：T3 的 bite 在呼 evaluate_cell 之前**手動** partition，
+# 測的是 partition_round_trips_by_oos 純函數，**不**測 bridge 把 rts_non_oos 餵進
+# evaluate_cell 的接線（mutation rts_non_oos→rts_all 在 T3 下仍全綠）。以下三測
+# 一律驅動整個 register_residual_candidate_experiment（真 load→partition→
+# evaluate_cell→window→manifest→register），register_fn 包**真**
+# register_experiment（FakeCursor 捕兩個 INSERT），故 bridge 自身的 _canonical_sha256
+# 被 registry residual-hash gate 路徑實際驅動（非 test-local copy）。
+
+
+def _drive_full_bridge_capture_manifest(
+    *,
+    loaded_round_trips: list[dict],
+    btc_klines: list[dict],
+    oos_start=_OOS_START,
+    data_end=_DATA_END,
+    embargo_buckets: int = 1,
+    bucket_sec: float = _BUCKET,
+) -> dict:
+    """驅動 FULL bridge，register_fn 包真 register_experiment（FakeCursor），回
+    register 實際持久化的 ``manifest_to_persist``（= body.manifest_jsonb 經 register
+    可能 inject runtime 欄位後的版本）。
+
+    為什麼經真 register：MED-1 要證 registry residual-hash gate 驅動的是 bridge
+    自己的 _canonical_sha256（report→manifest[demo_residual_alpha_report_hash]），
+    非測試本地 hash。klines 由 caller 注入（mock 不受 MED-2 clamp 影響），故可放
+    超集涵蓋 OOS 區，使「若 carve-out 失效則洩漏」可被 report 變化捕捉。
+    """
+    import os
+
+    captured: dict[str, Any] = {}
+
+    def _fake_load_round_trips(conn, strategy, *, engine_mode, since):
+        return [dict(rt) for rt in loaded_round_trips]
+
+    def _fake_load_btc_klines(conn, *, start_ts, end_ts, timeframe):
+        captured["klines_end_ts"] = end_ts
+        return [dict(b) for b in btc_klines]
+
+    def _real_register_fn(get_pg_conn_fn, actor, body, *, manifest_signer_module=None):
+        # 捕 register 持久化的 manifest（含 register 對 unsigned 的 runtime inject）。
+        ts = datetime(2026, 5, 4, 12, 0, 0, tzinfo=timezone.utc)
+        cur = _FakeCursor([("44444444-4444-4444-4444-444444444444", ts)])
+        os.environ["OPENCLAW_REPLAY_RUNTIME_ENV"] = "mac_dev_smoke_test_only"
+        try:
+            result, err = register_experiment(cur, actor, body)
+        finally:
+            os.environ.pop("OPENCLAW_REPLAY_RUNTIME_ENV", None)
+        captured["register_err"] = err
+        if err is None:
+            exp_insert = next(
+                p for s, p in cur.records if "INSERT INTO replay.experiments" in s
+            )
+            captured["manifest_persisted"] = json.loads(exp_insert[18])
+        return result, err
+
+    restore = (bridge.load_round_trips, bridge.load_btc_klines)
+    bridge.load_round_trips = _fake_load_round_trips
+    bridge.load_btc_klines = _fake_load_btc_klines
+    os.environ[RESIDUAL_PRODUCER_ENV] = "1"
+    try:
+        result, err = bridge.register_residual_candidate_experiment(
+            object(),
+            strategy="grid_trading", symbol="BTCUSDT", timeframe="4h",
+            family_id="family-alpha",
+            since=datetime.fromtimestamp(0.0, tz=timezone.utc),
+            oos_start=oos_start, data_end=data_end,
+            n_param_variants=1, n_symbols_screened=1, n_strategies_screened=1,
+            actor=_operator_actor(),
+            strategy_config_sha256="a" * 64, risk_config_sha256="b" * 64,
+            get_pg_conn_fn=lambda: None,
+            register_fn=_real_register_fn,
+            embargo_buckets=embargo_buckets, bucket_sec=bucket_sec,
+        )
+    finally:
+        os.environ.pop(RESIDUAL_PRODUCER_ENV, None)
+        bridge.load_round_trips, bridge.load_btc_klines = restore
+    captured["bridge_result"] = result
+    captured["bridge_err"] = err
+    return captured
+
+
+def test_t10_med1_integration_carveout_hash_byte_identical_to_non_oos_only():
+    """MED-1（leak 軸整合 bite）：驅動 FULL bridge 兩次——
+
+    run A：load_round_trips = 非 OOS-only。
+    run B：load_round_trips = 非 OOS + **極端 net_bps 的 out-trip**（exit>=oos_start，
+           且其桶在注入的 klines factor 覆蓋內 → 若洩漏則 report 必變）。
+
+    斷言：兩次經真 register 持久化的 manifest[demo_residual_alpha_report_hash]
+    **byte-identical**。bridge 正確 carve-out → out-trip 不進 residual → 兩 hash 相等。
+    若 bridge 把 rts_all 餵進 evaluate_cell / 窗口 bucketing（E2 指定的 mutation），
+    run B 的 report 含極端值 → hash 改變 → 本測 FAIL（T3 抓不到此 mutation）。
+    """
+    in_rts = _in_oos_round_trips()
+    btc = _btc_klines_4h()  # 覆蓋非 OOS（桶~10-19）+ OOS 區（桶 100/101）
+    out_rts = [
+        # exit>=oos_start，桶 floor=100*BUCKET / 101*BUCKET，皆在 btc factor 覆蓋內。
+        {"entry_ts": _OOS_START_EPOCH, "exit_ts": _OOS_START_EPOCH + 600.0, "net_bps": 9999.0},
+        {"entry_ts": _OOS_START_EPOCH + _BUCKET, "exit_ts": _OOS_START_EPOCH + _BUCKET + 600.0, "net_bps": -9999.0},
+    ]
+    cap_a = _drive_full_bridge_capture_manifest(loaded_round_trips=in_rts, btc_klines=btc)
+    cap_b = _drive_full_bridge_capture_manifest(loaded_round_trips=in_rts + out_rts, btc_klines=btc)
+
+    assert cap_a["register_err"] is None, cap_a["register_err"]
+    assert cap_b["register_err"] is None, cap_b["register_err"]
+    hash_a = cap_a["manifest_persisted"][REGISTRY_RESIDUAL_ALPHA_HASH_FIELD]
+    hash_b = cap_b["manifest_persisted"][REGISTRY_RESIDUAL_ALPHA_HASH_FIELD]
+    # 載入含極端 out-trip 不改變註冊的 residual hash（carve-out 真正生效）。
+    assert hash_a == hash_b, (hash_a, hash_b)
+    # 並夾死「該 hash 確為非 OOS-only report 的 canonical sha256」（byte-identical
+    # 到由非 OOS trip 算出的 report，經 bridge 自己的 _canonical_sha256）。
+    expected = bridge._canonical_sha256(
+        cap_a["manifest_persisted"][RESIDUAL_ALPHA_REPORT_FIELD]
+    )
+    assert hash_a == expected, (hash_a, expected)
+
+
+def test_t11_med2_non_bucket_aligned_oos_start_no_overlap_and_klines_clamped():
+    """MED-2（factor-side 邊界洩漏）：oos_start **非 4h 桶對齊**時——
+
+    (1) 傳給 load_btc_klines 的 end_ts <= oos_start（klines 載入 strictly 夾止）。
+    (2) aligned 集無任何桶 b 滿足 b+bucket_sec>oos_start——以註冊的
+        candidate_window_end（= eval_buckets[-1]+bucket_sec，aligned 最大桶的尾端）
+        <= oos_start 證明（sorted aligned 的最大桶滿足 ⇒ 全部滿足）。
+
+    構造：一筆 in-trip exit 落在邊界桶 100（< oos_start 仍屬非 OOS，carve-out 保留），
+    但桶 100 的尾端 101*BUCKET > oos_start → MED-2 part-(b) 必把桶 100 逐出 aligned，
+    故 candidate_window_end <= oos_start（= 100*BUCKET，桶 99 尾端）。
+    """
+    oos_start_epoch = 100.0 * _BUCKET + 5000.0  # 非 4h 對齊（5000s into 桶 100）
+    oos_start = datetime.fromtimestamp(oos_start_epoch, tz=timezone.utc)
+    data_end = datetime.fromtimestamp(oos_start_epoch + 30 * _BUCKET, tz=timezone.utc)
+    # in-trips 跨桶 10..19 + 一筆落在邊界桶 100（exit<oos_start，非 OOS）。
+    in_rts = _in_oos_round_trips()
+    in_rts.append(
+        {"entry_ts": 100.0 * _BUCKET + 500.0, "exit_ts": 100.0 * _BUCKET + 1000.0, "net_bps": 1.0}
+    )
+    btc = _btc_klines_4h()  # 覆蓋桶 ~9..138（含桶 100/101 factor）
+
+    cap = _drive_full_bridge_capture_manifest(
+        loaded_round_trips=in_rts, btc_klines=btc,
+        oos_start=oos_start, data_end=data_end,
+    )
+    assert cap["register_err"] is None, cap["register_err"]
+    # (1) klines 載入終點夾到 <= oos_start。
+    end_epoch = cap["klines_end_ts"].timestamp()
+    assert end_epoch <= oos_start_epoch, (end_epoch, oos_start_epoch)
+    # (2) aligned 最大桶尾端（candidate_window_end）<= oos_start → 無桶跨 OOS。
+    cand_end_iso = cap["manifest_persisted"]["hidden_oos_state"]["candidate_window_end"]
+    cand_end_epoch = datetime.fromisoformat(cand_end_iso).timestamp()
+    assert cand_end_epoch <= oos_start_epoch, (cand_end_epoch, oos_start_epoch)
+    # 邊界桶 100（尾端 101*BUCKET>oos_start）確被逐出 → 不可能落在 [oos_start 前一桶] 之後。
+    assert cand_end_epoch <= 100.0 * _BUCKET, cand_end_epoch
+
+
+def test_t11b_med2_filter_emptying_aligned_fails_closed():
+    """MED-2 fail-closed：若桶過濾把 aligned 清空（全部桶尾端跨 OOS）→ 不註冊，
+    回 insufficient_aligned_buckets（不送非法/洩漏窗去撞 register）。
+
+    構造：所有 in-trip 都落在 oos_start 前同一桶內、且該桶尾端跨 OOS（oos_start
+    非桶對齊，桶 floor 在 oos_start 前但 floor+bucket_sec>oos_start）→ 過濾後空。
+    """
+    oos_start_epoch = 50.0 * _BUCKET + 3000.0  # 非對齊；桶 floor=50*BUCKET
+    oos_start = datetime.fromtimestamp(oos_start_epoch, tz=timezone.utc)
+    data_end = datetime.fromtimestamp(oos_start_epoch + 30 * _BUCKET, tz=timezone.utc)
+    # 全部 in-trip exit 落在桶 50 內（< oos_start），桶 50 尾端 51*BUCKET>oos_start。
+    in_rts = [
+        {"entry_ts": 50.0 * _BUCKET + 100.0, "exit_ts": 50.0 * _BUCKET + 200.0 + i, "net_bps": 1.0}
+        for i in range(5)
+    ]
+    btc = _btc_klines_4h()
+    cap = _drive_full_bridge_capture_manifest(
+        loaded_round_trips=in_rts, btc_klines=btc,
+        oos_start=oos_start, data_end=data_end,
+    )
+    # bridge fail-closed（過濾後 aligned 空），register 從未被呼到。
+    assert cap["bridge_result"] is None
+    assert cap["bridge_err"] == "insufficient_aligned_buckets"
+    assert "manifest_persisted" not in cap
+
+
+def test_t12_med3_sealed_embargo_equals_evaluate_cell_purge():
+    """MED-3（embargo 對齊）：封存進 manifest 的 embargo_seconds == evaluate_cell
+    residual 計算實際用的 embargo_gap（兩邊各自獨立 derive，斷言相等），eb>=1。
+
+    bridge 與 evaluate_cell 公式對齊後（eb>0 → (eb+0.5)*bs；eb=0 → 0），任一 eb>=1
+    下兩者必相等。逐 eb 驗。
+    """
+    in_rts = _in_oos_round_trips()
+    btc = _btc_klines_4h()
+    for eb in (1, 2, 3):
+        cap = _drive_full_bridge_capture_manifest(
+            loaded_round_trips=in_rts, btc_klines=btc, embargo_buckets=eb,
+        )
+        assert cap["register_err"] is None, (eb, cap["register_err"])
+        sealed_embargo = cap["manifest_persisted"]["hidden_oos_state"]["embargo_seconds"]
+        # evaluate_cell 實際 purge（與 build_bucketed_residual_report :365 同源）：
+        purge_used = int(round((eb + 0.5) * _BUCKET)) if eb > 0 else 0
+        # 注：sealed 值是 int(round(...))；evaluate_cell 的 embargo_gap 在 R-1 內以
+        # 浮點 (eb+0.5)*bs 使用，兩者描述同一 purge；此處比對封存整數秒 == 由相同
+        # 公式 derive 的整數秒（MED-3 要求兩邊 byte-精確相等的對賬量）。
+        assert sealed_embargo == purge_used, (eb, sealed_embargo, purge_used)
