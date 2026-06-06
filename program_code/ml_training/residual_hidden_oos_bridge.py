@@ -19,14 +19,20 @@ registry」的接線缺口（FACT 3 sealer flat-key + FACT 5 OOS 第三窗 carve
     路徑 Operator+replay:write）；不碰 runtime / order / risk / auth / lease。
   - **env-flag 預設 OFF**（``residual_producer_enabled()``）：OFF 立即
     ``(None, "disabled")`` 零寫入（fail-closed，部署預設不改現役行為）。
-  - **leak-free**：exit_ts 落在 OOS 窗（>= oos_start，嚴格 ``exit_ts < oos_start``
-    才算非 OOS）的 round-trip 整筆排除，永不進 residual 計算；BTC klines 載入
-    範圍夾止在非 OOS round-trip 的 [min_entry, max_exit]（max_exit < oos_start）。
+  - **leak-free**（三道，MED-2 後精確化）：①exit_ts 落在 OOS 窗（>= oos_start，
+    嚴格 ``exit_ts < oos_start`` 才算非 OOS）的 round-trip 整筆排除，永不進
+    residual 計算；②BTC klines 載入終點夾到 ``min(max_exit+pad, oos_start)``，
+    **strictly < oos_start**（非僅 max_exit；否則 4h pad 會在 oos_start 非桶對齊時
+    把 ts>=oos_start 的 bar 載進邊界桶的 factor）；③只保留**完全在 OOS 之前結束**
+    的桶 ``b + bucket_sec <= oos_start``（半開區間 [b,b+bucket_sec) 不得跨進 OOS）
+    → train/eval 切分與三窗只由完全非 OOS 的桶衍生。
   - **三窗由 bucket 邊界 epoch→ISO datetime 衍生**，**不**用 report 的 fit_window
     字串（那是 float-string，experiment_registry `_parse_manifest_datetime` 回
     None）；三窗嚴格遞增以滿足 V132 windows_chk。
-  - ``embargo_seconds >= 1``（V132 ``embargo_seconds>0`` STRICT；0 會撞 CHECK
-    rollback → 此處 fail-closed 報 err 而非送進去）。
+  - ``embargo_seconds`` 公式與 evaluate_cell 的 embargo_gap **完全一致**
+    （``(eb+0.5)*bs if eb>0 else 0``）；封存的 embargo 即 residual 計算實際 purge
+    的秒數，不誤述。eb=0 ⇒ 0 ⇒ ``>= 1`` fail-closed（V132 ``embargo_seconds>0``
+    STRICT；永不送 0 去撞 CHECK rollback）。
   - **不引入生產 caller**（無 route、無 cycle auto-fire）：PART 2 只交付 primitive
     + 測；caller 由後續 PART（deploy）接。
   - residual hash 用 ``canonical_sha256``（sort_keys/separators/ensure_ascii=True），
@@ -191,13 +197,17 @@ def register_residual_candidate_experiment(
         return None, "no_non_oos_round_trips"
 
     # 3b) embargo（純 input 檢查，提前到 klines/windowing 之前 fail-fast）。
-    #     V132 embargo_seconds>0 STRICT → 必 >=1，否則 fail-closed（不送去撞
-    #     CHECK rollback）。embargo 只依賴 embargo_buckets/bucket_sec 兩個 input，
-    #     與 round-trip/factor 資料無關，故當作前置 input 驗證最穩健（PA §3.5/
-    #     trap #3：必須 enforce embargo_seconds>=1，此處比 §3.3 step-7 提前是
-    #     等價且讓守衛不被資料不足遮蔽的 fail-fast 微調）。
-    #     embargo_gap 與 cycle/build_bucketed_residual_report 同源。
-    embargo_seconds = int(round((embargo_buckets + 0.5) * bucket_sec))
+    #     MED-3：公式必須與 evaluate_cell 的 embargo_gap **完全一致**——
+    #     ``(eb+0.5)*bs if eb>0 else 0.0``。eb=0 時 evaluate_cell purge 0 秒，
+    #     若 bridge 卻封存 (0+0.5)*4h=7200s 會讓 sealed embargo 與 residual 計算
+    #     實際用的 purge 不符（誤述）。對齊後 eb=0 → embargo_seconds=0 →
+    #     下面 ``>= 1`` fail-closed 自然拒絕（一致：eb=0 ⇒ 0 ⇒ fail-closed，
+    #     永不撞 V132 embargo_seconds>0 CHECK）。embargo 只依賴 embargo_buckets/
+    #     bucket_sec，與 round-trip/factor 無關，故當前置 input 驗證最穩健（PA §3.5/
+    #     trap #3：此處比 §3.3 step-7 提前是等價且不被資料不足遮蔽的 fail-fast）。
+    embargo_seconds = (
+        int(round((embargo_buckets + 0.5) * bucket_sec)) if embargo_buckets > 0 else 0
+    )
     if embargo_seconds < 1:
         return None, "embargo_seconds_non_positive"
     embargo_days = embargo_seconds / 86400.0
@@ -206,12 +216,17 @@ def register_residual_candidate_experiment(
     if int(round(embargo_days * 86400)) != embargo_seconds:
         return None, "embargo_days_round_trip_mismatch"
 
-    # 4) 載 BTC klines：範圍夾止在非 OOS round-trip 的 [min_entry, max_exit]
-    #    （max_exit < oos_start_epoch by carve-out）→ 連 OOS 區 factor bar 都不載入。
+    # 4) 載 BTC klines：範圍夾止在非 OOS round-trip 的 [min_entry, max_exit]。
+    #    為什麼 end 必須 strictly < oos_start（MED-2 修復）：max_exit<oos_start，但
+    #    +klines_pad_sec（4h）會把載入終點推過 oos_start，當 oos_start 非 4h 桶
+    #    對齊時，bucketed_btc_factor 對邊界桶 bucket_floor(oos_start) 會用到
+    #    ts>=oos_start 的 bar → 二階前視洩漏。故 end 夾到 oos_start_epoch 之下，
+    #    連 OOS 區的 factor bar 都不載入（PIT-clean）。
     min_entry = min(rt["entry_ts"] for rt in rts_non_oos)
     max_exit = max(rt["exit_ts"] for rt in rts_non_oos)
+    end_epoch = min(max_exit + klines_pad_sec, oos_start_epoch)
     start_dt = datetime.fromtimestamp(min_entry - klines_pad_sec, tz=timezone.utc)
-    end_dt = datetime.fromtimestamp(max_exit + klines_pad_sec, tz=timezone.utc)
+    end_dt = datetime.fromtimestamp(end_epoch, tz=timezone.utc)
     btc_klines = load_btc_klines(
         conn, start_ts=start_dt, end_ts=end_dt, timeframe=klines_timeframe
     )
@@ -241,6 +256,11 @@ def register_residual_candidate_experiment(
     buckets, _counts = bucket_round_trips_by_exit(rts_non_oos, bucket_sec)
     factor = bucketed_btc_factor(btc_klines, bucket_sec)
     aligned = sorted(set(buckets) & set(factor))
+    # MED-2：只接受**完全在 OOS 之前**結束的桶。桶 b 覆蓋半開區間
+    # [b, b+bucket_sec)；b+bucket_sec>oos_start_epoch 代表該桶尾端跨進 OOS 區，
+    # 其 factor/報酬可能含 ts>=oos_start 的 bar → 排除（PIT-clean）。如此 train/
+    # eval 切分與三窗只由完全非 OOS 的桶衍生；過濾後若清空則 fail-closed。
+    aligned = [b for b in aligned if b + bucket_sec <= oos_start_epoch]
     if len(aligned) < 2:
         return None, "insufficient_aligned_buckets"
     n_aligned = len(aligned)
@@ -264,7 +284,8 @@ def register_residual_candidate_experiment(
         return None, "data_end_invalid"
 
     # 三窗嚴格遞增（V132 windows_chk）：calib_end<=eval_start by split；
-    # eval_end<=oos_start by carve-out（max_exit<oos_start）。逐窗 + 跨窗驗。
+    # eval_end<=oos_start（MED-2 桶過濾保證 eval_buckets[-1]+bucket_sec<=oos_start）。
+    # 逐窗 + 跨窗驗。
     if not _windows_strictly_increasing(
         calibration_window, candidate_window, oos_window
     ):
