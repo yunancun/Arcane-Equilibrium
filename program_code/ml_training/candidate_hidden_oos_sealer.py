@@ -74,6 +74,15 @@ def build_hidden_oos_state(
 
     ``oos_window`` 是保留、residual 計算**未觸碰**的窗（window_start/end 對外即此窗）；
     calibration=train 擬合窗、candidate=eval 評估窗。state 硬寫 sealed/未開封。
+
+    ``embargo_seconds`` 語意（MED-2 澄清，避免誤讀）：這是**內部 train→eval purge**
+    的秒數（residual 計算在 calibration/candidate 接縫處 purge 的 bucket gap，源自
+    ``(embargo_buckets+0.5)*bucket_sec``），**不是** candidate→OOS 邊界 embargo。
+    保留 OOS hold-out 的有效性靠 caller 的 strict ``exit_ts < oos_start`` carve-out
+    （報酬已實現於 exit，exit<oos_start 保證該報酬在 OOS 窗開始前完全實現）+ 跨界桶
+    DATA 層過濾（``bucket_floor(ts)+bucket_sec<=oos_start``），**不**需要在 candidate→
+    OOS 邊界額外加 purge band。封存的 embargo_seconds 只描述 train↔eval 的 purge，與
+    OOS 邊界保護是兩個獨立機制，勿混為一談。
     """
     split_hash = compute_split_hash(
         family_id=family_id,
