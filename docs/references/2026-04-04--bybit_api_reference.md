@@ -1330,6 +1330,7 @@ pub struct ShadowOrderRequest {
 | 110017 | ReduceOnlyReject | Reduce-only 被拒族碼（無倉 / 方向反 / qty>size）；**非零倉專屬**。本系統 one-way + close + qty==0 全平 form 下視為「exchange 已平」可安全收斂（見下方 110017 註記） | No | No | - |
 | 110043 | LeverageNotModified | 槓桿已是目標值 | No | **Yes** | - |
 | 110049 | PriceTickInvalid | 價格刻度非法（透過 InstrumentInfoCache 四捨五入後重試一次） | No | No | instrument_filter |
+| 110072 | OrderLinkIdDuplicate | orderLinkId 已存在（重複客戶端訂單 ID）；**僅 close intent** 下等價「該平倉單已送達/已執行」視為冪等成功，**open path 維持 fail-closed**（見下方 110072 註記） | No | **Yes（僅 close）** | - |
 | 110074 | ContractNotLive | 合約未上線（下架/暫停）→ 從掃描器宇宙移除 | No | No | - |
 | 110103 | PostOnlyOnlyStage | 現階段僅 Post-Only 可用（開市前/資金結算瞬間） | No | No | exchange_backoff |
 | 170210 | ExceedMaxQty | 超過最大數量 | No | No | - |
@@ -1350,6 +1351,8 @@ pub struct ShadowOrderRequest {
 **guard（缺一不可收斂）**：僅 close intent ∧ reduce_only==true ∧（D1：qty==0 全平 form｜D2：Bybit position query 確認 size==0 + 2-cycle）才本地 remove，防 C-1 qty>size 誤刪真倉。**one-way mode 是前提**——若未來啟用 hedge mode（`switch_position_mode` 被接線），C-2 positionIdx 不符會復活，本收斂路徑 **mandatory re-review**。
 
 **裸 110017 仍不可視為 silent success**：顯式 qty / hedge mode 下的 110017 不在上述安全語意域，client 必先檢查 position state 再下，重試前 state 沒變必再撞。實證背景：funding_arb BUSDT 110017 reject loop RCA（memory `project_funding_arb_v2_deprecation_path`，2026-05-02 / 2026-05-08）；PHYS-LOCK zero-position close loop 收斂安全審查 — 見 `docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-29--retcode_110017_convergence_semantics.md`（G-1..G-5 / C-1/C-2/C-3）。SSOT：code 為真，新行為 land 後字典隨之對齊。
+
+**⚠️ 110072 OrderLinkIdDuplicate 僅 close 等價冪等成功（P2-ORDERLINKID-HARDENING · BB 2026-06-06 APPROVE-WITH-MANDATORY-GUARD）**：Bybit V5 `110072` 權威語意 = 「orderLinkId 已存在」，**非** Bybit 保證「該單已成功」——等價關係由本系統 id 鑄造唯一性（`oc_{em}_{ts}_{seq}`，retry 重發同一 id）決定。**僅 close retry 場景**成立：首次 close attempt 已達 Bybit 但 response 丟失，retry 重發同一 id 撞此碼 → 該平倉確已執行 → 冪等成功。**open path 必須 fail-closed**：open 單次無重試（`OPEN_NO_RETRY`），撞 110072 只可能是 id 撞歷史 = 開倉未成功，裸視為成功會讓系統誤以為有不存在的倉（違反 fail-closed 開倉語意 + Root Principle 5/6）。**實作機制**（`dispatch.rs`）：classify 維持 `110072 => Structural`（open fail-closed 為預設），僅在 Structural consumption 分支以 `close_dup_is_idempotent_success`（`req.is_close && ret_code==110072`）guard 把 **close+110072** upgrade 成 `LeaseOutcome::Consumed` 冪等成功；**110072 不觸發本地倉收斂**（不加入 `noop_is_exchange_zero_position`，與 110017 不同）——倉位真相由首次成功 attempt 的 WS fill/position update 自然回填。即使不修，close-110072 失敗後下一 tick 重發新 id 會撞 110017 自癒，本修法是提早一 tick 收斂 + 消除 spurious DispatchFailed。ref：`docs/CCAgentWorkSpace/BB/workspace/reports/` 內 2026-06-06 110072 報告。**順帶（out of scope）**：既有 `10001 + retMsg "duplicate"` → NoOp 無 close guard（open 撞 10001-duplicate 也會被當成功，近不可達但同類風險），列 PM follow-up 評估是否一併 narrow。
 
 **⚠️ 110009 doc 版本歧義（待 BB 向 Bybit 核實 · owner=BB）**：官方 error 表存在兩版本表述 —「110009 = PositionNotFound（持倉不存在）」vs「110009 = stop orders 超過上限」。本系統 `dispatch.rs` 採 **PositionNotFound→NoOp** 語意（close 時持倉已不在 → 等效成功）。**風險**：若 110009 實為「stop orders 超上限」，落 NoOp 會**靜默吞掉一個該 fail 的 SL/TP 設置失敗**（違反 fail-loud + 本地止損保護 Root Principle 9）。此為**既有潛在風險**，2026-05-29 110017 修法不引入但順帶 flag。**尚未下結論**——待 BB 向 Bybit 核實當前 V5 對 110009 的權威定義後決定是否調整 dispatch 分類。ref：`docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-29--retcode_110017_convergence_semantics.md` §5 follow-up #2。
 

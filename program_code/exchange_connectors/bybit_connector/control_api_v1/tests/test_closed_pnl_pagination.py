@@ -243,3 +243,105 @@ def test_strategy_from_link_openclaw_without_owner_is_unknown_pending():
         "oc_dm_9", symbol="DOGEUSDT", engine_owner_lookup=lambda e: {}
     )
     assert (name, source) == ("unknown_pending", "pg_missing_unknown_external")
+
+
+# ── P2 #6-T2：對齊 Rust 真實前綴 grammar（lv + 全 close 前綴）─────────────────────
+# Rust 鑄造點（已 grep 核對）：
+#   開倉  oc_{em}_...            （step_4_5_dispatch.rs:662）
+#   風控平 oc_risk_{em}_...      （commands.rs:931+988）
+#   IPC 平 oc_ipc_close_{em}_... （commands.rs:1350/1547）
+#   maker fb oc_close_mf_fb_{em}_...（commands.rs:1112）
+# em ∈ {dm=demo, ld=live_demo, lv=live}。
+
+
+def test_strategy_from_link_lv_routes_to_live_engine():
+    """lv（live mainnet）必須映射為 engine='live'，不可 fall-through 誤判成 demo。"""
+    seen = {}
+
+    def lookup(engine):
+        seen["engine"] = engine
+        return {"BTCUSDT": "ma_crossover"} if engine == "live" else {}
+
+    name, source = cp._strategy_from_order_link_id(
+        "oc_lv_1", symbol="BTCUSDT", engine_owner_lookup=lookup
+    )
+    assert seen["engine"] == "live"
+    assert (name, source) == ("ma_crossover", "pg_link_id")
+
+
+def test_strategy_from_link_lv_without_owner_does_not_misclassify_as_demo():
+    """回歸守衛：lv 無 owner 時應 unknown_pending，且查詢的 engine 不得是 demo。"""
+    engines_seen = []
+
+    def lookup(engine):
+        engines_seen.append(engine)
+        return {}
+
+    name, source = cp._strategy_from_order_link_id(
+        "oc_lv_42", symbol="BTCUSDT", engine_owner_lookup=lookup
+    )
+    assert engines_seen == ["live"]
+    assert "demo" not in engines_seen
+    assert (name, source) == ("unknown_pending", "pg_missing_unknown_external")
+
+
+def test_strategy_from_link_risk_close_prefix_demo():
+    """oc_risk_{em} 風控平倉前綴 → 正確抽出 em=dm。"""
+    name, source = cp._strategy_from_order_link_id(
+        "oc_risk_dm_1700000000000_5",
+        symbol="DOGEUSDT",
+        engine_owner_lookup=lambda e: {"DOGEUSDT": "grid_trading"} if e == "demo" else {},
+    )
+    assert (name, source) == ("grid_trading", "pg_link_id")
+
+
+def test_strategy_from_link_ipc_close_prefix_live_demo():
+    """oc_ipc_close_{em} 不可被泛 close_[a-z0-9_]+_ 先吃掉 'ipc' 導致 em 錯位。"""
+    seen = {}
+
+    def lookup(engine):
+        seen["engine"] = engine
+        return {"ETHUSDT": "funding_arb"} if engine == "live_demo" else {}
+
+    name, source = cp._strategy_from_order_link_id(
+        "oc_ipc_close_ld_1700000000000_9", symbol="ETHUSDT", engine_owner_lookup=lookup
+    )
+    assert seen["engine"] == "live_demo"
+    assert (name, source) == ("funding_arb", "pg_link_id")
+
+
+def test_strategy_from_link_maker_fallback_close_prefix_demo():
+    """oc_close_mf_fb_{em} maker fallback 平倉前綴 → 正確抽出 em=dm。"""
+    name, source = cp._strategy_from_order_link_id(
+        "oc_close_mf_fb_dm_1700000000000_3",
+        symbol="DOGEUSDT",
+        engine_owner_lookup=lambda e: {"DOGEUSDT": "grid_trading"} if e == "demo" else {},
+    )
+    assert (name, source) == ("grid_trading", "pg_link_id")
+
+
+def test_strategy_from_link_legacy_generic_close_prefix_still_matches():
+    """向後相容：舊測試覆蓋的泛 oc_close_<...>_{em} 中綴仍須抽出 em。"""
+    name, source = cp._strategy_from_order_link_id(
+        "oc_close_maker_dm_1",
+        symbol="DOGEUSDT",
+        engine_owner_lookup=lambda e: {"DOGEUSDT": "grid_trading"} if e == "demo" else {},
+    )
+    assert (name, source) == ("grid_trading", "pg_link_id")
+
+
+def test_strategy_from_link_shadow_rail_prefix_is_external():
+    """sh_risk_ 為影子軌（非 Bybit-facing），不入此讀模型 → external_manual。"""
+    name, source = cp._strategy_from_order_link_id(
+        "sh_risk_dm_1", symbol="DOGEUSDT", engine_owner_lookup=lambda e: {"DOGEUSDT": "grid_trading"}
+    )
+    assert (name, source) == ("external_manual", "bybit_unknown")
+
+
+@pytest.mark.parametrize("garbage", ["sh_xyz", "pop_123", "manual-entry", "", "oc_xx_1", "oc_zz_1"])
+def test_strategy_from_link_non_openclaw_or_unknown_tag_is_external(garbage):
+    """非 oc_ 前綴、或 em∉{dm,ld,lv}（含 paper-defensive xx）→ 既有 external fallback 不變。"""
+    name, source = cp._strategy_from_order_link_id(
+        garbage, symbol="DOGEUSDT", engine_owner_lookup=lambda e: {"DOGEUSDT": "grid_trading"}
+    )
+    assert (name, source) == ("external_manual", "bybit_unknown")
