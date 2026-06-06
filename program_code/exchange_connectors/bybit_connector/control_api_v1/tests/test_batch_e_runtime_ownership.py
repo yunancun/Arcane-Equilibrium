@@ -114,6 +114,26 @@ def test_sw_001_os_004_maintenance_flag_and_safe_pid_checks() -> None:
     assert "CONFIRM_CODE=" not in fresh
 
 
+def test_restart_all_deploy_pauses_watchdog_via_maintenance_flag() -> None:
+    """#2 (2026-06-05): restart_all sets engine_maintenance.flag for the WHOLE
+    engine-touching deploy window so the canary watchdog cannot fire its own
+    restart_all --engine-only mid-deploy (the restart-storm collision), and
+    clears it via an EXIT/INT/TERM trap so it never leaks past the deploy."""
+    body = _read("helper_scripts/restart_all.sh")
+    # 設旗標 + trap 清除（沿用 SW-001/OS-004 cleanup_maintenance_flag 範式）
+    assert "cleanup_maintenance_flag()" in body
+    assert "trap cleanup_maintenance_flag EXIT INT TERM" in body
+    # guard：trap 只清「本腳本設的」旗標，不誤清 operator 手設 / 他人 live 部署
+    assert "MAINT_FLAG_ACTIVE" in body
+    # 只在會動引擎的場景暫停 watchdog（--api-only 不停引擎故不設）
+    assert '"$SCOPE" == "all" || "$SCOPE" == "--engine-only" || "$REBUILD"' in body
+    # 旗標內容含 PID，供 stale self-heal（前次被 SIGKILL 的部署殘旗）
+    assert "set by restart_all PID" in body
+    assert "kill -0" in body
+    # 舊的 mid-restart 無條件清旗標已移除（會在引擎起回前就解除暫停 → storm 根因）
+    assert 'rm -f "$DATA_DIR/engine_maintenance.flag"' not in body
+
+
 def test_os_002_db_reset_uses_dsn_fingerprint_confirmation() -> None:
     """DB reset execute confirm code is fingerprinted to DSN/environment."""
     body = _read("helper_scripts/db/fresh_start_reset.py")
