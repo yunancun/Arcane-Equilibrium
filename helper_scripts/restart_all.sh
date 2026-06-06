@@ -351,6 +351,57 @@ if [[ "$REQUIRE_CLEAN_BUILD_WINDOW" == "1" ]]; then
     echo ">>> --require-clean-build-window: 0 cargo processes active, proceeding"
 fi
 
+# ── Deploy-protocol maintenance flag / 部署協議維護旗標 ──
+# 為什麼：restart_all 停/重建引擎期間（尤其 --rebuild，數分鐘窗口），canary
+#   engine_watchdog 會看到引擎 stale 而自己 fire `restart_all.sh --engine-only`，
+#   與本次部署相撞（2026-06-05 restart-storm 事故根因）。watchdog 的
+#   should_restart 已尊重 $DATA_DIR/engine_maintenance.flag（present 即回
+#   maintenance/不重啟，見 engine_watchdog.py should_restart Safeguard #2），
+#   故在整個 stop→build→start→verify 窗口期間設此旗標暫停 watchdog 自愈，
+#   由 EXIT/INT/TERM trap 在部署結束（含 build 失敗中斷）後才清除。
+#   --api-only 不停引擎，故不設旗標、不掛 trap（保持 watchdog 對引擎的監看）。
+# 沿用 clean_restart.sh / fresh_start.sh 的 SW-001/OS-004 範式：
+#   MAINT_FLAG_ACTIVE guard 確保 trap 只清「本腳本設的」旗標，
+#   絕不誤清 operator 手設或他人 live 部署的旗標。
+MAINT_FLAG="$DATA_DIR/engine_maintenance.flag"
+MAINT_FLAG_ACTIVE=0
+cleanup_maintenance_flag() {
+    # trap 保證正常退出 / set -e 錯誤 / Ctrl-C / SIGTERM 都會清除本腳本設的旗標，
+    # 使 watchdog 只在部署完整結束後才恢復自愈（即使 build 失敗也不殘留）。
+    if [ "$MAINT_FLAG_ACTIVE" -eq 1 ] && [ -f "$MAINT_FLAG" ]; then
+        rm -f "$MAINT_FLAG" 2>/dev/null || true
+        echo ">>> maintenance flag cleared by trap (watchdog resumes auto-restart)"
+    fi
+}
+
+# 只有「會動到引擎」的場景才暫停 watchdog：scope=all/--engine-only，或帶 --rebuild。
+# --api-only 且未 --rebuild 時引擎不被觸碰，無需暫停。
+ENGINE_TOUCHED=0
+if [[ "$SCOPE" == "all" || "$SCOPE" == "--engine-only" || "$REBUILD" -eq 1 ]]; then
+    ENGINE_TOUCHED=1
+fi
+
+if [[ "$ENGINE_TOUCHED" -eq 1 ]]; then
+    mkdir -p "$DATA_DIR"
+    # Stale self-heal：先前被 SIGKILL 的部署可能留下殘旗（trap 來不及跑）。
+    # 僅當殘旗是「本腳本格式」（set by restart_all PID <N>）且該 <N> 已死
+    #   （kill -0 失敗）才清除——絕不動 operator 手設旗標（內容不符格式）
+    #   或 PID 仍存活的旗標（保護 operator 意圖與同時在跑的 live 部署）。
+    if [ -f "$MAINT_FLAG" ]; then
+        stale_pid=$(sed -n 's/^set by restart_all PID \([0-9][0-9]*\).*/\1/p' "$MAINT_FLAG" 2>/dev/null | head -n1)
+        if [ -n "$stale_pid" ] && ! kill -0 "$stale_pid" 2>/dev/null; then
+            rm -f "$MAINT_FLAG" 2>/dev/null || true
+            echo ">>> cleared stale deploy maintenance flag (PID $stale_pid dead)"
+        fi
+    fi
+    # 設旗標後立刻掛 trap，且設 MAINT_FLAG_ACTIVE=1 讓 trap 認領清除責任。
+    printf 'set by restart_all PID %s scope=%s rebuild=%s at %s — auto-cleared on exit\n' \
+        "$$" "$SCOPE" "$REBUILD" "$(date -u +%FT%TZ)" > "$MAINT_FLAG"
+    MAINT_FLAG_ACTIVE=1
+    trap cleanup_maintenance_flag EXIT INT TERM
+    echo ">>> watchdog paused for deploy (maintenance flag set; PID $$, scope=$SCOPE, rebuild=$REBUILD)"
+fi
+
 rebuild_engine_binary() {
     # Rebuild rust/target/release/openclaw-engine.
     # 2026-04-14 FA-PHANTOM-1 deploy incident: --rebuild used to only refresh
@@ -483,9 +534,10 @@ restart_engine() {
     echo ">>> Stopping Rust engine..."
     graceful_stop_engine
     rotate_engine_log
-    # Clear maintenance flag on explicit restart — operator wants it running.
-    # 明確重啟時清除 maintenance flag — operator 意圖是讓引擎跑起來。
-    rm -f "$DATA_DIR/engine_maintenance.flag" 2>/dev/null || true
+    # 注意：維護旗標的清除已移交檔頭的 EXIT/INT/TERM trap（cleanup_maintenance_flag），
+    # 在整個 stop→build→start→verify 窗口結束後才清。此處原本的 mid-restart
+    # `rm -f engine_maintenance.flag` 會在引擎尚未起回前就解除 watchdog 暫停，
+    # 造成 watchdog 自愈搶部署（2026-06-05 restart-storm 根因），故移除。
     echo ">>> Starting Rust engine..."
     # Phase 2 auto-migrate opt-in (V023 postmortem 2026-04-24): pass through
     # OPENCLAW_AUTO_MIGRATE + OPENCLAW_BASE_DIR so the engine's migration
