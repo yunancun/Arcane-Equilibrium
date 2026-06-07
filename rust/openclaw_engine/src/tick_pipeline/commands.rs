@@ -614,6 +614,7 @@ impl TickPipeline {
     /// 透過 OrderDispatchRequest → PendingOrder 端到端傳入，取代原本用 WS
     /// exec_ts 重算（100-500ms 漂移導致 JOIN 0 overlap）。空字串時 fallback
     /// 至原有 exec-time 重算以保留 orphan/shadow 舊行為。
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_confirmed_fill(
         &mut self,
         symbol: &str,
@@ -633,6 +634,7 @@ impl TickPipeline {
         liquidity_role: Option<&str>,
         fill_latency_ms: Option<u64>,
         exchange_exec_id: Option<&str>,
+        is_close: bool,
     ) {
         self.apply_confirmed_fill_with_close_maker_audit(
             symbol,
@@ -653,9 +655,16 @@ impl TickPipeline {
             fill_latency_ms,
             exchange_exec_id,
             None,
+            is_close,
         );
     }
 
+    /// PHANTOM-FILL-FIX-1（2026-06-07，PA T3）：新增末位 `is_close` 參數，將交易所
+    /// 確認成交是否為 reduce-only / 平倉透傳到 `apply_fill_with_close_semantics`。
+    /// 來源 = loop_exchange 匹配到的 `PendingOrder.is_close`。reduce-only fill 在本地
+    /// 無倉時 no-op（T1 guard），且本函數的 `was_open && realized==0` entry_context_id
+    /// 血緣標記在 reduce-only 落空時不寫（避免幻影被賦予正規開倉血緣，§1.4）。
+    #[allow(clippy::too_many_arguments)]
     pub fn apply_confirmed_fill_with_close_maker_audit(
         &mut self,
         symbol: &str,
@@ -676,6 +685,7 @@ impl TickPipeline {
         fill_latency_ms: Option<u64>,
         exchange_exec_id: Option<&str>,
         close_maker_audit: Option<CloseMakerFillAudit>,
+        is_close: bool,
     ) {
         // EDGE-P3-1 R2 + V083-FIX-1（2026-05-11）：apply_fill 前先捕獲 was_open
         // 與 existing entry_context_id；close fill 走 helper 拿 well-formed id
@@ -697,9 +707,11 @@ impl TickPipeline {
         // apply_confirmed_fill（Demo/Live 主路徑）未接線，PAPER-DISABLE-1
         // 後 ~95% exit 標籤靜默遺失。
         let pre_close_snapshot = self.paper_state.position_exit_snapshot(symbol);
-        let realized_pnl = self
-            .paper_state
-            .apply_fill(symbol, is_long, qty, fill_price, fee, ts_ms, strategy);
+        // PHANTOM-FILL-FIX-1（PA T3）：透傳 is_close。reduce-only fill 在本地無倉時
+        // 由 apply_fill_with_close_semantics 直接 no-op（不開幻影倉）。
+        let realized_pnl = self.paper_state.apply_fill_with_close_semantics(
+            symbol, is_long, qty, fill_price, fee, ts_ms, strategy, is_close,
+        );
         // FILL-CONTEXT-LINKAGE-1: use the signal-time id carried through
         // OrderDispatchRequest → PendingOrder rather than recomputing with
         // WS exec_ts (drifts 100-500ms from event.ts_ms → 0 JOIN overlap).
@@ -707,7 +719,12 @@ impl TickPipeline {
         // (e.g. shadow-channel close on an orphan position).
         // FILL-CONTEXT-LINKAGE-1：使用訊號時刻 context_id，不再用 WS exec_ts。
         // 僅在呼叫方未傳時退回 exec-time 重算以保留舊行為。
-        if was_open && realized_pnl == 0.0 {
+        //
+        // PHANTOM-FILL-FIX-1（PA §1.4）：reduce-only fill（is_close=true）即使
+        // was_open==true（本地無倉）且 realized==0（no-op），也**不**寫
+        // entry_context_id —— 否則一筆落空的平倉會被賦予正規開倉血緣（TON 幻影的
+        // 第二層偽裝）。只有真開倉 fill（is_close=false）才打 entry 血緣。
+        if was_open && realized_pnl == 0.0 && !is_close {
             let ctx_pre = if !signal_context_id.is_empty() {
                 signal_context_id.to_string()
             } else {

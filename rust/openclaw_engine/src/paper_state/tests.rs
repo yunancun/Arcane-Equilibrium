@@ -1666,3 +1666,124 @@ fn evict_on_dust_set_dust_floor_accepts_positive_finite() {
     s.set_dust_floor_usd(1.0);
     assert!((s.dust_floor_usd() - 1.0).abs() < 1e-12);
 }
+
+// ───────────────────────────────────────────────────────────────────────────
+// PHANTOM-FILL-FIX-1（2026-06-07，PA T1）· apply_fill reduce-only / 翻倉 / 幻影回歸
+// 釘住 TONUSDT 幻影事故根因：平倉 fill 在本地無倉時絕不開幻影反向倉。
+// ───────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn phantom_fix_close_to_flat() {
+    // ① 平倉到 flat：開 short 437.3@1.5929 → close Buy 437.3@1.5744（is_close=true）
+    //    → flat + realized = (1.5929-1.5744)*437.3（short 盈利，1e-9 容差）。
+    let mut s = PaperState::new(10_000.0);
+    s.apply_fill_with_close_semantics("TONUSDT", false, 437.3, 1.5929, 0.0, 0, "grid", false);
+    assert_eq!(s.position_count(), 1);
+    let pnl =
+        s.apply_fill_with_close_semantics("TONUSDT", true, 437.3, 1.5744, 0.0, 1_000, "grid", true);
+    assert_eq!(s.position_count(), 0, "完全平倉必歸 flat");
+    let expected = (1.5929_f64 - 1.5744) * 437.3;
+    assert!(
+        (pnl - expected).abs() < 1e-9,
+        "close-to-flat realized PnL 不對：got {pnl}, want {expected}"
+    );
+}
+
+#[test]
+fn phantom_fix_partial_reduce() {
+    // ② 部分減倉：開 short 100 → close Buy 40（is_close=true）→ short 剩 60、
+    //    entry 不變、realized = 40 對應 PnL。
+    let mut s = PaperState::new(10_000.0);
+    s.apply_fill_with_close_semantics("BTC", false, 100.0, 1.6, 0.0, 0, "grid", false);
+    let pnl = s.apply_fill_with_close_semantics("BTC", true, 40.0, 1.5, 0.0, 1_000, "grid", true);
+    let pos = s.get_position("BTC").expect("部分平倉後 short 仍在");
+    assert!(!pos.is_long, "方向仍為 short");
+    assert!((pos.qty - 60.0).abs() < 1e-9, "剩餘量應為 60，got {}", pos.qty);
+    assert!((pos.entry_price - 1.6).abs() < 1e-12, "entry 不應變");
+    let expected = (1.6_f64 - 1.5) * 40.0; // short 平 40 在更低價 → 盈利
+    assert!(
+        (pnl - expected).abs() < 1e-9,
+        "部分減倉 realized PnL 不對：got {pnl}, want {expected}"
+    );
+}
+
+#[test]
+fn phantom_fix_true_flip_overflow_builds_reverse_position() {
+    // ③ 真翻倉（qty > 既有反向倉量，§1.6 新邏輯）：open short 100@1.6 →
+    //    Buy 150@1.5（is_close=false，genuine 反向開倉成交）→ short 平掉、
+    //    新建 long 50@1.5（餘量 50，1e-9 容差）、realized = (1.6-1.5)*100。
+    let mut s = PaperState::new(10_000.0);
+    s.apply_fill_with_close_semantics("ETH", false, 100.0, 1.6, 0.0, 0, "grid", false);
+    let pnl = s.apply_fill_with_close_semantics("ETH", true, 150.0, 1.5, 0.0, 1_000, "grid", false);
+    let pos = s.get_position("ETH").expect("翻倉後應有反向 long 新倉");
+    assert!(pos.is_long, "翻倉後方向應為 long");
+    assert!(
+        (pos.qty - 50.0).abs() < 1e-9,
+        "翻倉餘量新倉 qty 應為 50（150-100），got {}",
+        pos.qty
+    );
+    assert!(
+        (pos.entry_price - 1.5).abs() < 1e-12,
+        "翻倉新倉 entry 應為 fill_price 1.5"
+    );
+    assert!(
+        (pos.entry_notional - 50.0 * 1.5).abs() < 1e-9,
+        "翻倉新倉 entry_notional 應為 餘量*fill_price"
+    );
+    let expected = (1.6_f64 - 1.5) * 100.0; // 平掉既有 100 short 的 PnL
+    assert!(
+        (pnl - expected).abs() < 1e-9,
+        "翻倉 realized PnL 應只結算平掉的 100：got {pnl}, want {expected}"
+    );
+}
+
+#[test]
+fn phantom_fix_reduce_only_no_position_is_noop() {
+    // ④ reduce-only fill 落空 no-op：本地無倉 → apply Buy is_close=true →
+    //    不開倉、realized=0（fail-closed 縱深，杜絕幻影）。
+    let mut s = PaperState::new(10_000.0);
+    assert_eq!(s.position_count(), 0);
+    let pnl = s.apply_fill_with_close_semantics("TONUSDT", true, 437.3, 1.5744, 0.0, 0, "grid", true);
+    assert_eq!(
+        s.position_count(),
+        0,
+        "reduce-only fill 本地無倉時必須 no-op，不得開幻影倉"
+    );
+    assert_eq!(pnl, 0.0, "no-op 不產生 realized PnL");
+    // 對照：genuine open（is_close=false）才開倉。
+    s.apply_fill_with_close_semantics("TONUSDT", true, 437.3, 1.5744, 0.0, 0, "grid", false);
+    assert_eq!(s.position_count(), 1, "genuine 開倉 fill 仍正常開倉");
+    assert!(s.get_position("TONUSDT").unwrap().is_long);
+}
+
+#[test]
+fn phantom_fix_position_update_advisory_then_close_buy_yields_flat_not_long() {
+    // ⑤ 核心回歸：模擬 TON 17:03 事故的根因序列在 apply_fill 層的最終契約 ——
+    //    交易所先推 position(size=0) 把 short 移除（advisory，本地已 flat），隨後
+    //    平倉 Buy fill（is_close=true）抵達。修後：apply_fill 對「本地無倉的
+    //    reduce-only fill」no-op → **斷言 flat 而非開出幻影 LONG**。
+    //
+    //    這正是拆分前的 BUG：close Buy 落空 → 落「開新倉」分支 → 幻影 LONG
+    //    （entry=平倉價、qty=平倉量）。reduce-only guard 封死此路。
+    let mut s = PaperState::new(10_000.0);
+    // 1) 開 short（execution 流 genuine open）。
+    s.apply_fill_with_close_semantics("TONUSDT", false, 437.3, 1.5929, 0.0, 0, "grid", false);
+    assert_eq!(s.position_count(), 1);
+    // 2) PositionUpdate(size=0) advisory 移除（模擬 T2 收斂 / 既有 size=0 路徑）。
+    //    在 apply_fill 層用 upsert size=0 等價表達「本地已被移除為 flat」。
+    s.upsert_position_from_exchange("TONUSDT", false, 0.0, 0.0, 500);
+    assert_eq!(s.position_count(), 0, "size=0 已移除 short，本地 flat");
+    // 3) 平倉 Buy fill 落空抵達（is_close=true）→ 必 no-op，不開幻影 LONG。
+    let pnl =
+        s.apply_fill_with_close_semantics("TONUSDT", true, 437.3, 1.5744, 0.0, 1_000, "grid", true);
+    assert_eq!(
+        s.position_count(),
+        0,
+        "核心回歸：亂序平倉 Buy 落空必須 flat，不得開幻影 LONG"
+    );
+    assert!(
+        s.get_position("TONUSDT").is_none(),
+        "TONUSDT 必為 flat（無任何倉位）"
+    );
+    assert_eq!(pnl, 0.0, "落空平倉不產生 realized PnL");
+}

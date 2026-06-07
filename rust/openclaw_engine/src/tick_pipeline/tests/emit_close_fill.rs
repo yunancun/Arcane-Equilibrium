@@ -194,6 +194,7 @@ fn apply_confirmed_fill_preserves_signal_context_id() {
         None,
         None,
         None,
+        false, // PHANTOM-FILL-FIX-1: open fill
     );
 
     // paper_state must show the signal-time id verbatim — not the exec-time
@@ -246,6 +247,7 @@ fn apply_confirmed_fill_falls_back_when_signal_id_empty() {
         None,
         None,
         None,
+        false, // PHANTOM-FILL-FIX-1: open fill
     );
 
     // Fallback path recomputes with em="demo", symbol="BTCUSDT", ts_ms=2000.
@@ -281,6 +283,7 @@ fn apply_confirmed_fill_uses_exchange_exec_id_as_fill_id() {
         None,
         None,
         Some("exec-id-123"),
+        false, // PHANTOM-FILL-FIX-1: open fill
     );
 
     let msg = rx.try_recv().expect("confirmed fill must be enqueued");
@@ -341,6 +344,7 @@ fn apply_confirmed_fill_emits_exit_feature_row_on_close() {
         None,
         None,
         None,
+        false, // PHANTOM-FILL-FIX-1: open fill
     );
     assert!(
         rx.try_recv().is_err(),
@@ -373,6 +377,7 @@ fn apply_confirmed_fill_emits_exit_feature_row_on_close() {
         None,
         None,
         None,
+        true, // PHANTOM-FILL-FIX-1: close fill (position present → realized PnL computed)
     );
 
     let row = rx
@@ -429,6 +434,7 @@ fn apply_confirmed_fill_exit_feature_fail_soft_when_tx_missing() {
         Some("taker"),
         Some(10),
         None,
+        false, // PHANTOM-FILL-FIX-1: open fill
     );
     pipeline.apply_confirmed_fill(
         "BTCUSDT",
@@ -448,6 +454,7 @@ fn apply_confirmed_fill_exit_feature_fail_soft_when_tx_missing() {
         None,
         None,
         None,
+        true, // PHANTOM-FILL-FIX-1: close fill (position present → realized PnL computed)
     );
 
     // Both Fills still flow through trading_tx (open + close).
@@ -505,6 +512,7 @@ fn apply_confirmed_fill_persists_close_maker_audit_payload() {
         None,
         None,
         None,
+        false, // PHANTOM-FILL-FIX-1: open fill
     );
     pipeline.apply_confirmed_fill_with_close_maker_audit(
         "BTCUSDT",
@@ -530,6 +538,7 @@ fn apply_confirmed_fill_persists_close_maker_audit_payload() {
             fallback_reason: None,
             rate_limit_scope: None,
         }),
+        true, // PHANTOM-FILL-FIX-1: reduce-only/close fill
     );
 
     let _open = rx.try_recv().expect("open fill");
@@ -587,6 +596,7 @@ fn apply_confirmed_fill_persists_close_maker_fallback_reason() {
         None,
         None,
         None,
+        false, // PHANTOM-FILL-FIX-1: open fill
     );
     pipeline.apply_confirmed_fill_with_close_maker_audit(
         "BTCUSDT",
@@ -612,6 +622,7 @@ fn apply_confirmed_fill_persists_close_maker_fallback_reason() {
             fallback_reason: Some("postonly_reject".into()),
             rate_limit_scope: None,
         }),
+        true, // PHANTOM-FILL-FIX-1: reduce-only/close fill
     );
 
     let _open = rx.try_recv().expect("open fill");
@@ -664,6 +675,7 @@ fn apply_confirmed_fill_persists_close_maker_rate_limit_scope_detail() {
         None,
         None,
         None,
+        false, // PHANTOM-FILL-FIX-1: open fill
     );
     pipeline.apply_confirmed_fill_with_close_maker_audit(
         "BTCUSDT",
@@ -689,6 +701,7 @@ fn apply_confirmed_fill_persists_close_maker_rate_limit_scope_detail() {
             fallback_reason: Some("rate_limit_backoff_per_symbol".into()),
             rate_limit_scope: Some("per_symbol".into()),
         }),
+        true, // PHANTOM-FILL-FIX-1: reduce-only/close fill
     );
 
     let _open = rx.try_recv().expect("open fill");

@@ -273,6 +273,13 @@ impl PaperState {
     /// 在紙盤狀態上應用成交。
     /// Apply a fill and return the realized PnL (0.0 for opens/accumulates, non-zero for closes).
     /// 應用成交並返回已實現損益（開倉/加倉返回 0.0，平倉返回非零值）。
+    ///
+    /// PHANTOM-FILL-FIX-1（2026-06-07）：此薄包裝保留拆分前的公開簽名供約 90 個
+    /// caller（paper-mode dispatch / resting orders / 全部 test）零改動沿用，預設
+    /// `is_close=false`。只有交易所確認成交鏈（`apply_confirmed_fill*` →
+    /// loop_exchange `po.is_close`）會走 `apply_fill_with_close_semantics` 帶真實
+    /// reduce-only 旗標。paper 模式無 WS `PositionUpdate` 競態，`is_close=false`
+    /// 對其安全且行為等價。
     pub fn apply_fill(
         &mut self,
         symbol: &str,
@@ -282,6 +289,39 @@ impl PaperState {
         fee: f64,
         ts_ms: u64,
         owner_strategy: &str,
+    ) -> f64 {
+        self.apply_fill_with_close_semantics(
+            symbol, is_long, qty, fill_price, fee, ts_ms, owner_strategy, false,
+        )
+    }
+
+    /// PHANTOM-FILL-FIX-1（2026-06-07，PA Option A T1）：帶 reduce-only 語意的成交應用。
+    ///
+    /// 為什麼新增此入口而非直接改 `apply_fill` 簽名：`apply_fill` 有約 90 個 caller
+    /// （含全部單測與 paper-mode dispatch），直接加參數會炸全庫；故保留舊簽名薄包裝
+    /// （見上）、新邏輯集中於此。`is_close=true` 代表這是一筆 reduce-only / 平倉成交。
+    ///
+    /// 兩項相對拆分前的語意強化（其餘算術順序 bit-exact 保留）：
+    ///   1. **翻倉餘量（補 §1.6 缺口）**：反向成交 `qty > pos.qty`（成交量大於既有反向
+    ///      倉）時，平掉既有倉後**用餘量 `qty - close_qty` 以 fill_price 建立反向新倉**。
+    ///      拆分前 `close_qty = pos.qty.min(qty)` 把餘量靜默丟棄。one-way 模式下交易所
+    ///      不會單筆既平且反開故歷史未爆，屬正確性缺口。
+    ///   2. **reduce-only 縱深防線（防幻影，§4.3）**：當 `is_close=true` 且本地**無**對應
+    ///      倉時 → **no-op 不開新倉**。這是 TON 幻影事故的根因防線：交易所平倉先推
+    ///      `position(size=0)` 移除 short → 隨後 close `Buy` fill 落空 → 拆分前落「開新倉」
+    ///      分支開出幻影 LONG。reduce-only fill 永遠不該開倉，fail-closed（Root Principle 6）。
+    ///      非平倉（`is_close=false`）的真開倉 fill 才走開新倉分支（既有行為不變）。
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply_fill_with_close_semantics(
+        &mut self,
+        symbol: &str,
+        is_long: bool,
+        qty: f64,
+        fill_price: f64,
+        fee: f64,
+        ts_ms: u64,
+        owner_strategy: &str,
+        is_close: bool,
     ) -> f64 {
         // Guard: reject zero-qty fills (prevents ghost positions)
         // 防護：拒絕零數量成交（防止幽靈持倉）
@@ -314,6 +354,32 @@ impl PaperState {
                     self.positions_insert(symbol.to_string(), updated);
                 } else {
                     self.positions_remove(symbol);
+                    // PHANTOM-FILL-FIX-1（PA §1.6 / §4.2 翻倉餘量）：成交量大於既有
+                    // 反向倉量時，平掉舊倉後用餘量建立反向新倉，而非靜默丟棄。
+                    // 僅在完全平倉（remaining<=1e-12）分支才可能有餘量；部分平倉
+                    // （remaining>0）代表 qty<=pos.qty，無餘量。reduce-only 平倉
+                    // （is_close=true）即便有餘量也不反開（reduce-only 不應反向開倉）。
+                    let overflow = qty - close_qty;
+                    if !is_close && overflow > 1e-12 {
+                        self.positions_insert(
+                            symbol.to_string(),
+                            PaperPosition {
+                                symbol: symbol.to_string(),
+                                is_long, // 餘量方向 = 本次成交方向（反向新倉）
+                                qty: overflow,
+                                entry_price: fill_price,
+                                best_price: fill_price,
+                                entry_fee: 0.0, // 手續費已在本函數開頭整筆計入
+                                entry_ts_ms: ts_ms,
+                                unrealized_pnl: 0.0,
+                                entry_context_id: String::new(),
+                                owner_strategy: owner_strategy.to_string(),
+                                entry_notional: overflow * fill_price,
+                                max_favorable_pnl_pct: 0.0,
+                                peak_reached_ts_ms: ts_ms as i64,
+                            },
+                        );
+                    }
                 }
                 self.peak_balance = self.peak_balance.max(self.balance);
                 // EVICT-ON-DUST T2a (PA §1.2.1): opposite-direction partial
@@ -325,7 +391,7 @@ impl PaperState {
                 // removed by the `remaining <= 1e-12` branch above.
                 // EVICT-ON-DUST T2a：反向部分平倉殘餘檢查；fill_price 即剛 set
                 // 的最新價，作 notional 計算參考。完全平倉路徑 already-removed
-                // → no-op。
+                // → no-op。翻倉新倉若為 dust 亦在此一併驅逐。
                 self.evict_if_dust(symbol, fill_price, "apply_fill_opposite_residue");
                 return pnl;
             } else {
@@ -359,6 +425,23 @@ impl PaperState {
                 self.evict_if_dust(symbol, fill_price, "apply_fill_same_dir_accumulate");
                 return 0.0;
             }
+        }
+
+        // PHANTOM-FILL-FIX-1（PA §4.3 reduce-only guard）：本地無對應倉時，
+        // 若這筆是 reduce-only / 平倉成交 → no-op 不開新倉（fail-closed 縱深）。
+        // 這封死 TON 幻影：平倉 fill 在 short 被 PositionUpdate(size=0) 先移除後
+        // 落空，絕不可被當作新開倉開出反向幻影 LONG。記 warn audit 供觀測。
+        if is_close {
+            tracing::warn!(
+                symbol = %symbol,
+                is_long = is_long,
+                qty = qty,
+                fill_price = fill_price,
+                owner_strategy = %owner_strategy,
+                "PHANTOM-FILL-FIX-1: reduce-only fill with no local position — no-op (orphan close, not opening phantom) \
+                 / reduce-only 成交但本地無倉 — no-op（孤兒平倉，不開幻影倉）"
+            );
+            return 0.0;
         }
 
         // Opening new position (no existing position for this symbol)
