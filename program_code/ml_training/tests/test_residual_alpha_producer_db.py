@@ -323,3 +323,218 @@ def test_build_bucketed_smoke_feeds_r1():
     assert diag["mean_trips_per_bucket"] == 1.0
     assert hasattr(result, "report") and hasattr(result, "promotion_ready")
     assert "verdict" in result.report
+
+
+# ---- Gap B：多因子 bucket panel（btc + market + funding）----
+
+from program_code.ml_training.residual_alpha_producer_db import (  # noqa: E402
+    bucketed_funding_factor,
+    bucketed_multi_factor,
+    load_funding_rates,
+)
+
+_B = 14400.0  # 4h bucket
+
+
+def _sym_klines(n: int, *, open_=100.0, close=100.5):
+    # 每桶一根 4h kline（ts 對齊桶起點）。
+    return [{"ts": i * _B, "open": open_, "close": close} for i in range(n)]
+
+
+def test_multi_factor_btc_only_matches_btc_factor():
+    """required_factors=("btc",) 的 multi-factor panel 必須與 bucketed_btc_factor
+    完全一致（行為中性的結構保證：預設路徑零漂移）。"""
+    klines = {"BTCUSDT": _sym_klines(10)}
+    lifecycles = {"BTCUSDT": (0.0, None)}
+    multi = bucketed_multi_factor(klines, lifecycles, required_factors=("btc",), bucket_sec=_B)
+    btc = bucketed_btc_factor(klines["BTCUSDT"], _B)
+    assert multi == btc  # dict 相等（key 集 + 值）
+
+
+def test_multi_factor_market_basket_pit_and_min_size():
+    """market 因子：每桶取該桶 PIT-active 等權；成員 < min_basket 該桶無值。"""
+    # 10 個 symbol 全程上市 → market basket 充足
+    syms = {f"S{i}" for i in range(10)} | {"BTCUSDT"}
+    klines = {s: _sym_klines(6) for s in syms}
+    lifecycles = {s: (0.0, None) for s in syms}
+    panel = bucketed_multi_factor(
+        klines, lifecycles, required_factors=("btc", "market"), bucket_sec=_B,
+        min_basket_symbols=8,
+    )
+    assert len(panel) == 6
+    for vals in panel.values():
+        assert set(vals.keys()) == {"btc", "market"}
+        # 每個 symbol 桶報酬皆 (100.5/100-1)*1e4 = 50 bps → basket=50
+        assert vals["market"] == pytest.approx(50.0)
+        assert vals["btc"] == pytest.approx(50.0)
+
+    # 只 3 個 symbol 有 lifecycle → basket < 8 → market 桶全無值 → panel 空（intersection）
+    thin_life = {"BTCUSDT": (0.0, None), "S0": (0.0, None), "S1": (0.0, None)}
+    thin_panel = bucketed_multi_factor(
+        klines, thin_life, required_factors=("btc", "market"), bucket_sec=_B,
+        min_basket_symbols=8,
+    )
+    assert thin_panel == {}
+
+
+def test_multi_factor_market_excludes_delisted_bucket_pit():
+    """market PIT：symbol 在某桶後下市，下市後的桶不得計入該 symbol（survivorship）。"""
+    syms = [f"S{i}" for i in range(9)]  # 9 個常駐 → 含 D 後仍可達 min 8
+    klines = {s: _sym_klines(4) for s in syms}
+    klines["BTCUSDT"] = _sym_klines(4)
+    klines["D"] = _sym_klines(4)
+    lifecycles = {s: (0.0, None) for s in syms}
+    lifecycles["BTCUSDT"] = (0.0, None)
+    # D 在 t=_B*2 前下市：delisted=_B*1.5 → 桶 [0,_B] 仍 active（delisted>bucket_end=_B），
+    # 桶 [_B,2_B] 起 delisted<=bucket_end 被排除。
+    lifecycles["D"] = (0.0, _B * 1.5)
+    panel = bucketed_multi_factor(
+        klines, lifecycles, required_factors=("market",), bucket_sec=_B, min_basket_symbols=8,
+    )
+    # 桶 0：D active（9 S + BTC + D = 11 成員）；桶 >=1：D 排除（10 成員）。
+    # 都 >= 8 → 4 桶都有 market 值（驗 D 的納入/排除不影響存在性，但驗無 crash 且 PIT 生效）。
+    assert len(panel) == 4
+
+
+def test_bucketed_funding_factor_pit_only_settled_rows():
+    """funding PIT（§5.1 最高風險）：一桶只用結算時刻 ts 落在桶窗內的結算列，
+    桶結束後才結算的下一筆費率（未來）必被排除。"""
+    # 桶 [0,_B)、[_B,2_B)。settlement 結算時刻：
+    #   ts=100（落桶 0）、ts=_B+100（落桶 1）、ts=2_B+100（落桶 2，對桶 1 而言是未來）
+    funding = {
+        "BTCUSDT": [
+            {"ts": 100.0, "funding_rate": 0.001},        # 桶 0
+            {"ts": _B + 100.0, "funding_rate": 0.002},   # 桶 1
+            {"ts": 2 * _B + 100.0, "funding_rate": 9.0}, # 桶 2（巨值；若洩漏到桶 1 會爆）
+        ]
+    }
+    out = bucketed_funding_factor(funding, ["BTCUSDT"], net_side=1, bucket_sec=_B)
+    # 做多：funding>0=付費=負報酬 → -rate*1e4
+    assert out[0.0] == pytest.approx(-0.001 * 1e4)
+    assert out[_B] == pytest.approx(-0.002 * 1e4)
+    # 桶 1 絕不可含 ts=2_B+100 的未來費率（9.0）：值必為 -20 bps 而非天文數字
+    assert abs(out[_B]) < 100.0
+    # 桶 2 的未來列只歸它自己的桶
+    assert out[2 * _B] == pytest.approx(-9.0 * 1e4)
+
+
+def test_bucketed_funding_factor_boundary_settlement_goes_to_prior_bucket():
+    """結算時刻恰在桶邊界 ts==bucket_start 時歸入上一桶（(start,end] 半開語意），
+    確保不把桶起點當下一桶的未來費率。"""
+    funding = {"X": [{"ts": _B, "funding_rate": 0.001}]}  # 恰在桶 1 起點
+    out = bucketed_funding_factor(funding, ["X"], net_side=1, bucket_sec=_B)
+    # ts=_B 屬桶 0 的尾（(0,_B]），不屬桶 1
+    assert set(out.keys()) == {0.0}
+    assert out[0.0] == pytest.approx(-0.001 * 1e4)
+
+
+def test_bucketed_funding_factor_sign_matches_net_side():
+    """funding 符號隨 net_side：做空收費（funding>0）→ 正報酬；做多付費 → 負報酬。"""
+    funding = {"X": [{"ts": 100.0, "funding_rate": 0.001}]}
+    long_out = bucketed_funding_factor(funding, ["X"], net_side=1, bucket_sec=_B)
+    short_out = bucketed_funding_factor(funding, ["X"], net_side=-1, bucket_sec=_B)
+    assert long_out[0.0] == pytest.approx(-0.001 * 1e4)   # 做多付費 → 負
+    assert short_out[0.0] == pytest.approx(+0.001 * 1e4)  # 做空收費 → 正
+
+
+def test_bucketed_funding_factor_multi_symbol_equal_weight():
+    """多 symbol funding 取等權（只在有結算列的 symbol 上平均）。"""
+    funding = {
+        "A": [{"ts": 100.0, "funding_rate": 0.001}],
+        "B": [{"ts": 100.0, "funding_rate": 0.003}],
+    }
+    out = bucketed_funding_factor(funding, ["A", "B"], net_side=1, bucket_sec=_B)
+    # realized 平均 = (0.001+0.003)/2 = 0.002 → -20 bps
+    assert out[0.0] == pytest.approx(-0.002 * 1e4)
+
+
+def test_multi_factor_funding_requires_inputs():
+    """required_factors 含 funding 但缺 funding_by_symbol/position_symbols → raise
+    （fail-closed，不得靜默產出無 funding 的 panel 誤判已涵蓋 carry）。"""
+    klines = {"BTCUSDT": _sym_klines(4)}
+    lifecycles = {"BTCUSDT": (0.0, None)}
+    with pytest.raises(ValueError, match="funding factor requires"):
+        bucketed_multi_factor(
+            klines, lifecycles, required_factors=("btc", "funding"), bucket_sec=_B,
+        )
+
+
+def test_multi_factor_three_factors_aligned_on_same_grid():
+    """btc+market+funding 三因子在同一桶網格 intersection 對齊。"""
+    syms = {f"S{i}" for i in range(10)} | {"BTCUSDT"}
+    klines = {s: _sym_klines(6) for s in syms}
+    lifecycles = {s: (0.0, None) for s in syms}
+    funding = {"BTCUSDT": [{"ts": i * _B + 100.0, "funding_rate": 0.001} for i in range(6)]}
+    panel = bucketed_multi_factor(
+        klines, lifecycles,
+        required_factors=("btc", "market", "funding"), bucket_sec=_B,
+        min_basket_symbols=8,
+        funding_by_symbol=funding, position_symbols=["BTCUSDT"], net_side=1,
+    )
+    assert len(panel) == 6
+    for vals in panel.values():
+        assert set(vals.keys()) == {"btc", "market", "funding"}
+        assert vals["funding"] == pytest.approx(-0.001 * 1e4)
+
+
+def test_multi_factor_funding_partial_bucket_intersection():
+    """funding 只覆蓋部分桶時，panel 只保留三因子都有值的桶（intersection）。"""
+    syms = {f"S{i}" for i in range(10)} | {"BTCUSDT"}
+    klines = {s: _sym_klines(6) for s in syms}
+    lifecycles = {s: (0.0, None) for s in syms}
+    # funding 只有前 3 桶
+    funding = {"BTCUSDT": [{"ts": i * _B + 100.0, "funding_rate": 0.001} for i in range(3)]}
+    panel = bucketed_multi_factor(
+        klines, lifecycles,
+        required_factors=("btc", "market", "funding"), bucket_sec=_B,
+        min_basket_symbols=8,
+        funding_by_symbol=funding, position_symbols=["BTCUSDT"], net_side=1,
+    )
+    # btc/market 有 6 桶，funding 只有 3 桶 → intersection = 3
+    assert len(panel) == 3
+
+
+def test_load_funding_rates_converts_and_drops_bad():
+    """DB loader（mock cursor）：timestamptz→epoch，壞 rate drop。"""
+    rows_by_call = [
+        [
+            {"ts": datetime(2026, 6, 5, 0, 0, tzinfo=timezone.utc), "funding_rate": 0.0001},
+            {"ts": datetime(2026, 6, 5, 8, 0, tzinfo=timezone.utc), "funding_rate": None},  # drop
+        ],
+    ]
+
+    class _MultiCursor:
+        def __init__(self, batches):
+            self._batches = list(batches)
+            self._last = []
+
+        def execute(self, q, p=None):
+            self._last = self._batches.pop(0) if self._batches else []
+
+        def fetchall(self):
+            return self._last
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class _MultiConn:
+        def __init__(self, batches):
+            self._batches = batches
+
+        def cursor(self, **kw):
+            return _MultiCursor(self._batches)
+
+    out = load_funding_rates(
+        _MultiConn(rows_by_call), ["BTCUSDT"],
+        start_ts=datetime(2026, 6, 5, tzinfo=timezone.utc),
+        end_ts=datetime(2026, 6, 6, tzinfo=timezone.utc),
+    )
+    assert set(out.keys()) == {"BTCUSDT"}
+    assert len(out["BTCUSDT"]) == 1
+    assert out["BTCUSDT"][0]["funding_rate"] == 0.0001
+    assert out["BTCUSDT"][0]["ts"] == pytest.approx(
+        datetime(2026, 6, 5, 0, 0, tzinfo=timezone.utc).timestamp()
+    )

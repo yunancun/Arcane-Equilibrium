@@ -33,6 +33,7 @@ try:  # 套件式 import（app runtime）
         DEFAULT_BUCKET_SEC,
         bucket_round_trips_by_exit,
         bucketed_btc_factor,
+        bucketed_multi_factor,
         load_btc_klines,
         load_round_trips,
     )
@@ -45,6 +46,7 @@ except ModuleNotFoundError:  # pragma: no cover - 直跑 fallback
         DEFAULT_BUCKET_SEC,
         bucket_round_trips_by_exit,
         bucketed_btc_factor,
+        bucketed_multi_factor,
         load_btc_klines,
         load_round_trips,
     )
@@ -114,16 +116,45 @@ def evaluate_cell(
     min_train_observations: int = 20,
     min_eval_observations: int = 8,
     n_trials_floor: int = DEFAULT_N_TRIALS_FLOOR,
+    required_factors: tuple[str, ...] = ("btc",),
+    klines_by_symbol: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
+    lifecycles: Mapping[str, tuple[float | None, float | None]] | None = None,
+    funding_by_symbol: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
+    position_symbols: Sequence[str] | None = None,
+    net_side: int = 1,
     **gate_kwargs: Any,
 ) -> CellResidualResult:
     """評估單一 cell。peers = 同策略其他參數變體的非重疊 bucket 序列；無 peer
     （單一配置）→ CSCV 不適用 → 診斷性 defer。所有報酬走 R-2 非重疊 bucket。
+
+    required_factors 預設 ``("btc",)``（行為中性：與既有 cron/payload 流 byte-identical，
+    走 BTC-only ``bucketed_btc_factor``）。caller 顯式傳 ``("btc","market","funding")``
+    才啟用多因子 ``bucketed_multi_factor``，此時須提供 market 的
+    ``klines_by_symbol``/``lifecycles`` 與 funding 的
+    ``funding_by_symbol``/``position_symbols``/``net_side``。
     """
     n_trials, deriv = derive_n_trials(
         n_param_variants, n_symbols_screened, n_strategies_screened, floor=n_trials_floor
     )
     candidate_buckets, counts = bucket_round_trips_by_exit(candidate_round_trips, bucket_sec)
-    factor_buckets = bucketed_btc_factor(btc_klines, bucket_sec)
+    if tuple(required_factors) == ("btc",):
+        # 預設單因子路徑：保持與既有實作完全一致（byte-identical factor + hash）。
+        factor_buckets = bucketed_btc_factor(btc_klines, bucket_sec)
+    else:
+        # 多因子路徑：market 需 klines_by_symbol+lifecycles；btc 若仍在 required
+        # 且 caller 未給 klines_by_symbol，回退用 btc_klines 補進 panel 來源。
+        merged_klines: dict[str, Sequence[Mapping[str, Any]]] = dict(klines_by_symbol or {})
+        if "btc" in required_factors and "BTCUSDT" not in merged_klines:
+            merged_klines["BTCUSDT"] = btc_klines
+        factor_buckets = bucketed_multi_factor(
+            merged_klines,
+            lifecycles or {},
+            required_factors=tuple(required_factors),
+            bucket_sec=bucket_sec,
+            funding_by_symbol=funding_by_symbol,
+            position_symbols=position_symbols,
+            net_side=net_side,
+        )
     if not candidate_buckets or not factor_buckets:
         return CellResidualResult(
             cell_key=cell_key,
@@ -152,7 +183,7 @@ def evaluate_cell(
         factor_buckets,
         n_trials=n_trials,
         peer_oos_returns=(None if single_config else peer_buckets),
-        required_factors=("btc",),
+        required_factors=tuple(required_factors),
         embargo_gap=embargo_gap,
         min_train_observations=min_train_observations,
         min_eval_observations=min_eval_observations,
@@ -208,15 +239,21 @@ def build_cycle_residual_reports(
     n_symbols_screened: int = 1,
     klines_timeframe: str = "4h",
     klines_pad_sec: float = DEFAULT_BUCKET_SEC,
+    required_factors: tuple[str, ...] = ("btc",),
     **cell_kwargs: Any,
 ) -> dict[str, CellResidualResult]:
-    """一輪多 cell 評估（v1，BTC-only，非重疊 bucket）。
+    """一輪多 cell 評估（v1 預設 BTC-only，非重疊 bucket）。
 
     cells: ``[{"cell_key": str, "strategy_name": str,
                "n_param_variants": int(預設1),
                "peer_strategy_names": list[str]|None}, ...]``。
     n_strategies_screened = 本輪 cell 數（搜尋家族多重性）。BTC klines 載一次覆蓋
     全 cell round-trip 時間範圍。只讀；不碰 runtime / order / risk。
+
+    required_factors 預設 ``("btc",)``（行為中性，與既有流一致）。多因子（market/
+    funding）的 DB 來源載入由 Stage-0R orchestrator（Gap A）負責並經 ``cell_kwargs``
+    把 ``klines_by_symbol``/``lifecycles``/``funding_by_symbol`` 等傳入 evaluate_cell；
+    本函數只負責把 required_factors 透傳下去，不在此新增 market/funding 查詢。
     """
     n_strategies_screened = len(cells)
     rt_by_strategy: dict[str, list[dict[str, float]]] = {}
@@ -259,6 +296,7 @@ def build_cycle_residual_reports(
             n_strategies_screened=n_strategies_screened,
             peer_variant_round_trips=peer_rts,
             bucket_sec=bucket_sec,
+            required_factors=required_factors,
             **cell_kwargs,
         )
     return out
@@ -285,6 +323,7 @@ def attach_residual_reports(
     report_field: str = RESIDUAL_ALPHA_REPORT_FIELD,
     signal_spec_field: str = "signal_spec",
     attach_signal_spec: bool = True,
+    required_factors: tuple[str, ...] = ("btc",),
     **cycle_kwargs: Any,
 ) -> int:
     """為每個 recommendation（須有 ``.strategy_name`` / ``.symbol`` / ``.payload``）算
@@ -294,6 +333,7 @@ def attach_residual_reports(
     factor_panel_hash）。hidden_oos 走 replay registry（非 payload），由 deploy 階段接。
     caller 須先檢查 ``residual_producer_enabled()``。只讀 DB；單一配置 demo 下 report
     為診斷性 defer（晉升閘仍 fail-closed），附了也不會放行——by design。
+    required_factors 預設 ``("btc",)``（行為中性：payload 流不含新因子，與部署前一致）。
     不碰 runtime / order / risk / auth。
     """
     if not recommendations:
@@ -315,7 +355,12 @@ def attach_residual_reports(
     if not cells:
         return 0
     results = build_cycle_residual_reports(
-        conn, cells, since=since, n_symbols_screened=n_symbols_screened, **cycle_kwargs
+        conn,
+        cells,
+        since=since,
+        n_symbols_screened=n_symbols_screened,
+        required_factors=required_factors,
+        **cycle_kwargs,
     )
     attached = 0
     for rec in recommendations:

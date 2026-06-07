@@ -105,6 +105,99 @@ def test_evaluate_cell_no_data():
     assert res.report is None
 
 
+# ---- Gap B：多因子 evaluate_cell（funding-loaded pure-carry beta-trap）----
+
+
+def _flat_btc_klines(n: int):
+    # BTC 桶報酬全 0（讓 candidate 的 raw edge 不可能來自 BTC beta）。
+    return [{"ts": i * _BUCKET, "open": 100.0, "close": 100.0} for i in range(n)]
+
+
+def _flat_symbol_klines(n: int):
+    # 任一 symbol 桶報酬全 0（market basket 也全 0）。
+    return [{"ts": i * _BUCKET, "open": 100.0, "close": 100.0} for i in range(n)]
+
+
+def test_evaluate_cell_funding_carry_beta_trap_fails():
+    """funding pure-carry beta-trap（mirror BTC beta-trap test）：候選 raw edge 全
+    來自 funding carry（對 BTC/market 中性），多因子殘差化後殘差必須非正 → fail。
+
+    這正是 funding-tilt 死掉的失敗模式：BTC-price beta 抓不到，funding 因子才抓得到。
+    """
+    n = 120
+    # funding 結算：每桶一筆，rate 在 +0.0015 / -0.0005 間擺動（持續正 carry 偏壓，
+    # 模擬 funding-tilt 看似有 edge 的真實樣態：均值為正但全來自 carry）。
+    # 做空（net_side=-1）：funding>0=收費=正報酬 → funding factor = +rate*1e4。
+    funding_rate_seq = [(0.0015 if i % 2 == 0 else -0.0005) for i in range(n)]
+    funding = {
+        "BTCUSDT": [
+            {"ts": i * _BUCKET + 100.0, "funding_rate": funding_rate_seq[i]} for i in range(n)
+        ]
+    }
+    # 候選 net = beta_f * funding_factor + 微擾（無 alpha）。net_side=-1：
+    # funding_factor[i] = +rate[i]*1e4 = +15 / -5 bps；beta_f=1.5 → net 隨 carry 擺動，
+    # 均值為正（看似 edge），但 100% 來自 carry beta。
+    rts = []
+    for i in range(n):
+        funding_factor_bps = funding_rate_seq[i] * 1e4  # net_side=-1 → +rate*1e4
+        net = 1.5 * funding_factor_bps + 0.05 * ((i % 3) - 1)  # 純 carry beta + 微擾
+        rts.append({"entry_ts": i * _BUCKET + 100.0, "exit_ts": i * _BUCKET + 200.0, "net_bps": net})
+
+    klines_by_symbol = {"BTCUSDT": _flat_btc_klines(n)}
+    # 補足 market basket（>=8 個 symbol，全 0 報酬）。
+    for j in range(10):
+        klines_by_symbol[f"S{j}"] = _flat_symbol_klines(n)
+    lifecycles = {s: (0.0, None) for s in klines_by_symbol}
+
+    res = evaluate_cell(
+        "funding_tilt::BTCUSDT", rts, _flat_btc_klines(n),
+        n_param_variants=1, n_symbols_screened=1, n_strategies_screened=1,
+        peer_variant_round_trips=None,
+        required_factors=("btc", "market", "funding"),
+        klines_by_symbol=klines_by_symbol,
+        lifecycles=lifecycles,
+        funding_by_symbol=funding,
+        position_symbols=["BTCUSDT"],
+        net_side=-1,
+        min_train_observations=20, min_eval_observations=8, min_coverage=0.8,
+    )
+    # 單配置仍走 defer 包裝，但底層 report 的 verdict / reasons 必反映 beta-trap。
+    assert res.report is not None
+    assert res.promotion_ready is False
+    # raw 為正（carry 在 down/up 不對稱下淨正），residual 扣 funding beta 後非正。
+    assert res.report["raw_mean_bps"] > 0.0
+    assert res.report["residual_mean_bps"] <= 0.0
+    # funding beta 必被辨識為主導（beta_loadings 含 funding 且顯著）。
+    assert "funding" in res.report["beta_loadings"]
+    assert res.report["beta_loadings"]["funding"] == pytest.approx(1.5, abs=0.2)
+    # 殘差化後核心 reason 命中 beta-trap 家族。
+    reasons = set(res.report.get("reasons", ()))
+    assert (
+        "raw_positive_residual_non_positive" in reasons
+        or "r_beta_retention_below_threshold" in reasons
+        or "beta_edge_share_above_threshold" in reasons
+    )
+
+
+def test_evaluate_cell_btc_only_default_unchanged_by_multi_factor_path():
+    """行為中性回歸：required_factors 預設 ("btc",) 時，evaluate_cell 走原 BTC-only
+    路徑，report 與「不傳 required_factors」完全一致（report dict 相等）。"""
+    rts = _variant_round_trips(120, alpha=8.0, beta=0.2)
+    klines = _btc_klines(120)
+    base = evaluate_cell(
+        "grid_trading::BTCUSDT", rts, klines,
+        n_param_variants=1, n_symbols_screened=1, n_strategies_screened=1,
+        min_train_observations=20, min_eval_observations=8, min_coverage=0.8,
+    )
+    explicit = evaluate_cell(
+        "grid_trading::BTCUSDT", rts, klines,
+        n_param_variants=1, n_symbols_screened=1, n_strategies_screened=1,
+        required_factors=("btc",),
+        min_train_observations=20, min_eval_observations=8, min_coverage=0.8,
+    )
+    assert base.report == explicit.report
+
+
 # ---- R-3 attach primitive + env-flag ----
 
 from datetime import datetime, timezone  # noqa: E402

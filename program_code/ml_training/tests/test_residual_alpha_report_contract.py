@@ -107,3 +107,54 @@ def test_passes_true_but_missing_hash_window_or_metrics_blocks(
 
     assert ok is False
     assert reason == expected_reason
+
+
+# ---- Gap C：permutation additive 校驗（backward-compat + 啟用時強制）----
+
+
+def test_old_report_without_perm_field_still_validates():
+    """★ backward-compat：舊 report（無 perm_p_value 欄位）必須仍可驗 → ok。"""
+    report = _valid_report()
+    assert "perm_p_value" not in report
+    ok, reason = validate_demo_residual_alpha_report(report)
+    assert ok is True
+    assert reason == "ok"
+
+
+def test_report_with_significant_perm_validates():
+    """report 帶 perm_p_value 且顯著（<= 門檻）→ ok。"""
+    report = _valid_report(perm_p_value=0.01, perm_iterations=2000)
+    ok, reason = validate_demo_residual_alpha_report(report)
+    assert ok is True
+    assert reason == "ok"
+
+
+def test_report_with_perm_above_threshold_blocks():
+    """report 帶 perm_p_value 但 > 門檻 → fail（虛無無法拒絕，不得 pass）。"""
+    report = _valid_report(perm_p_value=0.20, perm_iterations=2000)
+    ok, reason = validate_demo_residual_alpha_report(report)
+    assert ok is False
+    assert reason == "perm_p_value_above_threshold"
+
+
+def test_report_with_perm_none_blocks():
+    """report 帶 perm_p_value=None（啟用但 insufficient n）→ metric_missing。"""
+    report = _valid_report(perm_p_value=None, perm_iterations=0)
+    ok, reason = validate_demo_residual_alpha_report(report)
+    assert ok is False
+    assert reason == "metric_missing:perm_p_value"
+
+
+def test_require_permutation_flag_enforces_presence(monkeypatch):
+    """REQUIRE_PERMUTATION=True 時，缺 perm_p_value 的 report → fail。"""
+    from program_code.ml_training import residual_alpha_report_contract as rc
+
+    monkeypatch.setattr(rc, "REQUIRE_PERMUTATION", True)
+    report = _valid_report()  # 無 perm 欄位
+    ok, reason = rc.validate_demo_residual_alpha_report(report)
+    assert ok is False
+    assert reason == "perm_p_value_missing"
+    # 帶顯著 perm 則通過
+    report2 = _valid_report(perm_p_value=0.01)
+    ok2, reason2 = rc.validate_demo_residual_alpha_report(report2)
+    assert ok2 is True and reason2 == "ok"
