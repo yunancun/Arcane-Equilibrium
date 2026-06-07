@@ -1089,6 +1089,230 @@ async fn ghost_point_query_gate_is_load_bearing() {
     );
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// PHANTOM-FILL-FIX-1（2026-06-07，PA Option A · golden #2）：
+//   orphan-adopt 自癒回歸 —— Option A 把「PositionUpdate 兜底 upsert」移除後，
+//   missed-fill（Bybit 有倉 / 本地 flat）仍能經 reconciler orphan 軸 `Adopt` 把真倉
+//   注入 paper_state（非只 Close），確認自癒未失，且 latency ≤ 一個 reconcile cycle
+//   （= 一次 AdoptOrphan 指令 round-trip）。
+//
+//   背景：拆分前 WS `PositionUpdate(size>0)` 會 `upsert_position_from_exchange` 把
+//   交易所倉位主動補進本地帳（這是 fill 漏接時的「兜底補倉」隱式路徑之一）。
+//   Option A 降 PositionUpdate 為 advisory 後，size>0/本地無倉只 WARN 不 mutate，
+//   收斂明確交給 reconciler orphan 軸。本 golden 證明該軸真的把倉補回來。
+// ───────────────────────────────────────────────────────────────────────────
+
+/// 構建一個 Bybit-truth `PositionInfo`（reconciler `fetch_current_view` 的原始型別）。
+fn orphan_pos_info(symbol: &str, side: &str, size: f64, avg: f64, mark: f64) -> PositionInfo {
+    PositionInfo {
+        symbol: symbol.into(),
+        side: side.into(),
+        size,
+        avg_price: avg,
+        mark_price: mark,
+        unrealised_pnl: 0.0,
+        leverage: 10.0,
+        liq_price: 0.0, // 0 → Stage A1 liq 檢查跳過（安全遠離）
+        take_profit: 0.0,
+        stop_loss: 0.0,
+        position_idx: 0,
+        trailing_stop: 0.0,
+        position_value: size * mark,
+        cum_realised_pnl: 0.0,
+        created_time: String::new(),
+        updated_time: String::new(),
+    }
+}
+
+/// 最小 DualStateWriter（temp 檔），供 handle_paper_command 接收快照寫入。
+fn make_reconciler_test_writer() -> crate::persistence::DualStateWriter {
+    use std::path::PathBuf;
+    let mut p = std::env::temp_dir();
+    p.push(format!(
+        "openclaw_reconciler_adopt_test_{}_{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let primary = crate::persistence::StateWriter::new(&p as &PathBuf, 5_000);
+    crate::persistence::DualStateWriter::new(primary, None)
+}
+
+/// golden #2：missed-fill → orphan-adopt 端到端自癒。
+///
+/// 序列（重現 Option A 移除兜底後的自癒路徑）：
+///   1. Bybit 報告 BTCUSDT short 0.5 @ 50000（真倉），但本地 paper_state **flat**
+///      （fill 漏接 / restart 後遺留——這正是過去靠 PositionUpdate upsert 兜底的場景）。
+///   2. 該 symbol 有正 shrunk edge 的已知策略（ma_crossover）→ reconciler orphan 軸
+///      `handle_orphan` 判 `Adopt`（非 Close）。
+///   3. `dispatch_orphan_adopt` 發 `AdoptOrphan` 指令（一次 cycle 的 round-trip）。
+///   4. `handle_paper_command` 套用該指令 → `adopt_orphan` 把真倉注入 paper_state。
+///   5. 斷言：本地現在持有 BTCUSDT short 0.5 @ 50000（自癒成功），owner_strategy=
+///      合成 orphan_adopted 標籤（不污染策略 edge 掃描）。
+///
+/// 這證明 Option A 把 PositionUpdate 降 advisory 後，missed-fill 的收斂責任落到
+/// orphan 軸且確實生效，自癒 latency = 一個 reconcile cycle（一次指令）。
+///
+/// // BITE-A：把 dispatch_orphan_adopt 對 Adopt 的 cmd_tx.send 短路（不發指令）→
+/// //   無 AdoptOrphan 指令 → paper_state 仍 flat → 末段「self-heal 注入」斷言 FAIL。
+/// // BITE-B：把 handle_orphan 的 B2 Adopt 分支降級為 Close（回退 Phase 1 語意）→
+/// //   收到 Close 決策 → dispatch_orphan_adopt 路由不符回 false / 不注入 → FAIL。
+/// // 兩條夾住「Adopt 決策 + 注入」這條自癒鏈的 load-bearing 性。
+#[tokio::test]
+async fn phantom_fix_orphan_adopt_self_heals_missed_fill_into_paper_state() {
+    use crate::edge_estimates::EdgeEstimates;
+    use crate::position_reconciler::orphan_handler::{
+        dispatch_orphan_adopt, handle_orphan, OrphanContext, OrphanDecision, ORPHAN_ADOPTED_STRATEGY,
+    };
+    use crate::tick_pipeline::{PipelineCommand, PipelineKind, TickPipeline};
+
+    let symbol = "BTCUSDT";
+
+    // 1) 本地 demo pipeline，paper_state 起始 flat（模擬 missed-fill / restart 遺留）。
+    let mut pipeline = TickPipeline::with_kind(&[symbol], 10_000.0, PipelineKind::Demo);
+    pipeline.set_endpoint_env(crate::bybit_rest_client::BybitEnvironment::Demo);
+    assert_eq!(
+        pipeline.paper_state.position_count(),
+        0,
+        "setup：本地起始必 flat（missed-fill 場景）"
+    );
+
+    // Bybit truth：該 symbol 有 short 0.5 @ 50000。
+    let pos = orphan_pos_info(symbol, "Sell", 0.5, 50_000.0, 50_000.0);
+
+    // 2) 正 edge → handle_orphan 判 Adopt（非 Close）。
+    let json = r#"{
+        "_meta": {"grand_mean_bps": 0.0},
+        "ma_crossover::BTCUSDT": {"shrunk_bps": 6.0, "n": 120}
+    }"#;
+    let ee = EdgeEstimates::load_from_str(json).unwrap();
+    let active: Vec<String> = vec![symbol.into()];
+    let ctx = OrphanContext {
+        pos_info: &pos,
+        current_level: RiskLevel::Normal,
+        max_order_notional_usdt: 0.0, // 0 = 不檢查名目上限（避免 A3 提前 Close）
+        active_symbols: &active,
+        edge_estimates: &ee,
+    };
+    let decision = handle_orphan(&ctx);
+    let triggering = match &decision {
+        OrphanDecision::Adopt {
+            triggering_strategy,
+            ..
+        } => {
+            assert_eq!(
+                triggering_strategy, "ma_crossover",
+                "正 edge 策略應為 ma_crossover"
+            );
+            triggering_strategy.clone()
+        }
+        other => panic!("missed-fill + 正 edge 應判 Adopt（自癒注入），got {other:?}"),
+    };
+
+    // 3) dispatch_orphan_adopt 發 AdoptOrphan 指令（reconciler → event_consumer 的一次
+    //    cycle round-trip）。
+    let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
+    let sent = dispatch_orphan_adopt(&decision, &pos, &cmd_tx);
+    assert!(sent, "Adopt 決策必須成功派發 AdoptOrphan 指令");
+
+    let cmd = cmd_rx
+        .try_recv()
+        .expect("reconciler 應發出一條 AdoptOrphan 指令（self-heal）");
+    match &cmd {
+        PipelineCommand::AdoptOrphan {
+            symbol: s,
+            is_long,
+            qty,
+            entry_price,
+            owner_strategy,
+            ..
+        } => {
+            assert_eq!(s, symbol);
+            assert!(!is_long, "Bybit side=Sell → 注入 short（保留交易所方向）");
+            assert!((qty - 0.5).abs() < 1e-12, "注入量 = Bybit size 0.5");
+            assert!(
+                (entry_price - 50_000.0).abs() < 1e-9,
+                "注入 entry = Bybit avg_price 50000（不捏造合成價）"
+            );
+            assert_eq!(
+                owner_strategy.as_deref(),
+                Some(triggering.as_str()),
+                "AdoptOrphan 帶觸發策略名供下游 PnL 歸因"
+            );
+        }
+        other => panic!("expected AdoptOrphan command, got {other:?}"),
+    }
+
+    // 4) event_consumer 套用指令 → 注入 paper_state（自癒落地）。
+    let mut writer = make_reconciler_test_writer();
+    let mut pending: HashMap<String, crate::event_consumer::PendingOrder> = HashMap::new();
+    crate::event_consumer::handlers::handle_paper_command(cmd, &mut pipeline, &mut writer, &mut pending);
+
+    // 5) ── 核心自癒斷言：本地現已持有真倉（Option A 移除兜底後仍自癒）──
+    let healed = pipeline
+        .paper_state
+        .get_position(symbol)
+        .expect("orphan-adopt 自癒：真倉必已注入 paper_state（latency = 1 cycle）");
+    assert!(!healed.is_long, "自癒注入方向 = Bybit short");
+    assert!(
+        (healed.qty - 0.5).abs() < 1e-12,
+        "自癒注入量 = 0.5，got {}",
+        healed.qty
+    );
+    assert!(
+        (healed.entry_price - 50_000.0).abs() < 1e-9,
+        "自癒注入 entry = 50000"
+    );
+    // adopt 的 owner_strategy 是 triggering 策略名（dispatch 帶過去），非合成佔位——
+    // 但無論何者都不得是空（owner attribution 必填）。記錄合成標籤常數以防未來語意漂移。
+    assert!(
+        !healed.owner_strategy.is_empty()
+            && (healed.owner_strategy == triggering
+                || healed.owner_strategy == ORPHAN_ADOPTED_STRATEGY),
+        "owner_strategy 必為觸發策略或合成 orphan_adopted 標籤，got {:?}",
+        healed.owner_strategy
+    );
+}
+
+/// golden #2b：對照 —— 本地**已有同向倉**時 adopt 冪等 no-op（自癒不重複注入 / 不翻倍）。
+/// 證明 orphan-adopt 自癒在「其實沒漏倉」時不會把倉量翻倍（reconciler 重入安全）。
+///
+/// // BITE：把 adopt_orphan 的 `existing.is_long == is_long → return false` 冪等 guard
+/// // 移除 → 第二次注入會覆蓋/疊加 → 本測試 qty 斷言 FAIL。
+#[tokio::test]
+async fn phantom_fix_orphan_adopt_idempotent_when_already_owned() {
+    use crate::tick_pipeline::{PipelineKind, TickPipeline};
+
+    let symbol = "BTCUSDT";
+    let mut pipeline = TickPipeline::with_kind(&[symbol], 10_000.0, PipelineKind::Demo);
+    pipeline.set_endpoint_env(crate::bybit_rest_client::BybitEnvironment::Demo);
+
+    // 第一次 adopt：注入 short 0.5。
+    let first = pipeline
+        .paper_state
+        .adopt_orphan(symbol, false, 0.5, 50_000.0, 1_000, Some("ma_crossover"));
+    assert!(first, "首次 adopt 應注入");
+    assert_eq!(pipeline.paper_state.position_count(), 1);
+
+    // 第二次 adopt 同向（reconciler 下一 cycle 重入，倉其實沒漏）→ 冪等 no-op。
+    let second = pipeline
+        .paper_state
+        .adopt_orphan(symbol, false, 0.5, 49_000.0, 2_000, Some("ma_crossover"));
+    assert!(!second, "同向倉已存在 → adopt 冪等回 false（不重複注入）");
+    let pos = pipeline.paper_state.get_position(symbol).unwrap();
+    assert!(
+        (pos.qty - 0.5).abs() < 1e-12,
+        "冪等：倉量不得翻倍，仍為 0.5，got {}",
+        pos.qty
+    );
+    assert!(
+        (pos.entry_price - 50_000.0).abs() < 1e-9,
+        "冪等：保留首次 entry，不被第二次覆蓋"
+    );
+}
+
 // ── PHANTOM-FILL-FIX-1（2026-06-07，PA T5）：process_phantoms 本地幻影偵測軸 ──
 //
 // 安全核心：本軸只告警不收斂（不送任何 mutating PipelineCommand）。對抗性覆蓋

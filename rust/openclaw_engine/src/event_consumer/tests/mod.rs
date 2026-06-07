@@ -25,6 +25,9 @@ mod handlers_paper_cmd_tests;
 // FIX-G7-09B-INTENT-LIMIT-DROP-1（2026-04-25）：pin trading.orders.order_type
 // 誠實鏡射 PendingOrder.order_type，而非硬寫 "Market"。
 mod pending_registration_order_type_tests;
+// PHANTOM-FILL-FIX-1（2026-06-07）：真亂序整合 / 三引擎 / partial-fill is_close 透傳
+// golden，驅動真正的 handle_exchange_event 重現 TON 17:03 幻影事故。
+mod phantom_fill_ordering_tests;
 mod reconciler_tests;
 mod submit_order_tests;
 // F4-1 (2026-04-26): unmatched WS fill audit emission tests.
