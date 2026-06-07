@@ -282,6 +282,9 @@ pub(super) async fn handle_exchange_event(
                         fill_latency_ms,
                         Some(&exec.exec_id),
                         po.close_maker_audit.clone(),
+                        // PHANTOM-FILL-FIX-1（PA T2/T3）：透傳這筆成交是否為 reduce-only/平倉。
+                        // reduce-only fill 在本地無倉時 no-op（不開幻影倉，§4.3）。
+                        po.is_close,
                     );
                     snapshot_writer.force_write(&pipeline.snapshot());
 
@@ -529,42 +532,98 @@ pub(super) async fn handle_exchange_event(
             }
         }
         Some(ExchangeEvent::PositionUpdate(pos)) => {
-            // B-1 Phase 2: Mirror exchange position state into paper_state.
-            // size==0 → remove; size>0 → upsert with avg_price as entry.
-            // We treat side=="None" / empty side as "flat" (size==0 path).
-            // B-1 Phase 2：將交易所持倉狀態映射回 paper_state。
-            // size==0 視為平倉並移除；size>0 則 upsert（avg_price 作為入場價）。
-            // side=="None" 或空字串視為 flat（走 size==0 邏輯）。
+            // PHANTOM-FILL-FIX-1（2026-06-07，PA Option A T2）：把 WS PositionUpdate
+            // 從「authoritative 寫入 paper_state.positions」降為 **advisory 只讀比對**。
+            //
+            // 為什麼（根因）：拆分前此分支呼 `upsert_position_from_exchange` 直接
+            // add/flip/remove 本地倉，與 execution 流的 `apply_fill` 競爭同一份
+            // positions map（兩條 WS 訊息無序）。Bybit 平倉先推 `position(size=0)`
+            // → 移除 short → 隨後 close `Buy` fill 落空 → 開出幻影 LONG（TON 事故）。
+            //
+            // Option A：倉位**唯一 mutating 來源 = `apply_fill`（execution 流）**。
+            // PositionUpdate 只做：
+            //   - size==0 且本地有倉 → 走既有已測收斂路徑 `converge_exchange_zero_close`
+            //     （含 mirror 同步 + 清 pending_close + audit；非裸 positions_remove）。
+            //     收斂使 close fill 永遠先於 remove 抵達 → 競態消失。
+            //   - size>0 且方向/數量與本地背離 → **大聲 WARN**（advisory，不 mutate）；
+            //     真正收斂交給 reconciler / execution 流。
+            // 對所有 engine_mode（demo/live_demo/live）一致（private_ws 不分 kind）。
             let size: f64 = pos.size.parse().unwrap_or(0.0);
             let avg_price: f64 = pos.avg_price.parse().unwrap_or(0.0);
             let is_long = pos.side.eq_ignore_ascii_case("Buy");
             let now_ms = openclaw_core::now_ms();
             // Bybit returns side=="None" when the position is flat — coerce
-            // size to 0 so upsert removes any stale local entry.
-            // Bybit 在持倉為空時回傳 side=="None"，強制 size 為 0 以移除舊條目。
+            // size to 0 so the zero path runs.
+            // Bybit 在持倉為空時回傳 side=="None"，強制 size 為 0 走 zero 收斂路徑。
             let effective_size = if pos.side.eq_ignore_ascii_case("None") || pos.side.is_empty() {
                 0.0
             } else {
                 size
             };
-            let changed = pipeline.paper_state.upsert_position_from_exchange(
-                &pos.symbol,
-                is_long,
-                effective_size,
-                avg_price,
-                now_ms,
-            );
-            if changed {
-                tracing::info!(
-                    symbol = %pos.symbol,
-                    side = %pos.side,
-                    size = effective_size,
-                    avg_price = avg_price,
-                    kind = %pipeline.pipeline_kind,
-                    "B-1 Phase 2: paper_state synced from WS position update \
-                     / paper_state 已根據 WS 持倉更新同步"
+
+            if effective_size <= 0.0 {
+                // 交易所端該倉已 flat。若本地仍有倉 → 走已測收斂路徑移除（mirror 同步、
+                // 不記假 PnL）。converge_exchange_zero_close 內部對 paper-kind / 無倉皆
+                // 二重 noop 守衛，安全。is_long 取本地倉方向避免 side=None 時無方向。
+                let local_is_long = pipeline
+                    .paper_state
+                    .get_position(&pos.symbol)
+                    .map(|p| p.is_long)
+                    .unwrap_or(is_long);
+                let removed = pipeline.converge_exchange_zero_close(
+                    &pos.symbol,
+                    local_is_long,
+                    now_ms,
                 );
-                snapshot_writer.force_write(&pipeline.snapshot());
+                if removed {
+                    tracing::warn!(
+                        symbol = %pos.symbol,
+                        side = %pos.side,
+                        kind = %pipeline.pipeline_kind,
+                        "PHANTOM-FILL-FIX-1: WS position flat — converged drifted local position (advisory) \
+                         / WS 倉位已 flat — 收斂本地漂移倉（advisory）"
+                    );
+                    snapshot_writer.force_write(&pipeline.snapshot());
+                }
+            } else {
+                // size>0：advisory 只讀比對，不 mutate 本地帳。背離大聲 WARN 供觀測；
+                // 收斂留給 execution 流（apply_fill）/ reconciler（T5 phantom 偵測軸）。
+                match pipeline.paper_state.get_position(&pos.symbol) {
+                    Some(local) => {
+                        let qty_rel_diff = if local.qty.abs() > f64::EPSILON {
+                            (local.qty - effective_size).abs() / local.qty.abs()
+                        } else {
+                            f64::INFINITY
+                        };
+                        // 5% 與 reconciler MINOR_DRIFT_THRESHOLD_PCT 同檔，閾下視為
+                        // rounding / tick race 噪音不告警。
+                        if local.is_long != is_long || qty_rel_diff > 0.05 {
+                            tracing::warn!(
+                                symbol = %pos.symbol,
+                                ws_side = %pos.side,
+                                ws_size = effective_size,
+                                ws_avg_price = avg_price,
+                                local_is_long = local.is_long,
+                                local_qty = local.qty,
+                                kind = %pipeline.pipeline_kind,
+                                "PHANTOM-FILL-FIX-1: WS position diverges from local book (advisory, not mutated) \
+                                 / WS 倉位與本地帳背離（advisory，未 mutate）"
+                            );
+                        }
+                    }
+                    None => {
+                        // 交易所有倉但本地無 —— 可能 fill 漏接 / orphan。advisory WARN；
+                        // 收斂交給 reconciler orphan 軸（既有 dispatch_orphan_close）。
+                        tracing::warn!(
+                            symbol = %pos.symbol,
+                            ws_side = %pos.side,
+                            ws_size = effective_size,
+                            kind = %pipeline.pipeline_kind,
+                            "PHANTOM-FILL-FIX-1: WS reports position but local book is flat (advisory; reconciler orphan axis owns convergence) \
+                             / WS 報告有倉但本地 flat（advisory；收斂歸 reconciler orphan 軸）"
+                        );
+                    }
+                }
             }
         }
         Some(ExchangeEvent::DcpTriggered) => {

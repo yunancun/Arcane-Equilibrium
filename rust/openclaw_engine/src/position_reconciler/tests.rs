@@ -1088,3 +1088,167 @@ async fn ghost_point_query_gate_is_load_bearing() {
         "point-query gate MUST flip the outcome to no-converge for the same truncated scenario"
     );
 }
+
+// ── PHANTOM-FILL-FIX-1（2026-06-07，PA T5）：process_phantoms 本地幻影偵測軸 ──
+//
+// 安全核心：本軸只告警不收斂（不送任何 mutating PipelineCommand）。對抗性覆蓋
+// streak 防抖（S-streak）+ 點查 gate（S-point-query）+ absent/side_mismatch 分類。
+// 告警的可觀測終態 = canary_events.jsonl 寫入（DB pool=None 時 audit skip，不影響）。
+
+/// 在 env-locked tempdir 下跑 process_phantoms，回傳 canary_events.jsonl 內容
+/// （不存在則空字串）。OPENCLAW_DATA_DIR 由 env_lock 串行隔離，避免並行 race。
+async fn run_phantoms_capture_canary<F, Fut>(
+    mirror_pairs: &[(&str, bool)],
+    current: &HashMap<String, PositionView>,
+    state: &mut ReconcilerState,
+    point_query: F,
+) -> String
+where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = GhostPointQuery>,
+{
+    use crate::test_env_lock::guard as env_lock;
+    let _g = env_lock();
+    let tmp = std::env::temp_dir().join(format!(
+        "phantom_canary_test_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let _ = std::fs::remove_dir_all(&tmp);
+    // SAFETY: env_lock 已序列化所有改 OPENCLAW_DATA_DIR 的測試。
+    unsafe {
+        std::env::set_var("OPENCLAW_DATA_DIR", &tmp);
+    }
+    let mirror: HashMap<String, bool> = mirror_pairs
+        .iter()
+        .map(|(s, l)| (s.to_string(), *l))
+        .collect();
+    let pool: Option<sqlx::PgPool> = None;
+    process_phantoms(&mirror, current, &pool, "test", state, point_query).await;
+    let canary_path = tmp.join("canary_events.jsonl");
+    let content = std::fs::read_to_string(&canary_path).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(&tmp);
+    unsafe {
+        std::env::remove_var("OPENCLAW_DATA_DIR");
+    }
+    content
+}
+
+#[tokio::test]
+async fn phantom_alerts_on_absent_after_streak_and_confirmed_zero() {
+    // 本地 mirror 有 TONUSDT long、Bybit current 全空（absent）+ streak 已滿
+    // （last_phantom_keys 含 TONUSDT）+ 點查回 ConfirmedZero → 告警寫 canary。
+    let current: HashMap<String, PositionView> = HashMap::new(); // Bybit flat
+    let mut state = make_state();
+    state.last_phantom_keys.insert("TONUSDT".to_string()); // 上輪已見 → streak 滿
+    let content = run_phantoms_capture_canary(
+        &[("TONUSDT", true)],
+        &current,
+        &mut state,
+        pq_const(GhostPointQuery::ConfirmedZero),
+    )
+    .await;
+    assert!(
+        content.contains("PHANTOM_POSITION_DETECTED") && content.contains("TONUSDT"),
+        "absent 幻影 streak+ConfirmedZero 必告警，canary 內容：{content:?}"
+    );
+    assert!(
+        content.contains("\"kind\":\"absent\""),
+        "kind 應為 absent"
+    );
+    assert!(
+        state.last_phantom_keys.contains("TONUSDT"),
+        "本輪幻影 key 必記錄以維持下輪 streak"
+    );
+}
+
+#[tokio::test]
+async fn phantom_not_alerted_first_cycle_streak_unmet() {
+    // S-streak：本輪首見（last_phantom_keys 空）→ 不告警，但記錄 key 供下輪。
+    let current: HashMap<String, PositionView> = HashMap::new();
+    let mut state = make_state(); // last_phantom_keys 空
+    let content = run_phantoms_capture_canary(
+        &[("TONUSDT", true)],
+        &current,
+        &mut state,
+        pq_const(GhostPointQuery::ConfirmedZero), // 即使點查 confirmed 也不得告警
+    )
+    .await;
+    assert!(
+        content.is_empty(),
+        "首輪 streak 未滿不得告警，canary 應空，got：{content:?}"
+    );
+    assert!(
+        state.last_phantom_keys.contains("TONUSDT"),
+        "首輪須記錄 key，下輪才能滿 streak"
+    );
+}
+
+#[tokio::test]
+async fn phantom_not_alerted_when_point_query_still_has_position() {
+    // S-point-query：streak 滿，但點查回 StillHasPosition（主 fetch 分頁截斷的
+    // 假幻影 / 交易所仍有真倉）→ 不告警（防誤報）。
+    let current: HashMap<String, PositionView> = HashMap::new();
+    let mut state = make_state();
+    state.last_phantom_keys.insert("TONUSDT".to_string());
+    let content = run_phantoms_capture_canary(
+        &[("TONUSDT", true)],
+        &current,
+        &mut state,
+        pq_const(GhostPointQuery::StillHasPosition),
+    )
+    .await;
+    assert!(
+        content.is_empty(),
+        "點查 StillHasPosition 必擋告警（防分頁截斷假幻影），got：{content:?}"
+    );
+}
+
+#[tokio::test]
+async fn phantom_not_alerted_when_direction_matches_bybit() {
+    // 方向相符視為一致（非幻影）：本地 long + Bybit 也 Buy → 不告警。
+    let mut current: HashMap<String, PositionView> = HashMap::new();
+    current.insert("TONUSDT|Buy".into(), pv("TONUSDT", "Buy", 437.3));
+    let mut state = make_state();
+    state.last_phantom_keys.insert("TONUSDT".to_string());
+    let content = run_phantoms_capture_canary(
+        &[("TONUSDT", true)],
+        &current,
+        &mut state,
+        pq_const(GhostPointQuery::ConfirmedZero),
+    )
+    .await;
+    assert!(
+        content.is_empty(),
+        "方向相符不是幻影，不得告警，got：{content:?}"
+    );
+    assert!(
+        !state.last_phantom_keys.contains("TONUSDT"),
+        "方向相符不應記入幻影集合"
+    );
+}
+
+#[tokio::test]
+async fn phantom_alerts_on_side_mismatch_after_streak() {
+    // side_mismatch：本地 long、Bybit 該 symbol 為 Sell（方向背離）+ streak 滿 +
+    // 點查 ConfirmedZero（交易所確無本地方向倉）→ 告警 kind=side_mismatch。
+    let mut current: HashMap<String, PositionView> = HashMap::new();
+    current.insert("TONUSDT|Sell".into(), pv("TONUSDT", "Sell", 100.0));
+    let mut state = make_state();
+    state.last_phantom_keys.insert("TONUSDT".to_string());
+    let content = run_phantoms_capture_canary(
+        &[("TONUSDT", true)], // 本地 long
+        &current,
+        &mut state,
+        pq_const(GhostPointQuery::ConfirmedZero),
+    )
+    .await;
+    assert!(
+        content.contains("PHANTOM_POSITION_DETECTED")
+            && content.contains("\"kind\":\"side_mismatch\""),
+        "方向背離 streak+ConfirmedZero 必告警 kind=side_mismatch，got：{content:?}"
+    );
+}

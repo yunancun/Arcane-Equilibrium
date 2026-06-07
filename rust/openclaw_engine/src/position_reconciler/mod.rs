@@ -290,6 +290,117 @@ fn spawn_reconcile_audit(
     });
 }
 
+/// PHANTOM-FILL-FIX-1（2026-06-07，PA T5 §5.3 #1）· 本地幻影背離的 DB 審計
+/// （fire-and-forget）。寫 `observability.engine_events`（reconciler 既有通道、
+/// 已驗可落地、零新表零 migration），`event_type="reconcile_phantom_local"`，
+/// `source="position_reconciler"`。
+///
+/// 與既有 V014 reconcile audit / ghost_converge audit 互補：本軸記錄
+/// 「paper_state 本地帳有倉、Bybit current 無對應（或方向背離）」這條
+/// reconciler baseline-vs-Bybit 軸結構性盲視的 phantom（TON 7.4h 零告警的軸）。
+/// `kind` 區分 "absent"（Bybit 完全無此倉）/ "side_mismatch"（方向不符）。
+/// 首版**只告警不自動收斂**（PA §5.3 #3）：根因修（apply_fill 唯一 mutating 源）
+/// 上線後幻影不再產生，本軸是縱深告警；自動收斂列 Phase 2 operator-gated。
+fn spawn_phantom_audit(
+    audit_pool: &Option<sqlx::PgPool>,
+    symbol: &str,
+    kind: &str,
+    local_is_long: bool,
+    bybit_present: bool,
+    engine_label: &str,
+) {
+    let Some(pool) = audit_pool.clone() else {
+        return;
+    };
+    let payload = serde_json::json!({
+        "symbol": symbol,
+        "kind": kind,
+        "local_side": if local_is_long { "Buy" } else { "Sell" },
+        "bybit_present": bybit_present,
+        "engine": engine_label,
+        "auto_converged": false,
+    });
+    let engine_owned = engine_label.to_string();
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    tokio::spawn(async move {
+        if let Err(e) = sqlx::query(
+            "INSERT INTO observability.engine_events
+             (ts_ms, event_type, source, config_name, old_version, new_version, payload)
+             VALUES ($1, $2, $3, $4, NULL, NULL, $5)",
+        )
+        .bind(ts_ms)
+        .bind("reconcile_phantom_local")
+        .bind("position_reconciler")
+        .bind("trading.positions")
+        .bind(&payload)
+        .execute(&pool)
+        .await
+        {
+            warn!(
+                error = %e, engine = %engine_owned,
+                "reconcile_phantom_local audit insert failed / 本地幻影審計寫入失敗"
+            );
+        }
+    });
+}
+
+/// PHANTOM-FILL-FIX-1（2026-06-07，PA T5 §5.3 #2）· 本地幻影背離寫一條
+/// `PHANTOM_POSITION_DETECTED` 到 `$OPENCLAW_DATA_DIR/canary_events.jsonl`
+/// （watchdog 既有告警 sink，`engine_watchdog.py:78` `CANARY_EVENTS_FILE`），
+/// 讓既有 GUI-configurable alert（`alert_config.json` → Telegram/webhook）轉發。
+///
+/// 為什麼直接 append 而非走 canary_writer：canary_writer 只收 `CanaryRecord`
+/// per-tick 比對型別、且寫 `engine_results.jsonl`（不同檔）；reconciler task 也
+/// 未持 canary handle。PA §5.3 #2 明示「具體選型留 E1，傾向直接 append 與
+/// watchdog 同 sink 約定」。故採與 `halt_audit::write_jsonl_line` 同款
+/// fire-and-forget append（OpenOptions append + create，不 cache fd），事件頻率
+/// 極低（30s × 2-cycle streak），fail-soft：寫失敗只 warn 不阻塞對帳 cycle。
+///
+/// 事故 ② 教訓「宕機 20h 無人知」→ phantom 背離須進可被外部告警消費的 sink。
+fn append_phantom_canary_event(symbol: &str, kind: &str, local_is_long: bool, engine_label: &str) {
+    let data_dir = std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
+    let path = std::path::PathBuf::from(data_dir).join("canary_events.jsonl");
+    let ts_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let line = serde_json::json!({
+        "event": "PHANTOM_POSITION_DETECTED",
+        "ts_ms": ts_ms,
+        "symbol": symbol,
+        "kind": kind,
+        "local_side": if local_is_long { "Buy" } else { "Sell" },
+        "engine": engine_label,
+        "source": "position_reconciler",
+    })
+    .to_string();
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                warn!(path = %path.display(), error = %e,
+                    "phantom canary: create parent dir failed / 建立父目錄失敗");
+                return;
+            }
+        }
+    }
+    match std::fs::OpenOptions::new().create(true).append(true).open(&path) {
+        Ok(mut f) => {
+            use std::io::Write;
+            if let Err(e) = writeln!(f, "{}", line) {
+                warn!(path = %path.display(), error = %e,
+                    "phantom canary: write failed / 寫入失敗");
+            }
+        }
+        Err(e) => {
+            warn!(path = %path.display(), error = %e,
+                "phantom canary: open failed / 開檔失敗");
+        }
+    }
+}
+
 /// Fetch the current Bybit truth view. Returns `None` on REST error (fail-open;
 /// caller preserves old baseline). Used by both warmup seeding and the cycle loop.
 /// 抓取 Bybit 真相視圖。REST 失敗返回 None（fail-open）。warmup 與 cycle loop 共用。
@@ -558,6 +669,29 @@ pub async fn run_position_reconciler(
                                         &mut rc_state,
                                         move |symbol: String| {
                                             let pm = Arc::clone(&pos_mgr_for_query);
+                                            async move { ghost_point_query(&pm, &symbol).await }
+                                        },
+                                    )
+                                    .await;
+
+                                    // -- PHANTOM-FILL-FIX-1 (PA T5): local-book-vs-Bybit phantom axis --
+                                    // -- PHANTOM-FILL-FIX-1（PA T5）：本地帳 vs Bybit 幻影偵測軸 --
+                                    // 與上面 Ghost 軸互補：Ghost 比 Bybit-baseline-vs-Bybit；
+                                    // 本軸比 paper_state mirror vs Bybit current，抓 baseline
+                                    // 永遠 flat 的本地幻影（TON 7.4h 零告警的軸）。只告警不收斂。
+                                    let engine_mirror_snapshot: HashMap<String, bool> = {
+                                        let guard = oh_cfg.engine_positions_mirror.read();
+                                        guard.clone()
+                                    };
+                                    let pos_mgr_for_phantom = Arc::clone(&pos_mgr);
+                                    process_phantoms(
+                                        &engine_mirror_snapshot,
+                                        &current,
+                                        &audit_pool,
+                                        &engine_label,
+                                        &mut rc_state,
+                                        move |symbol: String| {
+                                            let pm = Arc::clone(&pos_mgr_for_phantom);
                                             async move { ghost_point_query(&pm, &symbol).await }
                                         },
                                     )
@@ -933,6 +1067,129 @@ where
     // 整體覆蓋上一輪 Ghost 集合：Ghost 消失自動清除，無需過期 GC。
     state.last_ghost_keys = current_ghost_keys;
     kept
+}
+
+/// PHANTOM-FILL-FIX-1（2026-06-07，PA T5 §5.1）· 新增「本地帳 vs Bybit」幻影偵測軸。
+///
+/// 為什麼這條軸是新的（PA §3 reconciler-miss 根因）：既有 Ghost 偵測比的是
+/// 「reconciler 自己的 Bybit baseline vs 這輪 Bybit」，兩個都是交易所真相；幻影只
+/// 活在 `paper_state`，在 Ghost 視野外 → TON 幻影 7.4h 零告警。本軸改比
+/// 「`paper_state` mirror（本地帳）vs Bybit `current`」，故能抓到 baseline 永遠 flat
+/// 的本地幻影。
+///
+/// 偵測規則（對每個本地 mirror 持有的 symbol）：
+///   - Bybit `current` 無任何同 symbol 條目 → `absent`（本地有倉、交易所無）。
+///   - Bybit 有同 symbol 但方向與本地 mirror 不符 → `side_mismatch`。
+///   - 方向相符 → 視為一致（qty 細粒度背離由既有 Ghost/MinorDrift 軸負責；本軸
+///     用既有 `bool` mirror，不引入跨子系統的 mirror struct 改造，最小影響）。
+///
+/// 防誤報（與 Ghost 軸同款縱深）：
+///   - **S-streak**：連續 2 cycle 都判幻影才告警（`last_phantom_keys`），避開
+///     「Bybit position WS 比 reconciler REST 慢一輪」的瞬時假背離（PA §5.4）。
+///   - **S-point-query**：告警前對候選 symbol 發單 symbol 點查，僅 `ConfirmedZero`
+///     （Bybit 真 size==0，非主 fetch limit=20 分頁截斷）才告警；`StillHasPosition`
+///     /`QueryFailed` 不告警（PA §5.4）。`side_mismatch` 同理只在點查確認交易所端
+///     非本地方向時才告警。
+///
+/// **首版只告警 + audit（DB + canary），不自動收斂**（PA §5.3 #3）：根因修（T1/T2，
+/// apply_fill 為倉位唯一 mutating 源）上線後幻影不再產生；本軸為縱深告警，自動
+/// 收斂列 Phase 2 operator-gated。本函數不送任何 mutating `PipelineCommand`。
+///
+/// `point_query` 注入（async）與 `process_ghosts` 同款：生產接
+/// `pos_mgr.get_positions(Linear, Some(symbol))`，測試注入 mock 覆蓋分支。
+async fn process_phantoms<F, Fut>(
+    engine_mirror_snapshot: &HashMap<String, bool>,
+    current: &HashMap<String, PositionView>,
+    audit_pool: &Option<sqlx::PgPool>,
+    engine_label: &str,
+    state: &mut ReconcilerState,
+    point_query: F,
+) where
+    F: Fn(String) -> Fut,
+    Fut: std::future::Future<Output = GhostPointQuery>,
+{
+    // 本輪所有幻影 symbol（不論是否告警都記，下一輪才能形成 2-cycle streak）。
+    let mut current_phantom_keys: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+
+    for (symbol, &local_is_long) in engine_mirror_snapshot {
+        // Bybit current 用 symbol|side key；本軸先以「同 symbol 任一 side」判定有無。
+        let buy_key = format!("{}|Buy", symbol);
+        let sell_key = format!("{}|Sell", symbol);
+        let bybit_buy = current.get(&buy_key);
+        let bybit_sell = current.get(&sell_key);
+        let bybit_present = bybit_buy.is_some() || bybit_sell.is_some();
+
+        // 判定幻影類型；方向相符視為一致（非幻影）。
+        let kind: Option<&'static str> = if !bybit_present {
+            Some("absent")
+        } else {
+            // Bybit 有同 symbol：方向相符則一致；不符則 side_mismatch。
+            let bybit_is_long = bybit_buy.is_some();
+            if bybit_is_long == local_is_long {
+                None
+            } else {
+                Some("side_mismatch")
+            }
+        };
+        let Some(kind) = kind else {
+            continue;
+        };
+        current_phantom_keys.insert(symbol.clone());
+
+        // S-streak：本輪首見（上輪 last_phantom_keys 無）只記不告警，留待下輪滿 streak。
+        if !state.last_phantom_keys.contains(symbol) {
+            info!(
+                symbol = %symbol, kind = kind,
+                "phantom streak not met (1st cycle); deferring alert / 幻影 streak 未滿（首輪），延後告警"
+            );
+            continue;
+        }
+
+        // S-point-query：告警前精準點查，避免主 fetch limit=20 分頁截斷誤報。
+        //   absent        → 需 ConfirmedZero（交易所端真無倉）才告警。
+        //   side_mismatch → 同樣需 ConfirmedZero（交易所端確無此 symbol 任一倉位 =
+        //                   本地方向必為幻影）；StillHasPosition 代表交易所仍有倉，
+        //                   方向背離可能是分頁/結算暫態，保守不告警。
+        match point_query(symbol.to_string()).await {
+            GhostPointQuery::ConfirmedZero => {
+                // 真幻影 → 告警（DB audit + canary），不自動收斂。
+                warn!(
+                    symbol = %symbol,
+                    kind = kind,
+                    local_side = if local_is_long { "Buy" } else { "Sell" },
+                    bybit_present = bybit_present,
+                    engine = %engine_label,
+                    "PHANTOM-FILL-FIX-1: local book holds a position Bybit does not confirm (phantom) — alert only, no auto-converge \
+                     / 本地帳有倉但 Bybit 未確認（幻影）— 僅告警，不自動收斂"
+                );
+                spawn_phantom_audit(
+                    audit_pool,
+                    symbol,
+                    kind,
+                    local_is_long,
+                    bybit_present,
+                    engine_label,
+                );
+                append_phantom_canary_event(symbol, kind, local_is_long, engine_label);
+            }
+            GhostPointQuery::StillHasPosition => {
+                info!(
+                    symbol = %symbol, kind = kind,
+                    "phantom not alerted: point-query returned size>0 (real position / pagination) / 幻影不告警：點查回 size>0（真倉/分頁）"
+                );
+            }
+            GhostPointQuery::QueryFailed => {
+                info!(
+                    symbol = %symbol, kind = kind,
+                    "phantom not alerted: point-query failed (avoid false alarm) / 幻影不告警：點查失敗（避免誤報）"
+                );
+            }
+        }
+    }
+
+    // 整體覆蓋上一輪幻影集合：幻影消失自動清除，無需過期 GC（對齊 last_ghost_keys）。
+    state.last_phantom_keys = current_phantom_keys;
 }
 
 /// Dispatch a `ReconcilerAction` by sending the corresponding `PipelineCommand`.

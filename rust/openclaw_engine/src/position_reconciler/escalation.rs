@@ -152,6 +152,14 @@ pub struct ReconcilerState {
     /// 立即誤刪真倉）。每輪以「本輪 Ghost keys」整體覆蓋（非 streak 計數），
     /// 故 Ghost 消失自動清除，無需過期 GC。本地集合、非熱路徑，成本極低。
     pub last_ghost_keys: std::collections::HashSet<String>,
+    /// PHANTOM-FILL-FIX-1（2026-06-07，PA T5）· 上一輪被判定為「本地幻影」的
+    /// symbol 集合（本地 mirror 有倉、Bybit current 無對應 / 方向背離）。phantom
+    /// 告警要求**連續 2 cycle** 都命中才告警（防抖：Bybit position WS 比 reconciler
+    /// REST 慢一輪的瞬時假背離）。語意與 `last_ghost_keys` 對稱：整輪覆蓋、自動清除。
+    /// 與 Ghost 軸的差別：Ghost 比「reconciler Bybit baseline vs Bybit current」；
+    /// phantom 比「paper_state mirror vs Bybit current」，故能抓到 baseline 永遠
+    /// flat 的 TON 幻影（該幻影只活在 paper_state，在 Ghost 軸視野外）。
+    pub last_phantom_keys: std::collections::HashSet<String>,
 }
 
 impl ReconcilerState {
@@ -170,6 +178,7 @@ impl ReconcilerState {
             pending_orphan_closes: HashMap::new(),
             startup_ms: 0,
             last_ghost_keys: std::collections::HashSet::new(),
+            last_phantom_keys: std::collections::HashSet::new(),
         }
     }
 }
