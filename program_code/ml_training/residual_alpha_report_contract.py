@@ -22,6 +22,12 @@ MAX_PBO = 0.5
 MIN_R_BETA_RETENTION = 0.5
 MAX_BETA_EDGE_SHARE = 0.5
 MIN_COVERAGE = 0.8
+MAX_PERM_P_VALUE = 0.05
+# Gap C：是否「強制要求」report 帶 permutation 證據。預設 False（backward-compat：
+# 舊 report 不含 perm 欄位仍可驗）。Stage-0R 路徑若要求 perm 必備可設 True。無論本
+# 旗標如何，只要 report **帶** perm_p_value 欄位（=permutation 已啟用）就 additively
+# 強制 perm_p_value 有限且 <= 門檻——不會放行帶 perm 卻不顯著的報告。
+REQUIRE_PERMUTATION = False
 
 FORBIDDEN_REASON_TOKENS: tuple[str, ...] = (
     "core_diagnostic_only",
@@ -122,6 +128,10 @@ def validate_demo_residual_alpha_report(report: Any) -> tuple[bool, str]:
     if not coverage_ok:
         return False, coverage_reason
 
+    perm_ok, perm_reason = _validate_permutation(report)
+    if not perm_ok:
+        return False, perm_reason
+
     return True, "ok"
 
 
@@ -171,6 +181,27 @@ def _validate_fit_window(raw_window: Any) -> tuple[bool, str]:
         return True, "ok"
     if not prior:
         return False, "fit_window_not_prior"
+    return True, "ok"
+
+
+def _validate_permutation(report: dict) -> tuple[bool, str]:
+    """Gap C additive 校驗：permutation 啟用（report 帶 perm_p_value）才強制。
+
+    為什麼 additive / fail-closed：舊 report 不含 perm 欄位時必須仍可驗（§5.6
+    byte-identity / backward-compat），故 perm_p_value 缺席且未 REQUIRE 時直接放行。
+    一旦 report **帶** perm_p_value（=permutation 已啟用），就強制有限且 <= 門檻——
+    帶 perm 卻 None/非 finite（insufficient n）或 p 過大（虛無無法拒絕）都不得 pass。
+    """
+    has_perm = "perm_p_value" in report
+    if not has_perm:
+        if REQUIRE_PERMUTATION:
+            return False, "perm_p_value_missing"
+        return True, "ok"
+    value = _finite_float(report.get("perm_p_value"))
+    if value is None:
+        return False, "metric_missing:perm_p_value"
+    if value > MAX_PERM_P_VALUE:
+        return False, "perm_p_value_above_threshold"
     return True, "ok"
 
 

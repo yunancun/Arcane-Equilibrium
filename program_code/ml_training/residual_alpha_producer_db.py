@@ -327,6 +327,205 @@ def bucketed_btc_factor(
     return factor
 
 
+# ---------------------------------------------------------------------------
+# 多因子 bucket 路徑（Gap B：btc + market + funding-carry）—— leak surface 全在此
+# ---------------------------------------------------------------------------
+# 為什麼加多因子：候選對 BTC 中性，但對板塊/市值（market basket）或 funding-carry
+# 殘留 beta 仍會偽裝成 edge（funding-tilt 策略即死於 carry beta，BTC-price beta 抓
+# 不到）。多因子殘差化把這些已實現曝險一併扣除，讓 gate 看到的是真 residual α。
+# 行為中性硬約束：required_factors 預設仍是 ("btc",)；只有 caller（未來的 Stage-0R
+# orchestrator）顯式傳 ("btc","market","funding") 才啟用，現有 cron/payload 流不變。
+
+
+def _bucketed_symbol_return(
+    klines: Sequence[Mapping[str, Any]],
+    bucket_sec: float,
+) -> dict[float, float]:
+    """單一 symbol 的 bucket open→close 報酬（bps），與 ``bucketed_btc_factor``
+    同語意（一桶多根取最早 open、最晚 close；價格非法則該桶無值）。"""
+    by_bucket: dict[float, list[tuple[float, Mapping[str, Any]]]] = {}
+    for bar in klines:
+        ts = _finite(bar.get("ts"))
+        if ts is None:
+            continue
+        by_bucket.setdefault(bucket_floor(ts, bucket_sec), []).append((ts, bar))
+    out: dict[float, float] = {}
+    for bucket_ts, bars in by_bucket.items():
+        bars.sort(key=lambda item: item[0])
+        first_open = _finite(bars[0][1].get("open"))
+        last_close = _finite(bars[-1][1].get("close"))
+        if first_open is None or last_close is None or first_open <= 0.0:
+            continue
+        out[bucket_ts] = (last_close / first_open - 1.0) * 10_000.0
+    return out
+
+
+def bucketed_funding_factor(
+    funding_by_symbol: Mapping[str, Sequence[Mapping[str, Any]]],
+    position_symbols: Sequence[str],
+    *,
+    net_side: int = 1,
+    bucket_sec: float = DEFAULT_BUCKET_SEC,
+) -> dict[float, float]:
+    """每桶已實現 funding-carry（bps），PIT、leak-free。
+
+    funding_by_symbol: ``{symbol: [{"ts": settlement_epoch, "funding_rate": frac}, ...]}``；
+      ``ts`` 是 funding **結算時刻**（Bybit market.funding_rates.ts，8h 結算）。
+    position_symbols: 該候選持倉的 symbol（多 symbol 取等權平均）。
+    net_side: +1=做多、-1=做空（caller 提供候選淨方向）。
+
+    PIT 規則（§5.1 最高風險，硬約束）：一桶 ``(bucket_start, bucket_end]`` 的
+    funding 只計**結算時刻 ts 落在桶窗內**的結算列，即
+    ``bucket_start < ts <= bucket_end``。**永不**用桶結束後才結算的下一筆 rate
+    （那是策略當下不可能知道的未來費率）；以結算時刻歸桶等價於「只用
+    ``ts <= bucket_end`` 的已結算列」並按桶切分。realized-over-window 累加。
+
+    sign：Bybit funding_rate 為正代表多方付費給空方。故對候選報酬軸的貢獻是
+    ``-net_side * funding_rate``（做多付費=負報酬；做空收費=正報酬），轉 bps。
+    回 ``{bucket_ts: funding_bps}``；桶內無結算列則該桶無值（caller 對不齊的桶
+    自然落在 factor 缺值而被丟棄，不回退）。
+    """
+    side = 1 if int(net_side) >= 0 else -1
+    syms = [s for s in position_symbols if s in funding_by_symbol]
+    if not syms:
+        return {}
+    # 先把每個 symbol 的結算列依桶累加 realized funding（fraction）。
+    per_symbol_bucket: dict[str, dict[float, float]] = {}
+    for symbol in syms:
+        acc: dict[float, float] = {}
+        for row in funding_by_symbol.get(symbol, ()):  # type: ignore[union-attr]
+            ts = _finite(row.get("ts"))
+            rate = _finite(row.get("funding_rate"))
+            if ts is None or rate is None:
+                continue
+            # 結算時刻歸桶：ts 落在 (bucket_start, bucket_end] → 進該桶。
+            # 用 ceil-1 對齊：恰在桶邊界 ts==bucket_start 的結算屬「上一桶尾」，
+            # 故落點桶 = floor((ts - epsilon)/bucket)，等價 (bucket_start, bucket_end]。
+            bucket_ts = bucket_floor(ts - _BUCKET_EPS, bucket_sec)
+            acc[bucket_ts] = acc.get(bucket_ts, 0.0) + rate
+        per_symbol_bucket[symbol] = acc
+    # 跨 symbol 等權平均（只在有列的 symbol 上平均，與 market basket 一致）。
+    all_buckets: set[float] = set()
+    for acc in per_symbol_bucket.values():
+        all_buckets.update(acc)
+    out: dict[float, float] = {}
+    for bucket_ts in all_buckets:
+        members = [
+            per_symbol_bucket[s][bucket_ts]
+            for s in syms
+            if bucket_ts in per_symbol_bucket[s]
+        ]
+        if not members:
+            continue
+        realized = sum(members) / len(members)
+        out[bucket_ts] = -side * realized * 10_000.0
+    return out
+
+
+# bucket 邊界 epsilon：結算時刻恰在桶起點時歸入「上一桶」，確保
+# (bucket_start, bucket_end] 半開區間語意（避免把桶起點當下一桶的未來費率）。
+_BUCKET_EPS: float = 1e-6
+
+
+def bucketed_multi_factor(
+    klines_by_symbol: Mapping[str, Sequence[Mapping[str, Any]]],
+    lifecycles: Mapping[str, tuple[float | None, float | None]],
+    *,
+    required_factors: tuple[str, ...] = ("btc",),
+    bucket_sec: float = DEFAULT_BUCKET_SEC,
+    btc_symbol: str = BTC_SYMBOL,
+    min_basket_symbols: int = DEFAULT_MIN_BASKET_SYMBOLS,
+    funding_by_symbol: Mapping[str, Sequence[Mapping[str, Any]]] | None = None,
+    position_symbols: Sequence[str] | None = None,
+    net_side: int = 1,
+) -> dict[float, dict[str, float]]:
+    """在同一條非重疊 exit-keyed 4h bucket 網格上產出多因子 panel。
+
+    回 ``{bucket_ts: {"btc":.., "market":.., "funding":..}}``（僅含 required_factors
+    要求的因子）。每個因子都在同一桶網格、與候選 bucket 報酬同單位（bps）、同時程，
+    故 beta 是真實已實現曝險、leak-free。
+
+    - "btc"：``klines_by_symbol[btc_symbol]`` 的桶 open→close 報酬。
+    - "market"：每桶取**該桶窗內 PIT-active**（``pit_active_symbols`` lifecycle 權威，
+      含已下市、排 survivorship）的 symbol 等權平均；成員 < ``min_basket_symbols``
+      則該桶無 market 值。桶窗用 ``[bucket_start, bucket_end]``（含界，與
+      pit_active_symbols 的 listed<=entry / delisted>exit 判定一致）。
+    - "funding"：見 ``bucketed_funding_factor``（PIT：只用 ts<=bucket_end 的已結算列）。
+      需 caller 傳 ``funding_by_symbol`` + ``position_symbols`` + ``net_side``；缺則
+      raise（不得靜默產出無 funding 的 panel，避免誤判殘差化已涵蓋 carry）。
+
+    桶若缺任一 required factor 值，該桶不入 panel（R-1 的對齊只取 factor 含全部
+    required factor 的 ts）。
+    """
+    # 先逐因子算各自的 bucket→value，再在桶層 intersection 組裝。
+    btc_by_bucket: dict[float, float] = {}
+    if "btc" in required_factors:
+        btc_by_bucket = _bucketed_symbol_return(
+            klines_by_symbol.get(btc_symbol, ()), bucket_sec
+        )
+
+    market_by_bucket: dict[float, float] = {}
+    if "market" in required_factors:
+        # 各 symbol 的桶報酬先算好（含 btc 自身可入 basket，與 1m 路徑一致：basket
+        # 是 PIT universe 等權，不刻意剔除 btc）。
+        symbol_bucket_returns: dict[str, dict[float, float]] = {
+            symbol: _bucketed_symbol_return(klines, bucket_sec)
+            for symbol, klines in klines_by_symbol.items()
+        }
+        all_buckets: set[float] = set()
+        for ret_map in symbol_bucket_returns.values():
+            all_buckets.update(ret_map)
+        for bucket_ts in all_buckets:
+            bucket_start = bucket_ts
+            bucket_end = bucket_ts + bucket_sec
+            active = pit_active_symbols(lifecycles, bucket_start, bucket_end)
+            members = [
+                symbol_bucket_returns[s][bucket_ts]
+                for s in active
+                if s in symbol_bucket_returns and bucket_ts in symbol_bucket_returns[s]
+            ]
+            if len(members) < min_basket_symbols:
+                continue
+            market_by_bucket[bucket_ts] = sum(members) / len(members)
+
+    funding_by_bucket: dict[float, float] = {}
+    if "funding" in required_factors:
+        if funding_by_symbol is None or position_symbols is None:
+            raise ValueError(
+                "funding factor requires funding_by_symbol and position_symbols"
+            )
+        funding_by_bucket = bucketed_funding_factor(
+            funding_by_symbol,
+            position_symbols,
+            net_side=net_side,
+            bucket_sec=bucket_sec,
+        )
+
+    factor_maps: dict[str, dict[float, float]] = {}
+    for fac in required_factors:
+        if fac == "btc":
+            factor_maps["btc"] = btc_by_bucket
+        elif fac == "market":
+            factor_maps["market"] = market_by_bucket
+        elif fac == "funding":
+            factor_maps["funding"] = funding_by_bucket
+        else:
+            raise ValueError(f"unsupported factor: {fac!r}")
+
+    # 桶層 intersection：只保留所有 required factor 都有值的桶。
+    if not factor_maps:
+        return {}
+    common: set[float] | None = None
+    for ret_map in factor_maps.values():
+        keys = set(ret_map)
+        common = keys if common is None else (common & keys)
+    common = common or set()
+    panel: dict[float, dict[str, float]] = {}
+    for bucket_ts in common:
+        panel[bucket_ts] = {fac: factor_maps[fac][bucket_ts] for fac in required_factors}
+    return panel
+
+
 def build_bucketed_residual_report(
     round_trips: Sequence[Mapping[str, Any]],
     btc_klines: Sequence[Mapping[str, Any]],
@@ -448,6 +647,53 @@ def load_btc_klines(
     return bars
 
 
+# market.funding_rates：欄位已驗 ts(timestamptz)/symbol/funding_rate(real)
+# （Linux 2026-06-08，BTCUSDT 8h 結算）。design §2 Gap B 稱此欄為 ``funding_time``，
+# 倉內實際欄名是 ``ts``（結算時刻）；語意一致（PIT：只取 ts<=bucket_end 的已結算列）。
+_FUNDING_RATES_QUERY = """
+SELECT ts, funding_rate
+FROM market.funding_rates
+WHERE symbol = %(symbol)s
+  AND ts >= %(start)s AND ts <= %(end)s
+ORDER BY ts ASC
+"""
+
+
+def load_funding_rates(
+    conn: Any,
+    symbols: Sequence[str],
+    *,
+    start_ts: datetime,
+    end_ts: datetime,
+) -> dict[str, list[dict[str, float]]]:
+    """載 [start_ts, end_ts] 各 symbol 的 funding 結算列。只讀。
+
+    回 ``{symbol: [{"ts": settlement_epoch, "funding_rate": frac}, ...]}``（ts 升序）。
+    ``ts`` 是結算時刻（Bybit 8h），供 ``bucketed_funding_factor`` 做 PIT 歸桶
+    （只用 ts<=bucket_end 的已結算列，永不取下一筆未結算費率）。
+    Linux runtime 驗證 funding 結算時序語意（§5.1）；Mac 測試用合成結算列。
+    """
+    from psycopg2.extras import RealDictCursor  # lazy：Mac pure-core 免依賴
+
+    out: dict[str, list[dict[str, float]]] = {}
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        for symbol in symbols:
+            cur.execute(
+                _FUNDING_RATES_QUERY,
+                {"symbol": symbol, "start": start_ts, "end": end_ts},
+            )
+            rows = cur.fetchall()
+            series: list[dict[str, float]] = []
+            for row in rows:
+                ts = to_epoch_seconds(row["ts"])
+                rate = _finite(row["funding_rate"])
+                if ts is None or rate is None:
+                    continue
+                series.append({"ts": ts, "funding_rate": rate})
+            out[symbol] = series
+    return out
+
+
 def build_strategy_residual_report(
     conn: Any,
     strategy_name: str,
@@ -501,8 +747,11 @@ __all__ = [
     "bucket_floor",
     "bucket_round_trips_by_exit",
     "bucketed_btc_factor",
+    "bucketed_funding_factor",
+    "bucketed_multi_factor",
     "build_bucketed_residual_report",
     "load_round_trips",
     "load_btc_klines",
+    "load_funding_rates",
     "build_strategy_residual_report",
 ]

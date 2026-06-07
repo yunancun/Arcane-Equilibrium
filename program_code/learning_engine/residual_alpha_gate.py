@@ -43,6 +43,10 @@ DEFAULT_MAX_BETA_EDGE_SHARE: float = 0.5
 DEFAULT_MIN_PSR: float = 0.95
 DEFAULT_MIN_DSR: float = 0.95
 DEFAULT_MAX_PBO: float = 0.5
+DEFAULT_PERMUTATION_N: int = 2000
+DEFAULT_MAX_PERM_P_VALUE: float = 0.05
+# permutation 需至少 2 個 eval 點才有非退化的 sign-flip 虛無分布；不足回 None→defer。
+_MIN_PERMUTATION_OBSERVATIONS: int = 2
 _EPSILON: float = 1e-12
 
 
@@ -110,6 +114,14 @@ class ResidualAlphaProtocol:
     psr_benchmark_bps: float = 0.0
     candidate_oos_returns: Sequence[Any] | None = None
     allow_missing_pbo_for_core_tests: bool = False
+    # Gap C：sign-flip permutation 虛無檢定（model-free，residual α mean≠0）。
+    # 預設 OFF（backward-compat）；只有 Stage-0R orchestrator 顯式開啟才生效，
+    # report 才會帶 perm 欄位、reason 才會進 blocking。permutation_seed=None 時由
+    # factor_panel_hash 推導（reproducible / hash-stable）。
+    permutation_enabled: bool = False
+    permutation_n: int = DEFAULT_PERMUTATION_N
+    permutation_seed: int | None = None
+    max_perm_p_value: float = DEFAULT_MAX_PERM_P_VALUE
 
 
 @dataclass(frozen=True)
@@ -139,10 +151,29 @@ class ResidualEdgeReport:
     factor_panel_hash: str
     fit_window: dict[str, Any]
     passes: bool
+    # Gap C permutation 結果。預設 None/0/False；permutation 未啟用時 to_dict()
+    # 不輸出這三個欄位，確保與 Gap C 前 report dict / hash **byte-identical**。
+    perm_p_value: float | None = None
+    perm_iterations: int = 0
+    permutation_applied: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        """回傳 JSON-safe dict，供 evidence artifact 或 audit surface 使用。"""
-        return _json_safe(asdict(self))
+        """回傳 JSON-safe dict，供 evidence artifact 或 audit surface 使用。
+
+        為什麼條件輸出 perm 欄位（§5.6 hash byte-identity 硬約束）：當 permutation
+        未啟用（``permutation_applied`` False）時，輸出必須與 Gap C 前完全一致，否則
+        bridge ``_canonical_sha256`` / drar report_hash / registry hash 會漂移，
+        source-contract 的 4 處交叉比對全失準。故未啟用時剔除 perm_p_value /
+        perm_iterations / permutation_applied 三個 key。啟用時三 writer 都對同一份
+        最終 to_dict() 取 hash，保持一致。
+        """
+        raw = asdict(self)
+        # permutation_applied 永遠是內部旗標，不進 canonical report payload。
+        raw.pop("permutation_applied", None)
+        if not self.permutation_applied:
+            raw.pop("perm_p_value", None)
+            raw.pop("perm_iterations", None)
+        return _json_safe(raw)
 
 
 class ResidualAlphaGate:
@@ -271,6 +302,22 @@ class ResidualAlphaGate:
             protocol=protocol,
         )
 
+        # Gap C：sign-flip permutation 虛無檢定（預設 OFF）。只在 residual_eval 上
+        # 做（PIT：不重算 factor、不引入窗外資料）；seed 綁 factor_panel_hash → 可重現。
+        perm_p_value: float | None = None
+        perm_iterations = 0
+        perm_blocking_reasons: list[str] = []
+        if protocol.permutation_enabled:
+            perm_seed = (
+                protocol.permutation_seed
+                if protocol.permutation_seed is not None
+                else _permutation_seed_from_hash(factor_panel_hash)
+            )
+            perm_p_value, perm_iterations = _permutation_residual_alpha(
+                residual_eval, n_perm=protocol.permutation_n, seed=perm_seed
+            )
+            perm_blocking_reasons = _permutation_reasons(perm_p_value, protocol)
+
         verdict_reasons = _metric_reasons(
             raw_mean_bps=raw_mean_bps,
             residual_mean_bps=residual_mean_bps,
@@ -284,8 +331,12 @@ class ResidualAlphaGate:
             pbo_residual=pbo_residual,
             protocol=protocol,
         )
-        report_reasons = _dedupe([*verdict_reasons, *pbo_report_reasons])
-        blocking_reasons = _dedupe([*verdict_reasons, *pbo_blocking_reasons])
+        report_reasons = _dedupe(
+            [*verdict_reasons, *pbo_report_reasons, *perm_blocking_reasons]
+        )
+        blocking_reasons = _dedupe(
+            [*verdict_reasons, *pbo_blocking_reasons, *perm_blocking_reasons]
+        )
         verdict = _verdict_from_blocking_reasons(blocking_reasons)
         beta_loadings = {
             factor: float(beta[idx])
@@ -312,6 +363,9 @@ class ResidualAlphaGate:
             factor_panel_hash=factor_panel_hash,
             fit_window=fit_window.to_dict(),
             passes=verdict == "pass",
+            perm_p_value=perm_p_value,
+            perm_iterations=perm_iterations,
+            permutation_applied=protocol.permutation_enabled,
         )
 
     def _validate_protocol(self, protocol: ResidualAlphaProtocol) -> None:
@@ -335,6 +389,13 @@ class ResidualAlphaGate:
             raise ValueError("n_trials must be >= 1")
         if not math.isfinite(protocol.psr_benchmark_bps):
             raise ValueError("psr_benchmark_bps must be finite")
+        # permutation 參數只在啟用時校驗，避免對既有未設這些欄位的 caller 引入
+        # 新例外（backward-compat / 行為中性）。
+        if protocol.permutation_enabled:
+            if protocol.permutation_n < 1:
+                raise ValueError("permutation_n must be >= 1")
+            if not 0.0 <= protocol.max_perm_p_value <= 1.0:
+                raise ValueError("max_perm_p_value must be in [0, 1]")
 
 
 def evaluate_residual_alpha(
@@ -737,6 +798,53 @@ def _degenerate_probability(mean: float, benchmark: float) -> float:
     return 0.5
 
 
+def _permutation_seed_from_hash(factor_panel_hash: str) -> int:
+    """從 factor_panel_hash 推導確定性 seed（reproducible / hash-stable）。
+
+    為什麼綁 factor_panel_hash：同一份對齊資料 → 同一 hash → 同一 seed → 同一
+    p-value，故 report 可重現、re-run 不漂移（§5.5）。取 hash 前 16 hex（64-bit）
+    再對 2**32 取模，落在 numpy default_rng 接受的種子範圍。
+    """
+    digest = hashlib.sha256(str(factor_panel_hash).encode("utf-8")).hexdigest()
+    return int(digest[:16], 16) % (2**32)
+
+
+def _permutation_residual_alpha(
+    residual_eval: np.ndarray,
+    *,
+    n_perm: int,
+    seed: int,
+) -> tuple[float | None, int]:
+    """sign-flip permutation：model-free 檢定「residual α mean 是否可區別於 0」。
+
+    虛無：residual_eval 的符號對稱（mean=0）。每次迭代隨機翻轉每個 eval 點的符號、
+    重算 mean，p = ``|permuted mean| >= |observed mean|`` 的比例。只在**已殘差化的
+    eval 序列**上做（PIT：不重算 factor、不引入窗外資料；sign-flip 保持 eval-窗成員
+    不變）。確定性 seed → 可重現。
+
+    回 ``(p_value, iterations)``；eval 點 < ``_MIN_PERMUTATION_OBSERVATIONS`` 或
+    n_perm<1 或序列含非 finite → ``(None, 0)``（caller 視為 insufficient → defer，
+    非 fail）。observed mean 恰為 0（退化）時回 ``(1.0, n_perm)``（無從區別於 0）。
+    """
+    arr = np.asarray(residual_eval, dtype=np.float64)
+    n = int(arr.size)
+    if n < _MIN_PERMUTATION_OBSERVATIONS or n_perm < 1:
+        return None, 0
+    if not np.all(np.isfinite(arr)):
+        return None, 0
+    observed = abs(float(np.mean(arr)))
+    if observed <= _EPSILON:
+        # mean≈0：本來就和虛無無法區別 → p=1（最保守），不必跑迭代。
+        return 1.0, int(n_perm)
+    rng = np.random.default_rng(int(seed))
+    # 向量化 sign-flip：每次迭代對 n 個點各以 0.5 機率翻號。
+    signs = rng.integers(0, 2, size=(int(n_perm), n)).astype(np.float64) * 2.0 - 1.0
+    permuted_means = np.abs((signs * arr).mean(axis=1))
+    hits = int(np.count_nonzero(permuted_means >= observed - _EPSILON))
+    p_value = hits / float(n_perm)
+    return p_value, int(n_perm)
+
+
 def _compute_pbo(
     *,
     eval_y: np.ndarray,
@@ -903,6 +1011,23 @@ def _metric_reasons(
     return _dedupe(reasons)
 
 
+def _permutation_reasons(
+    perm_p_value: float | None,
+    protocol: ResidualAlphaProtocol,
+) -> list[str]:
+    """permutation 的 blocking reason（mirror psr/dsr 的 not_computed vs below split）。
+
+    perm_p_value is None（eval n 不足）→ ``perm_p_value_not_computed``（defer-only，
+    非 alpha 證偽，與 pbo_not_computed 同類）；> max_perm_p_value（虛無無法拒絕）→
+    ``perm_p_value_above_threshold``（genuine fail，流入 verdict）。
+    """
+    if perm_p_value is None:
+        return ["perm_p_value_not_computed"]
+    if perm_p_value > protocol.max_perm_p_value:
+        return ["perm_p_value_above_threshold"]
+    return []
+
+
 def _hash_factor_rows(
     *,
     factors: Mapping[Hashable, Mapping[str, float]],
@@ -949,6 +1074,10 @@ def _is_defer_only_reason(reason: str) -> bool:
         # CSCV 檢定力不足（T<s_slices / total_trades / 組合數）→ defer，非 hard fail，
         # 與 pbo_not_computed 同類：缺 PBO evidence 但非 alpha 證偽。
         "pbo_insufficient_power",
+        # permutation eval n 不足 → defer（insufficient n），非 alpha 證偽；與
+        # pbo_not_computed 同類。p>threshold 的 perm_p_value_above_threshold 不在此
+        # → 屬 genuine fail，流入 verdict（mirror psr/dsr below_threshold）。
+        "perm_p_value_not_computed",
     }
 
 
