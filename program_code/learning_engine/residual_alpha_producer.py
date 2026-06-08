@@ -25,6 +25,8 @@ from typing import Any, Hashable, Mapping, Sequence
 
 try:  # 套件式 import（app runtime）
     from program_code.learning_engine.residual_alpha_gate import (
+        DEFAULT_MAX_PERM_P_VALUE,
+        DEFAULT_PERMUTATION_N,
         ResidualAlphaFitWindow,
         ResidualAlphaGate,
         ResidualAlphaProtocol,
@@ -34,6 +36,8 @@ try:  # 套件式 import（app runtime）
     )
 except ModuleNotFoundError:  # pragma: no cover - 直跑 fallback
     from learning_engine.residual_alpha_gate import (  # type: ignore
+        DEFAULT_MAX_PERM_P_VALUE,
+        DEFAULT_PERMUTATION_N,
         ResidualAlphaFitWindow,
         ResidualAlphaGate,
         ResidualAlphaProtocol,
@@ -83,6 +87,10 @@ def build_residual_alpha_report(
     min_dsr: float = 0.95,
     max_pbo: float = 0.5,
     psr_benchmark_bps: float = 0.0,
+    permutation_enabled: bool = False,
+    permutation_n: int = DEFAULT_PERMUTATION_N,
+    permutation_seed: int | None = None,
+    max_perm_p_value: float = DEFAULT_MAX_PERM_P_VALUE,
 ) -> ResidualAlphaProducerResult:
     """組裝並評估 residual alpha report。
 
@@ -144,6 +152,15 @@ def build_residual_alpha_report(
         n_trials=n_trials,
         psr_benchmark_bps=psr_benchmark_bps,
         candidate_oos_returns=peer_oos_returns,
+        # Gap C 接線（行為中性）：預設 permutation_enabled=False → 與既有 caller
+        # 完全一致（不算 perm、to_dict 不帶 perm 欄位、hash byte-identical）。只有
+        # Stage-0R orchestrator 透過 evaluate_cell ``**gate_kwargs`` 顯式傳
+        # permutation_enabled=True 才啟用 model-free null。permutation_seed=None
+        # 時由 gate 從 factor_panel_hash 衍生確定性 seed（hash 穩定、可重現）。
+        permutation_enabled=permutation_enabled,
+        permutation_n=permutation_n,
+        permutation_seed=permutation_seed,
+        max_perm_p_value=max_perm_p_value,
     )
 
     report = ResidualAlphaGate().evaluate(candidate_rows, factor_rows, protocol)

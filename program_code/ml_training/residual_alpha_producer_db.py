@@ -647,6 +647,101 @@ def load_btc_klines(
     return bars
 
 
+# market.klines 多 symbol 查詢（Gap B market basket 來源；欄位同 _BTC_KLINES_QUERY）。
+# 用 ANY(%(symbols)s) 一次拉多 symbol，呼叫端按 symbol group。
+_MULTI_KLINES_QUERY = """
+SELECT symbol, ts, open, close
+FROM market.klines
+WHERE symbol = ANY(%(symbols)s) AND timeframe = %(tf)s
+  AND ts >= %(start)s AND ts <= %(end)s
+ORDER BY symbol, ts ASC
+"""
+
+# market.symbol_universe_snapshots：lifecycle 權威（Linux 2026-06-08 驗 948 symbol，
+# listed_at/delisted_at 已 populate）。同 symbol 多筆 snapshot ts → 取最早 listed_at
+# 與**最新一筆**的 delisted_at（is_delisted_at_asof 反映當前下市狀態，用 DISTINCT ON
+# 取每 symbol 最新 ts 的 delisted_at；listed_at 取全期最小，含已下市，排 survivorship）。
+_SYMBOL_LIFECYCLE_QUERY = """
+SELECT
+    u.symbol,
+    u.listed_min AS listed_at,
+    latest.delisted_at AS delisted_at
+FROM (
+    SELECT symbol, MIN(listed_at) AS listed_min
+    FROM market.symbol_universe_snapshots
+    GROUP BY symbol
+) u
+LEFT JOIN LATERAL (
+    SELECT delisted_at
+    FROM market.symbol_universe_snapshots s
+    WHERE s.symbol = u.symbol
+    ORDER BY s.ts DESC
+    LIMIT 1
+) latest ON TRUE
+"""
+
+
+def load_symbol_lifecycles(
+    conn: Any,
+) -> dict[str, tuple[float | None, float | None]]:
+    """載全 universe 的 symbol lifecycle（listed_at/delisted_at，epoch 秒）。只讀。
+
+    回 ``{symbol: (listed_at_epoch | None, delisted_at_epoch | None)}``，供
+    ``pit_active_symbols`` / ``bucketed_multi_factor`` 的 market basket 做 PIT
+    成員判定（含已下市 symbol，排 survivorship bias，§5.2）。listed_at 取全期最小、
+    delisted_at 取最新一筆 snapshot（反映當前下市狀態）。Linux runtime 驗 lifecycle
+    時序；Mac 測試用合成 lifecycle。
+    """
+    from psycopg2.extras import RealDictCursor  # lazy
+
+    out: dict[str, tuple[float | None, float | None]] = {}
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(_SYMBOL_LIFECYCLE_QUERY)
+        for row in cur.fetchall():
+            symbol = str(row.get("symbol") or "").strip()
+            if not symbol:
+                continue
+            listed = to_epoch_seconds(row.get("listed_at"))
+            delisted = to_epoch_seconds(row.get("delisted_at"))
+            out[symbol] = (listed, delisted)
+    return out
+
+
+def load_klines_by_symbols(
+    conn: Any,
+    symbols: Sequence[str],
+    *,
+    start_ts: datetime,
+    end_ts: datetime,
+    timeframe: str = "4h",
+) -> dict[str, list[dict[str, float]]]:
+    """載 [start_ts, end_ts] 多 symbol 的 bucket klines（預設 4h）。只讀。
+
+    回 ``{symbol: [{"ts": epoch, "open", "close"}, ...]}``（ts 升序），供
+    ``bucketed_multi_factor`` 的 market basket。空 symbols → 回 ``{}``。
+    """
+    syms = [str(s).strip() for s in symbols if str(s).strip()]
+    if not syms:
+        return {}
+    from psycopg2.extras import RealDictCursor  # lazy
+
+    out: dict[str, list[dict[str, float]]] = {s: [] for s in syms}
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            _MULTI_KLINES_QUERY,
+            {"symbols": syms, "tf": timeframe, "start": start_ts, "end": end_ts},
+        )
+        for row in cur.fetchall():
+            symbol = str(row.get("symbol") or "").strip()
+            ts = to_epoch_seconds(row.get("ts"))
+            open_ = _finite(row.get("open"))
+            close = _finite(row.get("close"))
+            if not symbol or ts is None or open_ is None or close is None:
+                continue
+            out.setdefault(symbol, []).append({"ts": ts, "open": open_, "close": close})
+    return out
+
+
 # market.funding_rates：欄位已驗 ts(timestamptz)/symbol/funding_rate(real)
 # （Linux 2026-06-08，BTCUSDT 8h 結算）。design §2 Gap B 稱此欄為 ``funding_time``，
 # 倉內實際欄名是 ``ts``（結算時刻）；語意一致（PIT：只取 ts<=bucket_end 的已結算列）。
@@ -692,6 +787,93 @@ def load_funding_rates(
                 series.append({"ts": ts, "funding_rate": rate})
             out[symbol] = series
     return out
+
+
+def derive_net_side_from_fills(
+    fills: Sequence[Mapping[str, Any]],
+    strategy_name: str,
+) -> tuple[int, dict[str, float]]:
+    """從 fills 推導候選策略的**淨方向**（+1=做多 / -1=做空），純函數。
+
+    為什麼這是 MIT 硬條件（funding sign）：``load_round_trips`` 的 FIFO 配對只回
+    ``net_bps``，**丟失** entry side（往返淨報酬不帶方向）。但 funding-carry factor
+    的 sign 取決於候選**淨持倉方向**——funding_rate 為正時做多付費（負報酬）、做空收費
+    （正報酬）。若用 ``net_side=+1`` 預設套到一個淨做空候選，funding factor 會**反號**，
+    殘差化不但沒扣除 carry beta 反而**放大**它 → 正是本功能要消滅的 false-promote 向量。
+    故 orchestrator 必須先從真實 fills 推導 net_side，**絕不**把 +1 預設送進真實 run。
+
+    推導：候選**入場成交**（``strategy_name`` 等於候選策略、且非平倉——平倉用 prefixed
+    名 ``risk_close:`` / ``strategy_close:`` / ``stop_*`` 並帶 realized_pnl）的
+    **淨 signed-qty** = Σ side_sign × qty（Buy=+1、Sell=-1）。其符號即淨方向曝險。
+    回 ``(net_side, diag)``：net_side ∈ {+1, -1}（淨 0 / 無入場成交時回 +1 並於 diag
+    標 ``ambiguous=1.0`` 供 caller fail-loud，**不**靜默吞）。
+
+    diag: ``{"entry_fills": n, "net_signed_qty": float, "abs_signed_qty": float,
+            "ambiguous": 0.0|1.0}``。
+    """
+    net_signed_qty = 0.0
+    abs_signed_qty = 0.0
+    entry_fills = 0
+    for fill in fills:
+        name = str(fill.get("strategy_name") or "")
+        if name != strategy_name:
+            # 只看候選自己的入場成交；平倉成交用 prefixed 名（與候選名不同）→
+            # 自然被此判據排除，無需重複 is_exit 前綴清單。
+            continue
+        # 雙保險：即使平倉成交誤帶候選名（理論上不該），realized_pnl != 0 視為平倉略過。
+        realized = _finite(fill.get("realized_pnl"))
+        if realized is not None and realized != 0.0:
+            continue
+        qty = _finite(fill.get("qty"))
+        if qty is None or qty <= 0.0:
+            continue
+        side = str(fill.get("side") or "").strip().lower()
+        if side == "buy":
+            sign = 1.0
+        elif side == "sell":
+            sign = -1.0
+        else:
+            continue
+        net_signed_qty += sign * qty
+        abs_signed_qty += qty
+        entry_fills += 1
+    diag = {
+        "entry_fills": float(entry_fills),
+        "net_signed_qty": net_signed_qty,
+        "abs_signed_qty": abs_signed_qty,
+        "ambiguous": 0.0,
+    }
+    if entry_fills == 0 or net_signed_qty == 0.0:
+        diag["ambiguous"] = 1.0
+        return 1, diag
+    return (1 if net_signed_qty > 0.0 else -1), diag
+
+
+def load_candidate_net_side(
+    conn: Any,
+    strategy_name: str,
+    *,
+    engine_mode: str = "demo",
+    since: datetime,
+) -> tuple[int, dict[str, float]]:
+    """讀 trading.fills 推導候選策略淨方向（+1/-1），只讀。
+
+    重用 realized_edge_stats 的 ``_FILLS_QUERY`` + ``_engine_mode_scope``（與
+    ``load_round_trips`` 同一 fills 來源），交給純函數 ``derive_net_side_from_fills``
+    計算。回 ``(net_side, diag)``。Linux runtime 驗 fills.side 語意；Mac 測試用合成 fills。
+    """
+    from psycopg2.extras import RealDictCursor  # lazy：Mac pure-core 免依賴
+
+    try:
+        from program_code.ml_training import realized_edge_stats as _res
+    except ModuleNotFoundError:  # pragma: no cover - 直跑 fallback
+        from ml_training import realized_edge_stats as _res  # type: ignore
+
+    modes = _res._engine_mode_scope(engine_mode)
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(_res._FILLS_QUERY, {"since": since, "engine_modes": modes})
+        fills = [dict(row) for row in cur.fetchall()]
+    return derive_net_side_from_fills(fills, strategy_name)
 
 
 def build_strategy_residual_report(
@@ -752,6 +934,10 @@ __all__ = [
     "build_bucketed_residual_report",
     "load_round_trips",
     "load_btc_klines",
+    "load_klines_by_symbols",
+    "load_symbol_lifecycles",
     "load_funding_rates",
+    "derive_net_side_from_fills",
+    "load_candidate_net_side",
     "build_strategy_residual_report",
 ]
