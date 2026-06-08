@@ -344,8 +344,9 @@ def build_evidence_source_filter(
     # Block A: evidence_source_tier IN (accepted tiers)
     # Block A：evidence_source_tier 必在接受清單內。
     # 預設排除 synthetic_replay（P3-03）；唯有 allow_synthetic=True 才納入。
+    # base 欄位以 msr. 限定（主查詢已別名 base 表為 msr）。
     fragments.append(
-        "AND COALESCE(evidence_source_tier, 'real_outcome') = ANY(%s)"
+        "AND COALESCE(msr.evidence_source_tier, 'real_outcome') = ANY(%s)"
     )
     extra_params.append(resolve_accepted_tiers(allow_synthetic=allow_synthetic))
 
@@ -365,10 +366,12 @@ def build_evidence_source_filter(
         and caps.get("replay_experiments_has_status")
         and caps.get("replay_experiments_has_manifest_hash")
     ):
+        # 外層 replay_experiment_id 屬 base 表（與 hos 同名）→ msr. 限定；
+        # 子查詢內欄位在 replay.experiments scope 內單表無歧義，不加別名。
         fragments.append(
             "AND ("
-            "  replay_experiment_id IS NULL "
-            "  OR replay_experiment_id IN ("
+            "  msr.replay_experiment_id IS NULL "
+            "  OR msr.replay_experiment_id IN ("
             "    SELECT experiment_id FROM replay.experiments "
             "    WHERE manifest_hash IS NOT NULL "
             "      AND expires_at > now() "
@@ -385,13 +388,16 @@ def build_evidence_source_filter(
         # Partial forward-compat: column exists but stub missing
         # expires_at / status — degrade to FK-only (existence) gate.
         # 部分 forward-compat：column 存在但 stub 缺欄 — 退到 FK 存在性 gate。
+        # 外層 base 欄位 replay_experiment_id → msr. 限定；舊全名
+        # learning.mlde_shadow_recommendations.X 在 base 表別名後失效。
+        # 注意：此 EXISTS 子查詢自帶 alias e，與外層 registry_join 的 e 屬不同
+        # scope（子查詢內 e 遮蔽外層），語意不變、無歧義。
         fragments.append(
             "AND ("
-            "  replay_experiment_id IS NULL "
+            "  msr.replay_experiment_id IS NULL "
             "  OR EXISTS ("
             "    SELECT 1 FROM replay.experiments e "
-            "    WHERE e.experiment_id = "
-            "      learning.mlde_shadow_recommendations.replay_experiment_id"
+            "    WHERE e.experiment_id = msr.replay_experiment_id"
             "  )"
             ")"
         )
@@ -491,18 +497,21 @@ def fetch_pending_sql_and_params(
         residual_registry_label,
         hidden_oos_registry_label,
     )
+    # base 欄位一律以 msr. 限定：replay_experiment_id 與 hos 同名、manifest_hash
+    # 與 e 同名，裸寫即 ambiguous；evidence_source_tier 目前僅 base 表有，但採全
+    # 限定保持一致並防未來 join 表引入同名欄。
     evidence_source_tier_select = (
-        "evidence_source_tier::text AS evidence_source_tier"
+        "msr.evidence_source_tier::text AS evidence_source_tier"
         if caps.get("has_evidence_source_tier")
         else "NULL::text AS evidence_source_tier"
     )
     replay_experiment_id_select = (
-        "replay_experiment_id::text AS replay_experiment_id"
+        "msr.replay_experiment_id::text AS replay_experiment_id"
         if caps.get("has_replay_experiment_id")
         else "NULL::text AS replay_experiment_id"
     )
     manifest_hash_select = (
-        "encode(manifest_hash, 'hex') AS manifest_hash"
+        "encode(msr.manifest_hash, 'hex') AS manifest_hash"
         if caps.get("has_manifest_hash")
         else "NULL::text AS manifest_hash"
     )
@@ -510,9 +519,11 @@ def fetch_pending_sql_and_params(
         bool(caps.get("has_replay_experiment_id"))
         and bool(caps.get("has_replay_experiments"))
     )
+    # JOIN ON 子句：base 表加 msr 別名後，舊全名 learning.mlde_shadow_recommendations.X
+    # 會失效（PG 報 invalid FROM-clause reference），故改用 msr.X 引用。
     registry_join = (
         "LEFT JOIN replay.experiments e "
-        "ON e.experiment_id = learning.mlde_shadow_recommendations.replay_experiment_id"
+        "ON e.experiment_id = msr.replay_experiment_id"
         if has_registry_join
         else ""
     )
@@ -520,15 +531,14 @@ def fetch_pending_sql_and_params(
         "LEFT JOIN learning.demo_residual_alpha_reports drar "
         "ON drar.report_hash = "
         "  (e.manifest_jsonb ->> 'demo_residual_alpha_report_hash') "
-        "AND drar.strategy_name = learning.mlde_shadow_recommendations.strategy_name "
-        "AND drar.engine_mode = learning.mlde_shadow_recommendations.engine_mode"
+        "AND drar.strategy_name = msr.strategy_name "
+        "AND drar.engine_mode = msr.engine_mode"
         if has_residual_registry_join
         else ""
     )
     hidden_oos_registry_join = (
         "LEFT JOIN learning.hidden_oos_state_registry hos "
-        "ON hos.replay_experiment_id = "
-        "  learning.mlde_shadow_recommendations.replay_experiment_id "
+        "ON hos.replay_experiment_id = msr.replay_experiment_id "
         "AND hos.replay_manifest_hash = encode(e.manifest_hash, 'hex')"
         if has_hidden_oos_registry_join
         else ""
@@ -602,10 +612,17 @@ def fetch_pending_sql_and_params(
         else "NULL::jsonb AS durable_hidden_oos_state_jsonb"
     )
 
+    # base 表別名 msr：2026-06-07 residual/hidden_oos registry join 上線後，
+    # 被 LEFT JOIN 的 e / drar / hos 也帶 engine_mode / source / strategy_name /
+    # manifest_hash / replay_experiment_id 等同名欄；裸欄位（如 WHERE engine_mode）
+    # 因此變 ambiguous，導致 mlde_demo_applier 每日 cron AmbiguousColumn 失敗。
+    # 修法為全限定：所有屬於 base 表的欄位一律加 msr. 前綴（含目前未重疊但採
+    # 全限定保持完整、避免未來新增 join 表再次踩雷）。*_select / *_join /
+    # evidence_filter 模板片段已各自以 msr. / e. / drar. / hos. 限定其引用。
     sql = """
-        SELECT id, ts, engine_mode, source, recommendation_type, strategy_name,
-               symbol, expected_net_bps, confidence, sample_count,
-               context_id, intent_id,
+        SELECT msr.id, msr.ts, msr.engine_mode, msr.source, msr.recommendation_type,
+               msr.strategy_name, msr.symbol, msr.expected_net_bps, msr.confidence,
+               msr.sample_count, msr.context_id, msr.intent_id,
                {evidence_source_tier_select},
                {replay_experiment_id_select},
                {manifest_hash_select},
@@ -621,18 +638,18 @@ def fetch_pending_sql_and_params(
                {durable_residual_jsonb_select},
                {durable_hidden_oos_state_select},
                {durable_hidden_oos_jsonb_select},
-               payload
-          FROM learning.mlde_shadow_recommendations
+               msr.payload
+          FROM learning.mlde_shadow_recommendations msr
           {registry_join}
           {residual_registry_join}
           {hidden_oos_registry_join}
-         WHERE ts >= now() - (%s::int || ' hours')::interval
-           AND engine_mode = %s
-           AND NOT applied
-           AND COALESCE(confidence, 0.0) >= %s
-           AND COALESCE(sample_count, 0) >= %s
+         WHERE msr.ts >= now() - (%s::int || ' hours')::interval
+           AND msr.engine_mode = %s
+           AND NOT msr.applied
+           AND COALESCE(msr.confidence, 0.0) >= %s
+           AND COALESCE(msr.sample_count, 0) >= %s
            {evidence_filter}
-         ORDER BY confidence DESC NULLS LAST, sample_count DESC NULLS LAST, ts DESC
+         ORDER BY msr.confidence DESC NULLS LAST, msr.sample_count DESC NULLS LAST, msr.ts DESC
          LIMIT %s
     """.format(
         evidence_filter=extra_filter,

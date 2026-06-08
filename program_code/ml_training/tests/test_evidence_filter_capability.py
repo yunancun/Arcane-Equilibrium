@@ -170,7 +170,7 @@ def test_case1_full_capability_all_true_emits_full_block_b():
     fragment, extra = build_evidence_source_filter(caps)
 
     # Block A 必出現
-    assert "AND COALESCE(evidence_source_tier, 'real_outcome') = ANY(%s)" in fragment
+    assert "AND COALESCE(msr.evidence_source_tier, 'real_outcome') = ANY(%s)" in fragment
     assert extra[0] == list(DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST)
     assert "synthetic_replay" not in extra[0]
 
@@ -199,13 +199,14 @@ def test_case2_partial_capability_fallback_to_fk_existence_only():
     fragment, _ = build_evidence_source_filter(caps)
 
     # Block A 仍在
-    assert "AND COALESCE(evidence_source_tier, 'real_outcome') = ANY(%s)" in fragment
+    assert "AND COALESCE(msr.evidence_source_tier, 'real_outcome') = ANY(%s)" in fragment
 
     # Block B 退化為 EXISTS subquery（FK existence-only gate）
+    # base 欄位 replay_experiment_id 以 msr. 限定（與 hos 同名，舊全名在別名後失效）。
     assert "EXISTS (" in fragment
     assert "FROM replay.experiments e" in fragment
     assert "e.experiment_id = " in fragment
-    assert "learning.mlde_shadow_recommendations.replay_experiment_id" in fragment
+    assert "msr.replay_experiment_id" in fragment
 
     # 不應含完整版 manifest_hash NOT NULL / expires_at > now() / status NOT IN
     # (因為 stub 缺；Partial 路徑不能 reference 缺失的 column)
@@ -236,7 +237,7 @@ def test_case3_block_a_only_evidence_source_tier_allowlist_no_block_b():
     fragment, extra = build_evidence_source_filter(caps)
 
     # Block A 必在
-    assert "AND COALESCE(evidence_source_tier, 'real_outcome') = ANY(%s)" in fragment
+    assert "AND COALESCE(msr.evidence_source_tier, 'real_outcome') = ANY(%s)" in fragment
     assert extra == [list(DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST)]
 
     # Block B 完全略過：不應含任何 replay.experiments / EXISTS / manifest_hash
