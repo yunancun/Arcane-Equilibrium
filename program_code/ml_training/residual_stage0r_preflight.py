@@ -42,6 +42,7 @@ MODULE_NOTE
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -463,6 +464,29 @@ def _process_candidate(
         rpt = manifest.get(_RESIDUAL_ALPHA_REPORT_FIELD)
         if isinstance(rpt, dict):
             captured["report"] = rpt
+        # LOW-3：設 deterministic idempotency_key 縮小 crash-retry 重複窗。
+        # 為什麼從 family_id + split_hash 衍生：同一候選（replay_experiment_id IS NULL）
+        # 重跑 → 同窗 → 同 split_hash → 同 key。register_experiment 用 (actor, key) 的
+        # in-memory cache + PG advisory lock + H-2 hash guard：同 process 內重送直接回
+        # 既有 experiment（不重 INSERT），跨 process race 由 advisory lock 序列化。
+        # **誠實殘留風險**：in-memory cache 重啟即失（registry module note），且 cache-miss
+        # 競態下 registry 明確接受跨-process 重複 INSERT（H-1 取捨）；故「register 已 commit
+        # 但 process 在 stamp 前崩潰、重啟後重跑」仍可能產生第二個 replay.experiments row。
+        # 此 key 把重複窗從「任意 retry」縮到「僅 crash-then-restart」，是 cheap strict-
+        # better；完全消除需 durable idempotency 欄（V049 無，OUT OF Gap A scope）。
+        if getattr(body, "idempotency_key", None) is None:
+            split_ref = ""
+            state = manifest.get("hidden_oos_state")
+            if isinstance(state, dict):
+                split_ref = str(state.get("split_hash") or "")
+            if split_ref:
+                key = f"residual_stage0r:{family_id}:{split_ref}"
+                try:
+                    body.idempotency_key = key[:128]
+                except (AttributeError, ValueError):  # 非預期不可變 body → 不阻斷 register
+                    logger.warning(
+                        "residual_stage0r_preflight: could not set idempotency_key on body"
+                    )
         return register_fn(get_conn_fn, act, body, **kw)
 
     result, err = register_residual_candidate_experiment(
@@ -524,29 +548,42 @@ def _process_candidate(
 
     # 取 bridge 送進 registry 的同一份 report（capturing wrapper 從 body 抓到）→
     # hash byte-identical（§5.6）。bridge 必定有產 report 才會走到 register；理論上
-    # captured 必有，但保守 fallback：缺則記 verdict=None 並 skip drar（不重算）。
+    # captured 必有，但保守 fallback：缺則不蓋章（無 report 的 lineage 對下游 source
+    # contract 無意義——它第一道就讀 payload report，缺則死在 not_dict）。
     report = captured.get("report") if isinstance(captured.get("report"), dict) else None
-    verdict = None
-    drar_written = False
-    report_hash: str | None = None
-    if report is not None:
-        verdict = str(report.get("verdict") or "")
-        # ⑤ 寫 drar（重用薄 writer；非 pass 報告誠實 skip → 回 None）。
-        report_hash = write_demo_residual_alpha_report(
-            write_cur,
-            report,
-            strategy_name=strategy,
-            engine_mode=cfg.engine_mode,
-            source=PREFLIGHT_SOURCE,
+    if report is None:
+        # register 已寫但 capturing 缺 report（不該發生）→ 不蓋 lineage、不寫 payload。
+        # 不重算 report（重算=第二序列化路徑→hash 漂移）。reason=register_ok_but_report_
+        # uncaptured 供 audit；experiment 仍存在（bridge 已 commit），下次重跑 WHERE NULL
+        # 仍會選到（此時 idempotency_key 縮小重複窗，見 LOW-3）。
+        return CandidatePreflightOutcome(
+            rec_id=rec_id, strategy=strategy, symbol=symbol,
+            status="skipped", reason="register_ok_but_report_uncaptured",
+            net_side=net_side, experiment_id=experiment_id,
+            manifest_hash=manifest_hash,
         )
-        drar_written = report_hash is not None
 
-    # ⑥ 蓋 lineage 到 shadow rec（WHERE replay_experiment_id IS NULL 防重蓋/重開）。
+    verdict = str(report.get("verdict") or "")
+    # ⑤ 寫 drar（重用薄 writer；非 pass 報告誠實 skip → 回 None）。
+    report_hash = write_demo_residual_alpha_report(
+        write_cur,
+        report,
+        strategy_name=strategy,
+        engine_mode=cfg.engine_mode,
+        source=PREFLIGHT_SOURCE,
+    )
+    drar_written = report_hash is not None
+
+    # ⑥ 蓋 lineage **並**把同一份 report 寫進 payload（HIGH-1）。pass 與 defer report
+    #    皆寫 payload：defer report 經下游 source contract 第一道 validator 自然 surface
+    #    真實 math reason（如 passes_not_true / verdict_not_pass），**非** not_dict
+    #    （=defer-by-absence）。WHERE replay_experiment_id IS NULL 防重蓋/重開。
     rec_stamped = _stamp_rec_lineage(
         write_cur,
         rec_id=rec_id,
         experiment_id=experiment_id,
         manifest_hash=manifest_hash,
+        report=report,
     )
 
     return CandidatePreflightOutcome(
@@ -563,11 +600,28 @@ def _process_candidate(
     )
 
 
+# 蓋 lineage **並**把 bridge 產的 report 寫進 payload（HIGH-1 修復）。
+# 為什麼 payload 必須帶 report：下游 source contract（candidate_evidence_source_contract.
+# build_live_candidate_evidence_from_source）**第一道**就讀 ``payload.
+# demo_residual_alpha_report`` 並過 validate_demo_residual_alpha_report；production
+# fetch（mlde_demo_applier_evidence_filter.fetch_pending_sql_and_params）的 SELECT
+# **沒有** top-level demo_residual_alpha_report 欄，report 只能從 payload 取。若只蓋
+# lineage 不寫 payload，source contract 必死在 ``residual_alpha:not_dict``（=defer-by-
+# absence 換個名字）——即使 pass 候選也卡在第一道，durable gate 永不可達。
+# 同一 UPDATE 用 jsonb_set 寫入：原子（lineage + report 同進同出），且**覆寫**任何先前
+# attach_residual_reports hook 留下的 btc-only report → payload report == manifest
+# 內 multi-factor report → registry-hash 跨檢一致（§5.6 byte-identity）。
+# WHERE replay_experiment_id IS NULL：idempotent，已蓋過則整筆 no-op（不重寫 payload）。
 _STAMP_REC_SQL = """
 UPDATE learning.mlde_shadow_recommendations
 SET replay_experiment_id = %(experiment_id)s::uuid,
     manifest_hash = %(manifest_hash)s,
-    evidence_source_tier = %(tier)s
+    evidence_source_tier = %(tier)s,
+    payload = jsonb_set(
+        COALESCE(payload, '{}'::jsonb),
+        '{demo_residual_alpha_report}',
+        %(report_jsonb)s::jsonb
+    )
 WHERE id = %(rec_id)s
   AND replay_experiment_id IS NULL
 """
@@ -579,11 +633,19 @@ def _stamp_rec_lineage(
     rec_id: Any,
     experiment_id: str,
     manifest_hash: str,
+    report: dict[str, Any],
 ) -> bool:
-    """蓋 lineage 到 shadow rec；WHERE replay_experiment_id IS NULL 防 re-stamp/re-open。
+    """蓋 lineage + 寫 payload report 到 shadow rec；WHERE replay_experiment_id IS NULL
+    防 re-stamp/re-open。
 
-    manifest_hash 來自 registry 已 commit 的值（單一真相來源）。idempotent：已蓋過
-    （replay_experiment_id NOT NULL）→ rowcount=0，回 False（no-op，不覆蓋既有 lineage）。
+    manifest_hash 來自 registry 已 commit 的值（單一真相來源）。report 是 bridge 送進
+    registry 的**同一份** dict（capturing wrapper 抓到），故 payload 內的 report ==
+    manifest 內的 report → 下游 source contract 的 registry-hash 跨檢必一致（§5.6）。
+    序列化用 ``json.dumps(report, sort_keys=True)``：與 drar writer 的 report_jsonb 同
+    convention，且 jsonb 是結構（非位元組）儲存，round-trip 回 dict 後 ``_canonical_sha256``
+    與 manifest 的 hash 結構一致（pass/defer 皆寫，defer 報告經第一道 validator 自然
+    surface 真實 math reason，非 not_dict）。idempotent：已蓋過（replay_experiment_id
+    NOT NULL）→ rowcount=0，回 False（no-op，不覆蓋既有 lineage/payload）。
     """
     cur.execute(
         _STAMP_REC_SQL,
@@ -591,6 +653,7 @@ def _stamp_rec_lineage(
             "experiment_id": experiment_id,
             "manifest_hash": manifest_hash,
             "tier": CALIBRATED_REPLAY_TIER,
+            "report_jsonb": json.dumps(report, sort_keys=True),
             "rec_id": rec_id,
         },
     )

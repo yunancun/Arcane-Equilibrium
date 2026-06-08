@@ -533,6 +533,15 @@ def test_six_step_flow_registers_and_stamps(_patch_db):
     assert "replay_experiment_id IS NULL" in stamp_sql  # 防重蓋 guard
     assert stamp_params["experiment_id"] == spy.experiment_id
     assert stamp_params["tier"] == "calibrated_replay"
+    # ★ HIGH-1：同一 stamp UPDATE 必把 report 寫進 payload.demo_residual_alpha_report
+    #   （否則下游 source contract 第一道死在 not_dict = defer-by-absence）。
+    assert "jsonb_set" in stamp_sql
+    assert "demo_residual_alpha_report" in stamp_sql
+    assert "report_jsonb" in stamp_params
+    # payload 寫入的 report == bridge 送進 registry 的同一份（hash byte-identity）。
+    written_report = json.loads(stamp_params["report_jsonb"])
+    assert written_report == spy.calls[0]["report"]
+    assert _canonical_sha256(written_report) == spy.calls[0]["registry_residual_hash"]
     assert conn.committed >= 1
 
 
@@ -688,41 +697,183 @@ def test_drar_hash_matches_registry_when_report_passes(monkeypatch: Any, _patch_
 # ─── Beta-trap end-to-end（gate vetoes pure-beta）────────────────────
 
 
+def _production_shape_source_row(
+    *,
+    payload: dict[str, Any],
+    experiment_id: str = "00000000-0000-4000-8000-000000000001",
+    manifest_hash: str = "deadbeef" * 8,
+) -> dict[str, Any]:
+    """重建 production fetch（mlde_demo_applier_evidence_filter.fetch_pending_sql_and_params）
+    SELECT 出來的 row shape：lineage 欄 + payload（**無** top-level demo_residual_alpha_report
+    欄；production SELECT 根本沒有該欄，report 只能從 payload 取）。
+
+    為什麼這是 HIGH-1 的真實證明：先前測試在 top-level 手放 report，遮蔽了「orchestrator
+    從沒寫 payload」這個真 bug。改用 production shape 後，report 必須來自 orchestrator
+    實際寫的 payload，gate 的判據才是 report 的 math（非手放的假象）。
+    drar / hidden_oos / registry snapshot 等下游欄全留 None（缺 → 下游各 gate fail-closed），
+    但本 e2e 只證**第一道** residual validator 的反應（not_dict vs 真 math reason）。
+    """
+    return {
+        "id": 42,
+        "engine_mode": "demo",
+        "strategy_name": "grid_trading",
+        "symbol": "BTCUSDT",
+        "expected_net_bps": 12.0,
+        "confidence": 0.8,
+        "sample_count": 100,
+        "evidence_source_tier": "calibrated_replay",
+        "replay_experiment_id": experiment_id,
+        "manifest_hash": manifest_hash,
+        # 下游 registry / durable / hidden_oos snapshot 欄（production LEFT JOIN，
+        # drar/registry 未 populate 時為 None）——本 e2e 不驗下游，留 None。
+        "replay_registry_manifest_hash": None,
+        "replay_registry_status": None,
+        "replay_registry_expires_at": None,
+        "replay_registry_manifest_jsonb": None,
+        "durable_residual_alpha_report_hash": None,
+        "durable_residual_alpha_report_jsonb": None,
+        "durable_hidden_oos_state": None,
+        "durable_hidden_oos_state_jsonb": None,
+        "payload": payload,
+    }
+
+
 def test_beta_trap_end_to_end_gate_vetoes(monkeypatch: Any, _patch_db):
-    """pure-beta（含 funding-carry）候選 → orchestrator 註冊 report，但重構 source_row
-    後 build_live_candidate_evidence_from_source 回 NOT promotion_ready（gate vetoes）。"""
+    """HIGH-1 的真實證明：pure-beta（單配置 defer）候選 → orchestrator 把 report 寫進
+    **payload**（非 top-level）→ production-shape source_row 餵 source contract → 第一道
+    residual validator 回真實 **math reason**（passes_not_true，因 defer report passes=False），
+    **非** not_dict（=defer-by-absence 換名）。並對照「若 payload 不帶 report」→ not_dict，
+    證 math 才是 deciding factor。"""
     from program_code.ml_training.candidate_evidence_source_contract import (
         build_live_candidate_evidence_from_source,
     )
 
-    captured: dict[str, Any] = {}
-    real_eval = bridge.evaluate_cell
+    conn = _Conn(candidate_rows=[_candidate_row()])
+    spy = _RegisterSpy()
+    summary = P.run_residual_stage0r_preflight(
+        "dsn", cfg=_cfg(), get_pg_conn_fn=lambda: None, actor=_actor(),
+        conn_factory=lambda dsn: conn, register_fn=spy,
+    )
+    o = summary.outcomes[0]
+    assert o.status == "registered"
+    # ★ 取 orchestrator **實際寫進 payload 的 report**（stamp UPDATE 的 report_jsonb 參數），
+    #   非手放。這是 production 路徑：orchestrator UPDATE payload → fetch 讀回 → source contract。
+    wc = conn.write_cursors[0]
+    stamp_sql, stamp_params = wc.stamp_updates[0]
+    # 綁定：stamp SQL 必真把 report 寫進 payload（否則 production 的 fetch 取不到 report，
+    # 本 e2e 讀 params 會給假象）。jsonb_set 缺失 → 此 e2e 也紅（與 six-step 同向 bite）。
+    assert "jsonb_set" in stamp_sql and "demo_residual_alpha_report" in stamp_sql
+    written_report = json.loads(stamp_params["report_jsonb"])
+    # 該 report 是真實單配置 defer（passes=False；PBO 無 peer → defer_data）。
+    assert written_report.get("passes") is False
+    assert written_report.get("verdict") in {"defer_data", "block", "fail"}
 
-    def _spy_eval(cell_key, rts, btc_klines, **kwargs):
-        result = real_eval(cell_key, rts, btc_klines, **kwargs)
-        captured["report"] = result.report
-        return result
+    # (A) production shape：report 在 payload（orchestrator 寫的那份）。
+    row_with_payload = _production_shape_source_row(
+        payload={RESIDUAL_ALPHA_REPORT_FIELD: written_report},
+    )
+    build = build_live_candidate_evidence_from_source(row_with_payload)
+    assert build.validation.promotion_ready is False
+    # ★ 關鍵斷言：reason 是 report math（passes_not_true），**非** not_dict（absence）。
+    #   驗 math 是 deciding factor，beta-masquerade 被真實 verdict 否決（非缺席默拒）。
+    assert build.validation.reason == "residual_alpha:passes_not_true"
+    assert build.validation.reason != "residual_alpha:not_dict"
 
-    monkeypatch.setattr(bridge, "evaluate_cell", _spy_eval)
+    # (B) 對照組：payload **不帶** report（=HIGH-1 修復前 orchestrator 的真實狀態）→
+    #     source contract 死在 not_dict（defer-by-absence）。證 (A) 的差異全來自 payload
+    #     是否帶 report，亦即修復確實把判據從「缺席」改成「math verdict」。
+    row_no_report = _production_shape_source_row(payload={})
+    build_absent = build_live_candidate_evidence_from_source(row_no_report)
+    assert build_absent.validation.promotion_ready is False
+    assert build_absent.validation.reason == "residual_alpha:not_dict"
+
+
+def test_pass_report_in_payload_passes_first_gate(monkeypatch: Any, _patch_db):
+    """PASS 候選：orchestrator 把 PASS report 寫進 payload → production-shape source_row
+    過 source contract 的**第一道** residual validator（不再卡 residual_alpha:*）→ 推進到
+    下游 lineage gate。證修復後 PASS 候選的 math 確實能成為 deciding factor（durable/
+    hidden_oos gate 可達），而非一律死在第一道。"""
+    from program_code.ml_training.candidate_evidence_source_contract import (
+        build_live_candidate_evidence_from_source,
+    )
+    from program_code.ml_training.residual_alpha_cycle import CellResidualResult
+
+    # 合成一份「過第一道 validator」的 PASS report（math 全達標 + permutation）。
+    pass_report = {
+        "passes": True, "verdict": "pass", "reasons": [],
+        "raw_mean_bps": 2.0, "residual_mean_bps": 1.4,
+        "r_beta_retention": 0.7, "beta_edge_share": 0.3,
+        "psr_raw": 0.97, "psr_residual": 0.98,
+        "dsr_raw": 0.96, "dsr_residual": 0.97,
+        "pbo_raw": 0.20, "pbo_residual": 0.10,
+        "factor_panel_hash": "sha256:factor-panel",
+        "fit_window": {"train_end": 79, "eval_start": 80},
+        "coverage": {"train": 0.90, "eval": 0.85},
+        "perm_p_value": 0.01, "perm_iterations": 200,
+    }
+
+    def _fake_eval(cell_key, rts, btc_klines, **kwargs):
+        return CellResidualResult(
+            cell_key=cell_key, status="evaluated", promotion_ready=True,
+            reason="ok", n_trials=10, n_trials_derivation="x",
+            report=dict(pass_report),
+        )
+
+    monkeypatch.setattr(bridge, "evaluate_cell", _fake_eval)
+    conn = _Conn(candidate_rows=[_candidate_row()], has_drar=True)
+    spy = _RegisterSpy()
+    summary = P.run_residual_stage0r_preflight(
+        "dsn", cfg=_cfg(), get_pg_conn_fn=lambda: None, actor=_actor(),
+        conn_factory=lambda dsn: conn, register_fn=spy,
+    )
+    o = summary.outcomes[0]
+    assert o.status == "registered"
+    assert o.drar_written is True  # PASS report → drar 寫入
+    # 取 orchestrator 寫進 payload 的 PASS report。
+    wc = conn.write_cursors[0]
+    stamp_sql, stamp_params = wc.stamp_updates[0]
+    assert "jsonb_set" in stamp_sql and "demo_residual_alpha_report" in stamp_sql
+    written_report = json.loads(stamp_params["report_jsonb"])
+    assert written_report.get("verdict") == "pass"
+
+    row = _production_shape_source_row(
+        payload={RESIDUAL_ALPHA_REPORT_FIELD: written_report},
+    )
+    build = build_live_candidate_evidence_from_source(row)
+    # 仍 NOT promotion_ready（下游 registry/hidden_oos snapshot 在本 e2e 未 populate），
+    # 但**關鍵**：reason 已**不是** residual_alpha:*（第一道過了），推進到下游 lineage gate。
+    assert build.validation.promotion_ready is False
+    assert not build.validation.reason.startswith("residual_alpha:"), (
+        f"PASS report should clear first residual gate, got {build.validation.reason!r}"
+    )
+    # 下游卡點是 registry snapshot（manifest_hash 對得上但 registry_manifest_hash None）。
+    assert build.validation.reason.startswith(
+        ("replay_registry", "source_replay", "evidence_source_tier")
+    ), build.validation.reason
+
+
+def test_low3_deterministic_idempotency_key_set_on_body(_patch_db):
+    """LOW-3：register body 帶 deterministic idempotency_key（從 family_id + split_hash
+    衍生），縮小 crash-retry 重複 replay.experiments 窗。同候選同窗 → 同 key（穩定）。"""
     conn = _Conn(candidate_rows=[_candidate_row()])
     spy = _RegisterSpy()
     P.run_residual_stage0r_preflight(
         "dsn", cfg=_cfg(), get_pg_conn_fn=lambda: None, actor=_actor(),
         conn_factory=lambda dsn: conn, register_fn=spy,
     )
-    report = captured["report"]
-    # 重構 source_row（帶 registry lineage），餵 source contract gate。
-    source_row = {
-        "demo_residual_alpha_report": report,
-        "evidence_source_tier": "calibrated_replay",
-        "replay_experiment_id": spy.experiment_id,
-        "manifest_hash": "deadbeef" * 8,
-    }
-    build = build_live_candidate_evidence_from_source(source_row)
-    # gate vetoes：單配置 defer 報告 verdict!=pass → source contract 在第一道 residual
-    # validator 即拒（promotion_ready False）。證 active gate 否決 beta-masquerade。
-    assert build.validation.promotion_ready is False
-    assert "residual_alpha" in build.validation.reason
+    body = spy.calls[0]["body"]
+    key = getattr(body, "idempotency_key", None)
+    assert key, "register body must carry a deterministic idempotency_key (LOW-3)"
+    assert key.startswith("residual_stage0r:grid_trading::BTCUSDT:")
+    assert len(key) <= 128
+    # 穩定性：再跑一次同候選同 cfg → 同 key（split_hash 由窗決定，確定性）。
+    conn2 = _Conn(candidate_rows=[_candidate_row()])
+    spy2 = _RegisterSpy()
+    P.run_residual_stage0r_preflight(
+        "dsn", cfg=_cfg(), get_pg_conn_fn=lambda: None, actor=_actor(),
+        conn_factory=lambda dsn: conn2, register_fn=spy2,
+    )
+    assert getattr(spy2.calls[0]["body"], "idempotency_key", None) == key
 
 
 # ─── net_side correctness（long 候選 → +1）───────────────────────────
