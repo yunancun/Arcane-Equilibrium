@@ -59,6 +59,7 @@ try:  # 套件式 import（app runtime）
         DEFAULT_BUCKET_SEC,
         load_candidate_net_side,
         load_klines_by_symbols,
+        load_liquid_basket_symbols,
         load_symbol_lifecycles,
         load_funding_rates,
         pit_active_symbols,
@@ -87,6 +88,7 @@ except ModuleNotFoundError:  # pragma: no cover - 直跑 fallback
         DEFAULT_BUCKET_SEC,
         load_candidate_net_side,
         load_klines_by_symbols,
+        load_liquid_basket_symbols,
         load_symbol_lifecycles,
         load_funding_rates,
         pit_active_symbols,
@@ -356,15 +358,34 @@ def _load_multi_factor_inputs(
     }
     if "market" in required:
         lifecycles = load_symbol_lifecycles(conn)
-        # 只載 basket 內 PIT-active 過的 symbol（含已下市，排 survivorship）：用整窗
-        # [since, oos_start] 的 active universe，再夾到 max_basket_symbols。
+        # basket 選取（Gap A bug 修）：先取整窗 [since, oos_start] 的 PIT-active universe
+        # （含已下市但當時在交易者，排 survivorship），再交給 load_liquid_basket_symbols
+        # 按窗內 4h-bar 計數（流動性代理）排序取前 max_basket_symbols。
+        #
+        # 為什麼不再用 sorted(set(active))[:N]（舊 bug）：字母序前 N 在真實資料上命中
+        # 0GUSDT / 1000000BABYDOGEUSDT 等冷門 symbol，窗內 market.klines 4h bar 數=0 →
+        # bucketed_multi_factor 的 market basket 每桶成員 < min_basket_symbols → factor
+        # panel 空 → evaluate_cell 回 no_aligned_buckets → btc/market(/funding) 多因子閘
+        # 在真實資料上永不計算。改按資料可得性選取即可保證 basket 都有 bar。
+        #
+        # PIT 性質保留：load_liquid_basket_symbols 用 symbol = ANY(active) 把選取域夾在
+        # PIT-active 集內（lifecycle 權威），故「當時在交易、今已下市」者仍可入選；
+        # 「今日才上市」者因不在 active 集而被排除。s/e epoch 缺失（理論上不該，窗已驗）
+        # → 退回全 lifecycle keys 當候選域，仍交給 liquidity 查詢過濾掉無資料者。
         s_epoch = to_epoch_seconds(start_dt)
         e_epoch = to_epoch_seconds(end_dt)
         if s_epoch is not None and e_epoch is not None:
             active = pit_active_symbols(lifecycles, s_epoch, e_epoch)
         else:
             active = sorted(lifecycles.keys())
-        basket = sorted(set(active))[: int(cfg.max_basket_symbols)]
+        basket = load_liquid_basket_symbols(
+            conn,
+            active,
+            start_ts=start_dt,
+            end_ts=end_dt if end_dt is not None else start_dt,
+            timeframe=cfg.klines_timeframe,
+            limit=int(cfg.max_basket_symbols),
+        )
         klines = load_klines_by_symbols(
             conn,
             basket,

@@ -657,6 +657,74 @@ WHERE symbol = ANY(%(symbols)s) AND timeframe = %(tf)s
 ORDER BY symbol, ts ASC
 """
 
+# market.klines 流動性代理查詢（Gap A basket selection bug 修）：在窗內按 4h-bar 計數
+# 排序，取資料最豐（=該窗實際在交易）的 symbol。WHERE symbol = ANY(%(symbols)s) 把候選
+# 域限制在 caller 已過 PIT-active 的 symbol 集（保 survivorship correctness），再按
+# count(*) DESC 取前 N。GROUP BY 在 PG 端做，一次 round-trip。
+_LIQUID_BASKET_QUERY = """
+SELECT symbol, count(*) AS bar_count
+FROM market.klines
+WHERE timeframe = %(tf)s
+  AND ts >= %(start)s AND ts <= %(end)s
+  AND symbol = ANY(%(symbols)s)
+GROUP BY symbol
+ORDER BY count(*) DESC, symbol ASC
+LIMIT %(limit)s
+"""
+
+
+def load_liquid_basket_symbols(
+    conn: Any,
+    candidate_symbols: Sequence[str],
+    *,
+    start_ts: datetime,
+    end_ts: datetime,
+    timeframe: str = "4h",
+    limit: int = 60,
+) -> list[str]:
+    """從候選 symbol 集挑出窗內**實際有 klines** 的 symbol，按流動性代理（4h-bar 計數）
+    排序取前 ``limit``。只讀（單一 count 查詢）。
+
+    為什麼需要這個（Gap A market basket 選取 bug）：原 ``_load_multi_factor_inputs`` 用
+    ``sorted(set(active))[:max_basket_symbols]`` 取 PIT-active universe 的**字母序**前 N。
+    真實資料上 PIT-active ~616 symbol，字母序前 60 命中的是 ``0GUSDT`` /
+    ``1000000BABYDOGEUSDT`` 等冷門 symbol，在 [since, oos_start] 窗內 **market.klines 4h
+    bar 數為 0** → ``bucketed_multi_factor`` 的 market basket 每桶成員數 < min_basket_symbols
+    → factor panel 空 → ``evaluate_cell`` 回 ``no_aligned_buckets`` → 整個 btc/market(/
+    funding) 多因子閘**在真實資料上永不計算**（合成測試直接注 klines，故漏掉此 DB 選取
+    路徑）。改成「按窗內 bar 計數排序」即可保證選到的 symbol 都有資料、且偏向高流動性。
+
+    Survivorship correctness（MIT P1 不變式必須保留）：``candidate_symbols`` 由 caller
+    先過 ``pit_active_symbols(lifecycles, s_epoch, e_epoch)``（lifecycle 權威，含已下市但
+    當時在交易者）；本查詢用 ``symbol = ANY(%(symbols)s)`` 把選取域**夾在該 PIT-active 集
+    之內**，再按窗內資料可得性排序。故「當時在交易、今已下市」的 symbol 仍可入選（只要窗內
+    有 bar）；「今日才上市」的 symbol 因不在 PIT-active 集而被排除——既選有資料者、又不破
+    PIT 性質。空 ``candidate_symbols`` → 回 ``[]``（caller 自然得空 basket）。
+    """
+    syms = [str(s).strip() for s in candidate_symbols if str(s).strip()]
+    if not syms:
+        return []
+    from psycopg2.extras import RealDictCursor  # lazy：Mac pure-core 免依賴
+
+    out: list[str] = []
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute(
+            _LIQUID_BASKET_QUERY,
+            {
+                "tf": timeframe,
+                "start": start_ts,
+                "end": end_ts,
+                "symbols": syms,
+                "limit": int(limit),
+            },
+        )
+        for row in cur.fetchall():
+            symbol = str(row.get("symbol") or "").strip()
+            if symbol:
+                out.append(symbol)
+    return out
+
+
 # market.symbol_universe_snapshots：lifecycle 權威（Linux 2026-06-08 驗 948 symbol，
 # listed_at/delisted_at 已 populate）。同 symbol 多筆 snapshot ts → 取最早 listed_at
 # 與**最新一筆**的 delisted_at（is_delisted_at_asof 反映當前下市狀態，用 DISTINCT ON
@@ -952,6 +1020,7 @@ __all__ = [
     "load_round_trips",
     "load_btc_klines",
     "load_klines_by_symbols",
+    "load_liquid_basket_symbols",
     "load_symbol_lifecycles",
     "load_funding_rates",
     "derive_net_side_from_fills",

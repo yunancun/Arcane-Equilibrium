@@ -293,6 +293,15 @@ def _patch_db(monkeypatch: Any) -> dict:
     def _fake_load_symbol_lifecycles(conn):
         return _lifecycles()
 
+    def _fake_load_liquid_basket_symbols(
+        conn, candidate_symbols, *, start_ts, end_ts, timeframe, limit
+    ):
+        # 模擬流動性選取：從 PIT-active candidate 中挑「窗內有 klines」者（=合成
+        # market basket 的 SYM*USDT + BTCUSDT），按 limit 截斷。回有資料的 symbol。
+        with_data = set(_market_klines_by_symbol().keys()) | {"BTCUSDT"}
+        picked = [s for s in candidate_symbols if s in with_data]
+        return picked[: int(limit)]
+
     def _fake_load_klines_by_symbols(conn, symbols, *, start_ts, end_ts, timeframe):
         all_klines = dict(_market_klines_by_symbol())
         all_klines["BTCUSDT"] = _btc_klines_4h()
@@ -306,6 +315,7 @@ def _patch_db(monkeypatch: Any) -> dict:
 
     monkeypatch.setattr(P, "load_candidate_net_side", _fake_load_candidate_net_side)
     monkeypatch.setattr(P, "load_symbol_lifecycles", _fake_load_symbol_lifecycles)
+    monkeypatch.setattr(P, "load_liquid_basket_symbols", _fake_load_liquid_basket_symbols)
     monkeypatch.setattr(P, "load_klines_by_symbols", _fake_load_klines_by_symbols)
     monkeypatch.setattr(P, "load_funding_rates", _fake_load_funding_rates)
     # bridge 內部用的 loaders（bridge 自己 load round_trips + btc klines）。
@@ -1067,3 +1077,87 @@ def test_oos_fraction_invalid_fail_closed(_patch_db):
     # 此處 data_end < oos_start，但兩者皆非 None → 進 candidate loop → _oos_fraction None。
     assert summary.registered == 0
     assert len(spy.calls) == 0
+
+
+# ─── Gap A basket selection bug regression（orchestrator 層）─────────────
+
+
+class _OrchCountCursor:
+    """模擬 market.klines GROUP BY count(*) 查詢（_load_multi_factor_inputs 用）。
+    只回窗內有 bar 的 symbol（真實 PG GROUP BY 不回 0-bar symbol）。"""
+
+    def __init__(self, bar_counts):
+        self._bar_counts = bar_counts
+
+    def execute(self, query, params=None):
+        requested = list(params["symbols"])
+        limit = int(params["limit"])
+        present = [(s, self._bar_counts[s]) for s in requested if s in self._bar_counts]
+        present.sort(key=lambda kv: (-kv[1], kv[0]))
+        self._last = [{"symbol": s, "bar_count": c} for s, c in present[:limit]]
+
+    def fetchall(self):
+        return self._last
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _OrchCountConn:
+    def __init__(self, bar_counts):
+        self._bar_counts = bar_counts
+
+    def cursor(self, **kw):
+        return _OrchCountCursor(self._bar_counts)
+
+
+def test_load_multi_factor_inputs_selects_data_bearing_not_alphabetical(monkeypatch: Any):
+    """★ Gap A bug e2e（orchestrator 真正選取路徑）：當字母序最前的 PIT-active symbol
+    無 klines、流動 symbol 有資料時，``_load_multi_factor_inputs`` 必須把**有資料**者
+    放進 klines_by_symbol，**絕不**是字母序前綴（舊 ``sorted(active)[:N]`` 會選空 symbol）。
+
+    這條測試**不** patch load_liquid_basket_symbols（與 _patch_db 不同）——刻意走**真**
+    選取 seam，否則就是當初漏掉 bug 的同一個盲點（合成注入繞過 DB 選取）。lifecycles 讓
+    字母序前綴 symbol 全 PIT-active（舊碼必選它們），但 count 查詢只回流動者 → 證明選取
+    已改按資料可得性。
+    """
+    # 字母序最前 = 冷門無資料 symbol（PIT-active 但 0 bar）；流動者有資料。
+    alpha_first_empty = ["0GUSDT", "1000000BABYDOGEUSDT", "1000000CHEEMSUSDT"]
+    liquid_bar_counts = {"BTCUSDT": 300, "ETHUSDT": 280, "SOLUSDT": 200}
+    # lifecycles：全部（含空 symbol）在 [since, oos_start] 全程 PIT-active（listed 早、未下市）。
+    all_syms = alpha_first_empty + list(liquid_bar_counts.keys())
+    lifecycles = {s: (0.0, None) for s in all_syms}
+
+    def _fake_lifecycles(conn):
+        return lifecycles
+
+    def _fake_klines_by_symbols(conn, symbols, *, start_ts, end_ts, timeframe):
+        # 只有流動 symbol 真有 bar；空 symbol 即便被查也回空 list。
+        bars = [{"ts": float(i) * _BUCKET, "open": 100.0, "close": 100.1} for i in range(5)]
+        return {s: (bars if s in liquid_bar_counts else []) for s in symbols}
+
+    def _fake_funding(conn, symbols, *, start_ts, end_ts):
+        return {s: [] for s in symbols}
+
+    monkeypatch.setattr(P, "load_symbol_lifecycles", _fake_lifecycles)
+    monkeypatch.setattr(P, "load_klines_by_symbols", _fake_klines_by_symbols)
+    monkeypatch.setattr(P, "load_funding_rates", _fake_funding)
+    # 注意：**不** patch load_liquid_basket_symbols → 走真選取邏輯。
+
+    conn = _OrchCountConn(liquid_bar_counts)
+    inputs = P._load_multi_factor_inputs(conn, symbol="BTCUSDT", cfg=_cfg(max_basket_symbols=60))
+
+    kbs = inputs["klines_by_symbol"]
+    assert kbs is not None
+    # 核心：選到的 basket = 有資料的流動 symbol，字母序前綴空 symbol 一個都不在。
+    assert set(kbs.keys()) == set(liquid_bar_counts.keys())
+    for empty_sym in alpha_first_empty:
+        assert empty_sym not in kbs
+    # 每個入選 symbol 都真有 bar（bars>0）——這正是修復前 market_buckets=0 的根因被消除。
+    for sym in liquid_bar_counts:
+        assert len(kbs[sym]) > 0
+    assert inputs["lifecycles"] == lifecycles
+    assert inputs["position_symbols"] == ["BTCUSDT"]
