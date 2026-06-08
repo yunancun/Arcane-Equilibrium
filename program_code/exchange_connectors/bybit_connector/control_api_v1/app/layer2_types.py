@@ -359,6 +359,12 @@ class Layer2Session:
     insights: list[Insight] = field(default_factory=list)
     final_summary: str = ""
 
+    # D3 provenance / D3 取證溯源
+    # L2 Advisory Mesh：本 session 首個模型呼叫落 agent.l2_calls 時鑄造的 root
+    # lineage handle（"l2r:<uuid12>"）。None=該 session 尚未發生可記帳的模型呼叫
+    # （budget 攔截 / triage reject 等）。persist_lessons 以此映射 lesson 的 context_id。
+    l2_reply_id: str | None = None
+
     # PnL attribution / PnL 归因
     shadow_decision_id: str | None = None
     paper_order_id: str | None = None

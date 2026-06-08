@@ -40,6 +40,8 @@ import logging
 import re as _re
 import threading
 import time
+import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from .layer2_types import (
@@ -74,8 +76,20 @@ from . import provider_client as _pc
 # 旗標預設關閉時下方 hook 全部短路，行為與原碼 byte-identical。
 from . import layer2_critic as _critic
 from .layer2_tools_g3_07 import is_tool_enabled as _is_flag_enabled
+# D3 取證帳本：L2 Advisory Mesh Phase 1。把本 session 首個模型呼叫的完整
+# （已消毒）prompt/response 落 agent.l2_calls（唯一 sanctioned 寫入口）。
+from .l2_call_ledger_writer import get_l2_call_ledger_writer as _get_l2_ledger_writer
 
 logger = logging.getLogger(__name__)
+
+# ── D3 PromptContract / output-schema 版本（PA 設計 §E.1）──
+# 為什麼是常數：ledger 的 contract_ver / schema_ver 為 NOT NULL，記錄本次呼叫所
+# 依的 prompt 契約版本與輸出 schema 版本，供日後 contract drift 時逐列追溯。
+# 任何 SYSTEM_PROMPT / 輸出契約變更應 bump 對應版本。
+L2_PROMPT_CONTRACT_VER = "l2_contract.v1"
+L2_OUTPUT_SCHEMA_VER = "l2_schema.v1"
+# P1 capability registry 尚未落地（P2 才建）；manual-trigger 呼叫歸到此 capability id。
+L2_DEFAULT_CAPABILITY_ID = "l2.manual_reasoning"
 
 # ── Precompiled word-boundary regexes for L1 triage text parsing ──
 # 詞邊界正則：防止 "know" / "unknown" 等詞誤觸發否定匹配
@@ -303,6 +317,62 @@ class Layer2Engine:
         except asyncio.TimeoutError:
             logger.error("L2 provider %s 呼叫超時 %ss (tier=%s)", provider_name, timeout, tier)
             return None
+
+    # ── D3 取證帳本接線 / D3 forensic ledger wiring ──
+
+    def _record_l2_call_to_ledger(
+        self,
+        *,
+        session: Layer2Session,
+        system_prompt: str,
+        messages: list[dict[str, Any]],
+        response: _pc.L2Response,
+        eff_model: str,
+        latency_ms: int | None,
+    ) -> None:
+        """把本 session 首個模型呼叫落 agent.l2_calls（D3 唯一 sanctioned 寫入口）。
+
+        為什麼在引擎這裡接線：layer2_engine 是真正攜帶 system_prompt + input
+        context + raw response 的呼叫路徑（D3 中心缺口正是此處從不持久化）。在此
+        鑄造 session 的 root l2_reply_id 並寫帳，讓今天 manual-trigger 的 L2 呼叫
+        即被捕捉入庫（證明 writer reachable 非死碼）。消毒在 writer INSERT 之前跑。
+
+        fail-soft：任何失敗（DB 不可用 / writer 異常）只記 warning，NEVER raise——
+        D3 寫失敗不得阻斷 L2 session（lineage gap 由 health_monitoring 後續觀測）。
+        """
+        try:
+            reply_id = f"l2r:{uuid.uuid4().hex[:12]}"
+            # input_context：本次送模型的結構化輸入（messages）+ 提供的 tool defs。
+            # 整塊在 writer 內過 redact_jsonb 消毒所有 string leaf 後才落 jsonb 欄。
+            input_context: dict[str, Any] = {
+                "messages": messages,
+                "offered_tools": [t.get("name") for t in TOOL_SCHEMAS if isinstance(t, dict)],
+            }
+            writer = _get_l2_ledger_writer()
+            res = writer.record_l2_call(
+                l2_reply_id=reply_id,
+                session_id=session.session_id,
+                capability_id=L2_DEFAULT_CAPABILITY_ID,
+                trigger=getattr(session, "trigger", "manual"),
+                created_at=datetime.now(timezone.utc),
+                model=eff_model,
+                contract_ver=L2_PROMPT_CONTRACT_VER,
+                schema_ver=L2_OUTPUT_SCHEMA_VER,
+                system_prompt=system_prompt,
+                input_context=input_context,
+                raw_response=response.text or "",
+                input_tokens=response.input_tokens,
+                output_tokens=response.output_tokens,
+                latency_ms=latency_ms,
+                guard_verdict=None,
+                consequential_at_creation=False,
+            )
+            # 只有確定落庫（含合法 skip 視為未鑄造）才把 reply_id 綁到 session，
+            # 供 persist_lessons 映射 context_id；DB 不可用時 session.l2_reply_id 維持 None。
+            if res.get("ok"):
+                session.l2_reply_id = reply_id
+        except Exception as exc:  # noqa: BLE001 — D3 寫失敗不得阻斷 session
+            logger.warning("D3 ledger record skipped (fail-soft): %s", exc)
 
     # ── L1 Triage / L1 快速分诊 ──
 
@@ -575,6 +645,22 @@ class Layer2Engine:
                 self._cost_tracker.record_claude_cost(
                     session, response.input_tokens, response.output_tokens, eff_tier,
                 )
+
+                # ── D3 取證帳本：捕捉本 session 首個模型呼叫的完整 prompt/response ──
+                # 為什麼只記首呼叫：D3 中心缺口是「完整 prompt/response 從不持久化」；
+                # 首輪攜帶 SYSTEM_PROMPT + 初始 input context + 首個 raw response，鑄造
+                # session 的 root l2_reply_id 並落 agent.l2_calls（消毒在 writer INSERT 前）。
+                # fail-soft：D3 寫失敗（DB 不可用等）絕不阻斷 session（writer 內已吞）。
+                if session.l2_reply_id is None:
+                    self._record_l2_call_to_ledger(
+                        session=session,
+                        system_prompt=SYSTEM_PROMPT,
+                        messages=messages,
+                        response=response,
+                        eff_model=eff_tier,
+                        latency_ms=None,
+                    )
+
                 # 記下這輪用了誰（debug / GUI 顯示）
                 if not hasattr(session, "provider_chain"):
                     setattr(session, "provider_chain", [])

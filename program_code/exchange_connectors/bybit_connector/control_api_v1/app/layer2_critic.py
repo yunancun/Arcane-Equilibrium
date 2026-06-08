@@ -47,6 +47,7 @@ from .layer2_types import (
     Layer2Session,
 )
 from . import db_pool
+from . import l2_secret_redactor as _redactor
 # 沿用 G3-07 的 truthy env-gate helper：與工具旗標完全一致的 fail-closed 語意
 # （只有 {"1","true","yes","on"} 視為開啟，未設 / 空字串一律關閉）。
 # 為什麼從 g3_07 而非 layer2_tools import：g3_07 只依賴 layer2_types + stdlib，
@@ -436,7 +437,11 @@ def _persist_lessons_sync(
         return
 
     session_trigger = getattr(session, "trigger", None)
-    context_id = getattr(session, "session_id", None)
+    # D3 provenance（L2 Advisory Mesh §C agent.lessons 映射）：L2-origin lesson 的
+    # context_id 優先綁到本 session 的 root l2_reply_id（"l2r:..."），讓 lesson 可逆
+    # 溯回產生它的 L2 呼叫（agent.l2_calls）。尚未鑄造（DB 不可用 / 未發生模型呼叫）
+    # 則退回 session_id（"l2s:..."）保持既有可追溯行為，不改非 L2-origin 行為。
+    context_id = getattr(session, "l2_reply_id", None) or getattr(session, "session_id", None)
     try:
         session_cost = float(session.total_cost())
     except Exception:  # noqa: BLE001
@@ -451,6 +456,11 @@ def _persist_lessons_sync(
         if not content:
             # 無內容的 insight 不落庫（content 為 NOT NULL）。
             continue
+        # D3 sanitize（D.1.1「applies everywhere」）：lesson content 是 LLM 蒸餾的
+        # 自由文本，可能 drift 進 secret（API key / DSN / auth 物料）。在落 append-only
+        # 的 agent.lessons 之前過 secret redactor（與 D3 ledger 寫入路徑同一消毒語意），
+        # 確保「沒有任何 L2 衍生文本以未消毒形進入難清除的 durable store」。
+        content = _redactor.redact(content).text
         rows.append((
             sym,
             category,
