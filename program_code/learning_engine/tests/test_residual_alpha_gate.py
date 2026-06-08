@@ -755,3 +755,121 @@ def test_permutation_determinism_borderline_p_binds_seed():
     assert p_b1 == pytest.approx(0.6812, abs=1e-9)
     # 「接近但不相等」：差異小（<0.05）但確實非零。
     assert 0.0 < abs(p_a1 - p_b1) < 0.05
+
+
+# ---- HIGH-1：負零正規化（PG jsonb 丟符號位 → hash cross-check 破裂）----
+
+from program_code.learning_engine.residual_alpha_gate import (  # noqa: E402
+    ResidualEdgeReport,
+)
+
+
+def _canon_sha256(d: dict) -> str:
+    """複製 bridge/drar/registry/source-contract 共用的 canonical sha256。
+
+    sort_keys+separators+ensure_ascii 與 residual_hidden_oos_bridge._canonical_sha256
+    / candidate_evidence_source_contract._canonical_sha256 完全一致。
+    """
+    import hashlib
+    import json
+
+    return hashlib.sha256(
+        json.dumps(d, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _has_negative_zero(value) -> bool:
+    """遞迴偵測結構中是否存在 -0.0（math.copysign 對 -0.0 回 -1.0）。"""
+    if isinstance(value, float):
+        return value == 0.0 and math.copysign(1.0, value) == -1.0
+    if isinstance(value, dict):
+        return any(_has_negative_zero(v) for v in value.values())
+    if isinstance(value, (list, tuple)):
+        return any(_has_negative_zero(v) for v in value)
+    return False
+
+
+def _residual_report(*, residual_mean_bps: float, beta_btc: float) -> ResidualEdgeReport:
+    """直接構造 report（dataclass）以精確注入 +0.0 / -0.0；不靠 np.mean 巧合產零。
+
+    其餘欄位取中性占位（不影響 -0.0 正規化驗證）。
+    """
+    return ResidualEdgeReport(
+        raw_mean_bps=12.0,
+        residual_mean_bps=residual_mean_bps,
+        r_beta_retention=0.6,
+        beta_edge_share=0.4,
+        beta_loadings={"btc": beta_btc, "market": 0.3, "_intercept_bps": 1.0},
+        r_squared=0.5,
+        psr_raw=0.97,
+        psr_residual=0.96,
+        dsr_raw=0.97,
+        dsr_residual=0.96,
+        pbo_raw=0.1,
+        pbo_residual=0.1,
+        coverage={"train": 80, "eval": 40},
+        verdict="pass",
+        reasons=(),
+        factor_panel_hash="0" * 64,
+        fit_window={"train_start": 0, "train_end": 79, "eval_start": 80, "eval_end": 119},
+        passes=True,
+    )
+
+
+def test_to_dict_normalizes_negative_zero_to_positive_zero():
+    """★ MIT HIGH-1：弱/共線 factor 的 np.mean / 回歸係數可能產 -0.0
+    （residual_mean_bps、beta_loadings[factor]）；PG jsonb 會丟掉浮點符號位
+    （-0.0 讀回變 0.0），而 registry hash 在進 jsonb 前算、source-contract 在讀回後
+    重算 → -0.0→0.0 漂移 → residual_alpha_report_hash_mismatch → 候選被誤判 INVALID。
+
+    驗 to_dict() chokepoint 抹平 -0.0：
+    1. 注入 -0.0 到 residual_mean_bps 與 beta_loadings["btc"] 的 report，to_dict()
+       後結構中**無任何 -0.0**（含巢狀 beta_loadings）。
+    2. 該 report 的 canonical hash == 用 +0.0 構造的「相同」report 的 hash
+       —— 證明 PG 的 -0.0→0.0 已無法讓 cross-check 漂移。
+
+    PG jsonb 真 round-trip（-0.0→0.0、其餘不正規化）由 MIT 在 Linux 真 PG 驗證；本測試
+    在 in-memory 層證明 to_dict() 已先消除 -0.0，使 jsonb 丟符號位成為 no-op。
+    """
+    neg = _residual_report(residual_mean_bps=-0.0, beta_btc=-0.0)
+    pos = _residual_report(residual_mean_bps=0.0, beta_btc=0.0)
+
+    # 先確認 fixture 本身真的帶 -0.0（否則測試無 bite）。
+    assert math.copysign(1.0, neg.residual_mean_bps) == -1.0
+    assert math.copysign(1.0, neg.beta_loadings["btc"]) == -1.0
+
+    neg_dict = neg.to_dict()
+
+    # (1) to_dict() 後結構中無任何 -0.0（含 beta_loadings 巢狀 dict）。
+    assert not _has_negative_zero(neg_dict)
+    assert math.copysign(1.0, neg_dict["residual_mean_bps"]) == 1.0
+    assert math.copysign(1.0, neg_dict["beta_loadings"]["btc"]) == 1.0
+
+    # (2) -0.0 report 與 +0.0 report 的 canonical hash 必相等
+    #     → PG jsonb 的 -0.0→0.0 不再能讓 registry/source-contract hash 漂移。
+    assert _canon_sha256(neg.to_dict()) == _canon_sha256(pos.to_dict())
+
+
+def test_negative_zero_drift_without_normalization_would_break_hash():
+    """mutation 守門：證明若不正規化（直接序列化 -0.0），canonical hash 會與 +0.0
+    版本不同 —— 即此 cross-check 真的對 -0.0 敏感（_normalize_zeros 的 bite 來源）。
+
+    這裡用 asdict 繞過 to_dict()（不經 _normalize_zeros），直接序列化原始 -0.0 結構，
+    對照 to_dict()（已正規化）的 hash：前者與 +0.0 版本不同、後者相同。
+    """
+    from dataclasses import asdict
+
+    neg = _residual_report(residual_mean_bps=-0.0, beta_btc=-0.0)
+    pos = _residual_report(residual_mean_bps=0.0, beta_btc=0.0)
+
+    # 未經正規化（raw asdict，剔同 to_dict() 的內部旗標以對齊 key 集）：-0.0 仍在 →
+    # 與 +0.0 版本序列化不同（json.dumps 對 -0.0 輸出 "-0.0"，+0.0 輸出 "0.0"）。
+    def _raw(report: ResidualEdgeReport) -> dict:
+        d = asdict(report)
+        d.pop("permutation_applied", None)
+        d.pop("perm_p_value", None)
+        d.pop("perm_iterations", None)
+        return d
+
+    assert _canon_sha256(_raw(neg)) != _canon_sha256(_raw(pos))  # 未正規化 → 漂移（bug 還原）
+    assert _canon_sha256(neg.to_dict()) == _canon_sha256(pos.to_dict())  # 正規化後 → 收口

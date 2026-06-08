@@ -792,8 +792,9 @@ def load_funding_rates(
 def derive_net_side_from_fills(
     fills: Sequence[Mapping[str, Any]],
     strategy_name: str,
+    symbol: str | None = None,
 ) -> tuple[int, dict[str, float]]:
-    """從 fills 推導候選策略的**淨方向**（+1=做多 / -1=做空），純函數。
+    """從 fills 推導候選的**淨方向**（+1=做多 / -1=做空），純函數。
 
     為什麼這是 MIT 硬條件（funding sign）：``load_round_trips`` 的 FIFO 配對只回
     ``net_bps``，**丟失** entry side（往返淨報酬不帶方向）。但 funding-carry factor
@@ -802,11 +803,19 @@ def derive_net_side_from_fills(
     殘差化不但沒扣除 carry beta 反而**放大**它 → 正是本功能要消滅的 false-promote 向量。
     故 orchestrator 必須先從真實 fills 推導 net_side，**絕不**把 +1 預設送進真實 run。
 
-    推導：候選**入場成交**（``strategy_name`` 等於候選策略、且非平倉——平倉用 prefixed
-    名 ``risk_close:`` / ``strategy_close:`` / ``stop_*`` 並帶 realized_pnl）的
-    **淨 signed-qty** = Σ side_sign × qty（Buy=+1、Sell=-1）。其符號即淨方向曝險。
-    回 ``(net_side, diag)``：net_side ∈ {+1, -1}（淨 0 / 無入場成交時回 +1 並於 diag
-    標 ``ambiguous=1.0`` 供 caller fail-loud，**不**靜默吞）。
+    為什麼必須**逐 (strategy, symbol)**（MIT HIGH-2）：候選身分是 ``strategy::symbol``，
+    funding factor 也是該 symbol 的 funding_rate。一個策略可能整體淨做空、但在某個
+    symbol 上淨做多（MIT 實測 grid_trading 全域淨 short、但 RAVEUSDT/PENGUUSDT 淨
+    long）。若只按 ``strategy_name`` 跨全 symbol 聚合 → 給 ``grid_trading::RAVEUSDT``
+    候選一個 ``net_side=-1`` 而真實曝險是 +1 → funding sign 反號 → carry **被放大** →
+    正是本功能要消滅的 false-promote 向量。故 ``symbol`` 提供時**必須**同時篩 symbol。
+    ``symbol=None`` 保留全 symbol 聚合（既有 caller 行為不變）。
+
+    推導：候選**入場成交**（``strategy_name`` 等於候選策略、``symbol`` 相符（若指定）、
+    且非平倉——平倉用 prefixed 名 ``risk_close:`` / ``strategy_close:`` / ``stop_*`` 並帶
+    realized_pnl）的**淨 signed-qty** = Σ side_sign × qty（Buy=+1、Sell=-1）。其符號即
+    淨方向曝險。回 ``(net_side, diag)``：net_side ∈ {+1, -1}（淨 0 / 無相符入場成交時回
+    +1 並於 diag 標 ``ambiguous=1.0`` 供 caller fail-loud，**不**靜默吞）。
 
     diag: ``{"entry_fills": n, "net_signed_qty": float, "abs_signed_qty": float,
             "ambiguous": 0.0|1.0}``。
@@ -819,6 +828,10 @@ def derive_net_side_from_fills(
         if name != strategy_name:
             # 只看候選自己的入場成交；平倉成交用 prefixed 名（與候選名不同）→
             # 自然被此判據排除，無需重複 is_exit 前綴清單。
+            continue
+        if symbol is not None and str(fill.get("symbol") or "") != symbol:
+            # HIGH-2：候選是 strategy::symbol；net_side 必須只算該 symbol 的入場成交，
+            # 否則跨 symbol 聚合會給出與真實 per-symbol 曝險相反的方向 → funding 反號。
             continue
         # 雙保險：即使平倉成交誤帶候選名（理論上不該），realized_pnl != 0 視為平倉略過。
         realized = _finite(fill.get("realized_pnl"))
@@ -853,14 +866,18 @@ def load_candidate_net_side(
     conn: Any,
     strategy_name: str,
     *,
+    symbol: str | None = None,
     engine_mode: str = "demo",
     since: datetime,
 ) -> tuple[int, dict[str, float]]:
-    """讀 trading.fills 推導候選策略淨方向（+1/-1），只讀。
+    """讀 trading.fills 推導候選 (strategy, symbol) 淨方向（+1/-1），只讀。
 
     重用 realized_edge_stats 的 ``_FILLS_QUERY`` + ``_engine_mode_scope``（與
     ``load_round_trips`` 同一 fills 來源），交給純函數 ``derive_net_side_from_fills``
-    計算。回 ``(net_side, diag)``。Linux runtime 驗 fills.side 語意；Mac 測試用合成 fills。
+    計算。``_FILLS_QUERY`` 已回 ``f.symbol``，故 symbol 篩選在 Python 端做（不改 query
+    shape，不影響其他 caller）。``symbol`` 提供時**必須**逐 symbol（HIGH-2：跨 symbol
+    聚合可能與真實 per-symbol 曝險反號 → funding sign 反 → carry 放大）。回 ``(net_side,
+    diag)``。Linux runtime 驗 fills.side 語意；Mac 測試用合成 fills。
     """
     from psycopg2.extras import RealDictCursor  # lazy：Mac pure-core 免依賴
 
@@ -873,7 +890,7 @@ def load_candidate_net_side(
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(_res._FILLS_QUERY, {"since": since, "engine_modes": modes})
         fills = [dict(row) for row in cur.fetchall()]
-    return derive_net_side_from_fills(fills, strategy_name)
+    return derive_net_side_from_fills(fills, strategy_name, symbol)
 
 
 def build_strategy_residual_report(

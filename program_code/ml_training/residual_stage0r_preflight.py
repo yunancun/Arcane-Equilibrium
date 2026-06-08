@@ -412,8 +412,10 @@ def _process_candidate(
         return _skip("oos_window_not_configured")
 
     # ② 從真實 fills 推導 net_side（MIT 硬條件：絕不把 +1 預設送進真實 run）。
+    #    HIGH-2：必須逐 (strategy, symbol)——候選身分是 strategy::symbol、funding factor
+    #    也是該 symbol 的 funding_rate；跨 symbol 聚合可能與真實 per-symbol 曝險反號。
     net_side, net_diag = load_candidate_net_side(
-        conn, strategy, engine_mode=cfg.engine_mode, since=cfg.since
+        conn, strategy, symbol=symbol, engine_mode=cfg.engine_mode, since=cfg.since
     )
     if net_diag.get("ambiguous", 0.0) >= 1.0:
         # 淨方向不可判（無入場成交 / 淨 0）→ funding sign 無法確定 → fail-closed。
