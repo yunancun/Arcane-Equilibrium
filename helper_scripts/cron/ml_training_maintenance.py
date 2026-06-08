@@ -51,8 +51,15 @@ AUDIT_JOBS = (
     "dl3_foundation",
     "weekly_report_generator",
 )
-VALID_JOBS = CORE_JOBS + AUDIT_JOBS
-DEFAULT_JOBS = ",".join(VALID_JOBS)
+# OPTIONAL_JOBS：可被 --jobs 顯式選入但**不在 DEFAULT_JOBS**（部署即不跑）。
+# residual_preflight = Stage-0R β-residualization producer orchestrator（PART 4
+# Gap A/D）；額外受 OPENCLAW_RESIDUAL_STAGE0R_PREFLIGHT + OPENCLAW_RESIDUAL_ALPHA_PRODUCER
+# 雙 flag gate（皆預設 OFF）。三重 OFF：flag×2 + 不在 DEFAULT_JOBS → operator 須同時
+# 開兩 flag + 顯式加 job 名才會寫任何 row（行為中性硬約束）。
+OPTIONAL_JOBS = ("residual_preflight",)
+VALID_JOBS = CORE_JOBS + AUDIT_JOBS + OPTIONAL_JOBS
+# DEFAULT_JOBS 刻意只含 CORE+AUDIT（不含 OPTIONAL）→ 預設 cron 不跑 residual_preflight。
+DEFAULT_JOBS = ",".join(CORE_JOBS + AUDIT_JOBS)
 DEFAULT_STRATEGIES = "grid_trading,ma_crossover,bb_breakout,bb_reversion,funding_arb"
 # P2-05 決策（cold audit）：排程監督/分位訓練刻意維持 demo-only，暫不開 live_demo
 # 加寬訓練 lane。理由：驗證加寬 lane 所需的晉級證據目前為空（model_performance=0、
@@ -361,6 +368,124 @@ def _run_demo_applier(dsn: str | None, args: argparse.Namespace) -> JobResult:
             {},
             f"{type(exc).__name__}: {exc}",
         )
+
+
+def _run_residual_preflight(dsn: str | None, args: argparse.Namespace) -> JobResult:
+    """Stage-0R β-residualization producer orchestrator（PART 4 Gap A/D）。
+
+    三重 OFF（行為中性）：①OPENCLAW_RESIDUAL_STAGE0R_PREFLIGHT 預設 0 ②
+    OPENCLAW_RESIDUAL_ALPHA_PRODUCER 預設 0 ③ 本 job 不在 DEFAULT_JOBS（須 --jobs
+    顯式加 residual_preflight）。任一未滿足 → orchestrator 早退、零寫入。本 wrapper
+    在 flag/DSN 缺時回 skipped（不視為錯誤，cron 不 page）。DEMO evidence lane only：
+    只寫 replay.experiments / hidden_oos_state_registry / demo_residual_alpha_reports
+    + rec-stamp UPDATE；零 live/auth/order/risk/lease 變動。
+    """
+    start = time.monotonic()
+    try:
+        from ml_training.residual_stage0r_preflight import (  # type: ignore
+            ResidualPreflightConfig,
+            run_residual_stage0r_preflight,
+            stage0r_preflight_enabled,
+        )
+        from ml_training.residual_alpha_cycle import (  # type: ignore
+            residual_producer_enabled,
+        )
+    except Exception as exc:  # noqa: BLE001 — import 失敗不中斷整輪 cron
+        return JobResult(
+            "residual_preflight", "error", _elapsed_ms(start), {},
+            f"{type(exc).__name__}: {exc}",
+        )
+
+    # flag gate（在做任何事之前）：未開即 skipped、零寫入。
+    if not stage0r_preflight_enabled():
+        return JobResult(
+            "residual_preflight", "skipped", _elapsed_ms(start),
+            {"reason": "flag_off:OPENCLAW_RESIDUAL_STAGE0R_PREFLIGHT"},
+        )
+    if not residual_producer_enabled():
+        return JobResult(
+            "residual_preflight", "skipped", _elapsed_ms(start),
+            {"reason": "flag_off:OPENCLAW_RESIDUAL_ALPHA_PRODUCER"},
+        )
+    if not dsn:
+        return JobResult(
+            "residual_preflight", "skipped", _elapsed_ms(start), {}, "no_database_url",
+        )
+    # 必要窗（oos_start/data_end）須由 env 顯式提供（PIT：時間邊界是 operator 承諾，
+    # 不自行猜）；缺則 skipped。
+    oos_start = _parse_iso_env("OPENCLAW_RESIDUAL_PREFLIGHT_OOS_START")
+    data_end = _parse_iso_env("OPENCLAW_RESIDUAL_PREFLIGHT_DATA_END")
+    since = _parse_iso_env("OPENCLAW_RESIDUAL_PREFLIGHT_SINCE")
+    if oos_start is None or data_end is None or since is None:
+        return JobResult(
+            "residual_preflight", "skipped", _elapsed_ms(start),
+            {"reason": "oos_window_not_configured"},
+        )
+
+    try:
+        from exchange_connectors.bybit_connector.control_api_v1.app.auth import (  # type: ignore  # noqa: E501
+            AuthenticatedActor,
+        )
+
+        actor = AuthenticatedActor(
+            actor_id=os.environ.get("OPENCLAW_RESIDUAL_PREFLIGHT_ACTOR", "residual_stage0r_cron"),
+            actor_type="cron",
+            roles={"operator"},
+            scopes={"replay:write"},
+        )
+
+        def _get_pg_conn():
+            from contextlib import contextmanager
+
+            @contextmanager
+            def _cm():
+                conn = _pg_connect(dsn)
+                try:
+                    yield conn
+                finally:
+                    if conn is not None:
+                        try:
+                            conn.close()
+                        except Exception:  # noqa: BLE001
+                            pass
+
+            return _cm()
+
+        cfg = ResidualPreflightConfig(
+            enabled=True,
+            engine_mode=os.environ.get("OPENCLAW_RESIDUAL_PREFLIGHT_ENGINE", "demo"),
+            since=since,
+            oos_start=oos_start,
+            data_end=data_end,
+            n_param_variants=int(os.environ.get("OPENCLAW_RESIDUAL_PREFLIGHT_N_VARIANTS", "1")),
+            n_symbols_screened=int(os.environ.get("OPENCLAW_RESIDUAL_PREFLIGHT_N_SYMBOLS", "1")),
+            n_strategies_screened=int(os.environ.get("OPENCLAW_RESIDUAL_PREFLIGHT_N_STRATEGIES", "1")),
+            max_candidates=int(os.environ.get("OPENCLAW_RESIDUAL_PREFLIGHT_MAX_CANDIDATES", "16")),
+        )
+        summary = run_residual_stage0r_preflight(
+            dsn, cfg=cfg, get_pg_conn_fn=_get_pg_conn, actor=actor,
+        )
+        return JobResult(
+            "residual_preflight", "ok", _elapsed_ms(start),
+            {"summary": summary.as_dict()},
+        )
+    except Exception as exc:  # noqa: BLE001
+        return JobResult(
+            "residual_preflight", "error", _elapsed_ms(start), {},
+            f"{type(exc).__name__}: {exc}",
+        )
+
+
+def _parse_iso_env(name: str) -> datetime | None:
+    """讀 ISO-8601 env → aware UTC datetime；缺/非法回 None。naive 當 UTC。"""
+    raw = os.environ.get(name)
+    if not raw:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
 
 
 def _run_training_pipeline(
@@ -720,6 +845,8 @@ def _run_job(job: str, dsn: str | None, args: argparse.Namespace) -> JobResult:
         return _run_dl3_foundation(dsn, args)
     if job == "weekly_report_generator":
         return _run_weekly_report_generator(dsn, args)
+    if job == "residual_preflight":
+        return _run_residual_preflight(dsn, args)
     return JobResult(job, "error", 0, {}, "unknown_job")
 
 

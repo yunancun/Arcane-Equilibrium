@@ -433,23 +433,38 @@ def _persist_trial_ledger(
     return len(rows)
 
 
-def _persist_residual_alpha_report(
+def write_demo_residual_alpha_report(
     cur: Any,
-    evidence: StrategyPromotionEvidence,
+    report: Optional[dict[str, Any]],
     *,
+    strategy_name: str,
+    engine_mode: str,
     source: str,
 ) -> Optional[str]:
-    if evidence.demo_residual_alpha_report is None:
+    """把一份 canonical residual alpha report 寫進 ``learning.demo_residual_alpha_reports``。
+
+    這是從 ``_persist_residual_alpha_report`` 抽出的薄寫入 helper，供 Stage-0R
+    orchestrator（Gap A，它持有 raw report dict 而非 ``StrategyPromotionEvidence``）
+    與既有 promotion_evidence 共用同一寫入路徑。**行為與抽出前 byte-identical**：
+      - report None / 表不存在 → 回 None（不寫）。
+      - report 未過 ``validate_demo_residual_alpha_report`` → log + 回 None（honest
+        skip：defer/fail 報告本就不該進 drar）。
+      - 任一指標非 finite → 回 None（不寫殘缺列）。
+      - ``report_hash`` = ``_canonical_sha256(report)``（sort_keys/separators/ensure_ascii
+        =True）；與 bridge / source_contract 的 canonical hash byte-identical（§5.6 跨寫者
+        hash 一致性的單一真相來源）。
+    回 ``report_hash``（已寫/已 upsert）或 None（未寫）。
+    """
+    if report is None:
         return None
     if not _has_table(cur, "learning.demo_residual_alpha_reports"):
         return None
 
-    report = evidence.demo_residual_alpha_report
     ok, reason = validate_demo_residual_alpha_report(report)
     if not ok:
         logger.info(
             "skip residual alpha report registry write for %s: %s",
-            evidence.strategy_name,
+            strategy_name,
             reason,
         )
         return None
@@ -486,8 +501,8 @@ def _persist_residual_alpha_report(
             evidence = EXCLUDED.evidence
         """,
         (
-            evidence.strategy_name,
-            evidence.engine_mode,
+            strategy_name,
+            engine_mode,
             report_hash,
             json.dumps(report, sort_keys=True),
             metrics["raw_mean_bps"],
@@ -515,6 +530,23 @@ def _persist_residual_alpha_report(
         ),
     )
     return report_hash
+
+
+def _persist_residual_alpha_report(
+    cur: Any,
+    evidence: StrategyPromotionEvidence,
+    *,
+    source: str,
+) -> Optional[str]:
+    # 委派薄寫入 helper（行為 byte-identical）：保留原 caller 的 evidence-based 介面，
+    # 把實際 INSERT 收口到 write_demo_residual_alpha_report 供 orchestrator 共用同路徑。
+    return write_demo_residual_alpha_report(
+        cur,
+        evidence.demo_residual_alpha_report,
+        strategy_name=evidence.strategy_name,
+        engine_mode=evidence.engine_mode,
+        source=source,
+    )
 
 
 def _persist_promotion_reports(
