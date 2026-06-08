@@ -711,3 +711,47 @@ def test_gate_cross_writer_hash_identity_enabled_and_disabled():
     assert _canon(rep_on.to_dict()) == _canon(rep_on.to_dict())
     # disabled vs enabled 必不同（enabled 多了 perm 欄位）——證明 perm 確實進了 hash。
     assert _canon(rep_off.to_dict()) != _canon(rep_on.to_dict())
+
+
+def test_permutation_determinism_borderline_p_binds_seed():
+    """E4（補 E2 LOW #2）：seed binding 在「邊界 p」regime 才真有 bite。
+
+    既有 determinism 測試用強訊號 fixture（mean=1.0/std=2.0 → p 飽和到 0.0），
+    `assert p1==p2` 在 seed 被打斷（`default_rng()` 忽略 seed）時仍會通過，因為兩次
+    都飽和在 0.0。本測試改用**弱訊號 borderline fixture**（27×+0.5 / 23×-0.5，
+    n=50、observed mean=0.04bps）使 p 落在 ~0.66–0.69 且隨 seed 變動（非飽和）：
+
+    1. 同 seed 兩次呼叫 → p 完全相等（嚴格 deterministic；打斷 seed → 兩次 entropy
+       播種發散 → 此斷言 FAIL，即 mutation bite）。
+    2. 兩個不同 seed → p 接近但不相等（documented：0.668 vs 0.6812），且兩者皆落在
+       借助 sign-flip null 的中段區間 [0.60, 0.75]（非 0/1 飽和）。
+
+    這些值在 PYTHONHASHSEED=0 下跨 run 可重現（PCG64 整數抽樣平台無關）。
+    """
+    # 弱訊號 fixture：手構（非 rng），fixture 本身 reproducible，與 seed binding 解耦。
+    residual = np.asarray([0.5] * 27 + [-0.5] * 23, dtype=np.float64)
+    assert abs(float(residual.mean())) == pytest.approx(0.04)  # 確認弱訊號（非飽和源）
+
+    seed_a, seed_b, n_perm = 20260608, 777, 5000
+
+    # (1) 同 seed → 嚴格相等（deterministic）。打斷 seed binding 後此處 FAIL。
+    p_a1, iters_a1 = _permutation_residual_alpha(residual, n_perm=n_perm, seed=seed_a)
+    p_a2, iters_a2 = _permutation_residual_alpha(residual, n_perm=n_perm, seed=seed_a)
+    assert iters_a1 == iters_a2 == n_perm
+    assert p_a1 == p_a2  # ★ seed-binding bite：broken seed → 兩次發散 → FAIL
+
+    # (2) borderline（非飽和）—— p 必在中段，不得是 0.0/1.0；否則退回飽和 regime
+    #     而 (1) 又會喪失 bite（即守住「這條 fixture 真的有鑑別力」）。
+    assert 0.60 < p_a1 < 0.75
+    assert p_a1 not in (0.0, 1.0)
+
+    # (3) 不同 seed → 接近但不相等（documented 值；證明 p 確實隨 seed 變動）。
+    p_b1, iters_b1 = _permutation_residual_alpha(residual, n_perm=n_perm, seed=seed_b)
+    assert iters_b1 == n_perm
+    assert p_a1 != p_b1
+    assert 0.60 < p_b1 < 0.75
+    # documented 值（PYTHONHASHSEED=0、numpy PCG64、n_perm=5000）：
+    assert p_a1 == pytest.approx(0.668, abs=1e-9)
+    assert p_b1 == pytest.approx(0.6812, abs=1e-9)
+    # 「接近但不相等」：差異小（<0.05）但確實非零。
+    assert 0.0 < abs(p_a1 - p_b1) < 0.05
