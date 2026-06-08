@@ -349,6 +349,22 @@ class Layer2Engine:
                 "offered_tools": [t.get("name") for t in TOOL_SCHEMAS if isinstance(t, dict)],
             }
             writer = _get_l2_ledger_writer()
+            # P2 wiring delta（PA 設計 §A.2）：contract_ver/schema_ver 改由 contract registry
+            # 解析而非硬編。manual-trigger（l2.manual_reasoning）解析結果就是既有
+            # l2_contract.v1 / l2_schema.v1（值不變，來源變 registry）→ 零回歸。lazy import
+            # 避免 import cycle（l2_prompt_contract_registry import 本模塊的常數）；registry
+            # 不可用時 fallback 既有常數（fail-soft，仍寫得出 D3 row）。
+            contract_ver, schema_ver = L2_PROMPT_CONTRACT_VER, L2_OUTPUT_SCHEMA_VER
+            try:
+                from .l2_prompt_contract_registry import (  # noqa: PLC0415
+                    resolve_contract_versions as _resolve_cv,
+                )
+
+                contract_ver, schema_ver = _resolve_cv(capability_id=L2_DEFAULT_CAPABILITY_ID)
+            except Exception as _cv_exc:  # noqa: BLE001 — registry 不可用 → 既有常數兜底
+                logger.warning(
+                    "contract registry 解析失敗，fallback 既有常數（D3 仍寫得出）：%s", _cv_exc
+                )
             res = writer.record_l2_call(
                 l2_reply_id=reply_id,
                 session_id=session.session_id,
@@ -356,8 +372,8 @@ class Layer2Engine:
                 trigger=getattr(session, "trigger", "manual"),
                 created_at=datetime.now(timezone.utc),
                 model=eff_model,
-                contract_ver=L2_PROMPT_CONTRACT_VER,
-                schema_ver=L2_OUTPUT_SCHEMA_VER,
+                contract_ver=contract_ver,
+                schema_ver=schema_ver,
                 system_prompt=system_prompt,
                 input_context=input_context,
                 raw_response=response.text or "",

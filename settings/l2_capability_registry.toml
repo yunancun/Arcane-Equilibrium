@@ -1,0 +1,48 @@
+# L2 Advisory Mesh — capability registry（TOML-only SSOT，PA P2 設計 §B/§L）。
+#
+# 為什麼 TOML-only：operator 拍板 registry = TOML SSOT（無 DB 表、無 V137）。此檔是
+# capability 啟用/調參的唯一真相來源（mirror settings/risk_control_rules/risk_config.toml）。
+# 系統啟動時零外部 state 即可 boot。
+#
+# 硬規則（loader 強制，見 l2_capability_registry.py）：
+#   - 每個 [[capability]] stanza 預設 enabled=false（fail-closed；省略 enabled ⇒ false）。
+#   - unknown field → reject load（catches 過期 v1 config / drift）。
+#   - 宣告 autonomy_level 欄 → reject load（autonomy 是 DERIVED，永不宣告，見 §C）。
+#   - 把 can_auto_deploy_to_paper 當 posture gate 用 → reject load（它 True@all-tiers 無 signal）。
+#   - lane 不在 LANE_DIRECTION 表 keys → reject load（無 "live" lane；live 不可從任何 auto 路徑到達）。
+#
+# 本 phase（P2）= registry 機制 + 確定性模板紀律 + 接線；具體 capabilities 在 P3 才加。
+# 故本檔目前**無 [[capability]] stanza**（skeleton），系統行為與今天一致（manual-trigger
+# 走 layer2_engine 的 seed l2.manual_reasoning，由 contract registry 而非此檔提供）。
+
+[meta]
+# schema 版本：loader 在 unknown top-level key 時 reject；此版本供日後 contract drift 追溯。
+version = 1
+note = "P2 skeleton — capabilities added in P3; all future capabilities ship enabled=false"
+
+# ── capability stanza 範本（P3 才填；保留為文件，loader 不解析註解）──
+# [[capability]]
+# capability_id        = "ml_advisory"        # 穩定 key（P3 首個 capability）
+# enabled              = false                # master off-switch — FAIL-CLOSED DEFAULT（全 caps）
+# min_tier             = "L1"                 # LearningTier 門檻（map 到 can_*()）
+# tier_capability_flag = ""                   # 可選：綁某 TierCapabilities.can_* flag（空=不綁）
+# model_tier           = "cloud_l2"           # local_sentinel | ollama | cloud_l2
+# cloud_model_pref     = "sonnet"             # 僅 model_tier=cloud_l2 時用
+# lane                 = "research"           # 必在 LANE_DIRECTION keys（無 "live"）
+# output_schema_ref    = "ml_advisory.v1"     # → contract registry
+# prompt_contract_ref  = "ml_advisory.v1"     # → contract registry（確定性模板）
+# out_of_bound_guard_ref = "ml_advisory.guard.v1"
+# novelty_gate         = true
+# consequential_default = false               # → D3 ledger consequential_at_creation
+# quality_metric_ref   = "ml_advisory.metric.v1"  # → §O（P5）
+#
+# [capability.trigger]
+# kind          = "event"                     # event | schedule | manual | threshold
+# spec          = "ml:training_complete"
+# debounce_secs = 900                         # §F.1 trailing-edge settle window
+# dedup_key     = "capability_id+spec+coarse_subject"
+#
+# [capability.budget]
+# per_call_usd_cap = 0.50
+# daily_usd_cap    = 1.00                      # ≤ DOC-08 $2/day（budget_config.toml）unless rule-raised
+# tier_gated_spend = true

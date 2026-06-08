@@ -1128,7 +1128,12 @@ class TestLayer2Routes:
 
     def test_update_pricing_empty(self, setup_routes):
         from app.layer2_routes import update_pricing, PricingUpdateRequest
+        # /cost/pricing 現為 operator-scope WRITE（P2 budget-integrity fold-in）：須帶
+        # operator 角色 + ai_budget:write scope（與 /trigger 同模式），否則 gate 403。
         mock_actor = MagicMock()
+        mock_actor.roles = {"operator"}
+        mock_actor.scopes = {"ai_budget:write"}
+        mock_actor.actor_id = "test_op"
         req = PricingUpdateRequest()
         result = _run(
             update_pricing(req=req, actor=mock_actor)
@@ -1138,6 +1143,9 @@ class TestLayer2Routes:
     def test_update_pricing_valid(self, setup_routes):
         from app.layer2_routes import update_pricing, PricingUpdateRequest
         mock_actor = MagicMock()
+        mock_actor.roles = {"operator"}
+        mock_actor.scopes = {"ai_budget:write"}
+        mock_actor.actor_id = "test_op"
         req = PricingUpdateRequest(
             models={"haiku": {"input_per_mtok": 1.0, "last_verified_date": "2026-03-28"}},
         )
