@@ -16,6 +16,7 @@ from program_code.ml_training.residual_alpha_producer_db import (
     build_residual_report_from_data,
     contained_bar_return_bps,
     load_btc_klines,
+    load_liquid_basket_symbols,
     load_round_trips,
     pit_active_symbols,
     to_epoch_seconds,
@@ -538,3 +539,129 @@ def test_load_funding_rates_converts_and_drops_bad():
     assert out["BTCUSDT"][0]["ts"] == pytest.approx(
         datetime(2026, 6, 5, 0, 0, tzinfo=timezone.utc).timestamp()
     )
+
+
+# ---- load_liquid_basket_symbols（Gap A basket selection bug regression）----
+
+
+class _CountCursor:
+    """模擬 market.klines GROUP BY count(*) 查詢：只回**窗內有 bar** 的 symbol。
+
+    真實 PG 行為：count(*) GROUP BY 不會回 bar 數為 0 的 symbol（沒有列就不入
+    group）；ORDER BY count(*) DESC 已在 PG 端排序。故此 cursor 回的 rows = caller
+    傳入 candidate 中「有資料者」按 bar_count 降序，模擬真實選取。
+    """
+
+    def __init__(self, rows_for_symbols):
+        # rows_for_symbols: {symbol: bar_count}（只列有資料的 symbol）。
+        self._rows_for_symbols = rows_for_symbols
+        self.executed = []
+
+    def execute(self, query, params=None):
+        self.executed.append((query, params))
+        requested = list(params["symbols"])
+        limit = int(params["limit"])
+        # 只回「在 candidate 集內 且 有 bar」者，按 bar_count DESC, symbol ASC。
+        present = [
+            (s, self._rows_for_symbols[s])
+            for s in requested
+            if s in self._rows_for_symbols
+        ]
+        present.sort(key=lambda kv: (-kv[1], kv[0]))
+        self._last = [{"symbol": s, "bar_count": c} for s, c in present[:limit]]
+
+    def fetchall(self):
+        return self._last
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _CountConn:
+    def __init__(self, rows_for_symbols):
+        self._rows_for_symbols = rows_for_symbols
+        self.cursors = []
+
+    def cursor(self, **kw):
+        cur = _CountCursor(self._rows_for_symbols)
+        self.cursors.append(cur)
+        return cur
+
+
+def test_liquid_basket_picks_data_bearing_not_alphabetical():
+    """Gap A bug regression：字母序最前的 symbol 無 klines、流動者有 →
+    選取必回**有資料**者（按流動性），**絕不**回字母序前綴的空資料 symbol。
+
+    這正是真實 Linux PG 上的 bug：PIT-active ~616 symbol 字母序前 N（0GUSDT /
+    1000000BABYDOGEUSDT …）窗內 4h bar=0，舊 ``sorted(active)[:N]`` 選到它們 →
+    market basket 每桶 0 成員 → no_aligned_buckets。合成測試直接注 klines 從不走
+    此 DB 選取路徑，故漏掉。此測試固定「按窗內 bar 計數選取」行為，防回歸。
+    """
+    # candidate 集：字母序最前 3 個是冷門 symbol（無 bar），其餘是有資料的流動 symbol。
+    alpha_first_empty = ["0GUSDT", "1000000BABYDOGEUSDT", "1000000CHEEMSUSDT"]
+    liquid = {
+        "ETHUSDT": 300,
+        "BTCUSDT": 300,
+        "SOLUSDT": 250,
+        "XRPUSDT": 200,
+        "DOGEUSDT": 150,
+    }
+    candidates = alpha_first_empty + list(liquid.keys())
+    # rows_for_symbols 只含有資料者（模擬真實 GROUP BY count(*) 不回 0-bar symbol）。
+    conn = _CountConn(liquid)
+
+    picked = load_liquid_basket_symbols(
+        conn,
+        candidates,
+        start_ts=datetime(2026, 4, 9, tzinfo=timezone.utc),
+        end_ts=datetime(2026, 5, 24, tzinfo=timezone.utc),
+        timeframe="4h",
+        limit=60,
+    )
+
+    # 核心斷言：選到的全是有資料者，字母序前綴的空 symbol 一個都不在內。
+    assert set(picked) == set(liquid.keys())
+    for empty_sym in alpha_first_empty:
+        assert empty_sym not in picked
+    # 按流動性（bar_count）降序：BTC/ETH(300) 並列在前（同數按 symbol ASC），DOGE(150) 在後。
+    assert picked[0] == "BTCUSDT" and picked[1] == "ETHUSDT"
+    assert picked[-1] == "DOGEUSDT"
+
+    # 參數化（無注入）：symbols 用 ANY 綁定、limit/timeframe/窗皆為 query params。
+    query, params = conn.cursors[0].executed[0]
+    assert "ANY(%(symbols)s)" in query and "GROUP BY symbol" in query
+    assert "ORDER BY count(*) DESC" in query
+    assert params["symbols"] == candidates  # 候選域 = 傳入的 PIT-active 集
+    assert params["limit"] == 60
+    assert params["tf"] == "4h"
+
+
+def test_liquid_basket_respects_limit_keeps_most_liquid():
+    """limit 截斷取**最流動**的前 N（非字母序前 N）。"""
+    liquid = {f"S{i:02d}USDT": (100 - i) for i in range(20)}  # bar_count 遞減
+    conn = _CountConn(liquid)
+    picked = load_liquid_basket_symbols(
+        conn,
+        # 故意把字母序最前但低流動的 symbol 放在 candidate 最前。
+        ["AAAUSDT"] + list(liquid.keys()),
+        start_ts=datetime(2026, 4, 9, tzinfo=timezone.utc),
+        end_ts=datetime(2026, 5, 24, tzinfo=timezone.utc),
+        limit=5,
+    )
+    assert len(picked) == 5
+    assert "AAAUSDT" not in picked  # 無資料 → 不入選
+    # 最流動的 5 個（bar_count 100,99,98,97,96 = S00..S04）。
+    assert picked == ["S00USDT", "S01USDT", "S02USDT", "S03USDT", "S04USDT"]
+
+
+def test_liquid_basket_empty_candidates_returns_empty():
+    """空 candidate 集 → 回 []（caller 自然得空 basket，不發查詢）。"""
+    conn = _CountConn({})
+    assert load_liquid_basket_symbols(
+        conn, [], start_ts=datetime(2026, 4, 9, tzinfo=timezone.utc),
+        end_ts=datetime(2026, 5, 24, tzinfo=timezone.utc),
+    ) == []
+    assert conn.cursors == []  # 空 candidate 不開 cursor / 不發查詢
