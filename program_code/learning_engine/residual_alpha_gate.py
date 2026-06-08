@@ -173,7 +173,10 @@ class ResidualEdgeReport:
         if not self.permutation_applied:
             raw.pop("perm_p_value", None)
             raw.pop("perm_iterations", None)
-        return _json_safe(raw)
+        # 先 _json_safe（NaN/Inf→None、tuple→list），再 _normalize_zeros 抹平 -0.0：
+        # 保證 canonical report 永不帶 -0.0，使進 PG jsonb 前後 bytes 一致（見
+        # _normalize_zeros docstring 的 hash byte-identity 說明）。
+        return _normalize_zeros(_json_safe(raw))
 
 
 class ResidualAlphaGate:
@@ -1113,4 +1116,31 @@ def _json_safe(value: Any) -> Any:
         return {key: _json_safe(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_json_safe(item) for item in value]
+    return value
+
+
+def _normalize_zeros(value: Any) -> Any:
+    """遞迴把 IEEE-754 負零（-0.0）正規化為正零（0.0）。
+
+    為什麼（hash byte-identity 硬約束）：弱/共線 factor 的 np.mean / 回歸係數可能
+    產出 -0.0（例如 residual_mean_bps = _to_bps(np.mean(...))、beta_loadings[f] =
+    float(beta[idx])）。registry hash 在進 PG 前對 in-memory report 算（residual_
+    hidden_oos_bridge._canonical_sha256），但 PostgreSQL jsonb **會丟掉浮點符號位**
+    （-0.0 讀回變 0.0）；source-contract 在 jsonb 讀回後重算 hash
+    （candidate_evidence_source_contract:399），於是 -0.0 → 0.0 造成 registry_hash
+    != expected_hash → residual_alpha_report_hash_mismatch → 候選被誤判 INVALID。
+    在 canonical report 的唯一表示（ResidualEdgeReport.to_dict）這個 chokepoint 抹平
+    -0.0，使「進 jsonb 前」與「jsonb 讀回後」的 report bytes 完全相同，三 writer
+    （bridge canonical / drar report_hash / registry residual hash）與 source-contract
+    重算皆 hash 同一份 bytes。PG jsonb 不會正規化其他任何欄位（MIT 真 PG round-trip
+    驗證），故此單點修復即收口。
+    `x == 0.0` 對 +0.0 與 -0.0 皆為 True；`x + 0.0` 強制收斂到 +0.0（且對非零浮點與
+    NaN/Inf 不變，但 NaN/Inf 已先被 _json_safe 轉 None）。
+    """
+    if isinstance(value, float):
+        return value + 0.0 if value == 0.0 else value
+    if isinstance(value, dict):
+        return {key: _normalize_zeros(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalize_zeros(item) for item in value]
     return value

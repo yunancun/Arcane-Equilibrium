@@ -280,9 +280,9 @@ def _patch_db(monkeypatch: Any) -> dict:
         for _ in range(12)
     ]
 
-    def _fake_load_candidate_net_side(conn, strategy, *, engine_mode, since):
+    def _fake_load_candidate_net_side(conn, strategy, *, symbol=None, engine_mode, since):
         captured["fills_strategy"] = strategy
-        return DB.derive_net_side_from_fills(short_fills, strategy)
+        return DB.derive_net_side_from_fills(short_fills, strategy, symbol)
 
     def _fake_load_round_trips(conn, strategy, *, engine_mode, since):
         return _non_oos_round_trips()
@@ -430,8 +430,8 @@ def test_oos_window_not_configured_fail_closed(_patch_db):
 
 def test_net_side_ambiguous_fail_closed(monkeypatch: Any, _patch_db):
     # net_side ambiguous（無入場成交）→ 該候選 skip，不 register。
-    def _ambiguous(conn, strategy, *, engine_mode, since):
-        return DB.derive_net_side_from_fills([], strategy)
+    def _ambiguous(conn, strategy, *, symbol=None, engine_mode, since):
+        return DB.derive_net_side_from_fills([], strategy, symbol)
 
     monkeypatch.setattr(P, "load_candidate_net_side", _ambiguous)
     conn = _Conn(candidate_rows=[_candidate_row()])
@@ -886,8 +886,8 @@ def test_net_side_long_candidate(monkeypatch: Any, _patch_db):
         for _ in range(8)
     ]
 
-    def _long(conn, strategy, *, engine_mode, since):
-        return DB.derive_net_side_from_fills(long_fills, strategy)
+    def _long(conn, strategy, *, symbol=None, engine_mode, since):
+        return DB.derive_net_side_from_fills(long_fills, strategy, symbol)
 
     monkeypatch.setattr(P, "load_candidate_net_side", _long)
     seen: dict[str, Any] = {}
@@ -905,6 +905,111 @@ def test_net_side_long_candidate(monkeypatch: Any, _patch_db):
         conn_factory=lambda dsn: conn, register_fn=spy,
     )
     assert seen["net_side"] == 1  # 多單 → +1
+    assert summary.outcomes[0].net_side == 1
+
+
+# ─── HIGH-2：net_side 必須逐 (strategy, symbol)（funding sign 反號修復）──────
+
+
+def test_net_side_per_symbol_overrides_strategy_wide_short():
+    """★ MIT HIGH-2：策略整體淨 short、但候選 symbol 上淨 long → 必須回 per-symbol
+    的 +1，**不是** strategy-wide 的 -1。
+
+    重現 MIT 實測的 RAVEUSDT 發散：grid_trading 全域淨 short（BTCUSDT 大量 Sell），
+    但 RAVEUSDT 上淨 long（Buy）。若 net_side 只按 strategy_name 跨全 symbol 聚合 →
+    給 grid_trading::RAVEUSDT 候選 -1，而真實曝險是 +1 → funding factor 反號 → carry
+    被放大（= 本功能要消滅的 false-promote 向量）。傳 symbol=RAVEUSDT 後必回 +1。
+    """
+    fills = [
+        # BTCUSDT：大量 Sell（讓 strategy-wide 淨 short）。
+        *[
+            {"strategy_name": "grid_trading", "symbol": "BTCUSDT", "side": "Sell",
+             "qty": 10.0, "realized_pnl": 0.0}
+            for _ in range(20)
+        ],
+        # RAVEUSDT：淨 Buy（per-symbol 淨 long）。
+        *[
+            {"strategy_name": "grid_trading", "symbol": "RAVEUSDT", "side": "Buy",
+             "qty": 3.0, "realized_pnl": 0.0}
+            for _ in range(5)
+        ],
+    ]
+
+    # strategy-wide（symbol=None）：BTCUSDT 大量 Sell 主導 → 淨 short。
+    side_all, diag_all = DB.derive_net_side_from_fills(fills, "grid_trading")
+    assert side_all == -1
+    assert diag_all["ambiguous"] == 0.0
+
+    # per-symbol（symbol=RAVEUSDT）：只算 RAVEUSDT 的 Buy → 淨 long（+1，非 -1）。
+    side_sym, diag_sym = DB.derive_net_side_from_fills(
+        fills, "grid_trading", "RAVEUSDT"
+    )
+    assert side_sym == 1  # ★ HIGH-2：per-symbol +1，反轉 strategy-wide -1
+    assert diag_sym["entry_fills"] == 5.0  # 只數該 symbol 的入場成交
+    assert diag_sym["net_signed_qty"] == 15.0  # 5 × Buy 3.0
+
+    # mutation 守門：若退回 strategy-wide（忽略 symbol）→ 兩者相等 → 此斷言 FAIL。
+    assert side_sym != side_all
+
+
+def test_net_side_per_symbol_no_fills_for_symbol_is_ambiguous():
+    """候選 symbol 上無相符入場成交 → ambiguous（fail-closed），不沿用 strategy-wide。
+
+    避免「策略在別的 symbol 有成交、但這個 symbol 沒有」時誤用其他 symbol 的方向。
+    """
+    fills = [
+        {"strategy_name": "grid_trading", "symbol": "BTCUSDT", "side": "Buy",
+         "qty": 1.0, "realized_pnl": 0.0}
+        for _ in range(8)
+    ]
+    side, diag = DB.derive_net_side_from_fills(fills, "grid_trading", "RAVEUSDT")
+    assert diag["ambiguous"] == 1.0  # 該 symbol 無入場成交 → 不可判
+    assert diag["entry_fills"] == 0.0
+
+
+def test_orchestrator_threads_candidate_symbol_into_net_side(monkeypatch: Any, _patch_db):
+    """★ HIGH-2 e2e：orchestrator 必須把候選的 symbol 傳進 load_candidate_net_side，
+    使 per-symbol 方向（非 strategy-wide）流到 evaluate_cell 的 net_side。
+
+    候選是 grid_trading::RAVEUSDT；同一批 fills 中 BTCUSDT 淨 short、RAVEUSDT 淨 long。
+    斷言 (1) load_candidate_net_side 收到 symbol=RAVEUSDT，(2) 最終 net_side=+1（per-
+    symbol），證明若 orchestrator 漏傳 symbol（退回 strategy-wide）會得到 -1 → 此測試紅。
+    """
+    fills = [
+        *[
+            {"strategy_name": "grid_trading", "symbol": "BTCUSDT", "side": "Sell",
+             "qty": 10.0, "realized_pnl": 0.0}
+            for _ in range(20)
+        ],
+        *[
+            {"strategy_name": "grid_trading", "symbol": "RAVEUSDT", "side": "Buy",
+             "qty": 3.0, "realized_pnl": 0.0}
+            for _ in range(5)
+        ],
+    ]
+    seen_symbol: dict[str, Any] = {}
+
+    def _fake_net_side(conn, strategy, *, symbol=None, engine_mode, since):
+        seen_symbol["symbol"] = symbol
+        return DB.derive_net_side_from_fills(fills, strategy, symbol)
+
+    monkeypatch.setattr(P, "load_candidate_net_side", _fake_net_side)
+    seen: dict[str, Any] = {}
+    real_eval = bridge.evaluate_cell
+
+    def _spy_eval(cell_key, rts, btc_klines, **kwargs):
+        seen["net_side"] = kwargs.get("net_side")
+        return real_eval(cell_key, rts, btc_klines, **kwargs)
+
+    monkeypatch.setattr(bridge, "evaluate_cell", _spy_eval)
+    conn = _Conn(candidate_rows=[_candidate_row(symbol="RAVEUSDT")])
+    spy = _RegisterSpy()
+    summary = P.run_residual_stage0r_preflight(
+        "dsn", cfg=_cfg(), get_pg_conn_fn=lambda: None, actor=_actor(),
+        conn_factory=lambda dsn: conn, register_fn=spy,
+    )
+    assert seen_symbol["symbol"] == "RAVEUSDT"  # orchestrator 傳了候選 symbol
+    assert seen["net_side"] == 1  # ★ per-symbol +1（漏傳 symbol → strategy-wide -1 → 紅）
     assert summary.outcomes[0].net_side == 1
 
 
