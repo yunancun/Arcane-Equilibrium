@@ -170,7 +170,7 @@ def test_case1_evidence_source_tier_allowlist_allows_5_valid_tiers():
 
     # Block A：tier filter 必出現
     # Block A: tier filter MUST appear
-    assert "AND COALESCE(evidence_source_tier, 'real_outcome') = ANY(%s)" in fragment
+    assert "AND COALESCE(msr.evidence_source_tier, 'real_outcome') = ANY(%s)" in fragment
     # P3-03：預設不接受 synthetic_replay；Block A param 為 default allowlist。
     # Default accepted tiers exclude synthetic_replay (P3-03).
     assert extra[0] == list(DEFAULT_EVIDENCE_SOURCE_TIER_ALLOWLIST)
@@ -294,7 +294,7 @@ def test_forward_compat_partial_schema_only_tier_filter():
         "replay_experiments_has_status": True,
     }
     fragment, extra = build_evidence_source_filter(caps)
-    assert "AND COALESCE(evidence_source_tier, 'real_outcome') = ANY(%s)" in fragment
+    assert "AND COALESCE(msr.evidence_source_tier, 'real_outcome') = ANY(%s)" in fragment
     # Block B 不應出現
     # Block B must not appear
     assert "replay_experiment_id IS NULL" not in fragment
@@ -329,9 +329,14 @@ def test_fetch_pending_full_schema_executes_filtered_sql():
     final_sql, final_params = cur.executed[-1]
     assert "FROM learning.mlde_shadow_recommendations" in final_sql
     assert "evidence_source_tier" in final_sql
-    assert "evidence_source_tier::text AS evidence_source_tier" in final_sql
-    assert "replay_experiment_id::text AS replay_experiment_id" in final_sql
-    assert "encode(manifest_hash, 'hex') AS manifest_hash" in final_sql
+    # registry join 全啟用時 base 表必加 msr 別名，且與 join 表同名的 base 欄位
+    # （manifest_hash / replay_experiment_id / engine_mode）必以 msr. 限定，否則
+    # AmbiguousColumn（2026-06-07 residual/hidden_oos join 上線後的回歸根因）。
+    assert "FROM learning.mlde_shadow_recommendations msr" in final_sql
+    assert "msr.engine_mode" in final_sql
+    assert "msr.evidence_source_tier::text AS evidence_source_tier" in final_sql
+    assert "msr.replay_experiment_id::text AS replay_experiment_id" in final_sql
+    assert "encode(msr.manifest_hash, 'hex') AS manifest_hash" in final_sql
     assert "LEFT JOIN replay.experiments e" in final_sql
     assert "expires_at > now()" in final_sql
     assert "e.status::text AS replay_registry_status" in final_sql
