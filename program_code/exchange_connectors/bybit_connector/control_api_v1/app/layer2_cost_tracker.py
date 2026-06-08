@@ -71,8 +71,52 @@ from .layer2_types import (
 from . import layer2_adaptive as _adaptive_sibling
 from . import layer2_cost_recording as _recording_sibling
 from . import layer2_h_state_snapshots as _h_state_sibling
+from . import l2_secret_redactor as _redactor
 
 logger = logging.getLogger(__name__)
+
+
+# D3 sanitize（設計 §D.1.1「applies everywhere full text is persisted」）：session
+# 摘要落 durable layer2_cost_state.json 前過 secret redactor 的自由文本欄。這些欄是
+# LLM 生成（final_summary / recommendation.reasoning / insight.detail·title），可能
+# drift 進 secret（DSN / api_key / bearer），與 D3 ledger 寫入路徑同一消毒語意。
+# 為何在「寫入前」：layer2_cost_state.json 是長存盤面，未消毒 secret 落盤後難清除
+# （root principle 8 reconstructable + CLAUDE §四 signed-auth material never leak）。
+def _sanitize_session_dict_for_persist(session_dict: dict[str, Any]) -> dict[str, Any]:
+    """回新 dict（不就地改 caller）：對 session.to_dict() 的 LLM 自由文本欄套 D3
+    redactor。只動會夾 secret 的自由文本欄（final_summary / recommendation.reasoning
+    / insights[].title·detail），結構/數值欄（cost/tokens/symbol/action/...）原樣
+    保留——避免誤遮破壞 forensic 可讀的盤面欄位。"""
+    out = dict(session_dict)
+
+    fs = out.get("final_summary")
+    if isinstance(fs, str) and fs:
+        out["final_summary"] = _redactor.redact(fs).text
+
+    rec = out.get("recommendation")
+    if isinstance(rec, dict):
+        rec_out = dict(rec)
+        reasoning = rec_out.get("reasoning")
+        if isinstance(reasoning, str) and reasoning:
+            rec_out["reasoning"] = _redactor.redact(reasoning).text
+        out["recommendation"] = rec_out
+
+    insights = out.get("insights")
+    if isinstance(insights, list):
+        sanitized_insights = []
+        for ins in insights:
+            if isinstance(ins, dict):
+                ins_out = dict(ins)
+                for k in ("title", "detail"):
+                    v = ins_out.get(k)
+                    if isinstance(v, str) and v:
+                        ins_out[k] = _redactor.redact(v).text
+                sanitized_insights.append(ins_out)
+            else:
+                sanitized_insights.append(ins)
+        out["insights"] = sanitized_insights
+
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -321,12 +365,17 @@ class Layer2CostTracker:
     # ── Session Management / Session 管理 ──
 
     def record_session(self, session: Layer2Session) -> None:
-        """Record a completed session summary / 记录已完成 session 的摘要"""
+        """Record a completed session summary / 记录已完成 session 的摘要
+
+        D3 §D.1.1：session.to_dict() 的 LLM 自由文本欄（final_summary /
+        recommendation.reasoning / insights）在落 durable layer2_cost_state.json
+        之前過 secret redactor（消毒在寫入路徑、無窗口）。
+        """
         with self._lock:
             self._increment_daily_session_count()
             raw = self._read_raw()
             sessions = raw.setdefault("sessions", [])
-            sessions.insert(0, session.to_dict())
+            sessions.insert(0, _sanitize_session_dict_for_persist(session.to_dict()))
             # Trim to max history
             if len(sessions) > self.MAX_SESSION_HISTORY:
                 raw["sessions"] = sessions[:self.MAX_SESSION_HISTORY]

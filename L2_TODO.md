@@ -18,15 +18,21 @@ body 並閉合；3 re-confirm（QC B1 / MIT M1 / MIT M2）= **ENDORSE**。
 
 ## §2 Next action
 
-**operator 拍板啟 E1。** 啟動後走 `PM -> PA -> E1/E1a -> E2 -> E4 -> QA -> PM`，依 §3 phase 序，每
-phase 綠燈才下一步。尚未動任何碼／migration／DB／部署；singleton 註冊、V134/V13x 皆未落地。三端同步
-為 PM 動作。
+**P1 D3 已過 pre-deploy green gate（2026-06-08）。** 全鏈 PA→E1→E2(PASS)→E3(sanitize gate PASS)→
+E4(Linux PG `trading_postgres` 雙-apply 冪等 + trading.fills columnstore ADD COLUMN safe + prod
+`_sqlx_migrations` 仍 133 零觸碰)→QA(8/8 驗收 MET) 全綠。**P1 全部未 commit 在 dirty tree**；branch
+`feature/l2-critic-lessons-tools` HEAD `6d312405` = **17 ahead / 25 behind** origin/main `bdf15e4f`
+（sibling re-land，redactor 檔零衝突，merge 前需 reconcile=operator-gated；Mac workflow 禁 rebase/merge）。
+待 operator 拍：① commit 處置（建議 scoped-commit 綠檢查點，`git commit --only` 隔離他 session WIP）
+② **gate-to-P2**（Orchestrator+registry+contracts+guard+admission+adjudication+LANE_DIRECTION，**CC
+linchpin** no-auto-path-to-live，全 capability enabled=false）。owed-post-deploy: deployed-E2E +
+full Linux regression + sqlx apply。
 
 ## §3 Phase checklist（建置序 = 設計 §J；每 phase green-gated）
 
 | Phase | 內容 | 狀態 | Gate to next |
 |---|---|---|---|
-| P1 | D3 foundation：`agent.l2_calls`（V134 append-only）+ 全鏈 provenance + gate-seam + **E2 sanitize-before-persist** | ⬜ 未啟 | D3 綠 + sanitize 在 write path；其餘一律不 ship |
+| P1 | D3 foundation：V134 `agent.l2_calls`+marks / V135 gate-seam / V136 上游 provenance / L2CallLedgerWriter / redactor v4 / cost_tracker 消毒 / 接線 | ✅ **green(pre-deploy) 2026-06-08** PA→E1→E2/E3/E4-LinuxPG/QA 全 PASS | owed-post-deploy: deployed-E2E + full Linux regression + sqlx apply（operator-gated）；殘留 naked+cap-straddle→P3 source-side |
 | P2 | Orchestrator + registry（無 `autonomy_level`，derived）+ PromptContract/schema + out-of-bound guard + admission(§F.1) + adjudication(§F.2)；**`LANE_DIRECTION` 落地** | ⬜ 未啟 | **CC** APPROVE no-auto-path-to-live + carbon-layer fence；fail-safe 不阻塞；write 端 operator-scope |
 | P2p | `incident_sentinel`（本地哨兵，alert-only，never remediate）—平行廉價 | ⬜ 未啟 | 獨立可隨任何 phase ship |
 | P3 | `ml_advisory.v1`（首個 L2 能力）接現有 ML 管線；cascade Ollama→math/leak→cloud | ⬜ 未啟 | cascade + 確定性 math gate 綠（promotion-relevant verdict 須 **B1 QC sign-off**） |

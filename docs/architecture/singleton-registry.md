@@ -344,6 +344,29 @@ per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-03--p5_sm_soak_observabi
 
 ---
 
+### §2.6 L2 Advisory Mesh — D3 Provenance & Audit writer（Phase 1，2026-06-08）
+
+per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-08--l2-d3-phase1-tech-design.md` §F + 執行方案 `docs/execution_plan/2026-06-05--l2-advisory-mesh-execution-plan.md` §2 Phase 1。L2（Layer 2 AI 推理）D3 取證帳本的唯一 sanctioned 寫入口（INSERT-only），把單次模型呼叫的完整（已消毒）prompt/response 落 `agent.l2_calls`（V134），並提供 append-only 寫入口給 `agent.l2_consequential_marks`（V134 side-table）與 `learning.l2_gate_seam_log`（V135）。消毒（`l2_secret_redactor` secret-pattern + `error_sanitize` str(e)→classified code）在 INSERT 之前跑、sha256 算在已消毒文本上。
+
+#### 2.6.1 `L2CallLedgerWriter`（module-level singleton `_WRITER`）
+
+| 欄位 | 值 |
+|---|---|
+| name | `L2CallLedgerWriter`（module-level binding `_WRITER`）|
+| type_signature | `L2CallLedgerWriter \| None`（module-level；holds `conn_provider` = `db_pool.get_pg_conn` 共享 psycopg2 ThreadedConnectionPool handle，與 `persist_lessons` 同源）|
+| location | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/l2_call_ledger_writer.py:364`（`_WRITER` binding）；class `:99`；getter `get_l2_call_ledger_writer():367` |
+| owner_lifecycle | lazy：首次 `get_l2_call_ledger_writer()` 構造；control_api worker process lifetime；無 live-trading lifecycle。`_reset_l2_call_ledger_writer_for_tests()` 僅供測試清空 |
+| cross_task_pattern | append-only INSERT，在 L2 advisory 迴圈上（`Layer2Engine._record_l2_call_to_ledger` → D3 write）；read 路徑為 forensic SELECT（P2+ orchestrator/forensic 查詢，本 P1 不含 reader）|
+| lock_primitive | 無 in-process lock：DB-level append-only（REVOKE UPDATE/DELETE，三表零 column-level UPDATE grant）為真正 guard；連線並發由 psycopg2 ThreadedConnectionPool 內部處理（per-borrow conn，短生命週期）|
+| visibility | module-internal singleton；公共寫入口 `record_l2_call()` / `record_consequential_mark()` / `record_gate_seam()`（全 INSERT-only）|
+| caller_chain | **producer**：`layer2_engine.py:323` `_record_l2_call_to_ledger`（def，內部 `:352` 呼 `get_l2_call_ledger_writer().record_l2_call(...)`）由 `_run_session_inner` `:655` 真接線（manual-trigger `POST /trigger` route → `run_session` → 首輪模型呼叫）（P1 已可達，非死碼）。**consumer**：forensic SELECT 讀者（`agent.l2_calls` / gate-seam / marks）為 P2+ orchestrator + fault-localization 協定查詢——P1 ledger reachable 由 producer 證明，reader 在 P2 接 |
+| health_monitoring | NO（P1）—— 建議 YES（silent D3-write 失敗 = lineage gap = root-principle-8 違反）；本 P1 為 fail-soft（ok=False 不 raise），health emitter 觀測為 P2+ follow-up（見下 migration_plan）|
+| registered_date | 2026-06-08 |
+| governance_authority | `2026-06-08--l2-d3-phase1-tech-design.md` §F + design v4-final §D + 執行方案 Phase 1 |
+| migration_plan | P2 接 reader（orchestrator forensic SELECT）+ lane appliers 呼 `record_consequential_mark`/`record_gate_seam`；建議 P2+ 補 health_monitoring（D3-write 失敗告警）；retention（§Q6 post-P1）落地時連同 drop 邏輯處理（P1 ledger 無 retention/compression）|
+
+---
+
 ## §3 Registration Rules
 
 ### §3.1 新登記前必做（PA / E1 / E2 共同）
