@@ -365,6 +365,32 @@ per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-08--l2-d3-phase1-tech-de
 | governance_authority | `2026-06-08--l2-d3-phase1-tech-design.md` §F + design v4-final §D + 執行方案 Phase 1 |
 | migration_plan | P2 接 reader（orchestrator forensic SELECT）+ lane appliers 呼 `record_consequential_mark`/`record_gate_seam`；建議 P2+ 補 health_monitoring（D3-write 失敗告警）；retention（§Q6 post-P1）落地時連同 drop 邏輯處理（P1 ledger 無 retention/compression）|
 
+#### 2.6.2 `L2AdvisoryOrchestrator`（module-level singleton `_ORCHESTRATOR`，Phase 2，2026-06-08）
+
+per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-08--l2-p2-orchestrator-tech-design.md` §A/§K + 執行方案 §2 Phase 2。L2 advisory 迴圈的 conductor（root principle 15，非第六 trading agent）：trigger → admission → capability dispatch → PromptContract → out-of-bound guard → D3 write → result routing（proposal 進既有被閘管線，非執行）。擁有 `Layer2Engine` 作為「眾多 executor 之一」。
+
+| 欄位 | 值 |
+|---|---|
+| name | `L2AdvisoryOrchestrator`（module-level binding `_ORCHESTRATOR`）|
+| type_signature | `L2AdvisoryOrchestrator \| None`（module-level；holds registry cache + `_AdmissionState`（per-capability debounce/dedup 窗口）+ fail-safe state + 注入式 cost_tracker/registry_loader）|
+| location | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/l2_advisory_orchestrator.py`（class；`_ORCHESTRATOR` binding；getter `get_l2_advisory_orchestrator()`）|
+| owner_lifecycle | lazy：首次 `get_l2_advisory_orchestrator()` 構造；control_api worker process lifetime；**無 live-trading lifecycle**。`_reset_l2_advisory_orchestrator_for_tests()` 僅供測試清空 |
+| cross_task_pattern | conductor of advisory loop；admission 決策 + dispatch 經 `L2CallLedgerWriter` 寫 D3 gate-seam（`record_gate_seam(gate_id="admission")`）|
+| lock_primitive | `threading.RLock`（reentrant；保護 fail-safe 狀態轉移 + registry reload + admission 窗口；`_admit` 持鎖再呼 `_cap_spend_today` 需重入）；per-capability in-process（無 DB lock；重啟乾淨 re-arm）|
+| visibility | module-internal singleton；公共入口 `dispatch(...)` / `status()`（唯讀）/ `reload_registry()` / `report_call_outcome()` / `reset_fail_safe()` |
+| caller_chain | **producer**：route `layer2_routes.py` `/orchestrator/status`（read）+ `/registry/reload`（operator write）+ `/orchestrator/fail-safe/reset`（operator write）→ `_get_orchestrator()` → singleton。**consumer**：經 `L2CallLedgerWriter.record_gate_seam` 寫 `learning.l2_gate_seam_log`（admission trigger_decision）。P3 接 event/schedule/threshold trigger surface 驅動 dispatch |
+| health_monitoring | NO（P2）—— 建議 YES（silent dispatch 失敗 = 無 advisory；fail-safe worst=NO_ADVICE=今日 baseline）；P3+ follow-up |
+| governance_authority | `2026-06-08--l2-p2-orchestrator-tech-design.md` §A + design v4-final §A.1/§F/§H + 執行方案 Phase 2 |
+| migration_plan | none（無 DB 表；registry=TOML SSOT；admission/adjudication state in-memory + 記 V135 gate-seam）。P3 接各 capability executor + parsed_output guard 完整路徑 |
+
+#### 2.6.3 admission controller — **orchestrator-internal state，無獨立 binding**
+
+per PA §K：admission 的 per-capability debounce/dedup/coalesce 窗口實作為 `L2AdvisoryOrchestrator._admission`（`_AdmissionState` dataclass，§2.6.2 內部 state），**非獨立 singleton**。無 separate binding；生命週期隨 §2.6.2。
+
+#### 2.6.4 conflict adjudicator — **stateless 純函數模塊，無 singleton row（§4.1 note）**
+
+per PA §K：`l2_conflict_adjudicator` 是 stateless 純函數模塊（`adjudicate_vs_gate` / `adjudicate_cross_capability` + literal `PRECEDENCE` dict），**無 mutable singleton**，故不需 singleton row。設計鐵律：裁決函數內零 model 呼叫（CC stress-test 6）。同理 `l2_capability_registry`（loader + `LANE_DIRECTION` 常數 + `effective_autonomy` 純函數）、`l2_prompt_contract_registry`（versioned 常數 registry）、`l2_out_of_bound_guard`（純確定性函數）皆 stateless，無 singleton。
+
 ---
 
 ## §3 Registration Rules

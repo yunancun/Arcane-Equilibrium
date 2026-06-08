@@ -33,7 +33,7 @@ full Linux regression + sqlx apply。
 | Phase | 內容 | 狀態 | Gate to next |
 |---|---|---|---|
 | P1 | D3 foundation：V134 `agent.l2_calls`+marks / V135 gate-seam / V136 上游 provenance / L2CallLedgerWriter / redactor v4 / cost_tracker 消毒 / 接線 | ✅ **green(pre-deploy) 2026-06-08** PA→E1→E2/E3/E4-LinuxPG/QA 全 PASS | owed-post-deploy: deployed-E2E + full Linux regression + sqlx apply（operator-gated）；殘留 naked+cap-straddle→P3 source-side |
-| P2 | Orchestrator + registry（無 `autonomy_level`，derived）+ PromptContract/schema + out-of-bound guard + admission(§F.1) + adjudication(§F.2)；**`LANE_DIRECTION` 落地** | ⬜ 未啟 | **CC** APPROVE no-auto-path-to-live + carbon-layer fence；fail-safe 不阻塞；write 端 operator-scope |
+| P2 | Orchestrator + registry + LANE_DIRECTION + PromptContract + guard + admission + adjudication + fail-safe（TOML-only，**0 migration**） | ✅ **green(pre-deploy) 2026-06-09** CC-A級/E2(2輪)/E3(2輪)/E4-parity/QA 全 PASS | owed-post-deploy: deployed-E2E + full Linux regression；殘留 P3-deferred（coarse_subject TTL 等）；P2 未 commit |
 | P2p | `incident_sentinel`（本地哨兵，alert-only，never remediate）—平行廉價 | ⬜ 未啟 | 獨立可隨任何 phase ship |
 | P3 | `ml_advisory.v1`（首個 L2 能力）接現有 ML 管線；cascade Ollama→math/leak→cloud | ⬜ 未啟 | cascade + 確定性 math gate 綠（promotion-relevant verdict 須 **B1 QC sign-off**） |
 | P4 | online-FDR research loop（α-wealth + V132 sealer + novelty + N_eff + Q3 cascade），tier-gated L3+ | ⬜ 未啟 | **MIT** APPROVE M1 + M2；sealed-holdout 證實 |

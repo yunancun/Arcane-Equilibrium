@@ -105,6 +105,13 @@ def _get_engine() -> Layer2Engine:
     return _engine
 
 
+def _get_orchestrator():
+    """取 L2AdvisoryOrchestrator singleton（lazy import 避免 boot-time import cost）。"""
+    from .l2_advisory_orchestrator import get_l2_advisory_orchestrator  # noqa: PLC0415
+
+    return get_l2_advisory_orchestrator()
+
+
 def _layer2_response(
     data: Any,
     action_result: str = "success",
@@ -357,9 +364,13 @@ async def reset_today_costs(
 ) -> dict[str, Any]:
     """
     Zero-out today's AI cost counters (claude_usd, search_usd, total_usd, session_count).
-    Operator action — useful for calibration after a test run.
-    将今日 AI 成本计数器归零（校准用途）。
+    将今日 AI 成本计数器归零（operator 校准用途）。
+
+    operator-scope WRITE（P2 budget-integrity）：歸零 DOC-08 $2/day counter 等於繞過
+    P2 admission storm-control 的 $2/day 硬閘（cap-bypass）；故與 /trigger、/registry/reload
+    同模式，state 變更前先 require_scope_and_operator，任何已認證 viewer 不得 reset。
     """
+    base.require_scope_and_operator(actor, "ai_budget:write")
     tracker = _get_cost_tracker()
     zeroed = tracker.reset_today_costs()
     return _layer2_response({
@@ -394,7 +405,12 @@ async def update_pricing(
     """
     Update pricing table entries.
     更新定价表条目。
+
+    operator-scope WRITE（P2 budget-integrity）：定價表驅動 cost 估算/預算閘判斷，改它
+    間接影響 DOC-08 $2/day 計帳；故與 /cost/reset 同模式，state 變更前先
+    require_scope_and_operator，任何已認證 viewer 不得改定價表。
     """
+    base.require_scope_and_operator(actor, "ai_budget:write")
     tracker = _get_cost_tracker()
     updates: dict[str, Any] = {}
     if req.models:
@@ -650,3 +666,95 @@ async def delete_provider_key(
         **result,
         "provider_status": provider_keys_store.status(),
     })
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# L2 Advisory Mesh — Orchestrator + Registry 路由（PA P2 設計 §A/§B；route 薄 parse→call→format）
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# P2 budget-integrity 不變式（re-E2 fold-in）：本檔每個改變 state 的 WRITE endpoint =
+# operator-scope（reuse 既有 require_scope_and_operator "ai_budget:write"）；reads 唯讀不可
+# mutate。涵蓋 /trigger（:254）、/cost/reset（:373）、/cost/pricing（:413）、/registry/reload
+# （:731）、/orchestrator/fail-safe/reset（:757）。/cost/reset 與 /cost/pricing 先前只有
+# Depends(current_actor)（任何已認證者可歸零 DOC-08 counter＝繞過 P2 $2/day storm-control
+# 硬閘），本輪補上 require_scope_and_operator 收口；此註釋現為實況（先前誤稱已 scope 化）。
+
+
+@layer2_router.get("/orchestrator/status")
+def get_orchestrator_status(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """GET orchestrator 唯讀狀態（fail-safe state / 已註冊 capability / LANE_DIRECTION）。
+
+    唯讀：僅讀 status 投影，不可 mutate（E3-E1：read 路徑無 state 變更）。
+    """
+    orch = _get_orchestrator()
+    return _layer2_response({"orchestrator": orch.status()})
+
+
+@layer2_router.get("/registry/capabilities")
+def get_registry_capabilities(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """GET 已載入 capability registry（唯讀；P2 skeleton 預期空）。
+
+    fail-closed：載入失敗回 reject reason，不靜默吞。
+    """
+    from .l2_capability_registry import load_capability_registry, L2RegistryLoadError  # noqa: PLC0415
+
+    try:
+        reg = load_capability_registry()
+    except L2RegistryLoadError as exc:
+        return _layer2_response(
+            {"error": "registry_load_rejected", "detail": str(exc)},
+            action_result="blocked",
+            reason_codes=["l2_registry_load_rejected"],
+        )
+    return _layer2_response(
+        {
+            "meta": reg.meta,
+            "capabilities": {cid: c.model_dump() for cid, c in reg.capabilities.items()},
+            "enabled": [c.capability_id for c in reg.enabled_capabilities()],
+        }
+    )
+
+
+@layer2_router.post("/registry/reload")
+async def reload_registry(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """POST 重載 capability registry TOML（operator 改 TOML 後生效）。
+
+    operator-scope WRITE（E3-E1）：reuse require_scope_and_operator。fail-closed：載入失敗
+    回 reject（不切換到壞 registry）。
+    """
+    base.require_scope_and_operator(actor, "ai_budget:write")
+    from .l2_capability_registry import load_capability_registry, L2RegistryLoadError  # noqa: PLC0415
+
+    try:
+        reg = load_capability_registry()  # 先驗載入成功（壞 config 直接 reject，不換）
+    except L2RegistryLoadError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_codes": ["l2_registry_load_rejected"], "detail": str(exc)},
+        )
+    orch = _get_orchestrator()
+    orch.reload_registry()
+    return _layer2_response(
+        {"reloaded": True, "registered": sorted(reg.capabilities.keys())}
+    )
+
+
+@layer2_router.post("/orchestrator/fail-safe/reset")
+async def reset_orchestrator_fail_safe(
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """POST 手動清 fail-safe 狀態回 HEALTHY（operator）。
+
+    operator-scope WRITE（E3-E1）。鐵律：此操作只「恢復」L2 能力，不寫任何 live-enabling
+    state（reset_fail_safe 內無 live-config / promote_tier）。
+    """
+    base.require_scope_and_operator(actor, "ai_budget:write")
+    orch = _get_orchestrator()
+    orch.reset_fail_safe()
+    return _layer2_response({"fail_safe_state": orch.status()["fail_safe_state"]})
