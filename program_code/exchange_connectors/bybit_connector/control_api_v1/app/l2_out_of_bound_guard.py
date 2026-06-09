@@ -11,9 +11,15 @@ MODULE_NOTE
 主要類/函數：
   - GuardResult：dataclass（verdict / clamped_output / kinds_hit）。
   - guard_output(parsed_output, *, guard_ref, context):純確定性函數，跑通用 clause。
-  - get_guard(guard_ref):registry 查詢（P2 通用 guard；capability-specific clause 在 P3）。
+  - _guard_ml_advisory_v1(parsed_output, *, context):P3a capability-specific clauses
+    （M3 source_class typing / regime_caveat when bull-only / axes-subset）。
+  - get_guard(guard_ref):callable registry 查詢（P2 是 ref echo；P3 回 callable）。
+  - run_guard(parsed_output, *, guard_ref, context):依 guard_ref 路由到對應 guard callable。
 
-依賴：無 model、無 DB；純函數 + 確定性 bounds。
+依賴：
+  - 無 model、無 DB；純函數 + 確定性 bounds。
+  - l2_prompt_contract_registry 的 M3 source_class 常數（ML_ADVISORY_LEAK_SOURCE_CLASSES /
+    ML_ADVISORY_LEAKFREE_SOURCE_CLASSES）+ per-mode 必填欄（單一 source，不複製字面集合）。
 
 硬邊界：
   - 確定性：guard 內**無 model 呼叫**（CC/E2 grep target）；同輸入永得同 verdict。
@@ -21,6 +27,10 @@ MODULE_NOTE
     （logged-and-dropped）。
   - clamp ⇒ clamped_output 才是後續使用的值（非原始幻覺值）。
   - 純 guard：無 order surface、無 lease、無 promote。
+  - guard 抓「形」（M3 typing / regime_caveat 缺漏 / 捏造軸），math gate 抓「實」；P3a 無 alpha
+    math gate（diagnose/interpret 斷言無 alpha），故 guard 的 M3 typing 是 P3a 主要 gate。
+  - GUARD_REGISTRY 是 module-level 不可變 dict（frozen at import；stateless，無 mutable singleton，
+    對齊 singleton-registry.md:392「l2_out_of_bound_guard 純確定性函數，無 singleton」）。
 """
 
 from __future__ import annotations
@@ -151,12 +161,175 @@ def guard_output(
     return GuardResult(verdict="pass", clamped_output=out, kinds_hit=[])
 
 
-def get_guard(guard_ref: str) -> str:
-    """registry 查詢佔位（P2 僅通用 guard_output；capability-specific guard 在 P3 註冊）。
+# ═══════════════════════════════════════════════════════════════════════════════
+# P3a — ml_advisory.guard.v1 capability-specific clauses（PA P3 設計 §H；確定性，無 model）
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 為什麼這些 clause：diagnose/interpret 輸出的「形」風險不同於通用 leverage/size 幻覺——是
+#   (1) M3 leak source_class typing（name_pattern_check 不得宣稱 leak-free PIT）；
+#   (2) interpret 宣稱 promotion-ready 卻缺 regime_caveat 且 metrics 標 bull-only → reject；
+#   (3) signal_axes_used ⊄ available_signal_axes（捏造資料軸）→ reject。
+# guard 抓形、math gate 抓實；P3a 無 alpha math gate，故 M3 typing 是 P3a 的主 gate（design §D）。
 
-    回傳 guard_ref 本身作為 echo（P2 無多 guard 變體）；P3 改為回 callable registry。
+
+def _guard_ml_advisory_v1(
+    parsed_output: dict[str, Any] | None,
+    *,
+    context: dict[str, Any] | None = None,
+) -> GuardResult:
+    """ml_advisory.guard.v1：先跑通用 clause，再跑 P3a capability-specific clause（確定性）。
+
+    為什麼先呼 guard_output：通用 clause（schema-nonconformant / 負成本 / leverage-size / 通用
+    axes）仍適用——ml_advisory 輸出若混入這些幻覺向量同樣該擋。capability-specific clause 疊加在
+    其上（M3 typing / regime_caveat / per-mode 必填 / signal_axes_used 軸檢）。任一 reject → reject。
+
+    clause（design §E.2(0) lines 868-873 + §F M3）：
+      A. per-mode 必填子物件：mode ∈ {diagnose_leak, interpret_result}（P3a），且對應子物件存在；
+         未知 mode（含 hypothesize=P3b）或缺子物件 → reject（fail-closed）。
+      B. M3 source_class typing（diagnose_leak）：evidence[].source_class 必 ∈ 合法集合；任何宣稱
+         leak-free PIT（leak_free=true / pit_verified=true）卻 source_class ∉ leak-free 集合
+         （只有 shift1_compliance/is_oos_gap 可，P3a 無這兩 producer）→ reject。
+      C. regime_caveat（interpret_result）：宣稱 promotion-ready（promotion_ready=true）卻缺非空
+         regime_caveat 且 context 標 bull-only → reject（Alpha Evidence Governance）。
+      D. signal_axes_used ⊄ available_signal_axes → reject（捏造資料軸；§H clause 1）。
     """
-    return guard_ref
+    # 動態 import 避免模塊載入期循環（contract registry import layer2_engine；本 guard 不應在
+    # import 期被牽連）。常數來自 contract registry（single source，不複製字面集合）。
+    from . import l2_prompt_contract_registry as _contracts  # noqa: PLC0415
+
+    ctx = context or {}
+
+    # 先跑通用 clause（schema / 負成本 / leverage-size / 通用 referenced_signal_axes）。
+    base = guard_output(parsed_output, guard_ref="ml_advisory.guard.v1", context=ctx)
+    if base.verdict == "reject":
+        return base  # 通用層已 reject（如 None / 非 dict / 負成本）→ 直接回。
+
+    # base.clamped_output 是通用層處理後的 output（pass/clamp 皆有值）。後續 clause 在其上跑。
+    out = base.clamped_output if base.clamped_output is not None else dict(parsed_output or {})
+    extra_kinds = list(base.kinds_hit)  # 保留通用層的 clamp 記錄
+
+    # ── clause A：per-mode 必填子物件（fail-closed：未知 mode / 缺子物件 → reject）──
+    mode = out.get("mode")
+    required = _contracts.ML_ADVISORY_MODE_REQUIRED_FIELDS.get(str(mode)) if mode is not None else None
+    if required is None:
+        # 未知/缺 mode（含 hypothesize=P3b 不在 P3a 表）→ reject（不放行未知模式輸出）。
+        return GuardResult(
+            verdict="reject", clamped_output=None,
+            kinds_hit=[f"unknown_or_missing_mode:{mode}"],
+        )
+    missing = [f for f in required if f not in out]
+    if missing:
+        return GuardResult(
+            verdict="reject", clamped_output=None,
+            kinds_hit=[f"missing_mode_field:{','.join(missing)}"],
+        )
+
+    # ── clause B：M3 source_class typing（diagnose_leak）──
+    if mode == "diagnose_leak":
+        diag = out.get("leak_drift_diagnosis")
+        if not isinstance(diag, dict):
+            return GuardResult(
+                verdict="reject", clamped_output=None,
+                kinds_hit=["leak_drift_diagnosis_not_object"],
+            )
+        evidence = diag.get("evidence")
+        if isinstance(evidence, (list, tuple)):
+            for ev in evidence:
+                if not isinstance(ev, dict):
+                    continue
+                sc = ev.get("source_class")
+                # B.1：source_class 必填且 ∈ 合法集合（M3 typing 強制；缺/非法 → reject）。
+                if sc is None or sc not in _contracts.ML_ADVISORY_LEAK_SOURCE_CLASSES:
+                    return GuardResult(
+                        verdict="reject", clamped_output=None,
+                        kinds_hit=[f"invalid_leak_source_class:{sc}"],
+                    )
+                # B.2：任何 leak-free PIT 斷言（leak_free/pit_verified）卻 source_class 不在
+                # leak-free 集合（只有 shift1_compliance/is_oos_gap 可）→ reject。P3a 只有
+                # name_pattern_check producer，故任何 leak-free 斷言在 P3a 必被擋（M3 鐵律）。
+                claims_leakfree = bool(ev.get("leak_free")) or bool(ev.get("pit_verified"))
+                if claims_leakfree and sc not in _contracts.ML_ADVISORY_LEAKFREE_SOURCE_CLASSES:
+                    return GuardResult(
+                        verdict="reject", clamped_output=None,
+                        kinds_hit=[f"leakfree_claim_unsupported_by_source_class:{sc}"],
+                    )
+
+    # ── clause C：regime_caveat when bull-only（interpret_result）──
+    if mode == "interpret_result":
+        interp = out.get("result_interpretation")
+        if not isinstance(interp, dict):
+            return GuardResult(
+                verdict="reject", clamped_output=None,
+                kinds_hit=["result_interpretation_not_object"],
+            )
+        # bull-only 來自 context（metrics 標籤）或 output 自帶旗標。promotion_ready 斷言來自 output。
+        bull_only = bool(ctx.get("bull_only")) or bool(interp.get("bull_only"))
+        promotion_ready = bool(interp.get("promotion_ready"))
+        regime_caveat = interp.get("regime_caveat")
+        has_caveat = isinstance(regime_caveat, str) and regime_caveat.strip() != ""
+        # 宣稱 promotion-ready 且 bull-only 卻無 regime_caveat → reject（Alpha Evidence Governance）。
+        if promotion_ready and bull_only and not has_caveat:
+            return GuardResult(
+                verdict="reject", clamped_output=None,
+                kinds_hit=["promotion_ready_bull_only_missing_regime_caveat"],
+            )
+
+    # ── clause D：signal_axes_used ⊄ available_signal_axes（捏造資料軸）──
+    available_axes = ctx.get("available_signal_axes")
+    axes_used = out.get("signal_axes_used")
+    if available_axes is not None and isinstance(axes_used, (list, tuple)):
+        allowed = set(available_axes)
+        invented = [a for a in axes_used if a not in allowed]
+        if invented:
+            return GuardResult(
+                verdict="reject", clamped_output=None,
+                kinds_hit=[f"invented_signal_axis:{','.join(map(str, invented))}"],
+            )
+
+    # 全 clause 過：沿用通用層的 verdict（pass 或 clamp，保留 clamp 記錄）。
+    return GuardResult(
+        verdict=base.verdict,
+        clamped_output=out,
+        kinds_hit=extra_kinds,
+    )
+
+
+# ── callable guard registry（module-level 不可變 dict；frozen at import；stateless）──
+# 為什麼 module-level 不可變 dict 而非 mutable singleton：對齊 singleton-registry.md:392
+# 「l2_out_of_bound_guard 純確定性函數，無 singleton」。registry 在 import 期一次建成，runtime
+# 不 mutate；同 guard_ref 永得同 callable（確定性）。新 capability guard 在此表加一個 entry。
+_GUARD_REGISTRY: dict[str, Any] = {
+    "ml_advisory.guard.v1": _guard_ml_advisory_v1,
+}
+
+
+def get_guard(guard_ref: str) -> Any:
+    """callable guard registry 查詢（P3：回 callable；未註冊 ref → None）。
+
+    為什麼回 callable（非 P2 的 ref echo）：P3 起 capability 有各自 guard clause（ml_advisory.guard.v1
+    等）。orchestrator/executor 以 guard_ref 取對應 callable 跑。未註冊 ref 回 None，呼叫端退回通用
+    guard_output（fail-safe：未知 guard_ref 不致命，仍跑通用結構網）。
+    """
+    return _GUARD_REGISTRY.get(guard_ref)
+
+
+def run_guard(
+    parsed_output: dict[str, Any] | None,
+    *,
+    guard_ref: str = "",
+    context: dict[str, Any] | None = None,
+) -> GuardResult:
+    """依 guard_ref 路由：命中 registry → 跑該 capability guard；否則 → 通用 guard_output。
+
+    為什麼提供 run_guard（而非讓 caller 自己查 + 呼）：把「查 registry → 退通用」的路由收斂在一處，
+    orchestrator/executor 只需呼 run_guard(parsed, guard_ref=cap.out_of_bound_guard_ref, context=...)。
+    確定性、無 model。
+    """
+    fn = get_guard(guard_ref)
+    if fn is not None:
+        return fn(parsed_output, context=context)
+    # 未註冊 guard_ref（含 P2 的 ""）→ 退通用 guard_output（fail-safe）。
+    return guard_output(parsed_output, guard_ref=guard_ref, context=context)
 
 
 __all__ = [
@@ -164,4 +337,5 @@ __all__ = [
     "GuardResult",
     "guard_output",
     "get_guard",
+    "run_guard",
 ]

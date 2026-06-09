@@ -18,24 +18,25 @@ body 並閉合；3 re-confirm（QC B1 / MIT M1 / MIT M2）= **ENDORSE**。
 
 ## §2 Next action
 
-**P1 D3 已過 pre-deploy green gate（2026-06-08）。** 全鏈 PA→E1→E2(PASS)→E3(sanitize gate PASS)→
-E4(Linux PG `trading_postgres` 雙-apply 冪等 + trading.fills columnstore ADD COLUMN safe + prod
-`_sqlx_migrations` 仍 133 零觸碰)→QA(8/8 驗收 MET) 全綠。**P1 全部未 commit 在 dirty tree**；branch
-`feature/l2-critic-lessons-tools` HEAD `6d312405` = **17 ahead / 25 behind** origin/main `bdf15e4f`
-（sibling re-land，redactor 檔零衝突，merge 前需 reconcile=operator-gated；Mac workflow 禁 rebase/merge）。
-待 operator 拍：① commit 處置（建議 scoped-commit 綠檢查點，`git commit --only` 隔離他 session WIP）
-② **gate-to-P2**（Orchestrator+registry+contracts+guard+admission+adjudication+LANE_DIRECTION，**CC
-linchpin** no-auto-path-to-live，全 capability enabled=false）。owed-post-deploy: deployed-E2E +
-full Linux regression + sqlx apply。
+**P1 D3 + P2 Orchestrator + P3a ml_advisory 皆過 pre-deploy green gate 並 scoped-commit（2026-06-09）。**
+- **P1 = `f1c3c1ca`**：V134-136 ledger+marks/gate-seam/上游 provenance + redactor v4 + 接線。
+- **P2 = `6a9dd0f1`**：Orchestrator+registry+LANE_DIRECTION+admission+F.2+fail-safe（TOML-only，0 migration）。
+- **P3a**（本 checkpoint）：ml_advisory diagnose_leak+interpret_result（無 alpha；cascade Ollama screen M4→leak/diag gate M3→cloud-L2 interpret survivors；**sink=agent.lessons inert**——閉了原 mlde_shadow_recommendations 被 active `mlde_demo_applier` 掃描去 mutate demo 配置的 S-2 安全洞）；E2(3輪)/E3(完整)/MIT(M3+M4 GRANTED)/E4(Linux parity + agent.lessons INSERT 權 confirmed)/QA 全綠。
+- 他 session WIP 全程 scoped 隔離未動。
+
+**next = P3b track ACTIVE（2026-06-09 operator 開）**：`hypothesize→promotion`（alpha-bearing）blocked on——**QC**：B1 four final numbers + **altcap cap-weighted basket 構造規範（data 不存在=最大 gap）** + Q1 threshold；**MIT**：shift1_compliance/is_oos_gap producer + M4 benchmark artifact + down-market regime(V127) population。QC+MIT 出 spec → PA 設計 → E1 build beta_neutral_check + altcap producer + hypothesize 模式。
+
+**owed（operator-gated/timed）**：① branch divergent，merge 前需 rebase（operator 處置）② **deploy 活化整個 P1+P2+P3a bundle**：push → control_api restart + V134/135/136 經 auto-migrate apply（prod 現 `_sqlx_migrations`=133，V134-136 未 apply）③ deployed-E2E（需 V134 deploy + conductor trigger）④ full Linux regression post-push ⑤ minor: parents[5] eager-default nit / cap-mode 一致性斷言（conductor wiring 時加）。
 
 ## §3 Phase checklist（建置序 = 設計 §J；每 phase green-gated）
 
 | Phase | 內容 | 狀態 | Gate to next |
 |---|---|---|---|
 | P1 | D3 foundation：V134 `agent.l2_calls`+marks / V135 gate-seam / V136 上游 provenance / L2CallLedgerWriter / redactor v4 / cost_tracker 消毒 / 接線 | ✅ **green(pre-deploy) 2026-06-08** PA→E1→E2/E3/E4-LinuxPG/QA 全 PASS | owed-post-deploy: deployed-E2E + full Linux regression + sqlx apply（operator-gated）；殘留 naked+cap-straddle→P3 source-side |
-| P2 | Orchestrator + registry + LANE_DIRECTION + PromptContract + guard + admission + adjudication + fail-safe（TOML-only，**0 migration**） | ✅ **green(pre-deploy) 2026-06-09** CC-A級/E2(2輪)/E3(2輪)/E4-parity/QA 全 PASS | owed-post-deploy: deployed-E2E + full Linux regression；殘留 P3-deferred（coarse_subject TTL 等）；P2 未 commit |
+| P2 | Orchestrator + registry + LANE_DIRECTION + PromptContract + guard + admission + adjudication + fail-safe（TOML-only，**0 migration**） | ✅ **green+committed `6a9dd0f1` 2026-06-09** CC-A級/E2(2輪)/E3(2輪)/E4-parity/QA 全 PASS | owed-post-deploy: deployed-E2E + full Linux regression |
 | P2p | `incident_sentinel`（本地哨兵，alert-only，never remediate）—平行廉價 | ⬜ 未啟 | 獨立可隨任何 phase ship |
-| P3 | `ml_advisory.v1`（首個 L2 能力）接現有 ML 管線；cascade Ollama→math/leak→cloud | ⬜ 未啟 | cascade + 確定性 math gate 綠（promotion-relevant verdict 須 **B1 QC sign-off**） |
+| P3a | `ml_advisory.v1` diagnose_leak+interpret_result（無 alpha；cascade Ollama→leak/diag gate M3→cloud；**sink=agent.lessons inert**）| ✅ **green(pre-deploy) 2026-06-09** E2(3輪)/E3/MIT(M3+M4)/E4-parity+agent.lessons-grant/QA 全 PASS | owed-post-deploy: deployed-E2E（需 V134 deploy + conductor trigger）+ full Linux regression |
+| P3b | `hypothesize→promotion`（alpha-bearing）+ beta_neutral_check（B1）| 🔬 **track ACTIVE 2026-06-09**（QC B1/altcap + MIT shift1/is_oos/M4 benchmark）| blocked: altcap basket 構造（data 不存在）+ QC B1 final + shift1/is_oos producer + L3 tier |
 | P4 | online-FDR research loop（α-wealth + V132 sealer + novelty + N_eff + Q3 cascade），tier-gated L3+ | ⬜ 未啟 | **MIT** APPROVE M1 + M2；sealed-holdout 證實 |
 | P5 | feedback→rule pipeline(§M) + quality/ROI metric(§O) + GUI panel（vanilla JS） | ⬜ 未啟 | **CC** APPROVE no-auto-expansion linchpin + read-only promote inbox；math-primary live packet |
 

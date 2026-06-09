@@ -110,12 +110,146 @@ _MANUAL_SCHEMA = OutputSchema(
     required_fields=(),  # manual capability 用既有 submit_recommendation tool schema，不在此重述
 )
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# P3a — ml_advisory 兩模式 PromptContract + OutputSchema（PA P3 設計 §C/§D；確定性 versioned）
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 鐵律（同 manual）：template 是 checked-in 字面常數，Ollama/任何 model 禁生成。三模式共用「一個」
+# output-schema ml_advisory.v1（PA 設計 §E.2(0)），但各有「獨立」versioned PromptContract（role
+# 不同）。P3a 只註冊 diagnose_leak + interpret_result（斷言無 alpha）；hypothesize（P3b，alpha-
+# bearing）blocked on QC B1，不在本 phase。
+#
+# 為什麼 contract_ver/schema_ver 是顯式字面常數（非沿用引擎常數）：ml_advisory 是 P3 新 capability，
+# 與既有 l2.manual_reasoning 是不同契約。每個 ref 永得同模板（versioned）；契約變更必 bump 新 ver。
+# 這兩個 ver 由 resolve_contract_versions 寫進每 D3 row（fault-localization replay 用）。
+
+# 共用輸出 schema（三模式共用「一個」schema ml_advisory.v1；PA 設計 §C line 140）。mode 欄驅動哪個
+# 子物件被填（design §E.2(0) line 858 mode:"hypothesize|diagnose_leak|interpret_result"）。schema
+# 版本獨立於 contract 版本（schema 可不變而 prompt 演進）。
+#
+# 為什麼三模式共用一個 schema（非各自一個）：PA §C「one output-schema ml_advisory.v1」。required_fields
+# 只列「mode」（所有模式共有的識別欄）；per-mode 必填子物件（diagnose→leak_drift_diagnosis、
+# interpret→result_interpretation）的強制在「executor + guard」層（按 mode 分流），非 schema 層
+# ——避免 resolve_contract_versions 在共用 schema_ref 下解析到錯誤 required_fields 物件。
+_ML_ADVISORY_SCHEMA_VER = "ml_advisory_schema.v1"
+
+_ML_ADVISORY_SCHEMA = OutputSchema(
+    schema_ref="ml_advisory.v1",
+    schema_ver=_ML_ADVISORY_SCHEMA_VER,
+    # 只列共有的 mode 欄；per-mode 子物件必填由 executor/guard 按 mode 強制（見 MODULE_NOTE）。
+    required_fields=("mode",),
+)
+
+# per-mode 必填子物件（executor/guard 按 output["mode"] 分流強制；schema 層只驗共有的 mode 欄）。
+ML_ADVISORY_MODE_REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
+    "diagnose_leak": ("mode", "leak_drift_diagnosis"),
+    "interpret_result": ("mode", "result_interpretation"),
+    # hypothesize 是 P3b（alpha-bearing），P3a 不含——故此表無 hypothesize key（fail-closed：
+    # 未知 mode 在 executor 被 reject，不會被誤當合法模式）。
+}
+
+# M3 leak-typing 合法 source_class（design §E.2(0) line 864）。P3a 只有 name_pattern_check 這個
+# producer 存在（leakage_check.py）；shift1_compliance / is_oos_gap 是 MIT-owned producer（P3b leak
+# precondition）尚未存在，但合法值集合須含三者，使 guard 能 typing-強制：name_pattern_check 不得
+# 宣稱 leak-free PIT（只有 shift1_compliance/is_oos_gap 可），P3a 的 diagnose 證據一律 typed 為
+# name_pattern_check 且不宣稱 leak-free。
+ML_ADVISORY_LEAK_SOURCE_CLASSES: frozenset[str] = frozenset(
+    {"name_pattern_check", "shift1_compliance", "is_oos_gap"}
+)
+
+# 能支撐「leak-free PIT」斷言的 source_class（design §E.2(0) lines 894-900）。name_pattern_check
+# 不在其中（weak necessary-not-sufficient screen）；P3a 無這兩個 producer，故任何 leak-free PIT
+# 斷言在 P3a 必被 guard reject（typing 強制 M3）。
+ML_ADVISORY_LEAKFREE_SOURCE_CLASSES: frozenset[str] = frozenset(
+    {"shift1_compliance", "is_oos_gap"}
+)
+
+# diagnose_leak 的 PromptContract（role=診斷 leak/drift；確定性模板）。
+# 為什麼 template 明確要求 tag source_class + 禁 leak-free 斷言：M3（design §E.2(0) lines 884-903）
+# ——name_pattern_check 是 weak necessary-not-sufficient screen，ml_advisory 不得宣稱 leakage_check
+# 輸出 = leak-free PIT。typing 強制此。constraints 宣告「LLM 不驗 alpha」鐵律。
+_ML_ADVISORY_DIAGNOSE_CONTRACT = PromptContract(
+    contract_ref="ml_advisory.diagnose_leak.v1",
+    contract_ver="ml_advisory_diagnose.v1",
+    output_schema_ref="ml_advisory.v1",
+    schema_ver=_ML_ADVISORY_SCHEMA_VER,
+    role="ML pipeline leakage/drift diagnostician（advisory-only；asserts NO alpha）",
+    template=(
+        "You are a deterministic ML-pipeline leakage/drift diagnostician for a crypto "
+        "trading research system. You are given a completed training run's metrics, the "
+        "leakage_check findings (name-pattern only), and drift signals. Your job is to "
+        "diagnose suspected leak/drift causes and recommend a concrete follow-up CHECK.\n"
+        "HARD CONSTRAINTS:\n"
+        "- You make NO alpha claim and NO promotion-readiness claim. You only diagnose "
+        "pipeline integrity. You do not validate whether any signal has edge.\n"
+        "- Every leak/PIT claim in your evidence[] MUST carry a source_class. The only "
+        "evidence you have here is name_pattern_check (leakage_check.py). You MUST NOT "
+        "claim leak-free point-in-time integrity backed only by name_pattern_check — it "
+        "is a necessary-not-sufficient screen. A leak-free PIT assertion requires "
+        "shift1_compliance and/or is_oos_gap evidence, which is NOT provided here.\n"
+        "- Cite the exact metric/finding you reason from (source_ref).\n"
+        "Respond with ONLY a compact JSON object: "
+        '{"mode":"diagnose_leak","leak_drift_diagnosis":{"suspected_cause":"...",'
+        '"evidence":[{"claim":"...","kind":"leak|drift","source_ref":"...",'
+        '"source_class":"name_pattern_check"}],"recommended_check":"..."}}'
+    ),
+    constraints=(
+        "ALL output is advisory only（AI 輸出非命令，須經 Decision Lease + 風控；direction=neutral）",
+        "asserts NO alpha（diagnose 不作 promotion-relevant 斷言，無 alpha 需驗）",
+        "name_pattern_check is NOT leak-free PIT（M3：source_class typing 強制）",
+        "the LLM NEVER validates alpha（math gate 是唯一 validator；P3a 無 alpha gate）",
+        "distinguish facts / inferences / assumptions（事實/推論/假設分離）",
+    ),
+    uncertainty_rule="證據不足以定因 → suspected_cause='inconclusive' 並建議更強的 check（保守）",
+)
+
+# interpret_result 的 PromptContract（role=解讀訓練結果；regime_caveat when bull-only）。
+# 為什麼 template 明確要求 regime_caveat：out-of-bound guard 對「宣稱 promotion-ready 卻缺
+# regime_caveat 且 metrics 標 bull-only」的 interpretation reject（design §E.2(0) line 872 +
+# Alpha Evidence Governance：bull-only 結果是 regime-bet/learning-only，非 promotion proof）。
+_ML_ADVISORY_INTERPRET_CONTRACT = PromptContract(
+    contract_ref="ml_advisory.interpret_result.v1",
+    contract_ver="ml_advisory_interpret.v1",
+    output_schema_ref="ml_advisory.v1",
+    schema_ver=_ML_ADVISORY_SCHEMA_VER,
+    role="ML training-result interpreter（advisory-only；asserts NO alpha；separates signal from regime）",
+    template=(
+        "You are a deterministic interpreter of a completed ML training run for a crypto "
+        "trading research system. You are given the run's metrics, feature importances, "
+        "and the regime label under which it was trained. Your job is to give a sober "
+        "reading of what the result means, separating a genuine signal from a regime "
+        "artifact.\n"
+        "HARD CONSTRAINTS:\n"
+        "- You make NO alpha claim and NO promotion-readiness claim. You only interpret. "
+        "A bull-only / rally-dominated / single-regime result is a regime-bet / "
+        "learning-only observation, NOT promotion proof.\n"
+        "- If the result is bull-only or rally-dominated, you MUST populate regime_caveat "
+        "explaining the regime dependence. Do not present a regime-conditional result as "
+        "regime-robust.\n"
+        "- Do not invent signal axes that are not present in the feature set.\n"
+        "Respond with ONLY a compact JSON object: "
+        '{"mode":"interpret_result","result_interpretation":{"reading":"...",'
+        '"regime_caveat":"...","confidence":"low|medium|high"}}'
+    ),
+    constraints=(
+        "ALL output is advisory only（direction=neutral；AI≠命令）",
+        "asserts NO alpha（interpret 不作 promotion-relevant 斷言）",
+        "bull-only/rally-dominated = regime-bet/learning-only（Alpha Evidence Governance）",
+        "regime_caveat mandatory when bull-only（out-of-bound guard 強制）",
+        "the LLM NEVER validates alpha（P3a 無 alpha gate）",
+    ),
+    uncertainty_rule="無法分離 signal vs regime → confidence='low' + regime_caveat 說明依賴（保守）",
+)
+
 _PROMPT_CONTRACTS: dict[str, PromptContract] = {
     _MANUAL_CONTRACT.contract_ref: _MANUAL_CONTRACT,
+    _ML_ADVISORY_DIAGNOSE_CONTRACT.contract_ref: _ML_ADVISORY_DIAGNOSE_CONTRACT,
+    _ML_ADVISORY_INTERPRET_CONTRACT.contract_ref: _ML_ADVISORY_INTERPRET_CONTRACT,
 }
 
 _OUTPUT_SCHEMAS: dict[str, OutputSchema] = {
     _MANUAL_SCHEMA.schema_ref: _MANUAL_SCHEMA,
+    _ML_ADVISORY_SCHEMA.schema_ref: _ML_ADVISORY_SCHEMA,
 }
 
 # capability_id → 種子 contract_ref（P2 僅 manual；P3 capabilities 自帶 prompt_contract_ref）。
@@ -164,6 +298,9 @@ def resolve_contract_versions(
 __all__ = [
     "PromptContract",
     "OutputSchema",
+    "ML_ADVISORY_MODE_REQUIRED_FIELDS",
+    "ML_ADVISORY_LEAK_SOURCE_CLASSES",
+    "ML_ADVISORY_LEAKFREE_SOURCE_CLASSES",
     "get_prompt_contract",
     "get_output_schema",
     "resolve_contract_versions",
