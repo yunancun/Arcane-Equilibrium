@@ -64,6 +64,22 @@ def _utc_day(ts: float) -> str:
     return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
 
 
+# ── coarse_subject DoS 防護常數（E3 P3-flag：dedup_key 含 coarse_subject 無 evict → memory DoS）──
+#
+# 為什麼需要：dedup_key = capability_id|spec|coarse_subject。若 coarse_subject 高基數（攻擊者
+# 餵不同 subject 繞 dedup），last_served_ts / debounce_pending 會無界增長（每個 distinct subject
+# 一永久 key；P3 接 executor 即活、無 healthcheck 可察 → memory DoS）。兩道防護：
+#   (1) server-derive 低基數 coarse_subject（_derive_coarse_subject）——把任意 input 正規化進
+#       有界集合（已知 symbol/strategy token，否則落 "other" 桶），上游無法吹爆基數。
+#   (2) TTL + maxsize eviction（_evict_admission_windows）——admission 窗口本就是「近窗口去重」，
+#       過 TTL 的 key 永不再被讀（dedup 窗 = max(debounce,1)，遠短於 TTL），可安全清；maxsize
+#       是硬上限兜底（即便低基數 derive 失效仍有界）。
+_ADMISSION_KEY_TTL_SECS = 86_400.0  # dedup/debounce key 存活上限（24h；遠超任何 debounce 窗）
+_ADMISSION_KEY_MAXSIZE = 4_096  # last_served_ts / debounce_pending 各自硬上限（兜底）
+# 低基數 coarse_subject 字符上限（再長一律截斷 + 標記，防單一超長 subject 當 unique key）。
+_COARSE_SUBJECT_MAXLEN = 48
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Fail-safe 狀態機（§H）—— 鐵律：每態「減去」L2 能力，worst=NO_ADVICE=今日 baseline
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -122,6 +138,52 @@ class _AdmissionState:
         stale = [k for k in self.cap_daily_spend if k[1] != today]
         for k in stale:
             del self.cap_daily_spend[k]
+
+    def _evict_admission_windows(self, now: float) -> None:
+        """TTL + maxsize 驅逐 last_served_ts / debounce_pending（E3 coarse_subject DoS 防護）。
+
+        為什麼安全：admission 窗口是「近窗口去重」——dedup 只比 (now-last)<max(debounce,1)，
+        debounce pending 只比 (now-first)<debounce_secs；兩者窗口都 ≪ TTL（24h）。過 TTL 的 key
+        早已超出任何去重窗口、永不再被讀，清除不改任何去重判定（被清的 key 下次來等同新 key，
+        本就該重新計窗）。maxsize 是硬上限兜底（即便低基數 derive 失效仍有界）：超限時驅逐最舊。
+        呼叫端須持鎖（在 _admit 臨界區內呼叫）。
+        """
+        # (1) TTL：清掉 now-ts 超過 TTL 的 key（兩 dict 各自）。
+        ttl_cut = now - _ADMISSION_KEY_TTL_SECS
+        for d in (self.last_served_ts, self.debounce_pending):
+            stale = [k for k, ts in d.items() if ts < ttl_cut]
+            for k in stale:
+                del d[k]
+        # (2) maxsize 兜底：超硬上限 → 驅逐最舊（ts 小者）直到 ≤ maxsize。
+        for d in (self.last_served_ts, self.debounce_pending):
+            if len(d) > _ADMISSION_KEY_MAXSIZE:
+                # 按 ts 升序，刪到剩 maxsize（驅逐最舊；最舊最不可能仍在去重窗口內）。
+                for k, _ts in sorted(d.items(), key=lambda kv: kv[1])[: len(d) - _ADMISSION_KEY_MAXSIZE]:
+                    del d[k]
+
+
+def _derive_coarse_subject(raw: str) -> str:
+    """把任意上游 coarse_subject 正規化成低基數桶（E3 DoS 防護第一道）。
+
+    為什麼：dedup_key 含 coarse_subject；高基數會吹爆 admission 窗口。server-derive 把 input
+    收進有界集合——上游無法用「每次不同 subject」當 unique key 繞 dedup + 撐爆記憶體。
+
+    規則（保守、確定性、無 model）：
+      - 空 → "default"（穩定桶）。
+      - 截斷到 _COARSE_SUBJECT_MAXLEN（防單一超長字串當 unique key）；超長標 ":trunc"。
+      - 只保留 [A-Za-z0-9_:.-]（去除可被用來造無限變體的字元如空白/控制字元），其餘折成 "_"。
+      - upper-case 正規化（BTCusdt / btcusdt → 同桶；降低大小寫造的基數）。
+    這不是「驗 subject 合法性」，而是「把基數壓進有界範圍」——真正的有界保證仍由 TTL+maxsize
+    eviction 兜底（derive 是第一道、便宜、降基數；eviction 是硬上限）。
+    """
+    s = (raw or "").strip()
+    if not s:
+        return "default"
+    truncated = len(s) > _COARSE_SUBJECT_MAXLEN
+    s = s[:_COARSE_SUBJECT_MAXLEN]
+    # 折疊非白名單字元（防空白/控制字元/emoji 等造無限變體）。
+    cleaned = "".join(ch if (ch.isalnum() or ch in "_:.-") else "_" for ch in s).upper()
+    return f"{cleaned}:trunc" if truncated else cleaned
 
 
 @dataclass
@@ -297,8 +359,9 @@ class L2AdvisoryOrchestrator:
         )
         result.notes.append(f"contract_ver={contract_ver} schema_ver={schema_ver}")
 
-        # P2：executor 實際呼叫沿用既有 manual 路徑（layer2_engine 自帶 D3 write）。
-        # 此處示範 guard + routing 決策骨架（P3 接各 capability executor + parsed_output）。
+        # sync dispatch() 只做 admission + routing 「決策」（P2 + P3a 共用，無 await）；真正的
+        # async executor 呼叫在 dispatch_and_execute()（P3a 活化此路徑——對 ml_advisory capability
+        # 接 run_ml_advisory_cascade）。sync 路徑保持不變故 P2 測試零回歸。
         # routing 依 lane direction（§C/§A.2）：
         direction = _registry.LANE_DIRECTION.get(cap.lane, "neutral")
         if direction == "neutral":
@@ -310,6 +373,115 @@ class L2AdvisoryOrchestrator:
             result.notes.append("expand lane 不應到此（admission MANUAL 應已攔）——fail-closed")
 
         return result
+
+    # ── P3a：async executor 接線（活化 dormant dispatch 路徑）──
+
+    async def dispatch_and_execute(
+        self,
+        *,
+        capability_id: str,
+        mode: str,
+        context: dict[str, Any],
+        trigger: str = "ml:training_complete",
+        coarse_subject: str = "",
+        engine: Any = None,
+        engine_mode: str = "demo",
+        symbol: str | None = None,
+        strategy_name: str | None = None,
+        available_signal_axes: list[str] | None = None,
+        bull_only: bool = False,
+        now: float | None = None,
+    ) -> DispatchResult:
+        """conductor 完整入口（admission + executor）：先跑 sync dispatch() 取 admission/routing
+        決策，再對 ml_advisory neutral capability 接 run_ml_advisory_cascade（P3a 活化）。
+
+        為什麼分兩段（sync dispatch + async executor）：admission（dedup/debounce/budget/tier）
+        是同步、無 await、持 RLock 的確定性決策（P2 已驗）；真正花 cloud 的 executor 是 async。
+        分離讓 sync 路徑（P2 測試）零回歸，async executor 疊加在「已 admit + neutral」之上。
+
+        鐵律：executor 只在 admitted + routed_to=neutral_sink + capability=ml_advisory 時跑；
+        其餘（disabled / deduped / budget / tier / MANUAL / fail-safe drop）皆短路不呼 model。
+        executor direction=neutral、0 新執行權；report_call_outcome 推進 fail-safe SM。
+        """
+        result = self.dispatch(
+            capability_id=capability_id, trigger=trigger,
+            coarse_subject=coarse_subject, now=now,
+        )
+        # 只有「admitted + neutral_sink + ml_advisory capability」才接 executor。
+        if not (
+            result.admitted
+            and result.routed_to == "neutral_sink"
+            and capability_id.startswith("ml_advisory")
+        ):
+            return result
+
+        # lazy import 避免 boot-time / import cycle（executor import 本模塊的 writer）。
+        from . import l2_ml_advisory_executor as _exec  # noqa: PLC0415
+
+        eng = engine if engine is not None else self._resolve_engine()
+        if eng is None:
+            # engine 不可用 → fail-soft（advisory 失敗只「減去」L2 能力，不阻塞 baseline）。
+            result.notes.append("executor: engine 不可用，cascade skipped（fail-soft）")
+            self.report_call_outcome(ok=False, ollama_available=False)
+            return result
+
+        # contract version（寫每 D3 row）：必須用「此 capability 真實送 cloud 的 per-mode 契約 ref」
+        # 解析，否則 D3 ledger 記的 contract_ver/schema_ver 與實際用的契約分歧（記錯 provenance，
+        # 違 root principle 8 可重建）。dispatch() 已用 cap.prompt_contract_ref/output_schema_ref 正確
+        # 解析（:354-359）但結果只進 notes 後丟棄；此處對「同一 cap」重取 ref 再解析，與 dispatch()
+        # 的解析路徑等價（同 registry、同 ref → 同版本），不可傳 None（會落 generic fallback
+        # l2_contract.v1/l2_schema.v1=錯值）。cap 必非 None：能到此處代表 dispatch() 已 admit 它
+        # （capability 存在且 enabled），re-fetch fail-soft 退 None 時才回 generic fallback。
+        cap = self._registry_obj().get(capability_id)
+        contract_ver, schema_ver = _contracts.resolve_contract_versions(
+            capability_id=capability_id,
+            contract_ref=(cap.prompt_contract_ref or None) if cap is not None else None,
+            schema_ref=(cap.output_schema_ref or None) if cap is not None else None,
+        )
+        try:
+            casc = await _exec.run_ml_advisory_cascade(
+                capability_id=capability_id, mode=mode, context=context, engine=eng,
+                contract_ver=contract_ver, schema_ver=schema_ver, trigger=trigger,
+                engine_mode=engine_mode, symbol=symbol, strategy_name=strategy_name,
+                available_signal_axes=available_signal_axes, bull_only=bull_only,
+                spend_recorder=self.record_capability_spend,
+            )
+        except Exception as exc:  # noqa: BLE001 — executor 必 fail-soft，不拋進 dispatch
+            logger.warning("ml_advisory cascade fail-soft（dispatch 不中斷）: %s", exc)
+            result.notes.append("executor: cascade 例外，fail-soft")
+            self.report_call_outcome(ok=False, ollama_available=True)
+            return result
+
+        # cascade 結果投影進 DispatchResult（供 route 薄投影）。
+        result.guard_verdict = casc.guard_verdict
+        result.l2_reply_id = casc.l2_reply_id
+        result.notes.append(f"executor: stage={casc.stage} sink_written={casc.sink_written}")
+        if casc.screen_disabled:
+            result.notes.append("executor: M4 ollama_screen DISABLED（flag MIT）")
+        # fail-safe SM：cascade ok（sink written or honest短路）= healthy；cloud 不可用 = 失敗。
+        # 為什麼 screen_rejected / guard_rejected 算 ok：它們是「確定性閘正確擋下」，非執行器故障；
+        # 只有 cloud_unavailable / sink_write_failed 才是真故障（推進 fail-safe 降級）。
+        executor_ok = casc.stage in (
+            "sink_written", "screen_rejected", "guard_rejected", "unknown_mode_rejected",
+        )
+        self.report_call_outcome(ok=executor_ok, ollama_available=True)
+        return result
+
+    def _resolve_engine(self) -> Any:
+        """lazy 取 Layer2Engine（cloud-L2 + Ollama executor）。fail-soft：取不到回 None。"""
+        if self._engine_provider is not None:
+            try:
+                return self._engine_provider()
+            except Exception as exc:  # noqa: BLE001 — 注入式 provider 失敗 → None
+                logger.warning("executor engine_provider 失敗（fail-soft）: %s", exc)
+                return None
+        try:
+            from .layer2_routes import _get_engine  # noqa: PLC0415 — 避免 import cycle
+
+            return _get_engine()
+        except Exception as exc:  # noqa: BLE001 — 取不到 engine → None（cascade skipped）
+            logger.warning("executor 取 Layer2Engine 失敗（fail-soft）: %s", exc)
+            return None
 
     # ── §F.1 ADMISSION stage（dedup→debounce→coalesce→budget→tier/posture）──
 
@@ -325,8 +497,10 @@ class L2AdvisoryOrchestrator:
         debounce_secs = trig.debounce_secs if trig else 0
         dedup_template = trig.dedup_key if trig else "capability_id+spec+coarse_subject"
         spec = trig.spec if trig else ""
-        # dedup identity：capability_id + spec + coarse_subject（design §F.1）。
-        dedup_key = f"{cap.capability_id}|{spec}|{coarse_subject}"
+        # E3 DoS 防護第一道：server-derive 低基數 coarse_subject（上游無法吹爆基數）。
+        coarse = _derive_coarse_subject(coarse_subject)
+        # dedup identity：capability_id + spec + derived coarse_subject（design §F.1）。
+        dedup_key = f"{cap.capability_id}|{spec}|{coarse}"
 
         # 為什麼整段 admission 納 self._lock（MED-2 修）：dedup/debounce 的 read-modify-write
         # 若無鎖，P3 多執行緒同 dedup_key 兩 trigger 都讀 None → 都 admit → dedup 失效、storm
@@ -335,6 +509,10 @@ class L2AdvisoryOrchestrator:
         # 邊界不在此），故 threading lock 跨 sync 呼叫（_check_budget / effective_autonomy）安全；
         # 鎖為 RLock，_cap_spend_today 重入取鎖不自鎖。
         with self._lock:
+            # E3 DoS 防護第二道：TTL+maxsize 驅逐過期 admission 窗口 key（在臨界區內，持鎖）。
+            # 過 TTL 的 key 早已超出去重窗口、永不再被讀，清除不改任何去重判定。
+            self._admission._evict_admission_windows(ts)
+
             # ── Stage 1 — DEDUP：in-flight/近期已服務的 key 在窗口內 → drop（無 model 呼叫）──
             last = self._admission.last_served_ts.get(dedup_key)
             if last is not None and (ts - last) < max(debounce_secs, 1):

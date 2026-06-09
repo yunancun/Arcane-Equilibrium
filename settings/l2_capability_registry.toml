@@ -11,14 +11,84 @@
 #   - 把 can_auto_deploy_to_paper 當 posture gate 用 → reject load（它 True@all-tiers 無 signal）。
 #   - lane 不在 LANE_DIRECTION 表 keys → reject load（無 "live" lane；live 不可從任何 auto 路徑到達）。
 #
-# 本 phase（P2）= registry 機制 + 確定性模板紀律 + 接線；具體 capabilities 在 P3 才加。
-# 故本檔目前**無 [[capability]] stanza**（skeleton），系統行為與今天一致（manual-trigger
-# 走 layer2_engine 的 seed l2.manual_reasoning，由 contract registry 而非此檔提供）。
+# P3a（首批 capability）= ml_advisory 的 diagnose_leak + interpret_result 兩模式（direction=neutral，
+# 斷言「無 alpha」，無 alpha math gate）。hypothesize 模式（P3b，alpha-bearing）blocked on QC B1 +
+# altcap data，**本檔不含**。全部預設 enabled=false（fail-closed），部署即行為中性。
 
 [meta]
 # schema 版本：loader 在 unknown top-level key 時 reject；此版本供日後 contract drift 追溯。
 version = 1
-note = "P2 skeleton — capabilities added in P3; all future capabilities ship enabled=false"
+note = "P3a — ml_advisory diagnose_leak + interpret_result (neutral, no-alpha); all enabled=false"
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P3a capability stanzas（PA P3 設計 §B/§C/§L；direction=neutral，0 新執行權，斷言無 alpha）
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 為什麼 enabled=false 預設：fail-closed（loader 強制）。部署即行為中性——orchestrator dispatch
+# 對 disabled capability 立即 capability_disabled 短路，零 model 呼叫、零 sink 寫入。operator
+# 評估後才設 enabled=true。
+#
+# 為什麼 P3a 只有 2 模式、無 hypothesize：diagnose/interpret 斷言「無 alpha」（leak 診斷 / 結果
+# 解讀皆不作 promotion-relevant 斷言），故無 alpha 需要驗，無 B1 beta-neutral gate（=P3b，
+# alpha-bearing，blocked on QC B1 final numbers + altcap basket data）。P3a 的 gate = leak/
+# diagnostic typing（M3）+ Ollama 校準（M4），非 alpha math gate（beta/DSR/PBO）。
+#
+# 為什麼 lane="ml_backlog"（→ LANE_DIRECTION="neutral"）：研究 sink，非 remediation、無交易效果。
+# 兩模式皆 neutral（鐵律：0 新執行權）；feeds 既有 mlde_shadow_recommendations（applied=false/
+# requires_governance=true）+ D3。
+#
+# 為什麼 min_tier="L1"：diagnose/interpret 不生成 hypothesis（can_generate_hypotheses 是 L3+ 才
+# True，learning_tier_gate.py:203），L1 baseline 即足。hypothesize（P3b）才需 L3。
+
+[[capability]]
+capability_id          = "ml_advisory.diagnose_leak"  # P3a — 診斷 ML 管線 leak/drift；斷言無 alpha
+enabled                = false                          # FAIL-CLOSED DEFAULT（loader 強制；省略 ⇒ false）
+min_tier               = "L1"                           # 診斷不需 hypothesis-gen tier
+tier_capability_flag   = ""                             # 不綁 flag（L1 baseline）
+model_tier             = "cloud_l2"                     # cloud-L2 解讀 survivors；Ollama screen 是 cascade 內部階
+cloud_model_pref       = "sonnet"
+lane                   = "ml_backlog"                   # → LANE_DIRECTION="neutral"（研究 sink，無交易效果）
+output_schema_ref      = "ml_advisory.v1"               # → contract registry（三模式共用 schema）
+prompt_contract_ref    = "ml_advisory.diagnose_leak.v1" # → contract registry（確定性 versioned 模板）
+out_of_bound_guard_ref = "ml_advisory.guard.v1"         # → guard registry（M3 source_class typing）
+novelty_gate           = false                          # 診斷非 hypothesis → 無 novelty dedupe
+consequential_default  = false
+
+[capability.trigger]
+kind          = "event"
+spec          = "ml:training_complete"
+debounce_secs = 900                                     # §F.1 trailing-edge settle（burst 沉澱後 fire 一次）
+dedup_key     = "capability_id+spec+coarse_subject"
+
+[capability.budget]
+per_call_usd_cap = 0.50
+daily_usd_cap    = 0.50                                 # ≤ DOC-08 $2/day（budget_config.toml）
+tier_gated_spend = true
+
+[[capability]]
+capability_id          = "ml_advisory.interpret_result"  # P3a — 解讀訓練結果；斷言無 alpha
+enabled                = false                            # FAIL-CLOSED DEFAULT
+min_tier               = "L1"
+tier_capability_flag   = ""
+model_tier             = "cloud_l2"
+cloud_model_pref       = "sonnet"
+lane                   = "ml_backlog"                     # → LANE_DIRECTION="neutral"
+output_schema_ref      = "ml_advisory.v1"
+prompt_contract_ref    = "ml_advisory.interpret_result.v1"
+out_of_bound_guard_ref = "ml_advisory.guard.v1"
+novelty_gate           = false
+consequential_default  = false
+
+[capability.trigger]
+kind          = "event"
+spec          = "ml:training_complete"
+debounce_secs = 900
+dedup_key     = "capability_id+spec+coarse_subject"
+
+[capability.budget]
+per_call_usd_cap = 0.50
+daily_usd_cap    = 0.50
+tier_gated_spend = true
 
 # ── capability stanza 範本（P3 才填；保留為文件，loader 不解析註解）──
 # [[capability]]
