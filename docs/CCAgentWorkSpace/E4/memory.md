@@ -185,3 +185,8 @@
 **教訓**：(1) 負向測試的 mutation-bite 方向是「把被禁行為加回去」（重加 fallback→測試應紅），不是把正路徑弄壞；一條 bite 同時證測試非 tautology + 鎖回歸方向。(2) base-side flake 裁定用共享 CARGO_TARGET_DIR 重編 base worktree（dep 全 reuse，僅 workspace crates 重編，分鐘級）；跑完把 HEAD 重編回來恢復 cache 一致。(3) full-suite 下 timing benchmark 值（1135μs）vs standalone（1066μs）差 ~7% = suite 負載，flake 對比必 standalone-vs-standalone 同條件。(4) patch.dict(os.environ) context 內 pop 是安全 hermetic 手法（退出整體還原）——unittest 風格檔內清 env 不需 monkeypatch。
 
 **VERDICT: PASS**（Linux full regression owed 隨 merge+`--rebuild` 部署 gate；origin/main 已進 L2 Mesh 7 commits，E2 證 0 overlap）。退 E1 清單：無。
+
+## 2026-06-10 · half_life scipy importorskip 守衛回歸 @ `6c8c40b4`(PASS)
+**Linux trade-core 實證(detached worktree,prod porcelain=0 前後雙驗)**:本檔 scipy-less `/usr/bin/python3` = **5p/2s ×2**(skip 理由含 scipy,collected 7 守恆);scipy venv(1.17.1/numpy 2.4.6/pandas 3.0.3)= **7p ×2**(fit 斷言當代庫真過,un-skip 無雷);鄰域 learning_engine/tests = 修復前 main `02c80f3b` 親測 **246p/2f** → 修復後 **246p/2s ×2**(精確 2f→2s,0 新 fail);estimator diff=空,全 diff 2 檔 +11/-0 純插入。VERDICT: PASS,報告 `2026-06-10--half-life-scipy-skip-regression.md`。
+**★ 帳本歸屬更正(對 PM「8→6」預期)**:本案 2F **不在**「4661/8 pre-existing」ledger——root 裸收集=7325+3err vs 4669,量級證該 ledger ≈ tests/ 控制面 scope 不含 learning_engine;且 control_api `.venv` 有 scipy(只有系統 python lane 產生此 2F)。2F 屬 06-10 producer-gate ledger(794p/2f)→ post-land 該 lane **failed 2→0、skipped +2**;tests/ 8-ledger 不變。教訓:「全 suite」一詞跨記錄口徑會漂移,對帳前先用 collect-only 量級+解譯器依賴在位狀態釘 scope,勿直接拿兩本不同 scope 的帳互減。
+**SCOPED-BASELINE(非全量,正式 BASELINE 行仍待下次全量回歸)**:test_half_life_estimator.py @ scipy-less = 5p+2s;learning_engine/tests @ Linux 系統 python = 246p/2s/0f(main+本 fix 口徑)。
