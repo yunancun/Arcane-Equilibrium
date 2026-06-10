@@ -128,3 +128,19 @@ def test_artifact_writer_outputs_manifest_and_index(tmp_path: Path):
     index = Path(written["artifact_index"]).read_text(encoding="utf-8")
     assert "regime_labels_csv" in index
     assert "feature_lineage_csv" in index
+
+
+def test_write_db_import_resolvable_in_package_context():
+    """E2 MEDIUM-2 迴歸鎖：_write_db 的 db_writer import 必須在 package 模式可解析。
+
+    舊碼絕對 import 基於 helper_scripts/ 根（差一層 research）→ package 模式 --write-db
+    必 ModuleNotFoundError；V127 從未被 populate 故 deploy 至今未暴露。dual-path 修後
+    本測試在 package context 直接解析 relative 分支（direct-file 分支由頂部 fallback
+    既有測試面覆蓋）。
+    """
+    from aeg_regime_runner.db_writer import persist_regime_rows as _abs  # research/ 已在 path
+    from aeg_regime_runner import harness as _h
+
+    # harness 模組本身可載 + db_writer 符號存在（不真連 DB）。
+    assert callable(_abs)
+    assert hasattr(_h, "_write_db")

@@ -821,7 +821,12 @@ async def dispatch_ml_advisory(
         # adapter 產 context（缺鍵=None，誠實 DEFER 語義內建；lazy import 避免 boot-time cost）。
         from .l2_candidate_evidence_adapter import build_context_from_evidence  # noqa: PLC0415
 
-        context, assembly_reasons = build_context_from_evidence(req.candidate_evidence)
+        # 為什麼 to_thread：build_context_from_evidence → load_factor_bundle 是同步多筆
+        # psycopg2 SELECT（klines 26 symbol + FND-2 + altcap 計算），直呼會阻塞 control API
+        # event loop（GUI/engine bridge 共用）。鏡像 layer2_critic 同步 PG 讀的既有範式。
+        context, assembly_reasons = await asyncio.to_thread(
+            build_context_from_evidence, req.candidate_evidence
+        )
         # bull-only 標籤取嚴（Alpha Evidence Governance：bull-heavy 結果必須被標示）：
         # request flag 與 evidence 自報任一為 true 即視為 bull_only。
         bull_only = bull_only or bool(req.candidate_evidence.get("bull_only"))
