@@ -146,3 +146,7 @@
 - **裁決**：B1 wiring（load_factor_bundle→reindex→beta_neutral_check）SANE——13 判準全落帶、零 FATAL；clone witness β_btc=0.99984（共享 int-bar-index 對齊的銳利見證，位置性錯位會使其崩向 0）；噪音候選 pass 合法（down 155 bars/286d span 過 30/180 門檻）。帶外復算 3 項自洽（upper 公式 bit 級/SE 比例=σ 比/超帶量=buffer 天數）。
 - **harness 期抓 2 修**：altcap producer dsn 漏傳（harness 錯非 adapter）；bundle 未裁窗（340 vs 295，`_clip_window` 修，mask 回看 buffer 保留）。
 - **範圍紀律**：wiring sanity ≠ alpha 裁決；真實候選仍須完整 B1+Q1+M3/M4 閘鏈。報告正本 = workspace/reports/2026-06-10--l2-p3b-b1-wiring-signoff.md（PM 代寫）。
+
+## 2026-06-10 — P4 online-FDR QC sign-off（APPROVE-with-FIX，P4 可進 E1-READY）
+
+兩 sign-off 點皆 APPROVE-with-FIX。點 1 pre-reg hash 鏈：FIX-1.1 consume 限 supersedes 鏈 head / FIX-1.2 hash 釘 evidence 窗+重算先於一切渲染 / FIX-1.3 falsification 真評估+觸發鑄 dead-mode lesson。點 2 sealed-holdout §9（含對照原文重裁）：**FIX-2.1b 唯一 §9 阻斷**——gate 4(b) 原文 `>` 點比較對 daily-bar 區間對象語義不足（`==` off-by-one + 非對齊 oos_start 跨界 bar 全漏），正確=「末 bar 尾端 ≤ oos_start」區間算術鏡像 `_bucket_admissible`，reason 統一 `sealed_holdout_overlap`；FIX-2.3 re-scope 至 M1（confirm=accounting-confirm，null-confirm 率 15-40%，P5 晉升另要求 opened-OOS math gate+regime 標籤）。交互：MIT #3 × B1 promotion 語義零副作用；FIX-3.1 pre-DSR skip 經 MIT ACK-with-條件（謂詞 value-invariance 邊界，down-span 須換 value-free 版）。QN-1 V132 單向性非 DB-enforced（state_flags_chk 有部分防護）/QN-3 grep proof point-in-time/QN-4 同 cell 多 sealed row 聚合規則 fail-closed 取任一重疊即 DEFER。教訓：工具缺口（無 Bash 讀 branch）下重構原文必標註並留重裁條款——本次重構失準但條款救回。報告：workspace/reports/2026-06-10--l2-p4-qc-signoff.md
