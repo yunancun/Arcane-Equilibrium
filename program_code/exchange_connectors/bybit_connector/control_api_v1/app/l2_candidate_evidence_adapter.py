@@ -384,12 +384,17 @@ def load_factor_bundle(
     )
 
     # ── 2) BTC returns + down-mask（皆從 BTC closes 衍生）──
+    # 裁窗語意（QC B1 wiring 帶 2026-06-10）：closes 含 _MASK_LOOKBACK_BUFFER_DAYS 窗前
+    # buffer——mask 的 prior-only 回看（peak[i-30,i-1] / 7d lag）需要它，否則窗首 30 bar
+    # 結構性 False 縮 down-leg span（QC F5）。但 bundle **輸出**必須裁回 [ws, we]：buffer
+    # bars 留在 returns/mask 會虛增 n_bars 量綱（340 vs 窗內 295）；B1 交集對齊雖使回歸
+    # 無害，bundle 層計數仍須與分析窗一致（QC 預註冊帶 btc_bars∈[290,297] 的契約）。
     btc_returns: dict[Any, float] | None = None
     down_mask: dict[Any, bool] | None = None
     btc_closes = closes_by_symbol.get(_BTC_SYMBOL) or {}
     if len(btc_closes) >= 2:
-        btc_returns = _returns_from_closes(btc_closes)
-        down_mask = _down_mask_from_closes(btc_closes, reasons)
+        btc_returns = _clip_window(_returns_from_closes(btc_closes), ws, we)
+        down_mask = _clip_window(_down_mask_from_closes(btc_closes, reasons), ws, we)
     else:
         reasons.append("btc_klines_insufficient")
 
@@ -404,6 +409,15 @@ def load_factor_bundle(
         down_market_mask=down_mask,
         reasons=_dedupe(reasons),
     )
+
+
+def _clip_window(
+    series: dict[dt.date, Any] | None, ws: dt.date, we: dt.date
+) -> dict[dt.date, Any] | None:
+    """把 date-key 序列裁回分析窗 [ws, we]（buffer bars 只供 mask 回看，不入 bundle 輸出）。"""
+    if series is None:
+        return None
+    return {d: v for d, v in series.items() if ws <= d <= we}
 
 
 def _factor_symbols(reasons: list[str]) -> list[str]:
