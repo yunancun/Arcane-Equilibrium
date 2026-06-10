@@ -11,6 +11,10 @@ Coverage / 覆蓋:
    Default fallback（n<30）— 小樣本 → default_14d。
 4. Default fallback (high p-value) — both fits fail significance gate. /
    Default fallback（高 p-value）— 兩擬合皆未通過顯著性門檻。
+
+雙模式語意 / Dual-mode semantics:
+- 無 scipy 環境:測項 1-2 誠實 SKIP(fit 路徑需 scipy);其餘測試仍綠,
+  但行使的是 estimator 設計性降級路徑(default_14d)— 兩種模式皆為真實生產語意。
 """
 
 from __future__ import annotations
