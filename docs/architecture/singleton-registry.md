@@ -361,6 +361,25 @@ per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-10--p5sm_soak_observabil
 | governance_authority | P5-SM soak 第二輪 PA 設計 §3.2/§5.2 + PM 五條 fire-機率防護 |
 | migration_plan | step (iv) cleanup 連同 comparator sink（§2.5.1-4）+ V129/V137 + `[82]` 一起退役 |
 
+#### 2.5.6 `_SOAK_TRACKERS`（P5-SM soak 第二輪 E1-B，2026-06-10）
+
+per PA 設計 §3.1（flusher 擴充）：V137 `learning.lease_ipc_soak_events` 事件帳本的程內偵測 trackers——flag 變遷 / canary 失敗連段增量 / 計數器倒退 / epoch 起點，全部以「上次觀測值 vs 當下快照」比對偵測，事件 INSERT best-effort（V137 未 apply 全 fail-soft）。
+
+| 欄位 | 值 |
+|---|---|
+| name | `_SOAK_TRACKERS` |
+| type_signature | `dict[str, Any]`（last_flag_state / last_canary_breaches / canary_start_recorded / last_comparator_counts / last_canary_counts / epoch_start_recorded） |
+| location | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/governance_divergence_flush.py` |
+| owner_lifecycle | import 時建；leader worker process-local；restart 歸零 = epoch 邊界語義（`epoch_rollover` 事件即為此而存在）。`_reset_soak_event_trackers_for_tests()` 僅供測試隔離 |
+| cross_task_pattern | 只由 leader 進程的單一 flusher 協程順序讀寫（`record_epoch_start_events_once` 啟動一次 + `detect_and_record_soak_events_once` 每 30s 週期）；`run_in_executor` 逐次 await 的 happens-before 保證跨 executor thread 可見性 |
+| lock_primitive | 無（單協程順序存取，無並發 writer；見 cross_task_pattern 論證）+ 隸屬 §2.5.4 flock leader 域（非 leader worker 永不觸碰） |
+| visibility | private module binding（僅 `record_epoch_start_events_once` / `detect_and_record_soak_events_once` / `_reset_soak_event_trackers_for_tests` 存取） |
+| caller_chain | producer: `divergence_snapshot_flusher` 協程（main.py @startup 排程）；consumer: V137 `learning.lease_ipc_soak_events` → cron `[82]` soak-window check 跨 epoch 重建連續窗 |
+| health_monitoring | NO — soak 期觀測儀器；偵測層死 → 事件缺失 → `[82]` 在 active 下對「帳本空 / counter regression 交叉偵測」fail-closed FAIL |
+| registered_date | 2026-06-10 |
+| governance_authority | P5-SM soak 第二輪 PA 設計 §3.1 + §4 S3/S4 gate |
+| migration_plan | step (iv) cleanup 連同 comparator sink（§2.5.1-5）+ V129/V137 + `[82]` 一起退役 |
+
 ---
 
 ### §2.6 L2 Advisory Mesh — D3 Provenance & Audit writer（Phase 1，2026-06-08）
