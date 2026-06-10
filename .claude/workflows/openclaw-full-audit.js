@@ -51,6 +51,7 @@ const FINDINGS_SCHEMA = {
       type: 'object', required: ['note', 'why_unproven'], additionalProperties: false,
       properties: { note: { type: 'string' }, why_unproven: { type: 'string' } },
     } },
+    report_path: { type: 'string' },   // 落盤的 workspace 報告相對路徑（main/PA 按需讀全文，evidence 不進 return）
   },
 }
 
@@ -118,7 +119,7 @@ phase('Audit')
 log(`範圍：${scope}；審計軸（${axes.length}）：${axes.join(', ')}；模式：${doFix ? 'fix' : 'report-only'}${baseline ? '；基線已凍結' : '；⚠️ 未傳 baseline（建議主會話先 Stage 0 凍結三端 SHA）'}`)
 const audits = (await parallel(axes.map(ax => () =>
   agent(
-    `按你的 role SOP 與掛載 skills 對以下範圍做全量審計（你的 role 範疇即審計範圍，下列 focus 僅為額外靶向，不是範圍上限）：${scope}。\n${READONLY}${baseline ? '\n凍結基線（affected line 對齊此基線）：' + baseline : ''}${focusFor(ax)}\n每條 finding 標：FACT/INFERENCE/ASSUMPTION 分類、severity、confidence、evidence（file:line 或命令輸出）、impact、fix 方向。全量輸出含 LOW/INFO/不確定項。\n${ANNOTATE}\nnegative-space（達最高對抗標準的反向自審）：在 assumptions 額外列出「你這一域按 SOP 本該覆蓋、但本輪證據不足或未深入展開的盲區」，每條 note=盲區、why_unproven=未展開原因——這是給 PA 的 re-probe 線索，不得因無證據而沉默略過。報告按你的完成序列落盤 workspace。`,
+    `按你的 role SOP 與掛載 skills 對以下範圍做全量審計（你的 role 範疇即審計範圍，下列 focus 僅為額外靶向，不是範圍上限）：${scope}。\n${READONLY}${baseline ? '\n凍結基線（affected line 對齊此基線）：' + baseline : ''}${focusFor(ax)}\n每條 finding 標：FACT/INFERENCE/ASSUMPTION 分類、severity、confidence、evidence（file:line 或命令輸出）、impact、fix 方向。全量輸出含 LOW/INFO/不確定項。\n${ANNOTATE}\nnegative-space（達最高對抗標準的反向自審）：在 assumptions 額外列出「你這一域按 SOP 本該覆蓋、但本輪證據不足或未深入展開的盲區」，每條 note=盲區、why_unproven=未展開原因——這是給 PA 的 re-probe 線索，不得因無證據而沉默略過。報告按你的完成序列落盤 workspace，並把該報告的相對路徑填入 report_path（main 只收結構化摘要，evidence/impact 全文留報告，不靠 return 回傳）。`,
     { agentType: ax, label: `audit:${ax}`, phase: 'Audit', schema: FINDINGS_SCHEMA },
   ).then(r => r && { axis: ax, ...r }),
 ))).filter(Boolean)
@@ -226,6 +227,11 @@ if (fixes.some(x => x.fix && x.fix.status === 'FIXED')) {
   )
 }
 
+// return 瘦身（context 經濟）：去 evidence/impact/fix_hint 全文 —— 它們已落盤在各軸 report_path，
+// main 只吃決策骨架（axis/severity/title/file/anchor/可達性）。PA 需要全文時 Read 對應 report_path。
+const slim = f => ({ axis: f.axis, severity: f.severity, title: f.title, file: f.file, anchor: f.symbol_anchor, defect_type: f.defect_type, reachable: f.reachable })
+const report_paths = audits.map(a => ({ axis: a.axis, report: a.report_path })).filter(x => x.report)
+
 return {
   scope, axes, mode: doFix ? 'fix' : 'report-only', baseline,
   totals: {
@@ -234,17 +240,18 @@ return {
     clusters: consensus.length, multi_axis_clusters: consensus.filter(c => c.multi_axis).length,
     ungrouped: ungrouped.length, assumptions: assumptions.length, seam_reprobes: (seam && seam.reprobes || []).length,
   },
-  consensus,                 // 多軸共置聚簇（呈現層，PA 看這個免人工搜索去重）
-  ungrouped,                 // 無 anchor / 單軸 confirmed，直接交 PA
-  latent,                    // 生產不可達，latent debt（不進修復隊列，但記錄）
-  disputed,                  // 單質疑者反駁，PA re-probe
-  medium_low_info: all.filter(f => f.severity !== 'CRITICAL' && f.severity !== 'HIGH'),
-  assumptions,               // 待證假設 + 各軸 negative-space 盲區
+  report_paths,              // 各軸完整報告路徑 — evidence/impact 全文在此，main/PA 按需讀（不進 main context）
+  consensus: consensus.map(c => ({ key: c.key, hit_axes: c.hit_axes, multi_axis: c.multi_axis, severities: c.severities, defect_types: c.defect_types, members: c.members.map(slim) })),
+  ungrouped: ungrouped.map(slim),    // 無 anchor / 單軸 confirmed，直接交 PA
+  latent: latent.map(slim),          // 生產不可達 latent debt（不進修復隊列，記錄）
+  disputed: disputed.map(slim),      // 單質疑者反駁，PA re-probe
+  medium_low_info: all.filter(f => f.severity !== 'CRITICAL' && f.severity !== 'HIGH').map(slim),
+  assumptions,               // 待證假設 + 各軸 negative-space 盲區（本就精簡 note/why_unproven）
   seam_reprobes: (seam && seam.reprobes) || [],   // 軸交界盲區 → 派軸帶證據審後才升格 finding
   fixes, regression,
-  // Stage 3-4 由主會話接手：consensus 是呈現層去重（非語義替代）；跨檔/跨 type 同源、disputed、assumptions、
-  //   seam_reprobes 仍需 PA 判斷與定向 re-probe。去重期望值首次實戰需回放校準（見 skill）。
+  // Stage 3-4 由主會話接手：細節在 report_paths，main 只持決策骨架；consensus 是呈現層去重（非語義替代）；
+  //   跨檔/跨 type 同源、disputed、assumptions、seam_reprobes 仍需 PA 判斷與定向 re-probe（去重期望首次實戰回放校準，見 skill）。
   next: doFix
-    ? '主會話接 Stage 3：PA 整合 consensus+ungrouped+fixes 分級成修復計劃；Stage 4 PM 裁決+TODO；worktree 修復需 operator 簽核合併'
-    : '主會話接 Stage 3：PA 對 consensus 確認異質 corroboration、對 ungrouped/disputed/seam_reprobes/assumptions 定向 re-probe→validated fix plan；Stage 4 PM 裁決+TODO（見 ultracode-full-audit skill）',
+    ? '主會話接 Stage 3：PA 讀 report_paths 整合 consensus+ungrouped+fixes 分級成修復計劃；Stage 4 PM 裁決+TODO；worktree 修復需 operator 簽核合併'
+    : '主會話接 Stage 3：PA 讀 report_paths 對 consensus 確認異質 corroboration、對 ungrouped/disputed/seam_reprobes/assumptions 定向 re-probe→validated fix plan；Stage 4 PM 裁決+TODO（見 ultracode-full-audit skill）',
 }

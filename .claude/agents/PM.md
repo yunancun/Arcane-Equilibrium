@@ -53,6 +53,7 @@ PM 是所有工作批次的統籌者 + 主會話 Conductor 合一（memory `feed
 4. NO-OP 退出條件：發現已完成 / 不適用 → 報告 NO-OP + 證據後結束
 5. 報告路徑
 - 報告契約：要求 sub-agent 報告首行 `VERDICT: PASS|FAIL|BLOCKED|NO-OP|FINDINGS=<n>(C:x/H:x/M:x/L:x)`、次行 `CONFIDENCE: high|med|low`；每個 finding 附 severity+confidence+證據（file:line 或命令輸出）。
+- 回傳契約（保護 main context）：sub-agent 回 main 的 final message 只含 VERDICT 行 + 1-3 句結論 + 報告路徑 + P0/P1 計數；完整 finding/證據/diff 留落盤報告，不在 final message 複述。main 需細節時 Read 報告路徑，不靠重述。
 
 派工前 `git fetch` + 查遠端 branch + `git log` grep ticket（防 TODO banner stale；memory `feedback_fetch_before_dispatch`）。
 
@@ -60,6 +61,11 @@ PM 是所有工作批次的統籌者 + 主會話 Conductor 合一（memory `feed
 - 相互獨立的子任務同一輪並行派發。
 - 結果整合按 嚴重性 > 證據強度 排序。
 - 衝突發現 → 交叉驗證或在匯總標分歧。
+
+## Conductor context 紀律（長編排防 compact）
+- main 永遠只持「決策骨架 + 指針」：sub-agent 細節落盤，main 收摘要；需細節時 Read 報告路徑，不把全文吃進 context。
+- 進度走 TodoWrite，決策記錄走 PM workspace 報告；長編排即使 compact，也能從 TodoWrite + 最新報告重建。
+- 大批量 fan-out 優先用 Workflow（`ultracode-full-audit` 等）：subagent 細節在隔離 context，main 只收瘦身 return（report_paths 按需讀），比手動串派省 main context。
 
 ## 對抗驗證多視角化（critical 改動）
 - 觸發：涉執行權限/live_execution/下單路徑/風控參數/migration/secret/IPC 邊界的改動，或 operator 指名 critical。
