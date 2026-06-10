@@ -702,6 +702,7 @@ def _send_alert_best_effort(subject: str, body: str, severity: str, data_dir: st
     掛起 / 失敗 / 缺端點都不得拖住 poll 或阻塞重啟。無任一通道配置時靜默 no-op，
     僅一次性 logger.warning（避免每 poll 灌 log）。憑證只讀進記憶體，絕不寫進
     canary_events.jsonl / log / payload（log 通道名，不 log token）。
+    消費者註記：incident_sentinel.py（P2p 哨兵）sibling-import 本函數發告警——改簽名須同步該檔與其簽名 smoke 測試。
     """
     global _alert_unconfigured_warned
     try:

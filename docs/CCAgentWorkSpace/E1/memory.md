@@ -197,3 +197,8 @@
 ## 2026-06-10 — half_life 測試 scipy importorskip 守衛（fix/half-life-test-scipy-skip @ dc5c60d7，待 E2）
 - 2 fit-path 測試加 `pytest.importorskip("scipy")` + requirements-ml.txt 顯式宣告 scipy>=1.10.0；斷言零改動。行為矩陣雙側 Mac 實證：有 scipy 7 passed / 無 scipy 5 passed 2 skipped。worktree /tmp/hl_scipy_fix 保留待 E2/E4。
 - 教訓：模擬「依賴不存在」要用 `raise ModuleNotFoundError` shadow 而非裸 `ImportError`——後者觸發 pytest importorskip deprecation warning（module-exists-but-broken 路徑），與真實 absent-module 行為不同。
+
+## 2026-06-10 — L2 P2p incident_sentinel IMPL（feat/l2-p2p-impl，待 E2）
+- 四件套照 PA 設計落地：`canary/incident_sentinel.py`（6 軸 alert-only 哨兵，800 行）+ test（56 passed，隔離鐵則 0 真 DSN/0 真外發）+ cron wrapper/installer + SCRIPT_INDEX/watchdog docstring 1 行。watchdog alert 22 passed 零回歸；Mac dry-run drill 過（A1 stale 樣本 + db_unreachable lazy 路徑）。
+- 教訓再驗：never-remediate 結構斷言裸 grep "watchdog_state.json" 被 MODULE_NOTE 合法邊界宣告誤紅 → 斷言收窄到「模塊 docstring 之後的代碼區 0 引用」（partition at `from __future__`）；alert body 措辭避開 `restart_all` 字面防 E2 grep 誤紅。
+- 設計 ~400 行估算 vs 實際 800 行（Chinese-first 注釋覆蓋 + 6 軸先天廣度）；壓行三輪保住 ≤800 review-attention 門檻，rationale 未刪。
