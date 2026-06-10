@@ -325,12 +325,13 @@ def _reindex_all(
     if candidate is None and btc is None and altcap is None and mask is None:
         return None, None, None, None
     if candidate is None:
-        # E2 LOW-1：evidence 無 daily_returns（AEG-S3 標量輸出的常態）而因子載入成功時，
-        # 進 reindex 必觸 candidate_returns_missing fail-loud → 因子連帶全 None + 每次
-        # warning（常態當異常記）。B1 對 candidate=None 本就 DEFER（b1_inputs_missing_defer），
-        # 短路語義等價且不再噪音；因子保留原樣（candidate 缺與因子可得性無關）。
+        # E2 LOW-1 + re-review MEDIUM：evidence 無 daily_returns（AEG-S3 標量常態）時短路
+        # 去噪——但**因子必須一併歸 None**：B1 對 cand=None 先短路根本不讀因子（保留=零功能
+        # 價值），而保留的 date-key dict 會在 executor STAGE 2 `json.dumps(context,
+        # default=str)` 炸 TypeError（default 只兜 value 不兜 dict key）→ cascade 中斷 +
+        # fail-safe SM 失敗計數毒化。全 None = JSON 安全 + B1 同一 DEFER，診斷資訊在 reason。
         reasons.append("candidate_returns_missing_reindex_skipped")
-        return None, btc, altcap, mask
+        return None, None, None, None
     reindex = _resolve_reindex()
     if reindex is None:
         reasons.append("bar_index_reindex_unavailable_temporal_keys_left")

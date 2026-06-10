@@ -595,3 +595,49 @@ class TestBuildContextFromEvidence:
         ctx, _ = ADP.build_context_from_evidence(_evidence(), factor_loader=_loader)
         assert seen == [(dt.date(2026, 1, 1), dt.date(2026, 5, 1))]
         assert ctx["math_gate_inputs"]["btc_returns"] is not None
+
+
+class TestContextJsonSerializable:
+    """E2 re-review MEDIUM 迴歸鎖：adapter 產出的 context 必須過 executor STAGE 2 的
+    `json.dumps(context, ensure_ascii=False, default=str)`（default 不兜 dict key——
+    date-key 因子洩入 context 會 TypeError 炸斷 cascade 並毒化 fail-safe SM 計數）。
+    """
+
+    def test_no_candidate_with_factors_context_json_roundtrip(self):
+        # AEG-S3 常態：evidence 無 daily_returns + 因子載入成功 → 短路路徑。
+        import json as _json
+
+        rows = _kline_rows(["BTCUSDT", "ETHUSDT", "SOLUSDT"], dt.date(2026, 1, 1), 130, slope=-5.0)
+        fb = ADP.load_factor_bundle(
+            "2026-02-15", "2026-05-10",
+            conn_provider=_FakeConnProvider(rows=rows),
+            fnd2_rows_loader=lambda *a, **k: _fnd2_rows(["ETHUSDT", "SOLUSDT"], "2025-01-01", "2026-12-31"),
+        )
+        ev = {"evidence_schema": ADP.EVIDENCE_SCHEMA_V1}  # 無 daily_returns
+        ctx, reasons = ADP.build_math_gate_context(ev, factors=fb)
+        # 鐵律：executor STAGE 2 的逐字序列化表達式必須不炸。
+        _json.dumps(ctx, ensure_ascii=False, default=str)
+        assert ctx["candidate_returns"] is None
+        gi = ctx["math_gate_inputs"]
+        assert gi["btc_returns"] is None and gi["altcap_returns"] is None and gi["down_market_mask"] is None
+        assert "candidate_returns_missing_reindex_skipped" in reasons
+
+    def test_full_path_context_json_roundtrip(self):
+        # 對照：cand 在場走完整 reindex（int key）→ 同一序列化表達式也必須過。
+        import json as _json
+
+        rows = _kline_rows(["BTCUSDT", "ETHUSDT", "SOLUSDT"], dt.date(2026, 1, 1), 130, slope=-5.0)
+        fb = ADP.load_factor_bundle(
+            "2026-02-15", "2026-05-10",
+            conn_provider=_FakeConnProvider(rows=rows),
+            fnd2_rows_loader=lambda *a, **k: _fnd2_rows(["ETHUSDT", "SOLUSDT"], "2025-01-01", "2026-12-31"),
+        )
+        days = sorted(fb.btc_returns)
+        ev = {
+            "evidence_schema": ADP.EVIDENCE_SCHEMA_V1,
+            "daily_returns": {d.isoformat(): 0.001 for d in days},
+            "return_unit": "fraction",
+        }
+        ctx, _ = ADP.build_math_gate_context(ev, factors=fb)
+        _json.dumps(ctx, ensure_ascii=False, default=str)
+        assert ctx["candidate_returns"], "完整路徑 candidate 應在場（int key）"
