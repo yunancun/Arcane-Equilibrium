@@ -235,12 +235,16 @@ def _write_db(
         sys.path.insert(0, str(helper_dir))
     from lib.pg_connect import resolve_report_dsn  # type: ignore
 
-    # 為什麼 package-relative：本 package 在 helper_scripts/research/ 下，上面插入的
-    # sys.path 是 helper_scripts/（為 lib.pg_connect），舊寫法 `from aeg_regime_runner...`
-    # 差一層 research → --write-db 路徑 ModuleNotFoundError（artifact-only 不踩此 import，
-    # V127 從未被 populate 故 deploy 至今未暴露）。relative 對齊本 package「必以
-    # python3 -m 執行」的既有慣例（見 module docstring）。
-    from .db_writer import persist_regime_rows
+    # dual-path import（鏡像本檔頂部既有 pattern，兩種執行模式都通）：package 模式
+    # （python3 -m helper_scripts.research.aeg_regime_runner.harness）走 relative；
+    # direct-file 模式（python3 harness.py，頂部 fallback 已插 research/ 進 sys.path）
+    # 走絕對。舊碼只有絕對形且基於 helper_scripts/ 根（差一層 research）→ package 模式
+    # --write-db 必 ModuleNotFoundError；artifact-only 不踩此 import、V127 從未被
+    # populate，故 deploy 至今未暴露。
+    try:
+        from .db_writer import persist_regime_rows  # type: ignore
+    except ImportError:  # pragma: no cover — direct-file 執行模式
+        from aeg_regime_runner.db_writer import persist_regime_rows  # type: ignore
 
     dsn = args.dsn or resolve_report_dsn()
     conn = psycopg2.connect(dsn, application_name="aeg_regime_runner_write")

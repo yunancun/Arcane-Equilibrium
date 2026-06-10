@@ -324,6 +324,13 @@ def _reindex_all(
     """
     if candidate is None and btc is None and altcap is None and mask is None:
         return None, None, None, None
+    if candidate is None:
+        # E2 LOW-1：evidence 無 daily_returns（AEG-S3 標量輸出的常態）而因子載入成功時，
+        # 進 reindex 必觸 candidate_returns_missing fail-loud → 因子連帶全 None + 每次
+        # warning（常態當異常記）。B1 對 candidate=None 本就 DEFER（b1_inputs_missing_defer），
+        # 短路語義等價且不再噪音；因子保留原樣（candidate 缺與因子可得性無關）。
+        reasons.append("candidate_returns_missing_reindex_skipped")
+        return None, btc, altcap, mask
     reindex = _resolve_reindex()
     if reindex is None:
         reasons.append("bar_index_reindex_unavailable_temporal_keys_left")
