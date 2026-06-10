@@ -6,13 +6,11 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 
 # GUI Style Guide（OpenClaw Control Console）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active
-> state > `README.md` GUI surface > `CLAUDE.md` operating rules > governance
-> docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
 
-> ⚠️ **GUI 結構 disclaimer**：Control Console tab 清單以 `README.md`
-> 「OpenClaw Control Console 核心 Tab」為準（當前 16 個）。`ocEsc` /
+> ⚠️ **GUI 結構**：Control Console tab 清單以 `README.md`
+> 「OpenClaw Control Console 核心 Tab」表為準（不寫死數量）。`ocEsc` /
 > `ocSanitizeClass` / `ocExplain` 等 helper 仍需在
 > `program_code/.../static/` 內 grep 實測，不從記憶猜測。
 
@@ -26,7 +24,7 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 
 OpenClaw Control Console：
 - Canonical GUI: `http://trade-core:8000/console`（README 為入口）
-- Tab 清單以 `README.md` 現列 16 tabs 為準，不硬編碼歷史 N-Tab 數字
+- Tab 清單以 `README.md` tab 表為準，不硬編碼歷史 N-Tab 數字
 - Learning / Paper / Demo / Live 相關視圖需跟 README + 實際 static files 對齊
 - 新元件加入前先 grep `static/index.html`、`static/js/`、`static/tabs/`
 
@@ -55,7 +53,7 @@ OpenClaw Control Console：
 - 不引入動畫除非有功能性目的（loading / state transition）
 - 不依賴 Tailwind / CSS-in-JS 大型框架；用既有 CSS class
 - 圖表用既有 lib（如 Chart.js / lightweight chart）；不換
-- 文件 >800 行需要 review attention；2000 行是 hard cap
+- 檔案大小治理上限見 E5（唯一正本）
 
 ## JS 規範
 
@@ -88,6 +86,8 @@ try {
 ```
 
 ## 互動模式
+
+**本表為交互確認等級唯一正本，ux-checklist 引用本表，不另行重述。**
 
 | 操作 | 確認方式 | 回饋 |
 |---|---|---|

@@ -6,19 +6,14 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # E2E Integration Acceptance（端到端集成驗收手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active
-> state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md`
-> operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
-
-> **S3 上層 drift 防線**：本 skill 引用上層文件為 extract；runtime
-> 數字、phase、baseline 以 `TODO.md` 和當次實測為準。
+> 權威序：runtime RiskConfig TOML > Rust schema > `srv/TODO.md` > 治理文件（`SPECIFICATION_REGISTER.md` 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
 
 ## 何時觸發
 
 - QA 收到「Wave 完成驗收」「Phase 結束 sign-off」「Paper → Live 前置」「重大架構改動後」
 - 多模塊 PR 合入後的第一次集成驗收
-- Demo 21d 穩定期前後檢核（Phase 5 reframed）
+- Demo 穩定期前後檢核（phase 狀態以 `TODO.md` 為準）
 - AI 治理層 / Layer 2 / 5-Agent 接線完成後
 
 ## ★ 核心立場
@@ -37,7 +32,7 @@ allowed-tools: Read, Grep, Glob, Bash
 ```
 [ ] 測試數超過基準線（無新增 failed）— 數字以最近 baseline run 為準
 [ ] H0 Gate SLA 通過（<1ms，verify: passive_wait_healthcheck check_h0_gate）
-[ ] 治理端點 28/28 Operator 驗證完整 — 實際數以 grep "/api/v1" + 實測為準
+[ ] 治理端點 Operator 驗證完整 — 端點數以 grep "/api/v1" route 定義 + 實測為準
 [ ] paper_trading 完整流程：掃描 → 信號 → 審批 → 下單 → 止損
 [ ] GovernanceHub fail-closed 在 FREEZE 模式真實拒絕訂單
 [ ] 審計日誌完整（每筆訂單有 trace）
@@ -46,6 +41,8 @@ allowed-tools: Read, Grep, Glob, Bash
 ```
 
 ## 2. 業務鏈完整性（OpenClaw 5 階段）
+
+> **本拆法為業務鏈階段拆分唯一正本**：QA 驗收與 FA 對賬均按本拆法分段對齊。
 
 | 階段 | 端到端驗證 | 命令 / 證據 |
 |---|---|---|
@@ -82,7 +79,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 ## 4. 冒煙測試（最短路徑）
 
-5 個必跑：
+5 條全跑：
 
 ### 4.1 Health
 ```bash
@@ -111,29 +108,22 @@ ssh trade-core "psql -c 'SELECT max(ts), count(*) FROM trading.fills WHERE ts > 
 ```bash
 ssh trade-core "python3 helper_scripts/db/passive_wait_healthcheck.py"
 ```
-預期：17 check 全 PASS（或非新增 FAIL）
+預期：check 全 PASS（或無新增 FAIL）；check 清單以 `SPECIFICATION_REGISTER.md` healthcheck 條目與實測為準
 
 ## 5. Live 前置（Phase 6 / Mainnet 啟動）
 
-`CLAUDE.md` Hard Boundaries hard gates 5 項：
-1. Python `live_reserved` global mode（Python 側 RAM）
-2. Python Operator role auth
-3. `OPENCLAW_ALLOW_MAINNET=1` env（Rust 側）
-4. secret slot 有 api_key + api_secret
-5. `authorization.json` HMAC 簽名 + 未過期 + env_allowed 匹配
-
-QA 必逐項驗：
+hard gates 清單與指紋：見 `16-root-principles-checklist`（唯一正本）。QA 必逐項驗，驗證命令：
 ```bash
-# Gate 1: live_reserved
+# Gate: live_reserved
 ssh trade-core "python3 -c 'from app.modes import is_live_reserved; print(is_live_reserved())'"
 
-# Gate 3: env var
+# Gate: env var
 ssh trade-core "echo \$OPENCLAW_ALLOW_MAINNET"
 
-# Gate 4: secret slot
+# Gate: secret slot
 ssh trade-core "ls \$OPENCLAW_SECRETS_DIR/live/"
 
-# Gate 5: authorization.json
+# Gate: authorization.json
 ssh trade-core "python3 helper_scripts/live/verify_authorization.py"
 ```
 
@@ -163,26 +153,22 @@ ssh trade-core "python3 helper_scripts/live/verify_authorization.py"
 4. **冒煙 5 條**（§4）
 5. **跨模塊一致性 3 維**（§6）
 6. **E2E 8 條 checklist**（§1）
-7. **Live 前置 5 hard gate**（如 Phase 6）
+7. **Live 前置 hard gates**（如 Phase 6；§5）
 8. **灰度 7 天驗證**（CRITICAL=0 / WARNING<10）
-9. **healthcheck cron 24h 全 PASS**（17 check）
+9. **healthcheck cron 24h 全 PASS**（check 清單以 SSOT 與實測為準）
 10. **GovernanceHub FREEZE 模式真實拒單測試**
-11. **TODO.md active state 對照**（drift 檢查）
+11. **TODO.md active state 對照**（drift 檢查；G6-04 規則正本：`doc-cross-reference`）
 12. **report + sign-off**
 
-## OpenClaw context — 不在本 skill 重述
+## 穩定平台規則（不隨 runtime drift）
 
-OpenClaw 特定 snapshot（Phase 5 reframed 細節 / Demo 21d 時鐘起點 / 預測 Live 日期 / 當前 healthcheck check 數 / G6-04 規則編號）會 drift。本 skill 不重述。
+- 強制工作鏈 E1→E2→E4→QA→PM 不可跳。
+- engine_mode 4 值：paper / demo / live_demo / live。
+- Mac 端 `engine_alive=false` 是預期（取真值走 `ssh trade-core`）。
+- commit 即 push，由 PM 執行。
+- TODO / report 任何 runtime 數值採納前 source-of-truth 實測。
 
-實際 context 必從 SSOT 拿：runtime TOML > Rust schema > `TODO.md`
-active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md`
-operating rules > `git log` > governance docs > memory（最後）。
-
-**穩定不變的 governance / 平台 rule**（不會 drift）：強制工作鏈
-E1→E2→E4→QA→PM 不可跳；engine_mode 4 值 paper/demo/live_demo/live；
-Mac 端 `engine_alive=false` 是預期（必走 `ssh trade-core` 取真值）；
-commit 即 push由 PM 執行；TODO / report 任何 runtime 數值採納前必
-source-of-truth 實測。
+即時 snapshot（phase 狀態 / baseline / check 數 / 端點數 / Demo 穩定期時鐘）不在本 skill 重述，以檔首權威序 SSOT 取得。
 
 ## Cross-Skill 互引（避免重述）
 
@@ -194,7 +180,7 @@ source-of-truth 實測。
 - E4 過了直接放行 QA（不跑業務鏈）
 - 冒煙測試只跑 1 條
 - 雙進程不驗降級 + 重連
-- Live 前置只驗 1-3 gate
+- Live 前置只驗部分 gate
 - 7d 灰度沒看 CRITICAL 趨勢
 - healthcheck cron 沒跑就宣稱「stable」
 - TODO / report 數值沒對照 runtime 實測
@@ -235,7 +221,7 @@ source-of-truth 實測。
 ## E2E 8 checklist
 | Item | 狀態 |
 
-## Live 前置 5 gate（如適用）
+## Live 前置 hard gates（如適用）
 | Gate | 狀態 |
 
 ## 灰度 7d 統計

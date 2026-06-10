@@ -146,3 +146,9 @@
 
 ### CC 最終判決
 當前 TODO.md 與 CLAUDE.md 規則整體一致，無結構性違反。三大 BLOCKER 清晰可修復。建議 48h 內完成 P0 層清債，再進 DUAL-TRACK Phase 2。整體合規軌跡向上，已具備 live 前置基礎。
+
+### 2026-06-10 OPS-2 Phase-2 cutover 合規審計
+- verdict APPROVE-CONDITIONAL(A-):16/16+9/9+硬邊界 0 觸碰,0 BLOCKER 不阻 merge;G5 簽名 key 單一來源=強化方向
+- 條件 4 項:CC-MED-1(runbook §4.2.1/§13.5「不再 seed/panic 阻 boot」雙重失真 doc-reconcile,deploy 前)+C-A(soak 證據附 sign-off 包)+C-B(手動 renew 救濟留證)+C-C(§13.2 外部 alert 親簽)
+- 模式:fallback 移除類變更失敗模式不對稱(可用性損失≠失防)→條件全為 sign-off 閘非代碼缺陷;報告由 PM 代落盤(本 session 無 Write)
+- 報告:workspace/reports/2026-06-10--ops2_phase2_cutover_compliance.md(+Operator 鏡像)

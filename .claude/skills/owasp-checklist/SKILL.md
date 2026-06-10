@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # OWASP Top 10 Checklist（OpenClaw 專用）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
 
 ## 何時觸發
 
@@ -90,9 +90,17 @@ allowed-tools: Read, Grep, Glob, Bash
 - [ ] Local LLM 路由僅 `127.0.0.1` / `localhost`
 - [ ] webhook（如有）拒 `169.254.*` / `127.*` / `10.*` private IP
 
+### A11 — LLM/Prompt-Injection（本系統 L2 推理鏈）
+- [ ] 外部數據經 tool 結果回流注入 L2 prompt（news / web / UGC）有隔離與標記，不當指令執行
+- [ ] L2 輸出未驗證不得直接驅動決策鏈（schema 驗證 + 數值範圍檢查後才入 gate）
+- [ ] 本地模型 endpoint 鑑權：Ollama / LM Studio 綁定 loopback，非 loopback 綁定 = finding
+- [ ] prompt / 推理日誌不嵌入 secret（API key / HMAC / credential）
+- [ ] 模型輸出寫 DB 前消毒（長度 / 型別 / 注入字元）
+- [ ] L2 推理鏈信任邊界詳見 E3.md scope 條目
+
 ## OpenClaw 補充項
 
-- [ ] `OPENCLAW_BASE_DIR` / `OPENCLAW_DATA_DIR` / `OPENCLAW_SECRETS_DIR` 不出現用戶 home 字面值（`/home/ncyu`/`/Users/<name>`）
+- [ ] 跨平台路徑硬編碼（user home 字面值）：grep 配方正本見 `pr-adversarial-review` §3.1
 - [ ] `live_reserved`、`execution_authority`、`execution_state` 不被 monkey-patch / runtime override
 - [ ] LiveDemo 不因 endpoint 降級（authorization/TTL/風控門控按 Live 嚴格標準）
 - [ ] `OPENCLAW_AUTO_MIGRATE=1` opt-in 路徑：guard A/B/C 完整，ambiguous state RAISE

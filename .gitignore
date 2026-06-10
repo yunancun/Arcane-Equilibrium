@@ -97,3 +97,5 @@ backups/*.sql
 !.claude/skills/**
 !.claude/agents
 !.claude/agents/**
+!.claude/workflows
+!.claude/workflows/**
