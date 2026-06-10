@@ -108,6 +108,21 @@ NOTE：
 | N-8 | **executor docstring「short-circuit」與實作不符**（`:1003` vs 全 stage 執行）——pre-existing 非 P4 引入，但 P4 的 debit 語義依賴此行為，修 #3 時順手改 docstring | LOW | HIGH | E1-B 順帶一行 |
 | N-9 | 假陽性候選自查：曾疑「demo-confirm refund 的異步到帳破壞 α_i predictability」——判定不成立：α_i 取 INSERT 時 PG balance，refund 屬過去 discoveries 的外部驗證事件，對當前 test 的 null 無資訊耦合，predictability 成立 | （已排除） | MED-HIGH | 列出供 PM 覆核，不入 finding |
 
+## 5a. 補充裁決（同日）— QC FIX-3.1 ack：**ACK-with-條件**（confidence HIGH）
+
+QC sign-off 建議 FIX-3.1（DSR 渲染前 input-availability precheck，注定 DEFER 的 run 免費 skip）。MIT 裁決：
+
+**(1) Conditional-on-conducting 論證成立（收緊後）**：selection 不破 mFDR bound 的乾淨充分條件 = conduct 決策 C_i 可測於「test 逐 cell 保持 level 校準」的變數 σ-代數。DSR null 校準 conditional on (N,K)——對任何 C ∈ σ(存在性 flag, N, 日曆 span)，`P(pass|C,H0) ≤ α_i` 逐 cell 成立。「資料量與 Sharpe 精度相關」的對抗點被解掉：精度-given-N 正是 DSR 自己的 conditioning 變數，selecting on N 只是選校準 cell 非 selecting on 統計量。雙保險：(a) skip 只在 overall=pass 結構性不可達時觸發，被 skip run 對 V/R 增量恆 0；(b) 不渲染 ⇒ 無 dsr verdict 紀錄 ⇒ #3 封掉的 optional-continuation 通道根本不開——**#3 debit 規則一字不改**。
+
+**(2) QC verbatim 謂詞一項不過邊界**：`down-span<180d` 如實作是 **value-derived**（`beta_neutral_check.py:245` 親驗——down_ts 由 BTC 價格條件篩出），conduct conditional on BTC down-heavy 路徑對 short-beta null 是 anti-conservative 方向。**修法零成本**：替換為 value-free 蘊含條件「aligned candidate history 日曆 span < 180d」（年輕 cohort 覆蓋完全相同；老候選 down-bar 稀缺照渲染照付=保守浪費可受）。
+
+**允許集合邊界（binding，一句定死）**：
+> skip 謂詞必須滿足 **value-invariance**：固定 timestamps/row 存在性下擾動任何 price/return 數值，謂詞真值不得改變——允許：輸入序列存在性（`is None`）、row/bar/trade 計數、日曆 span、schema/lineage 完備性；絕不可：down-bar 計數、value-derived down-span、vol、Sharpe、β、任何 returns 實現值的函數、任何先前 value-derived stage verdict、wealth 以外的任何統計量。
+
+**Binding 條件 4 項（寫入 E1-B AC）**：① 謂詞替換（上述）；② total skip——不算 DSR、`stage_verdicts["dsr"]` 不記 pass/fail、DEFER reason=`precheck_input_unavailable`、skip 落 log（conducted 計數只算渲染過的，N-7 語義不被污染）；③ golden tests——(a) skip run ⇒ 無 debit ∧ 無 dsr verdict、(b) #3 golden test 原樣保留、(c) value-invariance mutation test（擾動數值斷言 skip 決策不變）；④ precheck 置於 STAGE 3.7 α_i assignment **之前**。
+
+註記：謂詞 under-fire=照付=保守；over-fire=power 損失非 validity 損失；建議謂詞 reuse B1 入口存在性檢查碼路徑防 drift。N-8 docstring 由本 FIX 部分兌現。1b 的 assign_alpha_i floor 建議獨立成立不因本 ACK 撤銷。
+
 ## 5. 文獻錨點
 
 Foster & Stine (2008) *α-investing: a procedure for sequential control of expected false discoveries*（mFDR_η ≤ α；multiple-streams 可加性）；Aharoni & Rosset (2014) GAI（payout/penalty 框架——φ=1.0 refund ≤ GAI payout cap 逐路徑成立）；Javanmard & Montanari (2018) / Ramdas et al. (2017) LORD/LORD++（W_0 ≤ α 慣例——本設計 W_0 = 0.1·α_target 更緊）；Ramdas et al. (2018) SAFFRON / Tian & Ramdas (2019) ADDIS（candidate-thresholding 路線，本設計未採、不必採）；Bailey & López de Prado (2014) DSR（null 校準假設的出處）。本 verdict 的核心 bound（§1）為自含推導，不依賴上列任何論文的精確 payout 常數——僅依賴 (a) predictability (b) per-test level ≤ α_i (c) conducted-test-pays 三前提。

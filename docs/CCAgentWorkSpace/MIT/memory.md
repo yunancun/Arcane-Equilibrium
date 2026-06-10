@@ -204,3 +204,5 @@
 ## 2026-06-10 — P4 online-FDR M1+M2 final ratification
 
 7 項=6 APPROVE/APPROVE-with-NOTE + 1 MODIFY（#3 debit 須含「dsr stage 渲染 pass/fail 即扣」，否則 single-config PBO honest-DEFER 下可無限免費 re-look DSR，破 E[V]≤Σα_i 前提 (c)；math gate 實作五 stage 全跑無 short-circuit、docstring :1003 誤述）。#2 拍板 **Option B**（Option A 斷帳本-水準恆等=無 FDR 保證，拒背書）。自含 bound：per-family mFDR ≤ 0.1·α_target（10x margin）、全域 ≤ α_target 需 **N_fam ≤ 1/γ=10**（cardinality healthcheck 閾值）。α_i ≤ 5e-4 恆成立 ⇒ cap=0.005 vacuous（defense-in-depth）+ threshold ≥ 0.9995 ⇒ 初期 discovery≈0 是設計後果（healthcheck 監測 conducted>0 非 discoveries>0）。NOTE：V137 CHECK 三值邏輯洞（NULL n_eff 過 CHECK）MED-HIGH、refund×debit_failed 無互斥、orphan refund wealth-inflation 向量、debit_id 決定性未規範、pre_reg_id 無 FK。E1-READY=YES+1 binding 條件。報告：workspace/reports/2026-06-10--l2-p4-m1-m2-final-ratification.md
+
+**2026-06-10 FIX-3.1 補充裁決 ACK-with-條件**：skip 謂詞邊界=value-invariance（存在性/計數/日曆 span 可；任何 returns/price 值的函數不可）；親驗 beta_neutral_check.py:245 down-span 是 BTC value-derived 須替換「candidate history span<180d」；#3 debit 規則不變，skip=不渲染不付費，conditional-on-conducting level 經 (N,K)-cell 論證+零 discovery 面雙保險成立。詳見 ratification 報告 §5a。
