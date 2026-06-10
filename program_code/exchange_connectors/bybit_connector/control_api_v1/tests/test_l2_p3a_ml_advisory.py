@@ -23,6 +23,7 @@ Linux E4 regression + E3 對抗 + MIT（M3/M4）owed。
 from __future__ import annotations
 
 import asyncio
+import ast
 import inspect
 import io
 import json
@@ -257,10 +258,14 @@ class TestTwoModesCascade:
         assert res.sink_written is True
 
     def test_unknown_mode_failclosed_no_model_call(self):
-        """未知/P3b mode（hypothesize）→ fail-closed reject，零 model 呼叫（P3a 不含 hypothesize）。"""
+        """未知 mode → fail-closed reject，零 model 呼叫。
+
+        P3b（2026-06-09）把 hypothesize 升為合法模式（alpha-bearing，走 §G.2 cascade）；故此處
+        改用「真未知」mode 驗 fail-closed 路徑仍在（hypothesize 的 cascade 另有專屬測試）。
+        """
         eng = _FakeEngine(cloud_text=json.dumps(_VALID_DIAGNOSE_OUTPUT))
         res = _run(EXEC.run_ml_advisory_cascade(
-            capability_id="ml_advisory.hypothesize", mode="hypothesize",
+            capability_id="ml_advisory.bogus", mode="bogus_mode",
             context={}, engine=eng,
             contract_ver="x", schema_ver="y", calibration=_enabled_calibration(),
         ))
@@ -734,11 +739,51 @@ class TestAdvisorySinkZeroExecAuthority:
 
 
 class TestLlmNeverValidatesAlpha:
-    def test_executor_has_no_alpha_gate_imports(self):
-        """grep：executor 真碼無 alpha-gate import（dsr_gate/pbo_gate/beta_neutral；P3a 斷言無 alpha）。"""
-        for forbidden in ("dsr_gate", "pbo_gate", "beta_neutral", "residual_alpha_gate", "compute_dsr"):
-            assert forbidden not in _EXEC_CODE, \
-                f"P3a executor 不該含 alpha gate {forbidden}（斷言無 alpha；LLM 永不驗 alpha）"
+    def test_llm_invocation_functions_have_no_alpha_gate(self):
+        """鐵律（P3b）：LLM-invocation 函數（screen/generate/cloud-interpret）真碼無 alpha-gate 引用。
+
+        P3b 把 alpha 驗證集中到「確定性 math gate」（dsr_gate/pbo_gate/beta_neutral_check 是唯一
+        alpha validator）。鐵律不是「executor 完全無 alpha gate」（math gate 須有），而是「LLM
+        永不驗 alpha」——故 LLM-invocation 函數體內不得引用任何 alpha gate（驗 alpha 只在確定性
+        math gate stage 函數，那些函數另有「0 LLM-invocation」測試把關）。
+        """
+        src = (PROJECT_ROOT / "app" / "l2_ml_advisory_executor.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        llm_fns = {"_run_ollama_screen", "_run_ollama_generate", "_run_cloud_interpret"}
+        alpha_tokens = ("dsr_gate", "pbo_gate", "beta_neutral", "residual_alpha_gate",
+                        "compute_dsr", "compute_pbo", "beta_neutral_check", "_run_math_gate")
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in llm_fns:
+                found = True
+                body_src = ast.get_source_segment(src, node) or ""
+                for tok in alpha_tokens:
+                    assert tok not in body_src, \
+                        f"LLM-invocation 函數 {node.name} 不得引用 alpha gate {tok}（LLM 永不驗 alpha）"
+        assert found, "未找到任何 LLM-invocation 函數（測試前提失效）"
+
+    def test_math_gate_stage_functions_have_no_llm_invocation(self):
+        """鐵律（P3b）：確定性 math gate stage 函數真碼 0 LLM-invocation（CC/E2/MIT grep target）。
+
+        math gate 是唯一 alpha validator，且必為「確定性」——stage 函數體內不得有任何 model 呼叫
+        （_provider_complete / run_session / _run_ollama* / _run_cloud*），確保 alpha 驗證 100%
+        由數學決定，0 LLM 介入。
+        """
+        src = (PROJECT_ROOT / "app" / "l2_ml_advisory_executor.py").read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        gate_fns = {"_run_math_gate", "_run_dsr_stage", "_run_pbo_stage", "_run_b1_stage",
+                    "_run_leak_stage", "_strictest_math_verdict"}
+        llm_tokens = ("_provider_complete", "run_session", "_run_ollama_screen",
+                      "_run_ollama_generate", "_run_cloud_interpret", "provider_client")
+        found = False
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in gate_fns:
+                found = True
+                body_src = ast.get_source_segment(src, node) or ""
+                for tok in llm_tokens:
+                    assert tok not in body_src, \
+                        f"math gate 函數 {node.name} 不得含 LLM-invocation {tok}（math gate 是確定性唯一 validator）"
+        assert found, "未找到任何 math gate stage 函數（測試前提失效）"
 
     def test_guard_is_deterministic_no_model_call(self):
         """guard 確定性：ml_advisory guard 真碼無 model 呼叫（guard 抓形非驗 alpha）。"""

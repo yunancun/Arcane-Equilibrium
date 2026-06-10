@@ -308,6 +308,32 @@ class TestPersistLessons:
         assert len(rows) == 2
         assert all(r[0] == "ETHUSDT" for r in rows)
 
+    def test_context_id_uses_l2_reply_id_when_set(self):
+        # D3 provenance（§C agent.lessons 映射）：session.l2_reply_id 設了就用它作
+        # context_id（讓 lesson 逆溯回 agent.l2_calls），而非 session_id。
+        cm, cur, conn = _mock_db_conn()
+        sess = Layer2Session()
+        sess.l2_reply_id = "l2r:abcdef123456"
+        insights = [Insight(category="macro", title="t", detail="d")]
+        with patch("app.layer2_critic.db_pool.get_pg_conn", return_value=cm):
+            _run(persist_lessons(insights, sess, "BTCUSDT"))
+        sql, rows = cur.executemany.call_args[0]
+        # context_id 是 INSERT tuple 第 5 欄（index 4）。
+        assert rows[0][4] == "l2r:abcdef123456"
+
+    def test_context_id_falls_back_to_session_id(self):
+        # 未鑄造 l2_reply_id（DB 不可用 / 未發生模型呼叫）→ 退回 session_id，
+        # 保持既有非 L2-origin 行為不變。
+        cm, cur, conn = _mock_db_conn()
+        sess = Layer2Session()
+        assert sess.l2_reply_id is None
+        insights = [Insight(category="macro", title="t", detail="d")]
+        with patch("app.layer2_critic.db_pool.get_pg_conn", return_value=cm):
+            _run(persist_lessons(insights, sess, "BTCUSDT"))
+        sql, rows = cur.executemany.call_args[0]
+        assert rows[0][4] == sess.session_id
+        assert sess.session_id.startswith("l2s:")
+
     def test_db_unavailable_no_raise(self):
         # conn 為 None（DB 不可用）→ 靜默放棄、不 raise、不 commit。
         cm = MagicMock()

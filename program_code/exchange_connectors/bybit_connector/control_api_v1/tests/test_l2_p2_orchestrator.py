@@ -241,11 +241,28 @@ class TestRegistryLoader:
         with pytest.raises(REG.L2RegistryLoadError):
             REG.load_capability_registry(toml)
 
-    def test_default_checked_in_toml_loads_empty_skeleton(self):
-        """checked-in 預設 TOML 載入成功且 capabilities 空（P2 skeleton）。"""
+    def test_default_checked_in_toml_loads_stanzas_all_disabled(self):
+        """checked-in 預設 TOML 載入成功；含 3 ml_advisory stanza 且全 enabled=false
+        （fail-closed 預設保留——部署即行為中性）。
+
+        P3a（2026-06-09）把 P2 空 skeleton 換成 2 capability stanza（diagnose_leak +
+        interpret_result）；P3b（2026-06-09）加第三個 hypothesize（alpha-bearing，但雙閘：
+        enabled=false + min_tier=L3 + can_generate_hypotheses）。registry 非空但無 enabled cap
+        = 仍 fail-closed。
+        """
         reg = REG.load_capability_registry()
-        assert reg.capabilities == {}
+        assert set(reg.capabilities.keys()) == {
+            "ml_advisory.diagnose_leak", "ml_advisory.interpret_result", "ml_advisory.hypothesize"
+        }
+        # 鐵律：全 enabled=false（fail-closed 預設；無 enabled cap = 無 advisory = 今日 baseline）。
         assert reg.enabled_capabilities() == []
+        # hypothesize 雙閘：enabled=false + min_tier=L3 + 綁 can_generate_hypotheses flag。
+        h = reg.get("ml_advisory.hypothesize")
+        assert h is not None
+        assert h.enabled is False
+        assert h.min_tier == "L3"
+        assert h.tier_capability_flag == "can_generate_hypotheses"
+        assert h.lane == "ml_backlog"  # → LANE_DIRECTION neutral（晉升是另一 expand/MANUAL lane）
 
     def test_missing_toml_returns_empty_failclosed(self, tmp_path):
         """TOML 不存在 → 回空 registry（fail-closed，不崩潰）。"""
