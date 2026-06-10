@@ -85,3 +85,15 @@ P3b hypothesize alpha-gate 已 green+commit **`24d049fc`**（18 檔/3989+）。*
 **對抗鏈戰果（E2 四輪全真彈）**：R1=route 同步 PG 阻塞 event loop+harness 半修 import（我的修反引入 direct-file 模式破壞）；R2=我修 LOW-1 引入序列化炸彈（date-key dict 過 `json.dumps(default=str)` 炸 key→cascade 中斷+fail-safe SM 毒化——「保留因子」零價值純危害）+no-bite 測試；R3=in-process bite 結構性不可能（conftest path 注入），subprocess 乾淨 context 才真 bite。**QC 流程創新**：QC 無 Bash→BLOCKED-HANDOFF+預註冊驗收帶（解析式預期+FATAL 指紋）→E4 代跑→機械裁決 SANE；clone witness β_btc=0.99984 是共享 int-index 對齊的銳利見證（錯位則崩向 0）。
 
 **E2E-0**：真 HTTP（Bearer+CSRF double-submit）→`capability_disabled` 雙閘真擋→`l2_gate_seam_log` seam_id=1 真 row（`l2adm:7b2406dda893`）→l2_calls 0=零 model 零成本。**殘**：E2E-1 operator-gated（enable diagnose_leak 一次→真 agent.l2_calls row）。**附帶**：guard v2 進程級（E2 probe 抓 daemon-thread 繞過 per-test fixture；fixture 污染 21 rows RCA：E4 parity 5 輪+deploy re-test 2 輪×3 sink 測試，fixture 文本 grep 一擊破案）；half_life 2 pre-existing fail 由他 session 領走已修上 main。**教訓**：(1)/tmp worktree 未 commit 產出會被系統清理蒸發——subagent transcript Write/Edit 重放可 0 損失恢復，但 commit-early 才是正解 (2)QC/read-only agent 派工不可含 runtime 執行假設——預註冊帶+執行位代跑是正解 (3)對抗審的修復本身要再過對抗審（我兩次修復引入新 bug 全靠 E2 攔）。main=`97a5c310`。
+
+---
+
+## [2026-06-10 深夜] E2E-1 達成 + P4/P2p 設計收檔（session 終態）
+
+**E2E-1**：enable diagnose_leak → 真 dispatch → **agent.l2_calls 第一條真 row**（`l2r:93166da5722f`，FULL prompt 落庫/contract ver 正確/與 HTTP provenance 閉合）→ TOML 復原 fail-closed+reload。途中真驗 debounce storm-control（900s trailing-edge 第一發必 pending——manual E2E 撞上是設計行為，臨時 debounce=0 完成後復原）。**環境 note（enable 真用前置）**：cloud provider key 未配（cloud 段 fail-soft）+ M4 ollama_screen MIT flag-off。deployed-E2E（P1 以來 owed）全閉。
+
+**P4 設計**（`b40b9481` feat/l2-p4-design，PA 8 問+Linux 親驗）：V137 雙表 append-only α-wealth 帳本（partial unique idx 封 double-refund）/N_eff hand-rolled average-linkage+初期誠實 fallback raw k_trials/V132 sealer 寫入鏈已存在只補 3 行觀測性+activation runbook/Q3=同軌（P4=hypothesize cascade 上游守門+下游記帳）/tier L3 結構性不可達=dormant ship 誠實/demo-confirm 資料夠但缺 debit↔deploy binding route（新檔 l2_fdr_routes.py，layer2_routes 861 行不再加）/三線 E1 零重疊。**待 MIT ratify 7 項**（α_i 序列/DSR mapping/DEFER-no-debit 等 PA defaults）+ operator V137 取號。
+
+**P2p 設計**（`e5a39342` feat/l2-p2p-design，E1-READY）：6 軸 cron */5 哨兵（engine 心跳/watchdog 活性/canary 4 事件消費=MEDIUM-2 收口/healthz/seam reject/migrations drift+A5 污染偵測 rate 主力雙層）；**watchdog alert wiring 已落地直接 sibling-import 零改動**；never-remediate 結構性；單 E1 ~900 行零 migration；OQ-1=告警通道 creds 先確認。
+
+**三端同步**：origin=Linux；Mac=他 session rescue-branch 架構（髒樹快照保 WIP）。**next session**：P2p E1 實作（1 session）∥ P4 MIT ratify→三線 E1（2-3 session）；hypothesize 真用前置=cloud key+M4 flag 評估（operator）。
