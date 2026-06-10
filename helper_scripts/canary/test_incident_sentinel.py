@@ -392,6 +392,22 @@ class TestDedup:
         env.run(now=NOW + 300)
         assert len(env.alerts.calls) == 1  # WARN 恢復不發 INFO
 
+    def test_same_second_burst_across_rounds_not_swallowed(self, tmp_path):
+        # MED-2 回歸：alert_key 若 int() 截整數秒，同一整數秒內 burst 被 cron
+        # 切成兩輪時，次輪新事件 int(X.7)==int(X.2) 同 key → should_emit False
+        # → 靜默吞且游標已推過不重掃。修後 key 全精度，兩輪必須兩 alert。
+        env = Env(tmp_path)
+        base = NOW - 30.0  # 兩事件同落 int(base) 整數秒
+        _write_canary_events(env.data_dir, [{"ts": base + 0.2, "event": "RESTART_FAILED"}])
+        env.run()
+        _write_canary_events(env.data_dir, [{"ts": base + 0.7, "event": "NETWORK_OUTAGE"}])
+        env.run(now=NOW + 60)
+        a2_alerts = [c for c in env.alerts.calls if "a2_canary" in c["subject"]]
+        assert len(a2_alerts) == 2, "次輪同秒新事件被同 key 吞（兩輪應兩 alert）"
+        # 游標全精度推進到次輪事件 ts（不重掃也不漏）。
+        state = json.loads((env.data_dir / isentinel.STATE_FILE).read_text())
+        assert state["canary_cursor_ts"] == base + 0.7
+
     def test_realert_window_exactly_one_per_window(self, tmp_path):
         env = Env(tmp_path, fresh_snapshots=False)
         env.run(now=NOW)                      # 首發
@@ -529,8 +545,15 @@ class TestNeverRemediateStructural:
         assert re.search(r"\b(INSERT|UPDATE|DELETE|TRUNCATE|ALTER|DROP|GRANT|REVOKE)\b", self.SRC) is None
 
     def test_db_session_read_only_and_timeout_params_present(self):
-        assert "default_transaction_read_only=on" in self.SRC
-        assert "statement_timeout" in self.SRC
+        # MED-1 修：原全檔 SRC 斷言被模塊 docstring 的合法邊界宣告（:23-24）滿足，
+        # 刪掉 connect kwarg 功能行測試仍綠 = no-bite（正面斷言不可查全文，
+        # 承「grep 正反兩面」教訓）。收窄到 _connect_readonly 函數源並剝其
+        # docstring，命中只能來自 psycopg2.connect 功能行。
+        src = inspect.getsource(isentinel._connect_readonly)
+        body = src.partition('"""')[2].partition('"""')[2]
+        assert body.strip(), "函數結構變動：找不到 _connect_readonly docstring 分界"
+        assert "default_transaction_read_only=on" in body
+        assert "statement_timeout" in body
 
     def test_never_writes_watchdog_owned_files(self):
         # 不寫 watchdog_state.json：MODULE_NOTE 合法提及邊界宣告（裸 grep 會誤紅，

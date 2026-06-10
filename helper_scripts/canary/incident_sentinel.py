@@ -257,10 +257,13 @@ def check_canary_events(
     }
     if total == 0:
         return AxisResult(axis="a2_canary", ok=True, evidence=evidence), max_ts
-    # key 含批次指紋（最大 alertable ts）：游標推進後同批不重發，新批必為新 key。
+    # key 含批次指紋（最大 alertable ts，全精度禁截秒）：游標推進後同批不重發；
+    # 新批事件 ts 必嚴格大於游標 ≥ 前批最大 ts → 必為新 key。若 int() 截整數秒，
+    # 同一秒內 burst 被 cron 切成兩輪時次輪同 key → should_emit 靜默吞且游標
+    # 已推過不重掃（MED-2）。
     result = AxisResult(
         axis="a2_canary", ok=False, severity=SEVERITY_WARN,
-        alert_key=f"a2:through_{int(max_alertable_ts)}",
+        alert_key=f"a2:through_{max_alertable_ts}",
         subject=f"OpenClaw sentinel: a2_canary — {total} unconsumed alertable canary event(s)",
         body=(
             f"canary_events.jsonl 新增 alertable 事件（watchdog 只落檔未告警）：\n"
