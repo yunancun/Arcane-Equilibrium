@@ -162,3 +162,26 @@ E1 flag 對。`l2_advisory_orchestrator.py:429-432` `dispatch_and_execute` 傳 `
 - **殘留字串域判定**：rename 後 grep `ipc_secret` 殘 6 處全 comment/負向測試名（IPC-transport 域概念引用）= 合法；抽 2 處讀上下文驗，不只看 grep 行。
 - **5e 真 fire 案例**：review 中 L2 Mesh 7 commits 推上 origin/main（含 E2/memory.md +574 行 sibling 寫入）→ `comm -12` 比對 PR 11 檔 vs sibling 檔 = 0 overlap → verdict 不受影響、照 SOP 記錄不忽略。
 - E1 本輪採上輪校正計數（watcher 12 非 15），數字 0 不符 → RETURN 輪揪 per-file 精度有效，re-review 輪信任度可升但仍抽驗。
+
+## 2026-06-10 · E2 — fix/l2-owed P3b owed wiring 三 commit 對抗審 → RETURN to E1（2 MED + 2 LOW）
+- 範圍 `a187b4e7`(adapter/reindex/route/novelty/seed)+`aae7656e`(guard v2)+`470687ac`(harness import)。核心全綠：捏造禁令 tokenizer-strip 結構成立+消費鍵 10+1 逐一對上+ordinal-offset 與 _span_days/_chrono_key 語意親證一致+mask date-key 空化 workaround 宣稱實證成立+guard finally 重封鎖；3 mutation 全 bite（union 還原 3 紅/ordinal→dense 2 紅/M3 typing 削除 1 紅）；L2 面 413p/4xf+58p 親跑。
+- RETURN 因：MED-1 route async handler 直呼同步 load_factor_bundle（layer2_critic :294 同家族明文 to_thread 範式，event-loop 阻塞）；MED-2 harness fix 註釋虛假引用（docstring 無「必以 -m」慣例，grep 唯一命中=新註釋自身）+direct-file --write-db 從可用變炸（頂部 fallback 明文支援該模式；修法=鏡像同檔 dual-path try/except）+_write_db 零測試。
+- §5e 真 fire ×2：review 期間 sibling 在同 branch 同 worktree 落 `58192465`+`026dd75d`（adapter 裁窗，QC 帶）——驗零 mutation 殘留吃入+新 HEAD 53p 綠；該 2 commit 不在本輪 sign-off 範圍，標給 re-review 輪一併蓋。教訓：worktree 共用時 mutation probe 必須「改完即還原」短窗操作，每輪 status 驗空——本次因此倖免污染 sibling commit。
+
+## 2026-06-10 · re-E2 — fix/l2-owed 3 commit narrow re-review → RETURN to E1（1 新 MEDIUM + 1 LOW）
+- `58192465`+`026dd75d` 裁窗 PASS（mask 仍吃全 buffer closes、裁輸出不破 prior-only 回看；ws/we :377 early-guard 型別安全；INFO：`_clip_window` 可出 `{}` 不歸一 None 無 reason，但 B1 :1134 fail-soft 兜 DEFER 無 false-GO）；`2c5d6a62` (a) to_thread PASS（asyncio :34/critic 範式明文/adapter 零可變模塊態）、(b) dual-path 生產修 PASS 但新測試 0 bite（AST 證只 callable/hasattr 從不執行 _write_db → 函數體 import 永不被行使，docstring「迴歸鎖」overclaim）= LOW。
+- **★ 新 MEDIUM：LOW-1 短路把 dt.date-key 因子 dict 留進 context → STAGE 2 `json.dumps(context, default=str)` 必 TypeError（default 不兜 dict key，端到端 repro 釘死：真 adapter 短路 fire + :376 逐字表達式炸）**。鏈：dispatch(:827/:835)→orchestrator(:442)→cascade :648→_run_cloud_interpret :376 無包裹→orchestrator :449 兜→`report_call_outcome(ok=False)` 推 fail-safe SM + 無 D3 row + 零 diagnosis；pre-fix 同 dispatch 因子連帶 None=JSON 安全可完整跑。教訓：**「語義等價」要分層驗——B1 層等價≠cascade/序列化層等價；保留下游零消費者的資料（B1 對 cand=None 不讀因子）只剩序列化危害**。修方向：短路改回傳全 None+新 reason，或 adapter 邊界字串化 date key；補 evidence-built context→json.dumps round-trip 測試。
+- §5e 又 fire ×1：sibling 同 worktree 落 `bec21427`（docs-only QC signoff，0 code overlap）照 SOP 記錄不影響 verdict；本輪 0 mutation 全唯讀 repro，status 全程 clean。
+
+## 2026-06-10 · E2 — half_life scipy importorskip `dc5c60d7` → APPROVE-with-nits（PASS to E4，0 需修 + 2 INFO）
+- 2 檔 +7 行純插入零刪除；三模式親跑：scipy 7p / shadow 5p+2s（skip 可見誠實）/ base 版+shadow 恰 2F 精準重現 trade-core 症狀（`assert 'default_14d' == 'pnl_decay'`）= 守衛有 bite、RCA 真因非遮蓋；0 production caller（grep 證，唯一命中 embargo_validator.py:160 字串）。報告：`workspace/reports/2026-06-10--half-life-scipy-skip-review.md`。
+- 可複用手法：dep-skip 守衛審查 = PYTHONPATH 注入 `raise ModuleNotFoundError` shadow 模擬缺依賴（importorskip 與模組 try/except 同被觸發），配 base 版 untracked 副本重現原始 FAIL 證 bite；「不擴守衛」可以是對的——降級路徑測試在 scipy-less 解譯器上行使的正是該環境生產路徑，加守衛反減覆蓋。
+
+## 2026-06-10 · E2 第三輪 narrow delta — fix/l2-owed `bc83ecc9` → RETURN to E1（MEDIUM 修 PASS；LOW 修 mutation 不殺）
+- MEDIUM 修全綠：短路全 None + reason 保留；TestContextJsonSerializable 鎖 executor :376 逐字 `json.dumps(ctx, ensure_ascii=False, default=str)`（:315/:922 同式）；mutation 還原保留因子 → 短路測試紅且死法=`TypeError: keys must be str...not datetime.date`（前輪 repro 同 signature），full-path 不受擾；build_context_from_evidence 對 context 零後加料=鎖內層即鎖最終物件。
+- LOW 修 FAIL：`test_write_db_import_seam_truly_executes` 兩個歷史壞形 mutation（原始絕對形 + 470687ac relative-only）**全存活**（各 1 passed）——根因=tests/conftest.py:15 插 research/ 進 sys.path + harness 以 package member 被 import，pytest in-process 結構上無法重現 package-mode/direct-file 任一 import context → docstring「revert→ModuleNotFoundError」宣稱實證不成立（同測試連續第二輪 bite overclaim）。修方向=subprocess 真 package-mode probe 或誠實改寫宣稱。
+- 教訓：import-seam regression 測試的 bite 取決於 import context 可否重現——conftest sys.path 注入會讓「壞 import 形」在測試裡照樣解析；宣稱鎖「執行模式 X 下會炸」的測試必須真的在模式 X 下執行（subprocess -m），in-process pytest 永遠不是模式 X。
+
+## 2026-06-10 · E2 終輪單點 — fix/l2-owed `209652f1` seam 測試 subprocess 版 → PASS to E4
+- mutation 親重放：harness dual-path 換回 `470687ac~1` 原始裸絕對形 → 測試紅且死法=`SEAM_FAIL:ModuleNotFoundError:No module named 'aeg_regime_runner'`（V127 populate 原 bug signature，非 sentinel）；還原 → 7 passed、status 驗空。docstring 宣稱逐條對實況（conftest 僅 in-process sys.path 不洩 env、PYTHONPATH 未設、namespace-package 鏈成立→relative 唯一通路、direct-file fallback 誠實標不覆蓋=harness `pragma: no cover` 對應）無 overclaim。
+- 教訓：subprocess probe 的「乾淨」要驗兩層——sys.path 注入不跨進程（conftest in-process 安全）但 os.environ 會繼承（本次 PYTHONPATH 未設故成立；更硬化可傳 scrubbed env，INFO 級不退）。

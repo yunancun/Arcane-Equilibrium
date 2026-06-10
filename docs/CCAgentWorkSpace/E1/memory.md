@@ -169,11 +169,6 @@
 - **Python 62 passed**（5 檔：9 secret-split 新版 + 16 signing + 7 recheck + 10 batchB + 20 toggle）。新 fail-loud 負向含「sign raise 前不可留部分寫入授權檔」+「fallback 機制移除斷言（hasattr 反證）」+ verify 端到端（先簽後刪 key → unverifiable + 新 reason）。
 - **部署前 operator gate（已寫進 commit body）**：runbook §13.2 外部 Grafana/journald alert rule 先加 `live_auth_signing_key_missing` + `AuthError::LiveAuthSigningKeyMissing`（repo grep 不到外部規則）；§13.5 rollback 依賴 restart_all seed 邏輯故 seed 保留不動。runbook 本身 PA 域未動；TODO.md PM 域未動。
 
-## 2026-06-10 — L2 P3b owed ①+② E1-A（bar_index_reindex + dead-mode seed，/tmp/wt-l2-owed 未 commit）
-
-- **owed ①**：新 `learning_engine/bar_index_reindex.py`（B1 int-bar-index 契約 producer-side 對偶，0 DB 純函數）：ordinal-day offset 默認（`index_rule="dense"` 對照可切）；fail-loud=reasons+全 None+warning（**非 raise**——PM 派發寫 raise 但 PA §D.2 正本是 reason-flow 且 §E 介面已凍結供 E1-B adapter 串接，取 PA 正本）；bite 實證：缺 bar 資料 dense 把 down-leg span 360d 壓成 120d → B1 誤殺 DEFER、ordinal 保真 pass。
-- **owed ②**：新 `helper_scripts/m4/seed_dead_mode_lessons.py`：6 條真實 NO-GO seed（symbol=`ml_advisory`=sink placeholder 否則檢索永 miss；content 英文主幹 trgm 可檢索；context_id=`seed:<slug>` 冪等錨點 WHERE NOT EXISTS）；默認 --dry-run 零連線、`--apply`（alias `--write`，PA/派發用詞分歧雙收斂）+顯式 `--dsn` 才寫。
-- **測試隔離鐵則落地**：seed 測試 autouse fixture 在 sys.modules 層 stub psycopg2（lazy import 故 stub 全覆蓋），結構上不可能真連線；reindex 測試純函數 0-IO。Mac 全綠：新 24+12 + 任務驗收 58 + full learning_engine 272 + m4 110，0 回歸。E1-B 並行檔（executor/layer2_routes/adapter）零觸碰。待 E2。
 ## 2026-06-10 — OPS-2 Phase 2 cutover E2 退回三項修復（cf1b9320，新 commit 不 amend）
 - **任務**：修 E2 RETURN（1 HIGH/1 MED/1 LOW，全機械、E2 已精確定位），同 branch `fix/ops2-phase2-cutover` 疊 `a3d27729` 上新 commit `cf1b9320`（保留審查軌跡），不 push 不 merge。3 檔 +11/−7。
 - **HIGH**：`test_strategist_promote_api.py:574` 漏掃 collateral——`test_live_apply_all_gates_green_succeeds` 注入 `OPENCLAW_IPC_SECRET` 當 verify key（Phase-1 fallback 行為）→ 換 `OPENCLAW_LIVE_AUTH_SIGNING_KEY`（grep 證該檔唯一注入點）。**根因承上輪教訓不足**：上輪 grep 找 collateral 用「tests 目錄 import 我改的 module」，但 promote_api 不 import live_trust_routes——它走 HTTP route → live_preflight 鏈間接吃 fallback。**正確找法=grep tests/ 的 `OPENCLAW_IPC_SECRET` 字串（env-key 字面），非 import 圖**；E2 全套 base-vs-HEAD 失敗清單 diff 是最終兜底。
@@ -198,3 +193,7 @@
 - **LOW-4 attach_residual_reports 不重處理 stamped rec（驗了）**：`attach_residual_reports`（residual_alpha_cycle.py:317）在 mlde_shadow_advisor `_maybe_attach_residual_evidence`（generation 時、persist 前）對 **in-memory recs** mutate `rec.payload`（btc-only，required_factors=("btc",)）；不讀/不寫 DB stamped rec。orchestrator 後續 UPDATE DB payload jsonb_set 覆寫 → 最終 multi-factor。無 race（不同 op）。
 - **`report is None` 保守路徑收緊（minor 行為改進）**：前輪缺 report 仍 stamp（無 payload 的 lineage 對下游無意義，且擋 WHERE-NULL 重選）。改為 skip（`register_ok_but_report_uncaptured`），experiment 已 commit 下次重選（idempotency_key 縮重複窗）。
 - **教訓**：(1) 「gate 接上了」≠「gate 收到真資料」——要 trace 到 production fetch 的**實際 SELECT 欄**（top-level vs payload 是 not_dict-vs-真 verdict 的分水嶺）。(2) e2e 測的 source_row 必對齊 production fetch shape，手放欄=假 confidence（E2 抓的就是這個）。(3) validator 內部檢查順序決定 reason 字串，寫 assertion 前先親驗實際 reason（passes 先於 verdict）。(4) idempotency 機制要讀清楚 durable-vs-volatile（in-memory cache 重啟失效），cheap fix 縮窗但別 overclaim 完全消除。(5) e2e 讀 write-params 要綁回實際 SQL（assert jsonb_set in sql）才有 bite。
+
+## 2026-06-10 — half_life 測試 scipy importorskip 守衛（fix/half-life-test-scipy-skip @ dc5c60d7，待 E2）
+- 2 fit-path 測試加 `pytest.importorskip("scipy")` + requirements-ml.txt 顯式宣告 scipy>=1.10.0；斷言零改動。行為矩陣雙側 Mac 實證：有 scipy 7 passed / 無 scipy 5 passed 2 skipped。worktree /tmp/hl_scipy_fix 保留待 E2/E4。
+- 教訓：模擬「依賴不存在」要用 `raise ModuleNotFoundError` shadow 而非裸 `ImportError`——後者觸發 pytest importorskip deprecation warning（module-exists-but-broken 路徑），與真實 absent-module 行為不同。

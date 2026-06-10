@@ -33,3 +33,9 @@ git log --oneline origin/main -10  # 看隔壁剛推什麼
 - **救援**：E1 sub-agent 自己 disk check 後做 **NO-OP closure**（不重做 30-40hr），證明 dispatch prompt 留 NO-OP exit path 的價值 — 派 IMPL 的 prompt 應允許 agent「發現已完成則 NO-OP 回報」而非硬寫。
 - **升級規則**：派任何 IMPL（非只 review）前，除 branch grep 外，**必** `git log --oneline --all | grep -iE '<ticket-keyword|主要檔名|strategy-name>'` 確認 main 上沒做過；TODO Phase Banner 不是 git 真相，commit 落地時必同步更新 Phase Banner（否則下一個 session 重派）。
 - 同樣適用 PA / 任何 planning agent：dispatch prompt 應強制「先 git-log grep，TODO 狀態僅參考」。
+
+**2026-06-10 第三次踩雷（升級教訓：commit 前 re-fetch；branch 有效性會在 session 中途改變）**：
+root sweep 任務開工時只看了 git status/log 沒 fetch；工作中途並行 session (a) 在本地 main 搶先做了 SKILLS_TODO 歸檔（`9de97d6e`，檔名不同），(b) 把我所在的 `feature/l2-critic-lessons-tools` 宣告 **SUPERSEDED**（`1f34653c`「勿 merge/rebase/cherry-pick」，L2 內容已 cherry-pick 重放上 main）。我的 3 個 doc commit 全落在死 branch 上+1/3 與 `9de97d6e` 撞車。
+- **升級規則**：(1) **每個 commit 批次前 re-fetch**，不只 dispatch 前——branch 在 session 進行中可能被並行 session 廢棄；(2) 發現本地 main 被別的 worktree 占用（`git worktree list`）= 有活躍並行 session 正在治理同域，先看它的 WIP 再動相鄰文件。
+- **救援模式（驗證有效）**：`git worktree add --detach /tmp/x origin/main` + `cherry-pick -x`（乾淨部分）/ `cherry-pick -n` 後撤出撞車檔（部分讓位）/ 手工重做（全撞部分，commit-first 讓位）→ push 前再 fetch 確認 → `git push origin HEAD:main`。不占 branch、不擾並行 worktree、不違 Mac 禁 rebase 規則。
+- **考古鏈**：遷移 commit message 記 SHA 對映表（模仿 `1f34653c`），死 branch 上的孤兒 commit 不再處理。

@@ -24,4 +24,6 @@ metadata:
 
 **How to apply**: 改 agent/skill 配置=改 srv git 樹，commit 走 `git -C srv commit --only`；新 agent prompt 遵循模板A/B/C+模板D 權威序+hot-facts 指針模式；勿在 prompt 寫死會漂移的數字。
 
-**未完成移交**：①變更未 commit——srv 當時在 superseded branch `feature/l2-critic-lessons-tools`（HEAD 標勿取檔）+57 個他務未提交檔，需切 main 後 `commit --only` .claude 路徑+兩個 workspace memory.md+references 新檔；②最大殘留 context 槓桿=workspace memory 無壓實機制（E4 memory.md 5384 行、BB 1218 行，啟動序列必讀=每 spawn 固定大成本），建議「最近 N 條+archive」結構，未動。
+**三端同步已完成（2026-06-10）**：commit `f0bffcab`（feature 分支，`commit --only` 68 檔）→ detached worktree cherry-pick `-X theirs` 上 main → push `02c80f3b` → Linux trade-core ff-pull 驗證綠。救援細節：①main 領先的 ~1,868 行 memory 追加經逐檔含入度驗證「已在工作樹被壓實捕獲」，唯 E1 缺 1 條目（Residual PART4 re-E2，9 行）從 main 提取補回後 264 行全掃 0 缺失；②`.gitignore:95 .claude/*` 會擋新目錄——已加 `!.claude/workflows` 白名單（skills/agents 原有白名單）；③.claude 三檔（E4.md/regression/spec-compliance）feature 比 main 新（main 還是 2555/17 舊口徑），我們版本超集兩邊。Mac srv 仍在 superseded 分支（檔案內容與 main 一致，含他務 57 未提交檔），切分支留 operator。
+
+**2026-06-10 同日續作（已完成）**：②memory 壓實已落地——11 檔 41,323→主檔 3,200 行（最大 202），舊文機械切分遷各自 memory-archive.md（38,462 行，byte-identical 驗證，append-only），長期教訓蒸餾 16-20 條/檔，E4 BASELINE 行保留主檔；機制接線=R4 體量巡檢(>300 行)+doc-cross-reference 壓實規格+PM 派工。③對抗驗證多視角化入 PM.md（E2∥E3∥E5 獨立並行+憲法層加 CC+合議規則+BLOCKER gate）+報告契約（VERDICT/CONFIDENCE 首行）。④ultracode 編排設置見 [[reference-ultracode-full-audit]]。順帶發現：append 式大 memory 配 Read 默認 2000 行=agent 只讀到最舊內容，壓實同時根治此陷阱。
