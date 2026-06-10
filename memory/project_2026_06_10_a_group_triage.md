@@ -28,6 +28,6 @@ metadata:
 
 ## [同日追加] OPS-2 Phase-2 cutover 全鏈完成(merge-ready)
 
-A1 後續鏈當日走完:E1 `a3d27729`→E2 RETURN(1H/1M/1L)→E1-fix `cf1b9320`→re-E2 ACCEPT→E4 PASS `e34a8772`→CC APPROVE-CONDITIONAL A-(0 BLOCKER)→CC-MED-1 doc fix `823e53ad`→BB SIGN-OFF 0 FLAG→PM sign-off(報告 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-10--ops2_phase2_cutover_pm_signoff.md`)。branch `fix/ops2-phase2-cutover` 5 commits 未 merge,deploy operator-gated(C-C 外部 alert→merge→rebuild+Linux regression→C-B renew 留證→§13.6;首次 rotation 2026-09-08)。
+A1 後續鏈當日走完:E1 `a3d27729`→E2 RETURN(1H/1M/1L)→E1-fix `cf1b9320`→re-E2 ACCEPT→E4 PASS `e34a8772`→CC APPROVE-CONDITIONAL A-(0 BLOCKER)→CC-MED-1 doc fix `823e53ad`→BB SIGN-OFF 0 FLAG→PM sign-off(報告 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-10--ops2_phase2_cutover_pm_signoff.md`)。branch `fix/ops2-phase2-cutover` 4 commits 未 merge,deploy operator-gated(C-C 外部 alert→merge→rebuild+Linux regression→C-B renew 留證→§13.6;首次 rotation 2026-09-08)。
 
 **追加教訓**:①E2 的 base-vs-HEAD 全套失敗清單 diff 是抓「漏掃 collateral 測試」的硬手段,點名檔驗證必漏 fixture 對舊行為的隱性依賴——已固化為 SOP。②PM 拍板保留 restart_all seed(rollback 安全墊,三方確認非 runtime fallback);runbook「panic 阻 boot」係統性失真已五處校準(實況=live 拒 spawn+log kind deny-loop,panic 被 LIVE-GATE-BINDING-1 post-dominate)。③PM 初判跳過 BB 被 runbook §13 owner 行推翻→撤回補派(0 FLAG 收場):裁決跳過角色前先讀 owner/chain 定義原文,不能只看編號段落。④CC session 偶發無 Write 工具:報告 PM 代落盤+核註保真,審計者原文不可改寫。⑤C-A「多獨立 restart 窗」法:依賴連續 log 的 soak 判準遇 log 輪轉,改用「N 個獨立重啟窗各自 0 信號+結構性發射率論證」重建置信。
