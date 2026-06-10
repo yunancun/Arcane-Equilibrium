@@ -234,7 +234,13 @@ def _write_db(
     if str(helper_dir) not in sys.path:
         sys.path.insert(0, str(helper_dir))
     from lib.pg_connect import resolve_report_dsn  # type: ignore
-    from aeg_regime_runner.db_writer import persist_regime_rows
+
+    # 為什麼 package-relative：本 package 在 helper_scripts/research/ 下，上面插入的
+    # sys.path 是 helper_scripts/（為 lib.pg_connect），舊寫法 `from aeg_regime_runner...`
+    # 差一層 research → --write-db 路徑 ModuleNotFoundError（artifact-only 不踩此 import，
+    # V127 從未被 populate 故 deploy 至今未暴露）。relative 對齊本 package「必以
+    # python3 -m 執行」的既有慣例（見 module docstring）。
+    from .db_writer import persist_regime_rows
 
     dsn = args.dsn or resolve_report_dsn()
     conn = psycopg2.connect(dsn, application_name="aeg_regime_runner_write")
