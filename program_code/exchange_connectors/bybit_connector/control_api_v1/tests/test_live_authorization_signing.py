@@ -28,11 +28,18 @@ TEST_SECRET = "test-ipc-secret-do-not-use-in-prod"
 @pytest.fixture
 def secrets_tmp(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """
-    Redirect both secret dir + IPC secret to test-local values.
-    Returns the live-slot dir.
+    Redirect secret dir + live-auth 簽名 key 到 test-local 值，回傳 live-slot dir。
+
+    OPS-2 SECRET-SPLIT Phase 2 cutover（2026-06-10）：簽名 key 單一來源
+    `OPENCLAW_LIVE_AUTH_SIGNING_KEY`（`OPENCLAW_IPC_SECRET` fallback 已移除，
+    fixture 不再設 IPC env——簽名路徑不讀它）。
     """
     monkeypatch.setenv("OPENCLAW_SECRETS_DIR", str(tmp_path))
-    monkeypatch.setenv("OPENCLAW_IPC_SECRET", TEST_SECRET)
+    monkeypatch.setenv("OPENCLAW_LIVE_AUTH_SIGNING_KEY", TEST_SECRET)
+    # 清掉可能殘留的 companion / legacy env，確保測試從已知環境出發。
+    monkeypatch.delenv("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE", raising=False)
+    monkeypatch.delenv("OPENCLAW_IPC_SECRET", raising=False)
+    monkeypatch.delenv("OPENCLAW_IPC_SECRET_FILE", raising=False)
     live_dir = tmp_path / "live"
     live_dir.mkdir(parents=True, exist_ok=True)
     return live_dir
@@ -135,12 +142,12 @@ def test_write_signed_live_authorization_creates_file(secrets_tmp: Path):
     assert loaded["sig"] == expected_sig
 
 
-def test_write_fails_without_ipc_secret(secrets_tmp: Path, monkeypatch):
-    """No IPC_SECRET → raise, don't silently write an unsigned file."""
-    monkeypatch.delenv("OPENCLAW_IPC_SECRET", raising=False)
+def test_write_fails_without_live_auth_signing_key(secrets_tmp: Path, monkeypatch):
+    """簽名 key 未設 → 必 raise，不可靜默寫出未簽名檔（OPS-2 Phase 2 fail loud）。"""
+    monkeypatch.delenv("OPENCLAW_LIVE_AUTH_SIGNING_KEY", raising=False)
     (secrets_tmp / "bybit_endpoint").write_text("demo")
 
-    with pytest.raises(RuntimeError, match="OPENCLAW_IPC_SECRET"):
+    with pytest.raises(RuntimeError, match="OPENCLAW_LIVE_AUTH_SIGNING_KEY"):
         ltr._write_signed_live_authorization(
             operator_id="ncyu",
             tier=TrustTier.T0_ENTRY.value,
