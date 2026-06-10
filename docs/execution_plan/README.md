@@ -29,6 +29,8 @@ Phase 6   (W19-20,8/14-8/27):  驗收
 | [phase_5.md](phase_5.md) | James-Stein + DL-1 + DL-2（13 任務） | 開始 Phase 5 時 |
 | [phase_6.md](phase_6.md) | 漸進放權 + 驗收（13 任務） | 開始 Phase 6 時 |
 | [critical_path.md](critical_path.md) | 關鍵路徑 + Contingency + 量化指標 | 排期變更時 |
+| [2026-06-05--l2-advisory-mesh-execution-plan.md](2026-06-05--l2-advisory-mesh-execution-plan.md) | L2 Advisory Mesh 可執行 roadmap（v4-final 設計轉 phase）；D3→Orchestrator→哨兵→ml_advisory→FDR loop→GUI，每 phase E1 驗收 + sign-off + green-gate；QC B1 / MIT M1 / MIT M2 ENDORSE FIX/NOTE 已折入；E1-READY 等 operator | 啟動 L2 Advisory Mesh E1 前 |
+| [2026-06-05--l2-copilot-design-session-consolidated.md](2026-06-05--l2-copilot-design-session-consolidated.md) | L2 copilot 設計 session 整合背景（FinceptTerminal 催生 / 角色重定義 / 核心決策 / 四審結論）；供未來 plan audit 引用 | 追溯 L2 設計理由時 |
 | [2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md](../archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_draft_v0.1.md) | REF-20 Paper Replay Lab 開發方案 v0.1：早期審查材料，未 sign-off（2026-05-28 archived；由 v3 取代） | 追溯早期風險來源時 |
 | [2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md](../archive/2026-05-28--ref20_paper_replay_lab_dev_plan_superseded/2026-05-02--ref20_paper_replay_lab_dev_plan_v1.md) | REF-20 Paper Replay Lab 開發方案 V1：第一版開發基線，已被 Round2 audit 推進為 V2（2026-05-28 archived；由 v3 取代） | 追溯 V2 變更來源時 |
 | [2026-05-02--ref20_v1_round2_audit.md](2026-05-02--ref20_v1_round2_audit.md) | REF-20 V1 第二輪 audit：對 V1 的安全 / 資料 / 量化 / UX / API 審查意見 | 追溯 V2 採納與反對理由時 |

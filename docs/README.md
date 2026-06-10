@@ -165,6 +165,13 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 |------|------|
 | `archive/2026-06-10--skills_todo_audit_closed.md` | 24-skill 安全審計 76/76 finding 全結案歸檔（2026-04-25 audit；修復 commit 鏈 `35a1b624`→`531e6d4a` 共 7 commits：P0×5 風控詞義反向/越位/捏造修正 + S1-S6 systemic + 9 對 cross-skill 互引 + C turn 2 snapshot trim）；原 `srv/SKILLS_TODO.md` 移入，根目錄不再保留；skill 現狀以 `.claude/skills/*/SKILL.md` 為準。|
 
+### 2026-06-05 L2 Advisory Mesh (L2 Copilot)
+
+| 文件 | 内容 |
+|------|------|
+| `execution_plan/2026-06-05--l2-advisory-mesh-execution-plan.md` | L2 Advisory Mesh 可執行 roadmap；建置序 D3→Orchestrator/registry/contracts/guard→本地哨兵→ml_advisory→online-FDR loop→feedback/quality+GUI，每 phase E1 驗收 + sign-off + green-gate；折入 QC B1 / MIT M1 / MIT M2 ENDORSE 的 FIX/NOTE、CC carbon-layer fence、E3 auth/sanitize、V134/V13x Linux PG dry-run。設計 E1-READY，等 operator 啟 E1。 |
+| `execution_plan/2026-06-05--l2-copilot-design-session-consolidated.md` | L2 copilot 設計 session 整合背景；FinceptTerminal 評估（催生 copilot 方向）、L2 角色重定義（copilot 非訊號器 / paper 退役 / L2 manual）、設計核心決策（6 lane/derived autonomy/LANE_DIRECTION/D3 provenance/人=事後法醫+稀有 live 批准/Q1 online-FDR/Q3 cascade/Q6 留存/LearningTier 融合）、四審 0 CRITICAL + 2 BLOCKER 已閉。供未來 plan audit 引用。 |
+
 ### 2026-06-01 AEG-S1 Foundation Blocker Resolution
 
 | 文件 | 内容 |

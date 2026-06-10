@@ -7123,3 +7123,287 @@ policy 設計本身不受影響（只依賴武裝語意 + arm/notify 語意 + AM
 - **架構決策**：放 `helper_scripts/research/aeg_breadth_ladder/`（package-dir，mirror FND-2 + multiday + funding_tilt sibling），CLI via harness.py。核心切分 `ladder.py`+`tiers.py` 純函數 0-DB（synthetic 可測），`evaluator.py` 是唯一碰 PG 的注入邊界（且委派候選既有 read-only loader）。**S2 無新 DB 表/migration**（MIT b.3：breadth artifact-only `breadth_ladder.parquet`，DB 表 defer S3+）。Rust-first 例外同 FND-2 OQ-1（research-evidence lane Python，PM 已批 FND-2 此 lane，breadth 繼承 OQ-B1）。統計復用 `lib.stats_common` + sibling `funding_tilt.stats.pca_effective_n`（不新增第 17 個統計複製，memory 精簡審計）。
 
 - **read-from-storage-only 確認（無隱性依賴）**：(b) 0 V127 / 0 component (a) 依賴（regime labels 是 (c) 才消費）。硬前置只有 FND-2（IMPL DONE，真跑 included=829/delisted_proof=255/PASS）+ S1 daily-kline/funding storage（live）。讀 FND-2 artifact + `market.klines`/`market.funding_rates`，0 重抓 Bybit，0 新 public-data client。**S2=read-from-storage-only 成立。** 單一 E1（檔互不重疊但 tiers↔ladder↔artifact↔harness 共享 TierResult schema 邏輯耦合，拆並行反增協調）。報告：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-03--aeg_s2_breadth_ladder_runner_impl_design.md`。
+
+## 2026-06-05 — WATCHDOG→ALERT WIRING design (engine-down non-silent)
+
+**背景**：2026-06-05 Rust engine down ~20h 無人知。watchdog 寫 RESTART_CIRCUIT_BROKEN / RESTART_FAILED / ENGINE_CRASH 到 `$OPENCLAW_DATA_DIR/canary_events.jsonl`，但 grep 確認**零消費者**（只有 fresh_start.sh rotate + test 讀）。alert infra 存在但未接 watchdog。
+
+**PART A 盤點結果（read-only）**：
+- 三檔在 `control_api_v1/app/`：`telegram_alerter.py`（stdlib urllib，`send()` sync + `send_async()` daemon thread，timeout=10，內建 rate-limit 20/min，creds `OPENCLAW_TELEGRAM_BOT_TOKEN`/`OPENCLAW_TELEGRAM_CHAT_ID`，is_enabled=兩者非空才 True），`webhook_alerter.py`（stdlib urllib，HMAC-SHA256 簽名，多端點 fan-out，creds `OPENCLAW_WEBHOOK_URLS`(逗號分隔)/`OPENCLAW_WEBHOOK_SECRET`(optional)），`alert_router.py`（`AlertRouter` 統一 dispatcher，扇出兩通道各自獨立失敗，單一入口 `alert_system(event,detail)`/`alert_trade`/`alert_stop`/`alert_pnl_summary`，**全 sync**）。
+- **唯一既有觸發**：`paper_trading_wiring.py:576` `await asyncio.to_thread(ALERT_ROUTER.alert_system, "RISK:<tier>", msg)`——Reconciler 風控 tier 升降（P0/P1 risk halt）。**0 個 system-health / engine-down / watchdog 告警**，全 trading-domain。`ALERT_ROUTER` 單例只在 `paper_trading_wiring` + `paper_trading_routes`（import）出現。
+- **無 HTTP alert endpoint**：grep routers/ 全空，沒有 `POST /api/v1/alert`。
+- creds 機制 = env var；KEY NAME 如上。**未印任何值**。
+
+**PART A 致命 runtime 發現（ssh trade-core 親驗）**：
+- `basic_system_services.env` 內**四個 alerter cred key 全 ABSENT**（telegram token/chat + webhook urls/secret）→ **目前所有告警通道全 disabled**，連既有 RISK alert 也是 no-op。**這是 #1 open question：無 creds 則接好線也靜默，operator 必須提供至少一個通道**。
+- production watchdog **不在 systemd 下跑**（`openclaw-watchdog` inactive / 未安裝），實際是 `restart_all.sh:758` bare-process spawn（`--poll-interval 2`，非 unit 的 1）。→ 這正是 ~20h outage 成因之一：bare process 無 `Restart=always`，reboot/未重跑 restart_all 後無人 respawn watchdog **且**無人告警。
+
+**PART A env-繼承關鍵約束（決定 option 取捨）**：
+- `restart_all.sh` **不做** blanket `set -a; source env`，而是 per-key `grep '^KEY='` 選擇性 export（POSTGRES_PASSWORD/OPENCLAW_ALLOW_MAINNET/...），**未** export `OPENCLAW_TELEGRAM_*`/`OPENCLAW_WEBHOOK_*`。FastAPI uvicorn spawn 同樣只 export 特定 var；app 只為 settings/PG/grafana 窄讀 env file，**不**把 alerter creds 灌進 `os.environ`。
+- 後果：**option (c) 直接讀 watchdog 自身 env 只在 systemd 路徑（`EnvironmentFile=`）乾淨可用**；bare-process 路徑需 restart_all.sh 額外傳這些 key。systemd unit line 54 已 `EnvironmentFile=...basic_system_services.env`——creds 一旦進該檔，systemd watchdog 自動可見。
+
+**PART B 設計決策（推薦）**：
+- **Channel + option：option (c) 變體——watchdog 直接呼叫既有 alerter 模組的「creds-from-env」邏輯，但用一個 zero-dep 內嵌函數（stdlib urllib + short timeout），不 import FastAPI app**。理由：(1) watchdog 是 recovery 元件須極輕量可靠，import app=拉進 FastAPI/sqlx/governance 整包違「standalone」；(2) telegram/webhook alerter 本身就是純 stdlib urllib，邏輯可在 watchdog 內薄薄重述（~40 行）不需依賴；(3) option (b) POST 本地 API 在 **engine-down 常伴隨 API 也 down**（同 box 同 restart_all 管理）的場景下不可靠——告警目的正是「全部掛了」，不能依賴另一個可能同死的進程；(4) option (d) 另起 tail consumer = 多一個要監督的進程（誰看門狗那個看門狗？）違最小化。**拒 (a) 共享 helper import**（會把 app 依賴鏈拉進來，除非把 alerter 抽到 zero-dep 共享模組——scope creep）。
+- **失敗隔離**：alert 呼叫包在 try/except + urllib timeout（5s）+ daemon thread（fire-and-forget），任何 hang/fail 絕不阻塞 monitor loop 或 restart。最關鍵不變量：**alert 永遠在 trigger_restart 之後、不在 critical path 上**。
+- **TRIGGER 語意**：(1) `RESTART_CIRCUIT_BROKEN` transition → 必告警 ONCE（severity=CRITICAL，"manual intervention required"）；(2) 可選 prolonged-down re-alert（still circuit_broken 後每 H 小時重發一次，避免被遺忘——對齊 ~20h 慘案）；(3) recovery all-clear（engine 回來發一條解除）。**dedup 完全鏡像既有 `emit_restart_skipped_if_new`**：state-persisted marker（`last_alert_emit_<kind>` in watchdog_state.json），circuit-break 整段只發 1 條，recovery 時 `clear` marker。payload = engine label + down 多久 + last_failure_reason + "manual intervention required"。
+- **code 落點**：純 `engine_watchdog.py` 內新增（不碰 app）：`_send_alert_best_effort(subject, body, severity)`（zero-dep urllib，讀 `OPENCLAW_TELEGRAM_*`/`OPENCLAW_WEBHOOK_*`，creds 缺則 silent-noop+一次性 log）+ `emit_engine_down_alert_if_new(...)`（鏡像 dedup）。trigger 點：`trigger_restart` 的 circuit-break 分支 + recovery（`on_engine_recovery`）+ 可選 stale>H re-alert（在 `on_engine_crash` level-triggered 區）。**bare-process 路徑修**：restart_all.sh 也 export 那 4 個 key（小改），讓兩條 launch 路徑對稱拿到 creds。
+- **硬邊界**：0 觸碰。告警=唯讀外送，不碰 live_execution/lease/max_retries/authorization。對齊根原則 14（creds 缺→silent noop，零外部成本仍可運行；告警是 additive，缺 creds 不致 watchdog 失能）。
+
+**E1 拆分**：T1 zero-dep `_send_alert_best_effort`（含 creds-from-env + timeout + try/except）；T2 `emit_engine_down_alert_if_new` dedup（鏡像 emit_restart_skipped_if_new + state marker）；T3 trigger 點接線（circuit-break/recovery/可選 re-alert）；T4 restart_all.sh export 4 key（對稱 bare-process）。E4：test_canary 加「circuit-break 只發 1 alert」「recovery clear marker 後可再發」「creds 缺=noop 不 raise」「alert hang/timeout 不阻塞 loop（mock urlopen sleep）」。
+
+**教訓**：檔名/systemd unit 不等於 runtime——unit 有 `EnvironmentFile=` 但 production 根本沒跑 systemd（bare process），且 restart_all 選擇性 export 不含 alerter creds → 「以為有 env 其實沒有」。creds-presence 必 ssh 親驗（本次四 key 全 ABSENT 是整個設計的轉折點：先別吹「接好就有告警」）。
+
+## 2026-06-05 — GUI-configurable engine-down alert (FINALIZE, contract-lock pass 2)
+
+承 2026-06-05--watchdog_alert_wiring_design.md（option-c inline emitter accepted）。
+本 pass 加 GUI-config 層 + 鎖 backend↔frontend contract。Risk class: 中。
+
+**修正 prior pass 兩個 ssh 誤判（operator corrected）**：
+1. watchdog **IS** systemd `--user` managed（`openclaw-watchdog.service` active）。prior「bare process / not systemd」WRONG（查了 system scope，實際是 `systemctl --user`；那個 transient bare PID 是 one-shot `--status` 退出）。
+2. 但 INSTALLED unit DRIFTED from repo template：template 有 `EnvironmentFile=basic_system_services.env`+`Restart=always`+`--poll-interval 1`，installed 三者皆無 → 列為獨立 companion fix（reinstall from template），不折進 alert feature。creds 改走 file 後 EnvironmentFile drift 對本 feature 已非阻塞。
+
+**PERSISTENCE 決策（crux，已驗）= 共享 JSON 檔 `$OPENCLAW_DATA_DIR/alert_config.json`（0600），NOT env-file**：
+- 查既有 settings-persistence pattern（settings_routes.py）：兩種既有手法 — `_write_env_file_value()` 寫 basic_system_services.env（paper-engine/dev-mode toggle 用）、`_write_key_file()` 寫 per-slot secret 檔 chmod 600（api-key 用）。
+- env-file 手法**不可重用於 watchdog**：prior pass A.6.3 已證 restart_all.sh 不 export OPENCLAW_TELEGRAM_*/WEBHOOK_*（只白名單 export POSTGRES_PASSWORD 等），standalone watchdog（無 app import、無 DB）讀不到 env creds。
+- **決定性事實（grep 驗）**：app 與 watchdog 在 runtime **都已 agree on `OPENCLAW_DATA_DIR`**（default `/tmp/openclaw`）：restart_all.sh 對 uvicorn spawn export `OPENCLAW_DATA_DIR="$DATA_DIR"`（restart_all.sh ~L724 + L615 註解），對 watchdog spawn 傳 `--data-dir "$DATA_DIR"`；watchdog 本就讀寫 watchdog_state.json 於此 dir（load_state/save_state via _state_path，engine_watchdog.py:450/454/466）。app 多模塊也讀此 env（ai_service.py:98 等）。→ 同 dir 放一個 alert_config.json = 雙進程 SSOT、零新接線。秒殺 env-file。
+- schema：`{"version":1,"telegram":{"enabled":bool,"bot_token":str,"chat_id":str},"webhook":{"enabled":bool,"urls":[str],"secret":str},"updated_at":epoch}`。disabled/empty by default = total no-op until operator fills。
+
+**SSOT loader（minimal, NOT a settings framework）**：tiny shared loader `load_alert_config(data_dir)` 讀檔（stdlib json best-effort，缺檔/壞檔→空 config），**env fallback** 保 back-compat（既有 RISK alert 不回歸）。app 端 alert_router/alerters 改讀同檔為 primary（env fallback）→ GUI config 同時驅動 engine-down alert + 既有 RISK alert。watchdog 端 inline 讀同檔。
+
+**Backend contract LOCKED**（settings_routes.py，複用既有 `_get_auth_actor`/`_require_operator_auth` + `_mask_key` 風格）：
+- GET /api/v1/settings/alerts → secrets MASKED（per-field `configured:bool` + tail4/"••••"，NEVER raw）。
+- POST /api/v1/settings/alerts → operator-auth；validate（URL format + SSRF guard + non-empty when enabled）；寫檔 0600（mirror `_write_key_file` 的 mkdir+chmod tmp+replace）。
+- POST /api/v1/settings/alerts/test → IN-SCOPE（operator 填後須驗）；per-channel success/fail；rate-limit 防濫用。
+
+**Frontend pattern LOCKED**（E1a）：settings tab inline JS（tab-settings.html，JS 起 L508），新 card 放 **connection sub-tab**（`subtab-connection`，現有 API-key card 旁，#apikey-slots-grid 後）。GET 用 `ocApi()`，POST 用 `ocPost()`（CSRF-aware，common.js:195/282），escape 用 `ocEsc()`，toast `ocToast()`。mirror loadApiKeyStatus()/doSaveApiKey() pattern（masked render + 立即清 DOM 敏感值 + Bybit-key 卡片那種 configured chip）。
+
+**SSRF guard 無既有可重用**（grep ssrf 全 false-positive 子字串；edge_estimator_scheduler.py:243/layer2_tools.py:924 只是 urlparse scheme check）→ E1 用 stdlib ipaddress 自建小 guard（block loopback/private/link-local 169.254/metadata 169.254.169.254）。
+
+**教訓**：①再次命中「ssh runtime 解讀易錯」——systemd user-scope vs system-scope、transient one-shot PID 誤判為常駐。operator 直接給 corrected facts 比我重 derive 可靠。②persistence 選型靠 grep 證雙進程 runtime 已共享同一 env（OPENCLAW_DATA_DIR），而非假設——env-file 看似自然但 watchdog 讀不到，data-dir 共享檔才是對的。③scope discipline：operator 三次強調「resist scope creep into generic settings system」——只做 alert 一個 feature 的 tiny loader + 2(+1) endpoints + 1 card，不建 settings 框架。
+
+## 2026-06-06 — P2 orderLinkId Hardening 設計（推薦 Scope A 最小硬化）
+
+**最 load-bearing 發現（推翻 PM triage 兩點）**：
+1. **:1101 order_link_id: None 不是 Bybit dispatch 兜底缺口**——是 PAPER_ONLY 分支（step_4_5_dispatch.rs:992）的 `emit_entry_lineage`（Spine 血緣 row），且 paper engine_mode 下 runtime_shadow.rs:57 已 short-circuit 不寫 row。真正送 Bybit 的 paper shadow order 在 :1358 用 `sh_{mode_tag}_{ts}_{seq}`（永遠非-None）。exchange open 真路徑 :815 傳 `Some(order_link_id)`。→ **:1101 非缺口，改它無意義甚至有害（Spine schema 一致性）。PM triage #3 推翻。**
+2. **「無 110072 classifier」字面對但語意誤導**——已有 duplicate→NoOp 處理，但 keyed on **retCode 10001 + substring "duplicate"**（dispatch.rs:267-273，case-insensitive，有回歸測試 dispatch_tests.rs:356 `DUPLICATE`→NoOp）。真缺口：Bybit **專屬碼 110072 OrderLinkedID is duplicate** 落入 `_ => Structural`（:348）→ fail-closed 而非 NoOp。**修法=classify_business_retcode 加 `110072 => NoOp` 一行 + 測試。grep 110072=0 命中確證 gap。**
+
+**硬邊界合規（0 觸碰，已逐條驗）**：110072→NoOp 在 run_dispatch_retry **立即 return**（dispatch.rs:512），不進 retry loop；open 路徑 `OPEN_NO_RETRY=[]`（:31）由 dispatch_retry_delays_for_intent 鎖死。NoOp≠retry，是「已存在訂單映射成功」。**不違反 open-create 0-retry 邊界。**
+
+**Scope 裁決=A（最小硬化），拒 B（格式重設計）**：
+- 現行 order_link_id 已全非-None（grep 全 callsite：open `oc_{mt}_{ts}_{seq}`/close `oc_risk_{mt}`/`oc_ipc_close_{mt}`/`oc_close_mf_fb_{mt}`/shadow `sh_*`/paper resting `pop_*`；mode_tag dm|ld|lv 已含 lv，pipeline_ctor.rs:317）。**"每個 dispatch attempt 非-None" 已成立**，retry 帶同 id（create_req clone，dispatch.rs:785）。
+- B 的 `oc_{em}_{kk}_{t36}_{s36}_{h6}` 破壞 closed_pnl_pagination.py:39 regex（只認 dm|ld、close_/risk_ 中綴）+ 歷史 oc_dm/oc_ld 回溯。**B 引入破壞性遷移卻 0 alpha/可靠性收益（id 已唯一已穩定）→ 否決。**
+- **但發現獨立既有 bug（非 B 才有）**：regex `^oc_(?:close_[a-z0-9_]+_)?(?:risk_)?(?P<engine>dm|ld)` 無 `lv`，且 `oc_ipc_close_`/`oc_close_mf_fb_` 中綴不被 `close_[a-z0-9_]+_` 涵蓋（`oc_` 後直接 `ipc`/`close`，非 `close_`）→ 已知 prefix 多數 fall through 到 external_manual/bybit_unknown（歸屬退化非 crash）。**Scope A 順帶修 regex 加 lv + 對齊真實 prefix grammar（唯一 consumer _strategy_from_order_link_id:398，blast radius 極小）。**
+
+**Python parity=最小**：bybit_rest_client.py place_order 僅 clean_restart_flatten.py（demo-only，mainnet :36 dry-run-only block）呼叫，**且 reduce-only flatten 全不傳 order_link_id**（讓 Bybit auto-mint，:137/:178）→ 不影響 oc_ 歸屬/110072。Python 無需 110072 classifier（無 retry loop、flatten 失敗 print 即可）。parity 只需：closed_pnl regex 認全 prefix（讀模型，與寫無關）。
+
+**E1 拆分（≤3 並行，檔不重疊）**：T1 Rust dispatch.rs classify_business_retcode 加 110072=>NoOp + dispatch_tests.rs 測試（鏡像 110017 test:249）；T2 Python closed_pnl_pagination.py:39 regex 加 lv + 對齊 prefix + test_closed_pnl_pagination.py 回歸（oc_lv/oc_ipc_close/oc_risk/oc_close_mf_fb cases）。T1/T2 完全 disjoint 可全並行。**無 T3（:1101 不改）。**
+
+**教訓**：(a) 「order_link_id: None」grep 命中須查所在分支（paper lineage vs exchange dispatch）——同欄名語意天差。(b) 「無 X classifier」要查語意等價實作（10001+duplicate 已覆蓋多數 case，110072 才是真 gap）。(c) 格式重設計前先證舊格式有何不足——本例 id 已唯一已穩定，B 是 0 收益破壞性遷移。(d) regex consumer grep 證 blast radius（單一 caller）才敢動。
+
+---
+
+## 2026-06-07 — L2 Advisory Mesh 設計收尾（v4-final 轉執行方案 + TODO + 整合背景）
+
+**任務**：v4-final 設計 3 gating（QC B1 / MIT M1 / MIT M2）全 ENDORSE（0 BLOCKER 開），E1-READY。
+產 4 交付物（純文件、不寫業務碼、不部署、不三端同步=PM 做）。
+
+**產出（4 路徑）**：
+- 執行方案 `docs/execution_plan/2026-06-05--l2-advisory-mesh-execution-plan.md`
+- 整合背景 `docs/execution_plan/2026-06-05--l2-copilot-design-session-consolidated.md`
+- L2 TODO 存根 `L2_TODO.md`（srv 根目錄）
+- 設計 SSOT（既存）`docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-05--l2-advisory-mesh-design-draft.md`
+
+**FIX/NOTE 折入位置**（當 E1 驗收，記錄不丟）：執行方案 §1 gating ledger + §2 各 phase 驗收；L2_TODO §4/§5；
+均當 E1 acceptance form（QC/MIT 在其 phase sign-off 確認最終常數）。
+- B1 ENDORSE：雙因子 BTC+altcap **強制**（BTC-only→DEFER）/ OLS daily-4h（非 1m）/ down=30d 回撤>8% OR
+  7d<-5% lagged-PIT ≥30bars 否則 DEFER / NOTE `β+1.96·SE<0.20` + 45/45d 窗穩定 + WF-OOS 不重疊 beta 窗。
+- M1 ENDORSE：φ=1.0 proportional / NOTE `debit_state` 進 **PG `research.alpha_wealth_ledger`**（非 in-mem）
+  + per-test `α_i ≤ α_target/min_batch_size` cap + 文件分 `n_trades≥30`(refund) vs `N_trades_oos≥50`(math gate)。
+- M2 ENDORSE：average-linkage Pearson corr>0.5 / NOTE `max(1,N_eff)` guard（K=0 raise）+
+  `max_variants_per_cluster` + `dsr_gate` `n_trials` 介面已 compatible 無 breaking change。
+- 另折 CC C1/C2、Q1/Q2/Q3、M3/M4、E3 E1/E2（設計 body 已閉，執行方案逐 phase 驗收引用）。
+
+**Phase 序**（建置=設計 §J）：P1 D3 foundation（V134 append-only + sanitize-before-persist）→ P2
+Orchestrator+registry+contracts+guard+admission+adjudication（CC linchpin：no-auto-path-to-live + C1 grep
+0 個 promote_tier + 全 write 端 operator-scope）→ P2p 本地哨兵（平行）→ P3 ml_advisory（接現有 ML 管線，
+promotion verdict 須 B1 QC sign-off，diagnose/interpret 可先行）→ P4 online-FDR loop（M1+M2 MIT sign-off
+gate）→ P5 feedback/quality + GUI（C1 read-only promote inbox + R2-1..4 + Q2/Q3）。每 phase green-gate。
+
+**慣例遵守**：docs/README §文档索引 + execution_plan/README index 各加 2 行（docs 放置強制規範）；V133 highest
+→ V134 free（plan 已標 needs-verify 防 parallel-session 撞號）；dirty tree 只動 2 個 index README + 3 新檔，
+未碰任何無關 dirty（既存 agent memory/aeg builder 等）。設計報告本身上一 session 已 untracked。
+
+**教訓**：① 設計→執行方案的價值=把「named-but-underspecified gate」釘成 phase-bound E1 驗收 + sign-off gate
+（B1/M1/M2 的 ENDORSE 不是「過了」而是「FIX/NOTE 變驗收條款」，必須逐條落進 phase 否則收尾即流失）。
+② 根目錄 TODO 存根 = active-blocker-visible + 不貼長架構 + 連回 SSOT，不複製設計 body。
+③ 大檔（design 692KB / PA memory 709KB）超 Read token cap → 分段 offset/limit 讀 + grep 定位，勿整檔讀。
+
+---
+
+## 2026-06-07 — 幻影倉位記帳 bug 定位 + 修復設計（TONUSDT demo phantom LONG）
+
+**RCA 鐵證鏈（已驗，非假設）**：幻影 LONG 不是 `apply_fill` 算錯，是 **WS `PositionUpdate` 與 `Fill`
+兩條訊息對同一份 `PaperState.positions` map 亂序雙寫**：
+- 兩回調共用同一 unbounded channel（`startup/private_ws.rs:95/143-162/167-179`），相對順序=Bybit 推送
+  順序，引擎不保序不關聯。
+- Bybit 平倉先推 `position(side=None,size=0)` → `loop_exchange.rs:550` `upsert_position_from_exchange(0)`
+  → `fill_engine.rs:98` `positions_remove` 把 short 移除（flat）→ 隨後 close `Buy` `Fill` 才到 →
+  `apply_fill`（`fill_engine.rs:295`）`if let Some(pos)` 落空 → 落到 `:364` **開新倉分支** → 開出
+  `is_long=true,qty=437.3,entry=1.5744` LONG（指紋=平倉價+平倉量，完全吻合）。
+- `commands.rs:686` `was_open` 落空 + `:710` 把這筆當新倉寫 `entry_context_id` → 幻影被賦正規血緣。
+- GAP-7 `on_tick_helpers.rs:700` 每 1000 ticks 遍歷 `paper_state.positions()` 寫 `position_snapshots`
+  （`trading_writer.rs:645`，engine_mode 來自 `effective_engine_mode`）→ 28548 假快照來源。
+
+**關鍵架構事實（更正 PM 推測）**：①所有 PipelineKind（Paper/Demo/Live）共用同一 `PaperState`
+（`pipeline_ctor.rs:52`），snapshot 對**所有模式**都來自 `PaperState` 非 Bybit 拉取 → **bug 非 demo 專屬，
+live_demo/真 live 同樣脆弱 = 極高風險**。②`position_manager.rs`（Bybit 拉取）只給 reconciler 對賬，
+非 snapshot 源。③Python `control_api` **無倉位帳本**（grep apply_fill/upsert/position_snapshots 全空，
+不讀 snapshots）→ 倉位帳 Rust 單一權威，**無跨語言 parity**。
+
+**reconciler-miss 結論（call-path grep proof）**：reconciler 在跑、覆蓋 demo，但**對賬軸接錯**——
+`reconcile_once`/cycle 的 baseline 與 current **都來自 `pos_mgr.get_positions(Bybit)`**
+（`mod.rs:296/438/470`），比「Bybit 上輪 vs Bybit 這輪」。TON 17:03 後 Bybit 一直 flat → baseline 每輪
+seed flat → `classify(None,None)=Match` 永不 drift。reconciler **有讀** `engine_positions_mirror`
+（paper_state 鏡像，`mod.rs:826`）但只是 Ghost verdict **已成立後**取方向派平倉（`process_ghosts:838`
+第一行 `if !matches!(verdict,Ghost) continue`），**mirror 是「方向來源」非「偵測來源」**。即「偵測 Bybit
+自我跨輪變化」與「偵測本地帳 vs Bybit 背離」是兩條軸，reconciler 只做前者 → 本地幻影結構性盲視 7.4h。
+
+**修復設計**：①根因修 Option A（推薦）=`PositionUpdate` 降為 advisory 只讀比對，不再 add/flip/remove
+本地帳，size=0 走既有 `converge_exchange_zero_close`（`commands.rs:1267` 已測），倉位唯一 mutating 源
+變回 `apply_fill` → 競態消失。②`apply_fill` 補翻倉餘量（`:299` `qty>pos.qty` 時餘量被丟、目前**完全沒
+實作翻倉**=附帶 bug）+ reduce-only fill 本地無倉時 no-op 不開倉（fail-closed 縱深）。③告警新軸=
+reconcile cycle 加 mirror-vs-Bybit-current phantom 偵測（2-cycle streak+點查 gate），復用
+`spawn_reconcile_audit`→`observability.engine_events` + canary_events.jsonl（事故②宕機 20h 無人知教訓）。
+首版只告警不自動收斂。④需求 #2（錯過+5%）是 #1 下游：幻影佔位→引擎以為持倉→不再入場；#1 修好自動解。
+
+**E1 拆解**：T1 fill_engine（根因+翻倉，linchpin）/T2 loop_exchange（PositionUpdate advisory+傳 is_close）
+/T3 commands（透傳 is_close）/T4 paper_state mirror 升 struct 帶 qty/T5 reconciler phantom 軸。
+Wave1 並行 T1/T3/T4，Wave2 serial T2(待T1簽名)/T5(待T4)。檔互不重疊。E4 核心=**17:03 亂序回歸 golden
+test**（先 PositionUpdate(size=0) 後 Fill(Buy,is_close) → 斷言 flat 非 LONG、不寫幻影血緣）。
+
+**教訓**：①「記帳 bug」先別怪算術——`apply_fill` 邏輯本身對，真因是**兩個無序寫入源競爭同一 state map**
+（B-1 Phase 2 把 WS position 也接進本來純 fill 累積的 PaperState）。查 bug 要查「誰還會寫這份 state」。
+②reconciler「沒抓到」≠「沒在跑」——**對賬軸接的對象**才是關鍵（baseline=Bybit 自我快照 vs =本地帳，
+天差地別）。mirror 被讀≠被當偵測軸。③同一 channel 串行處理保留 venue 推送順序=venue 不保序時的隱藏
+競態源。④共用 PaperState 跨三模式 → demo bug 自動是 live 風險，評級必須拉到極高。報告路徑
+`docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-07--phantom-position-fill-bug-design.md`。
+
+## 2026-06-08 — L2 D3 Phase-1 (provenance & audit) tech design (design-only, E1-READY)
+- 交付: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-08--l2-d3-phase1-tech-design.md`。承 v4-final design draft + execution plan Phase 1。
+- **設計修正(ground 在 file:line)**: ① hypotheses 真表 = `learning.hypotheses`(PK `hypothesis_id BIGSERIAL`, V100:273-274), **非** design 寫的 `research.hypotheses`/`hid`。② `replay.experiments`(V041:81) 是 plain TEXT-PK 表, **非** hash-chained(V131/V132 才是 residual/hidden-OOS registry)。③ strategy-variant **無物理表**(grep CREATE TABLE 0 命中; Track-B 是 `trading.fills.track` enum, V101:79-82)→P1 該 hop N/A/DEFER。④ demo fills = `trading.fills`(engine_mode='demo', V003+V015:15), 是 columnstore hypertable → ADD COLUMN 必 nullable/無 DEFAULT/無 SET NOT NULL(V077/V101:170-181 feature_not_supported 陷阱)。
+- **append-only 真相**: repo 兩模式。D3 用 DB-level REVOKE(強): `REVOKE UPDATE,DELETE FROM PUBLIC` + DO-block `REVOKE FROM trading_ai`(V099:298-307 最貼近語意; app role=`trading_ai`, 訂正 role=`trading_admin`)。application-discipline-only(V133/V064/V035)較弱不用於 ledger。
+- **consequential 矛盾解法**: 推薦 Option(b) V114 narrow-column UPDATE 例外(`GRANT UPDATE(consequential) TO trading_admin` only, V114:204-265), **P1 不開 compression** 避 compressed-twin column-grant abort(V114:208-216 = feedback_v_migration_pg_dry_run V114 教訓本身)。writer INSERT-only; consequential promote 走獨立 trading_admin path。
+- **redactor reuse-or-build**: hybrid。reuse `error_sanitize.py`(reason_code→safe msg) 解 str(e) 半; **新建** `l2_secret_redactor`(secret-pattern 大文本掃描, repo 無)。sanitize 在 D3 writer INSERT 前; sha256 over SANITIZED text(design:698-699)。
+- **migration 號**: V134=ledger(+§C additive ALTER), V135=gate-seam(跳 V128 軟保留 reserved-if-needed breadth, V127:125)。
+- **hypertable 強制 composite PK** `(l2_reply_id, created_at)`(design "text PRIMARY KEY" 是陷阱; V035:135/V064:163/V114:178 先例)。`agent.ai_invocations`(ledger:222-227) 只存 prompt_hash+response_summary 非 full → D3 確為 NEW table reuse helpers(_sha256_text:49, deterministic_event_ts:55)。
+- 教訓: design draft 是 heads/grep 讀, in-full 親查推翻 3 個表名/結構斷言(research.hypotheses / replay hash-chained / strategy-variant 表存在)。**call-path grep + 親讀 migration 全文 > 採信 design 文字**。R2-5 live hop 按 operator 拍板 EXPLICITLY DEFERRED, 只 shape-note 不設計。
+
+## 2026-06-08 (later) — L2 D3 Phase-1 design LOCKED to operator final decisions (overrode 2 PA recs)
+- 同檔 `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-08--l2-d3-phase1-tech-design.md` 由 "recommendation" 鎖成 LOCKED design。operator 拍板覆蓋我原 rec 兩處：
+- **① consequential → Option (c) side-table（非我推的 (b)）**。理由=長期可擴展：ledger 純 append-only、**零 column-level UPDATE grant** → 未來可自由開 TimescaleDB compression，**V114 compressed-twin column-grant abort 根本不發生**（這是 (c) 勝 (b) 的長期 key；我親驗 `V114:208-216` twin-abort + `:249-257` nested-exception kludge 確為 column-level grant 專屬陷阱）。新 append-only side-table `agent.l2_consequential_marks`(mark_id/l2_reply_id/marked_at/reason/lane/marked_by/details, 建在 V134, 純 REVOKE, 同樣零 column-grant)。precedent cite=`learning.lease_transitions`(`V054:225`, PK `(transition_id,created_at):240`, event-sourced 每筆 append 非 mutate)。
+- **at-creation 子變體選 (i)**（非 ii）：ledger 留**不可變** `consequential_at_creation BOOLEAN`（INSERT 設一次永不 UPDATE→零 grant），marks 表給 later-discovered。理由：known-at-creation 是多數→cheap 單欄掃描免 join；(i) INSERT-only 不重新引入 V114 trap。predicate=`consequential_at_creation=true OR EXISTS(marks)`。
+- **② provenance §C ALTER → 獨立 V136**（非我推的 fold 進 V134）。理由：ledger 全可現 designable→V134 早定稿乾淨；provenance 有 Linux-verify 未決(`trading.fills` columnstore 形 / `decision_outcomes` table-vs-jsonb)→拆 V136 讓 V134 不等、rollback/dry-run blast radius 更清。P1=**V134**(ledger+marks)·**V135**(gate-seam)·**V136**(provenance ALTER)。三號全 free, 不撞 V128 軟保留（親驗 ls=V133 head, V128 absent）。
+- **retention/compression**: P1 只鎖 shape, **不含 drop 邏輯、不開 compression**。post-P1 drop=anti-join marks 表 + at-creation flag。partial index 隨 retention deferred（舊 `WHERE consequential=false` 單欄 index 移除：(c) 下 false-at-creation 仍可能因 later mark 而 retention-worthy，單 predicate 錯）。
+- **新發現(ground)**: `trading.decision_outcomes` = **plain table**(`V075:8` "2 plain tables")非 columnstore→plain ADD COLUMN 可；但 decision_outcomes provenance 屬 deferred R2-5 live hop **不在 P1 V136**。`agent` schema 已存(`V001:35`/`V064:18`/`V133:38`)→V134 mirror `CREATE SCHEMA IF NOT EXISTS agent` 即可不假設。
+- **§H Linux dry-run checklist** 改覆蓋全三 migration：V134 兩表雙 apply 冪等 + 證 `trading_ai` 無 UPDATE/DELETE on 兩表 + 證 V134 **零 `GRANT UPDATE(...)`**(grep 0 hits)；V135；V136 columnstore-safe ALTER(nullable/無 DEFAULT/無 SET NOT NULL)。
+- **內部一致性驗**: grep 確認 0 殘留 (b)/narrow-column/fold 肯定句(只剩標明「rejected」「overrides earlier」的 LOCKED 文字)、24-col 不變(rename 非加減)、marks 命名一致、V134/V135/V136 全 free。design-only 本 pass 0 碼/0 apply/0 DB write。E1-READY LOCKED。
+- 教訓：operator 用「長期可維護/可擴展」軸推翻「reuse vetted pattern」軸——(b) 雖是 repo 已 dry-run 的 V114 pattern，但它**永久把 ledger 綁死在 V114 ordering+nested-exception**且擋掉 compression；(c) 多一張表卻換來 ledger 純淨可壓縮。短期 reuse-vetted ≠ 長期最優；column-level UPDATE grant on hypertable 是「會傳染 compressed twin」的長期負債，不只是「需 idempotency kludge」。
+
+---
+
+## 2026-06-08 — Gap-A PBO peer-validity ruling (residual gap-closure follow-up; PM methodology challenge)
+
+**任務**：PM 質疑 residual gap-closure design 的 Gap A「A1-lite peer generation」是否 PBO theater。要求 code-grounded 裁決 + 修正 P2 scope。
+
+**Code-ground 結論（5 問）**：
+1. **A1-lite 機制**：PM 描述「re-bucketing candidate's own demo round-trips under param-perturbed exit/entry rules computed offline from trading.fills」= **re-grouping 同一條 fills**，不是 per-variant re-simulation。對照 `residual_alpha_gate.py:791-800` `_probability_of_backtest_overfit`（degenerate proxy：只比 peer **means** vs observed mean）+ line 728 註解自承「最小近似…正式 CPCV/peer beta 可在後續版本取代」。
+2. **A1-lite PBO 無效**：PBO/CSCV（`pbo_gate.py:200-205`/`_cscv_pbo`）按定義需 **N 條 genuinely different config 的 OOS series** 做 IS-rank→OOS-rank。Re-group 同一序列 ≠ 不同 config → PBO invalid theater。**A1-lite 不得 fabricate peers**。
+3. **DSR 不需 peers（確認）**：`dsr_gate.py:381` `compute_dsr(observed_sharpe, n_trials:int, ...)`，`n_trials` 是 **count**，`_compute_expected_max_sharpe(K)` 走理論 Gaussian E[max]；`trial_sharpes` optional。residual gate 內 `_deflated_psr(psr, n_trials)` 同理（count-based）。**DSR/PSR/beta-residual/permutation 全 peer-independent，single-config 可跑**。
+4. **Promotion 對 PBO fail-closed（確認）**：`promotion_gate.py:106,125-131` — `candidate_oos_returns is None or <2` → `pbo_verdict=missing_cpcv_returns` → 整體 `verdict=defer_data`（除非已 block），`passes = verdict=='promote'`。即 **PBO defer → whole candidate defer，即使 DSR pass**。Rust 側 `canary_promotion.rs:376-388` 同構：`pbo=None`→Pending（不 fail 不 promote），Stage3→4 需 `DSR PASS + PBO≤0.5`。**結論：fake 2 peers 與 pass None 的 defer outcome 相同——除非 fake peers 真把 PBO 翻成 promote（正是要避免的 theater）。所以建 real peers 必須 A-full（Rust replay 真 variant series）**。
+5. **修正建議（確認 PM 的）**：P2 = orchestrator wiring A1(residual/beta)+A2(DSR by n_trials count)+A3(permutation) on real candidates（關 defer-by-absence，gate 在 beta-masquerade P0 維度真正 active），**誠實 defer PBO 維度**（single-config，標 `pbo_not_applicable`/沿用 `missing_cpcv_returns` defer path）直到 A-full（P3）Rust replay 供 genuine variant series。
+
+**關鍵架構事實**：
+- 現役 production peer 語意（`promotion_evidence.py:184-236` `build_strategy_promotion_evidence`）：peer = **同一 config 跨 symbol 的 per-cell return series**（`candidate_key=symbol`），K=symbol-cell 數。是 cross-sectional 軸（不同 instrument=不同 sub-portfolio，legitimate-ish CSCV），**從來不是 param-variant，也從來不是 re-group 單序列**。A1-lite 的 re-group 比這還弱。
+- **無既有 A-full variant-series producer**：`replay_runner.rs:378` 註解「T2 will land formal comparison route + DSR/PBO metrics」=Rust replay 尚未產 per-variant 比較序列。genuine PBO peers 須新建（=P3/A-full）。
+- residual_alpha_gate 已內建誠實 defer：`_is_defer_only_reason`（line 892）把 `pbo_missing_candidate_returns` 當 defer-only（非 hard fail）→ `defer_data`；docstring（line 97-98）明寫 `allow_missing_pbo_for_core_tests` 只給 unit diagnostic「不得作 promotion evidence」。**設計已誠實，A1-lite 是多此一舉且有害的 fabrication**。
+
+**教訓**：「真實有效」的 gate 設計，缺維度要 **honest defer 而非 synthesize peers**。PBO 的 input 契約（N 條獨立 config series）本身就否決了任何「從單 config 變出 peers」的捷徑——無論 re-group 還是 Python mini-backtest（後者還有 Rust↔Python 行為發散風險）。defer outcome 在 fail-closed policy 下與 fake-peers 相同，故 fabrication 零收益純風險。承 [[project_2026_06_05_residual_producer_build]]（當時已因「讓閘可信會誠實 defer」對單配置一律 defer，本裁決與之收斂）。
+
+---
+
+## 2026-06-08 — L2 Advisory Mesh Phase 2 (Orchestrator+registry+contracts+guard+admission+adjudication) 技術設計 [CC linchpin]
+
+**任務**：產 P2 設計（design-only，no feature code / no migration apply / no deploy）。接 P1 D3（已落 `f1c3c1ca`：V134/V135/V136 + `l2_call_ledger_writer.py` + `l2_secret_redactor.py` + 78 tests）。報告 `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-08--l2-p2-orchestrator-tech-design.md`。
+
+**關鍵 grounding 修正（execution-plan 文字已 stale）**：plan §0「V134 next free / V13x after V134」是舊的——**P1 已吃掉 V134/V135/V136**（在 disk @ f1c3c1ca）。P2 真正 next-free = **V137**（驗 `V13[7-9]/V14*` = 0 hits）。但 **P2 結論=不需 migration**（registry=TOML SSOT；admission/adjudication=in-memory+log 進既有 V135 gate-seam；guard verdict 用既有 V134 `guard_verdict` 欄；C1 promote-inbox `learning.l2_promote_candidates` 是 **P5** 非 P2）。V137 reserved-not-used，只在 operator 重開「DB-backed runtime registry override」才取。
+
+**carbon-layer invariants 全 ground 在真碼（CC 會逐條 grep）**：
+- `promote_tier` auto-raise L1→L4 with `approved_by=None`：`learning_tier_gate.py:520`(def)/`:525`(approved_by None)/`:550-553`(只 L5 要)/`:570-574`(AUTO_PROMOTE L2/L3/L4) — **C1 hazard 真實**。
+- `can_auto_deploy_to_paper=True@all-tiers`：`:185/196/205/218/231` + property `:660-662` — **C2 no-signal 真實**。
+- `can_modify_live_config` 硬回 `False`：`:178`(field)/`:664-671`(property literal False, "EX-05 §8.2") — live hard line 已在碼。
+- operator-scope WRITE 雙 pattern：`governance_routes.py:129-152` `_require_operator_auth`（docstring 自稱 "standard Depends() target for all write/state-change endpoints"）；TOTP-gated switch `governance_autonomy_service.py:598-601`（C1 promote-confirm 重用此）。`_AUTONOMY_PATH_MATRIX` `:80,116-130`（asymmetry 半成品：(e)/(j) auto-trigger=contract、(a)/(c)/(d) operator manual=expand）。
+- `/cost/reset`(`:354`)+`/cost/pricing`(`:389`) POST **已** operator-scope（`require_scope_and_operator(...,"ai_budget:write")` `layer2_routes.py:247`）→ E3-E1 對這兩個是「確認非新增」，只有新 Orchestrator/registry route 要新硬化。
+
+**D3 wiring 接點（P2 wire 進 P1 writer）**：`l2_call_ledger_writer.py:113 record_l2_call / :266 record_consequential_mark / :314 record_gate_seam / :367 get_l2_call_ledger_writer`（全 INSERT-only，已登記 singleton-registry §2.6.1 line 351）。engine 今天已在 `layer2_engine.py:352` 呼 `record_l2_call`，但傳 **hardcoded** `L2_DEFAULT_CAPABILITY_ID`/`L2_PROMPT_CONTRACT_VER`/`L2_OUTPUT_SCHEMA_VER`（`:89-92`/`:355/359/360`）→ **P2 wiring delta = 改成 registry/contract-driven**，既有 manual path 留作 seed `l2.manual_reasoning` capability（無 regression）。
+
+**CC-grep-verifiable 的設計手法（每個 invariant 設成單一 construct 非 emergent）**：LANE_DIRECTION = 一個 loader-owned table（無 `live` key）+ 一個 STEP-1 `if expand: return MANUAL`（function 頂、不可被 tier/posture 覆寫）；C1 = Orchestrator module「0 個 promote_tier ref」；C2 = 「0 個 can_auto_deploy_to_paper posture branch」+ loader-reject；F.2 = table-driven adjudicator「內部 0 model call」；fail-safe iron rule = 「每個 state 都是 L2 capability 的減法、0 個 live-enabling write，worst case=NO_ADVICE=今日 baseline」。
+
+**reuse-vs-new ground 確認**：~70% wiring（LearningTier `:165-234` + path matrix `:80` + P1 writer + operator-auth `:129` + budget gate `layer2_cost_tracker.py:286` + `check_daily_budget` + DOC-08 cap `budget_config.toml:9 daily_usd_max=2.0` + `ConfigDict(extra="forbid")` `agent_contracts.py:109` + RiskConfig TOML SSOT）；~30% net-new（Orchestrator/registry/LANE_DIRECTION/contract registry/guard registry/admission/adjudication 全 greenfield 0 hits）。
+
+**verdict**：E1-ready，**conditional on 1 operator confirm**——鎖「P2 ships TOML-SSOT registry, no DB table, no V137」（§N.1）。其餘 design-decided。CC 擁 load-bearing audit（stress-test 5/6/10/15/16/18）；E3 擁 write-auth + fail-safe-under-fault。殘留 Linux-verify=無（P2 無 migration/無 PG semantic/無 Rust IPC）；E4 欠標準 Mac+Linux test regression。
+
+**教訓**：execution-plan 的 migration-number 文字會被 phase 推進 stale（P1 吃掉 V134-136 但 plan 還寫「V134 next free」）——PA 設計時必 `ls sql/migrations/` + git log 對當前 HEAD 重新確認 next-free，不可信 plan 文字。承 [[project_2026_06_08_l2_d3_phase1]]（同 session P1 設計）。
+
+---
+
+## 2026-06-09 — L2 Advisory Mesh Phase 3 `ml_advisory.v1`（FIRST L2 capability）技術設計 [接 ML 管線]
+
+**任務**：產 P3 設計（design-only，no feature code / no migration / no deploy）。接 P2 Orchestrator（已落 `6a9dd0f1`：**整套 mesh scaffolding 已 commit**——`l2_advisory_orchestrator.py`/`l2_capability_registry.py`+`settings/l2_capability_registry.toml`(skeleton 0 stanza)/`l2_prompt_contract_registry.py`/`l2_out_of_bound_guard.py`/`l2_conflict_adjudicator.py`，全 capability enabled=false）。報告 `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-09--l2-p3-ml-advisory-tech-design.md`。
+
+**關鍵框架修正（execution-plan/design 文字假設 P3 較 greenfield）**：P2 已 commit 整套 orchestration plumbing。**P3 不是 greenfield orchestration**——是 (a) 3 個 TOML capability stanza、(b) `ml_advisory.*.v1` PromptContract+OutputSchema 入 contract registry、(c) `ml_advisory.guard.v1` clause 入 guard registry（P2 `get_guard` 是 placeholder echo `l2_out_of_bound_guard.py:154-159`，P3 改 callable registry）、(d) **cascade executor** 接入 P2 dispatch seam（`l2_advisory_orchestrator.py:300-301` 明寫「P3 接各 capability executor + parsed_output」）、(e) **deterministic math gate 含 B1 beta_neutral_check（NEW，QC-gated）**。真問題是 data+math-gate，不是 plumbing。
+
+**ML 管線 seam（全 ground:file:line，execution-plan §0 命令 read in full）**：
+- `run_training_pipeline.py:474` `run_pipeline` → `PipelineResult{verdict, metrics{pinball_skill/crossing_rate/decile_lift/feature_schema_hash}, acceptance_report_path, onnx_artifacts}`；sink=fs acceptance-report JSON `:299-312` + `learning.model_registry`(V023) `:374`（gate verdict≠no_ship）。
+- `mlde_shadow_advisor.py:578` → `list[ShadowRecommendation]` → **`learning.mlde_shadow_recommendations`** via `verify_replay_evidence_and_insert` `:469-489`，**`p_applied=false`:480 / `p_requires_governance=true`:481 hardcoded**。
+- `leakage_check.py:41` `check_feature_leakage(names, strict)` → `(passed, violations)`，**僅 name-pattern**（FORBIDDEN_PATTERNS `:20-30` + ALLOWED_PREFIXES `:33-38`），78 行確認。pure fn 無 sink。
+- **advisory sink CONFIRMED 雙層**：schema-enforced（V031 `applied DEFAULT FALSE`:432 / `requires_governance DEFAULT TRUE`:433 / live-gate CHECK 需 decision_lease_id `:444-449` / COMMENT「Not an execution queue」`:466`）+ producer-enforced（advisor hardcode applied=false）。→ ml_advisory feed 此 sink = **0 new exec authority**。
+
+**beta_neutral_check 判定 = MUST BE BUILT（但有可重用 machinery）**：
+- grep `beta_neutral` = **0 hits**。必建。
+- **BUT `residual_alpha_gate.py` 已存在**（2026-06-05 residual-producer build）：`DEFAULT_REQUIRED_FACTORS=("btc","market")` `:23`，train-window beta fit→OOS residual `:4-5`，`ResidualEdgeReport{residual_mean_bps, beta_loadings, beta_edge_share, r_beta_retention, dsr_residual...}` `:101-127`，`evaluate(candidate_returns, factor_panel, protocol)` `:147`。**這是 B1 重用的 OLS/factor-fit machinery**，但非 B1 本身（residual gate 用 beta_edge_share<0.5；B1 要 `|β_btc|<0.15 AND |β_alt|<0.15 AND |β_down|<0.15` 確定性閾值 + down-market 子樣本 + altcap factor；且 factor_panel 是 caller-supplied，不產 BTC/altcap 序列）。memory「grep beta=0 殺你5次的維度沒接進 gate」=此 machinery 存在但未綁進 production gate。
+
+**B1 data availability 判定（最重要交付）**：
+- **BTC return series = READY**（V125 `alpha_history_storage` + daily-kline backfill 14505 日線，承 2026-06-02 aeg infra）。
+- **down-market regime label = schema+writer READY, population OWED Linux-verify**：**V127 `research.aeg_regime_labels`** 有 `ret_30d`/`ret_90d`/`main_regime`/`market_anchor_regime`(BTC-anchored)，versioned+leak-free PIT daily（`V127:5-21,68-71`），writer `aeg_regime_runner/db_writer.py:28-79`。down-market mask(30d dd>8% OR 7d<-5%)可從 ret_30d/ret_90d 衍生。**BUT V127 只經 runner `--write-db` 填**（`db_writer.py:6`「默認只產 artifact」；migration `:17-21` 只建表不含 runner data）→ **Linux `SELECT count(*)` owed**。
+- **★ PIT cap-weighted altcap basket return series = DOES NOT EXIST，必建（最大 B1 gap）**：grep `altcap/cap_weight/basket/market_cap/weighted-return` over research+ml_training = **0 producer**。FND-2 `fnd2_pit_universe` 只產 **symbol-list artifact**（included/cohort_ids/alive_from，`aeg_breadth_ladder/universe_artifact.py:3-10`；builder.py 0 return/price/cap-weight），**非 return series**。cap-weighted return basket 還需 per-symbol PIT cap × daily return。→ **QC/MIT-data construction item**。
+
+**shift1_compliance / is_oos_gap（M3 leak-typing）判定**：
+- **`shift1_compliance` = 0 hits（必建）**。
+- **`is_oos_gap` = 只有 namesake-different metric**：`sample_weight_sensitivity.py:329-334` 是 train-vs-OOS **RMSE gap-ratio overfitting** detector，**非** M3 的「真 in-sample→out-of-sample 時序 gap」source-class。leak-typing producer 必建。
+- 只 `name_pattern_check` 存在（leakage_check.py）。M3：ml_advisory 不得宣稱 leakage_check 輸出=leak-free PIT；每 leak claim 帶 `source_class∈{name_pattern_check,shift1_compliance,is_oos_gap}`；name_pattern_check 不滿足 math-gate leak 前提。**P3a 只需 source_class typing 強制；producer 是 MIT-owned，gate P3b**。
+
+**3 modes + cascade**：全 `direction=neutral`（`LANE_DIRECTION["ml_backlog"]="neutral"` `l2_capability_registry.py:70`），0 new exec，feed 既有 advisory sink。diagnose_leak/interpret_result（L1，assert no alpha）+ hypothesize（**L3** because `can_generate_hypotheses` first True @L3 `learning_tier_gate.py:203`，bind `tier_capability_flag`）。cascade=Ollama screen(recall≥0.85，reuse layer2_critic)→**deterministic math gate（唯一 alpha validator）**→cloud-L2 interpret only survivors。**LLM 永不驗 alpha**（math gate 唯一，design §G.2:1224）。接 P2 orchestrator `:300-301` executor seam。dsr_gate.compute_dsr(`:381` count-based n_trials，single-config 可跑) reuse；pbo honest-defer single-config（承 2026-06-08 Gap-A PBO ruling）。
+
+**★ P3a/P3b split（最重要建議，execution-plan §1:79-82/§2:197-199 明示）**：
+- **P3a**（diagnose_leak+interpret_result，assert no alpha）：gate=**E2+MIT(M3 typing+M4 recall)**，**NOT B1**。**可現在 ship**——證 cascade+D3+M3+M4 於 zero-alpha 面，不等 B1 final / altcap data。
+- **P3b**（hypothesize，promotion-relevant verdict）：**HARD-BLOCKED** on **QC(B1 final 4 numbers + altcap construction + leak-free PIT) + (L3 tier) + shift1/is_oos producers**。理由：B1 是 unattended-gate command-line（design §N.1:1864）；P3b 提前 ship 會讓 down-beta masquerade 過無人閘（殺 5 候選的失敗）。tier 對齊強化（L3 + enabled=false 雙閘）。
+
+**Migration 判定 = P3 NO migration**：advisory sink V031 / D3 V134-135 / novelty agent.lessons V133 / regime V127+V125 全既有；registry=TOML。V137 reserved-not-used——只在 QC 要 altcap persisted table 才取（**PA rec：altcap on-the-fly/artifact 避 migration**，mirror FND-2 CSV-artifact）。shift1/is_oos 是 compute 非 schema（讀既有 data）無 migration。
+
+**verdict**：**P3a E1-ready now**（design-decided+grounded，gate E2+MIT 非 B1）。**P3b design-ready 但 EXECUTION-BLOCKED**（QC B1 final + altcap basket 不存在 + shift1/is_oos producers）。rec：先派 P3a 證 cascade，平行開 QC B1-finalize + altcap-construction track。需 operator 鎖「P3 no migration；altcap on-the-fly」或重開 V137。
+
+**教訓**：(1) phase 推進使「greenfield 假設」stale——P2 已 commit 整套 plumbing，PA 必先 `find l2_*.py` + 讀 P2 已 shipped 碼確認 seam（`:300-301` executor hook），不可信 design/plan 文字當 P3 greenfield。(2) 「data 存在」要分三層查：schema(migration) vs writer(producer code) vs **population(Linux runtime)**——V127 schema+writer 在但 population owed；altcap 連 producer 都無。(3) namesake collision 陷阱：`is_oos_gap` 在 sample_weight_sensitivity 是 RMSE-gap 非 M3 leak-typing，grep 命中≠語義命中，須讀 context。承 [[project_2026_06_08_l2_d3_phase1_green]]（同 session P1/P2 設計）+ [[project_2026_06_05_residual_producer_build]]（residual_alpha_gate machinery 來源）+ [[project_2026_06_03_v58_archive_audit_s2_design]]（V127 aeg_regime_labels 來源）。
+
+## 2026-06-09 — L2 Phase 3b 實作設計（hypothesize alpha-bearing + B1 beta_neutral_check + altcap + leak producers）[design-only, E1-READY]
+- 交付 `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-09--l2-p3b-implementation-design.md`。整合 QC B1 spec（4 numbers FINALIZED, altcap=EQUAL-WEIGHT operator-鎖）+ MIT spec（shift1 reuse / is_oos build / M4 / V127 0-rows）。承 P3a `aeae4da4`（cascade executor 已 ship diagnose/interpret 2 mode）。
+- **最 load-bearing 架構真相**：hypothesize alpha-bearing 但 lane 仍 `ml_backlog=neutral`（`l2_capability_registry.py:70`）。verdict 是 promotion-relevant，但**promotion 動作**是另一條 `demo_stage1=expand=MANUAL`（`effective_autonomy` STEP-1 `:119-120`）。B1 gate 的是 verdict 不是 lane → hypothesize 可 neutral 又 B1-gated。alpha 驗證在 cascade 內**確定性 math gate**（唯一 validator，LLM 永不驗，iron-rule grep target `l2_ml_advisory_executor.py:27-35` 已驗 comment-only 0 calls）。
+- **B1 插 math gate 序（§A.5）**：STEP0 Q1(N_trades_oos≥50→DEFER via `dsr_gate.compute_dsr(min_observations=50)`→insufficient_observations→defer_data `:465-507`)→STEP1 DSR(K)→STEP2 PBO honest-defer(single-config，承 2026-06-08 Gap-A 不 fabricate peers)→**STEP3 beta_neutral_check(pooled β_btc/β_alt on≥90d + down-leg β_down on≥180d-span)**→STEP4 leak precondition(shift1/is_oos leak_free=True 否則 DEFER)。overall=strictest-wins(fail>DEFER>pass，mirror `residual_alpha_gate._verdict_from_blocking_reasons:882-889`)。B1 是與 DSR 同 tier 的 hard precondition（design §N.1(5)）。
+- **SE 加法點（§A.2）**：reuse `residual_alpha_gate._fit_factor_beta:619-624`(np.linalg.lstsq)**不 fork**，wrap 加 SE=sqrt(σ²_resid·diag((X'X)⁻¹))（QC formula）；DW<1.5→HAC Newey-West（Bartlett kernel，hand-roll 無 statsmodels，仿 dsr_gate `:161-164`）。β_upper=β+1.96·SE<0.20 殺 noisy-small-β（5 候選失敗模式）。down-mask=klines-direct lagged-PIT（MIT Path B，不硬依 V127，V127 0-rows runtime-verified）。
+- **altcap producer（§B）**：`program_code/research/altcap_basket.py` 新建，equal-weight ex-BTC CORE25 24 檔（`cohorts.py:27-33` minus BTCUSDT）daily-rebal on-the-fly。**PIT walk-forward**用 FND-2 `alive_from`/`alive_to`（`builder.py:235-236` clip-to-window；`SymbolLifecycle.listed_at/delisted_at:79-80` 是 lifetime 權威，first/last_seen_ts:83-84 診斷-only snapshot 27d 陷阱）。bar t 用 t-時 alive set 非今日 survivors，no zombie forward-fill = **唯一 M3 leak hot-spot**。producer 無 → altcap_returns=None → B1 DEFER（BTC-only）。**NO V137**。
+- **shift1_compliance（§C）**=thin adapter reuse `feature_engineering_validator.py`（`is_leaky_sql:43`/`is_leakfree_sql:51`/`validate_shift1_pattern:72-113`）emit source_class；any DEFER→leak_free=False fail-closed。**is_oos_gap（§D）**=新建 `check_oos_gap`（distinct 名避 `sample_weight_sensitivity.py:329` RMSE-gap namesake，MIT option(a) 保 source_class string `:157` PA concur），temporal-sep+embargo+purge+no-shuffle 4 檢查。兩 producer 缺→math gate leak precondition unmet→hypothesize DEFER。
+- **hypothesize mode（§E）**：TOML stanza `min_tier=L3`(`learning_tier_gate.py:203` can_generate_hypotheses first True@L3)+`tier_capability_flag=can_generate_hypotheses`+`enabled=false` 雙閘。executor 擴 `_P3A_MODES:563` 加 hypothesize + 插 math-gate STAGE(guard 後 sink 前，只 hypothesize)。guard 擴：reuse clause D(axes `:277-287`)+clause C(regime/bull-only `:257-275`)+NEW empty-mechanism curve-fit clause；**novelty dedupe 不在 guard（guard 0-DB 不變式 `:24`）改在 executor 跑 `retrieve_lessons(lesson_type=dead_mode)` DB 讀**（修正 naive「guard 做 novelty」誤讀）。promotion routing=demo_stage1 expand MANUAL，auto 須 B2 forward-OOS≥21d demo-only。**0 promote_tier/order/lease import；can_modify_live_config=False 不碰；C1 AUTO_PROMOTE_L3_TO_L4 `:119` 不觸**。
+- **Migration 判定=P3b ZERO-migration，V137 reserved-not-used**（全 compute/JSON/TOML；altcap on-the-fly；V127 schema 已 applied sqlx_max=133 只欠 population）。
+- **2 個 E1 implementation decisions（非 blocker）**：(i) cascade order reconcile——P3a executor cloud-first(`:591` before guard `:611`)，design §G.2 要 Ollama-generate→math-gate→cloud-interpret-survivors（cost 紀律 root principle 13），E1 implement §G.2 序；(ii) M4 artifact path 對齊 `..._screen_benchmark.json`(MIT) vs `..._screen_calibration.json`(P3a loader `:153`)。
+- **owed-runtime（非 design blocker，blocks verdict-going-live）**：V127 population / agent.lessons seed 5-10 dead-modes / down-bars≥30 確認(full-span=309,last-90d=23) / altcap Linux smoke。
+- **verdict=E1-READY** conditional on 4 cross-team sign-off（operator altcap=equal-weight+zero-migration 已 prompt CONFIRMED；QC B1 final；MIT M3/M4 + is_oos option(a)）。其餘 design-decided ground file:line。
+- **教訓**：①hypothesize「alpha-bearing」但 lane 仍 neutral——promotion-relevant 是 verdict 屬性非 lane 屬性，promotion 動作走獨立 expand/MANUAL。設計時別把「會 promote」誤當「lane=expand」。②novelty dedupe 需 DB 讀 → 不能塞進 0-DB 的 guard，要放 executor（已有 DB I/O）。guard 純確定性無 DB 是 load-bearing 不變式，別為 novelty 破它。③SE 是 residual_alpha_gate 唯一沒做的——OLS 全可 reuse(`_fit_factor_beta`)，wrap 加 SE+DW+HAC 即可，不 fork lstsq。④P3a executor cloud-first 與 design §G.2 math-gate-first 衝突——phase 推進使 executor 既有路徑與後階設計不一致，E1 須 reconcile，PA 設計時要抓出這種「既有實作 vs 後階 spec」的序差。承 [[project_2026_06_09_l2_p3_ml_advisory]]（同 session P3 設計）+ [[project_2026_06_08_l2_d3_phase1_green]]。

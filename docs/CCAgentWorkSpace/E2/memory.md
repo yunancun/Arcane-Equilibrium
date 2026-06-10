@@ -4704,3 +4704,577 @@ Scope: backfill/funding_oi_backfill.rs(795) + funding_oi_writer.rs(391) + bin/fu
 **§5 race check**：5a fetch+sibling window clean（HEAD=origin/main=54947d7d，sibling 窗無 sql/migrations 衝突）；5b status 僅本 scope（V127 untracked + E1/memory + 既有 project memory）；5c 看到舊 stash 未 touch；5d/5e N/A（PM commit 階段）。
 
 **教訓**：(1) migration 審查 = 靜態對齊 V125 先例 + **獨立 sandbox 親跑 double-apply + 經驗 schema 反射 + 對抗 INSERT 探針**，三層才足；E1 自報 dry-run 結果可信但 E2 親跑才是 ground。(2) §F post-COMMIT Guard C 是「會 RAISE 的真驗證」非 NOTICE-only → 必親驗兩 apply 都 PASS（否則 crash-loop fail mode）。(3) feature REAL-NULL vs data-value NOT NULL 的語義分界 = 「分類器內部診斷產物（NULL 不污染證據）」vs「fail-closed 交易資料值（0.0 fake-zero 污染 PIT）」，審 schema NOT NULL 決策須問「此欄缺值的語義是 diagnostic-gap 還是 data-corruption」。
+
+---
+
+## 2026-06-05 — re-E2 engine_watchdog.py throttle increment (RETURN-TO-E1, HIGH)
+
+**Context**: re-review of E1 fix to RESTART_SKIPPED canary flooding (FINDING #2) +
+bind-host sanitize (FINDING #1) on `helper_scripts/canary/engine_watchdog.py`
+(uncommitted working tree, HEAD==origin/main 1c8962f6, no sibling race).
+
+**Verdict: RETURN-TO-E1 — 1 HIGH (throttle defeated for backoff windows).**
+
+### HIGH-1 (2b key risk realized): dedup keys on full human reason string → flooding returns for every backoff window
+- `should_restart` (engine_watchdog.py:572) returns
+  `f"backoff window active, {remaining:.0f}s remaining"` — a PER-POLL countdown.
+- `emit_restart_skipped_if_new` (:519) dedups on `last_reason == reason` (full string).
+- POLL_INTERVAL=2s → each poll yields a DISTINCT integer-second string → dedup never
+  fires within a backoff window. **Empirical probe (real should_restart, not mocked):
+  300s window = 150 distinct reasons → 150 RESTART_SKIPPED rows** (goal: <=1).
+- Normal failure climb backoff windows [60,120,300,600]s → ~540 rows before circuit-break,
+  burying the RESTART_CIRCUIT_BROKEN signal the fix exists to protect.
+- Throttle works ONLY for terminal circuit_broken (reason stable: fixed consecutive=5).
+- **Fix**: key dedup on a STABLE reason KEY ("backoff"/"circuit_broken"/"maintenance"),
+  not the full string. Either have should_restart return (allowed, reason, key) or derive
+  a key in emit_restart_skipped_if_new.
+
+### Test blind-spot (why suite is green but bug invisible)
+- E1's throttle tests (`test_held_skip_..._at_most_once`, `test_restart_skipped_reason_change_emits_again`)
+  MOCK should_restart with a CONSTANT string ("circuit broken...", "backoff window active, 120s remaining").
+  Mutation (throttle→unconditional append) DOES go red (3 fail) so test has bite vs "no throttle",
+  but it's blind to per-poll-varying reason because the mock pins the string.
+- E1 fix MUST add a test using the REAL should_restart over a backoff window (assert <=1 RESTART_SKIPPED).
+
+### PASSED items
+- **#1 bind-host**: DANGEROUS_BIND_HOSTS {"0.0.0.0","::","","tailscale","tailscale-ip","ts"}
+  matches api_bind_host.sh exit=2 set. tailscale test has bite (mutation→3 subtests red).
+  pass-through (100.64.x/auto/127.0.0.1) preserved. Guard files (api_bind_host.sh/restart_all.sh)
+  untouched ✓. ""→auto is behavior-preserving (same resolver arm). tailscale unconditional→auto
+  is slightly more permissive for recovery subprocess only — defensible fail-safe, not blocker.
+- **2c marker reset**: trigger_restart success (inline pop, single save, atomic) + on_engine_recovery
+  (clear_restart_skipped_marker) both correct. No permanent suppression after recovery. Single-writer
+  state file, synchronous loop, no intra-process race.
+- **2d caller grep**: prod call site run_watchdog:1494 passes data_dir=str(data_path) ✓; test callers
+  :439/:446 use default "" (backward-compat ✓). signature data_dir:str="" backward-compatible.
+- **#3 no core regression**: was_alive edge-count / level-retry / network_outage-preserve intact;
+  increment surgically scoped to skip-emit line 812.
+- Hygiene: no /home|/Users paths, no except:pass, logger uses %s, Chinese-first docstrings.
+- 116 passed (verbatim run, twice — pre and post all mutations restored clean).
+
+### Lesson
+- Reviewer mutation MUST exercise the REAL upstream function, not trust E1's test that mocks
+  it with a constant. A "≤1 emit" throttle test that hardcodes the reason string cannot catch
+  a per-poll-varying reason key. The bite-check passed but the bite was against the wrong axis.
+
+## 2026-06-05 — RE-E2 (final) engine_watchdog.py HIGH-1 RESTART_SKIPPED key-throttle → PASS
+- Delta: should_restart 改 3-tuple (allowed, reason_key, reason_detail)；reason_key 穩定鍵 {maintenance/circuit_broken/backoff/ok}。emit_restart_skipped_if_new 用 reason_key 去重（非人類字串），canary payload 仍帶 reason_detail + 新 reason_key 欄。marker last_restart_skipped_reason 存 KEY，save_state 跨 poll 持久化；trigger_restart 成功分支 inline pop + on_engine_recovery→clear_restart_skipped_marker 雙清。
+- 對抗驗證親跑：mutation 把去重改回 reason_detail → test_backoff_window_emits_restart_skipped_at_most_once 紅（AssertionError: 8 != 1，captured warning 顯示 10000s→9986s per-poll 倒數真遞減=真 should_restart 驅動非 mock）；revert 後 GREEN。該測試自證 assertGreater(len(seen_details),1) 守住 string-throttle 盲區。
+- caller grep：should_restart( 全 repo 3 處全 3-tuple unpack（prod on_engine_crash:823 + test 1146/1158），無殘留 2-tuple。on_engine_recovery 新增 data_dir="" default，舊 1-arg test caller 安全（if data_dir: 守 no-op）。
+- 回歸：bind-host sanitize set / was_alive edge-level / network_outage / marker-reset 全未被本 delta 破壞；inert-probe Layer B 區段 0 改動。118 passed verbatim。跨平台路徑 0、logger 0 f-string。
+- 教訓：3-tuple 擴張型 fix 最大風險=漏掉的 2-tuple unpack caller 會 runtime ValueError；grep `<fn>(` 全 repo + 連 test mock return_value 都要查（本次 mock 已全部更新成 3-tuple，無漏）。
+
+## 2026-06-05 — GUI-configurable alert feature (watchdog→alert wire + settings) → RETURN-TO-E1 (1 HIGH coverage gap)
+
+**Scope**: uncommitted dirty tree, HEAD==4b97d344 at start. Files: alert_config.py(NEW),
+settings_routes.py(+332), telegram/webhook_alerter.py(file-primary seam), paper_trading_wiring.py(+2),
+engine_watchdog.py(+286 alert wire), tab-settings.html(+330 frontend), 36 new tests
+(22 test_watchdog_alert.py + 14 test_settings_alerts_routes.py). §5 race 5/5 (5e: sibling 0ab8159d
+pushed DURING review but only layer2_types.py — disjoint scope, no impact).
+
+**Verdict: RETURN-TO-E1 — 1 HIGH (trigger-seam zero test coverage) + 1 LOW (loader env-fallback drift).**
+Everything else PASS. Not a blocker on logic correctness — the seams are wired correctly by
+inspection — but the load-bearing "engine-down is non-silent" requirement has no regression guard.
+
+### HIGH-1: the 3 alert TRIGGER SEAMS have ZERO test coverage (unit fns tested, wiring not)
+- `emit_engine_down_alert_if_new` / `_send_alert_best_effort` are well-tested in ISOLATION
+  (test_watchdog_alert.py: dedup bite ✓, hanging-send <5s bite ✓, secret-leak ✓).
+- But the WIRING of those into the state machine is untested:
+  - trigger_restart circuit-break → emit(key="circuit_broken")  [engine_watchdog.py:973-975]
+  - on_engine_crash prolonged-down re-alert  [engine_watchdog.py:1091-1105]
+  - on_engine_recovery RECOVERED alert  [engine_watchdog.py:1149-1166]
+- test_canary.py exercises trigger_restart/on_engine_crash/on_engine_recovery but 0 hits for
+  ENGINE_DOWN_ALERT_SENT / emit_engine_down / circuit_broken_reping.
+- **2 seam mutations both left suite 100% GREEN** (the proof): (a) delete the entire circuit-break
+  emit seam → engine-down produces NO alert → 100 passed; (b) pin reping key to constant
+  "circuit_broken" → all 4h re-alerts dedup-swallowed after first → 100 passed.
+- This is the exact 20h-silent-outage failure mode the feature exists to prevent; a future refactor
+  could silently sever the wire and CI would not catch it. PA design listed these as E4 test items
+  #1/#2/#5 (in test_canary.py) but they were not implemented.
+- **Fix**: add 3 integration tests in test_canary.py: (1) consecutive restart failures → circuit_broken
+  → exactly one ENGINE_DOWN_ALERT_SENT with key circuit_broken, re-poll while broken does NOT re-emit;
+  (2) recovery after a down-alert → RECOVERED alert + marker cleared → next down re-emits; (3) prolonged
+  re-alert fires once per RE_ALERT_INTERVAL window (key changes per ~hour bucket), not every poll.
+  Mutating any seam must then go red.
+
+### LOW-1: watchdog inline `_load_alert_creds` env-fallback diverges from app `_apply_env_fallback`
+- App alert_config.py:112 telegram env-fallback uses `if env_token OR env_chat` (stores orphan token,
+  enabled=bool(token AND chat)); watchdog engine_watchdog.py uses `if env_token AND env_chat`.
+- Empirical 10-input comparison: 9/10 MATCH; the only DIVERGE is env-token-WITHOUT-chat_id:
+  app stores bot_token="T"(enabled=False), watchdog stores ""(enabled=False).
+- **Benign**: both yield tg_active=False (no send) in that misconfig dead-state; the divergent field
+  is never read because send requires enabled AND token AND chat_id. File path / schema keys / active
+  send behavior all identical. Cosmetic only. Acceptable to leave, or align AND→OR for exactness.
+
+### PASSED (verified, not trusted)
+- **Contract frontend↔backend EXACT**: GET shape (telegram{enabled,bot_token_configured,bot_token_hint,
+  chat_id}, webhook{enabled,urls[],secret_configured,secret_hint}, any_channel_active, config_present,
+  last_modified) matches _alert_config_masked_view byte-for-byte; POST body {telegram{enabled,bot_token,
+  chat_id},webhook{enabled,urls,secret}} matches AlertConfigSaveRequest; resp=GET+saved:true; /test=
+  {telegram{attempted,ok,error},webhook{...}}. Frontend renderAlertConfig reads exactly those fields,
+  password fields always emptied, last_modified treated as unix-sec (matches int/None). node --check OK
+  on full concatenated inline JS.
+- **Sentinel ""vs"__CLEAR__" both sides**: frontend _alertSensitiveValue (typed→value, clear-mark→
+  __CLEAR__, else→"") ↔ backend _merge_secret_field (""→keep, __CLEAR__→clear, else→new). chat_id/urls
+  are prefilled plaintext so empty=clear is correct UX (not the token "" semantics) — consistent.
+- **Failure isolation airtight**: all sends via _send_alert_best_effort → daemon Thread only, 5s
+  urllib timeout, catch-all. All 3 seams fire AFTER restart/recovery logic + save_state, never before
+  trigger_restart's subprocess.run. test_hanging_send (30s sleep → <5s return) has bite (sync mutation
+  → 30s fail).
+- **Dedup parity EXACT**: emit_engine_down_alert_if_new mirrors emit_restart_skipped_if_new (load_state→
+  compare key→set marker+ts→save→emit→canary). clear on recovery + on restart-success. prolonged-down
+  key circuit_broken_reping_{int(hours)} + the last_engine_down_alert_ts >= RE_ALERT_INTERVAL(4h) gate
+  = one re-alert per window (gate is primary throttle, key is dedup backstop, no collision: keys jump
+  4→8→12). Dedup mutation → red bite.
+- **/test deviation correct**: one-shot TelegramAlerter/WebhookAlerter from current file config + sync
+  .send() (not startup ALERT_ROUTER which may predate creds). Reuses the REAL send() primitive, not a
+  bespoke sender. Per-process 10s throttle + asyncio.Lock + to_thread (no blocking in async route).
+  Accept.
+- **Partial-safe merge** (empirical probe): enable telegram + no stored token + empty input → 400
+  (not silently enabled); enable + stored token + empty → 200 keeps; validation AFTER merge; webhook
+  urls/secret __CLEAR__ correct; secret optional when enabled.
+- **App alerter seam**: precedence explicit>file>env; _load_config_creds catch-all → ("","") → env
+  fallback; construction never raises on missing/malformed; existing RISK alert works via env when
+  file absent (paper_trading_wiring TelegramAlerter() no data_dir → OPENCLAW_DATA_DIR default).
+- **SSRF guard** (new, was absent): validate_webhook_url blocks metadata 169.254.169.254/loopback/
+  RFC1918/link-local/unspecified/reserved/multicast, https-only, DNS-resolve-fail→fail-closed.
+  Tested. (Send-path does not re-validate — DNS-rebind residual explicitly documented & accepted;
+  env-fallback URLs not SSRF-checked = pre-existing trust level, not new.)
+- **Hygiene**: 0 hardcoded /home|/Users, 0 bare except/pass (all catch-all have noqa+rationale),
+  0 f-string logger, no detail=str(e) leak, data_dir default uniformly OPENCLAW_DATA_DIR→/tmp/openclaw
+  across 5 files, SCRIPT_INDEX updated, Chinese-first comments with fail-closed rationale + MODULE_NOTE.
+  Sizes: settings_routes 1558 / engine_watchdog 1970 (both <2000 cap; watchdog flagged for future split).
+  No new trading singleton (only per-process throttle lock/ts).
+- **Tests run verbatim**: 36 new pass (22+14); test_canary.py 100 passed +9 subtests; restored tree
+  byte-identical to start (numstat 286 0 etc, diff -q matches backup).
+
+**Lesson**: unit-testing the emit/send primitive in isolation is NOT enough when the whole point is
+"the wire must fire". Reviewer mutation must target the WIRING SEAM (delete the call site / pin the
+key), not just the called function — deleting the circuit-break emit seam AND pinning the reping key
+both left the suite green, proving the load-bearing requirement (engine-down non-silent, fire-once-
+per-4h) has no regression guard. When a PA design lists trigger-seam integration tests and the impl
+only ships unit tests for the helpers, grep the integration test file for the emitted event name /
+seam fn and mutate the seam to prove coverage before PASS.
+
+## 2026-06-05 — RE-E2 (final gate→E4) GUI-alert fix-deltas: HIGH-1 + LOW-1 + M1/M2/N1 → PASS
+- **Scope**: prior E2 RETURN's 2 fixes (HIGH-1 seam tests, LOW-1 env AND→OR) + A3's M1/M2/N1 frontend fixes. 6 files, uncommitted dirty tree, HEAD=0fa4fe77 on feature/l2-critic-lessons-tools (origin/main=4b97d344, +2/0, no sibling push during review). §5 race 5/5.
+- **Frontend was AUTHOR-UNVERIFIED (fixer socket-dropped)** → scrutinized hard. tab-settings.html grew +330→+554 (the +224 = M1/M2/N1). Verdict: all correct.
+  - **M1 status honesty CORRECT**: per-channel chip via local `_alertChannelArmed` (tg: bot_token_configured AND chat_id.trim; wh: urls.length>0); top chip via backend `any_channel_active`. **Verified backend `_alert_config_masked_view` (settings_routes:346-347) computes any_channel_active = enabled AND token AND chat / enabled AND urls — BYTE-MATCHES the local armed defn** → top vs per-channel chips can't disagree. 3 traces (armed→green / enabled-no-creds→red "不會送出告警" / disabled→neutral) all pass. Checks credentialed-ness not raw enabled. ✓
+  - **M1 presubmit guard no-false-block CORRECT**: `_alertPresubmitGuard` — enabled + stored token (bot_token_configured, no clear-mark) + empty input → typedToken="" (falsy) BUT storedToken=true → `!typed && !stored`=false → NOT blocked. ✓ chat_id empty when enabled → blocks. clear-marked token doesn't count as stored. ✓
+  - **M2 honesty CORRECT**: NEW `_alertFetch` bypasses ocApi (verified ocApi common.js:195 collapses ALL non-ok→null+toast, so bypass justified) → returns {ok,status,detail,networkError}; `_alertFailReason` maps 404→"後端尚未啟用"/network→"連線中斷"/else→backend detail. csrf-mismatch auto-reload NOT replicated (ocApi-only) → LOW UX-only, fail-closed (POST still rejected).
+  - **N1 CORRECT**: countdown via `_alertStartTestCooldown` (data-orig-label idiom, clears prior interval, self-clears at 0, restores innerHTML); no-channel → toast + return BEFORE fetch+cooldown (double-guard: pre-check on _ocAlertLastView armed + post-check anyAttempted). Tabs are IFRAMES → interval bounded ≤10s self-clearing, same pattern as existing tab-settings:754. No leak.
+  - **Contract not regressed**: POST {tg:{enabled,bot_token,chat_id},wh:{enabled,urls,secret}} matches AlertConfigSaveRequest; /test {tg/wh:{attempted,ok,error}} matches; password .value always '' (render + post-submit clear even on fail); ""=keep/__CLEAR__=clear both sides. chat_id trimmed server-side (save:1364) so whitespace-only divergence unreachable.
+  - **No XSS**: `_alertCardStatus` innerHTML uses ocEsc(text) + hardcoded color; ocToast/ocSetText use textContent; placeholder/.value not HTML-parsed. server hint/detail/error all escaped. ocEsc (common-formatters:250) escapes &<>"'.
+  - **CSS classes verified exist**: oc-chip-good/warn/bad/neutral + oc-loading + oc-btn-primary all defined common.js:734-905 (injected via ocInjectBaseCSS at line 14). No unstyled-chip bug.
+  - **node --check**: extracted inline blocks (line 14 + 598-1792, 1199 lines incl new 554) → exit 0 verbatim.
+- **Backend trust-but-verify**:
+  - **HIGH-1 FIXED + has bite**: 3 new TestWatchdogAlertWiring tests drive REAL state machine (_drive_to_circuit_broken = real trigger_restart w/ mocked-nonzero subprocess → real CIRCUIT BROKEN), only mock _send_alert_best_effort leaf + wraps= spy. **Mutation probe (item 9): deleted emit_engine_down_alert_if_new at engine_watchdog:982 → test RED "AssertionError: 0 != 1 熔斷時 emit 必被呼且僅一次" → reverted byte-identical (sha256 match) → GREEN.** Each test docstrings its exact seam-mutation. The 2 prior-review green-on-mutation gaps now both guarded.
+  - **LOW-1 FIXED**: watchdog `_load_alert_creds` env-fallback gate AND→OR (engine_watchdog:635) now byte-mirrors app `_apply_env_fallback` (alert_config:112); enabled still bool(token AND chat). Drift eliminated.
+  - **chmod-before-replace CORRECT**: alert_config.save_alert_config — chmod(tmp,0600) at :173 BEFORE os.replace :174, post-chmod :175 belt. **Empirically verified os.replace preserves source-inode perms → final file 0o600 immediately after replace (old way=0o644 group/other-readable window).** Perm test (test_watchdog_alert:148-166) asserts final 0o600 + zero group/other bits (note: tests END-state not transient window — acceptable, transient TOCTOU not deterministically testable; fix correct by inspection).
+  - **Tests verbatim**: test_canary+test_watchdog_alert = 103 passed +9 subtests (prior 100, +3 new integration); test_settings_alerts_routes = 14 passed.
+- **Hygiene**: 0 hardcoded /home|/Users, 0 f-string logger, 0 bare-except in delta, 0 detail=str(e), 0 secret in log/canary/payload (canary ENGINE_DOWN_ALERT_SENT = ts/event/alert_key only; HMAC is hash not raw secret; docstring engine_watchdog:691 "log 通道名不 log token").
+- **Verdict: PASS → E4.** Tree restored byte-identical (6/6 sha256 match baseline). 1 LOW UX-only follow-up (csrf-mismatch graceful-reload not in _alertFetch) — non-blocking, optional.
+- **Lesson**: when an unverified frontend fixer adds dual-source status logic (local-computed + backend-authoritative), the load-bearing check is whether the two definitions are byte-identical — read the BACKEND masked-view fn and diff the boolean expr against the JS armed() fn; if they ever diverge, top chip and per-channel chips silently disagree (the exact "soft fake-success" M1 was meant to kill). Here they matched (enabled AND creds, both sides) so PASS; had they differed it'd be a HIGH. Also: a presubmit-guard false-block test must trace the stored-creds-empty-input path specifically (typed=falsy, stored=true → not blocked), not just the missing-creds path.
+
+## 2026-06-05 — E2 adversarial review: L2 critic+lesson-store (B) + read-only tools (C) → RETURN-TO-E1 (1 CRITICAL + 1 HIGH)
+- **Scope**: branch feature/l2-critic-lessons-tools tip adf60372 (5 commits ahead of origin/main 4b97d344, 0 behind). NET diff 4b97d344..HEAD = 6 files +1371 LOC additive (layer2_critic.py NEW, layer2_tools_g3_08.py NEW, V133 NEW, layer2_types/tools/engine wiring). Reviewed NET only (intermediate salvage/superseded/converge commits ignored, squash-at-merge). §5 race 5/5 (origin/main==base, no sibling push during review).
+- **Verdict: RETURN-TO-E1 — CRITICAL-1 (deliverable C wired into nothing) + HIGH-1 (zero tests for B+C) + MED-1 (critic verdict last-wins ≠ spec'd most-severe) + 1 LOW comment.**
+- **CRITICAL-1 (the catch)**: get_orderbook/get_cvd/get_liquidations are IMPORTED into layer2_tools.py (`_g3_08_get_cvd` etc, each referenced EXACTLY ONCE = the import line) but NOT registered in TOOL_SCHEMAS (10 entries, all pre-existing incl g3_07's query_onchain/check_derivatives; the 3 new tools absent) and NOT in the `handlers` dispatch dict in execute() (which falls through to `{"error":"Unknown tool"}`). The module docstring claims "schema entries / handler dict 註冊留在 layer2_tools.py" (g3_07 precedent) but g3_08 did neither. Net result: the entire C deliverable is unreachable dead code — LLM never sees the tools, can never call them, and the 3 imports are dead. The "154 tests pass" claim is the PRE-EXISTING suite (verbatim 154 passed flags-off); grep proved ZERO test_*.py references any of get_cvd/get_liquidations/get_orderbook/run_critic/should_skip_critic/retrieve_lessons/persist_lessons. Fix: add 3 TOOL_SCHEMAS entries (input_schema: symbol + limit/window_bars/window_minutes) + 3 handler dispatch entries (wrap _g3_08_* via thin self._get_orderbook async methods returning dict, matching g3_07 pattern).
+- **HIGH-1**: net diff touches NO test file. All new B (critic verdict handling, lesson persist/retrieve, fail-soft paths, flag-off no-op) + C (3 tools, fail-closed, SQL window math) logic has zero regression guard. A future refactor could silently break the wiring/flag-gate and CI stays green (exactly how CRITICAL-1 slipped past "154 pass"). Fix: add tests — (a) 3 tools incl clamp/empty-rows/db-down/disabled-env/SQL-shape via mocked db_pool+httpx; (b) critic fail-soft (provider None→CONTINUE, non-JSON→CONTINUE, invalid verdict→CONTINUE), should_skip_critic flag-off→True and each skip condition, run_critic routes cheapest tier; (c) persist single agent.lessons INSERT + symbol param + no-insight→no-write; (d) engine integration: flag-on STOP→COMPLETED+break (not FAILED, not max-iter else), REPLAN→messages.append only; flags-off→behavior unchanged. Mutate the wiring seam (delete schema/dispatch entry) to prove bite.
+- **MED-1**: engine B-Hook 2 overwrites `critic_result` per tool call (last-wins) — review spec says aggregate MOST SEVERE (STOP>REPLAN>CONTINUE). Divergence only when CRITIC flag ON (non-default) AND one iteration has multiple tool_uses with divergent verdicts; worst case [STOP,CONTINUE]→CONTINUE = missed brake (bounded: critic can't trade, only waste cheap iters under hard budget cap). Not a safety/trading-correctness issue. Fix: implement severity-rank max, OR PM amends spec to last-wins with rationale.
+- **PASSED (verified not trusted)**: CC invariants AIRTIGHT — only DB write in whole changeset = single `INSERT INTO agent.lessons` (grep: zero other INSERT/UPDATE/DELETE/place_order/lease/authorization/execution_authority/system_mode in critic OR tools); critic can ONLY append "CRITIC NOTE" user msg (REPLAN) or set SESSION_STATE_COMPLETED (STOP), never orders. Tools strictly read-only (SELECT + external GET). No circular import (g3_07 has zero layer2_tools/engine/critic import). All engine method sigs match (_provider_complete/_resolve_effective_provider(role=triage→cheapest)/cost_tracker.record_claude_cost/get_pg_conn ctxmgr-conn-or-None). All session/config/insight/L2Response fields exist (tool_calls/iterations/insights/trigger/session_id/total_cost/final_summary/state; max_iterations/default_provider; category/title/detail; text/input_tokens/output_tokens). session.insights populated in finally BEFORE persist (ordering OK). symbol-param deviation sound (NOT NULL + session has no symbol → engine passes in-scope param). Flags-off byte-identical CONFIRMED behaviorally (154 passed verbatim flags-off; only always-on delta = critic_result=None init + should_skip_critic env-read→True early-return per tool; retrieve/persist behind flag gate). V133 idempotent (all IF NOT EXISTS, Guard A col-reflect-RAISE before CREATE, Guard B type drift, Guard C index existence; cols match INSERT+SELECT; Linux PG dry-run owed/operator-gated — flagged not blocking). PG schemas confirmed (market.trade_agg_1m buy_volume/sell_volume/ts/symbol; market.liquidations side/qty/ts/symbol; side lower-norm robust). Bybit GET /v5/market/orderbook (category,symbol,limit) matches ref doc (no new endpoint). messages APPEND-ONLY (grep: zero pop/remove/insert/clear/reassign). No hardcoded /home|/Users, no f-string log, no detail=str(e), no secret leak, no new singleton, MODULE_NOTE present, Chinese-first comments, both wiring files <2000 (tools 1067 / engine 933).
+- **Lesson**: "N tests pass" from a sub-agent self-test is NOT evidence the NEW code works — it can be 100% the pre-existing suite. ALWAYS grep test_*.py for the new symbol names; if zero hits, the green number is orthogonal to the change. Here 154-pass masked that deliverable C is wired into nothing (schema+dispatch absent, imports dead). The tell: net diff for the "wiring" file was +13 lines = imports ONLY, no TOOL_SCHEMAS entry, no handler dict entry — when a changeset claims "X.py (wiring)" and the diff has no schema/dispatch addition, the feature is dead-on-arrival regardless of unit tests on the leaf functions. Cross-check against the sibling precedent (g3_07 added BOTH schema AND dispatch) to expose the gap fast.
+
+## 2026-06-05 — E2 RE-REVIEW (round 2): L2 B+C after E1 fixes → PASS to E4 (0 open findings)
+- **Scope**: branch feature/l2-critic-lessons-tools tip 31811ca1. Fix commits bdfb5d99 (code FIX1/3/4) + 31811ca1 (tests FIX2). Re-verified all 4 round-1 findings genuinely RESOLVED (not papered over) + regression guard. §5 race: 5/5. NOTE sibling 92cdcc41 (watchdog/canary/alert_config/settings) landed on origin/main AFTER base 4b97d344 — DISJOINT file scope (zero overlap with layer2_*/V133), no conflict, no re-review trigger; PM merges clean (branch needs rebase onto current origin/main but files don't collide).
+- **CRITICAL-1 → RESOLVED**: 3 C tools now in BOTH TOOL_SCHEMAS (3 entries w/ input_schema, count 10→13) AND execute() handlers dict (TOOL_GET_ORDERBOOK/CVD/LIQUIDATIONS → self._get_*). Traced get_cvd→handler→_g3_08_get_cvd reachable. MUTATION-PROVED BITE: removed `TOOL_GET_CVD: self._get_cvd` from dispatch → test_all_three_in_handler_dispatch FAILS ("Unknown tool: get_cvd"); restored clean. Schema-count asserts (3 sites) are a 2nd guard.
+- **HIGH-1 (zero tests) → RESOLVED**: ran `python3 -m pytest tests/ -k layer2 --ignore=tests/replay --ignore=replay` (replay collection errors are PRE-EXISTING, not in PR scope) → **221 passed** (E1 claim verified exact). Tests have REAL bite (not vacuous): SQL-shape tests assert the actual bind param (`params[1]==MAX_CVD_WINDOW_BARS`, `params[1]==MAX_LIQ*60` verifying make_interval secs math), depth→limit bridged-via-executor asserts HTTP `params["limit"]==7`, critic fail-soft (provider None/non-JSON/invalid-verdict/exception→CONTINUE) all present.
+- **MED-1 (last-wins → most-severe) → RESOLVED**: new merge_critic_verdict() + _CRITIC_SEVERITY{continue:0,replan:1,stop:2}, None=no-opinion no-downgrade, equal=keep current (stable), unknown verdict=-1 (can't beat valid). Engine B-Hook 2 now ACCUMULATES across per-tool loop via merge (was overwrite). MUTATION-PROVED BITE: forced merge→last-wins → 5 tests FAIL incl end-to-end test_most_severe_stop_then_continue_acts_on_stop ([STOP,CONTINUE] thru run_session → iterations==1 + COMPLETED only under most-severe; last-wins gives CONTINUE→max-iter else); restored clean.
+- **LOW (comment) → RESOLVED + INDEPENDENTLY VERIFIED**: g3_08:526-529 comment claim confirmed against source — V002:217 `side TEXT NOT NULL` (no CHECK); V095:132-133 `ADD CONSTRAINT ... CHECK (side IN ('Buy','Sell')) NOT VALID`. NOT VALID = no historical-row scan → pre-V095 rows can hold non-Buy/Sell → defensive normalize warranted (not dead).
+- **depth→limit SEAM RULING = ACCEPT the bridge (do NOT force-rename)**: schema exposes `depth` (PM/PA spec, clearer semantics), handler reads `args["limit"]` (Bybit V5 native). Wrapper _get_orderbook bridges only when `depth` present AND `limit` absent (`args={**args,"limit":args["depth"]}`) — never clobbers explicit limit, clamp still applied by sibling _clamp_int[1,25]. Verified end-to-end: depth=7 via executor → HTTP params limit=7. Bridge correct+robust+tested; rename also fine but not required.
+- **REGRESSION GUARD (re-confirmed PASS)**: (a) CC invariant intact — ONLY DB write = single parametrized `INSERT INTO agent.lessons` (critic:454, 7 cols match V133); grep on critic+g3_08+the 3 dispatch wrappers = zero other INSERT/UPDATE/DELETE/place_order/v5-order/lease/authorization/commit; wrappers pure delegation; retrieve_lessons read path = parametrized SELECT + trgm→recency fallback. (b) Flags-OFF byte-identical CONFIRMED: B-Hook 1/4 behind `_is_flag_enabled`, should_skip_critic short-circuits True on flag-off line 162 (no LLM/PG/mutation), critic_result stays None → B-Hook 3 no-op; only always-on delta = `critic_result=None` init + 1 inert env-read per tool; test_flags_off_no_critic_call_no_pg asserts skip_spy/persist_spy/pg_mock not_called. (c) cvd/liq DEFAULT-ON is INTENDED+SAFE: read-only our-PG SELECT, zero external+LLM cost (tools record no cost), empty-window legal, kill-switch OPENCLAW_L2_TOOL_{CVD,LIQUIDATIONS}_ENABLED=0; this is the C deliverable (LLM tool surface), independent of the B flags' byte-identical guarantee; no write/cost/safety risk. orderbook DEFAULT-OFF (external HTTP, fail-closed). (d) line counts: layer2_tools.py=1206 (<2000), all 5 app files <2000; no hardcoded /home|/Users, no f-string log, no detail=str(e), no circular import.
+- **STILL-OWED (flagged for E4, NOT blocking PASS — Mac can't run PG)**: V133 + CVD/liq SQL Linux PG empirical dry-run (operator-gated). Same owed item as round-1.
+- **VERDICT: PASS to E4** (0 CRITICAL / 0 HIGH / 0 MED / 0 LOW open). All 4 round-1 findings resolved with mutation-proven test bite; the new depth→limit seam is correct+tested.
+- **Lesson (round 2)**: re-review must MUTATE the fix to prove the new tests actually bite, not just read them green — removed a dispatch entry (CRITICAL-1 test failed) + forced merge→last-wins (MED-1 end-to-end test failed), then restored byte-clean. A test that passes both with-fix AND with-the-bug-reintroduced is theater; mutation is the only way to confirm the guard locks the regression. Also: `-k layer2` count (221) only reproduces when unrelated PRE-EXISTING replay collection errors are excluded — confirm a claimed count under the SAME selection the claimant used, and verify erroring files are out-of-scope first.
+
+## 2026-06-05 — E2 adversarial review: residual_alpha_gate.py PSR/DSR/PBO → vetted DsrGate/PboGate → ACCEPT (1 LOW fixed + 1 LOW returned)
+- **Scope**: worktree /private/tmp/wt-residual-producer, branch feature/residual-producer tip e4bfd54e (merge-base 4b97d344). 3 uncommitted files: residual_alpha_gate.py (impl), test_residual_alpha_gate.py + test_residual_alpha_producer.py (recalibrated). origin/main=92cdcc41 (DISJOINT watchdog/GUI feature, zero file overlap). §5 race 5/5.
+- **Verdict: ACCEPT (PASS to E4)**. 0 CRITICAL/HIGH/MED. Removed 1 dead helper myself (allowed exception); 1 LOW comment-accuracy returned to E1 (non-blocking).
+- **#1 Sharpe convention (the silent-wrong risk) = CORRECT**. E1 passes observed_sharpe=(mean−bench)/std(ddof=1) = PER-PERIOD Sharpe. dsr_gate._compute_psr formula uses (SR−SR*)·sqrt(T−1)/sqrt(1−γ3·SR+(γ4−1)/4·SR²) = Bailey-LdP PER-PERIOD convention (variance_term only sane for O(0.01–0.2) per-period SR; an annualized SR≈2.5 would blow variance_term negative). DECISIVE PROOF: the repo's authoritative production caller promotion_evidence._sharpe (:164) computes EXACTLY `np.mean(arr)/np.std(arr,ddof=1)` — NO annualization. The dsr_gate test magnitudes (2.0–5.0) are illustrative synthetics, NOT evidence of annualized convention (production path feeds raw mean/std). No unit mismatch. PSR/DSR NOT silently wrong.
+- **#2 moments CORRECT**: _sample_moments population ddof=0 z-moments (skew=mean(z³), exk=mean(z⁴)−3). EMPIRICALLY matched scipy.stats.skew/kurtosis (bias=True=population, fisher=True=excess) to 4dp on normal/skewed/heavy-t. n<3 & constant guard → (0,0). Sign/normalization correct (Bailey-LdP use 1/T moment estimators = population).
+- **#3 n<2 guard CORRECT**: empirically no crash path to compute_dsr. n=0→(None,None); n=1→degenerate prob; constant series (std≤_EPSILON)→degenerate prob (no compute_dsr call). compute_dsr only reached with n≥2 AND std>_EPSILON.
+- **#4 PBO matrix CORRECT**: _coerce_pbo_peer enforces len==len(eval_y) (drops mismatched); residual_peers=raw−factor_prediction same len; empty-peers guarded upstream (line 775 returns pbo_not_computed BEFORE _pbo_via_cscv → <2-series ValueError unreachable); uses res.pbo VALUE not passes_threshold; insufficient_power OR not isfinite → None. PboGate power: T<s_slices(16)→nan; total_trades=T×N<320→insufficient; n_comb<min_K(10)→insufficient.
+- **#5 defer wiring CORRECT, no FALSE-PASS**: pbo_insufficient_power → _is_defer_only_reason set → _verdict_from_blocking_reasons returns defer_data (not fail). Contract triple-guards: (a) passes is not True→fail; (b) verdict!=pass→fail; (c) pbo_raw=None→metric_missing:pbo_raw. A deferred report can NEVER be promotion_ready. (LOW note: new reason token not in FORBIDDEN_REASON_TOKENS but None-pbo blocks it anyway — belt redundant.)
+- **#6 dead code**: orphan-scan proved _normal_cdf (residual_alpha_gate:736) was the ONLY zero-ref helper (E1 flagged it). REMOVED IT MYSELF (3-line private single-file, allowed dead-code exception). math still referenced (5 sites). _degenerate_probability still used. The 3 removed fns (_normal_approx_psr/_deflated_psr/_probability_of_backtest_overfit) only in comments now.
+- **#7 other callers**: ONLY residual_alpha_producer.py:149 calls ResidualAlphaGate().evaluate(). Consumes report via threshold-based contract (PSR≥0.95/DSR≥0.95/PBO≤0.5), NOT exact legacy numerics → changing values is safe, no caller depends on old scale.
+- **#8 test integrity = LEGITIMATE recalibration, NOT weakening**. Producer test_true_alpha_promotion_ready: 120→280 obs (real CSCV needs total_trades=T×N≥320; old 120→eval36×4=144<320→would defer) + beta 0.4/-0.2→0.2/-0.1 (weaker beta=LESS raw oscillation=HIGHER raw Sharpe; alpha UNCHANGED at 2.0bps, residual UNCHANGED). EMPIRICAL: at old beta 0.4/-0.2 dsr_raw=0.82<0.95→gate correctly FAILS (dsr_residual still=1.0, so true alpha IS detected; gate's `passes` is conjunctive raw AND residual — by design requires raw significance too). Recalibration = "make synthetic alpha strong enough to pass CORRECT stats" exactly as docstring claims. beta_trap tests (gate + producer) UNCHANGED, still fail HARD via residual≤0 / raw_positive_residual_non_positive (NOT defer, NOT DSR-dependent) = right reason. test_missing_pbo_evidence STRENGTHENED (psr/dsr None→≥0.95).
+- **#9 regression GREEN**: residual cluster (gate/producer/dsr/pbo/promotion_gate/producer_db/contract/promotion_evidence) = 85 passed; broader learning_engine/tests = 185 passed; py_compile clean. All re-run after my _normal_cdf removal.
+- **RETURNED LOW-1 (comment accuracy + latent footgun)**: DEFAULT_MIN_EVAL_OBSERVATIONS=10 < DsrGate.DEFAULT_DSR_MIN_OBSERVATIONS=30. E1 reads res.deflated_sharpe/psr_at_threshold RAW, bypassing DsrGate's P3-01 insufficient_observations guard. EMPIRICAL eval_n=15: dsr_raw=0.9997 (over-optimistic; DsrGate would've forced passes=False) BUT pbo_raw=None→pbo_insufficient_power→defer_data→passes=False. So VERDICT-SAFE (PBO total_trades≥320 power gate is the real protection), but (a) report DSR fields cosmetically over-optimistic at eval∈[10,30); (b) the code COMMENT (:705-707 "本檔自有 min_eval_observations gate 把關") is MISLEADING — min_eval_observations(10) is WEAKER than the bypassed guard(30); real protection is PBO not min_eval. Latent footgun if anyone raises DSR to verdict-driving w/o PBO or sets allow_missing_pbo_for_core_tests=True trusting DSR. Fix: tighten comment to state PBO-power is the actual low-N protection, OR surface insufficient_observations marker into report at low N. NON-BLOCKING (verdict correct today).
+- **Lesson**: the silent-wrong Sharpe-convention check is settled NOT by reading the formula in isolation but by greping the repo's OWN authoritative producer of that input (promotion_evidence._sharpe = mean/std ddof=1, no annualization) and matching E1's expr against it — test-fixture magnitudes (2.0–5.0) are a red herring that LOOK annualized but aren't load-bearing. And: a "test weakened to force green?" suspicion is resolved by MUTATING back the old params and watching WHERE it fails — old beta 0.4/-0.2 fails on dsr_raw (raw-series significance) while dsr_residual stays 1.0, proving the alpha is real and the recalibration only fed the conjunctive raw-DSR arm enough signal, not loosened any gate. Defense-in-depth caught the one real gap (low-N DSR bypass) being non-fatal only because an INDEPENDENT gate (PBO power) blocks the same promotion — flag the comment that misattributes the protection.
+
+## 2026-06-05 — WATCHDOG-INERT-STORM-FIX-1 adversarial review (worktree /tmp/wt-fixA, UNCOMMITTED main@92cdcc41)
+
+**對象**：engine_watchdog.py (+110) + test_canary.py (+255/-7)。修 2026-06-05 LIVE 風暴：restart_all exit=0(進程起)但引擎 INERT(快照永不刷新)→每次「成功」清 consecutive_failures+backoff=0→下個 2s poll 仍 stale→立即再重啟→無限風暴(退出碼熔斷 consec>=5 因每次成功永不觸發)。修法 3 件：(1)90s post_restart_settle_until 沉降窗口(should_restart key="settle")(2)restarts_since_recovery 每 trigger_restart 遞增、達 INERT_RESTART_LIMIT=3 在 exit=0 路徑 set circuit_broken+INERT_CIRCUIT_BROKEN canary+inert_circuit_broken 告警(3)on_engine_recovery 完全 re-arm 5 欄位。
+
+**Verdict: PASS to E4**(0 BLOCKER / 0 HIGH / 1 MEDIUM file-size / 3 OBS)。報告直接回給 PM(未寫檔)。
+
+### 核心對抗結論
+- **#2 gating hole 不存在(實證 simulation)**：restarts_since_recovery 在 storm 期間單調遞增只在真恢復歸零;consecutive_failures 只在 exit=0 success poll 歸零。對手兩難:要壓 consec<5 必須週期性 emit success,但任何 rsr>=3 的 success poll 立即觸 inert 熔斷→rsr>=3 後對手不能再 emit success→被迫全失敗→consec 爬到 5→exit-code 熔斷兜底。寫 throwaway harness 跑真 state machine 6 種 interleaving(pure exit0 / pure fail / alt / 2succ-then-fail / 2fail-1succ / succ@rsr5),延長 poll window 後**全部最終觸 SOME 熔斷,無無限逃逸**;最壞約 7 次重啟止住。E1「inert-break 只在 exit=0 路徑 fire」決策正確,exit-code break 是全失敗尾巴的 backstop。
+- **#3b flap re-arm = REAL but BOUNDED ACCEPTABLE**：單個 transient fresh snapshot 確實清掉 legit circuit_broken(on_engine_recovery re-arm)。但 perfect-flap worst-case simulation(引擎每 settle 後 flash fresh 一次再死)實測 sustained rate = **1 per ~91s(沉降窗口),非 2s 風暴(45x 改善)**,且持續 inert 仍每 ~3 重啟 re-trip inert break + re-alert。auto-re-arm 是 INTENDED(deploy-collision 自愈無需人工 reset)。非風暴回歸。
+- **#3c 行為變更需 surface(非回歸)**：diff 前 on_engine_recovery **不**重置 circuit_broken/consecutive_failures(EXIT-CODE break 是 latch,survive recovery,需手動 reset)。本 diff 改成 recovery 也清→EXIT-CODE break 也變 auto-re-arm。與 docstring「未來再宕機從乾淨狀態重新計數」一致,但若 restart_all 仍壞而引擎經他途恢復,下次崩潰會再燒 5 次失敗(~18min backoff)才 re-break — 低效非風暴。
+- **#4 settle downtime 比想像小**：recovery 會 CLEAR settle(re-arm)→「引擎健康啟動後稍後才崩潰」場景 0 penalty(立即可重啟);唯一 +85s downtime 場景 = 崩在開機途中從未 recover,正是沉降要防的 storm 場景,有界(每重啟一個沉降窗口)。
+- **#5 counter reset path 乾淨**：restarts_since_recovery 只在 trigger_restart:942 遞增 + on_engine_recovery:1260 歸零;exit=0:1014 無條件清 circuit_broken=False 在 inert 檢查前,但 trigger_restart 在 circuit_broken=True 時根本不被呼到(should_restart:899 gate + on_engine_crash:1181 只在 allowed 才呼)→無 reset-path bug。
+- **#6 prior-test 正確更新非 green-wash**：唯一刪除是 test_recovery_clears_marker 的 7 行(單次 returncode=1 重啟→改 _drive_to_circuit_broken 5 次),因 recovery 現在重置 consecutive_failures,re-trip 需重新爬 5 次。最終斷言 count_alert_sent("circuit_broken")==2 **保留不變**,intent(marker-clear→re-emit)保留。
+
+### Mutation 驗證(全 RED,有 bite)
+- M1 inert_break=False → storm 6 次(撐滿 max_polls)不止 → test_inert_storm RED ✓
+- M2 刪 settle 分支 → 沉降窗口內立即放行 → 3 tests RED(settle×2 + storm spacing)✓
+- M3 刪 _rearm["circuit_broken"]=False → 恢復後仍 broken 無法 re-arm → test_recovery_rearms RED ✓(localized:prior marker-clear test 仍 PASS,因走 exit-code 路徑)
+- M4(額外)刪 _emit_inert_circuit_broken 呼叫 → canary+alert 斷言抓到 → RED ✓
+- baseline + 復原後皆 107 passed + 9 subtests(byte-identical 復原,diff sha d6d422f9)
+
+### 治理
+- **MEDIUM(唯一退回候選,但 P0 storm-fix 不單獨 block)**：engine_watchdog.py HEAD 1977 → diff 後 **2087 行,破 2000 hard cap**(CLAUDE §七/§九)。無 TODO/docs 文件化 exception。2026-05-20 review 曾以「test_canary.py import surface lock」accept @1285,但已從 1285 累進(bind-host/level-trigger/alert-wire/inert-storm 系列 6/5 fix)破頂。module 是單一 flat import(`import engine_watchdog`,部署 entry `--status`),拆分需 package 重構非 P0 hotfix scope。建議:開 P2 split TODO + TODO 文件化臨時 exception,**不 block storm-fix**(邏輯正確、live 引擎已 down ~20h)。
+- **OBS**：(a)新 int()/float(state.get(...)) on watchdog_state.json(909/941)沿用既有 convention(next_allowed/consecutive 同寫法),該檔僅 watchdog 自寫 numeric,ValueError 風險理論且=既有,**非本 diff 新引入**(2026-05-20 那次 catch 是 load_inert_state 不同來源檔)(b)cross-platform/except-pass/log-fstring/private-attr/comment-style 全 clean,新註釋中文優先帶「為什麼」rationale 合規(c)SSRF guard 在 app-layer alert_config.validate_webhook_url config-write gate(settings_routes:1392),watchdog 讀已驗 URL,diff 不碰 send path,intact 且 out-of-scope。
+- §5 multi-session race 5/5 PASS(origin/main==HEAD==92cdcc41 0 ahead;tree 僅 2 in-scope 檔;3 stash 全歷史/他 branch 標"not mine"未碰)。
+- #7 prior-fix intact:bind-host sanitize / reason_key throttle / exit-code alert 全未動;BOTH break paths 各自 emit_engine_down_alert_if_new(key 不同→獨立去重互不淹沒)。
+
+### Durable lessons
+1. **storm/circuit-break 邏輯的「gating hole」必須跑真 state machine simulation,不能只讀分支**:本次寫 ~40 行 throwaway harness 鏡像 run_watchdog 的 should_restart→trigger_restart poll 迴圈,跑對手最佳 interleaving + 延長 poll window,才證明「兩個熔斷維度(inert on success / exit-code on failure)互補無逃逸」。靜態讀碼會漏「對手被迫進入全失敗尾巴」這個 backstop 論證。**poll-window 太短會假報 terminal_via=None**(backoff 60+120+300+600 需 >1100s 才到第 5 次)→ simulation 要給足 poll 數。
+2. **anti-flap re-arm 的可接受性 = 量測 sustained rate 不是 yes/no**:auto-re-arm vs latch-until-manual 是經典 tradeoff。判 acceptable 要實測 worst-case perfect-flap 的重啟頻率(本次 1/91s = settle-gated,45x 改善於 1/2s storm),證明 re-arm 不重引入原 storm,且持續病態仍 re-break+re-alert。
+3. **recovery 重置範圍變更要 diff 前後對比**:本 diff 把 on_engine_recovery 從「只清 alert marker + engine_alive」擴成「清 5 個 restart-state 欄位(含 circuit_broken/consecutive_failures)」,**順帶改了 EXIT-CODE break 的 latch 語義**(原本 survive recovery 需手動 reset → 現 auto)。E2 必 `git show HEAD:<file>` 比對舊行為,不能只看新增行;這類「順帶改既有 break 維度」是 spec drift 高發區。
+4. **file-size hard cap 在 P0 hotfix 的權衡**:邏輯正確的 safety-critical storm fix 不該單純因 +110 行跨 2000 cap 被 block。E2 動作 = 標 MEDIUM + 要求文件化 exception/split TODO,verdict 仍 PASS。但要查清是「本 diff 跨頂(1977→2087)」還是「早已破頂」,attribution 影響 follow-up owner。
+5. **int(state.get())/ValueError 復查要分檔來源**:2026-05-20 抓的是 load_inert_state(外部/多寫者來源檔)。watchdog_state.json 是 watchdog 獨佔自寫,同 pattern 風險等級不同 → 不可機械套用舊 finding,要 grep 該欄位的所有 writer 確認 numeric-only。
+
+## 2026-06-06 — E2 re-review: residual_hidden_oos_bridge MED-1/2/3 delta (ae6fec2a) → PASS to MIT (1 MED test-coverage gap returned non-blocking)
+- **Scope**: worktree /private/tmp/wt-residual-p2, branch feature/residual-hidden-oos-wiring, follow-up commit ae6fec2a (parent c39f84e6, NOT amend). 2 code files only: residual_hidden_oos_bridge.py (+53/-20) + test_residual_hidden_oos_bridge.py (+216). §5 race: merge-base=627b4772 (== parent of c39f84e6), branch = origin/main+2, origin/main 0 ahead, 0 file overlap on ml_training/residual (origin/main R-1..R-3/sealer all already merged ahead at 627b4772). status clean except expected E1/E2 memory + PA report. stash@{0} = documented "not mine" left untouched.
+- **Verdict: PASS to MIT**. 0 CRITICAL/HIGH. 1 MED returned as NON-BLOCKING test-coverage gap (code correct, test weak). All 3 MED fixes are CODE-CORRECT and 2/3 have genuine mutation-killing tests.
+- **MED-1 CAUGHT (genuine bite)**: fired E2's original dual-site mutation evaluate_cell(rts_non_oos)->rts_all AND bucket_round_trips_by_exit(rts_non_oos)->rts_all. Result: ONLY test_t10 fails, 25 pass. Hash diverged 44316c38.. (non-OOS-only) vs b620f9fd.. (leaked) — EXACTLY the SHAs E1 reported in commit msg (honest). T3 bite pre-partitions BEFORE evaluate_cell so it canNOT catch this dual-site mutation (confirmed: T3 stayed green under same mutation in prior run) — the gap was real, t10 closes it by driving the FULL register_residual_candidate_experiment through real register_experiment (FakeCursor) and asserting persisted demo_residual_alpha_report_hash byte-identical + == bridge._canonical_sha256(report).
+- **MED-2 CAUGHT (both sub-mutations, t11)**: (A) remove `aligned = [b for b in aligned if b+bucket_sec<=oos_start_epoch]` -> t11 fails; bridge returns windows_not_strictly_increasing (verified by direct call: boundary bucket 100 end=1454400 > oos_start=1445000 crosses OOS -> _windows_strictly_increasing backstops). (B) un-clamp klines end -> max_exit+pad -> t11 fails on explicit assert end_epoch<=oos_start (1455400<=1445000 False). t11 sufficiency PROVEN: aligned sorted ascending + eval_buckets=aligned[n_train:] => eval_buckets[-1]==max(aligned); asserting max_bucket+bucket_sec<=oos_start => ALL buckets satisfy invariant (monotone). PIT-correctness of half-open `b+bucket_sec<=oos_start` (bucket ending exactly at oos_start kept) CONFIRMED correct vs bucketed_btc_factor bucket_floor + partition strict exit<oos_start. NOTE: filter is PRIMARY guard, _windows_strictly_increasing(cand_end<=oos_start) is independent BACKSTOP — defense-in-depth.
+- **MED-3 CODE-CORRECT but TEST DOES NOT PIN IT (returned non-blocking)**: bridge embargo branch `(eb+0.5)*bs if eb>0 else 0` now byte-matches evaluate_cell:148 embargo_gap branch (parity verified directly for all bs∈{4h,1h,1d,1.0}×eb∈{0,1,2,3}). BUT my MED-3 mutation (revert to unconditional (eb+0.5)*bs) leaves FULL suite 26/26 GREEN — neither t12 nor t4_embargo catches it. Reason: real divergence ONLY at eb=0+bucket_sec=4h (OLD=7200 registers w/ misrepresented sealed embargo vs evaluate_cell purge=0; NEW=0 fail-closes). t12 tests only eb∈{1,2,3} (both formulas agree); t4_embargo uses bucket_sec=1.0 (round(0.5)=0 banker, both agree). NO test fires eb=0+bs=4h (the realistic default bucket_sec). t12 proves positive sealed==purge for eb≥1 (already held PRE-fix) — it does NOT prove the eb=0 carve. Non-blocking because: (a) code is correct & parity-proven; (b) eb=0 path additionally guarded by `<1` fail-closed regardless; (c) 0 production caller; (d) default embargo_buckets=1 so eb=0 needs explicit caller opt-in. RECOMMEND (not gate): MIT/E1 add t12b firing eb=0,bucket_sec=4h asserting err=='embargo_seconds_non_positive' to pin the regression.
+- **t11b is mutation-insensitive (noted, NOT a fix-blocker)**: removing the filter leaves t11b green — its construction collapses all trips into ONE bucket so len(aligned)<2 fail-closes 'insufficient_aligned_buckets' for a DIFFERENT reason (single-bucket, pre-existing guard) whether or not the filter exists. t11b documents the fail-closed reason but does not pin the filter-empties path specifically. The filter IS pinned by t11 (mutation A). Acceptable.
+- **Item 4 regression GREEN**: bridge+sealer 26 passed; full program_code/ml_training/tests/ 583 passed/31 skipped (E1's "768" includes learning_engine path; residual-relevant 0 regression confirmed). py_compile clean both files.
+- **Item 5 axes intact**: t4_windows_strictly_increasing + t7a/t7b honest-defer (durable_residual_alpha_report_hash_missing -> PENDING_SCHEMA) + t3_klines_bounded all GREEN after delta. MED-2 windowing change did NOT break strictly-increasing or e2e honest-defer.
+- **OpenClaw checklist**: 0 hardcoded /home|/Users in added lines (mac_dev_smoke excluded), 0 except:pass, 0 logger f-string, no detail=str(e), no foreign-private passthrough (test calls bridge._canonical_sha256 = same-module white-box, OK). Comments Chinese-first, MODULE_NOTE updated accurately to reflect 3-gate leak-free + embargo parity. Diff scope exactly 2 files, no creep.
+- **Linux-owed (unchanged from PART 2)**: real V132 CHECK round-trip (embargo_seconds>0, windows_chk) on Linux PG; FakeCursor only caps INSERT params on Mac. Mac has no pytest-asyncio gap here (suite is sync). No migration in this commit.
+- **Mutations fired & all caught (or proven-correct)**: MED-1 dual-site (caught: t10 only), MED-2-A filter-removal (caught: t11), MED-2-B klines-unclamp (caught: t11). MED-3 revert-unconditional (NOT caught by suite — code parity-proven correct, returned as non-blocking coverage gap).
+- **Lesson**: a fix can be CODE-CORRECT yet its test have ZERO mutation-killing power over the actual change — t12 asserts the always-true positive (sealed==purge for eb≥1) while the fix's real behavioural delta lives at eb=0+bs=4h, untested. Mutating the fix back and watching the suite stay GREEN is the only way to expose this; "26 passed +4 new tests" reads like coverage but the new t12 doesn't bite the line it claims to defend. Distinguish "fix is right" (verify by direct source-of-truth parity) from "fix is pinned" (verify by mutation) — both matter; here #1 holds so PASS, #2 partial so return a non-blocking coverage rec rather than RETURN-to-E1.
+
+## 2026-06-07 — E2 re-review: residual_hidden_oos_bridge HIGH-1 PIT leak fix (f8a6cfc5) → PASS to E4
+- **Scope**: worktree /private/tmp/wt-residual-p2, branch feature/residual-hidden-oos-wiring, follow-up commit f8a6cfc5 (parent ae6fec2a, NOT amend). 3 files: residual_hidden_oos_bridge.py (+87/-18), candidate_hidden_oos_sealer.py (+9 docstring), test_residual_hidden_oos_bridge.py (+129). Fixes the exact gap I flagged in my 2026-06-06 ae6fec2a review (MED-2 OOS filter only touched WINDOW LABEL, not evaluate_cell's independent re-bucketing) — MIT re-audit promoted it to HIGH-1 PIT leak.
+- **Verdict: PASS to E4**. 0 CRITICAL / 0 HIGH / 0 MED-blocking. 2 non-blocking coverage OBS + 1 file-size note (under cap).
+- **HIGH-1 fix = CORRECT and PINNED**. New `_bucket_admissible(ts,oos_start,bucket_sec)` reuses producer's bucket_floor; step-4b (line 278-287) filters BOTH rts_non_oos AND btc_klines IN PLACE before evaluate_cell (line 291). Step-6 window derivation (line 315-316) reads the SAME post-4b filtered names → genuine ONE-SOURCE-OF-TRUTH. rts_all (line 212) only feeds the carve-out, never downstream.
+- **Mutations fired (ALL with on-disk grep confirmation before run; ALL caught or proven-redundant)**:
+  1. NEUTER step-4b filter (pass-through) → t13 RED with EXACTLY E1's hashes 44316c38..(without) vs cd55472f..(with) + t11b RED (reason regressed no_admissible_round_trips→insufficient_aligned_buckets). HEADLINE: leak closed at COMPUTATION not just label. ✓
+  2. NEUTER step-6 backstop (pass-through) → suite STAYS 28 GREEN → proves step-6 is now genuinely REDUNDANT (no second parallel derivation; real guard is step-4b). ✓
+  3. BREAK partition carve-out (drop strict `<oos_start`) → 4 T3-family tests RED (partition_strictness / oos_buckets_absent / bite_extreme_out_trips / klines_bounded). Carve-out STILL PINNED. ✓
+  4. klines-unclamp (`end_epoch=max_exit+pad`, drop oos_start cap) → t11 RED on assert end_epoch<=oos_start (1455400<=1445000). MED-2 klines clamp STILL PINNED. ✓
+  5. _windows_strictly_increasing→always True → t4 RED. Strictly-increasing STILL PINNED. ✓
+- **OBS-1 (non-blocking coverage)**: t10's DESIGNATED dual-site mutation (evaluate_cell(rts_non_oos)→rts_all AND bucket_round_trips_by_exit(rts_non_oos)→rts_all) now leaves WHOLE suite GREEN — t10 lost its bite for that specific mutation. ROOT: evaluate_cell aligns candidate_buckets ∩ factor_buckets (residual_alpha_cycle:125-126, build_residual_alpha_report); btc_klines fed to evaluate_cell is the step-4b-filtered set with NO OOS factor bucket → leaked OOS trips in rts_all can't align → dropped inside. So step-4b's btc_klines filter independently masks the rts_all call-site leak. NOT a regression in the fix (t10 was built to catch the dual-site call swap, not a broken partition; carve-out itself stays pinned by T3 family). Guard-overlap artifact. Acceptable; recommend (not gate) MIT/E1 keep T3 as the carve-out pin and note t10 is now belt-and-suspenders.
+- **OBS-2 (item-4 ruling)**: t11b reason insufficient_aligned_buckets → no_admissible_round_trips. ACCEPTED. Fail-closed point legitimately moved earlier to DATA layer (step-4b empties rts_non_oos before step-6). Same intent (None return, register never called, no manifest persisted — test asserts both). Reason is internal (None,err) tuple, NEVER persisted, zero manifest/schema dependency. Old reason preservation NOT required.
+- **Regression (item 5)**: targeted bridge+sealer 28 passed (matches E1). Full ml_training 585/31. ml_training+learning_engine 770 passed/31 skipped — EXACTLY E1's 770/31 claim. 0 regression.
+- **OpenClaw 9 + 8 checklist**: 0 hardcoded /home|/Users (added lines), 0 bare except/except:pass, 0 logger f-string, 0 detail=str(e), 0 foreign private-attr (only bridge._ same-module test whitebox + os.environ). Scope exactly 3 files, no creep. 0 production caller (grep confirms PART-2 primitive-only). 0 migration/.sql/V###. Comments Chinese-first with WHY rationale (MODULE_NOTE updated leak-free 三道→四道; _bucket_admissible + step-4b 4b-comment explain DATA-layer necessity). Test file 940 lines < 2000 hard cap (acceptable, confirmed).
+- **§5 race 5/5 PASS**: merge-base 627b4772; origin/main 470098f4 is 5 commits ahead (P2 #6/#7 orderLinkId dispatch + signal_postmortem classifier + docs — known from MEMORY.md) but ZERO file-scope overlap with program_code/ml_training/ (git log HEAD..origin/main -- program_code/ml_training/ EMPTY) → no rebase-conflict for residual files. In-scope files clean/committed. No unknown WIP. No sibling push mid-review. (Only reverted MY OWN mutations via git checkout = §5c-compliant.)
+- **INCIDENT/LESSON (evidence discipline)**: mid-review hit a file-state desync — after `git checkout -- bridge.py` to revert one mutation, a SUBSEQUENT Edit (klines-unclamp) appeared applied (Edit tool confirmed + system-reminder said "modified") but later `grep` found the marker GONE and file == HEAD; my first klines-unclamp + t10 conclusions were drawn against a SILENTLY-REVERTED file → INVALID. Caught it because t11 "passed under klines-unclamp" contradicted my static analysis (predicted RED). FIX: re-ran EVERY consequential mutation with explicit `grep -n <MARKER>` on-disk confirmation IMMEDIATELY before pytest, and verified `git diff` empty after each revert. The t13 headline finding was re-confirmed twice independently. RULE REINFORCED (feedback_evidence_discipline): never trust Edit-tool "success" + system-reminder alone when mixing Edit with `git checkout` in the same file across calls — grep the marker on disk right before the test that depends on it; if a test result contradicts your static prediction, suspect file-state desync FIRST.
+
+## 2026-06-08 — PHANTOM-FILL-FIX-1 對抗審查 (TON 幻影倉) — PASS to E4
+- **任務**：審 E1 對「幽靈倉位記帳 bug」(PA Option A) 的 8-file 改動 (未 commit, branch feature/l2-critic-lessons-tools, dirty multi-session)。
+- **結論：PASS to E4**（0 BLOCKER / 0 HIGH）。3779 lib test green；cargo check 僅 pre-existing dead-code warn。
+- **is_close 來源雙向都查（最關鍵）**：源 = OrderDispatchRequest.is_close → PendingOrder.is_close → reduce_only=Some(true) (dispatch.rs:768)。**方向A**(真平倉→true)：risk-close commands.rs:1004/1167/1392/1591 全 is_close:true + is_long:!is_long（TON oc_risk_dm Buy 確走此 → guard 觸發）。**方向B**(真開倉誤判 true)：step_4_5_dispatch.rs:821 is_reducing_order = `p.is_long != intent.is_long`，genuine 新開倉 unwrap_or(false)=false（不誤傷）；唯反向 Open(=flip) 才 true，但該 order 本就送 reduce_only=true 給 Bybit（Bybit 自身不會反開），故 paper 與交易所語意一致，**無錯過機會**。
+- **MUTATION-SENSE 驗有 bite**：把 fill_engine.rs reduce-only guard 改 `if false` → golden test `phantom_fix_position_update_advisory_then_close_buy_yields_flat_not_long` + `..._reduce_only_no_position_is_noop` 雙 FAIL（panic at tests.rs:1779/1747）→ 還原後綠。測試真釘住根因。
+- **Option A 兜底場景(PA §9.1)獨立驗**：`upsert_position_from_exchange` size>0 caller 移除後，唯一 production call 剩 `converge_exchange_zero_close` 內 (size=0)。cold-start 種倉走 `import_positions` (bootstrap.rs:362) 完全獨立未受影響。**self-heal 未失**：missed-fill (Bybit 有/本地 flat) 改走 reconciler orphan 軸，且 orphan handler 有 `OrphanDecision::Adopt`→`dispatch_orphan_adopt` 注入 paper_state（非只 Close）→ 自癒保留，僅 latency 從即時 WS 變 ≤30s + 受 active-universe/edge/notional 資格限。**MEDIUM 給 E4**：整合測試應驗 orphan-adopt 仍接管丟失 fill 的真倉。
+- **三模式一致 + paper 不受影響**：converge_exchange_zero_close 有 `is_exchange()` 守衛 (commands.rs:1291)，paper-kind early-return 只清 pending_close。paper 無 private WS 故 PositionUpdate 不抵達；薄包裝 apply_fill delegate is_close=false 對 ~90 caller byte-identical。
+- **偏差裁決**：①**薄包裝 (apply_fill→apply_fill_with_close_semantics, is_close=false)**：ACCEPT。避免炸 90 caller，paper 無競態安全。②**bool mirror 保留 / phantom 軸用 presence+side（放棄 PA T4 的 struct{is_long,qty} qty-band）**：ACCEPT 足以滿足「不再幻影」。TON 型態 = `absent`（Bybit 完全 flat）已覆蓋；qty-band 細粒度背離既有 MinorDrift/Ghost 軸已負責，不必為此擴 mirror struct（最小改動 > PA 原議，正確取捨）。**不必退 PM 開 struct 升級 task**。
+- **LOW/NOTE 給 PM（非 blocker）**：(a) phantom `side_mismatch` 分支實質**告警不可達**——ghost_point_query 對「Bybit 有對側倉」回 StillHasPosition→不告警；E1 reconciler test 用 pq_const(ConfirmedZero) 注入才綠（runtime 該組合不可能）。E1 註解已誠實標「保守不告警」，防誤報設計合理，TON 型態(absent)不受影響。(b) **canary `PHANTOM_POSITION_DETECTED` 目前無 forwarder**：PA 自家 2026-06-05 watchdog-alert-wiring design line15 明寫「nothing consumes canary_events.jsonl」且 line129 REJECT tail-consumer；engine_watchdog.py 不 import alert_router → 目前 canary append 是 file-only observability 非真告警。但**屬 pre-existing infra gap**（forwarder 是未建的獨立 task），不 regress（之前也無 consumer）；**mandatory 通道 DB `observability.engine_events`(reconcile_phantom_local) 沿用既有 spawn_reconcile_audit 範式，operator SQL-queryable 真可達**，足夠。
+- **硬邊界/安全**：0 觸碰 live_execution_allowed/max_retries/system_mode/authorization；guard 為 fail-closed(return 0.0 no-op)；0 新 unwrap/panic 在 hot path；0 hardcoded /home|/Users；OPENCLAW_DATA_DIR fallback `/tmp/openclaw` 與全 engine 10+ 處一致；註解中文優先帶 WHY；翻倉餘量算術 bit-exact（close_qty/pnl/remaining 順序保留，overflow 僅在 fully-closed else 分支 `!is_close && >1e-12`）。
+- **§5 race 5/5 PASS**：HEAD b00c249d on feature branch；origin/main 8cd4da1f (residual+L2 sibling work) ZERO 重疊 8 phantom 檔；stash 全 pre-existing 非我；mutation 用 Edit 還原（非 git destructive）後 git diff 確認只剩 PHANTOM-FILL-FIX-1 增量。
+- **E4 必補**：①真亂序整合 golden（loop_exchange handle_exchange_event 層：先 PositionUpdate(size=0) 後 Fill(is_close=true)，斷言 flat + 無 entry_context_id；現 golden 在 apply_fill 單元層）②orphan-adopt 接管 missed-fill 真倉（self-heal 回歸）③三引擎獨立驗（demo/live_demo/live，禁只 demo PASS）④Linux cargo regression authoritative（Mac 過≠Linux 過）⑤partial-fill cum_filled 跨多 exec 的 is_close 透傳一致。
+
+---
+
+## 2026-06-08 · E2 review — L2 Advisory Mesh Phase 1 (D3 Provenance & Audit)
+
+**Verdict: PASS to E3/E4.** 11 檔對抗審查（V134/V135/V136 + l2_secret_redactor + l2_call_ledger_writer + layer2_engine/types/critic 接線 + singleton-registry §2.6 + test_l2_d3_ledger）對照 LOCKED PA 設計 `2026-06-08--l2-d3-phase1-tech-design.md`。0 CRITICAL / 0 HIGH / 0 MED blocker。
+
+**真實驗證（非 happy-path）**：
+- 244 layer2-family tests 綠（d3 24 + critic 36 + engine/escalation/tools 184）。
+- **Mutation 有 bite**：把 sha256 改算在 raw（非 sanitized）text → `test_sha256_over_sanitized_text` 立即 FAIL（hash mismatch）。證明測試非 mock-theater。
+- **Reachability 證實非死碼**：`POST /paper/layer2/trigger`(layer2_routes:234)→`run_session`(:285)→`_run_session_inner`→agent loop(:654 `if session.l2_reply_id is None`)→`_record_l2_call_to_ledger`(:323)→`writer.record_l2_call`(:352)。
+- **PA 3 個 E2-scrutinize point 全過**：(1) 複合 PK `(l2_reply_id,created_at)`/`(mark_id,marked_at)`/`(seam_id,ts)` 三表皆對；(2) sha256-after-sanitize 對；(3) **零 column-level GRANT UPDATE**（grep `GRANT UPDATE` = 0 hit 全 3 migration），trading_ai 只 INSERT/SELECT。
+- fail-soft 正確：`db_pool.get_pg_conn` yield None 時 writer 回 ok=False NEVER raise；engine 再包一層 try。`error_sanitize` 回 `{reason_codes,detail}` 正中 writer 讀法；DEBUG-mode str(e)[:200] 再過 redactor（防雙洩漏）。
+- decision_outcomes / live 表 0 ALTER（R2-5 live hop 正確 defer，僅 COMMENT 提及）。cross-platform grep CLEAN。無 f-string log / 無 bare except。
+
+**LOW（非阻，記錄交 E1/E3）**：
+1. singleton-registry §2.6 location 行號漂移（class 標 :78 實 :73；getter :340 實 :333；_WRITER :332 實 :330；engine wiring :351 實 :323/:352）——建議 E1 校正使 SSOT 精確。
+2. redactor 設計限制（**非 bug，PA §B 明確 keyword-gated**）：bare high-entropy 無相鄰 keyword 不遮（保 forensic 可讀、防 false-positive）→ E3 對抗驗時知此為已知 tradeoff，非漏遮缺陷。
+3. writer `final_summary`/`_error_reason` 僅在 `input_context` 為 dict 時併入；P1 reachable 路徑 input_context 恆 dict（engine 造 `{messages,offered_tools}`），latent-only。
+4. `ON CONFLICT DO NOTHING` 不驗 rowcount → uuid 碰撞極端下 ok=True 但無 row（碰撞機率 ~0，非實務風險）。
+
+**教訓固化**：本次每條 reachability/ordering claim 都跑了真實 grep + mutation + test，沒採信 E1 自述。D3 接線是「記憶教訓『語法通過≠接線可達』」的正面案例——E1 確實接到真實 manual-trigger 路徑且 fail-soft 不阻斷 session。
+
+---
+
+## 2026-06-08 — Residual PART 4 Phase 1（Gap B 多因子 + Gap C permutation）對抗審 → PASS-to-MIT
+
+**commit** `da3aec6f`（worktree `/private/tmp/wt-residual-act`，branch `feature/residual-activation`，base `8cd4da1f` 在 origin/main 上）。8 檔（4 source + 4 test），+1057/−8。
+
+**verdict = PASS-to-MIT**（0 blocker；2 LOW 觀察，非阻塞）。
+
+**獨立驗證（非採信 E1 自述）**：
+1. **行為中性（#1 criterion）親算**：抽 pristine HEAD（`da3aec6f^`）與新版 gate，餵相同 true-alpha-passing 合成輸入跑**完整建構路徑**（verdict=pass，非 early-return），`to_dict()` 18-key keyset 全等、dict 全等、canonical sha256 全等（`8bd4f3f5cae5…`）。default `required_factors` 維持 `("btc",)`、`permutation_enabled=False`。grep 全 default path：無任何 cron/payload/cycle caller 傳新因子或開 perm。
+2. **funding PIT 真 schema 核對（ssh trade-core trading_postgres/trading_ai，user=trading_admin db=trading_ai）**：`market.funding_rates` 真欄是 `ts timestamptz`（非 design 寫的 `funding_time`）→ E1 deviation **正確**；真資料 8h 結算格（00/08/16 UTC）→「只取 ts<=bucket_end 已結算列」PIT 正確。SQL 參數化（`%(symbol)s` 等）無注入，命中 PK index `(symbol,ts)`。
+3. **funding 邊界不對稱（LOW 觀察，非 leak）**：funding 用 `(start,end]`（`bucket_floor(ts-_BUCKET_EPS)`），btc/market 用 `[start,end)`（`floor(bar.ts)`）。逐桶推理：funding 窗 `(B,B+sec]` 實現價格窗 `[B,B+sec)` 的已結算 carry，落後桶尾的下一筆 settlement 正確歸入下一桶 → **無未來資料入桶**（mutation probe #2 證實）。屬保守建模選擇，建議 Linux dry-run 複核對齊。
+4. **gate vs validator defer/fail taxonomy** 初疑矛盾（gate `perm_p_value_not_computed`=defer vs validator `metric_missing:perm_p_value`=fail）→ 查證**實務不可達**：permutation 只在 quality-gate 通過後跑（`evaluate()` 先 early-return on reasons），此時 `aligned_eval_ts >= min_eval_observations >= 8/10 >= 2` 且 residual_eval finite → `_permutation_residual_alpha` 必回真 p 非 None。兩者皆「不晉升」，功能一致。non-issue。
+
+**mutation probes（3 跑，均報告 caught-by）**：
+- **#1 行為中性**：`to_dict()` 不剔除 `perm_iterations`（disabled）→ caught by `test_gate_permutation_disabled_is_byte_identical_default` + `test_gate_default_report_keyset_locked`（18-key lock 有 bite）。
+- **#2 PIT**：funding settlement 歸前一桶（讓桶 N 看到桶 N+1 未來費率）→ caught by 5 funding 測試含專職 `test_bucketed_funding_factor_pit_only_settled_rows`（用巨值 9.0 未來費率斷言不洩漏）。
+- **#3 determinism（test-strength gap, LOW）**：seed 改 `default_rng()` 無視 seed arg → 既有 determinism 測試**仍綠**（fixture mean=1.18/std=2/n_perm=3000 → p 飽和到 0.0，跨 seed 不變）。實作確實確定性（seed 綁 factor_panel_hash），但鎖它的測試在 borderline-p（weak-signal fixture p 在 0.687–0.696 隨 seed 跳）才有區別力。建議 E1 補一個 borderline-p determinism assert（非阻塞，後續硬化）。
+
+**counts 核對**：4 changed-file suites 79 passed（兩跑一致，PYTHONHASHSEED=0 deterministic）；residual* cluster 109；廣域 ml_training+learning_engine **826 passed / 31 skipped**（= E1 宣稱，0 regression）。
+
+**標準項**：hard-boundary grep 0（live/auth/order/risk/lease 全 0）；hardcoded path 0；except:pass 0；新 mutable singleton 0；f-string log 0；私有屬性穿透 0；新註釋中文優先合規。
+
+**file-size 觀察（LOW）**：`residual_alpha_gate.py` 1116 行（>800 soft，<2000 hard）；Gap C ~137 行與 `evaluate()`/`ResidualEdgeReport` 緊耦合（perm 讀 `residual_eval` local、寫 report 欄位），`_permutation_*` 純函數**可**抽 helper module 但 protocol/report dataclass 必留 gate。gate pre-Gap-C 已 987 行（pre-existing 近頂）。Gap A/D 落地後會再長 → 建議 MIT/PM 留意是否該抽 `residual_permutation.py`。
+
+**§5 multi-session race**：5a/5e fetch — origin/main 領先 HEAD 2 commit（`65952b8b`/`bdf15e4f` PHANTOM-FILL-FIX-1，**純 Rust engine**，與本 PR Python residual_alpha_* file scope **0 overlap**，benign divergence，PM 可 ff engine commits）；5b/5c/5d worktree 全程 clean（唯一 untracked = 被指派的 PA design doc）；review 中重 fetch 無新 sibling。stash list 有 3 條**非本 session**（含「recovered, not mine」標記）→ 按 §5c 一律不動。
+
+**Linux-owed（傳給 MIT/PM）**：funding settlement-timing real dry-run（Mac 用合成結算列）；flag-ON orchestrator 真寫測試屬 Gap A（不在本 commit）。
+
+## 2026-06-08 · E2 re-review — L2 D3 redactor v2 delta (RETURN to E1)
+
+**Verdict: RETURN to E1** (delta 正確性全綠，但 v2 bare-high-entropy 臂破壞 principle-8 可重建性 + 違 PA §B.2 LOCKED spec + 違前一輪 E2 自己簽的 accepted tradeoff)。fresh 重跑（前 re-E2 socket 斷無 verdict）。
+
+**問題1 over-redaction 量化（實測 24-case 真實 L2 forensic corpus）：7/24 = 29% 合法內容誤遮**，且非隨機——集中誤遮 operator fault-localization 必讀的高價值識別碼：
+- git full SHA(40hex)→[REDACTED]、sha256(64hex)→[REDACTED]（principle 8 字面就是 reconstructable，砍掉 manifest/artifact 溯源）
+- `KEY=VALUE` 形：`OPENCLAW_ALLOW_MAINNET=1`(24char/2cls/ent3.66)、`scope=CanaryStagePromotion`、`verdict=INCONCLUSIVE_NO_TRANSITION`、`eff_model=claude-haiku-3-5-20241022` 全被吃
+- **根因**：候選 regex `[A-Za-z0-9+/=_\-]{24,}` 把 `=`/`_`/`-` 收進字元類 → 貪吃整段 config 賦值 + hyphen/underscore 識別碼當單一「高熵 token」。`OPENCLAW_AUTO_MIGRATE=0`(23char) 僅差 1 char 倖存、`RECONCILIATION_WORKER_...`(全大寫1類)僅因 1 字元類倖存 = 脆弱結構非罕見 edge。
+
+**問題2 NFKC/url-decode（從碼判定）：存入 = preprocess 後文本（非原文只遮 span）**。`redact()` 內 `out=_preprocess(text)` 後所有 `pattern.sub` 作用於 out → 回傳 out；writer 存 out + `prompt_sha256=sha256(out)`。實測 8/9 零-secret 合法 CJK 輸入被改寫：全形 `，：（）`→半形（NFKC，中文為主專案普遍）、`ＡＢＣ１２３`→`ABC123`、`0.01％`→`0.01%`、合法 `%2F`/`%20`→`/`/空格（url-decode **不可逆**）、benign ZWSP 剝除。→ stored system_prompt ≠ 送模型 prompt，破壞 principle 8。
+
+**delta 正確性（全綠，非退回原因）**：13→5 pass 合併 18 臂 dispatch 全對 kind 不串；arm 順序對（`api_key=<高熵val>`→tag api_key 非 high_entropy，冪等跳 [REDACTED]）；redact-then-truncate[:4000] 次序對（critic:463 redact→467 truncate）；`_attach_meta` 三分支對（非-dict 包 `_context` 不丟 metadata）；ReDoS 200K 40-50ms 線性；261 passed/1 xfailed 親驗屬實（xfail=<24短-bare 殘留，strict 正確 fail）。
+
+**治理鐵證**：PA §B.2 line 252 只授權 high-entropy **"keyed by adjacent keyword"（keyword-GATED）**；前一輪 E2（本分支 memory:5009）明確簽 "bare high-entropy 無 keyword NOT redacted = 正確 in-spec tradeoff" PASS。v2 加 bare 臂 = **雙重違反 LOCKED spec + 前 E2 立場**。E3 RETURN 的是具體 bare/encoded **secret** 向量（24-char token/JWT/url-DSN/zero-width）——targeted 結構臂(JWT/DSN/IP)+preprocessing 已足夠抓；blanket entropy 臂是過度修正。
+
+**建議（給 E1，不代寫）**：① 問題1 = rebalance（非 ship-as-is）：移除或 keyword-gate bare-high-entropy 臂回 PA §B.2 原意；若保留須加 shape-exclusion（git-SHA 40/64-hex 純 hex + SCREAMING_SNAKE + `KEY=VALUE` 已知安全形）+ 拆候選邊界（`=`/`_`/`-` 不收進高熵候選字元類，只掃純 base64 run）。bare 24-char 真 secret 殘留改靠 keyword/struct/JSONB-key 三臂（已涵蓋具名 critical 資產）+ defense-in-depth。② 問題2 = detect-on-preprocessed-but-store-original：在 preprocess 後文本上「定位 secret span」，但把 span offset 映回**原文**遮（保留全形標點/url-encode/zero-width 原樣），sha256 算原文-遮-span 後。退而求其次才文件化為 accepted caveat（但 url-decode 不可逆，較弱，且中文專案標點改寫面太大不建議純文件化）。
+
+**教訓**：over-redaction 也是 finding——D3 整個存在意義 = principle 8 可重建（operator 月後讀 prompt/response 做 fault-localization）；29% 高價值識別碼變 [REDACTED] 噪音 = ledger 半廢。對抗審不只找「漏遮」，也找「過遮毀用途」。v2 修 E3 漏遮時越過 PA LOCKED spec 邊界＝scope drift，須退回收斂回 spec。
+
+## 2026-06-08 — L2 D3 redactor v3 re-review（store-original delta）→ RETURN E1（1 CRITICAL）
+- **任務**：re-review v3 收斂 delta（上輪 RETURN 2 findings 已修 + operator A）。專攻 store-original-by-span 新碼正確性（安全/覆蓋率殘留由 re-E3 並行）。改 4 檔（l2_secret_redactor.py 重寫 524 行 / layer2_cost_tracker.py Finding 3 / test_l2_d3_ledger.py / 設計 §B.5）。writer/critic/migrations/接線未動（已 PASS）。
+- **裁決 = RETURN E1（CRITICAL-1）**。store-original 大方向對、19 軸實證多數綠，但**fast-path gate 不健全→真實 secret verbatim 洩漏**。
+- **★ CRITICAL-1（自抓，E1 測試未覆蓋）：fast-path gate 與 strip 謂詞 drift → keyword 中插 135 個 Cf 字元之一即繞過遮罩，secret 原文落 ledger**。
+  - 根因：`redact()` :418 fast-path 條件 = `not _NEEDS_OFFSET_MAP_RE.search(text) AND is_normalized("NFKC")`。但 `_NEEDS_OFFSET_MAP_RE`（:98 手列範圍）**不是** `_is_control_or_format`（:101 strip 謂詞 = 全 Cc/Cf + zero-width frozenset）所剝字元的超集。全 Unicode sweep：**135 個 Cf 字元** strip=True 但 RE-miss 且 NFKC-stable（U+180E Mongolian Vowel Sep、U+061C Arabic Letter Mark、U+2066-9 directional isolates、整個 U+E00xx tag block 含 TAG LATIN LETTER）。
+  - exploit 實證：`api᠎_key=SUPERSECRETLEAK1234` → takes_fast=True → fast-path 不 strip → keyword 不連續 → 0 span → **`result == src`（secret verbatim 入庫）**；slow-path 同輸入 detect 1 span hits=api_key（正確）。U+061C 同。
+  - 影響：正是 redactor 設計要打的編碼規避向量（`_is_control_or_format` docstring 明列 `api​_key=` 規避）；fast-path 優化引入不健全 gate，毀 E3-HIGH sanitize gate + root principle 8。slow-path 機制本身正確（已驗 5 個 sample），**修點純在 gate**。
+  - 修向（不代寫）：A=gate 改用同一 `_is_control_or_format` 謂詞判「有無 strip 字元」（`any(_is_control_or_format(c) for c in text)` → slow），strip-set==gate-set by construction 不再 drift；B=`_NEEDS_OFFSET_MAP_RE` 由實際 strip-set 推導。+回歸測試（已知規避字元 keyword-split 不 verbatim + brute-force 斷言每 strip 字元 route slow）。
+- **其餘軸全綠（實證非讀碼）**：
+  - byte-identical（10 自造對抗 input：CJK 全形/合法%2F/zero-width/ﬁ ﬂ ligature 1→2 char NFKC/circled-digit/soft-hyphen/fullwidth alnum）全 `.encode utf-8` 相等 kinds=[]。
+  - off-by-one：secret 位文末（無下一字元，用哨兵）+ partial first/last char + 相鄰雙 secret 全無洩漏。
+  - 規避完整遮（**走 slow-path 的**）：zw-in-value（`api_key=SUPER​SECRET​1234`→`[REDACTED:api_key]` 含被剝 zw 區段完整遮）/ fullwidth secret / url-encoded DSN cred 全覆蓋。
+  - fast-path==slow-path 等價：9 個 fast-path input 與強制 slow 機制 byte 相等。
+  - _merge_spans：Authorization+Bearer 雙臂重疊 / 無分隔相鄰雙 secret / DSN+priv-ip 重疊 全正確 + 合併輸出冪等。
+  - Finding 1 移除乾淨：grep 0 dead ref（_redact_high_entropy/_HIGH_ENTROPY/_shannon_entropy/_char_classes/import math），AST 0 unused import；18 surviving arm（keyworded/DSN/JWT/priv-ip/host）逐一仍遮；5 negative（git-SHA/sha256/model-id/config-flag/public-ip）byte-identical 不誤遮。
+  - Finding 3 cost_tracker：redactor 純 stdlib 無 import cycle；結構/數值欄（symbol/action）未動；良性文本不誤遮。
+  - sha256：writer :162-165 hash `redact().text`（original-redacted）非 preprocess——正確。
+- **測試實況**：test_l2_d3_ledger.py **46 pass + 4 xfailed**（殘留 strict）；layer2 family scope（--ignore replay）**530 pass + 4 xfailed + 0 fail**。E1 稱「2 failed product_family」實為 19 fail，但同一 pre-existing 類（PG port 15432 refused + engine.sock 缺，Mac CLAUDE §六 預期）；grep 證該檔不 touch redactor/cost_tracker = 非 v3 回歸（E1 count 報少，非 finding）。4 replay collection error pre-existing（repo-root sys.path harness）。
+- **registry §2.6 drift（非 gate-blocker，PM commit 前收口）**：記 class:73/_WRITER:330/getter:333/engine-call:352；實際 :99/:364/:367/:655（def:323 巧合對）。E1 memory 已承認非本輪造成（writer 未動）；趁 CRITICAL fix 輪一併更正。
+- **bilingual**：新 `_sanitize_session_dict_for_persist`（:79-119）中文優先正確；唯一 English-only comment hit（cost_tracker:65）是 pre-existing G3-08 sibling block，未碰。
+- **§5 race**：5a origin/main 2h 內無 sibling push（feature 分支 25↔17 divergent，v3 未 commit 無 merge）；5b unstaged 全屬 L2 scope + agent memory（aeg research builder.py/test 屬他 scope leftover，不 touch redactor 故不阻）；5c stash 全舊/別 session 未動。
+- **教訓**：**fast-path 優化的 gate 必須是慢路徑「正規化無作用」條件的健全（sound）近似——手列字元範圍 RE 與另一處 strip 謂詞獨立維護必 drift；正解是 gate 復用同一 strip 謂詞**。對抗審查 store-original 不能只信「byte-identical 測試綠」——要全 Unicode sweep 找 strip-set vs gate-set 的洞（E1 測試只覆蓋 U+200B 一個 zero-width，漏 134 個）。
+
+## 2026-06-08 — L2 D3 redactor v4 narrow re-review（gate fix + keyword + cap）→ PASS to E4
+- **任務**：narrow re-review v4 delta（上輪 v3 我 RETURN CRITICAL-1 fast-path gate leak，E1 照方向 A 修）。只審 gate fix / keyword 補全 / 256KB cap / registry §2.6 行號。
+- **裁決 = PASS to E4（0 CRITICAL / 0 HIGH / 0 MED blocker）**。
+- **★ CRITICAL-1 真閉（brute-force 親證，非信 E1 自述）**：
+  - 全 Unicode（0..0x10FFFF 去 surrogate）枚舉 → strip-set 共 **223** 字元；`_needs_offset_map` 對每個 strip-set 字元 route slow-path **0 miss**（predicate level）。
+  - end-to-end exploit：223 strip-set 字元各插入 `api<ch>_key=SECRET` → **0 verbatim leak**、223/223 route slow。
+  - 7 個 named Cf-split（U+180E/U+061C/U+2066-9/U+E0041 tag）逐一驗：全 routed slow + 0 verbatim + 正確遮 api_key kind。
+  - **無第二份枚舉 drift**：`_needs_offset_map` 執行體用 `any(_is_control_or_format(c) ...)` 同一 strip 謂詞；舊 `_NEEDS_OFFSET_MAP_RE` 只剩 docstring 提及（執行定義已刪）。drift 結構上不可能再生。
+  - fast vs forced-slow byte parity：12 input 0 mismatch（含 idempotency `[REDACTED:*]` token 二次跑不變）。
+- **cap 放置判定 = 入口放置「強於」PINNED「ledger 寫入前」且無副作用，可接受**：
+  - redact() 被多 caller 用（writer:162-190 + critic:463 + cost_tracker:94/101/113）；cap 在 redactor 入口 = 單點 bound **全** caller（含非-D3 路徑），是 strictly stronger 涵蓋。
+  - cap 在 normalize/offset-map **之前**（redact() 首步），offset 對齊；over-cap secret near start 仍正確遮 + marker 事後附。
+  - 正確性：sub-cap（CAP-1 / 恰 CAP）byte-identical 不截（`>` 非 `>=`）；marker 確定性 `…[TRUNCATED:n chars]`；冪等（尾端 marker tail RE 偵測跳過再截，twice==once）；marker 不被誤遮（kinds 空）；straddle secret 被截斷 → **無 full verbatim leak**（fail-safe）。
+  - cap 只 bound super-linear per-char 迴圈（單巨葉 → 截；redact_jsonb 多小葉 aggregate 不 bound 但每葉線性 → linear-sum 非 super-linear，符 docstring 宣稱目標；input_context schema-controlled）。
+- **keyword 補全完整**：8 new（auth_signing_key/signing_key/signing_secret/auth_key/hmac_key/hmac/private_key/裸secret）key=value + JSONB-key 兩形全 catch；alternation 長/具體先（auth_signing_key→auth_json 非部分 auth_key）。裸 secret catch-all **value-scoped**：`secret` 裸字（無 =/: sep）不遮、`secret=v` 只遮 value、複數/複合詞不誤抓。無關文本零破壞。
+- **ReDoS-safe**：11 adversarial（keyword 前綴 spam / value class 邊界 / 巨 value / 規避混合）全**線性**（worst 101ms@220K 病態輸入，~0.5µs/char），無 catastrophic backtracking；>256KB 先 cap。
+- **registry §2.6**：class:99 / `_WRITER`:364 / getter:367 / engine-call `_record_l2_call_to_ledger`:655 — 四行號全 exact match。
+- **無回歸**：test_l2_d3_ledger 78 pass + 4 xfailed + **0 XPASS**（residual 契約完整）；layer2-family in-scope 4320 pass / 66 failed / 4 xfailed，66 failed 全在 product_family_business_settings/runtime_snapshot_bridge/snapshot_stable_entrypoint（redactor-ref=0），sample 證 engine.sock 缺 + 403 auth-state = Mac sandbox pre-existing（CLAUDE §六），非 v4 回歸。
+- **scope 隔離**：writer/cost_tracker/critic 只讀 `REDACTOR_VERSION`/`redact().text`，RedactResult shape 未變，v4 內部改動 transparent；migrations V134-136 untracked 屬 D3 原 PASS 集非 v4 delta。0 hardcoded path / logger %s / 無 except:pass / 無 detail=str(e) / 618 行 <800。
+- **§5 race（flag PM，非 blocker）**：origin/main `bdf15e4f`（sibling 重落 phantom-fill + residual，與本地 HEAD `6d312405` 同 message 不同 SHA = 分支 divergent/rebased）；但 sibling commits 觸 v4 redactor file scope **0 overlap**（l2_secret_redactor/test_l2_d3/V134-136/registry §2.6 全 uncommitted local，origin 無）→ 無檔衝突，**PM merge 前需 rebase** branch onto current origin/main。stash 3 entry 全舊/別 session 未動（§5c 未 revert）。
+- **教訓固化**：v3 我用 brute-force 抓到 gate drift（E1 測試只覆蓋 U+200B 一個），v4 必須用**同一 brute-force 復驗修補**——223 字元全枚舉 + end-to-end exploit + fast/slow parity 三層，不信「by construction」口頭宣稱。cap「入口 vs PINNED 字面位置」差異 → 判 strictly-stronger（bound 全 caller）而非機械要求字面對齊；驗 sub-cap byte-identical（`>` 非 `>=`）+ normalize-before-cap 對齊是真正風險點。
+
+## 2026-06-08 — Residual PART 4 Phase 2 re-E2（HIGH-1 payload report write + LOW-3 idempotency）→ PASS-to-MIT
+**commit** `7d2cdcba`（follow-up，parent `2a5df09e`，NOT amend；worktree `/private/tmp/wt-residual-act`，branch `feature/residual-activation`）。2 source/test 檔 + E1 memory；orchestrator preflight +103/-? · test +195。fix 我上輪 RETURN 的 HIGH-1（deciding-factor goal NOT met）+ LOW-3 + LOW-4。
+
+**verdict = PASS-to-MIT**（0 blocker；1 LOW 觀察非阻）。
+
+**★ headline 獨立判定（不採信 E1 自述，真跑 production 路徑）= YES，math 現在是 deciding factor end-to-end。**
+- **DEFER 候選**：真跑 orchestrator（fake DB loader）→ 取 stamp UPDATE 實際寫的 `report_jsonb` → 重建 production-shape source_row（payload 帶 report，**無** top-level 欄，比對真 `fetch_pending_sql_and_params` SELECT :606-624 確認無 top-level `demo_residual_alpha_report` 欄）→ `build_live_candidate_evidence_from_source` 回 `residual_alpha:passes_not_true`（MATH），**非** `residual_alpha:not_dict`（absence）。對照 payload={} → `not_dict`（=修復前狀態）。差異全來自 payload 是否帶 report。
+- **E1 修正我的 reason 名對**：validator（`residual_alpha_report_contract:62-68`）先檢 `passes is not True`（→`passes_not_true`）**才**檢 `verdict`（→`verdict_not_pass`）。defer report `passes=False` → 永遠回 `passes_not_true`。我上輪寫的 `verdict_not_pass:defer_data` 不精確；兩者皆 content/math reason，distinct from absence。實測 written verdict 甚至是 `fail`（單配置 PBO defer），但 `passes=False` 先 short-circuit。
+- **PASS 候選**：合成過 validator 的 PASS report → 過第一道 gate（reason 非 `residual_alpha:*`）AND 過 registry-hash cross-check（`:375` `_validate_registry_residual_report_hash`）：當 payload report 的 `_canonical_sha256` == registry `demo_residual_alpha_report_hash` → reason 推進到下游 `durable_residual_alpha_report_hash_missing`。mutate registry hash 為錯值 → `:375` 正確回 `replay_registry_demo_residual_alpha_report_hash_mismatch`（cross-check 有真 bite，且確認比的就是 payload report）。
+
+**hash byte-identity（item 3，跨寫者單一真相）**：drar writer（`promotion_evidence:479/507`）`report_hash=_canonical_sha256(report)` + `report_jsonb=json.dumps(report,sort_keys=True)`；orchestrator payload write（`:656`）同 `json.dumps(report,sort_keys=True)`，**同一 `captured["report"]` dict** 餵 drar + payload；source contract（`:399`）re-canonicalize round-trip dict。全部 `_canonical_sha256` = `sort_keys=True,separators=(",",":"),ensure_ascii=True`。三者結構一致。
+
+**4 個 mutation probe（全有 bite，我親自 Edit-mutate-restore，非 git destructive）**：
+1. 移除 `_STAMP_REC_SQL` 的 `jsonb_set` payload 寫入 → **3 紅**（six_step / beta_trap / pass_report）。test 在重建 row **之前**先 `assert "jsonb_set" in stamp_sql` 綁定 SQL，故 SQL 移除即抓（非靠 param 假象）。
+2. orchestrator 寫 **不同** report 進 payload（`raw_mean_bps:99` vs registry `1.0`）→ `test_six_step_flow` 紅於 `:543 assert written_report == spy.calls[0]["report"]`（hash byte-identity pin 有 bite；下一行 `:544` `_canonical_sha256==registry_residual_hash` 亦會紅）。
+3. 停用 idempotency_key 設定（`if False and split_ref`）→ `test_low3` 紅（1）。
+- 每次 mutate 後 `cp /tmp/preflight_backup.py` 還原 → `git diff --stat` 確認 byte-identical（empty）。
+
+**production-shape test 真 production（item 2）**：`_production_shape_source_row` 只放 lineage 欄 + `payload`，**無** hand-placed top-level report（上輪舊 test 手放 top-level 遮蔽真 bug）→ 會抓 absence regression（payload={} → not_dict 實證）。
+
+**LOW-4 resolved（cross-check 一致）**：`attach_residual_reports`（`residual_alpha_cycle:317`）唯一 caller `mlde_shadow_advisor:615`，**read-only conn**（`set_session(readonly=True)`）+ 只 `payload[field]=report`（in-memory mutate，`:377`），**零 DB UPDATE**；跑在 rec 生成期（未蓋 lineage 前），用 `required_factors=("btc",)` → btc-only。orchestrator 後來 `jsonb_set` **覆寫**該 btc-only payload 為 multi-factor（== manifest/registry hash）→ cross-check 一致。stamp `WHERE replay_experiment_id IS NULL` idempotent：已蓋過則 no-op 不重寫 payload。attach 不 re-process 已蓋 DB rec。順序安全（generate→insert(btc-only)→stamp(overwrite multi-factor + set lineage)→此後 NOT NULL 鎖死）。
+
+**LOW-3 resolved（item 4）**：實測 idempotency_key = `residual_stage0r:grid_trading::BTCUSDT:<64hex split_hash>`，真 split_hash 後綴（非空），跨兩跑 byte-identical（確定性），≤128。誠實殘留風險文檔正確（in-memory cache 重啟失效 + cache-miss 跨-process 接受重複 INSERT → 窗縮到「crash-then-restart」非完全消除；durable 欄 V049 無，out of Gap A scope）。`except (AttributeError, ValueError)` typed + logged（非 bare/silent）。
+
+**標準項全綠**：full `ml_training+learning_engine` **850 passed / 31 skipped**（= E1 宣稱，0 regression，33s）；orchestrator suite 23 pass。256 added 行 grep：0 hardcoded path / 0 hard-boundary（live/auth/order/risk/lease/mainnet）/ 0 f-string log / 0 bare except / 0 私有屬性穿透。behavior-neutral 3 test 綠（flag-off 0 writes 0 conn）。新註釋中文優先（English 僅 jsonb_set/欄名/reason token 等 identifier）。`import json` 真用。
+
+**LOW（非阻，記給 MIT/E1）**：新 fail-closed 分支 `register_ok_but_report_uncaptured`（report is None 不蓋 lineage、不寫 payload、回 skipped）**無直接 test**——但屬防禦性難達分支（bridge 必產 report 才到 register），且行為是安全方向（skip 不蓋），非 correctness 風險。建議補一個 `captured["report"]` 缺失的 e2e（非阻）。
+
+**§5 race 5/5 PASS**：5a/5e origin/main=`bdf15e4f` 領先 merge-base `8cd4da1f` 2 commit（`65952b8b`/`bdf15e4f` PHANTOM-FILL-FIX-1，**純 Rust engine**），`git log origin/main -- <我 2 檔>` **EMPTY**，0 file-scope overlap（與我 Phase 1 review 同 2 commit）；5b worktree 僅 E2 memory + PA design doc（untracked，非我）；5c 3 stash 全 pre-existing/別 session 未動；5d N/A；review 中無新 sibling push。mutation 全用 Edit + cp 還原（非 git checkout/stash drop）。
+
+**Linux-owed（傳 MIT/PM）**：flag-ON 真寫 run 確認 production 真路徑回 `passes_not_true` 非 `not_dict`（Mac 用 fake DB loader + Python-層 json round-trip；**PG jsonb 數值正規化** round-trip 風險未覆蓋——orchestrator 寫 `json.dumps::jsonb`，production 從 jsonb 讀回，PG 可能正規化 float trailing zero/int-vs-float → 理論上動 `_canonical_sha256` → registry-hash cross-check 漂移。Mac 測 `json.loads(json.dumps())` 不經 PG。**MIT/E4-Linux 必跑真 PG round-trip 驗 hash 仍 byte-identical**）。
+
+**教訓**：(1) deciding-factor 這種「命脈是否真接通」claim 不能只讀 SQL diff，要**真跑 orchestrator 取它實際寫的 param + 重建 production-shape row 餵下游 contract**，並對照 absence 證差異全來自修補。(2) hash byte-identity 在 Mac 只能驗到 Python json round-trip；**PG jsonb 數值正規化是真實漏網風險**，必明確標 Linux-owed 不能默認 PASS。(3) production-shape test 防 regression 的關鍵 = **不 hand-place** 被測欄位（上輪舊 test 手放 top-level report 正是遮蔽 HIGH-1 的元兇），新 test 改從 orchestrator 實寫的 payload 取 → 才有 absence-regression bite。
+
+## 2026-06-08 — Residual PART 4 Phase 2 MIT HIGH-1/HIGH-2 fix re-E2（67730b7b）→ PASS to E4
+**commit** `67730b7b`（follow-up，parent `7d2cdcba`，NOT amend；worktree `/private/tmp/wt-residual-act`，branch `feature/residual-activation`）。5 檔 surgical：gate +32 / gate-test +118 / db-adapter +35 / orchestrator +4 / preflight-test +117。修 MIT 在 Linux 真 PG 揭露的 2 HIGH（我上輪 Phase-2 re-E2 已把 PG jsonb round-trip 列 Linux-owed，MIT 實證後退 E1 修）。MIT 已 real-PG re-verify 兩者 PASS；本輪 = focused 確認碼乾淨 + 2 mutation bite + default-path 0 drift。
+
+**裁決 = PASS to E4**（0 CRITICAL / 0 HIGH / 0 MED / 0 LOW blocker）。
+
+**★ HIGH-1（_normalize_zeros）chokepoint 唯一性 + totality 親證（非信自述）：**
+- **單一 chokepoint 確認**：全 pipeline 只有 `ResidualEdgeReport.to_dict()`（gate:179 `_normalize_zeros(_json_safe(raw))`）產 canonical report dict 餵 hash/jsonb。trace 鏈：producer:167 `report.to_dict()`→result.report→cycle:193 `dict(result.report)`（shallow copy 不重引入符號）→bridge:303 `result.report`→bridge:355 `_canonical_sha256(report)` + drar/registry writer。**唯一手搓 report dict** = `_insufficient_result`（producer:245-252，sample 不足 defer），但 `raw_mean_bps/residual_mean_bps` 是字面 `0.0`（+0.0）→ -0.0-safe by construction（此 defer 從沒跑回歸，-0.0 不可達；commit 說的「defer/weak cohort -0.0」來自 np.mean/回歸係數=主 to_dict 路徑，已覆蓋）。`fit_window.to_dict()`（gate:82）只回 str（`_timestamp_for_report` 簽名+body 證 always `str(...)`）→ 無 float 分支。grep 全 pipeline `asdict(` 僅 to_dict 內 1 處（producer 0、cycle 0、bridge 0）→ **無 bypass**。
+- **_normalize_zeros totality 親跑**：nested dict+list+巢狀 -0.0 全抹平；非零 float（1.5/-3.25/1e18/5e-324 subnormal）byte-不變；int/str/None/**bool（type 保留，未被 coerce 成 float）**/NaN/Inf 不變（NaN/Inf 已先被 _json_safe→None）；冪等（json.dumps 二跑相等）。`x+0.0 if x==0.0 else x`：`-0.0==0.0` True→收斂 +0.0；`bool` 不入 float 分支（isinstance(True,float)=False）→ 安全。
+- **Item 3 default-path 0 drift 親證**：無 -0.0 的 report → `_normalize_zeros` 是**字面 no-op**（canonical bytes before==after）；`test_gate_default_report_keyset_locked`（key 集不增減）+ `test_gate_permutation_disabled_is_byte_identical_default` 仍綠（=與 pre-Gap-C `8bd4f3f5` baseline 一致）。
+
+**★ HIGH-2（per-symbol net_side）：** `derive_net_side_from_fills` 加 optional `symbol`（None=既有全-symbol 聚合 caller 不變；提供時 Python 端篩 `fill.symbol==symbol`，`_FILLS_QUERY` 已回 f.symbol→不改 query shape）→ `load_candidate_net_side` 透傳 → orchestrator preflight:418 傳候選真實 symbol（rec.get("symbol")，且 :410 `missing_strategy_or_symbol` fail-closed guard 在前）。ambiguous（淨 0 / 該 symbol 無入場成交）仍 fail-closed。
+
+**2 mutation probe（Edit+cp 還原，非 git destructive；還原後 git diff --stat empty 親驗）：**
+1. **bypass `_normalize_zeros`**（gate:179 改 `_json_safe(raw)`）→ HIGH-1 **2 測紅**（hash `f288d8…` != `227516…`；mutation-guard 測雙向斷言）。
+2. **drop symbol filter**（db:832 改 `if False`）→ HIGH-2 **3 測紅**，含 e2e `test_orchestrator_threads_candidate_symbol_into_net_side` 斷 `-1 == 1`（=真實 RAVEUSDT funding-sign-flip 還原）。
+- 兩次還原後 `git diff --stat <兩源檔>` 皆 EMPTY（byte-identical to committed）。
+
+**測試實況（PYTHONHASHSEED=0 + 清 __pycache__ deterministic）**：2 changed-file 直測 57 pass（gate 31 + preflight 26）；full ml_training+learning_engine **855 passed / 31 skipped**（= E1 宣稱，850 baseline + 5 新，0 regression，35.6s）。
+
+**標準項全綠（grep added lines）**：0 hard-boundary token（live/auth/order/risk/lease/mainnet——唯一 grep 命中是 docstring 內 `risk_close:` 解釋排除判據，非執行碼）；0 hardcoded path；0 except:pass；0 detail=str(e)；0 f-string log；0 私有屬性穿透（`._canonical_sha256` 命中是 docstring 函數引用非 instance 穿透）；新註釋中文優先合規。5 檔 surgical 對齊 PA scope（只 HIGH-1/HIGH-2）。
+
+**§5 race 5/5 PASS**：5a/5e origin/main `bdf15e4f` 領先 merge-base `8cd4da1f` 2 commit（`65952b8b`/`bdf15e4f` PHANTOM-FILL-FIX-1，**純 Rust engine**），`git diff --name-only 8cd4da1f..origin/main` **0 overlap** 本 PR 5 residual 檔（與我 Phase 1/2 review 同 2 commit，benign，PM 可 ff engine）；5b/5d worktree 源碼 clean（唯 E2 memory + 非我 PA design doc untracked）；5c 3 stash 全 pre-existing/別 session（明標「not mine」）未動；mutation 全 Edit+cp 還原。
+
+**教訓固化**：上輪我把「PG jsonb 數值正規化漂移 hash」列 Linux-owed（Mac 只能驗 json.loads(json.dumps) 不經 PG）→ MIT 真 PG 實證確認 -0.0 真會被丟、修法收口。本輪 re-E2 的對抗點不是再驗 PG（MIT 已做），而是**驗修補沒在 to_dict 之外留 bypass**：必須 trace 全 report-dict 構造路徑（含手搓 defer dict + fit_window.to_dict + asdict grep）證明只有單一 chokepoint，否則「在 to_dict 加 normalize」可能漏掉另一條手搓路徑。`value+0.0` 這種 idiom 要親跑 bool/subnormal/NaN/巢狀 邊界，不靠肉眼。
+
+## 2026-06-08 — L2 Advisory Mesh Phase 2（Orchestrator+registry+admission+adjudication+fail-safe+guard）E2 對抗審 → RETURN E1（1 HIGH + 2 MED + 2 LOW；全 dormant，0 P2-runtime-blocker，但需修正 spec-claim 才 PASS）
+- **範圍**：branch `feature/l2-critic-lessons-tools`，P2 疊 P1 `f1c3c1ca` 未 commit。5 新模塊（l2_capability_registry/l2_prompt_contract_registry/l2_out_of_bound_guard/l2_conflict_adjudicator/l2_advisory_orchestrator，共 1275 行全 <800）+ wiring delta（layer2_engine +20/layer2_routes +95）+ TOML(48) + 60 test + singleton §2.6.2-2.6.4。全用 `venvs/mac_dev/bin/python`（3.12 tomllib）。
+- **裁決 = RETURN E1**。linchpin 全綠（mutation 親證有 bite），但 **HIGH-1 per-capability daily ceiling 是 no-op**——code/comment 宣稱 PA §F.1 stage4「per-capability 硬日上限→NO_ADVICE」但實際只 re-read 全域 `remaining`，零 per-cap spend accounting。實證：cap_daily=0.01 + 全域 remaining=1.5 → 30/30 distinct-subject trigger 全 admitted，per-cap ceiling 從不 fire。**load-bearing 全域 $2/day storm 閘正確**（test_storm 綠），HIGH-1 只是被宣稱卻未交付的「額外」per-cap 細化。dormant（dispatch 0 production caller）但 spec-claim 不實必修。
+- **★ 關鍵 framing（嚴控 severity）：dispatch() + report_call_outcome() 在 P2 皆 0 production caller**（grep `app/` 證；`.dispatch(` 命中是 ai_service_dispatch/listener 別物件；routes 只呼 status/reload/reset 不呼 dispatch）。整個 admission loop + fail-safe SM 是 **dormant skeleton**（PA §A.2「P3 才接 executor」一致）。唯一 P2-live 路徑 = layer2_engine wiring delta（contract_ver/schema_ver 改 registry-resolved，fail-soft fallback 既有常數）。故所有 SM/admission finding 都是 **latent**（P3 wire trigger surface 才 bite），非 P2 runtime hazard。
+- **MED-1 fail-safe SM ollama_available 分支序 bug**：`report_call_outcome` :388-397，`elif ollama_available: DEGRADE_OLLAMA` 在 `<5 NO_ADVICE`/`<10 TRIPPED`/`else GLOBAL_CONSERVATIVE` **之前**→ 實證：ollama 持續 available 時 SM 永卡 DEGRADE_OLLAMA，50 連敗仍到不了 TRIPPED/GLOBAL_CONSERVATIVE（unique states 只 {RETRY,DEGRADE_OLLAMA}）。PA §H「repeated failure/guard storm→TRIPPED→systemic→GLOBAL_CONSERVATIVE」escalation 在 ollama-up 場景不可達。測試只測 ollama_available=False 路徑（漏 ollama-up persistent-fail）。方向（不代寫）：escalation 須與 ollama-availability 解耦——consecutive_failures 累積到閾值該 TRIP（即便 ollama 還活），或 DEGRADE_OLLAMA 本身要計次升級；+補 ollama-up persistent-fail 測試。
+- **MED-2 admission state race（dedup/debounce 無鎖）**：`dispatch`→`_admit` 改 `self._admission.last_served_ts[k]`(:322)/`debounce_pending`(:275/287) **不持 self._lock**；而 report_call_outcome/reload_registry/reset_fail_safe 都持鎖但碰的是別 state(_fail_safe/_registry_cache)。鎖保護不對稱：admission 窗口裸奔。dispatch 是 **sync 無 await**（驗 :163 無 async/await）→ 單 event-loop 內不交錯（asyncio 邊界 #7 PASS），唯多 OS thread 並發呼 dispatch 才 race（兩同 dedup_key trigger 各讀 last_served=None 各放行=破 dedup storm-control identity）。P2 0 caller 故 dormant；P3 多執行緒 trigger surface 會 bite。方向：admission 窗口 mutation 納入同一 self._lock（或獨立 admission lock）。
+- **LOW-1 cold-cache 壞 TOML 讀路徑 500**：boot 後 operator 手改 TOML 成 malformed（繞過 validated /registry/reload）+ 冷快取 → 下次 `_registry_obj()`（status() 讀路徑亦呼）raise L2RegistryLoadError **uncaught** → GET /orchestrator/status 回 500 非結構化 degraded envelope。實證 status()/dispatch() 皆裸 raise。安全意義 fail-closed（不採壞 config），唯 graceful 不如 /registry/capabilities route（該 route 有 catch）。方向：_registry_obj 或 status 對 L2RegistryLoadError fail-soft 回上次good/empty+degraded flag。
+- **LOW-2 adjudicate_vs_gate 未知 verdict fail-open（gate-recognition 軸）**：:89 只 reject/fail/block→a_wins，其餘（含 'warn'/''/None/未知）→b_wins。「gate reject 永勝」不變式成立（reject→gate 勝），且 b_wins=「L2 走自身下游 gate 非直接 apply」（docstring 明載），故非 safety bypass。唯未知 gate verdict 默認「放 L2 續走」是 gate-辨識軸的溫和 fail-open。as-designed 可接受，P3 真 gate verdict 接線時建議未知→fail-closed。
+- **全綠（實證非讀碼）**：① LANE_DIRECTION linchpin：無 'live' key（test 驗 key+value 皆無）；STEP-1 expand→MANUAL 在函數頂（inspect 剝 docstring 驗 idx_step1<idx_tier<idx_posture）；mutation 改 STEP-1 return AUTO_VIA_GATE → **4 test 紅**（含 dispatch :239 防禦性 fail-closed 補抓 leak 的 expand）；model_construct 繞 validator 給 lane='live' → STEP-1 subscript **KeyError fail-loud**（可接受）；validated 構造 reject live(ValidationError)。② 三 reject 分支全綠（autonomy_level 宣告/can_auto_deploy_to_paper-as-posture/lane∉表 + min_tier 非法 + unknown-field extra=forbid + unknown-top-key + 重複 capability_id）；enabled 預設 false；TOML 不存在→空 registry fail-closed；解析錯→L2RegistryLoadError。③ adjudication：mutation flip PRECEDENCE(contract=0/expand=2) → 2 test 紅；adjudicate_vs_gate 9 verdict 變體（含 case/None/空）全對；stateless 純函數。④ guard：inf→clamp10、-5→clamp0、neg cost→reject、NaN→reject、empty available_axes+referenced→reject(fail-closed)、==cap 邊界 pass；無 model。⑤ **carbon-grep tokenizer-strip 真有 bite**：注入 promote_tier 為**真碼**→C1 test 紅；既有 promote_tier 在**註解/docstring**→baseline C1 綠（strip 區分碼 vs 散文，非空測）。⑥ wiring delta：reachable（run_session:671 呼 _record_l2_call_to_ledger）；非死碼；**fail-soft 親證**——強制 resolve_contract_versions raise → fallback l2_contract.v1/l2_schema.v1 且 **D3 row 仍寫出**（零回歸）；lazy import 破 cycle（engine 端 lazy，registry 端 module-level import 常數）。⑦ 2 write route（/registry/reload、/orchestrator/fail-safe/reset）首句 require_scope_and_operator("ai_budget:write")（同 /cost/reset 範式，raise fail-closed）；reload 先驗載入成功才換 cache（壞 config 不換，HTTPException 400）；2 GET 唯讀。⑧ C1/C2/order-lease grep 跨**全 advisory-loop 模塊集**：每 hit 全在 comment/docstring/MODULE_NOTE 或 _FORBIDDEN_POSTURE_GATE_TOKEN 字面（C2 reject-target 非 flag-branch）。
+- **標準項全綠**：60 test pass（0.17s）；layer2/l2 family 358 pass+4 xfailed（wiring delta 零回歸，含 test_layer2_critic 走 engine 路徑）；py_compile 7 檔 OK；0 hardcoded path（2 hit 全註解「禁硬編」policy ref）；0 f-string log；0 bare except；0 detail=str(e)；0 私有屬性穿透；0 stray print；threading.Lock 無跨 await（dispatch sync）；5 MODULE_NOTE 全在；comment 中文優先（0 大段英文）；singleton §2.6.2-2.6.4 class/binding/getter 名對；**0 production-code scope creep**（diff 只動 L2 P2 + 已知 wiring 檔）。
+- **out-of-scope 確認**：test_layer2_critic.py(+26) 0 ref P2 模塊=他 session WIP（D3 l2_reply_id context_id，brief 指明勿審）；aeg builder/test_aeg ` M`=他 session；4 replay collection error=pre-existing import-path harness。
+- **§5 race 5/5 PASS**：5a/5e `git fetch` 後 origin/main=`b6f918d9`（residual PART4 track，非 L2），`git log origin/main -- <P2 3 檔>` **0 commit**（greenfield uncommitted local，0 file-scope overlap）；HEAD=`f1c3c1ca` 落後 origin/main 因 P2 疊 P1 未 rebase（PM merge 前 rebase，非 P2 blocker）；5b unstaged 全 L2 P2 scope+agent memory；5c 3 stash 全 pre-existing/別 session（標「not mine」）未動；5d N/A（未 commit）；review 中無新 sibling push 進 P2 scope。mutation 全 cp backup + 還原（非 git destructive），每次還原 git diff --stat empty 親驗。
+- **教訓**：(1) **「宣稱的保證」要實證它真交付**——HIGH-1 comment 寫「per-capability 硬日上限」但 code 只讀全域 remaining，跑 cap_daily=0.01+remaining=1.5 才抓到 30/30 全放行；不能信 comment+變數名（cap_daily 讀了但沒比 per-cap spend）。(2) **dormant skeleton 的 latent bug 仍要退**——P2 dispatch/SM 0 caller，但 PA §M row 明列 SM 為 E1 交付物且要求轉移正確；fail-safe ollama-up 卡 DEGRADE_OLLAMA 是真 SM bug，P3 wire 就 bite，不能因「現在沒跑」放行（對抗審查 = 找 root cause 非症狀，dormant≠免審）。(3) **鎖保護不對稱是隱性 race**——3 處 with self._lock 給人「有併發保護」錯覺，但 admission 窗口（storm-control 命脈）裸奔；要逐一對照「哪些 mutable state 被哪把鎖蓋」，sync-no-await 只擋 event-loop 內交錯非多執行緒。(4) **fail-soft 要親跑**——強制 resolver raise 證 D3 row 仍寫得出 + fallback 值對，比讀 try/except 可靠。(5) carbon-grep 這種「剝註解驗真碼」測試必親自 mutate（注入真碼 vs 註解兩路）證 strip 有 bite，否則可能是空測。
+
+## 2026-06-09 — E2 residual PART 4 Gap A market-basket selection fix `2fca92fe` — PASS to E4
+
+審 `feature/residual-activation` 上 `2fca92fe`（parent `67730b7b`）：`_load_multi_factor_inputs` basket 選取由字母序改流動性排序。**verdict PASS-to-E4（0 finding）**。
+
+- **★ survivorship/PIT 全綠（key risk）**：候選域**仍是** `pit_active_symbols(lifecycles, s_epoch, e_epoch)`（line 378，與舊碼 byte-identical），新 `load_liquid_basket_symbols` 只用 `symbol = ANY(active)` 在該 PIT 集**內**按 `count(*)` 排序+過濾無資料者，**從不擴/縮候選域**。關鍵推理：`pit_active_symbols` 成員條件 `delisted_at > exit_ts`（=活過整窗）→ 任何 PIT-active symbol 必在 `[since,oos_start]` 有 bar → count 查詢必留它；mid-window 下市者本就被 `pit_active_symbols` 排除（舊新碼皆不選）。故**修復不可能引入新 survivorship bias**——只重排既有集。窗 = `start=cfg.since`/`end=cfg.oos_start`（line 349-351），與 `pit_active_symbols` 及 `load_klines_by_symbols` 三者**同一 PIT 窗**，非「recent」。
+- **real-seam test 真關盲點 + mutation 親跑有 bite**：`test_load_multi_factor_inputs_selects_data_bearing_not_alphabetical`（:1117）**不** patch `load_liquid_basket_symbols`（:1148 明示），走真選取 seam，lifecycles 讓字母序前綴 symbol 全 PIT-active（舊碼必選）。**親手 mutation**：把 orchestrator 還原成 `sorted(set(active))[:N]` → 該 test **紅**（`AssertionError: Extra items: 0GUSDT/1000000BABYDOGEUSDT/1000000CHEEMSUSDT`，精準重現真 bug）；`git checkout` 還原後 4 新 test 全綠。E1 claim 誠實。
+- **query 安全（read-only/參數化/no-crash）全綠**：`_LIQUID_BASKET_QUERY` 靜態常數 + `%(...)s` bind；唯一 `execute(` 傳 dict params（無 f-string/format 拼 SQL）；新碼 0 INSERT/UPDATE/DELETE/commit；`if not syms: return []` 在開 cursor 前→空候選 0 查詢（test 驗 `conn.cursors==[]`）；`RealDictCursor` lazy import 同模塊既有 8 處精確範式。
+- **behavior-neutral 全綠**：唯一 caller = flag-gated orchestrator :475；diff 4 處 `min_basket_symbols` **全是註解**（下游 guard 0 邏輯改）；`_patch_db` stub 簽名與真 fn **完全一致**（kwarg-only `start_ts/end_ts/timeframe/limit`）→ 26 既有 test 為對的理由攔截非簽名漂移；`_process_candidate` 在 `oos_start/data_end is None` 時 :432-433 fail-closed `_skip` **早於** :475，故 `end_dt else start_dt` 退化窗在生產不可達（防禦性）；新 basket-window 表達式與相鄰 `load_klines_by_symbols` byte-identical（選到的 symbol 必同窗載到 bar，無 window mismatch）。
+- **§3 OpenClaw 全綠**：0 hardcoded `/home/ncyu`/`/Users`；comment 中文優先（英文僅 `market.klines`/`pit_active_symbols`/symbol 名等識別符）；註解解釋 why（survivorship rationale + Gap A 根因）；`residual_alpha_producer_db.py` 943→1012（+69，未到 800 review-attention 增量門檻外、距 2000 hard cap 遠）。
+- **全綠（實證）**：full `ml_training+learning_engine` **859 passed/31 skipped**（baseline 855/31，+4 新 test，0 regression）；mutation probe 親跑紅+還原綠。
+- **§5 race 5/5 PASS**：5a/5e `git fetch` 後 origin/main=`b6f918d9`（residual PART4 track 的**前身** lineage `7b5d92e9`=Gap A orchestrator 已 rebase 上 main，與本 fix 同一 workstream 非競爭 sibling；本 fix `2fca92fe` 尚未上任何 remote）；overlap 屬同 track 預期非 5e RETURN trigger；5b unstaged 僅 meta（TODO v120→v121 / E2 memory 本人 / PA report `??`）**無 impl leak**；5c 3 舊 stash 未動；5d N/A（未 commit）。
+- **教訓**：(1) 「選取/排序 fix」的 survivorship 審查 = 證**候選域未變**（domain 同一函數同一窗）比逐行讀排序邏輯更關鍵——bias 只能從 domain 擴縮來，重排既有集不引入新 bias。(2) 「修 synthetic-test 漏掉的 DB-seam bug」的 regression test 必須**不 patch 被修的 seam**（否則就是當初漏 bug 的同一盲點）；mutation = 還原舊實作看真 test 紅，是唯一可信證明。(3) stub 簽名 vs 真 fn 簽名要逐字對——kwarg-only 不一致會讓既有 test 為錯的理由 pass（本次一致，PASS）。
+
+## 2026-06-09 L2 P2 fix round-2 delta re-review → PASS to E4
+narrow re-review（上輪 RETURN 1 MED+1 LOW，E1 修 + 折入 /cost/reset+/cost/pricing operator-scope）。branch feature/l2-critic-lessons-tools，P2 未 commit 疊 P1 f1c3c1ca。改 4 檔：l2_advisory_orchestrator.py(untracked 新檔)、layer2_routes.py(M)、test_l2_p2_orchestrator.py(+14)、test_layer2.py(2 collateral)。**verdict PASS，0 BLOCKER/HIGH/MED/LOW**。
+
+關鍵判定（實證非讀碼）：
+- **MED-1 prune 純回收無語意變**：`_prune_stale_spend(today)` list-comp 收 `k[1]!=today` 後 del；wired 進 record_capability_spend lock 內 **prune-then-accumulate-today**。今日 key（k[1]==day）不被 prune→accumulate 仍對；`_cap_spend_today` 只讀今日 day_key→prune 只刪非今日→今日恆存。**per-cap 獨立性未退化**：同日 20 cap 共存（prune 只跨日 fire），test_spend_dict_bounded_multi_cap_single_day 證 20 key 全今日。跨日刪昨日桶=純回收（閘永不再讀昨日，daily-reset 語義本就存在於「新 day_key 無紀錄」）。
+- **★ mutation 真 bite（親跑非信 docstring）**：把 prune 改 no-op → TestPerCapSpendBounded **3 紅**（across_many_days 10≠1 / prune_drops_only_stale / mutation_bite_without_prune）；2 同日 test 仍綠（prune 對同日本就 no-op）=正確。revert 已驗 clean 無殘留。
+- **★ collateral test = 正當更新非弱化遮測（關鍵，親跑 auth 證）**：test_layer2.py 的 test_update_pricing_empty/valid 原用 **bare MagicMock()** actor（pre-gate update_pricing 只有 Depends(current_actor)無 scope 閘故穿透）；fold-in 後 update_pricing 首句 require_scope_and_operator。**親跑證 bare MagicMock → 403 operator_role_required**（MagicMock.__contains__ default False → 'operator' not in mock.roles → True → 403）。即舊 test gate 落地後**必 403**→collateral 更新**必要**。改後加 roles={"operator"}/scopes={"ai_budget:write"} 真 set（非 MagicMock auto-viv）→親跑證**genuinely 通過 gate**（非繞過）。仍驗原意圖（empty→no-updates / valid→success）只補 auth。grep reset_today_costs/update_pricing tests/ 確認**無遺漏 caller**：645/328 是 tracker.update_pricing(method 非 route 無閘)；1139/1153 已改；test_l2_p2 的 1125-1175 是新 +14 affirmative auth test。
+- **/cost/reset 三態 auth 正確**：親跑 require_scope_and_operator：viewer→403 operator_role_required / operator+scope→PASS / operator-missing-scope→403 forbidden_scope。gate 在 state 變更**前**（reset :373 gate < :375 mutation；pricing :413 gate < :430 mutation；empty-update early-return 在 gate 後）。鏡像 :731/:757 同 first-statement 範式。test_handlers_source_calls_scope_gate_before_mutation 用 inspect.getsource 斷言 idx_gate<idx_tracker=結構序 bite。:675-680 訂正註釋誠實（明寫「先前誤稱已 scope 化」）與實況一致。
+- **docstring LOW-1 準確**：cold-cache→空 fail-closed（無 cap=無 advisory=baseline） vs warm→last-good 已驗證 config（subtraction-only 保守降級非放未驗壞 cap）—與碼 _registry_obj :205-223 一致。
+- **無回歸（親跑 mac_dev py3.12）**：test_l2_p2_orchestrator 88 passed / test_layer2 94 / 7 L2 檔 386 passed+4 xfailed（critic linchpin 綠）。full-suite 66 failed/4492 passed=**pre-existing PG/engine.sock IPC**（grep 證 0 FAILED 在 l2_advisory/layer2_routes/test_l2_p2/test_layer2 scope；4 collection-error 是 replay ModuleNotFoundError program_code，不 import 本 2 模塊）。
+- OpenClaw 特殊：cross-platform grep 命中只在 leak-prevention test（斷言 /home /Users 不洩，§3.1 政策反例不在限）；無 except:pass；logger 用 %s 無 f-string；新註釋中文優先；檔 582/760 行 < 800。
+- race check：5a HEAD 18ahead/32behind(已知 P2 疊 P1)，sibling push 全 residual PART4/phantom-fill = file scope disjoint(helper_scripts/research + rust，非 L2 app)；5b/5d 我 working tree 僅 task-scope 2 檔；5c stash 3 個 pre-existing 不碰；mutation-probe 已 revert clean。
+
+教訓：collateral test「弱化 vs 正當」判定硬方法=**親跑 gate on 舊 actor 看是否 403**。bare MagicMock 在 require_operator_role 下 403（__contains__ default False）→舊 test 必破→更新必要且正當。對照 5/31 memory line 4150 ai_budget caller-guard 判斷亦同模式（grep caller + 親驗臨界區）。
+
+## 2026-06-09 · L2 P3a ml_advisory cascade 對抗審查 → RETURN E1（1 CRITICAL sink-DB）
+
+審查面：`l2_ml_advisory_executor.py`（新698）+ orchestrator dispatch_and_execute 活化 + guard ml_advisory.guard.v1 + 2 contract + TOML 2 stanza。branch `feature/l2-critic-lessons-tools` P3a 未 commit。
+
+**verdict = RETURN E1（1 CRITICAL）**。其餘 7 軸全綠（cost/cascade/dispatch/coarse-subject/sink-0exec/no-regression/comment）。
+
+- **★ CRITICAL（decision #1 sink）**：`write_ml_advisory_advisory_sink` 直接 `INSERT INTO learning.mlde_shadow_recommendations` **省略 `evidence_source_tier`**。V040 已把該欄 `SET NOT NULL`（無 column DEFAULT；`DEFAULT 'real_outcome'` 只是 V036/V055 **SQL 函數參數**預設，非欄位預設）→ 真 Linux DB INSERT **必 NOT NULL violation = sink 永遠寫不進**。三重問題：(a) V040 NOT NULL；(b) V051 paired CHECK lineage（real_outcome→replay_experiment_id+manifest_hash 皆 NULL，否則 FK 必填）→ 唯一可用值 'real_outcome' 對「斷言無 alpha 診斷」語意錯；(c) V037 REVOKE PUBLIC INSERT，唯一合規寫路是 `verify_replay_evidence_and_insert()`（V036/V055），全庫**唯一**直接 INSERT 就是 E1 新碼 line 430（grep 證），canonical producer mlde_shadow_advisor.py:470 走 SQL 函數。**為何 44 綠測抓不到**：test `_CapturingConn.execute` 只 append SQL+params list，**不打真 PG**=不驗 NOT NULL/CHECK/grant → 經典「mock 遮真 DB fail」。建議轉 operator：方向 A 換 sink 走既有 `verify_replay_evidence_and_insert`（過 V037 grant，但函數帶 replay-evidence 語意 mismatch）｜B 開 V137 新 advisory 表（乾淨但 migration+Linux dry-run）｜C 既有表加 `evidence_source_tier='real_outcome'`+確認 db_pool role 屬 replay_writer_role（最小改但語意臟）。E2 傾向 B 或 A，operator 拍。
+
+- **decision #2 cost = CONFIRMED 正確**：`_record_call_cost`→`engine._cost_tracker.record_claude_cost(tmp_session,...)`→delegate `layer2_cost_recording.record_claude_cost`→`_add_daily_claude_cost` 更新 `daily_spend.<day>.total_usd`（line 194）。admission stage-4 `_check_budget`→`_get_cost_tracker().check_daily_budget()`→讀**同一** total_usd。instance 同一：layer2_routes:101 engine 用 `cost_tracker=_get_cost_tracker()` singleton。**ml_advisory cloud 花費真進 $2/day counter，無 bypass**。tmp Layer2Session 是既有範式（engine 自身 triage_session line440 同樣）；daily rollup 是 tracker-level persist 非 session-scoped → cost 非永 0。local: tier→cost 0 但仍記（Ollama 免費正確）。
+
+- **dispatch 活化 = 真非死碼**：dispatch_and_execute 先 sync dispatch（admission/RLock 不變）再對 `admitted+routed_to==neutral_sink+capability_id.startswith("ml_advisory")` 才接 cascade；disabled/deduped/tier_locked/非-ml_advisory/engine-None 全短路（test 8 條驗 eng.calls==[]）。executor_ok 把 screen_rejected/guard_rejected/unknown_mode 算 healthy（確定性閘正確擋下≠故障），只 cloud_unavailable/sink_fail 推 fail-safe = 對。
+
+- engine interface 全對：`_provider_complete`(provider_name/tier/system_prompt/messages/tools/max_tokens/timeout) + `_resolve_effective_provider`(base_provider/base_tier/role) + PROVIDER_ANTHROPIC/TIER_HAIKU/TIER_SONNET + L2Response.input_tokens/output_tokens/text 全存在 → cascade 對真 engine 結構通（非 mock-only）。
+- coarse_subject DoS（E3 域，碼正確）：_evict_admission_windows 在臨界區 top 持鎖呼，只清 >TTL(24h)≫dedup窗(≤900s)→不破 dedup 語意（test_dedup_still_works 證）。_derive_coarse_subject 折白名單+upper 降基數。
+- M3 typing guard（clause B）+ regime_caveat（clause C）+ axes-subset（clause D）+ per-mode 必填（clause A）確定性無 model；run_guard API 對；_guard_ml_advisory_v1 呼 guard_output（非 run_guard）無遞迴。
+- TOML 2 stanza 全 enabled=false，hypothesize（P3b）正確不含；P2 test 從 empty-skeleton→2-stanza 是**正當**更新（enabled_capabilities()==[] 仍成立 + 加 hypothesize-not-in 強斷言），非遮測。
+- no-regression：P3a 44 + L2 全樹 430 passed（親跑驗）；replay 4 collection error 是 pre-existing 無關。
+- 教訓：**advisory sink 落 schema CHECK 重表（V031→V038/V040/V051/V055 疊 5 層 retrofit）時，必查「V031 後加的 NOT NULL/CHECK/REVOKE 欄」+「唯一合規寫路是否 SQL 函數」**。code-review grep `INSERT INTO <table>` 比讀 V031 base schema 更快定位「全庫唯一直接 INSERT = 繞合規路」。Mac mock-PG 永遠抓不到 NOT NULL/grant → 此類 finding 必標「需 Linux PG dry-run 證」。
+
+## 2026-06-09 — L2 P3a sink delta re-review + LOW-2 adjudication（narrow re-review；RETURN to E1）
+
+承上輪（2026-06-08 CRITICAL #1 sink）。E1 已把 sink 從 `mlde_shadow_recommendations` 改寫成 `agent.lessons`（operator 拍板 = 上輪 decision-B「開乾淨 advisory 表」的等價：複用既有 inert lessons store，免 V137 migration）。本輪只審 sink delta + 評 E1 flag 的 LOW-2。**測試用 `venvs/mac_dev/bin/python`（3.12）**。
+
+### sink delta = CONFIRMED 正確 + inert 真閉（S-2 結構性成立）
+- **schema 對 V133**：`sql/migrations/V133__agent_lessons.sql` 8 欄 INSERT 全對齊（symbol/lesson_type/content NOT NULL 由 placeholder+mode+redacted-content 滿足；context_id=l2_reply_id；outcome_net_bps/session_cost_usd 內聯 NULL literal；source 覆寫 default 'l2_session' 為 'ml_advisory'）。param tuple index 與 INSERT 順位**逐位對**（test params[0..5] 全核）。type 對（TEXT←str / REAL←NULL）。
+- **content 過 redactor = 真**：line 441 `content = _redactor.redact(content).text[:4000]`。**親跑 mutation-kill**：strip 掉 redactor → `test_sink_content_passes_through_redactor` FAIL（`KeyError: 'called_with'` spy 未被呼）→ 還原 → 綠。**bite 確認有牙**。
+- **inert 安全閉合（獨立驗，非採信註解）**：grep 全庫 `agent.lessons` 的 prod consumer 只有 `layer2_critic.retrieve_lessons`（line 329/366 SELECT，唯讀 trigram+recency 回 rows 進 LLM 推理）+ critic persist（line 486 寫）。**對比驗 applier**：`program_code/ml_training/mlde_demo_applier.py` line 649 `FROM learning.mlde_shadow_recommendations` + line 451 `recommendation_type != "regret_summary"` + line 353/445 `_derived_strategy_targets`/`_bounded_risk_patch`→IPC mutate RiskConfig；該檔 **0 個 agent.lessons 引用**（grep EXIT=2）。⇒ P3a sink 寫 agent.lessons ⇒ **0 applier 撿 ⇒ 0 新執行權結構性成立**（非旗標約束）。上輪 CRITICAL（寫 mlde_shadow_recommendations 會被 applier line 649 撿去改配置）**因此被正確閉合**。
+- **0 mlde_shadow_recommendations INSERT 殘留**：executor+test 的命中全在「解釋為何棄用」的註解 + test 反向斷言（`assert "INSERT INTO learning.mlde_shadow_recommendations" not in raw`）。0 真 INSERT。
+- scope 整潔：跨平台 0 硬編（line 148 命中是「禁硬編」註解）；0 新 mutable singleton；0 except:pass / detail=str(e) / f-string log。cost/dispatch/cascade/M3/M4/coarse_subject guard 碼**未擾動**（上輪已 PASS，本輪確認 sink-only delta）。
+
+### ★ LOW-2 = CONFIRMED 真 D3 provenance bug（退 E1；修在 orchestrator 非 sink）
+E1 flag 對。`l2_advisory_orchestrator.py:429-432` `dispatch_and_execute` 傳 `resolve_contract_versions(contract_ref=None, schema_ref=None)` → 這個 contract_ver/schema_ver 是**寫進每條 D3 ledger row**（traverse run_ml_advisory_cascade → `_ledger` → record_l2_call）。但 `contract_ref=None` 使 `resolve_contract_versions`（registry line 271）跳過 branch1（顯式 ref）、跳過 branch2（`_CAPABILITY_SEED_CONTRACT` line 256 **只含 manual cap**，ml_advisory 不在）→ 落 **branch3 fallback** = `L2_PROMPT_CONTRACT_VER='l2_contract.v1'` / `L2_OUTPUT_SCHEMA_VER='l2_schema.v1'`（通用引擎常數）。
+**親跑兩 branch 實測**（mac_dev py）：
+- diagnose_leak：D3 記 `l2_contract.v1`/`l2_schema.v1`；**executor 實際用** `ml_advisory_diagnose.v1`/`ml_advisory_schema.v1`（registry line 173/137）→ **match=False/False**
+- interpret_result：D3 記 `l2_contract.v1`/`l2_schema.v1`；實際 `ml_advisory_interpret.v1`/`ml_advisory_schema.v1`（line 212）→ **match=False/False**
+⇒ D3 ledger 的 contract_ver/schema_ver **記成通用 fallback，與 cascade 實際送 cloud 的 per-mode 契約模板不符** → 違 root principle 8（reconstructable）+ D3 provenance 準確性。contract drift 時 ledger 會指向錯模板。**非無害**。修法：`dispatch_and_execute` 改傳 cap 的 ref（重取 cap 或把 dispatch() 已解析的 contract_ver/schema_ver thread 下來，line 354-360 已算對值只是沒用）。
+**為何測試漏**：P3a test 全部**直接把 contract_ver 當參數注入 run_ml_advisory_cascade**（line 278 傳 `ml_advisory_diagnose.v1` 並 line 284 斷言 ledger 收到）→ 驗的是「executor 忠實 thread 收到的值」（對），**0 test 跑 dispatch_and_execute 對真 registry 的解析**→ divergence 漏網。RETURN 時建議 E1 補一條 dispatch_and_execute→真 registry→D3 contract_ver 斷言（鎖 regression）。
+
+### no-regression（環境噪音已隔離）
+- L2 全綠：P3a 48 + P2 orchestrator + critic = **172 passed**（親跑）。redactor bite 等 16 sink/inert/alpha test 全 run（非 skip）。
+- 全樹 `tests/` 67 failed/4539 passed：**0 在 L2**。失敗 5 檔（api_contract/learning_chapter/product_family_business_settings/runtime_snapshot_bridge/snapshot_stable_entrypoint）**0 import P3a/L2 碼**（grep EXIT=1）；failure = `assert 403==200` + `engine.sock 未連` + `PG port 15432 Connection refused` = Mac sandbox 無 engine/DB 的 pre-existing 環境失敗（CLAUDE §六：真 runtime 在 Linux）。replay/ 4 collection error = `No module named 'program_code'` import-path artifact，pre-existing 無關。
+- 教訓：**「executor 單元測試把 X 當參數注入並斷言被 thread」≠「X 的上游解析正確」**。本次 contract_ver 在 executor 層測得完美（注入 ml_advisory_diagnose.v1）卻遮蔽 orchestrator 傳 l2_contract.v1 的真相。provenance/版本欄這類「值由 caller 算、callee 只搬運」的欄位，**必須有一條 caller→真 registry→落庫值的端到端斷言**，否則 unit 注入會說謊。
+
+## 2026-06-09 — L2 P3a contract_ver fix narrow re-review → PASS to E4（D3 bug 真閉、mutation-bite 驗證）
+
+上輪 RETURN 的 LOW-2（真 D3 provenance bug：`dispatch_and_execute` 傳 `resolve_contract_versions(contract_ref=None)` → branch-3 generic fallback `l2_contract.v1`，D3 記錯 per-mode 契約）E1 已修。narrow re-review **只審此 fix**。
+
+### ★ 兩 branch 收斂實測（PASS）
+- 修法 `orchestrator:435-439`：`cap = self._registry_obj().get(capability_id)` 後傳 `cap.prompt_contract_ref`/`cap.output_schema_ref`。`_registry_obj().get()` 與 `dispatch():311-312` 同路徑同物件 → **同 registry 同 ref 同版本，解析等價**（非另開 registry）。
+- **per-mode 機制澄清**：per-mode contract_ver 不是「一個 cap 內 mode 分支」，而是**兩個獨立 capability**——`ml_advisory.diagnose_leak` cap.prompt_contract_ref=`ml_advisory.diagnose_leak.v1`→`ml_advisory_diagnose.v1`；`ml_advisory.interpret_result` cap→`ml_advisory_interpret.v1`（TOML 兩 stanza 各一 ref）。`capability_id`→cap.ref→registry→contract_ver 鏈成立。
+- executor 用 `mode`（`_MODE_CONTRACT_REF[mode]`:318）選**實際送 cloud 的 prompt template**；D3 contract_ver 用 orchestrator 傳入值（cascade 不 re-resolve，:603/627/729 忠實 thread）。consistent-pair（diagnose cap↔diagnose mode）下 D3 == 實際 prompt 契約 → **bug 真閉**。
+- 實測 D3-recorded：diagnose→`ml_advisory_diagnose.v1`/`ml_advisory_schema.v1`；interpret→`ml_advisory_interpret.v1`/`ml_advisory_schema.v1`（`TestD3ContractVerProvenance` 5/5 PASS，對真 registry 非 inject）。`record_l2_call` 簽名顯式收 contract_ver/schema_ver（無 silent drop）。
+- cap=None fail-soft：`(cap.prompt_contract_ref or None) if cap is not None else None`→generic fallback，防 registry reload race（防禦性；註解註明 cap 必非 None 因 dispatch 已 admit）=對。
+
+### ★ mutation-bite 親驗（revert 真紅）
+- 暫 revert fix（contract_ref=None/schema_ref=None）→ `TestD3ContractVerProvenance` **5/5 紅**（`AssertionError: 'l2_contract.v1' == 'ml_advisory_diagnose.v1'`=正是 bug）；restore 後 5/5 綠。**非空驗非遮測**。
+- E1 自糾的 `test_mutation_bite_orchestrator_never_resolves_via_none_for_ml_advisory` 推理**正確且有 bite**：斷言「無任何 contract_ref=None 解析」而非「存在真 ref」——因 dispatch() 內部本就用真 ref 解析一次（:354-359），「存在真 ref」對 buggy 版也成立（0 bite）；bug 是 dispatch_and_execute **額外**一次 None 解析。revert→出現 None 解析→紅（已親驗在 5 紅內）。上輪 memory:5245 預判的 subtlety 被正確處理。
+
+### scoped（PASS）
+- contract_ver threading 改動限 `orchestrator:435-439`（re-fetch+resolve）+ `:444`（cascade 傳 resolved 值）。registry diff **0 `resolve_contract_versions` 邏輯改**（純 ADD 新 ml_advisory 契約=prior P3a，非本輪）。executor/sink/cost/cascade/M3/M4/coarse_subject guard/linchpin **0 改**（coarse_subject DoS 上輪已 review PASS、memory:5222/5237 確認未擾動）。
+- P2 test 1 處改（`test_default_checked_in_toml_loads_p3a_stanzas_all_disabled`）=TOML 換 P3a 2 stanza 的合理後果，斷言全 enabled=false（fail-closed 保留）=對。
+- 跨平台 0 硬編；0 except:pass/detail=str(e)；0 f-string log（exception 用 `%s`+fail-soft 再 raise，advisory 失敗減 L2 能力不阻 baseline=對）。
+
+### no-regression（PASS）
+- P3a **53 passed**（48 prior + 5 新 D3）；P2+critic+P3a **177 passed**；全 L2 surface（8 檔）**439 passed/4 xfailed**（xfail=strict bare/short 殘留，prior 已知）。replay/ 4 collection error=`No module named 'program_code'` pre-existing import-path artifact，無關。
+- 0 production caller of `dispatch_and_execute`（grep 唯一 hit 是自身註解）⇒ 路徑 wired-but-dormant；cap/mode consistency 由未來 conductor 建立，本 fix 不引入新 hazard。
+
+### 教訓（承上輪）
+- provenance/版本欄「值由 caller 算、callee 搬運」**必須**一條 caller→真 registry→落庫值端到端斷言；本輪 E1 補的 5 test 正是此鎖。mutation-bite 對「caller 內部已有正確解析、bug 是額外錯誤解析」場景，**斷言點要選 buggy 版會違反的不變式（無 None 解析）**，不是「存在正確值」（會被內部正確解析遮蔽=0 bite）。
+- 親跑 revert→紅→restore→綠 是驗 mutation-bite 非空的硬手段，不採信「test 有寫斷言」。
+
+**verdict：E2 PASS to E4**（0 finding 待修）。
