@@ -131,7 +131,8 @@ def _enabled_calibration():
 
 
 def _valid_hypothesis_output():
-    """合法 hypothesize 輸出（非空 mechanism + falsification + 軸在 available 內）。"""
+    """合法 hypothesize 輸出（P4 v2 契約形：結構化 falsification 三欄 + primary_axis ∈
+    signal_axes_used——guard clause F 強制；v1 自由字串形已被 F reject）。"""
     return {
         "mode": "hypothesize",
         "signal_axes_used": ["funding_rate", "adx_1h"],
@@ -140,7 +141,12 @@ def _valid_hypothesis_output():
                 "hid": "h1",
                 "statement": "funding skew predicts short-horizon mean reversion",
                 "mechanism": "crowded longs pay funding; unwind reverts price",
-                "falsification_test": "permutation test on funding-sorted buckets",
+                "falsification_test": {
+                    "null_hypothesis": "funding skew has no predictive power for reversion",
+                    "test_statistic": "deflated Sharpe of funding-sorted bucket spread",
+                    "reject_condition": "DSR below threshold on pre-registered window",
+                },
+                "primary_axis": "funding_rate",
                 "signal_axes_used": ["funding_rate"],
                 "expected_direction": "short",
                 "beta_neutralization_plan": "residualize candidate vs BTC + altcap basket",
@@ -148,6 +154,72 @@ def _valid_hypothesis_output():
         ],
         "backlog_items": ["register funding-skew feature for B2 forward-OOS"],
     }
+
+
+def _evidence_window():
+    """P4：context 必帶 evidence 窗（pre-reg 釘窗 / debit_id / sealed 檢查），缺 = precheck 免費 DEFER。"""
+    return {"window_start": "2025-01-01", "window_end": "2025-09-30"}
+
+
+class _FakeAwc:
+    """E1-A alpha_wealth_controller 的 import-點 fake（簽名 = PA §2.2 契約；本 branch A 檔
+    未 merge，E4 全鏈於 merge 後驗真模組）。dsr_threshold_for 固定回 floor=0.95 保留
+    legacy DSR 行為——threshold 真咬合在 test_l2_p4_online_fdr.py 另測。"""
+
+    ALPHA_TARGET_DEFAULT = 0.05
+    W0_GAMMA = 0.10
+    PHI_REFUND = 1.0
+    MIN_BATCH_SIZE_DEFAULT = 10
+    SPEND_FRACTION_DEFAULT = 0.10
+
+    @staticmethod
+    def init_family_wealth(alpha_target: float = 0.05, gamma: float = 0.10) -> float:
+        return gamma * alpha_target
+
+    @staticmethod
+    def assign_alpha_i(balance, *, alpha_target, min_batch_size, spend_fraction):
+        cap = alpha_target / float(min_batch_size)
+        alpha_i = min(spend_fraction * balance, cap)
+        return None if alpha_i < 1e-6 else alpha_i
+
+    @staticmethod
+    def can_test(balance, alpha_i):
+        return (balance - alpha_i) > 0.0
+
+    @staticmethod
+    def dsr_threshold_for(alpha_i, *, floor: float = 0.95) -> float:
+        return floor
+
+
+@pytest.fixture
+def _fdr_machinery(monkeypatch):
+    """P4 wealth/pre-reg/sealed 機構的注入（0 真連線 / 0 真 learning_engine import）。
+
+    回 dict 捕捉 debits / preregs；dead-mode 鑄造走真 _mint_dead_mode_lesson（由
+    sink_conn_provider 捕捉，不在此 mock）。
+    """
+    import app.l2_alpha_wealth_store as STORE
+
+    captured: dict[str, Any] = {"debits": [], "preregs": []}
+    monkeypatch.setattr(EXEC, "_resolve_wealth_controller", lambda: _FakeAwc)
+    monkeypatch.setattr(
+        EXEC, "_check_sealed_boundary",
+        lambda strategy, symbol, we, conn: (False, ["no_sealed_split_for_cell"]),
+    )
+
+    def _fake_prereg(**kw):
+        captured["preregs"].append(kw)
+        return STORE.PreRegistrationOutcome(ok=True, pre_reg_id=11, spec_sha256="ab" * 32)
+
+    def _fake_debit(**kw):
+        captured["debits"].append(kw)
+        return STORE.DebitOutcome(ok=True, debit_id=kw["debit_id"])
+
+    monkeypatch.setattr(STORE, "register_pre_registration", _fake_prereg)
+    monkeypatch.setattr(STORE, "ensure_family_initialized", lambda *a, **kw: None)
+    monkeypatch.setattr(STORE, "get_family_balance", lambda *a, **kw: 0.005)
+    monkeypatch.setattr(STORE, "record_debit", _fake_debit)
+    return captured
 
 
 def _available_axes():
@@ -215,8 +287,9 @@ def _no_real_db(monkeypatch):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
-def test_hypothesize_pass_routes_to_backlog_sink(_mock_ledger):
-    """math gate pass → backlog sink（agent.lessons）+ cloud interpret survivor（cost on survivor）。"""
+def test_hypothesize_pass_routes_to_backlog_sink(_mock_ledger, _fdr_machinery):
+    """math gate pass → backlog sink（agent.lessons）+ cloud interpret survivor（cost on survivor）。
+    P4：pass = conducted → 恰一筆 debit（MIT #3）。"""
     cand, gate_inputs = _math_gate_inputs_pass()
     eng = _HypEngine(
         generate_text=json.dumps(_valid_hypothesis_output()),
@@ -226,8 +299,9 @@ def test_hypothesize_pass_routes_to_backlog_sink(_mock_ledger):
     store: list[dict[str, Any]] = []
     res = _run(EXEC.run_ml_advisory_cascade(
         capability_id="ml_advisory.hypothesize", mode="hypothesize",
-        context={"candidate_returns": cand, "math_gate_inputs": gate_inputs}, engine=eng,
-        contract_ver="ml_advisory_hypothesize.v1", schema_ver="ml_advisory_schema.v1",
+        context={"candidate_returns": cand, "math_gate_inputs": gate_inputs,
+                 "evidence_window": _evidence_window()}, engine=eng,
+        contract_ver="ml_advisory_hypothesize.v2", schema_ver="ml_advisory_schema.v1",
         available_signal_axes=_available_axes(), calibration=_enabled_calibration(),
         sink_conn_provider=_conn_provider_factory(store),
     ))
@@ -238,9 +312,11 @@ def test_hypothesize_pass_routes_to_backlog_sink(_mock_ledger):
     assert any("INSERT INTO agent.lessons" in s["sql"] for s in store)
     # cloud interpret 跑了（survivor；math gate pass 後）。
     assert res.cloud_called is True
+    # P4：conducted（pass）→ 恰一筆 debit（k_for_dsr=n_eff 同源由 store 層測試鎖）。
+    assert len(_fdr_machinery["debits"]) == 1
 
 
-def test_hypothesize_b1_fail_logged_and_dropped_no_sink(_mock_ledger):
+def test_hypothesize_b1_fail_logged_and_dropped_no_sink(_mock_ledger, _fdr_machinery):
     """math gate fail（B1 down-beta）→ logged-and-dropped（D3 記，不 sink）。"""
     import random
     random.seed(2)
@@ -259,32 +335,53 @@ def test_hypothesize_b1_fail_logged_and_dropped_no_sink(_mock_ledger):
     store: list[dict[str, Any]] = []
     res = _run(EXEC.run_ml_advisory_cascade(
         capability_id="ml_advisory.hypothesize", mode="hypothesize",
-        context={"candidate_returns": cand, "math_gate_inputs": gate_inputs}, engine=eng,
+        context={"candidate_returns": cand, "math_gate_inputs": gate_inputs,
+                 "evidence_window": _evidence_window()}, engine=eng,
         contract_ver="x", schema_ver="y", available_signal_axes=_available_axes(),
         calibration=_enabled_calibration(), sink_conn_provider=_conn_provider_factory(store),
     ))
     assert res.math_gate_verdict == "fail"
     assert res.stage == "math_gate_failed"
     assert res.ok is False
-    # fail → 不 sink（logged-and-dropped）。
-    assert not any("INSERT INTO agent.lessons" in s["sql"] for s in store)
+    # fail → 不寫 advisory sink（logged-and-dropped）；但 P4 FIX-1.3 鑄 dead-mode lesson
+    # （source='dead_mode_seed'，dict 參數形）——兩者都進 agent.lessons，按 source 區分。
+    sink_inserts = [
+        s for s in store
+        if "INSERT INTO agent.lessons" in s["sql"] and isinstance(s["params"], tuple)
+    ]
+    assert not sink_inserts  # advisory sink（位置參數形 + source='ml_advisory'）未寫
+    dead_mode_inserts = [
+        s for s in store
+        if isinstance(s["params"], dict) and s["params"].get("source") == "dead_mode_seed"
+    ]
+    assert len(dead_mode_inserts) == 1  # FIX-1.3：被證偽假說鑄 dead-mode（novelty 閉環）
+    assert "null_hypothesis=" in dead_mode_inserts[0]["params"]["content"]
     # cloud interpret 沒跑（cost only on survivors；fail 不花 cloud）。
     assert res.cloud_called is False
+    # P4：fail = conducted → 必有 debit（MIT #3）。
+    assert len(_fdr_machinery["debits"]) == 1
 
 
 def test_hypothesize_defer_writes_backlog_non_promotable(_mock_ledger):
-    """math gate DEFER（leak producer 缺）→ backlog 標 gate_verdict=DEFER（non-promotable）。"""
+    """leak producers 皆缺 → P4 precheck 免費 DEFER（FIX-3.1：注定 DEFER 的 run 不渲染
+    DSR、不入帳、不觸 wealth store）→ backlog 標 gate_verdict=DEFER（non-promotable）。
+
+    本測試刻意「不」掛 _fdr_machinery：precheck 在 pre-reg/wealth 之前短路，真 store
+    模組不被觸碰（store 函數若被呼會因 fake conn 缺 fetchone 而炸——綠 = 結構性未觸）。
+    """
     cand, gate_inputs = _math_gate_inputs_pass()
-    gate_inputs.pop("shift1_compliance_leak_free")  # leak precondition unmet → DEFER
+    gate_inputs.pop("shift1_compliance_leak_free")  # 兩 leak producer 皆缺 → precheck doom
     eng = _HypEngine(generate_text=json.dumps(_valid_hypothesis_output()))
     store: list[dict[str, Any]] = []
     res = _run(EXEC.run_ml_advisory_cascade(
         capability_id="ml_advisory.hypothesize", mode="hypothesize",
-        context={"candidate_returns": cand, "math_gate_inputs": gate_inputs}, engine=eng,
+        context={"candidate_returns": cand, "math_gate_inputs": gate_inputs,
+                 "evidence_window": _evidence_window()}, engine=eng,
         contract_ver="x", schema_ver="y", available_signal_axes=_available_axes(),
         calibration=_enabled_calibration(), sink_conn_provider=_conn_provider_factory(store),
     ))
     assert res.math_gate_verdict == "DEFER"
+    assert "precheck_input_unavailable" in res.math_gate_reasons
     assert res.stage == "backlog_written"  # DEFER 仍 sink（標 non-promotable）
     # sink payload 帶 gate_verdict DEFER。
     insert = [s for s in store if "INSERT INTO agent.lessons" in s["sql"]]
@@ -333,7 +430,7 @@ def test_hypothesize_empty_mechanism_guard_rejects(_mock_ledger):
     assert not any("INSERT INTO agent.lessons" in s["sql"] for s in store)
 
 
-def test_hypothesize_novelty_duplicate_defers(monkeypatch, _mock_ledger):
+def test_hypothesize_novelty_duplicate_defers(monkeypatch, _mock_ledger, _fdr_machinery):
     """novelty: dead_failure_mode 重複 → math gate DEFER（executor DB read，§E.4(c)）。"""
     cand, gate_inputs = _math_gate_inputs_pass()
     eng = _HypEngine(generate_text=json.dumps(_valid_hypothesis_output()))
@@ -347,7 +444,8 @@ def test_hypothesize_novelty_duplicate_defers(monkeypatch, _mock_ledger):
 
     res = _run(EXEC.run_ml_advisory_cascade(
         capability_id="ml_advisory.hypothesize", mode="hypothesize",
-        context={"candidate_returns": cand, "math_gate_inputs": gate_inputs}, engine=eng,
+        context={"candidate_returns": cand, "math_gate_inputs": gate_inputs,
+                 "evidence_window": _evidence_window()}, engine=eng,
         contract_ver="x", schema_ver="y", available_signal_axes=_available_axes(),
         calibration=_enabled_calibration(),
     ))
@@ -385,7 +483,7 @@ def test_hypothesize_screen_reject_short_circuits(_mock_ledger):
     assert len(eng.calls) == 1
 
 
-def test_hypothesize_pbo_single_config_honest_defers(_mock_ledger):
+def test_hypothesize_pbo_single_config_honest_defers(_mock_ledger, _fdr_machinery):
     """PBO single-config（無 genuine CPCV peers）→ honest-DEFER（不捏造 peer；承 Gap-A ruling）。
 
     為什麼這條重要：B1/DSR 即使 pass，single-config 候選的 PBO 必 honest-DEFER（genuine peer
@@ -396,12 +494,16 @@ def test_hypothesize_pbo_single_config_honest_defers(_mock_ledger):
     eng = _HypEngine(generate_text=json.dumps(_valid_hypothesis_output()))
     res = _run(EXEC.run_ml_advisory_cascade(
         capability_id="ml_advisory.hypothesize", mode="hypothesize",
-        context={"candidate_returns": cand, "math_gate_inputs": gate_inputs}, engine=eng,
+        context={"candidate_returns": cand, "math_gate_inputs": gate_inputs,
+                 "evidence_window": _evidence_window()}, engine=eng,
         contract_ver="x", schema_ver="y", available_signal_axes=_available_axes(),
         calibration=_enabled_calibration(),
     ))
     assert res.math_gate_verdict == "DEFER"
     assert "pbo_single_config_honest_defer" in res.math_gate_reasons
+    # P4 MIT #3 golden：dsr=pass ∧ overall=DEFER（single-config PBO honest-DEFER）⇒ 必有 debit
+    # （α-bearing 統計量已與 threshold 比較 = conducted；免費 re-look 通道封死）。
+    assert len(_fdr_machinery["debits"]) == 1
 
 
 def test_hypothesize_executor_zero_order_lease_promote():
