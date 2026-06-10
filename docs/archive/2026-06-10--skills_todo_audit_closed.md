@@ -1,5 +1,7 @@
 # SKILLS TODO — Audit Findings & Repair Backlog
 
+> **📦 已歸檔（2026-06-10）**：76/76 finding 全結案，修復 commit 鏈完整（`35a1b624` → `531e6d4a`）。原路徑 `srv/SKILLS_TODO.md`。本檔為歷史審計紀錄；skill 現狀以 `srv/.claude/skills/*/SKILL.md` 為準。
+
 > Skill 安全審計結果（2026-04-25）+ 修復路徑。Audit 角色：對抗性 audit（**不是辯護者**）。
 > 24 個 OpenClaw custom skill 全部審完 × 26 項 checklist。
 >
@@ -488,7 +490,7 @@
 | **B turn 1 — S1/S3/S6 + 6 個別** | 10/10 ✅ | `9e2559b` |
 | **B turn 2 — C1.a/C1.b/個別 disclaimer** | 7/7 ✅ | `3d7c9e3` |
 | **B turn 3 — P1 剩 + P2 高 ROI** | 6/6 ✅ | `bb366ac` |
-| **C turn 1 — 39 backlog FINAL（operator 指示 perfect 化）** | 39/39 ✅ | `[本次]` |
+| **C turn 1 — 39 backlog FINAL（operator 指示 perfect 化）** | 39/39 ✅ | `30b2250a` |
 |   - 個別 P1 (1.2, 3.3) | 2/2 ✅ | |
 |   - 個別 P2 (2.2, 2.4, 3.6, 4.6, 6.2, 6.3, 7.1, 9.2, 9.3, 12.4, 13.2, 14.1, 15.1, 15.2, 16.2, 18.4, 24.2) | 17/17 ✅ | |
 |   - 個別 P3 (2.6, 4.5, 4.6, 7.3, 9.2, 9.3, 10.1, 10.3, 11.3, 14.3, 15.3) | 11/11 ✅（含驗證為 PASS-by-original-content 的 owasp 10.1 / 10.3 等）| |
@@ -547,7 +549,7 @@
 - `3d7c9e3` B turn 2 (7 條 P1 disclaimer)
 - `bb366ac` B turn 3 (1 P1 + 5 P2 高 ROI)
 - `30b2250` C turn 1 (39 backlog 全清 + cross-skill 9 對)
-- `[本次]` **C turn 2 — OpenClaw snapshot trim pass**（operator push back v2「寧願沒有也不誤導」）：12 skill OpenClaw 特定段刪減 + 4 張 snapshot 表 + 多個 inline snapshot 點抽象化
+- `531e6d4a` **C turn 2 — OpenClaw snapshot trim pass**（operator push back v2「寧願沒有也不誤導」）：12 skill OpenClaw 特定段刪減 + 4 張 snapshot 表 + 多個 inline snapshot 點抽象化
 
 ### C turn 2 變更明細（trim pass）
 

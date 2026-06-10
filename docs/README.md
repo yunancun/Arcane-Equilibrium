@@ -159,6 +159,12 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 
 ## 文档索引 (Document Index)
 
+### 2026-06-10 SKILLS_TODO 審計歸檔
+
+| 文件 | 内容 |
+|------|------|
+| `archive/2026-06-10--skills_todo_audit_closed.md` | 24-skill 安全審計 76/76 finding 全結案歸檔（2026-04-25 audit；修復 commit 鏈 `35a1b624`→`531e6d4a` 共 7 commits：P0×5 風控詞義反向/越位/捏造修正 + S1-S6 systemic + 9 對 cross-skill 互引 + C turn 2 snapshot trim）；原 `srv/SKILLS_TODO.md` 移入，根目錄不再保留；skill 現狀以 `.claude/skills/*/SKILL.md` 為準。|
+
 ### 2026-06-01 AEG-S1 Foundation Blocker Resolution
 
 | 文件 | 内容 |
