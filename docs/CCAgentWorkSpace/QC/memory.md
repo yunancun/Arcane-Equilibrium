@@ -139,3 +139,10 @@
 **下一審查點**：
 - ≥ 5 月 1 日 （EDGE-DIAG-1 Phase 3 passive-wait 至 clean n≥200）
 - 或 ≥ 5 月 7 日 (21d demo 時鐘解鎖，P0-3 Phase 5 edge 重評)
+
+## 2026-06-10 — L2 P3b B1 wiring sign-off = SANE（兩段式：BLOCKED-HANDOFF → 預註冊帶機械裁決）
+
+- **流程教訓**：QC 無 Bash——PM dispatch 假設可 ssh 跑 runtime 與工具授權衝突。正解 = 我出**預註冊驗收帶**（解析式預期 + FATAL 指紋 + 帶界），E4 執行位代跑，我按帶機械裁決（數分鐘）。此模式可複用：QC 的 runtime 取數一律 handoff，預註冊防 post-hoc 合理化。
+- **裁決**：B1 wiring（load_factor_bundle→reindex→beta_neutral_check）SANE——13 判準全落帶、零 FATAL；clone witness β_btc=0.99984（共享 int-bar-index 對齊的銳利見證，位置性錯位會使其崩向 0）；噪音候選 pass 合法（down 155 bars/286d span 過 30/180 門檻）。帶外復算 3 項自洽（upper 公式 bit 級/SE 比例=σ 比/超帶量=buffer 天數）。
+- **harness 期抓 2 修**：altcap producer dsn 漏傳（harness 錯非 adapter）；bundle 未裁窗（340 vs 295，`_clip_window` 修，mask 回看 buffer 保留）。
+- **範圍紀律**：wiring sanity ≠ alpha 裁決；真實候選仍須完整 B1+Q1+M3/M4 閘鏈。報告正本 = workspace/reports/2026-06-10--l2-p3b-b1-wiring-signoff.md（PM 代寫）。
