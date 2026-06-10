@@ -17,7 +17,7 @@ TODO.
 | Implementation plans / sign-off evidence | linked reports under `docs/CCAgentWorkSpace/*/workspace/reports/` |
 | Role profile/memory structure | `docs/agents/role-profile-memory-standard.md` |
 | Historical completed detail | linked files under `docs/archive/` |
-| Deep old inventory / RCA | `OPENCLAW_INVENTORY_CONSOLIDATED.md`, on demand only |
+| Deep old inventory / RCA | `AE_INVENTORY_CONSOLIDATED.md`, on demand only |
 
 ## Default loading route
 

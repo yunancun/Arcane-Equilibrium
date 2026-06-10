@@ -28,7 +28,7 @@ Read on demand:
 
 - `CONTEXT.md` and relevant `docs/adr/*` for domain/architecture work
 - `docs/agents/todo-maintenance.md` before editing `TODO.md`
-- `OPENCLAW_INVENTORY_CONSOLIDATED.md` only for deep history, RCA, or old
+- `AE_INVENTORY_CONSOLIDATED.md` only for deep history, RCA, or old
   design decisions
 
 ## Role

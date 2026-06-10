@@ -32,7 +32,7 @@ At session start, PM should read in this order:
 6. `.codex/agents/PM.md`
 7. `.codex/SUBAGENT_EXECUTION_RULES.md`
 8. On demand: `.codex/DEPLOYMENT.md`, `.codex/skills/INDEX.md`
-9. On demand only: `OPENCLAW_INVENTORY_CONSOLIDATED.md`
+9. On demand only: `AE_INVENTORY_CONSOLIDATED.md`
 
 ## PM responsibilities
 
