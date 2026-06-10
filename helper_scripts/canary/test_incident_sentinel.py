@@ -280,6 +280,15 @@ class TestA3ApiHealthz:
         assert not r.ok and r.severity == "CRITICAL"
         assert "ConnectionRefusedError" in r.evidence["error"]
 
+    def test_timeout_critical(self):
+        # §8.4-1 字面驗收含 timeout 故障型（E4 補：與 refused 同 except 路徑，
+        # 但驗收映射要求顯式覆蓋）；key 仍固定 a3:api_down（錯誤型態不分裂 key）。
+        def opener_times_out(url, timeout=None):
+            raise TimeoutError("timed out")
+        r = isentinel.check_api_healthz("http://127.0.0.1:8000", opener=opener_times_out)
+        assert not r.ok and r.severity == "CRITICAL" and r.alert_key == "a3:api_down"
+        assert "TimeoutError" in r.evidence["error"]
+
 
 class TestA4SeamRejects:
     def test_above_threshold_warns(self):
