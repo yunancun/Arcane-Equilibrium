@@ -200,3 +200,7 @@
 - Linux E4 smoke (24-symbol × real market.klines altcap; PG-real) owed.
 
 **Minor honest flag (non-blocking)**: validate_shift1_pattern empirical check correlates only the LAST window-slice (feature_values[n-window:n]) vs shift(1) slice — a single-window spot-check, not full-series rolling leak scan. Adequate as adversarial screen + paired with static SQL/pandas structural net + the by-construction leak-free klines path; deeper full-series empirical scan is a future enhancement, not a P3b blocker (the structural+empirical+test triangulation covers the realistic leak vectors).
+
+## 2026-06-10 — P4 online-FDR M1+M2 final ratification
+
+7 項=6 APPROVE/APPROVE-with-NOTE + 1 MODIFY（#3 debit 須含「dsr stage 渲染 pass/fail 即扣」，否則 single-config PBO honest-DEFER 下可無限免費 re-look DSR，破 E[V]≤Σα_i 前提 (c)；math gate 實作五 stage 全跑無 short-circuit、docstring :1003 誤述）。#2 拍板 **Option B**（Option A 斷帳本-水準恆等=無 FDR 保證，拒背書）。自含 bound：per-family mFDR ≤ 0.1·α_target（10x margin）、全域 ≤ α_target 需 **N_fam ≤ 1/γ=10**（cardinality healthcheck 閾值）。α_i ≤ 5e-4 恆成立 ⇒ cap=0.005 vacuous（defense-in-depth）+ threshold ≥ 0.9995 ⇒ 初期 discovery≈0 是設計後果（healthcheck 監測 conducted>0 非 discoveries>0）。NOTE：V137 CHECK 三值邏輯洞（NULL n_eff 過 CHECK）MED-HIGH、refund×debit_failed 無互斥、orphan refund wealth-inflation 向量、debit_id 決定性未規範、pre_reg_id 無 FK。E1-READY=YES+1 binding 條件。報告：workspace/reports/2026-06-10--l2-p4-m1-m2-final-ratification.md
