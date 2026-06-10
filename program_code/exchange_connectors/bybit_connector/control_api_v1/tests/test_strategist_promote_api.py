@@ -571,7 +571,9 @@ class TestApplyLiveGateChain(unittest.TestCase):
                 return_value=(self.source_row, None),
             ), patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
-                "OPENCLAW_IPC_SECRET": secret,
+                # OPS-2 Phase 2 cutover：授權驗證 key 改讀
+                # OPENCLAW_LIVE_AUTH_SIGNING_KEY（IPC secret 已無 fallback 作用）。
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY": secret,
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",

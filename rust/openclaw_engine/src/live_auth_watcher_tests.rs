@@ -185,22 +185,21 @@ fn fresh_auth(now_ms: u64, ttl_ms: u64) -> LiveAuthorization {
 /// This is a test-only indirect — production reads the same env vars.
 ///
 /// **Env var contention**: many tests mutate `OPENCLAW_SECRETS_DIR` /
-/// `OPENCLAW_IPC_SECRET`; running watcher tests together (or with
+/// `OPENCLAW_LIVE_AUTH_SIGNING_KEY`; running watcher tests together (or with
 /// other live_authorization tests) under a single test binary risks
 /// interleaving. We serialize watcher tests via a mutex below.
-/// 許多測試改 `OPENCLAW_SECRETS_DIR` / `OPENCLAW_IPC_SECRET`；
+/// 許多測試改 `OPENCLAW_SECRETS_DIR` / `OPENCLAW_LIVE_AUTH_SIGNING_KEY`；
 /// 同一 test binary 並行會交錯。下方 mutex 串行。
 fn set_test_env(secrets_dir: &std::path::Path) {
     std::env::set_var("OPENCLAW_SECRETS_DIR", secrets_dir);
-    // OPS-2 SECRET-SPLIT — 兩 env 都 set；Phase 1 兩值相同對齊 restart_all seed 行為。
-    // 為什麼：避免測試走 Phase 1 fallback path 觸發 WARN log（測試環境 1/h 仍會 emit）；
-    // 同時驗 primary path 工作。
-    std::env::set_var("OPENCLAW_IPC_SECRET", TEST_SECRET);
+    // OPS-2 SECRET-SPLIT Phase 2 cutover（2026-06-10）— 只 set
+    // OPENCLAW_LIVE_AUTH_SIGNING_KEY（不再雙 set；runbook §13.3）。
+    // 為什麼：`OPENCLAW_IPC_SECRET` fallback 已自 read_live_auth_signing_key
+    // 移除，IPC env 對授權驗證路徑無作用，雙 set 只會誤導讀者。
     std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY", TEST_SECRET);
 }
 fn clear_test_env() {
     std::env::remove_var("OPENCLAW_SECRETS_DIR");
-    std::env::remove_var("OPENCLAW_IPC_SECRET");
     std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY");
 }
 

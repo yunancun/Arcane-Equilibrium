@@ -58,7 +58,7 @@ OpenClaw runtime 倚賴一組 long-lived secret material 維持 Live trading 5-h
 | Rotation 期間 LiveDemo 同 Mainnet 同等嚴格 | feedback `live_no_degradation_by_endpoint` | endpoint 降級 = root principle 4 違反 |
 | `restart_all --rebuild` 必跑 rotation 後（engine reload） | OPS-2 spec §3.1 + restart_all.sh | engine 仍用 old key |
 | operator 必簽 audit row（每次 rotation）| root principle 8 + §9 | rotation 來源不可追溯 |
-| Phase 2 land 後 Live + missing `OPENCLAW_LIVE_AUTH_SIGNING_KEY` → engine startup panic | OPS-2 spec §3.2 | gate #5 弱化 |
+| Phase 2 land 後 Live + missing `OPENCLAW_LIVE_AUTH_SIGNING_KEY` → live 拒 spawn + log kind `live_auth_signing_key_missing`（panic gate 在但被 LIVE-GATE-BINDING-1 post-dominate，僅窄路徑觸發；CC-MED-1 校準 2026-06-10） | OPS-2 spec §3.2 | gate #5 弱化 |
 
 ---
 
@@ -82,7 +82,7 @@ OpenClaw runtime 倚賴一組 long-lived secret material 維持 Live trading 5-h
 >
 > - 此 seed 行為**不視為違反**本節 urandom 要求；屬 OPS-2 spec §3.1 Phase 1 設計 contract。
 > - **第一次 scheduled rotation（90d）必須 from urandom**，不可再次 seed-from-ipc（per OPS-2 spec §9.4 hidden risk + §5.2.2 cadence）。
-> - **Phase 2 cutover 後（≥2026-06-10）**：`restart_all` 不再 seed；`live_auth_signing_key.txt` missing = fail-closed engine startup panic（per §13.4 + spec §3.2 Rust `main.rs` 第二 panic block）。
+> - **Phase 2 cutover 後（≥2026-06-10；CC-MED-1 校準 2026-06-10，PM 拍板=保留 seed）**：`restart_all` **保留** auto-seed 作 §13.5 rollback 安全墊（僅 `[ ! -f ]` 首次 provisioning，不讀 legacy env、非 runtime fallback——引擎/Python 只讀 `OPENCLAW_LIVE_AUTH_SIGNING_KEY`/file）。**注意**：seed 複製 `ipc_secret.txt` 同 material，首次 90d urandom rotation（due **2026-09-08**）前任何 missing-file 重啟會靜默重耦合兩 secret 域——operator 見 seed echo 應視為異常信號並排查 file 為何消失。缺 key 的**實際症狀**＝engine 照常啟動、live pipeline 拒 spawn、log kind `live_auth_signing_key_missing` deny-loop（panic gate 存在但被 LIVE-GATE-BINDING-1 post-dominate，僅 `live_bindings` 已成立的窄路徑觸發；per E2 A1 + CC-MED-1）。
 > - cross-ref：§13 Phase 2 Cutover SOP / §10.1.1 Phase 1 fallback WARN invariant。
 
 ```bash
@@ -312,7 +312,7 @@ A-5 replay_signing_key：見 `replay_signing_key_rotation.md §5`。
 | `IpcAuthFailed` | P-1 | IPC handshake HMAC mismatch | 確認所有 IPC 客戶端帶新 secret reconnect |
 | Bybit `retCode != 0` 連續 | P-3 | API key invalid / IP 不在 allowlist | 回 `4.2.2` validate 流程；不重試 (fail-closed) |
 | `LiveAuth role mismatch` | A-1 | authorization tier 不對 | revoke + renew with correct role |
-| engine startup panic | P-1 / P-2 | Live + missing key file | 復原 file from `.rotated.<UTC_TS>` 或 quarantine 回退 |
+| live 拒 spawn + log kind `live_auth_signing_key_missing`（panic 僅窄路徑；CC-MED-1 校準） | P-1 / P-2 | Live + missing key file | 復原 file from `.rotated.<UTC_TS>` 或 quarantine 回退 |
 | restart_all `--rebuild` fail | any | binary build fail / disk full | inspect log + revert commit + restart engine 不 rebuild |
 | `/auth/renew` fail | A-1 | operator token expired / role drift | 重新登入 operator + retry |
 
@@ -605,6 +605,7 @@ ssh trade-core "cd $OPENCLAW_BASE_DIR/rust/openclaw_engine && cargo test --relea
 
 - log substring：`live_auth_signing_key_missing`
 - Rust error variant 名（trace / journald）：`AuthError::LiveAuthSigningKeyMissing`
+- preflight gate token（live_preflight.py 既有雙 taxonomy，CC-LOW-2）：`live_auth_key_missing`
 
 **parallel 保留（不立即移除）**：
 
@@ -656,7 +657,7 @@ per OPS-2 spec §3.3 Rollback table + 本 runbook §7.2 Rollback procedure：
 # 1. stop engines
 ssh trade-core "bash $OPENCLAW_BASE_DIR/helper_scripts/stop_all.sh"
 
-# 2. 確認 live_auth_signing_key.txt 存在 chmod 600 + 非空（spec §3.3 Phase 2 D+14 後 panic 阻 boot row）
+# 2. 確認 live_auth_signing_key.txt 存在 chmod 600 + 非空（spec §3.3 Phase 2 D+14 後缺 key row；實際症狀=live 拒 spawn 非 panic 阻 boot，CC-MED-1 校準）
 ssh trade-core "ls -la \$HOME/BybitOpenClaw/secrets/environment_files/live_auth_signing_key.txt"
 
 # 3. 若不存在 → seed from ipc_secret.txt 暫救（緊急 fallback）
