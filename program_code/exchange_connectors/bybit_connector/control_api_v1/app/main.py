@@ -610,6 +610,33 @@ async def _startup_integrity_check() -> None:
             _div_flush_exc, _div_flush_exc,
         )
 
+    # ── P5-SM soak 第二輪: 唯讀 IPC canary（E1-C 模組 / E1-B wiring）──
+    # leader-elected（與 flusher 同一把 flock = 同進程，計數器才能被 flush 投影）；
+    # kill-switch OPENCLAW_SM_IPC_CANARY_ENABLED 嚴格 "1" 默認 OFF（soak 啟動才開，
+    # OFF 時協程立即返回 = 零負載）。cadence 默認 120s ±10% jitter + PM 五條
+    # fire-機率防護（single-flight / 2s timeout / 連敗退頻 / kill-switch / O(1)
+    # 唯讀）。fail-open 不阻斷啟動；worst case = canary 死 = 只少觀測數據
+    # （[82] soak-window check 會 FAIL，權威路徑不受影響）。
+    try:
+        import asyncio as _asyncio_canary  # noqa: PLC0415
+        from .governance_ipc_canary import (  # noqa: PLC0415
+            governance_ipc_canary_loop as _canary_loop,
+        )
+        _asyncio_canary.create_task(
+            _canary_loop(),
+            name="sm-ipc-canary",
+        )
+        base.logger.info(
+            "P5 SM IPC canary scheduled (kill-switch default OFF) / "
+            "SM IPC canary 已排程（kill-switch 默認 OFF）"
+        )
+    except Exception as _canary_exc:
+        base.logger.warning(
+            "P5 SM IPC canary startup failed (fail-open): %s / "
+            "SM IPC canary 啟動失敗（不阻斷）：%s",
+            _canary_exc, _canary_exc,
+        )
+
     # ── B1.5: AIServiceListener startup (R4-3 fix) ─────────────────────
     # Start AIServiceListener so Rust StrategistScheduler can connect.
     # 啟動 AIServiceListener 以便 Rust StrategistScheduler 可以連接。

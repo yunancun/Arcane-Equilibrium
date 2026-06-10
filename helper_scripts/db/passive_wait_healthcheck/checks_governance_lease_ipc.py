@@ -190,7 +190,360 @@ def _read_comparator_observed(cur: Any) -> str:
     )
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# `[82]` lease_ipc_soak_window — P5-SM soak 第二輪（E1-D，2026-06-10）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# ── S3/S4 gate 閾值（PA 設計 §4 + PM cadence 定案 2026-06-10）──
+
+# S3：連續有效窗下限（小時）。48h 覆蓋兩輪 daily cron + 跨 epoch，是 step-iii
+# 單向 cutover 的證據底線（生存 > 速度，PM 拍板不縮）。
+SOAK_WINDOW_MIN_HOURS: float = 48.0
+
+# S3：跨 epoch 累計 canary probe 下限。120s cadence 下 48h ≈ 1440 拍，500 floor
+# trivially-met（PM：binding 條件是 48h + 99% + 連段 + S4，本 floor 保留作底線）。
+SOAK_MIN_PROBES: int = 500
+
+# S3：結構成功率下限（cum_ok / cum_attempts）。
+SOAK_MIN_SUCCESS_RATE: float = 0.99
+
+# S4：epoch 間隙上限（秒）。30min 足夠 rebuild（~42s）+ restart 數次；超過 =
+# 觀測黑洞 → 窗中斷、錨點重置（fail-closed）。
+SOAK_EPOCH_GAP_MAX_SECONDS: int = 1800
+
+# soak-active 推定的事件回看窗（小時）：近 72h 有任何 soak 事件即視為 active
+# （即使 flag 已被誤關——這正是要抓的 soak invalid 情形）。
+SOAK_ACTIVE_EVENT_LOOKBACK_HOURS: int = 72
+
+# 事件掃描窗（天）：窗計算的最大回看（soak 兩週量級；14d 外不主張連續性）。
+SOAK_EVENT_SCAN_DAYS: int = 14
+
+# flusher 死判定：V129 'canary' row updated_at 距今超過此秒數 = flusher 停擺
+# （flusher 30s cadence，1800s = 60 個週期靜默，與 epoch 間隙容忍一致）。
+SOAK_CANARY_SNAPSHOT_STALE_SECONDS: int = 1800
+
+# canary 停擺判定：窗內累計 attempts 必須 ≥ (窗秒數 / 退頻上限 300s) × 0.5。
+# 用退頻 cadence（最慢合法拍距）+ 50% 安全係數做超保守下限——低於它代表 canary
+# 在窗內大段時間根本沒在拍（probe 數不增長），非單純失敗率問題。
+SOAK_CANARY_STALL_FLOOR_INTERVAL_SECONDS: int = 300
+SOAK_CANARY_STALL_SAFETY_FACTOR: float = 0.5
+
+# 窗太短時跳過停擺判定（秒）：窗 <30min 時期望拍數 <3，整數噪音會誤殺剛啟動
+# 的 soak（此時窗條件本來就 FAIL，停擺軸不需要搶答）。
+SOAK_STALL_CHECK_MIN_WINDOW_SECONDS: int = 1800
+
+
+def _parse_event_detail(raw: Any) -> dict:
+    """事件 detail 欄容錯解析：psycopg2 jsonb 自動回 dict；mock/text 回 str。"""
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw:
+        try:
+            import json  # noqa: PLC0415
+
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:  # noqa: BLE001 — detail 畸形不致命（fail-closed 由 caller 軸處理）
+            return {}
+    return {}
+
+
+def check_82_lease_ipc_soak_window(cur: Any) -> tuple[str, str]:
+    """[82] lease_ipc_soak_window — S3/S4 soak 連續有效窗評估（fail-closed）。
+
+    讀 V129 兩 row（'singleton' + 'canary'）+ V137 soak 事件帳本，重建「連續有效
+    soak 窗」並按 PA §4 S3/S4 判 PASS/FAIL：
+
+      - **soak-active 推定**：V129 任一 row flag_enabled=true，OR 近 72h 有 soak
+        事件。非 active → PASS-skip（"soak not active"，不污染非 soak 期 cron）。
+      - **錨點（anchor）**：窗起點 = 下列最晚者——14d 掃描窗下限 / 帳本首事件
+        （無法主張更早連續性）/ 任何 flag-OFF 觀測 / OFF→ON 轉變（同 epoch
+        flag_change 或跨 restart rollover 的 prev_flag_enabled=false）/ epoch 間隙
+        >30min 或間隙不可知的 rollover（fail-closed 重置）。
+      - **S4 FAIL 軸**：flag 當前 OFF / counter_regression 事件在窗內 /
+        「當前 canary total < 窗內事件快照 max」的無狀態倒退交叉偵測。
+      - **S3 FAIL 軸**：窗 <48h / 累計 probe <500 / 成功率 <99% / 窗內有
+        canary_fail_streak（≥15min 連段）事件。
+      - **基建死 FAIL 軸**：active 但 V137 缺 / canary row 缺 / canary snapshot
+        stale（flusher 死）/ 累計 attempts 低於停擺下限（canary 死）/ 帳本空。
+
+    計數歸屬誠實聲明：counter 是 epoch 粒度——錨點若切在 epoch 中段，該 epoch 的
+    全量計數仍計入（對成功率是保守方向：舊失敗仍拉低比率；對 probe floor 是輕微
+    寬鬆方向，但 binding 條件是 48h 窗 + 99% 率，500 floor 在 120s cadence 下
+    trivially-met，PM 定案已明示）。
+
+    Returns:
+        ``(status, msg)``；FAIL 標明第一個未過的條件 + 數字；PASS 附全量數字。
+    """
+    # 防禦性 rollback（鏡 check_81 pattern）。
+    try:
+        cur.connection.rollback()
+    except Exception:  # noqa: BLE001 — 防禦性，rollback 失敗非致命
+        pass
+
+    # ── 1. V129 存在性：缺 = 觀測棧未部署 → soak 不可能 active → PASS-skip ──
+    try:
+        cur.execute("SELECT to_regclass('learning.lease_ipc_divergence_snapshot') IS NOT NULL")
+        v129_row = cur.fetchone()
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[82] V129 existence check failed: {exc}")
+    if not v129_row or not v129_row[0]:
+        return ("PASS", "[82] soak not active (V129 snapshot table absent) — skip")
+
+    # ── 2. V129 兩 row（flag + canary 計數 + freshness）──
+    try:
+        cur.execute(
+            "SELECT snapshot_key, total, matches, divergences, flag_enabled, "
+            "       EXTRACT(EPOCH FROM (now() - updated_at))::BIGINT AS age_s "
+            "FROM learning.lease_ipc_divergence_snapshot "
+            "WHERE snapshot_key IN ('singleton', 'canary')"
+        )
+        snap_rows = cur.fetchall() or []
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[82] V129 snapshot query failed: {exc}")
+    snaps: dict[str, tuple[int, int, int, bool, int]] = {}
+    for r in snap_rows:
+        snaps[str(r[0])] = (
+            int(r[1] or 0), int(r[2] or 0), int(r[3] or 0), bool(r[4]), int(r[5] or 0),
+        )
+    flag_now = any(s[3] for s in snaps.values())
+
+    # ── 3. V137 存在性 + 近 72h 事件數（active 推定第二軸）──
+    try:
+        cur.execute("SELECT to_regclass('learning.lease_ipc_soak_events') IS NOT NULL")
+        v137_row = cur.fetchone()
+        v137_exists = bool(v137_row and v137_row[0])
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[82] V137 existence check failed: {exc}")
+
+    recent_events = 0
+    if v137_exists:
+        try:
+            cur.execute(
+                "SELECT COUNT(*) FROM learning.lease_ipc_soak_events "
+                f"WHERE created_at > now() - interval '{SOAK_ACTIVE_EVENT_LOOKBACK_HOURS} hours'"
+            )
+            cnt_row = cur.fetchone()
+            recent_events = int(cnt_row[0] or 0) if cnt_row else 0
+        except Exception as exc:  # noqa: BLE001
+            return ("FAIL", f"[82] soak_events recent-count query failed: {exc}")
+
+    # ── 4. soak-active 推定；非 active → PASS-skip ──
+    active = flag_now or recent_events > 0
+    if not active:
+        return (
+            "PASS",
+            "[82] soak not active (flag OFF on all snapshots; no soak events in "
+            f"last {SOAK_ACTIVE_EVENT_LOOKBACK_HOURS}h) — skip",
+        )
+
+    # ── 5. active 下的基建完整性（fail-closed）──
+    if not v137_exists:
+        return (
+            "FAIL",
+            "[82] soak active but learning.lease_ipc_soak_events missing "
+            "(V137 not applied) — continuity ledger unavailable, window 不可重建",
+        )
+    if not flag_now:
+        # active 由近 72h 事件推定但 flag 當前 OFF = soak 被中斷（S4 invalid）。
+        return (
+            "FAIL",
+            "[82] soak invalid: flag currently OFF while soak events exist in "
+            f"last {SOAK_ACTIVE_EVENT_LOOKBACK_HOURS}h — anchor reset "
+            "(S4: 0 flag-OFF 觀測未滿足)",
+        )
+    canary_snap = snaps.get("canary")
+    if canary_snap is None:
+        return (
+            "FAIL",
+            "[82] soak active but no 'canary' snapshot row in V129 — canary/flusher "
+            "投影未運行（檢查 OPENCLAW_SM_IPC_CANARY_ENABLED 與 flusher leader）",
+        )
+    if canary_snap[4] >= SOAK_CANARY_SNAPSHOT_STALE_SECONDS:
+        return (
+            "FAIL",
+            f"[82] flusher dead: 'canary' snapshot age={canary_snap[4]}s >= "
+            f"{SOAK_CANARY_SNAPSHOT_STALE_SECONDS}s — V129 投影停擺，窗證據凍結",
+        )
+
+    # ── 6. now epoch + 事件掃描（14d，ASC）──
+    try:
+        cur.execute("SELECT EXTRACT(EPOCH FROM now())::BIGINT")
+        now_row = cur.fetchone()
+        now_epoch = int(now_row[0]) if now_row else 0
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[82] now() query failed: {exc}")
+    try:
+        cur.execute(
+            "SELECT event_type, flag_enabled, prev_canary_attempts, prev_canary_ok, "
+            "       detail, EXTRACT(EPOCH FROM created_at)::BIGINT "
+            "FROM learning.lease_ipc_soak_events "
+            f"WHERE created_at > now() - interval '{SOAK_EVENT_SCAN_DAYS} days' "
+            "ORDER BY created_at ASC, id ASC"
+        )
+        event_rows = cur.fetchall() or []
+    except Exception as exc:  # noqa: BLE001
+        return ("FAIL", f"[82] soak_events scan query failed: {exc}")
+
+    if not event_rows:
+        # active + flag ON 但帳本全空 = flusher 從未寫事件（連 flusher_start 都缺）。
+        return (
+            "FAIL",
+            "[82] soak active but 0 soak events in scan window — flusher 事件鏈"
+            "未運行（V137 剛 apply 或 flusher 死），連續性不可證",
+        )
+
+    # ── 7. 錨點計算（第一遍掃描；fail-closed：不可證連續即重置）──
+    events = []
+    for r in event_rows:
+        events.append({
+            "type": str(r[0]),
+            "flag": bool(r[1]),
+            "canary_attempts": (int(r[2]) if r[2] is not None else None),
+            "canary_ok": (int(r[3]) if r[3] is not None else None),
+            "detail": _parse_event_detail(r[4]),
+            "ts": int(r[5] or 0),
+        })
+
+    scan_floor = now_epoch - SOAK_EVENT_SCAN_DAYS * 86400
+    anchor = max(scan_floor, events[0]["ts"])  # 帳本首事件前不主張連續性
+    anchor_reason = "ledger start"
+    for ev in events:
+        if not ev["flag"]:
+            # flag-OFF 觀測：窗不可早於此（S4 軸——之後的窗內必然 0 OFF）。
+            if ev["ts"] >= anchor:
+                anchor, anchor_reason = ev["ts"], "flag-OFF observation"
+            continue
+        if ev["type"] == "flag_change" and ev["detail"].get("from") is False:
+            # 同 epoch OFF→ON 轉變 = soak 起點。
+            if ev["ts"] >= anchor:
+                anchor, anchor_reason = ev["ts"], "flag OFF->ON transition"
+        elif ev["type"] == "epoch_rollover":
+            detail = ev["detail"]
+            if detail.get("prev_flag_enabled") is False:
+                # 跨 restart OFF→ON：前一 epoch flag OFF → 窗從本 rollover 起算。
+                if ev["ts"] >= anchor:
+                    anchor, anchor_reason = ev["ts"], "cross-restart flag OFF->ON"
+                continue
+            prev_ts_candidates = [
+                detail.get("prev_singleton_updated_at_epoch_s"),
+                detail.get("prev_canary_updated_at_epoch_s"),
+            ]
+            prev_ts_vals = [int(v) for v in prev_ts_candidates if v is not None]
+            if not prev_ts_vals:
+                # 間隙不可知 → fail-closed 重置（不可證連續）。
+                if ev["ts"] >= anchor:
+                    anchor, anchor_reason = ev["ts"], "rollover with unknown gap"
+                continue
+            gap = ev["ts"] - max(prev_ts_vals)
+            if gap > SOAK_EPOCH_GAP_MAX_SECONDS:
+                if ev["ts"] >= anchor:
+                    anchor, anchor_reason = (
+                        ev["ts"], f"epoch gap {gap}s > {SOAK_EPOCH_GAP_MAX_SECONDS}s",
+                    )
+
+    window_seconds = max(0, now_epoch - anchor)
+    window_hours = window_seconds / 3600.0
+
+    # ── 8. 窗內事件 FAIL 軸（第二遍：嚴格在錨點之後）──
+    in_window = [ev for ev in events if ev["ts"] > anchor]
+    for ev in in_window:
+        if ev["type"] == "counter_regression":
+            return (
+                "FAIL",
+                f"[82] S4 FAIL: counter_regression event at epoch_s={ev['ts']} inside "
+                f"window (anchor={anchor}) — 記帳完整性破洞，soak invalid",
+            )
+    for ev in in_window:
+        if ev["type"] == "canary_fail_streak":
+            return (
+                "FAIL",
+                f"[82] S3 FAIL: canary_fail_streak (>=15min) event at epoch_s={ev['ts']} "
+                f"inside window — 失敗連段違反 S3，soak 窗無效",
+            )
+
+    # ── 9. 跨 epoch 累計 + 無狀態倒退交叉偵測 ──
+    cum_attempts = canary_snap[0]
+    cum_ok = canary_snap[1]
+    last_rollover_ts = anchor
+    for ev in in_window:
+        if ev["type"] == "epoch_rollover":
+            cum_attempts += ev["canary_attempts"] or 0
+            cum_ok += ev["canary_ok"] or 0
+            last_rollover_ts = max(last_rollover_ts, ev["ts"])
+    # 無狀態交叉偵測：本 epoch（最後一個 rollover 之後）任何事件快照的 attempts
+    # 不得高於當前 V129 canary total（倒退而無對應 epoch_rollover = 記帳破洞）。
+    epoch_snapshot_max = max(
+        (
+            ev["canary_attempts"] for ev in in_window
+            if ev["type"] != "epoch_rollover"
+            and ev["ts"] > last_rollover_ts
+            and ev["canary_attempts"] is not None
+        ),
+        default=None,
+    )
+    if epoch_snapshot_max is not None and canary_snap[0] < epoch_snapshot_max:
+        return (
+            "FAIL",
+            f"[82] S4 FAIL: canary counter regression without epoch_rollover — "
+            f"current total={canary_snap[0]} < in-epoch event snapshot max="
+            f"{epoch_snapshot_max}（記帳完整性破洞）",
+        )
+
+    # ── 10. canary 停擺（probe 數不增長）──
+    if window_seconds >= SOAK_STALL_CHECK_MIN_WINDOW_SECONDS:
+        min_expected = int(
+            (window_seconds / SOAK_CANARY_STALL_FLOOR_INTERVAL_SECONDS)
+            * SOAK_CANARY_STALL_SAFETY_FACTOR
+        )
+        if cum_attempts < min_expected:
+            return (
+                "FAIL",
+                f"[82] canary stalled: cumulative attempts={cum_attempts} < "
+                f"conservative floor={min_expected}（窗 {window_hours:.1f}h，以退頻 "
+                f"{SOAK_CANARY_STALL_FLOOR_INTERVAL_SECONDS}s cadence × "
+                f"{SOAK_CANARY_STALL_SAFETY_FACTOR} 計）— probe 未在累積",
+            )
+
+    # ── 11. S3 gate 數字 ──
+    if window_hours < SOAK_WINDOW_MIN_HOURS:
+        return (
+            "FAIL",
+            f"[82] S3 not yet met: window={window_hours:.1f}h < "
+            f"{SOAK_WINDOW_MIN_HOURS:.0f}h (anchor reason: {anchor_reason}) — "
+            f"accumulating; probes={cum_attempts}",
+        )
+    if cum_attempts < SOAK_MIN_PROBES:
+        return (
+            "FAIL",
+            f"[82] S3 FAIL: cumulative probes={cum_attempts} < {SOAK_MIN_PROBES} "
+            f"over window={window_hours:.1f}h",
+        )
+    success_rate = (cum_ok / cum_attempts) if cum_attempts > 0 else 0.0
+    if success_rate < SOAK_MIN_SUCCESS_RATE:
+        return (
+            "FAIL",
+            f"[82] S3 FAIL: structural success rate={success_rate:.4f} < "
+            f"{SOAK_MIN_SUCCESS_RATE}（cum_ok={cum_ok} / cum_attempts={cum_attempts}）",
+        )
+
+    # ── 12. 全滿足 → PASS ──
+    return (
+        "PASS",
+        f"[82] soak window healthy: window={window_hours:.1f}h (anchor: {anchor_reason}), "
+        f"probes={cum_attempts}, success_rate={success_rate:.4f}, "
+        f"0 flag-OFF / 0 regression / 0 fail-streak in window, "
+        f"canary snapshot age={canary_snap[4]}s",
+    )
+
+
 __all__ = [
     "check_81_lease_ipc_soak",
+    "check_82_lease_ipc_soak_window",
     "LIVE_TRANSITION_FRESHNESS_MAX_SECONDS",
+    "SOAK_WINDOW_MIN_HOURS",
+    "SOAK_MIN_PROBES",
+    "SOAK_MIN_SUCCESS_RATE",
+    "SOAK_EPOCH_GAP_MAX_SECONDS",
+    "SOAK_CANARY_SNAPSHOT_STALE_SECONDS",
 ]
