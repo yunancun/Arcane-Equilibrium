@@ -47,6 +47,22 @@ fi
 export OPENCLAW_BASE_DIR="${OPENCLAW_BASE_DIR:-$BASE}"
 export OPENCLAW_DATA_DIR="${OPENCLAW_DATA_DIR:-$DATA}"
 
+# A3 API base：對齊 uvicorn 實際 bind host（restart_all.sh auto 解析 Tailscale
+# IPv4，禁 0.0.0.0）——實機 loopback:8000 不聽，sentinel.py 的 127.0.0.1 默認
+# 會讓 A3 常駐假 CRITICAL（§8.3-3 兩輪 all-pass 結構性不可達）。
+# 已設 OPENCLAW_SENTINEL_API_BASE 則尊重不覆蓋；未設則 auto-detect tailscale
+# ip -4（mirror m11_replay_runner_daily_cron.sh 同坑解法；lib/api_bind_host.sh
+# 是 server bind 視角且 0.0.0.0/:: 走 ERROR exit 2，不合本 client 端 fail-soft
+# 場景，故 inline 不 source）。解析失敗不設變數，留 sentinel.py 默認 loopback
+# （未來 bind=loopback 場景仍可達）；`|| true` 保證無 tailscale CLI 時
+# set -euo pipefail 不殺 wrapper。
+if [[ -z "${OPENCLAW_SENTINEL_API_BASE:-}" ]]; then
+    TS_IP=$(tailscale ip -4 2>/dev/null | head -1 || true)
+    if [[ -n "$TS_IP" ]]; then
+        export OPENCLAW_SENTINEL_API_BASE="http://${TS_IP}:8000"
+    fi
+fi
+
 # stale lock 自清：上輪 hang 死（mtime > 15min）→ 清掉避免永久 skip（設計 §9）。
 if [[ -d "$LOCK_DIR" ]] && [[ -n "$(find "$LOCK_DIR" -maxdepth 0 -mmin +15 2>/dev/null)" ]]; then
     echo "[$(ts)] WARN: stale lock (>15min) cleared: $LOCK_DIR" >> "$LOG"
