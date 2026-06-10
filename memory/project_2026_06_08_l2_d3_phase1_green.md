@@ -75,3 +75,13 @@ P3b hypothesize alpha-gate 已 green+commit **`24d049fc`**（18 檔/3989+）。*
 **deploy-NOTE(誠實記錄)**：(a) **prod 無 `trading_ai` role**(只有同名 database)→ V134/135 走 role-absent 分支(NOTICE「dev sandbox; REVOKE on PUBLIC sufficient」);`trading_admin`=owner 隱含全權(information_schema 顯示 7 privilege)=與 agent.lessons V133 同構,E4/MIT P3a sign-off 前提一致;append-only 實際由 PUBLIC-REVOKE+code 層 INSERT-only writer 保證。(b) api worker 啟動 4 條 `_sha256_text` import fallback log(`No module named 'program_code'`,api 從 control_api_v1 起跑絕對 import 不可達)=設計內 fail-soft,本地等價 sha256(hash 慣例一致)。(c) E3 LOW×2:AST 鐵律測試錨定硬編函數名集合(未來集合外 LLM 函數可規避,建議反向枚舉)/V136 header「Linux 驗 owed」自註 stale(bytes 不可改,接受)。
 
 **feature/l2-critic-lessons-tools = SUPERSEDED**：empty commit `1f34653c` 標記(含 SHA 對映表+為何不可 merge/rebase/cherry-pick/取檔)已 push origin。後續 L2 工作一律 branch off main。**owed**：deployed-E2E(真觸發→真 ledger row,operator-scope `/trigger`)。**P3b owed-before-enable 五項不變**(見上節)。SSOT=srv/L2_TODO.md。
+
+---
+
+## [2026-06-10 owed 五項 DONE] P3b owed-before-enable 全補齊 + E2E-0 達成
+
+**五項**：①`bar_index_reindex.py` ordinal-offset（PA 推翻 dense 0..N-1：`_span_days` calendar 語意，缺 bar 時 dense 低估 down-leg 180d）②6 條真實 NO-GO seed（funding_arb/funding_short/cascade_fade/funding_tilt/grid_short/textbook 家族；`source='dead_mode_seed'` 第 4 namespace+novelty placeholder union 修補）③`l2_candidate_evidence_adapter.py`（標量→序列捏造禁令寫死；45d mask buffer 算完裁窗輸出）+dispatch route（auth 第一行+inline-only+to_thread）④V127=7696 labels/26sym/1059 transitions（runner --write-db import 差層 pre-existing bug 順修+subprocess 真 bite 測試）⑤4380 根 klines+universe TOML。
+
+**對抗鏈戰果（E2 四輪全真彈）**：R1=route 同步 PG 阻塞 event loop+harness 半修 import（我的修反引入 direct-file 模式破壞）；R2=我修 LOW-1 引入序列化炸彈（date-key dict 過 `json.dumps(default=str)` 炸 key→cascade 中斷+fail-safe SM 毒化——「保留因子」零價值純危害）+no-bite 測試；R3=in-process bite 結構性不可能（conftest path 注入），subprocess 乾淨 context 才真 bite。**QC 流程創新**：QC 無 Bash→BLOCKED-HANDOFF+預註冊驗收帶（解析式預期+FATAL 指紋）→E4 代跑→機械裁決 SANE；clone witness β_btc=0.99984 是共享 int-index 對齊的銳利見證（錯位則崩向 0）。
+
+**E2E-0**：真 HTTP（Bearer+CSRF double-submit）→`capability_disabled` 雙閘真擋→`l2_gate_seam_log` seam_id=1 真 row（`l2adm:7b2406dda893`）→l2_calls 0=零 model 零成本。**殘**：E2E-1 operator-gated（enable diagnose_leak 一次→真 agent.l2_calls row）。**附帶**：guard v2 進程級（E2 probe 抓 daemon-thread 繞過 per-test fixture；fixture 污染 21 rows RCA：E4 parity 5 輪+deploy re-test 2 輪×3 sink 測試，fixture 文本 grep 一擊破案）；half_life 2 pre-existing fail 由他 session 領走已修上 main。**教訓**：(1)/tmp worktree 未 commit 產出會被系統清理蒸發——subagent transcript Write/Edit 重放可 0 損失恢復，但 commit-early 才是正解 (2)QC/read-only agent 派工不可含 runtime 執行假設——預註冊帶+執行位代跑是正解 (3)對抗審的修復本身要再過對抗審（我兩次修復引入新 bug 全靠 E2 攔）。main=`97a5c310`。
