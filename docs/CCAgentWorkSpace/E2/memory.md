@@ -5278,3 +5278,28 @@ E1 flag 對。`l2_advisory_orchestrator.py:429-432` `dispatch_and_execute` 傳 `
 - 親跑 revert→紅→restore→綠 是驗 mutation-bite 非空的硬手段，不採信「test 有寫斷言」。
 
 **verdict：E2 PASS to E4**（0 finding 待修）。
+
+## 2026-06-10 · E2 review — OPS-2 Phase-2 cutover `a3d27729` (RETURN to E1)
+
+**Verdict: RETURN**（1 HIGH + 1 MED + 1 LOW；production 代碼 0 defect，HIGH=漏掃 collateral 測試）。report: `workspace/reports/2026-06-10--ops2_phase2_cutover_review.md`。
+
+**抓法（可複用）**：
+- **base-vs-HEAD 全套失敗清單 diff** 是抓漏掃 collateral 的決定性手法：分支單 commit off base → `git checkout HEAD~1 -- <9 files>` 跑全套存 sorted FAILED 清單，還原 HEAD 再跑一次，`diff` 出唯一新增紅 = `test_strategist_promote_api.py::test_live_apply_all_gates_green_succeeds`（:574 注入 `OPENCLAW_IPC_SECRET` 當簽名 key，Phase-1 fallback 養出來的隱性依賴）。E1 只跑點名 5 檔（62 綠）就宣稱 collateral 清完 — **「受影響檔案清單」由 grep app-caller 推導必然漏「test fixture 對舊行為的隱性依賴」**，必須全套 sweep + 與 base diff（Mac 既有紅 66 條會淹沒肉眼，diff 才乾淨）。
+- **雙語言 mutation 全 bite**：Rust panic gate 鎖 false → 指名測試紅；Python 重加 fallback → 3 條 cutover 定義性測試紅。新測試非遷就。
+- **panic post-domination 結構分析**：spec §3.2 偽碼 gate `live_bindings.is_some()` 被 LIVE-GATE-BINDING-1 的 load_and_verify（try_spawn 內先 fail → live_bindings=None）post-dominate → 典型缺-key 啟動 panic 永不 fire，實際症狀=engine 起、live 拒 spawn、WARN kind deny-loop。實作=spec 逐字 → 定性為 PA advisory 非 E1 defect（fail-closed 完整 + §13.2 log-alert 可命中）。**教訓：fail-loud 聲明要追 gate 變數的 data flow 上游，「mirror 既有 pattern」可能 mirror 到不可達性**。
+- 舊 fixture 對新代碼跑出 7 紅 = 親證 E1「collateral 紅」宣稱的最快手法（git show HEAD~1:file > 覆蓋 → 跑 → 還原）。
+- E1 報告數字 2 處不符（watcher 15/15 實 12；signing 16 實 13；總數 62 對）— per-file 拆分宣稱要抽查。
+
+**naming debt 裁決前例**：spec 兩 phase 欄都列的 rename（§4.1.1 `ipc_secret`→`live_auth_signing_key` param）+ 已有修復輪 → 裁 in-scope bundle 給 E1，不自修（PA 方案範圍內），不另開 debt ticket。
+
+**§5 race**：origin/main 領先 3 commit 全 docs `[skip ci]` 0 overlap；3 條外來 stash 照例不動；mutation 後逐次 `git status --porcelain` 驗空還原。
+
+## 2026-06-10 · re-E2 — OPS-2 cutover fix `cf1b9320` → ACCEPT (PASS to E4)
+
+三項修復（HIGH env-key collateral / MED 4 處 param rename / LOW 註釋語義）全機械到位；diff 恰 3 檔 +11/−7 零漂移。親跑：promote_api 18/18 + 原紅單測綠；cargo lib live_authorization 24/24 + bin watcher 12/12 + cutover 3/3；`bash -n` 過。report 同檔追加 section（不開新檔）。
+
+- **省 full-suite 的算術核驗法（可複用）**：E1「passed 4255→4256=淨增 1 測試」用 `git diff base..HEAD -- '*.py' | grep -cE '^\+\s*(async )?def test_'`（+6/−5=+1）零成本核實，不重跑全套；Rust flake 宣稱用 **total 不變性**核（上輪 4154+1=4155 = 本輪 4155+0，fix 0 新 test）。re-review 抽驗宣稱優先找這類 invariant。
+- **rename 零 caller 影響實證**：Rust 位置參數 rename 理論不可能破 caller，但便宜實證 = 跑「唯一外部 caller 所在 test target」編譯+綠。注意 openclaw_engine **bin 名 `openclaw-engine`（連字號）**，watcher/cutover tests 都是 main.rs/src `#[cfg(test)]` mod 在 **bin target**（`--bin openclaw-engine <filter>`），不是 `--test` integration target（`--test` 會報 no target + 列可用清單）。
+- **殘留字串域判定**：rename 後 grep `ipc_secret` 殘 6 處全 comment/負向測試名（IPC-transport 域概念引用）= 合法；抽 2 處讀上下文驗，不只看 grep 行。
+- **5e 真 fire 案例**：review 中 L2 Mesh 7 commits 推上 origin/main（含 E2/memory.md +574 行 sibling 寫入）→ `comm -12` 比對 PR 11 檔 vs sibling 檔 = 0 overlap → verdict 不受影響、照 SOP 記錄不忽略。
+- E1 本輪採上輪校正計數（watcher 12 非 15），數字 0 不符 → RETURN 輪揪 per-file 精度有效，re-review 輪信任度可升但仍抽驗。

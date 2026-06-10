@@ -5380,3 +5380,23 @@ verify round 3 P0 Q3 SQL fix + 3 MED runtime behavior post E1 round 3 + MIT roun
 **陷阱記錄**：temp-overlay 法初跑漏 sql/ + rust/ → 25 假 fail（V082/V084 SQL read + 跨語言 Rust source read FileNotFound）；補 rsync 後歸零。branch divergence：main 有 residual-producer 8 test 檔我舊 branch 無（103 test gap，非 P3b）。**結論：temp 多 fail 全為 (a)缺 scipy (b)temp 缺檔 (c)CSRF mode — 0 P3b 真回歸**。
 
 **owed（operator/E1）**：V127 population（regime-labels seed）、agent.lessons seed、★B1 gate temporal-key re-index（AEG-S3 wiring 前必修）、6 ex-BTC symbol market.klines 1d 覆蓋（ATOM/ETC/FIL/ICP/INJ/UNI）。prod 零觸碰，temp 已清。
+
+- 2026-06-10 BASELINE 重置：舊基線（2555/17）隨配置遷移作廢；下次全量回歸建立新行（格式: BASELINE: YYYY-MM-DD passed=N failed=M）
+
+## 2026-06-10 · OPS-2 Phase-2 cutover 全回歸 @ `cf1b9320`（PASS；E4 +1 測試 `e34a8772`）
+
+**被驗**：worktree `/tmp/wt-ops2-cutover` branch `fix/ops2-phase2-cutover`，`a3d27729`+`cf1b9320` off main `28e376c0`（E2 兩輪 ACCEPT）。移除 secret-split Phase-1 IPC fallback，env 缺失 fail-loud。報告 `2026-06-10--ops2_phase2_cutover_regression.md`。
+
+**數字（全親跑，跑兩遍同綠）**：Rust full `--no-fail-fast` 43 targets = **4154/1/4ign ×2**（唯一紅 = stress_tick_latency_benchmark；total 4155 == E1/E2）；Python（venvs/mac_dev 3.12.13）`pytest tests/ --ignore=tests/replay` = **66 failed/4256 passed/6 skipped ×2**，FAILED 清單 run1==run2 byte-identical；+E4 測試後 = 66/4257/6。base `28e376c0`（自建 throwaway worktree）= 66/4255/6，**FAILED 66 條整列 diff = 空**（勝過抽 5 條）；probe 1 條 = 403 write-endpoint = Mac CSRF-enforcement 環境 artifact（無 CSRF_SHADOW=1 → 66 紅 mode，與 2026-05-30 F-NEW-1 一致）。
+
+**★ stress flake 裁定 SOP（記住此法）**：兩輪 full 紅（1135.5/1117.3μs vs <1000μs debug）→ (a) 結構：PR 0 觸碰 stress 檔；(b) HEAD standalone ×3 = 1059-1073μs 全紅；(c) **base standalone ×3（共享 CARGO_TARGET_DIR 重編 base，省 dep 重編）= 1068-1076μs 全紅** → base 本機今日同紅且 HEAD 值不劣（均值 1066.7 vs 1072.3）= 環境性非回歸，tick path 零劣化。跨 session（E1 紅/E2 紅/E1-fix 綠）= session 噪音。**獨立重做 base 裁定而非沿用 E1 stash 證據**。
+
+**測試數對賬（名字級，非僅總數）**：Python `def test_` 4316→4317(+1=記帳)；Rust `#[test]` 4186→4189(+3=main.rs ops2 mod)。名字 diff：Rust live_authorization 24→24（刪 `phase1_fallback_reads_ipc_secret_when_live_auth_unset` + rename `primary_wins_over_ipc_fallback`→`primary_read_ignores_ipc_secret`，+`ipc_secret_alone_no_longer_provides_signing_key`）；Python secret_split 8→9（刪 3 WARN + 1 rename，+5 新負向）。**被刪全為被移除功能（Phase-1 fallback）的行為測試且有「fallback 已死」負向取代 = 合法刪除類**；0 靜默消失。坑：zsh `$rev:rust/...` 會吃 `:r`（modifier）→ 必 `${rev}:path`。
+
+**mock-bite 親驗**：promote gate-chain 測試非 mock 短路——毒 `_read_live_auth_signing_key`→`""` → 紅 403 `gate_failed=authorization`+Phase-2 hint（真走 live_preflight HMAC 驗證）；還原 byte-clean。四象限（Rust panic live/非 live 不 panic/Py sign raise/Py verify reason）+ Rust verify 負向 + cross-lang pinned `1b2b18d7…78fc` 雙端全綠 named-run 親驗。
+
+**E4 新增 1 測試（缺口真實非為加而加）**：gate-chain 層唯獨缺「授權檔有效+簽名 key 缺」永久負向（grep tests/ 0 檔引用 live_preflight；E2 Finding-1 正是此 surface 顯形）→ `test_live_flip_signing_key_missing_403_authorization`（toggle gate-5 cluster；legacy IPC 在場不得救；hint 含新 env 名）。bite：暫重加 IPC fallback → 此測試紅 → 還原。commit `e34a8772`（僅測試檔）。
+
+**教訓**：(1) 負向測試的 mutation-bite 方向是「把被禁行為加回去」（重加 fallback→測試應紅），不是把正路徑弄壞；一條 bite 同時證測試非 tautology + 鎖回歸方向。(2) base-side flake 裁定用共享 CARGO_TARGET_DIR 重編 base worktree（dep 全 reuse，僅 workspace crates 重編，分鐘級）；跑完把 HEAD 重編回來恢復 cache 一致。(3) full-suite 下 timing benchmark 值（1135μs）vs standalone（1066μs）差 ~7% = suite 負載，flake 對比必 standalone-vs-standalone 同條件。(4) patch.dict(os.environ) context 內 pop 是安全 hermetic 手法（退出整體還原）——unittest 風格檔內清 env 不需 monkeypatch。
+
+**VERDICT: PASS**（Linux full regression owed 隨 merge+`--rebuild` 部署 gate；origin/main 已進 L2 Mesh 7 commits，E2 證 0 overlap）。退 E1 清單：無。

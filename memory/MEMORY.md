@@ -3,8 +3,9 @@
 > 索引條目一行 ≤250 字;細節在 topic 檔(超長舊條目已於 2026-06-10 全文歸檔進各 topic 檔的 `[index-archive]` 節)。
 
 ## Project context
-- [A 組 triage + OPS-2 cutover + P5-SM 監測重設計 (2026-06-10)](project_2026_06_10_a_group_triage.md) — OPS-2 D+14 證據達成(WARN=0,3 restart 窗)E1 派 `fix/ops2-phase2-cutover`;AC19 alt FAIL/large_cap low-n;TONUSDT watch 關;A-1 關/B INCONCLUSIVE 維持;P5-SM 真缺口=IPC 管線零曝險,新 gate S1-S5,雙邊 divergence 結構性不可達(鐵則);TODO v122;教訓:psql 2>/dev/null 吞 SQL error 須交叉檢核
-- [L2 Mesh P1-P3b DEPLOYED (2026-06-10)](project_2026_06_08_l2_d3_phase1_green.md) — 四 phase cherry-pick 重放上 main `7b8fae45`（零衝突；測試適配補遺 `bf32074d` 閉「乾淨樹必 FAIL」盲點）+ Linux 部署完成：sqlx 133→136（engine auto_migrate applied=3），`agent.l2_calls`/`l2_consequential_marks`/`learning.l2_gate_seam_log` 建成全 0 rows=**dormant flag-OFF**；re-test 綠（layer2 家族 450/4xf/0f + full 4661/8 pre-existing/0 新 fail）；E3 deploy 審 PASS-with-NOTE（AUTO_MIGRATE consumer=engine 非 control_api）；feature branch SUPERSEDED `1f34653c` 勿 merge/取檔；**P3b owed-before-enable**(否則 universal DEFER):int-bar-index re-index+agent.lessons seed dead-modes+conductor wiring+V127 pop+6 ex-BTC klines;owed:deployed-E2E(operator `/trigger`);next=P3b-enable 前置/P4(online-FDR)/P2p;SSOT=srv/L2_TODO.md
+- [Agents/Skills 全面修訂 (2026-06-10)](project_2026_06_10_agents_skills_revamp.md) — 42 檔 +740/−999 字面化模型適配+hot-facts 指針+canonical 正本表+E4 BASELINE 自更新+R4 配置巡檢;**根目錄 .claude=symlink→srv/.claude 單副本**;未 commit(srv 時在 superseded branch);殘留最大槓桿=E4 memory 5384 行無壓實
+- [A 組 triage + OPS-2 cutover 全鏈 + P5-SM 監測重設計 (2026-06-10)](project_2026_06_10_a_group_triage.md) — OPS-2 cutover **全鏈完成 merge-ready**(E1→E2×2→E4→CC A-→BB 0FLAG→PM signoff;branch `fix/ops2-phase2-cutover` 5 commits;deploy operator-gated,rotation due 09-08);AC19 alt FAIL;TONUSDT watch 關;P5-SM 新 gate S1-S5(雙邊 divergence 結構性不可達=鐵則);TODO v123;教訓:psql 2>/dev/null 吞 error 須交叉檢核/base-vs-HEAD 全套 diff 抓漏掃/跳角色前先讀 owner 行
+- [L2 Mesh P1-P3b DEPLOYED (2026-06-10)](project_2026_06_08_l2_d3_phase1_green.md) — 四 phase cherry-pick 重放上 main（`7b8fae45`→收口 `9e920c21`，零衝突；測試適配補遺 `bf32074d` 閉「工作樹綠≠commit 綠」盲點）+Linux 部署完成：sqlx 133→136（engine auto_migrate applied=3；**AUTO_MIGRATE consumer=engine 非 control_api**，E3 抓），3 表建成 0 rows=dormant flag-OFF；re-test 450/4xf+full 4661/8 pre-existing/0 新 fail；feature branch SUPERSEDED `1f34653c` 勿 merge/取檔；**P3b owed-before-enable**(否則 universal DEFER):int-bar-index re-index+agent.lessons seed dead-modes+conductor wiring+V127 pop+6 ex-BTC klines;owed:deployed-E2E(operator /trigger);next=P3b-enable 前置/P4(online-FDR)/P2p;SSOT=srv/L2_TODO.md
 - [幽靈倉位 fill 記帳 bug 修復+部署 (2026-06-08)](project_2026_06_08_phantom_position_fill_fix.md) — demo TON 幻影倉根因=PositionUpdate/Fill 無序雙寫競態;修=apply_fill 唯一 mutator+reduce-only fail-closed+reconciler 幻影偵測軸;全鏈綠+原子部署(commit 74b2e264→origin bdf15e4f);剩:告警僅 DB 可查/LiveDemo 缺 authorization.json(既有)
 - [Odysseus AI workspace 部署於開發 Mac (2026-06-08)](project_2026_06_08_odysseus_mac_deploy.md) — PewDiePie self-hosted AI native 裝 ~/Projects/odysseus,loopback-only 加固;**ssh trade-core 靠 Tailscale MagicDNS,Tailscale 斷=SSH 斷**,承 [[project_ssh_bridge_workflow]]
 - [P2 #6/#7/#8 orderLinkId/postmortem/AST (2026-06-06;06-07 已生效)](project_2026_06_06_p2_orderlinkid_postmortem_ast.md) — #6 110072 close-only idempotent `a59a7f60`+#7 postmortem 分類器 `e0dc2a14` **已於 2026-06-07 全量 rebuild+restart 生效**(V131-133 同次 apply);10001-dup 對齊 follow-up `7ccf8451`;#8 AST defer(解凍 gate 剩 schema freeze);github:22→ssh-over-443 繞過
@@ -30,7 +31,7 @@
 - [ML/DL 自主學習架構](project_ml_dl_learning_architecture.md) — v0.4 Teacher-Student+LightGBM+Optuna+3DL
 - [Agent P2 動態 SL/TP](project_agent_p2_dynamic_sl_tp.md) — 默認 ATR 動態,agent_adjust() 可覆蓋,P1 max 硬頂
 - [Agent 工作空間系統](project_agent_workspace.md) — docs/CCAgentWorkSpace/ 下 profile/memory/workspace
-- [18-agent runtime 接線 (2026-04-25)](project_18_agent_runtime_wired.md) — srv/.claude/agents 18 subagent+24 skill;雙端 git sync
+- [18-agent runtime 接線 (2026-04-25)](project_18_agent_runtime_wired.md) — srv/.claude/agents 18 subagent+24 skill;根目錄 .claude=symlink→srv/.claude(單副本,無雙端)
 - [Layer 2 AI 推理循環 (2026-04-23 更正)](project_layer2_agent_design.md) — L0/L1/L2 三層;真 gap=L2 自主推理+Executor shadow→live
 - [5-Agent+H1-H5 Runtime (2026-04-23)](project_5agent_runtime_state.md) — ~4552 行 live shadow;Strategist live/Executor shadow 默認
 - [GUI 寫入面盤點](project_gui_write_paths_inventory.md) — 93 endpoints;Rust trading_mode 冷參數陷阱;fake-success 判別
@@ -87,7 +88,7 @@
 - [Sub-agent 可寫碼 (2026-04-18 驗證)](feedback_subagent_code_writing_refusal.md) — refuse pattern 已解除;E1 可派並行寫碼
 - [Meta-doc 用 git commit --only](feedback_git_commit_only_for_metadoc.md) — CLAUDE/TODO/docs/memory 必用 --only;multi-session 下 add+commit 不安全
 - [多角色 adversarial review (2026-04-24/05-28)](feedback_multi_role_strategic_review.md) — 關鍵決策派並行獨立 review;grill-me+獨立 agent cross-verify
-- [派工前 fetch+查遠端 branch+log-grep ticket (2026-04-24/05-28)](feedback_fetch_before_dispatch.md) — TODO Banner 可 stale 數天;dispatch prompt 留 NO-OP exit
+- [派工前 fetch+查遠端 branch+log-grep ticket (2026-04-24/05-28/06-10)](feedback_fetch_before_dispatch.md) — TODO Banner 可 stale 數天;dispatch prompt 留 NO-OP exit;commit 批次前也 re-fetch(branch 可被並行 session 中途宣告 SUPERSEDED),救援=detached worktree+cherry-pick+push HEAD:main
 - [IMPL DONE 必走 A3+E2 對抗核驗 (2026-05-09)](feedback_impl_done_adversarial_review.md) — 高風險 IMPL 自評不接受單獨 sign-off
 
 ## Code & architecture rules
