@@ -50,3 +50,10 @@ metadata:
 **修復方向**：非散修，是架構級——引入一致的 demo 探索地板 + decay/恢復貫穿所有 gate，讓系統能 bootstrap；逐一修 6 點。觸及進場/sizing/執行 gating → 高風險需 CC 合規審查 + PA 整體設計。**關鍵實驗**：修 gate 後讓策略用真實信號跑 demo，才能第一次真正測到策略真實 edge（被 gate 卡 6 週，至今不知策略到底有無 alpha）。operator 2026-06-01 選擇「先擴大審計再動手」，審計已完成，待決定是否派 PA。
 
 全文裁決見本次會話；證據 file:line 如上，全部 read-only。
+
+
+---
+
+## [index-archive 2026-06-10] 原 MEMORY.md 索引條目全文(壓縮索引前歸檔,內容為當時點狀態)
+
+- [6 週無 edge 根因調查 (2026-06-01) — Phase-1 runtime 推翻 gate-棘輪論](project_2026_06_01_fail_closed_gate_stack_root_cause.md) — 代碼審計找 6 個 fail-closed gate，但 **Linux runtime 查驗推翻「gate 棘輪是主因」**：cost_gate 14d 拒 90.5% 但被拒 estimate 100% 真負(avg −13bps)、0 誤殺正 edge（主會話親驗 SQL）→ 正確阻擋非錯殺；H0 81M+41M checks 0 blocked（root#2/#6b 部分證偽）；驗證歸零 root#1 殺傷≈0（潛伏）；真問題回到「為何已實現 edge 普遍負」= (a)無入場alpha/(b)exit-policy 摧毀真alpha(cut-winners/let-losers + regime_multipliers H2)/(c)成本，operator 拍板 QC 先做樞紐診斷再設計；bounded 真 bug：bb_breakout OI gate(14d僅2單)/qty_zero BTCUSDT 精度(13.9萬噪音 reject)/regime_1h 100%空+key mismatch；證偽手續費重複計數/信號反向/回測高估；**教訓：代碼審計易過度歸因 gate，runtime 查驗擋下排序錯**

@@ -114,3 +114,10 @@ Sprint N+1 D+0 dispatch fire 啟動：
 - W-AUDIT-8a Phase A spec: `srv/docs/execution_plan/2026-05-09--w_audit_8a_alpha_surface_foundation_spec.md`
 - TODO v19: `srv/TODO.md`
 - QCTODO archived: `srv/docs/archive/2026-05-09--qctodo_sprint_n0_n5_archive.md`
+
+
+---
+
+## [index-archive 2026-06-10] 原 MEMORY.md 索引條目全文(壓縮索引前歸檔,內容為當時點狀態)
+
+- [Sprint N+0 closure 2026-05-10 — runtime impact verified](project_2026_05_10_sprint_n0_closure.md) — 9/10 ops done + HIGH-5 12h watch; engine restart + auto-migrate V80/82/83/84 success; attribution_chain_ok 0.5%→100% (grid/ma/bb_breakout); [40] avg_net -17.82→+8.75bps; 4-agent loss audit 真實 runtime impact verified; 5 textbook 策略結構性 alpha-deficient 結論不變 (P0-EDGE-1 root closure pending Phase B/C/D + A 群); 22 sign-off invariant 14✅/6 DEFER/2 PARTIAL/0 FAIL; CC A 93.3% / QC APPROVE 3 push back / MIT APPROVE FULL post V083+V084 dry-run / BB APPROVE; ADR-0022 + ARCH-04 + AMD-03/04 land; commit chain HEAD b6ed4975

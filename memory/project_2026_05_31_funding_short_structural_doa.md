@@ -24,3 +24,10 @@ metadata:
 - ∴ funding_short_v2 的 30% 入場 / 160% break-even 門檻**設在交易所結構上限之上 → 結構性 DOA，永遠不 fire**。非市場（不是「目前低」）非 pipeline，是 **QC 設計時一眼可查的可行性錯誤**（建策略前先查交易所 funding cap）。
 
 **行動**：A1 funding_short NO-GO 是結構性永久；等 basis_panel 累積（≥14天 ~2026-06-13）或擴 universe **都無效**，停止打磨。BTC/ETH fence **不是**主因（我先前 push back 錯，已收回）。A2 (liquidation_cascade_fade) 同 probe avg_net -4.11bps 負、n_eff=9 也 non-viable。延續 [[project_2026_05_31_v58_alpha_pivot]] 的「A1 NO-GO」結論並給出結構性 why。
+
+
+---
+
+## [index-archive 2026-06-10] 原 MEMORY.md 索引條目全文(壓縮索引前歸檔,內容為當時點狀態)
+
+- [A1 funding_short_v2 結構性 DOA (2026-05-31)](project_2026_05_31_funding_short_structural_doa.md) — 核驗隔壁 f7271405：3 program bug 真且修對（A1 stale stub→to_regclass probe+V115 / A2 %(name)s psycopg2 註釋 KeyError 真但反應式 / params 純註釋 compute_edge 14.67bps verified 無 gate 鬆動）；載重結論修正：THIS probe #1 reject 是 missing_basis_asof 93%（basis_panel 僅 1.8/14 天，隔壁混淆「表存在」vs「數據足夠」）；funding 數據可信（WS+REST+Bybit 官方 API 三方一致無 clamp）；**結構性根因（我自抓 Bybit API 驗）= 正側 funding 硬上限 +10.9% APR < 策略 30% 入場門檻 → DOA 永遠不 fire；等 basis 累積/擴 universe 都無效；fence 不是主因（先前 push back 錯已收回）**；與 v58 entry「6週4候選死於 edge<成本」收斂

@@ -23,3 +23,10 @@ metadata:
 **交叉印證**:MIT+QC 各自獨立都指出 `data_loader.py:300` Phase-1 `compute_rule_based_regime` 的 full-sample vol-tercile cross-section leak(minor,productionized `aeg_regime_v0.1.0` runner 不可繼承)。
 
 承 [[project_2026_06_02_aeg_trend_listing_infra_deployed]]（infra 部署）+ [[project_2026_05_31_v58_alpha_pivot]]（成本牆 2 逃逸路）+ [[project_2026_06_01_rust_python_boundary_simplification_audit]]（P5-SM Option2）；funding-tilt 紅線見 [[project_2026_05_31_funding_short_structural_doa]]（cap SSOT + regime-dormant）；soak 發現呼應 [[feedback_evidence_discipline_under_degraded_tools]]（silent no-op 偽 pass）。
+
+
+---
+
+## [index-archive 2026-06-10] 原 MEMORY.md 索引條目全文(壓縮索引前歸檔,內容為當時點狀態)
+
+- [接手審計 + AEG-S2/funding-tilt 設計 (2026-06-03)](project_2026_06_03_v58_archive_audit_s2_design.md) — V5.8 意圖保存 ✅ + 歸檔完整性 3 塊全 PASS（E2/MIT/QC 對抗 ground 在代碼/DB/run-artifact 非文檔；trend NO-GO 撈 raw JSON 逐位對賬 defensible）；**P5 soak total 空轉陷阱**（gate=divergences==0 AND total>=N，comparator 只在 Python shadow-hub 觸發 → 0-divergence 必要非充分，收口前須讀 health-check `lease_ipc_divergence.total`）；推進方向：**AEG-S2**（V002 regime_snapshots schema 衝突→新建 research.aeg_regime_labels V127；FND-2 builder IMPL critical-path，待 scope）+ **funding-tilt 全 harness（E1 `6aefa576`+E2/MIT/QC 全鏈）= 🔴 NO-GO-C 關閉**（三重否決 carry_cost_ratio 3.9/HAC 1.64/DSR 0；per-leg carry_share 0.179=82% 裸價格 down-beta；N_eff 2.033≈2.087 cross-sectional 不比 trend 獨立 QC 收回樂觀假設；**第 5 個候選死於同根因 down-market beta 偽裝 edge**）→主路回 listing fade①；MIT+QC 交叉印證 data_loader.py:300 vol-tercile leak

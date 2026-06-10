@@ -111,3 +111,10 @@ originSessionId: 4111ef84-e51d-4d16-99bf-f40bf3aa8fe8
 ## Sprint N+1 estimated duration
 
 7-10 day (per dispatch v3.7 §2 Wave 結構)；W7 從原 4 day 縮到 2-3 day（W7-1 + W7-3 提早 land 共省 1.5 day）；W6 5 day；W1 6 day；W2 7 day；W3 5 day（等 W6+W7）；W4 1 day；W5 分散
+
+
+---
+
+## [index-archive 2026-06-10] 原 MEMORY.md 索引條目全文(壓縮索引前歸檔,內容為當時點狀態)
+
+- [Sprint N+1 D+0 pre-dispatch readiness 2026-05-10](project_2026_05_10_sprint_n1_d0_readiness.md) — 25 項提前準備全 land HEAD bf66f1b2; W7-3 (b42731f6) + W7-1 (c9fb0b8f) PR ready NOT DEPLOYED; W6 RFC 3 視角 + verdict draft (Track A/B 拆分); W2 v1.2 dual-layer σ + +15/+5-15/<+5 階梯 gate; W1 v1.1 BB WS-first (Rust panel_aggregator, rate 100→0 req/s); W5 三 P1 specs (V089/V090); CC A- 92.0% APPROVE-CONDITIONAL + E3 ALL PASS + R4 8 fix land; 21:30 UTC sign-off 後純執行 deploy + 派 9 wave 並行

@@ -27,3 +27,10 @@ metadata:
 
 **Why**：V5.8 13 模組（3500-5200hr）的 active gate 全 conditional on「有 edge 可治理」；edge 未證前建 autonomy 基建 = 為不存在的引擎造變速箱，且 M4 production writeback 已被 Decision Lease 基建 `UUID column vs lease:<id>` schema mismatch 反噬。違反憲法優先序。
 **How to apply**：edge 證實前 autonomy 只做 DESIGN；任何 Sprint 2+ schema 派工以 `sql/migrations/` 真實檔為編號權威（非 V5.8 §9 / 非 TODO Banner）；下游派工前先 reconcile V### roster。relates [[project_phase5_promotion_edge_crisis]] [[project_2026_05_10_sprint_n0_closure]] [[feedback_demo_loose_live_strict_policy]] [[project_2026_05_22_layered_autonomy_with_failsafe]]
+
+
+---
+
+## [index-archive 2026-06-10] 原 MEMORY.md 索引條目全文(壓縮索引前歸檔,內容為當時點狀態)
+
+- [V5.8 alpha pivot — 凍結 autonomy 主攻 alpha (2026-05-31)](project_2026_05_31_v58_alpha_pivot.md) — operator 拍板凍結 M1/M2/M6/M8/M9 active-IMPL（保留 DESIGN/stub）+ 主攻 alpha-source surface bundle（解凍 gate=首個 net+ candidate stage0_ready；M7 decay 唯一例外提前）+ Sprint 4 走 LiveDemo 降級；三審計：P0-EDGE-1 真 binding / A1(NO-GO 0 events)/A2/A3 三候選全 non-viable / V113 編號雙佔 BLOCKER / M1「feature-live」誇大；**2026-05-31 R-1a oi_delta reject 揭露成本牆——6 週 4 候選全死於 edge 量級(1-3bps)<成本(11-27bps)，翻牆只有事件驅動大move或低turnover多日perp兩條路，R-2 重定向 listing fade**
