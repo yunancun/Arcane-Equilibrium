@@ -197,3 +197,8 @@
 ## 2026-06-10 — half_life 測試 scipy importorskip 守衛（fix/half-life-test-scipy-skip @ dc5c60d7，待 E2）
 - 2 fit-path 測試加 `pytest.importorskip("scipy")` + requirements-ml.txt 顯式宣告 scipy>=1.10.0；斷言零改動。行為矩陣雙側 Mac 實證：有 scipy 7 passed / 無 scipy 5 passed 2 skipped。worktree /tmp/hl_scipy_fix 保留待 E2/E4。
 - 教訓：模擬「依賴不存在」要用 `raise ModuleNotFoundError` shadow 而非裸 `ImportError`——後者觸發 pytest importorskip deprecation warning（module-exists-but-broken 路徑），與真實 absent-module 行為不同。
+
+## 2026-06-10 P5-SM soak 第三棒收尾（feat/p5sm-soak-observability @ 9eba5a40，待 E2）
+- Wave1 驗證+V137 Linux dry-run 親跑（雙 apply 全 no-op/CHECK 負向拒/ROLLBACK 後零痕跡，max version 恆 136）；Wave2 沿用 0 重寫，抓到 1 真測試洞：[82] flag-OFF 觀測支路 mutation 存活——原測試數據被 OFF→ON transition 支路遮蔽，修=OFF 觀測改由非 flag_change 事件攜帶且無補償 transition，只有 belt-and-suspenders 支路能擋。**教訓：多支路同向 FAIL 的 gate，每支路的 bite 測試必須構造「只有該支路能擋」的數據，否則 mutation 被鄰路遮蔽**。
+- mutation 驗證紀律：長 && 鏈跑多個 mutation 會被前一輪殘留汙染（F 輪紅錯測試名）——**一 mutation 一 bash call，restore 後綠再下一個**；八個 mutation（canary single-flight/backoff + [82] 六支路）standalone 全紅後綠。
+- S5(b) smoke 的 profile 陷阱：GovernanceProfile Validation/Exploration 在 Rust `acquire_lease` 直接 `LeaseId::Bypass`（不 engage SM、bypass lease release=LeaseNotFound）→「demo profile」字面照做=驗不到 mutating arm；正解=Production profile + 環境層 demo 圍欄（OPENCLAW_ALLOW_MAINNET guard），且 engine_mode 值 Live/LiveDemo 同寫 'live_demo' 不可作環境斷言軸。
