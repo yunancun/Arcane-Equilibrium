@@ -167,3 +167,9 @@ dict §4.2 110072 註記（line 1355）結尾的 follow-up 句目前寫「既有
 - 2026-04-12：full_program_chain audit（BB-A1~A7 系列）
 - 2026-04-20：EDGE-P2-3 Phase 1B-1 retCode 擴充
 - 2026-04-24：全面復審；H-1 字典過期 + M-1/2/3 周邊優化
+
+---
+
+## 2026-06-10 Demo vs Mainnet 撮合/深度審計(AC19 alt 23.8% 歸因)
+
+- **「demo book 系統性薄於 mainnet」prior 證偽**(BB 自我更正):REST orderbook/tape 實測 demo=mainnet 同源鏡像(同 u/seq/execId 序列,OP/ETC/ARB 五檔逐位一致)+ 官方 demo doc「public data is identical to mainnet」。AC19 慘案歸因=**撮合模擬無 queue position**(官方:demo 掛單不可見於 order book),fill 規則最符合零-queue-credit trade-through-like(推斷 MEDIUM)。轉移性:alt mainnet 方向 ≥ demo(不保證 ≥60%)、large_cap demo≈公平;demo `EC_PostOnlyWillTakeLiquidity` reject 推送有正樣本(silent-degradation 該軸部分退役,`EC_ReachMaxPendingOrders` 軸仍未證)。下次查驗:MIT/QA 10 筆 alt fill 的 through-print 判別是否做(F-3 升級)、引用舊 prior 的 spec/SOP 是否改寫。報告:`workspace/reports/2026-06-10--demo_vs_mainnet_depth_matching_audit.md`(HIGH F-1 已副本至 Operator/)。

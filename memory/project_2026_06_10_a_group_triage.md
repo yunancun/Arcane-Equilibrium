@@ -31,3 +31,11 @@ metadata:
 A1 後續鏈當日走完:E1 `a3d27729`→E2 RETURN(1H/1M/1L)→E1-fix `cf1b9320`→re-E2 ACCEPT→E4 PASS `e34a8772`→CC APPROVE-CONDITIONAL A-(0 BLOCKER)→CC-MED-1 doc fix `823e53ad`→BB SIGN-OFF 0 FLAG→PM sign-off(報告 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-10--ops2_phase2_cutover_pm_signoff.md`)。branch `fix/ops2-phase2-cutover` 4 commits 未 merge,deploy operator-gated(C-C 外部 alert→merge→rebuild+Linux regression→C-B renew 留證→§13.6;首次 rotation 2026-09-08)。
 
 **追加教訓**:①E2 的 base-vs-HEAD 全套失敗清單 diff 是抓「漏掃 collateral 測試」的硬手段,點名檔驗證必漏 fixture 對舊行為的隱性依賴——已固化為 SOP。②PM 拍板保留 restart_all seed(rollback 安全墊,三方確認非 runtime fallback);runbook「panic 阻 boot」係統性失真已五處校準(實況=live 拒 spawn+log kind deny-loop,panic 被 LIVE-GATE-BINDING-1 post-dominate)。③PM 初判跳過 BB 被 runbook §13 owner 行推翻→撤回補派(0 FLAG 收場):裁決跳過角色前先讀 owner/chain 定義原文,不能只看編號段落。④CC session 偶發無 Write 工具:報告 PM 代落盤+核註保真,審計者原文不可改寫。⑤C-A「多獨立 restart 窗」法:依賴連續 log 的 soak 判準遇 log 輪轉,改用「N 個獨立重啟窗各自 0 信號+結構性發射率論證」重建置信。
+
+---
+
+## [同日追加 2] deploy gate 全綠 + BB demo 撮合機制裁決(F-1 HIGH)
+
+**OPS-2 deploy gate 全綠**:merge 已由 sync_land session 完成(`3018c7a3`);Linux full regression(E4-owed)=Py 67f/4545p(0 cutover 相關,4 點名檔 61/61)+Rust 43 targets 4153/0 EXIT=0 → rebuild GO(剩 operator:C-C 外部 alert→rebuild→C-B renew)。陷阱重演:ssh non-interactive 無 cargo PATH(用 `~/.cargo/bin/cargo` 全路徑);github:22 再斷→repo config 已設 ssh-over-443 預設。
+
+**BB F-1(HIGH,durable)**:Bybit demo 行情=mainnet 同源鏡像(REST orderbook update-id/execId 逐位一致實證+官方文檔),但 demo 掛單**不進真實 order book**(官方明文)→零 queue position、無真實 taker flow 成交,maker fill=模擬器判定(最符合「價格穿越掛價」偏悲觀模型)。**系統性含義:全系統的 demo maker fill-rate 證據(AC19 alt 23.8%、cost-wall maker 路徑 49% 實證)都偏悲觀,mainnet 同等或更好但不可量化;adverse-selection 成本隨真實成交同增,既有 maker-path NO-GO 不改,但任何「demo maker fill 太低」的結論都要帶此 caveat**。AC19 三選項:β 前提須改寫/α 縮 timeout 轉移風險最低/C 把 23.8% 當保守下界。FA 同日另抓 drift:oi_delta=排後非 NO-GO(MIT 06-09 報告誤列);AC-S2-A-3 檢查=0 候選,排程改事件觸發。
