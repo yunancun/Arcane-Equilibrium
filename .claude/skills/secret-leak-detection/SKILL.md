@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Secret Leak Detection（密鑰洩漏掃描）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
 
 ## 何時觸發
 
@@ -15,6 +15,9 @@ allowed-tools: Read, Grep, Glob, Bash
 - 任何接觸 `bybit_rest_client*` / `live_auth*` / `authorization*` / `secret_*` 路徑
 - 新增 env var / config TOML / log statement
 - 部署前最後一道閘
+
+## 掃描範圍
+代碼 / log / commit history 之外，**`.claude/` 配置與 `docs/CCAgentWorkSpace/` 報告同屬掃描範圍**（會進 commit）。
 
 ## OpenClaw 已知敏感資產
 
@@ -70,9 +73,10 @@ git log --all -p | grep -E '(api_key|api_secret|hmac|authorization).*=.*["\047][
 grep -nrE '(/home/ncyu|/Users/[^/]+)/.*(secret|auth|key)' <path>
 ```
 
-## 假陽性過濾
+## 假陽性處理（全部列出，不自行剔除）
 
-允許出現的 token-like 字串：
+**全部列出：確認項入主表 + 假陽性候選入附錄（附判斷依據），不自行剔除；過濾裁決交 PM/operator。**
+常見假陽性候選（仍須列附錄）：
 - 測試 fixture 明標 `# pragma: allowlist secret` 或 `# noqa: secret`
 - `tests/` 下 mock value（如 `"test_key_abc123"`）
 - 文檔 `docs/` 內範例（明確標 example）
@@ -115,7 +119,7 @@ grep -nrE '(/home/ncyu|/Users/[^/]+)/.*(secret|auth|key)' <path>
 - CRITICAL：N
 - HIGH：N
 - MEDIUM：N
-- 假陽性已剔：N
+- 假陽性候選（附錄列出，附判斷依據）：N
 
 ## CRITICAL Findings
 ### [LEAK-01] Bybit API key 硬編碼 — <file:line>

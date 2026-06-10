@@ -1,13 +1,14 @@
 ---
 name: time-series-cv-protocol
 description: 時序 ML 模型 cross-validation 設計 — Purged k-fold、Embargo、TimeSeriesSplit、Walk-forward variants、CSCV。MIT agent 主用，與 walk-forward-validation-protocol（QC 視角）互補：QC 看策略 alpha 顯著性，MIT 看 ML 模型訓練 CV 嚴謹性。
-allowed-tools: Read, Grep, Glob, WebSearch
+allowed-tools: Read, Grep, Glob, Bash, WebSearch
 ---
 
 # Time Series CV Protocol（時序 CV 設計手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
+> **本檔為 Purged k-fold / Embargo / CSCV 機制細節唯一正本**（`walk-forward-validation-protocol` 指向此處）。
 
 ## 何時觸發
 
@@ -22,7 +23,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 **Purge + Embargo 是必要不是 optional**：未加就是 leakage。
 
 > **C1.b cross-skill 邊界**：本 skill（MIT）跟 `walk-forward-validation-protocol`（QC）在 walk-forward / Purge / Embargo / CSCV 等技術細節有 ~50% 內容重疊。**同時觸發時職責分**：
-> - **MIT 主負**：ML 模型訓練 CV 設計（sklearn TimeSeriesSplit / mlfinlab PurgedKFold / sample size for ML model 類別）
+> - **MIT 主負**：ML 模型訓練 CV 設計（sklearn TimeSeriesSplit / PurgedKFold / sample size for ML model 類別）
 > - **QC 主負**：策略 alpha 顯著性（PSR / DSR / 統計檢定 / 多重比較修正）
 > - 同時引用兩者的 audit task 應由 PM 明確指派 owner，避免雙頭判斷。
 
@@ -34,7 +35,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 | **TimeSeriesSplit** | 時序基本 baseline | 默認無 purge / embargo | `sklearn.model_selection.TimeSeriesSplit` |
 | **Walk-Forward Anchored** | 累積學習 | 後期 train fold 巨大 | 自寫 |
 | **Walk-Forward Rolling** | 固定 lookback | regime 切換場景 | 自寫 |
-| **Purged k-fold (Lopez de Prado)** | 含 label window 重疊 | 計算複雜 | `mlfinlab` 套件 |
+| **Purged k-fold (Lopez de Prado)** | 含 label window 重疊 | 計算複雜 | 自寫或套件（見 §7 套件選型注意）|
 | **CSCV (Combinatorially Symmetric CV)** | PBO 計算 | 樣本要求大 | 自寫 |
 
 ## 2. Purge + Embargo（Lopez de Prado, AFML Ch.7）
@@ -166,16 +167,15 @@ PBO < 0.5 = 模型未過擬合主導。
 - 對 5 fold 的 metric 算 std
 - std / mean > 0.5 → 不穩定，不上線
 
-## 7. 與 sklearn / scikit-learn 套件對照
+## 7. 套件對照與選型注意
 
 ```python
 # sklearn 內建
 from sklearn.model_selection import TimeSeriesSplit
 # 默認 gap=0（無 embargo），需手動傳 gap
 
-# mlfinlab（Lopez de Prado）
-from mlfinlab.cross_validation import PurgedKFold
-pkf = PurgedKFold(n_splits=5, samples_info_sets=label_end_ts, pct_embargo=0.01)
+# PurgedKFold：概念參考 López de Prado《Advances in Financial ML》Ch.7
+# 套件選型以當前維護狀態為準（mlfinlab 開源版已停滯）；建議自寫或審查後選用替代套件
 
 # 自寫 walk-forward（複雜時用）
 ```
@@ -184,7 +184,7 @@ pkf = PurgedKFold(n_splits=5, samples_info_sets=label_end_ts, pct_embargo=0.01)
 
 1. **資料 sort by ts** — 必要前置
 2. **Label end_ts 列** — 每 sample 的 label window 結束時間
-3. **CV 方法選擇**（默認 Walk-Forward Rolling）
+3. **CV 方法選擇**（依 §4 場景選型；OpenClaw 推薦見 §4 末）
 4. **N folds 設計**（5-10）
 5. **Window 設計**（train 90d / test 30d / embargo 1d）
 6. **Purge 邏輯**（train_label_end < test_start）
@@ -193,17 +193,13 @@ pkf = PurgedKFold(n_splits=5, samples_info_sets=label_end_ts, pct_embargo=0.01)
 9. **IS vs OOS gap**（用同期 train sample 算 IS）
 10. **CSCV / PBO**（K ≥ 10 model variants 時做）
 
-## OpenClaw context — 不在本 skill 重述
+## 穩定 CV rule（不會 drift）
 
-OpenClaw 特定 snapshot（commit hash / 當前 P0-13 ATR fix / 當前 label count / TODO id 引用）會 drift。本 skill 不重述。
-
-實際 context 必從 SSOT 拿：runtime TOML > `TODO.md` active state / runtime evidence > `audit_migrations.py` > `git log` > memory（最後）。Label count / row 量必跑 SQL（`SELECT count(*) FROM learning.exit_features WHERE engine_mode IN ('live','live_demo')`）。
-
-**穩定不變的 CV rule**（不會 drift）：時序資料禁用 `KFold`（會 shuffle）；training filter 必含 'live' + 'live_demo'（不混 paper）；TimescaleDB hypertable 支援快速 time-range query for split；embargo size 由 label horizon + autocorrelation 動態決定（不寫死數字）。
+時序資料禁用 `KFold`（會 shuffle）；training filter 必含 'live' + 'live_demo'（不混 paper）；TimescaleDB hypertable 支援快速 time-range query for split；embargo size 由 label horizon + autocorrelation 動態決定（不寫死數字）。Label count / row 量必跑 SQL 取真值（`SELECT count(*) FROM learning.exit_features WHERE engine_mode IN ('live','live_demo')`）。
 
 ## Cross-Skill 互引（避免重述）
 
-- **C1.b QC 視角 = 策略 alpha 顯著性**（PSR / DSR / Bonferroni / PBO）走 `walk-forward-validation-protocol`；本 skill = MIT 視角，**ML 模型訓練 CV 設計**（sklearn / mlfinlab）
+- **C1.b QC 視角 = 策略 alpha 顯著性**（PSR / DSR / Bonferroni / PBO）走 `walk-forward-validation-protocol`；本 skill = MIT 視角，**ML 模型訓練 CV 設計**（sklearn / 自寫 PurgedKFold）
 - **C1.c feature 設計 + leakage**：feature-side 6 leakage 類型（look-ahead / target / survivorship 等）走 `feature-engineering-protocol`，本 skill 補 split-side leakage（purge / embargo）
 - **pipeline 成熟度評級**：本 skill CV 設計通過 ≠ pipeline live；走 `ml-pipeline-maturity-audit` 看 4 維度 + 5 階段
 
@@ -217,7 +213,7 @@ OpenClaw 特定 snapshot（commit hash / 當前 P0-13 ATR fix / 當前 label cou
 - 5 fold metric 全用 mean 不看 std
 - IS 80% / OOS 60% 不查 leakage
 - N=2 fold 還宣稱「驗證過」
-- Anchored expanding 對 regime 切換 crypto 用（用 rolling）
+- Anchored expanding 用於 regime 快速切換的 crypto（見 §4 末推薦）
 
 ## 輸出格式
 
