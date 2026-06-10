@@ -107,6 +107,35 @@ fn btc_lead_lag_alt_cohort() -> Vec<String> {
 }
 
 // ----------------------------------------------------------------------
+// OPS-2 SECRET-SPLIT Phase 2（cutover 2026-06-10）— Live 簽名 key 啟動強制
+// ----------------------------------------------------------------------
+
+/// Live 管線啟動時 `OPENCLAW_LIVE_AUTH_SIGNING_KEY`（含 `_FILE` companion）
+/// 必須存在，否則 panic（fail-closed，mirror FIX-10 IPC HMAC panic pattern）。
+///
+/// 為什麼 panic 而非 fallback：Phase 1（2026-05-27..2026-06-10）14d soak 兩端
+/// log 0 次 `ops2_secret_split_phase1_fallback` 後，legacy `OPENCLAW_IPC_SECRET`
+/// fallback 已自 `live_authorization::read_live_auth_signing_key` 移除
+/// （spec §3.2）。簽名 key 缺失時 LiveAuthWatcher 永遠驗不過授權——與其留
+/// 靜默 deny-loop，不如啟動即 fail loud 讓 operator 立刻看到 root cause。
+///
+/// Boot ordering 硬約束（spec §9.5）：必須在 LiveAuthWatcher spawn 之前呼叫，
+/// 否則 watcher 先起再 panic 會留 dangling tokio task。
+fn enforce_live_auth_signing_key_or_panic(live_pipeline_active: bool) {
+    if live_pipeline_active
+        && secret_env::var_or_file("OPENCLAW_LIVE_AUTH_SIGNING_KEY").is_none()
+    {
+        panic!(
+            "FATAL: Live pipeline detected but OPENCLAW_LIVE_AUTH_SIGNING_KEY is not set. \
+             Live authorization signing requires its own key (split from OPENCLAW_IPC_SECRET per OPS-2). \
+             Set OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE or OPENCLAW_LIVE_AUTH_SIGNING_KEY before starting with Live credentials. \
+             / Live 管線偵測到但 OPENCLAW_LIVE_AUTH_SIGNING_KEY(_FILE) 未設置。\
+             Live 授權簽名 key 已與 IPC HMAC key 分離（OPS-2 Phase 2），缺失必拒絕啟動。"
+        );
+    }
+}
+
+// ----------------------------------------------------------------------
 // Crash-only pipeline wrapper / crash-only 管線包裝器
 // ----------------------------------------------------------------------
 // EN: Wraps an async pipeline Future so that an unwind panic is caught,
@@ -432,6 +461,13 @@ async fn async_main(
              / Live 管線偵測到但 OPENCLAW_IPC_SECRET(_FILE) 未設置。Live 交易必須啟用 IPC HMAC 認證。"
         );
     }
+
+    // ------------------------------------------------------------------
+    // OPS-2 SECRET-SPLIT Phase 2: live-auth signing key mandatory for Live —
+    // mirror FIX-10 fail-closed pattern（第二 panic block，spec §3.2）。
+    // 位置硬約束：緊跟 FIX-10、在 LiveAuthWatcher spawn 之前（spec §9.5）。
+    // ------------------------------------------------------------------
+    enforce_live_auth_signing_key_or_panic(live_bindings.is_some());
 
     // ------------------------------------------------------------------
     // Start IPC server / 啟動 IPC 服務器
@@ -1664,4 +1700,85 @@ async fn async_main(
     .await;
 
     info!(version = VERSION, "engine stopped / 引擎已停止");
+}
+
+// ----------------------------------------------------------------------
+// OPS-2 SECRET-SPLIT Phase 2 cutover tests（runbook §13.4 panic verify）
+// ----------------------------------------------------------------------
+#[cfg(test)]
+mod ops2_phase2_cutover_tests {
+    use super::enforce_live_auth_signing_key_or_panic;
+
+    /// 環境快照 + 還原 helper。
+    /// 為什麼用 catch_unwind 而非 #[should_panic]：panic 後測試函數不再往下執行，
+    /// 無法還原被改動的 process-wide env；catch_unwind 讓還原確定性發生，
+    /// 不污染同 binary 內其他 env-mutating 測試。
+    fn with_clean_live_auth_env<F: FnOnce() + std::panic::UnwindSafe>(
+        f: F,
+    ) -> Result<(), Box<dyn std::any::Any + Send>> {
+        let prev_la = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY").ok();
+        let prev_la_file = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE").ok();
+        std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY");
+        std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE");
+
+        let result = std::panic::catch_unwind(f);
+
+        match prev_la {
+            Some(v) => std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY", v),
+            None => std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY"),
+        }
+        match prev_la_file {
+            Some(v) => std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE", v),
+            None => std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE"),
+        }
+        result
+    }
+
+    #[test]
+    fn live_auth_signing_key_missing_panics_when_live() {
+        // runbook §13.4 AC：Live + missing OPENCLAW_LIVE_AUTH_SIGNING_KEY →
+        // 必 panic 且 panic message 含 env 名（fail-closed 啟動拒絕）。
+        let _guard = crate::test_env_lock::guard();
+        let result = with_clean_live_auth_env(|| enforce_live_auth_signing_key_or_panic(true));
+        let payload = result.expect_err("Live + 簽名 key 缺失必 panic（fail loud）");
+        let msg = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .map(String::from)
+            .or_else(|| payload.downcast_ref::<String>().cloned())
+            .unwrap_or_default();
+        assert!(
+            msg.contains("OPENCLAW_LIVE_AUTH_SIGNING_KEY"),
+            "panic message 必含 OPENCLAW_LIVE_AUTH_SIGNING_KEY 字眼供 alert 規則命中；got: {msg}"
+        );
+    }
+
+    #[test]
+    fn live_auth_signing_key_missing_does_not_panic_when_not_live() {
+        // 非 Live 管線（demo/paper-only boot）缺 key 不可 panic ——
+        // 簽名 key 只是 Live 授權域的硬需求。
+        let _guard = crate::test_env_lock::guard();
+        let result = with_clean_live_auth_env(|| enforce_live_auth_signing_key_or_panic(false));
+        assert!(result.is_ok(), "live_pipeline_active=false 不可 panic");
+    }
+
+    #[test]
+    fn live_auth_signing_key_present_does_not_panic_when_live() {
+        // key 存在 + Live → 正常通過（panic 條件只在 missing）。
+        let _guard = crate::test_env_lock::guard();
+        let prev_la = std::env::var("OPENCLAW_LIVE_AUTH_SIGNING_KEY").ok();
+        std::env::set_var(
+            "OPENCLAW_LIVE_AUTH_SIGNING_KEY",
+            "test-live-auth-signing-key-do-not-use-in-prod",
+        );
+
+        let result =
+            std::panic::catch_unwind(|| enforce_live_auth_signing_key_or_panic(true));
+
+        match prev_la {
+            Some(v) => std::env::set_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY", v),
+            None => std::env::remove_var("OPENCLAW_LIVE_AUTH_SIGNING_KEY"),
+        }
+        assert!(result.is_ok(), "key 已設置時不可 panic");
+    }
 }

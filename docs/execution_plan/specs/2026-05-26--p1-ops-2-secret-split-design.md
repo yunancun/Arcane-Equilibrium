@@ -182,7 +182,7 @@ if live_bindings.is_some()
 | 觸發 | 反應 |
 |---|---|
 | Phase 1 D+0..D+14 任何時候 Live pipeline 異常 + 懷疑與 split 相關 | 1. `git revert <split-commit>` → restart engine + API（fallback 路徑保證舊 `OPENCLAW_IPC_SECRET` 仍 valid for both）。2. 留 `live_auth_signing_key.txt` 在盤上不刪（無害）。 |
-| Phase 2 D+14 後 panic 阻 boot | 1. operator 確認 `$SECRETS_ROOT/environment_files/live_auth_signing_key.txt` 存在 chmod 600 + 非空。2. 不存在 → `cp $SECRETS_ROOT/environment_files/ipc_secret.txt $SECRETS_ROOT/environment_files/live_auth_signing_key.txt; chmod 600 $_`。3. restart_all `--rebuild`。4. 如仍 panic → `git revert <phase2-commit>` 回 Phase 1 fallback 模式。 |
+| Phase 2 D+14 後缺 key（實際症狀=live 拒 spawn + log kind `live_auth_signing_key_missing`；panic 僅窄路徑——CC-MED-1 校準 2026-06-10） | 1. operator 確認 `$SECRETS_ROOT/environment_files/live_auth_signing_key.txt` 存在 chmod 600 + 非空。2. 不存在 → `cp $SECRETS_ROOT/environment_files/ipc_secret.txt $SECRETS_ROOT/environment_files/live_auth_signing_key.txt; chmod 600 $_`。3. restart_all `--rebuild`。4. 如仍 panic → `git revert <phase2-commit>` 回 Phase 1 fallback 模式。 |
 | Phase 2 後第一次 90d rotation 失敗（new material 寫盤但 watcher reject）| 1. `cp $SECRETS_ROOT/environment_files/live_auth_signing_key.txt.rotated.<UTC_TS> $SECRETS_ROOT/environment_files/live_auth_signing_key.txt`。2. operator `/api/v1/live/auth/renew`（用舊 key 重簽 authorization）。3. restart_all `--rebuild`。 |
 
 ---

@@ -45,11 +45,11 @@ def live_auth_signing_key() -> str:
 
     為何集中：P1-01 的 root cause 是 executor verifier 直讀 OPENCLAW_IPC_SECRET
     （IPC transport 域），而 signer（live_trust_routes）與 Rust live_authorization
-    用的是 OPENCLAW_LIVE_AUTH_SIGNING_KEY（含 Phase-1 fallback）。兩個 secret 域
-    必須一致，否則合法簽名被拒、IPC-only 簽名卻能過。
+    用的是 OPENCLAW_LIVE_AUTH_SIGNING_KEY。兩個 secret 域必須一致，否則合法簽名
+    被拒、IPC-only 簽名卻能過。
 
-    委派給 live_trust_routes._read_live_auth_signing_key()（Phase-1 fallback 到
-    OPENCLAW_IPC_SECRET，含 ≤1/h WARN）。
+    委派給 live_trust_routes._read_live_auth_signing_key()（OPS-2 Phase 2
+    cutover 後純讀 OPENCLAW_LIVE_AUTH_SIGNING_KEY，無 IPC fallback）。
 
     Returns:
         非空簽名 key 字串；空字串代表 caller 必須 fail-closed。
@@ -149,8 +149,8 @@ def verify_signed_authorization(slot_dir: Path, endpoint_label: str, actor: Any)
         )
         raise _gate_failure(
             "authorization",
-            "OPENCLAW_LIVE_AUTH_SIGNING_KEY unset (and Phase-1 fallback "
-            "OPENCLAW_IPC_SECRET also unset) — cannot verify HMAC; set in engine env.",
+            "OPENCLAW_LIVE_AUTH_SIGNING_KEY unset — cannot verify HMAC; set in "
+            "engine env (OPS-2 Phase 2: no OPENCLAW_IPC_SECRET fallback).",
         )
     envs_sorted = sorted(set(env_allowed))
     payload = ltr._canonical_authorization_payload(

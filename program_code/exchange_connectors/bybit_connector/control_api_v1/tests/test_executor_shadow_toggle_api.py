@@ -406,7 +406,7 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
             )
             with patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
-                "OPENCLAW_IPC_SECRET": "test-secret",
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY": "test-secret",
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",
@@ -414,6 +414,49 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
                 resp = self._post()
         self.assertEqual(resp.status_code, 403)
         self.assertEqual(resp.json()["detail"]["gate_failed"], "authorization")
+
+    def test_live_flip_signing_key_missing_403_authorization(self) -> None:
+        """Gate 5 fail: authorization.json 有效但簽名 key env 缺失（E4 補強）。
+
+        OPS-2 Phase 2 cutover 的代表性失敗面：授權檔在、簽名 key 不在
+        → 必 403 gate_failed=authorization（live_preflight reason=
+        live_auth_key_missing），且 legacy OPENCLAW_IPC_SECRET 在場也救不了
+        （無 fallback）。此前此分支只在 live_trust_routes 單元層鎖定，
+        gate-chain 層（GUI 真實路徑）無永久負向測試。
+        """
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            secret = "test-secret"
+            future_ms = int(time.time() * 1000) + 24 * 3600 * 1000
+            record = _build_signed_authorization(
+                secret=secret,
+                expires_at_ms=future_ms,
+                env_allowed=["live_demo"],
+            )
+            secrets_root = _write_secret_slot(
+                tmp_path,
+                bybit_endpoint="demo",
+                authorization_record=record,
+            )
+            with patch.dict(os.environ, {
+                "OPENCLAW_SECRETS_DIR": str(secrets_root),
+                # legacy IPC env 故意在場：證明 Phase 2 後它不提供簽名 key。
+                "OPENCLAW_IPC_SECRET": secret,
+            }), patch(
+                "app.live_session_routes._get_global_mode_state",
+                return_value="live_reserved",
+            ):
+                # patch.dict 退出時整體還原 os.environ——context 內 pop 安全。
+                # 顯式清掉簽名 key（含 _FILE companion），確保命中 missing 分支。
+                os.environ.pop("OPENCLAW_LIVE_AUTH_SIGNING_KEY", None)
+                os.environ.pop("OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE", None)
+                resp = self._post()
+        self.assertEqual(resp.status_code, 403)
+        detail = resp.json()["detail"]
+        self.assertEqual(detail["gate_failed"], "authorization")
+        # operator 可行動性：hint 必含新 env 名（對齊 runbook §13.2 alert 字串）。
+        self.assertIn("OPENCLAW_LIVE_AUTH_SIGNING_KEY", detail["hint"])
 
     def test_live_flip_expired_authorization_403_authorization_expired(self) -> None:
         """Gate 5 fail: authorization.json expired."""
@@ -434,7 +477,7 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
             )
             with patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
-                "OPENCLAW_IPC_SECRET": secret,
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY": secret,
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",
@@ -463,7 +506,7 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
             )
             with patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
-                "OPENCLAW_IPC_SECRET": secret,
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY": secret,
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",
@@ -492,7 +535,7 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
             )
             with patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
-                "OPENCLAW_IPC_SECRET": secret,
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY": secret,
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",
@@ -535,7 +578,7 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
             )
             with patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
-                "OPENCLAW_IPC_SECRET": "test-secret",
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY": "test-secret",
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",
@@ -563,7 +606,7 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
             )
             with patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
-                "OPENCLAW_IPC_SECRET": secret,
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY": secret,
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",

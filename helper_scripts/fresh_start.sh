@@ -77,8 +77,10 @@ API_WORKDIR="$REPO_ROOT/program_code/exchange_connectors/bybit_connector/control
 SECRETS_ENV="$SECRETS_ROOT/environment_files/basic_system_services.env"
 IPC_SECRET_FILE="$SECRETS_ROOT/environment_files/ipc_secret.txt"
 # OPS-2 SECRET-SPLIT — fresh_start 不 seed（fresh start 必走 OPS-2 runbook 重新生成
-# urandom key）；spawn 點注入 env 讓 engine + API 接通新 path（若 file 缺 → engine
-# 走 Phase 1 fallback path，operator 須手動 seed 或生成新 key）。
+# urandom key）；spawn 點注入 env 讓 engine + API 接通新 path。Phase 2 cutover
+# （2026-06-10）後無 fallback：若 file 缺 → engine live 拒 spawn（log kind
+# `live_auth_signing_key_missing`）、Python sign raise；operator 走 runbook
+# §13.5 seed 或 §5.2.2 urandom 生成新 key。
 LIVE_AUTH_SIGNING_KEY_FILE="$SECRETS_ROOT/environment_files/live_auth_signing_key.txt"
 MAINT_FLAG="$DATA_DIR/engine_maintenance.flag"
 

@@ -294,7 +294,7 @@ def _verify_authorization_json_or_raise(slot_dir: Path, endpoint_label: str, act
 
     P1-01：驗簽本體已搬至 live_preflight.verify_signed_authorization（唯一真相），
     並把 HMAC key 從 OPENCLAW_IPC_SECRET（IPC transport 域）改為
-    live_auth_signing_key()（live-auth 簽名域，含 Phase-1 fallback），對齊 signer
+    live_auth_signing_key()（live-auth 簽名域；OPS-2 Phase 2 後無 IPC fallback），對齊 signer
     （live_trust_routes._write_signed_live_authorization）與 Rust
     live_authorization::verify。本 wrapper 保留是為了讓既有唯一 caller（:261）
     與 _gate_failure taxonomy 完全不變。
