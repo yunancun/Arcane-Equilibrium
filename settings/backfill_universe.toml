@@ -41,4 +41,15 @@ symbols = [
     "ARBUSDT",
     "OPUSDT",
     "SUIUSDT",
+    # ── P3b owed ⑤（2026-06-10）：altcap basket CORE25 ex-BTC 缺口補齊 ──
+    # 依 QC 2026-06-09--l2-p3b-b1-altcap-spec.md（B1 雙因子強制 altcap 籃），
+    # beta_neutral_check 的 altcap producer（research/altcap_basket.py equal-weight
+    # ex-BTC CORE25 PIT）需要這 6 個成分的 1d 覆蓋。2026-06-10 已 --apply 回填
+    # 6×730 根（provenance 帳本 research.alpha_klines_provenance 26 rows）。
+    "ATOMUSDT",
+    "ETCUSDT",
+    "FILUSDT",
+    "ICPUSDT",
+    "INJUSDT",
+    "UNIUSDT",
 ]
