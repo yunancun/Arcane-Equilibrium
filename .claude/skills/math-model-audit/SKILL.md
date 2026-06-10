@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Math Model Audit（量化數學審計）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
 
 > **S1 風控數字 SSOT**：position size / VaR / drawdown threshold 等所有風控數字以 `settings/risk_control_rules/risk_config_<env>.toml` 為 SSOT；config 不合理 → push back operator，**不信 memory 或 skill 內寫死值**。
 
@@ -20,6 +20,8 @@ allowed-tools: Read, Grep, Glob, WebSearch
 - 既有策略「edge 估計可疑」「樣本分佈異常」排查
 
 ## ★ 黑名單：絕不推薦（Operator 已拒絕）
+
+> **本節為 operator 已拒絕方法黑名單唯一正本**（`QC.md` / `quant-strategy-design` 指向此處，不另行重述）。
 
 下列方法**禁止**作為新方案出現在報告 / 建議 / 白皮書中。若 K-Dense-AI 等通用科學 skill 建議了，QC 必須在報告中明確 RETRACT：
 
@@ -81,13 +83,9 @@ allowed-tools: Read, Grep, Glob, WebSearch
 5. **對抗性反問** — 「樣本量翻倍 effect 變強還弱？」「換 OOS 還對嗎？」「fee + 1bps 結論還成立嗎？」
 6. **判定** — Approve / Conditional（待 N 條件）/ Reject + 替代方案
 
-## OpenClaw context — 不在本 skill 重述
+## 穩定數學原則（不會 drift）
 
-OpenClaw 特定 snapshot（cost_gate 當前閾值 / Phase 狀態 / specific bug 教訓如 bb_breakout F1 / EDGE-P2-3 部署細節 / TODO id）會 drift。本 skill 不重述。
-
-實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `git log` > governance docs > memory（operator 明示未必可信）。
-
-**穩定不變的數學原則**（不會 drift）：edge_estimator shrinkage prior 必合理（James-Stein 或 Bayesian shrinkage 而非 ad-hoc）；cost_gate 設計需 strategy::symbol cell-level 統計顯著；新策略 audit 必含 demo OOS gross > 0 證據（不是 in-sample）。
+edge_estimator shrinkage prior 必合理（James-Stein 或 Bayesian shrinkage 而非 ad-hoc）；cost_gate 設計需 strategy::symbol cell-level 統計顯著；新策略 audit 必含 demo OOS gross > 0 證據（不是 in-sample）。
 
 ## Cross-Skill 互引（避免重述）
 
@@ -101,7 +99,7 @@ OpenClaw 特定 snapshot（cost_gate 當前閾值 / Phase 狀態 / specific bug 
 - p < 0.05 但 N < 30
 - look-ahead bias 未排查（特別是 rolling max/min）
 - Kelly full（不 fractional）
-- Sharpe 算 daily 但年化用 ×252（crypto 是 24/7 應 ×365）
+- Sharpe 算 daily 但年化用 ×252（crypto 是 24/7 應 ×365；**本條為 ×365 年化規則唯一正本**，`walk-forward-validation-protocol` 指向此處）
 - correlation matrix 未列就推薦多策略並行
 - 「demo 表現好」當 live edge 證據（demo / paper / live 隔離原則）
 - 「PnL 為正」但 edge_per_trade 為負（過度交易補虧損）

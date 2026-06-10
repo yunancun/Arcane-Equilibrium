@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Portfolio Construction Protocol（組合構建手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
 
 > **S6 P0/P1/P2 cross-ref**：三層風控定義見 `srv/docs/decisions/EX-01_..._V2.md` §2.1-§2.3；本 skill 引用屬語意重述。
 
@@ -151,8 +151,8 @@ CVaR(α) = E[L | L > VaR(α)]
 ### 4.5 Stress Testing
 場景 list（OpenClaw 建議起點）：
 1. 2020-03-12 BTC -50% / 24h
-2. 2021-05-19 LUNA collapse
-3. 2022-06 / 11 cascade（LUNA / FTX）
+2. 2021-05-19 BTC -30% 單日（中國挖礦禁令 + 槓桿清洗 cascade）
+3. 2022-05 LUNA collapse + 2022-11 FTX cascade
 4. 2024-08-05 BTC -20% / 6h
 5. Custom：BTC ±20% / day + funding extremes ± 0.5%
 
@@ -168,83 +168,10 @@ component_VaR_i = w_i · ρ_iP · σ_i / σ_p × VaR
 - Marginal VaR：增加單位 i 倉位對 portfolio VaR 的影響
 - Component VaR：i 對 total VaR 的貢獻
 
-## 5. Drawdown Control（對齊 SM-04 + RiskConfig）
+## 5-6. Drawdown Control 治理映射 + Live 績效歸因（外移）
 
-**SM-04 是治理 SSOT**（`srv/docs/decisions/SM-04_..._V1.md`）：6 named states + event-driven + observation window；具體 % threshold 讀 RiskConfig `[cascade]`。
-
-### 5.1 SM-04 狀態與 RiskConfig 觸發 mapping
-
-| SM-04 state | 行為約束（見 SM-04 §9） | RiskConfig threshold（base / demo） |
-|---|---|---|
-| **NORMAL** | 正常裁決 | drawdown < `drawdown_cautious_pct` |
-| **CAUTIOUS** | 提高入場門檻 + 下調倉位 + 提高 manual review | drawdown ≥ `drawdown_cautious_pct`（5.0 / 8.0）|
-| **REDUCED** | 大比例 downsize + 局部凍結 + 限制訂單類型 | drawdown ≥ `drawdown_reduced_pct`（8.0 / 15.0）|
-| **DEFENSIVE** | reduce-only + protective only + 禁新風險 | drawdown ≥ `drawdown_defensive_pct`（12.0 / 20.0）|
-| **CIRCUIT_BREAKER** | 停止非保護性推進 + 凍結 live 扩张 | drawdown ≥ `drawdown_circuit_pct`（15.0 / 22.0）|
-| **MANUAL_REVIEW** | 人工審批指定範圍 | operator emergency / multi-layer conflict |
-
-具體值以 `settings/risk_control_rules/risk_config_<env>.toml` `[cascade]` 為 SSOT。**不信本表內數字**，每次 audit 必 grep TOML 重驗。
-
-### 5.2 跨級恢復禁止（SM-04 §7.1）
-
-明禁：
-- CIRCUIT_BREAKER → NORMAL
-- DEFENSIVE → NORMAL
-- REDUCED → NORMAL
-
-恢復必須**渐进**：CIRCUIT_BREAKER → DEFENSIVE → REDUCED → CAUTIOUS → NORMAL，且每步須觀察窗口完成。
-
-### 5.3 觀察窗口要求（SM-04 §11）
-
-進入更宽松前必有 observation_window：
-- 禁進一步放寬超過當前批准級別
-- 提高審計密度
-- 提高 incident / near-miss 檢查頻率
-
-結束條件（SM-04 §11.3）：
-- 無新增同類異常
-- 觸發恢復的根因已不再出現
-- 審計鏈、對賬鏈、健康鏈穩定
-- Operator 未提出回退
-
-### 5.4 OpenClaw 對應實現
-
-- CognitiveModulator.confidence_floor 動態調整（CLAUDE.md memory `feedback_agent_autonomy`）
-- P0/P1 硬邊界（DOC-01 §5.11；P2 範圍 Agent 自主）
-- Performance Attribution 拆解（見 §6 Live 階段績效歸因）
-
-## 6. Live 階段績效歸因（a3 整合）
-
-### 6.1 Performance Attribution 拆解
-```
-Total PnL = Σ_strategy PnL_strat + interaction
-PnL_strat = Σ_symbol PnL_sym
-PnL_sym = (entry_alpha + exit_alpha + holding_alpha) − (fee + slippage + funding)
-```
-
-### 6.2 Realized vs Expected Edge Gap
-每 24h 對每 (strategy, symbol) 比對：
-- Backtest expected edge per trade
-- Live realized edge per trade
-- Gap > 50% 的 cell → 警報（**建議起點，非硬規範**；具體 gap threshold 依 strategy 半衰期 + sample size 動態調整）
-
-OpenClaw 教訓：edge_estimator JSON 結構 + engine_mode 隔離（live vs live_demo 必含）。
-
-### 6.3 Slippage Monitoring
-- Expected fill price（mid）vs actual fill price
-- Per (symbol, hour, order_type) 分群統計
-- 異常時段 / symbol 列為高 slippage cell
-
-### 6.4 Position-level P&L Decomposition
-- Entry alpha（從 entry 到第一個 favourable move）
-- Exit alpha（exit 是 take profit / stop loss / phys lock）
-- Holding alpha（中間部分）
-- 對應 OpenClaw `learning.exit_features` table
-
-### 6.5 Rolling Sharpe / Drawdown Duration 動態追蹤
-- 30d rolling Sharpe 圖
-- Underwater curve（drawdown 持續多久）
-- 若 60d Sharpe < 0 → 全策略 review
+治理映射（SM-04 6 states / 跨級恢復禁止 / 觀察窗口，threshold 只留 TOML key、值以 runtime TOML 為準）與 Live 歸因細節（attribution 拆解 / edge gap / slippage / P&L decomposition）：見 `references/governance-extract.md`，需要時讀。
+QC 審計判準速記：threshold 數字每次 audit 必 grep `risk_config_<env>.toml` `[cascade]` 重驗；恢復必須渐进（禁跨級回 NORMAL）；realized vs expected edge gap 無對比 = silent decay 無感。
 
 ## 7. 工作流（10 步 portfolio review）
 
@@ -259,13 +186,9 @@ OpenClaw 教訓：edge_estimator JSON 結構 + engine_mode 隔離（live vs live
 9. **Performance attribution**（24h / 7d / 30d 拆解）
 10. **Realized vs expected edge gap**（cell-level 警報）
 
-## OpenClaw context — 不在本 skill 重述
+## 穩定 schema rule（不會 drift）
 
-OpenClaw 特定 snapshot（5 策略 gross edge 狀態 / Phase 5 reframed 細節 / funding_arb 結案 / EDGE-P2-3 部署 / G1-05 todo / healthcheck check 數）會 drift。本 skill 不重述以避免 sub-agent 引過期事實。
-
-實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `CLAUDE.md` hard boundaries / operating rules > `git log` > governance docs > memory（operator 明示未必可信）。
-
-**穩定不變的 schema rule**：edge_estimator JSON = `strategy::symbol` top-level key；`engine_mode IN ('live','live_demo')` filter 必含兩者；CognitiveModulator confidence_floor 是 OpenClaw 內建 drawdown 動態降倉機制（架構級不變）。
+edge_estimator JSON = `strategy::symbol` top-level key；`engine_mode IN ('live','live_demo')` filter 必含兩者；CognitiveModulator confidence_floor 是 OpenClaw 內建 drawdown 動態降倉機制（架構級不變）。
 
 ## Cross-Skill 互引（避免重述）
 
@@ -310,7 +233,8 @@ OpenClaw 特定 snapshot（5 策略 gross edge 狀態 / Phase 5 reframed 細節 
 ## Stress test
 | 場景 | PnL | DD |
 | 2020-03-12 BTC -50% | | |
-| 2021-05-19 LUNA | | |
+| 2021-05-19 BTC -30% | | |
+| 2022-05 LUNA | | |
 | 2022-11 FTX | | |
 
 ## Risk decomposition

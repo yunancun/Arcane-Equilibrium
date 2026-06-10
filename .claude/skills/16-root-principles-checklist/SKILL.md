@@ -6,8 +6,10 @@ allowed-tools: Read, Grep, Glob
 
 # 16 根原則 Checklist（CLAUDE.md Root Principles + DOC-01 項目憲法）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > `srv/TODO.md` > 治理文件（`SPECIFICATION_REGISTER.md` 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
+
+> **本檔為唯一正本**：5 hard gates 指紋與 AgentTool 訪問權限分類以本檔為準（CC / QA / spec-compliance / e2e-integration-acceptance 指向此處）；硬邊界 regex 與 `spec-compliance` 統一，以本檔為準。
 
 > **S3 上層 drift 防線**：本 skill 16 條根原則為 DOC-01 V2 §5.1-§5.16 的 extract（**真 SSOT 是 `srv/docs/decisions/DOC-01_..._V2.md`，不是 memory**），原文修改後可能漂移，發現不一致以 DOC-01 原文為準。
 
@@ -43,10 +45,9 @@ allowed-tools: Read, Grep, Glob
 
 ## 硬邊界（觸碰 = BLOCKER）
 
-`CLAUDE.md` Hard Boundaries 列舉。grep 必查：
-```
-grep -nE '(execution_state|execution_authority|live_execution_allowed|decision_lease_emitted|max_retries|OPENCLAW_ALLOW_MAINNET|live_reserved|authorization\.json)' <diff>
-```
+`CLAUDE.md` Hard Boundaries 列舉。指紋掃描（唯一正本，`spec-compliance` 引用此處）：
+
+用 Grep 工具（pattern=`(execution_state|execution_authority|live_execution_allowed|decision_lease_emitted|max_retries|OPENCLAW_ALLOW_MAINNET|live_reserved|authorization\.json)`，path=改動範圍）執行；有 Bash 環境可等價用 `grep -nE` 掃 diff。
 
 任一新增 / 修改 / 拿掉 fail-closed → 升 BLOCKER；要 Operator 顯式 sign-off。
 
@@ -78,7 +79,7 @@ Rust Engine 降級 L0 時 16 條原則**全部仍成立**：
 
 3E-ARCH（paper/demo/live）：每條原則須在三引擎獨立驗，禁「只驗 paper 就 PASS」。
 
-## AgentTool 訪問權限分類（V3 報告 B.3）
+## AgentTool 訪問權限分類（V3 報告 B.3；唯一正本）
 
 - 只讀：CognitiveModulator / DreamEngine
 - 受限寫：OpportunityTracker

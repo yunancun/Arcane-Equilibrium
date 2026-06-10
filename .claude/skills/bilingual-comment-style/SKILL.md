@@ -6,6 +6,8 @@ allowed-tools: Read, Grep, Glob, Edit, Write
 
 # Chinese-First Comment Style
 
+> **本檔為注釋規範唯一正本，E1 / E1a / E2 正文不重述，僅指針至此。**
+
 > **Compatibility note**: the skill directory keeps the historical
 > `bilingual-comment-style` name so existing agent settings do not break.
 > The active rule is now Chinese-first comments.
@@ -48,16 +50,6 @@ allowed-tools: Read, Grep, Glob, Edit, Write
 
 ## Templates
 
-### Rust Module
-
-```rust
-// MODULE_NOTE
-// 模塊用途：處理單筆 K-line tick，產出 intent 候選後送 governance 審批。
-// 主要類/函數：process_tick、build_intent_candidates。
-// 依賴：BybitWsListener、IntentProcessor、Guardian。
-// 硬邊界：交易 hot path 不得 panic；資料不足必 fail-closed。
-```
-
 ### Rust Function
 
 ```rust
@@ -80,18 +72,7 @@ MODULE_NOTE
 """
 ```
 
-### Python Function
-
-```python
-async def submit_intent(intent: TradeIntent, actor: str, lease_id: str) -> SubmitResult:
-    """
-    提交交易意圖並經 Guardian 審批。
-
-    為什麼：AI 只能產生建議，所有交易意圖必須經 lease + 風控 gate。
-    任一授權、lease、風控檢查失敗時 return ok=False，不拋給下游補救。
-    """
-    ...
-```
+其餘場景（Rust module / Python function / class 等）同構推廣以上兩組代表模板。
 
 ### Inline Invariant
 
@@ -129,11 +110,9 @@ rg -n 'TODO: (fix|update|handle this|misc|later)' <changed-files>
 
 ## TW Workflow
 
-1. Read the task scope and `git diff`.
-2. Identify new or materially changed modules / public APIs / safety paths.
-3. Add or clean comments only inside the task scope.
-4. Do not change business logic while doing comment cleanup.
-5. Report changed files, comment categories, and any unresolved ambiguity.
+1. 讀任務範圍 + `git diff`，找出新增/實質改動的模塊、公開 API、safety path。
+2. 只在任務範圍內補/清注釋；不順帶改業務邏輯。
+3. 回報改動檔案、注釋類別與未解決的歧義。
 
 ## Output Format
 

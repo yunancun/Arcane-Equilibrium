@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob
 
 # UX Checklist（交易 GUI 可用性審查）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` GUI surface > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死；GUI surface 以 `srv/README.md` tab 表為準。
 
 ## 何時觸發
 
@@ -19,18 +19,13 @@ allowed-tools: Read, Grep, Glob
 
 ### 1. 防誤觸（Trading-Critical）
 
-破壞性操作必過 3 道閘：
+破壞性操作必過 3 道閘（審計判準）：
 - [ ] **可達性**：按鈕**不在**主要 click flow 上（例：平倉按鈕不該緊貼「查詢」）
 - [ ] **二次確認**：modal 顯示具體影響（「這會關閉 BTCUSDT 0.5 倉位，預估損益 −$X」）
 - [ ] **打字確認**：高破壞性（平倉全部 / 切 Live / 改 risk）需打字短語確認
+- [ ] **等級匹配**：操作的破壞性 vs 其確認等級成正比；查詢類零阻力，live / 全平 / risk 變更最高阻力
 
-| 操作 | 防誤等級 |
-|---|---|
-| 查詢 / 切 tab | 0 |
-| 改非交易 config | 1（modal） |
-| Paper / Demo 啟停 | 2（modal + Operator role） |
-| 平倉單 symbol | 3（modal + 打字 symbol） |
-| 平倉全部 / 切 Live / 改 risk_config | 4（雙 actor + 打字 + cooldown ≥30s） |
+交互確認等級表正本見 `gui-style-guide`（操作 × 確認方式 × 回饋表）；本檔僅列上述審計判準，不重述等級表。
 
 ### 2. 認知負荷（Information Density）
 
@@ -72,7 +67,7 @@ allowed-tools: Read, Grep, Glob
 
 ## 工作流（4 步）
 
-1. **動手用 1 次** — Read 完代碼後實際操作所有 click flow（記錄阻力點）
+1. **靜態走查** — 沿 click handler → API 調用 → state 變更鏈 trace 代碼，逐 flow 記錄阻力點，證據 = file:line；僅當環境提供 browser/preview 類工具時才實際操作，並在報告標註操作方式（靜態 trace vs 實際操作）
 2. **5 維度逐項** — 表格化打勾 + 證據（截圖 / 檔:行）
 3. **對抗性測試** — 「如果 op 凌晨 3 點睡眼惺忪，會誤觸什麼？」「如果 backend 突然慢 10s 會怎樣？」
 4. **產出報告** — `docs/CCAgentWorkSpace/A3/workspace/reports/YYYY-MM-DD--<feature>_ux.md`
