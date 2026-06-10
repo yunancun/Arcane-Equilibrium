@@ -497,7 +497,10 @@ class TestFactorBundleLoader:
         start = self._WS - dt.timedelta(days=45)
         rows = _kline_rows(["BTCUSDT", "ETHUSDT", "SOLUSDT"], start, 130, slope=-5.0)
         fb = self._bundle(rows, _fnd2_rows(["ETHUSDT", "SOLUSDT"], "2025-01-01", "2026-12-31"))
-        assert fb.btc_returns and len(fb.btc_returns) >= 100
+        # 裁窗語意（2026-06-10 QC 帶修正）：合成 130 bars 含 45d buffer，bundle 輸出
+        # 裁回 [ws,we] → 窗內 returns = 130−45 = 85（buffer 只供 mask 回看不入輸出）。
+        assert fb.btc_returns and len(fb.btc_returns) >= 80
+        assert min(fb.btc_returns) >= self._WS  # buffer bars 不得洩入輸出
         assert all(isinstance(k, dt.date) for k in fb.btc_returns)
         # 線性下跌：r_t = -5/(1000-5(i-1)) < 0。
         assert all(v < 0 for v in fb.btc_returns.values())
