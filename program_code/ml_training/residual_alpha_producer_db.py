@@ -589,11 +589,17 @@ def load_round_trips(
     *,
     engine_mode: str = "demo",
     since: datetime,
+    symbol: str | None = None,
 ) -> list[dict[str, float]]:
     """從 trading.fills FIFO 配對出指定 entry strategy 的 round-trips（epoch 秒）。
 
     重用 realized_edge_stats 的 fills 查詢與 ``_pair_round_trips``（已測 FIFO 配對 +
     扣費 + winsorize + price-jump 防護），只取 exit 完成者。只讀。
+
+    ``symbol``（P4 reconciler attribution）：None = 全 symbol（既有 caller
+    byte-identical）；提供時加篩 ``rec.symbol == symbol``——demo-confirm 證據
+    必須逐 (strategy, symbol) cell，strategy-wide 聚合是 HIGH-2 已裁定的歸因
+    bug 向量（修法鏡像本檔 load_candidate_net_side 的 optional-param 先例）。
     """
     from psycopg2.extras import RealDictCursor  # lazy：Mac pure-core 免依賴
 
@@ -609,6 +615,8 @@ def load_round_trips(
     out: list[dict[str, float]] = []
     for rec in _res._pair_round_trips(fills):
         if rec.strategy_name != strategy_name or rec.exit_ts is None:
+            continue
+        if symbol is not None and rec.symbol != symbol:
             continue
         entry = to_epoch_seconds(rec.entry_ts)
         exit_ = to_epoch_seconds(rec.exit_ts)

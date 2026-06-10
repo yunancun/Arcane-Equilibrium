@@ -56,7 +56,10 @@ AUDIT_JOBS = (
 # Gap A/D）；額外受 OPENCLAW_RESIDUAL_STAGE0R_PREFLIGHT + OPENCLAW_RESIDUAL_ALPHA_PRODUCER
 # 雙 flag gate（皆預設 OFF）。三重 OFF：flag×2 + 不在 DEFAULT_JOBS → operator 須同時
 # 開兩 flag + 顯式加 job 名才會寫任何 row（行為中性硬約束）。
-OPTIONAL_JOBS = ("residual_preflight",)
+# alpha_wealth_reconciler = P4 online-FDR α-wealth refund 對帳器；受
+# OPENCLAW_ALPHA_WEALTH_RECONCILER flag gate（預設 OFF）+ 不在 DEFAULT_JOBS
+# + V137 表 0 rows = 三重 OFF 同款行為中性。
+OPTIONAL_JOBS = ("residual_preflight", "alpha_wealth_reconciler")
 VALID_JOBS = CORE_JOBS + AUDIT_JOBS + OPTIONAL_JOBS
 # DEFAULT_JOBS 刻意只含 CORE+AUDIT（不含 OPTIONAL）→ 預設 cron 不跑 residual_preflight。
 DEFAULT_JOBS = ",".join(CORE_JOBS + AUDIT_JOBS)
@@ -476,6 +479,64 @@ def _run_residual_preflight(dsn: str | None, args: argparse.Namespace) -> JobRes
         )
 
 
+def _run_alpha_wealth_reconciler(dsn: str | None, args: argparse.Namespace) -> JobResult:
+    """P4 α-wealth refund 對帳器 wrapper（E1-C；flag-OFF 行為中性）。
+
+    三重 OFF：① OPENCLAW_ALPHA_WEALTH_RECONCILER 預設 0 ② 本 job 不在
+    DEFAULT_JOBS（須 --jobs 顯式加 alpha_wealth_reconciler）③ V137 表 0 rows
+    → reconciler 自身 no-op。flag/DSN 缺回 skipped（cron 不 page）。寫面 =
+    research.alpha_wealth_ledger append-only INSERT + agent.lessons dead-mode
+    鑄造；零 live/auth/order/risk/lease 變動。獨立 psycopg2 conn +
+    statement_timeout（E3 cron 資源隔離），不碰 api pool。
+    """
+    start = time.monotonic()
+    try:
+        from ml_training.alpha_wealth_refund_reconciler import (  # type: ignore
+            STATEMENT_TIMEOUT_MS,
+            reconciler_enabled,
+            run_alpha_wealth_refund_reconciler,
+        )
+    except Exception as exc:  # noqa: BLE001 — import 失敗不中斷整輪 cron
+        return JobResult(
+            "alpha_wealth_reconciler", "error", _elapsed_ms(start), {},
+            f"{type(exc).__name__}: {exc}",
+        )
+
+    # flag gate（在做任何事之前）：未開即 skipped、零寫入。
+    if not reconciler_enabled():
+        return JobResult(
+            "alpha_wealth_reconciler", "skipped", _elapsed_ms(start),
+            {"reason": "flag_off:OPENCLAW_ALPHA_WEALTH_RECONCILER"},
+        )
+    if not dsn:
+        return JobResult(
+            "alpha_wealth_reconciler", "skipped", _elapsed_ms(start), {},
+            "no_database_url",
+        )
+
+    try:
+        import psycopg2  # type: ignore
+
+        conn = psycopg2.connect(
+            dsn, options=f"-c statement_timeout={STATEMENT_TIMEOUT_MS}"
+        )
+        try:
+            summary = run_alpha_wealth_refund_reconciler(
+                conn, dry_run=bool(getattr(args, "dry_run", False)),
+            )
+        finally:
+            conn.close()
+        return JobResult(
+            "alpha_wealth_reconciler", "ok", _elapsed_ms(start),
+            {"summary": summary},
+        )
+    except Exception as exc:  # noqa: BLE001
+        return JobResult(
+            "alpha_wealth_reconciler", "error", _elapsed_ms(start), {},
+            f"{type(exc).__name__}: {exc}",
+        )
+
+
 def _parse_iso_env(name: str) -> datetime | None:
     """讀 ISO-8601 env → aware UTC datetime；缺/非法回 None。naive 當 UTC。"""
     raw = os.environ.get(name)
@@ -847,6 +908,8 @@ def _run_job(job: str, dsn: str | None, args: argparse.Namespace) -> JobResult:
         return _run_weekly_report_generator(dsn, args)
     if job == "residual_preflight":
         return _run_residual_preflight(dsn, args)
+    if job == "alpha_wealth_reconciler":
+        return _run_alpha_wealth_reconciler(dsn, args)
     return JobResult(job, "error", 0, {}, "unknown_job")
 
 

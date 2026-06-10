@@ -200,6 +200,17 @@ from .checks_governance_lease_ipc import (
     # EQUIV sampler lease_ipc_equiv_sampler.py 已 DEPRECATED（不接 gate）。
     check_81_lease_ipc_soak,
 )
+from .checks_alpha_wealth_fdr import (
+    # L2 P4 online-FDR (2026-06-10 E1-C) — `[82]`-`[86]` α-wealth 帳本 +
+    # pre-registration + V132 回退五軸哨兵。V137/V132 表缺 → PASS-skip
+    # （pre-deploy 不 false-FAIL）。N-7 語義：監測帳本完整性與 conducted
+    # tests，非 discoveries（初期 discovery≈0 是設計後果非故障）。
+    check_82_alpha_wealth_family_cardinality,
+    check_83_alpha_wealth_orphan_refund,
+    check_84_alpha_wealth_refund_amount_mismatch,
+    check_85_pre_reg_cross_family_duplicate_spec,
+    check_86_hidden_oos_state_regression,
+)
 from .checks_pricing_binding import (
     # REF-20 Sprint C R6-T7 (2026-05-05) — `[45]` LG-3 provider pricing
     # binding sentinel. Implements RFC §IMPL T2 healthcheck output
@@ -1290,6 +1301,22 @@ def main() -> int:
             # lease_ipc_equiv_sampler.py 已 DEPRECATED（不接 gate）。
             s, m = check_81_lease_ipc_soak(cur)
             results.append(("[81] lease_ipc_soak", s, m))
+
+            # [82]-[86] L2 P4 online-FDR 五軸（2026-06-10 E1-C）：α-wealth
+            # 帳本完整性（family 基數 MIT 4a / orphan refund + 金額恆等 MIT
+            # N-3）+ pre-reg 跨 family 重複（MIT 4b 觀測級）+ V132 sealed
+            # 回退指紋（QC QN-1）。V137/V132 缺 → PASS-skip。純 SQL，
+            # cursor 區塊內跑。
+            s, m = check_82_alpha_wealth_family_cardinality(cur)
+            results.append(("[82] alpha_wealth_family_cardinality", s, m))
+            s, m = check_83_alpha_wealth_orphan_refund(cur)
+            results.append(("[83] alpha_wealth_orphan_refund", s, m))
+            s, m = check_84_alpha_wealth_refund_amount_mismatch(cur)
+            results.append(("[84] alpha_wealth_refund_mismatch", s, m))
+            s, m = check_85_pre_reg_cross_family_duplicate_spec(cur)
+            results.append(("[85] pre_reg_cross_family_dup_spec", s, m))
+            s, m = check_86_hidden_oos_state_regression(cur)
+            results.append(("[86] hidden_oos_state_regression", s, m))
     finally:
         conn.close()
 
