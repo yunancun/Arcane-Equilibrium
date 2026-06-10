@@ -59,7 +59,7 @@ Created: 2026-04-28
 - .codex: 29
 - .gitignore: 1
 - CLAUDE.md: 1
-- OPENCLAW_INVENTORY_CONSOLIDATED.md: 1
+- AE_INVENTORY_CONSOLIDATED.md: 1
 - README.md: 1
 - SKILLS_TODO.md: 1
 - TODO.md: 1

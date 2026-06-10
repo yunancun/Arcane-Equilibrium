@@ -21,7 +21,7 @@ At the start of every new session, read these files in order:
 7. `.codex/AGENT_DISPATCH_PROTOCOL.md`
 8. `.codex/SUBAGENT_EXECUTION_RULES.md`
 
-Read `OPENCLAW_INVENTORY_CONSOLIDATED.md` only on demand for deep history, RCA, or old design decisions.
+Read `AE_INVENTORY_CONSOLIDATED.md` only on demand for deep history, RCA, or old design decisions.
 
 ## Sub-agent rules
 
