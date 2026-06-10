@@ -6,10 +6,11 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Performance Profiling（效能分析）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
 
-> ⚠️ **SLA 數字 disclaimer**：「H0 Gate < 1ms / Tick path < 0.3ms / IPC < 5ms / 128GB / 4-8GB PG」等硬體 + 性能數字治理依據需 verify（SM-* 治理是否定義 SLA 不確定）；本 skill 引用值為 **CLAUDE.md memory + 工程實測 baseline**，若與真實 runtime 衝突以實測為準。
+**本檔為 SLA 閾值唯一正本（H0 Gate <1ms / Tick path <0.3ms / IPC round-trip <5ms），他檔引用不重述。**
+SLA 來源：CLAUDE.md 硬件 memory + 工程實測 baseline；與真實 runtime 衝突以實測為準。
 
 ## 何時觸發
 

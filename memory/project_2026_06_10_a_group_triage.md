@@ -23,3 +23,11 @@ metadata:
 
 **Why**(教訓):①psql `2>/dev/null` 會把 ORDER BY 越界等 SQL error 靜默吞掉——「7d 0 intents」是這樣的誤報,靠 max(ts) 交叉驗證抓回;聚合查詢必須帶一個獨立交叉檢核。②派 PA 前我的 brief 本身 stale(06-03 gate rework 已落地我不知道)——PA 設計任務必須要求「先親驗代碼現實再設計」,本次 PA 正確推翻 brief 四處。③log 證據會被 restart 截斷:依賴「N 天連續 log」的 soak 判準,要在設計期就規定 log 留存或改用 DB 帳本(PA 的 epoch ledger 正是解這個)。
 **How to apply**:OPS-2 cutover 鏈下一步=E1 完成→E2→E4;AC19 決策排 PA/QC;P5-SM 下一步=operator 審 PA 設計→E1 5-task wave;L2 線歸 L2_TODO(該 session 活躍中,P3b 已 commit `24d049fc`)。relates [[project_2026_06_01_rust_python_boundary_simplification_audit]] [[project_2026_06_03_v58_archive_audit_s2_design]] [[feedback_evidence_discipline_under_degraded_tools]]
+
+---
+
+## [同日追加] OPS-2 Phase-2 cutover 全鏈完成(merge-ready)
+
+A1 後續鏈當日走完:E1 `a3d27729`→E2 RETURN(1H/1M/1L)→E1-fix `cf1b9320`→re-E2 ACCEPT→E4 PASS `e34a8772`→CC APPROVE-CONDITIONAL A-(0 BLOCKER)→CC-MED-1 doc fix `823e53ad`→BB SIGN-OFF 0 FLAG→PM sign-off(報告 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-10--ops2_phase2_cutover_pm_signoff.md`)。branch `fix/ops2-phase2-cutover` 4 commits 未 merge,deploy operator-gated(C-C 外部 alert→merge→rebuild+Linux regression→C-B renew 留證→§13.6;首次 rotation 2026-09-08)。
+
+**追加教訓**:①E2 的 base-vs-HEAD 全套失敗清單 diff 是抓「漏掃 collateral 測試」的硬手段,點名檔驗證必漏 fixture 對舊行為的隱性依賴——已固化為 SOP。②PM 拍板保留 restart_all seed(rollback 安全墊,三方確認非 runtime fallback);runbook「panic 阻 boot」係統性失真已五處校準(實況=live 拒 spawn+log kind deny-loop,panic 被 LIVE-GATE-BINDING-1 post-dominate)。③PM 初判跳過 BB 被 runbook §13 owner 行推翻→撤回補派(0 FLAG 收場):裁決跳過角色前先讀 owner/chain 定義原文,不能只看編號段落。④CC session 偶發無 Write 工具:報告 PM 代落盤+核註保真,審計者原文不可改寫。⑤C-A「多獨立 restart 窗」法:依賴連續 log 的 soak 判準遇 log 輪轉,改用「N 個獨立重啟窗各自 0 信號+結構性發射率論證」重建置信。

@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # DB Schema Design for Financial Time Series（金融時序 DB schema 手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
 
 ## 何時觸發
 
@@ -188,9 +188,9 @@ CREATE TABLE learning.X (
 - 25% of 4-8GB = 1-2GB
 - 不要超 25%（OS file cache 也要空間）
 
-### 6.3 Connection pooling
-- pgbouncer 必開（OpenClaw 多 worker）
-- max_connections 50 內（待 verify）
+### 6.3 Connection pooling（typical baseline）
+- 多 worker 場景建議啟用 connection pooling（pgbouncer 類）；是否已部署先跑 §6 verify 命令 / 查 runtime 配置確認，不假設已開
+- max_connections 建議 50 內；實值先 `SHOW max_connections;` verify，再對照 worker 數評估，不引本行建議值當審計結論
 
 ### 6.4 Hypertable 自動 chunk drop
 ```sql
@@ -219,13 +219,9 @@ SELECT add_retention_policy('learning.tick_data', INTERVAL '90 days');
 9. **Test idempotency**（migration 跑兩次）
 10. **audit_migrations.py** 驗 V### 序列完整
 
-## OpenClaw context — 不在本 skill 重述
+## 穩定 schema rule（架構級不變）
 
-OpenClaw 特定 snapshot（具體 V### migration 編號 / commit hash / RAM 配比 / 當前 healthcheck check 數）會 drift。本 skill 不重述。
-
-實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `CLAUDE.md` hard boundaries / operating rules > `audit_migrations.py` 實測 > git log > memory（operator 明示未必可信）。
-
-**穩定不變的 schema rule**（架構級不變）：silent-noop postmortem 教訓 → 新 migration 必含 Guard A/B/C；engine_mode 4 值 paper/demo/live_demo/live；training filter `IN ('live','live_demo')`（不單 'live'）；schema 變動必同步加 healthcheck `check_X()` function。
+silent-noop postmortem 教訓 → 新 migration 必含 Guard A/B/C；engine_mode 4 值 paper/demo/live_demo/live；training filter `IN ('live','live_demo')`（不單 'live'）；schema 變動必同步加 healthcheck `check_X()` function。
 
 ## Cross-Skill 互引（避免重述）
 

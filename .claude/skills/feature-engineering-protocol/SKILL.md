@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Feature Engineering Protocol（特徵工程嚴謹性手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
 
 ## 何時觸發
 
@@ -103,6 +103,8 @@ df['z_score'] = (df['return'] - df['return'].expanding().mean()) / df['return'].
 
 ## 偵測 SQL 範本
 
+> 範本中表名（`learning.feature_metadata` / `learning.feature_target_pairs` / `learning.training_set` 等）為**示意 schema**；執行前先以 `information_schema.tables` 驗證存在，不存在則在報告標註並改用實際表名。
+
 ### A. Look-ahead 偵測（per feature × per timestamp）
 ```sql
 -- 對每個 feature 找出實際依賴的最後 timestamp
@@ -157,13 +159,9 @@ WHERE c.symbol IS NULL;
 6. **Cross-validation 驗 leakage 影響** — TimeSeriesSplit + purge + embargo（用 `time-series-cv-protocol` skill）
 7. **IS vs OOS Sharpe 差距** — > 50% 必 RCA leak
 
-## OpenClaw context — 不在本 skill 重述
+## 穩定 ML feature rule（不會 drift）
 
-OpenClaw 特定 snapshot（commit hash / specific bug 教訓如 bb_breakout F3 / 當前 P0-13 ATR fix 細節 / EDGE-P2-3 部署 / 當前 label count）會 drift。本 skill 不重述。
-
-實際 context 必從 SSOT 拿：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `audit_migrations.py` 實測 > `git log` > governance docs > memory（最後）。table 名 / column / row 量必跑 SQL 取真值（`SELECT count(*) FROM learning.X WHERE engine_mode IN ('live','live_demo')`）。
-
-**穩定不變的 ML feature rule**（不會 drift）：training filter 必含 'live' + 'live_demo'（不混 paper）；任何 rolling stat 必加 `.shift(1)` leak-free（rolling.max() 含 current bar 是已知 measurement bias）；resample 後只用 closed bar（`isClosed=true`）；feature ts 必早於 target window start（不重疊）。
+training filter 必含 'live' + 'live_demo'（不混 paper）；任何 rolling stat 必加 `.shift(1)` leak-free（rolling.max() 含 current bar 是已知 measurement bias）；resample 後只用 closed bar（`isClosed=true`）；feature ts 必早於 target window start（不重疊）。table 名 / column / row 量必跑 SQL 取真值。
 
 ## Cross-Skill 互引（避免重述）
 

@@ -11,6 +11,10 @@ Coverage / 覆蓋:
    Default fallback（n<30）— 小樣本 → default_14d。
 4. Default fallback (high p-value) — both fits fail significance gate. /
    Default fallback（高 p-value）— 兩擬合皆未通過顯著性門檻。
+
+雙模式語意 / Dual-mode semantics:
+- 無 scipy 環境:測項 1-2 誠實 SKIP(fit 路徑需 scipy);其餘測試仍綠,
+  但行使的是 estimator 設計性降級路徑(default_14d)— 兩種模式皆為真實生產語意。
 """
 
 from __future__ import annotations
@@ -99,6 +103,9 @@ def test_pnl_decay_pass():
     PnL decay fit recovers true half-life within tolerance.
     PnL decay 擬合在容差內還原真實 half_life。
     """
+    # fit 路徑意圖必須有 scipy;無 scipy 時 estimator 設計性降級 default_14d,
+    # 此處應誠實 SKIP 而非 FAIL(比照 test_onnx_exporter_quantile 重依賴守衛慣例)。
+    pytest.importorskip("scipy")
     true_hl = 7.0
     df = _make_decay_fills(n=200, true_half_life_days=true_hl, noise_std=0.5)
 
@@ -125,6 +132,9 @@ def test_sharpe_decay_pass():
     Sharpe decay fit succeeds when sharpe_60d_window has clear decay.
     當 sharpe_60d_window 有清晰衰減時，Sharpe decay 擬合成功。
     """
+    # fit 路徑意圖必須有 scipy;無 scipy 時 estimator 設計性降級 default_14d,
+    # 此處應誠實 SKIP 而非 FAIL(比照 test_onnx_exporter_quantile 重依賴守衛慣例)。
+    pytest.importorskip("scipy")
     rng = np.random.default_rng(123)
     n = 200
     true_hl = 5.0

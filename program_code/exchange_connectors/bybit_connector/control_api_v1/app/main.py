@@ -3,6 +3,9 @@ from __future__ import annotations
 """
 MODULE_NOTE (中文):
   FastAPI 应用主入口模块，在 main_legacy 基础上叠加快照稳定性编译与 runtime bridge 覆盖。
+  命名注記：openclaw_* / OPENCLAW_* 為歷史運行面名稱（2026-05-06 軟更名保留），正式產品名
+  = 玄衡 · Arcane Equilibrium（CLAUDE.md Product Boundary）；全面改名為 AE_* 是 Apple
+  Silicon 遷移時的強制 gate，見 docs/execution_plan/2026-06-10--ae_runtime_rename_migration_guide.md。
   负责状态读写的确定性重编译（snapshot identity 不变性）、runtime 事实层叠加、以及
   所有子路由（Paper Trading / L2 AI / Risk / Strategy / Governance / Scout）的统一注册。
   属于 Control API v1 层，是系统唯一的 HTTP 服务暴露点。

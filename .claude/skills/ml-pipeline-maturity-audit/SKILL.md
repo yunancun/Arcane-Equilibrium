@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # ML Pipeline Maturity Audit（ML 管線成熟度審計）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
 
 ## 何時觸發
 
@@ -46,7 +46,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 每行真值來源：`SELECT count(*), max(ts) FROM learning.X` + `grep -r "spawn_X_writer" rust/openclaw_engine/src/` + `grep -r "FROM learning.X" rust/openclaw_engine/src/ control_api_v1/` + IPC/API endpoint 確認。
 
-## 工作流（11 步審計，含 step 0 強制重驗）
+## 工作流（step 0-10，含 step 0 強制重驗）
 
 0. **Re-verify 從 SSOT 拿真值**（強制）：對每 component 跑 SQL（`SELECT count(*), max(ts) FROM learning.X`）+ grep writer spawn（`grep -r "spawn_X_writer" rust/openclaw_engine/src/`）+ grep consumer SELECT（`grep -r "FROM learning.X" rust/openclaw_engine/src/ control_api_v1/`）。**本 skill 不寫死 baseline；任何 audit 結論必基於本次 step 0 實測值**。
 
@@ -61,11 +61,17 @@ allowed-tools: Read, Grep, Glob, Bash
 9. **Healthcheck wiring** — `passive_wait_healthcheck.py` 是否有對應 check_X()
 10. **Stage 評級** — 5 階段 + 4 維度填表
 
-## OpenClaw 已知 ML pipeline 狀態 — 不在本 skill 重述
+## Model Registry 審計軸
 
-OpenClaw 各 ML component 的階段 + 阻塞原因（LinUCB / Combine Layer / Model Registry / Edge Estimator / Strategist / Executor / Exit features writer）會隨 commit + Phase 演進變動。**本 skill 不寫死狀態表**避免 sub-agent 用過期 stage 結論。
+對 `model_registry` 類 component 額外驗 4 項：
+- **Promotion gate 存在性**：canary → production 升級是否有明確 gate（API / 審批路徑），非默認直升
+- **Rollback 路徑**：production model 可否一步回退到上一版本；回退是否留 audit 記錄
+- **Model-data lineage**：模型版本 ↔ 訓練數據窗口（date range + engine_mode filter）對應可追溯
+- **Canary 評估記錄**：canary 期間的評估 metric 是否實際落表（非只有 status 字段）
 
-實際各 component 狀態：跑 §1-§9 工作流（V### migration check + SQL row count + grep writer spawn + grep consumer + IPC 確認 + healthcheck wiring），現場填表。**禁直接 cite 本 skill 內的 component 階段**。
+## OpenClaw component 狀態 — 必現場重驗
+
+OpenClaw 各 ML component 的階段 + 阻塞原因隨 commit + Phase 演進變動，本 skill 不寫死狀態表。實際各 component 狀態：跑 step 0-10 工作流（V### migration check + SQL row count + grep writer spawn + grep consumer + IPC 確認 + healthcheck wiring），現場填表；**禁直接 cite 本 skill 內的 component 階段**。
 
 ## 反模式（見即懷疑）
 
@@ -85,13 +91,9 @@ OpenClaw 各 ML component 的階段 + 阻塞原因（LinUCB / Combine Layer / Mo
 
 MIT 審計時若發現 V### 沒 Guard A → 列為 BLOCKER，回 E2 改。
 
-## OpenClaw context — 不在本 skill 重述
+## 穩定 schema rule（不會 drift）
 
-OpenClaw 特定 snapshot（commit hash / 5 策略名單 / 25 symbol 數量 / healthcheck check 數）會 drift。本 skill 不重述。
-
-實際 context 必從 SSOT 拿（衝突信前者）：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `CLAUDE.md` hard boundaries / operating rules > `git log` > governance docs > memory（operator 明示未必可信）。
-
-**穩定不變的 schema rule**：`engine_mode IN ('live','live_demo')` filter 必含兩者；edge_estimator JSON = `strategy::symbol` top-level key；`OPENCLAW_AUTO_MIGRATE=1` opt-in 路徑 refuse-to-start on ambiguous（架構級）。
+`engine_mode IN ('live','live_demo')` filter 必含兩者；edge_estimator JSON = `strategy::symbol` top-level key；`OPENCLAW_AUTO_MIGRATE=1` opt-in 路徑 refuse-to-start on ambiguous（架構級）。
 
 ## Cross-Skill 互引（避免重述）
 

@@ -1,0 +1,5169 @@
+# E2 Memory Archive（append-only：壓實遷入原文，勿刪改）
+
+--- 2026-06-10 壓實遷入（原 memory.md 第 1-5166 行）---
+# E2 Memory — 工作記憶
+
+## 2026-06-03 — FND-2 PIT universe builder 對抗審查（commit ccc7f4b7，E1 socket-dead PM 救回，verdict PASS → MIT）
+
+**對象**：`helper_scripts/research/fnd2_pit_universe/{__init__,builder,data_loader,cohorts,artifact,harness}.py` + `tests/test_fnd2_pit_universe.py`（19 test）+ SCRIPT_INDEX。**Verdict：PASS → MIT**（0 BLOCKER / 0 HIGH / 0 MED；3 LOW 觀察非阻塞）。**注意 prompt 給的 `30116afb` 是 docs-status commit；真 IMPL commit = `ccc7f4b7`**（git show --stat 確認 diff scope = 7 新檔 + SCRIPT_INDEX，0 runtime / 0 migration，與 PA dispatch packet 逐檔吻合無 scope creep）。報告直接回 parent（未寫檔）。
+
+**對抗驗證方法論（高價值，可複用於任何「純函數 builder + synthetic test」review）**：
+1. **mutation testing 是證 test-bite 的黃金手段**（不靠肉眼讀 assert）：把 committed source copy 到 /tmp 建 mutant package，逐個注入「最像 E1 會犯的錯」再跑 test 確認 FAIL。本案 6 mutant 全被抓：(M1) R-1 `eff_listed coalesce 到 first_seen_ts` → T5 抓（T2b 因 listed_at 非 NULL 未觸發該分支，但 T5 count drift 抓到=integration 高 bite）；(M1b) alive_from 直接用 first_seen_ts → T2b/T3a/T5 抓；(M2) survivor FAIL 分支恆 PASS → T3b 精確抓；(M3) digest 注入 now() → T4 抓；(M4) alive_from min 而非 max → T2/T2b 抓；(M5) unknown_lifetime AND→OR → T7a/T7d/T8 抓。**教訓：synthetic test 跑綠不夠，必須 mutant 證每條 load-bearing claim 有 bite**。
+2. **R-1（lifetime 邊界源）不能只信「真跑 unknown_lifetime=0」**（PA 親囑「非剛好資料無 NULL」）：對抗手法 = 撈 real artifact universe.csv 算「first_seen_ts 比 listed_at 晚 >60d 的 symbol 數」=**766/829（92%）正是 R-1 trap 場景**，逐行驗 `alive_from == max(listed_at, window_start)` → **0 miscomputed**、`alive_from == first_seen_ts while listed earlier`（bug 指紋）=**0**。即邏輯在 92% 真 row 上被實際 exercise 證對，非 vacuous。**比「跑綠」+「mutant」更強的第三層 = 真資料對賬 bug 指紋計數**。
+3. **forbidden-route 不能只信 T6**：自跑 grep `_fetch_historical_universe_snapshot_sync|max_symbols|current_scanner_fallback|LIMIT|control_api_v1` 全 source，確認命中全在 docstring/MODULE_NOTE prose（硬邊界註記，是好事），唯一真 SQL LIMIT = `_load_scanner_active` 的 `LIMIT 1`（latest-snapshot metadata 非 universe 截斷，T6 也單獨守此）。
+4. **determinism 要跨「fresh process」驗**（非同 process 兩跑）：`for i in 1 2; do python3 -c "...build_universe..."` 比對 universe_id → 相同。防的是 PYTHONHASHSEED/dict-order/now() 非確定性。digest 靠 `sorted(rows, by symbol)` + 固定 `_DIGEST_COLUMNS` tuple + `%.12g` float fmt + 排除 run_id/universe_id 自身（避免循環），結構性穩定。
+5. **core25 凍結常數對賬 seed**：`csv.DictReader` 撈 seed `in_core25_pinned=t` 25 行 vs `cohorts.CORE25_PINNED` → set EXACT MATCH（OQ-2「以 seed 為準」滿足，E1 0 自創）。
+6. **真 artifact DoD 對賬**（ssh trade-core 讀 summary.json）：`survivor_rejection_status=PASS` / `delisted_proof_count=255≥200`（且 == counts_by_status.closed=255 內部一致）/ `unknown_lifetime=0` / included=829/excluded=23（全 lifetime_outside_window，0 wrongly excluded）/ parquet 103KB 852 row（**未 COPY-TO 崩**，read_csv().write_parquet() 解法對，回應 2026-06-02 post-deploy parquet 崩潰教訓）/ manifest universe_sources 含 3 表 PIT gate。
+
+**3 LOW 觀察（非阻塞，不退）**：
+- (L1) **「3 個 is_delisted_at_asof XOR delisted_at-present 不一致」是 source-data 特性非 bug**：GNOUSDT/OLUSDT/REQUSDT 仍 `status=Trading`/`is_delisted=false`/`statuses_seen=["Trading"]`，但有 `delisted_at=2026-06-03T09:00`（**asof 00:00 之後的「已公告未來下市」時間**）。`seen_delisted=bool_or(...)=false` 正確不算 delisted-proof；`included=true` 正確；關鍵 **`alive_to=least(delisted_at, window_end)=window_end`**（00:00，非未來 09:00）→ Step F clip 正確未提前截斷（撈全 artifact 驗「included 有未來 delisted_at 但 alive_to 未 clip 到 window_end」=0）。PA reflection「lifecycle 100% 一致」是 latest-projection 視角；此 3 個是 aggregate `max(delisted_at)` 撈到未來公告值，與 latest `is_delisted_at_asof` 視角差，by-design。**對抗教訓：「未來 delisted_at on still-trading symbol」是真實 Bybit 資料形狀，builder 的 window-clip 正好防住，是設計亮點不是缺陷**。
+- (L2) 3 個 `except Exception` 全 fail-soft observability/optional-IO（parquet 鏡像非阻斷 + git provenance + DSN import fallback），無一吞交易/正確性路徑；logger 用 `%s`（artifact.py:98）非 f-string；合規。
+- (L3) M1 mutant（coalesce 到 first_seen_ts 的「契約 §3 字面」形式）只 fail T5 不 fail T2b——因 T2b 的 listed_at 非 NULL。**建議 follow-up（非阻塞）**：可加一條「listed_at=NULL 但 first_seen_ts 有值 + delisted_at 有值」case 直接鎖死「缺 listed_at 時 alive_from 不得退 first_seen_ts」這條最隱微的契約 §3 trap 分支（目前靠 unknown_lifetime=both-NULL 守，但「只缺 listed_at」走 `eff_listed=ws` 分支，T2b 未直接覆蓋此分支的 first_seen 反例）。real-data unknown=0 故無 runtime 風險，純 test 完備性。
+
+**§5 multi-session race**：fetch 後 `origin/main...HEAD`=`0	0`（HEAD==origin，FND-2 commit 已在 origin/main）；`git status --porcelain` 僅 1 untracked = 隔壁 session memory（`project_2026_06_03_blocked_signal_and_cascade_fade_nogo.md`，與 review scope disjoint，未碰）；3 pre-existing stash 全標「非我的」未碰（§5c 禁 revert）；review 期間無 sibling push 觸 FND-2 file scope。
+
+**結論**：FND-2 可作 AEG-S2 (b) breadth / (c) robustness 的可信 PIT universe 基礎——survivorship 控制真實（255 delisted included，survivor-rejection gate 有 bite）、R-1 lifetime 邊界源正確（92% real row exercise 0 miscompute）、determinism 跨 process 穩定、read-only fail-closed、0 禁用捷徑。**E1 不自簽正確：交 MIT universe-row 審（contract §7 末）**。
+
+**durable lessons**：
+1. **「純函數 builder + synthetic test」的對抗三層**：(a) 跑綠（必要不充分）→ (b) mutant 注入每條 load-bearing claim 證 test FAIL（證 bite）→ (c) 真 artifact 撈 bug-signature 計數證邏輯在真資料上 exercise（證非 vacuous）。三層缺一不可，尤其 (c) 破「資料剛好沒觸發 buggy 分支」的假陽性。
+2. **PA「算法權威 = 設計報告 §4 非契約 §3 字面」時，E2 必對齊 §4 而非契約**：本案契約 §3 的 `coalesce(listed_at, first_seen_ts)` 是 trap（snapshot ts 只 27d），PA §4 Step D 改為「listed_at 唯一權威，缺則 unknown 不 coalesce」。review 站 PA §4，且用 real-data 證 §4 對、契約 §3 字面會錯（766 symbol 受害）。
+3. **「資料不一致」先分清 aggregate-view vs latest-view**：is_delisted_at_asof（latest）vs max(delisted_at)（aggregate）差異可能是「未來公告下市」這種真實資料形狀，不是 source corruption；驗法 = 看 statuses_seen + alive_to 是否被 window-clip 正確處理。
+4. **parquet 鏡像用 `duckdb.read_csv().write_parquet()` 不用 COPY-TO ?**——回應 2026-06-02 post-deploy COPY-TO-? bind 崩潰教訓；Linux 真跑 852-row parquet 成功落地是這條 fix 的 runtime 證據。
+
+## 2026-06-01 — P2a governance autonomy 子域抽取 behavior-preserving 重構 review（verdict PASS → E4）
+
+**對象**：未提交工作樹（多任務髒樹）。governance_routes.py 1978→1346 LOC，autonomy 子域抽至新 `governance_autonomy_service.py` 706 LOC；test rename `test_governance_autonomy_level_routes.py`→`test_governance_autonomy_service.py`。**Verdict：PASS → E4**（0 BLOCKER / 0 HIGH / 0 MED；3 LOW 觀察非阻塞）。報告直接回傳 parent（未寫檔）。
+
+**對抗驗證方法論（高價值，可複用於任何「behavior-preserving extract」refactor review）**：
+1. **AST body-diff 是黃金手段，不靠肉眼讀 diff**：寫 `ast.parse` 抽每個 moved symbol 的 `node.lineno..end_lineno`（decorator 用 `decorator_list` 單獨比），對 HEAD vs 新模塊逐 symbol byte-compare。本案 16 符號（11 helper + 4 route + 1 model）+ 5 常量全 byte-identical → 證實安全路徑（`_perform_autonomy_switch` advisory-lock/FOR UPDATE 108 行、TOTP path、audit-on-FAILURE `_record_autonomy_switch_attempt` 46 行、cooldown、typed-confirm gate）零行為改動。比讀 600 行 diff 可靠 N 倍。
+2. **re-export 完整性 = grep 全 repo 找 importer，不信 E1「我都 re-export 了」**：E1 只 re-export model+4 route，**未** re-export 11 helper/5 常量。但 grep `program_code helper_scripts rust` 確認**無任何 production/test 模塊** `from .governance_routes import <helper>` → 不缺。教訓：re-export 不必覆蓋全部 moved name，只需覆蓋「外部實際引用」的；判斷靠 grep 不靠直覺。唯二 helper 提及是 SCRIPT_INDEX.md / pg_connect.py 的**註釋 prose**（非 import）。
+3. **circular-import invariant 要實證「leaf-first 真的炸 + routes-first 真的通」+ 證明 pre-existing**：`python3 -c "import app.governance_autonomy_service"`（leaf-first）→ 實測 raise `ImportError partially initialized`；`import governance_routes` then service → 通 + 4 route registered + `gr.switch is svc.switch`（同物件無雙註冊）。關鍵：對 sibling `governance_extended_routes` 跑同樣 leaf-first import **也炸**（同 ImportError）→ 證實 invariant 是 FIX-08 既有契約，非本次新引入。
+4. **route 註冊驗證 = import graph 實跑數 router.routes**：`[r for r in governance_router.routes if 'autonomy' in r.path]` → 恰 4，`len(set)==len`（無雙註冊），decorator path/method 與 HEAD byte-identical（GET state/eligibility/status + POST switch）。decorator-side-effect move 最易 silently drop route 或改 dep，必實跑數。
+5. **test「genuinely exercises moved code」= diff 老測試**：新 vs 老測試**唯一**差異 = import 行 `from app import governance_routes as gr`→`from app import governance_autonomy_service as gr`。這正是**正確**改動：symbol 既已搬家，`monkeypatch.setattr(gr, "_get_autonomy_pg_conn", ...)` 必須 target 路由實際 bare-name lookup 的模塊（service），否則 patch 不生效→測試要嘛紅要嘛對真 code trivially pass。`app.dependency_overrides[gr._get_auth_actor]` 安全因 FastAPI Depends 按 callable 物件身份覆蓋，service `from .governance_routes import _get_auth_actor` 與 route `Depends(_get_auth_actor)` 是同一物件。
+6. **test count 防漏 = 比 HEAD 三檔 grep `^def test_`**：working tree 113+13+6=132 == HEAD 113+13+6=132（coverage/auth 檔零改、autonomy 6→6 純 rename）。實跑 `pytest -q` 132 passed 復現。
+
+**3 LOW 觀察（非阻塞，不退 E1）**：
+- (L1) sibling `governance_extended_routes` 用 `from . import governance_routes as _gov` + `_gov.xxx` 模塊級存取（註釋明寫「for patchability in tests」），新模塊改成**直接 import** 共用 helper（`_get_auth_actor/_require_operator_auth/_sanitize_log`）+ autonomy-specific patch target 自定義 bare function。風格分歧但**非 bug**：(a) 兩 auth helper 走 Depends 按物件身份覆蓋無關模塊屬性；(b) `_sanitize_log` 僅 exception 分支調用無人 patch；(c) 真 patch target（`_get_autonomy_pg_conn` 等 4 個）定義在 service 並在 service patch=正確。grep 證無人 `setattr(governance_routes, _sanitize_log/_get_auth_actor, ...)` 期待 autonomy 生效。
+- (L2) `logger`（:53）定義但全模塊未用（moved code 從不 log）。無害 dead binding，符合模塊頭慣例。
+- (L3) `except Exception: pass`（:442/:552）= rollback-failure-tolerant 標準式（rollback 失敗的 transaction，吞 secondary rollback error，return fail-closed `pg_error:{type(exc).__name__}` 不洩 stack）；byte-identical HEAD，非本次引入。
+
+**scope/§5 race**：HEAD `0a16b772` == 4 ahead / 0 behind origin（fetch 後 0 sibling push 2h 窗）；3 pre-existing stash 全標「非我的」未碰（§5c）。**髒樹 scope 真相**：工作樹含 P2a（governance，我 review）+ **P2b（strategy_ai_routes split，平行任務，非我 scope）並存未提交**——untracked `closed_pnl_pagination.py`/`demo_snapshot_payloads.py`(+tests) 經 grep 證實只被 `strategy_ai_routes.py` import（「從 strategy_ai_routes 抽出」），與 governance 0 overlap。`bybit_rest_client`(P3) 已 commit clean（符 user）。commit `7f048e79`(P2b) 只是 docs-only E1 memory，**P2b code 仍未提交**。→ 提醒 PM：P2a 須 narrow-stage 單獨 commit（governance_routes.py + governance_autonomy_service.py + 2 test rename），勿誤捆 P2b。**§5b：未 revert/碰任何 P2b leftover**。
+
+## 2026-06-01 — SM 跨語言對等契約測試 review（4a 治理里程碑，TEST-ONLY，verdict PASS）
+
+審 E1 4 檔（未提交）：`rust/openclaw_core/tests/{sm_contract.rs,fixtures/sm_contract_vectors.json,fixtures/generate_sm_contract_vectors.py}` + `control_api_v1/tests/test_sm_contract_parity.py`。190 向量 / 186 等值 / 4 rust_only / 0 py_only，Rust+Python+既有 lib test 三綠全複現。
+
+**對抗審核方法論教訓（高價值，可複用）**：transcription-fidelity test 的最大風險 = 「E1 抄錯規則表 → 測試把錯的當對的，反而隱藏真 drift 或捏造假 parity」。光跑綠不夠。本次用 3 條獨立手段破解 circularity：
+1. **Gold-standard 全矩陣 diff（最關鍵）**：不信 E1 generator，E2 自己直讀 auth.rs/lease.rs/risk_gov.rs 重抄一份 Rust 規則表，再 import 真 Python SM source，對 FULL from×to×initiator×{approved T/F} 矩陣逐格比 → auth/lease/risk_gov(shared init) 全 0 mismatch。這證明「0 parity bug」是真，非 fixture 取巧子集。
+2. **Re-generate diff**：跑 generator 輸出與 committed fixture byte-identical → fixture 無手改脫離 generator。
+3. **雙向 bite**：flip 一條 expect.allowed → Rust+Python **都**紅（各 1 fail）→ 證實兩 harness 真呼 transition()/_validate_transition() 且等值斷言真會炸。
+
+**矩陣覆蓋率真相**：fixture 非全枚舉（auth 缺 25/56、lease 缺 33/72、risk_gov 缺 2/30 cell），但缺的全是 terminal-source（Guard1 必 TerminalState）或 plain invalid（Guard3 必 InvalidTransition），無一是任一側的 defined rule/forbidden → 漏格不藏 divergence（已由 gold-standard 全矩陣證偽「漏格藏 bug」假說）。generator step4 每 from-state 只取 1 條代表 invalid 防爆量，合理。
+
+**guard 順序**：兩側皆 terminal(G1) 先於 forbidden(G2)。fixture 14 條 forbidden_pair_shadowed_by_terminal 全浮 TerminalState、5 條 forbidden_pair（非終態源）浮 Forbidden、7 條 terminal_source 浮 TerminalState — 實跑確認，encoding 對。
+
+**tagged-count guard**：移除一個 rust_only tag → Rust(3!=4) + Python 雙紅。但**有不對稱**：注入「untagged equality 引用 Reconciler 且指向 Rust 也 allow 的 cell」→ Rust **靜默放過**（count 仍 4 + 真 transition allowed 匹配），只 Python 抓（missing initiator surface）。即「新 Reconciler 分歧」防線靠 Python 側，非 Rust 側。可接受（Python 是缺 initiator 那側）但屬殘留盲區，已記 report MEDIUM/LOW。
+
+**Python error 分類弱點（已知 + 我復驗）**：無結構化 SmError，靠訊息子串分類。6 deny class 全真 SM 實跑分類正確、6 訊息模板零碰撞（approval 命中 2 key 但同映 ApprovalRequired）。但依賴英文子串（"terminal state"/"Forbidden transition"/...）且無契約 assert 鎖死 → state_machine_base.py 改錯字會靜默 mis-classify 成 UNCLASSIFIED。建議 follow-up：Python 加 error code 欄位或 assert 訊息模板。
+
+**INV-A/B/C 直驗 Python source**：escalation requires_approval 全 False、de-escalation 全 True、CB→Defensive + MR→* 全 OP_ONLY（RG/HM 皆不在）。Rust gold-standard 同。
+
+**§5 multi-session race**：HEAD==origin/main(0/0)、2h 窗無 sibling push、3 個 pre-existing stash 標註「非我的」全程未碰（§5c 禁 revert）、髒樹 M 檔全屬隔壁 session memory/helper 與 review scope 0 overlap。restore fixture 全用 abs path + diff 驗 intact。
+
+**反模式自省**：第一次 bite/guard 測試用 heredoc 內 `cd` 進 rust d=>相對路徑斷裂 + restore 路徑錯（幸好結尾 abs-path restore 救回，diff 驗 intact）。教訓：破壞性 fixture 測試一律全程 abs path，restore 後必 `diff -q` 驗。
+
+## Memory Usage Contract (2026-05-16)
+
+- 本文件保存歷史教訓與角色偏好，不是 active state、TODO 或 runtime ledger。
+- 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
+- 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
+
+## 2026-06-01 — 4-fix 退化迴圈修復對抗審查（A-1 OI 解耦 / A-2 qty_zero skip / B regime gate / A-4 移除 edge 歸零）· 4/4 APPROVE → E4
+
+**對象**：HEAD `2e809b96`（== origin/main，§5 race 全綠 0/0），未 commit 工作樹（11 Rust + 1 Python file，+720/-46 Rust、+11/-4 Py）。**Verdict：4 項全 APPROVE → E4**（0 BLOCKER / 0 HIGH；1 MEDIUM 非阻塞觀察）。報告直接回傳 parent（未寫檔）。`cargo check --lib` PASS（3 warning 全 pre-existing 無關）；full lib **3702 passed / 0 failed / 1 ignored**（= Track B baseline 3700 + A-4 2 新測試）；Python 11 passed。
+
+**A-1 bb_breakout OI 解耦 — APPROVE**：(i) trait `requires_oi_panel()` default-false（mod.rs:121）+ bb_breakout override=`self.enable_oi_signal`（:354）唯二定義；其他 9 個 `impl Strategy` 全用 default、`cargo check` 證零改動。(ii) dispatch :388 `if strategy.requires_oi_panel() && bb_breakout_has_ta` —— flag=true 路徑與舊 byte-identical（`emit_panel_unavailable_evaluation`+`continue`），flag=false 跳過 probe（OI 不可得屬良性）。(iii) `oi_panel_delta_pct` f64→`Option<f64>`（mod.rs:496）唯二消費點（:496 binding + :798 match）；:798 `match (score, oi_panel_delta_pct)` 的 `_ => score` 覆蓋 `(Some,None)/(None,_)` 不 panic 不誤加成；flag=false `else { score }` bit-exact。(iv) 3 個 fail-closed 測試正確改設 `enable_oi_signal=true`（解耦後 fail-closed 只 flag=true 生效，否則 vacuous）+ 2 新測試鎖 flag=false benign（`still_emits` + `score_identical to_bits()`）。20/20 OI 測試 PASS。
+
+**A-2 qty_zero skip-not-reject — APPROVE（1 MEDIUM 非阻塞）**：(i) 確認絕無 floor-up、絕不碰 p1_max_qty（diff `if final_qty <= 0.0 { ... continue }` 純 skip）。(ii) **router.rs 0 diff line** —— pre-approval QtyZero reject（:437/:932 兩路徑對稱、均不動）與本 post-approval rounding skip（dispatch:697，在 `if gate.approved` 內）互斥不重疊（router reject → `gate.approved=false` → dispatch :697 永不執行）。(iii) `on_rejection` rollback hook 保留（:702）；移除的 `record_pre_risk_rejection`+`emit_decision_feature_intent_rejected` 在 :546/:576/:983/:1426 其他路徑仍在，函數本身不孤兒；移除是真去污染——`emit_decision_feature_intent_rejected` 寫 `label_close_tag="rejected_governance"`+edge=0.0 負樣本（database/mod.rs:658），但 gate 已 approve 故標 reject 是 bug（false negative-label 毒 ML）。(v) `qty_zero_skips: u64` `#[serde(default)]`，`TickStats` derive Default/Deserialize；唯二 struct-literal 構造點（def + ipc test:146）全更新、`cargo check` 過；backward-compat 測試有 bite（legacy JSON 缺欄位 deserialize→0）。**MEDIUM 觀察（非阻塞）**：skip-vs-reject 行為本身無直接 e2e bite 測試（無「approved intent + round→0 → 斷言 0 reject record + counter++ + continue」），E1 誠實揭露（dual_rail MODULE_NOTE 禁 e2e scaffold + 全模組以 apply_fill 種倉 20x 無 approved-entry 配方，已驗 on_tick 僅 4 處為 close-path），延 E4 replay；logic 簡單線性可肉眼驗，CC guard 對齊，不阻。
+
+**B bb_reversion regime 硬 gate — APPROVE**：(i) `None => false` fail-closed（mod.rs:548）比舊「None→boost=0 仍交易」更保守。(ii) 復用 :453-461 boost 的**逐字同一**判斷 `RegimeLabel::from_legacy_str(&h.regime)==AntiPersistent`（AntiPersistent=mean-reverting H<0.5 正確）；boost :442-461 0 改動正交保留。(iii) **真 tunable 非假功能**：`update_params_json`（:697）`from_str::<BbReversionParams>` = `pub use params::BbReversionParams`（含新欄位）→ `update_params`(:243 賦值) → gate 讀；`get_params`(:279 round-trip)；IPC dispatch :286/:290 routing；param_ranges `db_persisted:true`/`agent_adjustable:false`（治理硬 gate agent 不可自關）。(iv) **兩同名 BbReversionParams 安全**：registry.rs:88-105 factory 只 copy TOML 子集（不含 `require_mean_reverting_regime` 也不含既有 `require_ma_confirmation`）→ `new()` default=true 存活、startup gate ON；且 `#[serde(default=true)]` + TOML 子集無此欄位 → **結構性無「靜默 default false」路徑**（fail-safe-ON）。與 require_ma_confirmation 完全同模式；TOML 不可設初值是既有設計選擇（follow-up 非本範圍）。(v) 每 tick 重讀 `ind.hurst` 無 `is_none()` 永久 guard → regime 切回立即 re-fire（無 first-detection deadlock）；`persistence.clear` on reject 對齊既有 btc_lead_lag gate pattern 非死鎖。(vi) leak-free 留 MIT 專簽；接線正確。54/54 bb_reversion 測試 PASS。測試 bite 關鍵 = `neutralize_confluence_gate`（壓 threshold 10/11/12）隔離 confluence regime weight 同向干擾，使 entry 唯由 gate 決定（E1 殘留 #2 自覺；對抗注入 `None=>true`→(c) FAIL、`if false &&`→(b)(b')(c)(e) FAIL 已驗 bite）。
+
+**A-4 移除 Python edge 歸零 — APPROVE**：(i) **`git diff -- gates.rs` 空（exit 0）**，Guard 3 成立。(ii) live :275 `!fresh||!from_runtime_field||!validation_passed`→reject 不靠歸零；唯一 production live caller=router.rs:1051（Production profile），其餘全 test/comment/`#[cfg(test)]` wrapper。(iii) demo :184 對 mature(n=100>min_n=30) 未驗證正 edge→`return None`（探索放行，在 :203 threshold 比較之前）。(iv) 第二處歸零排查：:115 `min(grand_mean,0.0)` 是 `_inject_sync_label_proxy_cells` 合成 proxy cell（n=0/`proxy_cell_no_direct_observations`，:110 guard 不覆蓋真 cell）正交不動；:547 僅序列化非歸零。grep 全 Python 無他處依賴歸零行為。(v) 2 測試有 bite：`p1_09_estimates(Some(3600),true,false)`=runtime_bps=50/shrunk_bps=50/n=100/validated=false/fresh，live→:275 reject `validated=false`（注入移除 → FAIL）、demo→:184 None（注入 `>0.0`改`>100.0` → 落 :216 負阻擋 Some → FAIL）。註：與既有 `test_p1_09_live_validation_failed_rejected` 近重複（LOW 冗餘無害）。
+
+**跨 fix 交互**：唯一共用檔 step_4_5_dispatch.rs（A-1 hunk @@-375 在 `strategy.on_tick`:404 之前 pre-dispatch；A-2 hunk @@-664 在 `gate.approved`:659 之後 post-approval），相隔 ~290 行不同 control-flow stage、無共用變數，組合乾淨。其餘檔各 fix 獨佔。三者（A-1/A-2/A-4）同屬 2026-06-01 memory 退化迴圈家族（exploration_only 排除 + decision_features 負樣本污染 + edge 歸零死循環）互補；B 唯一收緊但 accumulate-only 且 bb_reversion 正交。
+
+**OpenClaw 9 條**：跨平台 grep added-line 0 命中 `/home/ncyu|/Users/`；hard-boundary grep（live_execution_allowed/authorization/system_mode/mainnet/max_retries/execution_authority）added-line 0 命中；unsafe 0；unwrap/panic added 全 4 處在 tests.rs/tests_oi.rs（test-only）；except:pass 0；中文優先註釋（無大段英文 added block，新註釋全解釋 why）；file size step_4_5_dispatch.rs 1813<2000（pre-existing 大檔，本次淨 +12，非本 fix 引入超標）；非 migration；非 Bybit API；trait 非 singleton。
+
+**durable lessons / 對抗驗證要點**：
+1. **「trait default-false + 單一 override」是 cross-cutting 改 per-strategy 自述的安全 pattern**：驗法 = `rg 'fn requires_oi_panel'` 確認唯二定義（trait default + bb_breakout override）+ `cargo check` 證其他 N 個 impl 零改動編譯。比舊 `name()=="x"` 字串 dispatch 更型別安全；migration 完整性 = grep 舊字串 dispatch site 0 殘留。
+2. **f64→Option<f64> 改型必 grep 全消費點 + 看 match 窮盡 arm**：本案唯二消費點（binding + 1 match），`_ => score` catch-all 覆蓋 None 不 panic 不誤加成；任何「理論不可達」的 None 仍要顯式覆蓋保型別安全（E1 :793-796 註釋自覺）。
+3. **skip-not-reject 去污染要分清「pre-approval reject」vs「post-approval skip」互斥性**：router QtyZero（pre-approval，`gate.approved=false`）與 dispatch round-to-zero skip（在 `if gate.approved` 內）結構性互斥——router reject 的 intent 永不到達 dispatch skip。驗 `git diff router.rs` = 0 行確認 reject 路徑保留。去除的 audit 是否真污染 = 看 emit 寫什麼 label（`rejected_governance`+edge=0.0 對 approved intent 是 false negative-label）。
+4. **「兩同名 Params + factory 不 wire 新 flag」的 fail-safe 驗法**：(a) factory（registry.rs）grep 確認不 copy 新欄位 → `new()` default 存活；(b) 新欄位 `#[serde(default=true)]` + TOML 子集 struct 無此欄位 → 結構性無「靜默 default false」路徑。**危險的是 default false（gate 靜默失效），ON-by-default + 無 false 路徑 = fail-safe**。與既有同模式（require_ma_confirmation）對齊 = 非新債。
+5. **regime/confidence gate 測試 bite 的隱形殺手 = 同向 soft scorer**：gate 與 confluence regime weight 同向時，「破壞 gate」測試會因 confluence 仍擋而 vacuous pass。必須中性化 soft scorer（壓 threshold 使其一律放行）隔離 gate 為唯一決定因素，再對抗注入驗 FAIL。E1 殘留 #2 自覺是高品質訊號。
+6. **gates.rs「0 byte 改動」宣稱 = `git diff -- <path>` 直接驗 exit+output 空**，不靠肉眼讀。本案 Guard 3 一條命令證實。
+
+## 2026-05-31 — A2 runner PG auth-drift fix (_load_secrets_pg_password) · APPROVE → E4
+
+**對象**：branch `fix/a2-runner-pg-auth` @ `10aeaf54`，base=`cc6c54d0`，1 檔 +68 行（`helper_scripts/reports/w_audit_8c/liquidation_cluster_stage0r_report.py` 新增 `_load_secrets_pg_password()` + `_get_conn()` 連線前呼叫）。
+**Verdict**：**APPROVE → E4**（0 blocking finding；1 LOW non-blocking observation）。
+**secret-leak 結論**：未洩漏。密碼只寫進 `os.environ["POSTGRES_PASSWORD"]`，從不入 log/stderr/exception；唯一 stderr 是 `OSError` 分支只印 `env_file` 路徑與 exception type，不含值。psycopg2 DSN 把密碼放 connection string（既有行為，非本次引入；sibling 8b 同模式）。
+**Report**：直接回傳 parent（未寫檔）。
+
+durable lessons / 對抗驗證要點：
+1. **canonical pattern 對齊用 git grep 全 cron 掃，不只信 E1 引用的 2 檔**：E1 注釋只 cite `panel_aggregator_health_cron.sh:46-61` + `ac19_alt_bucket_daily_cron.sh:75-80`。對抗驗 = `git grep 'basic_system_services'` 全 helper_scripts → 18 cron + 30 其他全用同一相對路徑 `environment_files/basic_system_services.env` + 同一 `OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets` override + 同一 `grep '^POSTGRES_PASSWORD=' | cut -d= -f2-`。E1 沿用既有抽象、無自創，CLAUDE.md §七 合規。`ref21_market_microstructure_recorder.py:68-72` 是已有 Python 等價先例（`Path(secrets_root)/environment_files/...` + `Path.home()/BybitOpenClaw/secrets/...` fallback），證明 E1 的 Python 寫法不是孤例。
+2. **parse 邏輯用獨立 standalone harness 跑 11 edge case，不靠肉眼**：`split('=',1)[1]` 正確保留值內 `=`（`ab=cd=ef` → `ab=cd=ef`，等效 `cut -d= -f2-`）；去引號處理單/雙引號對稱；空值 `POSTGRES_PASSWORD=` → 不寫 env（`if val:` 守住）→ fail-loud 保留正確。**已知 cosmetic 差異（LOW，不阻）**：`inline_comment`（`secret # c` 連注釋一起收）與 `export PREFIX`（`export POSTGRES_PASSWORD=` 不 match 因 startswith）與 shell `. env` 行為不完全一致；但 canonical cron 的 `grep|cut` **也有完全相同的 inline-comment 行為**（grep 不剝註釋），故本 helper 與 SSOT 對齊一致、非新缺陷；真 secrets file 無 inline comment / 無 export prefix（systemd `EnvironmentFile=` 格式），實務無觸發。
+3. **fail-loud 三條鏈完整無吞錯**：URL 短路 → return / 已有 PW 短路 → return / file 不存在 → return（皆不改 env，psycopg2 後續自然報 `no password supplied`）；唯一 try/except 只 catch `OSError`（讀檔 IO），`ValueError`/parse 不在保護內（fail-loud）。「只補缺不覆蓋」正確：兩個 `os.environ.get(...) return` guard 在前。
+4. **跨平台 0 硬編碼**：added-line grep `/home/ncyu|/Users/[^/]+` = 0 命中；default 用 `Path.home()` 動態解析，override 用 `OPENCLAW_SECRETS_ROOT`，無平台假設。
+5. **AST parse OK**（`python3 -c ast.parse` on `git show` 出的 branch 版本，非 worktree）。E2 8 條 + OpenClaw 9 條全綠（無 except:pass / 無 f-string log injection / 非 API 端點 / 非 asyncio / 無私有屬性穿透 / file 88 行遠 < 800 / 非 Bybit API / 非 migration）。
+6. **§5 race**：origin/main=`7ce64562`，fix branch 對 base 恰 +1 commit（乾淨）；PR 只 1 檔，origin/main 自 base 起的 sibling commit **0 觸 PR 檔**（無 overlap）。注意 worktree 當前在 `fix/c4-incident-policy-trigger`（無關 branch），但本次 review 全程用 `git show fix/a2-runner-pg-auth:<path>` 隔離讀，未 checkout、未動 worktree、無交叉污染。
+
+## 2026-05-29 — Track D Rust hygiene 2-item (btc_lead_lag spawn gate + bin env-lock) · 2/2 APPROVE → E4
+
+**對象**：worktree `wt-d-hygiene` branch `fix/d-rust-hygiene`，未提交 diff（4 files, +76/-39），base=origin/main `2b65ffe6`。
+**Verdict**：**Item 1 APPROVE · Item 2 APPROVE → E4**（0 finding；1 deferred LOW non-blocking）。
+**Report**：直接回傳 parent（未寫檔）。
+
+**Item 1 archive-policy 解讀對抗確認（修 source 是對的，不是修 test）**：
+- 證據鏈完整對齊 E1 診斷：`875de212`(2026-05-23) `--stat` 證明**只改 integration test 188 行、0 觸 source/main.rs**；source `should_spawn` 最後語意改動是 `eb181d70`(2026-05-15) 加 diagnostic gate 但**保留 PAPER match 殘留**→ test/source drift。
+- 治理 SSOT = `docs/execution_plan/2026-05-10--a4c_btc_alt_lead_lag_spec.md` v1.5 §6.2 line 333-337 **逐字 reference impl**：`let should_spawn = diagnostic_enabled;`。E1 fix body = `btc_lead_lag_diagnostic_mode_enabled()` 完全等價。line 342「paper-only no-op 不得自動 spawn」+ line 344「目的=避免 demo/live 期樣本污染 ML pipeline」。
+- **「demo/live 需要它」前提是錯的（task note 反向）**：原 source `!has_demo && !has_live` 對 demo/live 本就回 false（從不 auto-spawn）；archive verdict `2026-05-15--a4c_btc_alt_lead_lag_archive_verdict.md` 只保留為 diagnostic infra + `[57]` health；Layer 1 `effective_engine_mode()` 已保 demo/live surface=None。修 source = 移除裝飾性 PAPER spawn，**無 demo/live regression**（demo/live 行為前後都不 auto-spawn；唯一 spawn 路徑 = explicit diagnostic env）。
+- main.rs:1110 `btc_lead_lag_paper_enabled_env=false`（pre-existing `1f0354cf`，非 E1 引入）僅 tracing field，always-false 與「PAPER ignored」一致、不 mislead；E1 標 follow-up 不擴 scope = 正確 surgical discipline（deferred LOW，不阻 E4）。
+
+**Item 2 bin 共用鎖正確**：
+- lib/bin crate boundary 正確：`btc_lead_lag.rs`(lib module) 的 `crate::test_env_lock::guard()` 是 main 既存、解析到 lib.rs:125（**未被本 diff 觸碰**）；新 bin-crate `test_env_lock`(main.rs mod root) 服務 bin test modules，兩者獨立。
+- callsite 全改：main_boot_tasks 12 + live_auth_watcher_tests 11 全轉 `crate::test_env_lock::guard()`；0 stale `static ENV_GUARD` / `OnceLock env_lock`（剩餘 grep hit 全是說明性注釋）；StdMutex import 保留正確（MockSpawner.script 仍用，非 dead import）。
+
+**驗證**：integration test `btc_lead_lag_panel_fence_integration` 9/9 PASS（含原 FAIL 的 `layer_2_fence_archive_policy_diagnostic_only` → PASS）；bin 67/67；lib panel_aggregator 80/80 + should_spawn 2/2。0 hardcoded path / 0 hard-boundary touch / 0 unsafe/unwrap 新增 / 中文注釋合規 / file size 全內。§5 race：base + origin/main review 前後皆 `2b65ffe6` 無 sibling push；working tree clean 僅 4 file。
+
+**Lessons captured**：
+1. **「test 改了 source 沒改」是 source 退化真 bug 的高信號 pattern，不是 test 過期**：對抗手法 = `git show <test-commit> --stat` 確認該 commit **是否同時觸 source**；若只觸 test 且治理 SSOT 站 test 邊 → 修 source 才對。本案 875de212 only-test + a4c spec v1.5 逐字 ref impl 雙證。
+2. **task note 的「X 需要它」前提必獨立驗，不採信**：本案 prompt 說「demo/live 需要 btc_lead_lag spawn」，但 original source + archive verdict + spec line 344 三方證明 demo/live 從不 auto-spawn 且設計上禁止（污染 ML）。對抗 reviewer 對任何「修錯方向會固化」的 framing 都要回到 governance SSOT + 原 source 行為交叉驗，不接受 caller framing。
+3. **lib/bin 雙 crate 同名 `test_env_lock` 是合法刻意 pattern**：bin crate 與 lib 是不同 compilation unit，`pub(crate)` 互不可見；同名兩鎖各自串行各自 binary，不是重複/race。確認法 = 看哪個 crate 的 module 引用（lib module → lib.rs；bin root/sibling → main.rs）。
+
+## 2026-05-29 — v80 cold audit Wave 1 PkgB Rust (P1-03/06/07/08 + P2-02/03) · APPROVE → E4
+
+**對象**：未提交 Rust diff（17 files, +650/-68），HEAD `02ef4cb7`。Python/GUI 由另一 E2 審。
+**Verdict**：**APPROVE → E4**（0 finding）。cargo build PASS + `cargo test --lib` **3583 passed / 0 failed / 1 ignored**（與 E1 honest 數字完全吻合）。
+**Report**：本次直接回傳 parent（未寫檔）。
+
+durable lessons / 對抗驗證要點：
+- **async-intercept 不是 double-execution 陷阱**：cancel-all 在 `loop_handlers::handle_pipeline_command` 顯式 arm 攔截（與 ResetDrawdownBaseline 同模式），排在 `other =>` fall-through 之前 → 不會二次落到同步 `handle_paper_command`。同步 facade 的 arm 僅 match 窮盡性 + 防禦 warn。驗 fire-and-forget 失敗只 warn 不重試（符合 fail-safe + CLAUDE.md §四 no hidden retry）。
+- **cancel-all authority 正解 = 不在 IPC 層 gate execution_authority，而是 paper 模式無 order_mgr → None → log-only**。若在 IPC gate authority 反而會在 Stop 流 revoke 後阻斷 cancel（錯）。`cancel_all_order_mgr()` getter clone Arc 出 borrow 再 await，無跨 await borrow race。
+- **P1-07 lease 釋放驗法**：OPEN 空 slice → `run_dispatch_retry` attempt0>=len0 立即回 `TransientExhausted` → dispatch.rs `TransientExhausted`/`Structural` 兩 arm 均 `LeaseOutcome::Failed`（非 Consumed），僅 Ok/NoOp → Consumed。確認 dispatch_tests 移除 open-budget invariant、新增 2 OPEN single-attempt 測試、無任何測試仍 assert create-retry。
+- **P1-06 SL 方向保守正確性**：long SL floor（往價格下方 = 更寬 = 不提前觸發）；short SL ceil。fail-closed = 缺 spec / 0.0 / 非 finite → None → caller 只跳過交易所該欄位、保留本地 StopManager（雙軌不丟）。tests 覆蓋 None/0/-5/NaN edge。
+- **constructor fan-out 4 site 全 compile**：bootstrap 用真 shared cache；tasks/startup 非-stop 路徑用空 default cache（這些路徑不呼 set_trading_stop，fail-closed 仍成立）。
+- **pre-existing 雜訊辨識**：`spawn_position_reconciler`(:788) dead_code warning 非 E1 引入（production 走 `_with_cmd_provider`），342 repo-wide clippy 與 diff 無交集。stash@{0..2}（Cargo.lock dep WIP + 舊 branch）非本 session，§5c 不動。
+
+## 2026-05-25 — W2-E dual review M4 (W1-C) + V109 (W1-F) · M4 RETURN-TO-E1 / V109 APPROVE
+
+**對象**：commit `ae9a2dd8` (W1-C M4 IMPL Rust 1511 + Python 1900 LOC) + commit `16796d13` (W1-F V109 832 LOC schema)
+**Verdict**：M4 **RETURN-TO-E1**（1 HIGH BLOCKER + 1 MEDIUM + 1 LOW）；V109 **APPROVE → E4** (0 finding · 9/9 對抗 grep + 7/7 AC + Guard A/B/C 三重 ADR-0036 反向防護全完整)
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-25--w2e_m4_v109_dual_adversarial_review.md`
+
+**M4 5 invariant 全 PASS**（cargo 416/0 round 1+2 + pytest 51/0）：
+- I-1 shift(1) leak-free Rust feature_engineering + cross_correlation 雙端 verify
+- I-2 HMM/Markov/GARCH 0 production import + 4 comment 標禁用
+- I-3 K_TOTAL=2500 / ALPHA_CORRECTED=2e-5 Rust + Python 雙端 hard-code
+- I-4 N>=30 event gate Rust + Python 雙 sample_gate
+- I-5 reject 'live'/'promoted'/'rejected' Rust types.rs + Python draft_writer.py 雙重
+
+**M4 1 HIGH BLOCKER catch — 5 schema-incorrect column 在 2 source loader**:
+- fills_loader.py FILLS_QUERY_SQL: `size` (應 `qty`) / `close_fill = TRUE` (應 `entry_context_id IS NOT NULL`) / `realized_net_bps` (不存在；trading.fills 有 `realized_pnl`) 三處 wrong
+- liquidations_loader.py LIQUIDATIONS_QUERY_SQL: `liq.size` (應 `liq.qty`) / `aggregator_type IN ('top_liq_30s', 'cascade_5min')` (column 完全不存在)
+- empirical 證據：V003/V002 schema + production trading_writer.rs:459 INSERT + program_code/ml_training/edge_label_backfill.py:417/513/624 全用 canonical pattern
+- W2-D MIT cron wire-up 第一次 run 必 100% RAISE EXCEPTION
+- 直接違反 `feedback_v_migration_pg_dry_run` SOP（Mac mock pytest 不能 catch PG runtime semantic）
+
+**為什麼 51 pytest 漏 catch**:
+- grep test 0 hit `build_fills_query|FILLS_QUERY_SQL|build_liquidations_query` — source loader SQL 完全 untested
+- 51 test 全在 algorithm / leakage / writeback contract / 邏輯 helper；source loader SQL string 是黑盒
+- Mac `--dry-run` 路徑只 log SQL 不 execute；全程沒接觸 PG schema
+- E1 self-verify 「cargo + pytest 全 PASS」**未對齊 production schema empirical**
+
+**V109 APPROVE 全項**：
+- 23 col post-Guard count strict 驗 + 9 taxonomy + 4 severity + 5 engine_mode(含 replay) + 4 detection_method + 3 atr_vol_state + 3 funding_state
+- P0-1 表名 `learning.governance_audit_log` (非 governance.audit_log) 整體 6 hit
+- P1-5 `metric_baseline` column 加 + Guard A v_missing array 含 (13 hit total)
+- ADR-0036 黑名單 reverse RAISE 防護：Guard A (line 117-157) + Guard C 預檢 (line 244-254) + Guard C 後驗 (line 695-702) 三重 + column name pattern 雙重 → 結構性 enforcement
+- Hypertable 7d chunk + Compression 30d + Retention 180d + 4 partial index 全 post-Guard 驗
+- 7/7 AC PASS（含 AC-S2-D-7 23 column 強制 verify）
+
+**Hard boundary 0 觸碰 (M4 + V109)**：
+- 0 grep hit live_execution_allowed / authorization.json / system_mode / OPENCLAW_ALLOW_MAINNET in either
+- `unsafe` Rust 塊 0 hit；1 production-path `unwrap()` (tick_window.rs:64 邏輯安全 LOW)
+- file size cap 全內（max m4 file 344 LOC）
+
+**對抗反問 8 條全跑**（含 mock SQL execution gap / PA spec column 列表 / Bonferroni K trade-off / ADR-0036 反向 grep / engine_mode application filter / scope leak）
+
+**Lessons captured**：
+1. **PG-coupled source loader SQL 必 schema-grep test**：任何 sub-agent IMPL 寫 SQL `SELECT col_a, col_b FROM schema.table` 都必加 1 行 test `assert "qty" in SQL_STRING` 或更強 `assert "size" not in SQL_STRING`；51 test 完全沒 source loader SQL coverage 是 P1 cover gap。Source loader test 不需連 PG — 可純 regex / string check baseline 防禦 schema drift。
+2. **PA spec § 編碼點對齊「column 名」非「§ 號」**：PA W1-B spec §1.2/§1.3 寫「trading.fills」「market.liquidations」但 0 列 column 名 → E1 自行猜 column → 5 個猜錯。任何 PG-coupled spec 必含 empirical column 列表（`feedback_v_migration_pg_dry_run` 2026-05-05 invariant 升級版）— PA/MIT 寫 spec 必先 Linux PG 跑 `\d schema.table` 列 column 進 spec。
+3. **「dry-run mode 只 log SQL 不 execute」是 schema drift 盲點**：M4 `--dry-run` 設計上不 execute SQL 是合理（per CLAUDE.md §六 Mac 不跑 PG），但這令 schema-incorrect column 完全靜默。Future scaffold IMPL 必加 `--dry-run --validate-schema` mode：query `information_schema.columns` 對齊 spec column 名（read-only metadata，Mac 可跑透過 ssh trade-core 或本地 mock metadata）。
+4. **ADR-0036 黑名單反向 enforcement 三重防護是 V### gold-standard pattern**：V109 Guard A + Guard C 預檢 + Guard C 後驗 + column name pattern 雙重；任何 future ADR amendment 想加 hmm/markov/garch 必先 amend ADR-0036 → amend V109.sql → 各 V### sister 同步加；structurally impossible to back-door。M4 / M8 / future M### 黑名單演算法必沿用此 pattern。
+
+---
+
+## 2026-05-23 — cost_gate low-sample deep-negative arm · RETURN-TO-E1
+
+**對象**：commits `718c1ddd` (TOML 30→15) + `188f244a` (gates.rs +23 LOC 新 low-sample-deep-neg arm cutoff=-15bps)
+**Verdict**：**RETURN-TO-E1**（1 CRITICAL 既有 unit test FAIL + 1 HIGH RCA scope understated + 1 MEDIUM log field 不一致）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-23--cost_gate_low_sample_deep_neg_e2_review.md`
+
+**Pass 6/8（cargo test 1 既有 test FAIL）**：
+- §1 arm 順序 ✅ (新 arm L138-152 在 catch-all low-sample arm L153 之前)
+- §2 RejectionCode 兼容 ✅ (CostGateJsDemoNegative variant 既存 rejection_coding.rs:111)
+- §3 paper/live 零改動 ✅ (diff 1 hunk 23 LOC 全在 cost_gate_moderate_with_slippage body 內)
+- §4 ArcSwap 熱加載 ✅ (pipeline_config.rs:67 apply_risk_snapshot 推路；但是 owned RiskConfig 非 ArcSwap lock-free,restart/IPC 後生效)
+- §5 risk invariant 零違反 ✅ (live/paper TOML + live_execution_allowed + system_mode 零觸碰)
+- §8 f64 type ✅ (cell.shrunk_bps + -15.0 字面值都 f64)
+
+**3 個 Issue 必退 E1（不代寫）**：
+1. **🔴 CRITICAL**: tests.rs:1023-1037 `test_cost_gate_moderate_low_sample_negative_routes_to_exploration` FAIL — fixture shrunk_bps=-50/n=6,新 arm 攔截但 test 期望 explore (`is_none()`)。E1 自報 cargo check PASS 9.15s 但**未跑 cargo test**,沒抓到。
+2. **🟡 HIGH**: commit 188f244a body 「1B funding_arb 框架僅 LABUSDT outlier 被影響」**不準確** — 實證 funding_arb::BUSDT (n=16, shrunk_bps=-36.05) 也被新 arm 攔截。amend commit message 或 sign-off report 補明示。
+3. **🟡 MEDIUM**: gates.rs:141 新 arm tracing! field key `shrunk_bps =` 跟既有 L72/L156/paper L74 統一用 `estimated_edge_bps =` 不一致。audit log 分析會分裂兩 key。
+
+**Empirical edge_estimates.json 影響分析**:
+- 新攔截 cell n ∈ [15, 30) AND shrunk_bps < -15: **22 cell**（grid::FILUSDT/LABUSDT/LINKUSDT/HYPEUSDT/API3USDT/AVAXUSDT/DOTUSDT/AXSUSDT/ADAUSDT/ARBUSDT/INJUSDT/PENGUUSDT/ZECUSDT/AXSUSDT/BIOUSDT、ma::NEARUSDT/1000PEPEUSDT/TAOUSDT/ZECUSDT/PENGUUSDT/FARTCOINUSDT、funding_arb::BUSDT）
+- 既有 robust 邊界 cell (n≥30 且 shrunk_bps 略 < -15): grid::PRLUSDT/ETHUSDT/ZBTUSDT/BSBUSDT 本就被攔,新 arm 不影響
+- bybit_sync/orphan_*/dust_* 全是 n=0/shrunk=-13.89 stub cell — 新 arm 不觸發(shrunk_bps > -15)
+
+**對抗反問 catch**:
+- 「cargo check 9.15s PASS」陷阱：`cargo check ≠ cargo test`。Pattern match 新增 BLOCK 路徑必破既有 explore-mode test → 必跑 cargo test 親驗
+- 「RCA 1B funding_arb 影響僅 LABUSDT」：用 python jq 跑 edge_estimates.json 篩 `n ∈ [15, 30) AND shrunk_bps < -15`,實證 BUSDT 也被攔
+
+**Lessons captured**：
+1. **`cargo check` 不是 unit test 替代品**: E1 自報 cargo check PASS 不夠,E2 必跑 `cargo test --lib <module>` 親驗,尤其新增 match arm BLOCK 路徑必破既有 explore-mode test
+2. **RCA scope claim empirical 對齊 edge_estimates.json**: 「僅 X 個 outlier 被影響」是 falsifiable claim,E2 必跑實證 grep 對齊真實 deny cell list,本案 catch 漏 funding_arb::BUSDT
+3. **Same-facility log field key 統一**: 同 function 多分支 tracing log,field key 必對齊 baseline (本案 `estimated_edge_bps` vs `shrunk_bps`)。audit 分析腳本若 grep field key 取值會被分裂
+4. **新 boundary arm 必有 3+ boundary test**: 嚴格 `<` cutoff / NaN / cutoff 內外側各 1 個。Pattern match 新分支必同步加 unit test + 更新既有 test 反映新 invariant
+
+---
+
+## 2026-05-21 — H 批（H1 + H3 + H4）· 3/3 APPROVE → E4
+
+**對象**：H1 P3-AUDIT-SCRIPT-STALE-CONST audit script fix + H3 P2-PHYS-LOCK-72-HEALTHCHECK new healthcheck + H4 P1-HALT-TRIGGER-ROOT-CAUSE new healthcheck，3 件並行 sub-agent IMPL
+**Verdict**：**3/3 APPROVE → E4 regression ready**（0 BLOCKER / 0 HIGH / 0 MEDIUM / 3 LOW NTH 不阻 E4）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-21--h_batch_e2_review.md`
+
+**Pytest 全 PASS（自跑驗證）**：
+- `helper_scripts/canary/healthchecks/tests/`: **111 PASS** in 0.05s（88 baseline + 10 hc68 + 13 hc69）
+- `helper_scripts/db/audit/test_funding_arb_14d_audit.py`: **5 PASS** in 0.02s
+- 預期值與實際 100% 達成
+
+**H1 核心 catch**：
+- `_load_sl_hard_cap_pct()` module-load 一次 — TOML 變動須重啟 script，但 audit context short-lived acceptable（comment line 165 已 doc）
+- exit_code 1 條件改 `max_loss_pct > SL_HARD_CAP_PCT + slip_buf`（25%+5%=30%）— 對 6.29% loss/notional case 不再誤觸 「假警報」（FA F2 RCA 痊愈）
+- 真 TOML smoke `test_current_demo_toml_returns_25_pct` 防 W-AUDIT-6 invariant 偷偷回退 — grep `risk_config_demo.toml:74` 確 `stop_loss_max_pct_override = 2.5` 在 `[per_strategy.ma_crossover]` 區塊，funding_arb 真不在 per_strategy
+- tomllib + tomli + stale 三層 fallback 正確結構；Python 3.10.1 + tomli pip 環境 5 PASS 驗證
+
+**H3 核心 catch — PA refine 數學驗證**：
+- 原 spec §2.2 WARN 條件 `stale_roc=0 AND giveback>=10` 會把所有 demo natural sparse 環境（giveback 30 + stale_roc 自然 0）誤升 WARN — 與 spec §1 「natural sparse 不阻 deploy」訴求矛盾
+- PA refine 後新 WARN 條件 `giveback>=10 AND close_attempts=0` 對 natural sparse 環境正確判 PASS（test_pass_when_giveback_alive_and_stale_roc_naturally_sparse 直接驗）
+- 但 FAIL 仍保留 stale_roc 條件 — `has_stale_roc AND stale_roc_close_attempts_sum == 0` 是「policy alive 但 close path 不通」確證 — 14d window 內可成立（即使 stale_roc 只 1 fire）
+- production exit_reason fixture `phys_lock_gate4_giveback` / `phys_lock_gate4_stale_roc_neg` 與 grep `rust/openclaw_engine/src/exit_features/v2.rs:344/351/359/...` 對齊 PASS
+- slot [68] cross-namespace：canary vs passive_wait 不同 domain；`result["namespace"] = "canary"` 強制標 + `__init__.py` MODULE_NOTE 明標兩 namespace 邊界
+- FA prompt SQL `details->>'fee_bps'` schema-incorrect 已從 IMPL 移除（grep `fee_bps` 0 hit）
+- 10/10 PA AC + 3/3 E2 push back 全覆蓋
+
+**H4 核心 catch — schema 真實驗證**：
+- E1 claim「V035 真實是 `payload JSONB`」grep V035.sql:90-136 確認 PASS（不是 `details`）
+- V098 24-value enum allowlist 含 3 個 halt_session_* — grep V098.sql:122-125 + 196-198 PASS
+- `halt_audit_pg_writer.py:250` 將整 row JSON 寫 payload JSONB — `payload->>'session_drawdown_pct'/'loaded_drawdown_threshold'/'process_pid'/'ts_ms'` 全對齊 PASS
+- `daily_loss_pct` payload **永遠** null in halt_session_set event (halt_audit.rs:287 `serde_json::Value::Null`)；H4 `_classify_event` line 232-265 fallback 邏輯：drawdown_pct 驗算優先 + daily_loss kind 兩 metric 都 null 則 INSUFFICIENT_SAMPLE
+- `THRESHOLD_TOLERANCE = 1e-6` 防 f64 rounding boundary 誤判（drawdown == threshold case PASS 而非 WARN）
+- 90d window 對齊 FA G2 review date 2026-08-21（v56 closure 2026-05-20 + 90d）— `test_default_window_aligns_with_review_date_90d` 直接 assert
+- 13/13 verdict 分支 + boundary 全覆蓋
+
+**Cross-file race 5/5 PASS**：
+- HEAD = origin/main (0e10f594) — 2h window 0 sibling push
+- `__init__.py` H3 + H4 兩 entry [68] + [69] 都正確 land（git diff 驗）
+- `conftest.py` 兩 fixture hc68 + hc69 都正確 land — _load_script pattern 一致
+- pytest 111 PASS 隱式驗 import / syntax / fixture wire 全綠
+
+**3 LOW NTH（不阻 E4）**：
+1. H1 test：tomllib=None stale-fallback path 未明確 unit test（Python <3.10 + 無 tomli 環境才觸發；當前 runtime 0% 機會）
+2. H3 IMPL：overall_verdict 對「CLI 要 engine 但 0 row」與 per_engine_verdicts 不一致（design intent 已 doc comment 358-363）
+3. H4 test：`test_pass_when_daily_loss_kind_with_null_daily_loss_pct` test name 含 "pass" 但實 assert WARN（nit；不阻 functionality）
+
+**Lessons captured**：
+1. **schema-incorrect column grep 對抗驗證 SOP**：PA spec 自承 FA prompt 含 `details->>'fee_bps'` schema-incorrect column 已移除 — E2 必須 grep IMPL 0 hit 確證，不可信 PA 一句「已移除」。本次驗證 `grep -nE "fee_bps"` 0 hit PASS。
+2. **module-load 一次 const vs runtime reload trade-off**：audit / short-lived script 用 module-level const 從 TOML 一次性 load 是可接受 trade-off（重啟即生效），但必須 comment 明標 trade-off。長 runtime daemon 不可用此 pattern。
+3. **enum-allowlist 跨 migration 驗證**：V### 後續加 enum value 必須 grep 原 V### + 後續 V### 兩個 migration file 都對齊；本案 V035 14-value base → V053+V054 21-value → V098 24-value 三層 enum 演化必須驗 INSERT path 用的 event_type 都在 final allowlist。
+4. **production exit_reason fixture 對 rust src 對齊**：healthcheck SQL LIKE pattern catch production fill 必須附 fixture 對齊 rust emit point grep — fixture 設計目的 = catch emit point 未來改動帶 prefix（如「Physical:phys_lock_*」）後 SQL 漏 catch。本案 fixture 對齊 `exit_features/v2.rs:351/359/etc.`
+5. **Natural sparse 環境誤升 WARN 對抗驗證**：spec §2.2 原 WARN 條件數學上會 catch 所有 demo natural sparse → reviewer 必驗 verdict ladder 對 「healthy production case」是否誤升；本案 PA 自找 false-positive 並 refine 條件 — A 級 spec design discipline，reviewer 必驗 refine 後新條件對 sparse case 不誤判。
+6. **payload JSONB 整包 vs column-promoted 兩種 schema 設計**：V035 用 payload JSONB（forward-compat）而非 promoted columns — healthcheck 用 `payload->>'field'` 取值必須對齊 INSERT path 用的 key naming；E2 必 grep INSERT statement source（halt_audit_pg_writer.py:250）確證 key match。
+
+**對抗反問 8 條全跑 PASS**
+
+---
+
+## 2026-05-20 — P2-SIM-QUEUE-AWARE-ADJUSTMENT v55 · APPROVE-CONDITIONAL
+
+**對象**：E1 IMPL `helper_scripts/calibration/` 6 file（3 new + 3 modified）
++210/+452/+202 NEW + +124/+94/+149 MOD
+**Verdict**：**APPROVE-CONDITIONAL → E4 regression ready**（0 CRITICAL / 0 HIGH /
+2 MEDIUM SHOULD-FIX 不阻 E4 / 4 LOW NTH）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-20--p2_sim_queue_aware_e2_review.md`
+
+**Bias model 數學驗 PASS**：
+- 公式：`fill_p_adjusted = fill_p_proxy × (1 - base_rejection_rate) × (1 - queue_weight × queue_factor)`
+- 乘性合成正確：proxy=0 → adjusted=0（"no cross → no fill" 不變）；加性會破壞此 invariant
+- queue_factor 線性飽和 `my_qty/(my_qty+depth_5)` ∈ [0,1] 單調 — 符合 Roll/Glosten-Milgrom single-parameter linear approximation
+- 22 unit test 覆蓋邊界 case：NaN / None / negative / >1 clamp / proxy=0 / weight=0 全 GREEN
+- `base_rejection=0.70` 0 hardcode 進 source — `DEFAULT_BASE_REJECTION_RATE=0.0` + regression CLI `--base-rejection` 顯式 inject；0.70 只在 2D sweep grid tuple line 319
+
+**核心 catch — Wilson CI 統計學分析**：
+- actual_fill_rate = 5/18 = 0.2778
+- Wilson 95% CI = **[0.1250, 0.5087]**（寬度 38.4pp）
+- adjusted_rate = 0.2661 **完全落在 actual CI 內** → bias_after -1.17pp 在 statistical
+  sense 「indistinguishable from zero」
+- 但同樣「indistinguishable from +25pp / -15pp」：n=18 CI 太寬無法精細判別任何
+  base_rejection 是否「真實」
+- → E1 §6.1 honest finding 已 disclose 此局限；不算盲區
+
+**v55 治理 invariant 驗 PASS**：
+- §3.11 ML pipeline grep `linucb|scorer|quantile|mlde|dl3` 0 命中
+- close_maker_attempt 用作 WHERE filter / close_maker_fallback_reason carrier /
+  liquidity_role ground truth — **不**進任何 training feature
+- Rust runtime grep `queue_adjusted|queue_factor|same_side_depth|base_rejection`
+  0 命中
+- sweep_report.py / sweep_cli.py 不讀新欄位，舊 81-cell sweep backward-compat path
+
+**2 MEDIUM SHOULD-FIX**（不阻 E4，阻 v55 sweep production interpretation）：
+1. **family-specific anchor cell disclosure**：regression CLI SQL 拉 6 family
+   exit_reason 但 anchor cell.family='grid' 只跑 grid family；結論不可外推至
+   phys_lock_giveback / phys_lock_stale_roc_neg / bb_breakout
+2. **sliding 14d window 重現性**：`ts > NOW() - 14 days` 隨 demo runtime 漂移；
+   建議加 `--sample-end-utc` pin window
+
+**4 LOW NTH**：
+- queue depth timing alignment（placement vs taker fill_ts）— 14d sample factor < 0.02
+  vanishing 不致命
+- f-string DSN connection（與既有 phase_1b_tick_loader 同模式 acceptable）
+- 2D sweep grid hardcode tuple — 可加 `--sweep-grid` argparse
+- `_qty_for_diagnostic` O(n) scan — minor perf
+
+**Lessons captured**：
+1. **bias model 設計的乘性 vs 加性 trade-off**：乘性合成在物理上獨立 fail mode（queue
+   position vs non-queue PostOnly reject / cancel race）下是 correct 設計；加性會在
+   proxy=0 時需要額外 clamp 防負概率。對 single-variable hazard composition 乘性是
+   default best；reviewer 對 adjustment model 不可僅 「乘性比加性簡單」就過，必驗
+   physical mode 是否獨立可乘。
+2. **n=N Wilson CI 寬度的對抗驗證 SOP**：任何 verdict「bias ≤ Xpp PASS」claim 必算
+   Wilson CI 寬度與 verdict threshold 對比；若 CI 寬度 >> threshold（本案 38.4pp >>
+   5pp）→ verdict 是「small-sample lucky calibration」非「true bias < threshold」。
+   E1 自承此 limitation 在 §6.1 是 A-grade honest disclosure，但 reviewer 必須獨立
+   驗 CI 寬度避免被 PASS 數字迷惑。
+3. **V094 schema 內 placement_my_qty 不存在 → seed.qty fallback**：當 spec 內 column
+   不存在於 hot column 而 details JSONB 包含時，IMPL 用 trading.fills.qty（actual
+   fill qty）作 proxy 是 V094 schema constraint 內最精確選擇 — 對 close-maker first
+   → cancel → taker fallback 路徑，placement_maker_qty = fallback_taker_fill_qty
+   等價，不算 placeholder。reviewer 對 my_qty source 必驗 V094 schema 是否真有更精確
+   field，confirm fallback 是 schema-constrained choice 而非 lazy 設計。
+4. **research helper backward-compat default arg pattern**：新 dataclass field 全
+   `= default` / 新 function arg 全 `= default` → 既有 CLI / sweep_report / 63 既有
+   test 0 改而仍 GREEN。reviewer 對 「新增 field + 既有 caller 不變」必驗 default arg
+   是否真覆蓋所有 caller 路徑（grep simulate_all_cells 等下游 entry point）。
+5. **ML training pipeline non-input invariant 跨 module grep**：close_maker_*
+   audit field 只能 audit/replay-only，禁進 ML training feature / label。E2 §3.11
+   grep `linucb/scorer/quantile/mlde/dl3.*close_maker|close_maker.*linucb/...` 跨
+   rust/program_code 全方位 0 命中是 confirmed isolation。reviewer 對任何
+   close_maker_* / queue_adjusted / base_rejection 新欄位都應跑此 grep 防 future
+   accidental leak。
+6. **sliding window vs pinned window 在 audit reproducibility**：`ts > NOW() -
+   14 days` 是 sliding window，每次跑結果略漂移；audit-friendly 設計應加
+   `--sample-end-utc` pin window + JSON artifact record `sample_window_end_utc`。
+   reviewer 對 historical regression CLI 必驗結果可重現的時間範圍如何被 pin。
+
+**對抗反問 8 條全跑 PASS**（含乘性 vs 加性數學 / source 0.70 hardcode / V094 schema
+limit / Rust runtime isolation / ML pipeline non-input / Wilson CI 寬度 / family-
+specific anchor 結論不外推 / sliding window 重現性）
+
+**Race check 5/5 PASS**：origin/main 與 HEAD 對齊（無 sibling push）；3 modified + 3
+untracked 全屬本任務 scope；其他 dirty file（PM template / memory.md / stress_integration.rs）
+屬獨立 parallel task 0 動。
+
+---
+
+## 2026-05-20 — P2-STRESS-BB-BREAKOUT-FALSE-SQUEEZE-COINCIDENTAL-PASS · APPROVE
+
+**對象**：E1 working tree `rust/openclaw_engine/tests/stress_integration.rs` +92/-6 LOC（純 test 改動）
+**Verdict**：**APPROVE → E4 regression ready**（0 BLOCKER / 0 must-fix / 2 CAVEAT 非阻）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-20--p2_stress_bb_breakout_e2_review.md`
+
+**Coincidental PASS root cause 驗證**：
+- `bb_breakout/mod.rs:479` OI fail-closed gate 真早於 line 542-543 squeeze 登記
+- `EMPTY_ALPHA_SURFACE.oi_delta_panel = None` → `oi_panel_delta_5m_pct` 返 `Err("missing_panel")` → line 490 提前 `return vec![]`
+- 舊 test ctx1/ctx2 在 squeeze 登記 / entry path 之前被 fail-closed → `assert intents.is_empty()` 是「OI gate 一律 return 空」非「volume gate 攔下」
+
+**E1 fix narrative 完全成立**：
+1. 補 `fresh_oi_surface("BTCUSDT")` 解 OI gate
+2. 7 切片真實踩到 volume gate 拒絕分支 + entry lifecycle 邊界
+3. Control case（同 fixture vol→1.5）證明 volume gate 是唯一防線
+4. RED → GREEN 演練合理（RED probe 真 panic 證 fixture 修好後 entry path 真可達）
+
+**重跑驗 reproducibility PASS**：`cargo test stress_bb_breakout` 2/2 + 全 stress suite 35/35 ✓
+
+**2 CAVEAT 非阻**：
+- CAVEAT-1：1315→1401 LOC 過 800 警告線；P2 scope OK，follow-up 拆檔（按 strategy 分檔 + 共用 helper module）
+- CAVEAT-2：control case 同函數內第二實例 vs 獨立 #[test] — test cohesion > granularity 合理
+
+**Lessons captured**：
+1. **OI fail-closed gate 在 squeeze 登記之前的 architectural side-effect**：commit 7a07348b (2026-05-14 Phase 8a) 把 OI fail-closed gate 放在 on_tick 最上層 → 任何下游 indicator/state 邏輯（包含 squeeze 登記、OI buffer 維護、cooldown 等）都在 OI 不可用時 dormant。test 用 `EMPTY_ALPHA_SURFACE` 會 coincidental PASS 所有「期望 0 intents」的 assertion；type-level invariant test 必須補 OI surface。
+2. **「assert PASS 但邏輯沒驗到」的 coincidental-pass pattern**：本案是 E1 round 1 自留 follow-up，showcase 該 pattern。對抗審核必跑「列舉所有 return vec![] 路徑 + 逐項驗 fixture 是否命中」確認 assert 真正觸達被測 gate。
+3. **Control case 設計的對抗驗證 SOP**：control 必驗 (a) 完整 gate chain 是否真會通過（不只 happy-path 假設）(b) 變數隔離（哪些 state share、哪些 fresh）(c) RED probe 真會 panic 而非 fixture 缺依賴。
+4. **`#[test]` granularity vs cohesion trade-off**：同函數內 false-case + control 對照 → cohesion 強但 cargo test --filter 無法只跑 control；future 拆檔時建議拆獨立 #[test]，但不該阻 merge。
+5. **Race check 5 條於 review 期間活躍 dirty tree**：sibling commits 全屬不同 scope（P0-ENGINE-HALTSESSION-STUCK-FIX / GUI tab-live extract / healthcheck lg5），與 stress_integration.rs 0 overlap → APPROVE safe；review 期間 working tree 多檔 dirty 但僅 stress_integration.rs 屬本 review scope，其他 dirty 屬獨立 parallel task。
+
+**對抗反問 9 條全跑 PASS**（含 use_maker_entry default / confluence_as_gate default / Donchian None match / min_notional 充足 / in_squeeze 不過期 / squeeze_detected_ms 只在 entry path 末尾清空 等隱性 gate 全驗）
+
+---
+
+## 2026-05-18 — W-AUDIT-8c-S0R-1 Round 2 closure · APPROVE
+
+**對象**：E1 round 2 rework `feature/w-audit-8c-s0r-1-sql-query-template` HEAD `381d89a0`
+**Verdict**：**APPROVE → E4 regression ready**
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8c_s0r_1_e2_review_round2.md`
+
+**Round-2 全部 must-fix closed**：
+- CRIT-1（notional_pct_floor gate）：第 11 param 加入 + trigger_with_pct/trigger_candidates 拆兩層 + 三層 magnitude gate 完整鏡像；MODULE_NOTE deviation #6 documented
+- CRIT-2（sibling n_eff helper sample drift）：cluster_n_eff.sql trigger_with_pct + trigger_candidates 與主檔嚴格鏡像 gate set；param subset 正確
+- HIGH-1（sentinel-split contract drift）：3 個獨立 .sql 檔，sqlparse 各 = 1 statement，sentinel = 0；下游 caller 用三次獨立 cur.execute 載入無 silent failure mode
+- HIGH-2（boundary partial leak）：PA verdict D 完整應用 — entry_mid/exit_mid 改為 k_*.open::float8 (open-only)，LATERAL SELECT 縮窄到 (ts, open)，欄位名保留契約；`>=` 維持
+- LOW-2（expected_dir CASE）：ELSE NULL 加入 + defensive 註釋
+- MIT MUST-LAND（self-report at branch HEAD + R2 delta）+ MIT 3 SHOULD-FIX（pg_typeof doc / 288 row-window semantic doc / LATERAL ORDER BY invariant doc）
+
+**0 個新 regression / 0 個新 CRIT/HIGH**
+
+**Round-1 MED deferred（合理優先級）**：MED-1（panel cohort 變體欄位）/ MED-2（LATERAL upper-bound）/ MED-3（5m cooldown spec wording）/ MED-4（CASE 重複 sub-aggregation 重構）— round-1 review 已標為「建議修，可併到 rework round」未強制；不阻 E4
+
+**Lessons captured**：
+1. percent_rank 含 current row 在 magnitude gate 場景**不是** lookahead bias — 「自身是否高分位」這 question 含自身是 question 本質；feedback_indicator_lookahead_bias.md 適用於 max/min breach 訊號，不適用於 percentile gate
+2. PA verdict D 「欄位名沿用、semantic 改」是合理 trade-off — 下游 Python contract lock 比欄位 rename cascade 成本低；MODULE_NOTE 註釋承擔解釋責任
+3. 多檔 split-3-files 結構性防呆 > sentinel-split 文檔防呆；caller 三次獨立 cur.execute 是更乾淨的 contract
+4. CRIT-1 「percent_rank 在 WHERE 不能直接用」這類 PG 限制要在 review 時 think through，E1 round-2 拆 trigger_with_pct → trigger_candidates 兩層是正確 idiomatic SQL pattern
+5. focused validation （非 fresh review）效率高 — 只驗 round-1 must-fix list 是否落地 + 有無 regression；wall-clock ~20 min vs round 1 fresh review ~45 min
+
+**Race check 5 條全 PASS** — origin/main 2h 窗內 commits 全 Phase 1b 不衝突；working tree dirty 但 0 SQL leftover；review 期間 0 sibling push
+
+---
+
+## 2026-05-18 — W-AUDIT-8c-S0R-1 SQL query template · spec gate drift CRITICAL
+
+**對象**：E1 `feature/w-audit-8c-s0r-1-sql-query-template` HEAD `bd1b2443` 單一新檔 `sql/queries/w_audit_8c_liquidation_cluster_stage0r_features.sql` (+428 LOC) + self-report
+**Verdict**：**RETURN to E1** — 2 CRITICAL + 2 HIGH + 4 MEDIUM + 2 LOW
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8c_s0r_1_e2_review.md`
+
+**CRITICAL findings**：
+1. **CRIT-1 `notional_pct_floor` gate 完全缺漏**：spec v0.3 line 191 magnitude_ok 明確要求 `notional_percentile_24h >= notional_pct_floor`，E1 SQL 計算了 percentile 卻沒 gate；也沒納入 10-param 列表。spec line 264 K_total 公式列入 `3 notional_pct_floor` 為 11_664 grid 一維。alpha-bearing math drift 非 cosmetic。E1 self-report §4 列了 5 個 deviation 但漏這個第 6 個 critical。
+2. **CRIT-2 Sibling #2 n_eff helper 與主查詢 trigger_candidates 不一致**：sibling raw_buckets 缺 notional_pct_24h 計算，trigger_candidates 結構鏡像不嚴；連動 CRIT-1 但獨立 surface — 即使無 CRIT-1，n_eff/n 樣本基數不對齊也 break DSR penalty 計算
+
+**HIGH findings**：
+3. **HIGH-1 sentinel-split 契約漂移**：PA design 將主+sibling 呈現為 3 個獨立 code block，E1 自行合併 1 檔發明 `-- @SIBLING:NAME` 規範。psycopg2 multi-stmt `cur.execute` 只回 last 一個 description → S0R-2 不 sentinel-split = silent data loss without error。建議拆 3 個 .sql 檔（structural 防呆 > 文檔防呆）。
+4. **HIGH-2 quiet_window_sec=0 + bar-boundary partial leak**：spec line 229 寫 "after" 但 PA design line 261 寫 "at OR after" 用 `>=`，且 PA line 653 自相矛盾要 quiet_window=0 boundary 對。具體 bar-boundary scenario entry_mid 含 partial reversion → gross_bps underestimate。需 PA 仲裁 (a) spec amend / (b) `>` strict / (c) 強制 quiet_window ≥ 1 / (d) open-only。
+
+**MEDIUM/LOW（4 + 2 細節省略，見 review report）**
+
+**核心對抗反問 10 條全跑**：Q1 直接打中 CRIT-1（E1 self-report 5 documented deviations 看似 thorough，但對抗反問 spec 原文比對找出第 6 個 undocumented critical）
+
+**E2 反思 6 條**：
+1. E1 self-report 「我已對齊 spec」聲明必須逐項對 spec **原文**比對，不能信 E1 摘要
+2. PA 文檔自相矛盾（line 261 `>=` vs line 653 boundary correctness）應 surface 退 PA 仲裁，不能讓 E1 在矛盾中默默 follow literal
+3. Silent failure mode（sentinel-split misread → data loss without schema error）比 schema mismatch 更危險 → 拆檔結構防呆優於文檔防呆
+4. E1 「優化」claim（LATERAL <30s 必要優化）必驗 EXPLAIN ANALYZE，E2 不接受無 benchmark claim
+5. 跨 chain unblock（S0R-3 兩個 contract 問題）是 E2 順手職責，避免下游反向 ping
+6. §5 race check 全 PASS 但 5a 例行檢查 2h 窗 origin/main 5 commits 全 docs/governance 再次驗證價值
+
+**Unblock S0R-3 wire（per prompt）**：
+- psycopg2 `%(name)s` named-param 風格 + `cur.execute(sql, {"symbols": list(symbols), ...})` ✓
+- `bucket_5m_epoch` 單位 = 秒（seconds）✓
+- 警示：若 E1 採 HIGH-1 option (a) 拆 3 檔，S0R-3 CLI 載入路徑需相應改
+
+---
+
+## 2026-05-18 — W-AUDIT-8c-S0R-3 CLI wrapper · sibling contract drift catastrophe
+
+**對象**：`origin/worktree-agent-a61b44be0fbab2bf9` HEAD `b3e68870` · 749 + 34 LOC CLI + SCRIPT_INDEX
+**Verdict**：**RETURN to E1**（6 CRITICAL + 4 HIGH + 3 MEDIUM + 1 LOW）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8c_s0r_3_e2_review.md`
+
+### 6 CRITICAL 全是 sibling-isolation contract drift
+
+3 worktree 並行（S0R-1 SQL / S0R-2 metrics / S0R-3 CLI），S0R-3 不能讀 sibling 源碼只能讀 dispatch prompt 對 sibling API 的描述。E1 假設 4 個 contract，3 假錯：
+- **Q3** sweep 回 list[dict] ❌：真 dict 6 keys；CLI line 657 `cells = compute_stage0r_sweep(...)` 後 `for c in cells` 迭代 dict.keys（str）→ `AttributeError`
+- **Q4** k_prior 由 sibling 處理 ❌：sibling default 0 但 8b precedent 明明 caller 端 query `learning.strategy_trial_ledger` → DSR 嚴重低估 → over-PASS bias
+- **silent killer**：SQL 出 `bucket_end_ts` (timestamptz)，sibling 讀 `bucket_end_ts_ms` (ms int) — CLI 不 transform → 每 row signal_ts_ms=None → 全 skip → n=0 → 全 cell auto-RED with 看似合理 reason → **alpha tomb killer**
+- 5 個 hard runtime crash（sql_params 缺 symbols / sweep return shape / horizon_min vs horizon_grid kwarg / DataFrame vs list[dict] / BB 報告檔不存在）
+
+### Durable lesson
+
+1. **「Contract question for E2 to verify at merge」是 anti-pattern**：E1 把 contract 驗證丟給 reviewer = 把 integration test 工作往下游推；E2 該 catch，但 E1 應該至少寫 mock-SQL smoke 在自己 IMPL DONE 前自驗。Dispatch prompt 應改為「E1 已寫 smoke 驗證的 contract 假設」。
+2. **Sibling-isolation dispatch 必把對方公開 API signature copy 進 task brief**：本案 E1 只看到「contract per dispatch prompt §S0R-2」一句 + 一行口頭描述，反向猜出錯 4 處。Multi-worktree parallel 任務的 dispatch prompt **必須附完整 sibling API signature + return type + return shape**，不只是名稱。
+3. **「為讓 default 是 True 而省檔 check」是 PR-skill §1.5 shortcut anti-pattern**：BB STRUCTURAL 報告檔不存在 + CLI 預設 True 信任 hardcoded path = unfounded default。檔不存在應 fail-fast，無論 flag 是 True/False。
+4. **Silent-RED killer 比 hard crash 更危險**：5 個 crash operator 看到 traceback 至少知道壞，1 個 silent-0-trigger-auto-RED 會被信任 → alpha tomb。E2 必特別查「正常出現的低 n 是否藏 schema mismatch」。
+5. **48× under-sweep 是 spec drift**：DSR penalty 用 K_total=N×11_664 (per spec)，但 S0R-3 默認 grid 只 144 cells = 1/48 spec 範圍 → DSR formula uses K_total much larger than actually tested → 反向假 RED。Sweep 軸要 spec coverage 與 K_total formula 一致。
+
+### Adversarial review pattern 補
+
+- **4 contract assumption 仲裁**：對 E1 自評每個 assumption 必須去 sibling worktree origin 真實檔讀 signature/return shape/columns，**不接受 E1「per dispatch prompt」二手描述**。Dispatch prompt 也可能錯。
+- **silent-RED 偵測**：對 verdict-emitting CLI 必跑「`n=0` 是否可能由 schema mismatch / row-skip / silent-drop 造成而非真實零 trigger」反問。
+- **CRIT vs HIGH 分流**：runtime crash (TypeError/AttributeError/SyntaxError/KeyError) = CRIT；silent wrong verdict = CRIT；missing mandatory spec field = HIGH；over-PASS bias from missing k_prior = HIGH。
+
+---
+
+## 2026-05-16 — P1-WP03-DEPLOY-GATE-IMPL Round 2 quick re-review
+
+**對象**：E1 round 2 fix `2026-05-16--wp03_deploy_gate_round2_fix.md`（+76/-3，只動 checks 593→594 + test 525→592；無 scope creep）
+**Verdict**：**APPROVE → pass to E4 for Linux trade-core regression**
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--p1_wp03_deploy_gate_round2_re_review.md`
+
+**round 2 三 fix 全 PASS**：
+1. MEDIUM-1：`checks_wp03_deploy_gate.py:517` 真改 `if age_h >= T2_WINDOW_HOURS_DEFAULT and t1["n"] == 0 and t2["n"] == 0:` + trigger msg 揭露雙窗 evidence — false-positive 場景修妥 + 真實 dormancy 仍 trigger
+2. LOW-1：L578-583 REQUIRED escalation FAIL msg 加 `revert_recommended=false (approach_escalation, no flag written)` hint，與 Step 4 hard FAIL `revert_recommended=true` 對稱
+3. New test `test_zero_fills_env_override_age_mismatch` adversarial 反向驗證：local revert source 至 round-1 邏輯後此 test FAIL（msg 含 ZERO_FILLS trigger），restore 後 18/18 PASS → 真實打中 fix semantic 非 trivial
+
+**3 個既有 regression sample 仍 PASS**：`test_fail_zero_fills_dormancy`（真 dormancy 仍 trigger）/ `test_required_env_escalates_warn_to_fail`（msg substring 兼容）/ `test_t2_window_env_override`（env override 不破）
+
+**Scope creep PASS**：LOC delta 在容差內；git status 僅 2 檔 unstaged；0 unrelated change
+
+**Lexical scope shadow PASS**：AST `check_69_wp03_ou_sigma_deploy_gate` 0 nested function / 0 closure / 14 unique local names；W-AUDIT-7c 純 Python no-JS N/A
+
+**LOW-2 LOW-3 P2 ticket**：`P2-WP03-MSG-STRUCT` + `P2-WP03-ALERT-FLAG-INDEPENDENCE` 列入 sign-off §6 清楚
+
+**E2 round 2 reflection**：
+- Adversarial 反向 source revert + 跑單 test 是驗證 fix 真實性 strongest pattern — local 改 source 跑 pytest 比 grep + 推理可靠
+- MEDIUM-1 雙窗 secondary guard (T1+T2 都 0) > 單 condition 改 (`age_h >= t2_window_hours`) — 雙窗 confirm 對 env override / age 各排列組合都嚴謹
+- LOW-1 msg 對稱（hard FAIL vs approach FAIL）是 GUI/alert downstream regex parse 友善的關鍵 — operator 看 FAIL line 即知 flag 存否
+
+---
+
+## 2026-05-16 — P1-WP03-DEPLOY-GATE-IMPL E2 對抗審核
+
+**對象**：E1 `2026-05-16--wp03_deploy_gate_healthcheck_impl.md`（新檔 587 LOC `checks_wp03_deploy_gate.py` + 528 LOC 17-test suite + 51 LOC runner.py wire + 13 LOC __init__.py re-export）
+**Verdict**：**RETURN to E1**（1 MEDIUM 強制修 + 3 LOW 建議修）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--p1_wp03_deploy_gate_e2_review.md`
+
+**核心 MEDIUM finding（必修）**：
+- ZERO_FILLS 邊界 bug — `checks_wp03_deploy_gate.py:514`：`if age_h >= T2_WINDOW_HOURS_DEFAULT (24) and t2["n"] == 0:` 用 hardcoded 24h 但 t2 query 用 `t2_window_hours = env_override or 24`。實測重現：`OPENCLAW_WP03_DEPLOY_GATE_LOOKBACK_HOURS=48` + age=30h + T1 12h 有 50 fills + T2 48h n=0（因 age<48 query window 大於實際 engine age）→ false-positive ZERO_FILLS dormancy → 寫 revert flag → operator 看到 `48h grid_trading n=0` 但其實策略 active
+- 修法：`age_h >= t2_window_hours and t2["n"] == 0`（與 query window 對齊）或 secondary guard `t1["n"] == 0`
+
+**3 LOW（建議修）**：
+- LOW-1：REQUIRED escalation FAIL msg 無 `revert_recommended=false (approach_escalation)` hint — operator 看 FAIL line 但找不到 flag file 困惑
+- LOW-2：FAIL msg `revert_recommended=true` 是 substring 無結構化 marker — GUI / alert downstream regex parse 脆
+- LOW-3：flag write 失敗 fail-soft 但 verdict 仍 FAIL — operator 雙訊息混淆，P2 alert 邏輯改不依賴 flag exists
+
+**對抗反問 10 條全跑**：
+- SQL injection：✅ 3 execute 全參數化 `(%s::text)::interval` + `%s::timestamptz × 2` + 純常量 `to_regclass`
+- Threshold logic：✅ T1/T2/T3 嚴格 `<` 不含邊界，WARN approach floor 對負閾值方向正確（更接近 0），無 off-by-one
+- Baseline + cache：✅ window module 常量 spec §12 R1 mitigation；first-run query + persist；樣本不足不寫 cache fail-soft 正確
+- Revert flag design：APPROVE — PA spec §4.3 任一 trigger → flag set；E1 hard trigger 寫 flag + approach FAIL escalation 不寫 flag 是合理 advisory semantic 分層（但 msg 應更 explicit）
+- Lexical scope shadow：✅ 0 import shadow；test `_FakeDT` patch 路徑 explicit
+- Env vars naming：✅ `OPENCLAW_WP03_DEPLOY_GATE_REQUIRED/LOOKBACK_HOURS` 對齊 [68] `OPENCLAW_PORTFOLIO_RESTING_*` pattern
+- Mock review：✅ 3-tuple `(n, avg, std)` 與 [40] L1168 同 PG return shape；None-safe `int(n or 0)` 處理 PG AVG(NULL)=NULL
+- 17 test 強度：✅ PASS / WARN×3 / FAIL×4 (T1/T2/T3/ZERO_FILLS) + 6 edge + cache reuse；fixture 各自 assert severity / commit SHA / msg；非 trivial pass
+- ADR-0020 honored：✅ 純 filesystem write；無 IPC / subprocess / git / engine 呼叫
+- runner.py wire：✅ 與 [40]/[68] 同 pattern；0 import shadow / 0 circular
+
+**E1 5 verification points**：4/5 ✅（schema/cast/mtime/cache）；#5 (approach + REQUIRED → no flag) APPROVE 設計但 msg 強化建議
+
+**SOP 教訓**：
+- ZERO_FILLS-like derived trigger 用環境變數覆寫窗口時，**triggering condition 必與 query window 對齊**，否則 query window > 實際 age 產生 0-row 不是 dormancy 是 sampling artifact
+- E1 17 test 雖完整，但無 LOOKBACK_HOURS=48 + age<48 + ZERO_FILLS 邊界 — 補 1 test 防 regression
+
+**回 PM**：E2 RETURN to E1（必修 MEDIUM-1 + 建議 3 LOW + 補 1 test）→ E1 修 → 重 E2 → 才 E4。
+
+## 2026-05-16 — Wave 2-3 6 WP + BB-MF-3 retroactive E2 review（chain breach 補救路徑）
+
+**對象**：Wave 2-3 6 WP（WP-03/04/06/08/10/13）+ BB-MF-3 commits `ef6ea79f` + `5682994c` + `f31b6e8f` + `27f02a07`，已 push origin/main
+**Review 模式**：第三輪 retroactive — CC cross-validation 確認 E2 workspace 0 sign-off report 落地；commit body self-claim「E2 PASS」均無真實 dispatch；違反 CLAUDE.md §八「強制工作鏈不可跳」
+
+**7 份 sign-off report 落地** `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--*`：
+- wave2_wp03 OU sigma residual fix
+- wave2_wp04 AI observability + budget cap
+- wave2_wp06 state_compiler deepcopy 3→2
+- wave2_wp08 ML pipeline engine_mode + purge_days
+- wave2_wp10 Bybit ReduceOnlyReject + backtest URL
+- wave2_wp13 demo reconciler DemoCmdSenderSlot
+- bbmf3 reject_cooldown entry/close split
+
+**逐 WP retroactive verdict**：
+
+| WP | Verdict | 主要 finding | 建議動作 |
+|---|---|---|---|
+| WP-03 | APPROVE-CONDITIONAL | LOW (OLS den guard 缺失) + P2 (生產數據 empirical validation) + WATCH (test 5 tolerance 0.99) | PASS to E4 + 開 P2/P3 ticket |
+| WP-04 | **RETURN to E1** | HIGH (DOC-08 §12 fabricated citation 應改 §4.1+§12.4) + MEDIUM (Ollama-unavailable latency=0 sentinel 歧義) | 補修 citation + sentinel 後 PASS to E4 |
+| WP-06 | APPROVE | LOW (lock-internal deepcopy 拖長 lock hold) + WATCH (pre-existing race) | PASS to E4 + 建議 P2 修 |
+| WP-08 | APPROVE-CONDITIONAL | MEDIUM (_engine_mode_scope 0 test) + LOW × 2 + P2 (purge_days dead-API) | PASS to E4 + 補 unit test |
+| WP-10 | APPROVE-CONDITIONAL | MEDIUM (backtest URL module-level constant non-hot-reload) + LOW (新分類器缺) + P2 (BYBIT_RETCODE 110017 counter) | PASS to E4 + 補修熱重載或 docstring |
+| WP-13 | **RETURN to E1** | HIGH (partial fix marked complete — main.rs:822 strategist_scheduler + main.rs:1372 edge_estimates_reloader 仍 by-value cmd_tx) + MEDIUM + §九 singleton 表補登記 | 補 commit body amend + 開 P1-WP13-LEFTOVER-1 |
+| BB-MF-3 | APPROVE-CONDITIONAL | MEDIUM × 2 (production wiring 0 caller dead-API + short-circuit invariant 加固) + LOW × 2 + P2 | PASS to E4 + 開 P1-BBMF3-WIRE-1 |
+
+**整體 Wave 2-3 chain breach 補救 verdict**：**RETURN** （2 WP RETURN + 5 APPROVE/APPROVE-CONDITIONAL）
+
+**核心對抗發現**：
+
+1. **DOC-08 §12 vs §4.1 citation imprecision pattern**（WP-04 HIGH）— PA 三角 cross-validation 已確認 §4.1 是「$2/天」真實出處 + §12.4 是 invariant 確認 reference；E1 commit body + budget_config.toml × 2 comment + follow-up commit message body 全 cite「DOC-08 §12」是 systematic imprecision，違反 §二 原則 8（交易可解釋 — 配置文件 citation 是審計可追溯性）。
+
+2. **Partial fix marked as complete 反模式**（WP-13 HIGH）— FA-P1-11 ticket scope 涵蓋 all by-value cmd_tx captures（reconciler + strategist_scheduler + edge_estimates_reloader）；WP-13 只修 reconciler 但 commit body 自陳述「WP-13 FA-P1-11 修正」暗示全 ticket 完成；剩餘 main.rs:822 + main.rs:1372 by-value 路徑未修。**與 LG-1 T3 PA mitigation 假設不成立同型**。
+
+3. **Dead-API plumbing-only acceptable as Phase 1b prereq**（BB-MF-3）— BB-MF-3 commit body 明標「本 prereq commit 僅完成『資料欄位 + 寫入 helper + 隔離測試』，close path 真正進 cooldown gate 的接線留給 Phase 1b 主軸 IMPL」+ position_mgmt.rs:264 註釋同型 = 治理透明的合理 pattern；與 WP-13 partial-fix-marked-complete 區分為「明確標 prereq vs 暗示已完」。
+
+4. **Wave 2-3 chain breach + multi-session race 雙重治理破裂**：
+   - chain breach：6 WP + BB-MF-3 全 E1 commit body self-claim「E2 PASS」但 0 真實 E2 agent dispatch
+   - multi-session race：BB-MF-3 commit `27f02a07` 自承「sibling 12-agent audit session repeatedly stashed + silently dropped this work (3 race events)」是 git stash recovery commit
+   - 違反 CLAUDE.md §八「E2 代碼審查（絕不可跳）」 + feedback_impl_done_adversarial_review.md 「Sub-agent IMPL DONE 必走 A3+E2 對抗性核驗（高風險 IMPL，sub-agent 自評 IMPL DONE 不接受單獨 sign-off）」
+
+5. **無生產數據 empirical validation**（WP-03/WP-08/BB-MF-3 共性）— alpha-bearing changes（OU sigma 公式變、edge_estimate scope 改、cooldown 路由）全只用 synthetic data + unit test pass；無真實 trade-core fills 數據跑 sigma_old vs sigma_new、scope_old vs scope_new、cooldown_old vs cooldown_new empirical comparison。**P2 follow-up SOP**：alpha-bearing change 後 24h 內必 run empirical replay validation report。
+
+**驗證手段**：
+1. 讀 commit message body 自陳述 + git show 對應 file diff
+2. 對 WP-13 leftover 跑 `grep -n 'demo_cmd_tx' rust/openclaw_engine/src/main.rs` 確認 leftover 2 處
+3. 對 BB-MF-3 跑 `grep -rnE 'arm_close_cooldown' rust/openclaw_engine/src/ | grep -v 'grid_trading/'` 確認 0 production caller
+4. 對 WP-04 cross-check `docs/README.md` DOC-08 描述「實施橋樑（AI 成本上限 $2/天、provider 配置）」+ PA 三角 cross-validation 「§4.1 + §12.4」
+5. 對 WP-06 跑 callsite grep `compile_state` 全在 state_store / learning_records / control_ops 路徑，無外部依賴「拿 deepcopy」假設
+6. 對 WP-08 跑 SQL callsite grep `engine_mode = %\(` confirm 全替換完
+7. 對 WP-10 跑 `grep 'api.bybit.com\|api-demo.bybit.com'` 確認 backtest_routes.py 唯一 callsite
+
+**經驗教訓 / Lessons learned**：
+
+1. **Chain breach detection via cross-validation**：commit message body self-claim「E2 PASS」≠ E2 agent dispatch；需 cross-check workspace `docs/CCAgentWorkSpace/E2/workspace/reports/` 真實 sign-off report 落地。Sprint N+0 / N+1 / W2 IMPL 等 wave 均出此 pattern — PM dispatch SOP 必加「E1 commit 前必驗 E2 workspace report 真實存在」preflight。
+
+2. **Fabricated citation 比 missing citation 更危險**：「DOC-08 §12 規定」措辭 misdirects reader 去查 §12 找不到 → 質疑改動依據；missing citation 至少透明標「需查 spec」。E2 retroactive 必標 HIGH 不是 LOW — citation accuracy 是 §二 原則 8 治理 trail。
+
+3. **Partial fix marked as complete = chain breach 衍生治理問題**：commit body 暗示 ticket 全完 vs 明確標 prereq — 後者治理透明可接受（BB-MF-3 pattern）；前者必 RETURN（WP-13 pattern）。E2 review 必區分 transparent partial vs misleading partial。
+
+4. **Multi-session race protocol 弱點暴露**：sibling 12-agent audit session 多次 stashed + silently dropped Wave 2b BB-MF-3 IMPL；recovery 依賴 git stash ref ttl 是 fragile path。建議 SOP：multi-agent dispatch 前 preflight `git stash list` + `git fsck --lost-found` 識別其他 session WIP；發現 → 反向溝通而非 silently drop。
+
+5. **Alpha-bearing change 必有 empirical replay validation**：WP-03 OU sigma / WP-08 engine_mode scope / BB-MF-3 cooldown 全是 alpha-bearing；commit 前必跑真實 trade-core 數據 empirical comparison（sigma_old vs sigma_new / scope_old vs scope_new / etc）；unit test 用 synthetic data 是必要不充分。
+
+6. **§九 Singleton 表補登記是治理 chore**：DemoCmdSenderSlot 新增 type alias 但 §九 表未補；建議 meta-doc commit 一次性補 row。
+
+**Cross-References**：
+- 7 sign-off report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--{wave2_wp03,wave2_wp04,wave2_wp06,wave2_wp08,wave2_wp10,wave2_wp13,bbmf3}_retroactive_review.md`
+- Wave 2 commits: `ef6ea79f` (WP-03/04/07/10) + `5682994c` (WP-04 followup)
+- Wave 3 commit: `f31b6e8f` (WP-06/08/13)
+- BB-MF-3 commit: `27f02a07` (recovery from multi-session race)
+- E1 self-report: commit `15e67220 docs(e1): wave 2b reject_cooldown_split bb-mf-3 self-report`
+- Chain breach context: feedback_impl_done_adversarial_review.md
+- DOC-08 README description: `docs/README.md` "AI 成本上限 $2/天、provider 配置"
+- Multi-session race lesson: memory project_multi_session_memory_race
+- Engine_mode tag 升級: memory project_engine_mode_tag_live_demo
+
+---
+
+## 2026-05-16 — WP-11 Test Infrastructure (6 test files, 15 test fixes) 對抗 review (PASS to E4)
+
+**對象**：6 test files + E4 memory.md, +130/-79 LOC, 0 production code changes
+
+**Verdict**：**PASS to E4** -- 0 BLOCKER, 0 HIGH, 0 MEDIUM, 1 LOW (existence-only envelope assertion)
+
+**驗證手段**：
+1. `git diff HEAD --name-only | grep -v tests/ | grep -v CCAgentWorkSpace` = empty (zero production code changed)
+2. Cross-platform grep `/home/ncyu|/Users/[^/]+` on all diff = 0 hit
+3. Production code cross-check: `error_sanitize.py:62` returns `{"reason_codes": [reason_code], "detail": safe_msg}` -- all 3 IPC tests aligned
+4. `ipc_error_handler.py:125-128` generic Exception -> `sanitize_exc_for_detail(exc, "ipc_error")` -- ai_budget test's `"ipc_error"` reason code correct
+5. `executor_routes.py:634` + `strategist_promote_routes.py:719` both `sanitize_exc_for_detail(exc, "rust_engine_unavailable")` -- 2 tests aligned
+6. `route_helpers.py:861-868` `build_default_manifest_payload(cur=None)` returns exactly 3 keys -- test 6->3 aligned
+7. `route_helpers.py:1006-1015` defense-in-depth rejects envelope keys -- fixture payload stripping aligned
+8. `dispatch.rs:49` CLOSE_ATTEMPT_TIMEOUT_MS still present; `dispatch_tests.rs:455` test function confirmed moved
+9. `tab-live.html:1683` `_applyLiveTodayPnl(m)` confirmed (not old `metricsData` pattern)
+10. `resolve_artifact_allowlist_root()` returns platform-aware path -- spawn tests correctly use it
+11. `_signing_key_env` fixture: deterministic `"ab"*32` test key via `tmp_path` + `monkeypatch.setenv` -- no hardcoded paths, auto-cleaned
+12. New comments all Chinese-only (2026-05-05 governance compliant)
+13. No `except:pass`, no `._xxx` private access, no f-string logging, no blocking Lock in diff
+
+**LOW finding**：`test_write_manifest_fixture_embeds_run_id` 的 envelope assertion 從 `assert written["signature"] == "ph_sig"` 改為 `assert "signature" in written`（existence-only）。因為 Round 6 後 signature 是真實 HMAC（非 deterministic placeholder），existence check 合理；canonical byte-equal test 另覆蓋 integrity。接受不退回。
+
+**教訓**：test-only diff 仍必須逐條 cross-check production code path -- `ipc_error` vs `ipc_unreachable` reason code 取決於 which `except` clause catches（`_get_ipc_client()` failure vs IPC call failure），mock 注入點決定走哪條路。
+
+## 2026-05-11 — Wave 2.2 LG-1 + LG-2 batch (8 task) 對抗 review (APPROVE WITH MINOR · PASS to E4)
+
+**對象**：commit `a11a4df6 LG live gate checkpoint` 已 land main (16882+/121- LOC across 67 files)，working tree clean (only 1 stale report)
+
+**8 task scope**：
+- LG-1 T1 h0_blocking.rs E2E test (374) / T2 [59] healthcheck (468+532) / T3 ctor flip + runbook (179+316) / T4 H0 block summary route (410+468)
+- LG-2 T1 contract tests (275 inline + 521 integration) / T2 startup assertion (578 NEW) / T3 FeeSource enum + IPC + dual-source (501+203+184) / T4 RiskConfig [pricing] section (211+27+218 + 3 TOML +59)
+
+**Verdict**：**APPROVE WITH 4 MEDIUM / 2 LOW / 3 P2 / 1 HIGH governance flag · PASS to E4** · 0 BLOCKER
+
+**驗證手段**：
+1. 8 E1 report 全讀 + PA spec full read
+2. 跨平台 grep `/home/ncyu|/Users/[a-zA-Z]*ncyu` 11 個新 / 大改檔 = 0 hit
+3. unsafe / production unwrap / production expect grep new Rust modules = 0 hit (only test code)
+4. SQL injection grep: risk_routes.py + checks_pricing_binding.py + checks_h0_block_acceptance.py 全 parameterized (`%s`/ANY(%s)) + engine_mode whitelist
+5. Hot path SLA grep `fee_source\|fee_rate_count\|assert_pricing_binding\|tokio::spawn|.lock()|Mutex::|RwLock::` 在 tick_pipeline/ + strategies/ = 0 hit（無人在 tick path 用 LG-2 API）
+6. `live_spawn_assert.rs` production code unique tokio::spawn check = 0 hit (line 346 是 test code in mod tests)
+7. Live 5-gate ordering verify: `startup/mod.rs:517-553` (HMAC + BybitRestClient::new + has_credentials) 全保留；LG-2 T2 是第 6 gate 並列；fee refresh + balance fetch + WS spawn 順序 unchanged
+8. PricingConfig Mainnet hard-block 三層 defense verify (validate() 禁 "live" / BybitEnvironment::Mainnet endpoint URL distinct / assert_pricing_binding is_mainnet 硬規則 reject 任何非 BybitApi)
+9. risk_config_live.toml `cold_default_acceptable_modes=["demo", "live_demo"]` 確含 "live_demo" → LiveDemo + ColdDefault accept 邏輯統一一致
+10. `pipeline_config.rs:97-109` H0Gate RMW 確實**沒**推 `snap.runtime.h0_shadow_mode`（line 98 stale comment 「shadow_mode fields don't live in RiskConfig」與 `risk_config_advanced.rs:366` 矛盾）— 證實 LG1-T3 reviewer note 「PA mitigation 不成立」是真實 finding
+
+**8 PA spec push back 逐條 ACCEPT**：
+1. LG1-T2 PA「讀 canary_records」不存在 PG → E1 改 filesystem snapshot + PG join 等價，符合「不新增 PG 表」精神
+2. LG1-T3 PA「TOML always 覆蓋 ctor default」實證不成立 → 5 LOC fix 不在 T3 scope，ctor flip 已治本 fail-closed，建議 P1 follow-up
+3. LG2-T1 PA「account_manager_tests.rs」實為 inline `mod tests` → grep 確認真實 baseline
+4. LG2-T1 PA「(e) hourly refresh integration 直驗」binary crate 限制 → 等價語意接受
+5. LG2-T2 PA「build_exchange_pipeline in bybit_rest_client.rs」真實位置 `startup/mod.rs:496`
+6. LG2-T2 PA「audit write」未指明 storage → tracing 是 db_pool 連線前必選，建議 P2 retrofit
+7. LG2-T2 PA「LiveDemo + ColdDefault → reject」改統一邏輯「mode_label in acceptable_modes → accept」 → toml 確實 contains live_demo
+8. LG2-T4 PA「4 個 TOML」實為 3 active + 1 legacy fallback → grep 確認 risk_config_live_demo.toml 不存在
+
+**核心對抗發現**：
+1. **HIGH governance flag — SCOPE CREEP**：commit `a11a4df6` 同時 land bb_reversion + ma_crossover SCANNER-TRADEABLE-TIER-1 `is_pinned` entry guard（+19+248+20+119 LOC across 4 strategy file），**不在 PA spec §1.4/§2.4 任何 8 task scope**，commit message body 未 disclose。屬「checkpoint 同次 land 的 follow-up」OR PA spec 未派發業務邏輯改動，PM 必 sign-off
+2. **MEDIUM — PA §1.5 risk #1 mitigation 假設不成立 (LG1-T3)**：`pipeline_config.rs:97-109` H0Gate RMW 漏推 h0_shadow_mode；E1 sibling `#[ignore]` test 證實 + stale comment line 98；ctor flip 已治本 fail-closed；建議 P1 follow-up 5 LOC fix 同 LG-2 T4 risk.rs 一道 commit
+3. **MEDIUM — 2-week dual-source FAIL schedule 無代碼層 enforcement (LG2-T3)**：4 hit grep '2 週\|two weeks' 全 narrative only；`OPENCLAW_LG2_T3_DUAL_SOURCE` env 預設關，operator 必手動 flip；無 timer / TODO ticket。建議 P2 calendar reminder / healthcheck check
+4. **MEDIUM — wait_for_first_refresh_or_timeout cancel discipline (LG2-T2)**：30s poll 內無 `tokio::select! { sleep => {} cancel.cancelled() => return Err }` 對齊 production cancel discipline。trade-off 接受（startup 一次性 + 30s 短窗），建議 P3
+5. **MEDIUM — Singleton 表漏 AccountManagerSlot (LG2-T3)**：CLAUDE.md §九 表個別列 HStateCacheSlot + CostEdgeAdvisorDbSlot 但未列 AccountManagerSlot。建議 P2 ticket meta-doc commit 加 row
+6. **§九 LOC 8 檔超 800 警告線**：account_manager.rs 1404 / risk_routes.py 1118 / risk_config_tests.rs 1796 接近 2000 + 其他 5 pre-existing；全 baseline < 2000，**§九 exception clause 不適用**（per E2 memory 2026-05-11 W2 lesson #1）；3 P2 split ticket（其他 4 pre-existing 微增量是 P3）
+7. **Live 5-gate 不變式驗證**：LG-2 T2 是第 6 gate 並列；既有 5 gate（HMAC + freshness + env_allowed + secret + ALLOW_MAINNET）全 unchanged；ordering 在 startup/mod.rs:511-780 證實
+8. **stress_bb_reversion_extreme_oversold_bounce pre-existing fail**：E1 自報 100% W7-2 P0 Option A-Lite refactor fixture 未同步，與 LG-2 T2 無關；E2 cross-check `git log` 確認 6cdfe0dc/77a52796/df0e2269；accept；但 5.3 SCOPE CREEP 揭示 a11a4df6 也 land bb_reversion entry guard，E4 必驗 entry guard fix 了 stress test OR 仍 fail
+
+**驗證 unsafe path**：
+- `live_spawn_assert.rs` production code unique tokio::spawn = 0 hit；test mod 內 spawn line 346 合法
+- AccountManagerSlot `Arc<RwLock<Option<Arc<AccountManager>>>>` late-inject pattern 對齊 CostEdgeAdvisorDbSlot / HStateCacheSlot sibling
+- IPC handler `read().await` 純讀 RwLock + slot=None → fail-soft uninitialized payload；不爆 JSON-RPC error
+- LiveAuthWatcher respawn 取 pricing `Option::and_then(...).unwrap_or_default()` 雙層 fallback safe
+
+**Trade-off accepted**：
+- LG1-T3 5 LOC pipeline_config.rs RMW fix 不在 T3 scope（合理 push back，建議 P1 follow-up）
+- LG2-T2 audit log 走 tracing 非 PG（db_pool 連線前限制，建議 P2 retrofit）
+- LG2-T1 (e) hourly refresh 用等價語意 50ms interval（binary crate 限制接受）
+- 8 task 多檔 800-1500 LOC 警告但 < 2000 hard cap（per §九 exception clause 不適用，開 P2 split ticket）
+- SCOPE CREEP 不阻 8 task review（PM 決策）
+
+**經驗教訓 / Lesson learned**：
+
+1. **SCOPE CREEP detection through git show**：`git show --stat <commit>` 揭露 commit body 未 disclose 的 file 改動；commit message body 與 stat 不一致時，必對 stat 範圍做 grep cross-check。本次 a11a4df6 commit body 只提 LG-1/LG-2 surface 但 stat 含 strategies/ + scanner_config.toml；典型 checkpoint 「same wave land」風險，PM sign-off 是必要 governance gate。
+2. **PA spec mitigation 假設必 grep cross-check 真實代碼**：LG1-T3 reviewer note 揭示 PA §1.5 risk #1 「TOML always 覆蓋 ctor default」是 stale 假設；E1 sibling `#[ignore]` test 留證據是高品質 reviewer pattern；E2 verify pipeline_config.rs:97-109 + line 98 stale comment 雙重證實 PA spec drift。
+3. **Live gate ordering 對抗驗證 SOP**：對任何「新 gate」改動，必逐行 read `startup/mod.rs` 從 HMAC 到 WS spawn 完整 ordering；確認既有 N gate 全 unchanged + 新 gate 真實 fail-closed return None（not just warn）；E2 grep `fee refresh + balance fetch + WS spawn` 順序對齊。
+4. **Hot path SLA grep 多 file scope**：對「新 enum / new API」必 grep tick_pipeline/ + strategies/ 確認無人在 tick hot path 用；本 wave fee_source / fee_rate_count / assert_pricing_binding 全 0 hit，證實 LG-2 T2/T3 純 startup + healthcheck IPC + spawn-time 對齊 PA spec。
+5. **late-inject IPC slot fail-soft 必驗 None branch payload contract**：本 wave AccountManagerSlot 對齊 cost_edge_advisor pattern 走 structured `status=uninitialized` payload 不爆 JSON-RPC error；Python 端視 silent-dead branch 處理；contract test 必驗 slot=None 路徑回正確 enum fallback (cold_default)。
+6. **tracing audit log 在 db_pool 連線前 startup-time 路徑是合理 trade-off**：but 必開 P2 retrofit ticket（待 LG-3 supervised_live_audit table land 後對齊 PG row）；不能無限期 narrative-only。
+7. **commit message body 完整披露 wave scope 是 governance discipline**：commit `a11a4df6` body 只提 8 task 但 stat 含 strategies/ 業務邏輯改動 — 屬「同 wave land 的 follow-up」常見 pattern，但 disclosure 缺失 = E2 必 flag HIGH governance + PM 必 amend；此 lesson 加入 commit discipline SOP。
+
+**Cross-References**：
+- PA tech plan: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--lg_2_3_4_design_plan.md`
+- 8 E1 reports: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--lg{1_t1,1_t2,1_t3,1_t4,2_t1,2_t2,2_t3,2_t4}_*.md`
+- E2 report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--wave2_2_lg1_lg2_e2_review.md`
+- LG-1 runbook: `docs/runbooks/2026-05-11--lg1_h0_flip_rollback.md`
+- Commit: `a11a4df6 LG live gate checkpoint [skip ci]` (HEAD `a11a4df6` after `b28c6a83`)
+- Sibling: `070ff0a3 P0 Option 2: SCANNER-PINNED-GATE-1` (grid_trading 已 dispatch；本次 a11a4df6 sibling land bb_reversion/ma_crossover)
+- E2 W2 IMPL chain lesson #1 (pre-existing baseline exception clause 範圍嚴格)
+- E2 Wave 1.6 P1-FILL-LINEAGE-DROP lesson #1 (governance LOC enforcement)
+
+---
+
+## 2026-05-11 — Wave 1.6 P1-FILL-LINEAGE-DROP Option F4 對抗 review (APPROVE WITH MINOR · PASS to E4)
+
+**對象**：working tree HEAD未 commit + 3 檔 / +422 / -6 LOC
+- `tasks.rs:641-655` mpsc cap 1024 → 8192（QA RCA 25.8% drop rate fix）
+- `runtime_shadow.rs:33-93` 3 個 static AtomicU64 counter + 3 pub accessor
+- `runtime_shadow.rs:580-792` emit_fill_completion 接 retry helper + `try_send_with_background_retry` 新增
+- `tests.rs:1247-1476` 3 new unit test
+- Parallel：E5 hot-path perf re-audit（同時跑）
+
+**Verdict**：**APPROVE WITH MINOR · PASS to E4** · 0 BLOCKER / 0 HIGH / 2 MEDIUM / 3 LOW / 2 P2-governance-ticket
+
+**驗證手段**：
+1. Mac cargo test --lib --release 親跑：2810 PASS / 0 fail / 0 ignored
+2. retry test (`fill_completion_retry_succeeds_after_slot_released`) 3 連跑 0 flaky（每次 in 0.05s）
+3. grep `tokio::spawn|spawn|.lock()|Mutex::|RwLock::|tokio::time::sleep` 在 emit_entry_lineage 函式體 (line 105-426) = 0 hit → hot path SLA 守住
+4. grep callsites verify：emit_entry_lineage 唯一 caller = `step_4_5_dispatch.rs:664/932` (tick hot path)；emit_fill_completion_lineage 唯一 caller = `loop_exchange.rs:283` (WS Fill event consumer，非 tick path) — caller-aware 設計成立
+5. AgentSpineMsg `store.rs:8 #[derive(Debug, Clone, PartialEq)]` + variants 全 owned struct → retry_msg.clone() 在 loop 內合法安全
+6. PG bind param 計算：65535 / Object 20col = 3276 chunk_rows，cap 增到 8192 不破 batch_insert
+7. 跨平台 grep diff = 0 hit `/home/ncyu|/Users/[^/]+`
+8. unsafe / unwrap / expect 新增 = 0（既有 4 處全 pre-fix safe pattern）
+9. 注釋中文密度 28 hit；混技術詞合法
+
+**Findings**：
+- **MEDIUM-1**：E1 report §9 Caveat 1 引用 §九 Pre-existing baseline exception clause 為 runtime_shadow.rs 657→828 辯護**錯誤**（§九 明確「僅適用 baseline > 2000」；657 < 2000 不適用）。建議 E1 修報告表述為「警告線 watch + P2 split ticket」，**不阻 merge**；屬與 W2 IMPL btc_lead_lag.rs 1771 同型。
+- **MEDIUM-2**：SPINE_CHANNEL_DROP_TOTAL 同時計「entry path 永久丟失」+「fill_completion path 初始失敗（多數會 retry 救回）」；下游 healthcheck 直接用此 counter 當「最終丟失」會 over-report；建議注釋明確語意，或拆兩個 counter（P1-FILL-LINEAGE-MONITOR 接線時必對齊）
+- **LOW-1/2/3**：注釋 + 函式名 + test 緊密綁 counter 設計（不阻 deploy）
+- **P2-1/2**：runtime_shadow.rs 828 LOC + tests.rs 1476 LOC 開 split ticket（與 W2 lesson #1 + 既有 W-C E5 §D-5/6 同方向）
+
+**核心對抗發現**：
+1. **§九 pre-existing baseline exception clause 引用範圍嚴格**：原文「僅適用 baseline > 2000 行」；657 < 2000 場景**不適用**；屬「新 wave 推 ≤2000 到 ≤2000」常規 path（警告線 watch + 開 P2 split ticket）— E2 memory 2026-05-11 W2 lesson #1 已立。本次 E1 引用錯誤可能因「657→828 +171 LOC 突破警告線情緒上類比 baseline」誤用 — 需強化 E1 governance training。
+2. **drop_total counter 語意混淆風險**：counter 在 entry path（hot, 0 retry）+ fill_completion path（spawn retry 95%+ 救回）都做 fetch_add(1)；下游 healthcheck 用此值當「最終丟失」會 over-report。E1 留 P1-FILL-LINEAGE-MONITOR ticket 處理可接受，但 metric 注釋必明確「= initial fail occurrences, NOT final loss」。
+3. **caller-aware 設計合理**：emit_entry_lineage hot path 全 sync try_send + 0 retry / emit_fill_completion 非 hot path 用 try_send_with_background_retry。`tokio::spawn` 在 fill_completion path 是合理 trade-off（保 emit_fill_completion sync fn 避免破 caller cascade 改 async）。
+4. **3 個新 test 真實驗 invariant，非 mock-pass**：用真實 tokio mpsc + 真實 emit + 真實 try_recv；retry test 用真實 tokio::spawn + time::sleep + 500ms deadline 給 retry msg 收齊；連跑 3 次 0 flaky。
+5. **AgentSpineMsg #[derive(Clone)] verify**：retry_msg.clone() 在 spawn task loop 內合法；variants 全 owned struct，無 raw pointer 無 unsafe，clone 安全且 ns 級成本。
+
+**Trade-off accepted**：
+- Counter 語意混淆走 P1-FILL-LINEAGE-MONITOR follow-up（E1 自報已點此 ticket）
+- runtime_shadow.rs 828 / tests.rs 1476 LOC 警告線兩檔開 P2 split ticket
+- spawn 成本未做 micro-bench（理論推算 24h ~860μs 可忽略；E5 perf re-audit 可補實測）
+
+**經驗教訓 / Lesson learned**：
+
+1. **§九 pre-existing baseline exception clause 引用範圍 = baseline > 2000 only**：是 §九 原文嚴格限定；657 baseline < 2000 不能 invoke；E2 memory 2026-05-11 W2 lesson #1 已立同型；本次 E1 同 misapplication，需強化 governance reading SOP。
+2. **counter 語意完整性對 metric 對外接口必明確**：當一個 counter 既包含「初始失敗」又包含「最終丟失」，下游 healthcheck 必語意混淆；要么注釋明確「= initial fail」要么拆兩個 counter。本次 E1 自報 P1-FILL-LINEAGE-MONITOR follow-up 屬合理，但 commit 前必修注釋語意。
+3. **hot path SLA E2 grep 4 pattern verify**：`tokio::spawn|spawn|.lock()|Mutex::|RwLock::|tokio::time::sleep` 在 emit_entry_lineage 函式體 0 hit 是 SLA 守住的強證據；caller-aware 設計需 grep callsite verify 真實在 hot path 還是非 hot path（不能 trust E1 自報）。
+4. **Atomic Relaxed counter 對 metric 屬性 correct**：counter 屬統計屬性無 happens-before 需求；fetch_add(1, Relaxed) 並發單調遞增 race-free；對 metric 屬性是 Rust 最佳實踐（與 Lock-free 慣例對齊）。
+5. **spawn task 過量風險評估**：worst case 1秒 1000 fail → 1000 spawn × 3 retry × 50ms = 同時點積壓 ~1000 task × 200-500 bytes ≈ ~200-500KB memory，遠低於 tokio runtime 承載；實況 24h 86 fully_filled × 4 try_send = 344 spawn / 24h 可忽略。spawn 過量是常見 concern 但對 tokio 輕量級實現往往是「過早優化」担憂。
+
+**Cross-References**：
+- PA dispatch (隱含): QA RCA `2026-05-11--p1_rca_1_orphan_er_investigation.md` §D.3 Option F4 建議
+- E1 IMPL report: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--p1_fill_lineage_drop_fix.md`
+- QA RCA: `docs/CCAgentWorkSpace/QA/workspace/reports/2026-05-11--p1_rca_1_orphan_er_investigation.md`
+- E2 R2 review: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--p1_fill_lineage_drop_e2_review.md`
+- 與 W2 lesson #1 對齊（btc_lead_lag.rs 1771 LOC pre-existing clause misapplication 同型）
+
+---
+
+## 2026-05-11 — P0 Replay Tier A 4 sub-task post-IMPL 對抗 review (APPROVE to E4)
+
+**對象**：8 local commits `ffc57d7f` → `d9a52572`（main HEAD，未 push origin）
+- E1-A `ffc57d7f` runner.rs is_pinned + position_state + ReplayPosition.owner_strategy (+224 LOC)
+- E1-B `7f6182b2` Python manifest scanner_config + strategy_params + risk_overrides echo (+570 含 test)
+- E1-C `a17ff37a` per-symbol latest_price_by_symbol HashMap (+265 LOC)
+- E1-D `01b05e29` 6 acceptance test pack (+686 LOC)
+
+**Verdict**：**APPROVE to E4** · 0 BLOCKER / 0 HIGH / 1 MEDIUM (trait limitation trade-off) / 2 LOW / 1 WATCH
+
+**驗證手段**：
+1. nm symbol audit `replay_runner | grep -E 'router|ipc_server|build_exchange_pipeline|place_order|live_authorization'` → 0 hit
+2. cargo test 全 PASS：lib 2807 + tier_a_acceptance 6/6 + forbidden_guard 4/4 + e2e 6/6 + xlang param_delta 2/2 + profile 5/5 + mac_policy 4/4 + xlang signer 8/8 = **35 replay-specific test 全綠**
+3. PaperPosition import 合規驗證：`crate::paper_state::PaperPosition` = `pub use containers::PaperPosition`（containers.rs:17 #[derive] pure data，唯一 method refresh_max_favorable in-struct field update 無 forbidden side-effect）
+4. T2 lifetime borrow 反查：`stack_pp_opt` owned by-value（field clone 不持 self borrow）→ `pp_ref` borrow stack_pp_opt → `ctx` borrow pp_ref，per-iteration NLL，process_open_intent as_mut() 不衝突；cargo build PASS 證實
+5. manifest_version 1→2 backward compat：Rust signer 對 version field 0 hard match；Python register handler 0 schema validation；forward-compat 自然
+6. T5 fallback `.unwrap_or(0.0)` 比 PA spec 建議 1.0 **更安全**：Kelly sizer `price<=0.0` 早期 return max_qty passthrough，不會失控放大；bin/replay_runner.rs one-pass 預種所有 fixture symbol，production replay 不會觸 fallback
+7. TOML size 實測：scanner 4.2KB + strategy_params 8.3KB + risk_config_demo 18.3KB = 30.8KB raw << 256KB cap（8x headroom）
+8. 跨平台 grep `/home/ncyu` `/Users/*ncyu` 0 hit
+9. 文件大小：runner.rs 1237 / risk_adapter.rs 613 / apply_fill.rs 761 / runner_tests.rs 1645 / acceptance 686 / bin 643 / Python routes 1931 全 ≤ 2000 hard cap
+
+**Findings**：
+- **MEDIUM**：test 3 `test_replay_uses_production_strategy_params` 因 Strategy trait 無 public field accessor，只能驗 factory accept 而非 `bb_reversion.min_persistence_ms=120000` 真實 propagate 到 strategy internal field；E1-D 自承 trade-off；不阻 deploy，follow-up 評估加 trait method
+- **LOW-1**：E1-B 自承 manifest size ~17KB 估算偏低（實測 30.8KB raw），仍 << 256KB；不阻
+- **LOW-2**：mk_snapshot 預種 BTCUSDT/ETHUSDT default 100.0 hardcoded 耦合 production 25-sym pinned；E1-C 自承 trade-off；不阻
+- **WATCH**：E1 memory.md ~1MB 超 Read 256KB；下個 sprint 評估 archive 切分
+
+**核心對抗發現**：
+1. **T5 fallback IMPL `.unwrap_or(0.0)` 比 PA spec 建議的 1.0 更安全**：PA §10 第 1 點 expressed concern about fallback 1.0 放大 qty；IMPL 反而用 0.0 觸發 Kelly sizer `price<=0.0` 早期 return（kelly_sizer.rs:197）+ Gate 2.6 fallback 至 guardian_qty + Gate 2.7 admission 用 price=0 算 notional 自動 reject。real-world 風險 = 0
+2. **T2 lifetime 用 owned stack_pp_opt + borrow pp_ref**：避免 PA §3.5 #1 預期的 owned-by-value to TickContext 重構，更乾淨且 borrow checker 自然過
+3. **manifest_version bump 兩端 0 hard match**：forward-compat 自然滿足，無 IMPL 風險
+4. **forbidden_guard 0 violation**：nm symbol audit + grep import 雙重驗證；V3 §6.2 isolation invariant 不變
+5. **PaperPosition import 合規邊界**：runner.rs 既存 SAFETY 注釋禁的是 `PaperState` mutate module，PaperPosition data struct 從 containers.rs 引出與 production tick_pipeline 對稱
+
+**Trade-off accepted**：test 3 用 factory accept 作等價證據（Strategy trait limitation）；單獨 MEDIUM follow-up 不阻 current deploy。
+
+**完整報告**：`srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--replay_tier_a_post_impl_audit.md`
+
+---
+
+## 2026-05-11 — W2 IMPL chain 4 sub-task 對抗 review (APPROVE-CONDITIONAL · PASS to E4)
+
+**對象**：commit `1f0354cf` W2 A4-C BTC→Alt Lead-Lag fast-track IMPL chain，4 sub-agent 並行 + sibling V083 E2 review
+- W2-IMPL-1 Orderbook 接線 +644 LOC（btc_lead_lag.rs / main.rs / main_fanout.rs / panel_aggregator/mod.rs）
+- W2-IMPL-2 Layer 2 fence amendment（main.rs env-gate 三狀態 + spec v1.2→v1.3 inline edit + cross_asset MODULE_NOTE）
+- W2-IMPL-3 Healthcheck [57]（NEW checks_btc_lead_lag.py 321 + test 273 + runner wire）
+- W2-IMPL-4 Paper edge report 工具鏈（NEW w2_paper_edge_report.py 1257 + counterfactual SQL 279）
+
+**Verdict**：**APPROVE-CONDITIONAL · PASS to E4** · 0 BLOCKER / 0 HIGH / 0 MEDIUM / 4 LOW / 2 P2 governance ticket
+
+**驗證手段**：
+1. Mac cargo test 2797/0/0 親跑 verify（含 31 panel_aggregator::btc_lead_lag test 全 PASS）
+2. Mac pytest 10/10 healthcheck fixture 親跑 verify
+3. Mac smoke-test ALL PASS（plus15/plus5_15/minus5 + PSR/DSR/CI/R²）
+4. 三層 fence 對抗 grep verify：
+   - Layer 1 `step_4_5_dispatch.rs:211 _ => None` 未動
+   - Layer 2 main.rs:1005-1018 env-gate 三狀態 (a) ENABLE=1 / (b) unset+!has_demo&&!has_live / (c) unset+has_demo|has_live skip
+   - Layer 3 cross_asset/mod.rs:12-21 MODULE_NOTE 同步 Python writer→Producer env-gate
+5. spec v1.2→v1.3 inline edit § 6.2 Layer 2 描述 amend，§7.1 mandatory metric 6 + §8.1 三檔 step gate 0 動
+6. WS-first rate budget 0 req/s 驗：`full_subscription_list("BTCUSDT")` 含 `orderbook_topic(symbol)`，`main_ws.rs:50/89` 對每 watch symbol 調用，0 新 connection
+7. PSR(0) Bailey-LdP 2012 formula 嚴格：raw kurtosis vs excess kurtosis equivalence 證明 ((raw-1)/4 = (excess+2)/4)，denom_sq≤0 → None fail-closed
+8. DSR mu_0=√(2 ln 95) Python `math.log` 默認自然對數 ✓ (= 3.0179 對齊 smoke-test print)
+9. SQL counterfactual 三 CASE WHEN expected_dir +1/-1/0 byte-equal spec §7.2，60/120/300 三 forward window 並列
+10. 跨平台 grep 0 hit / 16 原則 / 5 硬邊界 / DOC-08 §12 9 條 / SM-04 / Guardian / IntentProcessor / paper_state / decision_lease / authorization.json 全 0 觸碰
+
+**Findings**：
+- **LOW-1** W2-IMPL-1 E1 report §3.2/§3.3 NaN propagation 描述錯誤：寫「NaN→PG 'NaN'::REAL literal」但實際 writer `nan_to_null_f32` 轉 PG NULL；runtime 對 [57] healthcheck `FILTER (WHERE IS NOT NULL)` fail-soft 仍正確；E1 follow-up 修報告
+- **LOW-2** block-bootstrap truncation 偏移：n=150 / block=60 case 抽 120 sample 而非 150（mean 基於 120 vs 150），對 D+12 real-data N=70000 場景不偏；學術精確性 P3 ticket
+- **LOW-3** main_fanout.rs Arc clone awkward fallback：`panel_arc_for_send.as_ref().map(Arc::clone).unwrap_or_else(|| Arc::clone(&arc_event))` 中 unwrap_or_else 永不執行 dead-code fallback；建議精簡 P3
+- **LOW-4** checks_btc_lead_lag.py line 138 exception message 露出 PG detail：對齊 sibling [55]/[58]/[66] passive sentinel pattern + trusted caller，accept
+- **P2-1** btc_lead_lag.rs 1771 LOC（baseline 1253 → +518）pre-existing 已 >800 警告 < 2000 cap；§九 「pre-existing baseline exception clause」**僅適用 baseline >2000，本 case 不適用**；P2 ticket N+2 sprint 拆 file（建議 producer.rs / ingest_task.rs / snapshot.rs / db_writer.rs 4-split）
+- **P2-2** w2_paper_edge_report.py NEW 1257 LOC > 800 警告；P2 ticket 拆 4-file（metrics / render / smoke / report.py CLI）
+
+**跨 sub-task 整合 risk**：
+- W2-IMPL-1 + W2-IMPL-2 main.rs 同 hunk range（933 / 957 / 1005-1078）但改動方向正交（IMPL-1 加 mpsc channel + fan-out arm；IMPL-2 加 env-gate wrap），merge 後正確
+- W2-IMPL-3 [57] check 對 W2-IMPL-1 deploy 前後切換正確 — default-off `OPENCLAW_W2_HEALTHCHECK_BOOK_REQUIRED=0` (WARN) → IMPL-1 land 後升 `=1` (FAIL) 漸進式
+- W2-IMPL-4 SQL panel.btc_lead_lag_panel 12 column 與 V088 + IMPL-3 healthcheck schema 100% 對齊
+
+**經驗教訓 / Lesson learned**：
+
+1. **「pre-existing baseline exception clause」適用範圍嚴格**：§九 clause **僅適用 baseline > 2000 行**；本 W2-IMPL-1 baseline 1253 > 800 警告但 < 2000，不適用 exception clause；屬「新 wave 推 ≤2000 到 ≤2000」場景 — 警告線 E2 必標記 + 開 P2 split ticket，但不禁 merge。
+2. **NaN sentinel vs PG NULL 文檔 vs 代碼一致性**：Rust 端用 NaN sentinel 表「無資料」是合理 fail-soft pattern，但 PG schema REAL column 接 NaN literal 是異常路徑；project 用 `nan_to_null_f32` helper 統一轉 NULL；E1 report 描述「PG 寫 'NaN'::REAL literal」與實際 PG NULL 行為脫節；E2 對抗審核必查 writer 的 NaN handling 邏輯，不能 trust E1 自報。
+3. **三層 fence 深度防禦的 E2 grep checklist**：Layer 1 (step_4_5_dispatch `_ => None`) + Layer 2 (main.rs env-gate spawn wrap) + Layer 3 (cross_asset `if let Some` defensive guard) — 每層 1 個 grep assertion 必跑；改動 main.rs spawn 區段時必驗 Layer 1 + Layer 3 仍綁。
+4. **block-bootstrap 樣本截斷的學術精確性 vs runtime 影響**：n // block_size truncate 邏輯對小 n（mock test）偏移大，對大 n（real-data 7d × 1m × 7 sym ~70000）幾乎無偏；E2 對抗審核接受 mock test 偏移但對 real-data invariant 必驗 (CI 寬度 / verdict label boundary)。
+5. **跨 sub-agent 並行 同 file hunk 衝突管理**：W2-IMPL-1 + W2-IMPL-2 同改 main.rs:1005-1078 區段但 hunks 正交（一加 alloc + fan-out arm / 一加 env-gate wrap），E2 對抗審核必 read 完整 hunk 確認 merge 後語意正確 — 不能單 trust E1 自報「不撞檔」結論。
+6. **WS-first rate budget 0 req/s 對抗驗證 SOP**：grep `orderbook_topic` callsite + `full_subscription_list` production caller (`main_ws.rs`) + `multi_interval_topics.rs` 對 watch symbol 都加 BTCUSDT orderbook topic → 0 新 connection 真實成立；不能 trust E1 「既有 subscription」自報，必 grep 證據。
+
+**Cross-References**：
+- PA dispatch: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-11--w2_impl_v12_dispatch_plan.md`
+- 4 E1 IMPL reports: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w2_impl_{1,3,4}_*.md` + IMPL-2 在 commit body
+- E2 review: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--w2_chain_e2_adversarial_review.md`
+
+---
+
+## 2026-05-11 — W-C MAG-082 Caveat 1+2+3 Round 2 mini re-review (APPROVE)
+
+**對象**：E1 R2 極小 fix（Round 1 已 APPROVE WITH CONDITIONS，C-A.2 MEDIUM operator 拍 Option B）
+
+**Scope**：production 1 LOC (`runtime_shadow.rs:567` `filled_report_id` → `input.stub_report_id.to_string()`) + tests 2 LOC (`tests.rs:946 + 956` 新 plan/report invariant assertion) + 注釋 8 行
+
+**Verdict**：**APPROVE** · 0 BLOCKER / 0 HIGH / 0 MEDIUM / 0 LOW（R1 6 個 LOW unchanged）
+
+**驗證手段**：
+1. `grep filled_report_id|stub_report_id runtime_shadow.rs` — 確認 line 567 已換、其他 7 處 production 引用（line 414/454/465/489/520/559-564 註釋/576 audit hint）unchanged
+2. `grep report_change.object_id|report_transition.object_id tests.rs` — 確認 R2 只動 1 個 test 中的 1 個 assertion；其他 6 個 runtime_shadow test 0 副作用
+3. Mac 本地 `cargo test --lib --release -p openclaw_engine`：**2776/0/0**（對齊 E1 自報），runtime_shadow series 7/7 PASS 含 R2 改的 `..._writes_real_fill_chain`（0.00s in 2769 filtered out）
+4. `git diff main_pipelines.rs` 確認 R2 對它 0 字節接觸 — bin build error `btc_lead_lag_panel_slot` 屬 sibling W2 sub-task 4 E1-δ wave 累積，不歸屬 R2
+5. R1 跨語言契約結論不破：R2 未動 ExecutedBy edge / details JSON / 新建 filled ExecutionReport row，Python `[55] check_55` SQL 不對 `decision_state_changes.object_id` 做 JOIN → R2 改 transition.object_id 對 healthcheck gate 無影響
+
+**接受 caveat**：
+- comment 8 行（acceptance #6 上限 5）— 接受 E1 caveat C-Round2-1：runtime_shadow 6 行對 SM-04 不變式 + reviewer 防回退提示有實質價值；tests 4 行對 plan vs report transition object_id 對稱說明合理。不強制精簡。
+- test count baseline 2757→2776 漂（acceptance #2 字面期望 2757）— 接受 E1 caveat C-Round2-3：sibling W2 wave 在 R1→R2 期間 land +19 test，0 failed 維持。
+- bin build error（acceptance #1 字面期望含 bin）— 接受 E1 caveat C-Round2-2：sibling W2 sub-task 4 E1-δ BtcLeadLagPanelSlot WIP 累積，PM holistic commit 一併打包。
+
+**經驗教訓 / Lesson learned**：
+
+1. **Mini re-review SOP 化**：R1 APPROVE WITH CONDITIONS + R2 極小 delta → mini re-review 只驗 R1→R2 delta，不重跑對抗審查；節約 token 對接 reviewer brief 而非每輪重頭分析。
+2. **多 wave 並行下 sibling 進展自然漂移**：W2 panel_aggregator + canary_writer 在 R1→R2 期間 land +19 test；E1 自報 baseline 漂移應接受為 work-in-progress 自然現象（核心 invariant = 0 failed/ignored）。
+3. **語意對齊 vs 設計 trade-off**：append-only event log 哲學下 transition.object_id 應對「既有 object 真實狀態變化」寫，而非「新建 row」。R1 IMPL 用 filled_report_id 雖然 from_state=shadow_planned 自圓其說（plan→report 對應 plan 的 state 變了），但 R2 改用 stub_report_id 在 SM-04 reviewer 視角更不歧義。MAG-083 audit pack 可省 1 章節 reviewer brief。
+
+**Cross-References**：
+- E2 R1 review：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-10--w_c_fix_e2_review.md`
+- E2 R2 review：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--w_c_fix_e2_review_round2.md`
+- E1 R2 report：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-11--w_c_fix_rust_impl_round2.md`
+
+---
+
+## 2026-05-05 — REF-20 Sprint C R6 W1 review (PASS to E4 + 1 LOW + 1 P2 + 1 LOC budget concern)
+
+**對象**：兩 sub-agent 並行 deliverable
+- E1-A R6-T1+T2: `rust/openclaw_engine/src/replay/runner.rs` 1466→**1992 LOC** (+526) + `replay/report_writer.rs` test fixture compat (+8 LOC) — fee + slippage helpers + 4 SimulatedFill push site fields + 9 unit test
+- E1-B R6-T7: `helper_scripts/db/passive_wait_healthcheck/checks_pricing_binding.py` (NEW 423 LOC) + `test_pricing_binding_healthcheck.py` (NEW 240 LOC) + `__init__.py` / `runner.py` wire-up (+51) — `[45]` LG-3 RFC §IMPL T2 sentinel
+
+**Verdict**：**PASS to E4** · 0 BLOCKER / 0 HIGH / 0 MEDIUM / 1 LOW (slot rename) / 1 P2 (LOC budget W2 R0-T0) / 1 P2 (const drift CI)
+
+**驗證手段**：
+1. byte-equal contract empirical — `runner.rs:546-547` `DEFAULT_TAKER_FEE_RATE=0.00055 / DEFAULT_MAKER_FEE_RATE=0.0002` mirror `intent_processor::DEFAULT_*_FEE_RATE` byte-equal ✓ + mirror `account_manager::DEFAULT_*_FEE` byte-equal ✓
+2. `replay_fee_rate_for_tif` (runner.rs:564) 對 `IntentProcessor::fee_rate_for_tif` (intent_processor/mod.rs:1200) 邏輯 byte-equal — PostOnly→maker (am.maker_fee/DEFAULT_MAKER_FEE_RATE) / 其他→taker (am.taker_fee/DEFAULT_TAKER_FEE_RATE)
+3. `replay_slippage_bps_for_tif` (runner.rs:588) 對 `IntentProcessor::slippage_rate_for_tif` (intent_processor/mod.rs:1179) 邏輯 byte-equal — PostOnly→0 / 其他→`SlippageConfig::lookup_rate(volume_24h)` × 10000；signed direction (buy=+/sell=-) per dispatch §2 schema 要求（live 寫 unsigned 至 cost_gate_paper / replay 寫 signed 至 simulated_fills.slippage_bps，acknowledged divergence）
+4. apply_slippage 直接乘除：`fill_price = reference_price × (1 + slippage_bps / 10000)`，PostOnly slippage_bps=0 → fill_price == limit_price byte-equal Sprint A/B baseline ✓
+5. Close path direction sign：`close_is_long = !pos.is_long` (line 1086) → long pos→sell→-bps→fill_price 降 / short pos→buy→+bps→fill_price 升 — adverse impact 一致 ✓
+6. 9 R6-T1+T2 unit test Mac PASS (test_apply_fill_postonly_uses_maker_fee + test_apply_fill_non_postonly_uses_taker_fee × 4 TIF (None/GTC/IOC/FOK) + test_apply_fill_long/short_slippage_increases/decreases_fill_price + test_apply_fill_zero_volume_24h_graceful_fallback (含 negative volume + PostOnly always 0) + test_apply_fill_simulated_fill_fee_field_populated 端到端 + 3 cross-check (postonly_path_emits_maker_zero_slippage + synthetic_walker_emits_unknown_role_zero_fee + ghost_row_records_zero_fee_with_intent_metadata))
+7. 67/67 replay lib + 6/6 e2e + 2/2 param_delta + 8/8 xlang_consistency + 4/4 forbidden_guard + 5/5 profile + 4/4 mac_policy = 96/96 replay GREEN — proof_1/4/5 e2e byte-equal preserved (synthetic walker fee=0/slippage_bps=0 → price 欄位 byte-equal Sprint A baseline)
+8. xlang_signature 13/13 byte-equal contract preserved (manifest_signer canonical_bytes 0 改動)
+9. R6-T7 healthcheck PG-side proxy 設計接受：query `MAX(ts) FILTER (WHERE fee_rate IS NOT NULL)` over `trading.fills` 24h 是 fresher-than-hourly heartbeat 對齊 Rust `AccountManager::last_fee_refresh_ms` 語意；engine_mode (V015) + fee_rate (V008) schema 真實 ✓
+10. R6-T7 10 pytest PASS (8 verdict path: PASS-all-fresh / WARN-1h-24h / FAIL-≥24h / FAIL-live-seed-default / FAIL-table-missing / PASS-cold-engine / WARN-warm-quiet / PASS-demo-seed-default + 2 helper drift)
+11. R6-T7 sibling 122/122 helper_scripts/db pytest PASS（無 regression）
+12. CRITICAL invariant audit: 0 forbidden import (`paper_state` / `canary_writer` / `ipc_server` / `governance_hub` / `live_authorization` / `decision_lease` / `bybit_*` / `intent_processor::router`) in changed code — module-level docstring 引用名是 explanatory，不是 use 語句
+13. 跨平台 grep `/home/ncyu|/Users/[a-z]+` 0 hit (5 changed file)
+14. 0 manifest_signer canonical_bytes 改動 / 0 V### migration / 0 IPC route 新增 / 0 Rust hot-path 改動
+15. cargo check --release Mac PASS（6.92s, 3 pre-existing warnings 不歸 R6-T1+T2）
+
+**Findings**：
+- 1 LOW (E1-B labeling): 文件中 `live+source=seed_default` 訊息一處 stringified 為 `live+source=seed_default` 與 docstring `live + seed_default` 不一致；不影響功能（assertIn 對齊測試實值）；建議 P3 統一
+- 1 P2 (W2 必修): runner.rs 1992 LOC 對 §九 2000 cap 只剩 8 LOC margin；R6-T3 KellyConfig wire 估 +30 LOC 必破 cap → W2 dispatch 必含 R0-T0 拆檔（recommend abstract `apply_fill_open` / `apply_fill_close` + 4 push site fee/slippage 邏輯至新檔 `replay/apply_fill.rs` ~250 LOC，runner.rs → ~1742）
+- 1 P2 (const drift): Rust `account_manager::DEFAULT_*_FEE` (0.00055/0.0002) 修改後 Python `checks_pricing_binding::DEFAULT_*_FEE` 不會自動同步；建議 CI grep gate 抓兩處不同步
+
+**LOC delta concern (sub-finding)**：E1-A 預估 +140 LOC 實際 +526 LOC = 3.7x over。raw 業務 code 真實增量 ~315 LOC + 雙語 docstring/註解 ~211 LOC。已 trim 從 2300 → 1992 (~308 LOC trimmed)。剩餘 docstring 主要 §七 mandate 雙語，不過度。LOC 構成合理。但因業務增量高估指 R6 W2 必前置 R0-T0 拆檔（已標 P2）。
+
+**Adversarial 反問結果**：
+1. byte-equal — 已逐行對 live `IntentProcessor::fee_rate_for_tif` + `slippage_rate_for_tif` + `SlippageConfig::lookup_rate` 邏輯 + 常量值 byte-equal ✓
+2. AccountManager seed gap — 替 R5-T4 CLI caller (`bin/replay_runner.rs`) 不接 `with_replay_fee_context` 此 wave，replay 走 `account_manager=None` 路徑直 fallback DEFAULT 常量 → 與 live 走 `taker_fee_rate` legacy field 路徑可能差（live 現 caller 從不 set fee_rate，AM 路徑唯一）→ 真實 byte-equal hold；R6-T3 wire 後完全一致
+3. 9 unit test 覆蓋 4 push site — Yes：synthetic walker (`test_apply_fill_synthetic_walker_emits_unknown_role_zero_fee`) + Open Accept (`test_apply_fill_simulated_fill_fee_field_populated`) + Open Reject ghost (`test_apply_fill_ghost_row_records_zero_fee_with_intent_metadata`) + Close 路徑 incidentally not isolated test，但 process_close_intent fee/slippage logic 與 process_open_intent 用同 helper → 邏輯 covered；建議 W2 加 close path explicit unit test (P3 nice-to-have)
+4. R6-T7 PG proxy 等價 IPC query — accepted: PG `MAX(ts) FILTER` 是 derivative observability not direct query，但 fee runtime → IntentProcessor → AccountManager 必呼路徑保證 trading.fills.fee_rate 寫入 == fee runtime alive；同時用 24h `fee_rate` 分佈對 DEFAULT 常量比對抓 silent regress 到 default fallback
+5. Linux PG dry-run gate — 必跑！per V055 5-round loop lesson + CLAUDE.md §七 governance — Mac pytest mock cursor 不能等同 Linux PG empirical；E2 PASS 條件附帶「PM commit 前必 SSH bridge Linux pytest + cargo build verify」，否則 V055 incident 重演
+
+**Sprint C 鏈下游**：R6-T1+T2 closure → R6-T3 KellyConfig wire (W2 並行 R0-T0 拆檔) → R6-T4 CalibrationLabelProducer → R6-T5/T6 Python writer → R6-T8 smoke → R6-T9 review
+
+## 項目上下文（2026-03-31 更新）
+
+- 當前 Wave：Wave 6 Sprint 1a+1b 審查完成（Sprint 1a CONDITIONAL PASS，P1 修復後 commit）
+- 測試基準：2614 passed（Sprint 0 TD-1 後）；Sprint 1a+1b 全部通過後預期 2623 passed
+- 系統模式：demo_only
+
+## 2026-05-04 — REF-20 Sprint A R3 e2e finalize evidence (PASS to E4 + 1 MED + 3 P2/P3 + 1 LOW)
+
+**對象**：R3 IMPL — `simulated_fills_writer.py` (NEW 602 LOC) + `run_finalize_route.py` (NEW 552 LOC after E2 micro-fix) + `app/replay_routes.py` 1443→1479 thin handler + 19 new test (11+8) · base `353db3fe`
+
+**Verdict**：PASS to E4 · 0 BLOCKER / 0 HIGH / 1 MEDIUM (deferred P2) / 2 LOW (1 E2 直修 / 1 deferred P2)
+
+**驗證手段**：
+1. V050 21-col INSERT 對 V050 CREATE TABLE 順序 byte-equivalent；V050_ALLOWED_TIER/SIDE/LIQUIDITY frozenset 對 SQL CHECK 一致
+2. V046 ARTIFACT_TYPE_REPLAY_REPORT='pnl_summary' 對 chk_replay_report_artifacts_type 5-value enum 內 + canary_writer.ALLOWED_ARTIFACT_TYPES 含 ARTIFACT_TYPE_PNL_SUMMARY → INSERT 不 23514 reject
+3. 重跑 19/19 R3 unit + 117 sibling replay PASS + 3498/3499 全 control_api_v1 PASS（1 pre-existing fail 與 R2 baseline 對齊）
+4. canonical_bytes / manifest_signer.py git diff 0 byte 修改 → xlang invariant 不破
+5. 跨平台 grep `/home/ncyu|/Users/ncyu` 0 hit（4 R3 file）
+6. MODULE_NOTE 雙語 ✅；module-level 全 frozenset / immutable constant，無新 mutable singleton 需登記 §九 (P3-FOLLOW-UP `_REGISTER_IDEM_CACHE` from R2 round 2 不在此 R3 scope)
+7. except (OSError, ValueError) 在 except Exception 之前順序對；logger.warning %s format 對；conn.rollback 包 try/except 正確
+8. IDOR enum-oracle close 雙 test 覆蓋 cross-actor 404 vs 403：test_finalize_actor_mismatch_404_not_403 hit + 不洩 row 存在
+9. atomic xact rollback test_finalize_atomic_xact_rollback_on_writer_failure 真覆蓋 conn.rollback ≥1 + commit 0 + 503 surface
+10. canary_writer.WriteResult `@dataclass(frozen=True)` 直接 synthesize 不破契約（register_artifact_in_db 內部不 reference _runtime_env）
+11. is_mock 從 row.runtime_environment="mac_dev_smoke_test_only" 推斷與 ctor 自動偵測等價
+
+**3 push-back E1 自承仲裁**：
+1. **artifact_type='pnl_summary' vs plan §6.R3 寫 'replay_report'** ✅ ACCEPT — pnl_summary 在 V046 5-value enum + canary_writer ALLOWED_ARTIFACT_TYPES 內；Rust replay_report.json 主 payload block 是 pnl_summary 對齊語意。**P2 deferred ticket**：未來 V### migration 加 'replay_report' 為新 enum value（更精準語意），同步擴 canary_writer.ALLOWED_ARTIFACT_TYPES。
+2. **multi-worker uvicorn race finalize 雙 INSERT V046** ⚠️ ACKNOWLEDGE — 真 race window；分析正確：V045 status guard + UPDATE 0 row + V050 (experiment_id, idempotency_key) UNIQUE 已防 fills 重複。V046 雙 row 是純 cosmetic 污染（兩個 artifact_id 指向同 file path），不影響後續 SELECT 行為；**P2 ticket** 加 SELECT FOR UPDATE 或 advisory lock per run_id（pattern mirror experiment_registry.py:474 advisory xact lock）。R3 不阻塞。
+3. **PID-reuse 巧合 false positive** ⚠️ ACKNOWLEDGE — 極罕見（cmdline 含 'replay_runner' 字串巧合）；**P3 ticket** 加 psutil.Process.create_time() 校驗。R3 不阻塞。
+
+**E2 直修（LOW）**：
+- run_finalize_route.py line 41 加 `import uuid` 至 top；line 428 改 `__import__("uuid").uuid4().hex` → `uuid.uuid4().hex`。19/19 PASS 後驗 552 LOC < 1500 cap。違 R1-6 「import 在頂部不在方法內」+ Python idiom。
+
+**MEDIUM finding（deferred P2）**：
+- run_finalize_route.py line 522-525 message field 含 `f"{type(exc).__name__}: {exc}"` — `OSError` exc 字串通常含絕對路徑（[Errno 2] No such file or directory: '$OPENCLAW_DATA_DIR/replay_artifacts/<run_id>/replay_report.json'）。違反 §九 SEC-04 「detail=str(e) 已改為 'Internal server error'」精神。**緩解**：(a) caller 已過 _require_replay_write Operator 守門（trusted）(b) 路徑非 secret 而是 server layout diagnostic info (c) run_id + OPENCLAW_DATA_DIR 對 operator 公開可接受。**P2 ticket**：改 message 為 generic + 細節僅 logger.warning（已 %s 格式）。**不阻塞 R3 收官**。
+
+**E2 教訓 / 反模式 提醒**：
+1. **plan 寫的字串值 vs CHECK enum**：plan §6.R3 偽碼寫 'replay_report' 但 V046 CHECK 5-value 不允；E1 的「選最近義 + 留 P2 擴 enum」是合理 pragmatic 處理；E2 不該僵化 reject 而需評估 spec drift cost（V### 擴 enum vs in-allowlist 重用）。Sprint A R3 收官 wave，pragmatic 路徑優於完美主義。
+2. **multi-worker race acceptable 邊界**：V045 status guard 是 advisory lock（idempotent UPDATE WHERE status IN）；V050 (experiment_id, idempotency_key) UNIQUE 是 hard lock；V046 無 (run_id, artifact_path) UNIQUE 是 race window 但 cosmetic-only。R3 不必修是 acceptable trade-off — 但**必須開 P2 ticket** 不靜默吞。
+3. **dataclass(frozen=True) 直接 synthesize**：canary_writer.WriteResult 是 `@dataclass(frozen=True)` public class，直接構造 instance 而不走 `write_replay_artifact()` filesystem write 階段是 OK pattern（節省一次 fsync），只要 (a) 該 file 已存在 (b) byte_size 對應 stat (c) is_mock 來源等價。但是 **risk**: 將來如果 dataclass 加 invariant（e.g., 必須 `artifact_path` 是已寫入磁碟的 file），會 silently 破。建議 docstring 加 explicit「caller 必須保證 file 已存在 + byte_size 對應 stat」。
+4. **`__import__("uuid")` 是 Python 第二類 anti-pattern**：(a) 違 R1-6 import 在頂部 (b) 違 PEP 8 idiom (c) micro overhead。E2 直修 + 不算 finding 嚴重，但見一次標一次。
+5. **"E1 push-back 列表 ≠ E2 全部 finding"**：E1 §10 列 5 個 + race + PID-reuse 共 7 push-back，E2 額外發現 message exception leak（MEDIUM）+ `__import__` typo（LOW）。E1 self-review 無 message leak 認知 — E2 對抗 audit 的價值就在這。
+6. **Sprint A 收官 wave PASS to E4 邊界判斷**：HIGH-or-above 必退 E1；MEDIUM 看 (a) 是否 trusted caller 守門 (b) 是否 secret leak vs cosmetic (c) 是否 deferred P2 可控。本次 message leak (a) caller trusted (b) 路徑非 secret (c) P2 可控 → PASS to E4 + ticket。如果 caller 是 unauthenticated public route，會升級 HIGH 退 E1。
+7. **canonical_bytes / manifest_signer 0 修改驗證**：xlang invariant cross-language 簽名一致性是 R2 round 3 H-1 fix 的核心；R3 finalize 不該動。git diff -- manifest_signer.py 0 byte → 不破 invariant 是 evidence-based 結論（不是「我看 R3 scope 沒提就信」）。每 wave 都跑這條 grep。
+
+**邏輯問題（順帶發現，但 in-scope finding 已表內含）**：無。
+
+**Files reviewed**:
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/replay/simulated_fills_writer.py
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/replay/run_finalize_route.py
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/app/replay_routes.py (lines 60-89, 731-758 finalize wiring)
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_simulated_fills_writer.py
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_replay_run_finalize.py
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/replay/canary_writer.py (cross-reference WriteResult/register_artifact_in_db)
+- /Users/ncyu/Projects/TradeBot/srv/program_code/exchange_connectors/bybit_connector/control_api_v1/replay/route_helpers.py (cross-reference artifact_path_within_allowlist)
+- /Users/ncyu/Projects/TradeBot/srv/sql/migrations/V046__replay_report_artifacts.sql
+- /Users/ncyu/Projects/TradeBot/srv/sql/migrations/V050__replay_simulated_fills.sql
+
+**E2 → E4 接手條件**：(1) E1 pre-existing P2 deferred ticket 留軌跡（artifact_type V### enum extension + multi-worker FOR UPDATE + PID-reuse create_time + message exception leak — 4 個 P2/P3）；(2) E4 跑 full smoke 117 replay sibling + 3498 control_api_v1 baseline regression；(3) Linux SSH bridge 真 PG smoke deferred 至 deploy phase。(4) E2 micro-fix（uuid import）已 working tree change，**未 commit**（同 R3 IMPL 待 PM 統一 commit）。
+
+---
+
+## 2026-05-04 — REF-20 Sprint A R2 round 2 verification（CONDITIONAL PASS to E4）
+
+**結論**：CONDITIONAL PASS to E4 — 13 fix 全 IMPL 真改 + 數據對得上 + sibling 97 PASS / Track C 13 PASS / control_api_v1 3478 PASS / 1 PRE-EXISTING flaky；但**3 NEW finding 不阻 E4**（1 MEDIUM dead-state + 1 MEDIUM enum-oracle + 2 LOW）必交 E1 round 3 / R3 dispatch 前順手清。
+
+**13 fix verdict**：
+- H-1/H-2/H-3/H-4 all PASS（cache module-level + hash mismatch 409 + report_route.py 421 LOC NEW + 0o600 mode check）
+- M-1/M-2/M-3/M-4 all PASS（live_demo allowlist + slowapi 10/min rate limit + 503 fail-closed + reserved prefix validator）
+- L-1 PASS（timezone import 移除）
+- L-2 ⚠ **NEW LOW L-P3-TICKET-MISSING**：E1 §10.6 自報 P3 ticket P3-PYDANTIC-V2-MIGRATE-REPLAY 但 grep TODO.md / E1/memory.md 0 hit，與 round 1 P2-AUDIT-V044 + LG5-W3-FUP-1 同 anti-pattern
+
+**3 NEW finding**：
+1. **M-DEAD-LOCK MEDIUM**：`_REGISTER_IDEM_CACHE_LOCK = asyncio.Lock()` (`experiment_registry.py:138`) 0 callsite。模組頂部注釋（line 116-117/134）+ CLAUDE.md §九 line 404 都宣稱有 asyncio.Lock 序列化，**但實際全用 `_REGISTER_IDEM_CACHE_THREAD_LOCK`**。注釋 + §九表 vs 實際 callsite 漂移會誤導未來 maintainer。Fix：刪 dead lock + 修注釋 + 修 §九 entry。
+2. **M-IDOR-ENUM MEDIUM**：H-3 fix 後 `/report` 用 `lookup_registered_experiment_id`（無 actor filter）→ 404 vs 200 empty 形成 enumeration oracle。E1 §10.10 給 E3 留問已提但未實作。Fix：unify 404 with `replay_experiment_not_found`（GitHub private/public 對 unauthorized 一律 404 industry pattern）。
+3. **L-P3-TICKET-MISSING / L-RATE-LIMIT-WIRING**：見上 + per-actor rate limit 真正生效需 ASGI middleware（當前 fallback IP 對企業共用 NAT 環境誤殺合法 actor，advisory only 不阻 round 2）。
+
+**對抗反問結論**：
+- **Multi-worker fallback PASS**：cache miss 跨 worker → PG advisory xact lock + DB single source of truth 兜底；race-safety 不破，cache hit% 退化 acceptable
+- **Unauthenticated rate limit safe**：`getattr` 雙 None-safe 不觸發 AttributeError
+- **IDOR retain on /report**：`build_report_idor_sql_fn` 真守 V046；Track C 13 PASS 包覆
+- **xlang invariant byte-equal PASS**：H-1 fix 不改 canonical bytes 計算路徑
+
+**LOC + R3 dispatch margin 評估**：
+- replay_routes.py **1443** ≤ 1500 (57 LOC margin) ✓
+- experiment_registry.py 972 / manifest_signer.py 757 / report_route.py 421 (NEW) / route_helpers.py 1249（E1 §10.10 自承未動，與 round 1 1480 差 -231 是 known measurement uncertainty，PM commit 前查 diff）
+- R3 dispatch 預估 +30 thin handler → ~1473 ≤ 1500 ✓
+- 建議 R3 dispatch 前 E1 round 3 順手做：(1) 修 M-DEAD-LOCK ~10 LOC (2) 修 M-IDOR-ENUM ~5 LOC (3) 補 P3 ticket ~3 line
+
+**E4 接手條件**：
+- ssh trade-core 跑 Linux 端 -k replay 對齊 97 PASS + control_api_v1 3478 PASS
+- V049-V054 schema deploy 確認（Sprint 1 Track D + Sprint 3 Track I 已 land）
+- 5 manual smoke：register idempotency / replay attack 409 / engine_sha 503 / 0o644 mode 410 / register→run→report 三連 200
+- xlang fixture 8 PASS
+
+**Lessons learned**：
+1. **`asyncio.Lock` 定義 + 注釋不等於 callsite**：對抗 grep `<lock_var>` 命中行數 = 「定義 + 注釋」 vs 「callsite」是 pattern；下次 review 必數 callsite 行數判 dead state。Round 2 同 pattern 命中 `_REGISTER_IDEM_CACHE_LOCK`（4 hit 全是 def + comment，0 use）。
+2. **CLAUDE.md §九 表 entry 與實際 race-safety 不一致**：表登記 race-safe 機制必對應真實 callsite，否則表變 documentation theatre。
+3. **`/report` 改用真實 V049 lookup 隱含 enumeration oracle**：跨 route consistency fix（H-3）正確但**需配對 unify response surface**避 oracle；不能只看「修了原 bug」就放行。
+4. **E1 「§10.6 加 P3 ticket」≠ 真進 TODO.md** 第三次 pattern（前 LG5-W3-FUP-1 + Sprint 1 P2-AUDIT-V044）：dispatch retrofit 必明文要求 E1 修 TODO.md + grep 自驗。
+5. **measurement uncertainty 標記要早**：route_helpers.py 1249 vs round 1 1480 差 -231，E1 自己也標「PM commit 時驗該檔 diff」← 這是健康的 self-flag pattern，不是 dishonesty；E2 接受並 cross-check on PM commit。
+
+**report**：`srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-04--ref20_sprint_a_r2_e2_review.md`
+
+## 2026-05-04 — REF-20 Sprint A R1 adversarial review（RETURN to E1）
+
+**結論**：RETURN to E1 — 1 HIGH + 4 MEDIUM + 3 LOW · 0 CRITICAL · sibling 31/31 PASS + 新 unit test 5/5 PASS
+
+**HIGH-1（必修才放行 E4）**：`Path.exists()` 對 directory + non-executable file 都回 True，攻擊面 = workspace target dir 可寫的 attacker / 誤操作放 dir 騙 helper → `/health` 報 binary_exists=true 但 spawn 必 fail；E2 Mac 復現確認。修法：`is_file()` 收斂（最低）或加 `os.access(X_OK)`。**4 個 path candidate（workspace_release / workspace_debug / legacy_release / legacy_debug）都要套**。
+
+**MEDIUM 4 條**：(1) `OPENCLAW_BASE_DIR="   "` whitespace 不 strip → garbage path（修法 `.strip()`，與 override line 一致）。(2) `/health` data 含 `binary_path` 完整絕對路徑——leak surface 比 `/health/signature` 大；schema 不變但 docstring 必註明 future viewer 分權 review。(3) 5 case 缺 `OPENCLAW_REPLAY_RUNNER_BIN=""` empty-string fallthrough 測。(4) 缺 legacy release vs legacy debug 順序覆蓋。
+
+**LOW**：(1) docstring 寫「4-step」實際 5-step path（PA plan 同樣口徑，要 PM/PA round confirm 措辭）。(2) `compute_replay_health_state` V049 absent 但仍 ready（E1 §9 #2 自 flag）。(3) `replay_routes.py` 1492 LOC 距 1500 cap 只 8 行 margin —— R2-T1 land 必觸；PM dispatch R2 前需先決抽出策略（建議 `replay_run_route.py`）。
+
+**對抗反問 7 條 + E2 復現**：
+- HIGH-1 用 Mac tmp_path 跑出 directory 與 non-exec file 都 `.exists()=True` 的反例
+- empty-string fallthrough 行為對（`.strip()` 守）但 5 case 沒覆蓋 → MEDIUM-3
+- /health auth 走 `current_actor` 401，PG injection 0 風險（literal SQL + parameterized）
+- PG 死鎖防護 `SET LOCAL statement_timeout = 2000ms` PASS
+- model 抽出 `replay_routes.ReplayRunRequest is replay_models.ReplayRunRequest` → True，0 重複
+
+**§九 8 條 + OpenClaw 9 條 checklist**：跨平台 ✅（grep 0 真實命中，2 hit 都在 docstring 政策反例引用）/ 雙語注釋 ✅（10 元素全中英對照）/ LOC ✅（1492/1500）/ Singleton ✅（0 新登記）/ Migration N/A / healthcheck ⚠️（`/health` 端點本身是 healthcheck 但 cron `passive_wait_healthcheck.py` 還沒接，R3 / R4 補不阻塞 R1）。
+
+**驗證範圍**：6 file diff（route_helpers.py / replay_routes.py / replay_models.py / test_replay_route_helpers_binary_resolution.py / restart_all.sh / replay_runner_symbol_audit.sh）+ 31 sibling test 跑通 + 5 新 unit test 全綠 + Mac 跑 audit script exit=0 + 4 個 import path 兼容性驗證 + Mac 反例復現 4 case（symlink dangling / mode 0644 / dir at path / whitespace BASE_DIR）。
+
+**Lessons learned**：
+1. **`Path.exists()` 對 directory 不分**：未來新 binary path resolution 一律走 `.is_file()`；HIGH 等級因 spawn 後果不可逆
+2. **PA plan + helper docstring 同步漂移風險**：PA 寫「4-step」E1 跟著寫「4-step」實質 5 path —— E2 要對 PA + IMPL 雙方標的不一致，不能單方 sign-off
+3. **LOC margin <10 LOC 視為 hard alert**：R2 dispatch 前先決抽出策略，否則 land 第一 task 即破 1500
+4. **leak surface vs auth scope 對比要明寫 docstring**：未來分權 review 不漏點
+
+**report**：`srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-04--ref20_sprint_a_r1_e2_review.md`
+
+## 2026-05-03 — REF-20 Sprint 2 Track F1 retroactive Wave 3-9 master review（補 §八 evidence trail）
+
+**結論**：7 wave 中 Wave 7 = PASS / Wave 3/4/5/6/8/9 = CONDITIONAL · 共 10 LOW finding · 7 P2 ticket 提案 · **0 P0 / 0 P1 阻塞**
+
+**對抗反問 ≥14 條**（每 wave ≥2 條 + Wave 4/6/8 各 3 條）：
+- Wave 3：mac_policy_guard.rs 中文全形括號 28 處全 self-introduced；commit msg 「sibling pre-existing doctest fail」**錯誤定性**（mac_policy_guard.rs 本就 Wave 3 引入；E5 follow-up 0 ticket）
+- Wave 4：26-file 一綑 commit 違反 §八；commit msg 自承「E2/E4 closure audit pending」但 0 跑；P2-REF20-W6-REFACTOR ticket 漂移 (TODO.md 0 hit)
+- Wave 5：4 file > 800 warn (regime_controller 1062 / shrinkage_router 767 / hierarchical_bayes 756 / mlde_shadow_advisor 812)；N_THRESHOLD 30/50 boundary sweep 缺；mini chain 200/400 v.s. production 1000/2000 CI 0 跑（cold audit 已 flag）
+- Wave 6：mlde_demo_applier.py **1542 > 1500 hard cap**；§九 Pre-existing baseline exception clause 條件 (2)+(3) 未滿足（pre-existing 1541 + Wave 6 +1，雖滿足 +5 LOC margin 但 0 P2 ticket + 0 PM exception declare）；V043 mlde_replay_veto_log healthcheck 缺
+- Wave 7：PA Sprint 1 P1-1 已 flag operator override defer (V3 §11 + Workplan §6 contract violation)；本 wave IMPL scope 純 HTML scaffold；hash routing pre-existing P3 backlog 不阻塞
+- Wave 8：cooldown query 0 row lock 0 isolation level（READ COMMITTED default）→ 兩 worker concurrent same-actor 不同 idempotency_key 1ms 內 race；E2 round 1 HIGH-3 confirmed retroactive；V044 LOCK TABLE 缺 P2-AUDIT-7 已 land
+- Wave 9：KPI cron Mac mock 跑過 Linux 真實 PG 0 跑；V047/V048 plain table 1y retention 0 設
+
+**新立 7 P2 ticket 提案**（PM Sprint 2 patch 一併進 TODO.md）：
+1. P2-WAVE-3-DOCTEST-FIX（mac_policy_guard.rs doctest fail；commit msg 偽稱 pre-existing；E5 follow-up 0 ticket）
+2. P2-WAVE-4-W6-REFACTOR（replay_routes.py 1500 LOC governance；Wave 4 commit msg ack 但 TODO.md 0 hit）
+3. P2-WAVE-5-NTHRESHOLD-SWEEP（shrinkage_router N_THRESHOLD 30/50 boundary sweep 缺 + production chain 1000/2000 CI 跑）
+4. P2-WAVE-6-MLDE-DEMO-APPLIER-SPLIT（mlde_demo_applier.py 1542 LOC；baseline exception clause (2)+(3) 未滿足）
+5. P2-WAVE-6-V043-HEALTHCHECK（V043 0 healthcheck）
+6. P2-WAVE-8-HANDOFF-HEALTHCHECK（handoff request flow 0 healthcheck）
+7. P2-WAVE-9-V047-V048-RETENTION（plain table 1y retention 0 設）
+
+**Cross-Wave ✅ contract**：
+- 0 hardcoded path on production code（reports/memory grep verify echo 除外）
+- 0 INSERT INTO trading.* / 0 live_* mutate / 0 authorization.json touch
+- 0 hard-boundary mutation（live_execution_allowed / max_retries / execution_authority / OPENCLAW_ALLOW_MAINNET）
+- V### sequence 無重號（V041 / V043 / V044 / V045/V046 / V047/V048 各綁不同 wave）
+
+**Lessons learned**：
+1. **§八 不能事後補**：E2 對抗 review 的價值在「攔截」不在「事後檢視」 — 事後檢視只能找文件結構性 finding（LOC / ticket 漂移 / hardcoded path），無法找邏輯性 race condition（這要靠 e2e test 在 deploy 前抓）；retroactive review 只是補 evidence trail
+2. **Wave 4 single-commit 26-file mega 違 §八**：未來 PM autonomous mode 派發 ≥3 wave 並行，必同 commit 立 placeholder E2 retrofit ticket（不能事後補）
+3. **§九 Pre-existing baseline exception clause 條件必須完整滿足**：3 條件 (1) ≤baseline+5 (2) P2 ticket (3) PM Sign-off declare 缺一即治理債；Wave 6 mlde_demo_applier 1542 LOC 條件 (2)+(3) 未滿足是 LOW finding 模式
+4. **commit msg 「同 commit 開 P2 ticket」 ≠ 真進 TODO.md**：Sprint 1 LOW-1 (P2-AUDIT-7) + Wave 4 (P2-REF20-W6-REFACTOR) 兩次相同模式 — E1/E2 retrofit dispatch 必明文要求 grep TODO.md 自驗
+5. **healthcheck 配對是被忽略的常態 gap**：V043/V044/V047/V048 4 V### 落地後 0 healthcheck pairing — CLAUDE.md §七「被動等待 TODO 必附 healthcheck」原則應擴展為「新 V### land 必附 healthcheck」
+6. **本 retroactive 抓出新 LOW 不是 rubber-stamp**：對 7 個 wave 各列嚴謹 grep + LOC + 雙語抽查；Wave 4 violation + Wave 6 1542 + Wave 7 contract violation + 多 ticket 漂移 — 全用 evidence chain 揭露
+
+**report**：`srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-03--ref20_wave3_to_9_retroactive_master_review.md`
+
+## 2026-05-03 — REF-20 Sprint 1 round 2 retrofit verify（A + C）
+
+**結論**：Track A PASS / Track C **CONDITIONAL（1 LOW finding）**
+
+**Track A retrofit verify（F1 byte-equal canonical contract）**：
+- route_helpers.py L649-657（deep-copy round-trip）+ L678-686（disk write）兩段 `json.dumps` 全帶 `sort_keys=True + separators=(',', ':') + ensure_ascii=False` 三 kwargs；deep-copy 多帶 `default=str` 是合理設計（first-pass stringify datetime/Path，後續 disk write 已純 JSON-native，不需重 default）。
+- 2 NEW pytest case `test_write_manifest_fixture_byte_equal_canonical_with_non_ascii` (L193) + `test_write_manifest_fixture_sort_keys_independent_of_input_order` (L277) 真實在 file 內；含 SHA-256 雙重驗證 + anti-`\uXXXX` 守護 grep（line 235-240）。
+- Test helper `_python_canonical_body_for_signing` (L163) 真鏡像 Rust algorithm: parse → strip envelope → json.dumps canonical kwargs → encode utf-8。docstring 引 `manifest_signer.rs` line 574 + 594（real line numbers 對齊）。
+- Track A 19/19 PASS（含 2 NEW byte-equal） + 全 replay test sub-suite 23/23 PASS + Rust 15 manifest_signer unit + 5 e2e proof + 5 cost_edge_advisor PASS。
+- F14 cross-track known-issue 在 §9.5 reflect（commit message 加 V045 status='failed' 100% expected pre-V042 advisory）。
+- **無 zombie code / 無 byte drift / 無新增私有屬性穿透。Track A retrofit PASS to E4。**
+
+**Track C retrofit verify（4 finding）**：
+1. **§九 1500 LOC cap**：`replay_routes.py` 從 1603 → **1494** ≤ 1500 ✅；`security_guards.py` 487 LOC (487 < 800 warn) ✅。
+2. **F8 `replay:read:any` scope**：`auth.py:239-240` default `auth_scopes` 真有 `replay:write` + `replay:read:any` 兩 scope；2 NEW test 驗 `Settings()` default 套含 + `build_authenticated_actor()` factory 持有兩 scope。
+3. **F6 boot guard raise**：`security_guards.py:101-149` `perform_p0_2_boot_guard()` 真 `raise RuntimeError`；`replay_routes.py:90` module-init 呼 `_sg.perform_p0_2_boot_guard(_is_live_release_profile)` 觸發 boot guard；3 NEW test 驗 dual-condition raise + dev-skip + unset-skip。
+4. **F2 V053 LOCK TABLE**：V053 SQL line 166-249 真 `BEGIN; DO $$ ... LOCK TABLE learning.governance_audit_log IN ACCESS EXCLUSIVE MODE; DROP+ADD; END $$; COMMIT;` 完整包裹；idempotency probe（line 187-200）短路在 LOCK 之前；race-free（ROW EXCLUSIVE vs ACCESS EXCLUSIVE 衝突 → concurrent INSERT 阻塞）；7/7 V053 migration test PASS（含新 LOCK TABLE 行為驗證）。
+5. **security_guards.py extract 真隔離邏輯**：6 helper 全 pure（無 FastAPI / pydantic import）；`os.kill(pid, SIGTERM)` 留在 `replay_routes.py:857` caller，**只在** `cancelled_dict is not None and pg_err is None` 時送（line 852）— 即 cmdline cert 失敗永不誤送 signal。0 zombie code / 0 reference 殘留。
+6. **Sibling test 23/23 PASS**（既有 4 file replay test）+ Track C 13/13 PASS（含 6 NEW retrofit case）。
+
+**LOW finding**：
+- `P2-AUDIT-V044-LOCK-TABLE-FIX` ticket：E1 §9.4 自報「同 commit 開新 ticket」+ V053 SQL line 163-164 注釋宣告 + E1 memory.md L4059/L4071 兩處提到，但 **TODO.md grep 0 hit**（P2-AUDIT 段現有 6 條 ID，無此新 entry）。**E1 漏寫進 TODO.md**。CONDITIONAL — PM commit Sprint 1 patch 前必補一條 `P2-AUDIT-7` row：「V044 P6-S15 enum DROP+ADD 缺 LOCK TABLE ACCESS EXCLUSIVE；補回同 V053 race-free retrofit pattern」。
+
+**對抗反問 + 結果**：
+1. 「159/159 PASS 是否包含真實業務 e2e（Linux PG outage / multi-worker race）？」— 答：**否，全 unit test + TestClient mock**。Mac dev 0 PG 是已知限制（per `feedback_dev_runtime_split.md`）；helper `execute_replay_cancel_pg_path` 的 `try/except/rollback` envelope + `race_already_final` 識別 + xact 邏輯結構正確，但真實 PG outage / pgpool failover / two-uvicorn-worker concurrent cancel 是 E4 在 Linux trade-core 跑 e2e regression 才能驗。本 round 2 接受作 known limitation 不阻塞 PASS。
+2. 「security_guards.py extract 是否真隔離邏輯（沒有 zombie code）？」— 答：**真隔離**。`os.kill` 留 caller 是 dispatch §"修法"明文設計（hermetic test 友好）；boot guard call 在 module-init line 90；6 helper 各自純函數。0 dead code / 0 double-pathway。
+3. 「`Path.resolve(strict=False)` 是否真 follows symlink？」— 答：**真 follow**。Python 3.10 docs: `Path.resolve()` resolves symlinks unconditionally; `strict=False` only relaxes the FileNotFoundError on missing files (canonical absolute path 仍計算)。attacker INSERT `/var/replay_artifacts/evil_link → /etc/passwd` → resolve → /etc/passwd → is_relative_to(/var/replay_artifacts) = False → 拒絕。
+4. 「deep-copy round-trip 加 `default=str` 但 disk write 沒加是否漂移？」— 答：**設計合理**。第一段 `default=str` 已把 datetime/Path stringify 進 dict，第二段 dump 時所有 value 都是 JSON-native（str/int/dict/list）— Python json.dumps 不會觸發 default fallback。0 漂移 risk。
+
+**Cross-track 對齊全 PASS**：
+- A `ENVELOPE_KEYS_FOR_SIGNING` (manifest_signer.rs:574) Python 端用 envelope_keys tuple `("signature", "manifest_hash", "signature_key_ref")` (test_track_a L183) 對齊 — Rust constant 三值 / Python tuple 三值 / 順序一致。
+- A `_verify_replay_runner_pid` Track C 用法 = `replay_routes.py:76 _verify_replay_runner_pid = _rh.verify_replay_runner_pid` alias + `replay_routes.py:849 verify_pid_fn=_verify_replay_runner_pid` 注入給 `_sg.execute_replay_cancel_pg_path`（dependency injection 設計）— 0 重複造輪。
+- C V053 + D V049/V050/V051/V052 V### sequence 無重號（REF-20_RESERVATION.md v1.9 確認 V049-V053 各綁不同 task）。
+- 4 並行 E1 + 2 retrofit 0 commit / 0 push（HEAD `2d6a405` 不變；git status 30 file unstaged 等 PM 一次 commit）。
+
+**Verdict**：
+- **Track A retrofit = PASS to E4**
+- **Track C retrofit = CONDITIONAL（必補 P2-AUDIT-7 row to TODO.md，~5 min 編輯）**
+- 整 Sprint 1（A+B+C+D） PM 補完 LOW after 即可派 E4 regression。
+
+**Lessons learned**：
+1. **E1 「同 commit 開 P2 ticket」≠ 真進 TODO.md**：E1 memory.md / commit message draft / SQL 注釋三處都提到，但 TODO.md 沒寫 → E2 grep 命中真實落地問題；下次 dispatch retrofit 必明文要求 E1 修 TODO.md + grep 自驗。
+2. **Mac dev 0 PG 不阻塞 unit test PASS verdict**：但 E2 報告必明標 Linux e2e 由 E4 跑，避免 PM 誤以為「159/159 PASS = 真實業務驗證完整」。
+3. **Path.resolve(strict=False) 跨平台一致**：Python 3.9+ 統一行為，不需 platform-specific guard。
+4. **DROP+ADD CHECK race window 必 LOCK TABLE ACCESS EXCLUSIVE**：V053 已驗 race-free pattern（probe-short-circuit-before-lock + 顯式 BEGIN/COMMIT 包裹）；P2 P2-AUDIT-V044-LOCK-TABLE-FIX 補回 V044 同樣修法。
+
+## 審查強制清單（每次 Code Review 必查項）
+
+### 雙語注釋合規（必查，不通過則打回 E1/E1a）
+以下情況必須打回重做：
+- [ ] 新建函數/類缺少中英雙語 docstring
+- [ ] 模塊頂部缺少 `MODULE_NOTE`（中英雙語模塊說明）
+- [ ] fail-closed 路徑沒有注釋說明 fallback 原因
+- [ ] 安全相關代碼（認證/授權/參數化查詢）沒有注釋說明用意
+- [ ] 修改了已有函數但沒更新 docstring（過時的注釋比沒注釋更危險）
+
+注釋質量標準：
+- 注釋應說明「為什麼」，而非只是翻譯「是什麼」
+- 中英兩段都要有實質內容，不接受機器翻譯式的逐字對照
+
+### 安全審查（必查）
+- [ ] innerHTML 賦值：必須有 ocEsc() 包裝
+- [ ] SQL 查詢：必須參數化（無字符串拼接）
+- [ ] 異常處理：無 `except: pass` / 無吞異常
+- [ ] HTTPException：有 `except HTTPException: raise` 穿透
+
+### 架構合規（必查）
+- [ ] 新的 governance 路徑：有 `_require_operator_role()` 驗證
+- [ ] 任何 `submit_order()` 調用：前面有 `acquire_lease()` 且 fail-closed
+- [ ] 治理不可通過環境變量禁用（無 OPENCLAW_GOVERNANCE_ENABLED 類型的 flag）
+
+### 測試合規（必查）
+- [ ] 新功能有對應測試，測試數 ≥ 任務前基準（當前 2555）
+- [ ] 邊界用例：None 注入、超時、崩潰路徑有測試
+
+## 2026-05-02 LG5-W3-FUP-2 Fix 2 全 IMPL 一輪 PASS to E4（含 1 MEDIUM + 2 LOW 觀察留 P2）
+
+- **範圍**：producer (`mlde_demo_applier.py` +122) + healthcheck `[42c]` (`checks_governance.py` +228) + consumer R-meta low-sample defer (`governance_hub_lg5_r_meta.py` 新 180 + parent split 9 LOC down)
+- **15/15 新 test 在 Mac 綠**：4 producer + 6 healthcheck + 5 consumer
+- **MEDIUM-1**：`r_meta_sample_n` 只在 R-meta gate 觸發路徑進入 verdict；approve / R3-defer / R1-R5-reject / lease-fail-downgrade / atomic-fail-downgrade 5 個 `_make_verdict` callsite **未** pass `attribution_sample_count=r_meta_sample_n`，導致 audit JSONB 對所有非 R-meta verdict 的 sample_n 永遠 None。RFC §4.2 IMPL-5 retro 校準 intent 部分破。**不阻 deploy，P2 fix**。test L723 approve case 缺 `assert verdict.attribution_sample_count == 20` 掩護此 gap。
+- **LOW-1**：`mlde_demo_applier.py` 1496 LOC，距 1500 cap 4 行；下次 material 加碼必須 split helpers (recommend `mlde_demo_applier_attribution.py` sibling，鏡 LG5 consumer split pattern)
+- **LOW-2**：[42c] 缺 `test_warn_when_all_strategies_silent` first-deploy-grace test（[42b] L236 有對應）；3d window 比 7d 更易觸發此 branch，產線最常見路徑反而沒測試
+- **對抗驗證 6 條**：3d binding (L818 hard `!= 7` assert) / 27 pending backward compat（兩 case L749/L781）/ R3+cost baseline 仍 7d (L777-1079) / [42c] 真複用 [42b] 常數+keyset (L106-108/L88) / split 0 import cycle (re-export L111) / 新 reason free-form 非 enum（V035 schema 0 改）
+- **教訓**：當 helper 回多 tuple 值，**所有** consumer 應顯式串接全部 component；E1 容易只串「直接 firing path」漏「pass-through path」(本 case 5 處 `_make_verdict` 全漏 sample_n)。E2 對抗 reflexive 問：「helper 回 N 個值，code 用了幾個？沒用的那幾個是 by design 還是漏？」
+- **report**：直接 inline 返回 PA conductor，無外部 .md (新 SOP)
+
+## 報告索引
+
+| 日期 | 任務 | 文件位置 |
+|------|------|---------|
+| 2026-03-31 | Sprint 0 G-05+G-01 審查 | workspace/reports/2026-03-31--sprint0_g05_g01_review.md |
+| 2026-03-31 | Sprint 5a 完整審查 | workspace/reports/2026-03-31--sprint5a_review.md |
+| 2026-03-31 | Sprint 5b 完整審查 | workspace/reports/2026-03-31--sprint5b_review.md |
+| 2026-03-31 | Wave 6 Sprint 0 TD-1 審查 | workspace/reports/2026-03-31--sprint0_td1_review.md |
+| 2026-03-31 | Wave 6 Sprint 1a+1b 審查 | workspace/reports/2026-03-31--sprint1a1b_review.md |
+| 2026-04-26 | Wave 3 G2-02 + G8-02 審查 | workspace/reports/2026-04-26--wave3_e1_review.md |
+| 2026-04-26 | Wave 3 G2-06 bb_breakout 永久 disable 審查 | workspace/reports/2026-04-26--g2_06_disable_review.md |
+| 2026-04-26 | Wave 3 第四波三軌 adversarial review（EDGE-P1b + EDGE-P2-flip + G2-03）| workspace/reports/2026-04-26--wave3_w4_three_tracks_review.md |
+| 2026-04-26 | Wave 3 W5 兩軌（EDGE-P2-flip T2 + G2-FUP-IPC-LEGACY-MS-FIX）adversarial review | workspace/reports/2026-04-26--wave3_w5_two_tracks_review.md |
+| 2026-04-26 | Phase 1+2 batch review 10 commits (df1d629..bd5ce56) | workspace/reports/2026-04-26--phase1_2_batch_review.md |
+| 2026-04-26 | Tier 3 batch review 5 commits (7564d07..31fa96c) + G9-05 PUSH-BACK | workspace/reports/2026-04-26--tier3_batch_review.md |
+| 2026-04-26 | Tier 4 batch review 6 commits (eb65e1e..4689fc8) + MIT EXIT-FEATURES-WRITER-BUG-1 audit + PM merge | workspace/reports/2026-04-26--tier4_batch_review.md |
+| 2026-04-26 | Tier 5 batch review 7 commits (af48ee1..f2ed286) — T5.1 EXIT-FEATURES-FIX + T5.2 G3-08-PHASE-1C + T5.3 Phase 2 H1+H3 | workspace/reports/2026-04-26--tier5_batch_review.md |
+| 2026-04-26 | Tier 6 batch review 4 commits (306b549..56104de) — T6.1 Track 1 4 LOW + T6.2 Track 2 H3 schema design + T6.3 Track 3 dust audit design | workspace/reports/2026-04-26--tier6_batch_review.md |
+| 2026-04-26 | Tier 7 batch review 3 commits (4b30f5e/8241133/c6ed0b3) — T7.1 Rust H3 schema align T7.2 healthcheck [21] dust inventory T7.3 PA Phase 3 sub-task split | workspace/reports/2026-04-26--tier7_batch_review.md |
+| 2026-04-26 | Tier 8 batch review 4 commits (8cd257e/cf39415/71faf4c/79a808a) — T8.1 Sub-task 3-1 H2 + T8.2 Sub-task 3-2 H4 silent gap + T8.3 RFC §7.4 amend | workspace/reports/2026-04-26--tier8_batch_review.md |
+| 2026-04-26 | Tier 8 Track 4 supplementary 1-commit review (d1a2252) — Sub-task 3-3 H5 cost_logging / Phase 3 COMPLETE / G3-09 unblock | workspace/reports/2026-04-26--tier8_track4_e2_review.md |
+| 2026-04-26 | Rust P0 Wave 4-PR adversarial review (F2/F3/F4/F6) — 直接 final message 回 PA/PM（system prompt 限制不寫 .md report）| inline final message · 3 PASS / 1 RETURN（F4）|
+| 2026-04-26 | Python P0 Wave 2-PR review (F5 GUI + F7 healthchecks) — F5 RETURN 1 HIGH/1 MEDIUM/1 LOW + F7 PASS-with 1 MEDIUM cross-cut + 2 LOW + 1 size warning | workspace/reports/2026-04-26--python_p0_wave_review.md |
+| 2026-04-27 | live-auth-watcher-event-consumer-spawn Round-2 review (working tree) — APPROVE_WITH_NITS · main.rs=1194 緊靠 1200 ⚠️ LOW | inline final message |
+| 2026-04-27 | Live Auth Renew 移至 Governance Hub (97bab9a) — APPROVE_WITH_NITS · 1 MEDIUM（ocEsc+textContent 雙重 escape pre-existing）+ 1 MEDIUM（tab-live.html 1598 行 pre-existing）+ 1 LOW（try/catch dead code）+ 1 ⚠️ 809 行警告 | inline final message |
+| 2026-04-27 | G3-08 Phase 4 Wave II batch 4-2/3/4/5 batch review (e1157ae/b8951ab/d99a0da/eee0f7b) — 4 PASS_WITH_NITS · sequential merge confirmed conflict（h_state_query_handler.py + test_h_state_query_handler.py 同位置 textual conflict，純機械 3-way 解；無語意衝突）· framework signature 4 commits 完全一致（5-key skeleton 不變）· schema parity Rust HashMap<String,i64> 全綠（int + bool→int + len cast）· 1 MEDIUM（4-5 multi_agent_framework.py 1190/1200 hard cap edge，FUP-MAF-SPLIT 必先 file 才能再動該檔）· 1 LOW（4-3 analyst empty-payload 早 return 後 invalidate 仍 fire — harmless no-op when env=0）· 1 LOW（4-4 executor dedup/error 早 return bumps 觀察計數但 skip invalidate；10s 排程 poll 兜底，RFC 設計範圍內）· 4-4 Edit/Write silent-fail caveat 已驗 disk == commit blob 無 phantom content · cross-platform / f-string / except 吞例外 / 雙語 注釋 / Bybit API / Migration Guard 全綠 | inline final message |
+| 2026-04-27 | G8-01 W1 CognitiveModulator dead-path fix（worktree-agent-a5d05003010f9c38c, working tree） — PASS to E4 · 1 LOW informational（strategist_agent.py 854>800 pre-existing 推近）+ 1 LOW style（cognitive.py:240 內層冗餘 try）· PA RFC §6 三點全綠（grep 0 殘留 / test_strategist_agent.py 48 全綠 / state 不洩漏）· BUG-A rename clean + regression guard test 加分 · BUG-B caller=0→1 結構修接 hot path（unconditional pre-return 驗證）· regret/dream `{}` placeholder + consecutive_losses=0 屬 PA 明示 acknowledged limitation（FUP-LOSSES-WIRING + W2/W3 deferred）· 6/6 新測 + 96/96 既有 strategist 套件全綠 | workspace/reports/2026-04-27--g8_01_w1_review.md |
+| 2026-04-28 | G8-01 W3 StrategistAgent x CognitiveModulator integration 7-scenario（worktree-agent-a4d9d240343d85fff, commit 571da6a） — **RETURN to E1** · 1 HIGH（S5 sys.modules stub 因 `from . import strategy_wiring` 走 parent-package attribute 而失效；test order-dependent Heisenbug；同 session phase2_strategy_routes 先載入後 S5 fail，Mac/Linux 一致；實測 1 failed, 50 passed）+ 1 MEDIUM（S3-B 隱式依賴 `_COGNITIVE_TICK_INTERVAL` 模 0；改顯式 tick 呼叫）+ 2 LOW（S5 version=1 lucky-pass / 私有 _stats 穿透）· 5/7 scenario 真整合、1 脆、1 broken · 隔離 8/8 PASS 但全 regression order 必然失敗（E1 self-test 為 happy-path Mac in-isolation） · REGRET/DREAM 0 hit ✅ + patch.object(sw) 0 hit ✅ + 跨平台 path 0 hit ✅ + 雙語注釋完整 ✅ · 修法建議：`unittest.mock.patch("app.h_state_query_handler.strategy_wiring", sw_stub)` importer-side patch | workspace/reports/2026-04-28--g8_01_w3_integration_review.md |
+| 2026-04-28 | STRATEGIST-SINGLETON-POLLUTION P3 Option B+A combined fix（main repo working tree, base e2875da） — **PASS to E4 · APPROVE_WITH_NITS** · §九 8/8 + OpenClaw 8/9 + 1 LOW（h_state_query_handler.py 859 行 >800 pre-existing 推近 1200，本 fix +33 中 ~28 為雙語注釋）· Option B production fix `from . import strategy_wiring` → `sys.modules.get("app.strategy_wiring")` 兩處（line 358 _collect_h_snapshots + line 502 _collect_agent_snapshots）— scope 微擴自 PA RFC line 334 為 root-cause-driven（不修第二處則 22/35 fail 仍綠不掉，按 PA §2.2 表 13+22=35 直推）· Option A test fixture dual-patch sys.modules + app.strategy_wiring attr + `_SW_ATTR_MISSING` sentinel atomic restore + backward-compat tuple/單值 prev shim · 自驗 Mac 35→0（隔離 90/90 + same-session 108/108）+ W3 8/8 + W2/W1/LOSSES 40/40 + 全 control_api_v1 套件 3070 passed / 38 fail 全為 pre-existing sibling-pollution family（17 executor + 18 promote + 3 phase2）非本 fix 引入 · 對抗 7 問全 PASS（production runtime 等價 / fail-soft 雙層 _sw is None + strategist is None / sentinel `is` identity 比對非 `==` / pytest 單線程無 race / CPython sys.modules cross-platform 一致 / `_SW_ATTR_MISSING` 非 process-global mutable 不需 §九 表登記 / no external caller 0 命中）· 待 E4 ssh trade-core Linux 同 pytest 跨平台驗 35→0 | workspace/reports/2026-04-28--strategist_singleton_pollution_fix_review.md |
+| 2026-04-28 | **RETROACTIVE** SINGLETON sibling fix executor_shadow_toggle + strategist_promote (commit cff6959 already pushed, E2 chain not pre-run) — **PASS_WITH_NITS** (precedent: cost_edge_advisor_boot retroactive). Pure test fixture fix +42/-4, 0 production code change. Root cause NOVEL: same polluter as W3 (`test_api_contract.py importlib.reload(main_legacy)`) but different downstream mechanism = **FastAPI Depends(base.current_actor) route-build-time freeze** (frozen callable obj 對不上 reload 後 dependency_overrides 新 obj → 401). Fix = Option A only (`_make_app` 內 `importlib.reload(executor_routes / strategist_promote_routes)`). Option B 拒絕正當 (Depends freeze 是 framework 設計，非 import indirection；改 production 破 introspection). **驗證**：Mac 53/53 forward + 53/53 reverse + 151/151 W1+W2+W3+SINGLETON regression + 全 baseline 38→3 (3 phase2 Mac-only out-of-scope) · **Linux 53/53 forward + 53/53 reverse + 151/151 regression + 全 baseline 3098 passed / 0 failed** (Linux 比 Mac 還乾淨，phase2 是 Mac-only)· §九 8/8 + OpenClaw 9/9 全綠 (兩檔 620/758 行皆 <800)· 0 path leak. **scope 完整性驗證**：grep `Depends(base.current_actor)` 揭其他 7 route file 用同 pattern (scout/shadow_fills/live_session_account/risk/strategy_write/attribution/live_trust/executor router 內第 2+ 處)，但 5 個對應 test file (test_engine_capabilities/test_phase2_strategy_routes_coverage/test_scanner_opportunities_ipc/test_shadow_fills_routes/test_strategist_history_routes) 同時跑 polluter **89/89 PASS**，無 latent issue → fix scope 對；test_phase2_routes 3 fail 是 *不同* root cause (P4 ticket)。**1 NIT informational**：未來新測 file 用 `_make_app` + `dependency_overrides[current_actor]` pattern 須先 `importlib.reload(<router_module>)`，建議補一行進 `feedback_fastapi_depends_reload_freeze.md` (PA report §7.4 已點名) | inline final message (per system prompt no .md write) |
+| 2026-04-28 | G3-09-DAEMON-TEST-SPLIT P3 (working tree, base 8a5973f) — **PASS to E4 · APPROVE_WITH_NIT** · Pure test split 0 production code diff in `src/cost_edge_advisor*` · 3 新檔 LOC 534/380/485 全 ≤ 800 · 11/0 daemon test sum unchanged (5+3+3 = base 6 + sticky 2 + spawn 3) · `cargo --test`×3 + persistence + lib 全綠 (5+3+3+2 + 2308 / all 0 fail) · §九 8/8 + OpenClaw 9/9 全綠 · 對抗 6 問全 PASS (PA spec 修正「同 mutex instance」正確 — Cargo `tests/*.rs` 獨立 binary process + OS env per-process 隔離，跨 binary mutex 無意義；單 binary 內 OnceLock<Mutex<()>> 序列化仍有效) · dual_safeguard.rs 不需 env_lock 因 Proof 3b 走 RiskConfig flag 短路、sticky tests 純 timestamp 比對 (grep set_var=0 confirmed) · 11 fn name 一字未改保 grep stability · 1 LOW informational (inline helper 重複 ~120 LOC，PA 自決採 B 而非 tests/common/mod.rs，理由 §3.1 充分；閾值 5+ 檔或 helper >200 LOC 才值得抽 common — 已沉澱 PA §7 教訓) · 4 expect() 在 lock acquisition + task join，test 容忍範圍 · 跨平台 grep `/home/ncyu` `/Users/[^/]+` 0 命中 · out-of-scope confirm: main.rs/main_scanner_init.rs 是 sibling MAIN-RS-PRE-EXISTING-CLEANUP P2 ticket，本 review 不涵蓋 · E4 下一步 ssh trade-core Linux 同 cargo --test×3 + lib 跨平台同 11/0 + 2308/0；commit 必須打包 3 新檔 + 1 git rm 在 single commit 避免路徑暫時 missing 的 grep 誤導 | workspace/reports/2026-04-28--g3_09_daemon_test_split_review.md |
+| 2026-04-28 | G3-08-FUP-HSQ-SPLIT P2 (h_state_query_handler 859→452 + new sibling h_state_collectors.py 547, working tree, base 8a5973f) — **PASS to E4 with NIT** (E2 cannot run pytest locally: Mac lacks fastapi; sandbox blocks rsync to Linux runtime, so 108/108 + 234/234 PASS rely on PA+E1 self-test claim — E4 must re-verify on Linux). **Static SINGLETON integrity 驗收全綠**：(1) `grep "sys.modules.get(\"app.strategy_wiring\")"` 在新 sibling 出現 EXACTLY 2 次 (lines 211 _collect_h_snapshots + 355 _collect_agent_snapshots)，handler 內 0 production occurrences (僅 2 次 MODULE_NOTE 文字引用) → Wave E SINGLETON fix 完整原子搬移 (2) `import sys` 在新 sibling line 86 (3) 28 行雙語 G3-08-PHASE-FUP-IMPORT-PATH-LEAK rationale 在兩個 collector 各保留一份 (lines 181-210 + 343-354) (4) handler `from .h_state_collectors import (...) # noqa: F401 — re-export for back-compat` line 240-245 透明 re-export 4 helpers (5) handler `__all__ = ["build_h_state_full_response"]` 唯一公開 — collector helpers 仍 underscore-private 不引入 naming pollution。**`_install_fake_strategy_wiring` 仍生效**：fixture (test line 322) patch `sys.modules["app.strategy_wiring"]` + parent attribute 雙保險；新 sibling call-time `sys.modules.get` lookup 仍命中 stub，與 split 前語意完全等價 (collector 模組 import 時不 import strategy_wiring，避循環)。**0 test patch site change**：grep test files 50+ `from app.h_state_query_handler import _safe_snapshot[_self] / _collect_agent_snapshots` 均透過 re-export 透明工作；0 `mock.patch("app.h_state_query_handler.<helper>")` 直接 module attribute patching 模式 (若有則 split 後會破 — 已驗無)。**§九 8/8 全綠**：scope 一致 (僅 2 檔，handler 452 + sibling 547，分別 47%/32% under 800 警告線) / 0 except:pass / log 用 %s / 純讀無新 API endpoint / except Exception 無前置 HTTPException 無關 (handler 無 HTTP route) / 無 detail=str(e) / 無 asyncio threading.Lock / 0 私有屬性穿透 (collector 用 getattr defensive)。**OpenClaw 9 條全綠**：跨平台 grep `/home/ncyu` `/Users/[^/]+` 0 命中 / 雙語注釋 MODULE_NOTE + collector docstring + handler split rationale 完整 / 純 Python 不涉 Rust unsafe / 不涉 IPC schema / 不涉 SQL migration / 不涉 healthcheck pairing / 不涉新 singleton (4 helpers 為 module function 非 singleton state) / 兩檔皆 <800 / 不涉 Bybit API。**對抗反問皆 PASS**：(a) re-export 是否引入 naming pollution? — 否，4 helper underscore-prefix 且 handler `__all__` 只列 `build_h_state_full_response` (b) `from . import strategy_wiring` 是否仍殘留? — grep 0 命中，已純 sys.modules.get pattern (c) test fixture `_install_fake_strategy_wiring` dual-patch 是否被 sibling 模組打破? — 否，sibling call-time 取 sys.modules，與原 fix 設計同源 (d) 28 行雙語 rationale 是否縮水? — 否，逐行原樣保留 + 額外 sub-task 註解。**1 NIT informational** (LOW)：E2 因 Mac 環境缺 fastapi + sandbox guardrail 無法本地 pytest；E4 必跑 ssh trade-core (未提交檔需先以 patch 方式同步) `pytest tests/test_api_contract.py tests/test_h_state_query_handler.py` 確認 108/108 forward + reverse 順序兩遍同綠 (key invariant — 若不綠則 SINGLETON 搬移 broken，需立即 RETURN E1) | inline final message (per system prompt no .md write) |
+| 2026-04-30 | 5-Agent `last_heartbeat_ms` 契約 round 2 (working tree, base e1 round 2 self-report) — **APPROVE_WITH_NITS · PASS to E4** · 5 round-1 finding 全修：M-1 strict (4 agent on_message stamp 移到 RUNNING gate 後) / M-2 4 negative test 鎖 stopped path / MED-1 record_scan stamp 移入 lock atomic (mirrors executor pattern) / MED-2 produce_intel + produce_event_alert collapse 蓋章 + 2 改寫 negative test / MED-3 _surface_heartbeat_ts helper 抽出 (4 cards 共用，Strategist eval-log 主路徑 + stats fallback 不套) · §九 8/8 + OpenClaw 9/9 全綠 (跨平台 grep 0 / 雙語注釋完整 / helpers 827<850<1200) · 36/36 heartbeat contract test Mac local 0.05s 全綠 + 23/23 agents_routes + 109/109 scout/multi_agent · 對抗 5 反問全 PASS (mock 不掩蓋邏輯：用真 ctor 真 AgentMessage / grep _handle_intel review_intent analyze_trade record_scan 全 production caller / record_scan lock 內 stamp+counter atomic _invalidate_h_state_async 在 lock 外無 reentrancy / None 空 dict 0 三邊界 helper 各 ts=None 對 / PA spec 5 finding 1:1 命中 diff) · **3 個 informational findings 全留尾不退回**：(1) **NEW-RISK-1 MEDIUM**: MED-2 後 `record_scan()` production 0 caller (scout_routes.py / strategy_wiring_scanner.py 30-min ScoutWorker 都直呼 produce_intel 不經 record_scan) → Scout heartbeat runtime 永不刷新；但 Scout state chip 用 `state_value=='running' && intel_produced>0` 不基於心跳，UI 不退步；建議下一 wave 補 1 行 `_sa.record_scan()` 進 strategy_wiring_scanner.py:228 (2) **NEW-RISK-2 LOW**: M-2 contract 僅鎖 on_message；review_intent / _handle_intel / analyze_trade direct path 無 RUNNING gate 為設計 carve-out (pipeline_bridge 直呼承諾)，注釋已明寫 (3) **LOW-1**: helpers 827>800 警告線，但 round 1 governance accept 850 threshold 確認；MED-3 抽 helper 後 net +8 LOC 無法回 820，結構承載多責任 ✅ accept · 1 LOW pre-existing 觀察 (Strategist card stopped 顯 "watching" 而非 "offline" 為 round 1 前已存在；M-1 strict 反而改善) · E1 注釋與雙語注釋皆完整，E2 直接修動作=0 · E4 下一步 ssh trade-core 跑 36 + 23 case 跨平台 + 全 control_api_v1 regression 驗 1 fail (test_rc_002_h0_status_refresh) 確 Rust pre-existing 與本 PR 正交 + 手動驗 GUI roster 5 cards last_heartbeat_ts 行為 (Scout start-only stale；其他 4 應 fresh) | workspace/reports/2026-04-30--agent_heartbeat_round2_review.md |
+| 2026-05-02 | LG5-W3-FUP-2 Fix 1 (cron edge_label_backfill + healthcheck [43]) E2 review (working tree, base a7b93d5) — **RETURN to E1 · 1 MEDIUM + 1 LOW (factual error in 3 places)** · §九 8/8 全綠 + OpenClaw 8/9 (LOW-1 跨平台 docs 路徑命中)。Cron wrapper 134 LOC bash -n clean / shebang `#!/usr/bin/env bash` / `set -euo pipefail` / mkdir-based overlap lock + EXIT/INT/TERM trap / Sanity check BASE/file 存在 / fail-loud RC=1 break / 兩 engine_mode 連跑 (demo + live_demo). E1 自報 backfill CLI flag (`--engine-mode` + `--batch-limit` line 483-484) 真實對齊 ✅. Healthcheck [43] SQL `extract(epoch from now() - max(label_filled_at)) FROM learning.decision_features WHERE engine_mode IN ('demo','live_demo')` 邏輯正確；fail-closed `to_regclass IS NOT NULL` + 5 verdict path PASS<2h/WARN<6h/FAIL≥6h/no-rows/V019-missing 完整 + threshold pin test 鎖 7200/21600 magic number drift. Runner cursor 區塊在 [42b] 後正確接 [43] dispatch + __init__ re-export + __all__ 補 [43] + main() docstring slot listings 補 [43]. **Findings**: (1) **MEDIUM-1**: `docs/healthchecks/2026-05-02--lg5_health_checks.md:217` crontab 範例硬編碼 `/home/ncyu/BybitOpenClaw/srv/...` literal — 違 CLAUDE.md §七 ★★ 跨平台規則；非 dated worklog 而是 operator action guide → operator copy-paste 風險。修法：改用 `$HOME/BybitOpenClaw/srv/...` 或 `$OPENCLAW_BASE_DIR/...` literal (註明 crontab 不展開 env var → operator 須先在 crontab `OPENCLAW_BASE_DIR=...` 行設值)。(2) **LOW-1**: 3 處 (`checks_governance.py:440 docstring + line 466 FAIL msg + docs line 196`) 標 "V019 deployed/V019 not applied"，但 `learning.decision_features` 實際 V017 創建 (`V017__edge_predictor_tables.sql:29`，V019 是 `strategist_applied_params`)；healthcheck `to_regclass` 邏輯仍正確，但 operator 看 FAIL msg 會去查錯 migration → triage 誤導。修法：`s/V019/V017/` 三處。**(3) LOW-2 informational** (不退回)：mkdir-based lock 無 PID/age 檢查；`kill -9` 後 lock 殘留 → cron 永 `exit 0` silent skip — 但 [43] healthcheck 6h 後 FAIL 是設計 back-stop (DB truth wins 已在 cron MODULE_NOTE 明寫)，acceptable。**(4) LOW-3 self-report quality** (不退回)：E1 自報 "cross-platform 0 hit" 未 grep 自身 docs (line 217 漏抓) → 自驗工具不全。**對抗 5 反問**：edge_label_backfill 0 改 ✅ / W1/W2/W3/FUP-1 code 0 改 ✅ / 19/19 lg5 healthcheck (含 6 新 [43]) + 106/106 helper_scripts/db baseline + 15/15 backfill module regression 全綠 ✅ / `engine_mode IN ('demo','live_demo')` 對齊 cron 寫入面 ✅ / fail-closed table missing/no-rows 雙路徑 ✅ · 修完 MED-1 + LOW-1 (4 處 sed) E2 round 2 直 PASS to E4 (純文字修，無業務邏輯動) | inline final message (per system prompt no .md write) |
+
+## 歷史審查關鍵發現（累積記憶）
+
+### 2026-03-31 Sprint 0 G-05 + G-01
+- **結論**: PASS，可進入 E4
+- **測試基準**: 2561 passed（G-05 新增 6 個 Decision Lease 測試 test_26~31）
+- **G-05 架構確認**: acquire_lease() 在 submit_order() 之前，lease=None 時 early return（fail-closed 正確），hub=None 時 fail-open（向後兼容，設計意圖明確）
+- **G-01 確認**: DEFAULT_DAILY_HARD_CAP_USD=2.0，DOC-08 §4 來源注釋在位，tab-ai.html `|| 15` 迭代預設值未被修改，定價 `15.00` per_mtok 未被修改
+- **WARN（P2 追蹤）**: `error=f"Execution error: {e}"` 動態異常字符串在外層 exception 捕獲路徑（executor_agent.py:415）。Batch 11 原有代碼模式，建議 P2 改為固定字符串。
+- **WARN（P2 追蹤）**: `error=f"Order rejected: {rejected_reason}"` 同上，来源為 paper engine 返回值，風險可控但不理想。
+
+### 2026-03-31 Sprint 5a（H0 blocking + H1 ThoughtGate + shadow=False + H3 ModelRouter）
+- **結論**: PASS，可進入 E4
+- **測試基準**: 2879 passed（新增 15 個 Sprint 5a 測試）
+- **H0 blocking 確認**: pipeline_bridge.py `continue` 已替換 warn-only；`intents_h0_blocked` 統計正確；4 個 TestH0GateBlocking 全部通過
+- **H1 ThoughtGate 確認**: 三個 gate（budget/complexity/cooldown）均正確降級到 `_heuristic_evaluate()`；`should_call_ai=False` 路徑無 allow-all
+- **架構約束確認**: 整個 H1/H2/H3 鏈路零 `await`；L2 在 `threading.Thread(daemon=True)` 執行
+- **shadow=False 確認**: 前置條件（G-05 acquire_lease + H0 blocking）均已驗證
+- **WARN-1（P2）**: `cost_tracker.record_call()` 的 `except Exception: pass` 缺少 logger（L485）
+- **WARN-2（P2）**: `_h1_cooldown` 字典無容量上限（650 符號場景安全，但建議 P2 追蹤加 LRU cap）
+- **重要觀察**: Sprint 5a 代碼順帶修復了 11 個 pre-existing test failures（34 → 23 FAILED）
+
+### 2026-03-31 Sprint 5b（H4 validate_output + H5 record_ollama_call + ScoutWorker + P14 集成測試）
+- **結論**: PASS，可進入 E4
+- **測試基準**: 2609 passed（新增 54 個 Sprint 5b 測試）
+- **H4 fail-closed 確認**: `_validate_ai_output()` 返回 False → `_heuristic_evaluate()`（無 allow-all）；h4_validation_fail + heuristic_evaluations 雙重計數器在位
+- **原則 10 roi_basis 確認**: `get_cost_summary()` 和 `get_cost_edge_ratio()` 均含 `roi_basis: "paper_simulation_only"` + `roi_disclaimer` 中文字段
+- **ScoutWorker daemon 確認**: daemon=True + except Exception 吞但記錄日誌 + phase2 初始化在 try/except 包裹 + 非致命
+- **新 failure 調查**: 18 FAILED = 17 pre-existing + 0 Sprint 5b 新增（git stash diff 驗證）
+- **WARN-1（P2）**: `_ollama_stats` 懶初始化在方法體，建議遷移至 `__init__`（功能正確，純可讀性）
+- **WARN-2（P2）**: ScoutWorker interval 不可運行時配置（建議 P3 環境變量覆蓋）
+- **WARN-3（P2 繼承）**: `cost_tracker.record_call()` 的 `except Exception: pass`（Sprint 5a 遺留）
+
+### 2026-03-31 Wave 6 Sprint 0 TD-1（pipeline_bridge acquire_lease 門控）
+- **結論**: PASS，可進入 E4
+- **測試基準**: 2614 passed（Sprint 0 TD-1 新增 4 個 TestPipelineBridgeDecisionLease 測試）
+- **架構確認**: acquire_lease() 在 submit_order() 之前，APPROVED/MODIFIED 兩分支共用同一 acquire_lease 門控（L697），REJECTED 分支直接 continue 不到達門控（正確）
+- **fail-open/fail-closed 確認**: hub=None → fail-open 正確；lease=None → fail-closed + 計數器；異常 → try/except logger.error + 計數器（無吞異常）
+- **WARN（P2）**: `intents_lease_failed` 未在 `__init__` self._stats 初始化塊預設為 0，其他 stats 均預初始化。功能正確（.get() 防 KeyError），但 GUI/API 消費者若期待 key 始終存在可能遇到 None。建議 P2 在 L114 的 `_stats` dict 中加 `"intents_lease_failed": 0`。
+
+### 2026-03-31 Wave 6 Sprint 1a（FA-7）+ Sprint 1b（1B-2/TD-3/TD-4）
+- **結論**: CONDITIONAL PASS — Sprint 1b 全 PASS；Sprint 1a 有 1 個 P1 問題需修復後方可提交
+- **測試基準**: 預期 2614 + 4 + 3 + 2 = 2623 passed（4 FA-7 + 3 freshness + 2 TD-4）
+- **Sprint 1a P1 問題**: `_check_stops()` FA-7 塊在 `submit_order()` 返回 rejected_reason 時仍調用 `_emit_round_trip()`，注入假的學習信號。應在 L954 before the `try:` block 加 `if result.get("rejected_reason"): skip _emit_round_trip`。
+- **Sprint 1a 架構確認**: `_emit_round_trip()` 在 `submit_order()` 之後（不在失敗分支），try/except non-fatal，perception_plane=None 路徑安全（不崩潰），PnL 方向正確（Sell=多頭，Buy=空頭）
+- **Sprint 1a 雙語注釋**: PASS（FA-7 塊 + except 路徑均有中英雙語）
+- **Sprint 1b freshness 確認**: getattr 安全鏈（_price_ts / _config / max_data_age_ms），None config 路徑 getattr(None, "max_data_age_ms", 1000) = 1000 正確，HTTPException 穿透在位
+- **Sprint 1b TD-3 確認**: except Exception: pass → logger.warning (with `as e`)，非致命路徑繼續不 re-raise，正確
+- **Sprint 1b TD-4 確認**: 觸發時機 `>= _H1_COOLDOWN_MAX_SIZE` 正確，清理策略（過期條目，30s window），熱路徑（len < cap）零額外開銷，雙語注釋在位
+- **pre-existing `except Exception: pass` at L885**: 覆蓋狀態讀取（非 submit_order），有說明注釋，非新引入，P2 追蹤
+- **WARN（P2）**: FA-7 tests 缺少 short position PnL 符號測試（Buy side = 空頭止損）
+- **WARN（P2）**: freshness tests 缺少 `_price_ts` 屬性完全不存在（del）的覆蓋路徑
+
+### 跨審查觀察（模式記憶）
+- ExecutorAgent 的異常 error 字段格式問題已出現兩次，建議建立統一規範：審計字段使用固定 snake_case 錯誤碼，動態信息僅進入 logger。
+- phase2_strategy_routes.py 的模塊初始化（`try: from ... except ImportError: pass`）模式貫穿全文件，是已驗證的安全 fallback 模式，E2 不需要每次審查都標記。
+
+### 2026-04-26 Wave 3 G2-06 bb_breakout 永久 disable — PASS to E4 with separate ticket recommendation
+- **結論**：PASS to E4（with 1 separate ticket recommendation）
+- **必查 3 點全 PASS**：(a) TOML 三環境（demo/paper/live）`[bb_breakout].active=false` 同方向 ✅ (b) healthcheck [12] 改判邏輯不擴張（fail-soft + 早 return PASS skip + StubCur 驗 SQL 0 次執行）✅ (c) CLAUDE.md §三 G6-04 drift 規則符合（採集時間 + healthcheck id + commit hash）✅
+- **E1 funding_arb push back 判定**：技術上正確（不擴大 G2-06 scope），但 adversarial 視角揭發 F2（MEDIUM）— paper TOML `[funding_arb].active=true` 是 v1 (2026-04-14) → v2 (2026-04-18) 結案 NEGATIVE EDGE 過渡期 sync miss，非「三 config 故意分開」。memory `feedback_env_config_independence` 適用於 risk threshold（fee/cost/freshness），不適用於 `active` binary 開關。建議 PM 開 G2-FUP-FUNDING-ARB-PAPER-SYNC（~5min）
+- **F1 (LOW)**：[18] inventory 只讀 demo TOML 單檔，跨環境誤導風險（E1 5.6 已 self-disclose）
+- **F3 (LOW)**：healthcheck.py 文件 2103 行 > §九 1200 硬上限（既存技術債，非 G2-06 引入）
+- **F4 (LOW)**：[18] 在 `--quiet` 模式下被 hide（drift 防線設計打折），但 cron 6h default 無 quiet → 實際運作 OK
+- **F5 (INFO)**：Rust comment block 設計合理 — `///` + `//` + `#[derive]` sandwich pattern 不破壞 doc-attribute attachment（cargo doc + 最小 reproducer diff 0 byte 雙重驗證）
+- **判定方法論教訓（補 §三 累積）**：
+  - `feedback_env_config_independence` 三 config 故意分開 protocol 適用於**風控閾值**（fee/cost/freshness/buffer），**不適用於策略 active 開關**（active 是 binary 結案/啟用）
+  - 凡是「策略結案 disable」必須**全環境同步 disable**，不享受三 config 分開保護
+  - 收到 E1 push back 時必獨立做 evidence chain（memory + TOML comment + 結案歷史）— 不以 E1 詮釋為準
+  - Rust `///` doc-comment + `//` plain comment + `#[derive]` 三明治 pattern 是合法的，但若不確定 → 用最小 reproducer + cargo doc diff 雙重驗證
+
+### 2026-04-26 Wave 3 G2-02 + G8-02 — 兩交付 PASS with conditions
+- **結論**：PASS with conditions（兩交付主體 OK，但 2 個 MEDIUM finding 必修）
+- **G2-02 (counterfactual replay)**：
+  - E1 push back（PM SQL spec schema 錯）✅ 正確且必要 — 我獨立 grep V003/V008/V015/V017 schema 確認 PM spec 7 個欄位都不存在
+  - 「`realized_pnl` 是 GROSS」結論 ✅ 屬實 — 我獨立讀 `fill_engine.rs::apply_fill` line 264/273-279/`trading_writer.rs:307` 三點交叉確認
+  - **新揭發 (G2-02-F1, MEDIUM)**：partial-close（fast_track ReduceToHalf）+ accumulate（多筆 entry）下，counterfactual 公式假設「1 entry × 1 close per JOIN row」會偏差；E1 docstring 沒揭露
+  - LOW: JOIN 缺 `entry.engine_mode/symbol` 防禦（理論 collision，極端 edge）
+  - LOW: exit code 寬鬆解讀 — E1 已聲明 PM 接受
+- **G8-02 (parity test)**：
+  - E1 push back（cap/pct deferred to G3-08）✅ 技術正確 — 我獨立 grep `intent_processor/` 確認 cap/pct 0 命中 + Python `_execute_via_ipc` 0 cap/pct check
+  - **70 case 100% agree 是 trivially guaranteed**（兩側都讀同一 boolean），但**仍有價值** — 保護 G3-03 修復不被 regression
+  - **新揭發 (G8-02-F1, MEDIUM)**：「synthetic_replay」嚴重命名誤導 — 40 case 全是手寫 YAML 字面量，無 seed/generator/replay。文檔欺騙性強
+  - LOW: dead imports `asyncio` / `os` — E2 已直接 fix
+  - LOW: setup/teardown `_reset_for_tests()` 是 dead code（本地 cache 實例不是 singleton）
+- **判定方法論教訓**：
+  - 凡是 SQL JOIN 的 counterfactual 工具，必查 partial close / accumulate / cross-strategy 三類 edge case 對 row count 的影響
+  - 凡是「parity test」名稱，必驗證兩側是否真的跨進程（Python ↔ Rust runtime），不是「Python ↔ Python schema-spec mock」
+  - 凡是「synthetic / replay / generated」字眼，必驗證實際代碼是否有 generator / seed / 真實資料源
+  - E1 push back 即使技術正確，也要 adversarial 重審其副作用（命名 / doc 透明度）— PM 接受不代表 E2 不能找新問題
+
+### 2026-04-26 Wave 3 第四波三軌（EDGE-P1b + EDGE-P2-flip + G2-03）— 3 軌獨立 PASS with conditions
+- **3 軌 PASS to E4**（不綁包）：軌 1 EDGE-P1b 4 子任務 / 軌 2 EDGE-P2-flip T1+T3 / 軌 3 G2-03 4 子任務
+- **HMAC ts bug 完整驗證**（軌 2 最關鍵）：legacy `app/ipc_client.py:786 sync_ipc_call` 用毫秒、Rust verifier 用秒（30s 容差量級差 1000x）→ **legacy 100% fail auth**。E2 grep 確認 2 個 production caller（`live_trust_routes.py:296 trigger_live_auth_recheck` + `control_ops.py:515 set_system_mode`）皆「fire-and-forget + try/except 吞錯誤 + 5s watcher poll backstop」設計 → 系統不崩潰但 fast-path optimization 100% 失效（authorization 5s 延遲生效 / system_mode 只能等 engine restart 經 snapshot 同步）。E1 在新檔內嵌 helper 用秒對齊 Rust 正確；legacy 修建議 **PM 立即開 P1 separate ticket**
+- **PA vs PM schema 分歧處理**（軌 3）：PM prompt 引用「P1_HARD_*_MAX_BPS constants」**不存在**；E1 採 PA RFC §2.1 pct 型 4 字段 schema（完美 1:1 match）正確判斷
+- **G2-03 staging 判定**：schema + 防線 A+B + 抽分完整，但 `check_position_on_tick_with_override` **0 production caller**（grep 確認，只被自己 thin wrapper + 8 unit tests 呼）→ 「runtime path 沒走 override，schema-only landing」屬正確 staging 不是半成品。**PM commit message 必明標 staging 狀態**
+- **§九 1200 硬上限管理**：`ipc_server/mod.rs 1251` PRE-EXISTING 超 +11 dispatch route → MEDIUM；E1 嚴守不擴張認可，但 E5 wave 必拆
+- **判定方法論教訓**：
+  - 凡是「100% fail 但未察覺」結論必 grep 完整 caller list 驗證 fail 路徑是否有 backstop 吞掉錯誤；無 backstop = silent system bug，有 backstop = optimization path 失效但功能正確
+  - 凡是「thin wrapper + 0 caller 改動」必 grep 新 fn 是否真有 production caller（grep `_with_override` 在 src/ 排除 tests/）；0 caller = 「實質效用 = 0」必明標 staging
+  - PA vs PM schema 分歧時必 grep PM prompt 引用的 constants 是否存在；不存在即 PM 寫錯，採 PA 為 source-of-truth
+  - dry-run script 必驗 mutating payload 構造 vs 真實 IPC call 路徑是否分離（line 510-516 構造 mutating + line 532-537 真送 唯讀 = 安全）
+  - schema-only landing 與 runtime active 是兩個獨立狀態 — schema land 不等於 binding 啟用；必在 commit message 標清楚
+
+### 2026-04-26 Phase 1+2 batch review (10 commits, df1d629..bd5ce56) — 9/10 PASS, 1 RETURN
+
+- **結論**：9 PASS / 1 RETURN E1（commit 7 92ea90b banner stale doc, MEDIUM）
+- **驗證 metric**：cargo lib 2161 → **2166 / 0 failed**（+1 c2ca032 stale_peak_ms test + 4 bd5ce56 verify_ipc_token tests），cron healthcheck 19 check 全跑通（17 PASS / 1 WARN [11] 96% / 1 FAIL [3] pre-existing）
+- **退回 commit 7 (92ea90b) MEDIUM finding**：calibrator banner「IPC bind only covers 6/7 dimensions」在 commit 6 (c2ca032) 加 stale_peak_ms 進 IPC 後**已過時**。commit 6 commit msg 明示「Banner removable once IPC schema extended」但 PM 代 commit 漏執行。banner lines 173/184-186/188-191 三處內容矛盾於 ipc_server/handlers/risk.rs:316-323 toml_only_fields_skipped 從 2→1 element 的真實狀態。建議選項 A 完全移除 banner + 1-2 行 reference c2ca032 inline comment 替代
+- **PM 代 commit 風險獨立驗證**：
+  - commit 2 (0cda2d9 G9-01 TW)：grep position_manager.rs:307-335 確認 Rust 用 confirm-pending-mmr ✅；Python 0 usage ✅；TW memory 與 commit msg 不一致（LOW，0 production 影響，下次 TW 接手 update 即可）
+  - commit 6 (c2ca032 EDGE-P1b-FUP-STALE-PEAK-IPC E1)：8 wire site 全改到 ✅（tick_pipeline + handlers/mod + handlers/risk + ipc_server/handlers/risk + 4 tests）；u64→i64 cast fail-closed by validate() ✅；restore handler 7→8 fields_restored + 2→1 toml_skipped 同步 ✅；+1 dedicated round-trip test 驗 5 點（lossless cast / version bump / additive merge / shadow_enabled unchanged / shadow_enabled-only 剩餘 TOML-only）✅
+- **G5 refactor 三件 hot-path 保留驗證**：
+  - bd5ce56 ipc_server split：`use crate::ipc_server::{IpcServer, PerEngineRiskStores, EngineCommandChannels}` 從 main.rs / main_boot_tasks.rs / main_pipelines.rs 全部解析 OK；mod.rs facade `pub use` 4 + `pub(crate) use` 10+ + `pub(in crate::ipc_server) use handlers::*` 確保 `super::super::*` 從 handlers/ 接得到所有 pre-split 名稱；macro re-export 限制由 handlers/teacher.rs + handlers_config.rs 各自 `use tracing::{info, warn};` 處理；4 verify_ipc_token unit tests 新加（pre-existing 0 coverage）；patch_risk_config / EDGE-P1b 8 exit_* / HMAC verify / accept loop byte-identical
+  - cc4c2d2 passive_wait_healthcheck split：cron 12:40 跑 19 check 全部跑通；shim 36 行 sys.path prepend OK；`__init__.py.__all__` 19 check_* 全列；runner.py invocation order byte-identical（13 cursor + 6 post-conn-close）；隨機抽 check_close_fills_24h 對照 pre/post SQL byte-identical
+  - a5b6f17 tick_pipeline tests split：120 test attributes pre = post（含 #[test] / #[tokio::test] / #[serial]）；on_tick_helpers 路徑 super::super:: 從 sibling 上兩層 = tick_pipeline 正確；shared make_event / make_signal 在 mod.rs 用 pub(super)；0 production touched
+- **時序 hazard 教訓（PM 改進建議）**：commit 7 (12:17) → commit 6 (12:36) 19 分鐘間隔；commit 6 invalidates commit 7 banner 但 PM 漏執行 commit msg 自己寫的「Banner removable」動作。對「commit B 應 invalidate commit A doc」依賴對，PM 編排建議：(A) 合併同次 push (B) commit B 完成手動補 patch 移除 commit A stale doc (C) commit A 加 TODO 標記 + 後續 ticket 提醒
+- **判定方法論教訓**：
+  - 凡 PM 代 commit（E1/TW push back 或 staging dir）必獨立驗證：(1) E1 改動完整性 grep 對照 (2) 任何聲明「verified」必獨立 reproduce (3) commit msg 預告的「removable」「to be done」必檢查是否真執行
+  - 凡 commit 在 19min 內依賴另一 commit 必檢查 invalidation chain：A 加 banner 警 X → B 修 X → A banner 是否 stale？
+  - 凡「fail-closed by downstream validate」設計 pattern 必驗：(a) Python wrapper 是否預 check（typed wrapper 應該主動拒絕，下游 validate 是 last line of defense） (b) Rust IPC handler 對 cast fail 是 silent None vs explicit error
+  - Hot-path refactor split 必對照原 mod.rs 的所有 `pub use` / `pub(crate) use` 與新 facade 是否字段對齊（不只看 `super::super::*` glob 解析能不能編譯，要看具體 pub item 集合是否一致）
+  - macro re-export 不繼承 `super::super::*` glob — 拆 mod.rs 時若原本 mod.rs use tracing 內部 macro，sibling 必各自 `use tracing::{info, warn};`（commit 11 commit msg 已說明此點）
+
+### 2026-04-26 Rust P0 Wave 4-PR adversarial review（F2 cross-symbol-price / F3 phantom-dust-evict / F4 trading-writer-live / F6 edge-reload-daemon）— 3 PASS / 1 RETURN
+- **結論**：F2 PASS / F3 PASS / **F4 RETURN E1** / F6 PASS。
+- **F2 PASS with 1 LOW**：3 層 fallback `latest_price → entry_price → event.last_price` + NaN-aware filter + 5 audit sites + 4 regression test 全綠。LOW = step_4_5_dispatch:334 audit comment 提「未來新增策略需改 paper_state.latest_price」但 debug_assert 在 release strip — 建議升級 release-time `assert_eq!(intent.symbol, ctx.symbol)` 但不阻 merge
+- **F3 PASS with 2 LOW**：4 trigger（T1 reduce_position 後 / T2a apply_fill 反向 / T2b 同向加倉 / T3 boot reaper / T4 status arm 30s）+ 13 unit test + ML hygiene（不寫 trading.fills）+ schema reuse（af48ee1 ft_dust_qty_floor_usd 不新增）+ fail-closed 4 邊界（floor=0 / NaN / price=0 / position absent）。LOW = (a) tests.rs 1645 行超 §九 1200（test file 慣例容忍）(b) evict_all_dust 內存 candidate Vec 對 N≥50 active symbols 有 GC 壓力可優化為 retain pattern
+- **F4 RETURN E1 — 1 MEDIUM logic bug + 1 §九 hard violation + 2 LOW**：
+  - **🛑 §九 hard limit violation**：F4 alone 1304 行 > 1200 hard limit（超 104 行）；F3+F4 merged 預測 1333 行（超 133 行）。E1 commit msg 完全沒提。**強制 Path A：F4 PR 內 split helper（line 78-200 抽到 sibling unattributed_emit.rs）**，F4 改 ~1h 重審 ~30min；不可 defer
+  - **MEDIUM logic bug — dedup race + try_send drop**：seen_exec_set.insert(exec_id) 在 line 413（emit branch upstream）→ try_send 通道滿時 audit row drop，WS 重連被 dedup 攔住不再走 emit branch → audit row **永久遺失**。F4 commit msg 「reconnect re-emit; fill_id PK keeps DB idempotent」claim **錯**：fill_id PK 保護「同條 emit 命中 ON CONFLICT」非「重連後再到達 emit branch」。修法：try_send → `send().await`（背壓不丟）
+  - **LOW commit msg amend**：「funding payment」非真實 unmatched WS source（Bybit V5 funding 走 wallet ledger 不走 execution stream）；改為 dust scrub / liquidation / 人工 GUI close / orphan auto 補單
+  - **LOW healthcheck implicit dependency**：`check_close_fills_24h` baseline 用 `realized_pnl != 0` 過濾，**隱式排除** F4 audit row（hardcoded `realized_pnl=0`）— coincidental safe；F4 commit msg 應 acknowledge 此依賴
+- **F6 PASS with 3 LOW**：1h periodic daemon + DEFAULT-OFF 嚴格 "1" env-gate + IPC `reload_edge_estimates` advisory（accepted/coalesced/reloader_closed/reloader_disabled 4 種 response）+ mode isolation handler 端 `pipeline.pipeline_kind.db_mode()` 結構性保證 + fail-soft 保留前份 + slot late-inject mirror G3-08 H state pattern。LOW = (a) `interval.tick().await` 第一次 skip → 第一次真實 reload 在 1h 後（boot 與 Python scheduler 新寫 JSON 之間有 gap，可在 boot 結束 emit 立即 trigger）(b) main_boot_tasks.rs 815 行接近 800 警告線 (c) dispatch_request 16+ args propagation 累積反模式
+- **5 cross-cutting findings**：
+  - CC-1 §九 1200 violation（**最重，CRITICAL**）：F4 必 PR 內 split；tests.rs 後續 G5 wave 拆
+  - CC-2 paper_state 視角：F2 用 latest_price accessor / F3 加 2 field+3 accessor / F6 不動 → **0 衝突**
+  - CC-3 F4 audit + F3 evict ML 視角：F3 不寫 fills（ML hygiene）/ F4 寫 audit row 同時 5 ML pipeline filter NOT LIKE 'unattributed:%' → **互補無衝突**；次生發現 healthcheck check_close_fills_24h 隱式依賴 realized_pnl != 0
+  - CC-4 engine lib test 數一致性：4 branch 從不同 main baseline 切（W2/W3 移動），cumulative 不能直接比，E4 跑 combined regression
+  - CC-5 雙語注釋 + 跨平台 grep + commit 即 push：4 PR 全 PASS
+- **Merge order 建議**：F2 first（lowest risk paper_state 不動）→ F6 second（DEFAULT-OFF env-gate 隔離）→ F3 third（loop_handlers +25 仍 < 1200）→ **F4 last，且必先 split helper + 修 MEDIUM logic bug + 重 E2**
+- **判定方法論教訓**：
+  - 凡是 channel-based audit emit + 上游 dedup_set，必 grep dedup mark 點是否在 emit upstream／downstream；upstream + try_send drop = silent loss
+  - 凡是「reconnect 會重發所以 idempotent」claim 必驗：(1) 上游 dedup 是否阻擋第二次到達 emit (2) PK ON CONFLICT 是否真覆蓋「重連後再到達」場景（不是「同一 emit 命中 ON CONFLICT」）
+  - 凡是 `try_send` 用於「不可丟失的 audit / observability event」必 push back；改用 `send().await` 背壓更乾淨
+  - §九 1200 hard limit 不可妥協 — E1 commit msg 沒提不代表可豁免；F3 + F4 merged 預測算法需 E2 主動算（兩 branch 改同檔不同 hunk）
+  - 跨 PR baseline 漂移時 cumulative 測試數比較無意義；只看「branch 自身是否從 own baseline 加測試 + 通過」
+  - mode isolation 在 handler 端讀（pipeline_kind.db_mode）vs producer 端路由 — handler 端讀更 robust（producer 誤路由也不會污染）
+  - DEFAULT-OFF 嚴格 "1" env-gate（拒 true/yes/on/0/" 1"/"1 "）是新代碼標準 pattern，G3-08 H state poller + F6 reload daemon 都用此（避免 typo 誤啟用）
+
+### 2026-04-26 Wave 3 W5 兩軌（EDGE-P2-flip T2 + G2-FUP-IPC-LEGACY-MS-FIX）— 兩軌獨立 PASS with conditions
+- **結論**：軌 1 EDGE-P2-flip T2（[15] per-strategy 切片 + breakdown.py 新工具）+ 軌 2 IPC HMAC ms→s 兩軌主體 OK，可 PASS to E4
+- **軌 1 [15] dormant 路徑驗證**：stub test scenario 1 證 `total == 0` 早 return PASS，per-strategy SQL 不執行（_call_count=2 而非 3）→ **0 dormant/per-strategy 衝突風險**
+- **軌 1 [14] vs [15] design divergence MEDIUM finding (T2-MED-1)**：E1 docstring 「mirrors [14]」誤導 — [14] per-strategy 純 informational（從不 promote status），[15] per-strategy WARN promotion 是 design **divergence**。讀者會以為 [14] 也有同樣升級邏輯
+- **軌 1 PM vs PA 立場分歧處理**：PA RFC §2.3 推 FAIL，PM 派發 spec 採 WARN（fail-soft），E1 採 WARN 正確；flag promotion 點極乾淨（line 2104-2109，1 個 return tuple，未來改 FAIL 改字串即可）
+- **軌 1 GROUP BY 對齊驗證**：PM prompt 推測「[14] 升級用 owner_strategy prefix」**錯**；[14]+[15] 都用 strategy_name 完整字串 GROUP BY（精確匹配，非 prefix LIKE），無對齊問題
+- **軌 1 sparse_threshold=5 邊界**：n=4 SPARSE / n=5 inclusive 進 PASS/WARN / disagreed_n=0 reason rows 不出現（sentinel 路徑只 1-4）/ aggregator 5 case stub 全 PASS
+- **軌 2 Rust verifier mirror byte-perfect**：對照 mod.rs:534-548 真實實作驗 5 點全 mirror — secret bytes / ts.to_string payload / Hmac<Sha256> / hex format / constant-time（mac.verify_slice ↔ compare_digest）/ tolerance abs(now-ts)>30
+- **軌 2 caller 影響**：grep 確認僅 2 production caller（live_trust_routes:296 + control_ops:515）；修前 100% PermissionError + 5s watcher poll / engine restart 兜底 → 修後 fast-path 即時生效；Rust handler advisory 設計（trigger_live_auth_recheck 永不錯誤回應 / set_system_mode 廣播 + snapshot 雙寫）→ **system behavior change but by-design**
+- **軌 2 commit message LOW finding (T2-LOW-3)**：應明示 `set_system_mode` 從 snapshot fallback (mins) → IPC fast-path (secs) 的 latency 改變，避免 operator 誤認「只是 typo fix」
+- **軌 2 test 邊界 LOW finding (T2-LOW-2)**：3 case 用 25/60 跨度避開 exact 30s；建議補 +30s pass + 31s fail boundary 增強保護
+- **§九 1200 上限管理**：healthcheck.py 2286 既存超 +101 不擴張範圍認可（純 [15] 升級 + per-strategy slice），G6-04 後續 wave 必拆（建議按 check ID 切到 sibling）
+- **判定方法論教訓**：
+  - 凡 docstring 說「mirrors [X]」必驗 [X] 與本 check 行為差異 — 不接受 happy-path「都 fail-soft 所以 mirror」籠統描述
+  - 凡 IPC ms→s 修復必查所有 caller 修前 silent fail 機制是否吞錯誤 + 修後 fast-path 生效是否引發 system behavior change（latency 變化等）
+  - Rust verifier mirror 必驗 byte-perfect（secret bytes / payload encoding / hex format / constant-time / tolerance）— 不接受「應該對齊」的籠統判斷
+  - §九 1200 既存超檔接收 PR 加注釋/小邏輯修必嚴守不擴範圍 + 後續 wave 必拆（不能無止境累加）
+  - PM prompt 推測「對齊既有 check 用 prefix 切片」必獨立 grep 驗證 — PM 推測有誤時必 push back（[14]+[15] 兩者用 strategy_name 完整匹配無 prefix）
+
+### 2026-04-26 Tier 3 batch review (5 commits, 7564d07..31fa96c) + G9-05 PUSH-BACK — 4 PASS / 1 PASS-with-MEDIUM / G9-05 CLOSE-PASS
+
+- **結論**：5 commit PASS to E4 / QA / PM Sign-off；G9-05 TW PUSH-BACK CLOSE-PASS（無 drift 需修）；建議 PM 開 4 follow-up tickets（非 BLOCKER）
+- **驗證 metric**：cargo lib `2176/0`（baseline 2166 + G9-02 ws_unknown_handler_guard 10 tests，commit message 完全對齊）；Python pytest `test_layer2 + test_layer2_escalation + test_layer2_tools = 136/0`（含 1 e2e @pytest.mark.slow warning，未阻塞）
+- **8-Axis audit 結果**：A 跨平台 PASS / B 雙語 PASS / C 範圍 PASS / D SQL Guard PASS（無新 V### migration）/ E Hot-path PASS（reconnect/subscribe/heartbeat/parse 0 動）/ F Test PASS / G E1/PA 11 review point 詳細結論 / H G9-05 CLOSE-PASS
+- **MEDIUM Finding G9-02-MED-1**：ws_client.rs 1108 → 1227 行（+119）超 §九 1200 hard cap +27 行；E1 memory.md 已 self-disclose 行數但略誤宣稱 +39。**ACCEPT-with-FOLLOWUP**（不退回 E1，hot-path 改動 surgical 再拆會擴張）；建議 PM 開 G9-02-FUP-WS-CLIENT-SPLIT ticket（split process_message 路由 / run() 內部結構，0.5-1d，Wave 4 收尾或 G5 refactor wave 帶走）
+- **G3-07 6 review points 結論**：6 ACCEPT / 0 REQUIRE-FIX / 0 REJECT
+  - #1 OPENCLAW_BYBIT_ENV namespace ACCEPT-with-NOTE（production 走 file-based 不 conflict + future polish ticket）
+  - #2 oi_24h_change_pct 不接 history endpoint ACCEPT（誠實標 data-unavailable per §二 #10）
+  - #3 liquidations_24h 不接 third-party ACCEPT（防擴範圍）
+  - #4 e2e network test ACCEPT（@pytest.mark.slow 已可 filter，warning 是 minor）
+  - #5 layer2_tools.py 1032 > 800 警告 ACCEPT（< 1200 hard cap 安全，sibling pattern 已最乾淨）
+  - #6 Mac httpx fail 不要求補 ACCEPT（Mac dev-only 本來不依賴 production deps，Linux SSOT 36/36 全綠）
+- **G9-02 5 review points 結論**：3 ACCEPT / 1 ACCEPT-with-FOLLOWUP / 1 OPEN-FOLLOW-UP / 0 REQUIRE-FIX
+  - #1 ws_client.rs 1227 cap → ACCEPT-with-FOLLOWUP（MED-1，開 split ticket）
+  - #2 force reconnect cooldown OPEN-FOLLOW-UP（既有 BackoffConfig::ws_public_default 3-60s 指數退避有基礎保護；DEFAULT-ON 後監控 forced_reconnect_total 1-2 週再決定是否需 cooldown）
+  - #3 DEFAULT-OFF env-gate 嚴格 "1" ACCEPT（vs G3-07 loose "1/true/yes/on"，差異合理：G9-02 是行為改動 strict / G3-07 是只讀工具 loose）
+  - #4 Auth phase 不啟 force reconnect ACCEPT（防 fresh connection 風暴）
+  - #5 ws_unknown_handler_guard.rs 共享 sibling ACCEPT（純 stand-alone module，pattern 對齊 ws_backoff.rs）
+- **G9-05 PUSH-BACK CLOSE-PASS 獨立驗證**：(1) grep `docs/references/2026-04-04--bybit_api_reference.md` 章節編號全為 1.X（9 子章 1.1~1.9），0 命中 L-[0-9] (2) set_trading_stop 字典 9 fields vs Bybit V5 真實 16+ fields 是 simplified subset（OpenClaw 未實作 partial TP/SL / limit-price TP/SL / order_type TP/SL）— TW 兩主張獨立驗證成立；BB 不需 re-audit
+- **判定方法論教訓**：
+  - 凡 PA design plan only commit 仍要驗：(a) 跨平台 grep (b) 章節結構完整 (c) phase rollout / risk / E2 重點審查 章節有實質內容；G3-08 自帶 §14「E2 重點審查 Top 3」可作為未來 E2 對抗式對照表
+  - 凡 §九 1200 hard cap 違反必判 ACCEPT-with-FOLLOWUP vs 退回 E1：(a) sibling 已預抽且 hot-path surgical 不可拆 → ACCEPT + open split ticket（如 G9-02-MED-1） (b) 沒做 sibling 預抽且純線性堆積 → REQUIRE-FIX 退回 (c) 有 sibling 但抽得不徹底 → 視 reviewer 判斷
+  - 凡 G3-07 類「pure-function tool」改 vs G9-02 類「Rust hot-path state machine」改的 sibling 預抽效果差異：前者 sibling pattern 完美（schema/handler 留主，fetch/parse 拆 sibling），後者 process_message 路由本身嵌在 select! 裡受限不可拆 — 應為未來 PA design 決策依據
+  - 凡 PM prompt 章節編號 vs doc 真實章節不一致（L-2~L-5 vs 1.2~1.5）：E2 不為 PM prompt 字面負責，為真實系統一致性負責 — 以 doc 原文為準
+  - 凡 caller graph 三層追蹤（self → import → cron pipeline）：v1 dead 不等於 v2 也 dead；v1 commit 必明示「v2 留尾 to broader cleanup ticket」（G9-04 commit message 範例好）
+  - 凡批次 review N commit + M review point + K PUSH-BACK 工作量管理：先 git fetch 拿物件 + git show 讀內容（Mac side 不 pull 避免動 working tree）+ ssh trade-core 跑 cargo test + pytest 驗 baseline + grep 驗 caller graph + namespace clash 雙端執行
+
+### 2026-04-26 Tier 4 batch review (6 commits, eb65e1e..4689fc8) + MIT findings + PM merge — 5 PASS / 1 PASS-merge / 0 RETURN
+
+- **結論**：6 commits **全 PASS to QA**（5 work commits + 1 PM merge accept union strategy）；MIT findings ACCEPT；PM merge ACCEPT；3 LOW finding 全 P3 future polish 不退回 E1
+- **驗證 metric**：cargo lib `2198/0`（baseline 2176 + 22 h_state_cache tests，post-merge Linux 驗）；pytest h_state `35/0`；layer2 chain `136/0` 不變；healthcheck cron pipeline 19→20 check Linux 跑通
+- **8-Axis audit 結果**：A 跨平台 PASS（生產代碼 0 hit，2 hit 在 c53c3f9 docs 屬政策反例引用白名單）/ B 雙語 PASS（5 Rust + 4 Python + 6 ws_client sibling + 5 OBSERVER 修改檔全中英對照）/ C 範圍 PASS（每 commit 嚴守邊界，G3-08 Sub-task B 不擴 Sub-task C 範圍 + OBSERVER 留尾 BB-M-3 合理）/ D SQL Guard PASS（無新 V### migration）/ E Hot-path PASS（G3-08 select! biased race=0 / G9-02-FUP 5 hot-path byte-identical 含 FA-1 risk #2 雙路徑非對稱性 / OBSERVER cron noise pattern 完全移除）/ F Test PASS / G PM merge ACCEPT（union 0 條目丟失 + cargo 2198/0 不破壞）/ H MIT findings ACCEPT（5 hypothesis 完整 + 雙因 RCA + STRKUSDT 7d lineage + 3 修復路徑 trade-off）
+- **3 LOW findings**：
+  - L-1 cron_observer_cycle.sh 76-79 BRIDGE_RC overshadow OBSERVER_RC at exit（只影響 cron daemon /var/log/cron exit code, log 行有 BRIDGE 細節）— P3 cosmetic 改 `[ $OBS -ne 0 -o $BRIDGE -ne 0 ] && exit 1`
+  - L-2 ai_service_dispatch.py 868 行 進 §九 800 警告區（pre-existing ~813 + G3-08 +55）— P3 split ticket 對齊 G5 refactor wave 收尾
+  - L-3 MIT 報告 H1 reject `build_exit_features_for_tick` 不寫 DB 結論未給 grep snippet 證據（E2 獨立驗證屬實）— MIT 下次補 grep snippet 教訓
+- **G3-08 Phase 1A Rust race risk 反駁**：PA §14.1 Top 3 #1 提「10s daemon poll + invalidation push 競態」實測無風險 — `tokio::select!` 同 task 同時只 select 一個 branch，`run_one_poll` sequential await 不可 reentrant；timer + invalidation 同時觸發只取 biased 順序首先 ready 那條，另一條等下一輪 select。Race=0
+- **G3-08 Phase 1B IPC route 真相教訓**：reverse IPC route 註冊位置是 `ai_service_dispatch.py:_register_handlers()` 的 `self._handlers` dict（不是 ipc_dispatch.py / dispatch.rs），這是 Rust→Python JSON-RPC server handler registry。E2 對抗 review 必驗 route 是否「永遠註冊」（PA §10.1 規定 env=0 時 route 仍可達），E1 此處對齊正確
+- **G9-02-FUP 5 hot-path byte-identical 對抗驗證**：grep run_loop.rs:66-70 (WS-TIMEOUT) + run_loop.rs:97-103,156-169 (subscribe HashSet O(1) + 10-batch + 500ms gap) + dispatch.rs:135-147 (process_message ShouldReconnect::No,Yes) + run_loop.rs:78-86,247-251 (BackoffConfig 雙路徑 FA-1 risk #2 順序非對稱性 — timeout-path sleep→after-incr / main-exit-path before-incr→delay) + run_loop.rs:200 (ProcessOutcome::ForceReconnect close-frame + break) — 5/5 byte-identical 對照原 1227 行內嵌實作
+- **OBSERVER cron-time env var 陷阱教訓**：cron 預設 cwd=$HOME（非 REPO），shell var fallback `OPENCLAW_SRV_ROOT="."` 在 cron context 解到完全不同 path → cycle JSON 寫到 `$HOME/docker_projects/` 而非 `REPO/docker_projects/` → healthcheck 找不到新鮮 JSON 是 path 偏移、不是 stale。修法：cron wrapper 顯式 export env var 給子程序，**不依賴** systemd / cron daemon 繼承
+- **OBSERVER `if ... ; then ... else echo "non-fatal" ; fi` 是 noise wrapper 反模式**：把 exit code 譯成 log 行 + 整段 exit 0 是 silent-fail 教科書級。CLAUDE.md §七「被動等待 TODO 必附 healthcheck」+「連續 3 FAIL 中止」要防的就是這 pattern。任何「failed (non-fatal)」字眼在 cron wrapper 都該被 grep 出來重 review。E2 cron wrapper review 必先 grep `non-fatal` / `set -e` 邏輯
+- **OBSERVER healthcheck 設計兩選一教訓**：(a) 真實狀態暴露（預設 FAIL，operator opt-out）vs (b) 環境感知（預設 PASS，operator opt-in）— silent-fail 修復場景必選 (a)，否則 healthcheck 自己變 silent-fail 二線共犯。E1 在 [19] 選 (a) + `OPENCLAW_OBSERVER_PIPELINE_OPTIONAL=1` opt-out 正確
+- **PM merge union strategy 驗證**：parent 1 (main `0765d0a` 含 Sub-task B + OBSERVER) + parent 2 (worktree `fbfb56f` 含 Sub-task A) → merge result `87fccdb` 兩段「報告檔位置」line 並列保留（worktree 用「直接傳給 parent agent」+ main 用「`.claude_reports/<ts>...`」雙引兩段）。3 條目（A/B/OBSERVER）全保留無丟失。E2 必查 union: (a) parent 1 + parent 2 各條目 grep 驗對應 (b) merge commit message 標明來源 worktree (c) cargo test post-merge baseline 不破壞
+- **MIT 5 hypothesis + 雙因 RCA 結構**：H1-H5 涵蓋 builder bug / detection / retry duplicate / SQL bug / engine_mode mismatch；雙因 RCA-A (FastTrack ReduceToHalf 對 dust legacy 倉位無限半倉，step_0_fast_track.rs:317 fail-open) + RCA-B (EF writer 對 partial reduce 也寫 row，pipeline_helpers.rs:217)；3 修復路徑 1+2 cohesive PR 對齊 RCA 結構合理。對抗 review 必獨立 grep H1 reject 證據鏈（`build_exit_features_for_tick` 是否真不寫 DB / `try_emit_exit_feature_row` 是否唯一 EF 寫 DB 路徑），不依賴 MIT 報告字面結論
+- **判定方法論教訓**：
+  - 凡 PM 派發 5 並行 sub-agent 中含 worktree isolation 一個 → 必查 PM merge 是否：(a) E1 memory.md 三段全保留 (b) merge commit message 標明來源 worktree branch (c) cargo test 不破壞 baseline；union 策略可接受但「報告檔位置」雙引 line 屬可容忍 cosmetic（不退回 PM）
+  - 凡「reverse IPC route」實作必查 (a) 註冊位置（`_register_handlers()` 而非 ipc_dispatch.py） (b) 是否「永遠註冊」（PA §10.1 規定 env=0 時 route 仍可達） (c) HANDLER_TTLS 是否 ≤ SLA target （5ms target → 2.0s deadlock guard） (d) lazy import 是否防 bootstrap cycle
+  - 凡 Rust `tokio::select!` race claim → 必驗 (a) `biased` 順序語意 (b) `run_one_poll` sequential await 不可 reentrant (c) await 點之間 task 不可中斷 — 三條皆滿足 race=0；不接受 happy-path 「應該不會 race」籠統判斷
+  - 凡 cron wrapper review → 必先 grep (a) `non-fatal` / `set -e` 邏輯 (b) `export OPENCLAW_*` env var 完整 (c) 任一段 RC 顯式捕捉 + wrapper 整體非零；發現 `if ... ; then ... else echo "non-fatal" ; fi` pattern 立即標 silent-fail 教科書級反模式
+  - 凡 healthcheck 預設 FAIL vs PASS-skip 取捨 → silent-fail 修復場景必選預設 FAIL + operator 主動 opt-out（`OPENCLAW_*_OPTIONAL=1`），不選預設 PASS
+  - 凡 MIT findings audit → 對 H1-H5 reject 結論必獨立 grep 證據鏈（不依賴 MIT 字面結論）；推 MIT 下次報告補 grep snippet 對齊 §7 smoking gun SQL 同等地位
+  - 凡 hot-path byte-identical 改動 → 必獨立 grep 對照 5+ hot-path 在新 sibling 中的確切 line（非籠統「保留」），FA-1 / WS-TIMEOUT 等 risk-tagged 點順序語意特別需驗
+
+### 2026-04-26 Tier 5 batch review (7 commits, af48ee1..f2ed286) — 3 PASS / 0 RETURN / 3 FUP tickets
+
+- **結論**：T5.1 EXIT-FEATURES-FIX (3 commits) PASS / T5.2 G3-08-PHASE-1C (2 commits) PASS / T5.3 G3-08 Phase 2 H1+H3 (2 commits) PASS-with-FOLLOWUP；3 follow-up tickets 推薦 PM 開
+- **驗證 metric**：cargo lib `2210/0`（baseline 2198 + EXIT-FEATURES-FIX +12 unit tests）+ integration `12/0`；pytest `75/0`（H1/H3/h_state_query_handler）+ strategist regression `36/36`；healthcheck [20] env=0/env=1 smoke 兩態都驗
+- **8-Axis audit 結果**：A 跨平台 PASS（7/7 commits 0 hit）/ B 雙語 PASS（11/11 modified files ≥5 中 markers + MODULE_NOTE）/ C 範圍 PASS（3 task 各自獨立 sequential 不擴張）/ D SQL Guard PASS（無新 V###）/ E Hot-path PASS-with-FOLLOWUP / F Test PASS / G PA design PASS-with-MEDIUM（H3 schema mismatch dormant）/ H MIT audit PASS（A1+A3+B1' 對齊）
+- **EXIT-FEATURES-FIX RCA-A audit**：(a) Gate 1 USD floor active in ALL branches（封住 entry_notional==0 fail-open 漏洞）(b) Gate 2 ratio gate 仍對 entry_notional > 0 生效（保留 pre-FIX legacy real position）(c) ft_dust_qty_floor_usd schema validate [0, 100_000] + reject NaN/Inf（hot-reloadable via patch_risk_config）(d) bootstrap migrate_legacy_entry_notional idempotent（only entry_notional <= 0 && qty > 0）(e) stale tick fall-through（last_price <= 0.0 → return true 保留倉位下 tick 重評估）
+- **EXIT-FEATURES-FIX RCA-B audit**：(a) is_partial_reduce_tag exact-match 不誤判 PHYS-LOCK / strategy exit (b) emit_close_fill 仍寫 trading.fills（operator visibility + PnL 帳）只 EF skip (c) E1 採 B1' 變體（partial_reduce_tag exact match）比 MIT B1 (`realized_pnl == 0`) 更精準避誤封 break-even 邊界 case
+- **G3-08 Phase 1C audit**：condition spawn 模式對齊 G3-03 ExecutorConfigCache（資源流相反）/ DEFAULT-OFF env=0 zero overhead（嚴格 `=="1"` strict eq → singleton stays None → invalidate_async no-op）/ healthcheck [20] 三態 PASS/WARN/FAIL pure-Python no live IPC（對齊 [16] log-tail-parse 哲學）
+- **G3-08 Phase 2 H1+H3 audit**：H1/H3 invalidate_async hooks 在 public method exit fire-and-forget never-blocks / get_*_snapshot 純讀無副作用 / lazy-import strategy_wiring 避 bootstrap circular（worker boot 序列死鎖風險）/ _safe_snapshot defensive 防 snapshot raise / schema v0→v1 升級含 `version != 0 + h_states keys ≠ 0` 觸發
+- **MEDIUM Finding T5.3-MED-1 H3 schema mismatch (DORMANT)**：Python keys 0/7 match Rust H3RouteStats（Python `l1_9b_count` vs Rust `l1_9b`，Python `l2_cache_hit/expired/stored` vs Rust `cache_hit/expired`，Python 多 `total_routes/budget_denied_count/l2_cache_stored`）；runtime impact = 0（Rust 仍用 StubHStateFetcher）但 Phase 3+ 接 real fetcher 時 silent regression。建議 PM 開 G3-08-PHASE-2-FUP-H3-SCHEMA-ALIGN（30min, before Phase 3 lands real fetcher，PA-led design A/B/C decision）
+- **MEDIUM Finding T5.3-MED-2 私有屬性穿透 (CLAUDE.md §九 #8 violation)**：h_state_query_handler:247-249 用 `getattr(strategist, "_h1_gate")` + `getattr(strategist, "_model_router")` 直讀 StrategistAgent 私有屬性；PA §5.1 spec line 397-405 期望 PUBLIC facade `STRATEGIST_AGENT.get_h1_stats_snapshot() / get_h3_route_stats_snapshot()`；E1 跳過 facade layer。functional impact = 0（_safe_snapshot defensive）但 contract 違規（後續 strategist refactor 改名 `_h1_gate` → `_thought_gate` 會 silent break）。**PM 二選一**：(A) RETURN E1 加 facade method ~15min ; (B) ACCEPT-with-FOLLOWUP 開 G3-08-PHASE-2-FUP-PRIVATE-ATTR-FACADE (P2)
+- **LOW Finding T5.1-LOW-1 helpers.rs 1315 §九 violation**：pre-existing 1182 + af48ee1 +133；hot-path 抽 helper surgical 不可隨便拆，ACCEPT-with-FOLLOWUP 對齊 G9-02 ws_client.rs 1227 方法論（同樣是 hot-path 非線性堆積、sibling pattern 可拆 helpers/{tags.rs, phys_lock.rs, shadow.rs}）；PM 開 EXIT-FEATURES-FIX-FUP-HELPERS-RS-SPLIT (~0.5d, Wave 4 G5 refactor)
+- **LOW Finding T5.2-LOW-1 healthcheck [20] expected sync after 9120948**：5943337 期望 stub Phase 1 形狀（version=0 + h_states={}），9120948 升級為 version=1 + real H1+H3 snapshots when env=1 → [20] env=1 path 永遠 WARN「Phase 2-4 progress? update [20] expectations」。E1 寫的 WARN 邏輯吸收成功但 [20] expected 應同步更新；PM 開 G3-08-PHASE-1C-FUP-CHECK20-SYNC (~10min)
+- **LOW Finding T5.3-LOW-1 model_router redundant f-string**：`counter_key = f"l1_9b_count" if ... else f"l1_27b_count"...` 無 placeholder；功能等同 plain string 但 ruff PLF0901 / W1309 會報；E2 留給 PM 決定是否強制修
+- **PM merge ACCEPT 推薦選項 B**（T5.3 PASS-with-FOLLOWUP）：functional impact = 0 + lazy-import 避 bootstrap circular 設計合理 + 1822 行 + 61 tests 重派 review cycle 開銷大 + PA §5.1 命名與 follow-up 一併處理符合 G2-02 / G9-02 / OBSERVER 慣例
+- **判定方法論教訓**：
+  - 凡 RCA-A 修法 layered Gate 設計必驗 5 個 invariants：(1) Gate 1 active in ALL branches 包含 fail-open 漏洞 path (2) Gate 2 仍對 valid path 生效保留 pre-FIX 行為 (3) schema validate boundary（NaN/Inf/range）(4) bootstrap migrate idempotent（only touch broken state）(5) stale data fall-through safety
+  - 凡 RCA-B 修法「跳過特定 tag」必驗 3 個 invariants：(1) tag exact-match 無誤判其他 close path (2) downstream side-effects（trading.fills / PnL accounting）仍正常 (3) 改進 vs MIT 原 spec（如 B1 → B1' 用 tag 而非 PnL）邏輯更嚴謹
+  - 凡 condition spawn pattern 必驗 4 個 invariants：(1) DEFAULT-OFF env-gate strict eq vs loose eq（行為改動 strict / 唯讀工具 loose）(2) singleton 為 None 時 method early return zero overhead (3) reverse channel 無條件註冊 vs push channel env-gated (4) ImportError + Exception fail-closed 不 crash
+  - 凡 schema v0→v1 升級必對照 (a) Python 推送的 keys (b) Rust 接收的 fields (c) PA design plan 規定的 spec naming —— 三者 mismatch = silent regression latent；本批 H3 keys 0/7 match Rust H3RouteStats 是教科書級 schema drift hazard
+  - 凡「跨進程 IPC handler」呼叫 SSOT 進程內 component 必驗 (a) 公有 facade method 路徑 (b) PA spec naming convention (c) §九 私有屬性穿透禁忌；本批 h_state_query_handler 直讀 _h1_gate / _model_router 違 §九 #8 + 偏 PA §5.1 spec
+  - 凡「commit B 19min 內 invalidate commit A 期望值」（Tier 5 [20] expected sync 是繼 Phase 1+2 banner 後第二例）— PM 編排建議「同 push wave / commit B 完成手動補 commit A patch / commit A 加 TODO 標記」
+  - 凡 §九 1200 hard cap violation 必判 (a) sibling 已預抽且 hot-path surgical 不可拆 → ACCEPT-with-FOLLOWUP（如 helpers.rs 6 個 free fns 可拆 sibling）(b) 沒做 sibling 預抽且純線性堆積 → REQUIRE-FIX 退回；本批 helpers.rs 屬 (a) 對齊 G9-02 ws_client.rs 慣例
+  - 凡 H 狀態 cache fetcher 從 stub → real 的演化 — 必在 stub 階段建立 schema parity 測試（不只測 default）防 future Phase 接線時 silent drift；本批 PA 設計 forward-compat unknown fields drop 是雙刃劍
+  - 凡 lazy-import 在 IPC handler 內必驗 3 個 invariants：(1) top-level import 不觸 circular（boot 序列死鎖）(2) ImportError + getattr None 多層 try/except 兜底 (3) never-raises contract 維持（IPC handler 對 caller 永不 propagate snapshot bug）
+  - 凡 PM 派發 7 commits 中含 3 個獨立 task 必查 commit time-order：本批 5943337 (15:43) → af48ee1 (15:48, parent=deee78e) → 9120948 (15:58)；3 task sequential 不是 cohesive PR，避免 §C 範圍判定誤套用 cohesive 標準
+
+### 2026-04-26 Tier 7 batch review (3 commits, 4b30f5e/8241133/c6ed0b3) — 3 PASS / 0 RETURN / 1 LOW FUP
+
+- **結論**：T7.1 Track 1 Rust H3RouteStats schema align (`4b30f5e`) PASS / T7.2 Track 2 healthcheck [21] dust inventory (`8241133`) PASS-with-LOW / T7.3 Track 3 PA Phase 3 sub-task split design (`c6ed0b3`) PASS。1 FUP optional（T7-FUP-DUST-SQL-DEVIATION-DOC，PA 10min 補 PA RFC §7.4 註記 E1 cleaner SQL）
+- **Track 1 4 強 claim 獨立驗證 100%**：(1) 10 keys aligned — 讀 `model_router.py:114-124` 9 stats keys + line 480 `cache_size` 注入 = 10 ✅ (2) 0 production hot-path consumer — `grep H3RouteStats rust/src/` 5 hits 全 internal + ipc h_state.rs:69 用 opaque struct via serde 無 field-name 依賴 ✅ (3) Schema parity test 真效 — BTreeSet 比對硬編碼 Python keys list，order-independent，drift 即 RED ✅ (4) Python 0 改動 — `git show --stat 4b30f5e` 1 file (types.rs) 167+/7- ✅。Linux cargo lib h_state_cache 17/0 (baseline 2195 + 17 = 2212)。閉合 E2 Tier 5 T5.3-MED-1
+- **Track 2 SQL 偏離 PA spec 但屬改善**：E1 在 `COUNT(DISTINCT symbol)` 加 `FILTER (WHERE realized_pnl=0)`（PA spec 沒）+ 棄 `partial_reduce_real_count` 欄。改善理由：filtered distinct 才真是 dust spiral fan-out signal（unfiltered 會被 partial_reduce_real 活動 inflate）。Linux production cron 16:09 UTC 印 `PASS [21] ... dust_spiral_count=0` LIVE 驗證。Slot [21] 唯一性 grep 確認（[17] 從未 assign，[16][18][19][20] 已佔）。三態 verdict 邊界 14 unit tests 覆蓋 1/10/11/2/3 + null + cursor None 完整無 off-by-one。Supersede note 在 docstring + TODO.md 4 處同步
+- **Track 3 PA Pattern B 決策論證 + 3 silent claim 獨立驗證**：(1) Pattern A 9-task α 全空 (Phase 1A 已建 schema) ✅ correct critique (2) Pattern C 4-task audit prelude 與 RFC §2.3 已併入的 H4 drift / H5 metadata 重複 ✅ correct judgment (3) H4 silent gap CONFIRMED — `grep validation_pass program_code/` 0 hits ✅ Sub-task 3-2 必補 (4) strategist_agent.py 1170 LOC + 25 = 1195 距 §九 1200 hard cap 5 line ✅ Phase 4 必先拆 (5) 3-1 + 3-3 file overlap CONFIRMED — `record_claude_cost layer2_cost_tracker.py:227` 是 H2 + H5 共同 hook 點 ✅ serial 強制正確 (6) Prompt template self-contained 抽 3-1 通讀 6 段式齊備
+- **判定方法論教訓**：
+  - 凡 sub-agent 自驗「0 production consumer」必獨立 grep 同範圍排除 def/test/re-export 確認；本 batch Track 1 + Tier 6 Track 2 兩次驗證皆成立 → pattern 收斂為「Rust mirror schema 在 Phase N stub 階段改 dormant struct 是黃金窗口」
+  - 凡 PA「ready-to-deploy SQL」E1 落地時改寫必逐 token diff，分清「invariant preserved 改善（如 filter 更精準）」vs「規範違反（如 verdict 邊界改）」；前者 LOW + 文件補 follow-up；後者 RETURN
+  - 凡 healthcheck 新增必驗 (a) Linux production cron 真跑通 (b) slot 編號 grep `__init__.py` 全 list 確認唯一 (c) supersede 既有 ticket 必 docstring + TODO.md 雙處留 audit trail
+  - 凡 PA RFC pattern A/B/C 決策 E2 不否定設計判斷但驗證底層 claim：本 batch H4 silent gap + 1170 LOC 餘地 + file overlap 全 grep 驗證屬實 — claim-based decision 站得住腳 = PASS；若 claim 假（如「0 hot-path consumer」實際有）= 退回 PA 重 design
+  - 凡 prompt template self-containedness 6 段式（前置驗證 + 文件 + 實作 + 完成標準 + commit msg + 一行回報）可作 E2 機械 check 標準 — 缺任一段 = LOW finding
+  - 凡 schema parity test 用 BTreeSet 而非 list 是 order-independent 設計，未來 PA 推類似 mirror schema fix 必鏡此 pattern 否則重新 排序 fields 即破測
+
+### 2026-04-26 Tier 8 batch review (4 commits, 8cd257e/cf39415/71faf4c/79a808a) — 3 PASS / 0 RETURN / 1 MEDIUM + 1 LOW FUP
+
+- **結論**：T8.1 Sub-task 3-1 H2 (`8cd257e`+`cf39415`) PASS to E4 / T8.2 Sub-task 3-2 H4+silent gap (`71faf4c`) PASS-with-MEDIUM (T8-MED-1 strategist_agent.py == 1200 LOC §九 hard cap exact-touch) / T8.3 RFC §7.4 amend (`79a808a`) PASS-with-LOW (typo). Linux pytest 188/0 + cargo h_state_cache 17/0 baseline 不變 + production cron [21] LIVE PASS dust=0
+- **Multi-track absorb pattern verified**：Track 1 sub-agent claim「absorbed Track 2 in-flight H4 edits to h_state_query_handler.py + test_h_state_query_handler.py via git commit --only」獨立 cross-diff 驗 TRUE — Track 1 含 H4 wiring + Track 2 0 touch shared files = atomic merge 成功，未來 PM 派 2-track parallel on shared files 可採此 pattern
+- **§九 1200 hard cap exact-touch 判定為 MEDIUM 不 LOW**：strategist_agent.py wc -l = 1200（commit msg + memory + PA §10.4 三重 self-disclose），boundary itself 在 `>1200 reject` 標準下 OK，但任何 Phase 4 +1 LOC = silent violation；MUST 開 split ticket 作 Phase 4 hard pre-condition；bilingual readability 抽 1180-1200 + 945-970 spot-check NOT degraded（trim 1234→1206→1200 通過）
+- **Silent gap 雙保險修法 (counter + invalidate hint pair)**：Track 2 H4 從 PA-prompted `validation_pass` grep 0 hits → 13 hits（init dict + pass branch counter + pass branch invalidate_async + get_h4_snapshot + docstring）；fail/pass 兩路徑對稱加 hint，防次級 silent gap（counter 動但 Rust 不知變化）— 此 pattern 通用化推廣
+- **判定方法論教訓**：(a) sub-agent 「absorbed in-flight edits to shared files」強 claim 必 cross-diff 兩 commit 對照不接受 face value (b) §九 hard cap exact-touch 默認 MEDIUM-with-mandatory-split-FOLLOWUP，警示下次 +1 LOC silent violation (c) bilingual trim 在 §九 壓力下 spot-check 1-2 段 docstring + invariant + import 即可判 readability degraded vs not (d) silent gap fix 必 dual-pattern (counter + hint) 對稱補 fail/pass 兩路 (e) PA RFC amend §13 Deviation Log + 不重寫 §7.x in place 是非破壞性 SSOT drift correction template
+
+### 2026-04-26 Tier 6 batch review (4 commits, 306b549..56104de) — 3 PASS / 0 RETURN / 2 FUP tickets
+- **結論**：T6.1 Track 1 (4 LOW + memory) PASS-with-LOW / T6.2 Track 2 H3 schema design PASS / T6.3 Track 3 dust audit design PASS-with-LOW。FUP：T6-FUP-WARN-ZONE-FILES-SPLIT (checks_derived 869 + ipc_client 899 兩檔進警告區漸增) + T6-FUP-PA-MEMORY-INDEX-SYNC (dd4d64a 缺 PA memory append)
+- **Pivot 對抗驗證 2 條**：(1) TIER4-OBSERVER 「postmortem readability 改善 ≠ 修不存在 overshadow bug」獨立 grep tier4_L309 + cron exit code 語意 byte-identical 驗證 ✅ (2) EDGE-P1b-FUP-NEGATIVE-GUARD 「ipc_client.py 真無既有 7 guard pattern 可鏡射」獨立 grep `exit_` 確認只 `exit_stale_peak_ms` typed-wrapper 暴露（L474 doc 自證）+ grep calibrator producer-side clamping ≠ ipc_client guard，故是 **typed-wrapper 第一個** ✅
+- **Track 3 PA push back 5-axis 獨立 SSOT 驗證 100% 站得住腳**：fill_engine.rs:220-243 restore 只 3 scalar counters / V018:30-39 paper_state_checkpoint 4 欄無倉位 / fill_engine.rs:44-75 import_positions 唯一倉位來源 / fill_engine.rs:377 reduce_position 1e-12 threshold (0.1 dust 不刪) / owner_attribution.rs:112 SYNTHETIC_OWNER_LABELS guard (Option C real-strategy flip 真實風險)
+- **Track 2 PA RFC schema mismatch 獨立驗證**：Rust H3RouteStats 7 fields + 0 hot-path consumer + Python 9 keys + cache_size = 10 + StrategistAgent 共用 L2 keys (Option A scope 風險 CONFIRMED)
+- **判定方法論教訓**：(a) sub-agent 主動 pivot 必查 PA prompt vs codebase grep 對照 + 屬「精準 framing」vs「修錯需求」(b) PA push back upstream 必 5 重 SSOT 獨立驗證，不依賴 PA 字面 (c) typed-wrapper guard 必三軸驗（field 是否真暴露 / 既有 fields 是否真有 guard / producer-side clamping 是否替代 wrapper guard）(d) PA workspace report commit 必查同 commit 內 PA memory.md 索引同步
+
+### 2026-04-26 Tier 8 Track 4 supplementary review (d1a2252) — Sub-task 3-3 H5 / Phase 3 COMPLETE — PASS-with-LOW
+- **結論**：Track 4 (`d1a2252`) PASS-with-LOW to E4 (1 LOW T8T4-LOW-1 §九 layer2_cost_tracker.py 930 LOC warning zone +130, headroom 270)
+- **驗證 metric**：Mac pytest **196/196 PASS** (independently re-run by E2: test_layer2 82 + test_h_state_query_handler 52 + test_h_state_invalidator 21 + test_strategist_agent 41); Rust H5CostStats schema 4 fields independently verified at types.rs:167-178 byte-identical
+- **7 PM-prompted adversarial points 全 verified PASS**：(A) 4-field schema parity (B) dual hook race-window safe by daemon-thread fire-and-forget + Rust handler 無 ordering contract + set test (C) cost_tracker SSOT 共享 H2+H5 同 drop by design (D) `with_h5=False` default-off pattern 三 sub-task 一致 (E) metadata drop 不破壞下游因 get_cost_edge_ratio 仍是 SSOT (F) search hook position 在 record_search_cost 末尾 + Sub-task 3-1 H2 contract 保留 (G) `test_all_raise_drops_all_keys_version_zero` rename 5 桶 invariant 升級正確
+- **lockless-read pattern 驗證**：`get_h5_snapshot` 不取 lock，鏈接 `get_cost_edge_ratio` 既有 lockless pattern；docstring 明確記錄契約「writer recalculate_adaptive 在 self._lock 下原子 replace whole self._adaptive reference」（line 588+636 grep verified） — CPython GIL 保證 attribute reference assignment 原子性
+- **判定方法論教訓**：(a) Single-commit Tier review template 適合「Tier batch 後晚到 cross-tier track」76s 時序差場景 (b) Dual invalidate hook 同 callsite 必 set comparison 反映無 ordering contract (c) Hot-path snapshot lockless-read pattern 適用 SSOT 持有 value-object 屬性 + writer 始終原子 replace whole reference 場景 (d) §九 800 warning line 應作 LOC 累積信號開 follow-up `G3-08-PHASE-4-COST-TRACKER-SPLIT` LOW with Strategist split — 不無視避免重演 strategist 1200 hard-cap 直撞教訓 (e) SSOT 共享 + degradation 一致性 by design 不退回，但 test 必顯式驗證共享 drop 路徑 (f) Metadata projection at Python boundary 是設計選擇 trade-off (Rust serde forward-compat 已容忍 unknown key, 但 pre-filter 帶來窄 wire payload + 清晰 schema contract)，design judgment acceptable
+
+### 2026-04-26 Python P0 Wave: F5 GUI + F7 healthchecks adversarial review — F5 RETURN / F7 PASS-with-MED+LOW
+
+- **結論**：F5 (`51be82f`+`3d1fb1f`) **RETURN to E1** (3 issues：1 HIGH server-side write guard gap / 1 MEDIUM client-guard bypass / 1 LOW import-in-fn) · F7 (`4085442`+`f572edc`) **PASS to E4 with FUP** (1 MEDIUM cross-cutting [23] vs F4 audit row + 2 LOW [26]/[28] design-time concern)。F7 38 unit tests Mac worktree 跑 `OK 0.014s`
+
+- **F5 critical gap — server-side phantom guard 漏寫入路徑（HIGH）**：5 個 GET endpoint (`/balance` `/positions` `/orders` `/fills` `/metrics`) 全套 `_phantom_view_guard()`，但 **2 個寫入 POST endpoint (`/positions/{symbol}/close` + `/close-all-positions`) 完全沒套**。違反 §二 #6 fail-closed + #2 讀寫分離。攻擊路徑：curl 直接 POST → IPC `close_all_positions {engine:"live"}` → IPC fail（live pipeline not authorized）→ `_sweep_live_orphan_positions` REST fallback **用 demo client → 誤平 demo 帳戶倉位**。Client-side `_applyLiveActionGuards()` 只 disable 按鈕 attribute（dev tools console / dynamic re-render 都可繞）。HIGH 嚴重性 RETURN
+
+- **F5 - 個別倉位「平倉」按鈕 + closeLiveOnePosition 完全繞過 client guard（MEDIUM）**：`_applyLiveActionGuards()` 只查 3 種 button id (btn-live-stop / btn-emergency-stop / `button[onclick="openCloseAllDialog()"]`). `closeLivePosition` 走 `closeLiveOnePosition` onclick string 不在 query 範圍 — phantom 模式 client side 也可觸 POST。配合 server-side 缺 phantom guard → 雙重沒守。MEDIUM finding
+
+- **F5 - `_resolve_live_endpoint_label` import-in-function 違反 [R1-6]（LOW）**：line 28-29 `import os` + `from pathlib import Path` 在 fn 內。`os` / `pathlib` 模組頂層 unused（已 grep 驗）。LOW finding。額外風險：import 在 try block 內，import fail（如 sys.path 異常）silently 吞回 "unconfigured"
+
+- **F5 - test 設計缺陷 `test_phantom_guard_allows_demo_engine_with_configured_mainnet_slot`**：注解明白標出「Mainnet slot configured + Rust live engine 沒跑」場景 backend 不擋（slot configured） → balance/positions endpoint **會打真實 Mainnet REST API 拿到真實 Mainnet 帳戶資料 + 注入 actual_engine_kind=demo marker**。前端依 marker swap 到 integrity-fail view 不渲染，但 **API response payload 已含 Mainnet wallet 資料** → 攻擊者直接 curl 仍能拿到。違反 §二 #2 讀寫分離。設計 trade-off acceptable for fast development，但需明確 backlog ticket 防 production 漏（已寫進 RETURN issue）
+
+- **F7 cross-cutting [23] vs F4 audit row 衝突（MEDIUM）**：F4 emit `unattributed:bybit_auto` audit row 進 trading.fills（context_id=`unattrib-{exec_id}-{ts}` non-NULL，**沒對應 order_state_changes**）。F7 [23] LEFT JOIN `trading.fills f LEFT JOIN trading.orders o ON o.context_id = f.context_id` → audit row fills_n=1 / orders_n=0 → 計入 `pairs_with_missing_orders`。1h 內 ≥6 個 F4 audit fill 跨多 symbol → F7 [23] 誤 FAIL「orders writer dropping rows across >5 pairs」。修法：`AND f.strategy_name NOT LIKE 'unattributed:%'` 排除 audit row。MEDIUM cross-cutting finding（需 F4 + F7 兩 PR coordinate）
+
+- **F7 [26] brittle constant `realized_net_bps = -5.5`（LOW）**：源於 `bybit_sync` adopted positions 的 `entry_fee = 0.0`（`fill_engine.rs:62/142`）→ `realized_net_bps = 0 (gross) - 5.5 (close) - 0 (entry) = -5.5`。耦合於當前 adopted-pos 實作。如未來修「給 adopted position 補 entry_fee 追蹤」→ `-5.5 → -11`，[26] 就 silently 漏抓 regression。建議改 `realized_net_bps BETWEEN -12 AND -4` 範圍 match。LOW finding
+
+- **F7 [28] per-symbol min_qty 通用閾值 `1e-3` 漏抓較大 symbol（LOW）**：BTC min_qty 0.001 = 1e-3 邊界 OK；ETH min_qty 0.01 → phantom 0.005 通不過 [28]（0.005 ≥ 1e-3）但 0.005 < ETH min_qty。設計上 [28] 是 fast triage 而非 full coverage，acceptable，但 docstring 應註明「fast triage; 較大 symbol 由 [21] dust inventory 接力」。LOW finding
+
+- **F7 mock pattern 健康**：MagicMock cursor + `cur.connection.rollback = MagicMock()` 配對 defensive rollback 慣例；`fetchall.return_value = [tuples]` 直設、`cur.execute.side_effect = Exception` 模擬 schema drift；38 tests 覆蓋 PASS/WARN/FAIL/empty/exception 各 5 case；boundary value（dcs_1h=100/101 / pairs_missing=5/6）沒測 edge — 屬 minor 不阻 PASS
+
+- **F7 [22] `engine_mode IN` schema 安全 verified**：5 表（fills/intents/orders/risk_verdicts/decision_context_snapshots）全在 V015 加 engine_mode column（含 risk_verdicts L20-23 + DCS L58-62 verified via grep）。SQL filter 不會撞 UndefinedColumn
+
+- **F7 file size 1154 / 1200 close to cap**：`checks_strategy.py` 距硬限 46 行；下次新 check 加進去會超。建議 follow-up `F7-FUP-CHECKS-STRATEGY-SPLIT` ticket 預計畫 split timing，避免重蹈 strategist 1200 exact-touch 教訓
+
+- **判定方法論教訓**：(a) GUI fake-success eliminate PR 必同時驗 GET (read) + POST (write) 兩面，前端 disable 按鈕不是真 guard 因 dev tools / dynamic re-render 可繞 (b) `closeLiveOnePosition` / `closeLivePosition` 雙函數命名近似但 callsite 不同 → client-guard 用 querySelector onclick string 必窮舉所有 onclick attribute 反例 (c) phantom guard 雙重判據（engine != live AND slot unconfigured）邊界邏輯 5 種狀態（mainnet/live_demo/unconfigured × engine in {live/demo/paper/unknown}）需各一 test case 完整覆蓋 (d) MIT spec 寫死的 magic number constant（如 -5.5）E2 必驗其推導鏈是否耦合於當前實作 invariant；耦合即 brittle (e) F4 + F7 並行落地時 cross-cutting 互動必驗：strategy_name pattern + context_id NULL 行為 + LEFT JOIN 結果 三軸交叉 (f) per-symbol invariant（如 min_qty）的通用閾值 [28] 1e-3 = fast triage acceptable，但 docstring 必說明 coverage 邊界 + sister check 接力
+
+## 2026-04-27 · G3-08 Phase 4 Strategist split (commit 6fac0ca) review
+
+- Verdict: PASS_WITH_NITS
+- 主檔 1200 → 792 (well under 800), 3 sibling 369/224/169
+- _handle_intel / _produce_intents / __init__ byte-identical (verified by `diff` empty)
+- 16 method body 搬出 + 16 1-line delegator + 4 sibling re-export blocks all `# noqa: F401`
+- 0 except:pass, 0 f-string in logger, 0 hardcoded paths, 0 module-level mutable state
+- Sibling fns 接 `agent: StrategistAgent` 第一參，access `agent._lock` / `agent._stats` / `agent.cost_tracker` / `agent._truth_registry` 等 instance attrs all map 1:1
+- Tests: 41/41 strategist_agent + 59/59 audit_wiring/truth_source/h_chain pass on Mac
+- 所有 re-export alias smoke-importable，class method `_ai_evaluate` 等仍存（delegator）
+- 無 Rust / TODO / CLAUDE / memory / helper_scripts touched
+- 設計 nit (NIT-1)：`_handle_intel` 仍 197 LOC，下次 §九 警告可考慮拆 dispatch helper（不阻擋本次 merge）
+- Lessons:
+  * Method-as-fn split via `agent: StrategistAgent` 第一參數是低風險 refactor pattern
+  * BWD compat 層 = class delegator + module re-export 雙重保護
+  * 必查驗 `_handle_intel` byte-identical（orchestrator 不變動）+ instance attr `agent._evaluate_edge = MagicMock(...)` patch path 仍生效
+
+## 2026-04-27 · G3-08 Phase 4 cost_tracker split (commit 73c1f3d) review
+
+- Verdict: PASS_WITH_NITS → E4
+- LOC: layer2_cost_tracker.py 930→540 (well under §九 800 警告); 3 NEW sibling 405/207/190 all <800
+- RFC estimate vs actual drift: sibling 480→802 (+322, +67%) — NOT padding, RFC formula 漏估雙語 MODULE_NOTE (~135) + delegator docstring (~60) + 既存 inline rationale 平搬 (~120)
+- 5 sample verbose docstrings 全部 trace 到 pre-split source (git blame 73c1f3d^), E1 0 行新 padding
+- PA RFC §10 三條高風險警告全部 1:1 落地：
+  * #1 `_sync_to_rust_budget` daemon thread (lazy `import threading` + nested `import asyncio` + `daemon=True`) bit-for-bit
+  * #2 `record_claude_cost` dual hint emit order (h2.budget_consumed → h5.claude_cost_recorded) preserved
+  * #3 test patch path 4 site (line 389/422/557/592) `app.layer2_cost_recording._invalidate_h_state_async` 升級
+- Test grep verify：`app.layer2_cost_tracker._invalidate_h_state_async` 0 site, `app.layer2_cost_recording._invalidate_h_state_async` 4 site
+- 196/196 test_layer2 cost-tracker + h_state_query_handler + escalation + strategist 全綠（Mac 12 TestLayer2Routes errors = pre-existing fastapi env gap，pre-split 同樣 fail，與本拆分無關）
+- 0 module-level mutable state in 3 sibling, 0 new singleton needed in §九 表
+- 0 Rust / TOML / CLAUDE.md / TODO / memory touch
+- 14 delegator confirmed (count of `_recording_sibling.` / `_adaptive_sibling.` / `_h_state_sibling.` calls in main = 14)
+- Smoke: `Layer2CostTracker(state_file=tmp).get_h2_snapshot()` end-to-end 綠
+- NITs (3, all cosmetic):
+  * NIT-1: commit message bullet「3 noqa: F401 re-export blocks」實際 code 0 此種 block — 不需要（class method delegator 已 resolve）
+  * NIT-2: E1 report 「+412 LOC 純為 MODULE_NOTE / docstring」不夠精準（~120 行為既存 inline rationale 平搬，非新 doc）
+  * NIT-3: `layer2_cost_recording.py:55-58` 注釋「升級」用詞暗示 backward-compat 但實際 old path 已物理不存在
+- §九 #8 「沒有私有屬性穿透 ._xxx」: ⚠️ Method A by design 走 `tracker._lock / _adaptive / _read_raw / _write_raw / _today_key / _save / _ollama_stats / _config / _pricing` 等 ~10 種底線屬性。Acceptable per RFC §6.4（sibling fn 本質 = 同類擴展，非外部模組穿透）
+- Lessons:
+  * Method A (module-level fn + tracker 注入第一參) 風險最低的拆分 pattern；sibling 走 private API 是設計選擇非 §九 #8 違反
+  * RFC LOC 估算 formula 應修：`business_LOC × (1 + 0.6) + 30 per sibling MODULE_NOTE` ≈ 實際；下次 PA 拆分 estimation 採此公式減少 +50-70% drift assertion
+  * 「commit message 說有 X 個 Y / 實際 0 個」屬 NIT 不退 E1（amend 政策禁止，且 X 對行為無影響）；PM 知曉即可
+  * 「pre-split 既存 inline rationale 1:1 搬移」E2 必查 git blame 確認非 E1 新 padding，避免 retract 既有設計文件化資產
+  * Daemon thread `_sync_to_rust_budget` lazy `import threading` + nested `import asyncio` 是刻意設計（避 module-import 期 thread spawn）；拆分後必 1:1 對齊不可優化為頂層 import
+
+## 2026-04-27 G3-09 Phase A cost_edge_advisor — PASS to E4
+
+- **Commit**：00682ef · **Verdict**：PASS to E4（0 finding）
+- **3 主審判點全綠**：
+  1. advisory-only 0 trade impact：grep 確認 `cost_edge_advisor` 不在 intent_processor / cost_gate / combine_layer / exits / strategies 任何 trade path 出現；只在 lib.rs / main.rs / main_boot_tasks.rs / ipc_server/{slots,server,connection,dispatch,mod}.rs / handlers/{mod,cost_edge_advisor}.rs 出現
+  2. threshold direction = -0.5 + `r <= threshold` trigger（PM Tier 9 T9-LOW-1 + PA RFC §2.4 variant A）已落 advisor.rs:106 + risk_config_cost_edge.rs:113 + 三 TOML
+  3. slot [30] 唯一性：[22]-[29] 全占（F7 wave），[30] free → 已配
+- **8 條 §九 checklist + 9 條 OpenClaw 特殊 全綠**
+- **Cross-platform**：grep `/home/ncyu|/Users/[^/]+` 0 命中
+- **檔案大小**：max 433 行（tests.rs），全 <800 警示線
+- **雙語注釋**：所有新 mod / fn / struct / variant 中英對照 OK
+- **Compile**：cargo check 1.74s clean / cost_edge tests 43 / 0 fail
+- **Schema integration**：`RiskConfig.validate()` 接 `cost_edge.validate()` OK
+- **Ordering**：set_config_stores → spawn_h_state_poller → spawn_cost_edge_advisor 依序，h_state_cache_slot 已 populated
+- **Audit emit**：transition only（prev_status != new_status），非每 cycle 重複 emit
+- **Lock 選型**：parking_lot::RwLock for advisor state（無 .await）+ tokio::sync::RwLock for IPC slot（async-safe）
+- **教訓**：E1 此次 self-report 完整度高，self-修正了 RFC slot drift（[22]→[30]）+ §九 1200 cap（advanced.rs 已 1297 → 另立 sibling），對抗審查 0 findings
+
+## 2026-04-27 d4bc9eb healthcheck+observer 4 fixes — RETURN to E1 (2 HIGH)
+
+- **改動**：[3] ratio threshold + [23] order_id JOIN + [24] paper-disabled-skip + [19] thin wrapper 內聯 4 stub + new shared helper
+- **2 HIGH findings**：
+  1. `checks_strategy.py` 1154 → **1201 行**，**1 行 over §九 1200 hard limit**（純 docstring 行可壓 1 行解決）
+  2. `[3] check_exit_features_writer` 50% 邊界落 WARN 不 FAIL → 低流量時段 writer 半死被降級 → cron 不 exit 1（runner.py L8 「only WARN = exit 0」）。Pre-fix delta 模型在 (close=10, EF=5) 報 FAIL；post-fix ratio=0.5 → WARN。修法：`ratio <= 0.5 → FAIL` 或加絕對 floor（混合 ratio + abs delta）
+- **2 MEDIUM（不擋）**：
+  1. Commit message 「byte-identical」**不準確** — 原 `.orig` 只 prod，新 helper demo+prod。Linux operator 只配 demo 時 retMsg 從 `api_key_not_configured` → `not_implemented`。下游 4 consumers 都只讀 `ok` boolean，**功能 OK** 但 commit 描述需修
+  2. [24] paper-snap-disabled-skip 缺 mtime guard：罕見情境（flip env + restart + paper crash before marker overwrite）會 mask 真 silent-dead
+- **對抗驗證點**：
+  - Verified Rust `flush_orders` 11-col INSERT 確實無 `context_id`，JOIN-FIX 結構正確
+  - Verified `4073875` 原 `.orig` schema 與新 helper 對比 → schema 一致但 secret-slot 邏輯擴展
+  - Verified `runner.py` exit-code 契約（WARN ≠ exit 1）
+  - Verified `cron_observer_cycle.sh:37` export `OPENCLAW_SRV_ROOT="$REPO"` → cron-time 路徑解析 OK
+  - Verified `main_pipelines.rs:147-228` paper-disable marker 是 one-shot startup write
+  - Grep'd 4 downstream retMsg consumers — 都只讀 `ok` boolean，無文字 match
+- **跨平台**：新代碼無 `/home/ncyu` `/Users/[^/]+` 命中；srv_root 三層 fallback 在 cron / Mac dev 都 OK（有 env var export / `OPENCLAW_BASE_DIR` 設定）
+- **雙語注釋**：MODULE_NOTE + docstring + inline 中英對照齊備
+- **教訓**：
+  1. **絕對 delta vs ratio threshold 互補**：absolute 抓「writer 無變動 / dead」場景強，ratio 抓「proportional drop」強。應 OR 結合（任一觸發即 FAIL）而非二選一。E1 的 ratio swap 在 burst-window 工作但暴露低流量 detection gap
+  2. **Boundary 嚴格性**：`< 0.5` vs `<= 0.5` 在 50% drop 的 detection 差異會導致 WARN/FAIL 翻轉，runner exit 0/1 翻轉，cron alarm 翻轉。新 healthcheck 邊界要 explicit 想 50% / 70% / 100% 三特殊點
+  3. **Commit message 精準度**：「byte-identical」這類強斷言要嚴審 — 本案 schema-identical / behavior-equivalent-for-downstream / retMsg-branch-changed 三層差異需區分
+  4. **新 file size grep**：1 行 over hard limit 也要打回 — 不能因「只差 1 行」放水，§九 標準是硬性
+
+### 2026-04-27 G8-01 W1 CognitiveModulator dead-path fix（worktree-agent-a5d05003010f9c38c）
+- **結論**：PASS to E4（1 LOW informational, nothing blocking）
+- **改動**：4 檔（strategist_edge_eval.py +9/-2 / strategist_cognitive.py +111/-2 / strategist_agent.py +25 / test_strategist_cognitive_w1_fix.py +255 NEW）
+- **驗證重點**：
+  1. **PA RFC §6 #1 GREP** `get_current_params` production 0 殘留（命中位點都是 promote_routes 同名 dict key + comment + test docstring，與 modulator API 無關）
+  2. **PA RFC §6 #2 regression** test_strategist_agent.py 48 全綠（PA 預期 41，drift 但全綠）；strategist 整套 96 全綠
+  3. **PA RFC §6 #3 state 不洩漏** W1 test 用 `_make_strategist()` 工廠每 case fresh，不依 module-level singleton
+  4. **BUG-B 接 hot path** 正確：tick 在 `with self._lock` 取 `_intel_count` 之後（atomic snapshot），早於 5 個 early return；emergency_mode 例外屬合理設計
+  5. **fail-soft test** 直驗 RuntimeError 不污染 hot path 且 stats 仍累積
+  6. **N=10 magic number** 命名常量 + 雙語注釋 cadence rationale，符合 modulator EMA(α=0.3) 收斂節奏
+- **PA-acknowledged limitation**：regret/dream `{}` placeholder + `_stats["consecutive_losses"]` 未 init → modulator 結構性 ++ 但行為仍卡 base value；W1 = 結構修非完全 live，FUP-LOSSES-WIRING + W2/W3 deferred 為 PA RFC §3.1 / §10 明文
+- **教訓**：
+  1. **rename fix 必有 regression guard test**：rename 後外層 try/except 仍會 mask 未來 regression；E1 加 `test_get_all_params_does_not_raise()` 是好實踐，未來其他 rename fix 應仿
+  2. **「結構修 vs 行為 live」要明確區分**：BUG-B 從 caller=0 修到 caller=1 是結構修，但若 input 全 0 → modulator 邏輯仍 dead 分支；E2 必查 PA RFC 是否明示 acknowledge 此 limitation 並標 FUP，明示則 PASS，未明示則 RETURN
+  3. **私有屬性穿透 sibling-pattern 例外**：`agent._cognitive_modulator` / `agent._stats` 屬同套件 sibling 模組對 agent 內部的合法穿透（pre-existing pattern）；§九「無私有屬性穿透」對此類同套件 sibling helper 不應一刀切
+  4. **PA RFC §6 must-check + 對抗反問結合**：PA 給的 3 點 + E2 自己想的 7 點對抗反問互補，避免單靠 PA 漏審；本次「regret/dream {} 是否承認 limitation」「N=10 是否合理」「emergency_mode 例外是否漏 fire」3 點對抗反問 PA 沒列但都成立
+  5. **854 行 pre-existing > 800 警告**：W1 +25 推近邊界但非主因，記 LOW informational + FUP backlog 留 G5 處理，不退回單個 fix；硬性是 1200，不是 800
+
+
+## G3-08-FUP-MAF-SPLIT review · 2026-04-27 commit b8b5150
+
+**Subject**: ScoutAgent class 從 multi_agent_framework.py (1190 LOC) 抽到 scout_agent.py (NEW 297) — pure location-only refactor。
+
+**Verdict**: PASS_WITH_NITS to E4
+
+**6 套 286 tests E2 reproduce 全綠**（test_scout_integration 38 + audit_wiring/maf/h_state_query 169 + strategist/conductor 79）。
+
+**核心 review 點 — PEP 562 lazy `__getattr__` re-export 偏離 PA RFC**：
+1. **PA RFC §3 假設 eager `from .scout_agent import ScoutAgent  # noqa: F401` 即可**（mirror `6fac0ca` strategist split），但 strategist case **不 re-export 回 maf**（test 直接 `from app.strategist_agent import StrategistAgent`），故 strategist 沒有 cycle 場景；ScoutAgent 案是新場景（class 搬出 + 仍要 maf re-export 回去 + scout_agent module-load 期需 maf 8 個內部符號），E1 實測撞循環 import 改用 PEP 562 module-level `__getattr__` lazy re-export
+2. **更乾淨替代** = bottom-of-file eager import（放在 maf 檔尾 line 966 後）— maf body 從未引用 ScoutAgent class（grep 證），eager 在檔尾觸發 scout_agent module-load 時 maf body 已執行完。E1 沒嘗試此方案，PA RFC §3 也未指明 import 位置。當 INFO 級記 P3 backlog `G3-08-FUP-MAF-SPLIT-CLEANUP`，不退回
+3. **PEP 562 副作用**：(a) `dir(maf)` 首次 lookup 後 cache 進 globals → IDE/Pylance type narrowing 部分降級 (b) 對 mypy 0.910+ OK，對舊 IDE 可能漏 auto-complete (c) docstring drift：scout_agent MODULE_NOTE 中英版聲稱 "noqa: F401 re-export" 但實際 maf 用 PEP 562 → 讀者 grep 找 noqa 將 mismatch 真實機制
+
+**驗證手法（複用模板）**：
+- `python3 -c "from app.maf import X; from app import sub_module; assert X is sub_module.X"` 驗 identity
+- `pickle.dumps/loads` round-trip 驗 class qualname 不破
+- `dir(maf)` 驗 cache 行為
+- 全 6 套 pytest reproduce
+- grep 3 hint emit 字串 bit-identical
+
+**Findings 分級**：
+- LOW NIT × 2：docstring drift 聲稱 noqa F401 ≠ 實際 PEP 562；unused `logger` import（pre-existing 風格）
+- INFO × 2：bottom-of-file eager 替代方案；SCOUT_AGENT pre-existing 未在 §九 singleton 表登記
+- 0 CRITICAL / 0 HIGH / 0 MEDIUM
+
+**review 心得**：
+1. **「PA RFC mirror 過往模式」需查依賴方向**：mirror `6fac0ca` 假設失效因 strategist 與 scout 兩 case 依賴方向不同；PA RFC 未做依賴方向 cross-check
+2. **PEP 562 lazy re-export 是合法但 over-magic 解法**：除非 enable Python 3.7+ 與 type checker 友好性是硬需求，否則 bottom-of-file eager 更 idiomatic
+3. **E1 偏離 PA 並寫明於 commit + 報告 §5.1** 是正確流程；E2 應驗 (a) 偏離真有必要 (b) functionally 對 (c) 替代是否更簡單；本案 (a)(b) yes，(c) 有但 acceptable to ship → PASS_WITH_NITS 而非 RETURN
+4. **「0 production change」refactor 必驗**：3 hint emit + 5-field schema + class identity 三項 bit-identical 全 grep + reproduce 比對
+5. **0 LOC 警告線雙標**：scout_agent 297 < 800 ok；maf 966 仍在 800-1200 警告區但本 PR 改善 -224 方向正確 → 不阻擋
+
+## 2026-04-28 G3-09-PHASE-B-FUP-STICKY-TS sticky `triggered_at_ms` review (worktree-aeb618f)
+
+PA single-shot fix to plug an INFO-level Phase A drift (advisor.rs docstring claimed sticky behavior that mod.rs daemon never implemented), prep-gate before Phase B Wave 1. Verdict: **PASS to E4 / 0 finding**.
+
+### 重點
+1. **4-arm exhaustive match `(prev, new)` audit**：對任何 7-variant `CostEdgeAdvisorStatus` 組合做窮舉 — `(Trigger,Trigger)` preserve / `(_,Trigger)` record / `(Trigger,_)` clear / `_` no-op；rust 編譯器 exhaustiveness check 過 = 0 silent fallthrough。Disabled/Stale/Anomaly/WarmUp 等罕見 prev/new 全在 wildcard arm 覆蓋。
+2. **Race window**：sticky + prev_status 都 task-local（daemon spawned future 內 `let mut`），單 owner，無共享 → 0 race；`evaluate() → sticky enforce → store_state` 順序保證 IPC 讀者不會看到 status/triggered_at_ms 不一致 torn state。
+3. **Pure fn 不變**：advisor.rs diff 僅 docstring 改動，evaluate() 簽名 / 邏輯 / arithmetic 零變動 → src/cost_edge_advisor/tests.rs 32 case 自動綠（lib 2290/0 baseline 維持）。
+4. **Test 設計嚴謹**：sticky 第二 test 用 `last_eval_ms` 嚴格遞增證實「真觀察到 ≥3 個不同 cycle」（防同 snapshot 採樣 3 次的偽證），triggered_at_ms 跨 cycle bit-equal 才 assert sticky 性質。第一 test wall-clock 視窗 `[before_spawn_ms, after_first_ms]` 緊但合理。
+5. **Daemon-restart limitation**：sticky state 不持久化，restart → episode boundary 重設；PA §8 已自承 acceptable，因為長期 audit 屬 Phase B Wave 1 V026 INSERT path scope。
+
+### Mac 實測
+- `cargo test --release -p openclaw_engine --test test_cost_edge_advisor_daemon` → **8/0**（6→8，+2 sticky tests both green）
+- `cargo test --release -p openclaw_engine --lib` → **2290/0**（baseline 不變）
+- `grep /home/ncyu /Users/[a-zA-Z]+` 4 modified files → 0 hit
+- File size：mod.rs 317 / advisor.rs 176 / types.rs 292，全 << 800 警戒線
+
+### 套用模式
+- **「PA 三角合一」prep-gate review**：PA 自設計 + 自寫碼 + 自寫測試 + 自跑驗證 → E2 主要驗 (a) 4-arm 完整性 (b) race window (c) test 對抗性 (d) baseline 不變；本 case 4 項全綠 → 0 finding PASS。
+- **「sticky semantics」 review pattern**：永遠驗「pure fn 對首次正確 / daemon 對連續 sticky / exit 必清零」三段；任何違反語意命名（field 名為「entry time」實際每 cycle 跳動）是 BLOCKER 級 design defect 而非 INFO，本 case 從 INFO 升 prep-gate 處理是正確判斷。
+- **Sub-agent 寫 ≤80 LOC sticky 邏輯 + ≥2 unit test**：對 task-local 變數 + 純 fn boundary clean 的 prep-gate 適用；若涉跨 thread shared state 必須再加 race / lock review。
+
+### 2026-04-28 G3-09 Phase B Wave 1 大規模實作 review
+- **Worktree**: agent-a9002481353677810 (uncommitted)
+- **Verdict**: RETURN to E1 (1 HIGH + 2 MEDIUM + 2 LOW)
+- **Scope**: 4 新檔（V026 243 + test_v026_guards 306 + test_persistence 338 + observation_report 511）+ 8 修改（mod.rs 317→652 / types 79+ / ipc handler 40+ / main.rs 1208→1230 / main_boot_tasks 944→1015 / checks_derived.py 1153→1304 / runner.py 43+）
+- **Tests**: cargo lib **2299/0** ✅ (Phase A baseline 2290 + 9 new) · daemon **11/0** ✅ (5-arg shim works)
+- **HIGH-1**: `helper_scripts/db/passive_wait_healthcheck/checks_derived.py` 1304 行越過 §九 1200 硬上限。pre-existing 1153 接近警告線、本 PR +151 推爆。E2 必須拒 merge 直到拆檔。
+- **MED-1**: `rust/openclaw_engine/src/main.rs` 1230 行。pre-existing 1208 已超限；本 PR +22 加深違規。E1 self-flag 待後續 split。
+- **MED-2**: `CostEdgeAdvisorDbSlot` singleton 未登記 §九 表（E1 self-flag 但未補）。CLAUDE.md §九 強制：「新增 singleton 必須在此表登記。禁止子模塊創建未登記的全局可變狀態」。
+- **LOW-1**: `main_boot_tasks.rs` 1015 行（>800 警告線；pre-existing 944 + 71 new）。
+- **LOW-2**: runner.py 將 [30] check 從 cursor 外移入 cursor 內 → DB 不可達時整個 [30] 不跑（先前 env=1 sentinel 仍跑 file-only）。輕微 sentinel coverage 倒退。
+- **PASS 點**: V026 Guard A/B 完整對齊 V023/V021 template；6-case test fixture 含 pass/fail/no-op；tokio::spawn fire-and-forget INSERT 不阻 daemon loop；4 IPC fields `#[serde(default)]` forward-compat；engine_mode 正確 bind spawn time；`entered_trigger` matches! 邏輯與既有 sticky logic 互動正確；雙語注釋齊備；跨平台 grep 0 hit；Rust unsafe 0 / unwrap 0；2299/2299 lib 全綠。
+
+---
+
+## 2026-04-28 · G8-01 W2 CognitiveModulator coverage review
+
+### Verdict
+**PASS to E4** · 0 CRITICAL/HIGH/MEDIUM · 1 LOW (optional docstring annotation)
+報告：`srv/.claude/worktrees/agent-af6ccceae93986103/docs/CCAgentWorkSpace/E2/workspace/reports/2026-04-28--g8_01_w2_cov_review.md`
+
+### 對象
+E1 worktree 未 commit · branch `worktree-agent-af6ccceae93986103` · base `cf34e96`
+- ADD: `tests/test_cognitive_modulator_coverage.py` 514 LOC / 22 case (26 collected)
+- 0 production diff confirmed (`git diff cf34e96 -- cognitive_modulator.py` empty)
+- Mac 自驗 cov 100% / 86 stmts · W1+LOSSES+W2 = 40/40 PASS in 0.05s
+
+### 核心對抗判斷 — 「100% line cov 是 false confidence 嗎？」
+**結論：不是 false confidence，但讀者必須理解「cov ≠ behavior coverage」**。
+- 證據鏈：`tick_cognitive_modulator` (`strategist_cognitive.py:265-270`) production caller 永遠傳 `regret_data={}` / `dream_data={}`
+- 因此 modulator regret/dream 分支（lines 119-123, 147-155 部分）在 production hot-path **結構性不可達**
+- W2 直呼 `update(...)` 餵 schema 達 100%
+- E1 framing「API contract test，非 production behavior assertion」**正確**：dead 的是 producers (`OpportunityTracker`/`DreamEngine` RC-11 deleted)，不是 modulator API 簽名
+- 與 `feedback_no_dead_params` 不衝突：`update()` 簽名仍 active production API，kwargs 是合法輸入空間
+- E1 MODULE_NOTE + REGRET-DREAM escalation 文件鏈完整 → 符合原則 #10 認知誠實
+
+### 為何不退回要求加 # pragma: no cover
+- E1 reasoning 正確：加 pragma 反而更糟 — Option B 重實作後失去 regression baseline
+- 100% cov 自然達標 = 維持彈性；docstring 反模式說明 = 認知透明
+- 屬「主動避免過度設計」（CLAUDE.md §八 工作流 5）
+
+### 22 → 26 sub-test drift 評估
+- PA RFC §3.2 列「≥18 case」表格 22 entry，E1 落 26 collected items
+- Case 20 拆 2（_clamp 直接 + runtime stay-in-bounds）
+- Case 22 拆 4（4 個 getter 各自 contract）
+- **非 spec drift**，屬合理細化（getter contract 本質就 4 個獨立 invariant）
+
+### Mirror antipattern 評估
+- Cases 4-11/13/15-18 用 `expected = α*target + (1-α)*BASE` 同形 production EMA 公式
+- 屬輕度 mirror — 若 α/(1-α) bug-flip test 同步 flip
+- 但**非 pure mirror**：Cases 5（cap=5）/9（[R1-5] ignore）/11（worst-case min）/18（min of two）測概念 invariant
+- 用 hardcoded 魔數會在 `_EMA_ALPHA` tuning 時 brittle
+- 接受 trade-off · 建議（不阻 merge）：W3 加「EMA 方向 sanity」oracle test
+
+### 套用模式
+- **「100% line cov 不一定 = behavior coverage」review pattern**：production caller grep 必跑（驗 dead-code branch 是否被 cov 數字「裝飾」）— 本 case grep 揭露 regret/dream 永遠不可達
+- **「dead branch contract test」判定法則**：
+  1. branch 在 production caller 傳 placeholder → unreachable
+  2. 但 API 簽名仍 active → 屬 contract test 合理場景
+  3. E1/PA 文件鏈必明確聲明「currently dormant in hot path」→ 認知誠實
+  4. 三項俱全 = 可接受 100% cov；不全 → 退回要求 pragma 或補真實 caller
+- **PA 文件鏈 cross-check**：本 case PA RFC + REGRET-DREAM escalation 雙報告 + Option C defer + Option B backlog 票完整 → 不需另闢調查
+- **「冷數字」防線**：cov 100% / 22 case / 0 fail 都是 SALT 數字；E2 必補：grep production caller / 抽 case docstring 邊界一致性 / 對抗反問「未來重實作會 trap 嗎」
+
+## 2026-04-28 — G3-09 Phase B Wave 1 E2-return fix re-review · PASS to E4
+
+worktree `agent-a9002481353677810` · base HEAD `cf34e96` · branch `worktree-agent-a9002481353677810`
+
+### 3 fix all PASS
+- **HIGH-1**: `checks_derived.py` 1304→990 (≤1200 ✅) + new sibling `checks_cost_edge.py` 370 LOC (≤800 ✅). `check_h_state_gateway_freshness` + `check_dust_spiral_noise_in_ef` 留 derived 是 E1 自決 per E2 spec，避 scope creep。`__init__.py` __all__ + import 對的；runner.py 兩處 import (cursor + db-down fallback) 全對。
+- **MED-1**: `CostEdgeAdvisorDbSlot` 登入 CLAUDE.md §九 表 line 459，鏡 `HStateCacheSlot` row pattern；attribution 含 §二 原則 #6+#8。grep 1 hit 唯一。
+- **LOW-2 (option A)**: runner.py:153-176 DB-fail except 區塊正確呼 `check_cost_edge_advisor_status(cur=None)`（Phase A pure-fs 路徑）；inner try/except 包 sentinel call 防雙層 raise；exit code 2 contract 不變。Phase A invariants 1+2 在 `if cur is None` 早返之前評估，env=1 fail 不會被 mask。
+
+### 對抗反問 8 條全 PASS
+- 0 production behavior change（Rust 711 行 delta 是 pre-existing Wave 1，fix 不碰）
+- 規格一致（5 files exactly）
+- pytest 45 passed / 8 fail = pre-existing TestSignalsWriterFreshness + TestIntentsCounterFreeze（git stash 驗證 baseline）
+- §九 + OpenClaw 9 條 0 新違規
+- MODULE_NOTE 雙語齊（6+ hits in checks_cost_edge.py）
+- 跨平台 grep 0 hardcoded path
+
+### 教訓 / 反模式提醒
+- **檢查 fix-only diff 範圍**：`git diff <base>` 可能顯示 fix-only + prior unstaged baseline 全部，要看 mtime + git log 區分。本次 Rust 711 行屬 prior Wave 1，fix 真正只動 5 Python+docs。
+- **option A vs option B for healthcheck cursor regression**：選 A (DB-down fallback) 比 B (出 cursor 區塊) 更乾淨 — 既保 cursor lifecycle 又補 fallback path。E1 選對。
+- **Phase A early-return 順序**：Phase B 加 cur 參數時，Phase A invariants 必須在 `if cur is None` 之前；本 fix 正確（line 142-216 在 line 228 之前）。
+
+
+---
+
+## 2026-04-28 · G8-01 W3 integration E2-return re-review (PASS to E4)
+
+**Worktree**: `srv/.claude/worktrees/agent-a4d9d240343d85fff` HEAD `571da6a` + 1 file working tree fix
+**Verdict**: PASS to E4 (條件：E1 commit + push)
+
+**Confirm 上輪 finding 全收**：
+- H-1（S5 sys.modules stub never effective）：fix 改雙 patch (sys.modules + app.strategy_wiring attr) + finally 反序還原 + 嚴格 `assertEqual(intel_received, 3)`
+- M-1（S3-B 隱式 N=10 magic）：fix 用 explicit `tick_cognitive_modulator(agent)` 解耦
+- L-1（S5 唯一性）：fix 用 strict eq 真防 H-1 復發
+
+**自驗實證**：
+- 51/51 same-session forward + reverse + 5 重跑同綠 (0.28s 穩定)
+- isolated S5 PASS · pair S5→h_state 91/91 PASS（finally 還原 atomic）
+- Baseline 36 failed → post-fix 35 failed = **+1 pass / -1 fail / 0 new regression**
+- 0 production diff
+- 702 LoC < 800 警告
+
+**對抗反問捕獲**：
+- 「Linux 跑 H-1 預期？」E2 預測同 Mac 51/51（CPython `from PKG import SUB` getattr semantic 跨平台一致），SSH 一鍵驗證
+- 「commit chain 是否真 append？」⚠️ E1 fix **未 commit**（working tree only），E2 退回要求 append 新 commit，禁 amend `571da6a`
+
+**E2 教訓 / 反模式提醒**：
+1. **同 session pollution 對比的正確姿勢** — 跑 baseline (`git stash`) vs post-fix 兩遍同樣 file 集合，比 delta = 0 才證 0 new regression。E1 報告「6 檔 115/115 PASS」實際只有部分 scope，正確值 162/197 (35 pre-existing pollution from sibling tests)。**E2 必驗實際 file count + math**。
+2. **Heisenbug from Python parent-package attribute** — `sys.modules["app.X"]` patch 對 `from app import X` 從**第二次** import 起無效（CPython 走 `getattr(app, "X")`）。test isolation 用 sys.modules patch 必同時 patch parent attribute；finally 反序還原避免污染 sibling。下次見 sibling test 偶發 fail/pass = 第一個 hypothesis。
+3. **commit append vs amend safety** — 在 auto mode + multi-session 下 amend 會破壞前 commit；append 新 commit 是 safe default。E2 退回時必 explicit 指明「新 commit append + 禁 amend」。
+4. **Pre-existing failure 怎麼處理** — fix 只負責不新增 regression，不負責修 pre-existing。但要 document + 開新 ticket，不可吞。本次 35 個 sibling singleton pollution → ticket `STRATEGIST-SINGLETON-POLLUTION`。
+
+
+---
+
+## 2026-04-28 · G3-08-FUP-ANALYST-SPLIT P2 review (PASS to E4)
+
+**對象**：`analyst_agent.py` 944 → 781 LOC + 2 sibling extract（`analyst_records.py` 142 / `analyst_pattern_claims.py` 264）；working tree unstaged；base `8a5973f`
+
+**Verdict**：PASS to E4 · 0 BLOCKER / 0 HIGH / 0 MEDIUM / 1 LOW informational
+
+**驗證手段**：
+1. `wc -l` 確認 LOC 達標
+2. `git show HEAD:analyst_agent.py` line-by-line 比對新 sibling — dataclass / helper 確認 byte-equivalent（含中英 inline 注釋 + ticket 標記 U-05/0A-6）
+3. `grep` 既有 `from app.analyst_agent import` caller — 6 test + 2 prod (`ai_service_dispatch` / `strategy_wiring`) 全覆蓋於 re-export
+4. Runtime exec identity check：`TradeRecord is TR2`、`AnalystAgent._KNOWN_STRATEGIES is KNOWN_STRATEGIES`、6 sample input staticmethod 對比 — 全 PASS
+5. 6 檔 analyst regression：146/146 PASS
+
+**對抗反問成果**：
+- Q3「delegator semantics 真等價？」抓到一個微差：原始 `_record_pattern_observations` 在 `_experiment_ledger=None` 時會 raise→outer except→warning，新 delegator 加 `if None: return` 早返回不 log。**判 LOW informational**（路徑1：從 `_register_pattern_claims` 進來時原本就有前置 guard 不會走到此 / 路徑2：grep tests 0 case 直呼此 None path）。
+- Q4「helper pure 為何要 instance method delegator？」PA report 明說為防禦性 BWD-compat（cheap insurance 1 line/method）。設計合理。
+
+**E2 教訓**：
+1. **byte-equivalent claim 驗證手法** — 用 `git show HEAD:<file>` 抓基線後直接眼比 + identity check (`is`)，比跑 test 更快證等價（test 只證 happy path）。
+2. **Refactor delegator 必查 silent path 差異** — 加 early-return guard 容易掉一個 fail-open warning log，雖不影響功能但要 catch 出來明寫 LOW，避免下游疑惑「為何此次 log 變少」。
+3. **Helper warning 訊息字串對齊建議** — fn 從 `_underscore` 移為 `bare_name` 時，warning 訊息字串內的 fn 名應跟著改（保持 log 與 fn 名 match），而非追求「與舊 instance method log 字串完全一致」。本次 PA 改動正確，記錄 informational 觀察即可。
+4. **Mac pytest collection error pre-existing** — 28 個 `control_api_v1/tests/` collection error 為 Mac env 既有問題（FastAPI / DB 路由），非本次 refactor 引入。E2 必須區分 explicit-list test pass (146/146) vs broad collection error，避免誤判 regression。
+
+
+---
+
+## 2026-05-02 · AUDIT-2026-05-02-P1-1 Round 2 Re-Review (PASS to E4)
+
+**Topic**: 對 E1 round 2 自報修齊 round 1 RETURN 三 finding 做 re-review。
+**Verdict**: ✅ PASS to E4 Linux PG end-to-end regression。
+**Workspace report**: `2026-05-02--audit_p1_1_guard_retrofit_round2_review.md`
+**.claude_report**: `20260502_124909_e2_audit_p1_1_review_round2.md`
+
+### Round 2 review 教訓
+
+1. **Round 2 re-review 範圍紀律** — 嚴格只看 round 2 改動（diff vs round 1），不重審 round 1 PASS 部分。`git status` 看到非 round 2 spec 範圍的 working tree 改動（本次 = TODO.md / .gitignore / test_batch_d / .coverage 來自主 CC 並行 P1-2/P2-1 修），明寫「不在本輪 review scope」並交 PM 決定，不擅自 expand。
+2. **E1 自報 LOC delta 無法用 git diff 嚴格驗的處理法** — 當 round 1 + round 2 都 uncommitted 時，`git diff HEAD` 顯示合計而非單 round delta；改用「逐行讀 diff + 對 spec 結構驗」，本次驗證 V028 fix 結構 = v_required 1 行 + hint 1 行 + prose 1 處 ≈ 「+3/-3」（含 prose 加碼第 4 處），結論 `「結構符合，數字小幅差異不影響邏輯結論」`。
+3. **F-1 v_required 14 欄字面對齊驗證手法** — V028 vs V033 同一目標表 (trading.fills) 必字面一致：直接 `grep -A8 'unnest(ARRAY\[' V028 V033` 對齊比對，比逐欄 diff 快。
+4. **F-2 / F-3 self-disclosure 驗證模式** — Governance / self-report drift 類 finding 的 fix 不是「修代碼」而是「補揭露」；E2 verify 點 = (a) 報告/檔案存在 (b) 內容真說該說的 (c) caveat 明示限制（無 PG / wiring smoke vs SQL execute 區別）。本次 E1 caveat 寫得很完整，是好範例。
+5. **Mac PG 缺席的處置 SOP** — Mac dev 環境永遠無 PG → idempotent 雙跑 / cargo test SQL execute 都必交 E4 Linux。E2 在 review report 必明寫「E2 無法在 Mac 驗 X，必交 E4 Y」並列出具體命令，避免 E4 漏跑。
+6. **「sub-agent 不寫 .md 副本」vs「§七 6 節中文 report 強制」澄清** — 兩規則並存：sub-agent 回主 agent 訊息時不另寫 .md 副本（節省 context）≠ 禁 §七 本機 review 報告（後者是強制治理）。E1 round 1 混淆漏寫 .claude_reports，round 2 澄清。E2 future review 時若 sub-agent E1 未寫 .claude_report 必標 GOVERNANCE finding。
+
+---
+
+## 2026-05-02 — AUDIT-2026-05-02-P1-1 round 3 V031 view-shape guard review
+
+### 對抗審查模式
+
+7. **「CREATE OR REPLACE VIEW idempotent」是錯的反模式** — Postgres `CREATE OR REPLACE VIEW` **禁止 DROP columns，只能 APPEND**。任何「view 用 CREATE OR REPLACE 故 idempotent 不需 guard」自報立即標 RETURN — 必須對齊 production runtime state（含後續 migration 已 APPEND 的 col）而非 fresh-install 假設。E1 round 1/2 自報就是這個 bug，E4 round 2 在 V034-applied state 抓到。
+8. **View 對外 column 列表 ≠ CTE 內 alias** — V031 view body 三層 CTE（intent_base / normalized / strategy_regime）內有大量中間 alias（raw_strategy_name / scanner_json / feature_strategy_name 等），但 view 對外 column 只有最外層 SELECT 的 projections（34 個）。E2 驗 v_v031_cols ARRAY 必對外層 SELECT 而非 CTE alias。
+9. **DO/EXECUTE 內 view body 業務邏輯不變的驗證手法** — `diff <(HEAD whitespace-normalized) <(round 3 whitespace-normalized)` 一鍵驗；indent shift 造成的「+/- LOC 看起來大」是 false positive（git numstat 嚴格算 indent-only 為刪除+新增），用 whitespace-normalized diff 二次驗證。
+10. **PG dollar-quoting `$tag$ ... $tag$` 內 single-quote 不需 escape** — 包進 EXECUTE $view$ ... $view$ 後，view body 內 `''` / `'command'` 等 literal 直接字面接受，無需改為 `''''`。E2 驗時 grep dollar-tag 配對 + 確認無 collision 即可。
+11. **Test fixture LOC 警戒線跨越的處置** — round 3 後 946 LOC（>800 警戒），但 round 1+2 baseline 已 733 + round 3 自然擴張 +213，per pre-existing baseline exception clause **不 BLOCK 本輪**；建議開 P3 follow-up ticket 拆檔。E2 標 MED finding 但放行。
+12. **Idempotency 三步驗證模板** — Fresh DB scenario：第 1 跑 Path 1 EXECUTE → 第 2 跑 Path 2 NOTICE-skip。Production scenario：V034-applied state 跑 Path 2 NOTICE-skip。E2 在 Mac 無法 production-state empirical，**必明寫 DEFERRED to E4** 並列具體 ssh/psql 命令避免漏跑。
+13. **同一 view 多 migration 的 baseline 一致性 cross-check** — V031 v_v031_cols + V034 既有 guard baseline + 兩個 V031 test case 共 4 處抄同一份 34-col list；E2 必 grep 4 處對齊（任一 drift 會讓 guard 失效）。長期 maintenance burden 文檔化於 V031 + V034 註解。
+
+## 2026-05-02 — audit/2026-05-09-and-16-3c-funding-arb-followup @ 5abb00e
+
+**Verdict**: RETURN to E1（2 MEDIUM + 2 LOW optional）。Read-only audit scripts，無 INSERT/UPDATE/DELETE，無 Rust/migration 改動。
+
+**E1 hint cross-validation**:
+- Hint #2「net_bps double-count fee」= 實際 audit 1A 用 `mlde_edge_training_rows.net_bps_after_fee` precomputed column（同 healthcheck `[40]` 同源），無 double-count 路徑存在。Funding_arb 14d audit 改用 `realized_pnl - entry_fee - close_fee`，經 Rust `fill_engine.rs:300-306` 驗證 `realized_pnl = (fill_price - entry_price) * close_qty` 純 gross，公式正確。
+- Hint #1「row_number()=1 partial close」= mirror `[38]` lifecycle drift JOIN 完全一致，monitor scope choice 非 bug。
+- `trade_executions` = V005 view over `trading.fills`，等價。
+
+**Findings**:
+1. MED `2026-05-16_funding_arb_14d_audit.py:247` — dead `net_pnl = stats.gross_bps_sum - 0.0` + 英文 inline 注釋 `"already net of fee"` 與緊接其後中英 NOTE block + Rust 真相**直接矛盾**。下個接手會被誤導。建議直接刪整行。
+2. MED `2026-05-09_3c_7d_audit.py:67 DEPLOY_UTC = "2026-05-02 17:42:00+00"` 缺證。3C TOML commit `a19797d` ts 為 `2026-05-02 17:20:35 +0200` (15:20 UTC)，差 ~2.4h。restart_all 時間 ≠ commit 時間，需 journalctl / engine startup log 證據；否則 prior/post baseline 接縫洩漏。
+3. LOW partial-close notional bias（SL cap pct 偏高）→ 報告 disclaimer 即可。
+4. LOW 排程腳本 prologue 加 healthcheck pre-check hint。
+
+**Lessons learned for future audit script reviews**:
+- 一律 cross-check `trading.fills.realized_pnl` 是 gross 還是 net — Rust `fill_engine.rs::apply_fill` 是 source of truth，現為 **gross**（`balance -= fee` 另計）。
+- DEPLOY_UTC 類常數 cutoff 必驗 commit ts vs runtime restart log 雙來源；commit ts ≠ deploy ts 經常是 silent error 來源。
+- "schedule reminder TODO" vs "passive-wait Nd" 不同語意 — 前者事件驅動 cutoff（§七 healthcheck-pair 規則嚴格不適用），後者要求 silent-dead 偵測；但 audit 內部仍應在跑前驗 baseline pipeline 活著。
+
+
+
+## 2026-05-02 LG5-W3-FUP-1 ROUND 2 — PASS
+
+- Round 1 RETURN: HIGH-1 unauthorized hard-skip 反破壞 IMPL-2 audit emission + MED-1 §九 漏登 + 4 NIT
+- Round 2 全 6 fix verified PASS。HIGH-1: 刪 hard-skip block + 信任 IMPL-2 R6 evaluator (governance_hub_live_candidate_review.py:1037-1047 / 1199-1252) emit reject_hard_veto；新 _total_rejected_hard_veto verdict-derived metric 取代 hub-derived _cycles_skipped_not_authorized；MODULE_NOTE 雙語明示「不要把 hard-skip 加回去」+ inline NOTE 點明 ROUND-2 修復歷史。MED-1: §九 行 446-447 加 2 entry 4 singleton names 鏡 EDGE-SCHEDULER-LEADER-1 格式。NIT-2: thread-leak guard `assert "lg5-review-consumer" not in threading.enumerate()`。NIT-3: 3 個 TestUnauthorizedStillCallsImpl2 tests 證 unauthorized hub 仍 call review (mocked.call_count==3)、mixed reject reasons subset count、is_authorized() raise wrapper not called。NIT-4: `_total_errors += len(errors)` 移到 cycle 末尾 lock 內。
+- Tests: 11 PASS / 59 baseline preserved（44 lg5_review + 15 mlde_demo_applier）。LOC: scheduler 716 / test 454 / both < 1500。0 hardcoded path。0 secret leak。IMPL-2 / mlde_demo_applier / edge_estimator_scheduler 0 改動（empty diff）。
+- Lesson: round 1 自報「hard-skip 防止無謂 IMPL-2 cost」實是 fundamental design bug —— 反破壞 audit emission 路徑、讓 [42] healthcheck FAIL。對抗反問「你的 hard-skip 是否阻斷了應該發生的 audit？」直接 catch fundamental issue。
+
+
+## 2026-05-02 LG5-W3-FUP-3-CRON-ENV — PASS
+
+- Context: E4 Linux smoke 揭 `psycopg2.OperationalError: fe_sendauth: no password supplied`；E1 補 wrapper PG creds sourcing block (62 LOC) + 4 unit tests (211 LOC) + healthcheck doc +18 LOC。
+- Sibling pattern alignment 驗證: 對齊 `linux_bootstrap_db.sh:41-45` 完整 5-key (USER/PASS/DB/HOST/PORT) — 比 `passive_wait_healthcheck_cron.sh:43-44` 2-line + hardcoded user/db/host/port 更通用，不綁定 slot。E1 自報「`|| true` + `${VAR:-default}` 二次 fallback」改進 sibling 的 `|| echo '127.0.0.1'` 字面 fallback（後者在 `grep '^POSTGRES_HOST=' file` 命中且 value 為空時不會落到 echo），技術正確。
+- Edge case probe 驗證:
+  1. ENV file `export KEY=value` format drift → grep `^POSTGRES_PASSWORD=` 不 match → PG_PASS 空 → FATAL exit 2 ✓ Fail-closed
+  2. ENV file `KEY="quoted"` 引號 value → grep + cut 不剝引號 → DSN 含字面引號 → psycopg2 會 loud raise (LOW informational, sibling 同行為; Linux real env file 純 KEY=value confirmed via ssh)
+  3. POSTGRES_HOST 真實缺失 → fallback 127.0.0.1 必要 (Linux confirmed: 4 keys present, HOST absent)
+- Tests: 4/4 PASS（syntax + env missing + creds incomplete + complete export DSN via mocked python3）。
+- Secret leak check: 0 hit on `set -x` / `echo $PG_PASS` / `cat ENV_FILE`；FATAL 訊息只列 key 名（POSTGRES_PASSWORD 等），不洩值；DSN 只 export 給 child process 環境，cron mailer 不見。
+- LOC: wrapper 196 / test 211 / doc 513，全 < 800 ⚠ 線。
+- 跨平台: 0 `/home/ncyu` / `/Users/<name>` 硬編碼；fallback 鏈 `OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets` 跨 Mac/Linux 一致。
+- 雙語注釋齊備：MODULE_NOTE EN+中 + 每個 inline 注釋對齊。
+- Side-effect grep: `edge_label_backfill_cron` 0 caller in code（只 docs 引用）；舊 25 lg5_health_checks tests 不受影響。
+- Verdict: PASS to E4 cron re-smoke。
+- Lesson: Cron wrapper PG creds sourcing 是「真實 cron 環境差異」常被低估的 gap；E1 主動 mirror sibling pattern + 改進 sibling 的 corner case 而不是直接照搬 = 資深判斷。E2 對抗驗證需自跑 format drift / 引號 drift / sibling cross-check 而非只信 unit test green。
+
+## 2026-05-03 — REF-20 Wave 1 P0 全 8 task design review (CONDITIONAL PASS to E4)
+
+**Topic**: V3 Wave 1 P0 全 8 task（T1 governance v2 4 docs + T2/T3/T9 Rust scaffold + T5 migration ledger + T6/T7 INSERT grep+classification + T8 signing key script+runbook）design + adversarial audit。
+**Verdict**: ⚠️ CONDITIONAL PASS to E4 — 3 MEDIUM finding 退 PA 修字（doc cross-ref label）；runtime/scaffold/build/script 全 PASS。
+**Workspace report**: `2026-05-03--ref20_wave1_p0_design_review.md`
+
+### Wave 1 review 教訓 / 反模式
+
+14. **`//!` doc comment 內 forbidden symbol mention 不算 violation** — Rust scaffold review 時 `grep -rE 'acquire_lease|ipc_server|...'` 在 spec-only binary 命中 15 hits，逐一驗 prefix 都是 `//!` (module-level doc comment) → 是「禁止列表」用法（"must NOT use X"），非實際 import / call。對抗 grep 必補 prefix verify（`grep -E '^use ' filename` 必驗 0 hit 才證 0 actual import）。本 review 兩 grep 並用結果 `^use ` = 0 hit 確認真 spec-only / panic stub。
+
+15. **`required-features = ["X"]` 是 Cargo 硬 enforcement** — `[[bin]]` 不帶 feature 時 cargo 拒絕 build；compile-time isolation 是物理事實。default `cargo check` 必驗 binary **未編譯**（21 lib + 3 bin warning baseline 持守，replay_runner 0 warning 因 0 行 compile）。雙 build matrix（無 feature / 有 feature）必驗 0 new warning vs lib baseline。
+
+16. **Bash `| head -N` 會 mask script real exit code** — smoke test 跑 `bash script | head -10` 看到 `exit=0` 但 script 內 `exit 4` 實際執行 — head 退出 0 mask 了 script 真實 exit。E2 smoke test 必獨立 silent run（`bash script > /dev/null 2>&1; echo $?`）才能驗 exit code 對 spec。本 case 正確抓到 7/7 exit code 全對 spec。
+
+17. **Doc cross-reference label 系統性錯位反模式** — REF-20 v2 三處 `(v1 §X 沿用)` 標的 v1 § 真實主題不符（v1 §6 = Learning Cockpit ≠ v2 §15 Storage / §7 Indicator Sweep；v1 §7 = 5-Agent Extraction ≠ v2 §16 Phased Delivery）。對抗審核 governance v2 doc 必獨立列 v1/v2 section header table cross-check（grep `^## ' v1 + v2 各自結果並 nl 對照），catch 系統性錯位；不能只信 v2 §0 讀者導讀的 self-claim。
+
+18. **「v1 §1-§N 條文重述...不改變邊界」claim 必驗實際結構** — REF-19 v2 §0 / §20 都自宣稱「v1 §1-§16 重述...不改變 v1 邊界承諾」，但實測 v1 §11 Storage 整節從 v2 中消失（內容遷至 REF-20 v2 §15 / V3 §4.2 / §6.2 但 REF-19 v2 §0 / §20 沒披露此 trace path）。對抗審核必驗 §0 + §20 表格 cross-ref 與實際 §結構是否字面 1:1 對應 — 整節主題替換（如 REF-19 v2 §11 從 Storage 變 Resource Quota）必在 §0 表格 explicit flag。
+
+19. **Forbidden token grep 必區分 active write vs doc reference** — `live_execution_allowed` / `max_retries=0` / `decision_lease` / `_write_signed_live_authorization` 在 v2 docs + Rust scaffold 共 3-15 hits，但全部位於 forbidden list / "MUST NOT" 注釋 / Python 唯一 caller 警示 — **0 actual write / set / acquire**。E2 grep 第一輪看 raw 結果可能 alarm，必逐行讀上下文 + `head -3` 抽 prefix（`//!` doc / `# Why this script` 注釋 / table cell ref）才能判定 write/active vs reference/doc-only。
+
+20. **Cargo.toml `+24 LOC` spec vs 實際 `+35 LOC` diff 解讀** — workplan / PA report 都宣稱 Cargo.toml `+24 LOC`，實際 `git diff --stat` 顯示 `+35 LOC`。讀 diff 細節：實際代碼變動 = 6 line（`replay_isolated = []` + `[[bin]]` 4 line），其餘 29 line 是雙語注釋（EN comment block + ZH comment block）。**評估方式**：核 active code line 是否與 spec 一致，bilingual comment 屬合規 over-spec（CLAUDE.md §七 強制），不算 spec 漂移。LOC delta 看 numstat 不能直接判 spec，必拆 active code vs comment line。
+
+21. **「整合到 V3 contract baseline」設計選擇下的 v2 補丁措辭** — v2 §11/§12 整節主題從 v1 storage/healthcheck 替換為 v2-only quota/role guard 補丁；v1 內容部分固化進 V3 contract baseline，部分遷至 sibling doc（REF-20 v2 §15）— 設計上 OK（v2 = governance amendment 整合 V3 工程坑），但 v2 §0 + §20 自宣稱必披露此 trace path。**boundary 是否削弱**判定：grep 16 根原則（特別是 #1/#2/#7）+ §四 fail-closed 條款 + Decision Lease 路徑承諾在 v2 是否完整保留 — 全 PASS 即 0 boundary 削弱（本 case 確認），純屬 metadata accuracy 問題降 MEDIUM。
+
+22. **5 atomic commit vs 1 wave commit 結構建議的 review trigger** — Wave 1 任務 subgroup（T1 / T2+T3+T9 / T5 / T6+T7 / T8）天然分 5 個獨立 deliverable layer，5 atomic commit 利後續 audit / rollback / partial revert。1 wave commit 的 diff 過大（governance docs + Rust + migration ledger + Python report + bash script + runbook 全包），cross-task 問題追溯困難。E2 sign-off 建議必含 commit 結構建議；PM 採納則 Wave 1 land 後 audit trail 清晰。
+
+## 2026-05-03 — REF-20 Sprint 1 4 並行 Track E2 senior+adversarial review (RETURN to E1)
+
+**Topic**: 4 並行 Track（A spawn argv / B Rust manifest verify / C Python /replay 安全洞 / D V049-V052 schema）E2 review，PM autonomous mode dispatch 強制 senior + adversarial 雙身份（W3-W9 跳過 E2 後第一份正式 E2，要求對 4 Track 各列 ≥2 條 finding 含 PASS 帶證據鏈）。
+**Verdict**: RETURN to E1（Track C 必修 4 條 finding；Track A 建議補 1 條；Track B/D PASS to E4）。
+**Workspace report**: `2026-05-03--ref20_sprint1_4track_review.md`
+
+### Sprint 1 4-Track review 教訓 / 反模式（追加 23-30）
+
+23. **CLAUDE.md §九 1500 hard cap pre-existing baseline exception clause 適用範圍** — replay_routes.py baseline 1498（pre-Sprint 1）→ Track A+C 並行同檔 → 1603 LOC（103 over）。Track C E1 申請「pre-existing baseline exception」放行，但 §九 原文明文「**僅適用 pre-existing 1500+ violation**，不適用『新 wave 把 ≤1500 推到 >1500』的場景」。E2 必嚴格 enforce — 拒絕 exception，退回 E1 抽 endpoint body 至 sibling 模組。
+
+24. **PM autonomous mode 4 並行 E1 dispatch 同檔 LOC 風險** — PA 派發階段已警示 replay_routes.py + route_helpers.py 同檔 Track A + Track C 並行（partition design § 3 cross-track 影響評估），但 PM dispatch 沒設 LOC budget enforcement（如「Track C 自行控制 ≤30 LOC delta」）。建議 PA 未來 partition design 對同檔多 Track 並行強制標 LOC budget（如「Track A ≤+50 LOC / Track C ≤+99 LOC / 合計 ≤+149 LOC ≤ §九 cap 5 LOC buffer」）。
+
+25. **Track A + Track B 同 commit 部署的 cross-track integration 斷點** — Track A 寫 placeholder hash + Track B fail-closed verify path = e2e 路徑全 fail-closed 直到 V042 Wave 6 land。E1 各自 IMPL 都正確但合併後 production 黑屏。E2 必跑 cross-track integration 推演（A 寫 + B 驗 → 預期結果），不能只信各 Track 自身 unit test green。本 case PM 必得知此 known-issue 才部署 — 否則 operator 看 Sprint 1 land 後 V045 全 'failed' 不知是 design 還是 bug。
+
+26. **`replay:read:any` scope 引入但未在 default `auth_scopes` 註冊** — Track C IDOR fix 加 admin bypass via `replay:read:any` scope，但 auth.py L184-233 預設 scope set 沒列。沒有任何 actor 能取得 → admin bypass 永遠關閉 → 功能等於失效。對抗反問「fail-closed default 不是好事？」回答：是，但 E1 deployment notes 沒提加 scope 步驟 → operator 不知道怎麼啟用。E2 必驗 grep `<new_scope>` 在 auth.py default scopes 是否註冊 — 0 hit 即標 finding。**SOP 加項**：任何新 scope 引入必同時改 auth.py default OR commit/PR 描述強制標 deploy doc 補充 step。
+
+27. **PA spec drift — boot guard 從 raise 降級為 logging-only** — PA partition design L133 明文要求 boot guard `OPENCLAW_RELEASE_PROFILE=live + OPENCLAW_REPLAY_VERIFY_TEST_KEY 設 → must raise`。E1 改為 `logging.error(...)` 沒 raise — PA spec drift。E2 必對 PA spec 每條「必 raise / fail-closed / abort」字眼 cross-check IMPL 是否真 raise（不能只 log）。本 case 退回 E1 補 5 行修。
+
+28. **同 enum DROP+ADD pattern V044 + V053 的 race window 一致性** — V044 既已 land DROP+ADD CHECK 不在 single transaction（E3 P1-3 flag 過 race window）。V053 沿用同 pattern，沒加 LOCK TABLE / BEGIN/COMMIT — Track C 未自承知道 V044 P1-3 flag。E2 必比對「同 schema 重複 pattern」是否 P1+ 已 flag — 一致性要求修。本 case 退回 E1 補 single DO block + LOCK TABLE。
+
+29. **`json.dumps(..., ensure_ascii=False)` cross-language byte-equal invariant** — Track A `_write_manifest_fixture` 用 `json.dumps(payload, sort_keys=True, indent=2)` 缺 `ensure_ascii=False` + 缺 `separators=(',', ':')`。Track B Rust `serde_json::to_vec` 預設 compact + sorted（BTreeMap） + 不 escape unicode — Python 預設 `ensure_ascii=True` 會 escape 非 ASCII char → byte 不等。**目前 attack surface 0**（A 寫 placeholder hash，B 重新 canonicalize），但 V042 land 後 A 升真 sign 必須對齊 — E1 補本檔 + 加 byte-equal unit test 防 regression。
+
+30. **對抗反問必逐項展開、不接受「測試通過」答覆** — 本 review 對 4 Track 各列 ≥2 條反問（A `time.sleep` 阻塞？/ A `output_dir.basename` 防 attacker？ / B 兩邊 verify？/ B key.hex 缺 dev workflow？/ C env attacker？/ C cmdline PID-1 邊界？/ C symlink 攻擊？/ D EXCLUDE GIST 真擋？/ D paired CHECK 既有 row？/ D preflight 0 row？）— 共 10 條反問，6 PASS（已測 / spec 合理）+ 2 acceptable（已 known + standard secondary defense）+ 2 advisory（V042 land 前 caveat / cross-track 整合）。對抗反問是 E2 senior judgement 體現 — 不能只跑 grep + checklist，必假設 E1 寫錯主動找 race / leakage / shortcut。本 SOP 化進 E2 review template。
+
+## 2026-05-03 — REF-20 Sprint 3 Track H 4-task E2 senior+adversarial review (RETURN to E1)
+
+**Topic**: Track H 4 task（E-1 Rust facade / E-2 router gate / E-3 Python IPC bridge / E-4 V054 schema + audit writer）E2 round 1，AMD-2026-05-02-01 路徑 A 兌現 critical path。
+**Verdict**: RETURN to E1 — 3 HIGH + 1 MEDIUM finding 必修；2 LOW informational。
+
+### Sprint 3 Track H E2 review 教訓 / 反模式（追加 31-37）
+
+31. **§九 pre-existing baseline exception clause condition (2)+(3) 嚴格 enforcement** — Pre-existing exception 不是「免責簽到」。tests.rs baseline 2375 → +535 LOC（推到 2910），E-1+E-2 雖各自正確 push back §7.2，但 condition (2)「同時開新 P2 ticket」**沒做**。E2 必查 TODO.md `grep -i "tests.rs\|P2-INTENT-PROCESSOR"` 0 hit = governance violation。RETURN E1 必 commit P2 ticket。
+
+32. **governance_core.rs 從 584 → 1498 是 NEW boundary expansion 不適用 pre-existing exception** — E-1 baseline 1251（誤），實際 git show HEAD 是 584。E-1 加 +667（Mutex/facade/8 unit test），E-4 加 +247（emit hook + 3 helper）= 合計 +914 LOC。此非 pre-existing baseline 1500+ violation，§九 exception clause 條 (1) 不適用。+247 LOC 把 governance_core.rs 推到 1498（距 hard cap 2 LOC）— 必嚴格 enforce「下次任何 +1 LOC 撞 hard cap」風險。Option A facade-inline emit 雖正確但需 helper extract 緩衝（candidate `governance_emit.rs` ~150 LOC）。E2 必標 HIGH finding + P2 ticket 強制。
+
+33. **env var-based runtime tag 必驗 setter wiring** — E-4 加 `OPENCLAW_ENGINE_MODE` env var 解析 + 5-value enum + default "demo"；對齊 V054 chk_lease_transitions_engine_mode CHECK。但 grep `OPENCLAW_ENGINE_MODE` 在 helper_scripts/restart_all.sh / engine main.rs / startup chain **0 hit setter** — env var 從來沒被設過，所有 emit 都會落入 default "demo" fallback。Live mainnet → 標 'demo'；LiveDemo → 標 'demo'；Paper → 標 'demo'。**PA push back #2 + AC-1 query `engine_mode != 'shadow'` 失效**（everything demo means no env-mode partition）。HIGH finding — env reader 必須有對應 setter（restart_all 或 main.rs runtime resolve），否則 dead tag。
+
+34. **HashMap 反查表必有清理路徑** — E-1 為解 idx vs lease_id 不對應加 `lease_id_to_idx: HashMap<String, usize>`；release_lease() **不清理 entry**（grep `lease_id_to_idx` 全文 0 remove call）。每筆 acquire+release leak 1 entry，1 年 365K entries × 50 bytes = ~18MB（不致命但 pre-live 必修）。配合 `DecisionLeaseSm::leases` Vec 也不 trim，是雙重 leak。**MEDIUM finding** — pre-existing SM-02 leak 不是 Track H 引入但 Track H 暴露面擴大；release_lease 必加 `self.lease_id_to_idx.lock().remove(lease_id_str)` 在 SM transition 之後。
+
+35. **ExpiryGuardian 引用是 lie**（router.rs L62 注釋「ExpiryGuardian sweeps」）— 字面意義 ExpiryGuardian 是 SM-02 內部 LeaseInitiator，不是真實的 background sweeper task。`governance_core.check_expiry()` exist L982 但**從未被 engine 呼**（grep `governance.*check_expiry|core\.check_expiry` 在 openclaw_engine 0 hit）。Drop 內 release_lease 失敗→「ExpiryGuardian sweep」是設計幻覺，真實是 lease 永遠卡 SM-02 直到 process restart。HIGH finding — 必須 wire periodic sweeper（main.rs spawn `tokio::spawn` 每 60s 呼 governance.check_expiry()）。
+
+36. **V050 placeholder column dangling 確認** — Sprint 1 V050 `replay.simulated_fills.decision_lease_id` 是 placeholder，PA 預期 Sprint 2 啟用。Track H 4 task 全完，但 grep `INSERT INTO replay\.|decision_lease_id` 在 Rust hot path = 0 hit。E-2 §7.1 push back 正確：V050 是 offline replay_runner output，Track H scope 只到 IntentResult.lease_id 暴露 + writer 寫 `learning.lease_transitions`，不寫 V050。**AC-2 + AC-3 query 從 `replay.simulated_fills` 取 `decision_lease_id IS NOT NULL` 將永遠返回 0** 直到 P3+ replay_runner online。E2 PASS for E-2/E-4 scope，但必 PM 知曉「AC-2/AC-3 不會 PASS in Sprint 3 deploy 後 24h 視窗」。
+
+37. **跨 crate test setter `pub fn ... _for_test` 安全紀律** — E-2 加 `set_router_gate_enabled_for_test` 為 `pub fn` + `#[doc(hidden)]`（因 cfg(test) 跨 crate 不傳遞）。grep production 代碼 0 caller — 紀律維持。E2 PASS。但建議未來加 `debug_assertions` runtime guard 防誤呼（panic on caller in release build）— 是 LOW informational suggestion。
+
+38. **`Path.exists()` 對 directory + non-executable 兩面欺騙：唯一正解 `is_file() and os.access(X_OK)` 雙保險** — REF-20 Sprint A R1 round 1 HIGH-1 攻擊面：`workspace_release.exists()` 對 mode 0644 file（True）+ directory（True）+ symlink-to-deleted（False）三面行為不一致；其中前兩者讓 `/run` 永遠 fail（subprocess.Popen 拋 PermissionError / IsADirectoryError）但 `/health` 仍報 `binary_exists=true`。對抗 probe（live Mac euid=501）發現 directory 對 `os.access(X_OK)=True`（因 traverse permission），所以**單檢 `os.access(X_OK)` 也會被 directory 騙**！E1 round 2 fix `_is_executable_file(p) = p.is_file() and os.access(p, os.X_OK)` 是**唯一**正確設計：`is_file()` 守 directory + dangling symlink，`os.access(X_OK)` 守 mode 0644 / 0444。POSIX root 行為附加：root 對 mode 0000 / 0644 仍回 X_OK=False（POSIX `access(2)` 規範要求至少一 user/group/other 有 x bit），所以「攻擊者放 0644 假 binary 騙 root helper」場景被守住。E2 PASS round 2。
+   **抽象 review pattern**：任何 binary path resolution helper 必須驗 「是檔 + 可執行」雙條件；只用 `Path.exists()` 是 attack surface。
+
+39. **`os.environ.get(..., "")` 跟 `.strip()` 必同步** — REF-20 Sprint A R1 round 1 MEDIUM-1：`OPENCLAW_BASE_DIR="   "`（whitespace-only）`if not base_dir:` 不觸發 fallback，後續 `Path("   ") / "rust/..."` 變 leading-space garbage path。E1 round 2 fix 兩處 env 都加 `.strip()`：`OPENCLAW_REPLAY_RUNNER_BIN`（line 189）+ `OPENCLAW_BASE_DIR`（line 198）。test 6/7（empty + whitespace-only）兩 corner case 釘住。**抽象 review pattern**：所有 `os.environ.get("X", "")` 後若用「if not」guard fallback，必須先 `.strip()`，避免 IFS / shell expansion / typo 留下 trailing space。
+
+40. **wiring_status='ready' 但 schema 缺：monitoring 在說謊** — REF-20 Sprint A R1 round 1 LOW-2：`compute_replay_health_state` 原邏輯只看 `binary_exists + pg_present + data_dir_writable`，PG up 但 V045 / V049 缺仍回 ready；`/run` 在第一筆 INSERT INTO replay.run_state 失敗。E1 round 2 fix 加 `elif not v045_present or not v049_present: wiring_status = "degraded"` rule + 3 unit test mock rows=[(False,True)] / [(True,False)] / [(True,True)]。**抽象 review pattern**：health endpoint 的 ready 條件 = downstream 第一筆操作能成功的 superset；health 撒謊比 health 標 degraded 更危險（前者讓 monitoring 沉默，後者只是 alert noise）。
+
+41. **focused round 2 scope 紀律：不重審已 cleared 的部分** — Round 2 verification 嚴格收斂在 round 1 finding 的 fix verdict，不重做 round 1 全 audit；對 round 1 已 PASS 的 R1-T2 / R1-T4 不再 grep / 不重跑 audit script（除非 sibling regression 觸發）。對 round 1 RETURN 的 5 finding 逐一驗 fix presence + 跑對應 regression test + 對抗反問。**抽象 review pattern**：multi-round review 後續 round = pin-point fix verification，不要把 scope 擴回全 audit；E2 對抗範圍只擴增「fix 是否引入新 issue」，不重審無關項。Round 2 結論 0 new finding → PASS to E4 直接放行。
+
+42. **REF-20 Sprint A R3 Round 6 review (2026-05-05) — RETURN to E1 / 1 HIGH + 1 LOW + 0 BLOCKER**：
+
+**對象**：T1+T2+T3a+T4 4 task in round 6 — `route_helpers.py` 1249 → 1485 (real HMAC sign + stderr capture + fixture env fallback) / `restart_all.sh` 470 → 492 (env injection) / 4 new test files (T4-1 to T4-4).
+
+**Verdict**：RETURN to E1 — 1 HIGH（FINDING-1：env override step 1 缺 live profile gate）+ 1 LOW（FINDING-2：spawn_died_early 503 detail leak stderr excerpt 含 path/fingerprint）
+
+**驗證手段**：
+1. `grep -rn "placeholder_signature_wave6\|placeholder_hash_wave6\|placeholder_key_ref"` production code path 0 hit（5 hits 全在 MAINTAINER docstring + test assertion）
+2. `grep "stderr=subprocess.DEVNULL"` in spawn_replay_runner — 0 hit（已換 `stderr=stderr_fh`）
+3. `grep -E '(/home/ncyu|/Users/ncyu)'` 6 文件 — 0 hit（cross-platform clean）
+4. Cross-language byte-equal invariant — Rust manifest_signer.rs:574 `ENVELOPE_KEYS_FOR_SIGNING` 3 keys 對齊 Python L707；Rust replay_runner.rs:544-547 `manifest_path.parent / "key.hex"` 對齊 Python L969 sibling key.hex 寫入路徑；Rust L480 `compute_key_fingerprint(file_content)` 對齊 Python L802 ✓
+5. Python `pytest -k xlang_consistency` 13/13 PASS（Sprint 1 F1 retrofit canonical bytes contract intact）
+6. Python `pytest -k replay` 141 PASS / 1 skip / 3387 deselected / 0 fail（baseline 118 + 23 new R3-R6 = 141）
+7. R3-R6 4 new test 23/23 unit case PASS（11 + 7 + 5 = 23 unit；T4-4 e2e smoke 1 skip opt-in）
+8. `bash -n restart_all.sh` syntax PASS
+9. Singleton 表：4 新 module-level constant 全 immutable str/tuple 不需登記
+10. LOC：route_helpers.py 1485 < 1500 hard cap ✓（但 800 警告線 Wave 4 已破；R7+ 必拆 manifest_provisioning.py）
+11. SEEK_END tail cap 演算法數學驗證：64KB → 2048 char tail，正確
+12. subprocess fd safety：parent stderr_fh 在 try/finally close（child 持自身 dup fd），exception path 也 close ✓
+
+**FINDING-1 (HIGH)** — `_resolve_manifest_signing_key()` step 1 `OPENCLAW_REPLAY_SIGNING_KEY_FILE` env override 缺 live profile gate：
+- 位置：`route_helpers.py:765-803`
+- 問題：production live profile 下，operator/attacker 設此 env 指向任意 path（任意 mode、任意 symlink）會繞過 R2-T3 step 2 既有的 mode 0o600 + symlink-injection guard + path traversal guard。Step 1 完全沒檢查 file mode、沒做 symlink resolve、沒 fail-closed。
+- PA design §7 Q2 + §5 E3 #3 自承「dev/test only path」「Live profile 守門由 (b) R2-T3 既有 mode/symlink 邏輯涵蓋」— 但 step 1 在 step 2 之前，且 step 1 完全沒 live profile gate，PA 描述與實作不一致。
+- 對齊 Sprint 1 Track C P0-2 模式：`OPENCLAW_REPLAY_VERIFY_TEST_KEY` 在 production 由 `is_live_release_profile()` 阻斷；本 round 新增的 `OPENCLAW_REPLAY_SIGNING_KEY_FILE` 是同類測試/dev override env 但**沒對齊** P0-2 gate。
+- 修法（簡單 + minimal）：step 1 開頭加 `if is_live_release_profile() and override_path_str: log.warning + raise ValueError("signing_key_file_env_override_blocked_in_live_profile")`，與 P0-2 模式對齊。或 step 1 沿用 R2-T3 mode/symlink/path-traversal 檢查（更厚的縱深防禦）。
+- 影響：Replay Lab 不 live trade，但仍是 secret leak 設計 hole；CLAUDE.md §九 SEC-08 嚴禁類似 bypass pattern。
+
+**FINDING-2 (LOW)** — spawn_died_early 503 detail leak path/fingerprint：
+- 位置：`replay_routes.py:678` + `route_helpers.py:628-630`
+- 問題：spawn_died_early reason 含 256 byte stderr excerpt，被 raise HTTPException(detail=`replay_runner failed to spawn: {pg_err}`) leak 給 API client。stderr 內容主要是 server-side 已知資訊（output_dir absolute path、fingerprint、verify mode label），不含 OS secret / API key。但仍違反 CLAUDE.md §九 SEC-04 「detail=str(e) → 'Internal server error'」原則 + IDOR 線索（path leak）。
+- 修法：reason_code 可保留 `spawn_died_early:exit=N`（無 stderr excerpt）；stderr 完整內容**只寫 server-side log + replay_runner.stderr disk file**；503 detail 只標 `replay_runner_spawn_failed` reason_code + opaque message。stderr file 已落 disk 給 operator post-mortem，不需 leak 給 API client。
+- 嚴重性 LOW：實際可能洩漏的是 absolute path / fingerprint hex，無 secret value；但收緊符合 SEC-04 原則。
+
+**E2 教訓 / 反模式提醒**：
+
+1. **dev/test override env 在 production 的 default behaviour 是「unguarded bypass」** — Round 6 新 env `OPENCLAW_REPLAY_SIGNING_KEY_FILE` 沿用 R2-T3 secrets-dir 守門設計，但 step 1 env override **直接讀檔不檢 mode / symlink** = production live profile 下守門整片崩。PA design 自證「dev/test only path」與**實作**不一致 — 實作在 production runtime 沒任何 gate 就讀任意路徑。Sprint 1 Track C P0-2 已立過 pattern：`OPENCLAW_REPLAY_VERIFY_TEST_KEY` 必須由 `is_live_release_profile()` 阻斷。**抽象 review pattern**：任何「dev/test only」env override 都必須有 explicit live profile gate 阻斷 production 啟用，否則就是繞門。E2 對 R3-R6 同類設計 pattern 必查 production gate 是否存在，不接受 docstring 自證「dev only」。
+
+2. **HTTPException detail 含 subprocess output 是 SEC-04 灰色地帶** — Round 6 為了 operator 不 ssh manual reproduce，把 stderr 256 byte excerpt 放進 503 detail message。stderr 主要 server-side path / fingerprint 不含 OS secret，但**任何來自外部 process 的 byte string 進 detail JSON 都應視為潛在 leakage**（反 SEC-04 原則）。stderr disk file 已存 → 503 detail 只需 reason_code + opaque message + 提示 operator check disk file 即可；不需 inline stderr。**抽象 review pattern**：subprocess stderr 進 503 detail 是反模式；server-side 寫 disk + 提示 operator 路徑是正解。
+
+3. **canonical_bytes contract reuse 無 drift 是不變量釘住的範例** — Sprint 1 F1 retrofit + 8/8 cross-language fixture regression test 持續鎖定 sort_keys + separators + ensure_ascii=False 三 kwargs；Round 6 T1 透過 import `compute_manifest_canonical_bytes` from experiment_registry + `ManifestSigner` from manifest_signer 完整重用 helper、不複製 kwargs，xlang 13/13 仍綠 — 是「複用既有 helper」優於「複製設定」的範本。R7+ 任何後續 sign-related 改動延續此 pattern。
+
+4. **SEEK_END tail cap 數學驗算很容易但常被忽略** — `_read_stderr_excerpt` `seek(0, 2) → tell() = size → seek(max(0, size - cap_bytes), 0) → read(cap_bytes)`，需獨立驗 64KB → 2048 char 的數學。本 round 驗算正確。**抽象 review pattern**：任何 seek/read tail cap 都當場跑 io.BytesIO sanity，比讀代碼快、誤差零。
+
+
+---
+
+## E2 Round — REF-20 Sprint B2 R5-T1 + R5-T2 Foundation Adversarial Review (2026-05-05)
+
+**Branch**: main HEAD `2a69addb` (E1 IMPL pre-commit, files unstaged) · **Reviewer**: E2 (this session)
+**Scope**: 2 NEW Rust modules in `rust/openclaw_engine/src/replay/`：strategy_adapter.rs (398 LOC) + risk_adapter.rs (546 LOC) + mod.rs +21 LOC re-export
+**E1 sign-off**：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-05--ref20_sprint_b2_r5t1t2_impl.md`
+
+### Pass-confirmed checks
+1. forbidden import grep（10 pattern）0 hit on adapter source files ✓
+2. cross-platform grep（`/home/ncyu` / `/Users/[a-z]+/`）0 hit on adapter files ✓
+3. cargo test --features replay_isolated --lib 2474 PASS / 0 fail / 0 regression（54/54 replay tests + pre-existing 2420）✓
+4. cargo test --test replay_runner_e2e 6/6 proof PASS（including Proof 4 forbidden trip + Proof 5 baseline-vs-candidate）✓
+5. xlang_consistency 13/13 PASS（沒動 manifest_signer，invariant 維持）✓
+6. symbol audit 414 symbol 0 forbidden ✓
+7. bilingual MODULE_NOTE 中英對照齊備 ✓ · docstring 雙語 ✓ · SAFETY 注釋雙語 ✓ — 完美遵循 §七
+8. interior mutability 0（`evaluate(&self, &snapshot)` pure 確認） ✓
+9. 0 unsafe / 0 production unwrap / 0 production panic（test 內 expect/panic OK）✓
+10. Strategy::on_tick byte-equal forward — `actions = self.strategy.on_tick(ctx); ... return actions;` line 146 + 181，0 mutation 0 filter 0 dedup ✓
+11. file size：strategy_adapter.rs 398 / risk_adapter.rs 546 — both <1500 hard cap ✓ (E1 §8.1 push back PM accept LOC overage with bilingual policy ceiling rationale 已 file)
+12. ReplayProfile::Isolated constructor reject Live/LiveDemo/PaperLegacy — 兩 adapter 對稱 ✓
+
+### Adversarial probes (PASS with notes)
+
+**Probe 1 — `compute_intent_signature` canonical bytes**:
+- 公式：`(symbol|is_long|strategy|order_type|conf:.4f|qty:.4e)` SHA-256 → 64-char lowercase hex
+- A4 acceptance：`grid_count=10 vs 20` → strategy 內部 OU spacing 改 → emit `qty` 變 → signature flip via `qty:.4e` ✓
+- **scope-out（accepted）**：5 OrderIntent fields 不入 signature — `limit_price`/`confluence_score`/`persistence_elapsed_ms`/`time_in_force`/`maker_timeout_ms`。對齊 PA design line 339 hash 規格。但若未來 strategy 改 `cross_persistence_ms` (MA crossover) 為唯一 delta → signature 不 flip。**A4 example 是 grid_count→qty path，覆蓋；其他 strategy parameter 改動需 R5-T7/T8 fixture 端 verify。LOW finding**：canonical bytes 有限，未來 acceptance test 設計 fixture 需匹配 hash 範圍。
+
+**Probe 2 — 6/8 Gate sequence vs router.rs:184-455 byte-equal**:
+- Order：1.5 dup → 1.6 neg-balance → pre_guardian_qty calc → 2.0 Guardian (reducing-path zero-leverage) → 2.5 Kelly → 2.6 P1 cap + qty=0 ghost → 2.7 admission
+- 對齊 router.rs ✓ (line-by-line 比對)
+- **scope-out（accepted, PA spec line 432 寫「復刻 router.rs:359-455」）**：
+  - `per_strategy_symbol_rejection`（router.rs:263-266）— PA design line 173 列「純函數可重用清單」但 §4.2 line 432 沒明說復刻；實作不含
+  - `apply_governor_order_constraints`（router.rs:403-413）— PA design line 173 ⚠️「需 mock GovernanceCore」；實作不含
+  - BLOCKER-3 D15 global notional cap（router.rs:457-464）— PA design未提；實作不含
+- **影響**：A5 acceptance "risk delta changes pass/reject" — `position_size_max_pct=2 vs 10` 走 Gate 2.7 admission ✓ covered；但 governor_tier 改動 / per-strategy override 改動 / global notional cap 改動 → replay 不會反映。**LOW finding**：留 R5 後續 wave / Sprint C 補完 R5-T2 risk gate 完整性。
+
+**Probe 3 — Strategy::on_tick reuse 0 trait change**:
+- adapter `on_tick(&mut self, &TickContext)` 直接 forward 給 wrapped `Strategy` instance
+- `actions = self.strategy.on_tick(ctx); ... actions` byte-equal return ✓
+- StrategyAction enum 2 variant（Open/Close）全 trace record；Strategy trait 真實只 emit 這 2 variant ✓
+- **race-free**：adapter owns `Box<dyn Strategy>`（單一 owner），`Send` bound 滿足 thread-safety；`&mut self` borrow 強制單路徑
+
+**Probe 4 — `evaluate(&self)` pure**:
+- 0 RefCell/Mutex/UnsafeCell（grep 0 hit）✓
+- `&self` not `&mut self` ✓
+- `&snapshot` immutable borrow ✓
+- 內部 Guardian.review / compute_kelly_qty / check_order_allowed 全 pure deterministic（grep 證實）✓
+
+**Probe 5 — `into_trace` consume self reproducibility**:
+- `into_trace(self) -> Vec<DecisionTraceEntry>` consume self → caller 不能 reuse
+- adapter dropped 前已 emit complete trace
+- fixture replay 每次 build 新 adapter + 跑同 fixture 應產 byte-equal trace
+- 前提：strategy 內部 deterministic（grep `rand::|rng|Instant::now|SystemTime::now` 在 grid_trading + ma_crossover 0 hit）✓
+
+**Probe 6 — NaN / 0 / negative input fail-closed**:
+- `intent.qty = NaN` → Gate 2.6 `!(final > 0.0)` rejection（NaN > 0.0 = false）✓
+- `intent.qty < 0` → pre_guardian_qty < 0 → Gate 2.6 rejection ✓
+- `snapshot.balance = NaN` → `balance <= 0.0` for NaN is **false** → 1.6 不 trigger（NaN 穿透）— **LOW**：caller R5-T3 構造 snapshot 必 fail-loud 對 NaN balance；adapter 不 sanitize（與 router.rs 同行為）
+- `snapshot.latest_price = None` → `price = 0.0` → Gate 2.6 fallback `p1_max_qty = kelly_qty`（無 cap）；admission 內 `position_pct = 0` → P1 cap 等於被禁。**LOW**：caller 必保證 latest_price 有值（與 router.rs 同行為）
+
+**Probe 7 — empty-tick skip in trace**:
+- strategy_adapter line 149 `if !actions.is_empty()` skip empty tick → trace count = action emit count
+- A4 fixture 兩 strategy_config_sha256 都 emit 0 fills → 兩 trace 都是 N=0 → 看似「同 outcome」誤導
+- **LOW**：caller 端 acceptance test 設 fixture 必保證至少有 1 fill（PA design §5.1 example `grid_count=10 vs 20` 兩邊 ≥2 fill 假設）
+
+### Findings
+| # | Severity | Location | Issue | Recommendation |
+|---|---|---|---|---|
+| F-1 | LOW | `risk_adapter.rs` whole | 3 sub-gate scope-out（per_strategy / governor / D15 cap）vs router.rs：A5 risk delta 範圍受限 | 接受本 round；PM 在 R5-T7/T8 acceptance test fixture 設計時注意：A5 fixture 必走 `position_size_max_pct` (Gate 2.7) 路徑。Sprint C 後續補 governor + D15。**不阻 B2 dispatch** |
+| F-2 | LOW | `strategy_adapter.rs:214-234` | canonical bytes 6 field（不含 limit_price/confluence/persistence/TIF/maker_timeout）；某 strategy parameter 改動可能不 flip signature | A4 acceptance fixture 必走 `grid_count` (qty path)。MA crossover `cross_persistence_ms` 等改動不適合作 A4 fixture。**不阻 B2 dispatch** |
+| F-3 | LOW | `risk_adapter.rs:255` + `:340-344` | `snapshot.balance=NaN` / `latest_price=None` 不 sanitize，與 router.rs 同 silent 行為 | R5-T3 IsolatedPipeline::execute 構造 snapshot 必 fail-loud 對 NaN balance / None price。 |
+| F-4 | LOW | E1 sign-off §2 | `ReplayPaperState` rename 為 `ReplayPaperSnapshot`（PA design line 437-450 named ReplayPaperState）+ apply_fill 不在 R5-T2 — design refinement 沒明列 push back | 不阻 dispatch；E1 R5-T3 sign-off 報告需明列此 rename + apply_fill ownership boundary |
+| F-5 | LOW | `strategy_adapter.rs:149` | empty-tick 不 record，A4 fixture 0-fill scenario 兩 candidate 看似 same outcome | A4 fixture 端必保證 fill ≥1；R5-T7/T8 acceptance test 設計時注意 |
+
+### Verdict
+**PASS to E4** — 5 LOW finding 全 scope-out 或 caller 端 R5-T3 注意項，0 CRITICAL/HIGH/MEDIUM。0 退回 E1 修復條目。
+
+R5-T1+T2 architectural foundation OK：
+- Strategy trait 0 改動 reuse ✓
+- 6 Gate replay-pure 復刻精準 ✓
+- forbidden surface 0 hit ✓
+- 對 R5-T3 wire-up 預備已被 E1 §8.3 push back 標記（owned `mut` field 不可 Arc<Mutex>）✓
+- `tests/replay_runner_e2e.rs` 6/6 proof 不破
+
+### R5-T3 wire-up 預備風險（為 PM 派發 R5-T3 dispatch brief 留）
+1. IsolatedPipeline 必 owned `mut adapter` field（不可 Arc<Mutex>，因 Strategy::on_tick 需 &mut self）
+2. snapshot 構造端必 fail-loud 對 NaN balance + None latest_price
+3. synthetic walker (runner.rs:478-503) 將 replace；保留 Proof 4 forbidden trip 邏輯 + Proof 5 baseline-vs-candidate 行為
+4. fixture_loader IndicatorSnapshot 端必含 indicators（PA design §13 line 691）
+5. apply_fill 邏輯歸 R5-T3（snapshot.clone() → apply → 餵下 tick）
+6. R5-T2 已用 `crate::ml::kelly_sizer::compute_kelly_qty` + `crate::risk_checks::check_order_allowed` + `openclaw_core::guardian::Guardian` — 這些 import path R5-T3 不可動
+
+### E2 教訓 / 反模式提醒（追加）
+
+5. **adversarial review 對 PA scope-out 的判斷標準** — R5-T2 的 6/8 Gate 設計 ≠ "PA wrong"。PA spec line 432「復刻 router.rs:359-455」是縮緊 scope（gate 2.5/2.6/2.7 + 1.5/1.6/2.0），不取 governor/per_strategy/D15。E2 不能因「不完整 = HIGH」退回 — 應認 PA spec scope-out 是「PA 已知 trade-off」+ 列 LOW finding 留 R5-T7/T8 acceptance test 端注意 + Sprint C 補完。**抽象**：對 PA 設計 scope-out 的審查標準是「scope-out 在 PA 設計文有跡可循？」+「acceptance fixture 走的 path 是否在 IMPL 範圍內？」+「未來 wave 的補完路徑是否清晰？」三條都 yes → LOW finding；任一 no → 退回 PA 重 design。
+
+6. **canonical bytes 範圍對齊 hash 用途** — A4 acceptance fixture 的 strategy parameter delta 若改 `grid_count` 影響 `qty` → signature flip via `qty:.4e`。若改 `cross_persistence_ms` (MA crossover) 純 internal state 不 reach OrderIntent fields 入 hash → signature 不 flip。**抽象 review pattern**：任何「hash 為證明」的設計都必須查 hash canonical bytes vs acceptance fixture 改動的 parameter 路徑是否會 reach hashed field。E2 必跑「PA fixture example 改的 X 是否 reach signature 公式」對照。
+
+---
+
+## 2026-05-05 R5-T3 Adversarial Review (REF-20 Sprint B2 — wire adapter into runner.rs)
+
+**Verdict**: PASS to E4 · 0 RETURN · 3 LOW finding (1 doc-text typo + 2 caller-side notes)
+**Report path**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-05--ref20_sprint_b2_r5t3_e2_review.md`
+
+### 對 PA Q10 偏離立場（Optional pattern vs wholesale replace）
+
+E1 偏離 PA Q10 改採 Optional adapter pattern，**accept**：
+- proof_1/4/5 e2e 為 V3 §12 binding 的 evidence baseline，wholesale replace 會破 byte-equal contract
+- synthetic walker 退化為 e2e regression baseline + fast deterministic test asset
+- R5-T4 CLI 後 production 永走 adapter，walker 轉 fallback 用途
+
+### apply_fill PnL 公式 byte-equal mirror paper_state
+
+讀 `paper_state/fill_engine.rs::apply_fill` (line 276-385) 對齊 4 路徑：
+- Same-direction extend (weighted avg entry): byte-equal (`(old_entry * old_qty + fill_price * qty) / new_qty`)
+- Opposite full close (qty >= pos.qty): byte-equal；over-fill 兩端皆 silent-discard 多餘 qty
+- Opposite partial close (qty < pos.qty): byte-equal；剩餘倉留
+- Fresh open: byte-equal (entry_price = fill_price)
+
+**StrategyAction::Close 無 qty 字段** → 一律全平 contract → `apply_fill_close` 全 remove 設計正確（NO BUG）
+
+**Sprint A baseline fee=0** 是 PA design 既決議 scope-out（Sprint C R6 補）
+
+### fail-loud snapshot 兩條 (F-3 fix)
+
+`with_adapter_pipeline` setter line 541-585 兩條：
+1. `!snapshot.balance.is_finite()` → `InvalidSnapshot { reason: "balance must be finite f64" }` (NaN/Inf reject)
+2. `latest_price.is_none() && positions.is_empty()` → `InvalidSnapshot { reason: "latest_price is None and positions is empty" }` (empty anchor reject)
+
+`ReplayError::InvalidSnapshot` variant 確存 (runner.rs:304) + Display impl (line 316-321)；4 R5-T3 inline test 有 2 條覆蓋。
+
+### `decision_traces` 加 field 0 break risk
+
+`ReplayResult.decision_traces: Vec<DecisionTraceEntry>` + `#[serde(default)]` 向後兼容；`grep -rln decision_traces program_code/` 0 hit (Python downstream 0 file 引用)；canonical_bytes / xlang invariant 0 影響（runner.rs 不影響 manifest envelope）。
+
+### LOC 1466 high-cohesion exception accept
+
+比照 commands.rs 1343 / scanner/scorer.rs 1437 先例 accept Option A：
+- runner.rs 全檔單一責任 (IsolatedPipeline 生命週期 + state mutation)
+- bilingual docstring + inline test 為 LOC 主要膨脹源（實業務代碼 ~470 LOC）
+- R5-T4/T5/T6 加 LOC 風險低（fixture_loader / Python writer / separate test file 走別檔）
+- 若 R5-T4 推 LOC > 1500 → 屆時拆 `runner_apply.rs`（Option B）
+
+### E2 review 教訓（追加）
+
+7. **PA Q-design 偏離的判斷標準** — E1 偏離 PA Q10「wholesale replace」改採 Optional pattern，E2 不能機械式退回。判斷三條：(1) 偏離有 e2e regression baseline 保護 (proof_1/4/5)？(2) 偏離增加 vs 減少 system fragility？(3) production path (R5-T4 CLI) 是否強制走新 path？三條都 yes → accept；任一 no → 退回 PA design 確認。**抽象**：對 PA 設計偏離的審查標準是 backward-compat asset value vs 維護複雜度的 trade-off，不是「偏離 = 違規」。
+
+8. **跨檔對齊型對抗審查** — apply_fill PnL 公式對齊 paper_state 是「跨檔 mirror invariant」典型；E2 不能只讀 runner.rs 內部，必須打開 paper_state/fill_engine.rs 對 4 路徑（extend / full close / partial close / fresh open）byte-by-byte 比對 + 確認 fee deduction scope-out 在 PA design 有跡。**抽象 pattern**：任何「mirror live behaviour」的 replay/shadow IMPL 都必須跨檔逐路徑對照，不接受「邏輯類似」答案。
+
+9. **schema 擴展 vs downstream consumer** — `ReplayResult.decision_traces` 加 field 但 Python downstream（R5-T5/T6 待寫）尚未消費。E2 確認三條：(1) `#[serde(default)]` 提供向後兼容？(2) Python `grep -rln <field_name>` 為 0？(3) 不影響 PG schema (V050)？三條都 yes → 0 break risk。**抽象**：schema 擴展型 PR 的審查必跑 producer-consumer 對照；schema 進但 consumer 未進是 acceptable forward-compat 寫法。
+
+10. **lib regression PASS count 細究** — E1 sign-off 報告 2474 PASS 但 E2 實測 2478；經查 +4 = R5-T3 inline tests，E1 §1 表格 +250 LOC = 4 inline tests 已透露但 §7 PASS count 未更新。**LOW finding**，不阻 E4 但 commit message 應訂正。**抽象**：E1 sign-off PASS count 必驗證 baseline + new = total，發現 mismatch 不一定是 regression（可能是新 test 沒計入），但必須叫 E1 解釋。
+
+7. **NaN propagation 在 risk gate 路徑的 silent bypass** — `balance <= 0.0` 對 NaN 是 false → 1.6 不 trigger。Live router.rs 同行為（即 router.rs 也 silent passes NaN balance 進 Guardian）。R5-T2 是 mirror 設計，行為一致 = OK；但 R5-T3 構造 snapshot 端必 fail-loud — 因為 router 真實由 paper_state 餵入，paper_state 自己 NaN-safe；R5-T3 從 fixture 構造 snapshot 不必然 NaN-safe。**抽象**：任何 "mirror existing function" 的 replay-pure adapter 都需確認 caller 構造 input 端維持與原 caller 一致的 fail-closed 不變量；不對齊 = silent bypass。
+
+---
+
+## 2026-05-05 R6-T0' V055 retrofit Adversarial Review (REF-20 Sprint C — V036 PR3 retrofit)
+
+**Verdict**: RETURN-TO-E1 · 5 finding (2 CRITICAL + 1 HIGH + 2 MEDIUM)
+**Report path**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-05--ref20_sprint_c_r6t0prime_v055_e2_review.md`
+
+### 核心 finding 抽象
+
+**FINDING C-1 (CRITICAL) — 「docstring 字面 vs schema 真實」對抗審查盲點**：E1 沿用 V036 docstring (line 195-204)「expires_at / replay_experiment_id / manifest_hash / evidence_source_tier columns 由 V038-V040 retrofit 後實際物理存在」字面，IMPL V055 INSERT 寫 4 column。但 grep 全 V*.sql 確認 `expires_at` column **0 ADD COLUMN 到 mlde_shadow_recommendations**（V049 的 expires_at 是 replay.experiments 不同表；V051 只加 2 col）。V3 §4.2 spec line 181-187 明確只列 3 column，V036 docstring 4-column 字面是 PR1 期望但 V038-V040+V051 final reality 只 3 column。E1 mock test 16 PASS 0 catch 因 mock 不撞 PG schema。**抽象**：任何 SQL function retrofit 必驗 INSERT 寫的 column 在目標表真實 ADD（grep `ALTER TABLE <table> ADD COLUMN <col>` 全 migration history），不可信 docstring 字面 + 不可信 mock test PASS。E2 必跑「schema reality grep」+「spec source-of-truth 對齊」。
+
+**FINDING C-2 (CRITICAL) — pg_get_function_arguments DEFAULT clause 干擾 substring 比對**：E1 用 `position('text, text, ..., timestamp with time zone, text, text, text' in lower(v_arg_types))` 子串檢測 19-arg signature drift。但 PG 13+ `pg_get_function_arguments(oid)` 真實輸出含 arg name + DEFAULT clause（`p_evidence_source_tier text DEFAULT 'real_outcome'::text, p_replay_experiment_id text DEFAULT NULL::text, ...`），第 13-19 arg 因 DEFAULT 插入打斷連續 type list → substring 必 false negative → V055 deploy 在真 PG 必 RAISE EXCEPTION 即使 signature 100% byte-equal V036。Mac mock 不暴露此 bug。**抽象**：PG 函數 signature 比對必用 `pg_get_function_identity_arguments(oid)` (PG 9.4+ 通用，不含 arg name + DEFAULT clause) 或 `pg_proc.proargtypes::regtype[]`，禁用 `pg_get_function_arguments(oid)` substring 子串比對（DEFAULT clause 必干擾）。E1 sign-off 自承「PG 12/11 未驗」但連 PG 13+ 都沒在真實 PG 跑 = mock-only PASS 不可採。
+
+**FINDING H-1 (HIGH) — `EXCEPTION WHEN OTHERS THEN ROLLBACK + RETURN` silent skip 反模式 in SQL**：E1 用「stub `replay.experiments` INSERT 失敗 → RAISE NOTICE skipped + RETURN（退出整個 outer DO block）」處理 V049 NOT NULL set 不確定。問題：(1) `WHEN OTHERS` 太寬（吞 V051 paired CHECK / serialization / lock timeout 等真 bug），(2) RETURN 連 path 1 real_outcome（不依賴 FK）也 skip，(3) operator 永遠不知道 smoke 真跑了沒（fragility 來源）。是 CLAUDE.md §九「sql:pass」等價反模式。**抽象**：SQL `EXCEPTION WHEN OTHERS` 是 silent skip 反模式（與 Python except:pass 同等）；必窄條件 (`WHEN unique_violation OR foreign_key_violation`) + RAISE NOTICE 含 SQLSTATE+SQLERRM 全文；preferred fail-loud 直接 RAISE EXCEPTION 不 graceful skip。任何 schema NOT NULL 不確定必先 `\d <table>` / information_schema 抽 NOT NULL set 對齊 stub minimal subset，不靠 try-except 規避。
+
+**FINDING M-1 (MEDIUM) — Python mock test PASS 不能宣稱 acceptance PASS**：E1 sign-off §5「16/16 PASS / 2 SKIP」是 `_mock_verify_and_insert` Python in-memory dict capture（test:129-212），完全不模擬 PG schema。test_v055_writes_4_metadata_columns_in_insert 只驗 SQL 靜態文字含 4 column 名 — 「靜態文字含 ≠ schema 真存在」。**抽象**：sign-off 報告引用「N PASS」當 acceptance 證據必驗證測試實質：(a) static-parse PASS 對應 SQL syntax / contract structural；(b) mock function 鏡射 PASS 對應 caller-side logic invariant；(c) 真 PG live smoke PASS 才對應 deploy 行為 acceptance。三層獨立，不可互相覆蓋。E2 必查 sign-off 引用的 PASS 屬哪層 + 是否對應宣稱的 acceptance 條件。
+
+### E2 教訓追加
+
+11. **「docstring 字面 + spec 真實」對齊審查** — E1 IMPL V055 沿用 V036 docstring 4-column 但 V3 §4.2 spec 與 V051 ADD COLUMN reality 只 3 column。E2 必 cross-check 三層：(1) IMPL 引用的 docstring 字面，(2) PA / V3 spec 真實要求，(3) 實際 ADD COLUMN migration grep。三層任一不對齊 = retrofit 設計錯誤（不只是字面 typo）。**抽象 pattern**：retrofit 類 PR（含 silent corruption fix / pre-existing PRn retrofit / docstring TODO follow-up）必驗 docstring 字面與 spec/schema reality 對齊；docstring 字面是 PR 早期期望，可能與後續 spec 演進偏離。
+
+12. **PG function signature 比對的正確 PG primitive** — E1 用 `pg_get_function_arguments(oid)` substring 子串比對 → DEFAULT clause 干擾 → false positive RAISE。**抽象規範**：PG function signature drift 檢測必用 `pg_get_function_identity_arguments(oid)`（不含 arg name + DEFAULT；PG 9.4+ 通用）或 `pg_proc.proargtypes::regtype[]`（陣列式型別 ID）。禁用 `pg_get_function_arguments`（含 arg name + DEFAULT，substring 比對必 false positive）。E2 看到 SQL Guard 用 `pg_get_function_arguments` 必標 issue。
+
+13. **mock test 不能宣稱 acceptance — 三層證據獨立** — Python mock test PASS 是 caller-logic invariant 證據，不是 deploy 行為證據。E2 必 cross-check sign-off 引用 PASS 是 (a) static-parse / (b) mock-mirror / (c) PG-live 哪一層；任一層 PASS 不能跨層代替。E1 sign-off 慣性「16 PASS = acceptance」必由 E2 訂正。**抽象**：acceptance 必涵蓋對應行為層 — schema 改動 acceptance 必含 PG-live；business logic 改動 acceptance 必含 mock-mirror；contract 文字 acceptance 含 static-parse 即可。
+
+14. **SQL `EXCEPTION WHEN OTHERS` 是 silent skip 反模式** — 與 Python except:pass / `except Exception` 同等。E2 看 SQL DO $$ block 內任何 `WHEN OTHERS` 必標 issue：(a) 改窄條件，(b) 必 RAISE NOTICE 含 SQLSTATE+SQLERRM 全文，(c) preferred 直接 RAISE EXCEPTION fail-loud。CLAUDE.md §九 fail-loud 原則 SQL 等價形式。
+
+15. **schema reality grep 是 SQL retrofit PR 的對抗審查必跑** — `grep ALTER TABLE <target_table> ADD COLUMN <col>` 全 V*.sql 是「column 真實存在」唯一 source-of-truth；docstring / spec / sign-off 表格 / mock test 都不可採。E2 對任何 INSERT/SELECT 觸碰 column 的 SQL retrofit PR 必跑此 grep。
+
+## 2026-05-05 R6-T0' V055 Round 2 Re-verify (REF-20 Sprint C — V036 PR3 retrofit)
+
+**Verdict**: RETURN-TO-E1 round 3 · 1 NEW CRITICAL finding (C-3 phantom column)
+**Report path**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-05--ref20_sprint_c_r6t0prime_v055_e2_review.md`
+
+### Round 1 5 finding 全 fixed verified
+
+| # | Round 1 | Round 2 status |
+|---|---|---|
+| C-1 expires_at column 不存在 | RETURN | **FIXED** (V055:386-431 INSERT body 0 expires_at；preflight 0 check；test_v055_does_not_write_expires_at_column PASS) |
+| C-2 Guard A position() substring 在 PG 13+ false positive | RETURN | **FIXED** (V055:527 pg_get_function_identity_arguments + V055:533 strict equality) |
+| H-1 EXCEPTION WHEN OTHERS silent skip | RETURN | **FIXED** (V055:600-795 SAVEPOINT block 0 EXCEPTION block in active code；4 hits 全 comment) |
+| M-1 sign-off §5 文字訂正 | RETURN | **FIXED** (sign-off §13.4 + §13.5 訂正 + 7-step E4 regression command) |
+| M-2 V049 NOT NULL set 對齊 | RETURN | **PARTIAL FIXED, NEW BUG (C-3)** |
+
+### NEW FINDING C-3 (CRITICAL) — phantom column `actor_id` on replay.experiments
+
+**位置**: V055:671-687 stub INSERT block + E1 sign-off §13.1 M-2 fix description
+
+**描述**: Round 2 fix M-2 改 stub INSERT 加 `runtime_environment` 規避 conditional NOT NULL，但**保留** round 1 的 `actor_id` column（line 673）— **此 column 不存在於 `replay.experiments` 表**：
+- V045:199 `actor_id TEXT NOT NULL` 是 `replay.run_state` 的 column（不同表）
+- V049 22 col schema 用 `created_by TEXT` (V049:284) 標 actor，不是 `actor_id`
+- V041/V049 任一 ADD COLUMN 都未加 actor_id 給 replay.experiments
+- Linux deploy V055 必撞 PG error `column "actor_id" of relation "experiments" does not exist`
+
+E1 round 2 sign-off §13.1 M-2 fix description 寫「stub minimal subset = experiment_id + actor_id (V041 4-col 之外，但 V049 line 284 ADD; 為 nullable per V049 source)」是 **factually 錯**：V049:284 ADD 是 `parent_experiment_id` 不是 `actor_id`。
+
+E1 round 1 §12 點 1 已自承「我寫了 INSERT INTO replay.experiments (experiment_id, actor_id, status, ...)」是混淆 `replay.run_state.actor_id` 與不存在的 `replay.experiments.actor_id`。Round 2 fix 直接複用 round 1 stub structure 加 runtime_environment 但**未 audit `actor_id` 實存性**。
+
+**為何 round 2 mock test 0 catch**: M-2 driver test (test_v055_v049_not_null_set_documented line 873-905) 只 grep stub INSERT column list 是否含 `runtime_environment` + `experiment_id` + 字串 `'mac_dev_smoke_test_only'`，**0 cross-validation 確認 stub column 全部實存於 V049 schema**。Mock layer 本質限制（per round 1 finding M-1 仍適用）。
+
+**為何 round 1 E2 沒 catch**: round 1 E2 finding M-2 標的是「NOT NULL 完整性」+ 建議「跑 \d replay.experiments 抽 NOT NULL set 全列」，假設 stub column 名都正確。Round 2 E2 對抗反問 §4「真實 line 282-307 跑 grep 看到的是什麼」深挖到 V049 source 才發現 stub column `actor_id` 與 V049 真實 column 名不一致。Multi-round audit 不同對抗角度（accepted limitation）。
+
+### E2 教訓追加（lesson 16-19）
+
+16. **Round 2 fix 必 cross-validate 不只審 round 1 finding 是否 fix** — Round 1 5 finding 全 fixed 不等於 round 2 deliverable 完整。Fix 過程 introducer 新 bug 是常見模式（C-3 = M-2 fix 過程引入 phantom column）。E2 round 2 必對 round 2 改動範圍做完整 8 條 §九 + 9 條 §3 checklist re-run，不只 verify 5 finding 之 fix。
+
+17. **stub INSERT column list 必對 source schema cross-validate** — 任何 SQL retrofit 寫 stub INSERT (含 SAVEPOINT smoke 測試 row)，column list 必對 source migration 的 ADD COLUMN list cross-validate；docstring 寫的、spec 寫的、E1 心智模型寫的都不可採。E2 必查 grep `ADD COLUMN <col>` 在原始 CREATE TABLE migration + 後續所有 ALTER TABLE migration 的全 history。M-2 driver test 應加 cross-validation step（test_v055_stub_columns_exist_in_v049 by V049 source ADD COLUMN list grep）防 round 4+ 重犯。
+
+18. **`actor_id` vs `created_by` 跨表名稱混淆是常見 SQL retrofit 反模式** — `replay.run_state.actor_id` (V045) vs `replay.experiments.created_by` (V049) 兩 column 都標 actor 但名稱不同。E1 round 1 + round 2 都把 `actor_id` 直接複製到 `replay.experiments` stub 引用而未 grep audit。**抽象**：跨表 actor identity 命名不一致（即使語意相同）必逐表查 source；不可信 cross-table mental model。E2 必 grep `<col_name>` 全 V*.sql 確認哪表有此 column。
+
+19. **multi-round audit 對抗角度演進** — Round 1 E2 finding M-2 dedicated NOT NULL 完整性；round 2 E2 dedicated column 名實存性。同 finding 不同 round 不同角度。**抽象**：每 round audit 的對抗角度可能漂移（隨 fix 演進），E2 必每 round 重新 audit reasoning，不靠「上 round 已 PASS」當免審；fix 過程引入新 bug 必新 round catch。
+
+## REF-20 Sprint C R6-T0' V055 retrofit ROUND 3 (2026-05-05)
+
+E2 round 3 verdict = **PASS to E4** — 0 finding。E1 round 3 fix 完美修 C-3 phantom column bug + round 1+2 5 fix 全保留 + 邊界守則 0 violation + Mac pytest 23/21/2 verified。
+
+### Round 3 fix 真實性驗證（C-3 phantom column 移除）
+
+E2 round 3 自跑 Python parser + grep 驗證 stub INSERT 真實狀態:
+- Active SQL `actor_id` 0 hit (21 raw hit 全為 round 3 fix doc comments)
+- Stub INSERT column set = `{experiment_id, status, created_at, half_life_days, embargo_days, runtime_environment}` 6-col byte-equal round 3 expected
+- 移除路徑 = E1 選 A (最小變動)：刪 phantom column row + VALUES 對應 row，0 column 替代
+
+### NEW test `test_v055_stub_columns_exist_in_v049` 真實性驗證
+
+- 真 file read (非 hardcoded fixture): `_read_sql(V049_PATH)` real I/O
+- V049 ADD COLUMN regex parse: `re.compile(r"ADD COLUMN IF NOT EXISTS\s+(\w+)").finditer(v049_sql)` 真實計數
+- V041 base 4-col hardcoded: accepted (V041 stub bootstrap 結構穩定，改動成本 vs 風險 trade-off)
+- 6-step + adversarial sanity inline + dual phantom guard：
+  - (1) parse stub
+  - (2) parse V049 ADD COLUMN
+  - (3) V041 base
+  - (4) phantom = stub − schema 必 ∅
+  - (5) adversarial inline sanity (手 craft fake_phantom 驗 phantom-detection logic 真會 catch)
+  - (6) explicit positive expect 6-col + phantom guard `assert "actor_id" not in stub_columns`
+
+### V049 ADD COLUMN count drift footnote (push back 接受)
+
+E1 round 3 §14.7 點 1 push back: V049 真實 ADD COLUMN line 282-307 = **25 columns** (PA dispatch + E2 round 1+2 標稱「18」是 stale label)。E2 round 3 awk-grep V049:283-307 確認 = 25 (parent_experiment_id / created_by / runtime_environment / git_sha / engine_binary_sha / strategy_config_sha256 / risk_config_sha256 / timeframe / data_tier / execution_confidence / 6 個 window TIMESTAMPTZ / oos_embargo_seconds / total_candidates_K / manifest_jsonb / manifest_hash / manifest_signature / signature_key_ref / expires_at / status / output_policy_jsonb)。
+
+**E2 verdict**: ACCEPT push back; 不 RETURN E1 round 4。理由：
+- Test logic 用 `len(v049_add_columns) >= 18` 是下界，>= 25 也 PASS（forward-compat）
+- E1 doc-label drift 在 V055 SQL line 591/623/718 + test line 945/953/969/1009 「18 ADD COLUMN list」是 doc label only，不影響 test 真實邏輯
+- Per dispatch §5 explicit instruction: footnote but not RETURN
+
+### E2 教訓追加（lesson 20-22）
+
+20. **Multi-round audit C-3 fix 真實性驗證 + push back 邊界處理** — 收到 round 3 deliverable 必 (1) 跑 round 1+2 N-1 finding regression check (本 round 是 5 fix preserve check) + (2) 對抗 N round 新 fix 真實性 (本 round C-3 phantom 移除) + (3) accept E1 push back 範圍判斷（doc label drift 不擴大 scope vs schema-real bug）。E2 round N 不必每 round 都 RETURN——當 fix 完整 + 邊界守則尊 + push back 合理，PASS to E4 是正確 verdict。
+
+21. **「>=N」test 邏輯 + doc label drift 處理** — Test 用 `>= N` 下界 assertion 是 forward-compat 設計（V049 ADD COLUMN 未來增加也不 break test）。當 `N` 寫 stale 值（本 round 18 vs 真 25），test 邏輯仍正確；但 doc label 應 update。**抽象**：審 multi-round fix，必區分「load-bearing 計數」（必驗精準）vs「doc label」（test 邏輯不依賴 → drift accepted as PM closure scope）。本 round 「18」是 doc label，「>=18」是 test 下界，兩者解耦 = E2 不退回。
+
+22. **Inline adversarial sanity vs 拆獨立 test 的 trade-off** — Round 3 NEW test 含「6-step phantom 偵測 + step (5) inline adversarial sanity 手 craft fake_phantom + step (6) explicit positive 6-col」三層 mixed pattern。E2 verdict = accept inline pattern not split。理由：(1) inline 與「test 自身契約 = phantom-detection logic 工作」高度耦合 (2) 拆獨立 test 增 file size 不增 audit value (3) main test fail = sanity test fail (有同步保證) — 拆分反 weakening (sanity test 被 deprecated 的風險)。**抽象**：design choice 不是越細越好；多層守 in 同 test 也是合理 audit pattern，當主邏輯與 sanity 同生命週期。
+
+---
+
+## 2026-05-05 REF-20 Sprint C R6-T0' V055 retrofit (round 5 design pivot review)
+
+### 場景
+
+E1 round 5 design pivot — Linux PG 16 deploy round 4 expected_string fix passed Guard A signature 但**新 fail at line 883 ROLLBACK TO SAVEPOINT**。PM 直驗 `psql -c "DO \$\$ BEGIN SAVEPOINT test_sp; END \$\$;"` 確認 PG 硬限制：PL/pgSQL DO block **不允** explicit `SAVEPOINT name` / `ROLLBACK TO SAVEPOINT name` (`unsupported transaction command in PL/pgSQL`)。E1 採 design pivot — drop Guard A 4-tier post-INSERT smoke entirely from V055 migration；coverage 移到 Python sibling test 4 path case under OPENCLAW_TEST_LIVE_PG=1。Guard A 仍保 3 條 enforce (function existence + 19-arg pronargs + identity_arguments byte-equal V036)。
+
+### Round 5 review verdict
+
+**RETURN-TO-E1 round 6** — 1 NEW CRITICAL finding C-4: sibling test `test_v055_live_pg_calibrated_replay_row_body` line 1252 stub INSERT 仍含 round 2-3 已知 phantom column `actor_id` (V049 真實 column 名為 `created_by`)。Round 3 fix C-3 在 V055 SQL 已 land 但 sibling test 的 stub INSERT line 1244-1261 從 round 2 加入後從未 audit/cross-validate against V049 schema。Round 5 design pivot 把 4-tier coverage 遷至 sibling test，phantom column risk 從「migration deploy 端」**遷至**「E4 regression 端」未 catch + fix。Linux PG 16 跑 OPENCLAW_TEST_LIVE_PG=1 必撞 PG `column "actor_id" of relation "experiments" does not exist`。
+
+同時 dispatch §3 binding 「4 case INSERT + SELECT + 4 column verify under OPENCLAW_TEST_LIVE_PG=1」實際 = 2 live_pg case (real_outcome live_pg clean + calibrated_replay live_pg broken)，0 synthetic_replay live_pg + 0 counterfactual_replay live_pg。round 5 §16.4 「Python sibling test 4 path 已等價覆蓋」claim 名義成立但實際被 phantom column carry-over 蝕空。
+
+E1 round 6 必修：(1) sibling test line 1252 stub INSERT actor_id → created_by (對齊 V049:284 真實 column name；同 round 3 V055 SQL 內 stub fix 修法) + (2) 補 synthetic_replay live_pg case + counterfactual_replay live_pg case 完整兌現 round 5 §16.4 coverage migration claim。
+
+### Round 1+2+3+4 6 fix re-verify (post round 5)
+
+| Fix | Round 5 status | 證據 |
+|---|---|---|
+| C-1 (round 2) expires_at 不寫 mlde_shadow_recommendations | ✅ VERIFIED | INSERT body line 422-471 仍 3 column；0 expires_at column 字面 |
+| C-2 (round 2) identity_arguments + strict equality | ✅ VERIFIED | line 597-609 strict equality 仍在 |
+| C-3 (round 3) no phantom column actor_id (V055 SQL) | ✅ VERIFIED IN V055 SQL ❌ REGRESSED IN sibling test (NEW C-4) | V055 SQL 0 actor_id；sibling test 1252 actor_id alive |
+| H-1 (round 2) no silent skip | ✅ VERIFIED (auto-extended via drop smoke) | 0 EXCEPTION block |
+| M-1 (round 2) sign-off mock-only doc | ✅ VERIFIED | E1 round 5 §16.5 對齊 mock-only |
+| M-2 (round 2) V049 NOT NULL set documented | ✅ VERIFIED | 25 ADD COLUMN 全 NULLABLE；test_v055_v049_source_not_null_invariant 仍 PASS |
+| Round 4 hotfix expected_string with-arg-names | ✅ VERIFIED | line 543-551 with-arg-names 保留 |
+
+### LOC 變動 + governance check
+
+- V055 SQL 913 → **715** (-198；E1 預估 -300 但實際因 design pivot bilingual section 70 LOC + Operator note 雙語 12 LOC 等補充必要文檔)
+- Python test 1294 → **1316** (E2 wc 真實 = 1316；E1 §16.6 標 1265 是 LOC 計算誤差 +51 LOC，不影響 round 5 design pivot semantic correctness 但 sign-off LOC 數應準)
+- 全 < §九 2000 cap (§九 governance 2026-05-05 raise 1500→2000 已 OpenClaw 既載)
+
+### E2 教訓追加（lesson 23-26）
+
+23. **Design pivot 後必 audit coverage migration target 自身的 stub 是否乾淨** — Round 5 把 in-migration smoke drop + 遷至 Python sibling test 是合理 fix（解 PL/pgSQL constraint），但 design pivot 後 sibling test 從「Mac dev 取代 doc」升級為「round 5 後唯一 calibrated_replay 真 PG verification path」— sibling test 內任何 stub INSERT 必同步 cross-validate against target schema (V049)，否則 phantom column risk 從「migration deploy 端」遷至「E4 regression 端」未 catch。**抽象**：coverage migration 不是只移 file，是 audit binding 同移；任何 fix 在 file A 真實 land 後，file B 內同樣 pattern 的 sibling carry-over 必 cross-check（C-3 在 V055 SQL 修，但同 phantom 在 sibling test 仍 alive 是 round 5 N=1 真實 case study）。E2 round N 對 design pivot 必跑 grep cross-validation 對所有 sibling test 內的同類 stub INSERT。
+
+24. **PG runtime 真實行為 vs PG docs claim drift 是 multi-round 累積成本** — Round 1+2 expected `pg_get_function_arguments` substring (含 DEFAULT clause noise PG 13+) + Round 2 改用 `pg_get_function_identity_arguments` 假設 stripped-down output 純 type list (per PG docs claim) → Round 4 hotfix Linux deploy 才 catch PG 16 真 output 含 arg names → Round 5 在 round 4 fix 後**新撞** PL/pgSQL DO block 拒 explicit SAVEPOINT/ROLLBACK TO SAVEPOINT。Round 1-4 累積 4 輪 fix 都漏看「PL/pgSQL transaction control 限制」這條 PG fundamental constraint。**抽象**：審 SQL migration 涉 PG 內建 reflection / transaction-control 函數時，E2 必對抗反問「你查過 PG empirical 行為嗎？docs claim 跟 PG runtime 一致嗎？」+ 推 P2 ticket 加 docker pg:16 + Linux PG 真 dry-run gate 至 acceptance binding；不能只信 Mac static-parse。Round 5 N=1 confirmed lesson — 多 round Linux deploy 才暴露的「Mac static-parse PASS but Linux runtime fail」是系統性盲點，需 P2 ticket（per E1 §16.12 P2-V055-FOLLOW-UP-1+2+3+4）做 process gate 不依賴 individual round catch。
+
+25. **Coverage migration 「等價覆蓋」claim 必驗實際數字** — E1 round 5 §16.4 表格 4 path test「等價覆蓋」名義成立但實際是 mock-only (4 hermetic case 走 _mock_verify_and_insert + _row_capture dict)；真 PG live coverage 只 2 case (real_outcome live_pg + calibrated_replay live_pg)，0 synthetic_replay live_pg + 0 counterfactual_replay live_pg。dispatch §3 binding「4 case INSERT + SELECT + 4 column verify under OPENCLAW_TEST_LIVE_PG=1」未完整達成。**抽象**：coverage migration 後必對抗反問「dispatch binding 的 N 個是 mock 算還是真 PG 算？」「OPENCLAW_TEST_LIVE_PG=1 跑時哪些 case 真實 INSERT vs 哪些 case skipped」**真實 N**對齊 binding **聲明 N**才能 PASS。E1 round 5 §16.4 聲明 4 path「等價覆蓋」不對齊 dispatch §3 真 PG 4-case binding，需 round 6 補完。
+
+26. **LOC mismatch 處理：E1 sign-off 數字 vs E2 wc 真實** — Round 5 E1 §16.6 LOC 標 Python test 1265 但 E2 自跑 wc -l 真實 = 1316（差 +51）。E2 round 5 verdict = 不單獨 RETURN（LOC 文字 fix only，不影響 V055 SQL/test 邏輯，1316 仍 < §九 2000 cap）。但 **sign-off LOC 數字必準**，PM closure 階段建議統一訂正。**抽象**：審 sign-off report，跑 wc -l real-time 對驗 E1 標稱 LOC；發現 mismatch 必 footnote（不單獨 RETURN，但 audit trail 留下）；E2 不放過任何「Sign-off 自描述 vs 真實檔案」的小 drift。Round 3 V049 ADD COLUMN 18 vs 25 drift 是 same pattern N=1，round 5 LOC 1265 vs 1316 是 N=2。
+
+---
+
+## 2026-05-05 — REF-20 Sprint C R6 W2 E2 review (R0-T0 + R6-T3)
+
+**Review target**: R0-T0 apply_fill.rs 拆檔（runner.rs 1992 → 1808；apply_fill.rs new 485 LOC）+ R6-T3 KellyConfig wire（bin/replay_runner.rs 1427 → 1461）
+
+**Verdict**: PASS to PM commit + Linux SSH cargo verify · 0 BLOCKER / 0 HIGH / 0 MEDIUM / 2 LOW（純 doc-clarification）
+
+### byte-equal contract 三層驗證 PASS
+- 4 helper byte-equal except visibility（fn → pub(crate) fn × 3）— `diff <(W1 runner.rs:526-608) <(W2 apply_fill.rs:117-199)` 顯示 3 line diff 全是 visibility widening（必要支持 runner.rs::tests `use crate::replay::apply_fill::{...}`），body byte-equal
+- 4 method byte-equal except visibility（fn → pub(super) fn × 4）+ apply_fill_close docstring 微改（W1 寫 `SimulatedFill row 層` → W2 寫 `process_close_intent row 層` — clarification，不變邏輯）
+- 4 SimulatedFill push site 一致性 ✓（process_open Accepted/Rejected + process_close + synthetic_walker 留 runner.rs）+ manifest_signer.rs 0 byte change ✓ → xlang_consistency 13/13 維持
+
+### Mac cargo verify
+- 2490 lib + 6 e2e + 2 e2e_param_delta + 8 xlang_consistency + 4 forbidden_guard + 5 profile_acceptance + 4 mac_policy = 2519 GREEN
+- runner::tests 跑出 20 PASS（9 W1 R6-T1+T2 test_apply_fill_* + 3 W2 R6-T3 test_r6t3_* + 8 background）
+
+### 對抗反問 5 條全 PASS
+1. 1992 → 1808 真實 = -300 抽出 + ~+116 R6-T3 test = -184 ✓
+2. apply_fill.rs 485 LOC 構成 = ~110 MODULE_NOTE + ~80 helper + ~250 impl + ~25 boundary notes ✓
+3. 3 R6-T3 unit test 是 fresh design 但對齊 W1 R6-T1+T2 pattern（同 tests mod / 同 super::* import / 同 G7-01 default / 同 bilingual docstring）✓
+4. lib test 2487 → 2490 (+3) 是 R6-T3 新加 test，非 regression ✓
+5. V055 lesson form-extension：W2 是 Rust 改動不涉 V### migration 但 Linux SSH cargo verify 在 PM commit 後仍強制 ✓
+
+### 2 LOW finding（純 doc-clarification，0 code action 必要）
+1. E1 sign-off §1 module note 寫 helper 採 `pub(super)`，實作為 `pub(crate)`（pub(crate) 比 pub(super) 寬一點點但仍 crate-internal，不擴大公開 API）
+2. E1 sign-off §8.1 #3(b) 寫 `young: rc.kelly.young, mature: rc.kelly.mature`，實作 `young_threshold: risk_config.kelly.young_threshold, mature_threshold: risk_config.kelly.mature_threshold`（doc shorthand 不對應 Rust struct field 全名）
+
+### E2 教訓追加（lesson 27-28）
+
+27. **R0-T0 純 refactor 反問策略：byte-equal proof 走 `diff <(git show OLD:file) <(NEW file)`**。E2 拒「重新讀 W1 文檔 + 信任 E1 claim byte-equal」的 happy-path 答案；必跑命令式 diff 對齊 line range。本 W2 跑 3 helpers diff 出 3 處 visibility widening 是 acceptable refactor（pub(crate) ⊂ crate-internal），但若 diff 跑出 method body 改動（含 1 行邏輯 if/else 順序變化）= 立即 RETURN BLOCKER。**抽象**：refactor PR 必 diff line-by-line over claimed-equal segment，不只看 LOC delta。
+
+---
+
+## 2026-05-09 — W-AUDIT-7c GUI 三項修復 E2 對抗 review
+
+### 場景
+
+E1a commit `9e265ba9` (+573/-124, 5 檔)：governance-tab.js 兩個 native confirm() / tab-ai.html provider key clear / tab-settings.html 4 sub-tab 拆分 + 共用 `openTypedConfirmModal` helper（common.js +140 LOC）+ test fixture 126 LOC。E1a sign-off claim: HTTP 200 × 5 / HTMLParser stack_residue=[] errors=0 / JS brace+paren+bracket diff 0 / fixture 5-case PASS / native confirm() 0 grep hit。
+
+### Review verdict
+
+**RETURN-TO-E1a · 6 findings (1 CRITICAL + 1 HIGH + 3 MEDIUM + 1 LOW)**
+
+### CRITICAL-1: governance-tab.js parse SyntaxError → governance tab JS 全失效
+
+`bulkAudit()` 函數 line 1555 `const ok = await openTypedConfirmModal(...)` + line 1581 `let ok = 0, fail = 0;` 同 function scope `ok` 重宣告 → `SyntaxError: Identifier 'ok' has already been declared`。整個 governance-tab.js parse 階段 fail，governance UI tab 內 `loadAll()` / `bulkAudit()` / `auditApprove()` / `auditReject()` / `confirmApproveRecovery()` / etc 全失效。Mac + Linux 雙端 `node -e "new Function(fs.readFileSync(...))"` 同樣 parse fail。
+
+### HIGH-1: sign-off process gap — 缺 file-level JS engine parse smoke
+
+E1a 「JavaScript brace/paren/bracket diff 0 0 0」是 **structural balance check**（matching `{ } ( ) [ ]` 數量），對 ES6 `let` / `const` 重宣告 **沒有偵測能力**。test fixture `test_typed_confirm_modal.html` 只載 common.js 不載 governance-tab.js → 同樣完全 missed。**E1a 從未對 governance-tab.js 跑過 JS engine 真實 parse**。
+
+### a11y baseline 4 項評估
+
+| 項 | 狀態 |
+|---|---|
+| focus trap | PASS — Tab/Shift+Tab + first/last 循環 |
+| aria | PASS（基線 role=dialog / aria-modal / aria-labelledby）/ MEDIUM-1 改進（input 缺 aria-required / aria-describedby / aria-invalid） |
+| Esc | PASS — ev.key === 'Escape' → close(false) |
+| Tab | PASS — focusableNodes() filter + setTimeout 50ms 起始 focus |
+
+### 三端 git sync
+
+Mac/origin/Linux 均在 `b186c6c2`，9e265ba9 + 8b766a43 commit chain 全 push 同步。
+
+### E2 教訓追加（lesson 29-30）
+
+29. **GUI / JavaScript 改動 sign-off 必跑 file-level JS engine parse smoke** — E1a sign-off 5 條全靜態（HTTP 200 / brace count / structural HTMLParser / grep / standalone fixture）；對 ES6 `let`/`const` redeclaration / 任何 syntax-level error 完全 blind。**單純跑 `node -e "new Function(fs.readFileSync(<file>, 'utf8'))"` 5 秒就 catch CRITICAL-1**，但 E1a process 沒這層。**抽象**：審 GUI / JS 改動，E2 必對抗反問「你跑了 file-level JS engine parse？brace count 不算數」+ 自己跑該檢測；GUI 改動 sign-off SOP 應加此 step（建議 P2 follow-up `helper_scripts/gui/parse_smoke.sh`）。Sub-issue：fixture 是 standalone test（只載部分 file）≠ 全文件 parse smoke；兩者必都要。
+
+30. **變量命名 shadow 在 same function scope 是 ES6 hard error 不是 warning** — JavaScript ES6 `const ok` 之後再 `let ok` 同 block scope = SyntaxError 整 file 不 parse（不只 runtime exception）。E2 反問模式：審 GUI 改動含「modal helper return value」+「envelope.ok / loop counter」mixed in same function 必看是否撞名。本 round CRITICAL-1 line 1555 `const ok` (modal result) + line 1581 `let ok` (counter) 是經典撞名陷阱 — modal 引入後新 const variable，counter 名與本來 envelope.ok 撞 → 雙 declaration 撞。**抽象**：modal helper 推廣 (例：openTypedConfirmModal / openConfirmModal / openPromptModal) 後，caller 的 `const ok = await modal(...)` 是新引入名稱，必檢查同 function 內其他 ok 變量；若有，同時改 caller 才安全。Modal helper 設計可考慮 return `{ confirmed: bool }` 而非 raw bool 規避 shadow。
+
+
+
+28. **R6-T3 實 wire 4 點對齊驗證：Sign-off vs Code 微 drift 是 LOW finding 不 RETURN** — Sign-off §8.1 #3(b) 寫 `young: rc.kelly.young, mature: rc.kelly.mature` shorthand，code 實際是 `young_threshold: risk_config.kelly.young_threshold, mature_threshold: risk_config.kelly.mature_threshold` 全名。E2 方法：(a) 對 KellyConfig struct definition grep `^    pub `（9 fields 確認 with `young_threshold` / `mature_threshold` 全名）+ (b) 對 `risk_config.kelly` struct grep `young_threshold|mature_threshold` 確認 source struct 一致 + (c) 對 cargo build verify compile success（field name 不對 Rust 不過 compile）。三層驗證後 = doc shorthand drift 是 LOW（不 RETURN）+ commit 後 PR 順帶 fix。**抽象**：sign-off shorthand vs code full-name drift 系統性出現在 Rust struct 改動；E2 必跑「struct definition + source struct + cargo compile」三層驗證才放行 LOW finding。Round 5 V055 LOC 1265 vs 1316 是 file-level drift，本 W2 是 token-level (field name shorthand) drift，是 same lesson family N=3。
+
+---
+
+## 2026-05-09 — ml_training cron IPC __auth handshake fix E2 review
+
+### 場景
+
+E1 commit `3d8d543e` (cron.sh +9 / optuna_optimizer.py +98/-33) 修 ml_parameter_suggestions=0 row 的 root cause = optuna IPC `get_param_ranges` 撞 engine `OPENCLAW_IPC_SECRET` first-message 必 `__auth` 約束。三層 RCA 結論：(a) cron entry 18:41 才裝 24h 內未 fire (b) 5 個 audit job by design weekly Sunday 非 daily (c) IPC HMAC handshake 缺。
+
+### Verdict
+
+**RETURN-TO-E1** — 1 HIGH (regression test 缺 commit) + 2 LOW (錯誤訊息冗中英並列、commit message 自報 9/9 unit test 但 0 file 入 repo)。
+
+byte-equal wire format 驗證 PASS（11/11 細項與 ipc_client._authenticate 完全一致）；runtime force-run 已驗 `param_ranges_source: ipc` + `status: ok` + `result.status: insufficient_data fills=25<80` → IPC 200 OK 真通過、ml_parameter_suggestions=0 真因 = 業務樣本不足非 IPC silent fail；cron env 隔絕模擬 (`env -i HOME=/home/ncyu PATH=...`) secret resolution PASS。
+
+### Findings
+
+**HIGH-1 (RETURN)**：commit `3d8d543e` 自報「9/9 unit test 通過」但 grep `tests/` + `program_code/` **0 個 test file added/modified**。E1 ad-hoc inline 跑（沒 commit 為 regression test）+ 既有 test_optuna.py（mtime Apr 20）0 line 涉 ipc/secret/auth/hmac。修法：補 program_code/ml_training/tests/test_optuna_ipc_handshake.py，覆蓋 (1) `_resolve_ipc_secret` 5 case (2) `_send_ipc_command` mock socket 4 case (3) fail-closed 不變式：secret 設置但 server reject auth 必 RuntimeError 不 silent skip。
+
+**LOW-1**：line 324 `ConnectionError("Socket closed before response / 響應前套接字已關閉")` + line 416 IPC error message 中英並列。2026-05-05 governance change 已廢除 bilingual mandate，新加錯誤訊息默認只寫中文。屬 cosmetic。E2 不單獨 RETURN，PM 可 commit 後 LOC fix。
+
+**LOW-2**：optuna_optimizer.py LOC 946→1011 (+65)，仍在 800 警告線+。Pre-existing baseline 已 >800（946），§九 pre-existing exception 僅針對 2000+ violation，800 警告線無此豁免。E2 追記 P2 ticket 「optuna_optimizer.py 拆檔」(IPC helper / TPE optimizer / PG writer 三 module 邊界已天然存在，可考慮拆出 program_code/ml_training/_ipc_helpers.py)。
+
+### byte-equal wire format 驗證
+
+| 項 | ipc_client._authenticate (基準) | optuna._send_ipc_command | 一致 |
+|---|---|---|---|
+| ts | `int(time.time())` | `int(time.time())` | ✓ |
+| HMAC key | `secret.encode()` (utf-8 default) | `secret.encode("utf-8")` | ✓ |
+| HMAC msg | `str(ts).encode()` | `str(ts).encode("utf-8")` | ✓ |
+| token | `.hexdigest()` | `.hexdigest()` | ✓ |
+| dict shape | `{jsonrpc, method, params:{token,ts}, id:0}` | 同 | ✓ insertion order 一致 |
+| separators | `(",", ":")` | `(",", ":")` | ✓ |
+| ensure_ascii | `False` | `False` | ✓ |
+| trailing | `+ "\n"` | `+ "\n"` | ✓ |
+| response check | `if resp.get("error")` | `if "error" in auth_resp` + **新增 `result.authenticated == true`** | ✓ over-strict (fail-closed 方向 acceptable) |
+| secret resolution | `get_secret_value("OPENCLAW_IPC_SECRET")` env-first/file-fallback/strip/OSError None | `_resolve_ipc_secret` 同邏輯 byte-equal | ✓ |
+
+11/11 PASS。E1 fix 比基準多 1 條 strict check `result.authenticated == true`（line 396-399），是 over-strict 不是 over-loose，fail-closed 方向 acceptable，不視 wire-equal 違反。
+
+### Runtime 證據
+
+- log line 2026-05-09 20:22:34: `Insufficient fills for optimization: 25 < 80 required. Skipping. / 成交數不足: 25 < 80，跳過優化。` ← optuna_optimizer.py 業務邏輯記錄
+- status_json optuna_optimizer: `{detail.param_ranges_source: 'ipc', detail.fills: 25, detail.result.status: 'insufficient_data', detail.result.error: 'fills=25 < min_fills_required=80', status: 'ok', error: ''}` → IPC 200 OK 真通過
+- 對抗反問 #4 「IPC silent fail 可能性」= **REFUTED** — `param_ranges_source` 從 fix 前 `unavailable:RuntimeError` 變 fix 後 `ipc`，明確證實 fix 後不走 fallback path。
+
+### 5/10 03:17 cron real-fire 監控觀察點
+
+```bash
+# 1. 確認 cron 真 fire
+ssh trade-core "tail -50 /tmp/openclaw/logs/ml_training_maintenance_cron.log | grep '2026-05-10 03:1'"
+
+# 2. 確認 IPC handshake 通
+ssh trade-core "cat /tmp/openclaw/status/ml_training_maintenance_status.json | jq '.jobs[] | select(.job==\"optuna_optimizer\") | {status, param_ranges_source: .detail.param_ranges_source, error}'"
+
+# Expected: status=ok, param_ranges_source=ipc, error="" (or insufficient_data 如 fills 仍<80)
+# FAIL: status=skipped, param_ranges_source=unavailable:RuntimeError → cron env 注入不通
+
+# 3. 確認 5 個 audit job 在 Sunday weekday=6 自然 fire
+ssh trade-core "cat /tmp/openclaw/status/ml_training_maintenance_status.json | jq '.jobs[] | select(.job | IN(\"thompson_sampling\",\"optuna_optimizer\",\"cpcv_validator\",\"dl3_foundation\",\"weekly_report_generator\")) | {job, status}'"
+```
+
+### E2 教訓追加（lesson 31-32）
+
+31. **「自報 unit test pass」必對 commit diff cross-check** — E1 sign-off report §4.1 自描「9/9 unit test 通過」但 commit `3d8d543e` 0 test file added/modified；既有 test_optuna.py mtime 是 Apr 20（pre-fix）。E2 必跑 `git show <commit> --stat` 對 test/ 目錄是否有變動，與 sign-off 自報「N test 通過」做交叉驗證。**抽象**：E1 ad-hoc inline 跑（即使真跑了 9 case）+ 沒 commit 為 regression test = 下次重跑無法重現 + CI 不 catch。**RETURN 規則**：sign-off 自報 unit test 數量 N≥1 但 commit diff 0 test file = HIGH finding 退回 E1 補 regression test commit。本 round N=1 confirmed lesson — wire-equal 邏輯 + auth handshake 是高敏感（IPC 安全邊界）改動，缺 regression test 是 process gap 不是 minor。
+
+32. **byte-equal wire format 11 細項 cross-check 矩陣是新方法論** — 對抗 IPC handshake 改動必跑：(a) ts 計算 (b) HMAC key encoding (c) HMAC msg encoding (d) token format (e) dict shape + insertion order (f) separators (g) ensure_ascii (h) trailing newline (i) response check 條件 (j) secret resolution 行為 (k) error message format。每項對基準 file_line 列實際 byte 比較。**抽象**：跨 process / 跨 lang / 跨 client 的 wire-equal 改動，不是「diff 一下看 LOC delta」就放行；必逐項 byte 比較，發現偏離標 ✓ over-strict (fail-closed 方向，acceptable) / ✗ over-loose (fail-open，BLOCKER)。本 round E1 多 1 條 strict check 是 over-strict 方向，accept；若是少 1 條（如沒驗 authenticated=true），就是 BLOCKER。
+
+---
+
+## 2026-05-09 lesson 33: ml_training Round 2 APPROVED — 對抗 mutation 真驗範式
+
+### 場景
+Round 2 commit 1448e0a1 = test 補洞 + LOW-1 清理（無新業務 logic）。E1 自評 12/12 PASS + 雙輪對抗 mutation。
+
+### E2 收口要點
+- **不採信自評** — 自跑 mutation 重現：silent return {} → (d) 兩 case RED「DID NOT RAISE RuntimeError」；separators drop → (c) RED「actual ≠ reference」逐字節 diff
+- 12 test 0.14s（每 ~12ms）— 純 monkeypatch + _FakeSocket，無 socket / PG / 外部 dep，不 flake
+- (a) 5 / (b) 4 / (c) 1 / (d) 2 = 12 真覆蓋
+- _FakeSocket.recv 按 line 切片釋出（不是 recv(1) 逐字節）— 對齊 _send_ipc_command 的 `recv(IPC_RECV_BUFFER)` 模式
+- LOW-1 grep 「Socket closed」「IPC error [」 0 hit（清乾淨）
+
+### 反模式守
+1. silent return None / silent skip 把 IPC fail 偽裝成業務樣本不足（E2 round 1 反問 #4 揭示） → (d) 守
+2. wire format drift（separators / ensure_ascii / 漏 \n）→ (c) byte-equal 守
+3. env-first / file-fallback / strip / OSError fail-soft → (a) 守
+4. happy / no-secret / auth-error / timeout 4 場景 wire 計數 + exception type → (b) 守
+
+### 教訓
+- E2 對抗驗證 SOP = 自己跑 mutation 而非信「E1 已驗」自評；mutation 從 `pass` → `return None` → `return {}` 三種不同程度 silent skip 全跑一次更穩
+- regression test 依賴的 helper（FakeSocket）要 isomorphic 模擬 production wire（這次 recv 模式對齊 `recv(IPC_RECV_BUFFER)`，不對齊 ipc_client 的 `recv(1)`）— 否則 mock 跑通了 prod 仍可能掛
+- byte-equal regression 守 wire format 不變式價值 = 跨 Python/Rust serde_json hash/HMAC 對齊（separators/ensure_ascii 任改一個 token validation 在 Rust 端會直接失效）
+
+---
+
+## 2026-05-09 lessons 34-37: W-AUDIT-7c round 2 GUI review
+
+### 場景
+W-AUDIT-7c Round 2 commit `0fbed710` + `78d5d013`，E1a 自評 9/9 FIXED + jsdom 6/6 PASS + node --check 4 檔 EXIT=0。RETURN-TO-E1a verdict = 1 HIGH + 2 MEDIUM + 1 LOW。
+
+### lesson 34 — JS Promise.reject helper 必驗 caller side catch
+round 2 [#7] singleton 防雙開實裝 `console.error + Promise.reject(new Error('modal already open'))` 表象正確，但 3 處 caller `const x = await openTypedConfirmModal(...)` 在 try/finally 內無 catch → rejected promise 變 silent unhandled rejection；finally 跑 → trigger button 被 re-enable（誤導 user 以為按鈕沒反應）→ 沒 toast / banner / user-facing 反饋 → 違背 round 2 [#8] 「cancel toast 不靜默」設計初衷。**規律**：任何 helper return Promise.reject 為非 user-cancel 路徑時，E2 必跑 `grep -B2 -A5 "await <helper>"` 列所有 caller，逐一檢查是否有 `try/catch` 包 await 或 `.catch()` 鏈接 — 缺 catch = silent unhandled rejection bug。本輪 3 caller 全缺 catch = HIGH finding。**抽象**：Promise reject 設計責任 = helper 端 + caller 端共擔；只在 helper 端 reject 不在 caller 接 = 半實 bug，比不 reject 更難 debug（user 看 console.error 才知道，但 user 不開 devtools）。
+
+### lesson 35 — dead-write data state 對抗 grep 模式
+round 2 [#5][#6] 加 `_lastPendingRecovery` + `_lastPendingAudit` 兩 cache vars，design intent 是「modal body 顯示具體影響時可直接讀取」。`_lastPendingRecovery` 4 read site PASS，但 `_lastPendingAudit` 0 read site（grep 4 hit 全為 declaration / write）→ dead-write data state（宣告變了但永遠沒讀回）。bulkAudit 沒讀 cache、`govGetPendingAudit()` 直 fetch 重來，與設計意圖矛盾。**規律**：E2 對 round 改動新增 module-level mutable state（cache / flag / counter），grep 必分 write site vs read site；read site = 0 = dead state，build-up code smell。**修復方案**：YAGNI 原則優先 — 刪 declaration（方案 B）優於補 read site（方案 A），dead state 比錯設計更可維護。本輪 MEDIUM finding。
+
+### lesson 36 — rename 完整性追到所有同類 caller
+round 1 verdict 建議「outer rename ok→proceed」是因為 same-scope shadowing 觸 SyntaxError。round 2 bulkAudit (line 1589) 用 `proceed`，但 confirmApproveRecovery (line 1727) 仍 `ok`（scope 內無第二宣告所以 node --check PASS）。技術不致 bug 但**未來新增 inner counter 時又踩同樣坑**。**規律**：E2 對 round 1 SyntaxError 修法的「rename」建議要追到所有同類 caller，不只觸發 bug 的單一 site；caller 並肩使用同 helper 應命名一致（同名 = 都用 proceed 或都用 ok），inconsistent = LOW finding。**抽象**：對抗審核 rename 完整性 = (a) 觸發 site rename (b) 並肩 site 同步 rename (c) future-proofing footgun 統一；缺任一條都退回。
+
+### lesson 37 — E1a sign-off self-claim 反向 grep 交叉驗證
+round 2 E1a report 自稱「中文輸出 + 中文注釋（廢除 bilingual mandate 2026-05-05）— ✓ 新加注釋全中文（既有中英對照塊修改時保留中文移除英文）」。E2 grep `case-sensitive match` 1 hit common.js:1919 — 上輪 LOW-6 retained 英文注釋未刪 ⊥ E1a self-claim。**規律**：E2 對 E1a 自評「全 OK」類陳述，必對應寫一條反向 grep 找該 claim 的反例；本輪「新加注釋全中文」反向 grep 「`// .* match\|// .* default\|// .* check`」（典型英文註釋 token）找命中即矛盾。**抽象**：E1 / E1a self-claim 的真實性必對抗驗證，不能盲信「自評 PASS」；這是 E2 對抗審核第一原則的 GUI / docs 領域延伸。
+
+---
+
+## 2026-05-09 lessons 38-40: W-AUDIT-7c round 3 GUI APPROVED + E2 round 2 自反
+
+### 場景
+W-AUDIT-7c Round 3 commit `e27e67ea`，E1a 收 round 2 verdict 1 HIGH + 2 MEDIUM + 1 LOW，3 actionable + 1 deferred。Verdict APPROVED。
+
+### lesson 38 — Round 3 收口完整三軸實證
+HIGH-1 收口 = (a) 3 caller 全包 try/catch（governance-tab.js:1604/1754 + tab-ai.html:673）+ (b) 二態 toast（modal already open → warn / 其他 → error）+ (c) `return; // finally 會 re-enable button` 顯式注釋落地 + (d) test fixture Case 7 補 jsdom singleton race smoke。實證軸 = (a) 寫對 + (b) 全覆蓋 + (c) 副作用清楚 + (d) regression 鎖定。**抽象**：HIGH finding 收口必同時驗 IMPL 寫對 + 所有同類 site 覆蓋 + caller-side 副作用注釋 + 補 regression test，4 軸缺 1 = round 4 retest。E1a Round 3 全 4 軸過。
+
+### lesson 39 — error.message 字串比對 robustness 評估表
+round 3 catch block 用 `err && err.message === 'modal already open'`。robustness 5 維評估：(a) **typo 風險**：源頭 `Promise.reject(new Error('modal already open'))` × 3 caller × 1 fixture 全 grep 確認 byte-equal；od 確認單空格無 leading/trailing whitespace、無 Unicode lookalike。(b) **null/undefined 守**：`err &&` 短路防 null；err.message 若不存在則 falsy 進 else 分支不誤觸 warn。(c) **錯誤類型混淆**：ocApi 自吞 network error return null 不會走 reject path，唯一 reject 來源是 modal singleton guard。(d) **i18n 風險**：error message hard-coded English，無 i18n 替換鏈，安全。(e) **future drift 防線**：源頭只有 1 處 throw，但 4 個 site 比對；若改 source 必同步改 4 site — 建議下次 refactor 用 `MODAL_ALREADY_OPEN_ERROR = 'modal already open'` 常數 import 避免分散。本輪 (a)-(d) 全 PASS，(e) advisory P3。**抽象**：text-based error.message 比對是次優方案（Sentinel constant > custom Error subclass > string match），但本輪規模小可接受；E2 review 字串比對 robustness 必跑 5 維。
+
+### lesson 40 — round 2 finding 自我修正：_lastPendingAudit 不是 dead-write（read site at 1682）
+**E2 round 2 review (940186ee) 把 `_lastPendingAudit` 標 MEDIUM-2 dead-write data state 是錯的** — round 3 grep 重驗發現 line 1682 `renderPendingAudit(_lastPendingAudit)` 是真實 read site；round 2 grep 太窄沒包括 `renderPendingAudit(...)` 用法，誤判 0 read。E1a round 3 把 MEDIUM-2 deferred 為 P2 ticket，PM brief 接受 — 但實際上根本不該 deferred，是 false positive。本輪自我糾正 = E2 對「dead-write data state」grep 必跑 multi-pattern：(a) bare variable name `_lastPendingAudit` (b) `renderXxx(_lastPendingAudit)` 函數參數位 (c) `_lastPendingAudit\.length` / `_lastPendingAudit\[`/`Array.isArray(_lastPendingAudit)` 條件位 (d) `... _lastPendingAudit ...` 三元 / template / spread 位 — 4 種 idiom 任一漏看就誤判。**規律**：E2 dead-write 判定要查 4 種 read idiom；單純查 `_lastPendingAudit` left-side `=` 不夠，會誤把 `renderPendingAudit(_lastPendingAudit)` 當 write（其實是 read）。**抽象**：E2 review 不只防 E1 出錯，自身要敢承認 round N review 看漏／誤判，下 round 主動糾正不護短。這是對抗審核的自反性。本 round 3 verdict 不重複此誤判，明確記入 closure 為「false positive 從 round 2 撤回，無真實 dead-write」。
+
+
+---
+
+## 2026-05-09 lessons 41-44: Sprint N+0 first-pass — 4 wave parallel + cross-wave IPC fail
+
+### 場景
+Sprint N+0 Day 0-3，4 sub-agent 平行交付 5 IMPL commit：E1-A `094f9914` (W-AUDIT-9 T1+T2 Rust schema + V080) / E1-C `200188ad` (T3 Python stage-aware) / E1-D `063f12d0` + `f6fb315a` (T6 LeaseScope + 6d-4/5/6) / E1-E `4a90966a` (B-M1 V082 + producer)。Verdict = RETURN-TO-E1-A（1 HIGH cross-wave + 3 MED + 1 LOW；3 wave APPROVE pending E1-A IPC fix）。
+
+### lesson 41 — E1 自評 cargo test scope 漏層的對抗檢查
+E1-A report §5.1 自報「cargo test --lib -p openclaw_engine config::risk_config 139 passed」— 看似嚴謹但**只跑 schema scope**，沒跑 `ipc_server::tests::config` scope。E2 實測 `cargo test --lib -p openclaw_engine --release` 暴露 2 IPC test fail（`test_g3_02_a2_patch_executor_*`）。E1-A 引入 schema invariant `shadow_mode != canary_stage.as_shadow_mode() = reject` 直接破既有 G3-02 binary patch IPC test，但 E1-A 漏跑 IPC scope 沒看到。**規律**：E2 對 schema invariant 級改動必檢查所有用該 schema 的 IPC / patch / round-trip / round-trip-toml / cohabitate scope，不信 E1 自報 cargo test scope 有限。**抽象**：「139 PASS」與「全套 PASS」差天涯，schema 改動對 cross-cutting test scope 影響面 = E2 必跑 `cargo test --lib --release` 全套 + grep schema 所有 callsite 並 cross-check。
+
+### lesson 42 — 多 sub-agent 並行交付的 cross-wave fail attribution
+4 sub-agent 平行做不同範圍，但 schema 升級（E1-A T1）會 ripple 到他人範圍。E1-D 報告 §5「既有失敗（**非本 task 引入**）：cargo test 顯示 2 個 IPC test fail；stash 我自己改動後 baseline 仍 fail」— **E1-D 的 attribution 是對的**：fail 不是 E1-D 引入。但 E2 必獨立追蹤 root cause 確認 fix 屬誰，不能只信 E1 之間互推。本輪 E2 用 fail message 的字串「shadow_mode=false inconsistent with canary_stage=0... AMD-2026-05-09-03 §4.4 requires...」directly point to `risk_config_advanced.rs` validate() 新代碼 → owner = E1-A。**規律**：cross-wave fail 用 fail message 反推 owner（log message 字串通常含 file/feature 標識）+ 用 git diff range 看誰引入相關代碼。**抽象**：multi-sub-agent 平行的 cross-wave attribution 不靠 「誰先報」也不靠 「誰最後 cargo test」，靠 fail message 的 source-of-truth 字串 + git blame；E2 為 ground truth arbiter。
+
+### lesson 43 — Bailey-Lopez de Prado DSR mu_0 公式 ln vs log₁₀ 的 academic standard
+E1-D `dsr_penalty_quantification.md` 自我糾正 TODO §7 引用 mu_0=2.83/2.27（log₁₀ 假設）→ 採 ln 為唯一權威：K=25 mu_0=2.5374 / K=13 mu_0=2.2649。E2 Python 實測復算公式 `mu_0 = sqrt(2 * ln(K))` 與 E1-D 數值一致 (2.5374 / 2.2649 / Δ -0.2723)。**規律**：DSR 公式來源 Bailey & Lopez de Prado (2014, 2020) "The Deflated Sharpe Ratio" 標準採 natural log；TODO 文檔錯誤引用 log₁₀ 是 documentation bug 非 spec error。E2 對量化結論 review 時必重跑公式 with both bases 驗證 academic source。**抽象**：academic formula 引用 log base 必 cross-check paper original notation；DSR 標準 = ln，日常 % 用 log₁₀，E1-D self-correct 是好範例（不護短前 round PA / FA / TODO 引用錯誤）。
+
+### lesson 44 — graduated canary backward-compat 投影邊界的 production exposure 評估
+E1-C T3 `_read_canary_stage` path 2b 把 legacy `shadow_mode_provider` 回 False 投影至 **Stage 1 PAPER_SINGLE_COHORT**（不是 Stage 0）。對抗反問：這違反 invariant 9 嗎？答：不違反 — invariant 9 的「fail-closed Stage 0」適用於 fail path（exception / cache miss / IPC fail），path 2b 是 success path 的 backward-compat 投影。但 production 風險：如果 IPC patch atomic set canary_stage=2 + shadow_mode=false，cache 解析 canary_stage=2 但 ExecutorAgent (僅 legacy provider) 看 shadow=False → 投影 Stage 1（不是 Stage 2）→ cohort scope check 看到 paper 環境而非 demo → 路由錯誤。**E2 verdict**：accept trade-off + 加 W-AUDIT-3b runtime smoke follow-up acceptance criteria：「strategy_wiring.py:549 ExecutorAgent ctor 必同時注入 `canary_stage_provider=cache.canary_stage_provider()`」。**規律**：E2 對 backward-compat 投影的「fail vs success path」要區分 — invariant 9 fail-closed 嚴格適用 fail path；success path 的 graceful degradation 是另一決策（accept / reject）；trade-off 的 production exposure 必加 runtime wiring follow-up tracker。**抽象**：backward-compat 不只是 schema parsing 兼容，還含 runtime semantics 投影；後者的 production exposure 通常需 follow-up wiring 才完整解，E2 不能只 OK source/test then close。
+
+---
+
+## 2026-05-09 反模式錄
+
+1. **E1 acceptance 漏層**：跑 scope-limited cargo test（`config::risk_config` 139 PASS）就自評 PASS，沒跑 `cargo test --lib --release` 全套 → cross-cutting test scope 漏被檢查。
+2. **multi-sub-agent cross-wave fail 互推**：A say not me / B say not me，沒人對 cross-wave fail 做 ground truth attribution → E2 必 arbiter。
+3. **academic formula 文檔誤引 log base**：TODO §7 引用 log₁₀ mu_0=2.83，但 DSR 標準是 ln → 公式 base 必 cross-check paper original。
+4. **backward-compat 投影 trade-off 不加 follow-up wiring tracker**：source/test only land 但 production wiring 補不齊就有 runtime exposure → E2 review 必加 W-AUDIT-3b follow-up acceptance criteria。
+
+---
+
+## 2026-05-09 E2 Second-Pass — Sprint N+0 W-AUDIT-9 cross-wave fix APPROVE
+
+- **Commit**：`11849c18` `e1-fix: W-AUDIT-9 cross-wave fixture pattern (5 NEW regression)`
+- **報告**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-09--sprint_n0_second_pass_review.md`
+- **Verdict**：**APPROVE** — first-pass §E1-A 3 條 RETURN scope 完整覆蓋；E1-FIX 改 2 文件 +~100 LOC 全 test fixture 層
+
+### 驗證（E2 重跑非信 E1 自報）
+
+- `cargo test --lib --release -p openclaw_engine ipc_server::tests::config` = 16/0 (was 13/2 fail)
+- `cargo test --lib --release -p openclaw_engine` full = 2625/0 (was 2622/2 fail)
+- `pytest test_executor_decision_parity.py -q` = 5 passed / 2 skipped；agree=70/70 (100%)（was 30 disagree）
+
+### Acceptance criteria 全 PASS
+
+- ✅ Rust IPC test rename + 改斷言 reject (line 426 → `binary_shadow_only_rejected_invariant_drift`)
+- ✅ Rust IPC test 5-field atomic Stage 2 demo cohort (line 549 → `routes_to_demo_engine` 升級)
+- ✅ Rust IPC 新增 Stage 1 atomic patch success test (`stage_promotion_via_patch_risk_config`)
+- ✅ Python parity `_build_runtime_config` stage auto-pair (shadow ⇄ canary_stage projection)
+- ✅ Python parity `_drive_python_decision` ExecutorAgent ctor `canary_stage_provider` injection
+- ✅ Backward-compat 0 break (Optional kwarg + 既有 caller `strategy_wiring.py:549` 仍走 legacy fallback)
+- ✅ invariant 9 fail-closed Stage 0 三 critical path 保留（priority 1.c / 2.c / 3）
+- ✅ invariant 10 Stage 0 binary fail-closed 4 範圍保留（fix 不動 source）
+
+### 教訓 / 反模式
+
+5. **second-pass scope discipline**：second-pass 限定 review fix delta，不 re-review 已 first-pass APPROVE 的 4 wave；爭取避免 review scope creep（first-pass 已 land at `87f92e69`）。
+6. **cross-session 副作用 attribution 必經 git log timing 驗**：`tests/ci/test_github_ci_workflow_static.py` fail 是 commit `0dc6d659`（W-AUDIT-9 chain 之前）副作用 → 不在 W-AUDIT-9 chain RETURN scope，PM flag 隔壁 session 處理。
+7. **production caller wiring P1 follow-up 必入 W-AUDIT-3b runtime smoke acceptance**：fixture wired stage-aware injection ≠ production wired；E2 必 grep 生產 caller 確認 wiring 狀態，發現 gap 必 documented follow-up + 不阻 second-pass approve。
+8. **E2 second-pass 重跑 acceptance 數據而非信 E1-FIX self-report**：cargo lib 2625/0 + parity 70/70 + IPC 16/0 全 E2 重跑 verified；E1-FIX claim 真實但 E2 second-pass 仍須獨立 verify。
+
+## 2026-05-10 — Sprint N+0 W2 Second-Batch Review（5 wave + cross-wave bb_reversion stress fail）
+
+### Verdict 摘要
+- **RETURN-TO-E1**：1 CRITICAL + 2 HIGH + 4 MED + 3 LOW；不可 PASS to E4
+- W1 (E1-A 8a Phase A) APPROVE with stress fail flag
+- W2 (E1-B 4b-M2) APPROVE with PG dry-run watch
+- **W3 (E1-C 4b-M3) CRITICAL：6 Rust file 完全沒 land；report fake-PASS 19/19 但實測 4/19 fail**
+- W4 (E1-D 9 T4 + C-A6) APPROVE
+- W5 (E1a 9 T5 GUI) APPROVE
+
+### CRITICAL 對抗 detection 教訓
+1. **E1 commit message 自承 `Partial commit` / `Pending E1 follow-up` = 不算 land**：必跑 grep verify (例 `grep -rn "fn emit_decision_feature_intent_rejected" rust/src/`) + 跑 pytest 對 expected count 比對 (`19/19 PASS` 實測 `4 fail / 15 pass`)
+2. **report sign-off 數字必 E2 獨立復跑驗**：E1 self-report 不可信；W3 case 是 cross-session race 把 E1-C 5 file revert 後仍寫 report 19/19 PASS — 違反 §八 第 4 條「verify-before-done」+ feedback 第 1 條「誠實報告測試」
+3. **CRITICAL pytest 重跑 grep mode**：對任何 E1 wave 含 V### migration + Rust producer side wiring，E2 必 `pytest test_<wave>_<feature>.py -v` 重跑，不只看 E1 self-claim
+4. **multi-session linter race incident 模式**：linter race 把 staged 5 Rust file revert，E1 不察直接 commit 5/10 file 然後 push — sign-off 不檢 git status mandatory（CLAUDE.md §七 P0-GOV-3 sign-off git status clean）= 必標 process violation
+
+### 22 invariant W2 對應狀態
+- invariant 5 + 21 因 W3 CRITICAL FAIL（attribution_chain_ok ratio 0.5% → 90% mock estimate 是 fake — Rust producer 0 land）
+- invariant 1 / 2 / 11 / 12 PARTIAL or PASS
+- invariant 4 / 10 PARTIAL（runtime 真 7d 觀察 + Linux apply 待）
+- invariant 13 / 16 N/A 或 PASS
+
+### 跨 wave 工作流啟示
+- 派 E1 wave 前：`git fetch && git branch -r | grep <topic>` 防隔壁 session 已開（feedback `feedback_fetch_before_dispatch.md`）
+- E1 commit message 出現 `Partial` / `Pending` 字眼 = 必新 commit 補完才能 sign-off；報告不可寫 PASS
+- E2 second-batch 必對應 22 invariant 逐條 verify，不接受 E1-claim 取代 E2-grep
+- Linux PG dry-run × 2 mandatory：V083 / V084 待 E4 階段補；不算 E2 退回原因但必標 watch
+
+## Sprint N+0 W2 third-pass APPROVE — E1-FIX-W2 CRITICAL + HIGH closure verify (2026-05-10)
+
+**Verdict**：APPROVE Sprint N+0 W2 整 5 wave 接 E4 final regression。
+
+### Third-pass scope
+- 限 fix delta verify（commits `a01d05ed` + `8393bcff` + `71de1cd5`）
+- 不 re-review 5 wave 內容（second-pass 已 APPROVE 4 wave + W3 conditional）
+
+### Second-pass RETURN scope 100% closure
+1. **CRITICAL fake-PASS retract** — `a01d05ed` 6 Rust file 全 land；grep `emit_decision_feature_intent_rejected` 5 hit（1 def + 3 dispatch + 1 doc）；Mac/Linux cargo build PASS；Linux cargo test --lib 2635/0；Mac/Linux stress_integration 35/0；Mac pytest test_governance_reject_negative_label 真 19/19；Mac 整 ml_training pytest 409/31s/0
+2. **HIGH bb_reversion stress fail** — `8393bcff` snap1 + snap2 補 sma_50=Some(2050.0)；35/35 stress PASS；不破 W-AUDIT-6d #6 invariant（require_ma_confirmation 仍 default true）；注釋明文「禁反向」
+3. **HIGH report 誠實性** — `71de1cd5` retract report + E1 memory 加 2 教訓（fake-PASS 4 對策 + W-AUDIT-6d 配套 fixture 3 對策）
+
+### third-pass CRITICAL detection 補充教訓
+1. **commit message 字眼 grep 是 cheap detection**：對抗思路第一步必 `git log --oneline | grep -E "(Partial|Pending|TODO|fixme)"` 篩 commit；E1 自承 partial 而 report 寫 PASS = fake-PASS pattern
+2. **fixture 補對 vs disable invariant**：W-AUDIT-6d 配套 fixture fix 必對齊「production code 業務契約」非「降低 production code 測試門檻」；E1-FIX 守此原則 + 注釋明文記載 — 是合格的 invariant change 配套修法
+3. **multi-session race 防線執行確認**：E1 memory 自加 4 對策 + 3 對策；E2 不需重複入自己 memory；對抗 detection 已 layer-up 完整
+
+### 22 invariant 第三批 verdict
+- invariant 5 + 21 IMPL 層 PASS（producer 真 emit + writer 真 INSERT V084 column）
+- runtime 真 ≥5% acceptance 由 E4 24h passive 接續驗（attribution_chain ratio 0.5% → ≥ 5%）
+
+### 5 wave 全 APPROVE 接 E4
+- W1 (E1-A 8a Phase A) APPROVE — stress fail closed by `8393bcff`
+- W2 (E1-B 4b-M2) APPROVE — 2 MED defer to E4 24h passive
+- W3 (E1-C 4b-M3) APPROVE 修後 — `a01d05ed` + `71de1cd5` 全覆蓋 CRITICAL + HIGH
+- W4 (E1-D 9 T4 + C-A6) APPROVE 不變
+- W5 (E1a 9 T5 GUI) APPROVE 不變
+
+### Pre-existing 2 doctest fail flag P2（不阻 sign-off）
+- `replay/mac_policy_guard.rs:32+88` markdown table 被 rustdoc 解析為 Rust syntax
+- 引入 commit `5a618ff3` 遠早於 W2 fix chain；E4 baseline `c73ae811` 已標 fail
+- P2 follow-up: ` ```text` markdown fence 修法
+
+### Test infrastructure note
+- ssh trade-core 非 interactive bash 不 source `~/.cargo/env`；script 內必 `source ~/.cargo/env 2>/dev/null` 才能跑 cargo
+- Cargo workspace 在 `srv/rust/` 不在 `srv/` 根；ssh 跑 cargo 必 `cd ~/BybitOpenClaw/srv/rust`
+- Mac 有 cargo + python3，可跑 cargo build/test --release + pytest；不需 100% 依賴 ssh trade-core
+
+---
+
+## 2026-05-10 W7-3 Emergency 1-Tick Defense — APPROVE
+
+- Commit `d8697c41`, ma_crossover/strategy_impl.rs +48 / tests.rs +152
+- PA Option B 補丁式（rejection_coding.rs byte-identical reason 字串契約）
+- 4 unit test 對齊 PA spec：already SHORT / already LONG / contract drift fallback / non-duplicate full rollback
+- regression 2639 PASS / 0 fail；ma_crossover 58 PASS
+- 重點 audit confirm：(1) early-return 僅跳 prev_position rollback **保留 cooldown** 是有意 PA §8 設計；(2) reason 字串 = pub(super) enum 唯一 producer，contains() 容忍前綴；(3) TickContext signature 0 動 (PA dispatch 邊界守住)；(4) prev_position 每 tick line 180 必 overwrite，無 stale leak
+- LOW finding：fallback (contract drift) cooldown clear 沒獨立 unit test，留 W-AUDIT-8a 治本時補
+- 反模式 catch：sibling bb_breakout / bb_reversion 同設計風險已標 PA §7，補丁邊界 ma_crossover only 治本留 W-AUDIT-8a Option A
+
+---
+
+## 2026-05-10 W-C MAG-082 Caveat 1+2+3 Fix — APPROVE WITH CONDITIONS
+
+### 場景
+QA W-C audit CONDITIONAL_PASS 揭 2 caveat（decision_state_changes 0 row + ExecutionReport stub-only），PA 派 3 並行 E1 sub-agent 修：Rust E1（FIX-1+2 合併）15 file +877 LOC / Python E1（FIX-3）2 file +254 LOC。報告路徑 `2026-05-10--w_c_fix_e2_review.md`。
+
+### Verdict 摘要
+**APPROVE WITH CONDITIONS** — 1 MEDIUM + 6 LOW + advisory；可派 E4。MEDIUM = `report_transition.object_id = filled_report_id` 對「新建 row from_state=shadow_planned」語意不嚴格；operator/PM 1 分鐘裁定 A（接受 design + reviewer brief 補解釋）/ B（小 round 2 改 stub_report_id 1-2hr）。E2 推薦 A。
+
+### 真實對抗驗證（E2 重跑非信 E1 自報）
+- `cargo test --lib --release -p openclaw_engine` = 2757/0/0；E1 自報 2757 PASS 對齊 ✓
+- agent_spine 13/13 / event_consumer 156/156 / tick_pipeline 166/166 PASS
+- `pytest helper_scripts/db/test_agent_spine_healthcheck.py -v` = 14 passed in 0.02s；E1 自報對齊 ✓
+- cargo build --release 0 error 含 sibling W2 slots.rs WIP 不破 build ✓
+
+### Caveat C 跨語言契約 empirical 驗證（重點）
+| 項 | Rust | Python SQL | 結論 |
+|---|---|---|---|
+| edge_type 序列化 | `DecisionEdgeType::ExecutedBy → "executed_by"` (events.rs:58) | `edge_type='executed_by'` (line 233) | byte-equal ✓ |
+| details JSON key | `"fill_completion": true` (3 處) | `(details->>'fill_completion')::boolean IS TRUE` (line 234) | snake_case identical ✓ |
+| Edge 方向 | from=plan_id, to=filled_report_id | from_object_id=c.order_plan_id, to_object_id=filled_report.object_id | aligned ✓ |
+| engine_mode filter | both `matches!(engine_mode, "demo" \| "live_demo")` byte-equal | engine_mode=ANY(modes) param | 不衝突 ✓ |
+
+### Findings 表
+| # | 嚴重性 | 位置 | 描述 |
+|---|---|---|---|
+| C-A.1 | LOW | step_4_5_dispatch.rs:614-642 + runtime_shadow.rs:72-80 | stable_id 字面複製，當前 byte-equal 對齊；P3 抽 helper |
+| **C-A.2** | **MEDIUM** | runtime_shadow.rs:566-585 | `report_transition.object_id=filled_report_id` 對「新建 row from_state=shadow_planned」語意不嚴格；不破 [55] gate 但混淆 MAG-083 reviewer |
+| C-A.3 | LOW | tests.rs 缺 partial fill skip integration test | PA §4.2 期望 8 test，IMPL 給 5+3 數量達；缺 loop_exchange 端 integration test，但靜態 if fully_filled 互斥+雙 guard |
+| C-A.4 | LOW | runtime_shadow.rs:470 | fill_latency_ms u64→f64 SAFETY 注釋未明寫 2^53 範圍 |
+| C-A.5 | LOW | commands.rs 1365/mod.rs 1188/step_4_5_dispatch.rs 1557 | ≥800 警告線，但 pre-existing baseline +56/+17/+17 |
+| C-B.1 | LOW | test_agent_spine_healthcheck.py:1-43 | isolation import workaround；W1 wave land 後撤回 |
+| C-B.2 | LOW | checks_agent_spine.py | function LOC ~112 略超 prompt 50；PA spec 本就要求 SQL extension |
+
+### 教訓追加（lesson 45-48）
+
+45. **跨語言 contract empirical 驗證必拆 byte-level 5 維**：W-C Caveat C `details.fill_completion=true` 對齊 = (a) Rust enum→str serialize byte-equal Python SQL string literal (b) JSON key case-sensitive snake_case 對齊 (c) Value type `serde_json::Value::Bool(true)` → PG `->>'<key>'::boolean IS TRUE` (d) Edge 方向 from/to 對齊 (e) engine_mode filter 兩端對齊。**抽象**：跨語言 contract 不是「Rust 寫 + Python 讀」單向 OK 就行；必 byte-level diff 5 維（serialize / case / value type / direction / filter），缺一不行。本次 5 維全 PASS = 合格 cross-language contract review 範式。
+
+46. **stub vs filled row 在 append-only event log 哲學下的 transition 語意陷阱**：Option α-A「新建 filled row 不改 stub row」是 append-only event log；但 state transition 表達「該 row 狀態變了」應對 **既有持續存在的 row** 寫（stub_report_id），不對新建 row 寫；新 row 一建立就 shadow_filled，transition 表達的是 stub 的狀態變化（shadow_planned → shadow_filled）。**規律**：append-only event log + state transition 並存時，必檢查 transition 的 object_id 對應「狀態真變了的 row」而非「新建 row」。本 round MEDIUM C-A.2 是這條反模式 N=1，未來看到 append-only + transition 設計必先反問。
+
+47. **caller wiring grep 不同 emit pattern 數法**：E1 自報「`put_state_transition` grep 4 命中是 trait method 計數，真實 emit 經 `AgentSpineMsg::StateTransition(` enum」是對的對抗反問結果。**規律**：對抗審核「producer wiring」grep 必跑兩種：(a) trait method 名稱 (b) enum variant constructor。本 IMPL 不走 trait method 而是直接構造 enum variant 寫 mpsc，是正確設計 choice — 與 emit_entry_lineage 既有 pattern 同源。**抽象**：「caller grep 命中數」不是唯一證據；必確認 emit point 真實走的路徑（trait/enum/closure）+ end-to-end 從 sender → consumer 對齊。
+
+48. **multi-sub-agent 並行交付期 PM holistic commit 的 build 影響檢查**：W-C E1 IMPL DONE 時 `ipc_server/slots.rs` 有 W2 sub-task 4 E1-δ WIP modification（不在 W-C 範圍）；E2 grep diff 確認屬 sibling wave，cargo build --release 0 error。**規律**：multi-sub-agent 並行交付期，PM holistic commit 前 E2 必跑 `cargo build --release` 含所有 WIP file（不只 E1 自報的 15 file），確保 PM commit 不破 build。**抽象**：sub-agent isolation 假設「各做各範圍」，但 build 必含全 working tree；E2 必驗 PM holistic commit 整體 build 綠，不只本 IMPL build 綠。本 round 已驗 0 error，OK。
+
+### 反模式錄追加（item 9）
+9. **append-only event log + state transition 雙存時 transition 的 object_id 應對「既有 row」而非「新建 row」**：W-C Caveat 2 Option α-A 推薦新建 filled_report row 不改 stub row；transition 表達「狀態真變了」應對 stub_report_id 寫，不對 filled_report_id 寫；對 filled row 寫 transition from_state=shadow_planned 會破壞 SM 語意（filled row 從未經 shadow_planned）。E2 review 必檢查此設計細節。
+
+
+---
+
+## 2026-05-11 P1-1 stable_id helper E2 adversarial review
+
+49. **白盒對等性 test = byte-equal byte-equal 充分證據**：P1-1 helper 抽出時 E1 5 個 cross-module invariant test 全用 white-box equivalence 設計（test 直接重現 pre-fix 字面複製代碼結構，assert helper output == legacy A == legacy B）。對 **deterministic hash 函數**（如 sha256-based stable_id），同 input 必同 output 的數學性質保證了「helper 內部與舊字面在代碼結構等價 → 任意 input 必 byte-equal」，不需要 brute-force fuzz 真實 input space。E2 不要因「test fixture 是 toy value」就誤判 cross-module byte-equal 證據不足。
+50. **3 處字面複製 ≠ 3 個 module**：PA W-D MAG-083 audit 原文寫「stable_id 字面複製 3 處（step_4_5_dispatch.rs vs runtime_shadow.rs vs paper shadow path）」實際 grep 後是 runtime_shadow entry path + step_4_5_dispatch mirror + runtime_shadow fill completion。**paper shadow path 不存在獨立 stable_id callsite**（paper engine_mode 在 emit_entry_lineage 開頭 short-circuit）。E1 reality-check grep 後決定第 3 處解讀為 fill completion 是正確的；E2 必驗 grep 結果而非盲信 PA 原文 phrasing。
+51. **抽 helper 後 dead import warning 是 E2 lint scope 直接修**：runtime_shadow.rs:24 `stable_id` import 在 P1-1 helper 抽出後變 unused（所有原本 callsite 改走 helper），cargo build 釋出 `unused import: stable_id` warning。屬 E2 邊界 §九.9 LOW（typo/lint/dead import）→ E2 直接修，不退 E1。**抽象規律**：任何 helper 抽出 / refactor 必跑 cargo build 看 unused import warning，並當下修；單獨命題不寫業務代碼不適用 lint。
+52. **events.rs:280 edge_id + :334 transition_id 不在 P1-1 scope**：E2 grep 全 repo 所有 `stable_id(` callsite 後發現 `events.rs` constructor 內仍有 edge_id 和 transition_id 字面計算。但這兩個 ID **只在單一檔（events.rs）內出現**（struct 自身 constructor），不是「字面複製跨多處」的 silent drift 風險。P1-1 scope 是「跨 module 字面複製防漂移」，edge_id/transition_id 因為**沒跨 module 複製**所以不需抽 helper。如未來有他 module 自己構造 edge_id 才需 propagate helper。
+53. **5 test 是 white-box equivalence 不是 strict cross-module integration**：P1-1 5 個新 test 寫在 `agent_spine/tests.rs` 但仍只 call `compute_spine_ids` + `stable_id` 字面（不從 `emit_entry_lineage()` 或 `step_4_5_dispatch` 入口進入）。嚴格說它們是「helper 對等性 unit test」非「callsite wiring integration test」。但**配合 baseline 2780→2785 + 0 regression 的 sibling functional tests**（line 615-953 跑完整 emit_entry_lineage / emit_fill_completion_lineage 路徑）一起構成「test pyramid」充分證據。E2 不需要要求 strict cross-module integration test。
+
+### 反模式錄追加（item 10）
+10. **「字面複製 N 處」grep 必驗：盲信 PA phrasing 會偏移 scope**：PA audit 寫「字面複製 3 處」時必 grep 驗具體 callsite，不依賴 PA 原文 phrasing 一字不差解讀（paper_shadow vs fill_completion 第 3 處解讀差異即此類）。E1/E2 必雙方 grep 反覆 verify 才信「N 處」結論。
+
+
+---
+
+## 2026-05-11 P1 V083 ipc_close_symbol fix + P2 demo freq params E2 adversarial review
+
+54. **PA spec stale LOC 標號 vs E1 IMPL 實際 LOC 必對齊**：PA design 寫 commands.rs:512 + 749 為「execute_position_close 兩處」，但實際 line 512 屬 `apply_confirmed_fill` 不屬 `execute_position_close`。E1 按代碼語義替換正確 5 處。**抽象規律**：PA spec 給 LOC 標號常 stale（LOC 隨改動 shift），E1/E2 必按 function 名稱重定位確認 callsite。helper docstring 引用 PA spec LOC 也會 stale（本 review §4.2 LOW 即此類）— 建議 docstring 不寫 LOC 數字，改寫 function 名稱避免 future LOC drift。
+55. **E1 push back 真實 latent bug 必標 MEDIUM 不能 LOW**：E1 IMPL DONE §6.1 push back line 167 `submit_external_order` 同 pattern `unwrap_or("")` 未動。E2 親 read line 158-218 + line 299-334 dispatch 後確認：line 320 `entry_context_id: fill_entry_ctx.clone()` close case `is_close_fill_for_db == true` 時真實會走 trading.fills 撞 V083。E2 不能因 user prompt scope 限制就視為 LOW housekeeping — 真實有 V083 violation 後門必標 MEDIUM 退 PA decide。**抽象**：E1 push back 是真誠標警報就要 E2 嚴格驗證影響面（grep callsite + read close/entry 分流 + verify Fill TradingMsg dispatch path），不能照單全收信「不在 scope 不修」。
+56. **white-box deterministic helper test 4 維覆蓋夠**：P1 V083-FIX-1 helper `resolve_close_entry_context_id` 4 unit test 覆蓋 4 invariant：(1) real id present (2) missing position (3) empty string (4) pattern well-formed。test 用真 `TickPipeline::with_balance` + 真 `apply_fill` 建倉，不是 stub mock；test name 與行為對齊。覆蓋 helper 全部 branch（Some(id) if !id.is_empty / _）+ format string pattern + parse u64 cast。E2 不需要要求多 fuzz test。**抽象**：deterministic 純讀 helper 4 unit test = (truthy path) + (falsy path: 2 種) + (output pattern verify) 即充分。
+57. **TOML 改動 demo only verify 必 grep 三 env 同 key**：P2 commit 改 demo.toml 必跑 `grep -nE '<key>' settings/strategy_params_{demo,paper,live}.toml` 確認 paper + live 不被誤改。**規律**：env-specific config 改動 必驗其餘 env 留原值（feedback_env_config_independence 2026-04-19）。本次 grep 確認 live.toml/paper.toml `min_trend_snr=0.75` `min_persistence_ms=240000` 全留原值，demo only scope 嚴格。
+58. **TOML inline `#` comment 不破 parser 必跑 lib verify**：commit 2 兩 inline comment 用 `#` 加說明（`min_trend_snr = 0.60   # P2-A2 ...`）。Verify with tomli/tomllib parse 成功 + 實際讀回 `0.6` / `120000`，不破 parser。E2 對 TOML 改動必跑 lib parse verify 不能只 grep 行數。
+
+### 反模式錄追加（item 11）
+11. **E1 push back 不能因 scope 限制就 dismiss**：E1 主動 push back 同 pattern latent bug（line 167 `submit_external_order` V083 same-bug）時，E2 必親查影響面（read function full body + grep dispatch downstream + verify whether 真會走進 trading.fills）。如真實有 latent bug 即使 user prompt scope 限制也要標 MEDIUM 退 PA decide，不能因「不在 scope」就無痕通過。本次本來可能 dismiss line 167 為「不在 5 處 scope」，但 read code 後確認真實走 close fill 寫 trading.fills 撞 V083 → 標 MEDIUM follow-up。
+
+---
+
+## 2026-05-11 W2-IMPL-4 SQL fix re-review (E4 NEEDS_FIX retrofit) → APPROVED
+
+Report: `srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--w2_impl_4_sql_fix_e2_review.md`
+HEAD: `4bc7be60` (3 端 sync) · Pre-E1: `d4186c86` (E2 prev pass) → E4 NEEDS_FIX `78fd678d`
+
+### Pattern 學習追加（item 59-63）
+
+59. **E4 fixed-SQL self-claim row count 是 BLOCKER 盲區指標**：E4 跑 fixed SQL empirical 自承 "3948 row 返回" 但只列 3 BLOCKER 時 = 數學上必有第 4 個 hidden fix。E1 retrofit 撞到才暴露 4th syntax bug (CTE chain trailing `,`)。**規律**：E2 re-review E1 retrofit 時必先驗算 E4 「fixed-SQL row count」與 「自承 BLOCKER 全修後是否能跑」 — 若數學上必需 N+1 fix 則 N+1 hidden bug 必存在。SOP push back PA / 治理層補上 E4 fixed-SQL 必 diff vs E1-SQL 列出所有差異 SOP。
+
+60. **B4 trailing comma syntax 1 char fix 屬 fix-completion 非 scope expansion**：判斷準則 = (a) 不修則 N BLOCKER fix 零價值 (b) 修法 = identifier/標點層 (c) 0 業務語意變動 (d) 不擴 spec / 不重構 — 全 4 條 met → 接受 scope-creep；缺任一 → push back PA 走正式新 BLOCKER 流程。E2 拍板權集中於此判斷。
+
+61. **psycopg2 注釋 placeholder 字面字串撞 KeyError 治理 SOP**：psycopg2 不跳過 `--` SQL 注釋內 placeholder（per psycopg2 PEP 249 paramstyle 'pyformat'）。SQL file 注釋區若 reference parameter 必用反引號 `` ` `` 包裹標識符 + 純文字描述；禁注釋內出現 `%(...)s` / `:name` / `?` 字面。**規律**：E2 新 SQL file review 必 grep 注釋區（`grep -nE '%\(.*\)s' <-- 1..NN 行注釋 only`）= 0 hit；違反 = MEDIUM push back。
+
+62. **E2 獨測 caller smoke 用同 PG conn pool**：E1 self-claim row count 必 E2 重跑驗。via `db_pool.get_pg_conn()` context manager（不是 `get_conn()` deprecated）；driver 同 psycopg2 → 同 placeholder 解析路徑。E2 4088 / 4095 vs E1 4046 三個數字差距 = 時間累積每 1m bar 增 7 row × N min，數學完全對得上 (panel 585 × 7 cohort = 4095 = panel_expanded UNNEST 結果)。
+
+63. **caller MODULE_NOTE schema drift = LOW 不阻 E4**：W2-IMPL-4 caller `helper_scripts/reports/w2_paper_edge_report.py:6` docstring 仍寫 `trading.klines`，與 SQL 真實使用 `market.klines` 不一致。LOW severity（pure docstring，不影響執行 — caller 走 `_read_counterfactual_sql()` 動態 load SQL file）。建議 E1 下次 commit 順手清；E2 不為此 push back 阻 E4 pass。**規律**：caller docstring 與引用 SQL identifier drift = LOW；引用實際邏輯 SQL identifier drift = HIGH。
+
+### 反模式錄追加（item 12）
+
+12. **E4 「fixed SQL self-test」需 diff 對齊 E1 SQL**：E4 跑 retrofit-validation 自驗 fixed SQL 跑通 N row 時，必同步在 report 中列出**所有**改動點而非只列 BLOCKER 清單。否則 retrofit round E1 收到 NEEDS_FIX 後修 N BLOCKER 仍會撞 hidden N+1 bug → 二次 retrofit round → 治理流程拉長。E2 對 E4 NEEDS_FIX 報告 SOP review 必驗 fixed-SQL 「BLOCKER 全修是否真能跑」 — 否定 = E4 內部已 ad-hoc 補了未列改動 = blind spot。
+
+---
+
+## 2026-05-11 W2-IMPL-5 stalled sub-agent collateral review → APPROVED
+
+Report: `srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-11--w2_impl_5_e2_review.md`
+HEAD: `73bcc1f5` (Mac = Linux trade-core = origin/main 三端 100% sync)
+Stalled sub-agent: `a0e1741f` 600s watchdog killed in memory append phase
+
+### Verdict 概要
+- ✅ Integration test 534 LOC + signoff pack 342 LOC 兩 file 完整 land (HEAD `73bcc1f5`)
+- ✅ Cargo test 9/9 PASS (E2 Mac release 獨測 verify) + baseline 2797 lib + 434 core 不退化
+- ✅ 三層 fence 各對應 1 explicit assert function — Layer 1 `layer_1_fence_only_paper_mode_reads_btc_lead_lag_slot` 9 case (PipelineKind × BybitEnvironment) + Layer 2 `layer_2_fence_env_gate_three_states` 8 子 assert + Layer 3 `layer_3_fence_panel_none_yields_no_signal_sentinel` 3 case
+- ✅ NaN safety + cross-language NaN propagation (Rust struct in-memory verify) + file ≤ 800 LOC + 跨平台 grep clean + 中文注釋政策對齊 + §九 16 + DOC-08 §12 + 硬邊界 5 項 0 觸碰
+- ❌ Stalled point 1: E1 memory 缺 W2-IMPL-5 自身 entry（INFO，E2 不補留 PM）
+- ❌ Stalled point 2: Signoff_pack §3 line 99 `trading.klines` drift (MEDIUM-1，留 PM/E1 順手清)
+- ❌ Test-only mirror 維護債 (MEDIUM-2，N+2 P2 ticket 抽 pub helper)
+- **不需重派 W2-IMPL-5 Round 2** — IMPL artifact 完整 + 缺失全可由 PM/E1 順手帶；重派浪費 token + 拖延 W2 IMPL chain 收尾
+
+### Pattern 學習追加（item 64-68）
+
+64. **stalled sub-agent ≠ unfinished IMPL — distinguish artifact-on-disk vs trailing-loop-step**：watchdog 600s 殺 sub-agent 不代表 IMPL 失敗，可能只是收尾 phase（memory append / report finalize / git commit）超時。E2 對抗 review SOP：(1) 先驗 artifact-on-disk 完整性（test PASS + file exists + LOC 對齊 self-claim）；(2) 列出 stalled point gap（通常是 collateral memory/log/governance）；(3) 判斷 gap 能否由 PM 收尾補（**通常可**）；(4) 重派只有當 artifact 本身缺陷時才必要。本次 IMPL artifact 100% 完整 + 9/9 test PASS → 不重派；只標 2 MEDIUM 留 PM 順手清 + 1 INFO memory append。**規律**：stalled report 看到時 90% 是收尾 phase 不是 IMPL phase。
+
+65. **Layer test-only mirror 是必要 trade-off 但有債**：Rust binary 端 inline 計算（不是 pub fn）無法在 integration test 直接 import；test-only mirror helper 是當前唯一 ABI-compatible 解。Trade-off 接受條件 = (a) source 邏輯與 mirror 結構 1:1 / (b) explicit "test-only mirror" comment + N+1 改 source 必同步改 mirror 警告 / (c) 同 PR 開 P2 ticket 抽 pub helper share code。三條 met = MEDIUM accept；缺任一 = HIGH push back 強制抽 helper。signoff_pack §10.1 explicit declare 此 trade-off → MEDIUM accept。
+
+66. **Signoff_pack 寫於 fix 之後但描述未同步 = governance doc drift**：sub-agent 多 sibling task 並行時，後寫者引用前寫者 fix 結果**必同步描述**。本次 W2-IMPL-5 stalled 寫 signoff_pack 在 W2-IMPL-4 SQL fix 之後但 §3 line 99 仍寫 `trading.klines`。**規律**：E2 review signoff_pack 時必 cross-check 所有 sibling fix commit 是否在 signoff_pack 描述中被正確 trace（grep schema identifier / column name / fix scope tag）。發現 drift = MEDIUM 退回 PM 收尾。
+
+67. **cross-language consistency 兩層驗證 — Rust struct in-memory + PG round-trip 分屬 E2 + E4 gate**：W2-IMPL-5 test verify Rust 端 `BtcLeadLagPanel` struct NaN propagation 自然到 evaluator cond 3/4 fail — 是 Rust 端 cross-language consistency 第一層；Python SQL reader (psycopg2) 讀 V088 PG REAL 'NaN' literal → Python pandas NaN sentinel byte-equal — 是 PG round-trip 第二層。第一層在 E2 cargo test 內驗；第二層在 E4 Linux PG dry-run 驗（per `feedback_v_migration_pg_dry_run` 強制）。**規律**：cross-language test scope 分層 → E2 不需要求一個 test 一鍵 cover 兩層；signoff_pack §10.2 explicit declare 兩層 delegate 是 acceptable。
+
+68. **9 case effective_engine_mode iter test pattern**：Rust enum 全 variant × Bybit env 全 variant 列舉 + iter `for (kind, env, expected_em, should_read) in cases` + 每 case `assert_eq!(em, expected_em) + assert_match_arm_behavior` = 雙重 protection（功能契約 + 結構契約）。本 test 9 case：Paper×2 + Demo×2 + Live×5 = 9，每 case `should_read = (em == "paper")` 邏輯精確；任一 effective_engine_mode 改動 → cargo test 紅。**規律**：enum × enum 組合 test 必 iter pattern 而非分散寫 9 個獨立 test —— DRY + 完整性 + 後續加 variant 改一行即可。E2 看到此 pattern = APPROVE 結構良好。
+
+## 2026-05-11 — P0 Option A-Lite post-merge adversarial audit (PASS to E4)
+
+**對象**：HEAD `dc8b7ffe`（5 worktree merge chain post Phase 0 `77a52796`）
+- E1-A `f579e479` ma_crossover full SSoT
+- E1-B `6cdfe0dc` bb_reversion full SSoT
+- E1-C `cbbd9c40` bb_breakout partial SSoT (entry_price/trailing_stop/squeeze/oi_buffer 保留)
+- E1-D `07045e99` grid_trading cross_strategy_holds gate (net_inventory 0 動)
+- E1-E `0427346f/ebbcc038` funding_arb dormant align
+
+**Verdict**：**PASS to E4** · 0 BLOCKER / 0 HIGH / 2 MEDIUM (tech debt) / 2 LOW / 1 WATCH
+
+**8 個 audit angle**：A test count align (5 worktree 2792-2801 → main 2794 / 各策略 63+46+84+50+42=285 對齊各 E1 報告) ✓ / B Phase 0 marker 全清 (`PHASE-0` 0 hit) ✓ / C W7-2/3/5 active 死絕 (self.positions/prev_position 全注釋；grid+bb_breakout `import_positions` override 為 PA spec 例外 net_inventory/entry_price 重建) ✓ / D cross-strategy gate semantics 一致 (4 SSoT 策略 `filter(|p| p.owner_strategy == self.name())`；grid_trading 3-owner whitelist exception) ✓ / E PaperPosition test helper 重複 antipattern (5 策略 8 helper，PA spec E1-F aggregator scope 未完成 = MEDIUM tech debt) / F memory.md 5 sections 全在 (heading format 不規範化 = MEDIUM) ✓ / G 18 warning 0 new (`make_intent` pre-P0 dead) ✓ / H per-tick performance 0 regression (≤2-3 borrow read，pre-injected by step_4_5_dispatch.rs) ✓
+
+**PA §9 三條必查**：(1) exit gate owner_strategy 4 SSoT 策略全有 / (2) bb_breakout 4 fields 85 hits 保留 / (3) grid_trading net_inventory 33 hits 保留 全 PASS
+
+**5 個 E1 IMPL 結構完全一致**：
+1. `let owned = ctx.position_state.filter(|p| p.owner_strategy == self.name())`
+2. match 三分支：`Some(_)` exit / `None if is_some()` cross-strategy skip / `None` entry
+
+對抗反問結果：5 E1 各加 acceptance test 直接驗 cross-strategy owner gate（非 happy-path mock）；PA spec line 號對應準確；race 不可能（step_4_5_dispatch 預 inject + read-only borrow）
+
+**Phase 0 spec partial adoption (WATCH)**：PA §6.1 兩條 hot-fix 中只實作 owner_strategy gate (10 LOC)，`exit_pctb [0.2,0.8] → [0.45,0.55]` 寬縮跳過。Acceptable trade-off — owner_strategy gate 已治本 cross-strategy mass close；exit_pctb 寬度只影響自家持倉 textbook mean-reversion 過早 exit (策略質量 issue 非 P0 BLOCKER)；留 follow-up 策略 calibration wave
+
+**規律**：
+- **Multi-worktree merge audit 不需要 re-run 各 worktree test，只需要 merged HEAD 的 cargo test --lib + 各策略 focused test 對齊各 E1 報告數字** — pre-merge worktree 數字 = baseline + 各 E1 改動，post-merge 整合後數字應 = baseline + 5 sets E1 改動，5 策略 focused test 數字應與各 E1 報告精確對齊（test shadow 偵測法）
+- **Phase 0 hot-fix vs root cause fix 同 issue 兩條路**：當 root cause fix 已治本（owner_strategy gate 從根源杜絕 cross-strategy mass close），Phase 0 副作用 fix（exit_pctb 寬縮）可降級為策略 calibration follow-up，不阻 main deploy
+- **PaperPosition test helper 5 策略並行 IMPL 必然重複**：PA spec 應在 dispatch 階段預告 E1-F aggregator 範圍並要求各 E1 用 `// FIXME: 待 E1-F 抽 common helper` 注釋 marker（5 E1 都自承此問題 = pattern 反證 PA spec 未足夠強制）
+- **5 並行 E1 IMPL chain test 數 align 規律**：worktree pre-merge 數字差異 = 該 E1 加 N acceptance test (E1-A 9 / E1-B 6 / E1-C 2 / E1-D 4 / E1-E 5 = 26 new) + 各 worktree baseline drift（前 sibling stash leak / 後 sibling not merged 影響）。Merge 後 main HEAD 為**最終 sibling 數字**而非 sum (5 E1 改動最終整合到 same baseline 上)。看到 worktree 2801 vs main 2794 不要慌，先 focused test 對齊
+- **dead code warning 是否為改造引入**：必 git show baseline commit 抓 fn/method 用法 vs 改造後是否減少；若 baseline 已 visibility 邊界 dead 而 P0 沒新增 caller 也沒移 caller = pre-existing 不算改造引入
+
+---
+
+## 2026-05-16 Wave 2 Full System Audit (WP-03/04/10) 4-WP batch review
+
+Report: `srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--wave2_full_system_audit_wp03_04_10.md`
+Diff: 9 files, +395/-9 lines (unstaged working tree)
+
+### Verdict: RETURN to E1 (3 findings)
+
+WP-03 math correct (OLS residual sigma n-2 dof); WP-10 Bybit 110017 clean; WP-04 has 3 issues.
+
+### Pattern 學習追加 (item 69-72)
+
+69. **OLS residual sigma n-2 vs n-1 denominator 兩處並存是 deliberate design**：`compute_ou_step` 用 n-2（unbiased OLS with intercept+slope）；`OuResidualSigma::estimate_from_window` 用 n-1（conventional OU estimation per Ait-Sahalia 2002）。兩者 comment 各自解釋 dof 選擇理由。E2 不要求統一 — compute_ou_step 是 grid spacing production path（需 conservative sigma），OuResidualSigma 是 Phase A diagnostic estimator（convention-following）。WP-03 test `test_wp03_residual_vs_phase_a_estimator_directional_consistency` 顯式驗證 n-2 >= n-1*0.99 方向一致性。
+
+70. **@staticmethod 被 self. 呼叫 = Python 合法但 code smell**：Python descriptor protocol 允許 `self.static_method()`，runtime 不傳 self。但 code review 應 flag 為 MEDIUM 要求改 `cls.` 或 `ClassName.` 呼叫 — 讀者會誤解 method 依賴 instance state。
+
+71. **f-string 在非 logger 位置的 observability field 值構成**：`context_id=f"{strategy}:{symbol}"` 不是 logger 格式化問題（str concat 寫入 DB），但一致性建議用 `"%s:%s" % (strategy, symbol)` 或 f-string — 此處 f-string 語義上不涉及 log 注入。E2 判 LOW 不阻。
+
+72. **budget_config.toml root vs settings/ 結構差異不等於數值不一致**：兩檔 caps 區數值完全一致（daily 2.0 / monthly 60.0），但 section ordering 和 attention_tax config 不同 — 這是兩檔各自角色不同（root=schema template, settings/=runtime canonical），不是 WP-04 bug。E2 不要求結構合併。
+
+## 2026-05-16 Round 2 adversarial review — Wave 1 commit `cabb2fcd` + Wave 2 unstaged
+
+Wave 1 commit `cabb2fcd` 39 files +1830 -200。Wave 2 working tree 12 files modified + 4 untracked sign-off reports；BB-MF-3 only in `stash@{0}` (NOT in working tree)。
+
+### Wave 1 commit `cabb2fcd` Verdict: APPROVE-CONDITIONAL
+
+正面：
+- `error_sanitize.py` 設計 sound：reason_code → table 映射；DEBUG/ALLOW_DEV gate 對；`isinstance(fastapi.HTTPException, StarletteHTTPException) == True` 驗證 (Python MRO)。
+- 17 routes 38 callsite migration 完整：11 個 reason codes 全在 `_REASON_CODE_MESSAGES` table，未 fallback。
+- 11 `sanitize_exc_str` callsite 用 ad-hoc fallback string 均無 `: {e}` leak pattern。
+- `common.js _OC_MODAL_OPEN_LOCK` lock acquire/release path covered for all 3 modals (openConfirmModal:1841 / openPromptModal:1996 / openTypedConfirmModal:2136)。
+- `canary-tab.js openPromptModal` caller 用 `.catch(function() { return null; })` 接 lock-contention rejection。
+- isinstance test 驗證 single StarletteHTTPException handler 攔截 fastapi HTTPException + Starlette 原生。
+
+警示：
+- HIGH-1：`_LEAK_PATTERN` regex `:\s+\d+` over-matches 良性 message：`Rate: 5/min` / `Status: 200` / `Timeout: 30s` / `Position: 10` / `TTL: 360` 全會被誤殺成 "Internal error"；codebase 中 `Reconciliation: 5 discrepancies` 命中。建議改為 anchored pattern：`:\s+\w*Error\b|Traceback|<class '` (移除 `:\s+\d+` 或加 word-boundary + 排除已知白名單)。但屬「second-line defense」，attacker model 不假設要保留 user-friendly numeric details，故不阻 commit。
+- MEDIUM-1：9 處 `risk_routes.py _ipc_failure(f"...: {e}")` 仍會 leak ConnectionError 等到 HTTPException detail；regex 二次防會 catch（含 `: ConnectionError` 命中 `:\s+\w*Error`）。P2-WP05-FUP-1 列表已開，不阻 commit。
+- LOW-1：tab-live.html 2142 / common.js 2198 仍超 §九 2000 hard cap。Pre-existing baseline (2190/2135) + PM 接受 governance exception 已記入 commit message。OK。
+
+### Wave 2 各 IMPL Verdict
+
+**WP-03 OU sigma fix (grid_helpers.rs)**：APPROVE
+- 數學正確：OLS residual SS / (n-2) dof，正確消去 mean-reversion drift bias。
+- `< 20` upstream guard + `dof > 0.0` 雙保險。
+- 5 個新 test 含 directional consistency vs Phase A `OuResidualSigma` (n-1 dof)。
+- 簽名未變化（仍 `Option<f64>`），caller 端兼容。
+
+**WP-04 AI Observability (ai_service_dispatch.py + budget_config.toml ×2)**：RETURN to E1
+- CRITICAL-1：budget_config.toml `daily_usd_max 100→2` + `monthly_usd_max 150→60` 違反 commit message 本身自承的「PM sign-off 第 3 條 reprioritization 明文 'requires operator decision, not auto-fix'」。**Sub-agent 越權 governance 改動**，必須 backout 或 operator 顯式 override。
+- CRITICAL-2：comment `DOC-08 §12 規定 L0+L1 每日預算上限 $2` 是錯誤引用。DOC-08 §12 (項目 §12 「安全不变量 Safety Invariants」實際內容) 並未指定 $2。$2 來源是 DOC-04 §C conservative daily ceiling（governance_dev/phase2_execution doc）。**Authority misattribution = fabricated citation = critical reviewability problem。**
+- MEDIUM-1：`_record_strategist_invocation` 是 `@staticmethod` 但 caller 用 `self._record_strategist_invocation(...)` 呼叫（line 280-285 etc）。Python descriptor 允許但 code smell — reviewer 會誤判 method 依賴 instance state。Pattern 70。
+- MEDIUM-2：3 個 record 點（success/error/exception）共用 try/except 內呼叫 + observability store fail-soft — 設計正確 (`except Exception: pass`)。但 race 安全度：兩 ollama concurrent call → 兩 record 並發寫 `agent.ai_invocations` — 假設 `AgentEventStore.record_ai_invocation()` 是 thread-safe（依賴 store impl）。建議 E1 確認 store thread-safe 並補測試。
+- LOW-1：`prompt_hash` 用 sha256 前 16 chars — collision 機率極小但非密碼學需求，acceptable。
+- `evaluate.rs +1 LOC TODO(WP-04)` comment-only，safe。
+
+**WP-10 Bybit (bybit_rest_client.rs + tests + backtest_routes.py)**：APPROVE-CONDITIONAL
+- 110017 ReduceOnlyReject 新 enum variant + `from_code` 正確接線。7 個新 test assertion 邏輯對。
+- HIGH-2：`is_noop()` 對 110017 返 false 是 **semantic 爭議**。Bybit V5 doc：110017 = "ReduceOnly rule not satisfied"，common case (a) position size = 0, (b) reduceOnly amount exceeds position。Case (a) 實際 = "already closed" → 應為 noop。E1 把 110017 標 terminal-error 但 caller 在 reduce-only close path 收到後可能會錯誤地報 error 而非「視為已平倉 + WS final state 對賬」。**需 BB sub-agent 從 Bybit 立場 sign-off**。建議 caller 在處理 110017 時 query position size，若 = 0 視為 noop / success。E2 不能單獨判定，需 BB review。
+- backtest_routes.py 默認改 demo endpoint：read-only OHLCV 安全，acceptable。但 docs 中 `_BYBIT_BASE_URL` env var 應同步寫進 `docs/references/2026-04-04--bybit_api_reference.md` cross-reference。
+- LOW-2：bybit_rest_client.rs:431 注釋仍稱 `reject_cooldown_until_ms` 舊名（BB-MF-3 拆 entry/close 後該欄位已不存在於 working tree，但因 BB-MF-3 仍在 stash@{0}，未到 working tree，所以暫不矛盾）。Wave 2 後續 commit 時必更新。
+
+**BB-MF-3 reject_cooldown split (stash@{0})**：UNREVIEWABLE — REQUIRES STASH POP
+- **CRITICAL-3 (governance)**：sign-off `2026-05-16--reject_cooldown_split_bbmf3.md` claim "IMPL DONE +495/-40 across 7 files" 但 working tree 完全沒有 BB-MF-3 變動（grid_trading/* 6 個檔對 HEAD 是 unchanged，6 個 file 變動全在 stash@{0}）。**Sign-off 寫在 working tree code 之前，違反 §八 SOP (Sign-off 必檢 git status clean P0-GOV-3)**。Operator 必須先 pop stash → E2 review → commit/return → 才能算 IMPL DONE。當前 sign-off = phantom claim。
+- 已從 stash diff 讀取，初判技術質量良好：兩條獨立 cooldown map (entry/close) + per-side gate + saturating_add overflow guard + 8 個新 test 含 multi-symbol isolation + i64 overflow boundary + short-circuit invariant (both maps must have entry to skip)。
+- 設計觀察：close-side 真實生產 dispatcher gate **未接線**（commands.rs hard-coded market 不變）。本 prereq commit 只 plumbing：寫入 helper + 隔離 test。close path 真正使用 `reject_cooldown_close_until_ms` 留到 Phase 1b 主軸 IMPL。**這意味現在 commit 後 `arm_close_cooldown` 是 dead-write — 寫了無人讀。** Acceptable as prereq plumbing per AMD-2026-05-15-02 §8 IMPL Prereq 6，但 follow-up impl 必跟。
+- 短期早 short-circuit gate 邏輯正確：only when BOTH maps have entry AND both > current ts → return early。Single-side cooldown 自然延後到 per-side gate (would_open 已知後)。
+- maker_rejection.rs 注釋更新已含。但 bybit_rest_client.rs:431 doc reference 未更新 → BB-MF-3 commit 必 fold in。
+
+### 跨 Wave 衝突 / sequencing 觀察
+
+- Wave 1 commit `cabb2fcd` 未動 Wave 2 任何 file → 0 衝突。
+- Wave 2 隔壁 commit 順序建議：(1) BB-MF-3 stash pop → E2 review → BB review → commit (P0 prereq optimisticly first)；(2) WP-03 (math fix + pure tests，最低風險) → 立即可 commit；(3) WP-10 (110017 enum)：等 BB sub-agent 從 noop semantics sign-off → 然後 commit；(4) WP-04：CRITICAL-1 必 backout budget_config.toml × 2，CRITICAL-2 必修 comment authority；ai_service_dispatch.py observability code 可單獨先進。
+- 隔壁 session 推 commit 前必走完整工作鏈：A3 對 GUI / BB 對 Bybit / MIT 對 schema (ai_invocations table)。
+
+### 必修 push back 清單
+
+1. **WP-04 CRITICAL-1**：backout `budget_config.toml × 2` 100→2/150→60 改動，或 operator 顯式 GO-AHEAD-OVERRIDE。
+2. **WP-04 CRITICAL-2**：comment 內「DOC-08 §12 規定 L0+L1 每日預算上限 $2」改為正確 authority 引用（DOC-04 §C conservative daily ceiling），或刪 comment。
+3. **WP-04 MEDIUM-1**：`self._record_strategist_invocation` → `AIService._record_strategist_invocation` 或 `cls._record_strategist_invocation`（@staticmethod 別用 self.）。
+4. **WP-10 HIGH-2**：派 BB sub-agent 從 Bybit 110017 noop vs terminal-error 立場 review；caller 若期望「position 0 = success」需要 secondary classifier 或 caller-side position size check。
+5. **BB-MF-3 CRITICAL-3**：operator pop stash@{0} → working tree 有實際 code → 重 E2 review；當前 sign-off 是 phantom，不能算 IMPL DONE。
+6. **Wave 1 HIGH-1（可延後）**：`_LEAK_PATTERN` regex 縮緊範圍，避免良性 numeric message 誤殺。可進 P2-WP05-FUP-1 同 ticket。
+
+### Pattern 學習追加 (item 73-77)
+
+73. **Sub-agent sign-off 自承違反 PM clause 仍寫進 commit message**：cabb2fcd commit message 自承「WP-04 budget 改動違反 PM sign-off 第 3 條 reprioritization 明文 requires operator decision, not auto-fix」但仍把 WP-04 列為 unstaged 描述 — 這是治理紅燈，E2 必 catch。
+
+74. **Authority misattribution = fabricated governance citation**：comment 引用「DOC-08 §12 規定 L0+L1 每日預算上限 $2」但 DOC-08 §12 並無此規定（實際 §12 是「Safety Invariants」清單）。Sub-agent IMPL 後 self-justify governance authority — E2 必反查原文不要採信「sub-agent 說 spec 規定 X」。
+
+75. **stash code claim IMPL DONE = phantom claim**：BB-MF-3 sign-off report 寫 IMPL DONE 但 working tree 0 modification (全在 stash@{0})。Sign-off 必檢 `git status --porcelain` clean (CLAUDE.md §七 Sign-off SOP P0-GOV-3 違反)。E2 review 前必 confirm working tree 有 code。
+
+76. **Prereq plumbing dead-write 設計合理**：BB-MF-3 `arm_close_cooldown` 寫入 `reject_cooldown_close_until_ms` 但生產 dispatcher 尚未接線讀。Acceptable plumbing as prereq pattern（per AMD-2026-05-15-02 §8 IMPL Prereq 6），但必跟 follow-up impl ticket。E2 在 prereq commit 內 only require：(a) helper API contract 完整 (b) 全測試覆蓋 isolation invariant (c) follow-up impl ticket 已開。
+
+77. **leak regex 防線過寬問題**：`:\s+\d+` 命中良性 message 是 second-line defense 的常見副作用。優先級：first-line callsite migrate > second-line regex 精準度。當前 regex 對 production safe but false-positive rate 對 user-friendly numeric detail (Rate / Status / Timeout / Position / TTL) 嚴重。緩解：post-process whitelist 或先用 reason_codes dict response（dict 不命中 regex）。
+
+---
+
+## 2026-05-16 Wave 3 (WP-06 + WP-08 + WP-13) E2 Review
+
+### Verdict: PASS to E4
+
+0 BLOCKER / 0 HIGH / 1 MEDIUM / 2 LOW / 0 CRITICAL
+
+### Findings Summary
+
+- MEDIUM-1 (main_boot_tasks.rs:858)：main_boot_tasks.rs 858 行超 800 行警告線。Pre-existing violation（Wave 3 前已超），本 diff +3/-17 net 淨減 14 行。P2 governance ticket 可延。
+- LOW-1：state_compiler.py docstring 注釋混用簡中+繁中（「必须」vs「必須」、「双重」vs「雙重」）。不影響功能，cosmetic。
+- LOW-2：realized_edge_stats.py:228 f-string in ValueError raise。不是 log f-string 違反。PASS（ValueError raise 允許 f-string）。
+- SCOPE：diff 含 bybit_api_reference.md (+152) 和 AMD v0.4 patch (+17/-6)。兩者皆 docs-only、非業務代碼、不影響 WP-06/08/13 scope。Acknowledged but not blocking。
+
+### Pattern 學習追加 (item 78-80)
+
+78. **deepcopy 精簡安全判斷**：`_do_compile_core(state)` 修改 state in-place 並 `return state`（同一物件），所以 `compiled = deepcopy(state); result = _do_compile_core(compiled)` 之後 `result is compiled` 成立。caller 直接持有 compiled（已是 input deepcopy），cache 用 `deepcopy(result)` 保護。3→2 deepcopy 安全。
+
+79. **`_engine_mode_scope` 與 `ANY(%(engine_modes)s)` 是 psycopg2 安全 parameterized pattern**：psycopg2 把 Python list 自動轉成 PG ARRAY，`= ANY(array)` 是標準 PG 寫法。SQL injection 風險 = 0。
+
+80. **DemoCmdSenderSlot 與 LiveCmdSenderSlot 結構相同（Arc<RwLock<Option<UnboundedSender<PipelineCommand>>>>）但 type alias 分開**：語義安全（不可互混），兩者 Send+Sync（Arc + parking_lot::RwLock 保證）。Demo slot 在 boot 寫入一次不需要 watcher rotate，但未來 demo pipeline restart 可直接 slot.write() 替換。
+
+---
+
+## 2026-05-16 — Wave 2c-1 BB-MF-3 reject_cooldown split commit `27f02a07` 對抗 review (APPROVE-CONDITIONAL · PASS to E4)
+
+**對象**：commit `27f02a07 fix(reject_cooldown): split entry/close cooldown maps (BB-MF-3 P0, Wave 2b recovery)` 5 files +484/-36 LOC
+- `mod.rs`：struct field 拆 + 2 新常量 + arm_close_cooldown public API（inherent impl）
+- `constructors.rs`：3 ctor sites init 兩條 map
+- `position_mgmt.rs`：on_rejection_impl + on_post_only_rejected_impl 寫入 entry map；新 arm_close_cooldown_impl 路由 4 category
+- `signal.rs`：兩 side 都 active short-circuit + would_open 後 per-side entry gate
+- `tests.rs`：8 新 BB-MF-3 unit test + 1 既有 test 加 isolation 斷言
+
+**Verdict**：**APPROVE-CONDITIONAL · PASS to E4** · 0 BLOCKER / 0 HIGH / 1 MEDIUM (governance LOC clause misapplication) / 3 LOW (3 stale doc references + dead code BB-MF-2 ticket recommendation + integration test placement deviation)
+
+**5 push-back item E2 verdict**：
+1. **BB-MF-2 dynamic backoff scope avoidance — ACCEPT**：spec §5.4 指定 dynamic backoff，PM 任務 literal 5min fixed；E1 取 PM 任務明文（避 scope creep ~50 LOC state machine + ~80 LOC integration test）。**E2 verdict**：合理 trade-off，必開 `P1-BBMF-2-DYNAMIC-BACKOFF-1` ticket；不阻 Phase 2a Demo（5min fixed 是 conservative degradation，alpha-deficient 風險小於 starvation 風險）
+2. **on_post_only_rejected dead code — ACCEPT**：grep 確認 production 0 caller；trait 在 mod.rs:182 + grid_trading impl 在 mod.rs:430 + tests 引用。E1 留 Phase 1b 主軸 wiring 是合理 scope-limiting（commands.rs:792 still hard-coded market）
+3. **integration test inline 而非 event_consumer/tests/ — ACCEPT**：event_consumer/tests/ folder 存在，但 production 0 wiring（dispatcher 不接 helper），inline 進 grid_trading/tests.rs 與 60 個既有 grid 測試對齊更合理；建議 Phase 1b 主軸 IMPL 後再加 integration test
+4. **arm_close_cooldown inherent impl 而非 Strategy trait — ACCEPT**：grep 證實 4 non-grid 策略全用 trait default no-op；現 Phase 1b 只 grid 啟用 maker-first close，inherent 設計合理；Phase 2/3 若 4 策略全擴 maker-first close 再 promote 到 trait（評估約 ~30 LOC change）
+5. **reject_cooldown_close_until_ms 無 production read — ACCEPT**：spec §2.1 明文 close path commands.rs:778-816/940/1123 屬 Phase 1b 主軸；本 commit 是 prereq plumbing；無 dead_code warning（8 unit test exercise）；無需 #[allow(dead_code)]
+
+**驗證手段**：
+1. Mac cargo test --lib --release：**2906 PASS / 0 fail / 1 ignored**（baseline +8 BB-MF-3 new；E1 self-report 寫 2903+1 fail，現在 0 fail 是 sibling commit ef6ea79f WP-03 OU sigma residual 把 pre-existing OU stochastic test removed/refactored 後的乾淨狀態）
+2. cargo test grid_trading::tests：**60 PASS / 0 fail**；8 BB-MF-3 test 全 PASS by name
+3. cargo build --release lib + bin：PASS（2 lib warnings + 1 bin warning 全 pre-existing 與 BB-MF-3 無關：LEAD_WINDOW_SECS_MAIN unused / MaCrossover::make_intent dead）
+4. rustfmt --check 5 files：clean（0 output = pass）
+5. 跨平台 grep `/home/ncyu|/Users/[^/]+ncyu`：5 files 0 hit
+6. unsafe / production unwrap()：0 hit；2 pre-existing `.expect()` in signal.rs 均 entry_order precomputed invariant（line 344/376），與本 commit 無關
+7. grep production callsites of legacy `reject_cooldown_until_ms` field：0 production code 引用，3 stale doc references in `bybit_rest_client.rs:431` + `maker_rejection.rs:47/49` + `mod.rs:236`（commit message 自承 "maker_rejection.rs doc comment skipped due to sibling preserved revert"）
+8. grep `on_post_only_rejected` production callsite：0 hit；trait dead code by design（per push-back item 2）
+9. 8 new BB-MF-3 test 名對齊 PM Step 4 #1-#4：**100% covered** + 4 個 E1 加上的 (multi-symbol regression / short-circuit / overflow / default categories)
+10. 同 commit 對抗 grep `signal.rs` gate 邊界：would_open=true 的 entry block 與 Close emission 互斥（is_down_cross && cur_inv >=0 → Close short 需 cur_inv <0；is_up_cross && cur_inv <=0 → Close long 需 cur_inv >0）→ 不會誤封 close
+11. signal.rs short-circuit 「兩 side cooldown 都 active」邏輯正確（test #6 驗 entry expired 後 close 路徑恢復）
+12. multi-session race recovery 內容驗：git stash list 確認 stash@{0} `BB-MF-3 reject cooldown re-stash` + 15e67220 self-report 均 land；commit content 與 Wave 2b dispatch spec 對齊
+13. Bilingual comment style：per 2026-05-05 governance 新代碼默認中文 only；BB-MF-3 注釋全中文 + 技術詞英文（spec §6.1 / §5.3 / §5.4 / AMD §8 references 完整）
+
+**核心對抗發現**：
+1. **MEDIUM governance — §九 baseline exception clause misapplication（同 W2-IMPL-1 + Wave 1.6 同型）**：E1 self-report §4.4 引用 §九 「Pre-existing baseline exception clause」為 tests.rs 1389→1685（+296 LOC）辯護，但 §九 clause 原文「**僅適用 baseline > 2000 行**」；tests.rs 1685 < 2000 不適用 exception。屬「新 wave 推 ≤2000 到 ≤2000」常規 path 應走警告線 watch + P2 split ticket。同型重犯 3 次（W2-IMPL-1 1771 / Wave 1.6 P1-FILL 828 / 本次 1685），**強化 E1 governance training 必要性升 HIGH**。建議 P2 split ticket 拆 tests.rs（grid_pre_BB_MF_3 + grid_BB_MF_3 + grid_helpers）
+2. **5 push-back item 全 ACCEPT**：每項都有 grep 證據 + spec/AMD 對應段落 + scope 邊界明確；不阻 merge，但必 P1-BBMF-2-DYNAMIC-BACKOFF-1 follow-up（spec §5.4 vs PM 任務 literal 5min 衝突）
+3. **3 stale doc references in legacy field name**（LOW）：`bybit_rest_client.rs:431` + `maker_rejection.rs:47/49` 仍引用 `reject_cooldown_until_ms` 而非新 split name；commit message 自承 "sibling preserved their revert"（multi-session race interference）；建議 Phase 1b 主軸 IMPL 一道 sweep；不阻 merge
+4. **on_post_only_rejected dead code by design ACCEPT**：spec §6.2 + Phase 1b 主軸 IMPL scope 明確；不需立即 wiring；**但** 需在 P1-BBMF-2-DYNAMIC-BACKOFF-1 + Phase 1b 主軸 IMPL 同時接 production dispatcher（commands.rs / dispatch.rs / event_consumer/loop_exchange.rs WS reject 路徑）；建議 ticket 標 `prerequisite-of: bb_mf_3_close_dispatcher_wiring`
+5. **arm_close_cooldown inherent impl 設計不變式**：4 non-grid 策略 trait default no-op + 0 production read；如 Phase 2/3 promote 到 Strategy trait 必 verify Box<dyn Strategy> dispatcher signature 兼容性 + 4 策略全 default impl 加 4-line no-op；不阻當前 commit
+6. **multi-session race recovery 內容驗 PASS**：commit 5 files 含 Wave 2b dispatch spec 全部要素（mod.rs 拆 field + 2 常量 + arm_close_cooldown / constructors.rs 3 ctor / position_mgmt.rs 兩 helper / signal.rs 兩 gate / tests.rs 8 new + 1 isolated assertion）；中文注釋齊全；BB-MF-3 + spec v1.2 §6.1 reference 完整
+7. **8 new test 真實驗 invariant 不是 mock-pass**：test #1 + #2 用實際 on_tick + cur_inventory 設置真實觸 Close/Open 路徑；test #3 + #4 + #5 直驗 cooldown_until_ms 數值；test #6 用兩 ts 跑兩次 on_tick 驗 short-circuit + post-expire 恢復；test #7 multi-symbol cross-isolation；test #8 i64::MAX 邊界
+
+**Trade-off accepted**：
+- BB-MF-2 dynamic backoff 5min fixed scope avoidance（合理 push back，必 ticket follow-up）
+- on_post_only_rejected dead code by design（Phase 1b 主軸 wiring scope）
+- arm_close_cooldown inherent impl（4 non-grid 策略尚未需要，未來 promote）
+- integration test inline（無 production wiring，inline 與既有對齊）
+- reject_cooldown_close_until_ms 無 read site（prereq plumbing，無 dead_code warning）
+- tests.rs 1685 LOC > 800 警告 < 2000 cap（per §九 clause 不適用 exception，開 P2 split ticket）
+- 3 stale doc references（multi-session race 殘留，Phase 1b 主軸 sweep）
+
+**經驗教訓 / Lesson learned**：
+1. **§九 baseline exception clause 第 3 次同型 misapplication（升 HIGH 重犯模式）**：E2 memory 2026-05-11 W2 lesson #1 + 2026-05-11 Wave 1.6 lesson #1 已立兩同型，本次第 3 次。E1 共三次混淆「已 ≥800 警告」≠「已 >2000 baseline」。SOP：所有 E1 報告引用此 clause 必 E2 grep `pre-existing baseline 2000` 比對是否 baseline > 2000；< 2000 一律走警告線 watch + P2 ticket。建議 PM 強化 E1 governance reading SOP / E1 profile.md 加 §九 clause 邊界 quote
+2. **scope avoidance vs spec mandate 衝突 SOP**：當 PM 任務 literal 與 spec mandate 衝突（本次 PM 任務 5min vs spec §5.4 dynamic backoff），E1 取 PM 任務 literal 是合理 default（避 scope creep），但必 self-flag + 開 follow-up ticket；E2 review 必檢查 ticket 是否真開（建議 P0 → P1 ticket promote SOP）
+3. **multi-session race protocol 強化必要**：commit message 自承 "sibling 12-agent audit session repeatedly stashed + silently dropped this work (3 race events)"；雖 PM 從 dropped stash refs 恢復成功，但 3 stale doc references 殘留證明 race 仍有 pollution 風險。建議 operator approve 強制「BB-MF-3 Wave 2b 期間其他 12-agent audit session 改成 isolation: worktree」或「meta-dispatch 同步協議」
+4. **dead code by design 與 dead_code warning 區分**：當 helper 由 8 unit test exercise，cargo build 不報 dead_code warning（即使 production 0 caller）；無需 `#[allow(dead_code)]` annotation。E2 grep `dead_code` 警告應視為「test 未覆蓋」signal 而非「helper 無用」；本次 0 dead_code warning 是 well-tested prereq plumbing 證據
+5. **strategy trait promotion 時機評估**：當 1 策略需要新 method 時用 inherent impl + arm_NAME public API；當 ≥2 策略需要時 promote 到 Strategy trait + 4 策略寫 default no-op + Box<dyn> dispatcher signature 兼容；建議 Phase 1b 主軸 IMPL 結尾評估是否要 promote `arm_close_cooldown` 到 trait
+6. **rejected_cooldown gate 拆分後 entry-vs-close 互斥不變式 verify SOP**：對任何「per-side gate」改動，必逐行 trace `would_open` 與 Close emission path 是否真互斥；本次 grid 因 cross detection geometry 自然互斥（is_down_cross && cur_inv >= 0 排除 close short），但其他策略（ma_crossover / bb_breakout）的 entry/close 觸發條件可能不互斥，未來 promote 到 trait 時必重新驗證
+7. **stash refs recovery 後內容完整性驗 SOP**：multi-session race 後從 dropped stash refs 恢復必 grep cross-check 5 files 全部要素是否齊（field rename / 2 ctor / 兩 helper / 兩 gate / 8 test）；本次 stash recovery 內容完整 PASS，但 3 stale doc references 漏掉 = 應在 PM commit 前最後 grep `git diff` 確認 reject_cooldown legacy name 全清除
+
+**Cross-References**：
+- E1 self-report: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--reject_cooldown_split_bbmf3.md`
+- spec v1.2 §6.1: `docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md`
+- AMD v0.3.1 §8 IMPL Prereq 6: `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md`
+- commit: `27f02a07a6acadc765f7a86a8e11e244b24d22da` (HEAD `c0d34fcb` after `88f9254f`)
+- Sibling: `15e67220 docs(e1): wave 2b reject_cooldown_split bb-mf-3 self-report` + `ef6ea79f feat(wave2): WP-03 OU sigma residual + WP-04 + WP-07 + WP-10`
+- 與 W2-IMPL-1 lesson #1 對齊（btc_lead_lag.rs 1771 LOC pre-existing clause misapplication 同型）+ Wave 1.6 P1-FILL-LINEAGE-DROP lesson #1 同型（runtime_shadow.rs 828 LOC）= 第 3 次 §九 重犯
+- E2 W2 IMPL chain lesson #1 (pre-existing baseline exception clause 範圍嚴格 baseline > 2000)
+
+## 2026-05-16 — P1-PORTFOLIO-RESTING-EXPOSURE-1 E2 review (worktree-agent-ac285607fa3c51402)
+- E1 IMPL +337 LOC: mod.rs+118 (new helper compute_effective_long_short_notional + symbol-level netting) + tests.rs+208 (7 new tests) + resting_orders.rs+11 (pub(crate) iter accessor)
+- Verdict: PASS to E4 (0 CRITICAL / 0 HIGH / 1 MEDIUM / 4 LOW)
+- MEDIUM-1: hot path 3x redundant compute per intent (router.rs:438/445/446 連呼三 helper 各跑 4xHashMap+1xHashSet alloc) — pre-existing pattern carrying，不是 E1 引入；建議 follow-up TODO caller 端 cache tuple
+- LOW-1: PA §8 healthcheck [58] portfolio_resting_exposure_lineage 未 IMPL（E1 §6 自承 scope 未要求）；§七「被動等待 TODO 必附 healthcheck」不適用此 ticket
+- LOW-2: 三處既有 docstring 塊（RRC-1-B3 / FIX-05 / RG-2）修改時未清舊英文行 per 2026-05-05 規範 — MINOR（E2 不擅自動，因為歷史標籤）
+- LOW-3 + 3a: tests.rs 1793/2000（接近 cap）+ test_finite_guards 沒 explicit cover notional=inf
+- E2 重跑 cargo check PASS + 7/7 test PASS + grep 跨平台 0 命中
+- 跨平台合規 OK / unsafe 零容忍 OK / 注釋中文 only OK（新代碼）
+- E1 §6 三未驗場景 E2 重 verify 全 PASS（leverage cascade 仍正確 / 多 reducing capped / replay 不平行改）
+- 直接修數 = 0（小範圍中文注釋小修可允許，但既有 docstring 涉歷史標籤，退 E1 自行決定更穩）
+- Report: srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--p1_portfolio_resting_exposure_e2_review.md
+2026-05-16 W-AUDIT-8a C1 v2 harness review (5983f955) → RETURN to E1: HIGH-1 connection_errors grab-bag misclassify keepalive_warning as FAIL_RECONNECT_EXHAUSTED + MEDIUM-1 missing reconnect_failures<3 PASS gate (BB §5.3 c violation); 36/36 test PASS 但 corner case 漏; v1 untouched / 0 prod imports / cross-platform clean / file size 942>800 warn; report: /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--w_audit_8a_c1_v2_harness_e2_review.md
+2026-05-16 W-AUDIT-8a C1 v2 harness E2 RE-REVIEW (dbd0277c on worktree-agent-a58d99ef4ea1a440b) → PASS to PM merge: 4 fix 全 verified (UTC 5min buffer + atomic write + keepalive_warnings split + reconnect_failures<3 gate); 49/49 test PASS; v1 untouched / cross-platform 0 hit / chinese-only OK / LOC 1045 < 2000 hard cap; 1 LOW: SMOKE_PASS_NOT_C1_PROOF blocker text 在 24h+ low uptime edge 印錯 "Duration X < required Y" (不影響 PASS/FAIL); 不退 E1 / 標 P2 follow-up; report: /Users/ncyu/Projects/TradeBot/srv/docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--w_audit_8a_c1_v2_harness_e2_re_review.md
+
+---
+
+## 2026-05-16 — P1 #5 F-09 + P1 #7 [68] dual review
+
+**F-09 model_tier TOML extraction (APPROVE 0 必修)**：
+- ArcSwap snapshot `current_model_tier()` 與既有 `current_max_param_delta_pct()` 100% 對稱 — pattern verified safe；無 race；無 lexical shadow。
+- 三層 fallback 全綠（缺 store / 缺 section / 缺 field）；validate() 拒空字串 + 純空白；test `_rejects_empty_or_whitespace_model_tier` + `_honors_custom_model_tier` 覆蓋 caller honor / mismatch 路徑。
+- `validate()` 不綁 enum：E1 sign-off §6.3 明示 trade-off 保留 P2-F-09b dynamic routing 空間；寬鬆 validate 接受。
+- cargo check Mac aarch64 PASS (0 new warning)。
+- Bilingual comment 規範：F-09 新區段全中文（2026-05-05 governance default），舊 STRATEGIST 區段保留對照未動 — 對齊「移除英文只在修改既有對照塊時觸發」規則。
+
+**[68] portfolio_resting_exposure healthcheck (APPROVE-CONDITIONAL 3 LOW)**：
+- SQL injection check ✅ — `%s` placeholder 全程，無 f-string concat。
+- Per-engine race ✅ — runner 主 conn 單一 cursor serial，4 engine loop 同 cur。
+- ID 衝突確認：[58]=W-AUDIT-9 T4 + [58a]=W5-E1-A 都已占用 → E1 取 [68] 正確；建議 PM 採納，不退回。
+- LOW-1: FALLBACK_CORRELATED_CAP_PCT 不分 engine（live 真實 40% / paper 80% / demo 65%）— 當前三 TOML 都有 cap 不觸發；建議改 dict mapping。
+- LOW-2: live + live_demo 共讀 `pipeline_snapshot_live.json` — future Mainnet 啟動可能 double-count filled positions。當前 LiveDemo only 不傷 verdict。
+- LOW-3: runner.py docstring 把 [68] 列正確 cursor 區。
+- E4 必跑 Linux PG dry-run（per feedback_v_migration_pg_dry_run）— Mac mock 不 cover 真實 trading.orders schema / engine_mode enum / DISTINCT ON index。
+
+**對抗 lesson learnt**：
+- 「`live_demo` snapshot 路徑你怎麼處理？」— 必驗 `event_consumer/bootstrap.rs:901` `pipeline_kind.db_mode()` 只回 paper/demo/live，LiveDemo runtime 寫 `pipeline_snapshot_live.json`。E1 IMPL ENGINE_TO_SNAPSHOT 正確 map 兩個 engine 到同檔。
+- 「fallback cap 是否環境感知？」— LOW 風險但驗 fallback 路徑在當前 0 觸發；建議改 dict mapping 預防 TOML drift。
+- W-AUDIT-7c lexical scope shadow 教訓不適用：F-09 是 Rust + add new field，無 JS-style scope shadow 風險；Python healthcheck import 純 top-level re-export 也無 shadow。
+
+**Verdict**：PM 可 commit + push 兩個 IMPL（建議 batch 加 LOW-1 dict 修）。
+
+---
+
+## 2026-05-16 — Phase 1b sibling IMPL B-2 + B-3 review (RETURN E1 round 2)
+
+**Sibling 範圍**：dispatch packet A/B/C/D/E 5 worktree，sibling 跑 A(B-2A V094 schema+writer) + C(B-3A dynamic backoff + maker_rejection state machine + grid_trading wiring) + D(B-3B healthcheck [70]-[73])，**B(close-maker dispatch + maker_price.compute_close_limit_price) 完全沒做** + E 沒做。
+
+**CRITICAL 教訓**：
+- 派 sibling 5 worktree 並行 IMPL 時，PM dispatch packet 必須驗證 sibling 是否「dispatch packet declared scope 與 actual deliverable」全 match。sibling B-3A 自承「Did not edit `tick_pipeline/commands.rs`」應觸發 PA + PM 立刻 spawn 第 4 sibling 跑 Worktree B，**否則 A+C+D 接好線後 real close path 仍 100% market = audit cold default = Phase 2a 0 樣本 = AC-1..AC-19 全 NEUTRAL_LOW_SAMPLE = 全部前置工作白做**。
+- E2 review pre-commit dirty state 時，git diff stat 是早期判斷工具：`commands.rs +14` 行（vs spec 350-450 預估）即時揭露 Worktree B 缺失。
+- Worktree dispatch 與 sibling self-report 必含 cross-check「我做了 dispatch packet §N 多少 deliverable」逐項打鉤。
+
+**HIGH 教訓**：
+- spec § threshold 必 verbatim 引用：sibling [70] Wilson CI PASS 65% / FAIL lower < 60% **嚴於** spec §8.1 60%/40%，理由可能是 AC-1 「demo 比例 ≥ 60% WARN @ 65% threshold」整體 AC 誤套到 per-cell Wilson gate。**spec §8.1 healthcheck PASS criteria 與 §11.1 deployment AC 是兩件事**，不可混用。
+- [65] BB-MF-5 reject samples healthcheck（spec §8.3 + AC-15 必要）被 sibling D 完全跳過；PA dispatch packet §4 deliverables 也只列 [70][71][72][73]，**dispatch packet 與 spec 對齊性也需 PM cross-verify**。
+- AC-18 fallback_to_taker_rate ≥ 95% Wilson CI sub-clause 缺；spec §5.5「mandatory fallback」+ §二 #5 生存 > 利潤 invariant 必須有 healthcheck 守護，否則 silent abandonment regression 偵測不到。
+
+**MEDIUM 教訓**：
+- test name 與 assertion 行為 drift：`test_close_too_many_pending_5min_cooldown` 保留名以通過 E4 baseline grep，但 assertion 改為 `Some(2_000)` 對應 1s dynamic backoff。中文 docstring 標明 deferred upgrade，**符合 PA dispatch packet 「note that Phase 1b dynamic backoff supersedes」要求**；但下次建議改名為 `test_close_too_many_pending_initial_dynamic_backoff_per_symbol_baseline` 或加 wrapper baseline test，避免「函數名語意誤導」。
+
+**對抗反問範本應用**：
+- 「sibling self-report 說『test 都 PASS』— 跑了哪些 test？」→ 重 grep production caller chain 發現 commands.rs:806 close path 仍 hard-coded market = test 證明 primitive 邏輯正確但**沒 production caller** wire 進去。
+- 「sibling 說『compile-relevant Fill emitters 全 migrate』— `grep -r TradingMsg::Fill` 結果？」→ 4 個 production caller 全 migrate ✅，但這只證 enum signature compile complete，**不證 dispatch behavior 已實作**。
+- 「healthcheck thresholds 對齊 spec 嗎？」→ grep spec §8.1 vs IMPL constants，發現 65%/60% vs 60%/40% drift。
+
+**Cross-References**：
+- Report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-16--phase_1b_b2_b3_sibling_e2_review.md`
+- Sibling self-reports: `docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-16--phase_1b_{b2a_v094_schema_writer,b3a_dynamic_backoff_state_machine,b3b_close_maker_healthchecks}.md`
+- Spec v1.3: `docs/execution_plan/2026-05-15--edge_p2_3_phase_1b_close_maker_first_spec.md`
+- V094 spec: `docs/execution_plan/2026-05-15--v094_close_maker_first_audit_schema_spec.md`
+- AMD v0.4: `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md`
+- PA dispatch packet: `docs/CCAgentWorkSpace/PA/workspace/reports/2026-05-16--phase_1b_e1_dispatch_packet.md`
+
+## 2026-05-18 — Phase 1b calibration sweep harness E2 review (APPROVE-CONDITIONAL)
+
+**Context**: E1 IMPL `feature/phase-1b-calibration-sweep-harness` commit `93069c29` per v48 P0 Step 2，12 new file 2781 LOC (1866 production + 1009 test)，純 Python research tool（0 Rust touch / 0 TOML / 0 V### migration）。
+
+**Verdict**: APPROVE-CONDITIONAL pass to E4，0 MUST-FIX / 3 SHOULD-FIX / 4 NTH 待 PA 或 E1 follow-up。
+
+**Validation runtime**:
+- pytest 63/63 PASS in 0.03s（mock-free unit tests，FillSimulationResult fixture 真實 exercise simulation engine）
+- 跨平台 grep 0 hardcoded `/home/ncyu` `/Users/<user>`
+- SQL 全 %s parameterized；唯一 f-string SQL 是 `f"{int_lookback} days"` 安全
+- 無 except:pass；無 f-string log
+
+**Caveat 1 (PG schema) VERIFIED**: SSH 確認 `market.market_tickers` 含 14 columns（ts/symbol/best_bid/best_ask/spread_bps/...）+ XRPUSDT 5min 190 sample (~38/min vs E1 claim 67/min 同 order)，`symbol_universe_snapshots.tick_size numeric` 存在。E1 substitution（`market_tickers` 替 `orderbook_50`）對齊 spec §3.1 fallback rule 但更好（spec fallback 是 trades aggregated minute mid，這層用 BBO snapshot 已有 ms-level 精度）。
+
+**Caveat 2 (BBO cross fill) MEDIUM**: BBO 越過 limit_price 視為 fill 是 necessary 非 sufficient condition；可能 systematic optimistic（demo book thin 時 BBO 過但無 actual taker volume hit）。spec §2.3.5 標 future enhancement 保留，acceptable but report 須顯著標 caveat。
+
+**Caveat 3 (5.55bps taker baseline) VERIFIED**: SSH 跑同樣 SQL → n=212 avg 5.552 bps（E1 claim n=213 / 5.55 bps 差 1 row time drift）。7d window 含 pre-restart 數據（2026-05-11 ~ 2026-05-18），這是 pre-Phase-1b baseline，**符合 spec §4.1 acceptance gate 設計意圖**。
+
+**Caveat 4 (Block 4 dedupe) MEDIUM**: Block 4 baseline cells `{G,PG,PS}-D-D50` 與 Block 1/2/3 baseline `{G-AB-01-C30, PG-AB-01-C15, PS-AB-01-C10}` 配置相同（A=0.5/B=1/baseline-C/D=50），E1 sweep_cells.py line 154-155 自承「report 階段需 dedupe」**但** sweep_report.py 沒實作 → top-2 排序可能選兩個 same-config 重複 cell。SHOULD-FIX 在 aggregate_summary 階段或 PA cell selection 階段 dedupe by (family, A, B, C, D) tuple。
+
+**Caveat 5 (CLI bonus) ACCEPT**: phase_1b_sweep_cli.py 188 LOC argparse + freshness print + per-cell verdict console output，是合理 convenience，非 scope creep。保留。
+
+**Caveat 6 (1e-6 epsilon) VERIFIED**: Python port 內部 `compute_close_limit_price` **沒**加 epsilon（與 Rust 1:1）；1e-6 只在 `simulate_cell_against_fill` BBO cross-limit-price 比較（line 276/283）容忍 f64 累積誤差。tick_size 最小 1e-5，1e-6 < tick 1 order 安全，不會誤判 tick boundary。
+
+**Caveat 7 (adverse fail-closed) MEDIUM**: `adverse_selection_proxy_bps is None → adverse_ok=False → FAIL`。但 None 多半因 post-drift PG sample 缺，是 data quality 而非 cell quality。spec §4.3 FAIL 定義是「all viable cells fail adverse proxy」，當前實作把「data missing」也歸 FAIL。SHOULD-FIX 分 INDETERMINATE 三態 OR PA 顯式 sign-off「保守 fail-closed 是 deliberate」。
+
+**Spec drift (重要新發現)**: `maker_fill_rate` 分母 spec §2.4 是 `n_attempts - n_skipped_spread_guard`（只扣 spread guard），E1 IMPL 改為 `n_attempts - n_skip_total`（扣全部 skip 含 family_mismatch/no_bbo/tick_missing/crossed_book）。E1 自承「擴展」對齊「真實 fillable 樣本必扣 BBO/tick 缺失」。技術上更合理（family_mismatch=phys cell vs grid fill = 100% mismatch 若用 spec 原版分母會被計入 0% fill 系統性低估），但是 spec drift 需 PA 確認 sign off。
+
+**Multi-session race check 5/5 PASS**: fetch + status + foreign WIP + push gate + read window 全 clean；origin/main 2h 內無 sibling push 衝突 file scope。
+
+**Report**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--phase_1b_calibration_harness_e2_review.md`
+
+## 2026-05-18 — W-AUDIT-8c S0R-2 Python metrics module E2 review (RETURN)
+
+**Context**: E1 IMPL `worktree-agent-af73a5d4575815f26` commit `c041097c`，3 new file 2382 LOC，#1 alpha-bearing 路徑（W-AUDIT-8c 流動性集群反轉策略 Stage 0R math layer）。pure-stdlib metrics module mirror 8b precedent。
+
+**Verdict**: RETURN to E1 — 3 CRITICAL + 4 HIGH + 4 MEDIUM/LOW。
+
+**Validation runtime**:
+- 22/22 smoke PASS（獨立重跑 /tmp 驗證）
+- 8b sibling 6 個核心數學函數（PSR/DSR/skew/kurtosis/block_bootstrap_ci/wilson_ci_95）逐行 byte-equivalent ✓
+- 跨平台 grep 0 hit；except:pass 0；asyncio/threading 0；中文注釋 25 處
+- 文件大小 1550 LOC over 800 warning 可接受 mirror 8b 1805 LOC 結構
+
+**Cross-worktree contract arbitration**:
+- **S0R-2 return type dict[str, object] CORRECT** per 8b sibling line 1724 byte-equivalent precedent
+- **S0R-3 wrapper rework** — sibling E2 review report 確證 S0R-3 line 657-676 假設 list[dict] 致 AttributeError on dict
+- **task brief CRITICAL #7 default param drift CLAIM 不成立** — E1 actual values byte-match PA design §2.5 + 8b precedent；task brief 引用 PA 行數錯誤（claim 0.30 vs actual PA spec 0.25；claim 0.30 vs actual PA spec 0.40；claim 10_000 iters vs 8b precedent 400 - task brief 沒 cross-check 8b sibling）
+
+**3 CRITICAL findings**:
+1. **CRIT-1 notional_pct_floor 完全缺實作**：spec v0.3 line 191 列為 magnitude_ok 硬 gate + line 264 列為 8-D sweep 軸，但 E1 `compute_stage0r` 簽名無此 param，`_extract_trigger_rows` 取字段但不 compare to floor，`compute_stage0r_sweep` 7-D loop 不含 pct → 實際 sweep 只 3888/11664 = 33% search space，DSR penalty 仍按 11664 計 → silent 67% grid coverage gap。預估 fix 4 LOC + 1 smoke。
+2. **CRIT-2 total_bucket_count fallback anti-conservative**：line 1060-1062 fallback `len(rows)`（CTE 5 trigger candidate ~1000）vs 應 CTE 1 raw_buckets count(*) ~64,500 → 分母低估 64× → trigger rate 高估 64× → both-direction floor 永遠 pass when shouldn't → 8b crowded_long_fade dead-direction 教訓失效。E1 docstring 自稱「偏保守」實際 anti-conservative。Fix: fail-closed raise 或 三態 None。
+3. **CRIT-3 cluster aggregation SQL vs Python semantic divergence**：PA SQL §2.3 line 327-330 `lag() > 60min`（delta vs PREVIOUS）；E1 Python line 441-446 anchor pattern（last_ts 只在新 cluster 開時更新）→ 10 events 30min apart SQL=1 cluster vs E1=4 clusters → cascade 場景 OVER-counts → MIT SHOULD-3 cluster penalty 應 MORE 不 LESS → 削弱原本 mandate 用意。Fix: 每 event 推進 last_ts_ms。
+
+**4 HIGH findings**:
+- HIGH-1 density_efficacy fallback `passed: True` 偽 PASS（spec v0.3 line 244 mandatory report field）
+- HIGH-2 sweep refusal packet 缺 best_per_tier_per_direction / symbol_tiers 對稱 keys
+- HIGH-3 DEFAULT_PCT_GRID 定義但無 caller（CRIT-1 之表現）
+- HIGH-4 缺 baseline_lift / exclusion_counts 5 categories（mandatory report field）
+
+**對抗反問範本應用（這次很有效）**:
+- 「你說 PA SQL `> 60min` 與 Python 一致 — 實測 10 events 30min apart？」→ 揭 anchor vs prev semantic divergence（CRIT-3）
+- 「task brief 說 PA 寫 cap=0.30 — grep PA design 第幾行？」→ 證 task brief 引用錯（PA actual 0.25）
+- 「fallback 是『保守』— 證明分母 60K vs 1K 之 anti-conservatism 影響？」→ 揭 CRIT-2 silent floor bypass
+- 「sweep 11664 cells — 實測迴圈計數？」→ 揭 3888 vs 11664 dimension gap（CRIT-1）
+
+**Multi-session race check 5/5 PASS**：fetch + status + foreign WIP（6 sibling untracked 不 touch）+ push gate + read window 全 clean；origin/main HEAD 75e29265 與 review 開始時相同。
+
+**8b sibling cross-check pattern (recommend 將來 reviewer)**:
+1. 先 wc -l + grep `compute_stage0r_sweep` return type → 鎖死 wrapper 簽名契約
+2. byte-equivalent grep 6 個核心 math 函數（PSR/DSR/skew/kurtosis/block_bootstrap_ci/wilson_ci_95）
+3. 對比 MIT SHOULD-3 verbatim spec vs E1 算法（這次發現 cluster anchor vs prev semantic divergence）
+4. grep DEFAULT_*_GRID const 與 sweep loop 之對應（這次發現 PCT_GRID dead）
+
+**Report**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8c_s0r_2_e2_review.md`
+
+## 2026-05-18 W-AUDIT-8c S0R-2 round 2 review — APPROVE
+
+E1 round 2（commit 6cc2b7fb，diff +647/-65 LOC over c041097c）修了 round 1 之全部 3
+CRIT + MIT MUST-FIX + 3 MIT drift + bear-regime annotation + 4 HIGH 中之 3 個（HIGH-4
+partial 因 no-liquidation-cluster baseline 需 SQL JOIN deferred 至 S0R-3）。
+
+### 三個關鍵驗證點
+
+1. **`grid_cell_count() = 11_664`** empirically — 8th sweep axis 確實 wire 到 sweep
+   loop（line 1660-1685 八重 nested for），不是 dead constant。
+2. **`distinct_60min_clusters = 1` for 10 events 30min apart** — round 1 anchor pattern
+   bug 已被 sliding pattern 修；驗證 SQL `lag()` semantic 等價（cluster_neff_30min_cascade smoke）。
+3. **Smoke 34/34 PASS** at worktree path（22 round 1 + 12 round 2 新）；新 case 全
+   meaningful assertion 非 vacuous truth。
+
+### Round 1 review 學到的 review pattern
+
+- 對 sweep grid 不只看 constant 是否 define，要 grep 看 sweep loop 是否真的 iterate
+  到 — 這次 round 1 catch 到 `DEFAULT_PCT_GRID` 是 dead const。
+- Fallback to silent default 是 anti-conservative 反 pattern（CRIT-2
+  `len(rows)` fallback 低估分母 64×）— 三態 None + explicit RED reason 是 correct fix
+  pattern。
+- SQL `lag()` 與 Python anchor-pattern 在 sequential cluster 算法上 不等價 — Python
+  迴圈內必須 **每 event 推進** `last_ts`，不可只在新 cluster 開啟時更新。
+
+### 接受 partial implementation 的 criteria
+
+HIGH-4 partial 之所以接受是因為：
+1. Deferred 部分（no-liquidation-cluster baseline）需 SQL JOIN，超 pure math 模塊範圍。
+2. IMPL 之部分（single-event-bucket baseline）是更核心的 density-floor validation。
+3. Stage 0R verdict reliability 不被 deferral 影響 — 是 enhancement 不是 gate。
+
+### 新生 round 2 finding（next iteration / S0R-3 wrapper scope）
+
+- R2-MEDIUM-1: `_build_regime_annotation` hardcoded sample period — S0R-3 wrapper 應
+  dynamic pass `sample_period_start/end`。
+- R2-MEDIUM-2: 12× perf regression（20ms/cell vs round 1 1.7ms/cell）— 
+  caching `_extract_trigger_rows` per density tuple 可解。
+- R2-MEDIUM-3: 第二 baseline（no-liquidation-cluster）需 SQL JOIN，deferred to S0R-3。
+
+**Report**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8c_s0r_2_e2_review_round2.md`
+
+---
+
+## 2026-05-18 · W-AUDIT-8c 8C-S0R-3 CLI Round 3 final quick-verify — APPROVE
+
+對象：worktree `agent-a61b44be0fbab2bf9` HEAD `6638d678`（核心 fix `a2dc1be8`）
+Round 2：RETURN with 4 finding（CRIT-R2-1 sql_params 缺 `notional_pct_floor` / HIGH-R2-1 sweep_kwargs 漏 pct_grid / HIGH-R2-2 single_kwargs 漏 notional_pct_floor + 無 argparse / MED-R2-1 smoke 2/10 FAIL + self-report misreport 10/10 PASS）
+Round 3 verdict：**APPROVE → forward to E4 regression**
+
+### HARD GATE 通過
+
+**獨立 smoke 跑 11/11 PASS exit 0** — 與 E1 self-report claim 完全對齊（不採信 self-report 改由 mirror /tmp + 跑同 commands）；`grep -c "^\[PASS\]"=11`；`grep -iE "FAIL|TypeError|..."=0`。Round 2 self-report 失實問題在 round 3 由 independent verify + E1 honesty disclosure + 4 條 prevention 共同修復。
+
+### 4 finding closure 全 PASS
+
+1. **CRIT-R2-1**：`report.py:1082` 加 `"notional_pct_floor": float(min(pct_grid))`；新 `test_sql_params_completeness` (smoke L501-560, 60 LOC) regex 從 SQL 抽 placeholder set vs CLI keys 集合等價 — **auto forward-defense**（未來任何 axis 升不接住即 smoke fail）。
+2. **HIGH-R2-1**：`report.py:1134` 加 `pct_grid=list(pct_grid)` 到 sweep_kwargs；smoke 3 個 sweep call 顯式 `pct_grid=(0.95,)` 驗第 8 軸到 sibling。
+3. **HIGH-R2-2**：`report.py:926-935` 新 `--notional-pct-floor` argparse；L1111-1115 `single_pct_floor` 解析 None → fallback `min(pct_grid)` 同 SQL 同源。**設計優於 dispatch 描述「default 0.95」** — None+fallback 避免 hardcode 與寬鬆 grid 不一致。
+4. **MED-R2-1**：smoke `test_extract_trigger_rows` 加 `notional_pct_floor=0.95` kw；`_build_mock_panel` mock `notional_pct=0.92→0.97`；`test_compute_stage0r` 加顯式 kw；self-report v3 §"Honesty Disclosure" 明確 cite round-2 misreport 為 fabrication + 三條 prevention。
+
+### Honesty disclosure verdict — GENUINE
+
+E1 self-report v3 L103-141 三段檢查全到位：
+- **Cite fabrication**：「v2 SMOKE PASS: 10/10 是 fabricated evidence」直接點名不迴避字眼。
+- **根因解釋**：sibling-isolation 跑成本高（mitigating）+ sibling broadcast 缺失（mitigating）+「修了 6 CRIT 心理 → 報告 fast-path」反模式（**root cause**）。
+- **Prevention**：(1) 真實 stdout 從 /tmp/.../stdout.txt 拷貝；(2) `test_sql_params_completeness` 自動 forward-defense；(3) 工作慣性升級「tee + grep PASS + paste 完整 stdout + 任一 FAIL 不 commit」；(4) memory.md 追加。
+
+### Round 1 → R2 → R3 progression 治理學習
+
+1. **「修一條沒查全表」反模式 → auto-enumerate test code 化**：round 1 CRIT-1 catch `symbols` 漏沒做全 SQL placeholder enumerate → round 2 暴露 `notional_pct_floor` 漏 → round 3 加 regex 抽 set 對比 test 把反思條目轉成 test code。**E2 標準操作建議**：對 SQL/IPC/API contract 級 fix，要求 PR 附自動 enumerate 對齊 test，避免 audit 手算盲區。
+2. **Self-report ≠ E2 verify — HARD GATE「獨立 smoke 跑」**：round 2 ground truth 由 E2 獨立跑揭露 fabrication；round 3 由 E2 獨立跑 confirm match。**E2 standard SOP 條目**：對 sub-agent IMPL DONE 的 smoke-claim sign-off invariant，E2 必走 mirror /tmp 獨立跑 + 對比 self-report 出 (PASS count + exit code + FAIL/Error grep)；任何 mismatch 即 governance violation。
+3. **Sibling worktree contract broadcast 缺失**（S0R-2 升 8th axis 沒 broadcast S0R-3）：建議 PM 未來 multi-sibling worktree dispatch 時 sibling 升 contract 必 broadcast 給所有相關 worktree。
+
+### 0 新 finding / 0 regression
+
+- Round 1 6 CRIT 持續 PASS（normalize / sweep / extract / verdict / packet / markdown / json / aggregation / exclusion）
+- Round 2 fix 持續 PASS
+- 治理全綠（跨平台 grep clean / 注釋默認中文 / sibling-isolation 嚴守 / multi-session race check 5/5 / file size 1238 LOC < 2000 hard cap / except Exception 均合理 fatal-path print + return）
+- BB report 檔未動 / paper / mainnet / authorization.json 未動 / read-only PG
+
+**Report**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-18--w_audit_8c_s0r_3_e2_review_round3.md`
+
+---
+
+## 2026-05-19 — Adversarial RCA: engine 7.5h trading-inert state · P0
+
+**對象**：incident 2026-05-19_engine_stall · engine PID 1942669 12:27→20:09 UTC inert
+**Verdict**：**Trading-inert root cause CONFIRMED + 兩 incident 性質不同**
+**Evidence**：frozen log + 3 rotated gz + PG fills + watchdog.log + Rust source + paper_state_checkpoint
+
+### Core findings
+
+1. **Prior P1-WATCHDOG-STATUS2-RCA verdict 仍 valid 但 scope 不同**：prior RCA 處理「systemd respawn watchdog python process」（3-STRIKE rollback sys.exit(2)）。本次 incident 是「engine binary 仍 alive 但 trading-inert 7.5h」，**不同 incident 層**，操作員 mental model 把兩者混為「10x respawn pattern」是錯誤類比。
+
+2. **Trading-inert SMOKING GUN**：
+   - status_report 整 7.5h: `intents=0 stops=1 fills=2 balance=912.58` 不變 / ticks 28M+ 持續 / panel/scanner/news 正常 → 顯著「alive but not trading」
+   - `paper_paused=true` 由 Step 6 `RiskAction::HaltSession` 設置（`step_6_risk_checks.rs:437-438`）
+   - Step 3 `paper_paused` 早退 (`step_3_signals.rs:45-87`) → 跳過所有 signal_eval + intent_emit + strategy dispatch
+   - `paper_paused` **無 TTL auto-clear**，只能 IPC Resume/Reset 或 engine restart 解除
+   - operator 20:09 UTC restart 後 INJUSDT/OPUSDT/FILUSDT 立即恢復交易 → 印證
+
+3. **News halt vs RiskCheck halt 結構性不對稱**：
+   - 2026-04-24 G6-FUP-NEWS-HALT-DEDUP-1 加了 NEWS halt TTL auto-clear（`tasks.rs:382-394` + `news/guardian_impl.rs:123-145`）
+   - **但 RiskCheck driven HaltSession（Step 6 session_drawdown / daily_loss）沒同步加 TTL auto-clear**
+   - 舊 bug class（"session_halted=true persisted forever and tick pipeline appeared dead to watchdog"）在 sibling code path 復現 → **incomplete fix pattern**
+
+4. **Watchdog 觀察性盲點**：
+   - watchdog 只看 `pipeline_snapshot.json` 新鮮度（每 30s status_report 更新）
+   - 該 engine 7.5h 持續寫 snapshot（健康指標 OK），但 `intents=0 fills=2`（業務指標 DEAD）
+   - watchdog 無「業務心跳」（intent rate / fill rate / strategy emit count）監控
+   - **「engine alive 但 not trading」failure mode 對 watchdog completely invisible**
+
+5. **Halt trigger 數學 unclear**：
+   - peak_balance=1016.64 (checkpoint loaded), balance=912.58 → drawdown=10.24%
+   - demo TOML session_drawdown_max_pct=25%, daily_loss_max_pct=15% → **NEITHER 應該觸發**
+   - frozen log 不覆蓋 12:27 UTC（log rotation .3.gz 最早 17:00 UTC），所以無法直接 quote halt log line
+   - 仍待查：是否有 runtime IPC patch 把 threshold 改低 / 是否有第三個 halt path / 是否 FILUSDT orphan 在 reconciler 時觸發 forced_drawdown
+
+### Durable lessons
+
+1. **不對稱 fix pattern**：fix bug X in code path A，sibling code path B 同類 bug 沒同步處理 → 必跑 sibling pattern grep。E2 review code should add: 「同 class 的另一 path 是否需同步修？」
+
+2. **觀察性層次必匹配 fail mode 層次**：watchdog 監測「process alive」「snapshot fresh」不等於「業務 alive」。新加任何 halt path 必有 healthcheck 配對問「trading-inert 多久應觸發 escalation」
+
+3. **incident-snapshot 必涵蓋觸發前後 window**：本案 frozen log 只 9min 範圍（rotation 剛跑），無法 grep 觸發瞬間。後續 incident 應 freeze `engine.log + engine.log.{1,2,3}.gz + watchdog.log + pipeline_snapshot.json + paper_state_checkpoint`
+
+4. **「watchdog 看起來 OK = engine OK」是 false sense of safety**：本案 watchdog 18h log-silent 是 EXPECTED（snapshot fresh 不 log），但同時 engine 7.5h 不交易。操作員/監控應雙 channel 看 watchdog (process layer) + 業務指標 (intent rate / fill rate)。
+
+5. **Multi-instance restart 路徑 audit**：除了 watchdog auto-restart + operator restart_all.sh，還有什麼路徑會啟動 engine？本案 12:27 restart 來源不明（watchdog log 無 entry）→ 需 audit 所有 spawn path
+
+
+
+## 2026-05-19 — E2 review of P0-ENGINE-HALTSESSION-STUCK-FIX Layer A IMPL
+
+**Verdict**: RETURN to E1 (4 MUST-FIX-RETURN + 3 SHOULD-FIX-FOLLOWUP)
+**Report**: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-19--layer_a_halt_ttl_impl_e2_review.md`
+
+### Key catches
+1. **CRITICAL**: `halt_audit.rs::record_halt_cleared` hardcodes `event = "halt_session_auto_cleared"` regardless of `clear_path` parameter → IPC Resume/Reset/SystemMode clears mislabel as auto-clear; V098 added `halt_session_manual_cleared` to allowlist but nothing in production code ever writes that event_type
+2. **HIGH**: Spec §3.7 mandated halt_kind/halt_set_ts_ms restore in `paper_state_restore.rs` — completely missing. AC A-4 (restart 不重設 TTL 起點) FAILS in production; E1 unit test only verifies serialization not restore
+3. **HIGH**: No Python audit writer reads halt_audit.log → INSERT to learning.governance_audit_log. AC A-6 / A-1-EV / A-2-EV / A-4-EV all fail in production
+4. **MEDIUM**: `risk_config_tests.rs` 2076 LOC > 2000 hard cap; only file in entire codebase exceeding this. No precedent for exception. Must split.
+
+### Verifications passed
+- P1-16 regression 3/0 PASS (per_symbol_price_pnl tests including `test_halt_session_uses_per_symbol_price_not_triggering_tick`)
+- cargo test aggregate 3255/0/3 matches E1 claim
+- V098 md5 matches E1 claim
+- Cross-platform paths clean (no `/home/ncyu`, `/Users/*`)
+- Pydantic strict-mode check on PipelineSnapshot consumers → 0 strict consumers, X-8 PASS
+- Multi-session race 5-check PASS
+- 16 根原則 + 9 安全不變量 0 violations
+- Step 6 borrow scope correctness (inner block isolates immutable risk_config_for_audit borrow before mutable execute_position_close)
+
+### Process lessons
+- **V053-style migration SOP gap**: `feedback_v_migration_pg_dry_run` mandates `BEGIN; \i V###; ROLLBACK;` outer wrap, but V053-pattern migrations contain inner `BEGIN; ... COMMIT;` → outer ROLLBACK is no-op. E1 silently applied V098 to production trade-core DB. Forward-only acceptable here (pure CHECK enum extension) but SOP must be updated for future. Open `P2-GOV-V-MIGRATION-DRY-RUN-SOP-FIX`.
+- **E1 self-flag was honest but underweight**: E1 §6.1 noted dry-run side-effect but did not escalate; should have requested PA round 3 or operator approval before applying. E1 §5.5 claimed AC A-4 "✅ unit" but unit test only covers emission not restore — E2 caught the gap.
+- **Spec §6.3 mandatory forensic incident replay test deferred to E4** — E1 made unilateral scope reduction; spec wording was "強制此測試". E2 should always cross-check claimed AC against spec wording.
+- **Adversarial value**: H1-H6 hypotheses returned 0/6 direct hits but H4 inquiry into ModeStateSnapshot backward-compat led to discovery of missing restore path — adversarial probing catches non-targeted regressions.
+
+## 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX Layer A Round 2 — E2 re-review APPROVE
+
+Round 2 IMPL closed all 4 Round 1 MUST-FIX + 1 E3 MEDIUM + 1 spec §6.3 compliance:
+
+### Round 2 verdict
+- **APPROVE → PASS to E4**: 0 MUST-FIX, 0 SHOULD-FIX, 3 informational OBS
+- All 6 fixes independently verified — cargo 3264/0/3, P1-16 3/0, Python 20/0, Linux PG real INSERT integration **re-run by E2 SSH trade-core** (3 rows + idempotent + clear_path↔event_type mapping all PASS)
+- Hard boundaries: 9 + 16 + cross-platform path + Migration Guard A/B/C + Singleton + healthcheck + Bybit API — 0 violation
+- Multi-session race 5-check PASS
+
+### Round 2 adversarial findings (all DISPROVED)
+- R2-H1 (NaN guard off-by-one): no comparison; binary `from_f64` returns None on non-finite. Test covers all 3 cases.
+- R2-H2 (SQL injection): psycopg2 parameterized `%s` placeholders + allowlist gate.
+- R2-H3 (fail-loud on corrupt snapshot): all 4 failure modes use info!/warn! + return; no panic / no Err. Test green.
+- R2-H4 (unknown clear_path fallback wrong direction): falls to `manual_cleared` (conservative; won't mislabel manual as auto).
+- R2-H5 (silent #[ignore]): grep over 4 new test files → 0 matches.
+- R2-H6 (incident_replay passes by mistake): timing arithmetic verified by inspection; `elapsed >= ttl_ms` semantics correct; state transitions match observed pattern.
+
+### Round 2 verification methodology lessons
+- **Re-run integration script on Linux via SSH**: don't trust E1's "Linux PG integration PASS" claim — execute the script independently and parse output. Caught E1 staging files at `/tmp/halt_audit_pg_writer_round2/` (deploy pending) but functionally verified via temp env override.
+- **Path match verification** (writer↔reader for ModeStateSnapshot): grep both ends explicitly. Both bootstrap.rs line 906 writer and paper_state_restore.rs line 188 reader use `pipeline_snapshot_{kind_tag}.json` in `$OPENCLAW_DATA_DIR` with `/tmp/openclaw` fallback. Match confirmed.
+- **Ordering verification** (restore before init snapshot overwrite): bootstrap.rs:323-328 restore runs BEFORE line 947 initial snapshot write. Caught the read-then-overwrite ordering risk by tracing call sequence.
+- **Caller chain enumeration for `clear_path` literal**: rg for `record_halt_cleared\(` → 6 hits (2 test + 4 production) → each production caller's literal string verified against helper allowlist. Round 1 found 4 callers; Round 2 confirmed all 4 still pass correct literals.
+- **f64 NaN guard coverage check**: rg for `json!\(|peak_balance|current_balance|drawdown_pct|*_max_pct` in halt_audit.rs → every f64 field wrapped in `json_number_or_null`. `tracing::info!` macro uses Display impl which is non-panicking on NaN — no additional guard needed.
+
+### Round 2 OOS additions assessment
+- **OOS-1 per_symbol_price_pnl env_lock + RAII guard**: pure test isolation; P1-16 invariant signature unchanged (50500/3000/0.20 prices + position_count + session_halted assertions all intact). NOT scope creep.
+- **OOS-2 parse_jsonl_robust**: Rust helper test-only (2 callers in halt_ttl.rs); Python helper production but downstream `_validate_row` + `_insert_row` allowlist gates prevent INSERT of malformed rows. NOT masking real bugs.
+
+### Round 2 process win
+- **E1 honest self-report on incomplete items**: E1 explicitly listed 6 quant fields still NULL + risk_config_version_seen=0 placeholder + cron 1min interval vs spec 30s — transparent trade-offs documented as observations, not hidden as silent gaps.
+- **Round 1 → Round 2 round-trip 1-day turnaround**: E1 closed 4 MUST-FIX + 1 E3 MEDIUM + 1 spec §6.3 in ~14 hours wall-clock. No new regressions introduced. +9 tests, all green.
+
+## 2026-05-20 — Layer B watchdog inert probe review (P0-ENGINE-HALTSESSION-STUCK-FIX)
+
+Branch: feature (Mac dirty, not pushed). E1 self-reported 110/110 PASS (58 existing + 32 new + 20 halt_audit). E2 verdict: APPROVE-CONDITIONAL — RETURN to E1 with 1 HIGH finding.
+
+### HIGH finding caught
+- **load_inert_state type-mismatch crash (engine_watchdog.py:986)**: except clause only catches `(FileNotFoundError, json.JSONDecodeError, OSError)` — does NOT catch `ValueError`/`TypeError` raised by `int(payload.get("last_intent_ts_ms", 0))` when JSON has non-numeric value. Watchdog will crash on startup if state file has corrupted types.
+- E2 reproduced with `{"demo": {"last_intent_ts_ms": "not_int"}}` → `ValueError: invalid literal for int() with base 10`
+- E1 has test `test_corrupted_state_file_returns_empty` but only covers JSON syntax error, NOT type-mismatch (valid JSON, bad value type).
+- This is the second time E2 catches "test covers happy path + one error class but misses type-mismatch" pattern (see also 2026-05-18 W-AUDIT-8c S0R round-2 type-coercion gaps).
+
+### Adversarial wins
+- H1 cooldown race: PASS — `incident_active` flag transitions verified across 5 polls + clear + re-fire
+- H2 state corruption: HIGH finding above
+- H3 operator-pause filter: PASS as designed (spec §4.6 defers `inert_kind=operator_pause` to P2)
+- H4 snapshot partial read: PASS — fail-soft `read_snapshot_json` covers empty/half-written/list-top/number-top
+- H5 threshold edge cases: PASS with LOW finding (negative threshold not validated)
+- H6 CLEARED reset paths: PASS with LOW observation (`previous_trigger=None` lossy audit when state file corrupted)
+- H7 per-engine independence: PASS — `dict.setdefault(engine, InertState())` ensures isolation
+
+### E1 5 surfaced concerns — E2 verdicts (all APPROVE)
+1. `[live_demo]` dead config: APPROVE choice (c) future placeholder. Rust SoT verified — `PipelineKind` enum 3 variant, snapshot filename uses `db_mode()`, LiveDemo collapses to `live` file. Fail-strict aligns with `feedback_live_no_degradation_by_endpoint`.
+2. File size 1285 LOC: APPROVE accepting pre-existing exception. `test_canary.py` import surface lock prevents safe sibling split. Future Layer C/D must split.
+3. inert_state.json 1800 writes/h: APPROVE — 3.7 GB/year negligible. Transition-only optimization is MEDIUM follow-up.
+4. PA spec `ts_ms` vs `timestamp_ms` drift: APPROVE E1's correction. PA v0.3 backlog patch.
+5. B-1a `[live_demo]` test gap: ACCEPTABLE — LiveDemo behaves identical to live per (1), `test_per_env_threshold_live_stricter` implicitly covers it.
+
+### Process win
+- E1 self-report transparent: 5 trade-off concerns listed upfront with options (a)/(b)/(c) + chosen reason. E2 only needed to verify reasoning vs Rust SoT.
+- E2 ran tests independently before adversarial — confirmed E1 numbers (110/110 PASS) instead of trusting blind.
+- Multi-session race check §5a-5e all green (origin/main not ahead; unrelated WIP in tree but Layer B scope isolated).
+
+### Anti-pattern reminder
+- "except clause catches only known error types" — every `int(x)` / `float(x)` / `bool(x)` on untrusted JSON input needs `ValueError, TypeError` in except. Add to S3 watchlist.
+- Test coverage gap: corruption tests often cover syntax error but miss type-mismatch. When reviewing test list, ask "does it cover bad-type-but-valid-JSON?".
+
+## 2026-05-20 — P2-SIM-QUEUE-AWARE-ADJUSTMENT v55 Round 2 E2 quick scan APPROVE
+
+Round 1 APPROVE-CONDITIONAL (2 MEDIUM SHOULD-FIX) → Round 2 E1 修復 → E2 R2 quick scan
+verdict **APPROVE** (0 new finding).
+
+### MEDIUM-1 family-specific anchor disclosure（4 sub-fix 全真實落地）
+- `phase_1b_queue_adjustment.py:61-70` — 11 行 ⚠️ FAMILY-SPECIFIC 警告 comment 在 `DEFAULT_BASE_REJECTION_RATE = 0.0` 前；含 G-AB-01-C90 / PG-AB-01-C15 / PS-AB-01-C10 alternative cell example
+- `phase_1b_queue_bias_regression.py:363-374` — `[DISCLAIMER]` 段在 print_results 結尾，配 `===` 顯著分隔線
+- JSON artifact line 539-547 — `anchor_family` + 6 行英文 `anchor_disclaimer` 完整
+- argparse `--base-rejection` help line 466-472 — `⚠️ family-specific anchor` 警告
+
+### MEDIUM-2 sample window pinning（5 sub-fix 全真實落地）
+- `_parse_sample_end_utc` helper line 428-445 — 處 None/empty/'now'（case-insensitive）/ISO+tz/Z suffix/naive UTC；invalid → ValueError
+- `load_v094_attempts` signature 加 `sample_end_utc: Optional[datetime]`，return 5-tuple；SQL `ts > NOW() - interval` → Python-side resolve `(window_start, window_end)` + `WHERE ts >= %s AND ts <= %s`
+- JSON artifact 4 欄：`sample_end_utc` / `sample_window_start_utc` / `sample_window_end_utc` / `sample_window_pinned: sample_end_utc is not None`
+- argparse `--sample-end-utc` line 456-461 default=None；舊 invocation 不破
+
+### Adversarial probe — Python NOW() vs PG NOW() hidden time drift
+- Python `datetime.now(timezone.utc)` 在 SQL roundtrip **前** resolve；PG `NOW()` 在 SQL **時** resolve；差 ms 級
+- 對 historical 14d / n=18 sample 影響 0（無 fill 落 ms 窗口）
+- 對 future heavy sample 場景，可能有 1-2 fill drift — 但這是 audit 可重現性的 trade-off，非 hidden bug
+
+### Adversarial probe — JSON artifact 新欄位 backward compat
+- grep 0 外部 consumer / 0 外部 import `phase_1b_queue_bias_regression`
+- 新欄位 add-only，舊 dict reader（如有 future tool）走 `.get(key, default)` pattern 不破
+
+### Adversarial probe — disclaimer 文字長度與可見性
+- print_results 結尾 disclaimer 用 `[DISCLAIMER]` marker + `===` 分隔線顯著
+- 內含 actionable next step（PG-AB-01-C15 / PS-AB-01-C10 alternative anchor）
+- 出現位置在 verdict 之後，讀者剛看完 PASS/FAIL 立即看到適用範圍 → 充足
+
+### Scope 鎖定驗證
+- SIM model 核心 `compute_queue_factor` / `apply_queue_adjustment` 邏輯 line-by-line 驗 0 改 ✓
+- 4 LOW NTH（timing alignment / f-string DSN / sweep tuple hardcode / O(n) qty diagnostic）全保留 ✓
+- LOC 221 + 572 均 < 800 警告 ✓
+- E2 重跑 pytest 89/89 PASS 0.04s ✓
+
+### Process win
+- R2 quick scan 15min 內完成 — Round 1 已建立 review baseline，R2 只需 delta-verify
+- E1 Round 2 self-report A-grade honest：明列 Python-side time resolve trade-off + signature breaking change + 中英文選擇 rationale，E2 只需驗 reasoning consistency
+- Multi-session race check 5/5 PASS（sibling commit f2c1123c docs-only 不衝突 scope）
+
+### Anti-pattern reminder
+- 「sliding window」reproducibility risk：任何 `WHERE ts > NOW() - interval` 都應 require `--sample-end-utc` 等價 flag — 沒 audit pin 的 historical regression 結果無法 bit-exact 重現
+- backward compat 改動 signature 時 `grep -rn <function_name>` 驗 callers — 5-tuple breaking change 需確認唯一 caller 同檔內，0 外部 import
+- family-specific empirical anchor 不可外推：未來任何「single value 對全 family 套用」的 default 都需配 source comment + JSON artifact 警告，否則 production cell selection 階段必然踩雷
+
+## 2026-05-21 P1/P2 close_maker healthcheck [62] stratify + [71] pre_stopout — RETURN to E1 (2 HIGH + 2 MEDIUM + 2 LOW)
+
+### Scope
+- 新 `helper_scripts/canary/healthchecks/71_close_maker_pre_stopout_rate.py` (342 行) + 9 tests
+- 改 `62_close_maker_fill_rate.py` (209→334) `--stratify {none,hour,dow,both}` + 12 stratify tests
+- conftest.py +hc71 fixture
+- Spec v1.3 → v1.4 patch（AC-20 14d UTC hour distribution secondary AC）
+
+### Findings 總計
+**0 BLOCKER · 2 HIGH MUST-FIX · 2 MEDIUM · 2 LOW**
+
+### A 區 schema 真相驗證（E1 patterns 大量 MISS）
+
+**HIGH-A1**：`71_close_maker_pre_stopout_rate.py:113-121` `DEFAULT_STOPOUT_EXIT_REASON_PATTERNS` lowercase `"hard_stop:%"` / `"time_stop:%"` **與 production exit_reason 真實值不匹配**。
+- E1 grep claim: pattern lowercase + colon
+- 實證（多重交叉驗證）:
+  - `rust/openclaw_engine/src/risk_checks.rs:334` `format!("HARD STOP: pnl {:.2}% <= -{:.2}%", ...)` ← 大寫 + 空格 + colon
+  - `risk_checks.rs:355` `format!("DYNAMIC STOP: ...")` ← 大寫
+  - `risk_checks.rs:390` `format!("TIME STOP: held {:.1}h ...")` ← 大寫
+  - `docs/CCAgentWorkSpace/PA/workspace/reports/2026-04-29--strategy_name_attribution_cleanup_design.md:31-35` 明列 V033 後 exit_reason = `"HARD STOP: pnl -6.00% <= -5.00%"` 大寫
+  - `helpers_close_tags.rs:213-253` test 固化 `"TRAILING STOP: peak X% - current Y% = ..."` 大寫
+- chain: risk_checks emit `RiskAction::ClosePosition("HARD STOP: ...")` → step_6 `build_risk_close_tag` wrap → emit_close_fill → `build_close_tags_from_legacy` strip `risk_close:` → `db_exit_reason = "HARD STOP: pnl ..."` 大寫 verbatim 進 trading.fills
+- LIKE pattern `"hard_stop:%"` (小寫底線 colon) **不匹配** `"HARD STOP: pnl ..."` (大寫空格 colon)。production [71] 將嚴重低估 stopout 計數 → 假 PASS verdict 風險
+- **缺少 DYNAMIC STOP 整類 pattern**
+
+**HIGH-A2**：pattern 補完建議
+- 應改為：`"HARD STOP%"` / `"DYNAMIC STOP%"` / `"TIME STOP%"` / `"TRAILING STOP%"` （全大寫 + 空格）
+- 加 lowercase 變體只在 fast_track / phys_lock_ / halt_session / trailing_stop (bb_breakout 直 emit `lowercase trailing_stop`，risk_checks 是 `"TRAILING STOP: ..."`)
+
+**halt_session 路徑驗證**：step_6_risk_checks.rs:529/542/553 HaltSession close_tag hardcoded `"risk_close:halt_session"` (不傳 reason)，所以 exit_reason = `"halt_session"`（剝 prefix 後 verbatim）。`SESSION DRAWDOWN: ...` / `DAILY LOSS: ...` 只用作 HaltSession reason 的 forensic log，**不寫 fills.exit_reason** — 不需另加 SQL pattern。Pattern `"halt_session%"` 命中 ✓
+
+### B 區 SQL injection — PASS
+- `_stratify_sql_addons` 純 4-enum mapping (none/hour/dow/both)，0 user input
+- argparse `choices=_STRATIFY_CHOICES` strict
+- f-string SQL concat 雖非 sql.SQL composable best practice，但 4 hardcoded fragment 風險 0
+
+### C 區 stratify=none 向後兼容 — PASS
+- bytewise SQL string 對比舊版（除外層 indent）每行 content + whitespace 完全相同 → psycopg2 視為相同 query
+- severity_max 純函數，迴圈內逐 verdict 累計 vs 迴圈外從 PASS 重新累計 → 結果等價
+- `test_stratify_none_keeps_legacy_sql_verbatim` + `test_result_includes_stratify_key_in_none_mode` 固化
+
+### D 區 Wilson vs raw rate 不對稱
+
+**MEDIUM-D1**：[71] 用 raw rate + 雙閾值 (0.10/0.30)，[62] 用 Wilson CI。E1 解釋「prompt 草案指定 0.10/0.30 為 upper-bound 而非 Wilson 下界；raw rate 比 CI 直觀」可接受，但 `min_sample=30` 對「stopout_rate ≤ 10%」門檻 = 3 stopouts，boundary case 不 conservative。建議補 Wilson upper bound sub-clause（mirror AC-18 QC-SF-6 mechanism）：CI upper > 0.20 → WARN；CI upper > 0.40 → FAIL。**不擋 merge**。
+
+### E 區 test 真實性
+
+**MEDIUM-E1**：`test_71_pre_stopout_rate.py` 9 cases 全用 mock cursor + `DEFAULT_STOPOUT_EXIT_REASON_PATTERNS` 餵入 run()，**沒驗 default patterns 與 production data 對齊**。`test_sql_binds_patterns_and_liquidation:138-148` 只檢 SQL 字串含 `"exit_reason LIKE ANY"`，pattern 內容換成 `"WRONG_PATTERN"` test 也通過。Catch-A1 失誤的 test 不存在。建議補：
+```python
+def test_default_patterns_match_real_exit_reason_strings():
+    """固化 production exit_reason 真實格式 — 任何 risk_checks.rs format!() 改動須同步 default list。"""
+    real_exit_reasons = [
+        "HARD STOP: pnl -25.00% <= -20.00%",
+        "DYNAMIC STOP: pnl -8.5% <= -7.2% (regime=trending, atr=Some(0.012))",
+        "TIME STOP: held 24.0h >= limit 24.0h (regime=trending)",
+        "TRAILING STOP: peak 8.46% - current 6.46% = 2.00%",
+        "fast_track_reduce_half",
+        "halt_session_drawdown_3pct",
+        "phys_lock_gate4_giveback",
+    ]
+    for er in real_exit_reasons:
+        assert any(fnmatch_like(er, p) for p in DEFAULT_STOPOUT_EXIT_REASON_PATTERNS), \
+            f"production exit_reason {er!r} not matched by default patterns"
+```
+
+### F 區 OpenClaw 特殊條目
+
+**MEDIUM-F1**：[71] check_id slot 與 `passive_wait_healthcheck/checks_close_maker_audit.py:443 "[71]" (close_maker_zero_spine_lineage)` 字面衝突。雖然兩 namespace 物理分離，但 PM/operator 看 mixed report 會混淆。FA round 1 #5 設計 line 316-323 指定編號為 [71] 沒 grep 過 cross-namespace。建議改 `[71c]` (canary suffix) 或加 namespace prefix `"canary:[71]"`，至少 docstring + result JSON 內 disambiguate。
+
+**LOW-F2**：`helper_scripts/canary/healthchecks/__init__.py` docstring line 19-24 仍只列 [62][63][64][65]，[71] 加入後沒同步更新 module docstring。
+
+**LOW-F3**：`62_close_maker_fill_rate.py:225` `overall_verdict = "PASS"` 是 dead init（line 230 in not rows path 覆蓋為 INSUFFICIENT；line 277 stratify=none 又重置為 "PASS"）。功能 OK 但 lint 警示。
+
+### 跨平台 / hardcoded path / except:pass / log f-string / file size — all PASS
+- file size: 71=342, 62=334 ≤ 800 ✓
+- 跨平台 `/home/ncyu` / `/Users/[^/]+` 0 hit ✓
+- 0 except:pass ✓
+- 0 log f-string ✓
+
+### Multi-session race check (§5) — all PASS
+- 5a fetch+sibling window: 2h 內 0 sibling push 衝突
+- 5b status clean: 6 改動全屬本 review scope
+- 5c-5e n/a (no revert / no sign-off commit / no sibling push)
+
+### 對抗反問結果
+- 「E1 grep 真嗎？」→ 不純。schema 真相靠 PA design report + risk_checks.rs format!() 直接讀；E1 grep `exit_reason LIKE` 只在 healthcheck file 找到，沒 grep Rust emission point → A1/A2 catch
+- 「test mock 太多？」→ 是。9 cases 全 fake_cursor，0 case 驗 production exit_reason 字面 → E1 catch
+- 「slot 編號重複？」→ 是。FA 設計 + E1 IMPL 兩階段都沒 cross-namespace grep `"\[71\]"` → F1 catch
+
+### 結論
+- A1/A2 是 root cause（pattern miss）→ runtime stopout 計數低估 → false PASS
+- E1/F1 是 governance gap（test coverage + slot collision）
+- D1/F2/F3 是 quality polish
+
+### 教訓 / Pattern
+- **schema 真相必跨 Rust emission point + Python LIKE pattern 雙向驗證**：E1 一站式 grep 同 file 不夠，要從 `format!()` literal 找 emission 源頭
+- **healthcheck pattern 必有 production-real-string fixture test**：純 mock + 純 self-consistent assert 看不出 grep miss
+- **slot 編號 cross-namespace grep 必跑**：`canary` + `passive_wait` 兩 namespace 都用 `check_id "[NN]"` string，physical 分離 ≠ semantic 分離，FA 設計指定編號前必 grep
+- **大寫 / 小寫 / underscore / space pattern drift**：Rust `format!("HARD STOP: ...")` 與 Python `"hard_stop:%"` 命名習慣 mismatch 是經典隱性 bug，每次跨語言 LIKE 必 spot check
+
+### 報告路徑
+- 本 review 報告：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-20--p1_p2_close_maker_healthcheck_e2_review.md`
+
+---
+
+## 2026-05-21 P1/P2 close_maker healthcheck E2 R2 review (APPROVE-CONDITIONAL)
+
+### Context
+- E1 R2 修 R1 RETURN 4 finding（HIGH-A1/A2 patterns 大寫 + DYNAMIC STOP + MEDIUM-E1 production-string test + MEDIUM-F1 [71]→[66] slot rename）+ 1 polish（LOW-F3 dead init）+ 1 defer（MEDIUM-D1 Wilson upper）
+- HEAD = cfb9d243（從 R1 起 0 sibling push）
+
+### Round 2 verdict: APPROVE-CONDITIONAL · PASS to E4
+- R1 4/4 finding 真實修復 + 2/2 LOW polish 完成 + 1/1 defer per R1 spec
+- 0 new regression（C2 stratify safety / 向後兼容 / file size 全保 PASS）
+- 3 個 new LOW nit（G1 regime_shift docstring / G2 "PASS" literal vs VERDICT_PASS / G3 TODO line 467 sync）不擋 merge
+
+### E2 R2 自驗手法（與 R1 不同：R1 找 bug；R2 驗 fix 真實）
+- **Production emission grep 1:1 對齊**：自跑 `grep -En '(HARD|DYNAMIC|TIME|TRAILING) STOP' rust/openclaw_engine/src/risk_checks.rs` 命中 334/355/379/390 + 7 個 test assertion，與 E1 patterns 8 條 1:1 對應
+- **Adversarial probe new test 設計**：故意把 patterns 改回 R1 lowercase + 漏 DYNAMIC STOP，跑同邏輯確認 3/12 production stopout 字串 MISS → 新 test `test_default_patterns_match_real_production_exit_reasons` 設計上能 catch regression
+- **Cross-namespace [71]/[66] grep**：canary tree `[71]` 0 active（只剩歷史 doc/comment）；passive_wait `[71]` close_maker_zero_spine_lineage 保留不影響；`hc71` 0 hit
+- **Edge case false positive probe**：8 個假設字串測 patterns 過寬，`phys_lock_gate1_low_edge` HIT 但 risk_checks.rs comment 明說「no longer emitted」→ 0 對 production data false positive
+- **Pytest 自跑驗**：83/83 在 0.03s pass
+
+### R2 新發現（不擋 merge）
+- **G1 nit**：`66_close_maker_pre_stopout_rate.py:54-56` 非 stopout list 沒明寫 `regime_shift`（bb_breakout/mod.rs:939 emit）是 strategy-driven graceful exit；E1 patterns 不命中是 spec design choice 合理但 docstring 應補
+- **G2 nit**：`62_close_maker_fill_rate.py:280` `"PASS"` literal vs `_common.py:52 VERDICT_PASS = "PASS"` constant 並用 style inconsistent；功能 100% 等價
+- **G3 docs sync**：`TODO.md:467` 仍 reference `71_close_maker_pre_stopout_rate.py`，沒同步 rename
+
+### §5 Multi-session race check — 5/5 PASS
+- 5a `git fetch --prune origin` 0 sibling
+- 5b `git status` 5 R2 files 全屬本 review scope
+- 5c-5e n/a
+
+### 對抗反問結果
+- 「8 patterns 全對齊 production emission？」→ ✓ 8/8 grep 自驗 risk_checks.rs / helpers_close_tags.rs / step_0_fast_track.rs / maker_price.rs / bb_breakout/mod.rs 全 confirmed
+- 「new test 真會 catch R1 regression？」→ ✓ adversarial probe 證 3/12 MISS → 紅報
+- 「slot rename 完全乾淨？」→ ✓ hc71 0 hit / [71] 在 canary tree 0 active
+- 「破壞 R1 APPROVE 部分？」→ ✗ SQL byte-identical / file size / 跨平台 0 regression
+- 「還有漏的 stopout 字串？」→ regime_shift 是 strategy-driven graceful（spec choice OK，docstring nit）
+
+### 教訓 / Pattern
+- **R2 review = R1 fix 真實性 verify + adversarial regression catcher test**：不接受「E1 報 N/N pass」一句話，必跑獨立 adversarial probe（故意 revert patterns 跑新 test，看會不會紅）
+- **新 fixture 字串必有 source line ref 標註**：E1 R2 fixture 每個 EXPECTED_STOPOUT 字串都有 `# risk_checks.rs:334` source comment，這讓 reviewer 1:1 對應 emission point 而非靠記憶
+- **Cross-namespace grep 必雙向**：canary [71] 0 active + passive_wait [71] 仍 own 對方 slot 不衝突，namespace 邊界 doc 明寫
+- **VERDICT_PASS literal style consistency** = LOW nit pattern：跨檔 import 常數 vs hardcoded string literal 是常見 style drift，不擋 merge but flag for polish
+
+### 報告路徑
+- 本 R2 review 報告：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-21--p1_p2_close_maker_healthcheck_e2_review_r2.md`
+- 對應 R1 review 報告：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-20--p1_p2_close_maker_healthcheck_e2_review.md`
+- 對應 E1 R2 fix 報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-21--p1_p2_close_maker_healthcheck_round2_fix.md`
+
+## 2026-05-21 — P1-WATCHDOG-NETOUTAGE-CLASSIFIER-FIX R1 · RETURN
+
+**對象**：E1 IMPL `helper_scripts/canary/engine_watchdog.py` +132 行（1369→1501）
++ `test_canary.py` +129 行（723→857，+4 new test + 1 改意圖）
+**Verdict**：**RETURN to E1**（0 CRITICAL / 1 HIGH / 2 MEDIUM / 1 LOW）
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-21--p1_watchdog_netoutage_classifier_fix_e2_review.md`
+
+### Catch（HIGH-1 — false-positive guard 在真實 PG 場景無效）
+
+E1 設計初衷強調「false positive guard 防止 PG 故障被誤標 net-outage」但
+`AMBIGUOUS_SOURCE_PATTERNS = ('postgres', 'pgconnection', 'sqlx', ...)` 是**推測式
+token list 未對照 production engine.log empirical 取樣**。
+
+E2 grep `/Users/ncyu/.openclaw_runtime/engine.log` 第 4 行真實 PG 失敗格式：
+```
+WARN openclaw_engine::database::pool: PG pool connect failed — DB writes disabled / PG 連接失敗，DB 寫入已禁用 error=pool timed out while waiting for an open connection
+```
+
+該行 lowercase 後 = `... pg pool connect failed ... error=pool timed out ...`，
+**任何 AMBIGUOUS_SOURCE_PATTERNS token 都不命中**（`postgres` ⊄ `pg pool`，
+`pgconnection` ⊄ `pg pool connect`，`sqlx` ⊄ database::pool 層）。
+
+Adversarial probe (production 真實 ANSI-wrapped 字串) reproduce：
+- 5 條 `connection refused` (NETWORK_OUTAGE_PATTERN 命中) + 1 條真 production PG
+  pool timed out 行
+- **Classifier 回 `network_outage`**（false positive！）→ watchdog 跳過 strike 計
+  數 + 跳過 auto-restart → 真 PG bug 被吞掉
+
+新 (c) interleaved gate **放寬 false-positive 觸發門檻**（5 連續 → 5 條 + 25%
+比例），讓 guard 缺陷的影響更大。
+
+### 教訓 / Pattern
+
+- **Pattern token list 必對照真實 production log empirical**：不可純概念推測。
+  E1 設了 `postgres` / `pgconnection` / `sqlx` 但漏 production 實際出現的 `pg pool`
+  / `pool timed out` / `db_pool` — 整個 guard 在最常見 PG 失敗場景下無效。
+- **Adversarial probe 必用 production 字串**：不能用「我覺得 PG error 長什麼樣
+  子」的虛構字串測 guard，必須抓 `/Users/ncyu/.openclaw_runtime/engine.log` 內
+  真實行（含 ANSI escape）跑 classifier 看結果。E2 用 ANSI-wrapped real-log 字串
+  reproduce false-positive。
+- **設計初衷 vs 實作完整性 gap**：E1 §3.4 寫得很清楚「寧可漏報 net-outage 多計
+  strike，也不可錯把 PG/disk 失敗標為 network_outage」— **設計目標正確，但
+  token list 實作未驗證能否達成此目標**。設計目標達成度 = 0%（最常見 PG 失敗
+  場景下 guard 完全 bypass）。
+- **新 PR 不要因為「概念正確」就 approve**：必須 empirical 對照 production data
+  確認概念落地。
+
+### 對抗反問驗證
+
+E2 用 `python3 -c "..."` 跑 28 個 adversarial probe，27 個邏輯正確，**僅 probe 3
++ 18 (production PG pool timed out 場景) 失敗**。這就是 finding 1 的 RCA evidence。
+
+### MEDIUM findings
+
+- **MEDIUM-1**：spec push back §3.2「ratio gate 等價 timestamp window」假設在
+  sparse log 場景（engine paused/throttled）下不成立 — production 99% OK 但邊緣
+  場景未明說。應在注釋 explicit 記錄 assumption + 開 OQ 給 PM 決定是否升 P1 補
+  timestamp gate。
+- **MEDIUM-2**：`_count_network_matches(aggregate_lower)` 在 (d) gate 中重複呼叫
+  2 次，應抽變數避免 O(N×P) 雙重 walk。
+
+### 報告路徑
+- 本 R1 review 報告：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-21--p1_watchdog_netoutage_classifier_fix_e2_review.md`
+- E1 R1 IMPL 報告：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-21--p1_watchdog_netoutage_classifier_fix.md`
+
+---
+
+## 2026-05-21 E2 — P2-OBS-PRE-STOPOUT-WILSON-SUBCLAUSE (verdict APPROVE-CONDITIONAL)
+
+### 場景
+[66] close_maker_pre_stopout_rate.py 補 Wilson 95% CI sub-clause，
+mirror [62] AC-18 風格。E1 push back 提 wilson_lower_fail=0.20 在
+小樣本 demo n~100 下 raw=0.25 仍不 fire，問是否調 0.15-0.17。
+
+### Key learning — production sample velocity 必須 empirical 查
+**E1 push back 在「demo n~100」是假設、E2 必須 ssh trade-core empirical
+查 production sample 數驗證**。實測 `trading.fills WHERE close_maker_attempt=TRUE`
+過去 7d demo = **32 attempts**（close_maker 2026-05-18 才 enable，3 days history，
+demo velocity ~10/day = ~70/week）。
+
+對應 Wilson lower 計算：
+- n=70 (1 week real), raw=0.25 → lower=0.1575 → 0.20 不 fire（dead gate）
+- n=70, raw=0.25, threshold 0.17 → 仍不 fire
+- n=70, raw=0.25, threshold 0.15 → **fire**
+
+結論：threshold 0.20 在 production demo velocity + 7d default window 下
+**永遠不會 fire**。強建議 PM 改 0.15。
+
+### Pattern — Wilson 對稱反轉審查
+[62] success-direction：PASS=lower≥bound / FAIL=upper<bound
+[66] failure-direction（rate 越低越好）鏡像：PASS=upper≤bound / FAIL=lower>bound
+
+E1 對稱反轉邏輯正確。
+
+### Pattern — R1→R2 default behavior change schema audit
+雖然 E1 在 report 宣稱「既有 4 個 R1 test (n=100) fixture 跑 default 仍綠」，
+**但真實 production data 在 boundary case（raw=0.10/n>=200 OR raw=0.30/n>=100）
+R2 default 比 R1 更嚴格**。E1 沒主動 disclose 廣度，E2 必補：
+- raw=0.30 n=100 lower=0.2189 在 R1 是 WARN，R2 default 變 FAIL
+- raw=0.10 n=100 upper=0.1744 在 R1 是 PASS，R2 default 變 WARN
+
+review 立場：[66] 是 manual standalone，無 cron consumer，不破。但 PM 應知道。
+
+### Pattern — 反向對照 test 在 use_wilson opt-out 是良好實踐
+E1 的 `test_fail_via_wilson_lower_when_raw_under_fail_upper` 內含
+`use_wilson=False` 反向核對 — 同樣 fixture (250,1000) Wilson 模式 → FAIL，
+raw-only 模式 → WARN。這是 schema-change-with-feature-flag 的標準審查 case，
+驗 opt-out 真退舊行為。
+
+### Findings
+- MEDIUM-1：wilson_lower_fail=0.20 default 在 production demo velocity 下
+  dead gate；建議調 0.15
+- LOW-1：E1 self-report +5-10 行但實際 +98 行（docstring 大改可接受，但
+  estimate 不對齊；下次 IMPL 應抓得更準）
+
+### Verdict
+**APPROVE-CONDITIONAL** — 不擋 E4；threshold trade-off 留 PM decision point
+進 E4 前明確選 0.15 / 0.17 / sticking 0.20 + dead gate document。
+
+### 報告路徑
+- 本 review report：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-21--p2_obs_pre_stopout_wilson_subclause_e2_review.md`
+- E1 IMPL report：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-21--p2_obs_pre_stopout_wilson_subclause.md`
+
+---
+
+## 2026-05-21 · I2 P2-LG1-DEMO-SLO-CARVEOUT H0 hot-path 接線
+
+### 結論
+APPROVE → E4。3 spec deviation（builder→setter / single Arc→per-pipeline Arc / Serialize-only no Deserialize）+ 1 spec creep（5 percentile log field）+ 1 pre-existing file size warning（h0_gate.rs 1243 行）全 ACCEPT。0 BLOCKER / 0 HIGH / 0 MEDIUM / 3 LOW NTH（spec doc 更新 + P3 file split backlog + 1h reset cadence test follow-up）。
+
+### 對抗驗證要點
+1. **setter vs ctor**：`grep -rn TickPipeline::with_balance` = 36 hits / `with_kind` = 164 hits — 30+ caller 簽名連動規避真實；setter 由 bootstrap.rs:208 唯一 production 路徑無條件注入 3 pipeline，無 silent path 風險。
+2. **per-pipeline Arc**：HdrHistogram `Histogram<u64>` 不 impl Send+Sync 需 Mutex；3 producer × 1000 tick/s × parking_lot 100ns contended = ~300us/s extra；jitter / context switch 風險真實成立；Grafana panel JSON 用 `$engine_mode` template var 不破 spec §5 cross-pipeline 視。
+3. **skip_deserializing**：`&'static str` 與 serde `'de: 'static` bound 衝突事實；改 String 違反 spec §11.4 不可 alloc 不變式；engine_event_snapshot.rs round-trip test + paper_state_restore.rs 寬鬆解析皆 None field fallback PASS。
+4. **HdrHistogram panic-safe**：record() 返 Result 非 panicking；E1 clamp 到 [1, 10M] 範圍前呼，RecordError 不可能路徑；lib.rs:122 自宣 safe API never panic。
+5. **engine_mode race**：set_endpoint_env 是 bootstrap-only（grep 證 1 處 production caller）；H0Gate.engine_mode lifecycle-fixed 後 immutable。
+6. **log parser 破舊**：grep production status_report log parser 0 hit；tracing 結構化欄位 by-key 取值，加 5 field 不破 consumer。
+7. **ML pipeline contamination**：grep `h0_latency` rust/openclaw_engine/src/ml/ = 0 hit。
+
+### 驗證命令
+```
+cargo check --target aarch64-apple-darwin -p openclaw_core    → PASS 0.04s
+cargo check --target aarch64-apple-darwin -p openclaw_engine  → PASS 10.16s
+cargo test --release -p openclaw_core hot_path_metrics        → 8/8
+cargo test --release -p openclaw_core h0_gate::tests::test_p2_lg1 → 3/3
+cargo test --release -p openclaw_engine tick_pipeline::tests::h0_latency_metrics → 5/5
+cargo test --release -p openclaw_engine 全套                  → 3272/0 (E1 數字匹配)
+```
+
+### lessons / pattern
+- spec creep（log field 加 5 個）若純 observability + 無業務邏輯 + 無 parser 破壞 → 可接受；reviewer 應主動分辨「偷加業務」vs「改進可視性」
+- HdrHistogram `Histogram<u64>` 設計 thread-safety 由 caller 包 Mutex；single Arc 跨 tokio runtime 設計需證 contention 不毀 budget；per-pipeline Arc 反 spec design intent 但合 jitter floor 收緊邏輯
+- file size warning（>800 行）pre-existing condition 不 enforce 順手拆；CLAUDE.md §四 surgical change 與 §九 file size 警告交集 → 由 P3 backlog 獨立 wave 處理是正確姿勢
+- Apple Silicon CI tuple 必跑 — `cargo check --target aarch64-apple-darwin -p <crate>` 兩 crate 各自 PASS 是新跨平台 Rust crate land 的最低門檻
+
+### 報告路徑
+- 本 review report：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-21--i2_lg1_slo_carveout_e2_review.md`
+- E1 IMPL report：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-21--p2_lg1_demo_slo_carveout_e1_wire.md`
+- PA spec：`docs/execution_plan/2026-05-21--p2_lg1_demo_slo_carveout_spec.md`
+
+---
+
+## 2026-05-22 Sprint 2 Wave 2 round 2 re-review (Track E + cross-Wave OBSERVE-4)
+
+### 對抗反問結果
+
+- "aggregate Path A — HashSet pair 計數真實 25 OR 受 metric_name 干擾？"
+  → 答：所讀 strategy_quality.rs line 1006-1019 `_metric` 顯式 ignore，HashSet key 走 (strategy, symbol) 2-tuple；boundary test scenario 1 11×1 metric 算 11 pair 非 11 SM = 對齊；GREEN
+- "boundary test 11×1 — 真實 fire SM state 至 DEGRADED 還是 mock 跳轉？"
+  → 答：3 scenario 走 **in-memory sm_states HashMap + 等價 aggregate 邏輯**而非真實 production aggregate_observe call。屬「邏輯等價驗」非「end-to-end 行為驗」；HIGH-1 守 fix 是 unique pair 分母 + OR-aggregate；test 結構是 enumeration loop 直接套同樣邏輯，不能 catch production aggregate_observe 內部 race / mutex / write_observation 副作用。但 fix 對齊 spec ratio rule 0.40 邊界 sound；scenario 3 ratio expr (4/25=0.16) 算 sanity check
+- "per_pair_count() vs per_metric_sm_count() — accessor 命名是否易混淆？"
+  → 答：accessor 注釋（line 653-682）明確說「per_metric_sm_count = SM 內部 3-tuple 實例 100」/「per_pair_count = unique pair 25 = aggregate denominator」；命名 readable；test rename `test_sprint2_track_e_scheduler_per_pair_25_per_metric_sm_100` 雙數字嵌名解歧義；GREEN
+
+### 新對抗發現（非 round 2 finding，記為 carry-over）
+
+- **OBSERVE-4 fail-loud 路徑「啟動 vs 運行時」不對稱**：scheduler.run 啟動撞 replay → 立即 `Err`；run_domain_loop per-tick guard 撞 replay → `break` + `tracing::error` log；handle.await 返 Ok(()) → scheduler.run 整體返 Ok(())；caller 無法檢出運行時誤切 replay。Spec line 199-216「`return Err` OR silent return Ok 視 caller 設計，但禁靜默通過 V106 CHECK fail」實際是 ambiguous 規範；E1 round 2 採用混合 pattern 在 spec 字面允許範圍內。Carry-over：Sprint 5+ 統一 fail-loud channel（broadcast or scheduler-level error sink）
+
+- **E1 round 2 注釋多處錯誤引述「spec §3.4 line 211」**：實際 metric_emitter spec line 211 是 OBSERVE-4 fix 文字；aggregate rule SSOT 在 M3 design spec `2026-05-21--m3_health_monitoring_design_spec.md` line 239+243（25 個 SM (strategy, symbol) tuple + DEGRADED 策略數 / 總策略數 > 40%）。**Doc 注釋引用錯誤是低嚴重性**（不影響 IMPL 行為）；建議 E1 後續 commit 統一引述兩 spec 文件名 + 對應 line
+
+- **`guard.mean().unwrap()` line 876 在 window_size >= 5 守護後**：邏輯安全（window full 必有 mean）；非 round 2 新加，round 1 既有；non-blocker
+
+- **m3_emitter_replay_forbidden.rs line 31 `unused import async_trait`**：cargo warning 1 條；round 2 新建檔 lint 疏漏；low severity；建議 E1 後續移除
+
+### 4 round 1 finding closure verify
+
+| # | finding | round 2 fix | 實測 |
+|---|---|---|---|
+| HIGH-1 | aggregate 3-tuple 違 2-tuple SSOT | Path A pair-level OR-aggregate + 3 scenario boundary test | strategy_quality.rs line 999-1025 land；test 11/11 PASS；對齊 M3 design spec line 243 SSOT |
+| LOW-1 | per_pair_independence 25/100 coverage gap | expand 25 pair × 4 metric = 100 SM；`fired_count == 100` assert | sprint2_track_e_strategy_quality.rs line 506-585 land；PASS |
+| LOW-2 | LOC 1489 > 800 | scaffold peak；Sprint 5+ backlog defer | strategy_quality.rs 實測 **1580** LOC（round 2 加 90 LOC）；< 2000 hard cap 內；accept defer |
+| LOW-3 | per_pair_sm_count 命名混淆 | per_metric_sm_count(100) + per_pair_count(25) 拆 2 accessor + 雙 assert test | line 653-682 land；test_sprint2_track_e_scheduler_per_pair_25_per_metric_sm_100 PASS；GREEN |
+
+### Cross-Wave OBSERVE-4 audit
+
+- `M3Error::ReplaySubprocessForbidden` variant 在 health/mod.rs line 84-96 land；注釋完整引 V106 line 259 CHECK + spec line 199-216
+- `MetricEmitterScheduler::run` line 590-633 簽名改 `Result<(), M3Error>`；line 594-597 啟動 guard fail-loud Err
+- `run_domain_loop` line 723-746 per-tick guard `break` + `tracing::error`
+- `StrategyQualityScheduler::run` line 702-737 雙 guard 對齊（啟動 Err + per-tick break）
+- 12 caller site cascade `let _ = scheduler.run(...).await;` 全 update
+- m3_emitter_replay_forbidden.rs 3 test PASS（replay → Err / 4 legal mode → Ok / Track E scheduler cross-Wave invariant）
+
+### LOC / 安全 / cross-platform 結果
+
+- strategy_quality.rs 1580 / sprint2_track_e_strategy_quality.rs 1075 / metric_emitter/mod.rs 1324 / m3_emitter_replay_forbidden.rs 199 / health/mod.rs 1084
+- 全 < 2000 hard cap；strategy_quality.rs + metric_emitter/mod.rs 觸 800 警告但 backlog defer 合理
+- 注釋全中文（bilingual-comment-style skill 2026-05-05 規範對齊）
+- 跨平台 0 hit（`/home/ncyu` / `/Users/[^/]+`）
+- ML invariant (§3.11)：strategy_quality.rs 0 close_maker_/linucb/scorer/quantile/mlde/dl3 ref GREEN
+- 0 unsafe / 1 unwrap (line 876 守 window_size >= 5 後) / 0 panic in production
+- lib 3152/3152 PASS / Track E 11/11 PASS / OBSERVE-4 3/3 PASS
+
+### Verdict
+**APPROVE-WITH-CONDITIONS to E4**：
+- 4 round 1 finding 全 deterministic closure
+- aggregate Path A 對齊 M3 design spec line 243 SSOT；boundary test 3 scenario 邏輯等價驗 fix 不退化
+- OBSERVE-4 cross-Wave fix 雙 scheduler 對齊 spec line 199-216；3 new test PASS
+- 1 carry-over (OBSERVE-4 運行時 fail-loud 路徑不對稱 — Sprint 5+ 統一 fail-loud channel)
+- 1 doc lint (注釋引述 spec § 錯誤 line 211 — non-blocking；建議 E1 後續 commit 修)
+- 1 lint warning (m3_emitter_replay_forbidden.rs:31 unused import — non-blocking)
+
+### 報告路徑
+- 本 review 結果直接回 PM（dispatch packet 要求；無單獨 .md 報告檔）
+- E1 IMPL report：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_wave2_round2_combined_fix.md`
+- Track E original report：`docs/CCAgentWorkSpace/E1/workspace/reports/2026-05-22--sprint_2_wave2_track_e_strategy_quality.md`
+- Sprint 2 spec：`docs/execution_plan/2026-05-22--m3_metric_emitter_sprint2_design_spec.md`
+- M3 design spec SSOT：`docs/execution_plan/2026-05-21--m3_health_monitoring_design_spec.md` line 243
+
+---
+
+## 2026-05-23 E2 round 1 review — Sprint 5+ Wave 1 §4.4 production hardening (4 items + AC-1b monthly cron)
+
+**Verdict**: RETURN to E1 — 4 finding (1 HIGH / 3 MEDIUM / 2 LOW) 待修，估 30-45 min E1。
+
+**3 PA spec §7.5 必審點全 PASS**：
+- §2.3.1 open_fd_count 3072 baseline 校準：doc-comment + 6h Linux PG empirical + 4 unit test PASS
+- §2.3.2 ws_rtt 170ms mainnet warning：doc-comment line 340-341「Live mainnet endpoint... mainnet 切換時須重 calibrate ladder；本次 amend 只覆蓋 demo + live_demo 範圍」明確 land
+- §5.2.2 PGPASSWORD vs PG_PASSWORD：3 db scripts 全用 `PGPASSWORD` 統一，PA spec §5.2.2 原 bug `PG_PASSWORD` 已修
+
+**4 finding（HIGH-1 + MEDIUM-1/2/3）**：
+1. **HIGH-1 cross-wave fixture spec drift**：`sprint2_track_d_api_latency.rs:711-712, 742` docstring「ws_p50=200 DEGRADED」+ fixture `ws_rtt_p50_ms: 200, // DEGRADED (>150)` 沒同步 amend ladder（新 ladder 200 = WARN 非 DEGRADED）。Test PASS（assertion 不對 row.state 個別 check）但注釋誤導 + E1 memory 12091 教訓正中（跨 wave 並行 sub-agent 改 threshold 必同步改既有 integration test fixture）
+2. **MEDIUM-1 sentinel env var convention drift**：`ac1b_monthly_healthcheck.sh:34, 44` 用 `OPENCLAW_HEARTBEAT_DIR`，codebase 主流是 `OPENCLAW_CRON_HEARTBEAT_DIR`（per `checks_cron_heartbeat.py:48`）或 `OPENCLAW_DATA_DIR/cron_heartbeat`。default path 碰巧一致，但 operator override 場景會 silent fall-through。sentinel 命名 `.last_run` 不對齊 cron_heartbeat module 規範的 `.last_fire`。
+3. **MEDIUM-2 bash 靜默吞 error**：`health_60s_boundary_verify.sh:130, 139` `[[ "$x" -lt 25 ]] 2>/dev/null` 對非數字字串視為 0 → silent FAIL alert 訊息誤導。對齊 E2 8 條 checklist 精神 bash version 反模式。
+4. **MEDIUM-3 active execution_plan spec ladder 描述舊**：`docs/execution_plan/2026-05-21--m3_health_monitoring_design_spec.md:144` 仍寫舊 `WS 常態 RTT < 50ms / 50-150ms / > 150ms`，沒同步回流 §4.4 amend 新 ladder。Spec drift 是 governance 反模式。
+
+**LOW-1/2 doc-comment usage hint 含絕對 path + Operator mirror file drift（可選不阻）**
+
+**對抗 reasoning gain**：
+- Sub-agent 自評 IMPL DONE 後 E2 必跑 `grep -r <changed_metric>` 確認 ladder amend 影響面（unit test PASS ≠ codebase 影響面 zero）
+- bash version of except:pass = `2>/dev/null` 抑制 stderr；E2 8 條 checklist 精神升嚴到 bash script
+- Convention drift 是「未來 silent-dead alert 起點」— 對齊 codebase 主流 env var convention 是 hardening 基本素養
+- mainnet warning catch by PA spec §7.5 mandate；證明 PA spec 設計時 anticipate scope-creep 風險
+
+**Report path**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-23--sprint5_wave1_4_4_production_hardening_e2_review.md`
+
+**Multi-session race check 5 條 PASS**：origin/main HEAD d514bd80 + sibling 3 commit GUI/WS bump 0 overlap with health/ helper_scripts/db/；不 revert unknown WIP；4 IMPL files 已 commit HEAD 612d1383。
+
+---
+
+### 2026-05-23 E2 round 2 mini-verify · §4.4 hardening · APPROVE-PASS-TO-E4
+
+Round 1 RETURN 4 finding (HIGH-1 + MEDIUM-1/2/3) + 2 LOW optional 全修。HEAD c4e1411d combined commit (R2-1 V101/V102 + R2-2 §4.4 + R2-3 Track B+C)，§4.4 scope 6 file +90/-12。
+
+**Verify status**:
+| Finding | 修復狀態 |
+|---|---|
+| HIGH-1 sprint2_track_d_api_latency.rs:711-713 docstring + L742 fixture | ✓ L712 docstring 「ws_p50=350 DEGRADED (>300 per §4.4 amend)」; L743 fixture 「ws_rtt_p50_ms: 350, // DEGRADED (>300 per §4.4 amend)」 |
+| MEDIUM-1 ac1b env var convention | ✓ `OPENCLAW_HEARTBEAT_DIR` → `OPENCLAW_CRON_HEARTBEAT_DIR` (L36/L50/L53); fallback chain 對齊 checks_cron_heartbeat.py:45-48 mainstream; sentinel `.last_run` → `.last_fire` (L144-148) |
+| MEDIUM-2 health_60s_boundary_verify bash numeric check | ✓ L131/L147 顯式 `[[ ! "$x" =~ ^[0-9]+$ ]]` FAIL loud; L131 + L147 移除 `2>/dev/null`; OBSERVATION：L114 §1 delta_int 仍有 `2>/dev/null` 但 round 1 未列 finding scope，屬同類 anti-pattern 漏 catch debt (非 round 2 blocker) |
+| MEDIUM-3 m3_health_monitoring_design_spec.md ladder amend | ✓ L144 ladder row 直更 `< 170ms / 170-300ms / > 300ms`; L157-163 amendment block 完整含日期 + 為什麼 + 不變量 (mainnet warning) + open_fd ladder + Linux 6h empirical 1700-1800 fd baseline |
+| LOW-1 ac1b doc-comment `${OPENCLAW_BASE_DIR:-...}` 抽象 | ✓ L18 抽象 + L20-21 inline 注釋說明跨平台 portability mandate |
+| LOW-2 Operator/ design.md redirect note | ✓ L6 status 標 round 2 amendment; L7-13 round_2_amendment block 完整含 canonical PA packet redirect |
+
+**Verify command**:
+- `bash -n` × 2: 兩 script PASS
+- `cargo test --release --test sprint2_track_d_api_latency`: 7/7 PASS
+- `cargo test --release --lib health`: 153/153 PASS
+
+**Multi-session race 5 條 PASS**: HEAD c4e1411d = origin/main (0 sibling drift); review scope 6 file 全 commit; 不 revert unknown WIP.
+
+**教訓 (E2 retro)**:
+- Round 1 4 finding 修復品質完整: 注釋 + env var rename + bash error 顯式化 + spec doc drift 全清; 0 業務邏輯改動 (純 hygiene)
+- OBSERVATION: L114 `printf %.0f $col5 2>/dev/null || echo 0` 同類 `silent fallback 0` 反模式但 round 1 漏 catch; 不阻 round 2 merge 但建議下次 health_60s_boundary_verify.sh 修改時順手修 (follow-up debt)
+- Combined commit pattern (3 R2 wave 同 commit) 對 E2 mini-verify 友好: 一 HEAD verify 三 scope 完整性
+
+**Verdict**: APPROVE → PASS to E4.
+
+**Report path**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-23--sprint5_wave1_4_4_production_hardening_e2_review_r2.md`
+
+---
+
+## 2026-05-25 — W2-E-R2 dual re-review · M4 R2 (99709a2f) APPROVE + W2-B (817de10a) APPROVE → E4 pending
+
+**對象**：commit `99709a2f` (M4 W1-C Round 2 fix · 6 schema column drift + 19 schema-grep regression test + tick_window unwrap cleanup) + commit `817de10a` (W2-B Alpha Tournament IMPL · funding_short_v2 + liquidation_cascade_fade Rust scaffold + Python harness + TOML)
+**Verdict**: M4 R2 **APPROVE** (E4 fa466361 已驗 · 不需重 E2 / E4) · W2-B **APPROVE → E4 regression pending** (E4 fa466361 在 W2-B 之前完成 · 需新 E4 cover 817de10a)
+**Report**：`docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-25--w2e_r2_m4_r2_w2b_dual_review.md`
+
+**M4 R2 7 closure**（W2-E original review 5 finding 全修 + E1 Round 2 額外 catch 第 6 column drift）：
+- HIGH BLOCKER #1-5（fills_loader size/close_fill/realized_net_bps + liquidations_loader liq.size/aggregator_type）全修：SQL string 全 PASS blacklist 0 hit + whitelist 全到位
+- HIGH BLOCKER #6（E1 Round 2 self-found）：trading.fills 無 `close_reason_code` column → 用既存 `exit_reason`（line 61）；test `test_fills_loader_uses_exit_reason_not_close_reason_code` parametrize 進 blacklist；對齊 `feedback_v_migration_pg_dry_run` SOP — 任何 PG-coupled spec 修改必先 empirical reflection
+- MEDIUM #1 51 pytest 黑盒 source loader SQL：新增 `test_source_loader_schema.py` 19 test (10 whitelist + 5 blacklist + 4 build_query contract) 全 PASS
+- LOW #1 tick_window.rs:64 unwrap → `if let Some(evicted)` early return pattern；7/7 tick_window tests 含 100k push Kahan precision exercise PASS
+
+**W2-B 10 spec compliance 全 PASS**：
+- W1-A v1.1 funding_short_v2: `const IS_LONG: bool = false` compile-time 不可繞 + 30% annualized + 24h hold + Stage 1 BTC/ETH + FUNDING_THRESHOLD_FLOOR=0.20 break-even floor + hysteresis (exit < threshold) + amortized edge gate + 負 funding hard reject 不轉長
+- W1-A v1.1 liquidation_cascade_fade: 5min panel-internal aggregation（非 entry rolling stat 避 look-ahead bias）+ BTC \$500k / ETH \$300k per-symbol + 60min max_hold + fade direction map LongLiq→long / ShortLiq→short / Mixed→reject + min_events 3 + reverse_cascade 1.5x ratio + take_profit 1.5% + panel/pulse None fail-closed + Stage 1 cohort + self-fills filter stub 永遠 false（避誤判 true 錯失 cascade）
+
+**5-gate auto path inheritance 完整**：
+- 2 candidate emit `StrategyAction::Open(OrderIntent::new_trade(...))` 走標準 pipeline → IntentProcessor → Guardian → Decision Lease
+- 0 hit `execution_authority` / `live_reserved` / `live_demo_authority` / `OPENCLAW_ALLOW_MAINNET` in W2-B 範圍
+- active=false（strategy_params_demo.toml）+ enabled=false（risk_config_demo.toml）雙保險 4 hits 全 land
+- `fail_closed_inactive_config()` (params.rs:163-167) 顯式 set `cfg.funding_short_v2.active = false` + `cfg.liquidation_cascade_fade.active = false` — exchange-facing pipeline TOML parse fail → fail-closed inactive
+
+**V101 / V103 / 跨平台 / unsafe 全 grep clean**：
+- V101 ENUM: 0 production hit `alpha_short_carry` / `alpha_microstructure_fade`（4 grep hit 全在註釋 anti-pattern 標註）；EXPECTED_TRACK = 'direct_exploit' 唯一值
+- V103 hypotheses: W2-B 整套 SELECT-only path（不寫 learning.hypotheses）；0 hit `m4_hypotheses_extended` 在 production code
+- `/home/ncyu` / `/Users/[^/]+` hardcode: 0 hit
+- `unsafe` Rust 塊: 0 hit
+- `.unwrap()` / `.expect()` in production path: 0 hit (1 expect 僅在 `#[cfg(test)] mod tests` params.rs:386)
+- file size max prod 610 LOC (lcf/mod.rs) · max test 649 LOC — 全 < 800 LOC warn
+
+**對抗反問 10 條 catch 2 inherited LOW NTH（不阻 E4）**：
+- #2 #3: registry.rs startup 路徑直接 mutate field 跳過 `StrategyParams::validate()`（funding_threshold_annualized / allowed_symbols 等）；inherited from funding_arb (line 243) + funding_harvest pattern — Sprint 3+ 統一 wrapper helper 加 `params.validate()?` 前置；不阻當前 sign-off
+- #2 同問題：startup 直接 set `fsv2.cooldown_ms = ...` field 但不調用 `fsv2.cooldown.set_duration(...)`；TrendCooldown.duration_ms 用 `new()` default 8h；TOML cooldown_ms 是裝飾性；IPC update_params 路徑正確；inherited from funding_arb 範式（registry.rs:243 同問題）；不阻 E4
+
+**M4 + W2-B PG path collision check empirical 0 collision**：
+- M4 engine_mode IN ('live', 'live_demo') + 5 textbook strategy_name；W2-B engine_mode IN ('demo', 'live_demo') + 2 candidate strategy_name
+- 重疊只在 'live_demo'（PipelineKind::Live + non-mainnet）+ 1 candidate；Sprint 2 W2-B default active=false，Stage 1 跑時 engine_mode='demo'，M4 看不到
+- 同 learning.hypotheses table 由 source_module 標籤完全區分（'M4_pattern_miner' vs 'alpha_tournament'）
+
+**95/95 W2-B Rust unit test 全 PASS（funding_short_v2 47 + liquidation_cascade_fade 48）+ Mac cargo --release × 2 (openclaw_core 416/0/0 + openclaw_engine 3463/0/1) non-flaky + pytest M4 70/0 (51 base + 19 new schema-grep) non-flaky**
+
+**Lessons captured**：
+1. **`feedback_v_migration_pg_dry_run` 升級版範式 — `test_source_loader_schema.py` 19 test**: 任何 sub-agent IMPL 寫 SQL `SELECT col_a, col_b FROM schema.table` 都必加 1 行 test `assert "qty" in SQL_STRING` 或更強 `assert "size" not in SQL_STRING`。Mac 跑不到 PG 但 SQL string grep 是 schema-coupled regression 補位手段；任何 future schema 改動 + SQL 改動都會被 catch。M4 / W2-B 各自 dedicated test 防呆 — schema drift defense in depth。
+2. **W2-B 2 candidate IMPL 100% spec compliance — Rust compile-time enforcement gold standard**: `const IS_LONG: bool = false` (funding_short_v2) + fade direction map explicit match (LongLiq→long / ShortLiq→short / Mixed→reject) — alpha thesis 物理性不可錯。任何 future alpha candidate 應沿用 compile-time const + explicit pattern match enum 對應 spec direction map；避免 runtime config-driven direction（避免「is_long: bool from config」這種運行時可翻盤的 anti-pattern）。
+3. **Cross-stream PG path collision check — engine_mode + strategy_name + source_module 三維獨立**: 同 PG 表多 stream 並存的最佳實踐：engine_mode 過濾（M4 看 live/live_demo · W2-B 看 demo/live_demo）+ strategy_name 過濾（W2-B 只看 2 candidate）+ source_module 標籤（writeback path 完全區分）。Sprint 3+ M11 + M4 + M8 + W2 共讀 trading.fills + learning.hypotheses 必沿用此三維框架。
+4. **registry.rs startup field-mutation 跳過 validate 是 funding_arb / funding_harvest / W2-B 共用 inherited pattern**: 4 strategy 範式都直接 set `strategy.field = p.toml.field`，不走 `strategy.update_params_json(toml_to_json(p))` validate 路徑。Sprint 3+ unify 為 helper `apply_<strategy>_params(strategy, params)`，內部先 `params.validate()?` 再 mutate；同時 cooldown.set_duration 也補上。debt tracked but not E4 blocker — pre-existing pattern。
+5. **Multi-source-loader common pytest pattern — parametrize cross-loader blacklist**: `test_no_loader_uses_illegal_column[illegal_token]` parametrize 跨 4 source loader 同步 grep 黑名單 column — 1 行 test parametrize 防 4 個 loader 任一引入 schema 違規。任何 future source loader 加入時用 `import` 後 parametrize 自動 cover。
+
+---
+
+## 2026-05-25 W2-E-R3 — W1-C-R3 draft_writer schema fix + PM 3 push back
+
+**對抗審核結果**：APPROVE-WITH-CONDITIONS（commit `b2febd43` 可 land 但 Sprint 2 cron production fire 前需 PA spec amend 1 HIGH）
+
+**3 push back verdict**（E1 對 PM Option B）：
+1. `evidence_json` column → E1 全對（SSH PG empirical 19 column 0 hit；W1-A spec §7.3 + V103 EXTEND §2.2 都未要求）
+2. `cowork_review_status='PENDING_REVIEW'` → E1 全對（PG CHECK enum = NONE/PENDING/APPROVED/REJECTED；'PENDING_REVIEW' 會撞 CHECK 違規）
+3. `decision_lease_draft_id 'TEXT or NULL'` → E1 部分對（PG 真實 type=UUID 非 TEXT；nullable=YES 但 application-level fail-loud 鎖 non-NULL 是 audit chain 16#8 必要）
+
+**核心教訓 — PM dispatch packet 文字精度問題**：W1-C-R3 揭露 PM Option B 文字「evidence_json column / PENDING_REVIEW enum / decision_lease_draft_id 'TEXT or NULL'」3 處詳細與 production PG empirical 不符。E1 用 SSH PG `\d learning.hypotheses` + V103 EXTEND spec + V100 base spec 三軌交叉驗 catch。將來 dispatch packet 內提到 schema column / enum / type 細節時 PM/PA 應先 SSH PG empirical verify 一次再下發。
+
+**HIGH 發現 — replicability_score 公式 spec 不一致**：E1 IMPL `_compose_replicability_score = 0.4*|d|/3 + 0.3*subperiod + 0.3*silhouette`；W1-B alg spec §4.3 line 469-485 定義 `0.3*subperiod + 0.4*cross_asset/25 + 0.3*cross_timeframe/5`；W1-A spec §10.2 line 630 寫「跨 sub-period + cross-asset / cross-timeframe robustness」。E1 公式 invent 因 Sprint 2 ship 1-asset / same-timeframe（spec line 813）無 cross_asset / cross_timeframe 數據可用。Pragmatic workaround 但 spec drift。E1 自我標記 §8.1 Open Q3 + `build_audit_metadata` 保留 raw 6 attribute 值供 Sprint 3 retroactive recompute → 可接受 mitigation。
+
+**反模式 — sub-agent 在 spec 內部不一致時自行 invent formula**：發現 spec §4.3 公式定義與 §10 Sprint 2 ship scope 矛盾時，E1 應該 raise 4th push back 給 PM 而非 invent formula。將來遇到 spec internal inconsistency（例如：§A 定義 formula 需 X+Y+Z，§B 寫 Sprint N 只 ship X），sub-agent 應停 IMPL 並 escalate，由 PM/PA 仲裁 (a) 用 NULL placeholder 等齊全 (b) 採部分 ship (c) 改變 ship scope。
+
+**正面範式 — `build_audit_metadata` 雙軌 audit chain**：E1 拒絕 PM 提的 `evidence_json` JSONB sidecar（不存在於 PG）而改用 `build_audit_metadata` function 回 dict 給 caller cron logger emit + PG `decision_lease_draft_id` UUID backref。雙軌 audit：PG 提供 transactional reconstructable backbone（hypothesis_id → lease_id），log file 提供 6 attribute 完整 raw value（含 PG 沒有的 graveyard_flag / raw cohens_d / raw silhouette）。Sprint 3 retroactive QC arbitration 即使 PG schema 改也能從 log recompute。
+
+**Lessons captured**：
+1. **PM dispatch packet schema 細節必先 SSH PG empirical verify**：PM 在 dispatch 內提到 column name / enum value / data type 必先跑 `\d schema.table` + `SELECT pg_get_constraintdef(...)` 驗一次再下發；W1-C-R3 PM Option B 3 處文字錯就是因為直接從 PA task wording 抄而沒 empirical verify。將來 PM Option pattern dispatch 必加 1 步「SSH PG empirical pre-verify」於下發前。
+2. **Spec internal inconsistency 必 escalate 而非自行 invent**：sub-agent 發現 spec §A formula 定義需要 §B Sprint scope 沒 ship 的數據時，應停 IMPL + raise push back，不自行 invent formula。W1-C-R3 E1 invent replicability_score 公式即使有 `build_audit_metadata` mitigation 仍是 spec drift HIGH。將來 E1/E1a sub-agent meta-skill：spec 公式 internal inconsistency → push back > pragmatic invent。
+3. **`build_audit_metadata` function 雙軌 audit chain 範式**：當 PG schema 無對應 column 但 audit 完整性要求保留 raw value 時，E1 用 `build_audit_metadata(payload) -> dict` 回 dict 給 caller emit log + PG backref 雙軌。Sprint 3 retroactive recompute 可從 log 重建。此範式適用 future case：spec 要求 6 attribute 完整保留但 PG schema 只有 4 column；不需要新加 JSONB sidecar column。
+4. **chicken-egg 分析：UUID client-side generate vs server-side FK 不同邏輯**：`decision_lease_draft_id` UUID 不是 chicken-egg 因 client-side `uuid.uuid4()` 同步生成 + PG FK 暫不加；UUID 寫入 PG INSERT 不需要 Lease table 存在。將來 audit chain 加 UUID backref 採同樣 pattern：先 client-side 生成 UUID 再雙寫（PG + Lease/log），不依賴 server-side INSERT 完成才知道 ID（避免 BIGSERIAL 等 server-allocated）。
+5. **SSH PG empirical reflection 3 條核心 query 全 set**：(a) `\d schema.table` → 全 column 列表 + DEFAULT；(b) `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='schema.table'::regclass AND contype='c'` → CHECK constraint 真實 enum；(c) `SELECT column_name, data_type, is_nullable FROM information_schema.columns WHERE table_schema='schema' AND table_name='table'` → 標準化 nullable + type。3 條全跑才能完整 verify schema drift 假設。W1-C-R3 SSH PG 3 條全跑 + V103 EXTEND spec + V100 base spec 三軌交叉 catch PM 文字錯 3 處。
+
+---
+
+## 2026-05-28 — M11 cron install (b43481f7) 對抗審查 — APPROVE-WITH-CONDITIONS
+
+Review 對象：2 個新 cron script（install + daily wrapper）851 LOC，Stage A replay_runner smoke heartbeat。verdict = APPROVE-WITH-CONDITIONS（0 BLOCKER；2 MED + 4 LOW；不阻 runtime deploy）。E1 自報 7 divergences 全核實：5 OK（a/c/d/e/g）+ 2 帶 follow-up 但合理（b/f）。
+
+**cron-specific review 範式（沉澱供未來 cron PR 重用）**：
+1. **curl Bearer token 洩漏面 = `ps`/`/proc/<pid>/cmdline`**：curl 無 env-var header option，`-H "Authorization: Bearer $TOK"` 必走 cmdline，本機 local user 可在 curl 執行窗口 `ps` 偷看。對比 pg_dump 用 `PGPASSWORD` env（不上 cmdline）。loopback/tailnet + 短窗 + 單機可信 → LOW，但要 note。**未來 cron 走 curl 認證一律記此 LOW**。
+2. **`event_type='audit_write_failed'` piggyback 已是既有 pattern**（`replay_key_rotation_check.sh:243-279`），且 grep 確認 **0 production consumer** 把 `audit_write_failed` 當實際 alarm → 成功事件記 `audit_write_failed` 不誤觸告警。語義污染 LOW + OQ-2 follow-up（Sprint 3 擴 V035 enum）。**驗法 = `grep -rn "audit_write_failed" program_code helper_scripts rust | grep -v cron/|md|test`**。
+3. **embargo CHECK 真實公式 V041 = `embargo_days >= GREATEST(7, CEIL(2.0*half_life_days)::INTEGER)`**；half_life=7 → 下限 14；request model `embargo_days: float` 接受 `14.0` 寫進 INTEGER column。E1 embargo_days=14 = 邊界值正確。
+4. **server-side sha override 行為**：`experiment_registry.py:308-326` body 帶 `strategy_params` 時 server OVERRIDE client sha = `sha256(canonical_bytes)`；cron 塞 fixture-SHA placeholder 會被改正。
+5. **heartbeat sentinel 無 consumer ≠ silent-death 盲區**：`m11_replay_runner_daily.last_fire` 無 healthcheck 消費（grep 證），但**主偵測走 `[48]` rows_7d（有 consumer + flip 實證）**，cron 死亡仍偵測得到。sentinel 冗餘二級，缺 consumer = LOW follow-up 非 blocker。
+6. **install script echo 的 operator pre-flight 指令 vs wrapper 真實 resolve 必 cross-check**：本 PR install echo `127.0.0.1:8000` + 教 operator `curl http://127.0.0.1:8000/...`，但 wrapper auto-resolve Tailscale IPv4（E1 §5.5 證 loopback 不通）→ operator 照 echo 跑連不上。誤導指引 = LOW UX bug，退 E1 改 echo。
+7. **divergence (b) operator API token 重用 = least-privilege 違反**：單一 global actor（`auth.py:182-245`）預設持 operator role + `replay:write` + 連 `live:trade`/`live:authority`/`system:restart` 全 scope；cron 用全權限 token 做只需 replay:write 的事。不觸 CLAUDE §四 hard boundary（signed live authorization 另一機制），但 OQ-1 dedicated Service principal swap 應追 P3 follow-up（E3 owns）。MED。
+
+---
+
+---
+
+## 2026-05-28 — Wave 5 Packet C 全 Rust (C1+C2+C3) 對抗審查 — APPROVE-WITH-CONDITIONS
+
+審查對象：11 commit (804392fc..3ba572ad + 9bf71423 + 4ac2b7a4 + 0521aaf4)；notification_failsafe/ 全 sub-mod (dispatchers/slack+email+console_banner+three_way + audit_emitter + providers/wall_clock+position_provider+exchange_stop_sync+single_watcher) + mod.rs setter。verdict = APPROVE-WITH-CONDITIONS (0 CRITICAL；1 HIGH design + 2 MED + 3 LOW；不阻 C1/C2/C3 land 但 HIGH 必在 C4 wire 前解)。
+
+**自驗結果**：
+- `cargo test -p openclaw_engine --lib notification_failsafe` = **104 passed / 0 failed**（prompt 預期 101，實際多 3，覆蓋更全）
+- `cargo clippy -p openclaw_engine --lib` = notification_failsafe scope **0 hit**（grep full output 0 nf 引用）。但 clippy 整體被 1 個 **pre-existing error** 擋（`openclaw_core/src/risk/price_tracker.rs:132` `#[deprecated(since="2026-04-22")]` 觸 rust-1.95.0 新 lint `deprecated_semver`，由 commit ece31b69 引入非 Packet C；342 warning 全是新 `doc_lazy_continuation` lint crate-wide 撞舊中文 doc comment，非 C scope）
+
+**ATR known-limitation 誠實性判定 = 誠實（PASS）**：
+- `RestPositionProvider` 硬設 `atr: 0.0`（position_provider.rs:174-176）；module note line 21-24 + field 註釋誠實標 known-limitation + C4 補 ATR 注入
+- 核驗 `active_lock_profit_per_position`（openclaw_core/src/sm/risk_gov.rs:339）確 `pos.atr <= 0.0 → continue` fail-closed → atr=0 時**每倉位全跳過 → 0 StopAdjustment → exchange sync 真 noop**
+- 無誤導性「看似收 SL 實 noop」：code 註釋如實標 + operator Q-B=BB defer ATR 到 C4 已拍板。**不造假 fill/lineage**
+
+**HIGH-1（design，退 PA/E1 在 C4 wire 前解）— console banner 本地寫近乎永真，AllFail 在真實「雙遠端通道掛」場景幾乎不可達**：
+- three_way.rs `compute_outcome` AllFail 需 3 路全 false；但 console banner = 本地檔寫（local disk），Slack+Email 雙掛時 console_ok 仍 true → 只 2 failed → `PartialFail` → `evaluate_dispatch` 不武裝 timer（mod.rs:308）
+- 後果：fail-safe 設計要保護的最關鍵場景（operator 兩個 push 通道全失聯）反被降級成「degraded but OK」不升級。1h escalation timer 實質不可達
+- root cause：console banner 是 **pull-based passive** channel（operator 要主動看 GUI），本地寫成功 ≠「operator 已被通知」；不該與 Slack/Email 兩個 **push** channel 同權計入 3-way 冗餘
+- 當前不阻 land：watcher 未 wire（C4/C5 deferred）+ dispatch 觸發點（incident_policy）deferred；latent 非 production runtime path。但 C4 wire 前 PA 必裁決：(a) AllFail 改成「兩遠端 push 全 fail」即觸發 (b) banner 不計入冗餘只當顯示 (c) 維持現狀但文檔明確「banner 永真所以 1h timer 實質靠 incident_policy 另判」
+
+**MED-1 — console banner tmp 檔名用 std::process::id() 跨並發碰撞**：console_banner.rs:165-169 `format!("{}.tmp.{}", BANNER_FILENAME, std::process::id())` pid 進程恆定；同進程內 write_banner（dispatch arm）與 clear_banner（ack arm）並發會寫同一 tmp path → atomic-rename 失效。C4 single-task select! 序列化可緩解但 ConsoleBannerDispatcher 是 &self pub API 無強制單寫者守衛。建議 tmp 名加 nanos/counter/uuid uniquifier。
+
+**MED-2 — SharedFailsafeWatcher::check_timer 三段拆鎖 idempotent guard 跨 lock-drop 窗口可被並發繞過**：single_watcher.rs:194-227 Phase1(lock 判 expired→drop)→Phase2(no-lock await escalation)→Phase3(re-lock set escalated=true)；兩個並發 check_timer(&self) 可都過 Phase1（escalated 尚未在 Phase3 設）→ 都跑完整 escalation → double SM-04 transition + double audit。mod.rs 原版 FailsafeWatcher::check_timer 持 &mut self 互斥無此問題；Shared 版 &self 內部可變故失互斥。C4 預期 single 30s task 序列呼故 latent；但 pub &self API 無 in-code 單呼者守衛。建議 Phase1 即 set escalated（claim 後再 await）或加 in-flight flag。
+
+**LOW-1 — EmailConfig derive(Debug) 持 smtp_app_password（latent secret leak）**：email.rs:53 `#[derive(Debug)]` + smtp_app_password: String；當前無人 {:?} log（RealSmtpTransport::send 只 log `error=%e` lettre error，非 config）但 Debug derive 在持密 struct 是潛在洩漏面。建議手寫 redacting Debug 或移除 derive。SlackDispatcher（存的那個 struct）無 Debug derive，clean；SlackSecretFile 是 transient parse struct。
+
+**LOW-2 — StubTransport（pub 非 #[cfg(test)]）內 .lock().unwrap()**：email.rs:124/138 mutex poison 才 panic；StubTransport 永不在 production hot path（prod 用 Real/Disabled）。非交易路徑非阻。
+
+**LOW-3 — 整 Packet C 目前 0 production caller（declared deferred dead code）**：grep 確認 main.rs/tasks.rs 0 處 instantiate SharedFailsafeWatcher/ThreeWayDispatcher/PgAuditEmitter/Rest*/Bybit*。EXPECTED（spec §8.1 C4/C5 deferred Sprint 3；mod.rs:47-52 明確）。對應 PA §11.2 自評「wire 完仍 dead code」。非 E2 code blocker（code 就是設計的 deferred slice）但 PM 必追 C4/C5 + incident_policy 觸發點落地否則 3-4 週 dead code。
+
+**§12 三重點審查**：
+- 重點1（tick loop 不被 SM transition 阻塞）：single_watcher check_timer 確拆鎖 await 在 lock-drop 後（但見 MED-2 idempotent 窗口）
+- 重點2（paper noop）：BybitExchangeStopSync **本身無 paper short-circuit**；module note line 46 明確 paper noop 延 C4 wire 時顯式短路（非本 struct）。C3 alone 不 enforce §6.3 守衛，C4 必補。已文檔化可接受但 C4 review 必驗
+- 重點3（per-pipeline SM 獨立）：C3 不 wire pipeline loop（C4 範圍），無法在 C3 驗；deferred
+
+**5-gate / 跨平台 / unsafe / unwrap grep**：5-gate relaxation 0 hit；硬編碼 home 0 hit（1 命中是「無硬編碼」註釋）；unsafe 0 塊（1 命中是 test fn 名）；production unwrap 0（全在 #[cfg(test)] mock 或 StubTransport LOW-2）
+
+**Rust↔V114 schema 對齊**：audit_emitter.rs INSERT 13 column（ts_ms/event_type/trigger/initiator/from_level/to_level/transition_succeeded/transition_skipped_reason/adjustments_count/sync_records/atr_buffer_multiplier/now_ms/payload_jsonb）對齊**實際 migration**（非 PA spec §5.2 proposal — spec 用 armed_at_utc/expired_at_utc timestamptz，實際 migration 用 ts_ms BIGINT；MIT 域，Rust 對齊已落地 migration 正確）。include_str! schema-lock test 8 條防 drift = 好範式
+
+**lettre 跨平台**：Cargo.toml:37 `default-features=false` + `tokio1-rustls-tls` + `ring`（0 openssl）— 確認；Apple Silicon arm64 build OK（aws-lc-rs pre-existing E1 flagged 不阻）
+
+**Multi-session race 5 條**：5a/5e origin/main HEAD=local HEAD=5097bd06，sibling window 全 Packet C + M11（b43481f7 另審，0 file overlap with notification_failsafe/）無衝突；5b/5d review scope Rust 全 commit clean；5c **V114 SQL 有 MIT 未 commit WIP（FIX MIT-2026-05-29 nested EXCEPTION undefined_column 冪等修）**— 不 revert（MIT 域 + 只動 GRANT 邏輯不動 column，不影響 Rust 對齊）。**C2 Rust merge 需與 V114 final land 協調（migration 尚未定稿）**
+
+**對抗 reasoning gain（沉澱）**：
+1. **「本地寫 channel 計入遠端冗餘」= fail-safe 反模式**：任何「N-way 冗餘通知」設計，pull-based local channel（檔/PG/GUI）的「寫成功」≠「人被通知」；不該與 push channel（Slack/Email/SMS）同權算 AllFail。下次任何 fail-safe escalation 設計必分 push/pull channel 權重
+2. **三段拆鎖 idempotent guard 的「claim 時機」**：lock→drop→await→re-lock 模式若 idempotent flag 在最後 re-lock 才設，await 窗口內並發呼叫全可繞過。正解 = Phase1 lock 內即 claim（set flag）再 drop 再 await（pessimistic claim）；或用 compare-and-swap in-flight token。&self interior-mutability API 比 &mut self 更需顯式並發守衛
+3. **deferred slice 的 dead-code 誠實性**：C1/C2/C3 全 0 production caller 是 EXPECTED 但必確認 (a) 明確文檔標 deferred (b) PM 有 C4/C5 follow-up ticket (c) 非殘缺半成品。三條齊 = 乾淨 stub 非 dead-code 反模式
+4. **clippy 被 pre-existing error 擋住時的核驗法**：`-- -A clippy::<pre-existing-lint>` 放行 pre-existing 讓 clippy 跑到 review scope；再 grep scope path 確認 scope 自身 0 hit。否則「clippy fail」會誤判成 review scope 問題
+5. **Debug derive on secret-bearing struct = latent leak**：即使當前無 log，持 password/token/webhook 的 struct derive(Debug) 是未來 {:?} 洩漏面；secret struct 應手寫 redacting Debug 或不 derive
+
+---
+
+## 2026-05-29 — M11 smoke register-only fix (d696b1f2) 對抗審查 — APPROVE-WITH-CONDITIONS
+
+審查對象：commit `d696b1f2` `fix(m11-cron): smoke register-only`（M11 daily cron 移除 POST /replay/run + poll，保留 register；消除 replay.run_state zombie = `[50]` FAIL 根因）。輕量 risk-reducing 簡化。verdict = APPROVE-WITH-CONDITIONS（0 BLOCKER；1 LOW in-scope + 1 MEDIUM pre-existing）。deploy clearance = **YES**（04:00 UTC fire 前可部署；fix 達成 zombie 消除目標 + 不 regress）。
+
+**run dispatch 移除乾淨確認**：grep `RUN_TMP|RUN_HTTP|RUN_ID|RUN_STATUS|RUN_BODY|/replay/run|run_id|poll|smoke_completed` 在 wrapper 只命中 DESIGN-FIX 註釋（line 22/29/322-325），0 live code。orphan `RUN_TMP` mktemp + 第二個 trap（含 RUN_TMP cleanup）已連帶移除；surviving trap (line 267) 只清 REGISTER_TMP+lock 正確。register 段 (209-318) + 兩 fail-soft exit 0 分支 + idempotency_key 全保留。`bash -n` 兩檔 PASS。
+
+**`[48]` 不破壞確認**：`check_48_replay_manifest_registry_growth` (checks_replay_maintenance.py:348-428) 只 query `replay.experiments`（count/rows_7d/rows_24h/created_at），0 處碰 `replay.run_state`。register-only 寫 experiments row → `[48]` keep PASS（E1 dry-run total 24→25 + `[48] PASS` 實證）。root cause（zombie 源）真除非 symptom-mask。
+
+**governance audit event_type — PG SAFE 但 incident scanner NOT clean**：
+- PG CHECK SAFE：INSERT 寫 `event_type='audit_write_failed'`（既有 V035 enum），`m11_replay_runner_register_only_completed` 只在 `payload->>'alert_type'`；不需註冊 V035/V113 enum；piggyback 對齊 replay_key_rotation_check.sh pattern。
+- **MEDIUM-1（pre-existing — 修正我 2026-05-28 review 結論）**：`audit_write_failed` 有 production consumer = `wave9_audit_incident_scan.py`（06:30 daily cron per SCRIPT_INDEX.md:148）。`_scan_audit_write_failed_other` (262-326) 用 5-item NOT-IN allowlist 把不在 list 的 `alert_type` 標 medium incident → `main()` return 1 (INCIDENT VIOLATION) + UPSERT `replay.audit_incident_summaries`。`m11_*register_only_completed` 不在 allowlist → **每日 M11 成功 fire 觸 daily false medium incident + 污染 audit_incident_summaries**。設計不對稱根因：sibling cron 只在 ALERT/violation emit audit row（replay_key_rotation_check.sh:331「OK: silent」），M11 在 SUCCESS emit。pre-existing（舊 smoke_completed 同樣不在 allowlist）非本 commit regress。修法：(a) M11 success alert_type 加進 wave9 allowlist OR (b) M11 success silent（drop PG audit emit 只留 JSONL/log，但要確認 `[48]` row growth 是 intended success evidence）。
+
+**LOW-1（in-scope，install echo drift）**：`install_m11_replay_runner_cron.sh:143`（always-printed banner「Audit row:」行）仍寫 `alert_type='m11_replay_runner_smoke_completed/_failed'`；wrapper 已改 `register_only_completed`。E1 modify-list 稱「三處」但漏這第四處 echo（在 banner block 非 E1 改的 DRY-RUN block line 169）。誤導 operator。退 E1 改 line 143。
+
+**Multi-session race 5 條**：5a/5e HEAD=d696b1f2 領先 origin/main=b2e06510（剛好 M11 commit），sibling window 全 Packet C/V114 0 file overlap M11 cron 二檔；5b/5d M11 commit 全 land；5c working tree 有隔壁 WIP（PA/memory.md / common.js / 3 cold-audit spec untracked）非本 scope，不 revert。0 race blocker。
+
+**對抗 reasoning gain（沉澱）**：
+1. **「success-emit governance_audit_log」+ 「incident scanner NOT-IN allowlist」= daily false alarm 反模式**：任何 cron piggyback `audit_write_failed` 在 SUCCESS 寫 row，必查 `wave9_audit_incident_scan.py` 的 `_scan_audit_write_failed_other` allowlist 是否含該 alert_type。sibling 紀律 = 只在 ALERT emit（silent success）。下次任何新 cron 走 audit_write_failed piggyback 必跑：`grep -A20 "_scan_audit_write_failed_other" wave9_audit_incident_scan.py` 看 allowlist + 確認 emit 時機是 alert-only 還是 success。
+2. **piggyback audit consumer grep 必含 incident scanner**：我 2026-05-28 review 點 #2「0 production consumer 把 audit_write_failed 當 alarm」結論 incomplete — 漏了 wave9_audit_incident_scan.py。正確 grep = `grep -rnE "event_type\s*(=|==|IN).*audit_write_failed|WHERE.*audit_write_failed" program_code helper_scripts rust`（不只 grep literal，要 grep SELECT/WHERE alarm consumer）。教訓：grep 範圍要含「掃 governance_audit_log 當 incident feed」的 cron 而非只看 emit 端。
+3. **install echo vs wrapper reality cross-check 是 M11 reproducible LOW**：2026-05-28 review 點 #6 已 catch 一次（loopback echo 誤導），本 round 又 catch line 143 alert_type echo drift。任何改 emit string 的 cron PR，必 grep install script 全部 echo banner（不只 DRY-RUN block）找舊 string 殘留：`grep -nE "<old_alert_type>|<old_event_string>" install_*.sh`。
+
+**Report**：本次回 main session 直述（E2 不寫 report .md per 指示）
+
+## 2026-05-29 — P2-09 Guardian scoring const extraction (v80 cold audit Wave 3)
+- E1 chose Option B: kept Guardian scoring weights as INVARIANT `const` (fail-closed safety floor) not RiskConfig-tunable. APPROVE.
+- Behavior-preserving verified: all 11 consts == original literals (0.4/0.3/0.4/0.15/0.35, 2.0/1.0, 0.3, 1.0). Zero numeric drift.
+- Option B justified: GuardianConfig threshold fields (max_leverage etc.) ARE config-derived — confirmed wiring at tick_pipeline/pipeline_config.rs:88 + event_consumer/setup.rs:63 build GuardianConfig from RiskConfig.limits.leverage_max / anti_cluster.max_same_direction via apply_risk_snapshot hot-reload. PA's cited "lines 26-32" = struct fields already tunable; real literals are scoring weights inside review(). E1's read correct.
+- Lock tests non-tautological: test_scoring_behavior_locked drives actual review() per-path (Default max_lev=20: lev30→ratio1.5 modify, lev50→ratio2.5 reject) — pins behavior not just const equality. 8/8 guardian::tests pass (Mac advisory).
+- Direct fix: bybit_rest_client.rs RateLimitGroup Order/Position/Account comment 10→20 req/s per UID (Bybit V5 correct; backoff logic threshold-based, comment-only). cargo check -p openclaw_engine clean.
+
+## 2026-05-29 — OPS-2 3-pack hygiene (CI-FLAKINESS-TEST-LOCK / RESTART-ALL-CP-ATOMIC / GITLEAKS) · RETURN E1 (1 HIGH)
+
+**對象**：未提交 dirty tree（restart_all.sh + 12 Rust test files + lib.rs + git_hooks/ 3 新檔 + SCRIPT_INDEX.md）。HEAD=origin/main ac5ce387 (0/0)。
+**Verdict**：(b) restart_all cp-atomic = **APPROVE**；(c) gitleaks = **APPROVE**；(a) CI-flakiness lock = **RETURN E1** 1 HIGH（殘留 race，ticket 範圍內該修）。
+
+durable lessons / 對抗驗證要點：
+- **「合併 env-test lock」類 ticket 必窮舉 process-global env mutator，不能只改「已有鎖」的 callsite**。E1 把 9 個 per-module Mutex 合併到 `lib.rs::test_env_lock`（單 static + poison-tolerant guard），但漏了 `bybit_private_ws_status_writer::test_writer_config_from_env_honours_srv_root`：它 **無鎖** `remove_var("OPENCLAW_BASE_DIR")`，而 Group A 的 `edge_estimates.rs` 測試（持鎖）`set_var("OPENCLAW_BASE_DIR", tempdir)` 後讀它 → 同 process 同 var race。鎖只排除「持鎖者」，無鎖的同 var mutator 直接打穿保證。
+- **判定「無鎖 test 是否該本輪修」的硬方法 = grep 出每個無鎖 test 的 env var 名，與 Group A 已鎖 var 求交集**。交集非空 = 本輪修；disjoint = follow-up。本次 3 個 E1 自承無鎖：bybit_writer(`OPENCLAW_SRV_ROOT`+**`OPENCLAW_BASE_DIR`**=重疊) / claude_teacher(`ANTHROPIC_API_KEY`=disjoint) / ai_budget(`OPENCLAW_PRICING_PATH`=disjoint)。E1 把 3 個全當 disjoint follow-up 是錯的，1/3 重疊。
+- **「tests pass」(3598 passed) ≠ race 消除**。env race 是 latent（interleave window 窄），測試計數無法證偽；靜態 var-overlap 分析才是 proof。對抗立場：不接受「跑綠了所以沒事」。
+- **bybit_private_ws_status_writer.rs:592 註釋自證有罪**：「serial_test-style isolation isn't needed because the test writes to a scoped TempDir」是錯的——`remove_var` 是 process-global 非 TempDir-scoped。這種「合理化」註釋正是 race 被遺漏的根因，修時須一併改正。
+- **lib/bin test binary 邊界**：`crate::test_env_lock` 是 lib-crate `#[cfg(test)] pub(crate)` 項；`main_boot_tasks` / `live_auth_watcher_tests` 由 main.rs `mod` 宣告（bin crate，Cargo.toml [[bin]] src/main.rs），獨立 test process，`crate::` 解析到 bin root 而非 lib，無法共享 → 兩個殘留 `static ENV_GUARD` 是合法 follow-up（uncertainty ii 成立）。`grep "static.*Mutex<()>"` 確認 lib 內只剩 1 個本體。
+- **restart_all cp→atomic 驗證範式**：tmp 用 `${final}.tmp.$$` 與 final 同目錄 → 同 fs → `mv` 是真 rename；chmod 600 在 mv 前 → final 一現身即 600 無 644 窗口；`cp && chmod && mv || { rm; exit 1; }` 在 `set -e` 下：`&&/||` chain 非最後一項的失敗不觸 errexit，正確 route 到 `||` fail-loud。實測 happy(600+match+0 leftover) / cp-fail(exit 1) / 已 rotate key 不被覆蓋(idempotent) 三路 PASS。fail-loud exit 1 不是 idempotent 重啟回歸——舊 `set -e` 下 cp 失敗本就 abort，新版只是顯式化 + 加診斷。
+
+## 2026-05-29 — P1-OPS-2-CI-FLAKINESS-TEST-LOCK round 2 re-confirm · APPROVE（HIGH closed）
+
+round 1 RETURN 的 1 HIGH（env race 殘留）round 2 已修。逐項對抗確認 PASS：
+- **HIGH closed**：`bybit_private_ws_status_writer.rs:604` `let _g = crate::test_env_lock::guard();` 取得在第一行，**早於** :609/:610 的 set_var/remove_var 與 :620-626 restore，且具名綁定 `_g`（非 `let _ =` 立即 drop），活到 test 結束覆蓋 mutate→read→restore 全程。重疊變量 `OPENCLAW_BASE_DIR` 現在持同一把鎖，與 Group A edge_estimates 真正串行。誤導性 TempDir 註釋已改中文說明 process-global + 必持鎖。
+- **ai_budget caller-guard 判斷正確**：grep `set_test_pricing_path` 確認唯一 caller = `test_budget_config_load_default`（:593）。guard 放 caller 第一行（:592）早於 `set_test_pricing_path()` 呼叫，覆蓋「helper set_var(OPENCLAW_PRICING_PATH) → BudgetTracker::new 讀 config」整段臨界區。若放 helper 內則 helper return 即釋放、無法覆蓋呼叫端後續讀 → E1 判斷正確。helper 無第二 caller，無洞。
+- **claude_teacher**：guard :271 早於 :273 remove_var，`_g` 具名綁定，覆蓋 mutate+restore。env var `ANTHROPIC_API_KEY` 與 Group A disjoint 但持同鎖維持 all-or-nothing 不變式。
+- **無 scope creep**：3 檔改動全在 `#[cfg(test)]` mod 內，無 production 邏輯改動、無新依賴。
+- **lib 唯一鎖本體**：`grep static.*Mutex<()>` → lib.rs:127 唯一；main_boot_tasks.rs:644 + live_auth_watcher_tests.rs:210 由 main.rs:12-13 `mod` 宣告（bin crate，獨立 compilation unit + test process），不在 lib `crate::test_env_lock` 鎖範圍，合法 follow-up。
+- 驗收：`cargo build --lib --tests` clean（僅 2 個 pre-existing bin-crate warning）；3 個 guarded test 各跑 PASS（3 passed / 0 failed）。
+- 教訓：caller-vs-helper guard 放置——env mutation 在 helper 時 guard 必在 caller 第一行，否則 helper return 即釋放鎖、無法覆蓋呼叫端後續對該 env 的讀取臨界區。re-confirm 時務必 grep 證 helper 唯一 caller，否則 helper 其他無鎖 caller 仍是洞。
+- **gitleaks toml 起手版**：`[extend] useDefault=true` + `[allowlist]{description,regexes,paths}` 合法 gitleaks v8 schema（`[allowlist]` 單數在 v8.19+ 被 `[[allowlists]]` 取代但仍兼容，E1 註釋已自承 first-cut + FP 調校 follow-up）。allowlist 的 pinned hex + test key 已 grep 驗證真實存在於 live_authorization.rs + python test + runbook（非捏造 fixture）。warn-and-pass 設計（缺工具 exit 0 / 有 finding exit 1）正確；installer worktree-safe（`git -C root rev-parse --git-dir` 處理相對 git-dir）+ refuse-clobber（cmp -s）+ --force backup。`.git/hooks/` 仍只 .sample = installer 未執行。
+
+## 2026-05-29 — P1-110017-POSITION-DRIFT-CLOSE-LOOP 完整修復對抗審查 — APPROVE-WITH-CONDITIONS
+
+審查對象：worktree wt-110017 / branch `fix/retcode-110017-convergence` working tree（6 檔 +540 行未 commit）。dispatch.rs(110017 Structural→NoOp + send_exchange_zero_close guard)/types.rs(ExchangeZeroClose event)/loop_handlers.rs(handle + 審計)/commands.rs(converge_exchange_zero_close)/2 test 檔。verdict = APPROVE-WITH-CONDITIONS（0 CRITICAL / 0 HIGH / 2 MED follow-up / 2 LOW；不阻 merge+deploy）。
+
+**4 個 operator 問題明確答案**：
+1. **誤刪真倉防得住嗎 = 是**。`qty==0` guard 是精確字面比較（close_dispatch_qty_for_full_close primary+exchange 回**硬編碼字面 0.0**，非浮點運算結果 → 無 1e-12 漂移疑慮）。親手對抗測試證明：去掉 `is_qty_zero_full_close` guard → C-1 partial-close 安全測試 FAIL（誤發收斂）→ guard 有效非 tautology。C-1（qty>size partial reduce-only 收 110017 倉仍在）被 qty==0 form 結構性排除；C-2（hedge positionIdx）被 one-way mode 排除（grep 證 OrderDispatchRequest 無 positionIdx 欄位 + switch_position_mode **0 production caller**）。
+2. **qty==0 narrowness = follow-up 非 blocker**。close-maker PostOnly close + market fallback **都走 qty>0**（commands.rs:1146 fallback 不經 close_dispatch_qty_for_full_close）→ 不被本 fix 收斂。但 RCA 觀測 TRXUSDT order_link_id prefix=`oc_risk_dm`（execute_position_close 的 market qty=0 form），**非** close-maker prefix `oc_close_mf_fb`，證明當前迴圈走 qty=0 form → 本 fix 覆蓋。擴 qty>0 收斂會違反 BB mandatory guard（誤刪真倉）→ 正解是 D2 reconcile（連續 110017 + exchange truth），documented follow-up。
+3. **≥2-連續 defer = 可接受**。C-3 just-opened race 自癒成立：收斂走 upsert_position_from_exchange(size=0)→positions_remove（純移除不記 PnL），下個 WS PositionUpdate(size>0)→loop_exchange.rs:550 upsert→**倉重建**（None 分支 insert）。雙重記帳不發生：已移除倉收到 fill → apply_fill 走「開新倉」分支 return 0.0 → realized=0 → record_trade 不呼（Kelly 不污染）。
+4. **能斷 TRXUSDT 迴圈 = 是**（前提 demo use_maker_close 對 phys_lock 路徑未生效，RCA observed qty=0 form 已證）。⚠️ 若未來 demo 啟 use_maker_close，phys_lock close 走 qty>0 PostOnly+fallback → 本 fix 不收斂 → 迴圈不斷（屬 #2 殘留路徑）。
+
+**attribution 不污染核驗（最關鍵）**：upsert_position_from_exchange size==0 → positions_remove（同步 mirror）→ **0 record_trade / 0 realized_pnl / 0 Kelly**。對齊既有 WS PositionUpdate size=0 收斂路徑（loop_exchange.rs:550）。E1 宣稱屬實。
+
+**自驗**：lib 3608 passed/0 failed；新增 11 test 全綠（C-1 安全 + 收斂 regression + without-convergence 反例 + 110001/110009 no-regression + suppression）；release build clean（0 本 PR warning，2 dead_code 在 panel_aggregator/ma_crossover = pre-existing 無關）；clippy 本 PR scope 僅 doc_lazy_continuation（rust-1.95 撞中文 doc 列表，crate-wide 342 pre-existing 同類，LOW 格式非邏輯）。
+
+**Findings**：
+- MED-1（follow-up）：close-maker qty>0 殘留路徑（PostOnly + market fallback 都 qty>0）不被本 fix 收斂 → 若 use_maker_close 啟用，同類迴圈仍可發生。需 D2 reconcile follow-up ticket。部署前確認 demo use_maker_close 對 phys_lock 當前狀態（RCA 已隱證 = 未生效）。
+- MED-2（follow-up）：commands.rs 本 PR +73 → **1972 行，離 2000 hard cap 僅剩 28 行**（歷史最逼近）。下次任何 touch 前必先按 orders/governor/close 拆（E5 2026-04-24 已建議）。非本 PR blocker（仍<2000，well-cohesion exception）。
+- LOW-1：新增 doc comment 多行中文列表觸 rust-1.95 doc_lazy_continuation（與 crate-wide 342 同類），可順手調列表縮排。
+- LOW-2：收斂移除倉到 WS 重建之間短窗本地少一倉風控視野（self-healing + exchange-side conditional protection 仍在），transient 可接受。
+
+**durable 對抗 reasoning gain（沉澱）**：
+1. **「qty==0 浮點比較可靠性」判定法 = 追到 qty 賦值源頭看是字面常數還是運算結果**。本案 close_dispatch_qty_for_full_close 回**字面 0.0**（直接賦值非計算）→ `req.qty == 0.0` 精確比較安全，1e-12 漂移疑慮消解。對抗審查「浮點 == 0」必先 grep 賦值源；若是 round/scale 運算結果才需 epsilon。
+2. **「本 fix 能斷迴圈嗎」必對照 RCA 觀測的 order_link_id prefix 與 code 各路徑 prefix**。`oc_risk`(execute_position_close market qty=0) vs `oc_close_mf_fb`(close-maker fallback qty>0) vs `sh_risk`(shadow)。prefix 是判斷實際 runtime 走哪條 close 路徑的指紋 → 直接決定 narrow guard 是否覆蓋實際形態。
+3. **去掉 guard 跑安全測試證 FAIL = 驗 C-1 安全測試非 tautology 的硬方法**。perl -pi neutralize guard → cargo test 單測 → 看 FAIL → 復原。比只看「測試綠」更強，證明 guard 真的是 load-bearing。
+4. **attribution-no-pollution 核驗 = 追收斂用的移除函數到底碰不碰 record_trade/realized_pnl**。upsert(size=0)→positions_remove（純 HashMap remove + mirror）不經 apply_fill PnL 路徑 → 0 Kelly 污染。對照「合成假 close fill」會污染 edge 樣本。位置移除 ≠ 平倉記帳，是兩條獨立語意。
+5. **一個 narrow safety guard 的「殘留同類路徑」判定 = follow-up vs blocker**：(a) 本次觸發實例是否被覆蓋（是→不阻當前事故）(b) 擴大覆蓋是否違反上游 sign-off（BB mandatory guard：qty>0 收 110017 倉可能仍在→擴=誤刪真倉）→ 違反則本次絕不擴，標 documented follow-up（D2 reconcile 安全處理 qty>0）。narrow-but-safe > broad-but-mis-delete。
+
+## 2026-05-29 — P1-PACKET-C-HIGH1 banner channel-weight (APPROVE)
+- three_way.rs compute_outcome: count-based `failed.len()==3` → push-weighted `!slack_ok && !email_ok` => AllFail；banner 不計判定但仍進 failed 清單(line137)+仍被 dispatch_3way 呼叫(write_banner line94)。
+- 對抗驗證手法（可複用）：把 compute_outcome 還原成 count-based → T3/T3b/T4 即 FAIL（t3b:256 = `compute_outcome(false,false,true)==AllFail` 核心場景）；證明 test 翻轉非掩蓋 regression。T5 兩規則同 PartialFail 故不 fail = 正確控制組。
+- 端到端武裝鏈：分兩個 trait seam 各自覆蓋（three_way T4 = 真 dispatcher→AllFail；mod.rs t2/t10→TimerArmed；t3→SM-04 Defensive）。真 ThreeWayDispatcher 注入真 watcher 的單一整合 test 缺 = **C4 wire 階段職責**（single_watcher.rs:14 註明 C4 Box::new 注入），此 PR 不補不阻。
+- mod.rs 全 doc-only，evaluate_dispatch body 不動，AllFail→TimerArmed 既有正確。lib 3609/0。
+
+## 2026-05-29 — P2-110017-D2-RECONCILE round1+2 對抗審查 — APPROVE-WITH-CONDITIONS（0 BLOCKER）
+
+審查對象：worktree wt-c-d2 / branch fix/retcode-110017-d2-reconcile working tree（7 Rust 檔 +805 行未 commit，base HEAD 6091aaaa = D1 caf008b6 已含）。D2 = reconciler 對 DriftVerdict::Ghost 週期收斂；round2 加 S-6 單 symbol 點查 gate（BB CRITICAL 修法 A）。verdict = APPROVE-WITH-CONDITIONS（0 CRITICAL/0 HIGH；2 條件全 non-code）。lib 3618 passed/0；reconciler 45 tests（10 新 D2）全綠。
+
+**5 個 operator 問題明確答案**：
+1. **async/await race = 無**。process_ghosts 只在 Ok(raw_positions) arm 被呼（mod.rs:467+，S-3 滿）。point_query closure `move` 捕 `Arc::clone(&pos_mgr)` + 回 `async move`，await 前在 closure 內再 Arc::clone → **不跨 await 持 &PositionManager borrow**，無 lifetime/borrow 問題。TOCTOU：reconciler 是單 task（tasks.rs spawn 一個），rc_state 是 task-local &mut 無並發 mutator；engine_mirror 一輪一 snapshot 但點查 ConfirmedZero 才是權威 gate 非 mirror → await 期間無第二 task 改 baseline/mirror。
+2. **誤刪全鎖死 = 是**。S-1(mirror 無方向→不收斂) / S-5(streak 未滿首輪→不收斂，點查前先擋不發 REST) / S-6 StillHasPosition(點查 size>0→不收斂+log pagination_false_ghost) / S-6 QueryFailed(fail-closed→不收斂)，4 條 negative 全有對抗測試。`ghost_point_query_gate_is_load_bearing` 用同截斷情境對比 ConfirmedZero(誤刪) vs StillHasPosition(保留) 證 S-6 gate 翻轉結果 = 非 tautology，直接 lock BB CRITICAL regression。
+3. **110017 重入防護 = 確認**。grep 三 D2 檔（mod/orphan_handler/lifecycle）的 ghost 路徑 0 處 CloseSymbol/ipc_close/execute_position_close。D2 走 dispatch_ghost_converge→ConvergeExchangeZero→handle_converge_exchange_zero→converge_exchange_zero_close(commands.rs:1267，0 改動)。orphan 的 CloseSymbol(orphan_handler.rs:341) 是獨立路徑未碰。測試 ghost_converge_never_dispatches_close_symbol drain channel 證唯一命令是 ConvergeExchangeZero。
+4. **D1 冪等無雙刪 = 是**。converge_exchange_zero_close 未改：已移除倉 upsert_position_from_exchange(size=0) 回 false(no-op)、pending_close_symbols.remove no-op、0 record_trade/0 realized。D1 先收斂後 D2 撞同 symbol = 安全 no-op。handle_converge_exchange_zero 只在 removed==true 才 force_write 快照，no-op 不多餘寫。
+5. **audit removed_position 語意 = 需小修但非阻**。mod.rs:dispatch 後硬傳 removed_position=true（baseline 有倉推定），但實際 removed 由 handler 端 converge_exchange_zero_close 決定（D1 已先收斂則回 false → audit 說 removed=true 與事實不符）。語意誤導但**不影響安全/收斂正確性**，純 observability 失真。降為 MED follow-up（D2 dispatch 是 fire-and-forget cmd channel，reconciler 無法同步取得 handler 回傳；要修需加 response_tx 或 handler 端補寫 audit，超出本 PR scope）。建議改傳 false 或 payload 註明「dispatched, actual-removal-at-handler」。
+
+**audit schema 對齊**：spawn_ghost_converge_audit INSERT observability.engine_events 7 column（ts_ms/event_type/source/config_name/old_version/new_version/payload）與既有 spawn_reconcile_audit/spawn_orphan_audit 完全一致 → 0 新 migration（spec §7 對）。
+
+**streak self-clear（點6）**：last_ghost_keys 每輪以 current_ghost_keys 整體覆蓋（mod.rs 末 `state.last_ghost_keys = current_ghost_keys`），非 Ghost 的 symbol 下輪自動清出。ghost_streak_self_clears_when_ghost_disappears 證上輪 Ghost 本輪非 Ghost → 清空，無 stale streak。
+
+## 2026-06-01 — AEG-S1 V125 storage migration-DESIGN packet 對抗審（MIT 作者，獨立審）· APPROVE-WITH-CONCERNS（0 BLOCKER，5 CONCERN 進 E1）
+
+審 `docs/execution_plan/2026-06-01--aeg_s1_mit_storage_migration_design_packet.md`。**這是 design packet 不是 SQL**——審查門檻 = 設計沉默處 + 無證據支撐宣稱 + 排序錯位，非 SQL 語法。
+
+**Race note**：prompt 宣稱 base=324001c3，實際 origin/main=324001c3 但 local HEAD 已領先 2 commit（7cefadec SM contract test + 4e111d52 helper lib refactor，0 file overlap AEG storage）。§5 5a-5e 全 clean（read-only review，無 sibling 衝突）。stash@{0..2} pre-existing 標註不碰。
+
+**設計正確（verified against repo，非信 packet 自稱）**：
+- retention-replace 法（§7 remove+add idempotent + assert exactly-one job）= V075 既有 precedent，結構對。
+- klines/funding/OI/LS 全 `ts TIMESTAMPTZ`（V002:122/151/172/193）非 BIGINT → 用 `INTERVAL '1095 days'` 正確，**不**踩 V088:260 BIGINT-drop_after 地雷。
+- §4 明確**不**改 market.klines row shape → 正確規避 V114 compressed-twin + GRANT/ADD COLUMN 地雷（retention 改 job scheduler 不碰 compressed twin column DDL；klines 自 V006:31 已 compress_segmentby='symbol,timeframe'）。
+- 三 research hypertable identity 全含 time col（funding_ts/ts）→ 滿足 TimescaleDB「unique/PK 必含 partition column」硬規則。
+- PIT universe 正確委派 FND-2 + 既有 V058 `market.symbol_universe_snapshots`（已含 ts/is_delisted_at_asof/listed_at/delisted_at/payload_hash/source_uri 完整 survivorship PIT）；V125 不重造 universe 表是對的 scope。
+
+**5 CONCERN（退回 E1 寫 SQL 時補強）**：
+- C-1（LOW）編號 reservation 敘述失準：packet 說「V118-124 留 M5/M7/M12/M13」過 collapsed。實際 V105/V108/V110/V111 是 spec-only placeholder **未落 .sql**（README:294-300），V116=M13（非 M5/M7）。V125 選號不撞已 apply SQL 仍成立，但敘述須對齊 TODO:260 + v5.8 plan:335。
+- C-2（MEDIUM 排序）retention 365→1095 對 stated alpha 目標時序錯位：blocker 是資料**深度**（57 天，FND-1:75 確認 no 18mo）非 retention；min ts 2026-04-05，365d policy 2027-04 才 reap → backfill 寫 >365d 前改 retention 對 alpha **零效果**。須標明真正目的=「為未來 backfill 預留 headroom」非「現在解深度」，防 operator 誤判。
+- C-3（MEDIUM PIT 污染）data column 完整性約束缺席：FND-1:84 點明既有 Rust parser「missing/failed numeric → 0.0」。packet coverage_status 只管 **page 級** coverage，未對 per-row data col（funding_rate/open_interest/buy_ratio/sell_ratio）指定 NOT NULL 或 parse-fail→reject。若 writer 沿用 0.0，PIT history silent fake-zero 污染 = 回測 garbage。E1 須補 data col NOT NULL（或 nullable+coverage 連動）+ writer 契約 parse-fail=coverage-failure。
+- C-4（LOW-MED）DROP 修飾語未指定：§8「drop only if no accepted rows」未說 RESTRICT vs CASCADE（prompt 假設 RESTRICT 但 packet 沉默）。repo 慣例 replay 鏈用 CASCADE（V046/V050），research 三表若有 run_id FK（runs←pages←provenance）須明確 RESTRICT 防誤連帶刪 evidence + FK 方向。
+- C-5（MEDIUM）compression segmentby 未指定 + run_id 進 PK 壓縮交互：§6 只給「compression after 30d」未給 compress_segmentby。identity 含高基數 run_id，segmentby 含 run_id 會碎片化壓縮。E1 須明確 segmentby（建議 symbol/category 低基數）。run_id 進 hypertable PK 合法（V045 UUID PK 先例）但 §5「run_id 進 identity 讓 repeat run 各自保留=反 overwrite」設計意圖明確，須 E1 確認 consumer 查詢一律 filter accepted run，否則同 (symbol,ts) 多 run row 在回測重複計數。
+
+**durable lessons（沉澱）**：
+1. 審 **storage design packet（非 SQL）** = 先列「設計沉默處」（RESTRICT? segmentby? data-col NOT NULL? FK 方向? INTERVAL vs BIGINT?）；沉默 = 留給 E1 的炸彈，design 階段不補 → round N RETURN。
+2. **retention 數字改動必問「現在有沒有那麼深資料」**：extend 在資料未達舊閾值前對目標零效果，是「看似推進實則 no-op」排序錯位（V023 silent-noop family 的 design 版）。
+3. **provenance ledger ≠ data integrity**：page-level coverage_status 管「這頁抓到沒」，per-row NOT NULL/parse-reject 管「這格數值真不真」，正交；PIT 污染（0.0 fake）藏後者。
+4. **編號 reservation cross-check 必看三處**：`ls sql/migrations/`（已 apply）+ README spec-placeholder（V105/108/110/111 是未落 SQL 的 gap 號）+ TODO active reservation；單看 head 號漏 gap。
+5. **TimescaleDB INTERVAL vs BIGINT drop_after 取決 time col 型別**：TIMESTAMPTZ 用 INTERVAL，BIGINT(ms) 必用 BIGINT（V088:260）。審 retention design 必先 grep CREATE TABLE 的 time col type，不可預設 INTERVAL。
+
+**engine_mode**：paper 不啟 reconciler（spawn gate shared_client）+ converge_exchange_zero_close 內 is_exchange() 二重守衛 noop。demo/live_demo/live 生效，live 安全疊 S-6 BB point-query（單 symbol 不受 limit=20 截斷）。get_positions(Linear, Some(symbol)) 確認真為點查（position_manager.rs:164 push ("symbol", sym)），ghost_point_query 映射對空 list 與 size=0/side=None entry 兩種 Bybit flat 表示都回 ConfirmedZero、真倉回 StillHasPosition，正確。
+
+**8 條 + 9 條 checklist**：0 except:pass / log 用 %s（tracing structured）/ unsafe 0 / production unwrap/expect/panic 0（test expect 可接受）/ 跨平台硬編碼 0 / 中文註釋為主（doc 中英並列但中文完整）/ 檔案 mod.rs 1072 / orphan_handler 1097 / tests 1090 全 <2000 hard cap（pre-existing review-attention range）/ Cargo.toml 0 改 = 無新依賴 / D1+dispatch.rs+commands.rs converge 本體 0 改動（git diff --name-only 確認）。
+
+**Multi-session race §5**：5a/5e main 領先 worktree HEAD 2 commit（3423f0f7 three_way failsafe + f43214ef docs）；3423f0f7 只碰 notification_failsafe/{three_way,mod}.rs，**與 D2 七檔 0 overlap**（git show --name-only 確認）；f43214ef docs-only。**無 file-scope 衝突**，僅需 ff/rebase 上 main 再 commit（機械無語意衝突）。5b working tree 7 Rust + E1 memory.md 全屬本 task scope 無外洩。5c stash list 3 個無關 stash（main WIP / 8c branch / E1-rebase）**不碰**。
+
+**APPROVE-WITH-CONDITIONS 2 條件（皆 non-code，不退 E1）**：
+- C1（commit 前）：worktree base 6091aaaa stale，main 已 +2 commit。commit 前 ff/rebase 上 origin/main f43214ef（無語意衝突，僅同步）。
+- C2（deploy 後，E1/MIT acceptance）：observability.engine_events WHERE event_type='reconcile_ghost_converge' 查得 row（spec §5 避 D1「audit 寫了查無」坑）。
+
+**1 MED follow-up（不阻 merge）**：audit removed_position 硬傳 true 語意失真（見 Q5）。建議下個 observability ticket 修。
+
+**durable 對抗 reasoning gain（沉澱）**：
+1. **「git diff main 顯示 .rs 為 DELETION」= base stale 信號非改動**：worktree HEAD 落後 main 時 `git diff main` 把 main 領先的 sibling commit 顯示成本地 deletion（three_way.rs/notification_failsafe）。真 review target 是 `git diff`（working tree vs HEAD）非 `git diff main`。merge-base = HEAD 自己 → HEAD 是 main 祖先 → main 領先 = 該 ff，非衝突。判 sibling overlap 必 `git show --name-only <sibling>` vs `git status --porcelain` 求交集，非看 diff main 的 deletion noise。
+2. **注入 async closure 防 borrow-cross-await 的正解 = closure 內再 Arc::clone**：process_ghosts 注入 `move |sym| { let pm = Arc::clone(&captured_arc); async move { f(&pm).await } }`。closure 捕 Arc（owned）、async block 內再 clone → await 期間持有的是 closure-local Arc 非外部 &PositionManager borrow → 無 lifetime 衝突。對抗審查 async 注入點先看「await 期間持的是 owned 還是 borrowed」。
+3. **gate ordering 影響 REST 成本 + 安全**：S-5 streak 在 S-6 點查「之前」→ 首輪 Ghost 連點查 REST 都不發（streak 未滿先 continue）。既省 rate budget 又確保「暫態抖動不觸發任何外部 query」。對抗審查多 gate 串聯必確認順序：cheap/local gate（mirror/streak）在前，expensive/REST gate（點查）在後。
+4. **fire-and-forget cmd-channel dispatch 的 audit 語意天花板**：reconciler 派 ConvergeExchangeZero 後無法同步知道 handler 端實際 removed bool（unbounded_channel send 即返）。audit removed_position 只能記「派發事實」非「實際結果」。這類 IPC 異步派發的 audit「結果欄位」必標記 dispatched-not-confirmed，否則跨 D1/D2 冪等 no-op 時 audit 撒謊（說 removed 實際 D1 已先清）。修需 handler 端補寫或 response_tx。
+5. **點查映射對「兩種交易所 flat 表示」都要覆蓋**：Bybit Some(symbol) 對 flat symbol 可能回空 list 或 size=0/side=None entry。映射用 `any(position_info_to_view(p).is_some())` 同時吃兩種 → 空 list false→ConfirmedZero、size=0 entry is_some()=false→ConfirmedZero、真倉 is_some()=true→StillHasPosition。對抗審查交易所「無倉」判定必確認兩種 representation 都歸 ConfirmedZero。
+
+---
+
+## 2026-05-29 · E2 review — session gap cleanup G1/G2/G5 (branch fix/session-cleanup-g1g2g5, on origin/main d2bbc79a)
+
+**Verdict: APPROVE → E4 (G1 structural move 需 regression)**
+
+3 件全宣稱 0 行為改變 cosmetic/structural cleanup，逐項驗實：
+
+- **G1 pure-move (重點)**：C4 escalate handler + 4 helper 從 `handlers/risk.rs`(822→605) 搬到新 `handlers/notification_failsafe_escalate.rs`(231)。
+  - byte-equivalence 證法：`git diff` 取 risk.rs 刪除 217 行 vs 新檔搬移段落 `diff`（忽略空行）→ 唯一差異 = **3 行純裝飾 `═══` banner 註解被丟棄**（新檔 MODULE_NOTE 已取代其作用），其餘 11 import 行 + ~205 LOC struct/impl/fn body 逐字相同。0 邏輯改。
+  - caller 零改：`loop_handlers.rs:726` + 2 test (`c4_failsafe_wire_tests.rs:57,177`) 全走 `handlers::handle_notification_failsafe_escalate` namespace；mod.rs re-export 由 `risk::` 改 `notification_failsafe_escalate::`，皆 `pub(crate) use` → 對外路徑同。
+  - count 證 pure-move：`cargo test -p openclaw_engine --lib` = **3622 passed / 0 failed**（= baseline，無增刪 test 充數；C4 wire test 含在內）。
+  - 無 unused-import/dead_code warning（risk.rs 留的 3 import 仍用 19/7/20+2 次；新檔 import 全用）。
+- **G2**：main.rs 只在既有 `let btc_lead_lag_paper_enabled_env = false;`（baseline 已 false，無 flip）前加 6 行中文註解。var 僅 line 1148/1181 當 `paper_enabled_env=` tracing field。`should_spawn_btc_lead_lag_producer(has_demo,has_live)`（panel_aggregator/btc_lead_lag.rs:79）決策不碰此 var；D-hygiene fix af92e2ca 未回退。
+- **G5**：single_watcher.rs 註解改引 `singleton-registry.md §2.4.2`（FAILSAFE_FEED_SENDERS）/§2.4.1（SHARED_WATCHER）/commit a8ba146c — registry 實有此兩節，引用正確。
+
+**1 LOW（非阻塞，pre-existing 非 E1 touch）**：`c4_failsafe_wire_tests.rs:15` `//!` doc-comment 仍寫 `handlers/risk.rs::handle_notification_failsafe_escalate`，搬移後變 stale；E1 diff 未動此檔。建議 E1 順手更正引用路徑（comment-only，零功能影響）。
+
+**race 5/5 PASS**：fetch 後 origin/main d2bbc79a 未動；HEAD==origin/main（0/0，G1/G2/G5 是 working-tree 未 commit 改動）；status 5 檔全屬本 scope 無外洩；3 個 pre-existing stash（C3/8c/E1-rebase）非本 session 一律不碰。
+
+**教訓**：pure-move review 黃金證法 = (1) diff 刪除段 vs 新檔 `diff` 揪出唯一差異並判其是否純註解 (2) 全 lib test count 不變 (3) caller namespace path 不變 + re-export visibility 同級。三者齊 = 真 0 行為改變。
+
+---
+
+## 2026-05-29 — P2-BASIS-PANEL-INFRA Rust writer 對抗審查 — RETURN to E1 (1 HIGH)
+
+審查對象：branch `feature/basis-panel-infra`（worktree wt-basis，未 commit）。新 `panel_aggregator/basis.rs`（539 LOC，12 test）+ mod.rs wire（74 ins）+ V115（MIT 寫，未碰）。verdict = **RETURN to E1**（1 HIGH：freshness 接線錯位）。
+
+**7 對抗重點結果**：
+1. 公式 parity（last 非 mark）= ✅ 結構性證明。panel `(last/index-1)*100` signed；strategy `compute_basis_pct` = `((perp/ip)-1).abs()*100`（funding_short_v2/mod.rs:157，guard `ip>0`）。`.abs()` 相等。關鍵：`PriceEvent` struct（openclaw_types/src/price.rs:31）**無 mark_price field**，只有 last_price + index_price → 分子用 mark **結構性不可能**。live ctx 同源：step_4_5_dispatch.rs:285 `price: event.last_price` + index_price 同 event。replay/context_builder.rs:143 `positive_finite_opt(event.index_price)`。同一 WS broadcast 餵 live + panel = source-level parity。
+2. fail-closed index≤0 = ✅ 雙重防線。cache 層（on_ticker_update match：never-seen + index≤0 不入 cache）+ flush 層（line 167 `index_price<=0.0 → continue`，不發 INSERT）。V115 NOT NULL on index_price/basis_pct/perp_last_price + writer skip = 不寫 0/NULL row。test_fail_closed_never_seen_index_not_cached 覆蓋 None/0/-1。
+3. latest-cache 不收假值 = ✅。match arm 順序正確：`Some(ip>0)` 才更新 (last, ip)；`(_, Some(prev_ip))` 只刷 last 保留舊 index；`_` 不入 cache。不 drain（flush 用 iter() 不 take）。test_latest_value_cache_sparse_index_frame + test_flush_pool_unavailable_cache_retained 覆蓋跨 flush 保留。
+4. leak-free = ✅。純 point-in-time（last/index-1），無 rolling/shift/window/lookahead。
+5. wire 每-frame dispatch = ✅。run-loop 每 Ticker frame 無條件呼 on_ticker_update（含 None index 刷 last）— 與 funding（touched 才 ingest）不同但對 basis 正確（last 須每 frame 刷）。sync &mut self（無 await），HashMap insert，非交易 hot path（panel collector task），不阻塞。`new` 簽名未改 → 9 caller 0 破壞（grep 確認 BasisAggregator::new 只 mod.rs:165 一處）。non-cohort silent return。
+6. **freshness pub-fn 未接 = HIGH RETURN**（推翻 E1「無框架可 mirror」flag）。E1 flag 事實錯誤：(a) Python `[66] check_panel_freshness`（checks_derived_ml_hygiene.py:389）是 table-driven loop over `[("panel.funding_rates_panel","funding"),("panel.oi_delta_panel","oi_delta")]` — 加 basis = **一行 tuple** `("panel.basis_panel","basis")`，ABSENT→PASS_SKIP 處理 pre-deploy 不阻塞。runner.py:1183 已掛。(b) sister 兩 panel funding_curve.rs/oi_delta.rs **無任何 Rust 端 freshness fn**；全靠 Python [66]。→ E1 寫的 Rust `check_basis_panel_freshness` 是 **0 production caller + 0 sister 先例的 dead pub fn**（grep：只 mod.rs:62 re-export + test:530，無 external consumer）。違 CLAUDE §七/skill「不可變 dead pub fn」+ §3.6 healthcheck 配對。
+7. offline-only / 硬邊界 = ✅。無 IPC slot（spec §6.4）；無 engine_mode（market 共享平面）；無交易路徑；無 unsafe/unwrap/panic；中文註釋 + MODULE_NOTE；539<800；無新 deps；非 singleton（PanelAggregator 持有）；跨平台 grep 0 hit。
+
+**RETURN 修復清單（1 項）**：
+- HIGH：把 `panel.basis_panel` 接進既有 Python `[66] check_panel_freshness`（checks_derived_ml_hygiene.py:412 panel_tables 加 `("panel.basis_panel", "basis")`，runner.py:412 doc line 補述）。同時**刪除**或降級 Rust `check_basis_panel_freshness` + `BasisPanelFreshness` enum（dead pub fn，無 sister 先例；除非 PA 明確要 Rust 端 in-engine freshness 並本輪接 caller）。傾向：刪 Rust dead fn + 用 sister 既有 Python [66] 一行 wire。
+
+**教訓**：E1 flag「無框架可 mirror 故 follow-up 可接受」必獨立查證 — 本案 `rg check_.*freshness helper_scripts/db` 一查即見 [66] table-driven loop。dead pub fn 透過 `pub` re-export 逃過 rustc dead_code warning（E1「0 warning」≠ 無 dead code）。sister panel 既有 wire pattern = mirror 的真來源，不是 Rust 端自造新 fn。
+
+**chain**：RETURN E1 修 → 重 E2 → E4（Linux V115 land double-apply + 60s flush 實寫 row + Python [66] 含 basis PASS + 公式 parity runtime 驗）。
+
+---
+
+## 2026-05-30 LG-3 T1+T4 對抗審查（重派；前 E2 撞 session-limit 0 report）
+
+審查：T1 `feature/lg3-t1`@`5d303560`（supervised_live_sm/ 5 新檔 1477+）+ T4 `feature/lg3-t4`@`45a23068`（V104 + writer.rs + checks_supervised_live_audit.py + e3_grep guard 1199+）。base `cc6c54d0`，真實 HEAD `3895d819`（**非 prompt 給的 `8f6c2d27`；fetch 為準**）。report: `docs/CCAgentWorkSpace/E2/workspace/reports/2026-05-30--lg3_t1_t4_adversarial_review.md`。
+
+**Verdict**：T1 = APPROVE-WITH-CONDITIONS（0 BLOCKER/0 HIGH；MED-1 seam follow-up；可進 E4）；T4 = APPROVE-WITH-CONDITIONS（V104/writer/guard 0 BLOCKER/0 HIGH；**MED-2 = healthcheck `[59]/[60]/[61]` 未接中央 `helper_scripts/db/passive_wait_healthcheck/runner.py`（不同目錄，`git grep` 0 hit）= silent-dead，建議退 E1 補 wire 後重 E2**）；seam 三方一致；T1+T4 merge clean。
+
+**1. 雙重「差點 fabricate」教訓（最重要，自打臉）**：
+- (a) **Mac bash 通道間歇靜默 + 多行 Read 注入顯示假象**：親遇假 BLOCKER —— Read mod.rs 顯示重複 `mod tests`+markdown fence+`tests_impl`；reconciler line138 顯示 `InSync;` 帶分號。**全經 `python3 print(repr(ls[N]))` 逐字驗為渲染假象**，真實檔乾淨。
+- (b) **我自己反覆報假 finding（最嚴重自打臉）**：對 T4 healthcheck 連續寫了 3 個版本的**未經真讀 finding** —— 先「5-SELECT schema 驗」、再「`_is_registered_in_runner()` 硬回 True 假證據」、再「auto-glob line 21-22 自動發現」。根因：`git diff --stat` 的 `.../` 截斷路徑害我**兩次猜錯真實路徑**（猜 `program_code/openclaw_api/...` 也錯）+ worktree 目錄中途消失致 Read cancel。**全部撤回**。最終 `git diff --name-only`（全路徑 = `helper_scripts/healthchecks/checks_supervised_live_audit.py`）+ `git cat-file -p`（rc=0, 195L）逐行真讀：真檔是 **3 個 `[59]/[60]/[61]` passive-wait check**（table_exists / recent_rows SKIP-not-FAIL / engine_mode_purity），3 個 `cur.execute`，自帶 `CHECKS` list + `main()`，**無 `_is_registered`、無 line 21-22 TODO、非 auto-glob**。真讀後成立的 finding = **MED-2：check 未接中央 `helper_scripts/db/passive_wait_healthcheck/runner.py`（不同目錄，T4 diff 0 改、`git grep` 0 hit）= silent-dead**。**鐵律：(i) `git diff --stat` 的 `.../` 是截斷路徑，必用 `git diff --name-only` / `git ls-tree -r --name-only` 取全路徑；(ii) load-bearing finding 必引真讀到的行；取不到寧標「未驗證」也不憑印象寫 finding——E2 該抓別人的 happy-path/捏造 trap，本審自己連犯 3 次才靠 git cat-file 真讀糾正**。
+
+**2. SmAction 17-enum 三方逐字一致**（MIT Gate 2b DEFERRED item 3 由本審完成）：T1 `SmAction.as_str()`（state.rs:180-196）= T4 `AuditAction.as_str()`（writer:50-72）= V104 CHECK（V104:148-164）= MIT canonical baseline，**順序逐字全一致**。並行雙 branch 各自定義 enum 仍對齊。
+
+**3. audit-first 原子性正確範式**（mod.rs drive:200-285）：`is_terminal()&&is_closing_event`先擋（CLOSED 冪等 no-op）→ try_transition None 走 forensic+Err（state 不動）→ `audit_sink.emit` Err → error!+Err（state 不動）→ **唯一 `self.state=outcome.dst` 在 emit Ok 之後（line 242）**。`is_closing_event`(mod.rs:306) 存在且正確（9 收斂事件）；CLOSED+非closing→try_transition→IllegalErr fail-loud。
+
+**4. reconciler read-only 驗法**：`grep -c '\.drive('`=0 + `grep -c 'self\.state ='`=0 → 不直寫 SM，回 `ReconcileDecision`。2-cycle 防抖（prev_cycle_disagreed flag）；missing view→agree（None 不誤判 drift，:104）；authoritative 投影不出→Indeterminate（fail-closed 不貿然 force_close，:122-132）。18 test 含 ac_t1_1~7 全覆蓋 + audit-fail/idempotent-closed/illegal-forensic。
+
+**5. 並行雙 branch seam 反模式（MED-1，同型 LG-1 T3）**：T1 `AuditSink`+`AuditRow`（9 欄子集），T4 `SupervisedLiveAuditWriter`+`SupervisedLiveAuditEvent`（21 欄），語意對齊非同一型別。T1 自註「T4 對齊 21 欄」但無整合 ticket。並行開發必然，不退 E1，要求 PA/PM 在 T5 整合指定單一 seam（T4 writer）+ adapter 補 11 NOT NULL 欄。
+
+**6. merge 衝突驗法**：`git merge-tree --write-tree A B`（rc=0=clean / 1=conflict）+ 0 conflict marker；hunk anchor T1`@@-99`(strategist_scheduler 後) vs T4`@@-97`(secret_env 後) 不同 anchor。async-trait dep 在 Cargo.toml line34 + 28 檔已用 → 兩 trait 可編譯。
+
+**7. healthcheck silent-dead 偵測法（§3.6）正解 + MED-2**：新 check 必查「是否接進實際會 fire 的中央 runner」。本案 T4 check 在 `helper_scripts/healthchecks/`，中央 passive-wait runner 在 **不同目錄** `helper_scripts/db/passive_wait_healthcheck/runner.py`，T4 diff 5 檔 0 改 runner + `git grep checks_supervised_live_audit feature/lg3-t4 -- '**/runner.py'` = 0 hit → **MED-2 silent-dead**（check 寫好但不會被自動跑）。同型本 memory 上一條 V115 [66] 教訓。**驗法：`git grep <check_module> <branch> -- '**/runner.py' '**/__init__.py'`，0 hit = 未接 = silent-dead**。
+
+**8. healthcheck 真查表驗法（真檔）**：`git cat-file -p feature/lg3-t4:helper_scripts/healthchecks/checks_supervised_live_audit.py` 真讀 = **3 個 `cur.execute`**：`[59]` to_regclass 表存在（缺→FAIL）/ `[60]` recent_rows 近 60min count（0→**SKIP** 非 FAIL，supervised-live 未啟用無事件是預期）/ `[61]` `count WHERE engine_mode NOT IN ('live','live_demo')`（>0→FAIL paper 洩漏）。read-only；DSN 環境變數不硬編碼；`main()` 任一 FAIL→exit 1。非假 PASS。（注：SKIP-not-FAIL 是正確設計——passive-wait check 對「功能未啟用」回 SKIP 不誤報故障）。
+
+## 2026-06-01 — scanner 入場漏斗 edge 回饋退化迴圈審計（HEAD 2e809b96, read-only）
+
+任務：掃 scanner 選樣漏斗同類於根因#1（james_stein 正 edge 歸零→demo gate 死循環）的退化迴圈。已排除 gates.rs cost gate + bb_breakout OI。
+
+**CRITICAL 新發現（CONFIRMED）— scanner universe 選樣層的 exploration_only 排除迴圈**：
+`scanner/scorer.rs:800-806` best_route 選擇 `.filter(|j| !matches!(route_mode, "market_gate"|"exploration_only"|"risk_policy_gate"))` + `:842 None => return None`。任一 symbol 的 5 策略全落 exploration_only/market_gate → score_ticker 回 None → symbol **整個被踢出 candidate list → 不進 active universe → 不訂 WS → 不 tick → 0 fill**。
+退化鏈：根因#1 把正 edge 歸零→`shrunk_bps<0`→`robust_negative_min_trades=30`（或 market_judgment.rs:152-167 的 `immature_negative_min_trades=10`）→ `route_mode="exploration_only"`（scorer.rs:414-434 / market_judgment.rs:164-172）→ best_route filter 排除 → symbol 出局 → 凍結負 edge 永不更新 → 永久排除。**無 auto-expiry/decay**：無任何路徑把 dormant cell 的 shrunk_bps 衰減回 0 或重置。
+**矛盾點（誤導性註釋）**：dispatch 層 `on_tick_helpers.rs:582-590` 明說 exploration_only「recorded WITHOUT suppressing new entry」（audit-only，不 continue）；但這是 moot——symbol 早在 universe 層被 scorer.rs:842 篩掉，根本到不了 dispatch。`scanner_legacy_new_open_block_reason:363-368` 把 exploration_only 列 market_blocked 但已降級 audit-only。兩處共存製造「exploration_only 不阻擋」假象。
+
+**驗法**：route_mode 三態硬篩在 scorer.rs:800-806（universe 選樣，硬）vs on_tick_helpers.rs:582（dispatch，audit-only）。判斷某 route_mode 是否真阻擋交易要看 **universe 層 best_route filter**，不是 dispatch 層 legacy block。
+
+**其餘 4 問結論（無新 bug）**：
+- Q3 方向過濾器：`bb_reversion/mod.rs:42-43` `expected_dir=if is_long{1}else{-1}; signal.expected_dir==expected_dir` = 同向放行，**正確未寫反**；signal=None→return true（fail-open，配合 live 產線關閉 btc_lead_lag 為 no-op，正確）。
+- Q4 first-detection deadlock：bb_breakout 已修（mod.rs:530-544 is_none guard 前先 auto-clear）。ma_crossover/grid/bb_reversion 無同型 squeeze-timestamp 無過期 guard。confluence.rs PersistenceTracker 有 now_ms-first_ts 計時非永久。
+- Q5 regime mismatch：`classify_market_regime`(market_judgment.rs:20) 輸出 trending/range_bound/one_way_shock/quiet/mixed；market_block_reason(44-114) 用 **numeric** mc.trend_score/range_pct/dir_pct 直接比閾值（非字串比 regime），無 enum-mismatch 永假。confluence hurst_regime（trending/mean_reverting/uncertain）來自獨立 indicator 源，未與 classify_market_regime 交叉。
+- Q2 AND 漏斗：confluence 是 **soft size-scaler**（compute_score None→full qty fallback, score_to_qty_pct 平滑無斷崖），非硬二元 gate；market gate 閾值（trend_min 0.45 / breakout_min_trend 0.50 / dir_pct 0.8~1.8）對多數靜盤 alt 偏緊但屬調參非 bug。真正硬漏斗 = scorer.rs:800-806 route_mode 三態篩。
+
+最該修：scorer.rs:800-806 best_route 對 exploration_only 的硬排除 + robust_negative cell 無 decay/expiry → 與根因#1 構成同類自我強化排除迴圈。建議 RETURN to PA：exploration_only 應保留在 universe（降權不踢出）讓其能繼續收 fill 自我修正；或給 robust_negative cell 加 time-decay/periodic re-exploration 出口。
+
+---
+
+## 2026-06-02 V125 (aeg_alpha_history_storage) + V126 (schema_hygiene_cleanup) 對抗靜態審查 — APPROVE 雙進 MIT dry-run
+
+**Verdict**: V125 APPROVE / V126 APPROVE → 雙進 Linux dry-run gate（MIT）+ 後續 commit。0 BLOCKER / 0 HIGH / 0 MED。LOW×2（觀察）。前一輪 design-packet 5 CONCERN（C-1..C-5）E1 全折入且**真到位**。
+
+**§5 race**：HEAD==origin/main==344025f9（0/0），無 sibling window 衝突；3 pre-existing stash 不碰；4 檔全 untracked（符合「未 commit」task 描述）。read-only review 0 race blocker。
+
+**Mac 上意外可做的真 PG 驗證（homebrew psql + 本地 PG16，無 timescaledb）**：
+- V125 contract test 8/8 PASS on real PG（Guard A 缺欄 RAISE / Guard B REAL RAISE / C-3 NOT NULL reject NULL funding_rate+sell_ratio / double CREATE 冪等）。
+- V125 actual-file DDL（schema+6 CREATE TABLE+4 Guard A+Guard B，line 149-567）真 PG execute 0 syntax error；**4 個 C-3 column 實測 is_nullable=NO + double precision**（funding_rate/open_interest/buy_ratio/sell_ratio）——最重要 fake-zero PIT 防線 empirical 確認非僅 static。
+- DDL+Guard 層 double-apply 冪等：第二次只印 "already exists, skipping"，**0 Guard A/B FAIL**（Guard A 不在 populated schema false-positive）。
+- Timescale preguard 真 PG fail-loud 確認（無 timescaledb → RAISE EXCEPTION 不靜默 skip）。
+- V126 python static test 8/8 PASS。
+- **仍待 MIT Linux dry-run**：hypertable 建立 / compress segmentby=symbol / retention 1095d job / klines 365→1095 replace / Guard C 後驗 / decision_context_snapshots DROP COLUMN on hypertable / runner-tx×顯式 BEGIN/COMMIT 交互。Mac PG 無 timescaledb 無法驗。
+
+**load-bearing 驗證（全對齊 repo，非信 SQL 註釋）**：
+- runner tx 語義：migrations.rs:336 `no_tx = sql.starts_with("-- no-transaction")`；V125/V126 皆非 → sqlx tx 包裹。顯式 BEGIN/COMMIT = V115/V090/V092/V097/V113 既有 production-proven 範式。sqlx 遇 SQL 內 COMMIT 提前關 tx → 後續語句跑 autocommit。V115 post-COMMIT 是純 RAISE NOTICE；**V125 post-COMMIT Guard C 是會 RAISE 的真驗證**——差異點，fail 模式=DDL 已 commit + migration row 未寫 = startup fail-loud → MIT dry-run 裁。
+- C-3：V125:387/439/491/492 四欄 `DOUBLE PRECISION NOT NULL`（real PG 實測 NO）。
+- C-5：V125:599/634/667 compress_segmentby='symbol'；orderby='<time> DESC, run_id'（run_id 高基數留 orderby）；Guard C:846 斷言 segmentby='symbol'。
+- klines retention：V006:66 確有 365d job（replace 非 no-op）；V002:122 ts=TIMESTAMPTZ→INTERVAL 正確；V075:127-129 remove+add 範式精確抄；§D 不碰 14d compression（V006:31-32）。
+- V126 recent_sequences/regime_1h 排除：V005:267 `c.recent_sequences,` + V005:234 `c.regime_1h,` 確為 scorer_training_features view-fronted；7 dropped col 全 grep history **0 view 引用**（只 V017 建 + V017_rollback 手動 + V021 是 shadow_exits 不同表同名 disagreed）；CC BLOCKER 正確。
+- V126 Packet3 hypertable DROP COLUMN 風險：decision_context_snapshots 是 hypertable(V003:96 1d) 但**全 history 0 compression policy**（grep exit 1）→ 無 compressed chunk → 不撞 TimescaleDB 限制。predicted_q50 上 idx_dcs_predicted_q50(V017:126-128) column-owned auto-drop 非 RESTRICT-block，正確。
+- 跨平台/secret/forbidden：V125+V126 grep `/home|/Users|password|secret|hmac|token` exit 1；hard boundary 全在 comment；0 觸碰 live_execution/auth/order path。
+
+**LOW×2（不阻塞）**：
+1. V125 §C compression nested EXCEPTION(WHEN duplicate_object OR undefined_column) 抄 V114，但本表無 column-level GRANT（V114 twin 主因），re-apply twin 風險低於 V114；nested EXCEPTION 是 belt-and-suspenders，無害。
+2. V126 python test:148 `count(*) from trading.{bare}` 粗篩 vs 實際 guard 用 `count(*) INTO v_dependents`(pg_depend)——test 句式冗餘非 SQL 缺陷（test 過因 SQL 確無 `select count(*) from trading.<damaged>`）。
+
+**durable lessons（沉澱）**：
+1. **Mac 偶有 homebrew PG（無 timescaledb）= 半個真 PG gate**：bare-SQL contract（Guard A/B + NOT NULL + CREATE 冪等 + DDL syntax + 真 is_nullable 反射）可在 Mac 真 PG 跑，遠強於 mock；只有 hypertable/compression/retention/Timescale-reflection 須 Linux。E2 審 V### 先 `psql -lqt` 探本地 PG，能跑的 contract 層直接真 PG 驗。
+2. **顯式 BEGIN/COMMIT in tx-wrapped migration 的 post-COMMIT 語義差異**：V115 範式 post-COMMIT 純 NOTICE（autocommit 安全）；若放會 RAISE 的真驗證（V125 Guard C），fail 模式 = body 已 commit + migration row 未寫 = startup fail-loud（非半套無痕）。審「抄 V115 BEGIN/COMMIT」必分辨 post-COMMIT 段是 NOTICE-only 還是 validation-that-can-raise。
+3. **hypertable DROP COLUMN 風險取決『是否有 compression policy』非『是否 hypertable』**：TimescaleDB 擋的是 compressed hypertable 的 DROP COLUMN；hypertable 但 0 compression policy（grep `compress.*<table>` exit 1）→ 安全。審 hypertable DDL 改動必 grep 該表 compression policy 史。
+4. **「N 欄不 view-fronted」必 grep 全 migration history 不只 CREATE 點**：V005 view 可能被後續 CREATE OR REPLACE append col（memory 既有 line 1880 lesson）；同名 col 在不同表（disagreed@shadow_exits vs @decision_context_snapshots）不混淆，才放行 column DROP。
+5. **design-packet CONCERN → SQL 折入核驗 = 逐條 file:line 對 packet anchor + 真 PG 實測**：不接受「comment 說折入了」自報，要 code line + 行為驗證（C-3 → real-PG is_nullable=NO；C-5 → Guard C 斷言）。
+
+---
+
+## 2026-06-01 — E5 #3+#4 helper_scripts/lib 整併對抗審查（working tree，base 324001c3）— PASS to E4
+
+審查對象：新 `helper_scripts/lib/{__init__,stats_common(333),pg_connect(83),tests/test_stats_common(284/31 tests)}` + 8b/8c metrics 改 re-export+seed-pin wrapper（−228/−297）+ 3 report `_get_conn`→`connect_report_pg` + runner/a2_maker。net −314 LOC。Verdict = **PASS to E4（0 CRITICAL/0 HIGH/0 MED；1 LOW informational 不退）**。
+
+**6 crux 全綠**：
+1. **n_eff ceil canonical = DORMANT 非 live**（最高風險項，三方獨立證）：(a) ceil 數學正確（5m bar，h-min forward return 跨 ceil(h/5) 根獨立 block，floor 高估獨立性 → over-PASS bias，符合 LdP overlap-deflation round-up）。(b) 8b `HORIZONS=(15,30,60)`+`PRIMARY_HORIZON=30` 全 ceil==floor；grep **每個** `_summary_stats` caller 皆 `horizon_min=PRIMARY_HORIZON`，無 numeric `horizon_min=` literal → 0 改。(c) **runner `_n_eff(len,hold_hours*60)` 唯一 call（line512），`hold_hours:int`（`--a1-hold-hours type=int default=24`）→ horizon 恆 60 倍數=5 倍數 → ceil==floor 結構性恆等，不可達 {6,10,14}**。8c `_n_eff_horizon_overlap` 本就 ceil（canonical 取自它）→ 定義上 0 改。A2 proxy horizon=60。E1 不僅判斷對且 loudly surface（stats_common MODULE §3 + n_eff docstring + 2 專測 + 8c smoke `_check_n_eff_horizon_ceil`）。
+2. **re-export 完整性 = 0 unresolved**：8b/8c 各 `comm -23` 比 pre/post 模塊級 def，removed defs 與 re-export 清單**逐一 1:1**（8b 10 + bootstrap/_pbo 留 local wrapper；8c 同）。`wilson_ci_95` 在 8b sweep 真用；`_normal_cdf/_skew/_kurtosis` 各 1 ref（透 PSR 間接）。**實 import 模塊**驗 runner/adapter：`r._n_eff.__module__==stats_common.n_eff_horizon_overlap`、`_safe_float_8b` callable、adapter `dsr_with_k` from stats_common → 0 NameError。
+3. **seed-pin 正確**：8b boot=20260515/pbo=20260516；8c boot=20260518/pbo=20260518 — 全對 PRE 真值（git show HEAD: 8b line155/571、8c line311/780 親驗）。8c `rng_seed` param 正確 thread 入 wrapper。
+4. **pg_connect scope 正確**：`connect_report_pg` 僅 3 report 消費；DSN+app_name+timeout 全對 PRE 真值（8b `_8b_`/120000、8c `_8c_`/180000、candidate `_alpha_candidate_`/180000）。`_get_autonomy_pg_conn`/cron/research/canary 不在 diff 不碰；canary `wilson_ci_95(successes,total,z)→(0,0)` 異 contract 變體刻意不併。
+5. **golden test 有 bite**：獨立 fresh-math 重算 skew=1.1384199576606164/kurt=2.788/Wilson(100,60)=(.50200..,.69060..)/Φ(1.96)=.97500../n_eff ceil(100,14)=33 floor=50 — 全逐字相符非 tautology。31 tests 0 skip/xfail。
+6. **scope clean**：本 task diff 僅 helper_scripts/**+SCRIPT_INDEX；dirty tree 的 program_code SM-parity test + rust sm_contract + project memory grep 0 引用 stats_common/pg_connect = 隔壁 session → race 5c 不碰。
+
+**behavior-preservation 決定性證據**：`/tmp/e2_baseline_wt` detached worktree @HEAD 跑 8b/8c smoke + **full packet JSON dump（sort_keys，全 PSR/DSR/CI/PBO/Wilson/n_eff 數值）** baseline vs WT diff → **byte-identical**（8b 24728B/8c 4208B）；8c smoke_cli 11/11 identical；AST parse 11 檔全 OK。
+
+**1 LOW（不退）**：real-PG `connect_report_pg` runtime Mac 無 PG+ssh down 無法實連；E4 須 Linux 跑 3 report wrapper 確認連得上 + `pg_stat_activity` 顯示 application_name。屬環境限制非 defect（DSN/timeout 邏輯已 monkeypatch 3-case 單測）。
+
+**race 5/5 PASS**：HEAD==origin/main==324001c3（0/0）；3 pre-existing stash（C3/8c/E1-rebase）5c 不碰；dirty 非 scope 檔屬隔壁 session 不 revert。
+
+**durable gain（沉澱）**：
+1. **dormant vs live 判定鐵律 = 追 caller 的 horizon/param 取值域，非看 fn 理論行為域**：n_eff ceil≠floor 只在非-5-倍數 h；grep 三方 caller 證可達 input 全 5 倍數 → 恆等。對抗 latent-bug-fix PR 必證「可達 input 域」。
+2. **pure-refactor 黃金證法升級 = detached worktree @base 跑 full-output JSON dump 雙跑 diff**：勝過信 smoke PASS line（PASS 只覆蓋結構欄位，數值漂移看不到）。`git worktree add --detach /tmp/x HEAD` 不動 dirty tree/不碰 stash；sort_keys JSON dump 攤平全數值逐字 diff。
+3. **re-export 完整性 = `comm -23 <(pre defs) <(post defs)` 求消失 def 必對上 re-export 清單**，再 `python3 -c import` 真載驗 `.__module__`（static grep 漏 transitive-only symbol 如 PSR 內部 _skew）。
+4. **seed-pin/DSN-fidelity 必對 PRE 真值（git show HEAD:file grep literal）不信 wrapper docstring 自稱**：防 docstring 寫對但 code transcribe 錯。
+
+---
+
+## 2026-06-01 · B-1 place_order mainnet fail-closed guard (bybit_rest_client.py) — PASS to E4 (1 LOW return)
+
+Verdict: **PASS to E4** · 0 CRITICAL / 0 HIGH / 0 MED · 1 LOW (test-hygiene, return to E1, non-blocking). 對抗 #1 bypass + #5 LiveDemo 兩個危險類全清。
+
+- **discriminator 正確性鐵證 = 窮舉枚舉 `_normalize_env` × `_BASE_URLS` 而非肉眼讀 if**：寫 19-input python 表（含 `'  live  '`/`mAiNnEt`/whitespace/None/`livedemo`無底線/`production`）印 normalized→base_url→guard_fires→host_is_mainnet 四欄，程式判 BYPASS(mainnet host but _env!=mainnet)=0 + MISFIRE(guard fires non-mainnet)=0。**關鍵不變量**：guard 與 base_url 同吃 normalized `env`（ctor line 300 `self._env=env` / 303 `_base_url=_BASE_URLS[env]`，全檔僅此一次賦值、post-ctor immutable）→ 結構性不可能 diverge。`_BASE_URLS` 兩個指向 mainnet host 的 key（`mainnet`+`live`）**都** normalize→`mainnet`。`live_demo`→demo host→guard 不 fire = LiveDemo 不誤殺。
+- **bite 必雙向 mutation 實測（非信「62 passed」）**：(a) guard 改 `if False and …` → 2 mainnet test FAIL、2 demo/live_demo PASS；(b) guard 改 `if self._env != "mainnet"` → 4 test 全 FAIL（demo/live_demo 因誤擋 `api-demo.bybit.com` 而 FAIL = 真 catch LiveDemo regression）。證 refuse 方向 + 非 regression 方向都有牙。mutation 用 `/tmp` md5 backup + Edit + restore + `diff`==empty + md5 比對復原，working tree 0 殘留。
+- **caller-path grep 推翻「prompt 只說 2 caller」**：`grep -rn '\.place_order('` 找到**第 3 條** production 構造 `live_session_routes.py:276 BybitClient(environment="mainnet")`（live slot `bybit_endpoint` 檔缺省→mainnet）。但讀 `_sweep_live_orphan_positions`(:624) 該 mainnet-env client **只呼 `get_positions`(read)**，平倉走 `_ipc_command("close_position")` Rust IPC；Python REST 寫路 `_rest_close_position_reduce_only`(:605) 已 LIVE-BOUNDARY-FREEZE-1 hard-disable(raise 409)。→ **production 無任何 mainnet-env client 呼 place_order**，guard = 真 defense-in-depth 閉 latent future hole，0 行為改動、0 LiveDemo regression。印證舊 memory F5(line 1513) 已被 remediate。
+- **fail-closed before I/O 確認**：guard 是 place_order body 第一條(line 857)，早於 body 構造(865)+`self._post`(910)。`clean_restart_flatten.py` caller 137/178 用 `except Exception` 但 raise 在 HTTP 前 → 安全屬性成立（非 swallow-then-act；script 只是 log+continue，且 mainnet 非 dry-run 已在 script line 36 先擋 exit 7）。retry/retCode/signing/timeout diff = NONE（不違 §四）。
+- **LOW（return E1, 非阻）**：`test_place_order_mainnet_refused_via_live_alias`(:711) **未裝 MockTransport** → 僅靠 guard 達成 hermetic；guard 一旦 regress 此 test 會真打 `https://api.bybit.com/v5/order/create`（mutation 實測噴真 Bybit `retCode=10003`）。修法 = 比照 sibling `_no_http`(:689) 加 `_explode` mock + `assert recorded == []`。屬 test-logic 不屬 typo → 退 E1（E2 不代寫）。
+- **報告 reproducibility 釐清**：prompt 單檔指令 `python -m pytest …test_bybit_rest_client.py` = **47 passed**（Mac 上 `python` 未 alias 需 `python3`）；E1「62 passed」= 該檔 47 + `test_bybit_rest_client_parity.py` 15 合跑。兩者皆綠，建議報告寫明 count 隨 invocation。
+
+---
+
+## 2026-06-01 — P2b strategy_ai_routes.py 拆分（2552→1541）對抗審查 — RETURN to E1（1 CRITICAL）
+
+審查對象：working tree（base HEAD 0a16b772）。E1 behavior-preserving refactor：strategy_ai_routes.py 拆出 `closed_pnl_pagination.py`(696) + `demo_snapshot_payloads.py`(435)，+2 test。Verdict = **RETURN to E1（1 CRITICAL：跨模塊 caller 簽名不兼容；0 HIGH；2 LOW 不退）**。
+
+**CRITICAL（拆分破壞 Live 端點）**：`_closed_pnl_history_cursor_payload` 為 DI 加了 3 個 **無預設 keyword-only** 參數（`engine_owner_lookup`/`record_failure`/`clear_failures`）。route 內 caller（strategy_ai_routes.py:1276）有更新傳入，**但跨模塊 caller `live_session_account_routes.py:537`（`@core.live_router.get("/closed-pnl")` → `get_live_closed_pnl`）沒更新**，仍只傳 9 kwargs → 每次呼叫 `TypeError: missing a required argument: 'engine_owner_lookup'` → **`GET /api/v1/live/closed-pnl` cursor mode 生產 500**。E1「behavior-preserving / re-export 完整」對此 caller 為假：re-export 讓 symbol importable，但**簽名變更不向後兼容**。`live_session_account_routes.py` working tree 未改（git status clean）= E1 漏掉這個 caller。**0 test 覆蓋 get_live_closed_pnl**（唯一 hit 是 static asset test），故 172 tests pass 沒抓到。修法：route call site 補 `engine_owner_lookup=lambda engine: routes._engine_owner_strategy_map(engine)`（live 用 `_engine_owner_strategy_map` 或其 live 對應）+ `record_failure`/`clear_failures`（live 對應的 failure-state fn，需確認 live 是否共用同一 `_CLOSED_PNL_BYBIT_FAILURES` 或有獨立 state）。**這是 E1 設計決策題（live 該用哪個 failure-state seam），故 RETURN 不代寫**。
+
+**驗法（決定性）= `inspect.signature(fn).bind(*HEAD_caller_kwargs)`**：把每個跨模塊 caller 的實參餵給新簽名 `.bind()`，TypeError 即證不兼容。比肉眼讀簽名可靠。配合 `grep -rn '<fn>(' program_code | grep -v def` 找出**所有** caller（本案 routes 內 1 個更新了，跨模塊 1 個漏了）。**鐵律：DI refactor 加無預設參數 = 對所有 caller 的 breaking change；必窮舉 caller 不只看本檔**。
+
+**DI seam #1 正確性已證（demo 端）**：route call site `engine_owner_lookup=lambda engine: _engine_owner_strategy_map(engine)` + `record_failure=_record_closed_pnl_bybit_failure`（name ref，call-time eval）→ patch `routes._engine_owner_strategy_map`/`_get_rust_client` 在 handler 跑時才解析 = patch observed。`test_bybit_closed_pnl_route.py::test_..._reconciles_four_strategy_sources` patch routes 命名空間後斷言 `oc_dm_3/DOGEUSDT → grid_trading`，只有 patched lookup 經 route→`_attach`→`_strategy_from_order_link_id`→`engine_owner_lookup(engine)` 鏈被看到才成立 → 12/12 route test PASS = seam 真確。kept-in-routes seam（`_get_rust_client`/`_engine_owner_strategy_map`/`_record_/_clear_closed_pnl_bybit_failures`/`_CLOSED_PNL_CACHE`/`_CLOSED_PNL_BYBIT_FAILURES`）grep 證全留 routes，pagination 模塊只在註釋提及無真引用 = 無 cache/failure-state copy 洩漏。
+
+**behavior-preservation 證法**：`git show HEAD:strategy_ai_routes.py > /tmp` 後逐函數 `extract + diff`：14 個未改函數 byte-identical（cursor codec / window bounds / 跨視窗分頁 loop / PG fallback SQL 全逐字同）；唯 2 處 comment-only diff（刪 stale `；與 :2187 一致` 行號引用，benign）。3 個 DI 函數 diff = 純 seam swap（`_engine_owner_strategy_map(engine)`→`engine_owner_lookup(engine)`、`_clear_/_record_closed_pnl_bybit_failure()`→`clear_failures()/record_failure()`）+ docstring，零邏輯改。
+
+**pre-existing-failure claim 驗真**：combined run（governance reload suite + phase2 coverage）2 fail（`TestDynamicRiskRoutes::test_status_no_deployer` + `test_status_happy`）。用 `git show HEAD:` 換回 2552-LOC 原檔 + `mv` 移走 2 新模塊 → 同樣 2 fail / 154 pass（identical）→ 確證是 `importlib.reload(main_legacy)` 跨 suite 污染 artifact，非 refactor 引入。**用 cp+md5 backup 換檔，跑完 md5 驗證原樣還原（dirty tree 禁 git stash）**。
+
+**0 dup def**（28 函數各跨 3 模塊唯一）；LOC 1541<2000 ✓；4 模塊 import-clean；13 re-export 全 accessible；cross-platform/except:pass/f-log/blocking-lock/detail=str(e)/私有穿透 全綠。
+
+**race 5/5**：5a 無 sibling（origin 324001c3，HEAD ahead 4/behind 0）；5b scope 乾淨（僅 routes M + 2 模塊 + 2 test untracked，broader dirty tree 是隔壁 P2a/memory session 不碰）；5c 3 pre-existing stash 不碰；5e review 中重 fetch 無新 push。
+
+**教訓**：(1) **DI refactor 把 module-global 改成無預設注入參數 = 對該函數所有 caller 的 breaking change**；E2 必 `grep -rn '<fn>(' program_code` 窮舉 caller，逐個 `inspect.signature().bind()` 驗，不能只信「本檔 call site 改了」。(2) **re-export 完整 ≠ 簽名兼容**——symbol importable 不代表舊 caller 還能呼叫成功。(3) 拆分後 **跨模塊 importer 的 caller** 是最易漏的盲區（本案 live_session_account_routes 連 test 都沒有 → 全靠 E2 caller grep 抓）。
+
+## 2026-06-02 · P4 replay full-chain push-down review (uncommitted, HEAD 9afb811a) — VERDICT PASS
+
+**Scope**: `app/replay_full_chain_routes.py` 1931→953 LOC，抽 20 純函式/PG fetcher 至新
+`replay/full_chain_fixture.py`(1158 LOC)。REF-21 security-audited，root #8 byte-identical 要求。
+
+**怎麼證 byte-identity（THE GATE）**：不信 E1 的 /tmp BEFORE。自寫 dual-capture：用 importlib
+把 HEAD route source 載成 `app._head_route_e2`（`__package__="app"` 讓相對 import 解析），與 working-tree
+module 在**同一進程**用同一組 fake 驅動 `/run`+`/coverage`，同一 redact path → **1060 行 canonical JSON
+BEFORE==AFTER**（含 registered manifest_jsonb + fixture 檔內容）。比信對方單向 capture 強：消除 redaction
+邏輯依賴。**這是 in-process dual-load 對照法，REF-21/replay 類重構複用。**
+
+**怎麼證 settings-root 深度**：(a) `Path(...).parents[N]` 算術——app/ 與 replay/ **同層**(都在
+control_api_v1 下一層)，兩者 `parents[5]`==srv/（empirical print）。(b) 端到端——manifest_jsonb 內
+`scanner_config` == 真實 `settings/risk_control_rules/scanner_config.toml`(9 key dict)，BEFORE==AFTER。
+若深度錯(parents[6]→TradeBot/)該 key 會缺(None→omit)。**深度錯是 silent evidence corruption，必雙證：路徑算術 + 真檔載入。**
+
+**E1 報告 claim 與碼不符（記下，碼是對的）**：E1 寫「fixed parents[5]→parents[6]」。實際 working-tree
+line 130 是 `parents[5]`，且 `parents[5]` **才是對的**（parents[6] 會壞）。碼正確、敘述反了。**對抗教訓：
+report 敘述可錯，必親驗碼的實際值，不照抄 claim。** 15/16 純 helper code 與 HEAD byte-identical（唯一 diff
+是 resolve_settings_root docstring 中文化 + 加深度註解，可執行行相同）；3 DI fetcher 僅 def 名 + 2 注入參數
+差異，SQL/欄位/reason code 全 identical；build_manifest_jsonb 僅 type-only `body:Any`(解 app/ 耦合)。
+
+**caller-grep（沿用 2026-05-15 DI lesson）**：moved symbol 0 個外部 importer（只 test 經 monkeypatch+
+read-access），main.py 只 import `full_chain_replay_router`(在 __all__)。orchestrator 一律裸名呼叫
+re-export → patch 流通；3 thin wrapper 用 `_fcf.` 委派(綁 get_pg_conn 後整塊被 patch)。invariant
+`replay/`⊅`app/` held（fixture 只 import stdlib，0 app import）。25p/1s baseline + dual-capture 200/200。
+
+**tests/replay/* ModuleNotFoundError(program_code)** 是 pre-existing rootdir artifact（那批 test 檔
+本次未動，`git diff --stat HEAD` 空），不追。
+
+**953 LOC judgment call → 同意保留 in-route**：強推 <800 需把 prepare/coverage/register/start/finalize
+orchestrator 下移，但那會逼出 15+ DI 注入面（P2b-CRITICAL cross-caller hazard）且 orchestrator 緊耦合
+`app.*`(main_legacy/auth/db_pool/replay_quick_routes IPC seam)——而 `replay/`⊅`app/` 禁這些下移。
+953 在 attention(800)/cap(2000) 之間，route 純 parse→call→format，正確取捨。
+
+---
+
+## 2026-06-02 — FIX-1/2/3 focused re-review（daily_kline_backfill + gate_b_artifact）· RETURN to E1
+
+**Context**：對 E1 修的 3 個 fix 做 focused re-review（HEAD==origin==344025f9，改動未 commit，untracked）。verdict = **RETURN E1（1 MEDIUM 退回，FIX-1 APPROVE）**。
+
+- **FIX-1（Rust window_end UTC 對齊）= APPROVE**。`window_end_ms=(now/PERIOD)*PERIOD` floor 到今日 00:00 UTC、window_start 同步對齊、now_ms 獨立保留傳 strict_filter。親算驗證：末根 in-window bar（open=base+(L-1)*PERIOD）close_time=window_end<=now → 過 closed filter；今日未收盤 bar 被 window 上界 `start_time>=window_end` 先擋（不雙計）；資料完整 expected==observed gap=0 pass。window_start 對齊**無**少回填一天（窗仍 L 天整數天語義）。新測試真 bite（對照組 unaligned window_end=now 平移 13h47m 擠掉 base 那根 → expected=3/observed=2 假 partial，復現舊 bug 形態）。cargo check Finished 4.67s 0 error。bin 12 + lib backfill 16 test 全綠（含 test_fix1_*）。
+
+- **FIX-3（Rust 註解）= RETURN MEDIUM（comment 仍不準）**。FIX-3 目的就是修註解準確性，卻引入**新的**不準描述。bin MODULE_NOTE :16-18 + 行內 :362-368 宣稱「無憑證 → BybitRestClient::new 建構即 Err / EXIT_DB / coverage 無法產出」。**證偽**：bin 用 `BybitEnvironment::Demo`（:369），secret_slot()="demo"→is_live_slot=false、is_mainnet=false；`new()` :1093-1103 在空憑證下，非 mainnet 走 else 分支**只 warn!，回 Ok(Self) with empty key**，建構**不**失敗。真正 fail-closed 在 **request time**：`get()` :1215-1217 `if !has_credentials() return Err(NoCredentials)` → paginate 回 Err → bin per-symbol fetch-fail 分支（:408-443）記 **failed coverage(observed=0)**，跑完全部 symbol 退 **EXIT_OK(0)**，apply 模式還寫 failed-status provenance row。即：行為仍安全（無假值、誠實 failed），但**機制與 exit code 與註解相反**（operator 預期 EXIT_DB 硬中止無 provenance，實得 EXIT_OK + failed provenance）。教訓再現「FIX-3 換掉一個錯描述（public 不簽名）又寫進另一個錯描述（建構即 Err）」——comment-accuracy fix 必親讀被描述源碼 new()+get() 全路徑驗證，不可採信自陳。
+
+- **FIX-2（Python gate_b verdict）= APPROVE 但附 partial-capture 邊界 finding（建議同批補）**。總 miss 路徑（capture_lags 空 / capture_lag_ms 全 None）已真堵死：`symbols_with_capture_lag==0`（只計 capture_lag_ms is not None）→ TRANSITION_BUT_NO_CAPTURE，排序在 SLOW/PASS 前；2 新測試 bite（!=PASS 且 ==新枚舉）；枚舉並入 __all__；閾值 _CAPTURE_LAG_PASS_MS=5*60*1000 與 gate_b_ws:50 對齊。**邊界漏徑（empirical 證實）**：transition_count=3 但只 1 symbol 抓到（2 轉移無 capture）→ `==0` 不成立 → 落 else → else 只 flag「present 且 slow」，缺 capture 的 symbol 當「不慢」靜默吞 → **verdict=PASS_CAPTURE**。partial capture-miss 與 FIX-2 自陳要 catch 的「轉移但管線捕捉失敗」同類，`==0` 只擋全 miss 不擋 partial miss → 邊界**不完備**。緩解：實際 listing transition 罕見（plan 述 ~Q4 sample），n=1 時不觸發（n=1 必落 PASS/SLOW 或 NO_CAPTURE）；hole 僅 n>=2 mixed 觸發。修法建議：`symbols_with_capture_lag < transition_count` → TRANSITION_BUT_NO_CAPTURE（或 partial 變體）。Gate-B plan §5 verdict 表未規範多 symbol partial 規則（plan 用 PASS_PHASE_TRANSITION 等不同 taxonomy，impl 已演進），故按工程判斷裁不完備。
+
+- **教訓**：(1) comment-only fix 的審查 = 把註解每句話當 claim 對源碼逐路徑證偽，FIX-3 是「修註解卻寫錯」反例。(2) 「fail-closed 效果安全」≠「fail-closed 機制如註解所述」——effect-safe 不豁免 mechanism-accurate。(3) 新增 verdict 枚舉要查「等價失敗的 partial 形態」是否同樣落網（==0 vs <total）。(4) cargo check 須在 rust/openclaw_engine cargo root 跑，srv 非 cargo root。
+
+## 2026-06-02 SM Option-2 step (i) Rust IPC 治理面對抗審查（ADDITIVE，PASS）
+
+任務：E1 加 SM Option-2 收斂 step (i) 的 Rust governance IPC surface（7 檔 ADDITIVE，未 commit）。封閉 `governance_lease_bridge.py` 的 half-wire（先前 Rust 無 lease dispatch arm → ERR_METHOD_NOT_FOUND → Python fail-closed None）。PA 設計 `2026-06-02--sm_option2_convergence_migration_design.md` §5 step (i)。
+
+**Verdict：PASS to E4。0 CRITICAL / 0 HIGH / 0 MED / 1 LOW（cosmetic 測試名，非阻塞）。**
+
+7 維全綠（含兩個 dangerous class）：
+1. **fail-CLOSED 全路徑** ✓：7 method × {engine-down primary()=None→ERR_INTERNAL / 缺param→ERR_INVALID_REQUEST / channel send fail→ERR_INTERNAL / tick-actor Err→ERR_INVALID_REQUEST / oneshot dropped→ERR_INTERNAL / timeout(5s)→ERR_INTERNAL}。**無任一 permissive/empty-success**。acquire 對 Production 無 auth → AuthNotEffective Err（test 親證）；is_authorized 誠實回 GovernanceCore（本身 !enabled/Frozen→false）。共用 `await_governance_reply` helper 鏡像 `force_governor_tighter`。
+2. **lease contract byte-match** ✓（獨立讀 Python 源）：`lease_ipc_schema.py` + `governance_lease_bridge.py` vs Rust。acquire params `intent_id/scope/ttl_ms/profile/source_stage` 完全一致；response `{lease_id,outcome}`，`LeaseId::Active(s).as_str()=s`+outcome"Active"、`LeaseId::Bypass.as_str()="bypass"`+outcome"Bypass"（governance_emit.rs:78 親驗 == Python L102-106 註釋）；release `{lease_id,outcome∈Consumed/Failed/Cancelled}`→`{ok:true}`（parse_release_response 讀 ok is True）；get → serde LeaseObject（sm/lease.rs:254 `pub lease_id:String` 默認 serde key = parse_get_response 要求的 `lease_id`）；not-found Rust Err → Python get_lease_via_ipc raw_result 非 Mapping → None。**無 mismatch（mismatch=seam 靜默 all-diverge）**。
+3. **無 SM 邏輯重實作** ✓：handler 只 CALL 既有 GovernanceCore（acquire_lease/release_lease/get_lease_by_id/is_authorized/status/lease.get_live/risk.constraints）+ private parse_profile/parse_lease_outcome（純字串白名單 3-value，非 transition rule）。
+4. **ADDITIVE** ✓：`openclaw_core` 完全 UNTOUCHED（diff stat empty）。唯一 `-1` = `ipc_server/handlers/mod.rs:48` re-export 行 rewrap 加 7 新 handler 名（舊 3 個 handler 名仍在），純 import merge 0 behavior。無既有 dispatch arm/SM enum/transition 改動。
+5. **round-trip** ✓：dispatch.rs:362-372 直呼 handle_*（送 PipelineCommand）→ tick actor loop_handlers.rs:735 catch-all `other =>` → handle_paper_command（sync，7 新 arm）→ governance::handle_*（sync 無 await）→ oneshot send。await_governance_reply 收。無 deadlock；timeout 5s bounded。注意：新 7 handler 是 **sync**（不像 NotificationFailsafeEscalate/CancelAllOrders 需 async 上層攔截），正確留在 sync handle_paper_command。
+6. **read projection 唯讀** ✓：is_authorized/status/get_lease_by_id/auth.snapshot_states/lease.get/lease.get_live/risk.constraints 全 `&self`。handler 簽名 `&mut TickPipeline` 是 dispatch 慣例，實際 call 不 mutate。get_status 兩讀（status + snapshot_states）非原子但 handler sync 無 await yield，tick actor 單線程獨佔 GovernanceCore → 無 interleave。
+7. **test bite** ✓：lib `3734 passed; 0 failed`（含 16 新：13 handler round-trip + 3 dispatch）。fail-closed test 真會 fail-if-permissive（test_acquire_production_without_auth_fails_closed assert is_err + "authorization not effective"；unknown profile/ttl/outcome/lease_id 全 assert is_err；exploration_bypass assert `{lease_id:"bypass",outcome:"Bypass"}` 鎖契約；get_lease assert serde 含 lease_id key）。dispatch test assert engine-down → ERR_INTERNAL（非 -32601 非 success）。真實 make_test_pipeline GovernanceCore 非 mock。
+
+**LOW（cosmetic，不退）**：`ipc_server/tests/dispatch.rs` `test_governance_acquire_lease_missing_params_invalid_request` 名稱含 "invalid_request" 但實 assert `ERR_INTERNAL`（no-channel fail-closed 先於 param 驗證）。註釋誠實說明且另有 `_with_channel` test 蓋真 param-validation 路徑。名稱誤導非邏輯 bug。可選改名 `..._no_channel_fails_closed`，backlog 即可。
+
+§3 OpenClaw：跨平台 0 hit ✓ / 新 production handler 無 unsafe/unwrap/expect/panic（用 `?`+map_err+match；.expect 僅 test）✓ / 中文 MODULE_NOTE + fail-closed rationale ✓ / 檔案 governance.rs 267+580<800、tick_pipeline/mod.rs 1450（+77，pre-existing 大檔，<2000 cap）✓ / Bybit API 未觸 ✓ / 無新 migration ✓ / 非新 singleton（GovernanceCore 由 tick actor 持）✓。
+
+**預存非 E1（不追）**：(1) `stress_tick_latency_benchmark` FAIL（1077μs>1000μs wall-clock perf，tests/stress_integration.rs git HEAD line953 未被 E1 動，Mac 負載 flake，非邏輯）；(2) clippy `deprecated_semver` price_tracker.rs:132（diff stat empty = 非 E1 檔）。
+
+**race §5**：5a/5e origin/main eae0b890 全程未動（0/0），無 sibling push。**非本任務 scope 的 working-tree leftover**（TODO/多 agent memory/MEMORY.md/WORKLOG/CLAUDE_CHANGELOG + E1 P2b/P4 Python 報告 + 3 project memory + Operator/PA design）= 隔壁 session 改動，**不 revert**（§5c + multi-session rule + stash@{0} 帶「accidentally dropped」警告）。我只審 7 Rust 檔。
+
+**教訓**：contract byte-match 必獨立讀 Python 源全文（不信 E1 「親驗」一句）— 本案逐一對 lease_ipc_schema 常量 + as_str() Rust enum + LeaseObject serde field 三方核，全 match。grep 出現 garbled `pub n {`（flaky channel artifact，同 b85ac3f3 報告）時改用 Read tool 直讀 source 取 load-bearing 事實。新 sync handler vs async-intercept 變體的路由分流（catch-all vs 顯式攔截）要對 loop_handlers 確認，否則 sync handler 誤判需 async 攔截。
+
+## 2026-06-02 — Gate-B probe parquet-mirror crash fix（mirror_jsonl_to_parquet）focused re-review · APPROVE
+
+Context：E1 修 Linux 45s smoke 暴露的 `mirror_jsonl_to_parquet` 崩潰（`duckdb.IOException: No files found ... rest.parquet`）。改 2 檔（gate_b_artifact.py mirror 重寫 + test_gate_b_probe.py +5 test，32→37）。HEAD==origin==a99bfa1d，未 commit。Verdict = **APPROVE / PASS to E4（0 CRITICAL/HIGH/MED；0 LOW 退回）**。可 commit。
+
+**根因雙證（親跑 duckdb 1.5.3 復現）**：(B) `COPY (...) TO ?` 真的炸 `_duckdb.IOException: No files found that match the pattern ".../old.parquet"`——TO 目標把 `?` 當字面 glob，確認 E1 根因 B 屬實。(A) 舊 per-channel try/finally 只 `con.close()` 不 catch → IOException 傳播到 `_finalize` → `run_probe`→`main`→未捕 traceback→SystemExit 非零（verdict 已先寫但進程整體 traceback 退）。fix 消除 raise = 對症。
+
+**Part B 正確性（關鍵對抗點：pyarrow 缺失）**：本 Mac **無 pyarrow** 但 duckdb 1.5.3 `read_json().write_parquet()` 仍成功（duckdb 自帶 native parquet writer，不依賴 pyarrow）→ roundtrip test 真跑過、parquet 檔 322B 非空殼、readback count==寫入 count。**MODULE_NOTE line 15-16 仍寫「依賴 duckdb + pyarrow」是 stale（pyarrow 非必要）但屬 pre-existing 註釋、不在 E1 diff、非本 fix 引入**——不退（surgical scope）。channel→檔名映射用真 `_CHANNEL_FILES`，輸出 `{channel}.parquet` 正確。count 用 `int(cnt[0]) if cnt else 0` 防 None。
+
+**Part A 3 層非阻斷（窮舉異常型別實測）**：(1) per-channel catch `(duckdb.Error, OSError, ValueError)`：corrupt JSONL→`duckdb.InvalidInputException`（**是 duckdb.Error 子類**，親驗）被接，且異常 fire 在 `read_json`（eager schema sniff）、**無 partial parquet 殘留**→test `not rest.parquet.exists()` 成立；好 channel 不連累。(2) topic_summary 同 tuple catch + logger.warning。(3) 外層 `except Exception` 安全網：read-only dir → csv `open()` 噴 `PermissionError`(OSError) 傳到外層→`failed`；非 tuple 內型別（MemoryError/RuntimeError 等）也被外層接。**唯一不接 = BaseException(KeyboardInterrupt/SystemExit)，正確不吞**。leak 分析：per-channel 漏接的型別必落外層 Exception → 仍不 raise，0 真 leak。
+
+**5 新測試真 bite（雙向 mutation 實測，/tmp md5 backup+Edit+restore，working tree 0 殘留 md5=eb8dd685 復原驗）**：
+- Mutation A（移 per-channel try/except）→ `test_mirror_corrupt_jsonl_partial_not_raise` FAIL（落外層→`failed`≠斷言的`partial`，且好 channel 失 parquet）= 真守 channel 隔離契約（不只守 no-raise，斷言 `== "partial"` 鎖隔離語義）。
+- Mutation B（外層 except 改 `raise`）→ `test_mirror_unwritable_dir_failed_not_raise` FAIL（PermissionError 傳播≠`failed`）= 真守 no-raise 契約。
+- roundtrip / readback / skip(duckdb missing via monkeypatch __import__) 全正向驗。
+
+**契約點 4 親驗（end-to-end dry-run probe）**：`_finalize`(:153) verdict 寫在 :168，mirror 在 :170，mirror 回 dict 整塊嵌 `write_manifest` 的 `parquet_mirror` key（非當錯誤）；exit code(:238) 只看 `capture_verdict`(PIPELINE_ERROR→1，else 0)，與 mirror status **完全解耦** → partial/failed 不影響 verdict、不影響 exit code、不 raise。E1 宣稱屬實。
+
+**hygiene 全綠**：scope 嚴格 2 檔（research/ 無第 3 檔 dirty）；R-0 隔離維持（top-level 僅加 `import logging` stdlib，duckdb 仍延遲 import，0 生產模組 import）；跨平台 added-line 0 命中 `/home/ncyu|/Users/`；except:pass 0（用 logger.warning %s 非 f-string）；detail=str(e) 無（reason 字串是研究 artifact 非 HTTP response，不適用該規則）；中文優先註釋（why 充分，0 大段英文 added block）；file 407/727 行 <800；非 migration/非 Bybit/非 singleton。37 passed in 0.51s（=32+5）。
+
+**race 5/5**：5a HEAD==origin==a99bfa1d(0/0)，2h 窗無 sibling push；5b scope 乾淨；5c 3 pre-existing stash（C3-recovered/8c/E1-rebase）不碰；5d read-only 不 commit；5e review 中無新 push。dirty meta-doc（TODO/多 agent memory/MEMORY/WORKLOG/CLAUDE_CHANGELOG + untracked 報告/project memory）= 隔壁 session，不 revert。
+
+**教訓沉澱**：(1) **「依賴 X+Y」型 MODULE_NOTE 註釋必親驗實際 runtime 依賴**——duckdb native parquet writer 不需 pyarrow，stale 依賴宣告會誤導後續環境配置；本案因 pre-existing 不在 diff 故不退，但記下 duckdb≥1.x 自帶 parquet 不需 pyarrow 的事實。(2) **非阻斷 fix 的 bite 必雙向 mutation**：移內層 catch 證隔離契約 / 改外層 raise 證 no-raise 契約，兩者測不同層、缺一不可；斷言 `== "partial"`（非僅 `not raise`）才真鎖隔離。(3) **corrupt-input 的 catch tuple 完整性靠親跑確認異常 MRO**（duckdb.InvalidInputException ⊂ duckdb.Error），不肉眼推；且查「失敗時有無 partial 檔殘留」（本案 read_json eager-fail 故無殘留，write_parquet-fail 則需另查）。(4) **exit-code 與 side-effect-status 解耦**是 fail-safe 收尾的正解：verdict 先寫、mirror 後跑且其 status 不回灌 exit code。
+
+---
+
+## 2026-06-02 — 多日 trend 診斷 harness E2 對抗審查（NO-GO-A 命脈）— RETURN to E1（1 HIGH 接線 + 1 MEDIUM 測試洞）+ QC 升級 1 件（推論過強）
+
+範圍：`helper_scripts/research/multiday_trend_diagnostic/`（stats/signals/cost_model/pnl/data_loader/harness 6 檔 + 23 test）working-tree 未 commit。任務 = 審手刻 numpy 統計正確性（NO-GO-A 直接靠 Ljung-Box）+ leak-free 紀律 + read-only。23 test 全綠。
+
+**手刻統計正確性全部 PASS（獨立 cross-check 對拍，scipy 在 Mac 可用作 oracle）**：
+- **Ljung-Box（命脈）數值正確**：Q 對獨立 reference impl byte-match（AR(1)φ=0.4 → Q=175.467001 兩邊一致）；ρ_k 標準 biased acf（full-variance denom）正確；χ² 上尾查表對 scipy.chi2.ppf 全 df 1-20 誤差<0.01；`positive_autocorr=(significant & rho_sum_low>0)` 正確區分 anti-persistent(φ=-0.5 顯著但負→False)/正 AR(1)→True/白噪音→False。**math 層站得住**。
+- JB 對 scipy byte-match（7416.598）；ADF t-stat 對獨立未縮放 OLS match 1e-3（證 column-scaling t-stat-invariant 對）+ 平穩方向正確；PCA n_eff 對手算 (Σλ)²/Σλ² match 1e-2；年化 ×365 對。
+- leak-free `_shift1`=唯一 PIT gateway（A/B/C/D 全過、naive 繞過）；leak-test 真 bite（注入 identity `_shift1`→test 抓到）。daily 成本 vs round_trip_cost_bps 一致（2 方向變動=full RT 21bps 無雙計）；flip_hold_min 邏輯對（turnover −68%）。read-only 三點達標。0 硬編碼 path / 檔全<800 / SCRIPT_INDEX 已更 / §5 race 5/5。
+
+**HIGH-1（命脈接線斷裂）**：NO-GO-A 的 `_inject_ljung_box_gate` **只在 `main()`(harness:666) 呼，不在 `run_diagnostic()`** → (a) `run_diagnostic`（唯一可 import/被測 API）永不產 NO-GO-A（synthetic trending：positive_autocorr=False 但 verdict=SURVIVES）；(b) `_decision_tree`(:372-376) 死碼 `lb=...` + 誤導註釋（原意 inline）；(c) fail-fast 順序實作反向（先算全 tree 後 override，雖最終 precedence Step0>Ljung>cost 對但脆弱）。production CLI `main` **確產 NO-GO-A**（親驗 override verdict=NO-GO-A）→ operator artifact 正確故非 CRITICAL；但命脈無法被 `run_diagnostic` 層測。修法：gate 移入 `run_diagnostic` 末段（Step0 後、用 data_quality 的 lb），main 不再 override。
+
+**升級 QC（HIGH 級方法論，非 E1 code bug）**：NO-GO-A 鍵在「BTC 日報酬 LB(lag10) 無正自相關」對「k=20..90 多日 TSMOM 有無 edge」是**過強充分條件**。反例親驗：slow-trend(250d)+白噪音→k=60 momentum 命中 59.3%（真 edge）但 LB(daily,lag10/20)=False→FALSE-KILL。雪上加霜 power：730d 對 φ=0.05/0.10 LB power 僅 8%/30%→弱日動量也測不到→誤觸。protocol §0 自認 power 不足卻 §5 把低 power LB 路由到**終局 kill 的 NO-GO-A**（非 INCONCLUSIVE）。harness 忠實實作 → protocol §4.7/§5 缺陷。建議降 INCONCLUSIVE-A 或補 k-horizon 動量持續性/OOS hit-rate 作 NO-GO-A 真依據。
+
+**MEDIUM-1（測試洞）**：0 test 斷言 NO-GO-A verdict 真 emit——只在 `assert v in {...}` allow-set(:295)，無 test 呼 `_inject_ljung_box_gate`/`main()`。配 HIGH-1 雙重盲（命脈 verdict 既不在被測 API 內、也無 end-to-end 斷言）。
+
+**LOW（cosmetic）**：ADF/ARCH 的 `_ols`(stats:149/:155) numpy 2.4.4 matmul SIMD 偽 RuntimeWarning（即使矩陣良態 cond~1380、結果 finite、t-stat 對手算 match）噴 stderr 污染 artifact；建議 `np.errstate(all="ignore")` 包 lstsq/inv。非數值錯。
+
+**教訓沉澱**：(1) **「verdict 命脈」必查它 emit 在哪個函數、被哪個 test 直接斷言**——本案 NO-GO-A 只在 CLI `main` override，`run_diagnostic` 測一輩子碰不到；「23 test 全綠」對命脈 verdict 是假安心。(2) **手刻統計『算對』≠『推論對』**：Q/ρ/χ² 全 byte-match 但「日報酬無自相關⟹多日 TSMOM 無基礎」是 horizon-mismatch 過強推論；審手刻統計分兩層——數值正確性（對拍）+ 推論妥當性（檢定 horizon 對不對得上信號 horizon、小樣本 power）。(3) **小樣本+終局 kill verdict 是危險組合**：power 模擬（φ-sweep×N trials 算 detection rate）是揭露「低 power 假陰性當鐵證」的標準手法，進統計 review template。(4) **scipy Mac 可用 / Linux 無**——審手刻統計用 Mac scipy 作 oracle 對拍（Linux 跑時純 numpy），比肉眼/手算可靠。
+
+---
+
+## 2026-06-02 — 多日 trend 診斷 harness FIX 重審（FIX-1/2/5 + TSMOM/coherence code 正確性）— RETURN to E1（1 MEDIUM 退化輸入 fail-open + 1 MEDIUM docstring/code 不符）+ 2 LOW doc-drift
+
+範圍：focused re-review E1 對上輪 RETURN 的修復。`multiday_trend_diagnostic/{harness.py(904行),stats.py(601行)}` + `tests/`（23→33）。§5 race 5/5（fetch 乾淨、HEAD==origin/main、無 sibling push、3 個 stash 全舊且非本 session，未動）。33 test 全綠（7.88s 親跑）。
+
+**修復確認 PASS**：
+- **FIX-1（上輪 HIGH-1，接線斷裂）真修好**：`_inject_ljung_box_gate` 已刪（grep 0 live def，僅註釋 + 1 test 斷言 `not hasattr`）；verdict gating 移進 `run_diagnostic`（:351-368：先算 tsmom_correct_scale + data_quality 再跑 `_decision_tree`）；`main()`(:891) 只讀 `report["decision_tree"]["verdict"]` 不覆寫（:890 註釋明示）；`_decision_tree` 無殘留死碼 `lb=...`；fail-fast 順序正確（Step0 → TSMOM gate → leak/naive → cost）。**被測 API run_diagnostic 自身產終 verdict**，test_verdict_produced_inside_run_diagnostic_not_main(:471) 直呼驗證。
+- **FIX-2 Newey-West HAC 數值正確**：`_newey_west_mean_tstat`(:395) 對我獨立 oracle（同式手刻 Bartlett LRV）byte-exact match（L=0/1/5/29 diff=0.00e+00）；overlap deflation 真生效（重疊 MA(30) 序列 naive_t=12.09→hac_t=3.24，壓重疊虛高）；lag=k-1 對。statsmodels Mac 無（只 scipy）故用同式 oracle 對拍。coherence gate `_summarize_tsmom`(:372) sig_pos/sig_reversal 邏輯與描述一致，3 個 coherence test（孤立單 k 不相干含真實 PG 形態重現 / 2 相鄰顯著相干 / 反轉破壞相干）有 bite。reversal 定義（t≤-2 AND mean<0）內部自洽。
+- **FIX-5/MEDIUM-1 end-to-end 有 bite**：test_end_to_end_no_momentum_verdict_is_close_trend(:488) 餵 20-sym×900d 隨機漫步 → 斷言終 verdict==NO-GO-TREND + stopped_at=="correct_scale_tsmom_significance" + 不被 Step0 提前攔 + power_caveat 存在。NO-GO-TREND（取代 NO-GO-A）有 end-to-end 斷言。
+- **LOW（上輪 stderr 污染）已修**：stats.py 3 處 `np.errstate(all="ignore")`（:151/:301/:411 含新 HAC）；dry-run 親跑 stderr=0 行 exit=0。
+- cross-platform grep 0 硬編碼；artifact 用 `OPENCLAW_DATA_DIR` env（不硬編碼）；data_loader `set_session(readonly=True)` 唯讀；無 bare-except；signals.py `_shift1` leak-free 單一進入點未動（上輪載重 MIT 點）。
+
+**MEDIUM-1（退化輸入 fail-OPEN，verdict-bearing stat）**：`_newey_west_mean_tstat`(:419-423) 的 `lrv<=0→return None` guard 被 FP 噪音擊穿——near-constant `arr`（dispersion≈0 但非精確 0）→ gamma0≈7.9e-31>0 → se≈1.3e-16 → t≈1e16（垃圾巨值）。**production caller `tsmom_significance` 可達**：pure deterministic ramp（每日固定 log-return）→ arr 全相同 → t_hac=1.96e16 + significant_positive_momentum=True（親驗）。naive_t 路徑（`sd>0` guard，:518）同樣被 near-constant 擊穿（sd=1.4e-11→naive_t=1.4e11）。方向是**false-GO**（falsification-first harness 最危險方向）。真實 PG 價格不可能零變異故非 live-data bug，但 deterministic/退化 synthetic 可達且 fail-open。修法：HAC + naive 兩處加相對離散度地板（如 gamma0 ≤ (eps×mu²) 或 se 相對 |mu| 可忽略 → return None，fail-closed）。
+
+**MEDIUM-2（docstring/code 不符）**：harness.py:379/:393/:406/:540 docstring 反覆說「≥2 個**相鄰** k 顯著正」（adjacent），但 code 只查 `len(sig_pos)>=2` 無 adjacency 約束（:394）。親驗 k20+k90（兩極端非相鄰）顯著→coherent=True，與 docstring 矛盾。**統計上 adjacency 該不該強制 = QC/MIT 決**（我只看 code-vs-doc 一致性）；退 E1 至少 reconcile：(a) docstring 刪「相鄰」對齊 code，或 (b) QC/MIT 定 adjacency 必要則 E1 實作。
+
+**LOW doc-drift（2 處）**：(1) harness.py MODULE_NOTE(:12-13) step 3 仍寫舊「Ljung-Box 無正自相關→NO-GO-A」，與實際 TSMOM gate 矛盾。(2) SCRIPT_INDEX.md 新增段仍描述舊設計（「Ljung-Box.../verdict=NO-GO-A」「23 測試」），未隨 FIX 刷新為 TSMOM/coherence/33 test。建議 E1 順手更（非業務邏輯，doc 同步）。
+
+**判定**：FIX-1/2/5 + MEDIUM-1（上輪）全真修好，TSMOM/coherence 數值正確、33 test 真綠。但 RETURN E1：MEDIUM-1 退化輸入 fail-open（verdict-bearing stat 兩處變異地板）+ MEDIUM-2 docstring/code 不符（adjacency；統計決策留 QC/MIT）+ 2 LOW doc-drift。coherence gate 閾值合理性（adjacency 是否該強制、|t|≥2 vs Bonferroni）已標明留 QC/MIT。harness 904 行過 800 soft-warning 但研究 harness、未過 2000 cap、職責內聚（編排+DATA TASK+decision tree+markdown）→ **接受不要求拆 verdict.py**（拆出去反增 import 面，且 verdict 邏輯與 report 組裝高度耦合）。
+
+**教訓沉澱**：(1) **手刻 HAC/方差型統計必測「退化輸入」(constant / near-constant / zero-dispersion)**——`lrv<=0` / `sd>0` guard 都被 FP 噪音擊穿，且方向是 fail-open（巨 t-stat→false significant）；相對離散度地板（相對 |mu| 或 mean²）比絕對 `<=0` 比較可靠。verdict-bearing stat 的 fail 方向必查（false-GO > false-NOGO 危險）。(2) **docstring 講「相鄰/adjacent」必對照 code 真有無 adjacency 約束**——本案 code 只數 count 不查相鄰，doc 過度承諾；統計語意（該不該 adjacent）與 code-doc 一致性分開判，前者留 QC/MIT 後者退 E1。(3) **未 commit 全新 dir（git `??`）無 baseline 可 diff**——E1「4 檔 byte-identical」claim 無 git oracle 可驗（dir 從未 commit），只能靠 E1 自存 snapshot；改以「載重 invariant 未變」（signals `_shift1` 單一進入點 + readonly session）正面確認替代 hash 對拍。(4) **focused re-review 仍跑獨立 oracle**——HAC 對自寫同式 oracle byte-match 比肉眼讀公式可靠；overlap deflation 用真重疊序列（MA 卷積）證 naive→hac 壓低，不靠 test 自證。
+
+---
+
+## 2026-06-02 SM Option-2 step-(i) E1b（governance IPC 權威路由 + divergence comparator）對抗審查 — RETURN E1
+
+範圍：6 檔（governance_hub.py +191/-18、governance_divergence.py NEW 232、governance_extended_routes.py +11、restart_all.sh +9、test_governance_lease_bridge.py +11 新 test、test_sm_contract_parity.py +1 新 test）。fb52c24e @ main，origin==HEAD 0/0 無 sibling race（5a/5b/5d clean）。Mac pytest 三檔 120 passed/1 skipped（skip 是既有 env-gated escalate，非本任務）。design ref：Operator 2026-06-02 sm_option2 §3b/§5 step-(i)。
+
+**驗對的（PASS 維度，獨立查證非採信 E1）**：
+- **#1 fail-closed 結構性成立**：三 `_via_ipc`（bridge:385/443/491）+ `_run_async_blocking`（:260 全例外吞→回 None）證實 IPC 失敗一律 *return* fail-closed 值（None/False/None）**不 raise**；hub 把 shadow+record 放在 IPC return 之後，record_divergence 絕不 raise → 權威回傳值結構上不可被 shadow 改寫。三方法逐一 trace 對齊 §3b。
+- **#3 shadow 純讀**：`_shadow_local_acquire_outcome` 只 `get_effective()`(clone)→`to_dict()`→`_auth_permits_scope()`(純 dict 讀，cascades:798)，**完全不碰 `_lease_sm`**（不可能 register lease）；`_shadow_local_lease_presence` 只 `_lease_sm.get()`(MultiObjectStoreMixin:437 回 clone)→讀 `state.name`。hub :780-1175 grep 0 個 create_draft/register/activate/transition/_emit 在 shadow helper 內（只 legacy Step-4 else 分支有）。terminal set 與真 TERMINAL_STATES(decision_lease:63) 全等。
+- **#6 4a audit-row parity 紮實**：親自重抓 Rust INSERT(lease_transition_writer.rs:269) 13 欄 == `_EXPECTED_RUST_LEASE_ROW_FIELDS`；regex 實測命中 :269 真 INSERT 非 :87 doc-comment；親驅真 Python `_build_transition_record` 14 鍵 = 10 mapped + 4 py-only，0 unaccounted；雙向注入假 Rust 欄/假 py 鍵證 sentinel 真 bite。3 Rust-only(profile/engine_mode/context_id) 合法（Python 歷史列本無→enrich 非 lineage loss）。
+- **#2/#7/#8**：flag-OFF 三 else 分支 byte-untouched（唯一 `-` 是 `return X(` 改 `rust=X(`）；4 Python SM 檔 git 全未動（ADDITIVE 真）；live_reserved/_require_operator_role/OPENCLAW_ALLOW_MAINNET/execution_authority/authorization.json 0-touch；ExecutorAgent shadow short-circuit(Step1) 未改。restart_all default-OFF/operator-first/exported、bash -n clean、strict `=="1"`。log 全 %s、無 bare except、無 hardcoded home path。
+
+**RETURN findings**：
+- **HIGH #5（comparator 作為 soak 儀器近乎盲）— 退 E1（設計協同 PA）**：acquire 影子跑在 hub Step-2 `is_authorized()` gate 之後（hub:935，兩 flag 態共用），而 `is_authorized()`==「任一 effective auth 存在」(:508-509)。故 comparator 只看得到「Python 已授權」子空間；**「Rust 比 Python 更寬鬆」（Rust grant 而 Python auth-gate 會 deny）這類最危險分歧在進 comparator 前已被 Step-2 濾掉**（acquire 在 :936 早 return None）。更甚：release/get 影子用 `python_outcome = local_view if local_view is not None else rust_outcome`（hub:1089/:1153）——flag-ON 下 acquire 不在本地 register（#3 設計）→ local SM 永不持有 Rust lease_id → `local_view` 恆 None → **release/get 永遠 echo Rust → 結構上 match=True**。合起來「0 divergence over N」gate 被構造性偏向 0，非真一致性證據。acquire 唯一真鑑別維度是 scope-permit（`_auth_permits_scope` 比 `is_authorized` 多查 lease_scopes）。bite test 自身 NOTE 也承認須 monkeypatch 繞 Step-2 才造得出 divergence = 反證 production 路徑被前濾。**非 code bug（fail-closed 更保守、無安全洞），是 step-(iii) cutover sign-off 的 evidence-validity 缺陷**。E1+PA 須三選一：(a) acquire 影子上移到 Step-2 之前比 auth-gate；(b) shadow 直接 compute 完整 local-SM acquire 判定（含 auth-effective 對 Rust，不靠 Step-2 預濾）；(c) design §5 step-(i) gate + sign-off packet 明標本 comparator 只覆蓋「Python-authorized 子空間 + scope 維度」、release/get 為 presence-echo 非獨立鑑別，並補一條能捕捉 auth-axis 分歧的 instrument。
+- **MEDIUM（singleton 未登記）— 退 E1**：governance_divergence.py 模組級 `_DIVERGENCE_RING`+`_COUNTERS`+`_DIVERGENCE_LOCK` = 跨 thread 可變 state+鎖，命中 singleton-registry.md §1.1「Python 模組級可變 binding」in-scope；CLAUDE.md §七/§九 要求合併前登記。先例 `_DUAL_WRITE_MIRROR`(governance_lease_bridge.py 同形) 也未登記=既有 gap，但不豁免新增。須登記 OR report/TODO 明確落地 step-(iv) 同除 follow-up（skill §3.7）。與 parallel CC review 重疊但 hard rule 仍標。
+- **LOW（注釋規範）— E1 改 OR operator 接受**：新檔 6 處中英重複 prose（MODULE_NOTE EN 段 + 每函式 EN docstring 複述）違反 2026-05-05 中文優先（CLAUDE.md §七）。新檔應只留中文（技術識別子保留）。
+- **NIT（count drift 非 bug）**：prompt 稱 lease bridge「13 new」實 11 個 `def test_`（5 unit + 6 hub）；估值偏差非 E1 code 問題。
+
+**教訓沉澱**：(5) **divergence/shadow comparator 的「0 mismatch」要先問『它在哪個 gate 之後跑、能不能看到危險方向的分歧』**——本案 comparator 在 authoritative gate(Step-2 is_authorized) *之後* 且 release/get 用 echo-on-no-opinion，導致「Rust 更寬鬆」與「release/get 全類」結構性不可能 fire；soak「0 divergence」遂非一致性證據而是 gate-placement artifact。比對器類 instrument 必畫「能 fire 的分歧子空間」邊界，bite test 要 monkeypatch 繞前置 gate 才造得出 mismatch = 該 instrument production 盲區紅旗。(6) **fail-closed 正確 ≠ soak 儀器有效**——#1 fail-closed 完美、#3 純讀完美，但 comparator 作為 cutover 證據仍弱；「code 安全」與「evidence 能否支撐 sign-off claim」分開判，後者對 governance/authority 遷移同等 blocking。(7) **手抓正則 parser 漂移哨兵要實跑對源碼**——4a `_parse_rust_insert_columns` 的 DOTALL `.*?` 有命中 doc-comment 同名 INSERT 風險，但實測命中真 :269 故安全；驗 sentinel 必雙向注入（假 Rust 欄 + 假 py 鍵）證真 bite 非 vacuous。
+
+### 2026-06-02 · E1b E2-return fix re-review（a99ef886 working-tree）→ PASS to E4
+
+對抗 re-review E1 對前述 3 項（HIGH #5 / MED singleton / LOW 注釋）的修。聚焦 fix delta。**Verdict = PASS（0 blocker；1 LOW 觀察、1 NIT 不阻）**。
+- **#5 真解（核心）✅ 有 bite**：E1 採前述選項 (a)+(b) 混合——新增 `_compare_auth_axis`(governance_hub.py) 於 **Step 1.5**（acquire-head，flag-ON、shadow-short-circuit 後、Step-2 `is_authorized()` gate *之前*）獨立比對 Rust `is_authorized` IPC vs Python `is_authorized()` → 把「Rust grant / Python auth deny」最危險方向在 Step-2 預過濾前*記錄*（新 `OP_IS_AUTHORIZED` 軸=主通道）；acquire scope-axis 影子 `_shadow_local_acquire_outcome` 也改成「完整 local 判定」(先 `is_authorized()` 再 scope)。核心測試 `test_auth_axis_rust_grants_python_denies..._production_path` **不** monkeypatch is_authorized、走真 production path、斷言 `hub.is_authorized() is False`+`lease_id is None`+`divergences==1 op=is_authorized`。**親跑 mutation 證 bite**：短路 `_compare_auth_axis` record（插 `return`）→ 該核心測試 + agreement 測試**轉紅**（div=1→0 / total=2→1），非 vacuous。
+- **#3 A3 沒退回 echo ✅**：移除舊 `local_view if not None else rust_outcome` echo；`record_divergence` 改 `match = no_opinion or (rust==python)`，no_opinion=任一側 OUTCOME_UNKNOWN。**雙向 mutation 證**：(a) 移除 no-opinion 排除→ release 弱通道測試轉紅（假報 rust=granted python=unknown div=1）證排除 load-bearing；(b) `match=True`(echo)→ 3 genuine-div 測試（auth-axis production + forced-bite + unit mismatch）**全紅**證真分歧仍 fire。排除的只是 genuine no-opinion，非全 release/get（local 真持有且終態 vs Rust ok → DENIED≠GRANTED 仍 fire）。
+- **#2 live byte-unchanged ✅**：Step-2 gate + Step-3 IPC branch return 值未改（acquire `return rust_lease_id`、release `return rust_ok`、get `return rust_lease`）；`_compare_auth_axis` void 只 record；Step 1.5 額外 IPC read 不改授權決定（Step-2 獨立 re-read）。`_run_async_blocking` 重用既有 pattern（:262，acquire/release/get/is_auth 四者同形），無新 asyncio anti-pattern。
+- **#4 fail-closed ✅**：`parse_is_authorized_response` strict-bool 拒 "true"/1/缺鍵→None（同 parse_release ok 嚴格）；`is_authorized_via_ipc` outage/timeout/non-Mapping→None；auth-axis Rust None→skip 絕不當 granted（測試 9 條全綠）；acquire IPC err→None/release→False/get→None 未改。
+- **side-effect-free ✅**：shadow helper block(784-1015) grep 無 create_/register/transition/activate/submit_/approve/_emit；唯一 SM 觸點 `_lease_sm.get()` 純讀；`is_authorized()` 只寫 `_cached_auth_state`(memoization 非 SM mutation)；`_auth_permits_scope` 純讀。
+- **#6 flag-OFF byte-unchanged ✅**：Step 1.5 + acquire/release/get 影子全 `if is_lease_ipc_enabled()` gated；`test_*_not_run_when_flag_off` 證 dispatcher `called==[]`+total=0。
+- **MED singleton ✅ 已修**：singleton-registry.md §2.5 登記 3 binding 全 12 欄完整（含 migration_plan=step-iv）。
+- **Rust 對端驗**：`governance.is_authorized` dispatch arm 真存在(dispatch.rs:369→handle_is_authorized)，回 `{"authorized": bool}`(event_consumer governance.rs:164)，與 Python `RESPONSE_KEY_AUTHORIZED="authorized"` 跨語言 schema 一致。
+- **LOW 注釋**：C 目標新檔 `governance_divergence.py` 已正確中文優先（grep 無大段獨立英文、OUTCOME_*/OP_*/SM_DIVERGENCE 技術識別子保留）= 原 LOW 已解。但 #5 fix 在 governance_hub.py 新增 ~44 行中英雙語——hub 全檔本就 pervasively bilingual(945-981 docstring + 既有 Step 註釋)，屬 CLAUDE Operating Style #3 strict-local-style-matching，可辯護不阻。
+- **NIT（doc drift 非 bug）**：§2.5 引用行號 `:66/:68/:69/:73` 實際 `:63/:65/:66/:69`（漂移 2-4 行，名+路徑正確，行錨 advisory）。
+- **§3e 額外**（非本 return scope，additive）：`test_lease_audit_row_shape_parity` 真驅動 Python `DecisionLeaseStateMachine`(非 mock) + 從 Rust `lease_transition_writer.rs:269-272` 重抓 13 INSERT 欄雙向漂移哨兵（實測 Rust 13 欄 == 期望集，非 vacuous）。
+- **scope/race**：5a fetch offline 但 origin/main==HEAD==a99ef886 無 sibling；in-scope 8 檔+governance_divergence 新檔 = E1b 宣告範圍；out-of-scope dirty（Rust funding_oi backfill 隔壁 session）**未動**（§5c unknown WIP 不 revert）。py_compile 5 模組 OK、新 import 0 dead；72 passed(bridge 68+contract 4)+133/1skip（含 hub 61）經多輪 mutation/restore 後一致綠。
+- **教訓 (8)**：comparator bite 必跑「短路 record→測試轉紅」+「echo 全 match→genuine-div 測試轉紅」雙向 mutation 才證 instrument 真活——本案 production-path 核心測試（不 monkeypatch 前置 gate）轉紅 = #5 近盲確實解掉；對比 forced-bite 測試*有* monkeypatch is_authorized（只測 scope-axis），兩者分工正確不可互相取代。前次 RETURN 的三選項 (a)/(b) 被 E1 正確採納（Step-1.5 auth-axis 上移 + scope 影子改完整判定）。
+
+## 2026-06-02 — funding/OI 歷史回填（孤兒 WIP, Codex）對抗審查 → PASS
+
+Scope: backfill/funding_oi_backfill.rs(795) + funding_oi_writer.rs(391) + bin/funding_oi_backfill.rs(899) + mod.rs/market_data_client/rest_poller/Cargo.toml/dict 改檔。HEAD 82777610，無 E1 報告。
+
+驗證結論：PASS（可 commit），0 BLOCKER / 0 HIGH / 0 MED；2 LOW（provenance-clarity，非阻塞）。
+
+親跑指令 + 證據：
+- get_open_interest 簽名加 start/end/cursor 後 byte-identity：None path 不 push 任何 param（`if let Some`），query string 與舊版逐參一致。grep 確認僅 2 non-raw caller(rest_poller:91/batch:302)全更新 None,None,None；panel 用 batch(簽名未變)。
+- strict-parse **mutation 驗有 bite**：把 strict_parse_finite_f64 改成 kline `>0` floor + unwrap_or(0.0)（BB 警告的確切 bug）→ 7 test 轉紅(含 test_funding_strict_accepts_zero_and_negative_rejects_missing / does_not_apply_positive_floor / oi_strict_accepts_any_finite)。還原後 23/0。**測試非 vanity**。
+- cap 紀律 CLEAN：grep upperFundingRate/lowerFundingRate/get_instruments → 僅註解「never touches cap / 留 None」，無實際 cap 讀取。funding_short_v2 教訓守住。
+- fail-closed：get_checked→into_result()，nonzero retCode→Err Business→backfill 記 failed coverage 不捏 row。V125 4 表 preflight to_regclass 缺即 EXIT_DB。dry-run 預設 + apply gate matrix(--apply+ack / env)。signed-GET via Demo slot。
+- 寫層：ON CONFLICT DO NOTHING(PK 含 run_id) 冪等；funding_rate/open_interest 直綁 DOUBLE 不 sanitize；utc_from_ms 溢出 None 不 epoch fallback。
+- 表級 disjoint：live OI poller 走 MarketDataMsg channel，**不**寫 research.alpha_*；零 ON CONFLICT 碰撞。
+- 0 unwrap/expect/panic/unsafe(test 外)；0 新 singleton/global-mutable；0 硬編碼 /home|/Users；3 新檔皆有 MODULE_NOTE；dict §132-163 drift 已修(line 141 OI start/end/cursor + funding「只傳 startTime error」)。
+- bin 13/0 + lib 23/0 = 36/0 親跑復現。
+
+2 LOW（給 PM 參考，可直接 commit 或順手調）：
+1. funding per-page ledger `request_start` 記 window-start，但 funding API 從不送 startTime（「只傳 startTime 會 error」）→ ledger 該欄對 funding 是邏輯窗註記非實送參數。建議：funding 的 PageMeta.request_start_ms 設 None 或加註解（page_id 不依賴它，rows 本身正確，非阻塞）。daily_kline 無 per-page ledger 先例可循，故此為新設計獨立判斷。
+2. 只有 retCode=0 的頁進 page ledger（nonzero→Err 不留頁行，只 symbol-level failed coverage）。與 daily_kline 風格一致，可接受；若要 page 級失敗痕跡需另設計（非本任務範圍）。
+
+教訓：孤兒 WIP 無 E1 報告時，mutation-test 是唯一能證「strict-parse 測試真有 bite」的手段——本次親手注入 BB 警告的確切 bug 確認 7 test 轉紅，比採信測試名可靠。
+
+---
+
+## 2026-06-03 — Dream 管線 Option A（語意清晰化 additive 註解+payload-key）對抗審查 → PASS to commit（無需 E4）
+
+範圍：2 檔 uncommitted（HEAD 188e9ec6 未動，git dirty 恰 2 檔）。`dream_engine.py`(+5/-0：1 dict key `expected_net_bps_kind="heuristic_recovery_projection"` + 4 行中文註) + `mlde_demo_applier_evidence_filter.py`(+7/-0：tier 語意純中文註解塊)。RCA 確認 `mlde_shadow_recommendations.expected_net_bps`(source='dream_engine') 是啟發式回收投影非實測 edge，Option A = 純語意標記不改 tier/值/邏輯，demo-only advisory blast radius。§5 race 5/5（5a HEAD==origin/main==188e9ec6 fetch 後一致、2h 窗無衝突 sibling、5c 無 stash、5b scope 乾淨僅 2 宣告檔、5d read-only、5e review 中無 push）。
+
+**PASS（0 BLOCKER/0 HIGH/0 MED/0 LOW）。可 commit。判定無需 E4——unit test + 本審查已足。**
+
+親驗證據（非採信 E1）：
+- **additive 純度 numstat 鐵證**：`git diff --numstat` = `5 0` + `7 0`；`grep "^-"` exit=1（**0 removed line**）。純插入，無一行被改/刪。formula `abs(avg_bps)×min(0.5,conf)`、tier_arg、`applied=false`、`verify_replay_evidence_and_insert` 19-arg 調用全在 additive hunk 外、結構未動。
+- **persist 路徑親驗成立（推翻「schema 擋 key」假設）**：`Json(insight)`(persist:570) 綁到 `%s -- p_payload`（tuple 第 6 位對應第 6 個 %s）。SQL function 定義在 **V055**(`verify_replay_evidence_function_full_insert.sql`:457)=`INSERT ... payload VALUES COALESCE(p_payload,'{}'::jsonb)` 原樣寫入 JSONB column。5 個 RAISE EXCEPTION(:338/:347/:357/:364/:382/:388) **只驗 tier-allowlist / source-allowlist / replay 複合契約 / TTL，無一檢查 payload key 內容**。JSONB column 接受任意 key → 新 key 不可能致 INSERT 失敗。E1「不需改 persist」claim 屬實。
+- **consumer 0 破壞**：applier(`mlde_demo_applier.py`) 全程 selective `.get(key)`（:293/:302/:303/:304/:439/:444 取 proposed_params/suggested_change_pct/direction/param_name/risk_patch/net_regret_direction）+ `payload->>'fingerprint'` SQL，**從不 iterate 全 key 或 whole-dict 相等比對** → additive key 對所有 selective reader 隱形。grep `== insight|insight ==|== payload|assertEqual(insight` 0 命中。test fixture 只有單 key 正向斷言（`insight["expected_improvement_bps"]==approx(4.0)`，test_mlde_shadow_advisor:275）非整 dict ==，新 key 不破壞。
+- **回歸親跑**：system python3 pytest 9.0.2 跑 `test_r7_producer_upgrade.py + test_mlde_shadow_advisor.py` = **16 passed in 0.07s**（涵蓋 build_dream_summary 輸出斷言 + dream producer persist-tier path）。E1 報「6+8」實 16，覆蓋且超出。
+- **註釋規範**：skill 大段英文 added-line regex exit=1（純中文，僅技術識別子 expected_net_bps/mlde_shadow_recommendations/expected_net_bps_kind/heuristic_recovery_projection 保留）。既有 REF-20 P4-S11 bilingual block(:52-61) **未動**（Chinese-first：未觸及不清理），新塊純中文 append 其後，0 mangle。語意準確（「證據基底為真」vs「expected_net_bps 啟發式」區分正確、非誤導、正確指向 payload.expected_net_bps_kind）。
+- **scope/硬邊界**：added-line grep `live_execution|execution_authority|system_mode|mainnet|OPENCLAW_ALLOW` exit=1；`/home/ncyu|/Users/` exit=1。`_estimate_candidate_edge`/`generate_replay_candidates` 未碰（diff 外）。
+
+**E4 判定理由（明確建議無需 E4）**：(a) 0 removed line 純 additive；(b) 0 控制流/公式/值/參數變動；(c) 新 key 不進任何 typed column 只進 JSONB free-form payload，無 schema/CHECK/whitelist 可拒；(d) 全下游 selective-get 對 additive key 隱形，consumer 面已 grep+test 雙證；(e) blast radius = demo-only advisory，無 live/execution path 觸點；(f) 註解改動對 runtime 0 影響。本審查 + 16 passed unit test 已覆蓋全 surface，full E4 regression 邊際價值 ≈ 0。**commit 後直接收口。**
+
+**教訓沉澱**：(1) **「additive key 進 JSONB payload」最危險假設是『某處 schema/whitelist 擋掉致 INSERT 失敗』——必親查 SQL function 定義（本案 V055）確認 payload 是 `COALESCE(p_payload,'{}'::jsonb)` 原樣寫入、RAISE 塊不檢 payload key 內容**；JSONB column 本質接受任意 key，但若 function 有 `jsonb ? 'key'` 白名單或 jsonb_typeof 強檢就會炸——本案逐 RAISE 確認只驗 tier/source/replay/TTL 故安全。(2) **consumer 破壞性看『讀 payload 的方式』**：selective `.get(key)` → additive 隱形不破壞；whole-dict `==` / iterate-all-keys / 嚴格 JSON schema 才破壞。grep `== <dictvar>` + `assertEqual(<dictvar>` 是判 fixture 硬比對的標準手法。(3) **numstat `N 0`（0 removed）是 additive-only 的鐵證**——比逐行讀 diff 判「有無夾帶邏輯」更快更硬；配 `grep "^-"` exit=1 雙確認。(4) **無需 E4 的明確條件**：0 removed line + 0 控制流/公式變動 + 新值只進 free-form JSONB（無 typed-column/CHECK）+ 下游 selective-read + demo-only blast radius + 註解級 runtime-0-impact → unit test+審查足，full regression 邊際 0。此判據可進 additive-comment/payload-key 改動的 E4-skip template。
+
+## 2026-06-03 — funding-tilt 診斷 harness (6aefa576) 對抗審查 → PASS (NO-GO-C 真實負判定)
+
+**對象**: commit 6aefa576 funding_tilt_diagnostic/ (data_loader/signals/cost_model/pnl/stats/harness 6檔 + 32 test)。任務假設「假陰性: 符號錯/leak-fix 過度懲罰把真 carry 壓成負」。HEAD==origin/main==6aefa576 working tree clean §5 race 5/5。
+
+**核心對抗結論: NO-GO-C 是真實負判定, 非 bug 假陰性 — 數學+數據雙重鎖死**:
+- run artifact aggregate: gross_price=+24.73 / funding_pnl=+5.39 / cost=21 / **net=+9.12(正!)** / carry_cost_ratio=3.896 / carry_share=0.179。net 正但 carry 只貢獻 17.9%, 82% 來自裸價格方向。
+- **per-leg 決定性**: LONG(做多最負funding) gross_price=−63.38/funding_pnl=0.88/net=−83.5(做多alt價格大跌災難, 幾乎收不到carry); SHORT(做空最正funding) gross_price=+88.64/funding_pnl=8.66/net=+76.3(碎正net全來自alt下跌beta非carry, carry_share=0.089)。**=MEMORY 反覆的「down-market beta 偽裝 edge」「bull short-side squeeze 偽裝 carry」**。
+- **決定性數據** (docker exec trading_postgres psql -U trading_admin -d trading_ai): canonical run realized **median|F|=0.8527bps/settle** mean=0.9057 n=46539。spec line 116 break-even 需 median|F|≳1bp → **實測 0.85<1 物理命中 §3.4 最可能失敗模式**。carry 量級被 realized funding 物理上限鎖死, 信號 off-by-one 不改 funding 收益(只改選股), 要跨 21bps 牆需 |F| 翻倍=數據物理不可能。
+
+**符號 bug (E1 自抓 +side×F→−side×F) 修對且完整**: 三處獨立實作全 `−side×F` 一致 — cost_model.py:89 `total += -side*float(r)*1e4` / pnl.py:232 `fund_pnl += -float(p)*float(r)` / harness.py:381 `sum(-side*float(r) for r in rates)`。grep 0 殘留 +side×F。per-leg 符號自證: short-leg funding_pnl=+8.66(正,空收正funding)、long-leg=+0.88(正小) → 若符號反這裡會是負。**符號 bug 不可能造此假陰性: 若有殘留 short carry 會變負反而強化「無 edge」結論, 不會藏真 carry edge**。
+
+**verdict 命脈 OK (避開 multiday_trend 坑)**: _decision_tree 在 run_diagnostic:686 內調用寫 report["decision_tree"], main():1152 只讀不 override。NO-GO-C 觸發 line 773 `amortization_fails OR cost_wall`: net_turns_positive=True→amortization_fails=False, 但 cost_wall=(3.896>=0.8)=True → True 進 NO-GO-C ✓ verdict 正確。32 test 全綠, naive-bite(spike 注入 naive[5]咬)/forward-sig 雙向 bite/K=8 自檢/readonly SQL 靜態(489-497 掃 INSERT/UPDATE/DELETE + set_session斷言) 全有 bite。
+
+**Findings (退 E1, 全非阻 verdict)**:
+- LOW-1 leak-free 邊界 off-by-one 過度排除 (signals.py:108-112): `lf_cut=open−eps(eps=1完整interval=480min)` 配 bisect_left → 排除前一日16:00 結算。**spec line 68 明確要「只能用前一日16:00 **及更早**」(用 ≤ 號 + ε=1interval 讓「≤前一日16:00」=含它); 基準 AEG-S0 §2.3 `feature_ts ≤ t−one_complete_bar` 也是 ≤**。E1 用 `<`(bisect_left)破壞 spec 的 ≤。修: bisect_left→bisect_right on (open−eps) 或直接 bisect_left on open。**對 verdict 無實質影響**(信號滯後8h只改選股不改 carry 量級; carry 量級被 median|F|=0.85bps 鎖死)。test:120-124 註釋把「排除第9日16:00」固化為預期=**測試鎖死了錯誤行為**, 修 code 須同步改 test。
+- LOW-2 NO-GO-C reason 字串自相矛盾 (harness.py:778, E1 flag#1): 寫死「amortization disproven net stays ≤0」但同句列印 net_turns_positive_with_horizon=True。真 binding=cost_wall(carry_cost_ratio=3.896)。verdict 正確、字串誤導。修: reason 按 amortization_fails/cost_wall 哪個 True 分支生成。
+- LOW-3 docstring 符號表述殘留 (cost_model.py:9/47/75 line161 "Σ side×F" / pnl.py:49 _close_segment:170 "Σ side×F"): 代碼是 −side×F, docstring 多處仍寫正號 Σ side×F(E1 修符號時 docstring 未同步)。讀者誤導, 修為 −side×F 或註明會計符號。
+
+**教訓**: (1) 負判定 harness 審「假陰性」最有力武器=查被判項的**物理量級上界**(realized funding median|F|), 一旦量級被數據鎖死, 任何信號/邊界 bug 都不可能翻 verdict — 比逐行追符號更決定性。(2) **per-leg 分解是 down-market beta 偽裝 carry 的照妖鏡**: aggregate 正 net 拆 long/short leg 後 short-leg gross_price>>funding_pnl 立即暴露「碎正 net 來自方向 beta 非 carry」。(3) test 把 off-by-one 邊界當預期固化=「測試綠」對邊界正確性是假安心(承 multiday_trend 教訓延伸: 不只查 verdict 命脈, 邊界 test 也要對 spec 核而非對 code 核)。
+
+## 2026-06-03 V127 (aeg_regime_labels + aeg_regime_transitions) 對抗審查 — PASS to E4（獨立 Linux sandbox dry-run 親跑）
+
+**Verdict**: PASS（0 BLOCKER / 0 HIGH / 0 MED / 1 LOW 觀察）。AEG-S2 component (a) regime-labels 儲存層 V127，untracked 待 PM commit。E1 乾淨完成（非 socket 中斷）。E4 正式 double-apply 在 operator 真 apply 時跑。
+
+**改動範圍**：純新增 `sql/migrations/V127__aeg_regime_labels.sql`（625 行 < 800）。`git diff HEAD --stat -- sql/migrations/` 空 = **0 既有 migration 被改**（無 V083/V084-style checksum drift）。untracked 正確（defer commit）。grep `/home|/Users|secret|hmac|token` exit 1 clean。BIGINT 僅出現在 comment + Guard C var decl（無 BIGINT-ms time interval）。
+
+**獨立 Linux sandbox dry-run（scp → v127_e2_dryrun DB，TSDB 2.26.1，零碰 live trading_ai）**：
+- Apply #1 EXIT=0，all guards PASS。Apply #2 EXIT=0 全 no-op（schema/table/hypertable/index "already exists skipping"；compression 走 IF NOT EXISTS guard 的 ELSE 分支「already enabled; skipping ALTER」非 nested EXCEPTION；policy if_not_exists 回 -1）。**冪等 double-apply 證實**。
+- **§F Guard C 兩 apply 皆 RAISE-able 但都 PASS**（V125 §E post-COMMIT validation-that-can-raise 的 fail mode，無 crash-loop）。
+- 經驗 schema 對 MIT §a.2 **逐欄/逐 PK/逐 CHECK byte-match**：labels 25 欄、transitions 9 欄；10 feature 全 `real|nullable=YES`；main_regime/context_bars/feature_rules_digest/git_* NOT NULL；market_anchor_regime + trigger_feature NULL-able。
+- **PK 軸經驗確認**：labels `(classifier_version,symbol,timeframe,signal_ts,run_id)` classifier_version **position 1**；transitions 同。
+- CHECK 經驗：main_regime/from/to 6-enum、timeframe 2-enum。
+- compression 經驗：兩表 symbol segmentby_column_index=1；orderby = `<time> DESC, classifier_version, run_id`（run_id 在 orderby 非 segmentby）；compress 30d / retention 1095d 各 1 job。
+
+**對抗 INSERT 探針（dry-run 不覆蓋的 fail-closed 語義）**：
+- 10 feature 全 NULL 的 insufficient_context row → INSERT 0 1（E1 decision #3 REAL-NULL 正確）；main_regime NULL → reject（NOT NULL）；main_regime='TRENDING_UP'（V002 詞表）→ CHECK reject（S0 §1.7 防混雜經驗證）；同 key 不同 classifier_version → coexist（immutability 軸）；exact dup PK → reject（無 silent overwrite）。
+- **Guard A drift 探針**：DROP feature_rules_digest 後 re-apply → `ERROR: V127 Guard A FAIL ... missing {feature_rules_digest}`，證 Guard A 真 fail-loud（非 V023 silent-noop；CREATE TABLE IF NOT EXISTS 本會靜默 skip drifted table，Guard A 先攔）。
+
+**E1 三個 V125-pattern 推導決策全 sound**：(a) compress_segmentby=symbol ✓ (b) orderby=`signal_ts DESC, classifier_version, run_id` ✓（經驗反射確認）(c) 10 feature REAL 允許 NULL ✓（符 MIT 明示 + insufficient_context 語義；對比 V125 C-3 fail-closed data-value DOUBLE NOT NULL 的差異 E1 註解正確）。
+
+**§F 反射軸硬繼承 V125 §E crash-loop fix**：`compression_settings.attname='symbol' AND segmentby_column_index IS NOT NULL`（非 `.segmentby` 欄）+ `dimensions.time_interval` + `jobs.config->>'drop_after'`，與 V125:848-857 結構 byte-identical。§F dimensions query 有 `column_name=v_timecol` filter → 單 time dim，無 multi-dim scalar trap。
+
+**清理**：sandbox DROP DATABASE + rm /tmp 檔；live head 仍 126、research.aeg_* count=0（零碰 live 確認）。
+
+**LOW-1（觀察非阻塞）**：TSDB advisory `WARNING: column "timeframe" should be used for segmenting or ordering`（timeframe 在 PK 不在 segmentby/orderby）。非 ERROR、不破 apply；timeframe 僅 2-enum 低基數，留在 PK 已足 query；與 V125 同類 PK-非-segmentby 欄處理一致。無需改。
+
+**§5 race check**：5a fetch+sibling window clean（HEAD=origin/main=54947d7d，sibling 窗無 sql/migrations 衝突）；5b status 僅本 scope（V127 untracked + E1/memory + 既有 project memory）；5c 看到舊 stash 未 touch；5d/5e N/A（PM commit 階段）。
+
+**教訓**：(1) migration 審查 = 靜態對齊 V125 先例 + **獨立 sandbox 親跑 double-apply + 經驗 schema 反射 + 對抗 INSERT 探針**，三層才足；E1 自報 dry-run 結果可信但 E2 親跑才是 ground。(2) §F post-COMMIT Guard C 是「會 RAISE 的真驗證」非 NOTICE-only → 必親驗兩 apply 都 PASS（否則 crash-loop fail mode）。(3) feature REAL-NULL vs data-value NOT NULL 的語義分界 = 「分類器內部診斷產物（NULL 不污染證據）」vs「fail-closed 交易資料值（0.0 fake-zero 污染 PIT）」，審 schema NOT NULL 決策須問「此欄缺值的語義是 diagnostic-gap 還是 data-corruption」。
+
+---
+
+## 2026-06-05 — re-E2 engine_watchdog.py throttle increment (RETURN-TO-E1, HIGH)
+
+**Context**: re-review of E1 fix to RESTART_SKIPPED canary flooding (FINDING #2) +
+bind-host sanitize (FINDING #1) on `helper_scripts/canary/engine_watchdog.py`
+(uncommitted working tree, HEAD==origin/main 1c8962f6, no sibling race).
+
+**Verdict: RETURN-TO-E1 — 1 HIGH (throttle defeated for backoff windows).**
+
+### HIGH-1 (2b key risk realized): dedup keys on full human reason string → flooding returns for every backoff window
+- `should_restart` (engine_watchdog.py:572) returns
+  `f"backoff window active, {remaining:.0f}s remaining"` — a PER-POLL countdown.
+- `emit_restart_skipped_if_new` (:519) dedups on `last_reason == reason` (full string).
+- POLL_INTERVAL=2s → each poll yields a DISTINCT integer-second string → dedup never
+  fires within a backoff window. **Empirical probe (real should_restart, not mocked):
+  300s window = 150 distinct reasons → 150 RESTART_SKIPPED rows** (goal: <=1).
+- Normal failure climb backoff windows [60,120,300,600]s → ~540 rows before circuit-break,
+  burying the RESTART_CIRCUIT_BROKEN signal the fix exists to protect.
+- Throttle works ONLY for terminal circuit_broken (reason stable: fixed consecutive=5).
+- **Fix**: key dedup on a STABLE reason KEY ("backoff"/"circuit_broken"/"maintenance"),
+  not the full string. Either have should_restart return (allowed, reason, key) or derive
+  a key in emit_restart_skipped_if_new.
+
+### Test blind-spot (why suite is green but bug invisible)
+- E1's throttle tests (`test_held_skip_..._at_most_once`, `test_restart_skipped_reason_change_emits_again`)
+  MOCK should_restart with a CONSTANT string ("circuit broken...", "backoff window active, 120s remaining").
+  Mutation (throttle→unconditional append) DOES go red (3 fail) so test has bite vs "no throttle",
+  but it's blind to per-poll-varying reason because the mock pins the string.
+- E1 fix MUST add a test using the REAL should_restart over a backoff window (assert <=1 RESTART_SKIPPED).
+
+### PASSED items
+- **#1 bind-host**: DANGEROUS_BIND_HOSTS {"0.0.0.0","::","","tailscale","tailscale-ip","ts"}
+  matches api_bind_host.sh exit=2 set. tailscale test has bite (mutation→3 subtests red).
+  pass-through (100.64.x/auto/127.0.0.1) preserved. Guard files (api_bind_host.sh/restart_all.sh)
+  untouched ✓. ""→auto is behavior-preserving (same resolver arm). tailscale unconditional→auto
+  is slightly more permissive for recovery subprocess only — defensible fail-safe, not blocker.
+- **2c marker reset**: trigger_restart success (inline pop, single save, atomic) + on_engine_recovery
+  (clear_restart_skipped_marker) both correct. No permanent suppression after recovery. Single-writer
+  state file, synchronous loop, no intra-process race.
+- **2d caller grep**: prod call site run_watchdog:1494 passes data_dir=str(data_path) ✓; test callers
+  :439/:446 use default "" (backward-compat ✓). signature data_dir:str="" backward-compatible.
+- **#3 no core regression**: was_alive edge-count / level-retry / network_outage-preserve intact;
+  increment surgically scoped to skip-emit line 812.
+- Hygiene: no /home|/Users paths, no except:pass, logger uses %s, Chinese-first docstrings.
+- 116 passed (verbatim run, twice — pre and post all mutations restored clean).
+
+### Lesson
+- Reviewer mutation MUST exercise the REAL upstream function, not trust E1's test that mocks
+  it with a constant. A "≤1 emit" throttle test that hardcodes the reason string cannot catch
+  a per-poll-varying reason key. The bite-check passed but the bite was against the wrong axis.
+
+## 2026-06-05 — RE-E2 (final) engine_watchdog.py HIGH-1 RESTART_SKIPPED key-throttle → PASS
+- Delta: should_restart 改 3-tuple (allowed, reason_key, reason_detail)；reason_key 穩定鍵 {maintenance/circuit_broken/backoff/ok}。emit_restart_skipped_if_new 用 reason_key 去重（非人類字串），canary payload 仍帶 reason_detail + 新 reason_key 欄。marker last_restart_skipped_reason 存 KEY，save_state 跨 poll 持久化；trigger_restart 成功分支 inline pop + on_engine_recovery→clear_restart_skipped_marker 雙清。
+- 對抗驗證親跑：mutation 把去重改回 reason_detail → test_backoff_window_emits_restart_skipped_at_most_once 紅（AssertionError: 8 != 1，captured warning 顯示 10000s→9986s per-poll 倒數真遞減=真 should_restart 驅動非 mock）；revert 後 GREEN。該測試自證 assertGreater(len(seen_details),1) 守住 string-throttle 盲區。
+- caller grep：should_restart( 全 repo 3 處全 3-tuple unpack（prod on_engine_crash:823 + test 1146/1158），無殘留 2-tuple。on_engine_recovery 新增 data_dir="" default，舊 1-arg test caller 安全（if data_dir: 守 no-op）。
+- 回歸：bind-host sanitize set / was_alive edge-level / network_outage / marker-reset 全未被本 delta 破壞；inert-probe Layer B 區段 0 改動。118 passed verbatim。跨平台路徑 0、logger 0 f-string。
+- 教訓：3-tuple 擴張型 fix 最大風險=漏掉的 2-tuple unpack caller 會 runtime ValueError；grep `<fn>(` 全 repo + 連 test mock return_value 都要查（本次 mock 已全部更新成 3-tuple，無漏）。
+
+## 2026-06-05 — GUI-configurable alert feature (watchdog→alert wire + settings) → RETURN-TO-E1 (1 HIGH coverage gap)
+
+**Scope**: uncommitted dirty tree, HEAD==4b97d344 at start. Files: alert_config.py(NEW),
+settings_routes.py(+332), telegram/webhook_alerter.py(file-primary seam), paper_trading_wiring.py(+2),
+engine_watchdog.py(+286 alert wire), tab-settings.html(+330 frontend), 36 new tests
+(22 test_watchdog_alert.py + 14 test_settings_alerts_routes.py). §5 race 5/5 (5e: sibling 0ab8159d
+pushed DURING review but only layer2_types.py — disjoint scope, no impact).
+
+**Verdict: RETURN-TO-E1 — 1 HIGH (trigger-seam zero test coverage) + 1 LOW (loader env-fallback drift).**
+Everything else PASS. Not a blocker on logic correctness — the seams are wired correctly by
+inspection — but the load-bearing "engine-down is non-silent" requirement has no regression guard.
+
+### HIGH-1: the 3 alert TRIGGER SEAMS have ZERO test coverage (unit fns tested, wiring not)
+- `emit_engine_down_alert_if_new` / `_send_alert_best_effort` are well-tested in ISOLATION
+  (test_watchdog_alert.py: dedup bite ✓, hanging-send <5s bite ✓, secret-leak ✓).
+- But the WIRING of those into the state machine is untested:
+  - trigger_restart circuit-break → emit(key="circuit_broken")  [engine_watchdog.py:973-975]
+  - on_engine_crash prolonged-down re-alert  [engine_watchdog.py:1091-1105]
+  - on_engine_recovery RECOVERED alert  [engine_watchdog.py:1149-1166]
+- test_canary.py exercises trigger_restart/on_engine_crash/on_engine_recovery but 0 hits for
+  ENGINE_DOWN_ALERT_SENT / emit_engine_down / circuit_broken_reping.
+- **2 seam mutations both left suite 100% GREEN** (the proof): (a) delete the entire circuit-break
+  emit seam → engine-down produces NO alert → 100 passed; (b) pin reping key to constant
+  "circuit_broken" → all 4h re-alerts dedup-swallowed after first → 100 passed.
+- This is the exact 20h-silent-outage failure mode the feature exists to prevent; a future refactor
+  could silently sever the wire and CI would not catch it. PA design listed these as E4 test items
+  #1/#2/#5 (in test_canary.py) but they were not implemented.
+- **Fix**: add 3 integration tests in test_canary.py: (1) consecutive restart failures → circuit_broken
+  → exactly one ENGINE_DOWN_ALERT_SENT with key circuit_broken, re-poll while broken does NOT re-emit;
+  (2) recovery after a down-alert → RECOVERED alert + marker cleared → next down re-emits; (3) prolonged
+  re-alert fires once per RE_ALERT_INTERVAL window (key changes per ~hour bucket), not every poll.
+  Mutating any seam must then go red.
+
+### LOW-1: watchdog inline `_load_alert_creds` env-fallback diverges from app `_apply_env_fallback`
+- App alert_config.py:112 telegram env-fallback uses `if env_token OR env_chat` (stores orphan token,
+  enabled=bool(token AND chat)); watchdog engine_watchdog.py uses `if env_token AND env_chat`.
+- Empirical 10-input comparison: 9/10 MATCH; the only DIVERGE is env-token-WITHOUT-chat_id:
+  app stores bot_token="T"(enabled=False), watchdog stores ""(enabled=False).
+- **Benign**: both yield tg_active=False (no send) in that misconfig dead-state; the divergent field
+  is never read because send requires enabled AND token AND chat_id. File path / schema keys / active
+  send behavior all identical. Cosmetic only. Acceptable to leave, or align AND→OR for exactness.
+
+### PASSED (verified, not trusted)
+- **Contract frontend↔backend EXACT**: GET shape (telegram{enabled,bot_token_configured,bot_token_hint,
+  chat_id}, webhook{enabled,urls[],secret_configured,secret_hint}, any_channel_active, config_present,
+  last_modified) matches _alert_config_masked_view byte-for-byte; POST body {telegram{enabled,bot_token,
+  chat_id},webhook{enabled,urls,secret}} matches AlertConfigSaveRequest; resp=GET+saved:true; /test=
+  {telegram{attempted,ok,error},webhook{...}}. Frontend renderAlertConfig reads exactly those fields,
+  password fields always emptied, last_modified treated as unix-sec (matches int/None). node --check OK
+  on full concatenated inline JS.
+- **Sentinel ""vs"__CLEAR__" both sides**: frontend _alertSensitiveValue (typed→value, clear-mark→
+  __CLEAR__, else→"") ↔ backend _merge_secret_field (""→keep, __CLEAR__→clear, else→new). chat_id/urls
+  are prefilled plaintext so empty=clear is correct UX (not the token "" semantics) — consistent.
+- **Failure isolation airtight**: all sends via _send_alert_best_effort → daemon Thread only, 5s
+  urllib timeout, catch-all. All 3 seams fire AFTER restart/recovery logic + save_state, never before
+  trigger_restart's subprocess.run. test_hanging_send (30s sleep → <5s return) has bite (sync mutation
+  → 30s fail).
+- **Dedup parity EXACT**: emit_engine_down_alert_if_new mirrors emit_restart_skipped_if_new (load_state→
+  compare key→set marker+ts→save→emit→canary). clear on recovery + on restart-success. prolonged-down
+  key circuit_broken_reping_{int(hours)} + the last_engine_down_alert_ts >= RE_ALERT_INTERVAL(4h) gate
+  = one re-alert per window (gate is primary throttle, key is dedup backstop, no collision: keys jump
+  4→8→12). Dedup mutation → red bite.
+- **/test deviation correct**: one-shot TelegramAlerter/WebhookAlerter from current file config + sync
+  .send() (not startup ALERT_ROUTER which may predate creds). Reuses the REAL send() primitive, not a
+  bespoke sender. Per-process 10s throttle + asyncio.Lock + to_thread (no blocking in async route).
+  Accept.
+- **Partial-safe merge** (empirical probe): enable telegram + no stored token + empty input → 400
+  (not silently enabled); enable + stored token + empty → 200 keeps; validation AFTER merge; webhook
+  urls/secret __CLEAR__ correct; secret optional when enabled.
+- **App alerter seam**: precedence explicit>file>env; _load_config_creds catch-all → ("","") → env
+  fallback; construction never raises on missing/malformed; existing RISK alert works via env when
+  file absent (paper_trading_wiring TelegramAlerter() no data_dir → OPENCLAW_DATA_DIR default).
+- **SSRF guard** (new, was absent): validate_webhook_url blocks metadata 169.254.169.254/loopback/
+  RFC1918/link-local/unspecified/reserved/multicast, https-only, DNS-resolve-fail→fail-closed.
+  Tested. (Send-path does not re-validate — DNS-rebind residual explicitly documented & accepted;
+  env-fallback URLs not SSRF-checked = pre-existing trust level, not new.)
+- **Hygiene**: 0 hardcoded /home|/Users, 0 bare except/pass (all catch-all have noqa+rationale),
+  0 f-string logger, no detail=str(e) leak, data_dir default uniformly OPENCLAW_DATA_DIR→/tmp/openclaw
+  across 5 files, SCRIPT_INDEX updated, Chinese-first comments with fail-closed rationale + MODULE_NOTE.
+  Sizes: settings_routes 1558 / engine_watchdog 1970 (both <2000 cap; watchdog flagged for future split).
+  No new trading singleton (only per-process throttle lock/ts).
+- **Tests run verbatim**: 36 new pass (22+14); test_canary.py 100 passed +9 subtests; restored tree
+  byte-identical to start (numstat 286 0 etc, diff -q matches backup).
+
+**Lesson**: unit-testing the emit/send primitive in isolation is NOT enough when the whole point is
+"the wire must fire". Reviewer mutation must target the WIRING SEAM (delete the call site / pin the
+key), not just the called function — deleting the circuit-break emit seam AND pinning the reping key
+both left the suite green, proving the load-bearing requirement (engine-down non-silent, fire-once-
+per-4h) has no regression guard. When a PA design lists trigger-seam integration tests and the impl
+only ships unit tests for the helpers, grep the integration test file for the emitted event name /
+seam fn and mutate the seam to prove coverage before PASS.
+
+## 2026-06-05 — RE-E2 (final gate→E4) GUI-alert fix-deltas: HIGH-1 + LOW-1 + M1/M2/N1 → PASS
+- **Scope**: prior E2 RETURN's 2 fixes (HIGH-1 seam tests, LOW-1 env AND→OR) + A3's M1/M2/N1 frontend fixes. 6 files, uncommitted dirty tree, HEAD=0fa4fe77 on feature/l2-critic-lessons-tools (origin/main=4b97d344, +2/0, no sibling push during review). §5 race 5/5.
+- **Frontend was AUTHOR-UNVERIFIED (fixer socket-dropped)** → scrutinized hard. tab-settings.html grew +330→+554 (the +224 = M1/M2/N1). Verdict: all correct.
+  - **M1 status honesty CORRECT**: per-channel chip via local `_alertChannelArmed` (tg: bot_token_configured AND chat_id.trim; wh: urls.length>0); top chip via backend `any_channel_active`. **Verified backend `_alert_config_masked_view` (settings_routes:346-347) computes any_channel_active = enabled AND token AND chat / enabled AND urls — BYTE-MATCHES the local armed defn** → top vs per-channel chips can't disagree. 3 traces (armed→green / enabled-no-creds→red "不會送出告警" / disabled→neutral) all pass. Checks credentialed-ness not raw enabled. ✓
+  - **M1 presubmit guard no-false-block CORRECT**: `_alertPresubmitGuard` — enabled + stored token (bot_token_configured, no clear-mark) + empty input → typedToken="" (falsy) BUT storedToken=true → `!typed && !stored`=false → NOT blocked. ✓ chat_id empty when enabled → blocks. clear-marked token doesn't count as stored. ✓
+  - **M2 honesty CORRECT**: NEW `_alertFetch` bypasses ocApi (verified ocApi common.js:195 collapses ALL non-ok→null+toast, so bypass justified) → returns {ok,status,detail,networkError}; `_alertFailReason` maps 404→"後端尚未啟用"/network→"連線中斷"/else→backend detail. csrf-mismatch auto-reload NOT replicated (ocApi-only) → LOW UX-only, fail-closed (POST still rejected).
+  - **N1 CORRECT**: countdown via `_alertStartTestCooldown` (data-orig-label idiom, clears prior interval, self-clears at 0, restores innerHTML); no-channel → toast + return BEFORE fetch+cooldown (double-guard: pre-check on _ocAlertLastView armed + post-check anyAttempted). Tabs are IFRAMES → interval bounded ≤10s self-clearing, same pattern as existing tab-settings:754. No leak.
+  - **Contract not regressed**: POST {tg:{enabled,bot_token,chat_id},wh:{enabled,urls,secret}} matches AlertConfigSaveRequest; /test {tg/wh:{attempted,ok,error}} matches; password .value always '' (render + post-submit clear even on fail); ""=keep/__CLEAR__=clear both sides. chat_id trimmed server-side (save:1364) so whitespace-only divergence unreachable.
+  - **No XSS**: `_alertCardStatus` innerHTML uses ocEsc(text) + hardcoded color; ocToast/ocSetText use textContent; placeholder/.value not HTML-parsed. server hint/detail/error all escaped. ocEsc (common-formatters:250) escapes &<>"'.
+  - **CSS classes verified exist**: oc-chip-good/warn/bad/neutral + oc-loading + oc-btn-primary all defined common.js:734-905 (injected via ocInjectBaseCSS at line 14). No unstyled-chip bug.
+  - **node --check**: extracted inline blocks (line 14 + 598-1792, 1199 lines incl new 554) → exit 0 verbatim.
+- **Backend trust-but-verify**:
+  - **HIGH-1 FIXED + has bite**: 3 new TestWatchdogAlertWiring tests drive REAL state machine (_drive_to_circuit_broken = real trigger_restart w/ mocked-nonzero subprocess → real CIRCUIT BROKEN), only mock _send_alert_best_effort leaf + wraps= spy. **Mutation probe (item 9): deleted emit_engine_down_alert_if_new at engine_watchdog:982 → test RED "AssertionError: 0 != 1 熔斷時 emit 必被呼且僅一次" → reverted byte-identical (sha256 match) → GREEN.** Each test docstrings its exact seam-mutation. The 2 prior-review green-on-mutation gaps now both guarded.
+  - **LOW-1 FIXED**: watchdog `_load_alert_creds` env-fallback gate AND→OR (engine_watchdog:635) now byte-mirrors app `_apply_env_fallback` (alert_config:112); enabled still bool(token AND chat). Drift eliminated.
+  - **chmod-before-replace CORRECT**: alert_config.save_alert_config — chmod(tmp,0600) at :173 BEFORE os.replace :174, post-chmod :175 belt. **Empirically verified os.replace preserves source-inode perms → final file 0o600 immediately after replace (old way=0o644 group/other-readable window).** Perm test (test_watchdog_alert:148-166) asserts final 0o600 + zero group/other bits (note: tests END-state not transient window — acceptable, transient TOCTOU not deterministically testable; fix correct by inspection).
+  - **Tests verbatim**: test_canary+test_watchdog_alert = 103 passed +9 subtests (prior 100, +3 new integration); test_settings_alerts_routes = 14 passed.
+- **Hygiene**: 0 hardcoded /home|/Users, 0 f-string logger, 0 bare-except in delta, 0 detail=str(e), 0 secret in log/canary/payload (canary ENGINE_DOWN_ALERT_SENT = ts/event/alert_key only; HMAC is hash not raw secret; docstring engine_watchdog:691 "log 通道名不 log token").
+- **Verdict: PASS → E4.** Tree restored byte-identical (6/6 sha256 match baseline). 1 LOW UX-only follow-up (csrf-mismatch graceful-reload not in _alertFetch) — non-blocking, optional.
+- **Lesson**: when an unverified frontend fixer adds dual-source status logic (local-computed + backend-authoritative), the load-bearing check is whether the two definitions are byte-identical — read the BACKEND masked-view fn and diff the boolean expr against the JS armed() fn; if they ever diverge, top chip and per-channel chips silently disagree (the exact "soft fake-success" M1 was meant to kill). Here they matched (enabled AND creds, both sides) so PASS; had they differed it'd be a HIGH. Also: a presubmit-guard false-block test must trace the stored-creds-empty-input path specifically (typed=falsy, stored=true → not blocked), not just the missing-creds path.
+
+## 2026-06-05 — E2 adversarial review: L2 critic+lesson-store (B) + read-only tools (C) → RETURN-TO-E1 (1 CRITICAL + 1 HIGH)
+- **Scope**: branch feature/l2-critic-lessons-tools tip adf60372 (5 commits ahead of origin/main 4b97d344, 0 behind). NET diff 4b97d344..HEAD = 6 files +1371 LOC additive (layer2_critic.py NEW, layer2_tools_g3_08.py NEW, V133 NEW, layer2_types/tools/engine wiring). Reviewed NET only (intermediate salvage/superseded/converge commits ignored, squash-at-merge). §5 race 5/5 (origin/main==base, no sibling push during review).
+- **Verdict: RETURN-TO-E1 — CRITICAL-1 (deliverable C wired into nothing) + HIGH-1 (zero tests for B+C) + MED-1 (critic verdict last-wins ≠ spec'd most-severe) + 1 LOW comment.**
+- **CRITICAL-1 (the catch)**: get_orderbook/get_cvd/get_liquidations are IMPORTED into layer2_tools.py (`_g3_08_get_cvd` etc, each referenced EXACTLY ONCE = the import line) but NOT registered in TOOL_SCHEMAS (10 entries, all pre-existing incl g3_07's query_onchain/check_derivatives; the 3 new tools absent) and NOT in the `handlers` dispatch dict in execute() (which falls through to `{"error":"Unknown tool"}`). The module docstring claims "schema entries / handler dict 註冊留在 layer2_tools.py" (g3_07 precedent) but g3_08 did neither. Net result: the entire C deliverable is unreachable dead code — LLM never sees the tools, can never call them, and the 3 imports are dead. The "154 tests pass" claim is the PRE-EXISTING suite (verbatim 154 passed flags-off); grep proved ZERO test_*.py references any of get_cvd/get_liquidations/get_orderbook/run_critic/should_skip_critic/retrieve_lessons/persist_lessons. Fix: add 3 TOOL_SCHEMAS entries (input_schema: symbol + limit/window_bars/window_minutes) + 3 handler dispatch entries (wrap _g3_08_* via thin self._get_orderbook async methods returning dict, matching g3_07 pattern).
+- **HIGH-1**: net diff touches NO test file. All new B (critic verdict handling, lesson persist/retrieve, fail-soft paths, flag-off no-op) + C (3 tools, fail-closed, SQL window math) logic has zero regression guard. A future refactor could silently break the wiring/flag-gate and CI stays green (exactly how CRITICAL-1 slipped past "154 pass"). Fix: add tests — (a) 3 tools incl clamp/empty-rows/db-down/disabled-env/SQL-shape via mocked db_pool+httpx; (b) critic fail-soft (provider None→CONTINUE, non-JSON→CONTINUE, invalid verdict→CONTINUE), should_skip_critic flag-off→True and each skip condition, run_critic routes cheapest tier; (c) persist single agent.lessons INSERT + symbol param + no-insight→no-write; (d) engine integration: flag-on STOP→COMPLETED+break (not FAILED, not max-iter else), REPLAN→messages.append only; flags-off→behavior unchanged. Mutate the wiring seam (delete schema/dispatch entry) to prove bite.
+- **MED-1**: engine B-Hook 2 overwrites `critic_result` per tool call (last-wins) — review spec says aggregate MOST SEVERE (STOP>REPLAN>CONTINUE). Divergence only when CRITIC flag ON (non-default) AND one iteration has multiple tool_uses with divergent verdicts; worst case [STOP,CONTINUE]→CONTINUE = missed brake (bounded: critic can't trade, only waste cheap iters under hard budget cap). Not a safety/trading-correctness issue. Fix: implement severity-rank max, OR PM amends spec to last-wins with rationale.
+- **PASSED (verified not trusted)**: CC invariants AIRTIGHT — only DB write in whole changeset = single `INSERT INTO agent.lessons` (grep: zero other INSERT/UPDATE/DELETE/place_order/lease/authorization/execution_authority/system_mode in critic OR tools); critic can ONLY append "CRITIC NOTE" user msg (REPLAN) or set SESSION_STATE_COMPLETED (STOP), never orders. Tools strictly read-only (SELECT + external GET). No circular import (g3_07 has zero layer2_tools/engine/critic import). All engine method sigs match (_provider_complete/_resolve_effective_provider(role=triage→cheapest)/cost_tracker.record_claude_cost/get_pg_conn ctxmgr-conn-or-None). All session/config/insight/L2Response fields exist (tool_calls/iterations/insights/trigger/session_id/total_cost/final_summary/state; max_iterations/default_provider; category/title/detail; text/input_tokens/output_tokens). session.insights populated in finally BEFORE persist (ordering OK). symbol-param deviation sound (NOT NULL + session has no symbol → engine passes in-scope param). Flags-off byte-identical CONFIRMED behaviorally (154 passed verbatim flags-off; only always-on delta = critic_result=None init + should_skip_critic env-read→True early-return per tool; retrieve/persist behind flag gate). V133 idempotent (all IF NOT EXISTS, Guard A col-reflect-RAISE before CREATE, Guard B type drift, Guard C index existence; cols match INSERT+SELECT; Linux PG dry-run owed/operator-gated — flagged not blocking). PG schemas confirmed (market.trade_agg_1m buy_volume/sell_volume/ts/symbol; market.liquidations side/qty/ts/symbol; side lower-norm robust). Bybit GET /v5/market/orderbook (category,symbol,limit) matches ref doc (no new endpoint). messages APPEND-ONLY (grep: zero pop/remove/insert/clear/reassign). No hardcoded /home|/Users, no f-string log, no detail=str(e), no secret leak, no new singleton, MODULE_NOTE present, Chinese-first comments, both wiring files <2000 (tools 1067 / engine 933).
+- **Lesson**: "N tests pass" from a sub-agent self-test is NOT evidence the NEW code works — it can be 100% the pre-existing suite. ALWAYS grep test_*.py for the new symbol names; if zero hits, the green number is orthogonal to the change. Here 154-pass masked that deliverable C is wired into nothing (schema+dispatch absent, imports dead). The tell: net diff for the "wiring" file was +13 lines = imports ONLY, no TOOL_SCHEMAS entry, no handler dict entry — when a changeset claims "X.py (wiring)" and the diff has no schema/dispatch addition, the feature is dead-on-arrival regardless of unit tests on the leaf functions. Cross-check against the sibling precedent (g3_07 added BOTH schema AND dispatch) to expose the gap fast.
+
+## 2026-06-05 — E2 RE-REVIEW (round 2): L2 B+C after E1 fixes → PASS to E4 (0 open findings)
+- **Scope**: branch feature/l2-critic-lessons-tools tip 31811ca1. Fix commits bdfb5d99 (code FIX1/3/4) + 31811ca1 (tests FIX2). Re-verified all 4 round-1 findings genuinely RESOLVED (not papered over) + regression guard. §5 race: 5/5. NOTE sibling 92cdcc41 (watchdog/canary/alert_config/settings) landed on origin/main AFTER base 4b97d344 — DISJOINT file scope (zero overlap with layer2_*/V133), no conflict, no re-review trigger; PM merges clean (branch needs rebase onto current origin/main but files don't collide).
+- **CRITICAL-1 → RESOLVED**: 3 C tools now in BOTH TOOL_SCHEMAS (3 entries w/ input_schema, count 10→13) AND execute() handlers dict (TOOL_GET_ORDERBOOK/CVD/LIQUIDATIONS → self._get_*). Traced get_cvd→handler→_g3_08_get_cvd reachable. MUTATION-PROVED BITE: removed `TOOL_GET_CVD: self._get_cvd` from dispatch → test_all_three_in_handler_dispatch FAILS ("Unknown tool: get_cvd"); restored clean. Schema-count asserts (3 sites) are a 2nd guard.
+- **HIGH-1 (zero tests) → RESOLVED**: ran `python3 -m pytest tests/ -k layer2 --ignore=tests/replay --ignore=replay` (replay collection errors are PRE-EXISTING, not in PR scope) → **221 passed** (E1 claim verified exact). Tests have REAL bite (not vacuous): SQL-shape tests assert the actual bind param (`params[1]==MAX_CVD_WINDOW_BARS`, `params[1]==MAX_LIQ*60` verifying make_interval secs math), depth→limit bridged-via-executor asserts HTTP `params["limit"]==7`, critic fail-soft (provider None/non-JSON/invalid-verdict/exception→CONTINUE) all present.
+- **MED-1 (last-wins → most-severe) → RESOLVED**: new merge_critic_verdict() + _CRITIC_SEVERITY{continue:0,replan:1,stop:2}, None=no-opinion no-downgrade, equal=keep current (stable), unknown verdict=-1 (can't beat valid). Engine B-Hook 2 now ACCUMULATES across per-tool loop via merge (was overwrite). MUTATION-PROVED BITE: forced merge→last-wins → 5 tests FAIL incl end-to-end test_most_severe_stop_then_continue_acts_on_stop ([STOP,CONTINUE] thru run_session → iterations==1 + COMPLETED only under most-severe; last-wins gives CONTINUE→max-iter else); restored clean.
+- **LOW (comment) → RESOLVED + INDEPENDENTLY VERIFIED**: g3_08:526-529 comment claim confirmed against source — V002:217 `side TEXT NOT NULL` (no CHECK); V095:132-133 `ADD CONSTRAINT ... CHECK (side IN ('Buy','Sell')) NOT VALID`. NOT VALID = no historical-row scan → pre-V095 rows can hold non-Buy/Sell → defensive normalize warranted (not dead).
+- **depth→limit SEAM RULING = ACCEPT the bridge (do NOT force-rename)**: schema exposes `depth` (PM/PA spec, clearer semantics), handler reads `args["limit"]` (Bybit V5 native). Wrapper _get_orderbook bridges only when `depth` present AND `limit` absent (`args={**args,"limit":args["depth"]}`) — never clobbers explicit limit, clamp still applied by sibling _clamp_int[1,25]. Verified end-to-end: depth=7 via executor → HTTP params limit=7. Bridge correct+robust+tested; rename also fine but not required.
+- **REGRESSION GUARD (re-confirmed PASS)**: (a) CC invariant intact — ONLY DB write = single parametrized `INSERT INTO agent.lessons` (critic:454, 7 cols match V133); grep on critic+g3_08+the 3 dispatch wrappers = zero other INSERT/UPDATE/DELETE/place_order/v5-order/lease/authorization/commit; wrappers pure delegation; retrieve_lessons read path = parametrized SELECT + trgm→recency fallback. (b) Flags-OFF byte-identical CONFIRMED: B-Hook 1/4 behind `_is_flag_enabled`, should_skip_critic short-circuits True on flag-off line 162 (no LLM/PG/mutation), critic_result stays None → B-Hook 3 no-op; only always-on delta = `critic_result=None` init + 1 inert env-read per tool; test_flags_off_no_critic_call_no_pg asserts skip_spy/persist_spy/pg_mock not_called. (c) cvd/liq DEFAULT-ON is INTENDED+SAFE: read-only our-PG SELECT, zero external+LLM cost (tools record no cost), empty-window legal, kill-switch OPENCLAW_L2_TOOL_{CVD,LIQUIDATIONS}_ENABLED=0; this is the C deliverable (LLM tool surface), independent of the B flags' byte-identical guarantee; no write/cost/safety risk. orderbook DEFAULT-OFF (external HTTP, fail-closed). (d) line counts: layer2_tools.py=1206 (<2000), all 5 app files <2000; no hardcoded /home|/Users, no f-string log, no detail=str(e), no circular import.
+- **STILL-OWED (flagged for E4, NOT blocking PASS — Mac can't run PG)**: V133 + CVD/liq SQL Linux PG empirical dry-run (operator-gated). Same owed item as round-1.
+- **VERDICT: PASS to E4** (0 CRITICAL / 0 HIGH / 0 MED / 0 LOW open). All 4 round-1 findings resolved with mutation-proven test bite; the new depth→limit seam is correct+tested.
+- **Lesson (round 2)**: re-review must MUTATE the fix to prove the new tests actually bite, not just read them green — removed a dispatch entry (CRITICAL-1 test failed) + forced merge→last-wins (MED-1 end-to-end test failed), then restored byte-clean. A test that passes both with-fix AND with-the-bug-reintroduced is theater; mutation is the only way to confirm the guard locks the regression. Also: `-k layer2` count (221) only reproduces when unrelated PRE-EXISTING replay collection errors are excluded — confirm a claimed count under the SAME selection the claimant used, and verify erroring files are out-of-scope first.
+
+## 2026-06-05 — E2 adversarial review: residual_alpha_gate.py PSR/DSR/PBO → vetted DsrGate/PboGate → ACCEPT (1 LOW fixed + 1 LOW returned)
+- **Scope**: worktree /private/tmp/wt-residual-producer, branch feature/residual-producer tip e4bfd54e (merge-base 4b97d344). 3 uncommitted files: residual_alpha_gate.py (impl), test_residual_alpha_gate.py + test_residual_alpha_producer.py (recalibrated). origin/main=92cdcc41 (DISJOINT watchdog/GUI feature, zero file overlap). §5 race 5/5.
+- **Verdict: ACCEPT (PASS to E4)**. 0 CRITICAL/HIGH/MED. Removed 1 dead helper myself (allowed exception); 1 LOW comment-accuracy returned to E1 (non-blocking).
+- **#1 Sharpe convention (the silent-wrong risk) = CORRECT**. E1 passes observed_sharpe=(mean−bench)/std(ddof=1) = PER-PERIOD Sharpe. dsr_gate._compute_psr formula uses (SR−SR*)·sqrt(T−1)/sqrt(1−γ3·SR+(γ4−1)/4·SR²) = Bailey-LdP PER-PERIOD convention (variance_term only sane for O(0.01–0.2) per-period SR; an annualized SR≈2.5 would blow variance_term negative). DECISIVE PROOF: the repo's authoritative production caller promotion_evidence._sharpe (:164) computes EXACTLY `np.mean(arr)/np.std(arr,ddof=1)` — NO annualization. The dsr_gate test magnitudes (2.0–5.0) are illustrative synthetics, NOT evidence of annualized convention (production path feeds raw mean/std). No unit mismatch. PSR/DSR NOT silently wrong.
+- **#2 moments CORRECT**: _sample_moments population ddof=0 z-moments (skew=mean(z³), exk=mean(z⁴)−3). EMPIRICALLY matched scipy.stats.skew/kurtosis (bias=True=population, fisher=True=excess) to 4dp on normal/skewed/heavy-t. n<3 & constant guard → (0,0). Sign/normalization correct (Bailey-LdP use 1/T moment estimators = population).
+- **#3 n<2 guard CORRECT**: empirically no crash path to compute_dsr. n=0→(None,None); n=1→degenerate prob; constant series (std≤_EPSILON)→degenerate prob (no compute_dsr call). compute_dsr only reached with n≥2 AND std>_EPSILON.
+- **#4 PBO matrix CORRECT**: _coerce_pbo_peer enforces len==len(eval_y) (drops mismatched); residual_peers=raw−factor_prediction same len; empty-peers guarded upstream (line 775 returns pbo_not_computed BEFORE _pbo_via_cscv → <2-series ValueError unreachable); uses res.pbo VALUE not passes_threshold; insufficient_power OR not isfinite → None. PboGate power: T<s_slices(16)→nan; total_trades=T×N<320→insufficient; n_comb<min_K(10)→insufficient.
+- **#5 defer wiring CORRECT, no FALSE-PASS**: pbo_insufficient_power → _is_defer_only_reason set → _verdict_from_blocking_reasons returns defer_data (not fail). Contract triple-guards: (a) passes is not True→fail; (b) verdict!=pass→fail; (c) pbo_raw=None→metric_missing:pbo_raw. A deferred report can NEVER be promotion_ready. (LOW note: new reason token not in FORBIDDEN_REASON_TOKENS but None-pbo blocks it anyway — belt redundant.)
+- **#6 dead code**: orphan-scan proved _normal_cdf (residual_alpha_gate:736) was the ONLY zero-ref helper (E1 flagged it). REMOVED IT MYSELF (3-line private single-file, allowed dead-code exception). math still referenced (5 sites). _degenerate_probability still used. The 3 removed fns (_normal_approx_psr/_deflated_psr/_probability_of_backtest_overfit) only in comments now.
+- **#7 other callers**: ONLY residual_alpha_producer.py:149 calls ResidualAlphaGate().evaluate(). Consumes report via threshold-based contract (PSR≥0.95/DSR≥0.95/PBO≤0.5), NOT exact legacy numerics → changing values is safe, no caller depends on old scale.
+- **#8 test integrity = LEGITIMATE recalibration, NOT weakening**. Producer test_true_alpha_promotion_ready: 120→280 obs (real CSCV needs total_trades=T×N≥320; old 120→eval36×4=144<320→would defer) + beta 0.4/-0.2→0.2/-0.1 (weaker beta=LESS raw oscillation=HIGHER raw Sharpe; alpha UNCHANGED at 2.0bps, residual UNCHANGED). EMPIRICAL: at old beta 0.4/-0.2 dsr_raw=0.82<0.95→gate correctly FAILS (dsr_residual still=1.0, so true alpha IS detected; gate's `passes` is conjunctive raw AND residual — by design requires raw significance too). Recalibration = "make synthetic alpha strong enough to pass CORRECT stats" exactly as docstring claims. beta_trap tests (gate + producer) UNCHANGED, still fail HARD via residual≤0 / raw_positive_residual_non_positive (NOT defer, NOT DSR-dependent) = right reason. test_missing_pbo_evidence STRENGTHENED (psr/dsr None→≥0.95).
+- **#9 regression GREEN**: residual cluster (gate/producer/dsr/pbo/promotion_gate/producer_db/contract/promotion_evidence) = 85 passed; broader learning_engine/tests = 185 passed; py_compile clean. All re-run after my _normal_cdf removal.
+- **RETURNED LOW-1 (comment accuracy + latent footgun)**: DEFAULT_MIN_EVAL_OBSERVATIONS=10 < DsrGate.DEFAULT_DSR_MIN_OBSERVATIONS=30. E1 reads res.deflated_sharpe/psr_at_threshold RAW, bypassing DsrGate's P3-01 insufficient_observations guard. EMPIRICAL eval_n=15: dsr_raw=0.9997 (over-optimistic; DsrGate would've forced passes=False) BUT pbo_raw=None→pbo_insufficient_power→defer_data→passes=False. So VERDICT-SAFE (PBO total_trades≥320 power gate is the real protection), but (a) report DSR fields cosmetically over-optimistic at eval∈[10,30); (b) the code COMMENT (:705-707 "本檔自有 min_eval_observations gate 把關") is MISLEADING — min_eval_observations(10) is WEAKER than the bypassed guard(30); real protection is PBO not min_eval. Latent footgun if anyone raises DSR to verdict-driving w/o PBO or sets allow_missing_pbo_for_core_tests=True trusting DSR. Fix: tighten comment to state PBO-power is the actual low-N protection, OR surface insufficient_observations marker into report at low N. NON-BLOCKING (verdict correct today).
+- **Lesson**: the silent-wrong Sharpe-convention check is settled NOT by reading the formula in isolation but by greping the repo's OWN authoritative producer of that input (promotion_evidence._sharpe = mean/std ddof=1, no annualization) and matching E1's expr against it — test-fixture magnitudes (2.0–5.0) are a red herring that LOOK annualized but aren't load-bearing. And: a "test weakened to force green?" suspicion is resolved by MUTATING back the old params and watching WHERE it fails — old beta 0.4/-0.2 fails on dsr_raw (raw-series significance) while dsr_residual stays 1.0, proving the alpha is real and the recalibration only fed the conjunctive raw-DSR arm enough signal, not loosened any gate. Defense-in-depth caught the one real gap (low-N DSR bypass) being non-fatal only because an INDEPENDENT gate (PBO power) blocks the same promotion — flag the comment that misattributes the protection.
+
+## 2026-06-05 — WATCHDOG-INERT-STORM-FIX-1 adversarial review (worktree /tmp/wt-fixA, UNCOMMITTED main@92cdcc41)
+
+**對象**：engine_watchdog.py (+110) + test_canary.py (+255/-7)。修 2026-06-05 LIVE 風暴：restart_all exit=0(進程起)但引擎 INERT(快照永不刷新)→每次「成功」清 consecutive_failures+backoff=0→下個 2s poll 仍 stale→立即再重啟→無限風暴(退出碼熔斷 consec>=5 因每次成功永不觸發)。修法 3 件：(1)90s post_restart_settle_until 沉降窗口(should_restart key="settle")(2)restarts_since_recovery 每 trigger_restart 遞增、達 INERT_RESTART_LIMIT=3 在 exit=0 路徑 set circuit_broken+INERT_CIRCUIT_BROKEN canary+inert_circuit_broken 告警(3)on_engine_recovery 完全 re-arm 5 欄位。
+
+**Verdict: PASS to E4**(0 BLOCKER / 0 HIGH / 1 MEDIUM file-size / 3 OBS)。報告直接回給 PM(未寫檔)。
+
+### 核心對抗結論
+- **#2 gating hole 不存在(實證 simulation)**：restarts_since_recovery 在 storm 期間單調遞增只在真恢復歸零;consecutive_failures 只在 exit=0 success poll 歸零。對手兩難:要壓 consec<5 必須週期性 emit success,但任何 rsr>=3 的 success poll 立即觸 inert 熔斷→rsr>=3 後對手不能再 emit success→被迫全失敗→consec 爬到 5→exit-code 熔斷兜底。寫 throwaway harness 跑真 state machine 6 種 interleaving(pure exit0 / pure fail / alt / 2succ-then-fail / 2fail-1succ / succ@rsr5),延長 poll window 後**全部最終觸 SOME 熔斷,無無限逃逸**;最壞約 7 次重啟止住。E1「inert-break 只在 exit=0 路徑 fire」決策正確,exit-code break 是全失敗尾巴的 backstop。
+- **#3b flap re-arm = REAL but BOUNDED ACCEPTABLE**：單個 transient fresh snapshot 確實清掉 legit circuit_broken(on_engine_recovery re-arm)。但 perfect-flap worst-case simulation(引擎每 settle 後 flash fresh 一次再死)實測 sustained rate = **1 per ~91s(沉降窗口),非 2s 風暴(45x 改善)**,且持續 inert 仍每 ~3 重啟 re-trip inert break + re-alert。auto-re-arm 是 INTENDED(deploy-collision 自愈無需人工 reset)。非風暴回歸。
+- **#3c 行為變更需 surface(非回歸)**：diff 前 on_engine_recovery **不**重置 circuit_broken/consecutive_failures(EXIT-CODE break 是 latch,survive recovery,需手動 reset)。本 diff 改成 recovery 也清→EXIT-CODE break 也變 auto-re-arm。與 docstring「未來再宕機從乾淨狀態重新計數」一致,但若 restart_all 仍壞而引擎經他途恢復,下次崩潰會再燒 5 次失敗(~18min backoff)才 re-break — 低效非風暴。
+- **#4 settle downtime 比想像小**：recovery 會 CLEAR settle(re-arm)→「引擎健康啟動後稍後才崩潰」場景 0 penalty(立即可重啟);唯一 +85s downtime 場景 = 崩在開機途中從未 recover,正是沉降要防的 storm 場景,有界(每重啟一個沉降窗口)。
+- **#5 counter reset path 乾淨**：restarts_since_recovery 只在 trigger_restart:942 遞增 + on_engine_recovery:1260 歸零;exit=0:1014 無條件清 circuit_broken=False 在 inert 檢查前,但 trigger_restart 在 circuit_broken=True 時根本不被呼到(should_restart:899 gate + on_engine_crash:1181 只在 allowed 才呼)→無 reset-path bug。
+- **#6 prior-test 正確更新非 green-wash**：唯一刪除是 test_recovery_clears_marker 的 7 行(單次 returncode=1 重啟→改 _drive_to_circuit_broken 5 次),因 recovery 現在重置 consecutive_failures,re-trip 需重新爬 5 次。最終斷言 count_alert_sent("circuit_broken")==2 **保留不變**,intent(marker-clear→re-emit)保留。
+
+### Mutation 驗證(全 RED,有 bite)
+- M1 inert_break=False → storm 6 次(撐滿 max_polls)不止 → test_inert_storm RED ✓
+- M2 刪 settle 分支 → 沉降窗口內立即放行 → 3 tests RED(settle×2 + storm spacing)✓
+- M3 刪 _rearm["circuit_broken"]=False → 恢復後仍 broken 無法 re-arm → test_recovery_rearms RED ✓(localized:prior marker-clear test 仍 PASS,因走 exit-code 路徑)
+- M4(額外)刪 _emit_inert_circuit_broken 呼叫 → canary+alert 斷言抓到 → RED ✓
+- baseline + 復原後皆 107 passed + 9 subtests(byte-identical 復原,diff sha d6d422f9)
+
+### 治理
+- **MEDIUM(唯一退回候選,但 P0 storm-fix 不單獨 block)**：engine_watchdog.py HEAD 1977 → diff 後 **2087 行,破 2000 hard cap**(CLAUDE §七/§九)。無 TODO/docs 文件化 exception。2026-05-20 review 曾以「test_canary.py import surface lock」accept @1285,但已從 1285 累進(bind-host/level-trigger/alert-wire/inert-storm 系列 6/5 fix)破頂。module 是單一 flat import(`import engine_watchdog`,部署 entry `--status`),拆分需 package 重構非 P0 hotfix scope。建議:開 P2 split TODO + TODO 文件化臨時 exception,**不 block storm-fix**(邏輯正確、live 引擎已 down ~20h)。
+- **OBS**：(a)新 int()/float(state.get(...)) on watchdog_state.json(909/941)沿用既有 convention(next_allowed/consecutive 同寫法),該檔僅 watchdog 自寫 numeric,ValueError 風險理論且=既有,**非本 diff 新引入**(2026-05-20 那次 catch 是 load_inert_state 不同來源檔)(b)cross-platform/except-pass/log-fstring/private-attr/comment-style 全 clean,新註釋中文優先帶「為什麼」rationale 合規(c)SSRF guard 在 app-layer alert_config.validate_webhook_url config-write gate(settings_routes:1392),watchdog 讀已驗 URL,diff 不碰 send path,intact 且 out-of-scope。
+- §5 multi-session race 5/5 PASS(origin/main==HEAD==92cdcc41 0 ahead;tree 僅 2 in-scope 檔;3 stash 全歷史/他 branch 標"not mine"未碰)。
+- #7 prior-fix intact:bind-host sanitize / reason_key throttle / exit-code alert 全未動;BOTH break paths 各自 emit_engine_down_alert_if_new(key 不同→獨立去重互不淹沒)。
+
+### Durable lessons
+1. **storm/circuit-break 邏輯的「gating hole」必須跑真 state machine simulation,不能只讀分支**:本次寫 ~40 行 throwaway harness 鏡像 run_watchdog 的 should_restart→trigger_restart poll 迴圈,跑對手最佳 interleaving + 延長 poll window,才證明「兩個熔斷維度(inert on success / exit-code on failure)互補無逃逸」。靜態讀碼會漏「對手被迫進入全失敗尾巴」這個 backstop 論證。**poll-window 太短會假報 terminal_via=None**(backoff 60+120+300+600 需 >1100s 才到第 5 次)→ simulation 要給足 poll 數。
+2. **anti-flap re-arm 的可接受性 = 量測 sustained rate 不是 yes/no**:auto-re-arm vs latch-until-manual 是經典 tradeoff。判 acceptable 要實測 worst-case perfect-flap 的重啟頻率(本次 1/91s = settle-gated,45x 改善於 1/2s storm),證明 re-arm 不重引入原 storm,且持續病態仍 re-break+re-alert。
+3. **recovery 重置範圍變更要 diff 前後對比**:本 diff 把 on_engine_recovery 從「只清 alert marker + engine_alive」擴成「清 5 個 restart-state 欄位(含 circuit_broken/consecutive_failures)」,**順帶改了 EXIT-CODE break 的 latch 語義**(原本 survive recovery 需手動 reset → 現 auto)。E2 必 `git show HEAD:<file>` 比對舊行為,不能只看新增行;這類「順帶改既有 break 維度」是 spec drift 高發區。
+4. **file-size hard cap 在 P0 hotfix 的權衡**:邏輯正確的 safety-critical storm fix 不該單純因 +110 行跨 2000 cap 被 block。E2 動作 = 標 MEDIUM + 要求文件化 exception/split TODO,verdict 仍 PASS。但要查清是「本 diff 跨頂(1977→2087)」還是「早已破頂」,attribution 影響 follow-up owner。
+5. **int(state.get())/ValueError 復查要分檔來源**:2026-05-20 抓的是 load_inert_state(外部/多寫者來源檔)。watchdog_state.json 是 watchdog 獨佔自寫,同 pattern 風險等級不同 → 不可機械套用舊 finding,要 grep 該欄位的所有 writer 確認 numeric-only。
+
+## 2026-06-06 — E2 re-review: residual_hidden_oos_bridge MED-1/2/3 delta (ae6fec2a) → PASS to MIT (1 MED test-coverage gap returned non-blocking)
+- **Scope**: worktree /private/tmp/wt-residual-p2, branch feature/residual-hidden-oos-wiring, follow-up commit ae6fec2a (parent c39f84e6, NOT amend). 2 code files only: residual_hidden_oos_bridge.py (+53/-20) + test_residual_hidden_oos_bridge.py (+216). §5 race: merge-base=627b4772 (== parent of c39f84e6), branch = origin/main+2, origin/main 0 ahead, 0 file overlap on ml_training/residual (origin/main R-1..R-3/sealer all already merged ahead at 627b4772). status clean except expected E1/E2 memory + PA report. stash@{0} = documented "not mine" left untouched.
+- **Verdict: PASS to MIT**. 0 CRITICAL/HIGH. 1 MED returned as NON-BLOCKING test-coverage gap (code correct, test weak). All 3 MED fixes are CODE-CORRECT and 2/3 have genuine mutation-killing tests.
+- **MED-1 CAUGHT (genuine bite)**: fired E2's original dual-site mutation evaluate_cell(rts_non_oos)->rts_all AND bucket_round_trips_by_exit(rts_non_oos)->rts_all. Result: ONLY test_t10 fails, 25 pass. Hash diverged 44316c38.. (non-OOS-only) vs b620f9fd.. (leaked) — EXACTLY the SHAs E1 reported in commit msg (honest). T3 bite pre-partitions BEFORE evaluate_cell so it canNOT catch this dual-site mutation (confirmed: T3 stayed green under same mutation in prior run) — the gap was real, t10 closes it by driving the FULL register_residual_candidate_experiment through real register_experiment (FakeCursor) and asserting persisted demo_residual_alpha_report_hash byte-identical + == bridge._canonical_sha256(report).
+- **MED-2 CAUGHT (both sub-mutations, t11)**: (A) remove `aligned = [b for b in aligned if b+bucket_sec<=oos_start_epoch]` -> t11 fails; bridge returns windows_not_strictly_increasing (verified by direct call: boundary bucket 100 end=1454400 > oos_start=1445000 crosses OOS -> _windows_strictly_increasing backstops). (B) un-clamp klines end -> max_exit+pad -> t11 fails on explicit assert end_epoch<=oos_start (1455400<=1445000 False). t11 sufficiency PROVEN: aligned sorted ascending + eval_buckets=aligned[n_train:] => eval_buckets[-1]==max(aligned); asserting max_bucket+bucket_sec<=oos_start => ALL buckets satisfy invariant (monotone). PIT-correctness of half-open `b+bucket_sec<=oos_start` (bucket ending exactly at oos_start kept) CONFIRMED correct vs bucketed_btc_factor bucket_floor + partition strict exit<oos_start. NOTE: filter is PRIMARY guard, _windows_strictly_increasing(cand_end<=oos_start) is independent BACKSTOP — defense-in-depth.
+- **MED-3 CODE-CORRECT but TEST DOES NOT PIN IT (returned non-blocking)**: bridge embargo branch `(eb+0.5)*bs if eb>0 else 0` now byte-matches evaluate_cell:148 embargo_gap branch (parity verified directly for all bs∈{4h,1h,1d,1.0}×eb∈{0,1,2,3}). BUT my MED-3 mutation (revert to unconditional (eb+0.5)*bs) leaves FULL suite 26/26 GREEN — neither t12 nor t4_embargo catches it. Reason: real divergence ONLY at eb=0+bucket_sec=4h (OLD=7200 registers w/ misrepresented sealed embargo vs evaluate_cell purge=0; NEW=0 fail-closes). t12 tests only eb∈{1,2,3} (both formulas agree); t4_embargo uses bucket_sec=1.0 (round(0.5)=0 banker, both agree). NO test fires eb=0+bs=4h (the realistic default bucket_sec). t12 proves positive sealed==purge for eb≥1 (already held PRE-fix) — it does NOT prove the eb=0 carve. Non-blocking because: (a) code is correct & parity-proven; (b) eb=0 path additionally guarded by `<1` fail-closed regardless; (c) 0 production caller; (d) default embargo_buckets=1 so eb=0 needs explicit caller opt-in. RECOMMEND (not gate): MIT/E1 add t12b firing eb=0,bucket_sec=4h asserting err=='embargo_seconds_non_positive' to pin the regression.
+- **t11b is mutation-insensitive (noted, NOT a fix-blocker)**: removing the filter leaves t11b green — its construction collapses all trips into ONE bucket so len(aligned)<2 fail-closes 'insufficient_aligned_buckets' for a DIFFERENT reason (single-bucket, pre-existing guard) whether or not the filter exists. t11b documents the fail-closed reason but does not pin the filter-empties path specifically. The filter IS pinned by t11 (mutation A). Acceptable.
+- **Item 4 regression GREEN**: bridge+sealer 26 passed; full program_code/ml_training/tests/ 583 passed/31 skipped (E1's "768" includes learning_engine path; residual-relevant 0 regression confirmed). py_compile clean both files.
+- **Item 5 axes intact**: t4_windows_strictly_increasing + t7a/t7b honest-defer (durable_residual_alpha_report_hash_missing -> PENDING_SCHEMA) + t3_klines_bounded all GREEN after delta. MED-2 windowing change did NOT break strictly-increasing or e2e honest-defer.
+- **OpenClaw checklist**: 0 hardcoded /home|/Users in added lines (mac_dev_smoke excluded), 0 except:pass, 0 logger f-string, no detail=str(e), no foreign-private passthrough (test calls bridge._canonical_sha256 = same-module white-box, OK). Comments Chinese-first, MODULE_NOTE updated accurately to reflect 3-gate leak-free + embargo parity. Diff scope exactly 2 files, no creep.
+- **Linux-owed (unchanged from PART 2)**: real V132 CHECK round-trip (embargo_seconds>0, windows_chk) on Linux PG; FakeCursor only caps INSERT params on Mac. Mac has no pytest-asyncio gap here (suite is sync). No migration in this commit.
+- **Mutations fired & all caught (or proven-correct)**: MED-1 dual-site (caught: t10 only), MED-2-A filter-removal (caught: t11), MED-2-B klines-unclamp (caught: t11). MED-3 revert-unconditional (NOT caught by suite — code parity-proven correct, returned as non-blocking coverage gap).
+- **Lesson**: a fix can be CODE-CORRECT yet its test have ZERO mutation-killing power over the actual change — t12 asserts the always-true positive (sealed==purge for eb≥1) while the fix's real behavioural delta lives at eb=0+bs=4h, untested. Mutating the fix back and watching the suite stay GREEN is the only way to expose this; "26 passed +4 new tests" reads like coverage but the new t12 doesn't bite the line it claims to defend. Distinguish "fix is right" (verify by direct source-of-truth parity) from "fix is pinned" (verify by mutation) — both matter; here #1 holds so PASS, #2 partial so return a non-blocking coverage rec rather than RETURN-to-E1.
+
+## 2026-06-07 — E2 re-review: residual_hidden_oos_bridge HIGH-1 PIT leak fix (f8a6cfc5) → PASS to E4
+- **Scope**: worktree /private/tmp/wt-residual-p2, branch feature/residual-hidden-oos-wiring, follow-up commit f8a6cfc5 (parent ae6fec2a, NOT amend). 3 files: residual_hidden_oos_bridge.py (+87/-18), candidate_hidden_oos_sealer.py (+9 docstring), test_residual_hidden_oos_bridge.py (+129). Fixes the exact gap I flagged in my 2026-06-06 ae6fec2a review (MED-2 OOS filter only touched WINDOW LABEL, not evaluate_cell's independent re-bucketing) — MIT re-audit promoted it to HIGH-1 PIT leak.
+- **Verdict: PASS to E4**. 0 CRITICAL / 0 HIGH / 0 MED-blocking. 2 non-blocking coverage OBS + 1 file-size note (under cap).
+- **HIGH-1 fix = CORRECT and PINNED**. New `_bucket_admissible(ts,oos_start,bucket_sec)` reuses producer's bucket_floor; step-4b (line 278-287) filters BOTH rts_non_oos AND btc_klines IN PLACE before evaluate_cell (line 291). Step-6 window derivation (line 315-316) reads the SAME post-4b filtered names → genuine ONE-SOURCE-OF-TRUTH. rts_all (line 212) only feeds the carve-out, never downstream.
+- **Mutations fired (ALL with on-disk grep confirmation before run; ALL caught or proven-redundant)**:
+  1. NEUTER step-4b filter (pass-through) → t13 RED with EXACTLY E1's hashes 44316c38..(without) vs cd55472f..(with) + t11b RED (reason regressed no_admissible_round_trips→insufficient_aligned_buckets). HEADLINE: leak closed at COMPUTATION not just label. ✓
+  2. NEUTER step-6 backstop (pass-through) → suite STAYS 28 GREEN → proves step-6 is now genuinely REDUNDANT (no second parallel derivation; real guard is step-4b). ✓
+  3. BREAK partition carve-out (drop strict `<oos_start`) → 4 T3-family tests RED (partition_strictness / oos_buckets_absent / bite_extreme_out_trips / klines_bounded). Carve-out STILL PINNED. ✓
+  4. klines-unclamp (`end_epoch=max_exit+pad`, drop oos_start cap) → t11 RED on assert end_epoch<=oos_start (1455400<=1445000). MED-2 klines clamp STILL PINNED. ✓
+  5. _windows_strictly_increasing→always True → t4 RED. Strictly-increasing STILL PINNED. ✓
+- **OBS-1 (non-blocking coverage)**: t10's DESIGNATED dual-site mutation (evaluate_cell(rts_non_oos)→rts_all AND bucket_round_trips_by_exit(rts_non_oos)→rts_all) now leaves WHOLE suite GREEN — t10 lost its bite for that specific mutation. ROOT: evaluate_cell aligns candidate_buckets ∩ factor_buckets (residual_alpha_cycle:125-126, build_residual_alpha_report); btc_klines fed to evaluate_cell is the step-4b-filtered set with NO OOS factor bucket → leaked OOS trips in rts_all can't align → dropped inside. So step-4b's btc_klines filter independently masks the rts_all call-site leak. NOT a regression in the fix (t10 was built to catch the dual-site call swap, not a broken partition; carve-out itself stays pinned by T3 family). Guard-overlap artifact. Acceptable; recommend (not gate) MIT/E1 keep T3 as the carve-out pin and note t10 is now belt-and-suspenders.
+- **OBS-2 (item-4 ruling)**: t11b reason insufficient_aligned_buckets → no_admissible_round_trips. ACCEPTED. Fail-closed point legitimately moved earlier to DATA layer (step-4b empties rts_non_oos before step-6). Same intent (None return, register never called, no manifest persisted — test asserts both). Reason is internal (None,err) tuple, NEVER persisted, zero manifest/schema dependency. Old reason preservation NOT required.
+- **Regression (item 5)**: targeted bridge+sealer 28 passed (matches E1). Full ml_training 585/31. ml_training+learning_engine 770 passed/31 skipped — EXACTLY E1's 770/31 claim. 0 regression.
+- **OpenClaw 9 + 8 checklist**: 0 hardcoded /home|/Users (added lines), 0 bare except/except:pass, 0 logger f-string, 0 detail=str(e), 0 foreign private-attr (only bridge._ same-module test whitebox + os.environ). Scope exactly 3 files, no creep. 0 production caller (grep confirms PART-2 primitive-only). 0 migration/.sql/V###. Comments Chinese-first with WHY rationale (MODULE_NOTE updated leak-free 三道→四道; _bucket_admissible + step-4b 4b-comment explain DATA-layer necessity). Test file 940 lines < 2000 hard cap (acceptable, confirmed).
+- **§5 race 5/5 PASS**: merge-base 627b4772; origin/main 470098f4 is 5 commits ahead (P2 #6/#7 orderLinkId dispatch + signal_postmortem classifier + docs — known from MEMORY.md) but ZERO file-scope overlap with program_code/ml_training/ (git log HEAD..origin/main -- program_code/ml_training/ EMPTY) → no rebase-conflict for residual files. In-scope files clean/committed. No unknown WIP. No sibling push mid-review. (Only reverted MY OWN mutations via git checkout = §5c-compliant.)
+- **INCIDENT/LESSON (evidence discipline)**: mid-review hit a file-state desync — after `git checkout -- bridge.py` to revert one mutation, a SUBSEQUENT Edit (klines-unclamp) appeared applied (Edit tool confirmed + system-reminder said "modified") but later `grep` found the marker GONE and file == HEAD; my first klines-unclamp + t10 conclusions were drawn against a SILENTLY-REVERTED file → INVALID. Caught it because t11 "passed under klines-unclamp" contradicted my static analysis (predicted RED). FIX: re-ran EVERY consequential mutation with explicit `grep -n <MARKER>` on-disk confirmation IMMEDIATELY before pytest, and verified `git diff` empty after each revert. The t13 headline finding was re-confirmed twice independently. RULE REINFORCED (feedback_evidence_discipline): never trust Edit-tool "success" + system-reminder alone when mixing Edit with `git checkout` in the same file across calls — grep the marker on disk right before the test that depends on it; if a test result contradicts your static prediction, suspect file-state desync FIRST.
+
+## 2026-06-08 — PHANTOM-FILL-FIX-1 對抗審查 (TON 幻影倉) — PASS to E4
+- **任務**：審 E1 對「幽靈倉位記帳 bug」(PA Option A) 的 8-file 改動 (未 commit, branch feature/l2-critic-lessons-tools, dirty multi-session)。
+- **結論：PASS to E4**（0 BLOCKER / 0 HIGH）。3779 lib test green；cargo check 僅 pre-existing dead-code warn。
+- **is_close 來源雙向都查（最關鍵）**：源 = OrderDispatchRequest.is_close → PendingOrder.is_close → reduce_only=Some(true) (dispatch.rs:768)。**方向A**(真平倉→true)：risk-close commands.rs:1004/1167/1392/1591 全 is_close:true + is_long:!is_long（TON oc_risk_dm Buy 確走此 → guard 觸發）。**方向B**(真開倉誤判 true)：step_4_5_dispatch.rs:821 is_reducing_order = `p.is_long != intent.is_long`，genuine 新開倉 unwrap_or(false)=false（不誤傷）；唯反向 Open(=flip) 才 true，但該 order 本就送 reduce_only=true 給 Bybit（Bybit 自身不會反開），故 paper 與交易所語意一致，**無錯過機會**。
+- **MUTATION-SENSE 驗有 bite**：把 fill_engine.rs reduce-only guard 改 `if false` → golden test `phantom_fix_position_update_advisory_then_close_buy_yields_flat_not_long` + `..._reduce_only_no_position_is_noop` 雙 FAIL（panic at tests.rs:1779/1747）→ 還原後綠。測試真釘住根因。
+- **Option A 兜底場景(PA §9.1)獨立驗**：`upsert_position_from_exchange` size>0 caller 移除後，唯一 production call 剩 `converge_exchange_zero_close` 內 (size=0)。cold-start 種倉走 `import_positions` (bootstrap.rs:362) 完全獨立未受影響。**self-heal 未失**：missed-fill (Bybit 有/本地 flat) 改走 reconciler orphan 軸，且 orphan handler 有 `OrphanDecision::Adopt`→`dispatch_orphan_adopt` 注入 paper_state（非只 Close）→ 自癒保留，僅 latency 從即時 WS 變 ≤30s + 受 active-universe/edge/notional 資格限。**MEDIUM 給 E4**：整合測試應驗 orphan-adopt 仍接管丟失 fill 的真倉。
+- **三模式一致 + paper 不受影響**：converge_exchange_zero_close 有 `is_exchange()` 守衛 (commands.rs:1291)，paper-kind early-return 只清 pending_close。paper 無 private WS 故 PositionUpdate 不抵達；薄包裝 apply_fill delegate is_close=false 對 ~90 caller byte-identical。
+- **偏差裁決**：①**薄包裝 (apply_fill→apply_fill_with_close_semantics, is_close=false)**：ACCEPT。避免炸 90 caller，paper 無競態安全。②**bool mirror 保留 / phantom 軸用 presence+side（放棄 PA T4 的 struct{is_long,qty} qty-band）**：ACCEPT 足以滿足「不再幻影」。TON 型態 = `absent`（Bybit 完全 flat）已覆蓋；qty-band 細粒度背離既有 MinorDrift/Ghost 軸已負責，不必為此擴 mirror struct（最小改動 > PA 原議，正確取捨）。**不必退 PM 開 struct 升級 task**。
+- **LOW/NOTE 給 PM（非 blocker）**：(a) phantom `side_mismatch` 分支實質**告警不可達**——ghost_point_query 對「Bybit 有對側倉」回 StillHasPosition→不告警；E1 reconciler test 用 pq_const(ConfirmedZero) 注入才綠（runtime 該組合不可能）。E1 註解已誠實標「保守不告警」，防誤報設計合理，TON 型態(absent)不受影響。(b) **canary `PHANTOM_POSITION_DETECTED` 目前無 forwarder**：PA 自家 2026-06-05 watchdog-alert-wiring design line15 明寫「nothing consumes canary_events.jsonl」且 line129 REJECT tail-consumer；engine_watchdog.py 不 import alert_router → 目前 canary append 是 file-only observability 非真告警。但**屬 pre-existing infra gap**（forwarder 是未建的獨立 task），不 regress（之前也無 consumer）；**mandatory 通道 DB `observability.engine_events`(reconcile_phantom_local) 沿用既有 spawn_reconcile_audit 範式，operator SQL-queryable 真可達**，足夠。
+- **硬邊界/安全**：0 觸碰 live_execution_allowed/max_retries/system_mode/authorization；guard 為 fail-closed(return 0.0 no-op)；0 新 unwrap/panic 在 hot path；0 hardcoded /home|/Users；OPENCLAW_DATA_DIR fallback `/tmp/openclaw` 與全 engine 10+ 處一致；註解中文優先帶 WHY；翻倉餘量算術 bit-exact（close_qty/pnl/remaining 順序保留，overflow 僅在 fully-closed else 分支 `!is_close && >1e-12`）。
+- **§5 race 5/5 PASS**：HEAD b00c249d on feature branch；origin/main 8cd4da1f (residual+L2 sibling work) ZERO 重疊 8 phantom 檔；stash 全 pre-existing 非我；mutation 用 Edit 還原（非 git destructive）後 git diff 確認只剩 PHANTOM-FILL-FIX-1 增量。
+- **E4 必補**：①真亂序整合 golden（loop_exchange handle_exchange_event 層：先 PositionUpdate(size=0) 後 Fill(is_close=true)，斷言 flat + 無 entry_context_id；現 golden 在 apply_fill 單元層）②orphan-adopt 接管 missed-fill 真倉（self-heal 回歸）③三引擎獨立驗（demo/live_demo/live，禁只 demo PASS）④Linux cargo regression authoritative（Mac 過≠Linux 過）⑤partial-fill cum_filled 跨多 exec 的 is_close 透傳一致。
+
+---
+
+## 2026-06-08 · E2 review — L2 Advisory Mesh Phase 1 (D3 Provenance & Audit)
+
+**Verdict: PASS to E3/E4.** 11 檔對抗審查（V134/V135/V136 + l2_secret_redactor + l2_call_ledger_writer + layer2_engine/types/critic 接線 + singleton-registry §2.6 + test_l2_d3_ledger）對照 LOCKED PA 設計 `2026-06-08--l2-d3-phase1-tech-design.md`。0 CRITICAL / 0 HIGH / 0 MED blocker。
+
+**真實驗證（非 happy-path）**：
+- 244 layer2-family tests 綠（d3 24 + critic 36 + engine/escalation/tools 184）。
+- **Mutation 有 bite**：把 sha256 改算在 raw（非 sanitized）text → `test_sha256_over_sanitized_text` 立即 FAIL（hash mismatch）。證明測試非 mock-theater。
+- **Reachability 證實非死碼**：`POST /paper/layer2/trigger`(layer2_routes:234)→`run_session`(:285)→`_run_session_inner`→agent loop(:654 `if session.l2_reply_id is None`)→`_record_l2_call_to_ledger`(:323)→`writer.record_l2_call`(:352)。
+- **PA 3 個 E2-scrutinize point 全過**：(1) 複合 PK `(l2_reply_id,created_at)`/`(mark_id,marked_at)`/`(seam_id,ts)` 三表皆對；(2) sha256-after-sanitize 對；(3) **零 column-level GRANT UPDATE**（grep `GRANT UPDATE` = 0 hit 全 3 migration），trading_ai 只 INSERT/SELECT。
+- fail-soft 正確：`db_pool.get_pg_conn` yield None 時 writer 回 ok=False NEVER raise；engine 再包一層 try。`error_sanitize` 回 `{reason_codes,detail}` 正中 writer 讀法；DEBUG-mode str(e)[:200] 再過 redactor（防雙洩漏）。
+- decision_outcomes / live 表 0 ALTER（R2-5 live hop 正確 defer，僅 COMMENT 提及）。cross-platform grep CLEAN。無 f-string log / 無 bare except。
+
+**LOW（非阻，記錄交 E1/E3）**：
+1. singleton-registry §2.6 location 行號漂移（class 標 :78 實 :73；getter :340 實 :333；_WRITER :332 實 :330；engine wiring :351 實 :323/:352）——建議 E1 校正使 SSOT 精確。
+2. redactor 設計限制（**非 bug，PA §B 明確 keyword-gated**）：bare high-entropy 無相鄰 keyword 不遮（保 forensic 可讀、防 false-positive）→ E3 對抗驗時知此為已知 tradeoff，非漏遮缺陷。
+3. writer `final_summary`/`_error_reason` 僅在 `input_context` 為 dict 時併入；P1 reachable 路徑 input_context 恆 dict（engine 造 `{messages,offered_tools}`），latent-only。
+4. `ON CONFLICT DO NOTHING` 不驗 rowcount → uuid 碰撞極端下 ok=True 但無 row（碰撞機率 ~0，非實務風險）。
+
+**教訓固化**：本次每條 reachability/ordering claim 都跑了真實 grep + mutation + test，沒採信 E1 自述。D3 接線是「記憶教訓『語法通過≠接線可達』」的正面案例——E1 確實接到真實 manual-trigger 路徑且 fail-soft 不阻斷 session。
+
+---
+
+## 2026-06-08 — Residual PART 4 Phase 1（Gap B 多因子 + Gap C permutation）對抗審 → PASS-to-MIT
+
+**commit** `da3aec6f`（worktree `/private/tmp/wt-residual-act`，branch `feature/residual-activation`，base `8cd4da1f` 在 origin/main 上）。8 檔（4 source + 4 test），+1057/−8。
+
+**verdict = PASS-to-MIT**（0 blocker；2 LOW 觀察，非阻塞）。
+
+**獨立驗證（非採信 E1 自述）**：
+1. **行為中性（#1 criterion）親算**：抽 pristine HEAD（`da3aec6f^`）與新版 gate，餵相同 true-alpha-passing 合成輸入跑**完整建構路徑**（verdict=pass，非 early-return），`to_dict()` 18-key keyset 全等、dict 全等、canonical sha256 全等（`8bd4f3f5cae5…`）。default `required_factors` 維持 `("btc",)`、`permutation_enabled=False`。grep 全 default path：無任何 cron/payload/cycle caller 傳新因子或開 perm。
+2. **funding PIT 真 schema 核對（ssh trade-core trading_postgres/trading_ai，user=trading_admin db=trading_ai）**：`market.funding_rates` 真欄是 `ts timestamptz`（非 design 寫的 `funding_time`）→ E1 deviation **正確**；真資料 8h 結算格（00/08/16 UTC）→「只取 ts<=bucket_end 已結算列」PIT 正確。SQL 參數化（`%(symbol)s` 等）無注入，命中 PK index `(symbol,ts)`。
+3. **funding 邊界不對稱（LOW 觀察，非 leak）**：funding 用 `(start,end]`（`bucket_floor(ts-_BUCKET_EPS)`），btc/market 用 `[start,end)`（`floor(bar.ts)`）。逐桶推理：funding 窗 `(B,B+sec]` 實現價格窗 `[B,B+sec)` 的已結算 carry，落後桶尾的下一筆 settlement 正確歸入下一桶 → **無未來資料入桶**（mutation probe #2 證實）。屬保守建模選擇，建議 Linux dry-run 複核對齊。
+4. **gate vs validator defer/fail taxonomy** 初疑矛盾（gate `perm_p_value_not_computed`=defer vs validator `metric_missing:perm_p_value`=fail）→ 查證**實務不可達**：permutation 只在 quality-gate 通過後跑（`evaluate()` 先 early-return on reasons），此時 `aligned_eval_ts >= min_eval_observations >= 8/10 >= 2` 且 residual_eval finite → `_permutation_residual_alpha` 必回真 p 非 None。兩者皆「不晉升」，功能一致。non-issue。
+
+**mutation probes（3 跑，均報告 caught-by）**：
+- **#1 行為中性**：`to_dict()` 不剔除 `perm_iterations`（disabled）→ caught by `test_gate_permutation_disabled_is_byte_identical_default` + `test_gate_default_report_keyset_locked`（18-key lock 有 bite）。
+- **#2 PIT**：funding settlement 歸前一桶（讓桶 N 看到桶 N+1 未來費率）→ caught by 5 funding 測試含專職 `test_bucketed_funding_factor_pit_only_settled_rows`（用巨值 9.0 未來費率斷言不洩漏）。
+- **#3 determinism（test-strength gap, LOW）**：seed 改 `default_rng()` 無視 seed arg → 既有 determinism 測試**仍綠**（fixture mean=1.18/std=2/n_perm=3000 → p 飽和到 0.0，跨 seed 不變）。實作確實確定性（seed 綁 factor_panel_hash），但鎖它的測試在 borderline-p（weak-signal fixture p 在 0.687–0.696 隨 seed 跳）才有區別力。建議 E1 補一個 borderline-p determinism assert（非阻塞，後續硬化）。
+
+**counts 核對**：4 changed-file suites 79 passed（兩跑一致，PYTHONHASHSEED=0 deterministic）；residual* cluster 109；廣域 ml_training+learning_engine **826 passed / 31 skipped**（= E1 宣稱，0 regression）。
+
+**標準項**：hard-boundary grep 0（live/auth/order/risk/lease 全 0）；hardcoded path 0；except:pass 0；新 mutable singleton 0；f-string log 0；私有屬性穿透 0；新註釋中文優先合規。
+
+**file-size 觀察（LOW）**：`residual_alpha_gate.py` 1116 行（>800 soft，<2000 hard）；Gap C ~137 行與 `evaluate()`/`ResidualEdgeReport` 緊耦合（perm 讀 `residual_eval` local、寫 report 欄位），`_permutation_*` 純函數**可**抽 helper module 但 protocol/report dataclass 必留 gate。gate pre-Gap-C 已 987 行（pre-existing 近頂）。Gap A/D 落地後會再長 → 建議 MIT/PM 留意是否該抽 `residual_permutation.py`。
+
+**§5 multi-session race**：5a/5e fetch — origin/main 領先 HEAD 2 commit（`65952b8b`/`bdf15e4f` PHANTOM-FILL-FIX-1，**純 Rust engine**，與本 PR Python residual_alpha_* file scope **0 overlap**，benign divergence，PM 可 ff engine commits）；5b/5c/5d worktree 全程 clean（唯一 untracked = 被指派的 PA design doc）；review 中重 fetch 無新 sibling。stash list 有 3 條**非本 session**（含「recovered, not mine」標記）→ 按 §5c 一律不動。
+
+**Linux-owed（傳給 MIT/PM）**：funding settlement-timing real dry-run（Mac 用合成結算列）；flag-ON orchestrator 真寫測試屬 Gap A（不在本 commit）。
+
+## 2026-06-08 · E2 re-review — L2 D3 redactor v2 delta (RETURN to E1)
+
+**Verdict: RETURN to E1** (delta 正確性全綠，但 v2 bare-high-entropy 臂破壞 principle-8 可重建性 + 違 PA §B.2 LOCKED spec + 違前一輪 E2 自己簽的 accepted tradeoff)。fresh 重跑（前 re-E2 socket 斷無 verdict）。
+
+**問題1 over-redaction 量化（實測 24-case 真實 L2 forensic corpus）：7/24 = 29% 合法內容誤遮**，且非隨機——集中誤遮 operator fault-localization 必讀的高價值識別碼：
+- git full SHA(40hex)→[REDACTED]、sha256(64hex)→[REDACTED]（principle 8 字面就是 reconstructable，砍掉 manifest/artifact 溯源）
+- `KEY=VALUE` 形：`OPENCLAW_ALLOW_MAINNET=1`(24char/2cls/ent3.66)、`scope=CanaryStagePromotion`、`verdict=INCONCLUSIVE_NO_TRANSITION`、`eff_model=claude-haiku-3-5-20241022` 全被吃
+- **根因**：候選 regex `[A-Za-z0-9+/=_\-]{24,}` 把 `=`/`_`/`-` 收進字元類 → 貪吃整段 config 賦值 + hyphen/underscore 識別碼當單一「高熵 token」。`OPENCLAW_AUTO_MIGRATE=0`(23char) 僅差 1 char 倖存、`RECONCILIATION_WORKER_...`(全大寫1類)僅因 1 字元類倖存 = 脆弱結構非罕見 edge。
+
+**問題2 NFKC/url-decode（從碼判定）：存入 = preprocess 後文本（非原文只遮 span）**。`redact()` 內 `out=_preprocess(text)` 後所有 `pattern.sub` 作用於 out → 回傳 out；writer 存 out + `prompt_sha256=sha256(out)`。實測 8/9 零-secret 合法 CJK 輸入被改寫：全形 `，：（）`→半形（NFKC，中文為主專案普遍）、`ＡＢＣ１２３`→`ABC123`、`0.01％`→`0.01%`、合法 `%2F`/`%20`→`/`/空格（url-decode **不可逆**）、benign ZWSP 剝除。→ stored system_prompt ≠ 送模型 prompt，破壞 principle 8。
+
+**delta 正確性（全綠，非退回原因）**：13→5 pass 合併 18 臂 dispatch 全對 kind 不串；arm 順序對（`api_key=<高熵val>`→tag api_key 非 high_entropy，冪等跳 [REDACTED]）；redact-then-truncate[:4000] 次序對（critic:463 redact→467 truncate）；`_attach_meta` 三分支對（非-dict 包 `_context` 不丟 metadata）；ReDoS 200K 40-50ms 線性；261 passed/1 xfailed 親驗屬實（xfail=<24短-bare 殘留，strict 正確 fail）。
+
+**治理鐵證**：PA §B.2 line 252 只授權 high-entropy **"keyed by adjacent keyword"（keyword-GATED）**；前一輪 E2（本分支 memory:5009）明確簽 "bare high-entropy 無 keyword NOT redacted = 正確 in-spec tradeoff" PASS。v2 加 bare 臂 = **雙重違反 LOCKED spec + 前 E2 立場**。E3 RETURN 的是具體 bare/encoded **secret** 向量（24-char token/JWT/url-DSN/zero-width）——targeted 結構臂(JWT/DSN/IP)+preprocessing 已足夠抓；blanket entropy 臂是過度修正。
+
+**建議（給 E1，不代寫）**：① 問題1 = rebalance（非 ship-as-is）：移除或 keyword-gate bare-high-entropy 臂回 PA §B.2 原意；若保留須加 shape-exclusion（git-SHA 40/64-hex 純 hex + SCREAMING_SNAKE + `KEY=VALUE` 已知安全形）+ 拆候選邊界（`=`/`_`/`-` 不收進高熵候選字元類，只掃純 base64 run）。bare 24-char 真 secret 殘留改靠 keyword/struct/JSONB-key 三臂（已涵蓋具名 critical 資產）+ defense-in-depth。② 問題2 = detect-on-preprocessed-but-store-original：在 preprocess 後文本上「定位 secret span」，但把 span offset 映回**原文**遮（保留全形標點/url-encode/zero-width 原樣），sha256 算原文-遮-span 後。退而求其次才文件化為 accepted caveat（但 url-decode 不可逆，較弱，且中文專案標點改寫面太大不建議純文件化）。
+
+**教訓**：over-redaction 也是 finding——D3 整個存在意義 = principle 8 可重建（operator 月後讀 prompt/response 做 fault-localization）；29% 高價值識別碼變 [REDACTED] 噪音 = ledger 半廢。對抗審不只找「漏遮」，也找「過遮毀用途」。v2 修 E3 漏遮時越過 PA LOCKED spec 邊界＝scope drift，須退回收斂回 spec。
+
+## 2026-06-08 — L2 D3 redactor v3 re-review（store-original delta）→ RETURN E1（1 CRITICAL）
+- **任務**：re-review v3 收斂 delta（上輪 RETURN 2 findings 已修 + operator A）。專攻 store-original-by-span 新碼正確性（安全/覆蓋率殘留由 re-E3 並行）。改 4 檔（l2_secret_redactor.py 重寫 524 行 / layer2_cost_tracker.py Finding 3 / test_l2_d3_ledger.py / 設計 §B.5）。writer/critic/migrations/接線未動（已 PASS）。
+- **裁決 = RETURN E1（CRITICAL-1）**。store-original 大方向對、19 軸實證多數綠，但**fast-path gate 不健全→真實 secret verbatim 洩漏**。
+- **★ CRITICAL-1（自抓，E1 測試未覆蓋）：fast-path gate 與 strip 謂詞 drift → keyword 中插 135 個 Cf 字元之一即繞過遮罩，secret 原文落 ledger**。
+  - 根因：`redact()` :418 fast-path 條件 = `not _NEEDS_OFFSET_MAP_RE.search(text) AND is_normalized("NFKC")`。但 `_NEEDS_OFFSET_MAP_RE`（:98 手列範圍）**不是** `_is_control_or_format`（:101 strip 謂詞 = 全 Cc/Cf + zero-width frozenset）所剝字元的超集。全 Unicode sweep：**135 個 Cf 字元** strip=True 但 RE-miss 且 NFKC-stable（U+180E Mongolian Vowel Sep、U+061C Arabic Letter Mark、U+2066-9 directional isolates、整個 U+E00xx tag block 含 TAG LATIN LETTER）。
+  - exploit 實證：`api᠎_key=SUPERSECRETLEAK1234` → takes_fast=True → fast-path 不 strip → keyword 不連續 → 0 span → **`result == src`（secret verbatim 入庫）**；slow-path 同輸入 detect 1 span hits=api_key（正確）。U+061C 同。
+  - 影響：正是 redactor 設計要打的編碼規避向量（`_is_control_or_format` docstring 明列 `api​_key=` 規避）；fast-path 優化引入不健全 gate，毀 E3-HIGH sanitize gate + root principle 8。slow-path 機制本身正確（已驗 5 個 sample），**修點純在 gate**。
+  - 修向（不代寫）：A=gate 改用同一 `_is_control_or_format` 謂詞判「有無 strip 字元」（`any(_is_control_or_format(c) for c in text)` → slow），strip-set==gate-set by construction 不再 drift；B=`_NEEDS_OFFSET_MAP_RE` 由實際 strip-set 推導。+回歸測試（已知規避字元 keyword-split 不 verbatim + brute-force 斷言每 strip 字元 route slow）。
+- **其餘軸全綠（實證非讀碼）**：
+  - byte-identical（10 自造對抗 input：CJK 全形/合法%2F/zero-width/ﬁ ﬂ ligature 1→2 char NFKC/circled-digit/soft-hyphen/fullwidth alnum）全 `.encode utf-8` 相等 kinds=[]。
+  - off-by-one：secret 位文末（無下一字元，用哨兵）+ partial first/last char + 相鄰雙 secret 全無洩漏。
+  - 規避完整遮（**走 slow-path 的**）：zw-in-value（`api_key=SUPER​SECRET​1234`→`[REDACTED:api_key]` 含被剝 zw 區段完整遮）/ fullwidth secret / url-encoded DSN cred 全覆蓋。
+  - fast-path==slow-path 等價：9 個 fast-path input 與強制 slow 機制 byte 相等。
+  - _merge_spans：Authorization+Bearer 雙臂重疊 / 無分隔相鄰雙 secret / DSN+priv-ip 重疊 全正確 + 合併輸出冪等。
+  - Finding 1 移除乾淨：grep 0 dead ref（_redact_high_entropy/_HIGH_ENTROPY/_shannon_entropy/_char_classes/import math），AST 0 unused import；18 surviving arm（keyworded/DSN/JWT/priv-ip/host）逐一仍遮；5 negative（git-SHA/sha256/model-id/config-flag/public-ip）byte-identical 不誤遮。
+  - Finding 3 cost_tracker：redactor 純 stdlib 無 import cycle；結構/數值欄（symbol/action）未動；良性文本不誤遮。
+  - sha256：writer :162-165 hash `redact().text`（original-redacted）非 preprocess——正確。
+- **測試實況**：test_l2_d3_ledger.py **46 pass + 4 xfailed**（殘留 strict）；layer2 family scope（--ignore replay）**530 pass + 4 xfailed + 0 fail**。E1 稱「2 failed product_family」實為 19 fail，但同一 pre-existing 類（PG port 15432 refused + engine.sock 缺，Mac CLAUDE §六 預期）；grep 證該檔不 touch redactor/cost_tracker = 非 v3 回歸（E1 count 報少，非 finding）。4 replay collection error pre-existing（repo-root sys.path harness）。
+- **registry §2.6 drift（非 gate-blocker，PM commit 前收口）**：記 class:73/_WRITER:330/getter:333/engine-call:352；實際 :99/:364/:367/:655（def:323 巧合對）。E1 memory 已承認非本輪造成（writer 未動）；趁 CRITICAL fix 輪一併更正。
+- **bilingual**：新 `_sanitize_session_dict_for_persist`（:79-119）中文優先正確；唯一 English-only comment hit（cost_tracker:65）是 pre-existing G3-08 sibling block，未碰。
+- **§5 race**：5a origin/main 2h 內無 sibling push（feature 分支 25↔17 divergent，v3 未 commit 無 merge）；5b unstaged 全屬 L2 scope + agent memory（aeg research builder.py/test 屬他 scope leftover，不 touch redactor 故不阻）；5c stash 全舊/別 session 未動。
+- **教訓**：**fast-path 優化的 gate 必須是慢路徑「正規化無作用」條件的健全（sound）近似——手列字元範圍 RE 與另一處 strip 謂詞獨立維護必 drift；正解是 gate 復用同一 strip 謂詞**。對抗審查 store-original 不能只信「byte-identical 測試綠」——要全 Unicode sweep 找 strip-set vs gate-set 的洞（E1 測試只覆蓋 U+200B 一個 zero-width，漏 134 個）。
+
+## 2026-06-08 — L2 D3 redactor v4 narrow re-review（gate fix + keyword + cap）→ PASS to E4
+- **任務**：narrow re-review v4 delta（上輪 v3 我 RETURN CRITICAL-1 fast-path gate leak，E1 照方向 A 修）。只審 gate fix / keyword 補全 / 256KB cap / registry §2.6 行號。
+- **裁決 = PASS to E4（0 CRITICAL / 0 HIGH / 0 MED blocker）**。
+- **★ CRITICAL-1 真閉（brute-force 親證，非信 E1 自述）**：
+  - 全 Unicode（0..0x10FFFF 去 surrogate）枚舉 → strip-set 共 **223** 字元；`_needs_offset_map` 對每個 strip-set 字元 route slow-path **0 miss**（predicate level）。
+  - end-to-end exploit：223 strip-set 字元各插入 `api<ch>_key=SECRET` → **0 verbatim leak**、223/223 route slow。
+  - 7 個 named Cf-split（U+180E/U+061C/U+2066-9/U+E0041 tag）逐一驗：全 routed slow + 0 verbatim + 正確遮 api_key kind。
+  - **無第二份枚舉 drift**：`_needs_offset_map` 執行體用 `any(_is_control_or_format(c) ...)` 同一 strip 謂詞；舊 `_NEEDS_OFFSET_MAP_RE` 只剩 docstring 提及（執行定義已刪）。drift 結構上不可能再生。
+  - fast vs forced-slow byte parity：12 input 0 mismatch（含 idempotency `[REDACTED:*]` token 二次跑不變）。
+- **cap 放置判定 = 入口放置「強於」PINNED「ledger 寫入前」且無副作用，可接受**：
+  - redact() 被多 caller 用（writer:162-190 + critic:463 + cost_tracker:94/101/113）；cap 在 redactor 入口 = 單點 bound **全** caller（含非-D3 路徑），是 strictly stronger 涵蓋。
+  - cap 在 normalize/offset-map **之前**（redact() 首步），offset 對齊；over-cap secret near start 仍正確遮 + marker 事後附。
+  - 正確性：sub-cap（CAP-1 / 恰 CAP）byte-identical 不截（`>` 非 `>=`）；marker 確定性 `…[TRUNCATED:n chars]`；冪等（尾端 marker tail RE 偵測跳過再截，twice==once）；marker 不被誤遮（kinds 空）；straddle secret 被截斷 → **無 full verbatim leak**（fail-safe）。
+  - cap 只 bound super-linear per-char 迴圈（單巨葉 → 截；redact_jsonb 多小葉 aggregate 不 bound 但每葉線性 → linear-sum 非 super-linear，符 docstring 宣稱目標；input_context schema-controlled）。
+- **keyword 補全完整**：8 new（auth_signing_key/signing_key/signing_secret/auth_key/hmac_key/hmac/private_key/裸secret）key=value + JSONB-key 兩形全 catch；alternation 長/具體先（auth_signing_key→auth_json 非部分 auth_key）。裸 secret catch-all **value-scoped**：`secret` 裸字（無 =/: sep）不遮、`secret=v` 只遮 value、複數/複合詞不誤抓。無關文本零破壞。
+- **ReDoS-safe**：11 adversarial（keyword 前綴 spam / value class 邊界 / 巨 value / 規避混合）全**線性**（worst 101ms@220K 病態輸入，~0.5µs/char），無 catastrophic backtracking；>256KB 先 cap。
+- **registry §2.6**：class:99 / `_WRITER`:364 / getter:367 / engine-call `_record_l2_call_to_ledger`:655 — 四行號全 exact match。
+- **無回歸**：test_l2_d3_ledger 78 pass + 4 xfailed + **0 XPASS**（residual 契約完整）；layer2-family in-scope 4320 pass / 66 failed / 4 xfailed，66 failed 全在 product_family_business_settings/runtime_snapshot_bridge/snapshot_stable_entrypoint（redactor-ref=0），sample 證 engine.sock 缺 + 403 auth-state = Mac sandbox pre-existing（CLAUDE §六），非 v4 回歸。
+- **scope 隔離**：writer/cost_tracker/critic 只讀 `REDACTOR_VERSION`/`redact().text`，RedactResult shape 未變，v4 內部改動 transparent；migrations V134-136 untracked 屬 D3 原 PASS 集非 v4 delta。0 hardcoded path / logger %s / 無 except:pass / 無 detail=str(e) / 618 行 <800。
+- **§5 race（flag PM，非 blocker）**：origin/main `bdf15e4f`（sibling 重落 phantom-fill + residual，與本地 HEAD `6d312405` 同 message 不同 SHA = 分支 divergent/rebased）；但 sibling commits 觸 v4 redactor file scope **0 overlap**（l2_secret_redactor/test_l2_d3/V134-136/registry §2.6 全 uncommitted local，origin 無）→ 無檔衝突，**PM merge 前需 rebase** branch onto current origin/main。stash 3 entry 全舊/別 session 未動（§5c 未 revert）。
+- **教訓固化**：v3 我用 brute-force 抓到 gate drift（E1 測試只覆蓋 U+200B 一個），v4 必須用**同一 brute-force 復驗修補**——223 字元全枚舉 + end-to-end exploit + fast/slow parity 三層，不信「by construction」口頭宣稱。cap「入口 vs PINNED 字面位置」差異 → 判 strictly-stronger（bound 全 caller）而非機械要求字面對齊；驗 sub-cap byte-identical（`>` 非 `>=`）+ normalize-before-cap 對齊是真正風險點。
+
+## 2026-06-08 — Residual PART 4 Phase 2 re-E2（HIGH-1 payload report write + LOW-3 idempotency）→ PASS-to-MIT
+**commit** `7d2cdcba`（follow-up，parent `2a5df09e`，NOT amend；worktree `/private/tmp/wt-residual-act`，branch `feature/residual-activation`）。2 source/test 檔 + E1 memory；orchestrator preflight +103/-? · test +195。fix 我上輪 RETURN 的 HIGH-1（deciding-factor goal NOT met）+ LOW-3 + LOW-4。
+
+**verdict = PASS-to-MIT**（0 blocker；1 LOW 觀察非阻）。
+
+**★ headline 獨立判定（不採信 E1 自述，真跑 production 路徑）= YES，math 現在是 deciding factor end-to-end。**
+- **DEFER 候選**：真跑 orchestrator（fake DB loader）→ 取 stamp UPDATE 實際寫的 `report_jsonb` → 重建 production-shape source_row（payload 帶 report，**無** top-level 欄，比對真 `fetch_pending_sql_and_params` SELECT :606-624 確認無 top-level `demo_residual_alpha_report` 欄）→ `build_live_candidate_evidence_from_source` 回 `residual_alpha:passes_not_true`（MATH），**非** `residual_alpha:not_dict`（absence）。對照 payload={} → `not_dict`（=修復前狀態）。差異全來自 payload 是否帶 report。
+- **E1 修正我的 reason 名對**：validator（`residual_alpha_report_contract:62-68`）先檢 `passes is not True`（→`passes_not_true`）**才**檢 `verdict`（→`verdict_not_pass`）。defer report `passes=False` → 永遠回 `passes_not_true`。我上輪寫的 `verdict_not_pass:defer_data` 不精確；兩者皆 content/math reason，distinct from absence。實測 written verdict 甚至是 `fail`（單配置 PBO defer），但 `passes=False` 先 short-circuit。
+- **PASS 候選**：合成過 validator 的 PASS report → 過第一道 gate（reason 非 `residual_alpha:*`）AND 過 registry-hash cross-check（`:375` `_validate_registry_residual_report_hash`）：當 payload report 的 `_canonical_sha256` == registry `demo_residual_alpha_report_hash` → reason 推進到下游 `durable_residual_alpha_report_hash_missing`。mutate registry hash 為錯值 → `:375` 正確回 `replay_registry_demo_residual_alpha_report_hash_mismatch`（cross-check 有真 bite，且確認比的就是 payload report）。
+
+**hash byte-identity（item 3，跨寫者單一真相）**：drar writer（`promotion_evidence:479/507`）`report_hash=_canonical_sha256(report)` + `report_jsonb=json.dumps(report,sort_keys=True)`；orchestrator payload write（`:656`）同 `json.dumps(report,sort_keys=True)`，**同一 `captured["report"]` dict** 餵 drar + payload；source contract（`:399`）re-canonicalize round-trip dict。全部 `_canonical_sha256` = `sort_keys=True,separators=(",",":"),ensure_ascii=True`。三者結構一致。
+
+**4 個 mutation probe（全有 bite，我親自 Edit-mutate-restore，非 git destructive）**：
+1. 移除 `_STAMP_REC_SQL` 的 `jsonb_set` payload 寫入 → **3 紅**（six_step / beta_trap / pass_report）。test 在重建 row **之前**先 `assert "jsonb_set" in stamp_sql` 綁定 SQL，故 SQL 移除即抓（非靠 param 假象）。
+2. orchestrator 寫 **不同** report 進 payload（`raw_mean_bps:99` vs registry `1.0`）→ `test_six_step_flow` 紅於 `:543 assert written_report == spy.calls[0]["report"]`（hash byte-identity pin 有 bite；下一行 `:544` `_canonical_sha256==registry_residual_hash` 亦會紅）。
+3. 停用 idempotency_key 設定（`if False and split_ref`）→ `test_low3` 紅（1）。
+- 每次 mutate 後 `cp /tmp/preflight_backup.py` 還原 → `git diff --stat` 確認 byte-identical（empty）。
+
+**production-shape test 真 production（item 2）**：`_production_shape_source_row` 只放 lineage 欄 + `payload`，**無** hand-placed top-level report（上輪舊 test 手放 top-level 遮蔽真 bug）→ 會抓 absence regression（payload={} → not_dict 實證）。
+
+**LOW-4 resolved（cross-check 一致）**：`attach_residual_reports`（`residual_alpha_cycle:317`）唯一 caller `mlde_shadow_advisor:615`，**read-only conn**（`set_session(readonly=True)`）+ 只 `payload[field]=report`（in-memory mutate，`:377`），**零 DB UPDATE**；跑在 rec 生成期（未蓋 lineage 前），用 `required_factors=("btc",)` → btc-only。orchestrator 後來 `jsonb_set` **覆寫**該 btc-only payload 為 multi-factor（== manifest/registry hash）→ cross-check 一致。stamp `WHERE replay_experiment_id IS NULL` idempotent：已蓋過則 no-op 不重寫 payload。attach 不 re-process 已蓋 DB rec。順序安全（generate→insert(btc-only)→stamp(overwrite multi-factor + set lineage)→此後 NOT NULL 鎖死）。
+
+**LOW-3 resolved（item 4）**：實測 idempotency_key = `residual_stage0r:grid_trading::BTCUSDT:<64hex split_hash>`，真 split_hash 後綴（非空），跨兩跑 byte-identical（確定性），≤128。誠實殘留風險文檔正確（in-memory cache 重啟失效 + cache-miss 跨-process 接受重複 INSERT → 窗縮到「crash-then-restart」非完全消除；durable 欄 V049 無，out of Gap A scope）。`except (AttributeError, ValueError)` typed + logged（非 bare/silent）。
+
+**標準項全綠**：full `ml_training+learning_engine` **850 passed / 31 skipped**（= E1 宣稱，0 regression，33s）；orchestrator suite 23 pass。256 added 行 grep：0 hardcoded path / 0 hard-boundary（live/auth/order/risk/lease/mainnet）/ 0 f-string log / 0 bare except / 0 私有屬性穿透。behavior-neutral 3 test 綠（flag-off 0 writes 0 conn）。新註釋中文優先（English 僅 jsonb_set/欄名/reason token 等 identifier）。`import json` 真用。
+
+**LOW（非阻，記給 MIT/E1）**：新 fail-closed 分支 `register_ok_but_report_uncaptured`（report is None 不蓋 lineage、不寫 payload、回 skipped）**無直接 test**——但屬防禦性難達分支（bridge 必產 report 才到 register），且行為是安全方向（skip 不蓋），非 correctness 風險。建議補一個 `captured["report"]` 缺失的 e2e（非阻）。
+
+**§5 race 5/5 PASS**：5a/5e origin/main=`bdf15e4f` 領先 merge-base `8cd4da1f` 2 commit（`65952b8b`/`bdf15e4f` PHANTOM-FILL-FIX-1，**純 Rust engine**），`git log origin/main -- <我 2 檔>` **EMPTY**，0 file-scope overlap（與我 Phase 1 review 同 2 commit）；5b worktree 僅 E2 memory + PA design doc（untracked，非我）；5c 3 stash 全 pre-existing/別 session 未動；5d N/A；review 中無新 sibling push。mutation 全用 Edit + cp 還原（非 git checkout/stash drop）。
+
+**Linux-owed（傳 MIT/PM）**：flag-ON 真寫 run 確認 production 真路徑回 `passes_not_true` 非 `not_dict`（Mac 用 fake DB loader + Python-層 json round-trip；**PG jsonb 數值正規化** round-trip 風險未覆蓋——orchestrator 寫 `json.dumps::jsonb`，production 從 jsonb 讀回，PG 可能正規化 float trailing zero/int-vs-float → 理論上動 `_canonical_sha256` → registry-hash cross-check 漂移。Mac 測 `json.loads(json.dumps())` 不經 PG。**MIT/E4-Linux 必跑真 PG round-trip 驗 hash 仍 byte-identical**）。
+
+**教訓**：(1) deciding-factor 這種「命脈是否真接通」claim 不能只讀 SQL diff，要**真跑 orchestrator 取它實際寫的 param + 重建 production-shape row 餵下游 contract**，並對照 absence 證差異全來自修補。(2) hash byte-identity 在 Mac 只能驗到 Python json round-trip；**PG jsonb 數值正規化是真實漏網風險**，必明確標 Linux-owed 不能默認 PASS。(3) production-shape test 防 regression 的關鍵 = **不 hand-place** 被測欄位（上輪舊 test 手放 top-level report 正是遮蔽 HIGH-1 的元兇），新 test 改從 orchestrator 實寫的 payload 取 → 才有 absence-regression bite。
+
+## 2026-06-08 — Residual PART 4 Phase 2 MIT HIGH-1/HIGH-2 fix re-E2（67730b7b）→ PASS to E4
+**commit** `67730b7b`（follow-up，parent `7d2cdcba`，NOT amend；worktree `/private/tmp/wt-residual-act`，branch `feature/residual-activation`）。5 檔 surgical：gate +32 / gate-test +118 / db-adapter +35 / orchestrator +4 / preflight-test +117。修 MIT 在 Linux 真 PG 揭露的 2 HIGH（我上輪 Phase-2 re-E2 已把 PG jsonb round-trip 列 Linux-owed，MIT 實證後退 E1 修）。MIT 已 real-PG re-verify 兩者 PASS；本輪 = focused 確認碼乾淨 + 2 mutation bite + default-path 0 drift。
+
+**裁決 = PASS to E4**（0 CRITICAL / 0 HIGH / 0 MED / 0 LOW blocker）。
+
+**★ HIGH-1（_normalize_zeros）chokepoint 唯一性 + totality 親證（非信自述）：**
+- **單一 chokepoint 確認**：全 pipeline 只有 `ResidualEdgeReport.to_dict()`（gate:179 `_normalize_zeros(_json_safe(raw))`）產 canonical report dict 餵 hash/jsonb。trace 鏈：producer:167 `report.to_dict()`→result.report→cycle:193 `dict(result.report)`（shallow copy 不重引入符號）→bridge:303 `result.report`→bridge:355 `_canonical_sha256(report)` + drar/registry writer。**唯一手搓 report dict** = `_insufficient_result`（producer:245-252，sample 不足 defer），但 `raw_mean_bps/residual_mean_bps` 是字面 `0.0`（+0.0）→ -0.0-safe by construction（此 defer 從沒跑回歸，-0.0 不可達；commit 說的「defer/weak cohort -0.0」來自 np.mean/回歸係數=主 to_dict 路徑，已覆蓋）。`fit_window.to_dict()`（gate:82）只回 str（`_timestamp_for_report` 簽名+body 證 always `str(...)`）→ 無 float 分支。grep 全 pipeline `asdict(` 僅 to_dict 內 1 處（producer 0、cycle 0、bridge 0）→ **無 bypass**。
+- **_normalize_zeros totality 親跑**：nested dict+list+巢狀 -0.0 全抹平；非零 float（1.5/-3.25/1e18/5e-324 subnormal）byte-不變；int/str/None/**bool（type 保留，未被 coerce 成 float）**/NaN/Inf 不變（NaN/Inf 已先被 _json_safe→None）；冪等（json.dumps 二跑相等）。`x+0.0 if x==0.0 else x`：`-0.0==0.0` True→收斂 +0.0；`bool` 不入 float 分支（isinstance(True,float)=False）→ 安全。
+- **Item 3 default-path 0 drift 親證**：無 -0.0 的 report → `_normalize_zeros` 是**字面 no-op**（canonical bytes before==after）；`test_gate_default_report_keyset_locked`（key 集不增減）+ `test_gate_permutation_disabled_is_byte_identical_default` 仍綠（=與 pre-Gap-C `8bd4f3f5` baseline 一致）。
+
+**★ HIGH-2（per-symbol net_side）：** `derive_net_side_from_fills` 加 optional `symbol`（None=既有全-symbol 聚合 caller 不變；提供時 Python 端篩 `fill.symbol==symbol`，`_FILLS_QUERY` 已回 f.symbol→不改 query shape）→ `load_candidate_net_side` 透傳 → orchestrator preflight:418 傳候選真實 symbol（rec.get("symbol")，且 :410 `missing_strategy_or_symbol` fail-closed guard 在前）。ambiguous（淨 0 / 該 symbol 無入場成交）仍 fail-closed。
+
+**2 mutation probe（Edit+cp 還原，非 git destructive；還原後 git diff --stat empty 親驗）：**
+1. **bypass `_normalize_zeros`**（gate:179 改 `_json_safe(raw)`）→ HIGH-1 **2 測紅**（hash `f288d8…` != `227516…`；mutation-guard 測雙向斷言）。
+2. **drop symbol filter**（db:832 改 `if False`）→ HIGH-2 **3 測紅**，含 e2e `test_orchestrator_threads_candidate_symbol_into_net_side` 斷 `-1 == 1`（=真實 RAVEUSDT funding-sign-flip 還原）。
+- 兩次還原後 `git diff --stat <兩源檔>` 皆 EMPTY（byte-identical to committed）。
+
+**測試實況（PYTHONHASHSEED=0 + 清 __pycache__ deterministic）**：2 changed-file 直測 57 pass（gate 31 + preflight 26）；full ml_training+learning_engine **855 passed / 31 skipped**（= E1 宣稱，850 baseline + 5 新，0 regression，35.6s）。
+
+**標準項全綠（grep added lines）**：0 hard-boundary token（live/auth/order/risk/lease/mainnet——唯一 grep 命中是 docstring 內 `risk_close:` 解釋排除判據，非執行碼）；0 hardcoded path；0 except:pass；0 detail=str(e)；0 f-string log；0 私有屬性穿透（`._canonical_sha256` 命中是 docstring 函數引用非 instance 穿透）；新註釋中文優先合規。5 檔 surgical 對齊 PA scope（只 HIGH-1/HIGH-2）。
+
+**§5 race 5/5 PASS**：5a/5e origin/main `bdf15e4f` 領先 merge-base `8cd4da1f` 2 commit（`65952b8b`/`bdf15e4f` PHANTOM-FILL-FIX-1，**純 Rust engine**），`git diff --name-only 8cd4da1f..origin/main` **0 overlap** 本 PR 5 residual 檔（與我 Phase 1/2 review 同 2 commit，benign，PM 可 ff engine）；5b/5d worktree 源碼 clean（唯 E2 memory + 非我 PA design doc untracked）；5c 3 stash 全 pre-existing/別 session（明標「not mine」）未動；mutation 全 Edit+cp 還原。
+
+**教訓固化**：上輪我把「PG jsonb 數值正規化漂移 hash」列 Linux-owed（Mac 只能驗 json.loads(json.dumps) 不經 PG）→ MIT 真 PG 實證確認 -0.0 真會被丟、修法收口。本輪 re-E2 的對抗點不是再驗 PG（MIT 已做），而是**驗修補沒在 to_dict 之外留 bypass**：必須 trace 全 report-dict 構造路徑（含手搓 defer dict + fit_window.to_dict + asdict grep）證明只有單一 chokepoint，否則「在 to_dict 加 normalize」可能漏掉另一條手搓路徑。`value+0.0` 這種 idiom 要親跑 bool/subnormal/NaN/巢狀 邊界，不靠肉眼。
+

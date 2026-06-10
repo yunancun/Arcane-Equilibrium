@@ -1,17 +1,19 @@
 ---
 name: regression-testing-protocol
-description: 回歸測試 SOP — 測試基準線追蹤、不刪測試遮蓋失敗、並發測試、跨語言浮點 1e-4 容差、SLA <1ms 壓測、mock 不掩蓋邏輯、Rust + Python 雙引擎測試。E4 agent 主用。
+description: 回歸測試 SOP — 測試基準線追蹤、不刪測試遮蓋失敗、並發測試、跨語言浮點 1e-4 容差、SLA 壓測、mock 不掩蓋邏輯、Rust + Python 雙引擎測試。E4 agent 主用。
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
 # Regression Testing Protocol（回歸測試手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
+
+`SRV`=倉庫根（Mac: `~/Projects/TradeBot/srv`；Linux: `~/BybitOpenClaw/srv`）。
 
 ## 何時觸發
 
-- E4 收到 E2 通過的 PR → commit 前必跑（強制工作鏈）
+- E4 收到 E2 通過的 PR → commit 前必跑（強制工作鏈 E2→E4 不可跳，含 P0 緊急）
 - 「跑測試」「驗證 fix 沒破壞其他」「測試數有沒有回退」
 - 新功能落地前的 baseline 確認
 - Rust `cargo test` + Python pytest 雙引擎同步
@@ -21,29 +23,31 @@ allowed-tools: Read, Grep, Glob, Bash
 1. **基準線不可回退**：passed 數 < baseline = BLOCKER
 2. **不允許刪測試使測試通過**：發現失敗 → 修代碼，不修測試
 3. **Mock 不掩蓋真實邏輯**：mock 只 stub IO 邊界，不 stub 業務邏輯
-4. **跨語言浮點 1e-4 容差**：Python ↔ Rust 同輸入差異 ≥ 1e-4 = bug
-5. **跑兩遍**：第一次過 ≠ 真綠（race / flaky）；第二次同樣綠才算
+4. 跨語言浮點 1e-4 容差：Python ↔ Rust 同輸入差異 ≥ 1e-4 = bug
+5. 跑兩遍：第一次過 ≠ 真綠（race / flaky）；第二次同樣綠才算
 
-## 1. 當前測試基準線（**動態，每次審計前重跑命令拿，不信本表寫死數字**）
+## 1. 當前測試基準線（動態，每次審計前重跑命令拿，不信寫死數字）
 
 | 引擎 | 命令 | 解讀 |
 |---|---|---|
-| Python pytest | `cd /Users/ncyu/Projects/TradeBot/srv && python3 -m pytest tests/ -q --tb=short \| tail -5` | passed / failed 數 |
-| Rust engine lib | `cd /Users/ncyu/Projects/TradeBot/srv/rust && cargo test --release -p openclaw_engine --lib 2>&1 \| tail -5` | passed / failed 數 |
-| Rust integration | `cd /Users/ncyu/Projects/TradeBot/srv/rust && OPENCLAW_TEST_PG="..." cargo test --release -p openclaw_engine 2>&1 \| tail -5` | 需 PG |
+| Python pytest | `cd $SRV && python3 -m pytest tests/ -q --tb=short \| tail -5` | passed / failed 數 |
+| Rust engine lib | `cd $SRV/rust && cargo test --release -p openclaw_engine --lib 2>&1 \| tail -5` | passed / failed 數 |
+| Rust integration | `cd $SRV/rust && OPENCLAW_TEST_PG="..." cargo test --release -p openclaw_engine 2>&1 \| tail -5` | 需 PG |
 
 **baseline 規則**：
 - 任何 commit 不可降低 passed 數
 - 任何 commit 不可增加 pre-existing failed 數
-- 數字以**改動前最後一次 baseline run** 為準（不信本 skill 內任何寫死數字）
+- 數字對照 E4 memory.md 最新 `BASELINE:` 行 +「改動前最後一次 baseline run」（不信本 skill 內任何寫死數字）
 
-⚠️ Mac 端：整合測試打真實 Bybit 會 fail by design（`*.dev_disabled_*` secret slot；Mac dev-only 模式）。Rust release 基準 → `ssh trade-core "cd ~/BybitOpenClaw/srv/rust && cargo test --release -p openclaw_engine --lib"` 取真實值。
+**Mac dev-only 注意**（唯一正本段）：
+- 部分整合測試打真實 Bybit → 3 secret slot rename 為 `*.dev_disabled_*` → 預期 fail-closed by design；mock-based unit test 不受影響
+- Rust release 真實基準 → `ssh trade-core "cd ~/BybitOpenClaw/srv/rust && cargo test --release -p openclaw_engine --lib"`
 
 ## 2. Python pytest 標準命令
 
 ```bash
 # 從 srv root 跑（重要：絕對 import）
-cd /Users/ncyu/Projects/TradeBot/srv
+cd $SRV
 python3 -m pytest tests/ -q --tb=short
 
 # 或從 control_api_v1 內（部分 test 路徑要求）
@@ -51,33 +55,28 @@ cd program_code/exchange_connectors/bybit_connector/control_api_v1/
 python3 -m pytest tests/ -q --tb=short
 ```
 
-**Mac dev-only 注意**：
-- 部分整合測試打真實 Bybit → 3 secret slot rename 為 `*.dev_disabled_*` → 預期 fail-closed by design
-- mock-based unit test 不受影響
-- Reproduce release 基準 `ssh trade-core "cd ~/BybitOpenClaw/srv/rust && cargo test --release -p openclaw_engine --lib"`
-
 ## 3. Rust cargo test 標準命令
 
 ```bash
 # Lib 測試（fastest）
-cd /Users/ncyu/Projects/TradeBot/srv/rust
+cd $SRV/rust
 cargo test --release -p openclaw_engine --lib
 
 # 含集成測試（需 PG）
-OPENCLAw_TEST_PG="postgres://..." cargo test --release -p openclaw_engine
+OPENCLAW_TEST_PG="postgres://..." cargo test --release -p openclaw_engine
 ```
 
 ## 4. 測試類型與覆蓋要求
 
 ### 4.1 Unit test
-- 每個新 E1 改動必須有對應 unit test
+- 每個新 E1 改動有對應 unit test
 - 邊界值 + 正常路徑至少各 1
-- 修復安全問題必須有「修復後攻擊路徑測試通過」
+- 修復安全問題需有「修復後攻擊路徑測試通過」
 
 ### 4.2 Integration test
 - 跨模塊調用鏈（如 Strategist → IPC → Rust engine）
 - 連 PG 的測試（含 hypertable / migration）
-- Bybit demo / paper API 整合（Mac 端 dev_disabled 跳過）
+- Bybit demo / paper API 整合（Mac 端 dev_disabled 跳過，見 §1）
 
 ### 4.3 Property-based test (proptest)
 - Rust 狀態機轉換窮舉
@@ -91,9 +90,7 @@ OPENCLAw_TEST_PG="postgres://..." cargo test --release -p openclaw_engine
 - threading + asyncio 邊界
 
 ### 4.5 SLA / 壓測
-- H0 Gate < 1ms 延遲
-- Tick path < 0.3ms
-- IPC round-trip < 5ms
+- SLA 閾值唯一正本見 performance-profiling skill（本檔不重述數字）
 - 測 N=10000 次取分位（p50 / p95 / p99）
 
 ### 4.6 Cross-language consistency
@@ -164,7 +161,7 @@ async def test_governance_concurrent_lease_request():
 ## 8. 工作流（10 步）
 
 1. **讀 E2 通過的 diff**
-2. **跑全量 Python pytest**（從 srv root，srv 子目錄）
+2. **跑全量 Python pytest**（從 srv root）
 3. **跑 Rust cargo test --release**
 4. **驗 passed >= baseline + failed <= pre-existing**
 5. **新增測試 cover 邊界 + 並發 + 安全**
@@ -172,19 +169,18 @@ async def test_governance_concurrent_lease_request():
 7. **浮點一致性**（如改 indicator / 計算）
 8. **SLA 壓測**（如改 hot path）
 9. **跑兩遍**（驗證非 flaky）
-10. **記錄測試數變化**（commit message 含 baseline 變動）
+10. **記錄測試數變化**（commit message 含 baseline 變動；回歸完成後追加 E4 memory `BASELINE:` 行）
 
 ## OpenClaw 特定核心
 
-- **強制工作鏈**：E2 → E4 不可跳，包括 P0 緊急
-- **Mac dev_disabled secret slots**：整合測試打真實 Bybit fail-closed by design
-- **絕對 import**：從 srv root 跑或加 PYTHONPATH，避免 `from program_code.…` ImportError
-- **engine PID 變動**：`cargo test` 不影響 runtime engine（Mac 端 engine_alive=false 是預期）
-- **passive_wait_healthcheck.py**：cron 6h 跑，被動等待 TODO 必有對應 check
-- **跨語言浮點 1e-4 容差**：indicator 計算（ATR / BB / Sharpe）必驗
-- **SLA 硬限**：H0 Gate < 1ms / Tick path < 0.3ms / IPC < 5ms
-- **commit 即 push**（由 PM 在通過 E4 / QA 後執行）
-- **failed 不可增**：pre-existing 數為上限（不在本表寫死，跑命令拿），新增 = BLOCKER
+- Mac dev_disabled secret slots：見 §1（fail-closed by design）
+- 絕對 import：從 srv root 跑或加 PYTHONPATH，避免 `from program_code.…` ImportError
+- engine PID 變動：`cargo test` 不影響 runtime engine（Mac 端 engine_alive=false 是預期）
+- passive_wait_healthcheck.py：cron 6h 跑，被動等待 TODO 有對應 check
+- 跨語言浮點 1e-4 容差：indicator 計算（ATR / BB / Sharpe）必驗
+- SLA 硬限：閾值見 performance-profiling（唯一正本）
+- commit 即 push（由 PM 在通過 E4 / QA 後執行）
+- **failed 不可增**：pre-existing 數為上限（跑命令拿 + 對照 E4 memory BASELINE），新增 = BLOCKER
 
 ## Cross-Skill 互引（避免重述）
 
@@ -211,8 +207,8 @@ async def test_governance_concurrent_lease_request():
 
 ## Test 結果
 | 引擎 | passed | failed | baseline | delta |
-| Python pytest | | | (改動前最後 baseline run) | |
-| Rust cargo test (lib) | | | (改動前最後 baseline run) | |
+| Python pytest | | | 對照 E4 memory.md 最新 BASELINE 行 | |
+| Rust cargo test (lib) | | | 對照 E4 memory.md 最新 BASELINE 行 | |
 | Rust integration | | | varies | |
 
 ## 新增測試
@@ -230,7 +226,7 @@ async def test_governance_concurrent_lease_request():
 ## 跑兩遍結果
 1st run: passed=X / failed=Y
 2nd run: passed=A / failed=B
-flaky? Y/N
+flaky? Y/N（不一致測試單獨重跑 3 次；仍 fail → 標 FLAKY 附隔離建議）
 
 ## 結論
 PASS / FAIL（具體 BLOCKER）

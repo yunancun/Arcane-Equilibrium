@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Data Drift Detection（資料漂移偵測手冊）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active state / runtime evidence > `README.md` stable surfaces > `CLAUDE.md` operating rules > governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
+> 權威序：runtime RiskConfig TOML > Rust schema > srv/TODO.md > 治理文件（SPECIFICATION_REGISTER.md 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
 
 ## 何時觸發
 
@@ -94,7 +94,7 @@ def psi(reference, current, bins=10):
 
 ### 4.1 直接法：error rate monitoring
 - live prediction error 比 OOS error 高 > 50% → concept drift 警報
-- 用 `passive_wait_healthcheck` cron 每 6h 跑
+- 用 `helper_scripts/db/passive_wait_healthcheck.py` cron 每 6h 跑
 
 ### 4.2 間接法：DDM (Drift Detection Method)
 - 偵測 error rate 的 mean + std 變化
@@ -148,13 +148,9 @@ def psi(reference, current, bins=10):
 9. **Decision tree 觸發動作**
 10. **報告 + memory update**
 
-## OpenClaw context — 不在本 skill 重述
+## 穩定 drift rule（不會 drift）
 
-OpenClaw 特定 snapshot（當前 Phase / 當前 model 階段 / TODO id）會 drift。本 skill 不重述。
-
-實際 context 必從 SSOT 拿：runtime TOML > Rust schema > `TODO.md` active state / runtime evidence > `git log` > memory（最後）。
-
-**穩定不變的 drift rule**（不會 drift）：reference + current 兩個 window 都必 `engine_mode IN ('live','live_demo')` filter；drift check 必加 `passive_wait_healthcheck.py:check_data_drift_X()`（cron 6h）；CognitiveModulator confidence_floor 是動態降倉機制（架構級不變）。
+reference + current 兩個 window 都必 `engine_mode IN ('live','live_demo')` filter；drift check 必加 `helper_scripts/db/passive_wait_healthcheck.py:check_data_drift_X()`（cron 6h）；CognitiveModulator confidence_floor 是動態降倉機制（架構級不變）。
 
 ## 反模式（見即 Reject）
 

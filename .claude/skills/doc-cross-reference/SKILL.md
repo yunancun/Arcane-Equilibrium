@@ -6,13 +6,8 @@ allowed-tools: Read, Grep, Glob
 
 # Doc Cross-Reference（文件交叉引用審計）
 
-> **優先序**：runtime RiskConfig TOML > Rust schema > `TODO.md` active
-> state > `README.md` stable surfaces > `CLAUDE.md` operating rules >
-> governance docs > memory > 本 skill
-> **衝突時向 PM / operator push back，不單方面執行 skill 內 SOP**
-
-> **S3 上層 drift 防線**：本 skill 引用上層文件為 extract；發現
-> `README.md` / `TODO.md` / memory 邊界不一致時，優先保留邊界清晰性並通報 PM。
+> 權威序：runtime RiskConfig TOML > Rust schema > `srv/TODO.md` > 治理文件（`SPECIFICATION_REGISTER.md` 索引）> 本 skill。衝突按權威序執行並在報告標註，不停下等待。
+> 即時狀態（策略名單/閾值/端點/baseline 等）以上述 SSOT 為準，本 skill 不寫死。
 
 ## 何時觸發
 
@@ -49,6 +44,8 @@ allowed-tools: Read, Grep, Glob
 | DOC-XX | 治理規範 | SPECIFICATION_REGISTER.md |
 | SM-XX | State Machine | DOC-XX 內部 |
 | EX-XX | Exchange-side | DOC-XX 內部 |
+| AMD-YYYY-MM-DD-NN | 治理 / 架構決策修訂（amendment） | SPECIFICATION_REGISTER.md Amendments 節 + `docs/governance_dev/amendments/` |
+| ADR-XXXX | 架構決策記錄（4 位數字） | `docs/adr/`（ADR-0001~0033 檔名即 ID）+ SPECIFICATION_REGISTER.md（ADR-0034+ 登錄） |
 | P0/P1/P2/P3/P4-XX | 風控層 / 任務優先 | TODO.md + `CLAUDE.md` Hard Boundaries |
 | LG-X | Live Guard | TODO.md + hard-boundary docs |
 | W-XX / Wave-X | Sprint / Wave | TODO.md + PM reports |
@@ -57,7 +54,7 @@ allowed-tools: Read, Grep, Glob
 ## 審計工作流（5 步）
 
 1. **載入 SSOT** — Read 優先級 1 文件全文 + 抽出全部編號（regex）
-2. **掃所有引用點** — `rg -n '(DOC|SM|EX|P0|P1|P2|P3|P4|LG|W-|G[1-6])-?[0-9]+' docs CLAUDE.md .codex/MEMORY.md README.md TODO.md`
+2. **掃所有引用點** — 用 Grep 工具（pattern=`(DOC|SM|EX|AMD|ADR|P0|P1|P2|P3|P4|LG|W-|G[1-6])-?[0-9]+`，path=docs / CLAUDE.md / .codex/MEMORY.md / README.md / TODO.md）執行；有 Bash 環境可等價用 `rg -n`
 3. **建反向索引** — 每個編號的所有引用點（檔:行）
 4. **三類漂移檢測**：
    - **A. 引用不存在的編號**（殭屍）：被 grep 命中但不在 SSOT
@@ -65,7 +62,7 @@ allowed-tools: Read, Grep, Glob
    - **C. 狀態不一致**：TODO.md active state 與 runtime / reports / README source map 不一致
 5. **產出報告** — `docs/CCAgentWorkSpace/R4/workspace/reports/YYYY-MM-DD--cross_ref_audit.md`
 
-## 已知漂移模式（G6-04 規則衍生）
+## 已知漂移模式（G6-04 TODO drift 規則唯一正本：CC / R4 / QA / e2e 指向此處）
 
 - **TODO runtime drift**：TODO 含「runtime 數值」（cell count / row count / fill rate / binary mtime）必註採集時間 + healthcheck id 或採集命令；滿 7 日未重驗即必更新、降級待驗，或移入 archive/report
 - **memory 越界**：CLAUDE / Codex memory 出現 active queue、工作進度、runtime 數字，應搬到 TODO 或 README
@@ -74,18 +71,31 @@ allowed-tools: Read, Grep, Glob
 - **memory 過期**：memory 提到的 file 已 rename / delete → CC 接手照引會誤判
 - **CHANGELOG 缺項**：commit 改重要 governance / context routing 但忘加 changelog 條
 
+## 配置漂移偵測（R4 巡檢執行細則）
+
+- 抽查 `.claude/agents/` 與 `.claude/skills/` 內數字 / 名單型事實（端點數、check 數、文件數、agent 名單、閾值、baseline）。
+- 對照 canonical 來源：SPECIFICATION_REGISTER.md / README / TODO / E4 BASELINE / 各 agent 最新報告。
+- 漂移列 file:line + 建議修正入報告；修復派工由 PM 決定。
+- prompt 檔內即時狀態應寫「以 <canonical 來源> 為準」而非寫死數字；寫死即列 finding。
+
+## Memory 壓實規格（R4 巡檢 / PM 派工依據）
+
+- 觸發：memory.md >300 行。壓實後結構：檔頭壓實規則 blockquote +「## 長期教訓」（蒸餾 ≤30 行）+「## 近期記錄」（最近完整條目 ~150 行）。
+- 舊條目以 Bash 機械切分原文遷同目錄 memory-archive.md（append-only，帶遷入日期分隔行，勿刪改）；行數守恆可驗。
+- E4 特例：含 `BASELINE` 的行永留主檔。各 agent 完成序列（檔尾追加）行為不變。
+
 ## DOC「廢棄 → 新版」轉換 SOP（24.2 P1）
 
 當治理 DOC 重編號 / 拆分 / 合併（例：`DOC-04 V1` → `DOC-04 V2` 或 `DOC-04 → DOC-04A + DOC-04B`），R4 audit 步驟：
 
 1. **驗 SPECIFICATION_REGISTER.md 雙條**：舊版標 `Deprecated / superseded by <new>`，新版標 `Active`，**兩條都不能消失** — 過去引用點需追溯舊版內容
 2. **驗 DEPRECATED.md 補新條**：列舊 ID + 撤回日期 + 替代 ID + 「禁引」標記
-3. **掃所有引用**：`rg -n 'DOC-04(?!\\sV2)' docs CLAUDE.md .codex/MEMORY.md README.md TODO.md` 找未升級引用點，逐個改為新 ID
+3. **掃所有引用**：找未升級引用點 — 用 Grep 工具掃 `DOC-04` 引用點後人工濾掉新版；有 Bash 環境可等價用 `rg -nP 'DOC-04(?!\sV2)' docs CLAUDE.md .codex/MEMORY.md README.md TODO.md`，逐個改為新 ID
 4. **memory 條目同步**：memory 引舊 DOC ID 的條目，**按 SOP 不直接刪**（保歷史線索），改加 `[已升級為 <new>]` 標記
 5. **archive 不動**：`docs/archive/` 內歷史 snapshot 用舊 ID 是**正確的**（凍結時間點），不改
 6. **產 R4 audit 報告**：列出所有 stale 引用點 + 修正狀態 + 殘留 known-orphan（如 archive）
 
-**判斷新舊**：當 sub-agent 看到同名 DOC 不同版本，**信 SPECIFICATION_REGISTER.md `Active` 標記 + 最大 V### 號**；無法判斷時 push back operator，**不單方面選舊版引用**。
+**判斷新舊**：當 sub-agent 看到同名 DOC 不同版本，**信 SPECIFICATION_REGISTER.md `Active` 標記 + 最大 V### 號**；無法判斷時在報告標註分歧並按 register Active 條目執行，**不單方面選舊版引用**。
 
 ## OpenClaw 特定核心檔對齊
 

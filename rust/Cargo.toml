@@ -1,3 +1,8 @@
+# 命名注記：openclaw_* 為歷史運行面名稱（2026-05-06 軟更名口徑保留）；
+# 正式產品名 = 玄衡 · Arcane Equilibrium（見 CLAUDE.md Product Boundary）。
+# 全面改名為 ae_* 是 Apple Silicon 遷移時的強制 gate，流程見
+# docs/execution_plan/2026-06-10--ae_runtime_rename_migration_guide.md；
+# 在那之前禁止新代碼使用 ae_*/AE_* 前綴（防雙前綴並存）。
 [workspace]
 members = [
     "openclaw_types",
