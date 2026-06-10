@@ -372,7 +372,29 @@ class TestCheck82S4WindowValidity(unittest.TestCase):
     """[82] S4 窗有效性（flag-OFF / epoch 間隙 / counter regression）。"""
 
     def test_flag_off_observation_resets_anchor(self) -> None:
-        """窗內 flag-OFF 觀測 → 錨點重置 → 窗縮短 → FAIL（S4 軸經錨點語義落實）。"""
+        """窗內 flag-OFF 觀測（**非** flag_change 事件）→ 錨點重置 → 窗縮短 → FAIL。
+
+        bite 精準度（E1 第三棒 mutation 驗證補強）：OFF 觀測來自 canary_leader_start
+        事件的 flag_enabled=False（模擬 flag_change INSERT 失敗被漏記、但其他事件
+        帶到 OFF 狀態的真實情形），且**無** OFF→ON flag_change 補償事件——只有
+        「任何事件的 flag-OFF 觀測」支路能擋住這個窗；移除該支路（mutation C）時
+        本測試必紅（先前版本被 OFF→ON transition 支路遮蔽，mutation C 存活）。
+        """
+        events = [
+            _ev("flusher_start", True, _NOW - 50 * 3600, 0, 0),
+            # OFF 觀測：flag_change 寫入失敗（tracker 前移寧漏勿重），OFF 狀態僅由
+            # 本事件的 flag_enabled=False 留痕；之後 flag 回 ON（V129 當前 flag=True）
+            # 但無 transition 事件——belt-and-suspenders 支路必須單獨擋住。
+            _ev("canary_leader_start", False, _NOW - 30 * 3600, 100, 100),
+        ]
+        fo, fa = _healthy_inputs(events=events)
+        cur = _cursor82(fo, fa)
+        status, msg = check_82_lease_ipc_soak_window(cur)
+        self.assertEqual(status, "FAIL")
+        self.assertIn("flag-OFF observation", msg)  # 錨點重置原因 = OFF 觀測支路
+
+    def test_flag_off_then_on_transition_resets_anchor(self) -> None:
+        """同 epoch OFF→ON flag_change → 錨點重置在 transition（窗 30h <48h → FAIL）。"""
         events = [
             _ev("flusher_start", True, _NOW - 50 * 3600, 0, 0),
             _ev("flag_change", False, _NOW - 30 * 3600, 100, 100,
