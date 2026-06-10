@@ -1154,6 +1154,14 @@ def _persist_hidden_oos_state_registry(
             ),
         ),
     )
+    # P4 §4.1 觀測性 delta：double-seal 由 silent DO NOTHING 升為可觀測 warning。
+    # 回傳值不變——stage0r 冪等重跑是設計行為，重複不是 error。
+    if cur.rowcount == 0:
+        logger.warning(
+            "hidden_oos double-seal skipped (already sealed): experiment_id=%s family=%s",
+            experiment_id,
+            str(raw_state.get("family_id") or "").strip(),
+        )
     return None
 
 

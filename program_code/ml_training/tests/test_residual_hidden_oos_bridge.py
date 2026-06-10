@@ -103,7 +103,14 @@ def _operator_actor() -> Any:
 
 
 class _FakeCursor:
-    """捕捉 register_experiment 兩個 INSERT 的 (sql, params)；fetchone 腳本化。"""
+    """捕捉 register_experiment 兩個 INSERT 的 (sql, params)；fetchone 腳本化。
+
+    rowcount 鏡像 psycopg2 真實邊界（execute 後恆為 int）：P4 §4.1 registry
+    double-seal 觀測 delta 讀 cur.rowcount；fake 缺此欄 = fixture 偏離真實
+    上游不變量（教訓：boundary 增讀面後，既有 test fake 必同步 retrofit）。
+    """
+
+    rowcount: int = 1  # 模擬「INSERT 成功寫 1 列」（非 conflict-skip 路徑）
 
     def __init__(self, fetchone_returns: list):
         self.records: list[tuple[str, tuple]] = []
