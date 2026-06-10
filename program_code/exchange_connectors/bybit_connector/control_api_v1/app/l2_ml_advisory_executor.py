@@ -972,6 +972,15 @@ async def _check_novelty(
 
         sym = (symbol or "").strip() or _SINK_SYMBOL_PLACEHOLDER
         lessons = await _critic.retrieve_lessons(sym, statement, lesson_type="dead_mode")
+        # placeholder union（P3b owed ② 配套，PA §C.3）：dead-mode 教訓掛 placeholder symbol
+        # = global namespace（down-beta 偽裝等失敗模式不分 symbol）。dispatch 帶具體 symbol
+        # 時若只查該 symbol 會 miss 全部 global seed → novelty 失明。順序鎖定：先具體 symbol
+        # （symbol-specific dead-mode 優先命中），未中再查 placeholder；fail-soft 外殼與參數
+        # 綁定不變（retrieve_lessons 內參數化，無注入面）。
+        if not lessons and sym != _SINK_SYMBOL_PLACEHOLDER:
+            lessons = await _critic.retrieve_lessons(
+                _SINK_SYMBOL_PLACEHOLDER, statement, lesson_type="dead_mode"
+            )
         if lessons:
             # 撈到 dead_mode near-duplicate → duplicate（pg_trgm 相似度已過門檻）。
             return "duplicate", f"matched_{len(lessons)}_dead_mode_lessons"
