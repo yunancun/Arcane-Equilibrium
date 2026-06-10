@@ -130,17 +130,29 @@ def test_artifact_writer_outputs_manifest_and_index(tmp_path: Path):
     assert "feature_lineage_csv" in index
 
 
-def test_write_db_import_resolvable_in_package_context():
-    """E2 MEDIUM-2 迴歸鎖：_write_db 的 db_writer import 必須在 package 模式可解析。
+def test_write_db_import_seam_truly_executes(monkeypatch):
+    """E2 MEDIUM-2 + re-review LOW 真 bite 版：實際執行 _write_db 走過 dual-path import。
 
-    舊碼絕對 import 基於 helper_scripts/ 根（差一層 research）→ package 模式 --write-db
-    必 ModuleNotFoundError；V127 從未被 populate 故 deploy 至今未暴露。dual-path 修後
-    本測試在 package context 直接解析 relative 分支（direct-file 分支由頂部 fallback
-    既有測試面覆蓋）。
+    舊碼絕對 import 差一層 research → package 模式 --write-db 必 ModuleNotFoundError
+    （V127 從未被 populate 故 deploy 至今未暴露）。本測試 monkeypatch psycopg2.connect
+    為 sentinel raise——sentinel 到達 = `from .db_writer import persist_regime_rows`
+    （或 fallback）**已成功解析並越過**（import 在 connect 之前）；revert 成壞 import
+    時本測試以 ModuleNotFoundError（非 sentinel）失敗 = 真 regression bite。
     """
-    from aeg_regime_runner.db_writer import persist_regime_rows as _abs  # research/ 已在 path
+    import types
+
+    import psycopg2
+    import pytest as _pytest
+
     from aeg_regime_runner import harness as _h
 
-    # harness 模組本身可載 + db_writer 符號存在（不真連 DB）。
-    assert callable(_abs)
-    assert hasattr(_h, "_write_db")
+    class _Sentinel(Exception):
+        pass
+
+    def _boom(*a, **k):
+        raise _Sentinel("import-seam-passed")
+
+    monkeypatch.setattr(psycopg2, "connect", _boom)
+    args = types.SimpleNamespace(dsn="postgresql://sentinel-not-used")
+    with _pytest.raises(_Sentinel):
+        _h._write_db(args, labels=[], transitions=[])
