@@ -211,8 +211,8 @@ async def test_governance_concurrent_lease_request():
 
 ## Test 結果
 | 引擎 | passed | failed | baseline | delta |
-| Python pytest | | | 2555 | |
-| Rust cargo test (lib) | | | 1980 | |
+| Python pytest | | | (改動前最後 baseline run) | |
+| Rust cargo test (lib) | | | (改動前最後 baseline run) | |
 | Rust integration | | | varies | |
 
 ## 新增測試

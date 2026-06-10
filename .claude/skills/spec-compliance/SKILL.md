@@ -20,7 +20,7 @@ allowed-tools: Read, Grep, Glob
 
 ## 治理文件權威清單
 
-> ⚠️ **「22 份」非權威 SSOT**：operator 明示「治理文件本身不能代表最終權威，已多次修改」（SKILLS_TODO 9.3）；本 skill 引用數量為 2026-04-25 snapshot；最終以 `SPECIFICATION_REGISTER.md` 列出的 Active 條目為準。任何時候衝突 = 信 register + push back operator。
+> ⚠️ **「22 份」非權威 SSOT**：operator 明示「治理文件本身不能代表最終權威，已多次修改」（SKILLS_TODO 9.3，audit 已歸檔 `docs/archive/2026-06-10--skills_todo_audit_closed.md`）；本 skill 引用數量為 2026-04-25 snapshot；最終以 `SPECIFICATION_REGISTER.md` 列出的 Active 條目為準。任何時候衝突 = 信 register + push back operator。
 
 掃描範圍 `srv/docs/governance_dev/`：
 - `SPECIFICATION_REGISTER.md` ← 所有 DOC-XX 的 SSOT（含 Active/Deprecated 狀態）
