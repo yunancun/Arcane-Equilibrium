@@ -45,53 +45,22 @@ from .secret_runtime import get_secret_value
 
 logger = logging.getLogger(__name__)
 
-# ─────────────────────────────────────────────────────────────────────────────
-# OPS-2 SECRET-SPLIT — Phase 1 fallback WARN rate-limit (≤1/h per process)
-# 為什麼：spec §8.5 E2 重點 #3 — fallback WARN 不可洪流；renew/re-verify 每呼叫
-# 一次都會走 _read_live_auth_signing_key()，未限速會被 alert 噪音淹沒。
-# 對齊 Rust live_authorization::FALLBACK_WARN_INTERVAL_SECS（同 3600s 窗口）。
-# ─────────────────────────────────────────────────────────────────────────────
-_FALLBACK_WARN_INTERVAL_SECS = 3600
-_fallback_warn_state = {"last_ts": 0.0, "lock": threading.Lock()}
-
-
 def _read_live_auth_signing_key() -> str:
-    """OPS-2 SECRET-SPLIT — 讀 live-auth 簽名 key，Phase 1 允許 fallback 到
-    `OPENCLAW_IPC_SECRET`（含 `_FILE` companion）並 emit 一次性 WARN log（rate ≤1/h）。
+    """OPS-2 SECRET-SPLIT Phase 2（cutover 2026-06-10）—— 純讀
+    `OPENCLAW_LIVE_AUTH_SIGNING_KEY`（含 `_FILE` companion，經 secret_runtime）。
 
-    為什麼分兩階段：
-      - Phase 1（D+0..D+14）：兩 env 都允許；舊 deploy 0 regression；fallback 觸發
-        須 WARN 提醒 operator 在 Phase 2 cutover 前完成 seed。
-      - Phase 2（D+14+）：移除 fallback；missing 純 `OPENCLAW_LIVE_AUTH_SIGNING_KEY`
-        必 raise（TODO: P1-OPS-2-SECRET-SPLIT-PHASE-2 移除 fallback 分支）。
+    為什麼無 fallback：Phase 1（2026-05-27..2026-06-10）允許退回
+    `OPENCLAW_IPC_SECRET` 供舊部署過渡；14d soak 期間 engine.log + api.log
+    fallback WARN 計數 = 0（含三次全量重啟），cutover 條件達成後 fallback 分支
+    與 rate-limit WARN 機制一併移除（spec §3.2）。簽名 key 與 IPC transport key
+    必須分離（blast radius 隔離 + 90d/180d 獨立 rotation cadence）。
 
     Returns:
-        非空簽名 key 字串；空字串代表 caller 須 fail-closed。
+        非空簽名 key 字串；空字串代表 key 未設置，caller 必須 fail-closed
+        （sign 路徑 raise RuntimeError；verify 路徑回 reason
+        "live_auth_signing_key_missing"，對齊 Rust auth_error_kind）。
     """
-    primary = (get_secret_value("OPENCLAW_LIVE_AUTH_SIGNING_KEY") or "").strip()
-    if primary:
-        return primary
-    # Phase 1 fallback：新 env 未設 → 嘗試舊 env；觸發即 WARN（rate-limit）。
-    # TODO(P1-OPS-2-SECRET-SPLIT-PHASE-2 D+14): 移除以下 fallback 分支；missing
-    # 必 raise RuntimeError("OPENCLAW_LIVE_AUTH_SIGNING_KEY is not set ...")。
-    fallback = (get_secret_value("OPENCLAW_IPC_SECRET") or "").strip()
-    if fallback:
-        now_ts = time.time()
-        with _fallback_warn_state["lock"]:
-            last_ts = _fallback_warn_state["last_ts"]
-            if now_ts - last_ts >= _FALLBACK_WARN_INTERVAL_SECS:
-                _fallback_warn_state["last_ts"] = now_ts
-                # 為什麼不用 logger.error：fallback 是 Phase 1 預期行為；warn 級
-                # 對齊 Rust target=live_authorization warn! 對應 alert tag 一致性。
-                logger.warning(
-                    "MIGRATION-FALLBACK: OPENCLAW_LIVE_AUTH_SIGNING_KEY unset; "
-                    "falling back to OPENCLAW_IPC_SECRET (OPS-2 SECRET-SPLIT Phase 1). "
-                    "Set OPENCLAW_LIVE_AUTH_SIGNING_KEY(_FILE) before Phase 2 cutover. "
-                    "event=%s",
-                    "ops2_secret_split_phase1_fallback",
-                )
-        return fallback
-    return ""
+    return (get_secret_value("OPENCLAW_LIVE_AUTH_SIGNING_KEY") or "").strip()
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LIVE-GATE-BINDING-1: signed authorization file for Rust engine
@@ -260,23 +229,23 @@ def _write_signed_live_authorization(
     Sign and persist the Earned-Trust authorization record that the Rust
     engine's LIVE-GATE-BINDING-1 reads.
 
-    Raises RuntimeError if neither `OPENCLAW_LIVE_AUTH_SIGNING_KEY` nor (Phase 1
-    fallback) `OPENCLAW_IPC_SECRET` is set — Rust will also refuse to verify
-    without it, so failing here surfaces the config error at approval time
-    instead of at engine restart.
+    Raises RuntimeError if `OPENCLAW_LIVE_AUTH_SIGNING_KEY` is not set — Rust
+    will also refuse to verify without it, so failing here surfaces the config
+    error at approval time instead of at engine restart.
 
     對 Rust 引擎 LIVE-GATE-BINDING-1 簽名寫入贏得信任授權記錄。
-    OPS-2 SECRET-SPLIT — Phase 1 兩 env 都接受（fallback 觸發 WARN ≤1/h）。
+    OPS-2 SECRET-SPLIT Phase 2 cutover 後簽名 key 單一來源
+    （`OPENCLAW_IPC_SECRET` fallback 已移除），missing 必 fail loud。
     """
-    # OPS-2 SECRET-SPLIT — Phase 1 fallback path 內含 rate-limit WARN。
-    ipc_secret = _read_live_auth_signing_key()
-    if not ipc_secret:
+    signing_key = _read_live_auth_signing_key()
+    if not signing_key:
         raise RuntimeError(
-            "OPENCLAW_LIVE_AUTH_SIGNING_KEY is not set (and Phase 1 fallback "
-            "OPENCLAW_IPC_SECRET also unset) — cannot sign live authorization. "
+            "OPENCLAW_LIVE_AUTH_SIGNING_KEY is not set — cannot sign live "
+            "authorization (OPS-2 Phase 2: no OPENCLAW_IPC_SECRET fallback). "
             "Set OPENCLAW_LIVE_AUTH_SIGNING_KEY(_FILE) in the control-api environment "
             "before approving live auth. / "
-            "OPENCLAW_LIVE_AUTH_SIGNING_KEY 未設定（含 Phase 1 fallback），無法簽署 live 授權"
+            "OPENCLAW_LIVE_AUTH_SIGNING_KEY 未設定，無法簽署 live 授權"
+            "（Phase 2 cutover 後無 IPC fallback）"
         )
 
     tier_enum = TrustTier(tier)
@@ -293,7 +262,7 @@ def _write_signed_live_authorization(
         approved_system_mode=approved_system_mode,
         env_allowed=env_allowed,
     )
-    sig = _sign_authorization_payload(payload, ipc_secret)
+    sig = _sign_authorization_payload(payload, signing_key)
 
     record = {
         "version": _AUTHORIZATION_SCHEMA_VERSION,
@@ -518,17 +487,18 @@ def _read_signed_live_authorization_status(now_ms: int | None = None) -> dict[st
             "reason": "authorization_json_mode_mismatch",
         }
 
-    # OPS-2 SECRET-SPLIT — Phase 1 fallback path 內含 rate-limit WARN（同一 process
-    # 與 sign 路徑共用 _fallback_warn_state，避免 sign+verify 雙路徑各 emit 一次）。
-    ipc_secret = _read_live_auth_signing_key()
-    if not ipc_secret:
+    # OPS-2 SECRET-SPLIT Phase 2 — 簽名 key 單一來源；missing 回 unverifiable
+    # 狀態（trust-status 是查詢端點，回狀態而非 raise，維持可診斷性）。
+    signing_key = _read_live_auth_signing_key()
+    if not signing_key:
         return {
             **parsed_status,
             "status": "unverifiable",
-            # 保留 "ipc_secret_missing" 字串為 Phase 1 backward-compat alert key；
-            # Phase 2 cutover 時改 "live_auth_signing_key_missing" 對齊 Rust kind。
-            # TODO(P1-OPS-2-SECRET-SPLIT-PHASE-2 D+14): 改 reason 字串並同步 alert rule。
-            "reason": "ipc_secret_missing",
+            # OPS-2 Phase 2 cutover（2026-06-10）：reason 由 "ipc_secret_missing"
+            # 改為 "live_auth_signing_key_missing" 對齊 Rust auth_error_kind；
+            # 外部 alert rule 由 operator 於 cutover 前加新字串（runbook §13.2），
+            # 舊字串留 14d buffer 後清。
+            "reason": "live_auth_signing_key_missing",
         }
 
     payload = _canonical_authorization_payload(
@@ -540,7 +510,7 @@ def _read_signed_live_authorization_status(now_ms: int | None = None) -> dict[st
         approved_system_mode=approved_system_mode,
         env_allowed=env_allowed,
     )
-    sig_expected = _sign_authorization_payload(payload, ipc_secret)
+    sig_expected = _sign_authorization_payload(payload, signing_key)
     if not hmac.compare_digest(sig_expected, sig_recorded):
         return {
             **parsed_status,

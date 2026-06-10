@@ -406,7 +406,7 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
             )
             with patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
-                "OPENCLAW_IPC_SECRET": "test-secret",
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY": "test-secret",
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",
@@ -434,7 +434,7 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
             )
             with patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
-                "OPENCLAW_IPC_SECRET": secret,
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY": secret,
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",
@@ -463,7 +463,7 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
             )
             with patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
-                "OPENCLAW_IPC_SECRET": secret,
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY": secret,
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",
@@ -492,7 +492,7 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
             )
             with patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
-                "OPENCLAW_IPC_SECRET": secret,
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY": secret,
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",
@@ -535,7 +535,7 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
             )
             with patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
-                "OPENCLAW_IPC_SECRET": "test-secret",
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY": "test-secret",
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",
@@ -563,7 +563,7 @@ class TestLiveShadowToLiveGateChain(unittest.TestCase):
             )
             with patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
-                "OPENCLAW_IPC_SECRET": secret,
+                "OPENCLAW_LIVE_AUTH_SIGNING_KEY": secret,
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",
