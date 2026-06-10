@@ -144,6 +144,10 @@ app.include_router(paper_router)
 from .layer2_routes import layer2_router  # noqa: E402
 app.include_router(layer2_router)
 
+# ── Layer 2 P4 online-FDR Router（bind-demo + wealth 唯讀；layer2_routes 超 800 行故獨立檔）──
+from .l2_fdr_routes import fdr_router  # noqa: E402
+app.include_router(fdr_router)
+
 # ── Risk Control Router / 风控路由注册 ──
 from .risk_routes import risk_router  # noqa: E402
 app.include_router(risk_router)
