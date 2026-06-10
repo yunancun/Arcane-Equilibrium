@@ -578,6 +578,45 @@ class TestCheck82DupRolloverDedup(unittest.TestCase):
         self.assertIn("success rate=0.9477", msg)
         self.assertIn("cum_attempts=860", msg)  # dedup 後帳（非 24060）
 
+    def test_distinct_updated_at_same_counts_both_counted_probe_f(self) -> None:
+        """E2 LOW-A regression（probe F，E4 補測 2026-06-11）：dedup key 的
+        ``prev_canary_updated_at_epoch_s`` 分量必須參與識別。
+
+        場景（現實可達：等長排程重啟 + 100% ok）：兩個**真實不同** epoch 攜
+        **完全相同的 prev 計數**（290/290）但**不同 updated_at**（各自 flush 過
+        ≥1 次 → V129 updated_at 必前移）→ 必須各計一次：
+        probes = 當前 10 + 290 + 290 = 590 ≥ 500 → PASS。
+
+        M1b mutant bite（key 削 updated_at 只剩 prev 計數）：兩個 (290, 290)
+        被誤判同一快照 → 過度去重成 10 + 290 = 300 < 500 → S3 probes 假 FAIL
+        （false-NOGO）→ 本測試紅。與 ``test_identical_prev_counted_once_...``
+        （distinct **counts**）互補：本測試釘的是 distinct **updated_at** +
+        same counts 這一軸，唯有完整三元組 key 同時讓兩者綠。
+        """
+        base_ts = _NOW - 20 * 3600
+        events = [
+            _ev("flusher_start", True, _NOW - 50 * 3600, 0, 0),
+            # epoch A 終值 290/290：updated_at = base_ts - 60（gap 60s ≤30min 不重置錨點）。
+            _ev("epoch_rollover", True, base_ts, 290, 290, {
+                "prev_singleton_updated_at_epoch_s": base_ts - 60,
+                "prev_canary_updated_at_epoch_s": base_ts - 60,
+                "prev_flag_enabled": True,
+            }),
+            # epoch B 終值同計數 290/290，但 updated_at 不同（真實第二個 epoch，
+            # 跑滿 ~1h 後 restart；gap 60s 同樣不重置錨點）。
+            _ev("epoch_rollover", True, base_ts + 3600, 290, 290, {
+                "prev_singleton_updated_at_epoch_s": base_ts + 3540,
+                "prev_canary_updated_at_epoch_s": base_ts + 3540,
+                "prev_flag_enabled": True,
+            }),
+            _hb(_NOW - 1800, 5),  # 本 epoch 合規 heartbeat（< 當前 total=10）
+        ]
+        fo, fa = _healthy_inputs(canary_total=10, canary_ok=10, events=events)
+        cur = _cursor82(fo, fa)
+        status, msg = check_82_lease_ipc_soak_window(cur)
+        self.assertEqual(status, "PASS")
+        self.assertIn("probes=590", msg)  # 290+290+10：同計數不同快照各計一次
+
     def test_identical_prev_counted_once_distinct_prev_still_counted(self) -> None:
         """精確算術雙生：identical-prev pair 計一次、distinct-prev 照計。
 
