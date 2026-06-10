@@ -1,6 +1,11 @@
 # OpenClaw Engine Bootstrap Configuration
 # 引擎啟動配置
 #
+# 命名注記：OpenClaw / OPENCLAW_* 為歷史運行面名稱（2026-05-06 軟更名保留），
+# 正式產品名 = 玄衡 · Arcane Equilibrium（CLAUDE.md Product Boundary）。
+# 全面改名 = Apple Silicon 遷移時強制 gate：
+# docs/execution_plan/2026-06-10--ae_runtime_rename_migration_guide.md
+#
 # 3E-10.2: trading_mode REMOVED — pipeline identity is now determined
 # automatically from API key detection (determine_primary_kind).
 # Paper always runs. Demo/Live start if credentials exist.
