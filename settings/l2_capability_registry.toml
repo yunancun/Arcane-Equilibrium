@@ -90,6 +90,48 @@ per_call_usd_cap = 0.50
 daily_usd_cap    = 0.50
 tier_gated_spend = true
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# P3b capability stanza（PA P3b 設計 §E.1；alpha-bearing，promotion-relevant verdict）
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 為什麼 hypothesize 是 alpha-bearing 卻仍 lane="ml_backlog"（neutral）：一次 hypothesize run
+# 產出「backlog item + promotion-relevant verdict（pass/DEFER/fail）」。verdict 是 promotion-
+# relevant，但「晉升動作」（到 demo Stage 1）是「另一個」demo_stage1 lane（=expand=forced
+# MANUAL）。alpha 驗證發生在 cascade 的「確定性 math gate」（B1+DSR+PBO+leak+Q1，唯一 validator；
+# LLM 永不驗 alpha）。pass-verdict backlog item 只是 advisory；「人工」晉升它（P4/P5），且 auto
+# 晉升須 B2 forward-OOS ≥21d demo Stage 1（Stage 0R necessary-not-sufficient）。0 新 live
+# authority、0 新 auto-to-paper signal。
+#
+# 雙閘（fail-closed）：
+#   - enabled=false（loader 強制；部署即行為中性，operator 評估後才開）。
+#   - min_tier=L3 + tier_capability_flag=can_generate_hypotheses（effective_autonomy STEP-2
+#     TIER_LOCKED if tier<L3 或 flag False）。can_generate_hypotheses 首次 True@L3
+#     （learning_tier_gate.py:203）。
+
+[[capability]]
+capability_id          = "ml_advisory.hypothesize"     # P3b — alpha-bearing；promotion-relevant verdict
+enabled                = false                          # FAIL-CLOSED DEFAULT（loader 強制；雙閘之一）
+min_tier               = "L3"                           # can_generate_hypotheses 首次 True@L3
+tier_capability_flag   = "can_generate_hypotheses"      # 綁 L3 flag（STEP-2 TIER_LOCKED if flag False）
+model_tier             = "cloud_l2"
+cloud_model_pref       = "sonnet"
+lane                   = "ml_backlog"                   # → LANE_DIRECTION="neutral"（backlog sink；晉升是另一 expand/MANUAL lane）
+output_schema_ref      = "ml_advisory.v1"               # 三模式共用 schema（mode 欄驅動子物件）
+prompt_contract_ref    = "ml_advisory.hypothesize.v1"   # → contract registry（NEW 確定性模板）
+out_of_bound_guard_ref = "ml_advisory.guard.v1"         # → guard registry（擴 empty-mechanism clause）
+novelty_gate           = true                           # hypothesis → novelty dedupe vs dead_failure_modes
+consequential_default  = false
+
+[capability.trigger]
+kind          = "event"
+spec          = "ml:training_complete"
+debounce_secs = 900                                     # §F.1 trailing-edge settle
+
+[capability.budget]
+per_call_usd_cap = 0.50
+daily_usd_cap    = 0.50                                 # ≤ DOC-08 $2/day
+tier_gated_spend = true
+
 # ── capability stanza 範本（P3 才填；保留為文件，loader 不解析註解）──
 # [[capability]]
 # capability_id        = "ml_advisory"        # 穩定 key（P3 首個 capability）

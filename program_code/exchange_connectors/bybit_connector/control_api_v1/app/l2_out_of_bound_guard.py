@@ -183,15 +183,19 @@ def _guard_ml_advisory_v1(
     axes）仍適用——ml_advisory 輸出若混入這些幻覺向量同樣該擋。capability-specific clause 疊加在
     其上（M3 typing / regime_caveat / per-mode 必填 / signal_axes_used 軸檢）。任一 reject → reject。
 
-    clause（design §E.2(0) lines 868-873 + §F M3）：
-      A. per-mode 必填子物件：mode ∈ {diagnose_leak, interpret_result}（P3a），且對應子物件存在；
-         未知 mode（含 hypothesize=P3b）或缺子物件 → reject（fail-closed）。
+    clause（design §E.2(0) lines 868-873 + §F M3 + §E.4 P3b hypothesize）：
+      A. per-mode 必填子物件：mode ∈ {diagnose_leak, interpret_result, hypothesize}，且對應子物件
+         存在；未知 mode 或缺子物件 → reject（fail-closed）。
       B. M3 source_class typing（diagnose_leak）：evidence[].source_class 必 ∈ 合法集合；任何宣稱
          leak-free PIT（leak_free=true / pit_verified=true）卻 source_class ∉ leak-free 集合
-         （只有 shift1_compliance/is_oos_gap 可，P3a 無這兩 producer）→ reject。
+         （只有 shift1_compliance/is_oos_gap 可）→ reject。
       C. regime_caveat（interpret_result）：宣稱 promotion-ready（promotion_ready=true）卻缺非空
          regime_caveat 且 context 標 bull-only → reject（Alpha Evidence Governance）。
       D. signal_axes_used ⊄ available_signal_axes → reject（捏造資料軸；§H clause 1）。
+      E. empty-mechanism curve-fit（hypothesize，P3b §E.4(b)）：每個 feature_hypotheses[] 的
+         mechanism / falsification_test 必非空字串 → 否則 reject（無機制 = curve-fit）。
+    注意：novelty dedupe（vs dead_failure_modes）「不」在此 guard——它需 DB read（retrieve_lessons
+    pg_trgm），而本 guard 的 no-DB 不變量 load-bearing。novelty 在 executor（已做 DB I/O）跑。
     """
     # 動態 import 避免模塊載入期循環（contract registry import layer2_engine；本 guard 不應在
     # import 期被牽連）。常數來自 contract registry（single source，不複製字面集合）。
@@ -273,6 +277,36 @@ def _guard_ml_advisory_v1(
                 verdict="reject", clamped_output=None,
                 kinds_hit=["promotion_ready_bull_only_missing_regime_caveat"],
             )
+
+    # ── clause E：empty-mechanism curve-fit（hypothesize，P3b §E.4(b)）──
+    # 為什麼 reject 空 mechanism：無經濟機制的假說 = curve-fit（execution-plan §2 Phase 3
+    # 「reject empty mechanism」）。每個 feature_hypotheses[] 須有非空 mechanism + falsification_test
+    # （可證偽）。math gate 雖是唯一 alpha validator，但「形」上空機制的假說連進 gate 都不該。
+    if mode == "hypothesize":
+        hyps = out.get("feature_hypotheses")
+        if not isinstance(hyps, (list, tuple)):
+            return GuardResult(
+                verdict="reject", clamped_output=None,
+                kinds_hit=["feature_hypotheses_not_list"],
+            )
+        for h in hyps:
+            if not isinstance(h, dict):
+                return GuardResult(
+                    verdict="reject", clamped_output=None,
+                    kinds_hit=["feature_hypothesis_not_object"],
+                )
+            mech = h.get("mechanism")
+            falsif = h.get("falsification_test")
+            if not (isinstance(mech, str) and mech.strip()):
+                return GuardResult(
+                    verdict="reject", clamped_output=None,
+                    kinds_hit=[f"empty_mechanism_curve_fit:{h.get('hid')}"],
+                )
+            if not (isinstance(falsif, str) and falsif.strip()):
+                return GuardResult(
+                    verdict="reject", clamped_output=None,
+                    kinds_hit=[f"empty_falsification_test:{h.get('hid')}"],
+                )
 
     # ── clause D：signal_axes_used ⊄ available_signal_axes（捏造資料軸）──
     available_axes = ctx.get("available_signal_axes")

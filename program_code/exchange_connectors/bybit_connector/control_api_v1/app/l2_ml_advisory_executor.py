@@ -79,14 +79,20 @@ from .l2_call_ledger_writer import get_l2_call_ledger_writer as _get_l2_ledger_w
 
 logger = logging.getLogger("l2_ml_advisory_executor")
 
-# P3a 合法模式（斷言無 alpha）。hypothesize 是 P3b（alpha-bearing），本模塊不含——未知 mode
-# 在 cascade 入口 fail-closed reject（不誤跑 P3b 模式）。
+# P3a 合法模式（斷言無 alpha）。
 _P3A_MODES: frozenset[str] = frozenset({"diagnose_leak", "interpret_result"})
+
+# P3b 合法模式（alpha-bearing；經確定性 math gate 驗，LLM 永不驗 alpha）。
+_P3B_MODES: frozenset[str] = frozenset({"hypothesize"})
+
+# 全部合法模式（P3a ∪ P3b）；未知 mode 在 cascade 入口 fail-closed reject。
+_VALID_MODES: frozenset[str] = _P3A_MODES | _P3B_MODES
 
 # 模式 → PromptContract ref（contract registry 是唯一模板來源；本模塊不複製字面模板）。
 _MODE_CONTRACT_REF: dict[str, str] = {
     "diagnose_leak": "ml_advisory.diagnose_leak.v1",
     "interpret_result": "ml_advisory.interpret_result.v1",
+    "hypothesize": "ml_advisory.hypothesize.v1",
 }
 
 # cloud-L2 interpret 的 max_tokens（單發 structured JSON 診斷/解讀，非 agentic session）。
@@ -99,6 +105,11 @@ _SCREEN_TIMEOUT_S = 30.0
 
 # M4：screen recall floor（design §G.2.1 line 1267；PA default 0.85，MIT 可調高）。
 _SCREEN_RECALL_FLOOR = 0.85
+
+# Q1：N_trades_oos ≥ 50 else DEFER（QC #Q1；同時當 dsr_gate.compute_dsr 的 min_observations）。
+# 為什麼 50（非 dsr_gate 預設 30）：QC #Q1 的 trade-count gate（樣本充分性），有別於 dsr_gate
+# 的 30-floor 退化輸入 guard。math gate 顯式傳 min_observations=50 給 compute_dsr。
+_Q1_MIN_TRADES_OOS = 50
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -157,13 +168,22 @@ def load_ollama_screen_calibration(
     *, artifact_path: Path | str | None = None, recall_floor: float = _SCREEN_RECALL_FLOOR
 ) -> OllamaScreenCalibration:
     """讀 M4 校準 artifact，回 OllamaScreenCalibration。fail-closed：無 artifact / 壞 / recall<floor
-    → enabled=False（screen 停用，全進 gate + flag MIT）。
+    / bad_reject_rate==0（degenerate pass-everything）→ enabled=False（screen 停用，全進 gate +
+    flag MIT）。
 
-    artifact schema（MIT-owned；E1 只定 schema + 讀）：
-      {"benchmark_version": "<ver>", "recall": <float 0..1>, "measured_at": "<iso>", ...}
+    artifact schema（MIT-owned benchmark；PA §F.1：benchmark BUILD 寫進 loader 既讀的 calibration
+    路徑，攜 MIT 擴充欄）：
+      {"benchmark_version", "classifier_version", "measured_at", "recall_floor", "threshold",
+       "n_good", "n_bad", "recall", "precision",
+       "per_class_recall": {"good_recall", "bad_reject_rate"},
+       "confusion": {"tp","fn","fp","tn"}, "enabled_decision"}
+    E1 讀 recall（必）+ recall_floor（可選 override，MIT §2.1）+ per_class_recall.bad_reject_rate
+    （degenerate-pass guard，MIT §2.4 step 4）；其餘欄是 MIT audit 載體（loader 忽略）。
 
-    為什麼 fail-closed 到 DISABLED（非 ENABLED）：未校準/低 recall 的 screen 可能 false-kill 真
-    alpha；停用只是多花 cloud（gate 兜底 precision）。對齊 design line 1271-1272。
+    為什麼 fail-closed 到 DISABLED（非 ENABLED）：未校準/低 recall/pass-everything 的 screen 可能
+    false-kill 真 alpha；停用只是多花 cloud（gate 兜底 precision）。對齊 design line 1271-1272。
+    為什麼 bad_reject_rate==0 也 DISABLED：screen 若放行一切（recall=1.0 但從不 reject dead-mode）
+    = 無用 screen（MIT §2.4 step 4 的 degenerate case），啟用它只是徒增風險，停用無損。
     """
     p = Path(artifact_path) if artifact_path is not None else _calibration_artifact_path()
     if not p.exists():
@@ -184,6 +204,13 @@ def load_ollama_screen_calibration(
         )
     recall = raw.get("recall")
     bver = str(raw.get("benchmark_version", "unknown"))
+    # MIT §2.1：artifact 可 override recall_floor（floor 由 MIT 決定，可調高）。
+    artifact_floor = raw.get("recall_floor")
+    try:
+        if artifact_floor is not None:
+            recall_floor = float(artifact_floor)
+    except (TypeError, ValueError):
+        pass  # 壞 floor 欄 → 沿用 caller floor（不因單欄壞而崩）。
     try:
         recall_f = float(recall) if recall is not None else None
     except (TypeError, ValueError):
@@ -199,7 +226,19 @@ def load_ollama_screen_calibration(
             enabled=False, recall=recall_f, threshold=recall_floor, benchmark_version=bver,
             reason=f"recall_{recall_f:.3f}_below_floor_{recall_floor:.2f}_screen_disabled_flag_mit",
         )
-    # recall≥floor 且有 benchmark → screen ENABLED（loose；removing obvious dead-modes）。
+    # MIT §2.4 step 4：bad_reject_rate==0（pass-everything degenerate）→ DISABLED（screen 無用）。
+    per_class = raw.get("per_class_recall")
+    if isinstance(per_class, dict) and per_class.get("bad_reject_rate") is not None:
+        try:
+            brr = float(per_class["bad_reject_rate"])
+        except (TypeError, ValueError):
+            brr = None
+        if brr is not None and brr <= 0.0:
+            return OllamaScreenCalibration(
+                enabled=False, recall=recall_f, threshold=recall_floor, benchmark_version=bver,
+                reason="bad_reject_rate_zero_pass_everything_screen_disabled_flag_mit",
+            )
+    # recall≥floor 且 bad_reject_rate>0（若提供）→ screen ENABLED（loose；removing obvious dead-modes）。
     return OllamaScreenCalibration(
         enabled=True, recall=recall_f, threshold=recall_floor, benchmark_version=bver,
         reason="calibrated",
@@ -230,6 +269,10 @@ class MlAdvisoryCascadeResult:
     l2_reply_id: str | None = None
     cost_usd: float = 0.0
     notes: list[str] = field(default_factory=list)
+    # ── P3b hypothesize 專屬（diagnose/interpret 恆 None/預設）──
+    math_gate_verdict: str | None = None  # B1+DSR+PBO+leak+Q1 strictest-wins（pass/DEFER/fail）
+    math_gate_reasons: list[str] = field(default_factory=list)
+    novelty: str | None = None  # "novel" | "duplicate"（vs dead_failure_modes）；hypothesize only
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -559,13 +602,26 @@ async def run_ml_advisory_cascade(
     result.l2_reply_id = l2_reply_id
     started = time.time()
 
-    # ── fail-closed：未知/非 P3a mode（含 hypothesize=P3b）→ reject，零 model 呼叫 ──
-    if mode not in _P3A_MODES:
+    # ── fail-closed：未知 mode → reject，零 model 呼叫 ──
+    if mode not in _VALID_MODES:
         result.stage = "unknown_mode_rejected"
-        result.notes.append(f"mode={mode} 非 P3a 合法模式（diagnose_leak/interpret_result）")
+        result.notes.append(f"mode={mode} 非合法模式（diagnose_leak/interpret_result/hypothesize）")
         _seam(writer, l2_reply_id, "ml_advisory_mode", "reject",
-              {"mode": mode, "reason": "unknown_or_p3b_mode"})
+              {"mode": mode, "reason": "unknown_mode"})
         return result
+
+    # ── P3b hypothesize（alpha-bearing）→ 走 §G.2 cascade（Ollama generate → math gate →
+    #    cloud interpret survivors）。math gate 是唯一 alpha validator（LLM 永不驗 alpha）。──
+    if mode in _P3B_MODES:
+        return await _run_hypothesize_cascade(
+            capability_id=capability_id, mode=mode, context=context, engine=engine,
+            contract_ver=contract_ver, schema_ver=schema_ver, trigger=trigger,
+            engine_mode=engine_mode, symbol=symbol, strategy_name=strategy_name,
+            available_signal_axes=available_signal_axes, bull_only=bull_only,
+            calibration=calibration, sink_conn_provider=sink_conn_provider,
+            spend_recorder=spend_recorder, writer=writer, l2_reply_id=l2_reply_id,
+            result=result, started=started,
+        )
 
     # ── STAGE 1 — Ollama screen（M4-gated；loose coarse）──
     calib = calibration if calibration is not None else load_ollama_screen_calibration()
@@ -656,6 +712,461 @@ async def run_ml_advisory_cascade(
         result.notes.append(f"sink write failed: {sink_res.get('errors')}")
     _record_spend(spend_recorder, capability_id, result.cost_usd)
     return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# P3b — hypothesize cascade（§G.2：Ollama generate → 確定性 math gate → cloud interpret survivors）
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 為什麼 hypothesize 的 cascade order 與 P3a 不同（PA-flagged E1 decision）：P3a 是 cloud-first
+# （STAGE 2 cloud-interpret 在 guard 前）。hypothesize 是 alpha-bearing，根據 design v4 §G.2 +
+# root principle 13（cost-aware）：cheap generate（Ollama）→ math validate（確定性，唯一 alpha
+# validator）→ expensive cloud「只在 survivor」interpret。即：先用便宜的本地模型「生成」結構化
+# 假說，再用確定性 math gate（B1+DSR+PBO+leak+Q1）驗，math gate pass 才花 cloud 解讀 survivor
+# 進 backlog packet。LLM「永不」驗 alpha——math gate 是唯一 validator。
+
+
+async def _run_hypothesize_cascade(
+    *,
+    capability_id: str,
+    mode: str,
+    context: dict[str, Any],
+    engine: Any,
+    contract_ver: str,
+    schema_ver: str,
+    trigger: str,
+    engine_mode: str,
+    symbol: str | None,
+    strategy_name: str | None,
+    available_signal_axes: list[str] | None,
+    bull_only: bool,
+    calibration: "OllamaScreenCalibration | None",
+    sink_conn_provider: Any,
+    spend_recorder: Any,
+    writer: Any,
+    l2_reply_id: str,
+    result: MlAdvisoryCascadeResult,
+    started: float,
+) -> MlAdvisoryCascadeResult:
+    """P3b hypothesize cascade（§G.2 order；alpha-bearing；promotion-relevant verdict）。
+
+    階序：Ollama screen（M4）→ Ollama generate（cheap 結構化假說）→ 確定性 guard（form：
+    empty-mechanism / axes）→ novelty dedupe（executor DB read vs dead_failure_modes）→ 確定性
+    math gate（B1+DSR+PBO+leak+Q1，唯一 alpha validator）→ cloud interpret survivors（expensive，
+    只在 math gate pass）→ advisory sink（backlog item）+ D3。
+
+    回 MlAdvisoryCascadeResult。0 新 live authority；pass-verdict → backlog（人工晉升）；
+    fail → logged-and-dropped（D3 記）；DEFER → backlog 標 non-promotable。
+    """
+    # ── STAGE 1 — Ollama screen（M4-gated；loose coarse；與 P3a 同機制）──
+    calib = calibration if calibration is not None else load_ollama_screen_calibration()
+    if not calib.enabled:
+        result.screen_disabled = True
+        result.screen_passed = True
+        result.notes.append(f"ollama_screen_disabled:{calib.reason}")
+        _seam(writer, l2_reply_id, "ollama_screen", "disabled", calib.to_seam_details())
+    else:
+        passed, reason, screen_cost = await _run_ollama_screen(engine, mode=mode, context=context)
+        result.cost_usd += screen_cost
+        result.screen_passed = passed
+        _seam(writer, l2_reply_id, "ollama_screen", "pass" if passed else "reject",
+              {"reason": reason, **calib.to_seam_details()})
+        if not passed:
+            result.stage = "screen_rejected"
+            result.notes.append(f"ollama_screen_skip:{reason}")
+            _record_spend(spend_recorder, capability_id, result.cost_usd)
+            return result
+
+    # ── STAGE 2 — Ollama generate（cheap 結構化假說；§G.2 cheap-generate-first，非 cloud-first）──
+    parsed, raw_gen, gen_cost = await _run_ollama_generate(engine, mode=mode, context=context)
+    result.cost_usd += gen_cost
+    if parsed is None:
+        # 本地生成不可用 / 非 JSON → fail-soft（D3 記 error，不寫 sink）。
+        result.stage = "generate_unavailable_or_unparsable"
+        result.notes.append("ollama generate 回 None 或非 JSON dict")
+        _ledger(writer, l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
+                model="ollama_generate", contract_ver=contract_ver, schema_ver=schema_ver,
+                system_prompt=_hypothesize_template(), context=context, raw_response=raw_gen,
+                parsed_output=None, guard_verdict=None, cost_usd=result.cost_usd,
+                latency_ms=int((time.time() - started) * 1000))
+        _record_spend(spend_recorder, capability_id, result.cost_usd)
+        return result
+
+    # ── STAGE 3 — 確定性 guard（form：per-mode 必填 / empty-mechanism / axes；無 model）──
+    guard_ctx: dict[str, Any] = {"bull_only": bull_only}
+    if available_signal_axes is not None:
+        guard_ctx["available_signal_axes"] = available_signal_axes
+    gres = _guard.run_guard(parsed, guard_ref="ml_advisory.guard.v1", context=guard_ctx)
+    result.guard_verdict = gres.verdict
+    _seam(writer, l2_reply_id, "ml_advisory_guard", gres.verdict,
+          {"mode": mode, "kinds_hit": gres.kinds_hit})
+    guard_out = gres.clamped_output if gres.clamped_output is not None else parsed
+
+    if gres.verdict == "reject":
+        # guard reject（empty-mechanism / 捏造軸 / 缺子物件）⇒ logged-and-dropped（D3 記，不寫 sink）。
+        result.stage = "guard_rejected"
+        result.notes.append(f"guard reject: {','.join(gres.kinds_hit)}")
+        _ledger(writer, l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
+                model="ollama_generate", contract_ver=contract_ver, schema_ver=schema_ver,
+                system_prompt=_hypothesize_template(), context=context, raw_response=raw_gen,
+                parsed_output=guard_out, guard_verdict=gres.verdict, cost_usd=result.cost_usd,
+                latency_ms=int((time.time() - started) * 1000))
+        _record_spend(spend_recorder, capability_id, result.cost_usd)
+        return result
+
+    # ── STAGE 3.5 — novelty dedupe（executor DB read；guard 的 no-DB 不變量 load-bearing）──
+    # 為什麼在 executor 非 guard：novelty 需 retrieve_lessons(lesson_type='dead_mode') 的 pg_trgm
+    # DB read；guard 必須 0-DB（純確定性）。near-duplicate dead-mode → math gate verdict DEFER。
+    novelty, dup_reason = await _check_novelty(guard_out, symbol=symbol)
+    result.novelty = novelty
+    _seam(writer, l2_reply_id, "ml_advisory_novelty", "pass" if novelty == "novel" else "reject",
+          {"novelty": novelty, "reason": dup_reason})
+
+    # ── STAGE 4 — 確定性 math gate（B1+DSR+PBO+leak+Q1；唯一 alpha validator；0 LLM-invocation）──
+    math_res = _run_math_gate(guard_out, context, novelty=novelty)
+    result.math_gate_verdict = math_res["verdict"]
+    result.math_gate_reasons = list(math_res["reasons"])
+    for stage_id, sv in math_res["stage_verdicts"].items():
+        _seam(writer, l2_reply_id, "ml_advisory_math_gate", sv,
+              {"stage": stage_id, "reasons": math_res["reasons"]})
+
+    # ── STAGE 5 — cloud interpret survivors only（expensive；只在 math gate pass）──
+    # 為什麼只在 pass 跑 cloud：cost only on survivors（root principle 13）。DEFER/fail 不值得花
+    # cloud 解讀（verdict 已定，backlog packet 用本地生成的結構即可）。
+    cloud_interp: dict[str, Any] | None = None
+    if math_res["verdict"] == "pass":
+        cloud_interp, raw_cloud, cloud_cost, _sp, cloud_meta = await _run_cloud_interpret(
+            engine, mode="interpret_result", context={**context, "surviving_hypothesis": guard_out}
+        )
+        result.cost_usd += cloud_cost
+        result.cloud_called = True
+        if cloud_interp is not None:
+            guard_out = {**guard_out, "survivor_interpretation": cloud_interp.get("result_interpretation")}
+
+    # fact/inference/assumption 標籤 + math gate verdict（D3 reconstructable）。
+    fact_inf_assm = {
+        "mode": mode,
+        "math_gate_verdict": math_res["verdict"],
+        "novelty": novelty,
+    }
+    # 不論 verdict 皆寫 D3 ledger（reconstructable）——含 math gate verdict + reasons。
+    _ledger(writer, l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
+            model="ollama_generate+math_gate", contract_ver=contract_ver, schema_ver=schema_ver,
+            system_prompt=_hypothesize_template(), context=context, raw_response=raw_gen,
+            parsed_output={**guard_out, "math_gate": math_res}, guard_verdict=gres.verdict,
+            fact_inf_assm=fact_inf_assm, cost_usd=result.cost_usd,
+            latency_ms=int((time.time() - started) * 1000))
+
+    # ── STAGE 6 — promotion routing（§E.5；0 新 live authority）──
+    # pass → backlog（agent.lessons，genuinely inert；人工晉升 demo_stage1=expand=MANUAL）。
+    # DEFER → backlog 標 non-promotable。fail → logged-and-dropped（D3 已記，不 sink）。
+    if math_res["verdict"] == "fail":
+        result.stage = "math_gate_failed"
+        result.notes.append(f"math gate fail: {','.join(math_res['reasons'])}")
+        _record_spend(spend_recorder, capability_id, result.cost_usd)
+        return result
+
+    # pass 或 DEFER → sink backlog item（content 帶 math gate verdict，標 promotion-relevant 但非
+    # auto-promote；晉升人工）。
+    sink_payload = {**guard_out, "gate_verdict": math_res["verdict"], "math_gate": math_res}
+    sink_res = write_ml_advisory_advisory_sink(
+        engine_mode=engine_mode, mode=mode, parsed_output=sink_payload, l2_reply_id=l2_reply_id,
+        symbol=symbol, strategy_name=strategy_name, trigger=trigger, conn_provider=sink_conn_provider,
+    )
+    result.sink_written = bool(sink_res.get("ok"))
+    _seam(writer, l2_reply_id, "ml_advisory_sink",
+          "pass" if result.sink_written else "reject",
+          {"sink_state": sink_res.get("sink_state"), "sink_table": "agent.lessons",
+           "inert": True, "no_applier_scan": True, "gate_verdict": math_res["verdict"]})
+
+    result.ok = result.sink_written
+    result.stage = (
+        "backlog_written" if result.sink_written else "sink_write_failed"
+    )
+    if not result.sink_written:
+        result.notes.append(f"sink write failed: {sink_res.get('errors')}")
+    _record_spend(spend_recorder, capability_id, result.cost_usd)
+    return result
+
+
+def _hypothesize_template() -> str:
+    """取 hypothesize 的 checked-in 模板（contract registry；Ollama 禁生成 prompt）。"""
+    pc = _contracts.get_prompt_contract("ml_advisory.hypothesize.v1")
+    return pc.template if pc is not None else ""
+
+
+async def _run_ollama_generate(
+    engine: Any, *, mode: str, context: dict[str, Any]
+) -> tuple[dict[str, Any] | None, str, float]:
+    """跑 Ollama「結構化生成」假說（§G.2 cheap-generate；用 contract registry 的 checked-in 模板）。
+
+    回 (parsed_output, raw_response, cost_usd)。LLM 只「生成」結構化假說，「不」驗 alpha
+    （math gate 是唯一 validator）。prompt 是 PromptContract.template（checked-in；model 禁生成）。
+
+    為什麼用 triage tier（cheap）：§G.2 cheap-generate-first。結構化生成走便宜本地/triage tier；
+    昂貴 cloud 只在 math gate survivor interpret（cost only on survivors）。fail-soft：provider
+    不可用 / 非 JSON → 回 None（不誤當生成成功）。
+    """
+    try:
+        from . import provider_client as _pc  # noqa: PLC0415 — 避免 import cycle
+
+        system_prompt = _hypothesize_template()
+        cfg = engine._cost_tracker.get_config()
+        base_provider = cfg.default_provider or _pc.PROVIDER_ANTHROPIC
+        # role="triage"：cheap tier（結構化生成不需頂級模型；math gate 兜底正確性）。
+        eff_provider, eff_tier = engine._resolve_effective_provider(
+            base_provider=base_provider, base_tier=_pc.TIER_HAIKU, role="triage",
+        )
+        user_input = (
+            f"Training run context (structured, extracted from the pipeline):\n"
+            f"{json.dumps(context, ensure_ascii=False, default=str)[:6000]}"
+        )
+        resp = await engine._provider_complete(
+            provider_name=eff_provider, tier=eff_tier,
+            system_prompt=system_prompt,
+            messages=[{"role": "user", "content": user_input}],
+            tools=None, max_tokens=_CLOUD_MAX_TOKENS, timeout=_CLOUD_TIMEOUT_S,
+        )
+        if resp is None:
+            return None, "", 0.0
+        cost = _record_call_cost(engine, resp, eff_tier)
+        raw = resp.text or ""
+        try:
+            parsed = json.loads(raw or "{}")
+            if not isinstance(parsed, dict):
+                parsed = None
+        except (json.JSONDecodeError, TypeError):
+            parsed = None
+        return parsed, raw, cost
+    except Exception as exc:  # noqa: BLE001 — 生成失敗 fail-soft（不誤當成功）
+        logger.warning("ml_advisory hypothesize generate fail-soft → None: %s", exc)
+        return None, "", 0.0
+
+
+async def _check_novelty(
+    parsed_output: dict[str, Any], *, symbol: str | None
+) -> tuple[str, str | None]:
+    """novelty dedupe：假說 statement vs agent.lessons dead_mode（executor DB read，fail-soft）。
+
+    回 ("novel" | "duplicate", reason)。near-duplicate dead-mode 存在 → "duplicate"（math gate
+    verdict 會 DEFER reason duplicate_of_dead_failure_mode）。
+
+    為什麼在 executor 非 guard：guard 的 no-DB 不變量 load-bearing（純確定性）；novelty 需
+    retrieve_lessons 的 pg_trgm DB read。fail-soft：DB 不可用 / 撈不到 → 視為 "novel"（不阻斷；
+    novelty 是 nice-to-have dedupe，非安全閘——安全由 math gate + 0-exec-authority sink 兜底）。
+    """
+    hyps = parsed_output.get("feature_hypotheses")
+    if not isinstance(hyps, (list, tuple)) or not hyps:
+        return "novel", None
+    # 取第一個假說的 statement 當 dedupe hint（多假說時逐一檢可後續擴；此處 surgical 取首條）。
+    statement = ""
+    for h in hyps:
+        if isinstance(h, dict):
+            statement = str(h.get("statement", "")).strip()
+            if statement:
+                break
+    if not statement:
+        return "novel", None
+    try:
+        from . import layer2_critic as _critic  # noqa: PLC0415 — 避免 import cycle
+
+        sym = (symbol or "").strip() or _SINK_SYMBOL_PLACEHOLDER
+        lessons = await _critic.retrieve_lessons(sym, statement, lesson_type="dead_mode")
+        if lessons:
+            # 撈到 dead_mode near-duplicate → duplicate（pg_trgm 相似度已過門檻）。
+            return "duplicate", f"matched_{len(lessons)}_dead_mode_lessons"
+        return "novel", None
+    except Exception as exc:  # noqa: BLE001 — novelty 是 nice-to-have，fail-soft 視為 novel
+        logger.warning("ml_advisory novelty check fail-soft → novel: %s", exc)
+        return "novel", None
+
+
+def _run_math_gate(
+    parsed_output: dict[str, Any], context: dict[str, Any], *, novelty: str
+) -> dict[str, Any]:
+    """確定性 math gate（§A.5 stage order：Q1→DSR→PBO→B1→leak）。唯一 alpha validator。
+
+    回 {"verdict": pass|DEFER|fail, "stage_verdicts": {stage:verdict}, "reasons": [...]}。
+
+    ★ 本函數內 0 LLM-invocation（CC/E2/MIT grep target）——全是確定性數學閘。candidate returns
+      + 因子資料由 context 提供（pipeline 抽取，非 model-authored）；缺資料 → 對應 stage DEFER。
+
+    stage order（§A.5；short-circuit on first DEFER/fail for cost+correctness）：
+      STEP0 Q1：N_trades_oos ≥ 50 else DEFER（最便宜，gate everything）。
+      STEP1 DSR(K)：dsr_gate.compute_dsr(min_observations=50)。
+      STEP2 PBO：single-config → HONEST-DEFER（承 2026-06-08 Gap-A：捏造 peer 是 theater）。
+      STEP3 B1 beta-neutral：beta_neutral_check（pooled β + down-leg）。← P3b 新增。
+      STEP4 leak precondition：shift1_compliance AND/OR is_oos_gap leak_free=True else DEFER。
+      → overall = strictest of {STEP0..STEP4}：any fail → fail；else any DEFER → DEFER；else pass。
+    """
+    stage_verdicts: dict[str, str] = {}
+    reasons: list[str] = []
+
+    # novelty duplicate → DEFER（dead_failure_mode 重複；§E.4(c)）。
+    if novelty == "duplicate":
+        reasons.append("duplicate_of_dead_failure_mode")
+        stage_verdicts["novelty"] = "DEFER"
+
+    cand = context.get("candidate_returns")
+    gate_inputs = context.get("math_gate_inputs") or {}
+
+    # ── STEP0 — Q1：N_trades_oos ≥ 50 else DEFER ──
+    n_trades_oos = gate_inputs.get("n_trades_oos")
+    if n_trades_oos is None or int(n_trades_oos) < _Q1_MIN_TRADES_OOS:
+        reasons.append("q1_trades_oos_below_50")
+        stage_verdicts["q1"] = "DEFER"
+    else:
+        stage_verdicts["q1"] = "pass"
+
+    # ── STEP1 — DSR(K)：compute_dsr(min_observations=50) ──
+    observed_sharpe = gate_inputs.get("observed_sharpe")
+    n_trials = gate_inputs.get("n_trials")
+    if observed_sharpe is None or n_trials is None or n_trades_oos is None:
+        reasons.append("dsr_inputs_missing")
+        stage_verdicts["dsr"] = "DEFER"
+    else:
+        dsr_v = _run_dsr_stage(float(observed_sharpe), int(n_trials), int(n_trades_oos))
+        stage_verdicts["dsr"] = dsr_v["verdict"]
+        reasons.extend(dsr_v["reasons"])
+
+    # ── STEP2 — PBO：single-config → HONEST-DEFER（不捏造 peer；承 Gap-A ruling）──
+    cpcv_returns = gate_inputs.get("cpcv_oos_returns_per_split")
+    if not cpcv_returns or len(cpcv_returns) < 2:
+        reasons.append("pbo_single_config_honest_defer")
+        stage_verdicts["pbo"] = "DEFER"
+    else:
+        pbo_v = _run_pbo_stage(cpcv_returns)
+        stage_verdicts["pbo"] = pbo_v["verdict"]
+        reasons.extend(pbo_v["reasons"])
+
+    # ── STEP3 — B1 beta-neutral（P3b；pooled β + down-leg；唯一驗「down-beta 偽裝 alpha」）──
+    b1_v = _run_b1_stage(cand, gate_inputs)
+    stage_verdicts["beta_neutral"] = b1_v["verdict"]
+    reasons.extend(b1_v["reasons"])
+
+    # ── STEP4 — leak precondition：shift1_compliance AND/OR is_oos_gap leak_free=True else DEFER ──
+    leak_v = _run_leak_stage(gate_inputs)
+    stage_verdicts["leak"] = leak_v["verdict"]
+    reasons.extend(leak_v["reasons"])
+
+    # overall = strictest-wins：any fail → fail；else any DEFER → DEFER；else pass。
+    verdict = _strictest_math_verdict(stage_verdicts.values())
+    return {
+        "verdict": verdict,
+        "stage_verdicts": stage_verdicts,
+        "reasons": _dedupe_reasons(reasons),
+    }
+
+
+def _run_dsr_stage(observed_sharpe: float, n_trials: int, n_trades_oos: int) -> dict[str, Any]:
+    """DSR stage：compute_dsr(min_observations=50) → insufficient → DEFER；else pass/fail。"""
+    try:
+        from program_code.learning_engine.dsr_gate import compute_dsr  # noqa: PLC0415
+    except ImportError:  # pragma: no cover — dual-path fallback
+        from learning_engine.dsr_gate import compute_dsr  # type: ignore  # noqa: PLC0415
+    try:
+        res = compute_dsr(
+            observed_sharpe=observed_sharpe, n_trials=max(1, n_trials),
+            n_observations=max(2, n_trades_oos), min_observations=_Q1_MIN_TRADES_OOS,
+        )
+    except (ValueError, Exception) as exc:  # noqa: BLE001 — 退化輸入 → DEFER（不 crash）
+        logger.warning("math gate DSR stage fail-soft → DEFER: %s", exc)
+        return {"verdict": "DEFER", "reasons": ["dsr_compute_error"]}
+    if res.insufficient_observations:
+        return {"verdict": "DEFER", "reasons": ["dsr_insufficient_observations"]}
+    if res.passes_threshold:
+        return {"verdict": "pass", "reasons": []}
+    return {"verdict": "fail", "reasons": ["dsr_below_threshold"]}
+
+
+def _run_pbo_stage(cpcv_returns: Any) -> dict[str, Any]:
+    """PBO stage：genuine CPCV peers 存在時跑 pbo_gate；否則上游已 DEFER（此處只處理有 peer 情況）。"""
+    try:
+        from program_code.learning_engine.pbo_gate import compute_pbo  # noqa: PLC0415
+    except ImportError:  # pragma: no cover — dual-path fallback
+        from learning_engine.pbo_gate import compute_pbo  # type: ignore  # noqa: PLC0415
+    import numpy as _np  # noqa: PLC0415
+    try:
+        arrays = [_np.asarray(s, dtype=_np.float64) for s in cpcv_returns]
+        res = compute_pbo(arrays)
+    except (ValueError, Exception) as exc:  # noqa: BLE001 — 退化 → DEFER
+        logger.warning("math gate PBO stage fail-soft → DEFER: %s", exc)
+        return {"verdict": "DEFER", "reasons": ["pbo_compute_error"]}
+    if res.insufficient_power:
+        return {"verdict": "DEFER", "reasons": ["pbo_insufficient_power"]}
+    if res.passes_threshold:
+        return {"verdict": "pass", "reasons": []}
+    return {"verdict": "fail", "reasons": ["pbo_above_threshold"]}
+
+
+def _run_b1_stage(cand: Any, gate_inputs: dict[str, Any]) -> dict[str, Any]:
+    """B1 stage：beta_neutral_check（pooled β + down-leg）。verdict map pass/fail/DEFER。
+
+    為什麼 cand/因子缺 → DEFER：無候選報酬或因子序列無法估 β（保守，不偽裝中性）。altcap 缺
+    → beta_neutral_check 內部 DEFER（雙因子強制）。
+    """
+    try:
+        from program_code.learning_engine.beta_neutral_check import beta_neutral_check  # noqa: PLC0415
+    except ImportError:  # pragma: no cover — dual-path fallback
+        from learning_engine.beta_neutral_check import beta_neutral_check  # type: ignore  # noqa: PLC0415
+    btc = gate_inputs.get("btc_returns")
+    altcap = gate_inputs.get("altcap_returns")  # None ⇒ B1 內部 DEFER（雙因子強制）
+    down_mask = gate_inputs.get("down_market_mask")
+    n_trades_oos = gate_inputs.get("n_trades_oos")
+    if cand is None or btc is None:
+        # 候選/BTC 因子缺 → B1 無法估 → DEFER（保守 fail-closed）。
+        return {"verdict": "DEFER", "reasons": ["b1_inputs_missing_defer"]}
+    try:
+        res = beta_neutral_check(
+            cand, btc, altcap, down_mask,
+            bar=str(gate_inputs.get("bar", "daily")),
+            n_trades_oos=int(n_trades_oos) if n_trades_oos is not None else None,
+        )
+    except Exception as exc:  # noqa: BLE001 — B1 退化 → DEFER（不 crash cascade）
+        logger.warning("math gate B1 stage fail-soft → DEFER: %s", exc)
+        return {"verdict": "DEFER", "reasons": ["b1_compute_error"]}
+    # B1 verdict ∈ {pass, fail, DEFER}（已 strictest-wins）；reasons 前綴 b1_ 便於 D3 區分。
+    return {"verdict": res.verdict, "reasons": [f"b1_{r}" for r in res.reasons]}
+
+
+def _run_leak_stage(gate_inputs: dict[str, Any]) -> dict[str, Any]:
+    """leak precondition：shift1_compliance AND/OR is_oos_gap leak_free=True else DEFER。
+
+    為什麼 name_pattern_check 不夠：M3 鐵律——只有 shift1_compliance / is_oos_gap 能撐 leak-free
+    PIT 斷言。兩 producer 任一 leak_free=True 即過；皆缺/皆 False → DEFER（無 producer ⇒ 無
+    leak-free 斷言 ⇒ 無 promotion）。
+    """
+    shift1 = gate_inputs.get("shift1_compliance_leak_free")
+    is_oos = gate_inputs.get("is_oos_gap_leak_free")
+    if shift1 is True or is_oos is True:
+        return {"verdict": "pass", "reasons": []}
+    # 任一 producer 明確 leak（False，非 None）→ fail（結構性 leak）。
+    if shift1 is False or is_oos is False:
+        return {"verdict": "fail", "reasons": ["leak_producer_reports_leak"]}
+    # 皆缺（None）→ DEFER（leak precondition unmet；no producer ⇒ no leak-free claim）。
+    return {"verdict": "DEFER", "reasons": ["leak_precondition_unmet_no_producer"]}
+
+
+# math gate stage verdict 字面（strictest-wins）。
+def _strictest_math_verdict(verdicts: Any) -> str:
+    """strictest-wins：any 'fail' → fail；else any 'DEFER' → DEFER；else pass。"""
+    vs = list(verdicts)
+    if any(v == "fail" for v in vs):
+        return "fail"
+    if any(v == "DEFER" for v in vs):
+        return "DEFER"
+    return "pass"
+
+
+def _dedupe_reasons(reasons: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for r in reasons:
+        if r in seen:
+            continue
+        seen.add(r)
+        out.append(r)
+    return out
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
