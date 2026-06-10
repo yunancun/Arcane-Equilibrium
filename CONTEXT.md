@@ -82,9 +82,19 @@ _Avoid_: "S4 bull alpha", "exchange prediction", "regime oracle".
 News, X, Reddit, market-commentary, and event-summary inputs used only to annotate context or explain event risk. These feeds are inference/context, not primary strategy evidence, and cannot override quantitative gates.
 _Avoid_: "sentiment signal" when it implies promotion authority, "news alpha proof".
 
+**AEG (Alpha-Edge Evidence Program)**:
+The post-pivot mainline (2026-05-31, ADR-0047 + AMD-2026-05-31-01) replacing the v5.8 autonomy sprint sequencing: AEG-S0 contracts → AEG-S1 foundation (V125 alpha storage + backfill) → AEG-S2 evidence automation (regime runner / breadth ladder / robustness matrix) → AEG-S3 alpha research (≤4 candidates in parallel) → AEG-S4 decision (CP-2). SSOT: `TODO.md` §2 + `docs/execution_plan/2026-05-31--alpha_edge_research_execution_plan.md`.
+_Avoid_: "Sprint 1A-x" (superseded sequencing), "alpha sprint" (loses the evidence-governance contract), bare "S1/S2" without the AEG- prefix (collides with the S1-Sx research-track labels in ADR-0047).
+
+**Gate-B listing probe**:
+The isolated listing-capture probe (deployed `c1c017b0`, R-0 zero-leak) feeding the listing-fade candidate — currently the AEG-S3 main path. Probe output is capture evidence only; promotion still requires the full AEG robustness matrix.
+_Avoid_: "listing collector" (production collector IMPL is gated separately), treating probe capture as promotion evidence.
+
 ### Autonomy expansion taxonomy (v5.8)
 
 These 12 terms are added by v5.8 13-module autonomy expansion thesis (執行計畫 v5.8 + ADR-0034..0044 + AMD-2026-05-21-01). Every new prose discussing autonomy / health / decay / replay / A/B / scope governance must use these names exactly — do not collapse them into "tier," "gate," "stage," "level," or generic "approval."
+
+> **2026-06-10 校準**：V5.8 alpha pivot（2026-05-31，AMD-2026-05-31-01 + ADR-0047）已凍結 M1/M2/M6/M8/M9 的 active-IMPL（M7 例外）；解凍 gate = 首個 net+ candidate 達 `stage0_ready`。本節 Sprint 1A-β/γ/δ/ε/ζ 分期隨之暫停——當前主線是 Alpha-Edge（AEG，見 TODO.md §2）。詞條定義保留：它們仍是 ADR-0034..0044 的權威詞彙，供歷史文檔閱讀與解凍後使用。
 
 **LAL (Layered Approval Lease)**:
 The five-level approval depth ladder layered onto Decision Lease — LAL 0 (per-fill, always autonomous via existing Guardian) / LAL 1 (intra-strategy reparam, auto after Stage 4 + 30d stable) / LAL 2 (cross-strategy reweight, Advisory Y1 / Auto Y2 with gate) / LAL 3 (new strategy promotion, always operator approval) / LAL 4 (capital structure / venue change, always operator approval). LAL 0-4 是 M1 Decision Lease 的 approval depth 維度，與 AMD-2026-05-15-01 Stage 0R-4 是兩個正交維度，per ADR-0034 + D2 改名（v5.7 之前稱「Lease Tier 0-4」已棄用）。
@@ -502,7 +512,7 @@ Mac is read/write/RCA only; Engine + Python + Postgres run only on the Linux tra
 The deploy command that rebuilds engine binary + PyO3 in one step (post 2026-04-14 semantics).
 
 **18 Live blockers**:
-The Operator-tracked panorama of remaining gaps before true Live trading (currently 13 unresolved; #5 Decision Lease just closed).
+The Operator-tracked panorama of remaining gaps before true Live trading — a historical PM construct from the 2026-04/05 era. Current open blockers live in `TODO.md` §1 (P0 queue); do not cite the original "18 / N unresolved" counts in new prose.
 
 ## Relationships
 
@@ -526,7 +536,7 @@ The Operator-tracked panorama of remaining gaps before true Live trading (curren
 - **`engine_mode='live'` historical 43k rows are actually LiveDemo** — resolved: ML filters now use `engine_mode IN ('live','live_demo')`; new INSERTs write `'live_demo'` for the LiveDemo pipeline.
 - **"Engine" can mean the Rust process OR the whole Python+Rust stack** — resolved: in this codebase, "engine" without qualification = the Rust `openclaw_engine` binary; the Python side is "Bridge" or "Control API." Note "Dream Engine" is a separate subsystem.
 - **"Demo" means the engine_mode OR the Bybit endpoint** — resolved: `demo` (lowercase) = engine_mode; "Bybit demo endpoint" = the API target. **LiveDemo** always means "Live pipeline → Bybit demo endpoint."
-- **Decision Lease deployment status** — Path A retrofit IMPL landed (commit `dbcf845b`). As of W-C, Linux `trade-core` runs `OPENCLAW_LEASE_ROUTER_GATE_ENABLED=1` only for shadow Agent Spine evidence collection; this does not grant true-live auth, Executor order authority, MAG-083, or MAG-084.
+- **Decision Lease deployment status** — Path A retrofit IMPL landed (commit `dbcf845b`); the router gate flag remains shadow/evidence semantics only (no true-live auth, no Executor order authority, no MAG-083/084). 2026-06 校準：SM end-state 已定為 Option 2（Rust 唯一權威，P5-SM）；step-i Rust (`a99bfa1d`) + E1b comparator (`e6aa5e37`) 完成，soak gate 因監測重設計暫停（2026-06-03 發現 Python shadow-hub 無 organic 流量時「0 divergence」屬空轉偽 pass），現狀以 `TODO.md` §0/§5 為準。
 - **`replay.simulated_fills.evidence_source_tier='synthetic_replay'`** looks usable but is explicitly non-training data. Always filter `IN ('calibrated_replay','counterfactual_replay')` before feeding MLDE / Dream / attribution.
 - **5-Agent runtime set (Scout / Strategist / Guardian / Analyst / Executor) vs 18-Agent dev role tiers (PM / FA / PA / CC / E1 / E2 …)** — different vocabularies. The 5-Agent set is a runtime trading construct (DOC-01); the 18 are dev workflow personas living under `.claude/agents/`.
 - **`OPENCLAW_BASE_DIR` vs `OPENCLAW_SRV_ROOT`** — `SRV_ROOT` is a legacy alias; new code must use `OPENCLAW_BASE_DIR`. They do not fall back to each other; Mac dev must export both to the same value.
