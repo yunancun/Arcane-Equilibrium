@@ -477,6 +477,47 @@ def pytest_configure(config):
         "e2e: true end-to-end tests against external services / real network "
         "(subset of slow; deselect with '-m \"not e2e\"')",
     )
+    config.addinivalue_line(
+        "markers",
+        "real_db: 顯式允許本測試經 app.db_pool 觸真 PG（scratch/parity 驗證用）。"
+        "未標記的測試由全域隔離夾具把連線池降級為 None（等價 Mac 無 PG 行為）。",
+    )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# 全域 prod-DB 隔離鐵閘（P0，2026-06-10）
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# 事故：test_l2_p3b_hypothesize 的 sink 測試漏 mock lessons 的 DB 連線——Mac 無 PG
+# 時業務層 fail-soft 吞錯假綠，但在連得上 prod PG 的環境（Linux E4 parity / deploy
+# re-test）每輪把 3 條 fixture 假資料寫進 prod agent.lessons（7 輪 21 rows，污染 M4
+# novelty 語料，已清）。危險模式 = 「測試本身永遠 pass，污染只在特定環境發生」。
+#
+# 防護設計（為什麼攔池層而非 get_pg_conn/get_conn 函數層）：
+#   1. 8+ 個 app 模組是 `from .db_pool import get_pg_conn` 直接綁定——patch 模組屬性
+#      攔不到已綁定的引用；而所有入口（get_conn / get_pg_conn / 直接綁定版）殊途同歸
+#      到 `_pool` 全域與 `_init_pool()` 漏斗，攔池層 = 全覆蓋。
+#   2. 行為等價於 Mac「無 psycopg2 / 連不上」的既有 graceful degradation（conn=None）：
+#      凡在 Mac 綠的測試都不依賴真 DB，故本夾具讓 Linux 行為趨同 Mac，理論零回歸
+#      （E4 全量基線驗證把關）。不選 raise：fail-soft 業務層本就吞例外，raise 不增加
+#      訊號，反而讓「驗 DB-不可用分支」的既有測試行為分岔。
+#   3. 與 per-test mock 相容：測試自帶的 monkeypatch.setattr(db_pool, "get_pg_conn",…)
+#      / patch("app.xxx.db_pool") 在更外層生效，根本不進池層；本夾具只是兜底。
+#   4. opt-in 雙軌：經 db_pool 的真 DB 測試標 @pytest.mark.real_db；繞過 db_pool 的
+#      psycopg2 直連測試沿用既有 `OPENCLAW_TEST_DSN` unset→skip 慣例（tests/replay 3 檔
+#      已是此模式 + SAVEPOINT/rollback 紀律，本夾具不涉）。
+@pytest.fixture(autouse=True)
+def _global_prod_db_isolation(request, monkeypatch):
+    """未標 real_db 的測試：把 app.db_pool 連線池降級為 None（等價 Mac 無 PG）。"""
+    if request.node.get_closest_marker("real_db"):
+        yield
+        return
+    import app.db_pool as _dbp  # noqa: PLC0415 — conftest 內延遲 import，避免收集期副作用
+
+    monkeypatch.setattr(_dbp, "_pool", None)
+    monkeypatch.setattr(_dbp, "_pool_init_attempted", True)  # get_conn 短路，不再嘗試 init
+    monkeypatch.setattr(_dbp, "_init_pool", lambda: None)  # 三重保險：即使被顯式呼叫也 no-op
+    yield
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
