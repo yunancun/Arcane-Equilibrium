@@ -506,17 +506,55 @@ def pytest_configure(config):
 #   4. opt-in 雙軌：經 db_pool 的真 DB 測試標 @pytest.mark.real_db；繞過 db_pool 的
 #      psycopg2 直連測試沿用既有 `OPENCLAW_TEST_DSN` unset→skip 慣例（tests/replay 3 檔
 #      已是此模式 + SAVEPOINT/rollback 紀律，本夾具不涉）。
-@pytest.fixture(autouse=True)
-def _global_prod_db_isolation(request, monkeypatch):
-    """未標 real_db 的測試：把 app.db_pool 連線池降級為 None（等價 Mac 無 PG）。"""
-    if request.node.get_closest_marker("real_db"):
-        yield
-        return
-    import app.db_pool as _dbp  # noqa: PLC0415 — conftest 內延遲 import，避免收集期副作用
+#
+# v2 升級（E2 對抗 probe 抓到的真繞過面，2026-06-10）：v1 是 per-test autouse fixture，
+# 只在「測試窗內」生效——E2 以 psycopg2.connect hook 實測抓到 grafana_data_writer 的
+# daemon thread 在 <outside-test-window>（collection / teardown 間隙）走
+# get_conn→_init_pool→ThreadedConnectionPool.__init__ 真連線：常駐 thread 一旦在某測試
+# 中被 singleton 啟動，其 _loop 跨測試生命週期持續跑，fixture teardown 恢復 patch 後
+# 下一輪 _write_snapshot 即落在無保護窗口。修法 = **進程級封鎖**：conftest import 期
+# （早於 collection、覆蓋全進程生命週期含任何 thread）直接覆寫 _init_pool 並清池；
+# real_db 測試由 fixture 臨時恢復真 init、teardown 時 closeall + 重新封鎖。
+import app.db_pool as _dbp_for_guard  # db_pool import 輕（psycopg2 延遲在 _init_pool 內），收集期零副作用
 
-    monkeypatch.setattr(_dbp, "_pool", None)
-    monkeypatch.setattr(_dbp, "_pool_init_attempted", True)  # get_conn 短路，不再嘗試 init
-    monkeypatch.setattr(_dbp, "_init_pool", lambda: None)  # 三重保險：即使被顯式呼叫也 no-op
+_REAL_INIT_POOL = _dbp_for_guard._init_pool  # real_db opt-in 臨時恢復用
+
+
+def _blocked_init_pool() -> None:
+    """進程級封鎖版 _init_pool：永不建池（等價 Mac 無 PG；daemon thread 亦攔）。"""
+    return None
+
+
+_dbp_for_guard._init_pool = _blocked_init_pool
+_dbp_for_guard._pool = None
+_dbp_for_guard._pool_init_attempted = True
+
+
+@pytest.fixture(autouse=True)
+def _global_prod_db_isolation(request):
+    """real_db 測試：臨時恢復真池層；其餘測試靠上方進程級封鎖（本夾具 no-op 兜底重申）。"""
+    import app.db_pool as _dbp  # noqa: PLC0415
+
+    if request.node.get_closest_marker("real_db"):
+        _dbp._init_pool = _REAL_INIT_POOL
+        _dbp._pool_init_attempted = False
+        try:
+            yield
+        finally:
+            pool = _dbp._pool
+            if pool is not None:
+                try:
+                    pool.closeall()
+                except Exception:  # noqa: BLE001 — teardown 盡力而為
+                    pass
+            _dbp._init_pool = _blocked_init_pool
+            _dbp._pool = None
+            _dbp._pool_init_attempted = True
+        return
+    # 非 opt-in：重申封鎖態（防前一個 real_db 測試異常中斷殘留），不依賴 monkeypatch 時序。
+    _dbp._init_pool = _blocked_init_pool
+    _dbp._pool = None
+    _dbp._pool_init_attempted = True
     yield
 
 
