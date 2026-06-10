@@ -194,6 +194,22 @@ def _mock_ledger(monkeypatch):
     return writer
 
 
+@pytest.fixture(autouse=True)
+def _no_real_db(monkeypatch):
+    """防 prod 污染鐵閘（P0，2026-06-10）：本檔 sink 測試曾只 mock ledger、漏 mock lessons
+    的 DB 連線——Mac 無 PG 時 fail-soft 吞錯假綠，但在連得上真 PG 的環境（Linux E4 parity /
+    deploy re-test）每輪把 3 條 fixture 假資料寫進 prod agent.lessons（7 輪共 21 rows，污染
+    M4 novelty/dead-modes 語料，已清）。教訓：「mock 不掩蓋邏輯」的對偶是「連線層必隔離」。
+
+    此 autouse 把 executor 模組引用的 db_pool.get_pg_conn 換成 MagicMock：content 構造 /
+    redact / INSERT 參數綁定全真實走（邏輯不被掩蓋），只攔真連線。需要斷言 INSERT 參數的
+    測試請顯式注入 conn_provider（write_ml_advisory_advisory_sink 參數，優先於本 fixture）。
+    """
+    fake_conn_cm = MagicMock()  # MagicMock 自帶 __enter__/__exit__，with provider() as conn 可用
+    monkeypatch.setattr(EXEC.db_pool, "get_pg_conn", lambda: fake_conn_cm)
+    return fake_conn_cm
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # §G.2 cascade order + math gate 整合
 # ═══════════════════════════════════════════════════════════════════════════════
