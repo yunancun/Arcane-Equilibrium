@@ -232,6 +232,27 @@ SOAK_CANARY_STALL_SAFETY_FACTOR: float = 0.5
 # 的 soak（此時窗條件本來就 FAIL，停擺軸不需要搶答）。
 SOAK_STALL_CHECK_MIN_WINDOW_SECONDS: int = 1800
 
+# ── canary 連續性 heartbeat 斷言（E2 HIGH-2 修復，2026-06-10）──
+# flusher 端每 1800s（governance_divergence_flush._HEARTBEAT_INTERVAL_S，與 30min
+# epoch 間隙容忍對齊；cron-side 不 import API app 模組，兩端鏡像常數 + 注釋互指）
+# 寫一條 canary_heartbeat 事件攜 attempts 快照。本組常數定義 `[82]` 對它的斷言。
+
+# 窗達此長度即要求至少一條 heartbeat（秒）。算術 = 2× heartbeat 週期：錨點重置後
+# 下一條 heartbeat 最遲 1800s 到 + 一輪 insert 失敗重試裕度；窗更短時 heartbeat
+# 可能合法尚未出現（不誤殺剛重置的窗）。
+SOAK_HEARTBEAT_REQUIRED_MIN_WINDOW_SECONDS: int = 3600
+
+# 最近一條 heartbeat 距今上限（秒）。算術 = heartbeat 週期 1800s + 最大可容忍
+# epoch 間隙 1800s（restart 期間 flusher 不在跑）。超過 = heartbeat 證據鏈本身
+# 中途停擺（事件寫入路徑死），之後的 canary 死亡將再度不可見 → fail-closed FAIL。
+SOAK_HEARTBEAT_STALE_MAX_SECONDS: int = 3600
+
+# heartbeat → 當前 V129 快照的增長寬限（秒）。算術 = 2× 退頻 cadence 上限
+# （SOAK_CANARY_STALL_FLOOR_INTERVAL_SECONDS=300）：600s 內必有 ≥1 拍；最後一條
+# heartbeat 距今超過此值才斷言當前 attempts 嚴格大於該 heartbeat 快照（低於寬限
+# 不斷言，避免「heartbeat 剛寫完就跑 check」的合法零增長被誤殺）。
+SOAK_HEARTBEAT_SNAPSHOT_GROWTH_GRACE_SECONDS: int = 600
+
 
 def _parse_event_detail(raw: Any) -> dict:
     """事件 detail 欄容錯解析：psycopg2 jsonb 自動回 dict；mock/text 回 str。"""
@@ -246,6 +267,88 @@ def _parse_event_detail(raw: Any) -> dict:
         except Exception:  # noqa: BLE001 — detail 畸形不致命（fail-closed 由 caller 軸處理）
             return {}
     return {}
+
+
+def _heartbeat_continuity_failure(
+    in_window: list,
+    canary_attempts_now: int,
+    last_rollover_ts: int,
+    now_epoch: int,
+    window_seconds: int,
+) -> str | None:
+    """canary 連續性 heartbeat 斷言（E2 HIGH-2 修復）；違反回 FAIL 訊息，滿足回 None。
+
+    為什麼需要本支路：累計停擺下限（步驟 10）在 canary 攢夠 floor 後死亡時不咬
+    （E2 Probe D：17h 攢 510 拍後 31h 全黑——flusher 照常保 V129 fresh、停擺不產生
+    失敗、窗照走 → 全軸不咬假 PASS）。flusher 每 30min 寫一條 canary_heartbeat
+    （攜 attempts 快照），本函數對它斷言四件事（任一不滿足 = canary 在窗內某段
+    死亡/停擺，或連續性證據不可證 → fail-closed FAIL）：
+      (i)   窗 ≥1h 必須有 heartbeat（證據鏈存在；缺 = 事件路徑死或部署不含本機制）。
+      (ii)  最近一條 heartbeat 距今 ≤1h（證據鏈沒有中途停擺——否則停擺後的 canary
+            死亡又會不可見，HIGH-2 換個位置復發）。
+      (iii) 同 epoch 相鄰 heartbeat 之間 attempts 嚴格增長（30min ≥6 拍裕度；
+            epoch_rollover 重置比較基線——計數器跨 restart 歸零是合法回落）。
+      (iv)  最後一條 heartbeat（屬本 epoch、距今超過 600s 寬限）→ 當前 V129
+            attempts 嚴格增長（抓「最後一條 heartbeat 之後才死」的尾段）。
+    """
+    hb_events = [ev for ev in in_window if ev["type"] == "canary_heartbeat"]
+    if not hb_events:
+        if window_seconds >= SOAK_HEARTBEAT_REQUIRED_MIN_WINDOW_SECONDS:
+            return (
+                f"[82] canary continuity unprovable: 0 canary_heartbeat events in "
+                f"window={window_seconds / 3600.0:.1f}h（≥"
+                f"{SOAK_HEARTBEAT_REQUIRED_MIN_WINDOW_SECONDS}s 即應有）— heartbeat "
+                f"證據鏈缺失，canary 中段死亡將不可見"
+            )
+        return None  # 窗太短，heartbeat 合法尚未出現（其他軸照常把關）
+
+    # (ii) 新鮮度：in_window 為 ASC，尾元素即最新一條。
+    newest = hb_events[-1]
+    newest_age = now_epoch - newest["ts"]
+    if newest_age > SOAK_HEARTBEAT_STALE_MAX_SECONDS:
+        return (
+            f"[82] canary continuity broken: newest canary_heartbeat age={newest_age}s "
+            f"> {SOAK_HEARTBEAT_STALE_MAX_SECONDS}s — heartbeat 證據鏈中途停擺，"
+            f"之後的 canary 死亡不可見（fail-closed）"
+        )
+
+    # (iii) 同 epoch 相鄰 heartbeat 嚴格增長（epoch_rollover 重置基線）。
+    baseline: int | None = None
+    for ev in in_window:
+        if ev["type"] == "epoch_rollover":
+            baseline = None  # 跨 epoch 計數器歸零，合法回落，不比較
+            continue
+        if ev["type"] != "canary_heartbeat":
+            continue
+        hb_attempts = ev["canary_attempts"]
+        if hb_attempts is None:
+            return (
+                f"[82] canary continuity unprovable: canary_heartbeat at "
+                f"epoch_s={ev['ts']} carries no attempts snapshot — 增長不可證"
+                f"（fail-closed）"
+            )
+        if baseline is not None and int(hb_attempts) <= int(baseline):
+            return (
+                f"[82] canary dead/stalled mid-window: attempts did not grow between "
+                f"adjacent heartbeats（{baseline} -> {hb_attempts} at "
+                f"epoch_s={ev['ts']}）— probe 在窗內某段未累積"
+            )
+        baseline = int(hb_attempts)
+
+    # (iv) 最後一條 heartbeat → 當前快照（僅當 heartbeat 屬本 epoch 且超過寬限）。
+    if (
+        newest["ts"] > last_rollover_ts
+        and newest["canary_attempts"] is not None
+        and newest_age >= SOAK_HEARTBEAT_SNAPSHOT_GROWTH_GRACE_SECONDS
+        and canary_attempts_now <= int(newest["canary_attempts"])
+    ):
+        return (
+            f"[82] canary dead/stalled at window tail: current attempts="
+            f"{canary_attempts_now} <= last heartbeat snapshot="
+            f"{newest['canary_attempts']}（{newest_age}s 前，寬限 "
+            f"{SOAK_HEARTBEAT_SNAPSHOT_GROWTH_GRACE_SECONDS}s 已過）— probe 未再累積"
+        )
+    return None
 
 
 def check_82_lease_ipc_soak_window(cur: Any) -> tuple[str, str]:
@@ -265,12 +368,16 @@ def check_82_lease_ipc_soak_window(cur: Any) -> tuple[str, str]:
       - **S3 FAIL 軸**：窗 <48h / 累計 probe <500 / 成功率 <99% / 窗內有
         canary_fail_streak（≥15min 連段）事件。
       - **基建死 FAIL 軸**：active 但 V137 缺 / canary row 缺 / canary snapshot
-        stale（flusher 死）/ 累計 attempts 低於停擺下限（canary 死）/ 帳本空。
+        stale（flusher 死）/ 累計 attempts 低於停擺下限（canary 死，粗粒度）/
+        heartbeat 連續性違反（canary 中段死亡/停擺或證據鏈斷，細粒度，E2 HIGH-2）/
+        帳本空。
 
     計數歸屬誠實聲明：counter 是 epoch 粒度——錨點若切在 epoch 中段，該 epoch 的
     全量計數仍計入（對成功率是保守方向：舊失敗仍拉低比率；對 probe floor 是輕微
     寬鬆方向，但 binding 條件是 48h 窗 + 99% 率，500 floor 在 120s cadence 下
-    trivially-met，PM 定案已明示）。
+    trivially-met，PM 定案已明示）。跨 epoch 求和對 epoch_rollover 以底層 V129
+    快照識別去重（E2 HIGH-1：crash-loop 的重複 rollover 攜同一未刷新終值，只計
+    一次，防成功率稀釋假綠）。
 
     Returns:
         ``(status, msg)``；FAIL 標明第一個未過的條件 + 數字；PASS 附全量數字。
@@ -446,6 +553,11 @@ def check_82_lease_ipc_soak_window(cur: Any) -> tuple[str, str]:
     window_hours = window_seconds / 3600.0
 
     # ── 8. 窗內事件 FAIL 軸（第二遍：嚴格在錨點之後）──
+    # 邊界歸屬語義（E2 LOW-2，裁決=文檔化不改碼）：嚴格 `>` 讓「與錨點同 epoch 秒」
+    # 的事件歸屬前一（已作廢）窗。同批 INSERT 共享 PG now()（單 transaction）時，
+    # anchor-reset 事件與 FAIL-worthy 事件同秒落帳 → 後者被排除；但 prod 觸發需
+    # in-process flag 翻轉（env 進程內不可變）基本不可達，且 anchor reset 本身已
+    # fail-closed 作廢舊窗——被排除事件歸屬舊窗、少算窗證據，皆為保守方向。
     in_window = [ev for ev in events if ev["ts"] > anchor]
     for ev in in_window:
         if ev["type"] == "counter_regression":
@@ -466,11 +578,29 @@ def check_82_lease_ipc_soak_window(cur: Any) -> tuple[str, str]:
     cum_attempts = canary_snap[0]
     cum_ok = canary_snap[1]
     last_rollover_ts = anchor
+    # E2 HIGH-1 修復：crash-loop（epoch 存活 <30s，死於首次 flush 前）讓連續多個
+    # epoch_rollover 重讀同一份**未刷新**的 V129 快照 → 攜帶完全相同的 prev 終值。
+    # 不去重會把同一底層快照疊加 k 次，稀釋失敗率成假綠（E2 Probe A：30 個 dup
+    # rollover 把 94.8% 真實帳稀釋成 99.21% PASS），probe floor 同被虛增。
+    # 去重 key = (detail.prev_canary_updated_at_epoch_s, prev_attempts, prev_ok)：
+    # updated_at 識別底層 V129 快照版本（epoch 內有 flush 必前移），prev 計數雙重
+    # 保險（同秒雙 flush 的理論邊界）。同一快照只計一次；方向保守（只會少算）。
+    seen_prev_snapshots: set = set()
     for ev in in_window:
         if ev["type"] == "epoch_rollover":
+            # 去重不影響 epoch 邊界本身：rollover 是真實 epoch 切換，
+            # last_rollover_ts 照常前移（本 epoch 的 regression 交叉偵測以它為界）。
+            last_rollover_ts = max(last_rollover_ts, ev["ts"])
+            prev_key = (
+                ev["detail"].get("prev_canary_updated_at_epoch_s"),
+                ev["canary_attempts"],
+                ev["canary_ok"],
+            )
+            if prev_key in seen_prev_snapshots:
+                continue
+            seen_prev_snapshots.add(prev_key)
             cum_attempts += ev["canary_attempts"] or 0
             cum_ok += ev["canary_ok"] or 0
-            last_rollover_ts = max(last_rollover_ts, ev["ts"])
     # 無狀態交叉偵測：本 epoch（最後一個 rollover 之後）任何事件快照的 attempts
     # 不得高於當前 V129 canary total（倒退而無對應 epoch_rollover = 記帳破洞）。
     epoch_snapshot_max = max(
@@ -490,7 +620,7 @@ def check_82_lease_ipc_soak_window(cur: Any) -> tuple[str, str]:
             f"{epoch_snapshot_max}（記帳完整性破洞）",
         )
 
-    # ── 10. canary 停擺（probe 數不增長）──
+    # ── 10. canary 停擺（probe 數不增長）——粗粒度累計下限 ──
     if window_seconds >= SOAK_STALL_CHECK_MIN_WINDOW_SECONDS:
         min_expected = int(
             (window_seconds / SOAK_CANARY_STALL_FLOOR_INTERVAL_SECONDS)
@@ -504,6 +634,16 @@ def check_82_lease_ipc_soak_window(cur: Any) -> tuple[str, str]:
                 f"{SOAK_CANARY_STALL_FLOOR_INTERVAL_SECONDS}s cadence × "
                 f"{SOAK_CANARY_STALL_SAFETY_FACTOR} 計）— probe 未在累積",
             )
+
+    # ── 10b. canary 連續性 heartbeat 斷言（E2 HIGH-2：細粒度補步驟 10 的縫隙）──
+    # 步驟 10 在 canary 攢夠 floor 後死亡時不咬（Probe D：17h 攢 510 拍後 31h 全黑
+    # 仍 PASS）；本支路以 flusher 低頻 heartbeat（30min 攜 attempts 快照）斷言窗內
+    # probe 持續增長。四子軸見 _heartbeat_continuity_failure docstring。
+    hb_failure = _heartbeat_continuity_failure(
+        in_window, canary_snap[0], last_rollover_ts, now_epoch, window_seconds,
+    )
+    if hb_failure is not None:
+        return ("FAIL", hb_failure)
 
     # ── 11. S3 gate 數字 ──
     if window_hours < SOAK_WINDOW_MIN_HOURS:
@@ -546,4 +686,7 @@ __all__ = [
     "SOAK_MIN_SUCCESS_RATE",
     "SOAK_EPOCH_GAP_MAX_SECONDS",
     "SOAK_CANARY_SNAPSHOT_STALE_SECONDS",
+    "SOAK_HEARTBEAT_REQUIRED_MIN_WINDOW_SECONDS",
+    "SOAK_HEARTBEAT_STALE_MAX_SECONDS",
+    "SOAK_HEARTBEAT_SNAPSHOT_GROWTH_GRACE_SECONDS",
 ]

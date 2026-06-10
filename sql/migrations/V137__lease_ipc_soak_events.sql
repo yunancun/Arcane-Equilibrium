@@ -34,11 +34,12 @@
 --
 -- 設計決策:
 --   【append-only 事件流，但非 hypertable】
---     低速表：soak 兩週 < ~100 row（epoch 邊界 + flag 變遷 + 罕見異常事件），無
---     chunk rotate / compression 需求。對比 V054 lease_transitions（高頻事件流 →
---     hypertable）。無 Timescale 依賴 → 在無 Timescale 的 PG 同樣可 apply。
+--     低速表：soak 兩週 ≈ ~700 row（epoch 邊界 + flag 變遷 + 罕見異常事件 +
+--     30min canary_heartbeat ≈ 672，E2 HIGH-2 修復後量級），無 chunk rotate /
+--     compression 需求。對比 V054 lease_transitions（高頻事件流 → hypertable）。
+--     無 Timescale 依賴 → 在無 Timescale 的 PG 同樣可 apply。
 --
---   【event_type 白名單 —— 比 PA §3.1 草案多 2 型（E1 最小安全偏差，報告已標註）】
+--   【event_type 白名單 —— 比 PA §3.1 草案多 3 型（E1 最小安全偏差，報告已標註）】
 --     PA 草案 4 型：flusher_start / epoch_rollover / flag_change / canary_leader_start。
 --     E1 增 2 型，理由 = 否則 S3/S4 兩個 gate 條件在 PG 結構性不可機器判定：
 --       - 'canary_fail_streak'：S3「無 ≥15min 失敗連段」—— V129 'canary' row 只有
@@ -48,6 +49,15 @@
 --       - 'counter_regression'：S4「0 次 counter regression 無對應 epoch_rollover」——
 --         flusher 程內觀測到計數器倒退（單調不變式破壞）時寫本事件留痕；`[82]` 另以
 --         「當前 row total < 本 epoch 內事件快照 max」做無狀態交叉偵測。
+--     E2 review 後再增 1 型（E2 HIGH-2 修復，2026-06-10；V137 尚未 apply，同檔改
+--     白名單免開 V138）：
+--       - 'canary_heartbeat'：canary 連續性證據——canary 累積 ≥ 停擺下限後死亡/
+--         長停擺時，flusher 照常 flush（V129 fresh）、停擺不產生失敗 → `[82]` 收口
+--         全軸不咬假 PASS（E2 Probe D：17h 攢 510 拍後 31h 全黑仍 PASS rate=1.0）。
+--         flusher 每 30min 寫一條攜 attempts 快照（prev_canary_*），`[82]` 斷言
+--         「同 epoch 相鄰 heartbeat 與 heartbeat→當前快照嚴格增長 + 新鮮度」。
+--         量級修正：heartbeat 48/day → 14d soak ≈ ~700 row（原估 <~100 row 不含
+--         heartbeat），仍為低速表，無 hypertable/retention 需求改變。
 --
 --   【prev_* 欄語義 = 「事件當下的計數器快照」】
 --     epoch_rollover：前一 epoch 的終值（被 UPSERT 覆寫前搶救，損失 ≤30s）。
@@ -84,7 +94,8 @@
 --   1. Guard A 對必要欄完整性（重跑 shape drift → RAISE）
 --   2. append-only：無 UPDATE/DELETE 路徑（writer 只 INSERT；retention 由 step-(iv)
 --      DROP 整表解決，毋需 per-row 清理）
---   3. CHECK：event_type 白名單 6 型（PA 4 型 + E1 偏差 2 型，理由見上）
+--   3. CHECK：event_type 白名單 7 型（PA 4 型 + E1 偏差 2 型 + E2 HIGH-2 修復
+--      1 型，理由見上）
 --   4. prev_* 全 NULL-able（事件本身的記錄不被計數讀取失敗阻斷）
 --   5. created_at DEFAULT now() = DB-side 權威（`[82]` 窗計算基準）
 --   6. 冪等：ADD CONSTRAINT 條件式探測 + index IF NOT EXISTS
@@ -185,7 +196,8 @@ BEGIN
             ADD CONSTRAINT chk_lease_ipc_soak_events_type
             CHECK (event_type IN (
                 'flusher_start', 'epoch_rollover', 'flag_change',
-                'canary_leader_start', 'canary_fail_streak', 'counter_regression'
+                'canary_leader_start', 'canary_fail_streak', 'counter_regression',
+                'canary_heartbeat'
             ));
         RAISE NOTICE 'V137: added CHECK chk_lease_ipc_soak_events_type (event_type whitelist)';
     ELSE
@@ -223,16 +235,19 @@ END $$;
 COMMENT ON TABLE learning.lease_ipc_soak_events IS
     'P5-SM-OPTION2 step-(i) soak 監測（第二輪重設計，V137）：append-only epoch/flag '
     '事件帳本。flusher leader 在 epoch 邊界（API 重啟，搶救前 epoch 計數終值）/ flag '
-    '變遷 / canary 失敗連段（≥15min）/ counter regression 時 INSERT 一筆。`[82]` '
-    'lease_ipc_soak_window healthcheck 讀本表 + V129 兩 row 重建連續有效 soak 窗'
-    '（S3/S4 gate）。低速（soak 兩週 < ~100 row）非 hypertable。writer 只 INSERT'
+    '變遷 / canary 失敗連段（≥15min）/ counter regression / 30min canary_heartbeat'
+    '（連續性證據，E2 HIGH-2）時 INSERT 一筆。`[82]` lease_ipc_soak_window '
+    'healthcheck 讀本表 + V129 兩 row 重建連續有效 soak 窗（S3/S4 gate）。'
+    '低速（soak 兩週 ≈ ~700 row，主體為 heartbeat）非 hypertable。writer 只 INSERT'
     '（append-only）；step-(iv) cleanup 連同 canary/flusher 擴充/`[82]`/V129 退役後 DROP。';
 COMMENT ON COLUMN learning.lease_ipc_soak_events.event_type IS
     '事件型白名單：flusher_start（flusher leader 啟動）/ epoch_rollover（API 重啟，'
     'prev_* 攜前一 epoch 計數終值 + detail 攜前 epoch 末次 flush 時間戳供間隙計算）/ '
     'flag_change（OPENCLAW_LEASE_PYTHON_IPC_ENABLED 變遷）/ canary_leader_start'
     '（canary 開始 probe）/ canary_fail_streak（失敗連段跨 15min，S3 連段證據）/ '
-    'counter_regression（程內計數器倒退，S4 記帳完整性證據）。';
+    'counter_regression（程內計數器倒退，S4 記帳完整性證據）/ canary_heartbeat'
+    '（30min 低頻連續性證據，prev_canary_* 攜當下 attempts 快照；`[82]` 斷言窗內 '
+    'probe 持續增長，E2 HIGH-2 修復）。';
 COMMENT ON COLUMN learning.lease_ipc_soak_events.prev_canary_attempts IS
     'canary 計數快照：epoch_rollover = 前一 epoch 終值（`[82]` 跨 epoch 求和累計 '
     'probe 數）；其他事件型 = emit 當下本 epoch 值（`[82]` epoch 內 regression 交叉'
