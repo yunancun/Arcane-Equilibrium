@@ -14215,3 +14215,9 @@ Scope: 新建 2 檔（純離線 failure taxonomy 分類器 + 測試），0 calle
 - **cargo test fail-fast 陷阱**：`cargo test -p openclaw_engine | grep ...` 背景跑完 exit 0 是 grep 的 exit code（無 pipefail）且 default fail-fast 在 stress_integration 紅後跳過剩餘 binaries（lib 3788 + bin 72 根本沒跑）——**全套件數字必須 `--no-fail-fast` + 數 `^test result` 行**。最終 4154 passed / 1 failed = `stress_tick_latency_benchmark` 1038μs vs 1000μs debug 閾值，**stash 基線同樣紅** = 既有 perf flake 非我回歸（stash-diff 法再次生效）。
 - **Python 62 passed**（5 檔：9 secret-split 新版 + 16 signing + 7 recheck + 10 batchB + 20 toggle）。新 fail-loud 負向含「sign raise 前不可留部分寫入授權檔」+「fallback 機制移除斷言（hasattr 反證）」+ verify 端到端（先簽後刪 key → unverifiable + 新 reason）。
 - **部署前 operator gate（已寫進 commit body）**：runbook §13.2 外部 Grafana/journald alert rule 先加 `live_auth_signing_key_missing` + `AuthError::LiveAuthSigningKeyMissing`（repo grep 不到外部規則）；§13.5 rollback 依賴 restart_all seed 邏輯故 seed 保留不動。runbook 本身 PA 域未動；TODO.md PM 域未動。
+
+## 2026-06-10 — L2 P3b owed ①+② E1-A（bar_index_reindex + dead-mode seed，/tmp/wt-l2-owed 未 commit）
+
+- **owed ①**：新 `learning_engine/bar_index_reindex.py`（B1 int-bar-index 契約 producer-side 對偶，0 DB 純函數）：ordinal-day offset 默認（`index_rule="dense"` 對照可切）；fail-loud=reasons+全 None+warning（**非 raise**——PM 派發寫 raise 但 PA §D.2 正本是 reason-flow 且 §E 介面已凍結供 E1-B adapter 串接，取 PA 正本）；bite 實證：缺 bar 資料 dense 把 down-leg span 360d 壓成 120d → B1 誤殺 DEFER、ordinal 保真 pass。
+- **owed ②**：新 `helper_scripts/m4/seed_dead_mode_lessons.py`：6 條真實 NO-GO seed（symbol=`ml_advisory`=sink placeholder 否則檢索永 miss；content 英文主幹 trgm 可檢索；context_id=`seed:<slug>` 冪等錨點 WHERE NOT EXISTS）；默認 --dry-run 零連線、`--apply`（alias `--write`，PA/派發用詞分歧雙收斂）+顯式 `--dsn` 才寫。
+- **測試隔離鐵則落地**：seed 測試 autouse fixture 在 sys.modules 層 stub psycopg2（lazy import 故 stub 全覆蓋），結構上不可能真連線；reindex 測試純函數 0-IO。Mac 全綠：新 24+12 + 任務驗收 58 + full learning_engine 272 + m4 110，0 回歸。E1-B 並行檔（executor/layer2_routes/adapter）零觸碰。待 E2。

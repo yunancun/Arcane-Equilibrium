@@ -675,7 +675,8 @@ async def delete_provider_key(
 # P2 budget-integrity 不變式（re-E2 fold-in）：本檔每個改變 state 的 WRITE endpoint =
 # operator-scope（reuse 既有 require_scope_and_operator "ai_budget:write"）；reads 唯讀不可
 # mutate。涵蓋 /trigger（:254）、/cost/reset（:373）、/cost/pricing（:413）、/registry/reload
-# （:731）、/orchestrator/fail-safe/reset（:757）。/cost/reset 與 /cost/pricing 先前只有
+# （:731）、/orchestrator/fail-safe/reset（:757）、/ml-advisory/dispatch（P3b owed 接線，
+# 本檔末段）。/cost/reset 與 /cost/pricing 先前只有
 # Depends(current_actor)（任何已認證者可歸零 DOC-08 counter＝繞過 P2 $2/day storm-control
 # 硬閘），本輪補上 require_scope_and_operator 收口；此註釋現為實況（先前誤稱已 scope 化）。
 
@@ -758,3 +759,98 @@ async def reset_orchestrator_fail_safe(
     orch = _get_orchestrator()
     orch.reset_fail_safe()
     return _layer2_response({"fail_safe_state": orch.status()["fail_safe_state"]})
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ml_advisory dispatch（P3b owed conductor wiring；PA 2026-06-10 §A——manual operator 入口）
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+class MlAdvisoryDispatchRequest(BaseModel):
+    """POST /ml-advisory/dispatch 請求（PA §A.2）。
+
+    candidate_evidence 為 inline-only（拒 server path：模型只收 dict，零 path-traversal 面；
+    operator 用 `curl -d @evidence.json` 內嵌）。context 與 evidence 互斥（context 是 E2E /
+    診斷用的直接 math-gate context）。
+    """
+
+    capability_id: str = Field(max_length=64)  # 必須 startswith "ml_advisory."（handler fail-closed 驗）
+    mode: str = Field(max_length=32)  # diagnose_leak | interpret_result | hypothesize（executor 自驗）
+    candidate_evidence: dict[str, Any] | None = None  # evidence 契約 v1（adapter 映射）
+    context: dict[str, Any] | None = None  # 直接 context（與 evidence 互斥）
+    symbol: str | None = Field(default=None, max_length=30)
+    strategy_name: str | None = Field(default=None, max_length=64)
+    bull_only: bool = False
+    coarse_subject: str = Field(default="", max_length=128)  # admission dedup key 成分
+
+
+@layer2_router.post("/ml-advisory/dispatch")
+async def dispatch_ml_advisory(
+    req: MlAdvisoryDispatchRequest,
+    actor: base.AuthenticatedActor = Depends(base.current_actor),
+) -> dict[str, Any]:
+    """POST 手動 dispatch 一次 ml_advisory capability（admission → cascade → sink；薄投影）。
+
+    operator-scope WRITE：dispatch 是 state-change 類 write（E3-E1 既有結論）——觸發 admission
+    視窗 mutation + 可能的 model 花費 + D3 append；故與 /trigger 同模式，第一行先
+    require_scope_and_operator。開銷護欄 = 既有 admission（dedup/debounce/$2/day 硬閘），
+    route 不另造預算邏輯。registry 3 stanza enabled=false 之下本 route 部署即行為中性
+    （capability_disabled 短路，零 model 呼叫）＝E2E-0 驗收路徑。
+    """
+    base.require_scope_and_operator(actor, "ai_budget:write")
+    # capability 前綴 fail-closed：本入口只服務 ml_advisory capability 家族（其餘 capability
+    # 的觸發入口各自設計，不從此擴權）。
+    if not req.capability_id.startswith("ml_advisory."):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "reason_codes": ["capability_not_ml_advisory"],
+                "capability_id": req.capability_id,
+            },
+        )
+    if req.candidate_evidence is not None and req.context is not None:
+        raise HTTPException(
+            status_code=400,
+            detail={"reason_codes": ["evidence_context_mutually_exclusive"]},
+        )
+
+    context: dict[str, Any] = req.context or {}
+    assembly_reasons: list[str] = []
+    bull_only = req.bull_only
+    if req.candidate_evidence is not None:
+        # adapter 產 context（缺鍵=None，誠實 DEFER 語義內建；lazy import 避免 boot-time cost）。
+        from .l2_candidate_evidence_adapter import build_context_from_evidence  # noqa: PLC0415
+
+        context, assembly_reasons = build_context_from_evidence(req.candidate_evidence)
+        # bull-only 標籤取嚴（Alpha Evidence Governance：bull-heavy 結果必須被標示）：
+        # request flag 與 evidence 自報任一為 true 即視為 bull_only。
+        bull_only = bull_only or bool(req.candidate_evidence.get("bull_only"))
+
+    orch = _get_orchestrator()
+    result = await orch.dispatch_and_execute(
+        capability_id=req.capability_id,
+        mode=req.mode,
+        context=context,
+        trigger="manual",
+        coarse_subject=req.coarse_subject,
+        symbol=req.symbol,
+        strategy_name=req.strategy_name,
+        bull_only=bull_only,
+    )
+
+    data: dict[str, Any] = {
+        "capability_id": result.capability_id,
+        "mode": req.mode,
+        "admitted": result.admitted,
+        "admission_reason": result.admission_reason,
+        "routed_to": result.routed_to,
+        "guard_verdict": result.guard_verdict,
+        "l2_reply_id": result.l2_reply_id,
+        "notes": list(result.notes),
+        "context_assembly_reasons": assembly_reasons,
+    }
+    if not result.admitted:
+        return _layer2_response(
+            data, action_result="blocked", reason_codes=[result.admission_reason]
+        )
+    return _layer2_response(data)
