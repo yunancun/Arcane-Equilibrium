@@ -219,6 +219,7 @@ class L2AdvisoryOrchestrator:
         current_tier: LearningTier = LearningTier.L1,
         posture: str = "Conservative",
         max_retries: int = 1,
+        tier_provider: Any = None,
     ) -> None:
         # cost_tracker / engine 注入供測試；預設 lazy 取既有 singleton（避免 import cycle）。
         self._cost_tracker = cost_tracker
@@ -226,6 +227,11 @@ class L2AdvisoryOrchestrator:
         self._registry_loader = registry_loader or _registry.load_capability_registry
         self._current_tier = current_tier
         self._posture = posture
+        # P4 §6：injectable 唯讀 tier 投影 `() -> (LearningTier, {flag_name: bool})`。
+        # fail-closed：None / raise / 非法回值 → (self._current_tier=L1, {})——行為與
+        # 未接線 byte-identical（tier_flag_value 落 None，STEP-2 照鎖）。tier 只讀不寫
+        # （C1 鐵則：本模塊 0 promote_tier）。
+        self._tier_provider = tier_provider
         # 為何 retry 上限可注入但預設 1：fail-safe RETRY 態的有界重試；與交易 max_retries=0
         # 硬邊界「無關」（此為 advisory 模型呼叫重試，非交易重試）。
         self._max_retries = max_retries
@@ -467,6 +473,38 @@ class L2AdvisoryOrchestrator:
         self.report_call_outcome(ok=executor_ok, ollama_available=True)
         return result
 
+    def set_tier_provider_if_absent(self, provider: Any) -> None:
+        """注入唯讀 tier 投影（僅當尚未注入；冪等，不覆蓋測試注入的 provider）。
+
+        為什麼 set-if-absent：singleton 經 layer2_routes._get_orchestrator 每請求取用，
+        無條件覆蓋會把測試/未來顯式注入的 provider 踩掉；首見注入一次即定。
+        """
+        with self._lock:
+            if self._tier_provider is None and provider is not None:
+                self._tier_provider = provider
+
+    def _resolve_tier(self) -> tuple[LearningTier, dict[str, bool]]:
+        """解析 (current_tier, capability flags)（唯讀投影；fail-closed 默認 L1）。
+
+        provider None / raise / 回值非法 → (self._current_tier, {})：與未接線行為
+        byte-identical（P4 §6 誠實語義——in-memory tier 重啟歸 L1 是系統真值，本函數
+        不為任何 capability 造假 tier）。
+        """
+        provider = self._tier_provider
+        if provider is None:
+            return self._current_tier, {}
+        try:
+            tier, flags = provider()
+            if not isinstance(tier, LearningTier):
+                return self._current_tier, {}
+            safe_flags = {
+                str(k): bool(v) for k, v in dict(flags or {}).items()
+            }
+            return tier, safe_flags
+        except Exception as exc:  # noqa: BLE001 — 投影故障 → fail-closed L1（不放行）
+            logger.warning("tier_provider 解析失敗（fail-closed → L1）：%s", exc)
+            return self._current_tier, {}
+
     def _resolve_engine(self) -> Any:
         """lazy 取 Layer2Engine（cloud-L2 + Ollama executor）。fail-soft：取不到回 None。"""
         if self._engine_provider is not None:
@@ -573,11 +611,16 @@ class L2AdvisoryOrchestrator:
                     )
 
             # ── Stage 5 — TIER/POSTURE：effective_autonomy（§C.2）──
+            # P4 §6：tier/flag 由 injectable 唯讀投影解析（默認 None → L1+{} → 與舊行為
+            # byte-identical）。唯讀；promote/晉升不在此（C1）。
+            eff_tier, tier_flags = self._resolve_tier()
+            flag_name = cap.tier_capability_flag or ""
+            tier_flag_value = tier_flags.get(flag_name) if flag_name else None
             autonomy = _registry.effective_autonomy(
                 cap,
-                current_tier=self._current_tier,
+                current_tier=eff_tier,
                 posture=self._posture,
-                tier_flag_value=None,  # P2 無 capability 綁 flag；P3 接 GovernanceHub 投影
+                tier_flag_value=tier_flag_value,
             )
             if autonomy == "TIER_LOCKED":
                 return AdmissionDecision(False, "tier_locked", autonomy=autonomy)
@@ -720,6 +763,9 @@ class L2AdvisoryOrchestrator:
             "fail_safe_state": self._fail_safe.value,
             "consecutive_failures": self._consecutive_failures,
             "current_tier": self._current_tier.name,
+            # P4 §6 觀測欄：投影是否接線 + 解析後的有效 tier（fail-closed 退 L1 可見）。
+            "tier_provider_wired": self._tier_provider is not None,
+            "effective_tier": self._resolve_tier()[0].name,
             "posture": self._posture,
             "registered_capabilities": sorted(reg.capabilities.keys()),
             "enabled_capabilities": [c.capability_id for c in reg.enabled_capabilities()],

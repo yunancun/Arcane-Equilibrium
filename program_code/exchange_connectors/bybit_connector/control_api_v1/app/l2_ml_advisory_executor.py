@@ -61,6 +61,7 @@ MODULE_NOTE
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -89,10 +90,12 @@ _P3B_MODES: frozenset[str] = frozenset({"hypothesize"})
 _VALID_MODES: frozenset[str] = _P3A_MODES | _P3B_MODES
 
 # 模式 → PromptContract ref（contract registry 是唯一模板來源；本模塊不複製字面模板）。
+# hypothesize → v2（P4：結構化 falsification 三欄 + primary_axis；v1 保留供 D3 血緣回放，
+# TOML stanza prompt_contract_ref 同 commit 指 v2——registry/TOML/此表三點同步）。
 _MODE_CONTRACT_REF: dict[str, str] = {
     "diagnose_leak": "ml_advisory.diagnose_leak.v1",
     "interpret_result": "ml_advisory.interpret_result.v1",
-    "hypothesize": "ml_advisory.hypothesize.v1",
+    "hypothesize": "ml_advisory.hypothesize.v2",
 }
 
 # cloud-L2 interpret 的 max_tokens（單發 structured JSON 診斷/解讀，非 agentic session）。
@@ -822,13 +825,28 @@ async def _run_hypothesize_cascade(
     _seam(writer, l2_reply_id, "ml_advisory_novelty", "pass" if novelty == "novel" else "reject",
           {"novelty": novelty, "reason": dup_reason})
 
-    # ── STAGE 4 — 確定性 math gate（B1+DSR+PBO+leak+Q1；唯一 alpha validator；0 LLM-invocation）──
-    math_res = _run_math_gate(guard_out, context, novelty=novelty)
+    # ── STAGE 3.55→4.5 — P4 online-FDR 守門 + math gate + 記帳（PA §5；MIT #3/§5a；
+    #    QC FIX-1.1/1.2/2.1b）：precheck（免費 skip）→ sealed-boundary → pre-registration
+    #    → wealth admission → math gate（n_trials=N_eff 由 adapter 注入、threshold=
+    #    dsr_threshold_for(α_i)）→ debit。0 LLM-invocation（守門全確定性）。──
+    math_res = await _run_wealth_gated_math_stage(
+        capability_id=capability_id, guard_out=guard_out, context=context,
+        novelty=novelty, symbol=symbol, strategy_name=strategy_name,
+        sink_conn_provider=sink_conn_provider,
+    )
     result.math_gate_verdict = math_res["verdict"]
     result.math_gate_reasons = list(math_res["reasons"])
     for stage_id, sv in math_res["stage_verdicts"].items():
         _seam(writer, l2_reply_id, "ml_advisory_math_gate", sv,
               {"stage": stage_id, "reasons": math_res["reasons"]})
+    # FDR 記帳 seam（root principle 8：debit/skip 決策可重建；fail-soft）。
+    fdr_meta = math_res.get("fdr") or {}
+    _seam(writer, l2_reply_id, "ml_advisory_fdr_accounting",
+          "reject" if fdr_meta.get("debit") == "debit_write_failed" else "pass",
+          {"family_id": fdr_meta.get("family_id"), "pre_reg_id": fdr_meta.get("pre_reg_id"),
+           "debit_id": fdr_meta.get("debit_id"), "debit": fdr_meta.get("debit"),
+           "alpha_i": fdr_meta.get("alpha_i"), "dsr_threshold": fdr_meta.get("dsr_threshold"),
+           "conducted": fdr_meta.get("conducted", False)})
 
     # ── STAGE 5 — cloud interpret survivors only（expensive；只在 math gate pass）──
     # 為什麼只在 pass 跑 cloud：cost only on survivors（root principle 13）。DEFER/fail 不值得花
@@ -863,6 +881,19 @@ async def _run_hypothesize_cascade(
     if math_res["verdict"] == "fail":
         result.stage = "math_gate_failed"
         result.notes.append(f"math gate fail: {','.join(math_res['reasons'])}")
+        # FIX-1.3：被證偽假說鑄 dead-mode lesson（英文主幹 + falsification 三欄；冪等；
+        # source='dead_mode_seed' / lesson_type='dead_mode' → novelty 自饋失敗庫閉環，
+        # 近似重提交被 STAGE 3.5 DEFER 擋住）。fail-soft：鑄造失敗不阻斷收尾。
+        mint_spec = (math_res.get("fdr") or {}).get("spec")
+        mint_sha = (math_res.get("fdr") or {}).get("spec_sha256")
+        if isinstance(mint_spec, dict) and mint_sha:
+            minted = await asyncio.to_thread(
+                _mint_dead_mode_lesson,
+                spec=mint_spec, spec_sha256=str(mint_sha), symbol=symbol,
+                trigger=trigger, math_reasons=list(math_res["reasons"]),
+                conn_provider=sink_conn_provider,
+            )
+            result.notes.append(f"dead_mode_lesson_minted={minted}")
         _record_spend(spend_recorder, capability_id, result.cost_usd)
         return result
 
@@ -890,8 +921,12 @@ async def _run_hypothesize_cascade(
 
 
 def _hypothesize_template() -> str:
-    """取 hypothesize 的 checked-in 模板（contract registry；Ollama 禁生成 prompt）。"""
-    pc = _contracts.get_prompt_contract("ml_advisory.hypothesize.v1")
+    """取 hypothesize 的 checked-in 模板（contract registry；Ollama 禁生成 prompt）。
+
+    ref 取自 _MODE_CONTRACT_REF（單一來源）——P4 指 v2（結構化 falsification 三欄 +
+    primary_axis）；雙源字面是 contract drift 的經典面，禁複製。
+    """
+    pc = _contracts.get_prompt_contract(_MODE_CONTRACT_REF["hypothesize"])
     return pc.template if pc is not None else ""
 
 
@@ -990,8 +1025,481 @@ async def _check_novelty(
         return "novel", None
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# P4 — online-FDR 守門（STAGE 3.55 precheck / 3.58 sealed / 3.6 pre-reg / 3.7 wealth /
+# 4 gate threshold 注入 / 4.5 debit）。PA P4 §5 + MIT #3/§5a + QC FIX-1.1/1.2/2.1b。
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# wealth 帳本事件的 actor 識別（系統寫者；route 寫者另用真實 operator actor_id）。
+_FDR_ACTOR_ID = "ml_advisory_cascade"
+
+# dead-mode lesson 的 namespace（與 helper_scripts/m4/seed_dead_mode_lessons.py 同一
+# 第 4 namespace；novelty 檢索鍵 = lesson_type='dead_mode'，source 不參與檢索過濾）。
+_DEAD_MODE_SOURCE = "dead_mode_seed"
+
+
+def _resolve_wealth_controller() -> Any:
+    """lazy 取 E1-A alpha_wealth_controller（dual-path）。不可得 → None（fail-closed：
+    wealth 機制不可用 = hypothesize DEFER alpha_wealth_store_unavailable，P3a 零波及）。"""
+    try:
+        from program_code.learning_engine import alpha_wealth_controller as awc  # noqa: PLC0415
+
+        return awc
+    except ImportError:
+        try:
+            from learning_engine import alpha_wealth_controller as awc  # type: ignore  # noqa: PLC0415
+
+            return awc
+        except ImportError:
+            return None
+
+
+def _min_down_span_days() -> int | None:
+    """B1 down-leg 最小日曆 span（單一定義點 = beta_neutral_check 常數，不複製字面）。
+
+    不可得 → None：precheck 略過 span 條件（under-fire = 照常渲染照付 = 保守浪費可受，
+    MIT §5a 註記方向）。"""
+    try:
+        from program_code.learning_engine.beta_neutral_check import (  # noqa: PLC0415
+            DOWN_SUBSAMPLE_SPAN_DAYS_MIN,
+        )
+
+        return int(DOWN_SUBSAMPLE_SPAN_DAYS_MIN)
+    except ImportError:
+        try:
+            from learning_engine.beta_neutral_check import (  # type: ignore  # noqa: PLC0415
+                DOWN_SUBSAMPLE_SPAN_DAYS_MIN,
+            )
+
+            return int(DOWN_SUBSAMPLE_SPAN_DAYS_MIN)
+        except ImportError:
+            return None
+
+
+def _aligned_history_span_days(cand: Any, btc: Any) -> int | None:
+    """aligned candidate 歷史日曆 span（value-free：只看 key 集合，不讀任何 return 值）。
+
+    int-bar-index 契約下 key 是 ordinal-day offset → max−min 即日曆天數。key 非 int /
+    結構異常 → None（span 不可證 → 呼叫端視為 doomed：非 int key 本就會被 B1 fail-loud
+    DEFER）。空交集 → 0（B1 無對齊樣本，注定 DEFER）。"""
+    try:
+        shared = set(cand.keys()) & set(btc.keys())
+    except Exception:  # noqa: BLE001 — 非 Mapping 形 → 不可證
+        return None
+    if not shared:
+        return 0
+    for k in shared:
+        if isinstance(k, bool) or not isinstance(k, int):
+            return None
+    return int(max(shared) - min(shared))
+
+
+def _run_doomed_input_precheck(context: dict[str, Any]) -> tuple[bool, list[str]]:
+    """FIX-3.1 precheck（MIT §5a binding ①②）：B1/leak 輸入「存在性」注定 DEFER → 整 run
+    免費 skip（不渲染 DSR、不 pre-reg、不指派 α_i、不入帳）。
+
+    value-invariance 鐵則（MIT §5a 允許集合，一句定死）：謂詞只准——輸入序列存在性
+    （is None）/ row-bar-trade 計數 / 日曆 span / schema 完備性；**絕不可**任何
+    returns/price 值的函數（down-bar 計數、value-derived down-span、vol、Sharpe、β、
+    先前 value-derived stage verdict）。固定 timestamps/存在性下擾動任何數值，本謂詞
+    真值不得改變（golden mutation test 鎖此性質）。
+
+    為什麼 skip 不破 mFDR bound（MIT §5a (1)）：conduct 決策 C 可測於 σ(存在性, N, 日曆
+    span)——DSR null 校準 conditional on (N,K)，selecting on N 是選校準 cell 而非選統計量；
+    且被 skip 的 run 結構上 overall ≠ pass（B1/leak DEFER 注定），對 V/R 增量恆 0。
+    """
+    why: list[str] = []
+    # evidence 窗 schema 完備性（pre-reg 釘窗 / debit_id / sealed 檢查的前置；缺 = 不可入帳）。
+    ev_win = context.get("evidence_window") or {}
+    if not ev_win.get("window_start") or not ev_win.get("window_end"):
+        why.append("evidence_window_missing")
+    cand = context.get("candidate_returns")
+    gi = context.get("math_gate_inputs") or {}
+    # B1 doom（MIT §5a 修正後謂詞，verbatim binding）：
+    if cand is None:
+        why.append("candidate_returns_absent_b1_doomed")
+    if gi.get("btc_returns") is None:
+        why.append("btc_returns_absent_b1_doomed")
+    if gi.get("altcap_returns") is None:
+        # altcap=None → B1 內部雙因子強制 DEFER（beta_neutral_check 既有語義）。
+        why.append("altcap_returns_absent_b1_doomed")
+    if cand is not None and gi.get("btc_returns") is not None:
+        min_span = _min_down_span_days()
+        if min_span is not None:
+            span = _aligned_history_span_days(cand, gi.get("btc_returns"))
+            if span is None:
+                why.append("aligned_history_keys_not_int_b1_doomed")
+            elif span < min_span:
+                # value-free 蘊含：down_ts ⊆ aligned history ⇒ span(down) ≤ span(history)
+                # < 180d ⇒ B1 down-leg span 檢查必 DEFER（年輕 cohort 覆蓋；MIT 替換
+                # QC 原 value-derived down-span 謂詞——down_ts 由 BTC 價格條件篩出，禁用）。
+                why.append(f"aligned_history_span_lt_{min_span}d_b1_doomed")
+    # leak doom：兩 producer 皆缺（None）→ leak stage 注定 DEFER。注意 False（明確 leak）
+    # 是「結論性 fail」非 doomed-DEFER，**不**入 precheck（fail 必須渲染 + 入帳）。
+    if gi.get("shift1_compliance_leak_free") is None and gi.get("is_oos_gap_leak_free") is None:
+        why.append("leak_producers_absent_doomed")
+    return bool(why), why
+
+
+def _check_sealed_boundary(
+    strategy_name: str | None,
+    symbol: str | None,
+    window_end_iso: str | None,
+    conn_provider: Any,
+) -> tuple[bool | None, list[str]]:
+    """FIX-2.1b sealed-boundary（薄 wrapper：adapter 持有區間算術正本；此處只解析窗）。
+
+    同步函數（內含 psycopg2 SELECT）——caller 必 to_thread。
+    """
+    we_date = None
+    if window_end_iso:
+        try:
+            we_date = datetime.strptime(str(window_end_iso)[:10], "%Y-%m-%d").date()
+        except ValueError:
+            we_date = None
+    try:
+        from . import l2_candidate_evidence_adapter as _adapter  # noqa: PLC0415
+
+        return _adapter.load_sealed_boundary_flag(
+            strategy_name, symbol, we_date, conn_provider=conn_provider
+        )
+    except Exception as exc:  # noqa: BLE001 — 檢查面故障 → fail-closed（無法證明盲視）
+        logger.warning("sealed-boundary 檢查失敗（fail-closed → overlap）：%s", exc)
+        return True, ["sealed_registry_check_failed"]
+
+
+def _build_pre_reg_spec(
+    parsed_output: dict[str, Any], window_start_iso: str, window_end_iso: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    """從 guard-passed 輸出取第一個假說構造 pre-registration spec（全字串/字串列表——
+    jsonb round-trip 表示穩定，canonical hash 跨 in-memory↔PG 邊界不漂移）。
+
+    回 (spec, primary_axis)；結構缺（guard clause F 理應已擋）→ (None, None) =
+    呼叫端 fail-closed DEFER。取「第一個」假說與 novelty 取首條 statement 同慣例
+    （單 evidence row 經 gate = 單 test = 單 debit，G.1.2）。
+    """
+    hyps = parsed_output.get("feature_hypotheses")
+    if not isinstance(hyps, (list, tuple)):
+        return None, None
+    for h in hyps:
+        if not isinstance(h, dict):
+            continue
+        statement = str(h.get("statement", "")).strip()
+        mechanism = str(h.get("mechanism", "")).strip()
+        primary = str(h.get("primary_axis", "")).strip()
+        falsif = h.get("falsification_test")
+        if not (statement and mechanism and primary and isinstance(falsif, dict)):
+            continue
+        triple = {}
+        ok = True
+        for fld in ("null_hypothesis", "test_statistic", "reject_condition"):
+            v = str(falsif.get(fld, "")).strip()
+            if not v:
+                ok = False
+                break
+            triple[fld] = v
+        if not ok:
+            continue
+        axes_raw = h.get("signal_axes_used")
+        if not isinstance(axes_raw, (list, tuple)):
+            axes_raw = parsed_output.get("signal_axes_used")
+        axes = [str(a) for a in axes_raw] if isinstance(axes_raw, (list, tuple)) else []
+        spec = {
+            "mode": "hypothesize",
+            "statement": statement,
+            "mechanism": mechanism,
+            "signal_axes_used": axes,
+            "primary_axis": primary,
+            "falsification_test": triple,
+            # FIX-1.2：evidence 窗入 hash payload（window_start 相等 + window_end 僅
+            # 單調向後延伸的比較基底在 store 層）。
+            "evidence_window": {
+                "window_start": str(window_start_iso),
+                "window_end": str(window_end_iso),
+            },
+        }
+        return spec, primary
+    return None, None
+
+
+def _skipped_math_res(
+    stage: str, reasons: list[str], novelty: str, fdr: dict[str, Any]
+) -> dict[str, Any]:
+    """pre-gate skip 的 math_res（total skip：不渲染 DSR、stage_verdicts 無 'dsr' 鍵——
+    conducted 計數只算真渲染過的，N-7 healthcheck 語義不被污染）。"""
+    sv: dict[str, str] = {stage: "DEFER"}
+    rs = list(reasons)
+    if novelty == "duplicate":
+        sv["novelty"] = "DEFER"
+        rs.append("duplicate_of_dead_failure_mode")
+    return {
+        "verdict": "DEFER",
+        "stage_verdicts": sv,
+        "reasons": _dedupe_reasons(rs),
+        "fdr": dict(fdr),
+    }
+
+
+async def _run_wealth_gated_math_stage(
+    *,
+    capability_id: str,
+    guard_out: dict[str, Any],
+    context: dict[str, Any],
+    novelty: str,
+    symbol: str | None,
+    strategy_name: str | None,
+    sink_conn_provider: Any,
+) -> dict[str, Any]:
+    """P4 STAGE 3.55→4.5：precheck → sealed-boundary → pre-registration → wealth
+    admission → math gate（threshold 注入）→ debit 記帳。回 math_res（含 "fdr" 審計欄）。
+
+    鐵閘序（每一步 fail-closed 收縮向 DEFER，全部「不」渲染 DSR = 免費）：
+      3.55 precheck（FIX-3.1；value-invariant；在 α_i 指派之前 = MIT §5a ④）
+      3.58 sealed-boundary（FIX-2.1b；V132 row 重取；末 bar 尾端 ≤ oos_start）
+      3.6  pre-registration（FIX-1.1 鏈 head + FIX-1.2 窗單調；hash 先於一切統計渲染）
+      3.7  wealth admission（PG SUM → assign_alpha_i → can_test；枯竭 = DEFER）
+      4    math gate（n_trials=N_eff 已由 adapter 注入；threshold=dsr_threshold_for(α_i)）
+      4.5  debit（MIT #3：overall ∈ {pass,fail} OR stage_verdicts['dsr'] ∈ {pass,fail}
+           即扣；純輸入缺失 DEFER 不扣；寫失敗 → verdict 強制 DEFER，不鑄未付費 discovery）
+
+    PG 呼叫一律 asyncio.to_thread（store 是同步 psycopg2，event-loop 阻塞殷鑑）。
+    """
+    fdr: dict[str, Any] = {"family_id": None, "pre_reg_id": None, "debit_id": None}
+    ev_win = context.get("evidence_window") or {}
+    ws_iso = ev_win.get("window_start")
+    we_iso = ev_win.get("window_end")
+
+    # ── STAGE 3.55 — FIX-3.1 precheck（免費 skip；log 供 conducted 計數對賬）──
+    doomed, why = _run_doomed_input_precheck(context)
+    if doomed:
+        logger.info(
+            "hypothesize precheck_input_unavailable → 免費 DEFER（FIX-3.1 total skip）：%s",
+            ",".join(why),
+        )
+        return _skipped_math_res("precheck", ["precheck_input_unavailable", *why], novelty, fdr)
+
+    # ── STAGE 3.58 — FIX-2.1b sealed-boundary（區間算術；V132 durable row 重取）──
+    sealed_flag, sealed_reasons = await asyncio.to_thread(
+        _check_sealed_boundary, strategy_name, symbol, we_iso, sink_conn_provider
+    )
+    if sealed_flag is True:
+        return _skipped_math_res("sealed_boundary", sealed_reasons, novelty, fdr)
+    extra_reasons: list[str] = list(sealed_reasons)  # no_sealed_split_for_cell 等非阻記錄
+    if sealed_flag is False:
+        # 注入 gate 輸入：math gate 記 sealed_boundary=pass stage（§9.4 證據面）。
+        (context.get("math_gate_inputs") or {})["sealed_holdout_overlap"] = False
+
+    # ── STAGE 3.6 — pre-registration（FIX-1.1/1.2；commit-before-render）──
+    from . import l2_alpha_wealth_store as _store  # noqa: PLC0415 — lazy（import cycle 防）
+
+    spec, primary_axis = _build_pre_reg_spec(guard_out, str(ws_iso), str(we_iso))
+    if spec is None or primary_axis is None:
+        # guard clause F 理應已擋；防禦性 fail-closed（不入帳、不渲染）。
+        return _skipped_math_res(
+            "pre_registration", ["pre_registration_spec_unbuildable", *extra_reasons], novelty, fdr
+        )
+    family_id = _store.family_id_for(capability_id, primary_axis)
+    fdr["family_id"] = family_id
+    fdr["spec"] = spec
+    awc = _resolve_wealth_controller()
+    if awc is None:
+        return _skipped_math_res(
+            "wealth_admission", ["alpha_wealth_store_unavailable", *extra_reasons], novelty, fdr
+        )
+    try:
+        prereg = await asyncio.to_thread(
+            _store.register_pre_registration,
+            family_id=family_id,
+            capability_id=capability_id,
+            signal_axis=primary_axis,
+            spec_jsonb=spec,
+            source_l2_reply_id=None,  # l2_reply_id 在 D3 ledger 鏈；spec 不含易變欄
+            actor_id=_FDR_ACTOR_ID,
+            conn_provider=sink_conn_provider,
+        )
+    except _store.AlphaWealthStoreError as exc:
+        logger.warning("pre-registration store 不可達（DEFER）：%s", exc)
+        return _skipped_math_res(
+            "pre_registration", ["alpha_wealth_store_unavailable", *extra_reasons], novelty, fdr
+        )
+    if not prereg.ok:
+        return _skipped_math_res(
+            "pre_registration", [prereg.defer_reason, *extra_reasons], novelty, fdr
+        )
+    fdr["pre_reg_id"] = prereg.pre_reg_id
+    fdr["spec_sha256"] = prereg.spec_sha256
+
+    # ── STAGE 3.7 — wealth admission（α_i 指派在 precheck 之後 = MIT §5a ④）──
+    try:
+        await asyncio.to_thread(
+            _store.ensure_family_initialized,
+            family_id,
+            capability_id=capability_id,
+            signal_axis=primary_axis,
+            amount=awc.init_family_wealth(),
+            actor_id=_FDR_ACTOR_ID,
+            evidence={
+                "alpha_target": awc.ALPHA_TARGET_DEFAULT,
+                "gamma": awc.W0_GAMMA,
+                "phi": awc.PHI_REFUND,
+            },
+            conn_provider=sink_conn_provider,
+        )
+        balance = await asyncio.to_thread(
+            _store.get_family_balance, family_id, conn_provider=sink_conn_provider
+        )
+    except _store.AlphaWealthStoreError as exc:
+        logger.warning("wealth store 不可達（DEFER fail-closed）：%s", exc)
+        return _skipped_math_res(
+            "wealth_admission", ["alpha_wealth_store_unavailable", *extra_reasons], novelty, fdr
+        )
+    alpha_i = awc.assign_alpha_i(
+        balance,
+        alpha_target=awc.ALPHA_TARGET_DEFAULT,
+        min_batch_size=awc.MIN_BATCH_SIZE_DEFAULT,
+        spend_fraction=awc.SPEND_FRACTION_DEFAULT,
+    )
+    if alpha_i is None or not awc.can_test(balance, alpha_i):
+        # wealth 枯竭 / α-death（MIT 1b floor）→ 不跑 gate、不 debit（G.1.1）。
+        return _skipped_math_res(
+            "wealth_admission", ["alpha_wealth_exhausted", *extra_reasons], novelty, fdr
+        )
+    fdr["alpha_i"] = alpha_i
+    fdr["balance_before"] = balance
+    # informational：餘額餵 context（D3 + STAGE 5 cloud survivor interpret 可見；§E 鍵位）。
+    context["alpha_wealth_remaining"] = balance
+
+    # ── STAGE 4 — math gate（threshold = max(0.95, 1−α_i)，MIT #2 Option B）──
+    threshold = awc.dsr_threshold_for(alpha_i)
+    fdr["dsr_threshold"] = threshold
+    math_res = _run_math_gate(guard_out, context, novelty=novelty, dsr_threshold=threshold)
+    math_res["reasons"] = _dedupe_reasons(list(math_res["reasons"]) + extra_reasons)
+    math_res["fdr"] = fdr
+
+    # ── STAGE 4.5 — debit（MIT #3 binding：DSR 渲染過 pass/fail 即 conducted 必扣；
+    #    overall 結論性（pass/fail）亦扣；純輸入缺失 DEFER 免費）──
+    dsr_verdict = math_res["stage_verdicts"].get("dsr")
+    conducted = math_res["verdict"] in ("pass", "fail") or dsr_verdict in ("pass", "fail")
+    fdr["conducted"] = conducted
+    if not conducted:
+        fdr["debit"] = "deferred_no_debit"
+        return math_res
+    # n_eff（M2 單 debit 合約：與 DSR 消費的 n_trials 同值同源）。DSR 未渲染而 overall
+    # 結論性（如 leak=False fail）時 n_trials 可缺 → 記 1 + evidence 標註（審計欄非 deflation）。
+    gi = context.get("math_gate_inputs") or {}
+    raw_n_trials = gi.get("n_trials")
+    try:
+        n_eff_ledger = max(1, int(raw_n_trials)) if raw_n_trials is not None else 1
+    except (TypeError, ValueError):
+        n_eff_ledger = 1
+    debit_id = _store.deterministic_debit_id(int(prereg.pre_reg_id), str(ws_iso), str(we_iso))
+    debit = await asyncio.to_thread(
+        _store.record_debit,
+        family_id=family_id,
+        capability_id=capability_id,
+        signal_axis=primary_axis,
+        debit_id=debit_id,
+        alpha_i=float(alpha_i),
+        n_eff=n_eff_ledger,
+        pre_reg_id=int(prereg.pre_reg_id),
+        actor_id=_FDR_ACTOR_ID,
+        evidence={
+            "dsr_verdict": dsr_verdict,
+            "overall": math_res["verdict"],
+            "dsr_threshold": threshold,
+            "n_eff_source": gi.get("n_eff_source") or (
+                "raw_k_trials" if raw_n_trials is not None else "absent_default_1"
+            ),
+            "window_start": str(ws_iso),
+            "window_end": str(we_iso),
+        },
+        conn_provider=sink_conn_provider,
+    )
+    fdr["debit_id"] = debit_id
+    fdr["debit_deduped"] = debit.deduped
+    if not debit.ok:
+        # conducted-test-pays（MIT §1 前提 (c)）被寫失敗破壞 → 不得放行任何結論性 verdict
+        # （未付費 discovery 禁鑄）；強制 DEFER + 醒目 reason，operator 由 D3 對賬。
+        logger.error(
+            "alpha-wealth debit 寫入失敗（verdict 強制 DEFER；未付費 test 不得鑄 discovery）：%s",
+            debit.error,
+        )
+        math_res["verdict"] = "DEFER"
+        math_res["reasons"] = _dedupe_reasons(
+            list(math_res["reasons"]) + ["alpha_wealth_debit_write_failed"]
+        )
+        fdr["debit"] = "debit_write_failed"
+        return math_res
+    fdr["debit"] = "debited"
+    return math_res
+
+
+def _mint_dead_mode_lesson(
+    *,
+    spec: dict[str, Any],
+    spec_sha256: str,
+    symbol: str | None,
+    trigger: str,
+    math_reasons: list[str],
+    conn_provider: Any = None,
+) -> bool:
+    """FIX-1.3：math gate fail → 鑄 dead-mode lesson（novelty 自饋失敗庫閉環）。
+
+    - namespace = source='dead_mode_seed'（與 helper_scripts/m4 seed 同第 4 namespace）；
+      lesson_type='dead_mode'（= _check_novelty 檢索鍵）→ 被證偽假說的近似重提交會被
+      novelty DEFER 擋住（補強 MIT #3）。
+    - content 英文主幹（pg_trgm 檢索池語言一致）+ falsification 三欄 + 證偽 reasons。
+    - 冪等：context_id = deadmode:<spec_sha256[:16]>，INSERT ... WHERE NOT EXISTS
+      （seed 腳本同款）。content 過 redactor 再落 append-only store（消毒鐵律）。
+    """
+    provider = conn_provider or db_pool.get_pg_conn
+    falsif = spec.get("falsification_test") or {}
+    content = (
+        f"DEAD MODE [{spec.get('primary_axis', '?')}]: {spec.get('statement', '')}. "
+        f"Why dead: failed deterministic math gate ({', '.join(math_reasons)}). "
+        f"Falsification: null_hypothesis={falsif.get('null_hypothesis', '')}; "
+        f"test_statistic={falsif.get('test_statistic', '')}; "
+        f"reject_condition={falsif.get('reject_condition', '')}. "
+        f"Mechanism: {spec.get('mechanism', '')}. Pre-reg sha256={spec_sha256}."
+    )
+    content = _redactor.redact(content).text[:4000]
+    sym = (symbol or "").strip() or _SINK_SYMBOL_PLACEHOLDER
+    context_id = f"deadmode:{spec_sha256[:16]}"
+    try:
+        with provider() as conn:
+            if conn is None:
+                return False
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO agent.lessons
+                    (symbol, lesson_type, content, session_trigger, context_id,
+                     outcome_net_bps, session_cost_usd, source)
+                SELECT %(symbol)s, 'dead_mode', %(content)s, %(trigger)s, %(context_id)s,
+                       NULL, NULL, %(source)s
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM agent.lessons
+                    WHERE source = %(source)s AND context_id = %(context_id)s
+                )
+                """,
+                {
+                    "symbol": sym,
+                    "content": content,
+                    "trigger": trigger,
+                    "context_id": context_id,
+                    "source": _DEAD_MODE_SOURCE,
+                },
+            )
+            conn.commit()
+            return True
+    except Exception as exc:  # noqa: BLE001 — 鑄造失敗 fail-soft（不阻斷 cascade 收尾）
+        logger.warning("dead-mode lesson 鑄造失敗（fail-soft）：%s", exc)
+        return False
+
+
 def _run_math_gate(
-    parsed_output: dict[str, Any], context: dict[str, Any], *, novelty: str
+    parsed_output: dict[str, Any], context: dict[str, Any], *, novelty: str,
+    dsr_threshold: float | None = None,
 ) -> dict[str, Any]:
     """確定性 math gate（§A.5 stage order：Q1→DSR→PBO→B1→leak）。唯一 alpha validator。
 
@@ -1000,13 +1508,22 @@ def _run_math_gate(
     ★ 本函數內 0 LLM-invocation（CC/E2/MIT grep target）——全是確定性數學閘。candidate returns
       + 因子資料由 context 提供（pipeline 抽取，非 model-authored）；缺資料 → 對應 stage DEFER。
 
-    stage order（§A.5；short-circuit on first DEFER/fail for cost+correctness）：
-      STEP0 Q1：N_trades_oos ≥ 50 else DEFER（最便宜，gate everything）。
-      STEP1 DSR(K)：dsr_gate.compute_dsr(min_observations=50)。
+    stage order（§A.5；**本函數內五 stage 全跑、無 short-circuit**——MIT N-8 訂正：舊註解
+    宣稱 short-circuit 與實作不符。P4 的 debit 語義（MIT #3）正依賴此事實：dsr stage 可
+    渲染 pass/fail 而 overall=DEFER（如 single-config PBO honest-DEFER），渲染即 conducted
+    即入帳。免費 skip 只存在於上游 cascade 的 precheck/sealed 守門（FIX-3.1/2.1b），不在
+    本函數內）：
+      STEP0 Q1：N_trades_oos ≥ 50 else DEFER（最便宜）。
+      STEP1 DSR(K)：dsr_gate.compute_dsr(min_observations=50)；P4 注入
+            threshold=dsr_threshold_for(α_i)=max(0.95, 1−α_i)（MIT #2 Option B；
+            dsr_threshold=None 時沿用 dsr_gate 預設 0.95，僅供直呼測試路徑）。
       STEP2 PBO：single-config → HONEST-DEFER（承 2026-06-08 Gap-A：捏造 peer 是 theater）。
-      STEP3 B1 beta-neutral：beta_neutral_check（pooled β + down-leg）。← P3b 新增。
+      STEP3 B1 beta-neutral：beta_neutral_check（pooled β + down-leg）。
       STEP4 leak precondition：shift1_compliance AND/OR is_oos_gap leak_free=True else DEFER。
-      → overall = strictest of {STEP0..STEP4}：any fail → fail；else any DEFER → DEFER；else pass。
+      STEP5 sealed_boundary（P4 FIX-2.1b，僅當 gate_inputs 帶 sealed_holdout_overlap 鍵）：
+            True → DEFER sealed_holdout_overlap（防禦縱深；正常路徑 executor 已在渲染前
+            短路）；False → pass（§9.4 證據面）。
+      → overall = strictest of all stages：any fail → fail；else any DEFER → DEFER；else pass。
     """
     stage_verdicts: dict[str, str] = {}
     reasons: list[str] = []
@@ -1034,7 +1551,10 @@ def _run_math_gate(
         reasons.append("dsr_inputs_missing")
         stage_verdicts["dsr"] = "DEFER"
     else:
-        dsr_v = _run_dsr_stage(float(observed_sharpe), int(n_trials), int(n_trades_oos))
+        dsr_v = _run_dsr_stage(
+            float(observed_sharpe), int(n_trials), int(n_trades_oos),
+            threshold=dsr_threshold,
+        )
         stage_verdicts["dsr"] = dsr_v["verdict"]
         reasons.extend(dsr_v["reasons"])
 
@@ -1058,6 +1578,16 @@ def _run_math_gate(
     stage_verdicts["leak"] = leak_v["verdict"]
     reasons.extend(leak_v["reasons"])
 
+    # ── STEP5 — sealed_boundary（P4 FIX-2.1b；僅 gate_inputs 帶鍵時渲染——legacy/直呼
+    #    context 無鍵 = 零波及。True 在正常路徑不可達（executor 渲染前已短路），此處為
+    #    防禦縱深：任何繞過上游守門的路徑仍被 DEFER 鎖住）。──
+    if "sealed_holdout_overlap" in gate_inputs and gate_inputs["sealed_holdout_overlap"] is not None:
+        if gate_inputs["sealed_holdout_overlap"] is True:
+            reasons.append("sealed_holdout_overlap")
+            stage_verdicts["sealed_boundary"] = "DEFER"
+        else:
+            stage_verdicts["sealed_boundary"] = "pass"
+
     # overall = strictest-wins：any fail → fail；else any DEFER → DEFER；else pass。
     verdict = _strictest_math_verdict(stage_verdicts.values())
     return {
@@ -1067,16 +1597,29 @@ def _run_math_gate(
     }
 
 
-def _run_dsr_stage(observed_sharpe: float, n_trials: int, n_trades_oos: int) -> dict[str, Any]:
-    """DSR stage：compute_dsr(min_observations=50) → insufficient → DEFER；else pass/fail。"""
+def _run_dsr_stage(
+    observed_sharpe: float, n_trials: int, n_trades_oos: int,
+    *, threshold: float | None = None,
+) -> dict[str, Any]:
+    """DSR stage：compute_dsr(min_observations=50) → insufficient → DEFER；else pass/fail。
+
+    threshold（P4 Option B）：dsr_threshold_for(α_i) ≥ 0.95 注入 test level；None 沿用
+    dsr_gate 預設（=0.95）。α_i 浮點下溢 → threshold=1.0 → compute_dsr 域檢 raise →
+    fail-soft DEFER（MIT #2 親驗邊界：收縮向不 crash，勿 clamp——clamp 會把 wealth 歸零
+    偽裝成可測）。
+    """
     try:
         from program_code.learning_engine.dsr_gate import compute_dsr  # noqa: PLC0415
     except ImportError:  # pragma: no cover — dual-path fallback
         from learning_engine.dsr_gate import compute_dsr  # type: ignore  # noqa: PLC0415
+    kwargs: dict[str, Any] = {}
+    if threshold is not None:
+        kwargs["threshold"] = float(threshold)
     try:
         res = compute_dsr(
             observed_sharpe=observed_sharpe, n_trials=max(1, n_trials),
             n_observations=max(2, n_trades_oos), min_observations=_Q1_MIN_TRADES_OOS,
+            **kwargs,
         )
     except (ValueError, Exception) as exc:  # noqa: BLE001 — 退化輸入 → DEFER（不 crash）
         logger.warning("math gate DSR stage fail-soft → DEFER: %s", exc)

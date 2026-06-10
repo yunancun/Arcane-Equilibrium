@@ -117,7 +117,7 @@ model_tier             = "cloud_l2"
 cloud_model_pref       = "sonnet"
 lane                   = "ml_backlog"                   # → LANE_DIRECTION="neutral"（backlog sink；晉升是另一 expand/MANUAL lane）
 output_schema_ref      = "ml_advisory.v1"               # 三模式共用 schema（mode 欄驅動子物件）
-prompt_contract_ref    = "ml_advisory.hypothesize.v1"   # → contract registry（NEW 確定性模板）
+prompt_contract_ref    = "ml_advisory.hypothesize.v2"   # → contract registry（P4：結構化 falsification 三欄 + primary_axis；v1 保留供 D3 血緣）
 out_of_bound_guard_ref = "ml_advisory.guard.v1"         # → guard registry（擴 empty-mechanism clause）
 novelty_gate           = true                           # hypothesis → novelty dedupe vs dead_failure_modes
 consequential_default  = false
