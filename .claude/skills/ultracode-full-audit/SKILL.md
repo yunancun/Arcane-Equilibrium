@@ -119,6 +119,17 @@ Workflow({ name: "openclaw-full-audit", args: { baseline, focus, axes?, scope?, 
 
 **最佳實踐 = 混合**：workflow 跑 Stage 2 廣度 fan-out + 對抗複核（拿結構化 confirmed/disputed/assumptions），主會話接 Stage 3-4 深度收斂。本 skill 的五階段就是這個混合形態 — 不是二選一。
 
+## 姊妹編排：盈利研判（profit-diagnosis）
+
+`openclaw-full-audit` 找**問題**（工程質量：bug/合規/安全），對偶的 `profit-diagnosis` 找**錢**（盈利歸因 + 開發方向）。交易系統的研判需兩者並用——前者保系統不出事，後者保系統會賺錢。
+
+`Workflow({ name: "profit-diagnosis", args: { baseline, scope, focus } })` — read-only，三階段：
+- **Evidence**：MIT/AI-E runtime 取真實證據（fills/edge/gate 拒單統計/dormant 清單/AI 成本 ROI）
+- **Probe**：QC/BB/MIT/AI-E 各域**守**（診斷現有錢漏 leak/凍 frozen/沒賺 unrealized，基於 runtime 證據）+**攻**（侵略性、跳出現有範式、最廣 scope 探索新 alpha 邊界，允許質疑「OHLCV+技術指標是否到天花板/搜索空間是否本身錯了」，可 WebSearch 借鑒外部）
+- **Map**：PA 綜合成 ROI 排序的開發機會地圖（守攻分區、翻牆概率、證據等級、驗證路徑、owner）
+
+鐵律：所有 edge 數字帶 runtime 證據不憑記憶；bull-only 標 regime-bet；attack 類 ASSUMPTION 機會先 leak-free 驗證（QC walk-forward / 歷史 kline backfill）才升格開發項，不直接投產；最快驗證路徑（flag-off/dormant 解凍，近零成本）優先於開發新東西。
+
 ## 與常規鏈的關係
 
 不替代日常 PM→PA→E1→E2→E4 鏈與順序派工。單點改動走 PM.md 派工模板 + 對抗驗證多視角化協議。本 workflow 是「全盤體檢」批量形態。
