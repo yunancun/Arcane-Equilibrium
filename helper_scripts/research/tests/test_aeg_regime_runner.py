@@ -130,29 +130,54 @@ def test_artifact_writer_outputs_manifest_and_index(tmp_path: Path):
     assert "feature_lineage_csv" in index
 
 
-def test_write_db_import_seam_truly_executes(monkeypatch):
-    """E2 MEDIUM-2 + re-review LOW 真 bite 版：實際執行 _write_db 走過 dual-path import。
+def test_write_db_import_seam_package_mode_subprocess():
+    """E2 MEDIUM-2/LOW 第三版（真 bite，subprocess）：在乾淨 package-mode context 行使
+    _write_db 的 dual-path import seam。
 
-    舊碼絕對 import 差一層 research → package 模式 --write-db 必 ModuleNotFoundError
-    （V127 從未被 populate 故 deploy 至今未暴露）。本測試 monkeypatch psycopg2.connect
-    為 sentinel raise——sentinel 到達 = `from .db_writer import persist_regime_rows`
-    （或 fallback）**已成功解析並越過**（import 在 connect 之前）；revert 成壞 import
-    時本測試以 ModuleNotFoundError（非 sentinel）失敗 = 真 regression bite。
+    為什麼必須 subprocess：tests/conftest 把 research/ 插進 sys.path，in-process 下
+    「原始差層絕對形」與「relative-only 形」兩個歷史壞 import 都可解析——bite 結構性
+    不可能（E2 第三輪 mutation 實證兩壞形全存活）。本測試 spawn 乾淨直譯器、cwd=srv 根、
+    不插 research/，以 `helper_scripts.research...harness` 真 package member import →
+    函數內 relative import 是唯一通路：mutation 回「原始差層絕對形」（燒掉 V127 populate
+    的那個）必 ModuleNotFoundError 非 sentinel = 真紅。
+
+    誠實範圍註記：direct-file 執行模式（python3 harness.py）的 fallback 分支不在本測
+    覆蓋（需直跑 main+CLI，過重）；該分支由生產 dual-path 結構保證、E2 上輪已 PASS。
     """
-    import types
+    import subprocess
+    import sys
+    import textwrap
+    from pathlib import Path
 
-    import psycopg2
-    import pytest as _pytest
+    srv_root = Path(__file__).resolve().parents[3]
+    prog = textwrap.dedent(
+        """
+        import sys, types
+        import psycopg2
 
-    from aeg_regime_runner import harness as _h
+        class _Sentinel(Exception):
+            pass
 
-    class _Sentinel(Exception):
-        pass
+        def _boom(*a, **k):
+            raise _Sentinel("seam-passed")
 
-    def _boom(*a, **k):
-        raise _Sentinel("import-seam-passed")
-
-    monkeypatch.setattr(psycopg2, "connect", _boom)
-    args = types.SimpleNamespace(dsn="postgresql://sentinel-not-used")
-    with _pytest.raises(_Sentinel):
-        _h._write_db(args, labels=[], transitions=[])
+        psycopg2.connect = _boom
+        from helper_scripts.research.aeg_regime_runner.harness import _write_db
+        args = types.SimpleNamespace(dsn="postgresql://sentinel-not-used")
+        try:
+            _write_db(args, labels=[], transitions=[])
+        except _Sentinel:
+            print("SEAM_OK")
+            sys.exit(0)
+        except Exception as exc:  # ModuleNotFoundError 等 = import seam 壞
+            print(f"SEAM_FAIL:{type(exc).__name__}:{exc}")
+            sys.exit(1)
+        print("SEAM_FAIL:no-exception")
+        sys.exit(1)
+        """
+    )
+    r = subprocess.run(
+        [sys.executable, "-c", prog], cwd=str(srv_root),
+        capture_output=True, text=True, timeout=120,
+    )
+    assert "SEAM_OK" in r.stdout, f"stdout={r.stdout!r} stderr={r.stderr[-500:]!r}"
