@@ -10,6 +10,11 @@ MODULE_NOTE (中文):
   所有子路由（Paper Trading / L2 AI / Risk / Strategy / Governance / Scout）的统一注册。
   属于 Control API v1 层，是系统唯一的 HTTP 服务暴露点。
 
+  檔案大小債務（E2 LOW-1，2026-06-10）：本檔已跨 800 行警戒線（CLAUDE §九）。
+  split follow-up 候選 = @app.on_event("startup") 的背景任務 wiring（flusher /
+  canary / reconciler 等 create_task 排程）抽離為獨立 startup wiring 模組。
+  本輪僅記帳不拆（exact-touch 慣例，P5-SM soak fix delta 不擴 scope）。
+
 MODULE_NOTE (English):
   Main FastAPI application entry point, layering snapshot-stable compilation and a
   runtime bridge on top of main_legacy. Responsible for deterministic state recompilation

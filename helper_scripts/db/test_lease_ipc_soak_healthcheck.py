@@ -227,6 +227,14 @@ def _ev(
     return (ev_type, flag, attempts, ok, detail or {}, epoch_s)
 
 
+def _hb(epoch_s: int, attempts: Any, ok: Any = None) -> tuple:
+    """canary_heartbeat 事件（E2 HIGH-2）：flusher 30min 低頻攜 attempts 快照。"""
+    return _ev(
+        "canary_heartbeat", True, epoch_s, attempts,
+        attempts if ok is None else ok, {"heartbeat_interval_s": 1800},
+    )
+
+
 def _healthy_inputs(
     *,
     canary_total: int = 1500,
@@ -236,13 +244,21 @@ def _healthy_inputs(
     events: Any = None,
     now_epoch: int = _NOW,
 ) -> tuple[list[Any], list[Any]]:
-    """一組「全健康」輸入（window 50h / probes 1500 / rate 0.9967）；caller 壞單一條件。"""
+    """一組「全健康」輸入（window 50h / probes 1500 / rate 0.9967）；caller 壞單一條件。
+
+    默認事件含一條合規 heartbeat（E2 HIGH-2 後 10b 支路要求窗內有連續性證據：
+    30min 前、attempts 略低於當前快照 → 嚴格增長成立、新鮮度成立）。caller 自帶
+    events 時須自行附合規 heartbeat（除非測的支路在 10b 之前提前 return）。
+    """
     snaps = [
         _snap("singleton", 100, 100, 0, flag, 10),
         _snap("canary", canary_total, canary_ok, canary_total - canary_ok, flag, canary_age),
     ]
     if events is None:
-        events = [_ev("flusher_start", True, _NOW - 50 * 3600, 0, 0)]
+        events = [
+            _ev("flusher_start", True, _NOW - 50 * 3600, 0, 0),
+            _hb(_NOW - 1800, max(0, canary_total - 5), max(0, canary_ok - 5)),
+        ]
     fetchones = [(True,), (True,), (1,), (now_epoch,)]
     fetchalls = [snaps, events]
     return fetchones, fetchalls
@@ -332,7 +348,10 @@ class TestCheck82S3Gates(unittest.TestCase):
         self.assertIn("success_rate=0.99", msg)
 
     def test_window_too_short_fails_accumulating(self) -> None:
-        events = [_ev("flusher_start", True, _NOW - 10 * 3600, 0, 0)]
+        events = [
+            _ev("flusher_start", True, _NOW - 10 * 3600, 0, 0),
+            _hb(_NOW - 1800, 1490),  # 合規 heartbeat（10b 不搶答，讓窗軸自己咬）
+        ]
         fo, fa = _healthy_inputs(events=events)
         cur = _cursor82(fo, fa)
         status, msg = check_82_lease_ipc_soak_window(cur)
@@ -386,6 +405,7 @@ class TestCheck82S4WindowValidity(unittest.TestCase):
             # 本事件的 flag_enabled=False 留痕；之後 flag 回 ON（V129 當前 flag=True）
             # 但無 transition 事件——belt-and-suspenders 支路必須單獨擋住。
             _ev("canary_leader_start", False, _NOW - 30 * 3600, 100, 100),
+            _hb(_NOW - 1800, 1490),  # 合規 heartbeat（10b 不搶答）
         ]
         fo, fa = _healthy_inputs(events=events)
         cur = _cursor82(fo, fa)
@@ -401,6 +421,7 @@ class TestCheck82S4WindowValidity(unittest.TestCase):
                 {"from": True, "to": False}),
             _ev("flag_change", True, _NOW - 30 * 3600 + 60, 100, 100,
                 {"from": False, "to": True}),
+            _hb(_NOW - 1800, 1490),  # 合規 heartbeat（10b 不搶答）
         ]
         fo, fa = _healthy_inputs(events=events)
         cur = _cursor82(fo, fa)
@@ -413,6 +434,7 @@ class TestCheck82S4WindowValidity(unittest.TestCase):
         events = [
             _ev("flag_change", True, _NOW - 49 * 3600, 10, 10,
                 {"from": False, "to": True}),
+            _hb(_NOW - 1800, 1490),  # 合規 heartbeat（10b 支路滿足）
         ]
         fo, fa = _healthy_inputs(events=events)
         cur = _cursor82(fo, fa)
@@ -430,6 +452,7 @@ class TestCheck82S4WindowValidity(unittest.TestCase):
                 "prev_canary_updated_at_epoch_s": rollover_ts - 7200,
                 "prev_flag_enabled": True,
             }),
+            _hb(_NOW - 1800, 1490),  # 合規 heartbeat（10b 不搶答，讓間隙軸自己咬）
         ]
         fo, fa = _healthy_inputs(events=events)
         cur = _cursor82(fo, fa)
@@ -447,6 +470,7 @@ class TestCheck82S4WindowValidity(unittest.TestCase):
                 "prev_canary_updated_at_epoch_s": rollover_ts - 60,
                 "prev_flag_enabled": True,
             }),
+            _hb(_NOW - 1800, 690),  # 本 epoch 合規 heartbeat（< 當前 total=700）
         ]
         fo, fa = _healthy_inputs(canary_total=700, canary_ok=698, events=events)
         cur = _cursor82(fo, fa)
@@ -460,6 +484,7 @@ class TestCheck82S4WindowValidity(unittest.TestCase):
             _ev("flusher_start", True, _NOW - 50 * 3600, 0, 0),
             _ev("epoch_rollover", True, _NOW - 20 * 3600, 700, 698,
                 {"prev_flag_enabled": True}),
+            _hb(_NOW - 1800, 1490),  # 合規 heartbeat（10b 不搶答）
         ]
         fo, fa = _healthy_inputs(events=events)
         cur = _cursor82(fo, fa)
@@ -477,6 +502,7 @@ class TestCheck82S4WindowValidity(unittest.TestCase):
                 "prev_canary_updated_at_epoch_s": rollover_ts - 60,
                 "prev_flag_enabled": False,
             }),
+            _hb(_NOW - 1800, 1490),  # 合規 heartbeat（10b 不搶答）
         ]
         fo, fa = _healthy_inputs(events=events)
         cur = _cursor82(fo, fa)
@@ -516,6 +542,191 @@ class TestCheck82S4WindowValidity(unittest.TestCase):
         cur.execute.side_effect = RuntimeError("pg boom")
         status, msg = check_82_lease_ipc_soak_window(cur)
         self.assertEqual(status, "FAIL")
+
+
+class TestCheck82DupRolloverDedup(unittest.TestCase):
+    """[82] E2 HIGH-1 regression：crash-loop 重複 epoch_rollover 去重（Probe A）。
+
+    epoch 存活 <30s（死於首次 flush 前）時，下一 epoch 的 rollover 重讀**未刷新**
+    的 V129 → 攜帶與前一 rollover 完全相同的 prev 終值。修復前跨 epoch 求和全數
+    疊加 → 成功率稀釋假綠；修復後同一底層快照（同 prev_canary_updated_at_epoch_s
+    + 同 prev 計數）只計一次。
+    """
+
+    def test_probe_a_dup_rollover_dilution_fails(self) -> None:
+        """E2 Probe A 縮減版：30 個 crash-loop rollover 攜同一 V129 終值（800/795）
+        + 劣化當前 epoch（60 attempts / 20 ok，散發失敗無連段）。
+
+        修復前：30 份疊加 → 24060/23870 = 0.9921 ≥ 0.99 → 假 PASS（本測試紅）；
+        修復後：dedup 帳 = 860/815 = 0.9477 < 0.99 → S3 成功率 FAIL。
+        """
+        v129_updated = _NOW - 49 * 3600  # epoch1 終值 updated_at（全部 dup 共享）
+        events = [_ev("flusher_start", True, _NOW - 50 * 3600, 0, 0)]
+        for i in range(30):
+            # 10 分鐘內 30 次 crash-loop restart（各 epoch <30s，間隙 20s ≤30min
+            # 不觸發錨點重置——窗保留，正是稀釋假綠成立的前提）。
+            events.append(_ev("epoch_rollover", True, _NOW - 49 * 3600 + i * 20, 800, 795, {
+                "prev_singleton_updated_at_epoch_s": v129_updated,
+                "prev_canary_updated_at_epoch_s": v129_updated,
+                "prev_flag_enabled": True,
+            }))
+        events.append(_hb(_NOW - 1800, 50))  # 合規 heartbeat（10b 不搶答）
+        fo, fa = _healthy_inputs(canary_total=60, canary_ok=20, events=events)
+        cur = _cursor82(fo, fa)
+        status, msg = check_82_lease_ipc_soak_window(cur)
+        self.assertEqual(status, "FAIL")
+        self.assertIn("success rate=0.9477", msg)
+        self.assertIn("cum_attempts=860", msg)  # dedup 後帳（非 24060）
+
+    def test_identical_prev_counted_once_distinct_prev_still_counted(self) -> None:
+        """精確算術雙生：identical-prev pair 計一次、distinct-prev 照計。
+
+        rollover A(prev 300/299) + B(=A 完全重複) + C(prev 500/496，不同快照)
+        + 當前 epoch 700/698 → probes = 700+300+500 = 1500（非 1800 過度疊加、
+        非 1200 過度去重）→ PASS。
+        """
+        base_ts = _NOW - 20 * 3600
+        shared_detail = {
+            "prev_singleton_updated_at_epoch_s": base_ts - 60,
+            "prev_canary_updated_at_epoch_s": base_ts - 60,
+            "prev_flag_enabled": True,
+        }
+        events = [
+            _ev("flusher_start", True, _NOW - 50 * 3600, 0, 0),
+            _ev("epoch_rollover", True, base_ts, 300, 299, dict(shared_detail)),
+            _ev("epoch_rollover", True, base_ts + 20, 300, 299, dict(shared_detail)),
+            _ev("epoch_rollover", True, base_ts + 40, 500, 496, {
+                "prev_singleton_updated_at_epoch_s": base_ts + 30,
+                "prev_canary_updated_at_epoch_s": base_ts + 30,
+                "prev_flag_enabled": True,
+            }),
+            _hb(_NOW - 1800, 690),  # 本 epoch 合規 heartbeat（< 當前 total=700）
+        ]
+        fo, fa = _healthy_inputs(canary_total=700, canary_ok=698, events=events)
+        cur = _cursor82(fo, fa)
+        status, msg = check_82_lease_ipc_soak_window(cur)
+        self.assertEqual(status, "PASS")
+        self.assertIn("probes=1500", msg)
+
+
+class TestCheck82HeartbeatContinuity(unittest.TestCase):
+    """[82] E2 HIGH-2 regression：canary 中段死亡偵測（heartbeat 連續性支路 10b）。
+
+    flusher 每 30min 寫 canary_heartbeat（攜 attempts 快照）；本支路斷言
+    (i) 窗 ≥1h 必須有 heartbeat、(ii) 最新 heartbeat ≤1h、(iii) 同 epoch 相鄰
+    heartbeat 嚴格增長、(iv) 最後 heartbeat（>600s 寬限）→ 當前快照嚴格增長。
+    """
+
+    def test_probe_d_midwindow_death_flat_heartbeats_fails(self) -> None:
+        """E2 Probe D：17h 攢 510 拍（@120s）後 canary 死 31h；flusher 持續 flush
+        （V129 fresh、0 失敗、無連段、窗 48h、510 ≥ 500 floor）。
+
+        修復前：全軸不咬 → 假 PASS rate=1.0000（本測試紅）；
+        修復後：死亡後相鄰 heartbeat attempts 持平（510 -> 510）→ 連續性 FAIL。
+        """
+        start = _NOW - 48 * 3600 - 60
+        events = [_ev("flusher_start", True, start, 0, 0)]
+        # 存活期 17h：每 30min 一條 heartbeat，attempts 嚴格增長至 510（~15 拍/30min）。
+        for k in range(1, 35):
+            events.append(_hb(start + k * 1800, min(510, k * 15)))
+        # 死亡期 31h：flusher 活著照發 heartbeat，但 attempts 凍結在 510。
+        for k in range(35, 97):
+            events.append(_hb(start + k * 1800, 510))
+        fo, fa = _healthy_inputs(canary_total=510, canary_ok=510, events=events)
+        cur = _cursor82(fo, fa)
+        status, msg = check_82_lease_ipc_soak_window(cur)
+        self.assertEqual(status, "FAIL")
+        self.assertIn("did not grow between adjacent heartbeats", msg)
+
+    def test_heartbeat_chain_stopped_midwindow_fails(self) -> None:
+        """heartbeat 證據鏈中途停擺（最新一條 5h 前）→ 新鮮度 FAIL。
+
+        否則「heartbeat 在 17h 停發、canary 30h 才死」會讓 HIGH-2 換個位置復發
+        （快照增長軸 vs 最後一條舊 heartbeat 仍會假綠）。
+        """
+        start = _NOW - 50 * 3600
+        events = [_ev("flusher_start", True, start, 0, 0)]
+        for k in range(1, 10):
+            events.append(_hb(start + k * 1800, k * 15)) # 早期正常增長
+        events.append(_hb(_NOW - 5 * 3600, 600))  # 最後一條在 5h 前，之後全黑
+        fo, fa = _healthy_inputs(canary_total=1500, canary_ok=1500, events=events)
+        cur = _cursor82(fo, fa)
+        status, msg = check_82_lease_ipc_soak_window(cur)
+        self.assertEqual(status, "FAIL")
+        self.assertIn("newest canary_heartbeat age=", msg)
+
+    def test_no_heartbeats_in_long_window_fails(self) -> None:
+        """窗 ≥1h 但 0 條 heartbeat → 連續性不可證 → fail-closed FAIL
+        （事件路徑死或部署不含 heartbeat 機制，canary 中段死亡將不可見）。"""
+        events = [_ev("flusher_start", True, _NOW - 50 * 3600, 0, 0)]
+        fo, fa = _healthy_inputs(events=events)
+        cur = _cursor82(fo, fa)
+        status, msg = check_82_lease_ipc_soak_window(cur)
+        self.assertEqual(status, "FAIL")
+        self.assertIn("0 canary_heartbeat events", msg)
+
+    def test_no_growth_since_last_heartbeat_fails(self) -> None:
+        """尾段死亡：相鄰 heartbeat 全增長，但最後一條（1800s 前 > 600s 寬限）後
+        當前快照無增長 → (iv) FAIL。"""
+        events = [
+            _ev("flusher_start", True, _NOW - 50 * 3600, 0, 0),
+            _hb(_NOW - 7200, 1460),
+            _hb(_NOW - 5400, 1475),
+            _hb(_NOW - 3600, 1490),
+            _hb(_NOW - 1800, 1500),  # 最後一條後 canary 死：當前快照仍 1500
+        ]
+        fo, fa = _healthy_inputs(canary_total=1500, canary_ok=1500, events=events)
+        cur = _cursor82(fo, fa)
+        status, msg = check_82_lease_ipc_soak_window(cur)
+        self.assertEqual(status, "FAIL")
+        self.assertIn("window tail", msg)
+
+    def test_recent_heartbeat_within_grace_no_false_tail_fail(self) -> None:
+        """雙生 PASS：最後 heartbeat 300s 前（<600s 寬限）、當前快照同值 →
+        不誤殺（120s cadence 下 300s 內零增長完全合法）。"""
+        events = [
+            _ev("flusher_start", True, _NOW - 50 * 3600, 0, 0),
+            _hb(_NOW - 2100, 1490),
+            _hb(_NOW - 300, 1500),
+        ]
+        fo, fa = _healthy_inputs(canary_total=1500, canary_ok=1500, events=events)
+        cur = _cursor82(fo, fa)
+        status, msg = check_82_lease_ipc_soak_window(cur)
+        self.assertEqual(status, "PASS")
+
+    def test_cross_epoch_heartbeat_drop_not_false_positive(self) -> None:
+        """雙生 PASS：epoch_rollover 後計數器歸零，heartbeat 800→30 是合法回落
+        （比較基線在 rollover 重置，不誤判死亡）；跨 epoch 求和照常。"""
+        rollover_ts = _NOW - 20 * 3600
+        events = [
+            _ev("flusher_start", True, _NOW - 50 * 3600, 0, 0),
+            _hb(rollover_ts - 3600, 790),
+            _hb(rollover_ts - 1800, 800),
+            _ev("epoch_rollover", True, rollover_ts, 800, 795, {
+                "prev_singleton_updated_at_epoch_s": rollover_ts - 60,
+                "prev_canary_updated_at_epoch_s": rollover_ts - 60,
+                "prev_flag_enabled": True,
+            }),
+            _hb(rollover_ts + 1800, 30),   # 新 epoch 從低值重新累積
+            _hb(_NOW - 1800, 690),
+        ]
+        fo, fa = _healthy_inputs(canary_total=700, canary_ok=698, events=events)
+        cur = _cursor82(fo, fa)
+        status, msg = check_82_lease_ipc_soak_window(cur)
+        self.assertEqual(status, "PASS")
+        self.assertIn("probes=1500", msg)  # 700 + 800（跨 epoch 求和不受影響）
+
+    def test_heartbeat_without_attempts_snapshot_fails_closed(self) -> None:
+        """heartbeat 攜 None attempts（計數讀取失敗）→ 增長不可證 → fail-closed。"""
+        events = [
+            _ev("flusher_start", True, _NOW - 50 * 3600, 0, 0),
+            _hb(_NOW - 1800, None),
+        ]
+        fo, fa = _healthy_inputs(events=events)
+        cur = _cursor82(fo, fa)
+        status, msg = check_82_lease_ipc_soak_window(cur)
+        self.assertEqual(status, "FAIL")
+        self.assertIn("carries no attempts snapshot", msg)
 
 
 @unittest.skip(

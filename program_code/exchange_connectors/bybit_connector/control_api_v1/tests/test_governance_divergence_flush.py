@@ -416,11 +416,17 @@ def _detect_with(
 
 
 def test_detect_first_observation_is_baseline_no_event() -> None:
-    """首次觀測只記 baseline（無 flag_change 事件——沒有「前值」可比）。"""
+    """首次觀測只記 baseline（無 flag_change 等「比對型」事件——沒有前值可比）。
+
+    唯一例外 = canary_heartbeat（E2 HIGH-2）：連續性證據鏈首輪即建立，
+    它是週期型非比對型事件，首輪就該有。
+    """
     cur = MagicMock()
     _detect_with(cur, True, [{"attempts": 0, "ok": 0, "fail": 0, "fail_streak_breaches": 0}])
-    inserts = [s for s, _ in _executed_sqls(cur) if "lease_ipc_soak_events" in s]
-    assert inserts == []  # 無事件
+    inserts = [
+        p for s, p in _executed_sqls(cur) if "lease_ipc_soak_events" in s
+    ]
+    assert [p[0] for p in inserts] == ["canary_heartbeat"]  # 僅 heartbeat，無比對型事件
 
 
 def test_detect_flag_change_emits_event() -> None:
@@ -433,14 +439,15 @@ def test_detect_flag_change_emits_event() -> None:
             flush.detect_and_record_soak_events_once()   # baseline = ON
         with _patch_flag(False):
             flush.detect_and_record_soak_events_once()   # ON→OFF
-    insert_params = [
-        p for s, p in _executed_sqls(cur) if "lease_ipc_soak_events" in s
+    # 按型別過濾（首輪另有 canary_heartbeat，E2 HIGH-2 後屬預期）。
+    flag_changes = [
+        p for s, p in _executed_sqls(cur)
+        if "lease_ipc_soak_events" in s and p[0] == "flag_change"
     ]
-    assert len(insert_params) == 1
-    assert insert_params[0][0] == "flag_change"
-    assert insert_params[0][1] is False  # 事件記錄 OFF 狀態
+    assert len(flag_changes) == 1
+    assert flag_changes[0][1] is False  # 事件記錄 OFF 狀態
     import json as _json
-    assert _json.loads(insert_params[0][8]) == {"from": True, "to": False}
+    assert _json.loads(flag_changes[0][8]) == {"from": True, "to": False}
 
 
 def test_detect_canary_leader_start_once() -> None:
@@ -532,6 +539,91 @@ def test_detect_exception_fail_soft() -> None:
     with _patch_pg_conn(conn), _patch_flag(True), _patch_canary_counters(seq):
         # attempts>0 會嘗試寫 canary_leader_start → INSERT 拋 → 吞噬回 False。
         assert flush.detect_and_record_soak_events_once() is False
+
+
+# ── canary_heartbeat（E2 HIGH-2 修復）────────────────────────────────────────
+
+
+def _heartbeat_params(cur: MagicMock) -> list:
+    """過濾出 canary_heartbeat 事件的 INSERT 參數。"""
+    return [
+        p for s, p in _executed_sqls(cur)
+        if "lease_ipc_soak_events" in s and p[0] == "canary_heartbeat"
+    ]
+
+
+def test_detect_emits_heartbeat_first_cycle_with_snapshot() -> None:
+    """首輪偵測即發 canary_heartbeat（flag ON），攜 attempts 快照 + interval detail。"""
+    cur = MagicMock()
+    seq = [{"attempts": 42, "ok": 41, "fail": 1, "fail_streak_breaches": 0}]
+    _detect_with(cur, True, seq)
+    hbs = _heartbeat_params(cur)
+    assert len(hbs) == 1
+    assert hbs[0][1] is True   # flag_enabled
+    assert hbs[0][5] == 42     # prev_canary_attempts = emit 當下快照（[82] 增長斷言依據）
+    import json as _json
+    assert _json.loads(hbs[0][8])["heartbeat_interval_s"] == flush._HEARTBEAT_INTERVAL_S
+
+
+def test_detect_heartbeat_interval_gating() -> None:
+    """間隔未到不重發（30min 低頻語義，不增噪音）；間隔過後再發。"""
+    import time as _time
+
+    cur = MagicMock()
+    seq = [{"attempts": 10, "ok": 10, "fail": 0, "fail_streak_breaches": 0}] * 3
+    conn = _make_conn(cur)
+    with _patch_pg_conn(conn), _patch_flag(True), _patch_canary_counters(seq):
+        flush.detect_and_record_soak_events_once()   # 首輪 → 發
+        flush.detect_and_record_soak_events_once()   # 間隔未到 → 不發
+        # 模擬 30min 經過：tracker 回撥超過間隔。
+        flush._SOAK_TRACKERS["last_heartbeat_mono"] = (
+            _time.monotonic() - flush._HEARTBEAT_INTERVAL_S - 1
+        )
+        flush.detect_and_record_soak_events_once()   # 間隔已過 → 再發
+    assert len(_heartbeat_params(cur)) == 2
+
+
+def test_detect_no_heartbeat_when_inactive() -> None:
+    """非 soak 期（flag OFF 且 canary 0 attempts）不發 heartbeat。
+
+    否則平時 cron 期每 30min 一條事件會讓 `[82]` 的 soak-active 推定
+    （近 72h 有事件）永遠為真，永遠不 PASS-skip。
+    """
+    cur = MagicMock()
+    seq = [{"attempts": 0, "ok": 0, "fail": 0, "fail_streak_breaches": 0}]
+    _detect_with(cur, False, seq)
+    assert _heartbeat_params(cur) == []
+
+
+def test_detect_heartbeat_when_flag_off_but_canary_active() -> None:
+    """flag OFF 但 canary 有 probe（不一致 soak 狀態）→ 照發且 flag_enabled=False。
+
+    事件本身即一次 OFF 觀測，`[82]` S4 軸（flag-OFF 觀測 / flag currently OFF）
+    會據此正確 FAIL——不發反而讓不一致狀態無痕。
+    """
+    cur = MagicMock()
+    seq = [{"attempts": 7, "ok": 7, "fail": 0, "fail_streak_breaches": 0}]
+    _detect_with(cur, False, seq)
+    hbs = _heartbeat_params(cur)
+    assert len(hbs) == 1
+    assert hbs[0][1] is False
+
+
+def test_detect_heartbeat_retry_after_insert_failure() -> None:
+    """INSERT 失敗 → heartbeat tracker 不前移 → 下一輪重試（與其他 tracker
+    「寧漏勿重」方向相反：heartbeat 是連續性證據鏈，漏洞會讓 `[82]` 新鮮度軸咬；
+    重複一條 heartbeat 對 append-only 帳本無害）。"""
+    cur = MagicMock()
+    cur.execute.side_effect = [RuntimeError("V137 hiccup"), None]
+    conn = _make_conn(cur)
+    seq = [{"attempts": 5, "ok": 5, "fail": 0, "fail_streak_breaches": 0}] * 2
+    with _patch_pg_conn(conn), _patch_flag(True), _patch_canary_counters(seq):
+        # 第一輪：批次（leader_start + heartbeat）INSERT 拋 → tracker 不前移。
+        assert flush.detect_and_record_soak_events_once() is False
+        assert flush._SOAK_TRACKERS["last_heartbeat_mono"] is None
+        # 第二輪：重試成功 → tracker 前移。
+        assert flush.detect_and_record_soak_events_once() is True
+        assert flush._SOAK_TRACKERS["last_heartbeat_mono"] is not None
 
 
 # ── flush_observability_cycle_once ───────────────────────────────────────────

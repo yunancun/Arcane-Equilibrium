@@ -50,7 +50,9 @@ MODULE_NOTE:
         leader 啟動時先讀舊 V129 兩 row 寫 ``epoch_rollover``（搶救前一 epoch 終值，
         損失 ≤30s）+ ``flusher_start``；週期偵測 flag 變遷（``flag_change``）/
         canary 失敗連段增量（``canary_fail_streak``）/ 程內計數器倒退
-        （``counter_regression``）。`[82]` soak-window check 以這些事件跨 epoch
+        （``counter_regression``）/ 低頻連續性 ``canary_heartbeat``（30min 攜
+        attempts 快照，E2 HIGH-2 修復：讓 `[82]` 可斷言 probe 窗內持續增長，
+        canary 中段死亡不再不可見）。`[82]` soak-window check 以這些事件跨 epoch
         重建連續有效窗。V137 未 apply 時全部 fail-soft（事件寫入失敗只 debug log，
         絕不影響權威路徑 / comparator / canary）。
 
@@ -84,6 +86,20 @@ _CANARY_SNAPSHOT_KEY: str = "canary"
 # 強制非 leader 的 env（對齊 OPENCLAW_RECON_ALERT_MONITOR_LEADER 慣例）。
 _LEADER_ENV: str = "OPENCLAW_LEASE_DIVERGENCE_FLUSHER_LEADER"
 
+# canary 連續性 heartbeat 週期（秒；E2 HIGH-2 修復，2026-06-10）。
+# 為什麼需要 heartbeat：canary 累積 ≥ 停擺下限後死亡/長停擺時，flusher 照常 flush
+# （V129 fresh → flusher-dead 軸不咬）、停擺不產生失敗（連段軸不咬）→ `[82]` 收口
+# 時中段死亡不可見（E2 Probe D：17h 攢 510 拍後 31h 全黑仍 PASS）。低頻 heartbeat
+# 事件攜帶 attempts 快照，讓 `[82]` 能斷言「窗內 probe 持續增長」。
+# 為什麼 1800s（30min）：
+#   - 與 `[82]` SOAK_EPOCH_GAP_MAX_SECONDS（30min 觀測黑洞容忍上限）對齊——連續性
+#     證據粒度 = 窗中斷判定粒度；
+#   - 相鄰兩條 heartbeat 之間至少 ~6 拍（300s 退頻 cadence 下限）、常態 ~15 拍
+#     （120s cadence），「嚴格增長」斷言裕度充足，結構上零誤殺；
+#   - 量級：48h 窗 ≈ 96 row、14d soak ≈ 672 row，append-only 低速表仍可忽略。
+# `[82]` 端鏡像常數 SOAK_HEARTBEAT_*（cron-side 不 import 本模組，兩端注釋互指）。
+_HEARTBEAT_INTERVAL_S: int = 1800
+
 # module-level leader-lock fd（singleton-registry §2.5.4）。None=尚未取得 / 非 leader。
 _FLUSHER_LEADER_LOCK_FD: int | None = None
 
@@ -103,6 +119,10 @@ _SOAK_TRACKERS: dict[str, Any] = {
     "last_canary_counts": None,
     # 本 epoch 是否已寫 epoch 起點事件（flusher_start + epoch_rollover）。
     "epoch_start_recorded": False,
+    # 上次成功寫入 canary_heartbeat 的 monotonic 秒（None=本 epoch 尚未寫過 →
+    # 首輪即發，讓新 epoch 的連續性證據鏈儘早建立）。用 monotonic 不用 wall-clock：
+    # heartbeat 是「間隔排程」語義，須免疫系統時鐘跳變。
+    "last_heartbeat_mono": None,
 }
 
 
@@ -478,11 +498,12 @@ def record_epoch_start_events_once() -> bool:
 
 def detect_and_record_soak_events_once() -> bool:
     """週期事件偵測（每輪 flush 後跑一次）：flag_change / canary_leader_start /
-    canary_fail_streak / counter_regression。
+    canary_fail_streak / counter_regression / canary_heartbeat。
 
     全部 best-effort；偵測本身純記憶體比對（trackers vs 當下快照），只有事件
     INSERT 碰 PG（fail-soft）。trackers 在**寫入成功與否之外**都會前移——事件
     寫失敗寧可漏記也不重複轟（append-only 帳本的 dedupe 由 tracker 前移保證）。
+    **例外：heartbeat tracker 只在寫入成功後前移**（方向相反，理由見該段注釋）。
     """
     try:
         flag_enabled = _read_lease_flag_state()
@@ -539,7 +560,36 @@ def detect_and_record_soak_events_once() -> bool:
             if current:
                 _SOAK_TRACKERS[tracker_key] = dict(current)
 
-        return _insert_soak_events(events)
+        # ── canary 連續性 heartbeat（E2 HIGH-2 修復）──
+        # 低頻（_HEARTBEAT_INTERVAL_S）寫一條攜 attempts 快照的事件，讓 `[82]` 能
+        # 斷言「窗內 probe 持續增長」（canary 中段死亡 → 相鄰 heartbeat attempts
+        # 持平 → FAIL）。emit 條件 = flag ON **或** canary 已有 probe：
+        #   - 非 soak 期（flag OFF 且 canary 從未跑）不發——否則平時 cron 期
+        #     heartbeat 會讓 `[82]` 的 soak-active 推定（近 72h 有事件）永遠為真；
+        #   - flag OFF 但 canary 仍在跑（不一致的 soak 狀態）照發：事件本身的
+        #     flag_enabled=false 是一次 OFF 觀測，`[82]` S4 軸會正確 FAIL。
+        now_mono = time.monotonic()
+        heartbeat_due = False
+        if flag_enabled or attempts > 0:
+            last_hb_mono = _SOAK_TRACKERS["last_heartbeat_mono"]
+            heartbeat_due = (
+                last_hb_mono is None
+                or (now_mono - float(last_hb_mono)) >= _HEARTBEAT_INTERVAL_S
+            )
+            if heartbeat_due:
+                events.append(_event_payload(
+                    "canary_heartbeat", flag_enabled, comparator, canary_counts,
+                    detail={"heartbeat_interval_s": _HEARTBEAT_INTERVAL_S},
+                ))
+
+        inserted = _insert_soak_events(events)
+        # heartbeat tracker 只在寫入成功後前移（與其他 tracker「寧漏勿重」相反）：
+        # heartbeat 是週期性連續性證據鏈，漏一條 = `[82]` 證據出洞且新鮮度軸會咬；
+        # 寫失敗下一輪 30s 重試直到成功，append-only 帳本多一條 heartbeat 無害
+        # （`[82]` 對 heartbeat 無 dedupe 需求，只看增長與新鮮度）。
+        if inserted and heartbeat_due:
+            _SOAK_TRACKERS["last_heartbeat_mono"] = now_mono
+        return inserted
     except Exception:  # noqa: BLE001 — 偵測層雙保險，絕不影響權威路徑
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
@@ -569,6 +619,7 @@ def _reset_soak_event_trackers_for_tests() -> None:
         last_comparator_counts=None,
         last_canary_counts=None,
         epoch_start_recorded=False,
+        last_heartbeat_mono=None,
     )
 
 
