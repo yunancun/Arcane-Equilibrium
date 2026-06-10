@@ -7,14 +7,14 @@ metadata:
 
 # 三端同步 + ops2 merge + 多 session 髒樹清理 (2026-06-10)
 
-**ops2 落地**:`fix/ops2-phase2-cutover`(原僅 Mac 本地 branch,從未推 origin——「merge-ready」工作差點只活在一台機器上)→ push origin → merge main **`fa88a487`** 零衝突。4 commits:a3d27729 cutover(remove Phase-1 IPC fallback,fail loud on missing signing key)+cf1b9320 E2 fixes+e34a8772 E4 負向測試+823e53ad CC doc-reconcile。觸碰面=rust live_authorization/main.rs+control_api live_trust_routes+fresh_start.sh,**零 cron 路徑→pull 安全,代碼靜止至重啟才生效**;rotation 仍 operator 9 月節點(due 09-08)。
+**ops2 落地**:`fix/ops2-phase2-cutover`(原僅 Mac 本地 branch,從未推 origin——「merge-ready」工作差點只活在一台機器上)→ push origin → merge main **`3018c7a3`** 零衝突(docs 收口 `9e08ccb6`;首次 merge fa88a487 因 push 競態被 replay 取代)。4 commits:a3d27729 cutover(remove Phase-1 IPC fallback,fail loud on missing signing key)+cf1b9320 E2 fixes+e34a8772 E4 負向測試+823e53ad CC doc-reconcile。觸碰面=rust live_authorization/main.rs+control_api live_trust_routes+fresh_start.sh,**零 cron 路徑→pull 安全,代碼靜止至重啟才生效**;rotation 仍 operator 9 月節點(due 09-08)。
 
 **Mac 髒樹 60 檔分桶清理**(切 main 前):
 - 31 檔與 main byte-identical(殘留副本)→ 直接吸收
 - 17 檔孤檔(UT-NOT-ON-MAIN:13 報告/設計+4 memory)→ docs commit 入庫 main
 - 9 M-divergent:E1/E2/E4 memory+feedback 純追加→入庫;**L2_TODO.md 本地=stale 舊版**(main 已是 deploy-DONE 新版,直 commit 會倒灌)+aeg builder/tests WIP(+202/−12 未走鏈)→只進 rescue
 - 2 fork memory topic 檔(l2_d3_phase1_green/agents_skills_revamp):**本地較新**(引用收口 SHA `9e920c21`/「三端同步完」)→本地入庫,main 舊版留 history
-- 全量快照 branch **`rescue/mac-dirty-2026-06-10`**(`1689b153`,已 push;勿 merge,純保存)
+- 全量快照 branch **`rescue/mac-dirty-2026-06-10`**(`1689b153`+sibling 後續編輯追加快照共 2 commits,已 push;勿 merge,純保存)
 
 **教訓**:
 1. fork 檔判方向不能只看 diff 行數,看**誰引用更晚的 commit SHA / 完成態敘述**(L2_TODO 本地舊但 memory topic 本地新——同一工作樹兩個方向並存)。
