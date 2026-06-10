@@ -282,3 +282,8 @@ WP-04 F-01 `budget_config.toml × 2` daily 100→2 / monthly 150→60 已 deploy
 2. **5+ 週 SoT drift pattern**：常量在代碼層（layer2_types.py:60）正確，TOML 配置層 stale → 任何「對齊代碼 SoT」的改動 procedure 上仍是 governance event，不是 silent hygiene
 3. **業務鏈完整度 ≠ substance 拍板**：$2 cap 業務鏈 4/4 環節通，但 operator 仍須拍板，因為 cap 數值本身是 governance 邊界
 4. **Implicit ratification via deployment = debt**：v35 rebuild 含改動不等於 ratify；未來 audit 不能用 "deployed" 充當 "approved"
+
+### 2026-06-10 AC-S2-A-3 證據檢查
+- 結論 (b):0 候選滿足,證據鏈 step 0 未啟動(A1/A2 demo inactive/0 fills/無 green Stage 0R);排程項改事件觸發(4 條件)+2026-06-27 backstop;AC-S2-A-3 從屬 AEG 非被取代(必要非充分)
+- 交叉核驗抓 1 處 drift:oi_delta 在 TODO=「排後」非 NO-GO,MIT 06-09 報告憑記憶誤列;按權威序信 TODO
+- 報告:workspace/reports/2026-06-10--ac_s2_a3_evidence_check.md(PM 代落盤,本 session 無寫檔工具)
