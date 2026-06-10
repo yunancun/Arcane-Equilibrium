@@ -159,6 +159,15 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 
 ## 文档索引 (Document Index)
 
+### 2026-06-10 Root sweep 歸檔（cold audit rulings + INVENTORY 校準更名）
+
+| 文件 | 内容 |
+|------|------|
+| `archive/2026-05-17--cold_audit_pm_final.md` | 第一輪 cold audit PM final ruling（P1 17/P2 17/P3 7；實際 5-29 完成）；原 srv 根目錄，已被 5-30 re-run 取代（closure 見 `archive/2026-05-29--cold_audit_p1_p2_p3_closure_archive.md`） |
+| `archive/2026-05-30--cold_audit_pm_final.md` | cold audit re-run PM final ruling：prior remediation HELD，P0=0/P1=0，僅小額 P2/P3 backlog；原 srv 根目錄 |
+
+> 同次 sweep：`OPENCLAW_INVENTORY_CONSOLIDATED.md`（2026-04-25 快照）經 71 條校準後更名 `AE_INVENTORY_CONSOLIDATED.md`（仍在 srv 根目錄，深歷史/RCA 按需讀）；清理 2026-04-20 占位目錄 backup_files/ research_notes/ stored_data/（README 所述子目錄從未建立）。
+
 ### 2026-06-10 SKILLS_TODO 審計歸檔
 
 | 文件 | 内容 |
