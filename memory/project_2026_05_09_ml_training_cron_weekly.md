@@ -32,3 +32,10 @@ ml_training_maintenance cron 真實 schedule（per `srv/helper_scripts/cron/ml_t
 - 全期 5-strategy labeled fill = 615 row
 - decision_features labeled = 9267, rejected = 7038
 - per-strategy fill 5d 估算: grid 374 (PASS 200 gate) / ma 167 (FAIL) / bb_breakout 27 (FAIL) / bb_reversion 4 (FAIL) / funding_arb 43 (FAIL, ADR-0018 退役 dormant by design)
+
+
+---
+
+## [index-archive 2026-06-10] 原 MEMORY.md 索引條目全文(壓縮索引前歸檔,內容為當時點狀態)
+
+- [ml_training_maintenance cron 是 hybrid (2026-05-09 / 修正 2026-05-10)](project_2026_05_09_ml_training_cron_weekly.md) — 修正過早 weekly 結論為 hybrid: 5 training (linucb/scorer/quantile/mlde shadow/mlde demo) DAILY; 5 audit (thompson/optuna/cpcv/dl3/weekly_report) DAILY fire 但 weekday=6 gate; per-strategy MIN_SAMPLES=200 4/5 策略不過 (grid 374 PASS / ma 167 / bb_breakout 27 / bb_reversion 4 / funding_arb 43 dormant)
