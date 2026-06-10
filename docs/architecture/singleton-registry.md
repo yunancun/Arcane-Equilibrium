@@ -342,6 +342,25 @@ per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-03--p5_sm_soak_observabi
 | governance_authority | P5-SM-OPTION2 soak redesign §3 B-3 + operator O-1/O-2 |
 | migration_plan | step (iv) cleanup 連同 comparator sink（§2.5.1-3）+ dual-write mirror 一起移除（soak 0 divergence 後）；屆時 DROP V129 表 |
 
+#### 2.5.5 `_CANARY_COUNTERS` / `_CANARY_STATE` / `_CANARY_LOCK`（P5-SM soak 第二輪 E1-C，2026-06-10）
+
+per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-10--p5sm_soak_observability_redesign.md` §3.1/§3.2 + PM cadence 定案 `2026-06-10--p5sm_soak_cadence_decision.md`：唯讀 IPC canary（默認 120s ±10% jitter）打 `governance.is_authorized` + `governance.get_status` 兩個讀 arm 做結構驗證，計數器由 flusher（§2.5.4 同 leader 進程）投影 V129 `'canary'` row。
+
+| 欄位 | 值 |
+|---|---|
+| name | `_CANARY_COUNTERS` + `_CANARY_STATE` + `_CANARY_LOCK` |
+| type_signature | `dict[str, int]`（attempts/ok/fail/fail_streak_breaches，單調累加）+ `dict[str, Any]`（last_ok_ts/consecutive_failures/fail_streak_started_mono/streak_breach_recorded/in_backoff/in_flight）+ `threading.Lock` |
+| location | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/governance_ipc_canary.py` |
+| owner_lifecycle | import 時建；API worker process-local；worker exit 隨 module drop（restart 歸零 = epoch 邊界，由 flusher `epoch_rollover` 事件搶救前值）。`reset_canary_state_for_tests()` 僅供測試隔離 |
+| cross_task_pattern | producer: `run_canary_tick`（leader 進程內單一 asyncio task；single-flight `in_flight` 守衛）；consumer: `get_canary_counters()`（flusher 每 30s 讀後 UPSERT V129 `'canary'` row：total=attempts / matches=ok / divergences=fail）。**leader 同進程不變量（load-bearing）**：canary 複用 §2.5.4 同一把 flock → canary 與 flusher 必在同一進程，flusher 才能從同進程記憶體讀到真計數（雙鎖會選出不同進程 = silent 假死） |
+| lock_primitive | `threading.Lock`（`_CANARY_LOCK`；計數 + 連段/退頻記帳在同一 hold 內，無跨 await 持鎖；log I/O 在鎖外）+ 復用 §2.5.4 flock（leader election） |
+| visibility | private module binding（僅 `run_canary_tick` / `get_canary_counters` / `get_canary_runtime_state` / `reset_canary_state_for_tests` 存取） |
+| caller_chain | producer: `main.py @startup` → `asyncio.create_task(governance_ipc_canary_loop())`（kill-switch `OPENCLAW_SM_IPC_CANARY_ENABLED` 嚴格 "1"，默認 OFF）；consumer: `governance_divergence_flush` → V129 → cron `[82]` soak-window check |
+| health_monitoring | NO — soak 期觀測儀器；canary 死 → V129 `'canary'` attempts 不增長 → `[82]` FAIL（fail-closed）；worst case = 只少觀測數據 |
+| registered_date | 2026-06-10 |
+| governance_authority | P5-SM soak 第二輪 PA 設計 §3.2/§5.2 + PM 五條 fire-機率防護 |
+| migration_plan | step (iv) cleanup 連同 comparator sink（§2.5.1-4）+ V129/V137 + `[82]` 一起退役 |
+
 ---
 
 ### §2.6 L2 Advisory Mesh — D3 Provenance & Audit writer（Phase 1，2026-06-08）

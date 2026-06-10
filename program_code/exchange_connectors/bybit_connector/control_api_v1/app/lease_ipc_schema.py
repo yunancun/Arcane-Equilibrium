@@ -80,6 +80,23 @@ METHOD_GET_LEASE: str = "governance.get_lease"
 # comparator (observation only).
 METHOD_IS_AUTHORIZED: str = "governance.is_authorized"
 
+# P5-SM soak 第二輪：governance.get_status 唯讀投影方法（Rust dispatch arm 已在
+# dispatch.rs:370 → handle_get_status；Python client 此前缺）。
+# 契約（實際 wire 形狀 = event_consumer/handlers/governance.rs handle_get_gov_status：
+# serde of openclaw_core GovernanceStatus + 注入 auth_pending_approval）：params={}；
+# response = {"enabled": bool, "mode": str, "risk_level": str,
+#             "auth_effective_count": int, "auth_pending_approval": int,
+#             "lease_live_count": int, "oms_active_count": int}
+# ⚠️ enum 字串大小寫（E1 親證 2026-06-10）：GovernanceMode / RiskLevel 的 serde
+# derive **無 rename_all**（governance_core.rs:82-88 / sm/risk_gov.rs:14-23），實際
+# wire 值是 PascalCase 變體名（"Normal"/"Restricted"/"Frozen"/"ManualReview"；
+# "Normal"/"Cautious"/.../"CircuitBreaker"/"ManualReview"）——dispatch.rs:422 doc
+# 散文寫的 UPPERCASE 是 as_str() 的值、非 serde 輸出，勿照抄。parser 因此只驗
+# 「非空 str」不釘大小寫（結構驗證軸，見 parse_get_status_response）。
+# 供 soak canary probe-2 做結構驗證（提前曝險 step-ii Python 投影的依賴），亦是
+# step-ii 投影層讀 Rust 狀態的正式 client 入口。
+METHOD_GET_STATUS: str = "governance.get_status"
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Request param keys (canonical) / 請求參數鍵（canonical）
@@ -125,6 +142,30 @@ RESPONSE_KEY_OK: str = "ok"
 # is_authorized response: {"authorized": bool}（Rust handle_is_authorized 契約）。
 # is_authorized 回應：{"authorized": bool}（Rust handle_is_authorized 契約）。
 RESPONSE_KEY_AUTHORIZED: str = "authorized"
+
+# get_status response keys（Rust GovernanceStatus serde + handle_get_gov_status
+# 注入的 auth_pending_approval；P5-SM soak canary probe-2 結構驗證用）。
+GET_STATUS_KEY_ENABLED: str = "enabled"
+GET_STATUS_KEY_MODE: str = "mode"
+GET_STATUS_KEY_RISK_LEVEL: str = "risk_level"
+GET_STATUS_KEY_AUTH_EFFECTIVE: str = "auth_effective_count"
+GET_STATUS_KEY_AUTH_PENDING: str = "auth_pending_approval"
+GET_STATUS_KEY_LEASE_LIVE: str = "lease_live_count"
+GET_STATUS_KEY_OMS_ACTIVE: str = "oms_active_count"
+
+# get_status 必備鍵 → 期望型別（canary 結構驗證軸；mode/risk_level 只驗非空 str
+# 不釘大小寫，見 METHOD_GET_STATUS 注釋的 serde 大小寫陷阱）。
+GET_STATUS_REQUIRED_BOOL_KEYS: tuple[str, ...] = (GET_STATUS_KEY_ENABLED,)
+GET_STATUS_REQUIRED_STR_KEYS: tuple[str, ...] = (
+    GET_STATUS_KEY_MODE,
+    GET_STATUS_KEY_RISK_LEVEL,
+)
+GET_STATUS_REQUIRED_INT_KEYS: tuple[str, ...] = (
+    GET_STATUS_KEY_AUTH_EFFECTIVE,
+    GET_STATUS_KEY_AUTH_PENDING,
+    GET_STATUS_KEY_LEASE_LIVE,
+    GET_STATUS_KEY_OMS_ACTIVE,
+)
 
 # Get response: serialized LeaseObject (Rust serde of LeaseObject struct).
 # Schema follows decision_lease_state_machine.LeaseObject equivalent fields:
@@ -448,12 +489,65 @@ def parse_is_authorized_response(result: Mapping[str, Any]) -> Optional[bool]:
     return None
 
 
+def parse_get_status_response(
+    result: Mapping[str, Any],
+) -> Optional[dict[str, Any]]:
+    """解析 governance.get_status 的 JSON-RPC result，做**結構驗證**後回正規化 dict 或 None。
+
+    Parse + structurally validate the governance.get_status result.
+
+    P5-SM soak canary probe-2 的驗證軸是「結構有效性」非等價性（PA 設計 §2.4 鐵則：
+    canary 不做雙邊比對）。strict 驗證規則：
+
+      - ``enabled`` 必為 strict ``bool``（拒 "true" / 1）。
+      - ``mode`` / ``risk_level`` 必為非空 ``str``。**不釘大小寫**——實際 serde wire
+        值是 PascalCase 變體名（"Normal" 等，見 METHOD_GET_STATUS 注釋），釘死字面
+        會把 Rust enum 演進誤判為管線故障。
+      - 四個計數（auth_effective_count / auth_pending_approval / lease_live_count /
+        oms_active_count）必為非負 ``int`` 且**非 bool**（Python bool 是 int 子類，
+        必須顯式排除——serde usize 永遠給真 int，bool 出現即 serde 漂移）。
+
+    回 ``None`` 的語義 = 「結構畸形 / 無法判定」，canary 計一次 fail（fail-closed；
+    絕不把畸形 payload 當健康）。
+
+    Returns the normalized payload dict on success; ``None`` when the payload
+    is structurally malformed (canary counts a failure — fail-closed).
+    """
+    if not isinstance(result, Mapping):
+        return None
+    payload: Mapping[str, Any] = result
+    inner = result.get("result")
+    if isinstance(inner, Mapping) and GET_STATUS_KEY_ENABLED in inner:
+        payload = inner
+
+    out: dict[str, Any] = {}
+    for key in GET_STATUS_REQUIRED_BOOL_KEYS:
+        val = payload.get(key)
+        # strict bool：與 parse_is_authorized_response 同嚴格（拒 "true" / 1）。
+        if val is not True and val is not False:
+            return None
+        out[key] = val
+    for key in GET_STATUS_REQUIRED_STR_KEYS:
+        val = payload.get(key)
+        if not isinstance(val, str) or not val:
+            return None
+        out[key] = val
+    for key in GET_STATUS_REQUIRED_INT_KEYS:
+        val = payload.get(key)
+        # 排除 bool（int 子類陷阱）：serde usize 永遠給真 int，bool = serde 漂移。
+        if isinstance(val, bool) or not isinstance(val, int) or val < 0:
+            return None
+        out[key] = val
+    return out
+
+
 __all__ = [
     # Method names
     "METHOD_ACQUIRE_LEASE",
     "METHOD_RELEASE_LEASE",
     "METHOD_GET_LEASE",
     "METHOD_IS_AUTHORIZED",
+    "METHOD_GET_STATUS",
     # Acquire keys
     "ACQUIRE_KEY_INTENT_ID",
     "ACQUIRE_KEY_SCOPE",
@@ -469,6 +563,16 @@ __all__ = [
     "RESPONSE_KEY_OUTCOME",
     "RESPONSE_KEY_OK",
     "RESPONSE_KEY_AUTHORIZED",
+    "GET_STATUS_KEY_ENABLED",
+    "GET_STATUS_KEY_MODE",
+    "GET_STATUS_KEY_RISK_LEVEL",
+    "GET_STATUS_KEY_AUTH_EFFECTIVE",
+    "GET_STATUS_KEY_AUTH_PENDING",
+    "GET_STATUS_KEY_LEASE_LIVE",
+    "GET_STATUS_KEY_OMS_ACTIVE",
+    "GET_STATUS_REQUIRED_BOOL_KEYS",
+    "GET_STATUS_REQUIRED_STR_KEYS",
+    "GET_STATUS_REQUIRED_INT_KEYS",
     # Outcome / Profile constants
     "OUTCOME_ACTIVE",
     "OUTCOME_BYPASS",
@@ -492,4 +596,5 @@ __all__ = [
     "parse_release_response",
     "parse_get_response",
     "parse_is_authorized_response",
+    "parse_get_status_response",
 ]
