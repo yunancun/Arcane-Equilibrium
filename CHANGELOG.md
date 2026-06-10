@@ -12,6 +12,55 @@
 >   微版（patch、rebase）走 `docs/CLAUDE_CHANGELOG.md`。
 > - 16 根原則（CLAUDE.md §二）每版必須在 Sign-off 確認 0 紅線。
 
+## [v5.9] — 2026-05-31
+
+### Thesis 摘要
+
+V5.8 alpha pivot（thesis-shift：autonomy expansion → alpha-first）。P0 成本牆調查
+（`docs/audits/2026-05-31--p0_edge_cost_wall_investigation.md`）確認 6 週多候選死於
+edge 1-3bps < 成本 11-27bps、textbook 策略普遍 alpha-deficient 後，operator 拍板：
+**凍結 v5.8 autonomy 模組 active-IMPL，主攻 alpha 證據**。v5.8 的 13-module 框架、
+ADR-0034..0044 與 AMD-2026-05-21-01 治理分界全部保留（凍結待解鎖，非取消）；
+解凍 gate = 首個 net+ candidate 達 `stage0_ready`（M7 strategy decay detection 例外，
+維持 active）。
+
+主檔：`docs/execution_plan/2026-05-31--alpha_edge_research_execution_plan.md`
+（本版起主檔不再採 `execution-plan-v5.x.md` 單檔形式，改為 AEG packet 體系；
+S0 契約 `2026-05-31--aeg_s0_contracts.md`）。
+
+### Added
+
+- ADR-0047 — Alpha-Edge regime evidence governance：promotion evidence 必須
+  math-primary（regime / breadth / freshness / survivorship / execution realism
+  五維矩陣）；bull data 可用但必須標籤化，bull-only 正面結果 =
+  `regime-bet / learning-only`；Bybit market API 是 raw state input 非 prediction
+  oracle；News / X / Reddit 僅旁證不可覆蓋 quantitative gate。
+- AMD-2026-05-31-01 — alpha-edge evidence governance 修正案（防三種誤讀：
+  bull 資料被禁／Bybit API 提供預測／敘事可作主證據）。
+- AEG 階段路線：AEG-S0 契約 → AEG-S1 基礎（V125 alpha 儲存 + backfill）→
+  AEG-S2 證據自動化（regime runner / breadth ladder / robustness matrix）→
+  AEG-S3 alpha 研究（≤4 候選並行）→ AEG-S4 決策（CP-2）。
+
+### Changed
+
+- M1 / M2 / M6 / M8 / M9 active-IMPL 凍結（AMD-2026-05-21-01 protected/opt-in
+  分界不變；M7 例外維持 active）。
+- S4 從獨立 bull-data alpha proof track 降級為全域 regime/falsification overlay。
+- Sprint 1A-β/γ/δ/ε/ζ 分期暫停，由 AEG 階段序列取代為當前主線。
+
+### Docs
+
+- 按 AMD cascade：README、CLAUDE.md、CONTEXT.md、`.codex/MEMORY.md`、Bybit API
+  reference 已同步 short rule；TODO 指向新 SSOT。
+- V5.8 設計進度保存：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-05-31--v58_design_progress_preservation_audit.md`。
+
+### Sign-off
+
+- 16 根原則 0 紅線：本版為治理/研究方向轉向，No runtime deploy、No DB write、
+  不放寬 Stage 0R / Demo / LiveDemo / true-live 任何 gate（AMD Non-Goals 聲明）。
+- AEG-S1/S2 後續實施記錄屬日常工程，見 `TODO.md` §2 與 `docs/CLAUDE_CHANGELOG.md`
+  （不在本檔重複）。
+
 ## [v5.8] — 2026-05-21
 
 ### Thesis 摘要
