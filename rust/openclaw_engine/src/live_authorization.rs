@@ -282,9 +282,9 @@ pub fn canonical_payload(auth: &LiveAuthorization) -> String {
 }
 
 /// Compute the expected hex-lowercase HMAC-SHA256 of the canonical payload.
-pub fn compute_signature(auth: &LiveAuthorization, ipc_secret: &str) -> String {
+pub fn compute_signature(auth: &LiveAuthorization, live_auth_signing_key: &str) -> String {
     let payload = canonical_payload(auth);
-    let mut mac = HmacSha256::new_from_slice(ipc_secret.as_bytes())
+    let mut mac = HmacSha256::new_from_slice(live_auth_signing_key.as_bytes())
         .expect("HMAC-SHA256 accepts any key size");
     mac.update(payload.as_bytes());
     let tag = mac.finalize().into_bytes();
@@ -313,7 +313,7 @@ pub fn verify_in_memory(
     auth: &LiveAuthorization,
     env: BybitEnvironment,
     now_ms: u64,
-    ipc_secret: &str,
+    live_auth_signing_key: &str,
 ) -> Result<(), AuthError> {
     if auth.version != SCHEMA_VERSION {
         return Err(AuthError::UnsupportedVersion {
@@ -331,7 +331,7 @@ pub fn verify_in_memory(
         return Err(AuthError::ApprovedSystemModeNotLiveReserved { got });
     }
 
-    let expected_sig = compute_signature(auth, ipc_secret);
+    let expected_sig = compute_signature(auth, live_auth_signing_key);
     if !constant_time_eq(expected_sig.as_bytes(), auth.sig.as_bytes()) {
         return Err(AuthError::BadSignature);
     }
