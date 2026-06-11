@@ -584,7 +584,7 @@ class TestWealthAdmission:
         assert spec["evidence_window"] == {
             "window_start": "2025-01-01", "window_end": "2025-09-30"
         }
-        # falsification 三欄入 spec（V137 CHECK 形）。
+        # falsification 三欄入 spec（V138 CHECK 形）。
         assert set(spec["falsification_test"]) == {
             "null_hypothesis", "test_statistic", "reject_condition"
         }

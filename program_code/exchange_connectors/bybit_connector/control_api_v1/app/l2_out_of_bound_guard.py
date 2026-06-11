@@ -306,7 +306,7 @@ def _guard_ml_advisory_v1(
                     kinds_hit=[f"empty_mechanism_curve_fit:{h.get('hid')}"],
                 )
             # P4 起 falsification_test 必為 v2 結構化物件（三欄在 clause F 驗）；缺 → reject。
-            # 自由字串（v1 形）也在 F reject——pre-registration 的 V137 CHECK 要求三欄，
+            # 自由字串（v1 形）也在 F reject——pre-registration 的 V138 CHECK 要求三欄，
             # 字串形結構上不可能入帳，guard 在「形」層先擋（不浪費後續 stage）。
             if falsif is None:
                 return GuardResult(
@@ -318,7 +318,7 @@ def _guard_ml_advisory_v1(
         # 為什麼 F 是 wealth-integrity clause：primary_axis 決定被扣帳的 FDR family
         # （capability:primary_axis，MIT #4）——宣告不在 signal_axes_used 內的 axis = 開新
         # family 鑄新 W_0 的 wealth-inflation 向量；falsification 三欄是 pre-registration
-        # 可證偽紀律的載體（V137 prh_falsification_chk 兜底，guard 前置擋形）。
+        # 可證偽紀律的載體（V138 prh_falsification_chk 兜底，guard 前置擋形）。
         top_axes = out.get("signal_axes_used")
         for h in hyps:
             falsif = h.get("falsification_test")

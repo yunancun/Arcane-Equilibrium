@@ -297,7 +297,7 @@ _ML_ADVISORY_HYPOTHESIZE_CONTRACT = PromptContract(
 # v1 保留供血緣回放，TOML stanza 的 prompt_contract_ref 同 commit 指 v2。
 # v2 delta（QC FIX-1.2/1.3 + MIT ratify #4 的契約面）：
 #   - falsification_test 從自由字串改為 {null_hypothesis, test_statistic, reject_condition}
-#     三欄結構（pre-registration V137 prh_falsification_chk 兜底；guard clause F 驗非空；
+#     三欄結構（pre-registration V138 prh_falsification_chk 兜底；guard clause F 驗非空；
 #     math gate fail 時三欄入 dead-mode lesson = novelty 自饋失敗庫的可檢索證偽紀錄）。
 #   - 每假說必宣告 primary_axis ∈ signal_axes_used（wealth family = capability:primary_axis，
 #     MIT #4——拒 axes 組合鑄幣面；guard clause F 強制）。
