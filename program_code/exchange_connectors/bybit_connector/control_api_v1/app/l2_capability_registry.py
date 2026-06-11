@@ -5,7 +5,7 @@ MODULE_NOTE
   settings/l2_capability_registry.toml 載入成 typed model，並擁有「no-auto-path-to-live」
   linchpin 不變式：LANE_DIRECTION 型別表 + effective_autonomy 函數的 STEP-1。
 
-  registry = TOML SSOT（operator 拍板：無 DB 表、無 V137）。capability 是 operator
+  registry = TOML SSOT（operator 拍板：無 DB 表、無 V138）。capability 是 operator
   enable/tune 的原子單位。全 capabilities 預設 enabled=false（fail-closed）。
 
 主要類/函數：

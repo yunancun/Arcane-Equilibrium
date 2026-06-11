@@ -45,7 +45,7 @@ from . import db_pool
 
 logger = logging.getLogger("l2_alpha_wealth_store")
 
-# ledger 事件型別字面（V137 CHECK 集合；不在此複製 CHECK 邏輯，僅作參數字面）。
+# ledger 事件型別字面（V138 CHECK 集合；不在此複製 CHECK 邏輯，僅作參數字面）。
 _EVT_FAMILY_INIT = "family_init"
 _EVT_DEBIT = "debit"
 _EVT_OPERATOR_ADJUSTMENT = "operator_adjustment"
@@ -263,7 +263,7 @@ def record_debit(
                     signal_axis,
                     _EVT_DEBIT,
                     debit_id,
-                    -abs(float(alpha_i)),  # debit 必為負額（V137 awl_amount_sign_chk）
+                    -abs(float(alpha_i)),  # debit 必為負額（V138 awl_amount_sign_chk）
                     float(alpha_i),
                     int(n_eff),
                     int(n_eff),  # k_for_dsr 恆 = n_eff（DB CHECK 雙保險）

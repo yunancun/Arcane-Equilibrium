@@ -28,7 +28,7 @@ MODULE_NOTE
     survivors 捷徑、無 delisted forward-fill。
   - producer 不可建（無成員 alive / 價缺）→ 回空 returns ⇒ B1 見 altcap=None-等價 → DEFER
     （fail-closed by construction）。
-  - on-the-fly：deterministic function of (FND-2 membership + daily closes)；無持久表、無 V137。
+  - on-the-fly：deterministic function of (FND-2 membership + daily closes)；無持久表、無 V138。
   - read-only：0 寫入、0 order path。
 """
 

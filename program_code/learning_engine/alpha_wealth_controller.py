@@ -84,7 +84,7 @@ MIN_FORWARD_OOS_DAYS: int = 21
 #        family 連跌後 α_i→0、threshold→1，淪為「永遠可測但永遠不可能 pass」
 #        的殭屍態；floor 給出有限 α-death（None ⇒ DEFER，誠實熄燈）。
 #   (7c) 防 NUMERIC(14,10) underflow fail-loud——α_i = 5e-4·0.9^t 在 t≈150 跌破
-#        1e-10 存儲精度 → 取整為 0 → V137 `awl_amount_sign_chk`（debit 必 <0）
+#        1e-10 存儲精度 → 取整為 0 → V138 `awl_amount_sign_chk`（debit 必 <0）
 #        被違反 → INSERT 炸。floor 在源頭擋住，債永不縮到精度之下。
 ALPHA_I_MIN_FLOOR: float = 1e-6
 
