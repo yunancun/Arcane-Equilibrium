@@ -767,6 +767,14 @@ restart_api() {
     # basic_system_services.env（跨 restart 持久）。對齊 cost_edge_advisor/h_state 模式。
     local lease_python_ipc_enabled
     lease_python_ipc_enabled="${OPENCLAW_LEASE_PYTHON_IPC_ENABLED:-$(grep '^OPENCLAW_LEASE_PYTHON_IPC_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    # P5-SM soak 第二輪：唯讀 IPC canary kill-switch + cadence（API 側）。
+    # governance_ipc_canary 嚴格比對 "1"（默認 OFF；soak 期寫 basic_system_services.env
+    # 持久，soak 結束移除）；cadence 默認 120s（PM 定案），env 可覆寫（E4 壓測 1s）。
+    # 為什麼必須在此轉發：不轉發 = kill-switch 持久層死參數（寫了 env 檔 API 進程
+    # 也看不到）。鏡像 lease_python_ipc_enabled 的 operator-env 優先 → env 檔 fallback。
+    local sm_ipc_canary_enabled sm_canary_interval_secs
+    sm_ipc_canary_enabled="${OPENCLAW_SM_IPC_CANARY_ENABLED:-$(grep '^OPENCLAW_SM_IPC_CANARY_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    sm_canary_interval_secs="${OPENCLAW_SM_CANARY_INTERVAL_SECS:-$(grep '^OPENCLAW_SM_CANARY_INTERVAL_SECS=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     local anthropic_api_key openai_api_key deepseek_api_key
     anthropic_api_key="$(resolve_provider_secret_env ANTHROPIC_API_KEY anthropic anthropic_api_key)"
     openai_api_key="$(resolve_provider_secret_env OPENAI_API_KEY openai openai_api_key)"
@@ -784,6 +792,8 @@ restart_api() {
         OPENCLAW_COST_EDGE_ADVISOR="${cost_edge_advisor_api}" \
         OPENCLAW_H_STATE_GATEWAY="${h_state_gateway_api}" \
         OPENCLAW_LEASE_PYTHON_IPC_ENABLED="${lease_python_ipc_enabled}" \
+        OPENCLAW_SM_IPC_CANARY_ENABLED="${sm_ipc_canary_enabled}" \
+        OPENCLAW_SM_CANARY_INTERVAL_SECS="${sm_canary_interval_secs}" \
         ANTHROPIC_API_KEY="${anthropic_api_key}" \
         OPENAI_API_KEY="${openai_api_key}" \
         DEEPSEEK_API_KEY="${deepseek_api_key}" \

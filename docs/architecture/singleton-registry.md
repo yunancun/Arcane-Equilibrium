@@ -342,6 +342,44 @@ per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-03--p5_sm_soak_observabi
 | governance_authority | P5-SM-OPTION2 soak redesign §3 B-3 + operator O-1/O-2 |
 | migration_plan | step (iv) cleanup 連同 comparator sink（§2.5.1-3）+ dual-write mirror 一起移除（soak 0 divergence 後）；屆時 DROP V129 表 |
 
+#### 2.5.5 `_CANARY_COUNTERS` / `_CANARY_STATE` / `_CANARY_LOCK`（P5-SM soak 第二輪 E1-C，2026-06-10）
+
+per `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-10--p5sm_soak_observability_redesign.md` §3.1/§3.2 + PM cadence 定案 `2026-06-10--p5sm_soak_cadence_decision.md`：唯讀 IPC canary（默認 120s ±10% jitter）打 `governance.is_authorized` + `governance.get_status` 兩個讀 arm 做結構驗證，計數器由 flusher（§2.5.4 同 leader 進程）投影 V129 `'canary'` row。
+
+| 欄位 | 值 |
+|---|---|
+| name | `_CANARY_COUNTERS` + `_CANARY_STATE` + `_CANARY_LOCK` |
+| type_signature | `dict[str, int]`（attempts/ok/fail/fail_streak_breaches，單調累加）+ `dict[str, Any]`（last_ok_ts/consecutive_failures/fail_streak_started_mono/streak_breach_recorded/in_backoff/in_flight）+ `threading.Lock` |
+| location | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/governance_ipc_canary.py` |
+| owner_lifecycle | import 時建；API worker process-local；worker exit 隨 module drop（restart 歸零 = epoch 邊界，由 flusher `epoch_rollover` 事件搶救前值）。`reset_canary_state_for_tests()` 僅供測試隔離 |
+| cross_task_pattern | producer: `run_canary_tick`（leader 進程內單一 asyncio task；single-flight `in_flight` 守衛）；consumer: `get_canary_counters()`（flusher 每 30s 讀後 UPSERT V129 `'canary'` row：total=attempts / matches=ok / divergences=fail）。**leader 同進程不變量（load-bearing）**：canary 複用 §2.5.4 同一把 flock → canary 與 flusher 必在同一進程，flusher 才能從同進程記憶體讀到真計數（雙鎖會選出不同進程 = silent 假死） |
+| lock_primitive | `threading.Lock`（`_CANARY_LOCK`；計數 + 連段/退頻記帳在同一 hold 內，無跨 await 持鎖；log I/O 在鎖外）+ 復用 §2.5.4 flock（leader election） |
+| visibility | private module binding（僅 `run_canary_tick` / `get_canary_counters` / `get_canary_runtime_state` / `reset_canary_state_for_tests` 存取） |
+| caller_chain | producer: `main.py @startup` → `asyncio.create_task(governance_ipc_canary_loop())`（kill-switch `OPENCLAW_SM_IPC_CANARY_ENABLED` 嚴格 "1"，默認 OFF）；consumer: `governance_divergence_flush` → V129 → cron `[82]` soak-window check |
+| health_monitoring | NO — soak 期觀測儀器；canary 死 → flusher 低頻 `canary_heartbeat` 事件（30min 攜 attempts 快照）持平/停更 → `[82]` heartbeat 連續性支路 FAIL（fail-closed；偵測粒度 = heartbeat 30min + cron 6h cadence，粗粒度兜底 = 累計 stall floor。E2 HIGH-2 修復前「attempts 不增長即 FAIL」宣稱過強：累積 ≥ floor 後中段死亡原不可見）；worst case = 只少觀測數據 |
+| registered_date | 2026-06-10 |
+| governance_authority | P5-SM soak 第二輪 PA 設計 §3.2/§5.2 + PM 五條 fire-機率防護 |
+| migration_plan | step (iv) cleanup 連同 comparator sink（§2.5.1-4）+ V129/V137 + `[82]` 一起退役 |
+
+#### 2.5.6 `_SOAK_TRACKERS`（P5-SM soak 第二輪 E1-B，2026-06-10）
+
+per PA 設計 §3.1（flusher 擴充）：V137 `learning.lease_ipc_soak_events` 事件帳本的程內偵測 trackers——flag 變遷 / canary 失敗連段增量 / 計數器倒退 / epoch 起點 / 低頻 canary_heartbeat（E2 HIGH-2 修復），全部以「上次觀測值 vs 當下快照」比對偵測，事件 INSERT best-effort（V137 未 apply 全 fail-soft）。
+
+| 欄位 | 值 |
+|---|---|
+| name | `_SOAK_TRACKERS` |
+| type_signature | `dict[str, Any]`（last_flag_state / last_canary_breaches / canary_start_recorded / last_comparator_counts / last_canary_counts / epoch_start_recorded / last_heartbeat_mono） |
+| location | `program_code/exchange_connectors/bybit_connector/control_api_v1/app/governance_divergence_flush.py` |
+| owner_lifecycle | import 時建；leader worker process-local；restart 歸零 = epoch 邊界語義（`epoch_rollover` 事件即為此而存在）。`_reset_soak_event_trackers_for_tests()` 僅供測試隔離 |
+| cross_task_pattern | 只由 leader 進程的單一 flusher 協程順序讀寫（`record_epoch_start_events_once` 啟動一次 + `detect_and_record_soak_events_once` 每 30s 週期）；`run_in_executor` 逐次 await 的 happens-before 保證跨 executor thread 可見性 |
+| lock_primitive | 無（單協程順序存取，無並發 writer；見 cross_task_pattern 論證）+ 隸屬 §2.5.4 flock leader 域（非 leader worker 永不觸碰） |
+| visibility | private module binding（僅 `record_epoch_start_events_once` / `detect_and_record_soak_events_once` / `_reset_soak_event_trackers_for_tests` 存取） |
+| caller_chain | producer: `divergence_snapshot_flusher` 協程（main.py @startup 排程）；consumer: V137 `learning.lease_ipc_soak_events` → cron `[82]` soak-window check 跨 epoch 重建連續窗 |
+| health_monitoring | NO — soak 期觀測儀器；偵測層死 → 事件缺失 → `[82]` 在 active 下對「帳本空 / counter regression 交叉偵測」fail-closed FAIL |
+| registered_date | 2026-06-10 |
+| governance_authority | P5-SM soak 第二輪 PA 設計 §3.1 + §4 S3/S4 gate |
+| migration_plan | step (iv) cleanup 連同 comparator sink（§2.5.1-5）+ V129/V137 + `[82]` 一起退役 |
+
 ---
 
 ### §2.6 L2 Advisory Mesh — D3 Provenance & Audit writer（Phase 1，2026-06-08）

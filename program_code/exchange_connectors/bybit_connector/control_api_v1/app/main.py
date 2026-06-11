@@ -10,6 +10,11 @@ MODULE_NOTE (中文):
   所有子路由（Paper Trading / L2 AI / Risk / Strategy / Governance / Scout）的统一注册。
   属于 Control API v1 层，是系统唯一的 HTTP 服务暴露点。
 
+  檔案大小債務（E2 LOW-1，2026-06-10）：本檔已跨 800 行警戒線（CLAUDE §九）。
+  split follow-up 候選 = @app.on_event("startup") 的背景任務 wiring（flusher /
+  canary / reconciler 等 create_task 排程）抽離為獨立 startup wiring 模組。
+  本輪僅記帳不拆（exact-touch 慣例，P5-SM soak fix delta 不擴 scope）。
+
 MODULE_NOTE (English):
   Main FastAPI application entry point, layering snapshot-stable compilation and a
   runtime bridge on top of main_legacy. Responsible for deterministic state recompilation
@@ -608,6 +613,33 @@ async def _startup_integrity_check() -> None:
             "P5 lease-divergence flusher startup failed (fail-open): %s / "
             "lease 分歧 flusher 啟動失敗（不阻斷）：%s",
             _div_flush_exc, _div_flush_exc,
+        )
+
+    # ── P5-SM soak 第二輪: 唯讀 IPC canary（E1-C 模組 / E1-B wiring）──
+    # leader-elected（與 flusher 同一把 flock = 同進程，計數器才能被 flush 投影）；
+    # kill-switch OPENCLAW_SM_IPC_CANARY_ENABLED 嚴格 "1" 默認 OFF（soak 啟動才開，
+    # OFF 時協程立即返回 = 零負載）。cadence 默認 120s ±10% jitter + PM 五條
+    # fire-機率防護（single-flight / 2s timeout / 連敗退頻 / kill-switch / O(1)
+    # 唯讀）。fail-open 不阻斷啟動；worst case = canary 死 = 只少觀測數據
+    # （[82] soak-window check 會 FAIL，權威路徑不受影響）。
+    try:
+        import asyncio as _asyncio_canary  # noqa: PLC0415
+        from .governance_ipc_canary import (  # noqa: PLC0415
+            governance_ipc_canary_loop as _canary_loop,
+        )
+        _asyncio_canary.create_task(
+            _canary_loop(),
+            name="sm-ipc-canary",
+        )
+        base.logger.info(
+            "P5 SM IPC canary scheduled (kill-switch default OFF) / "
+            "SM IPC canary 已排程（kill-switch 默認 OFF）"
+        )
+    except Exception as _canary_exc:
+        base.logger.warning(
+            "P5 SM IPC canary startup failed (fail-open): %s / "
+            "SM IPC canary 啟動失敗（不阻斷）：%s",
+            _canary_exc, _canary_exc,
         )
 
     # ── B1.5: AIServiceListener startup (R4-3 fix) ─────────────────────
