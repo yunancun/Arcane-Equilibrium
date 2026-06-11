@@ -304,31 +304,60 @@ def test_failed_inserts_debit_failed_and_mints_dead_mode_lesson(fake_controller)
     assert out["lessons_minted"] == 1
 
 
-@pytest.mark.parametrize("verdict", ["defer_data", "fail"])
-def test_stage0r_non_pass_verdict_stays_pending_zero_dead_mode(fake_controller, verdict):
-    """PM 裁決（E2 RETURN 輪）：verdict 非 pass = 證據不足非證偽 → pending。
+@pytest.mark.parametrize("verdict", ["defer_data", "some_future_verdict"])
+def test_stage0r_defer_or_unknown_verdict_stays_pending_zero_dead_mode(fake_controller, verdict):
+    """PM 三向裁決：defer_data（或字彙外值）= 非結論性 → 本輪 pending。
 
-    gate 字彙 {pass, fail, defer_data}（residual_alpha_gate.py:34）；單配置
-    preflight 誠實 defer 下 defer_data 是常態。非 pass 不餵 A 線真值表 False
-    臂——否則 demo 表現尚可（net=+5bps）也被鑄 dead-mode lesson，以非結論性
-    結果汙染 novelty 庫。斷言：pending（跳過）+ 0 帳本事件 + 0 dead-mode。
+    單配置 preflight 誠實 defer 下 defer_data 是常態（gate 字彙
+    {pass, fail, defer_data}，residual_alpha_gate.py:34）。非結論性結果不餵
+    A 線真值表——否則 demo 表現尚可（net=+5bps）也被鑄 dead-mode lesson，
+    汙染 novelty 庫（QC FIX-1.3）；字彙外值 fail-closed 同臂。斷言維持上輪：
+    pending（跳過）+ 0 帳本事件 + 0 dead-mode。
     """
     conn = _FakeConn(_routes(stage0r=(verdict,)))
     out = rec.run_alpha_wealth_refund_reconciler(
         conn, now=_NOW, dry_run=False, round_trip_loader=lambda *a, **k: _trips(40, 5.0),
     )
-    assert out["stage0r_not_pass"] == 1
+    assert out["stage0r_deferred"] == 1
     assert out["failed"] == 0
     assert out["confirmed"] == 0
     assert conn.inserts("research.alpha_wealth_ledger") == []
     assert conn.inserts("agent.lessons") == []
 
 
-def test_failed_only_reachable_via_negative_net(fake_controller):
-    """failed 唯一可達路徑 = stage0r pass + demo net<0（PM 裁決閉環斷言）。
+def test_stage0r_fail_verdict_enters_truth_table_failed_mints_dead_mode(fake_controller):
+    """PM 三向裁決：'fail' = gate 結論性統計否定 → green=False 進真值表。
 
-    與上測互補：dead-mode lesson 的 why 必為 net<0（stage0r-not-green 文案
-    在新映射下結構性不可達——demo_confirm_verdict 只在 green=True 時被呼）。
+    n=40≥30 且 net=+5bps≥0：failed 完全由 NOT-green 臂驅動（M1 真值表
+    failed ⇔ n≥30 AND (net<0 OR NOT stage0r_green)，QC FIX-1.3「被證偽→
+    鑄 dead-mode」）。斷言：debit_failed 事件 + dead-mode lesson 鑄造 +
+    why 文案 = not-green 臂（net<0 文案不得出現，net 為正）。
+    """
+    conn = _FakeConn(_routes(stage0r=("fail",)))
+    out = rec.run_alpha_wealth_refund_reconciler(
+        conn, now=_NOW, dry_run=False, round_trip_loader=lambda *a, **k: _trips(40, 5.0),
+    )
+    assert out["failed"] == 1
+    assert out["stage0r_deferred"] == 0
+    ledger = conn.inserts("research.alpha_wealth_ledger")
+    assert len(ledger) == 1
+    assert ledger[0][1]["event_type"] == "debit_failed"
+    assert ledger[0][1]["amount"] == Decimal("0")
+    assert '"stage0r_green": false' in ledger[0][1]["evidence"]
+
+    lessons = conn.inserts("agent.lessons")
+    assert len(lessons) == 1
+    content = lessons[0][1]["content"]
+    assert "stage0r replay preflight not green" in content
+    assert "bps < 0" not in content  # net=+5 ≥ 0：net<0 文案結構上不可現
+    assert out["lessons_minted"] == 1
+
+
+def test_failed_via_negative_net_with_green_stage0r(fake_controller):
+    """failed 的 net<0 臂：stage0r pass（green=True）+ demo net<0。
+
+    與 fail-verdict 測互補（M1 真值表兩臂在三向映射下各自可達）：本臂 why
+    文案必為 net<0、不得含 not-green 文案——證兩臂 why 歸因分流正確。
     """
     conn = _FakeConn(_routes(stage0r=("pass",)))
     out = rec.run_alpha_wealth_refund_reconciler(
