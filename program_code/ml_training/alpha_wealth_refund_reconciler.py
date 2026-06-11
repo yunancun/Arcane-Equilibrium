@@ -21,10 +21,11 @@ MODULE_NOTE
     awl_one_terminal_per_debit）——本對帳器冪等，重跑安全。
   - N-3 斷言：refund INSERT 前回查 debit 列，金額不符即 abort 該筆 + log
     （wealth-inflation 防線，MIT N-3）。
-  - binding 缺 = 永 pending（attribution 紀律：不猜 cell）；stage0r verdict
-    缺**或非 pass**（defer_data / fail）= pending（PM 裁決：defer 是證據不足
-    非證偽，餵 False 臂會誤鑄 dead-mode 汙染 novelty 庫；failed 僅經 net<0
-    路徑可達）。
+  - binding 缺 = 永 pending（attribution 紀律：不猜 cell）。stage0r verdict
+    三向映射（PM 裁決，對齊 M1 已 ratify 真值表）：'pass' → green=True、
+    'fail'（gate 結論性統計否定）→ green=False，兩者進真值表（NOT-green 臂
+    n≥30 → failed + debit_failed + 鑄 dead-mode，QC FIX-1.3）；'defer_data'
+    或缺席 = 非結論性 → 本輪跳過維持 pending（不鑄 lesson）。
   - 三重 OFF：flag `OPENCLAW_ALPHA_WEALTH_RECONCILER` 預設 0 + cron job 不在
     DEFAULT_JOBS + V138 表 0 rows = 部署即行為中性。
 
@@ -156,8 +157,8 @@ LIMIT 1
 # 故讀 mlde_shadow_recommendations 而非 drar（drar 無 symbol 欄）。
 # verdict 字彙 = gate ResidualAlphaVerdict {pass, fail, defer_data}
 # （residual_alpha_gate.py:34；preflight 對任何 verdict 皆蓋章寫 payload）。
-# 映射（PM 裁決）：僅 'pass' → stage0r_green=True 進 A 線真值表；其餘
-# （defer_data / fail / 缺席）一律本輪跳過維持 pending，不餵 False 臂。
+# 三向映射（PM 裁決）：'pass' → green=True、'fail' → green=False 皆進
+# A 線真值表；'defer_data'（或缺席/字彙外值）非結論性 → 本輪跳過維持 pending。
 _STAGE0R_VERDICT_SQL = """
 SELECT payload->'demo_residual_alpha_report'->>'verdict' AS verdict
 FROM learning.mlde_shadow_recommendations
@@ -309,7 +310,7 @@ def run_alpha_wealth_refund_reconciler(
         "still_pending": 0,
         "no_binding": 0,
         "stage0r_verdict_missing": 0,
-        "stage0r_not_pass": 0,
+        "stage0r_deferred": 0,
         "n3_aborted": 0,
         "insert_conflicts": 0,
         "lessons_minted": 0,
@@ -354,18 +355,20 @@ def run_alpha_wealth_refund_reconciler(
             if verdict_row is None or verdict_row[0] is None:
                 summary["stage0r_verdict_missing"] += 1
                 continue
-            stage0r_green = str(verdict_row[0]) == "pass"
-            if not stage0r_green:
-                # PM 裁決（E2 RETURN 輪折入）：verdict 非 pass（單配置常態
-                # defer_data，或 gate fail）= preflight 證據不足非證偽——餵
-                # A 線真值表 False 臂會鑄 dead-mode lesson，以非結論性結果
-                # 汙染 novelty 庫（與上方 verdict 缺席同構；QC FIX-1.3
-                # 「falsified→dead-mode」語義一致）。wealth 方向兩種映射皆
-                # 不退款（FDR bound 無損），純 lesson 衛生問題。故本輪跳過
-                # 維持 pending；failed 僅經 net<0 路徑（stage0r_green=True
-                # 且 demo 表現負）可達。
-                summary["stage0r_not_pass"] += 1
+            stage0r_verdict = str(verdict_row[0])
+            if stage0r_verdict not in ("pass", "fail"):
+                # PM 三向裁決（E2 RETURN 複審輪）：'defer_data'（單配置 preflight
+                # 誠實 defer 的常態）= 非結論性——既不退款也不鑄 dead-mode，
+                # 本輪跳過維持 pending（與上方 verdict 缺席同構，上輪裁決不變）。
+                # 字彙外值同走此臂（fail-closed：不認識的 verdict 不渲染結論）。
+                summary["stage0r_deferred"] += 1
                 continue
+            # 'fail' 是 gate 的結論性統計否定（replay preflight 上 DSR/PBO/cost
+            # gate 拒絕）——按 QC FIX-1.3「被證偽→鑄 dead-mode」走 A 線真值表
+            # False 臂（M1：failed ⇔ n≥30 AND (net<0 OR NOT green) → failed +
+            # debit_failed + lesson）；'pass' 走 True 臂。NOT-green 臂自此真實
+            # 可達，不再被「僅 pass 進真值表」結構性餓死。
+            stage0r_green = stage0r_verdict == "pass"
 
         # demo round-trips：嚴格按 binding cell（strategy::symbol）+
         # ts ≥ demo_deployed_at（loader 的 since 進 fills 查詢下界）。
