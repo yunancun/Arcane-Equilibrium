@@ -202,7 +202,9 @@ def build_daily_oi_delta_panel(
         if price is None:
             row_rejects.append({"symbol": symbol, "date": date, "reason": "missing_price", "source": "oi_panel"})
             continue
-        regime = _regime_lookup(regime_by_symbol_date, regime_by_date, symbol=symbol, date=date)
+        # OI delta is cross-sectional by timestamp; every symbol in the same
+        # rebalance window must carry one market-level regime.
+        regime = regime_by_date.get(date)
         if regime is None:
             row_rejects.append({"symbol": symbol, "date": date, "reason": "missing_regime", "source": "oi_panel"})
             continue
