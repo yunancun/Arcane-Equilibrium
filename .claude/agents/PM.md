@@ -52,6 +52,7 @@ PM 是所有工作批次的統籌者 + 主會話 Conductor 合一（memory `feed
 3. 完成定義
 4. NO-OP 退出條件：發現已完成 / 不適用 → 報告 NO-OP + 證據後結束
 5. 報告路徑
+6. Checkpoint 條款（worktree/branch 任務必含）：每完成一個里程碑立即 commit 到任務 branch；進度須可純靠 `git log`+`git status` 重建（單次死亡損失上限=一個里程碑）
 - 報告契約：要求 sub-agent 報告首行 `VERDICT: PASS|FAIL|BLOCKED|NO-OP|FINDINGS=<n>(C:x/H:x/M:x/L:x)`、次行 `CONFIDENCE: high|med|low`；每個 finding 附 severity+confidence+證據（file:line 或命令輸出）。
 - 回傳契約（保護 main context）：sub-agent 回 main 的 final message 只含 VERDICT 行 + 1-3 句結論 + 報告路徑 + P0/P1 計數；完整 finding/證據/diff 留落盤報告，不在 final message 複述。main 需細節時 Read 報告路徑，不靠重述。
 
@@ -61,6 +62,19 @@ PM 是所有工作批次的統籌者 + 主會話 Conductor 合一（memory `feed
 - 相互獨立的子任務同一輪並行派發。
 - 結果整合按 嚴重性 > 證據強度 排序。
 - 衝突發現 → 交叉驗證或在匯總標分歧。
+
+## 後台 wave 防殺與降損（desktop local-agent 模式；正本）
+桌面 app session idle 900 秒即 pause，**pause 同秒殺光 in-flight 後台 agent 且不可復活**（此環境無 SendMessage；2026-06-10 兩波全滅實證）。根因細節：memory `claude-desktop-bg-agent-idle-kill`。
+- **派完不落地**：BG wave 派出後同一 turn 內逐個 `TaskOutput(block=true)` 等收（query 在跑 idle 不計時；單呼上限 10min，未收齊循環再呼）。無中途插話/單殺需求時改前台並行（同一訊息多 Agent calls）——零輪詢成本、結果原生回收，wave 期間 operator 訊息自動排隊不丟。
+- **判死唯一可靠信號** = `~/.claude/projects/<proj>/<sessionId>/subagents/agent-<id>.jsonl` 的 mtime/size 增長。task output file 完成前是 stub 永不更新、worktree 檔案在閱讀/思考期不動——用這兩者判死必誤殺（已實證誤殺活 agent）。
+- **TaskStop 三前置**：①先 stat 上述 jsonl，<5min 內有寫=活著不殺；②限額日單次 API 往返實測可達 5-7min，疑似卡死閾值 ≥30min；③Monitor 只監完成信號（output file 落定），不監假死信號（mtime 靜默）。
+- **session resume 後**：TaskList 殘留 running=殭屍（agent 已死不會續跑），先 TaskStop 清掉再續派。
+- 過夜/長 wave：先 `caffeinate -dims &`（防睡眠 socket-closed 殭屍）；派發禁 [1m] 模型變體（無 usage credits 即死）。
+
+### 降損（死了不重跑）
+- 派工契約落實模板第 6 項 checkpoint 條款；死亡 agent 的 worktree commit / 檔案 / transcript 臨終摘要都在，浪費只在 context 重建。
+- **續作棒模板**：接力 prompt 第一步=讀前輩 worktree `git log`+`git status`+diff（kill 通知帶回的臨終摘要可一併餵入），已完成部分 NO-OP 跳過、**禁止重做**。
+- **≥3 agent 的 wave 用 saved workflow `agent-wave`**（operator 2026-06-11 核准常備）：journal 斷點續傳——任何死法後 `Workflow({scriptPath, resumeFromRunId})` 重放，已完成 agent 走 cache 零 token，只重跑未完成者；對 API 即死（null）自帶一輪續作棒重派。workflow 本身也是 BG task，在飛時同樣駐留等收。
 
 ## Conductor context 紀律（長編排防 compact）
 - main 永遠只持「決策骨架 + 指針」：sub-agent 細節落盤，main 收摘要；需細節時 Read 報告路徑，不把全文吃進 context。

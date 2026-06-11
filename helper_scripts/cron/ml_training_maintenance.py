@@ -58,7 +58,7 @@ AUDIT_JOBS = (
 # 開兩 flag + 顯式加 job 名才會寫任何 row（行為中性硬約束）。
 # alpha_wealth_reconciler = P4 online-FDR α-wealth refund 對帳器；受
 # OPENCLAW_ALPHA_WEALTH_RECONCILER flag gate（預設 OFF）+ 不在 DEFAULT_JOBS
-# + V137 表 0 rows = 三重 OFF 同款行為中性。
+# + V138 表 0 rows = 三重 OFF 同款行為中性。
 OPTIONAL_JOBS = ("residual_preflight", "alpha_wealth_reconciler")
 VALID_JOBS = CORE_JOBS + AUDIT_JOBS + OPTIONAL_JOBS
 # DEFAULT_JOBS 刻意只含 CORE+AUDIT（不含 OPTIONAL）→ 預設 cron 不跑 residual_preflight。
@@ -483,7 +483,7 @@ def _run_alpha_wealth_reconciler(dsn: str | None, args: argparse.Namespace) -> J
     """P4 α-wealth refund 對帳器 wrapper（E1-C；flag-OFF 行為中性）。
 
     三重 OFF：① OPENCLAW_ALPHA_WEALTH_RECONCILER 預設 0 ② 本 job 不在
-    DEFAULT_JOBS（須 --jobs 顯式加 alpha_wealth_reconciler）③ V137 表 0 rows
+    DEFAULT_JOBS（須 --jobs 顯式加 alpha_wealth_reconciler）③ V138 表 0 rows
     → reconciler 自身 no-op。flag/DSN 缺回 skipped（cron 不 page）。寫面 =
     research.alpha_wealth_ledger append-only INSERT + agent.lessons dead-mode
     鑄造；零 live/auth/order/risk/lease 變動。獨立 psycopg2 conn +

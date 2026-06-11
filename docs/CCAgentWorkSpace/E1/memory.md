@@ -202,3 +202,28 @@
 - 四件套照 PA 設計落地：`canary/incident_sentinel.py`（6 軸 alert-only 哨兵，800 行）+ test（56 passed，隔離鐵則 0 真 DSN/0 真外發）+ cron wrapper/installer + SCRIPT_INDEX/watchdog docstring 1 行。watchdog alert 22 passed 零回歸；Mac dry-run drill 過（A1 stale 樣本 + db_unreachable lazy 路徑）。
 - 教訓再驗：never-remediate 結構斷言裸 grep "watchdog_state.json" 被 MODULE_NOTE 合法邊界宣告誤紅 → 斷言收窄到「模塊 docstring 之後的代碼區 0 引用」（partition at `from __future__`）；alert body 措辭避開 `restart_all` 字面防 E2 grep 誤紅。
 - 設計 ~400 行估算 vs 實際 800 行（Chinese-first 注釋覆蓋 + 6 軸先天廣度）；壓行三輪保住 ≤800 review-attention 門檻，rationale 未刪。
+
+## 2026-06-10 P2p incident_sentinel E2 RETURN 2 MEDIUM 修復（commit 1e2b094d, feat/l2-p2p-impl 已 push）
+- **MED-2 dedup key 截秒吞事件**：A2 alert_key 用 `int(max_alertable_ts)` 截整數秒而游標 float 全精度 → 同一整數秒 burst 跨輪次輪同 key 被 should_emit 靜默吞且游標已推過。修=key 全精度 ts（新批 ts 必嚴格 > 游標 ≥ 前批 max → 必為新 key，dedup 語義守恆）。**教訓：dedup 指紋與游標的精度必須一致，指紋降精度=在精度縫隙內吞事件**。
+- **MED-1 正面結構斷言 no-bite**：`"X" in 全檔SRC` 正面斷言被模塊 docstring 合法提及滿足（負面斷言查全文有效、正面必收窄）——修=`inspect.getsource(_connect_readonly)` + 雙 partition('"""') 剝函數 docstring，命中只能來自功能行。mutation 三證（刪 read-only/statement_timeout kwarg、還原 int() 截秒）全紅，還原全綠；57+22 passed。
+
+## 2026-06-10 P2p E4 RED HIGH 修復：cron wrapper Tailscale IPv4 解析 A3 API base（commit bd324886, feat/l2-p2p-impl 已 push）
+- sentinel.py A3 默認 loopback:8000 在 trade-core 不可達（uvicorn bind Tailscale IPv4）→ 假 CRITICAL 常駐。修=wrapper 內 env 已設尊重/未設 `tailscale ip -4` 組 URL/失敗不設留 py 默認；mirror m11 inline **不 source lib/api_bind_host.sh**（server bind 視角、0.0.0.0 走 ERROR exit 2 不合 client fail-soft，且現無任何 cron wrapper source 它）。
+- 教訓：bind-host 政策（Tailscale IPv4 優先、禁 0.0.0.0）下，任何 client 端 cron wrapper 不能信 py 默認 loopback，必帶同款解析；contained 驗證法=`OPENCLAW_PYTHON_BIN` 指向 echo-stub 全程跑真 wrapper 而不觸真 sentinel（防誤發告警）。
+- set -euo pipefail 下 `VAR=$(cmd 2>/dev/null | head -1 || true)`：redirection 先於 command lookup，command-not-found 的 stderr 也被抑制，`|| true` 吞 pipefail 的 127——三案例（已設透傳/無 CLI 不設不炸/真解析 100.x URL）+ 58 passed 實證。
+
+## 2026-06-10 L2 P4 E1-C（V137 + refund reconciler + healthcheck [82]-[86]，branch feat/l2-p4-e1c，待 E2）
+- 兩段 commit+push：段1 `3e2ef6a3`（V137 461 行，第一代草稿 N-1/N-2/N-5 逐驗合格留用 + 我補 prh_falsification_chk 三值邏輯收緊：key 缺席 NULL 放行 + 陣列 `?` 元素匹配兩殘洞，前置存在性謂詞 + jsonb_typeof='object' 封死）；段2 `f90f1a26`（reconciler 581 行 + registry +8 行 + healthcheck 五軸 + cron OPTIONAL job + SCRIPT_INDEX；11 檔 +1545/−3）。Linux dry-run：apply×2 冪等 0 ERROR + N-1/N-2 CHECK 拒插原文 + role-absent NOTICE 三實證（p4v137_dryrun 已 drop）。
+- 教訓：PG `CHECK (jsonb->'k' ? 'x')` 對 key 缺席整式 NULL → 放行，且 `?` 對 jsonb 陣列按元素匹配——jsonb 結構 CHECK 必前置 `jsonb ? 'k' AND jsonb_typeof(...)='object'`（N-1 三值邏輯原則的 jsonb 版）。
+- 教訓：生產函數新增 `cur.rowcount` 讀面（registry double-seal warning）→ 既有 test fake cursor 無此 attr 必紅（6 個 bridge 測試）；正解=retrofit fake 鏡像 psycopg2 真實邊界（`rowcount: int = 1`），不是在生產碼 getattr 防禦遷就 fake。
+- 教訓：drar（V131）無 symbol 欄、ResidualEdgeReport 無 strategy/symbol field——per-cell stage0r verdict 唯一可查處 = `mlde_shadow_recommendations`（strategy_name+symbol+replay_experiment_id 蓋章+payload report verdict）；dead-mode lesson 鑄造必須 source='dead_mode_seed'（incident sentinel A5 LESSONS_SOURCE_WHITELIST 硬列，自創 source 即觸 A5 告警）。
+- deviation×3 已標：stage0r verdict 缺=pending 非 failed（防未跑 preflight 被誤鑄 dead-mode）；load_round_trips +optional symbol（HIGH-2 同檔先例，attribution 紀律 > 字面 reuse）；stage0r preflight cron 已存在（PART 4 Gap A）= 該交付項驗證後 NO-OP。owed-E4：dead-mode retrieve_lessons 真查 + 真 PG E2E dry-run。
+
+## 2026-06-11 L2 P4 E1-B（control_api online-FDR 接線）兩段 commit 已 push（feat/l2-p4-e1b ac6d5291+5eaba216，待 E2）
+- **段1**=l2_alpha_wealth_store（append-only INSERT/SELECT；FIX-1.1 supersedes-head + FIX-1.2 窗單調在 store 層；N-4 確定性 debit_id；partial-unique ON CONFLICT 冪等）+ l2_fdr_routes（bind-demo operator-scope 第一行 + GET wealth）+ main.py +2 行掛載（最小必要偏差）。**段2**=executor STAGE 3.55 precheck（FIX-3.1 value-invariant）→3.58 sealed→3.6 pre-reg→3.7 wealth→4 threshold（Option B）→4.5 debit（MIT #3：overall∈{pass,fail} OR dsr∈{pass,fail}）+ FIX-1.3 dead-mode mint；adapter N_eff seam（共享 ordinal int key 跨 variant 對齊，逐 variant 獨立 reindex 會錯位）+ FIX-2.1b 區間算術（bar_end=window_end+1d ≤ oos_start，==off-by-one 與非午夜 straddle 雙 golden）；guard clause F；contract v2 三點同步（registry/TOML/_MODE_CONTRACT_REF）；orchestrator tier_provider fail-closed L1。
+- **慘痛教訓：mutation 測試的還原一律用 sed/python 反向替換或先 commit 再 git checkout——對「未 commit 的工作檔」跑 `git checkout --` 會整檔回 HEAD 把所有未提交改動蒸發**（本次執行器 543 行新碼被一鍵清空，靠 context 內 Edit 全文逐一重放救回；兩段 commit 紀律=活性證明+災難保險的雙重意義實證）。
+- 測試：新 41+66 + P3b 10 更新（v2 形+FDR 語義）；l2/layer2 全家族 648 passed+4 xfailed 0 fail；3 組 mutation 全 bite（debit 條件 dsr 臂/區間算術→點比較/precheck 停用）。A 線 import 點（alpha_wealth_controller/n_eff_cluster）以 _FakeAwc+monkeypatch mock，merge 後 E4 全鏈驗真模組。executor 1274→1817 行（>800 review 線、<2000 cap），E2 須評 sibling-extract 時機。
+## 2026-06-10 P5-SM soak 第三棒收尾（feat/p5sm-soak-observability @ 9eba5a40，待 E2）
+- Wave1 驗證+V137 Linux dry-run 親跑（雙 apply 全 no-op/CHECK 負向拒/ROLLBACK 後零痕跡，max version 恆 136）；Wave2 沿用 0 重寫，抓到 1 真測試洞：[82] flag-OFF 觀測支路 mutation 存活——原測試數據被 OFF→ON transition 支路遮蔽，修=OFF 觀測改由非 flag_change 事件攜帶且無補償 transition，只有 belt-and-suspenders 支路能擋。**教訓：多支路同向 FAIL 的 gate，每支路的 bite 測試必須構造「只有該支路能擋」的數據，否則 mutation 被鄰路遮蔽**。
+- mutation 驗證紀律：長 && 鏈跑多個 mutation 會被前一輪殘留汙染（F 輪紅錯測試名）——**一 mutation 一 bash call，restore 後綠再下一個**；八個 mutation（canary single-flight/backoff + [82] 六支路）standalone 全紅後綠。
+- S5(b) smoke 的 profile 陷阱：GovernanceProfile Validation/Exploration 在 Rust `acquire_lease` 直接 `LeaseId::Bypass`（不 engage SM、bypass lease release=LeaseNotFound）→「demo profile」字面照做=驗不到 mutating arm；正解=Production profile + 環境層 demo 圍欄（OPENCLAW_ALLOW_MAINNET guard），且 engine_mode 值 Live/LiveDemo 同寫 'live_demo' 不可作環境斷言軸。

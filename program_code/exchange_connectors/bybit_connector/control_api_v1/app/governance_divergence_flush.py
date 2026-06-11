@@ -39,16 +39,36 @@ MODULE_NOTE:
     asyncio，是不同關注點。分檔讓 comparator 保持 byte-unchanged（其 singleton-registry
     §2.5 登記與契約不動），flusher 的 I/O 失敗面隔離在本檔。
 
-singleton-registry：本模塊新增一個 module-level 可變 leader-lock fd
-    ``_FLUSHER_LEADER_LOCK_FD``，已登記於 docs/architecture/singleton-registry.md
-    §2.5.4（與 comparator sink 同 step-(i) 退役）。
+    ── P5-SM soak 第二輪擴充（E1-B，2026-06-10）──
+    per PA 設計 `2026-06-10--p5sm_soak_observability_redesign.md` §3.1：
+      - ``flush_canary_snapshot_once``：把 governance_ipc_canary 計數器 UPSERT 到
+        V129 key='canary'（欄位映射 total=attempts / matches=ok / divergences=fail；
+        V129 CHECK total>=matches+divergences 因 attempts==ok+fail 天然成立）。
+        **同進程不變量**：canary 複用本檔同一把 flock（見 governance_ipc_canary
+        MODULE_NOTE）→ leader 進程內 get_canary_counters() 讀到的就是真計數。
+      - epoch/flag 事件帳本（V137 learning.lease_ipc_soak_events，append-only）：
+        leader 啟動時先讀舊 V129 兩 row 寫 ``epoch_rollover``（搶救前一 epoch 終值，
+        損失 ≤30s）+ ``flusher_start``；週期偵測 flag 變遷（``flag_change``）/
+        canary 失敗連段增量（``canary_fail_streak``）/ 程內計數器倒退
+        （``counter_regression``）/ 低頻連續性 ``canary_heartbeat``（30min 攜
+        attempts 快照，E2 HIGH-2 修復：讓 `[82]` 可斷言 probe 窗內持續增長，
+        canary 中段死亡不再不可見）。`[82]` soak-window check 以這些事件跨 epoch
+        重建連續有效窗。V137 未 apply 時全部 fail-soft（事件寫入失敗只 debug log，
+        絕不影響權威路徑 / comparator / canary）。
+
+singleton-registry：本模塊的 module-level 可變單例：
+    ``_FLUSHER_LEADER_LOCK_FD``（§2.5.4）+ soak 事件偵測 trackers
+    ``_SOAK_TRACKERS``（§2.5.6；單一 flusher 協程順序讀寫，await happens-before
+    保證可見性，無需鎖）。皆與 comparator sink 同 step-(iv) 退役。
 """
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -60,11 +80,50 @@ _FLUSH_INTERVAL_S: int = 30
 # UPSERT 目標 key（V129 表 snapshot_key 預設值）；單一 leader writer 永遠寫此 key。
 _SNAPSHOT_KEY: str = "singleton"
 
+# canary 計數器投影的 V129 key（P5-SM soak 第二輪 E1-B；同一 leader writer）。
+_CANARY_SNAPSHOT_KEY: str = "canary"
+
 # 強制非 leader 的 env（對齊 OPENCLAW_RECON_ALERT_MONITOR_LEADER 慣例）。
 _LEADER_ENV: str = "OPENCLAW_LEASE_DIVERGENCE_FLUSHER_LEADER"
 
+# canary 連續性 heartbeat 週期（秒；E2 HIGH-2 修復，2026-06-10）。
+# 為什麼需要 heartbeat：canary 累積 ≥ 停擺下限後死亡/長停擺時，flusher 照常 flush
+# （V129 fresh → flusher-dead 軸不咬）、停擺不產生失敗（連段軸不咬）→ `[82]` 收口
+# 時中段死亡不可見（E2 Probe D：17h 攢 510 拍後 31h 全黑仍 PASS）。低頻 heartbeat
+# 事件攜帶 attempts 快照，讓 `[82]` 能斷言「窗內 probe 持續增長」。
+# 為什麼 1800s（30min）：
+#   - 與 `[82]` SOAK_EPOCH_GAP_MAX_SECONDS（30min 觀測黑洞容忍上限）對齊——連續性
+#     證據粒度 = 窗中斷判定粒度；
+#   - 相鄰兩條 heartbeat 之間至少 ~6 拍（300s 退頻 cadence 下限）、常態 ~15 拍
+#     （120s cadence），「嚴格增長」斷言裕度充足，結構上零誤殺；
+#   - 量級：48h 窗 ≈ 96 row、14d soak ≈ 672 row，append-only 低速表仍可忽略。
+# `[82]` 端鏡像常數 SOAK_HEARTBEAT_*（cron-side 不 import 本模組，兩端注釋互指）。
+_HEARTBEAT_INTERVAL_S: int = 1800
+
 # module-level leader-lock fd（singleton-registry §2.5.4）。None=尚未取得 / 非 leader。
 _FLUSHER_LEADER_LOCK_FD: int | None = None
+
+# ── P5-SM soak 第二輪：事件偵測 trackers（singleton-registry §2.5.6）──
+# 只由 leader 進程的單一 flusher 協程順序讀寫（run_in_executor 逐次 await，
+# happens-before 保證跨 executor thread 可見性）→ 無需鎖。restart 歸零 = epoch
+# 邊界語義（epoch_rollover 事件本身就是為此存在）。
+_SOAK_TRACKERS: dict[str, Any] = {
+    # 上次 flush 觀測到的 lease-IPC flag 狀態（None=本 epoch 尚未觀測）。
+    "last_flag_state": None,
+    # 上次觀測到的 canary fail_streak_breaches（增量 → 寫 canary_fail_streak 事件）。
+    "last_canary_breaches": None,
+    # 本 epoch 是否已寫 canary_leader_start（attempts 0→>0 時寫一次）。
+    "canary_start_recorded": False,
+    # 上次 flush 的計數值（程內單調性交叉檢查；倒退 → counter_regression 事件）。
+    "last_comparator_counts": None,
+    "last_canary_counts": None,
+    # 本 epoch 是否已寫 epoch 起點事件（flusher_start + epoch_rollover）。
+    "epoch_start_recorded": False,
+    # 上次成功寫入 canary_heartbeat 的 monotonic 秒（None=本 epoch 尚未寫過 →
+    # 首輪即發，讓新 epoch 的連續性證據鏈儘早建立）。用 monotonic 不用 wall-clock：
+    # heartbeat 是「間隔排程」語義，須免疫系統時鐘跳變。
+    "last_heartbeat_mono": None,
+}
 
 
 def _acquire_flusher_leader_lock() -> bool:
@@ -191,15 +250,393 @@ def flush_divergence_snapshot_once() -> bool:
         return False
 
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# P5-SM soak 第二輪（E1-B）：canary 投影 + V137 事件帳本
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _read_lease_flag_state() -> bool:
+    """讀 lease-IPC flag 當下狀態（讀取失敗保守記 False，與既有 flush 同策略）。"""
+    try:
+        from .governance_lease_bridge import is_lease_ipc_enabled  # noqa: PLC0415
+
+        return bool(is_lease_ipc_enabled())
+    except Exception:  # noqa: BLE001 — flag 讀取失敗不阻斷，保守 False
+        return False
+
+
+def flush_canary_snapshot_once() -> bool:
+    """讀 canary 計數器 → UPSERT V129 key='canary' 一次（best-effort / fail-soft）。
+
+    欄位映射（V137 頭部 + singleton-registry §2.5.5 文檔化）：
+    total=attempts / matches=ok / divergences=fail。canary 的 attempts==ok+fail
+    不變量讓 V129 CHECK ``total >= matches + divergences`` 天然成立。
+
+    為什麼 canary 行也由本 flusher 寫：canary 複用本檔同一把 flock → 兩者必在
+    同一 leader 進程 → 本進程的 get_canary_counters() 讀到真計數（同進程不變量，
+    load-bearing；分鎖會選出不同進程 = flusher 永遠讀到 0 = silent 假死）。
+    """
+    try:
+        from .governance_ipc_canary import get_canary_counters  # noqa: PLC0415
+
+        counters = get_canary_counters()
+        attempts = int(counters.get("attempts", 0))
+        ok_count = int(counters.get("ok", 0))
+        fail_count = int(counters.get("fail", 0))
+        flag_enabled = _read_lease_flag_state()
+        flusher_ts_ms = int(time.time() * 1000)
+
+        from .db_pool import get_pg_conn  # noqa: PLC0415
+
+        with get_pg_conn() as conn:
+            if conn is None:
+                logger.debug(
+                    "canary snapshot flush skipped: PG unavailable / PG 不可用，跳過"
+                )
+                return False
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO learning.lease_ipc_divergence_snapshot
+                        (snapshot_key, total, matches, divergences,
+                         flag_enabled, flusher_ts_ms, updated_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, now())
+                    ON CONFLICT (snapshot_key) DO UPDATE SET
+                        total         = EXCLUDED.total,
+                        matches       = EXCLUDED.matches,
+                        divergences   = EXCLUDED.divergences,
+                        flag_enabled  = EXCLUDED.flag_enabled,
+                        flusher_ts_ms = EXCLUDED.flusher_ts_ms,
+                        updated_at    = now()
+                    """,
+                    (_CANARY_SNAPSHOT_KEY, attempts, ok_count, fail_count,
+                     flag_enabled, flusher_ts_ms),
+                )
+            conn.commit()
+        return True
+    except Exception:  # noqa: BLE001 — fail-soft，絕不影響權威路徑 / canary
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "flush_canary_snapshot_once 內部錯誤已吞噬（不影響權威路徑）",
+                exc_info=True,
+            )
+        return False
+
+
+def _insert_soak_events(events: list[dict[str, Any]]) -> bool:
+    """把一批事件 INSERT 進 V137 learning.lease_ipc_soak_events（append-only）。
+
+    Best-effort / fail-soft：V137 未 apply / PG 不可用 / 任何例外 → 回 False +
+    debug log，**絕不拋**。每事件 dict 鍵：event_type（必）、flag_enabled（必）、
+    prev_total / prev_matches / prev_divergences / prev_canary_attempts /
+    prev_canary_ok / prev_canary_fail（可 None）、detail（dict 或 None）。
+    """
+    if not events:
+        return True
+    try:
+        from .db_pool import get_pg_conn  # noqa: PLC0415
+
+        with get_pg_conn() as conn:
+            if conn is None:
+                logger.debug("soak event insert skipped: PG unavailable")
+                return False
+            with conn.cursor() as cur:
+                for ev in events:
+                    detail = ev.get("detail")
+                    cur.execute(
+                        """
+                        INSERT INTO learning.lease_ipc_soak_events
+                            (event_type, flag_enabled,
+                             prev_total, prev_matches, prev_divergences,
+                             prev_canary_attempts, prev_canary_ok, prev_canary_fail,
+                             detail)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            ev["event_type"],
+                            bool(ev["flag_enabled"]),
+                            ev.get("prev_total"),
+                            ev.get("prev_matches"),
+                            ev.get("prev_divergences"),
+                            ev.get("prev_canary_attempts"),
+                            ev.get("prev_canary_ok"),
+                            ev.get("prev_canary_fail"),
+                            json.dumps(detail) if detail is not None else None,
+                        ),
+                    )
+            conn.commit()
+        return True
+    except Exception:  # noqa: BLE001 — V137 未 apply / PG 抖動皆 fail-soft
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "_insert_soak_events 內部錯誤已吞噬（V137 未 apply 或 PG 不可用）",
+                exc_info=True,
+            )
+        return False
+
+
+def _current_counts_snapshot() -> tuple[dict[str, int], dict[str, int]]:
+    """讀 comparator + canary 當下計數快照（事件的 prev_* 欄；讀失敗回空 dict）。"""
+    comparator: dict[str, int] = {}
+    canary_counts: dict[str, int] = {}
+    try:
+        from .governance_divergence import get_divergence_counters  # noqa: PLC0415
+
+        comparator = get_divergence_counters()
+    except Exception:  # noqa: BLE001 — 計數讀取失敗不阻斷事件記錄（prev_* NULL-able）
+        pass
+    try:
+        from .governance_ipc_canary import get_canary_counters  # noqa: PLC0415
+
+        canary_counts = get_canary_counters()
+    except Exception:  # noqa: BLE001 — 同上
+        pass
+    return comparator, canary_counts
+
+
+def _event_payload(
+    event_type: str,
+    flag_enabled: bool,
+    comparator: dict[str, int],
+    canary_counts: dict[str, int],
+    detail: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """組一筆事件 dict（prev_* = emit 當下的本 epoch 計數快照；V137 語義）。"""
+    return {
+        "event_type": event_type,
+        "flag_enabled": flag_enabled,
+        "prev_total": comparator.get("total"),
+        "prev_matches": comparator.get("matches"),
+        "prev_divergences": comparator.get("divergences"),
+        "prev_canary_attempts": canary_counts.get("attempts"),
+        "prev_canary_ok": canary_counts.get("ok"),
+        "prev_canary_fail": canary_counts.get("fail"),
+        "detail": detail,
+    }
+
+
+def record_epoch_start_events_once() -> bool:
+    """leader 啟動時記 epoch 起點事件（每 epoch 恰一次）：epoch_rollover + flusher_start。
+
+    epoch_rollover：讀 V129 既有 'singleton'/'canary' row（前一 epoch 被 UPSERT
+    覆寫前的終值，損失 ≤30s），prev_* 攜終值、detail 攜兩 row 的末次 flush 時間戳
+    （epoch 秒）供 `[82]` 算 epoch 間隙 ≤30min。V129 無 row（首次部署）→ 只寫
+    flusher_start。Best-effort：任何失敗回 False，下輪**不再重試**（標記已記，
+    避免把「啟動事件」變成週期噪音；epoch 邊界證據缺失由 `[82]` counter-regression
+    交叉偵測兜底）。
+    """
+    if _SOAK_TRACKERS["epoch_start_recorded"]:
+        return True
+    _SOAK_TRACKERS["epoch_start_recorded"] = True
+
+    flag_enabled = _read_lease_flag_state()
+    events: list[dict[str, Any]] = []
+    try:
+        prev_rows: dict[str, tuple[int, int, int, int, bool]] = {}
+        from .db_pool import get_pg_conn  # noqa: PLC0415
+
+        with get_pg_conn() as conn:
+            if conn is not None:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT snapshot_key, total, matches, divergences,
+                               EXTRACT(EPOCH FROM updated_at)::BIGINT,
+                               flag_enabled
+                        FROM learning.lease_ipc_divergence_snapshot
+                        WHERE snapshot_key IN (%s, %s)
+                        """,
+                        (_SNAPSHOT_KEY, _CANARY_SNAPSHOT_KEY),
+                    )
+                    for row in cur.fetchall() or []:
+                        prev_rows[str(row[0])] = (
+                            int(row[1] or 0), int(row[2] or 0),
+                            int(row[3] or 0), int(row[4] or 0),
+                            bool(row[5]),
+                        )
+                # 唯讀查詢後 rollback 釋放 tx（不留 idle-in-transaction）。
+                conn.rollback()
+
+        if prev_rows:
+            singleton = prev_rows.get(_SNAPSHOT_KEY)
+            canary_prev = prev_rows.get(_CANARY_SNAPSHOT_KEY)
+            # prev_flag_enabled = 前一 epoch 末次 flush 的 flag 狀態（兩 row OR）。
+            # 為什麼必要：跨 restart 的 OFF→ON 轉變（operator 寫 env 檔後重啟）不會
+            # 產生同 epoch 內的 flag_change 事件，`[82]` 靠本欄識別「flag 在本
+            # rollover 才轉 ON」→ 窗錨點重置在 rollover，不可往前延伸虛胖窗。
+            prev_flag = bool(
+                (singleton[4] if singleton else False)
+                or (canary_prev[4] if canary_prev else False)
+            )
+            events.append({
+                "event_type": "epoch_rollover",
+                "flag_enabled": flag_enabled,
+                "prev_total": singleton[0] if singleton else None,
+                "prev_matches": singleton[1] if singleton else None,
+                "prev_divergences": singleton[2] if singleton else None,
+                "prev_canary_attempts": canary_prev[0] if canary_prev else None,
+                "prev_canary_ok": canary_prev[1] if canary_prev else None,
+                "prev_canary_fail": canary_prev[2] if canary_prev else None,
+                "detail": {
+                    # tuple 佈局：(total, matches, divergences, updated_at_epoch_s, flag)
+                    "prev_singleton_updated_at_epoch_s": (
+                        singleton[3] if singleton else None
+                    ),
+                    "prev_canary_updated_at_epoch_s": (
+                        canary_prev[3] if canary_prev else None
+                    ),
+                    "prev_flag_enabled": prev_flag,
+                },
+            })
+    except Exception:  # noqa: BLE001 — 前值搶救失敗不阻斷 flusher_start 記錄
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug("epoch_rollover 前值讀取失敗（已吞噬）", exc_info=True)
+
+    comparator, canary_counts = _current_counts_snapshot()
+    events.append(_event_payload("flusher_start", flag_enabled, comparator, canary_counts))
+    return _insert_soak_events(events)
+
+
+def detect_and_record_soak_events_once() -> bool:
+    """週期事件偵測（每輪 flush 後跑一次）：flag_change / canary_leader_start /
+    canary_fail_streak / counter_regression / canary_heartbeat。
+
+    全部 best-effort；偵測本身純記憶體比對（trackers vs 當下快照），只有事件
+    INSERT 碰 PG（fail-soft）。trackers 在**寫入成功與否之外**都會前移——事件
+    寫失敗寧可漏記也不重複轟（append-only 帳本的 dedupe 由 tracker 前移保證）。
+    **例外：heartbeat tracker 只在寫入成功後前移**（方向相反，理由見該段注釋）。
+    """
+    try:
+        flag_enabled = _read_lease_flag_state()
+        comparator, canary_counts = _current_counts_snapshot()
+        events: list[dict[str, Any]] = []
+
+        # ── flag 變遷（S4 flag-OFF 觀測軸；首次觀測只記 baseline 不發事件）──
+        last_flag = _SOAK_TRACKERS["last_flag_state"]
+        if last_flag is not None and bool(last_flag) != flag_enabled:
+            events.append(_event_payload(
+                "flag_change", flag_enabled, comparator, canary_counts,
+                detail={"from": bool(last_flag), "to": flag_enabled},
+            ))
+        _SOAK_TRACKERS["last_flag_state"] = flag_enabled
+
+        # ── canary 開始 probe（attempts 0→>0，每 epoch 一次）──
+        attempts = int(canary_counts.get("attempts", 0) or 0)
+        if attempts > 0 and not _SOAK_TRACKERS["canary_start_recorded"]:
+            _SOAK_TRACKERS["canary_start_recorded"] = True
+            events.append(_event_payload(
+                "canary_leader_start", flag_enabled, comparator, canary_counts,
+            ))
+
+        # ── canary 失敗連段增量（S3 ≥15min 連段證據）──
+        breaches = int(canary_counts.get("fail_streak_breaches", 0) or 0)
+        last_breaches = _SOAK_TRACKERS["last_canary_breaches"]
+        if last_breaches is not None and breaches > int(last_breaches):
+            events.append(_event_payload(
+                "canary_fail_streak", flag_enabled, comparator, canary_counts,
+                detail={"breaches": breaches, "prev_breaches": int(last_breaches)},
+            ))
+        _SOAK_TRACKERS["last_canary_breaches"] = breaches
+
+        # ── 程內計數器倒退（S4 記帳完整性；in-memory 計數器設計上單調，倒退 =
+        #    bug / 測試 reset 汙染，必須留痕）──
+        for axis, current, tracker_key in (
+            ("comparator", comparator, "last_comparator_counts"),
+            ("canary", canary_counts, "last_canary_counts"),
+        ):
+            last = _SOAK_TRACKERS[tracker_key]
+            if last is not None and current:
+                for key, last_val in last.items():
+                    cur_val = current.get(key)
+                    if cur_val is not None and int(cur_val) < int(last_val):
+                        events.append(_event_payload(
+                            "counter_regression", flag_enabled,
+                            comparator, canary_counts,
+                            detail={
+                                "axis": axis, "key": key,
+                                "before": int(last_val), "after": int(cur_val),
+                            },
+                        ))
+                        break  # 每軸每輪至多一筆（避免單次倒退多鍵轟帳本）
+            if current:
+                _SOAK_TRACKERS[tracker_key] = dict(current)
+
+        # ── canary 連續性 heartbeat（E2 HIGH-2 修復）──
+        # 低頻（_HEARTBEAT_INTERVAL_S）寫一條攜 attempts 快照的事件，讓 `[82]` 能
+        # 斷言「窗內 probe 持續增長」（canary 中段死亡 → 相鄰 heartbeat attempts
+        # 持平 → FAIL）。emit 條件 = flag ON **或** canary 已有 probe：
+        #   - 非 soak 期（flag OFF 且 canary 從未跑）不發——否則平時 cron 期
+        #     heartbeat 會讓 `[82]` 的 soak-active 推定（近 72h 有事件）永遠為真；
+        #   - flag OFF 但 canary 仍在跑（不一致的 soak 狀態）照發：事件本身的
+        #     flag_enabled=false 是一次 OFF 觀測，`[82]` S4 軸會正確 FAIL。
+        now_mono = time.monotonic()
+        heartbeat_due = False
+        if flag_enabled or attempts > 0:
+            last_hb_mono = _SOAK_TRACKERS["last_heartbeat_mono"]
+            heartbeat_due = (
+                last_hb_mono is None
+                or (now_mono - float(last_hb_mono)) >= _HEARTBEAT_INTERVAL_S
+            )
+            if heartbeat_due:
+                events.append(_event_payload(
+                    "canary_heartbeat", flag_enabled, comparator, canary_counts,
+                    detail={"heartbeat_interval_s": _HEARTBEAT_INTERVAL_S},
+                ))
+
+        inserted = _insert_soak_events(events)
+        # heartbeat tracker 只在寫入成功後前移（與其他 tracker「寧漏勿重」相反）：
+        # heartbeat 是週期性連續性證據鏈，漏一條 = `[82]` 證據出洞且新鮮度軸會咬；
+        # 寫失敗下一輪 30s 重試直到成功，append-only 帳本多一條 heartbeat 無害
+        # （`[82]` 對 heartbeat 無 dedupe 需求，只看增長與新鮮度）。
+        if inserted and heartbeat_due:
+            _SOAK_TRACKERS["last_heartbeat_mono"] = now_mono
+        return inserted
+    except Exception:  # noqa: BLE001 — 偵測層雙保險，絕不影響權威路徑
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "detect_and_record_soak_events_once 內部錯誤已吞噬", exc_info=True
+            )
+        return False
+
+
+def flush_observability_cycle_once() -> bool:
+    """單輪完整觀測 flush（loop 每 30s 跑）：comparator 投影 + canary 投影 + 事件偵測。
+
+    各步驟獨立 fail-soft（一步失敗不阻斷其他步驟）；回傳「全部成功與否」僅供測試
+    斷言，caller（flusher loop）不依賴回傳值。
+    """
+    ok_singleton = flush_divergence_snapshot_once()
+    ok_canary = flush_canary_snapshot_once()
+    ok_events = detect_and_record_soak_events_once()
+    return ok_singleton and ok_canary and ok_events
+
+
+def _reset_soak_event_trackers_for_tests() -> None:
+    """僅供測試隔離：重置事件偵測 trackers（勿於 production 呼叫）。"""
+    _SOAK_TRACKERS.update(
+        last_flag_state=None,
+        last_canary_breaches=None,
+        canary_start_recorded=False,
+        last_comparator_counts=None,
+        last_canary_counts=None,
+        epoch_start_recorded=False,
+        last_heartbeat_mono=None,
+    )
+
+
 async def divergence_snapshot_flusher() -> None:
-    """asyncio 背景協程：leader-elected，每 _FLUSH_INTERVAL_S 跑一次 flush。
+    """asyncio 背景協程：leader-elected，每 _FLUSH_INTERVAL_S 跑一次觀測 flush 週期。
 
     由 main.py @app.on_event("startup") 以 asyncio.create_task 排程（fail-open，不阻斷
     啟動）。cancellation-aware：shutdown 時 CancelledError 乾淨退出。
 
-    為什麼把 flush 放 executor：flush_divergence_snapshot_once 是同步 PG I/O（psycopg2
-    阻塞）；放 loop.run_in_executor 避免阻塞事件循環（對齊「啟動 <100ms / 不阻塞 await」
-    紀律）。flush 自身 fail-soft，executor 內例外已被吞（回 False），故 await 不會拋。
+    P5-SM soak 第二輪擴充：啟動先記 epoch 起點事件（epoch_rollover 搶救前一 epoch
+    終值 + flusher_start），之後每輪 = comparator 投影（既有，byte-unchanged）+
+    canary 投影（V129 'canary' row）+ 事件偵測（flag_change / canary_leader_start /
+    canary_fail_streak / counter_regression → V137）。
+
+    為什麼把 flush 放 executor：同步 PG I/O（psycopg2 阻塞）；放 loop.run_in_executor
+    避免阻塞事件循環（對齊「啟動 <100ms / 不阻塞 await」紀律）。各步驟自身 fail-soft，
+    executor 內例外已被吞，故 await 不會拋。
     """
     if not _acquire_flusher_leader_lock():
         return
@@ -210,6 +647,11 @@ async def divergence_snapshot_flusher() -> None:
         _FLUSH_INTERVAL_S,
     )
     loop = asyncio.get_event_loop()
+    # epoch 起點事件（搶救前一 epoch 終值；fail-soft，失敗不阻斷 flush 循環）。
+    try:
+        await loop.run_in_executor(None, record_epoch_start_events_once)
+    except Exception as exc:  # noqa: BLE001 — 雙保險
+        logger.debug("epoch start events error (continuing): %s", exc)
     while True:
         try:
             await asyncio.sleep(_FLUSH_INTERVAL_S)
@@ -219,8 +661,8 @@ async def divergence_snapshot_flusher() -> None:
             )
             return
         try:
-            # 同步 PG I/O 丟 executor，不阻塞事件循環；flush 內部 fail-soft 不拋。
-            await loop.run_in_executor(None, flush_divergence_snapshot_once)
+            # 同步 PG I/O 丟 executor，不阻塞事件循環；週期內部 fail-soft 不拋。
+            await loop.run_in_executor(None, flush_observability_cycle_once)
         except asyncio.CancelledError:
             logger.info(
                 "lease-divergence snapshot flusher cancelled mid-flush / flusher 取消"
@@ -245,5 +687,9 @@ def _reset_flusher_leader_lock_for_tests() -> None:
 
 __all__ = [
     "flush_divergence_snapshot_once",
+    "flush_canary_snapshot_once",
+    "flush_observability_cycle_once",
+    "record_epoch_start_events_once",
+    "detect_and_record_soak_events_once",
     "divergence_snapshot_flusher",
 ]
