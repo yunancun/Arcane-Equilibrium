@@ -1,6 +1,7 @@
 ---
 name: five-repo-subagent-token-eval
-description: 2026-06-11 五 repo 評估(rtk/superpowers/TencentDB-Agent-Memory/oh-my-pi/last30days)— 改善 subagent 運行+縮減 token;裁決與 P0-P2 行動清單;全部 MIT/Apache 無 AGPL
+description: 2026-06-11 五 repo 評估+P0/P1 落地(rtk hook 全鏈/四態契約/25 descriptions/SessionStart 路由)— 裁決、落地紀錄、教訓;rtk PR#2399 待 CLA;P2 待拍
+heat: 2
 metadata: 
   node_type: memory
   type: project
@@ -18,10 +19,16 @@ metadata:
 4. **can1357/oh-my-pi(11.8k★,MIT)= 競品 runtime,70% 價值鎖死搬不動**(hashline/TTSR/snapcompact/compaction)。可借:mnemopi MCP memory server 可獨立試點(SQLite+FTS5,`mnemopi mcp`);yield 結構化收尾契約(全文落檔+inline ≤5000 字預覽);batch 共享 CONTEXT 段;outline-first 讀檔 SOP。**其 minimizer 移植自 rtk = rtk 正確性的獨立佐證**。⚠️ 其 Anthropic OAuth 模擬 Claude Code 客戶端身份+逆向計費 attestation = ToS 灰區,禁止拿我們訂閱跑它當廉價 subagent runner。
 5. **mvanhorn/last30days-skill(39.4k★,MIT)= 不裝進鏈路,抄 4 模式**:①out-of-context 檢索蒸餾(過濾/去重/排序全在 Python 進程,模型只見 top-8);②store/watchlist 跨 run URL 去重+只在新發現時告警 → BB Bybit 公告追蹤藍圖(前置:watchdog 告警 silent no-op 須先修);③SKILL.md 對抗不遵從技法:LAW 前置(實證 line 1224 的規則=不存在)、具名災難案例、機器可驗自檢契約、`<untrusted_content>` 圍欄(BB 餵公告原文須加);④polymarket.py(786 行 MIT)— 接 FinceptTerminal 待決的 Polymarket 信號軸。⚠️ 默認探瀏覽器 cookie(opt-out),裝必須 FROM_BROWSER=off。
 
-## 行動清單(待 operator 拍板)
-- P0(~2-3 天):rtk 裝+hook(exclude pytest)→ pytest patch+上游 PR → 25 skill description 改寫 → SessionStart 路由 hook。
-- P1:四態協議+共享 CONTEXT 進 agent-wave;memory SOP(配額/heat/演變軌跡);analyze-token-usage.py;BB 增量哨兵;spec-先於-質量審查順序。
-- P2:runtime L2 PG 記憶層;mnemopi 試點;skill 觸發回歸套件;polymarket(等 FinceptTerminal 裁決)。
+## 行動清單(2026-06-11 operator 拍板 P0+P1 即做)
+- P0+P1 工作流項:**已落地**(見「落地紀錄」節)。
+- 未落地殘項:analyze-token-usage.py 適配(小項擇機);BB 增量哨兵(前置=watchdog 告警通路仍 no-op);skill 觸發回歸套件(P2)。
+- P2 待單獨拍板:runtime L2 PG 記憶層(5-7 session);mnemopi 試點;polymarket(綁 FinceptTerminal 裁決)。
 - 不採用:裝 superpowers plugin、oh-my-pi 當 runner、snapcompact/TTSR、X cookie 爬鏈、自寫蒸餾器。
+
+## 落地紀錄 (2026-06-11)
+- 鏈:E1×4 並行(rtk patch/25 descriptions/hooks 接線/四態契約)→ E2 全量對抗(抓 1 HIGH:patch 放寬 bare-summary 啟發式,失敗測試 stdout 含「error in」會被誤捕成 summary→假 `No tests collected`)→ E1-A2 修(整行文法錨定 `is_bare_summary_line()`+last-match-wins,連 base 既有的 stdout 餌假全綠一併修)→ re-E2 PASS(殘留 1 病態自傷 LOW,exit 透傳兜底)→ E4 GREEN 9/9。主要產物入 main `4587f65f`(sibling session 提前打包 commit,E4 以 batch-paths diff=0 + post-commit 重驗轉移結論;同 commit 的 aeg_s3 22 檔歸 sibling 自鏈)。
+- rtk:pin `6785a6c7`(上游默認 branch=**develop**)+ `tools/rtk/0001-fix-pytest-error-count.patch`;上游 PR https://github.com/rtk-ai/rtk/pull/2399(head `32561a0`);**owed:operator 簽 CLA** https://cla-assistant.io/rtk-ai/rtk?pullRequest=2399;Mac 裝 `~/.local/bin/rtk`(終驗 s3:`7 passed, 2 failed, 1 error`,error 計數在);上游 merge 後改回官方版並撤本地 patch 流程。
+- hooks:`.claude/settings.json`(PreToolUse Bash→rtk-rewrite.sh,fail-open 三重守衛+不繞權限;SessionStart startup|clear|compact→session-start.sh 路由注入;env RTK_TELEMETRY_DISABLED=1),對新 session 生效;`.gitignore` 白名單 +3(settings.json/hooks)。
+- 教訓:①`node --check` 對含 export 的 ESM 檔=無牙 no-op(壞語法也 exit 0),有牙檢法=剝 export+async wrapper(E4 報告有配方),涉 .js sign-off 一律用 wrapper;②`cmd | tail; echo $?` 捕的是 tail 的 exit——先存變量再管道;③多 session 下 sibling 可能把你的未 commit 工作提前打包——不 revert,E4 重驗轉移結論即可。
 
 關聯:[[project_2026_06_04_fincept_terminal_eval]]、[[project_2026_06_11_bg_subagent_idle_kill_rootcause]]
