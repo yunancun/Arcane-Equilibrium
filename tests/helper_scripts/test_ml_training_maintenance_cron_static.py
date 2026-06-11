@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import inspect
 import sys
 import subprocess
 import textwrap
@@ -60,7 +61,28 @@ def test_f08_runner_pins_the_five_audit_jobs() -> None:
         "dl3_foundation",
         "weekly_report_generator",
     )
-    assert runner.VALID_JOBS == runner.CORE_JOBS + runner.AUDIT_JOBS
+    # F-08 pin 範圍訂正（E2 merge-seam 適配，2026-06-11）：OPTIONAL tier 由
+    # main 7b5d92e9 引入（residual_preflight，當時即破舊精確等式）、P4 E1-C
+    # 延長（alpha_wealth_reconciler）。pin 意圖 = 五 audit job 不被偷改 +
+    # 預設 cron 恰跑 CORE+AUDIT——OPTIONAL 不削弱該意圖，斷言改為：
+    #   (1) VALID_JOBS 組成封閉（恰為三具名 tuple 串接，無第四來源）；
+    #   (2) DEFAULT_JOBS 精確 == CORE+AUDIT（OPTIONAL 永不默認跑）；
+    #   (3) 每個 OPTIONAL job 的 `_run_<job>` wrapper 含 flag gate（未開即
+    #       skipped 零寫入）。新增 OPTIONAL job 必須有意識觸碰本表 = pin 本意。
+    assert runner.VALID_JOBS == (
+        runner.CORE_JOBS + runner.AUDIT_JOBS + runner.OPTIONAL_JOBS
+    )
+    assert runner.DEFAULT_JOBS == ",".join(runner.CORE_JOBS + runner.AUDIT_JOBS)
+    optional_flag_gates = {
+        "residual_preflight": "stage0r_preflight_enabled()",
+        "alpha_wealth_reconciler": "reconciler_enabled()",
+    }
+    assert set(runner.OPTIONAL_JOBS) == set(optional_flag_gates)
+    default_set = set(runner.DEFAULT_JOBS.split(","))
+    for job, gate_token in optional_flag_gates.items():
+        assert job not in default_set, f"OPTIONAL job {job} 不得進 DEFAULT_JOBS"
+        wrapper_src = inspect.getsource(getattr(runner, f"_run_{job}"))
+        assert gate_token in wrapper_src, f"{job} wrapper 缺 flag gate {gate_token}"
     assert runner._expected_training_skip("insufficient samples: 10 < 200")
     assert not runner._expected_training_skip("lightgbm not installed")
 
