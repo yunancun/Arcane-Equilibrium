@@ -218,3 +218,7 @@
 
 ## 2026-06-11 · subagent 四態契約生效
 - 回報首行 STATUS 四態（DONE|DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED+一行理由）；E4.md 新增 rtk 壓縮層紀律：基準線記 passed/failed/skipped/error 四元組（error≠failed 單列）、exit≠0 而摘要全綠必讀 [full output:] tee log 或 rtk proxy 重跑、forensics 讀 tee log 不重跑長命令。
+
+## 2026-06-11 · P0 token/workflow 批次回歸 — GREEN 9/9（零業務代碼,full suite N/A 有佐證）
+- agent-wave wrapper-check 有牙親證(壞副本 exit 1);**字面 node --check 對含 export 檔連壞語法都 exit 0(node v26)=no-op,wrapper 法必須入 SOP**;shim 三路+patched rtk 7 場景(含自建 s6 補 skipped 元)四元組 ×2 全一致 exit 透傳;pytest_cmd 16/16 ×2;25 skill YAML 全綠;BASELINE 4728/66 不變沿用。
+- **驗證中途並行 session 把批次+aeg_s3 entangled commit 成 `4587f65f`(早於 E4 verdict)**——以 batch-paths worktree==HEAD diff=0 + post-commit 重驗綠把結論移轉到 commit;GREEN 僅覆蓋 P0 檔集,aeg_s3 須走自身 E 鏈。教訓:長回歸期間 git log smoke 是抓 mid-run 樹漂移的廉價哨兵;zsh echo 中轉 JSON 會解 \n 轉義產生假 parse error,驗證鏈一律直接 pipe。
