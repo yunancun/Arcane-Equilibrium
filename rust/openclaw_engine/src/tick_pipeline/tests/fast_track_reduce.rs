@@ -433,6 +433,7 @@ fn test_persist_intent_helper_emits_trading_msg_intent_with_engine_mode() {
         "live_demo",
         None,
         None,
+        None,
     );
 
     let msg = rx.try_recv().expect("Intent must be enqueued");
@@ -491,6 +492,7 @@ fn test_persist_intent_helper_records_maker_entry_details() {
         0.25,
         49_995.0,
         "demo",
+        None,
         None,
         None,
     );
@@ -608,6 +610,7 @@ fn test_persist_intent_helper_records_scanner_opportunity_shadow_details() {
         "demo",
         Some(&scanner),
         Some(&scanner_gate),
+        None,
     );
 
     let msg = rx.try_recv().expect("Intent must be enqueued");
@@ -639,6 +642,196 @@ fn test_persist_intent_helper_records_scanner_opportunity_shadow_details() {
         }
         other => panic!("expected TradingMsg::Intent, got {:?}", other),
     }
+}
+
+// ── P1-BB-REVERSION-REGIME-OBSERVABILITY（2026-06-11）persist_intent Hurst 契約 ──
+// 為什麼：QA B 複查需要正面證據面——bb_reversion mean_reverting hard gate fire 時
+// regime 判定是什麼。details 加 hurst_label/hurst_value 兩鍵（全策略統一）；
+// 缺失/non-finite 映 null 且絕不擋 intent 持久化（fail-soft 不變式）。
+
+/// 共用最小 entry intent（hurst 契約測試專用，欄位值不參與 hurst 斷言）。
+fn hurst_probe_intent() -> crate::intent_processor::OrderIntent {
+    crate::intent_processor::OrderIntent {
+        symbol: "TONUSDT".into(),
+        is_long: true,
+        qty: 10.0,
+        confidence: 0.77,
+        strategy: "bb_reversion".into(),
+        order_type: "market".into(),
+        limit_price: None,
+        confluence_score: None,
+        persistence_elapsed_ms: None,
+        time_in_force: None,
+        maker_timeout_ms: None,
+        // Sprint 1B Earn first stake — IntentType backward-compat 占位。
+        intent_type: crate::intent_processor::IntentType::OpenLong,
+        earn_payload: None,
+    }
+}
+
+/// Some(HurstResult) → 兩鍵=同 tick snapshot 原值；既有鍵不變（防 collateral）。
+#[test]
+fn test_persist_intent_records_hurst_regime_details() {
+    use openclaw_core::indicators::HurstResult;
+
+    let intent = hurst_probe_intent();
+    let hurst = HurstResult {
+        hurst: 0.33,
+        regime: "mean_reverting".to_string(),
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+
+    super::super::on_tick_helpers::persist_intent(
+        &Some(tx),
+        "demo",
+        1_700_000_001_000,
+        "sig-demo-bb_reversion-TONUSDT-1700000001000",
+        "ctx-demo-TONUSDT-1700000001000",
+        &intent,
+        10.0,
+        5.0,
+        "demo",
+        None,
+        None,
+        Some(&hurst),
+    );
+
+    let msg = rx.try_recv().expect("Intent must be enqueued");
+    match msg {
+        crate::database::TradingMsg::Intent { details, .. } => {
+            let details = details.expect("details must be persisted");
+            // 新增兩鍵 = gate 同 tick 消費的精確值（label 原樣字串 + 原始 R/S 估計）。
+            assert_eq!(details["hurst_label"].as_str(), Some("mean_reverting"));
+            let hv = details["hurst_value"]
+                .as_f64()
+                .expect("hurst_value 必為數值");
+            assert!((hv - 0.33).abs() < 1e-12);
+            // 既有鍵不變斷言（防 collateral：加鍵不得擾動既有 details 形狀）。
+            assert_eq!(details["strategy"].as_str(), Some("bb_reversion"));
+            assert_eq!(details["confidence"].as_f64(), Some(0.77));
+            assert_eq!(details["submitted_qty"].as_f64(), Some(10.0));
+            assert_eq!(details["is_long"].as_bool(), Some(true));
+        }
+        other => panic!("expected TradingMsg::Intent, got {:?}", other),
+    }
+}
+
+/// None（暖機期/hurst 缺失）→ 兩鍵存在且=null，intent 照常持久化（fail-soft bite）。
+#[test]
+fn test_persist_intent_hurst_none_keys_present_null_and_intent_still_persisted() {
+    let intent = hurst_probe_intent();
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+
+    super::super::on_tick_helpers::persist_intent(
+        &Some(tx),
+        "demo",
+        1_700_000_002_000,
+        "sig-demo-bb_reversion-TONUSDT-1700000002000",
+        "ctx-demo-TONUSDT-1700000002000",
+        &intent,
+        10.0,
+        5.0,
+        "demo",
+        None,
+        None,
+        None,
+    );
+
+    // fail-soft 不變式：label 缺失絕不擋 intent 持久化。
+    let msg = rx
+        .try_recv()
+        .expect("hurst=None 時 Intent 仍必須照常入列（fail-soft）");
+    match msg {
+        crate::database::TradingMsg::Intent { details, .. } => {
+            let details = details.expect("details must be persisted");
+            // 鍵必須「存在且為 null」（`details ? 'hurst_label'` 兼作部署分界標記），
+            // 不可缺鍵——故用 .get() 區分 present-null 與 absent。
+            assert_eq!(details.get("hurst_label"), Some(&serde_json::Value::Null));
+            assert_eq!(details.get("hurst_value"), Some(&serde_json::Value::Null));
+        }
+        other => panic!("expected TradingMsg::Intent, got {:?}", other),
+    }
+}
+
+/// NaN 防禦：non-finite f64 由 serde_json 映 null（不 panic），label 不受影響。
+#[test]
+fn test_persist_intent_hurst_nan_value_maps_null_no_panic() {
+    use openclaw_core::indicators::HurstResult;
+
+    let intent = hurst_probe_intent();
+    let hurst = HurstResult {
+        hurst: f64::NAN,
+        regime: "random_walk".to_string(),
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(8);
+
+    super::super::on_tick_helpers::persist_intent(
+        &Some(tx),
+        "demo",
+        1_700_000_003_000,
+        "sig-demo-bb_reversion-TONUSDT-1700000003000",
+        "ctx-demo-TONUSDT-1700000003000",
+        &intent,
+        10.0,
+        5.0,
+        "demo",
+        None,
+        None,
+        Some(&hurst),
+    );
+
+    let msg = rx.try_recv().expect("Intent must be enqueued");
+    match msg {
+        crate::database::TradingMsg::Intent { details, .. } => {
+            let details = details.expect("details must be persisted");
+            assert_eq!(details["hurst_label"].as_str(), Some("random_walk"));
+            assert_eq!(details.get("hurst_value"), Some(&serde_json::Value::Null));
+        }
+        other => panic!("expected TradingMsg::Intent, got {:?}", other),
+    }
+}
+
+/// 4 個透傳點結構覆蓋（include_str! 自審範式，對齊 database writers 先例）：
+/// 簽名改動已由編譯器強制「每個 call site 必傳第 12 參數」，本測試補上編譯器
+/// 管不到的縫——某個 call site 被改成傳 `None` 而非同 tick snapshot 引用。
+/// 不變量：step_4_5_dispatch.rs 內 3 個 call site（pre-risk caller / exchange /
+/// paper）全部傳 `indicators.and_then(|i| i.hurst.as_ref())`，且
+/// record_pre_risk_rejection 內部 persist_intent 呼叫透傳其 `hurst` 參數。
+#[test]
+fn test_dispatch_forwards_hurst_at_all_persist_intent_call_sites() {
+    let src = include_str!("../on_tick/step_4_5_dispatch.rs");
+    let forward_expr = "indicators.and_then(|i| i.hurst.as_ref())";
+    let n = src.matches(forward_expr).count();
+    assert_eq!(
+        n, 3,
+        "dispatch 必須在恰 3 個 call site（:546 pre-risk caller / exchange / paper）\
+         傳同 tick snapshot 的 hurst；計數漂移 = 漏接或被改傳 None，n={n}"
+    );
+
+    // record_pre_risk_rejection（第 4 個透傳點）：參數宣告 + 內部 persist_intent 透傳。
+    let start = src
+        .find("fn record_pre_risk_rejection")
+        .expect("record_pre_risk_rejection 必須存在");
+    let end = src[start..]
+        .find("impl TickPipeline")
+        .map(|off| start + off)
+        .expect("record_pre_risk_rejection 之後必有 impl TickPipeline 邊界");
+    let section = &src[start..end];
+    assert!(
+        section.contains("hurst: Option<&openclaw_core::indicators::HurstResult>"),
+        "record_pre_risk_rejection 必須宣告 hurst 透傳參數"
+    );
+    let pi = section
+        .find("persist_intent(")
+        .expect("record_pre_risk_rejection 內必呼叫 persist_intent");
+    let pi_end = section[pi..]
+        .find(");")
+        .map(|off| pi + off)
+        .expect("persist_intent 呼叫必有閉合");
+    assert!(
+        section[pi..pi_end].contains("hurst,"),
+        "record_pre_risk_rejection 內部 persist_intent 必須透傳 hurst 參數"
+    );
 }
 
 #[test]
