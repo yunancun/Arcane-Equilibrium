@@ -195,6 +195,13 @@ Unless the operator explicitly overrides this:
 - Security / deploy / runtime chain: `PM -> E3 -> BB if exchange-facing -> PM`.
 - E2 review and E4 regression are not skipped for implementation work unless the
   operator explicitly accepts the risk for a narrow emergency.
+- Desktop local-agent background waves: a session pause (idle 900s) kills all
+  in-flight background subagents, unrecoverable. After dispatching, stay
+  in-turn (blocking `TaskOutput` or foreground-parallel Agent calls). The only
+  reliable liveness signal is the agent transcript mtime under the session's
+  `subagents/` dir; stat it before any TaskStop and suspect death only after
+  ≥30 min of silence. Clear zombie `running` tasks after session resume.
+  Canonical SOP: `.claude/agents/PM.md` 「後台 wave 防殺與降損」.
 - Every delegated task must bind a repo role, ownership, expected output, and
   task shape.
 - If a role is skipped, say which role and why.

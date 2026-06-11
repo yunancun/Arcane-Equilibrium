@@ -1,5 +1,5 @@
 -- ============================================================
--- V137: research.pre_registered_hypotheses + research.alpha_wealth_ledger
+-- V138: research.pre_registered_hypotheses + research.alpha_wealth_ledger
 --       L2 Mesh P4 online-FDR research loop —— α-wealth 事件帳本 + pre-registration
 --
 -- 目的：
@@ -105,7 +105,7 @@ BEGIN
 
         IF v_missing IS NOT NULL AND array_length(v_missing, 1) > 0 THEN
             RAISE EXCEPTION
-                'V137 Guard A FAIL: research.pre_registered_hypotheses exists but missing required columns: %.',
+                'V138 Guard A FAIL: research.pre_registered_hypotheses exists but missing required columns: %.',
                 v_missing;
         END IF;
     END IF;
@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS research.pre_registered_hypotheses (
 
 -- 同 family 同 spec 不可重複註冊（重提交必須走 supersedes 血緣鑄新 hash 或被擋）。
 -- 跨 family 同 spec 合法（MIT 4b：各付各的 α，全域 bound 不破）——healthcheck
--- [85] 做 cross-family duplicate spec_sha256 觀測級計數。
+-- [86] 做 cross-family duplicate spec_sha256 觀測級計數。
 CREATE UNIQUE INDEX IF NOT EXISTS prh_family_spec_uk
     ON research.pre_registered_hypotheses (family_id, spec_sha256);
 
@@ -169,7 +169,7 @@ BEGIN
       );
 
     IF v_bad IS NOT NULL AND array_length(v_bad, 1) > 0 THEN
-        RAISE EXCEPTION 'V137 Guard B FAIL: research.pre_registered_hypotheses type drift: %.', v_bad;
+        RAISE EXCEPTION 'V138 Guard B FAIL: research.pre_registered_hypotheses type drift: %.', v_bad;
     END IF;
 END $$;
 
@@ -181,14 +181,14 @@ BEGIN
         WHERE schemaname = 'research' AND tablename = 'pre_registered_hypotheses'
           AND indexname = 'prh_family_spec_uk'
     ) THEN
-        RAISE EXCEPTION 'V137 Guard C FAIL: prh_family_spec_uk missing.';
+        RAISE EXCEPTION 'V138 Guard C FAIL: prh_family_spec_uk missing.';
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'prh_falsification_chk'
           AND conrelid = 'research.pre_registered_hypotheses'::regclass
     ) THEN
-        RAISE EXCEPTION 'V137 Guard C FAIL: prh_falsification_chk missing.';
+        RAISE EXCEPTION 'V138 Guard C FAIL: prh_falsification_chk missing.';
     END IF;
 END $$;
 
@@ -201,9 +201,9 @@ BEGIN
         EXECUTE 'REVOKE UPDATE, DELETE ON research.pre_registered_hypotheses FROM trading_ai';
         EXECUTE 'GRANT SELECT, INSERT ON research.pre_registered_hypotheses TO trading_ai';
         EXECUTE 'GRANT USAGE ON SEQUENCE research.pre_registered_hypotheses_pre_reg_id_seq TO trading_ai';
-        RAISE NOTICE 'V137: research.pre_registered_hypotheses — trading_ai = INSERT/SELECT only; UPDATE/DELETE revoked';
+        RAISE NOTICE 'V138: research.pre_registered_hypotheses — trading_ai = INSERT/SELECT only; UPDATE/DELETE revoked';
     ELSE
-        RAISE NOTICE 'V137: trading_ai role absent (dev sandbox); REVOKE on PUBLIC sufficient';
+        RAISE NOTICE 'V138: trading_ai role absent (dev sandbox); REVOKE on PUBLIC sufficient';
     END IF;
 END $$;
 
@@ -251,7 +251,7 @@ BEGIN
 
         IF v_missing IS NOT NULL AND array_length(v_missing, 1) > 0 THEN
             RAISE EXCEPTION
-                'V137 Guard A FAIL: research.alpha_wealth_ledger exists but missing required columns: %.',
+                'V138 Guard A FAIL: research.alpha_wealth_ledger exists but missing required columns: %.',
                 v_missing;
         END IF;
     END IF;
@@ -342,7 +342,7 @@ BEGIN
       );
 
     IF v_bad IS NOT NULL AND array_length(v_bad, 1) > 0 THEN
-        RAISE EXCEPTION 'V137 Guard B FAIL: research.alpha_wealth_ledger type drift: %.', v_bad;
+        RAISE EXCEPTION 'V138 Guard B FAIL: research.alpha_wealth_ledger type drift: %.', v_bad;
     END IF;
 END $$;
 
@@ -355,49 +355,49 @@ BEGIN
         WHERE schemaname = 'research' AND tablename = 'alpha_wealth_ledger'
           AND indexname = 'awl_one_init_per_family'
     ) THEN
-        RAISE EXCEPTION 'V137 Guard C FAIL: awl_one_init_per_family missing.';
+        RAISE EXCEPTION 'V138 Guard C FAIL: awl_one_init_per_family missing.';
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM pg_indexes
         WHERE schemaname = 'research' AND tablename = 'alpha_wealth_ledger'
           AND indexname = 'awl_one_debit_per_id'
     ) THEN
-        RAISE EXCEPTION 'V137 Guard C FAIL: awl_one_debit_per_id missing.';
+        RAISE EXCEPTION 'V138 Guard C FAIL: awl_one_debit_per_id missing.';
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM pg_indexes
         WHERE schemaname = 'research' AND tablename = 'alpha_wealth_ledger'
           AND indexname = 'awl_one_terminal_per_debit'
     ) THEN
-        RAISE EXCEPTION 'V137 Guard C FAIL: awl_one_terminal_per_debit missing (MIT N-2).';
+        RAISE EXCEPTION 'V138 Guard C FAIL: awl_one_terminal_per_debit missing (MIT N-2).';
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM pg_indexes
         WHERE schemaname = 'research' AND tablename = 'alpha_wealth_ledger'
           AND indexname = 'awl_family_created'
     ) THEN
-        RAISE EXCEPTION 'V137 Guard C FAIL: awl_family_created missing.';
+        RAISE EXCEPTION 'V138 Guard C FAIL: awl_family_created missing.';
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'awl_debit_fields_chk'
           AND conrelid = 'research.alpha_wealth_ledger'::regclass
     ) THEN
-        RAISE EXCEPTION 'V137 Guard C FAIL: awl_debit_fields_chk missing (MIT N-1).';
+        RAISE EXCEPTION 'V138 Guard C FAIL: awl_debit_fields_chk missing (MIT N-1).';
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'awl_amount_sign_chk'
           AND conrelid = 'research.alpha_wealth_ledger'::regclass
     ) THEN
-        RAISE EXCEPTION 'V137 Guard C FAIL: awl_amount_sign_chk missing.';
+        RAISE EXCEPTION 'V138 Guard C FAIL: awl_amount_sign_chk missing.';
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM pg_constraint
         WHERE conname = 'awl_terminal_needs_debit_id_chk'
           AND conrelid = 'research.alpha_wealth_ledger'::regclass
     ) THEN
-        RAISE EXCEPTION 'V137 Guard C FAIL: awl_terminal_needs_debit_id_chk missing.';
+        RAISE EXCEPTION 'V138 Guard C FAIL: awl_terminal_needs_debit_id_chk missing.';
     END IF;
 END $$;
 
@@ -410,9 +410,9 @@ BEGIN
         EXECUTE 'REVOKE UPDATE, DELETE ON research.alpha_wealth_ledger FROM trading_ai';
         EXECUTE 'GRANT SELECT, INSERT ON research.alpha_wealth_ledger TO trading_ai';
         EXECUTE 'GRANT USAGE ON SEQUENCE research.alpha_wealth_ledger_event_id_seq TO trading_ai';
-        RAISE NOTICE 'V137: research.alpha_wealth_ledger — trading_ai = INSERT/SELECT only; UPDATE/DELETE revoked';
+        RAISE NOTICE 'V138: research.alpha_wealth_ledger — trading_ai = INSERT/SELECT only; UPDATE/DELETE revoked';
     ELSE
-        RAISE NOTICE 'V137: trading_ai role absent (dev sandbox); REVOKE on PUBLIC sufficient';
+        RAISE NOTICE 'V138: trading_ai role absent (dev sandbox); REVOKE on PUBLIC sufficient';
     END IF;
 END $$;
 
@@ -449,9 +449,9 @@ DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'trading_ai') THEN
         EXECUTE 'GRANT SELECT ON research.alpha_wealth_debit_state TO trading_ai';
-        RAISE NOTICE 'V137: research.alpha_wealth_debit_state — trading_ai SELECT granted';
+        RAISE NOTICE 'V138: research.alpha_wealth_debit_state — trading_ai SELECT granted';
     ELSE
-        RAISE NOTICE 'V137: trading_ai role absent (dev sandbox); view grants skipped';
+        RAISE NOTICE 'V138: trading_ai role absent (dev sandbox); view grants skipped';
     END IF;
 END $$;
 

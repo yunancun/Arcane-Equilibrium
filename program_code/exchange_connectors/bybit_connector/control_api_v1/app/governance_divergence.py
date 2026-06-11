@@ -29,8 +29,14 @@ MODULE_NOTE:
     over-fire）。
 
     這是 *觀測*，不影響也不阻塞權威回傳值（hub 先拿到 Rust 結果就回，影子+比對
-    是事後 best-effort）。step (i) 的 gate 讀「soak 視窗內 0 divergence」=
-    ``get_divergence_counters()["divergences"] == 0`` 且 ``["total"] >= N``。
+    是事後 best-effort）。
+
+    gate 地位（rework (b)+(b-i)，operator 拍板 2026-06-03；2026-06-10 第三棒修
+    stale 殘文）：本比對器計數器是**觀測性信號、非 gate**——Option 2 下 Rust /
+    Python 是兩個獨立 auth 狀態實例，「0 divergence over N」的雙邊等價 gate 語意
+    結構性不可達（見 PA `2026-06-10--p5sm_soak_observability_redesign.md` §2.4）。
+    step-(i) soak gate 實際為：`[81]` P-LIVE（lease_transitions 活性）+ `[82]`
+    soak-window（S3/S4，canary 結構有效性 + 連續窗），comparator 計數僅供 triage。
 
     設計對齊 governance_lease_bridge._DUAL_WRITE_MIRROR：模組層級、package-private、
     threading.Lock 保護、無 TTL/LRU/DB 持久化、提供 snapshot + reset（測試隔離）。

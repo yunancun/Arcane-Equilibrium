@@ -152,3 +152,8 @@
 - 條件 4 項:CC-MED-1(runbook §4.2.1/§13.5「不再 seed/panic 阻 boot」雙重失真 doc-reconcile,deploy 前)+C-A(soak 證據附 sign-off 包)+C-B(手動 renew 救濟留證)+C-C(§13.2 外部 alert 親簽)
 - 模式:fallback 移除類變更失敗模式不對稱(可用性損失≠失防)→條件全為 sign-off 閘非代碼缺陷;報告由 PM 代落盤(本 session 無 Write)
 - 報告:workspace/reports/2026-06-10--ops2_phase2_cutover_compliance.md(+Operator 鏡像)
+
+### 2026-06-11 P5-SM soak 基建治理覆核
+- verdict APPROVE(A):16/16+9/9 適用項全 PASS、硬邊界 0 觸碰、0 自動擴權;smoke mutating 面五重圈欄(零排程/dry-run/mainnet exit 7/確認/30s TTL)
+- 2 LOW(flag 忘關無絆線;[82] flag-OFF restart 後 ≤72h FAIL 噪音=假陽性候選)+3 INFO 全交 PM 濾裁;報告由 PM 代落盤(本 session 無 Write)
+- 報告:workspace/reports/2026-06-11--p5sm_soak_infra_compliance.md(+Operator 鏡像)
