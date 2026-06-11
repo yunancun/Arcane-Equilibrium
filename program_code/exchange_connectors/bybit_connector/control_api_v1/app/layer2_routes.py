@@ -105,11 +105,34 @@ def _get_engine() -> Layer2Engine:
     return _engine
 
 
+def _governance_tier_projection():
+    """唯讀 tier 投影（P4 §6）：LEARNING_TIER_GATE → (current_tier, bool capability flags)。
+
+    經模組屬性 late-read（wiring 在 startup 後才置值，import-time 綁定會 stale）；
+    gate 未接線 → raise → orchestrator 端 fail-closed 退 L1。只讀不寫（C1）。
+    """
+    from . import paper_trading_wiring as _ptw  # noqa: PLC0415 — lazy import 防環
+
+    gate = getattr(_ptw, "LEARNING_TIER_GATE", None)
+    if gate is None:
+        raise RuntimeError("learning tier gate not wired")
+    caps = gate.capabilities
+    flags = {
+        name: bool(getattr(caps, name))
+        for name in dir(caps)
+        if not name.startswith("_") and isinstance(getattr(caps, name), bool)
+    }
+    return gate.current_tier, flags
+
+
 def _get_orchestrator():
     """取 L2AdvisoryOrchestrator singleton（lazy import 避免 boot-time import cost）。"""
     from .l2_advisory_orchestrator import get_l2_advisory_orchestrator  # noqa: PLC0415
 
-    return get_l2_advisory_orchestrator()
+    orch = get_l2_advisory_orchestrator()
+    # P4 §6：lazy 注入 GovernanceHub tier 投影（set-if-absent 冪等；fail-closed 默認 L1）。
+    orch.set_tier_provider_if_absent(_governance_tier_projection)
+    return orch
 
 
 def _layer2_response(

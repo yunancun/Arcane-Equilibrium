@@ -88,6 +88,10 @@ def _none_context() -> dict[str, Any]:
     """全 None 的 math gate context（每缺一鍵 = 對應 stage 誠實 DEFER；bar 固定 daily）。"""
     return {
         "candidate_returns": None,
+        # P4：evidence 窗 meta（ISO date 字串）——executor STAGE 3.6 pre-reg 釘窗（FIX-1.2）、
+        # N-4 確定性 debit_id、FIX-2.1b sealed-boundary 檢查的唯一窗來源。缺 = None（executor
+        # precheck 視為 input-unavailable，免費 DEFER，不入帳）。
+        "evidence_window": {"window_start": None, "window_end": None},
         "math_gate_inputs": {
             "n_trades_oos": None,
             "observed_sharpe": None,
@@ -129,6 +133,14 @@ def build_math_gate_context(
         reasons.append(f"evidence_schema_unsupported:{schema or 'absent'}")
         return ctx, reasons
 
+    # ── evidence 窗 meta（P4：pre-reg 釘窗 / debit_id / sealed-boundary 的窗來源）──
+    ev_ws = _to_date(evidence.get("window_start"))
+    ev_we = _to_date(evidence.get("window_end"))
+    ctx["evidence_window"] = {
+        "window_start": ev_ws.isoformat() if ev_ws is not None else None,
+        "window_end": ev_we.isoformat() if ev_we is not None else None,
+    }
+
     # ── regime row 選擇（防 cherry-pick；見 MODULE_NOTE 硬邊界）──
     row, row_reasons = _select_regime_row(evidence)
     reasons.extend(row_reasons)
@@ -146,6 +158,23 @@ def build_math_gate_context(
         gi["n_trials"] = _int_or_none(row.get("k_trials"))
         if gi["n_trials"] is None:
             reasons.append("k_trials_missing_dsr_defer")
+
+    # ── P4 M2：N_eff seam（evidence 有 variant_returns 才算；嚴禁標量合成序列）──
+    # 有真 per-variant 序列 → average-linkage（corr>0.5）聚類出 N_eff，同一值餵 DSR
+    # （gi["n_trials"]）與 ledger 審計欄（k_for_dsr=n_eff，executor 落帳）。缺/壞 → 保留
+    # raw k_trials（raw K ≥ N_eff = 對 duplicates 過嚴 = 保守向，G.1.2）+ 誠實 reason。
+    n_eff_applied = False
+    variants_raw = evidence.get("variant_returns")
+    if variants_raw is not None:
+        n_eff, n_eff_reasons = _compute_n_eff(variants_raw, evidence.get("return_unit"))
+        reasons.extend(n_eff_reasons)
+        if n_eff is not None:
+            gi["n_trials"] = n_eff
+            gi["n_eff_source"] = "avg_linkage_corr_gt_0p5"
+            n_eff_applied = True
+    if not n_eff_applied and gi["n_trials"] is not None:
+        # raw-K fallback 生效（上線初期 AEG evidence v1 無 per-variant 序列的常態）。
+        reasons.append("n_eff_unavailable_raw_k_trials")
 
     # ── cpcv（可選；單配置 → None → PBO honest-DEFER，不捏造 peer）──
     cpcv = evidence.get("cpcv_oos_returns_per_split")
@@ -347,9 +376,160 @@ def _reindex_all(
         return None, None, None, None
 
 
+def _resolve_n_eff_cluster() -> Callable[..., Any] | None:
+    """取 E1-A n_eff_cluster.n_eff_average_linkage（介面以 PA P4 §3.1 為契約）。
+
+    模組未落地（E1-A 並行 branch）→ None：seam 走 raw k_trials fallback + reason
+    `n_eff_cluster_unavailable`——誠實降級非靜默（raw K 偏大 = 保守向）。
+    """
+    try:
+        from program_code.learning_engine.n_eff_cluster import (  # noqa: PLC0415
+            n_eff_average_linkage,
+        )
+
+        return n_eff_average_linkage
+    except ImportError:
+        try:
+            from learning_engine.n_eff_cluster import (  # type: ignore  # noqa: PLC0415
+                n_eff_average_linkage,
+            )
+
+            return n_eff_average_linkage
+        except ImportError:
+            return None
+
+
+def _compute_n_eff(
+    variants_raw: Any, return_unit: Any
+) -> tuple[int | None, list[str]]:
+    """variant_returns（list of {date: return}）→ N_eff（M2 average-linkage）。
+
+    回 (n_eff, reasons)；任何成員壞 / 模組缺 / 計算例外 → (None, reason) = raw k_trials
+    fallback（保守）。**嚴禁從標量合成序列**（常數序列 corr 退化 → N_eff 假縮，比
+    fallback 危險——PA §3.2）。
+
+    為什麼用 date.toordinal() 共享 int key（而非逐 variant 各自 reindex）：pairwise corr
+    依賴「同日 → 同 key」的跨 variant 對齊；逐 variant 獨立 reindex 各有 origin 會錯位。
+    ordinal int 是全域一致映射（_down_mask_from_closes 同款先例），且滿足 n_eff_cluster
+    的 int-bar-index fail-loud 契約。
+    """
+    if not isinstance(variants_raw, (list, tuple)) or not variants_raw:
+        return None, ["variant_returns_malformed"]
+    fn = _resolve_n_eff_cluster()
+    if fn is None:
+        return None, ["n_eff_cluster_unavailable"]
+    series_list: list[dict[int, float]] = []
+    for member in variants_raw:
+        normalized, why = _normalize_daily_returns(member, return_unit)
+        if normalized is None:
+            return None, [
+                f"variant_returns_member_invalid:{why[0] if why else 'unknown'}"
+            ]
+        ord_series: dict[int, float] = {}
+        for k, v in normalized.items():
+            d = _to_date(k)
+            if d is None:
+                return None, ["variant_returns_temporal_key_unparseable"]
+            ord_series[d.toordinal()] = v
+        series_list.append(ord_series)
+    try:
+        res = fn(series_list)
+        n_eff = int(getattr(res, "n_eff"))
+    except Exception as exc:  # noqa: BLE001 — 聚類失敗 → fallback（保守），不冒進 route
+        logger.warning("n_eff 聚類失敗（fallback raw k_trials）：%s", exc)
+        return None, ["n_eff_compute_error"]
+    if n_eff < 1:
+        # 契約破壞（A 線 max(1,·) guard 保證 ≥1）→ 不信任，fallback。
+        return None, ["n_eff_contract_violation_lt_1"]
+    sub_reasons = [f"n_eff_{r}" for r in (getattr(res, "reasons", None) or [])]
+    return n_eff, sub_reasons
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # DB 層（read-only SELECT；fail-soft——任何子載入失敗 → 對應欄 None + reason）
 # ═══════════════════════════════════════════════════════════════════════════════
+
+
+def load_sealed_boundary_flag(
+    strategy_name: str | None,
+    symbol: str | None,
+    window_end: dt.date | None,
+    *,
+    conn_provider: Any = None,
+) -> tuple[bool | None, list[str]]:
+    """FIX-2.1b sealed-boundary 檢查（V132 durable row 重取，非 producer 自報）。
+
+    語義 = **區間算術**，鏡像 bridge `_bucket_admissible` 的半開區間（bucket=86400s）：
+    daily bar 標籤 `window_end` 覆蓋 [end 00:00Z, end+1d 00:00Z)；bar 可納入 iff
+    `end + 1d ≤ oos_start`。故 DEFER 條件 = 末 bar 尾端 > oos_start——`==` off-by-one
+    （window_end 當日 == oos_start 日）與「oos_start 非午夜對齊的 straddle bar」兩個
+    邊界 case 都被涵蓋（點比較對區間對象是錯的代表元，QC 重裁 §2）。
+
+    回 (overlap_flag, reasons)：
+      - True  ⇒ 與任一 sealed row 重疊（或查詢失敗無法證明盲視）→ executor DEFER
+        `sealed_holdout_overlap`，不渲染 DSR、不入帳。
+      - False ⇒ 無重疊（含查無 sealed row：reason `no_sealed_split_for_cell`，不阻）。
+      - None  ⇒ cell/窗不可得，檢查不適用（reason 記錄；gate-to-P5 的「證實」仍要求
+        至少一條真實 cell 走通，無 cell 候選不構成 sealed-holdout 主張）。
+
+    唯讀 SELECT 邊界元資料（family_id, window_start, state）——**不** SELECT OOS 窗內
+    任何 series（§9.4(a) auto-loop 盲視 grep 證據面）。
+    """
+    reasons: list[str] = []
+    strat = (strategy_name or "").strip()
+    sym = (symbol or "").strip()
+    if not strat or not sym or window_end is None:
+        reasons.append("sealed_check_not_applicable_no_cell_or_window")
+        return None, reasons
+    family_id = f"{strat}::{sym}"  # V132 family 慣例（residual_stage0r_preflight:476）
+    provider = conn_provider or db_pool.get_pg_conn
+    try:
+        with provider() as conn:
+            if conn is None:
+                # 連不上 → 無法證明非重疊 → fail-closed（盲視聲明不可在未知下放行）。
+                reasons.append("sealed_registry_check_failed")
+                return True, reasons
+            cur = conn.cursor()
+            cur.execute(
+                """
+                SELECT window_start
+                FROM learning.hidden_oos_state_registry
+                WHERE family_id = %s AND state = 'sealed'
+                """,
+                (family_id,),
+            )
+            rows = cur.fetchall()
+    except Exception as exc:  # noqa: BLE001 — 查詢失敗 → fail-closed（同上）
+        logger.warning("sealed-boundary 查詢失敗（fail-closed → overlap）：%s", exc)
+        reasons.append("sealed_registry_check_failed")
+        return True, reasons
+    if not rows:
+        reasons.append("no_sealed_split_for_cell")
+        return False, reasons
+    # 末 bar 尾端 = window_end + 1d 00:00Z（daily bar 半開區間上界）。
+    bar_end = dt.datetime.combine(
+        window_end + dt.timedelta(days=1), dt.time.min, tzinfo=dt.timezone.utc
+    )
+    overlapping: list[dt.datetime] = []
+    for (oos_start,) in rows:
+        if not isinstance(oos_start, dt.datetime):
+            # 型別異常（schema drift）→ 無法證明非重疊 → fail-closed。
+            reasons.append("sealed_registry_row_unparseable")
+            return True, reasons
+        anchored = (
+            oos_start if oos_start.tzinfo is not None
+            else oos_start.replace(tzinfo=dt.timezone.utc)
+        )
+        if bar_end > anchored:
+            overlapping.append(anchored)
+    if overlapping:
+        # 多 sealed row：任一重疊即 DEFER；details 取最早邊界（min window_start）供診斷。
+        reasons.append("sealed_holdout_overlap")
+        reasons.append(
+            f"sealed_oos_start_min:{min(overlapping).isoformat()}"
+        )
+        return True, reasons
+    return False, reasons
 
 
 def load_factor_bundle(
@@ -658,5 +838,6 @@ __all__ = [
     "FactorBundle",
     "build_math_gate_context",
     "load_factor_bundle",
+    "load_sealed_boundary_flag",
     "build_context_from_evidence",
 ]

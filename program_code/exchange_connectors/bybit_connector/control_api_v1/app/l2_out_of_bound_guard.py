@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
 logger = logging.getLogger("l2_out_of_bound_guard")
 
@@ -193,7 +193,10 @@ def _guard_ml_advisory_v1(
          regime_caveat 且 context 標 bull-only → reject（Alpha Evidence Governance）。
       D. signal_axes_used ⊄ available_signal_axes → reject（捏造資料軸；§H clause 1）。
       E. empty-mechanism curve-fit（hypothesize，P3b §E.4(b)）：每個 feature_hypotheses[] 的
-         mechanism / falsification_test 必非空字串 → 否則 reject（無機制 = curve-fit）。
+         mechanism 必非空字串、falsification_test 必存在 → 否則 reject（無機制 = curve-fit）。
+      F. wealth-integrity（hypothesize，P4 §4.2(4)）：falsification_test 必為三欄結構化物件
+         （null_hypothesis/test_statistic/reject_condition 非空）+ primary_axis 必 ∈
+         signal_axes_used（FDR wealth family 錨點，MIT #4 反 family 鑄幣）→ 否則 reject。
     注意：novelty dedupe（vs dead_failure_modes）「不」在此 guard——它需 DB read（retrieve_lessons
     pg_trgm），而本 guard 的 no-DB 不變量 load-bearing。novelty 在 executor（已做 DB I/O）跑。
     """
@@ -302,10 +305,52 @@ def _guard_ml_advisory_v1(
                     verdict="reject", clamped_output=None,
                     kinds_hit=[f"empty_mechanism_curve_fit:{h.get('hid')}"],
                 )
-            if not (isinstance(falsif, str) and falsif.strip()):
+            # P4 起 falsification_test 必為 v2 結構化物件（三欄在 clause F 驗）；缺 → reject。
+            # 自由字串（v1 形）也在 F reject——pre-registration 的 V137 CHECK 要求三欄，
+            # 字串形結構上不可能入帳，guard 在「形」層先擋（不浪費後續 stage）。
+            if falsif is None:
                 return GuardResult(
                     verdict="reject", clamped_output=None,
                     kinds_hit=[f"empty_falsification_test:{h.get('hid')}"],
+                )
+
+        # ── clause F：primary_axis ∈ signal_axes_used + falsification 三欄非空（P4 §4.2(4)）──
+        # 為什麼 F 是 wealth-integrity clause：primary_axis 決定被扣帳的 FDR family
+        # （capability:primary_axis，MIT #4）——宣告不在 signal_axes_used 內的 axis = 開新
+        # family 鑄新 W_0 的 wealth-inflation 向量；falsification 三欄是 pre-registration
+        # 可證偽紀律的載體（V137 prh_falsification_chk 兜底，guard 前置擋形）。
+        top_axes = out.get("signal_axes_used")
+        for h in hyps:
+            falsif = h.get("falsification_test")
+            if not isinstance(falsif, Mapping):
+                return GuardResult(
+                    verdict="reject", clamped_output=None,
+                    kinds_hit=[f"falsification_not_structured:{h.get('hid')}"],
+                )
+            for fld in ("null_hypothesis", "test_statistic", "reject_condition"):
+                v = falsif.get(fld)
+                if not (isinstance(v, str) and v.strip()):
+                    return GuardResult(
+                        verdict="reject", clamped_output=None,
+                        kinds_hit=[f"falsification_field_empty:{fld}:{h.get('hid')}"],
+                    )
+            primary = h.get("primary_axis")
+            if not (isinstance(primary, str) and primary.strip()):
+                return GuardResult(
+                    verdict="reject", clamped_output=None,
+                    kinds_hit=[f"primary_axis_missing:{h.get('hid')}"],
+                )
+            # primary_axis 的合法域 = 該假說自宣告的 signal_axes_used；假說未帶列表時退
+            # top-level signal_axes_used（兩者皆無 → 無法證明 membership → reject，fail-closed）。
+            h_axes = h.get("signal_axes_used")
+            effective_axes = (
+                h_axes if isinstance(h_axes, (list, tuple))
+                else top_axes if isinstance(top_axes, (list, tuple)) else None
+            )
+            if effective_axes is None or primary not in effective_axes:
+                return GuardResult(
+                    verdict="reject", clamped_output=None,
+                    kinds_hit=[f"primary_axis_not_in_signal_axes_used:{primary}"],
                 )
 
     # ── clause D：signal_axes_used ⊄ available_signal_axes（捏造資料軸）──
