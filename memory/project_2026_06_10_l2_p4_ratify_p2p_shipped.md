@@ -7,9 +7,14 @@ metadata:
   originSessionId: 41324aa7-e13b-455f-b627-6a627f93cf4b
 ---
 
-# L2 P4 ratification + P2p shipped（2026-06-10，主會話=PM）
+# L2 P4 ratification + P2p shipped（2026-06-10~11，主會話=PM）
 
-## P4 online-FDR（設計 `b40b9481`）— agent gate 全清，殘=operator V137 確認
+## P4 完工（2026-06-11）— merged main `ddaafda1`+TODO `d46b5cee`，dormant 三重關
+
+E1 三線（A `eb035e4d` 131t / B 兩段+E2 直修 `3cdcc9ed` / C 改號後 `4d7a4d84`）→ E2 對抗（**C RETURN：V137+[82] 被 P5-SM 同日撞號**——E2 §5e race 檢查抓獲；改 **V138 + [83]-[87]** 全鏈改名+Linux dry-run 重跑×4 證）→ PM 裁決 stage0r **三向映射**（pass→True / fail→False 臂=failed+dead-mode 可達（M1 真值表+QC FIX-1.3）/ defer_data+缺席+字彙外→pending 不鑄 lesson）→ E2 窄審 PASS（f08 紅鑑定= main pre-existing `7b5d92e9` 破的，非 C；E2 直修 pin 為組成封閉斷言）→ 整合分支+V137→V138 註釋 sweep 9 處（P5-SM 的 V137 引用正確不動）→ **E4 GREEN**：兩平台 ×2 決定性、真模組接線三證+自補 wiring 釘子（mock 縫：全家族 monkeypatch resolve 點，A 模組消失全鏈靜默 DEFER 無測試會紅）、scratch-DB deployed-E2E 全鏈（V138 雙 apply 冪等/store partial-index arbiter/hash round-trip 三方一致/視圖三態/reconciler --apply 冪等/retrieve_lessons pg_trgm 真檢索 similarity=0.169 命中）、prod 零觸碰。**owed-operator-gated**：V138 prod apply+sqlx → deployed-E2E → flags（runbook 在 reconciler docstring）。
+**教訓**：①migration 號+healthcheck 編號是 git 看不見的全局命名空間——同日兩鏈並行必撞，取號 commit 與 merge 距離越短越安全；E2 §5e re-fetch race 檢查 load-bearing。②agent 在 grounding 撞 spend-limit 死=分段 commit 紀律救回 0 浪費（B 段1 已 push 死也不全損）。③前台 Agent 串行=「turn 不落地」最穩實現（E2/E4/E1-fix 全程前台無一死）。
+
+## P4 online-FDR（設計 `b40b9481`）— agent gate 鏈（2026-06-10）
 
 - **MIT M1+M2 final ratification = APPROVE**：7 項=6 APPROVE/1 MODIFY。**#3 binding**：debit 條件=「overall ∈ {pass,fail} OR dsr stage ∈ {pass,fail}」（math gate 五 stage 全跑無 short-circuit、docstring :1003 誤述 → single-config PBO honest-DEFER 下原設計可無限免費 re-look DSR）。**#2 拍板 Option B**（threshold=max(0.95,1−α_i)；Option A 斷帳本-水準恆等被拒）。自含 bound：per-family mFDR ≤ 0.1·α_target；全域 ≤ α_target 需 **N_fam ≤ 1/γ=10**。α_i ≤ 5e-4 恆成立 ⇒ cap vacuous + threshold ≥ 0.9995 ⇒ **初期 discovery≈0 是設計後果**（healthcheck 監測 conducted>0 非 discoveries>0）。5 條 DB NOTE（V137 CHECK 三值邏輯洞 NULL n_eff 可過/refund×debit_failed 無互斥/orphan refund 向量/debit_id 決定性/pre_reg_id 無 FK）折入 E1-C。
 - **QC sign-off = APPROVE-with-FIX**（含 §9 原文重裁）：**FIX-2.1b 唯一 §9 阻斷**——gate 4(b) 原文 `>` 點比較對 daily-bar 區間對象語義不足（`==` off-by-one + 非對齊 oos_start straddle 全漏），正確=「末 bar 尾端 ≤ oos_start」鏡像 `_bucket_admissible`，reason 統一 `sealed_holdout_overlap`。FIX-1.1（consume 限 supersedes head）/FIX-1.2（hash 釘 evidence 窗+先於渲染）/FIX-1.3（falsification 真評估+鑄 dead-mode lesson）/FIX-2.3（confirm=accounting-confirm，null-confirm 率 15-40%，re-scope M1/P5）。

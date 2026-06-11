@@ -209,3 +209,16 @@ E1 flag 對。`l2_advisory_orchestrator.py:429-432` `dispatch_and_execute` 傳 `
 - 四原 finding 全閉實證:Probe A-hb 變體(加合規 heartbeat 隔離算術軸)FAIL `rate=0.9477/cum=860` 正中真值;Probe D-hb(31h 全黑+完整 flat hb 鏈=最對抗形態)由 (iii) 殺;dedup key 前提親驗=V129 UPSERT 每輪 `updated_at=now()`;修前紅親證 7+5;M1/M2/M3 mutation 全精準 bite;256+2 復現;diff 恰 7 檔零漂移。
 - **M1b over-dedup mutant(key 削 updated_at)44 測試全綠存活**=test-pin 缺口(LOW):probe F 證 mutant 誤殺真實同計數雙 epoch(590→300 假 NOGO)。教訓:dedup fix 的 mutation 要雙向打——under-dedup(還原 bug)與 over-dedup(key 削弱)各一;後者測試常漏因 PASS-雙生只配 distinct-counts 場景。
 - 殘餘縫隙量化(G-a:canary 死+sub-30min 重啟循環+600s 寬限內讀=逐讀 ~34% 逃逸;G-b/G-c 證 ≥600s 必殺)=LOW 非 HIGH 復發。教訓:合成事件 probe 必須遵守生產 ORDER BY 遞增——G 首版 while-loop 產未來時間戳亂序差點誤報 (iv) 不咬;構造後 assert ascending+≤NOW 當標配。
+
+## 2026-06-11 · E2 — L2 P4 online-FDR 三線（e1a/e1b/e1c）合併前對抗審 → A PASS / B PASS-with-FIX(`3cdcc9ed` 去 or True 死斷言) / C RETURN（V137 號+[82] 號被 P5-SM 撞佔 = §5e 真 fire 抓到的 merge-blocker；+prh CHECK 頂層非 object 三值殘洞+double-seal warning 0 test bite）
+- 實證：A 131p / B 家族 648p+4xf+P4 107p / C 28p+鄰接 147p 全親跑對自報；mutation 重放 2 組（debit 去 dsr 臂→2 紅、區間→點比較→恰 2 golden 紅）皆 bite；三向檔案交集=空；_FakeAwc/C fake 對 A 真簽名逐參數一致；B↔C binding 事件（operator_adjustment+demo_* 三欄 vs 不鎖 type 三欄齊備查詢）咬合。
+- 教訓：(1) §5e 不是儀式——本次 review 中 P5-SM merge 進 main 佔走 V137 與 [82]，兩個「號碼資源」衝突 git merge-tree 只報 2 文本衝突（SCRIPT_INDEX/runner），**migration 版本號與 healthcheck 編號是 git 看不見的全局命名空間**，跨 branch 取號必須 merge 前夕再驗一次。(2) PG CHECK 的 `?`+`->` 對頂層 array/scalar 仍走三值放行——封 jsonb 結構洞必須先鎖 `jsonb_typeof(col)='object'` 再驗內層，「封死」宣稱要對頂層型別變體逐一推演。(3) log-only 觀測 delta（rowcount==0→warning）若無 caplog 測試=0 bite，§9.3 這類「以 log 為 gate 證據」的 AC 必須配一條 rowcount=0 測試。
+
+## 2026-06-11 — P4 E1-C RETURN 修復 delta 複審 + f08 merge-seam 裁決 → PASS to E4（E2 seam commit `4d7a4d84`）
+- 三 commit（merge `809bf568`/fix `e752e960`/micro `9f12a1d4`）全審 PASS：改號 V137→V138+[83]-[87] 殘留 0（單趟映射親 grep）；C-LOW-1 在 Linux PG 獨立 dry-run 實證（scratch db double-apply 0 ERROR；頂層 array/string/number/jsonb-null/array-ft/缺 key 六攻擊全拒+合法 object 不誤殺；N-1 三向+N-2 第二終局拒；dropdb 0 殘留）；C-LOW-2+stage0r 三向映射三 mutation 親跑全恰 1 紅（刪 warning 塊/fail 臂回退/字彙外落真值表）；A 線 demo_confirm_verdict 簽名與真值表逐臂對照（green=False 結構性不可 refund）；P5-SM 側零波及（V137 檔+模組 byte-identical，128p/1s 綠）；full 984p/16s（基線 980+4 算術核實）。
+- **f08 裁決關鍵發現：紅非 C 引入**——main `7b5d92e9`（06-08 residual PART4 加 OPTIONAL_JOBS）即破 da2aba119 的精確等式，以 main 三檔隔離佈局親跑同紅實證。C 不違 F-08 意圖；按授權直修（組成封閉+DEFAULT 精確+逐 job flag-gate 釘）+ runner docstring inventory 補 [83]-[87]（LOW 直修），mutation 3/3 紅，commit `4d7a4d84` 已推 branch。
+- 教訓：merge-seam 紅測先「對 base 雙親各自跑」歸因（main 版三檔搬 /tmp 同構佈局即可隔離實證），別默認是本線引入；pin-test 適配後必對自己的新斷言跑 mutation（rogue 來源/混 DEFAULT/偷加成員）證 pin 仍有牙。
+
+## 2026-06-11 · E2 — bb regime observability `52727d82` 對抗審 → PASS to E4（0 需修 + 5 INFO）
+- 小 diff 熱路徑相鄰審查全綠：同 snapshot 宣稱以全鏈引用追蹤親證（dispatch param :152→ctx :290→iter_ctx clone :374→on_tick :407→bb_reversion ind :421 vs persist 3 點同局部變數，`let indicators` grep 證無 shadowing）；HEAD lib 3791/0/1 親跑+diff test fn 計數算術閉 base 3787；雙 mutation 獨立打點（exchange site→None 結構測試紅 n=2、刪 hurst_value 鍵→恰 3 新測試紅）全 bite 全還原驗空。
+- 可複用：E1「clippy 0 警告但整鏈被 pre-existing 阻斷」宣稱的驗法=複製同款臨時診斷修補（semver 1 行）→ 跑 clippy → grep `-->` 限本 diff 檔 → 還原驗空；順帶暴露 follow-up 真實 scope（修 1 行後又冒 4+1 個 deny-level pre-existing error，「1 行解鎖」單開小了要列全）。`details->>` 讀方 grep 要看 FROM 哪張表再判 PA「唯一讀方」宣稱（canary_promoter 讀的是 drift_events 非 intents，假陽性排除）。
