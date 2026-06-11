@@ -77,7 +77,7 @@ def _funding_rows() -> tuple[list[dict], list[dict], list[dict]]:
 def _regime_rows(symbols: list[str], days: int) -> list[dict]:
     base = datetime(2026, 1, 1, tzinfo=timezone.utc)
     return [
-        {"symbol": symbol, "date": (base + timedelta(days=i)).date().isoformat(), "regime": "chop"}
+        {"symbol": symbol, "date": (base + timedelta(days=i)).date().isoformat(), "regime": "bear" if symbol == symbols[0] else "chop"}
         for i in range(days + 2)
         for symbol in symbols
     ]
@@ -94,6 +94,7 @@ def test_exported_oi_panel_is_consumed_by_oi_delta_producer():
 
     assert summary["row_count"] == 200
     assert summary["rejected_row_count"] == 0
+    assert {row["regime"] for row in panel} == {"chop"}
     evidence, ev_summary = oi_builder.build_oi_delta_evidence(
         panel,
         source_path="oi_delta_panel.jsonl",
