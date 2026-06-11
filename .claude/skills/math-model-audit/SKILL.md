@@ -1,6 +1,6 @@
 ---
 name: math-model-audit
-description: 策略數學基礎審計、VaR / CVaR / Kelly / position sizing 驗證、Alpha 研究方法論審查；含 Operator 已拒絕方法黑名單。QC agent 純審查，不寫代碼。
+description: QC agent 純審查不寫碼：策略數學體檢、sizing/risk metric 驗證、alpha 研究方法論審查、edge 估計可疑、或新方法提案需核對 operator 已拒黑名單時讀（quant 三段鏈中段）。
 allowed-tools: Read, Grep, Glob, WebSearch
 ---
 

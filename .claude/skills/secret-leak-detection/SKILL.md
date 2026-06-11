@@ -1,6 +1,6 @@
 ---
 name: secret-leak-detection
-description: 掃描代碼/log/commit 中的 API key、authorization HMAC、密鑰路徑、credential pattern 洩漏。E3 agent 主用，PR pre-merge gate。
+description: E3 agent 主用：密鑰洩漏掃描、PR pre-merge gate、部署前最後一道閘、commit history 體檢、或改動觸及 secret/authorization 路徑、新增 env var 或 log 時必讀。
 allowed-tools: Read, Grep, Glob, Bash
 ---
 

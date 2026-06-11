@@ -1,6 +1,6 @@
 ---
 name: bilingual-comment-style
-description: Compatibility skill name for the current OpenClaw comment style. Enforces Chinese-first comments, MODULE_NOTE clarity, and touched-block cleanup. TW writes; E2 reviews.
+description: 注釋規範唯一正本：TW 接注釋/MODULE_NOTE 工作、E1/E1a 新增或實質改動代碼需補注釋、E2 審查 diff 注釋品質時必讀。
 allowed-tools: Read, Grep, Glob, Edit, Write
 ---
 

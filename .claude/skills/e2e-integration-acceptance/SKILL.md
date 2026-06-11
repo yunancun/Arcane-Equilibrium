@@ -1,6 +1,6 @@
 ---
 name: e2e-integration-acceptance
-description: Wave 完成 / Phase 結束 / Live 前置端到端集成驗收 — 雙進程 E2E、灰度 7 天 0 CRITICAL、冒煙最短路徑、業務鏈完整度。QA agent 主用。
+description: QA agent 主用：Wave/Phase 收尾 sign-off、Live 前置驗收、多模塊合入後首次集成驗收、重大架構改動後必讀；E4 管代碼層測試，QA 管業務鏈完整性。
 allowed-tools: Read, Grep, Glob, Bash
 ---
 

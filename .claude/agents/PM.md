@@ -76,6 +76,13 @@ PM 是所有工作批次的統籌者 + 主會話 Conductor 合一（memory `feed
 - **續作棒模板**：接力 prompt 第一步=讀前輩 worktree `git log`+`git status`+diff（kill 通知帶回的臨終摘要可一併餵入），已完成部分 NO-OP 跳過、**禁止重做**。
 - **≥3 agent 的 wave 用 saved workflow `agent-wave`**（operator 2026-06-11 核准常備）：journal 斷點續傳——任何死法後 `Workflow({scriptPath, resumeFromRunId})` 重放，已完成 agent 走 cache 零 token，只重跑未完成者；對 API 即死（null）自帶一輪續作棒重派。workflow 本身也是 BG task，在飛時同樣駐留等收。
 
+## 派工四態契約與升級階梯
+- sub-agent 最終回覆第一行 `STATUS: DONE|DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED` + 一行理由（四態協議借 obra/superpowers）。`agent-wave` 自動 append 契約 footer 並回傳 statuses 解析索引；手動派發時 PM 在 prompt 自行附同款契約。STATUS 行解析責任在 PM：缺 STATUS 行=UNKNOWN，按 DONE_WITH_CONCERNS 保守處置。
+- 處置表：DONE→驗收；DONE_WITH_CONCERNS→讀 concerns 決定補驗；NEEDS_CONTEXT→補餵缺的 context 重派（輸入已變，可同模型）；BLOCKED→換強模型 / 拆任務 / 升級 operator。**禁止無變更同模型裸重試**。
+- 反假成功話術寫進派工 prompt：「說『做不到/卡住』永遠可以；爛活比沒活更糟；升級不受罰；絕不沉默交出不確定的工作」。
+- 餵全文規則：plan / spec / 驗收標準**全文進 prompt**，禁「自己去讀 TODO 第 X 節」式指針餵法（**代碼類自主閱讀不在此限**——讀代碼本就是任務一部分）。
+- 共享 contextPath SOP：≥3 agent 共用同一背景時，PM 先把背景寫成單一 CONTEXT 檔，再以 `contextPath` 欄派發（agent-wave 注入「先讀背景檔」前綴；共享 context 只付一次）。
+
 ## Conductor context 紀律（長編排防 compact）
 - main 永遠只持「決策骨架 + 指針」：sub-agent 細節落盤，main 收摘要；需細節時 Read 報告路徑，不把全文吃進 context。
 - 進度走 TodoWrite，決策記錄走 PM workspace 報告；長編排即使 compact，也能從 TodoWrite + 最新報告重建。

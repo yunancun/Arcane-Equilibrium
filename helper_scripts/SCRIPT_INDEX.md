@@ -3,6 +3,8 @@
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
 最後更新：2026-06-10（L2 P4 online-FDR E1-C — 新增 `db/passive_wait_healthcheck/checks_alpha_wealth_fdr.py`（`[83]`-`[87]` 五軸哨兵：family 基數 MIT 4a N_fam≤10 / orphan refund + refund≠φ·|debit| MIT N-3 兩臂 / 跨 family 重複 spec_sha256 MIT 4b 觀測級 WARN / V132 sealed 回寫指紋 QC QN-1；**V138/V132 表缺 → PASS-skip 不 FAIL**；N-7 語義=監測帳本完整性與 conducted tests 非 discoveries）+ `db/passive_wait_healthcheck/runner.py` 註冊 `[83]`-`[87]`（cursor 區塊內，純 SQL）+ `cron/ml_training_maintenance.py` 新 OPTIONAL job `alpha_wealth_reconciler`（wrapper `_run_alpha_wealth_reconciler`：flag `OPENCLAW_ALPHA_WEALTH_RECONCILER` 預設 OFF + 不在 DEFAULT_JOBS + V138 0 rows 三重 OFF；獨立 psycopg2 conn + statement_timeout=30s；本體=`program_code/ml_training/alpha_wealth_refund_reconciler.py`：pending debit × 最新 binding → A 線 `demo_confirm_verdict` → refund(+φ·|debit|，N-3 回查斷言)/debit_failed(0)+dead-mode lesson（source=`dead_mode_seed` 冪等錨 `awl:<debit_id>`）/pending 不動；CLI `--dry-run` 預設；operator runbook 在模組 docstring）；測試 ×3（fake conn 注入 / 0 真 DSN）。歷史更新：同日 P5-SM soak 第二輪 — `db/lease_ipc_mutating_smoke.py` 新增 S5(b) operator 一次性 mutating IPC smoke（N≥10 acquire+release、`soak_smoke:` intent 前綴、mainnet fail-closed exit 7、默認 dry-run、read-only V054/V078 row-shape 驗證；**禁接 cron/scheduler**）+ `db/passive_wait_healthcheck/checks_governance_lease_ipc.py` 新增 `[82] check_82_lease_ipc_soak_window`（S3/S4 soak 連續有效窗，V129 兩 row + V137 事件帳本跨 epoch 重建；非 active PASS-skip、active 下 flag-OFF/flusher 死/canary 死/記帳破洞逐一 fail-closed FAIL）+ runner `[82]` 註冊。歷史更新：同日 L2 Mesh P2p incident sentinel — 新增 `canary/incident_sentinel.py`（6 軸本地哨兵，alert-only never remediate：A1 engine 心跳 / A1b watchdog 活性 / A2 canary 事件消費 / A3 api healthz / A4 seam reject 暴增 / A5 agent.lessons 異常寫入 / A6 migration drift；告警 sibling-import `engine_watchdog._send_alert_best_effort`，dedup 獨立 state + 4h re-alert 窗，閾值 `OPENCLAW_SENTINEL_*` env-overridable）+ `canary/test_incident_sentinel.py`（隔離鐵則：0 真 DSN / 0 真外發 / 全 tmp_path）+ `cron/incident_sentinel_cron.sh`（5min wrapper：lock + stale-lock 自清 + heartbeat + fail-soft）+ `cron/install_incident_sentinel_cron.sh`（Linux-only idempotent installer，dry-run 預設，`OPENCLAW_SENTINEL_CRON_APPLY=1` 才寫，支援 `--remove`），詳見下節。歷史更新：同日 M4 dead-mode lessons seeder — `m4/seed_dead_mode_lessons.py` 新增 L2 P3b owed ② 冪等 seeder：6 條真實 NO-GO dead-mode 教訓（funding_arb_v2 / funding_short_v2 / cascade_fade_h2 / funding_tilt / grid_short_downtrend / textbook_scalping_family）→ `agent.lessons`（V133），symbol=`ml_advisory`（sink placeholder，檢索鏈一致）/ lesson_type=`dead_mode` / source=`dead_mode_seed` / context_id=`seed:<slug>` 冪等錨點（INSERT … WHERE NOT EXISTS）；默認 `--dry-run` 零連線，顯式 `--apply`（alias `--write`）+ `--dsn` 才落庫（不隱式讀 env DSN，承 0ce45a09 污染事故默認無害原則）；不 seed listing fade（active 主路徑非 dead mode）。歷史更新：2026-06-05 AEG-S2 (c) robustness matrix builder — `research/aeg_robustness_matrix/` 新增 artifact-only verdict matrix builder；歷史更新：2026-06-03 AEG-S2 (b) breadth ladder runner — `research/aeg_breadth_ladder/` 新增 AEG-S2 component (b) breadth ladder runner：read-from-storage-only，把任一候選 per-symbol PnL 在 FND-2 PIT universe 的 4 breadth tier 各跑一次→ deterministic `breadth_ladder.parquet`，報 per-tier net edge + significance + **monotonicity**。candidate-agnostic（`CandidateEvaluator` protocol → `TierResult`）。tier 組裝用 FND-2 `cohort_ids`（multi-membership）組 cumulative-nested（**NOT `recommended_tier`** single-pick）+ 機械驗 core25 ⊆ top_liq ⊆ full。**breadth ≠ n_independent**（time-cluster-bound，cost-wall 8-rebalance 牆機械化；招牌 bite：n_independent(full)==n_independent(core25)）。survivorship 繼承不重算（MIT b.2，0 自寫 listed_at）。top_liquidity asof-constant rank 降級 diagnostic-only（OQ-B3 待 MIT 確認）。8 模塊（tiers/universe_artifact/ladder/evaluator/artifact/harness/healthcheck/__init__）+ 26 test synthetic 全綠 + 端到端真 multiday adapter 驗證（Mac，bite 通過 + ladder_id 跨進程穩定 + parquet 生成）；真 829-sym universe + 真 market.klines 留 E4-Linux。待 E2 對抗審 + MIT leak/n_independent 審；E1 不自簽。歷史更新：2026-06-03 FND-2 PIT universe builder — `research/fnd2_pit_universe/` 新增 AEG-S1 point-in-time universe builder：read-only `market.symbol_universe_snapshots`（V058）→ deterministic PIT universe artifact（universe.parquet/.csv + universe_summary.json + manifest.json + artifact_index.json），**含已 delisted symbol**（survivorship 控制核心）。算法權威=PA 設計報告 §4 修正版（**非** contract §3 字面）：`listed_at`/`delisted_at` 是唯一 lifetime 權威，`first_seen_ts`/`last_seen_ts` 僅診斷（snapshot ts 只跨 27 天，coalesce 到 ts 會把舊上市幣 alive_from 錯夾到 2026-05=R-1 trap）；兩權威欄全 NULL 才標 unknown_lifetime。builder.py 純函數 0-DB（synthetic 可測）+ data_loader.py 唯讀 `set_session(readonly=True)` + cohorts.py（core25 從 seed 凍結 25 成員）+ artifact.py（跨平台 root + duckdb parquet 鏡像 + sha256 + universe_id digest）+ harness.py（CLI 顯式窗無隱式 now() + seed regression）。禁 current-survivor 捷徑 / `_fetch_historical_universe_snapshot_sync` / `max_symbols` / universe SQL LIMIT 截斷 / market_tickers liquidity 當 PIT alpha（只能 tier 排序）。測試 10 case（T1-T10）全 synthetic 19 passed；真跑 18mo USDT-perp（read-only PG，asof 2026-06-03 / window 2024-06-03→2026-06-03）included=829 / delisted_proof_count=255（≥200）/ survivor_rejection_status=PASS / unknown_lifetime=0 / determinism universe_id 兩跑一致 / seed sha256 match drift+32 全解釋。E1 IMPL DONE 待 E2 對抗審 + MIT universe-row 審（E1 不自簽）。歷史更新：2026-06-03 funding-tilt / 多日 funding carry 樞紐診斷 harness — `research/funding_tilt_diagnostic/` 新增 QC 協議證偽優先診斷：read-only canonical run-versioned `research.alpha_funding_rates_history`（固定 run `18b3c2f8…` 只讀它）+ `market.klines` 1d（open-to-open）+ listed_at survivorship；2 信號族（A cross-sectional funding-tilt tertile long-short L∈{3,9,21} / B time-series funding-extreme 80th pct expanding PIT）leak-free（funding_ts<open−ε）/naive 雙軌 + §3.0 funding 雙面會計（funding_pnl 獨立項 −side×F 不雙重計入）+ **per-leg long/short 分解**（MIT 強制：短腿擠壓不可藏）+ Step0 + 兩個 N_eff（price-return + funding-tiltscore PCA）+ funding persistence + funding-tilt forward HAC + §4.5 horizon-vs-cost-share 掃描 + §4b regime split + DSR(K=8)/PSR/PBO/block-bootstrap（復用 lib.stats_common）；per-symbol 從 funding_ts 間距推 interval（欄 100% NULL，TON/POL=4h）；regime vol-tercile leak 修為 expanding/prior-365。輸出 JSON+markdown，不寫庫不 commit。K 鎖 8。E1 IMPL DONE 待 E2 對抗審 + MIT leak/sample 審 + QC 最終判定（E1 不自簽）。歷史更新：2026-06-02 多日 trend 樞紐診斷 harness — `research/multiday_trend_diagnostic/` 新增 QC 協議 Phase 1 fail-fast 早期決策樹診斷：read-only PG（market.klines/funding_rates/symbol_universe_snapshots/regime_snapshots）+ 4 信號族 leak-free/naive 雙軌 + 多日成本（含 funding 累積）+ Step0 effective N + 正確尺度 TSMOM coherence gate（過去 k 日→未來 k 日 + Newey-West overlap-corrected t-stat，verdict 依據；daily-lag Ljung-Box 降級為 data_quality 廣度統計）+ ADF/KPSS/JB/ARCH 純 numpy 統計；輸出 JSON+markdown artifact，不寫庫不 commit。E1 IMPL DONE 待 E2 審查；真跑 verdict=NO-GO-TREND（正確尺度無相干 momentum：k40 孤立顯著無相鄰對 + k90 反轉 + 0/20 正自相關，表面 Sharpe 為 short-side 厚尾/funding artifact）。歷史更新：2026-05-31 M4 Stage 1 GovernanceHub lease provider seam — `m4/stage1_production_runner.py` 新增 opt-in GovernanceHub IPC lease provider；只接受 UUID-compatible lease，非 UUID lease 立即 release FAILED 並拒絕 INSERT。歷史更新：同日 A2 maker-fill feasibility diagnostic — 新增 `reports/alpha_candidate_stage0r/a2_maker_fill_feasibility.py` + smoke，以 read-only `market.liquidations` + `market.market_tickers` BBO 檢查 cascade trigger 後 60s PostOnly offset touch rate；只輸出 `reject` / `draft_only` / `observe_more`，不下單不寫庫。同日 M4 Stage 1 production DRAFT runner — 新增 `m4/stage1_production_runner.py` non-dry-run source read / candidate compute / gated writeback；writeback 必須每 row 提供真實 Decision Lease UUID，analysis lane `exploratory` 映射成 PG status `draft`。2026-05-29 P2-OPS-2-GITLEAKS — 新增 `git_hooks/` secret-scan pre-commit hook 基礎設施：canonical hook + installer + gitleaks config；E1 IMPL DONE 待 E2 sign-off。2026-05-27 P0-OPS-4 GAP-D Track A round 2 — 新增 `canary/healthchecks/check_pg_dump_freshness.py` Python 主入口 7-check（5 verify_pg_dump.sh + L0 schema coverage + governance audit trail） + wire `passive_wait_healthcheck/checks_cron_heartbeat.py` 加 `check_80_pg_dump_freshness()` wrapper；E1 IMPL DONE 待 E2 sign-off。同日保留 P0-OPS-1 HTTPS Track A IMPL + P0-OPS-4 first-day-live runbook GAP A + GAP F IMPL 索引 + 2026-05-25 Sprint 2 W2-F NEW QA-2 AC-19 ALT bucket cron + W2-B Alpha Tournament scaffold + Hygiene Option E Phase 1 Step 2 + 2026-05-23 Sprint 5+ Wave 1 §4.4 production hardening + 2026-05-20 P0-ENGINE-HALTSESSION-STUCK-FIX 索引）
 
+最新補充：2026-06-11 AEG-S3 candidate direct rows builder、listing fade evidence producer、oi_delta evidence producer 已新增；正式條目見對應 2026-06-11 AEG-S3 sections。
+
 ## 2026-06-10 L2 Mesh P2p incident sentinel（本地哨兵，alert-only never remediate）
 
 設計 SSOT：`docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-10--l2-p2p-incident-sentinel-design.md`。
@@ -32,6 +34,64 @@ per PA 設計 `docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-10--p5sm_soak_
 | 腳本 | 用途 |
 |------|------|
 | `m4/seed_dead_mode_lessons.py` | L2 P3b owed ②：把 6 條真實 NO-GO dead-mode 教訓冪等 seed 進 `agent.lessons`（V133），供 hypothesize novelty 檢索（`_check_novelty` lesson_type=`dead_mode`）與 M4 bad-set。欄位 ground 在 `layer2_critic._retrieve_lessons_sync` filter 行為：symbol=`ml_advisory`（= executor sink placeholder；不一致=永 miss 死資料）、source=`dead_mode_seed`（第 4 namespace，純 provenance，filter 不含 source）、content 英文主幹（pg_trgm 字面 trigram，中文 vs 英文 hint 相似度≈0）、context_id=`seed:<slug>` 冪等錨點（`INSERT … WHERE NOT EXISTS`，重跑 inserted=0）、outcome_net_bps/session_cost_usd 恆 NULL（V133 forward-stub）。**默認 `--dry-run`（print 不寫，0 DB 連線）**；顯式 `--apply`（alias `--write`）+ **顯式 `--dsn`** 才落庫（不隱式讀任何 env DSN）。測試 `m4/tests/test_seed_dead_mode_lessons.py`（fake conn + sys.modules psycopg2 stub，零真連線）。 |
+
+## 2026-06-11 AEG-S3 candidate direct rows builder（`research/aeg_s3_candidate_rows/`）
+
+AEG-S3 補齊 AEG robustness matrix 最缺的真候選 per-regime rows：把候選自己輸出的
+leak-free independent sample returns evidence JSON 轉成 `aeg_candidate_metrics` 已支援的
+top-level `candidate_regime_metrics` direct report。硬邊界：artifact-only，0 DB / 0 runtime /
+0 trading path；`net_bps` 只來自 explicit sample-level `net_bps`，`mean_daily_bps`
+只從 explicit `daily_returns` 算，`n_independent` 只用 explicit `independence_bucket`
+去重，缺 PBO / daily returns / independence buckets 時 fail-closed，不用 scalar 均值反推序列。
+
+| 檔 | 職責 |
+|---|---|
+| `research/aeg_s3_candidate_rows/__init__.py` | schema / runner 版本與 sample return 欄位常數。 |
+| `research/aeg_s3_candidate_rows/builder.py` | 純函數核心：normalize candidate evidence、按 regime 聚合 gross/cost/net、PSR/DSR/PBO、OOS Sharpe、recent 90/180d 與 explicit daily mean。 |
+| `research/aeg_s3_candidate_rows/artifact.py` | 寫 `candidate_direct_metrics_report.json`、sample/daily rows、summary、manifest、artifact_index。 |
+| `research/aeg_s3_candidate_rows/harness.py` | CLI：`--candidate-evidence-json` + `--run-id` → AEG-S3 direct metrics artifact。 |
+| `research/tests/test_aeg_s3_candidate_rows.py` | synthetic bite tests：完整 direct report 可被 `aeg_candidate_metrics` PASS；缺 daily returns / independence bucket / PBO 均 fail-closed；manifest/index 與靜態禁 DB/runtime route。 |
+
+## 2026-06-11 AEG-S3 listing fade evidence producer（`research/aeg_s3_listing_fade/`）
+
+AEG-S3 listing fade 候選來源接口：把 Gate-B run dir（`capture_lag.jsonl` +
+`markout.jsonl`）或 V130 `research.listing_capture_events` 離線 JSONL export
+轉成 `aeg_s3_candidate_rows` 可消費的 `listing_fade_candidate_evidence.json`。
+artifact-only，0 DB / 0 Bybit / 0 runtime / 0 trading path；`gross_bps=-markout_bps`
+（short fade），`net_bps=gross_bps-round_trip_cost_bps`，daily returns 只從 explicit
+accepted event-window samples 聚合。預設只接受 `PASS_CAPTURE`；slow/missing capture、
+missing horizon fill、missing regime 皆 fail-closed。PBO 不捏造，缺 explicit
+candidate-grid evidence 時下游會以 `missing_pbo` reject。
+
+| 檔 | 職責 |
+|---|---|
+| `research/aeg_s3_listing_fade/__init__.py` | schema / runner 版本與 listing-fade 常數。 |
+| `research/aeg_s3_listing_fade/builder.py` | 純函數核心：解析 Gate-B 或 capture-events JSONL、構造 event-window samples、daily returns、reject summary。 |
+| `research/aeg_s3_listing_fade/artifact.py` | 寫 `listing_fade_candidate_evidence.json`、summary、manifest、artifact_index。 |
+| `research/aeg_s3_listing_fade/harness.py` | CLI：`--gate-b-run-dir` 或 `--capture-events-jsonl` + `--horizon-s` + `--round-trip-cost-bps` + `--k-trials` → evidence artifact。 |
+| `research/tests/test_aeg_s3_listing_fade.py` | synthetic bite tests：Gate-B run 串 AEG-S3 rows、V130 export 計 horizon markout、缺 regime fail-closed、slow capture 預設排除、manifest/index、靜態禁 runtime/DB/Bybit route。 |
+
+## 2026-06-11 AEG-S3 oi_delta evidence producer（`research/aeg_s3_oi_delta/`）
+
+AEG-S3 `oi_delta` 候選來源接口：把離線 OI/price panel JSONL export
+轉成 `aeg_s3_candidate_rows` 可消費的 `oi_delta_candidate_evidence.json`。
+artifact-only，0 DB / 0 Bybit / 0 runtime / 0 trading path；若輸入缺
+`oi_delta_pct`，會用同 symbol `--lookback-hours` 前的 `open_interest` 計算；若缺
+`forward_return_bps`，會用 `--horizon-hours` 後價格計算。樣本單位是 non-overlapping
+cross-sectional rebalance window：按 OI delta top/bottom tail 做 long-short basket，
+`gross_bps=top_mean_forward-bottom_mean_forward`（預設 `long_high_short_low`），
+`net_bps=gross_bps-round_trip_cost_bps`。`--min-spacing-hours` 預設等於 horizon，
+避免重疊 window 被當成獨立樣本；daily returns 只從 accepted explicit windows 聚合。
+這保留歷史結論「信息存在但 standalone 成本牆」：成本顯式扣除，PBO 不捏造，缺
+candidate-grid evidence 時下游會以 `missing_pbo` reject。
+
+| 檔 | 職責 |
+|---|---|
+| `research/aeg_s3_oi_delta/__init__.py` | schema / runner 版本與 oi_delta 常數。 |
+| `research/aeg_s3_oi_delta/builder.py` | 純函數核心：解析 offline panel、計 OI delta/forward return、構造 non-overlap rebalance samples、daily returns、reject summary。 |
+| `research/aeg_s3_oi_delta/artifact.py` | 寫 `oi_delta_candidate_evidence.json`、summary、manifest、artifact_index。 |
+| `research/aeg_s3_oi_delta/harness.py` | CLI：`--panel-jsonl` + `--lookback-hours` + `--horizon-hours` + `--round-trip-cost-bps` + `--k-trials` → evidence artifact。 |
+| `research/tests/test_aeg_s3_oi_delta.py` | synthetic bite tests：raw OI/price panel 串 AEG-S3 rows、precomputed signal/return、缺 regime fail-closed、overlap spacing、manifest/index、靜態禁 runtime/DB/Bybit route。 |
 
 ## 2026-06-05 AEG candidate metrics adapter（`research/aeg_candidate_metrics/`）
 

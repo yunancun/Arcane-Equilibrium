@@ -241,3 +241,23 @@
 - persist_intent +hurst 參數 + details 兩鍵（hurst_label/hurst_value，缺失/NaN→null fail-soft）；dispatch 4 透傳點同 tick snapshot；3 檔 +217/−1；lib base-vs-HEAD 3787→3791/0 fail；mutation 雙 bite（site→None / 鍵移除）。
 - 教訓：base main clippy 整鏈不可用 = openclaw_core price_tracker.rs:132 `deprecated(since="2026-04-22")` 非 semver 觸 clippy 1.95 deny-by-default `deprecated_semver` 在 dep 編譯即斷——驗自己檔法=臨時本地改 since 跑完還原（不入 commit，flag follow-up）；crate 級 fmt drift 大面積 pre-existing，只修自己 diff 行嚴禁全檔 fmt。
 - 教訓：簽名加參後編譯器只強制 arity，「call site 被改傳 None」的縫用 include_str! 結構測試 count==N 鎖（writer 自審先例）；stress_tick_latency_benchmark debug 閾值這台 Mac base 即紅（1053μs），熱路徑 perf 斷言只看 base-vs-HEAD 同機 delta（本次 0.1-4.4μs 噪音帶）。
+
+## 2026-06-11 subagent 四態契約生效
+- 收尾契約上線：最終回覆第一行 `STATUS: DONE|DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED` + 一行理由；完整報告落檔 workspace/reports/，回覆只給 ≤500 字摘要+報告路徑+關鍵結論。卡住/缺輸入就回 BLOCKED/NEEDS_CONTEXT，絕不沉默交出不確定的工作。
+
+## 2026-06-11 25 skill description 觸發條件式改寫（待 E2/PM commit）
+- 全 25 個 `.claude/skills/*/SKILL.md` description 改 WHEN-only（刪內容清單、保 owner 路由+互補壓縮），3,525→2,469 字（−30%），PyYAML 25/25 safe_load PASS；只動 frontmatter description 行（git diff 25 檔 ±1 行），未 commit。報告：`workspace/reports/2026-06-11--skill_descriptions_trigger_rewrite.md`。
+- 教訓：description 改寫必逐檔對照正文「何時觸發」段保真（寫漏=漏觸發、寫寬=誤觸發）；YAML plain scalar 安全靠全形標點（`：`代`: `），`V###` 的 `#` 前無空白非註釋；「≤120 全形字」遇 32 字長 skill 名交叉引用時 raw 口徑會超標，按 ASCII=0.5 全形等效口徑驗收並雙口徑披露。
+
+## 2026-06-11 Claude Code hooks 接線（settings.json + rtk shim + session-start，待 E2/PM commit）
+- 3 新（`.claude/settings.json` / `hooks/rtk-rewrite.sh` vendored rtk v3 @6785a6c7 / `hooks/session-start.sh`）+ 4 改（.gitignore 白名單 +3 / CLAUDE.md §八 +11 / .codex 兩檔鏡像 hint）；協議 6 臂 fake-rtk 實測（ask 臂無 permissionDecision=不繞權限模型）、rtk/jq 缺失+malformed 全 exit 0 無輸出、注入內容與 PM INJECT 塊 byte-identical。報告：`workspace/reports/2026-06-11--claude_hooks_settings_wiring.md`。
+- 教訓：①SessionStart hook 場景 heredoc 在 bash 5.3+ 有實錄掛死（superpowers#571），穩定路線=printf 逐行 | `jq -Rs`，並用 `rtrimstr("\n")` 修 printf 尾換行才能逐字 round-trip；②vendor 上游 shim 時「README 自述 silent-fail 但實作噴 stderr」這類意圖/實作不一致,以任務 fail-open 要求裁決並在檔頭逐條列舉偏差;③hook settings 的 `!` gitignore 白名單生效驗法=`git check-ignore -v` 看命中規則是否反向 + `git status` 呈 `??` 雙證。
+
+## 2026-06-11 rtk pytest error 計數缺陷修復（外部 repo patch + PR #2399，待 E2/E4）
+- pin=develop HEAD `6785a6c7`（rtk 預設 branch 是 develop 非 master，PR 必 target develop）；根因四疊加：parse_summary_line 無 error 解析 + 全綠提前 return 丟已收集 ERROR + summary 捕捉條件（===形/-q 裸形兩處）不含 error → collection error 全零誤報 No tests collected + `=== ERRORS ===` 區塊從未進狀態機（真實使用 rtk 注入 `-rxX`，short summary 不列 ERROR 行，細節唯一來源就是 ERRORS 區塊=load-bearing）。
+- 交付：`srv/tools/rtk/`（patch+README，apply --check 證乾淨）+ patched binary `/tmp/rtk-work/target/release/rtk` + 上游 PR https://github.com/rtk-ai/rtk/pull/2399（CLA 待 operator 簽）。測試：4 新 unit（mutation bite 證 4 紅/還原綠）+ workspace 2154/0（base 2150/0）+ 4 真實場景 A/B vs base binary（exit code 全透傳一致，全綠路徑 byte-identical）。
+- 教訓：①外部貢獻先讀 CONTRIBUTING/PR template——target branch、Conventional Commits、pre-commit 三關（fmt --check/clippy/test）、CLA 都是 merge 硬條件；②修「計數器漏類別」bug 時全綠 fast-path 加 `failures.is_empty()` 兜底，防 summary 解析漏抓時細節被丟（fail-closed）；③裸 `gh repo fork <repo> --remote` 在 clone 內會誤打 help，正形=clone 內 `gh repo fork --remote --remote-name fork`。
+
+## 2026-06-11 rtk pytest patch E2 RETURN 修復輪（squash `32561a07` 已 force-push PR #2399，待 re-E2）
+- E2 HIGH：初版加寬 `-q` 裸 summary substring 啟發式的 error 臂後，失敗測試 Captured stdout 的 `retrying after error in connection pool` 被第一命中佔位 → 真 footer 被擠掉 → RED run 變 `No tests collected`。修=整行 summary 文法錨定（`is_bare_summary_line`：每逗號段 `<count> <category>` 白名單 + 尾綴 `in <float>s` + 可選 `(h:mm:ss)`）+ **first-match→last-match**（真 footer 永遠最後，stdout 逐字內層 summary 也壓不住）；順手實證 pre-existing passed 餌在 base 是**假全綠** `Pytest: 3 passed`（exit=1 零細節），寫進 PR 當錨定全啟發式的賣點。workspace 2157/0、mutation A/B 雙紅證、六場景×四 binary A/B 表入報告。
+- 教訓：①「掃描器把內容行誤認結構行」類 bug，修法=全行文法錨定+last-match-wins 雙保險——單靠文法錨，逐字餌（測試自己驅動 pytest 印內層 summary）仍可第一命中佔位；②「段內不捕捉」方案要先 trace 真行到達時的狀態機位置（`-q` RED run 真 summary 到達時正在 Failures 段內，段內禁捕=連真行一起丟）；③錨 pytest summary 尾綴必須容 `(h:mm:ss)`（>60s run），純 `in X.XXs$` 會誤殺；④外部 PR 上游未 review 前 squash+force-with-lease 最乾淨，單 0001 patch 對裝機/E4 也最簡。

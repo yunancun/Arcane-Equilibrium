@@ -1,6 +1,6 @@
 ---
 name: crypto-microstructure-knowledge
-description: Crypto perpetual / spot 微結構知識手冊 — Funding rate 動態、Liquidation cascade、Basis trading、Perpetual term structure、Execution optimization (TWAP/VWAP/Implementation Shortfall)、PostOnly/IOC fee 計算。QC agent 主用（技術微結構視角）；BB agent 按需 cross-ref（policy 視角由 bybit-policy-compliance 主負）。
+description: QC agent 主用：評估涉 funding/basis/liquidation 的策略、執行成本/fee 爭議、套利提案時讀；BB 涉微結構時 cross-ref（政策面歸 bybit-policy-compliance）。
 allowed-tools: Read, Grep, Glob, WebSearch
 ---
 

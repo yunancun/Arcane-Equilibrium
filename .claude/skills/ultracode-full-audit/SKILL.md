@@ -1,6 +1,6 @@
 ---
 name: ultracode-full-audit
-description: OpenClaw 全盤多視角審計編排設置（主會話/conductor 專用，非 subagent skill）。當 operator 啟用 ultracode 並要求「全盤審查/全面檢查/multi-agent 優化/冷酷對抗審計」時使用：主會話親做 Stage 0 凍結與 Stage 3-4 收斂，並行審計段（Stage 2）以 Workflow 調用 saved script openclaw-full-audit。未啟用 ultracode 時降級為 PM 順序鏈或先徵求 operator 同意。
+description: 主會話/conductor 專用，非 subagent skill：operator 要求「全盤審查/全面檢查/multi-agent 優化/冷酷對抗審計」時必讀，含 ultracode 未啟用時的降級判斷。
 ---
 
 # Ultracode 全盤審計編排（持久化設置）

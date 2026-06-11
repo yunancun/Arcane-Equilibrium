@@ -194,3 +194,14 @@
 - 本批完成 source/test/docs-only fail-closed 接入：MLDE live-candidate producer 與 LG-5 reviewer 都要求 canonical `candidate_evidence_manifest` + valid `demo_residual_alpha_report`，missing / alias / invalid / research_only / pending_schema 都不可 create/approve live candidate。
 - 保留現實邊界：這不代表 hidden OOS registry 或真實 manifest producer 已完成；缺 manifest 的真實 upstream row 會被阻斷，而不是被自動修補。
 - Report: docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-04--alpha_edge_p1_candidate_evidence_manifest_gate.md
+
+## 2026-06-11 派工四態契約生效
+
+- subagent 回報首行 STATUS 四態；處置表=DONE 驗收 / DONE_WITH_CONCERNS 讀 concerns 補驗 / NEEDS_CONTEXT 補 context 重派（可同模型）/ BLOCKED 換強模型、拆任務或升級 operator，禁無變更同模型裸重試；餵全文 + 共享 contextPath SOP 入 PM.md「派工四態契約與升級階梯」，agent-wave 自動 append 契約 footer 並回傳 statuses 索引。
+
+## 2026-06-11 AEG-S3 + Claude Tooling 三端同步
+
+- Operator 要求「三端同步」。本批同步範圍：Claude hooks/rtk/four-state contract/skill trigger rewrite + AEG-S3 candidate direct rows、listing_fade、oi_delta artifact-only evidence producers。
+- AEG-S3 驗證：focused regression（listing fade + oi_delta + candidate rows + candidate metrics + robustness + Gate-B probe）= 70 passed；compileall OK；static forbidden-route search 新模組無 runtime/DB/Bybit route。
+- Claude tooling 驗證：`bash -n` hooks、`node --check .claude/workflows/agent-wave.js`、`.claude/settings.json` JSON parse OK；secret-pattern 搜尋只命中文檔/技能中的安全詞與路徑說明。
+- 邊界：docs/tooling/research artifact sync only；不重啟 runtime、不 rebuild、不改 DB/auth/risk/trading。P5-SM soak 繼續跑；AEG-S3 尚未產真候選 promotion proof，下一步仍是 Gate-B true transition artifact、V125 OI/price/regime export、candidate-grid PBO、funding_revive producer、E2/MIT/QC 審。

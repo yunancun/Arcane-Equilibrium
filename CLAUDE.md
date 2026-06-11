@@ -202,6 +202,17 @@ Unless the operator explicitly overrides this:
   `subagents/` dir; stat it before any TaskStop and suspect death only after
   ≥30 min of silence. Clear zombie `running` tasks after session resume.
   Canonical SOP: `.claude/agents/PM.md` 「後台 wave 防殺與降損」.
+- Token hygiene and hooks: `.claude/settings.json` wires a PreToolUse hook
+  (`.claude/hooks/rtk-rewrite.sh`) that rewrites Bash commands to `rtk`
+  equivalents for compressed output. It fails open (missing rtk/jq or rewrite
+  failure = silent passthrough) and never bypasses the permission model. If
+  exit != 0 but the compressed summary looks green, read the `[full output:]`
+  tee log or rerun via `rtk proxy <cmd>`; escape hatches are `rtk proxy <cmd>`
+  and the rtk config `exclude_commands`. Binary install is pinned per
+  `tools/rtk/README.md`. A SessionStart hook (`session-start.sh`) injects a
+  ≤300-token workflow router and re-injects it after compact. Subagent
+  completion follows the four-state contract DONE / DONE_WITH_CONCERNS /
+  NEEDS_CONTEXT / BLOCKED (canonical: `.claude/agents/PM.md`).
 - Every delegated task must bind a repo role, ownership, expected output, and
   task shape.
 - If a role is skipped, say which role and why.

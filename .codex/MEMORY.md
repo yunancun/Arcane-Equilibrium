@@ -122,6 +122,19 @@ Unless explicitly overridden:
   they are harmful.
 - Fail loud when tests, steps, or evidence are skipped.
 
+## Claude Code Hooks Mirror
+
+Hints mirrored from the Claude Code side; canonical text lives in the pointed
+files, not here.
+
+- Claude Code sessions in this repo run an rtk PreToolUse rewrite layer
+  (`.claude/settings.json` + `.claude/hooks/rtk-rewrite.sh`): Bash output in
+  shared transcripts/reports may be rtk-compressed. If exit != 0 but the
+  summary looks green, read the `[full output:]` tee log or rerun via
+  `rtk proxy <cmd>`. Canonical: `CLAUDE.md` §八 + `tools/rtk/README.md`.
+- `.claude/skills` descriptions are written as trigger conditions; check for a
+  matching skill before hand-rolling a procedure.
+
 ## Dispatch Rules
 
 Use bound repo roles, not temporary runtime nicknames.

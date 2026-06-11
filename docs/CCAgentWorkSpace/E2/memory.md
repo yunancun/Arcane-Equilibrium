@@ -222,3 +222,10 @@ E1 flag 對。`l2_advisory_orchestrator.py:429-432` `dispatch_and_execute` 傳 `
 ## 2026-06-11 · E2 — bb regime observability `52727d82` 對抗審 → PASS to E4（0 需修 + 5 INFO）
 - 小 diff 熱路徑相鄰審查全綠：同 snapshot 宣稱以全鏈引用追蹤親證（dispatch param :152→ctx :290→iter_ctx clone :374→on_tick :407→bb_reversion ind :421 vs persist 3 點同局部變數，`let indicators` grep 證無 shadowing）；HEAD lib 3791/0/1 親跑+diff test fn 計數算術閉 base 3787；雙 mutation 獨立打點（exchange site→None 結構測試紅 n=2、刪 hurst_value 鍵→恰 3 新測試紅）全 bite 全還原驗空。
 - 可複用：E1「clippy 0 警告但整鏈被 pre-existing 阻斷」宣稱的驗法=複製同款臨時診斷修補（semver 1 行）→ 跑 clippy → grep `-->` 限本 diff 檔 → 還原驗空；順帶暴露 follow-up 真實 scope（修 1 行後又冒 4+1 個 deny-level pre-existing error，「1 行解鎖」單開小了要列全）。`details->>` 讀方 grep 要看 FROM 哪張表再判 PA「唯一讀方」宣稱（canary_promoter 讀的是 drift_events 非 intents，假陽性排除）。
+
+## 2026-06-11 · E2 — subagent 四態契約生效
+- 回報首行改 `STATUS: DONE|DONE_WITH_CONCERNS|NEEDS_CONTEXT|BLOCKED`+一行理由；E2.md 新增審查順序鐵律：stage 0=spec 合規（對照派工契約逐項查漏建/超建/誤解）先於代碼質量審查，不信實作報告、讀真代碼逐行對 spec。
+
+## 2026-06-11 · E2 複審 — rtk pytest patch 修復輪(A 批 delta)→ PASS to E4
+- HIGH 真閉:`is_bare_summary_line()` 整行文法錨定+last-match-wins;雙 mutation 親跑(first-match 回退→verbatim 測試紅;substring 回退→2 測試紅含原始餌 e2e)、原始餌+pre-footer 逐字餌真 pytest A/B 親跑全對;patch 套 pin SHA 後與 commit `32561a07` 樹 byte-identical;PR #2399 head SHA 對上+review-update 節誠實披露。E1 否決「Failures 段內禁捕」實證成立:`-q -rxX` RED run 0 條 short-summary header,footer 到達時 parser 必在 Failures 段。
+- 新殘留(LOW,不擋):post-footer 文法精確餌(atexit 印 `99 passed in 0.01s`)可偷 headline 計數(親證 `Pytest: 99 passed, 0 failed`),但 exit code 透傳+Failures 細節仍在+全綠短形被 `failures.is_empty()` 防線擋;觸發需病態自傷代碼非意外散文,任何單趟文本啟發式無解,first-match 替代方案實證更差。教訓:審 parser 啟發式要分「意外散文觸發」vs「逐字對抗觸發」兩級定 severity;「真 footer 永遠最後」這類結構宣稱要用 atexit/post-process 探針實際打穿驗邊界。

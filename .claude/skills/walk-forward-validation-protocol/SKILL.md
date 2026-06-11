@@ -1,6 +1,6 @@
 ---
 name: walk-forward-validation-protocol
-description: 量化策略「驗證 / 回測」操作手冊 — Walk-forward、Deflated Sharpe、PSR、PBO、CSCV、multiple testing 修正、樣本量、資料品質統計診斷、參數穩健性。QC agent 主用，與 quant-strategy-design 互補（design vs validation）。
+description: QC agent 主用：策略上線前驗證、Sharpe/OOS 顯著性判斷、參數 sweep 評審、提案只引 in-sample 表現時讀（quant 三段鏈之末）；ML 訓練 CV 歸 MIT time-series-cv-protocol。
 allowed-tools: Read, Grep, Glob, WebSearch
 ---
 

@@ -99,3 +99,6 @@ backups/*.sql
 !.claude/agents/**
 !.claude/workflows
 !.claude/workflows/**
+!.claude/settings.json
+!.claude/hooks
+!.claude/hooks/**

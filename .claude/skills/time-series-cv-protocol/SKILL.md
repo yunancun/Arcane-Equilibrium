@@ -1,6 +1,6 @@
 ---
 name: time-series-cv-protocol
-description: 時序 ML 模型 cross-validation 設計 — Purged k-fold、Embargo、TimeSeriesSplit、Walk-forward variants、CSCV。MIT agent 主用，與 walk-forward-validation-protocol（QC 視角）互補：QC 看策略 alpha 顯著性，MIT 看 ML 模型訓練 CV 嚴謹性。
+description: MIT agent 主用：設計 ML 訓練 CV、任何 model 訓練前、OOS 退化排查、ONNX export 前驗證時讀；策略 alpha 顯著性（QC）歸 walk-forward-validation-protocol。
 allowed-tools: Read, Grep, Glob, Bash, WebSearch
 ---
 

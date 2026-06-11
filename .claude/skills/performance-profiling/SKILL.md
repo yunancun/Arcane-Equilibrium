@@ -1,6 +1,6 @@
 ---
 name: performance-profiling
-description: Rust + Python + PostgreSQL 三層效能分析；針對 128GB 統一記憶體 / 4-8GB PG 限制 / Apple Silicon 部署目標調校。E5 agent 主用。
+description: E5 agent 主用：效能優化、latency 超 SLA、記憶體/CPU spike、DB 慢查詢排查，及每 Phase/Wave 完成後強制體檢時讀；SLA 閾值唯一正本在此。
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
