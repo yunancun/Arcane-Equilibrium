@@ -419,11 +419,11 @@ def governance_health_check(
             "incident_count": status.incident_count,
         }
 
-        # P5 step-(i): surface the Rust-IPC vs Python-shadow divergence counter so
-        # the Linux soak can query "0 divergence over N ops" (design §5 step-(i)).
-        # 純讀計數器，flag-OFF 時 total 恆 0（acquire/release/get 不走 IPC 比對路徑）。
-        # P5 step-(i)：暴露 Rust-IPC 與 Python-shadow 的 divergence 計數，供 Linux
-        # soak 查詢「N 筆 0 divergence」；純讀，flag-OFF 時 total 恆 0。
+        # P5 step-(i)：暴露 Rust-IPC 與 Python-shadow 的 divergence 計數（**觀測性
+        # 信號、非 gate**——rework (b)+(b-i) 2026-06-03：雙邊等價 gate 在 Option 2
+        # 下語意不可達，soak gate 已改為 [81] P-LIVE + [82] soak-window；本計數僅
+        # 供 operator triage）。純讀，flag-OFF 時 total 恆 0（acquire/release/get
+        # 不走 IPC 比對路徑）。
         try:
             from .governance_divergence import get_divergence_counters  # noqa: PLC0415
             health["lease_ipc_divergence"] = get_divergence_counters()

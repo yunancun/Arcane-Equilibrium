@@ -199,6 +199,15 @@ from .checks_governance_lease_ipc import (
     # 配對 flusher governance_divergence_flush.py（仍投影 comparator 供觀測）；
     # EQUIV sampler lease_ipc_equiv_sampler.py 已 DEPRECATED（不接 gate）。
     check_81_lease_ipc_soak,
+    # P5-SM soak 第二輪 (2026-06-10，E1-D) — `[82]` S3/S4 soak 連續有效窗評估。
+    # 讀 V129 兩 row（'singleton'+'canary'）+ V137 learning.lease_ipc_soak_events
+    # 事件帳本，跨 epoch 重建連續窗：S3（≥48h / 累計 probe ≥500 / 成功率 ≥99% /
+    # 無 ≥15min 失敗連段）+ S4（0 flag-OFF 觀測 / epoch 間隙 ≤30min / 0 counter
+    # regression 無對應 rollover）。soak 非 active → PASS-skip（不污染平時 cron）；
+    # active 下 fail-closed：flag-OFF / flusher 死（snapshot stale）/ canary 死
+    # （probe 不增長）/ 記帳破洞逐一 FAIL。配對 canary governance_ipc_canary.py +
+    # flusher 擴充（V129 'canary' row + V137 事件鏈）。
+    check_82_lease_ipc_soak_window,
 )
 from .checks_pricing_binding import (
     # REF-20 Sprint C R6-T7 (2026-05-05) — `[45]` LG-3 provider pricing
@@ -565,6 +574,7 @@ def main() -> int:
       cursor: [1][2][3][4][5][6][8][9][10][12][Xb][14][15][21]
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55][57][58][58a][59][64][65][66][67][68][69][70][71][72][73][74]
+              [81][82]  ([81] 補登記——P5-SM B-3 註冊時漏列；[82] P5-SM soak 第二輪)
       post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56] [75][76][77][78][79] [80]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -1290,6 +1300,15 @@ def main() -> int:
             # lease_ipc_equiv_sampler.py 已 DEPRECATED（不接 gate）。
             s, m = check_81_lease_ipc_soak(cur)
             results.append(("[81] lease_ipc_soak", s, m))
+
+            # [82] P5-SM soak 第二輪 (2026-06-10，E1-D): S3/S4 soak 連續有效窗。
+            # 讀 V129 'singleton'+'canary' 兩 row + V137 soak 事件帳本，跨 epoch
+            # 重建連續窗並判 S3（48h/probe/成功率/連段）+ S4（flag-OFF/間隙/
+            # regression）。非 active → PASS-skip；active 下 fail-closed（四個
+            # 偵測支路逐一 FAIL：flag-OFF / flusher 死 / canary 死 / 記帳破洞）。
+            # 純 SQL，cursor 區塊內跑。
+            s, m = check_82_lease_ipc_soak_window(cur)
+            results.append(("[82] lease_ipc_soak_window", s, m))
     finally:
         conn.close()
 
