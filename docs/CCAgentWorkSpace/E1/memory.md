@@ -227,3 +227,17 @@
 - Wave1 驗證+V137 Linux dry-run 親跑（雙 apply 全 no-op/CHECK 負向拒/ROLLBACK 後零痕跡，max version 恆 136）；Wave2 沿用 0 重寫，抓到 1 真測試洞：[82] flag-OFF 觀測支路 mutation 存活——原測試數據被 OFF→ON transition 支路遮蔽，修=OFF 觀測改由非 flag_change 事件攜帶且無補償 transition，只有 belt-and-suspenders 支路能擋。**教訓：多支路同向 FAIL 的 gate，每支路的 bite 測試必須構造「只有該支路能擋」的數據，否則 mutation 被鄰路遮蔽**。
 - mutation 驗證紀律：長 && 鏈跑多個 mutation 會被前一輪殘留汙染（F 輪紅錯測試名）——**一 mutation 一 bash call，restore 後綠再下一個**；八個 mutation（canary single-flight/backoff + [82] 六支路）standalone 全紅後綠。
 - S5(b) smoke 的 profile 陷阱：GovernanceProfile Validation/Exploration 在 Rust `acquire_lease` 直接 `LeaseId::Bypass`（不 engage SM、bypass lease release=LeaseNotFound）→「demo profile」字面照做=驗不到 mutating arm；正解=Production profile + 環境層 demo 圍欄（OPENCLAW_ALLOW_MAINNET guard），且 engine_mode 值 Live/LiveDemo 同寫 'live_demo' 不可作環境斷言軸。
+
+## 2026-06-11 L2 P4 E1-C E2 RETURN 修復輪（merge `809bf568` + fix `e752e960`，feat/l2-p4-e1c 已 push，待 re-E2）
+- **C-CRIT-1 改號**：P5-SM merge main 佔走 V137+[82] → merge origin/main（2 衝突並存解：SCRIPT_INDEX 最後更新行 / runner append 區）+ 全面平移 V137→V138、[82]-[86]→[83]-[87]、`_v137_deployed`→`_fdr_tables_deployed`（撞號免疫命名含 skip 字串/test fixture）。commit 拆分=merge commit 承載全部機械改號（樹單一 V138 + runner import-coherent，detached worktree 實證 A 點綠 104 passed）、fix commit 只含三語義修復——供 E2 隔離審。
+- **三語義修復**：C-LOW-1 `prh_falsification_chk` 最前置 `jsonb_typeof(spec_jsonb)='object'`（封頂層 array/scalar 三值放行，E2 攻擊路徑 `'["falsification_test"]'` Linux 實證修復前可入庫、修復後 CHECK 拒）；C-LOW-2 double-seal warning 補 rowcount=0+caplog bite 測試（mutation 刪 warning 塊→紅）；PM 裁決 stage0r verdict 非 pass（**真實字彙={pass,fail,defer_data}** 非派工原文「pass/defer 兩種」，按「僅 pass 進真值表」最小安全解落地）→ `stage0r_not_pass` 計數+skip-pending，failed 僅經 net<0 可達（mutation 移 guard→defer_data/fail 兩測紅）。
+- **教訓**：改號輪動手前必親自 re-fetch 重驗號碼仍 free（散文式「免開 V138」提及 ≠ 佔用，要區分）；merge+改號+語義修復的 commit 拆分要保「每 commit import-coherent + migration 命名空間無雙號」，必要時用 exact-string 反向/正向替換把單檔 delta 暫時搬出 staging（對 renamed file 比 hunk-staging 可靠）。
+
+## 2026-06-11 L2 P4 E1-C stage0r verdict 三向映射微修（feat/l2-p4-e1c @ 9f12a1d4 已 push，待 E2）
+- PM 裁決三向：'pass'→green=True、'fail'（gate 結論性統計否定）→green=False 進 M1 真值表（NOT-green 臂自此真實可達，QC FIX-1.3 被證偽→鑄 dead-mode）；'defer_data'/缺席/字彙外值=非結論性 skip-pending（上輪裁決不變）。summary 計數更名 stage0r_not_pass→stage0r_deferred（fail 現進真值表，舊名失真；cron wrapper 整包透傳、唯一鍵級消費者=測試檔）。mutation bite：fail 臂改回 pending → 僅 fail 案例測試紅（1f/17p），還原 69 全綠（reconciler 18 + bridge/preflight 51）。
+- 待 E2 注意：`tests/helper_scripts/test_ml_training_maintenance_cron_static.py::test_f08_runner_pins_the_five_audit_jobs` 紅 = merge-seam pre-existing（main 側 f08 pin `VALID_JOBS==CORE+AUDIT` vs branch OPTIONAL_JOBS；da2aba119 經 merge 809bf568 入分支；detached baseline e752e960 同紅實證）——merge main 前須收此 pin，但在本微修「0 其他改動」範圍外，已 flag PM/E2。
+
+## 2026-06-11 BB-REVERSION regime observability（feat/bb-regime-observability @ 52727d82，待 E2）
+- persist_intent +hurst 參數 + details 兩鍵（hurst_label/hurst_value，缺失/NaN→null fail-soft）；dispatch 4 透傳點同 tick snapshot；3 檔 +217/−1；lib base-vs-HEAD 3787→3791/0 fail；mutation 雙 bite（site→None / 鍵移除）。
+- 教訓：base main clippy 整鏈不可用 = openclaw_core price_tracker.rs:132 `deprecated(since="2026-04-22")` 非 semver 觸 clippy 1.95 deny-by-default `deprecated_semver` 在 dep 編譯即斷——驗自己檔法=臨時本地改 since 跑完還原（不入 commit，flag follow-up）；crate 級 fmt drift 大面積 pre-existing，只修自己 diff 行嚴禁全檔 fmt。
+- 教訓：簽名加參後編譯器只強制 arity，「call site 被改傳 None」的縫用 include_str! 結構測試 count==N 鎖（writer 自審先例）；stress_tick_latency_benchmark debug 閾值這台 Mac base 即紅（1053μs），熱路徑 perf 斷言只看 base-vs-HEAD 同機 delta（本次 0.1-4.4μs 噪音帶）。
