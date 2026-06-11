@@ -209,6 +209,18 @@ from .checks_governance_lease_ipc import (
     # flusher 擴充（V129 'canary' row + V137 事件鏈）。
     check_82_lease_ipc_soak_window,
 )
+from .checks_alpha_wealth_fdr import (
+    # L2 P4 online-FDR (2026-06-10 E1-C) — `[83]`-`[87]` α-wealth 帳本 +
+    # pre-registration + V132 回退五軸哨兵（原 [82]-[86]，P5-SM 佔走 [82]
+    # 後整體平移 +1）。V138/V132 表缺 → PASS-skip（pre-deploy 不
+    # false-FAIL）。N-7 語義：監測帳本完整性與 conducted tests，非
+    # discoveries（初期 discovery≈0 是設計後果非故障）。
+    check_83_alpha_wealth_family_cardinality,
+    check_84_alpha_wealth_orphan_refund,
+    check_85_alpha_wealth_refund_amount_mismatch,
+    check_86_pre_reg_cross_family_duplicate_spec,
+    check_87_hidden_oos_state_regression,
+)
 from .checks_pricing_binding import (
     # REF-20 Sprint C R6-T7 (2026-05-05) — `[45]` LG-3 provider pricing
     # binding sentinel. Implements RFC §IMPL T2 healthcheck output
@@ -575,6 +587,7 @@ def main() -> int:
               [22][23][24][25][26][27][28] [30][31][32][33][34][35][36][37][38][39][40][41]
               [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55][57][58][58a][59][64][65][66][67][68][69][70][71][72][73][74]
               [81][82]  ([81] 補登記——P5-SM B-3 註冊時漏列；[82] P5-SM soak 第二輪)
+              [83][84][85][86][87]  (L2 P4 online-FDR 五軸，E1-C)
       post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56] [75][76][77][78][79] [80]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -1309,6 +1322,22 @@ def main() -> int:
             # 純 SQL，cursor 區塊內跑。
             s, m = check_82_lease_ipc_soak_window(cur)
             results.append(("[82] lease_ipc_soak_window", s, m))
+
+            # [83]-[87] L2 P4 online-FDR 五軸（2026-06-10 E1-C；原 [82]-[86]
+            # 因 P5-SM 佔走 [82] 整體平移 +1）：α-wealth 帳本完整性（family
+            # 基數 MIT 4a / orphan refund + 金額恆等 MIT N-3）+ pre-reg 跨
+            # family 重複（MIT 4b 觀測級）+ V132 sealed 回退指紋（QC QN-1）。
+            # V138/V132 缺 → PASS-skip。純 SQL，cursor 區塊內跑。
+            s, m = check_83_alpha_wealth_family_cardinality(cur)
+            results.append(("[83] alpha_wealth_family_cardinality", s, m))
+            s, m = check_84_alpha_wealth_orphan_refund(cur)
+            results.append(("[84] alpha_wealth_orphan_refund", s, m))
+            s, m = check_85_alpha_wealth_refund_amount_mismatch(cur)
+            results.append(("[85] alpha_wealth_refund_mismatch", s, m))
+            s, m = check_86_pre_reg_cross_family_duplicate_spec(cur)
+            results.append(("[86] pre_reg_cross_family_dup_spec", s, m))
+            s, m = check_87_hidden_oos_state_regression(cur)
+            results.append(("[87] hidden_oos_state_regression", s, m))
     finally:
         conn.close()
 
