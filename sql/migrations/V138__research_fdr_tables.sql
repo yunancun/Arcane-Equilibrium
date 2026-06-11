@@ -35,8 +35,10 @@
 --        向量（N-3 家族）。awl_terminal_needs_debit_id_chk 封死；這實作的是
 --        設計原文自己宣告的「debit/refund/debit_failed 必填」欄位語義。
 --   附加（N-1 同款，prh_falsification_chk）：原文 CHECK 在 falsification_test
---        key 缺席時整式 NULL → 放行；為陣列時 ? 按元素匹配也可全過。前置
---        存在性謂詞 + jsonb_typeof='object' 封死（嚴格收緊，無放寬面）。
+--        key 缺席時整式 NULL → 放行；為陣列時 ? 按元素匹配也可全過；spec_jsonb
+--        頂層為陣列/scalar 時 -> 回 NULL 致整式 NULL 也放行（E2 C-LOW-1）。
+--        前置 jsonb_typeof(spec_jsonb)='object' + 存在性謂詞 + 內層
+--        jsonb_typeof='object' 三道封死（嚴格收緊，無放寬面）。
 --
 -- 範圍 / 硬邊界：
 --   - additive only；不改任何既有表、不碰 order / promotion / lease / live。
@@ -131,14 +133,19 @@ CREATE TABLE IF NOT EXISTS research.pre_registered_hypotheses (
     actor_id              TEXT        NOT NULL,
     -- falsification_test 三欄結構化（contract v2 + guard clause F 的 DB 兜底）：
     -- 自由字串 falsification = 存而不裁 theater（QC FIX-1.3 前提）。
-    -- N-1 同款三值邏輯封堵（原文 CHECK 的兩個殘洞）：
+    -- N-1 同款三值邏輯封堵（原文 CHECK 的三個殘洞）：
     --   (1) key 整個缺席 → spec_jsonb->'falsification_test' 為 NULL →
     --       NULL ? 'x' 為 NULL → CHECK 三值邏輯放行；前置 ? 謂詞回 false
     --       （非 NULL）即封死。
     --   (2) falsification_test 為陣列 ['null_hypothesis',...] 時 ? 按陣列
     --       元素匹配也能全過 → jsonb_typeof = 'object' 鎖死容器型別。
+    --   (3) spec_jsonb 頂層為陣列/scalar（E2 C-LOW-1 攻擊路徑：
+    --       '["falsification_test"]' 經 ? 元素匹配 TRUE + -> 回 NULL +
+    --       jsonb_typeof(NULL) 為 NULL → 整式 NULL 放行）→ 最前置
+    --       jsonb_typeof(spec_jsonb)='object' 回 false 封死。
     CONSTRAINT prh_falsification_chk CHECK (
-        spec_jsonb ? 'falsification_test'
+        jsonb_typeof(spec_jsonb) = 'object'
+        AND spec_jsonb ? 'falsification_test'
         AND jsonb_typeof(spec_jsonb->'falsification_test') = 'object'
         AND spec_jsonb->'falsification_test' ? 'null_hypothesis'
         AND spec_jsonb->'falsification_test' ? 'test_statistic'
