@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -19,6 +20,7 @@ from program_code.exchange_connectors.bybit_connector.control_api_v1.replay.expe
     REGISTRY_RESIDUAL_ALPHA_HASH_FIELD,
     ReplayExperimentRegisterRequest,
     _extract_alpha_hidden_oos_v049_fields,
+    _persist_hidden_oos_state_registry,
     register_experiment,
 )
 from program_code.ml_training.candidate_evidence_source_contract import (
@@ -945,3 +947,36 @@ def test_t13_high1_sealed_hash_byte_identical_under_non_aligned_boundary_trip():
     cand_end_iso = cap_with["manifest_persisted"]["hidden_oos_state"]["candidate_window_end"]
     cand_end_epoch = datetime.fromisoformat(cand_end_iso).timestamp()
     assert cand_end_epoch <= oos_start_epoch, (cand_end_epoch, oos_start_epoch)
+
+
+# ─── C-LOW-2（E2 RETURN）：double-seal warning 可觀測性 bite ────────────
+
+
+def test_double_seal_rowcount_zero_emits_observable_warning(caplog):
+    """double-seal（ON CONFLICT DO NOTHING 吞掉、rowcount=0）必發 warning。
+
+    為什麼必測：P4 §4.1 唯一行為改動就是這條 warning；既有 fixture 全
+    rowcount=1（成功寫入路徑），mutation 刪掉 warning 塊測試照綠 = no-bite。
+    本測鎖死 rowcount=0 分支 → caplog 必含 "double-seal skipped"。
+    """
+    report = _passing_residual_report()
+    residual_hash = _canonical_sha256(report)
+    manifest = {
+        "hidden_oos_state": _alpha_state(residual_report_hash=residual_hash),
+        REGISTRY_RESIDUAL_ALPHA_HASH_FIELD: residual_hash,
+    }
+    cur = _FakeCursor([])
+    cur.rowcount = 0  # 實例覆蓋類屬性：模擬 ON CONFLICT (replay_experiment_id) 命中
+    with caplog.at_level(logging.WARNING):
+        err = _persist_hidden_oos_state_registry(
+            cur,
+            experiment_id="33333333-3333-3333-3333-333333333333",
+            manifest_hash_hex="d" * 64,
+            manifest_jsonb=manifest,
+            actor_id="alice",
+        )
+    # 回傳值契約不變（重複 seal 是冪等設計行為，非 error）。
+    assert err is None
+    assert any("double-seal skipped" in rec.message for rec in caplog.records), (
+        "rowcount=0 必須發出可觀測 double-seal warning（C-LOW-2 bite）"
+    )

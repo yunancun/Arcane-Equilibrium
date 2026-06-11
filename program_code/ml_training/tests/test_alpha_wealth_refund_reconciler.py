@@ -193,12 +193,12 @@ def _trips(n: int, net: float) -> list[dict[str, float]]:
 # 測試
 # ─────────────────────────────────────────────────────────────────────────────
 
-def test_v137_absent_skips_everything(fake_controller):
+def test_fdr_tables_absent_skips_everything(fake_controller):
     conn = _FakeConn(_routes(deployed=False))
     out = rec.run_alpha_wealth_refund_reconciler(
         conn, now=_NOW, dry_run=True, round_trip_loader=lambda *a, **k: [],
     )
-    assert out["skipped"] == "v137_not_deployed"
+    assert out["skipped"] == "fdr_tables_not_deployed"
     assert conn.inserts("research.alpha_wealth_ledger") == []
     assert conn.rollbacks == 1  # dry_run 結尾 rollback（零寫入 belt）
 
@@ -304,13 +304,40 @@ def test_failed_inserts_debit_failed_and_mints_dead_mode_lesson(fake_controller)
     assert out["lessons_minted"] == 1
 
 
-def test_failed_on_stage0r_red_regardless_of_net(fake_controller):
-    conn = _FakeConn(_routes(stage0r=("fail",)))
+@pytest.mark.parametrize("verdict", ["defer_data", "fail"])
+def test_stage0r_non_pass_verdict_stays_pending_zero_dead_mode(fake_controller, verdict):
+    """PM 裁決（E2 RETURN 輪）：verdict 非 pass = 證據不足非證偽 → pending。
+
+    gate 字彙 {pass, fail, defer_data}（residual_alpha_gate.py:34）；單配置
+    preflight 誠實 defer 下 defer_data 是常態。非 pass 不餵 A 線真值表 False
+    臂——否則 demo 表現尚可（net=+5bps）也被鑄 dead-mode lesson，以非結論性
+    結果汙染 novelty 庫。斷言：pending（跳過）+ 0 帳本事件 + 0 dead-mode。
+    """
+    conn = _FakeConn(_routes(stage0r=(verdict,)))
     out = rec.run_alpha_wealth_refund_reconciler(
         conn, now=_NOW, dry_run=False, round_trip_loader=lambda *a, **k: _trips(40, 5.0),
     )
+    assert out["stage0r_not_pass"] == 1
+    assert out["failed"] == 0
+    assert out["confirmed"] == 0
+    assert conn.inserts("research.alpha_wealth_ledger") == []
+    assert conn.inserts("agent.lessons") == []
+
+
+def test_failed_only_reachable_via_negative_net(fake_controller):
+    """failed 唯一可達路徑 = stage0r pass + demo net<0（PM 裁決閉環斷言）。
+
+    與上測互補：dead-mode lesson 的 why 必為 net<0（stage0r-not-green 文案
+    在新映射下結構性不可達——demo_confirm_verdict 只在 green=True 時被呼）。
+    """
+    conn = _FakeConn(_routes(stage0r=("pass",)))
+    out = rec.run_alpha_wealth_refund_reconciler(
+        conn, now=_NOW, dry_run=False, round_trip_loader=lambda *a, **k: _trips(40, -8.0),
+    )
     assert out["failed"] == 1
-    assert "stage0r replay preflight not green" in conn.inserts("agent.lessons")[0][1]["content"]
+    content = conn.inserts("agent.lessons")[0][1]["content"]
+    assert "net -8.00 bps < 0" in content
+    assert "stage0r replay preflight not green" not in content
 
 
 def test_loader_receives_cell_attribution(fake_controller):
