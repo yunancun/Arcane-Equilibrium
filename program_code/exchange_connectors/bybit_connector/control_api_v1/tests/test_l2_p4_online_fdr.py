@@ -1008,5 +1008,5 @@ class TestIronRules:
     def test_executor_docstring_no_longer_claims_short_circuit(self):
         """MIT N-8：_run_math_gate docstring 不得再宣稱 short-circuit（與實作不符）。"""
         doc = EXEC._run_math_gate.__doc__ or ""
-        assert "短路" not in doc.split("無 short-circuit")[0] or True
+        assert "短路" not in doc.split("無 short-circuit")[0]
         assert "無 short-circuit" in doc
