@@ -292,11 +292,71 @@ _ML_ADVISORY_HYPOTHESIZE_CONTRACT = PromptContract(
     uncertainty_rule="無可信機制可提 → 回空 feature_hypotheses（不捏造假說充數）",
 )
 
+# hypothesize v2（P4 §4.2(4)：falsification_test 結構化三欄 + primary_axis）。
+# 為什麼 bump v2 而非改 v1：契約 frozen——D3 歷史 row 引用 v1 不可變（versioned 鐵律）；
+# v1 保留供血緣回放，TOML stanza 的 prompt_contract_ref 同 commit 指 v2。
+# v2 delta（QC FIX-1.2/1.3 + MIT ratify #4 的契約面）：
+#   - falsification_test 從自由字串改為 {null_hypothesis, test_statistic, reject_condition}
+#     三欄結構（pre-registration V137 prh_falsification_chk 兜底；guard clause F 驗非空；
+#     math gate fail 時三欄入 dead-mode lesson = novelty 自饋失敗庫的可檢索證偽紀錄）。
+#   - 每假說必宣告 primary_axis ∈ signal_axes_used（wealth family = capability:primary_axis，
+#     MIT #4——拒 axes 組合鑄幣面；guard clause F 強制）。
+_ML_ADVISORY_HYPOTHESIZE_CONTRACT_V2 = PromptContract(
+    contract_ref="ml_advisory.hypothesize.v2",
+    contract_ver="ml_advisory_hypothesize.v2",
+    output_schema_ref="ml_advisory.v1",
+    schema_ver=_ML_ADVISORY_SCHEMA_VER,
+    role="ML feature-hypothesis proposer（advisory-only；pre-registerable + falsifiable；asserts NO alpha）",
+    template=(
+        "You are a deterministic feature-hypothesis proposer for a crypto trading research "
+        "system. You are given a completed training run's metrics, the available signal axes, "
+        "and the regime label. Your job is to PROPOSE pre-registerable feature hypotheses for "
+        "a downstream DETERMINISTIC math gate to validate. You do NOT validate them.\n"
+        "HARD CONSTRAINTS:\n"
+        "- You make NO alpha claim, NO edge claim, and NO promotion-readiness claim. A "
+        "downstream deterministic math gate (beta-neutrality B1, DSR, PBO, leak-typing, "
+        "trade-count) is the ONLY validator. You only propose what to test.\n"
+        "- Each hypothesis MUST carry: a concrete economic mechanism (a non-empty causal "
+        "story for why an edge could exist), a STRUCTURED falsification_test object with "
+        "three non-empty fields (null_hypothesis: the precise claim that the edge does NOT "
+        "exist; test_statistic: the deterministic statistic that adjudicates it; "
+        "reject_condition: the exact condition under which the hypothesis is proven wrong), "
+        "signal_axes_used (a subset of the provided available signal axes — do NOT invent "
+        "axes), a primary_axis (exactly one member of signal_axes_used naming the dominant "
+        "signal source — it determines the FDR wealth family being charged), an "
+        "expected_direction, and a beta_neutralization_plan (how the candidate would be "
+        "made orthogonal to BTC and the altcap basket).\n"
+        "- An empty or hand-wavy mechanism is curve-fitting and will be rejected. A "
+        "free-text falsification_test (not the three-field object) will be rejected.\n"
+        "- A bull-only / rally-dominated / single-regime observation is a regime-bet / "
+        "learning-only basis, NOT a promotion basis; mark such hypotheses with a regime_caveat.\n"
+        "Respond with ONLY a compact JSON object: "
+        '{"mode":"hypothesize","signal_axes_used":["..."],"feature_hypotheses":['
+        '{"hid":"...","statement":"...","mechanism":"...",'
+        '"falsification_test":{"null_hypothesis":"...","test_statistic":"...",'
+        '"reject_condition":"..."},"primary_axis":"...","signal_axes_used":["..."],'
+        '"expected_direction":"long|short|neutral","beta_neutralization_plan":"..."}],'
+        '"backlog_items":["..."]}'
+    ),
+    constraints=(
+        "ALL output is advisory only（direction=neutral；AI≠命令，須經 Decision Lease + 風控）",
+        "asserts NO alpha（hypothesize 只「提案」，不作 promotion-relevant alpha 斷言）",
+        "the math gate is the ONLY alpha validator（B1+DSR+PBO+leak+Q1；LLM 永不驗 alpha）",
+        "each hypothesis needs economic mechanism + structured falsification_test 三欄（缺 = guard reject）",
+        "primary_axis ∈ signal_axes_used（FDR wealth family 錨點；捏造軸 → guard reject）",
+        "signal_axes_used ⊆ available_signal_axes（捏造軸 → guard reject）",
+        "bull-only = regime-bet/learning-only（Alpha Evidence Governance；須 regime_caveat）",
+        "0 new live authority（pass-verdict → backlog；晉升人工 demo_stage1=expand=MANUAL）",
+    ),
+    uncertainty_rule="無可信機制可提 → 回空 feature_hypotheses（不捏造假說充數）",
+)
+
 _PROMPT_CONTRACTS: dict[str, PromptContract] = {
     _MANUAL_CONTRACT.contract_ref: _MANUAL_CONTRACT,
     _ML_ADVISORY_DIAGNOSE_CONTRACT.contract_ref: _ML_ADVISORY_DIAGNOSE_CONTRACT,
     _ML_ADVISORY_INTERPRET_CONTRACT.contract_ref: _ML_ADVISORY_INTERPRET_CONTRACT,
     _ML_ADVISORY_HYPOTHESIZE_CONTRACT.contract_ref: _ML_ADVISORY_HYPOTHESIZE_CONTRACT,
+    _ML_ADVISORY_HYPOTHESIZE_CONTRACT_V2.contract_ref: _ML_ADVISORY_HYPOTHESIZE_CONTRACT_V2,
 }
 
 _OUTPUT_SCHEMAS: dict[str, OutputSchema] = {
