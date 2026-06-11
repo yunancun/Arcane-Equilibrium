@@ -100,6 +100,8 @@ fn record_pre_risk_rejection(
     price: f64,
     scanner_ctx: Option<&IntentScannerContext>,
     scanner_gate: Option<&ScannerGateAudit>,
+    // P1-BB-REVERSION-REGIME-OBSERVABILITY：gate 同 tick 的 Hurst 判定，純透傳。
+    hurst: Option<&openclaw_core::indicators::HurstResult>,
     reason: &str,
 ) {
     push_display_intent(
@@ -121,6 +123,7 @@ fn record_pre_risk_rejection(
         em,
         scanner_ctx,
         scanner_gate,
+        hurst,
     );
     let verdict_info = crate::intent_processor::VerdictInfo::rejected(reason.to_string());
     persist_verdict(trading_tx, em, &intent.symbol, ts_ms, &verdict_info, em);
@@ -554,6 +557,7 @@ impl TickPipeline {
                                     event.last_price,
                                     scanner_ctx.as_ref(),
                                     Some(&scanner_gate_audit),
+                                    indicators.and_then(|i| i.hurst.as_ref()),
                                     &reason,
                                 );
 
@@ -757,6 +761,7 @@ impl TickPipeline {
                                     em,
                                     scanner_ctx.as_ref(),
                                     Some(&scanner_gate_audit),
+                                    indicators.and_then(|i| i.hurst.as_ref()),
                                 );
 
                                 // W-AUDIT-4b-M1 split (V082)：intent-only emit
@@ -1063,6 +1068,7 @@ impl TickPipeline {
                                     em,
                                     scanner_ctx.as_ref(),
                                     Some(&scanner_gate_audit),
+                                    indicators.and_then(|i| i.hurst.as_ref()),
                                 );
 
                                 // W-AUDIT-4b-M1 split (V082)：intent-only emit

@@ -402,7 +402,12 @@ pub(crate) fn persist_strategy_signal(
 
 /// Persist an approved intent to the trading writer channel.
 /// 將已批准的意圖持久化到交易寫入器通道。
+///
+/// `hurst`：gate 同 tick 消費的 Hurst regime 判定（`IndicatorSnapshot.hurst`
+/// 共享引用，純值搬運零重算）。缺失（暖機期/資料不足）映 JSON null ——
+/// fail-soft，絕不擋 intent 持久化或執行（P1-BB-REVERSION-REGIME-OBSERVABILITY）。
 #[inline]
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn persist_intent(
     trading_tx: &Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
     em: &str,
@@ -415,14 +420,17 @@ pub(crate) fn persist_intent(
     engine_mode: &str,
     scanner: Option<&IntentScannerContext>,
     scanner_gate: Option<&ScannerGateAudit>,
+    hurst: Option<&openclaw_core::indicators::HurstResult>,
 ) {
     if let Some(ref tx) = trading_tx {
         // FUP-8: populate details so trading.intents.details stops being 100% NULL.
         // Currently carries only what OrderIntent exposes (strategy + confidence);
-        // edge/funding_rate/basis/regime will be added once G-1 Strategist wires
+        // edge/funding_rate/basis will be added once G-1 Strategist wires
         // those fields into OrderIntent. Root principle #8「交易可解釋」requires
         // at minimum the strategy identifier + confidence score to be persisted.
         // FUP-8：填充 details 避免 trading.intents.details 100% NULL。
+        // 2026-06-11 更新：regime 已由 dispatch 層 hurst 參數搬運落地
+        // （hurst_label/hurst_value 兩鍵，見下），無須等 OrderIntent 改動。
         //
         // Sentinel guard (safety net post-Phase 2). As of FUP-8 Phase 2 both paper
         // and exchange callers pass `approved_qty` = post-Kelly/P1 sized qty, so
@@ -488,6 +496,15 @@ pub(crate) fn persist_intent(
             "time_in_force": intent.time_in_force.map(|tif| tif.as_str()),
             "post_only": matches!(intent.time_in_force, Some(crate::order_manager::TimeInForce::PostOnly)),
             "maker_timeout_ms": intent.maker_timeout_ms,
+            // P1-BB-REVERSION-REGIME-OBSERVABILITY（2026-06-11）：持久化 gate 同
+            // tick 消費的 Hurst regime 判定，讓 QA 可正面驗證 mean_reverting hard
+            // gate（如 bb_reversion Track B fix 324001c3）fire 時的 regime 是什麼。
+            // 值域 = HurstResult.regime legacy 字串原樣（"mean_reverting"|"trending"
+            // |"random_walk"）；缺失映 null（誠實，不 fabricate）；non-finite f64
+            // 由 serde_json 映 null（不 panic）。hurst_ 前綴釘死軸別，與 scanner
+            // 的 market_regime（趨勢/震盪軸）、AEG main_regime（日線研究軸）區隔。
+            "hurst_label": hurst.map(|h| h.regime.as_str()),
+            "hurst_value": hurst.map(|h| h.hurst),
             "signal_id": signal_id,
             "context_id": context_id,
             "scanner": scanner_details,
