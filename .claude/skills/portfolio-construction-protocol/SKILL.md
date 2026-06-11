@@ -1,6 +1,6 @@
 ---
 name: portfolio-construction-protocol
-description: 組合構建與資金管理手冊 — Kelly fractional 四層、Risk parity、相關性與因子分析、VaR/CVaR/EVT、Stress test、Risk decomposition、Drawdown control、Live 階段績效歸因。QC agent 主用。
+description: QC agent 主用：多策略資金分配、sizing 設計、組合級風險評估、drawdown 降倉決策、live PnL 偏離 backtest 歸因時讀；新策略/新 symbol 加入前必過。
 allowed-tools: Read, Grep, Glob, WebSearch
 ---
 

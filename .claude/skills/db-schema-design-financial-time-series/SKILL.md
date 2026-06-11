@@ -1,6 +1,6 @@
 ---
 name: db-schema-design-financial-time-series
-description: 金融時序資料庫 schema 設計 — TimescaleDB hypertable / partition / compression / hot-path index / engine_mode 隔離 / Guard A/B/C migration 規範 / V001-V024 lessons。MIT agent 主用。
+description: MIT agent 主用：設計新 ML/trading 表、寫 V### migration、規劃 hypertable/chunk、PG 慢查詢或 migration silent-noop 排查時讀。
 allowed-tools: Read, Grep, Glob, Bash
 ---
 

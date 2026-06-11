@@ -1,6 +1,6 @@
 ---
 name: data-drift-detection
-description: 資料漂移偵測 — Distribution shift / Concept drift / Population Stability Index (PSI) / KL divergence / KS test / Wasserstein distance；live 階段 ML 模型監控 SOP。MIT agent 主用。
+description: MIT agent 主用：懷疑 live ML 模型輸入分布漂移、預測質量退化、或設計 drift 監控時讀。
 allowed-tools: Read, Grep, Glob, Bash
 ---
 

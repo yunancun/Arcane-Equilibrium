@@ -1,6 +1,6 @@
 ---
 name: ml-pipeline-maturity-audit
-description: ML pipeline 成熟度審計 — 5 階段（Foundation / Skeleton / Shadow / Canary / Production）+ 4 維度（writer-spawn / consumer-exists / row-accumulation / decision-impact）評級框架。MIT agent 主用，避免「表存在 = pipeline live」假象。
+description: MIT agent 主用：評估 ML pipeline 真實成熟度與接線狀態、驗證 dormant/shadow/canary 宣稱、phase launch 前 readiness、或疑「表存在=pipeline live」假象時讀。
 allowed-tools: Read, Grep, Glob, Bash
 ---
 

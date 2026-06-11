@@ -1,6 +1,6 @@
 ---
 name: ux-checklist
-description: 交易系統 GUI 可用性 / 認知負荷 / 錯誤狀態 / 防誤觸 audit；A3 agent 純審查不寫代碼。
+description: A3 agent 純審查不寫碼：GUI UX/可用性審計、新 tab/modal/表單上線前、Live GUI readiness、或操作流被回報易誤操作/看不懂時讀。
 allowed-tools: Read, Grep, Glob
 ---
 

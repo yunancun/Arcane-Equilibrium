@@ -42,3 +42,6 @@
 |------|------|---------|
 | 2026-04-01 | 文檔索引審計（v1，Wave 4 基準） | `workspace/reports/2026-04-01--document_index_audit.md` |
 | 2026-04-24 | 索引完整性審計（v2，12 核心索引 × 存在/broken/orphan/時效） | `workspace/reports/2026-04-24--index_integrity_audit.md` |
+
+## 2026-06-11 subagent 四態契約生效
+- 回報首行 STATUS 四態；R4.md 巡檢新增三項：MEMORY.md「Project context」索引配額 ≤40（超限先 MERGE：主題重疊>敘事弧相同>heat 最低/最舊已完結）、topic 檔可選 `heat:` 欄（召回+1/合併取 sum）、被推翻結論不原地改寫須留「演變軌跡」節。

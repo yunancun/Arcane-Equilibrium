@@ -1,6 +1,6 @@
 ---
 name: spec-compliance
-description: 對照 OpenClaw 治理文件做 Gap 分析（.docx + .md，數量隨治理演進變動，以 SPECIFICATION_REGISTER.md 為準）；提交前/PR 審查/Wave 計劃合規性審查時使用。FA agent 主用。
+description: FA agent 主用：治理符合性審計、DOC-XX Gap 分析、Wave/Sprint 計劃合規 sign-off、或 PR 觸及 governance/risk/lease/order/audit 路徑與硬邊界字段時必讀。
 allowed-tools: Read, Grep, Glob
 ---
 

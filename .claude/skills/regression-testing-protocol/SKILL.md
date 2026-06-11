@@ -1,6 +1,6 @@
 ---
 name: regression-testing-protocol
-description: 回歸測試 SOP — 測試基準線追蹤、不刪測試遮蓋失敗、並發測試、跨語言浮點 1e-4 容差、SLA 壓測、mock 不掩蓋邏輯、Rust + Python 雙引擎測試。E4 agent 主用。
+description: E4 agent 主用：跑回歸/驗收測試、報告測試計數、新增或改動測試檔、或測試結果與基準線有出入時必讀。
 allowed-tools: Read, Grep, Glob, Bash
 ---
 

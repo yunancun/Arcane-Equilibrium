@@ -1,6 +1,6 @@
 ---
 name: pr-adversarial-review
-description: PR / 代碼變更對抗審核 SOP — 假設 E1 寫錯找 root cause / race / leakage / shortcut；senior + FA standard；E2 主用，發現 issue 退回 E1 不代寫。
+description: E2 agent 主用：審任何 E1/E1a 代碼改動（E4 回歸前必跑）、PR diff/commit/staged 變更審查時必讀；發現 issue 退回 E1 不代寫。
 allowed-tools: Read, Grep, Glob, Bash
 ---
 

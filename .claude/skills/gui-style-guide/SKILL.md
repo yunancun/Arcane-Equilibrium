@@ -1,6 +1,6 @@
 ---
 name: gui-style-guide
-description: OpenClaw Control Console GUI style and interaction guide; E1a agent primary skill. Uses README-listed tabs and the existing vanilla HTML/JS/CSS stack.
+description: E1a agent 主用：新增或改動 Control Console GUI 元件、Tab 改版、修改前端 static 檔，或對 GUI 做風格與互動審查時必讀。
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 

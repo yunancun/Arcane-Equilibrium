@@ -1,6 +1,6 @@
 ---
 name: token-cost-analysis
-description: Layer 2 AI 推理（Ollama L1 / Claude L2 / LM Studio）token 用量、成本歸因、cost_edge_ratio 監控；AI-E agent 純分析。
+description: AI-E agent 純分析：AI token 成本審計、cost_edge_ratio 評估、Layer 2 預算超標、月度成本回顧、新 L2 工具上線前 cost projection 時讀。
 allowed-tools: Read, Grep, Glob, Bash
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: 16-root-principles-checklist
-description: 16 條根原則逐條 + 9 條安全不變量 + 硬邊界守護；CC agent 對代碼/設計/計劃做合規審查時使用。
+description: CC agent 合規審查時必讀：任何觸及執行權限/live_execution_allowed/system_mode 的代碼、設計、Sprint 計劃，或全系統審計；E2 發現可疑硬邊界改動時亦讀。
 allowed-tools: Read, Grep, Glob
 ---
 

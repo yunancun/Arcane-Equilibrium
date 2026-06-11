@@ -1,6 +1,6 @@
 ---
 name: bybit-policy-compliance
-description: Bybit 平台政策合規 — ToS / 地理禁區 / KYC / API 用戶協議 / Rate limit / Broker rebate / IP whitelist / UTA / Master-Sub account / 公告追蹤節奏。BB agent 主用，與 crypto-microstructure-knowledge 互補（後者技術微結構，本檔政策面）。
+description: BB agent 主用：新 Bybit endpoint/功能接通前合規 review、API 鎖/帳戶異常、rate limit 警報、政策公告變動、新地區部署評估時讀（微結構歸 crypto-microstructure-knowledge）。
 allowed-tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 ---
 

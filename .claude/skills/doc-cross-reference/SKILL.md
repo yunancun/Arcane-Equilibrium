@@ -1,6 +1,6 @@
 ---
 name: doc-cross-reference
-description: 治理文件交叉引用一致性審計（DOC-XX / SM-XX / EX-XX / P0-XX 編號 + 索引 + 鏈接 / README ↔ TODO ↔ memory 漂移偵測）；R4 agent 純審查。
+description: R4 agent 純審查：文檔索引一致性、DOC-XX 等編號引用漂移、README/TODO/memory 邊界衛生、歸檔後索引驗證、引用 path 失效排查時讀。
 allowed-tools: Read, Grep, Glob
 ---
 

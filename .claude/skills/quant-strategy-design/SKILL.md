@@ -1,6 +1,6 @@
 ---
 name: quant-strategy-design
-description: 量化交易策略「設計」視角（先用本 skill）→ math-model-audit（數學審計）→ walk-forward-validation-protocol（驗證），三者順序遞進不可顛倒；Alpha 來源 framework、信號融合、衰減分析、多時間框架、行為金融異常、replication crisis 警覺。QC agent 主用。
+description: QC agent 主用：新策略提案、alpha hypothesis、信號設計、paper/KOL 異常評估、edge 衰減接班評估時先讀（三段鏈之首 → math-model-audit → walk-forward-validation-protocol，順序不可顛倒）。
 allowed-tools: Read, Grep, Glob, WebSearch
 ---
 

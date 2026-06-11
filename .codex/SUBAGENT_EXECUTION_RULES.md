@@ -1,6 +1,6 @@
 # Codex Sub-Agent Execution Rules
 
-Last updated: 2026-05-16
+Last updated: 2026-06-11
 
 ## Purpose
 
@@ -55,6 +55,15 @@ PM must not:
 - security / deploy / runtime work: `PM -> E3 -> BB if exchange-facing -> PM`
 
 If a chain is shortened, PM must say which role was skipped and why.
+
+## Completion contract (mirror)
+
+Sub-agent final status uses the four-state contract:
+`DONE` / `DONE_WITH_CONCERNS` / `NEEDS_CONTEXT` / `BLOCKED`.
+On `BLOCKED`, escalate by adding context, switching model, splitting the task,
+or raising to the operator — no bare same-model retry. Saying "cannot do it"
+is always acceptable. Canonical: `.claude/agents/PM.md`; this section only
+mirrors the pointer.
 
 ## Operator safety rule
 

@@ -1,6 +1,6 @@
 ---
 name: feature-engineering-protocol
-description: ML 特徵工程嚴謹性審計 — Look-ahead bias / target leakage / survivorship bias / cross-section leakage / time-zone leakage / re-sample boundary leak。MIT agent 主用，含偵測 SQL 範本。
+description: MIT agent 主用：設計 feature pipeline、準備 ML 訓練 dataset、新 feature 表上線前、或 IS 漂亮 OOS 崩（疑 leakage）的 RCA 時必讀。
 allowed-tools: Read, Grep, Glob, Bash
 ---
 

@@ -1,6 +1,6 @@
 ---
 name: owasp-checklist
-description: OWASP Top 10 (2021) 項目化審計，針對 OpenClaw FastAPI / Rust IPC / PostgreSQL / Bybit REST 的 attack surface 量身。E3 agent 主用。
+description: E3 agent 主用：安全審計、PR pre-merge security gate、新增 API 路由/IPC handler/webhook、或改動觸及認證、密鑰、SQL、subprocess 時必讀。
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
