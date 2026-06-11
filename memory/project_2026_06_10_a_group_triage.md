@@ -47,3 +47,13 @@ A1 後續鏈當日走完:E1 `a3d27729`→E2 RETURN(1H/1M/1L)→E1-fix `cf1b9320`
 ## [06-11 追加] P5-SM S-gate 基建全鏈完成,shipped on main
 
 鏈(四棒 E1 接力,兩次被殺一次限額中斷,WIP 快照協議全程零浪費):E1 Wave1-3(`58ad4dba`→`9eba5a40`)→E2 RETURN(2 HIGH 假綠 probe 實證:crash-loop dup rollover 稀釋 94.8%→99.21% 假 PASS;canary 攢滿 500 probe 後死亡 31h 全黑仍 PASS 1.0)→E1-fix `0ce0874c`(prev-epoch 快照去重+30min heartbeat+[82] 10b 四子軸;PM 親補測試 256/0+V137 dry-run 重做)→re-E2 ACCEPT(Probe A/D 重放翻 FAIL+反去重驗證)→E4 PASS `d7a9eacf`(兩端 0 新 fail+LOW-A 補釘;**1s 過殺壓測:真 engine IPC 240/240、H0 p50/p99/p999 三相 byte-identical、RTT p99 1.1ms=fire 機率零影響實證**)→CC APPROVE A(0 BLOCKER,smoke mutating 面五重圈欄)→merge `ca80d084`(SCRIPT_INDEX+E1/memory 雙衝突=index 檔頭行合併+EOF 雙保留)。dormant 上線:kill-switch OFF+V137 未 apply。PM 濾裁:CC LOW-1 接受(step-(iv) 具名+SOP 三處)、LOW-2 採部署註記(移 flag 後 72h [82] FAIL 屬預期)、INFO×3 記錄。soak 啟動 SOP 入 TODO row;可與 OPS-2 rebuild 合併一次 restart 活化。教訓:①E2 兩輪「probe 實證假綠」範式(構造對抗數據親跑 gate 算術)比靜態審查抓得深,值得固化;②接力棒協議(WIP 快照 commit+push origin)讓三次中斷零浪費。
+
+---
+
+## [06-11 追加 2] 部署雙活化+48h soak 啟動+regime 觀測欄全鏈
+
+**04:00 deploy(PM 代跑,operator 指令;C-C=operator override)**:一次 `restart_all --rebuild` 雙活化——OPS-2 cutover 生效(新 binary,0 fallback 字串)+V137 applied(136→137)+**48h soak 啟動**(兩 flag 寫 env 檔;canary 首拍+heartbeat 已流;`[82]` 正確報 accumulating probes=1;**錨點 2026-06-11 03:59:37+02,gate ~06-13 04:00**);AUTO_MIGRATE 用後即復原 0。剩:C-B operator renew 留證。
+
+**regime 觀測欄全鏈同日走完(全前台駐留,零盲跑)**:PA(抓 4 處 brief-vs-現實:gate 消費瞬時 hurst,HysteresisDetector 三環境 dormant;regime_snapshots=0 producer 死管道)→E1 `52727d82`(~25 行,dispatch 層純值搬運,fail-soft)→E2 PASS→E4 PASS(Linux release stress base-vs-HEAD 重疊)→merge `6628b4cf`。生效待下次 rebuild(建議 soak gate 後,避免 epoch 噪音);owed-post-deploy PA §3 SQL。
+
+**教訓**:①E4 抓到「共享 CARGO_TARGET_DIR 跨 worktree 靜默重用舊 binary→HEAD 測試 0 執行假數字」——tripwire 三件套(delta 對不上/新測名 grep run-log/binary hash 對比),base-vs-HEAD 必須獨立 fresh target dir。②前台串行 agent(PA→E1→E2→E4 各 15-26min)=turn 不落地,經 BG idle-kill 事故日驗證為最穩派發模式,代價=主會話駐留。
