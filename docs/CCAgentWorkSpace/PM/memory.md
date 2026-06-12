@@ -261,6 +261,11 @@
 - `2b880f5d` 讓 `aeg_s3_gate_b_preflight` 讀 local `gate_b_watch_latest.json`，輸出 `gate_watch.operator_action` 與 `probe_command_hints`；`WATCH_ONLY` wait-only，`ACTIONABLE_*` 才給 isolated probe hint，stale/malformed/source failure fail-closed。
 - Mac/Linux focused regression 各 `62 passed`；Linux smoke 讀 live watch artifact 得 `WATCH_ONLY`、23 candidates、0 alertable/start/schedule、operator_action=`WAIT_FOR_ACTIONABLE_WATCH`、old Gate-B sample_count=2。
 
+## 2026-06-12 AEG-S3 Gate-B preflight command guard
+
+- `289fcbe8` 將 Gate-B preflight 升 v0.3：`recommended_command` 增加 operator guard，wait-only + sample<30 時輸出 `operator_recommended=false` / `HOLD_WAIT_FOR_ACTIONABLE_WATCH`，防止舊 full-chain shell 被誤當當前 action。
+- Linux 同步後 focused preflight 8 passed；live smoke 仍 `WATCH_ONLY`、23 candidates、0 alertable、sample_count=2；P5-SM `[82]` 2026-06-12T21:00Z 為 `43.0h<48h`、probes=1290，約 2026-06-13 03:59:37+02 到期。
+
 ## 2026-06-12 P5-SM [81]/[82] selector fix
 
 - `bf673cdc` 修好 `passive_wait_healthcheck.runner --check 81 --check 82` narrow routing；只改 CLI selector dispatch，不改 `[81]/[82]` 判定邏輯。

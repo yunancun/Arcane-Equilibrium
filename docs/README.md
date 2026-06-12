@@ -159,6 +159,13 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 
 ## 文档索引 (Document Index)
 
+### 2026-06-12 AEG-S3 Gate-B watch / preflight
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-12--aeg_s3_gate_b_preflight_command_guard.md` | PM checkpoint: Gate-B preflight v0.3 adds `recommended_command` operator guard；current live artifact remains `WATCH_ONLY`, sample_count=2, `HOLD_WAIT_FOR_ACTIONABLE_WATCH`; includes P5-SM `[82]` countdown refresh。 |
+| `CCAgentWorkSpace/Operator/2026-06-12--aeg_s3_gate_b_preflight_command_guard.md` | Operator brief: do not run old Gate-B full-chain command or start probe while latest artifact is wait-only；`[82]` remains accumulating until about 2026-06-13 03:59:37+02。 |
+
 ### 2026-06-12 Incident-policy producer closure
 
 | 文件 | 内容 |
