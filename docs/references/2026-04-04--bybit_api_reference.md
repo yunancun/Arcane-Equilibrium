@@ -1114,6 +1114,33 @@ PostOnly Limit 下單時若 limit price 偏離 mid 不足 → 觸 BBO spread 內
 
 **Non-training surface invariant**：5 個 close_maker 欄位是 ops audit metadata，**禁餵任何 ML training pipeline**（LinUCB / scorer / quantile / MLDE / DL3）。E3 grep guard rule 永久化。詳 spec §4.4 + §三 §五 `replay.simulated_fills 'synthetic_replay'` precedent。
 
+### 1.11 Announcement — 公告（哨兵 read-only，2026-06-11 NEW）
+
+公開端點（無需認證、不經簽名 client、零 credential 面），無 per-UID rate group，僅受 per-IP 600 req/5s 總閘。消費者：公告增量哨兵（cron 30min，alert-only，絕不自動觸發交易動作）。
+
+---
+
+#### get_announcements
+- **服務**: 拉取 Bybit 官方公告中心列表（上幣/下架/維護窗/產品更新/活動等 8 類）。哨兵增量偵測+分級告警；P0=delistings/maintenance_updates（+escalated product_updates）。
+- **調用**: `helper_scripts/canary/bybit_announcement_sentinel.py::fetch_announcements`（cron wrapper：`helper_scripts/cron/bybit_announcement_sentinel_cron.sh`，30min `7,37 * * * *`）
+- **Bybit 路徑**: `GET /v5/announcements/index`（host: api.bybit.com；public 無 auth）
+- **Input**:
+  - `locale: &str` — **必填**（"en-US" 鎖定；19 語系枚舉）
+  - `type: Option<&str>` — 8 枚舉：new_crypto / latest_bybit_news / delistings / latest_activities / product_updates / maintenance_updates / new_fiat_listings / other（哨兵常態不傳，本地分類）
+  - `tag: Option<&str>` — tag 過濾（enum 混多語系，僅用英文 tag）
+  - `page: Option<u32>` — 默認 1
+  - `limit: Option<u32>` — 默認 20；實測 100 被接受（2026-06-11；官方未記 max）
+- **Output**: `result.total` + `result.list[]`：
+  `title` / `description`（外部文本，餵 LLM 必 `<untrusted_content>` 圍欄）/ `type{title,key}` / `tags[]` / `url`（尾帶 `blt<hex>` CMS entry UID，唯一穩定 id 來源）/ `dateTimestamp`（ms，編輯日，**列表排序鍵 desc**）/ `publishTime`（ms，實際發布，**與排序非單調**；2023 doc 例無此欄但 live 有，Option 容錯）/ `startDateTimestamp` / `endDateTimestamp`（ms，僅 type.key=="latest_activities" 語意有效）
+- **陷阱**:
+  1. **無獨立 id 欄位** — 去重鍵=正規化 url（輔助提取 `blt[0-9a-f]+`）；禁 dateTimestamp/publishTime watermark（排序 inversion 實證 2026-06-11），增量=seen-set 差集。
+  2. 官方 doc 欄位表拼寫 `startDataTimestamp` 疑 typo；live 實證 `startDateTimestamp`，parser 以 live 為準。
+  3. timestamp ms parse-fail → reject row，不落 epoch。
+  4. 403 "access too frequent" = IP ban 10min；哨兵 fail-quiet skip cycle，禁 tight retry。
+  5. live 實證（2026-06-11 煙測）：存在 `type.key==""` 條目（type.title="Spot" 行銷類）— 哨兵未知桶寬網歸 P1（寧誤升不漏降）。
+- **關聯程式**: `helper_scripts/canary/bybit_announcement_sentinel.py`（+ 測試 `test_bybit_announcement_sentinel.py`）、`helper_scripts/cron/bybit_announcement_sentinel_cron.sh`、`helper_scripts/cron/install_bybit_announcement_sentinel_cron.sh`；告警 emitter=`helper_scripts/canary/engine_watchdog.py::_send_alert_best_effort`（本地耐久 sink `<data_dir>/alerts/alerts.jsonl`，無 creds 也必達）
+- **設計 SSOT**: `docs/CCAgentWorkSpace/BB/workspace/reports/2026-06-11--bybit_announcement_sentinel_advisory.md`
+
 ---
 
 ## 2. WebSocket
@@ -1303,6 +1330,7 @@ pub struct ShadowOrderRequest {
 | Market | 120 req/s | `/v5/market/*`, `/v5/spot-lever-token/*` | per IP 端 600/5s |
 | Asset | 5 req/s | `/v5/asset/*`, `/v5/spot-margin*` | 含 transfer / coin-info / borrow |
 | Other | 10 req/s | 其餘 | UTA 升級 / dcp 等 |
+| Announcement | 無 per-UID group（public） | `/v5/announcements/index` | 僅 per-IP 600 req/5s；哨兵 1 req/30min，≈0.0001% |
 
 分組追蹤：`RateLimitGroup::from_path(path)` 自動分類。
 查詢剩餘：`client.is_group_near_limit(group, threshold)` / `client.rate_limit_remaining()`
