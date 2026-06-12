@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v136 AEG-S3 Gate-B full-matrix PBO readiness；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v137 AEG-S3 Gate-B preflight locator；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v137 增量（2026-06-12 AEG-S3 Gate-B preflight locator）**：新增 AEG-S3 Gate-B preflight locator code checkpoints `44a30afa` / `f4a58b3c`：`helper_scripts/research/aeg_s3_gate_b_preflight` 只掃本地 artifact，定位 Gate-B run、FND2、regime artifacts，檢查必需檔案與語義 summary，preview listing sample_count / PBO 狀態，並輸出可直接執行的 full-chain `aeg_s3_gate_b_chain.harness` command；樣本不足回 `READY_BUT_SAMPLE_BELOW_GATE`，缺 artifact/PBO 則 blocked。Mac/Linux focused regression `58 passed` + compileall OK；Mac `rg` / Linux `grep -R -E` forbidden-route search no hits。Linux explicit smoke `aeg_s3_gate_b_preflight_explicit_final_20260612` 用 old Gate-B + `fnd2_18mo_real_20260603` + `aeg_regime_smoke_20260605`，auto smoke `aeg_s3_gate_b_preflight_auto_final_20260612` 自動選 old Gate-B + `fnd2_18mo_real_20260603` + 最新有效 regime `l2_owed_v127_pop_20260610`；兩者皆 `READY_BUT_SAMPLE_BELOW_GATE`、sample_count=2、pbo_status=`produced_candidate_grid`、recommended command generated。結論：fresh Gate-B 後的手工找 artifact / 拼命令摩擦已降到 preflight 一步；舊 run 仍非 promotion，fresh Gate-B 仍需 `>=30` matched observations + E2/MIT/QC 審。
 
 **v136 增量（2026-06-12 AEG-S3 Gate-B full-matrix PBO readiness）**：新增 AEG-S3 Gate-B full formal matrix PBO regression checkpoint `235858f4`：`test_aeg_s3_gate_b_chain.py` 的 full-matrix 分支現在也帶 custom PBO grid，並斷言 Gate-B chain 的 `listing_pbo_status=produced_candidate_grid` 與 candidate rows `pbo_status=measured`，防止 PBO 只在 execution-only path 保持可用。Mac/Linux focused regression `54 passed`。Linux final true full formal smoke 用舊 Gate-B run `listing_24h_20260602_1847` + 真 FND2 `fnd2_18mo_real_20260603` + regime `aeg_regime_smoke_20260605` 產 artifact `aeg_s3_gate_b_chain_listing_pbo_formal_smoke_final_20260612`：listing_sample_count=2、execution_observation_count=2、listing_pbo_status=`produced_candidate_grid`、formal matrix row_count=12、coverage PASS、survivorship=`pit_fnd2_delisted_proof`、final labels 7 insufficient / 5 kill、chain_status=`COMPLETE_MATRIX_NON_PROMOTABLE`、reject=`sample_count_below_30`。結論：fresh Gate-B 後的 execution + event breadth + formal matrix + PBO 全鏈已可執行；舊 run 仍非 promotion，fresh Gate-B 仍需 `>=30` matched observations + E2/MIT/QC 審。
 
