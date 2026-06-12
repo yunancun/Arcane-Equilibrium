@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shlex
 from dataclasses import dataclass
+import datetime as dt
 import json
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -33,6 +34,13 @@ except ImportError:  # pragma: no cover
 GATE_B_REQUIRED_FILES = ("capture_lag.jsonl", "markout.jsonl", "ws_publictrade.jsonl")
 FND2_REQUIRED_FILES = ("universe.csv", "universe_summary.json")
 REGIME_REQUIRED_FILES = ("regime_labels.csv", "regime_summary.json")
+GATE_WATCH_ACTIONABLE_START = "ACTIONABLE_START_NOW"
+GATE_WATCH_ACTIONABLE_SCHEDULE = "ACTIONABLE_SCHEDULE"
+GATE_WATCH_OPERATOR_REVIEW = "OPERATOR_REVIEW"
+GATE_WATCH_WATCH_ONLY = "WATCH_ONLY"
+GATE_WATCH_NO_CANDIDATE = "NO_ACTIONABLE_CANDIDATE"
+GATE_WATCH_SOURCE_FAILURE = "SOURCE_FAILURE"
+PROBE_DURATION_SECONDS = 24 * 60 * 60
 
 
 @dataclass(frozen=True)
@@ -72,6 +80,10 @@ def default_gate_b_root() -> Path:
 
 def default_alpha_history_root() -> Path:
     return default_openclaw_root() / "alpha_history_runs"
+
+
+def default_gate_watch_latest_json() -> Path:
+    return default_openclaw_root() / "gate_b_watch" / "gate_b_watch_latest.json"
 
 
 def _dir_mtime(path: Path) -> float:
@@ -155,6 +167,231 @@ def _check(name: str, status: str, message: str, **extra: Any) -> dict[str, Any]
 
 def _quote_command(parts: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in parts)
+
+
+def _parse_utc(value: Any) -> Optional[dt.datetime]:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    raw = value.strip()
+    if raw.endswith("Z"):
+        raw = raw[:-1] + "+00:00"
+    try:
+        parsed = dt.datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def _safe_candidate_count(value: Any, name: str) -> int:
+    if isinstance(value, dict):
+        raw = value.get(name)
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def _gate_watch_probe_command(candidate: dict[str, Any]) -> dict[str, Any]:
+    symbol = str(candidate.get("symbol") or "unknown").lower()
+    event_date = str(
+        candidate.get("event_time_utc")
+        or candidate.get("launch_time_utc")
+        or ""
+    )[:10].replace("-", "")
+    suffix = event_date or "manual"
+    run_id = f"gate_b_{symbol}_{suffix}"
+    argv = [
+        "python3",
+        "helper_scripts/research/aeg_gate_b_probe.py",
+        "--duration-seconds",
+        str(PROBE_DURATION_SECONDS),
+        "--run-id",
+        run_id,
+    ]
+    return {
+        "symbol": candidate.get("symbol"),
+        "trigger_type": candidate.get("trigger_type"),
+        "recommended_action": candidate.get("recommended_action"),
+        "action_reason": candidate.get("action_reason"),
+        "event_time_utc": candidate.get("event_time_utc"),
+        "launch_time_utc": candidate.get("launch_time_utc"),
+        "suggested_probe": candidate.get("suggested_probe"),
+        "argv": argv,
+        "shell": "PYTHONPATH=helper_scripts/research:helper_scripts " + _quote_command(argv),
+    }
+
+
+def _candidate_digest(candidate: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "symbol": candidate.get("symbol"),
+        "source": candidate.get("source"),
+        "trigger_type": candidate.get("trigger_type"),
+        "priority": candidate.get("priority"),
+        "recommended_action": candidate.get("recommended_action"),
+        "action_reason": candidate.get("action_reason"),
+        "should_alert": candidate.get("should_alert"),
+        "status": candidate.get("status"),
+        "cur_auction_phase": candidate.get("cur_auction_phase"),
+        "event_time_utc": candidate.get("event_time_utc"),
+        "launch_time_utc": candidate.get("launch_time_utc"),
+        "publish_time_utc": candidate.get("publish_time_utc"),
+        "suggested_probe": candidate.get("suggested_probe"),
+        "title": candidate.get("title"),
+        "url": candidate.get("url"),
+    }
+
+
+def _operator_action_for_watch_status(status: str) -> tuple[str, str]:
+    if status == GATE_WATCH_ACTIONABLE_START:
+        return (
+            "START_ISOLATED_24H_PROBE",
+            "watcher_found_start_now_window_run_probe_then_preflight_full_chain",
+        )
+    if status == GATE_WATCH_ACTIONABLE_SCHEDULE:
+        return (
+            "SCHEDULE_ISOLATED_24H_PROBE",
+            "watcher_found_future_window_schedule_probe_then_preflight_full_chain",
+        )
+    if status == GATE_WATCH_OPERATOR_REVIEW:
+        return (
+            "OPERATOR_REVIEW_REQUIRED",
+            "watcher_found_candidate_that_needs_manual_review_before_probe",
+        )
+    if status == GATE_WATCH_WATCH_ONLY:
+        return (
+            "WAIT_FOR_ACTIONABLE_WATCH",
+            "watcher_has_only_non_alertable_conversion_watch_do_not_start_probe",
+        )
+    if status == GATE_WATCH_NO_CANDIDATE:
+        return (
+            "WAIT_FOR_FRESH_GATE_B_WINDOW",
+            "watcher_has_no_actionable_candidate_do_not_start_probe",
+        )
+    if status == GATE_WATCH_SOURCE_FAILURE:
+        return (
+            "FIX_WATCHER_SOURCE_HEALTH",
+            "watcher_sources_failed_do_not_start_probe_from_this_artifact",
+        )
+    return ("REVIEW_UNKNOWN_WATCH_STATUS", f"unknown_gate_watch_status:{status}")
+
+
+def analyze_gate_watch_latest(
+    *,
+    latest_json: Optional[str],
+    max_age_hours: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    explicit = bool(latest_json)
+    path = Path(latest_json) if latest_json else default_gate_watch_latest_json()
+    base = {
+        "path": str(path),
+        "explicit": explicit,
+        "present": path.exists(),
+        "max_age_hours": max_age_hours,
+        "policy": "local_gate_b_watch_artifact_only_no_network_no_probe_autostart",
+    }
+    if not path.exists():
+        status = "FAIL" if explicit else "WARN"
+        return {
+            **base,
+            "artifact_status": "MISSING",
+            "operator_action": "WATCH_ARTIFACT_MISSING",
+            "operator_message": "gate_b_watch_latest_json_missing",
+            "candidate_counts": {},
+            "top_candidates": [],
+            "probe_command_hints": [],
+        }, _check(
+            "gate_watch_latest",
+            status,
+            "gate_watch_latest_json_missing",
+            path=str(path),
+            explicit=explicit,
+        )
+
+    payload = _json_or_none(path)
+    if payload is None:
+        return {
+            **base,
+            "artifact_status": "MALFORMED",
+            "operator_action": "REVIEW_WATCH_ARTIFACT",
+            "operator_message": "gate_watch_latest_json_malformed",
+            "candidate_counts": {},
+            "top_candidates": [],
+            "probe_command_hints": [],
+        }, _check("gate_watch_latest", "FAIL", "gate_watch_latest_json_malformed", path=str(path))
+
+    generated = _parse_utc(payload.get("generated_at_utc"))
+    now = dt.datetime.now(dt.timezone.utc)
+    age_hours: Optional[float] = None
+    stale = False
+    if generated is None:
+        stale = True
+    else:
+        age_hours = max(0.0, (now - generated).total_seconds() / 3600.0)
+        stale = age_hours > max_age_hours
+
+    watch_status = str(payload.get("status") or "UNKNOWN")
+    operator_action, operator_message = _operator_action_for_watch_status(watch_status)
+    candidates = [
+        item for item in payload.get("candidates", [])
+        if isinstance(item, dict)
+    ]
+    actionable = [
+        candidate for candidate in candidates
+        if candidate.get("recommended_action") in {"START_GATE_B_NOW", "SCHEDULE_GATE_B_WINDOW", "OPERATOR_REVIEW"}
+    ]
+    probe_hints = [_gate_watch_probe_command(candidate) for candidate in actionable[:5]]
+    candidate_counts = payload.get("candidate_counts") if isinstance(payload.get("candidate_counts"), dict) else {}
+    summary = {
+        **base,
+        "artifact_status": watch_status,
+        "generated_at_utc": payload.get("generated_at_utc"),
+        "age_hours": age_hours,
+        "stale": stale,
+        "candidate_counts": {
+            "total": _safe_candidate_count(candidate_counts, "total"),
+            "alertable": _safe_candidate_count(candidate_counts, "alertable"),
+            "start_now": _safe_candidate_count(candidate_counts, "start_now"),
+            "schedule": _safe_candidate_count(candidate_counts, "schedule"),
+            "watch_only": _safe_candidate_count(candidate_counts, "watch_only"),
+        },
+        "alerts_sent": payload.get("alerts_sent"),
+        "source_health": payload.get("source_health"),
+        "operator_action": operator_action,
+        "operator_message": operator_message,
+        "top_candidates": [_candidate_digest(candidate) for candidate in candidates[:10]],
+        "probe_command_hints": probe_hints,
+        "probe_preconditions": payload.get("probe_preconditions"),
+        "boundary": payload.get("boundary"),
+    }
+    if stale:
+        return summary, _check(
+            "gate_watch_latest",
+            "FAIL",
+            "gate_watch_latest_json_stale_or_missing_generated_at",
+            path=str(path),
+            generated_at_utc=payload.get("generated_at_utc"),
+            age_hours=age_hours,
+            max_age_hours=max_age_hours,
+        )
+    if watch_status == GATE_WATCH_SOURCE_FAILURE:
+        return summary, _check(
+            "gate_watch_latest",
+            "FAIL",
+            "gate_watch_sources_failed",
+            path=str(path),
+            source_health=payload.get("source_health"),
+        )
+    return summary, _check(
+        "gate_watch_latest",
+        "PASS",
+        f"gate_watch_latest_status:{watch_status}",
+        path=str(path),
+        generated_at_utc=payload.get("generated_at_utc"),
+        operator_action=operator_action,
+    )
 
 
 def build_full_chain_command(
@@ -266,6 +503,8 @@ def build_preflight_summary(
     slippage_floor_bps: float,
     include_default_pbo_grid: bool,
     min_listing_samples: int,
+    gate_watch_latest_json: Optional[str],
+    gate_watch_max_age_hours: float,
 ) -> dict[str, Any]:
     alpha_root = Path(alpha_history_root) if alpha_history_root else default_alpha_history_root()
     out_root = Path(artifact_root) if artifact_root else alpha_root
@@ -290,6 +529,10 @@ def build_preflight_summary(
         required_files=REGIME_REQUIRED_FILES,
         validator=_valid_regime_dir,
     )
+    gate_watch, gate_watch_check = analyze_gate_watch_latest(
+        latest_json=gate_watch_latest_json,
+        max_age_hours=gate_watch_max_age_hours,
+    )
 
     checks: list[dict[str, Any]] = []
     for name, located in (("gate_b", gate_b), ("fnd2", fnd2), ("regime", regime)):
@@ -303,6 +546,7 @@ def build_preflight_summary(
                 path=str(located.path) if located.path is not None else None,
                 missing_files=located.missing_files,
             ))
+    checks.append(gate_watch_check)
 
     listing_preview: Optional[dict[str, Any]] = None
     if gate_b.present and gate_b.path is not None:
@@ -391,6 +635,7 @@ def build_preflight_summary(
             "fnd2": fnd2.to_summary(),
             "regime": regime.to_summary(),
         },
+        "gate_watch": gate_watch,
         "listing_preview": listing_preview,
         "checks": checks,
         "recommended_command": {
@@ -408,9 +653,11 @@ def build_preflight_summary(
             "slippage_floor_bps": slippage_floor_bps,
             "include_default_pbo_grid": include_default_pbo_grid,
             "min_listing_samples": min_listing_samples,
+            "gate_watch_max_age_hours": gate_watch_max_age_hours,
         },
         "notes": [
             "Preflight only inspects local artifacts and builds the recommended command.",
+            "Gate-B watcher input is a local artifact only; preflight never starts the probe.",
             "READY_BUT_SAMPLE_BELOW_GATE means the full command is runnable but not promotion-eligible.",
             "Full-chain completion is not promotion proof; E2/MIT/QC review remains required.",
         ],
@@ -424,4 +671,5 @@ __all__ = [
     "build_preflight_summary",
     "default_alpha_history_root",
     "default_gate_b_root",
+    "default_gate_watch_latest_json",
 ]
