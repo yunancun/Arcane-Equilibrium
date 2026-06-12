@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-05（TODO v118 Alpha-Edge robustness matrix selection-bias threshold checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v131 Gate-B autonomous watch；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v131 增量（2026-06-12 Gate-B autonomous watch）**：新增 Gate-B 專用 alert-only watcher `helper_scripts/canary/gate_b_watch.py`（code checkpoint `3675f651`）：每 30 分鐘掃 Bybit `new_crypto` 公告 page 1..3 + live `instruments-info?category=linear&status=PreLaunch`，把 Pre-Market / PreLaunch / convert-to-standard perpetual 轉成 `START_GATE_B_NOW` / `SCHEDULE_GATE_B_WINDOW` / `WATCH_CONVERSION` / stale 候選，輸出 `/tmp/openclaw/gate_b_watch/gate_b_watch_latest.json` + history/state，fresh/future/actionable 才發 `[GATE-B-WATCH]`。新增 tests（Gate-B watch + announcement sentinel focused = Mac 66 passed / Linux 66 passed）、cron wrapper/installer，Linux cron 已裝 `12,42 * * * *`；formal run 2026-06-12 09:43 UTC = `WATCH_ONLY`、23 candidates、0 alertable、0 start/schedule、唯一 live watch 是老 `BPUSDT` ContinuousTrading。無 CI、無 deploy/rebuild/restart、無 DB/auth/order/trading mutation；Gate-B 24h probe 仍需 operator 在 watcher alert 後手動啟動。
 
 **v124 增量（2026-06-10 AE 運行面改名 gate 立項）**：operator 評估後維持軟更名口徑（不立即改名：353 個 OPENCLAW_* env、~6,400 代碼處、8+ systemd、IPC/路徑/repo 名，風險收益不對稱），改名綁定 **Apple Silicon 遷移窗口強制執行**。落地：①完整遷移指引 `docs/execution_plan/2026-06-10--ae_runtime_rename_migration_guide.md`（波及面 2026-06-10 實測快照+命名約定+P0-P6 分階段+風險緩解+DONE 定義+工程量 ~2-3 週）；②§7 加 `P3-AE-RUNTIME-RENAME` gate 行（TODO 不展開步驟省 context）；③三處命名注記（rust/Cargo.toml、engine.toml、control_api main.py MODULE_NOTE）錨定「openclaw_*=歷史運行面名稱」；④禁令生效：改名 gate 前新代碼禁用 AE_*/ae_* 前綴（防雙前綴並存=最大 agent 誤解源）。
 
