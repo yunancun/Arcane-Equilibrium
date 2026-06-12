@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v135 AEG-S3 listing_fade PBO grid wiring；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v136 AEG-S3 Gate-B full-matrix PBO readiness；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v136 增量（2026-06-12 AEG-S3 Gate-B full-matrix PBO readiness）**：新增 AEG-S3 Gate-B full formal matrix PBO regression checkpoint `235858f4`：`test_aeg_s3_gate_b_chain.py` 的 full-matrix 分支現在也帶 custom PBO grid，並斷言 Gate-B chain 的 `listing_pbo_status=produced_candidate_grid` 與 candidate rows `pbo_status=measured`，防止 PBO 只在 execution-only path 保持可用。Mac/Linux focused regression `54 passed`。Linux final true full formal smoke 用舊 Gate-B run `listing_24h_20260602_1847` + 真 FND2 `fnd2_18mo_real_20260603` + regime `aeg_regime_smoke_20260605` 產 artifact `aeg_s3_gate_b_chain_listing_pbo_formal_smoke_final_20260612`：listing_sample_count=2、execution_observation_count=2、listing_pbo_status=`produced_candidate_grid`、formal matrix row_count=12、coverage PASS、survivorship=`pit_fnd2_delisted_proof`、final labels 7 insufficient / 5 kill、chain_status=`COMPLETE_MATRIX_NON_PROMOTABLE`、reject=`sample_count_below_30`。結論：fresh Gate-B 後的 execution + event breadth + formal matrix + PBO 全鏈已可執行；舊 run 仍非 promotion，fresh Gate-B 仍需 `>=30` matched observations + E2/MIT/QC 審。
 
 **v135 增量（2026-06-12 AEG-S3 listing_fade PBO grid wiring）**：新增 AEG-S3 listing_fade explicit PBO grid code checkpoint `3d03698c`：`aeg_s3_listing_fade` 現支援 `--include-default-pbo-grid` 與 `--pbo-grid-json`，在明確要求時輸出 `pbo_candidates` / `pbo_candidate_grid`，默認仍不偽造 PBO；candidate grid 少於 10 個有效 cells 時 fail-closed 為 `insufficient_candidate_grid`。`aeg_s3_gate_b_chain` 同步 pass-through PBO knobs，並在 gate snapshot/CLI output 暴露 `listing_pbo_status`。Mac/Linux focused regression `54 passed` + compileall OK；Mac `rg` 與 Linux `grep -R -E` forbidden-route search no hits。Linux true PBO smoke 用舊 Gate-B run `listing_24h_20260602_1847` 產 artifact `aeg_s3_gate_b_chain_listing_pbo_smoke_20260612`：listing_sample_count=2、execution_observation_count=2、listing_pbo_status=`produced_candidate_grid`、chain_status=`COMPLETE_EXECUTION_REALISM_FAIL`、reject=`sample_count_below_30`。結論：Gate-B fresh run 不再會因 listing_fade 缺 PBO grid 這個已知接線缺口卡住；但舊 run 仍非 promotion，fresh Gate-B 仍需 `>=30` matched observations + E2/MIT/QC 審。
 

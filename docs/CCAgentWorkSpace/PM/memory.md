@@ -243,3 +243,9 @@
 - `3d03698c` 讓 `listing_fade` PBO candidate grid 變成明確 opt-in：`--include-default-pbo-grid` / `--pbo-grid-json`，默認不偽造 PBO，grid 不足 10 cells 時 fail-closed。
 - Gate-B chain 已 pass-through PBO knobs 並輸出 `listing_pbo_status`；Linux old-run smoke 產 `produced_candidate_grid`，但仍因 sample_count=2 fail `sample_count_below_30`。
 - Mac/Linux focused regression 各 `54 passed`；compileall/static scan OK；本批無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/trading mutation。
+
+## 2026-06-12 AEG-S3 Gate-B full matrix PBO readiness
+
+- `235858f4` 固化 Gate-B chain full formal matrix 分支也必須攜帶 listing_fade PBO：test 斷言 `listing_pbo_status=produced_candidate_grid`、candidate rows `pbo_status=measured`。
+- Linux final smoke 用 old Gate-B + 真 FND2/regime 跑完整 chain：formal matrix row_count=12、coverage PASS、survivorship `pit_fnd2_delisted_proof`、final labels 7 insufficient / 5 kill，chain_status non-promotable 只因舊 run sample_count=2。
+- 結論：fresh Gate-B 到來後的 execution + event breadth + formal matrix + PBO 全鏈已可執行；promotion 仍需 fresh `>=30` matched observations + E2/MIT/QC。
