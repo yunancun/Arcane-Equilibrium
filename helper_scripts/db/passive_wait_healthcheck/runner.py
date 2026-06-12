@@ -505,7 +505,7 @@ def _run_selected_cursor_checks(
     Dependencies may run silently. In particular, [Xb] needs [1]'s
     ``close_fills`` baseline even when [1] was not selected.
     """
-    supported = {"1", "4", "xb"}
+    supported = {"1", "4", "81", "82", "xb"}
     unsupported = sorted(selected - supported)
     if unsupported:
         supported_display = ", ".join(f"[{x}]" if x != "xb" else "[Xb]" for x in sorted(supported))
@@ -525,6 +525,14 @@ def _run_selected_cursor_checks(
     if "4" in selected:
         s, m = check_phys_lock_runtime(cur)
         results.append(("[4] phys_lock_runtime", s, m))
+
+    if "81" in selected:
+        s, m = check_81_lease_ipc_soak(cur)
+        results.append(("[81] lease_ipc_soak", s, m))
+
+    if "82" in selected:
+        s, m = check_82_lease_ipc_soak_window(cur)
+        results.append(("[82] lease_ipc_soak_window", s, m))
 
     if "xb" in selected:
         if close_fills is None:
