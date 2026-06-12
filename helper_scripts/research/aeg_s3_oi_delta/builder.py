@@ -63,6 +63,52 @@ def _mean(values: Iterable[float]) -> Optional[float]:
     return statistics.mean(clean) if clean else None
 
 
+def _parameter_cell_id(
+    *,
+    lookback_hours: float,
+    horizon_hours: float,
+    tail_frac: float,
+    cost_bps: float,
+    side_mode: str,
+) -> str:
+    return (
+        f"lb{lookback_hours:g}h_h{horizon_hours:g}h_tail{tail_frac:g}_"
+        f"cost{cost_bps:g}_{side_mode}"
+    )
+
+
+def _validate_parameters(
+    *,
+    lookback_hours: float,
+    horizon_hours: float,
+    cost_bps: float,
+    k_trials: int,
+    tail_frac: float,
+    min_symbols: int,
+    min_spacing_hours: Optional[float],
+    max_timestamp_lag_minutes: float,
+    side_mode: str,
+) -> None:
+    if lookback_hours <= 0:
+        raise ValueError("lookback_hours_must_be_positive")
+    if horizon_hours <= 0:
+        raise ValueError("horizon_hours_must_be_positive")
+    if cost_bps < 0:
+        raise ValueError("cost_bps_must_be_non_negative")
+    if k_trials <= 1:
+        raise ValueError("k_trials_must_be_gt_1")
+    if not (0.0 < tail_frac <= 0.5):
+        raise ValueError("tail_frac_must_be_in_(0,0.5]")
+    if min_symbols < 2:
+        raise ValueError("min_symbols_must_be_at_least_2")
+    if min_spacing_hours is not None and min_spacing_hours < 0:
+        raise ValueError("min_spacing_hours_must_be_non_negative")
+    if max_timestamp_lag_minutes < 0:
+        raise ValueError("max_timestamp_lag_minutes_must_be_non_negative")
+    if side_mode not in {"long_high_short_low", "short_high_long_low"}:
+        raise ValueError(f"unsupported_side_mode:{side_mode}")
+
+
 def load_jsonl(path: Path) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for line_no, line in enumerate(Path(path).read_text(encoding="utf-8").splitlines(), start=1):
@@ -362,6 +408,139 @@ def _window_samples(
     return samples, rejects
 
 
+def default_pbo_grid(
+    *,
+    cost_bps: float,
+    min_symbols: int = 10,
+    side_mode: str = "long_high_short_low",
+) -> list[dict[str, Any]]:
+    """Small OI-delta parameter family used only when explicitly requested."""
+    cells: list[dict[str, Any]] = []
+    for lookback_hours in (24.0, 48.0, 72.0):
+        for horizon_hours in (24.0, 48.0, 72.0):
+            for tail_frac in (0.15, 0.2):
+                cells.append({
+                    "lookback_hours": lookback_hours,
+                    "horizon_hours": horizon_hours,
+                    "tail_frac": tail_frac,
+                    "min_symbols": min_symbols,
+                    "cost_bps": cost_bps,
+                    "side_mode": side_mode,
+                })
+    return cells
+
+
+def _cell_float(cell: dict[str, Any], key: str, fallback: Optional[float] = None) -> float:
+    value = cell.get(key, fallback)
+    if value is None:
+        raise ValueError(f"pbo_grid_missing_{key}")
+    return float(value)
+
+
+def _cell_int(cell: dict[str, Any], key: str, fallback: Optional[int] = None) -> int:
+    value = cell.get(key, fallback)
+    if value is None:
+        raise ValueError(f"pbo_grid_missing_{key}")
+    return int(value)
+
+
+def _pbo_grid_candidates(
+    raw_rows: list[dict[str, Any]],
+    *,
+    pbo_grid: list[dict[str, Any]],
+    fallback_min_symbols: int,
+    fallback_side_mode: str,
+    fallback_max_timestamp_lag_minutes: float,
+    regime_by_date: dict[str, str],
+    default_regime: Optional[str],
+    oos_start_date: Optional[dt.date],
+) -> tuple[dict[str, dict[str, float]], list[dict[str, Any]]]:
+    candidates: dict[str, dict[str, float]] = {}
+    grid_summary: list[dict[str, Any]] = []
+    for idx, cell in enumerate(pbo_grid):
+        lookback_hours = _cell_float(cell, "lookback_hours")
+        horizon_hours = _cell_float(cell, "horizon_hours")
+        tail_frac = _cell_float(cell, "tail_frac")
+        cost_bps = _cell_float(cell, "cost_bps")
+        min_symbols = _cell_int(cell, "min_symbols", fallback_min_symbols)
+        min_spacing_hours = (
+            None
+            if cell.get("min_spacing_hours") is None
+            else float(cell.get("min_spacing_hours"))
+        )
+        max_timestamp_lag_minutes = _cell_float(
+            cell,
+            "max_timestamp_lag_minutes",
+            fallback_max_timestamp_lag_minutes,
+        )
+        side_mode = str(cell.get("side_mode") or fallback_side_mode)
+        _validate_parameters(
+            lookback_hours=lookback_hours,
+            horizon_hours=horizon_hours,
+            cost_bps=cost_bps,
+            k_trials=2,
+            tail_frac=tail_frac,
+            min_symbols=min_symbols,
+            min_spacing_hours=min_spacing_hours,
+            max_timestamp_lag_minutes=max_timestamp_lag_minutes,
+            side_mode=side_mode,
+        )
+
+        enriched, enrichment_rejects = _enriched_rows(
+            raw_rows,
+            lookback_hours=lookback_hours,
+            horizon_hours=horizon_hours,
+            max_timestamp_lag_minutes=max_timestamp_lag_minutes,
+        )
+        spacing = horizon_hours if min_spacing_hours is None else min_spacing_hours
+        samples, window_rejects = _window_samples(
+            enriched,
+            tail_frac=tail_frac,
+            min_symbols=min_symbols,
+            min_spacing_hours=spacing,
+            cost_bps=cost_bps,
+            side_mode=side_mode,
+            regime_by_date=regime_by_date,
+            default_regime=default_regime,
+            oos_start_date=oos_start_date,
+        )
+        daily_returns = _daily_returns(samples) if samples else None
+        parameter_cell_id = str(cell.get("parameter_cell_id") or _parameter_cell_id(
+            lookback_hours=lookback_hours,
+            horizon_hours=horizon_hours,
+            tail_frac=tail_frac,
+            cost_bps=cost_bps,
+            side_mode=side_mode,
+        ))
+        if parameter_cell_id in candidates:
+            parameter_cell_id = f"{parameter_cell_id}_idx{idx}"
+        daily_values = (daily_returns or {}).get("values", {})
+        if daily_values:
+            candidates[parameter_cell_id] = {
+                str(day): float(value)
+                for day, value in daily_values.items()
+                if _float_or_none(value) is not None
+            }
+        grid_summary.append({
+            "parameter_cell_id": parameter_cell_id,
+            "lookback_hours": lookback_hours,
+            "horizon_hours": horizon_hours,
+            "tail_frac": tail_frac,
+            "min_symbols": min_symbols,
+            "min_spacing_hours": spacing,
+            "max_timestamp_lag_minutes": max_timestamp_lag_minutes,
+            "round_trip_cost_bps": cost_bps,
+            "side_mode": side_mode,
+            "enriched_row_count": len(enriched),
+            "sample_count": len(samples),
+            "rejected_enrichment_count": len(enrichment_rejects),
+            "rejected_window_count": len(window_rejects),
+            "daily_return_count": len(daily_values),
+            "included_in_pbo": bool(daily_values),
+        })
+    return candidates, grid_summary
+
+
 def build_oi_delta_evidence(
     payload: list[dict[str, Any]],
     *,
@@ -380,23 +559,23 @@ def build_oi_delta_evidence(
     regime_by_date: Optional[dict[str, str]] = None,
     default_regime: Optional[str] = None,
     oos_start_date: Optional[str] = None,
+    pbo_grid: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    if lookback_hours <= 0:
-        raise ValueError("lookback_hours_must_be_positive")
-    if horizon_hours <= 0:
-        raise ValueError("horizon_hours_must_be_positive")
-    if cost_bps < 0:
-        raise ValueError("cost_bps_must_be_non_negative")
-    if k_trials <= 1:
-        raise ValueError("k_trials_must_be_gt_1")
-    if not (0.0 < tail_frac <= 0.5):
-        raise ValueError("tail_frac_must_be_in_(0,0.5]")
-    if min_symbols < 2:
-        raise ValueError("min_symbols_must_be_at_least_2")
-    if max_timestamp_lag_minutes < 0:
-        raise ValueError("max_timestamp_lag_minutes_must_be_non_negative")
+    _validate_parameters(
+        lookback_hours=lookback_hours,
+        horizon_hours=horizon_hours,
+        cost_bps=cost_bps,
+        k_trials=k_trials,
+        tail_frac=tail_frac,
+        min_symbols=min_symbols,
+        min_spacing_hours=min_spacing_hours,
+        max_timestamp_lag_minutes=max_timestamp_lag_minutes,
+        side_mode=side_mode,
+    )
 
     raw_rows, raw_rejects = _normalize_raw_rows(payload)
+    parsed_oos_start_date = _date_or_none(oos_start_date)
+    resolved_regime_by_date = regime_by_date or {}
     enriched, enrichment_rejects = _enriched_rows(
         raw_rows,
         lookback_hours=lookback_hours,
@@ -411,16 +590,33 @@ def build_oi_delta_evidence(
         min_spacing_hours=spacing,
         cost_bps=cost_bps,
         side_mode=side_mode,
-        regime_by_date=regime_by_date or {},
+        regime_by_date=resolved_regime_by_date,
         default_regime=default_regime,
-        oos_start_date=_date_or_none(oos_start_date),
+        oos_start_date=parsed_oos_start_date,
     )
 
     daily_returns = _daily_returns(samples) if samples else None
-    parameter_cell_id = (
-        f"lb{lookback_hours:g}h_h{horizon_hours:g}h_tail{tail_frac:g}_"
-        f"cost{cost_bps:g}_{side_mode}"
+    parameter_cell_id = _parameter_cell_id(
+        lookback_hours=lookback_hours,
+        horizon_hours=horizon_hours,
+        tail_frac=tail_frac,
+        cost_bps=cost_bps,
+        side_mode=side_mode,
     )
+    pbo_candidates: dict[str, dict[str, float]] = {}
+    pbo_grid_summary: list[dict[str, Any]] = []
+    if pbo_grid:
+        pbo_candidates, pbo_grid_summary = _pbo_grid_candidates(
+            raw_rows,
+            pbo_grid=pbo_grid,
+            fallback_min_symbols=min_symbols,
+            fallback_side_mode=side_mode,
+            fallback_max_timestamp_lag_minutes=max_timestamp_lag_minutes,
+            regime_by_date=resolved_regime_by_date,
+            default_regime=default_regime,
+            oos_start_date=parsed_oos_start_date,
+        )
+
     evidence: dict[str, Any] = {
         "schema_version": EVIDENCE_SCHEMA_VERSION,
         "runner_version": RUNNER_VERSION,
@@ -449,8 +645,13 @@ def build_oi_delta_evidence(
     }
     if daily_returns is not None:
         evidence["daily_returns"] = daily_returns
+    if pbo_candidates:
+        evidence["pbo_seed"] = 20260611
+        evidence["pbo_candidates"] = pbo_candidates
+        evidence["pbo_candidate_grid"] = pbo_grid_summary
 
     all_rejects = raw_rejects + enrichment_rejects + window_rejects
+    included_pbo_count = len(pbo_candidates)
     summary = {
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "run_id": run_id,
@@ -480,13 +681,25 @@ def build_oi_delta_evidence(
         "accepted_gross_bps_mean": round(statistics.mean([row["gross_bps"] for row in samples]), 8) if samples else None,
         "accepted_net_bps_mean": round(statistics.mean([row["net_bps"] for row in samples]), 8) if samples else None,
         "daily_return_count": len((daily_returns or {}).get("values", {})),
-        "pbo_status": "not_produced_missing_candidate_grid",
+        "pbo_grid_cell_count": len(pbo_grid_summary),
+        "pbo_grid_included_candidate_count": included_pbo_count,
+        "pbo_grid_daily_return_counts": {
+            row["parameter_cell_id"]: row["daily_return_count"]
+            for row in pbo_grid_summary
+        },
+        "pbo_status": (
+            "produced_candidate_grid"
+            if included_pbo_count >= 10
+            else ("insufficient_candidate_grid" if pbo_grid else "not_produced_missing_candidate_grid")
+        ),
         "notes": [
             "gross_bps is explicit cross-sectional top-minus-bottom forward return by default",
             "round_trip_cost_bps is subtracted from every accepted rebalance window",
             "daily_returns are aggregated from explicit accepted samples only",
-            "pbo is intentionally absent until explicit candidate-grid evidence exists",
+            "pbo_candidates are emitted only when an explicit candidate-grid request is provided",
         ],
         "rejected_samples": all_rejects,
     }
+    if pbo_grid_summary:
+        summary["pbo_candidate_grid"] = pbo_grid_summary
     return evidence, summary
