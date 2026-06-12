@@ -75,6 +75,7 @@ def _fnd2_run(root: Path) -> Path:
     (run_dir / "universe_summary.json").write_text(json.dumps({
         "run_id": "fnd2_real",
         "universe_id": "uid",
+        "included_count": 1,
         "survivor_rejection_status": "PROVEN_NONE_IN_WINDOW",
     }), encoding="utf-8")
     return run_dir
@@ -86,6 +87,7 @@ def _regime_run(root: Path) -> Path:
     (run_dir / "regime_labels.csv").write_text("symbol,main_regime\nBTCUSDT,chop\n", encoding="utf-8")
     (run_dir / "regime_summary.json").write_text(json.dumps({
         "run_id": "regime_real",
+        "classifier_version": "aeg_regime_v0.1.0",
         "healthcheck": {"status": "PASS"},
     }), encoding="utf-8")
     return run_dir
