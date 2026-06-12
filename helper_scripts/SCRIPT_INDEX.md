@@ -182,6 +182,23 @@ candidate-grid evidence 時下游會以 `missing_pbo` reject。
 | `research/aeg_s3_funding_revive/harness.py` | CLI：`--panel-jsonl` + `--lookback-points` + `--horizon-hours` + `--stress-z` + `--exit-z` + `--round-trip-cost-bps` + `--k-trials` → evidence artifact。 |
 | `research/tests/test_aeg_s3_funding_revive.py` | synthetic bite tests：stress-unwind panel 串 AEG-S3 rows、missing regime fail-closed、positive stress short event、raw funding rolling z-score、manifest/index、靜態禁 runtime/DB/Bybit route。 |
 
+## 2026-06-12 AEG-S3 event breadth adapter（`research/aeg_s3_event_breadth/`）
+
+AEG-S3 單事件候選的真 breadth 接線：讀 `listing_fade` / `funding_revive`
+candidate evidence JSON，按 FND-2 PIT universe tiers 與 `alive_from_utc` /
+`alive_to_utc` mask 過濾 event samples，輸出既有 `breadth_ladder.csv` /
+`breadth_ladder_summary.json` artifact。這是 `aeg_s3_matrix_inputs` 的後續真
+survivorship/breadth 證據，不再使用 `candidate_metrics_only` 佔位。`oi_delta`
+等 cross-sectional basket sample 沒有單一 event symbol，會 fail-closed，不拆成假
+symbol breadth。artifact-only，0 DB / 0 Bybit / 0 runtime / 0 trading path。
+
+| 檔 | 職責 |
+|---|---|
+| `research/aeg_s3_event_breadth/__init__.py` | runner 版本與支援候選到 event-symbol 欄位映射。 |
+| `research/aeg_s3_event_breadth/builder.py` | 純函數核心：normalize 單 symbol event samples、套 FND-2 alive mask、計 per-tier gross/cost/net/Sharpe/PSR/DSR/PBO。 |
+| `research/aeg_s3_event_breadth/harness.py` | CLI：`--candidate-evidence-json` + `--fnd2-run-dir` → `breadth_ladder` artifact；time bounds 可由 FND-2 summary / evidence 推導，亦可顯式覆寫。 |
+| `research/tests/test_aeg_s3_event_breadth.py` | synthetic bite tests：FND-2 alive mask 會排除 delist 後事件、healthcheck PASS、`oi_delta` basket fail-closed、靜態禁 runtime/DB/Bybit route。 |
+
 ## 2026-06-05 AEG candidate metrics adapter（`research/aeg_candidate_metrics/`）
 
 AEG robustness matrix 的下一個缺口是候選級 per-regime PnL、recent 90/180d
