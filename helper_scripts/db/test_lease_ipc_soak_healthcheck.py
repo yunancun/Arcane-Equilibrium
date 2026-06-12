@@ -51,6 +51,7 @@ from helper_scripts.db.passive_wait_healthcheck.checks_governance_lease_ipc impo
     check_81_lease_ipc_soak,
     check_82_lease_ipc_soak_window,
 )
+from helper_scripts.db.passive_wait_healthcheck import runner as runner_mod  # noqa: E402
 
 
 def _cursor(fetches: list[Any]) -> MagicMock:
@@ -60,6 +61,38 @@ def _cursor(fetches: list[Any]) -> MagicMock:
     cur.connection.rollback = MagicMock()
     cur.fetchone.side_effect = fetches
     return cur
+
+
+class TestRunnerSelectedLeaseIpcChecks(unittest.TestCase):
+    """runner `--check` narrow selector routing for [81]/[82]."""
+
+    def test_selected_runner_routes_81_and_82(self) -> None:
+        cur = MagicMock()
+        with (
+            unittest.mock.patch.object(
+                runner_mod,
+                "check_81_lease_ipc_soak",
+                return_value=("PASS", "mock-81"),
+            ) as check_81,
+            unittest.mock.patch.object(
+                runner_mod,
+                "check_82_lease_ipc_soak_window",
+                return_value=("FAIL", "mock-82"),
+            ) as check_82,
+        ):
+            rows = runner_mod._run_selected_cursor_checks(cur, {"81", "82"})
+
+        self.assertEqual(rows, [
+            ("[81] lease_ipc_soak", "PASS", "mock-81"),
+            ("[82] lease_ipc_soak_window", "FAIL", "mock-82"),
+        ])
+        check_81.assert_called_once_with(cur)
+        check_82.assert_called_once_with(cur)
+
+    def test_selected_runner_rejects_unsupported_selector(self) -> None:
+        cur = MagicMock()
+        with self.assertRaisesRegex(ValueError, "unsupported --check selector"):
+            runner_mod._run_selected_cursor_checks(cur, {"82", "999"})
 
 
 # fetch 序列順序（rework 後 check_81 的 SQL 呼叫順序）：
