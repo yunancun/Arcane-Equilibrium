@@ -44,6 +44,8 @@ def build_and_write(args: argparse.Namespace) -> dict:
         slippage_floor_bps=args.slippage_floor_bps,
         include_default_pbo_grid=not args.no_default_pbo_grid,
         min_listing_samples=args.min_listing_samples,
+        gate_watch_latest_json=args.gate_watch_latest_json,
+        gate_watch_max_age_hours=args.gate_watch_max_age_hours,
     )
     written = artifact_mod.write_all(
         summary=summary,
@@ -82,6 +84,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--slippage-floor-bps", type=float, default=1.0, dest="slippage_floor_bps")
     p.add_argument("--no-default-pbo-grid", action="store_true", dest="no_default_pbo_grid")
     p.add_argument("--min-listing-samples", type=int, default=30, dest="min_listing_samples")
+    p.add_argument("--gate-watch-latest-json", default=None, dest="gate_watch_latest_json")
+    p.add_argument("--gate-watch-max-age-hours", type=float, default=4.0, dest="gate_watch_max_age_hours")
     p.add_argument("--session-id", default=None, dest="session_id")
     p.add_argument("--created-by-role", default="PM", dest="created_by_role")
     return p
@@ -95,6 +99,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         "run_id": summary["run_id"],
         "readiness_status": summary["readiness_status"],
         "selected_artifacts": summary["selected_artifacts"],
+        "gate_watch": summary["gate_watch"],
         "listing_preview": summary["listing_preview"],
         "recommended_command": summary["recommended_command"]["shell"],
         "artifact_dir": result["written"]["run_dir"],

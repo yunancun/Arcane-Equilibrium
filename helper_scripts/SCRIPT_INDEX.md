@@ -279,7 +279,7 @@ execution FAIL / matrix non-promotable 是 gate 結果，不是 orchestration er
 | `research/aeg_s3_gate_b_chain/harness.py` | CLI：`--gate-b-run-dir` + listing/execution/PBO knobs；optional `--fnd2-run-dir --regime-run-dir` → full formal matrix chain。 |
 | `research/tests/test_aeg_s3_gate_b_chain.py` | synthetic bite tests：chain 到 execution realism PASS、PBO grid 透傳、給齊 FND2/regime 後跑 formal matrix、缺一個 matrix input fail-fast、靜態禁 runtime/DB/Bybit route。 |
 
-## 2026-06-12 AEG-S3 Gate-B preflight locator（`research/aeg_s3_gate_b_preflight/`）
+## 2026-06-12 AEG-S3 Gate-B preflight locator + watch bridge（`research/aeg_s3_gate_b_preflight/`）
 
 AEG-S3 fresh Gate-B 後的本地 artifact readiness checker：掃 Gate-B run root、
 alpha_history FND2、regime artifacts，檢查必需檔案，預先用 listing_fade builder
@@ -290,11 +290,11 @@ alpha_history FND2、regime artifacts，檢查必需檔案，預先用 listing_f
 
 | 檔 | 職責 |
 |---|---|
-| `research/aeg_s3_gate_b_preflight/__init__.py` | runner / summary / manifest schema 版本。 |
-| `research/aeg_s3_gate_b_preflight/builder.py` | locate latest/explicit Gate-B, FND2, regime artifacts；listing preview；full-chain command builder。 |
+| `research/aeg_s3_gate_b_preflight/__init__.py` | runner / summary / manifest schema 版本（v0.2 起 summary 含 `gate_watch` block）。 |
+| `research/aeg_s3_gate_b_preflight/builder.py` | locate latest/explicit Gate-B, FND2, regime artifacts；讀 local `gate_b_watch_latest.json` 做 `WATCH_ONLY` / `ACTIONABLE_*` / stale/malformed 判讀；listing preview；full-chain command builder；probe command hint 只輸出、不自啟。 |
 | `research/aeg_s3_gate_b_preflight/artifact.py` | `gate_b_preflight_summary.json` + manifest/artifact_index writer。 |
-| `research/aeg_s3_gate_b_preflight/harness.py` | CLI：`--run-id` + optional artifact roots/dirs → readiness summary + recommended command。 |
-| `research/tests/test_aeg_s3_gate_b_preflight.py` | synthetic bite tests：ready command、sample-below-gate warn、missing artifact blocked、靜態禁 runtime/DB/Bybit route。 |
+| `research/aeg_s3_gate_b_preflight/harness.py` | CLI：`--run-id` + optional artifact roots/dirs + `--gate-watch-latest-json` / `--gate-watch-max-age-hours` → readiness summary + gate-watch operator action + recommended command。 |
+| `research/tests/test_aeg_s3_gate_b_preflight.py` | synthetic bite tests：ready command、sample-below-gate warn、missing artifact blocked、WATCH_ONLY/actionable schedule/start watcher bridge、stale/malformed fail-closed、靜態禁 runtime/DB/Bybit route。 |
 
 ## 2026-06-05 AEG candidate metrics adapter（`research/aeg_candidate_metrics/`）
 
