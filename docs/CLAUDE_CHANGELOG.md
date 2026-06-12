@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v144 P2 incident-policy external `engine_dead` watchdog notify-only producer coverage；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v145 P2 incident-policy producer slices BB/E2 focused re-review closure；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v145 增量（2026-06-12 P2 incident-policy producer slices BB/E2 focused re-review closure）**：完成 `sm_halt_stuck` + `position_drift` + external `engine_dead` 新增 producer slices 的 BB/E2 focused re-review。E2 `PASS-WITH-CONDITIONS`，0 blocker/high/medium/low：`sm_halt_stuck` 只讀 `TickPipeline.halt_kind/halt_set_ts_ms` 並經 incident_policy arm-class path，`position_drift` 在 reconciler unresolved residual drift 上做 notify-only，`engine_dead` 僅 watchdog-side alert/canary、network_outage 早退且不進 Rust C4。BB `APPROVE-WITH-CONDITIONS`，0 blocker/high/medium：三個 slice 不新增 Bybit endpoint/order/market-close/set_trading_stop 路徑；`position_drift` 僅消費既有 reconciler residual，`engine_dead` 不得描述為 exchange outage。Mac focused verification：`cargo test -p openclaw_engine sm_halt_incident --lib` 5 passed；`position_reconciler::incident --lib` 6 passed；`notification_failsafe::incident_policy --lib` 15 passed；`event_consumer::tests::c4_failsafe_wire_tests --lib` 4 passed；watchdog `py_compile` OK；`test_canary.py -k 'engine_dead or WatchdogAlertWiring'` 5 passed。P2 source coverage + BB/E2 review 已不再阻塞；剩 E4 focused regression/full-chain review → QA acceptance；本輪未 CI、未 deploy/rebuild/restart。
 
 **v144 增量（2026-06-12 P2 incident-policy external `engine_dead` watchdog notify-only producer coverage）**：新增 external watchdog `engine_dead` notify-only producer：`helper_scripts/canary/engine_dead_incident.py` 承載 producer state machine，`engine_watchdog.py` 只做薄接線。觸發條件對齊 PA §2.6：snapshot/heartbeat stale ≥30s 且 respawn failed ≥1（`consecutive_failures>=1`），發 `ENGINE_DEAD_NOTIFY_ONLY` canary event + 既有 engine-down alert（Telegram/webhook/local sink），同一 down episode 去重；`on_engine_recovery` 寫 `ENGINE_DEAD_RESOLVED` 並清 marker。此路徑明確 notify-only：不餵 Rust C4 `AllFail`、不武裝 Defensive、無 auth/order/DB/risk/trading mutation；network_outage 分支仍不觸發。Mac focused verification：`py_compile` watchdog files OK；`test_canary.py` 87 passed + 9 subtests；`test_engine_watchdog.py` 40 passed；`test_watchdog_alert.py` 41 passed；`rustfmt --edition 2021 --check main_boot_tasks.rs` 與 `git diff --check` passed。`cargo fmt --manifest-path rust/openclaw_engine/Cargo.toml --check` 因 repo 既有大量 rustfmt drift 失敗，非本 slice 新增；本輪未 CI、未 deploy/rebuild/restart。P2 incident-policy planned producers source coverage 至此完成；`sm_halt` / `position_drift` / `engine_dead` slices 仍待 BB/E2/E4/QA/full-chain review。
 
