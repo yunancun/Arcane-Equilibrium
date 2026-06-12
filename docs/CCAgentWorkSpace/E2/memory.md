@@ -248,3 +248,8 @@ E1 flag 對。`l2_advisory_orchestrator.py:429-432` `dispatch_and_execute` 傳 `
 - PM/E1 source update added `event_consumer/sm_halt_incident.rs`: active HaltSession is detected from `TickPipeline.halt_kind` + `halt_set_ts_ms`, observed after tick handling and after the 60s lease/auth sweep, fed into existing `IncidentClass::SmHaltStuck`, and resolved when halt clears.
 - This is not yet E2-reviewed. Review delta should check: stale `[69]` healthcheck selector is not used; operator IPC pause (`halt_kind=None`) cannot report; producer 5s cadence does not bypass incident_policy 120s sustained/throttle/cooling; self-heal cannot disarm another armed class; C4 owner-handler boundary remains unchanged.
 - Remaining producers after this source slice: `position_drift` notify-only and external `engine_dead` watchdog notify-only.
+
+## 2026-06-12 · E2 follow-up needed — position_drift notify-only source slice landed
+- PM/E1 source update added `position_reconciler/incident.rs`: post-reconcile unresolved actionable drifts feed `IncidentClass::PositionDrift` only after 3 consecutive cycles; MinorDrift ignored; startup grace suppresses accumulation; clear emits class-scoped resolved.
+- This is not yet E2-reviewed. Review delta should check: producer observes the post-orphan/post-ghost drift list, cannot report handled orphan/ghost entries, does not bypass `IncidentClass::PositionDrift` notify-only policy, and does not add any `PipelineCommand` / RiskGovernor / DB / auth / order side effect.
+- Remaining producer after this source slice: external `engine_dead` watchdog notify-only. Ticket still needs E2 review for `sm_halt_stuck` + `position_drift`, then E4/QA/full-chain before runtime-complete.

@@ -189,3 +189,8 @@ dict §4.2 110072 註記（line 1355）結尾的 follow-up 句目前寫「既有
 - PM/E1 source slice added `sm_halt_stuck` producer via `event_consumer/sm_halt_incident.rs`, using `TickPipeline.halt_kind` + `halt_set_ts_ms` as runtime source-of-truth and explicitly not using stale passive healthcheck `[69]`.
 - This update has not received BB re-review. BB next check should focus on whether active HaltSession -> incident notification -> possible C4 Defensive escalation keeps the same exchange-side boundary: no new Bybit request at report time, no direct stop write outside C4 owner handler, and no false claim that a policy/sticky halt equals exchange outage.
 - Remaining producer coverage after this source slice: `position_drift` notify-only and external `engine_dead` watchdog notify-only.
+
+## 2026-06-12 incident_policy position_drift source update (not BB-reviewed yet)
+- PM/E1 source slice added `position_drift` producer via `position_reconciler/incident.rs`, observing only unresolved post-orphan/post-ghost reconciler drift after 3 consecutive cycles and feeding `IncidentClass::PositionDrift`.
+- BB boundary to verify in review: this is notify-only and must not send C4 AllFail; it adds no Bybit request, no order, no close, no stop write, and no exchange-side mutation. Existing reconciler `PipelineCommand` escalation/close behavior is unchanged.
+- Remaining producer coverage after this source slice: external `engine_dead` watchdog notify-only; `sm_halt_stuck` + `position_drift` both still need BB/E2 focused review before E4/QA/full-chain.
