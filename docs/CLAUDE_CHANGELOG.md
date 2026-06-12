@@ -3083,3 +3083,9 @@ Cold audit of all ML_TODO completed items found 3 real issues + 4 pre-existing t
 
 > **歸檔**：2026-04-08 ~ 04-09 條目已移至 `docs/archive/2026-04-13--changelog_archive_0408_0409.md`。
 > 2026-03-30 ~ 04-07 條目見 `docs/archive/2026-04-12--changelog_archive_pre_0408.md`。
+
+## 2026-06-13 A1 basis gate + P2 OPS + P3 ticker forward recorder
+
+- A1 `P2-A1-RUNNER-WIRE-TO-BASIS` formal gate matured: Linux `panel.basis_panel` span=14.001163877d; Stage0R packet `/tmp/openclaw/alpha_candidate_stage0r/a1_basis_formal_20260613T0025p02.json` returns A1 functional path, `infra_gap=false`, `draft_only`, `n_eff=0`, fail=`no_a1_signals_after_entry_gate`; engineering wire closed, candidate remains event-triggered dormant.
+- P2 OPS pg_dump/passive health test gap closed with standalone `check_pg_dump_freshness` tests plus passive `[80] pg_dump_freshness` wrapper tests; focused pytest `52 passed`.
+- P3 `market_tickers` source forward recorder landed: Rust parser/PriceEvent/fast-track/writer now forwards nullable mark/index/funding/OI and writes missing/non-finite values as SQL NULL; Linux schema already has nullable `funding_rate` via V063/V076. No CI/deploy/rebuild/restart/backfill.

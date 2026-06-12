@@ -301,6 +301,11 @@
 
 - Root `L2_TODO.md` is not completed-archive eligible: V138/V139 activation, E2E-1, P2p sentinel operator gates, and P5 remain open. PM mirrored the uncovered tails into TODO v149 `P1-L2-ADVISORY-MESH-TAILS`; no runtime mutation/model call/deploy occurred.
 
+## 2026-06-13 A1 basis / P2 OPS / P3 forward recorder
+
+- A1 basis formal gate matured: `panel.basis_panel` span=14.001d, Stage0R functional path verified with `infra_gap=false`, but A1 remains `draft_only` because `no_a1_signals_after_entry_gate` and `n_eff=0`; next A1 check is event-triggered, not a passive date wait.
+- P2 OPS pg_dump/passive health tests closed; P3 ticker forward recorder source landed for nullable mark/index/funding/OI, deploy-gated and forward-only.
+
 ## 2026-06-12 Documentation governance first batch
 
 - PM -> R4/CC/FA -> PA -> PM 审阅确认：Markdown 历史证据不做删除；第一批只做 active/history 边界降权、routing banner、initiative index、audit folder semantics 和未跟踪 `.DS_Store` 清理。

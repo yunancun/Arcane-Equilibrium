@@ -17,11 +17,10 @@
 //!   仍保留於 writer 內 — `batch_insert` 只看乾淨的 `&[T]`。
 //!
 //! Risk budget (FA-2 refactor spec):
-//!   1. `market_writer.rs` ticker buffer: 13 cols × 5000 rows = 65000 params — too
-//!      close to the hard cap. The ticker path now calls this helper with
-//!      `columns_per_row = 13`, which yields `chunk_rows = 5041` then clamps to
-//!      10000 … we also impose an explicit `max_chunk_rows_override` of 4000 in
-//!      `market_writer` to keep headroom.
+//!   1. `market_writer.rs` ticker buffer historically sat near the hard cap.
+//!      The ticker path now has 14 cols and imposes an explicit
+//!      `max_chunk_rows_override` of 4000 in `market_writer`, keeping each
+//!      statement at 56000 params.
 //!   2. Per-row validation stays in the writer: epoch-0 check, JSONB parse, and
 //!      engine_mode guard are heterogeneous across writers and must not be lifted.
 //!   3. HashMap dedup ownership stays in the writer (context / feature / shadow
@@ -33,10 +32,9 @@
 //!      BEGIN/COMMIT, so neither does this helper.
 //!
 //! 風險預算（FA-2 重構規格）：
-//!   1. `market_writer.rs` ticker：13 欄 × 5000 行 = 65000 參數，距上限極近。
-//!      ticker 路徑現呼叫本 helper 並以 `columns_per_row = 13` 計算（結果 5041
-//!      再夾到 10000），同時在 market_writer 施加 `max_chunk_rows_override=4000`
-//!      保留餘量。
+//!   1. `market_writer.rs` ticker 歷史上接近 PG 參數上限；現為 14 欄，並在
+//!      market_writer 施加 `max_chunk_rows_override=4000`，每語句固定 56000
+//!      參數，保留餘量。
 //!   2. 每行驗證留在 writer：epoch-0 檢查、JSONB 解析、engine_mode 守衛各不相同，
 //!      不得抽到共用路徑。
 //!   3. HashMap 去重所有權仍在 writer（context / feature / shadow）— 本 helper
@@ -80,10 +78,10 @@ pub fn chunk_rows_for_columns(columns_per_row: usize) -> usize {
 /// 在 `chunk_rows_for_columns` 之上再套用一個可選的顯式上限。
 ///
 /// Used by `market_writer.rs` for the ticker path where we want the chunk cap
-/// well below the PG ceiling (4000 rows × 13 cols = 52000, leaves 13535 param
+/// well below the PG ceiling (4000 rows × 14 cols = 56000, leaves 9535 param
 /// headroom for future column additions).
-/// 市場 writer 的 ticker 路徑使用：明確把上限壓到 4000 行（× 13 欄 = 52000），
-/// 保留 13535 參數裕度供未來欄位擴充。
+/// 市場 writer 的 ticker 路徑使用：明確把上限壓到 4000 行（× 14 欄 = 56000），
+/// 保留 9535 參數裕度供未來欄位擴充。
 #[inline]
 pub fn chunk_rows_with_override(columns_per_row: usize, override_max: usize) -> usize {
     chunk_rows_for_columns(columns_per_row).min(override_max.max(1))
@@ -361,13 +359,13 @@ mod tests {
 
     #[test]
     fn chunk_math_market_writer_ticker_4000_safety() {
-        // Explicit pinning of the market_writer invariant: 4000 × 13 leaves
-        // headroom above a bare 65000 constant, well below 65535.
-        // 鎖定 market_writer 不變式：4000 × 13 = 52000，遠低於 65535 且比原硬編碼
-        // 65000 更安全。
-        let rows = chunk_rows_with_override(13, 4000);
-        assert_eq!(rows * 13, 52_000);
-        assert!(rows * 13 + 13_535 == PG_MAX_PARAMS);
+        // Explicit pinning of the market_writer invariant: 4000 × 14 leaves
+        // headroom below 65535 after the funding_rate ticker column.
+        // 鎖定 market_writer 不變式：funding_rate 接入後 4000 × 14 = 56000，
+        // 仍低於 65535 並保留餘量。
+        let rows = chunk_rows_with_override(14, 4000);
+        assert_eq!(rows * 14, 56_000);
+        assert!(rows * 14 + 9_535 == PG_MAX_PARAMS);
     }
 
     #[test]

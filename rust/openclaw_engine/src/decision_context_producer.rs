@@ -227,6 +227,7 @@ mod tests {
             asks5: None,
             adl_rank: None,
             funding_rate: None,
+            mark_price: None,
             // W1 sub-task 3 (E1-γ, 2026-05-11): test fixture 預設無 next_funding_ms。
             next_funding_ms: None,
             index_price: None,

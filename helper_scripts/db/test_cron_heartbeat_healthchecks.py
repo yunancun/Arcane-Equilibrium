@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for cron heartbeat healthchecks [75]-[79].
+"""Unit tests for cron heartbeat healthchecks [75]-[80].
 
 MODULE_NOTE:
   P1-CRON-INSTALL-WAVE-1（2026-05-18）— 驗 5 個 cron heartbeat sentinel：
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import os
 import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,7 @@ from helper_scripts.db.passive_wait_healthcheck.checks_cron_heartbeat import (  
     check_77_replay_key_rotation_check_cron_fires,
     check_78_feature_baseline_writer_cron_fires,
     check_79_blocked_symbols_30d_unblock_check_cron_fires,
+    check_80_pg_dump_freshness,
 )
 
 # 五 checks 對齊：函數 -> (sentinel 檔名, threshold 秒數, 人類可讀 cadence)。
@@ -64,6 +66,19 @@ _CHECK_MATRIX = [
         8 * 86400,
     ),
 ]
+
+
+def _pg_dump_result(
+    verdict: str,
+    checks: list[dict[str, str]] | None = None,
+) -> dict[str, object]:
+    """Build a minimal standalone pg_dump freshness result packet."""
+    return {
+        "verdict": verdict,
+        "checks": checks
+        if checks is not None
+        else [{"id": str(i), "verdict": "PASS"} for i in range(1, 8)],
+    }
 
 
 @pytest.fixture
@@ -282,6 +297,105 @@ def test_data_dir_default_path_resolution(
     assert status == "WARN"
     expected_path = str(data_dir / "cron_heartbeat" / "panel_aggregator_health.last_fire")
     assert expected_path in msg
+
+
+# ---------------------------------------------------------------------------
+# [80] pg_dump_freshness delegate wrapper
+# ---------------------------------------------------------------------------
+
+
+def test_pg_dump_freshness_wrapper_collapses_all_pass_summary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """[80] standalone 全 PASS 時應回 PASS + all PASS 摘要。"""
+    monkeypatch.delenv("OPENCLAW_CRON_HEARTBEAT_REQUIRED", raising=False)
+    fake_mod = types.SimpleNamespace(run=lambda: _pg_dump_result("PASS"))
+    monkeypatch.setitem(sys.modules, "check_pg_dump_freshness", fake_mod)
+
+    status, msg = check_80_pg_dump_freshness()
+
+    assert status == "PASS"
+    assert "[80] pg_dump_freshness verdict=PASS" in msg
+    assert "7 sub-check all PASS" in msg
+
+
+def test_pg_dump_freshness_wrapper_surfaces_non_pass_subchecks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """[80] non-PASS 子項需進 summary，避免 audit/deploy gap 被吞掉。"""
+    monkeypatch.delenv("OPENCLAW_CRON_HEARTBEAT_REQUIRED", raising=False)
+    fake_mod = types.SimpleNamespace(
+        run=lambda: _pg_dump_result(
+            "INSUFFICIENT_SAMPLE",
+            [
+                {"id": "1", "verdict": "PASS"},
+                {"id": "2", "verdict": "INSUFFICIENT_SAMPLE"},
+                {"id": "7", "verdict": "WARN"},
+            ],
+        )
+    )
+    monkeypatch.setitem(sys.modules, "check_pg_dump_freshness", fake_mod)
+
+    status, msg = check_80_pg_dump_freshness()
+
+    assert status == "INSUFFICIENT_SAMPLE"
+    assert "2:INSUFFICIENT_SAMPLE" in msg
+    assert "7:WARN" in msg
+
+
+def test_pg_dump_freshness_wrapper_keeps_fail_verdict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """[80] standalone FAIL 不得被 REQUIRED=0 降級。"""
+    monkeypatch.delenv("OPENCLAW_CRON_HEARTBEAT_REQUIRED", raising=False)
+    fake_mod = types.SimpleNamespace(
+        run=lambda: _pg_dump_result(
+            "FAIL",
+            [{"id": "4", "verdict": "FAIL"}],
+        )
+    )
+    monkeypatch.setitem(sys.modules, "check_pg_dump_freshness", fake_mod)
+
+    status, msg = check_80_pg_dump_freshness()
+
+    assert status == "FAIL"
+    assert "4:FAIL" in msg
+
+
+def test_pg_dump_freshness_wrapper_run_exception_warns_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """[80] standalone exception 不應打掛 runner，預設 WARN。"""
+    monkeypatch.delenv("OPENCLAW_CRON_HEARTBEAT_REQUIRED", raising=False)
+
+    def boom() -> dict[str, object]:
+        raise RuntimeError("pg unavailable")
+
+    fake_mod = types.SimpleNamespace(run=boom)
+    monkeypatch.setitem(sys.modules, "check_pg_dump_freshness", fake_mod)
+
+    status, msg = check_80_pg_dump_freshness()
+
+    assert status == "WARN"
+    assert "standalone run() raised RuntimeError: pg unavailable" in msg
+
+
+def test_pg_dump_freshness_wrapper_run_exception_fails_when_required(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """REQUIRED=1 時 [80] standalone exception 升 FAIL。"""
+    monkeypatch.setenv("OPENCLAW_CRON_HEARTBEAT_REQUIRED", "1")
+
+    def boom() -> dict[str, object]:
+        raise RuntimeError("pg unavailable")
+
+    fake_mod = types.SimpleNamespace(run=boom)
+    monkeypatch.setitem(sys.modules, "check_pg_dump_freshness", fake_mod)
+
+    status, msg = check_80_pg_dump_freshness()
+
+    assert status == "FAIL"
+    assert "standalone run() raised RuntimeError: pg unavailable" in msg
 
 
 if __name__ == "__main__":

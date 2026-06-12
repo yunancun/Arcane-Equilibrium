@@ -25,14 +25,14 @@ use tracing::{info, warn};
 /// from silently overflowing. Explicit 4000-row cap keeps 13_535 params of
 /// headroom for future column additions.
 /// 潛在 bug 修復（FA-2 風險 #1）：ticker 原本 13 欄 × 5000 行 = 65000 參數，距
-/// 65535 上限僅 535 參數；V-migration 加一欄就靜默越界。顯式壓到 4000 行，保留
-/// 13_535 參數裕度。
+/// 65535 上限僅 535 參數；V-migration 加一欄就靜默越界。FND-4 P3 接上 funding_rate
+/// 後為 14 欄，顯式壓到 4000 行，仍保留 9_535 參數裕度。
 const TICKER_CHUNK_MAX_ROWS: usize = 4000;
 
 // Column counts per table — consumed by batch_insert helper to derive chunk size.
 // 各表欄位數 — 交由 batch_insert helper 推導分塊大小。
 const KLINE_COLS: usize = 12;
-const TICKER_COLS: usize = 13;
+const TICKER_COLS: usize = 14;
 const OB_COLS: usize = 8;
 const TRADE_AGG_COLS: usize = 10;
 const LIQUIDATION_COLS: usize = 5;
@@ -83,6 +83,10 @@ fn validated_liquidation_row(msg: &MarketDataMsg) -> Option<LiquidationRow<'_>> 
         qty: valid_liquidation_real(*qty)?,
         price: valid_liquidation_real(*price)?,
     })
+}
+
+fn sanitize_optional_f32(value: Option<f64>) -> Option<f32> {
+    value.and_then(sanitize_f64).map(|v| v as f32)
 }
 
 /// Run the market data writer task: receive from channel, batch flush to PG.
@@ -275,10 +279,9 @@ async fn flush_klines(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
 /// Batch INSERT tickers to market.market_tickers with explicit 4000-row chunk cap.
 /// 批量插入行情到 market.market_tickers，顯式套用 4000 行分塊上限。
 ///
-/// Latent-bug fix (FA-2 Risk #1): ticker has 13 columns; without an override,
-/// natural chunk size would be 5041 rows (= 65533 params). A single V-migration
-/// column addition could push us over 65535 silently. The explicit 4000 cap
-/// pins the per-batch param count to 52000, leaving 13_535 headroom.
+/// Latent-bug fix (FA-2 Risk #1): ticker now has 14 columns; without an override,
+/// natural chunk size would still sit near the 65535-param cap. The explicit
+/// 4000 cap pins the per-batch param count to 56000, leaving 9_535 headroom.
 async fn flush_tickers(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     let pg = match pool.get() {
         Some(p) => p,
@@ -296,7 +299,7 @@ async fn flush_tickers(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
         TICKER_CHUNK_MAX_ROWS,
         |chunk| {
             let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
-                "INSERT INTO market.market_tickers (ts, symbol, last_price, mark_price, index_price, best_bid, best_ask, bid_size, ask_size, volume_24h, turnover_24h, spread_bps, open_interest) "
+                "INSERT INTO market.market_tickers (ts, symbol, last_price, mark_price, index_price, funding_rate, best_bid, best_ask, bid_size, ask_size, volume_24h, turnover_24h, spread_bps, open_interest) "
             );
             qb.push_values(chunk.iter(), |mut b, msg| {
                 if let MarketDataMsg::TickerSnapshot {
@@ -305,6 +308,7 @@ async fn flush_tickers(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
                     last_price,
                     mark_price,
                     index_price,
+                    funding_rate,
                     best_bid,
                     best_ask,
                     bid_size,
@@ -319,8 +323,9 @@ async fn flush_tickers(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
                     b.push_bind(ts);
                     b.push_bind(symbol.as_str());
                     b.push_bind(sanitize_f64(*last_price).map(|v| v as f32));
-                    b.push_bind(sanitize_f64(*mark_price).map(|v| v as f32));
-                    b.push_bind(sanitize_f64(*index_price).map(|v| v as f32));
+                    b.push_bind(sanitize_optional_f32(*mark_price));
+                    b.push_bind(sanitize_optional_f32(*index_price));
+                    b.push_bind(sanitize_optional_f32(*funding_rate));
                     b.push_bind(sanitize_f64(*best_bid).map(|v| v as f32));
                     b.push_bind(sanitize_f64(*best_ask).map(|v| v as f32));
                     b.push_bind(sanitize_f64(*bid_size).map(|v| v as f32));
@@ -328,7 +333,7 @@ async fn flush_tickers(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
                     b.push_bind(sanitize_f64(*volume_24h).map(|v| v as f32));
                     b.push_bind(sanitize_f64(*turnover_24h).map(|v| v as f32));
                     b.push_bind(sanitize_f64(*spread_bps).map(|v| v as f32));
-                    b.push_bind(sanitize_f64(*open_interest).map(|v| v as f32));
+                    b.push_bind(sanitize_optional_f32(*open_interest));
                 }
             });
             qb.push(" ON CONFLICT (symbol, ts) DO NOTHING");
@@ -715,8 +720,9 @@ mod tests {
             ts_ms: 1700000000000,
             symbol: symbol.into(),
             last_price: 50000.0,
-            mark_price: 50001.0,
-            index_price: 49999.0,
+            mark_price: Some(50001.0),
+            index_price: Some(49999.0),
+            funding_rate: Some(-0.0001),
             best_bid: 49999.5,
             best_ask: 50000.5,
             bid_size: 10.0,
@@ -724,7 +730,7 @@ mod tests {
             volume_24h: 1e9,
             turnover_24h: 5e13,
             spread_bps: 2.0,
-            open_interest: 1e6,
+            open_interest: Some(1e6),
         }
     }
 
@@ -840,6 +846,35 @@ mod tests {
         assert_eq!(kline_buf.len(), 2);
         assert_eq!(ticker_buf.len(), 1);
         assert_eq!(other_buf.len(), 1);
+    }
+
+    #[test]
+    fn test_ticker_forward_evidence_fields_are_nullable() {
+        let msg = make_ticker_msg("BTCUSDT");
+        if let MarketDataMsg::TickerSnapshot {
+            mark_price,
+            index_price,
+            funding_rate,
+            open_interest,
+            ..
+        } = msg
+        {
+            assert_eq!(mark_price, Some(50001.0));
+            assert_eq!(index_price, Some(49999.0));
+            assert_eq!(funding_rate, Some(-0.0001));
+            assert_eq!(open_interest, Some(1e6));
+        } else {
+            panic!("expected ticker snapshot");
+        }
+    }
+
+    #[test]
+    fn test_sanitize_optional_f32_keeps_zero_and_negative_funding_semantics() {
+        assert_eq!(sanitize_optional_f32(Some(0.0)), Some(0.0));
+        assert_eq!(sanitize_optional_f32(Some(-0.0001)), Some(-0.0001_f32));
+        assert_eq!(sanitize_optional_f32(None), None);
+        assert_eq!(sanitize_optional_f32(Some(f64::NAN)), None);
+        assert_eq!(sanitize_optional_f32(Some(f64::INFINITY)), None);
     }
 
     #[test]

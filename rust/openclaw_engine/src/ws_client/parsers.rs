@@ -235,7 +235,16 @@ pub(super) fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option
     let funding_rate = item
         .get("fundingRate")
         .and_then(|v| v.as_str())
-        .and_then(|s| s.parse::<f64>().ok());
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|p| p.is_finite());
+
+    // FND-4 P3：從 tickers 流提取 markPrice；缺欄/不可解析/非正/非有限值
+    // 均保持 None，讓 forward recorder 寫 SQL NULL 而不是 0 佔位。
+    let mark_price = item
+        .get("markPrice")
+        .and_then(|v| v.as_str())
+        .and_then(|s| s.parse::<f64>().ok())
+        .filter(|p| p.is_finite() && *p > 0.0);
 
     // W1 sub-task 3 (E1-γ, 2026-05-11)：從 tickers 流提取下次 funding 時間戳。
     // Bybit V5 tickers `nextFundingTime` 是字串編碼的 ms epoch；缺欄/不可解 → None。
@@ -255,7 +264,7 @@ pub(super) fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option
         .get("indexPrice")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())
-        .filter(|&p| p > 0.0);
+        .filter(|p| p.is_finite() && *p > 0.0);
 
     // EDGE-P2-2: Extract open interest (contract count, string-encoded f64).
     // Bybit sometimes emits null/missing on early snapshots — treat as None
@@ -280,6 +289,7 @@ pub(super) fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option
     event.bid_price = bid;
     event.ask_price = ask;
     event.funding_rate = funding_rate;
+    event.mark_price = mark_price;
     event.next_funding_ms = next_funding_ms;
     event.index_price = index_price;
     event.open_interest = open_interest;

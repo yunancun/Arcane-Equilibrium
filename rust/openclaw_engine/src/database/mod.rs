@@ -200,8 +200,9 @@ pub enum MarketDataMsg {
         ts_ms: u64,
         symbol: String,
         last_price: f64,
-        mark_price: f64,
-        index_price: f64,
+        mark_price: Option<f64>,
+        index_price: Option<f64>,
+        funding_rate: Option<f64>,
         best_bid: f64,
         best_ask: f64,
         bid_size: f64,
@@ -209,7 +210,7 @@ pub enum MarketDataMsg {
         volume_24h: f64,
         turnover_24h: f64,
         spread_bps: f64,
-        open_interest: f64,
+        open_interest: Option<f64>,
     },
     /// Orderbook L5 1-minute summary / L5 每分鐘 OB 摘要
     ObSnapshot {
