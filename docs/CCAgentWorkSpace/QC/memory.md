@@ -150,3 +150,6 @@
 ## 2026-06-10 — P4 online-FDR QC sign-off（APPROVE-with-FIX，P4 可進 E1-READY）
 
 兩 sign-off 點皆 APPROVE-with-FIX。點 1 pre-reg hash 鏈：FIX-1.1 consume 限 supersedes 鏈 head / FIX-1.2 hash 釘 evidence 窗+重算先於一切渲染 / FIX-1.3 falsification 真評估+觸發鑄 dead-mode lesson。點 2 sealed-holdout §9（含對照原文重裁）：**FIX-2.1b 唯一 §9 阻斷**——gate 4(b) 原文 `>` 點比較對 daily-bar 區間對象語義不足（`==` off-by-one + 非對齊 oos_start 跨界 bar 全漏），正確=「末 bar 尾端 ≤ oos_start」區間算術鏡像 `_bucket_admissible`，reason 統一 `sealed_holdout_overlap`；FIX-2.3 re-scope 至 M1（confirm=accounting-confirm，null-confirm 率 15-40%，P5 晉升另要求 opened-OOS math gate+regime 標籤）。交互：MIT #3 × B1 promotion 語義零副作用；FIX-3.1 pre-DSR skip 經 MIT ACK-with-條件（謂詞 value-invariance 邊界，down-span 須換 value-free 版）。QN-1 V132 單向性非 DB-enforced（state_flags_chk 有部分防護）/QN-3 grep proof point-in-time/QN-4 同 cell 多 sealed row 聚合規則 fail-closed 取任一重疊即 DEFER。教訓：工具缺口（無 Bash 讀 branch）下重構原文必標註並留重裁條款——本次重構失準但條款救回。報告：workspace/reports/2026-06-10--l2-p4-qc-signoff.md
+
+## 2026-06-11 — Polymarket 數據軸紀律 memo(PROCEED, artifact-only)
+- 賠率=corroborating context only 釘死,進交易鏈必走三段鏈;採集端禁 relevance 截斷(不可逆選擇偏差)、append-only point-in-time、track-to-resolution(反 lib 預設 skip-closed,防 survivorship bias);H4 calibration=全軸前置 gate;CLOB /prices-history 回補走獨立 retrospective lane(resolved 市場僅 ≥12h 粒度)。報告:workspace/reports/2026-06-11--polymarket_axis_discipline.md(PM 代落檔)
