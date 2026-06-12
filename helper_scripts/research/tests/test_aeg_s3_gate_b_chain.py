@@ -231,6 +231,7 @@ def test_gate_b_chain_runs_to_execution_realism(tmp_path):
 
 def test_gate_b_chain_runs_full_formal_matrix_when_inputs_are_provided(tmp_path):
     args = _base_args(tmp_path)
+    args["pbo_grid_json"] = str(_pbo_grid_json(tmp_path))
     args["fnd2_run_dir"] = str(_fnd2_dir(tmp_path))
     args["regime_run_dir"] = str(_regime_dir(tmp_path))
 
@@ -240,7 +241,9 @@ def test_gate_b_chain_runs_full_formal_matrix_when_inputs_are_provided(tmp_path)
     assert summary["chain_status"] == "COMPLETE_MATRIX_NON_PROMOTABLE"
     assert summary["outputs"]["event_breadth_run_dir"] is not None
     assert summary["outputs"]["formal_matrix_run_dir"] is not None
+    assert summary["gate_snapshot"]["listing_pbo_status"] == "produced_candidate_grid"
     assert summary["gate_snapshot"]["execution_realism_status"] == "PASS"
+    assert result["candidate_rows"]["summary"]["pbo_status"] == "measured"
     assert result["matrix"]["summary"]["coverage_gate_status"] == "PASS"
     assert result["matrix"]["summary"]["survivorship_mode"] == "pit_fnd2_proven_none"
     assert result["matrix"]["summary"]["final_label_counts"]
