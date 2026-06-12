@@ -24,6 +24,19 @@ This directory holds all engineering documents, logs, handoff records, and decis
 | 历史归档 | `archive/` |
 | 角色报告 | `CCAgentWorkSpace/*/workspace/reports/` |
 
+## Multi-Agent 接手路径
+
+| 任务类型 | 必读入口 | 读取边界 |
+|---|---|---|
+| 接手 active work / 判断是否能开工 | `../TODO.md` | 只把这里当当前 owner、gate、next action 权威。 |
+| 找某个主题的设计和证据 | `_indexes/initiative_index.md` | 按主题进设计、报告、archive；不要从长索引反推 active 状态。 |
+| 查历史文档或近期交付清单 | `_indexes/document_index.md` | 历史/导航用途；不是 active queue。 |
+| 查审计证据 | `_indexes/audit_index.md` | 先确认 `TODO.md` 是否仍 active，再读 audit/report。 |
+| 写新文档 / 移动路径 | 本文件 + `_indexes/path_redirects.md` | 先分类和命名；移动前保留 redirect/stub 计划。 |
+| 读取 role report | `CCAgentWorkSpace/README.md` | report 是证据；最终当前状态仍回到 `TODO.md`。 |
+| 执行 runbook / 操作手册 | `runbooks/README.md` | runbook 不是授权；运行态操作先看 `TODO.md` operator actions。 |
+| 查架构背景 | `architecture/README.md` + `../README.md` | 旧架构文档可能是 reference，读 banner 和当前 ADR/AMD。 |
+
 ---
 
 ## 强制规则 (Mandatory Rules)
