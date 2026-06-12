@@ -244,3 +244,6 @@ v1 樂觀「Strategist 354 applied / MLDE 41.7%」結論在 v2 不持續；v1 NE
 - v5.8 §3/§4 工時表 2,780-3,930 hr 仍 0 字 LLM cost — 與 v5.7 audit 同性質 finding 但 module 數量 +13 倍放大
 - ADR roster gap：0034-0040 七個 ADR 但漏掉 ContextDistiller v4 = governance 盲點
 - Must-fix 6 條（§5）：ADR-0041 補入 1A-β / 工時表加 LLM cost 欄 / M4 Cowork review path 釘 / M11 narrative policy 釘 / writer path 修 / DOC-08 cap 重估
+
+## 2026-06-11 — 工具登記：Claude Code session token 用量分析腳本可用
+- `helper_scripts/analyze_token_usage.py`（改編自 obra/superpowers，MIT，stdlib-only 唯讀）：按主會話／subagent 分桶統計 input/output/cache token 與估算成本；一行用法 `python3 helper_scripts/analyze_token_usage.py --recent 2 --top 15` 即出最近 2 個 session 分桶明細 + 全 session 合計 + 按 agentType 聚合 top-N（AI 團隊 token 成本歸因可直接取數；subagent 口徑=agent transcript 權威，非 toolUseResult 末次 call 低估值）。
