@@ -1,5 +1,10 @@
 # Phase 3a — update_params() 改造 = AGT-1（W9-10，6/05-6/18，10 工作日）
 
+> **LEGACY / REFERENCE**
+>
+> 旧融合方案 phase packet。当前 active dispatch、gate、owner、runtime evidence
+> 以根目录 `TODO.md` 和最新 PM/role report 为准。
+
 > 前置：Phase 2 完成
 > DoD：10 個 update_params()（Python 5 + Rust 5）· 50+ 新 tests · Python-Rust 行為一致 · 全量全綠
 

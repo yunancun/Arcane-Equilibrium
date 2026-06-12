@@ -1,11 +1,20 @@
 ---
 name: project_2026_05_31_funding_short_structural_doa
-description: A1 funding_short_v2 結構性 DOA — Bybit 正側 funding 硬上限 +10.9% APR < 策略 30% 入場門檻；附 f7271405 隔壁修復三審核驗
+description: SUPERSEDED lesson: A1 funding_short_v2 was once judged structural DOA from sampled funding history; current authority treats it as regime-dormant and requires exchange instruments-info upperFundingRate SSOT.
 metadata: 
   node_type: memory
   type: project
   originSessionId: 202b21e7-31be-4a10-b388-799ce5018582
 ---
+
+> **SUPERSEDED / CURRENT AUTHORITY**
+>
+> 本条保留 2026-05-31 当时的错误判断链，不能再作为当前策略可行性结论。
+> 后续审计已更正：funding cap 应以 Bybit `instruments-info.upperFundingRate`
+> 为 SSOT，而不是低溢价窗口的 funding/history 样本最大值。当前口径：
+> `funding_short_v2` 是 regime-dormant / learning-only 候选，不是永久结构性
+> DOA。引用前必须先读 `.codex/MEMORY.md` 的 Funding-cap lesson 与
+> `docs/audits/2026-05-31--p0_edge_cost_wall_investigation.md`。
 
 核驗隔壁 session commit `f7271405`（restore A1 functional replay）+ 深挖 A1 (funding_short_v2) 無 alpha 真因。三層遞進結論。
 

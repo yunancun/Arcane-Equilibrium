@@ -1,5 +1,11 @@
 # 融合方案執行計劃 V1 — 索引
-# Agent 接手入口：讀此文件��定要做哪個 Phase，然後只讀對應的 Phase 文件
+# LEGACY / REFERENCE：旧融合方案 phase 包导航，不是当前 agent 接手入口
+
+> **LEGACY / REFERENCE**
+>
+> 本索引保留 2026-04 融合方案和 REF/phase 计划的历史导航价值。当前 agent
+> 接手必须先读 `TODO.md`、`README.md`、`docs/agents/context-loading.md`
+> 和任务相关的最新报告；不得只从本文件的旧 20 周 phase 排期派工。
 
 ## 排期總覽（20 週 · 起算 4/11）
 

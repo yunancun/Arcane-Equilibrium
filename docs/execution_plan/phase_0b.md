@@ -1,5 +1,10 @@
 # Phase 0b — TimescaleDB 啟用（W2-3，4/18-4/30，10 工作日）
 
+> **LEGACY / REFERENCE**
+>
+> 旧融合方案 phase packet。当前 active dispatch、gate、owner、runtime evidence
+> 以根目录 `TODO.md` 和最新 PM/role report 为准。
+
 > 前置：Phase 0a 完成
 > DoD：TimescaleDB hypertable 可壓縮/retention · 連續聚合正常 · Grafana 正常 · OU 修正 · 4429+ tests
 

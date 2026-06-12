@@ -4,6 +4,26 @@
 
 This directory holds all engineering documents, logs, handoff records, and decision memos for the Arcane Equilibrium agentic trading governance system.
 
+> **ROUTER FIRST**
+>
+> 本文件是文档目录入口，不是 active dispatch queue，也不是完整历史证据库。
+> 当前工作状态、owner、gate、runtime evidence、operator action 一律读根目录
+> `TODO.md`；本文件只提供稳定目录路由和近期新增文档索引。大规模历史 report
+> 不在这里全文展开，按主题先看 `docs/_indexes/initiative_index.md`。
+
+## 当前入口速查
+
+| 需要 | 入口 |
+|---|---|
+| 当前活跃工作 / blocker / next action | `../TODO.md` |
+| 稳定项目入口 / 架构地图 | `../README.md` |
+| agent 启动路由 | `agents/context-loading.md` |
+| 主题证据导航 | `_indexes/initiative_index.md` |
+| 路径迁移 / redirect 记录 | `_indexes/path_redirects.md` |
+| 版本增量历史 | `CLAUDE_CHANGELOG.md` |
+| 历史归档 | `archive/` |
+| 角色报告 | `CCAgentWorkSpace/*/workspace/reports/` |
+
 ---
 
 ## 强制规则 (Mandatory Rules)
@@ -165,6 +185,15 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 |------|------|
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-12--l2_root_todo_tail_triage.md` | PM triage: root `L2_TODO.md` is not completed-archive eligible；open tails mirrored into TODO v149 `P1-L2-ADVISORY-MESH-TAILS`；no runtime mutation/model call/deploy。 |
 | `CCAgentWorkSpace/Operator/2026-06-12--l2_root_todo_tail_triage.md` | Operator brief mirror: V138/V139 activation, E2E-1, P2p sentinel Telegram/probe/install, and P5 remain gated; current safe action was active-state repair only。 |
+
+### 2026-06-12 文档治理第一批降权索引
+
+| 文件 | 内容 |
+|------|------|
+| `_indexes/initiative_index.md` | 主题入口索引：L2、AEG/Gate-B、P5-SM、OPS-2、incident-policy、Multi-Agent historical ledger；明确不是 active queue。 |
+| `_indexes/README.md` | `docs/_indexes` 目录说明；标记 `document_inventory.json` 为 stale snapshot。 |
+| `audit/README.md` | 说明 `docs/audit/` 是 legacy 62-finding audit bundle，不是当前 issue tracker。 |
+| `audits/README.md` | 说明 `docs/audits/` 是 dated audit evidence，不是 active queue。 |
 
 ### 2026-06-12 AEG-S3 Gate-B watch / preflight
 

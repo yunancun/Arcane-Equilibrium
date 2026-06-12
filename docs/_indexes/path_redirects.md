@@ -17,6 +17,7 @@ are stable:
 - `TODO.md`
 - `CONTEXT.md`
 - `AGENTS.md`
+- `L2_TODO.md` until its open tails are fully retired from `TODO.md`
 - `.codex/*`
 - `memory/*`
 - `docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md`
@@ -51,6 +52,15 @@ are stable:
 | `docs/audit/*` | `docs/04-audits/legacy/*` | cold batch after redirect stubs |
 | `docs/audits/*` | `docs/04-audits/*` | cold batch after redirect stubs |
 | `.claude_reports/*.md` | `docs/90-archive/generated/claude-reports/*.md` | cold batch after no active references |
+| `L2_TODO.md` | `docs/execution_plan/2026-06-05--l2_advisory_mesh_active_tail.md` or archive stub | only after `TODO.md` owns no open L2 tail and all direct references are updated |
+
+## Current No-Move Decisions (2026-06-12)
+
+| Path | Decision | Reason |
+|---|---|---|
+| `L2_TODO.md` | keep in place; add ACTIVE-TAIL MIRRORED banner | It still has many direct references and open operator-gated tails are mirrored in `TODO.md`; moving it now would create more drift than it removes. |
+| `docs/CCAgentWorkSpace/*/workspace/reports/*` | no bulk move | These are evidence artifacts with many hard references. Use `docs/_indexes/initiative_index.md` for routing. |
+| `docs/audit/` and `docs/audits/` | no path migration in first batch | Directory names are confusing, but reports are evidence. Add README semantics first; migrate only with redirect stubs later. |
 
 ## Redirect Stub Template
 

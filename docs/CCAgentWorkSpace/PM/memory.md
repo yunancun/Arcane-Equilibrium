@@ -300,3 +300,8 @@
 ## 2026-06-12 L2 root TODO tail triage
 
 - Root `L2_TODO.md` is not completed-archive eligible: V138/V139 activation, E2E-1, P2p sentinel operator gates, and P5 remain open. PM mirrored the uncovered tails into TODO v149 `P1-L2-ADVISORY-MESH-TAILS`; no runtime mutation/model call/deploy occurred.
+
+## 2026-06-12 Documentation governance first batch
+
+- PM -> R4/CC/FA -> PA -> PM 审阅确认：Markdown 历史证据不做删除；第一批只做 active/history 边界降权、routing banner、initiative index、audit folder semantics 和未跟踪 `.DS_Store` 清理。
+- 修正高风险 stale 指针：`L2_TODO.md` 不再是 active queue；funding_short 永久 DOA 与 Linear-only active 仅保留为历史，当前 authority 指向 TODO / `.codex/MEMORY.md` / `docs/agents/issue-tracker.md`。

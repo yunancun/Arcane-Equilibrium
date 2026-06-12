@@ -1,5 +1,10 @@
 # Phase 5 — James-Stein + DL-1 + DL-2（W16-18，7/24-8/13，15 工作日）
 
+> **LEGACY / REFERENCE**
+>
+> 旧融合方案 phase packet。当前 active dispatch、gate、owner、runtime evidence
+> 以根目录 `TODO.md` 和最新 PM/role report 为准。
+
 > 前置：Phase 3b 完成（James-Stein）+ Phase 2 完成（DL-1/DL-2）
 > DoD：JS 正確收斂 · DL-1 最優維度選定 · DL-2 Shadow 運行中 · 4429+20 tests
 

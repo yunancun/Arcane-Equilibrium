@@ -1,8 +1,14 @@
 # AgentTodo: Multi-Agent Rework
 
 Date: 2026-05-05
-Status: Historical implementation backlog; active dispatch now in `TODO.md` v13
+Status: Historical implementation backlog; active dispatch now in root `TODO.md`
 Parent plan: `ENGINEERING_PLAN.md`
+
+> **LEGACY / REFERENCE**
+>
+> 本文件是 Multi-Agent Rework 的历史实施 ledger。当前全仓 active dispatch
+> queue 只以根目录 `TODO.md` 为准；不要从本文件直接启动新 MAG / Sprint
+> 工作，除非 `TODO.md` 或新的 PM 报告明确重新打开对应范围。
 
 ## 2026-05-07 Active-Queue Overlay
 

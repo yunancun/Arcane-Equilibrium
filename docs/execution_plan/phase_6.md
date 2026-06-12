@@ -1,5 +1,10 @@
 # Phase 6 — 驗收（W19-20，8/14-8/27，10 工作日）
 
+> **LEGACY / REFERENCE**
+>
+> 旧融合方案 phase packet。当前 active dispatch、gate、owner、runtime evidence
+> 以根目录 `TODO.md` 和最新 PM/role report 为准。
+
 > 前置：Phase 5 完成
 > DoD：4 階段放權可流轉 · 壓測 SLA 全通過 · EvolutionEngine deprecated · 4629+ tests · QA 簽核
 

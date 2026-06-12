@@ -4,6 +4,12 @@ Date: 2026-05-05
 Status: Draft for PM/CC/FA/PA review
 Scope: Convert the current mixed Rust trading engine + Python 5-Agent advisory layer into a real, auditable, intelligent multi-agent decision system.
 
+> **LEGACY / REFERENCE**
+>
+> 本文件保留 2026-05-05 多 Agent 重构设计背景。后续已由 OpenClaw
+> repositioning、L2 Advisory Mesh、ADR/AMD 与根目录 `TODO.md` 多轮收敛；
+> 当前实现或派工不能只依据本 draft。
+
 ## 1. Executive Summary
 
 The original EX-06/DOC-04 design defines a real multi-agent trading architecture:
