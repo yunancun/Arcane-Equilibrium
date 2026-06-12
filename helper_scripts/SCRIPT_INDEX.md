@@ -131,15 +131,17 @@ artifact-only，0 DB / 0 Bybit / 0 runtime / 0 trading path；`gross_bps=-markou
 （short fade），`net_bps=gross_bps-round_trip_cost_bps`，daily returns 只從 explicit
 accepted event-window samples 聚合。預設只接受 `PASS_CAPTURE`；slow/missing capture、
 missing horizon fill、missing regime 皆 fail-closed。PBO 不捏造，缺 explicit
-candidate-grid evidence 時下游會以 `missing_pbo` reject。
+candidate-grid evidence 時下游會以 `missing_pbo` reject；2026-06-12 補上顯式
+`--include-default-pbo-grid` / `--pbo-grid-json`，只在 operator/PM 明確要求時按
+Gate-B 原生 markout horizons（30/60/300s）與成本 cell 產 `pbo_candidates`。
 
 | 檔 | 職責 |
 |---|---|
 | `research/aeg_s3_listing_fade/__init__.py` | schema / runner 版本與 listing-fade 常數。 |
-| `research/aeg_s3_listing_fade/builder.py` | 純函數核心：解析 Gate-B 或 capture-events JSONL、構造 event-window samples、daily returns、reject summary。 |
+| `research/aeg_s3_listing_fade/builder.py` | 純函數核心：解析 Gate-B 或 capture-events JSONL、構造 event-window samples、daily returns、explicit PBO grid candidates、reject summary。 |
 | `research/aeg_s3_listing_fade/artifact.py` | 寫 `listing_fade_candidate_evidence.json`、summary、manifest、artifact_index。 |
-| `research/aeg_s3_listing_fade/harness.py` | CLI：`--gate-b-run-dir` 或 `--capture-events-jsonl` + `--horizon-s` + `--round-trip-cost-bps` + `--k-trials` → evidence artifact。 |
-| `research/tests/test_aeg_s3_listing_fade.py` | synthetic bite tests：Gate-B run 串 AEG-S3 rows、V130 export 計 horizon markout、缺 regime fail-closed、slow capture 預設排除、manifest/index、靜態禁 runtime/DB/Bybit route。 |
+| `research/aeg_s3_listing_fade/harness.py` | CLI：`--gate-b-run-dir` 或 `--capture-events-jsonl` + `--horizon-s` + `--round-trip-cost-bps` + `--k-trials` + optional explicit PBO grid → evidence artifact。 |
+| `research/tests/test_aeg_s3_listing_fade.py` | synthetic bite tests：Gate-B run 串 AEG-S3 rows、explicit PBO grid 消除 `missing_pbo`、default grid horizon 缺口報 insufficient、V130 export 計 horizon markout、缺 regime fail-closed、slow capture 預設排除、manifest/index、靜態禁 runtime/DB/Bybit route。 |
 
 ## 2026-06-11 AEG-S3 oi_delta evidence producer（`research/aeg_s3_oi_delta/`）
 
@@ -267,13 +269,15 @@ execution observations producer、event execution realism adapter；若同時提
 不呼叫 Bybit、不寫 DB、不啟動 runtime。缺 FND2/regime 時仍保留到
 `execution_realism.json` 的中間產物；給齊全域 artifact 時才輸出 formal matrix。
 execution FAIL / matrix non-promotable 是 gate 結果，不是 orchestration error。
+2026-06-12 listing_fade PBO grid 接線後，wrapper 也透傳 `--include-default-pbo-grid`
+/ `--pbo-grid-json` 到第一段 listing evidence。
 
 | 檔 | 職責 |
 |---|---|
 | `research/aeg_s3_gate_b_chain/__init__.py` | runner / summary / manifest schema 版本。 |
 | `research/aeg_s3_gate_b_chain/artifact.py` | `gate_b_chain_summary.json` + manifest/artifact_index writer。 |
-| `research/aeg_s3_gate_b_chain/harness.py` | CLI：`--gate-b-run-dir` + listing/execution knobs；optional `--fnd2-run-dir --regime-run-dir` → full formal matrix chain。 |
-| `research/tests/test_aeg_s3_gate_b_chain.py` | synthetic bite tests：chain 到 execution realism PASS、給齊 FND2/regime 後跑 formal matrix、缺一個 matrix input fail-fast、靜態禁 runtime/DB/Bybit route。 |
+| `research/aeg_s3_gate_b_chain/harness.py` | CLI：`--gate-b-run-dir` + listing/execution/PBO knobs；optional `--fnd2-run-dir --regime-run-dir` → full formal matrix chain。 |
+| `research/tests/test_aeg_s3_gate_b_chain.py` | synthetic bite tests：chain 到 execution realism PASS、PBO grid 透傳、給齊 FND2/regime 後跑 formal matrix、缺一個 matrix input fail-fast、靜態禁 runtime/DB/Bybit route。 |
 
 ## 2026-06-05 AEG candidate metrics adapter（`research/aeg_candidate_metrics/`）
 
