@@ -61,6 +61,11 @@ are stable:
 | `L2_TODO.md` | keep in place; add ACTIVE-TAIL MIRRORED banner | It still has many direct references and open operator-gated tails are mirrored in `TODO.md`; moving it now would create more drift than it removes. |
 | `docs/CCAgentWorkSpace/*/workspace/reports/*` | no bulk move | These are evidence artifacts with many hard references. Use `docs/_indexes/initiative_index.md` for routing. |
 | `docs/audit/` and `docs/audits/` | no path migration in first batch | Directory names are confusing, but reports are evidence. Add README semantics first; migrate only with redirect stubs later. |
+| `docs/runbooks/` | no path migration in second batch | Add `README.md` router first; runbooks may contain operational hard references and should not be moved without operator/deploy context. |
+| `docs/architecture/` | no path migration in second batch | Add `README.md` router first; architecture files are referenced by ADRs, README, TODO, and reports. |
+| `docs/archive/` | no path migration in second batch | Archive is historical evidence. Add root README semantics; do not delete or rename evidence paths. |
+| `docs/execution_plan/README.md` | keep path; strengthen current router | Many old reports and specs link this path; change semantics in-place instead of moving. |
+| `docs/README.md` long Document Index | moved content to `_indexes/document_index.md`, keep README as router | Reduces active-entry bloat without changing historical paths; future long index updates belong in `_indexes/document_index.md`. |
 
 ## Redirect Stub Template
 

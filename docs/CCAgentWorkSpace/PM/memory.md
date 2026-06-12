@@ -305,3 +305,9 @@
 
 - PM -> R4/CC/FA -> PA -> PM 审阅确认：Markdown 历史证据不做删除；第一批只做 active/history 边界降权、routing banner、initiative index、audit folder semantics 和未跟踪 `.DS_Store` 清理。
 - 修正高风险 stale 指针：`L2_TODO.md` 不再是 active queue；funding_short 永久 DOA 与 Linear-only active 仅保留为历史，当前 authority 指向 TODO / `.codex/MEMORY.md` / `docs/agents/issue-tracker.md`。
+
+## 2026-06-12 Documentation governance second batch
+
+- 第二批确认策略：入口瘦身、目录 README、摘要库存和点名旧文档降权；继续不删除 Markdown、不批量移动 role reports。
+- `docs/README.md` 只做 router，长索引归 `docs/_indexes/document_index.md`；`document_inventory.json` 只作规模/导航摘要，不作删除判据。
+- 旧 Linear-only、L2 active stub、Paper promotion、3E-ARCH/v5.8 frozen module 语义必须在正文层明确 historical/reference，不能只依赖顶部 banner。

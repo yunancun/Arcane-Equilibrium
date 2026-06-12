@@ -7,6 +7,18 @@
 > 接手必须先读 `TODO.md`、`README.md`、`docs/agents/context-loading.md`
 > 和任务相关的最新报告；不得只从本文件的旧 20 周 phase 排期派工。
 
+## Current Plan Router
+
+| 需要 | 先读 |
+|---|---|
+| 当前 active queue / owner / gate / runtime evidence | 根目录 `TODO.md` |
+| 跨主题证据入口 | `docs/_indexes/initiative_index.md` |
+| L2 Advisory Mesh 当前尾巴 | `TODO.md` row `P1-L2-ADVISORY-MESH-TAILS`; 本目录 L2 文件只作 roadmap/reference |
+| AEG / Alpha-Edge 当前路线 | `TODO.md` `P0-EDGE-1` / `AEG-S3-CANDIDATE-DIRECT-ROWS` + `docs/_indexes/initiative_index.md` |
+| Apple Silicon / AE runtime rename gate | `2026-06-10--ae_runtime_rename_migration_guide.md`; active trigger 仍看 `TODO.md` |
+| REF / replay 历史设计 | 下方 REF-20/REF-21 条目；是否 active 必须回到 `TODO.md` 和最新 PM report |
+| 旧 phase packet | 下方 `phase_*.md` / `critical_path.md`; legacy/reference only |
+
 ## 排期總覽（20 週 · 起算 4/11）
 
 ```
@@ -58,5 +70,5 @@ Phase 6   (W19-20,8/14-8/27):  驗收
 |------|------|
 | `docs/references/2026-04-04--unified_db_ml_news_workplan_draft_v0.1.md` | 融合方案 v0.5 完整設計（889 行） |
 | `docs/references/2026-04-03--ml_dl_learning_architecture_v0.4.md` | ML/DL 架構設計 |
-| `docs/references/2026-04-03--data_storage_architecture_optimal_draft_v0.1.md` | DB 原始設計 |
+| `docs/archive/2026-04-03--data_storage_architecture_optimal_draft_v0.1.md` | DB 原始設計（已归档；当前 data storage 入口见 `docs/architecture/DATA_STORAGE_ARCHITECTURE_V1.md`） |
 | `docs/references/2026-04-04--execution_plan_v1.md` | 完整執行計劃（本目錄的合併版） |

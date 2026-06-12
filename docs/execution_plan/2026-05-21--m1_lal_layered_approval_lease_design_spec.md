@@ -20,6 +20,11 @@ mirror precedent:
 scope: module DESIGN only — 不寫 V112 DDL（per V112 spec doc 范圍）/ 不寫 IMPL code（E1 Sprint 4 起 IMPL）/ 不假設 V112 schema 細節（placeholder ref）/ 不擴張 M3/M7/M11 module 內部（cross-ref 即可）
 ---
 
+> **REFERENCE / FROZEN AUTONOMY MODULE SPEC**
+>
+> 本 spec 保留 v5.8 Sprint 1A module design lineage。当前 active-IMPL 以
+> `TODO.md` 和最新 PM/role reports 为准；不得仅凭本 spec 派发实现或授权 live 影响动作。
+
 # M1 Layered Approval Lease (LAL) Module DESIGN Spec
 
 ## §0 TL;DR

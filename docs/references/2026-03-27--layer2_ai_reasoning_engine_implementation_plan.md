@@ -1,5 +1,12 @@
 # Layer 2 AI 推理引擎实现计划 (Layer 2 AI Reasoning Engine Implementation Plan)
 
+> **HISTORICAL L2 PLAN / NOT CURRENT L2 AUTHORITY**
+>
+> 本文件保留 2026-03 Layer 2 设计 lineage。当前 L2 Advisory Mesh、cost、
+> provenance、sentinel、model-call gate 和 open tails 以根目录 `TODO.md` row
+> `P1-L2-ADVISORY-MESH-TAILS`、`L2_TODO.md` historical ledger、2026-06-05 L2
+> execution plan 和最新 PM/role reports 为准。
+
 **日期：** 2026-03-27
 **状态：** 设计完成，待实现
 **分支：** main（实现时将在 feature 分支进行）

@@ -11,11 +11,16 @@ type: reference
 > `CLAUDE.md` External Tools、`.codex/MEMORY.md` External Tools。当前口径为
 > GitHub Issues active；Linear historical/passive unless explicitly reopened。
 
-**完整 SOP**：CLAUDE.md §十二「外部整合工具映射」。本 memory 存入口資訊 + 各工具 status + decline 理由（避免未來 sub-agent 重新評估）。
+**完整 SOP**：当前外部工具权威见 `CLAUDE.md` External Tools、
+`.codex/MEMORY.md` External Tools 和 `docs/agents/issue-tracker.md`。本 memory
+仅保存 2026-04-29 快照入口資訊 + 各工具当时 status + decline 理由（避免未來
+sub-agent 误以为 Notion/Coupler/MotherDuck/Slack 曾被批准）。
 
-**Posture（2026-04-29 operator 簡化決定）**：**Linear 是唯一 active workflow tool**。其他工具不融入工作流，沒有 SOP gate。
+**Historical posture（2026-04-29 operator 簡化決定）**：当时口径为
+**Linear was the only active workflow tool**。该口径已被当前规则 supersede：
+GitHub Issues active；Linear historical/passive unless explicitly reopened。
 
-## 🟢 ACTIVE — Linear（唯一 active workflow tool）
+## HISTORICAL — Linear was active in the 2026-04-29 snapshot
 
 - Team: `NCYu`（id `0ac8e33e-9f7b-4406-b803-6716bf5765a7`）
 - Project: [`OpenClaw 62-Finding Remediation`](https://linear.app/ncyu/project/openclaw-62-finding-remediation-de1bc8f68e42)（id `557ab98c-5500-4a0b-9b0f-ba65104c68a5`）
@@ -25,7 +30,9 @@ type: reference
 - 鏡像對象：62-finding mainline + active backlog + time-driven items；**不**鏡像所有 TODO.md 條目
 - **Pricing**：Free Plan（1 user 充足，無付費風險）
 
-**SOP**：Wave/Batch Sign-off git commit landed 之後，主會話更新對應 Linear 父 issue（checklist + status flip）。
+**Historical SOP**：Wave/Batch Sign-off git commit landed 之後，主會話更新對應
+Linear 父 issue（checklist + status flip）。当前不适用；active tracker 以
+GitHub Issues 为准。
 
 ## ❄️ FROZEN — Notion（保留快照不維護）
 

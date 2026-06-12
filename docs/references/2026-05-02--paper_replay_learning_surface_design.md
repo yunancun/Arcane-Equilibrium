@@ -1,5 +1,11 @@
 # REF-20 - Paper Replay Lab and Learning Surface Design
 
+> **REFERENCE / PAPER PROMOTION SEMANTICS SUPERSEDED**
+>
+> 本文件保留 REF-20 replay / learning surface lineage。Paper 不是当前 active
+> promotion evidence lane；alpha-bearing promotion 当前以 `CLAUDE.md` hard
+> boundary、AMD-2026-05-15-01、ADR-0047、`TODO.md` 和最新 PM/role reports 为准。
+
 **Date:** 2026-05-02
 **Status:** Draft design contract; implementation must follow REF-19 boundaries.
 **Owner:** PM

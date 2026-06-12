@@ -8,6 +8,7 @@
 | 文件 | 状态 | 用途 |
 |---|---|---|
 | `initiative_index.md` | Active router | 按主题串起当前入口、设计、报告和历史证据。 |
+| `document_index.md` | Historical document index | 从 `docs/README.md` 迁出的长索引；保存近期/历史文档入口，不是 active queue。 |
+| `audit_index.md` | Audit router | 解释 `docs/audit/`、`docs/audits/`、`governance_dev/audits/` 的语义差异。 |
 | `path_redirects.md` | Active migration log | 记录已执行和计划中的路径迁移，移动前先查这里。 |
-| `document_inventory.json` | **STALE SNAPSHOT** | 2026-05-06 生成快照；只作历史规模参考，不代表当前文件数量。重建前不要据此判断孤儿文件或删除候选。 |
-
+| `document_inventory.json` | Current summary snapshot | 2026-06-12 重建的摘要库存；只用于规模/目录导航，不得单独作为删除候选依据。 |

@@ -577,3 +577,10 @@ YYYY-MM-DD HH:MM TZ
 - Dispatch chain: `PM -> R4(explorer) + CC(default) + FA(default) -> PA(default) -> PM`.
 - Result: first batch landed as routing/banners/indexes only. `L2_TODO.md` is now explicitly not the active queue; old execution phase packets are legacy/reference; external-tool and funding_short memories gained current-authority corrections; audit folders gained README semantics; untracked `.DS_Store` files were removed.
 - Boundary: no runtime, DB, auth, risk, trading, deploy, model-call, or code-path change. Existing unrelated Rust/helper WIP was not touched.
+
+# 2026-06-12 — Documentation Governance Second Batch
+
+- Task: continue subagent-assisted documentation governance after operator asked to start the next batch.
+- Dispatch chain: `PM -> R4(explorer) + CC(default) + FA(default) -> PA(default) -> PM`.
+- Result: `docs/README.md` is now router-sized, the long document index moved to `docs/_indexes/document_index.md`, `document_inventory.json` became a v2 summary snapshot, second-level README routers were added, and high-risk historical docs got reference/superseded wording.
+- Boundary: docs/memory governance only; no runtime, DB, auth, risk, trading, deploy, model-call, or code-path change. Existing unrelated Rust/helper WIP was not touched.

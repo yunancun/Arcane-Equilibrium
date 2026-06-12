@@ -7,6 +7,14 @@
 **TODO 索引 / TODO ref**: 3E-1 ~ 3E-9  
 **狀態 / Status**: ✅ 已完成（2026-04-11 commit 0f3af65）— `TradingMode` 已完全由 `PipelineKind` 取代，文中 `TradingMode` 引用為歷史上下文  
 
+> **HISTORICAL ARCHITECTURE STUDY / NOT CURRENT DISPATCH AUTHORITY**
+>
+> 本文件保留 3E-ARCH 迁移 lineage。当前 Bybit-only execution、Demo-only
+> promotion、Decision Lease、live authorization、OpenClaw control-plane
+> boundary 和 active work queue 以 `CLAUDE.md`、`.codex/MEMORY.md`、`TODO.md`、
+> ADR/AMD 和最新 PM/role reports 为准。文中 Paper/Demo 跳过 lease 或
+> Paper→Demo→Live 的旧叙事不得覆盖当前 hard boundaries。
+
 ---
 
 ## 一、執行摘要
