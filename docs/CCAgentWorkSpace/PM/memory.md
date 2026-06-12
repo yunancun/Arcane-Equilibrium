@@ -255,3 +255,8 @@
 - `44a30afa`/`f4a58b3c` 新增 artifact-only `aeg_s3_gate_b_preflight`：定位 Gate-B/FND2/regime，preview listing sample/PBO，輸出 full-chain command；auto locator 要求 FND2/regime summary 語義驗證。
 - Mac/Linux focused regression 各 `58 passed`；Linux explicit/auto smoke 均回 `READY_BUT_SAMPLE_BELOW_GATE`、sample_count=2、pbo_status=`produced_candidate_grid`、recommended command generated。
 - fresh Gate-B 後先跑 preflight，再按 generated command 跑 full matrix；preflight ready 不等於 promotion proof。
+
+## 2026-06-12 AEG-S3 Gate-B watch preflight bridge
+
+- `2b880f5d` 讓 `aeg_s3_gate_b_preflight` 讀 local `gate_b_watch_latest.json`，輸出 `gate_watch.operator_action` 與 `probe_command_hints`；`WATCH_ONLY` wait-only，`ACTIONABLE_*` 才給 isolated probe hint，stale/malformed/source failure fail-closed。
+- Mac/Linux focused regression 各 `62 passed`；Linux smoke 讀 live watch artifact 得 `WATCH_ONLY`、23 candidates、0 alertable/start/schedule、operator_action=`WAIT_FOR_ACTIONABLE_WATCH`、old Gate-B sample_count=2。
