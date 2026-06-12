@@ -28,6 +28,7 @@ Codex reuses the Claude skill corpus as the shared skill SSOT for this repositor
 | `spec-compliance` | `.claude/skills/spec-compliance/SKILL.md` | `CC`, `FA`, `PM` |
 | `time-series-cv-protocol` | `.claude/skills/time-series-cv-protocol/SKILL.md` | `MIT` |
 | `token-cost-analysis` | `.claude/skills/token-cost-analysis/SKILL.md` | `AI-E` |
+| `ultracode-full-audit` | `.claude/skills/ultracode-full-audit/SKILL.md` | `PM` / conductor only |
 | `ux-checklist` | `.claude/skills/ux-checklist/SKILL.md` | `A3` |
 | `walk-forward-validation-protocol` | `.claude/skills/walk-forward-validation-protocol/SKILL.md` | `QC` |
 

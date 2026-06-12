@@ -1,6 +1,12 @@
 # Known Issues & Unverified Risks
 # 已知問題與未驗證風險
 #
+# STATUS: STALE SNAPSHOT / REFERENCE ONLY
+#
+# 本文件最後更新於 2026-05-16，保留作歷史風險快照與排查索引。
+# 當前 active blockers、operator actions、runtime evidence、issue tracker
+# posture 以根目錄 TODO.md、GitHub Issues、最新 PM/role report 為準。
+#
 # 用途：記錄已識別但尚未修復/驗證的問題，供每次 session 接手時排查參考。
 # Purpose: Track identified but unresolved/unverified issues for troubleshooting reference.
 #
@@ -560,4 +566,3 @@
 **嚴重性**：HIGH（alpha candidate）
 **狀態**：spec v0.2 CONDITIONAL DESIGN APPROVED 2026-05-15（QC + MIT + BB 三方）；read-only Stage 0R replay query/report packet 待 PA / E1 派
 **約束**：30m primary horizon / branch-separated（crowded-long fade + crowded-short squeeze）/ `K_total >= K_prior+4050` / `DSR>=0.95` / PBO fail-closed / raw panel as-of joins / funding attribution `excluded`
-

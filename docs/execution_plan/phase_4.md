@@ -1,5 +1,10 @@
 # Phase 4 — Claude Teacher + LinUCB + News + DL-3（W13-15，7/03-7/23，15 工作日）
 
+> **LEGACY / REFERENCE**
+>
+> 旧融合方案 phase packet。当前 active dispatch、gate、owner、runtime evidence
+> 以根目录 `TODO.md` 和最新 PM/role report 为准。
+
 > 前置：Phase 3b 完成
 > DoD：Claude Directive → ExperimentLedger · LinUCB 可用 · News mock 接口 · DL-3 決策 · 3 集成測試全通過 · 4429+50 tests
 

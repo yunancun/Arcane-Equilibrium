@@ -1,5 +1,10 @@
 # Phase 2 — 交易鏈 + Scorer + ONNX（W6-9，5/15-6/11，20 工作日含 buffer）
 
+> **LEGACY / REFERENCE**
+>
+> 旧融合方案 phase packet。当前 active dispatch、gate、owner、runtime evidence
+> 以根目录 `TODO.md` 和最新 PM/role report 为准。
+
 > 前置：Phase 1 完成 + Paper 數據採集中
 > DoD：Context Snapshot 可寫入/查詢 · Scorer AUC>0.55 · ONNX err<1e-3 · Rust推理<1ms · `test_scorer_feature_alignment` 通過 · ETL cron 正常 · 4429+60 tests
 

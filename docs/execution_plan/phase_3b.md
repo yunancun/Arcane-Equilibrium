@@ -1,4 +1,9 @@
-# Phase 3b — Optuna + Thompson Sampling + CPCV + 黑���鵝（W11-12，6/19-7/02，10 工作日）
+# Phase 3b — Optuna + Thompson Sampling + CPCV + 黑天鵝（W11-12，6/19-7/02，10 工作日）
+
+> **LEGACY / REFERENCE**
+>
+> 旧融合方案 phase packet。当前 active dispatch、gate、owner、runtime evidence
+> 以根目录 `TODO.md` 和最新 PM/role report 为准。
 
 > 前置：Phase 3a 完成
 > DoD：TPE+TS 可跑 · CPCV 分級 embargo · 黑天鵝投票 · `test_optuna_to_ts_pipeline` 通過 · 4429+40 tests

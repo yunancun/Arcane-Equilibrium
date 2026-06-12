@@ -1,5 +1,10 @@
 # 關鍵路徑 + Contingency + 量化指標
 
+> **LEGACY / REFERENCE**
+>
+> 本文件是旧融合方案的关键路径快照，保留用于追溯当时排期假设。当前 active
+> blocker、owner、gate 与 next action 以 `TODO.md` 为准。
+
 ## 關鍵路徑（9 個任務）
 
 ```

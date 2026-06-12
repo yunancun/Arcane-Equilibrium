@@ -1,8 +1,15 @@
 ---
-name: 外部整合工具入口（Linear-only active posture）
-description: OpenClaw 外部 MCP 工具狀態盤點 — Linear active；Notion frozen；Coupler/Slack/MotherDuck declined；Drive passive
+name: 外部整合工具入口（historical Linear-only posture）
+description: SUPERSEDED external-tool snapshot; current authority is GitHub Issues active, Linear historical/passive unless explicitly reopened.
 type: reference
 ---
+
+> **SUPERSEDED / CURRENT AUTHORITY**
+>
+> 本条是 2026-04-29 外部工具快照，保留用于解释当时为什么不启用
+> Notion/Coupler/MotherDuck/Slack。当前权威：`docs/agents/issue-tracker.md`、
+> `CLAUDE.md` External Tools、`.codex/MEMORY.md` External Tools。当前口径为
+> GitHub Issues active；Linear historical/passive unless explicitly reopened。
 
 **完整 SOP**：CLAUDE.md §十二「外部整合工具映射」。本 memory 存入口資訊 + 各工具 status + decline 理由（避免未來 sub-agent 重新評估）。
 

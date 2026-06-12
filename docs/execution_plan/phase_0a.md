@@ -1,5 +1,10 @@
 # Phase 0a — PG Schema 基礎（W1，4/11-4/17，5 工作日）
 
+> **LEGACY / REFERENCE**
+>
+> 旧融合方案 phase packet。当前 active dispatch、gate、owner、runtime evidence
+> 以根目录 `TODO.md` 和最新 PM/role report 为准。
+
 > 前置：R-07 Go/No-Go 通過（4/10）
 > DoD：8 Schema 可查 · 全部新表可 INSERT/SELECT · Grafana VIEW 正常 · 4429 tests 全綠
 

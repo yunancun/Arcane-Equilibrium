@@ -1,5 +1,10 @@
 # Phase 1 — 市場數據止血 + FeatureCollector + PSI（W4-5，5/01-5/14，10 工作日）
 
+> **LEGACY / REFERENCE**
+>
+> 旧融合方案 phase packet。当前 active dispatch、gate、owner、runtime evidence
+> 以根目录 `TODO.md` 和最新 PM/role report 为准。
+
 > 前置：Phase 0b 完成
 > DoD：FeatureCollector <0.1ms · PG 異步不阻塞 tick · PSI+ADWIN 可 WARNING/ALERT · ExperimentLedger PG · Paper 數據採集中 · 4429+30 tests
 

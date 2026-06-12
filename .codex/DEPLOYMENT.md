@@ -14,7 +14,7 @@ Mirror the useful parts of the existing Claude Code setup inside Codex without p
 ## Current inventory
 
 - Claude agents: 18
-- Claude skills: 24
+- Claude skills: 25
 
 ## Codex deployment model
 

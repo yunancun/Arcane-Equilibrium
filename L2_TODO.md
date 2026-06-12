@@ -1,5 +1,12 @@
 # L2 Advisory Mesh — TODO
 
+> **ACTIVE-TAIL MIRRORED / NOT THE ACTIVE QUEUE**
+>
+> 本文件保留 L2 Advisory Mesh 的专题 ledger、phase checklist 与设计证据指针。
+> 当前全仓 active dispatch queue 只以 `TODO.md` 为准；L2 未闭尾巴已镜像到
+> `TODO.md` row `P1-L2-ADVISORY-MESH-TAILS`。后续 agent 不得只从本文件派工、
+> 标 completed archive，或绕过 `TODO.md` 的 gate / operator action。
+
 **版本** v1 ｜ **日期** 2026-06-05 ｜ 設計 = v4-final（0 CRITICAL · 2 BLOCKER 已閉）｜ gating = **B1/M1/M2 ENDORSED**
 
 **狀態**：設計 **E1-READY**，等 operator 拍板啟 E1。本檔僅為精簡派工存根，不貼長架構。

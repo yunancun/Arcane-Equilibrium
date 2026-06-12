@@ -1,11 +1,19 @@
-# Sub-Agent Hygiene SOP — Sprint 2 Pre-Dispatch Mandatory
+# Sub-Agent Hygiene SOP — Long-Lived Dispatch Hygiene
 
 **Date**: 2026-05-25
 **Author**: PA（Project Architect）
 **Severity**: MED（hygiene）— 本 sprint 已 3 次 cargo race
 **Trigger**: E5 audit `2026-05-25--runtime_hygiene_audit_pre_sprint_2.md` §M-4 + Sprint 2 多 wave 並行高機率第 4 次
 **Reads**: TODO §5 `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC` + memory `project_2026_05_02_p0_sqlx_hash_drift` + memory `feedback_v_migration_pg_dry_run`
-**Status**: **MANDATORY before any sub-agent dispatch in Sprint 2**
+**Status**: **REFERENCE / mandatory hygiene for delegated work that touches Linux runtime, cargo, PG, deploy, or service restart paths**
+
+> **CURRENT AUTHORITY NOTE**
+>
+> 本文件起源于 Sprint 2 cargo race，但其中的 Linux runtime / cargo / PG /
+> sudo / atomic deploy 边界是长期 dispatch hygiene。Sprint 2 语句保留为
+> 事故来源和证据，不再限定本 SOP 的适用期。当前 sub-agent 角色绑定与派工链仍以
+> `.codex/AGENT_DISPATCH_PROTOCOL.md`、`.codex/SUBAGENT_EXECUTION_RULES.md`
+> 和 `CLAUDE.md` 为准。
 
 ---
 

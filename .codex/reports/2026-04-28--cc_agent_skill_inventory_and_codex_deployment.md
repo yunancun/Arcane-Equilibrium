@@ -2,6 +2,12 @@
 
 Date: 2026-04-28
 
+> **SNAPSHOT**
+>
+> This report records the 2026-04-28 inventory at the time of Codex deployment.
+> It is not the current skill count authority. Current count is maintained in
+> `.codex/skills/INDEX.md` and `.codex/DEPLOYMENT.md`.
+
 ## Summary
 
 Claude Code setup found in this repository:

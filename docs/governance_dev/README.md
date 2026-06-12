@@ -1,5 +1,12 @@
 # Governance Development — 二次開發治理文件庫
 
+> **ROUTING NOTE**
+>
+> 本目录大部分 phase/T2.xx 文档是 Python-era / early governance 历史证据。
+> 当前仍 active 的治理入口是 `SPECIFICATION_REGISTER.md`、`amendments/`、
+> ADR/AMD、`CLAUDE.md`、`.codex/MEMORY.md` 和根目录 `TODO.md`。历史文件不做
+> 大规模重命名；命名约束见 `NAMING_NOTE.md`，退役/例外口径见 `DEPRECATED.md`。
+
 本目錄存放 OpenClaw/Bybit 二次開發過程中產生的所有評估報告、審計結果、修改日誌和新建記錄。
 
 ## 目錄結構
@@ -34,5 +41,7 @@ governance_dev/
 
 ## 工作流
 
-所有新建的 .md 文件默認直接 commit + push 到 GitHub。
-Ubuntu 端通過 `git pull` 同步。
+新建或修改治理文档时，按当前仓库规则执行：先确认 source of truth、
+用窄 staging / `git commit --only` 保护无关 WIP，提交信息必须有 subject
+和 body；是否 push / 三端同步以 `CLAUDE.md`、`.codex/MEMORY.md` 和 operator
+指令为准。旧的“默认直接 commit + push”不再作为当前工作流。

@@ -571,3 +571,9 @@ YYYY-MM-DD HH:MM TZ
 - result: 新增 `candidate_signal_spec.py`；manifest validator / builder / source contract / MLDE producer / LG-5 reviewer 均要求 canonical `signal_spec`，並驗 candidate/family、PIT、universe/regime/cost lineage、residualization、failure taxonomy、hidden OOS policy 與 `spec_hash` 一致；只有 `signal_spec_hash` / `factor_spec_hash` 不再 promotion-ready。
 - verification: SignalSpec + manifest/source focused `56 passed`；MLDE applier + LG5 focused `86 passed`；`program_code/ml_training/tests` = `516 passed, 31 skipped`；LG5 + replay full-chain routes `77 passed, 1 skipped`；touched Python `py_compile` PASS；`git diff --check` PASS。
 - boundary/risk: source/test/report only；no DB migration, DB write/apply, runtime deploy, rebuild/restart, auth/order/risk config mutation, paper/live enable, or promotion state mutation。本 checkpoint 不是 DSL、不是 durable hidden OOS state machine、不是 durable residual report registry，也不證明 alpha edge 已解決。
+# 2026-06-12 — Documentation Governance First Batch
+
+- Task: subagent-assisted review of squeezed development docs; reduce stale active-state confusion without deleting historical evidence.
+- Dispatch chain: `PM -> R4(explorer) + CC(default) + FA(default) -> PA(default) -> PM`.
+- Result: first batch landed as routing/banners/indexes only. `L2_TODO.md` is now explicitly not the active queue; old execution phase packets are legacy/reference; external-tool and funding_short memories gained current-authority corrections; audit folders gained README semantics; untracked `.DS_Store` files were removed.
+- Boundary: no runtime, DB, auth, risk, trading, deploy, model-call, or code-path change. Existing unrelated Rust/helper WIP was not touched.

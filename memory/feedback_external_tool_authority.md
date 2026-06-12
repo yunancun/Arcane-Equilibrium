@@ -1,8 +1,16 @@
 ---
-name: 外部工具權威邊界守則（Linear-only active posture）
-description: 2026-04-29 operator 決定：Linear 唯一 active workflow tool；其他 connector 凍結 / 待命 / 拒絕；git 永遠是 source of truth
+name: 外部工具權威邊界守則（historical Linear-only posture）
+description: SUPERSEDED 2026-04-29 operator decision; current authority is GitHub Issues active, Linear historical/passive unless explicitly reopened; git remains source of truth.
 type: feedback
 ---
+
+> **SUPERSEDED / CURRENT AUTHORITY**
+>
+> 本条保留 2026-04-29 的 Linear-only 决策历史，不能覆盖当前外部工具策略。
+> 当前权威：`docs/agents/issue-tracker.md`、`CLAUDE.md` External Tools、
+> `.codex/MEMORY.md` External Tools。当前口径为 GitHub Issues active；
+> Linear historical/passive unless explicitly reopened；Notion frozen；Drive
+> passive；Coupler/MotherDuck/Slack declined unless explicitly reopened。
 
 **規則**：外部 MCP 工具在 OpenClaw 工作流中**只有 Linear 是 active**。Notion = frozen 快照不維護；Drive = passive on-demand；Coupler.io / Slack / MotherDuck = declined 不啟用。任何衝突一律以 git `srv/` 為準。
 
