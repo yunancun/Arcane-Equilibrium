@@ -237,3 +237,9 @@
 - `75ed19c8` 新增 artifact-only `aeg_s3_gate_b_chain`：fresh Gate-B run 後一鍵編排 listing evidence、candidate rows、candidate metrics、execution observations、event execution realism；若提供 FND2+regime，再接 event breadth + formal matrix。
 - Mac/Linux focused regression 各 `52 passed`；Linux true smoke `aeg_s3_gate_b_chain_listing_smoke_20260612` 用舊 run 產 2 listing samples / 2 execution observations，chain_status=`COMPLETE_EXECUTION_REALISM_FAIL`，reject=`sample_count_below_30`。
 - 邊界：wrapper 只編排既有 artifact harness，不收集資料、不呼叫 Bybit、不寫 DB、不碰 runtime；wrapper 完成不是 promotion proof，fresh Gate-B 仍需 `>=30` matched samples + E2/MIT/QC 審。
+
+## 2026-06-12 AEG-S3 listing_fade PBO grid wiring
+
+- `3d03698c` 讓 `listing_fade` PBO candidate grid 變成明確 opt-in：`--include-default-pbo-grid` / `--pbo-grid-json`，默認不偽造 PBO，grid 不足 10 cells 時 fail-closed。
+- Gate-B chain 已 pass-through PBO knobs 並輸出 `listing_pbo_status`；Linux old-run smoke 產 `produced_candidate_grid`，但仍因 sample_count=2 fail `sample_count_below_30`。
+- Mac/Linux focused regression 各 `54 passed`；compileall/static scan OK；本批無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/trading mutation。
