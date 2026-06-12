@@ -83,6 +83,10 @@ Known paths:
 - Rust `openclaw_engine` is the trading, risk, config, and execution authority.
 - Python/FastAPI is control plane / GUI / bridge / replay / agent host, not the
   trading truth layer.
+- `engine_dead` incident detection is external-watchdog notify-only by design:
+  when the engine is dead, in-process Rust C4 senders are unavailable. Do not
+  route it through Rust `AllFail`/Defensive without a separately reviewed
+  watchdog-side defensive design.
 - External OpenClaw Gateway is communication, mobile, supervisor, and proposal
   relay only; it is not order authority or a second GUI.
 - True live requires all five gates: Python `live_reserved`, Python Operator

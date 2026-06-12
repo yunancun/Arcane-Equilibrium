@@ -145,7 +145,7 @@ pub(crate) fn spawn_position_reconcilers(
     // （同批 boot-time wiring，吃同樣的 db_pool / cancel / demo_cmd_slot / live_cmd_slot）。
     // 單例 external task；對 demo/live slot 發 in-band escalate command（paper 結構性排除）。
     // ⚠️ 機制 live；incident-trigger 已 partial wired（auth invalid + Bybit retCode
-    // fail-closed），SM-stuck / drift / watchdog producers 仍待後續。
+    // fail-closed + SM-stuck + position drift）；engine_dead 由外部 watchdog notify-only producer 接。
     tasks::spawn_notification_failsafe_watcher(db_pool, cancel, demo_cmd_slot, live_cmd_slot);
 }
 
