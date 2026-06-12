@@ -62,6 +62,49 @@ def _round_for_output(value: float) -> float:
     return round(float(value), 12)
 
 
+def _parameter_cell_id(
+    *,
+    lookback_points: int,
+    horizon_hours: float,
+    stress_z: float,
+    exit_z: float,
+    cost_bps: float,
+) -> str:
+    return (
+        f"lb{lookback_points}_h{horizon_hours:g}h_"
+        f"stress{stress_z:g}_exit{exit_z:g}_cost{cost_bps:g}"
+    )
+
+
+def _validate_parameters(
+    *,
+    lookback_points: int,
+    horizon_hours: float,
+    stress_z: float,
+    exit_z: float,
+    cost_bps: float,
+    k_trials: int,
+    min_spacing_hours: Optional[float],
+    max_timestamp_lag_minutes: float,
+) -> None:
+    if lookback_points < 2:
+        raise ValueError("lookback_points_must_be_at_least_2")
+    if horizon_hours <= 0:
+        raise ValueError("horizon_hours_must_be_positive")
+    if stress_z <= 0:
+        raise ValueError("stress_z_must_be_positive")
+    if exit_z < 0 or exit_z >= stress_z:
+        raise ValueError("exit_z_must_be_non_negative_and_below_stress_z")
+    if cost_bps < 0:
+        raise ValueError("cost_bps_must_be_non_negative")
+    if k_trials <= 1:
+        raise ValueError("k_trials_must_be_gt_1")
+    if min_spacing_hours is not None and min_spacing_hours < 0:
+        raise ValueError("min_spacing_hours_must_be_non_negative")
+    if max_timestamp_lag_minutes < 0:
+        raise ValueError("max_timestamp_lag_minutes_must_be_non_negative")
+
+
 def _first_float(row: dict[str, Any], keys: Iterable[str]) -> Optional[float]:
     for key in keys:
         if key in row:
@@ -395,6 +438,135 @@ def _daily_returns(samples: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _samples_for_parameters(
+    raw_rows: list[dict[str, Any]],
+    *,
+    lookback_points: int,
+    horizon_hours: float,
+    stress_z: float,
+    exit_z: float,
+    cost_bps: float,
+    min_spacing_hours: Optional[float],
+    max_timestamp_lag_minutes: float,
+    regime_by_date: dict[str, str],
+    default_regime: Optional[str],
+    oos_start_date: Optional[dt.date],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float]:
+    enriched_rows = _compute_missing_zscores(raw_rows, lookback_points=lookback_points)
+    spacing = horizon_hours if min_spacing_hours is None else min_spacing_hours
+    samples, event_rejects = _event_samples(
+        enriched_rows,
+        horizon_hours=horizon_hours,
+        stress_z=stress_z,
+        exit_z=exit_z,
+        cost_bps=cost_bps,
+        min_spacing_hours=spacing,
+        max_timestamp_lag_minutes=max_timestamp_lag_minutes,
+        regime_by_date=regime_by_date,
+        default_regime=default_regime,
+        oos_start_date=oos_start_date,
+    )
+    return samples, event_rejects, spacing
+
+
+def default_pbo_grid(*, cost_bps: float) -> list[dict[str, Any]]:
+    """Small funding-revive parameter family used only when explicitly requested."""
+    cells: list[dict[str, Any]] = []
+    for lookback_points in (14, 21, 28):
+        for horizon_hours in (24.0, 48.0):
+            for stress_z in (1.5, 2.0, 2.5):
+                cells.append({
+                    "lookback_points": lookback_points,
+                    "horizon_hours": horizon_hours,
+                    "stress_z": stress_z,
+                    "exit_z": 1.0,
+                    "cost_bps": cost_bps,
+                })
+    return cells
+
+
+def _pbo_grid_candidates(
+    raw_rows: list[dict[str, Any]],
+    *,
+    pbo_grid: list[dict[str, Any]],
+    fallback_max_timestamp_lag_minutes: float,
+    regime_by_date: dict[str, str],
+    default_regime: Optional[str],
+    oos_start_date: Optional[dt.date],
+) -> tuple[dict[str, dict[str, float]], list[dict[str, Any]]]:
+    candidates: dict[str, dict[str, float]] = {}
+    grid_summary: list[dict[str, Any]] = []
+    for idx, cell in enumerate(pbo_grid):
+        lookback_points = int(cell.get("lookback_points"))
+        horizon_hours = float(cell.get("horizon_hours"))
+        stress_z = float(cell.get("stress_z"))
+        exit_z = float(cell.get("exit_z"))
+        cost_bps = float(cell.get("cost_bps"))
+        min_spacing_hours = (
+            None
+            if cell.get("min_spacing_hours") is None
+            else float(cell.get("min_spacing_hours"))
+        )
+        max_timestamp_lag_minutes = float(
+            cell.get("max_timestamp_lag_minutes", fallback_max_timestamp_lag_minutes)
+        )
+        _validate_parameters(
+            lookback_points=lookback_points,
+            horizon_hours=horizon_hours,
+            stress_z=stress_z,
+            exit_z=exit_z,
+            cost_bps=cost_bps,
+            k_trials=2,
+            min_spacing_hours=min_spacing_hours,
+            max_timestamp_lag_minutes=max_timestamp_lag_minutes,
+        )
+        samples, event_rejects, spacing = _samples_for_parameters(
+            raw_rows,
+            lookback_points=lookback_points,
+            horizon_hours=horizon_hours,
+            stress_z=stress_z,
+            exit_z=exit_z,
+            cost_bps=cost_bps,
+            min_spacing_hours=min_spacing_hours,
+            max_timestamp_lag_minutes=max_timestamp_lag_minutes,
+            regime_by_date=regime_by_date,
+            default_regime=default_regime,
+            oos_start_date=oos_start_date,
+        )
+        daily_returns = _daily_returns(samples) if samples else None
+        parameter_cell_id = str(cell.get("parameter_cell_id") or _parameter_cell_id(
+            lookback_points=lookback_points,
+            horizon_hours=horizon_hours,
+            stress_z=stress_z,
+            exit_z=exit_z,
+            cost_bps=cost_bps,
+        ))
+        if parameter_cell_id in candidates:
+            parameter_cell_id = f"{parameter_cell_id}_idx{idx}"
+        daily_values = (daily_returns or {}).get("values", {})
+        if daily_values:
+            candidates[parameter_cell_id] = {
+                str(day): float(value)
+                for day, value in daily_values.items()
+                if _float_or_none(value) is not None
+            }
+        grid_summary.append({
+            "parameter_cell_id": parameter_cell_id,
+            "lookback_points": lookback_points,
+            "horizon_hours": horizon_hours,
+            "stress_z": stress_z,
+            "exit_z": exit_z,
+            "min_spacing_hours": spacing,
+            "max_timestamp_lag_minutes": max_timestamp_lag_minutes,
+            "round_trip_cost_bps": cost_bps,
+            "sample_count": len(samples),
+            "rejected_event_count": len(event_rejects),
+            "daily_return_count": len(daily_values),
+            "included_in_pbo": bool(daily_values),
+        })
+    return candidates, grid_summary
+
+
 def build_funding_revive_evidence(
     payload: list[dict[str, Any]],
     *,
@@ -412,43 +584,56 @@ def build_funding_revive_evidence(
     regime_by_date: Optional[dict[str, str]] = None,
     default_regime: Optional[str] = None,
     oos_start_date: Optional[str] = None,
+    pbo_grid: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    if lookback_points < 2:
-        raise ValueError("lookback_points_must_be_at_least_2")
-    if horizon_hours <= 0:
-        raise ValueError("horizon_hours_must_be_positive")
-    if stress_z <= 0:
-        raise ValueError("stress_z_must_be_positive")
-    if exit_z < 0 or exit_z >= stress_z:
-        raise ValueError("exit_z_must_be_non_negative_and_below_stress_z")
-    if cost_bps < 0:
-        raise ValueError("cost_bps_must_be_non_negative")
-    if k_trials <= 1:
-        raise ValueError("k_trials_must_be_gt_1")
-    if max_timestamp_lag_minutes < 0:
-        raise ValueError("max_timestamp_lag_minutes_must_be_non_negative")
-
-    raw_rows, raw_rejects = _normalize_raw_rows(payload)
-    enriched_rows = _compute_missing_zscores(raw_rows, lookback_points=lookback_points)
-    spacing = horizon_hours if min_spacing_hours is None else min_spacing_hours
-    samples, event_rejects = _event_samples(
-        enriched_rows,
+    _validate_parameters(
+        lookback_points=lookback_points,
         horizon_hours=horizon_hours,
         stress_z=stress_z,
         exit_z=exit_z,
         cost_bps=cost_bps,
-        min_spacing_hours=spacing,
+        k_trials=k_trials,
+        min_spacing_hours=min_spacing_hours,
         max_timestamp_lag_minutes=max_timestamp_lag_minutes,
-        regime_by_date=regime_by_date or {},
+    )
+
+    raw_rows, raw_rejects = _normalize_raw_rows(payload)
+    parsed_oos_start_date = _date_or_none(oos_start_date)
+    resolved_regime_by_date = regime_by_date or {}
+    samples, event_rejects, spacing = _samples_for_parameters(
+        raw_rows,
+        lookback_points=lookback_points,
+        horizon_hours=horizon_hours,
+        stress_z=stress_z,
+        exit_z=exit_z,
+        cost_bps=cost_bps,
+        min_spacing_hours=min_spacing_hours,
+        max_timestamp_lag_minutes=max_timestamp_lag_minutes,
+        regime_by_date=resolved_regime_by_date,
         default_regime=default_regime,
-        oos_start_date=_date_or_none(oos_start_date),
+        oos_start_date=parsed_oos_start_date,
     )
 
     daily_returns = _daily_returns(samples) if samples else None
-    parameter_cell_id = (
-        f"lb{lookback_points}_h{horizon_hours:g}h_"
-        f"stress{stress_z:g}_exit{exit_z:g}_cost{cost_bps:g}"
+    parameter_cell_id = _parameter_cell_id(
+        lookback_points=lookback_points,
+        horizon_hours=horizon_hours,
+        stress_z=stress_z,
+        exit_z=exit_z,
+        cost_bps=cost_bps,
     )
+    pbo_candidates: dict[str, dict[str, float]] = {}
+    pbo_grid_summary: list[dict[str, Any]] = []
+    if pbo_grid:
+        pbo_candidates, pbo_grid_summary = _pbo_grid_candidates(
+            raw_rows,
+            pbo_grid=pbo_grid,
+            fallback_max_timestamp_lag_minutes=max_timestamp_lag_minutes,
+            regime_by_date=resolved_regime_by_date,
+            default_regime=default_regime,
+            oos_start_date=parsed_oos_start_date,
+        )
+
     evidence: dict[str, Any] = {
         "schema_version": EVIDENCE_SCHEMA_VERSION,
         "runner_version": RUNNER_VERSION,
@@ -476,8 +661,13 @@ def build_funding_revive_evidence(
     }
     if daily_returns is not None:
         evidence["daily_returns"] = daily_returns
+    if pbo_candidates:
+        evidence["pbo_seed"] = 20260611
+        evidence["pbo_candidates"] = pbo_candidates
+        evidence["pbo_candidate_grid"] = pbo_grid_summary
 
     all_rejects = raw_rejects + event_rejects
+    included_pbo_count = len(pbo_candidates)
     summary = {
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "run_id": run_id,
@@ -508,14 +698,26 @@ def build_funding_revive_evidence(
         "accepted_funding_pnl_bps_mean": _round_for_output(statistics.mean([row["funding_pnl_bps"] for row in samples])) if samples else None,
         "accepted_net_bps_mean": _round_for_output(statistics.mean([row["net_bps"] for row in samples])) if samples else None,
         "daily_return_count": len((daily_returns or {}).get("values", {})),
-        "pbo_status": "not_produced_missing_candidate_grid",
+        "pbo_grid_cell_count": len(pbo_grid_summary),
+        "pbo_grid_included_candidate_count": included_pbo_count,
+        "pbo_grid_daily_return_counts": {
+            row["parameter_cell_id"]: row["daily_return_count"]
+            for row in pbo_grid_summary
+        },
+        "pbo_status": (
+            "produced_candidate_grid"
+            if included_pbo_count >= 10
+            else ("insufficient_candidate_grid" if pbo_grid else "not_produced_missing_candidate_grid")
+        ),
         "notes": [
             "events are single-symbol funding stress unwind windows",
             "gross_bps equals sided price return plus explicit holding-window funding pnl",
             "round_trip_cost_bps is subtracted from every accepted event window",
             "daily_returns are date-level means of accepted event returns",
-            "pbo is intentionally absent until explicit candidate-grid evidence exists",
+            "pbo_candidates are emitted only when an explicit candidate-grid request is provided",
         ],
         "rejected_samples": all_rejects,
     }
+    if pbo_grid_summary:
+        summary["pbo_candidate_grid"] = pbo_grid_summary
     return evidence, summary

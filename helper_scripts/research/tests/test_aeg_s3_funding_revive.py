@@ -51,6 +51,21 @@ def _stress_revive_panel() -> list[dict]:
     return rows
 
 
+def _pbo_test_grid() -> list[dict]:
+    return [
+        {
+            "lookback_points": lookback_points,
+            "horizon_hours": 24.0,
+            "stress_z": stress_z,
+            "exit_z": exit_z,
+            "cost_bps": 5.0,
+        }
+        for lookback_points in (3, 5, 7)
+        for stress_z in (1.5, 2.0)
+        for exit_z in (0.5, 1.0)
+    ]
+
+
 def test_panel_builds_funding_revive_evidence_consumed_by_s3_rows():
     evidence, summary = builder_mod.build_funding_revive_evidence(
         _stress_revive_panel(),
@@ -89,6 +104,46 @@ def test_panel_builds_funding_revive_evidence_consumed_by_s3_rows():
     assert rows[0]["n_independent"] == 64
     assert rows[0]["net_bps"] > 10.0
     assert json.loads(rows[0]["reject_reasons"]) == ["missing_pbo"]
+
+
+def test_candidate_grid_pbo_is_emitted_and_consumed_by_s3_rows():
+    evidence, summary = builder_mod.build_funding_revive_evidence(
+        _stress_revive_panel(),
+        source_path="fixture.jsonl",
+        run_id="funding_revive_run",
+        lookback_points=5,
+        horizon_hours=24,
+        stress_z=2.0,
+        exit_z=1.0,
+        cost_bps=5.0,
+        k_trials=12,
+        default_regime="chop",
+        oos_start_date="2026-03-15",
+        pbo_grid=_pbo_test_grid(),
+    )
+
+    assert summary["pbo_status"] == "produced_candidate_grid"
+    assert summary["pbo_grid_cell_count"] == 12
+    assert summary["pbo_grid_included_candidate_count"] == 12
+    assert len(evidence["pbo_candidates"]) == 12
+    assert evidence["pbo_candidate_grid"][0]["included_in_pbo"] is True
+
+    report, s3_summary, _sample_rows, _daily_rows = rows_builder.build_direct_report(
+        evidence,
+        run_id="direct_run",
+    )
+    assert s3_summary["pbo_status"] == "measured"
+
+    rows, adapted = candidate_builder.build_candidate_metrics(
+        report,
+        run_id="metrics_run",
+        candidate_id="funding_revive",
+        strategy_family="funding_revive",
+        parameter_cell_id=evidence["parameter_cell_id"],
+    )
+    assert adapted["metric_status_counts"] == {"PASS": 1}
+    assert rows[0]["pbo"] is not None
+    assert "missing_pbo" not in json.loads(rows[0]["reject_reasons"])
 
 
 def test_missing_regime_rejects_events_instead_of_creating_unlabeled_regime():
