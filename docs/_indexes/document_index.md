@@ -6,6 +6,12 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-13 A1 basis / P2 OPS / P3 forward recorder
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-13--a1_basis_p2ops_p3_forward_checkpoint.md` | PM checkpoint: A1 basis 14d formal evidence matured; A1 functional path verified but no entry-gate signals (`draft_only`, `infra_gap=false`); P2 pg_dump/passive health tests added; P3 ticker forward recorder source landed, deploy-gated。 |
+
 ### 2026-06-12 文档治理第二批索引收敛
 
 | 文件 | 内容 |

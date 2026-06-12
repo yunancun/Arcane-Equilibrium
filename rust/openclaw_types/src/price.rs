@@ -71,6 +71,10 @@ pub struct PriceEvent {
     /// 當前資金費率（Ticker 事件，來自 Bybit tickers 流）。
     #[serde(default)]
     pub funding_rate: Option<f64>,
+    /// Mark price (for Ticker events, from Bybit tickers stream).
+    /// 標記價格（Ticker 事件，來自 Bybit tickers 流）。
+    #[serde(default)]
+    pub mark_price: Option<f64>,
     /// W1 sub-task 3 (E1-γ, 2026-05-11) — 下次 funding 結算時間戳（ms epoch）。
     /// 來自 Bybit V5 tickers stream `nextFundingTime`。
     /// 用於 panel.funding_rates_panel.next_funding_ms 寫入（V085 schema）+
@@ -112,6 +116,7 @@ impl PriceEvent {
             asks5: None,
             adl_rank: None,
             funding_rate: None,
+            mark_price: None,
             // W1 sub-task 3 (E1-γ, 2026-05-11) — next_funding_ms 預設 None
             // （tickers payload 可能無此 field 或 cold-start 階段 unparseable）。
             next_funding_ms: None,

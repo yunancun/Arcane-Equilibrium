@@ -124,8 +124,9 @@ impl TickPipeline {
                     ts_ms: event.ts_ms,
                     symbol: sym.clone(),
                     last_price: event.last_price,
-                    mark_price: 0.0, // not available in PriceEvent yet
-                    index_price: event.index_price.unwrap_or(0.0),
+                    mark_price: event.mark_price,
+                    index_price: event.index_price,
+                    funding_rate: event.funding_rate,
                     best_bid: event.bid_price,
                     best_ask: event.ask_price,
                     bid_size: 0.0, // not available in PriceEvent yet
@@ -133,7 +134,7 @@ impl TickPipeline {
                     volume_24h: event.volume_24h,
                     turnover_24h: event.turnover_24h,
                     spread_bps: spread,
-                    open_interest: 0.0, // not available in PriceEvent yet
+                    open_interest: event.open_interest,
                 });
             }
         }

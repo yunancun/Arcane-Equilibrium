@@ -227,6 +227,53 @@ fn test_parse_ticker_item_open_interest() {
     assert!((event.open_interest.unwrap() - 12345.678).abs() < 1e-9);
 }
 
+/// FND-4 P3：ticker forward recorder 所需的 mark/index/funding/OI 欄位都以
+/// nullable field 傳遞；合法 0/負 funding 不得被誤拒。
+#[test]
+fn test_parse_ticker_item_forward_evidence_fields() {
+    let item = serde_json::json!({
+        "symbol": "BTCUSDT",
+        "lastPrice": "65500.50",
+        "markPrice": "65501.25",
+        "indexPrice": "65499.75",
+        "fundingRate": "-0.000125",
+        "volume24h": "12345.67",
+        "bid1Price": "65500.0",
+        "ask1Price": "65501.0",
+        "ts": "1700000000000",
+        "openInterest": "0"
+    });
+    let event = parse_ticker_item(&item, "tickers.BTCUSDT").unwrap();
+
+    assert_eq!(event.mark_price, Some(65501.25));
+    assert_eq!(event.index_price, Some(65499.75));
+    assert_eq!(event.funding_rate, Some(-0.000125));
+    assert_eq!(event.open_interest, Some(0.0));
+}
+
+/// FND-4 P3：缺失/壞值保持 None，避免 forward recorder 再寫 0 佔位。
+#[test]
+fn test_parse_ticker_item_forward_evidence_rejects_bad_values() {
+    let item = serde_json::json!({
+        "symbol": "BTCUSDT",
+        "lastPrice": "65500.50",
+        "markPrice": "0",
+        "indexPrice": "NaN",
+        "fundingRate": "NaN",
+        "volume24h": "12345.67",
+        "bid1Price": "65500.0",
+        "ask1Price": "65501.0",
+        "ts": "1700000000000",
+        "openInterest": "-1"
+    });
+    let event = parse_ticker_item(&item, "tickers.BTCUSDT").unwrap();
+
+    assert_eq!(event.mark_price, None);
+    assert_eq!(event.index_price, None);
+    assert_eq!(event.funding_rate, None);
+    assert_eq!(event.open_interest, None);
+}
+
 /// EDGE-P2-2: malformed openInterest string → None (fail-closed, no panic).
 /// EDGE-P2-2：openInterest 格式異常 → None（fail-closed，不 panic）。
 #[test]
