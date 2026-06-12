@@ -38,6 +38,26 @@ def load_candidate_metrics(run_dir: Path) -> dict[str, Any]:
     }
 
 
+def load_breadth_artifact(run_dir: Path) -> dict[str, Any]:
+    run_dir = Path(run_dir)
+    return {
+        "run_dir": run_dir,
+        "rows": _read_csv(run_dir / "breadth_ladder.csv"),
+        "summary": _read_json(run_dir / "breadth_ladder_summary.json"),
+    }
+
+
+def load_execution_realism(path: Path) -> dict[str, Any]:
+    payload = _read_json(Path(path))
+    mode = (
+        payload.get("execution_realism_mode")
+        or payload.get("mode")
+        or payload.get("assumption_mode")
+        or "provided_unspecified"
+    )
+    return {**payload, "execution_realism_mode": mode}
+
+
 def _date_to_utc(value: Any, *, end_of_day: bool = False) -> str:
     if value is None or str(value).strip() == "":
         return "1970-01-01T00:00:00+00:00"
@@ -76,6 +96,77 @@ def _stable_ladder_id(*, run_id: str, candidate_id: str, parameter_cell_id: str)
 def _summary_value(summary: dict[str, Any], key: str) -> str:
     value = summary.get(key)
     return str(value).strip() if value is not None and str(value).strip() else "unknown"
+
+
+def _required_summary_value(summary: dict[str, Any], key: str) -> str:
+    value = _summary_value(summary, key)
+    if value == "unknown":
+        raise ValueError(f"candidate_metrics_{key}_missing")
+    return value
+
+
+def _artifact_value(payload: dict[str, Any], key: str) -> str:
+    value = payload.get(key)
+    return str(value).strip() if value is not None and str(value).strip() else ""
+
+
+def _require_match(*, kind: str, field: str, expected: str, actual: str) -> None:
+    if not actual:
+        raise ValueError(f"{kind}_{field}_missing")
+    if expected != "unknown" and actual != expected:
+        raise ValueError(f"{kind}_{field}_mismatch:expected={expected},actual={actual}")
+
+
+def _validate_breadth_artifact(candidate_metrics: dict[str, Any], breadth_artifact: dict[str, Any]) -> None:
+    expected_candidate_id = _required_summary_value(candidate_metrics["summary"], "candidate_id")
+    summary = breadth_artifact["summary"]
+    rows = breadth_artifact.get("rows") or []
+    actual_candidate_id = _artifact_value(summary, "candidate_id")
+    if not actual_candidate_id and rows:
+        actual_candidate_id = _artifact_value(rows[0], "candidate_id")
+    _require_match(
+        kind="breadth",
+        field="candidate_id",
+        expected=expected_candidate_id,
+        actual=actual_candidate_id,
+    )
+    for idx, row in enumerate(rows):
+        row_candidate_id = _artifact_value(row, "candidate_id")
+        if row_candidate_id and row_candidate_id != expected_candidate_id:
+            raise ValueError(
+                "breadth_candidate_id_mismatch:"
+                f"row={idx},expected={expected_candidate_id},actual={row_candidate_id}"
+            )
+
+
+def _validate_execution_realism(candidate_metrics: dict[str, Any], payload: dict[str, Any]) -> None:
+    summary = candidate_metrics["summary"]
+    for field in ("candidate_id", "strategy_family", "parameter_cell_id"):
+        _require_match(
+            kind="execution",
+            field=field,
+            expected=_required_summary_value(summary, field),
+            actual=_artifact_value(payload, field),
+        )
+    if "status" not in payload:
+        raise ValueError("execution_status_missing")
+    if not _artifact_value(payload, "execution_realism_mode"):
+        raise ValueError("execution_realism_mode_missing")
+
+
+def _breadth_policy(breadth_summary: dict[str, Any]) -> str:
+    adapter = breadth_summary.get("event_breadth_adapter")
+    if isinstance(adapter, dict) and adapter.get("policy"):
+        return str(adapter["policy"])
+    return str(breadth_summary.get("policy") or "provided_breadth_artifact")
+
+
+def _execution_reject_reasons(payload: dict[str, Any]) -> list[str]:
+    reasons = payload.get("reject_reasons")
+    if isinstance(reasons, list):
+        return [str(item) for item in reasons]
+    reason = payload.get("reject_reason")
+    return [str(reason)] if reason else []
 
 
 def build_breadth_placeholder(
@@ -205,23 +296,50 @@ def build_inputs(
     candidate_metrics: dict[str, Any],
     *,
     run_id: str,
+    breadth_artifact: Optional[dict[str, Any]] = None,
+    execution_realism: Optional[dict[str, Any]] = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any], dict[str, Any]]:
-    rows, breadth_summary = build_breadth_placeholder(candidate_metrics, run_id=run_id)
-    execution_payload = build_unverified_execution_realism(candidate_metrics)
+    if breadth_artifact is None:
+        rows, breadth_summary = build_breadth_placeholder(candidate_metrics, run_id=run_id)
+        breadth_input_mode = "generated_placeholder"
+    else:
+        _validate_breadth_artifact(candidate_metrics, breadth_artifact)
+        rows = breadth_artifact["rows"]
+        breadth_summary = breadth_artifact["summary"]
+        breadth_input_mode = "provided_breadth_artifact"
+
+    if execution_realism is None:
+        execution_payload = build_unverified_execution_realism(candidate_metrics)
+        execution_input_mode = "unverified_placeholder"
+    else:
+        _validate_execution_realism(candidate_metrics, execution_realism)
+        execution_payload = execution_realism
+        execution_input_mode = "provided_execution_realism_artifact"
+
+    candidate_summary = candidate_metrics["summary"]
     summary = {
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "runner_version": RUNNER_VERSION,
         "run_id": run_id,
         "candidate_id": breadth_summary["candidate_id"],
-        "strategy_family": breadth_summary["strategy_family"],
-        "parameter_cell_id": breadth_summary["parameter_cell_id"],
-        "source_candidate_metrics_run_id": breadth_summary["source_candidate_metrics_run_id"],
-        "breadth_policy": breadth_summary["policy"],
-        "execution_realism_status": execution_payload["status"],
-        "execution_realism_reject_reasons": execution_payload["reject_reasons"],
+        "strategy_family": _summary_value(candidate_summary, "strategy_family"),
+        "parameter_cell_id": _summary_value(candidate_summary, "parameter_cell_id"),
+        "source_candidate_metrics_run_id": candidate_summary.get("run_id"),
+        "breadth_input_mode": breadth_input_mode,
+        "breadth_policy": _breadth_policy(breadth_summary),
+        "breadth_artifact_run_id": breadth_summary.get("run_id"),
+        "breadth_artifact_adapter": (
+            "event_breadth"
+            if isinstance(breadth_summary.get("event_breadth_adapter"), dict)
+            else "generic_breadth_ladder"
+        ),
+        "execution_input_mode": execution_input_mode,
+        "execution_realism_status": execution_payload.get("status"),
+        "execution_realism_mode": execution_payload.get("execution_realism_mode"),
+        "execution_realism_reject_reasons": _execution_reject_reasons(execution_payload),
         "notes": [
             "outputs are candidate-specific matrix inputs",
-            "breadth and execution realism intentionally fail closed until measured",
+            "missing sidecar artifacts intentionally fail closed until measured",
         ],
     }
     return rows, breadth_summary, execution_payload, summary
