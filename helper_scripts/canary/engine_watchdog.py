@@ -44,6 +44,9 @@ except ModuleNotFoundError:  # pragma: no cover
     except ModuleNotFoundError:
         tomllib = None  # type: ignore[assignment]
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import（cwd 漂移防護）
+import alert_sink  # 耐久 sink + 告警 redactor 正本（本檔 pre-existing 超 2000 行硬頂，只留薄調用）
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [WATCHDOG] %(levelname)s %(message)s",
@@ -699,22 +702,28 @@ def _send_alert_best_effort(subject: str, body: str, severity: str, data_dir: st
     """best-effort 發告警：file/env 讀憑證，daemon thread fire-and-forget，5s timeout，catch-all。
 
     為什麼 fire-and-forget + 永不拋：告警必須與 watchdog 恢復迴圈完全解耦 —— 任何
-    掛起 / 失敗 / 缺端點都不得拖住 poll 或阻塞重啟。無任一通道配置時靜默 no-op，
-    僅一次性 logger.warning（避免每 poll 灌 log）。憑證只讀進記憶體，絕不寫進
+    掛起 / 失敗 / 缺端點都不得拖住 poll 或阻塞重啟。憑證只讀進記憶體，絕不寫進
     canary_events.jsonl / log / payload（log 通道名，不 log token）。
+    WATCHDOG-ALERT-SINK（正本 alert_sink.py）：先 redact（E3 MED-1）再於遠端通道前無條件落耐久 sink。
     消費者註記：incident_sentinel.py（P2p 哨兵）sibling-import 本函數發告警——改簽名須同步該檔與其簽名 smoke 測試。
     """
     global _alert_unconfigured_warned
+    resolved_dir = data_dir or os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw")
     try:
-        creds = _load_alert_creds(data_dir or os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"))
+        creds = _load_alert_creds(resolved_dir)
     except Exception as exc:  # noqa: BLE001 - 憑證讀取必須 fail-safe
         logger.debug("alert creds load failed (non-fatal): %s", exc)
+        alert_sink.redact_and_sink(resolved_dir, subject, body, severity, [])  # 耐久線無條件成立
         return
 
     tg = creds["telegram"]
     wh = creds["webhook"]
     tg_active = bool(tg["enabled"]) and bool(tg["bot_token"]) and bool(tg["chat_id"])
     wh_active = bool(wh["enabled"]) and len(wh["urls"]) > 0
+
+    subject, body, sink_ok = alert_sink.redact_and_sink(  # E3 MED-1 唯一脫敏入口：遠送/log 必用回傳文本
+        resolved_dir, subject, body, severity,
+        [c for c, on in (("telegram", tg_active), ("webhook", wh_active)) if on])
 
     if not tg_active and not wh_active:
         if not _alert_unconfigured_warned:
@@ -723,6 +732,9 @@ def _send_alert_best_effort(subject: str, body: str, severity: str, data_dir: st
                 "/ 告警通道未配置 — engine-down 告警停用",
             )
             _alert_unconfigured_warned = True
+        logger.log(logging.INFO if sink_ok else logging.WARNING,  # W-2 觀測面據實：失敗不謊稱 recorded
+                   "alert recorded to local sink only (channels unconfigured): %s" if sink_ok else
+                   "alert LOST: sink write failed and no channels configured: %s", subject)
         return
 
     text = f"[{severity}] {subject}\n{body}"
