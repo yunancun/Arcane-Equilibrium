@@ -47,6 +47,12 @@ Mac focused Rust:
 - `rustfmt --edition 2021 --check rust/openclaw_engine/src/position_reconciler/incident.rs` -> passed
 - `git diff --check` -> passed
 
+Linux focused Rust after `trade-core` fast-forward to the same commit:
+
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine position_reconciler::incident --lib` -> 6 passed
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine position_reconciler --lib` -> 94 passed
+- `cargo test --manifest-path rust/Cargo.toml -p openclaw_engine notification_failsafe::incident_policy --lib` -> 15 passed
+
 Workspace-wide `cargo fmt --manifest-path rust/Cargo.toml --all --check` still reports pre-existing formatting drift outside this slice, so it was not used as a gate for this focused change.
 
 ## Remaining
