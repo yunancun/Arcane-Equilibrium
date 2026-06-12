@@ -163,9 +163,10 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 
 | 文件 | 内容 |
 |------|------|
-| `CCAgentWorkSpace/E2/workspace/reports/2026-06-12--incident_policy_producer_slices_re_review.md` | E2 focused re-review: `sm_halt_stuck` / `position_drift` / external `engine_dead` producer slices PASS-WITH-CONDITIONS；0 blocker/high/medium/low；E4/QA/full-chain pending。 |
+| `CCAgentWorkSpace/E4/workspace/reports/2026-06-12--incident_policy_dispatch_trigger_e4_regression.md` | E4 source-focused regression: incident-policy planned producer set PASS_WITH_CONDITIONS on Mac+Linux focused Rust/Python matrix；not QA acceptance；no CI/deploy/service rebuild/restart。 |
+| `CCAgentWorkSpace/E2/workspace/reports/2026-06-12--incident_policy_producer_slices_re_review.md` | E2 focused re-review: `sm_halt_stuck` / `position_drift` / external `engine_dead` producer slices PASS-WITH-CONDITIONS；0 blocker/high/medium/low；E4 follow-up now recorded above。 |
 | `CCAgentWorkSpace/BB/workspace/reports/2026-06-12--incident_policy_producer_slices_bb_re_review.md` | BB focused re-review: new producer slices add no Bybit endpoint/order/market-close/direct `set_trading_stop`; APPROVE-WITH-CONDITIONS；0 blocker/high/medium。 |
-| `CCAgentWorkSpace/PM/workspace/reports/2026-06-12--incident_policy_producer_slices_bb_e2_closure.md` | PM closure checkpoint: planned producer source coverage + BB/E2 focused review no longer block `P2-INCIDENT-POLICY-DISPATCH-TRIGGER`; next E4 regression/full-chain then QA acceptance。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-12--incident_policy_producer_slices_bb_e2_closure.md` | PM closure checkpoint: planned producer source coverage + BB/E2 focused review no longer block `P2-INCIDENT-POLICY-DISPATCH-TRIGGER`; superseded by E4 regression report above for the next gate。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-12--incident_policy_engine_dead_watchdog_producer.md` | PM report: external `engine_dead` watchdog notify-only producer source-live；stale ≥30s + failed respawn ≥1 後寫 `ENGINE_DEAD_NOTIFY_ONLY`/`ENGINE_DEAD_RESOLVED`，不餵 C4 `AllFail`、不武裝 Defensive；focused watchdog tests passed；後續 BB/E2 closure 見本節 producer slices reports。 |
 
 ### 2026-06-10 Root sweep 歸檔（cold audit rulings + INVENTORY 校準更名）
