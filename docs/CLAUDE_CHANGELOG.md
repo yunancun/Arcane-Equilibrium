@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v143 P2 incident-policy `position_drift` notify-only producer coverage；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v144 P2 incident-policy external `engine_dead` watchdog notify-only producer coverage；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v144 增量（2026-06-12 P2 incident-policy external `engine_dead` watchdog notify-only producer coverage）**：新增 external watchdog `engine_dead` notify-only producer：`helper_scripts/canary/engine_dead_incident.py` 承載 producer state machine，`engine_watchdog.py` 只做薄接線。觸發條件對齊 PA §2.6：snapshot/heartbeat stale ≥30s 且 respawn failed ≥1（`consecutive_failures>=1`），發 `ENGINE_DEAD_NOTIFY_ONLY` canary event + 既有 engine-down alert（Telegram/webhook/local sink），同一 down episode 去重；`on_engine_recovery` 寫 `ENGINE_DEAD_RESOLVED` 並清 marker。此路徑明確 notify-only：不餵 Rust C4 `AllFail`、不武裝 Defensive、無 auth/order/DB/risk/trading mutation；network_outage 分支仍不觸發。Mac focused verification：`py_compile` watchdog files OK；`test_canary.py` 87 passed + 9 subtests；`test_engine_watchdog.py` 40 passed；`test_watchdog_alert.py` 41 passed；`rustfmt --edition 2021 --check main_boot_tasks.rs` 與 `git diff --check` passed。`cargo fmt --manifest-path rust/openclaw_engine/Cargo.toml --check` 因 repo 既有大量 rustfmt drift 失敗，非本 slice 新增；本輪未 CI、未 deploy/rebuild/restart。P2 incident-policy planned producers source coverage 至此完成；`sm_halt` / `position_drift` / `engine_dead` slices 仍待 BB/E2/E4/QA/full-chain review。
 
 **v143 增量（2026-06-12 P2 incident-policy `position_drift` notify-only producer coverage）**：新增 source-live `position_drift` producer：`position_reconciler/incident.rs` 在 successful reconcile cycle 分類後、orphan/ghost 處理後、baseline 更新前觀察剩餘 actionable drifts（MajorDrift/SideFlip/Orphan/Ghost；MinorDrift 忽略），沿用既有 `PERSISTENT_DRIFT_CYCLES=3` 與 `STARTUP_GRACE_MS=5min`，連續 3 cycle 未收斂才餵 `IncidentClass::PositionDrift`；producer 60s local cadence，incident_policy 仍擁有 class-level 5m throttle/cooling，persistent drift 清除時 class-scoped `report_resolved`。`PositionDrift` 在 policy 層預設 `NotifyOnly`，不餵 C4 AllFail、不武裝 watcher timer。C4 owner handler / `PipelineCommand` 動作 / RiskGovernor / auth / DB / order / exchange 寫入口均未改。Mac+Linux focused Rust：`position_reconciler::incident` 6 passed、`position_reconciler` 94 passed、incident_policy 15 passed；`rustfmt --check` touched file + `git diff --check` passed。TODO v143 保持 partial：上一輪 BB/E2 review 僅覆蓋 CORE+auth+Bybit；新 `sm_halt` + `position_drift` slices 尚待 BB/E2/E4/QA/full-chain review，剩餘 producer 為 external `engine_dead` watchdog notify-only；本輪無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/trading mutation。
 

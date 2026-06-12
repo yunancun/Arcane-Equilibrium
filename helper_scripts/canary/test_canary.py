@@ -1235,6 +1235,23 @@ class TestWatchdogAlertWiring(unittest.TestCase):
                     keys.append(ev.get("alert_key"))
         return keys
 
+    def _count_canary(self, event_name, **filters):
+        """數 canary_events.jsonl 中指定 event；filters 全部相等才計入。"""
+        path = os.path.join(self.dir, "canary_events.jsonl")
+        if not os.path.exists(path):
+            return 0
+        n = 0
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                ev = json.loads(line)
+                if ev.get("event") != event_name:
+                    continue
+                if all(ev.get(k) == v for k, v in filters.items()):
+                    n += 1
+        return n
+
     def _drive_to_circuit_broken(self):
         """用真 trigger_restart 連續失敗驅動到 circuit_broken（不 mock trigger_restart）。
 
@@ -1248,6 +1265,73 @@ class TestWatchdogAlertWiring(unittest.TestCase):
         with mock.patch.object(engine_watchdog.subprocess, "run", return_value=fail):
             for _ in range(engine_watchdog.MAX_CONSECUTIVE_FAILURES):
                 trigger_restart(self.dir)
+
+    # ─── incident_policy E1-E：external engine_dead notify-only producer ───
+
+    def test_engine_dead_notify_only_emits_once_after_failed_respawn_and_resolves(self):
+        """engine_dead 外部 producer：stale≥30s + respawn failed≥1 ⇒ notify-only once。
+
+        驅動 on_engine_crash 真接線；只 mock trigger_restart 的副作用（寫一筆 failed
+        respawn state）與 _send_alert_best_effort（避免真 HTTP）。第二個 stale poll 不重發；
+        on_engine_recovery 寫 ENGINE_DEAD_RESOLVED 並清 producer marker。
+        """
+        log_path = self._write_log(["ERROR something broke"])
+        state = WatchdogState()
+
+        def failed_respawn(data_dir):
+            st = engine_watchdog.load_state(data_dir)
+            st["consecutive_failures"] = 1
+            st["last_failure_reason"] = "exit=1 stderr=boom"
+            st["circuit_broken"] = False
+            engine_watchdog.save_state(data_dir, st)
+            return False
+
+        with mock.patch.object(engine_watchdog, "_send_alert_best_effort") as m_send, \
+                mock.patch.object(engine_watchdog, "should_restart",
+                                  return_value=(True, "ok", "ok")), \
+                mock.patch.object(engine_watchdog, "trigger_restart",
+                                  side_effect=failed_respawn):
+            on_engine_crash(state, 60.0, data_dir=self.dir, log_path=log_path)
+
+        self.assertFalse(state.engine_alive)
+        self.assertEqual(self._count_canary("ENGINE_DEAD_NOTIFY_ONLY"), 1)
+        self.assertEqual(self._count_alert_sent("engine_dead_notify_only"), 1)
+        self.assertEqual(m_send.call_count, 1)
+        self.assertEqual(m_send.call_args.args[2], "CRITICAL")
+        persisted = engine_watchdog.load_state(self.dir)
+        self.assertTrue(persisted.get("engine_dead_notify_active"))
+
+        # 重複 stale poll：已有 active marker，不能每 poll 重發 notify-only。
+        with mock.patch.object(engine_watchdog, "_send_alert_best_effort") as m_send_again, \
+                mock.patch.object(engine_watchdog, "should_restart",
+                                  return_value=(False, "backoff", "backoff window active")), \
+                mock.patch.object(engine_watchdog, "trigger_restart"):
+            on_engine_crash(state, 61.0, data_dir=self.dir, log_path=log_path)
+        self.assertEqual(self._count_canary("ENGINE_DEAD_NOTIFY_ONLY"), 1)
+        self.assertEqual(self._count_alert_sent("engine_dead_notify_only"), 1)
+        m_send_again.assert_not_called()
+
+        with mock.patch.object(engine_watchdog, "_send_alert_best_effort") as m_recovered:
+            on_engine_recovery(state, data_dir=self.dir)
+        self.assertTrue(state.engine_alive)
+        self.assertEqual(self._count_canary("ENGINE_DEAD_RESOLVED"), 1)
+        self.assertFalse(engine_watchdog.load_state(self.dir).get("engine_dead_notify_active"))
+        self.assertEqual(m_recovered.call_count, 1)
+        self.assertEqual(m_recovered.call_args.args[2], "INFO")
+
+    def test_engine_dead_notify_only_requires_failed_respawn(self):
+        """沒有 failed respawn state 時，單純 stale poll 不應發 engine_dead notify-only。"""
+        log_path = self._write_log(["ERROR something broke"])
+        state = WatchdogState()
+        with mock.patch.object(engine_watchdog, "_send_alert_best_effort") as m_send, \
+                mock.patch.object(engine_watchdog, "should_restart",
+                                  return_value=(False, "backoff", "backoff window active")), \
+                mock.patch.object(engine_watchdog, "trigger_restart") as m_trigger:
+            on_engine_crash(state, 60.0, data_dir=self.dir, log_path=log_path)
+        self.assertEqual(self._count_canary("ENGINE_DEAD_NOTIFY_ONLY"), 0)
+        self.assertEqual(self._count_alert_sent("engine_dead_notify_only"), 0)
+        m_send.assert_not_called()
+        m_trigger.assert_not_called()
 
     # ─── 整合 1：熔斷 emit-once（再 poll 仍熔斷 → 不重發）───
 

@@ -46,6 +46,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import（cwd 漂移防護）
 import alert_sink  # 耐久 sink + 告警 redactor 正本（本檔 pre-existing 超 2000 行硬頂，只留薄調用）
+import engine_dead_incident  # external engine_dead notify-only producer（薄接線）
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1204,6 +1205,18 @@ def on_engine_crash(
             # circuit_broken 終態下也不會每 2s 灌一條把 RESTART_CIRCUIT_BROKEN 淹沒。
             emit_restart_skipped_if_new(data_dir, reason_key, reason_detail, now)
 
+        # incident_policy E1-E：engine_dead 是 engine 外 watchdog producer。引擎死時
+        # Rust 進程內的 C4 sender 不可用，因此此處只做 notify-only（不餵 AllFail）。
+        engine_dead_incident.maybe_emit_notify_only(
+            data_dir,
+            time.time(),
+            snapshot_age,
+            load_state,
+            save_state,
+            _append_canary_event,
+            emit_engine_down_alert_if_new,
+        )
+
         # WATCHDOG-ALERT-WIRE：持續宕機重發告警（level-triggered）。
         # 為什麼需要：2026-06-05 引擎 down ~20h；熔斷後 circuit_broken 是終態，初次
         # 告警之後不會再有狀態轉移觸發新告警。這裡每 RE_ALERT_INTERVAL_SECONDS 窗口
@@ -1276,6 +1289,9 @@ def on_engine_recovery(state: WatchdogState, data_dir: str = "") -> None:
         _rearm["consecutive_failures"] = 0
         _rearm["next_allowed_restart_ts"] = 0.0
         save_state(data_dir, _rearm)
+        engine_dead_incident.emit_resolved_if_active(
+            data_dir, time.time(), load_state, save_state, _append_canary_event,
+        )
         # WATCHDOG-ALERT-WIRE：恢復全清告警 —— 僅在先前確實發過 down-alert 時才發。
         # 為什麼有條件：若引擎一直健康（從未告警），恢復路徑不應憑空發 INFO；只有走過
         # 熔斷 / 宕機告警的恢復才值得通知「已恢復」。讀 marker（含 down-since）後再清，

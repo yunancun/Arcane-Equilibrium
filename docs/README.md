@@ -159,6 +159,12 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 
 ## 文档索引 (Document Index)
 
+### 2026-06-12 Incident-policy producer closure
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-12--incident_policy_engine_dead_watchdog_producer.md` | PM report: external `engine_dead` watchdog notify-only producer source-live；stale ≥30s + failed respawn ≥1 後寫 `ENGINE_DEAD_NOTIFY_ONLY`/`ENGINE_DEAD_RESOLVED`，不餵 C4 `AllFail`、不武裝 Defensive；focused watchdog tests passed；新增 producer review pending。 |
+
 ### 2026-06-10 Root sweep 歸檔（cold audit rulings + INVENTORY 校準更名）
 
 | 文件 | 内容 |
