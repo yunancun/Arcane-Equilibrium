@@ -124,6 +124,7 @@
 
 | 行動 | 觸發 | 影響 |
 |---|---|---|
+| **P2 batch activation owed #2-#6** | 2026-06-12 PM runtime partial：✅ owed #3 Bybit 公告哨兵 cron installed（`7,37 * * * *`）+ formal run 50 items/0 alerts；✅ owed #4 Polymarket daily artifact cron installed（`41 4 * * *`，hourly 保持註釋）+ run `daily-20260612T090806Z` 6100 rows/0 errors。A 前置：prod head=137、V138/V139 pending、checksum drift=0。 | ⛔ owed #2 V138→V139 apply + owed #5/#6 L2 activation blocked until P5-SM soak gate completes：2026-06-12T09:11Z `[82]` still accumulating `31.2h < 48h`, probes=934；migration 唯一路徑需要 engine restart。下一步：soak PASS/低風險窗口後 apply V138→V139，再跑 V140/seed/L2 cron pipeline。報告：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-12--p2_activation_partial_runtime.md`。 |
 | ~~V127 regime-labels migration apply~~ | ✅ **DONE 2026-06-03**（operator 批准，E4 engine-embedded sqlx，head 126→127，double-apply 冪等 + checksum 0 drift） | live `trading_ai` head 127；解鎖 AEG-S2 (a) regime runner。 |
 | **S2 Gate-B 24h 真捕捉 run** | 探針已部署（R-0 zero-leak）；operator 安排真實 PreLaunch 上幣窗口 | listing fade 主路第一證據；不可連 production WS/scanner/strategy/DB/order/auth。 |
 | OP-1 Bybit mainnet 金鑰更新 | 操作員可用性 | 封鎖 Earn Wave C、live-auth 更新、OPS-2 dry-run、endpoint-file 修正。 |
@@ -161,7 +162,7 @@
 |---|---|---|
 | AMD-2026-05-21-01 v2 Wave 5 | Packet A+B + TOTP 來源 + ADR/R4 落地；active-IMPL 凍結 | 晉升 gate 前不派工 runtime TOTP 註冊 / Packet C engine 整合。 |
 | ADR-0046 提議中 | basis 觀察／執行拆分仍 live | PA 設計鏈有效；與 AEG endpoint／儲存決策協調。 |
-| v92 V### 對帳 | SQL head **V133**（V127 aeg-regime-labels／V131・V132 registry／V133 agent_lessons 皆 applied，2026-06-07 rebuild）；V116-124 棄置槽；**L2 V134-136 已 commit 未 apply**（deploy bundle 見 `L2_TODO.md`） | TW 可更新文檔註記，不觸碰已套用 SQL。 |
+| v92 V### 對帳 | SQL head **V137**（V134-136 已於 2026-06-10 apply；V137 P5-SM soak events 已於 2026-06-11 apply；2026-06-12 checksum drift=0）。**V138/V139 pending**：V138 research FDR + V139 agent memory store 需下一個 engine auto-migrate restart 窗口套用；manual V140 依賴 V139。 | P2 activation A/B 等 P5-SM soak gate 完成後再跑，不在 soak accumulating 期間重啟 engine。 |
 | AMD-2026-05-31-01 / ADR-0047 | 已接受 / 進行中 | 每個 Alpha-Edge 判定須含 regime、breadth、freshness、survivorship、execution realism。 |
 
 ---
