@@ -225,3 +225,9 @@
 
 - `66a9e511` 讓 `aeg_s3_matrix_inputs` 可直接引用既有 `breadth_ladder` / `execution_realism` sidecar artifact；缺 sidecar 時原 fail-closed placeholder 不變，candidate/parameter mismatch 直接 fail-closed。
 - Mac/Linux focused regression 各 `24 passed`；Linux true funding_revive sidecar matrix smoke row_count=24、coverage PASS、survivorship `pit_fnd2_delisted_proof`、execution 仍 `unverified_missing_missing`，所以仍 non-promotable。
+
+## 2026-06-12 AEG-S3 execution observations producer
+
+- `9eaad929` 新增 artifact-only `aeg_s3_execution_observations`：把 `listing_fade` candidate evidence + Gate-B run 轉為 matched `execution_observations.jsonl`，供 `aeg_s3_event_execution_realism` 使用。
+- 邊界：只支援 Gate-B listing_fade；funding_revive/oi_delta 不冒充；source 是 publicTrade prints only，不宣稱 orderbook-depth fill realism。
+- Mac/Linux focused regression 各 `31 passed`；Linux old Gate-B smoke `listing_24h_20260602_1847` 只產 2 matched observations，execution realism 10 USDT FAIL=樣本不足+participation，1 USDT FAIL=樣本不足。producer 已接通；promotion 仍需 fresh Gate-B `>=30` matched samples 後重跑 formal matrix。
