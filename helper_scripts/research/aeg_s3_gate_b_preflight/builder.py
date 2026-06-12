@@ -5,8 +5,9 @@ from __future__ import annotations
 import os
 import shlex
 from dataclasses import dataclass
+import json
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 try:
     from . import RUNNER_VERSION, SUMMARY_SCHEMA_VERSION
@@ -83,13 +84,51 @@ def _dir_mtime(path: Path) -> float:
     return max(mtimes)
 
 
-def _latest_dir_with_files(root: Path, required_files: tuple[str, ...]) -> Optional[Path]:
+def _json_or_none(path: Path) -> Optional[dict[str, Any]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _valid_gate_b_dir(path: Path) -> bool:
+    return all((path / name).exists() for name in GATE_B_REQUIRED_FILES)
+
+
+def _valid_fnd2_dir(path: Path) -> bool:
+    summary = _json_or_none(path / "universe_summary.json")
+    if summary is None:
+        return False
+    return bool(summary.get("run_id") and summary.get("universe_id"))
+
+
+def _valid_regime_dir(path: Path) -> bool:
+    summary = _json_or_none(path / "regime_summary.json")
+    if summary is None:
+        return False
+    health = summary.get("healthcheck")
+    health_status = str(health.get("status") if isinstance(health, dict) else "").upper()
+    return (
+        summary.get("classifier_version") == "aeg_regime_v0.1.0"
+        and health_status == "PASS"
+        and bool(summary.get("run_id"))
+    )
+
+
+def _latest_dir_with_files(
+    root: Path,
+    required_files: tuple[str, ...],
+    validator: Optional[Callable[[Path], bool]] = None,
+) -> Optional[Path]:
     if not root.exists() or not root.is_dir():
         return None
     candidates = [
         path for path in root.iterdir()
         if path.is_dir() and all((path / name).exists() for name in required_files)
     ]
+    if validator is not None:
+        candidates = [path for path in candidates if validator(path)]
     if not candidates:
         return None
     return max(candidates, key=_dir_mtime)
@@ -100,11 +139,11 @@ def locate_artifact(
     explicit_dir: Optional[str],
     root: Path,
     required_files: tuple[str, ...],
-    source_name: str,
+    validator: Optional[Callable[[Path], bool]] = None,
 ) -> LocatedArtifact:
     if explicit_dir:
         return LocatedArtifact(Path(explicit_dir), "explicit", required_files)
-    latest = _latest_dir_with_files(root, required_files)
+    latest = _latest_dir_with_files(root, required_files, validator)
     return LocatedArtifact(latest, f"latest_under:{root}", required_files)
 
 
@@ -237,19 +276,19 @@ def build_preflight_summary(
         explicit_dir=gate_b_run_dir,
         root=gate_root,
         required_files=GATE_B_REQUIRED_FILES,
-        source_name="gate_b",
+        validator=_valid_gate_b_dir,
     )
     fnd2 = locate_artifact(
         explicit_dir=fnd2_run_dir,
         root=alpha_root,
         required_files=FND2_REQUIRED_FILES,
-        source_name="fnd2",
+        validator=_valid_fnd2_dir,
     )
     regime = locate_artifact(
         explicit_dir=regime_run_dir,
         root=alpha_root,
         required_files=REGIME_REQUIRED_FILES,
-        source_name="regime",
+        validator=_valid_regime_dir,
     )
 
     checks: list[dict[str, Any]] = []
