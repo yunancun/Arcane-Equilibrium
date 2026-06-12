@@ -159,6 +159,13 @@ YYYY-MM-DD-N--功能描述.扩展名     # N=1,2,3...，優先於 HHmm，git mti
 
 ## 文档索引 (Document Index)
 
+### 2026-06-12 L2 root TODO tail triage
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-12--l2_root_todo_tail_triage.md` | PM triage: root `L2_TODO.md` is not completed-archive eligible；open tails mirrored into TODO v149 `P1-L2-ADVISORY-MESH-TAILS`；no runtime mutation/model call/deploy。 |
+| `CCAgentWorkSpace/Operator/2026-06-12--l2_root_todo_tail_triage.md` | Operator brief mirror: V138/V139 activation, E2E-1, P2p sentinel Telegram/probe/install, and P5 remain gated; current safe action was active-state repair only。 |
+
 ### 2026-06-12 AEG-S3 Gate-B watch / preflight
 
 | 文件 | 内容 |
