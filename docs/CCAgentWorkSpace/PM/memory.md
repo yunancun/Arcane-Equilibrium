@@ -260,3 +260,8 @@
 
 - `2b880f5d` 讓 `aeg_s3_gate_b_preflight` 讀 local `gate_b_watch_latest.json`，輸出 `gate_watch.operator_action` 與 `probe_command_hints`；`WATCH_ONLY` wait-only，`ACTIONABLE_*` 才給 isolated probe hint，stale/malformed/source failure fail-closed。
 - Mac/Linux focused regression 各 `62 passed`；Linux smoke 讀 live watch artifact 得 `WATCH_ONLY`、23 candidates、0 alertable/start/schedule、operator_action=`WAIT_FOR_ACTIONABLE_WATCH`、old Gate-B sample_count=2。
+
+## 2026-06-12 P5-SM [81]/[82] selector fix
+
+- `bf673cdc` 修好 `passive_wait_healthcheck.runner --check 81 --check 82` narrow routing；只改 CLI selector dispatch，不改 `[81]/[82]` 判定邏輯。
+- Mac/Linux `test_lease_ipc_soak_healthcheck.py` 各 `47 passed, 1 skipped`；Linux true DB smoke 現正常輸出 `[81] PASS`、`[82] 38.7h<48h` accumulating。

@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v138 AEG-S3 Gate-B watch → preflight bridge；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v139 P5-SM [81]/[82] narrow selector fix；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v139 增量（2026-06-12 P5-SM `[81]/[82]` narrow selector fix）**：新增 checkpoint `bf673cdc`，修正 `helper_scripts/db/passive_wait_healthcheck/runner.py` narrow `--check` routing，只擴白名單與 dispatch 支援 `[81] lease_ipc_soak` / `[82] lease_ipc_soak_window`，不改 healthcheck 判定邏輯；補 `test_lease_ipc_soak_healthcheck.py` selected-runner routing / unsupported selector tests。Mac/Linux focused test `47 passed, 1 skipped` + compileall OK。Linux 真 DB smoke：`python3 -m helper_scripts.db.passive_wait_healthcheck.runner --check 81 --check 82` 現正常輸出 `[81] PASS` 與 `[82] S3 not yet met: window=38.7h < 48h ... probes=1160`，exit 1 合理來自 `[82]` accumulating，不再是 unsupported selector。無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/trading mutation。
 
 **v138 增量（2026-06-12 AEG-S3 Gate-B watch → preflight bridge）**：新增 AEG-S3 Gate-B watch/preflight bridge checkpoint `2b880f5d`：`aeg_s3_gate_b_preflight` summary schema 升 v0.2，新增 `gate_watch` block，可讀 local `/tmp/openclaw/gate_b_watch/gate_b_watch_latest.json` 或 `--gate-watch-latest-json`，輸出 `artifact_status`、candidate_counts、source_health、`operator_action`、`probe_command_hints`。`WATCH_ONLY` 明確映射為 `WAIT_FOR_ACTIONABLE_WATCH`，`ACTIONABLE_START_NOW` / `ACTIONABLE_SCHEDULE` 產 isolated 24h probe command hint；stale/malformed/source failure fail-closed，不冒充 ready。Mac/Linux focused AEG-S3 regression `62 passed` + compileall OK；Mac `rg` / Linux `grep -R -E` forbidden-route search no hits。Linux true smoke `aeg_s3_gate_b_preflight_watch_bridge_smoke_allow_slow_20260612` 用 old Gate-B + auto FND2/regime + live watch artifact：`gate_watch.artifact_status=WATCH_ONLY`、23 candidates、0 alertable/start/schedule、operator_action=`WAIT_FOR_ACTIONABLE_WATCH`、sample_count=2、pbo_status=`produced_candidate_grid`、readiness=`READY_BUT_SAMPLE_BELOW_GATE`、recommended command generated。邊界：artifact-only；無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/trading mutation。
 
