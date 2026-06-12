@@ -21,6 +21,7 @@ mod loop_handlers;
 pub(crate) mod paper_state_restore;
 mod pending_sweep;
 mod setup;
+mod sm_halt_incident;
 mod status_report;
 #[cfg(test)]
 mod tests;
@@ -234,6 +235,11 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                          / 租約 / 授權過期掃描已轉換物件"
                     );
                 }
+                sm_halt_incident::observe_and_dispatch(
+                    &pipeline,
+                    &mut state.sm_halt_incident,
+                    "lease_sweep",
+                );
             }
         }
     }
