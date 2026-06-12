@@ -220,3 +220,8 @@
 
 - `c35f8425` 新增 artifact-only AEG-S3 event execution realism adapter：`listing_fade` / `funding_revive` candidate evidence 可用 matched execution-observations JSONL 產 canonical `execution_realism.json`；`oi_delta` basket 明確 fail-closed。
 - Gate-B 等待口徑改為事件觸發：現官方 new listing 最新批為 2026-06-09 已 open perpetual，live PreLaunch 只有老 `BPUSDT`（ContinuousTrading since 2026-03-16）；下一步盯 BPUSDT conversion 或下一個 fresh Pre-Market/PreLaunch 公告，再開 isolated 24h probe。
+
+## 2026-06-12 AEG-S3 sidecar matrix wiring
+
+- `66a9e511` 讓 `aeg_s3_matrix_inputs` 可直接引用既有 `breadth_ladder` / `execution_realism` sidecar artifact；缺 sidecar 時原 fail-closed placeholder 不變，candidate/parameter mismatch 直接 fail-closed。
+- Mac/Linux focused regression 各 `24 passed`；Linux true funding_revive sidecar matrix smoke row_count=24、coverage PASS、survivorship `pit_fnd2_delisted_proof`、execution 仍 `unverified_missing_missing`，所以仍 non-promotable。
