@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v146 P2 incident-policy dispatch trigger E4 source-focused regression closure；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v147 P2 incident-policy dispatch trigger source-chain QA+PM closure；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v147 增量（2026-06-12 P2 incident-policy dispatch trigger source-chain QA+PM closure）**：完成 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` QA source acceptance 與 PM source closure。QA verdict `PASS_WITH_CONDITIONS`：Mac+Linux 最短 source business chain 均通過，C4 true producer path `e2e_c4_incident_policy_allfail_to_defensive_demo` 1 passed each，notify-only no-AllFail `report_incident_notify_only_class_never_feeds_allfail` 1 passed each，`engine_dead or WatchdogAlertWiring` targeted canary 5 passed each；靜態 forbidden-route scan 確認 `engine_dead` production files 無 order/auth/DB/risk/trading mutation，`sm_halt`/`position_drift` producers 僅呼 `spawn_report_incident(...)`。Linux runtime read-only sanity：watchdog `engine_alive=true`、demo/live snapshot fresh，`/api/v1/healthz` OK；loopback 與 `/api/v1/health` 失敗裁定為 bind/route drift，不是本 slice regression。PM closure：source chain closed；runtime activation 仍 operator/deploy-gated。本輪未 CI、未 deploy/service rebuild/service restart、未 DB/auth/risk/order/trading mutation。
 
 **v146 增量（2026-06-12 P2 incident-policy dispatch trigger E4 source-focused regression closure）**：完成 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` E4 source-focused regression/full-chain review，verdict `PASS_WITH_CONDITIONS`，source coverage 包含 CORE ledger/C4 arm path、`auth_invalid`、Bybit business-retCode fail-closed、`sm_halt_stuck`、`position_drift` notify-only、external watchdog `engine_dead` notify-only。Mac release matrix：incident_policy 15 passed ×2、C4 wire 4 ×2、sm_halt 5 ×2、position_drift 6 ×2、retCode 6 ×2、auth-invalid bin tests 2+1；adjacent notification_failsafe 124、position_reconciler 94、halt_ttl 29；Python py_compile OK、`test_canary.py` full 87 + 9 subtests、`test_watchdog_alert.py` 41、`test_engine_watchdog.py` 40。Linux source matrix：incident_policy 15、C4 wire 4、sm_halt 5、position_drift 6、retCode 6、auth-invalid 2+1、engine_dead targeted canary 5，all green。此前 0-test `live_auth_watcher` filter 不計入覆蓋，已改用實際 auth-invalid test names；Linux 非互動 Cargo PATH 首次命令未開始測試，rerun with `source ~/.cargo/env` 後通過。邊界：未 CI、未 deploy/service rebuild/service restart、未 DB/auth/risk/order/trading mutation；E4 不是 QA acceptance，下一步 QA。
 
