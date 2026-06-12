@@ -210,3 +210,8 @@
 
 - `8fed7073` 新增 AEG-S3 event breadth adapter：funding/listing 單 symbol event evidence 可用 FND-2 PIT tiers 產真 `breadth_ladder`；`oi_delta` basket evidence 明確 fail-closed。
 - Linux funding_revive event breadth `aeg_s3_funding_revive_event_breadth_v125_20260611T200033Z_oos20260301_pbo18` healthcheck PASS，full_survivorship breadth=829/delisted=255/n_independent=261；formal matrix 24 rows，coverage PASS、survivorship `pit_fnd2_delisted_proof`，但 DSR=0/PBO=0.54583333/execution unverified → 仍 non-promotable。
+
+## 2026-06-12 P2 batch activation partial
+
+- owed #3 Bybit 公告哨兵與 owed #4 Polymarket daily artifact cron 已在 `trade-core` 安裝並手動驗證；Bybit formal data-dir run 50 items/0 alerts，Polymarket `daily-20260612T090806Z` 6100 rows/0 errors。
+- owed #2 V138/V139 與 owed #5/#6 L2 activation 未跑：checksum drift=0、prod head=137，但 P5-SM `[82]` soak 仍 accumulating（31.2h<48h，934 probes），migration 唯一路徑需 engine restart，故依 survival/system-health 邊界停在 A/B 前。
