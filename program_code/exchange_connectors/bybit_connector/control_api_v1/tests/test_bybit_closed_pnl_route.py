@@ -29,6 +29,28 @@ class _FakeCursor:
         return self.rows
 
 
+class _SequencedFakeCursor:
+    def __init__(self, select_rows: list[list[tuple[Any, ...]]]):
+        self._select_rows = list(select_rows)
+        self.sql = ""
+        self.params: tuple[Any, ...] = ()
+        self.sqls: list[str] = []
+        self.params_list: list[tuple[Any, ...]] = []
+        self._current_rows: list[tuple[Any, ...]] = []
+
+    def execute(self, sql: str, params: tuple[Any, ...]):
+        self.sql = sql
+        self.params = params
+        if sql.strip().upper().startswith("SET "):
+            return
+        self.sqls.append(sql)
+        self.params_list.append(params)
+        self._current_rows = self._select_rows.pop(0) if self._select_rows else []
+
+    def fetchall(self):
+        return self._current_rows
+
+
 class _FakeConn:
     def __init__(self, cursor: _FakeCursor):
         self._cursor = cursor
@@ -187,6 +209,42 @@ async def test_demo_closed_pnl_openclaw_link_without_owner_is_unknown_pending(mo
         "pg_missing_unknown_external",
     ]
     assert data["list"][0]["strategy_name"] == "unknown_pending"
+
+
+@pytest.mark.asyncio
+async def test_demo_closed_pnl_missing_order_link_uses_pg_time_window_strategy(monkeypatch):
+    ts = datetime(2026, 5, 23, 12, 0, tzinfo=timezone.utc)
+    ts_ms = int(ts.timestamp() * 1000)
+    cursor = _SequencedFakeCursor([
+        [],
+        [(ts, "oc_close_mf_fb_dm_1770000000000_7", "OPUSDT", "Sell", 100.0, 1.05, "grid_trading")],
+    ])
+    _install_fake_db(monkeypatch, cursor)
+    fake_client = _FakeBybitClient([
+        {
+            "orderId": "BYBIT-CLOSE-1",
+            "orderLinkId": "",
+            "symbol": "OPUSDT",
+            "closedPnl": "1.0",
+            "updatedTime": str(ts_ms + 500),
+        },
+    ])
+    monkeypatch.setattr(routes, "_get_rust_client", lambda: fake_client)
+    monkeypatch.setattr(routes, "_engine_owner_strategy_map", lambda engine: {})
+
+    result = await routes.get_demo_closed_pnl(
+        limit=1, offset=0, symbol=None, force_refresh=True, actor=object()
+    )
+    row = result["data"]["list"][0]
+
+    assert row["strategy_name"] == "grid_trading"
+    assert row["strategy_source"] == "pg_time_window"
+    assert row["pg_engine_pnl"] == 1.05
+    assert row["strategy_match_delta_ms"] == 500
+    assert any("symbol = ANY(%s)" in sql for sql in cursor.sqls)
+    assert all("INSERT" not in sql.upper() for sql in cursor.sqls)
+    assert all("UPDATE" not in sql.upper() for sql in cursor.sqls)
+    assert all("DELETE" not in sql.upper() for sql in cursor.sqls)
 
 
 @pytest.mark.asyncio
