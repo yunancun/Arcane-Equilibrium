@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v142 P2 incident-policy `sm_halt_stuck` producer coverage；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v143 P2 incident-policy `position_drift` notify-only producer coverage；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v143 增量（2026-06-12 P2 incident-policy `position_drift` notify-only producer coverage）**：新增 source-live `position_drift` producer：`position_reconciler/incident.rs` 在 successful reconcile cycle 分類後、orphan/ghost 處理後、baseline 更新前觀察剩餘 actionable drifts（MajorDrift/SideFlip/Orphan/Ghost；MinorDrift 忽略），沿用既有 `PERSISTENT_DRIFT_CYCLES=3` 與 `STARTUP_GRACE_MS=5min`，連續 3 cycle 未收斂才餵 `IncidentClass::PositionDrift`；producer 60s local cadence，incident_policy 仍擁有 class-level 5m throttle/cooling，persistent drift 清除時 class-scoped `report_resolved`。`PositionDrift` 在 policy 層預設 `NotifyOnly`，不餵 C4 AllFail、不武裝 watcher timer。C4 owner handler / `PipelineCommand` 動作 / RiskGovernor / auth / DB / order / exchange 寫入口均未改。Mac focused Rust：`position_reconciler::incident` 6 passed、`position_reconciler` 94 passed、incident_policy 15 passed；`rustfmt --check` touched file + `git diff --check` passed。TODO v143 保持 partial：上一輪 BB/E2 review 僅覆蓋 CORE+auth+Bybit；新 `sm_halt` + `position_drift` slices 尚待 BB/E2/E4/QA/full-chain review，剩餘 producer 為 external `engine_dead` watchdog notify-only；本輪無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/trading mutation。
 
 **v142 增量（2026-06-12 P2 incident-policy `sm_halt_stuck` producer coverage）**：新增 source-live `sm_halt_stuck` producer：`event_consumer/sm_halt_incident.rs` 觀察 `TickPipeline.halt_kind` + `halt_set_ts_ms`，在每次 tick 後與 60s lease/auth sweep 後餵既有 `IncidentClass::SmHaltStuck`；producer 5s cadence，120s sustained window 仍由 `incident_policy` class ledger 負責，halt 清除時 class-scoped `report_resolved`。實作明確不讀 PA 舊文中的 `[69]H4`，因當前 repo `[69]` 已是 WP-03 deploy-gate selector。C4 owner handler / set_trading_stop / RiskGovernor / auth / DB / exchange 寫入口均未改。Mac focused Rust：`sm_halt_incident` 5 passed、incident_policy 15 passed、C4 wire 4 passed、halt_ttl 20 passed、ret_code_counter 6 passed。TODO v142 保持 partial：上一輪 BB/E2 review 僅覆蓋 CORE+auth+Bybit；新 `sm_halt` slice 尚待 BB/E2/E4/QA/full-chain review，剩餘 producers 為 `position_drift` notify-only 與 external `engine_dead` watchdog notify-only；本輪無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/trading mutation。
 

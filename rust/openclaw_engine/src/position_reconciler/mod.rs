@@ -44,6 +44,7 @@
 //!   CB/MR 恢復仍需 operator。
 
 pub mod escalation;
+mod incident;
 pub mod orphan_handler;
 #[cfg(test)]
 mod tests;
@@ -509,6 +510,7 @@ pub async fn run_position_reconciler(
     // the `STARTUP_GRACE_MS` warmup window.
     // P0-0：標記啟動時間，讓升級判定函式在 STARTUP_GRACE_MS 寬限期內抑制自動降級。
     rc_state.startup_ms = now_ms_util();
+    let mut position_drift_incident = incident::PositionDriftIncidentProducer::default();
     let mut tick = tokio::time::interval(Duration::from_secs(RECONCILE_INTERVAL_SECS));
     tick.tick().await; // skip immediate first tick
 
@@ -727,6 +729,16 @@ pub async fn run_position_reconciler(
                             }
                             None => {}
                         }
+
+                        incident::observe_and_dispatch(
+                            &mut position_drift_incident,
+                            &drifts,
+                            current_level,
+                            rc_state.startup_ms,
+                            now,
+                            &engine_label,
+                            "reconcile_cycle",
+                        );
 
                         // Update baseline
                         rc_state.baseline = current;

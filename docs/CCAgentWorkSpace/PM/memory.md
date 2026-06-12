@@ -284,3 +284,10 @@
 - Hook points: after each `pipeline.on_tick()` and after the 60s lease/auth sweep; active HaltSession feeds `IncidentClass::SmHaltStuck` at 5s cadence and clears with `report_resolved` once `halt_kind` clears. Operator IPC pause remains excluded because it has `halt_kind=None`.
 - Mac focused Rust: `sm_halt_incident` 5 passed; incident_policy 15 passed; C4 wire 4 passed; halt_ttl 20 passed; ret_code_counter 6 passed.
 - TODO v142 keeps ticket partial: prior BB/E2 review covers CORE+auth+Bybit only; the new `sm_halt` producer still needs BB/E2/E4/QA/full-chain review, and remaining producers are `position_drift` notify-only plus external `engine_dead` watchdog notify-only. No CI/deploy/rebuild/restart/DB/auth/risk/trading mutation.
+
+## 2026-06-12 P2 incident-policy position_drift producer slice
+
+- `position_drift` is now source-live via `position_reconciler/incident.rs`; producer observes post-classification/post-orphan-ghost unresolved drifts before baseline update.
+- Semantics: actionable = MajorDrift/SideFlip/Orphan/Ghost, MinorDrift ignored; startup grace does not accumulate; persistent threshold is existing `PERSISTENT_DRIFT_CYCLES=3`; clear path calls class-scoped `report_resolved`.
+- Boundary: `IncidentClass::PositionDrift` remains policy-level `NotifyOnly`, so no C4 AllFail feed or watcher timer arm; no `PipelineCommand`, RiskGovernor, auth, DB, order, or exchange write path changed.
+- Mac focused Rust: `position_reconciler::incident` 6 passed; `position_reconciler` 94 passed; incident_policy 15 passed; touched-file rustfmt and `git diff --check` passed. TODO v143 remains partial: new `sm_halt` + `position_drift` slices need BB/E2/E4/QA/full-chain review; external `engine_dead` watchdog notify-only remains unwired.
