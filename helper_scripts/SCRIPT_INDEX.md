@@ -199,6 +199,24 @@ symbol breadth。artifact-only，0 DB / 0 Bybit / 0 runtime / 0 trading path。
 | `research/aeg_s3_event_breadth/harness.py` | CLI：`--candidate-evidence-json` + `--fnd2-run-dir` → `breadth_ladder` artifact；time bounds 可由 FND-2 summary / evidence 推導，亦可顯式覆寫。 |
 | `research/tests/test_aeg_s3_event_breadth.py` | synthetic bite tests：FND-2 alive mask 會排除 delist 後事件、healthcheck PASS、`oi_delta` basket fail-closed、靜態禁 runtime/DB/Bybit route。 |
 
+## 2026-06-12 AEG-S3 event execution realism adapter（`research/aeg_s3_event_execution_realism/`）
+
+AEG-S3 單事件候選的 empirical execution realism 接線：讀 `listing_fade` /
+`funding_revive` candidate evidence JSON + execution-observations JSONL，按
+`sample_id` 或 `(symbol, sample_ts)` 匹配候選事件，聚合 maker fill、slippage p95、
+adverse-selection p95、latency p95、participation p95、capacity、fee、order
+availability，輸出既有 `aeg_execution_realism` gate 可消費的
+`execution_realism.json`。樣本不足、未匹配、非 empirical source tier、缺必要欄位全部
+fail-closed；`oi_delta` basket evidence 不支援。artifact-only，0 DB / 0 Bybit /
+0 runtime / 0 trading path。
+
+| 檔 | 職責 |
+|---|---|
+| `research/aeg_s3_event_execution_realism/__init__.py` | runner / summary schema 版本。 |
+| `research/aeg_s3_event_execution_realism/builder.py` | normalize/match empirical observations，聚合成 `aeg_execution_realism` raw input。 |
+| `research/aeg_s3_event_execution_realism/harness.py` | CLI：`--candidate-evidence-json` + `--execution-observations-jsonl` → canonical `execution_realism` artifact。 |
+| `research/tests/test_aeg_s3_event_execution_realism.py` | synthetic PASS/FAIL、`oi_delta` fail-closed、靜態禁 runtime/DB/Bybit route。 |
+
 ## 2026-06-05 AEG candidate metrics adapter（`research/aeg_candidate_metrics/`）
 
 AEG robustness matrix 的下一個缺口是候選級 per-regime PnL、recent 90/180d
