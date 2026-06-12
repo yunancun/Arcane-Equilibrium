@@ -48,6 +48,22 @@ def _raw_daily_panel() -> list[dict]:
     return rows
 
 
+def _pbo_test_grid() -> list[dict]:
+    return [
+        {
+            "lookback_hours": lookback_hours,
+            "horizon_hours": horizon_hours,
+            "tail_frac": tail_frac,
+            "min_symbols": 10,
+            "cost_bps": 0.0,
+            "side_mode": "long_high_short_low",
+        }
+        for lookback_hours in (24.0, 48.0, 72.0)
+        for horizon_hours in (24.0, 48.0)
+        for tail_frac in (0.15, 0.2)
+    ]
+
+
 def test_raw_panel_builds_oi_delta_evidence_consumed_by_s3_rows():
     evidence, summary = builder_mod.build_oi_delta_evidence(
         _raw_daily_panel(),
@@ -83,6 +99,44 @@ def test_raw_panel_builds_oi_delta_evidence_consumed_by_s3_rows():
     assert rows[0]["n_independent"] == 64
     assert rows[0]["net_bps"] < 0.0
     assert json.loads(rows[0]["reject_reasons"]) == ["missing_pbo"]
+
+
+def test_candidate_grid_pbo_is_emitted_and_consumed_by_s3_rows():
+    evidence, summary = builder_mod.build_oi_delta_evidence(
+        _raw_daily_panel(),
+        source_path="fixture.jsonl",
+        run_id="oi_run",
+        lookback_hours=24,
+        horizon_hours=24,
+        cost_bps=0.0,
+        k_trials=12,
+        default_regime="chop",
+        oos_start_date="2026-04-02",
+        pbo_grid=_pbo_test_grid(),
+    )
+
+    assert summary["pbo_status"] == "produced_candidate_grid"
+    assert summary["pbo_grid_cell_count"] == 12
+    assert summary["pbo_grid_included_candidate_count"] == 12
+    assert len(evidence["pbo_candidates"]) == 12
+    assert evidence["pbo_candidate_grid"][0]["included_in_pbo"] is True
+
+    report, s3_summary, _sample_rows, _daily_rows = rows_builder.build_direct_report(
+        evidence,
+        run_id="direct_run",
+    )
+    assert s3_summary["pbo_status"] == "measured"
+
+    rows, adapted = candidate_builder.build_candidate_metrics(
+        report,
+        run_id="metrics_run",
+        candidate_id="oi_delta",
+        strategy_family="oi_delta",
+        parameter_cell_id=evidence["parameter_cell_id"],
+    )
+    assert adapted["source_report_type"] == "aeg_candidate_metrics_direct"
+    assert rows[0]["pbo"] is not None
+    assert "missing_pbo" not in json.loads(rows[0]["reject_reasons"])
 
 
 def test_missing_regime_rejects_windows_instead_of_creating_unlabeled_regime():
