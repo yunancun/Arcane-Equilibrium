@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v133 AEG-S3 execution observations producer；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v134 AEG-S3 Gate-B evidence chain wrapper；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v134 增量（2026-06-12 AEG-S3 Gate-B evidence chain wrapper）**：新增 AEG-S3 Gate-B evidence chain wrapper code checkpoint `75ed19c8`：`helper_scripts/research/aeg_s3_gate_b_chain` 編排既有 artifact-only harness，fresh Gate-B run 後可固定跑 `listing_fade` evidence -> candidate direct rows -> candidate metrics -> matched execution observations -> event execution realism；若同時提供 `--fnd2-run-dir --regime-run-dir`，再接 event breadth + formal `aeg_robustness_matrix`。wrapper 只記錄 child artifact 路徑、gate snapshot、chain summary，不收集資料、不呼叫 Bybit、不寫 DB、不碰 runtime；execution FAIL / matrix non-promotable 是 gate 結果，不是 orchestration error。Mac/Linux focused regression `52 passed` + compileall OK + static forbidden-route search no hits。Linux true smoke 用舊 Gate-B run `listing_24h_20260602_1847` 產 artifact `aeg_s3_gate_b_chain_listing_smoke_20260612`：listing_sample_count=2、execution_observation_count=2、chain_status=`COMPLETE_EXECUTION_REALISM_FAIL`、reject=`sample_count_below_30`。結論：一鍵鏈已接通；下一步等 fresh Gate-B alert 後跑 isolated 24h probe，再用 wrapper 取得 `>=30` matched observations + formal matrix artifact。
 
 **v133 增量（2026-06-12 AEG-S3 execution observations producer）**：新增 AEG-S3 execution observations producer code checkpoint `9eaad929`：`helper_scripts/research/aeg_s3_execution_observations` 可把 `listing_fade` candidate evidence + isolated Gate-B run（`capture_lag.jsonl` / `markout.jsonl` / `ws_publictrade.jsonl`）轉成 matched `execution_observations.jsonl`，供 `aeg_s3_event_execution_realism` 聚合；觀測以 `sample_id`/symbol/timestamp 對齊候選樣本，未匹配樣本 fail-closed 計 reject。Gate-B producer 僅支援 listing_fade，funding_revive/oi_delta 不冒充單幣 Gate-B execution evidence；source 明標 publicTrade prints only，不宣稱歷史 orderbook-depth fill realism。Mac/Linux focused regression `31 passed` + compileall OK + static forbidden-route search no hits。Linux true smoke 用舊 run `listing_24h_20260602_1847`：listing_fade evidence sample_count=2，observations count=2；execution realism 10 USDT FAIL（`sample_count_below_30` + `participation_rate_p95_above_0_05`），1 USDT FAIL（只剩 `sample_count_below_30`）。結論：producer/aggregator 接通，但舊 run 不足 promotion；下一步等 fresh Gate-B alert 後跑 isolated 24h probe，取得 `>=30` matched observations，再以 `--execution-realism-json` 重跑 formal matrix。
 
