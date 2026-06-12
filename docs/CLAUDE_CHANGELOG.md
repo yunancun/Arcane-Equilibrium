@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v145 P2 incident-policy producer slices BB/E2 focused re-review closure；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v146 P2 incident-policy dispatch trigger E4 source-focused regression closure；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v146 增量（2026-06-12 P2 incident-policy dispatch trigger E4 source-focused regression closure）**：完成 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` E4 source-focused regression/full-chain review，verdict `PASS_WITH_CONDITIONS`，source coverage 包含 CORE ledger/C4 arm path、`auth_invalid`、Bybit business-retCode fail-closed、`sm_halt_stuck`、`position_drift` notify-only、external watchdog `engine_dead` notify-only。Mac release matrix：incident_policy 15 passed ×2、C4 wire 4 ×2、sm_halt 5 ×2、position_drift 6 ×2、retCode 6 ×2、auth-invalid bin tests 2+1；adjacent notification_failsafe 124、position_reconciler 94、halt_ttl 29；Python py_compile OK、`test_canary.py` full 87 + 9 subtests、`test_watchdog_alert.py` 41、`test_engine_watchdog.py` 40。Linux source matrix：incident_policy 15、C4 wire 4、sm_halt 5、position_drift 6、retCode 6、auth-invalid 2+1、engine_dead targeted canary 5，all green。此前 0-test `live_auth_watcher` filter 不計入覆蓋，已改用實際 auth-invalid test names；Linux 非互動 Cargo PATH 首次命令未開始測試，rerun with `source ~/.cargo/env` 後通過。邊界：未 CI、未 deploy/service rebuild/service restart、未 DB/auth/risk/order/trading mutation；E4 不是 QA acceptance，下一步 QA。
 
 **v145 增量（2026-06-12 P2 incident-policy producer slices BB/E2 focused re-review closure）**：完成 `sm_halt_stuck` + `position_drift` + external `engine_dead` 新增 producer slices 的 BB/E2 focused re-review。E2 `PASS-WITH-CONDITIONS`，0 blocker/high/medium/low：`sm_halt_stuck` 只讀 `TickPipeline.halt_kind/halt_set_ts_ms` 並經 incident_policy arm-class path，`position_drift` 在 reconciler unresolved residual drift 上做 notify-only，`engine_dead` 僅 watchdog-side alert/canary、network_outage 早退且不進 Rust C4。BB `APPROVE-WITH-CONDITIONS`，0 blocker/high/medium：三個 slice 不新增 Bybit endpoint/order/market-close/set_trading_stop 路徑；`position_drift` 僅消費既有 reconciler residual，`engine_dead` 不得描述為 exchange outage。Mac focused verification：`cargo test -p openclaw_engine sm_halt_incident --lib` 5 passed；`position_reconciler::incident --lib` 6 passed；`notification_failsafe::incident_policy --lib` 15 passed；`event_consumer::tests::c4_failsafe_wire_tests --lib` 4 passed；watchdog `py_compile` OK；`test_canary.py -k 'engine_dead or WatchdogAlertWiring'` 5 passed。P2 source coverage + BB/E2 review 已不再阻塞；剩 E4 focused regression/full-chain review → QA acceptance；本輪未 CI、未 deploy/rebuild/restart。
 
