@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v141 P2 incident-policy dispatch trigger BB/E2 review；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v142 P2 incident-policy `sm_halt_stuck` producer coverage；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v142 增量（2026-06-12 P2 incident-policy `sm_halt_stuck` producer coverage）**：新增 source-live `sm_halt_stuck` producer：`event_consumer/sm_halt_incident.rs` 觀察 `TickPipeline.halt_kind` + `halt_set_ts_ms`，在每次 tick 後與 60s lease/auth sweep 後餵既有 `IncidentClass::SmHaltStuck`；producer 5s cadence，120s sustained window 仍由 `incident_policy` class ledger 負責，halt 清除時 class-scoped `report_resolved`。實作明確不讀 PA 舊文中的 `[69]H4`，因當前 repo `[69]` 已是 WP-03 deploy-gate selector。C4 owner handler / set_trading_stop / RiskGovernor / auth / DB / exchange 寫入口均未改。Mac focused Rust：`sm_halt_incident` 5 passed、incident_policy 15 passed、C4 wire 4 passed、halt_ttl 20 passed、ret_code_counter 6 passed。TODO v142 保持 partial：上一輪 BB/E2 review 僅覆蓋 CORE+auth+Bybit；新 `sm_halt` slice 尚待 BB/E2/E4/QA/full-chain review，剩餘 producers 為 `position_drift` notify-only 與 external `engine_dead` watchdog notify-only；本輪無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/trading mutation。
 
 **v141 增量（2026-06-12 P2 incident-policy dispatch trigger BB/E2 review）**：完成 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` 的 BB/E2 客座審查 checkpoint。BB 對 CORE+auth+Bybit path 給 `APPROVE-WITH-CONDITIONS`（0 blocker/high/medium）：incident report 不新增 Bybit 請求，交換所 side effect 仍只經 C4 owner handler + existing `set_trading_stop` channel；retCode producer 要描述為 business-retCode fail-closed，不是完整 exchange outage coverage。E2 給 `PASS-WITH-CONDITIONS`（0 blocker/high/medium/low）：arm/notify split、push-secret gate、single armed owner、stale in-flight guard、current-class self-heal guard、fail-soft sender/drop path 均符合 PA 模型。TODO 狀態改為「CORE+auth+Bybit source-live / BB+E2 reviewed / producer coverage partial」。剩餘：`sm_halt_stuck`、`position_drift`、external `engine_dead` producer coverage，之後再走 E4/QA/full-chain；本輪無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/trading mutation。
 

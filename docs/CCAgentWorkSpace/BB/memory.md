@@ -184,3 +184,8 @@ dict §4.2 110072 註記（line 1355）結尾的 follow-up 句目前寫「既有
 - Verdict `APPROVE-WITH-CONDITIONS` for reviewed partial path; 0 blocker/high/medium. `incident_policy` report itself adds no Bybit request, and exchange side effects remain C4 owner-handler `StopRequest` -> existing `set_trading_stop` channel.
 - Frequency/rate posture acceptable: Bybit producer triggers on 8 consecutive or 15/60s business retCode failures, suppresses duplicate open incident edges, recovery requires 3 successes + cooled window; policy adds 5m throttle/single owner/7d cooling.
 - Do not overclaim: `bybit_fail_closed` is business-retCode fail-closed, not full exchange outage coverage; transport/parse/no-credentials are outside this producer. Remaining producer coverage: `sm_halt_stuck`, `position_drift`, `engine_dead`.
+
+## 2026-06-12 incident_policy sm_halt_stuck source update (not BB-reviewed yet)
+- PM/E1 source slice added `sm_halt_stuck` producer via `event_consumer/sm_halt_incident.rs`, using `TickPipeline.halt_kind` + `halt_set_ts_ms` as runtime source-of-truth and explicitly not using stale passive healthcheck `[69]`.
+- This update has not received BB re-review. BB next check should focus on whether active HaltSession -> incident notification -> possible C4 Defensive escalation keeps the same exchange-side boundary: no new Bybit request at report time, no direct stop write outside C4 owner handler, and no false claim that a policy/sticky halt equals exchange outage.
+- Remaining producer coverage after this source slice: `position_drift` notify-only and external `engine_dead` watchdog notify-only.

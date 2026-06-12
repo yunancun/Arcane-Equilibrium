@@ -57,6 +57,8 @@ pub(super) struct LoopState {
     /// mandatory taker fallback. Prevents double close dispatch when reject,
     /// cancel ack, and sweep grace events race.
     pub close_maker_fallback_dispatched: HashSet<String>,
+    /// P2-INCIDENT-POLICY-DISPATCH-TRIGGER: producer state for sm_halt_stuck.
+    pub sm_halt_incident: super::sm_halt_incident::SmHaltIncidentProducer,
 }
 
 impl LoopState {
@@ -80,6 +82,7 @@ impl LoopState {
             last_status: now,
             last_pending_check: now,
             close_maker_fallback_dispatched: HashSet::new(),
+            sm_halt_incident: super::sm_halt_incident::SmHaltIncidentProducer::default(),
         }
     }
 }
@@ -808,6 +811,7 @@ pub(super) fn handle_tick_event(
     }
     let prev_fills = pipeline.stats.total_fills;
     let canary_record = pipeline.on_tick(&ev);
+    super::sm_halt_incident::observe_and_dispatch(pipeline, &mut state.sm_halt_incident, "tick");
 
     // ENGINE-HEAL-FIX-PHASE1 R1: Hand the record to the dedicated
     // canary writer task — non-blocking. On channel-full the record

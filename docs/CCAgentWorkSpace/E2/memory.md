@@ -243,3 +243,8 @@ E1 flag 對。`l2_advisory_orchestrator.py:429-432` `dispatch_and_execute` 傳 `
 - Reviewed existing source-live path, not remaining producers. Verdict `PASS-WITH-CONDITIONS`, 0 blocker/high/medium/low. Arm/notify split, push-secret downgrade, single armed owner, stale in-flight generation guard, current-class self-heal, and fail-soft sender/drop paths all match PA model.
 - Important wording: Bybit producer is business-retCode fail-closed only; transport/parse/no-credentials are intentionally outside `RetCodeCounter`. `WatcherUnavailable` skips ledger accumulation, acceptable fail-soft because watcher is boot-wired, but not a substitute for watcher boot healthcheck.
 - Ticket remains partial until `sm_halt_stuck`, `position_drift`, and external `engine_dead` producers are wired or explicitly descoped; after coverage decision it still needs E4/QA/full-chain review before runtime-complete claim.
+
+## 2026-06-12 · E2 follow-up needed — sm_halt_stuck source slice landed
+- PM/E1 source update added `event_consumer/sm_halt_incident.rs`: active HaltSession is detected from `TickPipeline.halt_kind` + `halt_set_ts_ms`, observed after tick handling and after the 60s lease/auth sweep, fed into existing `IncidentClass::SmHaltStuck`, and resolved when halt clears.
+- This is not yet E2-reviewed. Review delta should check: stale `[69]` healthcheck selector is not used; operator IPC pause (`halt_kind=None`) cannot report; producer 5s cadence does not bypass incident_policy 120s sustained/throttle/cooling; self-heal cannot disarm another armed class; C4 owner-handler boundary remains unchanged.
+- Remaining producers after this source slice: `position_drift` notify-only and external `engine_dead` watchdog notify-only.
