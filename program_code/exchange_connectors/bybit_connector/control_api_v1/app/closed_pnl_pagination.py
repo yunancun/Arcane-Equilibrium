@@ -59,6 +59,9 @@ _CLOSED_PNL_ALL_HISTORY_DAYS = 730
 _CLOSED_PNL_MAX_WINDOWS_PER_PRELOAD = 8
 _CLOSED_PNL_CURSOR_VERSION = 1
 _GUI_READ_STATEMENT_TIMEOUT_MS = int(os.getenv("OPENCLAW_GUI_READ_STATEMENT_TIMEOUT_MS", "1500"))
+_CLOSED_PNL_STRATEGY_TIME_MATCH_MS = int(
+    os.getenv("OPENCLAW_CLOSED_PNL_STRATEGY_TIME_MATCH_MS", "600000")
+)
 
 # engine_owner_lookup 注入型別：engine 名 → {symbol: owner_strategy}
 EngineOwnerLookup = Callable[[str], dict[str, str]]
@@ -293,6 +296,24 @@ def _strategy_from_order_link_id(
     return "unknown_pending", "pg_missing_unknown_external"
 
 
+def _closed_pnl_time_ms(row: dict[str, Any]) -> int:
+    for key in ("updatedTime", "updated_time_ms", "createdTime", "created_time_ms"):
+        value = _safe_float(row.get(key))
+        if value is not None and value > 0:
+            return int(value)
+    return 0
+
+
+def _time_fallback_allowed(order_link_id: Any) -> bool:
+    """僅在 link id 缺失或呈 OpenClaw 形狀時允許 PG 時間窗口歸因。
+
+    非空且非 OpenClaw 的 link 保持 external/manual，避免只因同 symbol 附近
+    有一筆引擎 close fill，就把真正 operator / 交易所側成交誤標為策略成交。
+    """
+    link = str(order_link_id or "").strip()
+    return not link or bool(_OPENCLAW_LINK_RE.match(link))
+
+
 def _fetch_strategy_by_order_id(
     order_ids: list[str],
     *,
@@ -339,6 +360,120 @@ def _fetch_strategy_by_order_id(
             db_pool.put_conn(conn)
         except Exception:
             pass
+
+
+def _fetch_strategy_by_symbol_time(
+    indexed_rows: list[tuple[int, dict[str, Any]]],
+    *,
+    engine_modes: tuple[str, ...] = ("demo", "live_demo"),
+) -> dict[int, dict[str, Any]]:
+    """Bybit 缺 orderLinkId 時，用 symbol + close time 做只讀 fallback 歸因。
+
+    精確 order-id/link-id join 仍是首選。這條窄 fallback 只處理 Bybit
+    closed-PnL 行 ``orderLinkId`` 為空、但本地引擎已在 ``trading.fills``
+    寫入帶 strategy_name close fill 的情況。
+    """
+    targets: list[tuple[int, str, int, float | None]] = []
+    for idx, row in indexed_rows:
+        if not isinstance(row, dict) or not _time_fallback_allowed(row.get("orderLinkId")):
+            continue
+        sym = str(row.get("symbol") or "").strip()
+        ts_ms = _closed_pnl_time_ms(row)
+        if not sym or ts_ms <= 0:
+            continue
+        targets.append((idx, sym, ts_ms, _safe_float(row.get("closedPnl"))))
+    if not targets:
+        return {}
+
+    safe_modes = tuple(engine_modes or ("demo", "live_demo"))
+    mode_placeholders = ", ".join(["%s"] * len(safe_modes))
+    symbols = sorted({sym for _, sym, _, _ in targets})
+    min_ms = min(ts_ms for _, _, ts_ms, _ in targets) - _CLOSED_PNL_STRATEGY_TIME_MATCH_MS
+    max_ms = max(ts_ms for _, _, ts_ms, _ in targets) + _CLOSED_PNL_STRATEGY_TIME_MATCH_MS
+    # 限制候選掃描量：GUI 顯示歸因不可退化成寬歷史查詢。
+    candidate_limit = min(max(len(targets) * 12, 100), 1000)
+    try:
+        from . import db_pool  # noqa: PLC0415
+        conn = db_pool.get_conn()
+    except Exception:
+        return {}
+    if conn is None:
+        return {}
+    try:
+        cur = conn.cursor()
+        cur.execute("SET LOCAL statement_timeout = %s", (_GUI_READ_STATEMENT_TIMEOUT_MS,))
+        cur.execute(
+            "SELECT ts, order_id, symbol, side, qty, realized_pnl, strategy_name "
+            "FROM trading.fills "
+            f"WHERE engine_mode IN ({mode_placeholders}) "
+            "AND symbol = ANY(%s) "
+            "AND ts >= to_timestamp(%s / 1000.0) "
+            "AND ts <= to_timestamp(%s / 1000.0) "
+            "AND COALESCE(realized_pnl, 0) <> 0 "
+            "AND strategy_name IS NOT NULL AND strategy_name <> '' "
+            "AND strategy_name NOT LIKE 'unattributed:%%' "
+            "ORDER BY ts DESC LIMIT %s",
+            (*safe_modes, symbols, min_ms, max_ms, candidate_limit),
+        )
+        rows = cur.fetchall()
+    except Exception as exc:
+        logger.warning("closed-pnl PG time-window strategy lookup failed: %s", exc)
+        return {}
+    finally:
+        try:
+            db_pool.put_conn(conn)
+        except Exception:
+            pass
+
+    candidates_by_symbol: dict[str, list[dict[str, Any]]] = {}
+    for ts, order_id, sym, side, qty, realized_pnl, strategy_name in rows:
+        if not sym or not strategy_name:
+            continue
+        try:
+            ts_ms = int(ts.timestamp() * 1000) if ts is not None else 0
+        except Exception:
+            ts_ms = 0
+        if ts_ms <= 0:
+            continue
+        candidates_by_symbol.setdefault(str(sym), []).append({
+            "ts_ms": ts_ms,
+            "order_id": str(order_id or ""),
+            "side": str(side or ""),
+            "qty": _safe_float(qty),
+            "realized_pnl": _safe_float(realized_pnl),
+            "strategy_name": str(strategy_name),
+        })
+
+    matches: dict[int, dict[str, Any]] = {}
+    used: set[tuple[str, int, str]] = set()
+    for idx, sym, row_ts_ms, bybit_pnl in targets:
+        best: tuple[float, int, dict[str, Any]] | None = None
+        for cand in candidates_by_symbol.get(sym, []):
+            delta = abs(int(cand["ts_ms"]) - row_ts_ms)
+            if delta > _CLOSED_PNL_STRATEGY_TIME_MATCH_MS:
+                continue
+            key = (str(cand.get("order_id") or ""), int(cand["ts_ms"]), cand["strategy_name"])
+            if key in used:
+                continue
+            pg_pnl = cand.get("realized_pnl")
+            pnl_penalty = 0.0
+            if bybit_pnl is not None and pg_pnl is not None:
+                denom = max(abs(float(bybit_pnl)), 1.0)
+                pnl_penalty = min(abs(float(pg_pnl) - float(bybit_pnl)) / denom, 10.0)
+            score = float(delta) + pnl_penalty * 10_000.0
+            if best is None or score < best[0]:
+                best = (score, delta, cand)
+        if best is None:
+            continue
+        _, delta, cand = best
+        key = (str(cand.get("order_id") or ""), int(cand["ts_ms"]), cand["strategy_name"])
+        used.add(key)
+        matches[idx] = {
+            "strategy_name": cand["strategy_name"],
+            "realized_pnl": cand.get("realized_pnl"),
+            "match_delta_ms": delta,
+        }
+    return matches
 
 
 def _closed_pnl_float(row: dict[str, Any], key: str) -> float | None:
@@ -400,8 +535,21 @@ def _attach_closed_pnl_strategy(
             if value:
                 lookup_ids.append(value)
     strategy_by_order_id = _fetch_strategy_by_order_id(lookup_ids, engine_modes=engine_modes)
+    time_lookup_rows: list[tuple[int, dict[str, Any]]] = []
+    for idx, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        order_id = str(row.get("orderId") or "").strip()
+        order_link_id = str(row.get("orderLinkId") or "").strip()
+        pg_match = strategy_by_order_id.get(order_id) or strategy_by_order_id.get(order_link_id)
+        if not (pg_match and pg_match.get("strategy_name")):
+            time_lookup_rows.append((idx, row))
+    strategy_by_time = _fetch_strategy_by_symbol_time(
+        time_lookup_rows,
+        engine_modes=engine_modes,
+    )
     out: list[dict[str, Any]] = []
-    for row in rows:
+    for idx, row in enumerate(rows):
         if not isinstance(row, dict):
             continue
         order_id = str(row.get("orderId") or "").strip()
@@ -412,6 +560,12 @@ def _attach_closed_pnl_strategy(
         if pg_match and pg_match.get("strategy_name"):
             enriched["strategy_name"] = pg_match["strategy_name"]
             enriched["strategy_source"] = "pg_fill"
+        elif idx in strategy_by_time:
+            time_match = strategy_by_time[idx]
+            enriched["strategy_name"] = time_match["strategy_name"]
+            enriched["strategy_source"] = "pg_time_window"
+            enriched["strategy_match_delta_ms"] = time_match.get("match_delta_ms")
+            pg_pnl = time_match.get("realized_pnl")
         else:
             strategy_name, strategy_source = _strategy_from_order_link_id(
                 row.get("orderLinkId"),
