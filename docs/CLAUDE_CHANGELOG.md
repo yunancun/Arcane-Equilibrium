@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v148 AEG-S3 Gate-B preflight command guard + P5-SM `[82]` countdown refresh；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v149 L2 root TODO tail triage + active queue mirror；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v149 增量（2026-06-12 L2 root TODO tail triage + active queue mirror）**：對 root `L2_TODO.md` 做對抗性核查，結論是不能按 completed archive 移走：P4/V138 prod apply、L2 E2E-1、P2p sentinel Telegram/probe/install/兩輪 all-pass、P5 feedback/quality/GUI 均仍未閉。read-only Linux ground truth：prod `_sqlx_migrations` head=137、V138/V139 表不存在、`[82]` healthcheck 仍 accumulating `43.3h<48h` at 2026-06-12T21:14Z、`agent.l2_calls` 僅 1 row=`ml_advisory.diagnose_leak/manual/anthropic:sonnet`（不滿足 E2E-1 true Ollama row）、`learning.l2_gate_seam_log`=4、`agent.l2_consequential_marks`=0、runtime env 無 Telegram/Sentinel creds。已把缺失尾巴補入 `TODO.md` §5 `P1-L2-ADVISORY-MESH-TAILS`，避免 root L2 TODO 被誤判全閉；無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/order/trading mutation、無模型呼叫。
 
 **v148 增量（2026-06-12 AEG-S3 Gate-B preflight command guard + P5-SM `[82]` countdown refresh）**：新增 `289fcbe8` AEG-S3 Gate-B preflight v0.3 command guard：`recommended_command` 現含 `operator_recommended` / `operator_status` / `operator_message`，在 `WATCH_ONLY` + listing sample `<30` 時明確輸出 `operator_recommended=false`、`HOLD_WAIT_FOR_ACTIONABLE_WATCH`，避免舊 Gate-B full-chain shell 被誤讀為當前 operator action；`ACTIONABLE_*` 則要求先跑 isolated 24h probe。Mac/Linux focused preflight regression 各 `8 passed` + compileall OK + forbidden-route search no hits。Linux live smoke `aeg_s3_gate_b_preflight_command_guard_20260612T2105Z`：latest watch artifact `WATCH_ONLY`，23 candidates、0 alertable/start/schedule、sample_count=2、readiness=`READY_BUT_SAMPLE_BELOW_GATE`、command guard hold。同步刷新 P5-SM `[82]`：2026-06-12T21:00Z 真 DB `--check 81 --check 82` 得 `[81] PASS`、`[82] 43.0h < 48h`、probes=1290；48h gate 約 `2026-06-13 03:59:37+02`，23:00+02 時剩約 5h，不可提前收。無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/order/trading mutation。
 
