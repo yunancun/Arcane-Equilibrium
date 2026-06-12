@@ -271,3 +271,9 @@
 - TODO 原 row「PA 規格完成 / 待實作」已 stale。Source 已有 `notification_failsafe/incident_policy.rs` CORE ledger、auth invalid producer、Bybit fail-closed producer、C4 incident-policy E2E；本輪 PM 修正 TODO 狀態為 partial source-live。
 - Focused Rust verification on Mac and Linux: incident_policy `15 passed`; C4 failsafe wire `4 passed`; ret_code_counter `6 passed`.
 - Remaining honest gaps: `sm_halt_stuck`、`position_drift`、external `engine_dead` watchdog notify-only producer coverage still pending; BB/E2/E4/QA full review still needed before declaring fail-safe runtime-complete. No CI/deploy/rebuild/restart/DB/auth/risk/trading mutation.
+
+## 2026-06-12 P2 incident-policy BB/E2 review checkpoint
+
+- BB `APPROVE-WITH-CONDITIONS` + E2 `PASS-WITH-CONDITIONS` for existing CORE+auth+Bybit source-live path; 0 blocker/high/medium.
+- Boundaries preserved: `incident_policy` does not add Bybit requests or direct risk/system/auth mutation; C4 owner handler remains the only `set_trading_stop` side-effect path; `bybit_fail_closed` wording must stay business-retCode fail-closed, not full exchange-outage coverage.
+- TODO v141 marks the ticket as BB+E2 reviewed partial. Next recommended slice: remaining producer coverage, starting with `sm_halt_stuck` arm-class, then `position_drift` / `engine_dead` notify-only.

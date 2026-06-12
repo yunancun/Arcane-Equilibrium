@@ -228,7 +228,7 @@ per `P2-PACKET-C-C4-PIPELINE-WIRE` + `P2-INCIDENT-POLICY-DISPATCH-TRIGGER`；把
 | health_monitoring | NO（producer coverage 擴完後再評估 M3 emit）|
 | registered_date | 2026-05-29 |
 | governance_authority | spec `docs/execution_plan/specs/2026-05-29--packet-c-c4-pipeline-wire-spec.md` + E2 APPROVE-WITH-CONDITIONS C2 + QA ACCEPT C2 |
-| migration_plan | incident-trigger 初步接入 auth invalid + Bybit fail-closed；SM-stuck / drift / watchdog producer 仍待後續；BB mandatory re-review（set_trading_stop 真觸發）|
+| migration_plan | incident-trigger 初步接入 auth invalid + Bybit fail-closed；2026-06-12 BB/E2 reviewed CORE+auth+Bybit path with no blocker；SM-stuck / drift / watchdog producer 仍待後續；E4/QA/full-chain review 待 producer coverage decision |
 
 #### 2.4.2 `FAILSAFE_FEED_SENDERS`
 

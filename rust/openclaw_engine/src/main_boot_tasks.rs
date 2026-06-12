@@ -144,7 +144,8 @@ pub(crate) fn spawn_position_reconcilers(
     // P2-PACKET-C-C4-PIPELINE-WIRE：緊接 reconciler spawn 後起通知 fail-safe watcher
     // （同批 boot-time wiring，吃同樣的 db_pool / cancel / demo_cmd_slot / live_cmd_slot）。
     // 單例 external task；對 demo/live slot 發 in-band escalate command（paper 結構性排除）。
-    // ⚠️ 機制 live、incident-trigger 待 Sprint 3（C4 spec §5.1）。
+    // ⚠️ 機制 live；incident-trigger 已 partial wired（auth invalid + Bybit retCode
+    // fail-closed），SM-stuck / drift / watchdog producers 仍待後續。
     tasks::spawn_notification_failsafe_watcher(db_pool, cancel, demo_cmd_slot, live_cmd_slot);
 }
 
