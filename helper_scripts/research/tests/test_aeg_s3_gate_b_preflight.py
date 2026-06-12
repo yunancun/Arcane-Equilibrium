@@ -221,6 +221,8 @@ def test_preflight_ready_builds_full_chain_command(tmp_path):
     assert summary["gate_watch"]["operator_action"] == "WAIT_FOR_ACTIONABLE_WATCH"
     assert "--include-default-pbo-grid" in summary["recommended_command"]["shell"]
     assert "--fnd2-run-dir" in summary["recommended_command"]["argv"]
+    assert summary["recommended_command"]["operator_recommended"] is True
+    assert summary["recommended_command"]["operator_status"] == "RUNNABLE_FOR_RESEARCH_REVIEW"
     assert Path(result["written"]["summary"]).exists()
 
 
@@ -240,6 +242,8 @@ def test_preflight_sample_below_gate_is_warn_not_blocked(tmp_path):
     assert summary["readiness_status"] == "READY_BUT_SAMPLE_BELOW_GATE"
     assert summary["listing_preview"]["sample_count"] == 2
     assert summary["recommended_command"]["shell"]
+    assert summary["recommended_command"]["operator_recommended"] is False
+    assert summary["recommended_command"]["operator_status"] == "HOLD_WAIT_FOR_ACTIONABLE_WATCH"
     assert any(row["status"] == "WARN" for row in summary["checks"])
 
 
@@ -266,6 +270,8 @@ def test_preflight_actionable_start_watch_builds_probe_hint(tmp_path):
     assert summary["gate_watch"]["operator_action"] == "START_ISOLATED_24H_PROBE"
     assert summary["gate_watch"]["probe_command_hints"][0]["symbol"] == "ABCUSDT"
     assert "aeg_gate_b_probe.py" in summary["gate_watch"]["probe_command_hints"][0]["shell"]
+    assert summary["recommended_command"]["operator_recommended"] is False
+    assert summary["recommended_command"]["operator_status"] == "RUN_ISOLATED_PROBE_BEFORE_FULL_CHAIN"
 
 
 def test_preflight_actionable_schedule_watch_builds_probe_hint(tmp_path):
@@ -290,6 +296,8 @@ def test_preflight_actionable_schedule_watch_builds_probe_hint(tmp_path):
     assert summary["readiness_status"] == "PASS_READY_FOR_FULL_CHAIN"
     assert summary["gate_watch"]["operator_action"] == "SCHEDULE_ISOLATED_24H_PROBE"
     assert summary["gate_watch"]["candidate_counts"]["schedule"] == 1
+    assert summary["recommended_command"]["operator_recommended"] is False
+    assert summary["recommended_command"]["operator_status"] == "RUN_ISOLATED_PROBE_BEFORE_FULL_CHAIN"
 
 
 def test_preflight_blocks_stale_gate_watch_artifact(tmp_path):
@@ -310,6 +318,8 @@ def test_preflight_blocks_stale_gate_watch_artifact(tmp_path):
 
     assert summary["readiness_status"] == "BLOCKED_PRECHECK_FAILED"
     assert summary["gate_watch"]["stale"] is True
+    assert summary["recommended_command"]["operator_recommended"] is False
+    assert summary["recommended_command"]["operator_status"] == "BLOCKED_PRECHECK_FAILED"
     assert any(row["message"] == "gate_watch_latest_json_stale_or_missing_generated_at" for row in summary["checks"])
 
 
@@ -350,6 +360,8 @@ def test_preflight_blocks_missing_regime_artifact(tmp_path):
     assert summary["readiness_status"] == "BLOCKED_PRECHECK_FAILED"
     assert summary["selected_artifacts"]["regime_run_dir"] is None
     assert summary["recommended_command"]["shell"] is None
+    assert summary["recommended_command"]["operator_recommended"] is False
+    assert summary["recommended_command"]["operator_status"] == "UNAVAILABLE"
 
 
 def test_static_no_runtime_or_db_route():
