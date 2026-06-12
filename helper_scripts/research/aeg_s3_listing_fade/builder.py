@@ -314,6 +314,130 @@ def _daily_returns(samples: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _parameter_cell_id(*, horizon_s: int, cost_bps: float) -> str:
+    return f"h{horizon_s}s_cost{cost_bps:g}"
+
+
+def default_pbo_grid(*, cost_bps: float) -> list[dict[str, Any]]:
+    """Small listing-fade parameter family used only when explicitly requested."""
+    costs = []
+    for value in (cost_bps, cost_bps + 1.0, cost_bps + 3.0, max(0.0, cost_bps - 1.0)):
+        if value not in costs:
+            costs.append(value)
+    cells: list[dict[str, Any]] = []
+    for horizon_s in (30, 60, 300):
+        for cell_cost_bps in costs:
+            cells.append({
+                "horizon_s": horizon_s,
+                "cost_bps": cell_cost_bps,
+            })
+    return cells
+
+
+def _cell_int(cell: dict[str, Any], key: str) -> int:
+    value = cell.get(key)
+    if value is None:
+        raise ValueError(f"pbo_grid_missing_{key}")
+    return int(value)
+
+
+def _cell_float(cell: dict[str, Any], key: str) -> float:
+    value = cell.get(key)
+    if value is None:
+        raise ValueError(f"pbo_grid_missing_{key}")
+    return float(value)
+
+
+def _samples_for_parameters(
+    payload: dict[str, list[dict[str, Any]]],
+    *,
+    source_type: str,
+    horizon_s: int,
+    cost_bps: float,
+    regime_by_date: dict[str, str],
+    default_regime: Optional[str],
+    oos_start_date: Optional[dt.date],
+    allow_slow_capture: bool,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if horizon_s <= 0:
+        raise ValueError("horizon_s_must_be_positive")
+    if cost_bps < 0:
+        raise ValueError("cost_bps_must_be_non_negative")
+    if source_type == "gate_b_run":
+        return _samples_from_gate_b_payload(
+            payload,
+            horizon_s=horizon_s,
+            cost_bps=cost_bps,
+            regime_by_date=regime_by_date,
+            default_regime=default_regime,
+            oos_start_date=oos_start_date,
+            allow_slow_capture=allow_slow_capture,
+        )
+    if source_type == "capture_events_jsonl":
+        return _samples_from_capture_events_payload(
+            payload,
+            horizon_s=horizon_s,
+            cost_bps=cost_bps,
+            regime_by_date=regime_by_date,
+            default_regime=default_regime,
+            oos_start_date=oos_start_date,
+            allow_slow_capture=allow_slow_capture,
+        )
+    raise ValueError(f"unsupported_source_type:{source_type}")
+
+
+def _pbo_grid_candidates(
+    payload: dict[str, list[dict[str, Any]]],
+    *,
+    source_type: str,
+    pbo_grid: list[dict[str, Any]],
+    regime_by_date: dict[str, str],
+    default_regime: Optional[str],
+    oos_start_date: Optional[dt.date],
+    allow_slow_capture: bool,
+) -> tuple[dict[str, dict[str, float]], list[dict[str, Any]]]:
+    candidates: dict[str, dict[str, float]] = {}
+    grid_summary: list[dict[str, Any]] = []
+    for idx, cell in enumerate(pbo_grid):
+        horizon_s = _cell_int(cell, "horizon_s")
+        cost_bps = _cell_float(cell, "cost_bps")
+        samples, rejects = _samples_for_parameters(
+            payload,
+            source_type=source_type,
+            horizon_s=horizon_s,
+            cost_bps=cost_bps,
+            regime_by_date=regime_by_date,
+            default_regime=default_regime,
+            oos_start_date=oos_start_date,
+            allow_slow_capture=allow_slow_capture,
+        )
+        daily_returns = _daily_returns(samples) if samples else None
+        parameter_cell_id = str(cell.get("parameter_cell_id") or _parameter_cell_id(
+            horizon_s=horizon_s,
+            cost_bps=cost_bps,
+        ))
+        if parameter_cell_id in candidates:
+            parameter_cell_id = f"{parameter_cell_id}_idx{idx}"
+        daily_values = (daily_returns or {}).get("values", {})
+        if daily_values:
+            candidates[parameter_cell_id] = {
+                str(day): float(value)
+                for day, value in daily_values.items()
+                if _float_or_none(value) is not None
+            }
+        grid_summary.append({
+            "parameter_cell_id": parameter_cell_id,
+            "horizon_s": horizon_s,
+            "round_trip_cost_bps": cost_bps,
+            "sample_count": len(samples),
+            "rejected_sample_count": len(rejects),
+            "reject_reasons": dict(sorted(Counter(row["reason"] for row in rejects).items())),
+            "daily_return_count": len(daily_values),
+            "included_in_pbo": bool(daily_values),
+        })
+    return candidates, grid_summary
+
+
 def build_listing_fade_evidence(
     payload: dict[str, list[dict[str, Any]]],
     *,
@@ -328,6 +452,7 @@ def build_listing_fade_evidence(
     default_regime: Optional[str] = None,
     oos_start_date: Optional[str] = None,
     allow_slow_capture: bool = False,
+    pbo_grid: Optional[list[dict[str, Any]]] = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     if horizon_s <= 0:
         raise ValueError("horizon_s_must_be_positive")
@@ -337,31 +462,31 @@ def build_listing_fade_evidence(
         raise ValueError("k_trials_must_be_gt_1")
     regimes = regime_by_date or {}
     oos_start = _date_or_none(oos_start_date)
-    if source_type == "gate_b_run":
-        samples, rejects = _samples_from_gate_b_payload(
-            payload,
-            horizon_s=horizon_s,
-            cost_bps=cost_bps,
-            regime_by_date=regimes,
-            default_regime=default_regime,
-            oos_start_date=oos_start,
-            allow_slow_capture=allow_slow_capture,
-        )
-    elif source_type == "capture_events_jsonl":
-        samples, rejects = _samples_from_capture_events_payload(
-            payload,
-            horizon_s=horizon_s,
-            cost_bps=cost_bps,
-            regime_by_date=regimes,
-            default_regime=default_regime,
-            oos_start_date=oos_start,
-            allow_slow_capture=allow_slow_capture,
-        )
-    else:
-        raise ValueError(f"unsupported_source_type:{source_type}")
+    samples, rejects = _samples_for_parameters(
+        payload,
+        source_type=source_type,
+        horizon_s=horizon_s,
+        cost_bps=cost_bps,
+        regime_by_date=regimes,
+        default_regime=default_regime,
+        oos_start_date=oos_start,
+        allow_slow_capture=allow_slow_capture,
+    )
 
     daily_returns = _daily_returns(samples) if samples else None
-    parameter_cell_id = f"h{horizon_s}s_cost{cost_bps:g}"
+    parameter_cell_id = _parameter_cell_id(horizon_s=horizon_s, cost_bps=cost_bps)
+    pbo_candidates: dict[str, dict[str, float]] = {}
+    pbo_grid_summary: list[dict[str, Any]] = []
+    if pbo_grid:
+        pbo_candidates, pbo_grid_summary = _pbo_grid_candidates(
+            payload,
+            source_type=source_type,
+            pbo_grid=pbo_grid,
+            regime_by_date=regimes,
+            default_regime=default_regime,
+            oos_start_date=oos_start,
+            allow_slow_capture=allow_slow_capture,
+        )
     evidence: dict[str, Any] = {
         "schema_version": EVIDENCE_SCHEMA_VERSION,
         "runner_version": RUNNER_VERSION,
@@ -385,6 +510,11 @@ def build_listing_fade_evidence(
     }
     if daily_returns is not None:
         evidence["daily_returns"] = daily_returns
+    if pbo_candidates:
+        evidence["pbo_seed"] = 20260611
+        evidence["pbo_candidates"] = pbo_candidates
+        evidence["pbo_candidate_grid"] = pbo_grid_summary
+    included_pbo_count = len(pbo_candidates)
     summary = {
         "schema_version": SUMMARY_SCHEMA_VERSION,
         "run_id": run_id,
@@ -402,12 +532,24 @@ def build_listing_fade_evidence(
         "accepted_regime_counts": dict(sorted(Counter(row["regime"] for row in samples).items())),
         "accepted_net_bps_mean": round(statistics.mean([row["net_bps"] for row in samples]), 8) if samples else None,
         "daily_return_count": len((daily_returns or {}).get("values", {})),
-        "pbo_status": "not_produced_missing_candidate_grid",
+        "pbo_grid_cell_count": len(pbo_grid_summary),
+        "pbo_grid_included_candidate_count": included_pbo_count,
+        "pbo_grid_daily_return_counts": {
+            row["parameter_cell_id"]: row["daily_return_count"]
+            for row in pbo_grid_summary
+        },
+        "pbo_status": (
+            "produced_candidate_grid"
+            if included_pbo_count >= 10
+            else ("insufficient_candidate_grid" if pbo_grid else "not_produced_missing_candidate_grid")
+        ),
         "notes": [
             "short fade gross_bps is negative markout_bps",
             "daily_returns are aggregated from explicit accepted samples only",
-            "pbo is intentionally absent until explicit candidate-grid evidence exists",
+            "pbo_candidates are emitted only when an explicit candidate-grid request is provided",
         ],
         "rejected_samples": rejects,
     }
+    if pbo_grid_summary:
+        summary["pbo_candidate_grid"] = pbo_grid_summary
     return evidence, summary

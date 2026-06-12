@@ -26,6 +26,22 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def _load_pbo_grid(args: argparse.Namespace) -> list[dict] | None:
+    cells: list[dict] = []
+    if args.include_default_pbo_grid:
+        cells.extend(builder_mod.default_pbo_grid(cost_bps=args.round_trip_cost_bps))
+    if args.pbo_grid_json:
+        payload = json.loads(Path(args.pbo_grid_json).read_text(encoding="utf-8"))
+        if isinstance(payload, dict):
+            raw_cells = payload.get("cells") or payload.get("pbo_grid")
+        else:
+            raw_cells = payload
+        if not isinstance(raw_cells, list) or not all(isinstance(row, dict) for row in raw_cells):
+            raise ValueError("pbo_grid_json_must_be_list_or_object_with_cells")
+        cells.extend(raw_cells)
+    return cells or None
+
+
 def _load_source(args: argparse.Namespace) -> tuple[str, str, dict]:
     if args.gate_b_run_dir:
         path = Path(args.gate_b_run_dir)
@@ -50,6 +66,7 @@ def build_and_write(args: argparse.Namespace) -> dict:
         default_regime=args.default_regime,
         oos_start_date=args.oos_start_date,
         allow_slow_capture=args.allow_slow_capture,
+        pbo_grid=_load_pbo_grid(args),
     )
     written = artifact_mod.write_all(
         evidence=evidence,
@@ -81,6 +98,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--default-regime", default=None, dest="default_regime")
     p.add_argument("--oos-start-date", default=None, dest="oos_start_date")
     p.add_argument("--allow-slow-capture", action="store_true", dest="allow_slow_capture")
+    p.add_argument("--include-default-pbo-grid", action="store_true", dest="include_default_pbo_grid")
+    p.add_argument("--pbo-grid-json", default=None, dest="pbo_grid_json")
     p.add_argument("--artifact-root", default=None, dest="artifact_root")
     p.add_argument("--session-id", default=None, dest="session_id")
     p.add_argument("--created-by-role", default="PM", dest="created_by_role")
@@ -97,6 +116,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         "sample_count": summary["sample_count"],
         "rejected_sample_count": summary["rejected_sample_count"],
         "reject_reasons": summary["reject_reasons"],
+        "pbo_status": summary["pbo_status"],
+        "pbo_grid_cell_count": summary["pbo_grid_cell_count"],
+        "pbo_grid_included_candidate_count": summary["pbo_grid_included_candidate_count"],
         "artifact_dir": result["written"]["run_dir"],
     }, ensure_ascii=False, indent=2, sort_keys=True))
     return 0

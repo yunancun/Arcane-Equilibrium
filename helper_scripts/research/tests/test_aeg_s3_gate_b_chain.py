@@ -182,6 +182,8 @@ def _base_args(tmp_path: Path, *, sample_count: int = 40) -> dict:
         "default_regime": "chop",
         "oos_start_date": None,
         "allow_slow_capture": False,
+        "include_default_pbo_grid": False,
+        "pbo_grid_json": None,
         "maker_fee_bps": 2.0,
         "taker_fee_bps": 5.5,
         "evidence_source_tier": "calibrated_replay",
@@ -199,12 +201,26 @@ def _base_args(tmp_path: Path, *, sample_count: int = 40) -> dict:
     }
 
 
+def _pbo_grid_json(tmp_path: Path) -> Path:
+    path = tmp_path / "listing_pbo_grid.json"
+    path.write_text(json.dumps({
+        "cells": [
+            {"horizon_s": 60, "cost_bps": float(cost), "parameter_cell_id": f"h60_cost{cost}"}
+            for cost in range(10)
+        ]
+    }), encoding="utf-8")
+    return path
+
+
 def test_gate_b_chain_runs_to_execution_realism(tmp_path):
-    result = harness_mod.build_and_write(argparse.Namespace(**_base_args(tmp_path)))
+    args = _base_args(tmp_path)
+    args["pbo_grid_json"] = str(_pbo_grid_json(tmp_path))
+    result = harness_mod.build_and_write(argparse.Namespace(**args))
     summary = result["summary"]
 
     assert summary["chain_status"] == "COMPLETE_EXECUTION_REALISM_PASS"
     assert summary["gate_snapshot"]["listing_sample_count"] == 40
+    assert summary["gate_snapshot"]["listing_pbo_status"] == "produced_candidate_grid"
     assert summary["gate_snapshot"]["execution_observation_count"] == 40
     assert summary["gate_snapshot"]["execution_realism_status"] == "PASS"
     assert Path(summary["outputs"]["candidate_evidence_json"]).exists()

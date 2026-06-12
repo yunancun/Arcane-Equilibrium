@@ -106,6 +106,8 @@ def build_and_write(args: argparse.Namespace) -> dict[str, Any]:
         default_regime=args.default_regime,
         oos_start_date=args.oos_start_date,
         allow_slow_capture=args.allow_slow_capture,
+        include_default_pbo_grid=args.include_default_pbo_grid,
+        pbo_grid_json=args.pbo_grid_json,
         artifact_root=artifact_root,
         session_id=session_id,
         created_by_role=role,
@@ -315,6 +317,7 @@ def build_and_write(args: argparse.Namespace) -> dict[str, Any]:
         },
         "gate_snapshot": {
             "listing_sample_count": listing_summary["sample_count"],
+            "listing_pbo_status": listing_summary["pbo_status"],
             "execution_observation_count": execution_obs_result["summary"]["observation_count"],
             "execution_realism_status": event_execution_result["payload"].get("status"),
             "execution_realism_reject_reasons": event_execution_result["payload"].get("reject_reasons"),
@@ -370,6 +373,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--default-regime", default=None, dest="default_regime")
     p.add_argument("--oos-start-date", default=None, dest="oos_start_date")
     p.add_argument("--allow-slow-capture", action="store_true", dest="allow_slow_capture")
+    p.add_argument("--include-default-pbo-grid", action="store_true", dest="include_default_pbo_grid")
+    p.add_argument("--pbo-grid-json", default=None, dest="pbo_grid_json")
     p.add_argument("--maker-fee-bps", type=float, default=2.0, dest="maker_fee_bps")
     p.add_argument("--taker-fee-bps", type=float, default=5.5, dest="taker_fee_bps")
     p.add_argument("--evidence-source-tier", default="calibrated_replay", dest="evidence_source_tier")
@@ -397,6 +402,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         "candidate_id": summary["candidate_id"],
         "parameter_cell_id": summary["parameter_cell_id"],
         "listing_sample_count": summary["gate_snapshot"]["listing_sample_count"],
+        "listing_pbo_status": summary["gate_snapshot"]["listing_pbo_status"],
         "execution_observation_count": summary["gate_snapshot"]["execution_observation_count"],
         "execution_realism_status": summary["gate_snapshot"]["execution_realism_status"],
         "execution_realism_reject_reasons": summary["gate_snapshot"]["execution_realism_reject_reasons"],
@@ -409,4 +415,3 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

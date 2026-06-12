@@ -102,6 +102,48 @@ def test_gate_b_run_builds_listing_fade_evidence_consumed_by_s3_rows(tmp_path):
     assert rows[0]["mean_daily_bps"] is not None
 
 
+def test_explicit_pbo_grid_emits_candidates_consumed_by_s3_rows(tmp_path):
+    payload = builder_mod.load_gate_b_run(_gate_b_run_dir(tmp_path))
+    pbo_grid = [
+        {"horizon_s": 300, "cost_bps": float(cost), "parameter_cell_id": f"h300_cost{cost}"}
+        for cost in range(10)
+    ]
+    evidence, summary = builder_mod.build_listing_fade_evidence(
+        payload,
+        source_type="gate_b_run",
+        source_path="fixture",
+        run_id="listing_run",
+        horizon_s=300,
+        cost_bps=2.0,
+        k_trials=12,
+        default_regime="chop",
+        oos_start_date="2026-04-02",
+        pbo_grid=pbo_grid,
+    )
+
+    assert summary["pbo_status"] == "produced_candidate_grid"
+    assert summary["pbo_grid_cell_count"] == 10
+    assert summary["pbo_grid_included_candidate_count"] == 10
+    assert len(evidence["pbo_candidates"]) == 10
+
+    report, s3_summary, _sample_rows, _daily_rows = rows_builder.build_direct_report(
+        evidence,
+        run_id="direct_run",
+    )
+    rows, adapted = candidate_builder.build_candidate_metrics(
+        report,
+        run_id="metrics_run",
+        candidate_id="listing_fade",
+        strategy_family="listing_fade",
+        parameter_cell_id=evidence["parameter_cell_id"],
+    )
+    assert s3_summary["pbo_status"] == "measured"
+    assert rows[0]["pbo"] is not None
+    reasons = json.loads(rows[0]["reject_reasons"])
+    assert "missing_pbo" not in reasons
+    assert adapted["source_report_type"] == "aeg_candidate_metrics_direct"
+
+
 def test_missing_regime_rejects_samples_instead_of_creating_unlabeled_regime(tmp_path):
     payload = builder_mod.load_gate_b_run(_gate_b_run_dir(tmp_path))
     evidence, summary = builder_mod.build_listing_fade_evidence(
@@ -117,6 +159,26 @@ def test_missing_regime_rejects_samples_instead_of_creating_unlabeled_regime(tmp
     assert evidence["samples"] == []
     assert "daily_returns" not in evidence
     assert summary["reject_reasons"] == {"missing_regime": 64}
+
+
+def test_default_pbo_grid_is_explicit_and_reports_insufficient_when_horizons_missing(tmp_path):
+    payload = builder_mod.load_gate_b_run(_gate_b_run_dir(tmp_path))
+    evidence, summary = builder_mod.build_listing_fade_evidence(
+        payload,
+        source_type="gate_b_run",
+        source_path="fixture",
+        run_id="listing_run",
+        horizon_s=300,
+        cost_bps=2.0,
+        k_trials=12,
+        default_regime="chop",
+        pbo_grid=builder_mod.default_pbo_grid(cost_bps=2.0),
+    )
+
+    assert summary["pbo_grid_cell_count"] == 12
+    assert summary["pbo_grid_included_candidate_count"] == 4
+    assert summary["pbo_status"] == "insufficient_candidate_grid"
+    assert len(evidence["pbo_candidates"]) == 4
 
 
 def test_slow_capture_excluded_by_default_and_allowed_when_explicit(tmp_path):
