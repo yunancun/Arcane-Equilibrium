@@ -9,7 +9,7 @@
 - Bybit retCode fail-closed/resolved producer exists.
 - C4 E2E exists for incident policy `AllFail` -> watcher timer -> Demo SM-04 Defensive.
 
-Focused Mac Rust tests passed:
+Focused Mac and Linux Rust tests passed:
 
 - incident_policy: 15 passed
 - C4 failsafe wire: 4 passed
