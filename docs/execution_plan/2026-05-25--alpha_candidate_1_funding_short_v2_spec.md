@@ -7,6 +7,13 @@
 **Status**: PA SPEC — IMPL-ready 給 W2-B E1 sub-agent
 **Scope**: Stream A candidate #1 「funding short-only > 30% annualized arbitrage」 IMPL-ready specification
 
+> **REFERENCE / SUPERSEDED FUNDING-CAP LESSON**
+>
+> 本 spec 保留 funding_short_v2 设计 lineage。不要把旧 “funding_short structural
+> DOA / permanent cap” 语义当作当前结论；当前 funding cap SSOT 是 Bybit
+> `instruments-info.upperFundingRate`，funding_short_v2 是 regime-dormant /
+> learning-only unless future `TODO.md` gate reopens it。
+
 ---
 
 ## §0 TL;DR — Verdict

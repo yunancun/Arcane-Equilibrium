@@ -7,6 +7,12 @@
 **Foundation**：v5.7 (15 rounds reviewer convergence + 12 CRITICAL prefix DONE 2026-05-21 PM signoff) + reviewer round-16 autonomy gap audit (13 modules) + operator 2026-05-21 directive (reject Claude push-back on M4/M5/M10/M12/M13; ADD ALL 13 modules)
 **Supersedes**: none. v5.7 remains dispatch-of-record for Sprint 1A. v5.8 is **the autonomy track** layered onto v5.7.
 
+> **REFERENCE / FROZEN AUTONOMY THESIS**
+>
+> 本文件保留 v5.8 13-module autonomy thesis。当前 v5.9 thesis-shift 已冻结
+> v5.8 autonomy 模块 active-IMPL（M7 例外；解冻 gate 见 `TODO.md`）。不得从本文
+> 直接派发 runtime work 或放宽 live/Decision Lease/promotion hard boundaries。
+
 ---
 
 ## §0 Why v5.8 exists

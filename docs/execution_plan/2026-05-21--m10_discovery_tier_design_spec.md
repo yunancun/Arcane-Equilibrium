@@ -28,6 +28,12 @@ mirror precedent:
 scope: design / spec only — 不寫 V111.sql 實檔(V111 spec 另寫)、不寫 Rust tier-gate IMPL、不在 Mac 跑 SQL、不改 trading.fills writer、不執行 PG
 ---
 
+> **REFERENCE / FROZEN AUTONOMY MODULE SPEC**
+>
+> 本 spec 保留 v5.8 Sprint 1A module design lineage。当前 active-IMPL 以
+> `TODO.md` 和最新 PM/role reports 为准；不得仅凭本 spec 派发 tier activation、
+> capital-threshold 或 strategy-discovery runtime work。
+
 # M10 Discovery Tier — Capital-Triggered Strategy Discovery Tier Ladder DESIGN
 
 ## §0 TL;DR

@@ -4,6 +4,12 @@
 >
 > 旧融合方案 phase packet。当前 active dispatch、gate、owner、runtime evidence
 > 以根目录 `TODO.md` 和最新 PM/role report 为准。
+>
+> **Paper promotion semantics are superseded.** 本文件中的
+> `LEARNING→PAPER→DEMO→LIVE` 和 `Paper 14d → Demo` 语义仅为历史 phase
+> 设计。当前 alpha-bearing promotion 以 `CLAUDE.md` hard boundary、
+> AMD-2026-05-15-01、ADR-0047 和 `TODO.md` 为准：Paper 不是 active
+> promotion evidence；green Stage 0R 后才进入 Demo-only micro-canary。
 
 > 前置：Phase 5 完成
 > DoD：4 階段放權可流轉 · 壓測 SLA 全通過 · EvolutionEngine deprecated · 4629+ tests · QA 簽核

@@ -36,6 +36,7 @@
 | [PM/](PM/) | Project Manager — 優先級 + 批次計劃 | 管理層 |
 | [FA/](FA/) | Functional Auditor — 功能規格驗收 | 管理層 |
 | [PA/](PA/) | Project Architect — 技術方案設計 | 管理層 |
+| [BB/](BB/) | Bybit Boundary Reviewer — 交易所/Bybit 相容性審查 | 質量保證層 |
 | [CC/](CC/) | Compliance Checker — 16 條根原則審查 | 質量保證層 |
 | [E2/](E2/) | Code Reviewer — PR 審查 + 副作用識別 | 質量保證層 |
 | [E3/](E3/) | Security Auditor — 安全審計 | 質量保證層 |
@@ -47,6 +48,7 @@
 | [R4/](R4/) | Document Auditor — 文檔質量審查 | 專項審查層 |
 | [TW/](TW/) | Technical Writer — 中文優先注釋 + 工程日誌 | 專項審查層 |
 | [AI-E/](AI-E/) | AI Effectiveness Evaluator — AI 使用效果 | 分析層 |
+| [MIT/](MIT/) | Market / Information Theory Auditor — data / feature / CV / schema rigor | 分析層 |
 | [QA/](QA/) | Quality Assurance — 端到端集成驗收 | 分析層 |
 | [QC/](QC/) | Quantitative Consultant — 量化策略審計 | 顧問層 |
 

@@ -1,129 +1,237 @@
 {
-  "schema_version": 1,
-  "generated_at": "2026-05-06",
-  "source": "R4 documentation IA audit plus repository markdown scan",
+  "schema_version": 2,
+  "generated_at": "2026-06-12",
+  "source_commit": "0e8f2f26",
+  "repo_root": "/Users/ncyu/Projects/TradeBot/srv",
+  "source": "repo markdown inventory summary generated from working tree; non-deletion router only",
   "policy": {
-    "strategy": "index-first; no mass rename until redirects and hot references are stable",
-    "preserve_paths_initially": [
-      "CLAUDE.md",
-      "TODO.md",
-      "CONTEXT.md",
-      "AGENTS.md",
-      ".codex/MEMORY.md",
-      ".codex/AGENT_DISPATCH_PROTOCOL.md",
-      "docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md",
+    "purpose": "scale and navigation summary; not an orphan-file detector and not a deletion authority",
+    "active_state_authority": "TODO.md",
+    "stable_context_authority": "README.md and docs/agents/context-loading.md",
+    "do_not_delete_without_pm_review": [
       "docs/CCAgentWorkSpace/*/workspace/reports/*",
-      "docs/governance_dev/*"
+      "docs/archive/*",
+      "docs/audit/*",
+      "docs/audits/*",
+      "docs/governance_dev/*",
+      "memory/*",
+      "L2_TODO.md"
     ]
   },
   "counts": {
-    "docs_markdown": 1052,
-    "claude_reports_markdown": 184,
-    "memory_markdown": 80,
-    "codex_markdown": 32
+    "markdown_total_working_tree": 2966,
+    "docs_markdown": 2619,
+    "memory_markdown": 114,
+    "codex_markdown": 32,
+    "root_markdown": 8,
+    "agent_workspace_reports": 1473
   },
-  "current_clusters": [
-    {"path": "docs/CCAgentWorkSpace", "count": 560, "role": "agent profiles, memories, reports, operator handoffs"},
-    {"path": "docs/governance_dev", "count": 129, "role": "formal governance development evidence and historical phase packets"},
-    {"path": "docs/worklogs", "count": 81, "role": "chronological engineering logs"},
-    {"path": "docs/references", "count": 65, "role": "long-lived technical references"},
-    {"path": "docs/archive", "count": 50, "role": "stale extracts, snapshots, superseded active docs"},
-    {"path": "docs/execution_plan", "count": 37, "role": "sprint, wave, REF, MAG, and phase plans"},
-    {"path": "docs/audits", "count": 33, "role": "normalized audits and verdicts"},
-    {"path": "docs/audit", "count": 17, "role": "legacy audit folder to converge later"},
-    {"path": "docs/decisions", "count": 25, "role": "formal decision records and source governance docs"},
-    {"path": "docs/adr", "count": 14, "role": "architecture decision records"},
-    {"path": "docs/architecture", "count": 5, "role": "current structural plans and AgentTodo"},
-    {"path": "docs/_indexes", "count": 1, "role": "machine-readable inventory metadata and redirect plans"},
-    {"path": "memory", "count": 80, "role": "durable project memory"},
-    {"path": ".codex", "count": 32, "role": "Codex operating rules, reports, and dispatch memory"},
-    {"path": ".claude_reports", "count": 184, "role": "generated legacy report sink outside docs taxonomy"}
+  "docs_top_level_clusters": [
+    {
+      "path": "docs/CCAgentWorkSpace",
+      "count": 1823
+    },
+    {
+      "path": "docs/archive",
+      "count": 176
+    },
+    {
+      "path": "docs/governance_dev",
+      "count": 160
+    },
+    {
+      "path": "docs/execution_plan",
+      "count": 152
+    },
+    {
+      "path": "docs/references",
+      "count": 65
+    },
+    {
+      "path": "docs/adr",
+      "count": 47
+    },
+    {
+      "path": "docs/audits",
+      "count": 39
+    },
+    {
+      "path": "docs/worklogs",
+      "count": 30
+    },
+    {
+      "path": "docs/decisions",
+      "count": 25
+    },
+    {
+      "path": "docs/architecture",
+      "count": 20
+    },
+    {
+      "path": "docs/audit",
+      "count": 18
+    },
+    {
+      "path": "docs/handoffs",
+      "count": 17
+    },
+    {
+      "path": "docs/runbooks",
+      "count": 16
+    },
+    {
+      "path": "docs/rust_migration",
+      "count": 9
+    },
+    {
+      "path": "docs/agents",
+      "count": 7
+    },
+    {
+      "path": "docs/_indexes",
+      "count": 5
+    },
+    {
+      "path": "docs/healthchecks",
+      "count": 3
+    },
+    {
+      "path": "docs/known_issues",
+      "count": 2
+    },
+    {
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "count": 1
+    },
+    {
+      "path": "docs/CLAUDE_REFERENCE.md",
+      "count": 1
+    },
+    {
+      "path": "docs/KNOWN_ISSUES.md",
+      "count": 1
+    },
+    {
+      "path": "docs/README.md",
+      "count": 1
+    },
+    {
+      "path": "docs/lessons.md",
+      "count": 1
+    }
   ],
-  "target_taxonomy": [
-    {"path": "docs/00-active", "purpose": "curated active status, backlog, and active plan pointers"},
-    {"path": "docs/01-architecture", "purpose": "architecture overlays, ADRs, system boundary docs"},
-    {"path": "docs/02-execution-plans", "purpose": "REF, MAG, sprint, wave, and phase plans grouped by initiative"},
-    {"path": "docs/03-governance", "purpose": "governance specs, amendments, registers, formal policies"},
-    {"path": "docs/04-audits", "purpose": "audit and verdict reports"},
-    {"path": "docs/05-agent-workspace", "purpose": "role profiles, memories, reports, and operator copies"},
-    {"path": "docs/06-runbooks", "purpose": "deploy, disaster, first-day-live, and healthcheck SOPs"},
-    {"path": "docs/07-reference", "purpose": "stable technical background and external references"},
-    {"path": "docs/08-worklogs", "purpose": "chronological engineering logs"},
-    {"path": "docs/90-archive", "purpose": "stale extracts, snapshots, and superseded plans"},
-    {"path": "docs/_indexes", "purpose": "machine-readable inventories, redirect maps, and GUI source metadata"}
+  "agent_report_counts_by_role": [
+    {
+      "role": "E1",
+      "count": 329
+    },
+    {
+      "role": "PM",
+      "count": 325
+    },
+    {
+      "role": "PA",
+      "count": 235
+    },
+    {
+      "role": "E2",
+      "count": 135
+    },
+    {
+      "role": "E4",
+      "count": 118
+    },
+    {
+      "role": "MIT",
+      "count": 48
+    },
+    {
+      "role": "QC",
+      "count": 40
+    },
+    {
+      "role": "FA",
+      "count": 39
+    },
+    {
+      "role": "BB",
+      "count": 34
+    },
+    {
+      "role": "QA",
+      "count": 28
+    },
+    {
+      "role": "CC",
+      "count": 25
+    },
+    {
+      "role": "E5",
+      "count": 21
+    },
+    {
+      "role": "E3",
+      "count": 20
+    },
+    {
+      "role": "A3",
+      "count": 19
+    },
+    {
+      "role": "TW",
+      "count": 19
+    },
+    {
+      "role": "R4",
+      "count": 16
+    },
+    {
+      "role": "AI-E",
+      "count": 14
+    },
+    {
+      "role": "E1a",
+      "count": 8
+    }
   ],
-  "gui_hot_candidates": {
-    "high": [
-      {
-        "path": "TODO.md",
-        "surface": "Global Development Status, Live readiness, Governance panels",
-        "integration": "parsed structured data then API endpoint",
-        "reason": "P0/P1/P2 blockers, owners, gate timing, and active work are operator-critical"
-      },
-      {
-        "path": "CLAUDE.md",
-        "surface": "Global Development Status, Live readiness, console contract",
-        "integration": "parsed structured data; long-term DB/runtime facts should replace stale markdown",
-        "reason": "current runtime state, root principles, live blockers, and deployment truth"
-      },
-      {
-        "path": "docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md",
-        "surface": "Agent Control, Global Development Status",
-        "integration": "parsed structured data and OpenClaw status/self-state APIs",
-        "reason": "MAG milestones, row-proof gates, and next multi-agent work"
-      },
-      {
-        "path": "docs/execution_plan/2026-05-06--gui_openclaw_control_console_plan.md",
-        "surface": "OpenClaw Control Console / Agent Control",
-        "integration": "static markdown reference plus structured phase metadata",
-        "reason": "defines GUI console direction and expected operator surfaces"
-      },
-      {
-        "path": "docs/execution_plan/2026-05-06--openclaw_gateway_development_plan.md",
-        "surface": "OpenClaw Gateway / Agent Control",
-        "integration": "static markdown reference plus structured phase metadata",
-        "reason": "defines read-only gateway and supervisor relay sequencing"
-      },
-      {
-        "path": "docs/execution_plan/2026-05-06--ref21_full_chain_replay_engine_dev_plan_v1_3.md",
-        "surface": "Replay, Edge Gates, Global Development Status",
-        "integration": "structured plan and runtime gate metadata",
-        "reason": "active full-chain replay blockers and promotion gate state"
-      },
-      {
-        "path": "docs/execution_plan/2026-05-06--ref21_gui_ux_spec_v1_1.md",
-        "surface": "Replay GUI",
-        "integration": "structured UX acceptance metadata",
-        "reason": "current replay GUI acceptance shape"
-      }
-    ],
-    "medium": [
-      {"path": "CONTEXT.md", "surface": "Architecture reference drawer", "integration": "static markdown with search"},
-      {"path": "docs/adr", "surface": "Governance / Architecture reference", "integration": "static markdown with heading index"},
-      {"path": "docs/governance_dev/SPECIFICATION_REGISTER.md", "surface": "Governance compliance", "integration": "parsed register if format stabilizes"},
-      {"path": "docs/CCAgentWorkSpace/PM/workspace/reports", "surface": "Development timeline", "integration": "metadata extraction plus static markdown"},
-      {"path": "docs/CLAUDE_CHANGELOG.md", "surface": "Change history", "integration": "parsed headings"}
-    ],
-    "low": [
-      {"path": "docs/archive", "surface": "search-only archive", "integration": "static search"},
-      {"path": "docs/worklogs", "surface": "search-only archive", "integration": "static search"},
-      {"path": ".claude_reports", "surface": "generated report archive", "integration": "search-only or cold archive"}
-    ]
-  },
-  "phased_execution": [
-    "Generate docs/_indexes/document_inventory.json and docs/_indexes/path_redirects.md before moving files.",
-    "Add front matter to active docs for status, kind, initiative, owner, supersedes, superseded_by, gui_surface, hot_interactive.",
-    "Build GUI from indexes and parsed active docs before moving hot paths.",
-    "Freeze CLAUDE.md, TODO.md, CONTEXT.md, AgentTodo.md, .codex/*, memory/*, and CCAgentWorkSpace reports until references are updated.",
-    "Move cold docs first: archive snapshots, generated .claude_reports, legacy docs/audit duplicates, obsolete execution-plan versions.",
-    "Leave redirect stubs at old paths for at least one release cycle.",
-    "Update root docs, role docs, code comments, and SQL comments only after redirect stubs settle."
+  "known_legacy_or_reference_routers": [
+    {
+      "path": "docs/execution_plan/README.md",
+      "status": "legacy/reference router with current-plan pointer"
+    },
+    {
+      "path": "docs/_indexes/document_index.md",
+      "status": "historical document index moved out of docs/README.md"
+    },
+    {
+      "path": "docs/_indexes/audit_index.md",
+      "status": "audit-folder semantics router"
+    },
+    {
+      "path": "docs/archive/README.md",
+      "status": "archive semantics router"
+    },
+    {
+      "path": "docs/audit/README.md",
+      "status": "legacy audit bundle router"
+    },
+    {
+      "path": "docs/audits/README.md",
+      "status": "dated audit evidence router"
+    },
+    {
+      "path": "docs/architecture/multi_agent_rework_2026-05-05/AgentTodo.md",
+      "status": "historical MAG ledger/reference"
+    },
+    {
+      "path": "L2_TODO.md",
+      "status": "L2 ledger/reference; active tails mirrored in TODO.md"
+    }
   ],
-  "risk_notes": [
-    "Agent boot rules and dispatch files reference fixed paths.",
-    "SQL migrations and code comments cite execution plans and reports.",
-    "governance_dev has an explicit NAMING_NOTE advising against historical renames.",
-    "REF-20/REF-21 have many superseded versions; moving without status metadata will make stale plans look active.",
-    "CCAgentWorkSpace report paths are active role conventions."
+  "validation_notes": [
+    "Counts are based on current working-tree Markdown files visible under repo root.",
+    "Use python3 -m json.tool docs/_indexes/document_inventory.json for syntax validation.",
+    "Use find docs -type f -name \"*.md\" | wc -l for docs_markdown spot check.",
+    "Do not use this file alone to mark documents stale, orphaned, or deletable."
   ]
 }

@@ -104,7 +104,7 @@
 | REF-11 | ARCH-RC1 1C-3A Gap Analysis | docs/references/2026-04-07--arch_rc1_1c3a_gap_analysis.md | ✅ Active | ARCH-RC1 1C-3A 缺口分析 |
 | REF-12 | ARCH-RC1 1C-3C Reconciliation | docs/references/2026-04-07--arch_rc1_1c3c_recon.md | ✅ Active | ARCH-RC1 1C-3C 對賬設計 |
 | REF-13 | Signal Diamond DB TODO | docs/references/2026-04-10--signal_diamond_db_todo.md | ✅ Active | 多引擎數據分離 5 Phase 規劃（Phase 1-4 ✅，Phase 5 待實施） |
-| REF-14 | 3E-ARCH Three-Engine Parallel Plan V4 | docs/references/2026-04-11--three_engine_parallel_arch_plan.md | ✅ Active | 三引擎並行架構遷移計劃 v4：26 設計決策 · PM+PA+FA 三角色（已完成） |
+| REF-14 | 3E-ARCH Three-Engine Parallel Plan V4 | docs/references/2026-04-11--three_engine_parallel_arch_plan.md | ✅ Implemented Historical Reference | 三引擎並行架構遷移計劃 v4：26 設計決策 · PM+PA+FA 三角色（已完成）。不是当前派工权威；当前 OpenClaw / Bybit-only / Decision Lease / promotion 语义以 `CLAUDE.md`、`TODO.md`、ADR/AMD 和最新 reports 为准。 |
 | REF-15 | 3E-ARCH Session Execution Plan | docs/references/2026-04-11--3e_arch_session_execution_plan.md | ✅ Active | 3E-ARCH Session 執行計劃：8 工作日排期（已完成） |
 | REF-16 | Dust-Frozen Position Manual Clear SOP | docs/references/2026-04-20--dust_frozen_position_manual_clear_procedure.md | ✅ Active | DUST-EVICTION-GAP-1 P1-8 設計背景 · Bybit GUI 三路線 · Live 前 pre-flight checklist |
 | REF-17 | Cross-Platform Redeploy Dependencies | docs/references/2026-04-20--cross_platform_redeploy_dependencies.md | ✅ Active | Linux→macOS（Apple Silicon）冷裝清單 · brew/rustup/pip 步驟 · systemd↔launchd 差異 · HMAC 憑證重簽陷阱 |

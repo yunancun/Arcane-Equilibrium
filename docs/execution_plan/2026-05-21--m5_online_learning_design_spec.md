@@ -19,6 +19,11 @@ related ADR:
 scope: interface stub level only — 不寫 Rust IMPL 程式碼、不寫 V114 full DDL、不寫 streaming algorithm 選型、不寫 cross-module integration full DESIGN（Y3+ activation 後再寫）
 ---
 
+> **REFERENCE / FROZEN AUTONOMY MODULE SPEC**
+>
+> 本 spec 保留 v5.8 Sprint 1A module design lineage。当前 active-IMPL 以
+> `TODO.md` 和最新 PM/role reports 为准；不得仅凭本 spec 派发实现或扩展学习系统写权限。
+
 # M5 Online Learning Interface Reserved — DESIGN spec（interface stub level）
 
 ## §0 TL;DR

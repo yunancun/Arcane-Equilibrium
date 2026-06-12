@@ -7,6 +7,12 @@
 **Supersedes**: v5.6 (engineering precision drift on 6 verified issues)
 **Foundation**：15 rounds reviewer audit converged + reviewer 6/6 technical corrections verified
 
+> **REFERENCE / HISTORICAL DISPATCH PACKET**
+>
+> 本文件保留 v5.7 设计和审计 lineage，不是当前 active queue。M1-M13 / v5.8
+> active-IMPL 已按 v5.9 thesis-shift 冻结（M7 例外），当前 mainline、gate、
+> owner 和 runtime evidence 以根目录 `TODO.md`、ADR/AMD 和最新 PM/role reports 为准。
+
 ---
 
 ## §0 v5.6 → v5.7 changes (engineering precision only, thesis unchanged)
