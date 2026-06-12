@@ -31,4 +31,14 @@ metadata:
 - hooks:`.claude/settings.json`(PreToolUse Bash→rtk-rewrite.sh,fail-open 三重守衛+不繞權限;SessionStart startup|clear|compact→session-start.sh 路由注入;env RTK_TELEMETRY_DISABLED=1),對新 session 生效;`.gitignore` 白名單 +3(settings.json/hooks)。
 - 教訓:①`node --check` 對含 export 的 ESM 檔=無牙 no-op(壞語法也 exit 0),有牙檢法=剝 export+async wrapper(E4 報告有配方),涉 .js sign-off 一律用 wrapper;②`cmd | tail; echo $?` 捕的是 tail 的 exit——先存變量再管道;③多 session 下 sibling 可能把你的未 commit 工作提前打包——不 revert,E4 重驗轉移結論即可。
 
-關聯:[[project_2026_06_04_fincept_terminal_eval]]、[[project_2026_06_11_bg_subagent_idle_kill_rootcause]]
+## P2 落地紀錄 (2026-06-12,commits `131bd560`/`9bc57548`/`d4994f6b`/`5e3820f3`)
+四波 agent 鏈:設計波(PA L2 spec + BB 哨兵 advisory + QC polymarket discipline)→ 實作波(E1×4 並行,W 線被 API Overloaded 殺死續作棒收口)→ 審查波(E2-A 記憶層 / E2-B 哨兵+polymarket+小件 / E3 安全 / MIT schema ratify;退 2 MED+若干 LOW)→ 修復波(E1×2,中途被**月度限額**殺死,續作棒盤點「前棒源碼全做完、斷點=測試只寫宣告」收口)→ narrow re-E2 PASS 12/12 → E4 GREEN(Mac 全套 ×2 byte-identical + Linux scratch dry-run)。
+- **L2 記憶層**(dormant,`OPENCLAW_L2_MEMORY_*` 全 0):V139 agent.agent_memory(append-only+supersede 軟刪鏈+DELETE REVOKE+tsvector('simple')+雙 GIN+embedding_meta);memory_distiller package(抽取+兩段式 dedup 雙 prompt 中文化,LocalLLMClient/Ollama qwen3.5:9b,fail-open-to-store 僅 dedup 段);cron daily 05:23 + seed CLI + manual V140 pgvector 緩裝 + healthcheck [88][89]。**Linux scratch 實證**:V138→V139 雙 apply 冪等、trading_admin `CREATE EXTENSION vector` 可裝、三語 word_similarity 0.3 真召回(en 0.732/zh 0.333/混 0.400)。借鑒 TencentDB-Agent-Memory(MIT),宿主框架同名「OpenClaw」巧合已清洗。
+- **告警耐久 sink**:修 watchdog silent no-op(承 [[project_2026_06_05_engine_selfheal_bindhost_incident]] canary 無消費者);alert_sink.py sink-before-channel 落 alerts.jsonl + redactor(DSN/X-BAPI/key 遮蔽,sink+遠送雙路,E3 MED-1)+5MB 輪轉;自 engine_watchdog 抽出(2150→2100,pre-existing 2088 超頂,主檔拆分留 follow-up)。
+- **BB 公告哨兵**(alert-only):GET /v5/announcements/index zero-credential;**去重鍵=正規化 url**(響應無 id 欄+列表序非 publishTime→禁 timestamp watermark,BB 實證);首輪 baseline 防洪;真煙測捕 TONUSDT 2026-06-15 delisting=P0。
+- **polymarket 軸**(artifact-only):Gamma /events crypto 枚舉;QC 鐵則=賠率 corroborating-only 非主信號、零 relevance 截斷、append-only PIT、track-to-resolution 防 survivorship;進交易鏈前必走 quant 三段鏈。
+- **小件**:analyze_token_usage.py(superpowers MIT,三會計修正);mnemopi 試點(FTS-only bank tradebot-dev,200 條 seed,零外連,.mcp.json 在 repo 外;MEMORY.md 仍 SSOT;兩週判準見 docs/references/2026-06-11--mnemopi_pilot_protocol.md)。
+- **owed(operator-gated,代碼已三端同步 dormant 就緒)**:① rtk#2399 簽 CLA;② V138+V139 prod apply(prod sqlx head=137;連帶順序 V138→V139+checksum 預檢,MIT C-2);③ 三 cron 一鍵激活(installer APPLY-gated,未自行繞過——BB 哨兵會真告警/polymarket 真打外部 API/L2 依賴 V139,皆 outward-facing);④ bge-m3 pull(缺則 FTS-only 自動降級)。
+- 教訓:① 月度限額殺 agent 與 desktop idle-kill 同類,續作棒「源碼盤點先於重做」省一輪;② installer APPLY-gate=runtime 行為改變的 operator 閘,PM 代按=繞過設計意圖,outward-facing 一律留 operator;③ engine_watchdog 2100 行 pre-existing 超頂,本批已盡量抽出。
+
+關聯:[[project_2026_06_04_fincept_terminal_eval]]、[[project_2026_06_11_bg_subagent_idle_kill_rootcause]]、[[project_2026_06_05_engine_selfheal_bindhost_incident]]
