@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v147 P2 incident-policy dispatch trigger source-chain QA+PM closure；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v148 AEG-S3 Gate-B preflight command guard + P5-SM `[82]` countdown refresh；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v148 增量（2026-06-12 AEG-S3 Gate-B preflight command guard + P5-SM `[82]` countdown refresh）**：新增 `289fcbe8` AEG-S3 Gate-B preflight v0.3 command guard：`recommended_command` 現含 `operator_recommended` / `operator_status` / `operator_message`，在 `WATCH_ONLY` + listing sample `<30` 時明確輸出 `operator_recommended=false`、`HOLD_WAIT_FOR_ACTIONABLE_WATCH`，避免舊 Gate-B full-chain shell 被誤讀為當前 operator action；`ACTIONABLE_*` 則要求先跑 isolated 24h probe。Mac/Linux focused preflight regression 各 `8 passed` + compileall OK + forbidden-route search no hits。Linux live smoke `aeg_s3_gate_b_preflight_command_guard_20260612T2105Z`：latest watch artifact `WATCH_ONLY`，23 candidates、0 alertable/start/schedule、sample_count=2、readiness=`READY_BUT_SAMPLE_BELOW_GATE`、command guard hold。同步刷新 P5-SM `[82]`：2026-06-12T21:00Z 真 DB `--check 81 --check 82` 得 `[81] PASS`、`[82] 43.0h < 48h`、probes=1290；48h gate 約 `2026-06-13 03:59:37+02`，23:00+02 時剩約 5h，不可提前收。無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/order/trading mutation。
 
 **v147 增量（2026-06-12 P2 incident-policy dispatch trigger source-chain QA+PM closure）**：完成 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` QA source acceptance 與 PM source closure。QA verdict `PASS_WITH_CONDITIONS`：Mac+Linux 最短 source business chain 均通過，C4 true producer path `e2e_c4_incident_policy_allfail_to_defensive_demo` 1 passed each，notify-only no-AllFail `report_incident_notify_only_class_never_feeds_allfail` 1 passed each，`engine_dead or WatchdogAlertWiring` targeted canary 5 passed each；靜態 forbidden-route scan 確認 `engine_dead` production files 無 order/auth/DB/risk/trading mutation，`sm_halt`/`position_drift` producers 僅呼 `spawn_report_incident(...)`。Linux runtime read-only sanity：watchdog `engine_alive=true`、demo/live snapshot fresh，`/api/v1/healthz` OK；loopback 與 `/api/v1/health` 失敗裁定為 bind/route drift，不是本 slice regression。PM closure：source chain closed；runtime activation 仍 operator/deploy-gated。本輪未 CI、未 deploy/service rebuild/service restart、未 DB/auth/risk/order/trading mutation。
 
