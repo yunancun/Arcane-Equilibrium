@@ -221,6 +221,14 @@ from .checks_alpha_wealth_fdr import (
     check_86_pre_reg_cross_family_duplicate_spec,
     check_87_hidden_oos_state_regression,
 )
+from .checks_l2_memory import (
+    # L2 記憶層 (2026-06-11 E1-B，PA spec §12) — `[88]`-`[89]` dormant 哨兵。
+    # flag-OFF（部署默認態）→ PASS-skip 不 FAIL；flag-ON 才真檢：
+    # [88] pipeline freshness（V139 agent.agent_memory 可達 + 蒸餾游標滯後 ≤3 日）；
+    # [89] embedding meta（provider/model/dims）vs config 漂移。
+    check_88_l2_memory_pipeline_freshness,
+    check_89_l2_memory_embedding_drift,
+)
 from .checks_pricing_binding import (
     # REF-20 Sprint C R6-T7 (2026-05-05) — `[45]` LG-3 provider pricing
     # binding sentinel. Implements RFC §IMPL T2 healthcheck output
@@ -588,6 +596,8 @@ def main() -> int:
               [42][42b][42c][43][44][45] [46][48][49][50][51][52][53][54][55][57][58][58a][59][64][65][66][67][68][69][70][71][72][73][74]
               [81][82]  ([81] 補登記——P5-SM B-3 註冊時漏列；[82] P5-SM soak 第二輪)
               [83][84][85][86][87]  (L2 P4 online-FDR 五軸，E1-C)
+              [88][89]  (L2 記憶層 dormant 哨兵：pipeline freshness + embedding drift，
+                         E1-B 2026-06-11 PA spec §12；號占用正本)
       post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56] [75][76][77][78][79] [80]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
@@ -1338,6 +1348,15 @@ def main() -> int:
             results.append(("[86] pre_reg_cross_family_dup_spec", s, m))
             s, m = check_87_hidden_oos_state_regression(cur)
             results.append(("[87] hidden_oos_state_regression", s, m))
+
+            # [88]-[89] L2 記憶層（2026-06-11 E1-B，PA spec §12）：蒸餾管線
+            # freshness（V139 表可達 + 游標滯後 ≤3 日）+ embedding meta 漂移。
+            # flag-OFF（部署默認）→ PASS-skip（dormant 不造噪音，SKIP 非 FAIL）；
+            # flag-ON 才真檢。配對 cron：l2_memory_distill_cron.sh（05:23 UTC）。
+            s, m = check_88_l2_memory_pipeline_freshness(cur)
+            results.append(("[88] l2_memory_pipeline_freshness", s, m))
+            s, m = check_89_l2_memory_embedding_drift(cur)
+            results.append(("[89] l2_memory_embedding_drift", s, m))
     finally:
         conn.close()
 
