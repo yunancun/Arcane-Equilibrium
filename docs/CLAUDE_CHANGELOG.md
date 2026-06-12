@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v131 Gate-B autonomous watch；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v132 AEG-S3 sidecar matrix wiring；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v132 增量（2026-06-12 AEG-S3 sidecar matrix wiring）**：新增 AEG-S3 formal matrix input 旁路接線 code checkpoint `66a9e511`：`helper_scripts/research/aeg_s3_matrix_inputs` 現可用 `--breadth-run-dir` 直接引用既有 `breadth_ladder` artifact，並可用 `--execution-realism-json` 引用 canonical `execution_realism.json`；缺 sidecar 時原 candidate-specific placeholder + unverified execution 行為不變。provided artifact 會做 candidate_id / strategy_family / parameter_cell_id 一致性校驗，mismatch 直接 fail-closed。Mac focused regression `24 passed` + compileall OK + static scan no hits；Linux focused regression `24 passed` + compileall OK + static scan no hits。Linux true funding_revive smoke：provided event breadth run `aeg_s3_funding_revive_event_breadth_v125_20260611T200033Z_oos20260301_pbo18` 被新 harness 以 `breadth_input_mode=provided_breadth_artifact` / policy `single_symbol_event_samples_filtered_by_fnd2_alive_mask` 消費；formal matrix smoke `aeg_s3_funding_revive_robustness_sidecar_inputs_v125_20260611T200033Z_oos20260301_pbo18` row_count=24、coverage PASS、survivorship `pit_fnd2_delisted_proof`、execution `unverified_missing_missing`、final labels 16 insufficient / 8 kill。這完成「客座/旁路接線」，但 funding_revive 仍因 DSR=0、PBO>=0.5、execution empirical observations 未滿而不可 promotion。
 
 **v131 增量（2026-06-12 Gate-B autonomous watch）**：新增 Gate-B 專用 alert-only watcher `helper_scripts/canary/gate_b_watch.py`（code checkpoint `3675f651`）：每 30 分鐘掃 Bybit `new_crypto` 公告 page 1..3 + live `instruments-info?category=linear&status=PreLaunch`，把 Pre-Market / PreLaunch / convert-to-standard perpetual 轉成 `START_GATE_B_NOW` / `SCHEDULE_GATE_B_WINDOW` / `WATCH_CONVERSION` / stale 候選，輸出 `/tmp/openclaw/gate_b_watch/gate_b_watch_latest.json` + history/state，fresh/future/actionable 才發 `[GATE-B-WATCH]`。新增 tests（Gate-B watch + announcement sentinel focused = Mac 66 passed / Linux 66 passed）、cron wrapper/installer，Linux cron 已裝 `12,42 * * * *`；formal run 2026-06-12 09:43 UTC = `WATCH_ONLY`、23 candidates、0 alertable、0 start/schedule、唯一 live watch 是老 `BPUSDT` ContinuousTrading。無 CI、無 deploy/rebuild/restart、無 DB/auth/order/trading mutation；Gate-B 24h probe 仍需 operator 在 watcher alert 後手動啟動。
 
