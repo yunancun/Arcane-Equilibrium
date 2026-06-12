@@ -23,3 +23,19 @@ Remaining gaps:
 - BB/E2/E4/QA full-chain review
 
 No CI, no deploy, no rebuild/restart, no DB/auth/risk/trading mutation in this checkpoint.
+
+## BB/E2 Review Update
+
+2026-06-12 follow-up guest review:
+
+- BB: `APPROVE-WITH-CONDITIONS`, 0 blocker/high/medium.
+- E2: `PASS-WITH-CONDITIONS`, 0 blocker/high/medium/low.
+
+Operational meaning:
+
+- CORE+auth+Bybit producer path can continue development.
+- Ticket is still partial, not runtime-complete.
+- `bybit_fail_closed` means business-retCode fail-closed, not full exchange outage coverage.
+- Exchange side effects still go only through C4 owner handler and existing `set_trading_stop` path.
+
+Next development slice: remaining producer coverage, starting with `sm_halt_stuck`, then `position_drift` / `engine_dead` notify-only.

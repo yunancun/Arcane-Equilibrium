@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v139 P5-SM [81]/[82] narrow selector fix；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-12（TODO v141 P2 incident-policy dispatch trigger BB/E2 review；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v141 增量（2026-06-12 P2 incident-policy dispatch trigger BB/E2 review）**：完成 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` 的 BB/E2 客座審查 checkpoint。BB 對 CORE+auth+Bybit path 給 `APPROVE-WITH-CONDITIONS`（0 blocker/high/medium）：incident report 不新增 Bybit 請求，交換所 side effect 仍只經 C4 owner handler + existing `set_trading_stop` channel；retCode producer 要描述為 business-retCode fail-closed，不是完整 exchange outage coverage。E2 給 `PASS-WITH-CONDITIONS`（0 blocker/high/medium/low）：arm/notify split、push-secret gate、single armed owner、stale in-flight guard、current-class self-heal guard、fail-soft sender/drop path 均符合 PA 模型。TODO 狀態改為「CORE+auth+Bybit source-live / BB+E2 reviewed / producer coverage partial」。剩餘：`sm_halt_stuck`、`position_drift`、external `engine_dead` producer coverage，之後再走 E4/QA/full-chain；本輪無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/trading mutation。
 
 **v140 增量（2026-06-12 P2 incident-policy dispatch trigger source-state checkpoint）**：修正 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` TODO 狀態。PM 核對 source 後確認該 ticket 已非「PA 規格完成 / 待實作」：`notification_failsafe/incident_policy.rs` 已有 CORE ledger（sustained/throttle/7d cooling/single armed owner/self-heal guard/push-secret gate），`live_auth_watcher.rs` 已接 `auth_invalid` / resolved，`bybit_rest_client.rs` GET/POST retCode counter 已接 `bybit_fail_closed` / resolved，且 C4 E2E 覆蓋 incident_policy AllFail → watcher timer → in-band `NotificationFailsafeEscalate` → Demo SM-04 Defensive。Mac+Linux focused Rust verification：`cargo test -p openclaw_engine notification_failsafe::incident_policy --lib` = 15 passed；`cargo test -p openclaw_engine event_consumer::tests::c4_failsafe_wire_tests --lib` = 4 passed；`cargo test -p openclaw_engine ret_code_counter --lib` = 6 passed。邊界：`sm_halt_stuck`、`position_drift`、external `engine_dead` watchdog notify-only producers 仍未接；BB/E2/E4/QA 全鏈仍待派；本輪無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/trading mutation。
 
