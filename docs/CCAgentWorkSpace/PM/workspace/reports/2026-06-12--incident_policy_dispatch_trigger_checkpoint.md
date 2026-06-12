@@ -29,7 +29,7 @@ Current source already contains:
 
 ## Focused Verification
 
-Mac local:
+Mac local and Linux `trade-core`:
 
 ```bash
 cargo test -p openclaw_engine notification_failsafe::incident_policy --lib
