@@ -7,8 +7,8 @@ touch runtime state.
 
 from __future__ import annotations
 
-RUNNER_VERSION = "aeg_s3_gate_b_preflight.v0.2"
-SUMMARY_SCHEMA_VERSION = "aeg.s3_gate_b_preflight_summary.v0.2"
+RUNNER_VERSION = "aeg_s3_gate_b_preflight.v0.3"
+SUMMARY_SCHEMA_VERSION = "aeg.s3_gate_b_preflight_summary.v0.3"
 MANIFEST_SCHEMA_VERSION = "aeg.alpha_history_run_manifest.v0.1"
 
 __all__ = [

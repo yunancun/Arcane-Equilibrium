@@ -102,6 +102,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         "gate_watch": summary["gate_watch"],
         "listing_preview": summary["listing_preview"],
         "recommended_command": summary["recommended_command"]["shell"],
+        "recommended_command_operator_recommended": summary["recommended_command"]["operator_recommended"],
+        "recommended_command_operator_status": summary["recommended_command"]["operator_status"],
+        "recommended_command_operator_message": summary["recommended_command"]["operator_message"],
         "artifact_dir": result["written"]["run_dir"],
         "summary_json": result["written"]["summary"],
     }, ensure_ascii=False, indent=2, sort_keys=True))

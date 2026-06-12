@@ -444,6 +444,64 @@ def build_full_chain_command(
     return parts
 
 
+def _command_operator_guard(
+    *,
+    command_shell: Optional[str],
+    readiness_status: str,
+    gate_watch: dict[str, Any],
+    sample_count: Any,
+    min_listing_samples: int,
+) -> dict[str, Any]:
+    if not command_shell:
+        return {
+            "operator_recommended": False,
+            "operator_status": "UNAVAILABLE",
+            "operator_message": "full_chain_command_unavailable_until_required_artifacts_exist",
+        }
+    if readiness_status == "BLOCKED_PRECHECK_FAILED":
+        return {
+            "operator_recommended": False,
+            "operator_status": "BLOCKED_PRECHECK_FAILED",
+            "operator_message": "fix_precheck_failures_before_running_full_chain",
+        }
+
+    gate_action = str(gate_watch.get("operator_action") or "")
+    try:
+        samples = int(sample_count) if sample_count is not None else None
+    except (TypeError, ValueError):
+        samples = None
+
+    if gate_action in {"START_ISOLATED_24H_PROBE", "SCHEDULE_ISOLATED_24H_PROBE"}:
+        return {
+            "operator_recommended": False,
+            "operator_status": "RUN_ISOLATED_PROBE_BEFORE_FULL_CHAIN",
+            "operator_message": "watcher_is_actionable_start_or_schedule_probe_first_then_rerun_preflight",
+        }
+    if gate_action in {"OPERATOR_REVIEW_REQUIRED", "REVIEW_UNKNOWN_WATCH_STATUS"}:
+        return {
+            "operator_recommended": False,
+            "operator_status": "OPERATOR_REVIEW_REQUIRED",
+            "operator_message": "review_gate_watch_candidate_before_running_probe_or_full_chain",
+        }
+    if samples is not None and samples < min_listing_samples:
+        if gate_action in {"WAIT_FOR_ACTIONABLE_WATCH", "WAIT_FOR_FRESH_GATE_B_WINDOW"}:
+            return {
+                "operator_recommended": False,
+                "operator_status": "HOLD_WAIT_FOR_ACTIONABLE_WATCH",
+                "operator_message": "do_not_run_full_chain_from_wait_only_watch_and_under_sample_artifact",
+            }
+        return {
+            "operator_recommended": False,
+            "operator_status": "DIAGNOSTIC_ONLY_SAMPLE_BELOW_GATE",
+            "operator_message": "full_chain_shell_is_diagnostic_only_until_listing_sample_gate_is_met",
+        }
+    return {
+        "operator_recommended": True,
+        "operator_status": "RUNNABLE_FOR_RESEARCH_REVIEW",
+        "operator_message": "full_chain_command_is_runnable_but_still_requires_e2_mit_qc_review_before_promotion",
+    }
+
+
 def _listing_preview(
     *,
     gate_b_run_dir: Path,
@@ -613,6 +671,13 @@ def build_preflight_summary(
             "PYTHONPATH=helper_scripts/research:helper_scripts "
             + _quote_command(command_parts)
         )
+    command_guard = _command_operator_guard(
+        command_shell=command_shell,
+        readiness_status=readiness_status,
+        gate_watch=gate_watch,
+        sample_count=sample_count,
+        min_listing_samples=min_listing_samples,
+    )
 
     return {
         "schema_version": SUMMARY_SCHEMA_VERSION,
@@ -642,6 +707,7 @@ def build_preflight_summary(
             "argv": command_parts,
             "shell": command_shell,
             "policy": "artifact_only_full_chain_no_collection_no_runtime_mutation",
+            **command_guard,
         },
         "gate_parameters": {
             "horizon_s": horizon_s,
