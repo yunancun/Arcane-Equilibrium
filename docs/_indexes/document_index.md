@@ -6,6 +6,13 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-13 L2 memory B1 seed dry-run
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-13--l2_memory_b1_seed_dry_run.md` | PM runtime report: `seed_agent_memory.py --dry-run` PASS after V139; B source 93 candidates, 6 skips, A source dead_mode count=6 via read-only SQL, `agent.agent_memory` stays 0 rows; `--apply` remains gated。 |
+| `CCAgentWorkSpace/Operator/2026-06-13--l2_memory_b1_seed_dry_run.md` | Operator mirror: concise dry-run result and remaining gates for seed apply, V140, pipeline flags, cron, embedding, and model call。 |
+
 ### 2026-06-13 L2 V138/V139 runtime activation
 
 | 文件 | 内容 |
