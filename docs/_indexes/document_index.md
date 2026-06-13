@@ -6,12 +6,19 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-13 L2 memory B2 seed apply
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-13--l2_memory_b2_seed_apply.md` | PM runtime report: operator-approved `seed_agent_memory.py --apply` after V139; inserted 99 rows, recall verify PASS, duplicate record IDs 0, L2 memory flags remain off, `[83]-[89]` PASS。 |
+| `CCAgentWorkSpace/Operator/2026-06-13--l2_memory_b2_seed_apply.md` | Operator mirror: concise seed apply result, log/hash, remaining separate gates for V140, pipeline, cron, embedding, recall, and model call。 |
+
 ### 2026-06-13 L2 memory B1 seed dry-run
 
 | 文件 | 内容 |
 |------|------|
-| `CCAgentWorkSpace/PM/workspace/reports/2026-06-13--l2_memory_b1_seed_dry_run.md` | PM runtime report: `seed_agent_memory.py --dry-run` PASS after V139; B source 93 candidates, 6 skips, A source dead_mode count=6 via read-only SQL, `agent.agent_memory` stays 0 rows; `--apply` remains gated。 |
-| `CCAgentWorkSpace/Operator/2026-06-13--l2_memory_b1_seed_dry_run.md` | Operator mirror: concise dry-run result and remaining gates for seed apply, V140, pipeline flags, cron, embedding, and model call。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-13--l2_memory_b1_seed_dry_run.md` | PM runtime report: `seed_agent_memory.py --dry-run` PASS after V139; B source 93 candidates, 6 skips, A source dead_mode count=6 via read-only SQL, `agent.agent_memory` stayed 0 rows at dry-run time; seed apply later closed by B2。 |
+| `CCAgentWorkSpace/Operator/2026-06-13--l2_memory_b1_seed_dry_run.md` | Operator mirror: concise dry-run result and then-remaining gates; seed apply later closed by B2 while V140, pipeline flags, cron, embedding, and model call remain separate gates。 |
 
 ### 2026-06-13 L2 V138/V139 runtime activation
 
