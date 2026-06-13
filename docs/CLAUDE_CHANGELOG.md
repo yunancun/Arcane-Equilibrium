@@ -1,13 +1,17 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-12（TODO v149 L2 root TODO tail triage + active queue mirror；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-13（TODO v151 P5-SM `[82]` clean closure；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v151 增量（2026-06-13 P5-SM `[82]` clean closure + docs sync）**：P5-SM `[82]` 第二輪 48h soak gate 已用 Linux `trade-core` 真 DB healthcheck 關閉：2026-06-13T02:05:59Z `--check 81 --check 82` 回 `[81] PASS`（lease_transitions fresh，comparator non-gate flag ON）與 `[82] PASS`（window=48.1h、probes=1442、success_rate=1.0000、0 flag-OFF / 0 regression / 0 fail-streak、canary snapshot age=18s）。同輪 read-only watchdog `engine_alive=true`、snapshot age 4.8s、demo/live fresh。已修正 TODO §0/§5/§6/§8 的 RUNNING/accumulating/stale wording，補 PM closure report、Operator mirror、document index，並把 v150 增量移回本 Version-Increment Log。邊界：無 CI、無 deploy/rebuild/restart、無 migration apply、無 L2 activation、無 DB/auth/risk/order/trading mutation；step-iii CUTOVER、V138/V139、V140/seed/L2 activation 仍需另開 operator-gated 低風險窗口。
+
+**v150 增量（2026-06-13 A1 basis gate + P2 OPS + P3 ticker forward recorder）**：A1 `P2-A1-RUNNER-WIRE-TO-BASIS` formal gate matured：Linux `panel.basis_panel` span=14.001163877d；Stage0R packet `/tmp/openclaw/alpha_candidate_stage0r/a1_basis_formal_20260613T0025p02.json` returns A1 functional path, `infra_gap=false`, `draft_only`, `n_eff=0`, fail=`no_a1_signals_after_entry_gate`；engineering wire closed, candidate remains event-triggered dormant。P2 OPS pg_dump/passive health test gap closed with standalone `check_pg_dump_freshness` tests plus passive `[80] pg_dump_freshness` wrapper tests；focused pytest `52 passed`。P3 `market_tickers` source forward recorder landed：Rust parser/PriceEvent/fast-track/writer now forwards nullable mark/index/funding/OI and writes missing/non-finite values as SQL NULL；Linux schema already has nullable `funding_rate` via V063/V076。No CI/deploy/rebuild/restart/backfill。
 
 **v149 增量（2026-06-12 L2 root TODO tail triage + active queue mirror）**：對 root `L2_TODO.md` 做對抗性核查，結論是不能按 completed archive 移走：P4/V138 prod apply、L2 E2E-1、P2p sentinel Telegram/probe/install/兩輪 all-pass、P5 feedback/quality/GUI 均仍未閉。read-only Linux ground truth：prod `_sqlx_migrations` head=137、V138/V139 表不存在、`[82]` healthcheck 仍 accumulating `43.3h<48h` at 2026-06-12T21:14Z、`agent.l2_calls` 僅 1 row=`ml_advisory.diagnose_leak/manual/anthropic:sonnet`（不滿足 E2E-1 true Ollama row）、`learning.l2_gate_seam_log`=4、`agent.l2_consequential_marks`=0、runtime env 無 Telegram/Sentinel creds。已把缺失尾巴補入 `TODO.md` §5 `P1-L2-ADVISORY-MESH-TAILS`，避免 root L2 TODO 被誤判全閉；無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/order/trading mutation、無模型呼叫。
 
@@ -3083,9 +3087,3 @@ Cold audit of all ML_TODO completed items found 3 real issues + 4 pre-existing t
 
 > **歸檔**：2026-04-08 ~ 04-09 條目已移至 `docs/archive/2026-04-13--changelog_archive_0408_0409.md`。
 > 2026-03-30 ~ 04-07 條目見 `docs/archive/2026-04-12--changelog_archive_pre_0408.md`。
-
-## 2026-06-13 A1 basis gate + P2 OPS + P3 ticker forward recorder
-
-- A1 `P2-A1-RUNNER-WIRE-TO-BASIS` formal gate matured: Linux `panel.basis_panel` span=14.001163877d; Stage0R packet `/tmp/openclaw/alpha_candidate_stage0r/a1_basis_formal_20260613T0025p02.json` returns A1 functional path, `infra_gap=false`, `draft_only`, `n_eff=0`, fail=`no_a1_signals_after_entry_gate`; engineering wire closed, candidate remains event-triggered dormant.
-- P2 OPS pg_dump/passive health test gap closed with standalone `check_pg_dump_freshness` tests plus passive `[80] pg_dump_freshness` wrapper tests; focused pytest `52 passed`.
-- P3 `market_tickers` source forward recorder landed: Rust parser/PriceEvent/fast-track/writer now forwards nullable mark/index/funding/OI and writes missing/non-finite values as SQL NULL; Linux schema already has nullable `funding_rate` via V063/V076. No CI/deploy/rebuild/restart/backfill.

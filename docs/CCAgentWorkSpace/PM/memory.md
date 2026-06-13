@@ -316,3 +316,8 @@
 - 第二批确认策略：入口瘦身、目录 README、摘要库存和点名旧文档降权；继续不删除 Markdown、不批量移动 role reports。
 - `docs/README.md` 只做 router，长索引归 `docs/_indexes/document_index.md`；`document_inventory.json` 只作规模/导航摘要，不作删除判据。
 - 旧 Linear-only、L2 active stub、Paper promotion、3E-ARCH/v5.8 frozen module 语义必须在正文层明确 historical/reference，不能只依赖顶部 banner。
+
+## 2026-06-13 P5-SM [82] clean closure
+
+- `[82]` step-ii 48h soak gate 在 Linux 真 DB healthcheck 2026-06-13T02:05:59Z 關閉：window=48.1h、probes=1442、success_rate=1.0000、0 flag-OFF/regression/fail-streak；watchdog read-only `engine_alive=true`。
+- Closure 只解除 `[82]` blocker；未 deploy/rebuild/restart、未套 V138/V139、未啟 L2 activation。step-iii cutover 與 P2 activation 仍需 operator-gated 低風險窗口。

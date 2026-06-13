@@ -6,6 +6,13 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-13 P5-SM [82] clean closure
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-13--p5_sm_82_clean_closure.md` | PM closure: P5-SM `[82]` 48h soak gate PASS on Linux true DB healthcheck (`window=48.1h`, `probes=1442`, `success_rate=1.0000`); step-iii cutover and V138/V139/L2 activation remain operator-gated。 |
+| `CCAgentWorkSpace/Operator/2026-06-13--p5_sm_82_clean_closure.md` | Operator mirror: `[82]` blocker closed, no deploy/rebuild/restart/migration/model call/trading mutation; remaining explicit non-closures listed。 |
+
 ### 2026-06-13 A1 basis / P2 OPS / P3 forward recorder
 
 | 文件 | 内容 |
