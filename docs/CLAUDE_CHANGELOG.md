@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-13（TODO v155 L2 memory B1 seed dry-run；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-13（TODO v156 L2 memory B2 seed apply；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v156 增量（2026-06-13 L2 memory B2 seed apply）**：operator 批准後，PM 執行 bounded DB write `seed_agent_memory.py --apply`，run `l2_memory_b2_seed_apply_20260613T163835Z`，log `/tmp/openclaw/l2_memory_b2_seed_apply_20260613T163835Z.log`（sha256 `4b050252c803b193862d3758cf01d1ebb17fd907371369201e05f6764393a02c`）。Baseline：SQL head=139/success=true、`agent.agent_memory` before=0、A 源 dead_mode=6。Apply 結果：A=6、B=93、inserted=99、already_present=0、skip=6，中英 recall verify 各 5 hits。Post DB：`agent.agent_memory` total=99，scene `seed:dead_mode`=6 / `seed:memory_index`=93，source lesson=6 / memory_topic=93，active=99，embedding_pending=99，duplicate_record_ids=0，seed_batch=99。`OPENCLAW_L2_MEMORY_PIPELINE` / cron apply / embed backfill / recall flags 仍 unset；Linux `[83]-[89]` `SUMMARY: ALL PASS`；Mac focused seed tests 39 passed；engine PID 3607315 alive。邊界：未 CI、未 rebuild/restart、未 manual V140、未 pipeline/cron/embed/model call、未 Gate-B probe；下一步 manual V140 或 pipeline flag-on 設計仍需 separate approval。
 
 **v155 增量（2026-06-13 L2 memory B1 seed dry-run）**：V139 applied 後，PM 執行 B1 最低風險 dry-run：Linux `seed_agent_memory.py --dry-run`，保存 log `/tmp/openclaw/l2_memory_b1_seed_dry_run_20260613T161740Z.log`（sha256 `f06a301a97f012dbe8a9a5030e266cc0652e35b61e55aaf3b134493667023950`）。Dry-run 契約確認為 0 DB connection，A 源 `agent.lessons dead_mode` 因 dry-run deferred，另用 read-only SQL 確認 count=6；B 源 `memory/MEMORY.md` 解析 93 candidate rows，敏感網/白名單攔截 6（token keyword、reference_*、External tool authority section）；`agent.agent_memory` rows before/after=0。Focused verification：Linux `py_compile` PASS，Mac `test_seed_agent_memory.py` 39 passed。邊界：未 `--apply`、未 manual V140、未開 L2 memory flags/cron/embed、未 model call、未 Gate-B probe、未 rebuild/restart、未 DB write；下一步需 operator 決策是否允許 bounded `--apply` DB write。
 

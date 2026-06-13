@@ -335,9 +335,14 @@
 ## 2026-06-13 L2 V138/V139 runtime activation
 
 - Operator approved and PM executed V138/V139 engine-only auto-migrate: run `l2_v138_v139_activation_20260613T153352Z`, new engine PID 3607315, auto_migrate `Applied(2)`, `_sqlx_migrations` head=139/all_success=true/count=122, checksum drift=0, V138/V139 objects exist, new rows 0, `[83]-[89]` post-check `SUMMARY: ALL PASS`.
-- Persistent `OPENCLAW_AUTO_MIGRATE=0` restored and maintenance flag absent. Current process env still has `OPENCLAW_AUTO_MIGRATE=1` because that process was started for the migration; no further migration runs until restart, and future restart reads persistent 0. Remaining L2 gates: manual V140, seed apply, memory pipeline/cron/embed flags, E2E model call, P2p/P5.
+- Persistent `OPENCLAW_AUTO_MIGRATE=0` restored and maintenance flag absent. Current process env still has `OPENCLAW_AUTO_MIGRATE=1` because that process was started for the migration; no further migration runs until restart, and future restart reads persistent 0. Remaining L2 gates after seed: manual V140, memory pipeline/cron/embed flags, E2E model call, P2p/P5.
 
 ## 2026-06-13 L2 memory B1 seed dry-run
 
 - Ran `seed_agent_memory.py --dry-run` on Linux after V139: B source parsed 93 `memory/MEMORY.md` candidate rows, skipped 6 by sensitive/allowlist rules, A source `agent.lessons dead_mode` deferred by dry-run contract; read-only SQL confirmed dead_mode count=6 and `agent.agent_memory` stayed 0 rows.
-- Dry-run artifact `/tmp/openclaw/l2_memory_b1_seed_dry_run_20260613T161740Z.log` sha256 `f06a301a97f012dbe8a9a5030e266cc0652e35b61e55aaf3b134493667023950`; focused verification `test_seed_agent_memory.py` 39 passed. `--apply` remains a separate DB-write approval.
+- Dry-run artifact `/tmp/openclaw/l2_memory_b1_seed_dry_run_20260613T161740Z.log` sha256 `f06a301a97f012dbe8a9a5030e266cc0652e35b61e55aaf3b134493667023950`; focused verification `test_seed_agent_memory.py` 39 passed. The separate `--apply` approval was later granted and closed by B2 below.
+
+## 2026-06-13 L2 memory B2 seed apply
+
+- Operator approved bounded DB write; PM ran `seed_agent_memory.py --apply` on Linux: run `l2_memory_b2_seed_apply_20260613T163835Z`, log `/tmp/openclaw/l2_memory_b2_seed_apply_20260613T163835Z.log`, sha256 `4b050252c803b193862d3758cf01d1ebb17fd907371369201e05f6764393a02c`.
+- Result: A=6, B=93, inserted=99, already_present=0, recall verify en/zh hits=5/5. Post DB: `agent.agent_memory` total=99, duplicate_record_ids=0, active=99, embedding_pending=99; L2 memory pipeline/cron/embed/recall flags remain unset; `[83]-[89]` PASS and engine PID 3607315 stayed alive. Remaining gates: manual V140, pipeline/cron/embed flag-on, E2E model call, P2p/P5.
