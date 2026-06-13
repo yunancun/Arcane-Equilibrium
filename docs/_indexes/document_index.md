@@ -6,6 +6,13 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-13 L2 V138/V139 activation-window packet
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-13--l2_v138_v139_activation_window_packet.md` | PM runbook/evidence packet: V138/V139 ready for explicit operator-approved engine auto-migrate window; read-only Linux baseline head=V137/checksum drift=0/objects absent/`[83]-[89]` PASS; includes exact activation and post-check sequence; not executed。 |
+| `CCAgentWorkSpace/Operator/2026-06-13--l2_v138_v139_activation_window_packet.md` | Operator mirror: short decision packet; `psql -f` forbidden, only `OPENCLAW_AUTO_MIGRATE=1` + engine-only restart + restore flag after approval; V140/seed/flags/model/Gate-B remain separate gates。 |
+
 ### 2026-06-13 P5-SM [82] clean closure
 
 | 文件 | 内容 |
