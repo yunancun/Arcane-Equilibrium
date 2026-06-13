@@ -135,7 +135,7 @@ Covered:
 ## Remaining Gates
 
 - First non-empty L2 material day: verify true distillation/model-call evidence, not just seeded memory embedding.
-- B3 recall injection remains separate.
+- B3 recall injection remained separate in this embedding run. It was later closed at source-wiring level by `2026-06-13--l2_b3_recall_wiring.md`; runtime flag remains off unless `OPENCLAW_L2_MEMORY_RECALL=shadow|1` is set.
 - P2p sentinel Telegram/probe/install remains separate.
 - P5 feedback / quality / GUI remains separate.
 - Gate-B remains event-triggered for AEG/listing fade and does not block this L2 memory activation.

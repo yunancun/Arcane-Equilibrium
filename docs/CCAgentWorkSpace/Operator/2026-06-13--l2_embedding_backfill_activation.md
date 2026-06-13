@@ -28,6 +28,6 @@ L2 memory embedding 軸已啟用完成。
 ## 剩餘
 
 1. 等第一個非空 L2 material day，驗證 true distillation/model-call evidence。
-2. B3 recall injection 另開 gate。
+2. B3 recall injection 另開 gate（後續已完成 source wiring；runtime flag 尚未持久化開啟）。
 3. P2p sentinel Telegram/probe/install 另開 gate。
 4. P5 feedback / quality / GUI 另開 gate。

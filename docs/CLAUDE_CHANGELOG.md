@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-13（TODO v158 L2 embedding backfill activation；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-13（TODO v159 L2 B3 recall source wiring；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v159 增量（2026-06-13 L2 B3 recall source wiring）**：完成 L2 memory B3 recall source wiring，預設仍關閉。新增 `app/l2_memory_recall_context.py`，旗標契約固定為 `OPENCLAW_L2_MEMORY_RECALL=0|shadow|1`：`0` 不 import、不打 DB；`shadow` 計算 `recall_for_prompt` bundle 但只把 `memory_recall_shadow` metadata（mode/record_ids/total_chars/degraded_level）併入既有 D3 `input_context`；`1` 才把 stable rule/system_trait memory 追加到 system prompt、recent incident memory 前置到 user message。主線 `layer2_engine` 在既有 lesson-retrieval prompt 邊界接線；客座 `l2_ml_advisory_executor` 同接 diagnose/interpret 與 hypothesize 路徑，並保證 shadow metadata 不進模型輸入。`memory_distiller.recall.py` docstring 從 dormant 更新為 app-layer env-gated seam。Focused regression：`test_recall.py` + B3 helper + D3 engine wiring + P3a ml_advisory + P3b hypothesize = `92 passed`；`py_compile` touched modules PASS。邊界：未 CI、未 deploy/rebuild/restart、未 DB/cron/runtime flag 持久化、未 Gate-B/auth/risk/order/trading mutation；Linux engine PID 3607315 unchanged。下一步可在 operator-approved deploy/restart 後開 `OPENCLAW_L2_MEMORY_RECALL=shadow` 做 D3 shadow evidence，active `1` 等 shadow review 後再開。
 
 **v158 增量（2026-06-13 L2 embedding backfill activation）**：承接 V140 + FTS-only daily cron 後，PM 完成 L2 memory embedding 軸 activation。Linux `ollama pull bge-m3` 成功，`ollama list` 顯示 `bge-m3:latest`（1.2GB）。Backfill run `l2_embedding_backfill_20260613T170015Z`，log `/tmp/openclaw/l2_embedding_backfill_20260613T170015Z.log`，sha256 `109aa15dcb540ce7428713b36628034ca9b53652c2caaf5ead88737c83aa8833`：model info `ollama/bge-m3`，availability true，probe dims=1024，`run_backfill` 回 `status=ok embedded=99 reindexed=false`。Crontab update run `l2_memory_cron_embed_flag_20260613T170044Z`，sha256 `75de04eaf9e0434d984a99651b325e868ea3ece732f51246941708324303a33d`，daily 05:23 UTC entry 現含 `OPENCLAW_L2_MEMORY_PIPELINE=1 OPENCLAW_L2_MEMORY_EMBED_BACKFILL=1`。Post DB：`agent.agent_memory` total=99，embedding_pending=0，embedding_not_null=99，dims distinct=1024，meta=`ollama|bge-m3|1024`。Post Linux true DB healthcheck `[83]-[89]` `SUMMARY: ALL PASS`，`[89] meta=(ollama,bge-m3,1024) matches config`；focused source regression `94 passed`；watchdog `engine_alive=true`、engine PID 3607315 unchanged。邊界：未 CI、未 deploy/rebuild/restart、未 B3 recall injection、未 Gate-B probe、未 auth/risk/order/trading mutation；剩餘 L2 gate 是 first non-empty material day / E2E true distillation model-call evidence、B3 recall injection、P2p/P5。
 

@@ -42,6 +42,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app import l2_advisory_orchestrator as ORCH
 from app import l2_capability_registry as REG
+from app import l2_memory_recall_context as MRC
 from app import l2_ml_advisory_executor as EXEC
 from app import l2_out_of_bound_guard as GUARD
 from app import l2_prompt_contract_registry as CONTRACTS
@@ -97,7 +98,12 @@ class _FakeEngine:
         return base_provider, base_tier
 
     async def _provider_complete(self, *, provider_name, tier, system_prompt, messages, tools, max_tokens, timeout):
-        self.calls.append({"role_tier": tier, "system_prompt": system_prompt, "max_tokens": max_tokens})
+        self.calls.append({
+            "role_tier": tier,
+            "system_prompt": system_prompt,
+            "messages": messages,
+            "max_tokens": max_tokens,
+        })
         # 用 max_tokens 區分 screen（小）vs cloud（大）；screen=_SCREEN_MAX_TOKENS。
         is_screen = max_tokens <= EXEC._SCREEN_MAX_TOKENS
         text = self._screen_text if is_screen else self._cloud_text
@@ -292,6 +298,78 @@ class TestTwoModesCascade:
         # fact_inf_assm 帶 mode + evidence kinds（事實/推論/假設分離，root principle 10）。
         assert kwargs["fact_inf_assm"]["mode"] == "diagnose_leak"
         assert "leak" in kwargs["fact_inf_assm"]["evidence_kinds"]
+
+
+class TestB3MemoryRecallWiring:
+    def test_shadow_recall_is_ledger_only_not_model_prompt(self, monkeypatch, _mock_ledger):
+        """OPENCLAW_L2_MEMORY_RECALL=shadow：算 bundle，但只入 D3 input_context，不改 prompt。"""
+        store: list[dict[str, Any]] = []
+        eng = _FakeEngine(cloud_text=json.dumps(_VALID_DIAGNOSE_OUTPUT))
+        recall = MRC.L2MemoryRecallContext(
+            mode="shadow",
+            attempted=True,
+            record_ids=("mem:r1", "mem:i1"),
+            total_chars=44,
+            degraded_level="fts",
+            stable_block="- [rule] should not enter system prompt",
+            recent_block="- [incident] should not enter user prompt",
+        )
+
+        async def _fake_build(**_kwargs):
+            return recall
+
+        monkeypatch.setattr(EXEC, "_build_l2_memory_recall", _fake_build)
+        _run(EXEC.run_ml_advisory_cascade(
+            capability_id="ml_advisory.diagnose_leak", mode="diagnose_leak",
+            context=_diagnose_context(), engine=eng,
+            contract_ver="cv", schema_ver="sv", calibration=_enabled_calibration(),
+            sink_conn_provider=_conn_provider_factory(store),
+        ))
+
+        cloud_call = [c for c in eng.calls if c["max_tokens"] == EXEC._CLOUD_MAX_TOKENS][0]
+        assert "should not enter system prompt" not in cloud_call["system_prompt"]
+        assert "should not enter user prompt" not in cloud_call["messages"][0]["content"]
+        payload = _mock_ledger.record_l2_call.call_args.kwargs["input_context"][
+            "memory_recall_shadow"
+        ]
+        assert payload == {
+            "mode": "shadow",
+            "record_ids": ["mem:r1", "mem:i1"],
+            "total_chars": 44,
+            "degraded_level": "fts",
+        }
+
+    def test_active_recall_injects_cloud_prompt_and_audits_ids(self, monkeypatch, _mock_ledger):
+        """OPENCLAW_L2_MEMORY_RECALL=1：stable 進 system，recent 進 user，ledger 留 ids。"""
+        store: list[dict[str, Any]] = []
+        eng = _FakeEngine(cloud_text=json.dumps(_VALID_DIAGNOSE_OUTPUT))
+        recall = MRC.L2MemoryRecallContext(
+            mode="1",
+            attempted=True,
+            record_ids=("mem:r2",),
+            total_chars=33,
+            degraded_level="vector",
+            stable_block="- [rule] stable B3 rule",
+            recent_block="- [incident] recent B3 incident",
+        )
+
+        async def _fake_build(**_kwargs):
+            return recall
+
+        monkeypatch.setattr(EXEC, "_build_l2_memory_recall", _fake_build)
+        _run(EXEC.run_ml_advisory_cascade(
+            capability_id="ml_advisory.diagnose_leak", mode="diagnose_leak",
+            context=_diagnose_context(), engine=eng,
+            contract_ver="cv", schema_ver="sv", calibration=_enabled_calibration(),
+            sink_conn_provider=_conn_provider_factory(store),
+        ))
+
+        cloud_call = [c for c in eng.calls if c["max_tokens"] == EXEC._CLOUD_MAX_TOKENS][0]
+        assert "stable B3 rule" in cloud_call["system_prompt"]
+        assert "recent B3 incident" in cloud_call["messages"][0]["content"]
+        kwargs = _mock_ledger.record_l2_call.call_args.kwargs
+        assert "stable B3 rule" in kwargs["system_prompt"]
+        assert kwargs["input_context"]["memory_recall_shadow"]["record_ids"] == ["mem:r2"]
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

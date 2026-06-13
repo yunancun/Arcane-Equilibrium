@@ -35,6 +35,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app import l2_secret_redactor as R
 from app import l2_call_ledger_writer as W
+from app import l2_memory_recall_context as MRC
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -892,6 +893,46 @@ class TestEngineWiring:
         assert session.l2_reply_id is not None
         assert session.l2_reply_id.startswith("l2r:")
         assert captured["l2_reply_id"] == session.l2_reply_id
+
+    def test_engine_ledger_includes_b3_memory_recall_shadow_metadata(self):
+        from app.layer2_engine import Layer2Engine
+        from app.layer2_types import Layer2Session
+        from app import provider_client as pc
+
+        engine = Layer2Engine(cost_tracker=MagicMock())
+        session = Layer2Session(trigger="manual")
+        response = pc.L2Response(text="analysis result", input_tokens=10, output_tokens=5)
+        captured = {}
+        recall = MRC.L2MemoryRecallContext(
+            mode="shadow",
+            attempted=True,
+            record_ids=("mem:r1",),
+            total_chars=12,
+            degraded_level="fts",
+        )
+
+        class _FakeWriter:
+            def record_l2_call(self, **kwargs):
+                captured.update(kwargs)
+                return {"ok": True}
+
+        with patch("app.layer2_engine._get_l2_ledger_writer", return_value=_FakeWriter()):
+            engine._record_l2_call_to_ledger(
+                session=session,
+                system_prompt="SYS",
+                messages=[{"role": "user", "content": "hi"}],
+                response=response,
+                eff_model="haiku",
+                latency_ms=None,
+                memory_recall=recall,
+            )
+
+        assert captured["input_context"]["memory_recall_shadow"] == {
+            "mode": "shadow",
+            "record_ids": ["mem:r1"],
+            "total_chars": 12,
+            "degraded_level": "fts",
+        }
 
     def test_engine_wiring_fail_soft_keeps_reply_id_none(self):
         from app.layer2_engine import Layer2Engine

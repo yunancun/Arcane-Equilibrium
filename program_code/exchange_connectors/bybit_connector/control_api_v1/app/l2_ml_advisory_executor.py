@@ -77,6 +77,12 @@ from . import l2_out_of_bound_guard as _guard
 from . import l2_prompt_contract_registry as _contracts
 from . import l2_secret_redactor as _redactor
 from .l2_call_ledger_writer import get_l2_call_ledger_writer as _get_l2_ledger_writer
+from .l2_memory_recall_context import (
+    apply_memory_recall_to_prompt as _apply_memory_recall_to_prompt,
+    build_context_hint as _build_memory_recall_hint,
+    build_l2_memory_recall as _build_l2_memory_recall,
+    with_memory_recall_audit_context as _with_memory_recall_audit_context,
+)
 
 logger = logging.getLogger("l2_ml_advisory_executor")
 
@@ -348,7 +354,7 @@ async def _run_ollama_screen(
 
 
 async def _run_cloud_interpret(
-    engine: Any, *, mode: str, context: dict[str, Any]
+    engine: Any, *, mode: str, context: dict[str, Any], memory_recall: Any = None
 ) -> tuple[dict[str, Any] | None, str, float, str, dict[str, Any]]:
     """跑 cloud-L2 diagnose/interpret（單發；用 contract registry 的 checked-in 模板）。
 
@@ -377,6 +383,11 @@ async def _run_cloud_interpret(
     user_input = (
         f"Training run context (structured, extracted from the pipeline):\n"
         f"{json.dumps(context, ensure_ascii=False, default=str)[:6000]}"
+    )
+    system_prompt, user_input = _apply_memory_recall_to_prompt(
+        system_prompt=system_prompt,
+        user_message=user_input,
+        recall=memory_recall,
     )
     resp = await engine._provider_complete(
         provider_name=eff_provider, tier=eff_tier,
@@ -613,6 +624,11 @@ async def run_ml_advisory_cascade(
               {"mode": mode, "reason": "unknown_mode"})
         return result
 
+    memory_recall = await _build_l2_memory_recall(
+        symbol=symbol,
+        context_hint=_build_memory_recall_hint(symbol=symbol, mode=mode, context=context),
+    )
+
     # ── P3b hypothesize（alpha-bearing）→ 走 §G.2 cascade（Ollama generate → math gate →
     #    cloud interpret survivors）。math gate 是唯一 alpha validator（LLM 永不驗 alpha）。──
     if mode in _P3B_MODES:
@@ -623,7 +639,7 @@ async def run_ml_advisory_cascade(
             available_signal_axes=available_signal_axes, bull_only=bull_only,
             calibration=calibration, sink_conn_provider=sink_conn_provider,
             spend_recorder=spend_recorder, writer=writer, l2_reply_id=l2_reply_id,
-            result=result, started=started,
+            result=result, started=started, memory_recall=memory_recall,
         )
 
     # ── STAGE 1 — Ollama screen（M4-gated；loose coarse）──
@@ -649,7 +665,7 @@ async def run_ml_advisory_cascade(
 
     # ── STAGE 2 — cloud-L2 diagnose/interpret（survivors only；LLM 永不驗 alpha）──
     parsed, raw, cloud_cost, system_prompt, cloud_meta = await _run_cloud_interpret(
-        engine, mode=mode, context=context
+        engine, mode=mode, context=context, memory_recall=memory_recall
     )
     result.cost_usd += cloud_cost
     result.cloud_called = True
@@ -661,7 +677,9 @@ async def run_ml_advisory_cascade(
         result.notes.append("cloud diagnose/interpret 回 None 或非 JSON dict")
         _ledger(writer, l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
                 model=model_str, contract_ver=contract_ver, schema_ver=schema_ver,
-                system_prompt=system_prompt, context=context, raw_response=raw,
+                system_prompt=system_prompt,
+                context=_with_memory_recall_audit_context(context, memory_recall),
+                raw_response=raw,
                 parsed_output=None, guard_verdict=None, cost_usd=result.cost_usd,
                 latency_ms=int((time.time() - started) * 1000))
         _record_spend(spend_recorder, capability_id, result.cost_usd)
@@ -685,7 +703,9 @@ async def run_ml_advisory_cascade(
     guard_out = gres.clamped_output if gres.clamped_output is not None else parsed
     _ledger(writer, l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
             model=model_str, contract_ver=contract_ver, schema_ver=schema_ver,
-            system_prompt=system_prompt, context=context, raw_response=raw,
+            system_prompt=system_prompt,
+            context=_with_memory_recall_audit_context(context, memory_recall),
+            raw_response=raw,
             parsed_output=guard_out, guard_verdict=gres.verdict, fact_inf_assm=fact_inf_assm,
             cost_usd=result.cost_usd, latency_ms=int((time.time() - started) * 1000))
 
@@ -750,6 +770,7 @@ async def _run_hypothesize_cascade(
     l2_reply_id: str,
     result: MlAdvisoryCascadeResult,
     started: float,
+    memory_recall: Any = None,
 ) -> MlAdvisoryCascadeResult:
     """P3b hypothesize cascade（§G.2 order；alpha-bearing；promotion-relevant verdict）。
 
@@ -781,7 +802,9 @@ async def _run_hypothesize_cascade(
             return result
 
     # ── STAGE 2 — Ollama generate（cheap 結構化假說；§G.2 cheap-generate-first，非 cloud-first）──
-    parsed, raw_gen, gen_cost = await _run_ollama_generate(engine, mode=mode, context=context)
+    parsed, raw_gen, gen_cost = await _run_ollama_generate(
+        engine, mode=mode, context=context, memory_recall=memory_recall
+    )
     result.cost_usd += gen_cost
     if parsed is None:
         # 本地生成不可用 / 非 JSON → fail-soft（D3 記 error，不寫 sink）。
@@ -789,7 +812,9 @@ async def _run_hypothesize_cascade(
         result.notes.append("ollama generate 回 None 或非 JSON dict")
         _ledger(writer, l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
                 model="ollama_generate", contract_ver=contract_ver, schema_ver=schema_ver,
-                system_prompt=_hypothesize_template(), context=context, raw_response=raw_gen,
+                system_prompt=_hypothesize_system_prompt_for_ledger(memory_recall),
+                context=_with_memory_recall_audit_context(context, memory_recall),
+                raw_response=raw_gen,
                 parsed_output=None, guard_verdict=None, cost_usd=result.cost_usd,
                 latency_ms=int((time.time() - started) * 1000))
         _record_spend(spend_recorder, capability_id, result.cost_usd)
@@ -811,7 +836,9 @@ async def _run_hypothesize_cascade(
         result.notes.append(f"guard reject: {','.join(gres.kinds_hit)}")
         _ledger(writer, l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
                 model="ollama_generate", contract_ver=contract_ver, schema_ver=schema_ver,
-                system_prompt=_hypothesize_template(), context=context, raw_response=raw_gen,
+                system_prompt=_hypothesize_system_prompt_for_ledger(memory_recall),
+                context=_with_memory_recall_audit_context(context, memory_recall),
+                raw_response=raw_gen,
                 parsed_output=guard_out, guard_verdict=gres.verdict, cost_usd=result.cost_usd,
                 latency_ms=int((time.time() - started) * 1000))
         _record_spend(spend_recorder, capability_id, result.cost_usd)
@@ -854,7 +881,10 @@ async def _run_hypothesize_cascade(
     cloud_interp: dict[str, Any] | None = None
     if math_res["verdict"] == "pass":
         cloud_interp, raw_cloud, cloud_cost, _sp, cloud_meta = await _run_cloud_interpret(
-            engine, mode="interpret_result", context={**context, "surviving_hypothesis": guard_out}
+            engine,
+            mode="interpret_result",
+            context={**context, "surviving_hypothesis": guard_out},
+            memory_recall=memory_recall,
         )
         result.cost_usd += cloud_cost
         result.cloud_called = True
@@ -870,7 +900,9 @@ async def _run_hypothesize_cascade(
     # 不論 verdict 皆寫 D3 ledger（reconstructable）——含 math gate verdict + reasons。
     _ledger(writer, l2_reply_id=l2_reply_id, capability_id=capability_id, trigger=trigger,
             model="ollama_generate+math_gate", contract_ver=contract_ver, schema_ver=schema_ver,
-            system_prompt=_hypothesize_template(), context=context, raw_response=raw_gen,
+            system_prompt=_hypothesize_system_prompt_for_ledger(memory_recall),
+            context=_with_memory_recall_audit_context(context, memory_recall),
+            raw_response=raw_gen,
             parsed_output={**guard_out, "math_gate": math_res}, guard_verdict=gres.verdict,
             fact_inf_assm=fact_inf_assm, cost_usd=result.cost_usd,
             latency_ms=int((time.time() - started) * 1000))
@@ -930,8 +962,18 @@ def _hypothesize_template() -> str:
     return pc.template if pc is not None else ""
 
 
+def _hypothesize_system_prompt_for_ledger(memory_recall: Any = None) -> str:
+    """P3b D3 row 記錄真實 generate system prompt（含 active B3 stable block）。"""
+    system_prompt, _ = _apply_memory_recall_to_prompt(
+        system_prompt=_hypothesize_template(),
+        user_message="",
+        recall=memory_recall,
+    )
+    return system_prompt
+
+
 async def _run_ollama_generate(
-    engine: Any, *, mode: str, context: dict[str, Any]
+    engine: Any, *, mode: str, context: dict[str, Any], memory_recall: Any = None
 ) -> tuple[dict[str, Any] | None, str, float]:
     """跑 Ollama「結構化生成」假說（§G.2 cheap-generate；用 contract registry 的 checked-in 模板）。
 
@@ -955,6 +997,11 @@ async def _run_ollama_generate(
         user_input = (
             f"Training run context (structured, extracted from the pipeline):\n"
             f"{json.dumps(context, ensure_ascii=False, default=str)[:6000]}"
+        )
+        system_prompt, user_input = _apply_memory_recall_to_prompt(
+            system_prompt=system_prompt,
+            user_message=user_input,
+            recall=memory_recall,
         )
         resp = await engine._provider_complete(
             provider_name=eff_provider, tier=eff_tier,

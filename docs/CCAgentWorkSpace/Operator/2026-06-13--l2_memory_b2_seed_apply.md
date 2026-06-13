@@ -30,7 +30,7 @@
 - `OPENCLAW_L2_MEMORY_PIPELINE=1`
 - `OPENCLAW_L2_MEMORY_CRON_APPLY=1`
 - `OPENCLAW_L2_MEMORY_EMBED_BACKFILL=1`
-- `OPENCLAW_L2_MEMORY_RECALL_ENABLED=1`
+- `OPENCLAW_L2_MEMORY_RECALL=shadow|1` (B3 recall flag; not executed)
 - E2E true model call
 - Gate-B probe
 - CI / rebuild / restart
