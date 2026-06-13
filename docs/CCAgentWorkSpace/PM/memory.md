@@ -351,3 +351,9 @@
 
 - Operator instructed "V140 first, then L2"; PM applied manual V140 via `apply_manual_V140_agent_memory_vector.sh`: run `l2_manual_v140_apply_20260613T164628Z`, sha256 `3ccc6dc3ebcc69e0ee80027536a6d7d3325e6adc4a00d66279a45155bab07beb`; result `vector` extension 0.8.1 installed, `agent.agent_memory.embedding=vector(1024)`, HNSW index exists, sqlx head remains 139 by design.
 - Activated L2 FTS-only daily cron: smoke run `l2_pipeline_ftsonly_smoke_20260613T164831Z` processed 2026-06-12 as no-op (`l2_calls=0`, DRAR=0, stored=0) and advanced cursor to 2026-06-12; cron install run `l2_memory_cron_install_20260613T164901Z` installed daily 05:23 UTC with `OPENCLAW_L2_MEMORY_PIPELINE=1`; active `[83]-[89]` PASS, `[88] rows=99 last_success=2026-06-12 lag_days=1`, `[89]` embed backfill OFF PASS-skip. `bge-m3` is absent in Ollama, so embedding backfill remains gated/off; engine PID 3607315 stayed alive.
+
+## 2026-06-13 L2 embedding backfill activation
+
+- Pulled `bge-m3` on Linux Ollama and ran bounded embedding backfill for seeded memory rows: `l2_embedding_backfill_20260613T170015Z`, sha256 `109aa15dcb540ce7428713b36628034ca9b53652c2caaf5ead88737c83aa8833`, result `embedded=99/status=ok`, probe dims=1024.
+- Updated the existing L2 daily memory cron to include `OPENCLAW_L2_MEMORY_EMBED_BACKFILL=1`: `l2_memory_cron_embed_flag_20260613T170044Z`, sha256 `75de04eaf9e0434d984a99651b325e868ea3ece732f51246941708324303a33d`.
+- Post DB: `agent.agent_memory` total=99, embedding_pending=0, embedding_not_null=99, dims=1024, meta=`ollama|bge-m3|1024`; Linux `[83]-[89]` PASS and focused source regression `94 passed`. No CI/deploy/rebuild/restart/B3/Gate-B/auth/risk/order/trading mutation; engine PID remained 3607315.

@@ -9,7 +9,9 @@
 
 **版本** v1 ｜ **日期** 2026-06-05 ｜ 設計 = v4-final（0 CRITICAL · 2 BLOCKER 已閉）｜ gating = **B1/M1/M2 ENDORSED**
 
-**狀態**：設計 **E1-READY**，等 operator 拍板啟 E1。本檔僅為精簡派工存根，不貼長架構。
+**最新活化鏡像（2026-06-13）**：V138/V139 runtime activation、B1/B2 memory seed、manual V140、L2 daily cron、`bge-m3` embedding backfill 均已完成；`agent.agent_memory`=99、embedding_pending=0、meta=`ollama|bge-m3|1024`、Linux `[83]-[89]` PASS。剩餘 active tail 以根 `TODO.md` 的 `P1-L2-ADVISORY-MESH-TAILS` 為準：first non-empty material day / E2E true distillation model-call evidence、B3 recall injection、P2p/P5。
+
+**狀態**：本檔是專題 ledger / 歷史派工存根；最新 active dispatch 不從此處派發，必須讀根 `TODO.md`。
 **SSOT 連結**：
 - 設計（v4-final）`docs/CCAgentWorkSpace/PA/workspace/reports/2026-06-05--l2-advisory-mesh-design-draft.md`
 - 執行方案 `docs/execution_plan/2026-06-05--l2-advisory-mesh-execution-plan.md`

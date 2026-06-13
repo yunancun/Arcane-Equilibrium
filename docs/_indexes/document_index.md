@@ -6,11 +6,18 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-13 L2 embedding backfill activation
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-13--l2_embedding_backfill_activation.md` | PM runtime report: Linux `bge-m3` installed, 99 `agent.agent_memory` rows embedded with 1024-dim vectors, daily cron updated with `OPENCLAW_L2_MEMORY_EMBED_BACKFILL=1`, `[83]-[89]` PASS, no restart。 |
+| `CCAgentWorkSpace/Operator/2026-06-13--l2_embedding_backfill_activation.md` | Operator mirror: concise embedding activation result, run/log/hash, DB state, remaining gates for non-empty L2 material model-call evidence, B3 recall injection, P2p/P5。 |
+
 ### 2026-06-13 L2 V140 + FTS-only pipeline activation
 
 | 文件 | 内容 |
 |------|------|
-| `CCAgentWorkSpace/PM/workspace/reports/2026-06-13--l2_v140_pipeline_activation.md` | PM runtime report: manual V140 applied (`vector(1024)` + HNSW), L2 FTS-only pipeline smoke no-op success, daily cron installed with `OPENCLAW_L2_MEMORY_PIPELINE=1`, `[88]` PASS, embed backfill remains off because `bge-m3` is absent。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-13--l2_v140_pipeline_activation.md` | PM runtime report: manual V140 applied (`vector(1024)` + HNSW), L2 FTS-only pipeline smoke no-op success, daily cron installed with `OPENCLAW_L2_MEMORY_PIPELINE=1`; embed backfill was off at this checkpoint and is superseded by the embedding activation section above。 |
 | `CCAgentWorkSpace/Operator/2026-06-13--l2_v140_pipeline_activation.md` | Operator mirror: concise V140 and L2 cron activation result, remaining gates for `bge-m3`, embedding backfill, true non-empty distillation evidence, and B3 recall injection。 |
 
 ### 2026-06-13 L2 memory B2 seed apply
