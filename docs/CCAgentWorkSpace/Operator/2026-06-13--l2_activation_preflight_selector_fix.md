@@ -32,13 +32,28 @@ PASS-SOURCE-FIX / RUNTIME-ACTIVATION-BLOCKED-BY-OPERATOR-WINDOW.
 - `./venvs/mac_dev/bin/python -m pytest helper_scripts/db/passive_wait_healthcheck/test_checks_alpha_wealth_fdr.py helper_scripts/db/test_l2_memory_healthchecks.py -q` -> `32 passed`
 - `./venvs/mac_dev/bin/python -m py_compile helper_scripts/db/passive_wait_healthcheck/runner.py helper_scripts/db/test_lease_ipc_soak_healthcheck.py` -> PASS
 
+## Post-sync Linux verification
+
+After Mac -> GitHub -> Linux sync, Linux `trade-core` ran the new narrow selector against the live DB:
+
+```bash
+python3 -m helper_scripts.db.passive_wait_healthcheck.runner --check 83 --check 84 --check 85 --check 86 --check 87 --check 88 --check 89
+```
+
+Result: `SUMMARY: ALL PASS`.
+
+- `[83]-[86]`: PASS-skip, V138 research FDR tables absent.
+- `[87]`: PASS, `sealed_rows_with_post_insert_updates=0`.
+- `[88]`: PASS-skip, `OPENCLAW_L2_MEMORY_PIPELINE != 1`.
+- `[89]`: PASS-skip, `OPENCLAW_L2_MEMORY_EMBED_BACKFILL != 1`.
+
 ## Boundary
 
 No CI. No deploy, rebuild, service restart, migration apply, DB write, auth/risk/order/trading mutation, or model call.
 
 ## Next
 
-After three-end sync, run Linux narrow preflight:
+Before the operator activation window, rerun Linux narrow preflight:
 
 ```bash
 python3 -m helper_scripts.db.passive_wait_healthcheck.runner --check 83 --check 84 --check 85 --check 86 --check 87 --check 88 --check 89

@@ -325,3 +325,4 @@
 ## 2026-06-13 L2 activation preflight selector fix
 
 - `[82]` 到時後 read-only preflight confirmed live DB head=V137, V138/V139 objects absent, activation flags off, Gate-B latest still WATCH_ONLY. Fixed passive healthcheck narrow selector gap so `[83]-[89]` can be run directly before V138/V139 activation.
+- Post-sync Linux run of `--check 83..89` returned `SUMMARY: ALL PASS`: V138 checks PASS-skip, V132 sealed regression 0, L2 memory flags OFF PASS-skip.
