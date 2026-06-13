@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-13（TODO v159 L2 B3 recall source wiring；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-13（TODO v160 V5.8 pause readiness + alpha/edge handoff；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v160 增量（2026-06-13 V5.8 pause readiness + alpha/edge handoff）**：新增 artifact-only `helper_scripts/research/v58_pause_readiness/`，把 V5.8「保留架構 / active-IMPL 凍結 / 可恢復」狀態機械化檢查：必需設計檔、ADR/AMD、已落地 scaffolds、V### 編號現實、LAL 高階 fail-loud、M5/M12 stub fail-loud、可選 Gate-B watch context、alpha/edge unfreeze gate。真 repo + Linux Gate-B latest run `v58_pause_local_20260613_r3` 回 `PASS_PAUSE_READY`（47 pass / 0 warn / 0 fail），Gate-B latest=`WATCH_ONLY`、23 candidates、0 alertable/start/schedule、operator_action=`WAIT_FOR_ACTIONABLE_WATCH`，unfreeze gate `met=false`。Focused verification：`test_v58_pause_readiness.py` 5 passed，`py_compile` PASS。新增 PM report + Operator brief。邊界：artifact-only；無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/order/trading mutation、無 Gate-B probe。
 
 **v159 增量（2026-06-13 L2 B3 recall source wiring）**：完成 L2 memory B3 recall source wiring，預設仍關閉。新增 `app/l2_memory_recall_context.py`，旗標契約固定為 `OPENCLAW_L2_MEMORY_RECALL=0|shadow|1`：`0` 不 import、不打 DB；`shadow` 計算 `recall_for_prompt` bundle 但只把 `memory_recall_shadow` metadata（mode/record_ids/total_chars/degraded_level）併入既有 D3 `input_context`；`1` 才把 stable rule/system_trait memory 追加到 system prompt、recent incident memory 前置到 user message。主線 `layer2_engine` 在既有 lesson-retrieval prompt 邊界接線；客座 `l2_ml_advisory_executor` 同接 diagnose/interpret 與 hypothesize 路徑，並保證 shadow metadata 不進模型輸入。`memory_distiller.recall.py` docstring 從 dormant 更新為 app-layer env-gated seam。Focused regression：`test_recall.py` + B3 helper + D3 engine wiring + P3a ml_advisory + P3b hypothesize = `92 passed`；`py_compile` touched modules PASS。邊界：未 CI、未 deploy/rebuild/restart、未 DB/cron/runtime flag 持久化、未 Gate-B/auth/risk/order/trading mutation；Linux engine PID 3607315 unchanged。下一步可在 operator-approved deploy/restart 後開 `OPENCLAW_L2_MEMORY_RECALL=shadow` 做 D3 shadow evidence，active `1` 等 shadow review 後再開。
 
