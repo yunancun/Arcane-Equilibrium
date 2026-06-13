@@ -94,6 +94,82 @@ class TestRunnerSelectedLeaseIpcChecks(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported --check selector"):
             runner_mod._run_selected_cursor_checks(cur, {"82", "999"})
 
+    def test_selected_runner_routes_l2_activation_checks_83_to_89(self) -> None:
+        """[83]-[89] 可以窄選，供 V138/V139 activation preflight 單獨跑。"""
+        cur = MagicMock()
+        patches = [
+            unittest.mock.patch.object(
+                runner_mod,
+                "check_83_alpha_wealth_family_cardinality",
+                return_value=("PASS", "mock-83"),
+            ),
+            unittest.mock.patch.object(
+                runner_mod,
+                "check_84_alpha_wealth_orphan_refund",
+                return_value=("PASS", "mock-84"),
+            ),
+            unittest.mock.patch.object(
+                runner_mod,
+                "check_85_alpha_wealth_refund_amount_mismatch",
+                return_value=("PASS", "mock-85"),
+            ),
+            unittest.mock.patch.object(
+                runner_mod,
+                "check_86_pre_reg_cross_family_duplicate_spec",
+                return_value=("WARN", "mock-86"),
+            ),
+            unittest.mock.patch.object(
+                runner_mod,
+                "check_87_hidden_oos_state_regression",
+                return_value=("PASS", "mock-87"),
+            ),
+            unittest.mock.patch.object(
+                runner_mod,
+                "check_88_l2_memory_pipeline_freshness",
+                return_value=("PASS", "mock-88"),
+            ),
+            unittest.mock.patch.object(
+                runner_mod,
+                "check_89_l2_memory_embedding_drift",
+                return_value=("PASS", "mock-89"),
+            ),
+        ]
+        mocks = []
+        with (
+            patches[0] as mock_83,
+            patches[1] as mock_84,
+            patches[2] as mock_85,
+            patches[3] as mock_86,
+            patches[4] as mock_87,
+            patches[5] as mock_88,
+            patches[6] as mock_89,
+        ):
+            mocks.extend([
+                mock_83,
+                mock_84,
+                mock_85,
+                mock_86,
+                mock_87,
+                mock_88,
+                mock_89,
+            ])
+            rows = runner_mod._run_selected_cursor_checks(
+                cur,
+                {"83", "84", "85", "86", "87", "88", "89"},
+            )
+
+        self.assertEqual(rows, [
+            ("[83] alpha_wealth_family_cardinality", "PASS", "mock-83"),
+            ("[84] alpha_wealth_orphan_refund", "PASS", "mock-84"),
+            ("[85] alpha_wealth_refund_mismatch", "PASS", "mock-85"),
+            ("[86] pre_reg_cross_family_dup_spec", "WARN", "mock-86"),
+            ("[87] hidden_oos_state_regression", "PASS", "mock-87"),
+            ("[88] l2_memory_pipeline_freshness", "PASS", "mock-88"),
+            ("[89] l2_memory_embedding_drift", "PASS", "mock-89"),
+        ])
+        for mock in mocks:
+            mock.assert_called_once_with(cur)
+
 
 # fetch 序列順序（rework 後 check_81 的 SQL 呼叫順序）：
 #   P-LIVE gate（先判）：

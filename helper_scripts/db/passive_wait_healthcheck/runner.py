@@ -505,7 +505,20 @@ def _run_selected_cursor_checks(
     Dependencies may run silently. In particular, [Xb] needs [1]'s
     ``close_fills`` baseline even when [1] was not selected.
     """
-    supported = {"1", "4", "81", "82", "xb"}
+    supported = {
+        "1",
+        "4",
+        "81",
+        "82",
+        "83",
+        "84",
+        "85",
+        "86",
+        "87",
+        "88",
+        "89",
+        "xb",
+    }
     unsupported = sorted(selected - supported)
     if unsupported:
         supported_display = ", ".join(f"[{x}]" if x != "xb" else "[Xb]" for x in sorted(supported))
@@ -533,6 +546,34 @@ def _run_selected_cursor_checks(
     if "82" in selected:
         s, m = check_82_lease_ipc_soak_window(cur)
         results.append(("[82] lease_ipc_soak_window", s, m))
+
+    if "83" in selected:
+        s, m = check_83_alpha_wealth_family_cardinality(cur)
+        results.append(("[83] alpha_wealth_family_cardinality", s, m))
+
+    if "84" in selected:
+        s, m = check_84_alpha_wealth_orphan_refund(cur)
+        results.append(("[84] alpha_wealth_orphan_refund", s, m))
+
+    if "85" in selected:
+        s, m = check_85_alpha_wealth_refund_amount_mismatch(cur)
+        results.append(("[85] alpha_wealth_refund_mismatch", s, m))
+
+    if "86" in selected:
+        s, m = check_86_pre_reg_cross_family_duplicate_spec(cur)
+        results.append(("[86] pre_reg_cross_family_dup_spec", s, m))
+
+    if "87" in selected:
+        s, m = check_87_hidden_oos_state_regression(cur)
+        results.append(("[87] hidden_oos_state_regression", s, m))
+
+    if "88" in selected:
+        s, m = check_88_l2_memory_pipeline_freshness(cur)
+        results.append(("[88] l2_memory_pipeline_freshness", s, m))
+
+    if "89" in selected:
+        s, m = check_89_l2_memory_embedding_drift(cur)
+        results.append(("[89] l2_memory_embedding_drift", s, m))
 
     if "xb" in selected:
         if close_fills is None:
