@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-13（TODO v152 L2 activation preflight selector fix；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-13（TODO v153 L2 V138/V139 activation-window packet；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v153 增量（2026-06-13 L2 V138/V139 activation-window packet）**：在 `[82]` PASS 與 `[83]-[89]` selector 修復後，PM 補做 V138/V139 activation window 可執行包但未執行 runtime。Linux read-only baseline 2026-06-13T07:44Z：source head `de92f879`，prod `_sqlx_migrations` head=137/all_success=true/count=120，V138/V139 target objects 全 NULL，`repair_migration_checksum --verify` drift_count=0 且 V138/V139=`MISSING_IN_DB`，`OPENCLAW_AUTO_MIGRATE=0`，L2 memory/alpha wealth flags OFF/未設，Gate-B latest 仍 `WATCH_ONLY`。同輪 Linux true DB `--check 83..89` 回 `SUMMARY: ALL PASS`。新增 PM report + Operator mirror，固定唯一推薦路徑為 operator 批准後 `OPENCLAW_AUTO_MIGRATE=1` + `restart_all.sh --engine-only --keep-auth` + trap 還原 `OPENCLAW_AUTO_MIGRATE=0` + post-check；明確禁止 raw `psql -f`，並將 manual V140、seed、pipeline flags、embedding backfill、E2E true model call、Gate-B probe 分開 gate。邊界：無 CI、無 deploy/rebuild/restart、無 migration apply、無 DB/auth/risk/order/trading mutation。
 
 **v152 增量（2026-06-13 L2 activation preflight selector fix）**：`[82]` 到時後 PM 做 read-only activation preflight：Linux true DB `[82]` 已延長至 window=53.1h/probes=1593/success_rate=1.0000，live SQL head 仍 V137 且 V138/V139 objects absent，L2 activation flags 全 OFF/未設，Gate-B latest 仍 `WATCH_ONLY`（23 candidates、0 alertable/start/schedule）。發現 passive healthcheck full-run 已 import/wire `[83]-[89]`，但 narrow `--check` selector 仍只允許 `[1]/[4]/[81]/[82]/[Xb]`；已修 `runner.py` 支援 `[83]-[89]` 單獨 preflight，補 routing test。Focused verification：`test_lease_ipc_soak_healthcheck.py` 48 passed/1 skipped；alpha wealth + L2 memory healthchecks 32 passed；`py_compile` PASS。三端同步後 Linux 真 DB `--check 83..89` 回 `SUMMARY: ALL PASS`（V138 checks PASS-skip、V132 sealed regression 0、L2 memory flags OFF PASS-skip）。邊界：無 CI、無 deploy/rebuild/restart、無 migration apply、無 DB/auth/risk/order/trading mutation；V138/V139 apply 仍需 operator 低風險 restart/migration window。
 
