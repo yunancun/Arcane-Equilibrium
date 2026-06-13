@@ -331,3 +331,8 @@
 
 - V138/V139 activation is ready for an operator-approved window but not executed. Linux read-only baseline 2026-06-13T07:44Z: head=V137/all_success=true, checksum drift=0, V138/V139 objects absent, `OPENCLAW_AUTO_MIGRATE=0`, L2 memory/alpha wealth flags OFF, `[83]-[89]` true DB preflight `SUMMARY: ALL PASS`.
 - Accepted path is engine auto-migrate only: temporarily persist `OPENCLAW_AUTO_MIGRATE=1`, run `restart_all.sh --engine-only --keep-auth`, restore flag to 0, then verify head=139/checksum/objects/healthcheck/watchdog. Raw `psql -f` for V138/V139 is forbidden because it bypasses `_sqlx_migrations`; V140/seed/pipeline/model/Gate-B remain separate approvals.
+
+## 2026-06-13 L2 V138/V139 runtime activation
+
+- Operator approved and PM executed V138/V139 engine-only auto-migrate: run `l2_v138_v139_activation_20260613T153352Z`, new engine PID 3607315, auto_migrate `Applied(2)`, `_sqlx_migrations` head=139/all_success=true/count=122, checksum drift=0, V138/V139 objects exist, new rows 0, `[83]-[89]` post-check `SUMMARY: ALL PASS`.
+- Persistent `OPENCLAW_AUTO_MIGRATE=0` restored and maintenance flag absent. Current process env still has `OPENCLAW_AUTO_MIGRATE=1` because that process was started for the migration; no further migration runs until restart, and future restart reads persistent 0. Remaining L2 gates: manual V140, seed apply, memory pipeline/cron/embed flags, E2E model call, P2p/P5.
