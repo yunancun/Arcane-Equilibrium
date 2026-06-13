@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-13（TODO v153 L2 V138/V139 activation-window packet；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-13（TODO v154 L2 V138/V139 runtime activation；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v154 增量（2026-06-13 L2 V138/V139 runtime activation）**：operator 批准後 PM 執行低風險 engine-only auto-migrate window，run id `l2_v138_v139_activation_20260613T153352Z`。流程：暫設 persistent `OPENCLAW_AUTO_MIGRATE=1` → `restart_all.sh --engine-only --keep-auth` → trap 還原 persistent `OPENCLAW_AUTO_MIGRATE=0`；engine log 確認 `auto_migrate: completed seeded=0 applied=2 elapsed_ms=68` / `outcome=Applied(2)`，new engine PID `3607315`，maintenance flag cleared。Post-check：`_sqlx_migrations` head=139/all_success=true/count=122，V138/V139 objects exist，new tables rows=0，`repair_migration_checksum --verify` drift_count=0，Linux true DB `--check 83..89` 回 `SUMMARY: ALL PASS`（`[83]` families=0、`[84]` orphan=0、`[85]` mismatch=0、`[86]` dup=0、`[87]` sealed regression=0、`[88]/[89]` flags off PASS-skip），watchdog engine_alive=true。邊界：無 CI、無 rebuild、無 raw `psql -f`、無 manual V140、無 seed、無 L2 flags、無 model call、無 Gate-B probe、無 auth/risk/order/trading config mutation；engine log 另見 TONUSDT delisting retCode 30228 結構性 no-retry reject，非 migration failure。
 
 **v153 增量（2026-06-13 L2 V138/V139 activation-window packet）**：在 `[82]` PASS 與 `[83]-[89]` selector 修復後，PM 補做 V138/V139 activation window 可執行包但未執行 runtime。Linux read-only baseline 2026-06-13T07:44Z：source head `de92f879`，prod `_sqlx_migrations` head=137/all_success=true/count=120，V138/V139 target objects 全 NULL，`repair_migration_checksum --verify` drift_count=0 且 V138/V139=`MISSING_IN_DB`，`OPENCLAW_AUTO_MIGRATE=0`，L2 memory/alpha wealth flags OFF/未設，Gate-B latest 仍 `WATCH_ONLY`。同輪 Linux true DB `--check 83..89` 回 `SUMMARY: ALL PASS`。新增 PM report + Operator mirror，固定唯一推薦路徑為 operator 批准後 `OPENCLAW_AUTO_MIGRATE=1` + `restart_all.sh --engine-only --keep-auth` + trap 還原 `OPENCLAW_AUTO_MIGRATE=0` + post-check；明確禁止 raw `psql -f`，並將 manual V140、seed、pipeline flags、embedding backfill、E2E true model call、Gate-B probe 分開 gate。邊界：無 CI、無 deploy/rebuild/restart、無 migration apply、無 DB/auth/risk/order/trading mutation。
 
