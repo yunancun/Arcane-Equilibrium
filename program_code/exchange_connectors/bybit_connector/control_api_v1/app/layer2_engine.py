@@ -79,6 +79,12 @@ from .layer2_tools_g3_07 import is_tool_enabled as _is_flag_enabled
 # D3 取證帳本：L2 Advisory Mesh Phase 1。把本 session 首個模型呼叫的完整
 # （已消毒）prompt/response 落 agent.l2_calls（唯一 sanctioned 寫入口）。
 from .l2_call_ledger_writer import get_l2_call_ledger_writer as _get_l2_ledger_writer
+from .l2_memory_recall_context import (
+    apply_memory_recall_to_prompt as _apply_memory_recall_to_prompt,
+    build_context_hint as _build_memory_recall_hint,
+    build_l2_memory_recall as _build_l2_memory_recall,
+    with_memory_recall_audit_context as _with_memory_recall_audit_context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -329,6 +335,7 @@ class Layer2Engine:
         response: _pc.L2Response,
         eff_model: str,
         latency_ms: int | None,
+        memory_recall: Any = None,
     ) -> None:
         """把本 session 首個模型呼叫落 agent.l2_calls（D3 唯一 sanctioned 寫入口）。
 
@@ -348,6 +355,7 @@ class Layer2Engine:
                 "messages": messages,
                 "offered_tools": [t.get("name") for t in TOOL_SCHEMAS if isinstance(t, dict)],
             }
+            input_context = _with_memory_recall_audit_context(input_context, memory_recall)
             writer = _get_l2_ledger_writer()
             # P2 wiring delta（PA 設計 §A.2）：contract_ver/schema_ver 改由 contract registry
             # 解析而非硬編。manual-trigger（l2.manual_reasoning）解析結果就是既有
@@ -613,7 +621,18 @@ class Layer2Engine:
                 except Exception as exc:  # noqa: BLE001 — 檢索失敗不得阻斷 session
                     logger.warning("B-Hook lesson retrieval skipped: %s", exc)
 
+            memory_recall = await _build_l2_memory_recall(
+                symbol=symbol,
+                context_hint=_build_memory_recall_hint(
+                    symbol=symbol, mode=trigger, context=context or ""
+                ),
+            )
             user_message = self._build_user_message(symbol=symbol, context=context)
+            system_prompt, user_message = _apply_memory_recall_to_prompt(
+                system_prompt=SYSTEM_PROMPT,
+                user_message=user_message,
+                recall=memory_recall,
+            )
             messages: list[dict[str, Any]] = [
                 {"role": "user", "content": user_message},
             ]
@@ -644,7 +663,7 @@ class Layer2Engine:
                 response = await self._provider_complete(
                     provider_name=eff_provider,
                     tier=eff_tier,
-                    system_prompt=SYSTEM_PROMPT,
+                    system_prompt=system_prompt,
                     messages=messages,
                     tools=TOOL_SCHEMAS,
                     max_tokens=4096,
@@ -670,11 +689,12 @@ class Layer2Engine:
                 if session.l2_reply_id is None:
                     self._record_l2_call_to_ledger(
                         session=session,
-                        system_prompt=SYSTEM_PROMPT,
+                        system_prompt=system_prompt,
                         messages=messages,
                         response=response,
                         eff_model=eff_tier,
                         latency_ms=None,
+                        memory_recall=memory_recall,
                     )
 
                 # 記下這輪用了誰（debug / GUI 顯示）

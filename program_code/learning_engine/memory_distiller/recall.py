@@ -1,7 +1,7 @@
-"""recall — 記憶召回三級降級（vector → FTS → skip）+ B3 dormant 接縫。
+"""recall — 記憶召回三級降級（vector → FTS → skip）+ B3 召回接縫。
 
 MODULE_NOTE
-模塊用途：對 agent.agent_memory 做相似度召回。dedup 候選池與未來 B3 prompt
+模塊用途：對 agent.agent_memory 做相似度召回。dedup 候選池與 B3 prompt
   注入共用同一查詢核心。三級降級（PA spec §6.4）：
     L1 vector（V140 embedding 欄 + embed client 可用）
     L2 FTS（tsvector('simple') 與 pg_trgm 雙路單 SQL，GREATEST 取分）
@@ -12,8 +12,8 @@ MODULE_NOTE
 硬邊界（E2 審查重點 3）：
   - 兩個降級 except 都不得 re-raise：召回失敗永遠降級/回空，絕不冒泡阻斷
     caller（dedup 失敗會誤殺蒸餾批；B3 失敗會阻斷 L2 session——皆不可接受）。
-  - recall_for_prompt 簽名為 PA spec §8 釘死契約，未來批次 layer2_engine
-    直接對接；本批不接線（zero engine diff），任何例外/逾時回空 bundle。
+  - recall_for_prompt 簽名為 PA spec §8 釘死契約；app 層 helper 以 env-gated
+    shadow/active 模式接線。任何例外/逾時回空 bundle。
 """
 
 from __future__ import annotations
@@ -150,7 +150,7 @@ def _safe_rollback(conn: Any) -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# B3 dormant 接縫（PA spec §8；本批不接線，zero engine diff）
+# B3 召回接縫（PA spec §8；app 層 env-gated 接線）
 # ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -196,7 +196,7 @@ async def recall_for_prompt(
     char_budget: int = 2000,
     timeout_s: float = 5.0,
 ) -> RecallBundle:
-    """B3 召回接口（PA spec §8 釘死簽名；本批僅供未來批次接線）。
+    """B3 召回接口（PA spec §8 釘死簽名）。
 
     任何例外/逾時 ⇒ 空 bundle ⇒ 行為等同 flag=0（fail-open，召回永不阻斷
     L2 session）。char_budget：stable 70% / recent 30%，超限按序丟整條。
