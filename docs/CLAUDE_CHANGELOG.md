@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-13（TODO v157 L2 V140 + FTS-only pipeline cron activation；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-13（TODO v158 L2 embedding backfill activation；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v158 增量（2026-06-13 L2 embedding backfill activation）**：承接 V140 + FTS-only daily cron 後，PM 完成 L2 memory embedding 軸 activation。Linux `ollama pull bge-m3` 成功，`ollama list` 顯示 `bge-m3:latest`（1.2GB）。Backfill run `l2_embedding_backfill_20260613T170015Z`，log `/tmp/openclaw/l2_embedding_backfill_20260613T170015Z.log`，sha256 `109aa15dcb540ce7428713b36628034ca9b53652c2caaf5ead88737c83aa8833`：model info `ollama/bge-m3`，availability true，probe dims=1024，`run_backfill` 回 `status=ok embedded=99 reindexed=false`。Crontab update run `l2_memory_cron_embed_flag_20260613T170044Z`，sha256 `75de04eaf9e0434d984a99651b325e868ea3ece732f51246941708324303a33d`，daily 05:23 UTC entry 現含 `OPENCLAW_L2_MEMORY_PIPELINE=1 OPENCLAW_L2_MEMORY_EMBED_BACKFILL=1`。Post DB：`agent.agent_memory` total=99，embedding_pending=0，embedding_not_null=99，dims distinct=1024，meta=`ollama|bge-m3|1024`。Post Linux true DB healthcheck `[83]-[89]` `SUMMARY: ALL PASS`，`[89] meta=(ollama,bge-m3,1024) matches config`；focused source regression `94 passed`；watchdog `engine_alive=true`、engine PID 3607315 unchanged。邊界：未 CI、未 deploy/rebuild/restart、未 B3 recall injection、未 Gate-B probe、未 auth/risk/order/trading mutation；剩餘 L2 gate 是 first non-empty material day / E2E true distillation model-call evidence、B3 recall injection、P2p/P5。
 
 **v157 增量（2026-06-13 L2 V140 + FTS-only pipeline cron activation）**：operator 指令「先做 V140，再做 L2」後，PM 執行 manual V140 apply + L2 FTS-only cron activation。V140 run `l2_manual_v140_apply_20260613T164628Z`，log sha256 `3ccc6dc3ebcc69e0ee80027536a6d7d3325e6adc4a00d66279a45155bab07beb`：baseline `vector_installed=NULL`/available 0.8.1/embedding absent；apply 成功後 `vector_installed=0.8.1`、`agent.agent_memory.embedding=vector(1024)`、HNSW `idx_agent_memory_embedding_hnsw` exists、rows=99、embedding NULL=99/pending=99；sqlx head 仍 139（V140 manual path，不入 `_sqlx_migrations`）。L2 smoke `l2_pipeline_ftsonly_smoke_20260613T164831Z`：2026-06-12 pending day `l2_calls=0`/DRAR=0，no-op success，cursor 推到 2026-06-12，actual cron log sha256 `42d5a711cb0d09e20bd456a51a06ddcb1e41c4c922059b787b3f6b9b43962c34`；cron install `l2_memory_cron_install_20260613T164901Z`，sha256 `730b248eef84b4110d1aaf27dc926bc889497b24936f2263e83daff0c7a461f6`，daily 05:23 UTC entry installed with `OPENCLAW_L2_MEMORY_PIPELINE=1`。Post active healthcheck `[83]-[89]` `SUMMARY: ALL PASS`，`[88] rows=99 last_success=2026-06-12 lag_days=1`，`[89]` PASS-skip because embed backfill flag off。Ollama present but only qwen3.5 models; `bge-m3` absent, so embedding backfill intentionally not enabled. 邊界：未 CI、未 rebuild/restart、未 bge-m3 pull、未 embedding backfill、未 B3 recall injection、未 Gate-B probe；engine PID 3607315 alive。
 
