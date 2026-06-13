@@ -6,6 +6,13 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-13 L2 V140 + FTS-only pipeline activation
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-13--l2_v140_pipeline_activation.md` | PM runtime report: manual V140 applied (`vector(1024)` + HNSW), L2 FTS-only pipeline smoke no-op success, daily cron installed with `OPENCLAW_L2_MEMORY_PIPELINE=1`, `[88]` PASS, embed backfill remains off because `bge-m3` is absent。 |
+| `CCAgentWorkSpace/Operator/2026-06-13--l2_v140_pipeline_activation.md` | Operator mirror: concise V140 and L2 cron activation result, remaining gates for `bge-m3`, embedding backfill, true non-empty distillation evidence, and B3 recall injection。 |
+
 ### 2026-06-13 L2 memory B2 seed apply
 
 | 文件 | 内容 |

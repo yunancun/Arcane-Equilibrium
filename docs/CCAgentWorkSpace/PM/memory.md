@@ -345,4 +345,9 @@
 ## 2026-06-13 L2 memory B2 seed apply
 
 - Operator approved bounded DB write; PM ran `seed_agent_memory.py --apply` on Linux: run `l2_memory_b2_seed_apply_20260613T163835Z`, log `/tmp/openclaw/l2_memory_b2_seed_apply_20260613T163835Z.log`, sha256 `4b050252c803b193862d3758cf01d1ebb17fd907371369201e05f6764393a02c`.
-- Result: A=6, B=93, inserted=99, already_present=0, recall verify en/zh hits=5/5. Post DB: `agent.agent_memory` total=99, duplicate_record_ids=0, active=99, embedding_pending=99; L2 memory pipeline/cron/embed/recall flags remain unset; `[83]-[89]` PASS and engine PID 3607315 stayed alive. Remaining gates: manual V140, pipeline/cron/embed flag-on, E2E model call, P2p/P5.
+- Result: A=6, B=93, inserted=99, already_present=0, recall verify en/zh hits=5/5. Post DB: `agent.agent_memory` total=99, duplicate_record_ids=0, active=99, embedding_pending=99; L2 memory pipeline/cron/embed/recall flags remained unset at B2 time; `[83]-[89]` PASS and engine PID 3607315 stayed alive. Manual V140 and FTS-only pipeline were later closed below; embed backfill/model-call/P2p/P5 remain separate gates.
+
+## 2026-06-13 L2 V140 + FTS-only pipeline activation
+
+- Operator instructed "V140 first, then L2"; PM applied manual V140 via `apply_manual_V140_agent_memory_vector.sh`: run `l2_manual_v140_apply_20260613T164628Z`, sha256 `3ccc6dc3ebcc69e0ee80027536a6d7d3325e6adc4a00d66279a45155bab07beb`; result `vector` extension 0.8.1 installed, `agent.agent_memory.embedding=vector(1024)`, HNSW index exists, sqlx head remains 139 by design.
+- Activated L2 FTS-only daily cron: smoke run `l2_pipeline_ftsonly_smoke_20260613T164831Z` processed 2026-06-12 as no-op (`l2_calls=0`, DRAR=0, stored=0) and advanced cursor to 2026-06-12; cron install run `l2_memory_cron_install_20260613T164901Z` installed daily 05:23 UTC with `OPENCLAW_L2_MEMORY_PIPELINE=1`; active `[83]-[89]` PASS, `[88] rows=99 last_success=2026-06-12 lag_days=1`, `[89]` embed backfill OFF PASS-skip. `bge-m3` is absent in Ollama, so embedding backfill remains gated/off; engine PID 3607315 stayed alive.
