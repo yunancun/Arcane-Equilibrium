@@ -362,3 +362,9 @@
 
 - Completed B3 recall source wiring for both mainline `layer2_engine` and guest-line `l2_ml_advisory_executor` via new `l2_memory_recall_context.py`. Flag contract is `OPENCLAW_L2_MEMORY_RECALL=0|shadow|1`: default `0` does no import/DB read, `shadow` computes bundle but only writes `memory_recall_shadow` metadata into existing D3 `input_context`, and `1` injects stable/recent blocks into prompt.
 - Focused regression `92 passed` covering memory recall helper, `memory_distiller.recall`, D3 engine wiring, P3a ml_advisory, and P3b hypothesize. No CI/deploy/rebuild/restart/runtime flag enablement/DB/cron/Gate-B/auth/risk/order/trading mutation; engine PID remained 3607315 until a future deploy/restart.
+
+## 2026-06-13 V5.8 pause readiness + alpha/edge handoff
+
+- Added artifact-only `helper_scripts/research/v58_pause_readiness/` checker for V5.8 pause/resume: validates design/governance anchors, M1-M13 scaffold, freeze/unfreeze gate, V### numbering reality, LAL/M5/M12 fail-loud posture, and optional Gate-B watch context.
+- True repo + Linux Gate-B latest run `v58_pause_local_20260613_r3` returned `PASS_PAUSE_READY` with 47 pass / 0 warn / 0 fail; Gate-B remained `WATCH_ONLY` with 0 alertable/start/schedule candidates and unfreeze gate `met=false`.
+- Boundary: no CI/deploy/rebuild/restart/DB/auth/risk/order/trading mutation and no Gate-B probe. Future V5.8 active-IMPL remains frozen until AEG `stage0_ready`; rerun checker before pause/resume.
