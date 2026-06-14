@@ -49,6 +49,15 @@ pub struct CellEstimate {
     /// runtime-derived 才允許正 edge 授權——舊格式正 `shrunk_bps`（無 `runtime_bps`、
     /// 無驗證）不可過 live 門（根原則 #5/#6）。
     pub from_runtime_field: bool,
+    /// Track1 demo explore-gate：allocator 是否指示此 arm 仍在探索期（regime-aware）。
+    /// 為什麼 fail-closed：JSON 缺欄 → false（不探索，回退現行 gate 行為）。
+    /// 此欄**只被 demo gate**（`cost_gate_moderate_with_slippage`）讀；live gate
+    /// （`cost_gate_live_with_slippage`）不引用，是 demo↔live 隔離的單一守門點。
+    pub explore_eligible: bool,
+    /// Track1 demo explore-gate：剩餘探索額度（allocator `explore_budget - n_trials`，
+    /// 下限 0）。0 = 探索滿額 → 即使 eligible 仍回現行 block（不無限探索）。
+    /// 缺欄 → 0（fail-closed）。同樣只被 demo gate 讀。
+    pub explore_remaining: u64,
 }
 
 /// Shrunk realized-edge estimates per (strategy, symbol) cell.
@@ -168,6 +177,16 @@ impl EdgeEstimates {
                     .and_then(|v| v.as_str())
                     .unwrap_or("")
                     .to_string();
+                // Track1：explore 信號 fail-closed 解析。缺欄 → false / 0，
+                // 即「不探索」，舊 JSON（無 explore 欄）行為完全不變（absence=no-explore）。
+                let explore_eligible = val
+                    .get("explore_eligible")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let explore_remaining = val
+                    .get("explore_remaining")
+                    .and_then(|v| v.as_u64())
+                    .unwrap_or(0);
                 data.insert(
                     key.clone(),
                     CellEstimate {
@@ -178,6 +197,8 @@ impl EdgeEstimates {
                         validation_passed,
                         validation_reason,
                         from_runtime_field,
+                        explore_eligible,
+                        explore_remaining,
                     },
                 );
             }

@@ -12,9 +12,16 @@ MODULE_NOTE (中):
       kill_switch（一鍵停 + 還原 active 態）。
     - ingest_demo_maker_outcome：把一筆 demo-maker round-trip 已實現價差餵進 allocator
       （走 all_fills 軌標 saw_artifact、transferable_only 軌不吸收）。
-    - main()：argparse CLI（cron/手動），--apply 才真發 IPC，--kill-switch 一鍵停。
+    - main()：argparse CLI（cron/手動），--apply 才真發 IPC，--kill-switch 一鍵停，
+      --explore-sink 開 Track1 demo explore-gate overlay 注入。
 
-  依賴：reward_source / ipc_lever / demo_maker_arm（同 package）+
+  Track1 demo explore-gate（opt-in，enable_explore_sink）：
+    每 cycle ingest+allocate 後，呼 explore_quota_sink.build_explore_overlay 由 allocator
+    真實 explore_budget_remaining 推導每 cell 的 explore_eligible/explore_remaining，
+    再 additive 注入 edge_estimates.json（不覆蓋 JS writer 欄位）。dry-run 不寫檔。
+    explore 欄位只被 Rust demo cost_gate 讀，live gate 不讀（demo↔live 隔離）。
+
+  依賴：reward_source / ipc_lever / demo_maker_arm / explore_quota_sink（同 package）+
     regime_bandit_allocator（核心 allocator，已測綠）+ adaptive_demo_profit config loader。
 
   硬邊界 / 誠實鐵則（為什麼這樣設計）：
@@ -61,6 +68,10 @@ from program_code.ml_training.adaptive_demo_profit_engine.ipc_lever import (
 from program_code.ml_training.adaptive_demo_profit_engine.reward_source import (
     fetch_demo_arm_rewards,
 )
+from program_code.ml_training.adaptive_demo_profit_engine.explore_quota_sink import (
+    build_explore_overlay,
+    merge_into_edge_estimates,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +82,12 @@ _DEMO_ENGINE_MODE = "demo"
 # 從本檔（program_code/ml_training/adaptive_demo_profit_engine/runner.py）回推三層到 srv。
 _DEFAULT_CONFIG_PATH = os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "settings", "adaptive_demo_profit.toml"
+)
+
+# Track1 demo explore-gate：edge_estimates.json（demo 路徑）預設路徑。
+# explore 欄位只被 demo gate 讀，live gate 不讀（demo↔live 隔離）。
+_DEFAULT_EDGE_ESTIMATES_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "..", "..", "settings", "edge_estimates.json"
 )
 
 
@@ -97,6 +114,13 @@ class AdpeRunnerConfig:
     include_demo_maker_arm: bool = True
     # 隨機種子（None=非確定；CLI / 測試可注入固定值保可重現）。
     rng_seed: Optional[int] = None
+    # Track1 demo explore-gate：是否在每 cycle 算 explore overlay 並 additive 注入
+    # edge_estimates.json。預設 False（不影響既有 cycle 行為，opt-in）。
+    enable_explore_sink: bool = False
+    # explore overlay 用的「當前 regime」（design §3.3 regime 維在 Python 端 collapse）。
+    # 預設 insufficient_context（fail-closed：是 VALID_REGIMES 之一，allocator 對該 arm
+    # 自有 n_trials 狀態，不亂塞具體 regime 造 selection bias）。CLI / config 可覆寫。
+    explore_current_regime: str = "insufficient_context"
 
 
 def load_runner_config(
@@ -128,6 +152,10 @@ def load_runner_config(
         candidate_regimes=list(runner_d.get("candidate_regimes", []) or []),
         include_demo_maker_arm=bool(runner_d.get("include_demo_maker_arm", True)),
         rng_seed=runner_d.get("rng_seed"),
+        enable_explore_sink=bool(runner_d.get("enable_explore_sink", False)),
+        explore_current_regime=str(
+            runner_d.get("explore_current_regime", "insufficient_context")
+        ),
     )
 
     # AllocatorConfig：只覆寫 TOML 有提供的欄位，其餘用 dataclass 預設。
@@ -175,6 +203,8 @@ class CycleReport:
     desired_active: dict[str, bool] = field(default_factory=dict)
     apply_changes: list[dict] = field(default_factory=list)
     all_regimes_flat: bool = False  # 是否所有候選 regime 都歸 flat（全負 EV）
+    # Track1 demo explore-gate：本 cycle explore sink 的審計快照（None=未啟用 sink）。
+    explore_sink: Optional[dict] = None
 
     def to_dict(self) -> dict:
         return {
@@ -182,6 +212,7 @@ class CycleReport:
             "dry_run": self.dry_run,
             "n_rewards_ingested": self.n_rewards_ingested,
             "all_regimes_flat": self.all_regimes_flat,
+            "explore_sink": self.explore_sink,
             "desired_active": self.desired_active,
             "candidate_decisions": [
                 {
@@ -218,6 +249,7 @@ class AdpeRunner:
         lever: Optional[StrategyLever] = None,
         rewards_fn=None,
         dsn: Optional[str] = None,
+        edge_estimates_path: Optional[str] = None,
     ):
         self.runner_cfg = runner_cfg or AdpeRunnerConfig()
         self.alloc_cfg = alloc_cfg or AllocatorConfig()
@@ -227,6 +259,8 @@ class AdpeRunner:
         self._rewards_fn = rewards_fn or self._default_rewards_fn
         self._dsn = dsn
         self._rng = random.Random(self.runner_cfg.rng_seed)
+        # Track1 demo explore-gate：edge_estimates.json 路徑（測試可注入 scratch 檔）。
+        self._edge_estimates_path = edge_estimates_path or _DEFAULT_EDGE_ESTIMATES_PATH
 
     # ---- engine_mode 硬鎖 -------------------------------------------------
 
@@ -386,6 +420,12 @@ class AdpeRunner:
         # 5) 經 lever 落到 demo 引擎（冪等 diff；dry-run 不發 IPC）。
         apply_result: ApplyResult = self.lever.apply_desired(desired, dry_run=effective_dry)
 
+        # 6) Track1 demo explore-gate：算 explore overlay 並 additive 注入 edge_estimates.json
+        #    （opt-in；dry-run 不寫檔，與 lever 同一 dry_run 紀律）。
+        explore_audit: Optional[dict] = None
+        if self.runner_cfg.enable_explore_sink:
+            explore_audit = self._run_explore_sink(dry_run=effective_dry)
+
         report = CycleReport(
             engine_mode=self.runner_cfg.engine_mode,
             dry_run=effective_dry,
@@ -402,6 +442,7 @@ class AdpeRunner:
                 for c in apply_result.changes
             ],
             all_regimes_flat=all_flat,
+            explore_sink=explore_audit,
         )
         logger.info(
             "ADPE cycle done: dry_run=%s rewards=%d active=%d all_flat=%s",
@@ -411,6 +452,49 @@ class AdpeRunner:
             all_flat,
         )
         return report
+
+    # ---- Track1 demo explore-gate sink -----------------------------------
+
+    def _load_candidate_cells(self) -> list[str]:
+        """讀現有 edge_estimates.json 的 cell key 列表（'strategy::symbol'）。
+
+        為什麼以現有 cell 為候選：explore overlay 只標註「gate 已關心的格子」，
+        不憑空建 cell（additive 守恆）。缺檔 / 解析失敗 → 回空（fail-soft：本 cycle
+        無 overlay，不污染閉環）。symbol 維由現有 cell 提供（design §3.3 symbol fan-out）。
+        """
+        try:
+            with open(self._edge_estimates_path, "r", encoding="utf-8") as f:
+                snapshot = json.load(f)
+        except FileNotFoundError:
+            logger.info("explore sink: edge_estimates.json 不存在，本 cycle 無候選 cell")
+            return []
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning("explore sink: edge_estimates.json 解析失敗，本 cycle 無候選: %s", e)
+            return []
+        if not isinstance(snapshot, dict):
+            return []
+        # 跳過 _meta 與非 'strategy::symbol' 形狀的 key（build_explore_overlay 再過濾一次）。
+        return [k for k in snapshot.keys() if k != "_meta" and "::" in k]
+
+    def _run_explore_sink(self, *, dry_run: bool) -> dict:
+        """算 explore overlay（真實 allocator n_trials 衍生）並 additive 注入 edge_estimates.json。
+
+        誠實鐵則：overlay 完全由 allocator.explore_budget_remaining 推導（build_explore_overlay
+        內部），runner 不寫死任何 eligible。dry_run 透傳 sink（dry-run 不寫檔），與 lever 同紀律。
+        """
+        candidate_cells = self._load_candidate_cells()
+        overlay = build_explore_overlay(
+            self.allocator,
+            self.runner_cfg.explore_current_regime,
+            candidate_cells,
+        )
+        # apply = not dry_run：dry-run 只產 plan；真 cycle（--apply）才落檔。
+        return merge_into_edge_estimates(
+            overlay,
+            self._edge_estimates_path,
+            dry_run=dry_run,
+            apply=not dry_run,
+        )
 
     # ---- kill switch ------------------------------------------------------
 
@@ -454,12 +538,27 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--kill-switch", action="store_true", help="一鍵還原 active 態快照")
     parser.add_argument("--snapshot-out", default=None, help="把當前 active 快照寫到此 JSON 檔")
     parser.add_argument("--seed", type=int, default=None, help="RNG seed（可重現）")
+    parser.add_argument(
+        "--explore-sink",
+        action="store_true",
+        help="Track1 demo explore-gate：本 cycle 算 explore overlay 並 additive 注入 "
+        "edge_estimates.json（仍受 --apply 控制；無 --apply 為 dry-run 不寫檔）",
+    )
+    parser.add_argument(
+        "--explore-regime",
+        default=None,
+        help="explore overlay 用的當前 regime（默認 config / insufficient_context）",
+    )
     args = parser.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO)
     runner_cfg, alloc_cfg = load_runner_config(args.config)
     if args.seed is not None:
         runner_cfg.rng_seed = args.seed
+    if args.explore_sink:
+        runner_cfg.enable_explore_sink = True
+    if args.explore_regime is not None:
+        runner_cfg.explore_current_regime = args.explore_regime
     runner = AdpeRunner(runner_cfg, alloc_cfg, dsn=args.dsn)
 
     # kill-switch：讀現態 → 立即還原（demo 硬鎖也適用，restore 只動 active 態）。

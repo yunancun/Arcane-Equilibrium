@@ -1226,6 +1226,236 @@ fn test_cost_gate_moderate_high_sample_negative_still_blocks() {
     );
 }
 
+// ─── Track1 (2026-06-14): demo explore-gate（branch A/B 翻 reject 為探索放行）───
+// 只改 demo gate（cost_gate_moderate_with_slippage）。覆蓋：
+//   (A) low-sample deep-negative + explore_eligible+remaining>0 → 放行
+//   (B) robust-negative(n≥min_n) + explore_eligible+remaining>0 → 放行
+//   fail-closed：缺欄 / explore_remaining=0 / explore_eligible=false → 維持現行 block
+//   隔離：相同 explore 欄位餵 live gate 不改變 live 行為（live 不讀新欄）
+
+#[test]
+fn test_cost_gate_moderate_branch_a_explore_allows_deep_neg_low_sample() {
+    // branch A：低樣本(n<min_n) + 深負(<-15bps)，現行會 block；
+    // explore_eligible=true + remaining>0 → 探索放行（None）。
+    let mut proc = IntentProcessor::new();
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 5, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 18}}"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_none(),
+        "branch A: explore-eligible deep-neg low-sample should be allowed (explore)"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_branch_a_remaining_zero_still_blocks() {
+    // branch A：explore_eligible=true 但 remaining=0（探索滿額）→ 仍 block（誠實死）。
+    let mut proc = IntentProcessor::new();
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 5, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 0}}"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_some(),
+        "branch A: explore_remaining=0 should still block (budget exhausted)"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_branch_a_not_eligible_still_blocks() {
+    // branch A：remaining>0 但 explore_eligible=false（allocator 不指示探索）→ 仍 block。
+    let mut proc = IntentProcessor::new();
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 5, "std_bps": 2.0, "explore_eligible": false, "explore_remaining": 18}}"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_some(),
+        "branch A: explore_eligible=false should still block (allocator not exploring)"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_branch_b_explore_allows_robust_neg() {
+    // branch B：高樣本穩健負(n≥min_n)，現行會 block；
+    // explore_eligible=true + remaining>0 → 探索放行（regime-driven）。
+    let mut proc = IntentProcessor::new();
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 200, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 7}}"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_none(),
+        "branch B: explore-eligible robust-neg should be allowed (regime-driven explore)"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_branch_b_remaining_zero_still_blocks() {
+    // branch B：robust-negative + explore_eligible=true 但 remaining=0 → 仍 block。
+    let mut proc = IntentProcessor::new();
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 200, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 0}}"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_some(),
+        "branch B: robust-neg explore_remaining=0 should still block"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_missing_explore_fields_fail_closed_block() {
+    // fail-closed：JSON 完全無 explore 欄（舊格式）→ unwrap_or(false/0) → 維持現行 block。
+    // 同時驗 branch A（deep-neg low-sample）的舊行為 byte-identical。
+    let mut proc = IntentProcessor::new();
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 5, "std_bps": 2.0}}"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_some(),
+        "missing explore fields must fail-closed to existing block (absence=no-explore)"
+    );
+}
+
+#[test]
+fn test_cost_gate_live_ignores_explore_fields_robust_neg_still_blocks() {
+    // 隔離鐵則：相同 explore_eligible=true + remaining>0 餵 LIVE gate，
+    // live 必仍 block（負估計）—— live gate 不讀 explore 欄，demo↔live 隔離。
+    let mut proc = IntentProcessor::new();
+    let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 200, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 30}}"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_live("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_some(),
+        "live gate must IGNORE explore fields — negative estimate still fail-closed"
+    );
+    let reason = result.unwrap().rejected_reason.unwrap();
+    assert!(
+        reason.contains("live"),
+        "expected live rejection reason, got: {}",
+        reason
+    );
+}
+
+// ─── Track1 E4 (2026-06-14): file-based end-to-end（真檔 reload seam）───
+//   上面 7 個 E1 單測用 load_from_str（in-memory）。以下 E4 補測走真實
+//   reload 路徑：寫 scratch settings/edge_estimates.json → load_for_mode("demo")
+//   → set_edge_estimates → demo gate。驗證 (a) Python sink 落檔的同一 file 契約
+//   被 Rust 正確解析並翻 reject 為 explore-pass；(b) 同檔 explore_remaining=0
+//   與缺欄仍 fail-closed block；(c) 同檔餵 live（load_for_mode("live") 讀同檔名）
+//   仍 block（demo↔live 隔離在真檔層成立）。
+
+/// 把 JSON 寫進 tempdir 的 settings/edge_estimates.json（demo+live 共用檔名），
+/// 回 (TempDir, base_dir)。base_dir/settings/edge_estimates.json 即 load_for_mode
+/// 對 demo/live 讀的路徑（edge_estimates.rs:253-258）。
+#[cfg(test)]
+fn write_scratch_edge_file(json: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let base = dir.path().to_path_buf();
+    let settings = base.join("settings");
+    std::fs::create_dir_all(&settings).expect("mkdir settings");
+    std::fs::write(settings.join("edge_estimates.json"), json).expect("write edge file");
+    (dir, base)
+}
+
+#[test]
+fn test_e2e_file_reload_demo_gate_flips_reject_to_explore() {
+    // 端到端：scratch edge_estimates.json 帶 explore_eligible=true/remaining>0 的
+    // robust-negative cell → 真檔 load_for_mode("demo") → demo gate 翻 None（放行）。
+    let json = r#"{
+        "_meta": {"grand_mean_bps": 0.0, "updated_at": "2026-06-13T00:00:00+00:00"},
+        "ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 200, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 12}
+    }"#;
+    let (_dir, base) = write_scratch_edge_file(json);
+    let estimates = crate::edge_estimates::EdgeEstimates::load_for_mode(&base, "demo");
+    // 真檔解析正確：cell 存在且 explore 欄被讀到。
+    let cell = estimates
+        .get_cell("ma_crossover", "BTCUSDT")
+        .expect("cell loaded from scratch file");
+    assert!(cell.explore_eligible, "explore_eligible must parse true from file");
+    assert_eq!(cell.explore_remaining, 12, "explore_remaining must parse from file");
+
+    let mut proc = IntentProcessor::new();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_none(),
+        "E2E: file-loaded explore-eligible robust-neg should flip reject→explore-pass"
+    );
+}
+
+#[test]
+fn test_e2e_file_reload_remaining_zero_still_blocks() {
+    // 同真檔路徑：explore_remaining=0（探索滿額）→ 仍 block（fail-closed）。
+    let json = r#"{
+        "ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 200, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 0}
+    }"#;
+    let (_dir, base) = write_scratch_edge_file(json);
+    let estimates = crate::edge_estimates::EdgeEstimates::load_for_mode(&base, "demo");
+    let mut proc = IntentProcessor::new();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_some(),
+        "E2E: file-loaded explore_remaining=0 must still block (budget exhausted)"
+    );
+}
+
+#[test]
+fn test_e2e_file_reload_missing_fields_fail_closed_block() {
+    // 同真檔路徑：舊格式 JSON（無 explore 欄）→ unwrap_or(false/0) → 仍 block。
+    let json = r#"{
+        "ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 200, "std_bps": 2.0}
+    }"#;
+    let (_dir, base) = write_scratch_edge_file(json);
+    let estimates = crate::edge_estimates::EdgeEstimates::load_for_mode(&base, "demo");
+    let cell = estimates.get_cell("ma_crossover", "BTCUSDT").expect("cell");
+    assert!(!cell.explore_eligible, "missing field → fail-closed false");
+    assert_eq!(cell.explore_remaining, 0, "missing field → fail-closed 0");
+    let mut proc = IntentProcessor::new();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_some(),
+        "E2E: file-loaded old-format (no explore fields) must fail-closed block"
+    );
+}
+
+#[test]
+fn test_e2e_file_reload_same_file_live_gate_isolated_still_blocks() {
+    // demo↔live 隔離在真檔層：load_for_mode("demo") 與 ("live") 讀同一檔名
+    // edge_estimates.json（edge_estimates.rs:256 demo+live 共用）。同一 explore=true
+    // 檔餵 live gate 必仍 block（live 不讀 explore 欄）。
+    let json = r#"{
+        "ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 200, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 30}
+    }"#;
+    let (_dir, base) = write_scratch_edge_file(json);
+    // demo 讀同檔 → 放行
+    let demo_est = crate::edge_estimates::EdgeEstimates::load_for_mode(&base, "demo");
+    let mut demo_proc = IntentProcessor::new();
+    demo_proc.set_edge_estimates(demo_est);
+    assert!(
+        demo_proc
+            .cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0)
+            .is_none(),
+        "E2E: demo gate flips on shared file"
+    );
+    // live 讀同檔 → 仍 block（隔離）
+    let live_est = crate::edge_estimates::EdgeEstimates::load_for_mode(&base, "live");
+    let mut live_proc = IntentProcessor::new();
+    live_proc.set_edge_estimates(live_est);
+    let live_result =
+        live_proc.cost_gate_live("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        live_result.is_some(),
+        "E2E: live gate reading SAME shared file must IGNORE explore fields and block"
+    );
+}
+
 // ─── P1-09 (2026-05-29): positive-edge freshness gate ───
 // 正 edge 新鮮度門：fresh + runtime-derived + validated 才允許過生產門；
 // live → reject / demo → exploration（非對稱）。`now` 注入 TEST_NOW_SECS。
