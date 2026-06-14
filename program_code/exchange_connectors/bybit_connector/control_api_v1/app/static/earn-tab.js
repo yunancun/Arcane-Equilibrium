@@ -226,7 +226,7 @@
     if (status === 'PASS') {
       row.className = 'earn-stage0r-row stage0r-pass';
       badge.className = 'earn-stage0r-badge stage0r-pass';
-      badge.textContent = 'Stage 0R: ✅ PASS';
+      badge.textContent = 'Stage 0R 歷史重放預檢 ✅ 通過';
       var ts = stage0r.last_run_ts ? ocTime(stage0r.last_run_ts) : '--';
       var path = stage0r.json_path || '--';
       detail.textContent = '最近執行：' + ts + '  ·  JSON：' + path;
@@ -234,7 +234,7 @@
     } else if (status === 'FAIL') {
       row.className = 'earn-stage0r-row stage0r-fail';
       badge.className = 'earn-stage0r-badge stage0r-fail';
-      badge.textContent = 'Stage 0R: ❌ FAIL';
+      badge.textContent = 'Stage 0R 歷史重放預檢 ❌ 未通過';
       var reasons = (stage0r.fail_reasons && stage0r.fail_reasons.length)
         ? stage0r.fail_reasons.join(' / ')
         : '未知原因 / no reason reported';
@@ -243,7 +243,7 @@
     } else {
       row.className = 'earn-stage0r-row stage0r-pending';
       badge.className = 'earn-stage0r-badge stage0r-pending';
-      badge.textContent = 'Stage 0R: ⏳ PENDING';
+      badge.textContent = 'Stage 0R 歷史重放預檢 ⏳ 待跑';
       detail.textContent = '尚未跑過或 JSON age > 24h — 請開 SSH 執行：';
       if (copy) copy.textContent = cliCmd;
     }

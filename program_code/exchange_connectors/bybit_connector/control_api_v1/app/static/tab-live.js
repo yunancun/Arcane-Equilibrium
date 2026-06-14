@@ -1585,8 +1585,9 @@ function _liveClosedPnlRow(r) {
   const orderLinkId = r.order_link_id || r.orderLinkId || '';
   const orderId = r.order_id || r.orderId || '';
   const drift = parseFloat(r.pnl_source_drift_usd || r.pnlSourceDriftUsd || r.diff_usd || 0);
+  const driftLabel = 'PG-Bybit 毛利差 ' + ocEsc(String(drift)) + ' USD';
   const driftHtml = Number.isFinite(drift) && Math.abs(drift) > 0.10
-    ? '<span class="oc-source-note yellow" title="PG-Bybit 差 ' + ocEsc(String(drift)) + ' USD">&#x26A0; PG-Bybit 差 ' + ocEsc(String(drift)) + ' USD</span>'
+    ? '<span class="oc-source-note yellow" title="' + driftLabel + '">&#x26A0; ' + driftLabel + '</span>'
     : '';
   const title = 'exchange-confirmed · orderLinkId=' + orderLinkId + ' · orderId=' + orderId;
   return '<tr>' +

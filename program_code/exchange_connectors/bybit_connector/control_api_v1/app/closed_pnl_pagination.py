@@ -68,9 +68,9 @@ EngineOwnerLookup = Callable[[str], dict[str, str]]
 
 
 def _safe_float(value: Any) -> float | None:
-    """Best-effort float conversion. Returns None on any failure.
-    Bybit REST positions return stringified numbers; this normalizes them.
-    Best-effort 轉 float；失敗返回 None。Bybit REST 倉位數值常為字串。
+    """Best-effort 轉 float；任何失敗（None / 非數字 / NaN）回 None。
+
+    Bybit REST 倉位數值常為字串，此函數統一正規化；NaN 守衛防污染下游計算。
     """
     if value is None:
         return None
@@ -81,6 +81,27 @@ def _safe_float(value: Any) -> float | None:
     if f != f:  # NaN guard / NaN 守衛
         return None
     return f
+
+
+def _bybit_fee_total(row: dict[str, Any]) -> float:
+    """加總 Bybit 一筆 closed-PnL row 的 open + close fee（camelCase / snake_case 皆容）。"""
+    open_fee = _safe_float(row.get("openFee", row.get("open_fee"))) or 0.0
+    close_fee = _safe_float(row.get("closeFee", row.get("close_fee"))) or 0.0
+    return open_fee + close_fee
+
+
+def _bybit_gross_pnl(row: dict[str, Any]) -> float | None:
+    """回傳扣 open/close fee 前的 Bybit 毛 PnL（closedPnl + openFee + closeFee）。
+
+    為什麼需要 gross：Bybit ``closedPnl`` 是交易所權威「淨」PnL（已扣 open/close
+    fee），而本地 ``trading.fills.realized_pnl`` 是「毛」PnL。對帳比對必須同口徑 —
+    把 Bybit 還原成毛值再與 PG 毛值比，否則 drift 會被費用差額假性放大。
+    closedPnl 缺漏（None）時回 None，由 caller fail-closed 處理。
+    """
+    closed = _safe_float(row.get("closedPnl", row.get("closed_pnl")))
+    if closed is None:
+        return None
+    return closed + _bybit_fee_total(row)
 
 
 def _closed_pnl_encode_cursor(payload: dict[str, Any]) -> str:
@@ -337,7 +358,7 @@ def _fetch_strategy_by_order_id(
         # 為什麼設語句逾時：GUI 讀路徑不得被慢查詢阻塞事件迴圈線程池。
         cur.execute("SET LOCAL statement_timeout = %s", (_GUI_READ_STATEMENT_TIMEOUT_MS,))
         cur.execute(
-            "SELECT DISTINCT ON (order_id) order_id, strategy_name, realized_pnl "
+            "SELECT DISTINCT ON (order_id) order_id, strategy_name, realized_pnl, fee "
             "FROM trading.fills "
             f"WHERE order_id = ANY(%s) AND engine_mode IN ({mode_placeholders}) "
             "ORDER BY order_id, ts DESC",
@@ -348,8 +369,9 @@ def _fetch_strategy_by_order_id(
             str(order_id): {
                 "strategy_name": str(strategy_name) if strategy_name else "",
                 "realized_pnl": _safe_float(realized_pnl),
+                "fee": _safe_float(fee),
             }
-            for order_id, strategy_name, realized_pnl in rows
+            for order_id, strategy_name, realized_pnl, fee in rows
             if order_id
         }
     except Exception as exc:
@@ -381,7 +403,7 @@ def _fetch_strategy_by_symbol_time(
         ts_ms = _closed_pnl_time_ms(row)
         if not sym or ts_ms <= 0:
             continue
-        targets.append((idx, sym, ts_ms, _safe_float(row.get("closedPnl"))))
+        targets.append((idx, sym, ts_ms, _bybit_gross_pnl(row)))
     if not targets:
         return {}
 
@@ -403,7 +425,7 @@ def _fetch_strategy_by_symbol_time(
         cur = conn.cursor()
         cur.execute("SET LOCAL statement_timeout = %s", (_GUI_READ_STATEMENT_TIMEOUT_MS,))
         cur.execute(
-            "SELECT ts, order_id, symbol, side, qty, realized_pnl, strategy_name "
+            "SELECT ts, order_id, symbol, side, qty, realized_pnl, fee, strategy_name "
             "FROM trading.fills "
             f"WHERE engine_mode IN ({mode_placeholders}) "
             "AND symbol = ANY(%s) "
@@ -426,7 +448,7 @@ def _fetch_strategy_by_symbol_time(
             pass
 
     candidates_by_symbol: dict[str, list[dict[str, Any]]] = {}
-    for ts, order_id, sym, side, qty, realized_pnl, strategy_name in rows:
+    for ts, order_id, sym, side, qty, realized_pnl, fee, strategy_name in rows:
         if not sym or not strategy_name:
             continue
         try:
@@ -441,12 +463,13 @@ def _fetch_strategy_by_symbol_time(
             "side": str(side or ""),
             "qty": _safe_float(qty),
             "realized_pnl": _safe_float(realized_pnl),
+            "fee": _safe_float(fee),
             "strategy_name": str(strategy_name),
         })
 
     matches: dict[int, dict[str, Any]] = {}
     used: set[tuple[str, int, str]] = set()
-    for idx, sym, row_ts_ms, bybit_pnl in targets:
+    for idx, sym, row_ts_ms, bybit_gross_pnl in targets:
         best: tuple[float, int, dict[str, Any]] | None = None
         for cand in candidates_by_symbol.get(sym, []):
             delta = abs(int(cand["ts_ms"]) - row_ts_ms)
@@ -457,9 +480,9 @@ def _fetch_strategy_by_symbol_time(
                 continue
             pg_pnl = cand.get("realized_pnl")
             pnl_penalty = 0.0
-            if bybit_pnl is not None and pg_pnl is not None:
-                denom = max(abs(float(bybit_pnl)), 1.0)
-                pnl_penalty = min(abs(float(pg_pnl) - float(bybit_pnl)) / denom, 10.0)
+            if bybit_gross_pnl is not None and pg_pnl is not None:
+                denom = max(abs(float(bybit_gross_pnl)), 1.0)
+                pnl_penalty = min(abs(float(pg_pnl) - float(bybit_gross_pnl)) / denom, 10.0)
             score = float(delta) + pnl_penalty * 10_000.0
             if best is None or score < best[0]:
                 best = (score, delta, cand)
@@ -471,6 +494,7 @@ def _fetch_strategy_by_symbol_time(
         matches[idx] = {
             "strategy_name": cand["strategy_name"],
             "realized_pnl": cand.get("realized_pnl"),
+            "fee": cand.get("fee"),
             "match_delta_ms": delta,
         }
     return matches
@@ -488,6 +512,8 @@ def _closed_pnl_snake_row(row: dict[str, Any]) -> dict[str, Any]:
     closed_pnl = _closed_pnl_float(row, "closedPnl")
     open_fee = _closed_pnl_float(row, "openFee")
     close_fee = _closed_pnl_float(row, "closeFee")
+    fee_total = (open_fee or 0.0) + (close_fee or 0.0)
+    bybit_gross = (closed_pnl + fee_total) if closed_pnl is not None else None
     fill_count = row.get("fillCount")
     try:
         fill_count_int = int(fill_count) if fill_count is not None and fill_count != "" else 0
@@ -502,8 +528,10 @@ def _closed_pnl_snake_row(row: dict[str, Any]) -> dict[str, Any]:
         "avg_exit_price": _closed_pnl_float(row, "avgExitPrice"),
         "closed_pnl": closed_pnl if closed_pnl is not None else 0.0,
         "bybit_closed_pnl": closed_pnl if closed_pnl is not None else 0.0,
+        "bybit_gross_pnl": bybit_gross,
         "open_fee": open_fee,
         "close_fee": close_fee,
+        "bybit_fee_total": fee_total,
         "closed_size": _closed_pnl_float(row, "closedSize"),
         "fill_count": fill_count_int,
         "updated_time_ms": int(_closed_pnl_float(row, "updatedTime") or 0),
@@ -512,6 +540,20 @@ def _closed_pnl_snake_row(row: dict[str, Any]) -> dict[str, Any]:
         "order_link_id": row.get("orderLinkId") or "",
         "leverage": row.get("leverage") or "",
         "exec_type": row.get("execType") or "",
+        # 為什麼 closedPnl 缺漏時 authoritative/learning 走 None 而非捏造 0.0：
+        #   closed_pnl / bybit_closed_pnl 是展示欄，缺漏補 0.0 僅影響 UI；但
+        #   authoritative_pnl / learning_pnl 是對帳與學習口徑欄，捏造 0.0 並標
+        #   authoritative='bybit_closed_pnl' = 把「交易所沒給淨值」偽裝成「淨值=0
+        #   且權威」，與 PG 備援路徑（learning_pnl=None + fail_closed source）矛盾。
+        #   寧缺勿假：兩路徑對稱，下游依 None + source 旗標 dropna，不得餵學習。
+        "authoritative_pnl": closed_pnl,
+        "authoritative_pnl_source": (
+            "bybit_closed_pnl" if closed_pnl is not None else "bybit_pnl_missing_fail_closed"
+        ),
+        "learning_pnl": closed_pnl,
+        "learning_pnl_source": (
+            "bybit_closed_pnl" if closed_pnl is not None else "bybit_pnl_missing_fail_closed"
+        ),
     })
     return out
 
@@ -557,6 +599,7 @@ def _attach_closed_pnl_strategy(
         enriched = _closed_pnl_snake_row(row)
         pg_match = strategy_by_order_id.get(order_id) or strategy_by_order_id.get(order_link_id)
         pg_pnl = pg_match.get("realized_pnl") if pg_match else None
+        pg_fee = pg_match.get("fee") if pg_match else None
         if pg_match and pg_match.get("strategy_name"):
             enriched["strategy_name"] = pg_match["strategy_name"]
             enriched["strategy_source"] = "pg_fill"
@@ -566,6 +609,7 @@ def _attach_closed_pnl_strategy(
             enriched["strategy_source"] = "pg_time_window"
             enriched["strategy_match_delta_ms"] = time_match.get("match_delta_ms")
             pg_pnl = time_match.get("realized_pnl")
+            pg_fee = time_match.get("fee")
         else:
             strategy_name, strategy_source = _strategy_from_order_link_id(
                 row.get("orderLinkId"),
@@ -574,17 +618,31 @@ def _attach_closed_pnl_strategy(
             )
             enriched["strategy_name"] = strategy_name
             enriched["strategy_source"] = strategy_source
-        bybit_pnl = _safe_float(enriched.get("closed_pnl"))
+        # 為什麼用原始 row["closedPnl"] 判存在而非 enriched["closed_pnl"]：
+        #   enriched["closed_pnl"] 是展示欄，closedPnl 缺漏時已被補 0.0，會把「缺漏」
+        #   誤判為「淨值=0」並覆寫成 authoritative learning_pnl=0.0（捏造）。原始
+        #   row 的 closedPnl 為 None 才是真缺漏 → 此時不覆寫 snake_row 設好的
+        #   fail-closed None（寧缺勿假，與 PG 備援路徑對稱）。
+        bybit_net_pnl = _closed_pnl_float(row, "closedPnl")
+        bybit_gross_pnl = _safe_float(enriched.get("bybit_gross_pnl"))
         enriched["pg_engine_pnl"] = pg_pnl
-        if pg_pnl is not None and bybit_pnl is not None:
-            diff = abs(float(pg_pnl) - float(bybit_pnl))
+        enriched["pg_engine_gross_pnl"] = pg_pnl
+        enriched["pg_engine_close_fee"] = pg_fee
+        enriched["pnl_source_drift_basis"] = "pg_gross_vs_bybit_gross_before_fees"
+        if pg_pnl is not None and bybit_gross_pnl is not None:
+            diff = abs(float(pg_pnl) - float(bybit_gross_pnl))
             enriched["pnl_source_drift_usd"] = diff
             enriched["pnl_source_drift_pct"] = (
-                diff / abs(float(bybit_pnl)) if abs(float(bybit_pnl)) > 0 else None
+                diff / abs(float(bybit_gross_pnl)) if abs(float(bybit_gross_pnl)) > 0 else None
             )
         else:
             enriched["pnl_source_drift_usd"] = None
             enriched["pnl_source_drift_pct"] = None
+        if bybit_net_pnl is not None:
+            enriched["authoritative_pnl"] = bybit_net_pnl
+            enriched["authoritative_pnl_source"] = "bybit_closed_pnl"
+            enriched["learning_pnl"] = bybit_net_pnl
+            enriched["learning_pnl_source"] = "bybit_closed_pnl"
         out.append(enriched)
     return out
 
@@ -598,7 +656,15 @@ def _fetch_pg_closed_pnl_fallback(
     end_ms: int,
     engine_modes: tuple[str, ...] = ("demo", "live_demo"),
 ) -> dict[str, Any]:
-    """Read-only fallback from trading.fills when Bybit REST is unavailable."""
+    """Bybit REST 不可用時，從 trading.fills 只讀備援組裝 closed-PnL 行。
+
+    為什麼 learning_pnl fail-closed：本備援只有 PG 端的毛 realized_pnl 與 close fee，
+    缺交易所權威淨 closedPnl 與 open fee，故 closedPnl 只能是「估算淨值」
+    （pg_gross - close_fee，authoritative_pnl_source='pg_fallback_estimated_net'）。
+    學習樣本要求權威淨值，估算值會污染 M4/學習口徑，故此分支硬設
+    learning_pnl=None + learning_pnl_source='bybit_unavailable_fail_closed' —
+    寧缺勿假，由下游 dropna / 丟棄，不得當真實 net label 餵入學習。
+    """
     safe_modes = tuple(engine_modes or ("demo", "live_demo"))
     mode_placeholders = ", ".join(["%s"] * len(safe_modes))
     try:
@@ -640,15 +706,18 @@ def _fetch_pg_closed_pnl_fallback(
     for ts, order_id, sym, side, qty, price, fee, rpnl, strategy in rows[:limit]:
         ts_ms = int(ts.timestamp() * 1000) if ts is not None else 0
         strategy_name = strategy or "unknown_external"
+        pg_gross = float(rpnl) if rpnl is not None else 0.0
+        close_fee = float(fee) if fee is not None else 0.0
+        estimated_net = pg_gross - close_fee
         row = {
             "symbol": sym or "",
             "side": side or "",
             "qty": str(qty if qty is not None else 0),
             "avgEntryPrice": str(price if price is not None else 0),
             "avgExitPrice": str(price if price is not None else 0),
-            "closedPnl": str(rpnl if rpnl is not None else 0),
+            "closedPnl": str(estimated_net),
             "openFee": "",
-            "closeFee": str(fee if fee is not None else 0),
+            "closeFee": str(close_fee),
             "closedSize": str(qty if qty is not None else 0),
             "fillCount": "1",
             "updatedTime": str(ts_ms),
@@ -658,12 +727,19 @@ def _fetch_pg_closed_pnl_fallback(
             "execType": "pg_fallback",
             "strategy_name": strategy_name,
             "strategy_source": "pg_fill" if strategy else "pg_missing_unknown_external",
-            "pg_engine_pnl": float(rpnl) if rpnl is not None else 0.0,
+            "pg_engine_pnl": pg_gross,
         }
         normalized = _closed_pnl_snake_row(row)
         normalized["strategy_name"] = row["strategy_name"]
         normalized["strategy_source"] = row["strategy_source"]
         normalized["pg_engine_pnl"] = row["pg_engine_pnl"]
+        normalized["pg_engine_gross_pnl"] = pg_gross
+        normalized["pg_engine_close_fee"] = close_fee
+        normalized["authoritative_pnl"] = estimated_net
+        normalized["authoritative_pnl_source"] = "pg_fallback_estimated_net"
+        normalized["learning_pnl"] = None
+        normalized["learning_pnl_source"] = "bybit_unavailable_fail_closed"
+        normalized["pnl_source_drift_basis"] = "pg_fallback_no_bybit"
         normalized["pnl_source_drift_usd"] = 0.0
         normalized["pnl_source_drift_pct"] = 0.0
         out.append(normalized)

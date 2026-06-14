@@ -151,10 +151,17 @@ def _fresh_closed_pnl_cache(monkeypatch: pytest.MonkeyPatch):
 
 @pytest.mark.asyncio
 async def test_demo_closed_pnl_bybit_first_reconciles_four_strategy_sources(monkeypatch):
-    cursor = _FakeCursor([("OID1", "ma_crossover", 0.95)])
+    cursor = _FakeCursor([("OID1", "ma_crossover", 1.05, 0.03)])
     _install_fake_db(monkeypatch, cursor)
     fake_client = _FakeBybitClient([
-        {"orderId": "OID1", "orderLinkId": "oc_dm_1", "symbol": "OPUSDT", "closedPnl": "1.0"},
+        {
+            "orderId": "OID1",
+            "orderLinkId": "oc_dm_1",
+            "symbol": "OPUSDT",
+            "closedPnl": "1.0",
+            "openFee": "0.02",
+            "closeFee": "0.03",
+        },
         {"orderId": "OID2", "orderLinkId": "external-link", "symbol": "OPUSDT", "closedPnl": "-0.5"},
         {"orderId": "OID3", "orderLinkId": "oc_dm_3", "symbol": "DOGEUSDT", "closedPnl": "0.2"},
         {"orderId": "OID4", "orderLinkId": "", "symbol": "BTCUSDT", "closedPnl": "0.4"},
@@ -184,8 +191,16 @@ async def test_demo_closed_pnl_bybit_first_reconciles_four_strategy_sources(monk
         "grid_trading",
         "external_manual",
     ]
-    assert data["list"][0]["pg_engine_pnl"] == 0.95
-    assert data["list"][0]["pnl_source_drift_usd"] == pytest.approx(0.05)
+    assert data["list"][0]["pg_engine_pnl"] == 1.05
+    assert data["list"][0]["pg_engine_gross_pnl"] == 1.05
+    assert data["list"][0]["pg_engine_close_fee"] == 0.03
+    assert data["list"][0]["bybit_gross_pnl"] == pytest.approx(1.05)
+    assert data["list"][0]["authoritative_pnl"] == 1.0
+    assert data["list"][0]["authoritative_pnl_source"] == "bybit_closed_pnl"
+    assert data["list"][0]["learning_pnl"] == 1.0
+    assert data["list"][0]["learning_pnl_source"] == "bybit_closed_pnl"
+    assert data["list"][0]["pnl_source_drift_basis"] == "pg_gross_vs_bybit_gross_before_fees"
+    assert data["list"][0]["pnl_source_drift_usd"] == pytest.approx(0.0)
     assert "engine_mode IN (%s, %s)" in cursor.sql
     assert cursor.params[1:] == ("demo", "live_demo")
 
@@ -217,7 +232,7 @@ async def test_demo_closed_pnl_missing_order_link_uses_pg_time_window_strategy(m
     ts_ms = int(ts.timestamp() * 1000)
     cursor = _SequencedFakeCursor([
         [],
-        [(ts, "oc_close_mf_fb_dm_1770000000000_7", "OPUSDT", "Sell", 100.0, 1.05, "grid_trading")],
+        [(ts, "oc_close_mf_fb_dm_1770000000000_7", "OPUSDT", "Sell", 100.0, 1.05, 0.03, "grid_trading")],
     ])
     _install_fake_db(monkeypatch, cursor)
     fake_client = _FakeBybitClient([
@@ -226,6 +241,8 @@ async def test_demo_closed_pnl_missing_order_link_uses_pg_time_window_strategy(m
             "orderLinkId": "",
             "symbol": "OPUSDT",
             "closedPnl": "1.0",
+            "openFee": "0.02",
+            "closeFee": "0.03",
             "updatedTime": str(ts_ms + 500),
         },
     ])
@@ -240,6 +257,8 @@ async def test_demo_closed_pnl_missing_order_link_uses_pg_time_window_strategy(m
     assert row["strategy_name"] == "grid_trading"
     assert row["strategy_source"] == "pg_time_window"
     assert row["pg_engine_pnl"] == 1.05
+    assert row["pnl_source_drift_usd"] == pytest.approx(0.0)
+    assert row["learning_pnl"] == 1.0
     assert row["strategy_match_delta_ms"] == 500
     assert any("symbol = ANY(%s)" in sql for sql in cursor.sqls)
     assert all("INSERT" not in sql.upper() for sql in cursor.sqls)

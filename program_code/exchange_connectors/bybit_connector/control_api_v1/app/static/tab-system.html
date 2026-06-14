@@ -84,6 +84,7 @@
     <div class="oc-metric tip-metric" id="m-demo-wrap"><div class="oc-metric-label">系統能力</div><div class="oc-metric-val" id="m-demo">--</div><div class="tip-box" id="m-demo-tip"></div></div>
     <div class="oc-metric tip-metric" id="m-prot-wrap"><div class="oc-metric-label">誤操作保護</div><div class="oc-metric-val" id="m-prot">--</div><div class="tip-box" id="m-prot-tip"></div></div>
     <div class="oc-metric tip-metric" id="m-stage-wrap"><div class="oc-metric-label">階段標簽</div><div class="oc-metric-val" id="m-stage" style="font-size:12px">--</div><div class="tip-box" id="m-stage-tip"></div></div>
+    <div class="oc-metric tip-metric" id="m-engine-wrap"><div class="oc-metric-label">引擎運行</div><div class="oc-metric-val" id="m-engine" style="font-size:14px">--</div><div class="tip-box" id="m-engine-tip"></div></div>
   </div>
 
   <!-- Quick Actions / 快捷操作 -->
@@ -902,6 +903,36 @@ async function loadHealth() {
   ocSetHtml('health-body', html || '<div class="oc-loading">No health data</div>');
 }
 
+// ─── Engine Alive（Rust 引擎存活）─────────────────────────────
+// 為什麼放第一屏：Rust openclaw_engine 是交易 / 風控 / 執行的唯一權威，
+// 引擎宕機時所有下單與風控路徑失效。先前 engine_alive 只藏在 Agents tab 的
+// 英文 chip，操作員在總覽第一屏看不到。此處以中文狀態顯式呈現。
+// fail-closed：讀取失敗 / 欄位缺失時顯「未知」(yellow) 而非假裝「運行中」(禁 fake-success)。
+async function loadEngineAlive() {
+  const el = $('m-engine');
+  if (!el) return;
+  let alive = null;
+  try {
+    const d = await ocApi('/api/v1/openclaw/status');
+    const runtime = d && d.data && d.data.runtime;
+    if (runtime && typeof runtime.engine_alive === 'boolean') alive = runtime.engine_alive;
+  } catch (e) {
+    console.warn('engine_alive read failed:', e);
+  }
+  if (alive === true) {
+    ocSetText('m-engine', '運行中 ✓');
+    el.className = 'oc-metric-val green';
+  } else if (alive === false) {
+    ocSetText('m-engine', '已停止 ✗');
+    el.className = 'oc-metric-val red';
+  } else {
+    ocSetText('m-engine', '未知 ?');
+    el.className = 'oc-metric-val yellow';
+  }
+  setTip('m-engine-tip', 'engine_alive = ' + String(alive),
+    'Rust openclaw_engine 存活狀態。運行中 = 交易 / 風控 / 執行引擎在線；已停止 = 引擎宕機，所有下單與風控路徑失效，需檢查 watchdog；未知 = 讀取失敗或快照缺失，按 fail-closed 不可當作運行中。');
+}
+
 async function loadQuickStatus() {
   const [paperR, feedR, demoR, scannerR] = await Promise.allSettled([
     ocApi('/api/v1/paper/session/status'),
@@ -1047,7 +1078,7 @@ async function loadGovernanceStatus() {
 }
 
 async function loadAll() {
-  await Promise.allSettled([loadOverview(), loadSourceContext(), loadHealth(), loadBusiness(), loadProductFamilies(), loadQuickStatus(), loadGovernanceStatus()]);
+  await Promise.allSettled([loadOverview(), loadSourceContext(), loadHealth(), loadBusiness(), loadProductFamilies(), loadQuickStatus(), loadGovernanceStatus(), loadEngineAlive()]);
 }
 
 setupLiveReservedConfirmButton();

@@ -58,23 +58,11 @@ async function handlePaperAction(action) {
 }
 
 async function submitPaperOrder() {
-  const symbol = document.getElementById("paperSymbol").value.trim();
-  const side = document.getElementById("paperSide").value;
-  const orderType = document.getElementById("paperOrderType").value;
-  const qty = parseFloat(document.getElementById("paperQty").value);
-  const priceVal = document.getElementById("paperPrice").value;
-  const price = priceVal ? parseFloat(priceVal) : null;
-
-  if (!symbol || !qty || qty <= 0) return;
-
-  try {
-    const body = { symbol, side, order_type: orderType, qty };
-    if (price) body.price = price;
-    // Manual order submission disabled — Rust engine manages orders via strategies
-    console.warn("paper/order/submit disabled — Rust engine manages orders");
-    await refreshPaperTrading();
-  } catch (e) {
-    console.error("Paper order error:", e);
+  // Paper 手動下單已停用：後端 /api/v1/paper/order/submit 回 HTTP 410，
+  // 訂單一律由 Rust 引擎依策略管理。表單已在 HTML 禁用，此處為防禦性兜底——
+  // 若按鈕仍被觸發，必須顯式告知操作員「已停用」而非靜默 NO-OP（禁 fake-success）。
+  if (typeof ocToast === "function") {
+    ocToast("Paper 手動下單已停用，訂單由 Rust 引擎依策略管理", "warn");
   }
 }
 
