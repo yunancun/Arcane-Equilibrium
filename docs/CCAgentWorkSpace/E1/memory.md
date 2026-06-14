@@ -134,6 +134,13 @@
 - **關鍵偏差（已報告）**：PA 說 fee_rate/slippage「取 [slippage] 段」，但 [slippage] 實際只有 default_rate（slippage fallback），無 fee_rate（gates.rs 的 fee_rate 是 runtime Bybit per-symbol，非 TOML）。最小安全解=fee_rate 取同 TOML `[market_gate].max_taker_fee_bps`/1e4（per-env taker 上限，保守=threshold 偏大=寧早報），slippage 取 `[slippage].default_rate`。docstring 明標。
 - 教訓：edge cell SSOT=settings/edge_estimates.json（檔非 PG 表）；runtime_bps key 優先、缺則 shrunk_bps fallback；win_rate_shrunk 優先、缺則 win_rate（與 edge_estimates.rs 反序列化對齊）。max check 號=89 → 我占 [90]。
 
+## 2026-06-14 — MIGRATION-TREE-1 前向相容（V005 PART4 legacy-view 守衛 + V023 model_registry self-heal，IMPL 待 E2）
+- 任務：照已 scratch-驗證 PA 設計，使 V005/V023 在 virgin DB（無 V004 legacy 表/stub）與 brownfield 皆可前向相容遷移。只動兩檔，不碰 V004。
+- V005 PART4：把 5 個 FROM `*_legacy` 的 Grafana bridge view（account_snapshots/system_health/paper_pnl_snapshots/risk_events/learning_events）各包進 `DO $WRAP$ ... IF EXISTS(information_schema.tables ...) THEN EXECUTE $VV$ CREATE OR REPLACE VIEW ... $VV$; END IF; END $WRAP$;`。巢狀 dollar-quote tag $WRAP$/$VV$ 全庫唯一不撞 V005 既有 PART3 裸 $$ DO。非-legacy 的 6 view（指向 trading/agent/market 新表）不動。
+- V023：Guard A DO block **前**插 self-heal DO：偵測 legacy shape（有 model_name 欄 AND 無 canary_status 欄）→ 動態 `EXECUTE 'SELECT count(*) FROM learning.model_registry' INTO v_legacy_rows` → **僅 count=0**（空 stub）才 DROP 讓下方 CREATE TABLE IF NOT EXISTS 建新 shape。**非空 legacy 絕不 drop**，續走 Guard A RAISE 交 operator（真-drift 安全鐵則）。
+- self_test：本機 PG16 ephemeral scratch cluster（initdb --locale=C，port 54399）真跑 5 scenario 全綠：V005 virgin→0 view 跳過無錯/brownfield→5 view 建+可查/雙 apply 冪等；V023 virgin→新 shape/空 legacy→drop+重建新 shape(canary_status=1,model_name=0)/非空 legacy(1 row)→NOT drop(row 保留)+Guard A 正確 RAISE/雙 apply 冪等。cluster 已拆。
+- 鐵律遵守：0 hard-boundary token；V004 未碰；改 V005/V023 字節必致 checksum drift（已知，conductor push 後跑 repair_migration_checksum）；未 commit/未 apply prod。
+
 ## 2026-06-14 — AI-PRICING 殘項修（F-B Rust stale 真名 + F-D Python fail-OPEN→fail-closed，IMPL 待 E2）
 - 任務一（pricing 真值）：AI-E 查證值已正確（opus-4-8 $5/$25 / sonnet-4-6 $3/$15 / haiku-4-5 $1/$5），唯 `layer2_types.py:PricingTable` 三 anthropic tier 的 last_verified_date 2026-04-16→2026-06-14（值不動）。YAML AI-E#1 haiku 後綴 TODO 非本任務範疇，留。
 - 任務二 F-B：唯一 production 硬編 stale=`tasks.rs:270`（claude-sonnet-4-5 已退役/YAML active:false 會 404）→ 改讀 env `OPENCLAW_CLAUDE_TEACHER_MODEL`，預設真名 claude-sonnet-4-6（對齊本檔 :331 CRYPTOPANIC env 慣例）。`client.rs:98-99` doc 註釋同步真名。consumer_loop.rs ×8/client.rs:275 全在 `#[cfg(test)]` 內走 MockClient=inert 假陽性，NO-OP 不改（最小 scope）。

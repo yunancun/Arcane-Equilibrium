@@ -60,6 +60,41 @@
 -- Template source / 模板來源：
 --   sql/migrations/templates/schema_guard_template.sql § Guard A
 -- ------------------------------------------------------------
+
+-- ------------------------------------------------------------
+-- Forward-compat self-heal（前向相容自癒，MIGRATION-TREE-1）
+-- ------------------------------------------------------------
+-- 為什麼需要：V004 預留的 legacy model_registry stub（有 model_name 欄、
+-- 無 canary_status 欄）在 virgin/重建鏈上會讓下方 CREATE TABLE IF NOT EXISTS
+-- 靜默 no-op，導致 V023 新 shape 永遠建不起來、Guard A 直接 RAISE 阻斷遷移。
+-- 安全鐵則：只在「legacy shape AND 空表（count=0，純預留/虛擬產物）」時 DROP，
+-- 讓下方 CREATE TABLE 重建新 shape。**非空 legacy 絕不 drop**（有真實資料時
+-- 屬真-drift，仍交由 Guard A RAISE，由 operator 人工裁決，避免誤刪資料）。
+DO $$
+DECLARE
+    v_legacy_rows BIGINT;
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'learning'
+          AND table_name   = 'model_registry'
+          AND column_name  = 'model_name'
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_schema = 'learning'
+          AND table_name   = 'model_registry'
+          AND column_name  = 'canary_status'
+    ) THEN
+        -- 動態 EXECUTE 取列數：legacy shape 已由上方欄位偵測確認存在；
+        -- 用 EXECUTE 而非裸 SELECT 是因 cold-parse 階段 planner 不應硬綁此表。
+        EXECUTE 'SELECT count(*) FROM learning.model_registry' INTO v_legacy_rows;
+        -- 只有空表（純預留/虛擬產物）才 drop；非空 legacy 留給下方 Guard A RAISE。
+        IF v_legacy_rows = 0 THEN
+            DROP TABLE learning.model_registry;
+        END IF;
+    END IF;
+END $$;
+
 DO $$
 DECLARE
     v_missing TEXT[];
