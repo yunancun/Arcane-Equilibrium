@@ -3,7 +3,7 @@
 Date: 2026-05-25（BB APPROVE 候選 proposal）· 2026-05-26（隨 AMD-2026-05-26-01 確立為 revive-gate placeholder）
 Status: **Proposed**（decision TBD；尚未 Accepted）
 
-> **定位說明**：funding_arb V2 已 **Retired closed**（per ADR-0018 + AMD-2026-05-26-01）。本 ADR 是 funding_arb 「未來重設計」的占位 slot 與 **revive 硬閘**：`funding_arb.rs` 模組保留不刪，但運行時 `active=false` 硬鎖；任何 revive 必須先讓本 ADR 從 Proposed 升 Accepted（含 V3 IMPL + V117 migration spec 全 land）。**本 ADR 目前未 Accepted，不得作為 funding_arb 重新上線的依據。**
+> **定位說明**：funding_arb V2 已 **Retired closed**（per ADR-0018 + AMD-2026-05-26-01）。本 ADR 是 funding_arb 「未來重設計」的占位 slot 與 **revive 硬閘**：`funding_arb.rs` 模組保留不刪，運行時 `active=false` 經 TOML config-load 強制（三端 `[funding_arb].active = false`，`registry.rs` 載入時不掛載 entry）；任何 revive 必須先讓本 ADR 從 Proposed 升 Accepted（含 V3 IMPL + V117 migration spec 全 land）。**本 ADR 目前未 Accepted，不得作為 funding_arb 重新上線的依據。**
 
 ## Context
 
@@ -18,7 +18,7 @@ Status: **Proposed**（decision TBD；尚未 Accepted）
 
 **Proposed — decision TBD。** 本 ADR 尚未對「funding_arb 是否重設計、如何重設計」下最終決定；它先固定以下兩件事：
 
-1. **Slot 保留契約**：`funding_arb.rs` 模組 keep with `#[deprecated]` marker + runtime `update_params()` fail-closed guard（拒絕任何 IPC `active=true` 注入）。72 unit tests 保留為 dormant 結構驗。此契約由 AMD-2026-05-26-01 落地，本 ADR 記錄其作為 V3 redesign 前置基礎。
+1. **Slot 保留契約**：`funding_arb.rs` 模組保留不刪（72 unit tests 保留為 dormant 結構驗），運行時 dormant 由 TOML config-load `active=false` 強制。AMD-2026-05-26-01 §3.2 曾規劃 `#[deprecated]` marker + `update_params()` runtime fail-closed guard，**但該 D+7 E1 IMPL 從未 land**（per `2026-06-14--cold_audit_validated_fix_plan` 治理漂移訂正）——當前唯一 enforcement = TOML config-load active=false，無 runtime IPC `active=true` 注入 guard。本 slot 屬 dormant 非 active risk_config，故不補 guard；revive 時若需 fail-closed guard 應在 ADR-0046 升 Accepted 的 V3 IMPL 內一併設計。本 ADR 記錄此 slot 作為 V3 redesign 前置基礎。
 2. **Revive 硬閘**：funding_arb 任何形式重新上線，必須同時滿足三條 hard gate：
    - 新 AMD super-cedes AMD-2026-05-26-01，附 V3 design rationale；
    - **本 ADR-0046 升 Accepted**（V3 IMPL + V117 migration spec 全 land）；

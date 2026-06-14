@@ -231,3 +231,340 @@
 
 ## 2026-06-12 · incident-policy dispatch trigger source-focused E4 — PASS_WITH_CONDITIONS
 Mac release incident_policy/C4/sm_halt/position_drift/retCode two-run green plus auth-invalid bin tests and watchdog/canary suites green; Linux source-focused parity green for the same critical filters plus targeted engine_dead canary. No CI/deploy/service rebuild/restart or runtime claim; QA acceptance remains owed. Report `2026-06-12--incident_policy_dispatch_trigger_e4_regression.md`.
+
+## 2026-06-14 · 全量 read-only 審計（dirty closed_pnl/m4 靶向）— FINDINGS（無回歸,2 缺口 owed E1）
+**凍結 SHA 976d420e（main,HEAD 對齊）**。control_api_v1 全套（--ignore=replay,mac_dev py3.12.13/pytest9.0.3）**4738p/66f/6s/4xf ×3 決定性**；66f 全 pre-existing CSRF 403 enforcement env-lane（test_learning_chapter 33/product_family 19/api_contract 11/snapshot 2/runtime_snapshot 1），**0 在 dirty closed_pnl 檔**。vs BASELINE 4728/66：+10p 來自 ddaafda1→976d420e 兩 commit（5dfce536 L2 recall B3 + 45a4720a closed_pnl attribution），**非 dirty 工作樹**（3 closed_pnl dirty 檔 test-fn 數 30/13/5 committed==dirty=0 新增,僅改 assertion+FakeCursor tuple）。m4 111p ×2。closed_pnl 53p ×2。0 skip/xfail 注入,0 刪測試。
+**dirty 測試真咬非空轉（temp-overlay committed-source bite + mutation-bite 雙證）**：committed source 0 個新 key（bybit_gross_pnl/authoritative_pnl/learning_pnl/bybit_fee_total/pg_engine_gross_pnl）→ dirty 測試對 committed source KeyError（pagination unit 實證 `KeyError: bybit_fee_total`）；正向 bite：把 gross 對賬退回 net → route 測試紅（drift 0.05≠0.0）。
+**★ 缺口 1（test-blindspot,HIGH）：fail-closed learning_pnl 無測**。`_fetch_pg_closed_pnl_fallback` 新設 `learning_pnl=None`/`learning_pnl_source="bybit_unavailable_fail_closed"`/`authoritative_pnl_source="pg_fallback_estimated_net"`/`estimated_net=pg_gross-close_fee`,但 4 個 pg_fallback 測試**無一斷言**這些欄。mutation-bite 親證：`learning_pnl=None`→`=estimated_net`（洩未授權估值入學習 lane）4 fallback 測試全綠不察覺。已還原 byte-clean 0 marker。
+**★ 缺口 2（leakage/test-blindspot,HIGH,Linux runtime 實證）：m4 fee 自連可 fan-out**。dirty `fills_loader.FILLS_QUERY_SQL` 新 `LEFT JOIN trading.fills entry_fill ON entry_fill.context_id=f.entry_context_id AND engine_mode=f.engine_mode`,新測**僅字串比對**（37 處 in FILLS_QUERY_SQL,0 語義執行）。Linux read-only：trading.fills 有 29 個 (context_id,engine_mode) dup group,**30 close row 的 entry_context_id 命中 dup**→自連 fan-out 重複 M4 樣本+非確定 entry-fee 選取。屬未合併 in-flight 缺陷（非 committed runtime 回歸）。
+**GUI**：tab-live.js node --check OK;tab-demo.html 7 inline script 拼接 node --check OK（_demoProfitRow 改 driftLabel const 局部無 redeclare 風險,label 改「毛利差」對齊 gross basis）。GUI 不 surface 新 authoritative/learning_pnl 欄。
+**owed**：(a) closed_pnl fallback fail-closed learning_pnl 補測（E1）；(b) m4 自連 fan-out Linux PG dry-run + 去重（DISTINCT ON 或 entry 唯一性 guard）（E1）；(c) Linux full regression（push 後）；(d) Rust 本輪 N/A（dirty 無 Rust）。
+**BASELINE 不重建**（沿用 2026-06-11 4728/66;本輪 read-only 審計非 commit-gated 回歸,且 dirty 工作樹未過 E 鏈）。read-only 邊界全程遵守:0 mutation 留存,temp 已清。
+
+---
+
+## 2026-06-14 · Adaptive Demo Profit allocator (regime_bandit_allocator) 單測 + 回歸 — PASS
+
+**被驗**：`program_code/ml_training/regime_bandit_allocator.py`（E1 新檔，純 Python 核心，未接引擎/未碰 mainnet 5-gate）+ `tests/test_regime_bandit_allocator.py`。venv=`venvs/mac_dev/bin/python`（3.12.13/numpy2.4.4/pytest9.0.3）。E4 不改業務邏輯（module byte-identical to pre-E4 backup，diff IDENTICAL）。
+
+**E4 補測 +6（既有 E1 22 → 28）**：任務明示 5 場景中既有檔未直接覆蓋者：(3) regime 切換隨 regime 變（`test_regime_switch_allocation_follows_regime` bull→bull_pos / bear→bear_pos 贏家不同 + `test_regime_switch_stale_regime_arm_not_carried_over` bull 正 arm 不外溢 bear 冷候選仍歸 flat）；(4) Kelly cap 全分級 sweep ≤max_fraction（`test_kelly_cap_never_exceeds_max_fraction_all_tiers` 把三分級 frac 設 0.8-0.95 仍夾 0.25 + `test_kelly_cap_default_tiers_monotone_nondecreasing`）；(5) exploration 預算邊界（`test_explore_budget_boundary_exact_and_overflow` n==budget→0、超 budget 不為負 + `test_exploration_floor_boundary_below_and_above_budget` <budget 確定性 0/1、≥budget 走 MC 出分數權重）。鐵則 (1)(2) 由 E1 既有測涵蓋。
+
+**全量決定性 ×2 非 flaky**（`PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0`、每跑清 __pycache__、`-p no:cacheprovider`）：allocator 檔 **28 passed ×2**（0.75s）；full `ml_training/tests/` = **740 passed / 16 skipped / 0 failed ×2**（21.5s/20.5s，identical）；reused-dep（thompson+linucb_trainer+allocator）= **61 passed**。collect-only：allocator 28 = 22(E1)+6(E4)；full 740 = 734 pre-existing/E1 + 6 我。0 regression。
+
+**mutation-bite 親驗（證非 tautology，逐改業務碼跑必紅→還原 byte-clean）**：(1) allocate 歸零閘 `if p_pos>=gate`→`if True`（繞閘）→ `test_all_negative_arms_allocate_to_flat`/`test_empty_cold_arms`/`test_artifact_inflated`/`test_regime_switch_stale_regime` **4 紅**（誠實歸零鐵則真擋）。(2) `ArmReward.transferable` →`return True`（artifact 當可轉移）→ `test_artifact_not_ingested_into_transferable_track`/`test_artifact_inflated`/`test_reward_transferable_flag` **3 紅**（demo artifact 不可轉移鐵則真擋）。還原後 `diff /tmp/rba_backup.py module = IDENTICAL`、grep E4-MUTATION=0。
+
+**mock 審查**：唯一 mock = autouse `_no_real_db` 攔 `psycopg2.connect`（IO 邊界縱深防禦，本核心無 DB IO）；0 業務邏輯 mock，bandit 數學/歸零閘/雙軌隔離/Kelly 分級全真跑。隨機全 seeded `Random(42)`、ts 全注入，可重現。cross-lang float = N/A（純 Python，無 Rust hot path / IPC）。
+
+**誠實標 owed**：(1) Mac-only 純邏輯層回歸；無 migration（V140+新表=下一輪 operator-gated）故無 PG dry-run owed；無 Rust 故無 cargo/cross-lang owed。(2) E1 §6 點 5 的 counterfactual replay 驗 `forgetting_gamma=0.99`（6 週 demo fills replay 收斂 flat）屬 MIT/QC 範疇、本輪未跑。(3) regime 維度真實性（mlde_edge_training_rows 是否帶 regime）= 下一輪 Linux PG owed。
+
+**E4 不寫 E1 報告**（E1 report 既存且為 E1 所有，未覆蓋）；結論回 PM。**VERDICT: PASS（ready for PM commit+push）**。退 E1 清單：無。
+
+BASELINE: 2026-06-14 passed=740 failed=0 skipped=16 error=0 (scope=ml_training/tests, allocator-augmented; 基線重建——前基線 2555/17 已於 2026-06-10 作廢，本次以 ml_training/tests full-run 建 module-scope 基線)
+
+---
+
+## 2026-06-14 — ADPE 閉環 runner + demo-maker arm 回歸（PASS）
+
+**被驗**：新 leaf package `program_code/ml_training/adaptive_demo_profit_engine/`（__init__/reward_source/ipc_lever/demo_maker_arm/runner）+ `settings/adaptive_demo_profit.toml` + 2 新測檔（11+17=28 test）。全 untracked、0 既有檔改、0 外部 importer（grep 證：唯一外部引用是其自身 toml 註解）→ leaf 結構性不可影響任何既有 suite。HEAD=976d420e（dirty multi-session tree）。
+
+**環境坑（記教訓再現）**：runner.py module-top `import tomllib` → Mac 系統 py3.10.1 無 tomllib 直接 ImportError。必用 `venvs/mac_dev/bin/python`（py3.12.13，齊 tomllib+pytest9.0.3+psycopg2+numpy2.4.4+scipy1.17.1）。系統 py3.10 有 pytest 但缺 tomllib＝跑不了本 package。
+
+**全量回歸（`venvs/mac_dev` py3.12.13、PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0、每跑清 __pycache__）**：`program_code/ml_training/tests/` 跑 3 遍全 **768 passed / 16 skipped / 0 failed**（19.86/19.96/19.94s，含 -p no:cacheprovider，三跑 identical 非 flaky）。baseline（--ignore 2 新測檔）= **740 passed / 16 skipped**。delta = +28 passed（= 11+17 新測）、0 regression、skip-set 16=16 不變。targeted 2 檔單跑 28 passed ×2。
+
+**4× mutation-bite 親驗（逐一改業務碼跑必紅→還原 byte-clean、grep marker=0）**：①`_assert_demo` 改 `if False`→2 engine_mode hard-lock 測紅（demo 沙盒鎖真測）；②demo-maker tier 硬編改 `'taker_real'`→5 測紅（含 transferable_only 軌**真的**吸收了 artifact n_trials 0→40、promotion weight flat→`range__grid_trading:1.0`，證雙軌隔離非 tautology）；③`build_desired_active` 強制全 active→`all_negative_ev_converges_to_dormant` 紅（全負歸零真測）；④reward SQL 加 `decision_outcomes`→`no_forbidden_tokens` 紅（NULL-bug 表禁用 guard 真測）。
+
+**mock 審查 PASS（§5 合規）**：`AdpeRunner` 全測**不注入 allocator**＝跑**真** RegimeBanditAllocator（贏家/dormant 決策真經 Thompson-sampling+positive_prob_gate+flat-arm）。只 stub IO seam：psycopg2.connect（FakeCur 捕真 SQL 字串，不替 SQL-building）、set_active_fn/read_states_fn（IPC 寫+snapshot 讀邊界）、rewards_fn/_connect（DB fetch 邊界）。無一 mock 受測業務對象。
+
+**5 任務需求逐一獨立驗**：(1) 正 arm（60×+45bps taker_real）→真 allocator 配非 flat→`set_strategy_active(grid_trading,True)` 真發 ✓；(2) 全負（60×-30bps）→desired 全 False+all_regimes_flat=True+真發關 ✓；(3) demo-maker artifact→all_fills saw_artifact=True/transferable_only n_trials=0（mutation ② 反證）✓；(4) kill-switch e2e smoke：snapshot→runner churn→restore 精確還原 snapshot 策略且不碰 snapshot-外策略；dry-run kill 不 mutate ✓；(5) 0 既有測試回歸（leaf、740→768 純加）✓。real toml load 證 config 全 live（engine_mode=demo/dry_run=true/trust_track=transferable_only，無 dead param）。
+
+**owed（誠實標）**：(a) Linux 真 PG `mlde_edge_training_rows` demo rows 非空 + regime 值域對映實證；(b) `RustSnapshotReader.get_strategies()` 真 snapshot active 鍵名形狀；(c) `sync_ipc_call('set_strategy_active')` 真連線 smoke——三項 E1 已標 Mac-only 驗，Linux deploy-gated。top-level `srv/tests/` 全套未跑（leaf 0-importer 結構性不影響＋已知 CSRF/control-plane env-gated 噪音，out-of-scope）。
+
+**VERDICT: PASS（source land + 28 新測綠 ×3 + 4 mutation-bite + mock 乾淨；ready for QA/PM）**。退 E1 清單：無。
+
+BASELINE: 2026-06-14 passed=768 failed=0 skipped=16 error=0 scope=program_code/ml_training/tests venv=venvs/mac_dev(py3.12.13)
+
+---
+
+## 2026-06-14 · ADPE 全量回歸（ml_training/tests + ADPE 新測，deterministic 驗證）— PASS（含 1 不可復現 flake 標記）
+**被驗** HEAD=976d420e（dirty multi-session tree）。venv=venvs/mac_dev(py3.12.13/pytest9.0.3/numpy2.4.4/scipy1.17.1/tomllib)。全 untracked：ADPE leaf package（adaptive_demo_profit_engine/ 5 模組）+ regime_bandit_allocator.py + 3 測檔（maker9/runner22/allocator28 def，collect 59 item）。E4 0 source 編輯（git status 維持 ??；py_compile OK；0 mutation marker）。
+**全量數字（PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 每跑清 __pycache__+.pytest_cache -p no:cacheprovider）**：full ml_training/tests = **771 passed / 16 skipped / 0 failed / 0 error**；collect 787（771+16）。分解對賬：pre-existing（--ignore 3 新檔）=**712p/16s**；ADPE+allocator 3 檔=**59p**；712+59=771 守恆。vs `BASELINE 768`=**+3p / 0f**（+3 純 ADPE maker/runner 測檔增長，0 pre-existing regression；768 不回退 ✓）。leaf 0-importer 結構性不影響其他 suite（已驗）。
+**★ FLAKY 標記（1 次不可復現，不計入回歸 fail 數）**：32 次 full-suite 跑中**僅第 3 次**（與第 2 次同 shell 鏈式背靠背跑的第二跑）出現 **767p/4failed**，其餘 31 次全 771p/0f。事後刻意以多條件追殺**零復現**：clean-pycache×10、no-clear×8、chained-back-to-back×4、8 檔各 isolate-stress×30（含 3 ADPE 檔全 30/30 綠）皆未再現。**根因高度指向 pre-existing wall-clock 計時脆弱**：`test_realized_edge_stats_mode.py` 內**恰 4** 個 now-recompute 邊界斷言（`expected_min_rolling=datetime.now(tz=utc)-timedelta(days=7,seconds=5)` 後 `assert used>=expected_min_rolling`，僅 5s slack；run3 警告 trace 亦點此檔 :165 utcnow）——鏈式第二跑 CPU 重壓下 since 計算→斷言重算 now 之間若 stall>5s，4 斷言同翻=精確 4-cluster。**非 ADPE 回歸、非任何新檔**。隔離建議：把該 4 測的 `expected_min_rolling` 在呼叫**前**先 capture 一次 `now` 當下界（或放寬 slack 至 ≥60s / freeze now），消除 now-at-assert 重算競態（owed E1，LOW 優先，非 blocker）。
+**mock 審查**：本輪 E4 不新增測；既有 ADPE 測 mock 乾淨（autouse psycopg2.connect IO-邊界 stub、FakeCur 捕真 SQL、set_active/read_states/rewards IPC+DB 邊界；0 業務 mock；RegimeBanditAllocator 真跑）——沿用 2026-06-14 ADPE 條目親驗結論。cross-lang float=N/A（純 Python）。
+**owed（誠實標）**：(a) realized_edge wall-clock flake 隔離（E1，LOW）；(b) Linux 真 PG mlde_edge_training_rows/regime 值域、RustSnapshotReader snapshot 鍵形、sync_ipc_call 真連線 smoke（E1 已標 deploy-gated）；(c) top-level srv/tests/ 全套 out-of-scope（leaf 0-importer + 已知 CSRF env-lane 噪音）；(d) Rust N/A（無 Rust 改動）。
+**VERDICT: PASS**（771≥768 baseline 不回退、+3 純加、deterministic 31/32 綠、唯一 flake 不可復現且歸因 pre-existing 非 ADPE）。退 E1 清單：無（1 LOW owed flake 隔離，非 blocker）。
+BASELINE: 2026-06-14 passed=771 failed=0 skipped=16 error=0 scope=program_code/ml_training/tests venv=venvs/mac_dev(py3.12.13)（含 ADPE leaf+allocator；pre-existing core=712p 不變；1 realized_edge wall-clock flake 標 FLAKY 不計 fail）
+
+---
+
+## 2026-06-14 · ADPE reward 查詢效能修（signals lateral 砍除）Linux PG 實證回歸 — PASS
+**被驗**：dirty 工作樹 `reward_source.py`（_REWARD_SQL 由 view 改直查 base 表 trading.intents JOIN learning.decision_features + dcs PK lateral）+ runner test（+1 regression-lock）。Linux git HEAD=f69fbbdc（committed=慢 view 版）；perf-fix 在 Mac dirty tree → 我 overlay 法（cp 真 committed ml_training→/tmp，覆蓋 reward_source 為 perf-fix md5 3eaa987e，PYTHONPATH 指 overlay）。PG=docker trading_postgres/trading_ai（intents 939079/signals 5.87M/dcs 9.67M/df 14.1M=對齊 MIT 量級；sqlx_max=139 注意 MIT 報的 122 已 stale）。
+**(1) 效能 PASS**：NEW 30d demo EXPLAIN ANALYZE 親跑 ×2 = **1080ms / 1090ms**（wall 1099/1110ms），rows=144,526（==MIT==operator）。vs 修前 3827s（64 分）= **~3545x**。plan 證 `trading.signals` **完全消失**、decision_features 走 PK Index Scan（非 30d 翻車的 seq-scan-hash）、dcs lateral 走 PK Index Scan Backward 0.001ms/loop。OLD view 30d 親跑 = **300s statement_timeout 仍未完**（坐實 64 分 pathology）。<15s 門檻遠達標、<5000ms statement_timeout。
+**(2) 正確性 PASS**：NEW 30d per-arm = bb_breakout/trending=5、bb_reversion/mean_reverting=24、grid_trading/mean_reverting=209、ma_crossover/trending=144288（Σ=144,526）；net_bps 合理（avg -0.863/-16.236/-4.292/-0.006，min/max 落真實 bps 區）。**7d 等價 NEW vs VIEW byte-identical**（2/8/50/24，avg -52.067/-34.656/-7.228/3.416 逐位同）= per-arm count+stat diff=0（30d 等價靠 7d byte-identical + 30d total 144,526==MIT view-side）。
+**(3) vocab 端到端 PASS（命門，未重蹈靜默丟棄 bug）**：真 fetch_demo_arm_rewards 30d 回 4 arm 全重建為 **allocator 詞彙**（high-vol__bb_breakout/high-vol__ma_crossover/range__bb_reversion/range__grid_trading）；regimes_not_in_VALID_REGIMES=0、arm_id_prefix_vs_regime_mismatch=0。
+**(4) dry-run 30d CycleReport sane ×2 決定性**：n_rewards_ingested=144526、candidate_decisions=30（非空）、all_regimes_flat=True（4 arm 全負 avg net_bps→誠實歸零，對齊全局 no-alpha 結論）、desired_active 5 策略全 False、winner=0、REAL_IPC=0（dry-run 守）。注入 stub snapshot reader({})+真 DSN reward=IO 邊界 stub，allocator/reward/vocab 全真跑。
+**(4b) timeout guard 親證生效**：perf-fix path 帶 statement_timeout_ms=1 → **RAISED QueryCanceled**（SET LOCAL statement_timeout 真綁本交易，fail-soft 可接）= 閉 MIT「64 分能跑完=guard 未生效」次要 BLOCKER（新 1.08s 遠在限內亦使之 moot）。
+**(5) Mac ml_training pytest 無回歸 ×2**：venv mac_dev(3.12.13) full = **772 passed/16 skipped/0 failed**（vs BASELINE 771/16=+1 純 regression-lock test、0 pre-existing regression）。name-level：REMOVED=0/ADDED=1（test_reward_source_sql_drops_signals_lateral_queries_base_tables）；改的 test_..._is_demo_scoped 是 assertion 換成結構性 attribution token（非刪非弱化，對齊 fix）。targeted runner+maker=32p ×2。
+**mock 審查 PASS**：_FakeCur 只捕 SQL+回腳本 rows=IO 邊界 stub；reward/allocator/vocab/regime 映射全真跑。cross-lang float=N/A（純 SQL+Python lane）。
+**prod 零觸碰**：read-only session（DSN default_transaction_read_only=on+driver 純 SELECT）；sqlx_max=139 前後不變、Linux git HEAD f69fbbdc 不變、overlay 在 /tmp 從不碰 committed tree；temp 兩端已清。
+**owed（誠實標）**：(a) Linux full ml_training pytest（perf-fix 未 commit，Mac 772/16 為準，Linux 同套 owed-post-push）；(b) 30d per-arm NEW-vs-VIEW 逐 arm 對賬（view 30d=64 分，依 SOP 不重跑長命令，以 7d byte-identical+30d total 等價替代）；(c) RustSnapshotReader 真 snapshot 鍵形/sync_ipc_call 真連線（deploy-gated，本輪 stub）；(d) E2 對 perf-fix delta 的審查未見 E2 memory 紀錄（E2 06-14 紀錄是更早的 arm_id vocab fix，非本 perf delta）→ PM 派工直跳 E2，E4 兼任 E2 必查點（SQL %-escape/別名歧義/vocab）已涵蓋。
+**VERDICT: PASS**（perf 1.08s<<15s、correctness 7d byte-identical+30d total 等價、vocab 端到端 0 丟棄、dry-run sane ×2、Mac 772≥771 不回退、timeout guard 親證）。退 E1 清單：無。BASELINE 沿用 2026-06-14 ml_training 771（772=+1 regression-lock，未 commit 不重建正式 BASELINE 行）。
+
+## 2026-06-14 · Track1 demo explore-gate（Rust gate + Python sink）回歸 — PASS
+
+**被驗（dirty multi-session tree @ e454078d，E1 改動未 commit）**：demo gate `cost_gate_moderate_with_slippage` branch A/B 插 explore-allow（gates.rs +33）+ CellEstimate 2 新欄 fail-closed 解析（edge_estimates.rs +21）+ scanner struct literal 補欄（+3）+ Python `explore_quota_sink.py`（新檔）+ runner.py explore sink 接線（+101/-2）。
+
+**Rust lib（cargo test --lib -p openclaw_engine --no-fail-fast，×2 identical 非 flaky）**：baseline e454078d（throwaway worktree 共享 target dir 實跑）=**3806 passed/0 failed/1 ignored**；HEAD+E1=**3813**；+E4 4 個 file-reload E2E 測=**3817**。delta=+11 全新增測（E1 +7 explore unit + E4 +4 真檔 reload E2E），0 regression / 0 removed（git diff #[test]: +11 added / 0 removed）。
+
+**Python ml_training（mac_dev venv py3.12，PYTHONHASHSEED=0，×2 identical）**：baseline=**772 passed/16 skipped**；+E4 17 新測（13 sink unit + 4 runner integration）=**789 passed/16 skipped/0 failed**。skip-set delta=0（16 全 real-PG opt-in / OPENCLAW_DATABASE_URL gated，benign）。py3.10 系統無 tomllib（runner import）→ ADPE runner 測必走 mac_dev venv（py3.12+tomllib+pytest+numpy+scipy）。
+
+**★ demo↔live 隔離（單一守門點，per-function token 切片實證）**：explore_eligible/explore_remaining token 9 個全在 `cost_gate_moderate_with_slippage`（demo），`cost_gate_live_with_slippage`/`cost_gate_live`/`cost_gate_paper`/`cost_gate_k` **各 0**。真檔 E2E（load_for_mode demo vs live 讀同檔名 edge_estimates.json）證同一 explore=true 檔餵 live gate 仍 block。
+
+**mutation-bite 親驗（2 個，逐一改業務碼跑必紅→還原綠）**：(1) gates.rs branch B explore if→`if false &&`：我的 E2E `test_e2e_file_reload_demo_gate_flips_reject_to_explore` + E1 in-memory branch B 測 FAIL，branch A 測仍 PASS（證 branch 分工非 tautology）；(2) sink `eligible=remaining>0`→`eligible=True`（寫死）：`test_overlay_eligible_false_when_budget_exhausted` FAIL（咬死 design §8.3 嚴禁寫死全 true）。兩處還原後 diff rc=0 byte-clean、grep marker=0。
+
+**mock 紀律**：sink 測唯一 stub=StrategyLever（IPC IO 邊界，set/read 注入 fn），allocator 真跑（真 ingest_arm_outcome→真 explore_budget_remaining 衍生），sink 真讀寫 scratch 檔；Rust E2E 真寫 tempdir 檔走 load_for_mode 真 parse。無一 stub 受測對象。
+
+**E4 只加測試碼**：tests.rs +115（4 E2E）+ test_explore_quota_sink.py（新檔 17 測）；業務檔（gates/edge/sink/runner/scanner）diff 對 e454078d = E1 原樣未動（edge+21/gates+33/scanner+3/runner+103-2）。
+
+**owed（誠實標）**：Linux full ml_training + Rust release 真基準待 PM push 後補（Mac PASS≠Linux PASS）；source land≠runtime 生效（需 restart_all --rebuild）；無 migration→無 PG dry-run owed；GUI node --check N/A（本任務 footprint 無 .js，髒樹 tab-live.js/tab-demo.html 屬他 session）。
+
+**VERDICT: PASS（ready for QA/PM）**。退 E1 清單：無。
+
+BASELINE: 2026-06-14 passed=3817 failed=0 (rust lib) | passed=789 failed=0 skipped=16 (python ml_training) [基線重建：舊 2026-06-10 配置遷移後首次全量；error=0]
+
+---
+
+## 2026-06-14 · P1-AUTH-1 live RiskConfig 五門對齊回歸 — PASS（可 PM commit/push）
+**被驗**（dirty multi-session tree，HEAD 133eaccf）：risk_routes.py +23（engine=="live" 插 `all_five_live_gates_ok(actor,require_authz=True)` 唯一 primitive，失敗 409 fail-closed）+ handlers_config.rs +13（risk/live IPC patch audit-only warn!，不硬擋）+ 新測 test_risk_routes_live_config_gate.py(8test，??)。E2 已 PASS（0 finding/2 INFO spec-ack）。venv mac_dev(py3.12.13/pytest9.0.3)。
+**Python（control_api_v1/tests --ignore=replay，BASELINE scope）×2 決定性**：HEAD = **4746p/66f/6s/4xf ×2**，66 FAILED 名單 run1==run2 byte-identical（全 CSRF 403 enforcement env-lane：test_api_contract/learning_chapter/product_family/runtime_snapshot/snapshot_stable_entrypoint，0 觸 AUTH-1 檔）。**權威 baseline reconcile（in-place 法）**：revert risk_routes 至 HEAD + park 新測 → **4738p/66f**（== 2026-06-14 read-only audit 閉合的 dirty closed_pnl/m4 sibling 態），failed 名單 base==HEAD byte-identical。delta=4746−4738=**+8=8 新 AUTH-1 測、0 regression、failed 66 不變**。restore 後 risk_routes byte-clean(diff IDENTICAL)+marker grep=0+diff +23。
+**vs 正式 BASELINE 2026-06-11 4728/66**：+18p（+10=ddaafda1→976d420e L2 recall+closed_pnl 兩 commit 已歸因，+8=本 AUTH-1 新測），failed 66 不變、名單同族 → **無倒退**。
+**Rust lib（cargo debug --no-fail-fast，Mac）×2**：**3817p/0f/1ign ×2 identical**（== 2026-06-14 Track1 SCOPED-baseline 3817）；config-IPC broad filter 325/0、patch_risk_config 5/0、config_engine_routing 1/0 全綠。AUTH-1 Rust 加 **0 #[test]**（warn!-only，符 spec）。warn! import 在位（tracing::warn line9）。lib build 3 pre-existing warning 0 error。
+**新 reject 路徑測試覆蓋（fail-closed）= 充分**：8 測覆蓋 (1)五門未過→409 live_gate_failed + IPC 永不呼(call_mock.assert_not_called)；(2)全過→放行下 IPC；(3)require_authz=True 親驗；(4)demo/paper 不諮詢 live 門(gate.assert_not_called)；(5)gate ordering 非 operator→403 非 409(授權門先於 live 門)；(6)真實五門鏈 global_mode≠live_reserved→409（**不 patch primitive**，走真 secret slot+簽名 authorization.json fixture+OPENCLAW_LIVE_AUTH_SIGNING_KEY 真 key）；(7)真實五門全綠→放行。
+**mutation-bite 親驗（fail-closed 方向=把被禁行為加回去）**：移除 risk_routes live gate block(E4-MUTATION) → 3 live 測紅（live config patch 200≠409 直穿 IPC：test_live_gate_failed_returns_409 / test_live_requires_authz_true / test_live_no_global_mode_409），5 demo/paper/ordering/green 仍綠(by design)→證非 tautology+鎖回歸方向。還原 byte-clean shasum IDENTICAL+grep marker=0+8 測復綠。對齊 E1/E2 報的 3-live-red bite。
+**mock 審查 PASS（§5）**：唯 stub IO 邊界——_get_direct_ipc(假 client.call AsyncMock 不連 socket)/dependency_overrides current_actor/_get_global_mode_state/secret dir。**RealGateChain 類不 patch all_five_live_gates_ok**（受測授權邏輯真跑，走真 secret slot+簽名驗證），無一 stub 受測對象。primitive 簽名親驗 `all_five_live_gates_ok(actor,*,require_authz:bool)->tuple[bool,list[str]]`（live_preflight.py:247）= 唯一真權威。
+**GUI**：AUTH-1 footprint 0 .js（risk_routes/handlers_config/test 三檔）；dirty tab-live.js(sibling closed_pnl)node --check OK。cross-lang float=N/A（control-flow+授權邏輯，無 indicator/共用浮點）。
+**owed（誠實標）**：(a) **Linux release 真基準** cargo test --release -p openclaw_engine --lib 對照 4665/0（Mac debug 3817=SCOPED 非 release 權威，Mac PASS≠Linux PASS）= owed-post-push；(b) Linux control_api full regression（push 後）；(c) source land≠runtime 生效（需 restart_all --rebuild engine 才跑新 warn! binary）；(d) E2 INFO-1 mlde_demo_applier 直呼 patch_risk_config 繞 route+env-overridable engine、g2 CLI 直連 socket = spec-ack owed「live authz 搬進 Rust」operator 決策，非本 fix blocker。
+**VERDICT: PASS（無新 fail、無計數倒退、新 reject 路徑 fail-closed 覆蓋充分含 mutation-bite；ready for PM commit/push）**。退 E1 清單：無。BASELINE 沿用 2026-06-11 4728/66（4746=+18 全歸因 0 regression，dirty 未過完整 E 鏈 commit-gate 不重建正式行）。
+
+---
+
+## 2026-06-14 · ADPE explore-eligible 保活回歸 (E4) — PASS
+
+**被驗**：HEAD `133eaccf` working-tree（ADPE runner.py + test 為 uncommitted `M`）。E1 修 `build_desired_active`：`enable_explore_sink=True` 時 `desired = winners ∪ explore-eligible`（任一 arm `explore_budget_remaining>0` 保活；==0 不保活=有界）。surgical：runner.py 1 函數（+25 淨）、test +137（+4 test）。Mac `venvs/mac_dev/bin/python` 3.12.13（pytest 9.0.3 + tomllib 齊）。
+
+**baseline reconcile（同 worktree git stash 兩 ADPE 檔，cache 清淨）**：parent=**789 passed/16 skipped/0 failed**（= task 述 789）；HEAD=**793/16/0**。delta=**+4=4 新 explore test、0 regression、0 new fail、skip-set 16→16 不變**。collect-only ADPE 檔 node：23→27（REMOVED=0/ADDED=4）。全套 ×2 cache-cleaned byte-identical 793/793。
+
+**task 4 場景全綁定獨立驗（end-to-end，非盲信 E1）**：(1) all-flat+explore+under-sampled(remaining=27>0)→`desired_active=True`（保活探索）；(2) explore+耗盡(remaining=0,60 樣本>explore_budget=30)→`False`（有界、耗盡即停）；(3) `enable_explore_sink=False`+under-sampled→`False`（純 winner 回歸不變）。
+
+**mutation-bite 親驗（catcher 非 tautology）**：(A) `keep_active = active_strategies`（rev-union 退純 winner）→ `test_explore_keeps_undersampled`+`test_explore_mutation_bite` 紅；(B) `explore_budget_remaining>=0`（拔有界 → blanket pass-through）→ `test_explore_exhausted_arm_not_kept_active_bounded` 紅。還原後 git diff 只剩 E1 合法改動、E4-MUTATION grep=0。**有界性誠實鐵則被真測**（blanket pass-through 會被 (B) 抓）。
+
+**mock 審查 PASS**：只 stub IO 邊界（`_record_lever` set/read IPC fn + `rewards_fn` PG 源 + `_no_real_db` psycopg2.connect 鐵閘）；allocator/`build_desired_active`/`explore_budget_remaining` 全真跑、無業務邏輯 mock。
+
+**finding（不 block，交 PM/E1）**：[LOW test-hygiene] 兩 explore test 跑 `run_cycle(dry_run=False, enable_explore_sink=True)` 未注入 `edge_estimates_path` → 真寫 `settings/edge_estimates.json`（untracked、local-dev only，additive 注入 explore_eligible/remaining 到 `grid_trading::ORDIUSDT`，不污染 git/baseline）。建議比照其他測注入 scratch 檔。[INFO] 首次全套 1 fail 經查為**我 mutation-bite 後 stale .pyc artifact**（`cp` 還原 source 快過 .pyc mtime 粒度）；cache 清淨後 5/5 + isolated 3/3 全綠，非 E1 邏輯 flake、非 order-dependent。
+
+**owed**：Linux full ml_training 回歸 = owed-post-push（branch 未 push，純 Python 無 Rust/無浮點跨語言/無新 migration → Mac ×2 deterministic 足以建信心）。flag-ON 真活化（explore_sink flag + cron 接線）= operator/deploy gate，非本批。
+
+**VERDICT: PASS（ready for QA/PM commit+push）**。退 E1 清單：無（LOW test-hygiene 為可選改進，不 block）。
+
+BASELINE: 2026-06-14 passed=793 failed=0 skipped=16 error=0 (scope=program_code/ml_training/tests, env=venvs/mac_dev py3.12.13 pytest9.0.3; 基線重建 — 2026-06-10 舊基線作廢後首次 ml_training 全量基線)
+
+---
+
+## 2026-06-14 · P1-PERF-3 get_ollama_status async urlopen fix 回歸 — PASS（無倒退）
+**被驗**（dirty multi-session tree，HEAD a81a6c7e，PERF-3 改動 uncommitted M）：layer2_routes.py get_ollama_status — (1) line 518 `client.is_available()`→`await is_available_async()`（asyncio.to_thread offload，閉 E2 HIGH 殘留同步阻塞）；(2) 兩臂 urllib.urlopen→httpx.AsyncClient + `resp.raise_for_status()`（閉 E2 MED fail-soft 退化，503+JSON body 不再誤吞成 0 模型）；test_layer2.py +TestGetOllamaStatusPerf(+4 test)。E1 報告稱 3 findings 全修，diff +19/-8 對齊。**注：E2 最新紀錄為 RETURN（未見 re-E2 PASS）→ PM 直派 E4，E4 兼任 E2 必查點**（diff scope 精準無漂移、httpx 為本目錄既有範式 layer2_tools:545/1070、raise_for_status 對齊、mock 乾淨）。
+**全量四元組 ×3 決定性（venvs/mac_dev py3.12.13/pytest9.0.3/httpx0.28.1，PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0、每跑清 __pycache__、-p no:cacheprovider；scope=control_api_v1/tests --ignore=replay）**：**passed=4750 / failed=66 / skipped=6 / xfailed=4 / error=0**，三跑全同（106.9/106.9/108.8s），66 FAILED 名單 run1b==run2 LC_ALL=C sort **byte-identical（diff 空）**。targeted test_layer2.py=98p ×2（94 base+4 PERF-3）；PERF-3 class 4/4 PASS verbose 親證真跑。
+**★ 權威 base reconcile（in-place 法：git show HEAD: 還原 PERF-3 2 檔，其餘 dirty 不動）**：base=**66f/4746p/6s/4xf** → HEAD+PERF-3=**66f/4750p**。delta=**+4=4 新 PERF-3 測、0 regression、failed 66 不變**。diff invariant：test_layer2.py +4/-0 def test_、collect-only TestGetOllamaStatusPerf=4。還原 dirty 後 shasum byte-identical（layer2_routes 1abf9ada / test_layer2 39e2a4f1）+grep E4-MUTATION=0。
+**66 failed 全 pre-existing CSRF 403 enforcement env-lane**（test_learning_chapter 33/product_family 19/api_contract 11/snapshot_stable 2/runtime_snapshot 1=66，與 2026-06-14 read-only audit 同分佈；sample test_config_change_whitelist `assert 403`）。**0 在 layer2/ollama/perf 面**（grep 零命中）；PERF-3 footprint 2 檔與 5 個 failing 檔全 disjoint。
+**vs 正式 BASELINE 2026-06-11 4728/66**：+22p（+10=ddaafda1→976d420e L2 recall+closed_pnl，+8=AUTH-1 dirty 新測 sibling，+4=本 PERF-3），failed 66 不變、名單同族 → **無倒退**。
+**mutation-bite 親驗（catcher 非 tautology，逐改業務碼跑必紅→還原 byte-clean）**：(1) `await is_available_async()`→`is_available()`（退同步）→ 4 PERF-3 測全紅（同步版 side_effect=AssertionError，被調即紅）；(2) 移除兩臂 `resp.raise_for_status()` → 2 fail-soft 測紅（KeyError 'model_list_error'），2 非 error 測仍綠（partition 正確非 tautology）。還原 shasum 1abf9ada + grep marker=0。
+**mock 審查 PASS（§5）**：唯 stub IO 邊界——get_local_llm_client/_resolve_provider（factory+config 邊界）、is_available_async(AsyncMock=連通性 IO)、httpx.AsyncClient 注入 **MockTransport 驅真 raise_for_status()/json() 路徑**（非純 MagicMock 自證）。route body（available 處理/error→model_list_error）全真跑，無一 stub 受測對象。
+**cross-lang float=N/A**（純 async control-flow + IO，無 indicator/共用浮點/Rust hot path）。**SLA=N/A**（GUI ~60s 輪詢路由非 per-tick engine 路徑；fix 是移除 event-loop 阻塞=延遲改善非回歸，E1/E2 已以 mock-slow-server 並發 60/60 不凍親證；非 per-tick 路徑定性論證免 micro-bench）。
+**owed（誠實標）**：(a) Linux control_api full regression（push 後，Mac PASS≠Linux PASS；本 route 純讀 LLM 健康狀態無 PG/engine 依賴，httpx 行為跨平台一致，Mac ×3 具代表性）；(b) source land≠runtime 生效（需 restart_all 後跑新 binary）；(c) re-E2 PASS 紀錄缺（E2 memory 最新為 RETURN）→ PM 確認 re-E2 已過或接受 E4 兼任。無 migration→無 PG dry-run owed；Rust N/A（無 Rust 改動）；GUI node --check N/A（PERF-3 footprint 0 .js）。
+**VERDICT: PASS（4750≥base 4746 +4 純加、66 failed byte-identical 不倒退、PERF-3 fail-closed/async 路徑覆蓋充分含雙 mutation-bite、mock 乾淨；ready for QA/PM commit+push）**。退 E1 清單：無。
+**教訓**：(1) `--import-mode=importlib` 對 control_api_v1 主套會撞 conftest 致 4 collection error（audit/asm/change_audit/ipc_integration）——該 flag 只為 srv-root tests/ 的 test_pure_utils 重名，主套用專案預設 conftest 跑才對。(2) httpx MockTransport（functools.partial 注入 transport）是「real-code-on-synthetic」正確形態：受測 route 的 raise_for_status/json 真執行，只 stub 網路傳輸層——mutation-bite（拔 raise_for_status）能精準咬 2 fail-soft 測、放過 2 非 error 測，證 partition 非 tautology。
+
+BASELINE: 2026-06-14 passed=4750 failed=66 skipped=6 error=0 (scope=control_api_v1/tests --ignore=replay, env=venvs/mac_dev py3.12.13 pytest9.0.3; PERF-3 dirty @ a81a6c7e; 66f 全 pre-existing CSRF 403 enforcement env-lane，名單與 2026-06-11 4728/66 同族 byte-identical；vs 4728 +22 全歸因 0 regression；dirty 未過完整 commit-gate，正式行沿用 2026-06-11 4728/66，本行為 PERF-3 scoped 紀錄)
+
+---
+
+## 2026-06-14 · PROFIT-1-HC cost_gate 雙重扣成本預防哨兵 回歸 (E4) — PASS
+**被驗**：PROFIT-1-HC（AUDIT-2026-06-14-PROFIT-1 follow-up healthcheck）。6 檔 scope：standalone `helper_scripts/canary/healthchecks/check_cost_gate_double_deduct.py`(??新384行)+其 test(??新331行/21測)+wrapper `passive_wait_healthcheck/checks_cost_gate_double_deduct.py`(??新118行)+其 test(??新169行/7測)+runner.py(M wiring)+__init__.py(M re-export)。E2 最新紀錄=**PASS to E4**（2026-06-14 re-E2 HIGH-1 per-cell fix 對抗複審，0 finding 待修，2 INFO+報告計數訂正）。HEAD==origin/main `48cdbfe2`，髒樹多 session WIP 與 HC 檔 file-disjoint。venv mac_dev py3.12.13/pytest9.0.3/tomllib 齊。
+**focused 測 ×2 決定性**：28 passed/0 failed/0 skipped/0 error，run1==run2 identical（21 standalone+7 wrapper）。collect-only=28（21+7）。cache 清淨 -p no:cacheprovider。**baseline reconcile**：全 6 檔為 NEW（4 untracked + 2 M 純加性 wiring），focused-scope parent baseline=0 → +28 全新測、0 regression。sibling passive_wait wrapper 回歸（pg_dump/cron_heartbeat/cost_gate -k）=54 passed → runner.py/__init__.py wiring 不破既有；package import OK + check_90 在 __all__ 可呼。
+**HIGH-1 per-cell mutation-bite 親驗**（核心軸非 tautology）：暫改 `cell_threshold_bps` 把 `clamp(cell_win_rate,floor,1.0)`→固定 floor（HIGH-1 bug 還原）→ 3 測紅（test_cell_threshold_uses_win_rate_above_floor/test_scan_per_cell_win_rate_weighting_one_hits_one_passes/test_scan_win_rate_shrunk_takes_precedence，正是 E2 報的 3 紅）；還原後 grep E4-MUTATION-BITE=0、28 復綠。
+**★ Mac real-data run**：OPENCLAW_BASE_DIR=srv 跑真 settings → verdict=PASS/0 cell/exit0，三 env fee_bps=26/24/34 per-env differ；真 edge_estimates.json(Mac stale 455B)=1 cell/0 validation_passed → 0 hit。
+**★ Linux trade-core read-only run（runtime 權威）**：scp check+_common 入 /tmp(md5 parity f2ad05ca)，OPENCLAW_BASE_DIR=真 runtime srv 跑真 117-cell edge_estimates.json(46634B,_meta validation_summary eligible_cells=0)→**verdict=PASS/0 cell/exit0**（demo/live/paper fee_bps=26/24/34）。runtime 0 validation_passed-positive cell=dormant 實證，check 正確回 0 cell/PASS=符任務預期。**positive-bite on Linux real data**：注入 1 validated-positive 5bps cell 到 TEMP 副本→WARN/exit1（demo 5<67.6 / live 5<62.4 / paper 5<88.4 @wr0.50）證 check 非 silent no-op、risk-window 一觸即報。**prod 零觸碰**：edge_estimates md5 注入前後不變(897bd3af)、temp 已清、Linux HC 檔仍 ABSENT(未 push)、prod git status clean。
+**mock 審查 PASS（§5）**：standalone 測全 tmp_path 真檔（risk_config TOML + edge_estimates.json），純函數真跑、無業務 mock。wrapper 測 monkeypatch.setitem(sys.modules) 注入 fake standalone module=stub IO 邊界（被 delegate 的外部模組），wrapper collapse/verdict 透傳/REQUIRED=1 升 FAIL/INSUFFICIENT_SAMPLE 透傳/import+run 例外 fail-soft 全真跑。無一 stub 受測對象。
+**N/A 聲明**：GUI node --check=N/A（0 .js footprint）；cross-lang float=N/A（check 是 Python filesystem read，門檻公式與 gates.rs 對齊已由 E2 逐字核 + Mac/Linux real-data 行為對齊驗證，非 per-tick 共用浮點）；SLA=N/A（passive_wait 6h cron 非 hot path）；PG dry-run=N/A（無 migration，check 純 filesystem 0 PG）。
+**owed（誠實標）**：Linux full passive_wait runner 整合（push 後真接 cron [90]）=owed-post-push（branch 未 push，HC 檔 Linux ABSENT；本次以 temp+real-data 證 file-level 行為 parity）；source land≠runtime 生效（cron 接 [90] 需 push+restart）。E2 2 INFO（報告自述低報改動範圍 + SCRIPT_INDEX [90] 先於 impl committed）=記錄供 PM commit，非 E4 blocker。
+**VERDICT: PASS（28 全新測 ×2 決定性、0 regression、HIGH-1 mutation-bite 親證、Mac+Linux real-data dormant→0cell/PASS 實證、positive-bite 證非 no-op、prod 零觸碰；ready for PM commit/push）**。退 E1 清單：無。BASELINE：focused-scope 新建（28/0/0/0），不影響既有 ml_training/control_api 正式行。
+BASELINE: 2026-06-14 passed=28 failed=0 skipped=0 error=0 (scope=PROFIT-1-HC focused: helper_scripts/canary/test_check_cost_gate_double_deduct.py + helper_scripts/db/test_cost_gate_double_deduct_healthchecks.py, env=venvs/mac_dev py3.12.13 pytest9.0.3; 基線新建——全 6 檔 NEW/wiring，focused parent baseline=0；Mac+Linux real-data dormant→0cell/PASS 實證)
+
+---
+
+## 2026-06-14 — P1-SCHEMA-1 schema-consumer contract test 回歸（PASS to PM）
+
+**被驗（3 檔未 commit，HEAD=origin/main=`48cdbfe2`）**：`rust/openclaw_engine/tests/schema_contract_test.rs`（untracked，新增 6 個 `#[tokio::test]`）+ `.github/workflows/ci.yml`（M +66，新 `schema-contract` PR-only job）+ `helper_scripts/db/audit_migrations.py`（M +8，cwd-relative migrations 候選 + main() 恆 return 0 informational-only 註解）。E2 已 PASS to E4（re-review `2026-06-14--p1-schema-1-e2-return-fix-re-review.md`，0 finding 待修/1 INFO）。
+
+**Mac cargo（release）×2 決定性同綠**：`cargo test --release -p openclaw_engine --test schema_contract_test --test migrations_test`：schema_contract=**6 passed**、migrations=**5 passed**，run1==run2 byte-identical 非 flaky。**Mac PG 測試走 SKIP 早退路徑**（OPENCLAW_TEST_PG 未設）——`--nocapture` 證 6/6 印「SKIP: OPENCLAW_TEST_PG not set」，即 Mac 全綠=green-but-empty（real-PG 路徑 Mac 跑不到，需 Linux/CI），符 brief 預期。編譯：兩 test binary 建成功，僅 pre-existing 無關 warning，本檔 0 warning。
+
+**★ Linux trade-core read-only 真 schema 反向核驗（最高價值，全 PASS / 0 drift）**：PG=容器 `trading_postgres`，db `trading_ai`，role `trading_admin`，`_sqlx_migrations` 122 rows/max=139。
+- **6 contract probe 逐字對 LIVE schema 執行（BEGIN…INSERT/SELECT…ROLLBACK，零留痕）全 OK**：(1) observability.data_quality_events 7-col INSERT+ON CONFLICT(event_id,ts) (2) trading.fills 16-col INSERT(含 engine_mode/exit_source/close_maker_*) (3) learning.exit_features 18-col INSERT+ON CONFLICT(context_id,ts) (4) trading.decision_outcomes 10-col INSERT+ON CONFLICT(context_id) (5) learning.model_registry consumer SELECT（ml/registry.rs:224 逐字）回 0 row (6) market.klines SELECT 回 0 row。**證 test query shape 正確且 live schema 對 6 表 0 drift**。
+- **audit_migrations.py（E1-modified，md5 `d20e95ed…` Mac==Linux temp `/tmp`）對 live schema 跑：EXIT_CODE=0**（證 MEDIUM 修——informational-only 非 gate）；報 8 migration gap（5 schema+3 table+7 col+5 idx）**逐查證全為 parser naive forward-regex false-positive**（replay schema 真存在 9 table；learning.exit_features+decision_features 真存在；create-then-drop 生命週期表 + schema-rename 觸發）非真 drift。
+
+**CI yaml 靜態檢 PASS**：`yaml.safe_load` OK；新 `schema-contract` job = `if: pull_request`（零 macOS 10x）/`ubuntu-latest`(1x)/`timeout 20`/image pin `timescale/timescaledb:2.26.1-pg16`（無 latest 漂版）；cargo step 帶 OPENCLAW_TEST_PG+AUTO_MIGRATE=1；audit step `working-directory: .`+POSTGRES_*；既有 3 job 與 push/PR/schedule 觸發未動。（無 SCHEMA-1 .js 改動；tab-live.js 是 sibling task。）
+
+**★ owed/已知 BLOCKER（PA scope，非本回歸缺陷）**：CI 的 `cargo test` step 對 **virgin/ephemeral** PG 跑 V001-V139 全樹會在 **ordinal 23（V023 model_registry schema_guard RAISE）** fail——V004:147 建舊 shape `is_active`、V005:168 建 `is_active` 索引、V023:70 又 RAISE 要新欄，無單一靜態 shape 同時滿足（親讀 migration 檔證真）。**live schema 已達正確 end-state**（model_registry 有全部新欄 canary_status/strategy/engine_mode/quantile/verdict…、無 is_active），故 6 consumer contract 對 live 全成立=BLOCKER 純屬 virgin-replay-only，E2 已正確升 PA migration-hygiene。**E4 本輪驗到的=SKIP 路徑 + Mac 編譯 + Linux live-schema 6 probe 真執行 + audit exit-0；CI virgin 全樹真綠 owed-於-PA-修-model_registry-後首跑**。
+
+**prod 零觸碰**：所有 Linux 操作 read-only（probe 全 ROLLBACK、audit 唯讀反射）；temp `/tmp/e4_schema1_audit_migrations.py` 已刪；prod checkout 仍 `48cdbfe2`（3 SCHEMA-1 檔從未寫入 Linux 樹）。
+
+**VERDICT: PASS to PM commit/push**（Mac 編譯+SKIP 綠 ×2、Linux live-schema 6 probe 0 drift、audit exit-0、yaml 結構正確）。退 E1 清單：無。BLOCKER（virgin 全樹紅於 V023）非本 3 檔缺陷，屬 PA migration-hygiene owed，CI job 在 PA 修前對 PR 會 RED 於 ordinal 23——PM 須知此 job 上線後到 PA 修完前會紅。
+
+- 2026-06-14 BASELINE: scoped（非全量）schema_contract=6 passed / migrations_test=5 passed（Mac SKIP 路徑，release）。Linux real-PG 6 contract probe live-schema PASS。**全量 Python+Rust BASELINE 仍未重建**（2026-06-10 重置後本輪為 narrow SCHEMA-1 scope，非全量回歸）。
+
+## 2026-06-14 · PERF-1 Phase A (step_4_5 5m 指標 bar-close gated 快取) Rust 回歸 — PASS
+**被驗（dirty main 工作樹，6 E1 檔 + E4 +1 測，未 commit；HEAD=origin/main=48cdbfe2）**：PERF-1 只 gate「5m 指標重算」非「策略分派」。E2 曾 RETURN（LOW-1 dead-import StrategyParams），E1 已修（grep StrategyParams=0、build 0 unused warning）→ re-E2 紀錄缺，E4 兼任 E2 必查點（epoch key/never-cache-None/scope-fence）並標 re-E2 owed。Rust-only：Python/GUI=N/A（0 .py/.js footprint）。
+**Rust release lib ×2 決定性（cargo test --release -p openclaw_engine --lib --no-fail-fast）**：HEAD+E4=**3825 passed/0 failed/1 ignored ×2 identical**（run2=run3 同）；openclaw_core lib（PERF-1 改 klines.rs）=**426/0**。**baseline reconcile（throwaway worktree @48cdbfe2，跑完 remove）**：base（PERF-1 absent）=**3818/0/1**。delta=+7=6 E1 perf1 測 + 1 E4 bit-identical 測，**0 regression / 0 failed**。
+**★ bit-identical 驗（任務核心，E4 新增 perf1_cache_on_vs_cache_off_bit_identical_over_tick_sequence）**：對代表性 tick 序列（8 intra-bar tick + 1 跨 5m bar 邊界）逐 tick 並列 cache-on（gated helper）vs cache-off（直接 compute_indicators_for_timeframe），(a) serde byte-identical（最強：clone 逐位元同）+ (b) 全 ~26 個 f64 標量指標 1e-4 相對容差逐欄驗，**0 漂移**。涵蓋 epoch 不變（intra-bar clone）+ epoch 推進（新收盤強制重算）兩 regime。**mutation-bite 親證**：cache-hit 返 +1.0 bb.upper 漂移 → 我新測+既有 intra-bar 測雙紅；還原 byte-clean（on_tick_helpers diff 回原 53 insertions、E4-MUTATION grep=0、perf1 7/7 綠）→ 非 tautology。
+**hot_path bench before/after（cargo bench hot_path_baseline ×3 each）**：base(cache-off) avg 26.45–27.08us / p50 33.1–33.8 / p99 44.1–45.1；HEAD(cache-on) avg 26.56–26.77 / p50 33.3–34.2 / p99 **42.7–43.3**（p99 一致小幅改善 ~1.5us，avg/p50 在 OS 噪音帶內持平）。**caveat（承 E1）**：bench 餵原始 tick，暖機後段才累積 >=30 根已關閉 5m bar 走 cached-clone，故主要證「無回歸」非展示完整收益；真實 runtime 收益（省 compute_all_with_lambda 16 指標每 tick 重算）需 long-warmup bench（owed 另票）。
+**owed（誠實標）**：(a) **Linux release 真基準**：任務述 Rust BASELINE 4665/0 = Linux release **54-target full set**（memory 2026-06-11，`--lib` Linux=3791/0/1）；Mac release `--lib`=3818 base/3825 head（Mac vs Linux cfg-gated 數差，PERF-1 純 compute 邏輯無平台條件編譯故 Mac delta 代表性）→ Linux full 4665→預期 4672/0（+7）owed-post-push；(b) re-E2 PASS 紀錄缺（E2 memory 僅 RETURN）→ PM 確認 re-E2 已過或接受 E4 兼任；(c) source land≠runtime 生效（需 restart_all --rebuild engine 跑新 binary）；(d) long-warmup bench 量化暖機後 cached-clone 收益（另票）。cross-lang float=N/A（無 Python↔Rust 共算，PERF-1 是 Rust 內 cache 層）。
+**VERDICT: PASS（3825≥base 3818 +7 全新測 0 regression、bit-identical serde+1e-4 雙證 0 漂移含 mutation-bite、×2 決定性、E2 LOW-1 已修；ready for PM commit/push）**。退 E1 清單：無。throwaway worktree 已 remove，業務檔 byte-clean（僅 E4 +1 測試檔為新增工件）。
+BASELINE: 2026-06-14 passed=3825 failed=0 ignored=1 skipped=0 error=0 (scope=Rust openclaw_engine --lib release, env=Mac cargo 1.95.0; PERF-1 Phase A @ dirty main 48cdbfe2+6 E1 files+1 E4 test; base@48cdbfe2=3818 → +7 全新測 0 regression; 任務述 Linux release full-set BASELINE 4665/0 為 Linux 權威，Mac --lib release 3825 為本機 scoped 紀錄，Linux full 預期 4672/0 owed-post-push)
+
+## 2026-06-14 · PERF-2 (rust [profile.release] thin LTO + codegen-units=1) build-flag 回歸 — PASS
+**被驗（dirty main 工作樹，HEAD=origin/main=48cdbfe2，未 commit）**：PERF-2 footprint = 唯 `rust/Cargo.toml [profile.release]` +8 行（`lto = "thin"` + `codegen-units = 1` + 6 行中文 rationale 註）。Cargo.lock **未動**（純 compile profile flag 不加依賴）。純 build flag、0 source/logic 改動、flag 正確置於 `[profile.release]`（line 69-70，與 strip=symbols 同段）。**E2 memory 無 PERF-2 紀錄 → E4 兼任 E2 必查點**（bit-identical 語意/0 邏輯改/profile 置位/0 scope-creep/0 dep 改 全過）。dirty 樹同時含 PERF-1（klines.rs+tick_pipeline）+他 session 改動，但 PERF-2 footprint 已隔離確認。
+**cargo build --release -p openclaw_engine（POST，含 flag，real tree，隔離 CARGO_TARGET_DIR）= EXIT=0**，3 pre-existing warning 0 error → 新 flag 編譯成功。
+**Rust lib 回歸 ×2 決定性（cargo test --release -p openclaw_engine --lib --no-fail-fast）**：POST（含 flag）=**3825 passed/0 failed/1 ignored ×2 identical**，== PERF-1 SCOPED baseline 3825/0/1（該基線在無 LTO flag 下建立）。**bit-identical 證**：PRE（temp src 去 flag，settings symlink resolved 後）=**3825/0/1 ×2** == POST 3825/0/1 → build flag 證為語意中性、測試數 bit-identical。
+**★ temp-tree 陷阱再現（記教訓）**：PRE 首跑顯 11 failed，全為 `No such file or directory /private/tmp/settings/...`（risk_config*.toml / ai_pricing.yaml）——rsync 只帶 `rust/` 漏 `srv/settings/`，測試由 `env!(CARGO_MANIFEST_DIR)` 上溯 2 層找 settings sibling，temp tree 在 /tmp 故解析到 /tmp/settings 缺檔。`ln -sfn 真settings /tmp/settings` 後 11 fail 全歸零 → 確認 0 真回歸、與 LTO flag 無關。
+**build time delta（clean→clean，隔離 target dir，Mac cargo 1.95.0）**：PRE(strip-only)=**160.40s** / POST(thin LTO+cgu=1)=**232.72s**，delta **+72.3s (+45%)**。LTO 成本只在真 clean rebuild 付，incremental no-op rebuild 0 成本；release 僅 deploy 偶跑。
+**hot_path bench before/after（cargo bench hot_path_baseline，PRE/POST 各 ~5 跑 + 2 interleaved 配對輪控熱漂移）**：PRE avg 25.90–26.36 / p50 32.71–33.50 / p99 42.08–43.00；POST avg 25.60–25.94 / p50 32.58–32.96 / p99 40.92–42.25。方向一致 POST 略快（avg ~−1.8% / p50 ~−1.3% / p99 ~−2.5%），interleaved 每對 POST 皆不劣於 PRE。比 E1 報的 −4.2% 溫和（不同時段/熱態）但方向同、跨配對穩定，非單次噪音。
+**cross-lang float=N/A**（PERF-2 是 Rust 內 build profile，無 Python↔Rust 共算/IPC/indicator）。
+**owed（誠實標）**：(a) **Linux release 真基準**：任務述 Rust BASELINE 4665/0 = Linux release **54-target full set**（非 --lib）；Mac --lib release=3825（PERF-1+PERF-2 dirty）為本機 scoped；Linux full 對照 4665 含 PERF-1(+7→4672) 後 PERF-2 純 build flag 應 **bit-identical 維持 4672/0** owed-post-push（Mac PASS≠Linux PASS）；(b) E2 memory 無 PERF-2 紀錄 → PM 確認 re-E2 或接受 E4 兼任 E2 查點；(c) source land≠runtime 生效（需 restart_all --rebuild engine 跑新 LTO binary，deploy 時 +~build time 須容忍）；(d) deploy 機（Linux）絕對 build time + runtime 收益方向待 Linux 複跑（CPU/核數差，方向性結論跨平台成立）。
+**VERDICT: PASS（POST build EXIT=0 含新 flag；lib 3825/0/1 ×2 == PRE 3825/0/1 bit-identical 0 regression；build +72.3s/+45% clean-only；bench 方向一致小幅改善 0 回歸；ready for PM commit/push）**。退 E1 清單：無。temp artifacts 全清，prod dirty 樹 Cargo.toml flag 完好未動。
+**教訓**：(1) 純 build-flag 改動的「測試數 bit-identical」驗證若用 temp-src tree，必先把測試讀的真實 settings/fixtures（env!(CARGO_MANIFEST_DIR) 上溯路徑）symlink/rsync 進 temp 預期位置——否則 missing-file panic 假 fail 會掩蓋「flag 語意中性」結論（本次 11 假 fail）。(2) clean-build time delta 必逐 flag 隔離 CARGO_TARGET_DIR 各跑一次 clean build；同 source 只差 Cargo.toml flag 才是公平比較。(3) LTO 小幅 bench 收益（<5%）必 interleaved 配對跑控熱漂移，單向各跑易被 thermal/OS 噪音淹沒方向。
+BASELINE: 2026-06-14 passed=3825 failed=0 ignored=1 skipped=0 error=0 (scope=Rust openclaw_engine --lib release, env=Mac cargo 1.95.0; PERF-2 build-flag @ dirty main 48cdbfe2; PRE(no-flag)==POST(thin LTO+cgu=1)=3825/0/1 bit-identical→0 regression; build +72.3s/+45% clean-only; 任務述 Linux release full-set BASELINE 4665/0 為 Linux 權威, PERF-2 純 build flag 應維持 Linux full 含 PERF-1 之 4672/0 bit-identical, owed-post-push)
+
+## 2026-06-14 · GUI-FIXES 回歸 (P2-A3-1 Paper 死按鈕 + P2-A3-2 engine_alive 第一屏/Earn 術語) — PASS
+**被驗**：7 個 static 檔 working-tree 改動（app-paper.js/earn-tab.js/tab-live.js + index.html/tab-demo.html/tab-earn.html/tab-system.html）。P2-A3-1=app-paper.js 把靜默 NO-OP 改 ocToast warn + index.html 表單全 disabled（禁 fake-success）；P2-A3-2=tab-system.html 新增 loadEngineAlive() 第一屏中文 chip（fail-closed:None→未知 yellow）+ tab-earn 術語白話化 + earn-tab Stage 0R badge 文字。
+**node --check ×2**：3 standalone .js 全 OK；HTML 抽出 8 個 inline JS block（index 1/tab-demo 2/tab-earn 3/tab-system 2）全 node --check OK，FAILED=0。
+**括號平衡 diff**：base 與 HEAD 每檔 {}/()/[ ] 開閉皆 Δ=0（內部平衡）；計數隨刪改變（app-paper -2{/-12( = try/catch+DOM 讀移除；tab-system +6{/+17( = loadEngineAlive）但兩態皆 balanced。
+**wiring 核對**：$/ocSetText/ocApi/setTip(common.js)、ocToast 'warn'(common.js:535+oc-toast-warn CSS:866，既有 precedent) 全存在；/openclaw/status 真回 data.runtime.engine_alive(bool|None，openclaw_routes.py:230)，前端 typeof==='boolean' guard 對 None→未知，access path 正確；paperSubmitOrder 按鈕 disabled，app-review.js:400 delegation 仍呼 submitPaperOrder() 但已是正確 toast/no-op（disabled 不觸 click）；無 orphan DOM 讀、舊 Stage 0R 字串 0 殘留。
+**GUI 相關 pytest ×2 deterministic**：openclaw_agent_control_static+performance_metrics_gui_contract+static/+openclaw_routes+earn_routes+gui_fast_snapshot = 153 passed/0 failed/0 error（run1=run2 identical 非 flaky）；覆蓋 /openclaw/status envelope shape + earn routes。
+**baseline**：2026-06-10 reset 後無具體 passed/failed 數行；本批=targeted GUI-FIXES（純 HTML/JS，無 Rust/無 migration/無 Python 業務邏輯改動），node --check+brace+GUI subset 足以建信心。GUI-relevant subset 153 passed 不倒退。
+**owed**：full control_api_v1 pytest + Linux full regression 屬 deploy gate（本批純前端，restart 後 static 直接生效，無需 rebuild）。
+**VERDICT: PASS（ready for PM commit/push）**。退 E1 清單：無。
+
+---
+
+## 2026-06-14 — SHADOW-QTY-PREROUND 回歸（PASS）
+
+**被驗**：dirty main 工作樹（含並行多 session 改動）。SHADOW-QTY 改動=2 檔：`shadow_decision_builder.py`（移除客戶端 3-bucket pre-round >10000→5dp/>100→3dp/else→1dp，理由=price<=100 且 sub-0.1 qtyStep 小 notional 角落會把合法 qty round 到 0→靜默丟單 qty_rounds_to_zero 污染 paper attribution；正側精度權威屬 Rust qtyStep floor+min_qty rescue；qty<=0 fail-closed 改記 WARNING 不再靜默）+ `app-paper.js`（手動 paper 下單改顯式 ocToast「已停用」防 fake-success）。Python+GUI，0 新測。
+
+**Python pytest ×2 deterministic（scope=control_api_v1/tests --ignore=replay，env=venvs/mac_dev py3.12.13 pytest9.0.3，PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0 -p no:cacheprovider）**：run1=run2 = **4750 passed / 66 failed / 6 skipped / 4 xfailed**，FAILED 名單 byte-identical（diff=空）非 flaky。
+**對照 BASELINE 2026-06-11 passed=4728 failed=66**：passed +22（全歸並行 dirty sibling 改動 closed_pnl_pagination/layer2_routes/layer2_types/risk_routes app+4 改動 test 檔，非 SHADOW-QTY——後者 0 新測），failed=66 持平。**66f 全 pre-existing CSRF 403 write-endpoint enforcement env-lane**（跨 5 檔 api_contract/learning_chapter/product_family_business_settings/runtime_snapshot_bridge/snapshot_stable_entrypoint，抽 4 檔親驗皆 `assert 403==200`/`403==503`，0 涉 shadow_decision/paper builder）。**0 regression**。
+**SHADOW-QTY 隔離證**：shadow_decision_builder.py `py_compile` PASS（logger 為 module-level getLogger 既有，新 logger.warning 合法）；shadow/paper-targeted 7 檔 subset = **132 passed**；無任何 test 引用 shadow_decision_builder/ShadowDecisionConsumer/qty_rounds_to_zero（移除的 reason 字串無測試斷言依賴）。
+**GUI 靜態（app-paper.js）**：node --check PASS；brace 341/341 paren 846/846 平衡；ocToast 定義於 common.js+typeof guard 防護。3 個 dirty .js（app-paper/earn-tab/tab-live）node --check 全 PASS。
+**cross-lang float=N/A**（無 Rust hot path 改動；本批 Python control-plane + GUI）。Rust 未改（SHADOW-QTY 不碰 rust/）。
+**owed**：Linux full regression 屬 deploy gate（本批 Python+前端，restart 生效）。
+
+BASELINE: 2026-06-14 passed=4750 failed=66 skipped=6 error=0 (scope=control_api_v1/tests --ignore=replay, env=venvs/mac_dev py3.12.13 pytest9.0.3; SHADOW-QTY-PREROUND @ dirty main; 66f 全 pre-existing CSRF 403 enforcement env-lane 名單與 2026-06-11 4728/66 同族；vs 4728 +22 全歸並行 sibling dirty 改動 0 regression；dirty 未過完整 commit-gate，正式行沿用 2026-06-11 4728/66，本行為 SHADOW-QTY scoped 紀錄)
+
+**VERDICT: PASS（ready for PM commit/push）**。退 E1 清單：無。
+
+## 2026-06-14 · MODEL-REGISTRY-HC（[9] check_model_registry_freshness shadow 盲區修復）回歸 — PASS
+
+**被驗**：dirty main @ `48cdbfe2`，未 commit。改 `helper_scripts/db/passive_wait_healthcheck/checks_ipc_edge.py`（+74/-3，僅 `slots==0` 分支加 shadow cohort fallback + 三態裁決，production 路徑零改）+ 新 `tests/helper_scripts/test_model_registry_freshness_shadow.py`（9 test）。E1 report 在 disk；無專屬 E2 report（同批 E2 report 是 p1-schema-1，非本票）→ E4 兼任 E2 必查點並標明。Python-only，read-only healthcheck，無 migration/Rust/IPC/浮點面。
+
+**Mac focused ×2 決定性**（`PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0`、清 __pycache__/.pytest_cache、`-p no:cacheprovider`，venvs/mac_dev py3.12.13 pytest9.0.3）：`test_model_registry_freshness_shadow.py` = **9 passed ×2 identical**（collect-only 9 node-IDs 不變）。`tests/helper_scripts/` + `passive_wait_healthcheck/` 合跑 = 33 passed。
+
+**獨立 mutation-bite 親驗**（非盲信 E1）：暫把 shadow-stale 分支 WARN→PASS（回退舊盲區）→ **3 紅**（`_shadow_stale_is_warn` / `_never_escalates_to_fail` / `_mutation_bite_old_blanket_pass`，皆斷 stale shadow 必 surface），其餘 6（production/table-missing/29.5d-boundary/fresh/empty/fail-soft）不觸 shadow-stale 路徑正確仍綠 → 還原 byte-clean（md5 `3d39a694…` 復原、grep E4-MUTATION=0、git diff 仍 +74/-3）→ 9 全綠。證測試非 tautology。
+
+**全量 tests/（top-level srv lane）×2 決定性**（`--import-mode=importlib` 繞 test_pure_utils 重名 collection error）：run1=run2 = **453 passed / 11 failed / 2 skipped / 0 error**（315s/121s，名單 byte-identical 非 flaky）。11 fail 全 `tests/structure/*` 靜態結構測（docs index / GUI HTML·CSS·JS / event_consumer split / V072 feature_baseline writer）+ 0 觸 model_registry/checks_ipc_edge（grep=0）。**pre-existing attribution（決定性）**：git-stash 我的 checks_ipc_edge 改動後重跑同 11 test **同 11 fail byte-identical** → 證 11 fail 由並行 sibling dirty 改動（README/document_index/SCRIPT_INDEX/static/*.html·js/event_consumer/V072）驅動，與 MODEL-REGISTRY-HC 零關係。本票對 tests/ lane = **0 regression、+9 新 pass**。
+
+**★ Linux trade-core live runtime 驗（ssh read-only，最高價值——E1 標 owed 的 EXPLAIN/真 shadow row 驗）**：live `learning.model_registry`（docker `trading_postgres`/`trading_ai`，HEAD `48cdbfe2` 無此改動）= **3 row 全 canary_status='shadow'、created_at=2026-04-24（51d ago）、0 production**。跑 check 的真 query：production aggregate `slots=0` → shadow cohort `rows=3, newest=2026-04-24, age=51d`。**51>30 → 新碼 verdict=WARN**（"shadow rows=3 … 51d ago — shadow pool stale"）；**舊碼=blanket PASS expected（盲區）**。即正中修復意圖：凍結 7 週的 shadow pool 從靜默 PASS 變 WARN surface。query 純 SELECT、跑前後 model_registry 不變（read-only 確認）。column types 親驗：`created_at`/`promoted_at`=TIMESTAMPTZ（check 的 `datetime.now(tz)-newest` tz-aware 算術正確、無 naive/aware 衝突）、`train_date`=date；index `idx_model_registry_canary_status_created` 存在覆蓋 shadow query（plan-supported）。
+
+**E4 兼 E2 必查點**：硬約束未碰（max_retries/live_execution_allowed/execution_authority/system_mode grep 0）；read-only fail-soft（fallback 純 SELECT、例外退回原 PASS empty）；無 hardcoded 機器路徑；無新 migration/singleton；注釋中文為主。shadow 永不升 FAIL 設計合理（shadow 本不晉升，缺晉升非故障）。
+
+**cross-lang float = N/A**（純 Python read-only healthcheck）。**owed**：本批僅 source land + test PASS + live query 驗 verdict transition；真 cron 跑 [9] check 產 WARN 屬 runtime 觀察（PM deploy gate 後）。Mac 改動 Linux 樹尚無（未 push）。
+
+**VERDICT: PASS（ready for PM commit/push）**。退 E1 清單：無。
+
+BASELINE: 2026-06-14 passed=453 failed=11 skipped=2 error=0 (scope=tests/ top-level srv lane, env=venvs/mac_dev py3.12.13 pytest9.0.3 --import-mode=importlib; MODEL-REGISTRY-HC @ dirty main 48cdbfe2; 11f 全 pre-existing tests/structure/* 靜態結構測，git-stash 證 byte-identical 由並行 sibling dirty 驅動非本票，0 regression +9 新 pass；基線重建——此 lane 首次落數，與 control_api_v1/tests lane 4750/66 不同 scope 不可比；dirty 未過完整 commit-gate，本行為 MODEL-REGISTRY-HC scoped 紀錄)
+
+---
+
+## 2026-06-14 · AI-PRICING 回歸（YAML opus-4-8/sonnet-4-6 對齊 + pricing.rs Test 8 + layer2_types MODEL_OPUS id）— PASS
+
+**被驗（main 髒樹，3 檔）**：`settings/ai_pricing.yaml`（加 claude-opus-4-8/sonnet-4-6 active、退役 sonnet-4-5/opus-4-6→active:false）+ `rust/openclaw_engine/src/ai_budget/pricing.rs`（Test 8 spot-check sonnet-4-5→sonnet-4-6、加 sonnet-4-5 retired is_none 斷言）+ `layer2_types.py`（MODEL_OPUS id claude-opus-4-7→4-8，價值 5/25 不變）。源自 AUDIT-2026-06-14-P2P3-BATCH cold audit（真名呼叫被預算層 fail-closed 拒）。
+
+**Rust 全 lib（release，--no-fail-fast）×3**：run2/run3 穩定 = **3826 passed / 0 failed / 1 ignored**。run1 出現 1 fail = `config::io::tests::test_save_creates_parent_dir`，判定 **FLAKY**（隔離 ×3＝fail/ok/ok；full run2+run3 皆 ok）。根因＝該測用固定共享 temp path `temp_dir()/oc_io_test_mkdir/nested/deep` 無 per-test 後綴 + `remove_dir_all` 與 `save_toml` 建 parent dir 在平行執行下競態；**不在 AI-PRICING 改動集**（config/io.rs 與 main 同、非 dirty）、不在 pricing 路徑。隔離建議：改 `tempfile::TempDir` 或加 unique 後綴。不計入回歸 fail 數。
+
+**pricing 模組專測 9/9 ×2 綠**（default CWD + OPENCLAW_PRICING_PATH 指真 YAML 各一遍）。★ **抓到 skip-branch 假 PASS**：Test 8 從 `rust/` CWD 跑時 `settings/ai_pricing.yaml` 不存在→走 "skipping" 早退分支（eprintln 證實），新斷言**未被執行**＝假綠。用 `OPENCLAW_PRICING_PATH` 指 repo 真 YAML 才真跑新斷言（無 skipping 輸出）。**mutation-bite ×2**（只改 /tmp 副本，tracked 檔零觸碰）：(A) sonnet-4-6→active:false → Test 8 FAIL（咬 is_some）；(B) sonnet-4-5→active:true → Test 8 FAIL（咬 is_none）；真 YAML 還原後 PASS。證新斷言非 tautology。
+
+**Python（mac_dev venv py3.12.13/pytest9.0.3）×2 綠**：ai_budget_routes 9 + ai_cost_log_pricing_gate 2 + provider_keys_store 12 + layer2 家族 6 檔 303+4xfail + runtime_snapshot 3 = **329 passed / 4 xfailed**（4 xfail＝既有 naked-context-free strict-xfail）。YAML `yaml.safe_load` 靜態 parse OK：8 active / 2 retired，全 rate 非負。
+
+**Finding（INFO，pre-existing 非本批引入）**：`provider_pricing_catalog.py:64` opus model_id 仍 `claude-opus-4-7`（YAML+layer2_types 已 4-8）＝第三套硬編 manifest 漂移；無 test pin 故不破測，但 AI-PRICING fix 未對齊此源。建議交 AI-E/PM 裁是否補。
+
+**owed**：Linux trade-core 全 lib release 真基準（Mac PASS≠Linux）；engine restart_all --rebuild 後 runtime 生效屬 deploy gate。本批純 source land + test PASS。
+
+BASELINE: 2026-06-14 rust_engine_lib passed=3826 failed=0 skipped=0 ignored=1 (Mac release; flaky config::io::test_save_creates_parent_dir 隔離；AI-PRICING python 相關套件 329p/4xfail)
+
+**VERDICT: PASS（ready for PM commit/push）**。退 E1 清單：無（FLAKY config io 非 AI-PRICING、非 blocker，附隔離建議）。
+
+## 2026-06-14 · SEAM-GUARDS-RUST 三 seam 降級守衛回歸 — Mac --lib release PASS（Linux full owed-post-push）
+**被驗**：dirty main @ `48cdbfe2`，SEAM-GUARDS 4 檔（commands.rs submit_external_order live-reject guard `if effective_engine_mode()=="live"→Err("external_submit_blocked_on_live_pipeline")`+docstring / method_registry.rs module docstring「非授權面」/ strategy.rs as_str 註釋 / submit_order_tests.rs +1 fail-closed test）。diff 56+/4−（與 E2 逐字相符）。E2 已 PASS（0 finding）。Rust-only。
+**兩遍決定性**：Mac cargo 1.95.0 arm64 `cargo test --release -p openclaw_engine --lib` run1=run2=**3826 passed / 0 failed / 1 ignored / 0 error**（+3 確認跑共 5/5 同綠，0.72-0.73s identical）。0 FAILED/error/panicked。
+**baseline 對賬**：任務 BASELINE Rust 4665/0 = Linux release 54-target full set（Linux 權威）。Mac --lib release 為 scoped 子集。throwaway 法：stash 僅 SEAM-GUARDS test 檔 → base=3826 total（`--list`），HEAD=3827 total → **ADDED=1 / REMOVED=0**（node 級 set-diff 唯一新名=`event_consumer::tests::submit_order_tests::test_f_submit_order_rejected_on_live_pipeline`）。delta=+1 全新測 0 regression。
+**★ 2 FLAKY（不計回歸 fail）**：stash-test 的 base full-run 偶現 2 紅 `config::io::tests::test_save_then_load_round_trip`（固定 tempdir `/var/folders/.../oc_io_test_roundtrip/rt.toml` rename 並行 race→ENOENT）+ `persistence::tests::test_three_pipeline_concurrent_writes`（"demo didn't reach last tick" 42 vs 49 並發 timing）。兩者**隔離單跑 3/3 PASS、HEAD full-run 5/5 PASS**，且皆在 SEAM-GUARDS 代碼路徑外（commands.rs/method_registry.rs/strategy.rs/submit_order_tests.rs 不碰 config/io.rs+persistence.rs）→ 判 FLAKY 環境並行-load race，非 SEAM-GUARDS 回歸。隔離建議：config::io round-trip 用 per-test 唯一 tempdir（mktemp/uuid）；persistence 3-pipeline 改 deterministic barrier 取代 tick-count 斷言。
+**mutation-bite 親驗**：commands.rs guard `if self.effective_engine_mode()=="live"` → `if false && ...`（加 E4-MUTATION marker）→ 新測 **FAIL**（`assertion failed: result.is_err()` @ submit_order_tests.rs:81，live 路徑放行）→ 證非 vacuous + 無第二道隱性防線兜底。還原 byte-clean：grep E4-MUTATION=0 / `if false`=0 / 4-檔 diff 仍 56+/4−，post-restore full ×2=3826/0/1。
+**no-false-positive**：`test_f_submit_order_happy_path`（Paper 模式走同一 submit_external_order sink）post-restore 綠 → demo/paper 模擬不被誤殺。
+**cross-lang float=N/A**（Rust 內 control-flow guard，無 Python↔Rust 共算浮點）。
+**owed（誠實標）**：(a) **Linux release 54-target full set 真基準**對照 4665/0 = owed-post-push（Mac --lib 3826 為本機 scoped，Mac PASS≠Linux PASS；Linux full 預期 4666/0=4665+1 SEAM-GUARDS test）；(b) source land≠runtime 生效（需 restart_all --rebuild 跑新 binary）；(c) commit-scope：dirty 樹混 PERF-1 5m-cache + ai_budget/schema_contract sibling workstream，PM commit 須 `git commit --only` 僅 SEAM-GUARDS 4 檔。
+**VERDICT: PASS（Mac --lib scoped；Linux full owed-post-push）**。退 E1 清單：無。
+**教訓**：(1) stash 單一 test 檔做 base 對賬時，base full-run 可能偶現與本 fix 無關的並行-load flaky（本次 2 紅）——必隔離單跑 3× + HEAD full-run 多遍交叉證 flaky，且確認失敗 test 在受測代碼路徑外，方可不計回歸 fail。(2) 「guard 是唯一阻擋」型 fix 的 mutation-bite 用 `if false &&` 短路同時證兩事：test 非 vacuous + 短路後流程真走下去無第二道兜底（no-false-positive 靠既有 happy_path 走 Paper kind 過同 sink 的綠燈白嫖）。
+BASELINE: 2026-06-14 passed=3826 failed=0 ignored=1 skipped=0 error=0 (scope=Rust openclaw_engine --lib release, env=Mac cargo 1.95.0 arm64; SEAM-GUARDS-RUST @ dirty main 48cdbfe2; base(stash test)=3826 total → HEAD=3827 total, ADDED=1/REMOVED=0 全新測 0 regression; 2 flaky=config::io round-trip+persistence concurrent 隔離3/3+HEAD full 5/5 PASS 不計; 任務述 Linux release full-set BASELINE 4665/0 為 Linux 權威, Mac --lib release 3826 為本機 scoped, Linux full 預期 4666/0 owed-post-push)
+
+## 2026-06-14 · DIRTY-FIX m4 fills_loader + closed_pnl 回歸 + Linux fan-out 真 DB 驗 — PASS
+**被驗**：dirty multi-session 樹 HEAD=origin/main `48cdbfe2`，4 task 檔（fills_loader.py +120/-? / closed_pnl_pagination.py +116/-? / 2 test 檔），E2 re-review 已 PASS（3 LOW reconcile，0 finding）。Python-only（SQL 字串 + read-path helper）。
+**Mac 回歸 ×2 決定性**（PYTHONDONTWRITEBYTECODE=1 PYTHONHASHSEED=0、清 __pycache__、`-p no:cacheprovider`，mac_dev py3.12）：m4 = **116 passed ×2 identical**；closed_pnl 3 檔（test_closed_pnl_pagination 43 + test_bybit_closed_pnl_route 13 + test_live_closed_pnl_route 5）= **61 passed ×2 identical**。無 flake。
+**全量 control_api_v1（4 個 pre-existing import-error 檔 ignore：replay/test_calibration_label_python+r6+r6t6+r7，皆 `from program_code...` 絕對 import 需 srv-root+PYTHONPATH，未被 DIRTY-FIX 觸碰且不 import fix 檔）= 66 failed / 4842 passed / 9 skipped / 4 xfailed**。對照 brief BASELINE 4728/66：**failed=66 不增**（全 CSRF_SHADOW-OFF write-endpoint 403 enforcement-mode 文件化互斥 fail：test_learning_chapter 33 / test_product_family_business_settings 19 / test_api_contract 11 / snapshot 2 / runtime_snapshot 1，0 個在 closed_pnl/m4/fills）；**passed=4842 ≥ 4728**（codebase 成長，sibling 加測）。0 回歸。
+**base-vs-fix attribution（surgical `git stash push -- <2 source 檔>` 只還原 2 fix source，test 檔留新斷言）**：base 下 m4 = **6 failed/110 passed**（6 新 fix-test 全紅）、closed_pnl = **11 failed/50 passed**（含新 helper+route test 紅）→ 證新測真有 bite 非 tautology；`git stash pop` 還原後 byte-identical（diff stat 194+/42-）、m4 116/closed_pnl 61 全綠。
+**★ Linux read-only fan-out 真 DB 驗（trading_postgres/trading_ai/trading_admin，720h 窗，0 寫操作）**：A_base_close_rows=**288** / B_NEW_LATERAL_rows=**288**（= base，零 fan-out）/ C_OLD_barejoin_rows=**293**（裸 LEFT JOIN fan-out +5 phantom，重現被修 bug）/ D_entry_found_true=**288**（100% 找到代表 entry）/ E_close_rpnl_null=**0**（LOW-2 今日 vacuous，net-label NULL guard forward-protective）。LOW-1 entry_fee NULL prevalence=**0/284**（fee REAL DEFAULT 0 罕 NULL，`e.fee IS NOT NULL` 謂詞今日 no-op 但 forward-protective）。before/after row 數一致確認：NEW=288=base、OLD=293（+5 fan-out 被消除）。E2/E1 兩 Linux-owed 全閉。
+**cross-lang float = N/A**（純 Python + SQL，無 Rust hot path）。temp SQL 本地+容器皆已清。prod 零寫。
+**verdict = PASS（ready for PM commit/push）**。退 E1 清單：無。教訓：(1) fan-out 修在 Mac 只能字串 grep（不證行為），真 DB 三路對比（base/NEW LATERAL/OLD barejoin）才證 NEW=base 零 fan-out + OLD 真 +N 重現 bug。(2) 全量 4728/66 brief baseline：failed 是硬上限（CSRF-OFF 互斥 66 全在無關檔），passed 因 sibling 成長到 4842 ≥ baseline=不回退；surgical stash 2 source 檔分離「pre-existing WIP/sibling」vs「本 fix」的 attribution。
+
+BASELINE: 2026-06-14 passed=4842 failed=66 skipped=9 error=4 (control_api_v1 full, CSRF_SHADOW-OFF default, 4 errors=pre-existing program_code abs-import collection lane; m4 host suite 116 passed separate)
+
+## 2026-06-14 · SIZING-RIGOR 回歸（KELLY-SIG-1 Wilson shrinkage + DYNAMIC-RISK-SIG-1 UP-path LCB gate）— Mac --lib release PASS（Linux full owed-post-push）
+**被驗**：dirty main @ `48cdbfe2`，未 commit。SIZING-RIGOR=**5 檔**（非任務述 sizer 2 檔）：`ml/kelly_sizer.rs`(+236：Wilson LB shrink win_rate→Kelly + r_haircut shrink-toward-1 + KellyConfig 3 新欄+validate) / `dynamic_risk_sizer.rs`(+233：UP 路徑顯著性 gate，低樣本→SE 大→LCB<sharpe_high→不加倉；DOWN 永遠 ungated survival-safe；sig_gate_enabled/sig_z/sig_min_trades 3 新欄+純遙測 last_sharpe_annualized) / `config/risk_config.rs`(+46：RiskConfig.kelly 鏡像 3 欄+default+validate) / `config/risk_config_tests.rs`(+67) / `risk_checks_per_strategy_tests.rs`(+39：跨 3-env 真 TOML 配置 sentinel)。Rust-only。
+**保守路徑核心語義**：low-sample → 寬信賴區間 → (kelly)Wilson LB 把 win_rate 縮到下界→Kelly_full 降/翻負→qty 縮或 FIX-27 拒；(dynamic)point-est SR 過閾但 LCB 未過閾→UP 擋退 unchanged。default 全 ON 只增保守（z=1.645 單尾95%、r_haircut=0 不動R、UP floor=max(min_trades,sig_min_trades)）。
+**兩遍+決定性**：Mac cargo arm64 `cargo test --release -p openclaw_engine --lib --no-fail-fast` **4 遍全 3846 passed/0 failed/1 ignored/0 error**（exit=0、單一 result line、run1/2/3/final identical 0.72-0.98s）。0 FAILED/panicked/error。
+**baseline 對賬（stash 5 檔法）**：注意——只 stash sizer 2 檔會破編譯（`risk_checks_per_strategy_tests.rs` 引用新欄，dirty sibling 也屬 SIZING-RIGOR）→ 必 stash 全 5 檔。base(stash 5)=**3827 total（--list）** → HEAD=**3847 total** → 節點級 set-diff **REMOVED=0 / ADDED=20**（全 SIZING-RIGOR：kelly_sig_1×7+sig_gate×4+dynamic validate×3+annualized telemetry×1+risk_config kelly_sig_1×4+跨env sentinel×1）。delta=+20 全新測 0 regression。我的 stash 乾淨 pop、3 個 pre-existing stash（b9bb6735 / 8c-branch / E1-rebase）全程未碰。
+**獨立 mutation-bite ×2 親驗（非盲信 E1/E2）**：(1) dynamic `&& up_allowed`→`&& (up_allowed||true)`（退回舊低樣本行為）→ `sig_gate_blocks_marginal_up_but_off_fires`+`sig_gate_up_floor_blocks_below_sig_min_trades` **2 紅**（低樣本 UP-block 失效），`does_not_block_down`+`allows_up_when_lcb_clears` 正確仍綠（DOWN ungated/允許案兩路皆 fire）。(2) kelly `wilson_lower_bound(...)`→`win_rate`（shrinkage ON 但退回 point-est）→ `test_kelly_sig_1_shrinkage_only_reduces`+`_shrinkage_can_trigger_fix27_reject` **2 紅**（證 Wilson LB 是真縮倉機制）。兩 mutation 還原後 md5 byte-identical（dynamic=0b767071… kelly=e8a63578…）、grep E4-MUTATION=0、diff stat 仍 5 檔 +618/-3、post-restore full ×1=3846/0/1。
+**★ 配置 SSOT sentinel 非 skip-path false-pass（最高價值）**：`test_sig_keys_all_three_env_tomls_validate` 經 CARGO_MANIFEST_DIR 讀**真** settings/risk_control_rules/risk_config_{demo,live,paper}.toml→RiskConfig::validate()。三檔皆 EXISTS 且帶顯式保守 key：demo dynamic_sizing.enabled=true/min_trades=50/sig_min_trades=50；**live enabled=true/min_trades=100/sig_min_trades=100（最關鍵 env，`sig_min_trades>=min_trades` 斷言真執行）**；paper dynamic_sizing.enabled=false（該分支設計性跳過）。kelly uncertainty_shrinkage_enabled=true 三 env 皆斷言執行。權威序 runtime RiskConfig TOML 為最高，此測鎖死任何人改 live min_trades 漏改 sig_min_trades 即紅。
+**no-flaky**：4 遍 full-lib 無任一 fail；前基線記錄的 config::io round-trip + persistence concurrent flake 本 session 未出現。
+**mock 審查**：N/A（純 Rust 單元，無 IO/mock；測試直驅真 compute_kelly_qty / DynamicRiskSizer::maybe_update / RiskConfig::validate）。**cross-lang float=N/A**（Rust 內 sizing 計算，無 Python↔Rust 共算浮點）。
+**owed（誠實標）**：(a) **Linux release 54-target full set 真基準**對照任務述 4665/0 = owed-post-push（Mac --lib 3846 為本機 scoped，Mac PASS≠Linux PASS；Linux full 預期含本 +20 與其他 dirty sibling）；(b) source land≠runtime 生效（需 restart_all --rebuild 跑新 binary，TOML 新 key 經 serde(default) 已可被現行 binary 容忍但 gate 邏輯需新 binary）；(c) commit-scope：dirty 樹混 AI-PRICING/SEAM-GUARDS/PERF/SHADOW-QTY 等 sibling workstream，PM commit 須 `git commit --only` 僅 SIZING-RIGOR 5 檔。
+BASELINE: 2026-06-14 passed=3846 failed=0 ignored=1 skipped=0 error=0 (scope=Rust openclaw_engine --lib release, env=Mac cargo arm64; SIZING-RIGOR @ dirty main 48cdbfe2; base(stash 5 檔)=3827 total → HEAD=3847 total, ADDED=20/REMOVED=0 全新測 0 regression; mutation-bite ×2 親驗 sizer 保守路徑非 vacuous; 跨 3-env 真 TOML config sentinel 鎖 live sig_min_trades>=min_trades; 任務述 Linux release full-set BASELINE 4665/0 為 Linux 權威, Mac --lib 3846 為本機 scoped, Linux full owed-post-push; 0 flaky 本 session)
+**VERDICT: PASS（Mac --lib scoped；Linux full owed-post-push）**。退 E1 清單：無。
+**教訓**：SIZING-RIGOR 任務述「sizer 2 檔」實為 5 檔——config mirror（risk_config.rs/_tests.rs）+ 跨-env config sentinel（risk_checks_per_strategy_tests.rs）皆屬同一改動集且 sibling test 引用新欄；只 stash 名義上的 2 sizer 檔做 base 會因 sibling 引用未定義欄破編譯（--list 回 0）誤判，必先 grep 新欄的全部 referencer 把整個改動集一起 stash 才得乾淨 compile-able base。
+
+## 2026-06-14 · Deribit DVOL/IV-surface 採集軸（artifact-only 離線研究）回歸 — PASS
+**被驗（全 untracked 新檔，0 既有改動）**：`helper_scripts/research/deribit_vol_axis/{__init__,collector,artifact,cli}.py` + `tests/test_deribit_vol_axis.py`。offline/read-only（零生產 import/零 PG/零 auth/零 order；Deribit=ADR read-only 市場數據，mirror polymarket_axis）。Mac py3.10.1/pytest9.0.3/duckdb1.5.3。
+**測試數**：E1 原 37 passed/1 skipped（live smoke opt-in）。E4 補 9 測（cli 編排端到端×4 + parquet 鏡像非阻斷契約×3 + PIT 時間戳一致性×2）→ **46 passed/1 skipped**，決定性 ×2 identical 非 flake。全 research/tests 套件：base（移除 deribit）=298/1，加 deribit=335/1（E1），加 E4 補測=**344/2**，throwaway move-aside reconcile 證 REMOVED=0/ADDED=+46（=37 E1+9 E4），0 regression（純加性）。
+**mutation-bite 親驗（5 個，逐一改業務碼必紅→還原 md5 byte-identical）**：①append-only `exist_ok=False→True`→test_append_only RED；②zero-filter 加 `if mark_iv is None: continue`→test_zero_oi_kept RED（1!=2）；③fail-soft `errors.append→raise`→test_dvol_failure_isolated RED（exception 傳播）；④PIT 時間戳 surface `now→now+"_DRIFT"`→我的 test_single_snapshot_shares_one_timestamp RED；⑤cli `surface_rows=result→[]`→我的 test_run_collect_manifest_marks_pit RED（0!=3）。collector/artifact/cli 三檔最終 md5 對 pristine byte-identical，0 E4-MUTATION marker。
+**mock 審查**：補測只 2 個 monkeypatch — (a)`collector.ThrottledJsonClient`→ctor-wrapper 注入 fake urlopen（HTTP IO 邊界 stub，collect_vol_snapshot/flatten/build_*/write_run 全真跑）；(b)`builtins.__import__` 擋 duckdb（optional-dep 缺套件契約，IO 邊界）。無一 stub 受測對象。parquet test 走真 duckdb 路徑（status=ok/5 parquet/無 .tmp 殘檔，非 skip）。
+**邊界鐵則確認**：collector 零 rebate/net/PnL 邏輯（純市場數據）；tokenize 剝註釋後 code 零 relevance/ranking/private/order_id/authorization；artifact 5 jsonl+manifest+index sha256 reverify；PIT point_in_time=True/retrospective=False；append-only run-dir 重名 FileExistsError；root 由 ${OPENCLAW_DATA_DIR} 推導非硬編碼。
+**owed（誠實標）**：Linux full regression 待 push 後補（純 Python+stdlib，無 Rust/無跨語言浮點/無 migration/無 async race，Mac ×2 足以建信心）；真 Deribit public API live smoke = opt-in `OPENCLAW_DERIBIT_LIVE_SMOKE=1`（E1 已單跑，CI 默認 skip 不打外網）；duckdb 在 Linux runtime 已驗可用，Mac 本地 parquet 路徑已真跑。cross-lang float=N/A（純 Python lane）。
+**BASELINE: 2026-06-14 deribit_vol_axis research/tests passed=344 failed=0 skipped=2 error=0（research/tests 子套件局部基線；deribit 檔貢獻 46 passed/1 skipped；ml_training+learning_engine 主套件本批未觸碰、不在此 tree）**
+**VERDICT: PASS（ready for PM commit/push；artifact-only 離線軸，0 live 風險）**。退 E1 清單：無。
+
+## 2026-06-14 · E4 回歸 — AI-PRICING-FB-FD（F-B Rust stale 真名 env 化 + F-D fail-OPEN→fail-closed + _sync 鍵空間）— PASS（基線重建）
+**被驗**：8 檔 in-scope working-tree 改動疊 HEAD=origin/main=`48cdbfe2`（dirty 多 sibling 樹，只審 8 檔）。tasks.rs(env OPENCLAW_CLAUDE_TEACHER_MODEL 預設 claude-sonnet-4-6)/client.rs(doc 註釋)/pricing.rs(Test8 spot-check 換現行+retired is_none 斷言)/layer2_cost_recording.py(F-D raise ValueError + _sync model=MODEL_IDS.get(tier,tier))/layer2_types.py(MODEL_IDS[opus] 4-7→4-8 + last_verified bump)/provider_pricing_catalog.py(manifest opus 4-8)/ai_pricing.yaml(active opus-4-8/sonnet-4-6/haiku-4-5；retired sonnet-4-5/opus-4-6)/test_layer2.py(F-D 改寫 + MED-1 2 sync test)。E2 round-2 RETURN 5 finding 全已 E1 修補。
+**Python（mac_dev venv py3.12/pytest9.0.3）**：test_layer2.py = **100 passed ×2 非 flaky**；layer2-family+provider/pricing/model 7 檔合 **264 passed**。**baseline reconcile（同 worktree checkout HEAD 之 4 py 檔實測）**：base=94，HEAD-worktree=100。node-ID set diff：**REMOVED=1**（test_record_claude_cost_unknown_tier，fail-OPEN 舊測，有負向取代）/**ADDED=7**=本任務 3（unknown_tier_fails_closed + syncs_real_model_id_to_rust + syncs_non_anthropic_tier_unchanged）+ sibling perf3 4（TestGetOllamaStatusPerf::*，非本任務、working-tree test_layer2 攜帶）。本任務淨 −1/+3（刪測有功能已死負向取代，合規）。
+**Rust（cargo 1.95 release）**：engine lib **3846 passed / 0 failed / 1 ignored**；ai_budget::pricing **9 passed ×2**；Test8 對真 YAML（OPENCLAW_PRICING_PATH）**1 passed ×2**（live YAML sonnet-4-6 is_some + sonnet-4-5 is_none 真斷言）。engine **bin 構建綠**（tasks.rs/client.rs F-B 改在 bin crate，--lib 不編，必 build --bin openclaw-engine 才覆蓋；1 pre-existing unused-import warn 無關）。YAML safe_load OK，active=8（≥5）。
+**mutation-bite 親證（3 處 load-bearing fix 全有牙）**：(1) F-D：raise→silent-sonnet fallback → unknown_tier_fails_closed 紅（DID NOT RAISE），還原綠。(2) _sync 鍵空間：model=MODEL_IDS.get→model=model_tier → syncs_real_model_id 紅（'sonnet'=='claude-sonnet-4-6'）、syncs_non_anthropic 維持綠（deepseek fallback 兩版同 = 正確不變量非空測）→ 消滅 E2 MED-1 vacuous。(3) Test8：YAML sonnet-4-5 active true → is_none() panic@pricing.rs:284，還原綠。三處還原後 grep MUT-E4=0、cost_recording byte-identical、git diff stat 復原。
+**mock 審查**：2 sync test patch 模組級 `_sync_to_rust_budget`（IO/daemon-thread/IPC 邊界，鏡像同檔 _invalidate_h_state_async 範式）— record_claude_cost 業務邏輯（fail-closed 閘 + MODEL_IDS 正規化）真跑，斷言真 code 產的 model= 實參。0 業務邏輯被 mock。
+**cross-lang float = N/A**（Python control-flow + Rust YAML lookup，無共用 indicator/浮點）。fail-closed 對全 eff_tier 集不誤拒（4 production caller eff_tier 經 map_tier_to_provider 全∈PricingTable.models；local: 前綴 cost=0 早退在 raise 前）— 沿用 E2 cross-check + 獨立複核。
+**owed（Linux，誠實標）**：Rust budget sync 真連線（engine record_ai_usage IPC）+ env OPENCLAW_CLAUDE_TEACHER_MODEL 預設真名實際送 Anthropic API 對齊 = Mac 無法驗真連線；branch 未 commit/push/deploy。opus-4-8 價值 $5/$25 = operator 對 anthropic.com 核（AUDIT flag，非 E4 scope；AI-E P2 已證非本次臆造、三方 manifest pre-existing 一致）。
+**VERDICT: PASS**（ready for PM commit/push）。退 E1 清單：無。教訓：tasks.rs 在 main.rs `mod tasks`=bin crate，cargo test --lib 不編譯它，F-B env 改必 build --bin 才真覆蓋；「鍵空間 fix 有 bite」必逐 fix 親 mutate（fail-closed 有牙≠sync 鍵空間有牙），且設一條「不變量不應變」的對照測（non-anthropic fallback 兩版同綠）證非 over-fit。
+
+BASELINE: 2026-06-14 passed=3846 failed=0 (Rust openclaw_engine --lib release) | Python test_layer2.py passed=100 failed=0 (mac_dev py3.12) | layer2-family 7-file passed=264 failed=0 | 基線重建（2026-06-10 舊基線作廢後首次全量；error/skipped 四元組：lib skipped=0 error=0 ignored=1，py skipped=0 error=0）

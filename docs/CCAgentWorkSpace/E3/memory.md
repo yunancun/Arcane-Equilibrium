@@ -190,3 +190,101 @@
 - **LOW**：①seed CLI `_SENSITIVE_KEYWORD_RE`=keyword-anchored（api_key|secret|password|token|Bearer），漏 hmac/signing_key/auth_signing_key/X-BAPI-SIGN/DSN(postgres://redacted@)——同 L2 redactor v3 LOW-1 keyword-set gap；源=MEMORY.md 索引行（人寫、已在 git＝任何 leak 已 pre-existing），餵 agent_memory→B3 seam。②OLLAMA_BASE_URL env 可覆寫為非 loopback → embed POST（含蒸餾 l2_calls 文本）cleartext HTTP 外送；default loopback 安全。③urllib 三外連 default 跟 redirect 無 host re-pin（TLS 驗證 default-on + 0 credential 送出 → auth-leak N/A）。④distill cron CLI stats（含 source_read_failed:{exc}）落 cron log，psycopg2 query exc 理論可含片段。
 - **INFO**：①analyze_token_usage 印 meta.description + _first_line(prompt)（prompt 衍生 label，僅首行+截斷，stdout-only 非持久/非 commit）——非純計數但 bounded。②mnemopi pilot repo-external（~/.local/share/mnemopi-tradebot），`@oh-my-pi/pi-mnemopi@15.11.2 --ignore-scripts`（npm ls -g 驗、跳過 postinstall=onnxruntime-node 原生二進制 darwin 死碼）+ FTS-only + 剝 OPENROUTER/OPENAI key + stdio-only 無端口——供應鏈主 RCE 向量已中和；無法從本機獨立複驗 publisher 身份（源碼 eval 在 /tmp/repo-eval 已做）。③BB 哨兵 raw 公告存 state 無下游 LLM 消費者（描述絕不展開、plain-text alert）；alerts.jsonl 用 json.dumps per-record → 換行轉義無 jsonl line-injection。
 報告：返回 text output 給 parent agent（系統 reminder 禁寫 .md）。承 [[2026-06-08 L2 D3 sanitize gate FINAL re-audit（redactor v3 — E3 PASS）]]（LOW keyword-set gap 同根因）。
+
+### 2026-06-14 全倉 cold security audit（baseline 對照 — E3 PASS·1 LOW latent + 4 INFO）
+
+**Verdict：PASS — 0 CRITICAL / 0 HIGH / 0 MEDIUM / 1 LOW（latent，flag-OFF）/ 4 INFO** · HEAD `976d420e`（main，工作樹有 post-fee PnL label delta 未 commit）。
+
+**範圍**：srv 全倉（rust engine / control_api / GUI / helper_scripts / .claude / 治理文檔）+ 未 commit 碼 delta（closed_pnl_pagination.py post-fee 對賬 + fills_loader.py JOIN + tab-live.js/tab-demo.html drift label + m4 tests）。對照 baseline [[2026-05-30 E3 DEEP-DIVE Live/LiveDemo Boundary]]（CONFIRMED-CLEAN 5-gate）。
+
+**核心 PASS（親驗）**：
+1. **5 gate 全守**：gate-5 SSOT `verify_signed_authorization` 用 `hmac.compare_digest`(constant-time, live_preflight.py:168)+`expires_at_ms<=now_ms` 過期(:180)+env-match，未動。socket 0o600 真 apply(server.rs:417 `set_permissions from_mode(0o600)`)。IPC HMAC `verify_slice` 常數時間(connection.rs:68)；prod restart_all/fresh_start/clean_restart 全設 `OPENCLAW_IPC_SECRET_FILE`(chmod 600)→HMAC 握手 prod 開啟；unset-skip 僅 dev/test，且 0600 socket 為第二防線。
+2. **注入面 0**：5 SQL f-string 命中全非 user-controlled（parquet_etl SEC-B02 date-regex+resolve；mlde savepoint=time_ns;replay/ref21/fresh_start 全 hardcoded table 常數+allowlist）。recall.py B3 SQL 全 bound param(query 經 plainto_tsquery/word_similarity 非 concat)。0 shell=True。未 commit fills_loader JOIN `entry_fill.engine_mode=f.engine_mode` 不漏 paper；engine_mode `IN('live','live_demo')` invariant 未動。
+3. **secret-leak 0**：Pattern A-G 全 clean；docs 高熵 hex=test fixture(test_key.hex/manifest sha256/demo-operator sig)；.claude config 0 hardcoded secret；路徑硬編碼僅 1 test（enforce no-path guardrail）+rust/target(gitignored)。
+4. **access-control**：/cost/* HIGH-1 已閉(layer2_routes:396/436 require_scope_and_operator)；risk write `_require_risk_write`=require_scope_and_operator("risk:write")；`_ipc_failure` log_detail 僅 server-side 不入 client detail。CORS 剝 wildcard@credentials=True(APR01-HIGH-1)+rate-limit+login lockout+CSRF double-submit。
+5. **Rust unsafe**：8 塊全 `#[cfg(test)]`(halt_audit.rs:382 mod tests)包 env::set_var(Rust 2024 edition)；0 production unsafe FFI。
+6. **no-withdraw HELD**：grep 0 withdraw code path；MIT-MF-1 grep 0 hit。
+7. **embed loopback 守**：default 127.0.0.1:11434；非 loopback→`_remote_rejected`全停 embed 軸(FTS-only)，需 `OPENCLAW_L2_MEMORY_EMBED_ALLOW_REMOTE=1`（上輪 LOW-2 已閉）。
+
+**1 LOW（latent，不阻 — A11 B3 recall origin-tag 未在注入邊界 enforce）**：B3 recall（`OPENCLAW_L2_MEMORY_RECALL`，**default 0 OFF**，runtime 仍 OFF/PID 3607315）已從 dormant 接 live source。write-side 已做 MED-2 緩解：`pipeline.py:582 _origin_for_refs` 標 l2_calls 衍生記憶為 `l2_untrusted` 並沿 supersede 鏈傳染 + `parsing.py` schema 驗(mem_type 白名單/priority clamp[-1,100]/CONTENT_MAX=4096/source_ids∈allowed)。**但 recall path（_VECTOR_SQL/_FTS_SQL/_FTS_HINT_SQL）不 SELECT 也不 filter `origin`**→flag=1 時 untrusted-origin content 逐字注入 L2 system prompt(`apply_memory_recall_to_prompt`:152)，唯一隔離=inline 文字免責聲明（"advisory context, not an execution command"），無結構 injection-pattern scrub。**為何 LOW 非 HIGH**：flag default OFF+runtime OFF；L2 輸出下游 schema 驗+數值範圍後才入 gate（不直驅交易）；write-side origin tag 已建（只差 recall 端消費）。修：recall SQL 加 `origin` 欄+對 `l2_untrusted` 記憶降權/排除/加強隔離標記，active `1` 前必收口。承 [[2026-06-11 P2 殘項+哨兵批次安全審計]] MED-2 同鏈（write-side 緩解已落，recall-side enforcement 為新缺口）。
+
+**4 INFO**：①`.claude/workflows/rank7-altdata-leakfree-screen.js:19` hardcoded `/home/ncyu/BybitOpenClaw/srv` default（dev orchestration 非 production trading 碼、args.baseDir 可覆寫）跨平台偏差。②107 write route 未全 byte-trace（governance/live/L2/risk 核心面已覆，其餘靠 baseline）。③IPC unset-secret dev-skip 分支存在（prod 設 secret+0600 socket 雙防，非缺口）。④未 commit post-fee delta 純 observability label（authoritative_pnl/learning_pnl/drift），GUI drift 經 ocEsc XSS-safe，0 新 auth/order/secret 面。
+
+報告：`docs/CCAgentWorkSpace/E3/workspace/reports/2026-06-14--E3--full_repo_cold_audit.md`。
+
+### 2026-06-14 closed_pnl 分頁 + m4 fills_loader 靶向冷酷審計（8 dirty 檔 — E3 FINDINGS）
+
+**Verdict：FINDINGS — 0 CRIT / 0 HIGH / 1 MED / 2 LOW / 3 INFO** · HEAD `976d420e`（8 檔 working-tree uncommitted，in-flight 未過完整 E1→E2→E4）。承 [[2026-06-14 全倉 cold security audit]]（該輪 INFO-4 高層帶過，本輪 deep-dive PG empirical）。
+
+- **MED-1（m4 fills_loader post-fee net label JOIN 缺陷，latent）**：ssh trade-core read-only psql 實證 trading.fills `context_id` text/nullable/**非 unique**，同 (context_id,engine_mode) 重複 29 組；`LEFT JOIN entry_fill ON entry_fill.context_id=f.entry_context_id` 把 close 行 1763→1796（**fan-out +33/~1.9%**），30 close 配多 entry，抽樣 4/5 entry fee 不同（如 PEPE entry_fees {0.0041734,0.01147685}）→ **重複+歧義 net label**（正是 docstring 自稱要防的「污染 M4 樣本」換方式重犯）；另 25 close 配 0 entry，`COALESCE(entry_fill.fee,0)` **靜默省 entry fee=偏樂觀 gross-leakage**。為何 MED 非 HIGH：runner generate_stage1_candidates 只吃 kline/funding/liq，**fills load 但未傳入 candidate 生成**（runner:340/:284 僅 count）→ 標籤 scaffold/dormant 無 live 下游挖 hypotheses。修：JOIN DISTINCT ON/聚合去 fan-out + entry 缺失 fail-loud/drop 非靜默 0。
+- **LOW-1（test-blindspot）**：schema test 只 string-match JOIN 字面，0 真 PG 行為驗證，fan-out/entry-missing 全不覆蓋（M4 Mac mock 無 PG）。
+- **LOW-2（doc-stale）**：docstring 殘留「NULL realized_pnl caller dropna」契約 vs 新 `COALESCE(f.realized_pnl,0)`（derived net 永不 NULL）自相矛盾；empirical close_null_rpnl=0 今日無 live 影響。
+- **INFO（closed_pnl 分頁 + GUI 全 CLEAN）**：cursor base64-JSON fail-closed（篡改→400）；limit/offset/lookback FastAPI bounded Query→全 bound param 0 SQL inj；engine_mode demo=("demo","live_demo")/live=("live","live_demo")/m4 IN('live','live_demo') 三者 literal 非 caller-tunable **0 paper 洩漏**；純讀模型 0 order/lease/IPC 寫面，authoritative/learning_pnl 誠實標源 + Bybit 掛→`learning_pnl=None`+`bybit_unavailable_fail_closed` **fail-closed 非 fake-success**；GUI drift 純文案改，drift=parseFloat（Number）+ocEsc(title) **XSS-safe**，tab-live.js node --check PASS / tab-demo brace-balanced。secret-leak A/C/D/G + MIT-MF-1 grep 對 8 檔皆 0 hit；502 走 sanitize_exc_for_detail（prod 只 classified msg）；93 tests passed（40+35+18）。
+**教訓**：post-fee net label 的 JOIN 正確性必須在真 PG 驗 join-key cardinality（context_id 非 unique→fan-out），string-match 字面測試是 test-blindspot；「latent/dormant 標籤」（load 但未 wire 進 candidate）降 MED 非清白——建好即髒，wire 前必收口。
+
+報告：`docs/CCAgentWorkSpace/E3/workspace/reports/2026-06-14--E3--closed_pnl_pagination_m4_fills_targeted_audit.md`。返回 text output 給 parent agent。
+
+### 2026-06-14 seam 查證：submit_paper_order IPC 寫路徑（E3 REFUTED-as-bug / INFO）
+
+**Verdict：REFUTED（非真缺口）— 0 CRIT/HIGH/MED；判為 INFO（latent 設計觀察，非漏洞）** · 凍結 SHA `976d420e`。
+**seam 主張**：submit_paper_order 是 LIVE 可達 IPC 寫路徑，HTTP 410-disabled 但 IPC live，Rust handler 不驗 engine==paper → missing-gate/auth-bypass。
+**親驗反證**：(1) handler `strategy.rs:163` → `SubmitOrder` cmd → `lifecycle.rs:168 handle_submit_order` → `commands.rs:163 submit_external_order`（行 163-505）**全程只動 `self.paper_state.apply_fill`（模擬成交，oneshot 同步回 envelope），0 個 `OrderDispatchRequest`、0 個 `place_order`**。四處 OrderDispatchRequest(997/1160/1385/1584) 全在 close/exit fn（execute_position_close 等）非此 open path。真 OMS 寫=`event_consumer/dispatch.rs:838 om.place_order` 經 shadow_channel，由 on_tick 策略信號餵，**submit_external_order 不餵 shadow_channel**。executor_agent.py:722-724 docstring 自證「shadow_mode=False 時 routes to paper_state」。(2) engine 路由：`extract_engine_tx` 認 caller `engine` 參數（executor_agent 傳 execution_engine 可為 live；Python submit_paper_order 無 engine→primary() 偏 live>demo>paper）→ **即使路由到 LIVE pipeline，該 pipeline 的 SubmitOrder 仍只 paper_state 模擬**（三 pipeline 同一 handler）→ engine==paper 不驗**無害**（無真錢路徑可繞）。(3) reachability：IPC 入口 connection.rs:122 `OPENCLAW_IPC_SECRET` 設則首訊強制 `__auth` HMAC（verify_slice 常數時間+30s replay 窗）才進 dispatch loop(:199)，**無 per-method allowlist 繞過**；prod 全 restart 腳本設 secret。runtime 實證（ssh read-only）：`/home/ncyu/BybitOpenClaw/secrets/environment_files/ipc_secret.txt` 0600/65B 存在；`/tmp/openclaw/engine.sock` `srw-------`(0600 owner-only)→非 ncyu uid 不可連，ncyu 仍須 HMAC 握手。(4) HTTP route paper_trading_routes.py:678 確 410-disabled。
+**為何 REFUTED 非 confirmed**：「HTTP disabled vs IPC live」分歧是真的，但 IPC 那條 live 路徑**不通真錢**（純 paper_state sim）+ **非未授權可達**（0600 socket + HMAC）。無 auth-bypass、無 5-gate 繞過（5 gate 守的是真 OMS place_order，此路不經）。命名誤導（submit_*paper*_order 卻可 route live pipeline）是 latent 可讀性債，非安全漏洞。INFO：若未來 GUI/Earn intent 改走此 trade-path 接真 dispatch（commands.rs:199-201 註解已預警），須重審。承 [[2026-06-14 全倉 cold security audit]]（5-gate clean 基線一致）。
+報告：返回 text output 給 parent agent。
+
+### 2026-06-14 ADPE 閉環 runner + demo-maker arm 安全審計（E3 PASS）
+
+**Verdict：PASS — 0 CRITICAL / 0 HIGH / 0 MEDIUM / 2 LOW / 2 INFO**（新檔 only，工作樹未 commit；承 [[2026-06-14 全倉 cold security audit]] baseline）。
+
+**範圍**：adaptive_demo_profit_engine/{__init__,reward_source,ipc_lever,demo_maker_arm,runner}.py + settings/adaptive_demo_profit.toml + 2 test 檔。親跑 28 passed + 對抗 probe。
+
+**boundary「live 不碰」實證**：(1) engine_mode 雙層硬鎖=真 fail-closed：`_assert_demo` 用 `== "demo"` exact/case-sensitive match（probe 9 變體含 'DEMO'/' demo'/'live'/'mainnet'/'' 全 RuntimeError，0 IPC fire）；reward SQL `engine_mode_scope('demo')==('demo',)` 親驗 demo-only（'live' 才回 ('live','live_demo')）。(2) 5-gate/live/mainnet/authorization.json/secret slot 0 import 0 code hit（grep 只 4 中文註解）；新包 import 僅 stdlib+allocator+linucb SQL helper+lazy 既有 IPC client/snapshot reader。(3) set_strategy_active IPC 走既有 HMAC-SHA256(ts) auth（±30s skew，Rust verifier mod.rs:621），只 flip orchestrator per-strategy is_active bool；is_active 僅 gate signal-generation（orchestrator/tick step_4_5 upstream），**下游仍走 IntentProcessor+Guardian+cost-gate+5-gate**，活化策略不繞任何 live auth。(4) reward SQL read-only SELECT、100% 參數化（engine_modes/max_age_days 全 bound param，0 f-string）、demo-scope+attribution_chain_ok+net_bps_after_fee NOT NULL、不走 decision_outcomes NULL bug。
+
+**誠實鐵則實證**：demo-maker artifact 雙軌隔離真落地——`build_demo_maker_reward` 簽名不暴露 tier override，硬編 FILL_TIER_MAKER_NO_QUEUE_DEMO_ARTIFACT；allocator ingest 親驗 transferable_only 軌 0 吸收 artifact（trust_track=transferable_only=promotion 軌）、all_fills 軌標 saw_artifact。kill switch 完備（snapshot read + 冪等 restore，CLI --kill-switch）。0 合成 PnL/fills。
+
+**2 LOW（不阻 gate）**：①ipc_lever fail-safe「現態未知+想開→發 IPC 開」：snapshot 缺（引擎未跑/讀失敗回空 dict）時對 desired=True 策略主動發 set_active(True)——demo 沙盒內語義安全（開 demo 策略），但 snapshot-read 失敗與「策略確實不存在」不可區分，理論上可在引擎冷啟瞬間多開本該關的 demo 策略；demo-only 影響微。②sync_ipc_call 在 ipc_secret 未配置時（env 空）跳過 auth 直連 socket——既有 IPC 設計非本 PR 引入，Unix socket 本地權限為實際防線（非本包可修）。
+
+**2 INFO**：①regime enum 映射（trending→high-vol 等）是 best-effort 無共用 SSOT，映射不到退 insufficient_context（誠實降級，非安全問題）；②secret-leak grep（A-G）+ MIT-MF-1 guard + 硬編路徑 全 0 hit。
+
+### 2026-06-14 Track1 demo explore-gate PR pre-merge 安全審計（E3 PASS）
+
+**Verdict：PASS — 0 CRITICAL / 0 HIGH / 0 MEDIUM / 1 LOW（Python sink 無正式 pytest，E1 誠實 defer E2）/ 2 INFO** · HEAD `e454078d`（dirty multi-session tree；目標 4 rust + 2 py 全在 dirty set，pre-merge review 預期）。
+
+**範圍**：edge_estimates.rs / gates.rs / tests.rs / opportunity.rs（+172/-0 全 additive）+ explore_quota_sink.py（新）+ runner.py。設計正本 PA `2026-06-14--track1-demo-explore-gate-design.md`。
+
+**5 驗證點全綠（親跑真碼，0 mock）**：
+1. **kill switch OPENCLAW_EDGE_RELOAD=0 真停 explore = 是**。`is_edge_reload_enabled()` 嚴格 `== "1"`（main_boot_tasks.rs:518）；非 1 → `spawn_..._if_enabled` early-return 不 spawn daemon（:478）→ 0 ReloadEdgeEstimates 派發 → explore 信號永不進引擎（凍 boot snapshot）。
+2. **三層降級全 fail-closed = 是**。reload off（kill switch）/ JSON 缺欄（`unwrap_or(false/0)` edge_estimates.rs:182-189）/ 解析失敗（`load_from_file`→None→`load_for_mode` fallback empty()）皆 no-explore。Rust 7 test 綠（含缺欄 fail-closed block / remaining=0 still-block / not-eligible still-block）。
+3. **explore 只 demo（Validation profile）= 是，mainnet 物理隔離**。`effective_governance_profile`：僅 `Live+Mainnet`→Production→`cost_gate_live_with_slippage`（strict gate，grep 0 explore 引用 + test `test_cost_gate_live_ignores_explore_fields` 餵 explore=true 仍 block）。Demo + LiveDemo/Demo/Testnet→Validation→`cost_gate_moderate_with_slippage`（explore gate）。explore 全 9 處出現皆在 moderate 函數內（gates.rs:145-249）。LiveDemo 走 moderate 是 P0-6 方案 A 既有架構（play-money cold-start gate，非本 PR 新引入），sink 又硬鎖 engine_mode='demo' 只寫 edge_estimates.json。
+4. **5-gate/authorization/live 0 觸碰 = 是**。live_preflight/authorization/order_manager/live_auth/governance/place_order/live_reserved/secret 源檔全不在 dirty set；diff added-line grep 0 命中（唯一命中是隔離 invariant 註釋引用 `cost_gate_live_with_slippage`）。
+5. **explore_remaining 耗盡後不再放行 = 是**。`explore_budget_remaining` = `max(0, explore_budget - n_trials)`（allocator:472，真實 posterior n_trials 衍生，非寫死）；n≥budget(30)→0→eligible=False→gate 回 block。親探：sink overlay remaining≤30 bounded、`eligible=remaining>0`、malformed key 不建 cell、dry_run 不寫、additive merge 保 JS 欄+_meta。
+
+**結構保證**：cost gate 是 `process_gates_only_with_features` 最後一道（router:1044）；Guardian(:850)/Kelly(:883)/P1 cap(:906-915) 全在前。explore 翻 Gate3 reject 物理不可繞 Guardian/Kelly/P1（根原則 4）。
+
+**1 LOW**：explore_quota_sink.py 無正式 pytest 檔（E1 報告 line 89-90 誠實 defer 進 test_adaptive_demo_profit_runner.py 給 E2，本輪命令列 synthetic 驗綠；我親跑對抗 probe 補洞全 PASS，既有 ADPE 23 test 0 回歸）。**2 INFO**：①JS writer 與 sink 雙寫同檔 last-writer-wins（E1 建議 cron 排 sink 在 JS 後，運維決策非安全 bug）；②LiveDemo 經 moderate gate 受 explore 影響 = by-design play-money（非 mainnet，非本 PR 引入）。
+
+**教訓**：demo↔live 隔離單一守門點 = `cost_gate_live_with_slippage`（=mainnet-only Production gate）零 explore 引用；驗法 = grep explore 全在 moderate 函數內 + 餵 explore=true 給 live gate 仍 block 的 isolation test。「demo only」需釐清 LiveDemo 也走 moderate（P0-6 既有），但只 mainnet 觸 strict gate，故真錢路徑物理隔離。kill switch 嚴格 `=="1"` literal + early-return-no-spawn 是真停（非 flag 內部 skip）。
+
+### 2026-06-14 live RiskConfig 寫入面門控對齊安全複審（authz 邊界改動 — E3 APPROVE）
+
+**Verdict：APPROVE（無可繞路徑）— 0 CRITICAL / 0 HIGH / 0 MEDIUM / 1 LOW（直連 socket bypass，spec-acknowledged，受 0600+HMAC trust tier 約束，非本 fix 範圍）/ 3 INFO** · 工作樹未 commit。
+
+**範圍**：risk_routes.update_per_engine_global_config（POST /api/v1/paper/risk/config/engine/{engine}/global）live-engine fail-closed guard + handlers_config.rs audit-only warn! + 8-test 新檔。對照 baseline [[2026-06-14 全倉 cold security audit]]（5-gate clean）。
+
+**攻擊者視角四問全答（親驗）**：
+1. **live RiskConfig 是否仍有 HTTP 路徑繞 5-gate = 否**。新 guard 在 `_require_risk_write`(operator+risk:write scope) + engine-validity 之後、`_get_direct_ipc()` 之前插入 `engine=="live"`→`all_five_live_gates_ok(actor, require_authz=True)`，失敗 raise 409，IPC 永不被呼（test mutation spy `call_mock.assert_not_called()` 親證 gate-before-mutation 無 TOCTOU）。複用唯一權威 primitive（與 post_live_session_start:168 / executor verify 同 SSOT），非 copy inline。
+2. **漏 engine→fail-safe-to-paper 可否被利用 = 否（且方向安全）**。Rust dispatch.rs:421-425 `patch_risk_config` 漏 engine `.unwrap_or("paper")`；HTTP 端 engine 是 path param 必填且 `_ALLOWED_ENGINES` 白名單。關鍵：legacy 寫路由（/config/global·/config/category·/agent-adjust）走 RiskViewClient._patch（risk_view_client.py:304-307）**不傳 engine param**→Rust 落 paper store，**永不觸 live store**→這些路由無法繞 live guard 改 live config（fail-safe 方向 = 收緊非放鬆）。唯一寫 live store 的 HTTP 路徑就是被 gate 的 per-engine route。
+3. **其他 dispatch arm 同類漏洞 = 無**。`patch_risk_config` 是唯一寫 risk_stores 的 IPC method（`s.select(engine)` 僅出現在 get/patch_risk_config；get 只讀）。config_name=`format!("risk/{engine}")`→engine=live 時 `"risk/live"`，Rust warn! `starts_with("risk/live")` 正確 fire（audit-only，不硬擋——spec 風險#6：Rust 無 secret-slot/authz/global-mode context，硬擋會破 g2 canary 直連 socket）。
+4. **require_authz 真 enforce = 是**。test_live_requires_authz_true 親驗 `require_authz=True` 傳入；真實鏈測試（test_live_all_gates_green_proceeds）走真 secret slot + 簽名 authorization.json fixture + live_reserved，不 patch primitive→五門全綠才放行。primitive Gate5 require_authz 分支呼 verify_signed_authorization（hmac.compare_digest 常數時間 + expires_at_ms<=now 過期 + env_allowed 匹配，SSOT）。
+
+**無新洩漏/DoS**：409 detail = {error, gate_failed, message} 逐欄鏡 post_live_session_start；gate_failed reason_codes 全來自受控 taxonomy（operator_role / global_mode_not_live_reserved / mainnet_env / secret_slot / authorization_* 細分），**0 str(e) 0 path 內插**；message 靜態字串。secret-leak Pattern A-G 對 3 改檔 + E1 報告全 0 hit（test fixture secret="test-secret"/api_key="k" 短於 16-char window）。MIT-MF-1 grep 0 hit。無新 unbounded dict / 無新 SQL / 無 shell。
+
+**1 LOW（spec-acknowledged，非本 fix 範圍）**：g2 直連 IPC socket 路徑 primary fix 不覆蓋（Rust 只 warn! 不硬擋）。受 socket trust tier 約束：server.rs:417 socket 0o600（set_permissions from_mode）+ connection.rs:122 OPENCLAW_IPC_SECRET 設則首訊強制 __auth HMAC（verify_slice 常數時間 + 30s skew，無 per-method pre-auth allowlist，任何 auth 失敗在 method dispatch 前斷連）。prod restart_all/clean_restart/fresh_start 全設 OPENCLAW_IPC_SECRET_FILE(chmod 600)。攻擊者無 ncyu uid 不可連 socket；有 uid 仍須 HMAC 握手。與 baseline 直連 socket trust-tier 結論一致（非本 PR 引入，不阻 gate）。
+
+**3 INFO**：①field 粒度統一門控（GlobalConfigUpdate 整體過門非逐欄）= spec-acknowledged 設計取捨，安全（取嚴）。②GUI risk-tab.js 未渲染 409 reason = minor UX follow-up，非安全。③小決策偏差（綁模組屬性 live_preflight.all_five_live_gates_ok 而非綁函數名 import）對齊既有 core_preflight() canonical 範式 + 利 monkeypatch，語義等價，無安全影響。
+
+**8 tests passed**（含真實五門鏈 + demo/paper 不受門 + 非 operator 403-not-409 ordering + require_authz=True assert + gate-before-IPC mutation spy）。
+
+**教訓**：(1) 「漏 engine 參數 fail-safe-to-paper」要驗方向——legacy 路由不傳 engine→落 paper store→無法觸 live config=fail-safe 收緊非放鬆，必須 grep 寫 primitive（RiskViewClient._patch）是否帶 engine 才能下結論。(2) audit-only warn! 在 Rust 不硬擋是正解（Rust 無五門 context），enforcement 留 Python 控制面 + 直連 socket 由 0600+HMAC trust tier 兜底；驗法=grep 唯一寫 store 的 IPC method + 確認無 per-method pre-auth allowlist。(3) reason_code 受控 taxonomy（非 str(e)）是 409 無洩漏的根據，逐一比對 mirror 來源確認逐欄等價。承 [[2026-06-14 全倉 cold security audit]]（5-gate / verify_signed_authorization SSOT / socket 0600+HMAC 基線一致）。
+
+報告：返回 text output 給 parent agent（系統 reminder 禁寫 .md）。

@@ -186,3 +186,27 @@
 4. **`update_run_status` 單 UPDATE WHERE pk 在無並發寫同列時 ~3ms**；懷疑「終態 UPDATE 卡 lock」要先看它與前一個寫操作的時戳差（本案 3ms 直接證偽），不要假設。
 5. **current_thread tokio runtime + 無 spawn + reqwest keep-alive**：這組合下 `std::process::exit` 立即，idle HTTP 連線不阻退出；排查「慢退出」可快速排除背景 task / runtime drain 這條線。
 
+## 2026-06-14 全倉 read-only 優化審計（commit 976d420e）
+
+**報告**：`docs/CCAgentWorkSpace/E5/workspace/reports/2026-06-14--full_repo_optimization_audit.md`（已複製 Operator/）。Verdict=FINDINGS，12 項（3 HIGH / 4 MEDIUM / 3 LOW / 2 INFO），0 檔破 2000 硬限。
+
+**3 HIGH**：F1 熱路徑核心——1m+5m 全 16 指標套件每 tick 無條件重算（step_1_2:86 + step_4_5_dispatch:222，無 bar-close gate），但輸入是 closed bars（tick 間不變），latest_indicators cache + closed_bars 信號現成 → 可 bit-identical gate 掉。F2 最高 ROI：Cargo.toml release profile 僅 strip，缺 lto/codegen-units（熱路徑 5-15% 免費，純 build flag 零功能風險）。F3：layer2_routes.py:531 async def 內同步 urlopen(timeout=5) 阻塞 event loop（違反自身 main.py:387 守則）。
+
+**校正**：FD-200 leak（2026-05-25）已修確認（restart_all.sh:615 含 0<&- 200<&-）；Python threading.Lock 計數 81（profile baseline 記 ~45，已 stale 須更新）；F5 symbol interning 與 2026-05-21 H0 option C 重疊（引不重論）。
+
+**新教訓**：1) 指標重算類熱路徑先查「輸入更新頻率 vs 計算頻率」落差——closed-bar 驅動的指標每 tick 重算是高頻浪費，cache map 常已存在只差 gate。2) async route 內同步 I/O 用 `awk inasync` 掃 async def 區塊比全域 grep 準（排除 daemon-thread time.sleep false positive）。3) 同名 stat helper 跨檔（_percentile q∈[0,1] 無 NaN過濾 vs p∈[0,100] 有）是 silent drift，名同契約異比純複製更危險。
+
+## 2026-06-14 P1 perf 深掘：1m+5m 指標每 tick 無條件重算（bar-close gate fix_spec）
+
+**Verdict=CONFIRMED bug + fix_spec ready（GO，PA 範圍核可後可由 E1 IMPL）。**
+
+**量化（release microbench，本 Mac，openclaw_core compute_all 100 bars × 200k iter）**：`compute_all_with_lambda` = **28.0us/call**。每 dispatch tick 跑 2 次（1m@step_1_2:86 + 5m@step_4_5:222）=**~56us/tick 純指標 compute**。校正舊 memory：hot_path_baseline bench avg=23.6us **不含** compute（bench tick spacing 5s/symbol × 1000 warmup → 每 symbol 僅 ~16 closed 1m bar < 30-bar min → compute_indicators 回 None）；production 有 100 closed bar → 真實 per-tick ≈ 23.6+56 ≈ 80us，指標 compute 佔 ~70%。bar-close gate 後 5m 命中率 ~0.3%（300 tick/5m bar）、1m ~1.7%（60 tick/1m bar）→ 穩態省 ~98-99% 的指標 compute。
+
+**正確性根因（決定性）**：`get_ohlcv`→`buffer().ohlcv_arrays()` 只讀 **closed-bar buffer**（`self.bars`），in-progress `current_bar` 不在內（klines.rs:334 才 append）；compute_all_with_lambda 是 **純函數**(high/low/close/vol/lambda)，無 Instant/clock/RNG（volatility 的 "random_walk" 是 Hurst regime label 非 RNG）→ 兩次 bar-close 之間輸入 byte-identical → 輸出 bit-identical。
+
+**5m 路徑=乾淨零語意改**：indicators_5m 純 read-only（borrow 進 AlphaSurface/TickContext，策略只讀），無下游 stateful。**1m 路徑有 caveat**：step_1_2 在 compute 後跑 `apply_hurst_regime_label_for`（`detector.push(h_value)` 有狀態滯回 dwell-count），現每 tick push 同一 h_value=過餵；gate 到 bar-close 會改 dwell-count 語意（屬 bug-fix 方向但仍是行為變動，須 E2 確認 hurst 滯回 contract）。**建議分兩步：先做 5m gate（zero-change，最高信心）；1m gate 連同 hurst push gate 一起做並走 E2**。
+
+**fix_spec（epoch cache）**：cache key 用最後 closed bar 的 `open_time_ms`（單調唯一）**不可用 buffer.len()**（cap=500 飽和後 len 不變→stale）。加 `last_indicator_epoch: HashMap<String,(u64 1m_epoch,u64 5m_epoch,f64 lambda)>` + 複用 latest_indicators(1m)/新增 latest_indicators_5m map；gate=「epoch 與 lambda 皆未變→複用」（lambda 入 key 解 TOML hot-reload G7-02 失效面）。建議在 KlineBuffer 加 `last_close_time_ms()` inline 0-clone accessor。
+
+**caller_check**：5m consumer=AlphaSurface.tier1_only + TickContext.indicators_5m + bb_breakout_has_ta（step_4_5:273/291/377）全 read-only by-ref；1m consumer=step_3 signals/step_4_5 dispatch/step_6 derive_regime(latest_indicators)/commands ATR(latest_indicators) — 後二者讀 latest_indicators map 故 1m gate 須仍每 closed-bar 刷新該 map。複用不破任何下游（輸出 bit-identical）。
+

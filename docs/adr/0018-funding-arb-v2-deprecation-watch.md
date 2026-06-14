@@ -21,7 +21,9 @@ RiskConfig schema in W-AUDIT-6.
 
 **2026-05-26 升格 wording**（per AMD-2026-05-26-01）：
 
-funding_arb V2 **Retired closed**。三端 TOML `[funding_arb].active = false` 硬鎖（commit `a19797d` 已 land）+ Rust 程式碼層 `#[deprecated]` marker + runtime `update_params()` fail-closed guard（拒絕任何 IPC active=true 注入）。72 unit tests 保留為 dormant 結構驗。W-AUDIT-6 RiskConfig cleanup 由 AMD-2026-05-26-01 D+7 E1 IMPL 終結。
+funding_arb V2 **Retired closed**。enforcement 在 TOML config-load 層：三端 `[funding_arb].active = false`（commit `a19797d` 已 land），engine 啟動時 `registry.rs` 經 `set_active(p.funding_arb.active)` 載入 → 不掛載任何 entry。72 unit tests 保留為 dormant 結構驗。
+
+**doc-vs-code 訂正（2026-06-14 TW，per PA `2026-06-14--cold_audit_validated_fix_plan` funding 治理漂移家族 CC/FA MEDIUM）**：AMD-2026-05-26-01 §3.2 / cascade spec §1.2 規劃的「Rust 程式碼層 `#[deprecated]` marker + `update_params()` runtime fail-closed guard（拒絕 IPC `active=true` 注入）」屬 **D+7 E1 IMPL 範疇，從未 land**——`funding_arb.rs:156-177` `update_params()` 仍照 `self.active = params.active` 接受 IPC 注入；`registry.rs:240-251` 無 `#[allow(deprecated)]` 包裹也無強制 false。**當前唯一 enforcement = TOML config-load active=false；無 runtime IPC active=true 注入 guard。** 由於策略已 dormant（不在 active demo risk_config，無 live-money path），不補 guard（加 guard 屬擴 scope）；本訂正僅對齊文字陳述與代碼實態。W-AUDIT-6 RiskConfig cleanup 之 D+7 E1 IMPL 未執行。
 
 `funding_arb.rs` 模組保留作為 ADR-0046 (Proposed) future redesign slot；ADR-0046 並存不 retire。Revive 路徑 3 hard gate：
 1. 新 AMD super-cedes AMD-2026-05-26-01 + V3 design rationale
