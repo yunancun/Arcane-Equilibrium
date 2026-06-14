@@ -612,6 +612,8 @@ restart_engine() {
         ANTHROPIC_API_KEY="${anthropic_api_key}" \
         OPENAI_API_KEY="${openai_api_key}" \
         DEEPSEEK_API_KEY="${deepseek_api_key}" \
+        OPENCLAW_EDGE_RELOAD="${OPENCLAW_EDGE_RELOAD:-1}" \
+        OPENCLAW_EDGE_RELOAD_INTERVAL_SECS="${OPENCLAW_EDGE_RELOAD_INTERVAL_SECS:-300}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 0<&- 200<&- &
     echo "    PID: $!"
 }
