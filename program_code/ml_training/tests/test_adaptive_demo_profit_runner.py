@@ -508,6 +508,143 @@ def test_runner_demo_maker_arm_saw_artifact_isolated():
 
 
 # ---------------------------------------------------------------------------
+# explore-eligible 保活（修 ADPE 活化缺口）
+#
+# 缺口：build_desired_active 原本只把 winner→active、其餘→dormant；rich-signal 下
+# all-flat 會把全策略停用 → 無單 → demo explore-gate 永不觸發 → 學習器饑餓。
+# 修：enable_explore_sink=True 時，desired = winners ∪ explore-eligible（任一 arm
+# explore_budget_remaining>0）。有界：explore_remaining=0 不保活。explore 關→純 winner。
+# ---------------------------------------------------------------------------
+
+
+def test_explore_keeps_undersampled_strategy_active_when_all_flat():
+    # all-flat（負 EV → winner 全空）但該 arm explore 額度未耗盡（n_trials 少 < 30）：
+    # 開 explore_sink → 策略仍保 active（供 explore-gate 放行）。
+    neg_arm = make_arm_id("range", "grid_trading")
+    # 少量負樣本：n_trials 遠小於 explore_budget=30 → explore_budget_remaining>0。
+    rewards = [
+        ArmReward(neg_arm, "range", -30.0, float(i), FILL_TIER_TAKER_REAL)
+        for i in range(3)
+    ]
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        candidate_regimes=["range"],
+        candidate_strategies=[],
+        include_demo_maker_arm=False,
+        enable_explore_sink=True,  # 開 explore 保活
+        rng_seed=3,
+    )
+    lever, calls = _record_lever({"grid_trading": False})
+    runner = AdpeRunner(cfg, lever=lever, rewards_fn=lambda: rewards)
+    # 前置確認：該 arm 真的還在探索期（讀真實 allocator 信號，非寫死）。
+    for r in rewards:
+        runner.allocator.ingest_arm_outcome(
+            arm_id=r.arm_id, regime=r.regime,
+            realized_pnl_bps=r.realized_pnl_bps, ts=r.ts,
+            fill_realism_tier=r.fill_realism_tier,
+        )
+    assert runner.allocator.explore_budget_remaining(neg_arm) > 0
+    # 重建 runner（上面 ingest 只為斷言前置，避免雙重 ingest 污染 cycle）。
+    runner = AdpeRunner(cfg, lever=lever, rewards_fn=lambda: rewards)
+
+    report = runner.run_cycle(dry_run=False)
+    # winner 視角仍 all-flat（負 EV），但 explore 保活 → 策略 desired=True。
+    assert report.all_regimes_flat is True
+    assert report.desired_active.get("grid_trading") is True
+    # 現態 False → 真發一筆開（讓它產單供 explore-gate 放行）。
+    assert ("grid_trading", True) in calls
+
+
+def test_explore_exhausted_arm_not_kept_active_bounded():
+    # 有界：explore 額度耗盡（n_trials >= explore_budget=30 → remaining==0）且負 EV：
+    # 即使開 explore_sink 也不保活（耗盡即停，非全放行）。
+    neg_arm = make_arm_id("range", "bb_reversion")
+    # 60 筆 >> explore_budget=30 → explore_budget_remaining==0。
+    rewards = [
+        ArmReward(neg_arm, "range", -30.0, float(i), FILL_TIER_TAKER_REAL)
+        for i in range(60)
+    ]
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        candidate_regimes=["range"],
+        candidate_strategies=[],
+        include_demo_maker_arm=False,
+        enable_explore_sink=True,
+        rng_seed=3,
+    )
+    lever, calls = _record_lever({"bb_reversion": True})
+    runner = AdpeRunner(cfg, lever=lever, rewards_fn=lambda: rewards)
+    report = runner.run_cycle(dry_run=False)
+    # 探索額度耗盡 + 負 EV → 不保活（歸零）。
+    assert report.desired_active.get("bb_reversion") is False
+    assert report.all_regimes_flat is True
+    # 證額度真的耗盡（讀真實信號）。
+    assert runner.allocator.explore_budget_remaining(neg_arm) == 0
+    # 現態 True → 真發一筆關。
+    assert ("bb_reversion", False) in calls
+
+
+def test_explore_disabled_pure_winner_behavior_unchanged():
+    # explore 關（預設）：under-sampled 負 EV arm 不保活 → 純 winner 行為不變。
+    neg_arm = make_arm_id("range", "grid_trading")
+    rewards = [
+        ArmReward(neg_arm, "range", -30.0, float(i), FILL_TIER_TAKER_REAL)
+        for i in range(3)  # under-sampled，但 explore 關
+    ]
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        candidate_regimes=["range"],
+        candidate_strategies=[],
+        include_demo_maker_arm=False,
+        enable_explore_sink=False,  # explore 關
+        rng_seed=3,
+    )
+    lever, _calls = _record_lever({"grid_trading": True})
+    runner = AdpeRunner(cfg, lever=lever, rewards_fn=lambda: rewards)
+    report = runner.run_cycle(dry_run=False)
+    # explore 關 → 即使 under-sampled 也不保活（負 EV 歸零）。
+    assert report.desired_active.get("grid_trading") is False
+    assert report.all_regimes_flat is True
+
+
+def test_explore_mutation_bite_winner_only_drops_undersampled():
+    # Mutation bite：直接在 build_desired_active 邊界對比。同一 under-sampled
+    # 負 EV arm，explore 開→保活、explore 關→不保活，鎖死修復語義（防後人退回純 winner）。
+    neg_arm = make_arm_id("range", "ma_crossover")
+    rewards = [
+        ArmReward(neg_arm, "range", -25.0, float(i), FILL_TIER_TAKER_REAL)
+        for i in range(2)
+    ]
+
+    def _build(explore_on):
+        cfg = AdpeRunnerConfig(
+            engine_mode="demo",
+            candidate_regimes=["range"],
+            candidate_strategies=[],
+            include_demo_maker_arm=False,
+            enable_explore_sink=explore_on,
+            rng_seed=9,
+        )
+        lever, _c = _record_lever({})
+        runner = AdpeRunner(cfg, lever=lever, rewards_fn=lambda: rewards)
+        for r in rewards:
+            runner.allocator.ingest_arm_outcome(
+                arm_id=r.arm_id, regime=r.regime,
+                realized_pnl_bps=r.realized_pnl_bps, ts=r.ts,
+                fill_realism_tier=r.fill_realism_tier,
+            )
+        by_regime = runner._discover_candidate_arms({neg_arm})
+        desired, _d, _f = runner.build_desired_active(by_regime)
+        return desired
+
+    desired_on = _build(True)
+    desired_off = _build(False)
+    # explore 開：under-sampled arm 保活；關：不保活。差異 = 修復生效證據。
+    assert desired_on.get("ma_crossover") is True
+    assert desired_off.get("ma_crossover") is False
+
+
+# ---------------------------------------------------------------------------
 # kill switch
 # ---------------------------------------------------------------------------
 
