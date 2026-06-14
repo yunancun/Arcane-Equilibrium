@@ -63,6 +63,32 @@ fn test_f_submit_order_no_price_rejected() {
 }
 
 #[test]
+fn test_f_submit_order_rejected_on_live_pipeline() {
+    // fail-closed 鎖死：external submit 在真錢 mainnet live 管線必拒。
+    // 構造 Live + Mainnet → effective_engine_mode()=="live"；即使價/ATR/授權
+    // 齊備（happy-path 條件）仍須在最前 reject，倉位零變動。
+    use crate::bybit_rest_client::BybitEnvironment;
+    use crate::tick_pipeline::{PipelineKind, TickPipeline};
+    let mut p = TickPipeline::with_kind(&["BTCUSDT", "ETHUSDT"], 10_000.0, PipelineKind::Live);
+    p.set_endpoint_env(BybitEnvironment::Mainnet);
+    assert_eq!(p.effective_engine_mode(), "live");
+    let mut w = make_test_writer();
+    p.paper_state.set_latest_price("BTCUSDT", 50_000.0);
+    seed_indicators_with_atr(&mut p, "BTCUSDT", 2000.0);
+    authorize(&mut p);
+
+    let result = run_submit(&mut p, &mut w, "BTCUSDT", "Buy", 0.001);
+    assert!(result.is_err());
+    assert_eq!(
+        result.unwrap_err(),
+        "external_submit_blocked_on_live_pipeline"
+    );
+    // 副作用必須為零：倉位未開、fills 未增。
+    assert!(p.paper_state.get_position("BTCUSDT").is_none());
+    assert_eq!(p.stats.total_fills, 0);
+}
+
+#[test]
 fn test_f_submit_order_invalid_side_rejected() {
     let mut p = make_test_pipeline();
     let mut w = make_test_writer();

@@ -702,6 +702,29 @@ async def update_per_engine_global_config(
     _require_risk_write(actor)
     if engine not in _ALLOWED_ENGINES:
         raise HTTPException(status_code=400, detail=f"Invalid engine '{engine}'. Must be one of: {sorted(_ALLOWED_ENGINES)}")
+    # 為何 fail-closed：對 live 引擎改 RiskConfig 等同改真實資金上限，與下 live 單同
+    # 等級後果，必須先過完整 live 五門（與 post_live_session_start / executor 對齊）。
+    # demo/paper 不受此門（Demo 放寬 / Live 收緊政策），僅維持 operator + scope。
+    # 直接複用 live_preflight.all_five_live_gates_ok 唯一權威 primitive：零新增授權
+    # 邏輯、單一真相、reason_code 形態與 live session 路徑一致。lazy import 避循環。
+    if engine == "live":
+        from . import live_preflight  # noqa: PLC0415
+        ok, reason_codes = live_preflight.all_five_live_gates_ok(actor, require_authz=True)
+        if not ok:
+            logger.warning(
+                "Live RiskConfig change BLOCKED: gate_failed=%s — actor=%s",
+                reason_codes, getattr(actor, "actor_id", "unknown"),
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "live_gate_failed",
+                    "gate_failed": reason_codes,
+                    "message": "Live RiskConfig change blocked — live preflight gate failed. "
+                               "Ensure Global Mode=live_reserved, secret slot configured, "
+                               "and a valid signed authorization (renew if needed).",
+                },
+            )
     ipc = await _get_direct_ipc()
     updates = body.model_dump(exclude_none=True)
     if not updates:
