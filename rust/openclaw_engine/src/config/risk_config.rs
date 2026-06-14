@@ -913,6 +913,21 @@ pub struct KellyTierConfig {
     /// established 分層使用的 Kelly 分數（預設 1/4）。
     #[serde(default = "default_kelly_established_fraction")]
     pub established_fraction: f64,
+    /// KELLY-SIG-1 (2026-06-14): estimation-uncertainty shrinkage 總開關。
+    /// 為何 fail-closed default=true：原 compute_kelly_qty 用 point-estimate win_rate/R
+    /// 入 Kelly 公式，對估計誤差無感。n=50、W=0.5 時 SE(W)≈0.0707（±14pp 95%CI），
+    /// Kelly 對 W 上偏高度敏感 → 系統性高估 f* → 過度槓桿 → wipeout 尾險。開啟後 win_rate
+    /// 改用 Wilson 下置信界（永遠 <= point estimate）入公式。設 false 僅回退舊行為，不增風險。
+    #[serde(default = "default_kelly_uncertainty_shrinkage_enabled")]
+    pub uncertainty_shrinkage_enabled: bool,
+    /// Wilson 下界 z 值；default 1.645 = 單尾 95%。越大越保守（W_lcb 越低），0=回退 point estimate。
+    #[serde(default = "default_kelly_sig_z")]
+    pub kelly_sig_z: f64,
+    /// R = avg_win/avg_loss 的 shrink-toward-1 比例 ∈ [0,1)。
+    /// default 0.0 = 不動 R（保留現行行為當保守基線）；operator 可調高使 R→1（更保守）。
+    /// R 的 SE 無穩健 closed-form（兩樣本均值比值，厚尾下二階矩可能不存在），故做成可選旋鈕。
+    #[serde(default = "default_kelly_r_haircut")]
+    pub r_haircut: f64,
 }
 
 fn default_kelly_young_threshold() -> u32 {
@@ -935,6 +950,18 @@ fn default_kelly_established_fraction() -> f64 {
     1.0 / 4.0
 }
 
+fn default_kelly_uncertainty_shrinkage_enabled() -> bool {
+    true
+}
+
+fn default_kelly_sig_z() -> f64 {
+    1.645
+}
+
+fn default_kelly_r_haircut() -> f64 {
+    0.0
+}
+
 impl Default for KellyTierConfig {
     fn default() -> Self {
         Self {
@@ -943,6 +970,9 @@ impl Default for KellyTierConfig {
             young_fraction: default_kelly_young_fraction(),
             mature_fraction: default_kelly_mature_fraction(),
             established_fraction: default_kelly_established_fraction(),
+            uncertainty_shrinkage_enabled: default_kelly_uncertainty_shrinkage_enabled(),
+            kelly_sig_z: default_kelly_sig_z(),
+            r_haircut: default_kelly_r_haircut(),
         }
     }
 }
@@ -971,6 +1001,22 @@ impl KellyTierConfig {
         }
         if self.mature_fraction > self.established_fraction {
             return Err("risk.kelly.mature_fraction must be <= established_fraction".into());
+        }
+        // KELLY-SIG-1 (2026-06-14): estimation-uncertainty shrinkage 參數校驗。
+        // kelly_sig_z 須 finite 且 >= 0（負 z 會把 Wilson 下界抬到 point estimate 之上 = 放鬆，禁止）。
+        if !self.kelly_sig_z.is_finite() || self.kelly_sig_z < 0.0 {
+            return Err(format!(
+                "risk.kelly.kelly_sig_z {} must be finite and >= 0",
+                self.kelly_sig_z
+            ));
+        }
+        // r_haircut ∈ [0,1)：0=不動 R，趨近 1 才把 R 收向 1（更保守）；>=1 會把 R 壓成 1 以下無意義且
+        // 可能令 Kelly 失真，禁止。
+        if !self.r_haircut.is_finite() || self.r_haircut < 0.0 || self.r_haircut >= 1.0 {
+            return Err(format!(
+                "risk.kelly.r_haircut {} must be finite and in [0, 1)",
+                self.r_haircut
+            ));
         }
         Ok(())
     }

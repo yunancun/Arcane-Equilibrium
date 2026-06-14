@@ -267,7 +267,13 @@ pub(crate) async fn spawn_teacher_consumer_loop(
     };
     use std::sync::atomic::AtomicBool;
 
-    let model = "claude-sonnet-4-5";
+    // 模型名由 env 覆寫，預設取現行真名 claude-sonnet-4-6（已存在於 ai_pricing.yaml
+    // active 條目，pricing.lookup 不會 fail-closed 誤拒）；舊硬編 claude-sonnet-4-5
+    // 已退役（YAML active:false），會在 Anthropic API 端 404。env 模式對齊本檔 :331
+    // CRYPTOPANIC_API_KEY 既有慣例。送名最終須與 YAML active 鍵一致（見 AI-E#1）。
+    let model = std::env::var("OPENCLAW_CLAUDE_TEACHER_MODEL")
+        .unwrap_or_else(|_| "claude-sonnet-4-6".to_string());
+    let model = model.as_str();
     let llm_client: Arc<dyn LlmClient + Send + Sync> = Arc::new(AnthropicClient::new(model));
     let teacher = Arc::new(ClaudeTeacher::new(
         llm_client,

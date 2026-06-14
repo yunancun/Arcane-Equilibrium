@@ -221,12 +221,20 @@ use_maker_close = false
 enabled = true
 min_trades = 100
 step_pct = 0.0025
+# DYNAMIC-RISK-SIG-1 量綱說明（2026-06-14）：sharpe_high/sharpe_low 是「per-trade
+# Sharpe」（無年化），不要用年化直覺解讀。
 min_pct = 0.005
 max_pct = 0.03
 sharpe_high = 1.5
 sharpe_low = 0.5
 update_interval_ms = 600000
 window_size = 500
+# DYNAMIC-RISK-SIG-1 (2026-06-14)：UP 路徑顯著性 gate（見 demo 註解）。Live 的 sig_min_trades
+# 與 min_trades(100) 對齊（驗證要求 sig_min_trades >= min_trades，不可低於既有筆數門檻）。
+# DOWN 不受此 gate 影響。預設只增保守、不增風險。
+sig_gate_enabled = true
+sig_z = 1.645
+sig_min_trades = 100
 
 # INFRA-PREBUILD-1 Part A (2026-04-23) — Combine Layer shadow mode.
 # Live defaults OFF. When Phase 3+ Track L graduates, flip to true via IPC
@@ -246,6 +254,11 @@ mature_threshold = 200
 young_fraction = 0.125
 mature_fraction = 0.16666666666666666
 established_fraction = 0.25
+# KELLY-SIG-1 (2026-06-14)：estimation-uncertainty shrinkage（見 demo 註解）。
+# win_rate 用 Wilson 下界入 Kelly；r_haircut=0 預設不動 R。預設只增保守、不增風險。
+uncertainty_shrinkage_enabled = true
+kelly_sig_z = 1.645
+r_haircut = 0.0
 
 # W-AUDIT-6 (2026-05-09) — Fast-track held-drop thresholds.
 # Live defaults are intentionally identical to the former code constants:

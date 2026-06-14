@@ -21,6 +21,12 @@ use std::collections::VecDeque;
 /// Defaults are conservative: ±0.5% step, 1%..5% clamp, Sharpe band [0.0, 1.0],
 /// 5-minute update interval, 50-trade minimum before the first up/down.
 /// 可調參數，對應 TOML `[risk.dynamic_sizing]`。
+///
+/// 量綱說明（DYNAMIC-RISK-SIG-1, 2026-06-14）：`compute_sharpe` 計算的是
+/// 逐筆 (per-trade) Sharpe = mean/std of realized-PnL ring，**無年化、無 per-period
+/// 正規化**。故 `sharpe_high` / `sharpe_low` 閾值的語義是「per-trade Sharpe」而非
+/// 年化 Sharpe；不要拿年化直覺（>1 算好）解讀這些閾值。
+/// 純遙測欄位 `last_sharpe_annualized`（不參與任何決策）僅供人類在 status 看年化視圖。
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct DynamicRiskSizerConfig {
@@ -33,6 +39,17 @@ pub struct DynamicRiskSizerConfig {
     pub sharpe_low: f64,
     pub update_interval_ms: u64,
     pub window_size: usize,
+    /// DYNAMIC-RISK-SIG-1 (2026-06-14): 顯著性 gate 總開關。
+    /// 為何 fail-closed default=true：無 gate 時 maybe_update 只檢查筆數 >= min_trades
+    /// 就拿 point-estimate SR_trade 比閾值；n=50、SR≈0 時 SE(SR)≈0.14，measured SR=0.14
+    /// 與 0 無法區分卻仍可觸發加倉路徑（樣本不足即放大倉位）。開啟後 UP 路徑改用下置信界
+    /// LCB，樣本不足 → SE 大 → LCB 低 → 不加倉。設 false 僅回退舊（有缺陷）行為，不引入新風險。
+    pub sig_gate_enabled: bool,
+    /// UP 置信界 z 值（單尾）；default 1.645 = 單尾 95%。越大越保守（LCB 越低、UP 越難 fire）。
+    pub sig_z: f64,
+    /// UP 路徑額外硬 floor 筆數；與既有 `min_trades` 取 max（只嚴不鬆）。
+    /// 樣本數 < max(min_trades, sig_min_trades) 時 UP 一律禁止（DOWN 仍允許）。
+    pub sig_min_trades: usize,
 }
 
 impl Default for DynamicRiskSizerConfig {
@@ -47,6 +64,10 @@ impl Default for DynamicRiskSizerConfig {
             sharpe_low: 0.0,
             update_interval_ms: 300_000,
             window_size: 200,
+            // 保守 default：gate 開、單尾 95%、UP floor=50（與 min_trades default 對齊）。
+            sig_gate_enabled: true,
+            sig_z: 1.645,
+            sig_min_trades: 50,
         }
     }
 }
@@ -103,6 +124,21 @@ impl DynamicRiskSizerConfig {
                 self.window_size, self.min_trades
             ));
         }
+        // DYNAMIC-RISK-SIG-1 (2026-06-14): 顯著性 gate 參數校驗。
+        // sig_z 須 finite 且 >= 0（負 z 會把 LCB 抬到 point-estimate 之上 = 放鬆，禁止）。
+        if !self.sig_z.is_finite() || self.sig_z < 0.0 {
+            return Err(format!(
+                "dynamic_sizing.sig_z {} must be finite and >= 0",
+                self.sig_z
+            ));
+        }
+        // sig_min_trades >= min_trades：UP floor 不可低於既有筆數門檻，否則等於放鬆。
+        if self.sig_min_trades < self.min_trades {
+            return Err(format!(
+                "dynamic_sizing.sig_min_trades {} must be >= min_trades {} (UP floor cannot relax)",
+                self.sig_min_trades, self.min_trades
+            ));
+        }
         Ok(())
     }
 }
@@ -133,6 +169,9 @@ pub struct SizerStatus {
     pub trades_in_window: usize,
     pub min_trades: usize,
     pub last_sharpe: Option<f64>,
+    /// 純遙測：last_sharpe 的年化視圖（× sqrt(trades_in_window)），不參與任何決策。
+    /// 僅供人類在 status 用年化直覺對照 per-trade 閾值的量綱落差。
+    pub last_sharpe_annualized: Option<f64>,
     pub last_update_ms: Option<u64>,
     pub last_direction: SizerUpdateDirection,
     pub update_interval_ms: u64,
@@ -233,7 +272,28 @@ impl DynamicRiskSizer {
         self.last_update_ms = Some(now_ms);
 
         let previous = self.current_pct;
-        let (next, direction) = if sharpe >= self.config.sharpe_high {
+        // DYNAMIC-RISK-SIG-1 (2026-06-14)：UP（加倉）路徑顯著性 gate。
+        // 只有「即使保守地把 SR 拉到下置信界 LCB 仍 >= sharpe_high」才允許加倉，
+        // 且筆數須過 UP 硬 floor max(min_trades, sig_min_trades)。樣本不足 → SE 大 →
+        // LCB 低 → up_allowed=false → 退回 unchanged。DOWN 路徑刻意不加 gate：
+        // 降倉永遠 survival-safe，noise 觸發降倉是好事（survival-first）。
+        let up_allowed = if self.config.sig_gate_enabled {
+            let up_floor = self.config.min_trades.max(self.config.sig_min_trades);
+            if self.pnl_ring.len() < up_floor {
+                false
+            } else {
+                // SE(SR) ≈ sqrt((1 + 0.5·SR²)/(n−1))（Lo 2002 IID 近似；crypto 厚尾下
+                // 真 SE 偏大故用 (n−1) 較保守）。LCB = SR − z·SE。
+                let n = self.pnl_ring.len() as f64;
+                let se = ((1.0 + 0.5 * sharpe * sharpe) / (n - 1.0)).sqrt();
+                let lcb = sharpe - self.config.sig_z * se;
+                lcb >= self.config.sharpe_high
+            }
+        } else {
+            // gate 關閉 → 回退舊行為（point-estimate 直接比閾值）。
+            sharpe >= self.config.sharpe_high
+        };
+        let (next, direction) = if sharpe >= self.config.sharpe_high && up_allowed {
             let candidate = previous + self.config.step_pct;
             if candidate >= self.config.max_pct {
                 (self.config.max_pct, SizerUpdateDirection::Clamped)
@@ -275,6 +335,11 @@ impl DynamicRiskSizer {
             trades_in_window: self.pnl_ring.len(),
             min_trades: self.config.min_trades,
             last_sharpe: self.last_sharpe,
+            // 純遙測年化視圖：per-trade SR × sqrt(window 筆數)。僅供人類量綱對照，
+            // 不參與決策（決策一律用 per-trade last_sharpe 比 per-trade 閾值）。
+            last_sharpe_annualized: self
+                .last_sharpe
+                .map(|sr| sr * (self.pnl_ring.len() as f64).sqrt()),
             last_update_ms: self.last_update_ms,
             last_direction: self.last_direction,
             update_interval_ms: self.config.update_interval_ms,
@@ -323,6 +388,11 @@ mod tests {
             sharpe_low: -0.5,
             update_interval_ms: 1_000,
             window_size: 50,
+            // 既有機制測試（step/clamp/throttle）驗的是步進與夾限，非顯著性 gate。
+            // 關閉 gate 以保留小樣本 UP 行為；gate 行為由下方 DYNAMIC-RISK-SIG-1 專測覆蓋。
+            sig_gate_enabled: false,
+            sig_z: 1.645,
+            sig_min_trades: 4,
         }
     }
 
@@ -514,5 +584,166 @@ mod tests {
             err.contains("out of (0, 0.20]"),
             "unexpected error message: {err}"
         );
+    }
+
+    // ----- DYNAMIC-RISK-SIG-1 (2026-06-14): UP-path significance gate -----
+
+    /// 灌入 33 勝 / 17 負（±1）的 50 筆樣本：point-estimate SR≈0.334，
+    /// LCB(z=1.645,n=50)≈0.093。用於驗證 gate 在「point 過閾、LCB 未過閾」時擋下 UP。
+    fn fill_marginal_sample(s: &mut DynamicRiskSizer) {
+        for _ in 0..33 {
+            s.record_closed_trade(1.0);
+        }
+        for _ in 0..17 {
+            s.record_closed_trade(-1.0);
+        }
+    }
+
+    fn cfg_gated(sharpe_high: f64) -> DynamicRiskSizerConfig {
+        DynamicRiskSizerConfig {
+            enabled: true,
+            min_trades: 50,
+            step_pct: 0.005,
+            min_pct: 0.01,
+            max_pct: 0.05,
+            sharpe_high,
+            sharpe_low: -10.0, // 把 DOWN 推到不可達，隔離 UP 路徑
+            update_interval_ms: 0,
+            window_size: 200,
+            sig_gate_enabled: true,
+            sig_z: 1.645,
+            sig_min_trades: 50,
+        }
+    }
+
+    /// 核心 mutation-bite：同一邊際樣本，gate OFF 會加倉（舊行為），gate ON 不加倉。
+    /// 證明 gate 真改變行為（樣本不足以顯著 → 不放大）。
+    #[test]
+    fn sig_gate_blocks_marginal_up_but_off_fires() {
+        // gate OFF（舊行為）：point SR 0.334 >= 0.30 → UP fire。
+        let mut cfg_off = cfg_gated(0.30);
+        cfg_off.sig_gate_enabled = false;
+        let mut s_off = DynamicRiskSizer::new(0.03, cfg_off);
+        fill_marginal_sample(&mut s_off);
+        let r_off = s_off
+            .maybe_update(10_000)
+            .expect("gate OFF must reproduce old behavior (UP fires on point-estimate)");
+        assert!((r_off - 0.035).abs() < 1e-9, "UP step to 0.035, got {r_off}");
+        assert_eq!(s_off.status().last_direction, SizerUpdateDirection::Up);
+
+        // gate ON：LCB 0.093 < 0.30 → UP 被擋，退回 unchanged。
+        let mut s_on = DynamicRiskSizer::new(0.03, cfg_gated(0.30));
+        fill_marginal_sample(&mut s_on);
+        assert_eq!(
+            s_on.maybe_update(10_000),
+            None,
+            "gate ON must block UP when LCB < sharpe_high (insufficient significance)"
+        );
+        assert!((s_on.current_pct() - 0.03).abs() < f64::EPSILON);
+        assert_eq!(
+            s_on.status().last_direction,
+            SizerUpdateDirection::Unchanged
+        );
+    }
+
+    /// gate ON 但證據夠強（LCB >= sharpe_high）時仍允許加倉。
+    /// 同樣本，sharpe_high 降到 0.05：point 0.334 與 LCB 0.093 皆 >= 0.05 → UP fire。
+    #[test]
+    fn sig_gate_allows_up_when_lcb_clears_threshold() {
+        let mut s = DynamicRiskSizer::new(0.03, cfg_gated(0.05));
+        fill_marginal_sample(&mut s);
+        let next = s
+            .maybe_update(10_000)
+            .expect("gate ON must allow UP when LCB >= sharpe_high");
+        assert!((next - 0.035).abs() < 1e-9, "UP step to 0.035, got {next}");
+        assert_eq!(s.status().last_direction, SizerUpdateDirection::Up);
+    }
+
+    /// UP 硬 floor：樣本數 < max(min_trades, sig_min_trades) 時 UP 一律禁止。
+    /// 用 min_trades=10、sig_min_trades=50 的配置，灌 20 筆（過 min_trades 但未過 floor）。
+    #[test]
+    fn sig_gate_up_floor_blocks_below_sig_min_trades() {
+        let mut cfg = cfg_gated(0.05);
+        cfg.min_trades = 10;
+        cfg.sig_min_trades = 50;
+        let mut s = DynamicRiskSizer::new(0.03, cfg);
+        for _ in 0..14 {
+            s.record_closed_trade(1.0);
+        }
+        for _ in 0..6 {
+            s.record_closed_trade(-1.0);
+        }
+        // 20 筆 >= min_trades(10) 故進 maybe_update，但 < sig_min_trades(50) → UP floor 擋。
+        assert_eq!(
+            s.maybe_update(10_000),
+            None,
+            "UP must be blocked below max(min_trades, sig_min_trades)"
+        );
+    }
+
+    /// DOWN 路徑刻意不受 gate 影響（survival-safe）：邊際負樣本仍可降倉。
+    #[test]
+    fn sig_gate_does_not_block_down() {
+        let mut cfg = cfg_gated(10.0); // UP 不可達
+        cfg.sharpe_low = -0.30; // DOWN 在 SR≈-0.334 時觸發
+        let mut s = DynamicRiskSizer::new(0.03, cfg);
+        for _ in 0..17 {
+            s.record_closed_trade(1.0);
+        }
+        for _ in 0..33 {
+            s.record_closed_trade(-1.0);
+        }
+        // SR≈-0.334 <= sharpe_low(-0.30) → DOWN fire，不被任何顯著性 gate 擋。
+        let next = s
+            .maybe_update(10_000)
+            .expect("DOWN must remain ungated (降倉永遠 survival-safe)");
+        assert!((next - 0.025).abs() < 1e-9, "DOWN step to 0.025, got {next}");
+        assert_eq!(s.status().last_direction, SizerUpdateDirection::Down);
+    }
+
+    #[test]
+    fn validate_rejects_negative_sig_z() {
+        let mut cfg = cfg_tight();
+        cfg.sig_z = -0.1;
+        let err = cfg.validate().expect_err("negative sig_z must reject");
+        assert!(err.contains("sig_z"), "unexpected error message: {err}");
+    }
+
+    #[test]
+    fn validate_rejects_sig_min_trades_below_min_trades() {
+        let mut cfg = cfg_tight(); // min_trades = 4
+        cfg.sig_min_trades = 3;
+        let err = cfg
+            .validate()
+            .expect_err("sig_min_trades < min_trades must reject");
+        assert!(
+            err.contains("sig_min_trades"),
+            "unexpected error message: {err}"
+        );
+    }
+
+    #[test]
+    fn validate_accepts_default_sig_keys() {
+        // Default config (gate on, z=1.645, sig_min_trades=50, min_trades=50) validates.
+        DynamicRiskSizerConfig::default()
+            .validate()
+            .expect("default sig keys must validate");
+    }
+
+    /// 純遙測年化欄位不為 None 且方向正確（與 per-trade SR 同號、放大）。
+    #[test]
+    fn status_exposes_annualized_telemetry_without_affecting_decision() {
+        let mut s = DynamicRiskSizer::new(0.03, cfg_gated(0.30));
+        fill_marginal_sample(&mut s);
+        // gate ON 擋 UP（決策層用 per-trade），但 last_sharpe 仍被記錄供遙測。
+        let _ = s.maybe_update(10_000);
+        let st = s.status();
+        let sr = st.last_sharpe.expect("last_sharpe recorded");
+        let ann = st
+            .last_sharpe_annualized
+            .expect("annualized telemetry present");
+        // 年化 = per-trade SR × sqrt(n)，n=50 → 放大 ~7.07×，同號。
+        assert!(ann > sr, "annualized view magnifies per-trade SR");
+        assert!((ann - sr * (50f64).sqrt()).abs() < 1e-9);
     }
 }

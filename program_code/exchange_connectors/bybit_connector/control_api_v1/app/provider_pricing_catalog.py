@@ -61,7 +61,11 @@ def official_pricing_manifest(current_date: str | None = None) -> dict[str, dict
             "last_verified_date": checked,
         },
         "opus": {
-            "model_id": "claude-opus-4-7",
+            # 2026-06-14：opus 真名對齊 layer2_types.MODEL_IDS 與 ai_pricing.yaml
+            #   現行 active 條目（claude-opus-4-7 已退役 → claude-opus-4-8）。價值
+            #   （5/25）不變；此 manifest 經 refresh_pricing_if_needed →
+            #   update_pricing 寫回 runtime opus model_id，stale 真名會 undo 對齊。
+            "model_id": "claude-opus-4-8",
             "input_per_mtok": 5.00,
             "output_per_mtok": 25.00,
             "last_verified_date": checked,

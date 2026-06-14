@@ -1,11 +1,15 @@
 # AI Provider Pricing Table — USD per million tokens
 # AI Provider 定價表 — 每百萬 tokens 美元
 #
-# Last updated: 2026-04-06
-# 最後更新：2026-04-06
+# Last updated: 2026-06-14
+# 最後更新：2026-06-14
 #
 # Source: official pricing pages (anthropic.com, openai.com)
 # 來源：官方定價頁
+# anthropic 條目於 2026-06-14 對齊 anthropic.com pricing：
+#   opus-4.8 $5/$25、sonnet-4.6 $3/$15、haiku-4.5 $1/$5（per MTok）。
+# 退役型號保留為 active:false（fail-closed 拒呼叫），不刪除，
+# 符合 pricing.rs Test 5 retired 慣例 + 啟動 active_count()>=5 sanity check。
 #
 # Format / 格式:
 #   <provider>:
@@ -16,18 +20,36 @@
 #                                 # 若 false，模型 fail-closed（tracker 拒絕）
 
 anthropic:
-  claude-sonnet-4-5:
+  # 現行型號（2026-06-14 對齊官方）/ current models
+  claude-opus-4-8:
+    input_per_mtok: 5.00
+    output_per_mtok: 25.00
+    active: true
+  claude-sonnet-4-6:
     input_per_mtok: 3.00
     output_per_mtok: 15.00
     active: true
-  claude-opus-4-6:
-    input_per_mtok: 15.00
-    output_per_mtok: 75.00
+  claude-haiku-4-5:
+    input_per_mtok: 1.00
+    output_per_mtok: 5.00
     active: true
+  # dated haiku id：Python MODEL_IDS[MODEL_HAIKU] 實送此名（provider_client.py），
+  # 保留 active 以免 budget gate fail-closed 誤拒；與裸 claude-haiku-4-5 同價。
+  # TODO(待核 AI-E#1)：haiku/opus/sonnet 真名後綴（dated alias vs 裸名）以
+  #   console / API models list 為準，最終由 client.rs 實際送名對齊。
   claude-haiku-4-5-20251001:
     input_per_mtok: 1.00
     output_per_mtok: 5.00
     active: true
+  # 退役型號 / retired（active:false → fail-closed，價不動，保留供歷史記帳對照）
+  claude-sonnet-4-5:
+    input_per_mtok: 3.00
+    output_per_mtok: 15.00
+    active: false
+  claude-opus-4-6:
+    input_per_mtok: 15.00
+    output_per_mtok: 75.00
+    active: false
 
 openai:
   gpt-4o:

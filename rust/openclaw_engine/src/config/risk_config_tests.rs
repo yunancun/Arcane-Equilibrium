@@ -646,6 +646,73 @@ fn test_g7_01_kelly_tier_partial_toml_falls_back_to_defaults() {
     assert!(cfg.validate().is_ok());
 }
 
+// ----- KELLY-SIG-1 (2026-06-14): uncertainty-shrinkage key contract -----
+
+#[test]
+fn test_kelly_sig_1_default_keys_conservative() {
+    // 保守 default：shrinkage 開、單尾 95%、R 不動。
+    let cfg = RiskConfig::default();
+    assert!(cfg.kelly.uncertainty_shrinkage_enabled);
+    assert!((cfg.kelly.kelly_sig_z - 1.645).abs() < f64::EPSILON);
+    assert!((cfg.kelly.r_haircut - 0.0).abs() < f64::EPSILON);
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn test_kelly_sig_1_absent_keys_fall_back_to_conservative_defaults() {
+    // [kelly] 只給舊欄位，缺新 sig 欄位 → #[serde(default)] 補回保守值（shrinkage ON）。
+    let toml_str = r#"
+        [meta]
+        version = 1
+        saved_ts_ms = 0
+
+        [kelly]
+        young_threshold = 50
+        mature_threshold = 200
+        young_fraction = 0.125
+        mature_fraction = 0.16666666666666666
+        established_fraction = 0.25
+    "#;
+    let cfg: RiskConfig = toml::from_str(toml_str).unwrap();
+    assert!(
+        cfg.kelly.uncertainty_shrinkage_enabled,
+        "absent shrinkage key must default to ON (conservative)"
+    );
+    assert!((cfg.kelly.kelly_sig_z - 1.645).abs() < f64::EPSILON);
+    assert!((cfg.kelly.r_haircut - 0.0).abs() < f64::EPSILON);
+    assert!(cfg.validate().is_ok());
+}
+
+#[test]
+fn test_kelly_sig_1_validate_rejects_relaxing_params() {
+    // 負 z（會放鬆）、r_haircut 越界皆必拒。
+    let mut cfg = RiskConfig::default();
+    cfg.kelly.kelly_sig_z = -0.5;
+    assert!(cfg.validate().is_err(), "negative kelly_sig_z must reject");
+
+    cfg = RiskConfig::default();
+    cfg.kelly.r_haircut = 1.0;
+    assert!(cfg.validate().is_err(), "r_haircut >= 1 must reject");
+
+    cfg = RiskConfig::default();
+    cfg.kelly.r_haircut = -0.1;
+    assert!(cfg.validate().is_err(), "negative r_haircut must reject");
+}
+
+#[test]
+fn test_kelly_sig_1_toml_roundtrip() {
+    let mut cfg = RiskConfig::default();
+    cfg.kelly.uncertainty_shrinkage_enabled = false;
+    cfg.kelly.kelly_sig_z = 2.0;
+    cfg.kelly.r_haircut = 0.25;
+    let toml_str = toml::to_string(&cfg).unwrap();
+    let de: RiskConfig = toml::from_str(&toml_str).unwrap();
+    assert!(!de.kelly.uncertainty_shrinkage_enabled);
+    assert!((de.kelly.kelly_sig_z - 2.0).abs() < f64::EPSILON);
+    assert!((de.kelly.r_haircut - 0.25).abs() < f64::EPSILON);
+    assert!(de.validate().is_ok());
+}
+
 // ----- G3-02 Phase A (2026-04-25): ExecutorConfig schema + validation -----
 
 #[test]

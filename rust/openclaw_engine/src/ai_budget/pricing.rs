@@ -276,9 +276,12 @@ anthropic:
             "expected at least 5 active models, got {}",
             table.active_count()
         );
-        // Spot-check a known model
-        // 抽查一個已知模型
-        assert!(table.lookup("claude-sonnet-4-5").is_some());
+        // Spot-check a current active model. 2026-06-14：claude-sonnet-4-5 已退役
+        // （YAML active:false → lookup 回 None），改抽查現行 active 真名。
+        // 抽查一個現行 active 模型。
+        assert!(table.lookup("claude-sonnet-4-6").is_some());
+        // 退役型號必 fail-closed（lookup 回 None）。
+        assert!(table.lookup("claude-sonnet-4-5").is_none());
     }
 
     /// Test 9: negative rate is rejected at load time.

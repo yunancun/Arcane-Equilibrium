@@ -95,8 +95,8 @@ pub struct AnthropicClient {
     /// API base URL (overridable via `ANTHROPIC_BASE_URL` for proxies / tests).
     /// API base URL（可透過 `ANTHROPIC_BASE_URL` 覆寫，給 proxy / 測試用）。
     base_url: String,
-    /// Model id (e.g. `claude-sonnet-4-5`).
-    /// 模型 id（如 `claude-sonnet-4-5`）。
+    /// Model id (e.g. `claude-sonnet-4-6`).
+    /// 模型 id（如 `claude-sonnet-4-6`）。
     model: String,
 }
 

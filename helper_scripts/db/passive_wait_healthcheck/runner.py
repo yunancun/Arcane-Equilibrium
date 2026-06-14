@@ -375,6 +375,16 @@ from .checks_cron_heartbeat import (
     # 不同點：[80] 不只 sentinel mtime，而是 full 7-check 健康評估。
     check_80_pg_dump_freshness,
 )
+# PROFIT-1（2026-06-14）— cost_gate「雙重扣成本」latent issue 預防性哨兵 [90]。
+# Delegate 給 standalone
+# ``helper_scripts/canary/healthchecks/check_cost_gate_double_deduct.py``；偵測
+# validation_passed AND runtime_bps>0 AND runtime_bps<threshold 的 cell（門檻
+# per-cell，依 cell.win_rate clamp，公式與 gates.rs 一致）。純 filesystem（讀 edge_estimates.json
+# + risk_config_<env>.toml），跑於 conn.close() 後。WARN-by-default（latent issue
+# 早期預警，非 promotion-blocking）；OPENCLAW_COST_GATE_DOUBLE_DEDUCT_REQUIRED=1 升 FAIL。
+from .checks_cost_gate_double_deduct import (  # noqa: F401
+    check_90_cost_gate_double_deduct,
+)
 
 
 # Module docstring used by argparse to show the passive-wait healthcheck
@@ -404,6 +414,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [56]                                                  Live / LiveDemo pipeline active sentinel (filesystem)
     [75][76][77][78][79]                                  P1-CRON-INSTALL-WAVE-1 cron heartbeat sentinels
     [80]                                                  P0-OPS-4 GAP-D — trading_ai_pg_dump 7-check (delegate standalone)
+    [90]                                                  PROFIT-1 — cost_gate double-cost-deduct latent issue sentinel (delegate standalone)
 
 F7 sentinels [22]-[29] added 2026-04-26 by MIT DB audit + E5 engine.log dive:
   [22] trading_pipeline_silent_gap    (DCS active but fills cliff)
@@ -647,7 +658,7 @@ def main() -> int:
               [83][84][85][86][87]  (L2 P4 online-FDR 五軸，E1-C)
               [88][89]  (L2 記憶層 dormant 哨兵：pipeline freshness + embedding drift，
                          E1-B 2026-06-11 PA spec §12；號占用正本)
-      post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56] [75][76][77][78][79] [80]
+      post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56] [75][76][77][78][79] [80] [90]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
     ap.add_argument("--quiet", action="store_true", help="Only print non-PASS lines")
@@ -1552,6 +1563,14 @@ def main() -> int:
     # [80] P0-OPS-4 GAP-D — PG dump 7 check wrapper；standalone SSOT delegate。
     s, m = check_80_pg_dump_freshness()
     results.append(("[80] pg_dump_freshness", s, m))
+
+    # [90] PROFIT-1（2026-06-14）— cost_gate「雙重扣成本」latent issue 預防性哨兵。
+    # 偵測 validation_passed AND runtime_bps>0 AND runtime_bps<threshold 的 cell
+    # （門檻 per-cell，依 cell.win_rate clamp，公式與 gates.rs 一致）；delegate standalone
+    # ``check_cost_gate_double_deduct``。純 filesystem 不依賴 runner cur，故在
+    # conn.close() 後跑（與 [80] 同性質）。WARN-by-default；REQUIRED=1 升 FAIL。
+    s, m = check_90_cost_gate_double_deduct()
+    results.append(("[90] cost_gate_double_deduct", s, m))
 
     # NOTE: [30] cost_edge_advisor_status moved INSIDE the cursor block by
     # G3-09 Phase B Wave 1 (2026-04-28). Phase A version was filesystem-only
