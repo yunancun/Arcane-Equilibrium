@@ -48,10 +48,14 @@ MODEL_SONNET = "sonnet"
 MODEL_OPUS = "opus"
 
 # Model IDs (Anthropic API) / 模型 ID
+# 2026-06-14：opus 真名對齊 settings/ai_pricing.yaml 現行 active 條目
+#   （claude-opus-4-7 已退役 → claude-opus-4-8）。價值（5/25）不變、不受此 id 改動影響。
+#   sonnet-4-6 / haiku-4-5-20251001 仍為現行，無需改。
+# TODO(待核 AI-E#1)：haiku 後綴 dated vs 裸名以 client.rs 實際送名為準。
 MODEL_IDS: dict[str, str] = {
     MODEL_HAIKU: "claude-haiku-4-5-20251001",
     MODEL_SONNET: "claude-sonnet-4-6",
-    MODEL_OPUS: "claude-opus-4-7",
+    MODEL_OPUS: "claude-opus-4-8",
 }
 
 # Default budget limits / 默认预算限制
@@ -472,23 +476,24 @@ class PricingTable:
     新增 provider 時必同步加 entry，否則 KeyError。
     """
     models: dict[str, ModelPricing] = field(default_factory=lambda: {
+        # 2026-06-14 AI-E 對齊官方 anthropic.com pricing 後更新 last_verified。
         MODEL_HAIKU: ModelPricing(
             model_id=MODEL_IDS[MODEL_HAIKU],
             input_per_mtok=1.00,
             output_per_mtok=5.00,
-            last_verified_date="2026-04-16",
+            last_verified_date="2026-06-14",
         ),
         MODEL_SONNET: ModelPricing(
             model_id=MODEL_IDS[MODEL_SONNET],
             input_per_mtok=3.00,
             output_per_mtok=15.00,
-            last_verified_date="2026-04-16",
+            last_verified_date="2026-06-14",
         ),
         MODEL_OPUS: ModelPricing(
             model_id=MODEL_IDS[MODEL_OPUS],
             input_per_mtok=5.00,
             output_per_mtok=25.00,
-            last_verified_date="2026-04-16",
+            last_verified_date="2026-06-14",
         ),
         # DeepSeek V4 cache-miss pricing. Legacy aliases point to V4 Flash
         # until DeepSeek discontinues them on 2026-07-24.

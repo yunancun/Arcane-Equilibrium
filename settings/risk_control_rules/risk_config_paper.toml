@@ -228,6 +228,11 @@ mature_threshold = 200
 young_fraction = 0.125
 mature_fraction = 0.16666666666666666
 established_fraction = 0.25
+# KELLY-SIG-1 (2026-06-14)：estimation-uncertainty shrinkage（見 demo 註解）。
+# Paper 對齊 demo/live 保守 default，維持三環境配置面一致。
+uncertainty_shrinkage_enabled = true
+kelly_sig_z = 1.645
+r_haircut = 0.0
 
 # W-AUDIT-6 (2026-05-09) — Fast-track held-drop thresholds.
 # Paper mirrors demo/live defaults to keep three-environment config parity.

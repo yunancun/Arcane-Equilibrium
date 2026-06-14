@@ -666,3 +666,42 @@ fn test_live_toml_dyn_stop_explicit_divergence_from_demo() {
         demo_floor
     );
 }
+
+/// DYNAMIC-RISK-SIG-1 / KELLY-SIG-1 (2026-06-14): 三環境真實 TOML 必須通過
+/// RiskConfig::validate()，鎖死新顯著性 gate / shrinkage key 的 per-env 約束。
+/// 關鍵：live `[dynamic_sizing].sig_min_trades` 必須 >= live `min_trades`(100)，
+/// 否則 validate() 紅 — 此 sentinel 在任何人改 live min_trades 卻漏改 sig_min_trades 時預警。
+#[test]
+fn test_sig_keys_all_three_env_tomls_validate() {
+    use std::fs;
+    use std::path::PathBuf;
+
+    let mut srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    srv_root.pop();
+    srv_root.pop();
+    let rules = srv_root.join("settings").join("risk_control_rules");
+
+    for env in ["demo", "live", "paper"] {
+        let path = rules.join(format!("risk_config_{env}.toml"));
+        let s = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("failed to read {:?}: {}", path, e));
+        let cfg: RiskConfig = toml::from_str(&s)
+            .unwrap_or_else(|e| panic!("TOML parse failed for risk_config_{env}.toml: {}", e));
+        cfg.validate().unwrap_or_else(|e| {
+            panic!("risk_config_{env}.toml must pass validate() (sig keys included): {e}")
+        });
+        // 顯著性 gate / shrinkage 預設只增保守：兩開關 ON、z>=0、sig_min_trades>=min_trades。
+        assert!(
+            cfg.kelly.uncertainty_shrinkage_enabled,
+            "{env}: kelly shrinkage must default ON (conservative)"
+        );
+        assert!(cfg.kelly.kelly_sig_z >= 0.0);
+        assert!(cfg.kelly.r_haircut >= 0.0 && cfg.kelly.r_haircut < 1.0);
+        if cfg.dynamic_sizing.enabled {
+            assert!(
+                cfg.dynamic_sizing.sig_min_trades >= cfg.dynamic_sizing.min_trades,
+                "{env}: sig_min_trades must be >= min_trades (UP floor cannot relax)"
+            );
+        }
+    }
+}

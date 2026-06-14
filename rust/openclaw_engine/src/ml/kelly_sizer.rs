@@ -109,6 +109,14 @@ pub struct KellyConfig {
     /// Fraction applied once established (default 1/4 Kelly).
     /// established 分層使用的 Kelly 分數（預設 1/4）。
     pub established_fraction: f64,
+    /// KELLY-SIG-1 (2026-06-14): estimation-uncertainty shrinkage 總開關（鏡像 RiskConfig.kelly）。
+    /// true（default）時 win_rate 改用 Wilson 下置信界入 Kelly 公式（永遠 <= point estimate）。
+    /// uncertainty_shrinkage_enabled。
+    pub uncertainty_shrinkage_enabled: bool,
+    /// Wilson 下界 z 值；default 1.645 = 單尾 95%，0=回退 point estimate。越大越保守。
+    pub kelly_sig_z: f64,
+    /// R = avg_win/avg_loss 的 shrink-toward-1 比例 ∈ [0,1)；default 0.0=不動 R。
+    pub r_haircut: f64,
 }
 
 impl Default for KellyConfig {
@@ -126,6 +134,10 @@ impl Default for KellyConfig {
             young_fraction: 1.0 / 8.0,
             mature_fraction: 1.0 / 6.0,
             established_fraction: 1.0 / 4.0,
+            // KELLY-SIG-1：保守 default — shrinkage 開、單尾 95%、R 不動。
+            uncertainty_shrinkage_enabled: true,
+            kelly_sig_z: 1.645,
+            r_haircut: 0.0,
         }
     }
 }
@@ -141,6 +153,10 @@ impl KellyConfig {
             young_fraction: config.kelly.young_fraction,
             mature_fraction: config.kelly.mature_fraction,
             established_fraction: config.kelly.established_fraction,
+            // KELLY-SIG-1：estimation-uncertainty shrinkage 三欄從權威 RiskConfig.kelly 映射。
+            uncertainty_shrinkage_enabled: config.kelly.uncertainty_shrinkage_enabled,
+            kelly_sig_z: config.kelly.kelly_sig_z,
+            r_haircut: config.kelly.r_haircut,
             ..Self::default()
         }
     }
@@ -170,6 +186,20 @@ impl KellyConfig {
         if self.mature_fraction > self.established_fraction {
             return Err("kelly.mature_fraction must be <= kelly.established_fraction".into());
         }
+        // KELLY-SIG-1 (2026-06-14): shrinkage 參數校驗（鏡像 RiskConfig.kelly::validate）。
+        // 負 z 會把 Wilson 下界抬到 point estimate 之上 = 放鬆，禁止。
+        if !self.kelly_sig_z.is_finite() || self.kelly_sig_z < 0.0 {
+            return Err(format!(
+                "kelly.kelly_sig_z {} must be finite and >= 0",
+                self.kelly_sig_z
+            ));
+        }
+        if !self.r_haircut.is_finite() || self.r_haircut < 0.0 || self.r_haircut >= 1.0 {
+            return Err(format!(
+                "kelly.r_haircut {} must be finite and in [0, 1)",
+                self.r_haircut
+            ));
+        }
         Ok(())
     }
 }
@@ -179,6 +209,32 @@ fn validate_kelly_fraction(name: &str, value: f64) -> Result<(), String> {
         return Err(format!("{name} must be finite and in (0, 1]"));
     }
     Ok(())
+}
+
+/// KELLY-SIG-1 (2026-06-14): Wilson score interval lower bound for a binomial
+/// proportion (win_rate). Small-sample robust (better than normal approx) and
+/// strictly conservative: returns a value in `[0, W]` for `W = wins/n`, n>=1,
+/// converging to `W` as `n→∞`. Used to shrink the point-estimate win_rate before
+/// it enters the Kelly formula, so estimation error never inflates leverage.
+///
+/// 不變量：z=0 或 n<=0 時回 point estimate（不縮）；任何 z>0、n>=1 回 <= point。
+/// Wilson 下界永遠 >= 0，故 Kelly 公式輸入 W 仍在合法 [0,1]。
+/// Wilson LB = (W + z²/2n − z·sqrt(W(1−W)/n + z²/4n²)) / (1 + z²/n)。
+fn wilson_lower_bound(wins: u32, total: u32, z: f64) -> f64 {
+    if total == 0 {
+        return 0.0;
+    }
+    let n = total as f64;
+    let w = wins as f64 / n;
+    if z <= 0.0 {
+        return w; // z=0 → 不做 shrinkage，回退 point estimate
+    }
+    let z2 = z * z;
+    let denom = 1.0 + z2 / n;
+    let center = w + z2 / (2.0 * n);
+    let margin = z * (w * (1.0 - w) / n + z2 / (4.0 * n * n)).sqrt();
+    let lcb = (center - margin) / denom;
+    lcb.clamp(0.0, w) // 保證 ∈ [0, W]，永不超過 point estimate（只縮不放）
 }
 
 /// Compute Kelly-optimal position quantity.
@@ -218,9 +274,29 @@ pub fn compute_kelly_qty(
         return (balance * config.risk_pct / price).min(max_qty);
     }
 
+    // KELLY-SIG-1 (2026-06-14): estimation-uncertainty shrinkage。
+    // 為何 fail-closed：point-estimate Kelly 在 n=50 對 win_rate 上偏高度敏感，系統性高估
+    // f* → 過度槓桿 → wipeout 尾險（crypto 厚尾下放大）。對 W 取 Wilson 下置信界後再入
+    // 公式 = 對估計不確定性做 shrinkage。Wilson LB 對 W∈(0,1)、n>=1 永遠在 [0,W]，
+    // n→∞ 收斂回 W → 只縮不放，嚴格只增保守。
+    let w_for_kelly = if config.uncertainty_shrinkage_enabled {
+        wilson_lower_bound(stats.wins, stats.total_trades, config.kelly_sig_z)
+    } else {
+        win_rate
+    };
+
     // Kelly formula: f* = W - (1-W)/R where R = avg_win/avg_loss
-    let r = avg_win / avg_loss;
-    let kelly_full = win_rate - (1.0 - win_rate) / r;
+    // R 的保守處理：套 shrink-toward-1 係數 r_shrink=1−r_haircut（haircut=0 時 R 不動）。
+    // R 收向 1（fair odds）會降低 Kelly_full，故只增保守。
+    let r_raw = avg_win / avg_loss;
+    let r = if config.uncertainty_shrinkage_enabled && config.r_haircut > 0.0 {
+        let r_shrink = (1.0 - config.r_haircut).clamp(0.0, 1.0);
+        // R_adj = 1 + (R−1)·r_shrink：haircut→1 時 R→1，haircut=0 時 R 不變。
+        1.0 + (r_raw - 1.0) * r_shrink
+    } else {
+        r_raw
+    };
+    let kelly_full = w_for_kelly - (1.0 - w_for_kelly) / r;
 
     if kelly_full <= 0.0 {
         // FIX-27: Negative Kelly → negative edge → reject (return 0).
@@ -532,5 +608,161 @@ mod tests {
         assert!((cfg.young_fraction - 0.10).abs() < 1e-12);
         assert!((cfg.mature_fraction - 0.20).abs() < 1e-12);
         assert!((cfg.established_fraction - 0.30).abs() < 1e-12);
+    }
+
+    // ----- KELLY-SIG-1 (2026-06-14): estimation-uncertainty shrinkage -----
+
+    /// Wilson 下界數學性質：永遠 ∈ [0, W]，n→∞ 收斂回 W，z=0 回 point estimate。
+    #[test]
+    fn test_kelly_sig_1_wilson_lower_bound_properties() {
+        // z=0 → 回 point estimate（不縮）。
+        assert!((wilson_lower_bound(30, 50, 0.0) - 0.6).abs() < 1e-12);
+        // total=0 → 0（fail-closed）。
+        assert_eq!(wilson_lower_bound(0, 0, 1.645), 0.0);
+        // 任何 z>0、n>=1 → LCB <= point 且 >= 0。
+        for &(w, n) in &[(30u32, 50u32), (5, 10), (1, 2), (99, 100), (1, 1)] {
+            let lb = wilson_lower_bound(w, n, 1.645);
+            let point = w as f64 / n as f64;
+            assert!(lb <= point + 1e-12, "LCB {lb} must be <= point {point}");
+            assert!(lb >= 0.0, "LCB {lb} must be >= 0");
+        }
+        // 大 n 收斂：n=50 vs n=5000，同 W=0.6，後者更接近 0.6。
+        let lb_small = wilson_lower_bound(30, 50, 1.645);
+        let lb_large = wilson_lower_bound(3000, 5000, 1.645);
+        assert!(
+            lb_large > lb_small,
+            "larger n → tighter LCB → closer to point: {lb_large} vs {lb_small}"
+        );
+        assert!((0.6 - lb_large).abs() < 0.02, "n=5000 LCB near 0.6");
+    }
+
+    /// 核心 mutation-bite：shrinkage ON 的 Kelly qty 嚴格 <= shrinkage OFF（同樣本）。
+    /// W 用 Wilson LB（永遠 <= point）→ kelly_full 更小或翻負 → qty 只縮不放。
+    #[test]
+    fn test_kelly_sig_1_shrinkage_only_reduces() {
+        let stats = make_stats(30, 20, 100.0, 80.0); // n=50, W=0.6, R=1.25
+        let cfg_on = KellyConfig {
+            min_trades: 10,
+            ..KellyConfig::default()
+        };
+        let cfg_off = KellyConfig {
+            min_trades: 10,
+            uncertainty_shrinkage_enabled: false,
+            ..KellyConfig::default()
+        };
+        let qty_on = compute_kelly_qty(&cfg_on, &stats, 10_000.0, 50_000.0, 0.02, 1.0);
+        let qty_off = compute_kelly_qty(&cfg_off, &stats, 10_000.0, 50_000.0, 0.02, 1.0);
+        assert!(
+            qty_on <= qty_off,
+            "shrinkage must never increase Kelly qty: on={qty_on} off={qty_off}"
+        );
+        assert!(
+            qty_on < qty_off,
+            "for this marginal sample shrinkage must strictly reduce: on={qty_on} off={qty_off}"
+        );
+    }
+
+    /// 更高 z → 更保守（Wilson LB 更低）→ qty 更小或相等。
+    #[test]
+    fn test_kelly_sig_1_higher_z_more_conservative() {
+        let stats = make_stats(30, 20, 100.0, 80.0);
+        let cfg_low_z = KellyConfig {
+            min_trades: 10,
+            kelly_sig_z: 1.0,
+            ..KellyConfig::default()
+        };
+        let cfg_high_z = KellyConfig {
+            min_trades: 10,
+            kelly_sig_z: 2.0,
+            ..KellyConfig::default()
+        };
+        let qty_low = compute_kelly_qty(&cfg_low_z, &stats, 10_000.0, 50_000.0, 0.02, 1.0);
+        let qty_high = compute_kelly_qty(&cfg_high_z, &stats, 10_000.0, 50_000.0, 0.02, 1.0);
+        assert!(
+            qty_high <= qty_low,
+            "higher z must be at least as conservative: high_z={qty_high} low_z={qty_low}"
+        );
+    }
+
+    /// r_haircut default 0.0 不動 R：與顯式 r_haircut=0 等價（保守基線=現行 R）。
+    #[test]
+    fn test_kelly_sig_1_r_haircut_zero_leaves_r_untouched() {
+        let stats = make_stats(120, 80, 100.0, 80.0); // n=200
+        let cfg_default = KellyConfig {
+            ..KellyConfig::default()
+        };
+        let cfg_explicit_zero = KellyConfig {
+            r_haircut: 0.0,
+            ..KellyConfig::default()
+        };
+        let q_default = compute_kelly_qty(&cfg_default, &stats, 10_000.0, 50_000.0, 0.02, 1.0);
+        let q_zero = compute_kelly_qty(&cfg_explicit_zero, &stats, 10_000.0, 50_000.0, 0.02, 1.0);
+        assert!((q_default - q_zero).abs() < 1e-12, "r_haircut default 0 == explicit 0");
+    }
+
+    /// r_haircut > 0 把 R 收向 1（R>1 時降低 Kelly_full）→ qty 更小（更保守）。
+    #[test]
+    fn test_kelly_sig_1_r_haircut_shrinks_toward_one() {
+        let stats = make_stats(120, 80, 100.0, 80.0); // R = 100/80 = 1.25 > 1
+        let cfg_no_haircut = KellyConfig {
+            r_haircut: 0.0,
+            ..KellyConfig::default()
+        };
+        let cfg_haircut = KellyConfig {
+            r_haircut: 0.5,
+            ..KellyConfig::default()
+        };
+        let q_no = compute_kelly_qty(&cfg_no_haircut, &stats, 10_000.0, 50_000.0, 0.02, 1.0);
+        let q_hc = compute_kelly_qty(&cfg_haircut, &stats, 10_000.0, 50_000.0, 0.02, 1.0);
+        assert!(
+            q_hc < q_no,
+            "r_haircut>0 (R→1) must reduce Kelly qty when R>1: haircut={q_hc} none={q_no}"
+        );
+    }
+
+    /// FIX-27 與 shrinkage 疊加：W_lcb 把邊際正 edge 壓成負 → 直接拒單（return 0）。
+    #[test]
+    fn test_kelly_sig_1_shrinkage_can_trigger_fix27_reject() {
+        // 51% 勝率、R=1：point Kelly_full = 0.51 - 0.49/1 = 0.02 > 0（舊行為會開倉）。
+        // n=50 時 W_lcb≈0.378 → Kelly_full = 0.378 - 0.622/1 = -0.244 < 0 → FIX-27 拒。
+        let stats = make_stats(26, 24, 100.0, 100.0); // n=50, W=0.52, R=1
+        let cfg_on = KellyConfig {
+            min_trades: 10,
+            ..KellyConfig::default()
+        };
+        let cfg_off = KellyConfig {
+            min_trades: 10,
+            uncertainty_shrinkage_enabled: false,
+            ..KellyConfig::default()
+        };
+        let qty_off = compute_kelly_qty(&cfg_off, &stats, 10_000.0, 50_000.0, 0.02, 1.0);
+        let qty_on = compute_kelly_qty(&cfg_on, &stats, 10_000.0, 50_000.0, 0.02, 1.0);
+        assert!(qty_off > 0.0, "without shrinkage marginal edge trades");
+        assert_eq!(
+            qty_on, 0.0,
+            "shrinkage pushes marginal Kelly negative → FIX-27 reject"
+        );
+    }
+
+    #[test]
+    fn test_kelly_sig_1_validate_rejects_bad_sig_params() {
+        let mut cfg = KellyConfig::default();
+        cfg.kelly_sig_z = -0.1;
+        assert!(cfg.validate().is_err(), "negative kelly_sig_z must reject");
+
+        cfg = KellyConfig::default();
+        cfg.r_haircut = 1.0;
+        assert!(cfg.validate().is_err(), "r_haircut = 1.0 must reject");
+
+        cfg = KellyConfig::default();
+        cfg.r_haircut = -0.1;
+        assert!(cfg.validate().is_err(), "negative r_haircut must reject");
+
+        cfg = KellyConfig::default();
+        cfg.r_haircut = f64::NAN;
+        assert!(cfg.validate().is_err(), "NaN r_haircut must reject");
+
+        // Defaults must validate.
+        assert!(KellyConfig::default().validate().is_ok());
     }
 }

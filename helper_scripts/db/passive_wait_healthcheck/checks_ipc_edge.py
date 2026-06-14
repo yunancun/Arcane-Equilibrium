@@ -443,13 +443,34 @@ def check_model_registry_freshness(cur) -> tuple[str, str]:
     Phase 3+ (once production models land): latest production `train_date` per
     slot should be within 30 days — PSI/drift mitigation. Thresholds:
     - table missing → FAIL (V023 not applied)
-    - no production row → PASS + "empty" (Phase 1a/2 expected)
+    - no production row, no shadow row → PASS + "empty" (Phase 1a/2 expected)
+    - no production row but shadow rows exist → shadow-freshness fallback (see below)
     - latest production row train_date within 30d → PASS
     - 30d < age ≤ 60d → WARN (retraining overdue)
     - age > 60d → FAIL (model likely stale, drift risk)
 
+    Shadow-only blind-spot (P2-MIT, 2026-06-14): the production query alone
+    returns 0 slots whenever every model is still `canary_status='shadow'`
+    (never promoted). The old code mapped that to a blanket PASS "expected",
+    so a shadow model that went stale months ago stayed permanently green —
+    monitoring became a mirage. We now probe the shadow cohort as a fallback.
+    Shadow rows never carry `promoted_at` (NULL until promote), so `created_at`
+    (registration time) is the only age signal; if the *newest* shadow row is
+    aged past the freshness window the whole shadow pool is stale.
+    Verdict for the shadow cohort:
+    - newest shadow within 30d → PASS (shadow but fresh; dormant-as-designed)
+    - newest shadow > 30d       → WARN (stale shadow surfaced, NOT silent PASS)
+    Shadow never escalates to FAIL: a shadow model is *meant* to sit unpromoted,
+    so a missing promotion is not a fault — only an unrefreshed shadow is.
+
     [9] learning.model_registry 最新 production model 齡期。Phase 1a/2 空表屬預期；
     Phase 3+ 要求最新 production model train_date 30 天內。
+    為何加 shadow fallback（P2-MIT，2026-06-14）：production-only 查詢在「所有
+    model 仍是 shadow（從未晉升）」時恆回 0 slots，舊碼一律 PASS「expected」，
+    令過期 shadow model 永遠綠燈＝監測假象。故新增 shadow cohort fallback。
+    區分「shadow 但新鮮」（PASS，本就 dormant 非誤報）vs「shadow 且過齡」
+    （WARN surface，非靜默 PASS）。shadow 永不升 FAIL：shadow 本就不晉升，
+    缺晉升非故障，只有「未刷新」才是問題。
     """
     try:
         cur.execute("""
@@ -485,10 +506,60 @@ def check_model_registry_freshness(cur) -> tuple[str, str]:
         return ("WARN", f"registry query failed: {e}")
 
     if slots == 0:
+        # No production slot → probe the shadow cohort so a stale shadow model
+        # is surfaced instead of hiding behind a blanket PASS "expected".
+        # Shadow rows have promoted_at=NULL by design, so created_at (when the
+        # shadow row was registered) is the only freshness signal. Read-only,
+        # fail-soft: any query error degrades to the original PASS "expected".
+        # production slot=0 → 探測 shadow cohort，讓過期 shadow model 浮出，
+        # 不再被 PASS「expected」掩蓋。shadow 的 promoted_at 恆 NULL，故以
+        # created_at（shadow row 登記時刻）為唯一新鮮度信號。唯讀、fail-soft：
+        # 查詢失敗則退回原 PASS「expected」。
+        try:
+            cur.execute("""
+                SELECT
+                    COUNT(*)::int        AS shadow_rows,
+                    MAX(created_at)      AS newest_created_at
+                FROM learning.model_registry
+                WHERE canary_status = 'shadow'
+            """)
+            shadow_rows, newest_shadow = cur.fetchone()
+        except Exception:
+            shadow_rows, newest_shadow = 0, None
+
+        if shadow_rows == 0 or newest_shadow is None:
+            return (
+                "PASS",
+                "model_registry production slots=0, shadow rows=0 (expected in "
+                "Phase 1a/2; flip once training pipeline writes first row via "
+                "run_training_pipeline.py)",
+            )
+
+        # Shadow cohort exists: age the NEWEST shadow row. created_at is
+        # TIMESTAMPTZ → compare on UTC datetime (not date) for sub-day precision.
+        # shadow cohort 存在：以最新 shadow row 計齡。created_at 是 TIMESTAMPTZ，
+        # 以 UTC datetime 比較（非 date）保留次日精度。
+        now_ts = datetime.now(timezone.utc)
+        shadow_age_days = (now_ts - newest_shadow).days
+        shadow_msg = (
+            f"model_registry production slots=0, shadow rows={shadow_rows}, "
+            f"newest_shadow={newest_shadow} ({shadow_age_days}d ago)"
+        )
+        if shadow_age_days > 30:
+            # Stale shadow surfaced — WARN, never FAIL: shadow is meant to sit
+            # unpromoted, so the fault is "unrefreshed", not "unpromoted".
+            # 過期 shadow surface — WARN 非 FAIL：shadow 本就不晉升，問題是
+            # 「未刷新」而非「未晉升」。
+            return (
+                "WARN",
+                shadow_msg + " — newest shadow model >30d, shadow pool stale "
+                "(no production yet; retrain or promote)",
+            )
+        # Shadow but fresh: dormant-as-designed, not a false alarm.
+        # shadow 但新鮮：本就 dormant，非誤報。
         return (
             "PASS",
-            "model_registry production slots=0 (expected in Phase 1a/2; flip once "
-            "training pipeline writes first row via run_training_pipeline.py)",
+            shadow_msg + " (shadow but fresh; dormant as designed)",
         )
 
     # Compute age in days from oldest slot's train_date.

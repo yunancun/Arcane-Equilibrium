@@ -57,7 +57,7 @@ from typing import TYPE_CHECKING
 # 模組級 import，測試 patch path 升級到本模組
 # (``app.layer2_cost_recording._invalidate_h_state_async``，per RFC §7.3)。
 from .h_state_invalidator import invalidate_async as _invalidate_h_state_async
-from .layer2_types import Layer2Session
+from .layer2_types import MODEL_IDS, Layer2Session
 
 if TYPE_CHECKING:
     from .layer2_cost_tracker import Layer2CostTracker
@@ -102,8 +102,14 @@ def record_claude_cost(
             _add_daily_claude_cost(tracker, cost)
             return cost
         if model_tier not in tracker._pricing.models:
-            logger.warning("Unknown model tier: %s, using sonnet pricing", model_tier)
-            model_tier = "sonnet"
+            # 為什麼 fail-closed（根原則 6：不確定→保守）：未知 tier 靜默退 sonnet 會把
+            # 更貴的模型（如 opus）成本低估記成 sonnet，繞過 DOC-08 $2/day 預算閘 +
+            # 污染 ROI 自適應預算。拒絕記帳而非猜價；caller 必傳已知 tier（PricingTable
+            # 含全 anthropic/openai/deepseek/local tier 鍵，合法呼叫不受影響）。
+            raise ValueError(
+                f"Unknown model tier for cost recording: {model_tier!r}; "
+                "refusing fail-open billing"
+            )
         cost = tracker._pricing.models[model_tier].cost_for_tokens(input_tokens, output_tokens)
         session.cost_usd = round(session.cost_usd + cost, 6)
         session.input_tokens += input_tokens
@@ -111,10 +117,15 @@ def record_claude_cost(
         _add_daily_claude_cost(tracker, cost)
     # FIX-57: Sync to Rust BudgetTracker (fire-and-forget, non-blocking).
     # FIX-57：同步到 Rust BudgetTracker（非阻塞，失敗不影響本地記錄）。
+    # 鍵空間對齊：Rust BudgetTracker.record_ai_usage 以「真實 model-id」查
+    # ai_pricing.yaml（如 claude-sonnet-4-6），而本函式入參 model_tier 是 tier
+    # 別名（haiku/sonnet/opus）。送別名會讓 Rust lookup→None→Rust 端 fail-closed
+    # 漏記。故先用 MODEL_IDS 把 anthropic 別名正規化為真名；非 anthropic tier
+    # （deepseek/openai/local）不在 MODEL_IDS → fallback 原值，行為與舊版一致。
     _sync_to_rust_budget(
         tracker,
         provider="anthropic",
-        model=model_tier,
+        model=MODEL_IDS.get(model_tier, model_tier),
         tokens_in=input_tokens,
         tokens_out=output_tokens,
     )

@@ -227,6 +227,12 @@ from .checks_cron_heartbeat import (  # noqa: F401
     # ``helper_scripts/canary/healthchecks/check_pg_dump_freshness.py``。
     check_80_pg_dump_freshness,
 )
+# [90] PROFIT-1（2026-06-14）— cost_gate「雙重扣成本」latent issue 預防性哨兵；
+# delegate 給 standalone
+# ``helper_scripts/canary/healthchecks/check_cost_gate_double_deduct.py``。
+from .checks_cost_gate_double_deduct import (  # noqa: F401
+    check_90_cost_gate_double_deduct,
+)
 
 __all__ = [
     "main",
@@ -334,4 +340,6 @@ __all__ = [
     "check_79_blocked_symbols_30d_unblock_check_cron_fires",
     # [80] P0-OPS-4 GAP-D（2026-05-27）pg_dump cron 7-check delegate wrapper.
     "check_80_pg_dump_freshness",
+    # [90] PROFIT-1（2026-06-14）cost_gate 雙重扣成本 latent issue 預防性哨兵 wrapper.
+    "check_90_cost_gate_double_deduct",
 ]

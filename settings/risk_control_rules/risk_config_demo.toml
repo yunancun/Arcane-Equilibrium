@@ -236,12 +236,20 @@ use_maker_close = true
 enabled = true
 min_trades = 50
 step_pct = 0.005
+# DYNAMIC-RISK-SIG-1 量綱說明（2026-06-14）：sharpe_high/sharpe_low 是「per-trade
+# Sharpe」（mean/std of realized-PnL ring，無年化），不要用年化直覺解讀。
 min_pct = 0.01
 max_pct = 0.05
 sharpe_high = 1.0
 sharpe_low = 0.0
 update_interval_ms = 300000
 window_size = 200
+# DYNAMIC-RISK-SIG-1 (2026-06-14)：UP（加倉）路徑顯著性 gate。只有「SR 的下置信界
+# LCB(z) 仍 >= sharpe_high」且筆數過 max(min_trades, sig_min_trades) 才加倉；樣本不足
+# → 不放大（survival-first）。DOWN（降倉）不受此 gate 影響。預設只增保守、不增風險。
+sig_gate_enabled = true
+sig_z = 1.645
+sig_min_trades = 50
 
 [experimental.flags]
 
@@ -280,6 +288,13 @@ mature_threshold = 200
 young_fraction = 0.125
 mature_fraction = 0.16666666666666666
 established_fraction = 0.25
+# KELLY-SIG-1 (2026-06-14)：estimation-uncertainty shrinkage。win_rate 改用 Wilson
+# 下置信界入 Kelly 公式（永遠 <= point estimate），避免 point-estimate Kelly 在小樣本
+# 系統性高估 f* → 過度槓桿。r_haircut=0 預設不動 R（保守基線=現行 R）；operator 可調高
+# 使 R→1（更保守）。預設只增保守、不增風險。
+uncertainty_shrinkage_enabled = true
+kelly_sig_z = 1.645
+r_haircut = 0.0
 
 # W-AUDIT-6 (2026-05-09) — Fast-track held-drop thresholds.
 # Defaults preserve the previous hardcoded triggers:

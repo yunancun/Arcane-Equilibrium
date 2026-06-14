@@ -258,22 +258,18 @@ class ShadowDecisionConsumer:
         effective_fraction *= max(0.1, min(multiplier, 1.0))
         notional = balance * effective_fraction
         qty = notional / price if price > 0 else 0.0
+        # 不做客戶端取整：Rust 端對 qtyStep 做權威 floor + min_qty rescue，擁有合約精度。
+        # 為什麼移除原 3-bucket pre-round（>10000→5dp/>100→3dp/else→1dp）：在 price<=100
+        # 且 sub-0.1 qtyStep 的小 notional 角落，會把合法 qty round 到 0 → 靜默丟單
+        # （reason=qty_rounds_to_zero，只進 200-cap in-memory list 無 log），污染 paper attribution。
+        # 正側精度本就屬 Rust，客戶端 pre-round 只會誤殺；移除後 qty<=0 僅在餘額/價格邊界發生。
         if qty <= 0:
+            # fail-closed 丟單，但記 WARNING 使其可見（對齊 Rust 側 log-WARNING），不再靜默。
             result["reason"] = "insufficient_balance"
-            self._record(decision, result)
-            return result
-
-        # Reasonable client-side rounding so the IPC payload is clean; the
-        # Rust engine still does the authoritative instrument-precision round.
-        # 客戶端粗略取整保持 IPC 入參乾淨；Rust 端再做合約精度權威取整。
-        if price > 10_000:
-            qty = round(qty, 5)
-        elif price > 100:
-            qty = round(qty, 3)
-        else:
-            qty = round(qty, 1)
-        if qty <= 0:
-            result["reason"] = "qty_rounds_to_zero"
+            logger.warning(
+                "Shadow decision dropped (qty<=0 before IPC submit): %s %s %s notional=%.6f price=%.6f",
+                decision["decision_id"], side, symbol, notional, price,
+            )
             self._record(decision, result)
             return result
 
