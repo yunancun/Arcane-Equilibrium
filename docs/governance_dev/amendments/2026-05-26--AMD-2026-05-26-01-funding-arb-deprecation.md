@@ -6,7 +6,7 @@ Operator Sign-off: 2026-05-26 directive — 對 `P0-FUNDING-ARB-DECISION-FORCE` 
 PM Sign-off: 本 draft；批准前 cascade 不執行
 
 Supersedes:
-- `docs/adr/0018-funding-arb-v2-deprecation-watch.md` §Decision「retire from active strategy set」**狀態升格**為「retired closed per code-level `#[deprecated]` marker + runtime fail-closed guard + AMD-level closure governance」；ADR-0018 §Decision rewording 走 §11 cascade（不另立新 ADR）
+- `docs/adr/0018-funding-arb-v2-deprecation-watch.md` §Decision「retire from active strategy set」**狀態升格**為「retired closed per TOML config-load active=false + AMD-level closure governance」；ADR-0018 §Decision rewording 走 §11 cascade（不另立新 ADR）。**註（2026-06-14 TW 訂正）**：本 AMD §3.2 規劃的程式碼層 `#[deprecated]` marker + runtime fail-closed guard 屬 D+7 E1 IMPL（§6.2 / §10 Sign-off 列 `E1 (D+7) PENDING`），**從未 land**；終結之實際 enforcement 僅 TOML config-load active=false，詳見 §1 Status。
 - TODO `§1 P0-FUNDING-ARB-DECISION-FORCE` (已 ✅ CLOSED 2026-05-26) + TODO `§6 P1-EDGE-2 (funding_arb)` — 由本 AMD 落地 cascade 後永久 archive
 
 Related:
@@ -27,7 +27,9 @@ Related:
 
 **Proposed-pending-operator-confirm**
 
-本 AMD 為 operator 2026-05-26 對 `P0-FUNDING-ARB-DECISION-FORCE` 選 (D) 3C TOML deprecation closure 的正式 governance 化。22 天 dormant cycle（2026-05-03 三端 active=false 後）n=18 不再累積，audit 路徑沒有 closure；operator 選 (D) 在 22 天 deadlock 後將 V2 顯式 retire — 程式碼層加 `#[deprecated]` marker、runtime 加 fail-closed guard、TOML 三端硬鎖 active=false（已 land）、docs/spec cascade 全鏈標 retired、ADR-0018 status 從 "retire from active strategy set" 升格為 "Retired closed"。
+本 AMD 為 operator 2026-05-26 對 `P0-FUNDING-ARB-DECISION-FORCE` 選 (D) 3C TOML deprecation closure 的正式 governance 化。22 天 dormant cycle（2026-05-03 三端 active=false 後）n=18 不再累積，audit 路徑沒有 closure；operator 選 (D) 在 22 天 deadlock 後將 V2 顯式 retire — TOML 三端 active=false（commit `a19797d` 已 land）、docs/spec cascade 全鏈標 retired、ADR-0018 status 從 "retire from active strategy set" 升格為 "Retired closed"。
+
+> **2026-06-14 TW doc-vs-code 訂正（per PA `2026-06-14--cold_audit_validated_fix_plan` funding 治理漂移家族 CC/FA MEDIUM）**：本 §1 原 wording 將「程式碼層 `#[deprecated]` marker + runtime fail-closed guard」與 TOML 改動並列描述為已完成，造成 over-claim。實態：該 marker + guard 屬 §3.2 規劃、§6.2 D+7 排程、§10 Sign-off `E1 (D+7) PENDING` 之 E1 IMPL，**從未 land**——`funding_arb.rs:156-177` `update_params()` 仍 `self.active = params.active` 接受 IPC `active=true`，`registry.rs:240-251` 無 `#[allow(deprecated)]` 亦無強制 false。**當前 retire 的唯一 enforcement = TOML config-load `active=false`；無 runtime IPC active=true 注入 guard。** 策略已 dormant（不在 active demo risk_config，無 live-money path），故 (D) closure 不依賴該 guard 即成立；§3.2/§6/§10 之 PENDING 描述維持不變，作為 future revive 時的 IMPL 參考。
 
 ADR-0046 future redesign slot 並存保留；revive 須走 AMD amendment + ADR-0046 Accepted + 5-gate + Stage 0R replay preflight。
 

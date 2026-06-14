@@ -30,6 +30,7 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 | `live` | Live_Ready 仪表盘、余额/PnL/持仓/成交/API key 管理 |
 | `strategy` | 策略部署、scanner、品种管理 |
 | `risk` | 风控参数、止损、denylist |
+| `earn` | Earn 理财 / first-stake GUI（governance group，5-gate 对映后端 9-gate，typed-confirm 带 amount） |
 | `governance` | GovernanceHub、授权、Decision Lease、对账 |
 | `ai` | Layer2Engine、本地/云模型、成本追踪 |
 | `learning` | Learning Cockpit、promotion evidence、ML/feature 状态 |
@@ -74,7 +75,7 @@ srv/
 ├── program_code/
 │   ├── exchange_connectors/
 │   │   └── bybit_connector/
-│   │       └── control_api_v1/    ← FastAPI 209 /api/v1 + 11 non-api 路由 + 3,700+ 测试
+│   │       └── control_api_v1/    ← FastAPI 控制平面（约 200+ /api/v1 + non-api 路由 + 测试套件；精确数以代码/CI 为准）
 │   │           ├── app/
 │   │           │   ├── governance_hub.py         ← ★ 治理中枢（4 SM 编排 + 跨 SM 级联）
 │   │           │   ├── governance_routes.py      ← 11 治理 API 端点
@@ -103,8 +104,8 @@ srv/
 ├── rust/                          ← ★ Rust 交易引擎（交易 / 风控 / 策略配置 / 执行权威）
 │   ├── Cargo.toml                 ← Workspace: 3 crates
 │   ├── openclaw_types/            ← 10 shared types + serde (36 tests)
-│   ├── openclaw_core/             ← 24 modules: SM/indicators/signals/risk (~400 tests；backtest/portfolio 为 reserved-library，未接 API)
-│   ├── openclaw_engine/           ← 12+ modules: tick pipeline/strategies/paper state/canary (~2400 tests)
+│   ├── openclaw_core/             ← 18 modules: SM/indicators/signals/risk/m4_miner (~400 tests；backtest/portfolio 为 reserved-library，未接 API；7 legacy 模块 per ADR-0015 已退役)
+│   ├── openclaw_engine/           ← 60+ modules: tick pipeline/strategies/paper state/canary/news/earn (~2400 tests)
 │   └── schemas/                   ← Golden JSON schema (10 types)
 ├── helper_scripts/                ← ★ 详见 helper_scripts/SCRIPT_INDEX.md
 │   ├── restart_all.sh             ← 轻量重启（--rebuild 先编译 + --keep-auth 保持授权）
@@ -134,7 +135,7 @@ srv/
 | 核心状态机 | T2.01 授权状态机、T2.02 风控状态机、T2.03 决策租约、T2.04 对账引擎 | SM-01/SM-02/SM-04/EX-04 |
 | 扩展模组 | T2.05–T2.23（OMS、审计持久化、Scout Agent、组合风控、事件模型、感知数据面、学习门控等） | EX-01/EX-02/EX-05/EX-06/DOC-01/DOC-06 |
 
-**关键测试基准**（最新数字以 `TODO.md` header 为准）：~6,500 测试通过（Py pytest 3431 + Rs cargo workspace 3132 + sibling 44）· fail-closed 设计 · 线程安全（Py）/ 零锁 single-owner（Rs）· **注释规范**：2026-05-05 起新代码默认中文（旧双语块保留，详 `CLAUDE.md` §七）
+**关键测试基准**（精确数字以 `TODO.md` header / CI 为准，README 不再镜像以避免 drift）：约 6,500+ 测试通过（Py pytest + Rs cargo workspace + sibling）· fail-closed 设计 · 线程安全（Py）/ 零锁 single-owner（Rs）· **注释规范**：2026-05-05 起新代码默认中文（旧双语块保留，详 `CLAUDE.md` §七）
 
 ---
 

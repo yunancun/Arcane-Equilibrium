@@ -4,6 +4,8 @@
 > 治理(2026-06-11 起,R4 巡檢):Project context 索引 ≤40 條,超限新增前必先 MERGE(優先級:主題重疊>敘事弧相同>heat 最低/最舊已完結;archive 守恆);topic 檔 frontmatter 可選 `heat:`(被召回/引用 +1,合併取 sum);被推翻的結論不原地改寫 → topic 檔「演變軌跡」節(日期+轉變+原因+證據 SHA)。
 
 ## Project context
+- [全盤冷酷審計 ultracode 12軸+seam (2026-06-14)](project_2026_06_14_cold_audit.md) — 凍結 976d420e;**無 P0/CRITICAL**,live 5-gate 實證 fail-closed;confirmed P1:**AUTH-1 live RiskConfig 繞 5-gate**(patch_risk_config engine=live 只需 operator+scope 無 all_five_live_gates,違 #4/#5,operator 先裁 intent)/PROFIT-1 cost_gate 雙重扣成本(異質佐證 profit-diagnosis 拒 99.97%,不可直接翻先 replay)/SCHEMA-1 sqlx 全 runtime-checked 無 column contract test(M4 已抓 5 滑過)/PERF 三項;seam 7→2 refuted+1 降 LOW(防線比文檔厚);dirty 8 檔讀模型 CLEAN 但 fix-before-commit;教訓:Workflow args 必傳真 JSON 物件非字串(首輪退默認 10 軸);TODO §5 登 6 條 AUDIT-2026-06-14-*;細節在 topic 檔
+- [盈利研判 ultracode+/loop:搜索空間根因再確認+Rank7全NO-GO (2026-06-13~14)](project_2026_06_13_profit_diagnosis_searchspace_reconfirm.md) — 不賺錢=搜索空間問題非執行(OHLCV+TA net alpha=0,n=159萬,正PnL=down-beta副產品;cost_gate拒99.97%全真負0誤殺;realized近平偏正=空轉非虧損)。/loop 自主推進跑 Rank7 桶C 另類數據軸 $0 離線螢幕:funding+OI+LSR/liq-cascade 雙 NO-GO(down-beta 偽裝),Polymarket NEEDS-DATA;雙對抗複核(QC 攻無alpha→HOLDS/PA 攻延後→HOLDS,親 grep 證偽「縮虧解鎖被擋單」)。iteration3 跑 Polymarket calibration gate=WELL-CALIBRATED(Brier 0.052/skill +0.79)→PARK-CONFIRMED但拆:價格目標子軸KILL(odds是spot機械衍生不可能lead perp)、事件/監管子軸(ETF/SEC/FOMC)值得$0累積3-6月。**loop終態:profit搜索徹底窮盡(4軸全驗),現無廉價近期lever(四重確認);剩餘全operator-hand(啟cron/flip flag/部署/付費),主會話一個都沒自動執行(守read/write分離+survival-first)**;細節在 topic 檔
 - [五 repo 借用評估+P0/P1/P2 全落地 (2026-06-11~12)](project_2026_06_11_five_repo_subagent_token_eval.md) — **P0/P1 `4587f65f`+P2 `131bd560..5e3820f3`**(四波 agent 鏈全綠):P0=rtk hook 全鏈/SessionStart 路由/25 description/四態契約;P2=L2 PG 記憶層 dormant(V139+蒸餾管線+seed+pgvector 緩裝,flag-OFF)/告警耐久 sink+redactor/BB 公告哨兵(alert-only)/polymarket 軸(artifact-only)/analyze_token_usage/mnemopi 試點;**owed(operator-gated):rtk#2399 簽 CLA、V138+V139 prod apply、三 cron 一鍵激活、bge-m3 pull**;細節在 topic 檔
 - [BG subagent「卡死」根因三層+SOP shipped (2026-06-11)](project_2026_06_11_bg_subagent_idle_kill_rootcause.md) — ①desktop 900s idle-pause 殺光 in-flight BG agent(兩波 2 秒實證,不可復活);②output-stub/worktree mtime 判死=必誤殺,**唯一信號=subagents/agent-*.jsonl mtime**;③限額日 API 單往返 5m38s 假死。**路線 B 拍板,SOP shipped `558ded55`**:CLAUDE§八+PM.md 正本(駐留等收/TaskStop 三前置/續作棒)+E1 checkpoint+`agent-wave` workflow(resumeFromRunId 零浪費重放);**三端同步完 `7712ec80`**(增量 14 檔 worktree 重放+E1 memory union 解衝突;殭屍指針出清;Linux repo=`~/BybitOpenClaw/srv`)
 - [L2 P4 全鏈 shipped+P2p 哨兵 shipped (2026-06-10~11)](project_2026_06_10_l2_p4_ratify_p2p_shipped.md) — **P4 merged main `ddaafda1`(06-11,dormant 三重關)**:MIT 7 項+QC sign-off+三線 E1→E2(抓 **V137/[82] 被 P5-SM 撞號**→改 V138+[83]-[87])→PM stage0r 三向映射裁決→E4 GREEN(scratch-DB E2E 全鏈+wiring 釘子);owed=V138 prod apply(operator-gated)。教訓:**migration/healthcheck 號=git 看不見的全局命名空間**;前台 Agent 串行=turn 不落地最穩。P2p merge `661699e5`;owed=Telegram creds(operator 後補)→probe→installer。**watchdog 告警現仍靜默 no-op**
@@ -37,7 +39,7 @@
 - [ML/DL 自主學習架構](project_ml_dl_learning_architecture.md) — v0.4 Teacher-Student+LightGBM+Optuna+3DL
 - [Agent P2 動態 SL/TP](project_agent_p2_dynamic_sl_tp.md) — 默認 ATR 動態,agent_adjust() 可覆蓋,P1 max 硬頂
 - [Agent 工作空間系統](project_agent_workspace.md) — docs/CCAgentWorkSpace/ 下 profile/memory/workspace
-- [18-agent runtime 接線 (2026-04-25)](project_18_agent_runtime_wired.md) — srv/.claude/agents 18 subagent+24 skill;根目錄 .claude=symlink→srv/.claude(單副本,無雙端)
+- [18-agent runtime 接線 (2026-04-25)](project_18_agent_runtime_wired.md) — srv/.claude/agents 18 subagent+25 skill;根目錄 .claude=symlink→srv/.claude(單副本,無雙端)
 - [Layer 2 AI 推理循環 (2026-04-23 更正)](project_layer2_agent_design.md) — L0/L1/L2 三層;真 gap=L2 自主推理+Executor shadow→live
 - [5-Agent+H1-H5 Runtime (2026-04-23)](project_5agent_runtime_state.md) — ~4552 行 live shadow;Strategist live/Executor shadow 默認
 - [GUI 寫入面盤點](project_gui_write_paths_inventory.md) — 93 endpoints;Rust trading_mode 冷參數陷阱;fake-success 判別
@@ -62,10 +64,10 @@
 - [funding_arb V2 棄策略路徑 (2026-05-02)](project_funding_arb_v2_deprecation_path.md) — 1B 收樣本/2A 中期棄(delta-neutral 數學不成立)/3C TOML a19797d
 - [P0 sqlx hash drift incident (2026-05-02)](project_2026_05_02_p0_sqlx_hash_drift.md) — 改 migration file 沒同步 DB checksum;治本=repair_migration_checksum;盲點=audit closure 漏 engine restart 實測
 - [ml_training cron 是 hybrid (2026-05-09/10)](project_2026_05_09_ml_training_cron_weekly.md) — 5 training DAILY;5 audit DAILY fire 但 weekday=6 gate;MIN_SAMPLES=200 4/5 策略不過
-- [Sprint N+0 closure (2026-05-10)](project_2026_05_10_sprint_n0_closure.md) — attribution_chain_ok 0.5%→100%;[40] avg_net −17.82→+8.75bps;5 textbook 策略 alpha-deficient 不變;HEAD b6ed4975
-- [Sprint N+1 D+0 readiness (2026-05-10)](project_2026_05_10_sprint_n1_d0_readiness.md) — 25 項 land HEAD bf66f1b2;W7-3/W7-1 PR ready NOT DEPLOYED
+- [Sprint N+0 closure / N+1 D+0 readiness (2026-05-10)](project_2026_05_10_sprint_n0_closure.md) — N+0([n0 檔]):attribution_chain_ok 0.5%→100%;[40] avg_net −17.82→+8.75bps;5 textbook 策略 alpha-deficient 不變;HEAD b6ed4975。N+1([project_2026_05_10_sprint_n1_d0_readiness.md]):25 項 land HEAD bf66f1b2;W7-3/W7-1 PR ready NOT DEPLOYED
 
 ## Working principles & autonomy
+- [市場必然可主動盈利,禁範式陷阱探非常規數學 (2026-06-14)](feedback_active_profit_unconventional_mandate.md) — operator 鐵則:市場必然可主動盈利,「增加投入/被動等數據」=消極不接受。我被抓失敗模式=所有 NO-GO 都死於同一測試(線性 IC×OHLCV×beta 殘差×taker 成本牆=只為方向性 taker 預測設計),窮盡那一角落卻誤判整個市場無 edge(範疇錯誤)。須用各 lens 原生數學(做市/統計套利/Hawkes/資訊論/delta-carry/跨所),偏結構性·機械性 edge(非靠預測),discover AND implement
 - [Agent 自主權偏好](feedback_agent_autonomy.md) — 用戶只設 global 止盈止損,Agent 自主決定策略/參數/時機/倉位
 - [最少確認偏好](feedback_minimal_confirmation.md) — 不反復問 yes,自主執行,只真正高風險才確認
 - [主動 push back](feedback_pushback.md) — operator 錯了/含糊必須直接指出+提替代;協作者≠執行者
