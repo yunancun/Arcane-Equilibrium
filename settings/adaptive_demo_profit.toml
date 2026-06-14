@@ -28,6 +28,11 @@ candidate_regimes = []
 # 注：demo-maker 增益走 all_fills 軌標 saw_artifact，transferable_only 軌不吸收。
 include_demo_maker_arm = true
 
+# Track1 explore-gate 開關：true = 每 cycle 由 allocator 真實 explore_budget_remaining
+# 推導 explore overlay 寫 edge_estimates.json，並保 explore-eligible 策略 active（產單供
+# demo explore-gate 放行收集探索數據）。有界（explore_budget=30 耗盡即停）。demo 沙盒 only。
+enable_explore_sink = true
+
 # RNG seed：留空 = 非確定（production cron）；CLI --seed 可注入固定值供可重現。
 # rng_seed = 42
 

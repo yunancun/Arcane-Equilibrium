@@ -344,11 +344,22 @@ class AdpeRunner:
         映射規則（誠實鐵則）：
           - 對每 regime 跑 allocator.allocate → 權重 dict（含 flat）。
           - 某 (strategy, regime) arm 權重 > 0 且非 flat → 該 strategy 標 active（贏家）。
-          - 全 regime 皆 flat（全負 EV）→ all_regimes_flat=True，desired 全 False（歸零）。
+          - 全 regime 皆 flat（全負 EV）→ all_regimes_flat=True。
         active 是「任一 regime 為贏家即 active」的 union（strategy 級 lever）。
+
+        explore-eligible 保活（為什麼）：enable_explore_sink=True 時，desired 還要
+        union 進「explore-eligible 策略」。否則 rich-signal 下若 winner 全空（all-flat）
+        會把全策略停用 → 無單產生 → demo explore-gate（gates.rs 在 order 上放行）永不
+        觸發 → 無探索數據 → 學習器持續饑餓。為打破此死結，凡某 (strategy, regime) arm
+        的 allocator.explore_budget_remaining(arm_id) > 0（=該 arm 仍在探索期、under-
+        sampled）即把該 strategy 保 active，讓它產單供 explore-gate 放行。
+        **有界**：explore_budget_remaining==0（探索額度耗盡，已達 explore_budget=30）的
+        arm 不保活——耗盡即停，不是全放行。explore-eligibility 讀 allocator 真實
+        explore_budget_remaining（真實信號，非寫死）。explore 關時行為不變（純 winner）。
         """
         decisions: list[CandidateDecision] = []
         active_strategies: set[str] = set()
+        explore_eligible_strategies: set[str] = set()
         seen_strategies: set[str] = set()
         any_non_flat_winner = False
 
@@ -364,6 +375,13 @@ class AdpeRunner:
                 if is_winner:
                     active_strategies.add(strategy)
                     any_non_flat_winner = True
+                # explore-eligible：只在 enable_explore_sink 時計算（行為門控）。
+                # 讀 allocator 真實 explore_budget_remaining（>0=仍 under-sampled，
+                # 探索期未耗盡）；==0 不保活（有界探索，對齊 explore_budget=30）。
+                if self.runner_cfg.enable_explore_sink and (
+                    self.allocator.explore_budget_remaining(arm_id) > 0
+                ):
+                    explore_eligible_strategies.add(strategy)
                 diag = self.allocator.arm_diagnostics(arm_id, rng=self._rng)
                 decisions.append(
                     CandidateDecision(
@@ -376,8 +394,12 @@ class AdpeRunner:
                     )
                 )
 
-        # desired：所有見過的策略，贏家→True、其餘→False（負 EV 歸零）。
-        desired = {s: (s in active_strategies) for s in seen_strategies}
+        # desired：贏家→True；explore 開時 explore-eligible（額度未耗盡）的策略亦保
+        # active（供 explore-gate 放行產生探索數據）；其餘→False（負 EV 且非探索 → 歸零）。
+        keep_active = active_strategies | explore_eligible_strategies
+        desired = {s: (s in keep_active) for s in seen_strategies}
+        # all_regimes_flat 仍只反映「allocate 出的權重」（winner 視角），與 explore 保活
+        # 正交：即使無 winner，explore 保活仍會讓 desired 含 active 策略（這正是修復目的）。
         all_flat = (not any_non_flat_winner) and bool(seen_strategies)
         return desired, decisions, all_flat
 
