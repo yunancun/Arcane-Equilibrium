@@ -1,0 +1,49 @@
+# hftbacktest fill-realism harness 配置（artifact-only 離線研究；D2 re-validation）。
+#
+# 硬邊界：本 harness 不碰執行路徑、不碰 5-gate、不碰 order_manager、不需 restart_all。
+# net 計算 DECISIVE BLOCKER：maker_rebate_bps 必為 0.0（OpenClaw 非 approved-MM，
+# 物理收不到 rebate）；CLI 與 bridge 在 net 計算入口硬擋任何非 0 rebate。
+
+[tardis]
+# Tardis 免費 first-day-of-month 數據集（Bybit linear USDT perp，無 key）。
+exchange = "bybit"
+channels = ["incremental_book_L2", "trades", "liquidations"]
+# 候選 symbol + 免費日（挑 D2 cascade 事件密集者；BTC/ETH 流動性最深、cascade 樣本最多）。
+# day 必為每月 1 號（免費 tier 限制；非 1 號 → fetch raise）。
+symbols = ["BTCUSDT", "ETHUSDT"]
+free_days = ["2024-01-01", "2024-03-01", "2024-08-01"]
+
+[symbol_meta]
+# tick_size / lot_size 供 hftbacktest BacktestAsset 建簿（Bybit linear 規格）。
+# 注：實際 per-symbol 規格以 Bybit instruments-info 為準，此處為研究 baseline。
+"BTCUSDT" = { tick_size = 0.1, lot_size = 0.001 }
+"ETHUSDT" = { tick_size = 0.01, lot_size = 0.01 }
+
+[cascade]
+# cascade 偵測（時間聚類 + 事件數閾值 + 方向）。
+cluster_window_s = 30.0
+min_events = 3
+# 反 cascade maker 掛單相對「事件當時 live BBO」的偏移 bps（非 stale liquidation
+# price 定錨——清算執行價在 cascade 偵測時已偏離現價數十 bps，用它定錨會把掛單推到
+# 簿外永不成交＝peg artifact 非真 non-harvestable）。0 = 貼 BBO 最積極被動 maker；
+# >0 = 退到 BBO 更深處接超調。baseline=0（給 D2 最大 fill 機會，避免低估 fill_rate）。
+overshoot_offset_bps = 0.0
+order_qty = 0.01
+
+[d2]
+# time-based exit 窗（D2 半衰期 H3→H20→0，取保守 5 分鐘收斂窗）。
+exit_horizon_s = 300.0
+# queue model：log_prob（默認，hftbacktest 2.x ProbQueueModel 對應）。
+queue_model = "log_prob"
+
+[fee_legs]
+# DECISIVE BLOCKER 鐵則：maker_rebate_bps 寫死 0.0，不可覆寫為負/正。
+maker_fee_bps_per_leg = 2.0
+maker_rebate_bps = 0.0
+taker_fee_bps_per_leg = 2.75
+
+[verdict]
+# 誠實鐵則門檻：HARVESTABLE 需大樣本（成交事件數 >= min_harvestable_filled_events）；
+# free tier 單日通常達不到 → INSUFFICIENT_SAMPLE。fill_rate < fatal_floor → NON-HARVESTABLE。
+min_harvestable_filled_events = 30
+fill_rate_fatal_floor = 0.30
