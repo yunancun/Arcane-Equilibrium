@@ -213,6 +213,9 @@ def diff(exp: MigrationExpectations, live) -> MigrationGaps:
 # ---------------------------------------------------------------------------
 
 MIGRATIONS_DIR_CANDIDATES = [
+    # cwd-relative：CI 從 srv repo root 跑時命中（GH checkout 路徑非固定），
+    # 也讓本腳本可攜不依賴硬編主機路徑。
+    os.path.join(os.getcwd(), "sql", "migrations"),
     os.path.expanduser("~/BybitOpenClaw/srv/sql/migrations"),
     os.path.expanduser("~/srv/sql/migrations"),
     "/Users/ncyu/Projects/TradeBot/srv/sql/migrations",
@@ -343,6 +346,11 @@ def main() -> int:
           f"{total_missing_tables} tables + {total_missing_cols} cols + "
           f"{total_missing_idx} idx")
 
+    # 刻意恆 return 0（informational-only，非 CI gate）：parser 是 naive forward
+    # regex，無 DROP / RENAME 生命週期感知，對 create-then-drop 的表（如
+    # learning.decision_features、observability.scorer_predictions）會報 false-positive
+    # 「missing」。真正的 schema drift gate 是 schema_contract_test（query 真執行）；
+    # 此腳本只列差異供人工眼檢。若未來收緊 parser 至 drop-aware 再考慮改為非零退出。
     return 0
 
 
