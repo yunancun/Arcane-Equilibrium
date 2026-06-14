@@ -219,7 +219,11 @@ impl TickPipeline {
             .as_ref()
             .and_then(|c| c.get_tick_size(sym))
             .filter(|t| *t > 0.0);
-        let indicators_5m = self.compute_indicators_for_timeframe(sym, "5m");
+        // PERF-1 (2026-06-14)：bar-close gated 5m 指標重算。同一根 5m bar 內回快取
+        // clone（與每 tick 重算 bit-identical），僅在新 5m 收盤或 ewma_lambda 熱重載
+        // 時重算。只 gate「指標重算」，不 gate 策略分派 —— 下游策略（bb_breakout 等）
+        // 仍每 tick 對 live `ctx.price` 比較快取衍生的層級。
+        let indicators_5m = self.cached_or_recompute_indicators_5m(sym);
 
         // W-AUDIT-8a Phase B consumer wiring: clone Tier 2 panel snapshots
         // from late-injected slots before AlphaSurface construction. try_read

@@ -628,6 +628,59 @@ impl TickPipeline {
         self.compute_indicators_for_timeframe(symbol, "1m")
     }
 
+    /// PERF-1 (2026-06-14)：bar-close gated 5m 指標。epoch 不變則回快取 clone，
+    /// epoch 變化（新 5m 收盤 OR ewma_lambda 熱重載）則重算並刷新快取 + epoch。
+    ///
+    /// 為什麼 gate：5m 指標只在新 5m K 線收盤或 lambda 熱重載時改變；同一根 5m bar
+    /// 內每 tick 重算結果完全相同，純屬熱路徑浪費。本 gate 只省掉「指標重算」，
+    /// 不改變下游策略每 tick 對 live `ctx.price` 的比較（PERF-1 scope fence）。
+    ///
+    /// 不變量（fail-closed / 正確性不弱化）：
+    ///   - epoch key = (5m 最後收盤 bar 的 `open_time_ms`, ewma_lambda)。用
+    ///     `open_time_ms` 而非緩衝長度（緩衝滿後長度凍結，見 klines.rs）；lambda
+    ///     入 key 因其經 RiskConfig TOML 熱重載，漏掉會服務過期快照。
+    ///   - **只快取 `Some`**：重算回 `None`（暖機 / 無 OHLCV）時不動快取，向下游
+    ///     傳 `None`，絕不寫入 `None` → 暖機後不會服務過期 `Some`。
+    ///   - 回傳值與每 tick 直接重算 bit-identical（同 bar 內輸入相同）。
+    pub(super) fn cached_or_recompute_indicators_5m(
+        &mut self,
+        symbol: &str,
+    ) -> Option<IndicatorSnapshot> {
+        // epoch 缺 5m 已關閉 K 線（暖機期 / 未知幣種）→ 無法形成穩定 key。
+        // 退回直接重算（compute 端自己會在資料不足時回 None），不寫快取。
+        let last_open_time_ms = self
+            .kline_manager
+            .last_closed_open_time_ms(symbol, "5m")?;
+        let ewma_lambda = self
+            .risk_store
+            .as_ref()
+            .map(|store| store.load().ewma_vol.lambda_for_timeframe("5m"))
+            .unwrap_or(openclaw_core::indicators::DEFAULT_EWMA_VOL_LAMBDA);
+        let epoch = (last_open_time_ms, ewma_lambda);
+
+        // epoch 未變且有快取 → 回 clone（bit-identical 於重算）。
+        if self.perf1_indicators_5m_epoch.get(symbol) == Some(&epoch) {
+            if let Some(cached) = self.perf1_indicators_5m_cache.get(symbol) {
+                return Some(cached.clone());
+            }
+        }
+
+        // epoch 變化 OR 尚無快取 → 重算。
+        match self.compute_indicators_for_timeframe(symbol, "5m") {
+            Some(snapshot) => {
+                // 只快取 Some + 同步 epoch。
+                self.perf1_indicators_5m_cache
+                    .insert(symbol.to_string(), snapshot.clone());
+                self.perf1_indicators_5m_epoch
+                    .insert(symbol.to_string(), epoch);
+                Some(snapshot)
+            }
+            // 重算回 None：不動快取（保留先前 Some 不被污染為 None，也不服務過期
+            // Some —— 因為下游收到的是本次的 None），向下游傳 None。
+            None => None,
+        }
+    }
+
     /// Session 11: Feed trade & orderbook events into 1-minute aggregators.
     /// Flushes happen at minute boundaries → MarketDataMsg::TradeAgg1m / ObSnapshot.
     /// Session 11：將 trade/orderbook 事件餵入 1 分鐘聚合器，跨分鐘時 flush。

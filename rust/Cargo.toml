@@ -60,3 +60,11 @@ sysinfo = "0.32"
 
 [profile.release]
 strip = "symbols"
+# P1 perf：開 ThinLTO + 單一 codegen unit，讓 on_tick 熱路徑跨 crate
+# inline（strategies / tick_pipeline / openclaw_core 邊界），消除 crate
+# 邊界的去最佳化。為什麼 thin 而非 fat：thin 在本 workspace 取得幾乎等同
+# fat 的 runtime 收益，但 clean build 時間成本明顯較低；codegen-units=1
+# 移除平行 codegen 的最佳化縫隙，與 LTO 互補。純 build flag，不改任何
+# 程式邏輯，熱路徑行為 bit-identical（僅最佳化品質提升）。
+lto = "thin"
+codegen-units = 1

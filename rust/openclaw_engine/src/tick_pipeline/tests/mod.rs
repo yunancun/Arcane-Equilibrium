@@ -57,6 +57,8 @@ mod h0_latency_metrics;
 mod halt_ttl;
 mod maker_kpi_hot_reload;
 mod per_symbol_price_pnl;
+// PERF-1（2026-06-14）：bar-close gated 5m 指標重算快取回歸測試。
+mod perf1_indicators_5m_cache;
 mod pipeline_kind_governance;
 mod resolve_close_entry_context_id;
 mod risk_governance_hot_reload;

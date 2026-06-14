@@ -512,9 +512,10 @@ async def get_ollama_status() -> dict[str, Any]:
 
     client = get_local_llm_client()
     provider = _resolve_provider()
-    # is_available() has a 60s TTL cache — cheap to call on every GUI refresh
-    # is_available() 内置 60s TTL 缓存，每次 GUI 刷新调用无额外开销
-    available = client.is_available()
+    # P1-PERF-3：is_available() 有 60s TTL 缓存，但 cache-miss/过期时会跑同步阻塞
+    # urlopen(timeout=1)，在 async route 内冻结 event loop（GUI 每次刷新都调用）。
+    # 改用 is_available_async()（内部 asyncio.to_thread offload 同步健康检查）。
+    available = await client.is_available_async()
     result: dict[str, Any] = {
         "available": available,
         "provider": provider,
@@ -524,17 +525,27 @@ async def get_ollama_status() -> dict[str, Any]:
     if available:
         # Fetch installed model list per provider — Ollama: /api/tags; LM Studio: /v1/models
         # 依 provider 取模型列表 — Ollama 走 /api/tags，LM Studio 走 /v1/models
-        import urllib.request, json as _json
+        # P1-PERF：必須用 async httpx，舊版同步 urlopen 在 async route 內會卡住整個
+        # event loop（GUI 每次刷新都調用此端點），與本目錄既有 httpx.AsyncClient 範式一致。
+        import httpx
         try:
+            # raise_for_status()：httpx 不会对 4xx/5xx 自动 raise，若上游回 503+
+            # 合法 JSON body（过载的 proxy/LM Studio），resp.json() 会成功、models 落空，
+            # 例外分支永不触发、model_list_error 永不设置 → 误报「0 模型」而非「取列表失败」。
+            # 与本目录既有 httpx 范式（layer2_tools.py:545/1070）一致，显式 raise 后归入 fail-soft。
             if provider == PROVIDER_LM_STUDIO:
                 url = client.config.base_url.rstrip("/") + "/models"
-                with urllib.request.urlopen(url, timeout=5) as resp:
-                    data = _json.loads(resp.read())
+                async with httpx.AsyncClient(timeout=5.0) as http:
+                    resp = await http.get(url)
+                resp.raise_for_status()
+                data = resp.json()
                 models = [m.get("id", "") for m in data.get("data", [])]
             else:
                 url = client.config.base_url.rstrip("/") + "/api/tags"
-                with urllib.request.urlopen(url, timeout=5) as resp:
-                    data = _json.loads(resp.read())
+                async with httpx.AsyncClient(timeout=5.0) as http:
+                    resp = await http.get(url)
+                resp.raise_for_status()
+                data = resp.json()
                 models = [m["name"] for m in data.get("models", [])]
             result["models"] = models
             result["model_count"] = len(models)
