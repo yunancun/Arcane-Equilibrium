@@ -391,6 +391,9 @@ mod tests {
             validation_passed: true,
             validation_reason: "test".to_string(),
             from_runtime_field: true,
+            // Track1 demo explore-gate 欄位（此 scanner 測試不涉探索，預設不探索）。
+            explore_eligible: false,
+            explore_remaining: 0,
         };
         let decision = evaluate_opportunity(
             "ma_crossover",

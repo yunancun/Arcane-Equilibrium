@@ -142,6 +142,22 @@ impl IntentProcessor {
             //   - deep tail < -15 才方向可靠
             //   - 1B funding_arb 框架僅 LABUSDT outlier 被影響
             Some(cell) if cell.n_trades < min_n && cell.shrunk_bps < -15.0 => {
+                // Track1 demo explore-gate（branch A）：若 allocator 指示此 arm 仍在探索期
+                // AND 探索額度未滿 → 翻 reject 為探索放行（return None = pass）。
+                // 為什麼安全：放行的 qty 是已過 Guardian(Gate2)/Kelly(Gate2.5)/P1 cap(Gate2.6)/
+                // 准入(Gate2.7) 的 final_qty（cost gate 是最後一道），explore 只翻 Gate3 此一道，
+                // 結構上不可能繞過上游風控。fail-closed：缺欄→false/0→不進此分支→維持現行 block。
+                if cell.explore_eligible && cell.explore_remaining > 0 {
+                    tracing::info!(
+                        strategy,
+                        symbol,
+                        estimated_edge_bps = cell.shrunk_bps,
+                        n_trades = cell.n_trades,
+                        explore_remaining = cell.explore_remaining,
+                        "cost_gate(JS-demo): EXPLORE allow deep-neg low-sample / 探索放行深負低樣本"
+                    );
+                    return None;
+                }
                 // E2 review 2026-05-23 對齊:tracing field key 改用 `estimated_edge_bps`
                 // 與既有 4 處(paper L73 / demo L159 / live L73 / live L157)baseline 一致;
                 // audit log grep 不再分裂兩種 key。`cutoff_bps` 顯式 f64 避免 type mismatch。
@@ -214,6 +230,23 @@ impl IntentProcessor {
                 None // pass
             }
             Some(cell) => {
+                // Track1 demo explore-gate（branch B）：robust-negative（n≥min_n 的負）通常該死。
+                // 但若 allocator 仍指示 explore_eligible（例如 regime 轉折後 forgetting_gamma
+                // 衰減舊 regime 的負統計，arm 被縮回探索期）AND remaining>0 → 探索放行。
+                // 為什麼開 branch B：死 flat 主體是 n≥min_n 的負 arm；只開 branch A 它們會永久死，
+                // 撞 first-detection deadlock。regime 非平穩處理在 allocator 端，gate 只信任信號。
+                // fail-closed 與隔離同 branch A：缺欄→不放行；只 demo gate 讀 explore 欄。
+                if cell.explore_eligible && cell.explore_remaining > 0 {
+                    tracing::info!(
+                        strategy,
+                        symbol,
+                        estimated_edge_bps = cell.shrunk_bps,
+                        n_trades = cell.n_trades,
+                        explore_remaining = cell.explore_remaining,
+                        "cost_gate(JS-demo): EXPLORE allow robust-neg / 探索放行穩健負(regime-driven)"
+                    );
+                    return None;
+                }
                 // Statistically robust (n >= min_n) negative JS estimate → block.
                 // 統計穩健（n ≥ min_n）的負 JS 估計 → 阻擋。
                 Some(ExchangeGateResult::rejected(
