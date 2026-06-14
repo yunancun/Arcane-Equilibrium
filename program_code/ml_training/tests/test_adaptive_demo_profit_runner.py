@@ -158,7 +158,13 @@ def test_reward_source_sql_is_demo_scoped_and_attribution_gated():
     # demo-scope 硬鎖：engine_modes 參數只含 demo。
     assert params[0] == ["demo"]
     assert "engine_mode = ANY" in sql
-    assert "attribution_chain_ok" in sql
+    # 效能修法後直查 base 表，attribution 由「結構性條件」取代 view 的
+    # attribution_chain_ok 旗標（MIT RCA 2026-06-14；demo label-present row 等價）：
+    #   signal_id / context_id 非空 + df.label_net_edge_bps 存在。
+    assert "label_net_edge_bps IS NOT NULL" in sql
+    assert "i.signal_id IS NOT NULL" in sql
+    assert "i.context_id IS NOT NULL" in sql
+    # post-fee reward 欄（直查 base 表時以 net_bps_after_fee 別名輸出）。
     assert "net_bps_after_fee" in sql
 
 
@@ -171,6 +177,31 @@ def test_reward_source_sql_no_forbidden_tokens():
     assert "decision_outcomes" not in sql
     assert "outcome_net_bps" not in sql
     assert "'live'" not in sql
+
+
+def test_reward_source_sql_drops_signals_lateral_queries_base_tables():
+    """效能修法 regression-lock（MIT RCA 2026-06-14）。
+
+    為什麼鎖死：view 的 trading.signals signal_id-only LATERAL 在壓縮 chunk 上
+    per-outer-row bulk-decompress，30d demo 實測 3827s（64 分）。修法砍掉它、直查
+    base 表（intents JOIN decision_features）並保留走 PK 的 decision_context_snapshots
+    lateral 取 regime（962ms / ~3975x，行為等價）。本測試固定這個查詢形狀，防後人
+    退回 view 或重新引入 signals 讀取。
+    """
+    connect, captured = _make_fake_connect([])
+    fetch_demo_arm_rewards("FAKE_DSN", _connect=connect)
+    sql, params = captured["conn"].cur.executed[-1]
+    # 砍 signals lateral：不得再讀 trading.signals，也不得走 view。
+    assert "trading.signals" not in sql
+    assert "mlde_edge_training_rows" not in sql
+    # 直查 base 表 + 走 PK 的 dcs lateral。
+    assert "trading.intents" in sql
+    assert "learning.decision_features" in sql
+    assert "trading.decision_context_snapshots" in sql
+    # 參數簽名不變（engine_modes, max_age_days, max_age_days）= 3 個。
+    assert len(params) == 3
+    assert params[0] == ["demo"]
+    assert params[1] == params[2] == 30  # 預設 max_age_days
 
 
 def test_reward_source_skips_null_arm_id():
