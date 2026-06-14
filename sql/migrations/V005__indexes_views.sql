@@ -406,12 +406,22 @@ END $$;
 -- -------------------------------------------------------
 -- account_snapshots → 新表尚未建立，暫時指向 legacy
 -- NOTE: 正式遷移後改為指向新 schema 表
+-- 前向相容守衛：legacy 表只在 brownfield（既有部署）存在；
+-- virgin DB（全新部署）無 *_legacy 表時必須跳過建 view，
+-- 否則 CREATE VIEW 因 base 表缺失而失敗，阻斷遷移鏈。
 -- -------------------------------------------------------
-CREATE OR REPLACE VIEW public.account_snapshots AS
-SELECT
-    id, ts, total_equity, available_balance, used_margin,
-    unrealized_pnl, account_type, coin, raw_json
-FROM public.account_snapshots_legacy;
+DO $WRAP$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables
+               WHERE table_schema = 'public' AND table_name = 'account_snapshots_legacy') THEN
+        EXECUTE $VV$
+            CREATE OR REPLACE VIEW public.account_snapshots AS
+            SELECT
+                id, ts, total_equity, available_balance, used_margin,
+                unrealized_pnl, account_type, coin, raw_json
+            FROM public.account_snapshots_legacy;
+        $VV$;
+    END IF;
+END $WRAP$;
 
 -- -------------------------------------------------------
 -- position_snapshots → trading.position_snapshots
@@ -485,10 +495,18 @@ FROM agent.ai_invocations;
 -- -------------------------------------------------------
 -- system_health → 暫時指向 legacy（新架構中無直接對應表）
 -- NOTE: Phase 0b 時 grafana_data_writer 改寫後可移除
+-- 前向相容守衛：virgin DB 無 system_health_legacy 時跳過建 view。
 -- -------------------------------------------------------
-CREATE OR REPLACE VIEW public.system_health AS
-SELECT id, ts, component, status, latency_ms, detail, metrics
-FROM public.system_health_legacy;
+DO $WRAP$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables
+               WHERE table_schema = 'public' AND table_name = 'system_health_legacy') THEN
+        EXECUTE $VV$
+            CREATE OR REPLACE VIEW public.system_health AS
+            SELECT id, ts, component, status, latency_ms, detail, metrics
+            FROM public.system_health_legacy;
+        $VV$;
+    END IF;
+END $WRAP$;
 
 -- -------------------------------------------------------
 -- observer_verdicts → trading.risk_verdicts
@@ -509,21 +527,37 @@ FROM trading.risk_verdicts;
 -- -------------------------------------------------------
 -- paper_pnl_snapshots → 暫時指向 legacy
 -- NOTE: Phase 0b 時 grafana_data_writer 改寫後改為新表
+-- 前向相容守衛：virgin DB 無 paper_pnl_snapshots_legacy 時跳過建 view。
 -- -------------------------------------------------------
-CREATE OR REPLACE VIEW public.paper_pnl_snapshots AS
-SELECT
-    id, ts, session_id, realized_pnl, unrealized_pnl,
-    total_fees, ai_cost, net_pnl, open_positions,
-    total_trades, win_rate, sharpe_ratio
-FROM public.paper_pnl_snapshots_legacy;
+DO $WRAP$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables
+               WHERE table_schema = 'public' AND table_name = 'paper_pnl_snapshots_legacy') THEN
+        EXECUTE $VV$
+            CREATE OR REPLACE VIEW public.paper_pnl_snapshots AS
+            SELECT
+                id, ts, session_id, realized_pnl, unrealized_pnl,
+                total_fees, ai_cost, net_pnl, open_positions,
+                total_trades, win_rate, sharpe_ratio
+            FROM public.paper_pnl_snapshots_legacy;
+        $VV$;
+    END IF;
+END $WRAP$;
 
 -- -------------------------------------------------------
 -- risk_events → 暫時指向 legacy
 -- NOTE: risk.black_swan_events 結構不同，需要 Phase 0b 適配
+-- 前向相容守衛：virgin DB 無 risk_events_legacy 時跳過建 view。
 -- -------------------------------------------------------
-CREATE OR REPLACE VIEW public.risk_events AS
-SELECT id, ts, event_type, symbol, severity, layer, detail, metrics
-FROM public.risk_events_legacy;
+DO $WRAP$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables
+               WHERE table_schema = 'public' AND table_name = 'risk_events_legacy') THEN
+        EXECUTE $VV$
+            CREATE OR REPLACE VIEW public.risk_events AS
+            SELECT id, ts, event_type, symbol, severity, layer, detail, metrics
+            FROM public.risk_events_legacy;
+        $VV$;
+    END IF;
+END $WRAP$;
 
 -- -------------------------------------------------------
 -- market_tickers → market.market_tickers
@@ -545,10 +579,18 @@ FROM market.market_tickers;
 -- -------------------------------------------------------
 -- learning_events → 暫時指向 legacy
 -- NOTE: 學習事件分散到多張新表（teacher_directives, model_registry 等）
+-- 前向相容守衛：virgin DB 無 learning_events_legacy 時跳過建 view。
 -- -------------------------------------------------------
-CREATE OR REPLACE VIEW public.learning_events AS
-SELECT id, ts, event_type, title, detail, status, confidence, tags, metadata
-FROM public.learning_events_legacy;
+DO $WRAP$ BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.tables
+               WHERE table_schema = 'public' AND table_name = 'learning_events_legacy') THEN
+        EXECUTE $VV$
+            CREATE OR REPLACE VIEW public.learning_events AS
+            SELECT id, ts, event_type, title, detail, status, confidence, tags, metadata
+            FROM public.learning_events_legacy;
+        $VV$;
+    END IF;
+END $WRAP$;
 
 
 -- ================================================================
