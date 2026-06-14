@@ -1,0 +1,54 @@
+# Adaptive Demo Profit Engine（ADPE）閉環 runner 配置。
+#
+# 用途：control program_code.ml_training.adaptive_demo_profit_engine.runner 的閉環行為。
+# 硬邊界：engine_mode 硬鎖 'demo'（runner 啟動驗證，非 demo 直接拒絕整個 cycle）；
+#         真錢 / mainnet 5-gate / live 路徑完全不碰。
+# 缺檔 / 缺欄位 → runner 用內建 dataclass 預設（fail-soft）。
+
+[runner]
+# engine_mode 硬鎖：只允許 'demo'。改成其他值會被 runner 拒絕（fail-closed）。
+engine_mode = "demo"
+
+# 默認 dry-run：true = 只產 plan + log，不發 set_strategy_active IPC。
+# 真發需 CLI --apply（operator 確認 dry-run plan 合理後才開）。
+dry_run_default = true
+
+# 讀 realized demo reward 的近窗天數（learning.mlde_edge_training_rows，post-fee）。
+reward_max_age_days = 30
+
+# 候選策略集（要被配置的 strategy-arm）。空 = 從 reward 觀測自動發現 arm_id。
+# 與 mlde_edge_training_rows strategy_name_norm 的 5-enum 對齊。
+candidate_strategies = ["ma_crossover", "bb_breakout", "bb_reversion", "grid_trading", "funding_arb"]
+
+# 候選 regime 集（要逐一 allocate 的 regime context）。空 = allocator VALID_REGIMES 全集。
+# 留空使用全集；如需收斂到特定 regime 再列舉。
+candidate_regimes = []
+
+# 是否把 demo-maker candidate arm（post-only maker 捕價差，artifact tier）納入候選。
+# 注：demo-maker 增益走 all_fills 軌標 saw_artifact，transferable_only 軌不吸收。
+include_demo_maker_arm = true
+
+# RNG seed：留空 = 非確定（production cron）；CLI --seed 可注入固定值供可重現。
+# rng_seed = 42
+
+[allocator]
+# 歸零硬閘：真 arm 的 P(μ>0) 必須 ≥ 此值才有資格被配置；否則歸 flat（學會歸零）。
+positive_prob_gate = 0.55
+
+# Monte-Carlo 估 P(μ>0) / posterior-prob 權重的抽樣次數。
+prob_mc_samples = 2000
+
+# flat-arm 保守成本下限（bps）：真 arm 要贏過「不做且付此成本」才被配。
+flat_arm_cost_floor_bps = 5.0
+
+# 每 arm explore 上限（n_trials < 此值仍在探索期）。
+explore_budget = 30
+
+# 遺忘因子（非平穩）：每次 ingest 對舊充分統計量指數衰減。0.99 = 慢衰減。
+forgetting_gamma = 0.99
+
+# dormant 自動清除：arm 連續此 tick 數無新報酬 → 後驗回退 prior。
+dormant_clear_after_ticks = 1440
+
+# 信任軌：transferable_only = promotion 鐵則（demo artifact 不驅動真實配置）。
+trust_track = "transferable_only"
