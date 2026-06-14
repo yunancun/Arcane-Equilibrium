@@ -51,3 +51,66 @@ jobs:
         run: rustup target add aarch64-apple-darwin
       - name: Cargo check
         run: cargo check --target aarch64-apple-darwin --release -p openclaw_engine --bin openclaw-engine
+
+  # schema-consumer contract（P1-SCHEMA-1）：對 ephemeral PG 跑真 V001-V139 全樹，
+  # 再對代表性熱表執行與真實 writer/consumer 同形的 query，兜住「column rename/drop
+  # 隱形至 runtime」這條主線（engine 全 runtime-checked sqlx，編譯期看不見 column drift）。
+  # 成本紀律：限 pull_request → 只 PR 跑、ubuntu-latest 1x 倍率、零 macOS 10x；
+  # push-to-main 與 weekly schedule 不觸發。
+  schema-contract:
+    name: schema-consumer contract (linux + ephemeral pg)
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: rust
+    services:
+      # 用 prod 對齊的 TimescaleDB image，並 pin 明確 tag 避免 latest 漂版導致
+      # V### Guard 反射 timescaledb_information.* view 欄位名 drift（false RAISE）。
+      postgres:
+        image: timescale/timescaledb:2.26.1-pg16
+        env:
+          POSTGRES_USER: contract_user
+          POSTGRES_PASSWORD: contract_pass
+          POSTGRES_DB: contract_db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install psql + psycopg2
+        # psql 用於建 timescaledb extension；psycopg2 供 audit_migrations.py 反射。
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client python3-psycopg2
+      - name: Create timescaledb extension
+        # 決定性前置：migration 不自建 timescaledb extension（pg_trgm/btree_gist/
+        # pgcrypto 由 migration 自建免管）；缺此 step → V006 unguarded compression/
+        # retention 會 hard-fail = 非真 schema drift 的 false-positive。
+        run: |
+          PGPASSWORD=contract_pass psql -h 127.0.0.1 -U contract_user -d contract_db \
+            -c "CREATE EXTENSION IF NOT EXISTS timescaledb CASCADE;"
+      - name: Schema-consumer contract test (cargo)
+        # 正向：對代表性熱表跑真實 writer/consumer query（type/nullable/ON CONFLICT 都驗）。
+        env:
+          OPENCLAW_TEST_PG: postgres://contract_user:contract_pass@127.0.0.1:5432/contract_db
+          OPENCLAW_AUTO_MIGRATE: "1"
+        run: cargo test -p openclaw_engine --test schema_contract_test -- --test-threads=1
+      - name: Migration-declared vs DB audit (python, informational-only)
+        # audit_migrations.py 反射 information_schema.columns，列出「migration 宣告但
+        # DB 缺」的物件，補 consumer-test 的另一向診斷視角。**informational-only，非 gate**：
+        # parser 是 naive forward regex（無 drop/rename 感知），對 create-then-drop 的
+        # 生命週期表（如 learning.decision_features、observability.scorer_predictions）會
+        # 報 false-positive「missing」；故 main() 恆 return 0，不能用其 exit code 攔 CI。
+        # 真正的 drift gate 是上一個 cargo schema_contract_test step（query 真執行）。
+        working-directory: .
+        env:
+          POSTGRES_USER: contract_user
+          POSTGRES_PASSWORD: contract_pass
+          POSTGRES_DB: contract_db
+        run: python3 helper_scripts/db/audit_migrations.py
