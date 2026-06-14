@@ -184,6 +184,10 @@ impl TickPipeline {
             // Sprint 5+ Track B real probe — default None；既有 paper/test ctor 0
             // 行為退化。setter `set_signal_stats` 由 main.rs / health wire-up 注入。
             signal_stats: None,
+            // PERF-1 (2026-06-14)：空快取 + 空 epoch。冷啟動首 tick 必 miss →
+            // 重算並 populate；只快取 Some，故暖機期 None 永不入 map。
+            perf1_indicators_5m_cache: HashMap::new(),
+            perf1_indicators_5m_epoch: HashMap::new(),
         }
     }
 
@@ -392,6 +396,10 @@ impl TickPipeline {
         self.kline_manager.remove_symbol(symbol);
         self.latest_prices.remove(symbol);
         self.latest_indicators.remove(symbol);
+        // PERF-1 (2026-06-14)：清除 5m 指標快取 + epoch，避免同名 symbol 重新
+        // 加入 scanner 時繼承前一任期的過期快照。
+        self.perf1_indicators_5m_cache.remove(symbol);
+        self.perf1_indicators_5m_epoch.remove(symbol);
         self.consecutive_losses.remove(symbol);
         self.last_persisted_signal
             .retain(|(sym, _), _| sym != symbol);

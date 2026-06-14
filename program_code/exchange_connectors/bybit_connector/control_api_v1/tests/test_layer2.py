@@ -263,10 +263,45 @@ class TestLayer2CostTracker:
         assert session.input_tokens == 1000
         assert session.output_tokens == 500
 
-    def test_record_claude_cost_unknown_tier(self, cost_tracker, session):
-        # Unknown tier should fall back to sonnet
-        cost = cost_tracker.record_claude_cost(session, input_tokens=100, output_tokens=50, model_tier="unknown_model")
-        assert cost > 0
+    def test_record_claude_cost_unknown_tier_fails_closed(self, cost_tracker, session):
+        # 未知 tier 必須 fail-closed（拒絕記帳），不可靜默退 sonnet 低估成本。
+        with pytest.raises(ValueError, match="Unknown model tier"):
+            cost_tracker.record_claude_cost(
+                session, input_tokens=100, output_tokens=50, model_tier="unknown_model"
+            )
+
+    def test_record_claude_cost_syncs_real_model_id_to_rust(self, cost_tracker, session):
+        """anthropic tier 必須以「真實 model-id」同步給 Rust record_ai_usage。
+
+        為什麼這條 load-bearing：Rust BudgetTracker.record_ai_usage 以 model-id
+        查 ai_pricing.yaml；若送 tier 別名（sonnet/opus）會 lookup→None→Rust 端
+        fail-closed 漏記。故 record_claude_cost 須先用 MODEL_IDS 把 anthropic 別名
+        正規化為真名（sonnet→claude-sonnet-4-6）。patch 模組級 _sync_to_rust_budget
+        擷取 model= 實參（避免 daemon thread / IPC），鏡像同檔
+        _invalidate_h_state_async 的 patch 範式（per RFC §7.3）。
+        """
+        with patch("app.layer2_cost_recording._sync_to_rust_budget") as mock_sync:
+            cost_tracker.record_claude_cost(
+                session, input_tokens=1000, output_tokens=500, model_tier=MODEL_SONNET,
+            )
+            assert mock_sync.call_count == 1
+            # anthropic 別名必正規化為真名，非裸 tier 別名 'sonnet'。
+            assert mock_sync.call_args.kwargs["model"] == MODEL_IDS[MODEL_SONNET]
+            assert mock_sync.call_args.kwargs["model"] != MODEL_SONNET
+
+    def test_record_claude_cost_syncs_non_anthropic_tier_unchanged(self, cost_tracker, session):
+        """非 anthropic tier（不在 MODEL_IDS）須原值 fallback，行為與舊版一致。
+
+        deepseek-v4-flash 是 PricingTable.models 鍵（過 fail-closed 閘）但不在
+        MODEL_IDS → MODEL_IDS.get(tier, tier) 回原值。驗 anthropic 正規化不誤傷
+        其他 provider 的 tier（它們的 tier 名本身就是 Rust 端 model-id）。
+        """
+        with patch("app.layer2_cost_recording._sync_to_rust_budget") as mock_sync:
+            cost_tracker.record_claude_cost(
+                session, input_tokens=1000, output_tokens=500, model_tier="deepseek-v4-flash",
+            )
+            assert mock_sync.call_count == 1
+            assert mock_sync.call_args.kwargs["model"] == "deepseek-v4-flash"
 
     def test_record_search_cost(self, cost_tracker, session):
         cost_tracker.record_search_cost(session, "perplexity", 0.005)
@@ -1182,3 +1217,109 @@ class TestLayer2Routes:
         )
         assert result["action_result"] == "blocked"
         assert "daily_budget_exceeded" in result["reason_codes"]
+
+
+class TestGetOllamaStatusPerf:
+    """
+    P1-PERF-3 回归：get_ollama_status 路由不得在 event loop 上做同步阻塞 IO。
+      (1) 连通性检查走 await is_available_async()（thread offload，非同步 is_available()）。
+      (2) 模型列表用 await httpx + resp.raise_for_status()，上游 5xx 走 fail-soft
+          （设 model_list_error），不得误吞成「0 模型」。
+    用真 httpx.MockTransport 驱动真实 raise_for_status()/json() 路径，非纯 MagicMock 自证。
+    """
+
+    def _make_client(self):
+        client = MagicMock()
+        client.config.base_url = "http://127.0.0.1:1234/v1"
+        client.config.model = "test-model"
+        # 同步 is_available() 若被误调用会 raise，确保 route 只走 async 版本。
+        client.is_available = MagicMock(
+            side_effect=AssertionError("sync is_available() must not be called in async route")
+        )
+        client.is_available_async = AsyncMock(return_value=True)
+        return client
+
+    def _patch_httpx_transport(self, handler):
+        """patch httpx.AsyncClient 注入 MockTransport，驱动真实 httpx 响应路径。"""
+        import httpx
+        import functools
+
+        transport = httpx.MockTransport(handler)
+        return patch(
+            "httpx.AsyncClient",
+            functools.partial(httpx.AsyncClient, transport=transport),
+        )
+
+    def test_uses_async_availability_not_blocking_sync(self):
+        from app.layer2_routes import get_ollama_status
+        import httpx
+
+        client = self._make_client()
+
+        def handler(request):
+            return httpx.Response(200, json={"data": [{"id": "m1"}, {"id": "m2"}]})
+
+        with patch("app.local_llm_factory.get_local_llm_client", return_value=client), \
+             patch("app.local_llm_factory._resolve_provider", return_value="lm_studio"), \
+             self._patch_httpx_transport(handler):
+            result = _run(get_ollama_status())
+
+        # 走了 async 健康检查（is_available 同步版被设为 raise，未触发即证明）。
+        client.is_available_async.assert_awaited_once()
+        client.is_available.assert_not_called()
+        assert result["data"]["available"] is True
+        assert result["data"]["model_count"] == 2
+        assert "model_list_error" not in result["data"]
+
+    def test_5xx_with_json_body_triggers_fail_soft(self):
+        # 关键回归：上游回 503 + 合法 JSON body 时，raise_for_status() 必须触发例外分支，
+        # 设置 model_list_error，而非静默吞成「0 模型」。
+        from app.layer2_routes import get_ollama_status
+        import httpx
+
+        client = self._make_client()
+
+        def handler(request):
+            # 503 但带形态合法的 JSON（过载 proxy/LM Studio 的真实失败形态）。
+            return httpx.Response(503, json={"data": []})
+
+        with patch("app.local_llm_factory.get_local_llm_client", return_value=client), \
+             patch("app.local_llm_factory._resolve_provider", return_value="lm_studio"), \
+             self._patch_httpx_transport(handler):
+            result = _run(get_ollama_status())
+
+        assert result["data"]["available"] is True
+        assert result["data"]["models"] == []
+        assert result["data"]["model_list_error"] == "ollama_model_list_unavailable"
+
+    def test_ollama_arm_5xx_fail_soft(self):
+        # Ollama 臂（/api/tags）同样的 5xx fail-soft 行为。
+        from app.layer2_routes import get_ollama_status
+        import httpx
+
+        client = self._make_client()
+
+        def handler(request):
+            return httpx.Response(500, json={"models": []})
+
+        with patch("app.local_llm_factory.get_local_llm_client", return_value=client), \
+             patch("app.local_llm_factory._resolve_provider", return_value="ollama"), \
+             self._patch_httpx_transport(handler):
+            result = _run(get_ollama_status())
+
+        assert result["data"]["model_list_error"] == "ollama_model_list_unavailable"
+
+    def test_unavailable_skips_model_fetch(self):
+        # 连通性 False 时不取模型列表（available=False，无 models 字段）。
+        from app.layer2_routes import get_ollama_status
+
+        client = self._make_client()
+        client.is_available_async = AsyncMock(return_value=False)
+
+        with patch("app.local_llm_factory.get_local_llm_client", return_value=client), \
+             patch("app.local_llm_factory._resolve_provider", return_value="lm_studio"):
+            result = _run(get_ollama_status())
+
+        client.is_available_async.assert_awaited_once()
+        assert result["data"]["available"] is False
+        assert "models" not in result["data"]

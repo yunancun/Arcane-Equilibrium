@@ -290,6 +290,8 @@ fn test_dynamic_risk_1_paper_close_all_feeds_sizer() {
         sharpe_low: -0.5,
         update_interval_ms: 0,
         window_size: 20,
+        // 本測只檢查 trades_in_window，不呼 maybe_update；顯著性 gate 欄位取 default。
+        ..Default::default()
     };
     pipeline.dynamic_risk_sizer = crate::dynamic_risk_sizer::DynamicRiskSizer::new(0.03, cfg);
     pipeline
@@ -331,6 +333,8 @@ fn test_dynamic_risk_1_operator_patch_rebases_sizer() {
         sharpe_low: -0.5,
         update_interval_ms: 0,
         window_size: 20,
+        // 本測走 DOWN（虧損）路徑 + rebase，DOWN 不受顯著性 gate 影響；新欄取 default。
+        ..Default::default()
     };
     pipeline.dynamic_risk_sizer = crate::dynamic_risk_sizer::DynamicRiskSizer::new(0.03, cfg);
     // Push losing trades — next maybe_update would step down without rebase.

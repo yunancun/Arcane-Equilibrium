@@ -165,6 +165,19 @@ impl KlineBuffer {
         self.bars.iter().skip(skip).cloned().collect()
     }
 
+    /// `open_time_ms` of the most recent closed bar, or `None` if empty.
+    /// 最新一根已關閉 K 線的 `open_time_ms`，緩衝為空時回 `None`。
+    ///
+    /// 為什麼用 `open_time_ms` 而非 `len()` 當 epoch key：緩衝在達到
+    /// `DEFAULT_BUFFER_CAPACITY` 後 `append` 會 `pop_front` 淘汰最舊根
+    /// （見本檔 `append`），長度凍結在容量上限，但每根新收盤的
+    /// `open_time_ms` 仍單調遞增。以長度當 key 會在緩衝滿後永遠相等 →
+    /// 漏掉新收盤 → 服務過期快照。
+    #[inline]
+    pub fn last_open_time_ms(&self) -> Option<u64> {
+        self.bars.back().map(|b| b.open_time_ms)
+    }
+
     /// Extract close prices for the latest `n` bars.
     /// 提取最新 `n` 根 K 線的收盤價。
     pub fn close_array(&self, n: usize) -> Vec<f64> {
@@ -536,6 +549,18 @@ impl KlineManager {
             .get(symbol)
             .and_then(|m| m.get(timeframe))
             .map(|a| a.buffer())
+    }
+
+    /// `open_time_ms` of the most recent closed bar for a symbol + timeframe.
+    /// 指定幣種+時間框架最新一根已關閉 K 線的 `open_time_ms`。
+    ///
+    /// PERF-1 indicator-cache epoch key 用此值偵測新收盤：未知幣種 / 暖機期
+    /// 無已關閉 K 線時回 `None`（呼叫端視為「無法快取」並退回每 tick 重算）。
+    pub fn last_closed_open_time_ms(&self, symbol: &str, timeframe: &str) -> Option<u64> {
+        self.aggregators
+            .get(symbol)
+            .and_then(|m| m.get(timeframe))
+            .and_then(|a| a.buffer().last_open_time_ms())
     }
 
     /// Get the currently-building bar for a symbol + timeframe.

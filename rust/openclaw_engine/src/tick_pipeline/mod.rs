@@ -1319,6 +1319,32 @@ pub struct TickPipeline {
     /// per spec §2.4 「main_health_emitters.rs 取 Arc 透傳給 RealPipeline
     /// ThroughputSource」。
     pub(crate) signal_stats: Option<Arc<signal_stats::SignalStats>>,
+    /// PERF-1 (2026-06-14)：per-symbol 5m IndicatorSnapshot 快取。
+    ///
+    /// 為什麼：step_4_5_dispatch 過去每 tick 呼 `compute_indicators_for_timeframe(sym,"5m")`
+    /// 重算整套 5m 指標，但 5m 指標只在新 5m K 線收盤（或 ewma_lambda 熱重載）時才
+    /// 改變；同一根 5m bar 內每 tick 的結果完全相同。改為按 epoch 快取後僅在
+    /// 跨 bar 邊界重算。
+    ///
+    /// 不變量：**只快取 `Some`**。若重算回 `None`（暖機期 < 30 根或無 OHLCV），
+    /// 保持此 map 該 symbol 條目不動並向下游傳 `None`，絕不寫入 `None` —
+    /// 避免暖機後仍服務暖機前的過期 `Some`。
+    ///
+    /// 熱路徑等價性：快取的 5m 快照與每 tick 重算 bit-identical（同 bar 內輸入
+    /// 相同）；策略端（bb_breakout 等）讀快取衍生的 Donchian/布林層級後仍每 tick
+    /// 對 live `ctx.price` 比較 —— PERF-1 只 gate「指標重算」，**不 gate 策略分派**。
+    perf1_indicators_5m_cache: HashMap<String, IndicatorSnapshot>,
+    /// PERF-1 (2026-06-14)：per-symbol 5m 快取 epoch key = (5m 最後收盤 bar 的
+    /// `open_time_ms`, ewma_lambda)。
+    ///
+    /// 為什麼 key 用 `open_time_ms` 而非緩衝長度：KlineBuffer 達
+    /// `DEFAULT_BUFFER_CAPACITY` 後長度凍結但 open_time_ms 仍遞增（見
+    /// `klines.rs` `last_open_time_ms` 註解）。為什麼 lambda 在 key 內：
+    /// ewma_lambda 經 RiskConfig TOML 熱重載（`on_tick_helpers.rs`
+    /// `compute_indicators_for_timeframe`），漏掉 lambda 會在 operator 改 lambda
+    /// 後服務過期快照。f64 不可雜湊，故 key 整組存為 value 用 `==` 比對，
+    /// 而非當 HashMap key 雜湊。
+    perf1_indicators_5m_epoch: HashMap<String, (u64, f64)>,
 }
 
 // ---------------------------------------------------------------------------
