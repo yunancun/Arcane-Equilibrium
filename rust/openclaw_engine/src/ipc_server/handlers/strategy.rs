@@ -35,6 +35,9 @@ pub(in crate::ipc_server) async fn handle_strategy_param_cmd(
         }
     };
 
+    // 此處僅做存在性 + 型別解析，刻意不在此驗證 strategy_name 是否為已註冊策略：
+    // registry 驗證 fail-closed 地延後到 handle_update_strategy_params /
+    // find_strategy_mut（pipeline 側，已測）。勿把這個 as_str() 誤當授權 gate。
     let strategy_name = match params.get("strategy_name").and_then(|v| v.as_str()) {
         Some(s) => s.to_string(),
         None => {

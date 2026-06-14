@@ -2,9 +2,15 @@
 //! IPC method registry。
 //!
 //! This Module records Interface metadata that otherwise gets smeared across
-//! dispatch arms, handler files, and tests. It starts with slot-bound methods
-//! and can grow method-by-method without changing wire behaviour.
+//! dispatch arms, handler files, and tests.
+//!
+//! Descriptive metadata only, NOT an authorization/enforcement surface: the
+//! registry never gates who may call a method or whether a call is permitted.
+//! Real auth = connection HMAC (SEC-08) + the Python 5-gate. Adding or omitting
+//! an entry here changes neither wire behaviour nor access control.
 //! 本 Module 記錄過去散在 dispatch arm / handler / tests 的 Interface metadata。
+//! 純描述性 metadata，非授權/強制面：不決定誰可呼叫、是否放行。真正授權 =
+//! 連線 HMAC（SEC-08）+ Python 5-gate；增刪此處條目不改 wire 行為也不改存取控制。
 
 /// Runtime slot a method depends on.
 /// method 依賴的 runtime slot。

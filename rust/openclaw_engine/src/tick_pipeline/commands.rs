@@ -157,9 +157,17 @@ impl TickPipeline {
     /// Drives the same IntentProcessor pipeline strategies use, so all gates
     /// (Guardian / Kelly / P1 cap / risk gate / cost gate) apply uniformly.
     /// Returns a JSON envelope on success: `{order_id, fill_qty, fill_price, fee}`.
-    /// Reject reasons (paused / halted / unknown symbol / no price / no atr /
-    /// gate rejection) bubble up as Err(String).
+    /// Reject reasons (live-pipeline / paused / halted / unknown symbol / no
+    /// price / no atr / gate rejection) bubble up as Err(String).
+    ///
+    /// **All-pipeline simulation only, never the real OMS.** This entry routes
+    /// through `self.paper_state` / `intent_processor.process()` — it simulates
+    /// fills against in-memory paper state and never reaches Bybit order
+    /// placement. It is the single sink for both the IPC `submit_paper_order`
+    /// RPC and `lifecycle.rs` SubmitOrder delegation.
+    ///
     /// ARCH-RC1 1C-3-F：外部紙盤訂單入口（非策略），與策略走同一條 IntentProcessor 管線。
+    /// 全管線僅模擬、絕不觸真實 OMS（永遠走 paper_state 模擬成交，不到 Bybit 下單）。
     pub fn submit_external_order(
         &mut self,
         symbol: &str,
@@ -170,6 +178,15 @@ impl TickPipeline {
         confidence: f64,
         strategy: &str,
     ) -> Result<String, String> {
+        // 不變量鎖死：本入口僅做紙盤模擬，真錢 mainnet live 永不可達。
+        // 「route 到 live 也只是模擬故無害」原本是隱性不變量；此處將其鎖成
+        // 結構性不可能 —— 一旦未來在 process() 下游接真實 dispatch（見上方
+        // SubmitOrder intent 派發路徑備註），缺此守衛即升為 CRITICAL（真錢
+        // 繞過 5-gate 授權）。engine_mode "live" 唯一對應 Live + Mainnet（真錢）；
+        // LiveDemo/Demo/Testnet 折疊為 live_demo/live_testnet 仍為合法模擬端點。
+        if self.effective_engine_mode() == "live" {
+            return Err("external_submit_blocked_on_live_pipeline".into());
+        }
         if self.paper_paused {
             return Err("paper_paused".into());
         }
