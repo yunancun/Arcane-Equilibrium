@@ -1,14 +1,23 @@
 """
 MODULE_NOTE (中):
-  用途：ADPE 閉環的**唯一可信 reward 源**讀取層。從 learning.mlde_edge_training_rows
-  （V031/V034 view）讀近窗 realized demo PnL，per (strategy, regime) 聚成
-  ArmReward 序列，餵給 allocator。複用 linucb_trainer 的 SQL pattern（engine_mode_scope /
-  statement_timeout / psycopg2 connect_timeout），不 fork、不抄 legacy decision_outcomes。
+  用途：ADPE 閉環的**唯一可信 reward 源**讀取層。讀近窗 realized demo PnL，per
+  (strategy, regime) 聚成 ArmReward 序列，餵給 allocator。複用 linucb_trainer 的 SQL
+  pattern（engine_mode_scope / statement_timeout / psycopg2 connect_timeout），不 fork、
+  不抄 legacy decision_outcomes。
+
+  資料源（2026-06-14 效能修法，MIT RCA adpe-reward-query-perf-rca）：**直查 base 表
+  trading.intents JOIN learning.decision_features（+ decision_context_snapshots PK
+  lateral 取 regime）**，不再走 learning.mlde_edge_training_rows view。原因：view 的
+  intent_base CTE 含一個對 trading.signals（壓縮 hypertable、segmentby 不含 signal_id）
+  的 signal_id-only LATERAL，會 per-outer-row bulk-decompress 壓縮 chunk，30d demo 視窗
+  實測 3827s（64 分）；砍掉該 lateral 後 962ms（~3975x）、per-(strategy, regime) 分組 count
+  與 view 逐 arm diff=0（行為等價）。輸出欄序 / regime / strategy 詞彙與 view 完全一致，
+  下游映射路徑零改。詳見 _REWARD_SQL 上方註釋的等價性與 attribution 放寬 caveat。
 
   主要函數：
     - fetch_demo_arm_rewards(dsn, ...)：跑唯一一條 read-only SELECT，回
       list[ArmReward]（taker_real tier，realized post-fee）。
-    - map_view_regime_to_alloc_regime：view 的 regime enum（trending/mean_reverting/
+    - map_view_regime_to_alloc_regime：view 詞彙 regime enum（trending/mean_reverting/
       random_walk）→ allocator VALID_REGIMES（chop/range/...）的誠實映射。
 
   依賴：
@@ -17,6 +26,9 @@ MODULE_NOTE (中):
       （SQL pattern 100% 複用，不重寫）。
     - program_code.ml_training.regime_bandit_allocator.ArmReward / VALID_REGIMES /
       FILL_TIER_TAKER_REAL。
+    - PG 物件：trading.intents / learning.decision_features /
+      trading.decision_context_snapshots（皆 read-only 直查；regime_norm 邏輯逐字鏡像
+      V031:274-282；linucb_arm_id 形狀鏡像 V031:326）。
 
   硬邊界 / 誠實鐵則（為什麼這樣設計）：
     1. **engine_mode 硬鎖 demo**。SQL `WHERE engine_mode = ANY(engine_mode_scope('demo'))`，
@@ -127,22 +139,81 @@ def _strategy_from_view_arm_id(view_arm_id: str, strategy_name: Optional[str]) -
     return None
 
 
-# 唯一 read-only SELECT（demo-scope、post-fee、attribution-gated）。
-# 鏡像 linucb_trainer.fetch_arm_observations 的 mlde 分支（:285-297）的 WHERE 結構，
-# 但聚 (linucb_arm_id, regime, ts, net_bps_after_fee) 給 allocator 逐筆 ingest。
+# 唯一 read-only SELECT（demo-scope、post-fee、structural-attribution-gated）。
+#
+# 為什麼直查 base 表而非走 learning.mlde_edge_training_rows view（MIT RCA
+# 2026-06-14--adpe-reward-query-perf-rca.md）：
+#   view 的 `intent_base` CTE 含一個 `LEFT JOIN LATERAL trading.signals
+#   WHERE s.signal_id = i.signal_id ORDER BY ts DESC LIMIT 1`。trading.signals 是
+#   TimescaleDB hypertable，壓縮 segmentby=symbol（不含 signal_id），PK=(signal_id,
+#   ts)。以「裸 signal_id 無 ts 約束」查 → ChunkAppend 無法 prune chunk，歷史壓縮
+#   chunk 退化成 per-outer-row 的 Bulk Decompression 全掃（每 outer row 解壓一遍整個
+#   columnar chunk）。30d demo 視窗（144,526 rows）此 lateral 把查詢從應有的 ~1s 拖到
+#   實測 3827s（64 分），且 5000ms statement_timeout 對 view 整體 plan 顯然未能即時砍掉
+#   （超線性壞 plan）。MIT Linux PG 親驗：砍掉 signals lateral 後 962ms / 144,526 rows
+#   = ~3975x，且 per-(strategy, regime) 分組 count 與 view 逐 arm diff=0（行為等價）。
+#
+# 等價性與 vocab 不變式（MIT §3 實證 + 本模組鐵則 5）：
+#   1. 輸出仍是 5 欄、同順序 (linucb_arm_id, strategy_name, regime, net_bps_after_fee,
+#      ts_secs)，regime / strategy 仍是 **view 詞彙**（trending / mean_reverting /
+#      random_walk），下游 map_view_regime_to_alloc_regime / make_arm_id 重建路徑零改。
+#   2. strategy_name 用 intent/feature 欄 COALESCE（與 view 的 raw_strategy_name 同源；
+#      MIT 實測 144,526 row 全部由 intent/feature 欄提供，signals 對 strategy 非 load-bearing）。
+#   3. regime_norm 邏輯逐字鏡像 V031:274-282（dcs.regime_5m LIKE 比對 + strategy fallback），
+#      dcs lateral 走 decision_context_snapshots PK (context_id, ts) 前導欄，0.001ms/loop，不慢。
+#   4. linucb_arm_id 維持 `<view_regime>__<strategy>` 形狀（V031:326），reward_source 的
+#      _strategy_from_view_arm_id 只取後段 strategy、丟棄前段 view regime，故形狀必須保持。
+#
+# 誠實 caveat（attribution 由「signals 再讀比對」放寬為「結構性」）：
+#   view 的 attribution_chain_ok 含 `signal_context_id = context_id`（再讀 signals 比對其
+#   context_id 與 intent 一致）。本查詢以結構性條件取代：signal_id / context_id 非空 +
+#   df.label_net_edge_bps 存在。MIT 30d demo 實證此放寬對 label-present demo row 濾掉 0 行
+#   （144,526 == 144,526），但語義上略放寬（不再驗 signal 自身 context_id）。嚴格保留語義
+#   且仍快只能走 schema 級（signals 壓縮 segmentby 含 signal_id / 建投影表），需 V### +
+#   Guard A/B/C + Linux double-apply，且實證對 demo reward 無行為收益 → 不採（needs_migration=false）。
 _REWARD_SQL = """
-    SELECT linucb_arm_id,
-           strategy_name,
-           regime,
-           net_bps_after_fee,
-           floor(extract(epoch FROM ts))::double precision AS ts_secs
-      FROM learning.mlde_edge_training_rows
-     WHERE engine_mode = ANY(%s)
-       AND attribution_chain_ok
-       AND net_bps_after_fee IS NOT NULL
-       AND linucb_arm_id IS NOT NULL
-       AND (%s::INT IS NULL OR ts >= now() - (%s::INT || ' days')::interval)
-     ORDER BY ts ASC
+    WITH base AS (
+        SELECT i.ts,
+               i.context_id,
+               lower(COALESCE(NULLIF(i.strategy_name, ''), NULLIF(df.strategy_name, ''), '')) AS raw_strat,
+               df.label_net_edge_bps AS net_bps
+          FROM trading.intents i
+          JOIN learning.decision_features df ON df.context_id = i.context_id
+         WHERE i.engine_mode = ANY(%s)
+           AND df.label_net_edge_bps IS NOT NULL
+           AND i.signal_id IS NOT NULL AND i.signal_id <> ''
+           AND i.context_id IS NOT NULL AND i.context_id <> ''
+           AND COALESCE(i.details->>'source', '') <> 'command'
+           AND (%s::INT IS NULL OR i.ts >= now() - (%s::INT || ' days')::interval)
+    )
+    SELECT
+        (q.regime_norm || '__' || q.strat_norm) AS linucb_arm_id,
+        q.strat_norm AS strategy_name,
+        q.regime_norm AS regime,
+        q.net_bps AS net_bps_after_fee,
+        floor(extract(epoch FROM q.ts))::double precision AS ts_secs
+    FROM (
+        SELECT b.ts,
+               b.net_bps,
+               CASE b.raw_strat WHEN 'bollinger_reversion' THEN 'bb_reversion' ELSE b.raw_strat END AS strat_norm,
+               CASE
+                   WHEN lower(COALESCE(d.regime_5m, '')) LIKE '%%trend%%' THEN 'trending'
+                   WHEN lower(COALESCE(d.regime_5m, '')) LIKE ANY(ARRAY['%%mean%%', '%%range%%', '%%anti%%']) THEN 'mean_reverting'
+                   WHEN b.raw_strat IN ('grid_trading', 'bb_reversion', 'bollinger_reversion') THEN 'mean_reverting'
+                   WHEN b.raw_strat IN ('ma_crossover', 'bb_breakout') THEN 'trending'
+                   ELSE 'random_walk'
+               END AS regime_norm
+          FROM base b
+          LEFT JOIN LATERAL (
+              SELECT d.regime_5m
+                FROM trading.decision_context_snapshots d
+               WHERE d.context_id = b.context_id
+               ORDER BY d.ts DESC
+               LIMIT 1
+          ) d ON TRUE
+         WHERE b.raw_strat IN ('bollinger_reversion', 'bb_reversion', 'bb_breakout', 'ma_crossover', 'grid_trading', 'funding_arb')
+    ) q
+    ORDER BY ts_secs ASC
 """
 
 
@@ -161,12 +232,19 @@ def fetch_demo_arm_rewards(
       _connect：測試注入點（注入 fake connect 取代 psycopg2.connect），
         production 不傳則用 psycopg2.connect。
 
-    誠實：reward = realized post-fee net_bps，本函數不合成任何報酬。
-    regime 經 map_view_regime_to_alloc_regime 由 view 詞彙對齊 allocator 詞彙；映射不到 /
-    view regime 為 NULL → insufficient_context（誠實降級）。**arm_id 不原樣沿用 view 的
-    linucb_arm_id**（它嵌 view 詞彙 regime，下游會被靜默丟棄；見 MODULE_NOTE 鐵則 5），
-    而是用 allocator 的 make_arm_id(alloc_regime, strategy) 重建，保證與 runner allocate()
-    期望的 candidate_arm 詞彙端到端一致。
+    誠實：reward = realized post-fee net_bps（df.label_net_edge_bps，直查 base 表），本函數
+    不合成任何報酬。regime 由 _REWARD_SQL 在 SQL 側算出 view 詞彙（trending/mean_reverting/
+    random_walk，邏輯鏡像 V031:274-282），再經 map_view_regime_to_alloc_regime 對齊 allocator
+    詞彙；映射不到 / regime 為 NULL → insufficient_context（誠實降級）。**arm_id 不原樣沿用
+    SQL 回的 view 詞彙 linucb_arm_id**（它嵌 view 詞彙 regime，下游會被靜默丟棄；見 MODULE_NOTE
+    鐵則 5），而是用 allocator 的 make_arm_id(alloc_regime, strategy) 重建，保證與 runner
+    allocate() 期望的 candidate_arm 詞彙端到端一致。
+
+    fail-soft：statement_timeout_ms 經 _set_local_statement_timeout 以 `SET LOCAL
+    statement_timeout` 套在本交易（psycopg2 connect 預設 autocommit=False，with-block 開
+    交易，SET LOCAL 綁定之）。慢查詢 raise（QueryCanceled）而非 hang；呼叫端（runner driver）
+    以 fail-soft 接（reward 源異常 → 本 cycle 視為空 reward / 全 explore，不污染閉環）。
+    效能修法後 30d demo 962ms 遠在 5000ms 限內，timeout 為防呆兜底而非熱路徑常觸。
     """
     connect = _connect
     if connect is None:
