@@ -141,7 +141,7 @@ async def test_live_closed_pnl_cursor_mode_returns_enriched_payload(monkeypatch)
     P2b 漏補注入縫前此 handler 每次 cursor 呼叫 TypeError 500；此測試是該類破壞
     再發的防線（172 既有測試漏掉本 endpoint）。
     """
-    cursor = _FakeCursor([("OID1", "ma_crossover", 0.95)])
+    cursor = _FakeCursor([("OID1", "ma_crossover", 0.95, 0.0)])
     _install_fake_db(monkeypatch, cursor)
     fake_client = _FakeBybitClient([
         {"orderId": "OID1", "orderLinkId": "oc_ld_1", "symbol": "OPUSDT", "closedPnl": "1.0"},
@@ -218,7 +218,7 @@ async def test_live_closed_pnl_missing_order_link_uses_pg_time_window_strategy(m
     ts_ms = int(ts.timestamp() * 1000)
     cursor = _SequencedFakeCursor([
         [],
-        [(ts, "oc_ipc_close_lv_1770000000000_5", "BTCUSDT", "Sell", 0.01, 2.50, "ma_crossover")],
+        [(ts, "oc_ipc_close_lv_1770000000000_5", "BTCUSDT", "Sell", 0.01, 2.50, 0.05, "ma_crossover")],
     ])
     _install_fake_db(monkeypatch, cursor)
     fake_client = _FakeBybitClient([
@@ -227,6 +227,8 @@ async def test_live_closed_pnl_missing_order_link_uses_pg_time_window_strategy(m
             "orderLinkId": "",
             "symbol": "BTCUSDT",
             "closedPnl": "2.40",
+            "openFee": "0.05",
+            "closeFee": "0.05",
             "updatedTime": str(ts_ms + 250),
         },
     ])
@@ -247,6 +249,9 @@ async def test_live_closed_pnl_missing_order_link_uses_pg_time_window_strategy(m
     assert row["strategy_name"] == "ma_crossover"
     assert row["strategy_source"] == "pg_time_window"
     assert row["pg_engine_pnl"] == 2.50
+    assert row["bybit_gross_pnl"] == pytest.approx(2.50)
+    assert row["pnl_source_drift_usd"] == pytest.approx(0.0)
+    assert row["learning_pnl"] == 2.40
     assert row["strategy_match_delta_ms"] == 250
     assert cursor.params_list[0][1:] == ("live", "live_demo")
     assert cursor.params_list[1][:2] == ("live", "live_demo")

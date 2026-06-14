@@ -218,13 +218,18 @@
       </div>
       <div class="paper-orders-section">
         <h3>訂單 / Orders</h3>
+        <!-- Paper 手動下單已停用：訂單由 Rust 引擎依策略管理（後端 /paper/order/submit 回 HTTP 410）。
+             保留唯讀表單供參考，但禁用所有輸入與提交，避免靜默死按鈕誤導操作員。 -->
+        <div class="status-chip warn" role="note">
+          Paper 手動下單已停用 — 訂單由 Rust 引擎依策略自動管理 / Manual paper orders disabled (managed by Rust engine)
+        </div>
         <div class="paper-order-form" id="paperOrderForm">
-          <input id="paperSymbol" type="text" placeholder="Symbol (e.g. BTCUSDT)" value="BTCUSDT" />
-          <select id="paperSide"><option value="Buy">Buy</option><option value="Sell">Sell</option></select>
-          <select id="paperOrderType"><option value="market">Market</option><option value="limit">Limit</option></select>
-          <input id="paperQty" type="number" placeholder="Qty" step="0.001" value="0.01" />
-          <input id="paperPrice" type="number" placeholder="Price (limit)" step="0.01" />
-          <button class="paper-btn" id="paperSubmitOrder">提交 / Submit</button>
+          <input id="paperSymbol" type="text" placeholder="Symbol (e.g. BTCUSDT)" value="BTCUSDT" disabled />
+          <select id="paperSide" disabled><option value="Buy">Buy</option><option value="Sell">Sell</option></select>
+          <select id="paperOrderType" disabled><option value="market">Market</option><option value="limit">Limit</option></select>
+          <input id="paperQty" type="number" placeholder="Qty" step="0.001" value="0.01" disabled />
+          <input id="paperPrice" type="number" placeholder="Price (limit)" step="0.01" disabled />
+          <button class="paper-btn" id="paperSubmitOrder" disabled title="Paper 手動下單已停用，訂單由 Rust 引擎管理">已停用 / Disabled</button>
         </div>
         <div id="paperOrdersList">無訂單 / No orders</div>
       </div>

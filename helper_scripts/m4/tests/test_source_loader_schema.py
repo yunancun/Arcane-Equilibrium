@@ -91,8 +91,8 @@ def test_fills_loader_uses_qty_not_size():
 def test_fills_loader_uses_realized_pnl_not_realized_net_bps():
     """trading.fills 真實 column 是 realized_pnl 非 realized_net_bps。
 
-    realized_net_bps 可作為 SELECT 別名（derived from realized_pnl / notional * 10000），
-    但不可作為 source column 引用。
+    realized_net_bps 可作為 SELECT 別名（derived from realized_pnl - fees），但不可作為
+    source column 引用。
     """
     # white-list：必含 realized_pnl
     assert _grep_whole_word(FILLS_QUERY_SQL, "realized_pnl"), (
@@ -105,6 +105,119 @@ def test_fills_loader_uses_realized_pnl_not_realized_net_bps():
         assert "AS realized_net_bps" in FILLS_QUERY_SQL, (
             "realized_net_bps 只能作為 AS 別名出現，不可作為 source column 直接引用"
         )
+
+
+def test_fills_loader_realized_net_bps_subtracts_entry_and_exit_fee():
+    """M4 net label 必扣 close fee + 單一代表 entry fee；close-row gross PnL 不可當 net label。
+
+    entry fee 走 LATERAL single-representative（非 fan-out LEFT JOIN）：扣 close fee
+    `COALESCE(f.fee, 0)` + 代表 entry fee `entry_rep.entry_fee`。
+    """
+    assert "LEFT JOIN LATERAL" in FILLS_QUERY_SQL
+    assert "COALESCE(f.fee, 0)" in FILLS_QUERY_SQL
+    assert "entry_rep.entry_fee" in FILLS_QUERY_SQL
+    assert "AS realized_net_pnl" in FILLS_QUERY_SQL
+    assert "AS realized_total_fee" in FILLS_QUERY_SQL
+
+
+def test_fills_loader_entry_fee_uses_single_representative_lateral_not_fanout():
+    """entry fee 必走 single-representative LATERAL，不可用會 fan-out 的裸 LEFT JOIN。
+
+    為什麼：裸 `LEFT JOIN trading.fills entry_fill ON context_id = entry_context_id`
+    有兩缺陷 —— (1) context_id 非唯一 → 行倍增 fan-out；(2) 缺 `entry_context_id
+    IS NULL` 謂詞 → close 行被當 entry 命中、close fee 被雙重扣除。
+    修法 = LATERAL ORDER BY ts ASC LIMIT 1 取最早一筆真 entry 行。
+    """
+    # white-list：必走 LATERAL + entry-row 謂詞 entry_context_id IS NULL + ORDER/LIMIT
+    assert "LEFT JOIN LATERAL" in FILLS_QUERY_SQL, (
+        "FILLS_QUERY_SQL 必用 LEFT JOIN LATERAL 取單一代表 entry fee"
+    )
+    assert "e.entry_context_id IS NULL" in FILLS_QUERY_SQL, (
+        "LATERAL 必含 entry-row 謂詞 e.entry_context_id IS NULL（防 close 行被當 entry）"
+    )
+    assert "ORDER BY e.ts ASC" in FILLS_QUERY_SQL and "LIMIT 1" in FILLS_QUERY_SQL, (
+        "LATERAL 必 ORDER BY e.ts ASC LIMIT 1 取最早一筆真 entry"
+    )
+    # black-list：不可殘留舊 fan-out 裸 LEFT JOIN（entry_fill alias 上的 ON 等值 join）
+    assert "LEFT JOIN trading.fills entry_fill" not in FILLS_QUERY_SQL, (
+        "FILLS_QUERY_SQL 不可含 fan-out 裸 `LEFT JOIN trading.fills entry_fill`"
+    )
+    assert "COALESCE(entry_fill.fee, 0)" not in FILLS_QUERY_SQL, (
+        "不可殘留 fan-out 版 entry_fill.fee 引用"
+    )
+
+
+def test_fills_loader_excludes_close_shaped_rows_as_representative_entry():
+    """代表 entry 行必排除 close-shaped strategy_name 前綴（writer 會誤標 partial-reduce）。
+
+    Q-query 實證：`risk_close:fast_track_reduce_half` 行 entry_context_id IS NULL
+    卻語義上是 close；不排除會被當代表 entry，污染 entry fee。
+    """
+    for prefix in (
+        "risk_close:%%",
+        "orphan_close:%%",
+        "adopted_close:%%",
+        "shadow_fill:%%",
+        "unattributed:%%",
+    ):
+        assert f"NOT LIKE '{prefix}'" in FILLS_QUERY_SQL, (
+            f"LATERAL 代表 entry 篩選必排除 '{prefix}' close-shaped 前綴"
+        )
+
+
+def test_fills_loader_entry_missing_yields_null_net_label_not_zero():
+    """entry-missing（無代表 entry 行）時 net label 必 NULL，不可 COALESCE 成 0 捏造 gross。
+
+    D-query 實證 26 rows 無代表 entry；COALESCE(...,0) 會捏造樂觀 gross label
+    污染 M4 樣本。改 CASE WHEN entry_rep.entry_fill_found THEN ... ELSE NULL，
+    並 emit entry_fill_found discriminator 供 caller dropna / flag。
+    """
+    # net label 必走 entry_fill_found CASE gate（非無條件計算）
+    assert "CASE WHEN entry_rep.entry_fill_found" in FILLS_QUERY_SQL, (
+        "realized_net_pnl/bps 必用 CASE WHEN entry_rep.entry_fill_found 守衛"
+    )
+    assert "ELSE NULL END AS realized_net_pnl" in FILLS_QUERY_SQL, (
+        "entry-missing 時 realized_net_pnl 必 NULL"
+    )
+    assert "ELSE NULL END AS realized_net_bps" in FILLS_QUERY_SQL, (
+        "entry-missing 時 realized_net_bps 必 NULL"
+    )
+    # discriminator 必輸出供 caller dropna
+    assert "AS entry_fill_found" in FILLS_QUERY_SQL, (
+        "FILLS_QUERY_SQL 必輸出 entry_fill_found discriminator column"
+    )
+
+
+def test_fills_loader_lateral_requires_entry_fee_not_null():
+    """代表 entry 行必 `e.fee IS NOT NULL`（DIRTY-FIX LOW-1）。
+
+    為什麼：trading.fills.fee 為 REAL DEFAULT 0 可空（V003）。若代表 entry fee 為
+    NULL，entry_rep.entry_fee=NULL → net label 算術回 NULL 但 entry_fill_found 旗標
+    仍 TRUE → discriminator 失真。加 `e.fee IS NOT NULL` 謂詞 = entry_fill_found=TRUE
+    ⟹ entry_fee 必非 NULL，精確化 discriminator 契約。
+    """
+    assert "e.fee IS NOT NULL" in FILLS_QUERY_SQL, (
+        "LATERAL 必含 `e.fee IS NOT NULL` 謂詞（保 entry_fill_found=TRUE ⟹ entry_fee 非 NULL）"
+    )
+
+
+def test_fills_loader_net_label_guards_close_realized_pnl_not_null():
+    """close 行 realized_pnl 為 NULL 時 net label 必 NULL（DIRTY-FIX LOW-2）。
+
+    為什麼：舊版 net label 用 `COALESCE(f.realized_pnl, 0)`，close 行 realized_pnl
+    為 NULL 時會算成 `0 - fee - entry_fee` = 純費用小負值，被當真實 net label 餵入
+    M4 → 靜默捏造小負 bps。改 CASE 加 `f.realized_pnl IS NOT NULL` 守衛 + 移除
+    realized_pnl 的 COALESCE，realized_pnl NULL 時 emit NULL label。
+    """
+    # CASE 守衛必含 close 行 realized_pnl 非空條件
+    assert "entry_rep.entry_fill_found AND f.realized_pnl IS NOT NULL" in FILLS_QUERY_SQL, (
+        "net label CASE 必含 `entry_rep.entry_fill_found AND f.realized_pnl IS NOT NULL` 守衛"
+    )
+    # black-list：net label 算術不可再 COALESCE realized_pnl 成 0（會捏造純費用小負值）
+    assert "COALESCE(f.realized_pnl, 0)" not in FILLS_QUERY_SQL, (
+        "net label 不可用 COALESCE(f.realized_pnl, 0) — close 行 realized_pnl NULL 時"
+        "會捏造純費用小負 bps；應 emit NULL label"
+    )
 
 
 def test_fills_loader_uses_entry_context_id_pattern_not_close_fill():

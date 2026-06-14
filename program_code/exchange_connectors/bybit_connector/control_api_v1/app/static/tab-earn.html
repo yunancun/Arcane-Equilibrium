@@ -305,11 +305,18 @@
      5 light box (a-e) + verdict line + Stage 0R 3-state badge
      對齊 backend 9-gate (E-0..E-9)；5 light = 5 governance gate 群組 -->
 <section class="oc-card" role="region" aria-label="5-Gate 預檢 / 5-Gate Preflight">
-  <h3>&#x1F6E1;&#xFE0F; 5-Gate 預檢 / 5-Gate Preflight
-    <span style="font-size:11px;color:var(--text-dim);font-weight:normal">
-      (對齊後端 9-gate E-0..E-9) / (aligns with backend 9-gate E-0..E-9)
+  <h3 title="預檢 = 下單前的 5 道安全檢查，全部通過才允許提交 Earn 申購">&#x1F6E1;&#xFE0F; 下單前安全檢查 / 5-Gate 預檢
+    <span style="font-size:11px;color:var(--text-dim);font-weight:normal"
+          title="前端 5 個檢查群組對應後端 9 道細項閘門（編號 E-0 至 E-9），意義相同，只是顆粒度不同">
+      (5 道檢查 = 後端 9 道細項閘門) / (5 light groups = backend 9-gate E-0..E-9)
     </span>
   </h3>
+  <!-- operator-friendly 說明：避免主視圖只暴露 5-gate / 9-gate / Stage 0R 工程術語。
+       詳細逐項對照仍在頁首 ocExplain 的「了解更多」深層。 -->
+  <div style="font-size:11px;color:var(--text-dim);line-height:1.6;margin:2px 0 8px">
+    這 5 道檢查確認你有下單權限、授權有效、實盤開關開啟、密鑰就緒、下單通道接好；
+    全部亮綠才能申購。<strong>Stage 0R</strong> 是另一道「歷史重放預檢」，需先離線跑過並 PASS。
+  </div>
   <div id="earn-preflight-loading" style="padding:8px;color:var(--text-dim);font-size:12px">
     &#x23F3; 正在執行 5-gate 預檢…
   </div>
@@ -319,8 +326,9 @@
   <div id="earn-preflight-data" style="display:none" tabindex="0">
     <div class="earn-gate-grid" id="earn-gate-grid"></div>
     <div class="earn-gate-verdict" id="earn-gate-verdict">--</div>
-    <div class="earn-stage0r-row stage0r-pending" id="earn-stage0r-row">
-      <span class="earn-stage0r-badge stage0r-pending" id="earn-stage0r-badge">Stage 0R: ⏳ PENDING</span>
+    <div class="earn-stage0r-row stage0r-pending" id="earn-stage0r-row"
+         title="Stage 0R = 歷史數據重放預檢，先在離線環境跑過策略並確認結果無誤，才放行真實申購">
+      <span class="earn-stage0r-badge stage0r-pending" id="earn-stage0r-badge">Stage 0R 歷史重放預檢 ⏳ 待跑</span>
       <span id="earn-stage0r-detail" style="font-size:12px;line-height:1.6">尚未跑過 Stage 0R preflight</span>
       <span class="earn-stage0r-copy" id="earn-stage0r-copy"></span>
     </div>

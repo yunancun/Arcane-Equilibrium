@@ -185,6 +185,7 @@ def test_snake_row_exposes_aliases_and_preserves_camel():
         "avgEntryPrice": "1.5",
         "avgExitPrice": "1.6",
         "closedPnl": "1.0",
+        "openFee": "0.02",
         "closeFee": "0.01",
         "closedSize": "10",
         "fillCount": "2",
@@ -194,6 +195,10 @@ def test_snake_row_exposes_aliases_and_preserves_camel():
     out = cp._closed_pnl_snake_row(row)
     assert out["closed_pnl"] == 1.0
     assert out["bybit_closed_pnl"] == 1.0
+    assert out["bybit_fee_total"] == pytest.approx(0.03)
+    assert out["bybit_gross_pnl"] == pytest.approx(1.03)
+    assert out["authoritative_pnl"] == 1.0
+    assert out["learning_pnl"] == 1.0
     assert out["avg_entry_price"] == 1.5
     assert out["fill_count"] == 2
     assert out["order_id"] == "OID1"
@@ -204,7 +209,54 @@ def test_snake_row_exposes_aliases_and_preserves_camel():
 def test_snake_row_handles_missing_fill_count():
     out = cp._closed_pnl_snake_row({"symbol": "X"})
     assert out["fill_count"] == 0
+    # 展示欄 closed_pnl 缺漏補 0.0（僅影響 UI）
     assert out["closed_pnl"] == 0.0
+
+
+def test_snake_row_missing_closed_pnl_fail_closes_learning_pnl():
+    """closedPnl 缺漏 → authoritative/learning_pnl 必 None + fail_closed source（DIRTY-FIX LOW-3）。
+
+    為什麼：closed_pnl / bybit_closed_pnl 是展示欄，缺漏補 0.0 僅影響 UI；但
+    authoritative_pnl / learning_pnl 是對帳與學習口徑欄，捏造 0.0 並標
+    authoritative='bybit_closed_pnl' = 把「交易所沒給淨值」偽裝成「淨值=0 且權威」，
+    與 PG 備援路徑（learning_pnl=None + fail_closed source）矛盾。兩路徑須對稱。
+    """
+    out = cp._closed_pnl_snake_row({"symbol": "X"})
+    # 學習/對帳口徑欄 fail-closed None
+    assert out["learning_pnl"] is None
+    assert out["learning_pnl_source"] == "bybit_pnl_missing_fail_closed"
+    assert out["authoritative_pnl"] is None
+    assert out["authoritative_pnl_source"] == "bybit_pnl_missing_fail_closed"
+
+
+def test_snake_row_present_closed_pnl_keeps_authoritative(monkeypatch):
+    """closedPnl 存在（含真實 0.0）→ authoritative/learning_pnl 走交易所權威值，不被誤 fail-close。"""
+    # 真實 closedPnl=0.0（交易所確實給了 0）≠ 缺漏，必標 authoritative
+    out = cp._closed_pnl_snake_row({"symbol": "X", "closedPnl": "0.0"})
+    assert out["learning_pnl"] == 0.0
+    assert out["learning_pnl_source"] == "bybit_closed_pnl"
+    assert out["authoritative_pnl"] == 0.0
+    assert out["authoritative_pnl_source"] == "bybit_closed_pnl"
+
+
+def test_attach_missing_closed_pnl_does_not_override_fail_closed(monkeypatch):
+    """_attach_closed_pnl_strategy 對 closedPnl 缺漏行不得覆寫成捏造 0.0（DIRTY-FIX LOW-3）。
+
+    為什麼：override 區塊舊用 enriched["closed_pnl"]（展示欄，缺漏已補 0.0）判存在 →
+    把缺漏誤判為「淨值=0」覆寫 learning_pnl=0.0。改用原始 row["closedPnl"] 判存在，
+    缺漏時不覆寫 snake_row 設好的 fail-closed None（與 PG 備援路徑對稱）。
+    """
+    monkeypatch.setattr(cp, "_fetch_strategy_by_order_id", lambda ids, **kw: {})
+    monkeypatch.setattr(cp, "_fetch_strategy_by_symbol_time", lambda rows, **kw: {})
+    # closedPnl 缺漏（無 key）的 Bybit row
+    rows = [{"symbol": "DOGEUSDT", "side": "Buy", "orderId": "OID9", "orderLinkId": ""}]
+    out = cp._attach_closed_pnl_strategy(rows, engine_owner_lookup=lambda e: {})
+    assert len(out) == 1
+    item = out[0]
+    assert item["learning_pnl"] is None
+    assert item["learning_pnl_source"] == "bybit_pnl_missing_fail_closed"
+    assert item["authoritative_pnl"] is None
+    assert item["authoritative_pnl_source"] == "bybit_pnl_missing_fail_closed"
 
 
 # ── orderLinkId 策略推斷（注入 engine_owner_lookup）──────────────────────────────
@@ -345,3 +397,101 @@ def test_strategy_from_link_non_openclaw_or_unknown_tag_is_external(garbage):
         garbage, symbol="DOGEUSDT", engine_owner_lookup=lambda e: {"DOGEUSDT": "grid_trading"}
     )
     assert (name, source) == ("external_manual", "bybit_unknown")
+
+
+# ── gross PnL / fee 還原 helper ───────────────────────────────────────────────
+
+
+def test_bybit_fee_total_sums_open_and_close_fee():
+    assert cp._bybit_fee_total({"openFee": "0.02", "closeFee": "0.01"}) == pytest.approx(0.03)
+    # snake_case fallback + 缺漏視為 0
+    assert cp._bybit_fee_total({"open_fee": "0.05"}) == pytest.approx(0.05)
+    assert cp._bybit_fee_total({}) == 0.0
+
+
+def test_bybit_gross_pnl_adds_back_fees():
+    """gross = net closedPnl + open/close fee（同口徑對帳，避免費用差假性放大 drift）。"""
+    assert cp._bybit_gross_pnl(
+        {"closedPnl": "1.0", "openFee": "0.02", "closeFee": "0.01"}
+    ) == pytest.approx(1.03)
+
+
+def test_bybit_gross_pnl_none_when_closed_pnl_missing():
+    """closedPnl 缺漏 → gross 回 None（caller fail-closed）。"""
+    assert cp._bybit_gross_pnl({"openFee": "0.02"}) is None
+
+
+# ── PG 備援 fail-closed learning_pnl 分支 ──────────────────────────────────────
+
+
+class _FakeCursor:
+    """最小 cursor stub：SET LOCAL statement_timeout no-op，SELECT 回注入 rows。"""
+
+    def __init__(self, rows):
+        self._rows = rows
+
+    def execute(self, sql, params=None):  # noqa: D401 - stub
+        # SET LOCAL statement_timeout 是 no-op；真正取數走 fetchall。
+        return None
+
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeConn:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def cursor(self):
+        return _FakeCursor(self._rows)
+
+
+def _patch_db(monkeypatch, rows):
+    """注入假 db_pool.get_conn/put_conn，回傳吐 rows 的 _FakeConn。"""
+    fake_conn = _FakeConn(rows)
+    from app import db_pool  # noqa: PLC0415
+
+    monkeypatch.setattr(db_pool, "get_conn", lambda: fake_conn)
+    monkeypatch.setattr(db_pool, "put_conn", lambda conn: None)
+    return fake_conn
+
+
+def test_pg_fallback_learning_pnl_fail_closed_none(monkeypatch):
+    """PG 備援分支 learning_pnl 必 fail-closed 為 None（缺權威淨 closedPnl，不得餵學習）。
+
+    為什麼：備援只有 PG 毛 realized_pnl + close fee，缺交易所權威淨值 + open fee；
+    估算淨值（authoritative_pnl）僅供展示，learning_pnl 必 None 否則污染 M4 學習口徑。
+    """
+    import datetime as _dt
+
+    ts = _dt.datetime(2026, 6, 14, 0, 0, 0, tzinfo=_dt.timezone.utc)
+    # (ts, order_id, symbol, side, qty, price, fee, realized_pnl, strategy_name)
+    rows = [(ts, "OID1", "DOGEUSDT", "Buy", 10, 0.5, 0.01, 1.0, "grid_trading")]
+    _patch_db(monkeypatch, rows)
+
+    out = cp._fetch_pg_closed_pnl_fallback(
+        limit=10, offset=0, symbol=None, start_ms=0, end_ms=99999999999999,
+    )
+    assert out["count"] == 1
+    item = out["list"][0]
+    # learning_pnl fail-closed
+    assert item["learning_pnl"] is None
+    assert item["learning_pnl_source"] == "bybit_unavailable_fail_closed"
+    # authoritative_pnl = 估算淨值 = pg_gross - close_fee = 1.0 - 0.01
+    assert item["authoritative_pnl"] == pytest.approx(0.99)
+    assert item["authoritative_pnl_source"] == "pg_fallback_estimated_net"
+    assert item["pg_engine_gross_pnl"] == pytest.approx(1.0)
+    assert item["pg_engine_close_fee"] == pytest.approx(0.01)
+    assert item["pnl_source_drift_basis"] == "pg_fallback_no_bybit"
+
+
+def test_pg_fallback_pg_unavailable_raises(monkeypatch):
+    """get_conn 回 None → fail-loud RuntimeError('pg_unavailable')，不靜默吐空。"""
+    from app import db_pool  # noqa: PLC0415
+
+    monkeypatch.setattr(db_pool, "get_conn", lambda: None)
+    monkeypatch.setattr(db_pool, "put_conn", lambda conn: None)
+    with pytest.raises(RuntimeError, match="pg_unavailable"):
+        cp._fetch_pg_closed_pnl_fallback(
+            limit=10, offset=0, symbol=None, start_ms=0, end_ms=1,
+        )
