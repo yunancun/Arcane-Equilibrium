@@ -21,7 +21,6 @@ pub mod alpha_surface;
 // `tests/golden_extreme.rs`（BacktestEngine / compute_sharpe / compute_max_drawdown）
 // 持續行使，確保「保留而非死碼」。如要接 hot path，於新模組顯式接線。
 pub mod backtest;
-pub mod cost_gate;
 pub mod execution;
 pub mod governance_core;
 // AMD-2026-05-02-01 Track H E-4 retrofit (E2 round 1 verdict HIGH-1 fix):
