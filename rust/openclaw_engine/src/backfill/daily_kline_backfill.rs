@@ -1,11 +1,18 @@
 //! MODULE_NOTE
-//! 模塊用途：日線（timeframe='1d'）K 線歷史回填的分頁取數 + strict-parse 變體。
-//!   產出 ParsedKlinePage（嚴格通過的 bar）與 CoverageVerdict（覆蓋率判定 +
-//!   payload sha256），供 writer.rs 落 market.klines + research.alpha_klines_provenance。
-//! 主要類/函數：daily_window_ms / paginate_daily_klines（游標分頁 limit=1000）/
-//!   strict_filter_closed_bars（C-3 strict-parse 核心）/ CoverageVerdict / ParsedKlinePage。
-//! 依賴：MarketDataClient::get_klines（既有 client，不重寫）、openclaw_core::klines::KlineBar、
-//!   sha2::Sha256。
+//! 模塊用途：K 線歷史回填的分頁取數 + strict-parse 變體。原為日線（timeframe='1d'）專用，
+//!   2026-06-15 泛化出 period_ms + tf 參數化的通用版（供 intraday_kline_backfill 重用），
+//!   日線呼叫端以固定 DAILY_PERIOD_MS + "1d" 包裝保持行為位元一致。產出 ParsedKlinePage
+//!   （嚴格通過的 bar）與 CoverageVerdict（覆蓋率判定 + payload sha256），供 writer.rs 落
+//!   market.klines + research.alpha_klines_provenance。
+//! 主要類/函數：
+//!   - 通用版（intraday + daily 共用）：paginate_klines（任意 Bybit interval 游標分頁 limit=1000）/
+//!     strict_filter_closed_bars_for（period_ms + tf 參數化 C-3 strict-parse 核心）/
+//!     expected_bars_for（period_ms 參數化期望數）。
+//!   - daily 包裝（API 不變）：paginate_daily_klines（→ "D"）/ strict_filter_closed_bars
+//!     （→ DAILY_PERIOD_MS + "1d"）/ expected_daily_bars（→ DAILY_PERIOD_MS）。
+//!   - CoverageVerdict / ParsedKlinePage / compute_payload_sha256（與 tf 無關，共用）。
+//! 依賴：MarketDataClient::get_klines（既有 client，interval: &str 已通用，不重寫）、
+//!   openclaw_core::klines::KlineBar、sha2::Sha256。
 //! 硬邊界：
 //!   1. 純讀市場數據 + append-only provenance，不下單、不餵 intent、不碰 auth/lease。
 //!   2.【C-3 最關鍵】絕不用 .unwrap_or(0.0) / sanitize_f64_or_zero（parsers.rs:38-77 與
@@ -87,11 +94,24 @@ pub struct ParsedKlinePage {
 /// 為什麼 floor 而非 ceil：只有 `bar_open + DAILY_PERIOD_MS <= now_ms` 的 bar 才算 closed
 /// （見 strict_filter_closed_bars）。expected 以窗口長度整除週期估算可寫上界；末尾未滿一天
 /// 的殘段不計入期望，避免 observed < expected 的假性 partial。
+///
+/// 為什麼保留此 daily 包裝：日線呼叫端維持原 API（period_ms 固定 DAILY_PERIOD_MS），
+/// 與通用版 expected_bars_for 行為位元一致（intraday 回填器走通用版傳 period_ms）。
 pub fn expected_daily_bars(window_start_ms: u64, window_end_ms: u64) -> u64 {
-    if window_end_ms <= window_start_ms {
+    expected_bars_for(window_start_ms, window_end_ms, DAILY_PERIOD_MS)
+}
+
+/// 通用版：推算 [window_start_ms, window_end_ms) 區間內期望的 closed bar 數（任意 period_ms）。
+///
+/// 為什麼抽出 period_ms 參數（E1-A 泛化）：intraday 回填器（1m/5m/15m/1h/4h）與日線共用同一
+/// floor 整除語意，只差週期。daily 包裝以 DAILY_PERIOD_MS 呼叫此函數，行為不變；intraday
+/// 傳對應週期（60000/300000/900000/3600000/14400000）。
+/// fail-closed：period_ms==0 視為退化（無法整除）回 0，避免除零 panic。
+pub fn expected_bars_for(window_start_ms: u64, window_end_ms: u64, period_ms: u64) -> u64 {
+    if window_end_ms <= window_start_ms || period_ms == 0 {
         return 0;
     }
-    (window_end_ms - window_start_ms) / DAILY_PERIOD_MS
+    (window_end_ms - window_start_ms) / period_ms
 }
 
 /// 規範化 payload 指紋：對嚴格通過的 bar 以 `open_time|open|high|low|close|volume|turnover`
@@ -167,6 +187,45 @@ pub fn strict_filter_closed_bars(
     window_end_ms: u64,
     now_ms: u64,
 ) -> ParsedKlinePage {
+    // daily 包裝：固定 DAILY_PERIOD_MS + "1d" 標籤，行為與泛化前位元一致。
+    strict_filter_closed_bars_for(
+        symbol,
+        raw_bars,
+        window_start_ms,
+        window_end_ms,
+        now_ms,
+        DAILY_PERIOD_MS,
+        "1d",
+    )
+}
+
+/// 通用版 strict-parse 核心（E1-A 泛化）：把 client 回傳的 KlineBar（已被 parse_kline_list
+/// fake-zero 污染）過濾成「closed + 嚴格有效」的可寫 bar，並產出 CoverageVerdict。
+///
+/// 為什麼抽出 period_ms + tf 參數：intraday 回填器（1m/5m/15m/1h/4h）與日線共用完全相同的
+/// closed-bar filter / strict OHLC / 排序去重 / coverage 判定邏輯，唯二差異是 bar 週期
+/// （影響 close_time_ms 與 closed-bar 邊界）與寫入的 timeframe 標籤。daily 包裝以
+/// DAILY_PERIOD_MS + "1d" 呼叫此函數，輸出位元一致（見 daily 既有測試保護）。
+///
+/// 步驟（與 daily 原邏輯相同，period_ms 取代硬編碼 DAILY_PERIOD_MS）：
+///   1. closed-bar filter：`bar_open + period_ms <= now_ms`（未收盤 bar 不寫，避免寫入會變動
+///      的當期未完成 bar）。
+///   2. strict OHLC：對每根跑 is_strict_valid_ohlc，任一失敗即丟棄該 bar（不寫 0.0）。
+///   3. 轉 openclaw_core::klines::KlineBar（is_closed=true / tick_count=1）。
+///   4. 按 open_time 排序、去重（同 open_time 取首見），計 observed vs expected → status。
+///
+/// 不變量同 daily：本函數從不 panic、從不靜默補值；任何缺失只反映成 observed 下降，由
+/// provenance 帳本誠實記錄。tf 標籤直接落入 ParsedKlinePage.timeframe，writer 據此寫
+/// market.klines（intraday 回填寫 1m/5m/15m/1h/4h，與 daily 的 '1d' disjoint）。
+pub fn strict_filter_closed_bars_for(
+    symbol: &str,
+    raw_bars: &[KlineBar],
+    window_start_ms: u64,
+    window_end_ms: u64,
+    now_ms: u64,
+    period_ms: u64,
+    tf: &str,
+) -> ParsedKlinePage {
     use std::collections::BTreeMap;
 
     // open_time -> bar，BTreeMap 天然按 open_time 排序 + 去重（同 open_time 取首見）。
@@ -176,13 +235,13 @@ pub fn strict_filter_closed_bars(
         if raw.start_time < window_start_ms || raw.start_time >= window_end_ms {
             continue;
         }
-        // closed-bar filter：未滿一天的當前 bar 不寫。
-        if raw.start_time + DAILY_PERIOD_MS > now_ms {
+        // closed-bar filter：未滿一個週期的當前 bar 不寫。
+        if raw.start_time + period_ms > now_ms {
             continue;
         }
         let core = CoreKlineBar {
             open_time_ms: raw.start_time,
-            close_time_ms: raw.start_time + DAILY_PERIOD_MS,
+            close_time_ms: raw.start_time + period_ms,
             open: raw.open,
             high: raw.high,
             low: raw.low,
@@ -201,7 +260,7 @@ pub fn strict_filter_closed_bars(
 
     let bars: Vec<CoreKlineBar> = kept.into_values().collect();
     let observed = bars.len() as u64;
-    let expected = expected_daily_bars(window_start_ms, window_end_ms);
+    let expected = expected_bars_for(window_start_ms, window_end_ms, period_ms);
     let payload_sha256 = compute_payload_sha256(&bars);
 
     let status = if expected == 0 {
@@ -219,7 +278,7 @@ pub fn strict_filter_closed_bars(
 
     ParsedKlinePage {
         symbol: symbol.to_string(),
-        timeframe: "1d".to_string(),
+        timeframe: tf.to_string(),
         bars,
         verdict: CoverageVerdict {
             status,
@@ -255,6 +314,28 @@ pub async fn paginate_daily_klines(
     start_ms: u64,
     end_ms: u64,
 ) -> crate::bybit_rest_client::BybitResult<Vec<KlineBar>> {
+    // daily 包裝：固定 Bybit interval "D"，行為與泛化前一致。
+    paginate_klines(client, category, symbol, "D", start_ms, end_ms).await
+}
+
+/// 通用版分頁取數（E1-A 泛化）：對單一 symbol 的 [start_ms, end_ms) 窗口分頁取數，
+/// 回傳合併後的原始 KlineBar。
+///
+/// 為什麼抽出 interval 參數：intraday 回填器需傳 Bybit interval "1"/"5"/"15"/"60"/"240"，
+/// daily 傳 "D"。分頁游標邏輯（游標 = 已取得最早 open_time − 1ms 往前回溯）與週期無關
+/// （Bybit 用 endTime 截斷窗口，回傳 open_time 降序），故完全共用。daily 包裝以 "D" 呼叫，
+/// 行為位元一致。終止條件（三重 fail-closed）與 MAX_PAGES_PER_SYMBOL 上限沿用不變。
+///
+/// 為什麼回原始 bar 而非直接 strict：分頁終止判定需要原始 open_time（含未收盤 bar），strict
+/// 過濾在翻頁完成後一次做，避免「closed filter 濾掉邊界 bar 導致游標誤判取盡」。
+pub async fn paginate_klines(
+    client: &crate::market_data_client::MarketDataClient,
+    category: &str,
+    symbol: &str,
+    interval: &str,
+    start_ms: u64,
+    end_ms: u64,
+) -> crate::bybit_rest_client::BybitResult<Vec<KlineBar>> {
     use std::collections::BTreeMap;
 
     let mut acc: BTreeMap<u64, KlineBar> = BTreeMap::new();
@@ -273,7 +354,7 @@ pub async fn paginate_daily_klines(
             .get_klines(
                 category,
                 symbol,
-                "D",
+                interval,
                 Some(start_ms),
                 Some(cursor_end),
                 Some(KLINE_PAGE_LIMIT),
@@ -601,5 +682,158 @@ mod tests {
         assert_eq!(CoverageStatus::Pass.as_db_str(), "pass");
         assert_eq!(CoverageStatus::Partial.as_db_str(), "partial");
         assert_eq!(CoverageStatus::Failed.as_db_str(), "failed");
+    }
+
+    // ========================================================================
+    // E1-A intraday 泛化測試（period_ms + tf 參數化）。
+    // 鏡像上方 daily strict/fake-zero/coverage 測試，驗證通用版在 1m/5m/4h 週期下
+    // 同樣 fail-closed，且 daily 包裝與通用版位元一致（保護 daily 既有行為）。
+    // ========================================================================
+
+    /// intraday 各週期毫秒常量（與 bin 的 interval→period_ms 映射對齊）。
+    const MIN1_MS: u64 = 60_000;
+    const MIN5_MS: u64 = 300_000;
+    const HOUR4_MS: u64 = 14_400_000;
+
+    fn now_after_period(periods: u64, period_ms: u64) -> u64 {
+        DAY0 + periods * period_ms + 1
+    }
+
+    /// daily 包裝必須與通用版（DAILY_PERIOD_MS + "1d"）位元一致——保護 daily 行為不變。
+    #[test]
+    fn test_daily_wrapper_equals_generic_for_daily_period() {
+        let raw = vec![
+            raw_bar(DAY0, 100.0, 110.0, 95.0, 105.0, 10.0, 1000.0),
+            raw_bar(DAY0 + DAILY_PERIOD_MS, 105.0, 120.0, 104.0, 118.0, 11.0, 1200.0),
+            raw_bar(DAY0 + 2 * DAILY_PERIOD_MS, 118.0, 119.0, 100.0, 101.0, 9.0, 900.0),
+        ];
+        let end = DAY0 + 3 * DAILY_PERIOD_MS;
+        let now = now_after(3);
+        let via_wrapper = strict_filter_closed_bars("BTCUSDT", &raw, DAY0, end, now);
+        let via_generic =
+            strict_filter_closed_bars_for("BTCUSDT", &raw, DAY0, end, now, DAILY_PERIOD_MS, "1d");
+        assert_eq!(via_wrapper.timeframe, via_generic.timeframe);
+        assert_eq!(via_wrapper.timeframe, "1d");
+        assert_eq!(via_wrapper.verdict, via_generic.verdict);
+        assert_eq!(via_wrapper.bars.len(), via_generic.bars.len());
+        // expected_daily_bars 包裝亦須與 expected_bars_for(DAILY_PERIOD_MS) 一致。
+        assert_eq!(
+            expected_daily_bars(DAY0, end),
+            expected_bars_for(DAY0, end, DAILY_PERIOD_MS)
+        );
+    }
+
+    /// 通用版 expected_bars_for 對各週期正確 floor；period_ms==0 fail-closed 回 0（不 panic）。
+    #[test]
+    fn test_expected_bars_for_periods() {
+        // 1m：3 分鐘窗 = 3 根。
+        assert_eq!(expected_bars_for(DAY0, DAY0 + 3 * MIN1_MS, MIN1_MS), 3);
+        // 5m：末尾殘段（半根）不計。
+        assert_eq!(
+            expected_bars_for(DAY0, DAY0 + 3 * MIN5_MS + MIN5_MS / 2, MIN5_MS),
+            3
+        );
+        // 4h：2 根。
+        assert_eq!(expected_bars_for(DAY0, DAY0 + 2 * HOUR4_MS, HOUR4_MS), 2);
+        // 退化窗 / period_ms==0 → 0（除零保護）。
+        assert_eq!(expected_bars_for(DAY0, DAY0, MIN1_MS), 0);
+        assert_eq!(expected_bars_for(DAY0, DAY0 + 3 * MIN1_MS, 0), 0);
+    }
+
+    /// 1m 週期：全有效 → pass，close_time_ms 用 1m 週期。
+    #[test]
+    fn test_strict_1m_all_valid_pass() {
+        let raw = vec![
+            raw_bar(DAY0, 100.0, 100.5, 99.8, 100.2, 5.0, 500.0),
+            raw_bar(DAY0 + MIN1_MS, 100.2, 100.9, 100.1, 100.7, 6.0, 600.0),
+            raw_bar(DAY0 + 2 * MIN1_MS, 100.7, 101.0, 100.5, 100.6, 4.0, 400.0),
+        ];
+        let page = strict_filter_closed_bars_for(
+            "BTCUSDT",
+            &raw,
+            DAY0,
+            DAY0 + 3 * MIN1_MS,
+            now_after_period(3, MIN1_MS),
+            MIN1_MS,
+            "1m",
+        );
+        assert_eq!(page.verdict.status, CoverageStatus::Pass);
+        assert_eq!(page.verdict.expected, 3);
+        assert_eq!(page.verdict.observed, 3);
+        assert_eq!(page.timeframe, "1m");
+        // close_time_ms = open_time + 1m 週期。
+        assert!(page
+            .bars
+            .iter()
+            .all(|b| b.close_time_ms == b.open_time_ms + MIN1_MS));
+    }
+
+    /// 5m 週期 fake-zero（close=0.0）必拒、不寫，coverage 降 partial（C-3 在 intraday 同樣 bite）。
+    #[test]
+    fn test_strict_5m_fake_zero_rejected_partial() {
+        let raw = vec![
+            raw_bar(DAY0, 100.0, 101.0, 99.0, 100.5, 5.0, 500.0),
+            // 第二根 close=0.0（fake-zero 簽名）→ 必被拒。
+            raw_bar(DAY0 + MIN5_MS, 100.5, 101.5, 100.0, 0.0, 6.0, 600.0),
+            raw_bar(DAY0 + 2 * MIN5_MS, 100.6, 101.2, 100.3, 100.9, 4.0, 400.0),
+        ];
+        let page = strict_filter_closed_bars_for(
+            "ETHUSDT",
+            &raw,
+            DAY0,
+            DAY0 + 3 * MIN5_MS,
+            now_after_period(3, MIN5_MS),
+            MIN5_MS,
+            "5m",
+        );
+        assert_eq!(page.verdict.status, CoverageStatus::Partial);
+        assert_eq!(page.verdict.expected, 3);
+        assert_eq!(page.verdict.observed, 2);
+        assert_eq!(page.timeframe, "5m");
+        assert!(page.bars.iter().all(|b| b.close > 0.0));
+        assert!(page.bars.iter().all(|b| b.open_time_ms != DAY0 + MIN5_MS));
+    }
+
+    /// 4h 週期 closed-bar filter：未滿一個 4h 週期的當期 bar 不寫。
+    #[test]
+    fn test_strict_4h_closed_filter_excludes_current() {
+        let raw = vec![
+            raw_bar(DAY0, 100.0, 110.0, 95.0, 105.0, 10.0, 1000.0),
+            // 第二根 open_time = DAY0+4h，now 落其中途 → 未滿一個 4h 週期 → 不寫。
+            raw_bar(DAY0 + HOUR4_MS, 105.0, 115.0, 104.0, 110.0, 11.0, 1200.0),
+        ];
+        let now = DAY0 + HOUR4_MS + HOUR4_MS / 2;
+        let page = strict_filter_closed_bars_for(
+            "BTCUSDT",
+            &raw,
+            DAY0,
+            DAY0 + 2 * HOUR4_MS,
+            now,
+            HOUR4_MS,
+            "4h",
+        );
+        assert_eq!(page.verdict.expected, 2);
+        assert_eq!(page.verdict.observed, 1);
+        assert_eq!(page.verdict.status, CoverageStatus::Partial);
+        assert_eq!(page.timeframe, "4h");
+        assert!(page.bars.iter().all(|b| b.open_time_ms == DAY0));
+    }
+
+    /// turnover 真值（>0）在 intraday 路徑被保留（非 fake-zero）——回應 PA 驗收 #3。
+    #[test]
+    fn test_strict_1m_turnover_preserved() {
+        let raw = vec![raw_bar(DAY0, 100.0, 100.5, 99.8, 100.2, 5.0, 502.37)];
+        let page = strict_filter_closed_bars_for(
+            "BTCUSDT",
+            &raw,
+            DAY0,
+            DAY0 + MIN1_MS,
+            now_after_period(1, MIN1_MS),
+            MIN1_MS,
+            "1m",
+        );
+        assert_eq!(page.verdict.observed, 1);
+        assert_eq!(page.bars[0].turnover, 502.37);
+        assert_eq!(page.bars[0].volume, 5.0);
     }
 }
