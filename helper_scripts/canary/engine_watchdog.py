@@ -47,6 +47,7 @@ except ModuleNotFoundError:  # pragma: no cover
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import（cwd 漂移防護）
 import alert_sink  # 耐久 sink + 告警 redactor 正本（本檔 pre-existing 超 2000 行硬頂，只留薄調用）
 import engine_dead_incident  # external engine_dead notify-only producer（薄接線）
+import canary_audit_common  # audit_events direct fail-soft write 正本（薄調用；本檔超 2000 行硬頂）
 
 logging.basicConfig(
     level=logging.INFO,
@@ -526,6 +527,48 @@ def _append_canary_event(data_dir: str, event: dict) -> None:
             f.write(json.dumps(event) + "\n")
     except OSError as e:
         logger.warning("Failed to append canary event: %s", e)
+
+
+def _emit_audit_event_best_effort(
+    canary_event: str,
+    detection_ts: float,
+    summary: str,
+    details: dict,
+    notes: str,
+) -> None:
+    """ENGINE-AUDIT-VISIBILITY (2026-06-15)：direct fail-soft write 一行 audit_events。
+
+    為什麼薄包一層：watchdog 偵測到的 ENGINE_CRASH / NETWORK_OUTAGE / ENGINE_RECOVERED
+    要讓 operator 在 PG `audit_events` 查得到（表存在但 0 row）。本函數把 canary 事件名
+    映射成 (event_type, severity)、嵌確定性 dedup_key（與 bridge 共用同形）、補 hostname，
+    再走 canary_audit_common.write_audit_event_best_effort（自開連線 5s timeout + 冪等
+    INSERT + 全程吞沒例外）。
+
+    硬邊界：絕不在重啟「之前」呼叫——恢復是第一要務，DB 寫入不得延遲重啟；任何 DB 問題
+    都被 common 層吞沒，不會拋進偵測/重啟/分類邏輯。
+    """
+    try:
+        mapped = canary_audit_common.map_canary_to_audit(canary_event)
+        if mapped is None:
+            return
+        event_type, severity = mapped
+        dedup_key = canary_audit_common.build_dedup_key(event_type, detection_ts)
+        full_details = dict(details)
+        full_details.setdefault("hostname", canary_audit_common.hostname())
+        row = canary_audit_common.build_audit_row(
+            event_type=event_type,
+            severity=severity,
+            summary=summary,
+            event_details=full_details,
+            notes=notes,
+            dedup_key=dedup_key,
+        )
+        canary_audit_common.write_audit_event_best_effort(row)
+    except Exception as exc:  # noqa: BLE001 — 任何組裝/寫入錯誤都不得拋進 watchdog 偵測/重啟邏輯
+        logger.warning(
+            "audit emit best-effort failed (non-fatal): %s / audit 事件寫入失敗（吞沒）",
+            exc,
+        )
 
 
 def emit_restart_skipped_if_new(
@@ -1152,9 +1195,12 @@ def on_engine_crash(
     if classification == "network_outage":
         # 計數只在下行轉移時做一次（edge）；已 down 的重複 poll 不重複計數。
         if was_alive:
+            # 單一 detection_ts：canary 事件的 `ts` 與 audit dedup_key 必須用同一時間戳，
+            # 否則 backstop bridge 由 canary 算出的 key 與 direct write 的 key 不一致。
+            outage_ts = time.time()
             state.engine_alive = False
             state.total_network_outages += 1
-            state.network_outage_timestamps.append(time.time())
+            state.network_outage_timestamps.append(outage_ts)
             logger.warning(
                 "NETWORK_OUTAGE classified — snapshot age=%.1fs, total outages=%d "
                 "(strike NOT counted, auto-restart skipped) "
@@ -1163,21 +1209,42 @@ def on_engine_crash(
                 snapshot_age, state.total_network_outages,
             )
             if data_dir:
+                outage_dedup_key = canary_audit_common.build_dedup_key(
+                    "network_outage", outage_ts
+                )
                 _append_canary_event(data_dir, {
-                    "ts": time.time(),
+                    "ts": outage_ts,
                     "event": "NETWORK_OUTAGE",
                     "snapshot_age_seconds": snapshot_age,
                     "total_outages": state.total_network_outages,
+                    # bridge 直接讀此 key 去 NOT EXISTS 比對（與 direct write 同形）。
+                    "dedup_key": outage_dedup_key,
                 })
+                # NETWORK_OUTAGE 無重啟路徑，故 direct write 在 canary append 之後即可。
+                _emit_audit_event_best_effort(
+                    "NETWORK_OUTAGE",
+                    outage_ts,
+                    f"engine network outage detected (snapshot stale {snapshot_age:.1f}s)",
+                    {
+                        "snapshot_age_seconds": snapshot_age,
+                        "total_outages": state.total_network_outages,
+                        "classification": "network_outage",
+                    },
+                    "DNS/transport outage; no strike, no auto-restart",
+                )
         # network_outage 永不重啟（每次 poll 都 return，不落到下面的 retry 區塊）。
         return "network_outage"
 
     # ── engine_crash 分支 ──
     # 計數 / strike bookkeeping 只在下行轉移時做一次（edge）。
+    # crash_ts：本次 crash 轉移的偵測時間戳（只在 edge 設）；用於稍後在重啟「之後」
+    # 寫 canary 事件 + audit_events，且 dedup_key 跨兩條路徑用同一時間戳。
+    crash_ts: Optional[float] = None
     if was_alive:
+        crash_ts = time.time()
         state.engine_alive = False
         state.total_crashes += 1
-        state.crash_timestamps.append(time.time())
+        state.crash_timestamps.append(crash_ts)
         logger.error(
             "ENGINE_CRASH detected — snapshot age=%.1fs, total crashes=%d "
             "/ 檢測到引擎崩潰 — 快照年齡=%.1f秒，總崩潰數=%d",
@@ -1189,12 +1256,17 @@ def on_engine_crash(
     # 早退吞掉。should_restart 已用退避窗口 + circuit_broken 閘，故不會 storm。
     # 維持 Fix 2 (2026-04-14) rationale：成功重啟後下次 poll 看到新鮮快照，自然走
     # on_engine_recovery() 復原；strike 計數作為重啟風暴的次級安全網。
+    # restart_outcome：記錄本次 poll 的重啟結果，供稍後寫進 audit_events 的 event_details
+    # （spec：restart outcome if known）。allowed=True 才真 trigger；其餘記跳過原因。
+    restart_outcome = "not_attempted"
     if data_dir:
         now = time.time()
         allowed, reason_key, reason_detail = should_restart(data_dir, now)
         if allowed:
-            trigger_restart(data_dir)
+            restart_ok = trigger_restart(data_dir)
+            restart_outcome = "restart_success" if restart_ok else "restart_failed"
         else:
+            restart_outcome = f"restart_skipped:{reason_key}"
             # logger.warning 用 detail 保留 per-poll 本地可見性（log 會 rotate）。
             logger.warning(
                 "Auto-restart skipped: %s / 跳過自動重啟：%s",
@@ -1204,6 +1276,36 @@ def on_engine_crash(
             # 避免 backoff 倒數秒每 poll 變字串而失去節流（detail 仍寫進 payload）；
             # circuit_broken 終態下也不會每 2s 灌一條把 RESTART_CIRCUIT_BROKEN 淹沒。
             emit_restart_skipped_if_new(data_dir, reason_key, reason_detail, now)
+
+        # ENGINE-AUDIT-VISIBILITY (2026-06-15)：重啟觸發「之後」才寫 audit_events
+        # （恢復優先；DB 寫入絕不延遲重啟）。只在 crash 下行轉移那一刻（crash_ts 非 None）
+        # 寫一條 —— 一個 crash 事件對應一行，重複 poll 不重寫。canary 事件同時帶 dedup_key
+        # 供 backstop bridge 補洞（ENGINE_CRASH 先前無 canary 事件，bridge 才有東西可 tail）。
+        if crash_ts is not None:
+            crash_dedup_key = canary_audit_common.build_dedup_key(
+                "engine_crash", crash_ts
+            )
+            _append_canary_event(data_dir, {
+                "ts": crash_ts,
+                "event": "ENGINE_CRASH",
+                "snapshot_age_seconds": snapshot_age,
+                "total_crashes": state.total_crashes,
+                "restart_outcome": restart_outcome,
+                "dedup_key": crash_dedup_key,
+            })
+            _emit_audit_event_best_effort(
+                "ENGINE_CRASH",
+                crash_ts,
+                f"engine crash detected (snapshot stale {snapshot_age:.1f}s, "
+                f"total crashes={state.total_crashes})",
+                {
+                    "snapshot_age_seconds": snapshot_age,
+                    "total_crashes": state.total_crashes,
+                    "classification": "engine_crash",
+                    "restart_outcome": restart_outcome,
+                },
+                f"auto-restart {restart_outcome}; strike bookkeeping applied",
+            )
 
         # incident_policy E1-E：engine_dead 是 engine 外 watchdog producer。引擎死時
         # Rust 進程內的 C4 sender 不可用，因此此處只做 notify-only（不餵 AllFail）。
@@ -1308,6 +1410,29 @@ def on_engine_recovery(state: WatchdogState, data_dir: str = "") -> None:
                 data_dir,
             )
         clear_engine_down_alert_marker(data_dir)
+        # ENGINE-AUDIT-VISIBILITY (2026-06-15)：恢復轉移寫一條 audit_events（severity=info）
+        # + canary 事件（先前無，bridge 才能 backstop 恢復事件）。只在轉移那一刻寫一次
+        # （上方 `if state.engine_alive: return` 已保證非轉移不進此處）。無重啟路徑，順序無約束。
+        recovery_ts = state.last_recovery_ts
+        recovery_dedup_key = canary_audit_common.build_dedup_key(
+            "engine_recovered", recovery_ts
+        )
+        _append_canary_event(data_dir, {
+            "ts": recovery_ts,
+            "event": "ENGINE_RECOVERED",
+            "total_crashes": state.total_crashes,
+            "dedup_key": recovery_dedup_key,
+        })
+        _emit_audit_event_best_effort(
+            "ENGINE_RECOVERED",
+            recovery_ts,
+            "engine recovered — snapshot fresh again",
+            {
+                "total_crashes": state.total_crashes,
+                "classification": "engine_recovered",
+            },
+            "recovery transition; restart state re-armed",
+        )
     logger.info(
         "ENGINE_RECOVERED — Rust engine snapshot is fresh again "
         "/ 引擎已恢復 — Rust 引擎快照恢復新鮮",
