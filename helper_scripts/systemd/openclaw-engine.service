@@ -55,7 +55,9 @@ EnvironmentFile=__OPENCLAW_SECRETS_ROOT__/environment_files/basic_system_service
 Environment="OPENCLAW_BASE_DIR=__OPENCLAW_BASE_DIR__"
 Environment="OPENCLAW_DATA_DIR=__OPENCLAW_DATA_DIR__"
 Environment="OPENCLAW_SECRETS_ROOT=__OPENCLAW_SECRETS_ROOT__"
-Environment="OPENCLAW_CANARY_MODE=1"
+# 灰度逐-tick 捕捉預設關閉，避免 engine_results.jsonl ~300GB/天 NVMe 寫入；穩態無消費者。
+# 需 Rust↔Python 對賬或 replay 時，改 =1 重啟做單次捕捉（見 canary_comparator.py / replay_runner.py）。
+Environment="OPENCLAW_CANARY_MODE=0"
 Environment="OPENCLAW_IPC_SOCKET=__OPENCLAW_DATA_DIR__/engine.sock"
 Environment="OPENCLAW_DATABASE_URL_FILE=__OPENCLAW_DATA_DIR__/runtime_secrets/openclaw_database_url"
 Environment="OPENCLAW_IPC_SECRET_FILE=__OPENCLAW_SECRETS_ROOT__/environment_files/ipc_secret.txt"

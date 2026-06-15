@@ -597,7 +597,10 @@ restart_engine() {
     openai_api_key="$(resolve_provider_secret_env OPENAI_API_KEY openai openai_api_key)"
     deepseek_api_key="$(resolve_provider_secret_env DEEPSEEK_API_KEY deepseek deepseek_api_key)"
     mkdir -p "$(dirname "$ENGINE_SOCKET")"
-    OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE=1 \
+    # 灰度逐-tick 捕捉預設關閉，避免 engine_results.jsonl ~300GB/天 NVMe 寫入；穩態無消費者。
+    # 需 Rust↔Python 對賬或 replay 時，按需以 `OPENCLAW_CANARY_MODE=1 ./restart_all.sh ...` 啟動單次捕捉
+    # （見 canary_comparator.py / replay_runner.py 工作流）。
+    OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE="${OPENCLAW_CANARY_MODE:-0}" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
         OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE="$OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE" \
