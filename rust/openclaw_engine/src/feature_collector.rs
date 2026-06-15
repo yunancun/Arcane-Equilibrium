@@ -92,7 +92,6 @@ pub struct FeatureSnapshot {
     pub timeframe: String,
     pub ts_ms: u64,
     pub price: f64,
-    pub volume_24h: f64,
     pub indicators: IndicatorSnapshot,
     pub feature_version: String,
 }
@@ -104,7 +103,6 @@ impl FeatureSnapshot {
         symbol: String,
         ts_ms: u64,
         price: f64,
-        volume_24h: f64,
         indicators: IndicatorSnapshot,
         feature_version: String,
     ) -> Self {
@@ -113,7 +111,6 @@ impl FeatureSnapshot {
             timeframe: "1m".into(),
             ts_ms,
             price,
-            volume_24h,
             indicators,
             feature_version,
         }
@@ -281,7 +278,6 @@ mod tests {
             symbol.into(),
             ts,
             50000.0,
-            1e9,
             IndicatorSnapshot::default(),
             "v1.0".into(),
         )
@@ -349,7 +345,7 @@ mod tests {
                 width: 3000.0,
             }),
         };
-        let snap = FeatureSnapshot::new("BTCUSDT".into(), 1000, 50000.0, 1e9, ind, "v1.0".into());
+        let snap = FeatureSnapshot::new("BTCUSDT".into(), 1000, 50000.0, ind, "v1.0".into());
         let vec = snap.to_feature_vector();
         assert_eq!(vec.len(), FEATURE_DIM);
         // Check some specific values (0-indexed)

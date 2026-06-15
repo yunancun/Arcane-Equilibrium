@@ -127,7 +127,6 @@ impl TickPipeline {
                 sym.clone(),
                 event.ts_ms,
                 event.last_price,
-                event.volume_24h,
                 ind.clone(),
                 self.feature_version.clone(),
             );
