@@ -136,7 +136,6 @@ mod tests {
             "BTC".into(),
             1000,
             50000.0,
-            0.0,
             IndicatorSnapshot::default(),
             "v1".into(),
         );
@@ -144,7 +143,6 @@ mod tests {
             "BTC".into(),
             2000,
             51000.0,
-            0.0,
             IndicatorSnapshot::default(),
             "v1".into(),
         );
@@ -160,7 +158,6 @@ mod tests {
             "ETH".into(),
             0,
             3000.0,
-            0.0,
             IndicatorSnapshot::default(),
             "v1".into(),
         );

@@ -578,7 +578,6 @@ pub fn feature_vector_from_decision_context_snapshot(
         symbol.to_string(),
         ts_ms,
         last_price,
-        0.0,
         indicators,
         "decision_context_snapshot".to_string(),
     )
