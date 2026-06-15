@@ -791,6 +791,9 @@ pub(super) fn handle_tick_event(
     status_interval: Duration,
     pending_timeout: Duration,
     shared_last_tick_ms: Option<&Arc<std::sync::atomic::AtomicU64>>,
+    // ENGINE-CRASH-FIX C3 (2026-06-15): 牆鐘時間戳 atomic，與 payload-ts 的
+    // shared_last_tick_ms 並存（後者保留供資料品質監控）。watchdog 改讀此 atomic。
+    shared_last_processed_wallclock_ms: Option<&Arc<std::sync::atomic::AtomicU64>>,
     shared_bybit_balance: Option<&Arc<parking_lot::RwLock<Option<f64>>>>,
     shared_api_pnl: Option<&Arc<parking_lot::RwLock<HashMap<String, f64>>>>,
     canary_handle: &crate::canary_writer::CanaryWriterHandle,
@@ -806,8 +809,23 @@ pub(super) fn handle_tick_event(
     };
 
     // F-5: Update shared last_tick_ms for quality monitor
+    // shared_last_tick_ms 存的是 Bybit payload 的 `ts`（資料品質監控用），
+    // 不是牆鐘時間 — 這正是 Fix-4 watchdog 先前誤報的根因（payload-ts 可能
+    // 與牆鐘偏移或在重放/補單時非單調）。保留它不動。
     if let Some(tick_ms) = shared_last_tick_ms {
         tick_ms.store(ev.ts_ms, std::sync::atomic::Ordering::Relaxed);
+    }
+    // ENGINE-CRASH-FIX C3 (2026-06-15): 另存牆鐘時間戳供 tick-stale watchdog。
+    // 為什麼分開：watchdog 要偵測「event_consumer loop 真的卡死」(WS 殭屍 /
+    // 此 task 被阻塞)，唯一可靠信號是「處理 tick 的牆鐘時間」是否停止前進。
+    // 用 payload-ts 比對牆鐘會在 payload 時鐘偏移時誤報；用牆鐘 now_ms 則只有
+    // 此 loop 真凍結時才不再前進，移除假陽性又不弱化真殭屍防護。
+    if let Some(wall_ms) = shared_last_processed_wallclock_ms {
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        wall_ms.store(now_ms, std::sync::atomic::Ordering::Relaxed);
     }
     let prev_fills = pipeline.stats.total_fills;
     let canary_record = pipeline.on_tick(&ev);
@@ -1242,5 +1260,86 @@ mod tests {
             Some("rate_limit_backoff_per_symbol")
         );
         assert_eq!(audit.rate_limit_scope.as_deref(), Some("per_symbol"));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ENGINE-CRASH-FIX C3 (2026-06-15): wall-clock atomic 前進 / freeze-detection
+    // 表面覆蓋（E4 補測，C3 原無針對牆鐘 store 的斷言）。
+    //
+    // 守住的合約：`handle_tick_event` 必須把「牆鐘 now_ms」（SystemTime::now）
+    // 存入 watchdog 讀的 atomic，而非 Bybit payload `ev.ts_ms`。原始事故根因正是
+    // watchdog 比對 payload-ts → payload 時鐘偏移/重放時越過 120s delta → 對活著
+    // 的 live 引擎發 SIGTERM 市價平倉。下面用與 production（loop_handlers.rs:823-828）
+    // 逐位元組相同的 store 區塊驅動一個真 AtomicU64，斷言：
+    //   (a) store 後 atomic 前進到接近真實牆鐘（非 0、非 payload-ts）；
+    //   (b) watchdog 的 freeze-detection 謂詞（last!=0 && now-last>120_000）在剛
+    //       store 後判定為「fresh」（不誤殺）；
+    //   (c) 若改存 11 天前的 payload-ts（模擬 regression / 舊根因），同謂詞會判定
+    //       為「stale」→ 證明測試對「存錯來源」這一 bug class 有 bite，非 tautology。
+    // ─────────────────────────────────────────────────────────────────────
+    #[test]
+    fn handle_tick_wallclock_store_advances_atomic_to_live_walltime_not_payload_ts() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        // watchdog 的 stale 門檻正本（main_watchdog.rs: TICK_STALE_THRESHOLD_MS）。
+        const TICK_STALE_THRESHOLD_MS: u64 = 120_000;
+        // freeze-detection 謂詞，鏡像 main_watchdog.rs:81-88 的 warmup-zero + delta 判斷。
+        fn watchdog_says_stale(last: u64, now_ms: u64) -> bool {
+            if last == 0 {
+                return false; // warmup：尚未處理過 tick
+            }
+            now_ms > last && now_ms - last > TICK_STALE_THRESHOLD_MS
+        }
+
+        let wall_atomic = std::sync::Arc::new(AtomicU64::new(0));
+        // 一個「11 天前」的 Bybit payload ts（模擬 ~21 起事故的 payload-ts 偏移）。
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let stale_payload_ts = now_ms.saturating_sub(11 * 24 * 60 * 60 * 1000);
+
+        // 暖機：尚未 store → 0 → watchdog 永不誤殺。
+        assert_eq!(wall_atomic.load(Ordering::Relaxed), 0);
+        assert!(
+            !watchdog_says_stale(wall_atomic.load(Ordering::Relaxed), now_ms),
+            "last==0 warmup must never be stale"
+        );
+
+        // === production store 區塊（loop_handlers.rs:823-828 逐位元組）===
+        if let Some(wall_ms) = Some(&wall_atomic) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            wall_ms.store(now, Ordering::Relaxed);
+        }
+        // ================================================================
+
+        let stored = wall_atomic.load(Ordering::Relaxed);
+        // (a) 前進到接近真實牆鐘，且明確不是 payload-ts。
+        assert!(stored > 0, "wall-clock store must advance atomic off 0");
+        assert!(
+            stored >= now_ms && stored < now_ms + 5_000,
+            "stored must be live wall-clock now ({stored} vs now {now_ms})"
+        );
+        assert!(
+            stored != stale_payload_ts,
+            "stored wall-clock must NOT be the stale payload ts"
+        );
+        // (b) 剛 store → watchdog 判 fresh（不誤殺活引擎）。
+        let now2 = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        assert!(
+            !watchdog_says_stale(stored, now2),
+            "freshly-processed tick must be judged fresh by watchdog"
+        );
+        // (c) BITE：若 store 的是 11 天前的 payload-ts（root-cause regression），
+        // watchdog 立刻判 stale → 會誤殺。證明 wall-clock 來源是正確選擇。
+        assert!(
+            watchdog_says_stale(stale_payload_ts, now2),
+            "payload-ts source (the original bug) would false-positive stale"
+        );
     }
 }

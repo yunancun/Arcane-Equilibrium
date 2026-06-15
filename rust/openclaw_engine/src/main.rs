@@ -794,6 +794,11 @@ async fn async_main(
     // DB writer tasks (market, feature, trading, context, pollers, monitors)
     // ------------------------------------------------------------------
     let shared_last_tick_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    // ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘時間戳 atomic，與 payload-ts 的
+    // shared_last_tick_ms 並存。event_consumer loop 每處理一個 tick 以 now_ms()
+    // 更新；tick-stale watchdog 讀此 atomic 判斷 loop 是否真凍結（移除 payload-ts
+    // 對牆鐘比對的假陽性，又不弱化真 WS-殭屍防護）。
+    let shared_last_processed_wallclock_ms = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let (
         market_tx,
         feature_tx,
@@ -1260,6 +1265,7 @@ async fn async_main(
         shared_linucb_runtime: &shared_linucb_runtime,
         shared_news_snapshot: &shared_news_snapshot,
         shared_last_tick_ms: &shared_last_tick_ms,
+        shared_last_processed_wallclock_ms: &shared_last_processed_wallclock_ms,
         canary_handle: &canary_handle,
         per_engine_predictors: &per_engine_predictors,
         cross_engine_tx: &cross_engine_tx,
@@ -1370,6 +1376,7 @@ async fn async_main(
             shared_linucb_runtime: Arc::clone(&shared_linucb_runtime),
             shared_news_snapshot: Arc::clone(&shared_news_snapshot),
             shared_last_tick_ms: Arc::clone(&shared_last_tick_ms),
+            shared_last_processed_wallclock_ms: Arc::clone(&shared_last_processed_wallclock_ms),
             canary_handle: canary_handle.clone(),
             per_engine_predictors: Arc::clone(&per_engine_predictors),
             cross_engine_tx: cross_engine_tx.clone(),
@@ -1672,8 +1679,12 @@ async fn async_main(
     // LiveAuthWatcher 已在上方 spawn，負責 5s 輪詢 + IPC 快路徑觸發。
 
     // Tick-stale watchdog — extracted to main_watchdog.rs (G1-03 Wave 1).
+    // ENGINE-CRASH-FIX C3 (2026-06-15)：改傳「牆鐘」atomic 而非 payload-ts
+    // shared_last_tick_ms。watchdog 要偵測的是「event_consumer loop 真凍結」，
+    // 唯一可靠信號是處理 tick 的牆鐘時間是否停止前進；用 payload-ts 比對牆鐘
+    // 會在 payload 時鐘偏移時誤報（Fix-4 假陽性根因）。閾值/間隔/warmup 不變。
     // tick-stale watchdog 已抽至 main_watchdog.rs。
-    main_watchdog::spawn_tick_stale_watchdog(&shared_last_tick_ms, &cancel);
+    main_watchdog::spawn_tick_stale_watchdog(&shared_last_processed_wallclock_ms, &cancel);
 
     // ------------------------------------------------------------------
     // Signal handling / 信號處理

@@ -5,6 +5,7 @@ use crate::bybit_private_ws::ExecutionUpdate;
 use crate::database::TradingMsg;
 use crate::tick_pipeline::TickPipeline;
 use tokio::sync::mpsc;
+use tracing::warn;
 
 pub(super) fn is_funding_execution(exec: &ExecutionUpdate) -> bool {
     exec.exec_type.eq_ignore_ascii_case("Funding")
@@ -94,5 +95,75 @@ pub(super) async fn apply_and_emit_funding_settlement(
         raw,
     };
 
-    tx.send(msg).await.is_ok()
+    // ENGINE-CRASH-FIX A1 (2026-06-15): bounded send 取代無限阻塞 send().await。
+    // 為什麼 fail-open drop 在此安全（survival > audit）：本 fn 跑在 demo/live
+    // event_consumer select! arm 內，與 watchdog 讀的 health snapshot + tick
+    // atomic 同一 async task。無界 `tx.send().await` 在 trading_writer 因 PG 慢
+    // 塞滿 4096-cap channel 時無限阻塞此 task → 凍結 snapshot/tick → tick-stale
+    // watchdog 對活著的 live 引擎發 SIGTERM 平倉（root cause）。改為 500ms 有界
+    // send：通道未滿時與舊路徑逐位元組相同；只有背壓真正發生時才放棄這一筆
+    // funding settlement *audit emit*。安全性：settlement 在 DB 以 settlement_id
+    // 為 PK 冪等（funding-{exec_id}），WS 重連重發同 exec_id 由 ON CONFLICT 合併；
+    // 且錢包餘額對賬走 reconcile_balance_from_exchange 另一路徑（paper_state 的
+    // apply_funding_settlement 已在 send 前同步執行，不受丟棄影響）。Timeout/Full/
+    // Closed 一律回 false，鏡像舊 channel-closed → false 路徑。
+    let send_start = std::time::Instant::now();
+    let result = tx
+        .send_timeout(msg, std::time::Duration::from_millis(500))
+        .await;
+    let elapsed = send_start.elapsed();
+    // C3 instrumentation：熱路徑背壓觀測（>200ms 代表 trading_writer 落後）。
+    if elapsed.as_millis() > 200 {
+        warn!(
+            elapsed_ms = elapsed.as_millis() as u64,
+            "funding settlement send slow — trading_tx backpressure \
+             / funding settlement 送出緩慢 — trading_tx 背壓"
+        );
+    }
+    match result {
+        Ok(()) => true,
+        Err(e) => {
+            let total =
+                FUNDING_AUDIT_DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if should_emit_funding_drop_warn() {
+                warn!(
+                    total_dropped = total,
+                    elapsed_ms = elapsed.as_millis() as u64,
+                    error = %e,
+                    "funding settlement audit dropped under trading_tx backpressure \
+                     (warn 1Hz sampled) — settlement_id PK keeps DB idempotent, \
+                     wallet balance reconciled separately \
+                     / funding settlement audit 因 trading_tx 背壓丟棄"
+                );
+            }
+            false
+        }
+    }
+}
+
+// ENGINE-CRASH-FIX A1 (2026-06-15): 模組級單調丟棄計數 + 1Hz warn 節流。
+// 鏡像 unattributed_emit / canary_writer 模式（leaf fn 無 handle 可掛計數）。
+static FUNDING_AUDIT_DROPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static FUNDING_DROP_LAST_WARN_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// 每 1000ms 至多回傳一次 true（CAS 序列化），避免持續背壓下 warn flood。
+fn should_emit_funding_drop_warn() -> bool {
+    const WARN_THROTTLE_MS: u64 = 1000;
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let last = FUNDING_DROP_LAST_WARN_MS.load(std::sync::atomic::Ordering::Relaxed);
+    if now_ms.saturating_sub(last) < WARN_THROTTLE_MS {
+        return false;
+    }
+    FUNDING_DROP_LAST_WARN_MS
+        .compare_exchange(
+            last,
+            now_ms,
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+        )
+        .is_ok()
 }

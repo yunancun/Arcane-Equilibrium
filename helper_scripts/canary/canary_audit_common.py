@@ -55,11 +55,16 @@ AUDIT_CONNECT_TIMEOUT_SECONDS = 5
 # severity 規則（spec）：ENGINE_CRASH=critical / NETWORK_OUTAGE=warning /
 # ENGINE_RECOVERED=info。RESTART_CIRCUIT_BROKEN（自愈放棄=需人工介入）一併視為 critical，
 # 讓 bridge 也能把這條既有 canary 事件補進 audit_events（backstop 範圍涵蓋）。
+# SNAPSHOT_STALL_ENGINE_ALIVE（B1，2026-06-15）：snapshot 過期但 IPC 交叉檢查證明引擎
+# 仍活，watchdog 抑制了破壞性重啟（不平倉）。severity=warning：這是「避免了誤殺」的
+# 正向事件，不是引擎故障；但 snapshot-writer 停寫仍是需追蹤的退化（A1/A2 軌處理），
+# 故進 audit_events 讓 operator 看得到、bridge 也能補洞。
 _CANARY_EVENT_MAP: dict[str, tuple[str, str]] = {
     "ENGINE_CRASH": ("engine_crash", "critical"),
     "NETWORK_OUTAGE": ("network_outage", "warning"),
     "ENGINE_RECOVERED": ("engine_recovered", "info"),
     "RESTART_CIRCUIT_BROKEN": ("restart_circuit_broken", "critical"),
+    "SNAPSHOT_STALL_ENGINE_ALIVE": ("snapshot_stall_engine_alive", "warning"),
 }
 
 

@@ -65,6 +65,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         shared_bybit_balance,
         shared_api_pnl,
         shared_last_tick_ms,
+        shared_last_processed_wallclock_ms,
         exchange_event_rx,
         mut pipeline_cmd_rx,
         audit_pool,
@@ -198,6 +199,8 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     status_interval,
                     pending_timeout,
                     shared_last_tick_ms.as_ref(),
+                    // ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘 atomic 供 watchdog。
+                    shared_last_processed_wallclock_ms.as_ref(),
                     shared_bybit_balance.as_ref(),
                     shared_api_pnl.as_ref(),
                     &canary_handle,

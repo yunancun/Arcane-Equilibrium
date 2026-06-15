@@ -256,8 +256,13 @@ pub struct EventConsumerDeps {
     /// Phase 1：特徵快照派發通道。
     pub feature_tx: Option<tokio::sync::mpsc::Sender<crate::feature_collector::FeatureSnapshot>>,
     /// Phase 1 (F-5): Shared last_tick_ms for quality monitor staleness detection.
-    /// Phase 1（F-5）：共享 last_tick_ms 用於質量監控器過期檢測。
+    /// 注意：此處存 Bybit payload `ts`（資料品質監控用），非牆鐘時間。
+    /// Phase 1（F-5）：共享 last_tick_ms 用於質量監控器過期檢測（存 payload-ts）。
     pub last_tick_ms: Option<Arc<std::sync::atomic::AtomicU64>>,
+    /// ENGINE-CRASH-FIX C3 (2026-06-15): 牆鐘時間戳 atomic，loop 每處理一個 tick
+    /// 以 `now_ms()` 更新。tick-stale watchdog 改讀此 atomic（移除先前用
+    /// payload-ts 比對牆鐘造成的假陽性，又不弱化真 WS-殭屍 / loop-凍結防護）。
+    pub last_processed_wallclock_ms: Option<Arc<std::sync::atomic::AtomicU64>>,
     /// Phase 2a: Channel for trading lifecycle events (signals/intents/fills).
     /// Phase 2a：交易生命週期事件通道。
     pub trading_tx: Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
