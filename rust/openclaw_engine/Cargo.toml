@@ -163,6 +163,19 @@ path = "src/bin/feature_baseline_writer.rs"
 name = "daily_kline_backfill"
 path = "src/bin/daily_kline_backfill.rs"
 
+# intraday K 線歷史回填（2026-06-15，research-unblock 交付物 A）：用 Bybit REST aggregated-
+# candle 路徑（與正確的 daily 回填同源）回填 1m/5m/15m/1h/4h 至 market.klines + provenance，
+# 取代 live WebSocket tick-synth 路徑產生的退化單快照 bar。鏡像 daily_kline_backfill 安全骨架
+# （dry-run 預設 + --apply/env gate OPENCLAW_INTRADAY_KLINE_BACKFILL_APPLY + V125 preflight）。
+# --interval {1|5|15|60|240}（可重複，省略=全 5 個）。★衝突關鍵：寫的 timeframe 與 live 壞行
+# 同 PK，--apply 預設走 vol-turnover-only DO UPDATE（只校正既有行 volume+turnover，絕不碰
+# OHLC/tick_count，保護 outcome_backfiller 的 close 依賴）；--upsert-overwrite 顯式升級為全
+# OHLCV 覆蓋。壓縮 hypertable 上的 DO UPDATE 需 operator 先 decompress 目標窗。不改 live
+# writer 的 DO NOTHING。
+[[bin]]
+name = "intraday_kline_backfill"
+path = "src/bin/intraday_kline_backfill.rs"
+
 # funding + OI 歷史回填（2026-06-02）：funding rate（/v5/market/funding/history）+ open
 # interest（/v5/market/open-interest, intervalTime=1h）歷史回填 CLI。dry-run 預設 +
 # --apply/env gate（鏡像 daily_kline_backfill）。V125 preflight fail-closed（2 history +
