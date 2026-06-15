@@ -52,6 +52,8 @@ mod h0_ctor_default;
 // P2-LG1-DEMO-SLO-CARVEOUT（2026-05-21）：H0 latency metrics 接線 E2E integration test。
 // 對應 spec `docs/execution_plan/2026-05-21--p2_lg1_demo_slo_carveout_spec.md` §10。
 mod h0_latency_metrics;
+// QUOTE-VOL-FIX（2026-06-15）：step_1_2 K 線聚合 per-event-kind 量/額 gating 回歸測試。
+mod klines_turnover_gating;
 // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19)：halt TTL 狀態機測試。
 // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt TTL 測試。
 mod halt_ttl;

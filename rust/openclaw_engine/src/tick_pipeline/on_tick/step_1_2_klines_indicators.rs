@@ -11,6 +11,7 @@
 //! 1m bar 給黑天鵝檢測器。Step 2 計算指標並發 `FeatureSnapshot` 給特徵寫入
 //! channel。無早退；回傳 `Option<IndicatorSnapshot>` 供 Step 3/4+5 消費。
 
+use openclaw_types::PriceEventKind;
 use tracing::warn;
 
 use super::super::*;
@@ -33,9 +34,25 @@ impl TickPipeline {
 
         // Step 1: Kline aggregation — collect closed bars for DB write.
         // 步驟 1：K 線聚合 — 收集已關閉的 K 線用於 DB 寫入。
-        let closed_bars =
-            self.kline_manager
-                .on_tick(sym, event.last_price, event.ts_ms, event.volume_24h, 0.0);
+        //
+        // QUOTE-VOL-FIX：只有 publicTrade 事件攜帶真實的「單筆成交量」；ticker 事件
+        // 攜帶的是 24h 累計 volume_24h（逐 tick 累加會污染 per-bar 量），其餘事件無量。
+        // 故 Trade 事件貢獻 base 量(volume) 與 price×qty(turnover，quote-asset 成交額)，
+        // 非 Trade 事件對 volume/turnover 貢獻 0，但仍傳入價格驅動 OHLC 與週期滾動。
+        let (tick_volume, tick_turnover) = match event.event_kind {
+            Some(PriceEventKind::Trade) => {
+                let qty = event.volume_24h; // publicTrade `v`（base 數量），鏡像於 trade_qty
+                (qty, event.last_price * qty)
+            }
+            _ => (0.0, 0.0),
+        };
+        let closed_bars = self.kline_manager.on_tick(
+            sym,
+            event.last_price,
+            event.ts_ms,
+            tick_volume,
+            tick_turnover,
+        );
 
         // Phase 1: Emit KlineClose for each closed bar to market writer (F-2 audit fix).
         // Phase 1：為每根已關閉 K 線發送 KlineClose 到市場寫入器（F-2 審計修復）。
