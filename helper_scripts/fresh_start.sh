@@ -346,8 +346,11 @@ MAINT_FLAG_ACTIVE=0
 ok "maintenance flag cleared"
 
 echo "  starting Rust engine..."
+# 灰度逐-tick 捕捉預設關閉，避免 engine_results.jsonl ~300GB/天 NVMe 寫入；
+# 需對賬或 replay 時按需以 `OPENCLAW_CANARY_MODE=1 ./fresh_start.sh ...` 啟動單次捕捉
+# （見 canary_comparator.py / replay_runner.py 工作流）。
 OPENCLAW_DATA_DIR="$DATA_DIR" \
-OPENCLAW_CANARY_MODE=1 \
+OPENCLAW_CANARY_MODE="${OPENCLAW_CANARY_MODE:-0}" \
 OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
 OPENCLAW_IPC_SECRET_FILE="$IPC_SECRET_FILE" \
 OPENCLAW_LIVE_AUTH_SIGNING_KEY_FILE="$LIVE_AUTH_SIGNING_KEY_FILE" \

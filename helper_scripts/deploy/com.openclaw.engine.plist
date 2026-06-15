@@ -85,9 +85,10 @@
     <key>OPENCLAW_BASE_DIR</key>
     <string>__BASE__</string>
 
-    <!-- 灰度模式 flag — 對應 restart_all.sh 的 OPENCLAW_CANARY_MODE=1 -->
+    <!-- 灰度逐-tick 捕捉預設關閉，避免 engine_results.jsonl ~300GB/天 NVMe 寫入；穩態無消費者。 -->
+    <!-- 需 Rust↔Python 對賬或 replay 時，改 =1 重載做單次捕捉（見 canary_comparator.py / replay_runner.py）。 -->
     <key>OPENCLAW_CANARY_MODE</key>
-    <string>1</string>
+    <string>0</string>
 
     <!-- 時區 / Timezone -->
     <key>TZ</key>
