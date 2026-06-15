@@ -73,6 +73,9 @@ pub(crate) struct PipelineSpawnContext<'a> {
     pub shared_linucb_runtime: &'a Arc<LinUcbRuntime>,
     pub shared_news_snapshot: &'a Arc<NewsContextSnapshot>,
     pub shared_last_tick_ms: &'a Arc<std::sync::atomic::AtomicU64>,
+    /// ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘時間戳 atomic，clone 給三 pipeline
+    /// 的 EventConsumerDeps；同一 Arc 也傳給 tick-stale watchdog 讀取。
+    pub shared_last_processed_wallclock_ms: &'a Arc<std::sync::atomic::AtomicU64>,
     pub canary_handle: &'a CanaryWriterHandle,
     pub per_engine_predictors: &'a Arc<PerEnginePredictors>,
     pub cross_engine_tx: &'a broadcast::Sender<EngineEvent>,
@@ -362,6 +365,8 @@ pub(crate) fn spawn_paper_pipeline(
         market_data_tx: writers.market_tx.clone(),
         feature_tx: writers.feature_tx.clone(),
         last_tick_ms: Some(Arc::clone(ctx.shared_last_tick_ms)),
+        // ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘 atomic clone 給此 pipeline。
+        last_processed_wallclock_ms: Some(Arc::clone(ctx.shared_last_processed_wallclock_ms)),
         trading_tx: writers.trading_tx.clone(),
         context_tx: writers.context_tx.clone(),
         // EDGE-P3-1 Step 7a: wire training-store writer for paper engine.
@@ -483,6 +488,8 @@ pub(crate) fn spawn_demo_pipeline(
         market_data_tx: writers.market_tx.clone(),
         feature_tx: None,
         last_tick_ms: Some(Arc::clone(ctx.shared_last_tick_ms)),
+        // ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘 atomic clone 給此 pipeline。
+        last_processed_wallclock_ms: Some(Arc::clone(ctx.shared_last_processed_wallclock_ms)),
         trading_tx: writers.trading_tx.clone(),
         context_tx: writers.context_tx.clone(),
         // EDGE-P3-1 Step 7a: wire training-store writer for demo engine.
@@ -624,6 +631,8 @@ pub(crate) fn spawn_live_pipeline(
         market_data_tx: writers.market_tx.clone(),
         feature_tx: None,
         last_tick_ms: Some(Arc::clone(ctx.shared_last_tick_ms)),
+        // ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘 atomic clone 給此 pipeline。
+        last_processed_wallclock_ms: Some(Arc::clone(ctx.shared_last_processed_wallclock_ms)),
         trading_tx: writers.trading_tx.clone(),
         context_tx: writers.context_tx.clone(),
         // EDGE-P3-1 Step 7a: wire training-store writer for live engine.
@@ -824,6 +833,8 @@ pub(crate) struct LiveSpawnBundle {
     pub shared_linucb_runtime: Arc<LinUcbRuntime>,
     pub shared_news_snapshot: Arc<openclaw_engine::news::NewsContextSnapshot>,
     pub shared_last_tick_ms: Arc<std::sync::atomic::AtomicU64>,
+    /// ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘 atomic（live respawn 每次重生共享）。
+    pub shared_last_processed_wallclock_ms: Arc<std::sync::atomic::AtomicU64>,
     pub canary_handle: CanaryWriterHandle,
     pub per_engine_predictors: Arc<PerEnginePredictors>,
     pub cross_engine_tx: broadcast::Sender<EngineEvent>,
@@ -908,6 +919,8 @@ pub(crate) fn build_live_pipeline_spawner(
     let linucb_c = b.shared_linucb_runtime;
     let news_c = b.shared_news_snapshot;
     let last_tick_ms_c = b.shared_last_tick_ms;
+    // ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘 atomic 移入 closure，每次 respawn 共享。
+    let last_processed_wallclock_ms_c = b.shared_last_processed_wallclock_ms;
     let canary_c = b.canary_handle;
     let per_engine_predictors_c = b.per_engine_predictors;
     let cross_engine_tx_c = b.cross_engine_tx;
@@ -979,6 +992,7 @@ pub(crate) fn build_live_pipeline_spawner(
             shared_linucb_runtime: &linucb_c,
             shared_news_snapshot: &news_c,
             shared_last_tick_ms: &last_tick_ms_c,
+            shared_last_processed_wallclock_ms: &last_processed_wallclock_ms_c,
             canary_handle: &canary_c,
             per_engine_predictors: &per_engine_predictors_c,
             cross_engine_tx: &cross_engine_tx_c,

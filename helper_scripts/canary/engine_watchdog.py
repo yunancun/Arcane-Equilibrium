@@ -48,6 +48,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling import（cwd
 import alert_sink  # 耐久 sink + 告警 redactor 正本（本檔 pre-existing 超 2000 行硬頂，只留薄調用）
 import engine_dead_incident  # external engine_dead notify-only producer（薄接線）
 import canary_audit_common  # audit_events direct fail-soft write 正本（薄調用；本檔超 2000 行硬頂）
+import watchdog_liveness_crosscheck  # B1 破壞性重啟前 IPC 存活交叉檢查正本（薄調用；本檔超 2000 行硬頂）
 
 logging.basicConfig(
     level=logging.INFO,
@@ -245,6 +246,12 @@ class WatchdogState:
     # 網路中斷計數；獨立於 crash_timestamps，不計入三振規則。
     total_network_outages: int = 0
     network_outage_timestamps: list[float] = field(default_factory=list)
+    # B1 liveness cross-check (2026-06-15): snapshot stale 但 IPC 證明引擎仍活時，
+    # 抑制破壞性重啟的計數狀態。max-hold 上限以此計數封頂（避免無限期抑制）。
+    # liveness_suppress_cycles：連續抑制的週期數（每 stale-but-alive poll +1，恢復歸零）。
+    # liveness_first_suppress_ts：首次抑制的時間戳（None=尚未抑制；恢復歸零），供 wall-clock 上限。
+    liveness_suppress_cycles: int = 0
+    liveness_first_suppress_ts: Optional[float] = None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -567,6 +574,71 @@ def _emit_audit_event_best_effort(
     except Exception as exc:  # noqa: BLE001 — 任何組裝/寫入錯誤都不得拋進 watchdog 偵測/重啟邏輯
         logger.warning(
             "audit emit best-effort failed (non-fatal): %s / audit 事件寫入失敗（吞沒）",
+            exc,
+        )
+
+
+def _emit_snapshot_stall_engine_alive(
+    data_dir: str,
+    detection_ts: float,
+    snapshot_age: float,
+    probe_reason: str,
+    hold_cycles: int,
+    hold_seconds: float,
+) -> None:
+    """B1（2026-06-15）：snapshot 過期但 IPC 交叉檢查證明引擎仍活、已抑制破壞性重啟。
+
+    為什麼是獨立事件而非沿用 ENGINE_CRASH：這「不是」crash——引擎活著（仍 serve IPC、
+    處理 tick），只是 snapshot-writer task 停寫快照。沿用 ENGINE_CRASH 會污染 crash 計數 /
+    三振 / 21d 穩定時鐘並誤導 operator。本事件三路落地（canary + alert + audit_events），
+    讓 operator 知道「watchdog 擋掉了一次會平倉的誤殺重啟」且 snapshot-writer 退化中。
+
+    硬邊界：全程 best-effort fail-soft，任何寫入問題都不得拋進偵測/重啟邏輯。canary 帶
+    確定性 dedup_key（與 audit direct write 同形），供 backstop bridge 補洞。
+    """
+    try:
+        dedup_key = canary_audit_common.build_dedup_key(
+            "snapshot_stall_engine_alive", detection_ts
+        )
+        _append_canary_event(data_dir, {
+            "ts": detection_ts,
+            "event": "SNAPSHOT_STALL_ENGINE_ALIVE",
+            "snapshot_age_seconds": snapshot_age,
+            "probe_reason": probe_reason,
+            "hold_cycles": hold_cycles,
+            "hold_seconds": round(hold_seconds, 1),
+            "dedup_key": dedup_key,
+        })
+        subject = "OpenClaw snapshot STALLED but engine ALIVE — destructive restart suppressed"
+        body = (
+            "engine: rust openclaw_engine\n"
+            f"snapshot stale: {snapshot_age:.1f}s (writer task stalled)\n"
+            f"ipc cross-check: ALIVE ({probe_reason})\n"
+            f"action taken: SIGTERM/market-close SUPPRESSED (hold cycle {hold_cycles})\n"
+            "note: engine still serving IPC + processing ticks; only snapshot-writer "
+            "stalled. A1/A2 track fixes the stall itself.\n"
+            "action: ssh trade-core; check engine.log snapshot-writer task; no manual "
+            "restart needed unless this persists"
+        )
+        # severity=WARNING：避免誤殺的正向事件，非引擎故障；不可用 CRITICAL 淹沒真 down 告警。
+        _send_alert_best_effort(subject, body, "WARNING", data_dir)
+        _emit_audit_event_best_effort(
+            "SNAPSHOT_STALL_ENGINE_ALIVE",
+            detection_ts,
+            f"snapshot stalled {snapshot_age:.1f}s but engine alive via IPC "
+            f"({probe_reason}); destructive restart suppressed (hold cycle {hold_cycles})",
+            {
+                "snapshot_age_seconds": snapshot_age,
+                "classification": "snapshot_stall_engine_alive",
+                "probe_reason": probe_reason,
+                "hold_cycles": hold_cycles,
+                "hold_seconds": round(hold_seconds, 1),
+            },
+            "B1 liveness cross-check: IPC responsive; SIGTERM/market-close suppressed",
+        )
+    except Exception as exc:  # noqa: BLE001 — 任何組裝/寫入錯誤都不得拋進 watchdog 偵測/重啟邏輯
+        logger.warning(
+            "snapshot-stall-engine-alive emit failed (non-fatal): %s / 事件寫入失敗（吞沒）",
             exc,
         )
 
@@ -1137,6 +1209,72 @@ def trigger_restart(data_dir: str) -> bool:
     return False
 
 
+def _maybe_suppress_destructive_restart(
+    state: WatchdogState, snapshot_age: float, data_dir: str
+) -> Optional[str]:
+    """B1（2026-06-15）：snapshot stale 時對引擎 IPC 做存活交叉檢查，決定是否抑制重啟。
+
+    回傳：
+      - "fallback"（非 None）= 已抑制破壞性重啟（引擎活、只是 snapshot-writer 停寫）；
+        caller 應立即 return 此值，不做 crash 計數 / 重啟 / 平倉，僅已發
+        SNAPSHOT_STALL_ENGINE_ALIVE 事件。
+      - None = 未抑制（IPC 不活 / 含糊 / 達 max-hold 上限）；caller 照常走重啟路徑。
+
+    fail toward restart：probe_engine_ipc 對任何含糊一律回 alive=False；
+    decide_restart_suppression 只在 alive=True 且未達 max-hold 上限才回 suppress=True。
+    本函數任何意外都吞沒並回 None（= 倒向重啟），不得拋進 watchdog 偵測/重啟邏輯。
+    """
+    try:
+        probe = watchdog_liveness_crosscheck.probe_engine_ipc()
+        now = time.time()
+        decision = watchdog_liveness_crosscheck.decide_restart_suppression(
+            probe,
+            prior_hold_cycles=state.liveness_suppress_cycles,
+            first_suppress_ts=state.liveness_first_suppress_ts,
+            now=now,
+        )
+        if not decision.suppress:
+            # 不抑制：IPC 不活/含糊（真重啟）或達 max-hold 上限（升級重啟）。
+            # 達上限時 log 一條 critical 讓 operator 知道「曾抑制但已放棄、即將平倉」。
+            if decision.reason.startswith("max_hold_"):
+                logger.critical(
+                    "B1 max-hold reached (%s): snapshot stalled %.1fs, IPC alive but "
+                    "suppressed %d cycles / %.0fs — escalating to destructive restart "
+                    "/ B1 max-hold 上限：抑制 %d 週期後升級重啟",
+                    decision.reason, snapshot_age, decision.hold_cycles,
+                    decision.hold_seconds, decision.hold_cycles,
+                )
+            return None
+
+        # 抑制成立：引擎活著，只是 snapshot-writer 停寫。更新連續抑制計數狀態。
+        first_ts = state.liveness_first_suppress_ts
+        if first_ts is None:
+            first_ts = now
+            state.liveness_first_suppress_ts = first_ts
+        state.liveness_suppress_cycles = decision.hold_cycles
+        logger.warning(
+            "B1 liveness cross-check: snapshot stale %.1fs but engine ALIVE via IPC (%s) — "
+            "SUPPRESSING destructive restart (hold cycle %d, %.0fs) "
+            "/ B1 交叉檢查：快照過期但引擎仍活，抑制破壞性重啟",
+            snapshot_age, probe.reason, decision.hold_cycles, decision.hold_seconds,
+        )
+        # 只在「首次抑制」那一刻發事件（avoid 每 2s poll 灌爆 canary/alert）。dedup_key
+        # 以首次抑制時間戳算，重複 poll 不重發；恢復後 streak 歸零，下次新 stall 才再發。
+        if decision.hold_cycles == 1:
+            _emit_snapshot_stall_engine_alive(
+                data_dir, first_ts, snapshot_age, probe.reason,
+                decision.hold_cycles, decision.hold_seconds,
+            )
+        return "fallback"
+    except Exception as exc:  # noqa: BLE001 — 交叉檢查自身任何意外都倒向重啟（fail-safe）
+        logger.warning(
+            "B1 liveness cross-check errored (failing toward restart): %s / "
+            "B1 交叉檢查出錯（倒向重啟）",
+            exc,
+        )
+        return None
+
+
 def on_engine_crash(
     state: WatchdogState,
     snapshot_age: float,
@@ -1236,6 +1374,25 @@ def on_engine_crash(
         return "network_outage"
 
     # ── engine_crash 分支 ──
+    # B1 liveness cross-check (2026-06-15)：在把 stale 判定升級為「破壞性重啟（SIGTERM
+    # → 以市價平掉所有未平倉位）」之前，先向第二個獨立訊號（引擎 IPC socket）求證引擎
+    # 是否仍活。RCA：~21/21 次這類重啟其實引擎活著（仍 serve IPC、處理 tick），只是
+    # snapshot-writer task 停寫——等於 ~2×/天 對活引擎誤殺平倉。A1/A2 軌修 stall 本身；
+    # B1 是 defence-in-depth：無論根因為何，先擋掉這個破壞性的誤判重啟。
+    #
+    # fail toward restart（鐵則）：唯有 IPC 在緊湊 timeout 內「明確」回正確 reply 才抑制
+    # 重啟；連不上 / socket 不存在 / 認證失敗 / 逾時 / 亂碼 / RPC error 一律當「沒有明確
+    # 存活證據」→ 照舊重啟（存活優先於避免平倉）。抑制亦有 max-hold 上限（連續週期 +
+    # 硬性 10 分鐘牆），達上限即升級重啟——永久停寫快照的 writer 本身就是故障。
+    #
+    # 為什麼放在 crash 計數「之前」：抑制成立時引擎其實活著，不應污染 total_crashes /
+    # crash_timestamps / 三振 / 21d 穩定時鐘。故先探測、決策；抑制則直接 return「不計數、
+    # 不翻 engine_alive、不重啟、不平倉」，僅發 SNAPSHOT_STALL_ENGINE_ALIVE。
+    if data_dir and watchdog_liveness_crosscheck.liveness_crosscheck_enabled():
+        crosscheck_action = _maybe_suppress_destructive_restart(state, snapshot_age, data_dir)
+        if crosscheck_action is not None:
+            return crosscheck_action
+
     # 計數 / strike bookkeeping 只在下行轉移時做一次（edge）。
     # crash_ts：本次 crash 轉移的偵測時間戳（只在 edge 設）；用於稍後在重啟「之後」
     # 寫 canary 事件 + audit_events，且 dedup_key 跨兩條路徑用同一時間戳。
@@ -1250,6 +1407,10 @@ def on_engine_crash(
             "/ 檢測到引擎崩潰 — 快照年齡=%.1f秒，總崩潰數=%d",
             snapshot_age, state.total_crashes, snapshot_age, state.total_crashes,
         )
+    # 走到此（未被 B1 抑制）= IPC 不活/含糊/達 max-hold/交叉檢查關閉 → 重啟照舊。
+    # 抑制計數歸零：本次既然要重啟，連續抑制 streak 結束。
+    state.liveness_suppress_cycles = 0
+    state.liveness_first_suppress_ts = None
 
     # WATCHDOG-RETRY-LEVELTRIGGER-1 (2026-06-05): 重啟重試改為 LEVEL-triggered，
     # 每次 engine_crash 狀態的 stale poll 都跑（含已 down 的重複 poll），不再被
@@ -1375,7 +1536,17 @@ def on_engine_recovery(state: WatchdogState, data_dir: str = "") -> None:
     consecutive_failures / next_allowed_restart_ts。為什麼：恢復＝引擎再次健康，未來若再宕機
     應從乾淨狀態重新計數（含 inert 與 exit-code 兩個熔斷維度）。這也讓「部署撞車觸發 inert
     熔斷後，部署完成 + 引擎恢復」時 watchdog 自動 re-arm（無需人工 reset）。
+
+    B1 (2026-06-15)：snapshot 重新新鮮即 reset 存活交叉檢查的連續抑制計數。為什麼放在
+    `if state.engine_alive` 早退「之前」：B1 抑制路徑不翻 engine_alive=False（引擎其實
+    一直活著），故抑制後 snapshot 恢復新鮮時 engine_alive 仍是 True、會走早退；若把
+    reset 放在早退之後就永遠執行不到，max-hold streak 會跨越多次獨立 stall 累積誤觸上限。
     """
+    # B1：snapshot 恢復新鮮 = snapshot-writer 重新運作，連續抑制 streak 結束（恢復也是
+    # 非轉移路徑，故必須在早退前歸零）。
+    state.liveness_suppress_cycles = 0
+    state.liveness_first_suppress_ts = None
+
     if state.engine_alive:
         return  # Already alive / 已恢復
 

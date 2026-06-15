@@ -81,19 +81,59 @@ pub async fn run_trading_writer(
                             }
                         }
                     }
-                    flush_all(
-                        &pool,
-                        &mut signal_buf,
-                        &mut intent_buf,
-                        &mut fill_buf,
-                        &mut funding_buf,
-                        &mut pos_buf,
-                        &mut verdict_buf,
-                        &mut order_buf,
-                        &mut state_change_buf,
-                        &mut scanner_snapshot_buf,
-                        &mut scanner_decay_buf,
-                    ).await;
+                    // ENGINE-CRASH-FIX A2 (2026-06-15): bound flush_all 以保證
+                    // 此 select! 迴圈持續 drain rx。為什麼必須有上界：flush_all
+                    // 是 10 個 PG batch insert 的 join，先前無 timeout — PG 慢時
+                    // 此 await 阻塞整個 select! → `rx.recv()` arm 無法 drain →
+                    // trading_tx (cap 4096) 塞滿 → demo event_consumer 的有界
+                    // send 開始丟棄甚至（A1 修前）凍結 → watchdog 誤殺。3s 上界
+                    // 遠小於 channel-fill horizon（flush 間隔預設 2s，4096 cap 需
+                    // 多輪才滿）。timeout 時 future 被丟棄 → 已成功 flush 並 clear
+                    // 的 buffer 維持清空（rows 已 commit），未完成的 buffer 因
+                    // 各 flush_* 僅在成功時 clear、retain 整段未寫入的 rows →
+                    // 下一輪 flush 重試。交易資料零丟失，靠 (PK + ON CONFLICT)
+                    // 冪等重試達成（survival > 即時寫入完整性，但不犧牲資料）。
+                    const FLUSH_DEADLINE: std::time::Duration =
+                        std::time::Duration::from_secs(3);
+                    let flush_start = std::time::Instant::now();
+                    let flush_result = tokio::time::timeout(
+                        FLUSH_DEADLINE,
+                        flush_all(
+                            &pool,
+                            &mut signal_buf,
+                            &mut intent_buf,
+                            &mut fill_buf,
+                            &mut funding_buf,
+                            &mut pos_buf,
+                            &mut verdict_buf,
+                            &mut order_buf,
+                            &mut state_change_buf,
+                            &mut scanner_snapshot_buf,
+                            &mut scanner_decay_buf,
+                        ),
+                    )
+                    .await;
+                    let flush_elapsed = flush_start.elapsed();
+                    if flush_result.is_err() {
+                        // 逾時：保留所有未寫入 buffer（不丟資料），立即回 select!
+                        // 繼續 drain rx。下一輪 flush_timer tick 重試。
+                        warn!(
+                            deadline_ms = FLUSH_DEADLINE.as_millis() as u64,
+                            elapsed_ms = flush_elapsed.as_millis() as u64,
+                            "trading_writer flush_all timed out — buffers retained for \
+                             retry, draining channel / flush_all 逾時 — 保留 buffer 重試"
+                        );
+                    } else if flush_elapsed.as_millis() > 1000 {
+                        // C3 instrumentation：flush 耗時 + channel 深度可觀測性。
+                        // >1s（未逾時）已是早期背壓徵兆，記錄 trading_tx 佔用率。
+                        warn!(
+                            elapsed_ms = flush_elapsed.as_millis() as u64,
+                            channel_depth = rx.len(),
+                            channel_capacity = rx.max_capacity(),
+                            "trading_writer flush_all slow (not yet timed out) \
+                             / flush_all 緩慢（尚未逾時）"
+                        );
+                    }
                 }
             }
             msg = rx.recv() => {
@@ -1521,5 +1561,51 @@ mod tests {
     fn test_empty_buffer_zero_violations() {
         let buf: Vec<TradingMsg> = vec![];
         assert_eq!(count_close_fills_missing_entry_context_id(&buf), 0);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ENGINE-CRASH-FIX A2 (2026-06-15): flush 逾時/部分失敗時的 buffer 保留語意。
+    // should_clear_buffer 是「成功才清、失敗保留重試」的決策正本；A2 的零資料
+    // 丟失靠 (a) 此函數僅在 outcome.all_ok() 時回 true 清 buffer、(b) timeout
+    // 丟棄 future 時 &mut Vec buffer 完全未動（不經過此函數）、(c) 重試的冪等
+    // 由各 flush_* 的 `ON CONFLICT (..., ts) DO NOTHING` 保證（不會雙寫）。
+    // 本測試釘住 (a) 的決策邏輯（E4 補測，A2 原無覆蓋）。
+    // ─────────────────────────────────────────────────────────────────────
+    #[test]
+    fn test_should_clear_buffer_clears_only_on_full_success() {
+        use crate::database::batch_insert::BatchInsertOutcome;
+        // 全部成功 → 清 buffer（rows 已 commit，下輪不重送 = 無雙寫）。
+        let ok = BatchInsertOutcome {
+            rows_affected: 10,
+            failed_chunks: 0,
+        };
+        assert!(
+            should_clear_buffer("trading.fills", ok, 10),
+            "all_ok → buffer cleared (committed rows removed)"
+        );
+    }
+
+    #[test]
+    fn test_should_clear_buffer_retains_on_partial_failure() {
+        use crate::database::batch_insert::BatchInsertOutcome;
+        // 任一 chunk 失敗（含 flush 逾時致部分寫入）→ 保留整段 buffer 下輪重試；
+        // 重試時 ON CONFLICT DO NOTHING 使已寫入的 row 不重複 = 冪等、零資料丟失。
+        let partial = BatchInsertOutcome {
+            rows_affected: 4,
+            failed_chunks: 1,
+        };
+        assert!(
+            !should_clear_buffer("trading.fills", partial, 6),
+            "partial failure → buffer retained for idempotent retry"
+        );
+        // 完全失敗（0 寫入）同樣保留。
+        let none = BatchInsertOutcome {
+            rows_affected: 0,
+            failed_chunks: 3,
+        };
+        assert!(
+            !should_clear_buffer("trading.signals", none, 6),
+            "total failure → buffer retained"
+        );
     }
 }

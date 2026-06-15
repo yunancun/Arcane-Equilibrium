@@ -15,11 +15,14 @@
 //!        but the filter is still kept as defence-in-depth so a future paper
 //!        WS hookup never accidentally lands audit rows).
 //!     2. `try_emit_unattributed_fill(...).await` constructs the audit row and
-//!        awaits the trading_writer channel. Channel saturation no longer
-//!        silently drops rows: the caller (which already runs inside a tokio
-//!        select! arm async block) blocks until trading_writer drains. Real
-//!        production channel capacity is 4096 (tasks.rs:404) so blocking is
-//!        only a back-pressure signal, not a hot-path concern.
+//!        does a BOUNDED `send_timeout(500ms)` into the trading_writer channel.
+//!        ENGINE-CRASH-FIX A1 (2026-06-15): the previous unbounded
+//!        `send().await` could block this `select!` arm INDEFINITELY when the
+//!        4096-cap channel filled behind a slow PG flush, freezing the tick
+//!        atomic + health snapshot this same task updates and tripping the
+//!        tick-stale watchdog into SIGTERMing a live engine. Under backpressure
+//!        the audit emit is now dropped (fill remains DB-idempotent via PK + WS
+//!        reconnect re-emits) — see `try_emit_unattributed_fill` rationale.
 //!     3. `fill_id` is `unattrib-{exec_id}` so the same exec_id replayed by
 //!        WS reconnect collapses to one DB row via the (fill_id, ts) PK +
 //!        ON CONFLICT DO NOTHING in trading_writer.rs:332.
@@ -47,11 +50,13 @@
 //!        engine mode（`live` / `live_demo` / `demo`）；paper / live_testnet /
 //!        unknown → false（paper 在 production 沒接真 WS，但 filter 保留作
 //!        深層防護，避免未來 paper 接 WS 時意外落 audit row）。
-//!     2. `try_emit_unattributed_fill(...).await` 構造 audit row 並等待
-//!        trading_writer channel。通道飽和**不再** silently drop row：caller
-//!        本身已在 tokio select! arm 的 async block 中執行，因此 await 只是
-//!        對 trading_writer 提供背壓訊號。Production channel capacity = 4096
-//!        （tasks.rs:404），實務上不會因 audit row 排隊滿而阻塞 hot path。
+//!     2. `try_emit_unattributed_fill(...).await` 構造 audit row 並對
+//!        trading_writer channel 做 **有界** `send_timeout(500ms)`。
+//!        ENGINE-CRASH-FIX A1（2026-06-15）：先前無界 `send().await` 在
+//!        4096-cap channel 因 PG flush 緩慢塞滿時會「無限期」阻塞此 select! arm，
+//!        凍結同一 task 更新的 tick atomic + health snapshot，誘使 tick-stale
+//!        watchdog 對活著的 live 引擎發 SIGTERM。背壓下改為丟棄此 audit emit
+//!        （fill 由 PK 冪等 + WS 重連重發保留）— 詳見 `try_emit_unattributed_fill`。
 //!     3. `fill_id` 為 `unattrib-{exec_id}`，WS 重連重發同 exec_id 由 DB
 //!        (fill_id, ts) PK + ON CONFLICT DO NOTHING（trading_writer.rs:332）
 //!        合併為單行，保證冪等。
@@ -65,6 +70,8 @@
 //!   「外部 bybit_auto fill 落地」的合法 signal。Healthcheck 應將
 //!   `strategy_name LIKE 'unattributed:%'` 的 row 視為預期 missing（或拆成
 //!   獨立 metric），而非觸發 alert。
+
+use tracing::warn;
 
 // F4-RETURN Issue 1 (2026-04-26): module split out of loop_handlers.rs to keep
 // loop_handlers under the §九 1200-line hard ceiling. Public surface is
@@ -94,12 +101,15 @@ pub(super) fn engine_mode_emits_unattributed_audit(em: &str) -> bool {
     matches!(em, "live" | "live_demo" | "demo")
 }
 
-/// F4-1 audit-row builder + back-pressure aware send. Returns `true` when a row
-/// was queued to trading_writer; `false` when (a) engine_mode is paper /
-/// live_testnet (skip by design) or (b) `order_tx` is `None` (writer disabled
-/// in test fixture). Channel saturation no longer returns false — instead, the
-/// `.await` blocks until trading_writer drains (back-pressure handled normally;
-/// see F4-RETURN Issue 2 fix 2026-04-26). Channel-closed (sender error) → false.
+/// F4-1 audit-row builder + bounded backpressure-safe send. Returns `true` when
+/// a row was queued to trading_writer; `false` when (a) engine_mode is paper /
+/// live_testnet (skip by design), (b) `order_tx` is `None` (writer disabled in
+/// test fixture), or (c) the bounded `send_timeout(500ms)` failed under
+/// backpressure (channel full ≥500ms) or because the channel is closed.
+/// ENGINE-CRASH-FIX A1 (2026-06-15): the send is now bounded, NOT an unbounded
+/// `.await` — an indefinitely-blocking send on this select! arm froze the tick
+/// atomic + health snapshot and tripped the tick-stale watchdog into SIGTERMing
+/// a live engine. The drop-on-backpressure is safe (see fn body rationale).
 ///
 /// Strategy_name is hard-coded to `"unattributed:bybit_auto"` so that ML
 /// pipelines can filter via `WHERE strategy_name NOT LIKE 'unattributed:%'`
@@ -119,11 +129,13 @@ pub(super) fn engine_mode_emits_unattributed_audit(em: &str) -> bool {
 /// `unattributed:%` rows is the legitimate audit signal, not a bug. See
 /// MODULE_NOTE for full context.
 ///
-/// F4-1 audit row 構造 + 反壓送出。回傳 `true` 表已排入 trading_writer 佇列；
+/// F4-1 audit row 構造 + 有界反壓送出。回傳 `true` 表已排入 trading_writer 佇列；
 /// `false` 表 (a) engine_mode 為 paper / live_testnet（依設計跳過）、(b) `order_tx`
-/// 為 None（測試 fixture 停用 writer）。通道飽和不再回 `false` — 改由 `.await`
-/// 阻塞直到 trading_writer 排空（背壓正常處理；F4-RETURN Issue 2 fix
-/// 2026-04-26）。Channel 關閉（sender error） → `false`。
+/// 為 None（測試 fixture 停用 writer）、(c) 有界 `send_timeout(500ms)` 在背壓
+/// （通道滿 ≥500ms）或通道關閉時失敗。ENGINE-CRASH-FIX A1（2026-06-15）：送出
+/// 改為有界，**不再**無界 `.await` — 此 select! arm 無限阻塞會凍結 tick atomic
+/// + health snapshot 並誘發 tick-stale watchdog 對 live 引擎發 SIGTERM。背壓下
+/// 丟棄是安全的（見函數體論證）。
 ///
 /// strategy_name 固定為 `"unattributed:bybit_auto"`，ML pipeline 用
 /// `WHERE strategy_name NOT LIKE 'unattributed:%'` 即可過濾，未來 LIVE
@@ -219,14 +231,84 @@ pub(super) async fn try_emit_unattributed_fill(
         close_maker_attempt: false,
         close_maker_fallback_reason: None,
     };
-    // F4-RETURN Issue 2 (2026-04-26): use send().await for back-pressure.
-    // Production channel capacity is 4096 (tasks.rs:404) so this only blocks
-    // when trading_writer is genuinely behind (DB slow / saturated). Channel
-    // closed (sender error) → false; caller logs `audit_emitted=false` and
-    // moves on (real WS reconnect re-emits; fill_id PK keeps DB idempotent).
-    // F4-RETURN Issue 2（2026-04-26）：改用 send().await 提供背壓。
-    // Production channel capacity = 4096（tasks.rs:404），實際只在
-    // trading_writer 真的落後時（DB 慢 / 飽和）阻塞。Channel 關閉 → 回 false；
-    // caller 記 `audit_emitted=false` 後繼續（WS 重連重發；DB PK 保冪等）。
-    tx.send(msg).await.is_ok()
+    // ENGINE-CRASH-FIX A1 (2026-06-15): bounded send 取代無限阻塞 send().await。
+    // 為什麼 fail-open drop 在此安全（survival > audit）：
+    //   此 helper 跑在 demo/live event_consumer 的 select! arm 內，與 watchdog
+    //   讀的 health snapshot + tick atomic「同一個 async task」。先前
+    //   F4-RETURN Issue 2 的無界 `tx.send().await` 在 trading_writer 因 PG 慢而
+    //   塞滿 4096-cap channel 時會「無限期」阻塞此 task → snapshot + tick 凍結
+    //   → tick-stale watchdog（45s/120s）對「活著的 live 引擎」發 SIGTERM →
+    //   市價平倉（11 天 ~21 起事故，root cause）。改為 500ms 有界 send：
+    //   通道未滿時行為與舊路徑逐位元組相同（仍排入佇列）；只有在背壓真正發生
+    //   （通道滿且 500ms 內未排空）時才放棄這一筆 *audit emit*。
+    //   丟棄 audit emit 安全：fill 在 DB 以 (fill_id, ts) PK + ON CONFLICT DO
+    //   NOTHING 冪等（trading_writer.rs），且 WS 重連會重發同 exec_id；因此
+    //   「丟一筆審計排隊」遠優於「凍結交易迴圈」。Timeout/Full/Closed 三種
+    //   失敗一律回 false（鏡像舊的 channel-closed → audit_emitted=false 路徑），
+    //   caller 記錄後繼續。
+    let send_start = std::time::Instant::now();
+    let result = tx
+        .send_timeout(msg, std::time::Duration::from_millis(500))
+        .await;
+    let elapsed = send_start.elapsed();
+    // C3 instrumentation：熱路徑背壓觀測。送出超過 ~200ms 即代表 trading_writer
+    // 已落後到危險區間（接近 channel-fill horizon），在 prod log 留證據。
+    if elapsed.as_millis() > 200 {
+        warn!(
+            elapsed_ms = elapsed.as_millis() as u64,
+            "unattributed audit send slow — trading_tx backpressure \
+             / unattributed audit 送出緩慢 — trading_tx 背壓"
+        );
+    }
+    match result {
+        Ok(()) => true,
+        Err(e) => {
+            // 有界 send 失敗 = 背壓（Timeout/Full）或寫入器已退出（Closed）。
+            // 一律丟棄此 audit emit 並回 false（見上方安全論證）；單調遞增
+            // 丟棄計數供 operator / healthcheck 觀測。1Hz 節流避免 log flood。
+            let total = UNATTRIB_AUDIT_DROPPED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+            if should_emit_drop_warn() {
+                warn!(
+                    total_dropped = total,
+                    elapsed_ms = elapsed.as_millis() as u64,
+                    error = %e,
+                    "unattributed audit dropped under trading_tx backpressure \
+                     (warn 1Hz sampled) — fill stays DB-idempotent via PK + WS \
+                     reconnect re-emits / unattributed audit 因 trading_tx 背壓丟棄"
+                );
+            }
+            false
+        }
+    }
+}
+
+// ENGINE-CRASH-FIX A1 (2026-06-15): 模組級單調丟棄計數 + 1Hz warn 節流。
+// 為什麼 module-level static：此 emit helper 是 leaf fn，無持有 handle 可掛
+// 計數；canary_writer 用 Arc<AtomicU64> 因其有 handle struct，這裡用 static
+// 等價且零接線成本。計數單調遞增方便 operator / 未來 healthcheck 觀測累計丟棄。
+static UNATTRIB_AUDIT_DROPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static UNATTRIB_DROP_LAST_WARN_MS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// 每 1000ms 至多回傳一次 true（跨所有呼叫），用 CAS 序列化 — 換到時間戳的
+/// 執行緒取得發 warn 權。鏡像 canary_writer::should_emit_warn 模式，避免持續
+/// 背壓下 warn 本身成為 log flood。
+fn should_emit_drop_warn() -> bool {
+    const WARN_THROTTLE_MS: u64 = 1000;
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let last = UNATTRIB_DROP_LAST_WARN_MS.load(std::sync::atomic::Ordering::Relaxed);
+    if now_ms.saturating_sub(last) < WARN_THROTTLE_MS {
+        return false;
+    }
+    UNATTRIB_DROP_LAST_WARN_MS
+        .compare_exchange(
+            last,
+            now_ms,
+            std::sync::atomic::Ordering::Relaxed,
+            std::sync::atomic::Ordering::Relaxed,
+        )
+        .is_ok()
 }

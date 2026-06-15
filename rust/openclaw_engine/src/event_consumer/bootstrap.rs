@@ -83,6 +83,9 @@ pub(super) struct BootstrappedRuntime {
     pub shared_bybit_balance: Option<Arc<parking_lot::RwLock<Option<f64>>>>,
     pub shared_api_pnl: Option<Arc<parking_lot::RwLock<HashMap<String, f64>>>>,
     pub shared_last_tick_ms: Option<Arc<std::sync::atomic::AtomicU64>>,
+    /// ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘時間戳 atomic，loop 每 tick 更新，
+    /// tick-stale watchdog 讀取（取代先前讀 payload-ts 的誤報來源）。
+    pub shared_last_processed_wallclock_ms: Option<Arc<std::sync::atomic::AtomicU64>>,
     pub exchange_event_rx: Option<mpsc::UnboundedReceiver<ExchangeEvent>>,
     pub pipeline_cmd_rx: Option<mpsc::UnboundedReceiver<PipelineCommand>>,
     pub audit_pool: Option<sqlx::PgPool>,
@@ -117,6 +120,8 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         market_data_tx,
         feature_tx,
         last_tick_ms: shared_last_tick_ms,
+        // ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘 atomic 從 deps 轉發給 loop。
+        last_processed_wallclock_ms: shared_last_processed_wallclock_ms,
         trading_tx,
         context_tx,
         decision_feature_tx,
@@ -1013,6 +1018,7 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         shared_bybit_balance,
         shared_api_pnl,
         shared_last_tick_ms,
+        shared_last_processed_wallclock_ms,
         exchange_event_rx,
         pipeline_cmd_rx,
         audit_pool,

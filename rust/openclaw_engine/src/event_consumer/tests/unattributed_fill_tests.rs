@@ -330,6 +330,79 @@ async fn test_emit_idempotent_via_fill_id_prefix() {
     assert_eq!(id1, "unattrib-exec-DUP");
 }
 
+// ─────────────────────────────────────────────────────────────────────────
+// ENGINE-CRASH-FIX A1 (2026-06-15): bounded-send backpressure / 有界送出反壓
+// ─────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_full_channel_drops_within_bound_not_blocks_forever() {
+    // BITE：root cause 是無界 `send().await` 在 channel 滿時無限阻塞 event
+    // consumer task → 凍結 tick atomic / health snapshot → watchdog SIGTERM
+    // live 引擎。有界 `send_timeout(500ms)` 必須在背壓下「有界返回 false」而非
+    // 永久阻塞。用 cap-1 channel 灌滿後不排空，斷言：(a) 呼叫在遠小於無限的
+    // 上界內返回（這裡用 5s 外層 timeout 兜底，正常 ~500ms），(b) 回 false（丟棄）。
+    // 若退回無界 `send().await`，外層 timeout 觸發 → 測試紅（mutation bite）。
+    let (tx, _rx) = tokio::sync::mpsc::channel::<crate::database::TradingMsg>(1);
+    // 先灌一筆把 cap-1 channel 塞滿；_rx 從不接收，保持滿狀態。
+    tx.send(crate::database::TradingMsg::Fill {
+        fill_id: "filler".to_string(),
+        ts_ms: 1,
+        order_id: String::new(),
+        symbol: "BTCUSDT".to_string(),
+        side: "Buy".to_string(),
+        qty: 0.0,
+        price: 0.0,
+        fee: 0.0,
+        fee_rate: 0.0,
+        reference_price: None,
+        reference_ts_ms: None,
+        reference_source: None,
+        slippage_bps: None,
+        liquidity_role: None,
+        fill_latency_ms: None,
+        realized_pnl: 0.0,
+        strategy_name: "filler".to_string(),
+        context_id: "filler".to_string(),
+        entry_context_id: String::new(),
+        engine_mode: "live".to_string(),
+        exit_source: None,
+        exit_reason: None,
+        details: None,
+        close_maker_attempt: false,
+        close_maker_fallback_reason: None,
+    })
+    .await
+    .expect("filler send into cap-1 channel");
+
+    let start = std::time::Instant::now();
+    let emitted = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        try_emit_unattributed_fill(
+            "live",
+            "exec-BACKPRESSURE",
+            1_700_000_007_000,
+            "ord-BP",
+            "BTCUSDT",
+            "Buy",
+            0.001,
+            50_000.0,
+            0.0,
+            Some(&tx),
+        ),
+    )
+    .await
+    .expect("send_timeout must return within bound — NOT block forever");
+    let elapsed = start.elapsed();
+
+    assert!(!emitted, "backpressure → audit emit dropped → returns false");
+    // 有界返回：應接近 500ms timeout，必遠小於外層 5s 兜底上界。
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "bounded send must return ~500ms, got {:?}",
+        elapsed
+    );
+}
+
 #[tokio::test]
 async fn test_emit_back_pressure_blocks_then_succeeds_when_drained() {
     // F4-RETURN Issue 2 (2026-04-26): semantics changed from try_send fail-soft
