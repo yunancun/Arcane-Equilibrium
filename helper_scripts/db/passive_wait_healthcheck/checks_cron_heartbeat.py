@@ -23,6 +23,7 @@ MODULE_NOTE:
     [78] feature_baseline_writer        每日     → stale > 25h   → WARN
     [79] blocked_symbols_30d_unblock    每週     → stale > 8d    → WARN
     [80] trading_ai_pg_dump_freshness   每日     → stale > 26h   → WARN/FAIL
+    [91] kline_calibration              每日     → stale > 25h   → WARN
 
   Sentinel 缺失 → WARN「heartbeat file missing — cron not installed or
   has never fired」；過時 → WARN「heartbeat stale (age=<s>s, threshold=<s>s)
@@ -213,6 +214,32 @@ def check_79_blocked_symbols_30d_unblock_check_cron_fires(
     )
 
 
+def check_91_kline_calibration_cron_fires(
+    now: float | None = None,
+) -> tuple[str, str]:
+    """[91] kline_calibration daily heartbeat（INTRADAY-KLINES-PERMANENT-FIX R3）。
+
+    kline_calibration_cron.sh（Rust kline_calibration_checker R3 旋轉採樣 truth-test）
+    daily cron 但 crontab 尚未 install；wrapper start-time touch
+    ``kline_calibration.last_fire`` sentinel，本哨兵驗 mtime < threshold。
+    threshold 25h = cadence 24h + 1h grace（與 [78] feature_baseline_writer 對齊）。
+
+    ID 註：PA spec §3.1 標 ``[81]``，但 ``[81]``/``[82]`` 已被 P5-SM
+    ``check_81_lease_ipc_soak`` / ``check_82_lease_ipc_soak_window`` 占用（cursor 區塊）；
+    本 cron heartbeat 取下一自由 filesystem slot ``[91]``（[90] cost_gate_double_deduct
+    為當前最高），避免 ID 撞號（沿用 codebase ``[58]→[68]`` 重定址慣例）。
+    WARN-by-default（cron infra 非 promotion-blocking）；
+    OPENCLAW_CRON_HEARTBEAT_REQUIRED=1 升 WARN → FAIL。
+    """
+    return _classify(
+        check_id="[91]",
+        sentinel_name="kline_calibration.last_fire",
+        cadence_label="17 5 * * *",
+        threshold_seconds=25 * 3600,
+        now=now,
+    )
+
+
 def check_80_pg_dump_freshness(
     now: float | None = None,
 ) -> tuple[str, str]:
@@ -322,4 +349,5 @@ __all__ = [
     "check_78_feature_baseline_writer_cron_fires",
     "check_79_blocked_symbols_30d_unblock_check_cron_fires",
     "check_80_pg_dump_freshness",
+    "check_91_kline_calibration_cron_fires",
 ]

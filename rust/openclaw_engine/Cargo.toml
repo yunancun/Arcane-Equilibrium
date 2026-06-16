@@ -176,6 +176,17 @@ path = "src/bin/daily_kline_backfill.rs"
 name = "intraday_kline_backfill"
 path = "src/bin/intraday_kline_backfill.rs"
 
+# intraday kline 真值校準 / drift guardrail（2026-06-16，INTRADAY-KLINES-PERMANENT-FIX R3）：
+# cron 觸發旋轉採樣 truth-test，對 (symbol,timeframe) 拉 local market.klines + Bybit get_klines
+# 對齊 ts，算 close_match/range_ratio/corr@0/corr@+1/turnover_nonzero/gap（複用
+# backfill::kline_calibration 純函數 SSOT），寫 research.kline_calibration（V141），drift → 既有
+# 耐久 alert sink（alerts.jsonl）。--gate 模式為 R4 recal 嚴格驗收（corr0≈0.99 AND range≈1.0；
+# PASS exit 0 / FAIL exit 5）。唯讀 market.klines；dry-run 預設 + OPENCLAW_KLINE_CALIBRATION_APPLY=1
+# env gate。配對 healthcheck [91] + cron wrapper kline_calibration_cron.sh。
+[[bin]]
+name = "kline_calibration_checker"
+path = "src/bin/kline_calibration_checker.rs"
+
 # funding + OI 歷史回填（2026-06-02）：funding rate（/v5/market/funding/history）+ open
 # interest（/v5/market/open-interest, intervalTime=1h）歷史回填 CLI。dry-run 預設 +
 # --apply/env gate（鏡像 daily_kline_backfill）。V125 preflight fail-closed（2 history +

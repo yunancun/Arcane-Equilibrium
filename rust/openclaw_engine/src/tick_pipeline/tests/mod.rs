@@ -54,6 +54,8 @@ mod h0_ctor_default;
 mod h0_latency_metrics;
 // QUOTE-VOL-FIX（2026-06-15）：step_1_2 K 線聚合 per-event-kind 量/額 gating 回歸測試。
 mod klines_turnover_gating;
+// R1（2026-06-16）：WS-confirmed-candle 直寫持久化 + tick-synth 不再落盤回歸測試。
+mod kline_confirm_persistence;
 // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19)：halt TTL 狀態機測試。
 // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt TTL 測試。
 mod halt_ttl;

@@ -23,6 +23,15 @@ pub enum PriceEventKind {
     AdlNotice,
     /// REST poller fallback / REST 輪詢回退
     RestPoll,
+    /// Confirmed (closed) kline candle carrying full authoritative OHLCV+turnover.
+    /// 已確認（收盤）K 線，攜帶完整權威 OHLCV + 成交額。
+    ///
+    /// 為什麼新增此種類：Bybit `kline.{interval}.{symbol}` 流在 `confirm==true`
+    /// 時推送整根真實 OHLCV+turnover；舊路徑把它降級成 close-only tick 餵給
+    /// tick-synth aggregator，導致落盤的 K 線退化（open≈close、range≈0、
+    /// 一-bar offset）。`KlineConfirm` 讓持久化路徑能辨識「這是權威整根」並
+    /// 直接落盤，而非重新由稀疏 tick 合成。
+    KlineConfirm,
 }
 
 /// Real-time price event from WebSocket.
@@ -93,6 +102,37 @@ pub struct PriceEvent {
     /// 不同於 `openInterestValue`（名義金額 = OI × 標記價）。解析失敗則為 None。
     #[serde(default)]
     pub open_interest: Option<f64>,
+    // ── R1: KlineConfirm authoritative OHLCV fields (only填充 for KlineConfirm) ──
+    // R1：KlineConfirm 權威 OHLCV 欄位（僅 KlineConfirm 事件填充）。
+    //
+    // 為什麼用 Option：保持 PriceEvent 單一型別不分裂；非 KlineConfirm 事件
+    // （publicTrade/ticker/orderbook…）這些欄位恆為 None → 行為位元不變。
+    // 缺欄 = fail-closed（持久化端若任一欄 None 即不把它當權威整根）。
+    // close 與 volume 沿用既有 `last_price` / `volume_24h`，不重複增欄。
+    /// Open price (KlineConfirm) / 開盤價（KlineConfirm）
+    #[serde(default)]
+    pub kline_open: Option<f64>,
+    /// High price (KlineConfirm) / 最高價（KlineConfirm）
+    #[serde(default)]
+    pub kline_high: Option<f64>,
+    /// Low price (KlineConfirm) / 最低價（KlineConfirm）
+    #[serde(default)]
+    pub kline_low: Option<f64>,
+    /// Turnover / quote-asset volume (KlineConfirm) / 成交額（KlineConfirm）
+    #[serde(default)]
+    pub kline_turnover: Option<f64>,
+    /// Bybit topic interval string ("1"/"5"/"15"/"60"/"240"), KlineConfirm only.
+    /// Bybit 主題間隔字串（"1"/"5"/"15"/"60"/"240"），僅 KlineConfirm。
+    #[serde(default)]
+    pub kline_interval: Option<String>,
+    /// Candle period open time (epoch ms, Bybit `start`), KlineConfirm only.
+    /// K 線週期開盤時間（epoch ms，Bybit `start`），僅 KlineConfirm。
+    #[serde(default)]
+    pub kline_start_ms: Option<u64>,
+    /// Candle period close time (epoch ms, Bybit `end`), KlineConfirm only.
+    /// K 線週期收盤時間（epoch ms，Bybit `end`），僅 KlineConfirm。
+    #[serde(default)]
+    pub kline_close_ms: Option<u64>,
     /// Legacy metadata map — still populated for backward compat, but prefer structured fields.
     /// 舊版 metadata — 為向後兼容仍填充，但應優先使用結構化欄位。
     #[serde(default)]
@@ -124,6 +164,14 @@ impl PriceEvent {
             // EDGE-P2-2: open_interest defaults to None (ticker-only field).
             // EDGE-P2-2：open_interest 預設 None（僅 tickers 事件會填充）。
             open_interest: None,
+            // R1: KlineConfirm OHLCV 欄位預設 None（僅 KlineConfirm parser 填充）。
+            kline_open: None,
+            kline_high: None,
+            kline_low: None,
+            kline_turnover: None,
+            kline_interval: None,
+            kline_start_ms: None,
+            kline_close_ms: None,
             metadata: HashMap::new(),
         }
     }

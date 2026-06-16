@@ -9,6 +9,8 @@
 //!     「欄位存在 AND finite」而非 >0 floor — 保留真 0.0/負 funding，只擋 missing/non-finite）。
 //!   - funding_oi_writer：alpha_funding_rates_history / alpha_open_interest_history strict 寫入
 //!     + alpha_history_ingest_runs/pages 帳本 + V125 preflight。
+//!   - kline_calibration：intraday kline 真值校準 truth-test 純函數核心（INTRADAY-KLINES-
+//!     PERMANENT-FIX R3 監測門檻 + R4 recal 驗收門檻單一 SSOT；無 DB / 無網路，全 Mac-testable）。
 //! 依賴：market_data_client（既有 client + 新增 *_raw 原始回應方法）、database::pool（sqlx）、
 //!   openclaw_core::klines、serde_json、sha2。
 //! 硬邊界：純讀市場數據 + append-only provenance；不下單、不餵 intent、不碰 auth/lease/system_mode/cap。
@@ -18,4 +20,5 @@
 pub mod daily_kline_backfill;
 pub mod funding_oi_backfill;
 pub mod funding_oi_writer;
+pub mod kline_calibration;
 pub mod writer;

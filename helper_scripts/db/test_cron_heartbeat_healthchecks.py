@@ -34,6 +34,7 @@ from helper_scripts.db.passive_wait_healthcheck.checks_cron_heartbeat import (  
     check_78_feature_baseline_writer_cron_fires,
     check_79_blocked_symbols_30d_unblock_check_cron_fires,
     check_80_pg_dump_freshness,
+    check_91_kline_calibration_cron_fires,
 )
 
 # 五 checks 對齊：函數 -> (sentinel 檔名, threshold 秒數, 人類可讀 cadence)。
@@ -64,6 +65,13 @@ _CHECK_MATRIX = [
         check_79_blocked_symbols_30d_unblock_check_cron_fires,
         "blocked_symbols_30d_unblock_check.last_fire",
         8 * 86400,
+    ),
+    (
+        # [91] INTRADAY-KLINES-PERMANENT-FIX R3 — kline_calibration daily heartbeat
+        # （25h threshold = 24h cadence + 1h grace；與 [78] 對齊）。
+        check_91_kline_calibration_cron_fires,
+        "kline_calibration.last_fire",
+        25 * 3600,
     ),
 ]
 

@@ -226,6 +226,10 @@ from .checks_cron_heartbeat import (  # noqa: F401
     # （FA acceptance §E #7）；delegate 給 standalone
     # ``helper_scripts/canary/healthchecks/check_pg_dump_freshness.py``。
     check_80_pg_dump_freshness,
+    # [91] INTRADAY-KLINES-PERMANENT-FIX R3（2026-06-16）— kline_calibration daily
+    # cron heartbeat sentinel（kline_calibration.last_fire，stale > 25h → WARN）。
+    # ID 取 [91]：PA spec 標 [81] 但 [81]/[82] 已被 P5-SM lease_ipc_soak 占用。
+    check_91_kline_calibration_cron_fires,
 )
 # [90] PROFIT-1（2026-06-14）— cost_gate「雙重扣成本」latent issue 預防性哨兵；
 # delegate 給 standalone
@@ -342,4 +346,6 @@ __all__ = [
     "check_80_pg_dump_freshness",
     # [90] PROFIT-1（2026-06-14）cost_gate 雙重扣成本 latent issue 預防性哨兵 wrapper.
     "check_90_cost_gate_double_deduct",
+    # [91] INTRADAY-KLINES-PERMANENT-FIX R3（2026-06-16）kline_calibration cron heartbeat.
+    "check_91_kline_calibration_cron_fires",
 ]
