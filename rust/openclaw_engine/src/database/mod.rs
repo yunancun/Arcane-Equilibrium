@@ -285,6 +285,27 @@ pub enum MarketDataMsg {
         to_regime: String,
         trigger_reason: String,
     },
+    /// Sub-second 前向錄製：逐筆成交（publicTrade）→ market.trades（5 欄）。
+    /// 由 OPENCLAW_RECORD_TICKS=1 gate；flag-OFF 時 producer 不 emit 本變體。
+    /// RawTrade forward recorder: per-trade tape → market.trades (5 cols).
+    RawTrade {
+        ts_ms: u64,
+        symbol: String,
+        side: String,
+        price: f64,
+        qty: f64,
+    },
+    /// Sub-second 前向錄製：L1 top-of-book 取樣（orderbook.50）→ market.ob_top（6 欄）。
+    /// 取樣節流由 ObTopSampler 完成；flag-OFF 時 producer 不 emit 本變體。
+    /// ObTop forward recorder: L1 top-of-book sampled → market.ob_top (6 cols).
+    ObTop {
+        ts_ms: u64,
+        symbol: String,
+        best_bid: f64,
+        bid_size: f64,
+        best_ask: f64,
+        ask_size: f64,
+    },
 }
 
 // ═══════════════════════════════════════════════════════════════════
