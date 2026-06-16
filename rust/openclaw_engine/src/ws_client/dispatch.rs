@@ -107,7 +107,16 @@ impl WsClient {
                 .filter_map(|item| parse_kline_item(item, topic))
                 .collect()
         } else if topic.starts_with("orderbook.") {
-            parse_orderbook_snapshot(data, topic).into_iter().collect()
+            // recorder-v2：把父消息的 `type`（snapshot/delta）穿進 parser，
+            // L1BookTracker 才能確定性地辨 reset vs upsert（campaign-8 bad-tick 根因）。
+            let ob_type = parsed.get("type").and_then(|t| t.as_str());
+            // recorder-v2 producer gate：flag-OFF（預設）時 parser SKIP full-depth
+            // 解析、ob_* 欄維持 None（二進制 inert）。`l1_recording_enabled()` 是
+            // 進程級 OnceLock 快照，不在熱路徑逐訊息查 env（見 super::mod.rs）。
+            let record_l1 = super::l1_recording_enabled();
+            parse_orderbook_snapshot(data, topic, ob_type, record_l1)
+                .into_iter()
+                .collect()
         } else if topic.starts_with("tickers.") {
             data.iter()
                 .filter_map(|item| parse_ticker_item(item, topic))

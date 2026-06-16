@@ -32,6 +32,7 @@ pub mod exit_feature_writer;
 pub mod experiment_ledger_pg;
 pub mod fallback;
 pub mod feature_writer;
+pub mod l1_book_tracker;
 pub mod lease_transition_writer;
 pub mod market_writer;
 pub mod migrations;
@@ -305,6 +306,22 @@ pub enum MarketDataMsg {
         bid_size: f64,
         best_ask: f64,
         ask_size: f64,
+    },
+    /// recorder-v2：full L1 BBO 事件流 → market.l1_events（9 欄）。
+    /// 由 L1BookTracker 有狀態重建本地簿後，僅在解析後 BBO 真變化時 emit。
+    /// 由 OPENCLAW_RECORD_L1_EVENTS=1 gate（默認 OFF）；flag-OFF 時 producer 不 emit。
+    /// 與 ObTop 範疇不同：ObTop 是 250ms 節流*取樣*，L1Event 是*每一次*解析後 BBO 變更。
+    /// L1Event recorder-v2: full resolved-BBO event stream → market.l1_events (9 cols).
+    L1Event {
+        ts_ms: u64,
+        symbol: String,
+        best_bid: f64,
+        bid_size: f64,
+        best_ask: f64,
+        ask_size: f64,
+        update_id: u64,
+        seq: u64,
+        is_snapshot: bool,
     },
 }
 

@@ -72,6 +72,37 @@ pub struct PriceEvent {
     /// 前 5 檔賣盤（Orderbook 事件）。
     #[serde(default)]
     pub asks5: Option<Vec<(f64, f64)>>,
+    // ── recorder-v2 (L1 book event stream)：orderbook 全變更檔 + u/seq/type ──
+    // recorder-v2：供 L1BookTracker 做有狀態本地簿重建用的 additive 欄位。
+    //
+    // 為什麼新增（且全 Option / serde(default)）：v1 的 bids5/asks5 只截前 5 檔，
+    // 且 parse_orderbook_snapshot 對 delta 把「第一個*變更*檔」誤當 top-of-book
+    // （campaign-8 14.7% crossed/locked bad ticks 的根因）。要重建每一次真實 BBO
+    // 變更，必須保留 delta 的**全部**變更檔（含 qty==0 刪除）+ u（updateId，u==1
+    // 表服務重啟須 reset 本地簿）+ seq（cross-sequence）+ type（snapshot/delta，
+    // 決定是 reset+load 還是 upsert）。非 orderbook 事件這些欄恆為 None →
+    // 位元不變（v1 與所有 publicTrade/ticker/kline 路徑行為零改變）。
+    /// Orderbook message type ("snapshot" / "delta"), recorder-v2 only.
+    /// 訂單簿消息類型，僅 recorder-v2 stateful tracker 使用。
+    #[serde(default)]
+    pub ob_msg_type: Option<String>,
+    /// FULL changed bid levels (not top-5-truncated): [(price, qty), ...].
+    /// qty==0 表刪除該檔。recorder-v2 only。
+    /// 完整變更買盤檔（非截斷前 5），qty==0 為刪除。
+    #[serde(default)]
+    pub ob_changed_bids: Option<Vec<(f64, f64)>>,
+    /// FULL changed ask levels (not top-5-truncated). recorder-v2 only.
+    /// 完整變更賣盤檔（非截斷前 5）。
+    #[serde(default)]
+    pub ob_changed_asks: Option<Vec<(f64, f64)>>,
+    /// Bybit orderbook `u` (updateId; u==1 marks a service-restart reset).
+    /// Bybit `u`（updateId；u==1 標記服務重啟，本地簿須 reset）。
+    #[serde(default)]
+    pub ob_update_id: Option<u64>,
+    /// Bybit orderbook `seq` (cross-sequence; smaller = earlier).
+    /// Bybit `seq`（cross-sequence；越小越早）。
+    #[serde(default)]
+    pub ob_seq: Option<u64>,
     /// ADL rank (for AdlNotice events).
     /// ADL 排名（AdlNotice 事件）。
     #[serde(default)]
@@ -154,6 +185,12 @@ impl PriceEvent {
             trade_qty: None,
             bids5: None,
             asks5: None,
+            // recorder-v2：orderbook 全變更檔欄位預設 None（僅 parse_orderbook_snapshot 填充）。
+            ob_msg_type: None,
+            ob_changed_bids: None,
+            ob_changed_asks: None,
+            ob_update_id: None,
+            ob_seq: None,
             adl_rank: None,
             funding_rate: None,
             mark_price: None,

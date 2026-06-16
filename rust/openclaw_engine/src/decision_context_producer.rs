@@ -225,6 +225,12 @@ mod tests {
             trade_qty: None,
             bids5: None,
             asks5: None,
+            // recorder-v2：非 orderbook fixture → 全變更檔 / type / u / seq 恆 None。
+            ob_msg_type: None,
+            ob_changed_bids: None,
+            ob_changed_asks: None,
+            ob_update_id: None,
+            ob_seq: None,
             adl_rank: None,
             funding_rate: None,
             mark_price: None,
