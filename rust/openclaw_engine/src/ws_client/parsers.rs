@@ -67,13 +67,22 @@ pub(super) fn parse_trade_item(item: &serde_json::Value, topic: &str) -> Option<
     Some(event)
 }
 
-/// Parse a Bybit kline item into PriceEvent (uses close price).
-/// 將 Bybit K 線項目解析為 PriceEvent（使用收盤價）。
+/// Parse a Bybit kline item into a `KlineConfirm` PriceEvent carrying the FULL
+/// authoritative OHLCV+turnover of the closed candle.
+/// 將 Bybit K 線項目解析為攜帶完整權威 OHLCV+成交額的 `KlineConfirm` PriceEvent。
 ///
 /// Only returns Some for **confirmed** candles (confirm == true).
 /// Unconfirmed candles are dropped — real-time prices come via publicTrade.
 /// 只返回**已確認**的 K 線（confirm == true）。
 /// 未確認的 K 線被丟棄 — 實時價格通過 publicTrade 獲取。
+///
+/// R1（根因修復）：Bybit 在 `confirm==true` 時推送整根真實 OHLCV+turnover。
+/// 舊版只抽 `close`+`volume` 降級成 close-only tick，使持久化路徑的 tick-synth
+/// aggregator 從稀疏 tick 合成退化 K 線（open≈close、range≈0、一-bar offset）。
+/// 現改為填齊 open/high/low/close/volume/turnover + interval + start/end，標
+/// `KlineConfirm`，讓持久化端直接落盤權威整根。
+///
+/// fail-closed：任一 OHLC 欄位缺失或不可解析即回 None，絕不落半截 bar。
 pub(super) fn parse_kline_item(item: &serde_json::Value, topic: &str) -> Option<PriceEvent> {
     // Drop unconfirmed candles to avoid false signals on incomplete data
     // 丟棄未確認 K 線，避免不完整數據產生虛假信號
@@ -86,25 +95,51 @@ pub(super) fn parse_kline_item(item: &serde_json::Value, topic: &str) -> Option<
     }
 
     let symbol = extract_symbol_from_topic(topic)?;
-    let close = item
-        .get("close")
-        .and_then(|v| v.as_str())
-        .and_then(|s| s.parse::<f64>().ok())?;
-    let ts = item
+
+    // R1 fail-closed：open/high/low/close 任一缺失即丟棄整根（不送退化 bar）。
+    // Bybit WS kline item 欄位為字串編碼數值。
+    let parse_field = |key: &str| -> Option<f64> {
+        item.get(key)
+            .and_then(|v| v.as_str())
+            .and_then(|s| s.parse::<f64>().ok())
+            .filter(|v| v.is_finite())
+    };
+    let open = parse_field("open")?;
+    let high = parse_field("high")?;
+    let low = parse_field("low")?;
+    let close = parse_field("close")?;
+    // volume / turnover 缺失視為 0（量類欄位 fail-soft，價格欄位才 fail-closed）。
+    let volume = parse_field("volume").unwrap_or(0.0);
+    let turnover = parse_field("turnover").unwrap_or(0.0);
+
+    // Bybit `start` = 週期開盤時間（ms epoch）；缺失退回 now_ms（與舊行為一致）。
+    let start_ms = item
         .get("start")
         .and_then(|v| {
             v.as_u64()
                 .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
         })
         .unwrap_or_else(now_ms);
-    let volume = item
-        .get("volume")
-        .and_then(|v| v.as_str())
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.0);
+    // Bybit `end` = 週期收盤時間（ms epoch）；缺失退 None，持久化端依 interval 推算。
+    let end_ms = item.get("end").and_then(|v| {
+        v.as_u64()
+            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+    });
 
-    let mut event = PriceEvent::new(symbol, close, ts);
+    // 從 topic 第二段抽 interval，e.g. "kline.1.BTCUSDT" → "1"、"kline.240.X" → "240"。
+    let interval = extract_kline_interval_from_topic(topic);
+
+    // close 走既有 last_price 欄位；其餘權威欄位走 R1 新增的 kline_* 欄位。
+    let mut event = PriceEvent::new(symbol, close, start_ms);
     event.volume_24h = volume;
+    event.event_kind = Some(PriceEventKind::KlineConfirm);
+    event.kline_open = Some(open);
+    event.kline_high = Some(high);
+    event.kline_low = Some(low);
+    event.kline_turnover = Some(turnover);
+    event.kline_interval = interval;
+    event.kline_start_ms = Some(start_ms);
+    event.kline_close_ms = end_ms;
     Some(event)
 }
 
@@ -411,6 +446,26 @@ pub(super) fn parse_adl_notice_item(item: &serde_json::Value) -> Option<PriceEve
         .insert("adl_rank".into(), adl_rank.to_string());
     event.metadata.insert("side".into(), side.into());
     Some(event)
+}
+
+/// Extract the kline interval segment from a topic like "kline.1.BTCUSDT" → "1".
+/// 從 K 線主題字串提取 interval 段，如 "kline.1.BTCUSDT" → "1"、"kline.240.X" → "240"。
+///
+/// 格式為 "kline.{interval}.{symbol}" 三段；非此形狀（段數不符）回 None，
+/// 持久化端據此 fail-closed（無 interval 無法決定 timeframe）。
+pub(super) fn extract_kline_interval_from_topic(topic: &str) -> Option<String> {
+    let mut parts = topic.split('.');
+    let prefix = parts.next()?;
+    if prefix != "kline" {
+        return None;
+    }
+    let interval = parts.next()?;
+    // 必須剛好三段（prefix.interval.symbol），且 symbol 段存在非空。
+    let symbol = parts.next()?;
+    if interval.is_empty() || symbol.is_empty() || parts.next().is_some() {
+        return None;
+    }
+    Some(interval.to_string())
 }
 
 /// Extract symbol from topic string like "publicTrade.BTCUSDT" → "BTCUSDT".

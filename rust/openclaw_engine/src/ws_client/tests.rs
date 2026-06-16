@@ -9,9 +9,11 @@
 
 use super::connection::WsState;
 use super::parsers::{
-    extract_symbol_from_topic, parse_adl_notice_item, parse_kline_item, parse_liquidation_item,
-    parse_orderbook_snapshot, parse_price_limit_item, parse_ticker_item, parse_trade_item,
+    extract_kline_interval_from_topic, extract_symbol_from_topic, parse_adl_notice_item,
+    parse_kline_item, parse_liquidation_item, parse_orderbook_snapshot, parse_price_limit_item,
+    parse_ticker_item, parse_trade_item,
 };
+use openclaw_types::PriceEventKind;
 use super::run_loop::{BACKOFF_POLICY, SUBSCRIBE_BATCH_SIZE};
 use std::time::Duration;
 
@@ -59,6 +61,7 @@ fn test_parse_trade_item_missing_price() {
 
 #[test]
 fn test_parse_kline_item_confirmed() {
+    // R1：confirmed candle 現攜帶完整權威 OHLCV+turnover，並標記 KlineConfirm。
     let item = serde_json::json!({
         "start": 1700000000000_u64,
         "end": 1700000060000_u64,
@@ -67,18 +70,68 @@ fn test_parse_kline_item_confirmed() {
         "high": "65100.0",
         "low": "64400.0",
         "volume": "100.5",
+        "turnover": "6512345.0",
         "confirm": true,
     });
     let event = parse_kline_item(&item, "kline.1.BTCUSDT").unwrap();
     assert_eq!(event.symbol, "BTCUSDT");
+    assert_eq!(event.event_kind, Some(PriceEventKind::KlineConfirm));
+    // close 仍走既有 last_price 欄位
     assert!((event.last_price - 65000.0).abs() < f64::EPSILON);
     assert!((event.volume_24h - 100.5).abs() < f64::EPSILON);
+    // R1 新欄位全填齊（不再丟棄 OHL+turnover）
+    assert!((event.kline_open.unwrap() - 64500.0).abs() < f64::EPSILON);
+    assert!((event.kline_high.unwrap() - 65100.0).abs() < f64::EPSILON);
+    assert!((event.kline_low.unwrap() - 64400.0).abs() < f64::EPSILON);
+    assert!((event.kline_turnover.unwrap() - 6512345.0).abs() < f64::EPSILON);
+    assert_eq!(event.kline_interval.as_deref(), Some("1"));
+    assert_eq!(event.kline_start_ms, Some(1700000000000));
+    assert_eq!(event.kline_close_ms, Some(1700000060000));
+}
+
+#[test]
+fn test_parse_kline_item_240_interval_captured() {
+    // R1：4h（kline.240）也走 KlineConfirm，interval 段抽出 "240"。
+    let item = serde_json::json!({
+        "start": 1700000000000_u64,
+        "end": 1700014400000_u64,
+        "open": "100.0",
+        "close": "110.0",
+        "high": "115.0",
+        "low": "95.0",
+        "volume": "1.0",
+        "turnover": "110.0",
+        "confirm": true,
+    });
+    let event = parse_kline_item(&item, "kline.240.ETHUSDT").unwrap();
+    assert_eq!(event.kline_interval.as_deref(), Some("240"));
+    assert_eq!(event.event_kind, Some(PriceEventKind::KlineConfirm));
+}
+
+#[test]
+fn test_parse_kline_item_turnover_missing_defaults_zero() {
+    // turnover 缺失視為 0（量類欄位 fail-soft，不阻擋落盤）。
+    let item = serde_json::json!({
+        "start": 1700000000000_u64,
+        "open": "100.0",
+        "close": "101.0",
+        "high": "102.0",
+        "low": "99.0",
+        "volume": "5.0",
+        "confirm": true,
+    });
+    let event = parse_kline_item(&item, "kline.5.BTCUSDT").unwrap();
+    assert_eq!(event.kline_turnover, Some(0.0));
+    assert_eq!(event.kline_interval.as_deref(), Some("5"));
 }
 
 #[test]
 fn test_parse_kline_item_unconfirmed_dropped() {
     let item = serde_json::json!({
         "start": 1700000000000_u64,
+        "open": "64500.0",
+        "high": "65100.0",
+        "low": "64400.0",
         "close": "65000.0",
         "volume": "100.5",
         "confirm": false,
@@ -90,6 +143,9 @@ fn test_parse_kline_item_unconfirmed_dropped() {
 fn test_parse_kline_item_confirm_missing_treated_as_unconfirmed() {
     let item = serde_json::json!({
         "start": 1700000000000_u64,
+        "open": "64500.0",
+        "high": "65100.0",
+        "low": "64400.0",
         "close": "65000.0",
         "volume": "100.5",
     });
@@ -98,8 +154,39 @@ fn test_parse_kline_item_confirm_missing_treated_as_unconfirmed() {
 
 #[test]
 fn test_parse_kline_item_missing_close() {
+    // R1 fail-closed：缺 close（甚至缺 OHL）→ None，不落半截 bar。
     let item = serde_json::json!({"start": 1700000000000_u64, "confirm": true});
     assert!(parse_kline_item(&item, "kline.1.BTCUSDT").is_none());
+}
+
+#[test]
+fn test_parse_kline_item_missing_high_fail_closed() {
+    // R1 fail-closed：任一 OHLC 欄位缺失即丟棄整根（high 缺）。
+    let item = serde_json::json!({
+        "start": 1700000000000_u64,
+        "open": "64500.0",
+        "low": "64400.0",
+        "close": "65000.0",
+        "volume": "100.5",
+        "confirm": true,
+    });
+    assert!(parse_kline_item(&item, "kline.1.BTCUSDT").is_none());
+}
+
+#[test]
+fn test_extract_kline_interval_from_topic() {
+    assert_eq!(
+        extract_kline_interval_from_topic("kline.1.BTCUSDT").as_deref(),
+        Some("1")
+    );
+    assert_eq!(
+        extract_kline_interval_from_topic("kline.240.ETHUSDT").as_deref(),
+        Some("240")
+    );
+    // 非 kline topic / 段數不符 → None。
+    assert_eq!(extract_kline_interval_from_topic("tickers.BTCUSDT"), None);
+    assert_eq!(extract_kline_interval_from_topic("kline.1"), None);
+    assert_eq!(extract_kline_interval_from_topic("kline.1.BTC.extra"), None);
 }
 
 #[test]

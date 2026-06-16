@@ -234,6 +234,14 @@ mod tests {
             // EDGE-P2-2: Default test fixtures carry no OI (tickers-only signal).
             // EDGE-P2-2：測試 fixture 預設無 OI（僅 tickers 事件攜帶）。
             open_interest: None,
+            // R1: 非 KlineConfirm fixture → kline OHLCV 欄位恆 None。
+            kline_open: None,
+            kline_high: None,
+            kline_low: None,
+            kline_turnover: None,
+            kline_interval: None,
+            kline_start_ms: None,
+            kline_close_ms: None,
             metadata: Default::default(),
         }
     }

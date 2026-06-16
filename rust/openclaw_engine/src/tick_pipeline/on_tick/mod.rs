@@ -59,6 +59,7 @@
 //! values** to sidestep cross-step `&mut self` borrow conflicts.
 
 use super::*;
+use openclaw_types::PriceEventKind;
 use std::ops::ControlFlow;
 use std::time::Instant;
 
@@ -138,6 +139,15 @@ impl TickPipeline {
         // ── Step 1+2: kline aggregation + indicators + FeatureSnapshot. ──
         // ── Step 1+2：K 線聚合 + 指標計算 + FeatureSnapshot。──
         let indicators = self.on_tick_step_1_2_klines_indicators(event);
+
+        // R1：KlineConfirm 事件僅作 DB 持久化（已於 step_1_2 完成），它是
+        // 「每根 bar 收盤一次」的權威整根，不是實時 tick，**不得驅動信號 /
+        // 派單 / 風控**（實時交易價由高頻 publicTrade / ticker 提供 = R2 不變）。
+        // 在此早退避免 KlineConfirm 的 last_price=close 觸發 step_3/4/5/6 的
+        // 入場、平倉或風控誤判（一-bar 滯後的 close 進交易路徑 = 假信號）。
+        if event.event_kind == Some(PriceEventKind::KlineConfirm) {
+            return None;
+        }
 
         // ── Step 3: pause gate + boot cooldown + signal evaluation. ──
         // ── Step 3：暫停門控 + 啟動冷卻 + 信號評估與持久化。──

@@ -10,7 +10,14 @@
 //! Step 1 逐 timeframe 聚合已收 K 線、發 `KlineClose` 給 market writer、餵
 //! 1m bar 給黑天鵝檢測器。Step 2 計算指標並發 `FeatureSnapshot` 給特徵寫入
 //! channel。無早退；回傳 `Option<IndicatorSnapshot>` 供 Step 3/4+5 消費。
+//!
+//! R1（根因修復，2026-06-16）：DB `market.klines` 的持久化真值單一源 = WS
+//! `KlineConfirm` 事件（Bybit 推送的權威整根 OHLCV+turnover）。tick-synth
+//! aggregator（`kline_manager.on_tick`）仍照舊跑，但**只供記憶體 buffer /
+//! 指標 / 黑天鵝**（=R2 熱路徑不變），**不再對 market writer 發 `KlineClose`**。
+//! 這消除了「退化 tick-synth bar 落盤」這個一-bar offset + dead-wick 的根因。
 
+use openclaw_core::klines::{timeframe_duration_ms, KlineBar};
 use openclaw_types::PriceEventKind;
 use tracing::warn;
 
@@ -32,8 +39,21 @@ impl TickPipeline {
     ) -> Option<IndicatorSnapshot> {
         let sym = &event.symbol;
 
-        // Step 1: Kline aggregation — collect closed bars for DB write.
-        // 步驟 1：K 線聚合 — 收集已關閉的 K 線用於 DB 寫入。
+        // R1：KlineConfirm 事件 = Bybit 推送的權威整根 OHLCV+turnover。
+        // 直接 build 真值 KlineBar → emit KlineClose 落盤（旁路 tick-synth
+        // aggregator），然後早退（confirmed candle 不是指標 tick，不參與指標/
+        // 黑天鵝計算 = 熱路徑零退化）。DB 真值單一源即此路徑。
+        if event.event_kind == Some(PriceEventKind::KlineConfirm) {
+            self.persist_confirmed_kline(event);
+            return None;
+        }
+
+        // Step 1: Kline aggregation — feed in-memory buffer for indicators only.
+        // 步驟 1：K 線聚合 — 餵記憶體 buffer 供指標 / 黑天鵝使用（不再落盤）。
+        //
+        // R1：tick-synth aggregator 仍跑（記憶體 buffer 為指標源，=R2 不變），
+        // 但**不再對 market writer 發 KlineClose**——DB 持久化已由上方
+        // KlineConfirm 路徑單一源負責，避免退化 bar 與權威 bar 雙寫競 PK。
         //
         // QUOTE-VOL-FIX：只有 publicTrade 事件攜帶真實的「單筆成交量」；ticker 事件
         // 攜帶的是 24h 累計 volume_24h（逐 tick 累加會污染 per-bar 量），其餘事件無量。
@@ -53,23 +73,6 @@ impl TickPipeline {
             tick_volume,
             tick_turnover,
         );
-
-        // Phase 1: Emit KlineClose for each closed bar to market writer (F-2 audit fix).
-        // Phase 1：為每根已關閉 K 線發送 KlineClose 到市場寫入器（F-2 審計修復）。
-        if let Some(ref tx) = self.market_data_tx {
-            for (timeframe, bar) in &closed_bars {
-                if tx
-                    .try_send(crate::database::MarketDataMsg::KlineClose {
-                        symbol: sym.clone(),
-                        timeframe: timeframe.clone(),
-                        bar: bar.clone(),
-                    })
-                    .is_err()
-                {
-                    self.market_tx_dropped += 1;
-                }
-            }
-        }
 
         // DB-RUN-5: Feed black-swan detector on 1m bar close.
         // Compute log-return vs previous close, push into rolling window, run
@@ -136,5 +139,73 @@ impl TickPipeline {
         }
 
         indicators
+    }
+
+    /// R1：把 WS `KlineConfirm` 事件攜帶的權威整根 OHLCV+turnover 直接落盤。
+    ///
+    /// 為什麼旁路 tick-synth aggregator：Bybit 在 `confirm==true` 推送的就是真值
+    /// 整根，無需（也不應）由稀疏 tick 重新合成。直接 build `KlineBar` →
+    /// emit `MarketDataMsg::KlineClose`，DB writer 以 PK (symbol,timeframe,ts)
+    /// `ON CONFLICT DO NOTHING` 收。DB 真值單一源 = 此路徑。
+    ///
+    /// fail-closed：interval 無法映射 timeframe、或 OHLC 任一欄缺失 → 丟棄整根
+    /// （parser 已 fail-closed 過一層，這裡是第二道防線，不落半截 bar）。
+    fn persist_confirmed_kline(&mut self, event: &PriceEvent) {
+        let tx = match &self.market_data_tx {
+            Some(tx) => tx,
+            None => return, // scanner / paper 路徑未接 market writer → no-op
+        };
+
+        // interval → timeframe（與 intraday_kline_backfill bin 的 resolve_interval
+        // 映射一致：1→1m / 5→5m / 15→15m / 60→1h / 240→4h）。
+        let timeframe = match event.kline_interval.as_deref() {
+            Some("1") => "1m",
+            Some("5") => "5m",
+            Some("15") => "15m",
+            Some("60") => "1h",
+            Some("240") => "4h",
+            _ => return, // 未知 interval → fail-closed
+        };
+
+        // OHLC 必須齊全（parser 已保證，這裡二次防線）；close/volume 走既有欄位。
+        let (open, high, low) = match (event.kline_open, event.kline_high, event.kline_low) {
+            (Some(o), Some(h), Some(l)) => (o, h, l),
+            _ => return,
+        };
+        let close = event.last_price;
+        let volume = event.volume_24h;
+        let turnover = event.kline_turnover.unwrap_or(0.0);
+
+        let open_time_ms = event.kline_start_ms.unwrap_or(event.ts_ms);
+        // close_time：優先用 Bybit `end`；缺則由 timeframe 週期推算。
+        let close_time_ms = event.kline_close_ms.unwrap_or_else(|| {
+            open_time_ms + timeframe_duration_ms(timeframe).unwrap_or(0)
+        });
+
+        let bar = KlineBar {
+            open_time_ms,
+            close_time_ms,
+            open,
+            high,
+            low,
+            close,
+            volume,
+            turnover,
+            // tick_count：WS confirmed candle 是 Bybit 端聚合，本地無 tick 計數；
+            // 記 0 表「非本地 tick-synth 而是權威整根」（落盤欄位語義標記）。
+            tick_count: 0,
+            is_closed: true,
+        };
+
+        if tx
+            .try_send(crate::database::MarketDataMsg::KlineClose {
+                symbol: event.symbol.clone(),
+                timeframe: timeframe.to_string(),
+                bar,
+            })
+            .is_err()
+        {
+            self.market_tx_dropped += 1;
+        }
     }
 }

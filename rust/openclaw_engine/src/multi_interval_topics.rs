@@ -2,8 +2,8 @@
 //! 多時間框架公開 WebSocket 訂閱主題字串構建器（純函數）。
 //!
 //! MODULE_NOTE (EN): Pure topic-string construction for Bybit V5 public WS
-//!   subscriptions across multiple kline intervals (1m, 5m, 15m, 60m), ticker,
-//!   L2 orderbook, public trades, and C1-approved all-liquidation events.
+//!   subscriptions across multiple kline intervals (1m, 5m, 15m, 60m, 240m=4h),
+//!   ticker, L2 orderbook, public trades, and C1-approved all-liquidation events.
 //!   Deliberately has NO dependency on
 //!   `WsClient` or any side-effectful type — the caller applies the returned
 //!   topic strings to whatever WS client they hold. Behaviour contract is
@@ -37,10 +37,17 @@ pub enum KlineInterval {
     Min15,
     /// 1 hour / 1 小時
     Hour1,
+    /// 4 hours / 4 小時
+    ///
+    /// R1（2026-06-16）新增：先前 4h（`kline.240`）未訂閱，但 `DEFAULT_TIMEFRAMES`
+    /// 含 "4h"，導致 4h bar 純由 tick-synth 合成（最壞退化）。訂閱 `kline.240`
+    /// 後 4h 與其他 tf 同走 WS confirmed 整根直寫。`kline.240` 是 Bybit V5 合法
+    /// interval（與 1/5/15/60 同族，非 legacy 毒化 topic）。
+    Hour4,
 }
 
 impl KlineInterval {
-    /// Get Bybit topic interval string (e.g., "1", "5", "15", "60").
+    /// Get Bybit topic interval string (e.g., "1", "5", "15", "60", "240").
     /// 取得 Bybit 主題間隔字串。
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -48,6 +55,7 @@ impl KlineInterval {
             Self::Min5 => "5",
             Self::Min15 => "15",
             Self::Hour1 => "60",
+            Self::Hour4 => "240",
         }
     }
 }
@@ -59,6 +67,7 @@ pub const DEFAULT_INTERVALS: &[KlineInterval] = &[
     KlineInterval::Min5,
     KlineInterval::Min15,
     KlineInterval::Hour1,
+    KlineInterval::Hour4,
 ];
 
 // ---------------------------------------------------------------------------
@@ -198,11 +207,13 @@ mod tests {
     #[test]
     fn test_kline_topics_default() {
         let topics = kline_topics("BTCUSDT", DEFAULT_INTERVALS);
-        assert_eq!(topics.len(), 4);
+        // R1：新增 4h（kline.240）→ 5 個默認 interval。
+        assert_eq!(topics.len(), 5);
         assert_eq!(topics[0], "kline.1.BTCUSDT");
         assert_eq!(topics[1], "kline.5.BTCUSDT");
         assert_eq!(topics[2], "kline.15.BTCUSDT");
         assert_eq!(topics[3], "kline.60.BTCUSDT");
+        assert_eq!(topics[4], "kline.240.BTCUSDT");
     }
 
     /// Test kline topic generation with custom intervals.
@@ -230,12 +241,13 @@ mod tests {
     #[test]
     fn test_full_subscription_list() {
         let topics = full_subscription_list("BTCUSDT");
-        // 4 klines + ticker + orderbook + publicTrade + allLiquidation = 8.
-        assert_eq!(topics.len(), 8);
+        // R1：5 klines（含 4h）+ ticker + orderbook + publicTrade + allLiquidation = 9.
+        assert_eq!(topics.len(), 9);
         assert!(topics.contains(&"kline.1.BTCUSDT".to_string()));
         assert!(topics.contains(&"kline.5.BTCUSDT".to_string()));
         assert!(topics.contains(&"kline.15.BTCUSDT".to_string()));
         assert!(topics.contains(&"kline.60.BTCUSDT".to_string()));
+        assert!(topics.contains(&"kline.240.BTCUSDT".to_string()));
         assert!(topics.contains(&"tickers.BTCUSDT".to_string()));
         assert!(topics.contains(&"orderbook.50.BTCUSDT".to_string()));
         assert!(topics.contains(&"publicTrade.BTCUSDT".to_string()));
@@ -274,10 +286,12 @@ mod tests {
     #[test]
     fn test_multi_symbol_subscriptions() {
         let topics = multi_symbol_subscriptions(&["BTCUSDT", "ETHUSDT"]);
-        // 8 topics per symbol * 2 symbols = 16
-        assert_eq!(topics.len(), 16);
+        // R1：9 topics per symbol（含 4h）* 2 symbols = 18
+        assert_eq!(topics.len(), 18);
         assert!(topics.contains(&"kline.1.BTCUSDT".to_string()));
         assert!(topics.contains(&"kline.1.ETHUSDT".to_string()));
+        assert!(topics.contains(&"kline.240.BTCUSDT".to_string()));
+        assert!(topics.contains(&"kline.240.ETHUSDT".to_string()));
         assert!(topics.contains(&"tickers.ETHUSDT".to_string()));
         assert!(topics.contains(&"orderbook.50.BTCUSDT".to_string()));
         assert!(topics.contains(&"allLiquidation.ETHUSDT".to_string()));
@@ -291,6 +305,7 @@ mod tests {
         assert_eq!(KlineInterval::Min5.as_str(), "5");
         assert_eq!(KlineInterval::Min15.as_str(), "15");
         assert_eq!(KlineInterval::Hour1.as_str(), "60");
+        assert_eq!(KlineInterval::Hour4.as_str(), "240");
     }
 
     /// Test empty symbol list produces empty subscription.
@@ -348,14 +363,14 @@ mod tests {
     #[test]
     fn test_multi_symbol_subscriptions_grouping_contract() {
         let topics = multi_symbol_subscriptions(&["BTCUSDT", "ETHUSDT"]);
-        // First 8 entries must all be BTCUSDT topics, next 8 must all be ETHUSDT.
-        for t in &topics[0..8] {
+        // R1：每 symbol 9 topics（含 4h）。前 9 全 BTCUSDT，後 9 全 ETHUSDT。
+        for t in &topics[0..9] {
             assert!(
                 t.ends_with("BTCUSDT"),
                 "expected BTCUSDT prefix group, got {t}"
             );
         }
-        for t in &topics[8..16] {
+        for t in &topics[9..18] {
             assert!(
                 t.ends_with("ETHUSDT"),
                 "expected ETHUSDT prefix group, got {t}"

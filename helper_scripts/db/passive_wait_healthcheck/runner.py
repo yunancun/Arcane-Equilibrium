@@ -374,6 +374,11 @@ from .checks_cron_heartbeat import (
     # audit-log 用），跑於 conn.close() 後 — 與 [75]-[79] 同 cron_heartbeat 性質
     # 不同點：[80] 不只 sentinel mtime，而是 full 7-check 健康評估。
     check_80_pg_dump_freshness,
+    # [91] INTRADAY-KLINES-PERMANENT-FIX R3（2026-06-16）— kline_calibration daily
+    # cron heartbeat sentinel（kline_calibration.last_fire，stale > 25h → WARN）。純
+    # filesystem，跑於 conn.close() 後。WARN-by-default；REQUIRED=1 升 FAIL。ID 取 [91]：
+    # PA spec 標 [81] 但 [81]/[82] 已被 P5-SM lease_ipc_soak 占用（沿用 [58]→[68] 慣例）。
+    check_91_kline_calibration_cron_fires,
 )
 # PROFIT-1（2026-06-14）— cost_gate「雙重扣成本」latent issue 預防性哨兵 [90]。
 # Delegate 給 standalone
@@ -415,6 +420,7 @@ The checks split between DB pipelines + filesystem/observability sentinels:
     [75][76][77][78][79]                                  P1-CRON-INSTALL-WAVE-1 cron heartbeat sentinels
     [80]                                                  P0-OPS-4 GAP-D — trading_ai_pg_dump 7-check (delegate standalone)
     [90]                                                  PROFIT-1 — cost_gate double-cost-deduct latent issue sentinel (delegate standalone)
+    [91]                                                  INTRADAY-KLINES-PERMANENT-FIX R3 — kline_calibration daily cron heartbeat sentinel
 
 F7 sentinels [22]-[29] added 2026-04-26 by MIT DB audit + E5 engine.log dive:
   [22] trading_pipeline_silent_gap    (DCS active but fills cliff)
@@ -658,7 +664,7 @@ def main() -> int:
               [83][84][85][86][87]  (L2 P4 online-FDR 五軸，E1-C)
               [88][89]  (L2 記憶層 dormant 哨兵：pipeline freshness + embedding drift，
                          E1-B 2026-06-11 PA spec §12；號占用正本)
-      post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56] [75][76][77][78][79] [80] [90]
+      post-cursor: [7][13][11][Xa][16][18][19][20] [29] [47] [56] [75][76][77][78][79] [80] [90] [91]
     """
     ap = argparse.ArgumentParser(description=_RUNNER_DESCRIPTION)
     ap.add_argument("--quiet", action="store_true", help="Only print non-PASS lines")
@@ -1571,6 +1577,15 @@ def main() -> int:
     # conn.close() 後跑（與 [80] 同性質）。WARN-by-default；REQUIRED=1 升 FAIL。
     s, m = check_90_cost_gate_double_deduct()
     results.append(("[90] cost_gate_double_deduct", s, m))
+
+    # [91] INTRADAY-KLINES-PERMANENT-FIX R3（2026-06-16）— kline_calibration daily cron
+    # heartbeat sentinel（kline_calibration_cron.sh start-time touch
+    # ``kline_calibration.last_fire``；本哨兵驗 mtime < 25h）。純 filesystem 不依賴 runner
+    # cur，故在 conn.close() 後跑（與 [78]/[80]/[90] 同性質）。WARN-by-default；
+    # OPENCLAW_CRON_HEARTBEAT_REQUIRED=1 升 FAIL。ID 取 [91]：PA spec 標 [81] 但 [81]/[82]
+    # 已被 P5-SM lease_ipc_soak 占用，沿用 codebase [58]→[68] 重定址慣例避撞號。
+    s, m = check_91_kline_calibration_cron_fires()
+    results.append(("[91] kline_calibration_cron_fires", s, m))
 
     # NOTE: [30] cost_edge_advisor_status moved INSIDE the cursor block by
     # G3-09 Phase B Wave 1 (2026-04-28). Phase A version was filesystem-only
