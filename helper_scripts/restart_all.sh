@@ -600,6 +600,12 @@ restart_engine() {
     # 灰度逐-tick 捕捉預設關閉，避免 engine_results.jsonl ~300GB/天 NVMe 寫入；穩態無消費者。
     # 需 Rust↔Python 對賬或 replay 時，按需以 `OPENCLAW_CANARY_MODE=1 ./restart_all.sh ...` 啟動單次捕捉
     # （見 canary_comparator.py / replay_runner.py 工作流）。
+    #
+    # recorder-v2（OPENCLAW_RECORD_L1_EVENTS / market.l1_events）刻意**不**像 RECORD_TICKS
+    # 那樣預設 1：recorder-v2 對活引擎施加更重的持續負載（每 ~20ms delta 都要 apply 有狀態
+    # BTreeMap 本地簿，37 symbol），故預設 unset = OFF，二進制 inert，由 operator 顯式
+    # `OPENCLAW_RECORD_L1_EVENTS=1 ./restart_all.sh ...` 才開啟。OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL
+    # 是 rate-cap 安全閥的可選調參（缺省 ~80，僅在 RECORD_L1_EVENTS=1 時生效）。
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE="${OPENCLAW_CANARY_MODE:-0}" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
@@ -618,6 +624,8 @@ restart_engine() {
         OPENCLAW_EDGE_RELOAD="${OPENCLAW_EDGE_RELOAD:-1}" \
         OPENCLAW_EDGE_RELOAD_INTERVAL_SECS="${OPENCLAW_EDGE_RELOAD_INTERVAL_SECS:-300}" \
         OPENCLAW_RECORD_TICKS="${OPENCLAW_RECORD_TICKS:-1}" \
+        OPENCLAW_RECORD_L1_EVENTS="${OPENCLAW_RECORD_L1_EVENTS:-}" \
+        OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL="${OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL:-}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 0<&- 200<&- &
     echo "    PID: $!"
 }

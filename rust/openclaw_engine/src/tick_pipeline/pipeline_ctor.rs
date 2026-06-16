@@ -113,6 +113,13 @@ impl TickPipeline {
             record_ticks: std::env::var("OPENCLAW_RECORD_TICKS")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
+            // recorder-v2：tracker rate-cap 從 env 讀；總開關 record_l1_events 默認 OFF，
+            // 須 OPENCLAW_RECORD_L1_EVENTS=1 才 emit（cold-start 零行為改變；flag-OFF 時
+            // tracker 不被呼叫、不建簿，二進制完全 inert）。獨立於 record_ticks（不同表）。
+            l1_book_tracker: crate::database::l1_book_tracker::L1BookTracker::from_env(),
+            record_l1_events: std::env::var("OPENCLAW_RECORD_L1_EVENTS")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
             boot_ts_ms: None,
             boot_cooldown_ms: std::env::var("OPENCLAW_BOOT_COOLDOWN_MS")
                 .ok()

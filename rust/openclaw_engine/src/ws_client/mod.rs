@@ -43,6 +43,29 @@ pub mod stats;
 #[cfg(test)]
 mod tests;
 
+use std::sync::OnceLock;
+
+/// recorder-v2 producer-side gate：WS 讀熱路徑是否需要做 full-depth L1 解析。
+///
+/// 為什麼是 process-global one-shot（OnceLock）而非 per-message `env::var`：
+///   `parse_orderbook_snapshot` 跑在 WS 讀迴圈熱路徑（run_loop.rs:212，每條
+///   orderbook.50 訊息一次）。逐訊息查 `std::env::var` 本身就是熱路徑性能 bug
+///   （每次配置查找 + 字串配置），故只在進程啟動時讀一次並快取。對齊消費端
+///   `OPENCLAW_RECORD_L1_EVENTS`（pipeline_ctor.rs:120 在建構時讀同一 env）的
+///   gate 語意——兩端必須同源同預設，否則 producer 解析了 consumer 不消費的全簿。
+///
+/// 不變量：flag-OFF（預設）時 producer 完全 inert——不做 full-50-level 解析、不抽
+///   update_id/seq、5 個 ob_* 欄保持 `PriceEvent::new` 的 None 預設；只走 v1 路徑
+///   （bids5/asks5 top-5 + best-bid/ask + mid + metadata），與舊行為位元級相同。
+fn l1_recording_enabled() -> bool {
+    static FLAG: OnceLock<bool> = OnceLock::new();
+    *FLAG.get_or_init(|| {
+        std::env::var("OPENCLAW_RECORD_L1_EVENTS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+    })
+}
+
 // 公開再匯出 — 讓 crate 內呼叫端（main_ws.rs / main.rs / scanner/runner.rs）的
 // import 路徑與拆分前完全一致。
 pub use connection::WsState;

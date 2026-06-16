@@ -766,6 +766,30 @@ impl TickPipeline {
                             .and_then(|s| serde_json::from_str(s).ok())
                     })
                     .unwrap_or_default();
+                // recorder-v2（additive，獨立於 v1 的 record_ticks）：record_l1_events ON 時，
+                // 把 orderbook 全變更檔 + type/u/seq 餵入有狀態 L1BookTracker 重建本地簿，
+                // 僅在解析後 BBO 真變化時 emit 一筆 L1Event try_send。非阻塞 fail-soft、無
+                // await/無鎖；BTreeMap apply 為 O(log 50) bounded。本分支用「全變更檔」
+                // （ob_changed_bids/asks）而非截斷的 bids5/asks5——這是 recorder-v2 能正確
+                // 重建 BBO（含 qty=0 刪除 / 亂序 / u==1 reset）的前提，故與 v1 路徑解耦獨立。
+                // flag-OFF（默認）時整個分支跳過，零行為改變、tracker 不建簿。
+                if self.record_l1_events {
+                    let changed_bids = event.ob_changed_bids.as_deref().unwrap_or(&[]);
+                    let changed_asks = event.ob_changed_asks.as_deref().unwrap_or(&[]);
+                    if let Some(msg) = self.l1_book_tracker.record(
+                        &event.symbol,
+                        event.ob_msg_type.as_deref(),
+                        changed_bids,
+                        changed_asks,
+                        event.ob_update_id,
+                        event.ob_seq,
+                        event.ts_ms,
+                    ) {
+                        if let Some(ref tx) = self.market_data_tx {
+                            let _ = tx.try_send(msg);
+                        }
+                    }
+                }
                 if !bids.is_empty() && !asks.is_empty() {
                     // Sub-second 前向錄製（additive）：record_ticks ON 時把 L1 top-of-book
                     // 過取樣節流（ObTopSampler，~250ms 硬上界）後 try_send。非阻塞 fail-soft，

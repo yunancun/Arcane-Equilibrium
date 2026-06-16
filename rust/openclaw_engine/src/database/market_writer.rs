@@ -48,6 +48,9 @@ const REGIME_TRANS_COLS: usize = 6;
 // 5/6 欄經 chunk_rows_for_columns clamp 到 MAX_CHUNK_ROWS=10000，遠低 65535 參數上限。
 const RAW_TRADE_COLS: usize = 5;
 const OB_TOP_COLS: usize = 6;
+// recorder-v2：market.l1_events 9 欄。9 × chunk_rows_for_columns(9)=9×7281=65529 ≤ 65535，
+// 參數安全且留一欄未來裕度（PA schema_design）。
+const L1_EVENT_COLS: usize = 9;
 
 #[derive(Debug, Clone, Copy)]
 struct LiquidationRow<'a> {
@@ -370,6 +373,7 @@ async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     let mut regime_trans = Vec::new();
     let mut raw_trades = Vec::new();
     let mut ob_top = Vec::new();
+    let mut l1_events = Vec::new();
 
     for msg in buf.drain(..) {
         match msg {
@@ -383,6 +387,7 @@ async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
             m @ MarketDataMsg::RegimeTransition { .. } => regime_trans.push(m),
             m @ MarketDataMsg::RawTrade { .. } => raw_trades.push(m),
             m @ MarketDataMsg::ObTop { .. } => ob_top.push(m),
+            m @ MarketDataMsg::L1Event { .. } => l1_events.push(m),
             _ => {} // kline/ticker handled by dedicated flushers
         }
     }
@@ -416,6 +421,9 @@ async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     }
     if !ob_top.is_empty() {
         flush_ob_top(pg, pool, &ob_top).await;
+    }
+    if !l1_events.is_empty() {
+        flush_l1_events(pg, pool, &l1_events).await;
     }
 }
 
@@ -623,6 +631,90 @@ async fn flush_ob_top(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
         qb.push(" ON CONFLICT (symbol, ts) DO NOTHING");
         qb
     })
+    .await;
+}
+
+// ── recorder-v2：full L1 BBO 事件流 → market.l1_events（9 欄）──
+
+#[derive(Debug, Clone, Copy)]
+struct L1EventRow<'a> {
+    ts: chrono::DateTime<chrono::Utc>,
+    symbol: &'a str,
+    best_bid: f32,
+    bid_size: f32,
+    best_ask: f32,
+    ask_size: f32,
+    update_id: i64,
+    seq: i64,
+    is_snapshot: bool,
+}
+
+/// 校驗一筆 L1Event → L1EventRow。price/size 全 REAL NOT NULL，同 ob_top fail-soft：
+/// 任一價量欄非有限值丟整筆（NULL 綁定會違 NOT NULL 並 abort 整 batch，牽連無辜行）。
+/// update_id/seq 為 BIGINT：Bybit u/seq 是大單調整數，u64→i64 cast 在現實量級無溢位
+/// （u64::MAX 不可達；下游 gap-detection 用）。
+fn validated_l1_event_row(msg: &MarketDataMsg) -> Option<L1EventRow<'_>> {
+    let MarketDataMsg::L1Event {
+        ts_ms,
+        symbol,
+        best_bid,
+        bid_size,
+        best_ask,
+        ask_size,
+        update_id,
+        seq,
+        is_snapshot,
+    } = msg
+    else {
+        return None;
+    };
+    let ts = chrono::DateTime::from_timestamp_millis(*ts_ms as i64)?;
+    Some(L1EventRow {
+        ts,
+        symbol: symbol.as_str(),
+        best_bid: sanitize_f64(*best_bid)? as f32,
+        bid_size: sanitize_f64(*bid_size)? as f32,
+        best_ask: sanitize_f64(*best_ask)? as f32,
+        ask_size: sanitize_f64(*ask_size)? as f32,
+        update_id: *update_id as i64,
+        seq: *seq as i64,
+        is_snapshot: *is_snapshot,
+    })
+}
+
+/// Batch INSERT full L1 BBO 事件到 market.l1_events（9 欄，3-tuple PK
+/// (symbol, ts, update_id) ON CONFLICT DO NOTHING；update_id 在 PK 中是因為同毫秒
+/// 多筆 BBO 變更合法，(symbol, ts) 2-tuple 會誤併真實變更）。
+async fn flush_l1_events(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
+    let rows: Vec<_> = buf.iter().filter_map(validated_l1_event_row).collect();
+    if rows.is_empty() {
+        return;
+    }
+    batch_insert_chunked(
+        pg,
+        pool,
+        "market.l1_events",
+        rows.as_slice(),
+        L1_EVENT_COLS,
+        |chunk| {
+            let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+                "INSERT INTO market.l1_events (ts, symbol, best_bid, bid_size, best_ask, ask_size, update_id, seq, is_snapshot) ",
+            );
+            qb.push_values(chunk, |mut b, row| {
+                b.push_bind(row.ts);
+                b.push_bind(row.symbol);
+                b.push_bind(row.best_bid);
+                b.push_bind(row.bid_size);
+                b.push_bind(row.best_ask);
+                b.push_bind(row.ask_size);
+                b.push_bind(row.update_id);
+                b.push_bind(row.seq);
+                b.push_bind(row.is_snapshot);
+            });
+            qb.push(" ON CONFLICT (symbol, ts, update_id) DO NOTHING");
+            qb
+        },
+    )
     .await;
 }
 
@@ -981,17 +1073,60 @@ mod tests {
         }
     }
 
+    fn make_l1_event_msg() -> MarketDataMsg {
+        MarketDataMsg::L1Event {
+            ts_ms: 1_700_000_000_000,
+            symbol: "BTCUSDT".into(),
+            best_bid: 63_999.5,
+            bid_size: 10.0,
+            best_ask: 64_000.5,
+            ask_size: 12.0,
+            update_id: 123_456_789,
+            seq: 987_654_321,
+            is_snapshot: false,
+        }
+    }
+
     #[test]
     fn test_recorder_col_counts_are_param_cap_safe() {
-        // 5/6 欄經 chunk 數學夾到 MAX_CHUNK_ROWS=10000，距 65535 巨大裕度。
+        // 5/6/9 欄經 chunk 數學夾到 MAX_CHUNK_ROWS=10000，距 65535 巨大裕度。
         assert_eq!(RAW_TRADE_COLS, 5);
         assert_eq!(OB_TOP_COLS, 6);
+        assert_eq!(L1_EVENT_COLS, 9);
         let raw_chunk = crate::database::batch_insert::chunk_rows_for_columns(RAW_TRADE_COLS);
         let ob_chunk = crate::database::batch_insert::chunk_rows_for_columns(OB_TOP_COLS);
+        let l1_chunk = crate::database::batch_insert::chunk_rows_for_columns(L1_EVENT_COLS);
         assert_eq!(raw_chunk, 10_000); // 65535/5=13107 clamp 10000
         assert_eq!(ob_chunk, 10_000); // 65535/6=10922 clamp 10000
+        assert_eq!(l1_chunk, 7281); // 65535/9=7281，未觸 MAX_CHUNK_ROWS
         assert!(raw_chunk * RAW_TRADE_COLS <= 65_535);
         assert!(ob_chunk * OB_TOP_COLS <= 65_535);
+        assert!(l1_chunk * L1_EVENT_COLS <= 65_535); // 7281×9=65529
+    }
+
+    #[test]
+    fn test_validated_l1_event_row_accepts_and_rejects() {
+        let clean = make_l1_event_msg();
+        let row = validated_l1_event_row(&clean).unwrap();
+        assert_eq!(row.symbol, "BTCUSDT");
+        assert_eq!(row.update_id, 123_456_789);
+        assert_eq!(row.seq, 987_654_321);
+        assert!(!row.is_snapshot);
+        // 任一價量欄非有限值 → 整筆丟棄（NOT NULL fail-soft）。
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut msg = make_l1_event_msg();
+            if let MarketDataMsg::L1Event { best_bid, .. } = &mut msg {
+                *best_bid = bad;
+            }
+            assert!(validated_l1_event_row(&msg).is_none());
+        }
+    }
+
+    #[test]
+    fn test_l1_event_serializes_and_routes_to_other_buf() {
+        let s = serde_json::to_string(&make_l1_event_msg()).expect("L1Event serializes");
+        assert!(s.contains("L1Event") && s.contains("update_id"));
+        assert!(matches!(make_l1_event_msg(), MarketDataMsg::L1Event { .. }));
     }
 
     #[test]

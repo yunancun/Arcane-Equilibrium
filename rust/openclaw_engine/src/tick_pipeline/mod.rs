@@ -1049,6 +1049,15 @@ pub struct TickPipeline {
     /// 默認 OFF = cold-start 零行為改變（既有 1m 聚合路徑完全不動）。
     /// Forward-recorder master switch; default OFF for zero behavior change.
     record_ticks: bool,
+    /// recorder-v2：有狀態 per-symbol L1 本地簿重建器，emit full BBO 事件流。
+    /// 由 OPENCLAW_RECORD_L1_EVENTS gate；flag-OFF 時不被 process_market_events 呼叫。
+    /// recorder-v2: stateful L1 book tracker (gated by OPENCLAW_RECORD_L1_EVENTS).
+    l1_book_tracker: crate::database::l1_book_tracker::L1BookTracker,
+    /// recorder-v2 總開關（獨立於 record_ticks，gate 不同表）。OPENCLAW_RECORD_L1_EVENTS=1
+    /// 才 emit L1Event；默認 OFF（比 v1 更保守，因 recorder-v2 對活引擎施加更重的
+    /// 持續負載：每 ~20ms delta 都要 apply 有狀態 BTreeMap 本地簿）。
+    /// recorder-v2 master switch; default OFF (heavier sustained load than v1).
+    record_l1_events: bool,
     /// PNL-3: Boot timestamp (set on first tick) for cooldown gating.
     /// PNL-3：啟動時間戳（首個 tick 設定），用於冷卻期門控。
     boot_ts_ms: Option<u64>,

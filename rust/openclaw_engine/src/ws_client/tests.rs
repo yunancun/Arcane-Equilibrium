@@ -195,14 +195,96 @@ fn test_parse_orderbook_snapshot() {
         "s": "BTCUSDT",
         "b": [["65000.0", "1.5"], ["64999.0", "2.0"]],
         "a": [["65001.0", "0.8"], ["65002.0", "1.2"]],
+        "u": 100_u64,
+        "seq": 5000_u64,
         "ts": 1700000000000_u64
     })];
-    let event = parse_orderbook_snapshot(&data, "orderbook.50.BTCUSDT").unwrap();
+    // record_l1=true → 走 recorder-v2 ON 路徑（full-depth 解析 + ob_* 欄 populate）。
+    let event =
+        parse_orderbook_snapshot(&data, "orderbook.50.BTCUSDT", Some("snapshot"), true).unwrap();
     assert_eq!(event.symbol, "BTCUSDT");
     assert!((event.bid_price - 65000.0).abs() < f64::EPSILON);
     assert!((event.ask_price - 65001.0).abs() < f64::EPSILON);
     assert!((event.last_price - 65000.5).abs() < f64::EPSILON); // mid price
     assert_eq!(event.metadata.get("type").unwrap(), "orderbook");
+    // recorder-v2 additive 欄位：type/u/seq + 全變更檔（record_l1=true 才填）。
+    assert_eq!(event.ob_msg_type.as_deref(), Some("snapshot"));
+    assert_eq!(event.ob_update_id, Some(100));
+    assert_eq!(event.ob_seq, Some(5000));
+    assert_eq!(event.ob_changed_bids.as_ref().unwrap().len(), 2);
+    assert_eq!(event.ob_changed_asks.as_ref().unwrap().len(), 2);
+}
+
+/// recorder-v2 producer-side gate 的 inertness 保證：record_l1=false 時 parser
+/// 完全不做 full-depth 解析——5 個 ob_* 欄保持 None；但 v1 路徑（best-bid/ask、
+/// mid、bids5/asks5、metadata）必須與 flag-ON 時位元級相同（二進制 inert）。
+#[test]
+fn test_parse_orderbook_snapshot_record_l1_off_is_inert() {
+    let data = vec![serde_json::json!({
+        "s": "BTCUSDT",
+        // > 5 檔，驗 v1 仍只取前 5、且 ob_changed_* 不被計算。
+        "b": [
+            ["65000.0", "1.5"], ["64999.0", "2.0"], ["64998.0", "1.0"],
+            ["64997.0", "1.0"], ["64996.0", "1.0"], ["64995.0", "1.0"]
+        ],
+        "a": [["65001.0", "0.8"], ["65002.0", "1.2"]],
+        "u": 100_u64,
+        "seq": 5000_u64,
+        "ts": 1700000000000_u64
+    })];
+    // record_l1=false → recorder-v2 ON 路徑全部 SKIP。
+    let event =
+        parse_orderbook_snapshot(&data, "orderbook.50.BTCUSDT", Some("snapshot"), false).unwrap();
+    // recorder-v2 的 5 個 ob_* 欄全 None（PriceEvent::new 預設，未被 populate）。
+    assert_eq!(event.ob_msg_type, None);
+    assert_eq!(event.ob_changed_bids, None);
+    assert_eq!(event.ob_changed_asks, None);
+    assert_eq!(event.ob_update_id, None);
+    assert_eq!(event.ob_seq, None);
+    // v1 路徑與 ON 時完全一致（inert 保證）。
+    assert_eq!(event.symbol, "BTCUSDT");
+    assert!((event.bid_price - 65000.0).abs() < f64::EPSILON);
+    assert!((event.ask_price - 65001.0).abs() < f64::EPSILON);
+    assert!((event.last_price - 65000.5).abs() < f64::EPSILON); // mid price
+    assert_eq!(event.metadata.get("type").unwrap(), "orderbook");
+    // bids5/asks5 仍只取前 5（v1 行為不變）。
+    assert_eq!(event.bids5.as_ref().unwrap().len(), 5);
+    assert_eq!(event.asks5.as_ref().unwrap().len(), 2);
+}
+
+/// recorder-v2：delta-shaped 消息（含 qty=0 刪除、亂序、部分變更、字串編碼 u/seq）。
+/// 驗 parse_orderbook_snapshot 完整保留全部變更檔（不截前 5、不丟 qty==0），
+/// 並正確穿過 type="delta" 與 u/seq；BBO 解析交由 L1BookTracker（此處只驗 parser 抽取）。
+#[test]
+fn test_parse_orderbook_delta_keeps_full_levels_and_meta() {
+    let data = vec![serde_json::json!({
+        "s": "BTCUSDT",
+        // delta：亂序、含 qty=0 刪除、> 5 檔（驗不被 take(5) 截斷）。
+        "b": [
+            ["64998.0", "3.0"], ["65000.0", "0"], ["64999.0", "2.0"],
+            ["64997.0", "1.0"], ["64996.0", "1.0"], ["64995.0", "1.0"], ["64994.0", "1.0"]
+        ],
+        "a": [["65003.0", "0"]],
+        "u": "200",
+        "seq": "5100",
+        "ts": 1700000000050_u64
+    })];
+    // record_l1=true → 驗 full-depth 解析保留全部變更檔（不截前 5）。
+    let event =
+        parse_orderbook_snapshot(&data, "orderbook.50.BTCUSDT", Some("delta"), true).unwrap();
+    assert_eq!(event.ob_msg_type.as_deref(), Some("delta"));
+    assert_eq!(event.ob_update_id, Some(200)); // 字串編碼 u 也能解析
+    assert_eq!(event.ob_seq, Some(5100));
+    // 全 7 檔買盤變更（含 qty=0 刪除）全保留，不被 .take(5) 截斷。
+    let cb = event.ob_changed_bids.as_ref().unwrap();
+    assert_eq!(cb.len(), 7, "full changed bid levels preserved, not top-5");
+    // qty==0 的刪除標記原樣保留（tracker 端才據此 remove）。
+    assert!(cb.iter().any(|(p, q)| (*p - 65000.0).abs() < 1e-9 && *q == 0.0));
+    let ca = event.ob_changed_asks.as_ref().unwrap();
+    assert_eq!(ca.len(), 1);
+    assert!(ca.iter().any(|(p, q)| (*p - 65003.0).abs() < 1e-9 && *q == 0.0));
+    // v1 的 bids5/asks5 仍只取前 5（向後相容）。
+    assert_eq!(event.bids5.as_ref().unwrap().len(), 5);
 }
 
 #[test]
