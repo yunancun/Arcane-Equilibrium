@@ -44,6 +44,10 @@ const OI_COLS: usize = 4;
 const LSR_COLS: usize = 5;
 const REGIME_SNAP_COLS: usize = 5;
 const REGIME_TRANS_COLS: usize = 6;
+// Sub-second 前向錄製：market.trades 5 欄 / market.ob_top 6 欄。
+// 5/6 欄經 chunk_rows_for_columns clamp 到 MAX_CHUNK_ROWS=10000，遠低 65535 參數上限。
+const RAW_TRADE_COLS: usize = 5;
+const OB_TOP_COLS: usize = 6;
 
 #[derive(Debug, Clone, Copy)]
 struct LiquidationRow<'a> {
@@ -364,6 +368,8 @@ async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     let mut lsr = Vec::new();
     let mut regime_snap = Vec::new();
     let mut regime_trans = Vec::new();
+    let mut raw_trades = Vec::new();
+    let mut ob_top = Vec::new();
 
     for msg in buf.drain(..) {
         match msg {
@@ -375,6 +381,8 @@ async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
             m @ MarketDataMsg::LongShortRatio { .. } => lsr.push(m),
             m @ MarketDataMsg::RegimeSnapshot { .. } => regime_snap.push(m),
             m @ MarketDataMsg::RegimeTransition { .. } => regime_trans.push(m),
+            m @ MarketDataMsg::RawTrade { .. } => raw_trades.push(m),
+            m @ MarketDataMsg::ObTop { .. } => ob_top.push(m),
             _ => {} // kline/ticker handled by dedicated flushers
         }
     }
@@ -402,6 +410,12 @@ async fn flush_other(pool: &DbPool, buf: &mut Vec<MarketDataMsg>) {
     }
     if !regime_trans.is_empty() {
         flush_regime_transitions(pg, pool, &regime_trans).await;
+    }
+    if !raw_trades.is_empty() {
+        flush_raw_trades(pg, pool, &raw_trades).await;
+    }
+    if !ob_top.is_empty() {
+        flush_ob_top(pg, pool, &ob_top).await;
     }
 }
 
@@ -478,6 +492,133 @@ async fn flush_trade_agg(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]
                 b.push_bind(sanitize_f64(*vwap).map(|v| v as f32));
                 b.push_bind(sanitize_f64(*max_single_qty).map(|v| v as f32));
             }
+        });
+        qb.push(" ON CONFLICT (symbol, ts) DO NOTHING");
+        qb
+    })
+    .await;
+}
+
+// ── Sub-second 前向錄製：market.trades + market.ob_top ──
+
+#[derive(Debug, Clone, Copy)]
+struct RawTradeRow<'a> {
+    ts: chrono::DateTime<chrono::Utc>,
+    symbol: &'a str,
+    side: &'a str,
+    price: f32,
+    qty: f32,
+}
+
+/// 校驗一筆 RawTrade → RawTradeRow。
+///
+/// 為什麼 fail-soft 丟整筆：market.trades 全欄 REAL NOT NULL，任一欄非有限值若以
+/// NULL 綁定會違反 NOT NULL 並使整個 batch abort（牽連無辜行）；故非法 row 直接丟棄。
+fn validated_raw_trade_row(msg: &MarketDataMsg) -> Option<RawTradeRow<'_>> {
+    let MarketDataMsg::RawTrade {
+        ts_ms,
+        symbol,
+        side,
+        price,
+        qty,
+    } = msg
+    else {
+        return None;
+    };
+    let ts = chrono::DateTime::from_timestamp_millis(*ts_ms as i64)?;
+    let price = sanitize_f64(*price)? as f32;
+    let qty = sanitize_f64(*qty)? as f32;
+    Some(RawTradeRow {
+        ts,
+        symbol: symbol.as_str(),
+        side: side.as_str(),
+        price,
+        qty,
+    })
+}
+
+/// Batch INSERT 逐筆成交到 market.trades（5 欄，5-tuple PK ON CONFLICT DO NOTHING）。
+/// mirror flush_liquidations：先 validate-collect 再 chunk insert。
+async fn flush_raw_trades(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
+    let rows: Vec<_> = buf.iter().filter_map(validated_raw_trade_row).collect();
+    if rows.is_empty() {
+        return;
+    }
+    batch_insert_chunked(
+        pg,
+        pool,
+        "market.trades",
+        rows.as_slice(),
+        RAW_TRADE_COLS,
+        |chunk| {
+            let mut qb: QueryBuilder<Postgres> =
+                QueryBuilder::new("INSERT INTO market.trades (ts, symbol, side, price, qty) ");
+            qb.push_values(chunk, |mut b, row| {
+                b.push_bind(row.ts);
+                b.push_bind(row.symbol);
+                b.push_bind(row.side);
+                b.push_bind(row.price);
+                b.push_bind(row.qty);
+            });
+            qb.push(" ON CONFLICT (symbol, ts, side, price, qty) DO NOTHING");
+            qb
+        },
+    )
+    .await;
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ObTopRow<'a> {
+    ts: chrono::DateTime<chrono::Utc>,
+    symbol: &'a str,
+    best_bid: f32,
+    bid_size: f32,
+    best_ask: f32,
+    ask_size: f32,
+}
+
+/// 校驗一筆 ObTop → ObTopRow。market.ob_top 全欄 REAL NOT NULL，同 raw trade
+/// fail-soft：任一欄非有限值丟整筆。
+fn validated_ob_top_row(msg: &MarketDataMsg) -> Option<ObTopRow<'_>> {
+    let MarketDataMsg::ObTop {
+        ts_ms,
+        symbol,
+        best_bid,
+        bid_size,
+        best_ask,
+        ask_size,
+    } = msg
+    else {
+        return None;
+    };
+    let ts = chrono::DateTime::from_timestamp_millis(*ts_ms as i64)?;
+    Some(ObTopRow {
+        ts,
+        symbol: symbol.as_str(),
+        best_bid: sanitize_f64(*best_bid)? as f32,
+        bid_size: sanitize_f64(*bid_size)? as f32,
+        best_ask: sanitize_f64(*best_ask)? as f32,
+        ask_size: sanitize_f64(*ask_size)? as f32,
+    })
+}
+
+/// Batch INSERT L1 top-of-book 取樣到 market.ob_top（6 欄，2-tuple PK ON CONFLICT DO NOTHING）。
+async fn flush_ob_top(pg: &sqlx::PgPool, pool: &DbPool, buf: &[MarketDataMsg]) {
+    let rows: Vec<_> = buf.iter().filter_map(validated_ob_top_row).collect();
+    if rows.is_empty() {
+        return;
+    }
+    batch_insert_chunked(pg, pool, "market.ob_top", rows.as_slice(), OB_TOP_COLS, |chunk| {
+        let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+            "INSERT INTO market.ob_top (ts, symbol, best_bid, bid_size, best_ask, ask_size) ",
+        );
+        qb.push_values(chunk, |mut b, row| {
+            b.push_bind(row.ts);
+            b.push_bind(row.symbol);
+            b.push_bind(row.best_bid);
+            b.push_bind(row.bid_size);
+            b.push_bind(row.best_ask);
+            b.push_bind(row.ask_size);
         });
         qb.push(" ON CONFLICT (symbol, ts) DO NOTHING");
         qb
@@ -815,6 +956,104 @@ mod tests {
             }
             assert!(validated_liquidation_row(&msg).is_none());
         }
+    }
+
+    // ── Sub-second 前向錄製：RawTrade / ObTop 測試 ──
+
+    fn make_raw_trade_msg() -> MarketDataMsg {
+        MarketDataMsg::RawTrade {
+            ts_ms: 1_700_000_000_000,
+            symbol: "BTCUSDT".into(),
+            side: "Buy".into(),
+            price: 64_000.0,
+            qty: 0.5,
+        }
+    }
+
+    fn make_ob_top_msg() -> MarketDataMsg {
+        MarketDataMsg::ObTop {
+            ts_ms: 1_700_000_000_000,
+            symbol: "BTCUSDT".into(),
+            best_bid: 63_999.5,
+            bid_size: 10.0,
+            best_ask: 64_000.5,
+            ask_size: 12.0,
+        }
+    }
+
+    #[test]
+    fn test_recorder_col_counts_are_param_cap_safe() {
+        // 5/6 欄經 chunk 數學夾到 MAX_CHUNK_ROWS=10000，距 65535 巨大裕度。
+        assert_eq!(RAW_TRADE_COLS, 5);
+        assert_eq!(OB_TOP_COLS, 6);
+        let raw_chunk = crate::database::batch_insert::chunk_rows_for_columns(RAW_TRADE_COLS);
+        let ob_chunk = crate::database::batch_insert::chunk_rows_for_columns(OB_TOP_COLS);
+        assert_eq!(raw_chunk, 10_000); // 65535/5=13107 clamp 10000
+        assert_eq!(ob_chunk, 10_000); // 65535/6=10922 clamp 10000
+        assert!(raw_chunk * RAW_TRADE_COLS <= 65_535);
+        assert!(ob_chunk * OB_TOP_COLS <= 65_535);
+    }
+
+    #[test]
+    fn test_validated_raw_trade_row_accepts_clean_payload() {
+        let msg = make_raw_trade_msg();
+        let row = validated_raw_trade_row(&msg).unwrap();
+        assert_eq!(row.symbol, "BTCUSDT");
+        assert_eq!(row.side, "Buy");
+        assert!((row.price - 64_000.0).abs() < f32::EPSILON);
+        assert!((row.qty - 0.5).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_validated_raw_trade_row_rejects_non_finite() {
+        for bad in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut msg = make_raw_trade_msg();
+            if let MarketDataMsg::RawTrade { price, .. } = &mut msg {
+                *price = bad;
+            }
+            assert!(validated_raw_trade_row(&msg).is_none());
+            let mut msg = make_raw_trade_msg();
+            if let MarketDataMsg::RawTrade { qty, .. } = &mut msg {
+                *qty = bad;
+            }
+            assert!(validated_raw_trade_row(&msg).is_none());
+        }
+    }
+
+    #[test]
+    fn test_validated_ob_top_row_accepts_and_rejects() {
+        let clean = make_ob_top_msg();
+        let row = validated_ob_top_row(&clean).unwrap();
+        assert_eq!(row.symbol, "BTCUSDT");
+        assert!((row.best_bid - 63_999.5).abs() < 1.0);
+        // 任一欄非有限值 → 整筆丟棄（NOT NULL fail-soft）。
+        for bad in [f64::NAN, f64::INFINITY] {
+            let mut msg = make_ob_top_msg();
+            if let MarketDataMsg::ObTop { ask_size, .. } = &mut msg {
+                *ask_size = bad;
+            }
+            assert!(validated_ob_top_row(&msg).is_none());
+        }
+    }
+
+    #[test]
+    fn test_recorder_variants_serialize_for_jsonl_fallback() {
+        // PA §3.2：JSONL fallback 經 serde::Serialize 自動覆蓋；驗兩變體可序列化。
+        let raw = serde_json::to_string(&make_raw_trade_msg()).expect("RawTrade serializes");
+        assert!(raw.contains("RawTrade") && raw.contains("BTCUSDT"));
+        let ob = serde_json::to_string(&make_ob_top_msg()).expect("ObTop serializes");
+        assert!(ob.contains("ObTop") && ob.contains("best_bid"));
+    }
+
+    #[test]
+    fn test_recorder_variants_route_to_other_buf() {
+        // RawTrade/ObTop 不是 kline/ticker，應路由進 other_buf（flush_other 處理）。
+        for m in [make_raw_trade_msg(), make_ob_top_msg()] {
+            assert!(!matches!(m, MarketDataMsg::KlineClose { .. }));
+            assert!(!matches!(m, MarketDataMsg::TickerSnapshot { .. }));
+        }
+        assert!(matches!(make_raw_trade_msg(), MarketDataMsg::RawTrade { .. }));
+        assert!(matches!(make_ob_top_msg(), MarketDataMsg::ObTop { .. }));
     }
 
     #[test]

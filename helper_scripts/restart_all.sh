@@ -617,6 +617,7 @@ restart_engine() {
         DEEPSEEK_API_KEY="${deepseek_api_key}" \
         OPENCLAW_EDGE_RELOAD="${OPENCLAW_EDGE_RELOAD:-1}" \
         OPENCLAW_EDGE_RELOAD_INTERVAL_SECS="${OPENCLAW_EDGE_RELOAD_INTERVAL_SECS:-300}" \
+        OPENCLAW_RECORD_TICKS="${OPENCLAW_RECORD_TICKS:-1}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 0<&- 200<&- &
     echo "    PID: $!"
 }

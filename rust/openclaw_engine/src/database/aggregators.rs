@@ -310,6 +310,132 @@ impl ObAggregator {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// ObTopSampler — L1 top-of-book 取樣節流（sub-second 前向錄製）
+// ═══════════════════════════════════════════════════════════════════
+
+/// 默認最小取樣間隔（毫秒）。同 symbol 相鄰落盤至少間隔此值，除非 top-of-book
+/// 有意義變化。可由 OPENCLAW_OB_TOP_SAMPLE_MS env 覆蓋。
+/// Default min sample interval (ms) for ObTopSampler.
+pub const OB_TOP_DEFAULT_SAMPLE_MS: u64 = 250;
+
+#[derive(Debug, Clone, Copy)]
+struct ObTopState {
+    last_emit_ms: u64,
+    best_bid: f64,
+    bid_size: f64,
+    best_ask: f64,
+    ask_size: f64,
+}
+
+/// Per-symbol L1 top-of-book 取樣器。
+///
+/// 為什麼節流：orderbook.50 在熱門 symbol 上 update rate 極高，逐筆落盤 = full-rate
+/// 爆儲存（TB/週級）。本取樣器以「時間節流」為主閘：保證同 symbol 相鄰 emit 間隔
+/// 嚴格 ≥ `sample_interval_ms`（默認 250ms）—— 此上界對任意輸入恆成立，**不可被
+/// 繞過**（這是儲存量 < 40GB 駐留與 E2 審查點 #2 的硬保證）。
+///
+/// 「有意義變化」在此作為**節流窗內的去重旁路**：時間閘未過時，若 top-of-book
+/// 相對上次落盤值毫無變化，則連 emit 都省（不寫重複行）；但變化本身**不會**讓
+/// 落盤頻率超過時間閘上界。PA §2.2 原文「250ms 或有意義變化」字面允許變化在
+/// 窗內也 emit，但那會在熱門 symbol 上退化成 full-rate（違 E2 #2 與儲存估算）；
+/// 故取最小安全解：時間閘為硬上界，變化僅決定「過閘後是否值得寫」。
+/// 這仍補回 ObAggregator（每分鐘只留最後一筆）丟棄的 sub-minute 粒度。
+///
+/// 不變量：純 in-memory HashMap 查詢，開銷與 ObAggregator.record 同量級；
+/// 不阻塞、不持鎖、無 await。狀態由 TickPipeline 擁有。
+#[derive(Debug)]
+pub struct ObTopSampler {
+    states: HashMap<String, ObTopState>,
+    sample_interval_ms: u64,
+}
+
+impl ObTopSampler {
+    pub fn new(sample_interval_ms: u64) -> Self {
+        Self {
+            states: HashMap::new(),
+            sample_interval_ms,
+        }
+    }
+
+    /// 從 env 讀取取樣間隔（OPENCLAW_OB_TOP_SAMPLE_MS），缺省 250ms。
+    pub fn from_env() -> Self {
+        let interval = std::env::var("OPENCLAW_OB_TOP_SAMPLE_MS")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|&v| v > 0)
+            .unwrap_or(OB_TOP_DEFAULT_SAMPLE_MS);
+        Self::new(interval)
+    }
+
+    /// 接收一筆 OB 快照的 top-of-book，決定是否落盤。
+    ///
+    /// 回傳 `Some(MarketDataMsg::ObTop)` 代表通過取樣節流應落盤；`None` 代表被節流丟棄。
+    /// 取樣規則：距上次同 symbol emit ≥ sample_interval_ms **或** top-of-book 有意義變化。
+    pub fn record(
+        &mut self,
+        symbol: &str,
+        bids: &[(f64, f64)],
+        asks: &[(f64, f64)],
+        ts_ms: u64,
+    ) -> Option<MarketDataMsg> {
+        // fail-soft：缺最優買賣一檔或非有限值不落盤（避免寫入髒值）。
+        let (best_bid, bid_size) = *bids.first()?;
+        let (best_ask, ask_size) = *asks.first()?;
+        if !best_bid.is_finite()
+            || !bid_size.is_finite()
+            || !best_ask.is_finite()
+            || !ask_size.is_finite()
+        {
+            return None;
+        }
+
+        let should_emit = match self.states.get(symbol) {
+            None => true, // 首見 symbol 必落盤
+            Some(prev) => {
+                let elapsed = ts_ms.saturating_sub(prev.last_emit_ms);
+                // 時間閘=硬上界：未過閘一律不 emit（保證相鄰 ts ≥ sample_interval_ms）。
+                if elapsed < self.sample_interval_ms {
+                    return None;
+                }
+                // 過閘後再以「有意義變化」去重：top-of-book 毫無變化則省略重複寫入。
+                best_bid != prev.best_bid
+                    || bid_size != prev.bid_size
+                    || best_ask != prev.best_ask
+                    || ask_size != prev.ask_size
+            }
+        };
+
+        if !should_emit {
+            return None;
+        }
+
+        self.states.insert(
+            symbol.to_string(),
+            ObTopState {
+                last_emit_ms: ts_ms,
+                best_bid,
+                bid_size,
+                best_ask,
+                ask_size,
+            },
+        );
+
+        Some(MarketDataMsg::ObTop {
+            ts_ms,
+            symbol: symbol.to_string(),
+            best_bid,
+            bid_size,
+            best_ask,
+            ask_size,
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.states.len()
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Tests / 測試
 // ═══════════════════════════════════════════════════════════════════
 
@@ -482,5 +608,117 @@ mod tests {
         assert_eq!(agg.len(), 2);
         let drained = agg.drain();
         assert_eq!(drained.len(), 2);
+    }
+
+    // ── ObTopSampler 取樣節流測試 ──
+
+    fn ob_top_ts(msg: &MarketDataMsg) -> u64 {
+        match msg {
+            MarketDataMsg::ObTop { ts_ms, .. } => *ts_ms,
+            _ => panic!("expected ObTop"),
+        }
+    }
+
+    #[test]
+    fn test_ob_top_sampler_first_event_always_emits() {
+        let mut s = ObTopSampler::new(250);
+        let bids = vec![(100.0, 5.0)];
+        let asks = vec![(101.0, 7.0)];
+        let m = s.record("BTCUSDT", &bids, &asks, 1_000).expect("first emits");
+        match m {
+            MarketDataMsg::ObTop {
+                symbol,
+                best_bid,
+                bid_size,
+                best_ask,
+                ask_size,
+                ts_ms,
+            } => {
+                assert_eq!(symbol, "BTCUSDT");
+                assert!((best_bid - 100.0).abs() < f64::EPSILON);
+                assert!((bid_size - 5.0).abs() < f64::EPSILON);
+                assert!((best_ask - 101.0).abs() < f64::EPSILON);
+                assert!((ask_size - 7.0).abs() < f64::EPSILON);
+                assert_eq!(ts_ms, 1_000);
+            }
+            _ => panic!("expected ObTop"),
+        }
+    }
+
+    #[test]
+    fn test_ob_top_sampler_throttle_is_hard_upper_bound() {
+        // 時間閘=硬上界：窗內即使 top-of-book 變化也不得 emit（防 full-rate 爆儲存，E2 #2）。
+        let mut s = ObTopSampler::new(250);
+        let bids0 = vec![(100.0, 5.0)];
+        let asks0 = vec![(101.0, 7.0)];
+        assert!(s.record("BTCUSDT", &bids0, &asks0, 1_000).is_some()); // 首筆 emit @1000
+        // 1010ms：距上次 10ms < 250ms，即使價量變化也必須被節流丟棄。
+        let bids1 = vec![(100.5, 6.0)];
+        let asks1 = vec![(101.5, 8.0)];
+        assert!(s.record("BTCUSDT", &bids1, &asks1, 1_010).is_none());
+        // 1100ms：仍在窗內（距 1000ms 才 100ms），丟棄。
+        assert!(s.record("BTCUSDT", &bids1, &asks1, 1_100).is_none());
+        // 1250ms：距上次 emit 恰 250ms 過閘 + 有變化 → emit。
+        let m = s.record("BTCUSDT", &bids1, &asks1, 1_250).expect("gate passed");
+        assert_eq!(ob_top_ts(&m), 1_250);
+    }
+
+    #[test]
+    fn test_ob_top_sampler_dedup_unchanged_after_gate() {
+        // 過閘後若 top-of-book 毫無變化則去重（不寫重複行）。
+        let mut s = ObTopSampler::new(250);
+        let bids = vec![(100.0, 5.0)];
+        let asks = vec![(101.0, 7.0)];
+        assert!(s.record("BTCUSDT", &bids, &asks, 1_000).is_some());
+        // 1300ms：過閘但完全相同 → 去重，不 emit（last_emit_ms 維持 1000）。
+        assert!(s.record("BTCUSDT", &bids, &asks, 1_300).is_none());
+        // 1600ms：距首筆 emit 600ms 過閘 + size 變化 → emit。
+        let bids2 = vec![(100.0, 9.0)];
+        let m = s.record("BTCUSDT", &bids2, &asks, 1_600).expect("changed emits");
+        assert_eq!(ob_top_ts(&m), 1_600);
+    }
+
+    #[test]
+    fn test_ob_top_sampler_per_symbol_independent() {
+        // 不同 symbol 各自獨立計時，互不影響。
+        let mut s = ObTopSampler::new(250);
+        let bids = vec![(100.0, 5.0)];
+        let asks = vec![(101.0, 7.0)];
+        assert!(s.record("BTCUSDT", &bids, &asks, 1_000).is_some());
+        assert!(s.record("ETHUSDT", &bids, &asks, 1_000).is_some()); // 各自首筆都 emit
+        assert_eq!(s.len(), 2);
+        // BTCUSDT 窗內丟棄，ETHUSDT 同窗內也丟棄，互不解鎖。
+        assert!(s.record("BTCUSDT", &bids, &asks, 1_050).is_none());
+        assert!(s.record("ETHUSDT", &bids, &asks, 1_050).is_none());
+    }
+
+    #[test]
+    fn test_ob_top_sampler_rejects_empty_and_non_finite() {
+        let mut s = ObTopSampler::new(250);
+        let bids = vec![(100.0, 5.0)];
+        let asks = vec![(101.0, 7.0)];
+        assert!(s.record("BTCUSDT", &[], &asks, 1_000).is_none()); // 缺 bid
+        assert!(s.record("BTCUSDT", &bids, &[], 1_000).is_none()); // 缺 ask
+        let nan_bids = vec![(f64::NAN, 5.0)];
+        assert!(s.record("BTCUSDT", &nan_bids, &asks, 1_000).is_none()); // 非有限
+        assert_eq!(s.len(), 0); // 全被拒，無狀態寫入
+    }
+
+    #[test]
+    fn test_ob_top_sampler_throttle_caps_emit_rate() {
+        // 1 秒內 100 筆全變化的 tick @10ms cadence，250ms 閘下至多 ~4 筆 emit。
+        let mut s = ObTopSampler::new(250);
+        let mut emits = 0;
+        for i in 0..100u64 {
+            let ts = 1_000 + i * 10; // 1000..1990ms
+            let bids = vec![(100.0 + i as f64 * 0.01, 5.0)];
+            let asks = vec![(101.0 + i as f64 * 0.01, 7.0)];
+            if s.record("BTCUSDT", &bids, &asks, ts).is_some() {
+                emits += 1;
+            }
+        }
+        // 990ms 跨度 / 250ms 閘 + 首筆 → 上界 ~5；證明遠低於 full-rate 100。
+        assert!(emits <= 5, "throttle must cap emits, got {emits}");
+        assert!(emits >= 4, "should emit roughly every 250ms, got {emits}");
     }
 }

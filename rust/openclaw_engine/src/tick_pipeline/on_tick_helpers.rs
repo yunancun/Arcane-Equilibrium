@@ -713,6 +713,23 @@ impl TickPipeline {
                     })
                     .unwrap_or(0.0);
                 if let Some(side) = side {
+                    // Sub-second 前向錄製（additive）：record_ticks ON 時把逐筆成交原樣
+                    // try_send 進既有 writer。非阻塞（channel 滿即丟 = fail-soft，不回壓
+                    // tick loop），無 await/無鎖；side 直接用枚舉的標準形 Buy/Sell。
+                    if self.record_ticks {
+                        if let Some(ref tx) = self.market_data_tx {
+                            let _ = tx.try_send(crate::database::MarketDataMsg::RawTrade {
+                                ts_ms: event.ts_ms,
+                                symbol: event.symbol.clone(),
+                                side: match side {
+                                    crate::database::aggregators::TradeSide::Buy => "Buy".into(),
+                                    crate::database::aggregators::TradeSide::Sell => "Sell".into(),
+                                },
+                                price: event.last_price,
+                                qty,
+                            });
+                        }
+                    }
                     if let Some(msg) = self.trade_aggregator.record(
                         &event.symbol,
                         side,
@@ -750,6 +767,19 @@ impl TickPipeline {
                     })
                     .unwrap_or_default();
                 if !bids.is_empty() && !asks.is_empty() {
+                    // Sub-second 前向錄製（additive）：record_ticks ON 時把 L1 top-of-book
+                    // 過取樣節流（ObTopSampler，~250ms 硬上界）後 try_send。非阻塞 fail-soft，
+                    // 無 await/無鎖；節流的 HashMap 查詢與 ob_aggregator.record 同量級開銷。
+                    if self.record_ticks {
+                        if let Some(msg) =
+                            self.ob_top_sampler
+                                .record(&event.symbol, &bids, &asks, event.ts_ms)
+                        {
+                            if let Some(ref tx) = self.market_data_tx {
+                                let _ = tx.try_send(msg);
+                            }
+                        }
+                    }
                     if let Some(msg) =
                         self.ob_aggregator
                             .record(&event.symbol, &bids, &asks, event.ts_ms)
