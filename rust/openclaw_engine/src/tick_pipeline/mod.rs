@@ -1041,6 +1041,14 @@ pub struct TickPipeline {
     /// Session 11: 1-minute orderbook aggregator (idle writer #1 fix).
     /// Session 11：1 分鐘訂單簿聚合器（idle writer #1 修復）。
     ob_aggregator: crate::database::aggregators::ObAggregator,
+    /// Sub-second 前向錄製：L1 top-of-book 取樣節流器（OPENCLAW_RECORD_TICKS gate）。
+    /// 與 ob_aggregator 並存，補回每分鐘聚合丟棄的 sub-minute 粒度。
+    /// Sub-second recorder: L1 top-of-book sampler (gated by OPENCLAW_RECORD_TICKS).
+    ob_top_sampler: crate::database::aggregators::ObTopSampler,
+    /// Sub-second 前向錄製總開關。OPENCLAW_RECORD_TICKS=1 才 emit RawTrade/ObTop；
+    /// 默認 OFF = cold-start 零行為改變（既有 1m 聚合路徑完全不動）。
+    /// Forward-recorder master switch; default OFF for zero behavior change.
+    record_ticks: bool,
     /// PNL-3: Boot timestamp (set on first tick) for cooldown gating.
     /// PNL-3：啟動時間戳（首個 tick 設定），用於冷卻期門控。
     boot_ts_ms: Option<u64>,

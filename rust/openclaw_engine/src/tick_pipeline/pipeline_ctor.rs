@@ -107,6 +107,12 @@ impl TickPipeline {
             halt_set_ts_ms: 0,
             trade_aggregator: crate::database::aggregators::TradeAggregator::new(),
             ob_aggregator: crate::database::aggregators::ObAggregator::new(),
+            // Sub-second 前向錄製：取樣器從 env 讀間隔；總開關 record_ticks 默認 OFF，
+            // 須 OPENCLAW_RECORD_TICKS=1 才 emit（cold-start 零行為改變）。
+            ob_top_sampler: crate::database::aggregators::ObTopSampler::from_env(),
+            record_ticks: std::env::var("OPENCLAW_RECORD_TICKS")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
             boot_ts_ms: None,
             boot_cooldown_ms: std::env::var("OPENCLAW_BOOT_COOLDOWN_MS")
                 .ok()
