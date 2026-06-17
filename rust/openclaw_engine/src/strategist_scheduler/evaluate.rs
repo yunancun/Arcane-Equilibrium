@@ -9,7 +9,10 @@
 //! loop、metrics SQL、參數 IPC helper 與 `PairMetrics` DTO；`mod.rs` re-export
 //! 保持外部路徑不變。
 
-use super::{validate_recommendation_with_reason, StrategistScheduler};
+use super::{
+    validate_recommendation_with_reason, validate_recommendation_with_reason_rich,
+    CellEstimateView, RichInputs, StrategistScheduler,
+};
 use crate::strategies::ParamRange;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind};
 use serde::{Deserialize, Serialize};
@@ -23,6 +26,11 @@ const MAX_EVALS_PER_CYCLE: usize = 10;
 const MIN_SAMPLE_COUNT: i64 = 30;
 const NORMAL_INTERVAL: Duration = Duration::from_secs(300);
 const NORMAL_PARAM_DELTA_SKILL_PCT: f64 = 0.30;
+
+/// Phase 1 regime 自算窗口（1m bar 數）。對齊 `HurstConfig` 預設 window_size=128
+/// （~2 小時 1m），min_window=8。compute_hurst 要求 len >= min_window*4=32。
+const REGIME_WINDOW: usize = 128;
+const REGIME_MIN_WINDOW: usize = 8;
 
 /// Per-strategy×symbol aggregated metrics from fills table.
 /// 來自 fills 表的逐策略×symbol 聚合指標。
@@ -114,6 +122,15 @@ impl StrategistScheduler {
     /// Single evaluation cycle: gather metrics → rank → evaluate → validate → apply.
     /// 單次評估週期：收集指標 → 排名 → 評估 → 驗證 → 應用。
     async fn evaluate_cycle(&self) -> Result<usize, Box<dyn std::error::Error + Send + Sync>> {
+        // Phase 1 可觀測性：flag-ON 時，每輪 emit 一行 edge 可達面 log，讓 operator
+        // 看得到 quant gate 的「可調參表面」——即使 fail-closed-correct 地拒絕一切，
+        // 也能分辨那是「edge_estimates 管線還沒產出 validated+fresh cell」（runtime
+        // 資料狀態）而非代碼錯誤。**只報不改 gate**：log 與放行判定完全解耦。
+        // flag-OFF → 此段不執行 → 行為 byte-identical（不 emit、不讀 edge_store）。
+        if self.rich_input_enabled {
+            self.log_edge_reachable_surface();
+        }
+
         // 1. Gather per-strategy×symbol metrics via DB query (R4-6, R5-3, R5-4)
         // 1. 通過 DB 查詢收集逐策略×symbol 指標
         let metrics = self.gather_strategy_metrics().await?;
@@ -156,12 +173,25 @@ impl StrategistScheduler {
             // 缺 store 時 current_model_tier() 回 DEFAULT_STRATEGIST_MODEL_TIER
             // 後備，保 backward compat。
             let model_tier = self.current_model_tier();
+
+            // Phase 1（rich-input tuner）：flag-ON 時為當前 pair 組裝 leak-free
+            // 證據側車。flag-OFF → None → payload bit-identical（無 rich_input 鍵）。
+            // 全 fail-soft：任一 source 出錯只 debug log + 該欄 None，cycle 不失敗。
+            let now_ts = unix_now_secs();
+            let edge_ttl = self.current_edge_ttl_secs();
+            let rich: Option<RichInputs> = if self.rich_input_enabled {
+                Some(self.assemble_rich_inputs(pair, now_ts, edge_ttl).await)
+            } else {
+                None
+            };
+
             let params = build_strategist_eval_payload(
                 pair,
                 &current_json,
                 ranges_value,
                 max_delta_pct,
                 &model_tier,
+                rich.as_ref(),
             );
 
             let response = match self.ai_client.request("strategist_evaluate", params).await {
@@ -181,12 +211,31 @@ impl StrategistScheduler {
             //    `reject_by_reason` map → IPC `get_strategist_cycle_metrics`.
             // 4. 根據範圍、delta、權重總和驗證建議；delta cap 從 RiskConfig 取（缺 store=0.50）。
             //    G3-11：每條拒絕路徑都打 stable reason tag 到 CycleCounters。
-            match validate_recommendation_with_reason(
-                &response,
-                &current_json,
-                &ranges_json,
-                max_delta_pct,
-            ) {
+            //    Phase 1：flag-ON 且 edge_store 已接 → 走 rich 變體（既有 3 gate
+            //    之後疊加 server-side quant gate）；否則走既有 4-arg 版（bit-identical）。
+            //    edge_store 缺（flag-ON 但未注入）→ 退回既有 4-arg 版（不可能驗 quant，
+            //    fail-soft 保守：不引入「無 edge holder 卻硬拒」的 boot-edge 死鎖）。
+            let validate_result = match (self.rich_input_enabled, self.edge_store.as_ref()) {
+                (true, Some(edge_store)) => {
+                    let edge_snapshot = edge_store.read();
+                    validate_recommendation_with_reason_rich(
+                        &response,
+                        &current_json,
+                        &ranges_json,
+                        max_delta_pct,
+                        &edge_snapshot,
+                        now_ts,
+                        edge_ttl,
+                    )
+                }
+                _ => validate_recommendation_with_reason(
+                    &response,
+                    &current_json,
+                    &ranges_json,
+                    max_delta_pct,
+                ),
+            };
+            match validate_result {
                 Ok(()) => {
                     // 5. Apply via PipelineCommand
                     // 5. 通過 PipelineCommand 應用
@@ -247,6 +296,48 @@ impl StrategistScheduler {
         }
 
         Ok(applied)
+    }
+
+    /// Phase 1 可觀測性：emit 一行結構化 info log，報告 quant gate 的可達 edge
+    /// 證據面（n_cells / n_validated / n_fresh / n_usable）。
+    ///
+    /// 為什麼需要：Phase 1 quant gate 是 fail-closed-correct 的，但在 edge_estimates
+    /// 管線產出 validated+fresh cell 之前會拒絕一切調參——這是 runtime 資料狀態而非
+    /// 代碼 bug。把這個「可達面」每輪打出來，operator 才能分辨兩者。
+    ///
+    /// 唯讀不變量：只讀 `edge_store` snapshot 彙總計數，**不**影響任何放行判定
+    /// （gate 仍在 validate 階段逐 cell 自查真值）。`edge_store` 未接（flag-ON 但
+    /// 測試 / 未注入）→ usable 面恆 0，照常報出（明示「edge holder 未接」）。
+    /// 只在 caller 確認 `rich_input_enabled` 後呼叫（flag-OFF 不可達）。
+    fn log_edge_reachable_surface(&self) {
+        let (n_cells, n_validated, n_fresh, n_usable) = self.resolve_edge_reachable_surface();
+        info!(
+            cells = n_cells,
+            validated = n_validated,
+            fresh = n_fresh,
+            usable = n_usable,
+            edge_store_wired = self.edge_store.is_some(),
+            "STRATEGIST-RICH-INPUT edge surface: cells={} validated={} fresh={} usable={} \
+             / 策略師 rich-input edge 可達面",
+            n_cells,
+            n_validated,
+            n_fresh,
+            n_usable,
+        );
+    }
+
+    /// Phase 1 可觀測性：解析 quant gate 的可達 edge 證據面四項計數。
+    /// 與 `log_edge_reachable_surface` 拆開，讓 count 解析邏輯可單元測試（log
+    /// emit 仍由 caller 的 `rich_input_enabled` gate 包住）。`edge_store` 未接 →
+    /// 全 0。唯讀，零突變，不影響 gate。
+    pub(super) fn resolve_edge_reachable_surface(&self) -> (usize, usize, usize, usize) {
+        let now_ts = unix_now_secs();
+        let edge_ttl = self.current_edge_ttl_secs();
+        match self.edge_store.as_ref() {
+            Some(store) => store.read().reachable_surface_counts(now_ts, edge_ttl),
+            // flag-ON 但 edge holder 未接 → 全 0（quant gate 結構上無 edge 可引）。
+            None => (0, 0, 0, 0),
+        }
     }
 
     /// Query fills table for per-strategy×symbol aggregated metrics (R4-6, R5-3, R5-4).
@@ -409,6 +500,110 @@ impl StrategistScheduler {
         rx.await??;
         Ok(())
     }
+
+    /// Phase 1（rich-input tuner）：為當前 pair 組裝 leak-free 證據側車。
+    /// 只在 flag-ON 時呼叫（caller gate）。全 fail-soft：任一 source 出錯 →
+    /// 該欄 None + debug log，cycle 不失敗（survival > completeness）。
+    ///
+    /// 證據源（QC+MIT synthesis override 後）：
+    /// - edge_cell：engine 持有的 `edge_store` snapshot `.get_cell` + is_fresh
+    ///   （**唯一**進 quant gate 算術的源；absent/stale → quant gate 拒）。
+    /// - regime：scheduler 自算（market.klines 嚴格已收 1m closes → Hurst）。
+    ///   context-only，不影響 gate。
+    /// - news：保留 None（boot 未接 router；context-only，零 gate 權重）。
+    /// - ml_shadow：**DROP**（MIT 裁定 ONNX「ML」在生產非真：ort feature 未編、
+    ///   use_edge_predictor=false、唯一 runtime score 是 edge_estimates 的 mock
+    ///   重述）；納入會對 LLM 製造虛假的「獨立佐證」，故完全不填。
+    async fn assemble_rich_inputs(
+        &self,
+        pair: &PairMetrics,
+        now_ts: i64,
+        edge_ttl: i64,
+    ) -> RichInputs {
+        // edge_cell：從 holder snapshot 自查真 cell + engine 自算 freshness。
+        // 此欄 payload 展示用；quant gate 仍會在 validate 階段再自查一次真 cell
+        // （不信 payload 回讀），故此處只為讓 LLM 知道有無可引證據。
+        let edge_cell = self.edge_store.as_ref().and_then(|store| {
+            let snapshot = store.read();
+            let fresh = snapshot.is_fresh(now_ts, edge_ttl);
+            snapshot
+                .get_cell(&pair.strategy_name, &pair.symbol)
+                .map(|cell| CellEstimateView::from_cell(cell, fresh))
+        });
+
+        // regime 自算（point-in-time leak-free，fail-soft → None → "unknown"）。
+        let regime = self.compute_regime_for(&pair.symbol).await;
+
+        RichInputs {
+            edge_cell,
+            regime,
+            // news 暫不接（boot 未曝露 router Arc）；context-only，零 gate 權重。
+            news: None,
+        }
+    }
+
+    /// Phase 1：scheduler 自算 regime label（point-in-time leak-free）。
+    ///
+    /// 從 `market.klines` 取該 symbol 最近 `REGIME_WINDOW` 根 **嚴格已收盤** 1m
+    /// closes，跑 Hurst → 分類。
+    /// leak-free 保護 **不是** 靠 SQL 謂詞，而是來自上游寫入語意 + 查嚴格過去 bar：
+    ///   1. `market.klines` **只**由 `MarketDataMsg::KlineClose` 寫入
+    ///      （見 `database/market_writer.rs::flush_klines`）——表內永遠只有 **已收盤
+    ///      finalized** bar，不存在當前 forming bar，故讀到的都是定值。
+    ///   2. `ts` 是 bar 的 open_time；`ORDER BY ts DESC LIMIT N` 取最近 N 根已收 bar。
+    ///      `ts < now()` 只是排除「open_time 在未來」的退化資料，**不是** leak-free
+    ///      的來源（真保護是 KlineClose-only 寫入語意）。
+    /// closes 不足 / 算失敗 / DB 不可用 → None（caller 寫 "unknown"，context-only）。
+    /// 全 fail-soft：DB 錯誤只 debug log，不讓 cycle 失敗。
+    async fn compute_regime_for(&self, symbol: &str) -> Option<String> {
+        let pool = match self.db_pool.get() {
+            Some(p) => p,
+            None => {
+                debug!("regime self-compute: DB pool unavailable / DB 連接池不可用");
+                return None;
+            }
+        };
+
+        // 取最近 N 根已收 1m closes。leak-free 來自 KlineClose-only 寫入語意
+        // （表內只有 finalized bar，無 forming bar）+ 查嚴格過去已收 bar，**非**
+        // 靠 `ts < now()` 謂詞（後者只排除 open_time 在未來的退化資料）。
+        // DESC + LIMIT 取最新 N 根，下方再反轉成時序遞增供 Hurst。
+        let rows: Vec<(f64,)> = match sqlx::query_as::<_, (f64,)>(
+            r#"
+            SELECT close::float8
+            FROM market.klines
+            WHERE symbol = $1
+              AND timeframe = '1m'
+              AND ts < now()
+            ORDER BY ts DESC
+            LIMIT $2
+            "#,
+        )
+        .bind(symbol)
+        .bind(REGIME_WINDOW as i64)
+        .fetch_all(pool)
+        .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                debug!(symbol, error = %e, "regime self-compute: klines query failed (fail-soft) / 查 klines 失敗");
+                return None;
+            }
+        };
+
+        if rows.len() < REGIME_MIN_WINDOW * 4 {
+            debug!(
+                symbol,
+                n = rows.len(),
+                "regime self-compute: insufficient closes → unknown / 1m closes 不足"
+            );
+            return None;
+        }
+
+        // DB 回 DESC（新→舊）；Hurst 需時序遞增（舊→新）→ 反轉。
+        let closes: Vec<f64> = rows.into_iter().rev().map(|(c,)| c).collect();
+        super::compute_regime_label(&closes, REGIME_MIN_WINDOW, REGIME_WINDOW / 2)
+    }
 }
 
 /// 構建 strategist_evaluate IPC payload。
@@ -426,8 +621,12 @@ fn build_strategist_eval_payload(
     ranges_value: Value,
     max_delta_pct: f64,
     model_tier: &str,
+    // Phase 1（rich-input tuner）：None = flag-OFF → payload bit-identical
+    // （不加 rich_input / quant_evidence_available 鍵）。Some = flag-ON → 追加
+    // 單一新頂層鍵 rich_input + quant_evidence_available bool。
+    rich: Option<&RichInputs>,
 ) -> Value {
-    serde_json::json!({
+    let mut payload = serde_json::json!({
         "intel": {
             "symbol": &pair.symbol,
             "strategy": &pair.strategy_name,
@@ -450,7 +649,32 @@ fn build_strategist_eval_payload(
             "max_delta_pct": max_delta_pct,
             "description": "Use <=30% as the normal working range; use 30%-max only as a deliberate wide adjustment skill when evidence is poor enough to justify a larger move."
         }
-    })
+    });
+
+    // Phase 1：flag-ON 時 additive 加單一新頂層鍵，不污染既有 5 鍵。
+    // Python prompt builder 讀 rich_input（edge_estimates/regime/news_context）+
+    // quant_evidence_available。flag-OFF 時此段不執行 → 上面 5 鍵字面不變。
+    if let Some(rich) = rich {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("rich_input".to_string(), rich.to_payload_value());
+            obj.insert(
+                "quant_evidence_available".to_string(),
+                Value::Bool(rich.quant_evidence_available()),
+            );
+        }
+    }
+
+    payload
+}
+
+/// Unix epoch 秒（wallclock）。Phase 1 quant gate freshness 注入用。
+/// 為什麼集中此 helper：與既有 `evaluate_cycle` 內 `now_ms` 取法一致風格，
+/// 但 quant gate / is_fresh 用秒（對齊 edge_estimates `_meta.updated_at` 秒）。
+fn unix_now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 /// Rank pairs by deviation score, descending (worst-performing first).
@@ -500,7 +724,8 @@ mod tests {
         ]);
 
         // F-09：傳 default tier 對齊 backward compat baseline。
-        let payload = build_strategist_eval_payload(&pair, &current, ranges, 0.50, "l1_9b");
+        // Phase 1：傳 None rich → payload bit-identical（無 rich_input 鍵）。
+        let payload = build_strategist_eval_payload(&pair, &current, ranges, 0.50, "l1_9b", None);
 
         assert_eq!(
             payload["strategist_skill"]["name"],
@@ -530,8 +755,62 @@ mod tests {
         let ranges = serde_json::json!([]);
 
         // 27B（複雜場景）— caller 自帶 tier 必須穿透到 payload，無默認覆寫。
-        let payload = build_strategist_eval_payload(&pair, &current, ranges, 0.30, "l1_27b");
+        let payload = build_strategist_eval_payload(&pair, &current, ranges, 0.30, "l1_27b", None);
         assert_eq!(payload["model_tier"], "l1_27b");
         assert_eq!(payload["intel"]["strategy"], "grid_trading");
+    }
+
+    // ── T-P1-1：flag-OFF（rich=None）→ payload byte-identical baseline ──
+    // 證 flag-OFF 時 build_strategist_eval_payload 不加 rich_input /
+    // quant_evidence_available 鍵，且既有 5 鍵字面不變。
+    #[test]
+    fn t_p1_1_flag_off_payload_has_no_rich_keys() {
+        let pair = PairMetrics {
+            strategy_name: "ma_crossover".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            fill_count: 42,
+            avg_pnl: -1.25,
+            win_rate: 0.31,
+        };
+        let current = serde_json::json!({"cooldown_ms": 100_000});
+        let ranges = serde_json::json!([]);
+        let payload = build_strategist_eval_payload(&pair, &current, ranges, 0.50, "l1_9b", None);
+        // 既有 5 鍵存在。
+        assert!(payload.get("intel").is_some());
+        assert!(payload.get("model_tier").is_some());
+        assert!(payload.get("current_params").is_some());
+        assert!(payload.get("param_ranges").is_some());
+        assert!(payload.get("strategist_skill").is_some());
+        // Phase 1 新鍵 absent（flag-OFF bit-identical）。
+        assert!(payload.get("rich_input").is_none());
+        assert!(payload.get("quant_evidence_available").is_none());
+        assert_eq!(payload.as_object().unwrap().len(), 5);
+    }
+
+    // ── T-P1（flag-ON）：rich=Some → payload 多 rich_input + quant_evidence_available ──
+    #[test]
+    fn t_p1_flag_on_payload_adds_rich_keys() {
+        let pair = PairMetrics {
+            strategy_name: "ma_crossover".to_string(),
+            symbol: "BTCUSDT".to_string(),
+            fill_count: 42,
+            avg_pnl: -1.25,
+            win_rate: 0.31,
+        };
+        let current = serde_json::json!({"cooldown_ms": 100_000});
+        let ranges = serde_json::json!([]);
+        let rich = RichInputs {
+            edge_cell: None,
+            regime: Some("trending".to_string()),
+            news: None,
+        };
+        let payload =
+            build_strategist_eval_payload(&pair, &current, ranges, 0.50, "l1_9b", Some(&rich));
+        assert!(payload.get("rich_input").is_some());
+        assert_eq!(payload["rich_input"]["regime"], "trending");
+        // 無 edge cell → quant_evidence_available=false。
+        assert_eq!(payload["quant_evidence_available"], false);
+        // 既有 5 鍵 + 2 新鍵 = 7。
+        assert_eq!(payload.as_object().unwrap().len(), 7);
     }
 }

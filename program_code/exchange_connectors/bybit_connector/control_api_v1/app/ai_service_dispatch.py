@@ -226,6 +226,11 @@ class AIService:
         strategist_skill = params.get("strategist_skill", {})
         normal_delta_pct = strategist_skill.get("normal_delta_pct", _STRATEGIST_NORMAL_DELTA_PCT)
         max_delta_pct = strategist_skill.get("max_delta_pct", _STRATEGIST_DEFAULT_MAX_DELTA_PCT)
+        # Phase 1（rich-input tuner）：flag-OFF 時 Rust 不送 rich_input 鍵 →
+        # rich_input=None → prompt byte-identical。flag-ON 時 Rust 送單一頂層
+        # rich_input 鍵（edge_estimates/regime/news_context）+ quant_evidence_available。
+        rich_input = params.get("rich_input")
+        quant_evidence_available = bool(params.get("quant_evidence_available", False))
 
         ollama = await asyncio.to_thread(core._get_ollama_client)
 
@@ -259,6 +264,8 @@ class AIService:
             current_params, param_ranges,
             normal_delta_pct=normal_delta_pct,
             max_delta_pct=max_delta_pct,
+            rich_input=rich_input,
+            quant_evidence_available=quant_evidence_available,
         )
         # R-06-v2: enrich prompt with analyst insights + guardian rejection stats
         # R-06-v2：用 Analyst 洞察 + Guardian 拒絕統計增強 prompt
@@ -347,6 +354,8 @@ class AIService:
         param_ranges: list[dict[str, Any]],
         normal_delta_pct: float = _STRATEGIST_NORMAL_DELTA_PCT,
         max_delta_pct: float = _STRATEGIST_DEFAULT_MAX_DELTA_PCT,
+        rich_input: dict[str, Any] | None = None,
+        quant_evidence_available: bool = False,
     ) -> str:
         """Build prompt for Ollama strategy param tuning. / 構建 Ollama 策略參數調優 prompt。
 
@@ -357,6 +366,17 @@ class AIService:
         while the prompt teaches when to spend the wider 30%-50% freedom.
         預先算好日常範圍（默認 ±30%）與技能最大範圍（默認 ±50%）；這是
         Strategist 技能，不是新審批 gate。
+
+        Phase 1（rich-input tuner）：``rich_input`` is None when the engine flag
+        OPENCLAW_STRATEGIST_RICH_INPUT is OFF → prompt is BYTE-IDENTICAL to the
+        pre-Phase-1 prompt (the rich section is appended only when rich_input is
+        a dict). When ON, append leak-free edge evidence + self-computed regime +
+        UNTRUSTED news narrative, and require a structured ``quant_justification``
+        for every non-empty recommendation (news may never be the sole reason).
+        Phase 1：rich_input=None（flag-OFF）→ prompt 與 Phase 1 前 byte-identical；
+        rich_input=dict（flag-ON）→ 追加 leak-free edge 證據 + 自算 regime +
+        untrusted news 敘事，並要求每個非空 recommendation 附 quant_justification
+        （news 永不可作唯一理由）。
         """
         normal_delta_pct = AIService._safe_delta_pct(
             normal_delta_pct, _STRATEGIST_NORMAL_DELTA_PCT
@@ -407,7 +427,7 @@ class AIService:
                 )
         ranges_text = "\n".join(range_lines) if range_lines else "  (no adjustable params available)"
 
-        return (
+        base_prompt = (
             f"Strategy: {strategy}\n"
             f"Symbol: {symbol}\n"
             f"Performance (last 7 days):\n"
@@ -435,6 +455,79 @@ class AIService:
             f"  4. Weight params (weight_adx, weight_regime, weight_volume, weight_momentum) must sum to 65.\n"
             f"  5. If performance is acceptable or data is insufficient, respond with {{}} (empty object).\n"
         )
+
+        # Phase 1（rich-input tuner）：flag-OFF（rich_input is None）→ 直接回 base
+        # prompt，與 Phase 1 前 byte-identical。flag-ON → 追加 rich-input section。
+        if rich_input is None:
+            return base_prompt
+        return base_prompt + AIService._build_rich_input_section(
+            rich_input, quant_evidence_available
+        )
+
+    @staticmethod
+    def _build_rich_input_section(
+        rich_input: dict[str, Any],
+        quant_evidence_available: bool,
+    ) -> str:
+        """Phase 1：把 Rust 注入的 rich_input 鍵組成 prompt 附加段。
+
+        硬規則（Alpha Evidence Governance）：
+        - news_context 標為 UNTRUSTED narrative，**永不**可作為調參的唯一理由。
+        - 每個非空 recommendation 必須附 quant_justification，source 必為
+          edge_estimates；無 edge 支撐則回 {}。
+        - Rust server-side 會獨立自查被引用的 edge cell（不信 LLM 自述數字），
+          故 LLM 捏造 cell / claimed_shrunk_bps 一律被拒。
+        """
+        edge = rich_input.get("edge_estimates")
+        regime = rich_input.get("regime", "unknown")
+        news = rich_input.get("news_context") or []
+
+        lines = ["\n--- QUANTITATIVE EVIDENCE (leak-free, math-primary) ---"]
+        if isinstance(edge, dict):
+            lines.append(
+                "edge_estimates cell (James-Stein shrunk realized edge): "
+                f"shrunk_bps={edge.get('shrunk_bps')}, "
+                f"win_rate={edge.get('win_rate')}, "
+                f"n_trades={edge.get('n_trades')}, "
+                f"validation_passed={edge.get('validation_passed')}, "
+                f"is_fresh={edge.get('is_fresh')}"
+            )
+        else:
+            lines.append("edge_estimates cell: NONE (no leak-free edge evidence for this pair)")
+        lines.append(f"regime (self-computed Hurst, point-in-time): {regime}")
+        lines.append(f"quant_evidence_available: {quant_evidence_available}")
+
+        # news：UNTRUSTED narrative context；明示零量化權重。
+        lines.append("\n--- NEWS CONTEXT (UNTRUSTED narrative — NOT quantitative evidence) ---")
+        if news:
+            for item in news[:5]:
+                if isinstance(item, dict):
+                    lines.append(
+                        f"  - [{item.get('sentiment', '?')}] {item.get('headline', '')} "
+                        f"(severity={item.get('severity')})"
+                    )
+        else:
+            lines.append("  (none)")
+
+        lines.append(
+            "\n--- QUANT JUSTIFICATION REQUIREMENT (server-side enforced) ---\n"
+            "For EVERY non-empty recommendation you MUST add a structured object:\n"
+            '  "quant_justification": {\n'
+            '    "source": "edge_estimates",\n'
+            '    "cell": "<strategy>::<symbol>",\n'
+            '    "claimed_shrunk_bps": <number from the edge cell above>,\n'
+            '    "direction": "tighten" | "loosen",\n'
+            '    "rationale": "<text>"\n'
+            "  }\n"
+            "RULES:\n"
+            "  - news_context may NEVER be the sole or primary reason for a change.\n"
+            "  - If there is NO edge_estimates support (cell NONE / not fresh / not validated),\n"
+            "    respond with {} (empty object) — do not invent justification.\n"
+            "  - source MUST be \"edge_estimates\"; \"news\"/\"sentiment\"/free text is REJECTED.\n"
+            "  - The engine independently re-checks the cited cell; fabricated cell or\n"
+            "    claimed_shrunk_bps (wrong sign / far off) is REJECTED.\n"
+        )
+        return "\n".join(lines) + "\n"
 
     @staticmethod
     def _safe_delta_pct(value: Any, default: float) -> float:
@@ -551,6 +644,34 @@ class AIService:
                     filtered[k] = int(v)
                 else:
                     filtered[k] = v
+            elif k == "quant_justification" and isinstance(v, dict):
+                # Phase 1（rich-input tuner）命門：保留 **結構化** quant_justification
+                # dict，供 Rust server-side quant gate（verify_quant_justification）
+                # 自查 edge cell。今天此分支前的 else 會把它連同所有非數值欄靜默
+                # strip（:554），導致 Rust 永遠收不到 justification = 等於沒 gate。
+                # 只保留 schema 的 5 個白名單欄（source/cell/claimed_shrunk_bps/
+                # direction/rationale），其餘 key 丟棄，避免 LLM 塞額外 junk；型別
+                # 收斂為 str/number/str/str/str（fail-soft：缺欄 → 不補，Rust gate
+                # 缺欄自會拒）。news/sentiment 等敘事 **不** 在白名單，結構上無法
+                # 偽裝成 quant source（Rust 端另驗 source=="edge_estimates"）。
+                qj: dict[str, Any] = {}
+                src = v.get("source")
+                if isinstance(src, str):
+                    qj["source"] = src
+                cell = v.get("cell")
+                if isinstance(cell, str):
+                    qj["cell"] = cell
+                claimed = v.get("claimed_shrunk_bps")
+                # 數字（含 bool 排除）：保留為 float；非數字丟棄（Rust 缺欄自拒）。
+                if isinstance(claimed, (int, float)) and not isinstance(claimed, bool):
+                    qj["claimed_shrunk_bps"] = float(claimed)
+                direction = v.get("direction")
+                if isinstance(direction, str):
+                    qj["direction"] = direction
+                rationale = v.get("rationale")
+                if isinstance(rationale, str):
+                    qj["rationale"] = rationale
+                filtered["quant_justification"] = qj
             else:
                 logger.debug("Skipping non-numeric param recommendation: %s=%s", k, v)
 

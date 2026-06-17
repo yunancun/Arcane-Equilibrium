@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from fastapi import Body, Depends, HTTPException, Request
@@ -22,6 +23,18 @@ logger = logging.getLogger(__name__)
 # Module-level IPC client for strategy active/inactive sync to Rust.
 # 模組級 IPC client，用於同步策略啟停狀態到 Rust 引擎。
 _STRATEGY_IPC: EngineIPCClient | None = None
+
+
+def _strategy_toggle_live_enabled() -> bool:
+    """POLICY-2 旗標讀取：OPENCLAW_STRATEGY_TOGGLE_LIVE_MODE 是否啟用 live 策略啟停。
+
+    為何 default-OFF（fail-closed）：activate/pause/stop 原本是 Demo-only 策略開發
+    控制（_sync_strategy_active 寫死 engine="demo"）。在旗標 OFF 下，engine="live"
+    必須 fail-loud（409 live_strategy_toggle_disabled）而非靜默降級成 demo——靜默
+    降級會讓 operator 以為改了 live 實則改了 demo，違反「失敗收縮 + 可審計」。只接受
+    字面 "1"（鏡像既有 OPENCLAW_EDGE_RELOAD / OPENCLAW_ALLOW_MAINNET env-gate 慣例）。
+    """
+    return (os.environ.get("OPENCLAW_STRATEGY_TOGGLE_LIVE_MODE") or "").strip() == "1"
 
 
 def _require_strategy_write(actor: base.AuthenticatedActor) -> None:
@@ -67,6 +80,83 @@ async def _sync_strategy_active(name: str, active: bool) -> None:
             logger.warning("set_strategy_active IPC non-ok response: %s", resp)
     except Exception as e:
         logger.warning("set_strategy_active IPC error for %r active=%s: %s", name, active, e)
+
+
+async def _sync_strategy_active_live(actor: base.AuthenticatedActor, name: str, active: bool) -> Any:
+    """POLICY-2：把策略啟停同步到 **live** Rust pipeline（純 Rust IPC，不碰 Python 狀態）。
+
+    為何鏡像 toggle_dynamic_risk(:72-142) 而非 _sync_strategy_active：改 live 策略啟停的
+    後果等同改真實資金行為，故此路徑須先補完整 5-gate（all_five_live_gates_ok，
+    require_authz=True）——strategy:write scope 單獨不足以授權 live（與 toggle_dynamic_risk
+    同級）。通過後鑄 method-bound token，set_strategy_active ∈ Phase-0 LIVE_WRITE_METHODS，
+    Rust dispatch chokepoint 會自驗 token（POLICY-2 不改 Rust）。
+
+    硬邊界（fail-loud，非 fire-and-forget）：與 demo helper 不同，live 失敗必須上拋——
+    5-gate 失敗 → 409 live_gate_failed；IPC 失敗由 caller 包成 500。live 路徑**不**呼
+    ORCHESTRATOR.activate/pause/stop（那是 Python demo orchestrator 狀態），保持 live 啟停
+    為純 Rust 權威，不污染 demo 狀態機。
+    """
+    from . import live_preflight  # noqa: PLC0415
+
+    ok, reason_codes = live_preflight.all_five_live_gates_ok(actor, require_authz=True)
+    if not ok:
+        logger.warning(
+            "Live set_strategy_active BLOCKED: gate_failed=%s actor=%s strategy=%r active=%s",
+            reason_codes, getattr(actor, "actor_id", "unknown"), name, active,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "live_gate_failed", "gate_failed": reason_codes,
+                    "message": "Live strategy toggle blocked — live preflight gate failed."},
+        )
+    from .live_patch_token import call_params_with_token  # noqa: PLC0415
+    ipc_params: dict[str, Any] = {"strategy_name": name, "active": active, "engine": "live"}
+    ipc_params = call_params_with_token("set_strategy_active", ipc_params)
+    client = await _get_strategy_ipc()
+    resp = await client.call("set_strategy_active", params=ipc_params)
+    if isinstance(resp, dict) and not resp.get("ok"):
+        logger.warning("live set_strategy_active IPC non-ok response: %s", resp)
+    return resp
+
+
+async def _resolve_toggle_engine(request: Request | None) -> str:
+    """POLICY-2：從 activate/pause/stop 的 optional body 解析 engine（default "demo"）。
+
+    回傳值僅可能是 "demo" 或 "live"（已通過旗標 / 合法性檢查）：
+      - 無 request / 無 body / engine 缺省 / engine="demo" → "demo"（既有行為，bit-identical）。
+      - engine="live" + 旗標 OFF → 409 live_strategy_toggle_disabled（fail-loud，
+        **絕不**靜默降級成 demo）。
+      - engine="live" + 旗標 ON → "live"（caller 走 5-gate live 路徑）。
+      - 其他 engine 值（如 paper）→ 400（activate/pause/stop 僅 demo|live 語意；
+        paper 啟停不屬此面）。
+
+    為何只認 demo/live：原 demo helper 寫死 engine="demo"，POLICY-2 只新增 live 分支；
+    paper pipeline 啟停不經此控制面（避免擴大 scope）。為何 request 可為 None：FastAPI
+    HTTP routing 仍會注入真實 Request（型別注入，default 值不影響）；None 僅出現在
+    直呼 handler 的單元測試路徑（無 body）→ 視為 demo，保 bit-identical。
+    """
+    if request is None:
+        return "demo"
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    if not isinstance(body, dict):
+        body = {}
+    engine = str(body.get("engine", "demo")).strip().lower()
+    if engine in ("", "demo"):
+        return "demo"
+    if engine == "live":
+        if not _strategy_toggle_live_enabled():
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "live_strategy_toggle_disabled",
+                        "message": "Live strategy toggle is disabled "
+                                   "(OPENCLAW_STRATEGY_TOGGLE_LIVE_MODE off). "
+                                   "Refusing to silently demote to demo."},
+            )
+        return "live"
+    raise HTTPException(status_code=400, detail="engine must be demo|live")
 
 
 @phase2_router.post("/dynamic-risk/toggle")
@@ -146,16 +236,30 @@ async def toggle_dynamic_risk(request: Request, actor: base.AuthenticatedActor =
 @phase2_router.post("/{name}/activate")
 async def activate_strategy(
     name: str,
+    request: Request = None,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """
     Activate a registered strategy.
     激活已注册的策略。
+    POLICY-2：optional body {"engine": "demo"|"live"}（default demo）。engine="live" 須旗標
+    OPENCLAW_STRATEGY_TOGGLE_LIVE_MODE=1 + 完整 5-gate（純 Rust IPC，不碰 ORCHESTRATOR）。
     """
     _require_strategy_write(actor)
     if _validate_strategy_name(name) is None:
         raise HTTPException(status_code=400, detail="Invalid strategy name / 无效策略名称")
+    engine = await _resolve_toggle_engine(request)
     try:
+        if engine == "live":
+            # live 啟停 = 純 Rust 權威，不觸 Python demo orchestrator 狀態。
+            resp = await _sync_strategy_active_live(actor, name, active=True)
+            return _envelope({
+                "strategy": name,
+                "action": "activated",
+                "new_state": "active",
+                "engine": "live",
+                "ipc_response": resp,
+            })
         success = ORCHESTRATOR.activate_strategy(name)
         if not success:
             raise HTTPException(status_code=404, detail=f"Strategy '{name}' not found / 策略 '{name}' 未找到")
@@ -176,16 +280,29 @@ async def activate_strategy(
 @phase2_router.post("/{name}/pause")
 async def pause_strategy(
     name: str,
+    request: Request = None,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """
     Pause a running strategy.
     暂停运行中的策略。
+    POLICY-2：optional body {"engine": "demo"|"live"}（default demo）。engine="live" 須旗標
+    OPENCLAW_STRATEGY_TOGGLE_LIVE_MODE=1 + 完整 5-gate（純 Rust IPC，不碰 ORCHESTRATOR）。
     """
     _require_strategy_write(actor)
     if _validate_strategy_name(name) is None:
         raise HTTPException(status_code=400, detail="Invalid strategy name / 无效策略名称")
+    engine = await _resolve_toggle_engine(request)
     try:
+        if engine == "live":
+            resp = await _sync_strategy_active_live(actor, name, active=False)
+            return _envelope({
+                "strategy": name,
+                "action": "paused",
+                "new_state": "paused",
+                "engine": "live",
+                "ipc_response": resp,
+            })
         success = ORCHESTRATOR.pause_strategy(name)
         if not success:
             raise HTTPException(status_code=404, detail=f"Strategy '{name}' not found / 策略 '{name}' 未找到")
@@ -206,16 +323,29 @@ async def pause_strategy(
 @phase2_router.post("/{name}/stop")
 async def stop_strategy(
     name: str,
+    request: Request = None,
     actor: base.AuthenticatedActor = Depends(base.current_actor),
 ):
     """
     Stop a strategy.
     停止策略。
+    POLICY-2：optional body {"engine": "demo"|"live"}（default demo）。engine="live" 須旗標
+    OPENCLAW_STRATEGY_TOGGLE_LIVE_MODE=1 + 完整 5-gate（純 Rust IPC，不碰 ORCHESTRATOR）。
     """
     _require_strategy_write(actor)
     if _validate_strategy_name(name) is None:
         raise HTTPException(status_code=400, detail="Invalid strategy name / 无效策略名称")
+    engine = await _resolve_toggle_engine(request)
     try:
+        if engine == "live":
+            resp = await _sync_strategy_active_live(actor, name, active=False)
+            return _envelope({
+                "strategy": name,
+                "action": "stopped",
+                "new_state": "stopped",
+                "engine": "live",
+                "ipc_response": resp,
+            })
         success = ORCHESTRATOR.stop_strategy(name)
         if not success:
             raise HTTPException(status_code=404, detail=f"Strategy '{name}' not found / 策略 '{name}' 未找到")

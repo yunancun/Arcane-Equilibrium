@@ -116,4 +116,11 @@ pub const REJECT_REASONS: &[&str] = &[
     "weight_sum",
     "ipc_failed",
     "apply_failed",
+    // Phase 1（rich-input tuner）server-side quant gate（flag-ON 才會出現）：
+    // - news_solo_trigger：有實際 param delta 但無/非-edge_estimates 的
+    //   quant_justification（唯一可能支撐只剩 news/敘事 → 拒）。
+    // - quant_justification_unverified：引用的 edge cell 不存在/stale/未驗證/
+    //   數值符號與 claimed 不符（engine 自查證偽 LLM 自述）。
+    "news_solo_trigger",
+    "quant_justification_unverified",
 ];

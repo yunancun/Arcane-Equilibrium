@@ -921,6 +921,9 @@ async fn async_main(
         &demo_cmd_slot,
         &live_cmd_slot,
         &risk_stores,
+        // Phase 1（rich-input tuner）：demo-readable production edge_estimates
+        // holder（cost_gate 同源）。flag default-OFF → scheduler 不組裝 rich。
+        &scanner_edge_estimates,
     )
     .await;
     // G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1: late-inject the scheduler's

@@ -928,10 +928,276 @@ fn test_reject_reasons_list_covers_validate_branches() {
         "weight_sum",
         "ipc_failed",
         "apply_failed",
+        // Phase 1（rich-input tuner）server-side quant gate reasons。
+        "news_solo_trigger",
+        "quant_justification_unverified",
     ] {
         assert!(
             REJECT_REASONS.contains(r),
             "REJECT_REASONS missing reason `{r}`"
         );
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 1（rich-input tuner）：validate_recommendation_with_reason_rich 整合測試
+// （quant gate 疊在既有 3 gate 之後；flag-OFF 路徑走 4-arg 版 bit-identical）
+// ═══════════════════════════════════════════════════════════════════════════════
+
+use crate::edge_estimates::EdgeEstimates;
+
+const RICH_TEST_TTL: i64 = 172_800; // 48h，對齊 cost_gate 預設
+const RICH_TEST_UPDATED_EPOCH: i64 = 1_780_012_800; // 2026-05-29T00:00:00Z
+
+/// 建單 cell EdgeEstimates fixture（runtime_bps + validation_passed 可控）。
+fn rich_edge(key: &str, shrunk_bps: f64, validated: bool) -> EdgeEstimates {
+    let vp = if validated { "true" } else { "false" };
+    let json = format!(
+        r#"{{
+            "_meta": {{"updated_at": "2026-05-29T00:00:00+00:00"}},
+            "{key}": {{"runtime_bps": {shrunk_bps}, "validation_passed": {vp}, "n": 120}}
+        }}"#
+    );
+    EdgeEstimates::load_from_str(&json).unwrap()
+}
+
+fn rich_fresh_now() -> i64 {
+    RICH_TEST_UPDATED_EPOCH + 100
+}
+
+/// 一組 agent_adjustable 範圍（cooldown_ms 落在 ±50% 內）。
+fn rich_ranges() -> Vec<ParamRange> {
+    vec![ParamRange {
+        name: "cooldown_ms".into(),
+        min: 10_000.0,
+        max: 120_000.0,
+        step: Some(1_000.0),
+        agent_adjustable: true,
+        db_persisted: true,
+    }]
+}
+
+// ── T-P1-1（rich 變體版）：flag-OFF 路徑與 rich 變體在「無 delta / 既有 3 gate
+//    結果」上一致 —— 證 rich 變體只是疊加，不改既有 3 gate 行為 ──
+#[test]
+fn t_p1_1_rich_variant_preserves_existing_three_gates() {
+    let edge = rich_edge("ma_crossover::BTCUSDT", 5.0, true);
+    let ranges = rich_ranges();
+    let current = serde_json::json!({"cooldown_ms": 50_000.0});
+
+    // out_of_range：rich 變體必須先被既有 gate 擋（與 4-arg 版同 reason）。
+    let oor = serde_json::json!({"cooldown_ms": 999_999.0});
+    assert_eq!(
+        validate_recommendation_with_reason(&oor, &current, &ranges, 0.50),
+        Err("out_of_range")
+    );
+    assert_eq!(
+        validate_recommendation_with_reason_rich(
+            &oor, &current, &ranges, 0.50, &edge, rich_fresh_now(), RICH_TEST_TTL
+        ),
+        Err("out_of_range"),
+        "rich 變體必須先跑既有 3 gate，out_of_range 早於 quant gate"
+    );
+}
+
+// ── T-P1-8：cell 真實+fresh+validated+數值對齊 → rich 變體 Ok（可 apply）──
+#[test]
+fn t_p1_8_rich_variant_valid_cell_passes() {
+    let edge = rich_edge("ma_crossover::BTCUSDT", 5.0, true);
+    let ranges = rich_ranges();
+    let current = serde_json::json!({"cooldown_ms": 50_000.0});
+    // +10% delta（在 ±50% 內），帶對齊的 quant_justification。
+    let rec = serde_json::json!({
+        "cooldown_ms": 55_000.0,
+        "quant_justification": {
+            "source": "edge_estimates",
+            "cell": "ma_crossover::BTCUSDT",
+            "claimed_shrunk_bps": 5.0,
+            "direction": "tighten",
+            "rationale": "edge supports"
+        }
+    });
+    assert_eq!(
+        validate_recommendation_with_reason_rich(
+            &rec, &current, &ranges, 0.50, &edge, rich_fresh_now(), RICH_TEST_TTL
+        ),
+        Ok(())
+    );
+}
+
+// ── T-P1-2（rich 變體版）：有 delta 但無 quant_justification → news_solo_trigger ──
+#[test]
+fn t_p1_2_rich_variant_delta_without_justification() {
+    let edge = rich_edge("ma_crossover::BTCUSDT", 5.0, true);
+    let ranges = rich_ranges();
+    let current = serde_json::json!({"cooldown_ms": 50_000.0});
+    let rec = serde_json::json!({"cooldown_ms": 55_000.0});
+    assert_eq!(
+        validate_recommendation_with_reason_rich(
+            &rec, &current, &ranges, 0.50, &edge, rich_fresh_now(), RICH_TEST_TTL
+        ),
+        Err("news_solo_trigger")
+    );
+}
+
+// ── T-P1-11：空 recommendation {} → rich 變體 bypass quant gate（Ok）──
+//    證 flag-ON 下 LLM 棄調（回 {}）時行為與既有 empty 一致（不誤觸 quant gate）。
+#[test]
+fn t_p1_11_rich_variant_empty_rec_bypasses_quant_gate() {
+    let edge = rich_edge("ma_crossover::BTCUSDT", 5.0, true);
+    let ranges = rich_ranges();
+    let current = serde_json::json!({"cooldown_ms": 50_000.0});
+    let empty = serde_json::json!({});
+    // 既有 4-arg 版：空 rec → Ok（無 param 改）。
+    assert_eq!(
+        validate_recommendation_with_reason(&empty, &current, &ranges, 0.50),
+        Ok(())
+    );
+    // rich 變體：空 rec → 無 real delta → quant gate bypass → Ok（一致）。
+    assert_eq!(
+        validate_recommendation_with_reason_rich(
+            &empty, &current, &ranges, 0.50, &edge, rich_fresh_now(), RICH_TEST_TTL
+        ),
+        Ok(())
+    );
+}
+
+// ── T-P1-11b：rec 只把 param 設成與當前相同值（無實際 delta）→ bypass ──
+#[test]
+fn t_p1_11b_rich_variant_no_real_delta_bypasses() {
+    let edge = rich_edge("ma_crossover::BTCUSDT", 5.0, true);
+    let ranges = rich_ranges();
+    let current = serde_json::json!({"cooldown_ms": 50_000.0});
+    // 設成與當前相同 → 無 delta → 不需 quant_justification。
+    let same = serde_json::json!({"cooldown_ms": 50_000.0});
+    assert_eq!(
+        validate_recommendation_with_reason_rich(
+            &same, &current, &ranges, 0.50, &edge, rich_fresh_now(), RICH_TEST_TTL
+        ),
+        Ok(())
+    );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Phase 1 可觀測性：edge 可達面 log（reachable surface）
+//
+// 測試 `resolve_edge_reachable_surface`（log_edge_reachable_surface 委派的 count
+// 解析），它是每輪 log 行的數據來源。`resolve_*` 讀真 wallclock now，故 fresh
+// 路徑用「相對當前時間新鮮」的 snapshot 建構（避免固定過去 updated_at 在測試時
+// 已 stale 而打不到 fresh 分支）。reachable_surface_counts 對 injected now 的精確
+// 計數另由 edge_estimates.rs 單元測試覆蓋。
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// 建多 cell EdgeEstimates，`updated_at` 相對當前 wallclock 偏移 `age_secs` 秒。
+/// 為什麼動態時間戳：`resolve_edge_reachable_surface` 讀真 now，要打到 fresh 分支
+/// 必須讓 snapshot 相對 now 新鮮（固定 2026-05-29 在測試時早已超 48h TTL）。
+fn obs_edge_store(
+    age_secs: i64,
+) -> Arc<parking_lot::RwLock<EdgeEstimates>> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let updated = now - age_secs;
+    let updated_rfc3339 = chrono::DateTime::<chrono::Utc>::from_timestamp(updated, 0)
+        .unwrap()
+        .to_rfc3339();
+    // 3 cells：2 validated（a/b）、1 not（c）。
+    let json = format!(
+        r#"{{
+            "_meta": {{"updated_at": "{updated_rfc3339}"}},
+            "ma_crossover::BTCUSDT": {{"runtime_bps": 5.0, "validation_passed": true, "n": 120}},
+            "grid_trading::ETHUSDT": {{"runtime_bps": 3.0, "validation_passed": true, "n": 90}},
+            "bb_reversion::SOLUSDT": {{"runtime_bps": 1.0, "validation_passed": false, "n": 12}}
+        }}"#
+    );
+    Arc::new(parking_lot::RwLock::new(
+        EdgeEstimates::load_from_str(&json).unwrap(),
+    ))
+}
+
+// ── flag-ON + stubbed fresh edge_store → 正確 n_validated / n_fresh / n_usable ──
+#[test]
+fn t_p1_obs_flag_on_fresh_store_reports_correct_surface() {
+    let (ai, pool, cancel) = mk_deps();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    // age=100s，遠小於預設 48h TTL（無 risk store → DEFAULT_EDGE_ESTIMATE_TTL_SECS）→ fresh。
+    let store = obs_edge_store(100);
+    let sched = StrategistScheduler::new(ai, tx, PipelineKind::Demo, None, pool, cancel)
+        .with_rich_input(true)
+        .with_edge_store(store);
+
+    let (n_cells, n_validated, n_fresh, n_usable) = sched.resolve_edge_reachable_surface();
+    assert_eq!(n_cells, 3, "3 cells in snapshot");
+    assert_eq!(n_validated, 2, "2 cells validation_passed=true");
+    assert_eq!(n_fresh, 3, "fresh snapshot → all cells fresh");
+    assert_eq!(n_usable, 2, "usable = validated AND fresh");
+}
+
+// ── flag-ON + stale edge_store → fresh/usable 面歸 0（validated 仍可見）──
+#[test]
+fn t_p1_obs_flag_on_stale_store_zeroes_fresh_and_usable() {
+    let (ai, pool, cancel) = mk_deps();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    // age 超過預設 48h TTL → snapshot stale。
+    let store = obs_edge_store(DEFAULT_EDGE_ESTIMATE_TTL_SECS + 3_600);
+    let sched = StrategistScheduler::new(ai, tx, PipelineKind::Demo, None, pool, cancel)
+        .with_rich_input(true)
+        .with_edge_store(store);
+
+    let (n_cells, n_validated, n_fresh, n_usable) = sched.resolve_edge_reachable_surface();
+    assert_eq!(n_cells, 3);
+    assert_eq!(n_validated, 2);
+    assert_eq!(n_fresh, 0, "stale snapshot → 0 fresh");
+    assert_eq!(n_usable, 0, "validated 但 stale → 0 usable");
+}
+
+// ── flag-ON 但 edge_store 未接 → 全 0（明示無可引 edge）──
+#[test]
+fn t_p1_obs_flag_on_no_store_all_zero() {
+    let (ai, pool, cancel) = mk_deps();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let sched = StrategistScheduler::new(ai, tx, PipelineKind::Demo, None, pool, cancel)
+        .with_rich_input(true);
+    assert_eq!(
+        sched.resolve_edge_reachable_surface(),
+        (0, 0, 0, 0),
+        "flag-ON but edge_store unwired → all zero"
+    );
+}
+
+// ── flag-OFF：emit 完全不觸發（行為 byte-identical）──
+// 證明：(1) flag-OFF scheduler 的 rich_input_enabled=false → evaluate_cycle 的
+// `if self.rich_input_enabled` gate 短路，log_edge_reachable_surface 不可達。
+// (2) count 解析本身是純函數，flag 與 count 值無耦合（flag 是唯一 emit gate）。
+// 用 inspect-source 鎖死「emit site 被 rich_input_enabled gate 包住」這個不變量，
+// 防未來有人把 emit 移出 gate（=flag-OFF 不再 byte-identical 的回歸）。
+#[test]
+fn t_p1_obs_flag_off_emit_is_gated() {
+    let (ai, pool, cancel) = mk_deps();
+    let (tx, _rx) = tokio::sync::mpsc::unbounded_channel();
+    let store = obs_edge_store(100);
+    // 預設（不呼 with_rich_input）→ rich_input_enabled=false。
+    let sched_off = StrategistScheduler::new(ai, tx, PipelineKind::Demo, None, pool, cancel)
+        .with_edge_store(store);
+    assert!(
+        !sched_off.rich_input_enabled,
+        "flag-OFF scheduler must have rich_input_enabled=false → emit site unreachable"
+    );
+
+    // 不變量：emit（log_edge_reachable_surface 呼叫）必在 rich_input_enabled gate
+    // 內。evaluate.rs 原始碼斷言：呼叫點上方緊鄰 `if self.rich_input_enabled`。
+    let src = include_str!("evaluate.rs");
+    let gate_idx = src
+        .find("if self.rich_input_enabled {\n            self.log_edge_reachable_surface();")
+        .expect(
+            "log_edge_reachable_surface() must be emitted only inside the \
+             `if self.rich_input_enabled` gate (flag-OFF byte-identical)",
+        );
+    // emit 呼叫只應出現在 gate 之內，不應有 gate 外的裸呼叫。
+    let total_calls = src.matches("self.log_edge_reachable_surface()").count();
+    assert_eq!(
+        total_calls, 1,
+        "exactly one emit call site, and it is the gated one (idx {gate_idx})"
+    );
 }
