@@ -267,6 +267,41 @@ impl EdgeEstimates {
         })
     }
 
+    /// Phase 2 促升閘專用：載入 **live-grade** edge snapshot
+    /// （`settings/edge_estimates_live_demo.json`）。
+    ///
+    /// 為什麼與 scanner / cost_gate 的 `edge_estimates.json` 分離：scanner +
+    /// demo cost_gate 讀的 `edge_estimates.json` 由 producer 以
+    /// `ValidationConfig.for_engine_mode("demo")` 算（寬鬆 bar：PSR≥0.95 /
+    /// DSR≥0.90 / oos_n≥30 / wf≥2）。而 demo→LIVE 促升的 blast radius 是 25-sym
+    /// live，必須用 **live-grade** 顯著性 bar（`for_engine_mode("live_demo")`：
+    /// PSR≥0.975 / DSR≥0.95 / oos_n≥60 / wf≥3），producer 同時寫出
+    /// `edge_estimates_live_demo.json`。故促升閘的 `PROMOTION_EDGE_SLOT` 注入此
+    /// 檔的 holder（非 scanner 的 demo holder），使 `validation_passed` 攜帶
+    /// live-grade 語意（Fix 5，承 QC adversarial finding）。
+    ///
+    /// 缺檔（producer 尚未跑 live_demo 模式 / 冷啟動）→ 靜默回空（fail-closed：
+    /// 空 snapshot → 0 cell → criteria gate 對所有促升回 Pending，DESIRED §2.9）。
+    /// `OPENCLAW_PROMOTION_EDGE_SNAPSHOT` env 可覆寫路徑（測試 / 部署彈性）。
+    pub fn load_promotion_edge(base_dir: impl AsRef<Path>) -> Self {
+        let default_path = base_dir
+            .as_ref()
+            .join("settings")
+            .join("edge_estimates_live_demo.json");
+        let path = std::env::var("OPENCLAW_PROMOTION_EDGE_SNAPSHOT")
+            .map(std::path::PathBuf::from)
+            .unwrap_or(default_path);
+        Self::load_from_file(&path).unwrap_or_else(|| {
+            tracing::info!(
+                path = %path.display(),
+                "Phase 2 promotion edge snapshot (live-grade) not found — \
+                 cold-start (criteria gate will Pending all promotions) / \
+                 促升 live-grade 快照未找到，冷啟動（criteria 對所有促升回 Pending）"
+            );
+            Self::empty()
+        })
+    }
+
     /// Look up shrunk edge bps for a (strategy, symbol) pair (convenience).
     /// Returns None if no estimate available (unknown pair or cold-start).
     /// 查找 (策略, 幣種) 對的收縮邊際 bps（便捷方法）。無估計時返回 None。
@@ -511,6 +546,55 @@ mod tests {
         // Live mode shares production estimates with demo.
         let e = EdgeEstimates::load_for_mode("/nonexistent_base", "live");
         assert!(!e.is_populated());
+    }
+
+    // ─── Fix 5: promotion edge holder targets the live-grade snapshot ───
+
+    #[test]
+    fn test_load_promotion_edge_missing_file_is_empty() {
+        // 缺檔 → 空 holder（fail-closed：criteria gate 對所有促升回 Pending）。
+        let e = EdgeEstimates::load_promotion_edge("/nonexistent_base");
+        assert!(!e.is_populated());
+    }
+
+    #[test]
+    fn test_load_promotion_edge_reads_live_demo_filename_not_demo() {
+        // 寫一份 live-grade snapshot 到 <base>/settings/edge_estimates_live_demo.json，
+        // 並把 demo snapshot（edge_estimates.json）寫成「會誤導」的內容；確認
+        // load_promotion_edge 讀的是 *_live_demo 檔（live-grade bar），非 demo 檔。
+        let base = std::env::temp_dir().join(format!(
+            "openclaw_promo_edge_test_{}",
+            std::process::id()
+        ));
+        let settings = base.join("settings");
+        std::fs::create_dir_all(&settings).unwrap();
+        // demo 檔（不應被促升閘讀）：放一個 cell，若誤讀會 populated。
+        std::fs::write(
+            settings.join("edge_estimates.json"),
+            r#"{"demo_strat::DEMOSYM": {"runtime_bps": 99.0, "validation_passed": true, "n": 99}}"#,
+        )
+        .unwrap();
+        // live-grade 檔（應被讀）：放一個不同 cell。
+        std::fs::write(
+            settings.join("edge_estimates_live_demo.json"),
+            r#"{"live_strat::LIVESYM": {"runtime_bps": 7.0, "validation_passed": true, "n": 70}}"#,
+        )
+        .unwrap();
+        // env override 留空（不污染並行測試）；用 base-dir 路徑構造直接驗檔名選擇。
+        // 防呆：若環境有殘留 override 則此測試的路徑構造失效，故先確認未設。
+        if std::env::var("OPENCLAW_PROMOTION_EDGE_SNAPSHOT").is_err() {
+            let e = EdgeEstimates::load_promotion_edge(&base);
+            assert!(e.is_populated(), "should load the live_demo snapshot");
+            assert!(
+                e.get_cell("live_strat", "LIVESYM").is_some(),
+                "live-grade cell must be present"
+            );
+            assert!(
+                e.get_cell("demo_strat", "DEMOSYM").is_none(),
+                "demo-grade cell must NOT be read by promotion edge holder"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     // ─── P1-09: freshness / runtime-derived parse + is_fresh ───

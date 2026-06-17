@@ -535,11 +535,68 @@ class TestApplyLiveGateChain(unittest.TestCase):
             },
         )
 
+    @staticmethod
+    def _criteria_ipc(verdict: str, *, update: Any) -> AsyncMock:
+        """PHASE 2: route IPC by method (snapshot / criteria / update).
+
+        criteria gate runs BEFORE the 5-gate, so to keep exercising the 5-gate
+        chain these tests must let criteria reach Eligible (flag ON + soak ok).
+        PHASE 2 criteria gate 在 5-gate 之前，故這兩個測 5-gate 的 case 須讓
+        criteria 過（flag ON + Eligible），才能到達被測的 5-gate。
+        """
+        async def _side(method: str, *a: Any, **k: Any) -> Any:
+            if method == "get_strategy_params":
+                return {"result": json.dumps({"cooldown_ms": 30000, "n_levels": 8})}
+            if method == "evaluate_promotion_criteria":
+                # REAL handler shape: lowercase tag + per_cell/active_count/edge_estimates_fresh.
+                return {
+                    "verdict": verdict, "reason": None,
+                    "per_cell": [], "active_count": 2, "edge_estimates_fresh": True,
+                }
+            if method == "update_strategy_params":
+                return update
+            raise AssertionError(f"unexpected IPC method {method!r}")
+        return AsyncMock(side_effect=_side)
+
+    @staticmethod
+    def _patch_contract_helpers() -> Any:
+        """Patch Option-A route helpers (active_symbols/cost model/boundary) so the
+        5-gate tests isolate the gate chain from real TOML/DB (mirror phase2 fixture)."""
+        from contextlib import ExitStack
+        from unittest.mock import patch as _p
+        stack = ExitStack()
+        stack.enter_context(
+            _p("app.strategist_promote_routes._resolve_active_symbols",
+               return_value=["BTCUSDT", "ETHUSDT"])
+        )
+        stack.enter_context(
+            _p("app.strategist_promote_routes._load_live_cost_model",
+               return_value={"fee_bps_round_trip": 21.0, "cost_gate_safety_multiplier": 1.3,
+                             "cost_gate_win_rate_floor": 0.3, "edge_ttl_secs": 172_800})
+        )
+        stack.enter_context(
+            _p("app.strategist_promote_routes._compute_demo_boundary_violation_count",
+               return_value=0)
+        )
+        return stack
+
     def test_live_apply_no_global_mode_403_live_reserved(self) -> None:
-        """Gate 2 fail: global_mode lacks 'live'."""
-        with patch(
+        """Gate 2 fail: global_mode lacks 'live' (criteria eligible → reaches 5-gate)."""
+        ipc_mock = self._criteria_ipc("eligible", update={"version": 7})
+        with self._patch_contract_helpers(), patch(
             "app.strategist_promote_routes._fetch_latest_applied_row",
             return_value=(self.source_row, None),
+        ), patch(
+            "app.strategist_promote_routes._promotion_enabled", return_value=True,
+        ), patch(
+            "app.strategist_promote_routes._fetch_demo_soak_metrics",
+            return_value={
+                "demo_soak_wall_clock_ms": 30 * 24 * 3600 * 1000,
+                "ms_since_last_param_change": 5 * 24 * 3600 * 1000,
+                "attributable_demo_fills": 120,
+            },
+        ), patch(
+            "app.strategist_promote_routes.one_shot_ipc_call", new=ipc_mock,
         ), patch(
             "app.live_session_routes._get_global_mode_state",
             return_value="paper_only",
@@ -549,7 +606,7 @@ class TestApplyLiveGateChain(unittest.TestCase):
         self.assertEqual(resp.json()["detail"]["gate_failed"], "live_reserved")
 
     def test_live_apply_all_gates_green_succeeds(self) -> None:
-        """All 5 gates green → 200 + IPC update_strategy_params dispatched."""
+        """All 5 gates green + criteria Eligible → 200 + IPC update_strategy_params dispatched."""
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -565,10 +622,23 @@ class TestApplyLiveGateChain(unittest.TestCase):
                 bybit_endpoint="demo",  # → live_demo label, no mainnet env
                 authorization_record=record,
             )
-            ipc_mock = AsyncMock(return_value={"version": 7})
-            with patch(
+            ipc_mock = self._criteria_ipc("eligible", update={"version": 7})
+            with self._patch_contract_helpers(), patch(
                 "app.strategist_promote_routes._fetch_latest_applied_row",
                 return_value=(self.source_row, None),
+            ), patch(
+                "app.strategist_promote_routes._promotion_enabled", return_value=True,
+            ), patch(
+                "app.strategist_promote_routes._fetch_demo_soak_metrics",
+                return_value={
+                    "demo_soak_wall_clock_ms": 30 * 24 * 3600 * 1000,
+                    "ms_since_last_param_change": 5 * 24 * 3600 * 1000,
+                    "attributable_demo_fills": 120,
+                },
+            ), patch(
+                # PHASE 2 同步 audit INSERT → mock 成功（不依賴真 PG）。
+                "app.strategist_promote_routes._insert_promotion_audit",
+                return_value=777,
             ), patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
                 # OPS-2 Phase 2 cutover：授權驗證 key 改讀
@@ -588,9 +658,11 @@ class TestApplyLiveGateChain(unittest.TestCase):
         body = resp.json()
         self.assertEqual(body["phase"], "apply")
         self.assertEqual(body["target_engine"], "live")
-        ipc_mock.assert_called_once()
-        self.assertEqual(ipc_mock.call_args[0][0], "update_strategy_params")
-        params = ipc_mock.call_args[1].get("params") or ipc_mock.call_args[0][1]
+        self.assertEqual(body["promotion_id"], 777)
+        # update_strategy_params dispatched (last IPC call) with engine=live + token fields.
+        update_calls = [c for c in ipc_mock.call_args_list if c.args[0] == "update_strategy_params"]
+        self.assertEqual(len(update_calls), 1)
+        params = update_calls[0].kwargs.get("params") or update_calls[0].args[1]
         self.assertEqual(params["engine"], "live")
         # PHASE 0 AUTH-1：live target → 帶 method-bound token 三欄（非-patch hash 分支）
         self.assertTrue(

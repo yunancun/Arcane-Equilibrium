@@ -914,6 +914,38 @@ async fn async_main(
     // 注入 scheduler，scheduler 內部 `tune_cmd_snapshot()` 改從 slot 讀最新
     // demo sender，避免 boot-time 值捕獲在 demo pipeline restart 後過時。
     // owned `demo_cmd_tx` 仍傳入作 fallback（slot 爭用 / 啟動瞬間 None）。
+    // Phase 2 促升判定 seam（E1-C，2026-06-17；Fix 5 重接線 2026-06-17）：
+    // 注入 **live-grade** edge holder（`edge_estimates_live_demo.json`）進 dispatch
+    // 的 `PROMOTION_EDGE_SLOT`，讓唯讀 IPC `evaluate_promotion_criteria` handler 自查
+    // 真 per-cell edge。
+    //
+    // 為何 **不** 共用 scanner 的 `scanner_edge_estimates`（demo-grade）：scanner +
+    // demo cost_gate 讀的 `edge_estimates.json` 由 producer 以
+    // `for_engine_mode("demo")` 算（寬 bar：PSR≥0.95/DSR≥0.90/oos_n≥30）。但 demo→LIVE
+    // 促升 blast radius=25-sym live，QC 要求 live-grade bar（`for_engine_mode("live_demo")`：
+    // PSR≥0.975/DSR≥0.95/oos_n≥60/wf≥3），producer 同時寫 `edge_estimates_live_demo.json`。
+    // 故促升閘讀此 live-grade holder（非 demo holder），令 `validation_passed` 攜帶
+    // live-grade 語意（承 QC adversarial finding：避免 25-sym live 決策用 demo bar）。
+    //
+    // 缺檔（producer 尚未跑 live_demo / 冷啟動）→ 空 holder → 0 cell → criteria gate 對
+    // 所有促升回 Pending（DESIRED §2.9 fail-closed）。此處無條件注入（不隨 Demo 綁定
+    // gated；scheduler 早退也不影響唯讀 handler）。回傳 false 表已注入過（OnceLock no-op）。
+    let promotion_edge_estimates = {
+        let base_dir = std::env::var("OPENCLAW_BASE_DIR").unwrap_or_else(|_| ".".to_string());
+        Arc::new(parking_lot::RwLock::new(
+            openclaw_engine::edge_estimates::EdgeEstimates::load_promotion_edge(&base_dir),
+        ))
+    };
+    let promotion_slot_injected = openclaw_engine::ipc_server::set_promotion_edge_slot(
+        Arc::clone(&promotion_edge_estimates),
+    );
+    info!(
+        injected = promotion_slot_injected,
+        cells = promotion_edge_estimates.read().n_cells(),
+        "PROMOTION_EDGE_SLOT injected (live-grade edge_estimates_live_demo holder, \
+         separate from scanner demo holder) / 促升判定 edge slot 已注入（live-grade 獨立 holder）"
+    );
+
     let strategist_counters = main_boot_tasks::spawn_strategist_scheduler(
         &db_pool,
         &cancel,

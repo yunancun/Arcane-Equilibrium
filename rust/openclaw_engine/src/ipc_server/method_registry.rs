@@ -41,8 +41,21 @@ pub const GET_AGENT_SPINE_CHANNEL_METRICS: IpcMethodSpec = IpcMethodSpec {
     slot: IpcSlotRequirement::None,
 };
 
-pub const IPC_METHOD_REGISTRY: &[IpcMethodSpec] =
-    &[QUERY_FEE_SOURCE, GET_AGENT_SPINE_CHANNEL_METRICS];
+/// Phase 2 demo→live 促升 EDGE-ANCHORED criteria gate（唯讀）。
+/// slot=None：edge snapshot 由 `dispatch::PROMOTION_EDGE_SLOT` 程序級 OnceLock
+/// 注入（鏡像 `live_authz::nonce_ledger()`），非 dispatch 參數鏈 slot，故此處
+/// 標 None。readonly=true：**不在** `live_authz::LIVE_WRITE_METHODS`，token 豁免。
+pub const EVALUATE_PROMOTION_CRITERIA: IpcMethodSpec = IpcMethodSpec {
+    name: "evaluate_promotion_criteria",
+    readonly: true,
+    slot: IpcSlotRequirement::None,
+};
+
+pub const IPC_METHOD_REGISTRY: &[IpcMethodSpec] = &[
+    QUERY_FEE_SOURCE,
+    GET_AGENT_SPINE_CHANNEL_METRICS,
+    EVALUATE_PROMOTION_CRITERIA,
+];
 
 pub fn method_spec(name: &str) -> Option<&'static IpcMethodSpec> {
     IPC_METHOD_REGISTRY.iter().find(|spec| spec.name == name)
@@ -69,5 +82,25 @@ mod tests {
     #[test]
     fn unknown_method_has_no_registry_entry() {
         assert!(method_spec("not_a_real_method").is_none());
+    }
+
+    #[test]
+    fn evaluate_promotion_criteria_is_readonly_no_slot() {
+        let spec = method_spec("evaluate_promotion_criteria").expect("registered method");
+        assert!(spec.readonly, "criteria gate is read-only (token-exempt)");
+        assert_eq!(spec.slot, IpcSlotRequirement::None);
+    }
+
+    /// 安全不變量：promote criteria gate 是唯讀 method，**不可**進
+    /// `live_authz::LIVE_WRITE_METHODS`（進了就會要求 live token，但它純讀不改
+    /// state，且 Python promote route 在鑄 token 前就以此閘廉價拒——若需 token 會
+    /// 死鎖判定順序）。fail-closed 方向相反：唯讀面不受 token 強制。
+    #[test]
+    fn evaluate_promotion_criteria_not_in_live_write_methods() {
+        assert!(
+            !crate::ipc_server::live_authz::LIVE_WRITE_METHODS
+                .contains(&"evaluate_promotion_criteria"),
+            "read-only criteria gate must stay token-exempt (NOT a live mutator)"
+        );
     }
 }
