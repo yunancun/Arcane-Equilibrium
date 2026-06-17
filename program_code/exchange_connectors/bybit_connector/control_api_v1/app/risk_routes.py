@@ -597,6 +597,15 @@ class ResetDrawdownBaselineRequest(BaseModel):
         max_length=500,
         description="Operator reason for resetting the drawdown baseline",
     )
+    operator_override: bool = Field(
+        default=False,
+        description=(
+            "POLICY-1: engine=live override path for the structurally-impossible "
+            "signed-auth case (halt-recovery auto-revokes signed auth). False (default) "
+            "= full 5-gate; True = the 4 non-authz gates must still ALL pass, only "
+            "signed-auth (5th) is exempted. Never bypasses operator-role."
+        ),
+    )
 
 
 def _record_reset_drawdown_audit(
@@ -604,6 +613,10 @@ def _record_reset_drawdown_audit(
     engine: str,
     reason: str,
     ipc_response: dict[str, Any],
+    *,
+    override: bool = False,
+    bypassed_gate: str | None = None,
+    caller: str | None = None,
 ) -> None:
     """
     Write change_audit_log entry for a drawdown baseline reset.
@@ -614,6 +627,13 @@ def _record_reset_drawdown_audit(
 
     為一次 drawdown 基準重置寫 change_audit_log。若 governance hub 不可用，
     重置仍返回成功（Rust 端 DB DELETE 已確認），但以 WARN 記錄缺口。
+
+    POLICY-1（Root #8 可區分查詢）：override=True 的 live override reset（halt-
+    recovery 等 signed-auth 結構不可達場景）必須在審計上與普通 5-gated reset
+    可分離查詢。override 時 what 標 "OPERATOR_OVERRIDE, authz-gate-bypassed"，
+    new_value 額外帶 {override:true, bypassed_gate:"signed_auth", caller:...}。
+    override=False（預設）時 new_value 與上線前 byte-identical（不注入 override
+    欄），保既有 demo/paper/普通 5-gated caller 審計形態不變。
     """
     try:
         from .governance_routes import _get_governance_hub  # lazy import
@@ -625,20 +645,38 @@ def _record_reset_drawdown_audit(
     if hub is None or getattr(hub, "_change_audit_log", None) is None:
         logger.warning(
             "reset_drawdown_baseline: change_audit_log unavailable — "
-            "operator=%s engine=%s (Root Principle #8 trace gap)",
-            who, engine,
+            "operator=%s engine=%s override=%s (Root Principle #8 trace gap)",
+            who, engine, override,
         )
         return
+
+    if override:
+        # OVERRIDE 路徑：標記為可分離查詢（Root #8）。
+        what = (
+            f"Drawdown baseline reset (engine={engine}, OPERATOR_OVERRIDE, "
+            "authz-gate-bypassed)"
+        )
+        new_value: dict[str, Any] = {
+            "peak_balance": "equal_to_balance",
+            "ipc_result": ipc_response,
+            "override": True,
+            "bypassed_gate": bypassed_gate or "signed_auth",
+            "caller": caller or "manual_override",
+        }
+    else:
+        # 普通路徑：與上線前 byte-identical（不注入 override 欄）。
+        what = f"Drawdown baseline reset (engine={engine})"
+        new_value = {"peak_balance": "equal_to_balance", "ipc_result": ipc_response}
 
     try:
         from .change_audit_log import ChangeType
         hub._change_audit_log.record_change(
             change_type=ChangeType.STATE_CHANGE,
             who=who,
-            what=f"Drawdown baseline reset (engine={engine})",
+            what=what,
             reason=reason,
             old_value={"peak_balance": "prev"},
-            new_value={"peak_balance": "equal_to_balance", "ipc_result": ipc_response},
+            new_value=new_value,
             affected_components=[f"paper_state:{engine}", "trading.paper_state_checkpoint"],
             auto_approve=True,  # operator-authenticated action already passed auth
         )
@@ -689,6 +727,56 @@ async def reset_drawdown_baseline(
             detail=f"Invalid engine '{body.engine}'. Must be one of: {sorted(_ALLOWED_ENGINES)}",
         )
 
+    # ── POLICY-1：live drawdown-baseline reset 必須過完整 5-gate（與 live RiskConfig
+    #    寫入同級）或顯式 override 路徑。demo/paper 不受影響（無 5-gate、無 token，
+    #    維持現行）。manual 路徑（本 route）才在此做授權；halt-recovery 走直接
+    #    risk_view_client 繞過本 route，其 operator-approval 即 override 授權。
+    if body.engine == "live":
+        from . import live_preflight  # noqa: PLC0415
+
+        if not body.operator_override:
+            # 預設路徑：完整 5-gate（require_authz=True）。
+            ok, reason_codes = live_preflight.all_five_live_gates_ok(actor, require_authz=True)
+            if not ok:
+                logger.warning(
+                    "Live drawdown-baseline reset BLOCKED (5-gate): gate_failed=%s actor=%s",
+                    reason_codes, getattr(actor, "actor_id", "unknown"),
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "live_gate_failed",
+                        "gate_failed": reason_codes,
+                        "message": "Live drawdown-baseline reset blocked — live preflight "
+                                   "gate failed. Ensure Global Mode=live_reserved, secret slot "
+                                   "configured, and a valid signed authorization (renew if "
+                                   "needed); or use operator_override for halt-recovery cases.",
+                    },
+                )
+        else:
+            # OVERRIDE 路徑（signed-auth 結構不可達場景，如 halt-recovery 自動撤銷簽名）：
+            # 不跑 require_authz=True（必然失敗）；但前 4 門（live_reserved + operator-role
+            # + ALLOW_MAINNET + secret-slot）一律必過，**只**豁免第 5 門 (signed-auth)。
+            # operator-role 已於上方 (:676) 強制檢查，這裡再由 four_gates_minus_authz_ok
+            # 的 Gate 1 重複確認（override 永不繞 operator-role）。
+            ok, reason_codes = live_preflight.four_gates_minus_authz_ok(actor)
+            if not ok:
+                logger.warning(
+                    "Live drawdown-baseline reset BLOCKED (override 4-gate): gate_failed=%s "
+                    "actor=%s",
+                    reason_codes, getattr(actor, "actor_id", "unknown"),
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "error": "live_gate_failed",
+                        "gate_failed": reason_codes,
+                        "message": "Live drawdown-baseline reset (override) blocked — the 4 "
+                                   "non-authz gates must all pass; override only exempts the "
+                                   "signed-auth (5th) gate.",
+                    },
+                )
+
     client = await _get_risk_view_client()
     try:
         result = await client.reset_drawdown_baseline(body.engine)
@@ -699,12 +787,17 @@ async def reset_drawdown_baseline(
         ) from e
 
     # Root Principle #8: trade explainability — audit ALL baseline resets.
+    # override 路徑寫可分離查詢的審計 row（override:true, bypassed_gate:signed_auth）。
     # 根原則 #8：交易可解釋 — 所有 baseline 重置皆寫審計。
+    is_live_override = bool(body.engine == "live" and body.operator_override)
     _record_reset_drawdown_audit(
         who=str(actor.actor_id),
         engine=body.engine,
         reason=body.reason,
         ipc_response=result,
+        override=is_live_override,
+        bypassed_gate="signed_auth" if is_live_override else None,
+        caller="manual_override" if is_live_override else None,
     )
 
     return _risk_response({

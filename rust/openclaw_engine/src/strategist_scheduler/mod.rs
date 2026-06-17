@@ -24,6 +24,7 @@
 mod cycle_counters;
 mod evaluate;
 mod persist;
+mod rich_inputs;
 
 /// Re-export `load_latest_applied_params` at the `strategist_scheduler::`
 /// namespace so `main.rs` call sites remain unchanged after the split.
@@ -34,11 +35,20 @@ pub use cycle_counters::{CycleCounters, CycleCountersSnapshot, REJECT_REASONS};
 use evaluate::rank_by_deviation;
 pub use evaluate::PairMetrics;
 pub use persist::load_latest_applied_params;
+// Phase 1（rich-input tuner）：側車型別與 server-side quant gate。
+// 為什麼 re-export：evaluate.rs 組裝 RichInputs、tests.rs 構造 fixture、
+// IPC payload builder 引用視圖，皆從 `strategist_scheduler::` 命名空間取用。
+pub use rich_inputs::{
+    compute_regime_label, verify_quant_justification, CellEstimateView, NewsItemView, RichInputs,
+    REASON_NEWS_SOLO_TRIGGER, REASON_QUANT_JUSTIFICATION_UNVERIFIED,
+};
 
 use crate::ai_service_client::AiServiceClient;
 use crate::config::risk_config::RiskConfig;
 use crate::config::store::ConfigStore;
+use crate::edge_estimates::EdgeEstimates;
 use crate::ipc_server::{DemoCmdSenderSlot, LiveCmdSenderSlot};
+use crate::news::NewsRouter;
 use crate::strategies::ParamRange;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind};
 use serde_json::Value;
@@ -65,6 +75,11 @@ pub const DEFAULT_MAX_PARAM_DELTA_PCT: f64 = 0.50;
 /// 保留 backward compat。
 /// F-09：缺 store 時 model_tier 後備，與 source default / Python default 對齊。
 pub const DEFAULT_STRATEGIST_MODEL_TIER: &str = "l1_9b";
+
+/// Phase 1：缺 RiskConfig store 時 edge freshness TTL 的後備值（秒）。
+/// 與 `RiskConfig.slippage.edge_estimate_ttl_secs` 的 source 預設對齊（48h），
+/// 也與 cost_gate 同源。
+const DEFAULT_EDGE_ESTIMATE_TTL_SECS: i64 = 172_800;
 
 /// Weight sum target for confluence weights (65-point scale).
 /// 匯合權重目標總和（65 分制）。
@@ -157,6 +172,22 @@ pub struct StrategistScheduler {
     /// IPC handlers can hold a clone independent of scheduler ownership.
     /// G3-11：cycle 計數器；Arc 共享給 IPC handler。
     cycle_counters: Arc<CycleCounters>,
+    /// Phase 1（rich-input tuner）：是否啟用 rich INPUT 注入 + server-side
+    /// quant gate。讀 `OPENCLAW_STRATEGIST_RICH_INPUT`（default-OFF）。
+    /// false → payload 與 validate 路徑 bit-identical（無 rich_input 鍵、不呼
+    /// quant gate），即 flag-OFF 主 kill-switch。
+    rich_input_enabled: bool,
+    /// Phase 1：edge_estimates snapshot holder（per-cycle `.read().get_cell`）。
+    /// None = flag-OFF / 未接（測試路徑）→ edge_cell 欄 absent，quant gate 拒
+    /// （無 edge 支撐）。生產注入既有 demo-readable production holder（demo/live
+    /// 共用 production edge_estimates.json，scheduler tune_target=Demo 對齊）。
+    edge_store: Option<Arc<parking_lot::RwLock<EdgeEstimates>>>,
+    /// Phase 1：news router（untrusted narrative context，零 gate 權重）。
+    /// None = 未接 → news 欄 absent。**永不**進 quant gate 算術（structurally
+    /// guaranteed：verify_quant_justification 簽名無 news 參數）。
+    /// 註：當前 boot 暫不接（router Arc 建於 news pipeline 內未對外曝露），保留
+    /// builder + 欄位讓「news 零權重」不變量可測；future additive 接線即生效。
+    news_router: Option<Arc<NewsRouter>>,
     /// Cancellation token for graceful shutdown / 優雅關閉的取消令牌
     cancel: CancellationToken,
 }
@@ -198,8 +229,39 @@ impl StrategistScheduler {
             risk_store: None,
             consecutive_failures: AtomicU32::new(0),
             cycle_counters: Arc::new(CycleCounters::new()),
+            // Phase 1 預設 OFF / 未接：保 flag-OFF bit-identical + 既有測試路徑不變。
+            rich_input_enabled: false,
+            edge_store: None,
+            news_router: None,
             cancel,
         }
+    }
+
+    /// Phase 1：啟用/停用 rich INPUT 注入 + server-side quant gate（builder）。
+    /// 生產在 main_boot_tasks 讀 `OPENCLAW_STRATEGIST_RICH_INPUT` 傳入；OFF 時
+    /// 不呼此 builder（或傳 false），scheduler 維持 flag-OFF bit-identical 行為。
+    /// pattern 同 `with_risk_store` / `with_tune_cmd_slot`。
+    pub fn with_rich_input(mut self, enabled: bool) -> Self {
+        self.rich_input_enabled = enabled;
+        self
+    }
+
+    /// Phase 1：注入 edge_estimates holder（builder）。
+    /// 生產注入既有 demo-readable production holder（`scanner_edge_estimates`）；
+    /// 不接時 edge_cell 欄 absent → quant gate 拒（無 edge 支撐）。
+    pub fn with_edge_store(
+        mut self,
+        edge_store: Arc<parking_lot::RwLock<EdgeEstimates>>,
+    ) -> Self {
+        self.edge_store = Some(edge_store);
+        self
+    }
+
+    /// Phase 1：注入 news router（builder，untrusted context-only）。
+    /// 不接時 news 欄 absent；接了也只進 payload context，零 gate 權重。
+    pub fn with_news_router(mut self, news_router: Arc<NewsRouter>) -> Self {
+        self.news_router = Some(news_router);
+        self
     }
 
     /// G3-11: expose the shared `CycleCounters` Arc so the IPC server can
@@ -268,6 +330,19 @@ impl StrategistScheduler {
             .as_ref()
             .map(|store| store.load().strategist.model_tier.clone())
             .unwrap_or_else(|| DEFAULT_STRATEGIST_MODEL_TIER.to_string())
+    }
+
+    /// Phase 1：edge freshness TTL（秒）。鏡像 cost_gate 同源
+    /// `RiskConfig.slippage.edge_estimate_ttl_secs`（demo store），讓 quant gate
+    /// 的 freshness 判定與 cost_gate 完全一致；缺 store 時走 source 預設 48h。
+    /// 為什麼共用同一 TTL：edge_estimates 是 cost_gate 與 quant gate 的共同證據源，
+    /// 兩處 freshness 門檻不一致會造成「cost_gate 認 fresh、quant gate 認 stale」
+    /// 的語意分裂。
+    fn current_edge_ttl_secs(&self) -> i64 {
+        self.risk_store
+            .as_ref()
+            .map(|store| store.load().slippage.edge_estimate_ttl_secs)
+            .unwrap_or(DEFAULT_EDGE_ESTIMATE_TTL_SECS)
     }
 
     /// Tune target introspection (mainly for tests + status logging).
@@ -485,6 +560,78 @@ pub fn validate_recommendation_with_reason(
     }
 
     Ok(())
+}
+
+/// Phase 1：flag-ON 時的驗證變體 = 既有 3 gate（range/delta/weight）**之後**疊加
+/// server-side quant gate（`verify_quant_justification`）。
+///
+/// 為什麼是獨立變體而非改 4-arg 簽名：既有 `validate_recommendation` /
+/// `validate_recommendation_with_reason` 有大量 direct-call 測試鎖死 4-arg 簽名
+/// （tests.rs）。本變體疊加在它們之上 —— flag-OFF 路徑 caller 仍呼 4-arg 版（行為
+/// bit-identical），只有 flag-ON 路徑呼此變體。**疊加是更嚴（第 4 gate），永不放寬。**
+///
+/// 不變量：
+/// - 既有 3 gate 任一 Err → 立即回傳該 reason（quant gate 不執行 = 不放寬）。
+/// - quant gate 只在「recommendation 含 ≥1 實際 param delta」時驗（`has_real_param_delta`
+///   由 caller 用既有 `param_ranges` + `current_params` 算好；空 rec `{}` → false →
+///   quant gate bypass，對齊既有 empty 行為）。
+/// - quant gate **零讀 news**（`verify_quant_justification` 簽名無 news 參數）。
+#[allow(clippy::too_many_arguments)]
+pub fn validate_recommendation_with_reason_rich(
+    recommendation: &Value,
+    current_params: &Value,
+    param_ranges: &[ParamRange],
+    max_delta_pct: f64,
+    edge: &EdgeEstimates,
+    now_ts: i64,
+    ttl: i64,
+) -> Result<(), &'static str> {
+    // 先跑既有 3 gate（range/delta/weight）—— byte-identical 於 flag-OFF 路徑。
+    validate_recommendation_with_reason(recommendation, current_params, param_ranges, max_delta_pct)?;
+
+    // 算「是否有實際 param delta」：rec 中有任一 agent_adjustable 數值欄、其值
+    // 落在 range 內且與當前值不同（用既有 range/current 判定，與上面同源）。
+    let has_real_param_delta = rec_has_real_param_delta(recommendation, current_params, param_ranges);
+
+    // 疊加 server-side quant gate（news-blind；edge 由 engine 自查）。
+    rich_inputs::verify_quant_justification(
+        recommendation,
+        has_real_param_delta,
+        edge,
+        now_ts,
+        ttl,
+    )
+}
+
+/// Phase 1：判定 recommendation 是否含 ≥1「實際 param delta」。
+/// 「實際」= rec 有某 agent_adjustable 參數的數值欄，且與 `current_params` 對應值
+/// 不同（純 meta echo 或與當前相同不算）。
+/// 為什麼需要：quant gate 只在真要改參數時才要求 quant_justification；LLM 回 `{}`
+/// 或只回 meta（status/agent/...）時 → 無 delta → bypass（對齊既有 empty 行為）。
+fn rec_has_real_param_delta(
+    recommendation: &Value,
+    current_params: &Value,
+    param_ranges: &[ParamRange],
+) -> bool {
+    let rec_obj = match recommendation.as_object() {
+        Some(o) => o,
+        None => return false,
+    };
+    for range in param_ranges {
+        if !range.agent_adjustable {
+            continue;
+        }
+        let new_val = match rec_obj.get(&range.name).and_then(|v| v.as_f64()) {
+            Some(v) => v,
+            None => continue,
+        };
+        // 與當前值比較：缺當前值（首次設定）也算 delta；有當前值則需不同。
+        match current_params.get(&range.name).and_then(|v| v.as_f64()) {
+            Some(cur) if (new_val - cur).abs() <= f64::EPSILON => continue, // 相同 = 無 delta
+            _ => return true, // 不同或無當前值 = 有實際 delta
+        }
+    }
+    false
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

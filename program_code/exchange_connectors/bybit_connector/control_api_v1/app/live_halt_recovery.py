@@ -192,6 +192,16 @@ def build_live_halt_recovery_request(*, respect_sentinel: bool = True) -> dict[s
 
 
 async def _try_ipc_reset_live() -> dict[str, Any]:
+    # POLICY-1：halt-recovery 是 live drawdown-baseline reset override 路徑的**唯一**
+    # 合法自動觸發者。它**故意**直接走 risk_view_client（繞過 FastAPI route
+    # reset_drawdown_baseline），因為 live halt 時 signed authorization 已被自動撤銷
+    # （next_step="renew_signed_auth"），route 預設路徑的 all_five_live_gates_ok
+    # (require_authz=True) 在此場景結構上必然失敗——若把本呼叫改走 route 預設路徑會
+    # 卡死 halt-recovery，永遠無法解封。其授權來自上游 approve_live_halt_recovery
+    # (operator-approved 入口)，等同 route override 路徑的 operator-role + override 旗標
+    # 雙檢。client.reset_drawdown_baseline 內部對 engine=="live" 鑄 capability token，
+    # Rust chokepoint 仍會驗 token（Phase-0 保證）。**勿**為「統一授權」把本呼叫改走
+    # route：那會重新引入 deadlock。
     from .risk_routes import _get_risk_view_client
 
     client = await _get_risk_view_client()

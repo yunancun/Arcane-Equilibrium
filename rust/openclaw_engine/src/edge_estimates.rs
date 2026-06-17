@@ -306,6 +306,28 @@ impl EdgeEstimates {
         self.updated_at
     }
 
+    /// Phase 1 可觀測性：回傳 quant gate 的「可達 edge 證據面」四項計數
+    /// `(n_cells, n_validated, n_fresh, n_usable)`，供 strategist scheduler 每輪
+    /// 結構化 log 一行，讓 operator 看得到「edge_estimates 是否真的足以調參」。
+    ///
+    /// 為什麼是唯讀（&self、零突變）：本 helper 純粹彙總既有欄位，**不**改任何
+    /// gate 行為——`verify_quant_justification` 仍逐 cell 自查真值，這裡只報整體
+    /// 表面，不參與放行判定。
+    ///
+    /// freshness 語意：`is_fresh` 是 **快照層級**（單一 `_meta.updated_at` 對全
+    /// snapshot 生效），故 `n_fresh` 要嘛等於 `n_cells`（snapshot 新鮮）要嘛為 0
+    /// （無時間戳 / 過 TTL）。`n_usable` = validated AND fresh，即 gate 真正可用面。
+    pub fn reachable_surface_counts(&self, now: i64, ttl: i64) -> (usize, usize, usize, usize) {
+        let n_cells = self.data.len();
+        let n_validated = self.data.values().filter(|c| c.validation_passed).count();
+        // 快照層 freshness：fresh → 全部 cell fresh；否則全部非 fresh。
+        let snapshot_fresh = self.is_fresh(now, ttl);
+        let n_fresh = if snapshot_fresh { n_cells } else { 0 };
+        // gate 可用面 = validated AND fresh。
+        let n_usable = if snapshot_fresh { n_validated } else { 0 };
+        (n_cells, n_validated, n_fresh, n_usable)
+    }
+
     /// P1-09: whether the snapshot is fresh relative to `now` (epoch secs) and
     /// `ttl` (secs). A None `updated_at` is NOT fresh — a legacy snapshot with no
     /// timestamp must fail the production freshness gate rather than pass
@@ -557,6 +579,54 @@ mod tests {
         let json = r#"{"strat::SYM": {"runtime_bps": 5.0, "n": 50}}"#;
         let e = EdgeEstimates::load_from_str(json).unwrap();
         assert!(!e.is_fresh(1_779_667_200, 172_800));
+    }
+
+    // ─── Phase 1 可觀測性：reachable_surface_counts ───
+
+    #[test]
+    fn test_reachable_surface_counts_fresh_snapshot() {
+        // 3 cells：2 validated / 1 not；snapshot 新鮮 → n_fresh=全部、n_usable=validated。
+        let json = r#"{
+            "_meta": {"updated_at": "2026-05-29T00:00:00+00:00"},
+            "a::SYM": {"runtime_bps": 5.0, "validation_passed": true, "n": 50},
+            "b::SYM": {"runtime_bps": 3.0, "validation_passed": true, "n": 60},
+            "c::SYM": {"runtime_bps": 1.0, "validation_passed": false, "n": 10}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        let updated = 1_780_012_800;
+        let ttl = 172_800; // 48h
+        let (n_cells, n_validated, n_fresh, n_usable) =
+            e.reachable_surface_counts(updated + 100, ttl);
+        assert_eq!(n_cells, 3);
+        assert_eq!(n_validated, 2);
+        assert_eq!(n_fresh, 3); // snapshot fresh → 全部 cell fresh
+        assert_eq!(n_usable, 2); // validated AND fresh
+    }
+
+    #[test]
+    fn test_reachable_surface_counts_stale_snapshot() {
+        // snapshot 過 TTL → n_fresh=0、n_usable=0（即便有 validated cell）。
+        let json = r#"{
+            "_meta": {"updated_at": "2026-05-29T00:00:00+00:00"},
+            "a::SYM": {"runtime_bps": 5.0, "validation_passed": true, "n": 50}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        let updated = 1_780_012_800;
+        let ttl = 172_800;
+        let (n_cells, n_validated, n_fresh, n_usable) =
+            e.reachable_surface_counts(updated + ttl + 1, ttl);
+        assert_eq!(n_cells, 1);
+        assert_eq!(n_validated, 1);
+        assert_eq!(n_fresh, 0); // stale → 0
+        assert_eq!(n_usable, 0); // validated 但 stale → 不可用
+    }
+
+    #[test]
+    fn test_reachable_surface_counts_empty() {
+        let e = EdgeEstimates::empty();
+        let (n_cells, n_validated, n_fresh, n_usable) =
+            e.reachable_surface_counts(1_780_012_900, 172_800);
+        assert_eq!((n_cells, n_validated, n_fresh, n_usable), (0, 0, 0, 0));
     }
 
     #[test]

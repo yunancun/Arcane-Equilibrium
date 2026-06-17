@@ -325,3 +325,28 @@ def all_five_live_gates_ok(
             return False, reasons
 
     return True, reasons
+
+
+def four_gates_minus_authz_ok(actor: Any) -> tuple[bool, list[str]]:
+    """評估「5-gate 中除 signed-auth 外的前 4 門」，回 (ok, reason_codes)。
+
+    為何只重組、不新增/不放寬：本函數**不**自行實作任何門控判斷，而是直接委派
+    all_five_live_gates_ok(actor, require_authz=False)。該權威 primitive 在
+    require_authz=False 時恰好依序評估 Gate 1 (operator-role) / Gate 2
+    (global_mode==live_reserved) / Gate 3 (OPENCLAW_ALLOW_MAINNET，僅 Mainnet) /
+    Gate 4 (secret slot)，並**跳過** Gate 5 (signed authorization.json)。因此
+    本 helper = 「前 4 門必過、第 5 門 (signed-auth) 豁免」，與單一真相
+    all_five_live_gates_ok 共用 EXACT 同一份 gate 邏輯，零分叉。
+
+    為何需要豁免第 5 門：POLICY-1 的 operator_override 路徑專供「signed-auth
+    結構上不可達」場景（live halt 時 signed authorization 已被自動撤銷，
+    require_authz=True 必然失敗，否則 halt 永遠無法恢復）。此 helper **只**豁免
+    signed-auth，前 4 門（含 operator-role）一律不放寬——禁止用本函數繞過
+    live_reserved / operator / ALLOW_MAINNET / secret-slot 任何一門。
+
+    Returns:
+        (ok, reason_codes)：ok=True 代表前 4 門全過；否則 reason_codes 列出
+        失敗門控（fail-closed，順序短路）。reason_codes 永不含 "authorization*"，
+        因 require_authz=False 不評估第 5 門。
+    """
+    return all_five_live_gates_ok(actor, require_authz=False)

@@ -177,6 +177,7 @@ pub(crate) fn spawn_position_reconcilers(
 ///   - Demo 未綁則 scheduler 整個不 spawn（單行 info log）。
 /// 中 (STRATEGIST-PARAMS-PERSIST-1): spawn scheduler 前先從 DB 恢復上次 tune 好
 ///   的參數，避免 rebuild 靜默回 TOML baseline 重置 AUTO-PROMOTE 計數器。
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn spawn_strategist_scheduler(
     db_pool: &Arc<DbPool>,
     cancel: &CancellationToken,
@@ -184,6 +185,11 @@ pub(crate) async fn spawn_strategist_scheduler(
     demo_cmd_slot: &DemoCmdSenderSlot,
     live_cmd_slot: &LiveCmdSenderSlot,
     risk_stores: &PerEngineRiskStores,
+    // Phase 1（rich-input tuner）：demo-readable production edge_estimates holder
+    // （demo/live 共用 production edge_estimates.json；scheduler tune_target=Demo
+    // 對齊）。flag-OFF 時雖接入 holder，但 scheduler `rich_input_enabled=false`
+    // → 不組裝 rich/不呼 quant gate → bit-identical。
+    edge_estimates: &Arc<parking_lot::RwLock<openclaw_engine::edge_estimates::EdgeEstimates>>,
 ) -> Option<Arc<openclaw_engine::strategist_scheduler::CycleCounters>> {
     let Some(demo_tx) = demo_cmd_tx.as_ref() else {
         info!(
@@ -318,6 +324,12 @@ pub(crate) async fn spawn_strategist_scheduler(
     // restart 後自動拿到新 channel（不需重 spawn scheduler）。owned
     // `tune_cmd_tx`（即 `demo_tx.clone()`）保留作為 slot try_read 爭用 / 啟動
     // 瞬間 None 的 fallback，與既有 promote slot pattern 對稱。
+    // Phase 1（rich-input tuner）：讀 OPENCLAW_STRATEGIST_RICH_INPUT（default-OFF，
+    // 鏡像既有 OPENCLAW_H_STATE_GATEWAY env-gate pattern）。OFF → rich_input_enabled
+    // =false → payload+validate bit-identical（無 rich_input 鍵、不呼 quant gate）。
+    let rich_input_enabled = std::env::var("OPENCLAW_STRATEGIST_RICH_INPUT")
+        .map(|v| v == "1")
+        .unwrap_or(false);
     let scheduler = Arc::new(
         openclaw_engine::strategist_scheduler::StrategistScheduler::new(
             ai_client,
@@ -329,7 +341,11 @@ pub(crate) async fn spawn_strategist_scheduler(
         )
         .with_promote_cmd_slot(Arc::clone(live_cmd_slot))
         .with_tune_cmd_slot(Arc::clone(demo_cmd_slot))
-        .with_risk_store(Arc::clone(&risk_stores.demo)),
+        .with_risk_store(Arc::clone(&risk_stores.demo))
+        // Phase 1：edge_store 注入既有 demo-readable production holder（quant gate
+        // 自查的真 cell 來源）；rich_input flag 控制是否真組裝/驗證。
+        .with_edge_store(Arc::clone(edge_estimates))
+        .with_rich_input(rich_input_enabled),
     );
     // G3-11 STRATEGIST-CYCLE-OBSERVABILITY-1 (2026-04-25): grab the shared
     // CycleCounters Arc BEFORE moving the scheduler into run_forever. main.rs
@@ -342,6 +358,7 @@ pub(crate) async fn spawn_strategist_scheduler(
     let has_live_promote = live_cmd_slot.read().as_ref().is_some();
     info!(
         has_live_promote,
+        rich_input_enabled,
         "StrategistScheduler spawned — tune_target=Demo / 策略師排程器已啟動（調諧目標=Demo）",
     );
     Some(counters)
