@@ -588,6 +588,14 @@ restart_engine() {
     # 預設啟用 → 任何手動 restart_all.sh 都會解閘，違反 survival > profit。
     local allow_mainnet
     allow_mainnet="${OPENCLAW_ALLOW_MAINNET:-$(grep '^OPENCLAW_ALLOW_MAINNET=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    # Phase 1/3 智能調參旗標（engine 側，default-OFF fail-closed，鏡像 allow_mainnet pattern）：
+    # RICH_INPUT = StrategistScheduler 富輸入 tuner（demo；OFF → payload bit-identical）；
+    # RISKCONFIG_AGENT_TUNING = claude_teacher RiskConfigDirectiveSink（demo-Arc-only，
+    # v1 allowlist 結構性為空 → 啟用後仍 inert，veto 一切）。不在此轉發 = 寫了 env 檔
+    # 引擎進程也讀不到（死參數）；operator-env 優先 → basic_system_services.env fallback。
+    local strategist_rich_input riskconfig_agent_tuning
+    strategist_rich_input="${OPENCLAW_STRATEGIST_RICH_INPUT:-$(grep '^OPENCLAW_STRATEGIST_RICH_INPUT=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    riskconfig_agent_tuning="${OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED:-$(grep '^OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     local base_dir
     base_dir="${OPENCLAW_BASE_DIR:-$(pwd)}"
     # W-AUDIT-7 F-07: feed provider keys to Rust as process env. Provider
@@ -626,6 +634,8 @@ restart_engine() {
         OPENCLAW_RECORD_TICKS="${OPENCLAW_RECORD_TICKS:-1}" \
         OPENCLAW_RECORD_L1_EVENTS="${OPENCLAW_RECORD_L1_EVENTS:-}" \
         OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL="${OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL:-}" \
+        OPENCLAW_STRATEGIST_RICH_INPUT="${strategist_rich_input}" \
+        OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED="${riskconfig_agent_tuning}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 0<&- 200<&- &
     echo "    PID: $!"
 }
@@ -789,6 +799,13 @@ restart_api() {
     local sm_ipc_canary_enabled sm_canary_interval_secs
     sm_ipc_canary_enabled="${OPENCLAW_SM_IPC_CANARY_ENABLED:-$(grep '^OPENCLAW_SM_IPC_CANARY_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     sm_canary_interval_secs="${OPENCLAW_SM_CANARY_INTERVAL_SECS:-$(grep '^OPENCLAW_SM_CANARY_INTERVAL_SECS=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    # POLICY-2 + Phase 2 旗標（API 側，default-OFF fail-closed，鏡像 sm_ipc_canary pattern）：
+    # STRATEGY_TOGGLE_LIVE_MODE = live 策略啟停 5-gate 模式總開關（strategy_write_routes）；
+    # STRATEGIST_PROMOTION_ENABLED = demo→live 人工促升總開關（strategist_promote_routes）。
+    # OFF 時 live 路徑不可達（fail-loud 409，不靜默降級成 demo）。不轉發 = 持久層死參數。
+    local strategy_toggle_live_mode strategist_promotion_enabled
+    strategy_toggle_live_mode="${OPENCLAW_STRATEGY_TOGGLE_LIVE_MODE:-$(grep '^OPENCLAW_STRATEGY_TOGGLE_LIVE_MODE=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    strategist_promotion_enabled="${OPENCLAW_STRATEGIST_PROMOTION_ENABLED:-$(grep '^OPENCLAW_STRATEGIST_PROMOTION_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     local anthropic_api_key openai_api_key deepseek_api_key
     anthropic_api_key="$(resolve_provider_secret_env ANTHROPIC_API_KEY anthropic anthropic_api_key)"
     openai_api_key="$(resolve_provider_secret_env OPENAI_API_KEY openai openai_api_key)"
@@ -808,6 +825,8 @@ restart_api() {
         OPENCLAW_LEASE_PYTHON_IPC_ENABLED="${lease_python_ipc_enabled}" \
         OPENCLAW_SM_IPC_CANARY_ENABLED="${sm_ipc_canary_enabled}" \
         OPENCLAW_SM_CANARY_INTERVAL_SECS="${sm_canary_interval_secs}" \
+        OPENCLAW_STRATEGY_TOGGLE_LIVE_MODE="${strategy_toggle_live_mode}" \
+        OPENCLAW_STRATEGIST_PROMOTION_ENABLED="${strategist_promotion_enabled}" \
         ANTHROPIC_API_KEY="${anthropic_api_key}" \
         OPENAI_API_KEY="${openai_api_key}" \
         DEEPSEEK_API_KEY="${deepseek_api_key}" \
