@@ -11,8 +11,12 @@ MODULE_NOTE
   - core.py：leak-free 純函數核心（clean_obtop / build_grid / ofi / fwd /
     fisher_t / assemble_frames / pooled_ic_t / per_symbol_same_sign）。0 DB / 0 網路。
   - data_loader.py：read-only PG loader（PG* libpq env 或 OPENCLAW_DATABASE_URL，
-    禁硬編 trading_admin）。只 SELECT market.trades / market.ob_top，0 寫入。
+    禁硬編 trading_admin）。只 SELECT market.trades / market.ob_top / market.l1_events，0 寫入。
   - harness.py：thin runner CLI（--hours N 或 --since/--until），輸出單一 report JSON。
+  - mm_sizing_run.py：GROSS 做市 spread-capture pool sizing（spread × flow，未扣逆選）。
+  - fill_sim.py：queue-position fill-simulation（CP-3 go/no-go 工具）。讀 l1_events 做
+    事件驅動掛單成交模擬,量 fill-conditional adverse selection（beta-residual）+ naive vs
+    informed-skip NET 對照。誠實單窗=偵察讀數非裁決。
 
 leak-free 保證（與 campaign8b/sharpen_ofi.py 逐位元對齊，不得偷偷弱化）：
   - 特徵窗 [t-w, t) 嚴格 < t；預測窗 [t, t+h) 嚴格在特徵之後（半開不重疊）。
