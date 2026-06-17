@@ -20,6 +20,7 @@
 //!   後續 wiring/IPC 子任務可替換為真實實作。
 
 pub mod applier;
+pub mod applier_riskconfig;
 pub mod client;
 pub mod consumer_loop;
 pub mod governance_impl;
@@ -29,6 +30,10 @@ pub mod strategy_ipc_impl;
 pub mod writer;
 
 pub use applier::{ApplyOutcome, DirectiveApplier, GovernanceCheck, IpcFuture, StrategyIpcSink};
+pub use applier_riskconfig::{
+    riskconfig_decide_patch, riskconfig_patch_leaves, LeafDecision, PatchDecision,
+    RiskConfigDirectiveSink, RISKCONFIG_ALLOWLIST_CANDIDATES, RISKCONFIG_SURVIVAL_DENYLIST,
+};
 pub use client::{AnthropicClient, LlmClient, LlmClientError, LlmResponse, MockClient};
 pub use consumer_loop::{ConsumerLoopConfig, ConsumerLoopStatus, TeacherConsumerLoop};
 pub use governance_impl::GovernanceCoreWrapper;

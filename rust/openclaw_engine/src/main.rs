@@ -777,6 +777,8 @@ async fn async_main(
         teacher_loop_slot,
         engine_cmd_channels.clone(),
         &governance_wrapper,
+        // Phase 3：傳 DEMO RiskConfig store（demo-Arc-only 結構閘；絕不傳 live）。
+        &risk_stores.demo,
     )
     .await;
     let _phase4_governance_wrapper = governance_wrapper;
