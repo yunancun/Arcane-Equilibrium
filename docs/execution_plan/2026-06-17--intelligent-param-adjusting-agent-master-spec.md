@@ -406,15 +406,337 @@ news_router: Option<Arc<crate::news::NewsRouter>>,
 
 ---
 
-## PHASE 2 — demo→live 促升管線（人工閘）
-**目標**：把 `promote_params_to_live()`(mod.rs:342) 接在 operator 確認的 criteria 後。策略參數 only，永不 RiskConfig。
+## PHASE 2 — demo→live 促升管線（人工閘）— BUILD-READY（2026-06-17 PA in-place rewrite）
 
-- 新 IPC `promote_strategist_params`（method_registry+dispatch）→ 呼既有 promote method。
-- 新 route `POST /api/v1/strategist/promote`（Operator + all_five_live_gates_ok）→ 呼 IPC。
-- criteria gate（Rust 純邏輯，鏡像 canary_promotion_eval.py:127）：demo-applied 參數連 N cycle 穩定 + soak 窗無 drawdown 越界 + demo realized 非淨負，才可促升。
-- 流程：demo soak 穩 → operator GUI 審 diff → 確認 POST /promote(5 gate) → criteria gate → IPC → promote_params_to_live → Live UpdateStrategyParams → audit learning.strategist_promotions。**永不自動呼。**
-- Rollback = reverse-promote（`POST /strategist/demote` 重套促升前 live snapshot，同 gate）；存 pre-promotion snapshot 以精確還原。flag `OPENCLAW_STRATEGIST_PROMOTION_ENABLED` default-OFF。
-- Role chain：`PA → QC(criteria 閾值 quant-justified,MANDATORY) → E1 → E2(證無自動觸發+reverse 精確) → E3(live route auth) → E4(Linux 實證 真 Live engine bound, promote+demote 往返) → CC → PM`
+**目標**：把 demo-tuned 策略參數，經 **operator 確認 + 5-gate + criteria gate + Phase-0 token**，促升到 LIVE 引擎。**策略參數 only，永不 RiskConfig。永不自動呼。** flag `OPENCLAW_STRATEGIST_PROMOTION_ENABLED` default-OFF。
+
+> **★★★ 親 grep 翻案：Phase 2 不是 greenfield，是 ENHANCEMENT。** 已存在的 `strategist_promote_routes.py`（`strategist_promote_router`，已 wired 進 `main.py:280-281`，`strategy_write_routes.py:74` 已把它認作唯一合法 live-promote lane）**已實作絕大部分骨架**：兩步 confirm preview/apply、live 5-gate（`_apply_target_gate`→`executor_routes._verify_live_gate`）、**Phase-0 token 已鑄**（`call_params_with_token("update_strategy_params", ipc_params)` 行 700-701）、IPC dispatch（`update_strategy_params` 經既有 chokepoint+handler）、change_audit_log。**Phase 2 的工作 = 在此既有路徑上補三個結構性缺口**：(A) 加 flag gate（現無）、(B) 加 Rust 純邏輯 **EDGE-ANCHORED** criteria gate（現完全沒有 — 任何穩定 demo row 都可促升；§2.4 已採 QC NEEDS_CHANGES 重寫成 beta-neutral edge-anchored 閘，**不靠 demo PnL**）、(C) 把 audit 從 fire-and-forget 升級成 **fail-closed 同步寫 `learning.strategist_promotions`**，並 (D) 新建 **EXACT reverse-promote（demote）**（現完全不存在）。**E1 必先讀全 `strategist_promote_routes.py` 確認當前行為，不得盲信本 spec 把它當空白。**
+
+---
+
+### §2.0 既有路徑的親 grep 事實（E1 必先核對）
+
+| 事實 | 證據 | 對 Phase 2 的含義 |
+|---|---|---|
+| promote route 已 live + 已過 5-gate + 已鑄 token | `strategist_promote_routes.py` 全檔；token mint 在 :699-701（live target 才鑄） | **不重建 route。token+5-gate 已 done，只疊 flag/criteria/audit。** |
+| `update_strategy_params` 已在 `LIVE_WRITE_METHODS` | `live_authz.rs:64`；chokepoint `dispatch.rs:127-211` | **Rust 端 token 強制已部署**；route live 分支不鑄 token 即被自己的 chokepoint 拒（自封）。token 必鑄（已鑄）。 |
+| `promote_params_to_live()`(mod.rs:417-440) 是 unwired STUB | `mod.rs:403` 「Not invoked internally」 | **它走 `promote_cmd_snapshot()`（Live cmd slot），不經 dispatch chokepoint**（in-process Rust→Live channel）。**現有 Python route 不呼它**，而是走 Python IPC `update_strategy_params{engine:live}` 經 chokepoint。兩條路皆達 Live `UpdateStrategyParams`。**裁決見 §2.3。** |
+| IPC merge 是 **deep MERGE 非 replace** | `merge_strategy_params_json`(strategy_params.rs:17-42)：`for (k,v) in incoming { current_map.insert(k,v) }` — **只插入/覆寫，永不刪 key** | reverse-promote 必須 EXACT（§2.5）。 |
+| `get_strategy_params` 回 **完整 typed param set** | `handle_get_strategy_params`(strategy_params.rs:124-134)→`strategy.get_params_json()`（完整序列化，非 partial） | demote 用它捕捉「促升前完整 live param set」可行（§2.5）。 |
+| 現有 audit = fire-and-forget change_audit_log，**非 fail-closed，無專表** | `_record_promote_audit`(:364-445) try/except 吞錯「audit must never break the request」(:444) | **違反 must-fix C**（live param 改 + 無耐久 audit row = P8）。Phase 2 改成同步 fail-closed + 專表（§2.6）。 |
+| 現無 flag gate | grep `STRATEGIST_PROMOTION_ENABLED` = 0 hit（全 repo） | **任何穩定 demo row 今天即可促升 live（只要 operator 過 5-gate）**。Phase 2 加 flag default-OFF + criteria gate。 |
+| 現無 demote/reverse-promote 任何路徑 | grep demote/reverse_promote = 0 命中（除 canary stage demote 無關） | **demote 是 net-new**（§2.5）。 |
+| criteria gate 完全不存在 | promote route 不查任何 edge/drawdown/soak | **criteria gate 是 net-new Rust 純邏輯，EDGE-ANCHORED**（§2.4 — reuse `edge_estimates.validation_passed` OOS 鏈 + `cost_gate_live_with_slippage` cost wall + canary soak metric + LIVE drawdown SSOT；**不靠 demo PnL**，避 down-beta 假陽性）。 |
+
+---
+
+### §2.1 flag wiring（必先做，最低風險）
+
+- 新 env flag `OPENCLAW_STRATEGIST_PROMOTION_ENABLED`，default-OFF（讀法鏡像 Phase-0 `secret_env` / 既有 bool flag helper；E1 grep 既有 `os.environ.get(...)=="1"` 慣例對齊）。
+- **gate 位置 = `strategist_promote_routes.py` 的 `confirm=true` + `target_engine=="live"` 分支入口**（Step 5 `_apply_target_gate` 之前）。flag-OFF + 此分支 → **409 `promotion_disabled`**（fail-loud，不靜默降級成 demo，鏡像 POLICY-2 的 409 姿態）。
+- **flag 不擋**：`confirm=false`（preview）、`target_engine=="paper"`、demote 的 preview。**flag-OFF 時 live promote 完全不可達 = bit-identical 行為**（除新增的 409 拒絕碼）。
+- demote（§2.5）共用同一 flag（live demote 也須 flag-ON）。
+
+---
+
+### §2.2 5-gate + Phase-0 token（已 done，E1 只驗不改）
+
+- live promote 的 5-gate = `_apply_target_gate(actor,"live")`→`executor_routes._verify_live_gate(actor)`（內部走 `all_five_live_gates_ok(actor, require_authz=True)`，live_preflight.py:247）。**E1 驗 `_verify_live_gate` 確走 `require_authz=True`**（live 必須含 signed-auth gate；與 POLICY-1 override 場景相反，promote 無 halt-recovery 例外，永遠全 5 gate）。
+- token mint = `call_params_with_token("update_strategy_params", ipc_params)`（live_patch_token.py:235）**已在 route :699-701**。non-patch 類 hash 對象 = params 去 token 三欄 + engine（`hash_target_for` 自動處理）。**E1 不改 token 邏輯**；只確認 **criteria gate 與 audit 寫在 token mint＋IPC dispatch 之間/之後的正確時序**（§2.6）。
+- **順序（route confirm=true live 分支）**：① flag gate（§2.1）→ ② operator-role（既有 Step 2，always）→ ③ 取 source row（既有 Step 3）→ ④ **criteria gate（§2.4 新，EDGE-ANCHORED：route 算 soak/fills/boundary metric + 解析 active-symbol → 唯讀 IPC `evaluate_promotion_criteria`，engine 自查 live edge cells + cost wall + 跑判定）**→ ⑤ 5-gate `_apply_target_gate`（既有 Step 5）→ ⑥ **捕捉 pre-promotion 完整 live snapshot（§2.5 新，供 demote）**→ ⑦ token mint（既有 :699-701）→ ⑧ IPC `update_strategy_params`（既有 Step 6）→ ⑨ **同步 fail-closed audit 寫 `learning.strategist_promotions`（§2.6 新）**。**criteria gate 在 5-gate 前或後皆可（兩者皆 deny-on-fail），裁決放 5-gate 前**（criteria 是業務前提，先廉價拒不合格者，再跑較重的 signed-auth 驗證）。criteria gate 的 edge cell 取得是**唯讀 IPC**（不入 `LIVE_WRITE_METHODS`，token 豁免），不改任何 state。
+
+---
+
+### §2.3 promote 落地路徑裁決（不呼 stub，沿用既有 chokepoint 路徑）
+
+- **裁決：Phase 2 不接 `promote_params_to_live()` stub（mod.rs:417），沿用既有 Python route 的 `update_strategy_params{engine:live}` IPC 路徑。** 理由：(1) stub 走 `promote_cmd_snapshot()` 的 in-process Rust→Live channel，**繞過 dispatch chokepoint**=繞過 Phase-0 token 強制（U-P0-3 類繞過風險）；(2) 既有 route 路徑已過 chokepoint+token+handler，**安全面已驗證**；(3) master-spec 目標文字「接 promote_params_to_live」的**實質意圖是「把 demo-tuned 參數促升到 live」**，既有 route 已達成此語意，stub 是早期未完成的替代實作。
+- **stub 處置**：`promote_params_to_live()` 維持 **not-auto-called STUB**（不刪，保 additive headroom；master-spec/CLAUDE「learning 不可自動改寫 live」= P7，stub 永不被任何自動 caller 觸發）。E2 必 grep 證 `promote_params_to_live` 仍 0 caller（除 test）。**不新增 IPC method `promote_strategist_params`**（原 spec §2 的提議作廢——既有 `update_strategy_params` 已足，新 method 只增表面積且要再過一輪 chokepoint allowlist 維護）。
+- **U1（E1 必 grep）**：確認 `update_strategy_params` 經 chokepoint 後 dispatch 到 `handle_update_strategy_params`(strategy_params.rs:51)，其 merge 行為（deep merge）正是 §2.5 demote-exactness 的根因。
+
+---
+
+### §2.4 criteria gate — EDGE-ANCHORED / beta-neutral（net-new，REUSE in-tree 機制，鏡像 canary Stage 3→4）
+
+> **★★★ QC NEEDS_CHANGES 重寫（2026-06-17）。** 原 §2.4 提議的「`realized_pnl_net >= 0` + `drawdown_breach==0` + `stable_cycles>=N`」criteria 在量化上**錯誤**：demo realized PnL 在多頭/趨勢 regime 下會被 **down-beta 污染**而出現假陽性正值（承 [[project_2026_06_15_demo_loss_rootcause_grid_trend]] + profit-diagnosis 教訓：同一靜態 config 06-12 開多賺、06-15 開空虧，方向全由市場 regime 定非 alpha）。「demo 賺錢」**不是 edge 存在的證明**，只是 regime bet 的副產品（CLAUDE Alpha Evidence Governance：bull-only positive = `regime-bet / learning-only` 非 promotion proof）。**criteria 必須換成 edge-anchored、beta-neutral、引用既有 battle-tested gate 的量化可辯護閘。** 本節不再自定義新的盈利/穩定性度量，而是**復用樹內既有的 walk-forward OOS 顯著性鏈 + live cost wall + canary 風控 metric**。
+
+---
+
+#### §2.4.A 設計總則（為何 edge-anchored）
+
+促升 live 的唯一可辯護證據 = **leak-free 的 OOS alpha 顯著性**，不是 demo PnL。樹內已有兩條 battle-tested 顯著性防線，criteria gate **REUSE 它們，不重新推導**：
+
+1. **`edge_estimates` cell 的 `validation_passed` 鏈**（James-Stein producer，cost_gate 同源）= 每 `(strategy, symbol)` cell 的 **walk-forward OOS 顯著性 verdict**。由 `edge_estimate_validation.py` 計算：`PSR ≥ 0.95`（runtime mode 0.975）、`DSR ≥ 0.90`（runtime 0.95，**已 Bonferroni-deflated for multiple testing** — `p_value_bonferroni` over `m_tests`）、`oos_n ≥ 30`（runtime 60）、`wf_windows ≥ 2`（runtime 3）。`validation_reason` 在 PASS 時為 `"passed"`，FAIL 時為 `"insufficient_total_samples"` / `"psr_below_threshold"` / `"dsr_below_threshold"` 等穩定 token。**這就是 per-cell 的 deflated-Sharpe + PSR + OOS-n 顯著性閘——它本身已是 QC 要的「DSR/PBO/OOS significance bar」，且是 per (strategy, symbol) 而非 per canary-stage。**
+
+2. **`cost_gate_live_with_slippage`**（gates.rs:288-353）= **live cost wall**。它對正 edge cell 要求 `fresh && from_runtime_field && validation_passed` 三者全真，然後 `shrunk_bps ≥ fee_bps/win_rate × safety_multiplier`（`fee_bps = 2×(fee_rate + slippage)×10000` round-trip taker+slippage cost wall，win-rate 加權）。**這就是 QC 要的「demo→live degradation haircut：shrunk_bps 須清 live cost wall（taker fee + slippage + 保守滑點），不僅 > 0」。** criteria gate **直接以同一 cost model 為 bar**（同 `risk_config_live.toml` 的 `slippage.*` / `cost_gate_*` 參數），不另造成本模型。
+
+criteria gate = 把這兩條 **per-cell** 的 live-grade 防線，**aggregate 成 per-strategy 的 majority/weighted coverage 判定**（因 strategist param 按 `(engine_mode, strategy_name)` apply 跨該策略所有 active symbol — `strategist_promote_routes.py:47-48` 親證 schema 僅 `(engine_mode, strategy_name)`），再疊上 canary Stage 3→4 的 soak / wall-clock / drawdown / boundary 風控 metric（凡 per-strategy 可得者）。
+
+---
+
+#### §2.4.B BINDING GATE — edge-anchored hard requirement（per active-symbol cell）
+
+對被促升的 `strategy`，解析其 **active-symbol 集合**，逐 cell 套 live-grade 檢查，再 majority/weighted coverage 判定。
+
+**active-symbol 集合解析（E1）**：`strategy` 的 active symbol = `strategy_params_live.toml` 該策略段的 `allowed_symbols`（staging gate）∩ **pinned 交易 universe**（`scanner_config.toml` `pinned_symbols`，25-sym；非 `max_symbols` 觀測 tier — 承 [[bundle-recorderv2]] `is_pinned` 是硬交易 gate 的教訓，只有 pinned symbol 真開倉）。**理由**：promote 的 live blast radius = 該策略在 live 真會交易的 symbol 集，不是它名義 allowed 的全集，也不是觀測 tier。若 `allowed_symbols` 為空/未設 → 該策略 live 不交易任何 symbol → criteria `Reject("no_active_symbols")`（無 blast radius 即無促升意義，fail-closed）。
+
+**per-cell PASS 條件（全真才算該 cell qualified）**：對每個 active symbol，從 **live `edge_estimates` snapshot**（注意：必查 **live engine** 的 edge cell，不是 demo edge — promote 的是 live 行為，QC 要 demo→live degradation haircut 用 live cost wall；demo edge 只在 §2.4.D soak metric 用）取 `get_cell(strategy, symbol)`：
+1. `cell` 存在（None → 該 symbol unqualified）。
+2. `cell.validation_passed == true`。
+3. `cell.validation_reason == "passed"` —— **REAL OOS-PASS，拒 explore-grace-only**。**rationale**：`validation_passed` 由 `edge_estimate_validation.py` 的 walk-forward OOS 鏈寫；explore-gate（`explore_eligible`/`explore_remaining`）是 `explore_quota_sink.py` 的**獨立 overlay writer**，只新增 explore 兩欄、**不觸碰 `validation_passed`**（親 grep 證 explore_quota_sink.py:23-29「只新增 explore_eligible / explore_remaining 兩欄，原樣保留所有既有欄位」）。且 live gate `cost_gate_live_with_slippage` 結構上**完全不讀** `explore_eligible`/`explore_remaining`（gates.rs comment「此欄只被 demo gate 讀；live gate 不引用，是 demo↔live 隔離的單一守門點」）。→ criteria gate **同樣不讀 explore 欄**，且額外要求 `validation_reason=="passed"`（不是任何 `insufficient_*`/`*_below_threshold`），確保「explore-gate 放行的 demo-only 探索 cell」**結構上無法**冒充 live-qualified。
+4. `cell.is_fresh(now, edge_ttl) == true`（`edge_ttl = slippage_cfg.edge_estimate_ttl_secs`，與 live cost_gate 同源 TTL）。
+5. `cell.from_runtime_field == true`（runtime-derived bps，非 legacy `shrunk_bps` 回退 — P1-09）。
+6. `cell.shrunk_bps > 0.0`。
+7. `cell.n_trades >= 30`（OOS 樣本下界，對齊 `edge_estimate_validation.min_oos_n=30`；QC 可上調至 runtime `min_oos_n=60`）。
+8. **live cost wall（degradation haircut）**：`cell.shrunk_bps >= fee_bps/clamp(win_rate) × safety_multiplier`，其中 `fee_bps`/`win_rate`/`safety_multiplier` **完全 reuse `cost_gate_live_with_slippage` 的同一算式與同一 `risk_config_live.toml` slippage 參數**（不另造成本模型）。即「該 cell 的 shrunk edge 在扣 live round-trip taker+保守滑點+win-rate 加權後仍為正」。
+
+**coverage 判定（majority / weighted，NOT single cherry-picked cell）**：
+- `qualified_cells` = active symbol 中 per-cell 8 條全過者。
+- **weighted-coverage**：以各 cell `n_trades` 為權重（樣本多的 cell 權重高），`coverage = Σ n_trades(qualified) / Σ n_trades(all active)`。要求 `coverage >= COVERAGE_FLOOR`（QC 釘，建議 ≥0.6 majority）**AND** `qualified_count >= MIN_QUALIFIED_CELLS`（QC 釘，建議 ≥ ceil(active_count/2)，至少絕對下界如 2，防單 cell 高 n_trades 撐起整個 coverage）。
+- 任一不足 → `Pending("edge_coverage_below_floor: qualified=X/Y coverage=Z")`（not Reject — 等更多 cell validated）。
+- **單 cell cherry-pick 結構上被擋**：coverage 是「跨 active symbol 的 weighted 比例」，一個 validated cell 無法讓 25-sym 策略過 majority。
+
+> **★ 為何 binding gate 用 live edge（不是 demo edge）**：QC 要的核心 = 「demo→live degradation haircut，shrunk_bps 須清 LIVE cost wall」。live `edge_estimates` 的 cell 已是 producer 對 live engine_mode 算的 runtime-mode 顯著性（更嚴的 `min_oos_n=60`/`psr_min=0.975`/`dsr_min=0.95`）+ live cost wall。**這是把「促升前 demo 看起來好」這個假陽性源頭直接繞過**——不問 demo PnL，只問「live engine 對該策略×該 symbol 是否已有 OOS-validated、清 live 成本牆的正 edge」。若 live edge 從未 validated（今天 0 validated cell 的真實狀態），coverage=0 → 永遠 `Pending`，**這正是 desired fail-closed 行為**（§2.9 誠實標）。
+
+---
+
+#### §2.4.C MIRROR canary Stage 3→4 — soak / wall-clock / boundary（可得者）
+
+QC 要求鏡像 `canary_promotion.rs` 的 Stage 3→4 gate（PA 已親讀 evaluate_stage3_promote, canary_promotion.rs:329-419）：`wall_clock ≥ 21d` + `≥ 72h since last param change` + `≥ 30 attributable demo fills` + `DSR > 0`（deflated for sweep K）+ `PBO ≤ 0.5` + `attribution_chain_ok ≥ 0.7` + `boundary_violation_count = 0`。
+
+**FEASIBILITY 裁決（PA 親查，MANDATORY — 不發明不存在的 metric）**：
+
+| canary Stage 3→4 metric | 對 strategist-tuned param 是否可得？ | 裁決 |
+|---|---|---|
+| `wall_clock ≥ 21d` | **可得** — `learning.strategist_applied_params` 有 `applied_at`，可算「該策略當前 param-version 的 demo soak wall-clock」 | **採用**：`demo_soak_wall_clock_ms >= 21d`（`SOAK_WALL_CLOCK_MS`，鏡像 `STAGE3_WALL_CLOCK_MS`）。 |
+| `≥ 72h since last param change` | **可得** — 同表時序，「自上次 `params_json` 變動以來的 wall-clock」 | **採用**：`ms_since_last_param_change >= 72h`（`STABLE_SINCE_CHANGE_MS`，鏡像 canary sample_floor 72h）。**取代原 §2.4 的 `consecutive_stable_cycles`**（72h wall-clock 比「N 輪 loop」更穩健——loop 頻率變動不影響）。 |
+| `≥ 30 attributable demo fills` | **可得** — `trading.fills WHERE engine_mode='demo'` 該策略 soak 窗內 fills（鏡像 evaluate.rs:417 同源） | **採用**：`attributable_demo_fills >= 30`（`MIN_ATTRIBUTABLE_FILLS`，鏡像 `STAGE2_ENTRY_FILLS_MIN`=30）。**樣本充足性閘。** |
+| `DSR > 0`（deflated for sweep K） | **NOT 可得 per (strategy, param-version)** — canary 的 DSR 來自 W-AUDIT-6 pipeline，對 **canary executor config stage** 計算，**不存在 per strategist-tuned param 的 DSR row**（無 learning 表存它）。 | **NOT 重新發明。** 以 §2.4.B 的 `validation_passed` 鏈作 **canonical 顯著性 bar**——它本身就是 per-cell 的 **deflated-Sharpe（DSR≥0.90 Bonferroni over m_tests）+ PSR≥0.95 + OOS-n** verdict（`edge_estimate_validation.py:33-34,196-209`）。即「sweep K 的 multiple-testing deflation」已由 `edge_estimate_validation` 的 Bonferroni `p_value_bonferroni`/`m_tests` 編碼。**criteria 的顯著性權威 = validation_passed 鏈，不是 canary DSR。** |
+| `PBO ≤ 0.5` | **NOT 可得 per strategist-param**（同 DSR，PBO 是 W-AUDIT-6 對 canary stage 算，無 per-param row） | **NOT 重新發明。** 同上以 validation_passed 鏈代替（PBO 的 overfit 防護由 walk-forward OOS + Bonferroni deflation 在 `validation_passed` 內承擔）。 |
+| `attribution_chain_ok ≥ 0.7` | **可得（additional，非 binding）** — `[55]` attribution_chain_ok healthcheck 是 per-strategy 可查 metric（既有 healthcheck，不是 per-param） | **採用為 additional gate（where available）**：若該 healthcheck 對該策略可查且 `< 0.7` → `Pending("attribution_chain_below_floor")`（鏡像 `STAGE3_ATTRIBUTION_RATIO_FLOOR=0.7`）；查不到（None）→ **Pending**（不 fail，鏡像 canary None→Pending 語意，等下次），**但不作為唯一 binding bar**（binding 是 §2.4.B edge coverage）。 |
+| `boundary_violation_count = 0` | **可得** — demo soak 窗內 risk-envelope/drawdown 越界次數（同 canary boundary 語意，per-engine demo 可查） | **採用**：`demo_boundary_violation_count == 0` → 否則 `Reject("demo_boundary_breach")`（root #5 硬拒）。 |
+
+**結論（metric-sourcing decision，明確記錄）**：
+- **顯著性 canonical bar = `validation_passed` OOS 鏈（§2.4.B）**，不是 canary DSR/PBO（後者對 strategist-tuned param **不存在** per-param row，PA 親查確認，**不發明**）。validation 鏈已內含 DSR≥0.90(Bonferroni-deflated)/PSR≥0.95/OOS-n≥30。
+- **canary 可移植 metric = wall-clock(21d) + since-change(72h) + attributable-fills(30) + boundary(0)**，全部從 `learning.strategist_applied_params` + `trading.fills` + demo risk metric query 可得（與既有 route `_fetch_latest_applied_row` 同源 DB lane）。
+- **attribution_chain_ok = additional where-available**（None→Pending，非 binding）。
+
+---
+
+#### §2.4.D DRAWDOWN bound = LIVE risk_config SSOT（非 demo envelope）
+
+QC 要求：drawdown bound 用 **LIVE** `risk_config_live.toml` 的 `session_drawdown_max_pct=12` / `daily_loss_max_pct=7`（PA 親查確認），**不是** demo envelope（`risk_config_demo.toml` `session_drawdown_max_pct=25` / `daily_loss_max_pct=15`）。
+
+**設計**：`demo_boundary_violation_count`（§2.4.C）的「越界」定義 = demo soak 期間 **demo 引擎的 realized drawdown / daily-loss 是否曾突破 LIVE（較緊）envelope**——即用 `12% session DD / 7% daily loss` 作上界量測 demo 軌跡，**不是用 demo 自己的 25%/15%**。理由：促升的是 live 行為；demo 在寬鬆 envelope 下「沒爆」不代表它在 live 緊 envelope 下安全。E1：metric query 比對 demo soak 窗 max session-drawdown / max daily-loss vs LIVE SSOT 值（`risk_config_live.toml`，**SSOT 讀取，不硬編碼 12/7**）；任一曾突破 → `demo_boundary_violation_count > 0` → `Reject("demo_breached_live_drawdown_envelope")`。
+
+---
+
+#### §2.4.E 模塊位置 + 輸入 struct + 輸出 enum + 判定邏輯（Rust 純函數）
+
+**模塊位置**：新 `strategist_scheduler/promotion_criteria.rs`（sibling extract，鏡像 `cycle_counters.rs`/`rich_inputs.rs` 範本；mod.rs 加 `mod promotion_criteria;`）。**純函數，零 IO**——所有 metric（含 per-cell edge 數據）由 caller 預先 query/snapshot 後以 struct 傳入，鏡像 canary `is_promote_eligible(stage, metrics)` 簽名。
+
+**輸入 struct `PromotionCriteriaInput`**：
+```
+PromotionCriteriaInput {
+    // §2.4.B edge coverage（per active-symbol cell，caller 從 live EdgeEstimates snapshot + active-symbol 解析後填）
+    active_cells: Vec<ActiveCellEdge>,   // 每 active symbol 一筆
+    // §2.4.C/D canary 可移植 soak/風控 metric
+    demo_soak_wall_clock_ms: i64,
+    ms_since_last_param_change: i64,
+    attributable_demo_fills: i64,
+    demo_boundary_violation_count: i64,  // §2.4.D：以 LIVE envelope 量測
+    attribution_chain_ok_ratio: Option<f64>,  // additional where-available；None→Pending
+    // live cost model 參數（reuse risk_config_live.toml slippage.*，caller 傳入或 Rust 直讀 risk_config）
+    fee_bps_round_trip: f64,
+    cost_gate_safety_multiplier: f64,
+    cost_gate_win_rate_floor: f64,
+    edge_estimates_fresh: bool,          // snapshot 級 is_fresh(now, edge_ttl)
+    // §2.4.F direction bound
+    tuned_param_names: Vec<String>,      // 本次 promote 實際改動的 param key
+}
+
+ActiveCellEdge {
+    symbol: String,
+    present: bool,                // get_cell 是否存在
+    validation_passed: bool,
+    validation_reason: String,    // 必須 == "passed"
+    from_runtime_field: bool,
+    shrunk_bps: f64,
+    win_rate: f64,
+    n_trades: u64,
+}
+```
+> **注意**：`is_fresh` 是 snapshot-level（單一 `_meta.updated_at` 對全 snapshot，edge_estimates.rs:317-339），故 freshness 以 `edge_estimates_fresh` 一個 bool 傳入（caller 對 live snapshot 算一次），per-cell 不重複帶 ts。
+
+**輸出 enum `PromotionVerdict`**（鏡像 canary `PromoteVerdict`）：`Eligible` / `Pending(reason)` / `Reject(reason)`，reason 為穩定短 token（GUI surface + audit row 用）。
+
+**判定邏輯（fail-closed，順序短路）**：
+1. **direction bound（§2.4.F）**：`tuned_param_names` 含任一不在 v1 allowlist 的 param → `Reject("param_direction_ambiguous: <name>")`。
+2. **active-symbol 空**：`active_cells` 為空 → `Reject("no_active_symbols")`。
+3. **boundary**：`demo_boundary_violation_count > 0` → `Reject("demo_breached_live_drawdown_envelope")`（root #5）。
+4. **snapshot freshness**：`!edge_estimates_fresh` → `Pending("edge_snapshot_stale")`。
+5. **attributable fills**：`attributable_demo_fills < MIN_ATTRIBUTABLE_FILLS(30)` → `Pending("insufficient_attributable_fills")`。
+6. **wall-clock soak**：`demo_soak_wall_clock_ms < SOAK_WALL_CLOCK_MS(21d)` → `Pending("soak_below_21d")`。
+7. **since-change**：`ms_since_last_param_change < STABLE_SINCE_CHANGE_MS(72h)` → `Pending("param_changed_within_72h")`。
+8. **edge coverage（binding，§2.4.B）**：對每 cell 套 8 條 per-cell 檢查（含 live cost wall haircut），算 weighted `coverage` + `qualified_count`；`coverage < COVERAGE_FLOOR` 或 `qualified_count < MIN_QUALIFIED_CELLS` → `Pending("edge_coverage_below_floor: q=X/Y cov=Z")`。
+9. **attribution（additional）**：`attribution_chain_ok_ratio` == None → `Pending("attribution_not_computed")`；`< 0.7` → `Pending("attribution_chain_below_floor")`。
+10. 全過 → `Eligible`。
+
+> **fail-closed 順序註**：direction bound 與 boundary breach 是 **Reject**（硬拒，永不因等待而 Eligible）；其餘樣本/soak/coverage 不足是 **Pending**（等更多證據）。**edge coverage 是 binding gate**——即使 soak/fills/wall-clock 全過，coverage 不足仍 Pending（沒有 OOS-validated 清 live 成本牆的正 edge = 沒有可促升的 alpha，root #5/#6/#12）。
+
+---
+
+#### §2.4.F v1 DIRECTION BOUND（限定 unambiguous-direction param）
+
+QC 要求：v1 只允許促升**方向語意明確**的 param（如 cooldown / threshold 收緊），denylist 方向模糊者，直到 QC 的 direction×param consistency map 建立（25-sym live blast radius 使方向倒置的促升高風險）。
+
+**v1 ALLOWLIST（unambiguous「tighten = 更保守 = 交易更少」單調語意）**（PA 親查 param_ranges 後初擬，**QC MANDATORY 復核並釘死最終 allowlist**）：
+- `cooldown_ms`（↑ = 進場間隔更長 = 交易更少，結構性保守）。
+- `min_events` / `min_*` 樣本/事件下界（↑ = 要求更多證據才進場）。
+- entry threshold 類「值越高越難進場」者：`funding_threshold`、`adx_threshold`、`*_threshold_usd`（`default_threshold_usd`/`btc_threshold_usd`/`eth_threshold_usd`）（↑ = 要求更強信號）。
+
+**v1 DENYLIST（方向模糊，promote-blocked 直到 consistency map）**：
+- 所有 `weight_*`（`weight_adx`/`weight_regime`/`weight_volume`/`weight_momentum` 等）——權重重分配可**反轉有效信號方向**，非單調。
+- `take_profit_pct`、`max_hold_ms`、`expected_periods`（持倉時長/止盈，方向取決於 regime，非單調安全）。
+- `entry_basis_ratio`、`max_basis_pct`、`reverse_cascade_ratio`、`total_cost_bps`（basis/反轉/成本旋鈕，方向語意需 map）。
+- sizing/notional 類（已 `agent_adjustable:false`，本就不在面，但顯式列入 denylist 防回歸）。
+
+**機制**：direction bound 在 `promotion_criteria.rs` 判定邏輯 step 1（`tuned_param_names` 任一 ∉ allowlist → `Reject`）。**allowlist 是 const `&[&str]`，與 param_ranges `name` 對齊**。E1：`tuned_param_names` = 本次 promote payload 相對 pre-promotion 真正改動的 key（route 算 diff 傳入）。**QC 釘死 allowlist 前，E1 用 PA 初擬 allowlist 並標 PROVISIONAL。**
+
+---
+
+#### §2.4.G 資料來源裁決（async/sync 邊界 — 不變，重申）
+
+criteria gate 的**純邏輯**在 Rust（`promotion_criteria.rs`），**資料 query 放 Python route**（route 已 async + 有 `get_pg_conn()`/IPC；`_fetch_latest_applied_row` 已 query `strategist_applied_params`）。route 算齊所有 metric（含經唯讀 IPC `get_edge_estimates_snapshot`-類取 live edge cells，或 route 直讀 producer 寫的 live `edge_estimates.json` 快照 — E1 二選一，**偏好經 IPC 取 engine 記憶體中 live snapshot 以保 freshness 一致**）→ 填 `PromotionCriteriaInput` → 經**新唯讀 IPC `evaluate_promotion_criteria`**（不在 `LIVE_WRITE_METHODS`，唯讀豁免 token；回 `verdict + reason`）。route 拿到 `Reject`/`Pending` → **409 `criteria_not_met` + reason**，0 IPC promote、0 audit-as-applied（但寫 denied audit row §2.6）。
+- **為何 Rust 判定**：deterministic 風控邏輯，Rust-first（`feedback_new_code_rust_first`）+ 與 Phase 3 RiskConfig promote 共用同一 criteria 模塊（headroom）。
+- **edge cell 取得**：promote 路徑需 live `edge_estimates` 的 per-cell 數據。**裁決：經唯讀 IPC 由 engine 回傳 live `EdgeEstimates` snapshot 的 per-cell（strategy 的 active symbol 子集）**——保證與 live cost_gate 看到的是同一份記憶體 snapshot（freshness/runtime_field 一致），避免 route 自讀檔產生「route 看到的 edge ≠ engine 看到的 edge」漂移。若 E1 評估「在 `evaluate_promotion_criteria` IPC handler 內 engine 直接自查 `Arc<RwLock<EdgeEstimates>>` + 解析 active-symbol + 跑判定」更乾淨（engine 本就持有 edge snapshot + risk_config slippage 參數）→ **此為首選**：route 只傳 `strategy` + soak/fills/boundary metric + `tuned_param_names`，engine 自查 edge + cost model + 跑 `promotion_criteria.rs`，回 verdict。**E1 二選一並在報告釘死；QC 驗閾值不受實作語言/取得路徑影響。**
+- **fallback（若新 IPC 過重）**：criteria 純邏輯可在 Python route 內聯——但 edge cell 仍須經唯讀 IPC 取 live snapshot（不可 route 自讀檔當權威），且閾值常數須與 Rust const 對齊。**PA 偏好 Rust-first + engine 自查 edge**。
+
+---
+
+**待 QC 釘死（MANDATORY，PA 不自定閾值）**：
+1. **`COVERAGE_FLOOR`**（weighted-coverage 下界，PA 建議 ≥0.6 majority）。
+2. **`MIN_QUALIFIED_CELLS`**（絕對下界，PA 建議 ≥ max(2, ceil(active/2))）。
+3. **per-cell `n_trades` 下界**（PA 建議 30 對齊 `min_oos_n`；QC 判是否上調至 runtime 60）。
+4. **`SOAK_WALL_CLOCK_MS`**（PA 建議 21d 鏡像 canary Stage3）/ **`STABLE_SINCE_CHANGE_MS`**（72h）/ **`MIN_ATTRIBUTABLE_FILLS`**（30）—— QC 確認對 strategist-param soak 是否沿用 canary 值或調整。
+5. **v1 direction ALLOWLIST 最終名單**（§2.4.F，PA 初擬 PROVISIONAL，QC 釘死）。
+6. **是否啟用 attribution_chain_ok additional gate**（若 [55] healthcheck 對該策略不可查則整條移除，避免假 Pending 卡死）。
+
+**QC 不需釘的（已由既有機制決定，criteria 直接 reuse，不重新推導）**：OOS 顯著性 bar（PSR/DSR/oos_n/Bonferroni — `edge_estimate_validation.py` 已釘）；live cost wall 算式與滑點參數（`cost_gate_live_with_slippage` + `risk_config_live.toml` 已釘）；LIVE drawdown envelope（`risk_config_live.toml` 12/7 SSOT 已釘）。
+
+---
+
+### §2.5 reverse-promote（demote）EXACT — net-new（must-fix「REVERSE-PROMOTE EXACTNESS」）
+
+**問題根因（親 grep 鐵證）**：`merge_strategy_params_json`(strategy_params.rs:17-42) 是 deep MERGE（`current_map.insert(k,v)`）——**只覆寫/新增 key，永不刪 key**。若一次 promote ADD 了新 key（如某策略加了一個 demo-only 調出來的參數），naive「重放促升前 snapshot」demote **不會移除該新增 key**（snapshot 沒那 key，merge 不刪）→ demote 不精確。
+
+**EXACT demote 設計**：
+1. **promote 時捕捉「完整 pre-promotion live param set」**：§2.2 順序步驟 ⑥ — 在 IPC promote 寫入**之前**，先 IPC `get_strategy_params{engine:live, strategy_name}`（唯讀，無 token）取 **live 當前完整 param set**（`handle_get_strategy_params` 回完整 typed serialization，§2.0 已證）。把此完整 set 連同 promote 後的 set 一起存進 `learning.strategist_promotions`（`pre_promotion_params_json` 完整欄 + `promoted_params_json` 完整欄）。
+2. **demote = 用完整 pre-promotion set 做 EXACT 還原**，**不靠 merge 語意**：
+   - **裁決 A（首選，零 Rust 改動）**：demote 送 **完整 key union** 給 `update_strategy_params{engine:live}`。具體：demote payload = `pre_promotion_params_json`（完整 set）；因 demote 前的 live set = promote 後的 set（其 key 是 pre-set ∪ promote-added-keys），把 **pre-set 的所有 key 都送**會覆寫回原值，但 **promote 新增、而 pre-set 沒有的 key 不會被刪**（merge 不刪）→ **裁決 A 對「promote 只改值不加 key」精確，對「promote 加了 pre-set 沒有的 key」仍不精確。**
+   - **裁決 B（EXACT，必選）**：demote payload = **pre-set ∪「promote 相對 pre-set 新增的 key 各自設回其 typed default / 或顯式 null-clear」**。但 typed param struct **無「刪 key」語意**（`update_params_json` 是 typed struct deserialize，未提供的 key 保留 struct 既有值）→ **真 EXACT 還原唯一可靠路徑 = 送回 pre-promotion 的完整 typed param set，且依賴「typed struct 全欄序列化」特性**：因 `get_strategy_params` 回的是**完整 typed 序列化（所有欄位都在）**，pre-promotion snapshot 本身就是 full set；把它整份送回，`merge` 後 typed `update_params_json` 重新 deserialize 整個 struct → **promote 期間任何「typed 欄位的值變動」都被還原**。**唯一仍不還原的 = promote 透過 IPC 加進去、但不在 typed struct schema 內的「額外 JSON key」**——而 `handle_update_strategy_params` 走 `strategy.update_params_json(&merged_json)`（**typed deserialize**），**typed deserialize 會丟棄非 schema key**（serde 預設 ignore unknown 或 deny；E1 必驗該 struct 是否 `#[serde(deny_unknown_fields)]`）。
+   - **★ E1 必驗的決定性事實（U2）**：`update_params_json` 的 typed struct 是否 `deny_unknown_fields`？若**是**→ promote 根本無法加入 schema 外的 key（merge 後 deserialize 會報錯），則「promote 加新 key」場景不存在，**裁決 A 即已 EXACT**（所有可促升的 key 都是 typed schema 內欄位，全在完整 snapshot）。若**否（ignore unknown）**→ 非 schema key 可被 merge 進 JSON 但 deserialize 時被忽略，**不影響 live 策略行為**（策略只讀 typed struct），demote 還原 typed set 即還原行為，殘留的 inert JSON key 無害（但 audit 上 `get_strategy_params` 回的是 typed 序列化，不含 inert key，故無殘留）。**兩種情況下，「送回 pre-promotion 的完整 get_strategy_params 序列化」都達成行為級 EXACT 還原。** E1 grep 確認 struct serde 屬性，在報告釘死哪種情況，并加對應 acceptance test。
+3. **version / precondition guard（must-fix「refusing demote if live params changed since the snapshot」）**：demote 前再 IPC `get_strategy_params{engine:live}` 取**當前** live set，與 `learning.strategist_promotions.promoted_params_json`（促升當下寫入 live 的 set）比對：
+   - 相等 → live 自促升後未被改 → demote 安全，放行。
+   - 不等 → live 在促升後被其他路徑改過（另一次 promote / operator 手改 / scheduler）→ **409 `live_changed_since_promotion`**，拒絕 demote（避免盲目覆寫掉中間的合法改動）。operator 須先查清再決定。
+   - **比對用 canonical 比較**（鏡像 Phase-0 `canonical_json`/`canonicalize` byte-equal 邏輯，避免 key 序/float 格式假性不等）。E1 復用既有 canonicalizer。
+4. **demote route**：新 `POST /api/v1/strategist/demote`（同 `strategist_promote_router`，同 5-gate + flag + token mint，target=live）。body = `{strategy, symbol, promotion_id}`（指向要回滾的 `strategist_promotions` row）。**demote 也是 operator-confirmed（confirm=true）+ 5-gate + criteria gate 豁免**（demote 是安全方向，root #5/#6——回滾到已知 live-safe 的 pre-promotion 狀態永遠允許，不需 criteria）。demote 成功寫 `strategist_promotions` 一條 `action='demote'` row（指回原 `promotion_id`）。
+5. **acceptance test（must-fix「add-key-then-demote」）**：E2/E4 必跑「promote 改值 → demote → live set byte-equal 還原 pre-promotion set」+ 「(若 deny_unknown_fields=false) promote 試圖加 schema 外 key → 行為不變 → demote 還原」+ 「demote 遇 live 被中途改 → 409 拒」。
+
+---
+
+### §2.5.1 post-promotion realized-vs-expected auto-demote trigger（DESIGN-ONLY，標 **Phase 2.1，NOT v1**）
+
+> **★ QC follow-up #8（design 但 defer）。** 唯一能防「促升前不可觀測的分布漂移」（pre-promotion demo edge 真實，但 live 上線後 regime/microstructure 變化使實際 edge 蒸發）的真正防線 = **促升後在 live 上量測 realized edge，若顯著低於 demo-claimed edge 則自動 demote**。但此 trigger **只在「有東西被促升」之後才有意義**——而 §2.9 誠實標已證：0 validated cell → Phase 2 v1 上線不會促升任何東西。**故設計但延後**：在第一個真促升發生（= 真有 validated edge）之前，auto-demote trigger 無對象可監控，建它是 premature。
+
+**設計（Phase 2.1 build）**：
+- **trigger**：對每個 active 的 `strategist_promotions`（`action='promote'` 且尚未被 demote）row，在促升後的監控窗（如 7-14d，QC 釘）內，量測該 `(strategy, active-symbol)` 的 **live realized edge**（同 `edge_estimates` producer 對 live engine_mode 算的 runtime `shrunk_bps`，或 `trading.fills WHERE engine_mode='live'` 該策略的 realized round-trip edge，beta-neutral 去 down-beta）。
+- **auto-demote 條件**：`live_realized_edge < REALIZED_DEMOTE_RATIO × demo_claimed_edge`（QC 建議 `REALIZED_DEMOTE_RATIO ≈ 0.3`——live 實現 edge 跌破 demo 宣稱 edge 的 ~30% 即視為分布漂移/促升失效）→ **自動觸發 §2.5 的 demote machinery**（回滾到 pre-promotion live set，EXACT）。auto-demote 同樣寫 `strategist_promotions` 一條 `action='demote'` + `reason='auto_demote_realized_edge_decay'` row。
+- **wire 點**：復用 §2.5 已建的 demote 路徑（同 5-gate + token + 同步 audit）。trigger 可掛 out-of-band scheduler（鏡像既有 5-min loop）或 canary comparator 類週期 job。**auto-demote 是「learning 自動收縮 live」= root #5/#6 允許的安全方向**（與「learning 自動 promote/擴張 live」相反，後者 P7 禁止）——故 auto-demote 可自動觸發，promote 永遠 operator-confirmed。
+- **defer 理由（明確）**：(1) 無促升對象前無監控目標；(2) live realized edge 量測需促升後累積足夠 live fills（本身需時）；(3) v1 先把「安全促升 + 安全手動 demote」機器建穩，auto-demote 是其上的自動化層，依賴 v1 的 demote machinery 已驗證可靠。**Phase 2.1 在第一個真促升發生後啟動建設。**
+- **副作用 / 風險**：auto-demote 必有 hysteresis / min-fills 防抖（live fills 不足時不觸發，避免低樣本噪音誤 demote）；REALIZED_DEMOTE_RATIO 與監控窗由 QC quant-justify。
+
+---
+
+### §2.6 audit fail-closed + `learning.strategist_promotions` 表（must-fix「AUDIT FAIL-CLOSED FOR LIVE」）
+
+**現狀缺口**：既有 `_record_promote_audit`(:364-445) 是 **fire-and-forget change_audit_log**（try/except 吞錯，:444「audit must never break the request」）。**Phase 2 的 live promote/demote 必須改成「commit gate 在 audit row 寫成功」**——live param 改動 + 無耐久 audit row = P8 違反（root #8；`audit_events` 歷史為空，QA 必實證 row 真落）。
+
+**設計**：
+- **新表 `learning.strategist_promotions`**（V### 見 §2.7）。schema（鏡像 `strategist_applied_params` V019 + 加促升專屬欄）：
+  - `id BIGSERIAL PK`
+  - `action TEXT NOT NULL`（`'promote'` / `'demote'`）
+  - `strategy_name TEXT NOT NULL`
+  - `symbol TEXT`（audit scope hint，不參與語意，鏡像既有 route 的 symbol-as-hint 設計）
+  - `source_engine TEXT NOT NULL`（promote 來源，'demo'/'paper'）
+  - `target_engine TEXT NOT NULL DEFAULT 'live'`
+  - `pre_promotion_params_json JSONB NOT NULL`（**完整** live set，促升前 / demote 還原目標）
+  - `promoted_params_json JSONB NOT NULL`（**完整** 促升後寫入 live 的 set；demote 的 precondition 比對基準）
+  - `criteria_verdict TEXT NOT NULL`（`Eligible`/`Pending:reason`/`Reject:reason`/`demote_exempt`）
+  - `criteria_input_json JSONB`（promote 當下的 EDGE-ANCHORED metric 快照，root #8 可重建：per active-symbol cell 的 `{symbol, validation_passed, validation_reason, from_runtime_field, shrunk_bps, win_rate, n_trades, cleared_live_cost_wall}` 陣列 + `weighted_coverage` + `qualified_count` + `demo_soak_wall_clock_ms` + `ms_since_last_param_change` + `attributable_demo_fills` + `demo_boundary_violation_count`（以 LIVE envelope 量測）+ `attribution_chain_ok_ratio` + `tuned_param_names` + `live_cost_model{fee_bps_round_trip, safety_multiplier, win_rate_floor}`。**完整保留促升當下的 edge 證據，供事後 QC 重審「這次促升的量化依據」**。）
+  - `actor_id TEXT NOT NULL`
+  - `gate_passed BOOLEAN NOT NULL`（5-gate 結果）
+  - `applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()` + `applied_at_ms BIGINT NOT NULL`
+  - `reverts_promotion_id BIGINT`（demote 指回被回滾的 promote row id；FK-soft）
+  - `reason TEXT`
+  - index：`(strategy_name, target_engine, applied_at_ms DESC)`、`(action, applied_at_ms DESC)`
+- **fail-closed 寫入時序（live promote 成功路徑）**：IPC `update_strategy_params{engine:live}` 回 OK 後，**同步**（非 fire-and-forget）`INSERT INTO learning.strategist_promotions(...)` with `action='promote'`。**INSERT 失敗 → route 回 500 `audit_write_failed` + 結構化告警**（live 已改但 audit 沒落 = 必須 loud；operator 須立即知曉並考慮 demote）。**裁決：audit 寫在 IPC 成功之後**（不能在之前，否則 IPC 失敗會留假 audit row）；**這意味著「IPC 成功 + audit 失敗」是一個真實窗口**——此窗口的處置 = route 回 500 + 告警 + log 完整 params（讓 operator 能手動重建 audit / 決定 demote）。**不可吞錯靜默成功。**
+  - **與既有 change_audit_log 的關係**：保留既有 `_record_promote_audit`（change_audit_log，給 governance hub 統一審計流）為**補充**，但 **`learning.strategist_promotions` 的同步 INSERT 才是 commit gate 的權威耐久 row**。两者不互斥（change_audit_log fail 仍 fire-and-forget warn；strategist_promotions fail = hard 500）。
+- **denied 路徑**（criteria reject / 5-gate fail / flag-off）：寫 `strategist_promotions` 一條 `gate_passed=false` + `criteria_verdict=<reason>` row（fail-soft 此處可接受 best-effort，因無 live 改動；但 PA 偏好同樣同步寫以保 audit 完整 — E1 裁量，QA 驗 denied row 是否落）。
+- **QA 實證（MANDATORY）**：Linux PG 真連線，跑 promote-success / criteria-reject / 5-gate-fail / demote / demote-precondition-fail 五場景，**親查 `learning.strategist_promotions` 真有對應 row**（`audit_events`/`engine_events` 歷史稀疏甚至為空，P8 風險，不可只信 code path）。
+
+---
+
+### §2.7 migration `learning.strategist_promotions`（V###，build 時釘）
+
+- **next-free V### = build 時親查，勿信本 doc。** 親 grep `sql/migrations/` 當前最高 = **V143**（`V143__l1_book_event_recorder.sql`），但 **V140 缺號、V143 file 可能尚未 apply 至 prod**（PA memory 06-16 條：prod `_sqlx_migrations` max 曾為 139）。**E1 必 `ssh trade-core` 查 prod `_sqlx_migrations` 實際最高 ordinal**，取**檔案鏈最高 + 1**（避免撞並行 session 的號）。**建議 V144**，但以 build 時 grep + prod 查為準（migration 號是 git 看不見的全局命名空間 — PA memory 鐵則）。
+- **Guard A**：`CREATE SCHEMA IF NOT EXISTS learning;` + `CREATE TABLE IF NOT EXISTS learning.strategist_promotions (...)`（schema 已由 V019 建，重複 IF NOT EXISTS 安全）。index 用 `CREATE INDEX IF NOT EXISTS`。
+- **idempotent double-apply**：Linux PG 連跑兩次 migration，第二次必 no-op 無錯（CLAUDE Data §）。
+- **Linux PG empirical dry-run（MANDATORY）**：`ssh trade-core` 連 `trading_admin@127.0.0.1/trading_ai`（via ~/.pgpass），scratch DB 跑 migration → 驗表/欄/index/型別 → double-apply → 驗 `_sqlx_migrations` row。**不手 psql 打 prod**（避 checksum 漂移；prod apply 走 sqlx auto-migrate at engine boot 或 operator-gated migrate 命令）。
+- **非 hypertable**（促升是稀疏事件，非時序高頻；無 compress/retention，永久保留 audit lineage — root #8）。
+
+---
+
+### §2.8 副作用清單
+
+1. **`strategist_promote_routes.py` 行為改變**：flag-OFF 時 live promote 從「5-gate 過即可」變「409 promotion_disabled」。**現無 caller 在 prod 自動呼 live promote**（operator GUI 手動），故 default-OFF 不破任何自動流程。GUI promote 按鈕在 flag-OFF 下會收 409 — **GUI 需顯示 promotion_disabled 提示**（E1 加，或 GUI 既有錯誤處理 surface）。
+2. **新唯讀 IPC `evaluate_promotion_criteria`（首選 Rust 路徑）**：加進 dispatch match arm。**不在 `LIVE_WRITE_METHODS`**（唯讀，token 豁免）。handler 自查 `Arc<RwLock<EdgeEstimates>>`（**只 read lock**，不寫）+ 讀 `risk_config_live.toml` slippage 參數（只讀）+ 跑 `promotion_criteria.rs` 純函數。E2 驗它確唯讀（不改任何 ConfigStore / 不改 EdgeEstimates / 不送 cmd）。**注意 async/sync 邊界**：edge snapshot 取 read lock 是同步快操作（非阻塞 await），handler 內不引入 await-on-lock。
+3. **`promote_params_to_live()` stub 仍 0 自動 caller**：E2 grep 證 P7（learning 不自動改寫 live）不破。
+4. **change_audit_log 不變**（既有 fire-and-forget 保留為補充）。
+5. **無 RiskConfig 觸碰**：全程只 `update_strategy_params`（strategy param sink），永不 `patch_risk_config`/`update_risk_config`。E2/CC 驗。
+6. **mock 脆弱點**：`_verify_live_gate` / `all_five_live_gates_ok` 在大量測試被 mock；criteria gate + demote 新測試不可 mock 掉 5-gate（否則 live 授權繞過誤過）。E2 驗測試真跑 gate。
+
+---
+
+### §2.9 降級 / rollback 路徑
+
+- **flag default-OFF** = Phase 2 完全 inert，live promote 不可達（bit-identical 除 409 拒絕碼）。緊急關閉 = unset flag。
+- **demote（§2.5）= 業務級 rollback**：任何促升後可一鍵回滾到 pre-promotion live 完整 set（EXACT）。**Phase 2.1 的 auto-demote trigger（§2.5.1，DEFER）** 將在此 demote machinery 上加自動收縮層（live realized edge < 0.3× demo-claimed → 自動回滾），防促升後分布漂移——但 defer 到第一個真促升發生後。
+- **Phase-0 secret 撤除 = 終極 kill-switch**：撤 `OPENCLAW_LIVE_PATCH_SECRET` → 所有 live-write（含 promote/demote IPC）token 驗證必失敗 → fail-closed 拒（既有 Phase-0 機制）。
+- **migration 純 additive**（新表，無改既有表）→ git revert 安全；表留存無害（無 writer 時就是空表）。
+- **★ 誠實標（核心，flag-ON 絕不可誤讀為「促升啟動」）**：今天 live `edge_estimates` = **129 cells / 0 validated**。EDGE-ANCHORED criteria gate（§2.4）的 binding gate = 「該策略 active symbol 的 edge cell 須 `validation_passed && validation_reason=="passed" && fresh && from_runtime_field && shrunk_bps>0 && n_trades>=30 && 清 live cost wall`，且 weighted-coverage ≥ floor」。**0 validated cell → 任何策略的 `weighted_coverage == 0` → criteria gate 對所有促升一律回 `Pending("edge_coverage_below_floor")`（或 `Reject`）**。即 **Phase 2 上線當天，正確 criteria gate REJECTS/PENDS 所有促升 —— 這是 DESIRED 行為**：機器安全就緒，但在「真正 OOS-validated、清 live 成本牆的正 edge」出現之前**不促升任何東西**。Phase 2 是「為將來有 validated edge 時準備好的安全機器」，**flag-ON ≠ 促升 active**。任何把 flag-ON 讀成「現在開始促升」的理解都是錯的——edge coverage 是 binding gate，沒有 validated edge 就沒有 Eligible。
+
+---
+
+### §2.10 E1 派發計劃（最大並行）
+
+- **E1-A（Rust，EDGE-ANCHORED criteria gate）**：新 `strategist_scheduler/promotion_criteria.rs`（`PromotionCriteriaInput` + `ActiveCellEdge` struct + `PromotionVerdict` enum + 純函數 `evaluate_promotion_criteria`，10-step fail-closed 判定 §2.4.E；per-cell 8 條 + weighted coverage §2.4.B；v1 direction allowlist const §2.4.F）；mod.rs 加 `mod`。新唯讀 IPC `evaluate_promotion_criteria`（dispatch.rs 加唯讀 arm + handler wrapper，**不入 LIVE_WRITE_METHODS**）——**首選實作**：handler 內 engine 自查 `Arc<RwLock<EdgeEstimates>>` 的 live snapshot + 解析該策略 active-symbol（`strategy_params_live.toml allowed_symbols` ∩ `scanner_config.toml pinned_symbols`）+ reuse `risk_config_live.toml` slippage 參數算 live cost wall（鏡像 `cost_gate_live_with_slippage` 算式）+ 跑判定，回 verdict（route 只傳 strategy + soak/fills/boundary metric + tuned_param_names，§2.4.G）。**REUSE 既有：`edge_estimate_validation` 的 `validation_passed`/`validation_reason` 語意（不重算 PSR/DSR）、`cost_gate_live_with_slippage` 的 cost wall 算式（不另造成本模型）、`risk_config_live.toml` SSOT（drawdown 12/7 §2.4.D、slippage 參數）。** **不重驗 U2（U2 屬 §2.5 demote，E1-A 不碰）。**
+- **E1-B（SQL，migration）**：`V###__strategist_promotions.sql`（§2.7，build 時 ssh 查號）+ Linux PG double-apply dry-run。`criteria_input_json` 欄須容納 §2.6 的 edge-anchored 快照（JSONB 已足）。**先定表名/欄/PK/index**，E1-C 跟。
+- **E1-C（Python，route enhancement，依賴 E1-A IPC 簽名 + E1-B 表 schema）**：`strategist_promote_routes.py` 加 flag gate（§2.1）+ criteria metric query（soak wall-clock / since-change / attributable demo fills / demo boundary-vs-LIVE-envelope，§2.4.C/D，與 `_fetch_latest_applied_row` 同 DB lane）+ active-symbol 解析傳入（或由 engine 自解，§2.4.G 首選）+ criteria 唯讀 IPC call（§2.4.G）+ tuned_param_names diff（§2.4.F）+ pre-promotion snapshot 捕捉（§2.5 步驟 1）+ 同步 fail-closed `strategist_promotions` INSERT（含 edge-anchored `criteria_input_json`，§2.6）；新 `POST /demote` route（§2.5 步驟 4，precondition guard 步驟 3）。
+- **阻塞關係**：E1-A∥E1-B 可並行；E1-C 依賴二者的契約（IPC verdict 形狀 + 表 schema）——E1-A/B 先交契約 stub，E1-C 跟。**單 E1 串行亦可**（工作量中等，route 已大半存在；edge-anchored 判定的複雜度集中在 E1-A 的 active-symbol 解析 + per-cell coverage）。
+
+---
+
+### §2.11 E2 重點審查 4 點
+
+1. **無自動觸發 + P7 不破**：grep 證 `promote_params_to_live` stub 0 自動 caller；promote/demote 唯一觸發 = operator-confirmed route（confirm=true）；criteria IPC 唯讀不改 state（不送 cmd / 不改 ConfigStore / 不改 EdgeEstimates）。
+2. **★ EDGE-ANCHORED criteria 不可被繞 + 不靠 demo PnL（QC 重寫核心）**：(a) criteria 的 binding gate 是 live `edge_estimates` 的 `validation_passed && validation_reason=="passed"` 鏈，**不讀** demo realized PnL 當促升證據（驗 `PromotionCriteriaInput` 無 `realized_pnl` 欄、判定無 PnL 分支 — down-beta 假陽性源頭已移除）；(b) criteria gate **結構上不讀 `explore_eligible`/`explore_remaining`**（explore-grace-only cell 無法冒充 live-qualified — 鏡像 live cost_gate 的 demo↔live 隔離守門點）；(c) drawdown bound 用 **LIVE** `risk_config_live.toml`（12/7）非 demo envelope（25/15）；(d) per-cell 須清 **live cost wall**（reuse `cost_gate_live_with_slippage` 算式，非僅 shrunk_bps>0）；(e) coverage 是 **weighted/majority**（單 cell cherry-pick 無法過 25-sym 策略）；(f) v1 direction allowlist 生效（denylist param → Reject）。
+3. **reverse-promote EXACT**：依 U2 裁決（§2.5），acceptance test 證「promote→demote→live set byte-equal 還原 pre-promotion」+「live 中途被改→demote 409」+ canonical 比對正確（不假性不等）。
+4. **audit fail-closed 真生效**：live promote IPC 成功後 `strategist_promotions` INSERT 失敗 → route 真回 500（非吞錯）；`criteria_input_json` 完整保留 edge-anchored 證據（per-cell + coverage）；5-gate/criteria/token 三閘任一失敗 → 0 live 改 + 不靜默；E4 Linux PG 親查 row 真落（P8）。
+
+> **★ E2 GREP 要求（criteria 繞過防線 — 不可省）**：E2 必 grep 證 **無第二個 `update_strategy_params{engine:live}` caller 繞過 criteria gate**。具體：(1) grep 全 repo `call_params_with_token("update_strategy_params"` + `update_strategy_params` IPC method 的所有 Python caller，證**唯一**達 live 的路徑是 `strategist_promote_routes.py` 的 confirm=true live 分支（已過 §2.2 順序的 criteria gate ④）；(2) grep Rust 端 `UpdateStrategyParams` / `promote_cmd_snapshot` / `promote_params_to_live` 的 caller，證 stub 仍 0 自動 caller、in-process Rust→Live channel（繞 chokepoint+criteria）無任何 production 觸發；(3) `strategy_write_routes.py:74` 認 promote router 為唯一合法 live-promote lane 仍成立。**任一旁路 caller = criteria gate 可被繞 = BLOCKER。**
+
+### §2.12 Role chain（修正 — EDGE-ANCHORED criteria 重寫後）
+`PA(本設計，§2.4 已採 QC NEEDS_CHANGES 的 edge-anchored 重寫) → QC(ratify edge-anchored criteria 設計 + 釘死 §2.4「待 QC 釘死」6 項：COVERAGE_FLOOR / MIN_QUALIFIED_CELLS / per-cell n_trades 下界 / soak·since-change·fills 值 / v1 direction allowlist 最終名單 / attribution_chain_ok 是否啟用，MANDATORY) → E1-A/B/C → E2(對抗：無自動觸發 + EDGE-ANCHORED 不可繞·不靠 demo PnL·拒 explore-grace·LIVE drawdown·清 live cost wall·weighted coverage·direction allowlist + reverse 精確 + audit fail-closed + 無 RiskConfig 觸碰 + 無第二 live caller 繞過 grep) → E3(live route auth：_verify_live_gate require_authz=True，token mint 時序，demote 同 5-gate) → E4(Linux 真 Live engine bound：criteria reject/pending 在 0-validated-cell 真回 Pending（誠實標）、promote+demote 往返 byte-equal、precondition-fail 409、strategist_promotions row 親查 edge-anchored criteria_input_json 真落、double-apply) → CC(P4/P5/P7/#8 audit + Alpha Evidence Governance：promotion 證據 math-primary·demo-only lane·bull-only=regime-bet 非 proof) → PM`
 
 ---
 
