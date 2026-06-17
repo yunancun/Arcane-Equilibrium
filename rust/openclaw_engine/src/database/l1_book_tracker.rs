@@ -105,6 +105,55 @@ impl SymbolBook {
         let (ba, as_) = self.asks.first_key_value()?; // 最低賣價
         Some((bb.0, *bs, ba.0, *as_))
     }
+
+    /// crossed-book self-heal prune（PA 修復 Part B）：清除被擠出 top-50 視窗、
+    /// feed 卻不送 qty==0 的 stale 越界檔，使重建簿不再 crossed。
+    ///
+    /// 為什麼需要：Bybit orderbook.50 是 top-50 截斷 feed，對「跌出 top-50 的舊
+    /// best 檔」**不送 qty==0 刪除**（官方 WS doc 對 out-of-depth pruning 靜默，
+    /// 只明文 qty==0=刪除）。故 stale best 檔在本地簿永久殘留 → best_bid>=best_ask。
+    ///
+    /// 不變量：只刪「本筆 delta **未觸碰**的那一側」的越界檔——觸碰側 = feed 最新
+    /// 真值（fresh），未觸碰側才可能殘留 stale。orderbook.50 是全簿快照式 delta，
+    /// 同 frame 內所有檔同期，無法逐檔分 stale，故以「觸碰側=fresh」判語義。
+    /// - bids 為 fresh（本 frame 動了 bid 側）：刪 asks 中 price<=best_bid 的越界檔。
+    /// - asks 為 fresh（本 frame 動了 ask 側）：刪 bids 中 price>=best_ask 的越界檔。
+    /// - 兩側都 fresh / 兩側都未動：無法判 stale 側 → 不刪（交給 Part A 兜底）。
+    ///
+    /// 純 in-memory，BTreeMap range 掃 O(log50+k) 無 await/無鎖；只在 resolve 後
+    /// 偵測到 crossed 才呼叫（冷路徑），正常市況零開銷。
+    fn prune_crossed(&mut self, bids_fresh: bool, asks_fresh: bool) {
+        // 兩側都 fresh 或都未動：無法判定 stale 側，不刪（Part A fail-soft 兜底）。
+        if bids_fresh == asks_fresh {
+            return;
+        }
+        // 先取當前（crossed）的 best 值作為剪枝邊界，再 drop borrow。
+        let (best_bid, best_ask) = match (self.bids.last_key_value(), self.asks.first_key_value()) {
+            (Some((bb, _)), Some((ba, _))) => (bb.0, ba.0),
+            _ => return,
+        };
+        if bids_fresh {
+            // bid 側 fresh：asks 中 price<=best_bid 為 stale 越界檔，刪除。
+            let stale: Vec<OrderedF64> = self
+                .asks
+                .range(..=OrderedF64(best_bid))
+                .map(|(k, _)| *k)
+                .collect();
+            for k in stale {
+                self.asks.remove(&k);
+            }
+        } else {
+            // ask 側 fresh：bids 中 price>=best_ask 為 stale 越界檔，刪除。
+            let stale: Vec<OrderedF64> = self
+                .bids
+                .range(OrderedF64(best_ask)..)
+                .map(|(k, _)| *k)
+                .collect();
+            for k in stale {
+                self.bids.remove(&k);
+            }
+        }
+    }
 }
 
 /// per-symbol 1 秒滑動視窗 rate counter（rate-cap 安全閥）。
@@ -185,13 +234,42 @@ impl L1BookTracker {
         }
 
         // 解析 BBO；任一側空（全被刪光）→ 不 emit（fail-soft）。
-        let (best_bid, bid_size, best_ask, ask_size) = book.resolve_bbo()?;
+        let (mut best_bid, mut bid_size, mut best_ask, mut ask_size) = book.resolve_bbo()?;
         if !best_bid.is_finite()
             || !bid_size.is_finite()
             || !best_ask.is_finite()
             || !ask_size.is_finite()
         {
             return None;
+        }
+
+        // ── crossed-book 修復（PA Part A + Part B）──
+        // 契約：emit 的 BBO 必須是 true BBO，best_bid < best_ask 恆成立；crossed 是
+        // top-50 截斷 feed 殘留 stale 檔的本地簿人造產物，整個 MM 研究依賴此正確性，
+        // 故 crossed 永不落盤。
+        if best_bid >= best_ask {
+            // Part B（self-heal）：先嘗試剪除未觸碰側的 stale 越界檔，重 resolve。
+            // 觸碰側 = 本 frame changed_* 非空 = feed 最新真值（fresh）。
+            let bids_fresh = !changed_bids.is_empty();
+            let asks_fresh = !changed_asks.is_empty();
+            book.prune_crossed(bids_fresh, asks_fresh);
+            match book.resolve_bbo() {
+                Some((bb, bs, ba, as_))
+                    if bb.is_finite()
+                        && bs.is_finite()
+                        && ba.is_finite()
+                        && as_.is_finite()
+                        && bb < ba =>
+                {
+                    best_bid = bb;
+                    bid_size = bs;
+                    best_ask = ba;
+                    ask_size = as_;
+                }
+                // Part A（硬底線）：剪枝後仍 crossed（或任一側被剪空 / 非有限）→
+                // fail-soft 不 emit、不更新 last_emitted、不計 rate-cap，crossed 永不落盤。
+                _ => return None,
+            }
         }
 
         // emit-on-change：以 f32（落盤精度）比較，避免 f64 噪音造無謂 emit。
@@ -463,5 +541,154 @@ mod tests {
             .record("ETHUSDT", Some("snapshot"), &[(50.0, 1.0)], &[(51.0, 1.0)], Some(1), Some(1), 1_000)
             .is_some());
         assert_eq!(t.len(), 2);
+    }
+
+    // ── crossed-book 修復回歸（PA Part A + Part B）──
+
+    #[test]
+    fn test_crossed_delta_bid_pushed_through_stale_ask_prunes_and_emits_uncrossed() {
+        // top-50 截斷情境：bid 漲穿一檔舊 ask，feed 不送該 ask 的 qty==0（out-of-depth
+        // 不送刪除）→ 本地簿殘留 stale ask 8.129 低於新 best_bid 8.145 → crossed。
+        // 本 frame 只動 bid 側（changed_asks 空）→ ask 為 stale 側 → 剪 price<=best_bid。
+        let mut t = L1BookTracker::new(80);
+        t.record(
+            "LINKUSDT",
+            Some("snapshot"),
+            &[(8.100, 100.0)],
+            &[(8.129, 50.0), (8.150, 60.0)],
+            Some(10),
+            Some(1),
+            1_000,
+        );
+        // delta：best-bid 漲到 8.145（穿過舊 ask 8.129）。
+        let m = t
+            .record("LINKUSDT", Some("delta"), &[(8.145, 30.0)], &[], Some(11), Some(2), 1_010)
+            .expect("prune stale ask then emit uncrossed");
+        let (bb, _, ba, ..) = bbo(&m);
+        assert!(bb < ba, "emitted BBO must NEVER be crossed (best_bid < best_ask)");
+        assert!((bb - 8.145).abs() < 1e-9, "fresh bid retained");
+        assert!((ba - 8.150).abs() < 1e-9, "stale ask 8.129 pruned, next ask 8.150 is BBO");
+    }
+
+    #[test]
+    fn test_crossed_delta_ask_pushed_through_stale_bid_prunes_symmetric() {
+        // 對稱情境：ask 跌穿一檔舊 bid，本 frame 只動 ask 側（changed_bids 空）→
+        // bid 為 stale 側 → 剪 price>=best_ask。
+        let mut t = L1BookTracker::new(80);
+        t.record(
+            "LINKUSDT",
+            Some("snapshot"),
+            &[(8.140, 50.0), (8.100, 60.0)],
+            &[(8.200, 100.0)],
+            Some(10),
+            Some(1),
+            1_000,
+        );
+        // delta：best-ask 跌到 8.130（穿過舊 bid 8.140）。
+        let m = t
+            .record("LINKUSDT", Some("delta"), &[], &[(8.130, 30.0)], Some(11), Some(2), 1_010)
+            .expect("prune stale bid then emit uncrossed");
+        let (bb, _, ba, ..) = bbo(&m);
+        assert!(bb < ba, "emitted BBO must NEVER be crossed");
+        assert!((ba - 8.130).abs() < 1e-9, "fresh ask retained");
+        assert!((bb - 8.100).abs() < 1e-9, "stale bid 8.140 pruned, next bid 8.100 is BBO");
+    }
+
+    #[test]
+    fn test_crossed_still_unresolvable_fails_soft_no_emit_no_state_pollution() {
+        // Part A 兜底：prune 後仍 crossed（或被剪空）→ 不 emit、不污染 last_emitted/rate-cap。
+        let mut t = L1BookTracker::new(80);
+        // 健康初始簿：best_bid 8.10 < best_ask 8.20，先 emit 一筆建立 last_emitted。
+        let first = t
+            .record("LINKUSDT", Some("snapshot"), &[(8.10, 10.0)], &[(8.20, 10.0)], Some(10), Some(1), 1_000)
+            .expect("healthy snapshot emits");
+        let (fb, _, fa, ..) = bbo(&first);
+        // 製造 unresolvable crossed：兩側同 frame 都動（changed_bids+changed_asks 皆非空）
+        // 使 prune_crossed 無法判 stale 側（bids_fresh==asks_fresh）→ 不剪 → 仍 crossed。
+        assert!(t
+            .record(
+                "LINKUSDT",
+                Some("delta"),
+                &[(8.30, 5.0)],   // bid 漲到 8.30
+                &[(8.25, 5.0)],   // ask 仍 8.25 < bid → crossed，且兩側都 fresh
+                Some(11),
+                Some(2),
+                1_010,
+            )
+            .is_none(), "unresolvable crossed must fail-soft (no emit)");
+        // last_emitted 未被污染：下一筆健康 delta 回到原 BBO 仍能 emit（證明 8.30/8.25 沒落盤）。
+        let again = t
+            .record("LINKUSDT", Some("delta"), &[(8.10, 10.0)], &[(8.20, 10.0)], Some(12), Some(3), 1_020);
+        // 8.10/8.20 與 first 相同 → emit-on-change 應抑制（證明 last_emitted 仍是 first 的值）。
+        assert!(again.is_none(), "last_emitted untouched by crossed frame -> same BBO deduped");
+        let _ = (fb, fa);
+    }
+
+    #[test]
+    fn test_non_crossing_delta_not_disturbed_by_fix() {
+        // 非 crossing 場景不誤觸：正常 delta 移動 BBO，prune 分支根本不進。
+        let mut t = L1BookTracker::new(80);
+        t.record("BTCUSDT", Some("snapshot"), &[(100.0, 5.0), (99.0, 4.0)], &[(101.0, 7.0), (102.0, 3.0)], Some(10), Some(1), 1_000);
+        let m = t
+            .record("BTCUSDT", Some("delta"), &[(100.5, 2.0)], &[], Some(11), Some(2), 1_010)
+            .expect("normal non-crossing delta emits unchanged");
+        let (bb, _, ba, ..) = bbo(&m);
+        assert!((bb - 100.5).abs() < 1e-9);
+        assert!((ba - 101.0).abs() < 1e-9, "ask side untouched, no spurious prune");
+    }
+
+    #[test]
+    fn test_e4_linkusdt_ask_drops_below_best_bid_emits_uncrossed_l1event() {
+        // E4 核心回歸（任務述）：餵 snapshot 後，一筆 delta 讓 best ask 跌到「低於既有
+        // best bid」（複現 LINKUSDT crossed 事故的字面情境），斷言 emit 的 *L1Event* 欄位
+        // best_bid < best_ask 恆成立——crossed 永不落盤。
+        //
+        // 與 E1 的對稱測試刻意取不同價位與不同切入點：此處直接斷言 emitted MarketDataMsg
+        // 的 best_bid/best_ask 欄位（非僅 BBO 元組），並驗 stale bid 被剪、fresh ask 保留。
+        let mut t = L1BookTracker::new(80);
+        // 健康初始簿：best_bid 13.880 < best_ask 13.950。
+        t.record(
+            "LINKUSDT",
+            Some("snapshot"),
+            &[(13.880, 200.0), (13.800, 300.0)],
+            &[(13.950, 120.0)],
+            Some(10),
+            Some(1),
+            1_000,
+        );
+        // delta：best-ask 跌到 13.870 —— 低於既有 best-bid 13.880（feed 未送 13.880 的
+        // qty==0，out-of-depth 不送刪除）→ 本地簿一度 crossed。
+        // 本 frame 只動 ask 側（changed_bids 空）→ bid 為 stale 側 → 剪 price>=best_ask。
+        let m = t
+            .record(
+                "LINKUSDT",
+                Some("delta"),
+                &[],
+                &[(13.870, 40.0)],
+                Some(11),
+                Some(2),
+                1_010,
+            )
+            .expect("ask-drops-below-bid must prune stale bid then emit uncrossed L1Event");
+        match m {
+            MarketDataMsg::L1Event {
+                best_bid, best_ask, is_snapshot, ..
+            } => {
+                assert!(
+                    best_bid < best_ask,
+                    "emitted L1Event MUST be uncrossed: best_bid={best_bid} best_ask={best_ask}"
+                );
+                assert!(
+                    (best_ask - 13.870).abs() < 1e-9,
+                    "fresh ask 13.870 retained as best_ask"
+                );
+                assert!(
+                    (best_bid - 13.800).abs() < 1e-9,
+                    "stale bid 13.880 pruned (>= best_ask), next bid 13.800 is best_bid"
+                );
+                assert!(!is_snapshot, "delta frame is not a snapshot");
+            }
+            _ => panic!("expected L1Event"),
+        }
     }
 }
