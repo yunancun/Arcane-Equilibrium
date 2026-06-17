@@ -144,6 +144,62 @@ fn test_regime_default_lookups() {
     assert_eq!(r.get("nonexistent").stop, 1.0); // fall back to unknown
 }
 
+/// DEAD-CONFIG-FIX exact-match guard：鎖死 `RegimeMultipliers::get()` 對全部
+/// 5 個 regime × {stop,tp,time} 的精確預設值，以及未知 regime 字串回退到
+/// `unknown` bundle。此測試移植被刪除的 `openclaw_core::risk::regime` 的
+/// `test_regime_trending/_volatile/_unknown_defaults` 三個 exact-match 測試
+/// 意圖（核心硬編碼表已刪除，乘數現由可調 RiskConfig.regime 提供）。
+/// 預設值與舊核心硬編碼表 byte-identical → 此測鎖死「預設行為位元不變」契約，
+/// 防止未來 default_* 漂移悄無聲息地改變預設止損/止盈/時間行為。
+///
+/// 上面的 `test_regime_default_lookups` 只抽查 5 個欄位（E2 MEDIUM 指出此鬆散
+/// 覆蓋無法鎖死完整契約）；本測窮舉 15 個欄位 + 完整 unknown fallback bundle。
+/// 全部為精確 f64 字面量，無需 epsilon。
+#[test]
+fn test_regime_get_exact_defaults_all_fields() {
+    let r = RegimeMultipliers::default();
+
+    // trending {stop=1.0, tp=1.5, time=1.5}
+    let t = r.get("trending");
+    assert_eq!(t.stop, 1.0, "trending.stop");
+    assert_eq!(t.tp, 1.5, "trending.tp");
+    assert_eq!(t.time, 1.5, "trending.time");
+
+    // volatile {stop=1.5, tp=0.8, time=0.8}
+    let v = r.get("volatile");
+    assert_eq!(v.stop, 1.5, "volatile.stop");
+    assert_eq!(v.tp, 0.8, "volatile.tp");
+    assert_eq!(v.time, 0.8, "volatile.time");
+
+    // ranging {stop=0.7, tp=0.7, time=0.8}
+    let ra = r.get("ranging");
+    assert_eq!(ra.stop, 0.7, "ranging.stop");
+    assert_eq!(ra.tp, 0.7, "ranging.tp");
+    assert_eq!(ra.time, 0.8, "ranging.time");
+
+    // squeeze {stop=0.6, tp=0.5, time=1.0}
+    let sq = r.get("squeeze");
+    assert_eq!(sq.stop, 0.6, "squeeze.stop");
+    assert_eq!(sq.tp, 0.5, "squeeze.tp");
+    assert_eq!(sq.time, 1.0, "squeeze.time");
+
+    // unknown {stop=1.0, tp=1.0, time=1.0}（顯式 "unknown" 名稱）
+    let u = r.get("unknown");
+    assert_eq!(u.stop, 1.0, "unknown.stop");
+    assert_eq!(u.tp, 1.0, "unknown.tp");
+    assert_eq!(u.time, 1.0, "unknown.time");
+
+    // 未知/無法識別的 regime 字串 → 回退到 unknown bundle {1.0,1.0,1.0}
+    let fb = r.get("some_unrecognized_regime");
+    assert_eq!(fb.stop, 1.0, "fallback.stop must == unknown");
+    assert_eq!(fb.tp, 1.0, "fallback.tp must == unknown");
+    assert_eq!(fb.time, 1.0, "fallback.time must == unknown");
+
+    // 額外鐵證：空字串與任意 regime 名稱都走 `_` 分支回退到 unknown。
+    assert_eq!(r.get("").stop, 1.0, "empty string → unknown.stop");
+    assert_eq!(r.get("TRENDING").stop, 1.0, "case-sensitive: uppercase → unknown");
+}
+
 #[test]
 fn test_regime_negative_multiplier_rejected() {
     let mut cfg = RiskConfig::default();
