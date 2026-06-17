@@ -31,6 +31,14 @@ pub enum DirectiveType {
     /// Resume a previously paused scope.
     /// 恢復之前暫停的 scope。
     Unpause,
+    /// Adjust non-survival RiskConfig knobs (Phase 3). Routed to the demo
+    /// `RiskConfigDirectiveSink`; gated OFF by default via
+    /// `OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED`. Survival floors stay
+    /// operator-only forever — see `applier_riskconfig::RISKCONFIG_SURVIVAL_DENYLIST`.
+    /// 調整非 survival 的 RiskConfig 旋鈕（Phase 3）。route 到 demo
+    /// `RiskConfigDirectiveSink`；預設經 `OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED`
+    /// 關閉。survival floors 永遠 operator-only。
+    AdjustRiskConfig,
 }
 
 /// Parsed Teacher directive ready for governance + persistence.
@@ -111,6 +119,7 @@ pub fn parse_directive(json: &str) -> Result<Directive, ParserError> {
         "pause_strategy" => DirectiveType::PauseStrategy,
         "boost_arm" => DirectiveType::BoostArm,
         "unpause" => DirectiveType::Unpause,
+        "adjust_risk_config" => DirectiveType::AdjustRiskConfig,
         other => return Err(ParserError::UnknownType(other.to_string())),
     };
 
@@ -226,5 +235,17 @@ mod tests {
             r#"{"type":"pause_strategy","scope":"s","params":{},"expiry":1000,"priority":2}"#;
         let err = parse_directive(json).expect_err("must reject");
         assert!(matches!(err, ParserError::ExpiryInPast(_)));
+    }
+
+    // Test 5（FIX-2）："adjust_risk_config" 解析為 DirectiveType::AdjustRiskConfig。
+    #[test]
+    fn test_parser_accepts_adjust_risk_config() {
+        let json = format!(
+            r#"{{"type":"adjust_risk_config","scope":"global","params":{{"limits":{{"leverage_max":50}}}},"expiry":{},"priority":3}}"#,
+            future_secs()
+        );
+        let d = parse_directive(&json).expect("should parse");
+        assert_eq!(d.directive_type, DirectiveType::AdjustRiskConfig);
+        assert_eq!(d.scope, "global");
     }
 }

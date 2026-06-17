@@ -12,7 +12,8 @@
 //!     2. GovernanceCore veto check via an injected `GovernanceCheck` trait
 //!        (system state, daily loss, etc.).
 //!   Every outcome — Applied, VetoedByGovernance, VetoedByHardBoundary,
-//!   InvalidDirective, IpcError — is written to `learning.directive_executions`
+//!   VetoedByDefaultDeny, InvalidDirective, IpcError — is written to
+//!   `learning.directive_executions`
 //!   as an audit row (best-effort: PG unavailable = silent skip, the outcome
 //!   is still returned to the caller).
 //!
@@ -33,7 +34,8 @@
 //!     2. GovernanceCore veto 檢查（透過注入的 `GovernanceCheck` trait，
 //!        覆蓋系統狀態、日虧損等）。
 //!   所有 outcome（Applied / VetoedByGovernance / VetoedByHardBoundary /
-//!   InvalidDirective / IpcError）都會寫入 `learning.directive_executions`
+//!   VetoedByDefaultDeny / InvalidDirective / IpcError）都會寫入
+//!   `learning.directive_executions`
 //!   作為審計行（盡力寫入：PG 不可用則靜默跳過，outcome 仍回傳給呼叫方）。
 //!
 //!   ARCH-RC1 對齊：本模組 **絕不** 觸碰 Python RiskManager、
@@ -44,6 +46,7 @@
 //!   透過 mock 實作完全可單元測試，可在不動 `lib.rs` / `main.rs` /
 //!   `ipc_server.rs` 的情況下寫成、審查、合併。
 
+use super::applier_riskconfig::RiskConfigDirectiveSink;
 use super::parser::{Directive, DirectiveType};
 use crate::database::pool::DbPool;
 use std::future::Future;
@@ -78,6 +81,25 @@ pub enum ApplyOutcome {
         boundary: String,
         reason: String,
     },
+    /// Phase 3 audit-semantic split (FIX-3): a leaf that is simply NOT on the
+    /// allowlist (default-deny backstop), as opposed to one that hit an
+    /// enumerated survival floor (`VetoedByHardBoundary`). Both fail closed
+    /// (both reject the whole patch), but they carry distinct audit semantics
+    /// in `learning.directive_executions`: "not allowlisted" is an expected
+    /// inert-v1 rejection, whereas a hard-boundary veto means the agent tried
+    /// to touch a survival-class field by name. Conflating them loses signal
+    /// for learning / operator review.
+    /// Phase 3 審計語意拆分（FIX-3）：某葉「單純不在 allowlist」（default-deny
+    /// 後盾），有別於命中已列舉的 survival floor（`VetoedByHardBoundary`）。
+    /// 兩者皆 fail-closed（皆拒整 patch），但在 `directive_executions` 中帶
+    /// 不同審計語意：「未列入 allowlist」是 v1 inert 的預期拒絕；hard-boundary
+    /// veto 則代表 agent 試圖指名碰 survival-class 欄位。混為一談會在學習 /
+    /// operator 復核時丟失信號。
+    VetoedByDefaultDeny {
+        directive_id: i64,
+        field: String,
+        reason: String,
+    },
     /// Directive shape is legal per parser but semantically invalid
     /// (unknown strategy name, missing required params).
     /// directive 結構合法（parser 通過）但語義無效
@@ -96,6 +118,7 @@ impl ApplyOutcome {
             ApplyOutcome::Applied { .. } => "applied",
             ApplyOutcome::VetoedByGovernance { .. } => "vetoed_by_governance",
             ApplyOutcome::VetoedByHardBoundary { .. } => "vetoed_by_hard_boundary",
+            ApplyOutcome::VetoedByDefaultDeny { .. } => "vetoed_by_default_deny",
             ApplyOutcome::InvalidDirective { .. } => "invalid_directive",
             ApplyOutcome::IpcError { .. } => "ipc_error",
         }
@@ -114,6 +137,7 @@ impl ApplyOutcome {
             ApplyOutcome::Applied { directive_id, .. }
             | ApplyOutcome::VetoedByGovernance { directive_id, .. }
             | ApplyOutcome::VetoedByHardBoundary { directive_id, .. }
+            | ApplyOutcome::VetoedByDefaultDeny { directive_id, .. }
             | ApplyOutcome::InvalidDirective { directive_id, .. }
             | ApplyOutcome::IpcError { directive_id, .. } => *directive_id,
         }
@@ -239,6 +263,14 @@ pub struct DirectiveApplier {
     /// 注入的策略 IPC sink。`None` = dry-run 模式（測試只要斷言閘決定、
     /// 不需要真實 channel 時使用）。
     ipc_sink: Option<Arc<dyn StrategyIpcSink>>,
+    /// Phase 3: optional RiskConfig agent-tuning sink (demo-Arc-only). `None`
+    /// when `OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED` is OFF (default) — the
+    /// sink is then NOT constructed/wired and `AdjustRiskConfig` directives
+    /// short-circuit to `InvalidDirective{disabled}` (not silently swallowed).
+    /// Phase 3：可選的 RiskConfig agent 調參 sink（demo-Arc-only）。flag OFF
+    /// （預設）時為 `None` —— sink 不被構造/接線，`AdjustRiskConfig` directive
+    /// 直接回 `InvalidDirective{disabled}`（非靜默吞）。
+    riskconfig_sink: Option<Arc<RiskConfigDirectiveSink>>,
     /// PG pool handle for the audit row write.
     /// PG pool 句柄，用於審計行寫入。
     pool: Arc<DbPool>,
@@ -259,8 +291,22 @@ impl DirectiveApplier {
         Self {
             governance,
             ipc_sink,
+            riskconfig_sink: None,
             pool,
         }
+    }
+
+    /// Phase 3 builder: attach the demo-Arc-only `RiskConfigDirectiveSink`.
+    /// Called ONLY at the spawn site when
+    /// `OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED == "1"`; when the flag is OFF
+    /// the sink is never constructed, so `riskconfig_sink` stays `None` and any
+    /// `AdjustRiskConfig` directive is rejected as disabled.
+    /// Phase 3 builder：掛上 demo-Arc-only 的 `RiskConfigDirectiveSink`。
+    /// 僅在 flag ON 時於 spawn 處呼叫；flag OFF 時 sink 從不構造，
+    /// `riskconfig_sink` 維持 `None`，任何 `AdjustRiskConfig` directive 回 disabled。
+    pub fn with_riskconfig_sink(mut self, sink: Arc<RiskConfigDirectiveSink>) -> Self {
+        self.riskconfig_sink = Some(sink);
+        self
     }
 
     /// Apply a single directive. Guarantees an audit row write attempt for
@@ -295,6 +341,39 @@ impl DirectiveApplier {
             }
             DirectiveType::BoostArm => self.apply_boost_arm(directive, directive_id).await,
             DirectiveType::Unpause => self.apply_unpause(directive, directive_id).await,
+            DirectiveType::AdjustRiskConfig => {
+                self.apply_adjust_risk_config(directive, directive_id).await
+            }
+        }
+    }
+
+    // -------------------- adjust_risk_config (Phase 3) --------------------
+
+    /// Delegate to the demo-Arc-only `RiskConfigDirectiveSink` (§3.6). When the
+    /// flag is OFF the sink was never wired (`riskconfig_sink == None`) → return
+    /// `InvalidDirective{disabled}` rather than silently swallowing the directive
+    /// (§3.6-1: flag-OFF must be observable, not a no-op black hole). The sink
+    /// itself enforces the recursive survival-denylist + allowlist-default-deny;
+    /// audit of the returned `ApplyOutcome` is handled by `apply()`'s
+    /// `record_execution`.
+    /// 委派給 demo-Arc-only 的 `RiskConfigDirectiveSink`（§3.6）。flag OFF 時
+    /// sink 從未接線（`riskconfig_sink == None`）→ 回 `InvalidDirective{disabled}`
+    /// 而非靜默吞（§3.6-1：flag-OFF 必須可觀測）。sink 自身執行遞迴 survival
+    /// denylist + allowlist-default-deny；回傳 outcome 的審計由 `apply()` 的
+    /// `record_execution` 負責。
+    async fn apply_adjust_risk_config(
+        &self,
+        directive: &Directive,
+        directive_id: i64,
+    ) -> ApplyOutcome {
+        match &self.riskconfig_sink {
+            Some(sink) => sink.apply(directive, directive_id).await,
+            None => ApplyOutcome::InvalidDirective {
+                directive_id,
+                error: "adjust_risk_config disabled \
+                        (OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED is OFF — sink not wired)"
+                    .into(),
+            },
         }
     }
 
@@ -1067,6 +1146,32 @@ mod tests {
                 assert_eq!(boundary, "max_position_size_usd");
             }
             other => panic!("expected VetoedByHardBoundary, got {other:?}"),
+        }
+    }
+
+    // ===================================================================
+    // FIX-2 test (1): adjust_risk_config flag-OFF arm（riskconfig_sink=None）
+    //   → InvalidDirective{disabled}（非靜默吞）。此前 flag-OFF 臂零測試覆蓋。
+    // ===================================================================
+    #[tokio::test]
+    async fn test_adjust_risk_config_disabled_when_sink_none() {
+        // make_applier 走 DirectiveApplier::new → riskconfig_sink 預設 None
+        //（flag OFF / sink 未接線）。
+        let (applier, _, _) = make_applier(MockGov::default_healthy(), None).await;
+        let d = directive(
+            DirectiveType::AdjustRiskConfig,
+            "global",
+            json!({"limits": {"leverage_max": 50}}),
+        );
+        let outcome = applier.apply(d, 9006).await;
+        match outcome {
+            ApplyOutcome::InvalidDirective { error, .. } => {
+                assert!(
+                    error.contains("disabled"),
+                    "flag-OFF arm must surface 'disabled', got: {error}"
+                );
+            }
+            other => panic!("expected InvalidDirective{{disabled}}, got {other:?}"),
         }
     }
 }

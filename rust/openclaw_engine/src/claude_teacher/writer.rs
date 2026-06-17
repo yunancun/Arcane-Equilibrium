@@ -60,6 +60,8 @@ pub async fn persist_directive(
         super::parser::DirectiveType::PauseStrategy => "risk_assessment",
         super::parser::DirectiveType::BoostArm => "experiment",
         super::parser::DirectiveType::Unpause => "risk_assessment",
+        // Phase 3：RiskConfig 調參歸入 risk_assessment 審計類別。
+        super::parser::DirectiveType::AdjustRiskConfig => "risk_assessment",
     };
 
     // hypothesis_id is a deterministic correlation key shared with ledger.
@@ -197,6 +199,19 @@ pub async fn record_execution(
             serde_json::json!({
                 "outcome": "vetoed_by_hard_boundary",
                 "boundary": boundary,
+                "reason": reason,
+            }),
+        ),
+        // FIX-3 審計語意拆分：default-deny（未列入 allowlist）與 hard-boundary
+        // （命中 survival floor）分流為不同 action_taken / outcome，使
+        // directive_executions 行可區分「未列入」vs「碰生存底線」。仍 fail-closed
+        // （success=false）。
+        ApplyOutcome::VetoedByDefaultDeny { field, reason, .. } => (
+            "vetoed_by_default_deny",
+            false,
+            serde_json::json!({
+                "outcome": "vetoed_by_default_deny",
+                "field": field,
                 "reason": reason,
             }),
         ),

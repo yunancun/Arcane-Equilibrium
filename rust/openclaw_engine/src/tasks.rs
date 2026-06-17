@@ -12,7 +12,7 @@ use supervised_spawn::spawn_cancellable_interval;
 use openclaw_engine::account_manager::AccountManager;
 use openclaw_engine::agent_spine::store::AGENT_SPINE_CHANNEL_CAPACITY;
 use openclaw_engine::bybit_rest_client::{BybitApiError, BybitEnvironment, BybitRestClient};
-use openclaw_engine::config::{ConfigManager, ConfigStore, LearningConfig};
+use openclaw_engine::config::{ConfigManager, ConfigStore, LearningConfig, RiskConfig};
 use openclaw_engine::database::pool::DbPool;
 use openclaw_engine::event_consumer::SYMBOLS;
 use openclaw_engine::ipc_server::{
@@ -249,6 +249,14 @@ pub(crate) async fn spawn_teacher_consumer_loop(
     teacher_loop_slot: TeacherLoopSlot,
     engine_cmd_channels: EngineCommandChannels,
     governance_wrapper: &Arc<openclaw_engine::claude_teacher::GovernanceCoreWrapper>,
+    // Phase 3: DEMO RiskConfig store (clone of `risk_stores.demo`). The demo
+    // Arc is passed in so the RiskConfig agent-tuning sink can be wired
+    // demo-Arc-only (structural gate, E3) — the live store Arc is NEVER passed
+    // here. Used only when OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED == "1".
+    // Phase 3：DEMO RiskConfig store（`risk_stores.demo` 的 clone）。只傳 demo
+    // Arc 進來，使 RiskConfig agent 調參 sink 接成 demo-Arc-only（結構閘，E3）
+    // —— live store Arc 絕不傳入此處。僅在 flag ON 時使用。
+    demo_risk_store: &Arc<ConfigStore<RiskConfig>>,
 ) {
     if !db_pool.is_available() {
         warn!("Phase 4.1 consumer loop skipped: db_pool unavailable / db_pool 不可用，consumer loop 跳過");
@@ -284,11 +292,38 @@ pub(crate) async fn spawn_teacher_consumer_loop(
     let governance_for_applier: Arc<dyn GovernanceCheck> =
         Arc::clone(governance_wrapper) as Arc<dyn GovernanceCheck>;
     let ipc_sink: Arc<dyn StrategyIpcSink> = Arc::new(EngineCommandSink::demo(engine_cmd_channels));
-    let applier = Arc::new(DirectiveApplier::new(
+    let applier_base = DirectiveApplier::new(
         governance_for_applier,
         Some(ipc_sink),
         Arc::clone(db_pool),
-    ));
+    );
+
+    // Phase 3：RiskConfig agent 調參 sink，flag-gated（default-OFF）。flag != "1"
+    // 時 sink **不被構造/接線**（bit-identical dormancy）→ AdjustRiskConfig
+    // directive 走 InvalidDirective{disabled}。flag == "1" 時掛上 demo-Arc-only
+    // sink（鏡像 EngineCommandSink::demo 與 cost_edge_advisor 先例）；即便如此，
+    // v1 allowlist 結構性為空 → 任何 RiskConfig patch 仍 default-deny（inert）。
+    let riskconfig_tuning_enabled =
+        std::env::var("OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED").as_deref() == Ok("1");
+    let applier = Arc::new(if riskconfig_tuning_enabled {
+        use openclaw_engine::claude_teacher::RiskConfigDirectiveSink;
+        // 結構閘：只接 demo 的 Arc::clone；governance 重用同一 wrapper。
+        let governance_for_rc: Arc<dyn GovernanceCheck> =
+            Arc::clone(governance_wrapper) as Arc<dyn GovernanceCheck>;
+        let rc_sink = Arc::new(RiskConfigDirectiveSink::demo(
+            Arc::clone(demo_risk_store),
+            governance_for_rc,
+        ));
+        info!(
+            "Phase 3 RiskConfigDirectiveSink wired (demo-Arc-only; flag ON) — v1 allowlist empty so still inert / RiskConfig 調參 sink 已接線（demo Arc，flag ON），v1 allowlist 空仍 inert"
+        );
+        applier_base.with_riskconfig_sink(rc_sink)
+    } else {
+        debug!(
+            "Phase 3 RiskConfigDirectiveSink NOT wired (OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED OFF) / 未接線（flag OFF）"
+        );
+        applier_base
+    });
     let outcome_tracker = Arc::new(OutcomeTracker::new(Arc::clone(db_pool)));
     // Default-off until E3 R6 PASS. Operator flips via IPC.
     // E3 R6 通過前預設關閉。Operator 透過 IPC 翻開。
