@@ -691,6 +691,14 @@ async def post_strategist_promote(
             f"row_id={source_row.get('id')}:symbol={body.symbol}"
         ),
     }
+    # PHASE 0 AUTH-1：target_engine=="live" 時 update_strategy_params ∈ LIVE_WRITE_METHODS
+    # → Rust chokepoint 要求 token。此路由的 live 分支已於 Step 5 過完整 5-gate
+    # （_apply_target_gate → _verify_live_gate），故在此鑄 method-bound token 併入 params。
+    # non-patch 類 hash 對象 = params 去 token 三欄 + engine（call_params_with_token 自動處理）。
+    # demo/paper target 不鑄。
+    if body.target_engine == "live":
+        from .live_patch_token import call_params_with_token  # noqa: PLC0415
+        ipc_params = call_params_with_token("update_strategy_params", ipc_params)
     try:
         ipc_response = await one_shot_ipc_call(
             "update_strategy_params",

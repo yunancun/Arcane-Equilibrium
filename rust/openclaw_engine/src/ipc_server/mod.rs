@@ -47,6 +47,8 @@ mod dispatch;
 mod engine_routing;
 mod handlers;
 mod handlers_config;
+// PHASE 0 AUTH-1：live-write capability token 強制執行（dispatch chokepoint enforcer）。
+mod live_authz;
 mod method_registry;
 // E5-P1-5: JSON-RPC params extraction & validation helpers (orphan §九).
 //         Exposed as a sibling module so existing handlers.rs can adopt

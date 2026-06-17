@@ -40,6 +40,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _attach_live_token_if_live(method: str, params: dict[str, Any] | None) -> dict[str, Any] | None:
+    """PHASE 0 AUTH-1：當 params 的 engine=="live" 時，為 LIVE_WRITE_METHOD 鑄 method-bound
+    capability token 併入 params；否則原樣回傳（demo/paper/缺 engine 不鑄）。
+
+    為何集中於此：reset_drawdown_baseline / unhalt_session(resume_paper) 的 live-intent
+    caller（live-halt-recovery + operator /reset-drawdown-baseline 路由）共用 RiskViewClient
+    方法。caller 已過自己的 operator gate；此 helper 不做授權，只在 engine=="live" 時鑄
+    憑證（Python authorizer → Rust enforcer）。secret 缺 → raise（fail-closed，向上冒泡）。
+    """
+    if not isinstance(params, dict) or params.get("engine") != "live":
+        return params
+    from .live_patch_token import call_params_with_token  # noqa: PLC0415
+
+    return call_params_with_token(method, params)
+
+
 # ─── GUI → Rust field mapping ───────────────────────────────────────────────
 # GUI 送來的平坦欄位名稱 → Rust RiskConfig 嵌套路徑 (section, rust_key)
 # GUI flat field names → Rust RiskConfig nested path (section, rust_key)
@@ -338,20 +354,32 @@ class RiskViewClient:
             logger.warning("unhalt_session skipped — no IPC client")
             return {}
         params = {"engine": engine} if engine else None
+        # PHASE 0 AUTH-1：engine=="live" 時 resume_paper ∈ LIVE_WRITE_METHODS，Rust
+        # chokepoint 要求 token。caller（live-halt-recovery approve 流程，operator-role
+        # gate）顯式傳 engine="live"。在此鑄 method-bound token（Python authorizer →
+        # Rust enforcer）。為何此處不要求 all_five_live_gates_ok：live-halt 期間簽名授權
+        # 已被自動撤銷（五門必失敗），recovery 是「重置 live 風控以便重新續期授權」的
+        # operator one-button 路徑，僅 operator-role gate；不鑄 token 則 recovery 永久封死。
+        params = _attach_live_token_if_live("resume_paper", params)
         resp = await self._ipc.call("resume_paper", params)
         await self.refresh_runtime_status()
         return resp if isinstance(resp, dict) else {}
 
-    async def clear_consecutive_losses(self) -> dict[str, Any]:
+    async def clear_consecutive_losses(self, engine: str | None = None) -> dict[str, Any]:
         """
         Safe reset: clear per-symbol loss counters. Does NOT affect RiskGovernor
         tier — for tier override see `force_governor_tier_*` in 1C-3-B-2.
         安全重置：清除 per-symbol 連虧計數器（不影響 governor tier）。
+
+        PHASE 0 AUTH-1：`engine` 顯式傳遞時併入 IPC params。caller（/reset-cooldown
+        paper-control 路由）顯式傳 ``engine="paper"`` 使 Rust chokepoint 在 live-running
+        引擎上解析為 paper（不觸 primary()=live），永不要求 token。
         """
         if self._ipc is None:
             logger.warning("clear_consecutive_losses skipped — no IPC client")
             return {}
-        resp = await self._ipc.call("clear_consecutive_losses")
+        params = {"engine": engine} if engine else None
+        resp = await self._ipc.call("clear_consecutive_losses", params)
         await self.refresh_runtime_status()
         return resp if isinstance(resp, dict) else {}
 
@@ -381,7 +409,11 @@ class RiskViewClient:
         if self._ipc is None:
             logger.warning("reset_drawdown_baseline skipped — no IPC client")
             return {}
-        resp = await self._ipc.call("reset_drawdown_baseline", {"engine": engine})
+        # PHASE 0 AUTH-1：engine=="live" 時 reset_drawdown_baseline ∈ LIVE_WRITE_METHODS
+        # → 鑄 method-bound token（與 unhalt_session live 分支同理；caller=operator-gated
+        # /reset-drawdown-baseline 路由 + live-halt-recovery）。demo/paper 不鑄。
+        params = _attach_live_token_if_live("reset_drawdown_baseline", {"engine": engine})
+        resp = await self._ipc.call("reset_drawdown_baseline", params)
         await self.refresh_runtime_status()
         return resp if isinstance(resp, dict) else {}
 
@@ -402,6 +434,11 @@ class RiskViewClient:
         if self._ipc is None:
             logger.warning("force_governor_tier_tighter skipped — no IPC client")
             return {}
+        # PHASE 0 AUTH-1（DEFERRED）：force_governor_tier_tighter ∈ LIVE_WRITE_METHODS，
+        # 但今天 control_api_v1 內無任何 FastAPI route 呼叫此方法（grep 親證），故非 live-
+        # active path，Phase 0 不 retrofit。若未來新增 operator route 呼叫此方法且目標 live
+        # 引擎，**必須**先過 operator/5-gate 再經 _attach_live_token_if_live 鑄 token 併入
+        # params（顯式傳 engine="live"），否則 Rust chokepoint 會 fail-closed 拒。
         resp = await self._ipc.call(
             "force_governor_tier_tighter",
             params={"target_tier": target_tier, "reason": reason},
@@ -423,6 +460,10 @@ class RiskViewClient:
         if self._ipc is None:
             logger.warning("force_governor_tier_looser skipped — no IPC client")
             return {}
+        # PHASE 0 AUTH-1（DEFERRED）：同 force_governor_tier_tighter — 今天無 route caller
+        # （grep 親證），非 live-active path。未來 operator route 呼叫且目標 live 須過
+        # operator/5-gate 後 _attach_live_token_if_live 鑄 token（顯式 engine="live"）。
+        # 註：此方法是「放寬風控」危險能力，未來 retrofit 時務必走完整 5-gate（非僅 operator）。
         resp = await self._ipc.call(
             "force_governor_tier_looser",
             params={

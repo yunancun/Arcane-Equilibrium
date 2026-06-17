@@ -149,19 +149,11 @@ where
                 source = outcome.source.as_str(),
                 "ARCH-RC1 config patched via IPC / 配置經 IPC 熱更新"
             );
-            // 縱深防禦（僅審計可見，不硬擋）：任何 risk/live RiskConfig patch 都發一條
-            // warn! 結構化日誌，讓下游 V014 engine_events 審計列有對應的引擎側信號。
-            // 為何不在 Rust 硬拒 risk/live：Rust 無 secret-slot/authorization.json/
-            // global-mode context，無法分辨已過五門的 operator 呼叫與未過門呼叫；硬擋還會
-            // 破合法的 operator g2 canary 直連 socket 路徑。授權判斷留在 Python 控制面。
-            if config_name.starts_with("risk/live") {
-                warn!(
-                    config = config_name,
-                    version = outcome.version,
-                    source = outcome.source.as_str(),
-                    "LIVE RiskConfig patched via IPC — audit-only signal / live 風控配置經 IPC 變更（僅審計信號）"
-                );
-            }
+            // PHASE 0 AUTH-1（MED-1 移除 fail-open）：原 risk/live warn!-only 縱深防禦 block
+            // 已刪除。授權強制上移到 dispatch chokepoint（live_authz::check_live_authz，
+            // dispatch.rs match 前）：到達此 handle_patch_config 的 engine==live patch 必已過
+            // token gate（缺/過期/重放/壞 token 在 chokepoint 即 fail-closed 拒絕）。此處不再有
+            // warn!-only 逃生門；唯一緊急姿態 = 撤 OPENCLAW_LIVE_PATCH_SECRET。
             // ARCH-RC1 1C-2-E: fire-and-forget audit row to V014 engine_events.
             // ARCH-RC1 1C-2-E：fire-and-forget 寫一行 V014 engine_events 審計。
             if let Some(pool) = audit_pool.clone() {

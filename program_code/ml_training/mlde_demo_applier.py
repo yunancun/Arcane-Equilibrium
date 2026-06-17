@@ -1549,10 +1549,17 @@ async def _apply_one(
         status = "dry_run"
         ipc_response: dict[str, Any] = {"dry_run": True}
     elif kind == "strategy_params":
+        # 為什麼 wire 用字面 "demo" 而非 cfg.engine_mode（Phase 0 AUTH-1 re-review MED）：
+        # update_strategy_params / patch_risk_config 皆屬 LIVE_WRITE_METHODS。此處只在上方
+        # :1494 demo-lock（engine_mode != "demo" → skip non_demo_engine）通過後可達，故
+        # cfg.engine_mode 在此結構性恆為 "demo"；但 engine_mode 是 env-overridable（:191），
+        # 用變數 echo 會讓 wire 與「demo-only applier」文檔意圖出現潛在分歧。鎖死字面 "demo"
+        # → wire 永遠解析成 demo（true-live 引擎上不要 token、不被 fail-closed 拒），與
+        # MODULE_NOTE「applies only demo-scoped changes / Live rows never applied here」一致。
         ipc_response = await ipc_call(
             "update_strategy_params",
             {
-                "engine": cfg.engine_mode,
+                "engine": "demo",
                 "strategy_name": target,
                 "params_json": json.dumps(patch, separators=(",", ":")),
             },
@@ -1560,9 +1567,11 @@ async def _apply_one(
         )
         status = "applied"
     else:
+        # 同上：demo-lock 後字面 "demo"（非 cfg.engine_mode），patch_risk_config 是 live-write
+        # 面，wire 鎖 demo 避免 env 覆寫造成 demo→live 誤投與 true-live fail-closed 拒。
         ipc_response = await ipc_call(
             "patch_risk_config",
-            {"engine": cfg.engine_mode, "source": "agent", "patch": patch},
+            {"engine": "demo", "source": "agent", "patch": patch},
             5.0,
         )
         status = "applied"

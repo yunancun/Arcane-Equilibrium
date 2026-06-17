@@ -124,6 +124,93 @@ pub(crate) async fn dispatch_request(
         );
     }
 
+    // ── PHASE 0 AUTH-1：live-write capability token chokepoint（單一閘，唯一覆蓋全
+    //    method 的點）──
+    //
+    // 為何在 `match method` 之前：grep 證實無單一 engine-resolution 函數所有 live-write
+    // 都經過（extract_engine_tx 只服務 PipelineCommand、patch_risk_config 走 risk_stores.
+    // select）；唯一覆蓋全 method 的點是 match 前。
+    //
+    // U-P0-3 engine-skew 釘死：下游 arm 解析 engine 有「兩條路」——
+    //   (a) patch_risk_config / get_risk_config 走 `select(unwrap_or("paper"))`；
+    //   (b) 其餘 11 個 LIVE_WRITE_METHODS 走 `extract_engine_tx`：engine 在場 → select(engine)，
+    //       engine 缺席 → `primary()`（live > demo > paper）。
+    // 若 gate 一律 `unwrap_or("paper")`，則「缺 engine 參數的 (b) 類 method」在 live-running
+    // 引擎上會被 arm 路由到 LIVE，而 gate 判 paper → 繞過。故 gate 必須鏡像 arm：缺 engine
+    // 時對 (b) 類用 `cmd_channels.primary_label()` 解出真實 effective engine。
+    //
+    // fail-closed：effective engine==live 且 method ∈ LIVE_WRITE_METHODS 時，缺/過期/重放/壞
+    // token 一律拒（ERR_INVALID_REQUEST）+ 寫 V014 config_reject row。demo/paper 完全不變。
+    // secret 撤除 = kill-switch fail-closed。
+    {
+        // (a) select-based methods 在缺 engine 時 default paper；(b) extract_engine_tx-based
+        // methods 在缺 engine 時走 primary_label()。patch_risk_config 是唯一在 LIVE_WRITE_METHODS
+        // 中走 select 的；其餘皆 extract_engine_tx。
+        let engine_param = req.params.get("engine").and_then(|v| v.as_str());
+        let engine: &str = match engine_param {
+            Some(e) => e,
+            None if method == "patch_risk_config" => "paper",
+            None => cmd_channels.primary_label(),
+        };
+        if super::live_authz::requires_live_authz(engine, method) {
+            // secret 與 IPC HMAC secret 分離檔（OPENCLAW_LIVE_PATCH_SECRET / *_FILE）。
+            // None → "" → verify 必失敗（fail-closed kill-switch）。
+            let secret =
+                crate::secret_env::var_or_file("OPENCLAW_LIVE_PATCH_SECRET").unwrap_or_default();
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let ledger = super::live_authz::nonce_ledger();
+            if let Err(reject) =
+                super::live_authz::check_live_authz(method, &req.params, &secret, now, ledger)
+            {
+                let reason = reject.code();
+                tracing::warn!(
+                    ipc_method = method,
+                    reject_reason = reason,
+                    "live-write authz rejected (fail-closed) / live 寫入授權拒絕（fail-closed）"
+                );
+                // V014 config_reject 審計 row（fire-and-forget，鏡像 config_patch INSERT）。
+                // 不記 token/nonce/secret 任何值（CLAUDE §十一）。source=direct_socket：
+                // 到達此 chokepoint 的 live-write 必是繞過 Python 控制面的 socket client
+                // （Python operator 路徑會先過 5-gate 再鑄 token）。
+                if let Some(pool) = audit_pool.clone() {
+                    let method_s = method.to_string();
+                    let reason_s = reason.to_string();
+                    tokio::spawn(async move {
+                        let ts_ms = std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_millis() as i64)
+                            .unwrap_or(0);
+                        let payload = serde_json::json!({
+                            "method": method_s,
+                            "reject_reason": reason_s,
+                            "engine": "live",
+                        });
+                        let res = sqlx::query(
+                            "INSERT INTO observability.engine_events \
+                             (ts_ms, event_type, source, config_name, old_version, new_version, payload) \
+                             VALUES ($1, 'config_reject', 'direct_socket', 'risk/live', NULL, NULL, $2)",
+                        )
+                        .bind(ts_ms)
+                        .bind(&payload)
+                        .execute(&pool)
+                        .await;
+                        if let Err(e) = res {
+                            tracing::warn!(error = %e, "V014 config_reject insert failed / V014 拒絕審計寫入失敗");
+                        }
+                    });
+                }
+                return JsonRpcResponse::error(
+                    id,
+                    ERR_INVALID_REQUEST,
+                    format!("live_authz_rejected: {reason}"),
+                );
+            }
+        }
+    }
+
     match method {
         "ping" => handle_ping(id),
         "get_build_capabilities" => handle_get_build_capabilities(id),

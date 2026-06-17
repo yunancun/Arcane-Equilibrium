@@ -12,6 +12,7 @@ from ml_training.mlde_demo_applier import (
     _R_META_MIN_SAMPLE_PER_STRATEGY,
     _R_META_WINDOW_DAYS,
     _already_applied,
+    _apply_one,
     _build_live_candidate_payload,
     _compute_attribution_chain_ratio_by_strategy,
     _compute_attribution_sample_count_by_strategy,
@@ -1793,3 +1794,77 @@ def test_payload_includes_live_candidate_lineage(monkeypatch):
     assert lineage["source_demo_recommendation_id"] == 12
     assert lineage["source_demo_application_id"] == 333
     assert lineage["patch_keys"] == ["sma_fast", "sma_slow"]
+
+
+# ---------------------------------------------------------------------------
+# Phase 0 AUTH-1 re-review MED 回歸：_apply_one 的 mutation IPC wire 必帶 engine="demo"
+# ---------------------------------------------------------------------------
+
+
+def _run_apply_one_capture_mutation(monkeypatch, *, rec_type, row, fixed_patch):
+    """驅動 _apply_one 並捕捉 mutation IPC 的 params。
+
+    讀方法（get_*）由 fake ipc_call 回固定 shape；mutation（update_strategy_params /
+    patch_risk_config）被捕捉。DB 觸碰 helper（_already_applied / _record_application /
+    _mark_recommendation_applied）被 monkeypatch 成 noop，patch builder 固定回非空 patch，
+    把測試聚焦在「wire 的 engine 欄位」這一個不變式上。
+    """
+    import asyncio
+
+    import ml_training.mlde_demo_applier as mod
+
+    captured: dict[str, dict] = {}
+
+    async def _fake_ipc_call(method, params, _timeout):
+        if method in ("update_strategy_params", "patch_risk_config"):
+            captured[method] = dict(params)
+            return {"ok": True}
+        # 讀方法回最小 shape（不影響本測斷言）。
+        if method == "get_param_ranges":
+            return {"ranges": []}
+        return {}
+
+    monkeypatch.setattr(mod, "build_strategy_patch", lambda **_kw: dict(fixed_patch))
+    monkeypatch.setattr(mod, "build_risk_patch", lambda **_kw: dict(fixed_patch))
+    monkeypatch.setattr(mod, "_already_applied", lambda *a, **k: False)
+    monkeypatch.setattr(mod, "_record_application", lambda *a, **k: 1)
+    monkeypatch.setattr(mod, "_mark_recommendation_applied", lambda *a, **k: None)
+
+    cfg = DemoApplierConfig(engine_mode="demo", dry_run=False)
+    asyncio.run(_apply_one(cur=None, row=row, cfg=cfg, ipc_call=_fake_ipc_call))
+    return captured
+
+
+def test_apply_one_strategy_params_wire_carries_engine_demo(monkeypatch):
+    """strategy_params 分支：update_strategy_params 的 wire engine 必為字面 "demo"。"""
+    row = {
+        "engine_mode": "demo",
+        "id": 1,
+        "recommendation_type": "rank",
+        "strategy_name": "grid_trading",
+        "payload": {},
+    }
+    captured = _run_apply_one_capture_mutation(
+        monkeypatch, rec_type="rank", row=row, fixed_patch={"cooldown_ms": 144_000}
+    )
+    assert "update_strategy_params" in captured
+    assert captured["update_strategy_params"]["engine"] == "demo"
+
+
+def test_apply_one_risk_config_wire_carries_engine_demo(monkeypatch):
+    """risk_config 分支：patch_risk_config 的 wire engine 必為字面 "demo"。"""
+    row = {
+        "engine_mode": "demo",
+        "id": 2,
+        "recommendation_type": "regret_summary",
+        "strategy_name": "grid_trading",
+        "payload": {"risk_patch": {"max_position_pct": 0.02}},
+    }
+    captured = _run_apply_one_capture_mutation(
+        monkeypatch,
+        rec_type="regret_summary",
+        row=row,
+        fixed_patch={"max_position_pct": 0.02},
+    )
+    assert "patch_risk_config" in captured
+    assert captured["patch_risk_config"]["engine"] == "demo"

@@ -574,6 +574,8 @@ class TestApplyLiveGateChain(unittest.TestCase):
                 # OPS-2 Phase 2 cutover：授權驗證 key 改讀
                 # OPENCLAW_LIVE_AUTH_SIGNING_KEY（IPC secret 已無 fallback 作用）。
                 "OPENCLAW_LIVE_AUTH_SIGNING_KEY": secret,
+                # PHASE 0 AUTH-1：live update_strategy_params 鑄 token，需 secret env。
+                "OPENCLAW_LIVE_PATCH_SECRET": "promote-live-patch-secret",
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",
@@ -590,6 +592,10 @@ class TestApplyLiveGateChain(unittest.TestCase):
         self.assertEqual(ipc_mock.call_args[0][0], "update_strategy_params")
         params = ipc_mock.call_args[1].get("params") or ipc_mock.call_args[0][1]
         self.assertEqual(params["engine"], "live")
+        # PHASE 0 AUTH-1：live target → 帶 method-bound token 三欄（非-patch hash 分支）
+        self.assertTrue(
+            {"live_authz_token", "live_authz_nonce", "live_authz_ts"} <= set(params)
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
