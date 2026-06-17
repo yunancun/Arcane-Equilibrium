@@ -500,6 +500,103 @@ fn test_close_maker_dispatch_postonly_spine_none() {
     assert_eq!(audit.fallback_reason, None);
 }
 
+/// ★ SURVIVAL-CRITICAL (P2 E4): a STOP / urgent-exit close MUST route TAKER
+/// (Market), never maker, **even when `use_maker_close` is runtime-enabled**.
+/// This is the single most important survival invariant for the symbols→100
+/// bundle: widening the universe + the parallel stop-loss WIP must not let any
+/// stop reason leak onto the passive maker rail (a PostOnly limit on a stop is
+/// an unbounded-exposure trap — the position keeps bleeding while the limit
+/// rests un-filled). The maker eligibility gate is a POSITIVE whitelist
+/// (close_maker_price_policy returns Some only for benign grid/bb/phys_lock
+/// reasons), so every stop reason — and every future/unknown reason — falls
+/// through to Market. We drive the *real* dispatch path (execute_position_close
+/// → close_order_dispatch_shape) with maker enabled and assert Market for the
+/// full family of stop / urgent-exit tags.
+/// ★ 生存關鍵：止損 / 緊急平倉永遠走 TAKER（Market），即使 use_maker_close 已
+/// 啟用也不得退化成 maker 掛單（止損掛 PostOnly = 無界曝險陷阱）。maker 資格是
+/// 正白名單，任何 stop / 未知 reason 都 fall-through 到 Market。
+#[test]
+fn test_stop_and_urgent_exits_always_route_taker_even_with_maker_close_enabled() {
+    // Full family of survival-critical exit reasons (risk_close: prefixed as the
+    // production risk path emits them) + bare/operator/unknown forms.
+    let stop_tags: &[&str] = &[
+        "risk_close:HARD STOP: loss -2.0%",
+        "risk_close:TRAILING STOP: peak giveback",
+        "risk_close:TIME STOP: max age",
+        "risk_close:DYNAMIC STOP: atr breach",
+        "risk_close:fast_track_reduce_half",
+        "risk_close:halt_session:daily_loss",
+        "risk_close:DAILY LOSS limit",
+        "risk_close:DRAWDOWN hard cap",
+        "risk_close:CONSECUTIVE LOSS streak",
+        "risk_close:bybit_sync reconcile",
+        "risk_close:circuit breaker tripped",
+        "risk_close:authorization expired",
+        // A brand-new stop reason a parallel session might add must STILL be
+        // taker by default (positive-whitelist fail-closed direction).
+        "risk_close:NEW_REGIME_STOP_FROM_PARALLEL_SESSION",
+        "strategy_close:some_future_unknown_exit",
+    ];
+
+    for tag in stop_tags {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+        // Maker-close runtime-ENABLED — the adversarial setup. If a stop could
+        // ever reach maker, this is the configuration that would expose it.
+        pipeline.set_use_maker_close_for_test(true);
+        assert!(
+            pipeline.use_maker_close(),
+            "precondition: maker-close must be enabled so the test is adversarial"
+        );
+        pipeline.set_instrument_cache(instrument_cache_for("BTCUSDT", 0.1));
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+        pipeline.set_shadow_channel(tx);
+        pipeline.paper_state.apply_fill(
+            "BTCUSDT",
+            true,
+            0.1,
+            50_000.0,
+            0.0,
+            1_700_000_000_000,
+            "grid_trading",
+        );
+
+        // Tight, healthy book — a maker price WOULD be computable here, so the
+        // only thing keeping this taker is the reason-based positive whitelist.
+        let event = make_bbo_event("BTCUSDT", 50_000.0, 49_999.9, 50_000.1, 1_700_000_060_000);
+        assert!(pipeline.execute_position_close(
+            "BTCUSDT",
+            true,
+            0.1,
+            &event,
+            true,
+            tag,
+        ));
+
+        let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+        assert_eq!(
+            req.order_type, "market",
+            "STOP/urgent tag {tag:?} MUST route Market (taker), got {:?}",
+            req.order_type
+        );
+        assert_eq!(
+            req.limit_price, None,
+            "STOP tag {tag:?} must carry no maker limit price"
+        );
+        assert_eq!(
+            req.time_in_force, None,
+            "STOP tag {tag:?} must NOT be PostOnly"
+        );
+        assert_eq!(
+            req.maker_timeout_ms, None,
+            "STOP tag {tag:?} must carry no maker timeout"
+        );
+        assert!(
+            req.close_maker_audit.is_none(),
+            "STOP tag {tag:?} must emit no close-maker audit (it never went maker)"
+        );
+    }
+}
+
 #[test]
 fn test_close_maker_phys_lock_giveback_timeout_policy() {
     let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);

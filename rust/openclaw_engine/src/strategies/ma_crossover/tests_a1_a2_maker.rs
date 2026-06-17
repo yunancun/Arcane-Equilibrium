@@ -480,6 +480,67 @@ fn test_ma_crossover_sell_postonly_above_last_price() {
     }
 }
 
+/// ★ P2 E4 (#4) PRODUCER half: maker-preference is OPT-IN for entries; the safe
+/// default is TAKER. With `use_maker_entry=true` the real ma_crossover entry
+/// gate emits a PostOnly Limit carrying a `maker_timeout_ms` (the taker-fallback
+/// clock the dispatcher will arm); with it OFF (cold default, root principle #6)
+/// the same gate emits a Market taker. The matching CONSUMER half (the resting
+/// maker timing out → `MakerTimeoutCancel` → taker re-fill) lives next to the
+/// decision core in `event_consumer/pending_sweep.rs`
+/// (`test_entry_maker_postonly_times_out_to_taker_fallback`), bound to the same
+/// default 45s deadline asserted here.
+/// ★ 入場 maker 優先為 opt-in、預設 TAKER：本檔證 producer（emit PostOnly+45s
+/// timeout vs 預設 market）；consumer 超時→taker 半在 pending_sweep.rs 以同一
+/// 45s deadline 綁定。
+#[test]
+fn test_ma_crossover_maker_entry_is_opt_in_and_arms_taker_fallback_clock() {
+    // Safe default: maker OFF → Market (taker) entry.
+    let mut s_default = MaCrossover::new();
+    s_default.min_persistence_ms = 0;
+    assert!(
+        !s_default.use_maker_entry,
+        "entries default to TAKER (use_maker_entry must be false cold)"
+    );
+    match &s_default.on_tick(
+        &ctx_with(100.0, 101.0, 25.0, 0),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    )[0]
+    {
+        StrategyAction::Open(intent) => {
+            assert_eq!(intent.order_type, "market", "default entry must be taker");
+            assert!(intent.time_in_force.is_none());
+            assert!(intent.maker_timeout_ms.is_none());
+        }
+        other => panic!("expected Open, got {other:?}"),
+    }
+
+    // Opt-in: maker ON → PostOnly Limit carrying the taker-fallback clock.
+    let mut s = MaCrossover::new();
+    s.min_persistence_ms = 0;
+    s.use_maker_entry = true;
+    s.maker_price_offset_bps = 1.0;
+    match &s.on_tick(
+        &ctx_with_bbo_g709c(100.0, 101.0, 25.0, 0, 50_000.0, 49_999.5, 50_000.5, 0.1),
+        &openclaw_core::alpha_surface::EMPTY_ALPHA_SURFACE,
+    )[0]
+    {
+        StrategyAction::Open(intent) => {
+            assert_eq!(
+                intent.order_type, "limit",
+                "maker entry must be a PostOnly Limit, not taker"
+            );
+            assert_eq!(intent.time_in_force, Some(TimeInForce::PostOnly));
+            assert_eq!(
+                intent.maker_timeout_ms,
+                Some(45_000),
+                "maker entry must arm the taker-fallback clock; default 45s binds \
+                 the pending_sweep consumer test"
+            );
+        }
+        other => panic!("expected Open, got {other:?}"),
+    }
+}
+
 /// update_params round-trips maker fields so Agent IPC can toggle at runtime.
 /// Also verifies maker_limit_timeout_ms is clamped on assignment
 /// (500_000 → 300_000 upper bound, 1_000 → 15_000 lower bound).

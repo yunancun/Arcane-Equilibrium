@@ -1021,6 +1021,102 @@ mod tests {
         assert!(cfg.validate().is_err());
     }
 
+    /// ★ P2 E4 (#5): the REAL deployed scanner_config.toml at symbols→100 must
+    /// (a) load + validate, (b) yield a universe size of exactly 100 with pinned
+    /// 25 and dynamic-observation slots = 75, and (c) keep the recorder-v2 L1
+    /// storage worst-case bounded at 100 symbols. This reads the production file
+    /// (not a synthetic fixture) so a future edit that drifts max_symbols or
+    /// over-pins is caught here.
+    /// ★ 真實 deployed scanner_config.toml @100：載入+validate、universe=100/
+    /// pinned=25/dynamic=75、recorder-v2 100-sym 硬上界儲存有界。
+    #[test]
+    fn test_deployed_scanner_config_symbols_100_loads_and_storage_bounded() {
+        use crate::database::l1_book_tracker::L1_DEFAULT_MAX_EVENTS_PER_SEC_PER_SYMBOL as CAP;
+        use std::path::PathBuf;
+
+        // ── (a) Load the REAL deployed TOML (CARGO_MANIFEST_DIR = srv/rust/openclaw_engine) ──
+        let mut srv_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        srv_root.pop(); // openclaw_engine -> rust
+        srv_root.pop(); // rust -> srv
+        let toml_path = srv_root
+            .join("settings")
+            .join("risk_control_rules")
+            .join("scanner_config.toml");
+        let toml_str = std::fs::read_to_string(&toml_path)
+            .unwrap_or_else(|e| panic!("failed to read {:?}: {}", toml_path, e));
+        let cfg: ScannerConfig = toml::from_str(&toml_str)
+            .unwrap_or_else(|e| panic!("scanner_config.toml parse failed: {}", e));
+        cfg.validate()
+            .expect("deployed scanner_config.toml must pass ScannerConfig::validate()");
+
+        // ── (b) universe size = 100; pinned = 25; dynamic-observation slots = 75 ──
+        assert_eq!(
+            cfg.universe.max_symbols, 100,
+            "P2(2A): max_symbols must be 100"
+        );
+        assert_eq!(
+            cfg.universe.pinned_symbols.len(),
+            25,
+            "pinned tradeable tier must stay 25 (2A widens observation only)"
+        );
+        let dynamic_slots = cfg
+            .universe
+            .max_symbols
+            .saturating_sub(cfg.universe.pinned_symbols.len());
+        assert_eq!(
+            dynamic_slots, 75,
+            "dynamic observation slots = max_symbols - pinned = 100 - 25"
+        );
+        // pinned ≤ max invariant holds at 100 (validate() above already enforced it).
+        assert!(cfg.universe.pinned_symbols.len() <= cfg.universe.max_symbols);
+
+        // ── (c) recorder-v2 L1 storage worst-case bound at 100 symbols ──
+        // The per-symbol 1s rate-cap circuit breaker makes the row rate provably
+        // bounded: worst_rows/day ≤ CAP × symbols × 86_400. This is what makes
+        // widening the universe safe for the recorder-v2 storage budget.
+        const SECS_PER_DAY: u64 = 86_400;
+        const DAYS_PER_WEEK: u64 = 7;
+        let symbols = cfg.universe.max_symbols as u64; // 100
+        let worst_rows_per_day = CAP * symbols * SECS_PER_DAY;
+        let worst_rows_per_week = worst_rows_per_day * DAYS_PER_WEEK;
+
+        // The bound is finite and matches the closed-form (no overflow at 100).
+        assert_eq!(worst_rows_per_day, 50 * 100 * 86_400); // 432_000_000 rows/day
+        assert_eq!(worst_rows_per_week, 432_000_000 * 7); // 3_024_000_000 rows/week
+
+        // PA storage authority (PA/memory.md): the cap=50/s ceiling binds
+        // ~8.4 GB/week compressed at the 37-symbol basis. Linear-scale that to
+        // 100 symbols and assert the worst-case weekly residency stays well
+        // under a conservative 30 GB/week ceiling (PA states ~23 GB/week; on the
+        // 686 GB runtime volume a 21-day residency is ≈10% — acceptable without
+        // touching retention). Using f64 GB here mirrors PA's published math.
+        const PA_GB_PER_WEEK_AT_37_SYM: f64 = 8.4; // worst-case, cap=50/s, compressed
+        let gb_per_week_at_100 = PA_GB_PER_WEEK_AT_37_SYM * (symbols as f64) / 37.0;
+        assert!(
+            gb_per_week_at_100 < 30.0,
+            "worst-case recorder-v2 storage at 100 sym must stay bounded \
+             (<30 GB/week); computed {gb_per_week_at_100:.1} GB/week"
+        );
+        // Sanity: the linear extrapolation lands at PA's published ~23 GB/week.
+        assert!(
+            (gb_per_week_at_100 - 22.7).abs() < 0.5,
+            "100-sym worst-case should be ~22.7 GB/week (PA ~23), got {gb_per_week_at_100:.1}"
+        );
+
+        // 21-day worst-case residency as a fraction of the 686 GB volume must be
+        // bounded well below 1.0 (PA: ~10%).
+        let residency_gb_21d = gb_per_week_at_100 / 7.0 * 21.0;
+        let volume_gb = 686.0_f64;
+        let fraction = residency_gb_21d / volume_gb;
+        assert!(
+            fraction < 0.15,
+            "21-day worst-case recorder residency must be <15% of the 686 GB volume; \
+             computed {:.1} GB = {:.1}%",
+            residency_gb_21d,
+            fraction * 100.0
+        );
+    }
+
     #[test]
     fn test_pinned_exceeds_max_fails() {
         let mut cfg = ScannerConfig::default();
