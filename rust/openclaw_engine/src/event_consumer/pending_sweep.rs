@@ -444,6 +444,54 @@ mod tests {
         );
     }
 
+    /// ★ P2 E4 (#4) CONSUMER half: an ENTRY PostOnly maker that does not fill
+    /// within `maker_timeout_ms` must convert to a TAKER fill. The mechanism:
+    /// below the deadline the resting maker is kept (true maker-preference);
+    /// at/after the deadline the sweep classifies `MakerTimeoutCancel`, which
+    /// the event loop uses to cancel the stale resting maker so the strategy
+    /// re-evaluates and re-submits — the taker fallback. Bound to the SAME
+    /// default 45_000ms the ma_crossover producer emits
+    /// (`test_ma_crossover_maker_entry_is_opt_in_and_arms_taker_fallback_clock`),
+    /// so a drift in either the strategy default or the sweep deadline breaks
+    /// one of the paired tests.
+    /// ★ 入場 maker 超時 → taker：deadline 前 Keep（真 maker 優先），deadline
+    /// 起 MakerTimeoutCancel（取消掛單→策略重評→taker 重送），與 producer 預設
+    /// 45s 綁定。
+    #[test]
+    fn test_entry_maker_postonly_times_out_to_taker_fallback() {
+        // Bind to the producer's default maker_limit_timeout_ms (45s).
+        const PRODUCER_DEFAULT_TIMEOUT_MS: u64 = 45_000;
+        let po = make_postonly_pending(Some(PRODUCER_DEFAULT_TIMEOUT_MS));
+        assert!(!po.is_close, "this is an ENTRY maker, not a close maker");
+
+        // Below the deadline: keep resting as a maker (maker-preference holds).
+        assert_eq!(
+            classify_pending_sweep(&po, PRODUCER_DEFAULT_TIMEOUT_MS - 1),
+            PendingSweepAction::Keep,
+            "below the maker timeout the entry must keep resting as a maker"
+        );
+        // At the deadline: cancel the stale resting maker → strategy re-evaluates
+        // → taker market re-submission. MakerTimeoutCancel IS the taker-fallback
+        // trigger for entries (no close-fallback reason — entries are not closes).
+        assert_eq!(
+            classify_pending_sweep(&po, PRODUCER_DEFAULT_TIMEOUT_MS),
+            PendingSweepAction::MakerTimeoutCancel,
+            "at the maker timeout the resting entry maker must be cancelled → taker fallback"
+        );
+        assert_eq!(
+            close_maker_sweep_fallback_reason(&po, PRODUCER_DEFAULT_TIMEOUT_MS),
+            None,
+            "entry maker timeout is a taker re-entry, not a close-maker fallback"
+        );
+        // Well past the deadline, an un-cancelled entry maker stays on the
+        // taker-fallback trigger (never silently dropped).
+        assert_eq!(
+            classify_pending_sweep(&po, PRODUCER_DEFAULT_TIMEOUT_MS + 60_000),
+            PendingSweepAction::MakerTimeoutCancel,
+            "an un-cancelled entry maker stays on the taker-fallback trigger past the deadline"
+        );
+    }
+
     #[test]
     fn test_entry_maker_timeout_has_no_close_fallback_reason() {
         let po = make_postonly_pending(Some(30_000));

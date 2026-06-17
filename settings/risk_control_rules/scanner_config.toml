@@ -15,18 +15,23 @@ scan_interval_secs = 60     # 1 minute / 1 分鐘
 warmup_delay_secs = 60      # wait 60s after engine start / 引擎啟動後等待 60 秒
 
 [universe]
-max_symbols = 40
+# 2026-06-17 P2(2A)：max_symbols 40→100。只擴「觀測 tier」（dynamic slot
+# 25→75），用以餵 recorder-v2 寬截面 L1 adverse-selection 數據面 + panel +
+# WS + alpha-surface。pinned 仍 25 不變 → 交易 tier 不變（is_pinned 是硬交易
+# gate：grid/ma/bb 新開倉前驗 ctx.is_pinned，dynamic slot 不在其上開新倉）。
+# 在 100 sym 上真交易（升 pinned + 放寬 correlation cap + 改 panel cohort）
+# 是 2B，DEFER 到 adverse-selection gate 通過後（數週外，operator-gated）。
 # pinned_symbols 對齊 main.rs panel_aggregator_cohort() 25-sym 名單
 # （per W1 P0 fix follow-up 2026-05-11）。
 # 原因：panel.funding_rates_panel + panel.oi_delta_panel 需 cohort 全 sym
 # 有 ticker WS 訂閱才能寫入；scanner pinned 是唯一 boot-time WS subscribe set。
-# Scanner 收到 25 pinned 後 anti-churn 保護全 cohort，max_symbols=40 留 15 動態 slot。
-# Tradeable tier: pinned 25. Observation tier: pinned 25 + 15 dynamic slots.
+# Scanner 收到 25 pinned 後 anti-churn 保護全 cohort，max_symbols=100 留 75 動態 slot。
+# Tradeable tier: pinned 25. Observation tier: pinned 25 + 75 dynamic slots.
 # grid_trading / ma_crossover / bb_reversion only open on the pinned tier;
 # dynamic slots still feed scanner snapshots, WS market data, panels, and
 # future alpha-surface observation.
-# Side effect: 動態探索 long-tail sym 機會減少 ~23 slot；接受換 panel 全覆蓋。
 # POLUSDT 取代 MATICUSDT（後者 Bybit V5 status=Closed since 2024-09-06）。
+max_symbols = 100
 pinned_symbols = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
     "ADAUSDT", "AVAXUSDT", "LINKUSDT", "DOTUSDT", "POLUSDT",
