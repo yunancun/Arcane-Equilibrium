@@ -56,6 +56,8 @@ fn close_pending_order(symbol: &str, is_long: bool, qty: f64) -> PendingOrder {
         reference_ts_ms: None,
         reference_source: None,
         cancel_requested_ts_ms: None,
+        // MAKER-CLOSE-REPRICE-1：test fixture 預設未重掛。
+        reprice_count: 0,
         spine_order_plan_id: None,
         spine_decision_id: None,
         spine_verdict_id: None,

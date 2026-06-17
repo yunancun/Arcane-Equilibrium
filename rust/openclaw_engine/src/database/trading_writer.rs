@@ -250,7 +250,7 @@ async fn flush_all(
 // 每表欄位數 — `batch_insert` 以此集中推算 chunk_rows，取代先前各表硬編碼常數。
 const SIGNAL_COLS: usize = 8;
 const INTENT_COLS: usize = 12; // includes details JSONB
-const FILL_COLS: usize = 26; // V094 adds details + close-maker audit columns
+const FILL_COLS: usize = 27; // V094 details + close-maker audit; V145 maker_markout_bps
 const FUNDING_SETTLEMENT_COLS: usize = 13; // includes raw JSONB
 const POSITION_COLS: usize = 9;
 const VERDICT_COLS: usize = 12; // includes risk_level/check arrays + details
@@ -496,7 +496,7 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
             // V094（2026-05-15）：新增 details JSONB 與 close-maker audit 欄位；
             // 既有 cold default 不變，同時讓 close-maker 嘗試可查。
             let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
-                "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, reference_price, reference_ts_ms, reference_source, slippage_bps, liquidity_role, fill_latency_ms, realized_pnl, is_paper, strategy_name, context_id, entry_context_id, engine_mode, exit_source, exit_reason, details, close_maker_attempt, close_maker_fallback_reason) "
+                "INSERT INTO trading.fills (ts, fill_id, order_id, symbol, side, qty, price, fee, fee_rate, reference_price, reference_ts_ms, reference_source, slippage_bps, liquidity_role, fill_latency_ms, realized_pnl, is_paper, strategy_name, context_id, entry_context_id, engine_mode, exit_source, exit_reason, details, close_maker_attempt, close_maker_fallback_reason, maker_markout_bps) "
             );
             qb.push_values(chunk.iter(), |mut b, msg| {
                 if let TradingMsg::Fill {
@@ -525,6 +525,7 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     details,
                     close_maker_attempt,
                     close_maker_fallback_reason,
+                    maker_markout_bps,
                 } = msg
                 {
                     b.push_bind(
@@ -584,6 +585,10 @@ async fn flush_fills(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     // V094 hot 欄位：false/None 為 cold path default。
                     b.push_bind(*close_maker_attempt);
                     b.push_bind(close_maker_fallback_reason.as_deref());
+                    // V145: maker adverse-selection markout。只有 maker fill 帶值
+                    // （loop_exchange.rs 按 liquidity_role 互斥分流）；taker/paper
+                    // fill 為 None → NULL，與 slippage_bps 對 maker 維持 NULL 對稱。
+                    b.push_bind(maker_markout_bps.as_ref().and_then(|v| sanitize_f64(*v)));
                 }
             });
             qb.push(" ON CONFLICT (fill_id, ts) DO NOTHING");
@@ -1093,6 +1098,7 @@ mod tests {
             details: None,
             close_maker_attempt: false,
             close_maker_fallback_reason: None,
+            maker_markout_bps: None,
         };
         assert!(matches!(fill, TradingMsg::Fill { .. }));
 
@@ -1230,6 +1236,7 @@ mod tests {
                 details: None,
                 close_maker_attempt: false,
                 close_maker_fallback_reason: None,
+                maker_markout_bps: None,
             },
             TradingMsg::FundingSettlement {
                 settlement_id: "funding-f1".into(),
@@ -1359,6 +1366,7 @@ mod tests {
             details: None,
             close_maker_attempt: false,
             close_maker_fallback_reason: None,
+            maker_markout_bps: None,
         }
     }
 
@@ -1395,6 +1403,7 @@ mod tests {
             details: None,
             close_maker_attempt: false,
             close_maker_fallback_reason: None,
+            maker_markout_bps: None,
         }
     }
 

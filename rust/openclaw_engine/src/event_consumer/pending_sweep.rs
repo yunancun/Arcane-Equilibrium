@@ -87,6 +87,80 @@ pub(crate) fn classify_pending_sweep(po: &PendingOrder, now_ms: u64) -> PendingS
     }
 }
 
+/// MAKER-CLOSE-REPRICE-1 (2026-06-17): decision for toward-the-touch close-maker
+/// repricing. Pure so the eligibility logic is unit-testable independent of the
+/// async sweep loop / REST cancel.
+///
+/// `Some(new_limit_price)` = the sweep should cancel the resting close maker and
+/// re-submit PostOnly at `new_limit_price`. `None` = no reprice (let the existing
+/// timeout / cancel-grace path handle it).
+///
+/// **生存 gate 結構互斥（與 A.4 證明對齊）**：本 fn 第一道門 `is_close &&
+/// tif==PostOnly`，而 PostOnly close 只可能由 close_order_dispatch_shape 的
+/// close_maker_price_policy.is_some() 產生（=8 個正白名單 reason）。stops /
+/// urgent / operator / circuit-breaker 等負白名單 reason 永遠走 market（tif=None），
+/// 結構上到不了這裡。reprice 只把已過 gate 的 PostOnly close 拉回 inside quote，
+/// 不新增任何 maker 准入，不碰任何 gate 函數。
+/// MODULE_NOTE: new_inside_limit 由呼叫端以 compute_close_limit_price（同一安全
+/// 函數，strict-passive + spread guard 全套）產生並傳入；本 fn 只做「是否值得重掛」
+/// 的純決策，不自行計價。
+pub(crate) fn close_maker_reprice_decision(
+    po: &PendingOrder,
+    now_ms: u64,
+    new_inside_limit: Option<f64>,
+    max_reprices: u32,
+    reprice_after_ms: u64,
+) -> Option<f64> {
+    // Gate 1：僅 PostOnly close maker。entry maker / market / 非 PostOnly 一律不 reprice。
+    if !po.is_close || po.time_in_force != Some(crate::order_manager::TimeInForce::PostOnly) {
+        return None;
+    }
+    // Gate 2：reprice 關閉（降級開關）或已達硬上限。
+    if max_reprices == 0 || po.reprice_count >= max_reprices {
+        return None;
+    }
+    // Gate 3：cancel 已在途（不可同時 reprice + cancel 同一單，避免 double dispatch）。
+    if po.cancel_requested_ts_ms.is_some() {
+        return None;
+    }
+    // Gate 4：尚未到 reprice 觀察窗（首掛 reprice_after_ms 內不動，給原掛價成交機會）；
+    //   且必須仍在 timeout 之前（達 timeout 走既有 MakerTimeoutCancel→taker，不 reprice）。
+    let elapsed_ms = pending_elapsed_ms(po, now_ms);
+    let timeout_ms = po.maker_timeout_ms.unwrap_or(45_000);
+    if elapsed_ms < reprice_after_ms || elapsed_ms >= timeout_ms {
+        return None;
+    }
+    // Gate 5：新 inside quote 必須「嚴格優於」原掛價（book 朝對我方向移動才值得重掛）。
+    //   原掛價 = close_maker_audit.initial_limit_price（dispatch 時 compute_close_limit_price
+    //   產出的 PostOnly 限價）。
+    //   **方向修正（2026-06-17 E2/E4 RETURN HIGH）**：`po.is_long` 是 **訂單方向**，
+    //   非持倉方向——close order 在 dispatch 時已 inverted（commands.rs `is_long: !is_long`），
+    //   故 PendingOrder.is_long 鏡射的是訂單側：平多倉 = SELL → is_long=false；
+    //   平空倉 = BUY → is_long=true。toward-touch 的「嚴格優於」按 **訂單側**判定：
+    //     - SELL（po.is_long=false）：賣價越高越好 → 新限價 > 原限價；
+    //     - BUY （po.is_long=true）：買價越低越好 → 新限價 < 原限價。
+    //   先前註釋/比較把 is_long 誤當持倉方向 → 比較反向（unit test 因 fixture 共用同一
+    //   錯誤假設而綠），會把 toward-touch 算反 → 壞 fill / PostOnly 穿越 spread。
+    let new_limit = new_inside_limit.filter(|v| v.is_finite() && *v > 0.0)?;
+    let original_limit = po
+        .close_maker_audit
+        .as_ref()
+        .and_then(|a| a.initial_limit_price)
+        .filter(|v| v.is_finite() && *v > 0.0)?;
+    let strictly_better = if po.is_long {
+        // 訂單側 BUY（平空倉）：新買價更低才重掛。
+        new_limit < original_limit
+    } else {
+        // 訂單側 SELL（平多倉）：新賣價更高才重掛。
+        new_limit > original_limit
+    };
+    if strictly_better {
+        Some(new_limit)
+    } else {
+        None
+    }
+}
+
 /// Classify only close-maker sweep states into required market fallback reasons.
 ///
 /// The event loop can continue using `classify_pending_sweep()` for generic
@@ -222,6 +296,8 @@ mod tests {
             reference_ts_ms: None,
             reference_source: None,
             cancel_requested_ts_ms: None,
+            // MAKER-CLOSE-REPRICE-1：test fixture 預設 0（未重掛）。
+            reprice_count: 0,
             // W-C Caveat 2 修復（2026-05-11）：test fixture 預設 None。
             spine_order_plan_id: None,
             spine_decision_id: None,
@@ -252,6 +328,8 @@ mod tests {
             reference_ts_ms: None,
             reference_source: None,
             cancel_requested_ts_ms: None,
+            // MAKER-CLOSE-REPRICE-1：test fixture 預設 0（未重掛）。
+            reprice_count: 0,
             // W-C Caveat 2 修復（2026-05-11）：test fixture 預設 None。
             spine_order_plan_id: None,
             spine_decision_id: None,
@@ -563,6 +641,171 @@ mod tests {
         assert_eq!(
             classify_pending_sweep(&p, elapsed),
             PendingSweepAction::Keep
+        );
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // MAKER-CLOSE-REPRICE-1：close_maker_reprice_decision 純函數測試。
+    // 含 survival-gate 互斥的 negative assertion（HARD STOP close 永不 reprice）。
+    // ═══════════════════════════════════════════════════════════════════════
+
+    /// 建構帶 audit（原掛價 = initial_limit_price）的 close-maker PostOnly fixture。
+    ///
+    /// **方向不變量（2026-06-17 E2/E4 RETURN HIGH 修正）**：參數 `position_is_long`
+    /// 是 **真實持倉方向**；fixture 鏡射真實 dispatch 路徑（commands.rs `is_long: !is_long`）
+    /// 把 `po.is_long` 設為 **訂單側 = !position_is_long**（平多倉=SELL→is_long=false、
+    /// 平空倉=BUY→is_long=true）。先前 fixture 直接 `po.is_long = is_long` 把持倉方向
+    /// 當成訂單側寫入，與 source 共用同一錯誤假設 → unit test 綠但 runtime 算反。
+    fn make_close_maker_pending(
+        position_is_long: bool,
+        initial_limit_price: f64,
+        reprice_count: u32,
+        maker_timeout_ms: u64,
+    ) -> PendingOrder {
+        let mut po = make_postonly_pending(Some(maker_timeout_ms));
+        po.is_close = true;
+        // 訂單側 = 持倉反向（鏡射真實 close dispatch）。
+        po.is_long = !position_is_long;
+        po.strategy = "strategy_close:grid_close_long".into();
+        po.reprice_count = reprice_count;
+        po.close_maker_audit = Some(crate::tick_pipeline::CloseMakerFillAudit {
+            initial_limit_price: Some(initial_limit_price),
+            eligible_reason: "grid_close_long".into(),
+            fallback_reason: None,
+            rate_limit_scope: None,
+        });
+        po
+    }
+
+    #[test]
+    fn reprice_long_close_sell_triggers_when_new_limit_strictly_higher() {
+        // 持倉=LONG → close order = SELL（po.is_long=false）：新 inside 賣價更高
+        //（book 上移、賣價朝對我有利）→ 重掛。
+        let po = make_close_maker_pending(true, 100.0, 0, 90_000);
+        assert!(!po.is_long, "long-position close must register as SELL (is_long=false)");
+        // elapsed 在 [30s, 90s) 窗內。
+        let now = po.sent_ts_ms + 30_000;
+        let decision = close_maker_reprice_decision(&po, now, Some(100.5), 2, 30_000);
+        assert_eq!(decision, Some(100.5), "higher SELL reprice should fire");
+        // 新限價 <= 原掛價 → 不重掛。
+        assert_eq!(
+            close_maker_reprice_decision(&po, now, Some(100.0), 2, 30_000),
+            None,
+            "equal price must not reprice"
+        );
+        assert_eq!(
+            close_maker_reprice_decision(&po, now, Some(99.5), 2, 30_000),
+            None,
+            "lower SELL price must not reprice"
+        );
+    }
+
+    #[test]
+    fn reprice_short_close_buy_triggers_when_new_limit_strictly_lower() {
+        // 持倉=SHORT → close order = BUY（po.is_long=true）：新 inside 買價更低
+        //（book 下移、買價朝對我有利）→ 重掛。
+        let po = make_close_maker_pending(false, 100.0, 0, 90_000);
+        assert!(po.is_long, "short-position close must register as BUY (is_long=true)");
+        let now = po.sent_ts_ms + 30_000;
+        assert_eq!(
+            close_maker_reprice_decision(&po, now, Some(99.5), 2, 30_000),
+            Some(99.5),
+            "lower BUY reprice should fire"
+        );
+        assert_eq!(
+            close_maker_reprice_decision(&po, now, Some(100.5), 2, 30_000),
+            None,
+            "higher BUY price must not reprice"
+        );
+    }
+
+    #[test]
+    fn reprice_respects_observation_window_and_timeout() {
+        let po = make_close_maker_pending(true, 100.0, 0, 90_000);
+        // 觀察窗前（< reprice_after_ms）→ 不重掛（給原掛價成交機會）。
+        assert_eq!(
+            close_maker_reprice_decision(&po, po.sent_ts_ms + 29_999, Some(100.5), 2, 30_000),
+            None,
+            "before reprice window must not reprice"
+        );
+        // 已到 timeout（>= timeout_ms）→ 走 MakerTimeoutCancel→taker，不重掛。
+        assert_eq!(
+            close_maker_reprice_decision(&po, po.sent_ts_ms + 90_000, Some(100.5), 2, 30_000),
+            None,
+            "at/after timeout must not reprice (falls to taker)"
+        );
+    }
+
+    #[test]
+    fn reprice_respects_max_reprices_hard_cap_and_kill_switch() {
+        // 已達 max_reprices 硬上限 → 不再重掛。
+        let po_capped = make_close_maker_pending(true, 100.0, 2, 90_000);
+        assert_eq!(
+            close_maker_reprice_decision(&po_capped, po_capped.sent_ts_ms + 30_000, Some(100.5), 2, 30_000),
+            None,
+            "at max_reprices must not reprice"
+        );
+        // max_reprices=0（降級開關）→ 完全關閉 reprice（退化現狀）。
+        let po_fresh = make_close_maker_pending(true, 100.0, 0, 90_000);
+        assert_eq!(
+            close_maker_reprice_decision(&po_fresh, po_fresh.sent_ts_ms + 30_000, Some(100.5), 0, 30_000),
+            None,
+            "max_reprices=0 kill switch disables reprice entirely"
+        );
+    }
+
+    #[test]
+    fn reprice_skipped_when_cancel_in_flight() {
+        let mut po = make_close_maker_pending(true, 100.0, 0, 90_000);
+        po.cancel_requested_ts_ms = Some(po.sent_ts_ms + 30_000);
+        assert_eq!(
+            close_maker_reprice_decision(&po, po.sent_ts_ms + 30_000, Some(100.5), 2, 30_000),
+            None,
+            "cancel in-flight must not reprice (avoid double dispatch)"
+        );
+    }
+
+    #[test]
+    fn reprice_skipped_when_no_new_limit_available() {
+        // BBO 缺值 / spread guard skip → compute_close_limit_price 回 None → 不重掛。
+        let po = make_close_maker_pending(true, 100.0, 0, 90_000);
+        assert_eq!(
+            close_maker_reprice_decision(&po, po.sent_ts_ms + 30_000, None, 2, 30_000),
+            None,
+            "no inside-quote price must not reprice"
+        );
+    }
+
+    /// ★ SURVIVAL-GATE NEGATIVE ASSERTION（A.4 互斥證明的 sweep 端鏡像）：
+    /// 一筆「HARD STOP」close 在 dispatch 階段必走 market（tif=None，無 audit），
+    /// 結構上不可能是 PostOnly close maker，因此 reprice 分支永不接受它。本測試
+    /// 鎖死此不變式 —— 即使所有時間/價格條件都滿足，非 PostOnly close 仍回 None。
+    #[test]
+    fn reprice_never_fires_for_hard_stop_market_close() {
+        // 模擬 HARD STOP close 在 dispatch 後的 PendingOrder 形狀：market、tif=None、
+        // 無 close_maker_audit（close_order_dispatch_shape 對負白名單回 market）。
+        let mut hard_stop_close = make_postonly_pending(Some(90_000));
+        hard_stop_close.is_close = true;
+        hard_stop_close.is_long = true;
+        hard_stop_close.strategy = "risk_close:HARD STOP: loss".into();
+        hard_stop_close.order_type = "market".into();
+        hard_stop_close.time_in_force = None; // ★ market close 永遠 tif=None
+        hard_stop_close.close_maker_audit = None;
+        let now = hard_stop_close.sent_ts_ms + 30_000;
+        // 即使餵入「更優」的新限價，Gate 1（tif==PostOnly）就拒絕。
+        assert_eq!(
+            close_maker_reprice_decision(&hard_stop_close, now, Some(100.5), 2, 30_000),
+            None,
+            "HARD STOP market close must NEVER reprice (survival gate structural exclusion)"
+        );
+        // 交叉驗證：HARD STOP 確實在負白名單（強制 market-only）。
+        assert!(
+            crate::strategies::common::is_close_maker_market_only_reason("risk_close:HARD STOP: loss"),
+            "HARD STOP must remain market-only"
+        );
+        assert!(
+            crate::strategies::common::close_maker_price_policy("risk_close:HARD STOP: loss").is_none(),
+            "HARD STOP must not be in positive close-maker whitelist"
         );
     }
 }

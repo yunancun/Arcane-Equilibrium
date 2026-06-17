@@ -100,6 +100,8 @@ fn test_dual_rail_shadow_order_has_sl_fields() {
         // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：dual-rail 測試僅
         // 校驗 SL/TP/is_primary 結構欄位，intent_id 預設 None。
         intent_id: None,
+        // MAKER-CLOSE-REPRICE-1：test fixture 預設未重掛。
+        reprice_count: 0,
     };
     assert_eq!(req.stop_loss, Some(49000.0));
     assert_eq!(req.take_profit, Some(52000.0));
@@ -160,6 +162,8 @@ fn test_dual_rail_close_orders_no_broker_sl() {
         // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：dual-rail 測試僅
         // 校驗 SL/TP/is_primary 結構欄位，intent_id 預設 None。
         intent_id: None,
+        // MAKER-CLOSE-REPRICE-1：test fixture 預設未重掛。
+        reprice_count: 0,
     };
     assert!(req.stop_loss.is_none());
     assert!(req.is_close);
@@ -200,6 +204,8 @@ fn test_dual_rail_paper_shadow_skips_broker_sl() {
         // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：dual-rail 測試僅
         // 校驗 SL/TP/is_primary 結構欄位，intent_id 預設 None。
         intent_id: None,
+        // MAKER-CLOSE-REPRICE-1：test fixture 預設未重掛。
+        reprice_count: 0,
     };
     assert!(!req.is_primary);
     assert!(req.stop_loss.is_none());
@@ -498,6 +504,188 @@ fn test_close_maker_dispatch_postonly_spine_none() {
     assert_eq!(audit.initial_limit_price, Some(50_000.1));
     assert_eq!(audit.eligible_reason, "grid_close_long");
     assert_eq!(audit.fallback_reason, None);
+}
+
+/// ★ DIRECTION E2E (2026-06-17 E2/E4 RETURN HIGH)：穿透真實鏈
+/// `execute_position_close → register（dispatch.rs Register 鏡射）→ sweep
+/// （compute_close_reprice_limit + close_maker_reprice_decision）`，鎖死
+/// toward-touch 重掛的方向不變式，使「把訂單側當持倉方向」的反向 bug 無處藏身。
+///
+/// 為何純函數單測會放過反向 bug：sweep 呼叫端傳給 compute_close_reprice_limit /
+/// dispatch_close_maker_reprice 的是 `po.is_long`（**訂單側**），但那兩個 fn 的
+/// `position_is_long` 要的是**持倉方向**（內部再 `!`）；先前單測 fixture 與 source
+/// 共用「is_long=持倉方向」的同一錯誤假設，故單測恆綠卻在 runtime 算反。本測試
+/// 用**真實 dispatch 路徑**產生 PendingOrder（is_long 由 execute_position_close 的
+/// `is_long: !is_long` 真正 inverted），再走真正的 sweep 計算，反向就會立刻露餡。
+///
+/// 不變式：平多倉 close = SELL，book 上移時須以**更高**的 passive SELL 限價重掛
+///（新限價 > 原掛價 ≥ best_ask，永不穿越 spread、永遠 PostOnly）。
+#[test]
+fn test_close_maker_reprice_direction_through_real_chain() {
+    use crate::event_consumer::{pending_sweep, PendingOrder};
+
+    // ── 平多倉（LONG position）：close order = SELL ──────────────────────
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    pipeline.set_use_maker_close_for_test(true);
+    pipeline.set_instrument_cache(instrument_cache_for("BTCUSDT", 0.1));
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+    pipeline.paper_state.apply_fill(
+        "BTCUSDT",
+        true, // LONG position
+        0.1,
+        50_000.0,
+        0.0,
+        1_700_000_000_000,
+        "grid_trading",
+    );
+
+    // dispatch 時 BBO：best_ask=50_000.1。close-maker SELL 掛 best_ask（passive）。
+    let event = make_bbo_event("BTCUSDT", 50_000.0, 49_999.9, 50_000.1, 1_700_000_060_000);
+    assert!(pipeline.execute_position_close(
+        "BTCUSDT",
+        true, // 持倉方向 = LONG
+        0.1,
+        &event,
+        true,
+        "strategy_close:grid_close_long",
+    ));
+    let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
+    // 真實鏈不變式：平多倉 close 派發為 SELL（is_long=false），掛 best_ask（passive）。
+    assert!(!req.is_long, "long-position close must dispatch as SELL (is_long=false)");
+    assert_eq!(req.time_in_force, Some(TimeInForce::PostOnly));
+    let initial_limit = req.limit_price.expect("close-maker limit price");
+    assert!(
+        (initial_limit - 50_000.1).abs() < 1e-9,
+        "initial passive SELL must rest at best ask"
+    );
+
+    // register：鏡射 dispatch.rs:707 Register（is_long: req.is_long = 訂單側）。
+    let po = PendingOrder {
+        order_link_id: req.order_link_id.clone(),
+        symbol: req.symbol.clone(),
+        is_long: req.is_long, // ← 訂單側（SELL=false），非持倉方向
+        qty: req.qty,
+        strategy: req.strategy.clone(),
+        sent_ts_ms: 1_700_000_060_000,
+        cum_filled_qty: 0.0,
+        is_close: req.is_close,
+        context_id: req.context_id.clone(),
+        order_type: req.order_type.clone(),
+        time_in_force: req.time_in_force,
+        maker_timeout_ms: req.maker_timeout_ms,
+        close_maker_audit: req.close_maker_audit.clone(),
+        reference_price: req.reference_price,
+        reference_ts_ms: req.reference_ts_ms,
+        reference_source: req.reference_source.clone(),
+        cancel_requested_ts_ms: None,
+        reprice_count: req.reprice_count,
+        spine_order_plan_id: None,
+        spine_decision_id: None,
+        spine_verdict_id: None,
+        spine_stub_report_id: None,
+        intent_id: None,
+    };
+
+    // sweep：book 上移（ask 50_000.1 → 50_000.5）。toward-touch 對 SELL =
+    // 更高的 passive 賣價。**走 sweep 真正呼叫的 *_for_pending 單一收口**（內部
+    // `!po.is_long` 把訂單側還原持倉方向，再回 SELL 算價）——故方向寫反的 mutation
+    // 會同時打掛 sweep 與本測試（真 bite，非旁路重算）。
+    pipeline
+        .paper_state
+        .set_latest_bbo("BTCUSDT", 50_000.3, 50_000.5);
+    pipeline.paper_state.set_latest_price("BTCUSDT", 50_000.4);
+    let new_inside_limit = pipeline
+        .compute_close_reprice_limit_for_pending(&po)
+        .expect("reprice limit must compute from cached BBO");
+    // passive SELL 新限價 = best_ask = 50_000.5（>= ask，永不穿越 spread）。
+    assert!(
+        (new_inside_limit - 50_000.5).abs() < 1e-9,
+        "reprice SELL must rest at the (raised) best ask, never cross the spread"
+    );
+    assert!(
+        new_inside_limit > initial_limit,
+        "book moved up → new passive SELL limit must be strictly higher than original"
+    );
+
+    // 決策：elapsed 在 [30s, 90s) 窗內，新限價嚴格優於原掛價 → 必須 reprice。
+    let now = po.sent_ts_ms + 35_000;
+    assert_eq!(
+        pending_sweep::close_maker_reprice_decision(&po, now, Some(new_inside_limit), 2, 30_000),
+        Some(new_inside_limit),
+        "long-close SELL must reprice toward the touch (higher) when book moves up"
+    );
+    // 反向哨兵：若 book 反而下移（新 ask 更低），SELL 不該重掛（非 toward-touch）。
+    assert_eq!(
+        pending_sweep::close_maker_reprice_decision(&po, now, Some(49_999.0), 2, 30_000),
+        None,
+        "long-close SELL must NOT reprice when the achievable sell price drops"
+    );
+
+    // ── 平空倉（SHORT position）：close order = BUY ──────────────────────
+    let mut p2 = TickPipeline::with_kind(&["ETHUSDT"], 10_000.0, PipelineKind::Demo);
+    p2.set_use_maker_close_for_test(true);
+    p2.set_instrument_cache(instrument_cache_for("ETHUSDT", 0.1));
+    let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    p2.set_shadow_channel(tx2);
+    p2.paper_state.apply_fill(
+        "ETHUSDT",
+        false, // SHORT position
+        0.1,
+        3_000.0,
+        0.0,
+        1_700_000_000_000,
+        "grid_trading",
+    );
+    let event2 = make_bbo_event("ETHUSDT", 3_000.0, 2_999.9, 3_000.1, 1_700_000_060_000);
+    assert!(p2.execute_position_close(
+        "ETHUSDT",
+        false, // 持倉方向 = SHORT
+        0.1,
+        &event2,
+        true,
+        "strategy_close:grid_close_short",
+    ));
+    let req2 = rx2.try_recv().expect("OrderDispatchRequest must be sent");
+    assert!(req2.is_long, "short-position close must dispatch as BUY (is_long=true)");
+    let initial_limit2 = req2.limit_price.expect("close-maker limit price");
+    assert!(
+        (initial_limit2 - 2_999.9).abs() < 1e-9,
+        "initial passive BUY must rest at best bid"
+    );
+    let po2 = PendingOrder {
+        is_long: req2.is_long, // 訂單側（BUY=true）
+        symbol: req2.symbol.clone(),
+        order_link_id: req2.order_link_id.clone(),
+        strategy: req2.strategy.clone(),
+        close_maker_audit: req2.close_maker_audit.clone(),
+        ..po.clone()
+    };
+    // book 下移（bid 2_999.9 → 2_999.5）。toward-touch 對 BUY = 更低的 passive 買價。
+    // 同樣走 *_for_pending 單一收口。
+    p2.paper_state.set_latest_bbo("ETHUSDT", 2_999.5, 2_999.7);
+    p2.paper_state.set_latest_price("ETHUSDT", 2_999.6);
+    let new_inside_limit2 = p2
+        .compute_close_reprice_limit_for_pending(&po2)
+        .expect("reprice limit must compute");
+    assert!(
+        (new_inside_limit2 - 2_999.5).abs() < 1e-9,
+        "reprice BUY must rest at the (lowered) best bid, never cross the spread"
+    );
+    assert!(
+        new_inside_limit2 < initial_limit2,
+        "book moved down → new passive BUY limit must be strictly lower than original"
+    );
+    assert_eq!(
+        pending_sweep::close_maker_reprice_decision(&po2, now, Some(new_inside_limit2), 2, 30_000),
+        Some(new_inside_limit2),
+        "short-close BUY must reprice toward the touch (lower) when book moves down"
+    );
+    assert_eq!(
+        pending_sweep::close_maker_reprice_decision(&po2, now, Some(3_001.0), 2, 30_000),
+        None,
+        "short-close BUY must NOT reprice when the achievable buy price rises"
+    );
 }
 
 /// ★ SURVIVAL-CRITICAL (P2 E4): a STOP / urgent-exit close MUST route TAKER

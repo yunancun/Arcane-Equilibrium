@@ -92,6 +92,12 @@ pub struct PaperState {
     pub(super) session_start_ts_ms: u64,
     pub(super) positions: HashMap<String, PaperPosition>,
     pub(super) latest_prices: HashMap<String, f64>,
+    /// MAKER-CLOSE-REPRICE-1 (2026-06-17)：per-symbol 最新 BBO (best_bid, best_ask)，
+    /// 與 latest_prices 同一 per-tick 寫入點（step_0_fast_track）更新。close-maker
+    /// toward-touch reprice 在 5s sweep（無 event）時讀此快取重算 inside-quote 限價
+    /// （經 compute_close_limit_price 同一安全函數，spread guard / crossed-book 全套）。
+    /// 只在 reprice 路徑消費，不回饋任何下單/timeout 決策（純記錄面快取）。
+    pub(super) latest_bbo: HashMap<String, (f64, f64)>,
     /// Per-symbol 24h turnover for dynamic slippage calculation.
     /// 每交易對 24h 成交額，用於動態滑點計算。
     pub(super) latest_turnovers: HashMap<String, f64>,
@@ -188,6 +194,7 @@ impl PaperState {
             session_start_ts_ms: openclaw_core::now_ms(),
             positions: HashMap::new(),
             latest_prices: HashMap::new(),
+            latest_bbo: HashMap::new(),
             latest_turnovers: HashMap::new(),
             total_realized_pnl: 0.0,
             total_fees: 0.0,

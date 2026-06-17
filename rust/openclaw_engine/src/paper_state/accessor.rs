@@ -322,6 +322,22 @@ impl PaperState {
         self.latest_prices.insert(symbol.to_string(), price);
     }
 
+    /// MAKER-CLOSE-REPRICE-1：讀 per-symbol 最新 BBO (best_bid, best_ask)。
+    /// 供 close-maker toward-touch reprice 在 sweep（無 event）時重算 inside quote。
+    pub fn latest_bbo(&self, symbol: &str) -> Option<(f64, f64)> {
+        self.latest_bbo.get(symbol).copied()
+    }
+
+    /// MAKER-CLOSE-REPRICE-1：寫 per-symbol 最新 BBO。只在 finite 且 bid/ask 皆
+    /// >0 時記錄（與 compute_close_limit_price 的 BBO 前置條件一致）；非法值不寫
+    /// 入，避免 stale/髒 BBO 污染 reprice 決策。
+    pub fn set_latest_bbo(&mut self, symbol: &str, best_bid: f64, best_ask: f64) {
+        if best_bid.is_finite() && best_bid > 0.0 && best_ask.is_finite() && best_ask > 0.0 {
+            self.latest_bbo
+                .insert(symbol.to_string(), (best_bid, best_ask));
+        }
+    }
+
     /// Get latest 24h turnover for a symbol (for dynamic slippage).
     /// 獲取交易對最新 24h 成交額（用於動態滑點）。
     pub fn latest_turnover(&self, symbol: &str) -> Option<f64> {

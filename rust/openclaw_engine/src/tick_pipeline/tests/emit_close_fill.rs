@@ -529,6 +529,8 @@ fn apply_confirmed_fill_persists_close_maker_audit_payload() {
         Some(1_990),
         Some("dispatch_last_fallback"),
         None,
+        // MAKER-CLOSE-REPRICE-1 / V145：新增 maker_markout_bps 參數位（None=不驗 markout）。
+        None,
         Some("maker"),
         Some(10),
         Some("exec-close-maker"),
@@ -613,6 +615,8 @@ fn apply_confirmed_fill_persists_close_maker_fallback_reason() {
         Some(1_990),
         Some("close_maker_fallback"),
         Some(0.1),
+        // V145：taker fallback 無 maker markout，None。
+        None,
         Some("taker"),
         Some(10),
         Some("exec-close-maker-fallback"),
@@ -691,6 +695,8 @@ fn apply_confirmed_fill_persists_close_maker_rate_limit_scope_detail() {
         Some(51_000.1),
         Some(1_990),
         Some("close_maker_fallback"),
+        None,
+        // V145：taker fallback 無 maker markout，None。
         None,
         Some("taker"),
         Some(10),

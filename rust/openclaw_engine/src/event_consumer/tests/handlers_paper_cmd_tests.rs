@@ -73,6 +73,8 @@ fn test_handle_reset_clears_state_and_pending() {
             reference_ts_ms: None,
             reference_source: None,
             cancel_requested_ts_ms: None,
+            // MAKER-CLOSE-REPRICE-1：test fixture 預設未重掛。
+            reprice_count: 0,
             // W-C Caveat 2 修復（2026-05-11）：test fixture 預設 None。
             spine_order_plan_id: None,
             spine_decision_id: None,

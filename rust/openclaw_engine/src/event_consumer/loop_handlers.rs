@@ -447,6 +447,9 @@ pub(super) fn handle_pending_registration(
                 reference_ts_ms: None,
                 reference_source: None,
                 cancel_requested_ts_ms: None,
+                // MAKER-CLOSE-REPRICE-1：dispatch_failed 重建走 market fallback，
+                // 不參與 reprice，計數 0。
+                reprice_count: 0,
                 spine_order_plan_id: None,
                 spine_decision_id: None,
                 spine_verdict_id: None,
@@ -912,6 +915,10 @@ pub(super) fn handle_tick_event(
         let mut maker_to_cancel: Vec<(String, String, u64, u64)> = Vec::new();
         let mut maker_grace_fallback: Vec<String> = Vec::new();
         let mut legacy_to_remove: Vec<String> = Vec::new();
+        // MAKER-CLOSE-REPRICE-1：toward-touch 重掛候選。每元素 = (原 order_link_id,
+        // 新限價, reprice_count)。只在 PostOnly close maker 仍 Keep（30s-90s 窗、未
+        // 達 max_reprices、book 朝對我方向移動）時收集，後續串行 cancel 舊單 + 重發。
+        let mut maker_to_reprice: Vec<(String, f64, u32)> = Vec::new();
         for (key, po) in state.pending_orders.iter() {
             let elapsed = pending_sweep::pending_elapsed_ms(po, now_ms);
             match classify_pending_sweep(po, now_ms) {
@@ -955,7 +962,72 @@ pub(super) fn handle_tick_event(
                         "pending order soft timeout (>5s) / 待處理訂單軟超時"
                     );
                 }
-                PendingSweepAction::Keep => {}
+                PendingSweepAction::Keep => {
+                    // MAKER-CLOSE-REPRICE-1：仍 Keep 的 PostOnly close maker 嘗試
+                    // toward-touch 重掛。compute_close_reprice_limit 讀快取 BBO 經
+                    // compute_close_limit_price 算新 inside quote（spread guard /
+                    // crossed-book strict skip 全套）；純函數 close_maker_reprice_decision
+                    // 判定「未達 max_reprices、在 [reprice_after, timeout) 窗、cancel
+                    // 未在途、新限價嚴格優於原掛價」才放行。stops/urgent 走 market
+                    // （tif=None）結構上到不了此分支（A.4 互斥證明）。
+                    if po.is_close
+                        && po.time_in_force == Some(TimeInForce::PostOnly)
+                        && po.cancel_requested_ts_ms.is_none()
+                        && po.reprice_count < crate::strategies::common::CLOSE_MAKER_MAX_REPRICES
+                    {
+                        // DIRECTION FIX（2026-06-17 E2/E4 RETURN HIGH）：po.is_long 是
+                        // **訂單方向**（close order 已 inverted：平多倉=SELL→is_long=false、
+                        // 平空倉=BUY→is_long=true），但 reprice 計價要的是**真實持倉方向**。
+                        // 經 *_for_pending 單一收口做 `!po.is_long` 轉換（sweep 與 e2e
+                        // 方向測試共用同一條，使「把方向寫反」的 mutation 必被測試抓到）。
+                        let new_inside_limit =
+                            pipeline.compute_close_reprice_limit_for_pending(po);
+                        if let Some(new_limit) = pending_sweep::close_maker_reprice_decision(
+                            po,
+                            now_ms,
+                            new_inside_limit,
+                            crate::strategies::common::CLOSE_MAKER_MAX_REPRICES,
+                            crate::strategies::common::CLOSE_MAKER_REPRICE_AFTER_MS,
+                        ) {
+                            maker_to_reprice.push((key.clone(), new_limit, po.reprice_count));
+                        }
+                    }
+                }
+            }
+        }
+        // MAKER-CLOSE-REPRICE-1：串行處理重掛候選 —— **cancel-before-dispatch**
+        //（2026-06-17 E2/E4 RETURN INFO，對齊 PA design §A.2「舊單先 cancel」）：
+        // 先對舊掛單發出 cancel（非阻塞 REST，fail-soft，與 timeout sweep 同一
+        // cancel_resting_maker_order 路徑），**再**發新 PostOnly close maker
+        //（reprice_count+1），最後移除舊 tracker（新單由 dispatch.rs Register 進
+        // tracker）。先 cancel 再 dispatch 收斂「新舊同時掛單」窗口（兩單皆
+        // reduceOnly 本就良性，但 cancel-first 更乾淨）。handle_tick_event 為同步
+        // 函數無法 .await，故 cancel 仍以 tokio::spawn 排程；其在 dispatch 之前
+        // 送出即達成 cancel-first 排序。dispatch 失敗（僅 channel 關閉等終態）則
+        // 不移除舊 tracker、舊單由後續 timeout→taker 兜底。
+        for (link_id, new_limit, reprice_count) in &maker_to_reprice {
+            let Some(po) = state.pending_orders.get(link_id).cloned() else {
+                continue;
+            };
+            if po.close_maker_audit.is_none() {
+                continue;
+            }
+            // 先 cancel 舊掛單（非阻塞 REST，fail-soft）。
+            if let Some(client) = shared_client {
+                let c = client.clone();
+                let sym = po.symbol.clone();
+                let lid = po.order_link_id.clone();
+                tokio::spawn(async move {
+                    pending_sweep::cancel_resting_maker_order(c, sym, lid).await;
+                });
+            }
+            // DIRECTION FIX（2026-06-17 E2/E4 RETURN HIGH）：經 *_for_pending 單一收口
+            // 做 po.is_long（訂單側）→ 真實持倉方向（`!po.is_long`）轉換，再派發。
+            let dispatched =
+                pipeline.dispatch_close_maker_reprice_for_pending(&po, *new_limit, *reprice_count, now_ms);
+            if dispatched.is_some() {
+                // 重掛已派發 → 移除舊 tracker（新單已 Register）。
+                legacy_to_remove.push(link_id.clone());
             }
         }
         for link_id in &maker_grace_fallback {
@@ -1123,6 +1195,8 @@ mod tests {
             reference_ts_ms: Some(1_700_000_000_000),
             reference_source: Some("dispatch_last_fallback".to_string()),
             cancel_requested_ts_ms: None,
+            // MAKER-CLOSE-REPRICE-1：fixture 預設未重掛。
+            reprice_count: 0,
             spine_order_plan_id: None,
             spine_decision_id: None,
             spine_verdict_id: None,

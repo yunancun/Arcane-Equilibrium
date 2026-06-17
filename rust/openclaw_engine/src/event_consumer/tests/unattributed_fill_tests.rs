@@ -370,6 +370,7 @@ async fn test_full_channel_drops_within_bound_not_blocks_forever() {
         details: None,
         close_maker_attempt: false,
         close_maker_fallback_reason: None,
+        maker_markout_bps: None,
     })
     .await
     .expect("filler send into cap-1 channel");
