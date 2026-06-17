@@ -19,7 +19,7 @@
 use crate::config::risk_config::{GlobalLimits, StrategyOverride};
 use crate::config::RiskConfig;
 use crate::exit_features::{physical_micro_profit_lock_v2, ExitFeatures, PhysicalDecision};
-use openclaw_core::risk::{compute_dynamic_stop_pct, regime_multipliers};
+use openclaw_core::risk::compute_dynamic_stop_pct;
 
 /// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): priority-9 `RiskAction::HaltSession`
 /// reason 字首；用於 `HaltKind::classify` 分類 + V098 governance audit。
@@ -302,7 +302,9 @@ pub fn check_position_on_tick_with_override(
     // Legacy COST EDGE inputs retained on ABI for T4; silence unused-param warnings.
     // T3：COST EDGE 相關參數保留 ABI，等 T4 接 ExitFeatures 真實值。
     let _ = (cost_ratio, cost_edge_max_ratio, min_profit_to_close_pct);
-    let rm = regime_multipliers(regime);
+    // DEAD-CONFIG FIX：改讀 operator 可調的 RiskConfig.regime（取代 core 硬編碼表）。
+    // default config 與舊硬編碼表 byte-identical → 預設行為位元不變。
+    let rm = config.regime.get(regime);
     let limits = &config.limits;
     let agent = &config.agent;
     let dyn_cfg = &config.dynamic_stop;
@@ -345,7 +347,7 @@ pub fn check_position_on_tick_with_override(
         atr_pct,
         symbol,
         entry_ts_ms,
-        regime,
+        rm.stop, // regime stop 乘數（來自 config.regime）
         effective_sl,
         dyn_cfg.cap_ratio,
         dyn_cfg.atr_stop_mult,
@@ -997,6 +999,118 @@ mod tests {
             matches!(wide, RiskAction::Hold),
             "wide mult=2.5 should hold (wider stop), got {:?}",
             wide
+        );
+    }
+
+    #[test]
+    fn test_regime_stop_mult_changes_dynamic_stop_decision() {
+        // DEAD-CONFIG-FIX 關鍵驗收（TEST B）：證明 `config.regime.<X>.stop` 真正
+        // 流入動態止損決策（而非被忽略）。E2 MEDIUM 指出 stops.rs 鬆散範圍測試
+        // 無法咬住 `base = base_stop_pct * 1.0` 變異（忽略 regime 乘數）；本測在
+        // 完整 hot-path（check_position_on_tick → _with_override）上鎖死該乘數。
+        //
+        // 算術（atr=None 以隔離 regime.stop，無 ATR 路徑干擾）：
+        //   effective_sl = stop_loss_max_pct = 5.0（無 per_strategy override）
+        //   base_stop_pct = effective_sl * dyn.base_ratio = 5.0 * 0.6 = 3.0
+        //   compute_dynamic_stop_pct: base = base_stop_pct * regime.stop
+        //     anti_cluster_offset("BTCUSDT", 1000) = +0.11181
+        //   tight regime.trending.stop=1.0: base=3.0 → dyn_stop=3.0*1.11181=3.3354
+        //     pnl=-3.5 <= -3.3354 → DYNAMIC STOP 觸發
+        //   wide  regime.trending.stop=1.5: base=4.5 → dyn_stop=4.5*1.11181=5.0031
+        //     pnl=-3.5 <= -5.0031 為 False；hard stop(-5.0) 也未達 → Hold
+        // gap 1.0 vs 1.5 已足夠跨越敏感帶（沿用既有 atr 測試的 BTCUSDT/ts=1000/-3.5%）。
+        let mut cfg_tight = RiskConfig::default();
+        cfg_tight.regime.trending.stop = 1.0;
+
+        let mut cfg_wide = RiskConfig::default();
+        cfg_wide.regime.trending.stop = 1.5;
+
+        let tight = call_tick(
+            -3.5, 0.0, 1.0, 0.0, "trending", None, 0, 0.0, 0.0, &cfg_tight,
+        );
+        let wide = call_tick(
+            -3.5, 0.0, 1.0, 0.0, "trending", None, 0, 0.0, 0.0, &cfg_wide,
+        );
+
+        assert!(
+            matches!(tight, RiskAction::ClosePosition(ref r) if r.contains("DYNAMIC STOP")),
+            "tight regime.stop=1.0 should trigger DYNAMIC STOP, got {:?}",
+            tight
+        );
+        assert!(
+            matches!(wide, RiskAction::Hold),
+            "wide regime.stop=1.5 should hold (wider regime stop), got {:?}",
+            wide
+        );
+    }
+
+    #[test]
+    fn test_regime_tp_mult_changes_take_profit_decision() {
+        // DEAD-CONFIG-FIX 驗收（TEST C — tp surface）：證明 `config.regime.<X>.tp`
+        // 真正流入止盈決策。take_profit_enforced 預設為 false，故測試 cfg 需顯式
+        // 開啟強制止盈旗標（否則 TP gate 不可達）。
+        //
+        // 算術（atr=None；peak=pnl=5.0 使 drawdown=0 → trailing gate 不觸發）：
+        //   effective_tp = take_profit_max_pct = 20.0
+        //   tp_target = effective_tp * regime.tp
+        //   baseline regime.trending.tp=1.5: target=30.0；pnl=5.0 >= 30.0 為 False → Hold
+        //   lowered  regime.trending.tp=0.2: target=4.0；pnl=5.0 >= 4.0 → TAKE PROFIT
+        let mut cfg_baseline = RiskConfig::default();
+        cfg_baseline.limits.take_profit_enforced = true;
+
+        let mut cfg_lowered = RiskConfig::default();
+        cfg_lowered.limits.take_profit_enforced = true;
+        cfg_lowered.regime.trending.tp = 0.2;
+
+        let baseline = call_tick(
+            5.0, 5.0, 1.0, 0.0, "trending", None, 0, 0.0, 0.0, &cfg_baseline,
+        );
+        let lowered = call_tick(
+            5.0, 5.0, 1.0, 0.0, "trending", None, 0, 0.0, 0.0, &cfg_lowered,
+        );
+
+        assert!(
+            matches!(baseline, RiskAction::Hold),
+            "baseline regime.tp=1.5 (target 30%) should hold at pnl 5%, got {:?}",
+            baseline
+        );
+        assert!(
+            matches!(lowered, RiskAction::ClosePosition(ref r) if r.contains("TAKE PROFIT")),
+            "lowered regime.tp=0.2 (target 4%) should TAKE PROFIT at pnl 5%, got {:?}",
+            lowered
+        );
+    }
+
+    #[test]
+    fn test_regime_time_mult_changes_time_stop_decision() {
+        // DEAD-CONFIG-FIX 驗收（TEST C — time surface）：證明 `config.regime.<X>.time`
+        // 真正流入時間止損決策。time gate 透過 call_tick 的 holding_hours 參數可達。
+        //
+        // 算術（pnl=0.0/peak=0.0 → 前面所有 stop/tp/trailing gate 皆不觸發）：
+        //   max_hours = holding_hours_max * regime.time = 72.0 * regime.time
+        //   baseline regime.trending.time=1.5: max=108.0；hold=80.0 >= 108.0 為 False → Hold
+        //   lowered  regime.trending.time=0.2: max=14.4；hold=80.0 >= 14.4 → TIME STOP
+        let cfg_baseline = RiskConfig::default();
+
+        let mut cfg_lowered = RiskConfig::default();
+        cfg_lowered.regime.trending.time = 0.2;
+
+        let baseline = call_tick(
+            0.0, 0.0, 80.0, 0.0, "trending", None, 0, 0.0, 0.0, &cfg_baseline,
+        );
+        let lowered = call_tick(
+            0.0, 0.0, 80.0, 0.0, "trending", None, 0, 0.0, 0.0, &cfg_lowered,
+        );
+
+        assert!(
+            matches!(baseline, RiskAction::Hold),
+            "baseline regime.time=1.5 (max 108h) should hold at 80h, got {:?}",
+            baseline
+        );
+        assert!(
+            matches!(lowered, RiskAction::ClosePosition(ref r) if r.contains("TIME STOP")),
+            "lowered regime.time=0.2 (max 14.4h) should TIME STOP at 80h, got {:?}",
+            lowered
         );
     }
 
