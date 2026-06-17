@@ -452,6 +452,27 @@ per `docs/execution_plan/2026-06-17--intelligent-param-adjusting-agent-master-sp
 
 ---
 
+### §2.8 PHASE 2 促升判定 — EDGE-ANCHORED criteria gate edge slot（Rust，2026-06-17）
+
+per `docs/execution_plan/2026-06-17--intelligent-param-adjusting-agent-master-spec.md` Phase 2。唯讀 IPC `evaluate_promotion_criteria` handler 自查每 (strategy, symbol) cell 的 leak-free OOS alpha（`validation_passed`）+ snapshot freshness 所需的 EdgeEstimates 句柄。延後注入（boot seam）而非穿過已龐大的 dispatch 參數鏈，鏡像同檔 `live_authz::nonce_ledger()` 先例。注入的是程序唯一的 scanner `EdgeEstimates` Arc（`main_scanner_init.rs:127` 構造、`ScannerInitBundle.edge_estimates`）——**同一個** holder 也餵 Phase 1 strategist `with_edge_store`（`main_boot_tasks.rs:347`），故促升判定與 Phase 1 rich-input gate 讀完全相同的記憶體 snapshot；demo/live 共用同一份 production `edge_estimates.json`，promote 判定吃 validation+freshness（與引擎模式無關）。未注入（None）→ handler fail-soft 回 `criteria_engine_uninitialized` → route 視為 Pending（fail-closed，無法判定即不促升）。
+
+| 欄位 | 值 |
+|---|---|
+| name | `PROMOTION_EDGE_SLOT`（module-level `static PROMOTION_EDGE_SLOT: OnceLock<...>`）|
+| type_signature | `OnceLock<Arc<parking_lot::RwLock<EdgeEstimates>>>` |
+| location | `rust/openclaw_engine/src/ipc_server/dispatch.rs`（`static PROMOTION_EDGE_SLOT`；setter `set_promotion_edge_slot(...) -> bool`；reader 在 `handle_evaluate_promotion_criteria`）|
+| owner_lifecycle | eager：`main.rs` boot 期一次性 `set`（與 Phase 1 `with_edge_store` 同源 holder 旁、無條件，不隨 Demo 綁定 gated）；engine process lifetime；無顯式銷毀（process exit 即釋放）|
+| cross_task_pattern | 每個 IPC connection 在獨立 tokio task 跑 `dispatch_request`；唯讀 handler 經 `PROMOTION_EDGE_SLOT.get()` 共享同一 `Arc<RwLock<EdgeEstimates>>` → 跨 task 並發 read-lock（`parking_lot::RwLock` 多讀者）|
+| lock_primitive | 外層 `OnceLock`（set-once）；內層 `parking_lot::RwLock`（handler 取極短 read-lock 拷 per-cell + freshness 後即釋放，不跨 await 持鎖）|
+| visibility | setter `pub`（binary crate `openclaw-engine` 經 `ipc_server` facade `pub use dispatch::set_promotion_edge_slot` 取用）；slot + reader `pub(crate)`/private |
+| caller_chain | **producer**：`main.rs` boot（`openclaw_engine::ipc_server::set_promotion_edge_slot(Arc::clone(&scanner_edge_estimates))`，與 Phase 1 同源）。**consumer**：`dispatch.rs::handle_evaluate_promotion_criteria`（唯讀 IPC，跑 `strategist_scheduler::evaluate_promotion_criteria` 純函數）|
+| health_monitoring | NO —— 未注入即 fail-soft Pending（fail-closed，不促升）；注入後讀的是共享 scanner holder，其新鮮度由既有 edge reload 路徑維護，不需獨立健康哨 |
+| registered_date | 2026-06-17 |
+| governance_authority | `2026-06-17--intelligent-param-adjusting-agent-master-spec.md` Phase 2（E1-A 加 slot/setter/handler，E1-C 接線注入）|
+| migration_plan | none（in-memory，重啟乾淨 re-arm；slot 內容由 boot 重新注入）|
+
+---
+
 ## §3 Registration Rules
 
 ### §3.1 新登記前必做（PA / E1 / E2 共同）

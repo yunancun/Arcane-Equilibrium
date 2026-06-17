@@ -607,6 +607,14 @@ pub(crate) async fn dispatch_request(
             );
             handle_get_agent_spine_channel_metrics(id).await
         }
+        // ── Phase 2 demo→live 促升 — EDGE-ANCHORED criteria gate（唯讀）──
+        // 唯讀 method：**不在** LIVE_WRITE_METHODS（live_authz.rs:50），故自動
+        // token 豁免（不送 cmd / 不改 ConfigStore / 不改 EdgeEstimates，純讀
+        // live edge snapshot + 跑純函數判定 + 回 verdict）。Python promote route
+        // 在 5-gate 前以此閘廉價拒不合格促升（§2.2 順序 ④）。
+        "evaluate_promotion_criteria" => {
+            handle_evaluate_promotion_criteria(id, &req.params)
+        }
         _ => JsonRpcResponse::error(
             id,
             ERR_METHOD_NOT_FOUND,
@@ -849,5 +857,319 @@ where
     match extract(&snapshot) {
         Ok(v) => JsonRpcResponse::success(id, v),
         Err(e) => JsonRpcResponse::error(id, ERR_INTERNAL, format!("serialize error: {e}")),
+    }
+}
+
+// ===========================================================================
+// Phase 2 demo→live 促升 — EDGE-ANCHORED criteria gate（唯讀 IPC handler）
+// ===========================================================================
+
+/// 延後注入的 EdgeEstimates snapshot 句柄，供
+/// `handle_evaluate_promotion_criteria` 自查每 (strategy, symbol) cell。
+///
+/// 為何用 `OnceLock` 而非穿過 `dispatch_request` 已龐大的參數鏈：鏡像
+/// `live_authz::nonce_ledger()`（同檔已立此先例，doc 明示二擇一）。
+///
+/// 注入的是 **live-grade** `EdgeEstimates` holder（`edge_estimates_live_demo.json`，
+/// `EdgeEstimates::load_promotion_edge`），**與 scanner/demo cost_gate 的
+/// `edge_estimates.json` holder 分離**（Fix 5，2026-06-17）。為何分離：scanner +
+/// Phase 1 `with_edge_store` 讀 demo-grade 快照（`for_engine_mode("demo")`：寬 bar
+/// PSR≥0.95/DSR≥0.90/oos_n≥30），但 demo→LIVE 促升 blast radius=25-sym live，必須用
+/// live-grade bar（`for_engine_mode("live_demo")`：PSR≥0.975/DSR≥0.95/oos_n≥60/wf≥3），
+/// producer 同時寫 `edge_estimates_live_demo.json`。promote 判定吃的是此 live-grade
+/// 快照的 leak-free `validation_passed` OOS alpha + freshness（§2.4.B）。
+/// 未注入（None）→ handler 回結構化 `criteria_engine_uninitialized` payload
+/// （fail-soft，鏡像 cost_edge_advisor / account_manager slot 語意），**不報錯**；
+/// route 視之為 Pending（無法判定即不促升，fail-closed）。
+static PROMOTION_EDGE_SLOT: std::sync::OnceLock<
+    Arc<parking_lot::RwLock<crate::edge_estimates::EdgeEstimates>>,
+> = std::sync::OnceLock::new();
+
+/// boot 期注入 EdgeEstimates snapshot 句柄（整合 seam 呼叫一次）。
+/// 為何回 bool：`OnceLock::set` 僅首次成功；重複注入回 false（已就緒，no-op）。
+///
+/// 接線（E1-C 整合 seam，2026-06-17；Fix 5 重接線）：`main.rs` boot 期以
+/// `ipc_server::set_promotion_edge_slot`（facade re-export）注入由
+/// `EdgeEstimates::load_promotion_edge` 載入的 **live-grade**
+/// `edge_estimates_live_demo.json` holder——**獨立**於 scanner 的 demo holder。
+/// pub 因 binary crate `openclaw-engine` 經 facade 取用此 lib 內部 setter。
+pub fn set_promotion_edge_slot(
+    edge: Arc<parking_lot::RwLock<crate::edge_estimates::EdgeEstimates>>,
+) -> bool {
+    PROMOTION_EDGE_SLOT.set(edge).is_ok()
+}
+
+/// cost-wall fallback 常數（Fix 6/7）：對齊 `risk_config_live.toml [slippage]` SSOT。
+/// route（Option A）永遠送真值，這些是 defensive-only fallback；測試
+/// `promotion_criteria_cost_wall_fallbacks_match_live_ssot` 斷言它們 == live TOML 值，
+/// 防 silent drift（即使 route 漏送，cost wall 不會比 live cost_gate 寬鬆）。
+const PROMOTION_FALLBACK_SAFETY_MULTIPLIER: f64 = 1.3;
+const PROMOTION_FALLBACK_WIN_RATE_FLOOR: f64 = 0.3;
+/// fee_bps 缺 → +INF（fail-closed：任何 cell 不清成本牆）。route 永遠送真值。
+const PROMOTION_FALLBACK_FEE_BPS: f64 = f64::INFINITY;
+
+/// EDGE-ANCHORED criteria gate（唯讀）。
+///
+/// 為什麼純唯讀 + fail-closed：促升的唯一可辯護證據 = leak-free 的 OOS alpha
+/// 顯著性（`edge_estimates.validation_passed` 鏈）+ 清 live 成本牆，不是 demo PnL
+/// （多頭 regime 下正 PnL 是 down-beta 假陽性）。handler **只讀** edge snapshot，
+/// 跑 `strategist_scheduler::evaluate_promotion_criteria` 純函數，回 verdict——
+/// 不送任何 cmd、不改 ConfigStore、不改 EdgeEstimates。
+///
+/// 契約（route 傳入 / engine 自查 的分工 — **Option A**，E1 2026-06-17 釘死）：
+///   - route 傳入（Python async route 有 DB + 可讀 TOML，是唯一能算 boundary 的層）：
+///       `strategy`、`active_symbols`（route 解析
+///       `strategy_params_live.allowed_symbols ∩ scanner_config.pinned_symbols`；
+///       未設 allowed_symbols → 空陣列 → criteria `Reject("no_active_symbols")`）、
+///       soak/fills metric（`demo_soak_wall_clock_ms` / `ms_since_last_param_change`
+///       / `attributable_demo_fills`）、`demo_boundary_violation_count`
+///       （route 比對 demo soak 窗 realized drawdown vs LIVE 12%/7% envelope，§2.4.D）、
+///       `attribution_chain_ok_ratio`（option）、live cost-model 參數
+///       （`fee_bps_round_trip` / `cost_gate_safety_multiplier` /
+///       `cost_gate_win_rate_floor` 讀 `risk_config_live.toml [slippage]` SSOT）、
+///       `edge_ttl_secs`（freshness TTL，同 SSOT）、`tuned_param_names`（promote diff）。
+///   - engine 自查（freshness/runtime_field 一致性必須在引擎記憶體內判定）：
+///       對每個 `active_symbol` 從 `PROMOTION_EDGE_SLOT` 的 **live-grade** EdgeEstimates
+///       snapshot `get_cell(strategy, symbol)` 取 per-cell 數據 + 算 snapshot freshness。
+///       此 slot 注入的是 `edge_estimates_live_demo.json`（`for_engine_mode("live_demo")`：
+///       PSR≥0.975/DSR≥0.95/oos_n≥60/wf≥3），**非** scanner 的 demo-grade
+///       `edge_estimates.json`——故 `validation_passed` 攜帶 **live-grade** 顯著性語意
+///       （Fix 5，避免 25-sym live 促升決策建在 demo bar 上）。
+///
+/// 為何 active_symbols 由 route 傳而非 engine 自查：active-symbol 解析需讀兩份 TOML
+/// （strategy_params_live + scanner_config），且 boundary 需查 demo realized drawdown
+/// （DB query）——這兩者在 sync IPC handler 內不可達（無 DB pool、無 config reader），
+/// route（async + DB + tomllib）是唯一能算齊的層。engine 端只保留「必須與 live
+/// cost_gate 看同一記憶體 snapshot」的 edge cell 自查。
+///
+/// 回應 payload：`{ verdict, tag, reason, strategy, active_count,
+///   edge_estimates_fresh, per_cell:[{symbol, present, ...}] }`（route 用 per_cell +
+///   active_count + edge_estimates_fresh 組裝 audit `criteria_input_json`）。
+fn handle_evaluate_promotion_criteria(
+    id: serde_json::Value,
+    params: &serde_json::Value,
+) -> JsonRpcResponse {
+    use crate::strategist_scheduler::{
+        evaluate_promotion_criteria, ActiveCellEdge, PromotionCriteriaInput,
+    };
+
+    // ── 解析 route 傳入欄（缺必要欄 → fail-closed invalid_request）──
+    let strategy = match params.get("strategy").and_then(|v| v.as_str()) {
+        Some(s) if !s.is_empty() => s,
+        _ => {
+            return JsonRpcResponse::error(
+                id,
+                ERR_INVALID_REQUEST,
+                "evaluate_promotion_criteria: missing/empty 'strategy'",
+            );
+        }
+    };
+    let active_symbols: Vec<String> = match params.get("active_symbols").and_then(|v| v.as_array())
+    {
+        Some(arr) => arr
+            .iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect(),
+        None => {
+            return JsonRpcResponse::error(
+                id,
+                ERR_INVALID_REQUEST,
+                "evaluate_promotion_criteria: missing 'active_symbols' array",
+            );
+        }
+    };
+    // 數值/布林 metric（缺 → fail-closed 保守值，使判定傾向 Pending/Reject 而非誤過）。
+    let demo_soak_wall_clock_ms = params
+        .get("demo_soak_wall_clock_ms")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let ms_since_last_param_change = params
+        .get("ms_since_last_param_change")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let attributable_demo_fills = params
+        .get("attributable_demo_fills")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    // boundary 缺 → 1（保守：視為曾越界 → Reject），不可缺欄即誤判 0 越界。
+    let demo_boundary_violation_count = params
+        .get("demo_boundary_violation_count")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(1);
+    let attribution_chain_ok_ratio = params
+        .get("attribution_chain_ok_ratio")
+        .and_then(|v| v.as_f64());
+    let fee_bps_round_trip = params
+        .get("fee_bps_round_trip")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(PROMOTION_FALLBACK_FEE_BPS); // 缺 → 無限成本牆 → 任何 cell 不過（fail-closed）
+    // fallback 對齊 risk_config_live.toml SSOT（Fix 6/7）：safety_multiplier=1.3 /
+    // win_rate_floor=0.3，與 [slippage] live 值一致。route 在 Option A 下永遠送真值
+    // （見下方契約），這些 fallback 是 defensive-only：若 route 漏送某欄，cost wall 仍以
+    // live SSOT buffer 量測，不會比 live cost_gate 寬鬆（避免 silent drift）。
+    let cost_gate_safety_multiplier = params
+        .get("cost_gate_safety_multiplier")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(PROMOTION_FALLBACK_SAFETY_MULTIPLIER);
+    let cost_gate_win_rate_floor = params
+        .get("cost_gate_win_rate_floor")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(PROMOTION_FALLBACK_WIN_RATE_FLOOR);
+    let edge_ttl_secs = params
+        .get("edge_ttl_secs")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let tuned_param_names: Vec<String> = params
+        .get("tuned_param_names")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // ── engine 自查 live edge snapshot（slot 未注入 → fail-soft uninitialized）──
+    let Some(edge_arc) = PROMOTION_EDGE_SLOT.get() else {
+        return JsonRpcResponse::success(
+            id,
+            serde_json::json!({
+                "status": "criteria_engine_uninitialized",
+                "verdict": "pending",
+                "tag": "pending",
+                "reason": "criteria_engine_uninitialized",
+            }),
+        );
+    };
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    // read-lock（sync，parking_lot）：取 snapshot freshness + per-cell 數據後即釋放。
+    let (edge_estimates_fresh, active_cells) = {
+        let guard = edge_arc.read();
+        let fresh = guard.is_fresh(now_secs, edge_ttl_secs);
+        let cells: Vec<ActiveCellEdge> = active_symbols
+            .iter()
+            .map(|sym| match guard.get_cell(strategy, sym) {
+                Some(cell) => ActiveCellEdge {
+                    symbol: sym.clone(),
+                    present: true,
+                    validation_passed: cell.validation_passed,
+                    validation_reason: cell.validation_reason.clone(),
+                    from_runtime_field: cell.from_runtime_field,
+                    shrunk_bps: cell.shrunk_bps,
+                    win_rate: cell.win_rate,
+                    n_trades: cell.n_trades,
+                },
+                None => ActiveCellEdge {
+                    symbol: sym.clone(),
+                    present: false,
+                    validation_passed: false,
+                    validation_reason: "cell_absent".to_string(),
+                    from_runtime_field: false,
+                    shrunk_bps: 0.0,
+                    win_rate: 0.0,
+                    n_trades: 0,
+                },
+            })
+            .collect();
+        (fresh, cells)
+    };
+
+    let input = PromotionCriteriaInput {
+        active_cells: active_cells.clone(),
+        demo_soak_wall_clock_ms,
+        ms_since_last_param_change,
+        attributable_demo_fills,
+        demo_boundary_violation_count,
+        attribution_chain_ok_ratio,
+        fee_bps_round_trip,
+        cost_gate_safety_multiplier,
+        cost_gate_win_rate_floor,
+        edge_estimates_fresh,
+        tuned_param_names,
+    };
+    let verdict = evaluate_promotion_criteria(&input);
+
+    // per_cell snapshot 回給 route 寫進 audit `criteria_input_json`（edge-anchored 證據）。
+    let per_cell: Vec<serde_json::Value> = active_cells
+        .iter()
+        .map(|c| {
+            serde_json::json!({
+                "symbol": c.symbol,
+                "present": c.present,
+                "validation_passed": c.validation_passed,
+                "validation_reason": c.validation_reason,
+                "from_runtime_field": c.from_runtime_field,
+                "shrunk_bps": c.shrunk_bps,
+                "win_rate": c.win_rate,
+                "n_trades": c.n_trades,
+            })
+        })
+        .collect();
+
+    JsonRpcResponse::success(
+        id,
+        serde_json::json!({
+            "verdict": verdict.tag(),
+            "tag": verdict.tag(),
+            "reason": verdict.reason(),
+            "strategy": strategy,
+            "active_count": active_cells.len(),
+            "edge_estimates_fresh": edge_estimates_fresh,
+            "per_cell": per_cell,
+        }),
+    )
+}
+
+#[cfg(test)]
+mod promotion_criteria_dispatch_tests {
+    use super::{
+        PROMOTION_FALLBACK_FEE_BPS, PROMOTION_FALLBACK_SAFETY_MULTIPLIER,
+        PROMOTION_FALLBACK_WIN_RATE_FLOOR,
+    };
+
+    /// Fix 6/7：cost-wall fallback 常數必須 == `risk_config_live.toml [slippage]` SSOT。
+    ///
+    /// 為什麼 bite：route（Option A）永遠送真 cost 參數，但若未來 route regress 漏送，
+    /// handler fallback 接管——此時 fallback 必須與 live cost_gate 用的同一 buffer
+    /// （safety_multiplier=1.3 / win_rate_floor=0.3），否則促升閘會以比 live 更寬鬆的
+    /// 成本牆放行（silent drift，承 QC adversarial MEDIUM finding）。fee_bps 缺 → +INF
+    /// （fail-closed）。本測試 parse live TOML，drift 即紅。
+    #[test]
+    fn promotion_criteria_cost_wall_fallbacks_match_live_ssot() {
+        // include_str! 自編譯期嵌入 live TOML（CARGO_MANIFEST_DIR 相對路徑，跨平台）。
+        let toml_src = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../settings/risk_control_rules/risk_config_live.toml"
+        ));
+        let parsed: toml::Value = toml::from_str(toml_src).expect("live risk_config TOML parses");
+        let slippage = parsed
+            .get("slippage")
+            .expect("risk_config_live.toml has [slippage]");
+        let live_mult = slippage
+            .get("cost_gate_safety_multiplier")
+            .and_then(|v| v.as_float())
+            .expect("[slippage].cost_gate_safety_multiplier is a float");
+        let live_floor = slippage
+            .get("cost_gate_win_rate_floor")
+            .and_then(|v| v.as_float())
+            .expect("[slippage].cost_gate_win_rate_floor is a float");
+
+        assert_eq!(
+            PROMOTION_FALLBACK_SAFETY_MULTIPLIER, live_mult,
+            "cost-wall safety_multiplier fallback drifted from live SSOT"
+        );
+        assert_eq!(
+            PROMOTION_FALLBACK_WIN_RATE_FLOOR, live_floor,
+            "cost-wall win_rate_floor fallback drifted from live SSOT"
+        );
+        // fee_bps fallback 必為 +INF（fail-closed）。
+        assert!(
+            PROMOTION_FALLBACK_FEE_BPS.is_infinite() && PROMOTION_FALLBACK_FEE_BPS > 0.0,
+            "fee_bps fallback must be +INFINITY (fail-closed)"
+        );
     }
 }

@@ -24,6 +24,8 @@
 mod cycle_counters;
 mod evaluate;
 mod persist;
+// Phase 2（demo→live 促升）：EDGE-ANCHORED criteria gate 純函數模塊。
+mod promotion_criteria;
 mod rich_inputs;
 
 /// Re-export `load_latest_applied_params` at the `strategist_scheduler::`
@@ -41,6 +43,11 @@ pub use persist::load_latest_applied_params;
 pub use rich_inputs::{
     compute_regime_label, verify_quant_justification, CellEstimateView, NewsItemView, RichInputs,
     REASON_NEWS_SOLO_TRIGGER, REASON_QUANT_JUSTIFICATION_UNVERIFIED,
+};
+// Phase 2（demo→live 促升）：criteria gate 型別 + 純函數，從
+// `strategist_scheduler::` 命名空間 re-export 供 IPC dispatch handler 引用。
+pub use promotion_criteria::{
+    evaluate_promotion_criteria, ActiveCellEdge, PromotionCriteriaInput, PromotionVerdict,
 };
 
 use crate::ai_service_client::AiServiceClient;
@@ -400,20 +407,24 @@ impl StrategistScheduler {
     /// Promote validated params from the tune target (Demo) to Live.
     /// 從 tune target（Demo）促升已驗證參數到 Live。
     ///
-    /// **Not invoked internally in this PR.** Phase 5+ will wire:
-    ///   - Promotion criteria (N consecutive stable demo applies + no drawdown breach)
-    ///   - IPC trigger (operator `POST /api/v1/strategist/promote`)
-    /// This method exists so that wiring becomes additive, not structural.
+    /// **★ FORWARD-RISK / 0-auto-caller STUB（Fix 8，2026-06-17）★**
+    /// **必須維持 0 production caller。** Phase 2 的合法 demo→live 促升路徑是
+    /// Python `POST /api/v1/strategist/promote`，它經 IPC `update_strategy_params`
+    /// 走 `dispatch_request` 的 **chokepoint**（Phase-0 live-write token 在那裡強制驗）。
+    /// 本方法走的是另一條路 `promote_cmd_snapshot()`（in-process Rust→Live cmd channel），
+    /// **不經 dispatch chokepoint**，故 **完全繞過 Phase-0 token + criteria gate + flag +
+    /// 5-gate**（event_consumer handle_update_strategy_params 直改 ConfigStore 無 token 檢查）。
+    /// 任何 Phase 5+ in-process 觸發若呼叫此方法，等於在 live pipeline 上開一條無授權的
+    /// 寫入口（承 security MED-2 forward-risk finding）。**硬前置（任何接線前必滿足其一）**：
+    ///   (a) 此 in-process sink 自行重跑 criteria/flag/token 驗證，或
+    ///   (b) 把 promote 改道經 `dispatch_request`，讓既有 chokepoint 生效。
+    /// 在滿足之前，本方法僅供 tests.rs 引用（grep `.promote_params_to_live(` 應 0 production
+    /// caller）。**E2/CC review checklist：新增 caller 即 BLOCKER。**
     ///
     /// Returns `Err` if:
     ///   - no Live promote sender is currently available (Live engine not bound)
     ///   - Send fails (Live engine's cmd channel closed — reports up)
     ///   - UpdateStrategyParams handler returns error (strategy unknown / invalid params)
-    ///
-    /// **本 PR 不會自動調用。** Phase 5+ 再補：
-    ///   - 促升 criteria（N 輪穩定 demo 應用 + 無 drawdown 越界）
-    ///   - IPC 觸發器（operator `POST /api/v1/strategist/promote`）
-    /// 此方法存在是為了讓接線變成疊加而非重構。
     pub async fn promote_params_to_live(
         &self,
         strategy_name: &str,

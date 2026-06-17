@@ -77,6 +77,10 @@ pub use engine_routing::{
 };
 pub use protocol::{IpcError, JsonRpcError, JsonRpcRequest, JsonRpcResponse};
 pub use server::IpcServer;
+// E1-C 整合 seam（2026-06-17）：把 dispatch 私有 setter 經 facade 暴露給 binary
+// crate `openclaw-engine`（main.rs boot），讓促升判定 handler 能讀真 EdgeEstimates。
+// 鏡像上方 `pub use server::IpcServer` 把 lib 內部項目提供給 binary 的模式。
+pub use dispatch::set_promotion_edge_slot;
 pub use slots::{
     AuditPoolSlot, BtcLeadLagPanelSlot, BudgetTrackerSlot, CostEdgeAdvisorSlot,
     EdgeReloadSenderSlot, FundingCurvePanelSlot, HStateCacheSlot,
