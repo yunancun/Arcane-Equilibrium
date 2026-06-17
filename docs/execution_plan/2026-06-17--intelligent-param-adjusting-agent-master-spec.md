@@ -740,29 +740,94 @@ criteria gate 的**純邏輯**在 Rust（`promotion_criteria.rs`），**資料 q
 
 ---
 
-## PHASE 3 — RiskConfig agent 調參（全範圍件）
-**目標**：agent 調 **非 survival** RiskConfig 旋鈕，demo 自主 + live 經 Phase 2 促升閘。survival floors 永遠 operator-only。需 Phase 0 完成。
+## PHASE 3 — RiskConfig agent 調參 — BUILD-READY（2026-06-17 PA in-place rewrite）
+**目標**：agent 調 **非 survival** RiskConfig 旋鈕，demo 自主 + live **僅**經 Phase-2 人工促升閘。survival floors 永遠 operator-only。需 Phase 0 完成（live 半另需 Phase 2）。
 
-### 新 `RiskConfigDirectiveSink`（DirectiveApplier 第三 sink）
-- 新增 `DirectiveType::AdjustRiskConfig` + 平行 sink trait（**不**擴 PipelineCommandSink——其契約 strategy_ipc_impl.rs:11-24 禁碰 RiskConfig，保此不變量）。經 Rust `ConfigStore<RiskConfig>` 直寫（in-process，source=Agent），**永不**走 Python operator route（保 agent 路徑在 Rust denylist 內）。
+> **★★★ v1 誠實邊界（先講結論，全節據此設計）**：親 grep 證 `DynamicStop`/`RegimeMultipliers` 等候選 allowlist 欄位**在 struct 中沒有任何 operator-set band 欄**（`DynamicStop::validate` risk_config_advanced.rs:165-178 只查 `base_ratio>0 / cap_ratio>0 / base<=cap / atr_*>0`；`RegimeMultipliers::validate` risk_config.rs:1263-1276 只查 `stop/tp/time > 0`）。**沒有 band = clamp-cannot-widen 對它們是空操作（VACUOUS）**。因此 v1 的**硬規則 U5**（見下）把所有「無 operator band」的欄位**留在 denylist**。淨效果：**v1 很可能以 allowlist 實質為空出貨 → flag-ON 也 tune NOTHING**。這是**正確的 inert 行為**（與 Phase 1/2「機器先就位、edge 證據/band 未備齊就持續 fail-closed」一致），不是缺陷。agent 真正能動任何 RiskConfig 旋鈕的**啟動路徑 = operator+QC 先加 band 欄（band 欄自身 denylist）+ 填值**（§3.5）。
 
-### 欄位級 ALLOWLIST（非 survival，agent 可在 operator band 內動）
-- `regime.{trending,volatile,ranging,squeeze,unknown}.*` 乘數
-- `dynamic_stop.{base_ratio,cap_ratio,trailing_min_rr,atr_stop_mult,atr_tp_mult}`（不可超 survival SL/TP 上限）
-- `limits.holding_hours_max`（**僅向下/收緊**）
-- `agent.{trailing_activation_pct,trailing_distance_pct,size_multiplier}`（size_multiplier 已 clamp [0.1,1.0]）
+### §3.0 in-process 寫入面 + demo-only-Arc 結構閘（must-fix「IN-PROCESS SELF-GATE」/ E3 MED-2）
+- **新 `RiskConfigDirectiveSink`（DirectiveApplier 的平行 sink，不是 PipelineCommandSink 的第 N 個方法）**。**不**擴 `StrategyIpcSink` trait（strategy_ipc_impl.rs:11-24，ARCH-RC1 契約禁碰 RiskConfig — 保此不變量）。新 sink 是獨立 struct，持有 `Arc<ConfigStore<RiskConfig>>` 並經 `ConfigStore::apply_patch(PatchSource::Agent, …)`（store.rs:155）**in-process 直寫**，**永不**走 Python operator route（`POST /config/global` 等），故 agent 路徑的 denylist/clamp 永遠在 Rust 內、不可繞。
+- **★ 命門：此 in-process 寫入不經過 IPC `dispatch_request` chokepoint（dispatch.rs:127 前）→ 結構上拿不到 Phase-0 `live_authz_token` 強制**。因此 sink 自身必須結構性保證「live 寫只在 promotion-state 在 frame 內時可達」。設計用**型別/所有權閘**（非 runtime 字串判斷）：
+  - **demo sink = `RiskConfigDirectiveSink::demo(Arc::clone(&risk_stores.demo))`**：建構時**只**接 `risk_stores.demo` 的 Arc，**結構上不持有 `risk_stores.live` 的 Arc**。鏡像兩個已部署的 in-process daemon 先例：`EngineCommandSink::demo(...)`（tasks.rs:286，Teacher 既有 sink）+ `spawn_cost_edge_advisor_if_enabled` 取 `Arc::clone(&risk_stores.demo)`（cost_edge_advisor_boot.rs:167，RFC §8 cross-env 獨立）。**禁用 `PerEngineRiskStores::select(engine_str)`**（engine_routing.rs:93 unknown→paper fail-safe，會用 runtime 字串把 live Arc 取出 = 破壞結構閘）。demo sink 連 live Arc 的 handle 都沒有 → 無論 directive 怎麼寫都**不可能** mutate live ConfigStore（E3 編譯期可證：demo sink struct 欄位型別不含 live store）。
+  - **live 寫 = 不存在獨立的「live RiskConfigDirectiveSink」**。agent 對 RiskConfig 的 live 變更**唯一路徑 = Phase-2 promotion**：把 demo 上已驗證的 RiskConfig 子集，經 §2 既有 `strategist_promote_routes` 同級機制（operator confirm + `all_five_live_gates_ok` + Phase-0 token + 同步 fail-closed audit）促升。**裁決：Phase 3 不新增任何把 RiskConfig 寫 live 的 in-process Rust 路徑**；live RiskConfig 的促升走 Python route → IPC `patch_risk_config{engine:live}`（已過 dispatch chokepoint + Phase-0 token，handlers_config.rs）。這與 Phase 2 「不接 `promote_params_to_live()` in-process stub、沿用過 chokepoint 的 route」裁決同構。**RiskConfig 促升的 criteria 模塊 reuse Phase 2 的 `promotion_criteria.rs`**（§2.4 edge-anchored，spec :610 已預留 headroom）。
 
-### survival DENYLIST（operator-only 永遠，agent 寫=硬 veto）
-`limits.{stop_loss_max_pct,take_profit_max_pct,position_size_max_pct,total_exposure_max_pct,correlated_exposure_max_pct,leverage_max,session_drawdown_max_pct,daily_loss_max_pct,global_notional_cap_usdt,min_balance_usdt,consec_loss_cooldown_*}`、`per_trade_risk_pct`，加既有 P0_P1_DENYLIST_FIELDS。
-**cost_gate.k_***：operator 旗標 survival-class → Phase 3 **預設 denylist**；若日後允許僅向下(收緊)、在緊 band 內，永不向上（另一 operator 決定）。
+### §3.1 完整 survival DENYLIST（按 REAL RiskConfig dotted-path 欄名重寫；must-fix「SURVIVAL FLOOR INVARIANT」/ CC）
+> **★ 為何不可複用既有 `P0_P1_DENYLIST_FIELDS`**：那組（applier.rs:200-218）是 strategy-param 命名空間的舊名（`max_leverage` / `max_position_size_usd` / `hard_stop_pct` / `daily_loss_pct` / `max_drawdown_pct` …），**與 RiskConfig 真實葉名不同**（RiskConfig 是 `limits.leverage_max` / `limits.position_size_max_pct` / `limits.daily_loss_max_pct` / `limits.session_drawdown_max_pct`）。若直接套用，denylist **永遠 match 不到任何 RiskConfig patch key = 靜默全放行**。Phase 3 必須用下方按 risk_config.rs / risk_config_advanced.rs 親 grep 出的**真 dotted-path**重新 author 一份 `RISKCONFIG_SURVIVAL_DENYLIST`。既有 `P0_P1_DENYLIST_FIELDS` 為 strategy-param sink 保留不動（仍對 AdjustParam 有效）。
 
-### clamp-cannot-widen（鏡像 DynamicRiskSizer）
-每 allowlist 欄位：agent 提議值 → sink clamp 至 live RiskConfig 讀出的 `[band_min,band_max]`（band 欄位本身在 denylist，agent 不能放寬）。放寬風險的 UP 移動需 LCB 顯著性 gate（dynamic_risk_sizer.rs:42-52）；收緊 DOWN 不設限。
+**RISKCONFIG_SURVIVAL_DENYLIST（dotted-path，全部 operator-only forever；agent 觸碰=硬 veto）**：
 
-### 治理 gate（復用 Teacher applier）
-1) 欄位 allowlist check（非 allowlist 或含 denylist→拒，inverse+extend find_denylisted_field applier.rs:306）；2) GovernanceCore veto(applier.rs:342)；3) daily-loss/drawdown veto；4)(live only) 值須經 Phase 2 促升(operator 確認+5 gate+Phase-0 token)，demo 自主無 token。每結果→learning.directive_executions row。
-- flag `OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED` default-OFF（master）。
-- Role chain：`PA → CC(證 P4/P5/P7/P11,MANDATORY) → E3(sink 在 live 無 token 不可達,MANDATORY) → QC+MIT(旋鈕由 leak-free 證據支撐? regime/dynamic-stop 敏感度,MANDATORY) → BB(live sizing 影響) → E1(新 sink+DirectiveType+allowlist) → E2(對抗:survival veto/band-widen/live bypass) → E4(Linux:demo apply+audit+hot-reload; live 無促升被拒) → CC final → PM`
+- **絕對 SL/TP 上限 + 倉位/曝險上限（GlobalLimits，risk_config.rs:365-498）**：
+  `limits.stop_loss_max_pct`、`limits.take_profit_max_pct`、`limits.take_profit_enforced`、`limits.position_size_max_pct`、`limits.total_exposure_max_pct`、`limits.correlated_exposure_max_pct`、`limits.leverage_max`、`limits.session_drawdown_max_pct`、`limits.daily_loss_max_pct`、`limits.consec_loss_cooldown_count`、`limits.consec_loss_cooldown_min`、`limits.open_positions_max`、`limits.min_order_notional_usdt`、`limits.max_order_notional_usdt`、`limits.min_balance_usdt`、`limits.global_notional_cap_usdt`、`limits.per_trade_risk_pct`、`limits.margin_mode`、`limits.position_mode`、`limits.allowed_categories`。
+- **halt TTL（生存恢復語意，risk_config.rs:484/496）**：`limits.daily_loss_halt_ttl_ms`、`limits.drawdown_halt_ttl_ms`（後者 validate 強制=0；任何 agent 改都違 root#5/#6）。
+- **guardian 修正 caps（risk_config.rs:427-430）**：`limits.guardian_modification_size_factor`、`limits.guardian_modification_leverage_cap`。
+- **fast_track dust floors（survival 平倉語意，risk_config.rs:448/468）**：`limits.ft_min_notional_ratio_of_entry`、`limits.ft_dust_qty_floor_usd`。
+- **liquidation buffer（risk_config_advanced.rs:200 MarketGate）**：`market_gate.liquidation_buffer_pct`（連帶整個 `market_gate.*` 微結構 gate 不在 allowlist，default-deny 自動擋；但 liquidation_buffer 顯式列入以便 audit 可讀）。
+- **整個 cascade.* struct（CascadeThresholds，risk_config.rs:1039-1070；must-fix 點名「the ENTIRE cascade.* struct」）**：`cascade.drawdown_cautious_pct`、`cascade.drawdown_reduced_pct`、`cascade.drawdown_defensive_pct`、`cascade.drawdown_circuit_pct`、`cascade.daily_loss_cautious_pct`、`cascade.daily_loss_reduced_pct`、`cascade.daily_loss_circuit_pct`、`cascade.consec_loss_cautious`、`cascade.consec_loss_reduced`、`cascade.consec_loss_circuit`、`cascade.pressure_cautious`、`cascade.pressure_reduced`、`cascade.pressure_defensive`、`cascade.pressure_circuit`、`cascade.min_hold_ms`。**E1 實作層面更穩的做法：denylist 一條 `cascade`（整個 struct 前綴）即可，遞迴 matcher 對 `cascade.` 下任何葉直接拒**（見 §3.3）。
+- **cost_gate 全部 5 欄（CostGate，risk_config.rs:1283-1295；must-fix：k-up + min_confidence-down 都放寬 edge filter = survival-class）**：`cost_gate.k_base`、`cost_gate.k_medium`、`cost_gate.k_small`、`cost_gate.min_confidence`、`cost_gate.adx_trending`。**整個 `cost_gate.*` 預設 denylist**；k 上調 / min_confidence 下調 / adx_trending 下調都是「放寬 edge 過濾 = 開更多倉」，屬 survival-class。日後若要允許僅向下收緊（k 下調 / min_confidence 上調）須另一 operator 決定 + 加 band（同 §3.5），v1 不開。
+- **既有 P0_P1_DENYLIST_FIELDS 的硬邊界字面 token 一併納入（防 agent 用舊名/別名注入）**：`execution_state`、`execution_authority`、`system_mode`、`live_execution_allowed`、`max_retries`（連帶 §四 三硬邊界字面）。這些雖非 RiskConfig 葉，但作為 free-text key 出現即 veto（defense-in-depth）。
+
+### §3.2 候選 ALLOWLIST（v1 實質為空 — 每欄須有 operator band 才解禁）
+> 下列是「**若**未來 operator+QC 加了 band 欄、且 QC 確認該欄由 leak-free 證據支撐」才可能進 allowlist 的候選。**v1 因無 band 欄，全部按 §3.3 U5 規則留在 default-deny（=denylist）**。列出是為了把 §3.5 啟動路徑釘清楚，不是 v1 即可調。
+
+- `regime.{trending,volatile,ranging,squeeze,unknown}.{stop,tp,time}` 乘數（RegimeMultipliers，risk_config.rs:1182-1200）— 無 band 欄 → v1 deny。
+- `dynamic_stop.{base_ratio,cap_ratio,trailing_min_rr,atr_stop_mult,atr_tp_mult}`（DynamicStop，risk_config_advanced.rs:124-135）— 無 band 欄 → v1 deny。
+- `agent.{trailing_activation_pct,trailing_distance_pct,size_multiplier}`（AgentParams，risk_config.rs:782-820）— `size_multiplier` 已有結構性 clamp `[0.1,1.0]`（validate :854）算「半個 band」，但 trailing_* 只有 `>0`；**v1 仍 deny**（要 explicit `[band_min,band_max]` 才一致，避免「有些半 band 有些無」的不一致防線）。
+- **注意**：`agent.stop_loss_pct`/`agent.take_profit_pct`（P2 有效止損止盈）**不入候選 allowlist** — 它們是直接 SL/TP 數值，與 survival SL/TP 上限耦合（validate cross-field :311-326），歸 survival 語意，留 deny。
+
+### §3.3 遞迴 dotted-path matcher + allowlist-default-deny（must-fix「RECURSIVE/DOTTED-PATH」/ CC+E2）
+> **★ 為何必須重寫 matcher**：既有 `find_denylisted_field`（applier.rs:551-559）**只比頂層 object key**（`for key in obj.keys()`，不遞迴）。RiskConfig patch 是**巢狀** `{"limits":{"leverage_max":50}}` → 頂層 key 只有 `"limits"`，舊 matcher 看不到 `leverage_max` → **整條 survival 邊界被繞過**。
+
+- **新 `riskconfig_patch_leaves(patch: &serde_json::Value) -> Vec<String>`（純函數，sibling）**：遞迴走整個 patch JSON 樹，對每個**葉節點**（非 object 的 value，或 object 內的純量）產出其完整 dotted-path（如 `limits.leverage_max`、`regime.trending.stop`、`cascade.min_hold_ms`）。陣列葉用 `key[]` 或整 key 視為單葉（保守：`allowed_categories` 整體視為一葉，落 denylist）。
+- **判定順序（fail-closed，default-deny）**：對每個葉 path：
+  1. 若 path（或其任一前綴，如 `cascade`、`cost_gate`、`market_gate`）∈ `RISKCONFIG_SURVIVAL_DENYLIST` → **VetoedByHardBoundary**（reason 帶確切 dotted-path）。
+  2. 否則若 path ∉ `RISKCONFIG_ALLOWLIST`（v1 為空集）→ **VetoedByDefaultDeny**（reason `riskconfig_field_not_allowlisted`）。
+  3. 僅當 path ∈ allowlist 且 path 有對應 operator band → 進 §3.4 clamp。
+- **任一葉被拒 → 整個 patch 拒（all-or-nothing，對齊 ConfigStore apply_patch 語意）**。E2 對抗測試必含：`{"limits":{"leverage_max":50}}`（nested survival）、`{"cascade":{"min_hold_ms":0}}`（nested struct-prefix）、`{"cost_gate":{"k_base":99}}`、`{"regime":{"trending":{"stop":99}}}`（v1 無 band → default-deny）、`{"unknown_top":{"x":1}}`（未知頂層 → default-deny）。
+- **大小寫/別名**：保留既有 `eq_ignore_ascii_case` 比對；denylist token 全小寫存。
+
+### §3.4 clamp-cannot-widen + LCB-UP gate（must-fix「clamp-cannot-widen」+ E2 MED-2 race；鏡像 DynamicRiskSizer）
+- **band 從何讀**：sink 從**自己持有的 demo `ConfigStore<RiskConfig>` 當前快照**讀該欄的 `[band_min, band_max]`（band 欄自身在 denylist → agent 不能放寬 band → clamp 永遠對 operator 真值生效）。
+- **★ 原子性（E2 MED-2：load→merge→replace 非原子，handlers_config.rs:119/144 是舊路徑的問題）**：新 sink **不**用 load-then-replace，而是**在單一 `ConfigStore::apply_patch(PatchSource::Agent, mutate, validate)` closure 內**（store.rs:155-192，write_lock 持有期間）讀 band + clamp + 寫。`apply_patch` 在 write_lock 內快照 current（store.rs:173）→ 同一 critical section 內讀 band 與寫值 = 無 band-narrow-during-agent-UP race。validate 仍跑完整 `RiskConfig::validate()`（all-or-nothing 回滾）。
+- **clamp 規則**：agent 提議 `v_raw` → `v = clamp(v_raw, band_min, band_max)`。clamp 後值永遠 ⊆ operator band。
+- **方向 gate（鏡像 DynamicRiskSizer DYNAMIC-RISK-SIG-1，dynamic_risk_sizer.rs:275-290 真碼，非 spec 舊引的 :42-52 config doc）**：
+  - **DOWN（朝「更保守/交易更少」方向）= ungated**（survival-first，root#5/#6）。每欄須標 monotonic direction（哪邊是 tighten）——**這正是 Phase 2 §2.4 已釘的 v1 direction-bound 問題**（ParamRange 無方向語意）；RiskConfig 欄的 tighten 方向由 QC 在加 band 時一併釘（如 `atr_stop_mult` 下調=停損更近=更保守?需 QC 確認，因更近停損也可能增 whipsaw — 這正是為何 v1 不靠猜）。
+  - **UP（朝「放寬/交易更多」方向）= 需 LCB 顯著性 gate**：reuse DynamicRiskSizer 的 `lcb = metric − sig_z·se; lcb >= threshold` + 樣本硬 floor `max(min_trades, sig_min_trades)` 形態。**但 metric 來源必須是 leak-free per-(strategy,symbol) edge 證據**（reuse Phase 1 `edge_estimates` cell / Phase 2 `validation_passed` 鏈），不是 RiskConfig 旋鈕自己的歷史。**v1 因無 band、無 allowlist 欄、無「哪個 edge metric 支撐哪個 risk 旋鈕」的 QC 映射 → UP gate 無對象 = 進一步坐實 v1 inert**。
+- **誠實標**：clamp-cannot-widen 對「無 band」欄是 vacuous（U5），所以**安全來自 §3.3 default-deny 把無 band 欄擋在 clamp 之前**，clamp 只是「已有 band 欄解禁後」的第二層。
+
+### §3.5 U5 硬規則 + band-field 加法設計（must-fix「U5 no-operator-band→stays-denylisted」）
+- **U5 硬規則（v1 不可違反）**：**任何 allowlist 候選欄，若 RiskConfig struct 中沒有對應的 operator-defined `[band_min, band_max]` 欄，則該欄留在 denylist（default-deny），agent 不可調。**
+- **啟動路徑（agent 將來能調某 risk 旋鈕的唯一方式）**：
+  1. **operator + QC** 決定某欄值得交給 agent，且能指出**leak-free 證據源**（哪個 edge metric / 哪個方向是 tighten）。
+  2. 在 RiskConfig struct **新增該欄的 band 子欄**（如 `dynamic_stop.atr_stop_mult_band: Option<(f64,f64)>` 或獨立 `DynamicStopBands` sub-struct）。**band 欄自身列入 `RISKCONFIG_SURVIVAL_DENYLIST`**（agent 永不能改自己的 band — 這是 clamp-cannot-widen 的根基）。band 欄 `Option`/default=None → 未設時該欄**仍 deny**（None ≠ 解禁）。
+  3. operator 經正常 operator route 填 band 值（operator-only 寫，過既有 5-gate / `_require_risk_write`）。
+  4. 該欄才進 `RISKCONFIG_ALLOWLIST`（編譯期常數或由「band 欄非 None」動態推導 — **裁決：動態推導**，即 allowlist 成員資格 = 「在候選集 ∧ band 欄 Some」，避免「allowlist 常數列了但 band 沒填」的不一致）。
+  5. v1 ship 時所有 band 欄 None → allowlist 動態為空 → flag-ON 也 tune nothing。
+- band 欄的 schema/validate（band_min < band_max、band ⊆ 該欄物理合法域、不得放寬到 survival 邊界外）由加 band 的那次 operator+QC 工作定義，**不在 Phase 3 v1 範疇**（v1 只建機器 + default-deny）。
+
+### §3.6 治理 gate 全鏈（demo sink，flag-ON 時每個 directive 順序）
+1. **flag check**：`OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED` ≠ "1" → directive 不被 route 到此 sink（DirectiveType::AdjustRiskConfig 在 flag-OFF 時於 `apply_inner` match arm 直接回 `InvalidDirective{disabled}`，不靜默吞）。
+2. **§3.3 遞迴 matcher**：任一葉 ∈ denylist → VetoedByHardBoundary；任一葉 ∉ allowlist → VetoedByDefaultDeny。（v1：所有 RiskConfig 葉都會在此被擋。）
+3. **GovernanceCore veto**（reuse `GovernanceCheck::session_halted()` applier.rs:141）：session halted / daily-loss / drawdown 觸發 → 拒（stress 時擋全 agent 調參）。
+4. **§3.4 clamp + 方向 gate**（僅 allowlist 欄到此）：clamp 到 band；UP 需 LCB；在 `apply_patch` closure 內原子寫。
+5. **audit（§3.7）**：每個 outcome（Applied / VetoedByHardBoundary / VetoedByDefaultDeny / VetoedByGovernance / IpcError-equiv / Clamped）→ `learning.directive_executions` row（reuse 既有表，**無新 migration**；source=agent）。reuse `super::writer::record_execution`（applier.rs:276）；audit 失敗不吞 outcome（既有語意），但 Phase 3 **QA 必實證 5 類 outcome 都落 row**（audit_events 歷史稀疏，P8 風險）。
+
+### §3.7 audit（reuse learning.directive_executions，無新 migration）
+- 每次 auto-tune（含被拒）→ row：`directive_id / directive_type=adjust_risk_config / scope(欄 dotted-path 或 "riskconfig") / params(原始 patch) / outcome / clamped_from→clamped_to(若 clamp) / band_used / source=agent`。
+- 新 IPC 觀測 `get_risk_directive_metrics`（per-field apply/reject/clamp count + last value + last reject reason），GUI Risk tab surface（node --check 前置）。
+- v1 預期 row 形態：清一色 `VetoedByDefaultDeny`（因 allowlist 空）→ **這正是「機器活著、安全 inert」的可觀測證據**。
+
+### §3.8 flag / singleton / migration / 降級
+- flag `OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED` **default-OFF（master）**。flag-OFF = sink 不被 route（bit-identical：DirectiveType::AdjustRiskConfig 不存在於現行 directive 流，flag-OFF 下新 arm 立即回 disabled）。
+- singleton：`RiskConfigDirectiveSink`（demo Arc holder）須登記 CLAUDE §九 singleton 表（merge 前）。
+- migration：**無**（reuse learning.directive_executions）。
+- **降級 / rollback**：(a) flag-OFF = 凍結整個 Phase 3，sink no-op；(b) demo sink 結構上不持 live Arc = live RiskConfig 永遠不被此路徑碰（編譯期不變量，非 runtime 開關）；(c) GovernanceCore session-halt / daily-loss / drawdown veto = stress 時擋全 agent 調參；(d) v1 allowlist 空 = 即使誤開 flag 也 tune nothing；(e) live RiskConfig 促升唯一觸發 = operator Phase-2 confirm（撤 `OPENCLAW_LIVE_PATCH_SECRET` → 全 live patch fail-closed）。
+
+### §3.9 E1 派發計劃（檔案邊界 + 並行度）
+- **E1-RUST-A（denylist + 遞迴 matcher，純函數，無 IO，可先行）**：新 sibling `applier_riskconfig.rs`（applier.rs 已 1072 行 >800，§九；新 DirectiveType+sink 加上去恐近 2000 cap → 拆 sibling，LOW 注意項已記）。含 `RISKCONFIG_SURVIVAL_DENYLIST` 常數（§3.1 真 dotted-path）+ `riskconfig_patch_leaves` 遞迴 + 判定函數 + 全 §3.3 對抗單測。
+- **E1-RUST-B（DirectiveType + sink + clamp + wiring）**：parser.rs 加 `DirectiveType::AdjustRiskConfig`（enum + snake_case + ALLOWED_FIELDS 不變，params 仍 free-form）；apply_inner match arm（applier.rs:291）加 `apply_adjust_risk_config`；新 `RiskConfigDirectiveSink::demo(...)` struct（持 demo Arc）；clamp 在 `apply_patch` closure 內（§3.4）；tasks.rs spawn 處 wire（demo Arc，鏡像 :286）+ flag gate。
+- **依賴**：B 依賴 A（matcher 函數）。A 可與 Phase-2 `promotion_criteria.rs`（live 促升 criteria reuse）並行（不同檔）。
+- **E2 重點審查 3 點**：(1) **遞迴 matcher nested-widen**：`{"limits":{"leverage_max":50}}` 與 `{"cascade":{...}}` 必被拒（舊 top-level matcher 會放行 = 命門）；(2) **demo-only-Arc 結構閘**：grep + 型別證 RiskConfigDirectiveSink 欄位不含 `risk_stores.live`，且不調用 `select(engine_str)`（編譯期不可達 live）；(3) **allowlist-default-deny + U5**：未列舉葉 + 無 band 欄一律 default-deny；v1 對任何 RiskConfig patch 回 VetoedByDefaultDeny（證 inert）。
+- Role chain：`PA → CC(證 P4 策略不繞風控 / P5 生存>利潤 / P7 學習不改 live / P11 自主在 P0/P1 內,MANDATORY) → E3(sink 在 live 結構不可達 + in-process 不繞 token 的補償閘,MANDATORY) → QC+MIT(哪個 leak-free edge metric 支撐哪個 risk 旋鈕 + tighten 方向 + 是否值得加 band,MANDATORY；v1 預期結論「暫不加任何 band」) → BB(live sizing 影響：v1 無 live 寫故 N/A，記為 Phase-2-promotion 時才復審) → E1-RUST-A ∥ (promotion_criteria) → E1-RUST-B → E2(對抗 3 點) → E4(Linux 真 engine：demo flag-ON 仍 default-deny 不動值 + audit row 落 + 確認 live ConfigStore 版本號不變) → CC final → PM`
 
 ---
 
@@ -877,7 +942,7 @@ criteria gate 的**純邏輯**在 Rust（`promotion_criteria.rs`），**資料 q
 - **U2(Phase 1) RESOLVED**：payload builder = `build_strategist_eval_payload`（evaluate.rs:**423**，caller :159-165）；signature 改為追加 `Option<&RichInputs>`（§1.2）。:310 是 tune_target=Demo fail-fast guard（E2 已證 Phase 1 結構碰不到 live）。
 - **U3(Phase 1) → 細分 §1.6**：agent_adjustable:true ParamRange 集不擴；命門是 **edge_estimates cell key（`strategy::symbol`，edge_estimates.rs:280）與 fills 的 `strategy_name` 必須同字典**（否則 cell 永遠 absent → quant gate 永遠拒 → Phase 1 無效），E1 必驗。ml_shadow demo-lane 可達性（U5-P1，MIT 確認，可能恆 absent → 誠實移欄）。regime 自算 leak-free（U6-P1，只用嚴格過去 1m closes）。quant gate 方向語意（U4-P1，QC 定，v1 不卡方向）。
 - **U4(Phase 0,security,operator+E3) RESOLVED-PENDING-RATIFY**：capability-token 模型已具體設計（§0.1-§0.2，綁操作+單次 nonce+TTL 25s+constant-time）。operator 已鎖定方向（Operator 決策 #3）；E3 review token 綁定/replay/nonce ledger/canonical 對齊。拒絕的替代=全 5-gate-in-Rust（重複權威 + Rust 缺 session/secret-slot context）。
-- **U5(Phase 3,quant,QC)**：各 allowlist 欄位的 operator band（regime 乘數、dynamic_stop ratio）。band 即安全面；無 band 則該欄位留 denylist。
+- **U5(Phase 3,quant,QC) RESOLVED-AS-HARD-RULE**：親驗 DynamicStop/RegimeMultipliers struct **無 band 欄**（validate 只查 >0）→ §3.5 釘成硬規則「無 operator band → 留 denylist」，v1 allowlist 空 = inert（正確）。**剩餘 QC 工作（非 v1 阻塞）**：日後若要解禁某欄，QC 須回答「哪個 leak-free edge metric 支撐該風險旋鈕 + 哪個方向是 tighten」才加 band（§3.5 啟動路徑）。v1 預期 QC 結論=「暫不加任何 band」。
 
 ---
 
@@ -897,11 +962,11 @@ criteria gate 的**純邏輯**在 Rust（`promotion_criteria.rs`），**資料 q
 - **[PHASE-0 RESOLVED — 折入 §0.5]** fail-open flag 移除（E3 MED-1）：`OPENCLAW_LIVE_PATCH_TOKEN_REQUIRED` 概念整個移除（§0.5）；handlers_config.rs:157-164 warn!-only block 刪除；唯一緊急姿態=撤 `OPENCLAW_LIVE_PATCH_SECRET`（fail-closed）。
 - **[PHASE-0 PARTIAL — 折入 §0.4]** live audit fail-closed（CC §5）：Phase 0 每次 gate/token reject 落 V014 `config_reject` row（§0.4，復用既有表，無新 migration）；QA 必在 Linux PG **實證** accept(config_patch)+4 類 reject 都落 row。**「commit gate 在 audit 寫成功」的同步硬綁是 Phase 2 促升要求**（Phase 0 不改 commit↔audit 時序，避免 live patch 阻塞風險）。
 - **[PHASE-0 NOTE — §0.7 U-P0-1]** canonical 序列化 Python↔Rust 位元對齊（新增 must-resolve）：浮點字串化分歧會使 token hash 失配；E1-RUST 先產 T12 fixture，E1-PY 對齊；不一致則 Rust 主導 hash。**這是 Phase 0 build 的命門。**
-- **denylist 補全 + 用真 RiskConfig 欄名**（CC，**Phase 3 範疇**）：spec denylist 漏 `limits.{daily_loss_halt_ttl_ms,drawdown_halt_ttl_ms,guardian_modification_leverage_cap,guardian_modification_size_factor,open_positions_max,min/max_order_notional_usdt,ft_*}`、**整個 `cascade.*`**、`cost_gate.{min_confidence,adx_trending}`（min_confidence 下調=放寬 gate 同 k 上調）。且既有 `P0_P1_DENYLIST_FIELDS`(applier.rs:200-218) 用舊名(max_leverage)≠RiskConfig 葉名(leverage_max)→不可依賴,Phase 3 denylist 須按真 RiskConfig dotted-path 重寫。
-- **nested 遞迴 matcher**（CC + E2，**Phase 3 範疇**）：`find_denylisted_field`(applier.rs:551-559) 只比 top-level key→`{"limits":{"leverage_max":50}}` 繞過。須 dotted-path 遞迴走整 patch 樹 + allowlist-default-deny + E2 nested-widen 對抗測試。
-- **U5 成硬 gate**（CC，**Phase 3 範疇**）：regime/dynamic_stop 在 struct **無 band 欄**(DynamicStop/RegimeMultipliers validate 只查 >0)→clamp-to-band 是空操作。無 operator band 的 allowlist 欄位 v1 **留 denylist**（或先加 operator-set band 欄,band 本身 denylist）。
-- **clamp-cannot-widen race**（E2 MED-2，**Phase 3 範疇**）：ConfigStore load→merge→replace 非原子(handlers_config.rs:119/144)。新 sink 須在單一 `apply_patch` closure(write_lock 內,store.rs:155-192) 讀 band+clamp+寫,或加 CAS version precondition。加 band-narrow-during-agent-UP race 測試。
-- **in-process sink 自有 gate**（E3 MED-2，**Phase 3 範疇**）：Phase 3 sink in-process 寫 ConfigStore 不過 IPC token 層→live 寫須 sink 自驗 token/promotion-state；demo sink 只持 demo ConfigStore Arc,結構上不可持 live Arc（P1 單一 ConfigStore/engine,E3 驗）。
+- **[PHASE-3 RESOLVED — 折入 §3.1]** denylist 補全 + 用真 RiskConfig 欄名（CC）：§3.1 已按親 grep 的真 dotted-path author 完整 `RISKCONFIG_SURVIVAL_DENYLIST`（含 halt_ttl/guardian/open_positions/notional/ft_*/**整個 cascade.***/**整個 cost_gate.* 5 欄含 min_confidence+adx_trending**/liquidation_buffer），並明示既有 `P0_P1_DENYLIST_FIELDS`(applier.rs:200-218) 舊名不可複用（max_leverage≠leverage_max 會靜默不 match）。
+- **[PHASE-3 RESOLVED — 折入 §3.3]** nested 遞迴 matcher（CC + E2）：§3.3 新 `riskconfig_patch_leaves` 遞迴走整 patch 樹（取代只比 top-level 的 `find_denylisted_field` applier.rs:551-559）+ 前綴匹配(cascade/cost_gate/market_gate)+ allowlist-default-deny + E2 nested-widen 對抗測試清單。
+- **[PHASE-3 RESOLVED — 折入 §3.2/§3.5]** U5 成硬 gate（CC）：§3.5 釘死「無 operator band → 留 denylist」硬規則；§3.2 列候選但全標 v1 deny（DynamicStop/RegimeMultipliers validate 只查 >0，親驗無 band 欄）；§3.5 設計 band-field 加法為唯一啟動路徑（band 欄自身 denylist + Option default None + 動態 allowlist 推導）。**v1 ship inert（allowlist 空）= 正確**已釘為節首結論。
+- **[PHASE-3 RESOLVED — 折入 §3.4]** clamp-cannot-widen race（E2 MED-2）：§3.4 規定 clamp 在單一 `ConfigStore::apply_patch` closure（write_lock 內，store.rs:155-192）讀 band+clamp+寫，同 critical section 消除 band-narrow-during-UP race（不用 load→replace）。LCB-UP gate 真碼引 dynamic_risk_sizer.rs:275-290。
+- **[PHASE-3 RESOLVED — 折入 §3.0]** in-process sink 自有 gate（E3 MED-2）：§3.0 demo sink 結構上**只**持 `Arc::clone(&risk_stores.demo)`（鏡像 EngineCommandSink::demo tasks.rs:286 + cost_edge_advisor_boot.rs:167 先例），編譯期不持 live Arc、禁用 `select(engine_str)`；**Phase 3 不新增任何 RiskConfig→live in-process 路徑**，live 促升唯一走 Phase-2 route+chokepoint+token。
 - **news/quant-justification 須 server-side 驗值非 LLM 自述**（E3 MED-3 + CC §4 + E2 angle-6，**Phase 1 範疇**）：`quant_justification` free-text 是新注入出口+可被 news 敘事滿足。validate 須(1)news_context 標 untrusted 結構隔離;(2)引用的 quant 證據用 **engine 端獨立查/重算**(edge_estimates cell shrunk_bps 符號/量級與 delta 方向一致),news 在 gate 算術零權重;(3)新 reject 理由 `quant_justification_unverified`。news 只能在已獨立通過量化 gate 的選項間作 post-hoc tiebreaker。
 - **migration 號 build 時釘**（E2 MED-4，**Phase 2 範疇**）：最高現為 V143。P2 `learning.strategist_promotions` build 前重查 next-free(≥V144)+Guard A+double-apply,勿信本 doc 佔位。**Phase 0 無新 migration**（復用 V014）。
 - **method_registry 是描述非執行**（E2 MED-3）：真 wiring 在 dispatch.rs match arm(unknown→ERR_METHOD_NOT_FOUND);registry 條目 optional。
