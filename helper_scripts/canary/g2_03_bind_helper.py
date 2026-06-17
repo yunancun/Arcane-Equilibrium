@@ -247,6 +247,20 @@ def cmd_apply(args: argparse.Namespace) -> int:
     confirming with operator + checking qc_report_path BEFORE calling apply.
     apply 子命令：真送 IPC patch；caller 負責 operator 確認 + QC report 檢查。
     """
+    # PHASE 0 AUTH-1 re-home：--engine-mode live 直接禁用。Rust dispatch chokepoint
+    # 已對 engine==live 的 patch_risk_config 強制 live_authz token；本 helper 走 direct
+    # socket 不鑄 token，必被 fail-closed 拒。合法 operator live 寫入須走 Python 控制面
+    # （POST /api/v1/paper/risk/config/engine/live/global，已過 5-gate + Phase-0 token）。
+    # paper/demo/live_demo 維持既有 socket 直連（demo/paper 無 token 需求；live_demo 在
+    # PerEngineRiskStores::select 落到 paper store [_ => paper]，不寫 live store → 不需 token，
+    # 此 U-P0-2 由 engine_routing.rs:93-99 grep 證實）。
+    if args.engine_mode == "live":
+        logger.error(
+            "live writes must go through the Python control plane "
+            "(POST /api/v1/paper/risk/config/engine/live/global, 5-gate + token). "
+            "direct-socket --engine-mode live is disabled (PHASE 0 AUTH-1)."
+        )
+        sys.exit(2)
     overrides = _validate_floats(args)
     if not args.qc_report_path:
         logger.error("--qc-report-path REQUIRED for apply (PA RFC §4.2 binding SOP)")

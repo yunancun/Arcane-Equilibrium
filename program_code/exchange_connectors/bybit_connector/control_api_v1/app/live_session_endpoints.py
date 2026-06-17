@@ -72,6 +72,20 @@ def _require_live_authority(actor: Any) -> None:
     base.require_scope_and_operator(actor, "live:authority")
 
 
+def _live_call_params_with_token(method: str, params: dict[str, Any]) -> dict[str, Any]:
+    """PHASE 0 AUTH-1：對 engine==live 的 LIVE_WRITE_METHOD（resume_paper / pause_paper）
+    鑄 method-bound capability token 併入 params。
+
+    為何在此鑄：caller（live session start/pause/resume）已先過自己的 operator/5-gate；
+    此 helper 不做授權，只鑄憑證（Python authorizer → Rust enforcer）。lazy import 避免
+    本檔 import-time 依賴 token 模組。secret 缺 → raise（fail-closed kill-switch，向上冒
+    泡成 IPC 失敗 → 既有 502/503 fail-closed 路徑）。
+    """
+    from .live_patch_token import call_params_with_token  # noqa: PLC0415
+
+    return call_params_with_token(method, params)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Session lifecycle endpoints / Session 生命週期端點
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -190,8 +204,13 @@ async def post_live_session_start(
 
     # IPC：恢復引擎管線。INV-A1 — 不可吞錯：resume 失敗則不 grant、不 active。
     # 如果管線因上次 stop 而暫停，恢復管線。
+    #
+    # PHASE 0 AUTH-1：resume_paper{engine:live} ∈ LIVE_WRITE_METHODS，Rust chokepoint
+    # 要求 token。此 call 緊接 all_five_live_gates_ok 通過之後（上方 :168 gate），故在此
+    # 鑄 method-bound token 併入 params（Python 是 authorizer、Rust 是 enforcer）。
     try:
-        result = await core._ipc_command("resume_paper", {"engine": "live"})
+        ipc_params = _live_call_params_with_token("resume_paper", {"engine": "live"})
+        result = await core._ipc_command("resume_paper", ipc_params)
     except Exception as exc:
         logger.error("Live session start BLOCKED: IPC resume_paper failed — actor=%s err=%s", actor_id, exc)
         core._set_execution_authority(None)  # fail-closed：確保無 orphan granted
@@ -479,7 +498,12 @@ async def post_live_session_pause(
     """
     _require_live_trade(actor)
     try:
-        result = await core._ipc_command("pause_paper", {"engine": "live"})
+        # PHASE 0 AUTH-1：pause_paper{engine:live} ∈ LIVE_WRITE_METHODS。pause 是「停止
+        # 新單但不平倉」控制，operator 過 _require_live_trade（live:trade scope）即可，
+        # 不要求完整五門（pause 本身收縮風險，不應因 authz 過期而無法暫停）。在此 gate 後
+        # 鑄 method-bound token。緊急 STOP（平倉）走 OUT-OF-SCOPE 的 close_* path，不受此約束。
+        ipc_params = _live_call_params_with_token("pause_paper", {"engine": "live"})
+        result = await core._ipc_command("pause_paper", ipc_params)
         return core._live_response({
             "message": "Live session paused — no new orders / 實盤 session 已暫停",
             "source": "rust_engine",
@@ -531,8 +555,12 @@ async def post_live_session_resume(
         )
 
     # IPC：恢復下單。失敗則不 grant、不 active（fail-closed）。
+    #
+    # PHASE 0 AUTH-1：resume_paper{engine:live} 緊接 all_five_live_gates_ok 通過之後
+    # （上方 :517 gate）→ 鑄 method-bound token 併入 params。
     try:
-        result = await core._ipc_command("resume_paper", {"engine": "live"})
+        ipc_params = _live_call_params_with_token("resume_paper", {"engine": "live"})
+        result = await core._ipc_command("resume_paper", ipc_params)
     except Exception as exc:
         logger.error("Live session resume BLOCKED: IPC resume_paper failed — actor=%s err=%s", actor_id, exc)
         core._set_execution_authority(None)

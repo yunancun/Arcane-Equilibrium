@@ -71,6 +71,13 @@ def _default_set_active(strategy: str, active: bool) -> dict:
 
     lazy import：避免 ml_training package import 時硬拉 control_api app 依賴鏈。
     回 IPC result dict（成功）或 raise（失敗，由上層 catch 記 failed）。
+
+    為什麼顯式帶 engine="demo"（Phase 0 AUTH-1 re-review MED）：set_strategy_active 屬
+    LIVE_WRITE_METHODS；wire 若省 engine，Rust chokepoint 在 true-live primary 引擎會經
+    primary_label()="live" 解析成 live → 要求 live-write token，而 ADPE 不鑄 token → 被
+    fail-closed 拒（demo 沙盒 lever 在 live 引擎上失效）。本 lever 是 demo-only（MODULE_NOTE
+    硬邊界 #1），故顯式鎖定 engine="demo"：wire 與文檔意圖一致、永遠解析成 demo（不要 token）、
+    且消除潛在 demo→live 誤投。鏡像 control-plane strategy_write_routes._sync_strategy_active。
     """
     from program_code.exchange_connectors.bybit_connector.control_api_v1.app.ipc_client_sync import (  # noqa: PLC0415,E501
         sync_ipc_call,
@@ -78,7 +85,7 @@ def _default_set_active(strategy: str, active: bool) -> dict:
 
     return sync_ipc_call(
         "set_strategy_active",
-        {"strategy_name": strategy, "active": bool(active)},
+        {"strategy_name": strategy, "active": bool(active), "engine": "demo"},
     )
 
 

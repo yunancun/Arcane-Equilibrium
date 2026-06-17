@@ -26,10 +26,11 @@ MODULE_NOTE (中文):
 """
 
 import logging
+import time
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from . import main_legacy as base
 from .h0_block_evidence import H0GateEvidence, h0_reason_breakdown
@@ -115,6 +116,75 @@ def _require_risk_write(actor: base.AuthenticatedActor) -> None:
     base.require_scope_and_operator(actor, "risk:write")
 
 
+def _write_config_reject_audit(*, method: str, engine: str, source: str, reason: str) -> None:
+    """PHASE 0 AUTH-1：fire-and-forget 寫一行 V014 observability.engine_events config_reject
+    審計 row（鏡像 Rust chokepoint INSERT；復用既有 V014 表，無新 migration）。
+
+    為何 fail-soft：審計寫入失敗不可阻塞拒絕路徑本身（拒絕已生效）；Phase 0 維持與
+    既有 config_patch 一致的 fire-and-forget（commit↔audit 同步硬綁是 Phase 2 要求）。
+    不記 token/nonce/secret 任何值（CLAUDE §十一）。
+    """
+    try:
+        import json  # noqa: PLC0415
+
+        from .db_pool import get_pg_conn  # noqa: PLC0415
+    except Exception as imp_exc:  # noqa: BLE001
+        logger.warning("config_reject audit import failed (fail-soft): %s", imp_exc)
+        return
+    ts_ms = int(time.time() * 1000)
+    payload = {"method": method, "reject_reason": reason, "engine": engine}
+    try:
+        with get_pg_conn() as conn:
+            if conn is None:
+                logger.warning(
+                    "config_reject audit: DB pool unavailable (method=%s reason=%s)",
+                    method, reason,
+                )
+                return
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO observability.engine_events
+                        (ts_ms, event_type, source, config_name, old_version, new_version, payload)
+                    VALUES (%s, 'config_reject', %s, %s, NULL, NULL, %s::jsonb)
+                    """,
+                    (ts_ms, source, "risk/live", json.dumps(payload)),
+                )
+            conn.commit()
+    except Exception as insert_exc:  # noqa: BLE001
+        logger.warning("config_reject audit INSERT failed (fail-soft): %s", insert_exc)
+
+
+def _require_live_gates_if_live(actor: base.AuthenticatedActor, engine: str) -> None:
+    """PHASE 0 AUTH-1：engine=="live" 時強制 5-gate（逐字鏡像 update_per_engine_global_config
+    的既有 body），demo/paper no-op（Demo 放寬 / Live 收緊政策）。
+
+    為何 fail-closed：對 live 引擎改 RiskConfig 等同改真實資金上限，必須先過完整 live
+    五門。複用 live_preflight.all_five_live_gates_ok 唯一權威 primitive（零新增授權邏輯）。
+    無 flag（只收緊，永遠生效）。
+    """
+    if engine != "live":
+        return
+    from . import live_preflight  # noqa: PLC0415
+
+    ok, reason_codes = live_preflight.all_five_live_gates_ok(actor, require_authz=True)
+    if not ok:
+        logger.warning(
+            "Live RiskConfig change BLOCKED: gate_failed=%s — actor=%s",
+            reason_codes, getattr(actor, "actor_id", "unknown"),
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "live_gate_failed",
+                "gate_failed": reason_codes,
+                "message": "Live RiskConfig change blocked — live preflight gate failed. "
+                           "Ensure Global Mode=live_reserved, secret slot configured, "
+                           "and a valid signed authorization (renew if needed).",
+            },
+        )
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Request Models / 請求模型 (unchanged from pre-1C-3-C)
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -141,6 +211,16 @@ class GlobalConfigUpdate(BaseModel):
     atr_multiplier: float | None = Field(default=None, ge=0, le=10)
     max_same_direction_positions: int | None = Field(default=None, gt=0, le=25)
     h0_shadow_mode: bool | None = None
+    # PHASE 0 AUTH-1（U1）：engine 路由欄。default="paper" 保留今日行為（client 不傳
+    # engine → Rust default paper）；engine=="live" 觸 5-gate + Phase-0 token（_require_live_gates_if_live）。
+    engine: str = Field(default="paper")
+
+    @field_validator("engine")
+    @classmethod
+    def _validate_engine(cls, v: str) -> str:
+        if v not in ("paper", "demo", "live"):
+            raise ValueError("engine must be one of: paper, demo, live")
+        return v
 
 
 class CategoryConfigUpdate(BaseModel):
@@ -156,6 +236,15 @@ class CategoryConfigUpdate(BaseModel):
     option_max_premium_pct: float | None = Field(default=None, gt=0, le=100)
     option_max_delta_exposure: float | None = Field(default=None, gt=0)
     option_allowed_strategies: list[str] | None = None
+    # PHASE 0 AUTH-1（U1）：engine 路由欄（同 GlobalConfigUpdate）。
+    engine: str = Field(default="paper")
+
+    @field_validator("engine")
+    @classmethod
+    def _validate_engine(cls, v: str) -> str:
+        if v not in ("paper", "demo", "live"):
+            raise ValueError("engine must be one of: paper, demo, live")
+        return v
 
 
 class AgentAdjustRequest(BaseModel):
@@ -169,6 +258,16 @@ class AgentAdjustRequest(BaseModel):
     prefer_limit_over_market: bool | None = None
     use_reduce_only_for_close: bool | None = None
     use_post_only_for_limit: bool | None = None
+    # PHASE 0 AUTH-1（U1）：engine 路由欄。engine=="live" → agent→live 硬拒 403
+    # （合法 agent→live 路徑要到 Phase 3）；default="paper" 保留今日 agent 寫 paper 行為。
+    engine: str = Field(default="paper")
+
+    @field_validator("engine")
+    @classmethod
+    def _validate_engine(cls, v: str) -> str:
+        if v not in ("paper", "demo", "live"):
+            raise ValueError("engine must be one of: paper, demo, live")
+        return v
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -254,11 +353,26 @@ async def update_global_config(
     成功後熱更新 5 個下游引擎並寫入 V014 audit。
     """
     _require_risk_write(actor)
+    # PHASE 0 AUTH-1：engine=="live" 強制 5-gate（demo/paper no-op）。
+    engine = body.engine
+    _require_live_gates_if_live(actor, engine)
     client = await _get_risk_view_client()
-    updates = body.model_dump(exclude_none=True)
+    # engine 是路由欄非 RiskConfig 欄位，從 updates 排除（避免污染 patch / 空判）。
+    updates = {k: v for k, v in body.model_dump(exclude_none=True).items() if k != "engine"}
     if not updates:
         await client.refresh_config()
         return _risk_response({"message": "no_updates", "config": client.config})
+    if engine == "live":
+        # 5-gate 已過 → 走 direct-ipc + Phase-0 token（鏡像 update_per_engine_global_config）。
+        # 非 live 維持既有 client.update_global_config（不傳 engine、寫 paper、零 token）。
+        patch = _build_global_patch(updates)
+        if not patch:
+            return _risk_response({"engine": "live", "message": "no_mappable_fields"})
+        result = await _patch_live_with_token(patch, engine="live")
+        return _risk_response({
+            "engine": "live", "message": "updated",
+            "version": result.get("version"), "source": result.get("source"),
+        })
     try:
         await client.update_global_config(updates)
     except Exception as e:
@@ -291,13 +405,29 @@ async def update_category_config(
 ):
     """Patch P0 category override via Rust ConfigStore (operator source, nested patch)."""
     _require_risk_write(actor)
+    # PHASE 0 AUTH-1：engine=="live" 強制 5-gate（demo/paper no-op）。
+    engine = body.engine
+    _require_live_gates_if_live(actor, engine)
     client = await _get_risk_view_client()
-    updates = body.model_dump(exclude_none=True)
+    updates = {k: v for k, v in body.model_dump(exclude_none=True).items() if k != "engine"}
     if not updates:
         await client.refresh_config()
         return _risk_response({
             "message": "no_updates",
             "config": client.get_category_config(category),
+        })
+    if engine == "live":
+        # 5-gate 已過 → direct-ipc + Phase-0 token。patch shape 鏡像 RiskViewClient
+        # update_category_config：{"overrides": {category: mapped}}。
+        from .risk_view_client import _remap_category_to_rust  # noqa: PLC0415
+        mapped = _remap_category_to_rust(updates)
+        if not mapped:
+            return _risk_response({"engine": "live", "category": category, "message": "no_mappable_fields"})
+        patch = {"overrides": {category: mapped}}
+        result = await _patch_live_with_token(patch, engine="live")
+        return _risk_response({
+            "engine": "live", "category": category, "message": "updated",
+            "version": result.get("version"), "source": result.get("source"),
         })
     try:
         await client.update_category_config(category, updates)
@@ -380,8 +510,22 @@ async def agent_adjust(
 ):
     """Agent self-tuning — patch_risk_config with source=agent for V014 audit."""
     _require_risk_write(actor)
+    # PHASE 0 AUTH-1：agent→live 硬拒（合法 agent→live 路徑要到 Phase 3）。先於 gate/mint
+    # 短路（不鑄 token），並寫 V014 config_reject 審計 row（source=agent）。此即 operator 必測項。
+    if body.engine == "live":
+        _write_config_reject_audit(
+            method="agent_adjust", engine="live", source="agent",
+            reason="agent_source_live_write_forbidden",
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={"error": "agent_source_live_write_forbidden"},
+        )
     client = await _get_risk_view_client()
-    updates = {k: v for k, v in body.model_dump().items() if k in body.model_fields_set}
+    updates = {
+        k: v for k, v in body.model_dump().items()
+        if k in body.model_fields_set and k != "engine"
+    }
     if not updates:
         await client.refresh_config()
         return _risk_response({"message": "no_updates", "agent_params": client.get_agent_params()})
@@ -412,7 +556,11 @@ async def reset_cooldown(
     _require_risk_write(actor)
     client = await _get_risk_view_client()
     try:
-        result = await client.clear_consecutive_losses()
+        # PHASE 0 AUTH-1：此為 Risk-tab paper-control 路由（prefix /api/v1/paper/risk）。
+        # 顯式傳 engine="paper" 使 Rust chokepoint 在 live-running 引擎上解析為 paper
+        # （否則缺 engine → primary()=live → 被 live-write token gate 擋）。Live 引擎的
+        # 連虧/解封走專屬 live-halt-recovery 流程（approve_live_halt_recovery 顯式 "live"）。
+        result = await client.clear_consecutive_losses(engine="paper")
     except Exception as e:
         raise _ipc_failure(
             "ipc_clear_consecutive_losses_failed",
@@ -618,6 +766,39 @@ def _build_global_patch(updates: dict[str, Any]) -> dict[str, Any]:
     return patch
 
 
+async def _patch_live_with_token(patch: dict[str, Any], *, engine: str = "live") -> dict[str, Any]:
+    """PHASE 0 AUTH-1：對 live engine 走 direct-ipc patch_risk_config，並鑄+附 Phase-0 token。
+
+    為何單一 helper：所有 Python→live RiskConfig 寫入路徑（/config/global live 分支、
+    /config/category live 分支、update_per_engine_global_config live 分支）共用同一鑄
+    token + 送 IPC 邏輯，確保 canonical_patch_hash 對的是「實際送 Rust 的同一 patch 物件」
+    （跨寫者 hash 一致性靠共用 EXACT 物件，禁重算）。caller 必先過 5-gate。
+
+    Raises: _ipc_failure（IPC 不可達 / not-ok）。token 鑄造失敗（secret 缺）會 raise
+    RuntimeError（fail-closed，向上冒泡成 500）。
+    """
+    from .live_patch_token import mint_live_authz_token  # noqa: PLC0415
+
+    ipc = await _get_direct_ipc()
+    # token 綁的 canonical_patch_hash 必對「實際送的 patch 物件」算（patch 類分支）。
+    token_fields = mint_live_authz_token("patch_risk_config", patch)
+    params = {"engine": engine, "patch": patch, "source": "operator", **token_fields}
+    try:
+        resp = await ipc.call("patch_risk_config", params=params)
+    except Exception as e:
+        raise _ipc_failure(
+            "ipc_patch_risk_config_per_engine_failed",
+            log_detail=f"engine={engine}: {e}",
+        ) from e
+    result = resp if isinstance(resp, dict) else {}
+    if not result.get("ok"):
+        raise _ipc_failure(
+            "ipc_patch_risk_config_not_ok",
+            log_detail=f"engine={engine}: {result!r}",
+        )
+    return result
+
+
 @risk_router.get("/config/engine/{engine}")
 async def get_per_engine_risk_config(
     engine: str,
@@ -707,31 +888,25 @@ async def update_per_engine_global_config(
     # demo/paper 不受此門（Demo 放寬 / Live 收緊政策），僅維持 operator + scope。
     # 直接複用 live_preflight.all_five_live_gates_ok 唯一權威 primitive：零新增授權
     # 邏輯、單一真相、reason_code 形態與 live session 路徑一致。lazy import 避循環。
-    if engine == "live":
-        from . import live_preflight  # noqa: PLC0415
-        ok, reason_codes = live_preflight.all_five_live_gates_ok(actor, require_authz=True)
-        if not ok:
-            logger.warning(
-                "Live RiskConfig change BLOCKED: gate_failed=%s — actor=%s",
-                reason_codes, getattr(actor, "actor_id", "unknown"),
-            )
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "error": "live_gate_failed",
-                    "gate_failed": reason_codes,
-                    "message": "Live RiskConfig change blocked — live preflight gate failed. "
-                               "Ensure Global Mode=live_reserved, secret slot configured, "
-                               "and a valid signed authorization (renew if needed).",
-                },
-            )
-    ipc = await _get_direct_ipc()
-    updates = body.model_dump(exclude_none=True)
+    # engine 由 URL path 權威決定；body.engine（default paper）在此 route 無意義，排除。
+    _require_live_gates_if_live(actor, engine)
+    updates = {k: v for k, v in body.model_dump(exclude_none=True).items() if k != "engine"}
     if not updates:
         return _risk_response({"engine": engine, "message": "no_updates"})
     patch = _build_global_patch(updates)
     if not patch:
         return _risk_response({"engine": engine, "message": "no_mappable_fields"})
+    # PHASE 0 AUTH-1 不可遺漏整合點：此 route 是今天唯一已過 5-gate 的合法 operator live
+    # 寫入路徑，但原本送 patch_risk_config 不帶 token → 一旦 Rust chokepoint 上線會被自己
+    # 的 gate 拒（self-deadlock）。故 live 分支改走 _patch_live_with_token（mint+attach token）。
+    # demo/paper 分支維持既有零-token call（不受 chokepoint 約束）。
+    if engine == "live":
+        result = await _patch_live_with_token(patch, engine="live")
+        return _risk_response({
+            "engine": engine, "message": "updated",
+            "version": result.get("version"), "source": result.get("source"),
+        })
+    ipc = await _get_direct_ipc()
     try:
         resp = await ipc.call(
             "patch_risk_config",
@@ -771,7 +946,11 @@ async def unhalt_session(
     _require_risk_write(actor)
     client = await _get_risk_view_client()
     try:
-        await client.unhalt_session()
+        # PHASE 0 AUTH-1：此為 Risk-tab paper-control 路由（prefix /api/v1/paper/risk）。
+        # 顯式傳 engine="paper" 使 Rust chokepoint 在 live-running 引擎上解析為 paper
+        # （否則 unhalt_session() 無 engine → resume_paper primary()=live → 被 token gate
+        # 擋）。Live 引擎的 session 解封走專屬 live-halt-recovery 流程（顯式 "live" + token）。
+        await client.unhalt_session(engine="paper")
     except Exception as e:
         raise _ipc_failure(
             "ipc_resume_paper_failed",

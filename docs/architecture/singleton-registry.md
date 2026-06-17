@@ -431,6 +431,27 @@ per PA §K：`l2_conflict_adjudicator` 是 stateless 純函數模塊（`adjudica
 
 ---
 
+### §2.7 PHASE 0 AUTH-1 — live-write capability token NonceLedger（Rust，2026-06-17）
+
+per `docs/execution_plan/2026-06-17--intelligent-param-adjusting-agent-master-spec.md` §0.1。Phase 0 AUTH-1 全封的單次 nonce 帳本：Rust dispatch chokepoint（`live_authz::check_live_authz`，dispatch.rs `match method` 前）對 engine==live 的 LIVE_WRITE_METHODS 驗 token 時，記錄已用過的 nonce 防 TTL 內重放。verify 成功後 check-and-insert（已在 → `nonce_replay`），lazy 驅逐 TTL 外舊條目，硬上界 `MAX_NONCE_LEDGER=10_000`（DoS 安全閥，超限拒 `nonce_ledger_full`）。
+
+| 欄位 | 值 |
+|---|---|
+| name | `NonceLedger`（module-level `static NONCE_LEDGER: OnceLock<NonceLedger>`）|
+| type_signature | `OnceLock<NonceLedger>`，內含 `seen: Mutex<HashMap<String, i64>>`（key=nonce hex，value=mint ts 秒）|
+| location | `rust/openclaw_engine/src/ipc_server/live_authz.rs`（`struct NonceLedger`；`static NONCE_LEDGER`；getter `nonce_ledger() -> &'static NonceLedger`）|
+| owner_lifecycle | lazy：首次 chokepoint 觸 live-write 時 `OnceLock::get_or_init` 構造；engine process lifetime；無顯式銷毀（process exit 即釋放）|
+| cross_task_pattern | 每個 IPC connection 在獨立 tokio task 跑 `dispatch_request`；live-write chokepoint 經 `nonce_ledger()` 共享同一帳本 → 跨 task 並發 check-and-insert（`std::sync::Mutex` 互斥）|
+| lock_primitive | `std::sync::Mutex`（臨界區極短：retain 驅逐 + contains + insert；鎖中毒 → fail-closed 當作 LedgerFull 擋下）|
+| visibility | `pub(crate)`（`NonceLedger` / `nonce_ledger()` / `check_and_insert`）；僅 dispatch chokepoint 呼用 |
+| caller_chain | **producer**：`dispatch.rs` `match method` 前的 live-write chokepoint（`super::live_authz::check_live_authz(...)` 內 `ledger.check_and_insert`）。無 consumer（帳本純內部 replay 防護）|
+| health_monitoring | NO —— 正常 TTL 窗內 live patch 次數極小（個位數），帳本天然有界；`nonce_ledger_full`（error! + 拒）是異常信號（DoS 或 mint 暴走），由結構化 log 承載 |
+| registered_date | 2026-06-17 |
+| governance_authority | `2026-06-17--intelligent-param-adjusting-agent-master-spec.md` §0.1（HIGH-1 RESOLVED：綁操作 + 單次 nonce）|
+| migration_plan | none（in-memory，重啟乾淨 re-arm；Phase 1-3 不改此帳本）|
+
+---
+
 ## §3 Registration Rules
 
 ### §3.1 新登記前必做（PA / E1 / E2 共同）

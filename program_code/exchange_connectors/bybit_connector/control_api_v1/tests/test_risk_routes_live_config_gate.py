@@ -192,11 +192,12 @@ class TestLiveConfigGate(unittest.TestCase):
         call_mock.assert_not_called()
 
     def test_live_gate_passed_proceeds_to_ipc(self) -> None:
-        """engine=live + 五門全過 → 放行，下 IPC patch_risk_config。"""
+        """engine=live + 五門全過 → 放行，下 IPC patch_risk_config（含 Phase-0 token）。"""
         app = _make_app(_operator_actor())
         client = TestClient(app)
         call_mock = AsyncMock(return_value={"ok": True, "version": 42, "source": "operator"})
-        with patch(
+        # PHASE 0 AUTH-1：live 分支現走 _patch_live_with_token，需 OPENCLAW_LIVE_PATCH_SECRET 鑄 token。
+        with patch.dict(os.environ, {"OPENCLAW_LIVE_PATCH_SECRET": "test-live-patch-secret"}), patch(
             "app.risk_routes._get_direct_ipc", new=_fake_ipc(call_mock)
         ), patch(
             "app.live_preflight.all_five_live_gates_ok",
@@ -214,6 +215,10 @@ class TestLiveConfigGate(unittest.TestCase):
         args, kwargs = call_mock.call_args
         self.assertEqual(args[0], "patch_risk_config")
         self.assertEqual(kwargs["params"]["engine"], "live")
+        # PHASE 0 AUTH-1：live patch 必帶 token 三欄（否則 Rust chokepoint self-deadlock）。
+        self.assertIn("live_authz_token", kwargs["params"])
+        self.assertIn("live_authz_nonce", kwargs["params"])
+        self.assertIn("live_authz_ts", kwargs["params"])
 
     def test_live_requires_authz_true(self) -> None:
         """live 門必以 require_authz=True 呼叫（與 live-order / session 路徑同級後果）。"""
@@ -221,7 +226,7 @@ class TestLiveConfigGate(unittest.TestCase):
         client = TestClient(app)
         call_mock = AsyncMock(return_value={"ok": True, "version": 1})
         gate = MagicMock(return_value=(True, []))
-        with patch(
+        with patch.dict(os.environ, {"OPENCLAW_LIVE_PATCH_SECRET": "test-live-patch-secret"}), patch(
             "app.risk_routes._get_direct_ipc", new=_fake_ipc(call_mock)
         ), patch("app.live_preflight.all_five_live_gates_ok", gate):
             client.post(
@@ -348,6 +353,8 @@ class TestRealGateChain(unittest.TestCase):
             with patch.dict(os.environ, {
                 "OPENCLAW_SECRETS_DIR": str(secrets_root),
                 "OPENCLAW_LIVE_AUTH_SIGNING_KEY": secret,
+                # PHASE 0 AUTH-1：live 分支鑄 token 需此 secret。
+                "OPENCLAW_LIVE_PATCH_SECRET": "test-live-patch-secret",
             }), patch(
                 "app.live_session_routes._get_global_mode_state",
                 return_value="live_reserved",

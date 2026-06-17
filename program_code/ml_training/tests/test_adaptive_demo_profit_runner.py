@@ -404,6 +404,34 @@ def test_lever_ipc_failure_no_hidden_retry():
     assert res.failed_count == 1
 
 
+def test_default_set_active_wire_carries_engine_demo(monkeypatch):
+    """Phase 0 AUTH-1 re-review MED 回歸：_default_set_active 的 production wire 必帶
+    engine="demo"。set_strategy_active 屬 LIVE_WRITE_METHODS，省 engine 會在 true-live
+    primary 引擎被解析成 live → fail-closed 拒（demo lever 失效）+ 潛在 demo→live 誤投。
+    """
+    from program_code.ml_training.adaptive_demo_profit_engine import ipc_lever as _lever
+
+    captured: dict[str, object] = {}
+
+    def _fake_sync_ipc_call(method, params):
+        captured["method"] = method
+        captured["params"] = dict(params)
+        return {"ok": True}
+
+    # 攔截 lazy-import 的 sync_ipc_call（直接 patch 其源模組屬性）。
+    import program_code.exchange_connectors.bybit_connector.control_api_v1.app.ipc_client_sync as _ics  # noqa: E501
+
+    monkeypatch.setattr(_ics, "sync_ipc_call", _fake_sync_ipc_call)
+
+    resp = _lever._default_set_active("grid_trading", True)
+
+    assert resp == {"ok": True}
+    assert captured["method"] == "set_strategy_active"
+    assert captured["params"].get("engine") == "demo"
+    assert captured["params"]["strategy_name"] == "grid_trading"
+    assert captured["params"]["active"] is True
+
+
 # ---------------------------------------------------------------------------
 # runner：engine_mode 硬鎖 / 全負歸零 / dry-run / 贏家活化
 # ---------------------------------------------------------------------------

@@ -52,9 +52,16 @@ async def _sync_strategy_active(name: str, active: bool) -> None:
     """
     try:
         client = await _get_strategy_ipc()
+        # PHASE 0 AUTH-1：顯式傳 engine="demo" 而非缺省 engine。
+        # 為何 demo：activate/pause/stop 路由僅 operator + strategy:write scope（非完整
+        # live 五門），是策略開發/學習控制；缺 engine 時 Rust 走 primary()=live（live-running
+        # 引擎），會被 live-write token chokepoint 擋。strategy 是 Demo-only 促升 lane
+        # （CLAUDE §四），且此 sync 為 fire-and-forget（Python ORCHESTRATOR 為 fallback），
+        # 故顯式鎖 demo pipeline、不在此非-5-gate 路徑鑄 live token（不弱化授權）。真正的
+        # live 策略參數促升走 strategist_promote_routes（full 5-gate + token）。
         resp = await client.call(
             "set_strategy_active",
-            params={"strategy_name": name, "active": active},
+            params={"strategy_name": name, "active": active, "engine": "demo"},
         )
         if isinstance(resp, dict) and not resp.get("ok"):
             logger.warning("set_strategy_active IPC non-ok response: %s", resp)
@@ -81,11 +88,32 @@ async def toggle_dynamic_risk(request: Request, actor: base.AuthenticatedActor =
     engine = str(body.get("engine", "demo")).lower()
     if engine not in ("paper", "demo", "live"):
         raise HTTPException(status_code=400, detail="engine must be paper|demo|live")
+    # PHASE 0 AUTH-1：engine=="live" 時 set_dynamic_risk_enabled ∈ LIVE_WRITE_METHODS
+    # → Rust chokepoint 要求 token。此路由原本僅 strategy:write scope（非完整五門），故
+    # 對 live 必須先補完整 5-gate（all_five_live_gates_ok，與 live RiskConfig 寫入同級
+    # 後果——改 live 風險旋鈕等同改真實資金行為），通過後鑄 method-bound token。demo/paper
+    # 維持既有零-token 行為（Demo 放寬 / Live 收緊政策）。**不可在缺 5-gate 下鑄 token**。
+    ipc_params: dict[str, Any] = {"enabled": enabled, "engine": engine}
+    if engine == "live":
+        from . import live_preflight  # noqa: PLC0415
+        ok, reason_codes = live_preflight.all_five_live_gates_ok(actor, require_authz=True)
+        if not ok:
+            logger.warning(
+                "Live set_dynamic_risk_enabled BLOCKED: gate_failed=%s actor=%s",
+                reason_codes, getattr(actor, "actor_id", "unknown"),
+            )
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "live_gate_failed", "gate_failed": reason_codes,
+                        "message": "Live dynamic-risk toggle blocked — live preflight gate failed."},
+            )
+        from .live_patch_token import call_params_with_token  # noqa: PLC0415
+        ipc_params = call_params_with_token("set_dynamic_risk_enabled", ipc_params)
     try:
         client = await _get_strategy_ipc()
         resp = await client.call(
             "set_dynamic_risk_enabled",
-            params={"enabled": enabled, "engine": engine},
+            params=ipc_params,
         )
         # Best-effort stub mirror so `get_dynamic_risk_status` cached reads stay consistent.
         # 兼容用：同步更新 Python stub 的旗標，讓 stub fallback 路徑也看到最新狀態。

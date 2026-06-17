@@ -184,12 +184,27 @@ def test_unhalt_session_calls_resume_paper(client, fake_ipc):
     assert "get_risk_runtime_status" in methods
 
 
-def test_unhalt_session_sends_engine_param(client, fake_ipc):
+def test_unhalt_session_sends_engine_param(client, fake_ipc, monkeypatch):
+    # PHASE 0 AUTH-1：engine="live" → resume_paper 鑄 token 併入 params。需 secret env。
+    monkeypatch.setenv("OPENCLAW_LIVE_PATCH_SECRET", "test-secret")
     fake_ipc.responses["resume_paper"] = {"message": "live resumed"}
     out = _run(client.unhalt_session("live"))
     assert out == {"message": "live resumed"}
     resume_calls = [c for c in fake_ipc.calls if c[0] == "resume_paper"]
-    assert resume_calls == [("resume_paper", {"engine": "live"})]
+    assert len(resume_calls) == 1
+    params = resume_calls[0][1]
+    assert params["engine"] == "live"
+    # live → method-bound capability token 三欄齊
+    assert set(params) >= {"engine", "live_authz_token", "live_authz_nonce", "live_authz_ts"}
+
+
+def test_unhalt_session_demo_no_token(client, fake_ipc):
+    # PHASE 0 AUTH-1：engine="demo" → 不鑄 token（demo/paper 不受 chokepoint 約束）。
+    fake_ipc.responses["resume_paper"] = {"message": "demo resumed"}
+    _run(client.unhalt_session("demo"))
+    params = next(c[1] for c in fake_ipc.calls if c[0] == "resume_paper")
+    assert params == {"engine": "demo"}
+    assert "live_authz_token" not in params
 
 
 def test_unhalt_session_no_ipc():
@@ -285,13 +300,19 @@ def test_reset_drawdown_baseline_sends_engine_param(client, fake_ipc):
     assert any(c[0] == "get_risk_runtime_status" for c in fake_ipc.calls)
 
 
-def test_reset_drawdown_baseline_distinct_engines_route_independently(client, fake_ipc):
-    """Back-to-back calls for paper / demo / live each forward their own engine tag."""
+def test_reset_drawdown_baseline_distinct_engines_route_independently(client, fake_ipc, monkeypatch):
+    """Back-to-back calls for paper / demo / live each forward their own engine tag.
+    PHASE 0 AUTH-1：live 分支鑄 token（需 secret env）；paper/demo 不鑄。"""
+    monkeypatch.setenv("OPENCLAW_LIVE_PATCH_SECRET", "test-secret")
     fake_ipc.responses["reset_drawdown_baseline"] = {"result": "ok"}
     for engine in ("paper", "demo", "live"):
         _run(client.reset_drawdown_baseline(engine))
     reset_calls = [c for c in fake_ipc.calls if c[0] == "reset_drawdown_baseline"]
     assert [c[1]["engine"] for c in reset_calls] == ["paper", "demo", "live"]
+    # paper/demo 不帶 token；live 帶完整 token 三欄
+    assert "live_authz_token" not in reset_calls[0][1]
+    assert "live_authz_token" not in reset_calls[1][1]
+    assert set(reset_calls[2][1]) >= {"engine", "live_authz_token", "live_authz_nonce", "live_authz_ts"}
 
 
 def test_reset_drawdown_baseline_no_ipc_returns_empty():

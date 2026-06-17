@@ -286,8 +286,28 @@ async fn test_p2_patch_risk_config_engine_routing() {
     let config = make_test_config();
     let dd = make_test_data_dir();
     let (rs, ls, bs) = rc1_stores();
-    // Patch live engine only.
-    let req = r#"{"jsonrpc":"2.0","method":"patch_risk_config","params":{"engine":"live","source":"operator","patch":{"limits":{"leverage_max":5.0}}},"id":9020}"#;
+    // PHASE 0 AUTH-1：engine="live" patch_risk_config 現需有效 live_authz token（dispatch
+    // chokepoint fail-closed）。設 secret + 鑄 byte-equal token（patch hash 對「實際送的
+    // patch 物件」算），證明 routing 行為在合法 token 下不變（live store 前進、paper/demo 不動）。
+    std::env::set_var("OPENCLAW_LIVE_PATCH_SECRET", "test_routing_secret");
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let nonce = "p2routingnonce0001";
+    let patch_val = serde_json::json!({"limits":{"leverage_max":5.0}});
+    let params_for_hash = serde_json::json!({"engine":"live","source":"operator","patch":patch_val.clone()});
+    let hash = super::super::live_authz::canonical_hash_for("patch_risk_config", &params_for_hash);
+    let bind = super::super::live_authz::build_bind_bytes(&hash, "live", "patch_risk_config", ts, nonce);
+    use hmac::{Hmac, Mac};
+    use sha2::Sha256;
+    let mut mac = Hmac::<Sha256>::new_from_slice(b"test_routing_secret").unwrap();
+    mac.update(&bind);
+    let token = hex::encode(mac.finalize().into_bytes());
+    let req = format!(
+        r#"{{"jsonrpc":"2.0","method":"patch_risk_config","params":{{"engine":"live","source":"operator","patch":{{"limits":{{"leverage_max":5.0}}}},"live_authz_token":"{token}","live_authz_nonce":"{nonce}","live_authz_ts":{ts}}},"id":9020}}"#
+    );
+    let req = req.as_str();
     let resp = dispatch_request(
         req,
         &config,
@@ -331,6 +351,8 @@ async fn test_p2_patch_risk_config_engine_routing() {
         0,
         "demo store should be untouched"
     );
+    // 清理 process-global env（避免跨 test 污染）。
+    std::env::remove_var("OPENCLAW_LIVE_PATCH_SECRET");
 }
 
 /// LIVE-P2-1: get_risk_config with engine="demo" returns demo store snapshot.

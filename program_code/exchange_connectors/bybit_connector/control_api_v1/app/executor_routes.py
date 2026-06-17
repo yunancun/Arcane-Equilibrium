@@ -485,14 +485,22 @@ async def post_executor_shadow_toggle(
             "shadow_mode": target_shadow,
         },
     }
+    # PHASE 0 AUTH-1：engine=="live" 時 patch_risk_config ∈ LIVE_WRITE_METHODS，Rust
+    # chokepoint 要求 token。此處在 Step 2 的 engine-conditional gate 通過後（shadow=false
+    # +live → 完整 5-gate _verify_live_gate；shadow=true retreat → operator-role）鑄 method-
+    # bound token 併入 params（Python authorizer → Rust enforcer）。demo/paper 不鑄。
+    ipc_params: dict[str, Any] = {
+        "engine": body.engine,
+        "patch": patch_payload,
+        "source": body.source,
+    }
+    if body.engine == "live":
+        from .live_patch_token import call_params_with_token  # noqa: PLC0415
+        ipc_params = call_params_with_token("patch_risk_config", ipc_params)
     try:
         ipc_response = await one_shot_ipc_call(
             "patch_risk_config",
-            params={
-                "engine": body.engine,
-                "patch": patch_payload,
-                "source": body.source,
-            },
+            params=ipc_params,
             timeout=5.0,
             wrap_errors_as_http=False,
             error_context="executor_shadow_toggle",
