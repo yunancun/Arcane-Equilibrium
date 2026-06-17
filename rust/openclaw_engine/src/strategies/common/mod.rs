@@ -22,7 +22,8 @@ pub use confidence_builder::ConfidenceBuilder;
 pub use maker_price::{
     canonical_close_maker_reason, close_maker_price_policy, compute_close_limit_price,
     compute_post_only_price, is_close_maker_market_only_reason, is_close_maker_positive_reason,
-    CloseMakerPricePolicy, MakerPriceInputs,
+    CloseMakerPricePolicy, MakerPriceInputs, CLOSE_MAKER_MAX_REPRICES,
+    CLOSE_MAKER_REPRICE_AFTER_MS,
 };
 pub use per_symbol_state::PerSymbolState;
 pub use trend_cooldown::TrendCooldown;

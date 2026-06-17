@@ -266,6 +266,8 @@ impl TickPipeline {
                     details: None,
                     close_maker_attempt: false,
                     close_maker_fallback_reason: None,
+                    // V145：此 close fill 路徑無 maker markout，恆 None。
+                    maker_markout_bps: None,
                 },
                 "close_fill",
             );

@@ -107,6 +107,11 @@ pub struct PendingOrder {
     /// maker timeout cancel 已派發的時間。Some 時保留 row，讓 cancel ack 前 race
     /// 到的成交仍能匹配原始 context；Cancelled/Rejected/Filled 或 grace 到期後移除。
     pub cancel_requested_ts_ms: Option<u64>,
+    /// MAKER-CLOSE-REPRICE-1 (2026-06-17)：本筆 close-maker PostOnly 已 toward-touch
+    /// 重掛的次數。每次 reprice 由 sweep 取消舊單 + 重發新 order_link_id 並把計數
+    /// 帶到新 PendingOrder（+1）；達 CLOSE_MAKER_MAX_REPRICES 硬上限後不再 reprice，
+    /// 沿用原 timeout→taker fallback。entry maker / market 為 0（不參與 reprice）。
+    pub reprice_count: u32,
     /// W-C Caveat 2 修復（2026-05-11）：emit_entry_lineage 同步計算的
     /// Spine `order_plan_id`（stable_id("plan", &[engine_mode, decision_id,
     /// verdict_id])）。由 step_4_5_dispatch 在 emit_entry_lineage 之後注入

@@ -1,6 +1,6 @@
 //! Exchange-event select! arm handler split from loop_handlers.rs.
 
-use super::execution_fill_helpers::{adverse_slippage_bps, fill_liquidity_role};
+use super::execution_fill_helpers::{fill_liquidity_role, split_markout_by_role};
 use super::funding_settlement::{apply_and_emit_funding_settlement, is_funding_execution};
 use super::loop_handlers::{
     dispatch_close_maker_fallback_from_pending, pending_order_accepts_fill, LoopState,
@@ -244,11 +244,20 @@ pub(super) async fn handle_exchange_event(
                 if let Some(po) = state.pending_orders.get_mut(&key) {
                     po.cum_filled_qty += exec_qty;
                     let liquidity_role = fill_liquidity_role(exec.is_maker, matched_tif);
-                    let slippage_bps = if liquidity_role == "taker" {
-                        adverse_slippage_bps(po.is_long, exec_price, po.reference_price)
-                    } else {
-                        None
-                    };
+                    // V145：同一純函數 adverse_slippage_bps 按 liquidity_role 互斥
+                    // 分流到兩個正交 column —— taker 寫 slippage_bps（穿越 spread 的
+                    // 執行劣勢），maker 寫 maker_markout_bps（掛單成交後 mid 朝對我
+                    // 不利方向走的 adverse selection）。先前 maker 一律 None（756/756
+                    // NULL）就是因為這裡只算 taker。zero 新數學，純記錄面分流。
+                    // close-maker 的 po.reference_price 在 commands.rs close emit 已
+                    // 改為 mid@submit（reference_source="mid_at_submit"），使 maker
+                    // markout 基準正確（非 last price）。
+                    let (slippage_bps, maker_markout_bps) = split_markout_by_role(
+                        liquidity_role,
+                        po.is_long,
+                        exec_price,
+                        po.reference_price,
+                    );
                     let fill_latency_ms = if exec_ts > 0 {
                         Some(exec_ts.saturating_sub(po.sent_ts_ms))
                     } else {
@@ -278,6 +287,8 @@ pub(super) async fn handle_exchange_event(
                         po.reference_ts_ms,
                         reference_source.as_deref(),
                         slippage_bps,
+                        // V145：maker markout（taker 為 None）按參數順序傳入。
+                        maker_markout_bps,
                         Some(liquidity_role),
                         fill_latency_ms,
                         Some(&exec.exec_id),

@@ -831,6 +831,12 @@ pub struct OrderDispatchRequest {
     /// Some = entry order（step_4_5_dispatch 主路徑）；None = close / IPC
     /// flatten / orphan close（無上游 strategy intent，保 NULL 為誠實表述）。
     pub intent_id: Option<String>,
+    /// MAKER-CLOSE-REPRICE-1 (2026-06-17)：本筆若為 toward-touch 重掛產生的
+    /// close maker，帶上累計重掛次數（首次正常 dispatch=0）。dispatch.rs 構造
+    /// PendingOrder 時鏡射至 `reprice_count`，使 sweep 能對重掛單繼續累計直到
+    /// CLOSE_MAKER_MAX_REPRICES 硬上限。非 reprice 路徑（entry / 一般 close /
+    /// IPC / fallback）一律 0。
+    pub reprice_count: u32,
 }
 
 /// V094 close-maker audit payload carried from dispatch registration to fill.

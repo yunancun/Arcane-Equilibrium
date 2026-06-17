@@ -19,7 +19,11 @@ mod loop_handlers;
 // crate test（tick_pipeline::tests::halt_ttl）內被呼叫 → pub(crate) 暴露足夠，
 // 不需要 pub。
 pub(crate) mod paper_state_restore;
-mod pending_sweep;
+// MAKER-CLOSE-REPRICE-1 DIRECTION FIX（2026-06-17）：close_maker_reprice_decision
+// 在 tick_pipeline::tests 的 e2e 方向測試（execute_position_close→register→sweep）
+// 內被呼叫 → pub(crate) 暴露模組足夠（內部項目本就 pub(crate)/private）。鏡像
+// paper_state_restore 的同款 sibling-crate-test 暴露範式。
+pub(crate) mod pending_sweep;
 mod setup;
 mod sm_halt_incident;
 mod status_report;

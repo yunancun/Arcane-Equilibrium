@@ -50,6 +50,8 @@ fn close_maker_dispatch_req(
         // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：close-maker dispatch
         // 為 close path，無上游 strategy intent，保 None。
         intent_id: None,
+        // MAKER-CLOSE-REPRICE-1：test fixture 預設未重掛。
+        reprice_count: 0,
     }
 }
 
@@ -875,6 +877,8 @@ fn close_dispatch_req_for_zero(is_primary: bool, is_close: bool, qty: f64) -> Or
         spine_verdict_id: None,
         spine_stub_report_id: None,
         intent_id: None,
+        // MAKER-CLOSE-REPRICE-1：test fixture 預設未重掛。
+        reprice_count: 0,
     }
 }
 

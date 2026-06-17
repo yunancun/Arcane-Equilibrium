@@ -477,6 +477,9 @@ impl TickPipeline {
                     details: None,
                     close_maker_attempt: false,
                     close_maker_fallback_reason: None,
+                    // V145：external / IPC close 非 WS-confirmed maker fill，
+                    // 無 mid@submit markout，恆 None。
+                    maker_markout_bps: None,
                 },
                 "external_fill",
             );
@@ -668,6 +671,9 @@ impl TickPipeline {
             reference_ts_ms,
             reference_source,
             slippage_bps,
+            // V145：thin wrapper（僅 test 呼叫）不帶 maker markout，傳 None；
+            // 真 maker markout 由 loop_exchange.rs 直接呼 _with_close_maker_audit。
+            None,
             liquidity_role,
             fill_latency_ms,
             exchange_exec_id,
@@ -698,6 +704,10 @@ impl TickPipeline {
         reference_ts_ms: Option<u64>,
         reference_source: Option<&str>,
         slippage_bps: Option<f64>,
+        // V145：maker adverse-selection markout（mid@submit vs fill）。只有
+        // maker fill 帶 Some；taker fill 為 None（與 slippage_bps 互斥）。由
+        // loop_exchange.rs 按 liquidity_role 分流計算後傳入，純記錄不影響執行。
+        maker_markout_bps: Option<f64>,
         liquidity_role: Option<&str>,
         fill_latency_ms: Option<u64>,
         exchange_exec_id: Option<&str>,
@@ -871,6 +881,9 @@ impl TickPipeline {
                     details: close_maker_details,
                     close_maker_attempt,
                     close_maker_fallback_reason,
+                    // V145：maker adverse-selection markout。loop_exchange.rs 已按
+                    // liquidity_role 分流（maker→Some / taker→None），此處透傳。
+                    maker_markout_bps,
                 },
                 "confirmed_fill",
             );
@@ -1011,6 +1024,38 @@ impl TickPipeline {
             } else {
                 qty
             };
+            // V145（mid@submit）：PostOnly close maker 的 markout 基準應為送單時刻
+            // mid=(best_bid+best_ask)/2，而非 last price。先前用 dispatch_last_fallback
+            // （last trade price）算 maker markout 會有系統性偏差。**只對 PostOnly
+            // close maker 且 BBO 可得時**改用 mid；taker close / market fallback /
+            // BBO 缺值一律維持原 dispatch_last_fallback，不污染既有 taker slippage
+            // 語意。此改動純記錄面（reference_price 不回饋任何下單/timeout 決策）。
+            let mid_at_submit = if is_close_maker_limit && event.symbol == symbol {
+                let bid = Some(event.bid_price).filter(|v| v.is_finite() && *v > 0.0);
+                let ask = Some(event.ask_price).filter(|v| v.is_finite() && *v > 0.0);
+                match (bid, ask) {
+                    (Some(b), Some(a)) if a > b => Some((b + a) * 0.5),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            let (close_reference_price, close_reference_source) = match mid_at_submit {
+                Some(mid) => (Some(mid), Some("mid_at_submit".to_string())),
+                None => (
+                    Some(dispatch_price).filter(|p| p.is_finite() && *p > 0.0),
+                    if dispatch_price.is_finite() && dispatch_price > 0.0 {
+                        Some("dispatch_last_fallback".to_string())
+                    } else {
+                        None
+                    },
+                ),
+            };
+            let close_reference_ts_ms = if close_reference_price.is_some() {
+                Some(event.ts_ms)
+            } else {
+                None
+            };
             let request = OrderDispatchRequest {
                 symbol: symbol.to_string(),
                 is_long: !is_long,
@@ -1036,17 +1081,10 @@ impl TickPipeline {
                 time_in_force: close_shape.time_in_force,
                 maker_timeout_ms: close_shape.maker_timeout_ms,
                 close_maker_audit,
-                reference_price: Some(dispatch_price).filter(|p| p.is_finite() && *p > 0.0),
-                reference_ts_ms: if dispatch_price.is_finite() && dispatch_price > 0.0 {
-                    Some(event.ts_ms)
-                } else {
-                    None
-                },
-                reference_source: if dispatch_price.is_finite() && dispatch_price > 0.0 {
-                    Some("dispatch_last_fallback".to_string())
-                } else {
-                    None
-                },
+                // V145：close maker 用 mid@submit，其餘維持 dispatch_last_fallback。
+                reference_price: close_reference_price,
+                reference_ts_ms: close_reference_ts_ms,
+                reference_source: close_reference_source,
                 // W-C Caveat 2 修復（2026-05-11）：close 路徑不寫 entry lineage
                 // （emit_entry_lineage 僅 open intent 使用），下游
                 // emit_fill_completion_lineage 自然 short-circuit。
@@ -1058,6 +1096,8 @@ impl TickPipeline {
                 // 不對應 strategy intent（exit logic 觸發），保 None 為誠實
                 // 表述；不在 writer 端合成 fake id 以免遮蓋上游 bug。
                 intent_id: None,
+                // MAKER-CLOSE-REPRICE-1：初始 close maker dispatch，reprice 計數從 0 起。
+                reprice_count: 0,
             };
             match tx.send(request) {
                 Ok(()) => {
@@ -1211,6 +1251,8 @@ impl TickPipeline {
             // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：close-maker
             // market fallback 走 close 路徑無 strategy intent 對應，保 None。
             intent_id: None,
+            // MAKER-CLOSE-REPRICE-1：market fallback 非 maker，reprice 計數 0。
+            reprice_count: 0,
         };
 
         match tx.send(request) {
@@ -1240,6 +1282,217 @@ impl TickPipeline {
                 false
             }
         }
+    }
+
+    /// MAKER-CLOSE-REPRICE-1 (2026-06-17)：以快取 BBO 重算 toward-touch close-maker
+    /// 的 inside-quote 限價。經 **compute_close_limit_price（同一安全函數：strict-
+    /// passive + spread guard + crossed-book strict skip 全套）** 產生；BBO 缺值 /
+    /// 髒資料 / spread 超 guard 一律回 None（caller 沿用 timeout→taker fallback）。
+    ///
+    /// **DIRECTION CONTRACT（2026-06-17 E2/E4 RETURN HIGH）**：`position_is_long`
+    /// = **真實持倉方向**（平多倉=SELL / 平空倉=BUY），與 close_order_dispatch_shape
+    /// 同契約；本 fn 透傳給 compute_close_limit_price，後者再 `!position_is_long`
+    /// 還原訂單側。**呼叫端（loop_handlers.rs sweep）持有的是 PendingOrder.is_long
+    ///（=訂單側，close 已 inverted），必須傳 `!po.is_long` 還原持倉方向**——直接傳
+    /// po.is_long 會把 toward-touch 算反（壞 fill / PostOnly 穿越 spread）。
+    pub(crate) fn compute_close_reprice_limit(
+        &self,
+        symbol: &str,
+        position_is_long: bool,
+        strategy: &str,
+    ) -> Option<f64> {
+        let policy = close_maker_price_policy(strategy)?;
+        let (best_bid, best_ask) = self.paper_state.latest_bbo(symbol)?;
+        let tick_size = self
+            .instrument_cache
+            .as_ref()
+            .and_then(|cache| cache.get_tick_size(symbol));
+        let inputs = MakerPriceInputs {
+            last_price: self.paper_state.latest_price(symbol).unwrap_or(0.0),
+            best_bid: Some(best_bid),
+            best_ask: Some(best_ask),
+            tick_size,
+        };
+        compute_close_limit_price(
+            position_is_long,
+            inputs,
+            policy,
+            "close_maker_reprice",
+            symbol,
+        )
+    }
+
+    /// MAKER-CLOSE-REPRICE-1 DIRECTION SINGLE-HOME（2026-06-17 E2/E4 RETURN HIGH）：
+    /// 由一個 PendingOrder 算 toward-touch 重掛限價。**訂單側→持倉方向的轉換
+    /// （`!po.is_long`）唯一收口在此**——sweep（loop_handlers）與 e2e 方向測試
+    /// 都走這條，故任何把轉換寫反的 mutation 會同時打掛兩者（test 真 bite）。
+    /// po.is_long = 訂單側（close 已 inverted：平多倉 SELL=false / 平空倉 BUY=true）。
+    pub(crate) fn compute_close_reprice_limit_for_pending(
+        &self,
+        po: &crate::event_consumer::PendingOrder,
+    ) -> Option<f64> {
+        self.compute_close_reprice_limit(&po.symbol, !po.is_long, &po.strategy)
+    }
+
+    /// MAKER-CLOSE-REPRICE-1 (2026-06-17)：派發一筆 toward-touch 重掛的 close maker。
+    ///
+    /// 由 event_consumer 5s sweep 在純函數 `close_maker_reprice_decision` 判定值得
+    /// 重掛後呼叫，發一筆新的 PostOnly close maker（reprice_count+1、新 order_link_id、
+    /// mid@submit reference、保留 close_maker_audit），回傳 `Some(new_link_id)`。
+    ///
+    /// **生存 gate 不變式（A.4）**：caller 已保證為 PostOnly close maker（=已過
+    /// close_maker_price_policy 正白名單）且決策函數已放行；本 fn 不碰任何 gate
+    /// 函數、不新增 maker 准入，只把已過 gate 的 close 拉回 inside quote。stops/urgent
+    /// 走 market 永遠到不了這裡。入隊失敗回 None，由 caller 沿用 timeout→taker
+    /// fallback（不吞掉 close = survival）。
+    ///
+    /// `new_limit` 已由 caller 經 compute_close_reprice_limit + 決策函數驗為「嚴格
+    /// 優於原掛價」的 strict-passive 限價。回傳新 order_link_id 供 caller 把
+    /// reprice_count+1 帶到新 tracker 並移除舊單。
+    ///
+    /// **DIRECTION CONTRACT（2026-06-17 E2/E4 RETURN HIGH）**：`position_is_long`
+    /// = **真實持倉方向**；本 fn 內部以 `is_long: !position_is_long` 還原訂單側
+    /// （與 on_tick close emit 一致）。呼叫端持有 PendingOrder.is_long（訂單側），
+    /// 必須傳 `!po.is_long`。
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn dispatch_close_maker_reprice(
+        &mut self,
+        original_order_link_id: &str,
+        symbol: &str,
+        position_is_long: bool,
+        qty: f64,
+        cum_filled_qty: f64,
+        strategy: &str,
+        context_id: &str,
+        maker_timeout_ms: Option<u64>,
+        reprice_count: u32,
+        audit: &CloseMakerFillAudit,
+        new_limit: f64,
+        now_ms: u64,
+    ) -> Option<String> {
+        // 通道未綁定 → 不 reprice（caller 走 timeout→taker fallback）。
+        let tx = self.order_dispatch_tx.clone()?;
+        // 殘量必須 > 0（已大致全成交則不重掛）。
+        let remaining_qty = if qty > 0.0 {
+            (qty - cum_filled_qty).max(0.0)
+        } else {
+            return None;
+        };
+        if remaining_qty <= 0.0 {
+            return None;
+        }
+        if !(new_limit.is_finite() && new_limit > 0.0) {
+            return None;
+        }
+        // mid@submit reference（與 on_tick close emit 同語意）。BBO 缺值時退回
+        // new_limit 作參考（仍為 maker 價，markout 基準誠實）。
+        let mid_at_submit = match self.paper_state.latest_bbo(symbol) {
+            Some((b, a)) if a > b => (b + a) * 0.5,
+            _ => new_limit,
+        };
+
+        self.exchange_seq = self.exchange_seq.wrapping_add(1);
+        let new_order_link_id = format!(
+            "oc_close_mk_rp_{}_{}_{}",
+            self.order_link_mode_tag(),
+            now_ms,
+            self.exchange_seq
+        );
+        // 重掛 audit：沿用原 eligible_reason + 原始 initial_limit_price（保持 markout
+        // 基準可追溯到首次掛價）；fallback_reason 仍 None（重掛仍是 maker 嘗試）。
+        let reprice_audit = CloseMakerFillAudit {
+            initial_limit_price: audit.initial_limit_price,
+            eligible_reason: audit.eligible_reason.clone(),
+            fallback_reason: None,
+            rate_limit_scope: None,
+        };
+        let request = OrderDispatchRequest {
+            symbol: symbol.to_string(),
+            // close 方向 = 持倉反向（與 on_tick close emit 的 `is_long: !is_long` 一致）。
+            is_long: !position_is_long,
+            qty: remaining_qty,
+            price: mid_at_submit,
+            strategy: strategy.to_string(),
+            paper_fill_ts: now_ms,
+            is_close: true,
+            order_link_id: new_order_link_id.clone(),
+            decision_lease_id: None,
+            is_primary: true,
+            stop_loss: None,
+            take_profit: None,
+            context_id: context_id.to_string(),
+            order_type: "limit".to_string(),
+            limit_price: Some(new_limit),
+            time_in_force: Some(TimeInForce::PostOnly),
+            maker_timeout_ms,
+            close_maker_audit: Some(reprice_audit),
+            // V145：reprice 亦走 mid@submit，使 maker markout 基準正確。
+            reference_price: Some(mid_at_submit),
+            reference_ts_ms: Some(now_ms),
+            reference_source: Some("mid_at_submit".to_string()),
+            spine_order_plan_id: None,
+            spine_decision_id: None,
+            spine_verdict_id: None,
+            spine_stub_report_id: None,
+            intent_id: None,
+            // 累計重掛次數 +1，使下一輪 sweep 對新單繼續計數至 max_reprices 硬上限。
+            reprice_count: reprice_count.saturating_add(1),
+        };
+        match tx.send(request) {
+            Ok(()) => {
+                self.pending_close_symbols.insert(symbol.to_string());
+                tracing::info!(
+                    original_order_link_id,
+                    reprice_order_link_id = %new_order_link_id,
+                    symbol,
+                    remaining_qty,
+                    new_limit,
+                    reprice_count = reprice_count.saturating_add(1),
+                    "close-maker toward-touch reprice dispatched \
+                     / close-maker toward-touch 重掛已派發"
+                );
+                Some(new_order_link_id)
+            }
+            Err(e) => {
+                tracing::warn!(
+                    original_order_link_id,
+                    symbol,
+                    error = %e,
+                    "close-maker reprice enqueue failed — caller falls back to timeout→taker \
+                     / close-maker 重掛入隊失敗，caller 沿用 timeout→taker"
+                );
+                None
+            }
+        }
+    }
+
+    /// MAKER-CLOSE-REPRICE-1 DIRECTION SINGLE-HOME（2026-06-17 E2/E4 RETURN HIGH）：
+    /// 由一個 PendingOrder 派發 toward-touch 重掛。**訂單側→持倉方向的轉換
+    /// （`!po.is_long`）唯一收口在此**——sweep 與 e2e 方向測試都走這條。po 必帶
+    /// close_maker_audit（caller 已過 close_maker_reprice_decision 的 audit gate）；
+    /// 缺 audit 回 None（fail-soft，caller 沿用 timeout→taker）。
+    pub(crate) fn dispatch_close_maker_reprice_for_pending(
+        &mut self,
+        po: &crate::event_consumer::PendingOrder,
+        new_limit: f64,
+        reprice_count: u32,
+        now_ms: u64,
+    ) -> Option<String> {
+        let audit = po.close_maker_audit.clone()?;
+        self.dispatch_close_maker_reprice(
+            &po.order_link_id,
+            &po.symbol,
+            !po.is_long,
+            po.qty,
+            po.cum_filled_qty,
+            &po.strategy,
+            &po.context_id,
+            po.maker_timeout_ms,
+            reprice_count,
+            &audit,
+            new_limit,
+            now_ms,
+        )
     }
 
     /// R-02: Reconcile pending_close_symbols against actual open positions.
@@ -1437,6 +1690,8 @@ impl TickPipeline {
                         // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：
                         // ipc_close_all 為運維平倉，無 strategy intent。
                         intent_id: None,
+                        // MAKER-CLOSE-REPRICE-1：ipc_close_all 走 market，reprice 計數 0。
+                        reprice_count: 0,
                     };
                     match tx.send(request) {
                         Ok(()) => {
@@ -1636,6 +1891,8 @@ impl TickPipeline {
                     // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：
                     // ipc_close_symbol 為運維平倉，無 strategy intent。
                     intent_id: None,
+                    // MAKER-CLOSE-REPRICE-1：ipc_close_symbol 走 market，reprice 計數 0。
+                    reprice_count: 0,
                 };
                 match tx.send(request) {
                     Ok(()) => {

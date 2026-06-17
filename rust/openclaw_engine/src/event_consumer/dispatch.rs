@@ -732,6 +732,10 @@ pub(super) fn spawn_order_dispatch(
                     reference_ts_ms: req.reference_ts_ms,
                     reference_source: req.reference_source.clone(),
                     cancel_requested_ts_ms: None,
+                    // MAKER-CLOSE-REPRICE-1：鏡射 OrderDispatchRequest.reprice_count
+                    // （初始 dispatch=0；toward-touch 重掛產生的單帶累計值），
+                    // 使 sweep 對重掛單繼續累計至 CLOSE_MAKER_MAX_REPRICES 硬上限。
+                    reprice_count: req.reprice_count,
                     // W-C Caveat 2 修復（2026-05-11）：鏡射 OrderDispatchRequest
                     // 帶來的 4 個 Spine id，loop_exchange.rs 成交確認後讀此
                     // 4 欄位呼叫 emit_fill_completion_lineage 補寫真實

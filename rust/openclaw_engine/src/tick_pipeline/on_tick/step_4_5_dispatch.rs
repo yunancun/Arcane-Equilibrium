@@ -932,6 +932,9 @@ impl TickPipeline {
                                             &intent.symbol,
                                             event.ts_ms,
                                         )),
+                                        // MAKER-CLOSE-REPRICE-1：entry order 不參與
+                                        // close-maker reprice，計數 0。
+                                        reprice_count: 0,
                                     });
                                     match send_result {
                                         Ok(()) => {
@@ -1310,6 +1313,8 @@ impl TickPipeline {
                                                 details: None,
                                                 close_maker_attempt: false,
                                                 close_maker_fallback_reason: None,
+                                                // V145：開倉 fill 非 maker markout 採集點，恆 None。
+                                                maker_markout_bps: None,
                                             },
                                             "strategy_open_fill",
                                         );
@@ -1414,6 +1419,9 @@ impl TickPipeline {
                                                 &intent.symbol,
                                                 event.ts_ms,
                                             )),
+                                            // MAKER-CLOSE-REPRICE-1：paper shadow entry
+                                            // 不參與 close-maker reprice，計數 0。
+                                            reprice_count: 0,
                                         });
                                     }
                                 }
@@ -1592,6 +1600,10 @@ impl TickPipeline {
                                     details: None,
                                     close_maker_attempt: false,
                                     close_maker_fallback_reason: None,
+                                    // V145：entry-maker mid@submit markout 屬 Phase 2
+                                    // （entry reference 在不同 call-site 設定），本次只做
+                                    // close-maker；entry maker markout 暫恆 None。
+                                    maker_markout_bps: None,
                                 },
                                 "resting_maker_fill",
                             );

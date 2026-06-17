@@ -85,6 +85,11 @@ impl TickPipeline {
         }
         self.latest_prices.insert(sym.clone(), event.last_price);
         self.paper_state.set_latest_price(sym, event.last_price);
+        // MAKER-CLOSE-REPRICE-1：與 latest_price 同點快取最新 BBO，供 close-maker
+        // toward-touch reprice 在 5s sweep（無 event）時重算 inside quote。
+        // set_latest_bbo 自帶 finite/>0 守衛，非法 BBO 不寫入（不污染 reprice 決策）。
+        self.paper_state
+            .set_latest_bbo(sym, event.bid_price, event.ask_price);
 
         // DUST-EVICTION-GAP-1 / P1-8 FUP (2026-04-17): opportunistic per-tick re-triage for
         // positions wearing a synthetic owner label (bybit_sync / orphan_adopted /

@@ -230,6 +230,8 @@ pub(super) async fn try_emit_unattributed_fill(
         details: None,
         close_maker_attempt: false,
         close_maker_fallback_reason: None,
+        // V145：未歸因 fill 無 mid@submit reference，恆 None。
+        maker_markout_bps: None,
     };
     // ENGINE-CRASH-FIX A1 (2026-06-15): bounded send 取代無限阻塞 send().await。
     // 為什麼 fail-open drop 在此安全（survival > audit）：

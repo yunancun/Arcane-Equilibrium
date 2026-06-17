@@ -389,6 +389,12 @@ pub enum TradingMsg {
         /// Signed adverse execution slippage in bps. Positive is worse.
         /// 有符號 adverse execution slippage（bps），正值代表更差。
         slippage_bps: Option<f64>,
+        /// V145: signed maker adverse-selection markout in bps (mid@submit vs
+        /// fill). Populated only for maker fills (liquidity_role=="maker");
+        /// taker / paper fills stay None. 語意與 slippage_bps 正交：slippage_bps
+        /// 是 taker 穿越 spread 的執行劣勢，maker_markout_bps 是 maker 掛單成交
+        /// 後 mid 朝對我不利方向走的逆選程度（正值=被 informed flow 逆選）。
+        maker_markout_bps: Option<f64>,
         /// Liquidity role of this fill: maker/taker/unknown/paper_sim.
         /// 成交流動性角色。
         liquidity_role: Option<String>,

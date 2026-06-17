@@ -54,6 +54,25 @@ pub struct MakerPriceInputs {
 /// Phase 1b close-maker spread guard。超過此 spread 時跳過 maker，走 taker。
 pub const CLOSE_MAKER_SPREAD_GUARD_BPS: f64 = 50.0;
 
+/// MAKER-CLOSE-REPRICE-1 (2026-06-17): toward-the-touch adaptive repricing.
+///
+/// 為什麼需要：close-maker 64% 失敗主因（桶 1）= 掛 inside-quote 同價
+/// （buffer_ticks=0）後整個 timeout 窗口零 repricing，book 走離後排隊尾等死。
+/// 90s timeout 已是 2026-05-18 calibration 結果（非「太短」），真因是「掛一次
+/// 等死」。解法 = 把同一個 timeout 預算切成「最多 N 次跟價」：掛
+/// `CLOSE_MAKER_REPRICE_AFTER_MS` 仍未成交且 BBO inside 已優於原掛價（book 朝
+/// 對我方向移動）→ cancel 舊單 + 以新 inside quote 重掛 PostOnly（仍走
+/// compute_close_limit_price 同一安全函數），不延長持倉暴露、只提高成交命中。
+///
+/// 30s 與既有 calibration 風格一致（grid family timeout=90s）→ 一個 90s 預算
+/// 變「首掛 30s → 重掛 → 30s → 重掛 → 30s」最多 3 次掛價。
+pub const CLOSE_MAKER_REPRICE_AFTER_MS: u64 = 30_000;
+
+/// 每筆 close maker 的最大重掛次數硬上限。**降級開關**：設 0 即關閉 reprice
+/// 分支，退化成「掛一次 + timeout→taker」=現狀 byte-equivalent；
+/// 與 use_maker_close runtime flag（整體 close-maker kill）正交。
+pub const CLOSE_MAKER_MAX_REPRICES: u32 = 2;
+
 /// Close-maker quote parameters selected by exit reason.
 /// 依 exit reason 選出的 close-maker 掛價參數。
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -641,6 +660,31 @@ mod tests {
         assert!(
             price.is_none(),
             "spread above 50 bps must strict-skip to market fallback"
+        );
+    }
+
+    /// MAKER-CLOSE-REPRICE-1：鎖死 reprice 常數關係 —— reprice_after 必須嚴格小於
+    /// grid family timeout（否則永遠到不了 reprice 窗），且 max_reprices>0 才有效。
+    /// 任何 calibration 改動觸發此哨兵測試即提醒同步檢視 sweep 預算切分。
+    #[test]
+    fn close_maker_reprice_constants_are_consistent() {
+        let grid_timeout = close_maker_price_policy("grid_close_long")
+            .expect("grid policy")
+            .timeout_ms;
+        assert!(
+            CLOSE_MAKER_REPRICE_AFTER_MS < grid_timeout,
+            "reprice_after ({CLOSE_MAKER_REPRICE_AFTER_MS}) must be < grid timeout ({grid_timeout}) \
+             so the reprice window is reachable before timeout→taker"
+        );
+        assert!(
+            CLOSE_MAKER_MAX_REPRICES >= 1,
+            "max_reprices must be >=1 for the feature to do anything (0 = kill switch)"
+        );
+        // 90s / 30s = 最多 3 次掛價（首掛 + 2 重掛），與 A.3 量化口徑一致。
+        assert_eq!(
+            grid_timeout / CLOSE_MAKER_REPRICE_AFTER_MS,
+            3,
+            "grid 90s budget should split into 3 quote attempts at 30s reprice cadence"
         );
     }
 
