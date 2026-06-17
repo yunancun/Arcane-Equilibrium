@@ -10,10 +10,13 @@ MODULE_NOTE
   - connect：psycopg2 連線（read-only session）。
   - resolve_window：把 --hours / --since / --until 解析成 (since_ts, until_ts)。
   - load_trades / load_obtop：參數化 SELECT，回 typed DataFrame（含 sgn 衍生）。
+  - load_l1_events：recorder-v2 full L1 BBO 事件流（V143，fill-sim 用）。
+  - liquid_l1_symbols：以 l1 事件數計流動性入選。
 
 硬邊界：
   - 連線一律 set_session(readonly=True)，結構上禁任何寫入（fail-loud 若被誤用）。
-  - 只 SELECT market.trades / market.ob_top；0 寫入、0 order path、0 market 表 mutate。
+  - 只 SELECT market.trades / market.ob_top / market.l1_events；0 寫入、0 order path、
+    0 market 表 mutate。
   - SQL 全參數化（%s / params），symbol 篩用 ANY(%s) 不用字串拼接。
 """
 from __future__ import annotations
@@ -120,6 +123,49 @@ def load_obtop(conn, since_ts=None, until_ts=None) -> pd.DataFrame:
     for c in ["best_bid", "bid_size", "best_ask", "ask_size"]:
         df[c] = df[c].astype(float)
     return df
+
+
+def load_l1_events(conn, since_ts=None, until_ts=None) -> pd.DataFrame:
+    """SELECT market.l1_events 切片 → typed DataFrame（recorder-v2 full L1 BBO 事件流）。
+
+    為什麼讀 l1_events 而非 ob_top：ob_top 是 250ms 節流取樣，無法還原 queue-position /
+    queue-advance；l1_events 是「每一次解析後 BBO 真變更」的 full 事件流，是 fill-sim
+    所需的粒度（V143）。
+
+    回傳欄位：ts(UTC tz-aware), symbol, best_bid, bid_size, best_ask, ask_size,
+              update_id, seq, is_snapshot。
+    排序：symbol, ts, update_id（per-symbol 時序 + 同毫秒以 update_id 穩定 tiebreak）。
+    本函數不做任何 clean / crossed 過濾——呼叫端（fill_sim）負責 §1.2 兩段過濾並 fail-loud 計數。
+    """
+    where, params = _window_clause(since_ts, until_ts)
+    q = ("SELECT ts,symbol,best_bid,bid_size,best_ask,ask_size,update_id,seq,is_snapshot "
+         "FROM market.l1_events" + where + " ORDER BY symbol, ts, update_id")
+    df = pd.read_sql(q, conn, params=params or None)
+    if df.empty:
+        return df
+    df["ts"] = pd.to_datetime(df["ts"], utc=True)
+    for c in ["best_bid", "bid_size", "best_ask", "ask_size"]:
+        df[c] = df[c].astype(float)
+    for c in ["update_id", "seq"]:
+        df[c] = df[c].astype("int64")
+    df["is_snapshot"] = df["is_snapshot"].astype(bool)
+    return df
+
+
+def liquid_l1_symbols(conn, since_ts=None, until_ts=None, min_events: int = 500):
+    """流動性入選 symbol（以 l1_events 事件數計）：窗內 l1 event 數 >= min_events。
+
+    fill-sim 以 l1 事件密度判 symbol 是否值得模擬（trades 多但 BBO 幾乎不動的 symbol
+    queue model 無意義）。回傳排序後 symbol list。
+    """
+    where, params = _window_clause(since_ts, until_ts)
+    q = ("SELECT symbol FROM market.l1_events" + where
+         + " GROUP BY symbol HAVING count(*) >= %s ORDER BY symbol")
+    cur = conn.cursor()
+    cur.execute(q, params + [min_events])
+    syms = [r[0] for r in cur.fetchall()]
+    cur.close()
+    return syms
 
 
 def liquid_symbols(conn, since_ts=None, until_ts=None, min_trades: int = 500):
