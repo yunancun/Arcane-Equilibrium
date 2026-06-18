@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v166 Phase2 verdict-casing reconcile；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v167 runtime stale reconcile；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v167 增量（2026-06-18 runtime stale reconcile）**：read-only Linux recheck 關閉兩個 TODO stale 點。其一，`AUDIT-2026-06-14-P2P3-BATCH` 的 `daily_cost_snapshot.sh` broken-cron action 已無可執行殘留：current `trade-core` crontab 無 `daily_cost_snapshot` 行，repo/Linux find 仍無該腳本，故不需 operator 刪 cron 或重建；舊 AI-E/PA finding superseded。其二，刷新 §6 Gate-B watcher：cron 仍 `12,42 * * * *`，latest `/tmp/openclaw/gate_b_watch/gate_b_watch_latest.json` generated `2026-06-18T17:42:01Z`，status=`WATCH_ONLY`，candidate_counts total=21/alertable=0/start_now=0/schedule=0/watch_only=1，source health ok；gate-watch-only preflight `gate_b_preflight_refresh_20260618T1745Z` 回 `operator_action=WAIT_FOR_ACTIONABLE_WATCH`，0 probe hints，未啟動 24h probe。邊界：artifact/read-only verification only；無 deploy/rebuild/restart/DB/auth/risk/order/trading mutation，除 preflight summary 寫入 `/tmp/openclaw/aeg_s3_gate_b_preflight/...`。
 
 **v166 增量（2026-06-18 Phase2 verdict-casing reconcile）**：關閉 TODO §6「Phase2 verdict-casing mismatch 須 grep reconcile」疑點。Source 已有 shared contract `app/strategist_promote_contract.py`：`ELIGIBLE_TOKEN="eligible"`，`is_eligible()` 對 token `.strip().lower()` 後比對；`strategist_promote_routes.py` promote gate 使用 `is_eligible(verdict)`；Rust `ipc_server/dispatch.rs` 回 `verdict.tag()` lowercase；`test_strategist_promote_phase2.py::TestIpcContractKeysAndCasing::test_verdict_casing_handler_emits_what_route_consumes` PASS。完整 phase2 test 用 `/usr/local/bin/python3` 3.10 跑 21/23，兩個 false-red 來自 `tomllib` missing；本機 3.12 有 `tomllib` 但未裝 pytest。結論：原 worklog/TODO warning 已 stale，不是 open promotion-gate bug。邊界：read-only source/test reconcile；無 code/runtime/DB/auth/risk/order/trading mutation。
 
