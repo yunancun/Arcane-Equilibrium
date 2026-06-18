@@ -507,3 +507,8 @@
 
 - TODO v190 removes `P1-EARN-WAVE-D-RUST-HMAC-CANONICAL-FORM` from §5 after adding shared Rust/Python golden-vector coverage for Bybit REST V5 signing. The tests lock Earn GET sorted query bytes and Earn POST compact JSON body bytes to identical HMAC outputs in Rust `common::bybit_signer` and Python `BybitClient._sign`.
 - Focused verification passed: Rust signer 2 tests and Python parity 2 tests. Remaining Wave D frontend -> backend -> Rust IPC integration test stays active as `P2-EARN-WAVE-D-CONTRACT-INTEGRATION-TEST`. Boundary: source/tests/docs only; no real Bybit call, credential mutation, deploy, runtime, DB, auth, risk, order, or trading mutation.
+
+## 2026-06-18 TODO P5-SM completed-row relocation
+
+- TODO v191 removes `P5-SM-OPTION2-CONVERGENCE` from §5. The active row was stale: `[82]` step-ii 48h soak had already passed on 2026-06-13T02:05:59Z, and later V138/V139, seed, V140, L2 cron, embedding backfill, and B3 source wiring superseded its old "not applied/not activated" caveats.
+- This is not a P5-SM step-iii completion claim. Remaining `P5-SM step-iii CUTOVER sign-off` is preserved in §6 as an operator-gated action requiring operator sign-off plus CC/E2/BB/E4 review chain; docs hygiene only, no source/runtime mutation.
