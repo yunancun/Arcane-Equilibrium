@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 00:00 CEST
+- hardened `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` with PM-local payload semantics tests
+- ghost-converge audit payload now goes through a pure helper, and unit tests pin both `dispatched-not-confirmed` and `handler-confirmed` `removed_position_semantics`
+- verification: `position_reconciler::orphan_handler::tests` 19 passed, `position_reconciler::tests::ghost` 11 passed, `cargo clippy -p openclaw_engine --lib -- -D warnings` PASS, rustfmt check PASS, diff check PASS
+- boundary: row remains active for formal E2/E4 review and production `reconcile_ghost_converge` event proof; no real Bybit call, deploy/rebuild/restart, runtime/DB/auth/risk/order/trading mutation
+
 2026-06-18 23:52 CEST
 - hardened `P2-RECONCILER-GET-POSITIONS-PAGINATION` full-scan cursor guard after PM-local review
 - `get_positions(Linear, None)` now compares the current request cursor to response `nextPageCursor`, so same-cursor pagination fails closed immediately rather than after one extra duplicate request
