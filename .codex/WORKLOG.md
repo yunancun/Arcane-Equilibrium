@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 00:16 CEST
+- refreshed Gate-B watcher/preflight evidence without starting any probe
+- Linux latest gate_b_watch artifact generated at 2026-06-18T22:12:02Z remained `WATCH_ONLY`; gate-watch-only preflight `gate_b_preflight_refresh_20260618T2216Z` returned `WAIT_FOR_ACTIONABLE_WATCH`, 0 probe hints, and full-chain command `UNAVAILABLE`
+- boundary: artifact/read-only plus `/tmp` summary only; no CI, deploy/rebuild/restart, production WS/scanner/strategy/DB/auth/risk/order/trading mutation
+
 2026-06-19 00:10 CEST
 - removed a duplicate v198 archive marker from TODO and advanced the docs-only TODO hygiene checkpoint to v200
 - TODO source-sync metadata now records v199 `a8ff3e85` as the verified prior checkpoint; current v200 cleanup is intentionally git-log-only until committed

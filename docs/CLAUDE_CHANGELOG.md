@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v200 duplicate-marker cleanup checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v201 Gate-B WATCH_ONLY refresh checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v201 增量（2026-06-19 Gate-B WATCH_ONLY refresh checkpoint）**：刷新 `TODO.md` §6 Gate-B watcher / preflight 現場證據。Linux `/tmp/openclaw/gate_b_watch/gate_b_watch_latest.json` 於 `2026-06-18T22:12:02Z` 仍為 `WATCH_ONLY`，candidate_counts total=21 / alertable=0 / start_now=0 / schedule=0 / watch_only=1，source_health ok；PM 跑 gate-watch-only preflight `gate_b_preflight_refresh_20260618T2216Z`，summary 寫 `/tmp/openclaw/aeg_s3_gate_b_preflight/gate_b_preflight_refresh_20260618T2216Z/gate_b_preflight_summary.json`，`operator_action=WAIT_FOR_ACTIONABLE_WATCH`、0 probe hints、recommended full-chain command `UNAVAILABLE`。不關閉 `AEG-S3-CANDIDATE-DIRECT-ROWS` 或 S2 Gate-B 24h 真捕捉 gate。邊界：artifact/read-only + `/tmp` summary only；未跑 CI full suite，未 deploy/rebuild/restart，無 production WS/scanner/strategy/DB/auth/risk/order/trading mutation，未啟動 isolated probe。
 
 **v200 增量（2026-06-19 duplicate-marker cleanup checkpoint）**：刪除 `TODO.md` §5 歸檔區重複出現的 v198 source/test pass marker，並把 masthead/source-sync pointer 從 v199 docs checkpoint 推進到 `a8ff3e85`。不改任何 active row 狀態，也不關閉 runtime/review/operator gate。Focused verification：`rg -n "v198 source/test pass" TODO.md` 僅剩 1 筆；`git diff --check` PASS。邊界：docs/TODO hygiene only；未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation。
 
