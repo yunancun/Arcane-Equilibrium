@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 00:10 CEST
+- removed a duplicate v198 archive marker from TODO and advanced the docs-only TODO hygiene checkpoint to v200
+- TODO source-sync metadata now records v199 `a8ff3e85` as the verified prior checkpoint; current v200 cleanup is intentionally git-log-only until committed
+- boundary: docs/TODO hygiene only; no code, CI full suite, deploy/rebuild/restart, runtime/DB/auth/risk/order/trading mutation
+
 2026-06-19 00:06 CEST
 - corrected TODO v199 source-sync metadata after the v198 commit
 - Mac `main`, `origin/main`, and Linux `trade-core` were all verified at `3ebeb1cd`; TODO masthead/§0 now match that source state
