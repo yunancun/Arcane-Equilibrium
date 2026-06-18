@@ -231,3 +231,99 @@ pub fn per_strategy_new_entry_rejection(
     }
     None
 }
+
+/// Return the per-strategy concurrency-cap rejection for a fresh entry.
+/// `owned_count` is the number of OPEN positions currently attributed to
+/// `strategy` (counted by `owner_strategy` from `PaperState` at the call site).
+/// Returns `None` when the strategy has no override, no cap is configured,
+/// or there is still headroom for one more position.
+///
+/// 為什麼這是 HARD 層而非 producer soft cap：producer 端 `open_symbols.len()`
+/// 在重啟後可能 under-count（import_positions 把 owner 重置為 "bybit_sync"），
+/// soft cap 失效 → 同策略可超開。風控層直接依 `owner_strategy` 重數一次
+/// PaperState 真倉，作為 backstop 拒絕第 N+1 筆新開倉（fail-closed，不可被
+/// producer 端誤差繞過）。`max_concurrent_positions` 屬 denylist 的 per_strategy
+/// 前綴，agent 永不可放寬。
+///
+/// 不變量：僅對「新開倉」生效（呼叫端先排除 is_reducing），平倉/減倉永不被擋。
+pub fn per_strategy_concurrency_rejection(
+    config: &RiskConfig,
+    strategy: &str,
+    owned_count: usize,
+) -> Option<String> {
+    let override_cfg = config.per_strategy.get(strategy)?;
+    let max = override_cfg.max_concurrent_positions?;
+    // max=0 視為「不限」（與既有 Option=None 行為一致，避免把 0 誤判為全封）。
+    if max == 0 {
+        return None;
+    }
+    if owned_count >= max as usize {
+        return Some(format!(
+            "per_strategy.{strategy}.max_concurrent_positions={max} reached \
+             (owned={owned_count}); new entry rejected by risk layer"
+        ));
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::risk_config::{RiskConfig, StrategyOverride};
+
+    fn cfg_with_cap(strategy: &str, cap: Option<u32>) -> RiskConfig {
+        let mut cfg = RiskConfig::default();
+        cfg.per_strategy.insert(
+            strategy.into(),
+            StrategyOverride {
+                max_concurrent_positions: cap,
+                ..Default::default()
+            },
+        );
+        cfg
+    }
+
+    #[test]
+    fn concurrency_rejection_blocks_at_cap() {
+        // 不變量：owned==cap 時必須拒絕第 N+1 筆新開倉（HARD 層）。
+        let cfg = cfg_with_cap("flash_dip_buy", Some(3));
+        assert!(per_strategy_concurrency_rejection(&cfg, "flash_dip_buy", 3).is_some());
+        let reason = per_strategy_concurrency_rejection(&cfg, "flash_dip_buy", 3).unwrap();
+        assert!(reason.contains("max_concurrent_positions=3"));
+        assert!(reason.contains("owned=3"));
+    }
+
+    #[test]
+    fn concurrency_rejection_allows_below_cap() {
+        let cfg = cfg_with_cap("flash_dip_buy", Some(3));
+        assert!(per_strategy_concurrency_rejection(&cfg, "flash_dip_buy", 0).is_none());
+        assert!(per_strategy_concurrency_rejection(&cfg, "flash_dip_buy", 2).is_none());
+    }
+
+    #[test]
+    fn concurrency_rejection_blocks_above_cap() {
+        // 重啟後 under-count 修正後可能出現 owned>cap，仍須拒絕（>= 比較）。
+        let cfg = cfg_with_cap("flash_dip_buy", Some(3));
+        assert!(per_strategy_concurrency_rejection(&cfg, "flash_dip_buy", 4).is_some());
+    }
+
+    #[test]
+    fn concurrency_rejection_none_when_no_override() {
+        let cfg = RiskConfig::default();
+        assert!(per_strategy_concurrency_rejection(&cfg, "flash_dip_buy", 99).is_none());
+    }
+
+    #[test]
+    fn concurrency_rejection_none_when_cap_unset() {
+        // override 存在但 max_concurrent_positions=None → 不限。
+        let cfg = cfg_with_cap("flash_dip_buy", None);
+        assert!(per_strategy_concurrency_rejection(&cfg, "flash_dip_buy", 99).is_none());
+    }
+
+    #[test]
+    fn concurrency_rejection_zero_means_unlimited() {
+        // cap=0 視為不限，避免把 0 誤判為全封導致策略永不可開倉。
+        let cfg = cfg_with_cap("flash_dip_buy", Some(0));
+        assert!(per_strategy_concurrency_rejection(&cfg, "flash_dip_buy", 99).is_none());
+    }
+}

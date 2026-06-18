@@ -180,6 +180,106 @@ fn test_per_strategy_blocked_symbol_allows_reducing_order() {
 }
 
 #[test]
+fn test_per_strategy_max_concurrent_positions_hard_reject() {
+    // CC/E3 must-fix #1 HARD-layer regression（E2 HIGH-1）：
+    // 注入 3 個由 flash_dip_buy 擁有的真倉（owner_strategy 經 apply_fill 設定），
+    // 第 4 筆新開倉必須被「風控層」拒（per_strategy.max_concurrent_positions），
+    // 而非僅靠 producer soft skip。驗證 backstop 在 import_positions 把 owner 重置
+    // 後仍能依 owner_strategy 重數真倉 fail-closed。
+    let mut proc = IntentProcessor::new();
+    let mut cfg = RiskConfig::default();
+    cfg.per_strategy.insert(
+        "flash_dip_buy".into(),
+        crate::config::risk_config::StrategyOverride {
+            max_concurrent_positions: Some(3),
+            ..Default::default()
+        },
+    );
+    proc.update_risk_config(cfg);
+    let mut gov = GovernanceCore::new();
+    gov.grant_paper_authorization(None).unwrap();
+    let mut state = PaperState::new(100_000.0);
+
+    // 注入 3 個 flash_dip_buy 擁有的真倉（不同 symbol，owner_strategy 經 fill 設定）。
+    for (sym, px) in [("ADAUSDT", 0.5), ("AVAXUSDT", 30.0), ("SOLUSDT", 150.0)] {
+        state.set_latest_price(sym, px);
+        state.apply_fill(sym, true, 1.0, px, 0.0, 0, "flash_dip_buy");
+    }
+    assert_eq!(
+        state
+            .positions()
+            .iter()
+            .filter(|p| p.owner_strategy == "flash_dip_buy")
+            .count(),
+        3,
+        "fixture must seed exactly 3 flash_dip_buy-owned positions"
+    );
+
+    // 第 4 筆新開倉（新 symbol）必須被風控層 max_concurrent_positions 擋。
+    state.set_latest_price("BTCUSDT", 50_000.0);
+    let mut intent = make_intent("BTCUSDT", true);
+    intent.strategy = "flash_dip_buy".into();
+    let result = proc.process(&intent, &gov, &state, 2000.0, GovernanceProfile::Exploration);
+    assert!(
+        !result.submitted,
+        "4th flash_dip_buy entry must be rejected by risk layer"
+    );
+    let reason = result.rejected_reason.unwrap_or_default();
+    assert!(
+        reason.contains("max_concurrent_positions=3"),
+        "rejection must come from the risk-config concurrency cap, got: {reason}"
+    );
+
+    // Sanity：cap 內（同策略 2 倉）的第 3 筆仍應放行（驗證不是無條件全擋）。
+    let mut state3 = PaperState::new(100_000.0);
+    for (sym, px) in [("ADAUSDT", 0.5), ("AVAXUSDT", 30.0)] {
+        state3.set_latest_price(sym, px);
+        state3.apply_fill(sym, true, 1.0, px, 0.0, 0, "flash_dip_buy");
+    }
+    state3.set_latest_price("BTCUSDT", 50_000.0);
+    let mut intent3 = make_intent("BTCUSDT", true);
+    intent3.strategy = "flash_dip_buy".into();
+    let result3 = proc.process(&intent3, &gov, &state3, 2000.0, GovernanceProfile::Exploration);
+    assert!(
+        result3.submitted,
+        "3rd entry under cap=3 must pass concurrency gate, got {:?}",
+        result3.rejected_reason
+    );
+}
+
+#[test]
+fn test_per_strategy_max_concurrent_allows_reducing_at_cap() {
+    // 不變量：達上限時平倉/減倉永不被並發 gate 擋（survival 路徑）。
+    let mut proc = IntentProcessor::new();
+    let mut cfg = RiskConfig::default();
+    cfg.per_strategy.insert(
+        "flash_dip_buy".into(),
+        crate::config::risk_config::StrategyOverride {
+            max_concurrent_positions: Some(3),
+            ..Default::default()
+        },
+    );
+    proc.update_risk_config(cfg);
+    let mut gov = GovernanceCore::new();
+    gov.grant_paper_authorization(None).unwrap();
+    let mut state = PaperState::new(100_000.0);
+    for (sym, px) in [("ADAUSDT", 0.5), ("AVAXUSDT", 30.0), ("SOLUSDT", 150.0)] {
+        state.set_latest_price(sym, px);
+        state.apply_fill(sym, true, 1.0, px, 0.0, 0, "flash_dip_buy");
+    }
+    // 反向 (Sell) 對既有 long 倉 = reducing；應繞過並發上限。
+    let mut intent = make_intent("ADAUSDT", false);
+    intent.strategy = "flash_dip_buy".into();
+    intent.qty = 1.0;
+    let result = proc.process(&intent, &gov, &state, 0.01, GovernanceProfile::Exploration);
+    assert!(
+        result.submitted,
+        "reducing order at cap must bypass concurrency gate, got {:?}",
+        result.rejected_reason
+    );
+}
+
+#[test]
 fn test_position_sizing_caps_qty() {
     // P1 cap: 3% of 10,000 / 50,000 = 0.006 BTC
     // Intent qty 0.01 should be reduced to 0.006.

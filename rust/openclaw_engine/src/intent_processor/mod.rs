@@ -772,6 +772,49 @@ impl IntentProcessor {
         }
     }
 
+    /// FLASH-DIP-PILOT (2026-06-18): band-external hard cap (kill-switch 1).
+    /// 對 `intent.strategy == "flash_dip_buy"` 的開倉做硬拒：若 effective notional
+    /// (`final_qty * price`) > `balance * limits.flash_dip_buy_max_notional_pct_equity`
+    /// 則回 Some(reason)；否則 None。在 gate stack Gate 2.7 region（final_qty 已知後）
+    /// 呼叫，與 check_global_notional_cap 並列。
+    ///
+    /// 為什麼 hard reject 而非 scale：effective qty 已是 min(target, Kelly, P1) 保守值；
+    /// 超過此 label-conditional cap 代表「即使被通用 P1 夾過仍超 pilot 收緊上限」=
+    /// 結構性異常，fail-closed 拒整單。**此 cap 是 ADDITIVE 收緊，非 survival floor**
+    /// （label-conditional，可被 mislabel 繞過）；真 floor = P1(2%)/position_size +
+    /// max_order_notional_usdt（label-independent，已 denylist，由 check_order_allowed
+    /// + global cap 強制）。reducing 單不受此 cap（降風險）。
+    fn check_flash_dip_notional_cap(
+        &self,
+        strategy: &str,
+        final_qty: f64,
+        price: f64,
+        balance: f64,
+        is_reducing: bool,
+    ) -> Option<String> {
+        if is_reducing || strategy != "flash_dip_buy" {
+            return None;
+        }
+        let pct = self.risk_config.limits.flash_dip_buy_max_notional_pct_equity;
+        // pct <= 0 不可能（validate 守住），但 defense-in-depth：非正即不啟用 cap
+        // 反而危險，故 <= 0 視為「最嚴」直接拒（fail-closed）。
+        if !(pct > 0.0) || !balance.is_finite() || balance <= 0.0 {
+            return Some(format!(
+                "flash_dip_buy_notional_cap fail-closed: invalid pct={pct} or balance={balance}"
+            ));
+        }
+        let order_notional = final_qty * price;
+        let max_notional = balance * pct;
+        if order_notional > max_notional {
+            Some(format!(
+                "flash_dip_buy_notional_cap: order_notional={order_notional:.2} > \
+                 {pct:.4} * equity({balance:.2}) = {max_notional:.2} (band-external hard cap)"
+            ))
+        } else {
+            None
+        }
+    }
+
     /// EXIT-FEATURES-TABLE-1: Read-only accessor for the currently loaded
     /// shrunk-edge table. Used by `emit_close_fill` to stamp the `est_net_bps`
     /// feature onto `learning.exit_features` — the same table the cost_gate

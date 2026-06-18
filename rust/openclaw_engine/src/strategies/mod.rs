@@ -18,6 +18,10 @@ pub mod bb_breakout;
 pub mod bb_reversion;
 pub mod common;
 pub mod confluence;
+// flash_dip_buy — flash-crash dip-buy demo pilot（sibling 策略；demo-only，
+// flag-OFF + active=false 雙鎖預設）。daily cadence + PostOnly 靜態深價 maker entry +
+// N=3 day-clustered hold exit。研究 ref: tail_dislocation_meanrev 26-survivor universe。
+pub mod flash_dip_buy;
 // Sprint N+1 W2 sub-task 2：BtcLeadLagPanel paper-only shadow log 共用 helper。
 pub mod cross_asset;
 pub mod funding_arb;
@@ -270,6 +274,15 @@ pub trait Strategy: Send {
     /// Default no-op for strategies that opt out (their conf_scale stays 1.0).
     /// CONF-D：設定 confidence 縮放因子，越界自動 clamp 到 [0, 2]。
     fn set_conf_scale(&mut self, _scale: f64) {
+        // Default no-op / 預設無操作
+    }
+
+    /// FLASH-DIP-PILOT (2026-06-18): boot-time prior daily close seed。
+    /// 為什麼是 trait 方法：on_tick 無 KlineManager 存取；flash_dip_buy 的入場價
+    /// 依賴「前一完整 UTC 日收盤」（leak-free），由 bootstrap 在 1d REST seed 後
+    /// 讀 KlineManager 1d buffer 注入。default no-op：其他 5 策略不消費 daily close
+    /// （零行為差）。
+    fn seed_prior_close(&mut self, _symbol: &str, _prior_close: f64) {
         // Default no-op / 預設無操作
     }
 }

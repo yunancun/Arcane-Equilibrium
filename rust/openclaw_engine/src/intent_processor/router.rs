@@ -163,6 +163,37 @@ fn per_strategy_symbol_rejection(
     crate::config::per_strategy_new_entry_rejection(config, &intent.strategy, &intent.symbol)
 }
 
+/// HARD 並發上限門控（CC/E3 must-fix #1）。
+///
+/// 為什麼必須在風控層重數而非依賴 producer 端 soft cap：producer 的
+/// `open_symbols.len()` 在引擎重啟後可能 under-count —— `import_positions`
+/// 把所有恢復倉的 `owner_strategy` 重置為 "bybit_sync"，於是同策略真倉不被計入
+/// producer 計數 → 可繞過 soft cap 超開。本 helper 直接依 `owner_strategy` 重數
+/// PaperState 真倉，把 `per_strategy.<strategy>.max_concurrent_positions`
+/// （denylist 前綴，agent 不可放寬）落實為 hard reject。
+///
+/// 不變量：僅對新開倉生效（is_reducing 時短路 None，平倉/減倉永不被擋，守 survival
+/// 路徑）。`intent.symbol` 對應的已有倉不重複計入（同向重複已被 Gate 1.5 擋；
+/// 反向為 reducing 已短路）。
+fn per_strategy_concurrency_rejection(
+    config: &RiskConfig,
+    paper_state: &PaperState,
+    intent: &OrderIntent,
+    is_reducing: bool,
+) -> Option<String> {
+    if is_reducing {
+        return None;
+    }
+    let owned_count = paper_state
+        .positions()
+        .iter()
+        .filter(|p| {
+            p.owner_strategy == intent.strategy && !p.symbol.eq_ignore_ascii_case(&intent.symbol)
+        })
+        .count();
+    crate::config::per_strategy_concurrency_rejection(config, &intent.strategy, owned_count)
+}
+
 impl IntentProcessor {
     /// Process a single intent through the full governance pipeline (no edge-predictor features).
     /// Legacy entry-point retained for callers that do not yet compute FeatureVectorV1.
@@ -281,6 +312,14 @@ impl IntentProcessor {
             .map(|p| p.qty);
         let is_reducing = reducing_existing_qty.is_some();
         if let Some(reason) = per_strategy_symbol_rejection(&self.risk_config, intent, is_reducing)
+        {
+            return IntentResult::rejected(RejectionCode::RiskGate { reason }.format());
+        }
+        // HARD 並發上限：per_strategy.<strategy>.max_concurrent_positions backstop
+        // （CC/E3 must-fix #1）。在風控層依 owner_strategy 重數真倉拒第 N+1 筆新開倉，
+        // 不依賴 producer soft cap（重啟後可 under-count）。
+        if let Some(reason) =
+            per_strategy_concurrency_rejection(&self.risk_config, paper_state, intent, is_reducing)
         {
             return IntentResult::rejected(RejectionCode::RiskGate { reason }.format());
         }
@@ -500,6 +539,20 @@ impl IntentProcessor {
                 if let Some(reason) = self.check_global_notional_cap(order_notional) {
                     return IntentResult::rejected(reason);
                 }
+            }
+
+            // FLASH-DIP-PILOT band-external hard cap (kill-switch 1)。
+            // final_qty 已知後、cost_gate 前；只約束 flash_dip_buy（label-conditional
+            // ADDITIVE 收緊，真 survival floor 為上方通用 check_order_allowed P1/
+            // position_size + global cap）。
+            if let Some(reason) = self.check_flash_dip_notional_cap(
+                &intent.strategy,
+                final_qty,
+                price,
+                balance,
+                is_reducing,
+            ) {
+                return IntentResult::rejected(reason);
             }
         }
 
@@ -804,6 +857,13 @@ impl IntentProcessor {
         {
             return ExchangeGateResult::rejected(RejectionCode::RiskGate { reason }.format());
         }
+        // HARD 並發上限：與主 router 同一 backstop（CC/E3 must-fix #1）。exchange
+        // 路徑同樣在風控層依 owner_strategy 重數真倉拒第 N+1 筆新開倉。
+        if let Some(reason) =
+            per_strategy_concurrency_rejection(&self.risk_config, paper_state, intent, is_reducing)
+        {
+            return ExchangeGateResult::rejected(RejectionCode::RiskGate { reason }.format());
+        }
         let pre_guardian_qty = if let Some(existing_qty) = reducing_existing_qty {
             intent.qty.min(existing_qty)
         } else {
@@ -976,6 +1036,18 @@ impl IntentProcessor {
                 if let Some(reason) = self.check_global_notional_cap(order_notional) {
                     return ExchangeGateResult::rejected(reason);
                 }
+            }
+
+            // FLASH-DIP-PILOT band-external hard cap (kill-switch 1)。
+            // 與 process_with_features 對稱：production exchange (Demo) 路徑亦強制。
+            if let Some(reason) = self.check_flash_dip_notional_cap(
+                &intent.strategy,
+                final_qty,
+                price,
+                balance,
+                is_reducing,
+            ) {
+                return ExchangeGateResult::rejected(reason);
             }
         }
 

@@ -935,6 +935,107 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         }
     }
 
+    // ── FLASH-DIP-PILOT (2026-06-18 / Q1): boot-time 1d REST seed + freshness ──
+    // 為什麼需要：bootstrap kline seed 只 fetch 1m+5m（上方迴圈），1d buffer 由
+    // daily backfill cron 填 → boot 時 flash_dip_buy 無 prior_close 來源 → 首次
+    // backfill 前 silent inert（fail-safe 但靜默）。此處 fetch pilot 26 symbol 的 1d
+    // 收盤線，seed_bars 進 KlineManager，再讀「最後一根已收盤 1d bar」(leak-free
+    // 前一完整 UTC 日) + 1d-freshness 檢查後，注入 flash_dip_buy.seed_prior_close。
+    // gate：只在 Demo + flag-on + 策略已註冊 才跑（否則零成本跳過）。
+    {
+        let flag_on = std::env::var(crate::strategies::registry::FLASH_DIP_PILOT_ENABLED_ENV)
+            .as_deref()
+            == Ok("1");
+        let pilot_registered = pipeline
+            .orchestrator
+            .active_strategy_names()
+            .iter()
+            .any(|n| *n == "flash_dip_buy");
+        if pipeline_kind == PipelineKind::Demo && flag_on && pilot_registered {
+            if let Some(ref client_arc) = bootstrap_client {
+                let mdc = crate::market_data_client::MarketDataClient::new(Arc::clone(client_arc));
+                // pilot universe = 策略 allowed_symbols（26 survivor）；用 default 取，
+                // 與 TOML active 後策略內部一致（registry wire 時已套 TOML allowed_symbols）。
+                let pilot_symbols =
+                    crate::strategies::flash_dip_buy::params::default_allowed_symbols();
+                const DAY_MS: u64 = 86_400_000;
+                // 1d-freshness 上限：最後一根已收盤 1d bar 的 open_time 距今不得超過 2 日
+                // （容忍 backfill 滯後一日；> 2 日視為 stale → 不 seed 該 symbol，fail-safe）。
+                const MAX_1D_STALE_MS: u64 = 2 * DAY_MS;
+                let now_ms = openclaw_core::now_ms();
+                let mut seeded = 0_usize;
+                let mut stale = 0_usize;
+                for sym in &pilot_symbols {
+                    match mdc
+                        .get_klines("linear", sym, "D", None, None, Some(5))
+                        .await
+                    {
+                        Ok(bars) => {
+                            let mut core_bars: Vec<openclaw_core::klines::KlineBar> = bars
+                                .iter()
+                                // 只收已收盤 1d bar（open + 1 日 <= now）：leak-free。
+                                .filter(|b| b.start_time + DAY_MS <= now_ms)
+                                .map(|b| openclaw_core::klines::KlineBar {
+                                    open_time_ms: b.start_time,
+                                    close_time_ms: b.start_time + DAY_MS,
+                                    open: b.open,
+                                    high: b.high,
+                                    low: b.low,
+                                    close: b.close,
+                                    volume: b.volume,
+                                    turnover: b.turnover,
+                                    tick_count: 1,
+                                    is_closed: true,
+                                })
+                                .collect();
+                            core_bars.sort_by_key(|b| b.open_time_ms);
+                            pipeline.kline_manager.seed_bars(sym, "1d", core_bars);
+                            // 讀最後一根已收盤 1d bar 的收盤 + freshness 檢查。
+                            let last_open = pipeline
+                                .kline_manager
+                                .last_closed_open_time_ms(sym, "1d");
+                            let prior_close = pipeline
+                                .kline_manager
+                                .get_buffer(sym, "1d")
+                                .and_then(|buf| buf.close_array(1).last().copied());
+                            match (last_open, prior_close) {
+                                (Some(open_ms), Some(pc))
+                                    if now_ms.saturating_sub(open_ms) <= MAX_1D_STALE_MS
+                                        && pc.is_finite()
+                                        && pc > 0.0 =>
+                                {
+                                    if let Some(s) =
+                                        pipeline.orchestrator.find_strategy_mut("flash_dip_buy")
+                                    {
+                                        s.seed_prior_close(sym, pc);
+                                        seeded += 1;
+                                    }
+                                }
+                                _ => {
+                                    // stale 或無已收盤 1d bar → 不 seed（該 symbol 當日 inert）。
+                                    stale += 1;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            warn!(symbol = %sym, error = %e,
+                                "FLASH-DIP-PILOT 1d seed fetch failed / 1d 引導抓取失敗");
+                            stale += 1;
+                        }
+                    }
+                }
+                info!(
+                    seeded,
+                    stale,
+                    total = pilot_symbols.len(),
+                    "FLASH-DIP-PILOT 1d prior_close seeded / 已注入 pilot 前日收盤"
+                );
+            } else {
+                warn!("FLASH-DIP-PILOT 1d seed skipped — no REST client / 無 REST 客戶端");
+            }
+        }
+    }
+
     // Persistence / 持久化
     let data_dir = std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into());
     let data_path = PathBuf::from(&data_dir);

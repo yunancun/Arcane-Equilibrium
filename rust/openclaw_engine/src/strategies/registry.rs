@@ -15,14 +15,18 @@
 
 use super::params::{
     default_bbb_oi_buffer_window_ms, default_bbb_oi_confluence_bonus, load_strategy_params,
-    StrategyParamsConfig,
+    StrategyParams, StrategyParamsConfig,
 };
 use super::Strategy;
 use super::{
-    bb_breakout, bb_reversion, funding_arb, funding_harvest, funding_short_v2, grid_helpers,
-    grid_trading, liquidation_cascade_fade, ma_crossover,
+    bb_breakout, bb_reversion, flash_dip_buy, funding_arb, funding_harvest, funding_short_v2,
+    grid_helpers, grid_trading, liquidation_cascade_fade, ma_crossover,
 };
 use crate::tick_pipeline::PipelineKind;
+
+/// FLASH-DIP-PILOT 啟用 env flag。fail-closed：unset / 非 "1" → 永不註冊。
+/// 三合一 gate：env flag set AND TOML active=true AND kind == Demo。
+pub const FLASH_DIP_PILOT_ENABLED_ENV: &str = "OPENCLAW_FLASH_DIP_PILOT_ENABLED";
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // 3E-9: StrategyFactory — single registration point for all strategies.
@@ -46,7 +50,44 @@ impl StrategyFactory {
     /// 為特定引擎創建策略，從 TOML 加載參數。
     pub fn create_for_engine(kind: PipelineKind) -> Vec<Box<dyn Strategy>> {
         let params = load_strategy_params(kind);
-        Self::create_with_params(&params)
+        let mut strategies = Self::create_with_params(&params);
+
+        // ── FLASH-DIP-PILOT kind-aware demo-gate（CC 條件 4 / E3 MED-1）──
+        // 為什麼 gate 落 create_for_engine（kind-aware）而非 create_with_params
+        // （kind-blind，亦被 create_all / replay_runner 用）：pilot 結構性只能在
+        // Demo pipeline 出現；Paper / Live factory 路徑永不建構此策略，使 Live
+        // 5-gate 零修改即排除（IPC set_strategy_active("flash_dip_buy") 在 Live 回
+        // "strategy not found"）。
+        // 三合一 fail-closed gate：(a) env flag set AND (b) TOML active=true AND
+        // (c) kind == Demo。任一不滿足 → 不註冊（flag-OFF 預設）。
+        let flag_on = std::env::var(FLASH_DIP_PILOT_ENABLED_ENV).as_deref() == Ok("1");
+        if kind == PipelineKind::Demo && flag_on && params.flash_dip_buy.active {
+            // TOML validate（fail-closed：壞參數不註冊，不污染 pilot）。
+            match params.flash_dip_buy.validate() {
+                Ok(()) => {
+                    let mut fdb = flash_dip_buy::FlashDipBuy::new();
+                    fdb.k_dip = params.flash_dip_buy.k_dip;
+                    fdb.hold_days = params.flash_dip_buy.hold_days;
+                    fdb.max_concurrent = params.flash_dip_buy.max_concurrent;
+                    fdb.notional_frac = params.flash_dip_buy.notional_frac;
+                    fdb.allowed_symbols = params.flash_dip_buy.allowed_symbols.clone();
+                    fdb.set_active(true);
+                    strategies.push(Box::new(fdb));
+                    tracing::info!(
+                        strategy = "flash_dip_buy",
+                        kind = %kind,
+                        "FLASH-DIP-PILOT registered (Demo + flag + active) / 已註冊（demo-only pilot）"
+                    );
+                }
+                Err(e) => tracing::warn!(
+                    strategy = "flash_dip_buy",
+                    error = %e,
+                    "FLASH-DIP-PILOT params invalid — NOT registered (fail-closed) / 參數非法，不註冊"
+                ),
+            }
+        }
+
+        strategies
     }
 
     /// Create strategies with explicit params (for testing / direct config).

@@ -484,6 +484,24 @@ pub struct GlobalLimits {
     #[serde(default = "default_daily_loss_halt_ttl_ms")]
     pub daily_loss_halt_ttl_ms: u64,
 
+    /// FLASH-DIP-PILOT (2026-06-18): band-external 硬上限 — flash_dip_buy 單筆
+    /// 名目佔 equity 比例上限（0.03 = 3%）。在 gate stack（Gate 2.7 region，
+    /// final_qty 已知後）對 `intent.strategy == "flash_dip_buy"` 的單做 HARD reject
+    /// （非 soft scale）：`final_qty * price > balance * 此值` 即拒。
+    ///
+    /// 為什麼是 ADDITIVE 而非 survival floor：此 cap key 在 self-asserted
+    /// `intent.strategy` String，策略 bug 誤標/清空 strategy 欄會繞過自己的 cap
+    /// （E3 MED-2 label-conditional 弱點）。**真通用 survival floor = P1
+    /// per_trade_risk_pct(2%) + position_size_max_pct + max_order_notional_usdt**
+    /// （三者 label-independent 且已 denylist）。此欄只是針對 pilot 的額外收緊。
+    ///
+    /// denylist：顯式入 RISKCONFIG_SURVIVAL_DENYLIST（applier_riskconfig.rs limits.*
+    /// 段）→ riskconfig_decide_leaf 回 HardBoundary；即使漏列，allowlist-default-deny
+    /// 仍回 VetoedByDefaultDeny（fail-closed by construction）。serde default 0.03；
+    /// validate() 拒 > 0.03 或 <= 0。
+    #[serde(default = "default_flash_dip_buy_max_notional_pct_equity")]
+    pub flash_dip_buy_max_notional_pct_equity: f64,
+
     /// P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): priority-7 `SESSION DRAWDOWN`
     /// halt 的 TTL（毫秒）。**必須 0 = NEVER auto-clear**（三環境硬性 sticky）。
     /// validate() 對 > 0 直接 reject。
@@ -576,6 +594,12 @@ fn default_daily_loss_halt_ttl_ms() -> u64 {
     24 * 60 * 60 * 1000
 }
 
+fn default_flash_dip_buy_max_notional_pct_equity() -> f64 {
+    // FLASH-DIP-PILOT：與策略 params notional_frac 硬上限 MAX_NOTIONAL_FRAC 同義 3%。
+    // 移除/缺失此欄 → serde 退回 0.03，更保守的通用 P1(2%)/position_size 仍生效。
+    0.03
+}
+
 fn default_drawdown_halt_ttl_ms() -> u64 {
     // P0-ENGINE-HALTSESSION-STUCK-FIX：drawdown 三環境硬性 sticky；任何 > 0
     // 配置 validate() 直接 reject。明示 0 default 與 hard-code 都可，留欄位
@@ -615,6 +639,9 @@ impl Default for GlobalLimits {
             // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：halt TTL 預設。
             daily_loss_halt_ttl_ms: default_daily_loss_halt_ttl_ms(),
             drawdown_halt_ttl_ms: default_drawdown_halt_ttl_ms(),
+            // FLASH-DIP-PILOT (2026-06-18)：band-external flash_dip_buy 名目上限預設 3%。
+            flash_dip_buy_max_notional_pct_equity:
+                default_flash_dip_buy_max_notional_pct_equity(),
         }
     }
 }
@@ -685,6 +712,18 @@ impl GlobalLimits {
             || !(0.0..=100_000.0).contains(&self.ft_dust_qty_floor_usd)
         {
             return Err("risk.limits.ft_dust_qty_floor_usd must be finite in [0, 100000]".into());
+        }
+        // FLASH-DIP-PILOT (2026-06-18): band-external flash_dip_buy 名目上限守門。
+        // 為什麼 fail-loud：此 cap 是 pilot survival 收緊；> 3% 等同放寬至超過通用
+        // P1 邊界語意，<= 0 會關閉 cap，兩者皆 reject（不可 widen / 不可關）。
+        if !self.flash_dip_buy_max_notional_pct_equity.is_finite()
+            || self.flash_dip_buy_max_notional_pct_equity <= 0.0
+            || self.flash_dip_buy_max_notional_pct_equity > 0.03
+        {
+            return Err(format!(
+                "risk.limits.flash_dip_buy_max_notional_pct_equity must be in (0, 0.03]; got {}",
+                self.flash_dip_buy_max_notional_pct_equity
+            ));
         }
         // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): halt TTL 守門。
         // drawdown_halt_ttl_ms：三環境硬性 sticky；任何 > 0 即 reject（D1 policy）。
@@ -766,7 +805,9 @@ pub struct CategoryOverride {
 // `pub use` 保留 `crate::config::risk_config::StrategyOverride` 公開 API 路徑。
 #[path = "risk_config_per_strategy.rs"]
 mod per_strategy;
-pub use per_strategy::{per_strategy_new_entry_rejection, StrategyOverride};
+pub use per_strategy::{
+    per_strategy_concurrency_rejection, per_strategy_new_entry_rejection, StrategyOverride,
+};
 
 pub(super) fn default_true() -> bool {
     true

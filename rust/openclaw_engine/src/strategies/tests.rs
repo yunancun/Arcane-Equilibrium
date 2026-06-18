@@ -144,6 +144,75 @@ fn test_strategy_factory_creates_six_strategies() {
     );
 }
 
+// ── FLASH-DIP-PILOT kind-aware demo-gate 負測（CC 條件 4 / E3 MED-1 grep-proof）──
+
+/// 序列化 env-sensitive 測試（OPENCLAW_FLASH_DIP_PILOT_ENABLED 為 process-wide）。
+static FLASH_DIP_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn flash_dip_count(strategies: &[Box<dyn super::Strategy>]) -> usize {
+    strategies
+        .iter()
+        .filter(|s| s.name() == "flash_dip_buy")
+        .count()
+}
+
+#[test]
+fn test_flash_dip_never_in_create_all_or_create_with_params() {
+    // create_all / create_with_params 為 kind-blind（亦被 replay_runner 用）→ 必 0 次。
+    assert_eq!(
+        flash_dip_count(&StrategyFactory::create_all()),
+        0,
+        "flash_dip_buy must NEVER be in create_all (kind-blind path)"
+    );
+    let cfg = super::params::StrategyParamsConfig::default();
+    assert_eq!(
+        flash_dip_count(&StrategyFactory::create_with_params(&cfg)),
+        0,
+        "flash_dip_buy must NEVER be in create_with_params (kind-blind path)"
+    );
+}
+
+#[test]
+fn test_flash_dip_demo_gate_flag_off_zero_registration() {
+    let _g = FLASH_DIP_ENV_LOCK.lock().unwrap();
+    std::env::remove_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED"); // flag OFF
+                                                              // flag OFF → 即使 Demo 也 0 次。
+    assert_eq!(
+        flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Demo)),
+        0,
+        "flag OFF must yield 0 flash_dip_buy registration even in Demo"
+    );
+}
+
+#[test]
+fn test_flash_dip_never_in_paper_or_live_even_with_flag_on() {
+    let _g = FLASH_DIP_ENV_LOCK.lock().unwrap();
+    // 強制 flag ON：仍只有 Demo 可能註冊；Paper / Live 結構性 0 次。
+    std::env::set_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED", "1");
+    let paper = flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Paper));
+    let live = flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Live));
+    std::env::remove_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED");
+    assert_eq!(paper, 0, "flash_dip_buy must NEVER register in Paper pipeline");
+    assert_eq!(live, 0, "flash_dip_buy must NEVER register in Live pipeline");
+}
+
+#[test]
+fn test_flash_dip_demo_gate_requires_all_three_conditions() {
+    let _g = FLASH_DIP_ENV_LOCK.lock().unwrap();
+    // 三合一 gate：Demo + flag-ON + active=true。repo settings/strategy_params_demo.toml
+    // 的 [flash_dip_buy].active=false → 即使 Demo + flag-ON 仍 0 次（active gate 守住）。
+    // 此測試證「flag-ON + Demo 但 active=false → 不註冊」（active 為第三必要條件）。
+    std::env::set_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED", "1");
+    let demo = flash_dip_count(&StrategyFactory::create_for_engine(PipelineKind::Demo));
+    std::env::remove_var("OPENCLAW_FLASH_DIP_PILOT_ENABLED");
+    // active=false default in repo TOML → 0 次（除非 operator 顯式 active=true）。
+    assert_eq!(
+        demo, 0,
+        "Demo + flag-ON but active=false (repo default) must NOT register \
+         (active is the third required gate condition)"
+    );
+}
+
 #[test]
 fn test_strategy_factory_liquidation_cascade_consumer_gate_after_stage0r_launch() {
     // W-AUDIT-8a C1 / W-AUDIT-8c boundary guard 演進至 Sprint 2 W2-B：
