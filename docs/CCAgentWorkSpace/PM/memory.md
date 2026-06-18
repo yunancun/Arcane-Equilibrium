@@ -463,3 +463,9 @@
 
 - TODO v182 archives `AUDIT-2026-06-14-SCHEMA-1` from §5. The schema contract test and PR-only PG CI path remain in repo, while `audit_migrations.py` is explicitly informational-only.
 - The derivative `MIGRATION-TREE-1` blocker is already closed/archived by v171 and future migration safety is carried by V### / Linux PG dry-run discipline. Boundary: docs hygiene only; no source/runtime mutation.
+
+## 2026-06-18 TODO Stage0R replay preflight event-trigger relocation
+
+- TODO v183 moves `P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH` from §5 active queue to §7 passive schedule because the row has no current engineering action; it is now event-triggered.
+- This is not a completion claim: 06-10 FA evidence still says 0 candidates satisfy AC-S2-A-3, A1/A2 demo are inactive with 0 fills, A1 basis wire is functional but candidate remains dormant (`n_eff=0` / `no_a1_signals_after_entry_gate`), and A2 remains NO-GO/observe_more.
+- Reopen triggers preserved in §7: green Stage 0R preflight + operator demo-canary approval, first real AEG-S3 `candidate_regime_metrics` rows, residual Stage0R preflight flag-ON first run, or funding >30% APR + A1 entry-gate regime reappears; backstop remains 2026-06-27 with `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK`. Boundary: docs hygiene only; no source/runtime mutation.

@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v182 SCHEMA-1 completed-row archive；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v183 Stage0R replay preflight event-trigger relocation；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v183 增量（2026-06-18 Stage0R replay preflight event-trigger relocation）**：依 `docs/agents/todo-maintenance.md` active queue / passive wait 規則，從 `TODO.md` §5 移出 `P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH`，改由 §7 事件觸發等待承接。此不是完成歸檔：06-10 FA 證據檢查結論仍是 0 候選滿足 AC-S2-A-3；A1/A2 demo inactive 且 0 fills；2026-06-13 A1 basis wire formal gate 只關工程線，candidate 仍因 `n_eff=0` / `no_a1_signals_after_entry_gate` dormant；A2 仍 NO-GO/observe_more。§7 保留全部 reopen 條件：任一 green Stage 0R preflight + operator demo-canary approval（核准後 D+14 review）、AEG-S3 首批真 `candidate_regime_metrics` rows、residual Stage0R preflight flag-ON 首輪、或 funding >30% APR + A1 entry-gate regime 復現；backstop 仍為 2026-06-27 併 `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK`。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 
 **v182 增量（2026-06-18 SCHEMA-1 completed-row archive）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 `AUDIT-2026-06-14-SCHEMA-1`。本體已由 cold-audit fix-wave 完成：`rust/openclaw_engine/tests/schema_contract_test.rs` 現在存在，CI 仍有 PR-only Linux PG `schema_contract_test` step，`audit_migrations.py` 已明標 informational-only；E1/E2/E4 報告與 fix-wave 總結記錄 6 probe、column-drift bite 真 PG 親證、Linux read-only 6/6 probe 0 drift，且未改 93 runtime call site（不在 scope）。該 row 原先保留的衍生 blocker 是 `MIGRATION-TREE-1`；v171 已把它作為完成項歸檔（V005/V023 forward-compat、deploy、checksum repair、virgin/CI replay 現可過），未來 migration 紀律由 V### / Linux PG dry-run 規則承接。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 
