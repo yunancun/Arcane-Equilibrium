@@ -368,3 +368,8 @@
 - Added artifact-only `helper_scripts/research/v58_pause_readiness/` checker for V5.8 pause/resume: validates design/governance anchors, M1-M13 scaffold, freeze/unfreeze gate, V### numbering reality, LAL/M5/M12 fail-loud posture, and optional Gate-B watch context.
 - True repo + Linux Gate-B latest run `v58_pause_local_20260613_r3` returned `PASS_PAUSE_READY` with 47 pass / 0 warn / 0 fail; Gate-B remained `WATCH_ONLY` with 0 alertable/start/schedule candidates and unfreeze gate `met=false`.
 - Boundary: no CI/deploy/rebuild/restart/DB/auth/risk/order/trading mutation and no Gate-B probe. Future V5.8 active-IMPL remains frozen until AEG `stage0_ready`; rerun checker before pause/resume.
+
+## 2026-06-18 TODO v164 hygiene
+
+- TODO masthead restored to compact shape; v161-v163 long increment narrative moved to `docs/CLAUDE_CHANGELOG.md`, preserving active state in structured TODO sections.
+- §5 stale cold-audit rows corrected: duplicate SCHEMA-1 removed, AUTH-1/PROFIT-1/DIRTY-FIX statuses aligned to deployed/healthcheck/true-table evidence. Boundary: docs-only, no runtime/code/DB/auth/risk/order mutation.
