@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v168 closed-row archive pass；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v169 closed-row archive pass #2 + source-sync checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v169 增量（2026-06-18 closed-row archive pass #2 + source-sync checkpoint）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 active queue 再移出 5 個無下一步或已被其他 active row 承接的完成 rows：`AUDIT-2026-06-14-PERF-123`（PERF-1/2/3 全修，報告已歸 cold-audit fix-wave）、`AUDIT-2026-06-14-DIRTY-FIX`（m4 fee fan-out / closed_pnl fail-closed 修復及 Linux true-table 複驗已完成）、`V5.8-PAUSE-READINESS`（未來 pause/resume 只需重跑 checker，active freeze posture 已在 §3.1 保留）、`P0-EDGE-1-POST-DEPLOY-QA-A1A2BA4`（A-1 preventive closure、B 正面證據路徑由 `P1-BB-REVERSION-REGIME-OBSERVABILITY` 承接）、`CODE-SIMPLIFY-D-CLOSED`（operator no-reopen 保留到 archive marker）。同輪 masthead/§0 source-sync 指針更新到 prior docs checkpoint `e4e1b7a3`，該 checkpoint 已 Mac→GitHub→Linux `trade-core` fast-forward verified；Linux 僅有 unrelated untracked report/research artifacts。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 source/runtime/DB/auth/risk/order/trading mutation。
 
 **v168 增量（2026-06-18 closed-row archive pass）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 active queue 移出 8 個無下一步/已 no-reopen/已被其他 active row 覆蓋的完成 rows，並在 §5 archive marker 保留 ID：`P0-EDGE-1-CAND-FUNDING-TILT-DIAGNOSTIC`（NO-GO-C no-reopen，funding tilt 不比 price-return 更獨立，回 listing fade 主路）、`P3-FUNDING-TILT-HARNESS-3LOW-DEBT`（E1 `e863853a` 修完，verdict 仍 NO-GO-C）、`P2-ORDERLINKID-HARDENING` + `P3-110072-10001-DUP-OPEN-FAILCLOSED-EVAL`（#6/#6 follow-up 已 main 且 2026-06-07 rebuild 生效）、`P2-POSTMORTEM-CLASSIFIER`（#7 pure Python 已 2026-06-07 API restart 生效；v2 consumer 不存在故不作 active task）、`P1-OPS-2-14D-SOAK-OBSERVE`（D+14 closed，cutover row still carries relevant caveat）、`P2-OPS-4-GAP-B-D-UNIT-TEST-GAP`（source tests done，report linked）、`P2-A1-RUNNER-WIRE-TO-BASIS`（wire verified/candidate dormant，same fact retained in Stage0R event-trigger row and §2 basis note）。保留未歸檔：deploy/operator/future-dated rows and rows with live active gates. 邊界：TODO/changelog/report hygiene only；無 source/runtime/DB/auth/risk/order/trading mutation。
 
