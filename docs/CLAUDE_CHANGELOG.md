@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v199 source-sync correction checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v200 duplicate-marker cleanup checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v200 增量（2026-06-19 duplicate-marker cleanup checkpoint）**：刪除 `TODO.md` §5 歸檔區重複出現的 v198 source/test pass marker，並把 masthead/source-sync pointer 從 v199 docs checkpoint 推進到 `a8ff3e85`。不改任何 active row 狀態，也不關閉 runtime/review/operator gate。Focused verification：`rg -n "v198 source/test pass" TODO.md` 僅剩 1 筆；`git diff --check` PASS。邊界：docs/TODO hygiene only；未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation。
 
 **v199 增量（2026-06-19 source-sync correction checkpoint）**：修正 `TODO.md` masthead / §0 source-sync 事實：v198 commit `3ebeb1cd` 已推送 `origin/main` 並 fast-forward 到 Linux `trade-core`，不應再把 `43402763` 寫作來源實作 HEAD。Focused verification：Mac `HEAD=origin/main=3ebeb1cd`，Linux `/home/ncyu/BybitOpenClaw/srv` `HEAD=origin/main=3ebeb1cd`；`git diff --check` PASS。邊界：docs/TODO hygiene only；未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation；不關閉任何 runtime/review/operator gate。
 
