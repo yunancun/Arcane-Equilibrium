@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 00:58 CEST
+- corrected TODO v208 SQL-head metadata after Linux read-only psql showed prod `_sqlx_migrations` max=145
+- V141-V145 all returned `success=t`; §8 v92 V### now matches the 2026-06-18 intelligent-param deploy fact, while V146 remains normal deploy/migration-gated
+- boundary: docs/TODO hygiene plus read-only DB metadata check only; no CI, deploy/rebuild/restart, DB write, runtime/auth/risk/order/trading mutation
+
 2026-06-19 00:53 CEST
 - corrected TODO v207 source-sync metadata after the v206 8c report-auth-smoke checkpoint
 - Mac `main`, `origin/main`, and Linux `trade-core` were verified at `1e1d0393`; TODO masthead/§0 now name that source state instead of prior `a90e5938`
