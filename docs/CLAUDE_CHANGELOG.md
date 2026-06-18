@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v191 P5-SM completed-row relocation；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v192 Earn Wave D IPC contract checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v192 增量（2026-06-18 Earn Wave D IPC contract source/test checkpoint）**：關閉 `TODO.md` §5 `P2-EARN-WAVE-D-CONTRACT-INTEGRATION-TEST`。Rust IPC server 新增 `process_earn_intent` dispatch arm、method registry metadata、`PipelineCommand::ProcessEarnIntent`、event-consumer async owner-task bridge，真正調 `IntentProcessor::process_earn_intent`；Python `/api/v1/earn/stake` 新增 contract test 鎖住傳給 Rust 的 method/timeout/8-field params。Focused verification：`cargo test -p openclaw_engine process_earn_intent --lib`（3 passed）、`cargo test -p openclaw_engine earn_router_fail_closed_when_unwired --lib`（1 passed）、`python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_earn_routes.py`（28 passed, 1 existing Pydantic deprecation warning）。誠實邊界：當前 Rust bootstrap 尚未注入 `BybitEarnClient` + `EarnMovementWriter`，真 IPC 回 `submitted=false` + `earn_dispatch_unwired...` 是預期 fail-closed；未做真 Bybit call、未 credential/key/secret mutation、未 CI full suite、未 deploy/rebuild/restart、未 runtime/DB/auth/risk/order/trading mutation。`P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` 仍留 §5，明示 OP-1/2/3 + Earn capability injection 才能走首筆真質押。
 
 **v191 增量（2026-06-18 P5-SM completed-row relocation）**：依 `docs/agents/todo-maintenance.md` active queue lifecycle，從 `TODO.md` §5 移出 `P5-SM-OPTION2-CONVERGENCE`。該 row 的驗收本體 `[82]` step-ii 48h soak 已於 2026-06-13T02:05:59Z 以 Linux 真 DB healthcheck 關閉（window=48.1h、probes=1442、success_rate=1.0000、0 flag-OFF/regression/fail-streak，watchdog fresh）；且 row 內「未套 V138/V139、未啟 L2 activation」已被後續 operator-approved V138/V139、B1/B2 seed、manual V140、L2 cron、`bge-m3` embedding backfill、B3 source wiring completion supersede。未隱藏剩餘 gate：`TODO.md` §6 新增 `P5-SM step-iii CUTOVER sign-off` operator action，明示仍需 operator sign-off + CC/E2/BB/E4 review chain，移除/收斂兩個 P5-SM soak flag 後 72h 內若 `[82]` fail-closed 噪音則按既有 CC LOW-2 SOP 處理。邊界：TODO/changelog/memory/report/index hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation；不宣稱 P5-SM step-iii cutover 已完成。
 

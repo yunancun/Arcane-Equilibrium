@@ -53,6 +53,7 @@ use std::collections::HashMap;
 mod budget;
 mod config;
 mod dispatch;
+mod earn;
 mod phase4;
 mod risk;
 mod risk_update;

@@ -652,6 +652,62 @@ class TestStakeIPCDispatch:
         assert audit.get("actor") == "test-operator"
         assert "trace_id" in audit
 
+    def test_stake_ipc_contract_params_match_rust_method(self):
+        """Route sends the exact Rust `process_earn_intent` contract shape."""
+        test_app = _make_test_app(_operator_actor())
+        client = TestClient(test_app, raise_server_exceptions=False)
+        captured: dict[str, Any] = {}
+
+        async def _ipc_strict_contract(method, params, timeout=None):
+            captured["method"] = method
+            captured["params"] = dict(params)
+            captured["timeout"] = timeout
+            return {
+                "submitted": False,
+                "rejected_reason": "earn_dispatch_unwired: bybit_earn_client not injected",
+                "lease_id": None,
+                "intent_id": None,
+                "movement_id": None,
+                "bybit_response": None,
+            }
+
+        with patch.object(
+            earn_routes_module,
+            "_global_mode_is_live_reserved",
+            return_value=True,
+        ), patch.object(
+            earn_routes_module,
+            "_ipc_call_strict",
+            _ipc_strict_contract,
+        ):
+            resp = client.post("/api/v1/earn/stake", json=_valid_stake_body(amount=100))
+
+        assert resp.status_code == 200, resp.text
+        assert captured["method"] == "process_earn_intent"
+        assert captured["timeout"] == earn_routes_module._IPC_STAKE_TIMEOUT_SEC
+        params = captured["params"]
+        assert set(params) == {
+            "coin",
+            "product_id",
+            "amount_usdt",
+            "expected_apr_bps",
+            "rationale",
+            "actor_id",
+            "submitted_ts_ms",
+            "trace_id",
+        }
+        assert params["coin"] == "USDT"
+        assert params["product_id"] == "BYBIT_USDT_FLEXIBLE_v1"
+        assert params["amount_usdt"] == "100"
+        assert params["expected_apr_bps"] == 800
+        assert params["actor_id"] == "test-operator"
+        assert isinstance(params["submitted_ts_ms"], int)
+        assert isinstance(params["trace_id"], str)
+        assert params["trace_id"].count("-") >= 1
+        data = resp.json().get("data") or {}
+        assert data.get("submitted") is False
+        assert "earn_dispatch_unwired" in (data.get("rejected_reason") or "")
+
     def test_stake_ipc_returns_rejected_reason_propagates(self):
         """IPC 回 submitted=false + rejected_reason → 200 + 透傳 reason。"""
         test_app = _make_test_app(_operator_actor())

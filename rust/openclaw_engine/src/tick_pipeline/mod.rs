@@ -403,6 +403,24 @@ pub enum PipelineCommand {
         strategy: String,
         response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
     },
+    /// Sprint 1B Earn Wave D: external Earn stake intent from Python GUI.
+    /// This must use the async EarnRouter path, not `SubmitOrder` / trading
+    /// submit, because Earn is an asset movement with separate 9-gate + audit
+    /// semantics. The event consumer owns `TickPipeline`/`IntentProcessor`,
+    /// so IPC sends a command and awaits a JSON envelope via oneshot.
+    /// Sprint 1B Earn Wave D：Python GUI 送入的 Earn stake intent。必走
+    /// async EarnRouter，不可復用 trading SubmitOrder。
+    ProcessEarnIntent {
+        coin: String,
+        product_id: String,
+        amount_usdt: String,
+        expected_apr_bps: i32,
+        rationale: String,
+        actor_id: String,
+        submitted_ts_ms: u64,
+        trace_id: String,
+        response_tx: tokio::sync::oneshot::Sender<Result<String, String>>,
+    },
     /// Scanner: query the set of symbols with open paper positions.
     /// Used by ScannerRunner to defer removal of symbols with active trades.
     /// 掃描器：查詢有開放紙盤持倉的交易對集合。

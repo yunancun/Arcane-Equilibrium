@@ -512,3 +512,9 @@
 
 - TODO v191 removes `P5-SM-OPTION2-CONVERGENCE` from §5. The active row was stale: `[82]` step-ii 48h soak had already passed on 2026-06-13T02:05:59Z, and later V138/V139, seed, V140, L2 cron, embedding backfill, and B3 source wiring superseded its old "not applied/not activated" caveats.
 - This is not a P5-SM step-iii completion claim. Remaining `P5-SM step-iii CUTOVER sign-off` is preserved in §6 as an operator-gated action requiring operator sign-off plus CC/E2/BB/E4 review chain; docs hygiene only, no source/runtime mutation.
+
+## 2026-06-18 Earn Wave D IPC contract checkpoint
+
+- TODO v192 removes `P2-EARN-WAVE-D-CONTRACT-INTEGRATION-TEST` from §5 after source/test integration landed: Rust IPC dispatch registers `process_earn_intent`, sends `PipelineCommand::ProcessEarnIntent`, and the event-consumer owner task calls `IntentProcessor::process_earn_intent`; Python `/api/v1/earn/stake` now has a contract test locking method, timeout, and 8 params sent to Rust.
+- Verification passed: `cargo test -p openclaw_engine process_earn_intent --lib` (3), `cargo test -p openclaw_engine earn_router_fail_closed_when_unwired --lib` (1), and full `test_earn_routes.py` (28, existing Pydantic warning only).
+- Boundary preserved: no real Bybit call, no credential/secret mutation, no deploy/rebuild/restart, no runtime/DB/auth/risk/order/trading mutation. Current real Rust path intentionally returns `submitted=false` with `earn_dispatch_unwired...` until `BybitEarnClient` and `EarnMovementWriter` are injected; `P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` stays active for OP-1/2/3 plus capability injection.

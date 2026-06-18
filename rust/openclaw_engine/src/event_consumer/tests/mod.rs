@@ -13,6 +13,7 @@
 // ── 按類別拆分的子模組（G5-07 拆分） ──
 mod c4_failsafe_wire_tests;
 mod cross_engine_tests;
+mod earn_ipc_tests;
 // SM Option-2 收斂 step (i)（2026-06-02）：治理 lease + 唯讀投影 handler round-trip
 // + fail-closed 測試。
 mod governance_ipc_tests;

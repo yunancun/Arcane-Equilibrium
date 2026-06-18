@@ -462,6 +462,17 @@ pub(crate) async fn dispatch_request(
             let tx = extract_engine_tx(&req.params, cmd_channels);
             handle_submit_paper_order(id, &tx, &req.params).await
         }
+        // Sprint 1B Earn Wave D: Python Earn tab → Rust IPC → owner task
+        // IntentProcessor::process_earn_intent. This is intentionally separate
+        // from submit_paper_order; Earn is an asset movement, not a trade order.
+        "process_earn_intent" => {
+            debug_assert_eq!(
+                method_spec(method).map(|spec| spec.slot),
+                Some(IpcSlotRequirement::None)
+            );
+            let tx = extract_engine_tx(&req.params, cmd_channels);
+            handle_process_earn_intent(id, &tx, &req.params).await
+        }
         // RRC-1-E2: Strategy activate/pause / 策略啟停
         "set_strategy_active" => {
             let tx = extract_engine_tx(&req.params, cmd_channels);
