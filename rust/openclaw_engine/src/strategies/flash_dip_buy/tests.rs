@@ -10,13 +10,22 @@ use crate::strategies::test_harness::StrategyHarness;
 use openclaw_core::execution::FillResult;
 
 /// 隔離 entry_ts checkpoint sidecar：每測試用獨立 OPENCLAW_DATA_DIR，避免污染。
-/// 為什麼：persist_entry_ts/load_entry_ts_checkpoint 走 OPENCLAW_DATA_DIR；測試間
-/// 必須隔離，否則 on_fill 寫的 sidecar 會跨測試殘留。
+/// 為什麼：persist_entry_ts/load_entry_ts_checkpoint/sidecar_owned_symbols 走
+/// process 全局 OPENCLAW_DATA_DIR；`cargo test --lib` 預設多執行緒並行，會讓並發的
+/// flash_dip 測試互相覆蓋此 env var（在 set_var 與 sidecar 讀取之間），導致
+/// sidecar_owned_symbols() 讀到別的測試的 dir（E4 RED：~13% 並發 suite-fail，
+/// 命中新 triage 測試 + 既有 restart_rebuild_* 測試）。
+/// 修法（TEST-ONLY）：取 crate 全局 env-mutating 測試互鎖 `crate::test_env_lock::guard()`
+/// 鎖住整個閉包執行期，使所有改 OPENCLAW_DATA_DIR 的 flash_dip 測試真正串行；
+/// guard() 內部以 into_inner() 處理 poisoning，故某測試 panic 不會連鎖毒化後續測試。
+/// 不改任何 production 簽名（不把 dir 參數穿進 load_entry_ts_checkpoint /
+/// sidecar_owned_symbols）。
 fn with_isolated_data_dir<F: FnOnce()>(tag: &str, f: F) {
+    // 鎖必須涵蓋 set_var → f() → remove_dir_all 的「整段」，否則並發測試會在
+    // 本測試讀 sidecar 前先 set_var 蓋掉本測試的 dir。
+    let _env_guard = crate::test_env_lock::guard();
     let dir = std::env::temp_dir().join(format!("flash_dip_test_{tag}_{}", std::process::id()));
     let _ = std::fs::create_dir_all(&dir);
-    // SAFETY: 測試單執行緒序列化（cargo test 預設多執行緒，但本 helper 設 + 還原 env
-    // 僅在本閉包同步區間；各測試用獨立 tag dir 故 sidecar 不衝突）。
     std::env::set_var("OPENCLAW_DATA_DIR", &dir);
     f();
     let _ = std::fs::remove_dir_all(&dir);
@@ -295,6 +304,138 @@ fn maker_timeout_floor_enforced() {
     let near_midnight = 5 * params::MS_PER_UTC_DAY - 1; // 距日終 1ms
     let to = FlashDipBuy::maker_timeout_to_day_end(near_midnight);
     assert!(to >= 15_000, "maker timeout must respect floor near midnight");
+}
+
+#[test]
+fn triage_retains_flash_dip_ownership_and_hard_reject_counts_them() {
+    // E2 HIGH regression（restart triage ownership bypass）：驅動「完整 triage_bybit_sync
+    // 路徑」—— 不直接 seed owner=="flash_dip_buy"，而是模擬真實重啟：
+    //   1. PaperState::import_positions 把恢復倉統一標 "bybit_sync"（如 bootstrap:367）；
+    //   2. flash_dip 寫過 sidecar（記 3 個 pilot symbol，如 on_fill 持久化）；
+    //   3. reclaim_owner_for_symbols（bootstrap triage 前那一步）依 sidecar 重蓋；
+    //   4. triage_bybit_sync（bootstrap:477）執行 —— 必須跳過已重蓋的 pilot 倉，
+    //      不把它們改標 KNOWN_STRATEGY_NAMES[0]（= "ma_crossover"）。
+    // 斷言：triage 後 3 倉 owner 仍 == "flash_dip_buy"（非被 adopt 成 ma_crossover），
+    //       且 router per_strategy 並發硬層數到 3 → 第 4 筆新開倉被 fail-closed 拒。
+    use crate::config::risk_config::StrategyOverride;
+    use crate::config::RiskConfig;
+    use crate::intent_processor::IntentProcessor;
+    use crate::paper_state::PaperState;
+    use crate::position_reconciler::orphan_handler::KNOWN_STRATEGY_NAMES;
+    use openclaw_core::governance_core::{GovernanceCore, GovernanceProfile};
+
+    with_isolated_data_dir("triagepath", || {
+        let pilot_syms = ["ETHUSDT", "SOLUSDT", "XRPUSDT"];
+
+        // (2) flash_dip 在崩潰前已 fill 並持久化 sidecar（記 3 個 pilot symbol）。
+        {
+            let mut s = active_strategy();
+            let now = openclaw_core::now_ms();
+            for sym in pilot_syms {
+                s.entry_ts.insert(sym.to_string(), now - params::MS_PER_UTC_DAY);
+                s.open_symbols.insert(sym.to_string());
+            }
+            s.persist_entry_ts();
+        }
+        // sidecar reader 必須讀回 3 個 symbol。
+        let mut sidecar = FlashDipBuy::sidecar_owned_symbols();
+        sidecar.sort();
+        assert_eq!(sidecar, vec!["ETHUSDT", "SOLUSDT", "XRPUSDT"]);
+
+        // (1) 重啟：PaperState::import_positions 把恢復倉統一標 "bybit_sync"。
+        let mut paper = PaperState::new(100_000.0);
+        let seed: Vec<(String, bool, f64, f64, u64)> = pilot_syms
+            .iter()
+            .map(|s| (s.to_string(), true, 1.0, 100.0, openclaw_core::now_ms()))
+            .collect();
+        assert_eq!(paper.import_positions(seed), 3);
+        for sym in pilot_syms {
+            assert_eq!(
+                paper.get_position(sym).unwrap().owner_strategy,
+                "bybit_sync",
+                "import_positions 必統一標 bybit_sync（重現 bootstrap:367）"
+            );
+        }
+
+        // (3) bootstrap triage 前的 reclaim（依 sidecar 重蓋）。
+        let reclaimed = paper.reclaim_owner_for_symbols(&sidecar, "flash_dip_buy");
+        assert_eq!(reclaimed, 3, "reclaim 必重蓋 3 個 pilot 倉");
+        for sym in pilot_syms {
+            assert_eq!(
+                paper.get_position(sym).unwrap().owner_strategy,
+                "flash_dip_buy",
+                "reclaim 後 pilot 倉 owner 必為 flash_dip_buy"
+            );
+        }
+
+        // 加一個無關 bybit_sync 倉，證明 triage 仍正常 adopt 非-pilot 倉 → ma_crossover。
+        paper.set_latest_price("DOGEUSDT", 0.1);
+        paper.apply_fill("DOGEUSDT", true, 100.0, 0.1, 0.0, 0, "bybit_sync");
+
+        // (4) 完整 triage_bybit_sync 路徑（universe 含 pilot symbol + 無關 bybit_sync 倉）。
+        let active_symbols: Vec<String> = pilot_syms
+            .iter()
+            .map(|s| s.to_string())
+            .chain(std::iter::once("DOGEUSDT".to_string()))
+            .collect();
+        let triage = paper.triage_bybit_sync(
+            &active_symbols,
+            KNOWN_STRATEGY_NAMES,
+            |_sym, _qty| None, // 無 dust gate
+        );
+
+        // pilot 倉位歸屬未被 triage 改動（仍 flash_dip_buy）。
+        for sym in pilot_syms {
+            assert_eq!(
+                paper.get_position(sym).unwrap().owner_strategy,
+                "flash_dip_buy",
+                "triage 不得把已 reclaim 的 pilot 倉改標 ma_crossover"
+            );
+        }
+        // triage 只 adopt 那個無關 bybit_sync 倉（DOGEUSDT → ma_crossover）。
+        assert_eq!(triage.adopted.len(), 1, "triage 只應 adopt 非-pilot 倉");
+        assert_eq!(triage.adopted[0].0, "DOGEUSDT");
+        assert_eq!(triage.adopted[0].1, "ma_crossover");
+
+        // router 並發硬層：3 個 flash_dip_buy 真倉 → cap=3 → 第 4 筆新開倉被拒。
+        let mut proc = IntentProcessor::new();
+        let mut cfg = RiskConfig::default();
+        cfg.per_strategy.insert(
+            "flash_dip_buy".into(),
+            StrategyOverride {
+                max_concurrent_positions: Some(3),
+                ..Default::default()
+            },
+        );
+        proc.update_risk_config(cfg);
+        let mut gov = GovernanceCore::new();
+        gov.grant_paper_authorization(None).unwrap();
+
+        paper.set_latest_price("BTCUSDT", 50_000.0);
+        let intent = OrderIntent::new_trade(
+            "BTCUSDT".to_string(),
+            true,
+            0.01,
+            0.6,
+            "flash_dip_buy".to_string(),
+            "market".to_string(),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let result = proc.process(&intent, &gov, &paper, 2000.0, GovernanceProfile::Exploration);
+        assert!(
+            !result.submitted,
+            "triage 保歸屬後，第 4 筆 flash_dip_buy 開倉必被並發硬層拒"
+        );
+        let reason = result.rejected_reason.unwrap_or_default();
+        assert!(
+            reason.contains("max_concurrent_positions=3"),
+            "拒因須來自 per_strategy 並發硬層，got: {reason}"
+        );
+    });
 }
 
 #[test]

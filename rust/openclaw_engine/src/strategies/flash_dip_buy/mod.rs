@@ -192,6 +192,18 @@ impl FlashDipBuy {
         }
     }
 
+    /// E2 HIGH fix (2026-06-18)：讀 sidecar 取「本 pilot 上次持有過的 symbol 集合」。
+    /// sidecar 的 key 即歸屬證據 —— entry_ts 只在 on_fill / import_positions 對
+    /// owner=="flash_dip_buy" 的倉寫入，故 key 集合 == flash_dip 真持倉 symbol。
+    /// 為什麼 static / 不經 instance：bootstrap re-claim 必須在策略「註冊之前」
+    /// （bootstrap.rs register@:830 晚於 triage@:477）跑，那時尚無 FlashDipBuy
+    /// instance，需純靜態讀 sidecar。fail-soft：缺檔/解析失敗 = 空 Vec（不 reclaim，
+    /// 退化為舊行為 → triage 仍會把 pilot 倉改標 ma_crossover，但僅 flag-ON 且
+    /// 真有 sidecar 殘留時才走到，且不影響其他策略）。
+    pub fn sidecar_owned_symbols() -> Vec<String> {
+        Self::load_entry_ts_checkpoint().into_keys().collect()
+    }
+
     /// 平倉決策（純判定）：本策略持倉 + entry_day+N 的 UTC 日首 tick →
     /// Some((reason, today_utc_day_index))。回傳 today 供呼叫端 set last_exit_day。
     /// 為什麼 gate 到 UTC 日首 tick：day-clustered exit 對齊研究面板（Q5 預設）。
