@@ -19,6 +19,7 @@ mod agent_spine_metrics;
 mod budget;
 mod cost_edge_advisor;
 mod dynamic_risk;
+mod earn;
 mod fee_source;
 mod governance;
 mod h_state;
@@ -43,6 +44,7 @@ pub(in crate::ipc_server) use cost_edge_advisor::handle_get_cost_edge_advisor_st
 pub(in crate::ipc_server) use dynamic_risk::{
     handle_get_dynamic_risk_status, handle_set_dynamic_risk_enabled,
 };
+pub(in crate::ipc_server) use earn::handle_process_earn_intent;
 pub(in crate::ipc_server) use fee_source::handle_query_fee_source;
 pub(in crate::ipc_server) use governance::{
     // SM Option-2 收斂 step (i)（2026-06-02）：治理 lease + 唯讀投影 IPC handler。

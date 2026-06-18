@@ -6,6 +6,12 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-18 Earn Wave D IPC contract integration
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--earn_wave_d_ipc_contract_integration.md` | PM source/test checkpoint: closes `P2-EARN-WAVE-D-CONTRACT-INTEGRATION-TEST` by wiring Python `/earn/stake` contract to Rust `process_earn_intent` IPC dispatch, per-pipeline command handling, and fail-closed owner-task tests; first real stake remains blocked by OP-1/2/3 plus Earn capability injection。 |
+
 ### 2026-06-18 Earn Wave D HMAC canonical form
 
 | 文件 | 内容 |

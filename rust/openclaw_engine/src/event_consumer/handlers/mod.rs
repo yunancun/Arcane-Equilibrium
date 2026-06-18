@@ -22,6 +22,7 @@ use crate::persistence::DualStateWriter;
 use crate::tick_pipeline::{PipelineCommand, TickPipeline};
 use std::collections::HashMap;
 
+mod earn;
 pub(crate) mod edge_estimates;
 pub(crate) mod edge_predictor;
 // SM Option-2 收斂 step (i)（2026-06-02）：治理 lease + 唯讀投影 IPC handler
@@ -36,6 +37,7 @@ mod strategy_params;
 
 // Re-exports for external callers (event_consumer/mod.rs and tests).
 // 對外再出口：event_consumer/mod.rs 攔截路徑 + tests.rs 直接呼叫。
+pub(crate) use earn::handle_process_earn_intent;
 pub use edge_predictor::handle_disable_edge_predictor_all;
 // P2-PACKET-C-C4-PIPELINE-WIRE：fail-safe in-band 升級 handler（async，含 exchange
 // sync + V114 audit），由 loop_handlers::handle_pipeline_command 攔截後呼叫。
@@ -170,6 +172,17 @@ pub fn handle_paper_command(
             pipeline,
             snapshot_writer,
         ),
+        // Earn asset movement is async and must be intercepted in
+        // loop_handlers::handle_pipeline_command, where the owner task can
+        // await IntentProcessor::process_earn_intent. If this sync facade sees
+        // it, return fail-loud instead of silently dropping the operator intent.
+        PipelineCommand::ProcessEarnIntent { response_tx, .. } => {
+            let _ = response_tx.send(Err(
+                "ProcessEarnIntent must be intercepted in async handle_pipeline_command \
+                 (sync handle_paper_command cannot await) / 必須在 async 上層攔截"
+                    .to_string(),
+            ));
+        }
         // RRC-1-E2: Strategy activate/pause / 策略啟停
         PipelineCommand::SetStrategyActive {
             strategy_name,

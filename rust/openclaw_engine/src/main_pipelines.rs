@@ -177,6 +177,7 @@ fn reject_disabled_paper_command(cmd: PipelineCommand) {
         | PipelineCommand::ForceGovernorTighter { response_tx, .. }
         | PipelineCommand::ForceGovernorLooser { response_tx, .. }
         | PipelineCommand::SubmitOrder { response_tx, .. }
+        | PipelineCommand::ProcessEarnIntent { response_tx, .. }
         | PipelineCommand::ReconcilerEscalate { response_tx, .. }
         | PipelineCommand::ReconcilerDeEscalate { response_tx, .. }
         | PipelineCommand::SetSystemMode { response_tx, .. }

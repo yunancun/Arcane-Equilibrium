@@ -41,6 +41,16 @@ pub const GET_AGENT_SPINE_CHANNEL_METRICS: IpcMethodSpec = IpcMethodSpec {
     slot: IpcSlotRequirement::None,
 };
 
+/// Sprint 1B Earn Wave D asset-movement entry.
+/// readonly=false because the owner task may submit an Earn stake once the
+/// Earn capability is wired. slot=None because the capability lives inside
+/// the per-pipeline `IntentProcessor`, not an IPC-server global slot.
+pub const PROCESS_EARN_INTENT: IpcMethodSpec = IpcMethodSpec {
+    name: "process_earn_intent",
+    readonly: false,
+    slot: IpcSlotRequirement::None,
+};
+
 /// Phase 2 demo→live 促升 EDGE-ANCHORED criteria gate（唯讀）。
 /// slot=None：edge snapshot 由 `dispatch::PROMOTION_EDGE_SLOT` 程序級 OnceLock
 /// 注入（鏡像 `live_authz::nonce_ledger()`），非 dispatch 參數鏈 slot，故此處
@@ -54,6 +64,7 @@ pub const EVALUATE_PROMOTION_CRITERIA: IpcMethodSpec = IpcMethodSpec {
 pub const IPC_METHOD_REGISTRY: &[IpcMethodSpec] = &[
     QUERY_FEE_SOURCE,
     GET_AGENT_SPINE_CHANNEL_METRICS,
+    PROCESS_EARN_INTENT,
     EVALUATE_PROMOTION_CRITERIA,
 ];
 
@@ -82,6 +93,13 @@ mod tests {
     #[test]
     fn unknown_method_has_no_registry_entry() {
         assert!(method_spec("not_a_real_method").is_none());
+    }
+
+    #[test]
+    fn process_earn_intent_is_mutating_no_ipc_slot() {
+        let spec = method_spec("process_earn_intent").expect("registered method");
+        assert!(!spec.readonly, "Earn stake is an asset movement");
+        assert_eq!(spec.slot, IpcSlotRequirement::None);
     }
 
     #[test]

@@ -721,6 +721,35 @@ pub(super) async fn handle_pipeline_command(
                 }
             }
         }
+        // Sprint 1B Earn Wave D: asset movement intent must run in the async
+        // owner task so IntentProcessor::process_earn_intent can await the
+        // EarnRouter gates. This deliberately bypasses SubmitOrder/trading
+        // order authority; Earn has its own capability + governance checks.
+        PipelineCommand::ProcessEarnIntent {
+            coin,
+            product_id,
+            amount_usdt,
+            expected_apr_bps,
+            rationale,
+            actor_id,
+            submitted_ts_ms,
+            trace_id,
+            response_tx,
+        } => {
+            handlers::handle_process_earn_intent(
+                coin,
+                product_id,
+                amount_usdt,
+                expected_apr_bps,
+                rationale,
+                actor_id,
+                submitted_ts_ms,
+                trace_id,
+                response_tx,
+                pipeline,
+            )
+            .await;
+        }
         // P2-PACKET-C-C4-PIPELINE-WIRE：通知 fail-safe in-band 升級。handler 含 await
         // （exchange sync via stop channel + V114 audit emit），故在此 async 攔截，
         // 與 CancelAllOrders / ResetDrawdownBaseline 同模式（handle_paper_command 同步）。
