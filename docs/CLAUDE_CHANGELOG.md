@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v180 cold-audit completed-row archive；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v181 schedule-only duplicate cleanup；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v181 增量（2026-06-18 schedule-only duplicate cleanup）**：依 `docs/agents/todo-maintenance.md` active queue / passive wait 規則，從 `TODO.md` §5 移出兩個 schedule-only 重複 row：`P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK` 與 `P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1`。兩者沒有當前可執行工程步驟，且已各有明確復查日期；§7 現在完整承接其條件與上下文：06-27 bb_breakout/bb_reversion Stage 0R baseline vs M7 retire/extend（n<100 延長），08-21 fallback dead-enum audit + halt root-cause review（`halt_audit.log` ready，除非 healthcheck 退步不提前）。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 
 **v180 增量（2026-06-18 cold-audit completed-row archive）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 `AUDIT-2026-06-14-AUTH-1` 與 `AUDIT-2026-06-14-PROFIT-1`。兩者本體已無下一個 active engineering action：AUTH-1 已於 cold-audit fix-wave commit+Linux deploy，Python `update_per_engine_global_config(engine=="live")` 對齊 5-gate fail-closed；PROFIT-1 已由 PA/MIT/QC 裁定 NO-FIX，並有 passive_wait `[90]` sentinel 驗 Linux 117-cell 0 active bite、positive-bite WARN/exit1 證非 no-op。未來尾巴未被抹掉：§7 新增 `P2-LIVE-AUTHZ-RUST-DIRECT-SOCKET-FUTURE`（若 operator 決定閉 direct-socket bypass，另開 Rust live-authz 架構鏈）與 `P1-COST-GATE-DOUBLE-DEDUCT-TRIGGER`（若 explore-gate/Stage0R 寫入 validated-positive cell 或 forward PnL 證明 released cell 為正，啟用 pre-locked QC fix）。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 
