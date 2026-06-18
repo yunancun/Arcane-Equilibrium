@@ -488,6 +488,30 @@ pub fn dispatch_ghost_converge(
 ///
 /// `confirmed=false` 表示此 row 只證明 `ConvergeExchangeZero` 已成功送入 engine
 /// channel，不證明 handler 端已實際移除本地倉；真實 removal 由 handler 端決定。
+fn build_ghost_converge_audit_payload(
+    symbol: &str,
+    side: &str,
+    baseline_qty: f64,
+    engine_label: &str,
+    removed_position: bool,
+    confirmed: bool,
+) -> serde_json::Value {
+    let removed_position_semantics = if confirmed {
+        "handler-confirmed"
+    } else {
+        "dispatched-not-confirmed"
+    };
+    serde_json::json!({
+        "symbol": symbol,
+        "side": side,
+        "baseline_qty": baseline_qty,
+        "engine": engine_label,
+        "removed_position": removed_position,
+        "confirmed": confirmed,
+        "removed_position_semantics": removed_position_semantics,
+    })
+}
+
 pub fn spawn_ghost_converge_audit(
     audit_pool: &Option<sqlx::PgPool>,
     symbol: &str,
@@ -500,20 +524,14 @@ pub fn spawn_ghost_converge_audit(
     let Some(pool) = audit_pool.clone() else {
         return;
     };
-    let removed_position_semantics = if confirmed {
-        "handler-confirmed"
-    } else {
-        "dispatched-not-confirmed"
-    };
-    let payload = serde_json::json!({
-        "symbol": symbol,
-        "side": side,
-        "baseline_qty": baseline_qty,
-        "engine": engine_label,
-        "removed_position": removed_position,
-        "confirmed": confirmed,
-        "removed_position_semantics": removed_position_semantics,
-    });
+    let payload = build_ghost_converge_audit_payload(
+        symbol,
+        side,
+        baseline_qty,
+        engine_label,
+        removed_position,
+        confirmed,
+    );
     let engine_owned = engine_label.to_string();
     let ts_ms = openclaw_core::now_ms() as i64;
     tokio::spawn(async move {
@@ -1069,6 +1087,37 @@ mod tests {
             }
             other => panic!("expected HardSafetyLiqClose, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn ghost_converge_audit_payload_marks_dispatch_only_semantics() {
+        let payload =
+            build_ghost_converge_audit_payload("BTCUSDT", "Buy", 0.25, "engine-a", true, false);
+
+        assert_eq!(payload["symbol"], "BTCUSDT");
+        assert_eq!(payload["side"], "Buy");
+        assert_eq!(payload["baseline_qty"], 0.25);
+        assert_eq!(payload["engine"], "engine-a");
+        assert_eq!(payload["removed_position"], true);
+        assert_eq!(payload["confirmed"], false);
+        assert_eq!(
+            payload["removed_position_semantics"],
+            "dispatched-not-confirmed"
+        );
+    }
+
+    #[test]
+    fn ghost_converge_audit_payload_marks_handler_confirmed_semantics() {
+        let payload =
+            build_ghost_converge_audit_payload("ETHUSDT", "Sell", 1.5, "engine-b", true, true);
+
+        assert_eq!(payload["symbol"], "ETHUSDT");
+        assert_eq!(payload["side"], "Sell");
+        assert_eq!(payload["baseline_qty"], 1.5);
+        assert_eq!(payload["engine"], "engine-b");
+        assert_eq!(payload["removed_position"], true);
+        assert_eq!(payload["confirmed"], true);
+        assert_eq!(payload["removed_position_semantics"], "handler-confirmed");
     }
 
     /// Dedup: first call returns true, second within window returns false.

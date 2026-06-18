@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v197 reconciler cursor-guard source/test checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v198 ghost audit payload semantics source/test checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v198 增量（2026-06-18 ghost audit payload semantics source/test checkpoint）**：`P3-110017-D2-AUDIT-REMOVED-SEMANTICS` 仍保持 active，但本輪 PM-local source hardening 將 ghost-converge audit payload 抽成純 helper，並新增單元測試鎖住 `confirmed=false` 時 `removed_position_semantics="dispatched-not-confirmed"`，以及 `confirmed=true` 時 `removed_position_semantics="handler-confirmed"`。Focused verification：`cargo test -p openclaw_engine position_reconciler::orphan_handler::tests --lib`（19 passed）、`cargo test -p openclaw_engine position_reconciler::tests::ghost --lib`（11 passed）、`cargo clippy -p openclaw_engine --lib -- -D warnings` PASS、`rustfmt --edition 2021 --check rust/openclaw_engine/src/position_reconciler/orphan_handler.rs` PASS、`git diff --check` PASS。邊界：未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation；正式 E2/E4 review 和 production `reconcile_ghost_converge` event proof 仍未關。
 
 **v197 增量（2026-06-18 reconciler cursor-guard source/test checkpoint）**：`P2-RECONCILER-GET-POSITIONS-PAGINATION` 仍保持 active，但本輪 PM-local review 修掉一個 full-scan pagination guard 弱點：原 `get_positions(Linear, None)` 在 response `nextPageCursor` 等於本次 request cursor 時，因比對 `prev_cursor`，會多打一個重複請求才 fail-closed；現改為直接比對 current request cursor 與 response `nextPageCursor`，same-cursor 立即回 `BybitApiError::Other`。補純單元測試鎖住 first cursor / same cursor / advanced cursor 三種情境。Focused verification：`cargo test -p openclaw_engine position_manager::tests --lib`（19 passed）、`cargo test -p openclaw_engine test_classify_client_side_invariant_error --lib`（1 passed）、`cargo test -p openclaw_engine notification_failsafe::providers::exchange_stop_sync::tests::map_client_side_invariant_to_transport --lib`（1 passed）、`cargo test -p openclaw_engine ghost_pagination_truncation_false_ghost_not_converged --lib`（1 passed）、`cargo test -p openclaw_engine position_reconciler::tests::ghost --lib`（11 passed）、`cargo clippy -p openclaw_engine --lib -- -D warnings` PASS。邊界：未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation；正式 BB/E2/E4 review/event proof 仍未關。
 
