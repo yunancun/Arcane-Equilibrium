@@ -438,3 +438,8 @@
 
 - TODO v177 archives `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` from §5. Source chain was already closed at `26a72990`; this pass only closed the stale runtime activation gate by verifying `26a72990` is ancestor of runtime source marker `83b7632d`, running engine PID 3134818 contains the incident class/C4 dispatch strings, and watchdog PID 765009 started after current watchdog source mtime.
 - Caveat preserved: no synthetic incident/drill, no real incident occurrence, and no alert-delivery proof is claimed. Future incident-class drills or alert-delivery checks need a new active row. Boundary: read-only runtime/source/DB/log introspection + docs hygiene only; no CI/deploy/rebuild/restart/runtime/DB/auth/risk/order/trading mutation.
+
+## 2026-06-18 Reconciler runtime-status correction
+
+- TODO v178 corrects stale `未部署` wording for `P2-RECONCILER-GET-POSITIONS-PAGINATION` / `P3-110017-D2-AUDIT-REMOVED-SEMANTICS`: `bb7e9efc`/`baf46a69` are in Mac/Linux HEAD and running engine PID 3134818 binary strings include `removed_position_semantics` / `dispatched-not-confirmed` / `reconcile_ghost_converge`.
+- Rows stay active: PM 1-4 integration report still requires E2/E4/QA review, and production DB currently has 0 `observability.engine_events.event_type='reconcile_ghost_converge'` rows. Boundary: read-only source/runtime/DB verification + docs hygiene only; no CI/deploy/rebuild/restart/runtime/DB/auth/risk/order/trading mutation.
