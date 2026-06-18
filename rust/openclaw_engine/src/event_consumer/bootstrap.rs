@@ -966,12 +966,17 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         }
     }
 
-    // ── FLASH-DIP-PILOT (2026-06-18 / Q1): boot-time 1d REST seed + freshness ──
-    // 為什麼需要：bootstrap kline seed 只 fetch 1m+5m（上方迴圈），1d buffer 由
-    // daily backfill cron 填 → boot 時 flash_dip_buy 無 prior_close 來源 → 首次
-    // backfill 前 silent inert（fail-safe 但靜默）。此處 fetch pilot 26 symbol 的 1d
-    // 收盤線，seed_bars 進 KlineManager，再讀「最後一根已收盤 1d bar」(leak-free
-    // 前一完整 UTC 日) + 1d-freshness 檢查後，注入 flash_dip_buy.seed_prior_close。
+    // ── FLASH-DIP-PILOT (2026-06-18 / Q1): boot-time 1d prior_close seed (DB-sourced) ──
+    // 為什麼需要：bootstrap kline seed 只 fetch 1m+5m（上方迴圈），engine KlineManager
+    //   的 timeframe 集 = DEFAULT_TIMEFRAMES（1m/5m/15m/1h/4h），**不含 "1d"**。故 boot 時
+    //   flash_dip_buy 無 prior_close 來源 → 首次價格事件前 silent inert（fail-safe 但靜默）。
+    // 為什麼改 DB 而非 demo-mdc REST（FLASH-DIP-SEED-FIX 2026-06-18）：先前版本 fetch demo
+    //   1d 後呼叫 `kline_manager.seed_bars(sym,"1d",..)`，但 KlineManager 沒有 "1d" aggregator
+    //   → seed_bars 回 0（no-op），後續 last_closed_open_time_ms("1d")/get_buffer("1d") 皆 None
+    //   → 全 26 symbol 落 stale 分支（seeded=0/stale=26，0 fetch-fail = REST 成功但 buffer 不存在）。
+    //   robust fix：直接從 market.klines 1d（verified-fresh、mainnet-sourced backfill、daily
+    //   cron 維護）SELECT 每 symbol 最後一根已收盤 1d bar 的 close，繞過不存在的 KlineManager
+    //   "1d" buffer。保留 2 日 staleness fail-safe（DB 過期 → 不 seed 該 symbol，當日 inert）。
     // gate：只在 Demo + flag-on + 策略已註冊 才跑（否則零成本跳過）。
     {
         let flag_on = std::env::var(crate::strategies::registry::FLASH_DIP_PILOT_ENABLED_ENV)
@@ -983,86 +988,84 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
             .iter()
             .any(|n| *n == "flash_dip_buy");
         if pipeline_kind == PipelineKind::Demo && flag_on && pilot_registered {
-            if let Some(ref client_arc) = bootstrap_client {
-                let mdc = crate::market_data_client::MarketDataClient::new(Arc::clone(client_arc));
+            if let Some(pool) = audit_pool.as_ref() {
                 // pilot universe = 策略 allowed_symbols（26 survivor）；用 default 取，
                 // 與 TOML active 後策略內部一致（registry wire 時已套 TOML allowed_symbols）。
                 let pilot_symbols =
                     crate::strategies::flash_dip_buy::params::default_allowed_symbols();
                 const DAY_MS: u64 = 86_400_000;
-                // 1d-freshness 上限：最後一根已收盤 1d bar 的 open_time 距今不得超過 2 日
-                // （容忍 backfill 滯後一日；> 2 日視為 stale → 不 seed 該 symbol，fail-safe）。
+                // 1d-freshness 上限：最後一根已收盤 1d bar 的 open_ts_ms 距今不得超過 2 日
+                // （容忍 daily backfill cron 滯後一日；> 2 日視為 stale → 不 seed 該 symbol）。
                 const MAX_1D_STALE_MS: u64 = 2 * DAY_MS;
                 let now_ms = openclaw_core::now_ms();
                 let mut seeded = 0_usize;
                 let mut stale = 0_usize;
-                for sym in &pilot_symbols {
-                    match mdc
-                        .get_klines("linear", sym, "D", None, None, Some(5))
-                        .await
-                    {
-                        Ok(bars) => {
-                            let mut core_bars: Vec<openclaw_core::klines::KlineBar> = bars
-                                .iter()
-                                // 只收已收盤 1d bar（open + 1 日 <= now）：leak-free。
-                                .filter(|b| b.start_time + DAY_MS <= now_ms)
-                                .map(|b| openclaw_core::klines::KlineBar {
-                                    open_time_ms: b.start_time,
-                                    close_time_ms: b.start_time + DAY_MS,
-                                    open: b.open,
-                                    high: b.high,
-                                    low: b.low,
-                                    close: b.close,
-                                    volume: b.volume,
-                                    turnover: b.turnover,
-                                    tick_count: 1,
-                                    is_closed: true,
-                                })
-                                .collect();
-                            core_bars.sort_by_key(|b| b.open_time_ms);
-                            pipeline.kline_manager.seed_bars(sym, "1d", core_bars);
-                            // 讀最後一根已收盤 1d bar 的收盤 + freshness 檢查。
-                            let last_open = pipeline
-                                .kline_manager
-                                .last_closed_open_time_ms(sym, "1d");
-                            let prior_close = pipeline
-                                .kline_manager
-                                .get_buffer(sym, "1d")
-                                .and_then(|buf| buf.close_array(1).last().copied());
-                            match (last_open, prior_close) {
-                                (Some(open_ms), Some(pc))
-                                    if now_ms.saturating_sub(open_ms) <= MAX_1D_STALE_MS
+                // market.klines.open_ts_ms = 該 1d bar 的 UTC 日界 open（writer.rs:258 寫入），
+                // close = 該日收盤（REAL/f32）。DISTINCT ON (symbol) + ORDER BY open_ts_ms DESC
+                // 取每 symbol 最新一根 1d bar；ANY($1) 限定 pilot universe。
+                // 注意：1d bar 在 backfill 寫入時 window_end floor 到日界 → 表內只含已收盤 bar
+                //   （無 forming 當日 bar），故無需在 SQL 內額外濾 forming；staleness 在下方
+                //   用 open_ts_ms 距今 <= 2 日 把關（同舊邏輯，但讀的是 DB 而非 KlineManager）。
+                let rows: Result<Vec<(String, i64, f32)>, sqlx::Error> = sqlx::query_as(
+                    "SELECT DISTINCT ON (symbol) symbol, open_ts_ms, close \
+                     FROM market.klines \
+                     WHERE timeframe = '1d' AND symbol = ANY($1) \
+                     ORDER BY symbol, open_ts_ms DESC",
+                )
+                .bind(&pilot_symbols)
+                .fetch_all(pool)
+                .await;
+                match rows {
+                    Ok(rows) => {
+                        let mut by_symbol: std::collections::HashMap<&str, (i64, f32)> =
+                            std::collections::HashMap::with_capacity(rows.len());
+                        for (sym, open_ms, close) in &rows {
+                            by_symbol.insert(sym.as_str(), (*open_ms, *close));
+                        }
+                        for sym in &pilot_symbols {
+                            match by_symbol.get(sym.as_str()) {
+                                Some(&(open_ms, close)) => {
+                                    let pc = close as f64;
+                                    // open_ms 來自 DB（i64，正值）→ 轉 u64 做與舊版一致的 ms 距今計算。
+                                    let open_u64 = if open_ms >= 0 { open_ms as u64 } else { 0 };
+                                    if now_ms.saturating_sub(open_u64) <= MAX_1D_STALE_MS
                                         && pc.is_finite()
-                                        && pc > 0.0 =>
-                                {
-                                    if let Some(s) =
-                                        pipeline.orchestrator.find_strategy_mut("flash_dip_buy")
+                                        && pc > 0.0
                                     {
-                                        s.seed_prior_close(sym, pc);
-                                        seeded += 1;
+                                        if let Some(s) = pipeline
+                                            .orchestrator
+                                            .find_strategy_mut("flash_dip_buy")
+                                        {
+                                            s.seed_prior_close(sym, pc);
+                                            seeded += 1;
+                                        }
+                                    } else {
+                                        // DB 過期 / close 非法 → 不 seed（該 symbol 當日 inert，fail-safe）。
+                                        stale += 1;
                                     }
                                 }
-                                _ => {
-                                    // stale 或無已收盤 1d bar → 不 seed（該 symbol 當日 inert）。
+                                None => {
+                                    // market.klines 1d 無此 symbol（universe 不一致 / 未 backfill）→ inert。
                                     stale += 1;
                                 }
                             }
                         }
-                        Err(e) => {
-                            warn!(symbol = %sym, error = %e,
-                                "FLASH-DIP-PILOT 1d seed fetch failed / 1d 引導抓取失敗");
-                            stale += 1;
-                        }
+                    }
+                    Err(e) => {
+                        // 查詢失敗（fail-soft）：全 symbol 不 seed，pilot 當日靜默 inert（不阻斷引擎啟動）。
+                        warn!(error = %e,
+                            "FLASH-DIP-PILOT 1d seed query failed (fail-soft) / 1d 引導查詢失敗（fail-soft）");
+                        stale = pilot_symbols.len();
                     }
                 }
                 info!(
                     seeded,
                     stale,
                     total = pilot_symbols.len(),
-                    "FLASH-DIP-PILOT 1d prior_close seeded / 已注入 pilot 前日收盤"
+                    "FLASH-DIP-PILOT 1d prior_close seeded from DB / 已從 DB 注入 pilot 前日收盤"
                 );
             } else {
-                warn!("FLASH-DIP-PILOT 1d seed skipped — no REST client / 無 REST 客戶端");
+                warn!("FLASH-DIP-PILOT 1d seed skipped — no DB pool / 無 DB pool（fail-safe inert）");
             }
         }
     }
