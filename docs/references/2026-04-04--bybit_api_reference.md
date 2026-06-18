@@ -1352,7 +1352,7 @@ pub struct ShadowOrderRequest {
 | 110004 | WalletInsufficient | 錢包餘額不足（該幣種暫停） | No | No | balance_block |
 | 110007 | AvailableInsufficient | 可用餘額不足（該幣種暫停） | No | No | balance_block |
 | 110008 | OrderCompletedOrCancelled | 訂單已完成或已取消（生命週期競爭） | No | **Yes** | - |
-| 110009 | PositionNotFound | 持倉不存在（⚠️ doc 版本歧義，見下方註記） | No | No | - |
+| 110009 | StopOrderLimitExceeded | stop orders 數量超過上限（官方 V5 error table；舊 PositionNotFound 口徑已裁撤，見下方註記） | No | No | - |
 | 110010 | OrderAlreadyCancelled | 訂單已取消 | No | **Yes** | - |
 | 110012 | InsufficientBalance | 餘額不足 | No | No | balance_block |
 | 110017 | ReduceOnlyReject | Reduce-only 被拒族碼（無倉 / 方向反 / qty>size）；**非零倉專屬**。本系統 one-way + close + qty==0 全平 form 下視為「exchange 已平」可安全收斂（見下方 110017 註記） | No | No | - |
@@ -1374,7 +1374,7 @@ pub struct ShadowOrderRequest {
 
 **本系統的安全收斂語意（已實作確認）**：在 **one-way mode + close intent + reduce-only + qty==0 全平 form** 前提下，110017 可靠等價「exchange 已平」→ 安全收斂本地倉。兩層處理：
 - **D1（已 land · commit `caf008b6`）**：`dispatch.rs` 110017 在 qty==0 guard 下 → NoOp + `converge_exchange_zero_close`（即時清本地殘倉 + `pending_close_symbols.remove`）。qty==0 form 下 Bybit 不可能因「qty>size」回 110017（無顯式 qty）→ C-1 從風險面移除；one-way 排除 C-2。
-- **D2（spec pending IMPL · `docs/execution_plan/specs/2026-05-29--retcode-110017-d2-reconcile-spec.md`）**：close-maker PostOnly 走 explicit qty>0 的 drift 倉 D1 故意不收斂（防 C-1 誤刪）；D2 改由 `position_reconciler` 30s 週期 ghost 偵測兜底——必先 Bybit position query 確認 `size==0` 再 remove，並要求 2-cycle 連續確認防 race。
+- **D2（已 source-land/runtime-loaded；event proof 仍另 gate）**：close-maker PostOnly 走 explicit qty>0 的 drift 倉 D1 故意不收斂（防 C-1 誤刪）；D2 改由 `position_reconciler` 30s 週期 ghost 偵測兜底——必先 Bybit position query 確認 `size==0` 再 remove，並要求 2-cycle 連續確認防 race。Source：`a5e1ded1` 新增 ghost convergence，`baf46a69` 將 audit payload 標成 `confirmed=false` / `removed_position_semantics="dispatched-not-confirmed"`；production event proof 仍以 `observability.engine_events.event_type='reconcile_ghost_converge'` 為準。
 
 **guard（缺一不可收斂）**：僅 close intent ∧ reduce_only==true ∧（D1：qty==0 全平 form｜D2：Bybit position query 確認 size==0 + 2-cycle）才本地 remove，防 C-1 qty>size 誤刪真倉。**one-way mode 是前提**——若未來啟用 hedge mode（`switch_position_mode` 被接線），C-2 positionIdx 不符會復活，本收斂路徑 **mandatory re-review**。
 
@@ -1382,7 +1382,7 @@ pub struct ShadowOrderRequest {
 
 **⚠️ 110072 OrderLinkIdDuplicate 僅 close 等價冪等成功（P2-ORDERLINKID-HARDENING · BB 2026-06-06 APPROVE-WITH-MANDATORY-GUARD）**：Bybit V5 `110072` 權威語意 = 「orderLinkId 已存在」，**非** Bybit 保證「該單已成功」——等價關係由本系統 id 鑄造唯一性（`oc_{em}_{ts}_{seq}`，retry 重發同一 id）決定。**僅 close retry 場景**成立：首次 close attempt 已達 Bybit 但 response 丟失，retry 重發同一 id 撞此碼 → 該平倉確已執行 → 冪等成功。**open path 必須 fail-closed**：open 單次無重試（`OPEN_NO_RETRY`），撞 110072 只可能是 id 撞歷史 = 開倉未成功，裸視為成功會讓系統誤以為有不存在的倉（違反 fail-closed 開倉語意 + Root Principle 5/6）。**實作機制**（`dispatch.rs`）：classify 維持 `110072 => Structural`（open fail-closed 為預設），僅在 Structural consumption 分支以 `close_dup_is_idempotent_success`（`req.is_close && ret_code==110072`）guard 把 **close+110072** upgrade 成 `LeaseOutcome::Consumed` 冪等成功；**110072 不觸發本地倉收斂**（不加入 `noop_is_exchange_zero_position`，與 110017 不同）——倉位真相由首次成功 attempt 的 WS fill/position update 自然回填。即使不修，close-110072 失敗後下一 tick 重發新 id 會撞 110017 自癒，本修法是提早一 tick 收斂 + 消除 spurious DispatchFailed。ref：`docs/CCAgentWorkSpace/BB/workspace/reports/` 內 2026-06-06 110072 報告。**10001+duplicate 對齊（已 land 2026-06-07 follow-up · BB APPROVE）**：`10001 + retMsg contains "duplicate"`（泛 InvalidParam 帶 duplicate 訊息）**亦適用同 close-only 冪等語意**，與 110072 完全對齊：classify 層 `10001 => Structural`（open fail-closed 為預設），consumption 層 `close_dup_is_idempotent_success` 以 `req.is_close && (ret_code==110072 || (ret_code==10001 && retMsg contains "duplicate"))` guard 把 close+duplicate upgrade 成 `LeaseOutcome::Consumed`；open path 維持 fail-closed（DispatchFailed）；**不**觸發本地倉收斂。**substring 比對僅在 `ret_code==10001` 分支生效**——官方 10001 的所有 retMsg 變體均不含 "duplicate"，且 `10014 "Request is duplicate"` 為獨立碼（落 classify `_ => Structural`，不進 helper），不誤觸。
 
-**⚠️ 110009 doc 版本歧義（待 BB 向 Bybit 核實 · owner=BB）**：官方 error 表存在兩版本表述 —「110009 = PositionNotFound（持倉不存在）」vs「110009 = stop orders 超過上限」。本系統 `dispatch.rs` 採 **PositionNotFound→NoOp** 語意（close 時持倉已不在 → 等效成功）。**風險**：若 110009 實為「stop orders 超上限」，落 NoOp 會**靜默吞掉一個該 fail 的 SL/TP 設置失敗**（違反 fail-loud + 本地止損保護 Root Principle 9）。此為**既有潛在風險**，2026-05-29 110017 修法不引入但順帶 flag。**尚未下結論**——待 BB 向 Bybit 核實當前 V5 對 110009 的權威定義後決定是否調整 dispatch 分類。ref：`docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-29--retcode_110017_convergence_semantics.md` §5 follow-up #2。
+**⚠️ 110009 official meaning verified（2026-06-18）**：Bybit V5 error table 當前列 `110009 = The number of stop orders exceeds the maximum allowable limit`，不是 PositionNotFound。Repo 仍有待修 drift：`BybitRetCode::PositionNotFound = 110009`、`dispatch.rs` `110001 | 110009 => NoOp`、以及相關 tests/comments 仍採舊口徑。BB 2026-05-30 call-path trace 判定：`PositionManager::set_trading_stop` 的 SL/TP 路徑不經 dispatch classifier，會 fail-loud；因此現狀是 P2 latent misclassification，不是 P1 active SL/TP swallow。修法須走 E1→E2→E4：rename enum/test/doc wording，並把 110009 從 close-equivalent-success NoOp arm 移出或加明確 guard。ref：官方 Bybit V5 error table `https://bybit-exchange.github.io/docs/v5/error`；`docs/CCAgentWorkSpace/BB/workspace/reports/2026-05-30--BB--bybit_api_compatibility_audit.md` §NEW FINDINGS BB-2026-05-30-P2-1。
 
 ### 4.2.1 WS `order` 事件 `rejectReason` 正式字串
 
