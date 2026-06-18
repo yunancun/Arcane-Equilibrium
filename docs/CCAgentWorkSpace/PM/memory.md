@@ -433,3 +433,8 @@
 
 - TODO v176 archives `P3-110017-CONVERGE-AUDIT-OBSERVABILITY` from §5 after Linux read-only DB evidence closed both deployment residual checks: 4 `trading.order_state_changes.reason LIKE 'exchange_zero_close_converge:%'` rows exist, and each had 0 follow-up orders for the same symbol+strategy within 63s and 5m after convergence.
 - The row closed only D1 convergence observability/stop-timing. `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` and `P3-110017-BB-DOC-FOLLOWUPS` remain active separately. Boundary: read-only DB/source verification + docs hygiene only; no CI/deploy/rebuild/restart/runtime/DB/auth/risk/order/trading mutation.
+
+## 2026-06-18 TODO incident-policy runtime deployment closure
+
+- TODO v177 archives `P2-INCIDENT-POLICY-DISPATCH-TRIGGER` from §5. Source chain was already closed at `26a72990`; this pass only closed the stale runtime activation gate by verifying `26a72990` is ancestor of runtime source marker `83b7632d`, running engine PID 3134818 contains the incident class/C4 dispatch strings, and watchdog PID 765009 started after current watchdog source mtime.
+- Caveat preserved: no synthetic incident/drill, no real incident occurrence, and no alert-delivery proof is claimed. Future incident-class drills or alert-delivery checks need a new active row. Boundary: read-only runtime/source/DB/log introspection + docs hygiene only; no CI/deploy/rebuild/restart/runtime/DB/auth/risk/order/trading mutation.
