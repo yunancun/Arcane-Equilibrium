@@ -1,13 +1,21 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-13（TODO v160 V5.8 pause readiness + alpha/edge handoff；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v164 masthead hygiene + v161-v163 增量補錄；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v164 增量（2026-06-18 TODO masthead hygiene）**：按 `docs/agents/todo-maintenance.md` 將 `TODO.md` header 壓回 compact masthead，只保留版本、source/runtime pointer、當前 posture、主入口與歷史指針；v161-v163 長敘事移入本 changelog。同步清理 §5 stale active rows：移除 `AUDIT-2026-06-14-SCHEMA-1` confirmed duplicate（已由 fixed row 取代），把 `AUDIT-2026-06-14-AUTH-1`、`AUDIT-2026-06-14-PROFIT-1`、`AUDIT-2026-06-14-DIRTY-FIX` 狀態校正為已 commit/deploy/healthcheck/true-table 驗證後的現況。邊界：文檔隊列 hygiene only；無 code/runtime/DB/auth/risk/order/trading mutation。
+
+**v163 增量（2026-06-18 flash_dip_buy demo pilot live+functional）**：arc-first tail-dislocation mean-reversion edge 完成 discovery→validation→build→enable→functional 全鏈：`flash_dip_buy` demo-only pilot 以 prior close × 0.85 掛 maker BUY，3-day hold，目標量測真 fill-rate、conditional death-rate、maxDD。部署鏈 `53da5f7b`→`b2ae0d56`→`234e3faf`→`a5179a17`→`83b7632d`，三端同步；runtime engine PID 3134818，3-lock true（strategy active + per_strategy risk enabled + `OPENCLAW_FLASH_DIP_PILOT_ENABLED=1`），seeded 25/26 prior_close from DB，實掛 25 symbols，0 panic。安全邊界：demo-only structural gate、nf<=3% band-external hard cap、universal P1 2% backstop、restart-safe concurrency 3、per-name -50%、daily loss breaker、flag-OFF byte-identical。Phase 2 realized-death-rate CUSUM hot-path auto-breaker 延後；interim monitor cron 已裝。詳見 TODO §0/§5 與 `memory/feedback_active_profit_unconventional_mandate.md`。
+
+**v162 增量（2026-06-18 intelligent-param deployment + cost-wall investigation）**：operator 批准後，智能調參 Agent 系統全 4 phase + 2 policy + RegimeMult 部署並驗證；修補 `restart_all.sh` feature flag forwarding gap（commit `25fc4369`），canonical 路徑套 V141-V145 後 revert `OPENCLAW_AUTO_MIGRATE=0`，runtime engine/API PID 2389718/2389870，4 flags 實證在 `/proc/PID/environ`，demo 健康且因 0 validated edge/空 allowlist 正確 inert。同步完成 edge 8-test cost-wall investigation：OHLCV/MM/order-flow 在 calm/high-vol/downside/upside-squeeze 下均撞同一 fee line，診斷為「edge 在成本之下」而非「無 edge」；唯一降牆結構 lever 是 fee-tier/rebate/MM-program。Vol-event read-only auto-trigger cron 已裝 `0 */2 * * *`。工程日誌：`docs/worklogs/2026-06-18--session-intelligent-param-agent-build-and-edge-cost-wall-investigation.md`。
+
+**v161 增量（2026-06-14 cold audit fix-wave + 2026-06-17 profit/mm groundwork）**：冷酷審計 fix-wave 完成 13 項驗證修復（AUTH-1、PERF-1/2/3、SCHEMA-1 contract test、SIZING-RIGOR、AI-PRICING、cost_gate sentinel [90]、model_registry healthcheck、seam guards、shadow qty、GUI、DIRTY-FIX closed_pnl/m4、funding docs）以及 MIGRATION-TREE-1 V005/V023 forward-compat；commit+push `c7f97f50` 並 Linux rebuild/restart 部署，`repair_migration_checksum --apply` 後 drift_count=0。後續 profit-search 12-campaign price-prediction 結論為 retail fee wall 結構性；跨所降費不能破牆，cash-and-carry 作 existence proof 但 parked，做市/流動性提供成為下一結構路徑。Recorder-v2 L1 event stream、symbols 觀測 universe 100、maker-fill status 審明、crossed-book bug 修復並清髒行。主要報告：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-14--cold_audit_fix_wave_completion.md`、`docs/CCAgentWorkSpace/Operator/2026-06-17--PA--bundle-recorderv2-symbols100-makerfill-design.md`。
 
 **v160 增量（2026-06-13 V5.8 pause readiness + alpha/edge handoff）**：新增 artifact-only `helper_scripts/research/v58_pause_readiness/`，把 V5.8「保留架構 / active-IMPL 凍結 / 可恢復」狀態機械化檢查：必需設計檔、ADR/AMD、已落地 scaffolds、V### 編號現實、LAL 高階 fail-loud、M5/M12 stub fail-loud、可選 Gate-B watch context、alpha/edge unfreeze gate。真 repo + Linux Gate-B latest run `v58_pause_local_20260613_r3` 回 `PASS_PAUSE_READY`（47 pass / 0 warn / 0 fail），Gate-B latest=`WATCH_ONLY`、23 candidates、0 alertable/start/schedule、operator_action=`WAIT_FOR_ACTIONABLE_WATCH`，unfreeze gate `met=false`。Focused verification：`test_v58_pause_readiness.py` 5 passed，`py_compile` PASS。新增 PM report + Operator brief。邊界：artifact-only；無 CI、無 deploy/rebuild/restart、無 DB/auth/risk/order/trading mutation、無 Gate-B probe。
 
