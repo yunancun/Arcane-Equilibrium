@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 00:33 CEST
+- corrected TODO v203 source-sync metadata after v202 source/test checkpoint
+- Mac `main`, `origin/main`, and Linux `trade-core` were verified at `42b6166b`; TODO masthead/§0 now name that source state instead of prior `7141bb41`
+- boundary: docs/TODO hygiene only; no code, CI full suite, deploy/rebuild/restart, runtime/DB/auth/risk/order/trading mutation
+
 2026-06-19 00:27 CEST
 - reduced `P1-A1A2-STAGE0R-RUNNER-IMPL` auth-drift source blocker
 - old branch `fix/a2-runner-pg-auth` (`10aeaf54`) was not in main and targeted the pre-refactor 8c report file; main now routes 8b/8c/alpha report DSN building through `helper_scripts.lib.pg_connect`
