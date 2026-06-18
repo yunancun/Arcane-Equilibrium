@@ -596,6 +596,14 @@ restart_engine() {
     local strategist_rich_input riskconfig_agent_tuning
     strategist_rich_input="${OPENCLAW_STRATEGIST_RICH_INPUT:-$(grep '^OPENCLAW_STRATEGIST_RICH_INPUT=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     riskconfig_agent_tuning="${OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED:-$(grep '^OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    # flash_dip_buy demo pilot 啟用旗標（engine 側，default-OFF fail-closed，鏡像上方 pattern）：
+    # registry.rs create_for_engine 三合一 gate（kind==Demo AND env flag=="1" AND TOML active）
+    # 在進程 env 讀 OPENCLAW_FLASH_DIP_PILOT_ENABLED；不在此轉發 = 寫了 basic_system_services.env
+    # 引擎 /proc/environ 也讀不到（QA blocker B1：nohup 不繼承 inline/檔 env，pilot 靜默 inert，
+    # 同 25fc4369 / 88b35727 修掉的轉發 gap）。operator-env 優先 → basic_system_services.env fallback；
+    # 空/缺 → 留空（registry gate flag_on==false，pilot 維持 fail-closed inert，survival 預設安全）。
+    local flash_dip_pilot_enabled
+    flash_dip_pilot_enabled="${OPENCLAW_FLASH_DIP_PILOT_ENABLED:-$(grep '^OPENCLAW_FLASH_DIP_PILOT_ENABLED=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     local base_dir
     base_dir="${OPENCLAW_BASE_DIR:-$(pwd)}"
     # W-AUDIT-7 F-07: feed provider keys to Rust as process env. Provider
@@ -636,6 +644,7 @@ restart_engine() {
         OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL="${OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL:-}" \
         OPENCLAW_STRATEGIST_RICH_INPUT="${strategist_rich_input}" \
         OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED="${riskconfig_agent_tuning}" \
+        OPENCLAW_FLASH_DIP_PILOT_ENABLED="${flash_dip_pilot_enabled}" \
         nohup rust/target/release/openclaw-engine > "$DATA_DIR/engine.log" 2>&1 0<&- 200<&- &
     echo "    PID: $!"
 }
