@@ -687,6 +687,7 @@ class TestStakeIPCDispatch:
         assert captured["timeout"] == earn_routes_module._IPC_STAKE_TIMEOUT_SEC
         params = captured["params"]
         assert set(params) == {
+            "engine",
             "coin",
             "product_id",
             "amount_usdt",
@@ -696,6 +697,7 @@ class TestStakeIPCDispatch:
             "submitted_ts_ms",
             "trace_id",
         }
+        assert params["engine"] == "live"
         assert params["coin"] == "USDT"
         assert params["product_id"] == "BYBIT_USDT_FLEXIBLE_v1"
         assert params["amount_usdt"] == "100"

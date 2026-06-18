@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v192 Earn Wave D IPC contract checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v193 Earn first-stake capability routing checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v193 增量（2026-06-18 Earn first-stake capability routing source/test checkpoint）**：`P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` source blocker reduced but not closed. Rust event-consumer bootstrap now injects `BybitEarnClient` from existing `shared_client` and `EarnMovementWriter` from existing `audit_pool`; wrapper construction does not call Bybit or PG, and missing deps still keep Gate E-0 fail-closed. Python `/api/v1/earn/stake` now sends `engine="live"` to avoid relying on primary fallback for an operator/live_reserved asset-movement lane; missing live sender fails closed. Focused verification: `rustfmt --edition 2021 --check openclaw_engine/src/event_consumer/bootstrap.rs openclaw_engine/src/event_consumer/tests/earn_ipc_tests.rs` PASS; `cargo test -p openclaw_engine process_earn_intent_command --lib`（2 passed）; `cargo test -p openclaw_engine process_earn_intent --lib`（4 passed）; `cargo test -p openclaw_engine earn_router_fail_closed_when_unwired --lib`（1 passed）; `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_earn_routes.py`（28 passed, 1 existing Pydantic deprecation warning）; `git diff --check` PASS. Boundary: no real Bybit call, no credential/key/secret mutation, no CI full suite, no deploy/rebuild/restart, no runtime/DB/auth/risk/order/trading mutation; running engine binary unchanged. Active row remains blocked by OP-1/2/3, review/deploy/restart, and first real stake evidence.
 
 **v192 增量（2026-06-18 Earn Wave D IPC contract source/test checkpoint）**：關閉 `TODO.md` §5 `P2-EARN-WAVE-D-CONTRACT-INTEGRATION-TEST`。Rust IPC server 新增 `process_earn_intent` dispatch arm、method registry metadata、`PipelineCommand::ProcessEarnIntent`、event-consumer async owner-task bridge，真正調 `IntentProcessor::process_earn_intent`；Python `/api/v1/earn/stake` 新增 contract test 鎖住傳給 Rust 的 method/timeout/8-field params。Focused verification：`cargo test -p openclaw_engine process_earn_intent --lib`（3 passed）、`cargo test -p openclaw_engine earn_router_fail_closed_when_unwired --lib`（1 passed）、`python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_earn_routes.py`（28 passed, 1 existing Pydantic deprecation warning）。誠實邊界：當前 Rust bootstrap 尚未注入 `BybitEarnClient` + `EarnMovementWriter`，真 IPC 回 `submitted=false` + `earn_dispatch_unwired...` 是預期 fail-closed；未做真 Bybit call、未 credential/key/secret mutation、未 CI full suite、未 deploy/rebuild/restart、未 runtime/DB/auth/risk/order/trading mutation。`P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` 仍留 §5，明示 OP-1/2/3 + Earn capability injection 才能走首筆真質押。
 

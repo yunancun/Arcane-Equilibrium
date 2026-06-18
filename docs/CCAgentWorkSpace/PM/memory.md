@@ -25,6 +25,14 @@
 
 ## 近期記錄
 
+## 2026-06-18 Earn First-Stake Capability Routing
+
+- Reduced `P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` source blocker without closing the runtime row.
+- Rust event-consumer bootstrap now injects `BybitEarnClient` from `shared_client` and `EarnMovementWriter` from `audit_pool`; construction is handle-only and does not call Bybit/PG.
+- Python `/api/v1/earn/stake` now sends `engine="live"` to `process_earn_intent`, so the operator/live_reserved asset-movement lane does not rely on primary fallback.
+- Focused checks passed: Rust owner-task unwired/wired-gate regression, Rust IPC `process_earn_intent` selector, Earn router unwired selector, Python Earn route suite, rustfmt check, and `git diff --check`.
+- Boundary: no real Bybit call, no key/secret mutation, no deploy/rebuild/restart, no runtime DB/auth/risk/order/trading mutation. Remaining: OP-1/2/3, review/deploy/restart, first real stake evidence.
+
 ## 2026-05-15 A4-C PM/PA/FA Unblock Engineering Card
 
 - Operator asked PM/PA/FA to formalize the A4-C unblock path and start in
