@@ -826,8 +826,9 @@ pub enum BybitRetCode {
     /// Order completed or cancelled (lifecycle race) — treat as noop.
     /// 訂單已完成或已取消（生命週期競爭）— 視為 noop。
     OrderCompletedOrCancelled = 110008,
-    /// Position not found / 持倉不存在
-    PositionNotFound = 110009,
+    /// Stop-order count exceeds Bybit's maximum allowable limit.
+    /// 止損/止盈等 stop orders 數量超過 Bybit 允許上限。
+    StopOrderLimitExceeded = 110009,
     /// Order already cancelled — noop.
     /// 訂單已取消 — noop。
     OrderAlreadyCancelled = 110010,
@@ -886,7 +887,7 @@ impl BybitRetCode {
             110004 => Some(Self::WalletInsufficient),
             110007 => Some(Self::AvailableInsufficient),
             110008 => Some(Self::OrderCompletedOrCancelled),
-            110009 => Some(Self::PositionNotFound),
+            110009 => Some(Self::StopOrderLimitExceeded),
             110010 => Some(Self::OrderAlreadyCancelled),
             110012 => Some(Self::InsufficientBalance),
             110017 => Some(Self::ReduceOnlyReject),

@@ -481,3 +481,9 @@
 - TODO v185 moves seven tail deferred/condition/cadence debt rows from §5 to §7: Packet C5 GUI ack, OPS-2 Sprint4 runbook bundle, LG-5 90d maturity review, LEASE-1 post-LG3 cleanup, Phase1B dynamic backoff, IntentType visibility refactor, and OPS-4 pg_dump/SOP cargo-test debt.
 - This is not a DONE claim. §7 now carries the explicit wait conditions: Packet C4/failsafe role freeze, Sprint4 bandwidth/OPS-2 operator context, 90d reviewer maturity cadence, `P0-LG-3` closure, Phase 2a Demo PASS, PA builder-pattern spec, and SOP/on-demand bandwidth.
 - §5 still keeps active/operator/action rows such as OP-1 dry-run, OPS-4 deploy, TOTP backend, A1/A2 runner, Earn Wave C/D, 110009 semantics, and other rows with current engineering/review gates. Boundary: docs hygiene only; no source/runtime mutation.
+
+## 2026-06-18 TODO 110009 retCode semantics source fix
+
+- TODO v186 archives `P2-110009-RETCODE-SEMANTICS-FIX` from §5 after source/test correction: `BybitRetCode::PositionNotFound` was renamed to `StopOrderLimitExceeded`, `from_code(110009)` maps to the new enum, and dispatch no longer classifies 110009 as close-equivalent NoOp.
+- Official Bybit V5 meaning remains: 110009 = stop-order count exceeds maximum allowable limit. The fix makes 110009 Structural/fail-closed; 110001 stays NoOp and 110017 guarded convergence behavior is unchanged.
+- Focused Rust tests passed: retCode tests (2), changed classifier/helper tests, and full `event_consumer::dispatch::tests` (56). Boundary: source/tests/reference/TODO/changelog/report only; no deploy/rebuild/restart, and running engine binary is not claimed to include the fix.

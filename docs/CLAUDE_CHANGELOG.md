@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v185 tail deferred-debt relocation；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v186 110009 retCode semantics source fix；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v186 增量（2026-06-18 110009 retCode semantics source fix）**：關閉 `TODO.md` §5 `P2-110009-RETCODE-SEMANTICS-FIX` active row。依官方 Bybit V5 error table，110009 是 stop-orders-count limit，不是 PositionNotFound；source 已改為 `BybitRetCode::StopOrderLimitExceeded = 110009`，`from_code(110009)` 對應新 enum，dispatch classifier 移除 `110001 | 110009 => NoOp` 舊 arm，讓 110009 走 Structural/fail-closed；相關 tests/comments 與 reference doc 已同步。Focused Rust 驗證：`cargo test -p openclaw_engine test_bybit_ret_code --lib`（2 passed）、`cargo test -p openclaw_engine test_classify_stop_order_limit_exceeded_is_structural --lib`、`test_classify_110001_noop_110009_structural_no_regression`、`test_close_dup_is_idempotent_success_other_retcode_false`、`test_send_exchange_zero_close_suppressed_for_110001`、以及 `cargo test -p openclaw_engine event_consumer::dispatch::tests --lib`（56 passed）。Dispatch chain shortened deliberately: PM handled locally because scope was a small enum/classifier/test correction with official-source-backed semantics; no sub-agents were spawned because the user did not request parallel delegation and the multi-agent tool forbids unsolicited spawning. 邊界：source/tests/reference/TODO/changelog/memory/report only；未 CI full suite、未 deploy/rebuild/restart，running engine binary 不宣稱已載入此修法；無 production runtime/DB/auth/risk/trading mutation。
 
 **v185 增量（2026-06-18 tail deferred-debt relocation）**：依 `docs/agents/todo-maintenance.md` passive wait 規則，從 `TODO.md` §5 移出尾端 7 組明確 deferred / condition-triggered / cadence debt，改由 §7 承接，避免 active engineering queue 被低優先等待項稀釋：`P2-PACKET-C-C5-GUI-BANNER-ACK-ROLE`（等 Packet C4 / `failsafe_ack_role` freeze）、OPS-2 Sprint4 runbook debt bundle（hotreload/audit endpoint/cron drift/healthcheck SQL/emergency audit contract）、`P1-LG-5` 90d maturity review、`P1-LEASE-1`（等 `P0-LG-3`）、`P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP`（等 Phase 2a Demo PASS）、`P1-INTENTYPE-FIELD-VISIBILITY-DEFER`（等 PA builder pattern spec）、`P3-OPS-4-PG-DUMP-EVENT-EXTEND` / `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC`（Sprint bandwidth / SOP debt）。保留於 §5 的仍是真 active/operator/action rows（OP-1、OPS-4、TOTP、A1/A2 runner、Earn Wave C/D、110009 等）。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation；不宣稱上述 debt 已完成。
 

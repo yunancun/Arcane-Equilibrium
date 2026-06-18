@@ -298,13 +298,17 @@ fn classify_business_retcode(ret_code: i64, ret_msg: &str) -> DispatchOutcome {
         // 鑑權/權限/IP — 結構性。
         10003 | 10004 | 10005 | 10010 => DispatchOutcome::Structural,
 
-        // Order / position not found on a close → equivalent success.
-        // 平倉時找不到訂單/倉位 → 等效成功。
-        110001 | 110009 => DispatchOutcome::NoOp,
+        // Order not found on a close → equivalent success. 110009 is not a
+        // position-not-found code in the current Bybit V5 table; it means the
+        // stop-order count limit was exceeded and must fail closed.
+        // 平倉時找不到訂單 → 等效成功。110009 當前官方語意為 stop orders
+        // 數量超上限，不是倉位不存在，故不得當 NoOp。
+        110001 => DispatchOutcome::NoOp,
 
         // 110017 ReduceOnlyReject「current position is zero」— reduce-only 平倉
-        // 被拒，因交易所端該倉位已不存在。語意上與 110001/110009 同族（平倉
-        // 時倉位/訂單已不在）→ 同樣歸 NoOp，重試無法救回不存在的倉。
+        // 被拒，因交易所端該倉位已不存在。語意上與 110001 的「平倉時訂單
+        // 已不在」同屬 close-equivalent success；110009 已移出此族。
+        // 同樣歸 NoOp，重試無法救回不存在的倉。
         //
         // 為什麼從 Structural 改為 NoOp（P1-110017-POSITION-DRIFT-CLOSE-LOOP）：
         // 舊分類把 110017 落入 `_ => Structural`，no-retry 但也不收斂；當本地
@@ -364,8 +368,9 @@ fn classify_business_retcode(ret_code: i64, ret_msg: &str) -> DispatchOutcome {
 /// 已 zero」的 reduce-only 平倉（Bybit retCode 110017）。
 ///
 /// 為什麼只認 110017：110017 retMsg「current position is zero」是交易所
-/// 對「無倉可 reduce」的權威信號，須觸發本地倉收斂；110001/110009 雖同為
-/// NoOp，但語意是「訂單/倉位 idx 找不到」，沿用既有不收斂行為（不回歸）。
+/// 對「無倉可 reduce」的權威信號，須觸發本地倉收斂；110001 雖同為 NoOp，
+/// 但語意是「訂單找不到」，沿用既有不收斂行為。110009 是 stop-order limit
+/// structural failure，不在 NoOp/收斂語意域。
 fn noop_is_exchange_zero_position(err: &BybitApiError) -> bool {
     matches!(
         err,
@@ -434,7 +439,7 @@ fn close_dup_is_idempotent_success(req: &OrderDispatchRequest, err: &BybitApiErr
 ///                             等價零倉，C-1 結構性排除。qty>0 partial reduce-only
 ///                             close 收到 110017（倉可能仍在）→ **絕不收斂**。
 ///   is_primary             —— paper shadow（fire-and-forget，無交易所倉）不收斂。
-///   ret_code==110017       —— 110001/110009 維持原 NoOp 不收斂。
+///   ret_code==110017       —— 110001 維持原 NoOp 不收斂；110009 非 NoOp。
 ///
 /// G-3 hedge-mode 前提守衛：本收斂僅在 **Bybit one-way mode** 安全（BB §3 已以 4
 /// 指紋驗：OrderDispatchRequest 無 positionIdx 欄位 / switch_position_mode 0
@@ -905,7 +910,8 @@ pub(super) fn spawn_order_dispatch(
                     // BB MANDATORY guard 全在 send_exchange_zero_close 內（is_primary ∧
                     // is_close ∧ reduce_only ∧ qty==0 form ∧ 110017）；qty>0 partial
                     // reduce-only close 收到 110017（C-1，倉可能仍在）絕不收斂；
-                    // 110001/110009 維持原不收斂行為（無回歸）。
+                    // 110001 維持原不收斂行為；110009 非 NoOp（stop-order
+                    // limit exceeded，fail-closed）。
                     send_exchange_zero_close(&pending_reg_tx, &req, &last_error);
                     send_decision_lease_release(
                         &pending_reg_tx,
