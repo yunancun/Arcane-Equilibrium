@@ -179,8 +179,7 @@ impl PositionManager {
         // single-symbol point-query 路徑：Bybit 回單筆、無分頁，保持原單次取數行為。
         // S-6 D2 收斂 gate 依賴此路徑，勿動。
         if let Some(sym) = symbol {
-            let params: Vec<(&str, &str)> =
-                vec![("category", category.as_str()), ("symbol", sym)];
+            let params: Vec<(&str, &str)> = vec![("category", category.as_str()), ("symbol", sym)];
             let resp = self
                 .client
                 .get_checked("/v5/position/list", &params)
@@ -194,7 +193,6 @@ impl PositionManager {
         // Bybit 列出所有倉位時要求 symbol 或 settleCoin 二擇一；linear 永遠以 USDT 結算。
         let mut all_positions: Vec<PositionInfo> = Vec::new();
         let mut cursor: Option<String> = None;
-        let mut prev_cursor: Option<String> = None;
 
         for page in 1..=Self::FULL_SCAN_MAX_PAGES {
             let mut params: Vec<(&str, &str)> = vec![
@@ -226,13 +224,7 @@ impl PositionManager {
 
             // 防無限迴圈：cursor 與上一頁相同代表交易所分頁異常，fail-closed 拋錯
             // 而非靜默截斷。
-            if prev_cursor.as_deref() == Some(next.as_str()) {
-                return Err(crate::bybit_rest_client::BybitApiError::Other(format!(
-                    "get_positions pagination cursor did not advance at page {page} (fail-closed) \
-                     / 分頁 cursor 未推進，fail-closed"
-                )));
-            }
-            prev_cursor = cursor.take();
+            validate_full_scan_cursor_advanced(cursor.as_deref(), &next, page)?;
             cursor = Some(next);
         }
 
@@ -646,6 +638,20 @@ fn parse_position_list_with_cursor(
     Ok((positions, next_cursor))
 }
 
+fn validate_full_scan_cursor_advanced(
+    current_cursor: Option<&str>,
+    next_cursor: &str,
+    page: u32,
+) -> BybitResult<()> {
+    if current_cursor == Some(next_cursor) {
+        return Err(crate::bybit_rest_client::BybitApiError::Other(format!(
+            "get_positions pagination cursor did not advance at page {page} (fail-closed) \
+             / 分頁 cursor 未推進，fail-closed"
+        )));
+    }
+    Ok(())
+}
+
 /// Parse a single PositionInfo item from Bybit response.
 /// 從 Bybit 回應解析單個 PositionInfo 項目。
 ///
@@ -885,6 +891,25 @@ mod tests {
         assert_eq!(positions.len(), 1);
         assert_eq!(positions[0].symbol, "ETHUSDT");
         assert_eq!(positions[0].side, "Sell");
+    }
+
+    #[test]
+    fn full_scan_cursor_guard_accepts_first_nonempty_cursor() {
+        validate_full_scan_cursor_advanced(None, "page2", 1).unwrap();
+    }
+
+    #[test]
+    fn full_scan_cursor_guard_fails_when_next_cursor_does_not_advance() {
+        let err = validate_full_scan_cursor_advanced(Some("page2"), "page2", 2)
+            .expect_err("same cursor must fail closed");
+        let msg = err.to_string();
+        assert!(msg.contains("cursor did not advance"));
+        assert!(msg.contains("page 2"));
+    }
+
+    #[test]
+    fn full_scan_cursor_guard_accepts_advanced_cursor() {
+        validate_full_scan_cursor_advanced(Some("page2"), "page3", 2).unwrap();
     }
 
     #[test]
