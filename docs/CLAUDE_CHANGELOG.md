@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v203 source-sync correction checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v204 CSP deferred-scope clarification checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v204 增量（2026-06-19 CSP deferred-scope clarification checkpoint）**：保留 `P2-WP05-CSP-UNSAFE-INLINE` active/passive-wait，但把原本過短的「live gate 前」補成明確觸發條件與 scope：first Live D-14 / Wave B 才 dispatch，closure 需要跨 PA/E3/A3/E1/E2/E4/QA 的 GUI/CSP sprint，把 static HTML inline script/style 外移、`onclick` 改 `addEventListener`、處理 Grafana HTTPS/frame-src，最後移除 `unsafe-inline` 並 enforcing nonce/hash CSP。PM read-only triage 確認現場約 26 個 static HTML，inline/style/handler 分布廣，與 `docs/execution_plan/specs/2026-05-26--p0-ops-1-https-secure-cookie.md` §5、archive v55、`main_legacy.py` CSP comments 一致，因此不是 PM-local quick fix。邊界：docs/TODO hygiene only；未改 GUI/source behavior，未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation；不關閉任何 live-gate/runtime/review/operator gate。
 
 **v203 增量（2026-06-19 source-sync correction checkpoint）**：修正 `TODO.md` masthead / §0 source-sync 事實：v202 source/test checkpoint commit `42b6166b` 已推送 `origin/main` 並 fast-forward 到 Linux `trade-core`，不應再把 prior `7141bb41` 寫作來源實作 HEAD。Focused verification：Mac `HEAD=origin/main=42b6166b`，Linux `/home/ncyu/BybitOpenClaw/srv` `HEAD=origin/main=42b6166b`；`git diff --check` PASS。邊界：docs/TODO hygiene only；未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation；不關閉任何 runtime/review/operator gate。
 
