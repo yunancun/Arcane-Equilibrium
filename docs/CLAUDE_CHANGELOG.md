@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v198 ghost audit payload semantics source/test checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v199 source-sync correction checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v199 增量（2026-06-19 source-sync correction checkpoint）**：修正 `TODO.md` masthead / §0 source-sync 事實：v198 commit `3ebeb1cd` 已推送 `origin/main` 並 fast-forward 到 Linux `trade-core`，不應再把 `43402763` 寫作來源實作 HEAD。Focused verification：Mac `HEAD=origin/main=3ebeb1cd`，Linux `/home/ncyu/BybitOpenClaw/srv` `HEAD=origin/main=3ebeb1cd`；`git diff --check` PASS。邊界：docs/TODO hygiene only；未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation；不關閉任何 runtime/review/operator gate。
 
 **v198 增量（2026-06-18 ghost audit payload semantics source/test checkpoint）**：`P3-110017-D2-AUDIT-REMOVED-SEMANTICS` 仍保持 active，但本輪 PM-local source hardening 將 ghost-converge audit payload 抽成純 helper，並新增單元測試鎖住 `confirmed=false` 時 `removed_position_semantics="dispatched-not-confirmed"`，以及 `confirmed=true` 時 `removed_position_semantics="handler-confirmed"`。Focused verification：`cargo test -p openclaw_engine position_reconciler::orphan_handler::tests --lib`（19 passed）、`cargo test -p openclaw_engine position_reconciler::tests::ghost --lib`（11 passed）、`cargo clippy -p openclaw_engine --lib -- -D warnings` PASS、`rustfmt --edition 2021 --check rust/openclaw_engine/src/position_reconciler/orphan_handler.rs` PASS、`git diff --check` PASS。邊界：未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation；正式 E2/E4 review 和 production `reconcile_ghost_converge` event proof 仍未關。
 

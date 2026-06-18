@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 00:06 CEST
+- corrected TODO v199 source-sync metadata after the v198 commit
+- Mac `main`, `origin/main`, and Linux `trade-core` were all verified at `3ebeb1cd`; TODO masthead/§0 now match that source state
+- boundary: docs/TODO hygiene only; no code, CI full suite, deploy/rebuild/restart, runtime/DB/auth/risk/order/trading mutation
+
 2026-06-19 00:00 CEST
 - hardened `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` with PM-local payload semantics tests
 - ghost-converge audit payload now goes through a pure helper, and unit tests pin both `dispatched-not-confirmed` and `handler-confirmed` `removed_position_semantics`
