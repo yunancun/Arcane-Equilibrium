@@ -37,11 +37,13 @@ try:
     from app.bybit_rest_client import (
         BybitBusinessError as NewBybitBusinessError,
         BybitClient as NewBybitClient,
+        _signed_get_query_string as _new_signed_get_query_string,
     )
     _NEW_CLIENT_AVAILABLE = True
 except ImportError:
     NewBybitClient = None  # type: ignore[assignment,misc]
     NewBybitBusinessError = Exception  # type: ignore[assignment,misc]
+    _new_signed_get_query_string = None  # type: ignore[assignment]
     _NEW_CLIENT_AVAILABLE = False
 
 
@@ -228,6 +230,58 @@ class TestModeBSnapshotNewClient:
             assert c.has_credentials() is True
             assert c.base_url() == "https://api-demo.bybit.com"
             assert c.instrument_count() == 0
+        finally:
+            c.close()
+
+    def test_rest_signer_earn_get_matches_rust_golden_vector(self):
+        """Earn GET canonical query bytes match Rust common::bybit_signer.
+        Earn GET canonical query bytes 必須對齊 Rust common::bybit_signer。"""
+        c = NewBybitClient(
+            api_key="TESTKEY123",
+            api_secret="TESTSECRET456",
+            environment="demo",
+        )
+        try:
+            query_string = _new_signed_get_query_string({
+                "productId": "USDT001",
+                "coin": "USDT",
+                "category": "FlexibleSaving",
+            })
+            assert query_string == "category=FlexibleSaving&coin=USDT&productId=USDT001"
+            assert c._sign("1700000000000", query_string) == (
+                "921845ae79a3ca0edce72602e03928a64c2c774f9986de2b42e33427212df13b"
+            )
+        finally:
+            c.close()
+
+    def test_rest_signer_earn_post_matches_rust_golden_vector(self):
+        """Earn POST compact JSON bytes match Rust common::bybit_signer.
+        Earn POST compact JSON bytes 必須對齊 Rust common::bybit_signer。"""
+        c = NewBybitClient(
+            api_key="TESTKEY123",
+            api_secret="TESTSECRET456",
+            environment="demo",
+        )
+        try:
+            body = {
+                "category": "FlexibleSaving",
+                "orderType": "Stake",
+                "accountType": "UNIFIED",
+                "coin": "USDT",
+                "productId": "USDT001",
+                "amount": "200.00000000",
+                "orderLinkId": "lease-uuid-abc",
+            }
+            body_str = json.dumps(body, separators=(",", ":"), ensure_ascii=False)
+            assert body_str == (
+                '{"category":"FlexibleSaving","orderType":"Stake",'
+                '"accountType":"UNIFIED","coin":"USDT",'
+                '"productId":"USDT001","amount":"200.00000000",'
+                '"orderLinkId":"lease-uuid-abc"}'
+            )
+            assert c._sign("1700000000000", body_str) == (
+                "53ff2bec550de286c1da597a3fa5eb3ba5386b87aa75a742c1ecbd3bb85bca98"
+            )
         finally:
             c.close()
 

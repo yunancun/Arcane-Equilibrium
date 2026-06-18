@@ -502,3 +502,8 @@
 
 - TODO v189 removes `AUDIT-2026-06-14-P2P3-BATCH` from §5. The Batch 4/5 fix-wave body is already completed/deployed by the cold-audit checkpoint, and its stale tails have since been split or closed: `daily_cost_snapshot.sh` v167, DIRTY-FIX v169, MIGRATION-TREE-1 v171, and 110009 semantics v186.
 - Remaining policy/doc/perf tails are preserved in §7 as `P2-COLD-AUDIT-P2P3-BATCH-FOLLOWUP`: cost-edge re-gate decision, AI-PRICING option1 SSOT + `last_verified`, BB rate-limit dictionary doc hygiene, and PERF-1 1m minor follow-up. Boundary: docs hygiene only; no source/runtime mutation.
+
+## 2026-06-18 Earn Wave D HMAC canonical-form checkpoint
+
+- TODO v190 removes `P1-EARN-WAVE-D-RUST-HMAC-CANONICAL-FORM` from §5 after adding shared Rust/Python golden-vector coverage for Bybit REST V5 signing. The tests lock Earn GET sorted query bytes and Earn POST compact JSON body bytes to identical HMAC outputs in Rust `common::bybit_signer` and Python `BybitClient._sign`.
+- Focused verification passed: Rust signer 2 tests and Python parity 2 tests. Remaining Wave D frontend -> backend -> Rust IPC integration test stays active as `P2-EARN-WAVE-D-CONTRACT-INTEGRATION-TEST`. Boundary: source/tests/docs only; no real Bybit call, credential mutation, deploy, runtime, DB, auth, risk, order, or trading mutation.

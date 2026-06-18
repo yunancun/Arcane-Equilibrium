@@ -140,6 +140,49 @@ mod tests {
         assert_eq!(actual.len(), 64);
     }
 
+    /// EN: Fixed golden vector shared with Python BybitClient tests for Earn
+    ///     GET signing. This locks the canonical bytes, not only the HMAC shape.
+    /// 中文: 與 Python BybitClient 測試共享的 Earn GET 固定 golden vector，
+    ///     鎖定 canonical bytes，而不只是 HMAC 形狀。
+    #[test]
+    fn test_sign_rest_v5_earn_get_matches_python_golden_vector() {
+        let ts = "1700000000000";
+        let key = "TESTKEY123";
+        let recv = "5000";
+        let params = "category=FlexibleSaving&coin=USDT&productId=USDT001";
+        let secret = "TESTSECRET456";
+
+        let actual = sign_rest_v5(secret, ts, key, recv, params);
+        assert_eq!(
+            actual,
+            "921845ae79a3ca0edce72602e03928a64c2c774f9986de2b42e33427212df13b"
+        );
+    }
+
+    /// EN: Fixed golden vector shared with Python BybitClient tests for the
+    ///     compact JSON body used by Earn place-order POST signing.
+    /// 中文: 與 Python BybitClient 測試共享的 Earn place-order POST compact JSON
+    ///     body 固定 golden vector。
+    #[test]
+    fn test_sign_rest_v5_earn_post_matches_python_golden_vector() {
+        let ts = "1700000000000";
+        let key = "TESTKEY123";
+        let recv = "5000";
+        let params = concat!(
+            "{\"category\":\"FlexibleSaving\",\"orderType\":\"Stake\",",
+            "\"accountType\":\"UNIFIED\",\"coin\":\"USDT\",",
+            "\"productId\":\"USDT001\",\"amount\":\"200.00000000\",",
+            "\"orderLinkId\":\"lease-uuid-abc\"}"
+        );
+        let secret = "TESTSECRET456";
+
+        let actual = sign_rest_v5(secret, ts, key, recv, params);
+        assert_eq!(
+            actual,
+            "53ff2bec550de286c1da597a3fa5eb3ba5386b87aa75a742c1ecbd3bb85bca98"
+        );
+    }
+
     /// EN: ws_auth_payload matches `GET/realtime{expires}` contract.
     /// 中文: ws_auth_payload 符合 `GET/realtime{expires}` 契約。
     #[test]
