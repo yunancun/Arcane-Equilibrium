@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 00:39 CEST
+- clarified `P2-WP05-CSP-UNSAFE-INLINE` as a first Live D-14 / Wave B passive-wait item, not a PM-local quick fix
+- read-only triage found the existing spec/archive/CSP comments expect a broad GUI/CSP sprint: externalize inline script/style across static HTML, replace `onclick`, handle Grafana frame-src/HTTPS, then enforce nonce/hash CSP without `unsafe-inline`
+- boundary: docs/TODO hygiene only; no GUI/source behavior, CI full suite, deploy/rebuild/restart, runtime/DB/auth/risk/order/trading mutation
+
 2026-06-19 00:33 CEST
 - corrected TODO v203 source-sync metadata after v202 source/test checkpoint
 - Mac `main`, `origin/main`, and Linux `trade-core` were verified at `42b6166b`; TODO masthead/§0 now name that source state instead of prior `7141bb41`
