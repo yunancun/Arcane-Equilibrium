@@ -388,3 +388,8 @@
 
 - Closed the stale `daily_cost_snapshot.sh` cron action: current Linux crontab has no `daily_cost_snapshot` line and repo/Linux still have no script, so there is no remaining cron deletion/rebuild action.
 - Refreshed Gate-B watcher state: latest artifact generated `2026-06-18T17:42:01Z` is `WATCH_ONLY` with 21 total candidates, 0 alertable/start/schedule, and gate-watch-only preflight says `WAIT_FOR_ACTIONABLE_WATCH`. No probe/autostart/trading mutation.
+
+## 2026-06-18 TODO closed-row archive pass
+
+- Archived 8 no-action completed rows out of TODO §5: funding tilt NO-GO/no-reopen + 3LOW debt, orderLinkId #6/#6 follow-up, postmortem #7, OPS-2 D+14 soak observe, OPS-4 unit-test gap, and A1 basis wire.
+- Kept rows that still have active deploy/operator/future-date/event-trigger gates. Boundary: docs hygiene only, no source/runtime mutation.

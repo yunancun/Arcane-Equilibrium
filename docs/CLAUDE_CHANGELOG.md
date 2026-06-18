@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v167 runtime stale reconcile；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v168 closed-row archive pass；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v168 增量（2026-06-18 closed-row archive pass）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 active queue 移出 8 個無下一步/已 no-reopen/已被其他 active row 覆蓋的完成 rows，並在 §5 archive marker 保留 ID：`P0-EDGE-1-CAND-FUNDING-TILT-DIAGNOSTIC`（NO-GO-C no-reopen，funding tilt 不比 price-return 更獨立，回 listing fade 主路）、`P3-FUNDING-TILT-HARNESS-3LOW-DEBT`（E1 `e863853a` 修完，verdict 仍 NO-GO-C）、`P2-ORDERLINKID-HARDENING` + `P3-110072-10001-DUP-OPEN-FAILCLOSED-EVAL`（#6/#6 follow-up 已 main 且 2026-06-07 rebuild 生效）、`P2-POSTMORTEM-CLASSIFIER`（#7 pure Python 已 2026-06-07 API restart 生效；v2 consumer 不存在故不作 active task）、`P1-OPS-2-14D-SOAK-OBSERVE`（D+14 closed，cutover row still carries relevant caveat）、`P2-OPS-4-GAP-B-D-UNIT-TEST-GAP`（source tests done，report linked）、`P2-A1-RUNNER-WIRE-TO-BASIS`（wire verified/candidate dormant，same fact retained in Stage0R event-trigger row and §2 basis note）。保留未歸檔：deploy/operator/future-dated rows and rows with live active gates. 邊界：TODO/changelog/report hygiene only；無 source/runtime/DB/auth/risk/order/trading mutation。
 
 **v167 增量（2026-06-18 runtime stale reconcile）**：read-only Linux recheck 關閉兩個 TODO stale 點。其一，`AUDIT-2026-06-14-P2P3-BATCH` 的 `daily_cost_snapshot.sh` broken-cron action 已無可執行殘留：current `trade-core` crontab 無 `daily_cost_snapshot` 行，repo/Linux find 仍無該腳本，故不需 operator 刪 cron 或重建；舊 AI-E/PA finding superseded。其二，刷新 §6 Gate-B watcher：cron 仍 `12,42 * * * *`，latest `/tmp/openclaw/gate_b_watch/gate_b_watch_latest.json` generated `2026-06-18T17:42:01Z`，status=`WATCH_ONLY`，candidate_counts total=21/alertable=0/start_now=0/schedule=0/watch_only=1，source health ok；gate-watch-only preflight `gate_b_preflight_refresh_20260618T1745Z` 回 `operator_action=WAIT_FOR_ACTIONABLE_WATCH`，0 probe hints，未啟動 24h probe。邊界：artifact/read-only verification only；無 deploy/rebuild/restart/DB/auth/risk/order/trading mutation，除 preflight summary 寫入 `/tmp/openclaw/aeg_s3_gate_b_preflight/...`。
 
