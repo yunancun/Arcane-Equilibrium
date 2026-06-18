@@ -169,12 +169,12 @@ impl IntentProcessor {
                     cutoff_bps = -15.0_f64,
                     "cost_gate(JS-demo): low sample but deep-negative — block / 低樣本深負阻擋"
                 );
-                return Some(ExchangeGateResult::rejected(
+                Some(ExchangeGateResult::rejected(
                     RejectionCode::CostGateJsDemoNegative {
                         estimated_bps: cell.shrunk_bps,
                     }
                     .format(),
-                ));
+                ))
             }
             Some(cell) if cell.n_trades < min_n => {
                 // EDGE-DIAG-2: low-sample cell — treat as noise; route to exploration mode.

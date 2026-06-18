@@ -210,7 +210,7 @@ impl Guardian {
             risk_score += SCORE_DRAWDOWN_BREACH;
         }
 
-        let risk_score = (risk_score as f64).min(RISK_SCORE_CAP);
+        let risk_score = risk_score.min(RISK_SCORE_CAP);
 
         // Verdict logic
         let verdict = if reasons.iter().any(|r| {

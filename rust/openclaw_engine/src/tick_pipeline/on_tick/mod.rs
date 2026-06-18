@@ -176,7 +176,7 @@ impl TickPipeline {
 
         // ── Tail: periodic stats/snapshots + final CanaryRecord emission. ──
         // ── 尾段：定期統計/快照 + 最終 CanaryRecord 發送。──
-        if self.stats.total_ticks % 1000 == 0 {
+        if self.stats.total_ticks.is_multiple_of(1000) {
             tracing::info!(
                 ticks = self.stats.total_ticks,
                 fills = self.stats.total_fills,

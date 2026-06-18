@@ -129,7 +129,7 @@ impl PriceHistoryTracker {
     /// Returns `None` if insufficient samples.
     /// 樣本不足時回傳 `None`。
     #[deprecated(
-        since = "2026-04-22",
+        since = "0.1.0",
         note = "Returns per-tick micro-volatility (~0.001-0.006% scale), NOT \
                 position-life ATR. For stops/exits use \
                 `openclaw_core::indicators::volatility::atr` on KlineManager OHLCV. \

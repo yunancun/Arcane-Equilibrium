@@ -117,8 +117,7 @@ impl WsClient {
                     }
                     info!(
                         topics = self.subscriptions.len(),
-                        batches = (self.subscriptions.len() + SUBSCRIBE_BATCH_SIZE - 1)
-                            / SUBSCRIBE_BATCH_SIZE,
+                        batches = self.subscriptions.len().div_ceil(SUBSCRIBE_BATCH_SIZE),
                         "subscribed / 已訂閱"
                     );
 

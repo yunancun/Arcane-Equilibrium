@@ -6,6 +6,13 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-18 Apple Silicon clippy gate
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--p2_clippy_cleanup_gate.md` | PM source/test checkpoint: closes `P2-CLIPPY-CLEANUP-1` by restoring the Apple Silicon `cargo clippy --target aarch64-apple-darwin -- -D warnings` gate, fixing low-risk core/type lints, and codifying the engine historical lint baseline as explicit allowlists; no runtime/deploy mutation。 |
+| `CCAgentWorkSpace/Operator/2026-06-18--p2_clippy_cleanup_gate.md` | Operator mirror: concise result, verification commands, and boundary for the clippy cleanup checkpoint。 |
+
 ### 2026-06-18 Earn Wave D IPC contract integration
 
 | 文件 | 内容 |

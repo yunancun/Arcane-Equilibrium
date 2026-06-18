@@ -132,6 +132,13 @@
 //!     + workplan R20-P2b-S7/S8/S9
 //! Owner: PA + E1 (Wave 1 scaffold) → E1 + E2 + E3 (Wave 3 IMPL).
 
+#![allow(
+    clippy::doc_lazy_continuation,
+    clippy::doc_overindented_list_items,
+    clippy::empty_line_after_doc_comments,
+    clippy::too_many_arguments
+)]
+
 #![cfg(feature = "replay_isolated")]
 
 #[path = "replay_runner/calibration.rs"]

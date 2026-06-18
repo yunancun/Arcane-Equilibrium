@@ -23,6 +23,7 @@ use crate::tick_pipeline::TickContext;
 use super::{ConfidenceBuilder, MaCrossover};
 
 impl MaCrossover {
+    #[cfg(test)]
     pub(super) fn make_intent(
         &self,
         ctx: &TickContext<'_>,

@@ -526,3 +526,9 @@
 - TODO v192 removes `P2-EARN-WAVE-D-CONTRACT-INTEGRATION-TEST` from §5 after source/test integration landed: Rust IPC dispatch registers `process_earn_intent`, sends `PipelineCommand::ProcessEarnIntent`, and the event-consumer owner task calls `IntentProcessor::process_earn_intent`; Python `/api/v1/earn/stake` now has a contract test locking method, timeout, and 8 params sent to Rust.
 - Verification passed: `cargo test -p openclaw_engine process_earn_intent --lib` (3), `cargo test -p openclaw_engine earn_router_fail_closed_when_unwired --lib` (1), and full `test_earn_routes.py` (28, existing Pydantic warning only).
 - Boundary preserved: no real Bybit call, no credential/secret mutation, no deploy/rebuild/restart, no runtime/DB/auth/risk/order/trading mutation. Current real Rust path intentionally returns `submitted=false` with `earn_dispatch_unwired...` until `BybitEarnClient` and `EarnMovementWriter` are injected; `P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` stays active for OP-1/2/3 plus capability injection.
+
+## 2026-06-18 P2 clippy cleanup gate
+
+- TODO v194 closes `P2-CLIPPY-CLEANUP-1`: Apple Silicon `cargo clippy --target aarch64-apple-darwin -- -D warnings` now passes.
+- Low-risk core/type lint errors were fixed directly; engine/bin historical lint debt is explicit at crate/bin boundaries so new unlisted lint classes still fail. Verification passed: clippy gate, core lib 412 passed, engine lib 4092 passed / 1 ignored.
+- Boundary: source/tests/docs only; no CI full suite, deploy/rebuild/restart, runtime DB/auth/risk/order/trading mutation, credential mutation, or real Bybit call.

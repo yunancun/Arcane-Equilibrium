@@ -482,7 +482,7 @@ pub(super) async fn dispatch_earn_intent(
             // 含 ret_code/ret_msg/failure_reason）；release lease Failed。
             let (ret_code, ret_msg, failure_reason) = match &api_err {
                 BybitApiError::Business { ret_code, ret_msg, .. } => {
-                    (*ret_code as i64, ret_msg.clone(), "business_error".to_string())
+                    (*ret_code, ret_msg.clone(), "business_error".to_string())
                 }
                 BybitApiError::Transport(e) => {
                     (-1, format!("{}", e), "transport_error".to_string())

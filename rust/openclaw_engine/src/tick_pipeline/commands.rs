@@ -193,11 +193,11 @@ impl TickPipeline {
         if self.session_halted {
             return Err("session_halted".into());
         }
-        if !(qty > 0.0) {
+        if !matches!(qty.partial_cmp(&0.0), Some(std::cmp::Ordering::Greater)) {
             return Err(format!("invalid qty: {qty}"));
         }
         let price = self.paper_state.latest_price(symbol).unwrap_or(0.0);
-        if !(price > 0.0) {
+        if !matches!(price.partial_cmp(&0.0), Some(std::cmp::Ordering::Greater)) {
             return Err(format!("no latest price for {symbol}"));
         }
         // ATR drives the cost gate; absent ATR is fail-closed (matches on_tick path).
@@ -292,7 +292,10 @@ impl TickPipeline {
                 }
             }
         }
-        if !(fill.fill_qty > 0.0) {
+        if !matches!(
+            fill.fill_qty.partial_cmp(&0.0),
+            Some(std::cmp::Ordering::Greater)
+        ) {
             return Err("fill_qty rounded to 0".into());
         }
 

@@ -291,7 +291,7 @@ impl LeaseObject {
     }
 
     pub fn is_expired_by_time(&self, now_ms: u64) -> bool {
-        self.expires_at_ms.map_or(false, |exp| now_ms > exp)
+        self.expires_at_ms.is_some_and(|exp| now_ms > exp)
     }
 }
 
@@ -333,6 +333,7 @@ impl DecisionLeaseSm {
         self.objects.len() - 1
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn transition(
         &mut self,
         idx: usize,

@@ -18,6 +18,13 @@
 //!   mainnet）；fail-closed 在首次 get() → NoCredentials → 全 symbol 記 failed coverage
 //!   (observed=0) 退 EXIT_OK（無假值，但 cron 須檢 coverage 非僅看 exit code）。非 no-auth public。
 
+#![allow(
+    clippy::doc_lazy_continuation,
+    clippy::doc_overindented_list_items,
+    clippy::empty_line_after_doc_comments,
+    clippy::too_many_arguments
+)]
+
 use std::env;
 use std::path::PathBuf;
 

@@ -126,13 +126,9 @@ impl WsClient {
                 .filter_map(|item| parse_liquidation_item(item, topic))
                 .collect()
         } else if topic.starts_with("price-limit.") {
-            data.iter()
-                .filter_map(|item| parse_price_limit_item(item))
-                .collect()
+            data.iter().filter_map(parse_price_limit_item).collect()
         } else if topic.starts_with("adl-notice.") {
-            data.iter()
-                .filter_map(|item| parse_adl_notice_item(item))
-                .collect()
+            data.iter().filter_map(parse_adl_notice_item).collect()
         } else {
             // G9-02: track unknown topic; trigger force reconnect when armed
             // and threshold met. `now_ms()` is the openclaw_core shared helper

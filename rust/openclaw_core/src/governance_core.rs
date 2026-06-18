@@ -296,6 +296,7 @@ impl GovernanceCore {
     /// production grep marker，reviewer 掃 lateral test-hook 濫用時有單一字串
     /// 錨點。
     #[doc(hidden)]
+    #[allow(clippy::assertions_on_constants)]
     pub fn set_router_gate_enabled_for_test(&mut self, enabled: bool) {
         // SAFETY / 不變量：production code paths MUST NOT call this setter.
         // `debug_assertions` is on for `cargo build` / `cargo test` (debug +
@@ -713,7 +714,7 @@ impl GovernanceCore {
                         .state;
                     if cur == LeaseState::Active {
                         sm.bridge(idx)?;
-                        let bridged_obj = sm.get(idx).map(|o| o.clone());
+                        let bridged_obj = sm.get(idx).cloned();
                         if let Some(obj) = bridged_obj {
                             if let Some(msg) = build_msg_from_last_transition(
                                 lease_id_str,
@@ -727,7 +728,7 @@ impl GovernanceCore {
                         }
                     }
                     sm.consume(idx)?;
-                    let consumed_obj = sm.get(idx).map(|o| o.clone());
+                    let consumed_obj = sm.get(idx).cloned();
                     if let Some(obj) = consumed_obj {
                         if let Some(msg) = build_msg_from_last_transition(
                             lease_id_str,
@@ -747,7 +748,7 @@ impl GovernanceCore {
                         LeaseOutcome::Consumed => unreachable!(),
                     };
                     sm.revoke(idx, "rust_facade", reason)?;
-                    let revoked_obj = sm.get(idx).map(|o| o.clone());
+                    let revoked_obj = sm.get(idx).cloned();
                     if let Some(obj) = revoked_obj {
                         if let Some(msg) = build_msg_from_last_transition(
                             lease_id_str,

@@ -396,7 +396,7 @@ pub struct LiquidationEvent {
 ///     即 long 倉位被強制買回對手單；通常價格下跌）
 ///   - Bybit `side = "Sell"` ⇒ `LiquidationSide::ShortLiquidated`（空頭被強平，
 ///     即 short 倉位被強制賣回對手單；通常價格上漲）
-///   寫反 = alpha 訊號反向 = 直接 trade loss。
+///     寫反 = alpha 訊號反向 = 直接 trade loss。
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct LiquidationPulse {
     /// Rolling 視窗內的單一 symbol 強平事件（5m 視窗，per spec §6.1）。

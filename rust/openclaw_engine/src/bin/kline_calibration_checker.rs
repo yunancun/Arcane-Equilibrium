@@ -24,6 +24,13 @@
 //! 運維：cron wrapper helper_scripts/cron/kline_calibration_cron.sh（OPENCLAW_KLINE_CALIBRATION_APPLY=1）；
 //!   配對 healthcheck [91]（cron heartbeat sentinel kline_calibration.last_fire）。
 
+#![allow(
+    clippy::doc_lazy_continuation,
+    clippy::doc_overindented_list_items,
+    clippy::empty_line_after_doc_comments,
+    clippy::too_many_arguments
+)]
+
 use std::collections::BTreeMap;
 use std::env;
 use std::io::Write as _;

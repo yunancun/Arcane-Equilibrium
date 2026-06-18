@@ -50,6 +50,13 @@
 //!
 //! Refs: incident 2026-05-02 18:35 engine abort; PA plan B path.
 
+#![allow(
+    clippy::doc_lazy_continuation,
+    clippy::doc_overindented_list_items,
+    clippy::empty_line_after_doc_comments,
+    clippy::too_many_arguments
+)]
+
 use std::env;
 use std::io::{self, BufRead, IsTerminal, Write};
 use std::path::PathBuf;

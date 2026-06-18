@@ -270,7 +270,7 @@ impl AuthorizationObject {
     }
 
     pub fn is_expired_by_time(&self, now_ms: u64) -> bool {
-        self.expires_at_ms.map_or(false, |exp| now_ms > exp)
+        self.expires_at_ms.is_some_and(|exp| now_ms > exp)
     }
 }
 
@@ -320,6 +320,7 @@ impl AuthorizationSm {
 
     /// Core transition with 5 guards.
     /// 核心遷移，5 個守衛。
+    #[allow(clippy::too_many_arguments)]
     pub fn transition(
         &mut self,
         idx: usize,

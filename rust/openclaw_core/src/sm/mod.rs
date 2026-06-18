@@ -46,6 +46,7 @@ pub struct TransitionRecord {
 }
 
 impl TransitionRecord {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         from_state: &str,
         to_state: &str,
