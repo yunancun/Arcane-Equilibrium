@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v178 reconciler runtime-status correction；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v179 retcode dictionary correction；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v179 增量（2026-06-18 retCode 110009/110017 dictionary correction）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 `P3-110017-BB-DOC-FOLLOWUPS`。本輪只關文檔/語意核實：`docs/references/2026-04-04--bybit_api_reference.md` 將 110017 D2 從 stale `spec pending IMPL` 改為 source-land/runtime-loaded 但 event proof 另 gate；同時用官方 Bybit V5 error table（2026-06-18 recheck）裁定 110009 目前是 stop-orders-count limit，不是 PositionNotFound，並把舊「待 BB 核實」註記改成已驗語意 + code drift caveat。剩餘 Rust code drift 沒有被假關閉，已在 §5 單列 `P2-110009-RETCODE-SEMANTICS-FIX`：rename enum/tests/comments，並把 110009 從 close-equivalent-success NoOp arm 移出或加 guard；BB 2026-05-30 已裁定 `set_trading_stop` SL/TP path 目前 fail-loud，所以此是 P2 latent misclassification，不是 P1 active stop-loss swallow。邊界：official-doc/source/read-only verification + docs/TODO/changelog/memory/report hygiene only；無 CI、無 code change、無 deploy/rebuild/restart、無 production runtime/DB/auth/risk/order/trading mutation。
 
 **v178 增量（2026-06-18 reconciler runtime-status correction）**：依 `docs/agents/todo-maintenance.md` conflict handling，修正 `TODO.md` §5 中 `P2-RECONCILER-GET-POSITIONS-PAGINATION` / `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` 的部署狀態漂移。Mac/Linux HEAD 均已包含 `bb7e9efc` 與 `baf46a69`；running engine PID 3134818（started 2026-06-18 14:11:50 CEST）之 `/proc/3134818/exe` strings 含 `removed_position_semantics`、`dispatched-not-confirmed`、`reconcile_ghost_converge`，watchdog read-only `engine_alive=true`、demo snapshot fresh，故不再寫「未部署」。但不歸檔：PM 1-4 integration report 仍明示 E2/E4/QA review pending，且 production DB `observability.engine_events(event_type='reconcile_ghost_converge')` 目前 0 rows、無 D2 event proof。邊界：read-only source/runtime/DB verification + TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 production source/runtime/DB/auth/risk/order/trading mutation。
 
