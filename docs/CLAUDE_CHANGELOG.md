@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v189 cold-audit P2/P3 batch active-row archive；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v190 Earn Wave D HMAC canonical-form source/test checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v190 增量（2026-06-18 Earn Wave D HMAC canonical-form source/test checkpoint）**：關閉 `TODO.md` §5 `P1-EARN-WAVE-D-RUST-HMAC-CANONICAL-FORM`。既有 Rust `common::bybit_signer::sign_rest_v5()` 與 Python `BybitClient._sign()` 均按 Bybit V5 `timestamp + api_key + recv_window + params` 簽名；本輪補上跨語言固定 golden vector，鎖定 Earn GET canonical sorted query bytes（`category=FlexibleSaving&coin=USDT&productId=USDT001`）與 Earn POST compact JSON body bytes（place-order Stake payload）在 Rust/Python 兩端輸出完全相同 HMAC。Focused verification：`cargo test -p openclaw_engine test_sign_rest_v5_earn --lib`（2 passed）與 `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_bybit_rest_client_parity.py -k 'rest_signer_earn'`（2 passed）。未關閉 Wave D 全鏈：`P2-EARN-WAVE-D-CONTRACT-INTEGRATION-TEST` 仍留在 §5，等待 frontend -> backend -> Rust IPC integration test。邊界：source/tests/TODO/changelog/memory/report/index only；無真 Bybit call、無 credential/key/secret mutation、無 CI full suite、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 
 **v189 增量（2026-06-18 cold-audit P2/P3 batch active-row archive）**：依 `docs/agents/todo-maintenance.md` DONE/passive-wait lifecycle，從 `TODO.md` §5 移出 `AUDIT-2026-06-14-P2P3-BATCH`。該 row 的 Batch 4/5 修復本體已在 cold-audit fix-wave 完成並由 `c7f97f50` commit+push+Linux rebuild/restart 部署；後續 stale tails 已分別閉合：`daily_cost_snapshot.sh` broken-cron action 由 v167 read-only Linux recheck 關閉、`AUDIT-2026-06-14-DIRTY-FIX` 由 v169 歸檔、`AUDIT-2026-06-14-MIGRATION-TREE-1` 由 v171 歸檔，110009 語意 drift 也已由 v186 source fix 收斂。未隱藏剩餘尾項：§7 新增 `P2-COLD-AUDIT-P2P3-BATCH-FOLLOWUP`，僅在 operator/QC/AI-E/PA 裁 cost-edge 復閘、PA/AI-E 決定 AI-PRICING option1 SSOT+`last_verified` 架構、BB/PA doc hygiene window 更新 rate-limit dictionary、或 perf sprint 接 PERF-1 1m minor follow-up 時重開 active row。邊界：TODO/changelog/memory/report/index hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 

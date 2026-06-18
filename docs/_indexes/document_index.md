@@ -6,6 +6,12 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-18 Earn Wave D HMAC canonical form
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--earn_wave_d_hmac_canonical_form.md` | PM source/test checkpoint: closes `P1-EARN-WAVE-D-RUST-HMAC-CANONICAL-FORM` by adding Rust/Python Bybit REST V5 Earn GET/POST golden-vector HMAC parity tests; full frontend -> backend -> Rust IPC integration remains active separately。 |
+
 ### 2026-06-18 TODO lifecycle hygiene
 
 | 文件 | 内容 |
