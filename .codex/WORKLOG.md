@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 01:14 CEST
+- corrected TODO v212 source-sync metadata after the v211 L2/D2 read-only watch refresh checkpoint
+- Mac `main`, `origin/main`, and Linux `trade-core` were verified at `37e3abba`; TODO masthead/§0 now name that source state instead of prior `0929d87c`
+- boundary: docs/TODO hygiene only; no CI, deploy/rebuild/restart, model call, DB write, runtime/auth/risk/order/trading mutation
+
 2026-06-19 01:11 CEST
 - refreshed L2/D2 watch-state blockers with Linux read-only checks
 - L2 still has only one historical `agent.l2_calls` row (`2026-06-10`, `ml_advisory.diagnose_leak`, `manual`, `anthropic:sonnet`); L2 cron cursor is `2026-06-17` with 2026-06-12..17 all `materials_l2=0/stored=0`; `[88]`/`[89]` PASS; B3 shadow rows=0 and consequential marks=0
