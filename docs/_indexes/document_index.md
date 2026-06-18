@@ -6,6 +6,13 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-18 H0Gate file split
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--p3_h0gate_file_split.md` | PM source/test checkpoint: closes `P3-H0GATE-FILE-SPLIT` by moving H0Gate tests into `openclaw_core/src/h0_gate/tests.rs`, reducing production `h0_gate.rs` below the 800-line review threshold with behavior preserved。 |
+| `CCAgentWorkSpace/Operator/2026-06-18--p3_h0gate_file_split.md` | Operator mirror: concise result, verification commands, and boundary for the H0Gate file-split checkpoint。 |
+
 ### 2026-06-18 Apple Silicon clippy gate
 
 | 文件 | 内容 |

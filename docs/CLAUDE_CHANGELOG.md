@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v194 Apple Silicon clippy gate source/test checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v195 H0Gate file-split source/test checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v195 增量（2026-06-18 H0Gate file-split source/test checkpoint）**：關閉 `TODO.md` §7 `P3-H0GATE-FILE-SPLIT`。`rust/openclaw_core/src/h0_gate.rs` 原 1243 行主要因內嵌 `#[cfg(test)] mod tests` 超過 800 行 warning threshold；本輪把 test module 機械移到 `rust/openclaw_core/src/h0_gate/tests.rs`，production file 降為 630 行，API 與 production 行為不變。Verification：`cargo test -p openclaw_core h0_gate::tests --lib`（33 passed；4 existing deprecated test warnings from unrelated core tests compile）、`cargo test -p openclaw_core --lib`（412 passed；同 4 warnings）、`cargo clippy --target aarch64-apple-darwin -- -D warnings` PASS、`cargo test -p openclaw_engine h0_latency_metrics --lib`（5 passed）。邊界：source/tests/TODO/changelog/memory/report/index only；未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation。`P2-WP05-CSP-UNSAFE-INLINE` 仍留 §7，因其是約 25 HTML inline script/style 重構 + nonce/hash CSP 的獨立 live-gate sprint，不在本機械拆檔 scope。
 
 **v194 增量（2026-06-18 Apple Silicon clippy gate source/test checkpoint）**：關閉 `TODO.md` §7 `P2-CLIPPY-CLEANUP-1`。原始 sprint 1A Apple Silicon `cargo clippy --target aarch64-apple-darwin -- -D warnings` gate 曾因 baseline lint debt 無法 enforce；本輪把低風險 core/type lint 直接修掉（doc list continuation、`Option::cloned`、`is_some_and`、unnecessary cast、NaN fail-closed comparison 保真等），並在 `openclaw_engine` crate/bin 邊界把歷史文檔與交易路徑複雜度 codify 成明確 allowlist，讓未列入的新 lint 類別仍會失敗。Focused verification：`cargo clippy --target aarch64-apple-darwin -- -D warnings` PASS；`cargo test -p openclaw_core --lib`（412 passed，4 existing deprecated test warnings）；`cargo test -p openclaw_engine --lib`（4092 passed / 1 ignored）。邊界：未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation。Dispatch chain deliberately shortened: PM handled locally because this was a deterministic tooling hygiene checkpoint with clippy/test gates and no exchange/runtime surface.
 
