@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-18 23:42 CEST
+- closed TODO `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC` as a Codex governance checkpoint
+- made `docs/agents/sub-agent-hygiene-sop.md` mandatory in Codex dispatch records for Rust/Cargo/Linux-runtime/PG/deploy/runtime-verification work
+- dispatch records now need hygiene SOP, verification surface, and Linux write policy; E1/E2/E4 Rust work must report focused Mac cargo/source verification or an explicit skip reason
+- boundary: docs/governance only; no code/runtime/deploy/DB/auth/risk/order/trading mutation
+
 2026-06-04 16:03 CEST
 - completed Alpha-Edge P1 `candidate_evidence_manifest` fail-closed gate as a source/test/docs-only checkpoint
 - added shared manifest validator and wired MLDE live-candidate producer plus LG-5 reviewer so missing/alias/invalid/research_only/pending_schema manifests cannot create or approve live candidates

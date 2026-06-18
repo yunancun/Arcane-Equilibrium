@@ -52,6 +52,7 @@ captures the same decision surface or the deletion is explicitly called out.
 | Architecture overview and service family map | `README.md`, `docs/architecture/*`, ADRs |
 | Paths, scripts, deploy entry points | `README.md`, `helper_scripts/SCRIPT_INDEX.md`, `.codex/DEPLOYMENT.md` |
 | Dispatch chains and sub-agent role binding | `CLAUDE.md`, `.codex/AGENT_DISPATCH_PROTOCOL.md`, `.codex/SUBAGENT_EXECUTION_RULES.md` |
+| Sub-agent Linux/Cargo/atomic restart hygiene | `docs/agents/sub-agent-hygiene-sop.md` before delegating Rust, Cargo, Linux runtime, PG, deploy, service restart, or runtime-verification work |
 | TODO maintenance rules | `docs/agents/todo-maintenance.md` |
 | Agent profile/memory hygiene | `docs/agents/role-profile-memory-standard.md` |
 | External tool posture | `README.md`, `docs/agents/issue-tracker.md`, compact memory reminder |

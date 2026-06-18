@@ -1,6 +1,6 @@
 # Codex Agent Dispatch Protocol
 
-Last updated: 2026-05-16
+Last updated: 2026-06-18
 
 ## Purpose
 
@@ -65,6 +65,13 @@ Every delegated task must declare:
 - ownership
 - deliverable
 
+For delegated work touching Rust, Cargo, Linux `trade-core`, PG, deploy, or
+runtime verification, the dispatch must also declare the hygiene source and
+verification surface:
+- `hygiene_sop`: `docs/agents/sub-agent-hygiene-sop.md`
+- `verification_surface`: Mac source-test/check, Linux read-only probe, or
+  PM/operator-owned atomic deploy path
+
 Use the role form `ROLE(codex_type)` in updates and summaries.
 
 Do not use only temporary runtime labels such as `worker 1` as the authoritative identity.
@@ -119,6 +126,14 @@ Deploy requests should still start with `PM`, even if the final action is operat
 - confirm branch / commit / host state
 - decide whether a deploy is warranted
 - then perform the deploy or delegate narrow checks
+
+## Linux cargo hygiene
+
+Sub-agents must not run `cargo build`, `cargo test`, or `cargo check` on Linux
+`trade-core`. Rust implementation/review/regression validation uses Mac cargo
+commands unless PM explicitly takes over an atomic deploy path. Linux checks by
+delegated roles are read-only probes only, per
+`docs/agents/sub-agent-hygiene-sop.md`.
 
 ## Documentation rule
 

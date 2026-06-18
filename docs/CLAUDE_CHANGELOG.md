@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v195 H0Gate file-split source/test checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v196 Codex sub-agent hygiene dispatch-rule checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v196 增量（2026-06-18 Codex sub-agent hygiene dispatch-rule checkpoint）**：關閉 `TODO.md` §7 `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC`。既有 `docs/agents/sub-agent-hygiene-sop.md` 已清楚禁止 sub-agent 在 Linux `trade-core` 跑 cargo/build/test/check 或自行 restart，但 Codex dispatch 規則未把它變成必帶欄位；本輪更新 `.codex/SUBAGENT_EXECUTION_RULES.md` 與 `.codex/AGENT_DISPATCH_PROTOCOL.md`，要求凡 delegated Rust/Cargo/Linux-runtime/PG/deploy/runtime-verification work 均帶 `hygiene_sop`、`verification_surface`、`linux_write_policy`，且 E1/E2/E4 Rust 工作須回報 focused Mac cargo/source verification 或明確 skip reason。同步更新 `.codex/MEMORY.md`、`docs/agents/context-loading.md`、`docs/agents/sub-agent-hygiene-sop.md`、`.codex/WORKLOG.md`、`.codex/DISPATCH_LEDGER.md`、PM report/index/memory。邊界：docs/governance only；無 source code、無 CI、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 
 **v195 增量（2026-06-18 H0Gate file-split source/test checkpoint）**：關閉 `TODO.md` §7 `P3-H0GATE-FILE-SPLIT`。`rust/openclaw_core/src/h0_gate.rs` 原 1243 行主要因內嵌 `#[cfg(test)] mod tests` 超過 800 行 warning threshold；本輪把 test module 機械移到 `rust/openclaw_core/src/h0_gate/tests.rs`，production file 降為 630 行，API 與 production 行為不變。Verification：`cargo test -p openclaw_core h0_gate::tests --lib`（33 passed；4 existing deprecated test warnings from unrelated core tests compile）、`cargo test -p openclaw_core --lib`（412 passed；同 4 warnings）、`cargo clippy --target aarch64-apple-darwin -- -D warnings` PASS、`cargo test -p openclaw_engine h0_latency_metrics --lib`（5 passed）。邊界：source/tests/TODO/changelog/memory/report/index only；未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation。`P2-WP05-CSP-UNSAFE-INLINE` 仍留 §7，因其是約 25 HTML inline script/style 重構 + nonce/hash CSP 的獨立 live-gate sprint，不在本機械拆檔 scope。
 

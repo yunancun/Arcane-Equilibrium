@@ -121,6 +121,10 @@ Unless explicitly overridden:
   debt.
 - Read exports, direct callers, and shared helpers before writing.
 - Tests should verify intent, not just behavior.
+- For delegated Rust/Cargo or Linux-runtime work, attach
+  `docs/agents/sub-agent-hygiene-sop.md` to the dispatch. Sub-agents do Mac
+  cargo/source verification and Linux read-only probes only; Linux cargo or
+  restart requires PM/operator-owned atomic deploy handling.
 - Checkpoint after significant steps.
 - Match codebase conventions even when you disagree; push back explicitly if
   they are harmful.
