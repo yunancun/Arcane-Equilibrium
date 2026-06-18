@@ -487,3 +487,8 @@
 - TODO v186 archives `P2-110009-RETCODE-SEMANTICS-FIX` from §5 after source/test correction: `BybitRetCode::PositionNotFound` was renamed to `StopOrderLimitExceeded`, `from_code(110009)` maps to the new enum, and dispatch no longer classifies 110009 as close-equivalent NoOp.
 - Official Bybit V5 meaning remains: 110009 = stop-order count exceeds maximum allowable limit. The fix makes 110009 Structural/fail-closed; 110001 stays NoOp and 110017 guarded convergence behavior is unchanged.
 - Focused Rust tests passed: retCode tests (2), changed classifier/helper tests, and full `event_consumer::dispatch::tests` (56). Boundary: source/tests/reference/TODO/changelog/report only; no deploy/rebuild/restart, and running engine binary is not claimed to include the fix.
+
+## 2026-06-18 TODO AC19 final-verdict active-row archive
+
+- TODO v187 archives `P2-AC19-ALT-BUCKET-FINAL-VERDICT` from §5. The evidence/verdict work was already done: QA final verdict says alt FAIL (42 attempts, 23.8% fill, Wilson lower 13.5%, 28 timeout->taker), large_cap INCONCLUSIVE-LOW-N, and BB audit says demo public data mirrors mainnet while fills are pessimistic because demo orders have no queue position.
+- Future α/β/C choice is now `P2-AC19-ALT-BUCKET-FINAL-VERDICT-FOLLOWUP` in §7: reopen only if PA/QC/operator chooses alt taker-direct, shortened timeout, or explicit keep-current-policy acceptance. Boundary: docs hygiene only; no code/runtime/DB/auth/risk/order/trading mutation.
