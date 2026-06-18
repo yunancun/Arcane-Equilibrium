@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-18 23:52 CEST
+- hardened `P2-RECONCILER-GET-POSITIONS-PAGINATION` full-scan cursor guard after PM-local review
+- `get_positions(Linear, None)` now compares the current request cursor to response `nextPageCursor`, so same-cursor pagination fails closed immediately rather than after one extra duplicate request
+- verification: `position_manager::tests` 19 passed, client-side invariant dispatch mapping 1 passed, exchange-stop invariant mapping 1 passed, reconciler ghost pagination suite 11 passed, `cargo clippy -p openclaw_engine --lib -- -D warnings` PASS
+- boundary: row remains active for formal BB/E2/E4 review and D2 event proof; no real Bybit call, deploy/rebuild/restart, runtime/DB/auth/risk/order/trading mutation
+
 2026-06-18 23:42 CEST
 - closed TODO `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC` as a Codex governance checkpoint
 - made `docs/agents/sub-agent-hygiene-sop.md` mandatory in Codex dispatch records for Rust/Cargo/Linux-runtime/PG/deploy/runtime-verification work
