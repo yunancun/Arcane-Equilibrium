@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 01:07 CEST
+- corrected TODO v210 source-sync metadata after the v209 Gate-B WATCH_ONLY refresh checkpoint
+- Mac `main`, `origin/main`, and Linux `trade-core` were verified at `117a6a0c`; TODO masthead/§0 now name that source state instead of prior `cd0776ef`
+- boundary: docs/TODO hygiene only; no CI, deploy/rebuild/restart, runtime/DB/auth/risk/order/trading mutation
+
 2026-06-19 01:01 CEST
 - refreshed Gate-B watcher/preflight evidence from Linux without starting a probe
 - latest `/tmp/openclaw/gate_b_watch/gate_b_watch_latest.json` generated `2026-06-18T22:42:01Z` remains `WATCH_ONLY` (21 total, 0 alertable/start/schedule, 1 watch_only); preflight `gate_b_preflight_refresh_20260618T2242Z` returned `WAIT_FOR_ACTIONABLE_WATCH`, 0 probe hints, command not operator-recommended
