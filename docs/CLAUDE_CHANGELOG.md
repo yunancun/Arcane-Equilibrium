@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v204 CSP deferred-scope clarification checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v205 Stage0R report-auth-smoke checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v205 增量（2026-06-19 Stage0R report-auth-smoke checkpoint）**：`P1-A1A2-STAGE0R-RUNNER-IMPL` 保持 active，但 v202 shared report PG auth fallback 已在 Linux 真 PG read-only smoke 中被 exercised。PM 在 Linux `trade-core` 刻意 unset `OPENCLAW_DATABASE_URL` 與 `POSTGRES_PASSWORD`，只提供 PG user/db/host/port，使 `helper_scripts.lib.pg_connect.resolve_report_dsn()` 從 canonical secrets env file 補密碼；8b limited BTC/ETH 1d report 產出 `/tmp/openclaw/stage0r_report_auth_smoke/w_audit_8b_fallback_20260618T224216Z.json` sha256 `b9429419ca9ae5875cbf403f49f18949c8ee29a4520d4bb3a72ab982ee38e380`（row_count=549、eligible=false、fail=`no primary-horizon signals`），alpha_candidate A1/A2 limited BTC/ETH 1d packet 產出 `/tmp/openclaw/stage0r_report_auth_smoke/alpha_candidate_fallback_20260618T224241Z.json` sha256 `99f0ae1aacbf9af367e009a38d1e2b126e0fafa7a0a01c8075f08bebbdaf46f2`（verdict=observe_more、stage0_ready=false、A1 draft_only、A2 observe_more）。邊界：limited `/tmp` smoke only；不信任為正式 promotion packet；未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 repo artifact write、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation；E4 review + PM formal deploy/runtime verification 仍未關。
 
 **v204 增量（2026-06-19 CSP deferred-scope clarification checkpoint）**：保留 `P2-WP05-CSP-UNSAFE-INLINE` active/passive-wait，但把原本過短的「live gate 前」補成明確觸發條件與 scope：first Live D-14 / Wave B 才 dispatch，closure 需要跨 PA/E3/A3/E1/E2/E4/QA 的 GUI/CSP sprint，把 static HTML inline script/style 外移、`onclick` 改 `addEventListener`、處理 Grafana HTTPS/frame-src，最後移除 `unsafe-inline` 並 enforcing nonce/hash CSP。PM read-only triage 確認現場約 26 個 static HTML，inline/style/handler 分布廣，與 `docs/execution_plan/specs/2026-05-26--p0-ops-1-https-secure-cookie.md` §5、archive v55、`main_legacy.py` CSP comments 一致，因此不是 PM-local quick fix。邊界：docs/TODO hygiene only；未改 GUI/source behavior，未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation；不關閉任何 live-gate/runtime/review/operator gate。
 

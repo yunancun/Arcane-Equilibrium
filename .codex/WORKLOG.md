@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 00:43 CEST
+- exercised the Stage0R shared PG auth fallback against Linux PG with `OPENCLAW_DATABASE_URL` and `POSTGRES_PASSWORD` deliberately unset
+- 8b limited BTC/ETH 1d report wrote `/tmp/openclaw/stage0r_report_auth_smoke/w_audit_8b_fallback_20260618T224216Z.json` (sha256 `b9429419ca9ae5875cbf403f49f18949c8ee29a4520d4bb3a72ab982ee38e380`, row_count=549, eligible=false)
+- alpha_candidate A1/A2 limited BTC/ETH 1d packet wrote `/tmp/openclaw/stage0r_report_auth_smoke/alpha_candidate_fallback_20260618T224241Z.json` (sha256 `99f0ae1aacbf9af367e009a38d1e2b126e0fafa7a0a01c8075f08bebbdaf46f2`, verdict=observe_more, stage0_ready=false)
+- boundary: limited `/tmp` smoke only; row remains active for E4 review + formal PM deploy/runtime verification; no deploy/rebuild/restart, repo artifact write, DB/auth/risk/order/trading mutation
+
 2026-06-19 00:39 CEST
 - clarified `P2-WP05-CSP-UNSAFE-INLINE` as a first Live D-14 / Wave B passive-wait item, not a PM-local quick fix
 - read-only triage found the existing spec/archive/CSP comments expect a broad GUI/CSP sprint: externalize inline script/style across static HTML, replace `onclick`, handle Grafana frame-src/HTTPS, then enforce nonce/hash CSP without `unsafe-inline`
