@@ -538,3 +538,9 @@
 - TODO v195 closes `P3-H0GATE-FILE-SPLIT`: `h0_gate.rs` moved its test module to `h0_gate/tests.rs`, reducing the production file from 1243 to 630 lines.
 - Verification passed: H0 tests 33 passed, core lib 412 passed, Apple clippy gate, and engine `h0_latency_metrics` 5 passed.
 - Boundary: source/tests/docs only; no CI full suite, deploy/rebuild/restart, runtime DB/auth/risk/order/trading mutation, credential mutation, or real Bybit call.
+
+## 2026-06-18 Codex sub-agent hygiene dispatch rules
+
+- TODO v196 closes `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC`: Codex dispatch rules now require `docs/agents/sub-agent-hygiene-sop.md` for delegated Rust/Cargo/Linux-runtime/PG/deploy/runtime-verification work.
+- Dispatch records must name `hygiene_sop`, `verification_surface`, and Linux write policy. E1/E2/E4 Rust tasks must report focused Mac cargo/source verification or an explicit skip reason; sub-agents remain barred from Linux cargo and unsupervised restart.
+- Boundary: docs/governance only; no source code, CI, deploy/rebuild/restart, runtime DB/auth/risk/order/trading mutation, credential mutation, or real Bybit call.

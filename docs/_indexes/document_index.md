@@ -6,6 +6,12 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-18 Codex sub-agent hygiene dispatch rules
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--codex_subagent_hygiene_dispatch_rules.md` | PM governance checkpoint: closes `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC` by making the existing sub-agent hygiene SOP mandatory in Codex dispatch records for Rust/Cargo/Linux-runtime/PG/deploy work; no source/runtime mutation。 |
+
 ### 2026-06-18 H0Gate file split
 
 | 文件 | 内容 |

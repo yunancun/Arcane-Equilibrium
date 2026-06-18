@@ -1,6 +1,6 @@
 # Codex Sub-Agent Execution Rules
 
-Last updated: 2026-06-11
+Last updated: 2026-06-18
 
 ## Purpose
 
@@ -46,6 +46,29 @@ PM must not:
 - merge implementation and adversarial review into the same role when separation matters
 - skip PM triage and jump straight into anonymous parallel work
 - describe the workflow as complete unless the bound roles and chain are clear
+
+## Cargo and atomic runtime hygiene
+
+For any delegated task that touches Rust, Cargo, Linux `trade-core`, PG,
+deploy, service restart, or runtime verification paths, PM must attach the
+mandatory hygiene source:
+
+- `hygiene_sop`: `docs/agents/sub-agent-hygiene-sop.md`
+- `verification_surface`: Mac source-test/check, Linux read-only probe, or
+  PM/operator-owned atomic deploy path
+- `linux_write_policy`: no Linux cargo, no PG write, no sudo, no restart unless
+  the task is an explicit PM-supervised deploy action
+
+Delegated E1/E2/E4 Rust work is not complete after an edit/build-only signal.
+The role must report the focused Mac `cargo test` / `cargo check` /
+`cargo clippy` command that validates the atomic unit, or explicitly state why
+it was skipped and what PM must run before merge.
+
+Sub-agents must not run `cargo build`, `cargo test`, or `cargo check` on Linux
+`trade-core`. If Linux empirical evidence is required, limit it to read-only
+`psql SELECT`, `ls`, `cat`, `tail`, `fuser`, process inspection, or approved
+healthcheck probes. If a Linux build/restart is required, stop and return that
+need to PM; PM decides whether to use `helper_scripts/build_then_restart_atomic.sh`.
 
 ## Forced chain reminder
 

@@ -26,6 +26,21 @@ Result:
 - outcome, blocker, or next action
 ```
 
+2026-06-18 23:42 CEST
+Task:
+- Close `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC` by turning the existing sub-agent hygiene SOP into a Codex dispatch-time requirement.
+
+Chain:
+- PM -> PM
+
+Ownership:
+- PM: inspect existing SOP and Codex dispatch rules, update governance docs, preserve Linux cargo/atomic restart boundary, and archive the TODO row.
+
+Result:
+- `.codex/SUBAGENT_EXECUTION_RULES.md` and `.codex/AGENT_DISPATCH_PROTOCOL.md` now require `hygiene_sop`, `verification_surface`, and Linux write policy for delegated Rust/Cargo/Linux-runtime/PG/deploy work.
+- Sub-agents are explicitly barred from Linux cargo and unsupervised restart; Rust delegated work must report focused Mac cargo/source verification or an explicit skip reason.
+- No code, runtime, deploy, DB, auth, risk, order, or trading mutation.
+
 2026-05-16 22:19 CEST
 Task:
 - Normalize all CCAgent role profiles and memories after the memory slimming / TODO-first decision.

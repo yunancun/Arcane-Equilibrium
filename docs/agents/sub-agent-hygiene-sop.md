@@ -14,6 +14,10 @@
 > 事故来源和证据，不再限定本 SOP 的适用期。当前 sub-agent 角色绑定与派工链仍以
 > `.codex/AGENT_DISPATCH_PROTOCOL.md`、`.codex/SUBAGENT_EXECUTION_RULES.md`
 > 和 `CLAUDE.md` 为准。
+>
+> 2026-06-18 Codex mirror: `.codex/SUBAGENT_EXECUTION_RULES.md` now requires
+> PM dispatches touching Rust/Cargo/Linux runtime/PG/deploy paths to carry this
+> SOP plus an explicit verification surface.
 
 ---
 
