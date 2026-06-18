@@ -190,7 +190,8 @@ pub enum PendingOrderEvent {
     /// 為什麼需獨立事件而非沿用 DispatchFailed：DispatchFailed 走的是
     /// structural/transient 終態的「平倉失敗」語意（保留本地倉等 sweep）；
     /// 110017 相反 — 交易所確認倉已不在，本地必須跟隨交易所 flat。
-    /// 僅 110017 觸發；110001/110009 維持原 NoOp 不收斂行為（不回歸）。
+    /// 僅 110017 觸發；110001 維持原 NoOp 不收斂行為；110009 是
+    /// stop-order limit structural failure，非 NoOp。
     ExchangeZeroClose {
         order_link_id: String,
         symbol: String,

@@ -325,6 +325,10 @@ fn test_bybit_ret_code() {
         Some(BybitRetCode::OrderNotFound)
     );
     assert_eq!(
+        BybitRetCode::from_code(110009),
+        Some(BybitRetCode::StopOrderLimitExceeded)
+    );
+    assert_eq!(
         BybitRetCode::from_code(110012),
         Some(BybitRetCode::InsufficientBalance)
     );
@@ -344,6 +348,11 @@ fn test_bybit_ret_code() {
     // ReduceOnlyReject：不可重試、不是 noop（真實拒絕）
     assert!(!BybitRetCode::ReduceOnlyReject.is_retryable());
     assert!(!BybitRetCode::ReduceOnlyReject.is_noop());
+    assert!(!BybitRetCode::StopOrderLimitExceeded.is_retryable());
+    assert!(!BybitRetCode::StopOrderLimitExceeded.is_noop());
+    assert!(!BybitRetCode::StopOrderLimitExceeded.is_exchange_backoff());
+    assert!(!BybitRetCode::StopOrderLimitExceeded.is_instrument_filter());
+    assert!(!BybitRetCode::StopOrderLimitExceeded.is_balance_block());
     assert!(BybitRetCode::LeverageNotModified.is_noop());
     assert!(!BybitRetCode::InsufficientBalance.is_noop());
 }

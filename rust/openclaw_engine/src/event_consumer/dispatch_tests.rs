@@ -252,15 +252,18 @@ fn test_classify_order_not_found_is_noop() {
 }
 
 #[test]
-fn test_classify_position_not_found_is_noop() {
-    let e = biz(110009, "position idx not match");
-    assert_eq!(classify_dispatch_error(&e), DispatchOutcome::NoOp);
+fn test_classify_stop_order_limit_exceeded_is_structural() {
+    let e = biz(
+        110009,
+        "The number of stop orders exceeds the maximum allowable limit",
+    );
+    assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
 }
 
 #[test]
 fn test_classify_110017_reduce_only_reject_is_noop() {
     // P1-110017-POSITION-DRIFT-CLOSE-LOOP：110017「current position is zero」
-    // 由 Structural 改為 NoOp（同 110001/110009 平倉時倉位已不在族）。
+    // 由 Structural 改為 NoOp（同 110001 平倉時訂單已不在族；110009 非此族）。
     // 為什麼：舊 `_ => Structural` 使本地殘倉 + 交易所已平的漂移倉每 tick
     // 重發 reduce-only close → 110017 → 倉永不刪 → 自持迴圈。NoOp + 消費端
     // 收斂才能斷迴圈。
@@ -269,15 +272,19 @@ fn test_classify_110017_reduce_only_reject_is_noop() {
 }
 
 #[test]
-fn test_classify_110001_110009_unchanged_noop_no_regression() {
-    // 回歸守衛：主修只動 110017，110001/110009 必須維持原 NoOp 分類。
+fn test_classify_110001_noop_110009_structural_no_regression() {
+    // 回歸守衛：110001 維持 NoOp；110009 按官方 stop-order limit 語意
+    // fail-closed，不可再回到 close-equivalent success。
     assert_eq!(
         classify_dispatch_error(&biz(110001, "order not exists")),
         DispatchOutcome::NoOp
     );
     assert_eq!(
-        classify_dispatch_error(&biz(110009, "position idx not match")),
-        DispatchOutcome::NoOp
+        classify_dispatch_error(&biz(
+            110009,
+            "The number of stop orders exceeds the maximum allowable limit",
+        )),
+        DispatchOutcome::Structural
     );
 }
 
@@ -322,12 +329,22 @@ fn test_close_dup_is_idempotent_success_open_110072_false() {
 
 #[test]
 fn test_close_dup_is_idempotent_success_other_retcode_false() {
-    // close req + 其他業務碼（如 110001）→ false。僅 110072 觸發此冪等路徑；
-    // 110001/110009 由既有 NoOp 路徑處理，不走 Structural 冪等 upgrade。
+    // close req + 其他業務碼（如 110001 或 110009）→ false。僅 110072 觸發此冪等路徑；
+    // 110001 走既有 NoOp；110009 為 stop-order limit Structural，不走冪等 upgrade。
     let req = close_dispatch_req_for_zero(true, true, 0.0);
     assert!(
         !close_dup_is_idempotent_success(&req, &biz(110001, "order not exists")),
         "close + 110001 不是 110072 冪等成功"
+    );
+    assert!(
+        !close_dup_is_idempotent_success(
+            &req,
+            &biz(
+                110009,
+                "The number of stop orders exceeds the maximum allowable limit"
+            )
+        ),
+        "close + 110009 是 stop-order limit failure，不是 110072 冪等成功"
     );
     assert!(
         !close_dup_is_idempotent_success(&req, &biz(110012, "insufficient available balance")),
@@ -918,10 +935,9 @@ fn test_send_exchange_zero_close_suppressed_for_110001() {
     let (tx, mut rx) = mpsc::unbounded_channel::<PendingOrderEvent>();
     let req = close_dispatch_req_for_zero(true, true, 0.0);
     send_exchange_zero_close(&tx, &req, &biz(110001, "order not exists"));
-    send_exchange_zero_close(&tx, &req, &biz(110009, "position idx not match"));
     assert!(
         rx.try_recv().is_err(),
-        "110001/110009 must NOT emit ExchangeZeroClose (no regression on existing NoOp)"
+        "110001 must NOT emit ExchangeZeroClose (only 110017 converges)"
     );
 }
 
