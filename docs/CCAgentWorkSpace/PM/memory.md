@@ -428,3 +428,8 @@
 
 - TODO v175 archives `P0-EDGE-1-CAND-FUNDING-OI-BACKFILL` from §5. The completed state remains in TODO §2; active queue no longer needs a row whose only content was caveat/usage guidance.
 - Linux read-only recheck confirmed `research.alpha_funding_rates_history` rows=46539 and `research.alpha_open_interest_history` rows=348153, single run_id `18b3c2f8-6125-42a8-a42c-cfcc8aec9406`, 0 NULL values. Caveat preserved: run-versioned schema is not idempotent on re-apply; future cron/refresh requires a new active row for clear-old-run/wrapper/rate-limit design. Boundary: docs hygiene + read-only SQL only; no CI/deploy/rebuild/restart/runtime/DB/auth/risk/order/trading mutation.
+
+## 2026-06-18 TODO 110017 convergence observability closure
+
+- TODO v176 archives `P3-110017-CONVERGE-AUDIT-OBSERVABILITY` from §5 after Linux read-only DB evidence closed both deployment residual checks: 4 `trading.order_state_changes.reason LIKE 'exchange_zero_close_converge:%'` rows exist, and each had 0 follow-up orders for the same symbol+strategy within 63s and 5m after convergence.
+- The row closed only D1 convergence observability/stop-timing. `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` and `P3-110017-BB-DOC-FOLLOWUPS` remain active separately. Boundary: read-only DB/source verification + docs hygiene only; no CI/deploy/rebuild/restart/runtime/DB/auth/risk/order/trading mutation.

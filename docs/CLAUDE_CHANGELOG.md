@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v175 funding/OI backfill completed-row archive；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v176 110017 convergence observability closure；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v176 增量（2026-06-18 110017 convergence observability closure）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 `P3-110017-CONVERGE-AUDIT-OBSERVABILITY`。Linux production DB read-only 驗證：`trading.order_state_changes.reason LIKE 'exchange_zero_close_converge:%'` 有 4 rows，span=`2026-06-03 17:36:20.263+02`→`2026-06-06 07:27:25.119+02`，order ids `oc_risk_dm_1780500980096_18` / `oc_risk_dm_1780617634096_7` / `oc_risk_dm_1780678263986_74` / `oc_ipc_close_dm_1780723644651_18`，均為 `Working→Cancelled` 且帶 `110017` 收斂 reason；前三筆 `removed_position=true`，最後一筆 `removed_position=false`（已 flat/no-op convergence）。同批 `trading.orders` 顯示皆為 demo qty=0 close form（ARBUSDT/ETHUSDT/OPUSDT `risk_close:phys_lock_gate4_giveback`，AVAXUSDT `risk_close:ipc_close_symbol`）。停止計時驗證：每筆收斂後同 symbol+strategy follow-up orders 在 63 秒與 5 分鐘內均為 0；下一筆同 symbol+strategy order 最早也在數日後（ARBUSDT 06-14、ETHUSDT 06-09、OPUSDT 06-08；AVAXUSDT 無後續）。同時保留 source/read-only nuance：D1 immediate close 收斂 audit 寫 `trading.order_state_changes.reason='exchange_zero_close_converge:110017; ...'`；D2 reconciler ghost dispatch source audit 是 `observability.engine_events.event_type='reconcile_ghost_converge'`，但 production 目前只見舊 `reconcile_ghost` rows（此不屬本 row 的 D1 audit+stop-timing acceptance）。仍保留 `P3-110017-D2-AUDIT-REMOVED-SEMANTICS`（E2/E4 with reconciler batch）與 `P3-110017-BB-DOC-FOLLOWUPS`（110017 dictionary / 110009 doc ambiguity）。邊界：read-only DB/source verification + TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 production source/runtime/DB/auth/risk/order/trading mutation。
 
 **v175 增量（2026-06-18 funding/OI backfill completed-row archive）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 `P0-EDGE-1-CAND-FUNDING-OI-BACKFILL`。該 row 是已完成 P0 基礎資料工作，完成狀態仍由 `TODO.md` §2 保留：`5b80c2f7` code + run `18b3c2f8` apply。Linux 真 DB read-only recheck：`research.alpha_funding_rates_history` rows=46539、runs=1、run_id=`18b3c2f8-6125-42a8-a42c-cfcc8aec9406`、span=`2024-06-03 02:00:00+02`→`2026-06-02 22:00:00+02`、NULL funding=0；`research.alpha_open_interest_history` rows=348153、runs=1、same run_id、span=`2024-06-03 01:00:00+02`→`2026-06-03 01:00:00+02`、NULL OI=0。保留 caveat：schema run-versioned（run_id in PK），re-apply 會 append 新 run，查詢須固定 run_id 或取最新 run；未來若要 cron/refresh，另開新 active row 設計清舊 run / wrapper / rate-limit 並發，不復用已完成 row。邊界：read-only DB verification + TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 production source/runtime/DB/auth/risk/order/trading mutation。
 
