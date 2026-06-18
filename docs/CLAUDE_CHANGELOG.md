@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v187 AC19 final-verdict active-row archive；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v188 P2/L2 activation owed operator-row archive；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v188 增量（2026-06-18 P2/L2 activation owed operator-row archive）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §6 移出 `P2 batch activation owed #2-#6` operator row。該 row 的 owed 本體已全部完成並已有報告：#3 Bybit 公告哨兵 cron、#4 Polymarket daily artifact cron、#2 V138/V139 runtime activation、B1/B2 seed、manual V140、L2 daily cron、`bge-m3` embedding backfill、B3 source wiring。這不是關閉整個 L2：剩餘 first non-empty material day / E2E true distillation model-call evidence、`OPENCLAW_L2_MEMORY_RECALL=shadow` runtime evidence、P2p sentinel credential/probe/install、P5 feedback/quality/GUI gate 仍由 `TODO.md` §5 `P1-L2-ADVISORY-MESH-TAILS`、§8 v92 V### 對帳與 `L2_TODO.md` 承接。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 
 **v187 增量（2026-06-18 AC19 final-verdict active-row archive）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 `P2-AC19-ALT-BUCKET-FINAL-VERDICT`。該 row 的驗收本體已完成：QA final verdict 鎖定 alt bucket FAIL（42 attempts / fill 23.8% / Wilson lower 13.5% / 28 timeout→taker）、large_cap = INCONCLUSIVE-LOW-N；BB demo-vs-mainnet audit 已裁定 demo 行情同 mainnet、差異在無 queue 模擬，β 前提需改寫、α-輕縮 timeout 轉移風險最低、C 可把 23.8% 作 mainnet conservative lower bound；expired AC19 cron 已於 v165 清除。剩餘不是 active engineering，而是條件觸發的 PA/QC/operator policy choice，已由 §7 `P2-AC19-ALT-BUCKET-FINAL-VERDICT-FOLLOWUP` 承接：若選 α/β/C 任一路徑，再另開 PA/QC/FA/BB → E1/E2/E4/QA row。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 

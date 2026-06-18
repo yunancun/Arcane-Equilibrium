@@ -6,6 +6,12 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-18 TODO lifecycle hygiene
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--todo_p2_l2_activation_owed_operator_row_archive.md` | PM TODO hygiene report: archives completed §6 `P2 batch activation owed #2-#6` operator row after V138/V139, seed, V140, cron, embedding, and B3 source wiring were already closed; remaining L2 E2E/B3-shadow/P2p/P5 gates stay in root `TODO.md` / `L2_TODO.md`。 |
+
 ### 2026-06-13 L2 embedding backfill activation
 
 | 文件 | 内容 |

@@ -492,3 +492,8 @@
 
 - TODO v187 archives `P2-AC19-ALT-BUCKET-FINAL-VERDICT` from §5. The evidence/verdict work was already done: QA final verdict says alt FAIL (42 attempts, 23.8% fill, Wilson lower 13.5%, 28 timeout->taker), large_cap INCONCLUSIVE-LOW-N, and BB audit says demo public data mirrors mainnet while fills are pessimistic because demo orders have no queue position.
 - Future α/β/C choice is now `P2-AC19-ALT-BUCKET-FINAL-VERDICT-FOLLOWUP` in §7: reopen only if PA/QC/operator chooses alt taker-direct, shortened timeout, or explicit keep-current-policy acceptance. Boundary: docs hygiene only; no code/runtime/DB/auth/risk/order/trading mutation.
+
+## 2026-06-18 TODO P2/L2 activation owed operator-row archive
+
+- TODO v188 removes the completed §6 operator row `P2 batch activation owed #2-#6`: V138/V139, B1/B2 seed, manual V140, L2 cron, bge-m3 embedding backfill, and B3 source wiring all have closure reports/evidence.
+- This is not an L2 all-clear. Remaining L2 work stays visible in `P1-L2-ADVISORY-MESH-TAILS`, §8, and `L2_TODO.md`: first non-empty material day/E2E model-call evidence, B3 shadow runtime evidence, P2p sentinel operator gates, and P5 feedback/quality/GUI. Boundary: docs hygiene only; no source/runtime mutation.
