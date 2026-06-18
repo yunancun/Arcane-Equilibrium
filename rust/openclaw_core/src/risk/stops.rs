@@ -44,6 +44,7 @@ pub fn anti_cluster_offset(symbol: &str, ts_ms: u64) -> f64 {
 /// - `hard_stop_pct`:   Hard stop ceiling from config / 配置的硬止損上限
 /// - `cap_ratio`:       Fraction of hard_stop used as dynamic cap / 動態止損上限占硬止損的比例
 /// - `atr_stop_mult`:   ATR multiplier for stop distance (from DynamicStop config) / ATR 止損乘數（來自 DynamicStop 設定）
+#[allow(clippy::too_many_arguments)]
 pub fn compute_dynamic_stop_pct(
     base_stop_pct: f64,
     atr_pct: Option<f64>,

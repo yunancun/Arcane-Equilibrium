@@ -10,6 +10,7 @@ use tracing::{debug, info, warn};
 use super::ingest::BtcOrderbookSlot;
 use super::producer::BtcLeadLagProducer;
 use super::snapshot::{snapshot_to_trait_panel, BtcLeadLagPanelSnapshot};
+#[cfg(test)]
 use super::LEAD_WINDOW_SECS_MAIN;
 use crate::database::batch_insert::{exec_single_insert, SingleInsertOutcome};
 use crate::database::pool::DbPool;

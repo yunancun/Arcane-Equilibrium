@@ -171,7 +171,7 @@ pub(super) fn try_send_with_background_retry(
 ) -> bool {
     // Fast path：先 sync try_send 一次。99%+ 走這條，零 spawn 成本。
     match tx.try_send(msg) {
-        Ok(()) => return true,
+        Ok(()) => true,
         Err(mpsc::error::TrySendError::Full(retry_msg)) => {
             // Channel full → spawn background retry task。
             // 計入 drop counter（與 hot-path 對齊）；retry 成功時補回對應 counter。
@@ -189,10 +189,7 @@ pub(super) fn try_send_with_background_retry(
                     tokio::time::sleep(Duration::from_millis(50)).await;
                     match tx_clone.try_send(retry_msg.clone()) {
                         Ok(()) => {
-                            SPINE_CHANNEL_RETRY_SUCCESS_TOTAL.fetch_add(
-                                1,
-                                Ordering::Relaxed,
-                            );
+                            SPINE_CHANNEL_RETRY_SUCCESS_TOTAL.fetch_add(1, Ordering::Relaxed);
                             warn!(
                                 msg_type = msg_type,
                                 attempt = attempt,

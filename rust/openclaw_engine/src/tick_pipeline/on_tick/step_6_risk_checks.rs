@@ -202,7 +202,7 @@ impl TickPipeline {
             cost_edge_max_ratio,
             min_profit_to_close_pct,
             exit_features_fn,
-            &risk_config,
+            risk_config,
         );
 
         let is_exchange_mode = self.pipeline_kind.is_exchange();

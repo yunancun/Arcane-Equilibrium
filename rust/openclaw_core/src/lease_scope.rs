@@ -59,6 +59,7 @@ pub enum LeaseScope {
     ///   - TTL 60s（per earn_governance §2.3 line 102「TTL = 60s 與 trading lease 一致」）
     ///   - requires_operator_authority = true（ADR-0020 Layer 2 manual+supervisor only
     ///     + earn_governance §2.1 hard fail-closed operator authority）
+    ///
     /// 不變量：新加此 variant 後所有 `match` 必須 exhaustive；既有 SQL CHECK
     /// constraint（lease_transitions.scope / canary_stage_log.transition_kind）若限
     /// 4 scope 字串 → 需 V### ALTER 擴此值（本 IMPL 不寫 V###，僅 grep + 報 PM）。

@@ -177,6 +177,7 @@ pub struct PatternDraft {
 impl PatternDraft {
     /// 安全建構：強制 status_candidate ∈ 白名單。
     /// 為什麼 fail-loud：避免 Python 端拿到 status="live"/"promoted" 之類非法值。
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         strategy_name: String,
         symbol: String,

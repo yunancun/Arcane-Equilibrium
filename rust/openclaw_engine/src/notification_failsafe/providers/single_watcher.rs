@@ -109,6 +109,7 @@ pub fn failsafe_feed_senders() -> Option<FailsafeFeedSenders> {
 ///   解除與 C1/C2 具體型別耦合；C4 wire 時用 `Box::new(ThreeWayDispatcher::...)` 等
 ///   填入。`Send + Sync` bound 已在 trait 定義（`mod.rs` line 204 + 213 + 220 + 226 + 234），
 ///   trait object 自動繼承。
+#[allow(dead_code)]
 pub struct SharedFailsafeWatcher {
     dispatcher: Box<dyn NotificationDispatcher>,
     positions: Box<dyn PositionSnapshotProvider>,

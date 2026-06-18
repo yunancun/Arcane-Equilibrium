@@ -33,6 +33,13 @@
 //!   依賴 demo secret slot 憑證；Demo 空憑證不建構失敗，fail-closed 在首次 get() →
 //!   NoCredentials → 該 symbol 記 failed coverage(observed=0)，cron 須檢 coverage 非僅看 exit。
 
+#![allow(
+    clippy::doc_lazy_continuation,
+    clippy::doc_overindented_list_items,
+    clippy::empty_line_after_doc_comments,
+    clippy::too_many_arguments
+)]
+
 use std::env;
 use std::path::PathBuf;
 

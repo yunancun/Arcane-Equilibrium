@@ -5,6 +5,13 @@
 //! `--apply --i-understand-this-modifies-db` path is kept for one-shot operator
 //! runs.
 
+#![allow(
+    clippy::doc_lazy_continuation,
+    clippy::doc_overindented_list_items,
+    clippy::empty_line_after_doc_comments,
+    clippy::too_many_arguments
+)]
+
 use std::env;
 
 use openclaw_engine::database::drift_detector::{

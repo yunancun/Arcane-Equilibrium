@@ -11,6 +11,7 @@
 //!     FromStr 對應 string literal 走 `VenueParseError::DeniedByADR0040` 明示拒絕路徑，不可繞 enum check。
 //!   - Sprint 1A-δ 介面預留階段：禁實作 method body 含 trading / routing / venue dispatch；違反 = scope creep。
 //!   - 未來開放新 venue（如 OKX / Coinbase）必先開新 ADR amend ADR-0040 + 新 enum variant + per-venue 5-gate schema。
+//!
 //! 對應 spec：srv/docs/execution_plan/2026-05-21--m13_asset_class_venue_design_spec.md §2 §3 §6。
 
 use serde::{Deserialize, Serialize};

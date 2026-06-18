@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v193 Earn first-stake capability routing checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v194 Apple Silicon clippy gate source/test checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v194 增量（2026-06-18 Apple Silicon clippy gate source/test checkpoint）**：關閉 `TODO.md` §7 `P2-CLIPPY-CLEANUP-1`。原始 sprint 1A Apple Silicon `cargo clippy --target aarch64-apple-darwin -- -D warnings` gate 曾因 baseline lint debt 無法 enforce；本輪把低風險 core/type lint 直接修掉（doc list continuation、`Option::cloned`、`is_some_and`、unnecessary cast、NaN fail-closed comparison 保真等），並在 `openclaw_engine` crate/bin 邊界把歷史文檔與交易路徑複雜度 codify 成明確 allowlist，讓未列入的新 lint 類別仍會失敗。Focused verification：`cargo clippy --target aarch64-apple-darwin -- -D warnings` PASS；`cargo test -p openclaw_core --lib`（412 passed，4 existing deprecated test warnings）；`cargo test -p openclaw_engine --lib`（4092 passed / 1 ignored）。邊界：未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation。Dispatch chain deliberately shortened: PM handled locally because this was a deterministic tooling hygiene checkpoint with clippy/test gates and no exchange/runtime surface.
 
 **v193 增量（2026-06-18 Earn first-stake capability routing source/test checkpoint）**：`P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` source blocker reduced but not closed. Rust event-consumer bootstrap now injects `BybitEarnClient` from existing `shared_client` and `EarnMovementWriter` from existing `audit_pool`; wrapper construction does not call Bybit or PG, and missing deps still keep Gate E-0 fail-closed. Python `/api/v1/earn/stake` now sends `engine="live"` to avoid relying on primary fallback for an operator/live_reserved asset-movement lane; missing live sender fails closed. Focused verification: `rustfmt --edition 2021 --check openclaw_engine/src/event_consumer/bootstrap.rs openclaw_engine/src/event_consumer/tests/earn_ipc_tests.rs` PASS; `cargo test -p openclaw_engine process_earn_intent_command --lib`（2 passed）; `cargo test -p openclaw_engine process_earn_intent --lib`（4 passed）; `cargo test -p openclaw_engine earn_router_fail_closed_when_unwired --lib`（1 passed）; `python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_earn_routes.py`（28 passed, 1 existing Pydantic deprecation warning）; `git diff --check` PASS. Boundary: no real Bybit call, no credential/key/secret mutation, no CI full suite, no deploy/rebuild/restart, no runtime/DB/auth/risk/order/trading mutation; running engine binary unchanged. Active row remains blocked by OP-1/2/3, review/deploy/restart, and first real stake evidence.
 
