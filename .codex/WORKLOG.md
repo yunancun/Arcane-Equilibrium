@@ -11,6 +11,13 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 00:27 CEST
+- reduced `P1-A1A2-STAGE0R-RUNNER-IMPL` auth-drift source blocker
+- old branch `fix/a2-runner-pg-auth` (`10aeaf54`) was not in main and targeted the pre-refactor 8c report file; main now routes 8b/8c/alpha report DSN building through `helper_scripts.lib.pg_connect`
+- added shared fallback: when `OPENCLAW_DATABASE_URL` and `POSTGRES_PASSWORD` are unset, `resolve_report_dsn()` reads only `POSTGRES_PASSWORD` from the canonical secrets env file and does not source/override other env
+- verification: `python3 -m pytest helper_scripts/lib/tests/test_stats_common.py -q` 33 passed; report wrapper compileall PASS
+- boundary: row remains active for E4 + PM deploy/runtime verification and true report-run evidence; no true PG/report run, deploy/rebuild/restart, runtime/DB/auth/risk/order/trading mutation
+
 2026-06-19 00:16 CEST
 - refreshed Gate-B watcher/preflight evidence without starting any probe
 - Linux latest gate_b_watch artifact generated at 2026-06-18T22:12:02Z remained `WATCH_ONLY`; gate-watch-only preflight `gate_b_preflight_refresh_20260618T2216Z` returned `WAIT_FOR_ACTIONABLE_WATCH`, 0 probe hints, and full-chain command `UNAVAILABLE`
