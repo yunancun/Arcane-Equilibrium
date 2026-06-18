@@ -14,6 +14,7 @@ MODULE_NOTE:
 from __future__ import annotations
 
 import math
+import os
 
 import pytest
 
@@ -260,6 +261,7 @@ def test_dsn_prefers_database_url(monkeypatch):
     # OPENCLAW_DATABASE_URL 存在時最高優先，直接用之
     monkeypatch.setenv("OPENCLAW_DATABASE_URL", "postgresql://x/y")
     monkeypatch.setenv("POSTGRES_USER", "ignored")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "ignored")
     assert PG.resolve_report_dsn() == "postgresql://x/y"
 
 
@@ -281,4 +283,50 @@ def test_dsn_host_port_defaults(monkeypatch):
     monkeypatch.setenv("POSTGRES_USER", "u")
     monkeypatch.setenv("POSTGRES_PASSWORD", "p")
     monkeypatch.setenv("POSTGRES_DB", "d")
+    assert PG.resolve_report_dsn() == "postgresql://redacted@127.0.0.1:5432/d"
+
+
+def test_dsn_loads_missing_password_from_secrets_env(monkeypatch, tmp_path):
+    # ssh 直 invoke 沒 source secrets 時，從 canonical env file 只補 POSTGRES_PASSWORD。
+    secrets_root = tmp_path / "secrets"
+    env_dir = secrets_root / "environment_files"
+    env_dir.mkdir(parents=True)
+    (env_dir / "basic_system_services.env").write_text(
+        "\n".join(
+            [
+                "POSTGRES_PASSWORD='secret=pw'",
+                "POSTGRES_HOST=should_not_be_loaded",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    for k in (
+        "OPENCLAW_DATABASE_URL",
+        "POSTGRES_PASSWORD",
+        "POSTGRES_HOST",
+        "POSTGRES_PORT",
+    ):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("OPENCLAW_SECRETS_ROOT", str(secrets_root))
+    monkeypatch.setenv("POSTGRES_USER", "u")
+    monkeypatch.setenv("POSTGRES_DB", "d")
+
+    assert PG.resolve_report_dsn() == "postgresql://redacted@127.0.0.1:5432/d"
+    assert "POSTGRES_HOST" not in os.environ
+
+
+def test_dsn_does_not_override_existing_password(monkeypatch, tmp_path):
+    secrets_root = tmp_path / "secrets"
+    env_dir = secrets_root / "environment_files"
+    env_dir.mkdir(parents=True)
+    (env_dir / "basic_system_services.env").write_text(
+        "POSTGRES_PASSWORD=file_pw\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("OPENCLAW_DATABASE_URL", raising=False)
+    monkeypatch.setenv("OPENCLAW_SECRETS_ROOT", str(secrets_root))
+    monkeypatch.setenv("POSTGRES_USER", "u")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "env_pw")
+    monkeypatch.setenv("POSTGRES_DB", "d")
+
     assert PG.resolve_report_dsn() == "postgresql://redacted@127.0.0.1:5432/d"

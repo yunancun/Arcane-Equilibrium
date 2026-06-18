@@ -1,9 +1,10 @@
 """共享 PG 連線 helper — offline report scripts 專用。
 
 MODULE_NOTE:
-  模塊用途：整併 W-AUDIT-8b / 8c / alpha_candidate report wrapper 之間 byte-identical
-    的 PG 連線 helper（E5 finding #4 shared-lib infra）。三者原各有一份 ``_get_conn``，
-    DSN 解析完全相同，只差 ``application_name`` 與預設 ``statement_timeout``。
+  模塊用途：整併 W-AUDIT-8b / 8c / alpha_candidate report wrapper 之間原本
+    byte-identical 的 PG 連線 helper（E5 finding #4 shared-lib infra）。三者原各有
+    一份 ``_get_conn``，DSN 解析完全相同，只差 ``application_name`` 與預設
+    ``statement_timeout``。
   主要函數：``connect_report_pg(application_name, *, statement_timeout_ms_default,
     statement_timeout_env)`` — 解析 DSN → psycopg2.connect → 設 statement_timeout。
   依賴：延遲匯入 psycopg2（連線時才 import，維持 metrics 層 import-time 零 DB 依賴）。
@@ -17,6 +18,10 @@ MODULE_NOTE:
       ``postgresql://redacted@{HOST:-127.0.0.1}:{PORT:-5432}/{DB}``。
     為什麼禁硬編碼 hostname：feedback_cross_platform.md 跨平台原則（host 預設
     127.0.0.1，可被 env override）。
+    2026-06-19 加一層保守 auth-drift fallback：若無 ``OPENCLAW_DATABASE_URL`` 且
+    ``POSTGRES_PASSWORD`` 未設，才從
+    ``${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}/environment_files/basic_system_services.env``
+    讀 ``POSTGRES_PASSWORD`` 一行補回 env；不 source 全檔、不覆蓋已設 env。
 
   ── 為什麼只整併「report wrapper 族」而非全 helper_scripts 連線函數 ──
     repo 內另有 ~20 個連線 helper（cron / db / research / calibration），其 DSN
@@ -31,6 +36,8 @@ MODULE_NOTE:
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 from typing import Any
 
 
@@ -39,11 +46,51 @@ from typing import Any
 DEFAULT_STATEMENT_TIMEOUT_ENV = "OPENCLAW_STAGE0R_STATEMENT_TIMEOUT_MS"
 
 
+def _load_secrets_pg_password() -> None:
+    """缺 PG 密碼 env 時，從 canonical secrets env file 補 POSTGRES_PASSWORD。
+
+    這只服務 ssh 直接 invoke report wrapper 的 auth drift：cron wrapper 會自行 export
+    DSN/密碼；互動 shell 也可能已設 env。缺檔或缺 key 不報成功也不 raise，保留下游
+    psycopg2 fail-loud 行為。
+    """
+    if os.environ.get("OPENCLAW_DATABASE_URL") or os.environ.get("POSTGRES_PASSWORD"):
+        return
+
+    secrets_root = os.environ.get("OPENCLAW_SECRETS_ROOT")
+    if secrets_root:
+        env_file = Path(secrets_root) / "environment_files" / "basic_system_services.env"
+    else:
+        env_file = (
+            Path.home()
+            / "BybitOpenClaw"
+            / "secrets"
+            / "environment_files"
+            / "basic_system_services.env"
+        )
+    if not env_file.is_file():
+        return
+
+    try:
+        for raw in env_file.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line.startswith("POSTGRES_PASSWORD="):
+                continue
+            val = line.split("=", 1)[1].strip()
+            if len(val) >= 2 and val[0] in ("'", '"') and val[-1] == val[0]:
+                val = val[1:-1]
+            if val:
+                os.environ["POSTGRES_PASSWORD"] = val
+            return
+    except OSError as exc:
+        sys.stderr.write(f"WARN: read secrets env failed {env_file}: {exc}\n")
+
+
 def resolve_report_dsn() -> str:
-    """解析 report wrapper 族的 PG DSN（與整併前 8b/8c/alpha byte-identical）。
+    """解析 report wrapper 族的 PG DSN。
 
     為什麼獨立成函數：方便測試 DSN 拼接邏輯，且未來其他 report 可只取 DSN 不連線。
     """
+    _load_secrets_pg_password()
     return (
         os.environ.get("OPENCLAW_DATABASE_URL")
         or f"postgresql://{os.environ.get('POSTGRES_USER','')}"

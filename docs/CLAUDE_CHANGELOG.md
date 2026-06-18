@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v201 Gate-B WATCH_ONLY refresh checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v202 A1/A2 auth-drift source fix checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v202 增量（2026-06-19 A1/A2 auth-drift source fix checkpoint）**：`P1-A1A2-STAGE0R-RUNNER-IMPL` 保持 active，但「auth fix 只在舊分支」這個 source blocker 已收斂到 main。Read-only 檢查確認 `fix/a2-runner-pg-auth` tip `10aeaf54` 不是 main ancestor，且舊 patch 修在 `liquidation_cluster_stage0r_report.py`；main 後來 `4e111d52` 已把 8b/8c/alpha report wrappers 收口到 `helper_scripts.lib.pg_connect`。本輪將缺 `OPENCLAW_DATABASE_URL` 且缺 `POSTGRES_PASSWORD` 時從 `${OPENCLAW_SECRETS_ROOT:-$HOME/BybitOpenClaw/secrets}/environment_files/basic_system_services.env` 只讀 `POSTGRES_PASSWORD` 的 fallback 移植到 `resolve_report_dsn()`；不 source 全檔，不覆蓋已設 env，缺檔/缺 key 保留下游 psycopg2 fail-loud。Focused verification：`python3 -m pytest helper_scripts/lib/tests/test_stats_common.py -q`（33 passed）與 report wrapper `compileall` PASS。邊界：未跑真 PG/report runner，未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation；E4 + PM deploy/runtime 驗證仍未關，runner 輸出仍不可直接信任。
 
 **v201 增量（2026-06-19 Gate-B WATCH_ONLY refresh checkpoint）**：刷新 `TODO.md` §6 Gate-B watcher / preflight 現場證據。Linux `/tmp/openclaw/gate_b_watch/gate_b_watch_latest.json` 於 `2026-06-18T22:12:02Z` 仍為 `WATCH_ONLY`，candidate_counts total=21 / alertable=0 / start_now=0 / schedule=0 / watch_only=1，source_health ok；PM 跑 gate-watch-only preflight `gate_b_preflight_refresh_20260618T2216Z`，summary 寫 `/tmp/openclaw/aeg_s3_gate_b_preflight/gate_b_preflight_refresh_20260618T2216Z/gate_b_preflight_summary.json`，`operator_action=WAIT_FOR_ACTIONABLE_WATCH`、0 probe hints、recommended full-chain command `UNAVAILABLE`。不關閉 `AEG-S3-CANDIDATE-DIRECT-ROWS` 或 S2 Gate-B 24h 真捕捉 gate。邊界：artifact/read-only + `/tmp` summary only；未跑 CI full suite，未 deploy/rebuild/restart，無 production WS/scanner/strategy/DB/auth/risk/order/trading mutation，未啟動 isolated probe。
 
