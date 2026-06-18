@@ -31,9 +31,9 @@ pub use budget_config::BudgetConfig;
 pub use io::{load_toml_or_default, save_toml};
 pub use learning_config::LearningConfig;
 pub use risk_config::{
-    per_strategy_new_entry_rejection, CostEdgeConfig, FastTrackConfig, HurstConfig, RiskConfig,
-    SlippageConfig, SlippageTier, StrategyOverride, DEFAULT_PER_TRADE_RISK_PCT,
-    MAX_PER_TRADE_RISK_PCT, MIN_PER_TRADE_RISK_PCT,
+    per_strategy_concurrency_rejection, per_strategy_new_entry_rejection, CostEdgeConfig,
+    FastTrackConfig, HurstConfig, RiskConfig, SlippageConfig, SlippageTier, StrategyOverride,
+    DEFAULT_PER_TRADE_RISK_PCT, MAX_PER_TRADE_RISK_PCT, MIN_PER_TRADE_RISK_PCT,
 };
 // ScannerConfig lives in scanner::config; re-exported here for uniform access via config::ScannerConfig
 // ScannerConfig 定義在 scanner::config，此處重新導出以統一通過 config::ScannerConfig 訪問
