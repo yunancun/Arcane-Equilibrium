@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v171 active queue archive pass #3；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v172 OPS-2 cutover stale row reconcile；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v172 增量（2026-06-18 OPS-2 cutover stale row reconcile）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 stale `P1-OPS-2-PHASE-2-CUTOVER` row。判定證據：`3018c7a3`（OPS-2 Phase-2 cutover merge）是 runtime source HEAD `83b7632d` 與當前 docs HEAD 的 ancestor；Linux `trade-core` checkout 亦含該 commit；`memory/project_2026_06_10_a_group_triage.md` 記錄 2026-06-11 04:00 operator 指令下 PM 代跑 `restart_all --rebuild`，OPS-2 cutover 新 binary 生效、`ops2_secret_split_phase1_fallback` 0、V137 applied。剩餘 C-B 手動 `/auth/renew` 留證與 2026-09-08 rotation timing 沒有關閉，仍由 `TODO.md` §6 OPS-2 leftover operator row 承接。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 production source/runtime/DB/auth/risk/order/trading mutation。
 
 **v171 增量（2026-06-18 active queue archive pass #3）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 2 個已完成且下一步已由其他 active row 承接的 rows：`AUDIT-2026-06-14-MIGRATION-TREE-1`（V005/V023 forward-compat 已實作/部署/repair apply，`drift_count=0`，virgin/CI replay 現可過；未來 migration 紀律仍由 V###/PG dry-run 規則承接）與 `AEG-S2-EVIDENCE-AUTOMATION`（S2 runner 基建完成；候選 direct rows / Gate-B fresh run 下一步由 `AEG-S3-CANDIDATE-DIRECT-ROWS` 與 §6 Gate-B row 承接）。保留仍含政策、deploy、operator、future-date、event-trigger 或 source-vs-runtime gate 的 DONE-ish rows。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 source/runtime/DB/auth/risk/order/trading mutation。
 

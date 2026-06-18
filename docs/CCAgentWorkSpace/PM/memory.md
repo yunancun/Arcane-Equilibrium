@@ -408,3 +408,8 @@
 
 - TODO v171 archives `AUDIT-2026-06-14-MIGRATION-TREE-1` and `AEG-S2-EVIDENCE-AUTOMATION` from §5 because both are completed and their remaining relevance is carried by V###/PG discipline plus `AEG-S3-CANDIDATE-DIRECT-ROWS`.
 - Kept DONE-ish rows that still carry policy, deploy, operator, future-date, event-trigger, or source-vs-runtime gates. Boundary: docs hygiene only; no runtime mutation.
+
+## 2026-06-18 TODO OPS-2 cutover stale row reconcile
+
+- TODO v172 removes stale §5 row `P1-OPS-2-PHASE-2-CUTOVER`: cutover commit `3018c7a3` is ancestor of runtime source HEAD `83b7632d` and current docs HEAD, Linux checkout contains it, and 2026-06-11 runtime note records operator-commanded `restart_all --rebuild` with OPS-2 cutover new binary active, 0 fallback string, and V137 applied.
+- Remaining OPS-2 operator obligations are not closed: C-B manual `/auth/renew` evidence and 2026-09-08 rotation timing remain in TODO §6. Boundary: docs hygiene only; no CI/deploy/rebuild/restart/runtime mutation.
