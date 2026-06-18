@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 00:53 CEST
+- corrected TODO v207 source-sync metadata after the v206 8c report-auth-smoke checkpoint
+- Mac `main`, `origin/main`, and Linux `trade-core` were verified at `1e1d0393`; TODO masthead/§0 now name that source state instead of prior `a90e5938`
+- boundary: docs/TODO hygiene only; no code, CI full suite, deploy/rebuild/restart, runtime/DB/auth/risk/order/trading mutation
+
 2026-06-19 00:46 CEST
 - exercised the same Stage0R PG auth fallback path through the 8c wrapper with `OPENCLAW_DATABASE_URL` and `POSTGRES_PASSWORD` deliberately unset
 - 8c limited BTC/ETH 1d no-sweep report wrote `/tmp/openclaw/stage0r_report_auth_smoke/w_audit_8c/2026-06-18--w_audit_8c_stage0r_red.json` (sha256 `590f6154b642d62d5850154f9bebd78630bd5496899f61d4ea7a338cb7a90bab`, verdict=RED, review_ready=true, panel rows=0)

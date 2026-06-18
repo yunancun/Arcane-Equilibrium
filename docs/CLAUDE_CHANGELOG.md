@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v206 8c report-auth-smoke checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v207 source-sync correction checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v207 增量（2026-06-19 source-sync correction checkpoint）**：修正 `TODO.md` masthead / §0 source-sync 事實：v206 8c report-auth-smoke commit `1e1d0393` 已推送 `origin/main` 並 fast-forward 到 Linux `trade-core`，不應再把 prior `a90e5938` 寫作來源實作 HEAD。Focused verification：Mac `HEAD=origin/main=1e1d0393`，Linux `/home/ncyu/BybitOpenClaw/srv` `HEAD=origin/main=1e1d0393`；`git diff --check` PASS。邊界：docs/TODO hygiene only；未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation；不關閉任何 runtime/review/operator gate。
 
 **v206 增量（2026-06-19 8c report-auth-smoke checkpoint）**：補齊 v205 未直接跑到的 8c wrapper family。Linux `trade-core` 以同一約束刻意 unset `OPENCLAW_DATABASE_URL` 與 `POSTGRES_PASSWORD`，只提供 PG user/db/host/port，執行 `helper_scripts/reports/w_audit_8c_liquidation_cluster_stage0r.py --window-days 1 --symbols BTCUSDT,ETHUSDT --no-sweep --bootstrap-iters 50 --format json --out-dir /tmp/openclaw/stage0r_report_auth_smoke/w_audit_8c`；產出 `/tmp/openclaw/stage0r_report_auth_smoke/w_audit_8c/2026-06-18--w_audit_8c_stage0r_red.json` sha256 `590f6154b642d62d5850154f9bebd78630bd5496899f61d4ea7a338cb7a90bab`，summary：`verdict=RED`、`review_ready=true`、`panel_meta.total_rows=0`。這只證明 8c report wrapper auth/query/writer path 在缺 DB URL/PG password env 時能透過 shared fallback 完成；不是正式 Stage0R packet。邊界：limited `/tmp` smoke only；未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 repo artifact write、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation；E4 review + PM formal deploy/runtime verification 仍未關。
 
