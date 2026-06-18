@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v165 AC19 expired cron cleanup；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v166 Phase2 verdict-casing reconcile；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v166 增量（2026-06-18 Phase2 verdict-casing reconcile）**：關閉 TODO §6「Phase2 verdict-casing mismatch 須 grep reconcile」疑點。Source 已有 shared contract `app/strategist_promote_contract.py`：`ELIGIBLE_TOKEN="eligible"`，`is_eligible()` 對 token `.strip().lower()` 後比對；`strategist_promote_routes.py` promote gate 使用 `is_eligible(verdict)`；Rust `ipc_server/dispatch.rs` 回 `verdict.tag()` lowercase；`test_strategist_promote_phase2.py::TestIpcContractKeysAndCasing::test_verdict_casing_handler_emits_what_route_consumes` PASS。完整 phase2 test 用 `/usr/local/bin/python3` 3.10 跑 21/23，兩個 false-red 來自 `tomllib` missing；本機 3.12 有 `tomllib` 但未裝 pytest。結論：原 worklog/TODO warning 已 stale，不是 open promotion-gate bug。邊界：read-only source/test reconcile；無 code/runtime/DB/auth/risk/order/trading mutation。
 
 **v165 增量（2026-06-18 AC19 expired cron cleanup）**：關閉 §6 可選低優先 operator action。PM 先 read-only 查證 Linux `trade-core` crontab 只有一行 `ac19_alt_bucket_daily_cron.sh`，再備份原 crontab 到 `/tmp/openclaw/backup/crontab_pre_ac19_cleanup_20260618T175129Z.txt`，以精準 filter 移除該 expired/no-op cron；post-check `grep` 0 命中且備份存在。邊界：只改 user crontab，無 code/deploy/rebuild/restart/DB/auth/risk/order/trading mutation。
 
