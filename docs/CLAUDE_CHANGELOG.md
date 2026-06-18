@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v174 market_tickers forward-column post-deploy SQL closure；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v175 funding/OI backfill completed-row archive；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v175 增量（2026-06-18 funding/OI backfill completed-row archive）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 `P0-EDGE-1-CAND-FUNDING-OI-BACKFILL`。該 row 是已完成 P0 基礎資料工作，完成狀態仍由 `TODO.md` §2 保留：`5b80c2f7` code + run `18b3c2f8` apply。Linux 真 DB read-only recheck：`research.alpha_funding_rates_history` rows=46539、runs=1、run_id=`18b3c2f8-6125-42a8-a42c-cfcc8aec9406`、span=`2024-06-03 02:00:00+02`→`2026-06-02 22:00:00+02`、NULL funding=0；`research.alpha_open_interest_history` rows=348153、runs=1、same run_id、span=`2024-06-03 01:00:00+02`→`2026-06-03 01:00:00+02`、NULL OI=0。保留 caveat：schema run-versioned（run_id in PK），re-apply 會 append 新 run，查詢須固定 run_id 或取最新 run；未來若要 cron/refresh，另開新 active row 設計清舊 run / wrapper / rate-limit 並發，不復用已完成 row。邊界：read-only DB verification + TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 production source/runtime/DB/auth/risk/order/trading mutation。
 
 **v174 增量（2026-06-18 market_tickers forward-column post-deploy SQL closure）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 `P3-MARKET-TICKERS-INDEX-MARK-DEAD-PERSISTENCE`。判定證據：source checkpoint `5733eb06` 已將 tickers parser→`PriceEvent`→fast-track `TickerSnapshot`→`market.market_tickers` 寫入鏈接上 `mark_price`/`index_price`/`funding_rate`/`open_interest` optional 欄位；Linux current engine PID 3134818 started `2026-06-18 14:11:50+02`，runtime source HEAD `83b7632d` 是 Linux checkout ancestor；production schema 四欄均為 nullable real。Linux 真 DB read-only SQL 在 post-engine-start window `ts >= 2026-06-18 14:11:50+02` 得 `market.market_tickers` n=587319、mark_n=40912、index_n=84919、oi_n=5913、funding_n=719；mark/index/OI zero=0，funding_zero=8（合法 0 funding，不是缺失佔位）；per-symbol sample 顯示 BTC/ETH/H/NEAR/OP 等多 symbol 有新欄位。此 row 解的是 forward recorder 生效與 fake-zero 防線，不改 90d retention、不做 backfill、不宣稱歷史資料完整。邊界：read-only DB/source verification + TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 production source/runtime/DB/auth/risk/order/trading mutation。
 
