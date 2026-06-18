@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 00:46 CEST
+- exercised the same Stage0R PG auth fallback path through the 8c wrapper with `OPENCLAW_DATABASE_URL` and `POSTGRES_PASSWORD` deliberately unset
+- 8c limited BTC/ETH 1d no-sweep report wrote `/tmp/openclaw/stage0r_report_auth_smoke/w_audit_8c/2026-06-18--w_audit_8c_stage0r_red.json` (sha256 `590f6154b642d62d5850154f9bebd78630bd5496899f61d4ea7a338cb7a90bab`, verdict=RED, review_ready=true, panel rows=0)
+- boundary: auth/query/writer smoke only; not a trusted Stage0R packet; no deploy/rebuild/restart, repo artifact write, DB/auth/risk/order/trading mutation
+
 2026-06-19 00:43 CEST
 - exercised the Stage0R shared PG auth fallback against Linux PG with `OPENCLAW_DATABASE_URL` and `POSTGRES_PASSWORD` deliberately unset
 - 8b limited BTC/ETH 1d report wrote `/tmp/openclaw/stage0r_report_auth_smoke/w_audit_8b_fallback_20260618T224216Z.json` (sha256 `b9429419ca9ae5875cbf403f49f18949c8ee29a4520d4bb3a72ab982ee38e380`, row_count=549, eligible=false)
