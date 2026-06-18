@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v173 BB reversion regime observability post-deploy SQL closure；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v174 market_tickers forward-column post-deploy SQL closure；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v174 增量（2026-06-18 market_tickers forward-column post-deploy SQL closure）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 `P3-MARKET-TICKERS-INDEX-MARK-DEAD-PERSISTENCE`。判定證據：source checkpoint `5733eb06` 已將 tickers parser→`PriceEvent`→fast-track `TickerSnapshot`→`market.market_tickers` 寫入鏈接上 `mark_price`/`index_price`/`funding_rate`/`open_interest` optional 欄位；Linux current engine PID 3134818 started `2026-06-18 14:11:50+02`，runtime source HEAD `83b7632d` 是 Linux checkout ancestor；production schema 四欄均為 nullable real。Linux 真 DB read-only SQL 在 post-engine-start window `ts >= 2026-06-18 14:11:50+02` 得 `market.market_tickers` n=587319、mark_n=40912、index_n=84919、oi_n=5913、funding_n=719；mark/index/OI zero=0，funding_zero=8（合法 0 funding，不是缺失佔位）；per-symbol sample 顯示 BTC/ETH/H/NEAR/OP 等多 symbol 有新欄位。此 row 解的是 forward recorder 生效與 fake-zero 防線，不改 90d retention、不做 backfill、不宣稱歷史資料完整。邊界：read-only DB/source verification + TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 production source/runtime/DB/auth/risk/order/trading mutation。
 
 **v173 增量（2026-06-18 BB reversion regime observability post-deploy SQL closure）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 `P1-BB-REVERSION-REGIME-OBSERVABILITY`。判定證據：source merge `6628b4cf` 是 runtime source HEAD `83b7632d` 與 Linux checkout ancestor；production `trading.intents.details` 為 JSONB；Linux 真 DB read-only SQL 在 `ts >= 2026-06-11 02:00:00+00` 的 `bb_reversion` intents 得 n=10、`details ? 'hurst_label'`=10、`details ? 'hurst_value'`=10、min/max=`2026-06-13 18:05:00.004+02`→`2026-06-18 17:41:00+02`，最新 10 筆樣本均有 `mean_reverting` label 與 Hurst value。此 row 解的是「可判讀性 / post-deploy hurst key」驗收，不解樣本量或 alpha；2026-06-27 `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK` 仍保留，用於 bb_breakout/bb_reversion Stage 0R 基線或 M7 退役判斷。邊界：read-only DB/source verification + TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 production source/runtime/DB/auth/risk/order/trading mutation。
 
