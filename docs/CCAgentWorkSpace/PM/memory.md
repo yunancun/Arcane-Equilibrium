@@ -383,3 +383,8 @@
 
 - Reconciled the §6 Phase2 promotion casing warning as stale: shared contract now canonicalizes `eligible` via `is_eligible()`, route uses that helper, Rust emits lowercase `verdict.tag()`, and the focused casing contract test passed.
 - Full phase2 pytest under `/usr/local/bin/python3` was 21/23 with two `tomllib` false-reds from Python 3.10; local 3.12 has `tomllib` but no pytest. Boundary: read-only verification, no source/runtime mutation.
+
+## 2026-06-18 runtime stale TODO reconcile
+
+- Closed the stale `daily_cost_snapshot.sh` cron action: current Linux crontab has no `daily_cost_snapshot` line and repo/Linux still have no script, so there is no remaining cron deletion/rebuild action.
+- Refreshed Gate-B watcher state: latest artifact generated `2026-06-18T17:42:01Z` is `WATCH_ONLY` with 21 total candidates, 0 alertable/start/schedule, and gate-watch-only preflight says `WAIT_FOR_ACTIONABLE_WATCH`. No probe/autostart/trading mutation.
