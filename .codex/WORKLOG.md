@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 01:01 CEST
+- refreshed Gate-B watcher/preflight evidence from Linux without starting a probe
+- latest `/tmp/openclaw/gate_b_watch/gate_b_watch_latest.json` generated `2026-06-18T22:42:01Z` remains `WATCH_ONLY` (21 total, 0 alertable/start/schedule, 1 watch_only); preflight `gate_b_preflight_refresh_20260618T2242Z` returned `WAIT_FOR_ACTIONABLE_WATCH`, 0 probe hints, command not operator-recommended
+- boundary: artifact/read-only plus `/tmp` summary only; no CI, deploy/rebuild/restart, production WS/scanner/strategy/DB/auth/risk/order/trading mutation
+
 2026-06-19 00:58 CEST
 - corrected TODO v208 SQL-head metadata after Linux read-only psql showed prod `_sqlx_migrations` max=145
 - V141-V145 all returned `success=t`; §8 v92 V### now matches the 2026-06-18 intelligent-param deploy fact, while V146 remains normal deploy/migration-gated

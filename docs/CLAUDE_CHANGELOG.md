@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v208 SQL-head hygiene checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v209 Gate-B WATCH_ONLY refresh checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v209 增量（2026-06-19 Gate-B WATCH_ONLY refresh checkpoint）**：刷新 `TODO.md` §6 Gate-B watcher / preflight 現場證據。Linux `/tmp/openclaw/gate_b_watch/gate_b_watch_latest.json` 於 `2026-06-18T22:42:01Z` 仍為 `WATCH_ONLY`，candidate_counts total=21 / alertable=0 / start_now=0 / schedule=0 / watch_only=1，alerts_sent=0，source_health announcements ok 150 items/3 pages + prelaunch ok 1；top watch 仍為 old `BPUSDT` `ContinuousTrading`。PM 跑 gate-watch-only preflight `gate_b_preflight_refresh_20260618T2242Z`，summary 寫 `/tmp/openclaw/alpha_history_runs/gate_b_preflight_refresh_20260618T2242Z/gate_b_preflight_summary.json`，`gate_watch.operator_action=WAIT_FOR_ACTIONABLE_WATCH`、0 probe hints、`recommended_command_operator_recommended=false` / `UNAVAILABLE`。同輪補 masthead/§0 source-sync，把 v208 SQL-head hygiene checkpoint `cd0776ef` 記為已 Mac→GitHub→Linux `trade-core` fast-forward verified；v209 本身以 git log 為準。邊界：artifact/read-only + `/tmp` summary only；未跑 CI full suite，未 deploy/rebuild/restart，無 production WS/scanner/strategy/DB/auth/risk/order/trading mutation，未啟動 isolated probe；不關閉 `AEG-S3-CANDIDATE-DIRECT-ROWS` 或 S2 Gate-B 24h 真捕捉 gate。
 
 **v208 增量（2026-06-19 SQL-head hygiene checkpoint）**：修正 `TODO.md` §8 v92 V### 對帳中的 stale SQL head：§0 runtime 已記錄 2026-06-18 intelligent-param deploy auto-migrate V141-V145 applied，但 §8 仍停在 V139。Linux read-only psql verification：prod `_sqlx_migrations` `max(version)=145`，V141/V142/V143/V144/V145 均 `success=t`。同輪補 masthead/§0 source-sync，把 v207 source-sync correction checkpoint `5b1c29ea` 記為已 Mac→GitHub→Linux `trade-core` fast-forward verified；v208 本身以 git log 為準。邊界：docs/TODO hygiene + read-only DB metadata verification only；未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 DB write、無 credential/key/secret/runtime/auth/risk/order/trading mutation；V146 仍需正常 deploy/migration gate，不因本行視為 applied；不關閉任何 runtime/review/operator gate。
 
