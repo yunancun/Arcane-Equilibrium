@@ -469,3 +469,9 @@
 - TODO v183 moves `P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH` from §5 active queue to §7 passive schedule because the row has no current engineering action; it is now event-triggered.
 - This is not a completion claim: 06-10 FA evidence still says 0 candidates satisfy AC-S2-A-3, A1/A2 demo are inactive with 0 fills, A1 basis wire is functional but candidate remains dormant (`n_eff=0` / `no_a1_signals_after_entry_gate`), and A2 remains NO-GO/observe_more.
 - Reopen triggers preserved in §7: green Stage 0R preflight + operator demo-canary approval, first real AEG-S3 `candidate_regime_metrics` rows, residual Stage0R preflight flag-ON first run, or funding >30% APR + A1 entry-gate regime reappears; backstop remains 2026-06-27 with `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK`. Boundary: docs hygiene only; no source/runtime mutation.
+
+## 2026-06-18 TODO SignalSpec conformance stale-defer relocation
+
+- TODO v184 moves `P2-AST-SIGNALSPEC-CONFORMANCE` from §5 active queue to §7 conditional wait. The old defer reason was stale: `candidate_signal_spec_producer.py` and residual/hidden-OOS/manifest source now exist on main, and residual-producer baseline/operator history was archived in v170.
+- This is not a checker completion claim and not a GO to implement. The remaining unblock condition is formal SignalSpec schema freeze plus PA/PM GO.
+- Future thaw must preserve the corrected scope: build a `SignalSpec schema/lineage conformance checker`, not an expression-tree AST checker; true schema is a flat metadata manifest. Boundary: docs/status correction only; no source/runtime mutation.

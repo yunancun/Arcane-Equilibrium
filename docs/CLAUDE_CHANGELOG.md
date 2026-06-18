@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v183 Stage0R replay preflight event-trigger relocation；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v184 SignalSpec conformance stale-defer relocation；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v184 增量（2026-06-18 SignalSpec conformance stale-defer relocation）**：依 `docs/agents/todo-maintenance.md` active queue / passive wait 規則，從 `TODO.md` §5 移出 `P2-AST-SIGNALSPEC-CONFORMANCE`，改由 §7 條件等待承接。這不是完成歸檔，也不是開始實作 checker：舊 row 的「SignalSpec producer 只在未合併分支 / HEAD 僅 validator」理由已過期，因 `program_code/ml_training/candidate_signal_spec_producer.py`、residual source、hidden-OOS/manifest source 目前在 main，且 v170 已封存 residual-producer baseline/operator 歷史行；但 #8 的真正 blocker 仍是 formal SignalSpec schema freeze + PA/PM GO。§7 保留命名與範圍約束：未解凍前不得做 expression-tree AST checker；解凍後應正名 `SignalSpec schema/lineage conformance checker`，覆蓋 fields、duplicate fingerprint、feature-count budget、deterministic hypothesis alignment。邊界：TODO/changelog/memory/report hygiene + source/read-only status correction only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 
 **v183 增量（2026-06-18 Stage0R replay preflight event-trigger relocation）**：依 `docs/agents/todo-maintenance.md` active queue / passive wait 規則，從 `TODO.md` §5 移出 `P1-SPRINT2-STAGE0R-REPLAY-PREFLIGHT-DISPATCH`，改由 §7 事件觸發等待承接。此不是完成歸檔：06-10 FA 證據檢查結論仍是 0 候選滿足 AC-S2-A-3；A1/A2 demo inactive 且 0 fills；2026-06-13 A1 basis wire formal gate 只關工程線，candidate 仍因 `n_eff=0` / `no_a1_signals_after_entry_gate` dormant；A2 仍 NO-GO/observe_more。§7 保留全部 reopen 條件：任一 green Stage 0R preflight + operator demo-canary approval（核准後 D+14 review）、AEG-S3 首批真 `candidate_regime_metrics` rows、residual Stage0R preflight flag-ON 首輪、或 funding >30% APR + A1 entry-gate regime 復現；backstop 仍為 2026-06-27 併 `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK`。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 
