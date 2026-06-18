@@ -159,6 +159,11 @@ pub const RISKCONFIG_SURVIVAL_DENYLIST: &[&str] = &[
     // -- fast_track dust floors（survival 平倉語意，risk_config.rs:448/468）--
     "limits.ft_min_notional_ratio_of_entry",
     "limits.ft_dust_qty_floor_usd",
+    // -- FLASH-DIP-PILOT band-external 名目上限（CC 條件 2 / E3 #4）：agent 絕不可
+    //    放寬 pilot 的單筆名目 cap（widen = 放大最大倉位 = survival-class）。
+    //    顯式列入使 riskconfig_decide_leaf 回 HardBoundary；即使漏列，limits.* 從不
+    //    在 allowlist 候選 → allowlist-default-deny 仍回 VetoedByDefaultDeny。
+    "limits.flash_dip_buy_max_notional_pct_equity",
     // -- 硬邊界字面 token（防 agent 用舊名/別名注入；非 RiskConfig 葉，作為
     //    free-text key 出現即 veto，defense-in-depth，對齊 §四 三硬邊界）--
     "execution_state",
@@ -871,6 +876,80 @@ mod tests {
                 ),
                 other => panic!("expected HardBoundary for {patch:?}, got {other:?}"),
             }
+        }
+    }
+
+    // ---- FLASH-DIP-PILOT band-external cap：CC 條件 2 三項 AC（缺一不可）----
+
+    #[test]
+    fn test_flash_dip_notional_cap_validate_rejects_out_of_bound() {
+        // AC (a)：validate() 拒 > 0.03 或 <= 0。
+        let mut over = RiskConfig::default();
+        over.limits.flash_dip_buy_max_notional_pct_equity = 0.05;
+        assert!(over.validate().is_err(), "> 0.03 must be rejected");
+
+        let mut zero = RiskConfig::default();
+        zero.limits.flash_dip_buy_max_notional_pct_equity = 0.0;
+        assert!(zero.validate().is_err(), "<= 0 must be rejected");
+
+        let mut neg = RiskConfig::default();
+        neg.limits.flash_dip_buy_max_notional_pct_equity = -0.01;
+        assert!(neg.validate().is_err());
+
+        // 邊界 0.03 + 預設皆通過。
+        let mut ok = RiskConfig::default();
+        ok.limits.flash_dip_buy_max_notional_pct_equity = 0.03;
+        assert!(ok.validate().is_ok());
+        assert!(RiskConfig::default().validate().is_ok());
+        // serde default 保持 0.03（double-apply / hot-reload 不漂移）。
+        assert!(
+            (RiskConfig::default()
+                .limits
+                .flash_dip_buy_max_notional_pct_equity
+                - 0.03)
+                .abs()
+                < 1e-12
+        );
+    }
+
+    #[test]
+    fn test_flash_dip_notional_cap_denylist_hard_boundary() {
+        // AC (b)：新欄在 denylist → riskconfig_decide_leaf 對完整路徑回 HardBoundary。
+        let leaf = "limits.flash_dip_buy_max_notional_pct_equity";
+        assert!(
+            RISKCONFIG_SURVIVAL_DENYLIST.contains(&leaf),
+            "field must be explicitly in survival denylist"
+        );
+        match riskconfig_decide_leaf(&cfg(), leaf) {
+            LeafDecision::HardBoundary { path, matched } => {
+                assert_eq!(path, leaf);
+                assert_eq!(matched, leaf);
+            }
+            other => panic!("expected HardBoundary, got {other:?}"),
+        }
+        // 經整 patch 路徑亦 HardBoundary（agent 不可放寬）。
+        let p = json!({"limits": {"flash_dip_buy_max_notional_pct_equity": 0.20}});
+        match riskconfig_decide_patch(&cfg(), &p) {
+            PatchDecision::HardBoundary { path, .. } => assert_eq!(path, leaf),
+            other => panic!("expected HardBoundary patch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_flash_dip_notional_cap_fail_closed_by_construction_if_unlisted() {
+        // AC (c)：退一步 — 即使「漏列 denylist」，allowlist-default-deny catch-all 仍
+        // 對任何未列為 allowlist-with-band 的 limits.* 葉回 DefaultDeny（fail-closed
+        // by construction）。limits.* 從不在 allowlist 候選集，故任何同族不在 denylist
+        // 的 leaf 都走 DefaultDeny。用一個結構上不可能進 allowlist 的 limits.* 假想葉
+        // 證明 catch-all 不 fail-open（與 test_unknown_top_level_default_deny 同理）。
+        let hypothetical_unlisted_leaf = "limits.flash_dip_buy_some_future_unlisted_leaf";
+        assert!(
+            !RISKCONFIG_SURVIVAL_DENYLIST.contains(&hypothetical_unlisted_leaf),
+            "this leaf is intentionally NOT in the denylist for the proof"
+        );
+        match riskconfig_decide_leaf(&cfg(), hypothetical_unlisted_leaf) {
+            LeafDecision::DefaultDeny { path } => assert_eq!(path, hypothetical_unlisted_leaf),
+            other => panic!("expected DefaultDeny (fail-closed by construction), got {other:?}"),
         }
     }
 

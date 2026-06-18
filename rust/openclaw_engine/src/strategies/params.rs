@@ -43,6 +43,10 @@ pub use super::funding_short_v2::FundingShortV2Params;
 // 同範式：params 結構放 sub-module，registry 用 re-export 路徑。
 pub use super::liquidation_cascade_fade::LiquidationCascadeFadeParams;
 
+// flash_dip_buy demo pilot — FlashDipBuyParams。
+// 同範式：params 結構放 sub-module，registry 用 re-export 路徑。
+pub use super::flash_dip_buy::FlashDipBuyParams;
+
 // Factory fallback helpers used by `registry.rs` when TOML-supplied OI fields
 // fail the mirror validator. Routed through `params::` to match the historic
 // symbol path pre-C4c split.
@@ -111,6 +115,11 @@ pub struct StrategyParamsConfig {
     /// Stage 1 Demo 限定 BTCUSDT / ETHUSDT；預設 active=false。
     #[serde(default)]
     pub liquidation_cascade_fade: LiquidationCascadeFadeParams,
+    /// flash_dip_buy demo pilot — flash-crash dip-buy daily cadence。
+    /// prior_close*(1-K=0.15) PostOnly maker entry + N=3 day-clustered hold；
+    /// 26-survivor universe；demo-only，預設 active=false（+ env flag 雙鎖）。
+    #[serde(default)]
+    pub flash_dip_buy: FlashDipBuyParams,
 }
 
 /// Resolve settings directory: `OPENCLAW_BASE_DIR/settings` or `./settings`.
@@ -165,6 +174,7 @@ fn fail_closed_inactive_config() -> StrategyParamsConfig {
     cfg.funding_harvest.active = false;
     cfg.funding_short_v2.active = false;
     cfg.liquidation_cascade_fade.active = false;
+    cfg.flash_dip_buy.active = false;
     cfg
 }
 
