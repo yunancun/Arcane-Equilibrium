@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v181 schedule-only duplicate cleanup；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v182 SCHEMA-1 completed-row archive；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v182 增量（2026-06-18 SCHEMA-1 completed-row archive）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 `AUDIT-2026-06-14-SCHEMA-1`。本體已由 cold-audit fix-wave 完成：`rust/openclaw_engine/tests/schema_contract_test.rs` 現在存在，CI 仍有 PR-only Linux PG `schema_contract_test` step，`audit_migrations.py` 已明標 informational-only；E1/E2/E4 報告與 fix-wave 總結記錄 6 probe、column-drift bite 真 PG 親證、Linux read-only 6/6 probe 0 drift，且未改 93 runtime call site（不在 scope）。該 row 原先保留的衍生 blocker 是 `MIGRATION-TREE-1`；v171 已把它作為完成項歸檔（V005/V023 forward-compat、deploy、checksum repair、virgin/CI replay 現可過），未來 migration 紀律由 V### / Linux PG dry-run 規則承接。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 
 **v181 增量（2026-06-18 schedule-only duplicate cleanup）**：依 `docs/agents/todo-maintenance.md` active queue / passive wait 規則，從 `TODO.md` §5 移出兩個 schedule-only 重複 row：`P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK` 與 `P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1`。兩者沒有當前可執行工程步驟，且已各有明確復查日期；§7 現在完整承接其條件與上下文：06-27 bb_breakout/bb_reversion Stage 0R baseline vs M7 retire/extend（n<100 延長），08-21 fallback dead-enum audit + halt root-cause review（`halt_audit.log` ready，除非 healthcheck 退步不提前）。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 

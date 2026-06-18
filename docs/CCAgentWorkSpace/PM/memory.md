@@ -458,3 +458,8 @@
 
 - TODO v181 removes `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK` and `P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1` from §5 because both are passive scheduled reviews already carried by §7.
 - §7 now contains the missing details: 2026-06-27 bb strategy baseline/retire/extend decision, and 2026-08-21 fallback dead-enum + halt root-cause review with `halt_audit.log` ready. Boundary: docs hygiene only; no source/runtime mutation.
+
+## 2026-06-18 TODO SCHEMA-1 completed-row archive
+
+- TODO v182 archives `AUDIT-2026-06-14-SCHEMA-1` from §5. The schema contract test and PR-only PG CI path remain in repo, while `audit_migrations.py` is explicitly informational-only.
+- The derivative `MIGRATION-TREE-1` blocker is already closed/archived by v171 and future migration safety is carried by V### / Linux PG dry-run discipline. Boundary: docs hygiene only; no source/runtime mutation.
