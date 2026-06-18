@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v214 passive health residual triage checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v215 Bybit fee/MM/rebate eligibility checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v215 增量（2026-06-19 Bybit fee/MM/rebate eligibility checkpoint）**：完成 §6 智能調參 Agent 前路 lever 的 BB read-only audit，把 `fee-tier / rebate / MM-program` 從「待 BB 評估」收斂成明確 operator-only / scale-gated lever。官方 Bybit docs rechecked：standard perpetual/futures VIP0 = taker 0.0550% / maker 0.0200%；VIP1 derivatives 需 30d derivatives volume >= $10M 或 asset balance >= $100k；API Broker Level 1 derivatives 也從 $10M 起，且需正式 Broker ID / `referer` onboarding；MM program 需 institutional application + weighted maker share，非自動升級；MNT fee discount 明確不適用 API users。Linux read-only PG capacity proxy：30d `trading.fills` 1,529 fills / $840,299.41 notional / $304.4811 fee / effective 3.6235bps，其中 maker $477,049.36、taker $354,950.82；且全為 demo/live_demo，不能當 mainnet VIP eligibility proof。結論：即使用 proxy，也僅約 $10M threshold 的 8.4%，差約 11.9x；PM-local fee reduction 已無可做，剩 operator capital/scale/Bybit BD/MM trial/Broker onboarding 決策。報告：`docs/CCAgentWorkSpace/BB/workspace/reports/2026-06-19--bybit_fee_tier_mm_rebate_eligibility.md`。邊界：official public docs + read-only PG `SELECT` only；未打 Bybit private/signed/trading API，未跑 CI full suite，未 deploy/rebuild/restart，無 DB write、credential/key/secret/runtime/auth/risk/order/trading mutation；不關閉 cost-wall、P0-EDGE、operator gates。
 
 **v214 增量（2026-06-19 passive health residual triage checkpoint）**：用 Linux `passive_wait_healthcheck.sh` 重新核對 §0 被動健康殘留。Overall healthcheck 仍 FAIL，但 `[48] replay_manifest_registry_growth` 已 PASS（2026-06-18T23:25:26Z，total=45 / rows_7d=6 / rows_24h=1 / last_age=21.5h），因此不再列為殘留阻塞。Remaining failures kept explicit：`[74] close_maker_reject_samples` FAIL（demo attempts=198 / postonly_reject_samples=26 / max_pending_samples=0，仍缺 max-pending reject sample 或 gate 決策）與 `[56] live_pipeline_active` FAIL（live auth `authorization_json_missing` at `/home/ncyu/BybitOpenClaw/secrets/secret_files/bybit/live/authorization.json`，仍需 operator signed live-auth renew）。同輪 watchdog read-only still fresh (`engine_alive=true`, demo snapshot age 16.5s)。邊界：read-only healthcheck only；未跑 CI full suite，未 deploy/rebuild/restart，無 model call、DB write、credential/key/secret/runtime/auth/risk/order/trading mutation；不關閉 `[74]`、`[56]`、OPS/operator gates。
 
