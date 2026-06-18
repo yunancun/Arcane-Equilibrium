@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v177 incident-policy runtime deployment closure；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v178 reconciler runtime-status correction；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v178 增量（2026-06-18 reconciler runtime-status correction）**：依 `docs/agents/todo-maintenance.md` conflict handling，修正 `TODO.md` §5 中 `P2-RECONCILER-GET-POSITIONS-PAGINATION` / `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` 的部署狀態漂移。Mac/Linux HEAD 均已包含 `bb7e9efc` 與 `baf46a69`；running engine PID 3134818（started 2026-06-18 14:11:50 CEST）之 `/proc/3134818/exe` strings 含 `removed_position_semantics`、`dispatched-not-confirmed`、`reconcile_ghost_converge`，watchdog read-only `engine_alive=true`、demo snapshot fresh，故不再寫「未部署」。但不歸檔：PM 1-4 integration report 仍明示 E2/E4/QA review pending，且 production DB `observability.engine_events(event_type='reconcile_ghost_converge')` 目前 0 rows、無 D2 event proof。邊界：read-only source/runtime/DB verification + TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 production source/runtime/DB/auth/risk/order/trading mutation。
 
 **v177 增量（2026-06-18 incident-policy runtime deployment closure）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 `P2-INCIDENT-POLICY-DISPATCH-TRIGGER`。該 row 在 v147 已由 PM source closure 判定 source chain CLOSED，但保留 runtime activation gate；本輪用 read-only runtime/source verification 補齊 deploy evidence：source closure commit `26a72990` 是當前 Mac/Linux HEAD、Linux checkout、以及 runtime source marker `83b7632d` 的 ancestor；Linux watchdog `engine_alive=true`、demo snapshot fresh；running engine PID `3134818` started `2026-06-18 14:11:50+02`，cwd `/home/ncyu/BybitOpenClaw/srv`，`/proc/3134818/exe` strings 含 `auth_invalid` / `bybit_fail_closed` / `engine_dead` / `sm_halt_stuck` / `position_drift` / `incident_policy` / `NotificationFailsafeEscalate`；external watchdog PID `765009` started `2026-06-15 21:55:54+02`，晚於 current `helper_scripts/canary/engine_watchdog.py` mtime `2026-06-15 21:51:42+02`，且 `2960b503` engine_dead producer 是 HEAD/runtime-marker ancestor。Read-only DB/log scan 未見 incident-policy event rows 或 `ENGINE_DEAD_NOTIFY_ONLY` canary event；這是明示 caveat，不是 failure：本 archive 只關「source-accepted code 已部署到 running engine/watchdog」gate，不宣稱已做 synthetic incident drill、真 incident occurrence、C4 defensive arm runtime event proof、或 operator alert delivery proof。未來若要演練 incident classes 或驗 alert delivery，另開新 row。邊界：read-only DB/log/source/runtime introspection + TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 production source/runtime/DB/auth/risk/order/trading mutation。
 
