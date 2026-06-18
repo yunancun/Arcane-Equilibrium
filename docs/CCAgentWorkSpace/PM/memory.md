@@ -448,3 +448,8 @@
 
 - TODO v179 archives `P3-110017-BB-DOC-FOLLOWUPS`: Bybit reference now says 110017 D2 is source-land/runtime-loaded, not pending IMPL, and official Bybit V5 error table verifies 110009 as stop-orders-count limit rather than PositionNotFound.
 - The remaining Rust drift is not hidden: `P2-110009-RETCODE-SEMANTICS-FIX` now tracks enum/test/comment rename plus removal/guarding of 110009 from the close-equivalent-success NoOp arm. Boundary: docs/TODO hygiene + official-doc verification only; no code/runtime mutation.
+
+## 2026-06-18 TODO cold-audit completed-row archive
+
+- TODO v180 archives `AUDIT-2026-06-14-AUTH-1` and `AUDIT-2026-06-14-PROFIT-1` from §5. AUTH-1 remains closed by cold-audit fix-wave/deploy; PROFIT-1 remains NO-FIX with passive_wait `[90]` sentinel.
+- The future tails are preserved in §7, not hidden: Rust live-authz/direct-socket closure is a future operator architecture decision, and cost-gate double-deduct fix only reopens if explore-gate/Stage0R produces validated-positive cells or forward PnL proves released cells positive. Boundary: docs hygiene only; no source/runtime mutation.
