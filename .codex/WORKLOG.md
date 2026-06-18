@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 01:27 CEST
+- triaged passive health residuals with Linux `passive_wait_healthcheck.sh`
+- `[48] replay_manifest_registry_growth` is now PASS (total=45, rows_7d=6, rows_24h=1, last_age=21.5h) and was removed as a residual blocker in TODO
+- `[74] close_maker_reject_samples` remains FAIL (attempts=198, postonly=26, max_pending=0); `[56] live_pipeline_active` remains FAIL due missing live authorization JSON; watchdog stayed fresh
+- boundary: read-only healthcheck only; no CI, deploy/rebuild/restart, DB write, runtime/auth/risk/order/trading mutation
+
 2026-06-19 01:24 CEST
 - refreshed flash_dip pilot observation state without touching runtime
 - watchdog was alive with demo snapshot age 20.6s; snapshot still shows `flash_dip_buy` active and risk enabled, but read-only PG found 0 flash_dip rows in intents/orders/fills/order_state_changes/position_snapshots; `flash_dip_buy_entry_ts.json` is `{}` and death-rate cron log/heartbeat are absent before the first scheduled 06:53 CEST run
