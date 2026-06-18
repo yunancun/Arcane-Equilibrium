@@ -16,6 +16,7 @@
 
 | 文件 | 内容 |
 |------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--todo_p5_sm_completed_row_relocation.md` | PM TODO hygiene report: removes completed/stale `P5-SM-OPTION2-CONVERGENCE` from §5 after `[82]` step-ii 48h soak and later V138/V139 + L2 activation facts superseded the row; preserves step-iii cutover as §6 operator-gated sign-off。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--todo_cold_audit_p2p3_batch_archive.md` | PM TODO hygiene report: archives completed `AUDIT-2026-06-14-P2P3-BATCH` from §5 after cold-audit Batch 4/5 fix-wave and stale tails were already closed/split; remaining cost-edge / AI-pricing SSOT / BB rate-limit doc / PERF-1 1m follow-up are preserved as §7 condition triggers。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--todo_p2_l2_activation_owed_operator_row_archive.md` | PM TODO hygiene report: archives completed §6 `P2 batch activation owed #2-#6` operator row after V138/V139, seed, V140, cron, embedding, and B3 source wiring were already closed; remaining L2 E2E/B3-shadow/P2p/P5 gates stay in root `TODO.md` / `L2_TODO.md`。 |
 
