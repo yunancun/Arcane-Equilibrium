@@ -200,6 +200,7 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
     if let Some(env) = endpoint_env {
         pipeline.set_endpoint_env(env);
     }
+    wire_earn_capabilities(&mut pipeline, shared_client.as_ref(), audit_pool.as_ref());
     // P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：注入 per-pipeline 獨立的
     // H0LatencyRecorder。必須在 set_endpoint_env 之後，因為 set_endpoint_env
     // 把 effective_engine_mode 同步給 H0Gate.engine_mode；recorder 注入後
@@ -1032,9 +1033,8 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
                                         && pc.is_finite()
                                         && pc > 0.0
                                     {
-                                        if let Some(s) = pipeline
-                                            .orchestrator
-                                            .find_strategy_mut("flash_dip_buy")
+                                        if let Some(s) =
+                                            pipeline.orchestrator.find_strategy_mut("flash_dip_buy")
                                         {
                                             s.seed_prior_close(sym, pc);
                                             seeded += 1;
@@ -1065,7 +1065,9 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
                     "FLASH-DIP-PILOT 1d prior_close seeded from DB / 已從 DB 注入 pilot 前日收盤"
                 );
             } else {
-                warn!("FLASH-DIP-PILOT 1d seed skipped — no DB pool / 無 DB pool（fail-safe inert）");
+                warn!(
+                    "FLASH-DIP-PILOT 1d seed skipped — no DB pool / 無 DB pool（fail-safe inert）"
+                );
             }
         }
     }
@@ -1162,5 +1164,24 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         cross_engine_rx,
         pipeline_health,
         canary_handle,
+    }
+}
+
+pub(super) fn wire_earn_capabilities(
+    pipeline: &mut TickPipeline,
+    shared_client: Option<&Arc<crate::bybit_rest_client::BybitRestClient>>,
+    audit_pool: Option<&sqlx::PgPool>,
+) {
+    // Capability injection only: constructing these wrappers does not call
+    // Bybit or PG. Missing deps keep Earn fail-closed at Gate E-0.
+    if let Some(client) = shared_client {
+        pipeline.intent_processor.set_bybit_earn_client(Arc::new(
+            crate::bybit_earn_client::BybitEarnClient::new(Arc::clone(client)),
+        ));
+    }
+    if let Some(pool) = audit_pool {
+        pipeline.intent_processor.set_earn_movement_writer(Arc::new(
+            crate::database::earn_movement_writer::EarnMovementWriter::new(pool.clone()),
+        ));
     }
 }

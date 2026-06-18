@@ -10,6 +10,7 @@
 
 | 文件 | 内容 |
 |------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--earn_first_stake_capability_routing.md` | PM source/test checkpoint: reduces `P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` source blocker by wiring Rust Earn capabilities from existing runtime handles and routing Python stake IPC explicitly to `engine=live`; OP-1/2/3, deploy/restart, and first real stake evidence remain gated。 |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-18--earn_wave_d_ipc_contract_integration.md` | PM source/test checkpoint: closes `P2-EARN-WAVE-D-CONTRACT-INTEGRATION-TEST` by wiring Python `/earn/stake` contract to Rust `process_earn_intent` IPC dispatch, per-pipeline command handling, and fail-closed owner-task tests; first real stake remains blocked by OP-1/2/3 plus Earn capability injection。 |
 
 ### 2026-06-18 Earn Wave D HMAC canonical form

@@ -1162,6 +1162,10 @@ async def post_earn_stake(
     # intent_id / approval_id 等 system-generated 欄位（per earn_router.rs
     # Gate E-1 + earn_governance §3.2）。
     ipc_params: dict[str, Any] = {
+        # Earn stake is a live/live_demo asset-movement lane. Route explicitly
+        # instead of relying on Rust primary fallback, so missing live slot
+        # fails closed rather than falling through to demo/paper.
+        "engine": "live",
         "coin": body.coin,
         "product_id": body.product_id,
         # Bybit V5 amount 字串型（per bybit_earn_client.rs:251）— F1 後 amount_usd
