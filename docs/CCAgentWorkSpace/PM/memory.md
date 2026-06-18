@@ -373,3 +373,8 @@
 
 - TODO masthead restored to compact shape; v161-v163 long increment narrative moved to `docs/CLAUDE_CHANGELOG.md`, preserving active state in structured TODO sections.
 - §5 stale cold-audit rows corrected: duplicate SCHEMA-1 removed, AUTH-1/PROFIT-1/DIRTY-FIX statuses aligned to deployed/healthcheck/true-table evidence. Boundary: docs-only, no runtime/code/DB/auth/risk/order mutation.
+
+## 2026-06-18 AC19 expired cron cleanup
+
+- Removed the expired `ac19_alt_bucket_daily_cron.sh` user-crontab line on Linux `trade-core` after read-only single-line match; backup saved at `/tmp/openclaw/backup/crontab_pre_ac19_cleanup_20260618T175129Z.txt`.
+- Post-check confirmed 0 remaining crontab matches. Boundary: no code/deploy/rebuild/restart/DB/auth/risk/order/trading mutation.

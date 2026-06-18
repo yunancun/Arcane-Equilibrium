@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v164 masthead hygiene + v161-v163 增量補錄；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v165 AC19 expired cron cleanup；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v165 增量（2026-06-18 AC19 expired cron cleanup）**：關閉 §6 可選低優先 operator action。PM 先 read-only 查證 Linux `trade-core` crontab 只有一行 `ac19_alt_bucket_daily_cron.sh`，再備份原 crontab 到 `/tmp/openclaw/backup/crontab_pre_ac19_cleanup_20260618T175129Z.txt`，以精準 filter 移除該 expired/no-op cron；post-check `grep` 0 命中且備份存在。邊界：只改 user crontab，無 code/deploy/rebuild/restart/DB/auth/risk/order/trading mutation。
 
 **v164 增量（2026-06-18 TODO masthead hygiene）**：按 `docs/agents/todo-maintenance.md` 將 `TODO.md` header 壓回 compact masthead，只保留版本、source/runtime pointer、當前 posture、主入口與歷史指針；v161-v163 長敘事移入本 changelog。同步清理 §5 stale active rows：移除 `AUDIT-2026-06-14-SCHEMA-1` confirmed duplicate（已由 fixed row 取代），把 `AUDIT-2026-06-14-AUTH-1`、`AUDIT-2026-06-14-PROFIT-1`、`AUDIT-2026-06-14-DIRTY-FIX` 狀態校正為已 commit/deploy/healthcheck/true-table 驗證後的現況。邊界：文檔隊列 hygiene only；無 code/runtime/DB/auth/risk/order/trading mutation。
 
