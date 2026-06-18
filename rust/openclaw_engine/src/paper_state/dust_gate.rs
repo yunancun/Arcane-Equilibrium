@@ -126,4 +126,45 @@ impl PaperState {
         }
         outcome
     }
+
+    /// FLASH-DIP-PILOT restart-ownership reclaim (E2 HIGH fix, 2026-06-18)：在
+    /// `triage_bybit_sync` 之前把「重啟後恢復為 bybit_sync」的 pilot 倉位歸屬重新
+    /// 蓋回 `new_owner`（= "flash_dip_buy"），使 triage 跳過它們（triage 只動
+    /// owner_strategy=="bybit_sync" 的倉，見上方 line 80）。
+    ///
+    /// 為什麼必須在 triage 之前重蓋：bootstrap 順序為 `import_positions`(:367) →
+    /// 本 reclaim → `triage_bybit_sync`(:477) → `import_positions_for_all`(:843)。
+    /// `import_positions` 把所有恢復倉統一標 "bybit_sync"，而 triage 會把所有「在
+    /// universe 內」的 bybit_sync 倉 adopt 成 `strategy_names[0]`（= "ma_crossover"）。
+    /// 若不先重蓋，pilot 倉位就被改標 ma_crossover：
+    ///   1. flash_dip 的 `import_positions`（owner==self.name 過濾）找到 0 → soft cap
+    ///      under-count；
+    ///   2. router `per_strategy_concurrency_rejection`（重數 owner=="flash_dip_buy"）
+    ///      亦找到 0 → C=3 硬層被靜默突破。
+    /// 重蓋後兩條計數路徑皆能數到真倉，hard reject 第 4 筆仍 fail-closed。
+    ///
+    /// 不變量（其他 5 策略 byte-identical）：
+    ///   - 只動 owner_strategy 當前 == "bybit_sync" 且 symbol ∈ `symbols` 的倉；
+    ///     非 bybit_sync（含 5 既有策略既有歸屬、synthetic label）一律不碰。
+    ///   - symbol 來源是 flash_dip sidecar（OPENCLAW_DATA_DIR/flash_dip_buy_entry_ts.json）
+    ///     的 key 集合 — 只有本 pilot 真持有過的 symbol 會出現。
+    ///   - 呼叫端以 `pipeline_kind==Demo && flag_on` gate（與 1d seed 同一 gate）；
+    ///     flag-OFF / 非 Demo 時 bootstrap 完全不呼叫本 fn → 零行為差異。
+    /// 回傳實際重蓋的倉位數（供 bootstrap 日誌與測試斷言）。
+    pub fn reclaim_owner_for_symbols(&mut self, symbols: &[String], new_owner: &str) -> usize {
+        if symbols.is_empty() || new_owner.is_empty() {
+            return 0;
+        }
+        let mut reclaimed = 0_usize;
+        for symbol in symbols {
+            if let Some(pos) = self.positions.get_mut(symbol) {
+                // 只重蓋「恢復後被統一標成 bybit_sync」的倉；防覆蓋其他真實歸屬。
+                if pos.owner_strategy == "bybit_sync" {
+                    pos.owner_strategy = new_owner.to_string();
+                    reclaimed += 1;
+                }
+            }
+        }
+        reclaimed
+    }
 }

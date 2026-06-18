@@ -447,6 +447,37 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
     // 不在集合內 → 正常驅逐並派 CloseSymbol。
     // DUST-EVICTION-GAP-1：驅逐候選若名義值低於 min_notional 則凍結保留（避免
     // 引擎狀態與交易所無聲偏差）。
+    //
+    // ── FLASH-DIP-PILOT restart-ownership reclaim (E2 HIGH fix, 2026-06-18) ──
+    // 必須在 triage_bybit_sync 之前：import_positions(:367) 把所有恢復倉統一標
+    // "bybit_sync"，triage 隨後會把「在 universe 內」的 bybit_sync 倉 adopt 成
+    // KNOWN_STRATEGY_NAMES[0]（= "ma_crossover"），導致 flash_dip pilot 倉被改標
+    // → 軟層 + router 並發硬層皆 under-count（C=3 被靜默突破）。此處先依 sidecar
+    // key（= pilot 真持有過的 symbol）把恢復為 bybit_sync 的 pilot 倉重蓋回
+    // "flash_dip_buy"，triage 即跳過它們（只動 bybit_sync）。
+    // gate 與下方 1d seed 一致（Demo + flag-on）：flag-OFF / 非 Demo 不執行 →
+    // 其他 5 策略 triage 行為 byte-identical。fail-soft（缺 sidecar = 空集 = no-op）。
+    {
+        let flag_on = std::env::var(crate::strategies::registry::FLASH_DIP_PILOT_ENABLED_ENV)
+            .as_deref()
+            == Ok("1");
+        if pipeline_kind == PipelineKind::Demo && flag_on {
+            let pilot_symbols =
+                crate::strategies::flash_dip_buy::FlashDipBuy::sidecar_owned_symbols();
+            let reclaimed = pipeline
+                .paper_state
+                .reclaim_owner_for_symbols(&pilot_symbols, "flash_dip_buy");
+            if reclaimed > 0 {
+                info!(
+                    kind = %pipeline_kind,
+                    reclaimed,
+                    "FLASH-DIP-PILOT: reclaimed pilot ownership from bybit_sync before triage \
+                     / triage 前重蓋 pilot 歸屬，避免被誤 adopt 成 ma_crossover"
+                );
+            }
+        }
+    }
+
     if pipeline_kind.is_exchange() {
         let active_symbols = match symbol_registry {
             Some(ref reg) => reg.snapshot(),
