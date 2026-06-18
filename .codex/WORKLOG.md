@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 01:24 CEST
+- refreshed flash_dip pilot observation state without touching runtime
+- watchdog was alive with demo snapshot age 20.6s; snapshot still shows `flash_dip_buy` active and risk enabled, but read-only PG found 0 flash_dip rows in intents/orders/fills/order_state_changes/position_snapshots; `flash_dip_buy_entry_ts.json` is `{}` and death-rate cron log/heartbeat are absent before the first scheduled 06:53 CEST run
+- daily kline keepalive last OK at 2026-06-18 14:34 CEST (26 symbols, 180 observed, 0 inserted, TONUSDT partial 5/7); Gate-B latest 2026-06-18T23:12:01Z remains `WATCH_ONLY`, so no preflight rerun/probe
+- boundary: read-only PG + Linux `/tmp` files/logs/artifacts only; no CI, deploy/rebuild/restart, DB write, runtime/auth/risk/order/trading mutation
+
 2026-06-19 01:14 CEST
 - corrected TODO v212 source-sync metadata after the v211 L2/D2 read-only watch refresh checkpoint
 - Mac `main`, `origin/main`, and Linux `trade-core` were verified at `37e3abba`; TODO masthead/§0 now name that source state instead of prior `0929d87c`
