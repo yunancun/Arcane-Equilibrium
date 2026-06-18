@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v172 OPS-2 cutover stale row reconcile；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v173 BB reversion regime observability post-deploy SQL closure；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v173 增量（2026-06-18 BB reversion regime observability post-deploy SQL closure）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 `P1-BB-REVERSION-REGIME-OBSERVABILITY`。判定證據：source merge `6628b4cf` 是 runtime source HEAD `83b7632d` 與 Linux checkout ancestor；production `trading.intents.details` 為 JSONB；Linux 真 DB read-only SQL 在 `ts >= 2026-06-11 02:00:00+00` 的 `bb_reversion` intents 得 n=10、`details ? 'hurst_label'`=10、`details ? 'hurst_value'`=10、min/max=`2026-06-13 18:05:00.004+02`→`2026-06-18 17:41:00+02`，最新 10 筆樣本均有 `mean_reverting` label 與 Hurst value。此 row 解的是「可判讀性 / post-deploy hurst key」驗收，不解樣本量或 alpha；2026-06-27 `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK` 仍保留，用於 bb_breakout/bb_reversion Stage 0R 基線或 M7 退役判斷。邊界：read-only DB/source verification + TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 production source/runtime/DB/auth/risk/order/trading mutation。
 
 **v172 增量（2026-06-18 OPS-2 cutover stale row reconcile）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 移出 stale `P1-OPS-2-PHASE-2-CUTOVER` row。判定證據：`3018c7a3`（OPS-2 Phase-2 cutover merge）是 runtime source HEAD `83b7632d` 與當前 docs HEAD 的 ancestor；Linux `trade-core` checkout 亦含該 commit；`memory/project_2026_06_10_a_group_triage.md` 記錄 2026-06-11 04:00 operator 指令下 PM 代跑 `restart_all --rebuild`，OPS-2 cutover 新 binary 生效、`ops2_secret_split_phase1_fallback` 0、V137 applied。剩餘 C-B 手動 `/auth/renew` 留證與 2026-09-08 rotation timing 沒有關閉，仍由 `TODO.md` §6 OPS-2 leftover operator row 承接。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 production source/runtime/DB/auth/risk/order/trading mutation。
 
