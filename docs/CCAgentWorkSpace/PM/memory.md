@@ -497,3 +497,8 @@
 
 - TODO v188 removes the completed §6 operator row `P2 batch activation owed #2-#6`: V138/V139, B1/B2 seed, manual V140, L2 cron, bge-m3 embedding backfill, and B3 source wiring all have closure reports/evidence.
 - This is not an L2 all-clear. Remaining L2 work stays visible in `P1-L2-ADVISORY-MESH-TAILS`, §8, and `L2_TODO.md`: first non-empty material day/E2E model-call evidence, B3 shadow runtime evidence, P2p sentinel operator gates, and P5 feedback/quality/GUI. Boundary: docs hygiene only; no source/runtime mutation.
+
+## 2026-06-18 TODO cold-audit P2/P3 batch active-row archive
+
+- TODO v189 removes `AUDIT-2026-06-14-P2P3-BATCH` from §5. The Batch 4/5 fix-wave body is already completed/deployed by the cold-audit checkpoint, and its stale tails have since been split or closed: `daily_cost_snapshot.sh` v167, DIRTY-FIX v169, MIGRATION-TREE-1 v171, and 110009 semantics v186.
+- Remaining policy/doc/perf tails are preserved in §7 as `P2-COLD-AUDIT-P2P3-BATCH-FOLLOWUP`: cost-edge re-gate decision, AI-PRICING option1 SSOT + `last_verified`, BB rate-limit dictionary doc hygiene, and PERF-1 1m minor follow-up. Boundary: docs hygiene only; no source/runtime mutation.

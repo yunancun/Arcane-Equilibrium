@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v188 P2/L2 activation owed operator-row archive；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v189 cold-audit P2/P3 batch active-row archive；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v189 增量（2026-06-18 cold-audit P2/P3 batch active-row archive）**：依 `docs/agents/todo-maintenance.md` DONE/passive-wait lifecycle，從 `TODO.md` §5 移出 `AUDIT-2026-06-14-P2P3-BATCH`。該 row 的 Batch 4/5 修復本體已在 cold-audit fix-wave 完成並由 `c7f97f50` commit+push+Linux rebuild/restart 部署；後續 stale tails 已分別閉合：`daily_cost_snapshot.sh` broken-cron action 由 v167 read-only Linux recheck 關閉、`AUDIT-2026-06-14-DIRTY-FIX` 由 v169 歸檔、`AUDIT-2026-06-14-MIGRATION-TREE-1` 由 v171 歸檔，110009 語意 drift 也已由 v186 source fix 收斂。未隱藏剩餘尾項：§7 新增 `P2-COLD-AUDIT-P2P3-BATCH-FOLLOWUP`，僅在 operator/QC/AI-E/PA 裁 cost-edge 復閘、PA/AI-E 決定 AI-PRICING option1 SSOT+`last_verified` 架構、BB/PA doc hygiene window 更新 rate-limit dictionary、或 perf sprint 接 PERF-1 1m minor follow-up 時重開 active row。邊界：TODO/changelog/memory/report/index hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 
 **v188 增量（2026-06-18 P2/L2 activation owed operator-row archive）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §6 移出 `P2 batch activation owed #2-#6` operator row。該 row 的 owed 本體已全部完成並已有報告：#3 Bybit 公告哨兵 cron、#4 Polymarket daily artifact cron、#2 V138/V139 runtime activation、B1/B2 seed、manual V140、L2 daily cron、`bge-m3` embedding backfill、B3 source wiring。這不是關閉整個 L2：剩餘 first non-empty material day / E2E true distillation model-call evidence、`OPENCLAW_L2_MEMORY_RECALL=shadow` runtime evidence、P2p sentinel credential/probe/install、P5 feedback/quality/GUI gate 仍由 `TODO.md` §5 `P1-L2-ADVISORY-MESH-TAILS`、§8 v92 V### 對帳與 `L2_TODO.md` 承接。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 
