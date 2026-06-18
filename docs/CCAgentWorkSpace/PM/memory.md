@@ -413,3 +413,8 @@
 
 - TODO v172 removes stale §5 row `P1-OPS-2-PHASE-2-CUTOVER`: cutover commit `3018c7a3` is ancestor of runtime source HEAD `83b7632d` and current docs HEAD, Linux checkout contains it, and 2026-06-11 runtime note records operator-commanded `restart_all --rebuild` with OPS-2 cutover new binary active, 0 fallback string, and V137 applied.
 - Remaining OPS-2 operator obligations are not closed: C-B manual `/auth/renew` evidence and 2026-09-08 rotation timing remain in TODO §6. Boundary: docs hygiene only; no CI/deploy/rebuild/restart/runtime mutation.
+
+## 2026-06-18 TODO BB reversion regime observability SQL closure
+
+- TODO v173 archives `P1-BB-REVERSION-REGIME-OBSERVABILITY` from §5 after post-deploy runtime evidence passed: source merge `6628b4cf` is ancestor of runtime source HEAD `83b7632d` and Linux checkout, production `trading.intents.details` is JSONB, and Linux read-only SQL for `bb_reversion` intents since `2026-06-11 02:00:00+00` returned n=10 with `hurst_label` 10/10 and `hurst_value` 10/10.
+- This closes only the observability/key-presence acceptance. The 2026-06-27 bb_strategy sample-size/retire decision remains active under `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK`; n<100 extension logic is unchanged. Boundary: read-only DB/source verification + docs hygiene only; no CI/deploy/rebuild/restart/runtime/DB/auth/risk/order/trading mutation.
