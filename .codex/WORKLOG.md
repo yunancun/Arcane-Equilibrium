@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 01:11 CEST
+- refreshed L2/D2 watch-state blockers with Linux read-only checks
+- L2 still has only one historical `agent.l2_calls` row (`2026-06-10`, `ml_advisory.diagnose_leak`, `manual`, `anthropic:sonnet`); L2 cron cursor is `2026-06-17` with 2026-06-12..17 all `materials_l2=0/stored=0`; `[88]`/`[89]` PASS; B3 shadow rows=0 and consequential marks=0
+- D2 `observability.engine_events(event_type='reconcile_ghost_converge')` remains 0, including 0 `removed_position_semantics` payload rows; no archive/closure
+- boundary: read-only PG plus Linux `/tmp` files/logs only; no CI, deploy/rebuild/restart, model call, DB write, runtime/auth/risk/order/trading mutation
+
 2026-06-19 01:07 CEST
 - corrected TODO v210 source-sync metadata after the v209 Gate-B WATCH_ONLY refresh checkpoint
 - Mac `main`, `origin/main`, and Linux `trade-core` were verified at `117a6a0c`; TODO masthead/§0 now name that source state instead of prior `cd0776ef`

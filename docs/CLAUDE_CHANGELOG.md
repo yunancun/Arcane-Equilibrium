@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v210 source-sync correction checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v211 L2/D2 read-only watch refresh checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v211 增量（2026-06-19 L2/D2 read-only watch refresh checkpoint）**：刷新 `P1-L2-ADVISORY-MESH-TAILS` 與 `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` 的現場阻塞證據。Linux read-only PG + file/log check：`agent.l2_calls` 仍只有 1 row（2026-06-10 `ml_advisory.diagnose_leak` / `manual` / `anthropic:sonnet`），`memory_recall_shadow` rows=0，`agent.l2_consequential_marks`=0，`learning.l2_gate_seam_log`=4；L2 cron cursor `last_success_utc_date=2026-06-17`，day stats 2026-06-12..17 皆 `materials_l2=0` / `stored=0`，`[88]`/`[89]` PASS；`observability.engine_events(event_type='reconcile_ghost_converge')` 仍 0 rows，`removed_position_semantics` payload rows=0。結論：L2/D2 rows 不可 archive；等待 first non-empty material day / B3 shadow runtime evidence / D2 production event proof。邊界：read-only PG + local Linux `/tmp` files/logs only；未跑 CI full suite，未 deploy/rebuild/restart，無 model call、DB write、credential/key/secret/runtime/auth/risk/order/trading mutation。
 
 **v210 增量（2026-06-19 source-sync correction checkpoint）**：修正 `TODO.md` masthead / §0 source-sync 事實：v209 Gate-B WATCH_ONLY refresh commit `117a6a0c` 已推送 `origin/main` 並 fast-forward 到 Linux `trade-core`，不應再把 prior `cd0776ef` 寫作來源實作 HEAD。Focused verification：Mac `HEAD=origin/main=117a6a0c`，Linux `/home/ncyu/BybitOpenClaw/srv` `HEAD=origin/main=117a6a0c`；`git diff --check` PASS。邊界：docs/TODO hygiene only；未跑 CI full suite，未 deploy/rebuild/restart，running engine binary 未改；無真 Bybit call、無 credential/key/secret/runtime/DB/auth/risk/order/trading mutation；不關閉任何 runtime/review/operator gate。
 
