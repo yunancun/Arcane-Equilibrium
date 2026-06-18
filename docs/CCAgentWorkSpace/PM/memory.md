@@ -423,3 +423,8 @@
 
 - TODO v174 archives `P3-MARKET-TICKERS-INDEX-MARK-DEAD-PERSISTENCE` from §5 after post-engine-start SQL evidence passed. Current Linux engine PID 3134818 started `2026-06-18 14:11:50+02`; source checkpoint `5733eb06` is deployed through runtime source HEAD `83b7632d`; production `market.market_tickers` has nullable real `mark_price/index_price/open_interest/funding_rate`.
 - Linux read-only SQL for `ts >= 2026-06-18 14:11:50+02` returned n=587319, mark_n=40912, index_n=84919, oi_n=5913, funding_n=719; mark/index/OI zero counts are 0, and funding_zero=8 is legitimate zero funding. This closes forward persistence/fake-zero evidence only; it does not backfill history or change 90d retention. Boundary: read-only DB/source verification + docs hygiene only; no CI/deploy/rebuild/restart/runtime/DB/auth/risk/order/trading mutation.
+
+## 2026-06-18 TODO funding/OI backfill completed-row archive
+
+- TODO v175 archives `P0-EDGE-1-CAND-FUNDING-OI-BACKFILL` from §5. The completed state remains in TODO §2; active queue no longer needs a row whose only content was caveat/usage guidance.
+- Linux read-only recheck confirmed `research.alpha_funding_rates_history` rows=46539 and `research.alpha_open_interest_history` rows=348153, single run_id `18b3c2f8-6125-42a8-a42c-cfcc8aec9406`, 0 NULL values. Caveat preserved: run-versioned schema is not idempotent on re-apply; future cron/refresh requires a new active row for clear-old-run/wrapper/rate-limit design. Boundary: docs hygiene + read-only SQL only; no CI/deploy/rebuild/restart/runtime/DB/auth/risk/order/trading mutation.
