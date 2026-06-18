@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 01:46 CEST
+- completed BB read-only audit for the §6 fee-tier/rebate/MM-program cost-wall lever
+- official Bybit docs show VIP1 derivatives starts at $10M/30d or $100k assets; API Broker Level 1 derivatives also starts at $10M/30d; MM rebates require application plus weighted maker share; MNT fee discounts exclude API users
+- Linux read-only PG current 30d fills proxy: $840,299.41 notional total, $477,049.36 maker, $354,950.82 taker; demo/live_demo only, so not eligibility proof and still only ~8.4% of $10M as capacity proxy
+- boundary: public docs + read-only SELECT only; no private/signed Bybit API, CI, deploy/rebuild/restart, DB write, runtime/auth/risk/order/trading mutation
+
 2026-06-19 01:27 CEST
 - triaged passive health residuals with Linux `passive_wait_healthcheck.sh`
 - `[48] replay_manifest_registry_growth` is now PASS (total=45, rows_7d=6, rows_24h=1, last_age=21.5h) and was removed as a residual blocker in TODO
