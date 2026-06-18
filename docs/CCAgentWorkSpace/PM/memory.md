@@ -453,3 +453,8 @@
 
 - TODO v180 archives `AUDIT-2026-06-14-AUTH-1` and `AUDIT-2026-06-14-PROFIT-1` from §5. AUTH-1 remains closed by cold-audit fix-wave/deploy; PROFIT-1 remains NO-FIX with passive_wait `[90]` sentinel.
 - The future tails are preserved in §7, not hidden: Rust live-authz/direct-socket closure is a future operator architecture decision, and cost-gate double-deduct fix only reopens if explore-gate/Stage0R produces validated-positive cells or forward PnL proves released cells positive. Boundary: docs hygiene only; no source/runtime mutation.
+
+## 2026-06-18 TODO schedule-only duplicate cleanup
+
+- TODO v181 removes `P3-BB-STRATEGIES-30D-CATCH-UP-CLOCK` and `P1-HALT-TRIGGER-ROOT-CAUSE-INVESTIGATION-1` from §5 because both are passive scheduled reviews already carried by §7.
+- §7 now contains the missing details: 2026-06-27 bb strategy baseline/retire/extend decision, and 2026-08-21 fallback dead-enum + halt root-cause review with `halt_audit.log` ready. Boundary: docs hygiene only; no source/runtime mutation.
