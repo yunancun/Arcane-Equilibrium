@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v213 flash_dip pilot observation checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v214 passive health residual triage checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v214 增量（2026-06-19 passive health residual triage checkpoint）**：用 Linux `passive_wait_healthcheck.sh` 重新核對 §0 被動健康殘留。Overall healthcheck 仍 FAIL，但 `[48] replay_manifest_registry_growth` 已 PASS（2026-06-18T23:25:26Z，total=45 / rows_7d=6 / rows_24h=1 / last_age=21.5h），因此不再列為殘留阻塞。Remaining failures kept explicit：`[74] close_maker_reject_samples` FAIL（demo attempts=198 / postonly_reject_samples=26 / max_pending_samples=0，仍缺 max-pending reject sample 或 gate 決策）與 `[56] live_pipeline_active` FAIL（live auth `authorization_json_missing` at `/home/ncyu/BybitOpenClaw/secrets/secret_files/bybit/live/authorization.json`，仍需 operator signed live-auth renew）。同輪 watchdog read-only still fresh (`engine_alive=true`, demo snapshot age 16.5s)。邊界：read-only healthcheck only；未跑 CI full suite，未 deploy/rebuild/restart，無 model call、DB write、credential/key/secret/runtime/auth/risk/order/trading mutation；不關閉 `[74]`、`[56]`、OPS/operator gates。
 
 **v213 增量（2026-06-19 flash_dip pilot observation checkpoint）**：刷新 `flash_dip_buy` demo pilot 與 Gate-B 現場證據，明確記錄「live+functional 但 zero-sample wait」。Linux watchdog at 2026-06-19 01:19 CEST showed `engine_alive=true` / demo snapshot age 20.6s；snapshot has `flash_dip_buy` active and risk per-strategy enabled, but `paper_state.positions=[]`。Read-only PG found 0 flash_dip rows across `trading.intents` / `orders` / `fills` / `order_state_changes` / `position_snapshots`；`/tmp/openclaw/flash_dip_buy_entry_ts.json` is `{}`；death-rate log and heartbeat are absent before the first scheduled 06:53 CEST natural run。Daily kline keepalive last ran 2026-06-18 14:34 CEST, OK with 26 symbols / 180 observed bars / 0 inserted / TONUSDT partial 5/7。Gate-B latest `/tmp/openclaw/gate_b_watch/gate_b_watch_latest.json` at 2026-06-18T23:12:01Z remains `WATCH_ONLY`（21 total / 0 alertable / 0 start_now / 0 schedule / 1 watch_only, top BPUSDT stale），so the 22:42 preflight was not rerun and no isolated probe was started。邊界：read-only PG + Linux `/tmp` files/logs/artifacts only；未跑 CI full suite，未 deploy/rebuild/restart，無 model call、DB write、credential/key/secret/runtime/auth/risk/order/trading mutation；不關閉 flash_dip evidence accumulation、death-rate、Gate-B probe、P0-EDGE、runtime/review/operator gates。
 
