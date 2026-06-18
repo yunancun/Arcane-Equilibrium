@@ -398,3 +398,8 @@
 
 - TODO v169 archives five more no-action completed rows from §5: PERF-123, DIRTY-FIX, V5.8 pause readiness, P0-EDGE post-deploy QA A1/A2/B/A4, and CODE-SIMPLIFY-D no-reopen.
 - Masthead/§0 now records prior docs checkpoint `e4e1b7a3` as Mac→GitHub→Linux `trade-core` fast-forward verified; no CI/deploy/rebuild/restart/source/runtime/DB/auth/risk/order/trading mutation.
+
+## 2026-06-18 TODO operator archive pass
+
+- TODO v170 compresses §6 operator actions by archiving six completed historical rows: V127 apply, AC19 cron cleanup, P5-SM step-i, P2 #6/#7, P2 #8 AST decision, and residual producer baseline done.
+- Kept rows with real remaining gates: front levers, P2/L2 tails, Gate-B capture, OP-1/2/3, restore/systemd window, OPS-2 leftover auth/rotation, and residual PART4 activation decision. Boundary: docs hygiene only; no runtime mutation.

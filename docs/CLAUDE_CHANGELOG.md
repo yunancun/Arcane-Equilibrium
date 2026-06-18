@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v169 closed-row archive pass #2 + source-sync checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v170 operator archive pass；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v170 增量（2026-06-18 operator archive pass）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，壓縮 `TODO.md` §6 操作員行動清單，移出 6 個已完成且無當前 operator action 的歷史行：`V127 regime-labels migration apply`、`AC19 crontab 行清除`、`P5-SM step-i soak flag-on`、`P2 #6/#7 已上 main`、`P2 #8 AST 解凍決策`、`RESIDUAL-PRODUCER 全完成+部署+flag-on`。保留仍含真 gate 的 operator rows：智能調參前路 lever、P2/L2 remaining gates、Gate-B 24h capture、OP-1/2/3、還原/系統層窗口、OPS-2 cutover leftover `/auth/renew`/rotation、RESIDUAL PART4 activation decision。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 source/runtime/DB/auth/risk/order/trading mutation。
 
 **v169 增量（2026-06-18 closed-row archive pass #2 + source-sync checkpoint）**：依 `docs/agents/todo-maintenance.md` DONE lifecycle，從 `TODO.md` §5 active queue 再移出 5 個無下一步或已被其他 active row 承接的完成 rows：`AUDIT-2026-06-14-PERF-123`（PERF-1/2/3 全修，報告已歸 cold-audit fix-wave）、`AUDIT-2026-06-14-DIRTY-FIX`（m4 fee fan-out / closed_pnl fail-closed 修復及 Linux true-table 複驗已完成）、`V5.8-PAUSE-READINESS`（未來 pause/resume 只需重跑 checker，active freeze posture 已在 §3.1 保留）、`P0-EDGE-1-POST-DEPLOY-QA-A1A2BA4`（A-1 preventive closure、B 正面證據路徑由 `P1-BB-REVERSION-REGIME-OBSERVABILITY` 承接）、`CODE-SIMPLIFY-D-CLOSED`（operator no-reopen 保留到 archive marker）。同輪 masthead/§0 source-sync 指針更新到 prior docs checkpoint `e4e1b7a3`，該 checkpoint 已 Mac→GitHub→Linux `trade-core` fast-forward verified；Linux 僅有 unrelated untracked report/research artifacts。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 deploy/rebuild/restart、無 source/runtime/DB/auth/risk/order/trading mutation。
 
