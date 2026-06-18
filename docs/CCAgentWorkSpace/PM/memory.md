@@ -532,3 +532,9 @@
 - TODO v194 closes `P2-CLIPPY-CLEANUP-1`: Apple Silicon `cargo clippy --target aarch64-apple-darwin -- -D warnings` now passes.
 - Low-risk core/type lint errors were fixed directly; engine/bin historical lint debt is explicit at crate/bin boundaries so new unlisted lint classes still fail. Verification passed: clippy gate, core lib 412 passed, engine lib 4092 passed / 1 ignored.
 - Boundary: source/tests/docs only; no CI full suite, deploy/rebuild/restart, runtime DB/auth/risk/order/trading mutation, credential mutation, or real Bybit call.
+
+## 2026-06-18 H0Gate file split
+
+- TODO v195 closes `P3-H0GATE-FILE-SPLIT`: `h0_gate.rs` moved its test module to `h0_gate/tests.rs`, reducing the production file from 1243 to 630 lines.
+- Verification passed: H0 tests 33 passed, core lib 412 passed, Apple clippy gate, and engine `h0_latency_metrics` 5 passed.
+- Boundary: source/tests/docs only; no CI full suite, deploy/rebuild/restart, runtime DB/auth/risk/order/trading mutation, credential mutation, or real Bybit call.
