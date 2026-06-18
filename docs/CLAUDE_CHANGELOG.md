@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-18（TODO v184 SignalSpec conformance stale-defer relocation；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-18（TODO v185 tail deferred-debt relocation；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v185 增量（2026-06-18 tail deferred-debt relocation）**：依 `docs/agents/todo-maintenance.md` passive wait 規則，從 `TODO.md` §5 移出尾端 7 組明確 deferred / condition-triggered / cadence debt，改由 §7 承接，避免 active engineering queue 被低優先等待項稀釋：`P2-PACKET-C-C5-GUI-BANNER-ACK-ROLE`（等 Packet C4 / `failsafe_ack_role` freeze）、OPS-2 Sprint4 runbook debt bundle（hotreload/audit endpoint/cron drift/healthcheck SQL/emergency audit contract）、`P1-LG-5` 90d maturity review、`P1-LEASE-1`（等 `P0-LG-3`）、`P1-EDGE-P2-3-PH1B-DYNAMIC-BACKOFF-FOLLOWUP`（等 Phase 2a Demo PASS）、`P1-INTENTYPE-FIELD-VISIBILITY-DEFER`（等 PA builder pattern spec）、`P3-OPS-4-PG-DUMP-EVENT-EXTEND` / `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC`（Sprint bandwidth / SOP debt）。保留於 §5 的仍是真 active/operator/action rows（OP-1、OPS-4、TOTP、A1/A2 runner、Earn Wave C/D、110009 等）。邊界：TODO/changelog/memory/report hygiene only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation；不宣稱上述 debt 已完成。
 
 **v184 增量（2026-06-18 SignalSpec conformance stale-defer relocation）**：依 `docs/agents/todo-maintenance.md` active queue / passive wait 規則，從 `TODO.md` §5 移出 `P2-AST-SIGNALSPEC-CONFORMANCE`，改由 §7 條件等待承接。這不是完成歸檔，也不是開始實作 checker：舊 row 的「SignalSpec producer 只在未合併分支 / HEAD 僅 validator」理由已過期，因 `program_code/ml_training/candidate_signal_spec_producer.py`、residual source、hidden-OOS/manifest source 目前在 main，且 v170 已封存 residual-producer baseline/operator 歷史行；但 #8 的真正 blocker 仍是 formal SignalSpec schema freeze + PA/PM GO。§7 保留命名與範圍約束：未解凍前不得做 expression-tree AST checker；解凍後應正名 `SignalSpec schema/lineage conformance checker`，覆蓋 fields、duplicate fingerprint、feature-count budget、deterministic hypothesis alignment。邊界：TODO/changelog/memory/report hygiene + source/read-only status correction only；無 CI、無 source/code change、無 deploy/rebuild/restart、無 runtime/DB/auth/risk/order/trading mutation。
 
