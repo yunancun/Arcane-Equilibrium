@@ -694,3 +694,10 @@ YYYY-MM-DD HH:MM TZ
 - Dispatch chain: `PM -> R4(explorer) + CC(default) + FA(default) -> PA(default) -> PM`.
 - Result: `docs/README.md` is now router-sized, the long document index moved to `docs/_indexes/document_index.md`, `document_inventory.json` became a v2 summary snapshot, second-level README routers were added, and high-risk historical docs got reference/superseded wording.
 - Boundary: docs/memory governance only; no runtime, DB, auth, risk, trading, deploy, model-call, or code-path change. Existing unrelated Rust/helper WIP was not touched.
+
+# 2026-06-19 — Vol-Event Robust Ruling Evidence Checkpoint
+
+- Task: preserve Linux-generated vol-event robust ruling as repo-tracked TODO evidence.
+- Dispatch chain: `PM(default)` local read-only synthesis; no sub-agent spawn.
+- Result: added dated report `docs/CCAgentWorkSpace/E1/workspace/reports/2026-06-18--vol-event-robust-ruling.md` and advanced TODO to v216. The report records 4 independent high_vol events, 0/4 surviving the fee wall, and robust ruling `NO_EDGE_SURVIVES`.
+- Boundary: docs/report evidence only; no CI full suite, deploy/rebuild/restart, model call, DB write, credential/key/secret/runtime/auth/risk/order/trading mutation.

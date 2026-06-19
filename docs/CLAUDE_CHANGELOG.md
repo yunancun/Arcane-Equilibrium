@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v215 Bybit fee/MM/rebate eligibility checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v216 vol-event robust ruling evidence checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v216 增量（2026-06-19 vol-event robust ruling evidence checkpoint）**：收錄 Linux runtime 上由 `vol_event_trigger.py` 自動產出的 high-vol robust ruling artifact，將 §6「vol-event cron 已自動精煉」從無 report pointer 的敘述改成 repo-tracked evidence。新增 report `docs/CCAgentWorkSpace/E1/workspace/reports/2026-06-18--vol-event-robust-ruling.md`：2026-06-18T22:00Z，自動分析 4 個 independent high_vol events（downside=3 / upside_squeeze=1），regime diversity achieved，0/4 events survives fee wall；OFI@10s fwd15s、OFI@10s fwd5s、microprice_tilt 三軸均 0/4，robust ruling `NO_EDGE_SURVIVES`。此 ruling 只補 evidence trace，最終 promotion verdict 權限仍屬 QC；未啟動新 probe/strategy/order，也不改 risk/runtime。邊界：docs/report evidence only，source snapshot copied from Linux untracked artifact；未跑 CI full suite，未 deploy/rebuild/restart，無 model call、DB write、credential/key/secret/runtime/auth/risk/order/trading mutation；不關閉 P0-EDGE、cost-wall、Gate-B、flash_dip、L2、review 或 operator gates。
 
 **v215 增量（2026-06-19 Bybit fee/MM/rebate eligibility checkpoint）**：完成 §6 智能調參 Agent 前路 lever 的 BB read-only audit，把 `fee-tier / rebate / MM-program` 從「待 BB 評估」收斂成明確 operator-only / scale-gated lever。官方 Bybit docs rechecked：standard perpetual/futures VIP0 = taker 0.0550% / maker 0.0200%；VIP1 derivatives 需 30d derivatives volume >= $10M 或 asset balance >= $100k；API Broker Level 1 derivatives 也從 $10M 起，且需正式 Broker ID / `referer` onboarding；MM program 需 institutional application + weighted maker share，非自動升級；MNT fee discount 明確不適用 API users。Linux read-only PG capacity proxy：30d `trading.fills` 1,529 fills / $840,299.41 notional / $304.4811 fee / effective 3.6235bps，其中 maker $477,049.36、taker $354,950.82；且全為 demo/live_demo，不能當 mainnet VIP eligibility proof。結論：即使用 proxy，也僅約 $10M threshold 的 8.4%，差約 11.9x；PM-local fee reduction 已無可做，剩 operator capital/scale/Bybit BD/MM trial/Broker onboarding 決策。報告：`docs/CCAgentWorkSpace/BB/workspace/reports/2026-06-19--bybit_fee_tier_mm_rebate_eligibility.md`。邊界：official public docs + read-only PG `SELECT` only；未打 Bybit private/signed/trading API，未跑 CI full suite，未 deploy/rebuild/restart，無 DB write、credential/key/secret/runtime/auth/risk/order/trading mutation；不關閉 cost-wall、P0-EDGE、operator gates。
 
