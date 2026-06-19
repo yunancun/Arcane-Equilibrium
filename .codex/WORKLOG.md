@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 03:09 CEST
+- corrected TODO source-sync metadata after v222 Earn first-stake routing review
+- evidence: Mac `HEAD=origin/main=712d3a03`; Linux `trade-core` `HEAD=origin/main=712d3a03`; Linux tracked checkout clean except existing unrelated untracked `vol-event-robust-ruling.md` and `variance_risk_premium/`
+- watchdog read-only status: `engine_alive=true`, demo snapshot age `9.6s`
+- boundary: docs/TODO metadata only; no CI, cargo, Linux build, deploy/rebuild/restart, DB write, Bybit private call, credential mutation, auth/risk/order/trading mutation, or active gate closure
+
 2026-06-19 03:01 CEST
 - refreshed PM-local review evidence for `P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` without archiving the row
 - evidence: source review confirms bootstrap handle-only injection for `BybitEarnClient`/`EarnMovementWriter`, fail-closed unwired behavior, Rust IPC -> owner-task routing for `process_earn_intent`, and Python `/api/v1/earn/stake` `engine=live` routing
