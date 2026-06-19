@@ -264,6 +264,13 @@
 - PM 收錄為 dated repo report `docs/CCAgentWorkSpace/E1/workspace/reports/2026-06-18--vol-event-robust-ruling.md` 並更新 TODO v216；這是 evidence trace，不是 QC final promotion verdict。
 - 邊界：docs/report only；無 runtime/DB/auth/risk/order/trading mutation，P0-EDGE/Gate-B/flash/L2/operator gates 不因此關閉。
 
+## 2026-06-19 Stage0R 8c Denominator + PM Runtime Verification
+
+- PM runtime verification of Stage0R report wrappers found standalone 8c no-sweep emitted `missing_bucket_count_denominator`; alpha_candidate A2 adapter already passed the denominator.
+- Source fix: `w_audit_8c/liquidation_cluster_stage0r_report.py` now queries raw 5m liquidation `total_bucket_count` and passes it into single/sweep metrics; smoke_cli pins the no-missing-denominator invariant.
+- Linux `/tmp` temp clone true-PG post-fix run `stage0r_8c_denominator_fix_20260619T001027Z` produced `RED`/`review_ready=true`, total_rows=291, total_bucket_count=2931, long=164, short=121, missing_denominator=false.
+- TODO advanced to v217. PM formal runtime verification is done; E4 review remains open before trusting Stage0R runner outputs. No deploy/rebuild/restart/runtime/DB/auth/risk/order/trading mutation.
+
 ## 2026-06-12 AEG-S3 Gate-B preflight locator
 
 - `44a30afa`/`f4a58b3c` 新增 artifact-only `aeg_s3_gate_b_preflight`：定位 Gate-B/FND2/regime，preview listing sample/PBO，輸出 full-chain command；auto locator 要求 FND2/regime summary 語義驗證。

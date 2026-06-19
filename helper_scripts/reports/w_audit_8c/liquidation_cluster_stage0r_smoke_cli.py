@@ -222,15 +222,19 @@ def test_compute_stage0r() -> tuple[bool, str]:
     MED-R2-1：sibling round 2 default notional_pct_floor=0.95；smoke 顯式
     pass 0.95 配合 mock data notional_pct=0.97（_build_mock_panel 已升）。
     HIGH-R2-2 同理：production CLI single_kwargs 也應傳 notional_pct_floor。
+    CRIT-2：production CLI 亦必須傳 raw_buckets denominator，否則會被
+    missing_bucket_count_denominator hard-RED。
     """
     rows = _build_mock_panel(n_symbols=4, days=8)
     normalized = _normalize_bucket_end_ts(rows)
+    total_bucket_count = len(normalized)
     result = compute_stage0r(
         normalized,
         cost_bps=12.0,
         horizon_min=5,
         notional_pct_floor=0.95,  # MED-R2-1：顯式 8th axis 配 mock 0.97
         bootstrap_iters=50,  # 小量加速 smoke
+        total_bucket_count=total_bucket_count,
     )
     if not isinstance(result, dict):
         return False, f"compute_stage0r 返非 dict: {type(result).__name__}"
@@ -239,6 +243,11 @@ def test_compute_stage0r() -> tuple[bool, str]:
         return False, f"compute_stage0r n_per_cell={n_pc} — 應 > 0"
     if "pass" not in result:
         return False, "compute_stage0r 缺 'pass' verdict key"
+    if any(
+        "missing_bucket_count_denominator" in str(reason)
+        for reason in result.get("pass_reasons", [])
+    ):
+        return False, "single-cell path 不應再缺 total_bucket_count denominator"
     return True, (
         f"compute_stage0r OK: n_per_cell={n_pc} verdict={result.get('pass')}"
     )
@@ -252,6 +261,7 @@ def test_compute_stage0r_sweep() -> tuple[bool, str]:
     """
     rows = _build_mock_panel(n_symbols=4, days=8)
     normalized = _normalize_bucket_end_ts(rows)
+    total_bucket_count = len(normalized)
     # 用小 grid 避 11_664 cell 跑爆 smoke 時間
     result = compute_stage0r_sweep(
         normalized,
@@ -265,6 +275,7 @@ def test_compute_stage0r_sweep() -> tuple[bool, str]:
         horizon_grid=(5,),
         pct_grid=(0.95,),  # HIGH-R2-1：8th axis 顯式接到 sweep
         bootstrap_iters=50,
+        total_bucket_count=total_bucket_count,
     )
     if not isinstance(result, dict):
         return False, (
@@ -324,6 +335,7 @@ def test_packet_builder() -> tuple[bool, str]:
     """驗 _build_packet 覆蓋 spec v0.3 14 mandatory fields（HIGH-1 fix）。"""
     rows = _build_mock_panel(n_symbols=4, days=8)
     normalized = _normalize_bucket_end_ts(rows)
+    total_bucket_count = len(normalized)
     sweep = compute_stage0r_sweep(
         normalized,
         cost_bps=12.0,
@@ -336,6 +348,7 @@ def test_packet_builder() -> tuple[bool, str]:
         horizon_grid=(5,),
         pct_grid=(0.95,),  # HIGH-R2-1：packet 流也走 8th axis
         bootstrap_iters=50,
+        total_bucket_count=total_bucket_count,
     )
     cells = sweep.get("sweep_cells") or []
     primary = cells[0] if cells else None
@@ -388,6 +401,13 @@ def test_packet_builder() -> tuple[bool, str]:
     missing_cats = exc_cats - set(exc.keys())
     if missing_cats:
         return False, f"exclusion_counts 缺 5 categories 之: {missing_cats}"
+    primary_cell = packet.get("primary_cell") or {}
+    reasons = primary_cell.get("pass_reasons") if isinstance(primary_cell, dict) else []
+    if any(
+        "missing_bucket_count_denominator" in str(reason)
+        for reason in (reasons or [])
+    ):
+        return False, "packet primary_cell 不應含 missing_bucket_count_denominator"
     return True, f"packet 完整：{len(packet)} top-level keys + 5 exclusion categories"
 
 
@@ -395,6 +415,7 @@ def test_render_markdown() -> tuple[bool, str]:
     """驗 Markdown render 不拋 + 含 4-agent sections。"""
     rows = _build_mock_panel(n_symbols=2, days=8)
     normalized = _normalize_bucket_end_ts(rows)
+    total_bucket_count = len(normalized)
     sweep = compute_stage0r_sweep(
         normalized,
         cost_bps=12.0,
@@ -407,6 +428,7 @@ def test_render_markdown() -> tuple[bool, str]:
         horizon_grid=(5,),
         pct_grid=(0.95,),  # HIGH-R2-1
         bootstrap_iters=20,
+        total_bucket_count=total_bucket_count,
     )
     cells = sweep.get("sweep_cells") or []
     primary = cells[0] if cells else None
