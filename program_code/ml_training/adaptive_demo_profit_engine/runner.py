@@ -72,6 +72,7 @@ from program_code.ml_training.adaptive_demo_profit_engine.ipc_lever import (
 )
 from program_code.ml_training.adaptive_demo_profit_engine.reward_source import (
     fetch_demo_arm_rewards,
+    fetch_demo_side_edge_cells,
 )
 from program_code.ml_training.adaptive_demo_profit_engine.explore_quota_sink import (
     build_explore_overlay,
@@ -535,6 +536,7 @@ class AdpeRunner:
         lever: Optional[StrategyLever] = None,
         rewards_fn=None,
         advisory_fn=None,
+        side_evidence_fn=None,
         dsn: Optional[str] = None,
         edge_estimates_path: Optional[str] = None,
     ):
@@ -546,6 +548,9 @@ class AdpeRunner:
         self._rewards_fn = rewards_fn or self._default_rewards_fn
         # advisory_fn：注入點（測試 / 替代源）；預設讀 L2/multi-agent advisory 表。
         self._advisory_fn = advisory_fn or self._default_advisory_fn
+        # side_evidence_fn：注入點；預設從 DB 原始 realized edge 重建 side cells，
+        # 作為 edge_estimates.json side overlay 被舊 writer 覆蓋時的 fallback。
+        self._side_evidence_fn = side_evidence_fn or self._default_side_evidence_fn
         self._dsn = dsn
         self._rng = random.Random(self.runner_cfg.rng_seed)
         # Track1 demo explore-gate：edge_estimates.json 路徑（測試可注入 scratch 檔）。
@@ -588,6 +593,24 @@ class AdpeRunner:
         except Exception as exc:  # noqa: BLE001
             logger.warning("ADPE advisory evidence 讀取失敗，controlled explore fail-closed: %s", exc)
             return {}
+
+    def _default_side_evidence_fn(self) -> list[dict]:
+        if (
+            not self.runner_cfg.use_edge_snapshot_for_explore_evidence
+            or not self.runner_cfg.enable_explore_sink
+            or not self.runner_cfg.controlled_experiment_enabled
+        ):
+            return []
+        if self._dsn is None:
+            return []
+        try:
+            return fetch_demo_side_edge_cells(
+                self._dsn,
+                max_age_days=self.runner_cfg.reward_max_age_days,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ADPE DB side edge evidence 讀取失敗，fallback 為空: %s", exc)
+            return []
 
     def ingest_demo_maker_outcome(self, realized_spread_bps: float, ts: float) -> None:
         """把一筆 demo-maker round-trip 已實現價差餵進 allocator。
@@ -763,14 +786,20 @@ class AdpeRunner:
         snapshot_cell_strategies_seen = set(
             edge_evidence_audit.get("snapshot_cell_strategies_seen") or []
         )
-        edge_snapshot_has_candidate_cells = bool(
+        db_side_cell_strategies_seen = set(
+            edge_evidence_audit.get("db_side_cell_strategies_seen") or []
+        )
+        edge_source_has_candidate_cells = bool(
             edge_evidence_audit.get("snapshot_loaded")
         ) and bool(set(explore_candidates) & snapshot_cell_strategies_seen)
+        edge_source_has_candidate_cells = edge_source_has_candidate_cells or bool(
+            set(explore_candidates) & db_side_cell_strategies_seen
+        )
         require_cost_edge = (
             bool(self.runner_cfg.require_cost_viable_edge_for_explore_when_available)
             and (
                 bool(edge_evidence_candidate_strategies)
-                or edge_snapshot_has_candidate_cells
+                or edge_source_has_candidate_cells
             )
         )
         rejected: dict[str, str] = {}
@@ -842,32 +871,24 @@ class AdpeRunner:
                 "snapshot_loaded": False,
             }
             return {}, []
+        snapshot_loaded = False
+        snapshot_reason: Optional[str] = None
         try:
             with open(self._edge_estimates_path, "r", encoding="utf-8") as f:
                 snapshot = json.load(f)
+            if isinstance(snapshot, dict):
+                snapshot_loaded = True
+            else:
+                snapshot = {}
+                snapshot_reason = "edge_estimates_not_object"
         except FileNotFoundError:
             logger.info("ADPE edge evidence: edge_estimates.json missing")
-            self._last_edge_evidence_audit = {
-                "enabled": True,
-                "snapshot_loaded": False,
-                "reason": "edge_estimates_missing",
-            }
-            return {}, []
+            snapshot = {}
+            snapshot_reason = "edge_estimates_missing"
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("ADPE edge evidence: edge_estimates.json unreadable: %s", exc)
-            self._last_edge_evidence_audit = {
-                "enabled": True,
-                "snapshot_loaded": False,
-                "reason": "edge_estimates_unreadable",
-            }
-            return {}, []
-        if not isinstance(snapshot, dict):
-            self._last_edge_evidence_audit = {
-                "enabled": True,
-                "snapshot_loaded": False,
-                "reason": "edge_estimates_not_object",
-            }
-            return {}, []
+            snapshot = {}
+            snapshot_reason = "edge_estimates_unreadable"
 
         fee_rate = max(0.0, float(self.runner_cfg.edge_evidence_fee_rate))
         slippage = max(0.0, float(self.runner_cfg.edge_evidence_slippage))
@@ -886,9 +907,12 @@ class AdpeRunner:
         skipped_low_n = 0
         skipped_grid_low_n = 0
         side_cell_strategies_seen: set[str] = set()
+        db_side_cell_strategies_seen: set[str] = set()
         legacy_cell_strategies_seen: set[str] = set()
         candidate_side_cells_seen = 0
+        db_side_cells_seen = 0
         legacy_cells_seen = 0
+        side_candidates: dict[str, tuple[str, str, str, dict, str]] = {}
 
         scores: dict[str, float] = {}
         cells: list[dict] = []
@@ -910,6 +934,28 @@ class AdpeRunner:
                 continue
             candidate_side_cells_seen += 1
             side_cell_strategies_seen.add(strategy)
+            side_candidates[key] = (strategy, symbol, side, raw_cell, "edge_estimates")
+
+        db_side_records = self._side_evidence_fn() or []
+        for record in db_side_records:
+            if not isinstance(record, dict):
+                continue
+            strategy = str(record.get("strategy") or "").strip()
+            symbol = str(record.get("symbol") or "").strip()
+            side = _canonical_entry_side(str(record.get("side") or ""))
+            raw_cell = record.get("cell")
+            if not isinstance(raw_cell, dict):
+                raw_cell = record
+            key = str(record.get("key") or f"{strategy}::{symbol}::{side or ''}").strip()
+            if not strategy or not symbol or side is None or not isinstance(raw_cell, dict):
+                continue
+            db_side_cells_seen += 1
+            db_side_cell_strategies_seen.add(strategy)
+            # DB is the source of truth for realized side labels; let it override
+            # stale JSON side cells with the same key while preserving audit counts.
+            side_candidates[key] = (strategy, symbol, side, raw_cell, str(record.get("source") or "db"))
+
+        for key, (strategy, symbol, side, raw_cell, source) in side_candidates.items():
             if ready_symbols is not None and symbol not in ready_symbols:
                 skipped_unready += 1
                 continue
@@ -940,6 +986,7 @@ class AdpeRunner:
                     "margin_bps": round(margin_bps, 6),
                     "win_rate": round(win_rate, 6),
                     "n": n_trades,
+                    "source": source,
                     "readiness": self._classify_edge_cell_readiness(
                         strategy,
                         symbol,
@@ -957,13 +1004,16 @@ class AdpeRunner:
             )
         self._last_edge_evidence_audit = {
             "enabled": True,
-            "snapshot_loaded": True,
+            "snapshot_loaded": snapshot_loaded,
+            "snapshot_reason": snapshot_reason,
             "candidate_side_cells_seen": candidate_side_cells_seen,
+            "db_side_cells_seen": db_side_cells_seen,
             "legacy_cells_seen": legacy_cells_seen,
             "snapshot_cell_strategies_seen": sorted(
                 side_cell_strategies_seen | legacy_cell_strategies_seen
             ),
             "side_cell_strategies_seen": sorted(side_cell_strategies_seen),
+            "db_side_cell_strategies_seen": sorted(db_side_cell_strategies_seen),
             "legacy_cell_strategies_seen": sorted(legacy_cell_strategies_seen),
             "cost_viable_cells": len(cells),
             "skipped_unready_symbol": skipped_unready,
