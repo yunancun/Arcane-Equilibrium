@@ -25,6 +25,14 @@
 
 ## 近期記錄
 
+## 2026-06-19 TODO v227 Passive-Watch Refresh
+
+- Refreshed passive watch surfaces without closing any active gate.
+- Source sync: Mac/origin/Linux aligned at v226 checkpoint `880b82ba`; watchdog `engine_alive=true` with demo snapshot age `7.4s`.
+- Gate-B latest `2026-06-19T01:42:01Z` remained `WATCH_ONLY` with 21 total candidates, 0 alertable/start/schedule, and 1 watch_only; no preflight/probe was run.
+- flash_dip remained zero-sample; L2 cursor remained `2026-06-17` with B3 shadow rows=0; D2 `reconcile_ghost_converge` total/semantics rows remained 0.
+- Passive health at `2026-06-19T01:45:02Z` still failed `[74]` (`attempts=201`, `postonly=26`, `max_pending=0`) and `[56]` (`authorization_json_missing`). Boundary: docs/TODO/report + read-only Linux file/PG/healthcheck only; no CI/cargo/Linux build/deploy/rebuild/restart/DB write/Bybit private call/credential/runtime/auth/risk/order/trading mutation/probe/archive/promotion.
+
 ## 2026-06-19 TODO v226 Source-Sync Correction
 
 - Corrected source-sync metadata after v225 passive-watch refresh.
