@@ -152,6 +152,8 @@ class AdpeRunnerConfig:
     edge_evidence_win_rate_floor: float = 0.3
     edge_evidence_safety_multiplier: float = 1.3
     edge_evidence_grid_min_n: int = 30
+    edge_evidence_require_runtime_symbol_ready: bool = False
+    edge_evidence_runtime_snapshot_path: str = "/tmp/openclaw/pipeline_snapshot.json"
 
 
 def load_runner_config(
@@ -232,6 +234,15 @@ def load_runner_config(
             runner_d.get("edge_evidence_safety_multiplier", 1.3)
         ),
         edge_evidence_grid_min_n=int(runner_d.get("edge_evidence_grid_min_n", 30)),
+        edge_evidence_require_runtime_symbol_ready=bool(
+            runner_d.get("edge_evidence_require_runtime_symbol_ready", False)
+        ),
+        edge_evidence_runtime_snapshot_path=str(
+            runner_d.get(
+                "edge_evidence_runtime_snapshot_path",
+                "/tmp/openclaw/pipeline_snapshot.json",
+            )
+        ),
     )
 
     # AllocatorConfig：只覆寫 TOML 有提供的欄位，其餘用 dataclass 預設。
@@ -823,6 +834,8 @@ class AdpeRunner:
         win_rate_floor = max(1e-9, min(1.0, self.runner_cfg.edge_evidence_win_rate_floor))
         safety_multiplier = max(1.0, self.runner_cfg.edge_evidence_safety_multiplier)
         grid_min_n = max(0, int(self.runner_cfg.edge_evidence_grid_min_n))
+        ready_symbols = self._load_edge_evidence_ready_symbols()
+        skipped_unready = 0
 
         scores: dict[str, float] = {}
         cells: list[dict] = []
@@ -835,6 +848,9 @@ class AdpeRunner:
             strategy, symbol, side_raw = (p.strip() for p in parts)
             side = _canonical_entry_side(side_raw)
             if not strategy or not symbol or side is None:
+                continue
+            if ready_symbols is not None and symbol not in ready_symbols:
+                skipped_unready += 1
                 continue
             bps = _cell_bps(raw_cell)
             if bps is None or bps <= 0.0:
@@ -863,7 +879,39 @@ class AdpeRunner:
             )
 
         cells.sort(key=lambda item: (item["margin_bps"], item["key"]), reverse=True)
+        if skipped_unready:
+            logger.info(
+                "ADPE edge evidence: skipped %d side cells without runtime-ready symbol",
+                skipped_unready,
+            )
         return scores, cells
+
+    def _load_edge_evidence_ready_symbols(self) -> Optional[set[str]]:
+        if not self.runner_cfg.edge_evidence_require_runtime_symbol_ready:
+            return None
+        path = str(self.runner_cfg.edge_evidence_runtime_snapshot_path or "").strip()
+        if not path:
+            return None
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                snapshot = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
+            logger.info("ADPE edge evidence: runtime symbol readiness skipped: %s", exc)
+            return None
+        if not isinstance(snapshot, dict):
+            return None
+        latest_prices = snapshot.get("latest_prices")
+        indicators = snapshot.get("indicators")
+        if not isinstance(latest_prices, dict) or not isinstance(indicators, dict):
+            return None
+        ready: set[str] = set()
+        for symbol, price in latest_prices.items():
+            symbol_s = str(symbol).strip()
+            if not symbol_s or _finite_float(price) is None:
+                continue
+            if isinstance(indicators.get(symbol_s), dict):
+                ready.add(symbol_s)
+        return ready
 
     # ---- 一個 cycle -------------------------------------------------------
 
