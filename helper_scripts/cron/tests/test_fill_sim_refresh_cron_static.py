@@ -14,6 +14,7 @@ import pytest
 
 CRON_DIR = Path(__file__).resolve().parents[1]
 WRAPPER = CRON_DIR / "fill_sim_refresh_cron.sh"
+MM_VERDICT = CRON_DIR / "recorder_mm_verdict_cron.sh"
 
 
 def _src() -> str:
@@ -39,6 +40,7 @@ def test_bounded_freshness_defaults_and_force_override() -> None:
     assert 'OPENCLAW_FILL_SIM_HOURS:-2' in src
     assert 'OPENCLAW_FILL_SIM_MAX_AGE_H:-60' in src
     assert 'OPENCLAW_FILL_SIM_STALE_ALERT_H:-72' in src
+    assert 'OPENCLAW_FILL_SIM_MAX_DATA_AGE_H:-72' in src
     assert "OPENCLAW_FILL_SIM_FORCE" in src
     assert "skipped_fresh" in src
 
@@ -46,7 +48,8 @@ def test_bounded_freshness_defaults_and_force_override() -> None:
 def test_runs_fill_sim_module_with_read_only_pg() -> None:
     src = _src()
     assert "program_code.research.microstructure.fill_sim" in src
-    assert '--out "$REPORT"' in src
+    assert '--out "$CANDIDATE_REPORT"' in src
+    assert '--out "$REPORT"' not in src
     assert 'PGOPTIONS="-c default_transaction_read_only=on"' in src
     assert "basic_system_services.env" in src
     assert "POSTGRES_PASSWORD" in src
@@ -60,6 +63,16 @@ def test_lock_heartbeat_status_and_alert_surfaces() -> None:
     assert "fill_sim_refresh_cron.log" in src
     assert "alerts.jsonl" in src
     assert "refresh_failed" in src
+
+
+def test_candidate_report_must_validate_before_replace() -> None:
+    src = _src()
+    assert "validate_candidate_report" in src
+    assert "empty_l1" in src
+    assert "stale_l1_data" in src
+    assert 'mv -f "$CANDIDATE_REPORT" "$REPORT"' in src
+    assert "candidate_rejected" in src
+    assert "invalid_latest" in src
 
 
 def test_optional_cli_knobs_are_env_only() -> None:
@@ -95,3 +108,11 @@ def test_no_hardcoded_user_paths() -> None:
     src = _src()
     assert "/home/ncyu" not in src
     assert "/Users/" not in src
+
+
+def test_mm_verdict_rejects_empty_or_stale_l1_fillsim_data() -> None:
+    src = MM_VERDICT.read_text(encoding="utf-8")
+    assert "data_l1_rows_post_filter" in src
+    assert "data_l1_max_age_hours" in src
+    assert "empty_l1" in src
+    assert "stale_l1_data" in src

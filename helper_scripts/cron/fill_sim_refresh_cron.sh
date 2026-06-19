@@ -14,6 +14,7 @@
 #   OPENCLAW_FILL_SIM_HOURS=2              recent window; 0 = full available data
 #   OPENCLAW_FILL_SIM_MAX_AGE_H=60         skip refresh while report is younger
 #   OPENCLAW_FILL_SIM_STALE_ALERT_H=72     alert if report remains too old
+#   OPENCLAW_FILL_SIM_MAX_DATA_AGE_H=72    reject candidate if L1 data is older
 #   OPENCLAW_FILL_SIM_FORCE=1              run even if report is fresh
 #   OPENCLAW_FILL_SIM_REPORT=<path>        output JSON; CSV is written beside it
 set -euo pipefail
@@ -33,6 +34,7 @@ REPORT="${OPENCLAW_FILL_SIM_REPORT:-${DATA}/research/fillsim/fillsim_report.json
 FILL_SIM_HOURS="${OPENCLAW_FILL_SIM_HOURS:-2}"
 FILL_SIM_MAX_AGE_H="${OPENCLAW_FILL_SIM_MAX_AGE_H:-60}"
 FILL_SIM_STALE_ALERT_H="${OPENCLAW_FILL_SIM_STALE_ALERT_H:-72}"
+FILL_SIM_MAX_DATA_AGE_H="${OPENCLAW_FILL_SIM_MAX_DATA_AGE_H:-72}"
 FILL_SIM_FORCE="${OPENCLAW_FILL_SIM_FORCE:-0}"
 STALE_LOCK_MIN="${OPENCLAW_FILL_SIM_STALE_LOCK_MIN:-180}"
 
@@ -75,8 +77,14 @@ try:
         rep = json.load(f)
     info["present"] = True
     info["parse_ok"] = True
+    data = rep.get("data") or {}
     gen = rep.get("generated_at")
     info["generated_at"] = gen
+    info["abort"] = rep.get("abort")
+    info["l1_rows_post_filter"] = data.get("l1_rows_post_filter")
+    info["l1_max_ts"] = data.get("l1_max_ts")
+    info["l1_max_age_hours"] = data.get("l1_max_age_hours")
+    info["n_symbols"] = data.get("n_symbols")
     gt = datetime.datetime.fromisoformat(str(gen))
     if gt.tzinfo is None:
         gt = gt.replace(tzinfo=datetime.timezone.utc)
@@ -105,14 +113,20 @@ emit_status() {
     local rc="$2"
     local before_json="$3"
     local after_json="$4"
+    local candidate_json="${5:-}"
+    if [[ -z "$candidate_json" ]]; then
+        candidate_json="{}"
+    fi
     STATUS_ACTION="$action" \
     STATUS_RC="$rc" \
     STATUS_BEFORE="$before_json" \
     STATUS_AFTER="$after_json" \
+    STATUS_CANDIDATE="$candidate_json" \
     STATUS_REPORT="$REPORT" \
     STATUS_HOURS="$FILL_SIM_HOURS" \
     STATUS_MAX_AGE_H="$FILL_SIM_MAX_AGE_H" \
     STATUS_STALE_ALERT_H="$FILL_SIM_STALE_ALERT_H" \
+    STATUS_MAX_DATA_AGE_H="$FILL_SIM_MAX_DATA_AGE_H" \
     STATUS_FORCE="$FILL_SIM_FORCE" \
     "$PYBIN" - <<'PY' >> "$STATUS_LOG"
 import datetime
@@ -135,9 +149,11 @@ row = {
     "hours": float(os.environ["STATUS_HOURS"]),
     "max_age_h": float(os.environ["STATUS_MAX_AGE_H"]),
     "stale_alert_h": float(os.environ["STATUS_STALE_ALERT_H"]),
+    "max_data_age_h": float(os.environ["STATUS_MAX_DATA_AGE_H"]),
     "force": os.environ["STATUS_FORCE"],
     "before": _loads("STATUS_BEFORE"),
     "after": _loads("STATUS_AFTER"),
+    "candidate": _loads("STATUS_CANDIDATE"),
 }
 print(json.dumps(row, separators=(",", ":"), sort_keys=True))
 PY
@@ -162,6 +178,68 @@ row = {
     "channels_ok": None,
 }
 print(json.dumps(row, separators=(",", ":"), sort_keys=True))
+PY
+}
+
+validate_candidate_report() {
+    local candidate_path="$1"
+    "$PYBIN" - "$candidate_path" "$FILL_SIM_MAX_DATA_AGE_H" <<'PY'
+import datetime
+import json
+import sys
+
+path = sys.argv[1]
+max_data_age_h = float(sys.argv[2])
+info = {
+    "path": path,
+    "present": False,
+    "parse_ok": False,
+    "valid": False,
+    "reason": None,
+    "generated_at": None,
+    "l1_rows_post_filter": None,
+    "l1_max_ts": None,
+    "l1_max_age_hours": None,
+    "n_symbols": None,
+    "abort": None,
+}
+try:
+    with open(path, encoding="utf-8") as f:
+        rep = json.load(f)
+    data = rep.get("data") or {}
+    info.update(
+        {
+            "present": True,
+            "parse_ok": True,
+            "generated_at": rep.get("generated_at"),
+            "abort": rep.get("abort"),
+            "l1_rows_post_filter": data.get("l1_rows_post_filter"),
+            "l1_max_ts": data.get("l1_max_ts"),
+            "l1_max_age_hours": data.get("l1_max_age_hours"),
+            "n_symbols": data.get("n_symbols"),
+        }
+    )
+    l1_rows = int(data.get("l1_rows_post_filter") or 0)
+    n_symbols = int(data.get("n_symbols") or 0)
+    l1_age = data.get("l1_max_age_hours")
+    if rep.get("abort"):
+        info["reason"] = "abort"
+    elif l1_rows <= 0:
+        info["reason"] = "empty_l1"
+    elif n_symbols <= 0:
+        info["reason"] = "empty_symbols"
+    elif l1_age is not None and float(l1_age) > max_data_age_h:
+        info["reason"] = "stale_l1_data"
+    else:
+        info["valid"] = True
+        info["reason"] = "ok"
+except FileNotFoundError:
+    info["reason"] = "missing"
+except Exception as exc:
+    info["reason"] = exc.__class__.__name__
+
+print("valid" if info["valid"] else "invalid")
+print(json.dumps(info, separators=(",", ":"), sort_keys=True))
 PY
 }
 
@@ -226,10 +304,21 @@ fi
 export PGHOST="$PG_HOST" PGPORT="$PG_PORT" PGDATABASE="$PG_DB" PGUSER="$PG_USER" PGPASSWORD="$PG_PASS"
 export PGOPTIONS="-c default_transaction_read_only=on"
 
+if [[ "$REPORT" == *.json ]]; then
+    CANDIDATE_REPORT="${REPORT%.json}.candidate.$$.json"
+    INVALID_REPORT="${REPORT%.json}.invalid_latest.json"
+else
+    CANDIDATE_REPORT="${REPORT}.candidate.$$"
+    INVALID_REPORT="${REPORT}.invalid_latest"
+fi
+CANDIDATE_CSV="${CANDIDATE_REPORT%.*}_per_symbol.csv"
+REPORT_CSV="${REPORT%.*}_per_symbol.csv"
+INVALID_CSV="${INVALID_REPORT%.*}_per_symbol.csv"
+
 ARGS=(
     -m program_code.research.microstructure.fill_sim
     --hours "$FILL_SIM_HOURS"
-    --out "$REPORT"
+    --out "$CANDIDATE_REPORT"
 )
 if [[ -n "${OPENCLAW_FILL_SIM_SINCE:-}" ]]; then
     ARGS+=(--since "$OPENCLAW_FILL_SIM_SINCE")
@@ -261,27 +350,56 @@ rc=0
     "$PYBIN" "${ARGS[@]}"
 ) >> "$LOG" 2>&1 || rc=$?
 
+CANDIDATE_STATE="$(validate_candidate_report "$CANDIDATE_REPORT")"
+CANDIDATE_VALID="$(printf '%s\n' "$CANDIDATE_STATE" | sed -n '1p')"
+CANDIDATE_JSON="$(printf '%s\n' "$CANDIDATE_STATE" | sed -n '2p')"
+if [[ -z "$CANDIDATE_JSON" ]]; then
+    CANDIDATE_JSON="{}"
+fi
+
+action="refreshed"
+if [[ "$rc" -ne 0 ]]; then
+    action="refresh_failed"
+    if [[ -f "$CANDIDATE_REPORT" ]]; then
+        mv -f "$CANDIDATE_REPORT" "$INVALID_REPORT"
+    fi
+    if [[ -f "$CANDIDATE_CSV" ]]; then
+        mv -f "$CANDIDATE_CSV" "$INVALID_CSV"
+    fi
+elif [[ "$CANDIDATE_VALID" == "valid" ]]; then
+    mv -f "$CANDIDATE_REPORT" "$REPORT"
+    if [[ -f "$CANDIDATE_CSV" ]]; then
+        mv -f "$CANDIDATE_CSV" "$REPORT_CSV"
+    fi
+else
+    action="candidate_rejected"
+    if [[ -f "$CANDIDATE_REPORT" ]]; then
+        mv -f "$CANDIDATE_REPORT" "$INVALID_REPORT"
+    fi
+    if [[ -f "$CANDIDATE_CSV" ]]; then
+        mv -f "$CANDIDATE_CSV" "$INVALID_CSV"
+    fi
+fi
+
 POST_STATE="$(read_report_state)"
 POST_JSON="$(printf '%s\n' "$POST_STATE" | sed -n '2p')"
 if [[ -z "$POST_JSON" ]]; then
     POST_JSON="{}"
 fi
 
-action="refreshed"
-if [[ "$rc" -ne 0 ]]; then
-    action="refresh_failed"
-fi
-emit_status "$action" "$rc" "$PRE_JSON" "$POST_JSON"
+emit_status "$action" "$rc" "$PRE_JSON" "$POST_JSON" "$CANDIDATE_JSON"
 
-ALERT_NEEDED=$(POST_JSON="$POST_JSON" STALE_ALERT_H="$FILL_SIM_STALE_ALERT_H" RC="$rc" "$PYBIN" - <<'PY'
+ALERT_NEEDED=$(POST_JSON="$POST_JSON" STALE_ALERT_H="$FILL_SIM_STALE_ALERT_H" RC="$rc" ACTION="$action" "$PYBIN" - <<'PY'
 import json
 import os
 
 post = json.loads(os.environ["POST_JSON"])
 stale_h = float(os.environ["STALE_ALERT_H"])
 rc = int(os.environ["RC"])
+action = os.environ["ACTION"]
 age = post.get("age_hours")
-bad = rc != 0 or not post.get("present") or not post.get("parse_ok")
+bad = action in {"refresh_failed", "candidate_rejected"}
+bad = bad or rc != 0 or not post.get("present") or not post.get("parse_ok")
 if age is not None and float(age) > stale_h:
     bad = True
 print("1" if bad else "0")
@@ -292,9 +410,9 @@ if [[ "$ALERT_NEEDED" == "1" ]]; then
     append_alert \
         "[FILL-SIM] refresh failed or stale" \
         "warning" \
-        "fill_sim refresh rc=${rc}; report=${REPORT}; before=${PRE_JSON}; after=${POST_JSON}. MM verdict adverse_selection may become unavailable."
-    echo "[$(ts)] ALERT appended: fill_sim refresh rc=${rc} after=${POST_JSON}" >> "$LOG"
+        "fill_sim refresh action=${action} rc=${rc}; report=${REPORT}; before=${PRE_JSON}; candidate=${CANDIDATE_JSON}; after=${POST_JSON}. MM verdict adverse_selection may become unavailable."
+    echo "[$(ts)] ALERT appended: fill_sim refresh action=${action} rc=${rc} candidate=${CANDIDATE_JSON} after=${POST_JSON}" >> "$LOG"
 fi
 
-echo "[$(ts)] === fill_sim refresh end rc=${rc} after=${POST_JSON} ===" >> "$LOG"
+echo "[$(ts)] === fill_sim refresh end action=${action} rc=${rc} candidate=${CANDIDATE_JSON} after=${POST_JSON} ===" >> "$LOG"
 exit 0

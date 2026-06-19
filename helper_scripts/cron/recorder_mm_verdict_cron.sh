@@ -275,6 +275,8 @@ alerts = []  # alert subject 字串
 # 不發正 net 告警（fail-soft，誠實）。
 def _load_fillsim_adverse(path, h_primary, max_age_h):
     info = {"source": path, "present": False, "stale": None, "age_hours": None,
+            "stale_reason": None, "data_stale": None, "data_l1_rows_post_filter": None,
+            "data_l1_max_ts": None, "data_l1_max_age_hours": None,
             "adverse_sel_bps": None, "adverse_sel_n": None,
             "adverse_sel_signif_suppressed": None, "sensitivity": {}}
     try:
@@ -294,6 +296,33 @@ def _load_fillsim_adverse(path, h_primary, max_age_h):
         info["stale"] = age_h > max_age_h
     except (TypeError, ValueError):
         info["stale"] = True
+        info["stale_reason"] = "bad_generated_at"
+    data = rep.get("data") or {}
+    info["data_l1_rows_post_filter"] = data.get("l1_rows_post_filter")
+    info["data_l1_max_ts"] = data.get("l1_max_ts")
+    info["data_l1_max_age_hours"] = data.get("l1_max_age_hours")
+    info["data_stale"] = False
+    try:
+        if int(data.get("l1_rows_post_filter") or 0) <= 0:
+            info["data_stale"] = True
+            info["stale"] = True
+            info["stale_reason"] = "empty_l1"
+    except (TypeError, ValueError):
+        info["data_stale"] = True
+        info["stale"] = True
+        info["stale_reason"] = "bad_l1_rows"
+    try:
+        data_age = data.get("l1_max_age_hours")
+        if data_age is not None and float(data_age) > max_age_h:
+            info["data_stale"] = True
+            info["stale"] = True
+            info["stale_reason"] = "stale_l1_data"
+    except (TypeError, ValueError):
+        info["data_stale"] = True
+        info["stale"] = True
+        info["stale_reason"] = "bad_l1_age"
+    if info["stale"] and info["stale_reason"] is None:
+        info["stale_reason"] = "stale_generated_at"
     # fill-only 軌（QC/PA：fill_only，非 pooled，非 adverse_through）的 adverse_sel@h。
     fo = (((rep.get("pooled") or {}).get("naive") or {}).get("fill_only") or {})
     info["adverse_sel_bps"] = fo.get(f"adverse_sel_bps@{h_primary}")
