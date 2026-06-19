@@ -240,8 +240,8 @@ def fetch_k_prior(conn, *, mode: str) -> tuple[int, dict[str, object]]:
 
 def _fetch_panel_rows(
     conn, *, params: dict[str, Any], symbols: Sequence[str]
-) -> list[dict[str, Any]]:
-    """執行 SQL feature query，回傳 `list[dict]`。
+) -> tuple[list[dict[str, Any]], int]:
+    """執行 SQL feature query，回傳 `(list[dict], total_bucket_count)`。
 
     為什麼 list[dict] 而非 pandas.DataFrame：sibling 8C-S0R-2 contract 簽名
     `compute_stage0r(rows: Sequence[Mapping[str, object]], ...)` 期待
@@ -254,6 +254,11 @@ def _fetch_panel_rows(
     `_extract_trigger_rows` line 904 讀 `bucket_end_ts_ms` (ms int)；不
     normalize 每個 row signal_ts_ms = None → continue → n_per_cell=0 →
     every cell auto-RED with fake reason。
+
+    total_bucket_count：CRIT-2 denominator，必須從 SQL CTE 1 raw_buckets 等價
+    查詢取得，傳給 metrics 的 both-direction floor。若 caller 漏傳，metrics 會
+    fail-closed 成 missing_bucket_count_denominator；report wrapper 不可把這個
+    hard-RED 當正常 packet。
     """
     sql = _read_sql()
     # SQL 必含 %(symbols)s 綁定（round 1 漏 → psycopg2 KeyError 即 CRIT-1）。
@@ -277,7 +282,31 @@ def _fetch_panel_rows(
             # 顯式 fail-loud：少數 row 缺 bucket_end_ts → 不繞，trigger 階段
             # 直接 skip 不污染 panel 統計。
             row["bucket_end_ts_ms"] = None
-    return out
+        out.append(row)
+
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT count(*)::int FROM (
+                SELECT
+                    symbol,
+                    (floor(extract(epoch FROM ts) / 300.0))::bigint * 300 AS bucket_5m_epoch
+                FROM market.liquidations
+                WHERE ts >= now() - (%(window_days)s::int * INTERVAL '1 day')
+                  AND symbol = ANY(%(symbols)s::text[])
+                GROUP BY symbol, bucket_5m_epoch
+            ) raw_buckets
+            """,
+            {
+                "window_days": int(params["window_days"]),
+                "symbols": list(symbols),
+            },
+        )
+        count_row = cur.fetchone()
+        total_bucket_count = (
+            int(count_row[0]) if count_row and count_row[0] is not None else 0
+        )
+    return out, total_bucket_count
 
 
 def _clean_json(value):
@@ -1079,7 +1108,10 @@ def main(argv: list[str] | None = None) -> int:
             "horizon_min": int(min(horizon_grid)),
             "cost_bps": float(args.cost_bps),
         }
-        panel_rows = _fetch_panel_rows(conn, params=sql_params, symbols=symbols)
+        panel_rows, total_bucket_count = _fetch_panel_rows(
+            conn, params=sql_params, symbols=symbols
+        )
+        sweep_params["total_bucket_count"] = total_bucket_count
     except Exception as exc:  # noqa: BLE001
         print(
             f"[FATAL] Stage 0R query 失敗：{type(exc).__name__}: {exc}", file=sys.stderr
@@ -1116,6 +1148,7 @@ def main(argv: list[str] | None = None) -> int:
             k_prior=k_prior,
             rng_seed=args.rng_seed,
             bootstrap_iters=args.bootstrap_iters,
+            total_bucket_count=total_bucket_count,
         )
         sweep_kwargs = dict(
             cost_bps=args.cost_bps,
@@ -1130,6 +1163,7 @@ def main(argv: list[str] | None = None) -> int:
             k_prior=k_prior,
             rng_seed=args.rng_seed,
             bootstrap_iters=args.bootstrap_iters,
+            total_bucket_count=total_bucket_count,
         )
         if args.no_sweep:
             primary_cell = compute_stage0r(panel_rows, **single_kwargs)

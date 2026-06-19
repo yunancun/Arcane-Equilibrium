@@ -701,3 +701,11 @@ YYYY-MM-DD HH:MM TZ
 - Dispatch chain: `PM(default)` local read-only synthesis; no sub-agent spawn.
 - Result: added dated report `docs/CCAgentWorkSpace/E1/workspace/reports/2026-06-18--vol-event-robust-ruling.md` and advanced TODO to v216. The report records 4 independent high_vol events, 0/4 surviving the fee wall, and robust ruling `NO_EDGE_SURVIVES`.
 - Boundary: docs/report evidence only; no CI full suite, deploy/rebuild/restart, model call, DB write, credential/key/secret/runtime/auth/risk/order/trading mutation.
+
+# 2026-06-19 — Stage0R 8c Denominator Fix + PM Runtime Verification
+
+- Task: advance `P1-A1A2-STAGE0R-RUNNER-IMPL` by closing the PM formal runtime-verification half and fixing the standalone 8c wrapper gap found during verification.
+- Dispatch chain: `PM(default)` local source/test + Linux `/tmp` true-PG verification; no sub-agent spawn.
+- Result: `w_audit_8c` standalone wrapper now queries raw 5m liquidation `total_bucket_count` and passes it to single/sweep metrics, matching the already-correct alpha_candidate A2 adapter. Added report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-19--stage0r_8c_denominator_and_pm_runtime_verification.md` and advanced TODO to v217.
+- Verification: py_compile PASS; 8c smoke_cli 11/11 PASS; 8c metrics smoke PASS; alpha_candidate smoke PASS; 8b smoke PASS; Linux `/tmp` temp clone true-PG post-fix run produced standalone 8c `RED`/`review_ready=true` with `total_bucket_count=2931` and `missing_denominator=false`.
+- Boundary: source/test + docs/report only; no CI full suite, deploy/rebuild/restart, canonical Linux checkout mutation, DB write, credential/key/secret/runtime/auth/risk/order/trading mutation. E4 review remains open before trusting runner outputs.
