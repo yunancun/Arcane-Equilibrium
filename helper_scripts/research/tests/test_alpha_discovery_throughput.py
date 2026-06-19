@@ -17,6 +17,7 @@ from alpha_discovery_throughput.packet import (
     build_direct_report_from_packet,
     daily_returns_from_samples,
 )
+from alpha_discovery_throughput.runtime_runner import run_once
 from alpha_discovery_throughput.signal_manifest import build_signal_spec, validate_signal_manifest
 
 
@@ -169,6 +170,93 @@ def test_discovery_loop_waits_gate_b_watch_only_and_prioritizes_ready_chain():
     assert plan["arms"][0]["action"] == "READY_FOR_AEG_CHAIN"
     assert next(row for row in plan["arms"] if row["arm_id"] == "gate_b")["action"] == "WAIT"
     assert plan["policy"] == "read_only_recommendations_no_probe_or_trade_side_effect"
+
+
+def test_discovery_loop_blocks_no_edge_survives_without_source_failure_label():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "vol_event_order_flow",
+            "gate_status": "NO_EDGE_SURVIVES",
+            "sample_count": 4,
+            "artifacts_ready": False,
+            "source_ok": True,
+        },
+    ], now_utc=dt.datetime(2026, 6, 19, tzinfo=dt.timezone.utc))
+
+    assert plan["arms"][0]["action"] == "BLOCK"
+    assert plan["arms"][0]["reason"] == "gate_status:no_edge_survives"
+
+
+def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
+    data = tmp_path / "openclaw"
+    (data / "gate_b_watch").mkdir(parents=True)
+    (data / "gate_b_watch" / "gate_b_watch_latest.json").write_text(json.dumps({
+        "generated_at_utc": "2026-06-19T00:00:00+00:00",
+        "status": "WATCH_ONLY",
+        "candidate_counts": {"total": 21, "alertable": 0, "start_now": 0, "schedule": 0},
+        "alerts_sent": 0,
+    }), encoding="utf-8")
+
+    (data / "logs").mkdir(parents=True)
+    (data / "logs" / "flash_dip_death_rate.log").write_text(json.dumps({
+        "ts_utc": "2026-06-19T00:00:00Z",
+        "thresholds": {"min_n": 20},
+        "n_closed_slots": 0,
+        "n_deaths": 0,
+        "death_rate_pct": None,
+        "actionable": False,
+        "alerted": False,
+    }) + "\n", encoding="utf-8")
+    (data / "logs" / "recorder_mm_verdict.log").write_text(json.dumps({
+        "ts_utc": "2026-06-19T00:00:00Z",
+        "thresholds": {"min_maker_fills": 30},
+        "markout_n_total": 31,
+        "adverse_selection_usable": True,
+        "net_edge_per_symbol": {
+            "BTCUSDT": {"net_edge_bps": 1.25, "n_maker_fills": 31},
+        },
+    }) + "\n", encoding="utf-8")
+
+    (data / "order_flow_alpha").mkdir(parents=True)
+    (data / "order_flow_alpha" / "vol_event_ledger.json").write_text(json.dumps({
+        "version": 1,
+        "milestones": {"ruling_3plus_fired": True},
+        "events": {
+            f"e{i}": {
+                "direction": "upside_squeeze" if i == 0 else "downside",
+                "analysis": {"survives_wall": False},
+            }
+            for i in range(4)
+        },
+    }), encoding="utf-8")
+
+    matrix_dir = data / "alpha_history_runs" / "matrix_1"
+    matrix_dir.mkdir(parents=True)
+    (matrix_dir / "verdict_matrix_summary.json").write_text(json.dumps({
+        "run_id": "matrix_1",
+        "row_count": 6,
+        "final_label_counts": {"insufficient evidence": 6},
+        "coverage_gate_status": "PASS",
+        "execution_realism_mode": "provided",
+    }), encoding="utf-8")
+
+    result = run_once(
+        data_dir=data,
+        repo_root=tmp_path,
+        now_utc=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.timezone.utc),
+    )
+
+    assert result["killboard"]["is_fast_discovery_active"] is True
+    assert result["killboard"]["source_present_count"] == 5
+    assert result["killboard"]["ready_for_aeg_chain"] == 1
+    assert result["killboard"]["block"] == 1
+    latest = Path(result["written"]["latest"])
+    assert latest.exists()
+    loaded = json.loads(latest.read_text(encoding="utf-8"))
+    arms = {row["arm_id"]: row for row in loaded["discovery_plan"]["arms"]}
+    assert arms["mm_verdict_maker_edge"]["action"] == "READY_FOR_AEG_CHAIN"
+    assert arms["gate_b_listing_fade"]["action"] == "WAIT"
+    assert arms["vol_event_order_flow"]["reason"] == "gate_status:no_edge_survives"
 
 
 def test_edge_snapshot_adapter_only_promotes_durable_non_bull_concrete_rows():

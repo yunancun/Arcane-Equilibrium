@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-19 Alpha Discovery Runtime Killboard
+
+- 1-6 alpha discovery throughput 從 source/test scaffold 接成 artifact-only runtime killboard：讀 Gate-B / FlashDip / vol-event / MM verdict / AEG matrix artifacts，寫 `<DATA>/alpha_discovery_throughput/alpha_discovery_latest.json`。
+- 新 cron wrapper 可每 15 分鐘更新 killboard；`is_fast_discovery_active` 需至少 3 個真實 artifact source present，避免空跑假陽性。
+- 邊界：不連 DB、不連 Bybit、不啟 probe、不下單、不改 auth/risk/runtime state；目前是 discovery-orchestration active，不是可晉升 alpha proof。
+
 ## 2026-06-19 TODO v227 Passive-Watch Refresh
 
 - Refreshed passive watch surfaces without closing any active gate.

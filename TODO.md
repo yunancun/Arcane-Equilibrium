@@ -1,9 +1,9 @@
 # 玄衡 TODO — 主動派工佇列
 
-**版本** v228 ｜ **日期** 2026-06-19 ｜ **來源實作 HEAD** main（alpha discovery throughput 1-6 source/test checkpoint；current checkpoint 以 git log 為準）。
-**當前姿態**：flash_dip_buy demo pilot live+functional，但截至 2026-06-19 03:47 CEST 仍無 DB 級 order/fill/death-rate 樣本；P0-EDGE-1 仍等待 Gate-B fresh `ACTIONABLE_*`，本輪只新增 artifact-only alpha discovery throughput Module，不構成 promotion proof；fee-tier/rebate/MM lever 已 BB read-only audit，current scale 不足，剩 operator capital/scale/Bybit BD action。
+**版本** v229 ｜ **日期** 2026-06-19 ｜ **來源實作 HEAD** main（alpha discovery throughput runtime killboard checkpoint；current checkpoint 以 git log 為準）。
+**當前姿態**：flash_dip_buy demo pilot live+functional，但截至 2026-06-19 03:47 CEST 仍無 DB 級 order/fill/death-rate 樣本；P0-EDGE-1 仍等待 Gate-B fresh `ACTIONABLE_*`；本輪把 artifact-only alpha discovery throughput 1-6 接成 runtime killboard + cron wrapper，可確認 discovery-orchestration active 後才算「快速找 edge/alpha」，但不構成 promotion proof；fee-tier/rebate/MM lever 已 BB read-only audit，current scale 不足，剩 operator capital/scale/Bybit BD action。
 **主入口**：runtime 快照 §0；P0 blockers §1；AEG §2；主動工程佇列 §5；操作員行動 §6；排程 §7。
-**歷史指針**：v161-v228 增量見 `docs/CLAUDE_CHANGELOG.md`；v110 pre-cleanup 全量封存 `docs/archive/2026-06-03--todo_v110_pre_cleanup_archive.md`；V5.8 暫停交接 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-13--v58_pause_readiness_alpha_edge_handoff.md`。
+**歷史指針**：v161-v229 增量見 `docs/CLAUDE_CHANGELOG.md`；v110 pre-cleanup 全量封存 `docs/archive/2026-06-03--todo_v110_pre_cleanup_archive.md`；V5.8 暫停交接 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-13--v58_pause_readiness_alpha_edge_handoff.md`。
 
 ---
 

@@ -41,6 +41,8 @@ def decide_arm_action(arm: dict[str, Any], *, min_samples: int = 30) -> dict[str
 
     if not source_ok or gate_status in {"SOURCE_FAILURE", "ERROR", "FAILED"}:
         action, reason = BLOCK, "source_not_healthy"
+    elif gate_status in {"KILL", "KILLED", "REJECTED", "NO_EDGE_SURVIVES", "NO_EDGE"}:
+        action, reason = BLOCK, f"gate_status:{gate_status.lower()}"
     elif gate_status in {"WATCH_ONLY", "NO_CANDIDATE", "WAIT"}:
         action, reason = WAIT, f"gate_status:{gate_status.lower()}"
     elif artifacts_ready and sample_count >= min_samples:
