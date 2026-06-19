@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-19 TODO v223 Source-Sync Correction
+
+- Corrected source-sync metadata after v222 Earn first-stake routing review.
+- Mac `HEAD=origin/main=712d3a03` and Linux `trade-core` `HEAD=origin/main=712d3a03`; Linux tracked checkout was clean except existing unrelated untracked `vol-event-robust-ruling.md` and `variance_risk_premium/`.
+- Watchdog read-only status: `engine_alive=true`, demo snapshot age `9.6s`.
+- Boundary: docs/TODO metadata only; no CI/cargo/Linux build/deploy/rebuild/restart/DB write/Bybit private call/credential mutation/auth/risk/order/trading mutation; no active gate closed.
+
 ## 2026-06-19 TODO v222 Earn First-Stake Capability Routing Focused Review
 
 - Refreshed PM-local evidence for `P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` without closing the runtime/first-stake row.

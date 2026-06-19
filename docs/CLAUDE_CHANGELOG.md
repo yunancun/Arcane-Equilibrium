@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v222 Earn first-stake capability routing PM-local focused review checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v223 source-sync correction checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v223 增量（2026-06-19 source-sync correction checkpoint）**：修正 `TODO.md` §0 source-sync 事實：v222 Earn first-stake capability routing review checkpoint `712d3a03` 已推送 `origin/main` 並 fast-forward 到 Linux `trade-core`，不應再只停在 post-v221 `1ec05e6f`。Focused verification：Mac `HEAD=origin/main=712d3a03`，Linux `trade-core` `HEAD=origin/main=712d3a03`；Linux tracked checkout clean except existing unrelated untracked `vol-event-robust-ruling.md` + `variance_risk_premium/`；watchdog read-only status `engine_alive=true` / demo snapshot age `9.6s`。Report：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-19--todo_v223_source_sync_after_earn.md`。邊界：docs/TODO source-sync metadata only；no CI full suite / no cargo / no Linux build / no deploy/rebuild/restart / no DB write / no Bybit private/signed call / no credential/key/secret mutation / no auth/risk/order/trading mutation；不關閉任何 runtime/review/operator gate。
 
 **v222 增量（2026-06-19 Earn first-stake capability routing PM-local focused review checkpoint）**：`P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` 保持 active，但 PM-local source review/regression 已刷新並補 report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-19--earn_first_stake_capability_routing_focused_review.md`。Source inspection：event-consumer bootstrap injects `BybitEarnClient` from existing `shared_client` and `EarnMovementWriter` from existing `audit_pool`; wrapper construction is handle-only and does not call Bybit or PG; missing deps still keep Gate E-0 fail-closed as `earn_dispatch_unwired`; Rust IPC registers/dispatches `process_earn_intent` into `PipelineCommand::ProcessEarnIntent`; event-consumer owner task calls `IntentProcessor::process_earn_intent`; Python `/api/v1/earn/stake` sends `engine="live"` for deterministic live/live_demo routing. Focused verification：`cargo test -p openclaw_engine process_earn_intent_command --lib`（2 passed）、`cargo test -p openclaw_engine process_earn_intent --lib`（4 passed）、`cargo test -p openclaw_engine earn_router_fail_closed_when_unwired --lib`（1 passed）、`python3 -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/test_earn_routes.py`（28 passed, 1 existing Pydantic deprecation warning）、`cargo clippy -p openclaw_engine --lib -- -D warnings` PASS。結論：source-routing risk narrowed，但 OP-1/OP-2/OP-3、review/deploy/restart、first real stake evidence in `learning.earn_movement_log` 仍未關，row 不 archive。邊界：docs/report + local focused Rust/Python checks only；no full CI / no Linux cargo / no deploy/rebuild/restart / no real Bybit private/signed call / no credential/key/secret mutation / no DB write / no auth/risk/order/trading mutation。
 
