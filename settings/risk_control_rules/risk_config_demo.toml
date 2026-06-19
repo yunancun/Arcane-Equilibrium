@@ -146,10 +146,10 @@ trailing_distance_pct_override = 0.4
 [per_strategy.flash_dip_buy]
 enabled = true                        # operator 啟用 demo pilot 2026-06-18（三鎖之一）
 max_concurrent_positions = 3          # 硬層 C=3（CC 條件 1；軟層 producer-side 另計）
-allowed_symbols = [                   # 與 strategy_params_demo.toml 同 26 survivor
+allowed_symbols = [                   # 與 strategy_params_demo.toml 同 25 survivor
   "ADAUSDT", "APTUSDT", "ARBUSDT", "ATOMUSDT", "AVAXUSDT", "BCHUSDT", "BNBUSDT", "BTCUSDT",
   "DOGEUSDT", "DOTUSDT", "ETCUSDT", "ETHUSDT", "FILUSDT", "ICPUSDT", "INJUSDT", "LINKUSDT",
-  "LTCUSDT", "NEARUSDT", "OPUSDT", "POLUSDT", "SOLUSDT", "SUIUSDT", "TONUSDT", "TRXUSDT",
+  "LTCUSDT", "NEARUSDT", "OPUSDT", "POLUSDT", "SOLUSDT", "SUIUSDT", "TRXUSDT",
   "UNIUSDT", "XRPUSDT",
 ]
 

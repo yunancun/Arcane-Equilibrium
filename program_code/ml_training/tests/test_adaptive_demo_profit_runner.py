@@ -23,6 +23,7 @@ import pytest
 from program_code.ml_training.adaptive_demo_profit_engine.ipc_lever import StrategyLever
 from program_code.ml_training.adaptive_demo_profit_engine.reward_source import (
     fetch_demo_arm_rewards,
+    fetch_demo_side_edge_cells,
     map_view_regime_to_alloc_regime,
 )
 from program_code.ml_training.adaptive_demo_profit_engine.runner import (
@@ -245,6 +246,56 @@ def test_reward_source_sql_drops_signals_lateral_queries_base_tables():
     assert len(params) == 3
     assert params[0] == ["demo"]
     assert params[1] == params[2] == 30  # 預設 max_age_days
+
+
+def test_side_edge_sql_requires_latest_trading_symbol_lifecycle():
+    rows = [
+        (
+            "ma_crossover",
+            "UNIUSDT",
+            "Buy",
+            3,
+            32.0,
+            1.5,
+            1.0,
+            32.0,
+            0.0,
+        )
+    ]
+    connect, captured = _make_fake_connect(rows)
+    out = fetch_demo_side_edge_cells("FAKE_DSN", _connect=connect)
+
+    assert out == [
+        {
+            "strategy": "ma_crossover",
+            "symbol": "UNIUSDT",
+            "side": "Buy",
+            "key": "ma_crossover::UNIUSDT::Buy",
+            "source": "db_decision_features_side_edge",
+            "cell": {
+                "shrunk_bps": 32.0,
+                "runtime_bps": 32.0,
+                "raw_bps": 32.0,
+                "n": 3,
+                "std_bps": 1.5,
+                "win_rate": 1.0,
+                "win_rate_shrunk": 1.0,
+                "avg_win_bps_shrunk": 32.0,
+                "avg_loss_bps_shrunk": 0.0,
+                "combined_ev_bps": 32.0,
+                "validation_passed": False,
+                "validation_reason": "db_side_edge_demo_only_not_promotion_evidence",
+                "_side": "Buy",
+                "_side_from": "learning.decision_features.side",
+            },
+        }
+    ]
+    sql, params = captured["conn"].cur.executed[-1]
+    assert "market.symbol_universe_snapshots" in sql
+    assert "lifecycle.status = 'Trading'" in sql
+    assert "COALESCE(lifecycle.is_delisted_at_asof, FALSE) = FALSE" in sql
+    assert params[0] == params[1] == ["demo"]
+    assert params[2] == params[3] == 30
 
 
 def test_reward_source_skips_null_arm_id():

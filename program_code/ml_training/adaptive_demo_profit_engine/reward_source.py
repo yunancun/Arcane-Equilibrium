@@ -235,6 +235,16 @@ _SIDE_EDGE_SQL = """
             df.label_net_edge_bps AS net_bps
           FROM trading.intents i
           JOIN learning.decision_features df ON df.context_id = i.context_id
+          JOIN LATERAL (
+              SELECT s.status, s.is_delisted_at_asof
+                FROM market.symbol_universe_snapshots s
+               WHERE s.exchange = 'bybit'
+                 AND s.category = 'linear'
+                 AND s.symbol = df.symbol
+               ORDER BY s.ts DESC
+               LIMIT 1
+          ) lifecycle ON lifecycle.status = 'Trading'
+                     AND COALESCE(lifecycle.is_delisted_at_asof, FALSE) = FALSE
          WHERE i.engine_mode = ANY(%s)
            AND df.engine_mode = ANY(%s)
            AND df.label_net_edge_bps IS NOT NULL
