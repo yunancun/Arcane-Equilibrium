@@ -620,8 +620,16 @@ def run(l1, tr, ob, syms, clean_since, horizons, cadence_s, skip_quantile, since
     ob_clean = core.clean_obtop(ob) if ob is not None and not ob.empty else pd.DataFrame()
 
     span_min = 0.0
+    l1_min_ts = None
+    l1_max_ts = None
+    l1_max_age_hours = None
     if not l1_clean.empty:
+        l1_min_ts = l1_clean["ts"].min()
+        l1_max_ts = l1_clean["ts"].max()
         span_min = (l1_clean["ts"].max() - l1_clean["ts"].min()).total_seconds() / 60.0
+        l1_max_age_hours = (
+            pd.Timestamp.now(tz="UTC") - pd.Timestamp(l1_max_ts).tz_convert("UTC")
+        ).total_seconds() / 3600.0
     span_hours = span_min / 60.0
 
     report = {
@@ -640,6 +648,9 @@ def run(l1, tr, ob, syms, clean_since, horizons, cadence_s, skip_quantile, since
             "trades_rows": int(len(tr)),
             **fcounts,
             "span_minutes": _r(span_min, 2),
+            "l1_min_ts": l1_min_ts.isoformat() if l1_min_ts is not None else None,
+            "l1_max_ts": l1_max_ts.isoformat() if l1_max_ts is not None else None,
+            "l1_max_age_hours": _r(l1_max_age_hours, 3),
             "n_symbols": int(len(syms)),
         },
         "caveat": (
