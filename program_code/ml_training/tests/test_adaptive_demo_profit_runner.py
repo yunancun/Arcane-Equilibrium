@@ -153,6 +153,7 @@ def test_repo_config_enables_controlled_experiment_and_excludes_retired_funding_
     assert rc.require_advisory_for_explore is True
     assert rc.use_edge_snapshot_for_explore_evidence is True
     assert rc.require_cost_viable_edge_for_explore_when_available is True
+    assert rc.edge_evidence_require_runtime_symbol_ready is True
     assert "funding_arb" in rc.retired_strategy_blocklist
     assert "funding_arb" not in rc.candidate_strategies
     assert rc.max_active_explore_strategies == 2
@@ -910,6 +911,77 @@ def test_side_edge_evidence_keeps_ma_alive_and_drops_advisory_only_grid(tmp_path
         17.7,
         abs=1e-6,
     )
+
+
+def test_edge_evidence_runtime_symbol_readiness_filter_drops_unready_ton(tmp_path):
+    ma_arm = make_arm_id("range", "ma_crossover")
+    rewards = [
+        ArmReward(ma_arm, "range", -20.0, float(i), FILL_TIER_TAKER_REAL)
+        for i in range(3)
+    ]
+    edge_path = tmp_path / "edge_estimates.json"
+    edge_path.write_text(
+        json.dumps(
+            {
+                "ma_crossover::TONUSDT::Buy": {
+                    "runtime_bps": 48.0,
+                    "win_rate": 1.0,
+                    "n": 3,
+                },
+                "ma_crossover::UNIUSDT::Buy": {
+                    "runtime_bps": 32.0,
+                    "win_rate": 1.0,
+                    "n": 1,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    snapshot_path = tmp_path / "pipeline_snapshot.json"
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "latest_prices": {"TONUSDT": 1.7, "UNIUSDT": 3.0},
+                "indicators": {"UNIUSDT": {"sma_20": 3.0}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        candidate_regimes=["range"],
+        candidate_strategies=[],
+        include_demo_maker_arm=False,
+        enable_explore_sink=True,
+        controlled_experiment_enabled=True,
+        require_advisory_for_explore=True,
+        use_edge_snapshot_for_explore_evidence=True,
+        require_cost_viable_edge_for_explore_when_available=True,
+        edge_evidence_require_runtime_symbol_ready=True,
+        edge_evidence_runtime_snapshot_path=str(snapshot_path),
+        explore_strategy_allowlist=["ma_crossover"],
+        rng_seed=7,
+    )
+    lever, _calls = _record_lever({"ma_crossover": False})
+    runner = AdpeRunner(
+        cfg,
+        lever=lever,
+        rewards_fn=lambda: rewards,
+        advisory_fn=lambda: {},
+        edge_estimates_path=str(edge_path),
+    )
+
+    report = runner.run_cycle(dry_run=False)
+
+    assert report.desired_active["ma_crossover"] is True
+    assert report.experiment_policy["selected_explore"] == ["ma_crossover"]
+    assert report.experiment_policy["edge_evidence_scores"]["ma_crossover"] == pytest.approx(
+        17.7,
+        abs=1e-6,
+    )
+    assert [c["symbol"] for c in report.experiment_policy["edge_evidence_cells"]] == [
+        "UNIUSDT"
+    ]
 
 
 def test_under_cost_side_edge_is_not_positive_explore_evidence(tmp_path):
