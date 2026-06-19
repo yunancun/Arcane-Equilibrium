@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-19 TODO v219 Stage0R 8c E4 Focused Regression
+
+- Reduced the open `P1-A1A2-STAGE0R-RUNNER-IMPL` E4 denominator-fix review risk with a focused local regression report, without closing promotion/trusted-runner authority.
+- Evidence: py_compile PASS; 8c smoke_cli 11/11 twice; 8c metrics smoke twice; alpha_candidate smoke twice; 8b funding_skew smoke twice; `helper_scripts/lib/tests/test_stats_common.py` 33 passed.
+- Source inspection confirms the 8c wrapper now passes raw 5m `total_bucket_count` to single/sweep metrics, metrics still fail-close when omitted, and smoke coverage checks both paths.
+- Boundary: no full CI, no Linux full E4 suite, no new true-PG rerun beyond v217 PM artifact, no deploy/rebuild/restart/model call/DB write/auth/risk/order/trading mutation.
+
 ## 2026-06-19 TODO v218 Source-Sync Passive Watch Refresh
 
 - Corrected TODO source HEAD from stale v216 `61e1a6d2` to v217 `737356a5`; Mac/origin/Linux are aligned at `737356a5`.

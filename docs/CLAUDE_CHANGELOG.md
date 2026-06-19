@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v218 source-sync/passive-watch refresh checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v219 Stage0R 8c E4 focused regression checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v219 增量（2026-06-19 Stage0R 8c E4 focused regression checkpoint）**：收斂 `P1-A1A2-STAGE0R-RUNNER-IMPL` 中 standalone 8c denominator fix 的 E4 focused regression gate，但不宣稱 runner/promotion trusted。新增 E4 report `docs/CCAgentWorkSpace/E4/workspace/reports/2026-06-19--stage0r_8c_denominator_focused_regression.md`。Source inspection：8c wrapper `_fetch_panel_rows` 回傳 `(panel_rows,total_bucket_count)`，main 將 denominator 寫入 `sweep_params` 並傳入 single/sweep metrics；metrics 對 `total_bucket_count=None` hard RED；8c smoke_cli asserts wrapper/packet path 不得再出現 `missing_bucket_count_denominator`，metrics smoke 仍驗 intentional omitted-denominator RED。Focused verification：py_compile PASS；8c smoke_cli 11/11 ×2；8c metrics smoke PASS ×2；alpha_candidate smoke PASS ×2；8b funding_skew smoke PASS ×2；`python3 -m pytest helper_scripts/lib/tests/test_stats_common.py -q` = 33 passed。結論：E4 focused source/regression PASS，open E4 denominator-fix review risk reduced；但 no full CI / no Linux full E4 suite / no new true-PG rerun beyond v217 PM artifact / no deploy/rebuild/restart / no DB write；trusted promotion packet、QC/MIT/QA authority、operator gates unchanged。
 
 **v218 增量（2026-06-19 source-sync/passive-watch refresh checkpoint）**：修正 `TODO.md` masthead / §0 source-sync 事實：v217 Stage0R 8c denominator checkpoint `737356a5` 已推送 `origin/main` 並 fast-forward 到 Linux `trade-core`，不應再把 v216 `61e1a6d2` 寫作 source HEAD。同步刷新被動等待面但不關閉任何 gate：Mac `HEAD=origin/main=737356a5`，Linux `HEAD=737356a5`（僅 unrelated untracked `vol-event-robust-ruling.md` + `variance_risk_premium/`）；watchdog `engine_alive=true` / demo snapshot age 23.8s；Gate-B latest artifact generated `2026-06-19T00:12:01Z` remains `WATCH_ONLY`（21 total / 0 alertable/start/schedule / 1 watch_only）；flash_dip entry file remains `{}` and death-rate success file absent before first scheduled 06:53 CEST natural run；L2 cursor remains `2026-06-17` with 2026-06-12..17 day stats all `materials_l2=0/stored=0`；passive health at `2026-06-19T00:21:31Z` still FAIL on `[74]` attempts=199/postonly=26/max_pending=0 and `[56]` missing live authorization JSON。結論：no probe/autostart/promotion/archive；等待 Gate-B fresh `ACTIONABLE_*`、flash_dip natural fill/death-rate、L2 first non-empty material day/B3 shadow evidence、operator live-auth。邊界：docs/TODO + read-only Linux file/healthcheck only；未跑 CI full suite，未 deploy/rebuild/restart，無 model call、DB write、credential/key/secret/runtime/auth/risk/order/trading mutation。
 
