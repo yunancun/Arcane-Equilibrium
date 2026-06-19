@@ -21,6 +21,7 @@ from .discovery_loop import build_discovery_plan
 
 RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v1"
 DEFAULT_MAX_ARTIFACT_AGE_SECONDS = 6 * 60 * 60
+DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS = 36 * 60 * 60
 
 
 def _utc_now() -> dt.datetime:
@@ -265,7 +266,12 @@ def collect_vol_event_arm(data_dir: Path) -> dict[str, Any]:
     )
 
 
-def collect_mm_verdict_arm(data_dir: Path) -> dict[str, Any]:
+def collect_mm_verdict_arm(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
     path = data_dir / "logs" / "recorder_mm_verdict.log"
     status, err = _latest_json_line(path)
     if err:
@@ -280,6 +286,12 @@ def collect_mm_verdict_arm(data_dir: Path) -> dict[str, Any]:
             detail={"note": "mm_verdict_status_missing_or_not_yet_fired"},
         )
     assert status is not None
+    ts_utc = status.get("ts_utc")
+    fresh, age, freshness_error = _source_fresh(
+        ts_utc,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
     thresholds = status.get("thresholds") if isinstance(status.get("thresholds"), dict) else {}
     min_fills = _int(thresholds.get("min_maker_fills"), 30)
     net_by_symbol = status.get("net_edge_per_symbol") if isinstance(status.get("net_edge_per_symbol"), dict) else {}
@@ -293,16 +305,38 @@ def collect_mm_verdict_arm(data_dir: Path) -> dict[str, Any]:
         net = _float(row.get("net_edge_bps"))
         if net is not None and net > 0 and n >= min_fills:
             positive_symbols.append(symbol)
+    sample_count = max(_int(status.get("markout_n_total")), max_sample)
+    if not fresh:
+        return _arm(
+            arm_id="mm_verdict_maker_edge",
+            gate_status="SOURCE_FAILURE",
+            sample_count=sample_count,
+            artifacts_ready=False,
+            source_ok=False,
+            source_path=path,
+            source_error=freshness_error,
+            detail={
+                "ts_utc": ts_utc,
+                "age_seconds": age,
+                "positive_symbols": sorted(positive_symbols),
+                "adverse_selection_usable": status.get("adverse_selection_usable"),
+                "l1_fill_sim_ready": status.get("l1_fill_sim_ready"),
+                "highvol_day": status.get("highvol_day"),
+                "markout_n_total": status.get("markout_n_total"),
+                "note": "mm_verdict_status_stale_or_missing_timestamp",
+            },
+        )
     gate_status = "READY" if positive_symbols else "CAPTURING"
     return _arm(
         arm_id="mm_verdict_maker_edge",
         gate_status=gate_status,
-        sample_count=max(_int(status.get("markout_n_total")), max_sample),
+        sample_count=sample_count,
         artifacts_ready=bool(positive_symbols),
         source_ok=True,
         source_path=path,
         detail={
-            "ts_utc": status.get("ts_utc"),
+            "ts_utc": ts_utc,
+            "age_seconds": age,
             "positive_symbols": sorted(positive_symbols),
             "adverse_selection_usable": status.get("adverse_selection_usable"),
             "l1_fill_sim_ready": status.get("l1_fill_sim_ready"),
@@ -376,7 +410,7 @@ def collect_runtime_arms(
         collect_gate_b_arm(data_dir, now_utc=now, max_age_seconds=max_age_seconds),
         collect_flash_dip_arm(data_dir),
         collect_vol_event_arm(data_dir),
-        collect_mm_verdict_arm(data_dir),
+        collect_mm_verdict_arm(data_dir, now_utc=now),
         collect_aeg_matrix_arm(data_dir),
     ]
 
