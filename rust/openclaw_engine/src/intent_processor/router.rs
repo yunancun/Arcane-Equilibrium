@@ -152,6 +152,48 @@ fn apply_governor_order_constraints(
     Ok(scaled_qty)
 }
 
+const FLASH_DIP_SENTINEL_QTY_MIN: f64 = 100_000_000.0;
+
+fn flash_dip_sentinel_target_qty(
+    config: &RiskConfig,
+    intent: &OrderIntent,
+    balance: f64,
+    price: f64,
+    is_reducing: bool,
+) -> Result<Option<f64>, String> {
+    if is_reducing
+        || intent.strategy != "flash_dip_buy"
+        || !intent.qty.is_finite()
+        || intent.qty < FLASH_DIP_SENTINEL_QTY_MIN
+    {
+        return Ok(None);
+    }
+
+    let pct = config.limits.flash_dip_buy_max_notional_pct_equity;
+    if !pct.is_finite()
+        || !(pct > 0.0)
+        || !balance.is_finite()
+        || balance <= 0.0
+        || !price.is_finite()
+        || price <= 0.0
+    {
+        return Err(format!(
+            "flash_dip_buy_sentinel_size fail-closed: invalid pct={pct} \
+             balance={balance} price={price}"
+        ));
+    }
+
+    let target_qty = balance * pct / price;
+    if target_qty.is_finite() && target_qty > 0.0 {
+        Ok(Some(target_qty))
+    } else {
+        Err(format!(
+            "flash_dip_buy_sentinel_size fail-closed: invalid target_qty={target_qty} \
+             from pct={pct} balance={balance} price={price}"
+        ))
+    }
+}
+
 fn per_strategy_symbol_rejection(
     config: &RiskConfig,
     intent: &OrderIntent,
@@ -239,7 +281,8 @@ impl IntentProcessor {
         if intent.intent_type.is_earn() {
             return IntentResult::rejected(
                 "earn_intent_routed_to_trade_path: caller must use \
-                IntentProcessor::process_earn_intent (async) for EarnStake/EarnRedeem".to_string(),
+                IntentProcessor::process_earn_intent (async) for EarnStake/EarnRedeem"
+                    .to_string(),
             );
         }
 
@@ -419,7 +462,17 @@ impl IntentProcessor {
         // Kelly 倉位計算（Phase 2b）
         let price = paper_state.latest_price(&intent.symbol).unwrap_or(0.0);
         let balance = paper_state.balance();
-        let guardian_qty = guardian_result.modified_qty.unwrap_or(pre_guardian_qty);
+        let mut guardian_qty = guardian_result.modified_qty.unwrap_or(pre_guardian_qty);
+        match flash_dip_sentinel_target_qty(&self.risk_config, intent, balance, price, is_reducing)
+        {
+            Ok(Some(target_qty)) => {
+                guardian_qty = guardian_qty.min(target_qty);
+            }
+            Ok(None) => {}
+            Err(reason) => {
+                return IntentResult::rejected(RejectionCode::RiskGate { reason }.format());
+            }
+        }
 
         let kelly_qty = if let Some(ref kelly_cfg) = self.kelly_config {
             let stats = self
@@ -499,8 +552,7 @@ impl IntentProcessor {
         // 三個變體做純算術。3 HashMap allocs → 1。語意完全不變（既有 wrapper
         // 也已委派至同一 `_from_netting` 數學）。
         {
-            let (eff_long, eff_short) =
-                Self::compute_effective_long_short_notional(paper_state);
+            let (eff_long, eff_short) = Self::compute_effective_long_short_notional(paper_state);
             let balance_snapshot = paper_state.balance();
             let exposure_pct =
                 Self::compute_exposure_pct_from_netting(eff_long, eff_short, balance_snapshot);
@@ -805,7 +857,8 @@ impl IntentProcessor {
         if intent.intent_type.is_earn() {
             return ExchangeGateResult::rejected(
                 "earn_intent_routed_to_trade_path: caller must use \
-                IntentProcessor::process_earn_intent (async) for EarnStake/EarnRedeem".to_string(),
+                IntentProcessor::process_earn_intent (async) for EarnStake/EarnRedeem"
+                    .to_string(),
             );
         }
 
@@ -939,7 +992,17 @@ impl IntentProcessor {
         // Gate 2.5: Kelly position sizing
         let price = paper_state.latest_price(&intent.symbol).unwrap_or(0.0);
         let balance = paper_state.balance();
-        let guardian_qty = guardian_result.modified_qty.unwrap_or(pre_guardian_qty);
+        let mut guardian_qty = guardian_result.modified_qty.unwrap_or(pre_guardian_qty);
+        match flash_dip_sentinel_target_qty(&self.risk_config, intent, balance, price, is_reducing)
+        {
+            Ok(Some(target_qty)) => {
+                guardian_qty = guardian_qty.min(target_qty);
+            }
+            Ok(None) => {}
+            Err(reason) => {
+                return ExchangeGateResult::rejected(RejectionCode::RiskGate { reason }.format());
+            }
+        }
         let kelly_qty = if let Some(ref kelly_cfg) = self.kelly_config {
             let stats = self
                 .trade_stats
@@ -1112,10 +1175,12 @@ impl IntentProcessor {
                     // P1-09：注入 epoch 秒供新鮮度門使用（now_ms 為 fee staleness
                     // 用的 wallclock epoch-ms，÷1000 得 epoch 秒）。gate 內不讀 wallclock。
                     let now_secs = (now_ms / 1000) as i64;
+                    let intent_side = if intent.is_long { "Buy" } else { "Sell" };
                     let gate_result = match profile {
                         GovernanceProfile::Validation => self.cost_gate_moderate_with_slippage(
                             &intent.strategy,
                             &intent.symbol,
+                            Some(intent_side),
                             fee_rate,
                             slippage_rate,
                             now_secs,

@@ -181,6 +181,9 @@ class RoundTripRecord:
     funding_bps: float = 0.0
     bps_denominator_usd: float = 0.0
     entry_context_id: str = ""
+    # Entry fill side ("Buy"/"Sell"), used for side-aware edge overlays.
+    # 入場成交方向，用於 side-aware edge overlay；不可用平倉 fill side 代替。
+    entry_side: str = ""
 
 
 @dataclass
@@ -278,6 +281,16 @@ def _bps(value_usd: float, notional_usd: float) -> float:
     return (value_usd / notional_usd) * 10_000.0
 
 
+def _canonical_side(side: object) -> str:
+    """Normalize exchange fill side to Buy/Sell when possible. / 將成交方向正規化為 Buy/Sell。"""
+    normalized = str(side or "").strip().lower()
+    if normalized == "buy":
+        return "Buy"
+    if normalized == "sell":
+        return "Sell"
+    return str(side or "").strip()
+
+
 def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
     """
     Pair entry and exit fills for a single symbol using a FIFO queue.
@@ -337,6 +350,7 @@ def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
                     "entry_fee": fee,
                     "ts": ts,
                     "context_id": fill.get("context_id") or "",
+                    "entry_side": _canonical_side(fill.get("side")),
                 })
             else:
                 # Exit fill — match against oldest entry (FIFO)
@@ -419,6 +433,7 @@ def _pair_round_trips(fills: list[dict]) -> list[RoundTripRecord]:
                                 notional_usd=entry_notional,
                                 bps_denominator_usd=denom_bps,
                                 entry_context_id=entry.get("context_id", ""),
+                                entry_side=entry.get("entry_side", ""),
                             )
                             records.append(rec)
 

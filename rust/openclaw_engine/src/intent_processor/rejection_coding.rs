@@ -110,6 +110,18 @@ pub(super) enum RejectionCode {
     /// Gate 3 cost-gate JS — demo 負 edge 阻擋。
     CostGateJsDemoNegative { estimated_bps: f64 },
 
+    /// Gate 3 cost-gate JS variant — demo mode strategy-specific cold-start blocked.
+    /// Gate 3 cost-gate JS — demo 特定策略冷啟動阻擋。
+    CostGateJsDemoColdStart { strategy: String },
+
+    /// Gate 3 cost-gate JS variant — demo mode strategy-specific low-sample blocked.
+    /// Gate 3 cost-gate JS — demo 特定策略低樣本阻擋。
+    CostGateJsDemoInsufficientSample {
+        strategy: String,
+        n_trades: u64,
+        min_n: u64,
+    },
+
     /// Gate 3 cost-gate JS variant — live mode positive-edge below threshold.
     /// Gate 3 cost-gate JS — live 正 edge 未達門檻。
     CostGateJsLiveThreshold {
@@ -234,6 +246,20 @@ impl RejectionCode {
                 estimated_bps,
             ),
 
+            RejectionCode::CostGateJsDemoColdStart { strategy } => format!(
+                "cost_gate(JS-demo): no edge estimate for {} — cold-start blocked / 無估計冷啟動阻擋",
+                strategy,
+            ),
+
+            RejectionCode::CostGateJsDemoInsufficientSample {
+                strategy,
+                n_trades,
+                min_n,
+            } => format!(
+                "cost_gate(JS-demo): {} low-sample n={} < min_n={} — blocked / 低樣本阻擋",
+                strategy, n_trades, min_n,
+            ),
+
             RejectionCode::CostGateJsLiveThreshold {
                 edge_bps,
                 threshold_bps,
@@ -313,6 +339,8 @@ impl RejectionCode {
                 | RejectionCode::CostGateJsPaper { .. }
                 | RejectionCode::CostGateJsDemoThreshold { .. }
                 | RejectionCode::CostGateJsDemoNegative { .. }
+                | RejectionCode::CostGateJsDemoColdStart { .. }
+                | RejectionCode::CostGateJsDemoInsufficientSample { .. }
                 | RejectionCode::CostGateJsLiveThreshold { .. }
                 | RejectionCode::CostGateJsLiveNegative { .. }
                 | RejectionCode::CostGateJsLiveColdStart
@@ -371,6 +399,8 @@ impl RejectionCode {
             | RejectionCode::CostGateJsPaper { .. }
             | RejectionCode::CostGateJsDemoThreshold { .. }
             | RejectionCode::CostGateJsDemoNegative { .. }
+            | RejectionCode::CostGateJsDemoColdStart { .. }
+            | RejectionCode::CostGateJsDemoInsufficientSample { .. }
             | RejectionCode::CostGateJsLiveThreshold { .. }
             | RejectionCode::CostGateJsLiveNegative { .. }
             | RejectionCode::CostGateJsLiveColdStart
@@ -528,6 +558,30 @@ mod tests {
         assert_eq!(
             code.format(),
             "cost_gate(JS-demo): estimated=-12.50bps < 0 — blocked / 負估計阻擋",
+        );
+    }
+
+    #[test]
+    fn cost_gate_js_demo_cold_start_matches() {
+        let code = RejectionCode::CostGateJsDemoColdStart {
+            strategy: "grid_trading".into(),
+        };
+        assert_eq!(
+            code.format(),
+            "cost_gate(JS-demo): no edge estimate for grid_trading — cold-start blocked / 無估計冷啟動阻擋",
+        );
+    }
+
+    #[test]
+    fn cost_gate_js_demo_insufficient_sample_matches() {
+        let code = RejectionCode::CostGateJsDemoInsufficientSample {
+            strategy: "grid_trading".into(),
+            n_trades: 7,
+            min_n: 15,
+        };
+        assert_eq!(
+            code.format(),
+            "cost_gate(JS-demo): grid_trading low-sample n=7 < min_n=15 — blocked / 低樣本阻擋",
         );
     }
 

@@ -101,6 +101,32 @@ def test_normal_roundtrip_passes_through_unchanged():
     assert get_winsorize_clamp_count() == 0
 
 
+def test_pair_round_trips_records_buy_entry_side_not_exit_side():
+    """A long round-trip exits with Sell, but the record's strategy direction is Buy."""
+    fills = [
+        _mk_fill(symbol="BTCUSDT", strategy="bb_reversion", side="buy",
+                 qty=10, price=10000, fee=0.0, offset_sec=0),
+        _mk_fill(symbol="BTCUSDT", strategy="strategy_close:target", side="sell",
+                 qty=10, price=10100, fee=0.0, realized_pnl=1_000, offset_sec=60),
+    ]
+    records = _pair(fills)
+    assert len(records) == 1
+    assert records[0].entry_side == "Buy"
+
+
+def test_pair_round_trips_records_sell_entry_side_not_exit_side():
+    """A short round-trip exits with Buy, but the record's strategy direction is Sell."""
+    fills = [
+        _mk_fill(symbol="BTCUSDT", strategy="bb_reversion", side="sell",
+                 qty=10, price=10000, fee=0.0, offset_sec=0),
+        _mk_fill(symbol="BTCUSDT", strategy="strategy_close:target", side="buy",
+                 qty=10, price=9900, fee=0.0, realized_pnl=1_000, offset_sec=60),
+    ]
+    records = _pair(fills)
+    assert len(records) == 1
+    assert records[0].entry_side == "Sell"
+
+
 # ---------------------------------------------------------------------------
 # Case 2: extreme negative clamps to -_WINSORIZE_BPS
 # ---------------------------------------------------------------------------

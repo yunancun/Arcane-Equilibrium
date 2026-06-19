@@ -60,6 +60,18 @@ pub struct CellEstimate {
     pub explore_remaining: u64,
 }
 
+/// Where a side-aware lookup found its cell.
+/// side-aware 查詢命中的 cell 來源。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CellLookupSource {
+    /// Exact `strategy::symbol::Buy/Sell` entry-side cell.
+    /// 精準命中 `strategy::symbol::Buy/Sell` entry-side cell。
+    SideSpecific,
+    /// Legacy coarse `strategy::symbol` fallback.
+    /// 舊格式粗粒度 `strategy::symbol` 回退。
+    Coarse,
+}
+
 /// Shrunk realized-edge estimates per (strategy, symbol) cell.
 /// 每 (策略, 幣種) 格子的收縮實現邊際估計。
 #[derive(Debug, Clone, Default)]
@@ -316,6 +328,70 @@ impl EdgeEstimates {
         self.data.get(&key)
     }
 
+    fn canonical_side(side: &str) -> Option<&'static str> {
+        match side.trim().to_ascii_lowercase().as_str() {
+            "buy" => Some("Buy"),
+            "sell" => Some("Sell"),
+            _ => None,
+        }
+    }
+
+    /// Demo cost-gate side overlay lookup.
+    /// 優先查 entry side 專屬格子（strategy::symbol::Buy/Sell），缺失時回退舊的
+    /// strategy::symbol，確保尚未產生 side cell 的快照仍維持原行為。
+    pub fn get_cell_for_side(
+        &self,
+        strategy: &str,
+        symbol: &str,
+        side: Option<&str>,
+    ) -> Option<&CellEstimate> {
+        self.get_cell_for_side_with_source(strategy, symbol, side)
+            .map(|(cell, _source)| cell)
+    }
+
+    /// Side overlay lookup with provenance.
+    /// 回傳 side-aware lookup 的 cell 與來源，讓 caller 可區分「entry-side
+    /// 已有證據」與「仍只是舊粗粒度回退」。
+    pub fn get_cell_for_side_with_source(
+        &self,
+        strategy: &str,
+        symbol: &str,
+        side: Option<&str>,
+    ) -> Option<(&CellEstimate, CellLookupSource)> {
+        if let Some(side) = side.and_then(Self::canonical_side) {
+            let key = format!("{}::{}::{}", strategy, symbol, side);
+            if let Some(cell) = self.data.get(&key) {
+                return Some((cell, CellLookupSource::SideSpecific));
+            }
+        }
+        self.get_cell(strategy, symbol)
+            .map(|cell| (cell, CellLookupSource::Coarse))
+    }
+
+    /// Return the highest positive-edge strategy for `symbol` among `strategy_names`.
+    /// Ties keep the earlier strategy order for deterministic attribution.
+    /// 在候選策略中取此 symbol 的最高正 edge；平手時保留原策略順序以穩定歸因。
+    pub fn best_positive_strategy<'a>(
+        &self,
+        strategy_names: &[&'a str],
+        symbol: &str,
+    ) -> Option<(&'a str, f64)> {
+        let mut best: Option<(&'a str, f64)> = None;
+        for strategy in strategy_names {
+            let Some(cell) = self.get_cell(strategy, symbol) else {
+                continue;
+            };
+            let bps = cell.shrunk_bps;
+            if !bps.is_finite() || bps <= 0.0 {
+                continue;
+            }
+            if best.map(|(_, best_bps)| bps > best_bps).unwrap_or(true) {
+                best = Some((*strategy, bps));
+            }
+        }
+        best
+    }
+
     /// Whether estimates have been loaded (non-empty).
     /// 估計是否已加載（非空）。
     pub fn is_populated(&self) -> bool {
@@ -434,6 +510,115 @@ mod tests {
         let e = EdgeEstimates::load_from_str(sample_json()).unwrap();
         assert!(e.get("unknown_strat", "BTCUSDT").is_none());
         assert!(e.get("bb_reversion", "UNKNOWN").is_none());
+    }
+
+    #[test]
+    fn test_get_cell_for_side_prefers_side_specific_cell() {
+        let json = r#"{
+            "ma_crossover::BTCUSDT": {"runtime_bps": 25.0, "n": 100},
+            "ma_crossover::BTCUSDT::Sell": {"runtime_bps": -12.0, "n": 80}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+
+        let sell = e
+            .get_cell_for_side("ma_crossover", "BTCUSDT", Some("sell"))
+            .expect("side-specific Sell cell should be found");
+        assert!((sell.shrunk_bps - (-12.0)).abs() < 1e-10);
+
+        let coarse = e.get_cell("ma_crossover", "BTCUSDT").unwrap();
+        assert!((coarse.shrunk_bps - 25.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_get_cell_for_side_with_source_marks_side_specific() {
+        let json = r#"{
+            "ma_crossover::BTCUSDT": {"runtime_bps": 25.0, "n": 100},
+            "ma_crossover::BTCUSDT::Sell": {"runtime_bps": -12.0, "n": 80}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+
+        let (sell, source) = e
+            .get_cell_for_side_with_source("ma_crossover", "BTCUSDT", Some("sell"))
+            .expect("side-specific Sell cell should be found");
+
+        assert_eq!(source, CellLookupSource::SideSpecific);
+        assert!((sell.shrunk_bps - (-12.0)).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_get_cell_for_side_falls_back_to_coarse_cell() {
+        let json = r#"{
+            "ma_crossover::BTCUSDT": {"runtime_bps": 25.0, "n": 100}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+
+        let buy = e
+            .get_cell_for_side("ma_crossover", "BTCUSDT", Some("Buy"))
+            .expect("missing side cell should fall back to coarse cell");
+        assert!((buy.shrunk_bps - 25.0).abs() < 1e-10);
+
+        let invalid = e
+            .get_cell_for_side("ma_crossover", "BTCUSDT", Some("entry"))
+            .expect("invalid side hint should fall back to coarse cell");
+        assert!((invalid.shrunk_bps - 25.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_get_cell_for_side_with_source_marks_coarse_fallback() {
+        let json = r#"{
+            "ma_crossover::BTCUSDT": {"runtime_bps": 25.0, "n": 100}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+
+        let (buy, source) = e
+            .get_cell_for_side_with_source("ma_crossover", "BTCUSDT", Some("Buy"))
+            .expect("missing side cell should fall back to coarse cell");
+
+        assert_eq!(source, CellLookupSource::Coarse);
+        assert!((buy.shrunk_bps - 25.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_best_positive_strategy_picks_highest_positive_edge() {
+        let json = r#"{
+            "ma_crossover::BTCUSDT": {"shrunk_bps": 3.0, "n": 50},
+            "bb_reversion::BTCUSDT": {"shrunk_bps": 7.0, "n": 100},
+            "grid_trading::BTCUSDT": {"shrunk_bps": -2.0, "n": 30}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        let strategies = &["ma_crossover", "bb_reversion", "grid_trading"];
+
+        assert_eq!(
+            e.best_positive_strategy(strategies, "BTCUSDT"),
+            Some(("bb_reversion", 7.0))
+        );
+    }
+
+    #[test]
+    fn test_best_positive_strategy_ignores_zero_negative_missing() {
+        let json = r#"{
+            "ma_crossover::BTCUSDT": {"shrunk_bps": 0.0, "n": 50},
+            "bb_reversion::BTCUSDT": {"shrunk_bps": -1.0, "n": 100}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        let strategies = &["ma_crossover", "bb_reversion", "grid_trading"];
+
+        assert_eq!(e.best_positive_strategy(strategies, "BTCUSDT"), None);
+    }
+
+    #[test]
+    fn test_best_positive_strategy_tie_keeps_strategy_order() {
+        let json = r#"{
+            "ma_crossover::BTCUSDT": {"shrunk_bps": 4.0, "n": 50},
+            "bb_reversion::BTCUSDT": {"shrunk_bps": 4.0, "n": 100}
+        }"#;
+        let e = EdgeEstimates::load_from_str(json).unwrap();
+        let strategies = &["ma_crossover", "bb_reversion"];
+
+        assert_eq!(
+            e.best_positive_strategy(strategies, "BTCUSDT"),
+            Some(("ma_crossover", 4.0))
+        );
     }
 
     #[test]
@@ -562,10 +747,8 @@ mod tests {
         // 寫一份 live-grade snapshot 到 <base>/settings/edge_estimates_live_demo.json，
         // 並把 demo snapshot（edge_estimates.json）寫成「會誤導」的內容；確認
         // load_promotion_edge 讀的是 *_live_demo 檔（live-grade bar），非 demo 檔。
-        let base = std::env::temp_dir().join(format!(
-            "openclaw_promo_edge_test_{}",
-            std::process::id()
-        ));
+        let base =
+            std::env::temp_dir().join(format!("openclaw_promo_edge_test_{}", std::process::id()));
         let settings = base.join("settings");
         std::fs::create_dir_all(&settings).unwrap();
         // demo 檔（不應被促升閘讀）：放一個 cell，若誤讀會 populated。
@@ -651,7 +834,7 @@ mod tests {
         let e = EdgeEstimates::load_from_str(json).unwrap();
         let updated = 1_780_012_800;
         let ttl = 172_800; // 48h
-        // 正好等於 TTL 邊界 → fresh（<= 比較）。
+                           // 正好等於 TTL 邊界 → fresh（<= 比較）。
         assert!(e.is_fresh(updated + ttl, ttl));
         // 超過 TTL 1 秒 → not fresh。
         assert!(!e.is_fresh(updated + ttl + 1, ttl));
