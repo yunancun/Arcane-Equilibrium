@@ -258,6 +258,12 @@
 - Linux final smoke 用 old Gate-B + 真 FND2/regime 跑完整 chain：formal matrix row_count=12、coverage PASS、survivorship `pit_fnd2_delisted_proof`、final labels 7 insufficient / 5 kill，chain_status non-promotable 只因舊 run sample_count=2。
 - 結論：fresh Gate-B 到來後的 execution + event breadth + formal matrix + PBO 全鏈已可執行；promotion 仍需 fresh `>=30` matched observations + E2/MIT/QC。
 
+## 2026-06-19 Vol-Event Robust Ruling Evidence
+
+- Linux vol-event cron 自動產出 high-vol robust ruling：4 independent high_vol events（3 downside / 1 upside_squeeze），0/4 survives fee wall，robust ruling `NO_EDGE_SURVIVES`。
+- PM 收錄為 dated repo report `docs/CCAgentWorkSpace/E1/workspace/reports/2026-06-18--vol-event-robust-ruling.md` 並更新 TODO v216；這是 evidence trace，不是 QC final promotion verdict。
+- 邊界：docs/report only；無 runtime/DB/auth/risk/order/trading mutation，P0-EDGE/Gate-B/flash/L2/operator gates 不因此關閉。
+
 ## 2026-06-12 AEG-S3 Gate-B preflight locator
 
 - `44a30afa`/`f4a58b3c` 新增 artifact-only `aeg_s3_gate_b_preflight`：定位 Gate-B/FND2/regime，preview listing sample/PBO，輸出 full-chain command；auto locator 要求 FND2/regime summary 語義驗證。
