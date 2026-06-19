@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 02:33 CEST
+- completed a focused E4 regression slice for the Stage0R 8c denominator source fix
+- evidence: py_compile PASS; 8c smoke_cli 11/11 twice; 8c metrics smoke twice; alpha_candidate smoke twice; 8b funding_skew smoke twice; stats_common pytest 33 passed; source inspection confirms wrapper passes raw 5m `total_bucket_count` and metrics still RED when omitted
+- boundary: docs/report/TODO only; no full CI, Linux full E4 suite, new true-PG rerun, deploy/rebuild/restart, model call, DB write, auth/risk/order/trading mutation; trusted promotion packet remains closed
+
 2026-06-19 02:21 CEST
 - corrected TODO v218 source-sync metadata after v217 `737356a5` was verified on Mac/origin/Linux
 - refreshed passive watch surfaces without action: Gate-B latest `2026-06-19T00:12:01Z` remains WATCH_ONLY; flash_dip entry `{}` and no death-rate success file; L2 cursor remains 2026-06-17 with 2026-06-12..17 zero material/stored days; passive health still fails `[74]` and `[56]`
