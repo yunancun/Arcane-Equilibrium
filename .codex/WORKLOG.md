@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 03:01 CEST
+- refreshed PM-local review evidence for `P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` without archiving the row
+- evidence: source review confirms bootstrap handle-only injection for `BybitEarnClient`/`EarnMovementWriter`, fail-closed unwired behavior, Rust IPC -> owner-task routing for `process_earn_intent`, and Python `/api/v1/earn/stake` `engine=live` routing
+- checks: `process_earn_intent_command` 2, `process_earn_intent` 4, `earn_router_fail_closed_when_unwired` 1, Python Earn route suite 28 with one existing Pydantic warning, and `cargo clippy -p openclaw_engine --lib -- -D warnings` passed
+- boundary: docs/report checkpoint plus local focused Rust/Python checks only; no full CI, Linux cargo, deploy/rebuild/restart, DB write, Bybit private call, credential mutation, auth/risk/order/trading mutation, or first-stake evidence; OP-1/2/3 plus runtime deploy/restart remain open
+
 2026-06-19 02:56 CEST
 - refreshed PM-local review evidence for `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` without archiving the row
 - evidence: source review confirms D2 uses `ConvergeExchangeZero` instead of `CloseSymbol`, dispatch-site audit uses `dispatched-not-confirmed`, handler-confirmed wording is reserved for handler-side facts, and convergence removes local drift plus clears pending close without synthetic PnL/Kelly pollution
