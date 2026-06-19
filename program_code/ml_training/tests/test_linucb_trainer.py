@@ -330,9 +330,9 @@ def test_upsert_arm_state_persists_cumulative_reward(monkeypatch):
     assert params[7] == "sha256:test"
 
 
-def test_fetch_arm_observations_sets_statement_timeout_before_mlde_view(monkeypatch):
-    """V031 MLDE view reads must SET LOCAL timeout before the SELECT.
-    讀 V031 MLDE view 前必先設定 statement_timeout。"""
+def test_fetch_arm_observations_sets_statement_timeout_before_base_query(monkeypatch):
+    """MLDE contract reads must SET LOCAL timeout and avoid the slow view.
+    MLDE 契約讀取須先設定 timeout，且避開慢 view。"""
     calls = []
 
     class FakeCursor:
@@ -381,9 +381,13 @@ def test_fetch_arm_observations_sets_statement_timeout_before_mlde_view(monkeypa
     assert "SET LOCAL statement_timeout" in timeout_sql
     assert timeout_params == (1234,)
     select_sql, select_params = calls[1]
-    assert "FROM learning.mlde_edge_training_rows" in select_sql
-    assert select_params[0] == "trending__ma_crossover"
-    assert select_params[1] == ["demo", "live_demo"]
+    assert "FROM trading.intents" in select_sql
+    assert "JOIN learning.decision_features" in select_sql
+    assert "decision_context_snapshots" in select_sql
+    assert "mlde_edge_training_rows" not in select_sql
+    assert "trading.signals" not in select_sql
+    assert select_params[0] == ["demo", "live_demo"]
+    assert select_params[-1] == "trending__ma_crossover"
 
 
 def test_train_all_arms_passes_statement_timeout_to_pg_helpers(monkeypatch):

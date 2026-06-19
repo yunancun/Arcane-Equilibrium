@@ -57,7 +57,87 @@ CANONICAL_FEATURE_NAMES_V1 = [
 
 VALID_ENGINE_MODES = ("paper", "demo", "live", "live_demo", "demo_live_demo")
 VALID_OBSERVATION_SOURCES = ("mlde_edge_training_rows", "legacy_decision_context")
-DEFAULT_PG_STATEMENT_TIMEOUT_MS = 2_000
+DEFAULT_PG_STATEMENT_TIMEOUT_MS = 5_000
+
+
+_MLDE_EDGE_BASE_OBSERVATIONS_SQL = """
+WITH base AS (
+    SELECT
+        i.ts,
+        floor(extract(epoch FROM i.ts) * 1000.0)::bigint AS ts_ms,
+        lower(COALESCE(
+            NULLIF(i.strategy_name, ''),
+            NULLIF(df.strategy_name, ''),
+            NULLIF(i.details->'scanner'->>'best_strategy', ''),
+            ''
+        )) AS raw_strategy_name,
+        df.features_jsonb,
+        df.label_net_edge_bps AS net_bps_after_fee,
+        d.regime_5m,
+        d.ind_5m_adx,
+        d.ind_5m_rsi,
+        d.ind_5m_atr_14_pct
+      FROM trading.intents i
+      JOIN learning.decision_features df ON df.context_id = i.context_id
+      LEFT JOIN LATERAL (
+          SELECT
+              d.regime_5m,
+              d.ind_5m_adx,
+              d.ind_5m_rsi,
+              d.ind_5m_atr_14_pct
+            FROM trading.decision_context_snapshots d
+           WHERE d.context_id = i.context_id
+           ORDER BY d.ts DESC
+           LIMIT 1
+      ) d ON TRUE
+     WHERE i.engine_mode = ANY(%s)
+       AND df.label_net_edge_bps IS NOT NULL
+       AND i.signal_id IS NOT NULL AND i.signal_id <> ''
+       AND i.context_id IS NOT NULL AND i.context_id <> ''
+       AND COALESCE(i.details->>'source', '') <> 'command'
+       AND (%s::BIGINT IS NULL OR i.ts >= to_timestamp(%s / 1000.0))
+       AND (%s::INT IS NULL OR i.ts >= now() - (%s::INT || ' days')::interval)
+),
+normalized AS (
+    SELECT
+        b.*,
+        CASE b.raw_strategy_name
+            WHEN 'bollinger_reversion' THEN 'bb_reversion'
+            WHEN 'bb_reversion' THEN 'bb_reversion'
+            WHEN 'bb_breakout' THEN 'bb_breakout'
+            WHEN 'ma_crossover' THEN 'ma_crossover'
+            WHEN 'grid_trading' THEN 'grid_trading'
+            WHEN 'funding_arb' THEN 'funding_arb'
+            ELSE b.raw_strategy_name
+        END AS strategy_name_norm,
+        CASE
+            WHEN lower(COALESCE(b.regime_5m, '')) LIKE '%%trend%%' THEN 'trending'
+            WHEN lower(COALESCE(b.regime_5m, '')) LIKE ANY(ARRAY['%%mean%%', '%%range%%', '%%anti%%'])
+                THEN 'mean_reverting'
+            WHEN b.raw_strategy_name IN ('grid_trading', 'bb_reversion', 'bollinger_reversion')
+                THEN 'mean_reverting'
+            WHEN b.raw_strategy_name IN ('ma_crossover', 'bb_breakout') THEN 'trending'
+            ELSE 'random_walk'
+        END AS regime_norm
+      FROM base b
+)
+SELECT
+    jsonb_build_array(
+        LEAST(GREATEST(COALESCE(ind_5m_atr_14_pct::double precision, 0.5), 0.0), 1.0),
+        LEAST(GREATEST(COALESCE(ind_5m_rsi::double precision, 50.0) / 100.0, 0.0), 1.0),
+        LEAST(GREATEST(COALESCE(learning.mlde_try_float8(features_jsonb->>'bb_width_pct'), 0.5), 0.0), 5.0),
+        LEAST(GREATEST(COALESCE(learning.mlde_try_float8(features_jsonb->>'hurst_h'), 0.5), 0.0), 1.0),
+        LEAST(GREATEST(COALESCE(ind_5m_adx::double precision, 25.0), 0.0), 100.0) / 100.0,
+        LEAST(GREATEST(COALESCE(learning.mlde_try_float8(features_jsonb->>'volume_ratio'), 1.0), 0.0), 5.0),
+        sin(2.0 * pi() * ((ts_ms %% 86400000)::double precision / 86400000.0)),
+        cos(2.0 * pi() * ((ts_ms %% 86400000)::double precision / 86400000.0))
+    ) AS context_features,
+    net_bps_after_fee
+  FROM normalized
+ WHERE strategy_name_norm IN ('ma_crossover', 'bb_breakout', 'bb_reversion', 'grid_trading', 'funding_arb')
+   AND (regime_norm || '__' || strategy_name_norm) = %s
+ ORDER BY ts ASC
+"""
 
 
 # ---------------------------------------------------------------------------
@@ -86,16 +166,20 @@ class LinUcbTrainConfig:
         reward_column: legacy decision_outcomes column to use as r_t when
             observation_source="legacy_decision_context".
             legacy 模式下作為 r_t 的 decision_outcomes 欄位名。
-        observation_source: default uses V031 learning.mlde_edge_training_rows,
-            which requires valid signal/context attribution and post-fee reward.
-            默認使用 V031 view，要求歸因鏈與扣費後 reward。
+        observation_source: default preserves the V031
+            learning.mlde_edge_training_rows contract, but reads the underlying
+            base tables directly to avoid the slow trading.signals lateral path.
+            默認保留 V031 view 契約，但直讀底層表，避開慢的 trading.signals
+            lateral 路徑。
         engine_mode: training lane. "live" includes live_demo for historical
             live-pipeline demo rows; explicit "live_demo" remains exact.
             訓練模式；live 會包含 live_demo，demo_live_demo 會包含 demo+live_demo。
         reward_scale_bps: converts net_bps_after_fee into a stable reward unit.
             默認 100 bps = 1.0，後續 agent 可調。
-        max_age_days: optional recent-window bound for V031 view rows.
-            可調近期窗口；None 表示不按天數截斷。
+        max_age_days: optional recent-window bound for MLDE training rows.
+            Routine scheduler default is 30d; longer windows belong in explicit
+            offline research runs.
+            可調近期窗口；routine scheduler 預設 30d；更長窗口應由離線研究顯式指定。
         statement_timeout_ms: per-statement PG timeout for scheduler safety.
             每條 PG 語句 timeout；避免慢 view 阻塞 edge scheduler。
     """
@@ -110,7 +194,7 @@ class LinUcbTrainConfig:
     observation_source: str = "mlde_edge_training_rows"
     engine_mode: str = "demo"
     reward_scale_bps: float = 100.0
-    max_age_days: Optional[int] = 90
+    max_age_days: Optional[int] = 30
     statement_timeout_ms: Optional[int] = DEFAULT_PG_STATEMENT_TIMEOUT_MS
 
 
@@ -259,16 +343,20 @@ def fetch_arm_observations(
     observation_source: str = "mlde_edge_training_rows",
     engine_mode: str = "demo",
     reward_scale_bps: float = 100.0,
-    max_age_days: Optional[int] = 90,
+    max_age_days: Optional[int] = 30,
     statement_timeout_ms: Optional[int] = DEFAULT_PG_STATEMENT_TIMEOUT_MS,
 ) -> list[tuple[list[float], float]]:
     """Fetch (context_features, reward) tuples for a single arm.
     為單個 arm 取出 (context_features, reward) 三元組。
 
-    Default path reads V031 `learning.mlde_edge_training_rows`, requiring an
-    intact attribution chain and using post-fee `net_bps_after_fee` as reward.
-    The legacy path is retained for diagnostics only.
-    默認讀 V031 view，要求完整歸因鏈，reward 使用扣費後 `net_bps_after_fee`；
+    Default path mirrors the V031 ``learning.mlde_edge_training_rows`` output
+    shape, but reads ``trading.intents`` + ``learning.decision_features`` and
+    the PK-backed ``decision_context_snapshots`` lateral directly. This avoids
+    the view's signal_id-only ``trading.signals`` lateral, which bulk-decompresses
+    compressed Timescale chunks and repeatedly times out in production.
+
+    默認路徑鏡像 V031 view 輸出形狀，但直讀 base tables，避開 view 內
+    signal_id-only ``trading.signals`` lateral 的壓縮 chunk 全解壓慢路徑。
     legacy path 僅保留作診斷。
     """
     if psycopg2 is None:
@@ -282,22 +370,9 @@ def fetch_arm_observations(
             _set_local_statement_timeout(cur, statement_timeout_ms)
             if observation_source == "mlde_edge_training_rows":
                 engine_modes = list(engine_mode_scope(engine_mode))
-                sql = """
-                    SELECT context_features, net_bps_after_fee
-                      FROM learning.mlde_edge_training_rows
-                     WHERE linucb_arm_id = %s
-                       AND engine_mode = ANY(%s)
-                       AND attribution_chain_ok
-                       AND net_bps_after_fee IS NOT NULL
-                       AND jsonb_typeof(context_features) = 'array'
-                       AND jsonb_array_length(context_features) = 8
-                       AND (%s::BIGINT IS NULL OR ts >= to_timestamp(%s / 1000.0))
-                       AND (%s::INT IS NULL OR ts >= now() - (%s::INT || ' days')::interval)
-                     ORDER BY ts ASC
-                """
                 cur.execute(
-                    sql,
-                    (arm_id, engine_modes, since_ts_ms, since_ts_ms, max_age_days, max_age_days),
+                    _MLDE_EDGE_BASE_OBSERVATIONS_SQL,
+                    (engine_modes, since_ts_ms, since_ts_ms, max_age_days, max_age_days, arm_id),
                 )
                 for features, reward_bps in cur.fetchall():
                     if features is None or reward_bps is None:

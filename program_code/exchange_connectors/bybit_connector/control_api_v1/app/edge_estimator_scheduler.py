@@ -685,13 +685,17 @@ class EdgeEstimatorScheduler:
                 linucb_mode = os.environ.get("OPENCLAW_MLDE_LINUCB_ENGINE_MODE", "demo_live_demo")
                 reward_scale = float(os.environ.get("OPENCLAW_MLDE_LINUCB_REWARD_SCALE_BPS", "100.0"))
                 statement_timeout_ms = int(
-                    os.environ.get("OPENCLAW_MLDE_LINUCB_STATEMENT_TIMEOUT_MS", "2000")
+                    os.environ.get("OPENCLAW_MLDE_LINUCB_STATEMENT_TIMEOUT_MS", "5000")
+                )
+                max_age_days = int(
+                    os.environ.get("OPENCLAW_MLDE_LINUCB_MAX_AGE_DAYS", "30")
                 )
                 cfg = LinUcbTrainConfig(
                     feature_names=list(CANONICAL_FEATURE_NAMES_V1),
                     engine_mode=linucb_mode,
                     reward_scale_bps=reward_scale,
                     observation_source="mlde_edge_training_rows",
+                    max_age_days=max_age_days,
                     statement_timeout_ms=statement_timeout_ms,
                 )
                 train_results = train_all_arms(dsn, cfg)

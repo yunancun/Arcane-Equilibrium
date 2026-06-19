@@ -116,7 +116,7 @@ def test_shadow_advisor_builds_rank_and_veto_recommendations():
     assert rank.payload["scanner_context"]["scanner_f_bkout"] == 0.74
 
 
-def test_shadow_advisor_fetch_sets_statement_timeout_before_mlde_view(monkeypatch):
+def test_shadow_advisor_fetch_sets_statement_timeout_before_base_query(monkeypatch):
     calls = []
 
     class FakeCursor:
@@ -133,12 +133,8 @@ def test_shadow_advisor_fetch_sets_statement_timeout_before_mlde_view(monkeypatc
 
         def execute(self, sql, params=None):
             calls.append((sql, params))
-            if "information_schema.columns" in sql:
-                self._rows = [("scanner_market_regime",)]
-                self.description = [("column_name",)]
-            else:
-                self._rows = []
-                self.description = [("engine_mode",)]
+            self._rows = []
+            self.description = [("engine_mode",)]
 
         def fetchall(self):
             return self._rows
@@ -165,12 +161,17 @@ def test_shadow_advisor_fetch_sets_statement_timeout_before_mlde_view(monkeypatc
     cfg = ShadowAdvisorConfig(statement_timeout_ms=2345)
     assert mlde_shadow_advisor._fetch_aggregate_rows("postgresql://unit-test", cfg) == []
 
-    assert len(calls) == 3
+    assert len(calls) == 2
     timeout_sql, timeout_params = calls[0]
     assert "SET LOCAL statement_timeout" in timeout_sql
     assert timeout_params == (2345,)
-    assert "information_schema.columns" in calls[1][0]
-    assert "FROM learning.mlde_edge_training_rows" in calls[2][0]
+    select_sql, select_params = calls[1]
+    assert "FROM trading.intents" in select_sql
+    assert "JOIN learning.decision_features" in select_sql
+    assert "decision_context_snapshots" in select_sql
+    assert "mlde_edge_training_rows" not in select_sql
+    assert "trading.signals" not in select_sql
+    assert select_params[0] == ["demo"]
 
 
 def test_shadow_advisor_persist_sets_statement_timeout_before_insert(monkeypatch):

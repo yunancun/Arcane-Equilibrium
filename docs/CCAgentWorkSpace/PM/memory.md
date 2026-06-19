@@ -634,3 +634,8 @@
 - TODO v196 closes `P3-SUB-AGENT-HYGIENE-SOP-CARGO-TEST-AFTER-ATOMIC`: Codex dispatch rules now require `docs/agents/sub-agent-hygiene-sop.md` for delegated Rust/Cargo/Linux-runtime/PG/deploy/runtime-verification work.
 - Dispatch records must name `hygiene_sop`, `verification_surface`, and Linux write policy. E1/E2/E4 Rust tasks must report focused Mac cargo/source verification or an explicit skip reason; sub-agents remain barred from Linux cargo and unsupervised restart.
 - Boundary: docs/governance only; no source code, CI, deploy/rebuild/restart, runtime DB/auth/risk/order/trading mutation, credential mutation, or real Bybit call.
+
+## 2026-06-20 MLDE LinUCB / shadow timeout fix
+
+- Production logs showed daily LinUCB and API scheduler MLDE reads timing out on the slow `learning.mlde_edge_training_rows` view path. LinUCB and shadow advisor now preserve the MLDE training-row contract while reading base tables directly, avoiding the `trading.signals` lateral bulk-decompress path.
+- Routine LinUCB windows default to 30d with 5s timeout; remote read-only smoke of patched modules showed 30d all-arm LinUCB max arm 1.69s and shadow aggregate ~0.5s. Boundary: source/tests/docs only in this checkpoint; remote smoke was read-only and not an alpha promotion proof.

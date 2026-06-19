@@ -972,7 +972,7 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--max-age-days",
         type=int,
-        default=int(os.environ.get("OPENCLAW_ML_CRON_MAX_AGE_DAYS", "90")),
+        default=int(os.environ.get("OPENCLAW_ML_CRON_MAX_AGE_DAYS", "30")),
     )
     parser.add_argument(
         "--onnx-validate-samples",
