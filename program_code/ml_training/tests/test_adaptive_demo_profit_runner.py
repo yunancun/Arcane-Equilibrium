@@ -1209,6 +1209,83 @@ def test_legacy_edge_snapshot_without_side_cells_blocks_advisory_fallback(tmp_pa
     )
 
 
+def test_db_side_edge_fallback_survives_legacy_snapshot_without_side_cells(tmp_path):
+    ma_arm = make_arm_id("range", "ma_crossover")
+    rewards = [
+        ArmReward(ma_arm, "range", -20.0, float(i), FILL_TIER_TAKER_REAL)
+        for i in range(3)
+    ]
+    edge_path = tmp_path / "edge_estimates.json"
+    edge_path.write_text(
+        json.dumps(
+            {
+                "ma_crossover::UNIUSDT": {
+                    "runtime_bps": -8.0,
+                    "win_rate": 0.4,
+                    "n": 3,
+                    "validation_passed": False,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        candidate_regimes=["range"],
+        candidate_strategies=[],
+        include_demo_maker_arm=False,
+        enable_explore_sink=True,
+        controlled_experiment_enabled=True,
+        require_advisory_for_explore=True,
+        use_edge_snapshot_for_explore_evidence=True,
+        require_cost_viable_edge_for_explore_when_available=True,
+        edge_evidence_min_n=3,
+        explore_strategy_allowlist=["ma_crossover"],
+        max_active_explore_strategies=2,
+        rng_seed=11,
+    )
+    lever, calls = _record_lever({"ma_crossover": False})
+    runner = AdpeRunner(
+        cfg,
+        lever=lever,
+        rewards_fn=lambda: rewards,
+        advisory_fn=lambda: {},
+        side_evidence_fn=lambda: [
+            {
+                "strategy": "ma_crossover",
+                "symbol": "UNIUSDT",
+                "side": "Buy",
+                "key": "ma_crossover::UNIUSDT::Buy",
+                "source": "db_decision_features_side_edge",
+                "cell": {
+                    "runtime_bps": 32.0,
+                    "win_rate": 1.0,
+                    "n": 3,
+                },
+            }
+        ],
+        edge_estimates_path=str(edge_path),
+    )
+
+    report = runner.run_cycle(dry_run=False)
+
+    assert report.desired_active["ma_crossover"] is True
+    assert ("ma_crossover", True) in calls
+    assert report.experiment_policy["selected_explore"] == ["ma_crossover"]
+    assert report.experiment_policy["edge_evidence_scores"]["ma_crossover"] == pytest.approx(
+        17.7,
+        abs=1e-6,
+    )
+    audit = report.experiment_policy["edge_evidence_audit"]
+    assert audit["candidate_side_cells_seen"] == 0
+    assert audit["db_side_cells_seen"] == 1
+    assert audit["legacy_cells_seen"] == 1
+    assert audit["db_side_cell_strategies_seen"] == ["ma_crossover"]
+    assert report.experiment_policy["edge_evidence_cells"][0]["source"] == (
+        "db_decision_features_side_edge"
+    )
+
+
 def test_under_cost_side_edge_is_not_positive_explore_evidence(tmp_path):
     ma_arm = make_arm_id("range", "ma_crossover")
     rewards = [

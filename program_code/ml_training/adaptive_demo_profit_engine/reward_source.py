@@ -17,6 +17,9 @@ MODULE_NOTE (中):
   主要函數：
     - fetch_demo_arm_rewards(dsn, ...)：跑唯一一條 read-only SELECT，回
       list[ArmReward]（taker_real tier，realized post-fee）。
+    - fetch_demo_side_edge_cells(dsn, ...)：同源讀近窗 realized demo PnL，聚合成
+      (strategy, symbol, entry side) side-aware edge evidence，供 ADPE 在 JSON side overlay
+      遺失時仍能 fail-closed 地評估 cost wall。
     - map_view_regime_to_alloc_regime：view 詞彙 regime enum（trending/mean_reverting/
       random_walk）→ allocator VALID_REGIMES（chop/range/...）的誠實映射。
 
@@ -216,6 +219,48 @@ _REWARD_SQL = """
     ORDER BY ts_secs ASC
 """
 
+_SIDE_EDGE_SQL = """
+    WITH base AS (
+        SELECT
+            CASE lower(COALESCE(NULLIF(df.strategy_name, ''), NULLIF(i.strategy_name, ''), ''))
+                WHEN 'bollinger_reversion' THEN 'bb_reversion'
+                ELSE lower(COALESCE(NULLIF(df.strategy_name, ''), NULLIF(i.strategy_name, ''), ''))
+            END AS strategy_name,
+            df.symbol AS symbol,
+            CASE
+                WHEN df.side > 0 THEN 'Buy'
+                WHEN df.side < 0 THEN 'Sell'
+                ELSE NULL
+            END AS entry_side,
+            df.label_net_edge_bps AS net_bps
+          FROM trading.intents i
+          JOIN learning.decision_features df ON df.context_id = i.context_id
+         WHERE i.engine_mode = ANY(%s)
+           AND df.engine_mode = ANY(%s)
+           AND df.label_net_edge_bps IS NOT NULL
+           AND i.signal_id IS NOT NULL AND i.signal_id <> ''
+           AND i.context_id IS NOT NULL AND i.context_id <> ''
+           AND COALESCE(i.details->>'source', '') <> 'command'
+           AND (%s::INT IS NULL OR i.ts >= now() - (%s::INT || ' days')::interval)
+    )
+    SELECT
+        strategy_name,
+        symbol,
+        entry_side,
+        count(*)::int AS n,
+        avg(net_bps)::double precision AS mean_bps,
+        COALESCE(stddev_samp(net_bps), 0.0)::double precision AS std_bps,
+        avg((net_bps > 0.0)::int)::double precision AS win_rate,
+        COALESCE(avg(net_bps) FILTER (WHERE net_bps > 0.0), 0.0)::double precision AS avg_win_bps,
+        COALESCE(avg(net_bps) FILTER (WHERE net_bps <= 0.0), 0.0)::double precision AS avg_loss_bps
+      FROM base
+     WHERE strategy_name IN ('bb_reversion', 'bb_breakout', 'ma_crossover', 'grid_trading', 'funding_arb')
+       AND COALESCE(symbol, '') <> ''
+       AND entry_side IS NOT NULL
+     GROUP BY strategy_name, symbol, entry_side
+     ORDER BY strategy_name, symbol, entry_side
+"""
+
 
 def fetch_demo_arm_rewards(
     dsn: str,
@@ -283,5 +328,76 @@ def fetch_demo_arm_rewards(
                         # view 路徑 = 引擎真實成交歸因 → taker_real（非 demo-maker artifact）。
                         fill_realism_tier=FILL_TIER_TAKER_REAL,
                     )
+                )
+    return out
+
+
+def fetch_demo_side_edge_cells(
+    dsn: str,
+    *,
+    max_age_days: Optional[int] = 30,
+    statement_timeout_ms: Optional[int] = DEFAULT_PG_STATEMENT_TIMEOUT_MS,
+    _connect=None,
+) -> list[dict]:
+    """Read demo realized edge grouped by strategy/symbol/entry-side.
+
+    This is an evidence fallback for ADPE only. It does not write snapshots and
+    does not grant order authority; runner still applies the same cost-wall and
+    runtime-readiness filters used for JSON side cells.
+    """
+    connect = _connect
+    if connect is None:
+        if psycopg2 is None:
+            raise RuntimeError("psycopg2 not installed / psycopg2 未安裝")
+        connect = psycopg2.connect  # pragma: no cover — live path
+
+    engine_modes = list(engine_mode_scope(_DEMO_ENGINE_MODE))
+    out: list[dict] = []
+    with connect(dsn, connect_timeout=2) as conn:
+        with conn.cursor() as cur:
+            _set_local_statement_timeout(cur, statement_timeout_ms)
+            cur.execute(
+                _SIDE_EDGE_SQL,
+                (engine_modes, engine_modes, max_age_days, max_age_days),
+            )
+            for (
+                strategy,
+                symbol,
+                side,
+                n,
+                mean_bps,
+                std_bps,
+                win_rate,
+                avg_win_bps,
+                avg_loss_bps,
+            ) in cur.fetchall():
+                if not strategy or not symbol or side not in ("Buy", "Sell"):
+                    continue
+                mean = float(mean_bps)
+                wins = float(win_rate)
+                out.append(
+                    {
+                        "strategy": str(strategy),
+                        "symbol": str(symbol),
+                        "side": str(side),
+                        "key": f"{strategy}::{symbol}::{side}",
+                        "source": "db_decision_features_side_edge",
+                        "cell": {
+                            "shrunk_bps": mean,
+                            "runtime_bps": mean,
+                            "raw_bps": mean,
+                            "n": int(n),
+                            "std_bps": float(std_bps or 0.0),
+                            "win_rate": wins,
+                            "win_rate_shrunk": wins,
+                            "avg_win_bps_shrunk": float(avg_win_bps or 0.0),
+                            "avg_loss_bps_shrunk": float(avg_loss_bps or 0.0),
+                            "combined_ev_bps": mean,
+                            "validation_passed": False,
+                            "validation_reason": "db_side_edge_demo_only_not_promotion_evidence",
+                            "_side": str(side),
+                            "_side_from": "learning.decision_features.side",
+                        },
+                    }
                 )
     return out
