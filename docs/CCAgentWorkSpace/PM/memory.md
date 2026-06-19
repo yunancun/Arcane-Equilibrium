@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-19 TODO v224 Stage0R Current-Head Wrapper True-PG Rerun
+
+- Refreshed `P1-A1A2-STAGE0R-RUNNER-IMPL` with current-head Linux true-PG read-only wrapper evidence, superseding the stale "no new true-PG rerun beyond v217 artifact" caveat without closing the row.
+- Linux canonical `trade-core` was `HEAD=origin/main=e69d5fd3`; run dir `/tmp/openclaw/stage0r_current_head_verify_20260619T011508Z`; `PGOPTIONS="-c default_transaction_read_only=on"` with DB URL/password env deliberately unset.
+- Evidence: 8b row_count=8034 / eligible=false / `no primary-horizon signals`; alpha_candidate `observe_more` / `stage0_ready=false` / A1 `draft_only` / A2 `observe_more`; standalone 8c `RED` / `review_ready=true` / total_rows=291 / total_bucket_count=2924 / long=164 / short=121 / missing-denominator scan=0.
+- Boundary: no full CI/cargo/Linux build/deploy/rebuild/restart/DB write, no repo artifact write beyond docs, no Bybit private call, no credential mutation/auth/risk/order/trading mutation; trusted promotion packet, full E4 review, QC/MIT/QA sign-off, Stage0R promotion, P0-EDGE, and operator gates remain open.
+
 ## 2026-06-19 TODO v223 Source-Sync Correction
 
 - Corrected source-sync metadata after v222 Earn first-stake routing review.

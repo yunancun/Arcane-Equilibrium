@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 03:16 CEST
+- refreshed `P1-A1A2-STAGE0R-RUNNER-IMPL` with current-head Linux true-PG read-only wrapper evidence
+- evidence: Linux `trade-core` `HEAD=origin/main=e69d5fd3`; run dir `/tmp/openclaw/stage0r_current_head_verify_20260619T011508Z`; 8b row_count=8034/eligible=false/no primary-horizon signals; alpha_candidate observe_more/stage0_ready=false/A1 draft_only/A2 observe_more; standalone 8c RED/review_ready=true/total_rows=291/total_bucket_count=2924/long=164/short=121/missing-denominator scan=0
+- remains: trusted promotion packet, full E4 review, QC/MIT/QA sign-off, Stage0R promotion, P0-EDGE, and operator gates are still open
+- boundary: no full CI, cargo, Linux build, deploy/rebuild/restart, DB write, repo artifact write beyond docs, Bybit private call, credential mutation, auth/risk/order/trading mutation
+
 2026-06-19 03:09 CEST
 - corrected TODO source-sync metadata after v222 Earn first-stake routing review
 - evidence: Mac `HEAD=origin/main=712d3a03`; Linux `trade-core` `HEAD=origin/main=712d3a03`; Linux tracked checkout clean except existing unrelated untracked `vol-event-robust-ruling.md` and `variance_risk_premium/`

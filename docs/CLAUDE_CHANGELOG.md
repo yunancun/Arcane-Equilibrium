@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v223 source-sync correction checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v224 Stage0R current-head wrapper true-PG rerun checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v224 增量（2026-06-19 Stage0R current-head wrapper true-PG rerun checkpoint）**：補 `P1-A1A2-STAGE0R-RUNNER-IMPL` current-head Linux true-PG read-only rerun，supersede v219/v217 後「no new true-PG rerun beyond v217 artifact」caveat，但 row 仍不 archive。Linux canonical `trade-core` `HEAD=origin/main=e69d5fd3`，run dir `/tmp/openclaw/stage0r_current_head_verify_20260619T011508Z`，`PGOPTIONS="-c default_transaction_read_only=on"`，刻意 unset `OPENCLAW_DATABASE_URL` / `DATABASE_URL` / `POSTGRES_PASSWORD`。Artifacts：8b sha256 `1a0bea6a...` row_count=8034 / eligible=false / fail=`no primary-horizon signals`；alpha_candidate sha256 `6bcbd8ef...` verdict=`observe_more` / `stage0_ready=false` / A1=`draft_only` / A2=`observe_more`；standalone 8c sha256 `b027b09a...` `RED` / `review_ready=true` / total_rows=291 / `params.total_bucket_count=2924` / both-direction floor long=164, short=121, fail_reason=null / recursive missing-denominator scan=0。Report：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-19--stage0r_current_head_wrapper_true_pg_rerun.md`。邊界：no full CI / no cargo / no Linux build / no deploy/rebuild/restart / no DB write / no repo artifact write beyond docs / no Bybit private/signed call / no credential/key/secret mutation / no auth/risk/order/trading mutation；trusted promotion packet、E4 full review、QC/MIT/QA sign-off、Stage0R promotion、P0-EDGE、operator gates 仍開。
 
 **v223 增量（2026-06-19 source-sync correction checkpoint）**：修正 `TODO.md` §0 source-sync 事實：v222 Earn first-stake capability routing review checkpoint `712d3a03` 已推送 `origin/main` 並 fast-forward 到 Linux `trade-core`，不應再只停在 post-v221 `1ec05e6f`。Focused verification：Mac `HEAD=origin/main=712d3a03`，Linux `trade-core` `HEAD=origin/main=712d3a03`；Linux tracked checkout clean except existing unrelated untracked `vol-event-robust-ruling.md` + `variance_risk_premium/`；watchdog read-only status `engine_alive=true` / demo snapshot age `9.6s`。Report：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-19--todo_v223_source_sync_after_earn.md`。邊界：docs/TODO source-sync metadata only；no CI full suite / no cargo / no Linux build / no deploy/rebuild/restart / no DB write / no Bybit private/signed call / no credential/key/secret mutation / no auth/risk/order/trading mutation；不關閉任何 runtime/review/operator gate。
 
