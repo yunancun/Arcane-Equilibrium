@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-19（TODO v226 source-sync correction checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-19（TODO v227 passive-watch refresh checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v227 增量（2026-06-19 passive-watch refresh checkpoint）**：刷新 Linux read-only passive-watch surface，補 `TODO.md` §0 / §6 與 PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-19--todo_v227_passive_watch_refresh.md`。Mac/origin/Linux 已在 v226 checkpoint `880b82ba` 對齊；watchdog `engine_alive=true` / demo snapshot age 7.4s。Gate-B latest artifact generated `2026-06-19T01:42:01Z` remains `WATCH_ONLY`（21 total / 0 alertable/start/schedule / 1 watch_only；announcements ok 150 items/3 pages + prelaunch ok 1），未跑 preflight / isolated probe。flash_dip entry file remains `{}`，death-rate last-success/log absent；read-only PG found 0 flash_dip rows in intents/orders/fills/order-state/position snapshot details。L2 cursor remains `2026-06-17`，2026-06-12..17 day stats/log tail still no-op (`materials_l2=0/stored=0`)，B3 shadow rows=0；D2 `reconcile_ghost_converge` total=0/semantics=0。Passive health at `2026-06-19T01:45:02Z` still FAIL on `[74]` attempts=201/postonly=26/max_pending=0 and `[56]` `authorization_json_missing`。結論：no archive/promotion/probe/autostart/closure；等待 Gate-B fresh `ACTIONABLE_*`、flash_dip natural fill/death-rate、L2 first non-empty material day/B3 shadow evidence、D2 production event proof、operator live-auth。邊界：docs/TODO/report + read-only Linux file/PG/healthcheck only；未跑 CI full suite/cargo/Linux build，未 deploy/rebuild/restart，無 Bybit private/signed call、DB write、credential/key/secret/runtime/auth/risk/order/trading mutation。
 
 **v226 增量（2026-06-19 source-sync correction checkpoint）**：修正 `TODO.md` §0 source-sync 事實：v225 passive-watch refresh checkpoint `e8ade59a` 已推送 `origin/main` 並 fast-forward 到 Linux `trade-core`。Focused verification：Mac `HEAD=origin/main=e8ade59a`，Linux `trade-core` `HEAD=origin/main=e8ade59a`；watchdog read-only status `engine_alive=true` / demo snapshot age `30.0s`。Report：`docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-19--todo_v226_source_sync_after_passive_watch.md`。邊界：docs/TODO source-sync metadata only；no CI full suite / no cargo / no Linux build / no deploy/rebuild/restart / no DB write / no Bybit private/signed call / no credential/key/secret mutation / no auth/risk/order/trading mutation；不關閉任何 runtime/review/operator gate。
 
