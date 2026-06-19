@@ -17,7 +17,7 @@ from alpha_discovery_throughput.packet import (
     build_direct_report_from_packet,
     daily_returns_from_samples,
 )
-from alpha_discovery_throughput.runtime_runner import run_once
+from alpha_discovery_throughput.runtime_runner import collect_runtime_arms, run_once
 from alpha_discovery_throughput.signal_manifest import build_signal_spec, validate_signal_manifest
 
 
@@ -257,6 +257,34 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     assert arms["mm_verdict_maker_edge"]["action"] == "READY_FOR_AEG_CHAIN"
     assert arms["gate_b_listing_fade"]["action"] == "WAIT"
     assert arms["vol_event_order_flow"]["reason"] == "gate_status:no_edge_survives"
+
+
+def test_runtime_runner_blocks_stale_mm_verdict_status(tmp_path):
+    data = tmp_path / "openclaw"
+    (data / "logs").mkdir(parents=True)
+    (data / "logs" / "recorder_mm_verdict.log").write_text(json.dumps({
+        "ts_utc": "2026-06-17T21:45:03Z",
+        "thresholds": {"min_maker_fills": 30},
+        "markout_n_total": 31,
+        "adverse_selection_usable": True,
+        "net_edge_per_symbol": {
+            "BTCUSDT": {"net_edge_bps": 1.25, "n_maker_fills": 31},
+        },
+    }) + "\n", encoding="utf-8")
+
+    arms = collect_runtime_arms(
+        data_dir=data,
+        now_utc=dt.datetime(2026, 6, 19, 22, 30, tzinfo=dt.timezone.utc),
+    )
+    mm_arm = next(arm for arm in arms if arm["arm_id"] == "mm_verdict_maker_edge")
+    plan = build_discovery_plan([mm_arm], now_utc=dt.datetime(2026, 6, 19, 22, 30, tzinfo=dt.timezone.utc))
+
+    assert mm_arm["source_ok"] is False
+    assert mm_arm["source_error"] == "stale_artifact"
+    assert mm_arm["gate_status"] == "SOURCE_FAILURE"
+    assert mm_arm["detail"]["age_seconds"] > 36 * 60 * 60
+    assert plan["arms"][0]["action"] == "BLOCK"
+    assert plan["arms"][0]["reason"] == "source_not_healthy"
 
 
 def test_edge_snapshot_adapter_only_promotes_durable_non_bull_concrete_rows():
