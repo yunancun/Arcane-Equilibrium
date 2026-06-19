@@ -58,9 +58,11 @@ edge_evidence_fee_rate = 0.00055
 edge_evidence_slippage = 0.0
 edge_evidence_win_rate_floor = 0.3
 edge_evidence_safety_multiplier = 1.3
+edge_evidence_min_n = 3
 edge_evidence_grid_min_n = 30
 edge_evidence_require_runtime_symbol_ready = true
 edge_evidence_runtime_snapshot_path = "/tmp/openclaw/pipeline_snapshot.json"
+edge_evidence_ma_adx_threshold = 20.0
 
 # RNG seed：留空 = 非確定（production cron）；CLI --seed 可注入固定值供可重現。
 # rng_seed = 42
