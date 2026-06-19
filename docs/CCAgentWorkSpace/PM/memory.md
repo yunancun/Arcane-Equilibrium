@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-19 TODO v218 Source-Sync Passive Watch Refresh
+
+- Corrected TODO source HEAD from stale v216 `61e1a6d2` to v217 `737356a5`; Mac/origin/Linux are aligned at `737356a5`.
+- Read-only passive recheck found no actionable event: Gate-B remains `WATCH_ONLY`, flash_dip entry is still `{}` with no death-rate success file, L2 cursor remains `2026-06-17` with zero material/stored days, and passive health still fails `[74]`/`[56]`.
+- Boundary: docs/TODO + read-only Linux file/healthcheck only; no CI/deploy/rebuild/restart, no model call, no DB write, no auth/risk/order/trading mutation.
+
 ## 2026-06-18 Earn First-Stake Capability Routing
 
 - Reduced `P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` source blocker without closing the runtime row.
