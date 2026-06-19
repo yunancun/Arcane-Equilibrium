@@ -942,7 +942,23 @@ def test_edge_evidence_runtime_symbol_readiness_filter_drops_unready_ton(tmp_pat
         json.dumps(
             {
                 "latest_prices": {"TONUSDT": 1.7, "UNIUSDT": 3.0},
-                "indicators": {"UNIUSDT": {"sma_20": 3.0}},
+                "indicators": {
+                    "UNIUSDT": {
+                        "sma_20": 3.0,
+                        "kama": {"kama": 3.1},
+                        "hurst": {"regime": "trending"},
+                    }
+                },
+                "signals": [
+                    {
+                        "source": "ma_crossover",
+                        "symbol": "UNIUSDT",
+                        "direction": "Long",
+                        "confidence": 0.8,
+                        "edge_bps": 20.0,
+                        "ts_ms": 1000,
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -982,6 +998,91 @@ def test_edge_evidence_runtime_symbol_readiness_filter_drops_unready_ton(tmp_pat
     assert [c["symbol"] for c in report.experiment_policy["edge_evidence_cells"]] == [
         "UNIUSDT"
     ]
+    readiness = report.experiment_policy["edge_evidence_cells"][0]["readiness"]
+    assert readiness["status"] == "entry_ready"
+    assert readiness["reasons"] == []
+
+
+def test_edge_evidence_readiness_audit_explains_ma_blocked_state(tmp_path):
+    ma_arm = make_arm_id("range", "ma_crossover")
+    rewards = [
+        ArmReward(ma_arm, "range", -20.0, float(i), FILL_TIER_TAKER_REAL)
+        for i in range(3)
+    ]
+    edge_path = tmp_path / "edge_estimates.json"
+    edge_path.write_text(
+        json.dumps(
+            {
+                "ma_crossover::UNIUSDT::Buy": {
+                    "runtime_bps": 32.0,
+                    "win_rate": 1.0,
+                    "n": 1,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    snapshot_path = tmp_path / "pipeline_snapshot.json"
+    snapshot_path.write_text(
+        json.dumps(
+            {
+                "latest_prices": {"UNIUSDT": 3.0},
+                "indicators": {
+                    "UNIUSDT": {
+                        "sma_20": 3.0,
+                        "kama": {"kama": 2.9},
+                        "hurst": {"regime": "random_walk"},
+                    }
+                },
+                "signals": [
+                    {
+                        "source": "ma_crossover",
+                        "symbol": "UNIUSDT",
+                        "direction": "Short",
+                        "confidence": 0.6,
+                        "edge_bps": 10.0,
+                        "ts_ms": 1000,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        candidate_regimes=["range"],
+        candidate_strategies=[],
+        include_demo_maker_arm=False,
+        enable_explore_sink=True,
+        controlled_experiment_enabled=True,
+        require_advisory_for_explore=True,
+        use_edge_snapshot_for_explore_evidence=True,
+        edge_evidence_require_runtime_symbol_ready=True,
+        edge_evidence_runtime_snapshot_path=str(snapshot_path),
+        explore_strategy_allowlist=["ma_crossover"],
+        rng_seed=8,
+    )
+    lever, _calls = _record_lever({"ma_crossover": False})
+    runner = AdpeRunner(
+        cfg,
+        lever=lever,
+        rewards_fn=lambda: rewards,
+        advisory_fn=lambda: {},
+        edge_estimates_path=str(edge_path),
+    )
+
+    report = runner.run_cycle(dry_run=False)
+
+    assert report.desired_active["ma_crossover"] is True
+    readiness = report.experiment_policy["edge_evidence_cells"][0]["readiness"]
+    assert readiness["status"] == "blocked_by_strategy_state"
+    assert readiness["desired_direction"] == "Long"
+    assert readiness["signal_direction"] == "Short"
+    assert readiness["indicator_direction"] == "Short"
+    assert readiness["hurst_regime"] == "random_walk"
+    assert "ma_signal_opposite:Short" in readiness["reasons"]
+    assert "ma_kama_sma_direction_opposite:Short" in readiness["reasons"]
+    assert "ma_hurst_not_persistent:random_walk" in readiness["reasons"]
 
 
 def test_under_cost_side_edge_is_not_positive_explore_evidence(tmp_path):
