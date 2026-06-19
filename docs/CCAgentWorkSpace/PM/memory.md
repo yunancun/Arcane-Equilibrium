@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-19 TODO v226 Source-Sync Correction
+
+- Corrected source-sync metadata after v225 passive-watch refresh.
+- Mac `HEAD=origin/main=e8ade59a` and Linux `trade-core` `HEAD=origin/main=e8ade59a` after ff-only sync.
+- Linux watchdog read-only status: `engine_alive=true`, demo snapshot age `30.0s`.
+- Boundary: docs/TODO metadata only; no CI/cargo/Linux build/deploy/rebuild/restart/DB write/Bybit private call/credential/runtime/auth/risk/order/trading mutation; no active gate closed.
+
 ## 2026-06-19 TODO v225 Passive-Watch Refresh
 
 - Refreshed passive watch surfaces without closing any active gate.
