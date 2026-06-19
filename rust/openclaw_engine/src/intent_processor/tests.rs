@@ -51,6 +51,16 @@ fn make_intent(symbol: &str, is_long: bool) -> OrderIntent {
     }
 }
 
+fn make_flash_dip_sentinel_intent(symbol: &str) -> OrderIntent {
+    let mut intent = make_intent(symbol, true);
+    intent.qty = 1e9;
+    intent.strategy = "flash_dip_buy".into();
+    intent.order_type = "limit".into();
+    intent.limit_price = Some(49_000.0);
+    intent.time_in_force = Some(crate::order_manager::TimeInForce::PostOnly);
+    intent
+}
+
 /// AMD-2026-05-02-01 Track E E-1 retrofit helper: seed an Active SM-02 lease on a
 /// Production-profile GovernanceCore fixture. PA push back #4 requires Production
 /// fixtures must NOT use LeaseId::Bypass short-circuit — the helper invokes the
@@ -219,7 +229,13 @@ fn test_per_strategy_max_concurrent_positions_hard_reject() {
     state.set_latest_price("BTCUSDT", 50_000.0);
     let mut intent = make_intent("BTCUSDT", true);
     intent.strategy = "flash_dip_buy".into();
-    let result = proc.process(&intent, &gov, &state, 2000.0, GovernanceProfile::Exploration);
+    let result = proc.process(
+        &intent,
+        &gov,
+        &state,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
     assert!(
         !result.submitted,
         "4th flash_dip_buy entry must be rejected by risk layer"
@@ -239,7 +255,13 @@ fn test_per_strategy_max_concurrent_positions_hard_reject() {
     state3.set_latest_price("BTCUSDT", 50_000.0);
     let mut intent3 = make_intent("BTCUSDT", true);
     intent3.strategy = "flash_dip_buy".into();
-    let result3 = proc.process(&intent3, &gov, &state3, 2000.0, GovernanceProfile::Exploration);
+    let result3 = proc.process(
+        &intent3,
+        &gov,
+        &state3,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
     assert!(
         result3.submitted,
         "3rd entry under cap=3 must pass concurrency gate, got {:?}",
@@ -342,8 +364,13 @@ fn test_per_strategy_max_concurrent_hard_reject_exchange_path() {
     state3.set_latest_price("BTCUSDT", 50_000.0);
     let mut intent3 = make_intent("BTCUSDT", true);
     intent3.strategy = "flash_dip_buy".into();
-    let result3 =
-        proc.process_gates_only(&intent3, &gov, &state3, 2000.0, GovernanceProfile::Validation);
+    let result3 = proc.process_gates_only(
+        &intent3,
+        &gov,
+        &state3,
+        2000.0,
+        GovernanceProfile::Validation,
+    );
     assert!(
         result3.approved,
         "3rd exchange-path entry under cap=3 must pass concurrency gate, got {:?}",
@@ -653,6 +680,113 @@ fn test_fup8_phase2_approved_qty_exposed_on_success() {
         "approved_qty ({}) must match fill.fill_qty ({})",
         result.approved_qty,
         fill.fill_qty
+    );
+}
+
+#[test]
+fn test_flash_dip_sentinel_paper_sizes_to_flash_cap_before_hard_cap() {
+    let mut proc = IntentProcessor::new();
+    proc.set_p1_risk_pct(0.10);
+    proc.risk_config.limits.per_trade_risk_pct = 0.10;
+    proc.risk_config
+        .limits
+        .flash_dip_buy_max_notional_pct_equity = 0.03;
+
+    let mut gov = GovernanceCore::new();
+    gov.grant_paper_authorization(None).unwrap();
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("BTC", 50_000.0);
+    let intent = make_flash_dip_sentinel_intent("BTC");
+
+    let result = proc.process(
+        &intent,
+        &gov,
+        &state,
+        2000.0,
+        GovernanceProfile::Exploration,
+    );
+    assert!(
+        result.submitted,
+        "flash_dip sentinel should be sized under its own cap, got {:?}",
+        result.rejected_reason
+    );
+    assert!(
+        (result.approved_qty - 0.006).abs() < 1e-9,
+        "approved_qty should use flash cap 3%, got {}",
+        result.approved_qty
+    );
+}
+
+#[test]
+fn test_flash_dip_sentinel_exchange_sizes_to_flash_cap_before_hard_cap() {
+    let mut proc = IntentProcessor::new();
+    proc.set_p1_risk_pct(0.10);
+    proc.risk_config.limits.per_trade_risk_pct = 0.10;
+    proc.risk_config
+        .limits
+        .flash_dip_buy_max_notional_pct_equity = 0.03;
+
+    let gov = GovernanceCore::new_with_profile(GovernanceProfile::Validation);
+    let mut state = PaperState::new(10_000.0);
+    state.set_latest_price("BTC", 50_000.0);
+    let intent = make_flash_dip_sentinel_intent("BTC");
+
+    let result =
+        proc.process_gates_only(&intent, &gov, &state, 2000.0, GovernanceProfile::Validation);
+    assert!(
+        result.approved,
+        "flash_dip sentinel should pass exchange gates under its own cap, got {:?}",
+        result.rejected_reason
+    );
+    assert!(
+        (result.approved_qty - 0.006).abs() < 1e-9,
+        "approved_qty should use flash cap 3%, got {}",
+        result.approved_qty
+    );
+}
+
+#[test]
+fn test_flash_dip_notional_cap_tolerates_cent_rounding_boundary() {
+    let mut proc = IntentProcessor::new();
+    proc.risk_config
+        .limits
+        .flash_dip_buy_max_notional_pct_equity = 0.03;
+
+    let balance = 9_572.29;
+    let price = 0.974;
+    let max_notional = balance
+        * proc
+            .risk_config
+            .limits
+            .flash_dip_buy_max_notional_pct_equity;
+
+    let display_equal_qty = (max_notional + 0.005) / price;
+    assert!(
+        proc.check_flash_dip_notional_cap(
+            "flash_dip_buy",
+            display_equal_qty,
+            price,
+            balance,
+            false,
+        )
+        .is_none(),
+        "sub-cent/cent display-equivalent cap drift should not reject"
+    );
+
+    let materially_over_qty = (max_notional + 0.02) / price;
+    let reason = proc.check_flash_dip_notional_cap(
+        "flash_dip_buy",
+        materially_over_qty,
+        price,
+        balance,
+        false,
+    );
+    assert!(
+        reason
+            .as_deref()
+            .unwrap_or_default()
+            .contains("flash_dip_buy_notional_cap"),
+        "materially over-cap order must still reject, got {reason:?}"
     );
 }
 
@@ -1134,6 +1268,240 @@ fn test_cost_gate_moderate_negative_edge_blocks() {
 }
 
 #[test]
+fn test_cost_gate_moderate_side_specific_negative_overrides_positive_coarse() {
+    let mut proc = IntentProcessor::new();
+    let json = r#"{
+        "_meta": {"updated_at": "2026-05-29T00:00:00+00:00"},
+        "ma_crossover::BTCUSDT": {
+            "runtime_bps": 50.0,
+            "shrunk_bps": 50.0,
+            "win_rate": 0.6,
+            "n": 100,
+            "std_bps": 5.0,
+            "validation_passed": true
+        },
+        "ma_crossover::BTCUSDT::Sell": {
+            "runtime_bps": -20.0,
+            "shrunk_bps": -20.0,
+            "win_rate": 0.4,
+            "n": 80,
+            "std_bps": 7.0,
+            "validation_passed": false
+        }
+    }"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+
+    let sell_result = proc.cost_gate_moderate_with_slippage(
+        "ma_crossover",
+        "BTCUSDT",
+        Some("Sell"),
+        0.00055,
+        0.0,
+        super::gates::TEST_NOW_SECS,
+    );
+    assert!(
+        sell_result.is_some(),
+        "Sell side-specific mature negative edge must block even when coarse cell is positive"
+    );
+
+    let buy_result = proc.cost_gate_moderate_with_slippage(
+        "ma_crossover",
+        "BTCUSDT",
+        Some("Buy"),
+        0.00055,
+        0.0,
+        super::gates::TEST_NOW_SECS,
+    );
+    assert!(
+        buy_result.is_none(),
+        "Buy should fall back to the coarse positive cell when no Buy side cell exists"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_side_specific_low_sample_negative_blocks() {
+    // PROFIT-RCA-2026-06-19c: once the producer has written entry-side
+    // evidence, a negative Buy/Sell side is no longer "unknown". Do not let
+    // the low-sample noise-band exploration branch spend normal demo exchange
+    // budget on that same losing side.
+    let mut proc = IntentProcessor::new();
+    let json = r#"{
+        "bb_reversion::SUIUSDT::Sell": {
+            "runtime_bps": -12.7,
+            "shrunk_bps": -12.7,
+            "win_rate": 0.5,
+            "n": 4,
+            "std_bps": 20.0,
+            "explore_eligible": true,
+            "explore_remaining": 30
+        }
+    }"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+
+    let result = proc.cost_gate_moderate_with_slippage(
+        "bb_reversion",
+        "SUIUSDT",
+        Some("Sell"),
+        0.00055,
+        0.0,
+        super::gates::TEST_NOW_SECS,
+    );
+
+    assert!(
+        result.is_some(),
+        "side-specific low-sample negative edge must block instead of exploring"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_coarse_low_sample_negative_with_side_hint_still_explores() {
+    // The stricter rule only applies to exact entry-side cells. Coarse fallback
+    // keeps the pre-existing low-sample noise-band exploration behavior, so we
+    // do not reintroduce the no-trade/no-data dead-loop for symbols without
+    // side-aware evidence yet.
+    let mut proc = IntentProcessor::new();
+    let json = r#"{
+        "bb_reversion::SUIUSDT": {
+            "runtime_bps": -12.7,
+            "shrunk_bps": -12.7,
+            "win_rate": 0.5,
+            "n": 4,
+            "std_bps": 20.0,
+            "explore_eligible": true,
+            "explore_remaining": 30
+        }
+    }"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+
+    let result = proc.cost_gate_moderate_with_slippage(
+        "bb_reversion",
+        "SUIUSDT",
+        Some("Sell"),
+        0.00055,
+        0.0,
+        super::gates::TEST_NOW_SECS,
+    );
+
+    assert!(
+        result.is_none(),
+        "coarse fallback low-sample noise-band negative should still explore"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_side_specific_positive_below_cost_wall_blocks() {
+    // PROFIT-RCA-2026-06-19d: exact side cells with a positive mean still need
+    // to pay the exchange cost wall. DOT Sell mirrors the current runtime shape:
+    // +16.24bps at wr≈0.667 is below the ~21.45bps maker threshold, so it should
+    // not bypass via the generic low-sample exploration branch.
+    let mut proc = IntentProcessor::new();
+    let json = r#"{
+        "ma_crossover::DOTUSDT::Sell": {
+            "runtime_bps": 16.24,
+            "shrunk_bps": 16.24,
+            "win_rate": 0.6667,
+            "n": 3,
+            "std_bps": 18.0,
+            "explore_eligible": true,
+            "explore_remaining": 30
+        }
+    }"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+
+    let result = proc.cost_gate_moderate_with_slippage(
+        "ma_crossover",
+        "DOTUSDT",
+        Some("Sell"),
+        0.00055,
+        0.0,
+        super::gates::TEST_NOW_SECS,
+    );
+
+    let reason = result
+        .expect("side-specific positive below cost wall must block")
+        .rejected_reason
+        .unwrap_or_default();
+    assert!(
+        reason.contains("threshold"),
+        "expected threshold/cost-wall rejection, got: {reason}"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_side_specific_positive_above_cost_wall_can_explore() {
+    // Keep a path for plausible profit discovery: exact side cell is low-sample
+    // but clears the immediate cost wall, so the existing demo exploration path
+    // may still collect more evidence.
+    let mut proc = IntentProcessor::new();
+    let json = r#"{
+        "ma_crossover::TONUSDT::Buy": {
+            "runtime_bps": 48.37,
+            "shrunk_bps": 48.37,
+            "win_rate": 1.0,
+            "n": 3,
+            "std_bps": 12.0,
+            "explore_eligible": true,
+            "explore_remaining": 30
+        }
+    }"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+
+    let result = proc.cost_gate_moderate_with_slippage(
+        "ma_crossover",
+        "TONUSDT",
+        Some("Buy"),
+        0.00055,
+        0.0,
+        super::gates::TEST_NOW_SECS,
+    );
+
+    assert!(
+        result.is_none(),
+        "side-specific positive above cost wall should keep demo exploration open"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_coarse_positive_below_cost_with_side_hint_still_explores() {
+    // The new cost-wall block is only for exact side cells. A coarse low-sample
+    // positive still follows the old demo data-collection behavior when no
+    // entry-side evidence exists yet.
+    let mut proc = IntentProcessor::new();
+    let json = r#"{
+        "ma_crossover::DOTUSDT": {
+            "runtime_bps": 16.24,
+            "shrunk_bps": 16.24,
+            "win_rate": 0.6667,
+            "n": 3,
+            "std_bps": 18.0,
+            "explore_eligible": true,
+            "explore_remaining": 30
+        }
+    }"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+
+    let result = proc.cost_gate_moderate_with_slippage(
+        "ma_crossover",
+        "DOTUSDT",
+        Some("Sell"),
+        0.00055,
+        0.0,
+        super::gates::TEST_NOW_SECS,
+    );
+
+    assert!(
+        result.is_none(),
+        "coarse fallback positive below cost wall should still explore"
+    );
+}
+
+#[test]
 fn test_cost_gate_moderate_cold_start_allows() {
     let proc = IntentProcessor::new();
     // No edge estimates set = cold start
@@ -1141,6 +1509,26 @@ fn test_cost_gate_moderate_cold_start_allows() {
     assert!(
         result.is_none(),
         "cold start should be allowed in moderate mode (data accumulation)"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_grid_cold_start_blocks() {
+    // PROFIT-RCA-2026-06-19: grid_trading is the dominant 7d demo loss source.
+    // Missing edge cells used to bypass the grid negative-edge gate; block that
+    // cold-start path while preserving non-grid exploration above.
+    let proc = IntentProcessor::new();
+    let result = proc.cost_gate_moderate("grid_trading", "DOTUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_some(),
+        "grid cold-start with no edge cell must block, not spend demo risk budget"
+    );
+    let reason = result.unwrap().rejected_reason.unwrap_or_default();
+    assert!(
+        reason.contains("JS-demo")
+            && reason.contains("no edge estimate")
+            && reason.contains("grid_trading"),
+        "expected explicit grid cold-start block reason, got: {reason}"
     );
 }
 
@@ -1398,10 +1786,10 @@ fn test_cost_gate_moderate_high_sample_negative_still_blocks() {
     );
 }
 
-// ─── Track1 (2026-06-14): demo explore-gate（branch A/B 翻 reject 為探索放行）───
+// ─── Track1 (2026-06-14): demo explore-gate（branch A 翻 reject 為探索放行）───
 // 只改 demo gate（cost_gate_moderate_with_slippage）。覆蓋：
 //   (A) low-sample deep-negative + explore_eligible+remaining>0 → 放行
-//   (B) robust-negative(n≥min_n) + explore_eligible+remaining>0 → 放行
+//   (B) robust-negative(n≥min_n) + explore_eligible+remaining>0 → 阻擋
 //   fail-closed：缺欄 / explore_remaining=0 / explore_eligible=false → 維持現行 block
 //   隔離：相同 explore 欄位餵 live gate 不改變 live 行為（live 不讀新欄）
 
@@ -1449,23 +1837,123 @@ fn test_cost_gate_moderate_branch_a_not_eligible_still_blocks() {
 }
 
 #[test]
-fn test_cost_gate_moderate_branch_b_explore_allows_robust_neg() {
-    // branch B：高樣本穩健負(n≥min_n)，現行會 block；
-    // explore_eligible=true + remaining>0 → 探索放行（regime-driven）。
+fn test_cost_gate_moderate_branch_b_robust_neg_blocks_even_when_explore_eligible() {
+    // PROFIT-RCA-2026-06-19: high-sample robust-negative cells are evidence,
+    // not cold-start uncertainty. explore_eligible=true must not override them.
     let mut proc = IntentProcessor::new();
     let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 200, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 7}}"#;
     let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
     proc.set_edge_estimates(estimates);
     let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
     assert!(
-        result.is_none(),
-        "branch B: explore-eligible robust-neg should be allowed (regime-driven explore)"
+        result.is_some(),
+        "branch B: robust-negative must block even when explore_remaining > 0"
     );
 }
 
 #[test]
-fn test_cost_gate_moderate_branch_b_remaining_zero_still_blocks() {
-    // branch B：robust-negative + explore_eligible=true 但 remaining=0 → 仍 block。
+fn test_cost_gate_moderate_grid_low_sample_negative_explore_still_blocks() {
+    // PROFIT-RCA-2026-06-19: grid_trading 的負 edge 探索不得再用正常 demo
+    // 交易風險預算支付。低樣本 noise-band 仍可讓其他策略探索；grid 先收縮。
+    let mut proc = IntentProcessor::new();
+    let json = r#"{"grid_trading::BTCUSDT": {"shrunk_bps": -10.0, "win_rate": 0.35, "n": 5, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 18}}"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate("grid_trading", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_some(),
+        "grid low-sample negative edge must block even when explore overlay is populated"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_grid_low_sample_positive_side_blocks() {
+    // PROFIT-RCA-2026-06-19b: side-aware cells exposed low-sample positive grid
+    // sides (n<min_n) reopening normal exchange-budget exploration. Grid is the
+    // dominant realized loss source, so require min_n observations first.
+    let mut proc = IntentProcessor::new();
+    let json = r#"{
+        "grid_trading::LINKUSDT::Sell": {
+            "runtime_bps": 0.6354,
+            "shrunk_bps": 0.6354,
+            "win_rate": 0.7143,
+            "n": 7,
+            "std_bps": 42.89,
+            "validation_passed": false,
+            "explore_eligible": true,
+            "explore_remaining": 30
+        }
+    }"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate_with_slippage(
+        "grid_trading",
+        "LINKUSDT",
+        Some("Sell"),
+        0.00055,
+        0.0,
+        super::gates::TEST_NOW_SECS,
+    );
+    let reason = result
+        .expect("grid low-sample positive side must block")
+        .rejected_reason
+        .unwrap_or_default();
+    assert!(
+        reason.contains("low-sample") && reason.contains("grid_trading"),
+        "expected grid low-sample block reason, got: {reason}"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_grid_mature_positive_side_can_explore() {
+    // Do not permanently kill grid: once a side has enough observations and a
+    // positive demo edge, the existing demo-positive unvalidated path may
+    // explore. Live remains strict elsewhere.
+    let mut proc = IntentProcessor::new();
+    let json = r#"{
+        "grid_trading::LINKUSDT::Sell": {
+            "runtime_bps": 22.0,
+            "shrunk_bps": 22.0,
+            "win_rate": 0.7143,
+            "n": 50,
+            "std_bps": 8.0,
+            "validation_passed": false
+        }
+    }"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate_with_slippage(
+        "grid_trading",
+        "LINKUSDT",
+        Some("Sell"),
+        0.00055,
+        0.0,
+        super::gates::TEST_NOW_SECS,
+    );
+    assert!(
+        result.is_none(),
+        "grid mature positive side should keep demo exploration available"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_grid_robust_negative_explore_still_blocks() {
+    // robust-negative grid cell + remaining>0 used to be branch B pass; that
+    // produced demo maker churn without evidence of net edge.
+    let mut proc = IntentProcessor::new();
+    let json = r#"{"grid_trading::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 200, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 7}}"#;
+    let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
+    proc.set_edge_estimates(estimates);
+    let result = proc.cost_gate_moderate("grid_trading", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    assert!(
+        result.is_some(),
+        "grid robust-negative edge must block even when explore_remaining > 0"
+    );
+}
+
+#[test]
+fn test_cost_gate_moderate_robust_neg_remaining_zero_still_blocks() {
+    // robust-negative + explore_eligible=true 但 remaining=0 → 仍 block。
     let mut proc = IntentProcessor::new();
     let json = r#"{"ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 200, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 0}}"#;
     let estimates = crate::edge_estimates::EdgeEstimates::load_from_str(json).unwrap();
@@ -1473,7 +1961,7 @@ fn test_cost_gate_moderate_branch_b_remaining_zero_still_blocks() {
     let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
     assert!(
         result.is_some(),
-        "branch B: robust-neg explore_remaining=0 should still block"
+        "robust-neg explore_remaining=0 should still block"
     );
 }
 
@@ -1517,9 +2005,9 @@ fn test_cost_gate_live_ignores_explore_fields_robust_neg_still_blocks() {
 //   上面 7 個 E1 單測用 load_from_str（in-memory）。以下 E4 補測走真實
 //   reload 路徑：寫 scratch settings/edge_estimates.json → load_for_mode("demo")
 //   → set_edge_estimates → demo gate。驗證 (a) Python sink 落檔的同一 file 契約
-//   被 Rust 正確解析並翻 reject 為 explore-pass；(b) 同檔 explore_remaining=0
-//   與缺欄仍 fail-closed block；(c) 同檔餵 live（load_for_mode("live") 讀同檔名）
-//   仍 block（demo↔live 隔離在真檔層成立）。
+//   被 Rust 正確解析；(b) robust-negative 即使帶 explore 欄也要 block；
+//   (c) low-sample branch A 仍可從真檔翻成 explore-pass；
+//   (d) 同檔餵 live（load_for_mode("live") 讀同檔名）仍 block（demo↔live 隔離在真檔層成立）。
 
 /// 把 JSON 寫進 tempdir 的 settings/edge_estimates.json（demo+live 共用檔名），
 /// 回 (TempDir, base_dir)。base_dir/settings/edge_estimates.json 即 load_for_mode
@@ -1535,9 +2023,9 @@ fn write_scratch_edge_file(json: &str) -> (tempfile::TempDir, std::path::PathBuf
 }
 
 #[test]
-fn test_e2e_file_reload_demo_gate_flips_reject_to_explore() {
+fn test_e2e_file_reload_demo_gate_blocks_robust_negative_even_when_explore_eligible() {
     // 端到端：scratch edge_estimates.json 帶 explore_eligible=true/remaining>0 的
-    // robust-negative cell → 真檔 load_for_mode("demo") → demo gate 翻 None（放行）。
+    // robust-negative cell → 真檔 load_for_mode("demo") → demo gate 仍 block。
     let json = r#"{
         "_meta": {"grand_mean_bps": 0.0, "updated_at": "2026-06-13T00:00:00+00:00"},
         "ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 200, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 12}
@@ -1548,15 +2036,21 @@ fn test_e2e_file_reload_demo_gate_flips_reject_to_explore() {
     let cell = estimates
         .get_cell("ma_crossover", "BTCUSDT")
         .expect("cell loaded from scratch file");
-    assert!(cell.explore_eligible, "explore_eligible must parse true from file");
-    assert_eq!(cell.explore_remaining, 12, "explore_remaining must parse from file");
+    assert!(
+        cell.explore_eligible,
+        "explore_eligible must parse true from file"
+    );
+    assert_eq!(
+        cell.explore_remaining, 12,
+        "explore_remaining must parse from file"
+    );
 
     let mut proc = IntentProcessor::new();
     proc.set_edge_estimates(estimates);
     let result = proc.cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
     assert!(
-        result.is_none(),
-        "E2E: file-loaded explore-eligible robust-neg should flip reject→explore-pass"
+        result.is_some(),
+        "E2E: file-loaded explore-eligible robust-neg must still block"
     );
 }
 
@@ -1603,10 +2097,10 @@ fn test_e2e_file_reload_same_file_live_gate_isolated_still_blocks() {
     // edge_estimates.json（edge_estimates.rs:256 demo+live 共用）。同一 explore=true
     // 檔餵 live gate 必仍 block（live 不讀 explore 欄）。
     let json = r#"{
-        "ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 200, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 30}
+        "ma_crossover::BTCUSDT": {"shrunk_bps": -25.0, "win_rate": 0.35, "n": 5, "std_bps": 2.0, "explore_eligible": true, "explore_remaining": 30}
     }"#;
     let (_dir, base) = write_scratch_edge_file(json);
-    // demo 讀同檔 → 放行
+    // demo 讀同檔 → 低樣本 branch A 放行
     let demo_est = crate::edge_estimates::EdgeEstimates::load_for_mode(&base, "demo");
     let mut demo_proc = IntentProcessor::new();
     demo_proc.set_edge_estimates(demo_est);
@@ -1614,14 +2108,13 @@ fn test_e2e_file_reload_same_file_live_gate_isolated_still_blocks() {
         demo_proc
             .cost_gate_moderate("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0)
             .is_none(),
-        "E2E: demo gate flips on shared file"
+        "E2E: demo gate explores low-sample negative on shared file"
     );
     // live 讀同檔 → 仍 block（隔離）
     let live_est = crate::edge_estimates::EdgeEstimates::load_for_mode(&base, "live");
     let mut live_proc = IntentProcessor::new();
     live_proc.set_edge_estimates(live_est);
-    let live_result =
-        live_proc.cost_gate_live("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
+    let live_result = live_proc.cost_gate_live("ma_crossover", "BTCUSDT", 0.00055, 1_000_000_000.0);
     assert!(
         live_result.is_some(),
         "E2E: live gate reading SAME shared file must IGNORE explore fields and block"

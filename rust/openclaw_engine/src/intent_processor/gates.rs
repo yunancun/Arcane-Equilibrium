@@ -101,14 +101,17 @@ impl IntentProcessor {
     /// estimate is noise-dominated and blocking on it creates a dead-loop where strategies
     /// cannot accumulate fills to escape the negative-edge bucket. Statistically robust cells
     /// (n >= min_n) keep the original behavior: positive → threshold check; negative → block;
-    /// cold-start (no cell) → allow with warning. Live path stays strict per
-    /// CLAUDE.md §四 operator policy: demo loose, live strict.
+    /// cold-start (no cell) → allow with warning, except grid_trading which is
+    /// blocked after PROFIT-RCA-2026-06-19 found grid to be the dominant
+    /// negative-edge churn source. Live path stays strict per CLAUDE.md §四
+    /// operator policy: demo loose, live strict.
     /// 3E-2a：Demo 模式成本門——中等嚴格。
     /// EDGE-DIAG-2（2026-04-28）：低樣本（n_trades < cost_gate_min_n_trades_for_block，
     /// 預設 30）跳過 JS 估計直接走探索模式——估計值噪音主導，據此阻擋會造成死循環，
     /// 策略無法累積 fills 逃脫負 edge 桶。統計穩健（n ≥ min_n）保持原行為：
-    /// 正 → 門檻檢查；負 → 阻擋；冷啟動（無格子） → 放行並警告。Live 路徑仍嚴格
-    /// （CLAUDE.md §四 operator 政策：demo 放寬 / live 收緊）。
+    /// 正 → 門檻檢查；負 → 阻擋；冷啟動（無格子） → 放行並警告，但
+    /// grid_trading 缺格子會阻擋。Live 路徑仍嚴格（CLAUDE.md §四 operator 政策：
+    /// demo 放寬 / live 收緊）。
     #[cfg(test)]
     pub(super) fn cost_gate_moderate(
         &self,
@@ -119,13 +122,21 @@ impl IntentProcessor {
     ) -> Option<ExchangeGateResult> {
         let slippage = lookup_slippage(&self.risk_config.slippage, volume_24h);
         // 測試 wrapper：注入固定 now（與 TEST_NOW_SECS fixture 對齊）。
-        self.cost_gate_moderate_with_slippage(strategy, symbol, fee_rate, slippage, TEST_NOW_SECS)
+        self.cost_gate_moderate_with_slippage(
+            strategy,
+            symbol,
+            None,
+            fee_rate,
+            slippage,
+            TEST_NOW_SECS,
+        )
     }
 
     pub(super) fn cost_gate_moderate_with_slippage(
         &self,
         strategy: &str,
         symbol: &str,
+        side: Option<&str>,
         fee_rate: f64,
         slippage: f64,
         now_secs: i64,
@@ -133,7 +144,127 @@ impl IntentProcessor {
         let slippage_cfg = &self.risk_config.slippage;
         let fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0;
         let min_n = slippage_cfg.cost_gate_min_n_trades_for_block;
-        match self.edge_estimates.get_cell(strategy, symbol) {
+        let threshold_bps_for = |cell: &crate::edge_estimates::CellEstimate| -> f64 {
+            let wr = cell
+                .win_rate
+                .clamp(slippage_cfg.cost_gate_win_rate_floor, 1.0);
+            fee_bps / wr * slippage_cfg.cost_gate_safety_multiplier
+        };
+        match self
+            .edge_estimates
+            .get_cell_for_side_with_source(strategy, symbol, side)
+        {
+            Some((cell, _source))
+                if strategy.eq_ignore_ascii_case("grid_trading") && cell.shrunk_bps < 0.0 =>
+            {
+                // PROFIT-RCA-2026-06-19: grid_trading is the dominant demo
+                // negative-edge churn source. Keep discovery available for
+                // other arms, but do not let a known-negative grid cell spend
+                // normal exchange risk budget just because the explore overlay
+                // is populated.
+                tracing::info!(
+                    strategy,
+                    symbol,
+                    side = side.unwrap_or("any"),
+                    estimated_edge_bps = cell.shrunk_bps,
+                    n_trades = cell.n_trades,
+                    explore_eligible = cell.explore_eligible,
+                    explore_remaining = cell.explore_remaining,
+                    "cost_gate(JS-demo): grid negative edge blocked despite explore overlay \
+                     / grid 負 edge 即使探索 overlay 也阻擋"
+                );
+                Some(ExchangeGateResult::rejected(
+                    RejectionCode::CostGateJsDemoNegative {
+                        estimated_bps: cell.shrunk_bps,
+                    }
+                    .format(),
+                ))
+            }
+            Some((cell, _source))
+                if strategy.eq_ignore_ascii_case("grid_trading") && cell.n_trades < min_n =>
+            {
+                // PROFIT-RCA-2026-06-19b: side-aware cells exposed another
+                // grid leak: low-sample positive side cells (n=3..11) reopened
+                // normal exchange-budget exploration and produced PostOnly
+                // churn. Grid is already the dominant realized loss source; it
+                // must show at least min_n observations before demo spends
+                // exchange budget, even when the side mean is positive.
+                tracing::info!(
+                    strategy,
+                    symbol,
+                    side = side.unwrap_or("any"),
+                    estimated_edge_bps = cell.shrunk_bps,
+                    n_trades = cell.n_trades,
+                    min_n_for_block = min_n,
+                    "cost_gate(JS-demo): grid low-sample blocked / grid 低樣本阻擋"
+                );
+                Some(ExchangeGateResult::rejected(
+                    RejectionCode::CostGateJsDemoInsufficientSample {
+                        strategy: strategy.to_string(),
+                        n_trades: cell.n_trades,
+                        min_n,
+                    }
+                    .format(),
+                ))
+            }
+            Some((cell, crate::edge_estimates::CellLookupSource::SideSpecific))
+                if cell.shrunk_bps < 0.0 =>
+            {
+                // PROFIT-RCA-2026-06-19c: coarse low-sample negative cells still
+                // need a bounded discovery path, but an entry-side cell is no
+                // longer cold-start uncertainty. If this Buy/Sell side already
+                // has a negative realized edge, do not spend normal demo
+                // exchange budget to "explore" the same losing side again.
+                tracing::info!(
+                    strategy,
+                    symbol,
+                    side = side.unwrap_or("any"),
+                    estimated_edge_bps = cell.shrunk_bps,
+                    n_trades = cell.n_trades,
+                    explore_eligible = cell.explore_eligible,
+                    explore_remaining = cell.explore_remaining,
+                    "cost_gate(JS-demo): side negative edge blocked / side 負 edge 阻擋"
+                );
+                Some(ExchangeGateResult::rejected(
+                    RejectionCode::CostGateJsDemoNegative {
+                        estimated_bps: cell.shrunk_bps,
+                    }
+                    .format(),
+                ))
+            }
+            Some((cell, crate::edge_estimates::CellLookupSource::SideSpecific))
+                if cell.shrunk_bps > 0.0 && cell.shrunk_bps < threshold_bps_for(cell) =>
+            {
+                // PROFIT-RCA-2026-06-19d: a positive side-specific cell still
+                // must clear the immediate exchange cost wall. Coarse low-sample
+                // cells remain exploratory, but once Buy/Sell evidence exists,
+                // a side mean below fee/slippage/win-rate threshold is not a
+                // profitable use of normal demo exchange budget.
+                let threshold_bps = threshold_bps_for(cell);
+                tracing::info!(
+                    strategy,
+                    symbol,
+                    side = side.unwrap_or("any"),
+                    estimated_edge_bps = cell.shrunk_bps,
+                    threshold_bps,
+                    fee_bps,
+                    win_rate = cell.win_rate,
+                    n_trades = cell.n_trades,
+                    explore_eligible = cell.explore_eligible,
+                    explore_remaining = cell.explore_remaining,
+                    "cost_gate(JS-demo): side positive edge below cost wall blocked \
+                     / side 正 edge 未覆蓋成本阻擋"
+                );
+                Some(ExchangeGateResult::rejected(
+                    RejectionCode::CostGateJsDemoThreshold {
+                        edge_bps: cell.shrunk_bps,
+                        threshold_bps,
+                        fee_bps,
+                        win_rate: cell.win_rate,
+                    }
+                    .format(),
+                ))
+            }
             // EDGE-DIAG-2 補:即使 low-sample,當 shrunk_bps 落在
             // crypto 結構性 noise band 以下(< -15 bps),不放行;
             // 避免 cell 在 noise band 內累損直到跨 min_n。
@@ -141,7 +272,7 @@ impl IntentProcessor {
             //   - cross-validation 50% 命中率顯示 [-15, 0) 是 noise band
             //   - deep tail < -15 才方向可靠
             //   - 1B funding_arb 框架僅 LABUSDT outlier 被影響
-            Some(cell) if cell.n_trades < min_n && cell.shrunk_bps < -15.0 => {
+            Some((cell, _source)) if cell.n_trades < min_n && cell.shrunk_bps < -15.0 => {
                 // Track1 demo explore-gate（branch A）：若 allocator 指示此 arm 仍在探索期
                 // AND 探索額度未滿 → 翻 reject 為探索放行（return None = pass）。
                 // 為什麼安全：放行的 qty 是已過 Guardian(Gate2)/Kelly(Gate2.5)/P1 cap(Gate2.6)/
@@ -149,11 +280,12 @@ impl IntentProcessor {
                 // 結構上不可能繞過上游風控。fail-closed：缺欄→false/0→不進此分支→維持現行 block。
                 if cell.explore_eligible && cell.explore_remaining > 0 {
                     tracing::info!(
-                        strategy,
-                        symbol,
-                        estimated_edge_bps = cell.shrunk_bps,
-                        n_trades = cell.n_trades,
-                        explore_remaining = cell.explore_remaining,
+                    strategy,
+                    symbol,
+                    side = side.unwrap_or("any"),
+                    estimated_edge_bps = cell.shrunk_bps,
+                    n_trades = cell.n_trades,
+                    explore_remaining = cell.explore_remaining,
                         "cost_gate(JS-demo): EXPLORE allow deep-neg low-sample / 探索放行深負低樣本"
                     );
                     return None;
@@ -164,6 +296,7 @@ impl IntentProcessor {
                 tracing::info!(
                     strategy,
                     symbol,
+                    side = side.unwrap_or("any"),
                     estimated_edge_bps = cell.shrunk_bps,
                     n_trades = cell.n_trades,
                     cutoff_bps = -15.0_f64,
@@ -176,12 +309,13 @@ impl IntentProcessor {
                     .format(),
                 ))
             }
-            Some(cell) if cell.n_trades < min_n => {
+            Some((cell, _source)) if cell.n_trades < min_n => {
                 // EDGE-DIAG-2: low-sample cell — treat as noise; route to exploration mode.
                 // EDGE-DIAG-2：低樣本 cell — 視為噪音；路由到探索模式。
                 tracing::info!(
                     strategy,
                     symbol,
+                    side = side.unwrap_or("any"),
                     estimated_edge_bps = cell.shrunk_bps,
                     win_rate = cell.win_rate,
                     n_trades = cell.n_trades,
@@ -190,7 +324,7 @@ impl IntentProcessor {
                 );
                 None
             }
-            Some(cell) if cell.shrunk_bps > 0.0 => {
+            Some((cell, _source)) if cell.shrunk_bps > 0.0 => {
                 // P1-09 demo 非對稱：正 edge 若 stale / 非 runtime-derived / 未驗證，
                 // 路由到探索模式（放行 + log），NOT reject。理由：demo 是學習資料源
                 // （memory feedback_demo_loose_live_strict_policy），對 unvalidated-positive
@@ -201,6 +335,7 @@ impl IntentProcessor {
                     tracing::info!(
                         strategy,
                         symbol,
+                        side = side.unwrap_or("any"),
                         estimated_edge_bps = cell.shrunk_bps,
                         fresh,
                         has_runtime = cell.from_runtime_field,
@@ -212,10 +347,7 @@ impl IntentProcessor {
                 // Positive JS estimate: same threshold as live (win-rate weighted)
                 // G7-07: floor + safety multiplier from `risk.slippage.*`.
                 // 正 JS 估計：與 live 相同門檻（勝率加權）。G7-07：改讀 TOML。
-                let wr = cell
-                    .win_rate
-                    .clamp(slippage_cfg.cost_gate_win_rate_floor, 1.0);
-                let threshold_bps = fee_bps / wr * slippage_cfg.cost_gate_safety_multiplier;
+                let threshold_bps = threshold_bps_for(cell);
                 if cell.shrunk_bps < threshold_bps {
                     return Some(ExchangeGateResult::rejected(
                         RejectionCode::CostGateJsDemoThreshold {
@@ -229,24 +361,20 @@ impl IntentProcessor {
                 }
                 None // pass
             }
-            Some(cell) => {
-                // Track1 demo explore-gate（branch B）：robust-negative（n≥min_n 的負）通常該死。
-                // 但若 allocator 仍指示 explore_eligible（例如 regime 轉折後 forgetting_gamma
-                // 衰減舊 regime 的負統計，arm 被縮回探索期）AND remaining>0 → 探索放行。
-                // 為什麼開 branch B：死 flat 主體是 n≥min_n 的負 arm；只開 branch A 它們會永久死，
-                // 撞 first-detection deadlock。regime 非平穩處理在 allocator 端，gate 只信任信號。
-                // fail-closed 與隔離同 branch A：缺欄→不放行；只 demo gate 讀 explore 欄。
-                if cell.explore_eligible && cell.explore_remaining > 0 {
-                    tracing::info!(
-                        strategy,
-                        symbol,
-                        estimated_edge_bps = cell.shrunk_bps,
-                        n_trades = cell.n_trades,
-                        explore_remaining = cell.explore_remaining,
-                        "cost_gate(JS-demo): EXPLORE allow robust-neg / 探索放行穩健負(regime-driven)"
-                    );
-                    return None;
-                }
+            Some((cell, _source)) => {
+                // PROFIT-RCA-2026-06-19: robust-negative cells (n>=min_n) are
+                // evidence, not cold-start uncertainty. The allocator currently
+                // marks broad negative cells explore_eligible=true, so letting
+                // branch B override robust negatives reopens the exact loss
+                // surface the cost gate is meant to close (BTC/ETH MA, grid, etc.).
+                // Regime reset must be proven by a producer writing a non-negative
+                // runtime cell or a future dedicated risk-budget lane, not by
+                // spending normal demo exchange budget on known-negative cells.
+                // robust-negative（n>=min_n）是證據，不是冷啟動不確定性。當前
+                // allocator 廣泛把負 cell 標 explore_eligible=true，若 branch B
+                // 仍覆蓋 robust 負 edge，就會重開成本門本來要關閉的虧損面。
+                // regime reset 必須由 producer 寫出非負 runtime cell 或未來專用
+                // 探索風險預算證明，不可直接花正常 demo 交易預算。
                 // Statistically robust (n >= min_n) negative JS estimate → block.
                 // 統計穩健（n ≥ min_n）的負 JS 估計 → 阻擋。
                 Some(ExchangeGateResult::rejected(
@@ -256,10 +384,31 @@ impl IntentProcessor {
                     .format(),
                 ))
             }
+            None if strategy.eq_ignore_ascii_case("grid_trading") => {
+                // PROFIT-RCA-2026-06-19: grid is already the largest realized
+                // demo loss contributor. A missing cell must not become an
+                // unbounded exploration bypass for newly-listed / newly-selected
+                // grid symbols; require the producer to create a non-negative
+                // cell before spending exchange risk budget.
+                // grid 已是 demo 最大虧損來源；缺 cell 不可成為新幣種 / 新選中幣種的
+                // 無上限探索旁路。先要求 producer 寫出非負 cell，才可花交易風險預算。
+                tracing::info!(
+                    strategy,
+                    symbol,
+                    "cost_gate(JS-demo): grid cold-start blocked / grid 冷啟動阻擋"
+                );
+                Some(ExchangeGateResult::rejected(
+                    RejectionCode::CostGateJsDemoColdStart {
+                        strategy: strategy.to_string(),
+                    }
+                    .format(),
+                ))
+            }
             None => {
-                // Cold start: allow with warning (unlike live which blocks)
-                // Demo needs to accumulate trades — blocking creates dead-loop like paper.
-                // 冷啟動：放行並警告（不同於 live 阻擋）。Demo 需累積交易數據。
+                // Cold start: allow with warning (unlike live which blocks).
+                // Non-grid demo strategies still need bounded exploration data.
+                // 冷啟動：放行並警告（不同於 live 阻擋）；非 grid demo 策略仍需
+                // 有界探索資料。
                 tracing::info!(strategy, symbol,
                     "cost_gate(demo-cold-start): no JS estimate — allowing for data accumulation / 無 JS 估計放行以累積數據");
                 None

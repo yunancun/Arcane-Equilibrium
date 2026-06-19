@@ -11,6 +11,7 @@ silently miss and force phys_lock Hold.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 import os
 import tempfile
@@ -23,6 +24,7 @@ from program_code.ml_training.james_stein_estimator import (
     _inject_sync_label_proxy_cells,
     _write_json_snapshot,
 )
+from program_code.ml_training.realized_edge_stats import RoundTripRecord
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +54,26 @@ def _make_results(pairs: list[tuple[str, str]], grand_mean_bps: float = 1.2345):
             "combined_ev_bps": 1.25,
         }
     return results
+
+
+_TS = datetime(2026, 6, 19, 12, 0, 0, tzinfo=timezone.utc)
+
+
+def _round_trip(net_bps: float, entry_side: str) -> RoundTripRecord:
+    return RoundTripRecord(
+        strategy_name="bb_reversion",
+        symbol="BTCUSDT",
+        gross_pnl_bps=net_bps,
+        entry_fee_bps=0.0,
+        exit_fee_bps=0.0,
+        net_pnl_bps=net_bps,
+        entry_ts=_TS,
+        exit_ts=_TS,
+        notional_usd=1_000.0,
+        bps_denominator_usd=1_000.0,
+        entry_context_id=f"ctx-{entry_side}-{net_bps}",
+        entry_side=entry_side,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +177,19 @@ def test_proxy_injection_on_empty_snapshot_is_noop():
     assert list(snapshot.keys()) == ["_meta"]
 
 
+def test_proxy_injection_ignores_side_suffix_when_deriving_symbols():
+    """Side overlay keys must derive BTCUSDT, not BTCUSDT::Sell, for proxy cells."""
+    snapshot: dict = {
+        "_meta": {"grand_mean_bps": 1.0},
+        "grid_trading::BTCUSDT::Sell": {"shrunk_bps": -12.0, "n": 8},
+    }
+    added = _inject_sync_label_proxy_cells(snapshot, grand_mean_bps=1.0)
+    assert added == 4
+    for strat in SYNC_LABEL_STRATEGIES:
+        assert f"{strat}::BTCUSDT" in snapshot
+        assert f"{strat}::BTCUSDT::Sell" not in snapshot
+
+
 # ---------------------------------------------------------------------------
 # Integration with _write_json_snapshot / 與 _write_json_snapshot 整合
 # ---------------------------------------------------------------------------
@@ -187,6 +222,34 @@ def test_write_json_snapshot_injects_proxy_cells_end_to_end(tmp_path):
 
     # _meta preserved.
     assert on_disk["_meta"]["grand_mean_bps"] == pytest.approx(1.5, abs=1e-4)
+
+
+def test_write_json_snapshot_injects_entry_side_cells_from_round_trips(tmp_path):
+    """Round-trip entry side produces strategy::symbol::Buy/Sell overlay cells."""
+    results = _make_results([("bb_reversion", "BTCUSDT")], grand_mean_bps=0.0)
+    results[("bb_reversion", "BTCUSDT")]["raw_records"] = [
+        _round_trip(10.0, "Buy"),
+        _round_trip(-30.0, "Buy"),
+        _round_trip(-20.0, "Sell"),
+    ]
+    out_path = str(tmp_path / "edge_estimates.json")
+    _write_json_snapshot(results, out_path)
+
+    with open(out_path) as f:
+        on_disk = json.load(f)
+
+    buy = on_disk["bb_reversion::BTCUSDT::Buy"]
+    assert buy["n"] == 2
+    assert buy["runtime_bps"] == pytest.approx(-10.0, abs=1e-4)
+    assert buy["win_rate"] == pytest.approx(0.5, abs=1e-4)
+    assert buy["validation_passed"] is False
+    assert buy["_side_from"] == "round_trip_entry_side"
+
+    sell = on_disk["bb_reversion::BTCUSDT::Sell"]
+    assert sell["n"] == 1
+    assert sell["runtime_bps"] == pytest.approx(-20.0, abs=1e-4)
+    assert sell["_side"] == "Sell"
+    assert on_disk["_meta"]["entry_side_cells"] == 2
 
 
 def test_write_json_snapshot_empty_results_no_proxy(tmp_path):

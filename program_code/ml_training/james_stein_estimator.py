@@ -61,6 +61,37 @@ SYNC_LABEL_STRATEGIES: tuple[str, ...] = (
 )
 
 
+def _canonical_entry_side(side: object) -> Optional[str]:
+    """Normalize round-trip entry side for side-aware snapshot keys. / 正規化入場方向。"""
+    normalized = str(side or "").strip().lower()
+    if normalized == "buy":
+        return "Buy"
+    if normalized == "sell":
+        return "Sell"
+    return None
+
+
+def _snapshot_key_parts(key: str) -> Optional[tuple[str, str, Optional[str]]]:
+    """
+    Parse edge snapshot keys.
+
+    Supports legacy `strategy::symbol` and side overlay
+    `strategy::symbol::Buy/Sell`. Unknown shapes are ignored by producers that
+    derive symbol sets.
+    解析 edge snapshot key；支援舊格式與 side overlay，未知形狀忽略。
+    """
+    if key == "_meta":
+        return None
+    parts = key.split("::")
+    if len(parts) == 2 and parts[0] and parts[1]:
+        return parts[0], parts[1], None
+    if len(parts) == 3 and parts[0] and parts[1]:
+        side = _canonical_entry_side(parts[2])
+        if side is not None:
+            return parts[0], parts[1], side
+    return None
+
+
 def _inject_sync_label_proxy_cells(
     snapshot: dict,
     grand_mean_bps: float,
@@ -97,11 +128,11 @@ def _inject_sync_label_proxy_cells(
     # 沒有 "::" 的頂層 key，必須跳過。
     known_symbols: set[str] = set()
     for key in snapshot.keys():
-        if key == "_meta" or "::" not in key:
+        parts = _snapshot_key_parts(key)
+        if parts is None:
             continue
-        _, _, sym = key.partition("::")
-        if sym:
-            known_symbols.add(sym)
+        _, symbol, _side = parts
+        known_symbols.add(symbol)
 
     added = 0
     for strategy in SYNC_LABEL_STRATEGIES:
@@ -117,6 +148,83 @@ def _inject_sync_label_proxy_cells(
                 "validation_passed": False,
                 "validation_reason": "proxy_cell_no_direct_observations",
                 "_proxy_from": "grand_mean",
+            }
+            added += 1
+    return added
+
+
+def _record_field(record: object, field: str, default: object = None) -> object:
+    if isinstance(record, dict):
+        return record.get(field, default)
+    return getattr(record, field, default)
+
+
+def _inject_entry_side_cells(snapshot: dict, results: dict[tuple[str, str], dict]) -> int:
+    """
+    Add side-specific demo overlay cells from round-trip entry side.
+
+    These cells deliberately use raw side means rather than JS shrinkage. They
+    are tactical demo cost-gate hints: validation_passed=false keeps live strict,
+    while demo can distinguish profitable long entries from losing short entries
+    inside the same (strategy, symbol) coarse cell.
+    從 round-trip 入場方向新增 side-specific demo overlay cell。這些 cell 是
+    demo 成本門提示，不是 live 促升證據。
+    """
+    added = 0
+    for (strategy, symbol), result in results.items():
+        buckets: dict[str, list[object]] = {"Buy": [], "Sell": []}
+        for record in result.get("raw_records", []) or []:
+            side = _canonical_entry_side(_record_field(record, "entry_side", ""))
+            if side is not None:
+                buckets[side].append(record)
+
+        for side, records in buckets.items():
+            if not records:
+                continue
+            key = f"{strategy}::{symbol}::{side}"
+            if key in snapshot:
+                continue
+
+            net_bps: list[float] = []
+            for record in records:
+                try:
+                    value = float(_record_field(record, "net_pnl_bps", 0.0) or 0.0)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(value):
+                    net_bps.append(value)
+            if not net_bps:
+                continue
+
+            n = len(net_bps)
+            mean_net = sum(net_bps) / n
+            if n >= 2:
+                variance = sum((x - mean_net) ** 2 for x in net_bps) / (n - 1)
+                std_bps = math.sqrt(variance)
+            else:
+                std_bps = 0.0
+            wins = [x for x in net_bps if x > 0.0]
+            losses = [x for x in net_bps if x <= 0.0]
+            win_rate = len(wins) / n
+            avg_win = sum(wins) / len(wins) if wins else 0.0
+            avg_loss = sum(losses) / len(losses) if losses else 0.0
+
+            snapshot[key] = {
+                "shrunk_bps": round(mean_net, 4),
+                "runtime_bps": round(mean_net, 4),
+                "raw_bps": round(mean_net, 4),
+                "n": n,
+                "B": 0.0,
+                "std_bps": round(std_bps, 4),
+                "win_rate": round(win_rate, 4),
+                "win_rate_shrunk": round(win_rate, 4),
+                "avg_win_bps_shrunk": round(avg_win, 4),
+                "avg_loss_bps_shrunk": round(avg_loss, 4),
+                "combined_ev_bps": round(mean_net, 4),
+                "validation_passed": False,
+                "validation_reason": "entry_side_overlay_demo_only_not_promotion_evidence",
+                "_side": side,
+                "_side_from": "round_trip_entry_side",
             }
             added += 1
     return added
@@ -342,9 +450,11 @@ def run_james_stein(
             "avg_loss_bps": es.avg_loss_bps,
             # P0-V2-NEW-3: keep the real per-round-trip return series in the
             # in-memory return value so the promotion-evidence push can compute
-            # DSR/PBO inputs without re-querying fills. `_write_json_snapshot`
-            # intentionally does not serialize this field.
+            # DSR/PBO inputs without re-querying fills. Keep raw records as
+            # in-memory source for side-aware demo overlay cells; `_write_json_snapshot`
+            # does not serialize the records themselves.
             "raw_bps_series": list(es.raw_bps_list),
+            "raw_records": list(es.raw_records),
             **validation.to_json_dict(),
         }
 
@@ -572,6 +682,14 @@ def _write_json_snapshot(
             if field in r:
                 snapshot[key][field] = r[field]
 
+    # Side-aware demo overlay cells must be injected before sync-label proxy
+    # derivation so proxy symbols parse `strategy::symbol::Buy/Sell` correctly.
+    # Side overlay 先於 proxy，避免 proxy 把 side suffix 誤當 symbol 一部分。
+    side_added = _inject_entry_side_cells(snapshot, results)
+    if side_added:
+        snapshot["_meta"]["entry_side_cells"] = side_added
+        logger.info("Injected %d entry-side overlay cells", side_added)
+
     # P0-14 Option B: inject sync-label proxy cells (grand_mean prior).
     # P0-14 Option B：注入 sync-label 代理格子（全域均值先驗）。
     proxy_added = _inject_sync_label_proxy_cells(snapshot, grand_mean_bps)
@@ -588,8 +706,8 @@ def _write_json_snapshot(
         json.dump(snapshot, f, indent=2)
     os.replace(tmp, path)  # atomic rename / 原子重命名
     logger.info(
-        "Edge snapshot written to %s (%d real cells + %d proxy cells)",
-        path, len(results), proxy_added,
+        "Edge snapshot written to %s (%d real cells + %d side cells + %d proxy cells)",
+        path, len(results), side_added, proxy_added,
     )
 
 
