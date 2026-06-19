@@ -15,6 +15,7 @@ Adaptive Demo Profit Engine runner / reward_source / ipc_lever 單元測試。
 
 from __future__ import annotations
 
+import json
 import random
 
 import pytest
@@ -27,6 +28,7 @@ from program_code.ml_training.adaptive_demo_profit_engine.reward_source import (
 from program_code.ml_training.adaptive_demo_profit_engine.runner import (
     AdpeRunner,
     AdpeRunnerConfig,
+    fetch_recent_advisory_strategy_scores,
     load_runner_config,
 )
 from program_code.ml_training.regime_bandit_allocator import (
@@ -99,6 +101,33 @@ def _make_fake_connect(rows):
     return _connect, captured
 
 
+class _ScriptedCur(_FakeCur):
+    def __init__(self, rowsets):
+        super().__init__([])
+        self._rowsets = list(rowsets)
+
+    def execute(self, sql, params=None):
+        self.executed.append((sql, params))
+        if not sql.lstrip().upper().startswith("SET"):
+            self._rows = self._rowsets.pop(0) if self._rowsets else []
+
+
+class _ScriptedConn(_FakeConn):
+    def __init__(self, rowsets):
+        self.cur = _ScriptedCur(rowsets)
+
+
+def _make_fake_connect_scripted(rowsets):
+    captured = {}
+
+    def _connect(dsn, connect_timeout=None):
+        captured["dsn"] = dsn
+        captured["conn"] = _ScriptedConn(rowsets)
+        return captured["conn"]
+
+    return _connect, captured
+
+
 # ---------------------------------------------------------------------------
 # config loader
 # ---------------------------------------------------------------------------
@@ -116,6 +145,17 @@ def test_load_runner_config_missing_file_fail_soft():
     # 缺檔 → 內建預設（fail-soft，不 raise）。
     assert rc.engine_mode == "demo"
     assert isinstance(ac, AllocatorConfig)
+
+
+def test_repo_config_enables_controlled_experiment_and_excludes_retired_funding_arb():
+    rc, _ac = load_runner_config()
+    assert rc.controlled_experiment_enabled is True
+    assert rc.require_advisory_for_explore is True
+    assert rc.use_edge_snapshot_for_explore_evidence is True
+    assert rc.require_cost_viable_edge_for_explore_when_available is True
+    assert "funding_arb" in rc.retired_strategy_blocklist
+    assert "funding_arb" not in rc.candidate_strategies
+    assert rc.max_active_explore_strategies == 2
 
 
 # ---------------------------------------------------------------------------
@@ -214,6 +254,80 @@ def test_reward_source_skips_null_arm_id():
     assert len(out) == 1
     # arm_id 用 allocator 詞彙重建：mean_reverting -> range。
     assert out[0].arm_id == make_arm_id("range", "grid_trading")
+
+
+def test_advisory_strategy_scores_sql_is_demo_readonly_positive_evidence():
+    rows = [("grid_trading", 4.25)]
+    connect, captured = _make_fake_connect(rows)
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        controlled_experiment_enabled=True,
+        require_advisory_for_explore=True,
+        advisory_sources=["ml_shadow", "dream_engine"],
+        advisory_min_confidence=0.5,
+        advisory_min_expected_net_bps=0.0,
+        advisory_min_sample_count=10,
+        advisory_allow_requires_governance=False,
+    )
+    out = fetch_recent_advisory_strategy_scores("FAKE_DSN", cfg, _connect=connect)
+    assert out == {"grid_trading": 4.25}
+
+    executed = captured["conn"].cur.executed
+    sql, params = next(
+        (s, p) for s, p in executed if "FROM learning.mlde_shadow_recommendations" in s
+    )
+    assert "FROM learning.mlde_shadow_recommendations" in sql
+    assert "recommendation_type IN ('rank', 'parameter_proposal')" in sql
+    assert "NOT COALESCE(requires_governance, false)" in sql
+    assert params[0] == "demo"
+    assert params[2] == ["dream_engine", "ml_shadow"]
+    lessons_sql, lessons_params = next(
+        (s, p) for s, p in executed if "FROM agent.lessons" in s
+    )
+    assert "source = 'ml_advisory'" in lessons_sql
+    assert "lesson_type = 'hypothesize'" in lessons_sql
+    assert "content LIKE %s" in lessons_sql
+    assert lessons_params == (48, "ml_advisory:hypothesize:%")
+
+
+def test_advisory_strategy_scores_reads_only_math_gate_pass_lessons():
+    def _lesson(strategy, verdict="pass", engine_mode="demo"):
+        body = {
+            "ml_advisory_mode": "hypothesize",
+            "engine_mode": engine_mode,
+            "strategy_name": strategy,
+            "advisory": {
+                "gate_verdict": verdict,
+                "math_gate": {"verdict": verdict},
+            },
+        }
+        return "ml_advisory:hypothesize: " + json.dumps(body)
+
+    rowsets = [
+        [("grid_trading", 4.25)],  # learning.mlde_shadow_recommendations
+        [
+            (_lesson("ma_crossover", "pass"),),
+            (_lesson("bb_reversion", "DEFER"),),
+            (_lesson("grid_trading", "pass"),),  # mlde score should remain max.
+            (_lesson("bb_breakout", "pass", engine_mode="live"),),
+            ("ml_advisory:diagnose_leak: {}",),
+            ("ml_advisory:hypothesize: {bad json",),
+        ],
+    ]
+    connect, _captured = _make_fake_connect_scripted(rowsets)
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        controlled_experiment_enabled=True,
+        require_advisory_for_explore=True,
+        advisory_sources=["dream_engine"],
+    )
+
+    out = fetch_recent_advisory_strategy_scores("FAKE_DSN", cfg, _connect=connect)
+
+    assert out == {
+        "grid_trading": 4.25,
+        "ma_crossover": 1.0,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -633,6 +747,222 @@ def test_explore_disabled_pure_winner_behavior_unchanged():
     # explore 關 → 即使 under-sampled 也不保活（負 EV 歸零）。
     assert report.desired_active.get("grid_trading") is False
     assert report.all_regimes_flat is True
+
+
+def test_controlled_experiment_requires_advisory_before_explore_keepalive():
+    neg_arm = make_arm_id("range", "grid_trading")
+    rewards = [
+        ArmReward(neg_arm, "range", -30.0, float(i), FILL_TIER_TAKER_REAL)
+        for i in range(3)
+    ]
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        candidate_regimes=["range"],
+        candidate_strategies=[],
+        include_demo_maker_arm=False,
+        enable_explore_sink=True,
+        controlled_experiment_enabled=True,
+        require_advisory_for_explore=True,
+        rng_seed=3,
+    )
+    lever, calls = _record_lever({"grid_trading": True})
+    runner = AdpeRunner(
+        cfg,
+        lever=lever,
+        rewards_fn=lambda: rewards,
+        advisory_fn=lambda: {},  # no L2 / multi-agent positive evidence
+    )
+
+    report = runner.run_cycle(dry_run=False)
+
+    assert report.all_regimes_flat is True
+    assert report.desired_active.get("grid_trading") is False
+    assert ("grid_trading", False) in calls
+    assert report.experiment_policy["selected_explore"] == []
+    assert (
+        report.experiment_policy["rejected_explore"]["grid_trading"]
+        == "missing_positive_advisory_evidence"
+    )
+
+
+def test_controlled_experiment_caps_explore_and_blocks_retired_strategy():
+    grid_arm = make_arm_id("range", "grid_trading")
+    ma_arm = make_arm_id("range", "ma_crossover")
+    funding_arm = make_arm_id("range", "funding_arb")
+    rewards = []
+    for i, arm in enumerate([grid_arm, ma_arm, funding_arm]):
+        rewards.extend(
+            ArmReward(arm, "range", -20.0, float(i * 10 + j), FILL_TIER_TAKER_REAL)
+            for j in range(3)
+        )
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        candidate_regimes=["range"],
+        candidate_strategies=[],
+        include_demo_maker_arm=False,
+        enable_explore_sink=True,
+        controlled_experiment_enabled=True,
+        require_advisory_for_explore=True,
+        retired_strategy_blocklist=["funding_arb"],
+        explore_strategy_allowlist=["grid_trading", "ma_crossover", "funding_arb"],
+        max_active_explore_strategies=1,
+        rng_seed=4,
+    )
+    lever, calls = _record_lever(
+        {"grid_trading": False, "ma_crossover": False, "funding_arb": True}
+    )
+    runner = AdpeRunner(
+        cfg,
+        lever=lever,
+        rewards_fn=lambda: rewards,
+        advisory_fn=lambda: {
+            "grid_trading": 6.0,
+            "ma_crossover": 3.0,
+            "funding_arb": 99.0,  # even strongest evidence cannot revive retired strategy
+        },
+    )
+
+    report = runner.run_cycle(dry_run=False)
+
+    assert report.all_regimes_flat is True
+    assert report.desired_active["grid_trading"] is True
+    assert report.desired_active["ma_crossover"] is False
+    assert report.desired_active["funding_arb"] is False
+    assert ("grid_trading", True) in calls
+    assert ("funding_arb", False) in calls
+    assert report.experiment_policy["selected_explore"] == ["grid_trading"]
+    assert (
+        report.experiment_policy["rejected_explore"]["ma_crossover"]
+        == "max_active_explore_strategies_cap"
+    )
+    assert (
+        report.experiment_policy["rejected_explore"]["funding_arb"]
+        == "retired_strategy_blocklist"
+    )
+    assert report.experiment_policy["forced_dormant"] == ["funding_arb"]
+
+
+def test_side_edge_evidence_keeps_ma_alive_and_drops_advisory_only_grid(tmp_path):
+    grid_arm = make_arm_id("range", "grid_trading")
+    ma_arm = make_arm_id("range", "ma_crossover")
+    rewards = []
+    for i, arm in enumerate([grid_arm, ma_arm]):
+        rewards.extend(
+            ArmReward(arm, "range", -20.0, float(i * 10 + j), FILL_TIER_TAKER_REAL)
+            for j in range(3)
+        )
+    edge_path = tmp_path / "edge_estimates.json"
+    edge_path.write_text(
+        json.dumps(
+            {
+                "ma_crossover::UNIUSDT::Buy": {
+                    "runtime_bps": 32.0,
+                    "win_rate": 1.0,
+                    "n": 1,
+                },
+                # Rust demo gate blocks low-sample grid even if the side mean is
+                # positive, so ADPE must not treat it as cost-viable keepalive.
+                "grid_trading::XRPUSDT::Buy": {
+                    "runtime_bps": 50.0,
+                    "win_rate": 1.0,
+                    "n": 3,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        candidate_regimes=["range"],
+        candidate_strategies=[],
+        include_demo_maker_arm=False,
+        enable_explore_sink=True,
+        controlled_experiment_enabled=True,
+        require_advisory_for_explore=True,
+        use_edge_snapshot_for_explore_evidence=True,
+        require_cost_viable_edge_for_explore_when_available=True,
+        explore_strategy_allowlist=["grid_trading", "ma_crossover"],
+        max_active_explore_strategies=2,
+        rng_seed=5,
+    )
+    lever, calls = _record_lever({"grid_trading": True, "ma_crossover": False})
+    runner = AdpeRunner(
+        cfg,
+        lever=lever,
+        rewards_fn=lambda: rewards,
+        advisory_fn=lambda: {"grid_trading": 9.0},
+        edge_estimates_path=str(edge_path),
+    )
+
+    report = runner.run_cycle(dry_run=False)
+
+    assert report.all_regimes_flat is True
+    assert report.desired_active["ma_crossover"] is True
+    assert report.desired_active["grid_trading"] is False
+    assert ("ma_crossover", True) in calls
+    assert ("grid_trading", False) in calls
+    assert report.experiment_policy["selected_explore"] == ["ma_crossover"]
+    assert (
+        report.experiment_policy["rejected_explore"]["grid_trading"]
+        == "missing_cost_viable_edge_evidence"
+    )
+    assert report.experiment_policy["edge_evidence_scores"]["ma_crossover"] == pytest.approx(
+        17.7,
+        abs=1e-6,
+    )
+
+
+def test_under_cost_side_edge_is_not_positive_explore_evidence(tmp_path):
+    ma_arm = make_arm_id("range", "ma_crossover")
+    rewards = [
+        ArmReward(ma_arm, "range", -20.0, float(i), FILL_TIER_TAKER_REAL)
+        for i in range(3)
+    ]
+    edge_path = tmp_path / "edge_estimates.json"
+    edge_path.write_text(
+        json.dumps(
+            {
+                "ma_crossover::DOTUSDT::Sell": {
+                    "runtime_bps": 16.0,
+                    "win_rate": 2.0 / 3.0,
+                    "n": 3,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        candidate_regimes=["range"],
+        candidate_strategies=[],
+        include_demo_maker_arm=False,
+        enable_explore_sink=True,
+        controlled_experiment_enabled=True,
+        require_advisory_for_explore=True,
+        use_edge_snapshot_for_explore_evidence=True,
+        explore_strategy_allowlist=["ma_crossover"],
+        max_active_explore_strategies=2,
+        rng_seed=6,
+    )
+    lever, calls = _record_lever({"ma_crossover": True})
+    runner = AdpeRunner(
+        cfg,
+        lever=lever,
+        rewards_fn=lambda: rewards,
+        advisory_fn=lambda: {},
+        edge_estimates_path=str(edge_path),
+    )
+
+    report = runner.run_cycle(dry_run=False)
+
+    assert report.all_regimes_flat is True
+    assert report.desired_active["ma_crossover"] is False
+    assert ("ma_crossover", False) in calls
+    assert report.experiment_policy["edge_evidence_scores"] == {}
+    assert (
+        report.experiment_policy["rejected_explore"]["ma_crossover"]
+        == "missing_positive_advisory_evidence"
+    )
 
 
 def test_explore_mutation_bite_winner_only_drops_undersampled():

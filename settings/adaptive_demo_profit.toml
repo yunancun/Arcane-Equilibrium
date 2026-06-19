@@ -17,8 +17,8 @@ dry_run_default = true
 reward_max_age_days = 30
 
 # 候選策略集（要被配置的 strategy-arm）。空 = 從 reward 觀測自動發現 arm_id。
-# 與 mlde_edge_training_rows strategy_name_norm 的 5-enum 對齊。
-candidate_strategies = ["ma_crossover", "bb_breakout", "bb_reversion", "grid_trading", "funding_arb"]
+# funding_arb 已 retired；controlled experiment mode 下不可由 ADPE revive。
+candidate_strategies = ["ma_crossover", "bb_breakout", "bb_reversion", "grid_trading"]
 
 # 候選 regime 集（要逐一 allocate 的 regime context）。空 = allocator VALID_REGIMES 全集。
 # 留空使用全集；如需收斂到特定 regime 再列舉。
@@ -29,9 +29,36 @@ candidate_regimes = []
 include_demo_maker_arm = true
 
 # Track1 explore-gate 開關：true = 每 cycle 由 allocator 真實 explore_budget_remaining
-# 推導 explore overlay 寫 edge_estimates.json，並保 explore-eligible 策略 active（產單供
-# demo explore-gate 放行收集探索數據）。有界（explore_budget=30 耗盡即停）。demo 沙盒 only。
+# 推導 explore overlay 寫 edge_estimates.json。controlled mode 會額外約束哪些策略可為了探索
+# 被保 active；winner active 仍由 allocator post-fee reward 決定。
 enable_explore_sink = true
+
+# Controlled experiment mode：demo 不是停機，而是把探索從「全策略常開」改為
+# evidence-gated / capped / auditable 的實驗政策。L2/multi-agent advisory 只作
+# explore 保活 evidence，不授予下單權、不改 live、不繞 governance。
+controlled_experiment_enabled = true
+retired_strategy_blocklist = ["funding_arb"]
+explore_strategy_allowlist = ["ma_crossover", "bb_breakout", "bb_reversion", "grid_trading"]
+max_active_explore_strategies = 2
+require_advisory_for_explore = true
+advisory_sources = ["ml_shadow", "dream_engine"]
+advisory_max_age_hours = 48
+advisory_min_confidence = 0.5
+advisory_min_expected_net_bps = 0.0
+advisory_min_sample_count = 10
+advisory_allow_requires_governance = false
+
+# Side-aware realized edge evidence：讀 settings/edge_estimates.json 的
+# strategy::symbol::Buy/Sell cell，只有清過 cost wall 的 side edge 才能作 explore
+# keepalive evidence。當至少一個候選策略有 cost-viable side edge 時，advisory-only
+# 候選不再保活，避免舊 advisory 讓 grid 反覆產生會被 Rust cost gate 擋掉的 intent。
+use_edge_snapshot_for_explore_evidence = true
+require_cost_viable_edge_for_explore_when_available = true
+edge_evidence_fee_rate = 0.00055
+edge_evidence_slippage = 0.0
+edge_evidence_win_rate_floor = 0.3
+edge_evidence_safety_multiplier = 1.3
+edge_evidence_grid_min_n = 30
 
 # RNG seed：留空 = 非確定（production cron）；CLI --seed 可注入固定值供可重現。
 # rng_seed = 42
