@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 03:34 CEST
+- corrected TODO v226 source-sync metadata after v225 passive-watch refresh
+- evidence: Mac `HEAD=origin/main=e8ade59a`; Linux `trade-core` `HEAD=origin/main=e8ade59a`; watchdog `engine_alive=true`, demo snapshot age `30.0s`
+- boundary: docs/TODO metadata only; no CI, cargo, Linux build, deploy/rebuild/restart, DB write, Bybit private call, credential/runtime/auth/risk/order/trading mutation, or gate closure
+
 2026-06-19 03:24 CEST
 - refreshed TODO v225 passive-watch evidence without closing any gate
 - evidence: Mac/origin/Linux aligned at v224 checkpoint `f622574a`; watchdog `engine_alive=true` with demo snapshot age `28.6s`; Gate-B latest `2026-06-19T01:12:01Z` remains `WATCH_ONLY` (21 total, 0 alertable/start/schedule, 1 watch_only); flash_dip entry `{}` and 0 DB samples; L2 cursor still `2026-06-17` with 2026-06-12..17 no-op days; D2 `reconcile_ghost_converge` total/semantics rows still 0
