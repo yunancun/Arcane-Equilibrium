@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM Verdict Stale Guard + Cron Restore
+
+- Fixed alpha discovery killboard so stale `recorder_mm_verdict` status older than 36h becomes `SOURCE_FAILURE/stale_artifact` instead of active MM capture; focused alpha discovery tests are now 10 passed.
+- Restored Linux daily `recorder_mm_verdict_cron.sh` at `41 6 * * *`; manual read-only run updated MM samples from 3 to 16, all current net-edge symbols remain negative and below sample gate.
+- Caveat: fill_sim report was ~57h old; after 72h adverse_selection becomes unavailable unless a separate heavy refresh schedule is approved/designed.
+
 ## 2026-06-19 Alpha Discovery Runtime Killboard
 
 - 1-6 alpha discovery throughput 從 source/test scaffold 接成 artifact-only runtime killboard：讀 Gate-B / FlashDip / vol-event / MM verdict / AEG matrix artifacts，寫 `<DATA>/alpha_discovery_throughput/alpha_discovery_latest.json`。
