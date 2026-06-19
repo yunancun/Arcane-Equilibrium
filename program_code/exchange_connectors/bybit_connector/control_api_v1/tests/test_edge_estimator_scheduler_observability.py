@@ -123,6 +123,7 @@ def test_mlde_unblock_passes_linucb_statement_timeout_env(monkeypatch):
     def fake_train_all_arms(dsn, cfg):
         captured["dsn"] = dsn
         captured["statement_timeout_ms"] = cfg.statement_timeout_ms
+        captured["max_age_days"] = cfg.max_age_days
         return []
 
     fake_shadow = types.ModuleType("ml_training.mlde_shadow_advisor")
@@ -159,6 +160,7 @@ def test_mlde_unblock_passes_linucb_statement_timeout_env(monkeypatch):
     assert captured == {
         "dsn": "postgresql://unit-test",
         "statement_timeout_ms": 4321,
+        "max_age_days": 30,
     }
     assert out["linucb"] == {
         "engine_mode": "demo_live_demo",

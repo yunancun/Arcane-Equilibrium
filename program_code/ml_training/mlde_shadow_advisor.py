@@ -1,7 +1,10 @@
 """MLDE shadow advisor.
 
-Reads the V031 ML/Dream edge-unblock training view and emits advisory
-rank/veto rows into ``learning.mlde_shadow_recommendations``.
+Preserves the V031 ML/Dream edge-unblock training-row contract and emits
+advisory rank/veto rows into ``learning.mlde_shadow_recommendations``.
+The runtime aggregate query reads base tables directly instead of
+``learning.mlde_edge_training_rows`` because that view's historical
+``trading.signals`` lateral path repeatedly times out on compressed chunks.
 
 This module is deliberately not an execution path. Rows are logged with
 ``applied=false`` and ``requires_governance=true`` so downstream promotion can
@@ -158,6 +161,149 @@ SCANNER_NUMERIC_FIELDS = (
     "scanner_f_funding_arb",
 )
 SCANNER_CONTEXT_FIELDS = SCANNER_TEXT_FIELDS + SCANNER_NUMERIC_FIELDS
+
+_SCANNER_CONTEXT_AGGREGATE_SELECTS = """
+            max(scanner_market_regime) AS scanner_market_regime,
+            max(scanner_trend_phase) AS scanner_trend_phase,
+            avg(scanner_trend_score)::float8 AS scanner_trend_score,
+            avg(scanner_range_score)::float8 AS scanner_range_score,
+            avg(scanner_shock_score)::float8 AS scanner_shock_score,
+            avg(scanner_close_alignment)::float8 AS scanner_close_alignment,
+            avg(scanner_range_position)::float8 AS scanner_range_position,
+            avg(scanner_crowding_score)::float8 AS scanner_crowding_score,
+            avg(scanner_reversal_risk_score)::float8 AS scanner_reversal_risk_score,
+            avg(scanner_directional_efficiency)::float8 AS scanner_directional_efficiency,
+            avg(scanner_dir_pct)::float8 AS scanner_dir_pct,
+            avg(scanner_signed_dir_pct)::float8 AS scanner_signed_dir_pct,
+            avg(scanner_range_pct)::float8 AS scanner_range_pct,
+            avg(scanner_fr_bps)::float8 AS scanner_fr_bps,
+            avg(scanner_f_ma)::float8 AS scanner_f_ma,
+            avg(scanner_f_grid)::float8 AS scanner_f_grid,
+            avg(scanner_f_bbrv)::float8 AS scanner_f_bbrv,
+            avg(scanner_f_bkout)::float8 AS scanner_f_bkout,
+            avg(scanner_f_funding_arb)::float8 AS scanner_f_funding_arb
+"""
+
+_AGGREGATE_BASE_SQL = f"""
+WITH base AS (
+    SELECT
+        i.ts,
+        i.engine_mode,
+        COALESCE(NULLIF(df.symbol, ''), NULLIF(i.symbol, ''), '') AS symbol,
+        lower(COALESCE(
+            NULLIF(i.strategy_name, ''),
+            NULLIF(df.strategy_name, ''),
+            NULLIF(i.details->'scanner'->>'best_strategy', ''),
+            ''
+        )) AS raw_strategy_name,
+        i.details->'scanner' AS scanner_json,
+        df.label_net_edge_bps AS net_bps_after_fee,
+        d.regime_5m
+      FROM trading.intents i
+      JOIN learning.decision_features df ON df.context_id = i.context_id
+      LEFT JOIN LATERAL (
+          SELECT d.regime_5m
+            FROM trading.decision_context_snapshots d
+           WHERE d.context_id = i.context_id
+           ORDER BY d.ts DESC
+           LIMIT 1
+      ) d ON TRUE
+     WHERE i.engine_mode = ANY(%s)
+       AND df.label_net_edge_bps IS NOT NULL
+       AND i.signal_id IS NOT NULL AND i.signal_id <> ''
+       AND i.context_id IS NOT NULL AND i.context_id <> ''
+       AND COALESCE(i.details->>'source', '') <> 'command'
+       AND i.ts >= now() - (%s::int || ' hours')::interval
+),
+normalized AS (
+    SELECT
+        b.*,
+        lower(COALESCE(b.scanner_json->>'route_mode', 'unknown')) AS scanner_route_mode,
+        lower(COALESCE(b.scanner_json->>'edge_status', 'unknown')) AS scanner_edge_status,
+        NULLIF(b.scanner_json->>'market_regime', '') AS scanner_market_regime,
+        NULLIF(b.scanner_json->>'trend_phase', '') AS scanner_trend_phase,
+        learning.mlde_try_float8(b.scanner_json->>'trend_score') AS scanner_trend_score,
+        learning.mlde_try_float8(b.scanner_json->>'range_score') AS scanner_range_score,
+        learning.mlde_try_float8(b.scanner_json->>'shock_score') AS scanner_shock_score,
+        learning.mlde_try_float8(b.scanner_json->>'close_alignment') AS scanner_close_alignment,
+        learning.mlde_try_float8(b.scanner_json->>'range_position') AS scanner_range_position,
+        learning.mlde_try_float8(b.scanner_json->>'crowding_score') AS scanner_crowding_score,
+        learning.mlde_try_float8(b.scanner_json->>'reversal_risk_score') AS scanner_reversal_risk_score,
+        learning.mlde_try_float8(b.scanner_json->>'directional_efficiency') AS scanner_directional_efficiency,
+        learning.mlde_try_float8(b.scanner_json->>'dir_pct') AS scanner_dir_pct,
+        learning.mlde_try_float8(b.scanner_json->>'signed_dir_pct') AS scanner_signed_dir_pct,
+        learning.mlde_try_float8(b.scanner_json->>'range_pct') AS scanner_range_pct,
+        learning.mlde_try_float8(b.scanner_json->>'fr_bps') AS scanner_fr_bps,
+        learning.mlde_try_float8(b.scanner_json->>'f_ma') AS scanner_f_ma,
+        learning.mlde_try_float8(b.scanner_json->>'f_grid') AS scanner_f_grid,
+        learning.mlde_try_float8(b.scanner_json->>'f_bbrv') AS scanner_f_bbrv,
+        learning.mlde_try_float8(b.scanner_json->>'f_bkout') AS scanner_f_bkout,
+        learning.mlde_try_float8(b.scanner_json->>'f_funding_arb') AS scanner_f_funding_arb,
+        CASE
+            WHEN b.symbol IN ('BTCUSDT', 'BTCUSD') THEN 'btc'
+            WHEN b.symbol IN ('ETHUSDT', 'ETHUSD') THEN 'eth'
+            WHEN b.symbol LIKE 'SOL%%' THEN 'sol'
+            WHEN b.symbol LIKE 'XRP%%' THEN 'xrp'
+            WHEN b.symbol LIKE 'DOGE%%' THEN 'doge'
+            ELSE 'alt'
+        END AS symbol_bucket
+      FROM base b
+),
+strategy_regime AS (
+    SELECT
+        n.*,
+        CASE n.raw_strategy_name
+            WHEN 'bollinger_reversion' THEN 'bb_reversion'
+            WHEN 'bb_reversion' THEN 'bb_reversion'
+            WHEN 'bb_breakout' THEN 'bb_breakout'
+            WHEN 'ma_crossover' THEN 'ma_crossover'
+            WHEN 'grid_trading' THEN 'grid_trading'
+            WHEN 'funding_arb' THEN 'funding_arb'
+            ELSE n.raw_strategy_name
+        END AS strategy_name_norm,
+        CASE
+            WHEN lower(COALESCE(n.regime_5m, '')) LIKE '%%trend%%' THEN 'trending'
+            WHEN lower(COALESCE(n.regime_5m, '')) LIKE ANY(ARRAY['%%mean%%', '%%range%%', '%%anti%%'])
+                THEN 'mean_reverting'
+            WHEN n.raw_strategy_name IN ('grid_trading', 'bb_reversion', 'bollinger_reversion')
+                THEN 'mean_reverting'
+            WHEN n.raw_strategy_name IN ('ma_crossover', 'bb_breakout') THEN 'trending'
+            ELSE 'random_walk'
+        END AS regime_norm
+      FROM normalized n
+)
+SELECT
+    engine_mode,
+    strategy_name_norm AS strategy_name,
+    symbol_bucket,
+    regime_norm AS regime,
+    scanner_route_mode,
+    scanner_edge_status,
+    concat_ws(
+        '__',
+        strategy_name_norm,
+        symbol_bucket,
+        regime_norm,
+        COALESCE(NULLIF(scanner_route_mode, ''), 'unknown'),
+        COALESCE(NULLIF(scanner_edge_status, ''), 'unknown')
+    ) AS mlde_arm_id,
+    CASE
+        WHEN strategy_name_norm IN ('ma_crossover', 'bb_breakout', 'bb_reversion', 'grid_trading', 'funding_arb')
+        THEN regime_norm || '__' || strategy_name_norm
+        ELSE NULL
+    END AS linucb_arm_id,
+{_SCANNER_CONTEXT_AGGREGATE_SELECTS},
+    count(*)::int AS sample_count,
+    avg(net_bps_after_fee)::float8 AS avg_net_bps,
+    avg(CASE WHEN net_bps_after_fee > 0 THEN 1.0 ELSE 0.0 END)::float8 AS win_rate
+  FROM strategy_regime
+ GROUP BY
+    engine_mode, strategy_name_norm, symbol_bucket, regime_norm,
+    scanner_route_mode, scanner_edge_status
+HAVING count(*) >= %s
+ ORDER BY abs(avg(net_bps_after_fee)) DESC, count(*) DESC
+ LIMIT %s
+"""
 
 
 @dataclass(frozen=True)
@@ -329,36 +475,8 @@ def _fetch_aggregate_rows(dsn: str, cfg: ShadowAdvisorConfig) -> list[dict[str, 
     with psycopg2.connect(dsn, connect_timeout=2) as conn:  # pragma: no cover - DB path
         with conn.cursor() as cur:
             _set_local_statement_timeout(cur, cfg.statement_timeout_ms)
-            available_columns = _fetch_training_view_columns(cur)
-            scanner_selects = _scanner_context_select_sql(available_columns)
-            sql = f"""
-        SELECT
-            engine_mode,
-            strategy_name,
-            symbol_bucket,
-            regime,
-            scanner_route_mode,
-            scanner_edge_status,
-            mlde_arm_id,
-            linucb_arm_id,
-            {scanner_selects},
-            count(*)::int AS sample_count,
-            avg(net_bps_after_fee)::float8 AS avg_net_bps,
-            avg(CASE WHEN net_bps_after_fee > 0 THEN 1.0 ELSE 0.0 END)::float8 AS win_rate
-        FROM learning.mlde_edge_training_rows
-        WHERE engine_mode = ANY(%s)
-          AND attribution_chain_ok
-          AND net_bps_after_fee IS NOT NULL
-          AND ts >= now() - (%s::int || ' hours')::interval
-        GROUP BY
-            engine_mode, strategy_name, symbol_bucket, regime,
-            scanner_route_mode, scanner_edge_status, mlde_arm_id, linucb_arm_id
-        HAVING count(*) >= %s
-        ORDER BY abs(avg(net_bps_after_fee)) DESC, count(*) DESC
-        LIMIT %s
-    """
             cur.execute(
-                sql,
+                _AGGREGATE_BASE_SQL,
                 (
                     list(_engine_mode_scope(cfg.engine_mode)),
                     cfg.lookback_hours,
@@ -368,41 +486,6 @@ def _fetch_aggregate_rows(dsn: str, cfg: ShadowAdvisorConfig) -> list[dict[str, 
             )
             cols = [desc[0] for desc in cur.description]
             return [dict(zip(cols, row)) for row in cur.fetchall()]
-
-
-def _fetch_training_view_columns(cur: Any) -> set[str]:
-    """Return available columns on the MLDE training view.
-
-    回傳 MLDE training view 目前可用欄位，用於跨 migration 相容。
-    """
-    cur.execute(
-        """
-        SELECT column_name
-        FROM information_schema.columns
-        WHERE table_schema = 'learning'
-          AND table_name = 'mlde_edge_training_rows'
-        """
-    )
-    return {str(row[0]) for row in (cur.fetchall() or [])}
-
-
-def _scanner_context_select_sql(available_columns: set[str]) -> str:
-    """Build scanner-context aggregate SQL with missing-column fallbacks.
-
-    建立 scanner context 彙總 SQL；欄位尚未 migration 時使用 NULL fallback。
-    """
-    selects: list[str] = []
-    for field in SCANNER_TEXT_FIELDS:
-        if field in available_columns:
-            selects.append(f"max({field}) AS {field}")
-        else:
-            selects.append(f"NULL::text AS {field}")
-    for field in SCANNER_NUMERIC_FIELDS:
-        if field in available_columns:
-            selects.append(f"avg({field})::float8 AS {field}")
-        else:
-            selects.append(f"NULL::float8 AS {field}")
-    return ",\n            ".join(selects)
 
 
 def _scanner_context_from_row(row: dict[str, Any]) -> dict[str, Any]:
