@@ -25,6 +25,14 @@
 
 ## 近期記錄
 
+## 2026-06-19 TODO v225 Passive-Watch Refresh
+
+- Refreshed passive watch surfaces without closing any active gate.
+- Source sync: Mac/origin/Linux aligned at v224 checkpoint `f622574a`; watchdog `engine_alive=true` with demo snapshot age `28.6s`.
+- Gate-B latest `2026-06-19T01:12:01Z` remained `WATCH_ONLY` with 21 total candidates, 0 alertable/start/schedule, and 1 watch_only; top BPUSDT candidates were stale/old ContinuousTrading, so no preflight/probe was run.
+- flash_dip entry remained `{}` and read-only PG found 0 flash_dip rows; L2 cursor remained `2026-06-17` with 2026-06-12..17 no-op material days and B3 shadow rows=0; D2 `reconcile_ghost_converge` total/semantics rows remained 0.
+- Passive health at `2026-06-19T01:23:30Z` still failed `[74]` (`attempts=200`, `postonly=26`, `max_pending=0`) and `[56]` (`authorization_json_missing`). Boundary: docs/TODO/report + read-only Linux file/PG/healthcheck only; no CI/cargo/Linux build/deploy/rebuild/restart/DB write/Bybit private call/credential/runtime/auth/risk/order/trading mutation/probe/archive/promotion.
+
 ## 2026-06-19 TODO v224 Stage0R Current-Head Wrapper True-PG Rerun
 
 - Refreshed `P1-A1A2-STAGE0R-RUNNER-IMPL` with current-head Linux true-PG read-only wrapper evidence, superseding the stale "no new true-PG rerun beyond v217 artifact" caveat without closing the row.
