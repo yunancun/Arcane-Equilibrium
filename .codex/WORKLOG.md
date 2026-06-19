@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 02:45 CEST
+- refreshed PM-local review evidence for `P2-RECONCILER-GET-POSITIONS-PAGINATION` without archiving the row
+- evidence: source review confirms full-scan pagination, same-cursor fail-closed, client-side invariant classification, exchange-stop sync mapping, and ghost point-query gate; focused Rust checks from `srv/rust` passed (position_manager 19, dispatch invariant 1, exchange-stop invariant 1, false-ghost 1, ghost suite 11, clippy)
+- caveat: one initial cargo command was run from `srv/` and failed before tests due missing Cargo.toml, then rerun correctly from `srv/rust`
+- boundary: docs/report checkpoint plus local focused tests only; no full CI, Linux cargo, deploy/rebuild/restart, DB write, Bybit private call, auth/risk/order/trading mutation; BB/E2/E4/QA review and production event proof remain open
+
 2026-06-19 02:33 CEST
 - completed a focused E4 regression slice for the Stage0R 8c denominator source fix
 - evidence: py_compile PASS; 8c smoke_cli 11/11 twice; 8c metrics smoke twice; alpha_candidate smoke twice; 8b funding_skew smoke twice; stats_common pytest 33 passed; source inspection confirms wrapper passes raw 5m `total_bucket_count` and metrics still RED when omitted
