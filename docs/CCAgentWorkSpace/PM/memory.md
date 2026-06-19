@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-19 TODO v222 Earn First-Stake Capability Routing Focused Review
+
+- Refreshed PM-local evidence for `P1-EARN-WAVE-C-FIRST-STAKE-RUNTIME` without closing the runtime/first-stake row.
+- Source review confirms bootstrap injects `BybitEarnClient` and `EarnMovementWriter` from existing runtime handles only, missing deps still fail closed as `earn_dispatch_unwired`, Rust IPC routes `process_earn_intent` into the event-consumer owner task, and Python `/api/v1/earn/stake` sends `engine="live"`.
+- Focused checks passed: `process_earn_intent_command` 2, `process_earn_intent` 4, `earn_router_fail_closed_when_unwired` 1, Python Earn route suite 28 with one existing Pydantic warning, and `cargo clippy -p openclaw_engine --lib -- -D warnings`.
+- Boundary: no full CI/Linux cargo/deploy/rebuild/restart, no real Bybit call, no credential/key/secret mutation, no runtime DB write, no auth/risk/order/trading mutation, and no first-stake evidence. OP-1/2/3 plus review/deploy/restart remain open.
+
 ## 2026-06-19 TODO v221 D2 Audit Semantics Focused Review
 
 - Refreshed PM-local evidence for `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` without closing the row.
