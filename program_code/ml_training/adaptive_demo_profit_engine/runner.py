@@ -834,7 +834,12 @@ class AdpeRunner:
         win_rate_floor = max(1e-9, min(1.0, self.runner_cfg.edge_evidence_win_rate_floor))
         safety_multiplier = max(1.0, self.runner_cfg.edge_evidence_safety_multiplier)
         grid_min_n = max(0, int(self.runner_cfg.edge_evidence_grid_min_n))
-        ready_symbols = self._load_edge_evidence_ready_symbols()
+        runtime_snapshot = self._load_edge_evidence_runtime_snapshot()
+        ready_symbols = (
+            self._runtime_ready_symbols(runtime_snapshot)
+            if self.runner_cfg.edge_evidence_require_runtime_symbol_ready
+            else None
+        )
         skipped_unready = 0
 
         scores: dict[str, float] = {}
@@ -875,6 +880,12 @@ class AdpeRunner:
                     "margin_bps": round(margin_bps, 6),
                     "win_rate": round(win_rate, 6),
                     "n": n_trades,
+                    "readiness": self._classify_edge_cell_readiness(
+                        strategy,
+                        symbol,
+                        side,
+                        runtime_snapshot,
+                    ),
                 }
             )
 
@@ -886,9 +897,7 @@ class AdpeRunner:
             )
         return scores, cells
 
-    def _load_edge_evidence_ready_symbols(self) -> Optional[set[str]]:
-        if not self.runner_cfg.edge_evidence_require_runtime_symbol_ready:
-            return None
+    def _load_edge_evidence_runtime_snapshot(self) -> Optional[dict]:
         path = str(self.runner_cfg.edge_evidence_runtime_snapshot_path or "").strip()
         if not path:
             return None
@@ -898,6 +907,11 @@ class AdpeRunner:
         except (FileNotFoundError, json.JSONDecodeError, OSError) as exc:
             logger.info("ADPE edge evidence: runtime symbol readiness skipped: %s", exc)
             return None
+        if not isinstance(snapshot, dict):
+            return None
+        return snapshot
+
+    def _runtime_ready_symbols(self, snapshot: Optional[dict]) -> Optional[set[str]]:
         if not isinstance(snapshot, dict):
             return None
         latest_prices = snapshot.get("latest_prices")
@@ -912,6 +926,114 @@ class AdpeRunner:
             if isinstance(indicators.get(symbol_s), dict):
                 ready.add(symbol_s)
         return ready
+
+    def _classify_edge_cell_readiness(
+        self,
+        strategy: str,
+        symbol: str,
+        side: str,
+        runtime_snapshot: Optional[dict],
+    ) -> dict:
+        """Explain why a cost-viable side cell can or cannot produce an entry now.
+
+        This is an audit-only mirror for operator visibility. It intentionally
+        does not grant or deny orders; Rust strategy code and cost gates remain
+        authoritative.
+        """
+        desired_direction = "Long" if side == "Buy" else "Short"
+        out = {
+            "status": "strategy_readiness_unknown",
+            "desired_direction": desired_direction,
+            "reasons": [],
+        }
+        if not isinstance(runtime_snapshot, dict):
+            out["status"] = "runtime_unavailable"
+            out["reasons"] = ["runtime_snapshot_unavailable"]
+            return out
+
+        latest_prices = runtime_snapshot.get("latest_prices")
+        indicators = runtime_snapshot.get("indicators")
+        price = latest_prices.get(symbol) if isinstance(latest_prices, dict) else None
+        indicator = indicators.get(symbol) if isinstance(indicators, dict) else None
+        if _finite_float(price) is None or not isinstance(indicator, dict):
+            out["status"] = "runtime_unavailable"
+            out["reasons"] = ["runtime_symbol_not_ready"]
+            return out
+
+        if strategy != "ma_crossover":
+            out["status"] = "strategy_readiness_unknown"
+            out["reasons"] = ["strategy_readiness_not_implemented"]
+            return out
+
+        reasons: list[str] = []
+        signal = self._latest_runtime_signal(runtime_snapshot, strategy, symbol)
+        if signal is None:
+            reasons.append("no_current_ma_signal")
+        else:
+            signal_direction = str(signal.get("direction") or "").strip()
+            out["signal_direction"] = signal_direction
+            out["signal_confidence"] = _finite_float(signal.get("confidence"))
+            out["signal_edge_bps"] = _finite_float(signal.get("edge_bps"))
+            if signal_direction != desired_direction:
+                reasons.append(f"ma_signal_opposite:{signal_direction or 'unknown'}")
+
+        indicator_direction = self._ma_indicator_direction(indicator)
+        out["indicator_direction"] = indicator_direction or "unknown"
+        if indicator_direction is None:
+            reasons.append("ma_indicator_direction_unavailable")
+        elif indicator_direction != desired_direction:
+            reasons.append(f"ma_kama_sma_direction_opposite:{indicator_direction}")
+
+        hurst = indicator.get("hurst")
+        hurst_regime = None
+        if isinstance(hurst, dict):
+            hurst_regime = str(hurst.get("regime") or "").strip()
+        out["hurst_regime"] = hurst_regime or "unknown"
+        if hurst_regime and hurst_regime != "trending":
+            reasons.append(f"ma_hurst_not_persistent:{hurst_regime}")
+
+        if reasons:
+            out["reasons"] = reasons
+            out["status"] = (
+                "waiting_for_signal"
+                if reasons == ["no_current_ma_signal"]
+                else "blocked_by_strategy_state"
+            )
+            return out
+
+        out["status"] = "entry_ready"
+        out["reasons"] = []
+        return out
+
+    def _latest_runtime_signal(
+        self,
+        runtime_snapshot: dict,
+        strategy: str,
+        symbol: str,
+    ) -> Optional[dict]:
+        signals = runtime_snapshot.get("signals")
+        if not isinstance(signals, list):
+            return None
+        candidates = [
+            s
+            for s in signals
+            if isinstance(s, dict)
+            and str(s.get("source") or "") == strategy
+            and str(s.get("symbol") or "") == symbol
+        ]
+        if not candidates:
+            return None
+        return max(candidates, key=lambda s: int(_finite_float(s.get("ts_ms")) or 0))
+
+    def _ma_indicator_direction(self, indicator: dict) -> Optional[str]:
+        kama = indicator.get("kama")
+        fast = None
+        if isinstance(kama, dict):
+            fast = _finite_float(kama.get("kama"))
+        slow = _finite_float(indicator.get("sma_20"))
+        if fast is None or slow is None or fast == slow:
+            return None
+        return "Long" if fast > slow else "Short"
 
     # ---- 一個 cycle -------------------------------------------------------
 
