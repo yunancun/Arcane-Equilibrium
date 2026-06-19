@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-19 TODO v220 Reconciler Pagination Focused Review
+
+- Refreshed PM-local evidence for `P2-RECONCILER-GET-POSITIONS-PAGINATION` without closing the row.
+- Source review confirms full-scan `get_positions(None)` uses `settleCoin=USDT` + `limit=200` pagination, normalizes empty/missing cursor to None, fails closed on same-cursor response, maps the client-side invariant as Structural / sync-untrusted, and keeps the ghost point-query gate load-bearing against pagination-truncated false ghosts.
+- Focused checks from `srv/rust` passed: `position_manager::tests` 19, dispatch invariant mapping 1, exchange-stop invariant mapping 1, false-ghost regression 1, `position_reconciler::tests::ghost` 11, and `cargo clippy -p openclaw_engine --lib -- -D warnings`.
+- Boundary: initial wrong-root cargo invocation failed before tests and was rerun correctly; no full CI/Linux cargo/deploy/rebuild/restart/DB write/Bybit private call/auth/risk/order/trading mutation. Formal BB/E2/E4/QA review and production event proof remain open.
+
 ## 2026-06-19 TODO v219 Stage0R 8c E4 Focused Regression
 
 - Reduced the open `P1-A1A2-STAGE0R-RUNNER-IMPL` E4 denominator-fix review risk with a focused local regression report, without closing promotion/trusted-runner authority.
