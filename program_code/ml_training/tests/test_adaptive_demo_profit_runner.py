@@ -153,7 +153,9 @@ def test_repo_config_enables_controlled_experiment_and_excludes_retired_funding_
     assert rc.require_advisory_for_explore is True
     assert rc.use_edge_snapshot_for_explore_evidence is True
     assert rc.require_cost_viable_edge_for_explore_when_available is True
+    assert rc.edge_evidence_min_n == 3
     assert rc.edge_evidence_require_runtime_symbol_ready is True
+    assert rc.edge_evidence_ma_adx_threshold == pytest.approx(20.0)
     assert "funding_arb" in rc.retired_strategy_blocklist
     assert "funding_arb" not in rc.candidate_strategies
     assert rc.max_active_explore_strategies == 2
@@ -946,6 +948,7 @@ def test_edge_evidence_runtime_symbol_readiness_filter_drops_unready_ton(tmp_pat
                     "UNIUSDT": {
                         "sma_20": 3.0,
                         "kama": {"kama": 3.1},
+                        "adx": {"adx": 25.0},
                         "hurst": {"regime": "trending"},
                     }
                 },
@@ -1031,6 +1034,7 @@ def test_edge_evidence_readiness_audit_explains_ma_blocked_state(tmp_path):
                     "UNIUSDT": {
                         "sma_20": 3.0,
                         "kama": {"kama": 2.9},
+                        "adx": {"adx": 19.0},
                         "hurst": {"regime": "random_walk"},
                     }
                 },
@@ -1079,10 +1083,130 @@ def test_edge_evidence_readiness_audit_explains_ma_blocked_state(tmp_path):
     assert readiness["desired_direction"] == "Long"
     assert readiness["signal_direction"] == "Short"
     assert readiness["indicator_direction"] == "Short"
+    assert readiness["adx"] == pytest.approx(19.0)
+    assert readiness["adx_threshold"] == pytest.approx(20.0)
     assert readiness["hurst_regime"] == "random_walk"
     assert "ma_signal_opposite:Short" in readiness["reasons"]
     assert "ma_kama_sma_direction_opposite:Short" in readiness["reasons"]
+    assert "ma_adx_below_threshold:19.000000<20.000000" in readiness["reasons"]
     assert "ma_hurst_not_persistent:random_walk" in readiness["reasons"]
+
+
+def test_low_sample_edge_snapshot_blocks_advisory_fallback(tmp_path):
+    ma_arm = make_arm_id("range", "ma_crossover")
+    rewards = [
+        ArmReward(ma_arm, "range", -20.0, float(i), FILL_TIER_TAKER_REAL)
+        for i in range(3)
+    ]
+    edge_path = tmp_path / "edge_estimates.json"
+    edge_path.write_text(
+        json.dumps(
+            {
+                "ma_crossover::UNIUSDT::Buy": {
+                    "runtime_bps": 32.0,
+                    "win_rate": 1.0,
+                    "n": 1,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        candidate_regimes=["range"],
+        candidate_strategies=[],
+        include_demo_maker_arm=False,
+        enable_explore_sink=True,
+        controlled_experiment_enabled=True,
+        require_advisory_for_explore=True,
+        use_edge_snapshot_for_explore_evidence=True,
+        require_cost_viable_edge_for_explore_when_available=True,
+        edge_evidence_min_n=3,
+        explore_strategy_allowlist=["ma_crossover"],
+        max_active_explore_strategies=2,
+        rng_seed=9,
+    )
+    lever, calls = _record_lever({"ma_crossover": True})
+    runner = AdpeRunner(
+        cfg,
+        lever=lever,
+        rewards_fn=lambda: rewards,
+        advisory_fn=lambda: {"ma_crossover": 99.0},
+        edge_estimates_path=str(edge_path),
+    )
+
+    report = runner.run_cycle(dry_run=False)
+
+    assert report.all_regimes_flat is True
+    assert report.desired_active["ma_crossover"] is False
+    assert ("ma_crossover", False) in calls
+    assert report.experiment_policy["edge_evidence_scores"] == {}
+    assert report.experiment_policy["edge_evidence_audit"]["skipped_low_n"] == 1
+    assert report.experiment_policy["edge_evidence_audit"]["min_n"] == 3
+    assert report.experiment_policy["require_cost_viable_edge_when_available"] is True
+    assert (
+        report.experiment_policy["rejected_explore"]["ma_crossover"]
+        == "missing_cost_viable_edge_evidence"
+    )
+
+
+def test_legacy_edge_snapshot_without_side_cells_blocks_advisory_fallback(tmp_path):
+    grid_arm = make_arm_id("range", "grid_trading")
+    rewards = [
+        ArmReward(grid_arm, "range", -20.0, float(i), FILL_TIER_TAKER_REAL)
+        for i in range(3)
+    ]
+    edge_path = tmp_path / "edge_estimates.json"
+    edge_path.write_text(
+        json.dumps(
+            {
+                "grid_trading::APTUSDT": {
+                    "runtime_bps": -8.0,
+                    "win_rate": 0.4,
+                    "n": 28,
+                    "validation_passed": False,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    cfg = AdpeRunnerConfig(
+        engine_mode="demo",
+        candidate_regimes=["range"],
+        candidate_strategies=[],
+        include_demo_maker_arm=False,
+        enable_explore_sink=True,
+        controlled_experiment_enabled=True,
+        require_advisory_for_explore=True,
+        use_edge_snapshot_for_explore_evidence=True,
+        require_cost_viable_edge_for_explore_when_available=True,
+        explore_strategy_allowlist=["grid_trading"],
+        max_active_explore_strategies=2,
+        rng_seed=10,
+    )
+    lever, calls = _record_lever({"grid_trading": True})
+    runner = AdpeRunner(
+        cfg,
+        lever=lever,
+        rewards_fn=lambda: rewards,
+        advisory_fn=lambda: {"grid_trading": 99.0},
+        edge_estimates_path=str(edge_path),
+    )
+
+    report = runner.run_cycle(dry_run=False)
+
+    assert report.desired_active["grid_trading"] is False
+    assert ("grid_trading", False) in calls
+    assert report.experiment_policy["edge_evidence_scores"] == {}
+    audit = report.experiment_policy["edge_evidence_audit"]
+    assert audit["candidate_side_cells_seen"] == 0
+    assert audit["legacy_cells_seen"] == 1
+    assert audit["snapshot_cell_strategies_seen"] == ["grid_trading"]
+    assert report.experiment_policy["require_cost_viable_edge_when_available"] is True
+    assert (
+        report.experiment_policy["rejected_explore"]["grid_trading"]
+        == "missing_cost_viable_edge_evidence"
+    )
 
 
 def test_under_cost_side_edge_is_not_positive_explore_evidence(tmp_path):
@@ -1122,7 +1246,7 @@ def test_under_cost_side_edge_is_not_positive_explore_evidence(tmp_path):
         cfg,
         lever=lever,
         rewards_fn=lambda: rewards,
-        advisory_fn=lambda: {},
+        advisory_fn=lambda: {"ma_crossover": 99.0},
         edge_estimates_path=str(edge_path),
     )
 
@@ -1134,7 +1258,7 @@ def test_under_cost_side_edge_is_not_positive_explore_evidence(tmp_path):
     assert report.experiment_policy["edge_evidence_scores"] == {}
     assert (
         report.experiment_policy["rejected_explore"]["ma_crossover"]
-        == "missing_positive_advisory_evidence"
+        == "missing_cost_viable_edge_evidence"
     )
 
 

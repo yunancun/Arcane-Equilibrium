@@ -151,9 +151,11 @@ class AdpeRunnerConfig:
     edge_evidence_slippage: float = 0.0
     edge_evidence_win_rate_floor: float = 0.3
     edge_evidence_safety_multiplier: float = 1.3
+    edge_evidence_min_n: int = 1
     edge_evidence_grid_min_n: int = 30
     edge_evidence_require_runtime_symbol_ready: bool = False
     edge_evidence_runtime_snapshot_path: str = "/tmp/openclaw/pipeline_snapshot.json"
+    edge_evidence_ma_adx_threshold: float = 20.0
 
 
 def load_runner_config(
@@ -233,6 +235,7 @@ def load_runner_config(
         edge_evidence_safety_multiplier=float(
             runner_d.get("edge_evidence_safety_multiplier", 1.3)
         ),
+        edge_evidence_min_n=int(runner_d.get("edge_evidence_min_n", 1)),
         edge_evidence_grid_min_n=int(runner_d.get("edge_evidence_grid_min_n", 30)),
         edge_evidence_require_runtime_symbol_ready=bool(
             runner_d.get("edge_evidence_require_runtime_symbol_ready", False)
@@ -242,6 +245,9 @@ def load_runner_config(
                 "edge_evidence_runtime_snapshot_path",
                 "/tmp/openclaw/pipeline_snapshot.json",
             )
+        ),
+        edge_evidence_ma_adx_threshold=float(
+            runner_d.get("edge_evidence_ma_adx_threshold", 20.0)
         ),
     )
 
@@ -545,6 +551,7 @@ class AdpeRunner:
         # Track1 demo explore-gate：edge_estimates.json 路徑（測試可注入 scratch 檔）。
         self._edge_estimates_path = edge_estimates_path or _DEFAULT_EDGE_ESTIMATES_PATH
         self._last_experiment_policy: Optional[dict] = None
+        self._last_edge_evidence_audit: dict = {}
 
     # ---- engine_mode 硬鎖 -------------------------------------------------
 
@@ -748,9 +755,23 @@ class AdpeRunner:
         edge_evidence_candidate_strategies = set(explore_candidates) & set(
             edge_evidence_scores
         )
+        edge_evidence_audit = (
+            self._last_edge_evidence_audit
+            if isinstance(self._last_edge_evidence_audit, dict)
+            else {}
+        )
+        snapshot_cell_strategies_seen = set(
+            edge_evidence_audit.get("snapshot_cell_strategies_seen") or []
+        )
+        edge_snapshot_has_candidate_cells = bool(
+            edge_evidence_audit.get("snapshot_loaded")
+        ) and bool(set(explore_candidates) & snapshot_cell_strategies_seen)
         require_cost_edge = (
             bool(self.runner_cfg.require_cost_viable_edge_for_explore_when_available)
-            and bool(edge_evidence_candidate_strategies)
+            and (
+                bool(edge_evidence_candidate_strategies)
+                or edge_snapshot_has_candidate_cells
+            )
         )
         rejected: dict[str, str] = {}
         eligible: list[tuple[float, int, str]] = []
@@ -797,6 +818,7 @@ class AdpeRunner:
                 k: round(float(v), 6) for k, v in sorted(edge_evidence_scores.items())
             },
             "edge_evidence_cells": edge_evidence_cells[:20],
+            "edge_evidence_audit": dict(edge_evidence_audit),
             "require_cost_viable_edge_when_available": require_cost_edge,
             "selected_explore": sorted(selected),
             "rejected_explore": dict(sorted(rejected.items())),
@@ -815,17 +837,36 @@ class AdpeRunner:
             or not self.runner_cfg.enable_explore_sink
             or not self.runner_cfg.controlled_experiment_enabled
         ):
+            self._last_edge_evidence_audit = {
+                "enabled": False,
+                "snapshot_loaded": False,
+            }
             return {}, []
         try:
             with open(self._edge_estimates_path, "r", encoding="utf-8") as f:
                 snapshot = json.load(f)
         except FileNotFoundError:
             logger.info("ADPE edge evidence: edge_estimates.json missing")
+            self._last_edge_evidence_audit = {
+                "enabled": True,
+                "snapshot_loaded": False,
+                "reason": "edge_estimates_missing",
+            }
             return {}, []
         except (json.JSONDecodeError, OSError) as exc:
             logger.warning("ADPE edge evidence: edge_estimates.json unreadable: %s", exc)
+            self._last_edge_evidence_audit = {
+                "enabled": True,
+                "snapshot_loaded": False,
+                "reason": "edge_estimates_unreadable",
+            }
             return {}, []
         if not isinstance(snapshot, dict):
+            self._last_edge_evidence_audit = {
+                "enabled": True,
+                "snapshot_loaded": False,
+                "reason": "edge_estimates_not_object",
+            }
             return {}, []
 
         fee_rate = max(0.0, float(self.runner_cfg.edge_evidence_fee_rate))
@@ -833,6 +874,7 @@ class AdpeRunner:
         fee_bps = 2.0 * (fee_rate + slippage) * 10_000.0
         win_rate_floor = max(1e-9, min(1.0, self.runner_cfg.edge_evidence_win_rate_floor))
         safety_multiplier = max(1.0, self.runner_cfg.edge_evidence_safety_multiplier)
+        min_n = max(0, int(self.runner_cfg.edge_evidence_min_n))
         grid_min_n = max(0, int(self.runner_cfg.edge_evidence_grid_min_n))
         runtime_snapshot = self._load_edge_evidence_runtime_snapshot()
         ready_symbols = (
@@ -841,6 +883,12 @@ class AdpeRunner:
             else None
         )
         skipped_unready = 0
+        skipped_low_n = 0
+        skipped_grid_low_n = 0
+        side_cell_strategies_seen: set[str] = set()
+        legacy_cell_strategies_seen: set[str] = set()
+        candidate_side_cells_seen = 0
+        legacy_cells_seen = 0
 
         scores: dict[str, float] = {}
         cells: list[dict] = []
@@ -848,12 +896,20 @@ class AdpeRunner:
             if key == "_meta" or not isinstance(raw_cell, dict):
                 continue
             parts = str(key).split("::")
+            if len(parts) == 2:
+                strategy, symbol = (p.strip() for p in parts)
+                if strategy and symbol:
+                    legacy_cells_seen += 1
+                    legacy_cell_strategies_seen.add(strategy)
+                continue
             if len(parts) != 3:
                 continue
             strategy, symbol, side_raw = (p.strip() for p in parts)
             side = _canonical_entry_side(side_raw)
             if not strategy or not symbol or side is None:
                 continue
+            candidate_side_cells_seen += 1
+            side_cell_strategies_seen.add(strategy)
             if ready_symbols is not None and symbol not in ready_symbols:
                 skipped_unready += 1
                 continue
@@ -861,7 +917,11 @@ class AdpeRunner:
             if bps is None or bps <= 0.0:
                 continue
             n_trades = _cell_n(raw_cell)
+            if n_trades < min_n:
+                skipped_low_n += 1
+                continue
             if strategy == "grid_trading" and n_trades < grid_min_n:
+                skipped_grid_low_n += 1
                 continue
             win_rate = _cell_win_rate(raw_cell)
             threshold_bps = fee_bps / max(win_rate, win_rate_floor) * safety_multiplier
@@ -895,6 +955,26 @@ class AdpeRunner:
                 "ADPE edge evidence: skipped %d side cells without runtime-ready symbol",
                 skipped_unready,
             )
+        self._last_edge_evidence_audit = {
+            "enabled": True,
+            "snapshot_loaded": True,
+            "candidate_side_cells_seen": candidate_side_cells_seen,
+            "legacy_cells_seen": legacy_cells_seen,
+            "snapshot_cell_strategies_seen": sorted(
+                side_cell_strategies_seen | legacy_cell_strategies_seen
+            ),
+            "side_cell_strategies_seen": sorted(side_cell_strategies_seen),
+            "legacy_cell_strategies_seen": sorted(legacy_cell_strategies_seen),
+            "cost_viable_cells": len(cells),
+            "skipped_unready_symbol": skipped_unready,
+            "skipped_low_n": skipped_low_n,
+            "skipped_grid_low_n": skipped_grid_low_n,
+            "min_n": min_n,
+            "grid_min_n": grid_min_n,
+            "runtime_symbol_ready_required": bool(
+                self.runner_cfg.edge_evidence_require_runtime_symbol_ready
+            ),
+        }
         return scores, cells
 
     def _load_edge_evidence_runtime_snapshot(self) -> Optional[dict]:
@@ -983,6 +1063,19 @@ class AdpeRunner:
             reasons.append("ma_indicator_direction_unavailable")
         elif indicator_direction != desired_direction:
             reasons.append(f"ma_kama_sma_direction_opposite:{indicator_direction}")
+
+        adx = indicator.get("adx")
+        adx_value = None
+        if isinstance(adx, dict):
+            adx_value = _finite_float(adx.get("adx"))
+        adx_threshold = max(0.0, float(self.runner_cfg.edge_evidence_ma_adx_threshold))
+        out["adx"] = adx_value
+        out["adx_threshold"] = adx_threshold
+        if adx_threshold > 0.0:
+            if adx_value is None:
+                reasons.append("ma_adx_unavailable")
+            elif adx_value < adx_threshold:
+                reasons.append(f"ma_adx_below_threshold:{adx_value:.6f}<{adx_threshold:.6f}")
 
         hurst = indicator.get("hurst")
         hurst_regime = None
