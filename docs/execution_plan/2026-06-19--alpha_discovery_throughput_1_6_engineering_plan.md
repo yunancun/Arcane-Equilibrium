@@ -165,3 +165,29 @@ Interface：
    - 若 import path 需要，沿用 `helper_scripts/research/tests/conftest.py`。
 5. 本批不 deploy、不 rebuild、不 restart、不 Linux PG write、不 Bybit private call。
 
+## 9. Runtime Activation Addendum（2026-06-19）
+
+本輪後續把 1-6 scaffold 接成 artifact-only runtime killboard，但仍不改交易/DB/Bybit/授權路徑。
+
+新增：
+- `helper_scripts/research/alpha_discovery_throughput/runtime_runner.py`
+- `helper_scripts/cron/alpha_discovery_throughput_cron.sh`
+
+Interface：
+- input：`OPENCLAW_DATA_DIR` 下既有 artifacts：
+  - `gate_b_watch/gate_b_watch_latest.json`
+  - `logs/flash_dip_death_rate.log`
+  - `order_flow_alpha/vol_event_ledger.json`
+  - `logs/recorder_mm_verdict.log`
+  - `alpha_history_runs/*/verdict_matrix_summary.json`
+- output：`alpha_discovery_throughput/alpha_discovery_latest.json`、dated JSON、history JSONL。
+
+安全裁決：
+- `runtime_runner.py` 只讀 artifacts，不連 DB、不連 Bybit、不跑 probe、不下單、不改 auth/risk/runtime state。
+- `is_fast_discovery_active` 需要至少 3 個真實 artifact source present；runner 空跑不可假報 active。
+- `NO_EDGE_SURVIVES` / `KILL` / `REJECTED` 類 arm 會進 `BLOCK`，但 reason 是 `gate_status:*`，不是 `source_not_healthy`。
+- Linux cron 建議每 15 分鐘跑一次，僅更新 killboard 與 heartbeat。
+
+驗收：
+- focused tests 擴到 9 個，覆蓋 runtime runner 寫入與 `NO_EDGE_SURVIVES` semantic。
+- cron wrapper 通過 `bash -n`；runner 通過 `py_compile` 和空資料 smoke（空資料不標 active）。

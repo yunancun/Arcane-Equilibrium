@@ -10,7 +10,7 @@ MODULE_NOTE:
 
 from __future__ import annotations
 
-RUNNER_VERSION = "alpha_discovery_throughput_v0.1"
+RUNNER_VERSION = "alpha_discovery_throughput_v0.2"
 PACKET_SCHEMA_VERSION = "alpha_candidate_packet_v1"
 DISCOVERY_LOOP_SCHEMA_VERSION = "alpha_discovery_loop_v1"
 EDGE_SNAPSHOT_ADAPTER_SCHEMA_VERSION = "aeg_edge_snapshot_adapter_v1"
