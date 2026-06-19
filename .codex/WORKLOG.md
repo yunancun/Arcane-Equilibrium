@@ -11,6 +11,11 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 02:21 CEST
+- corrected TODO v218 source-sync metadata after v217 `737356a5` was verified on Mac/origin/Linux
+- refreshed passive watch surfaces without action: Gate-B latest `2026-06-19T00:12:01Z` remains WATCH_ONLY; flash_dip entry `{}` and no death-rate success file; L2 cursor remains 2026-06-17 with 2026-06-12..17 zero material/stored days; passive health still fails `[74]` and `[56]`
+- boundary: docs/TODO + read-only Linux file/healthcheck only; no CI, deploy/rebuild/restart, model call, DB write, auth/risk/order/trading mutation
+
 2026-06-19 01:46 CEST
 - completed BB read-only audit for the §6 fee-tier/rebate/MM-program cost-wall lever
 - official Bybit docs show VIP1 derivatives starts at $10M/30d or $100k assets; API Broker Level 1 derivatives also starts at $10M/30d; MM rebates require application plus weighted maker share; MNT fee discounts exclude API users
