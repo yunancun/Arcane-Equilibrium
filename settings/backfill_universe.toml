@@ -30,7 +30,6 @@ symbols = [
     "ADAUSDT",
     "AVAXUSDT",
     "LINKUSDT",
-    "TONUSDT",
     "TRXUSDT",
     "DOTUSDT",
     "POLUSDT",  # 原 MATICUSDT，2024-09 MATIC→POL 遷移後 Bybit 已下架 MATICUSDT perp（BB 2026-06-02 核實）

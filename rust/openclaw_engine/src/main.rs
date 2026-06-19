@@ -117,12 +117,12 @@ use startup::*;
 /// panel cohort 是 funding/OI panel 計算範圍。Bybit V5 USDT-M perp 主力 25 sym。
 fn panel_aggregator_cohort() -> Vec<String> {
     // POLUSDT 取代 MATICUSDT（後者 Bybit V5 status=Closed since 2024-09-06，
-    // Polygon Labs MATIC→POL token migration）；Bybit 上 POLUSDT contract since
-    // 2024-09-05 active。post-restart#4 empirical 證實只 MATICUSDT 0 funding row。
+    // Polygon Labs MATIC→POL token migration）。BNBUSDT 取代 TONUSDT（Bybit
+    // V5 status=Closed since 2026-06-15），避免 panel/scanner bootstrap 追閉市合約。
     vec![
         "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT", "ADAUSDT", "AVAXUSDT", "LINKUSDT",
         "DOTUSDT", "POLUSDT", "LTCUSDT", "BCHUSDT", "NEARUSDT", "UNIUSDT", "ATOMUSDT", "ETCUSDT",
-        "FILUSDT", "ICPUSDT", "TRXUSDT", "ARBUSDT", "OPUSDT", "APTUSDT", "SUIUSDT", "TONUSDT",
+        "FILUSDT", "ICPUSDT", "TRXUSDT", "ARBUSDT", "OPUSDT", "APTUSDT", "SUIUSDT", "BNBUSDT",
         "INJUSDT",
     ]
     .into_iter()
