@@ -1,0 +1,252 @@
+"""alpha_discovery_throughput focused tests."""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+from datetime import date, timedelta
+from pathlib import Path
+
+from aeg_candidate_metrics import builder as candidate_metrics_builder
+from alpha_discovery_throughput.discovery_loop import build_discovery_plan
+from alpha_discovery_throughput.edge_snapshot_adapter import build_edge_snapshot, row_is_live_grade
+from alpha_discovery_throughput.execution_spine import evaluate_execution_realism
+from alpha_discovery_throughput.flash_dip_ladder import build_flash_dip_ladder_packets
+from alpha_discovery_throughput.packet import (
+    build_candidate_packet,
+    build_direct_report_from_packet,
+    daily_returns_from_samples,
+)
+from alpha_discovery_throughput.signal_manifest import build_signal_spec, validate_signal_manifest
+
+
+def _signal_spec(**extra):
+    return build_signal_spec(
+        candidate_id="candidate-x",
+        family_id="family-x",
+        hypothesis="funding plus orderflow residual alpha",
+        horizon={"bars": 12, "unit": "1m"},
+        inputs=["funding_rate", "ofi_10s", "btc_return"],
+        universe_ref={"source": "research.fnd2", "hash": "u"},
+        regime_ref={"source": "research.aeg_regime", "hash": "r"},
+        feature_schema={"version": "v1"},
+        cost_model_ref={"source": "demo_cost", "version": "v1"},
+        residualization={"method": "ols", "factors": ["btc_return"]},
+        failure_taxonomy=["cost_defeat", "beta_edge"],
+        hidden_oos_policy={"state_required": "sealed", "open_once": True},
+        extra=extra,
+    )
+
+
+def _samples(n: int = 64) -> list[dict]:
+    rows = []
+    for i in range(n):
+        regime = "chop" if i < n // 2 else "bear"
+        day = (date(2026, 3, 1) + timedelta(days=i)).isoformat()
+        net = 8.0 + (i % 3)
+        rows.append({
+            "sample_id": f"s{i}",
+            "sample_ts_utc": f"{day}T00:00:00Z",
+            "sample_date": day,
+            "symbol": "BTCUSDT",
+            "regime": regime,
+            "independence_bucket": f"{regime}:{i}",
+            "gross_bps": net + 2.0,
+            "cost_bps": 2.0,
+            "net_bps": net,
+            "is_oos": i % 2 == 0,
+        })
+    return rows
+
+
+def _pbo_candidates(n_days: int = 64) -> dict[str, dict[str, float]]:
+    return {
+        f"cell_{cell}": {
+            (date(2026, 3, 1) + timedelta(days=d)).isoformat(): 0.0001 * cell + d * 0.000001
+            for d in range(n_days)
+        }
+        for cell in range(12)
+    }
+
+
+def test_signal_manifest_uses_existing_validator_and_fails_future_data():
+    spec = _signal_spec()
+    assert validate_signal_manifest(spec)["ok"] is True
+
+    bad = dict(spec)
+    bad["pit_contract"] = {"point_in_time": True, "future_data_allowed": True}
+    bad.pop("spec_hash", None)
+    verdict = validate_signal_manifest(bad)
+    assert verdict["ok"] is False
+    assert verdict["reason"] == "pit_contract_future_data_allowed"
+
+
+def test_candidate_packet_feeds_existing_aeg_direct_rows_and_metrics():
+    samples = _samples()
+    packet = build_candidate_packet(
+        candidate_id="candidate-x",
+        strategy_family="listing_fade",
+        parameter_cell_id="v0",
+        selected_variant="v0",
+        sample_unit="event_window",
+        samples=samples,
+        annualization_factor=365,
+        k_trials=8,
+        daily_returns=daily_returns_from_samples(samples),
+        pbo_candidates=_pbo_candidates(),
+        signal_spec=_signal_spec(),
+    )
+    report, summary = build_direct_report_from_packet(packet, run_id="packet-run")
+    assert summary["sample_count"] == 64
+    assert report["candidate_id"] == "candidate-x"
+
+    rows, adapted = candidate_metrics_builder.build_candidate_metrics(
+        report,
+        run_id="metrics-run",
+        candidate_id="candidate-x",
+        strategy_family="listing_fade",
+        parameter_cell_id="v0",
+    )
+    assert adapted["metric_status_counts"] == {"PASS": 2}
+    assert {row["sample_unit"] for row in rows} == {"event_window"}
+
+
+def test_execution_spine_reuses_execution_realism_gate_and_fails_low_sample():
+    observations = [
+        {
+            "submitted": True,
+            "filled": True,
+            "adverse_selection_bps": 1.0 + (i % 3) * 0.1,
+            "latency_ms": 100 + i,
+            "participation_rate": 0.01,
+            "capacity_notional_usdt": 5000,
+            "slippage_bps": 1.0,
+        }
+        for i in range(40)
+    ]
+    payload = evaluate_execution_realism(
+        observations=observations,
+        candidate_id="candidate-x",
+        strategy_family="maker_arm",
+        parameter_cell_id="v0",
+        order_style="maker",
+        maker_fee_bps=2.0,
+        taker_fee_bps=5.5,
+    )
+    assert payload["status"] == "PASS"
+    assert payload["sample_count"] == 40
+
+    low_n = evaluate_execution_realism(
+        observations=observations[:4],
+        candidate_id="candidate-x",
+        strategy_family="maker_arm",
+        parameter_cell_id="v0",
+        order_style="maker",
+        maker_fee_bps=2.0,
+        taker_fee_bps=5.5,
+    )
+    assert low_n["status"] == "FAIL"
+    assert "sample_count_below_30" in low_n["reject_reasons"]
+
+
+def test_discovery_loop_waits_gate_b_watch_only_and_prioritizes_ready_chain():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "gate_b",
+            "gate_status": "WATCH_ONLY",
+            "sample_count": 0,
+            "artifacts_ready": False,
+        },
+        {
+            "arm_id": "funding_oi",
+            "gate_status": "READY",
+            "sample_count": 42,
+            "artifacts_ready": True,
+        },
+    ], now_utc=dt.datetime(2026, 6, 19, tzinfo=dt.timezone.utc))
+
+    assert plan["arms"][0]["arm_id"] == "funding_oi"
+    assert plan["arms"][0]["action"] == "READY_FOR_AEG_CHAIN"
+    assert next(row for row in plan["arms"] if row["arm_id"] == "gate_b")["action"] == "WAIT"
+    assert plan["policy"] == "read_only_recommendations_no_probe_or_trade_side_effect"
+
+
+def test_edge_snapshot_adapter_only_promotes_durable_non_bull_concrete_rows():
+    durable = {
+        "final_label": "durable-alpha candidate",
+        "strategy_family": "flash_dip_buy",
+        "symbol": "BTCUSDT",
+        "regime": "bear",
+        "net_bps": 7.5,
+        "n_independent": 35,
+        "psr_0": 0.97,
+        "dsr_k": 0.96,
+        "pbo": 0.20,
+        "reject_reasons": "[]",
+        "parameter_cell_id": "k15",
+    }
+    bull = {**durable, "symbol": "ETHUSDT", "regime": "bull"}
+    aggregate = {**durable, "symbol": "__AGGREGATE__"}
+    rejected = {**durable, "symbol": "SOLUSDT", "reject_reasons": json.dumps(["cost_wall"])}
+
+    assert row_is_live_grade(durable) is True
+    assert row_is_live_grade(bull) is False
+    snapshot = build_edge_snapshot(
+        [durable, bull, aggregate, rejected],
+        now_utc=dt.datetime(2026, 6, 19, tzinfo=dt.timezone.utc),
+    )
+    assert snapshot["_meta"]["n_cells"] == 1
+    assert snapshot["flash_dip_buy::BTCUSDT"]["runtime_bps"] == 7.5
+    assert "flash_dip_buy::ETHUSDT" not in snapshot
+    assert snapshot["_meta"]["updated_at"].startswith("2026-06-19T00:00:00")
+
+
+def test_flash_dip_ladder_builds_counterfactual_packets_not_promotion_proof():
+    rows = [
+        {
+            "symbol": "BTCUSDT",
+            "date": "2026-06-01",
+            "regime": "bear",
+            "prior_close": 100.0,
+            "forward_low": 84.0,
+            "exit_close": 95.0,
+            "is_oos": True,
+        },
+        {
+            "symbol": "ETHUSDT",
+            "date": "2026-06-02",
+            "regime": "chop",
+            "prior_close": 100.0,
+            "forward_low": 93.0,
+            "exit_close": 98.0,
+            "is_oos": False,
+        },
+    ]
+    packets, summary = build_flash_dip_ladder_packets(rows=rows, k_pcts=[5, 15], cost_bps=4.0)
+
+    assert len(packets) == 2
+    assert summary["promotion_blocker"] == "counterfactual_only_not_promotion_evidence"
+    k15 = next(packet for packet in packets if packet["parameter_cell_id"] == "k_15pct")
+    assert k15["evidence_tier"] == "counterfactual_replay"
+    assert k15["promotion_blocker"] == "counterfactual_only_not_promotion_evidence"
+    assert len(k15["samples"]) == 1
+    report, direct_summary = build_direct_report_from_packet(k15, run_id="flash-dip-ladder")
+    assert direct_summary["sample_count"] == 1
+    assert report["candidate_id"].endswith("k_15pct")
+
+
+def test_alpha_discovery_throughput_static_no_runtime_or_db_write_route():
+    pkg = Path(__file__).resolve().parents[1] / "alpha_discovery_throughput"
+    code = "\n".join(path.read_text(encoding="utf-8") for path in pkg.glob("*.py"))
+    forbidden = (
+        "psycopg2",
+        "asyncpg",
+        "INSERT INTO",
+        "UPDATE ",
+        "DELETE FROM",
+        "OPENCLAW_ALLOW_MAINNET",
+        "execution_authority",
+        "authorization.json",
+    )
+    for needle in forbidden:
+        assert needle not in code
