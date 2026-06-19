@@ -11,6 +11,12 @@ YYYY-MM-DD HH:MM TZ
 - where to look next
 ```
 
+2026-06-19 02:56 CEST
+- refreshed PM-local review evidence for `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` without archiving the row
+- evidence: source review confirms D2 uses `ConvergeExchangeZero` instead of `CloseSymbol`, dispatch-site audit uses `dispatched-not-confirmed`, handler-confirmed wording is reserved for handler-side facts, and convergence removes local drift plus clears pending close without synthetic PnL/Kelly pollution
+- checks: payload semantics tests 2, orphan_handler suite 19, loop-break regression 1, ghost suite 11, and `cargo clippy -p openclaw_engine --lib -- -D warnings` passed from `srv/rust`; Linux read-only DB count for `reconcile_ghost_converge` remained `0|0`
+- boundary: docs/report checkpoint plus local focused tests/read-only count only; no full CI, Linux cargo, deploy/rebuild/restart, DB write, Bybit private call, auth/risk/order/trading mutation; formal E2/E4 review and production event proof remain open
+
 2026-06-19 02:45 CEST
 - refreshed PM-local review evidence for `P2-RECONCILER-GET-POSITIONS-PAGINATION` without archiving the row
 - evidence: source review confirms full-scan pagination, same-cursor fail-closed, client-side invariant classification, exchange-stop sync mapping, and ghost point-query gate; focused Rust checks from `srv/rust` passed (position_manager 19, dispatch invariant 1, exchange-stop invariant 1, false-ghost 1, ghost suite 11, clippy)

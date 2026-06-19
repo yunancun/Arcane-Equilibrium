@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-19 TODO v221 D2 Audit Semantics Focused Review
+
+- Refreshed PM-local evidence for `P3-110017-D2-AUDIT-REMOVED-SEMANTICS` without closing the row.
+- Source review confirms D2 dispatch uses `PipelineCommand::ConvergeExchangeZero` rather than `CloseSymbol`, dispatch-site audit rows use `confirmed=false` / `dispatched-not-confirmed`, handler-confirmed wording is reserved for handler-side fact, and `converge_exchange_zero_close` removes local drift plus clears pending close without synthetic PnL/Kelly pollution.
+- Focused checks from `srv/rust` passed: payload semantics tests 2, orphan_handler suite 19, loop-break regression 1, ghost suite 11, and `cargo clippy -p openclaw_engine --lib -- -D warnings`.
+- Linux read-only DB count still showed `reconcile_ghost_converge` total=0 / semantics_rows=0, so production event proof remains open. Boundary: no full CI/Linux cargo/deploy/rebuild/restart/DB write/Bybit private call/auth/risk/order/trading mutation.
+
 ## 2026-06-19 TODO v220 Reconciler Pagination Focused Review
 
 - Refreshed PM-local evidence for `P2-RECONCILER-GET-POSITIONS-PAGINATION` without closing the row.
