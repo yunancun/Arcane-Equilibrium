@@ -30,6 +30,7 @@
 - Alpha discovery runtime now treats stale `flash_dip_death_rate.log` as `SOURCE_FAILURE/stale_artifact` instead of active FlashDip capture.
 - This closes the same false-active class as the MM verdict stale guard, but for the current non-MM strategy path.
 - Focused checks passed: `test_alpha_discovery_throughput.py` 11 and runtime runner py_compile.
+- Linux selective deploy + artifact-only killboard smoke confirmed current status remains fresh (`age_seconds=71986.8 < 36h`), source_ok=true, sample_count=0.
 - Boundary: source/test/docs only at checkpoint; no engine/API restart, no PG write, no Bybit private/signed/trading call, no runtime/auth/risk/order mutation.
 
 ## 2026-06-20 MM Verdict Cost-Wall Bridge
