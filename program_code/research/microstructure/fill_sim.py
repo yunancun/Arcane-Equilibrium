@@ -1618,6 +1618,7 @@ def _low_friction_train_confirmed_gross_scorecard(rows: list[dict]) -> dict:
             "name": row.get("name"),
             "condition": row.get("condition"),
             "feature": row.get("feature"),
+            "candidate_shape": row.get("candidate_shape"),
             "threshold_source": row.get("threshold_source"),
             "train_edge_before_fees_bps": train_edge,
             "train_net_bps": train.get("net_bps"),
@@ -1811,6 +1812,7 @@ def fill_sim_low_friction_signal_scorecard(
         "feature_family": "recent_flow_l1_churn",
         "split": None,
         "candidates_evaluated": 0,
+        "interaction_candidates_evaluated": 0,
         "best_train_candidate": None,
         "best_holdout_current_fee_candidate": None,
         "best_holdout_gross_candidate": None,
@@ -1938,6 +1940,36 @@ def fill_sim_low_friction_signal_scorecard(
                 for label in labels:
                     combo_specs.append(("quoted_half_spread_bps", spread_label, col, label))
 
+    interaction_specs = []
+    for spread_label in ("train_p75", "train_p90"):
+        for suffix in ("10s", "30s"):
+            quiet_cols = (
+                f"recent_trade_count_{suffix}",
+                f"recent_l1_update_count_{suffix}",
+                f"recent_l1_update_intensity_{suffix}",
+            )
+            favorable_cols = (
+                f"side_touch_size_delta_frac_{suffix}",
+                f"side_recent_trade_imbalance_{suffix}",
+                f"spread_bps_delta_{suffix}",
+            )
+            for quiet_col in quiet_cols:
+                if quiet_col not in low_feature_cols:
+                    continue
+                for quiet_label in ("train_p10", "train_p25"):
+                    for favorable_col in favorable_cols:
+                        if favorable_col not in low_feature_cols:
+                            continue
+                        for favorable_label in ("train_p75", "train_p90"):
+                            interaction_specs.append((
+                                "quoted_half_spread_bps",
+                                spread_label,
+                                quiet_col,
+                                quiet_label,
+                                favorable_col,
+                                favorable_label,
+                            ))
+
     for a_col, a_label, b_col, b_label in combo_specs:
         a = thresholds.get((a_col, a_label))
         b = thresholds.get((b_col, b_label))
@@ -1955,6 +1987,31 @@ def fill_sim_low_friction_signal_scorecard(
                 "components": [
                     {"feature": a_col, "operator": a_op, "quantile": a_label, "threshold": a_thr},
                     {"feature": b_col, "operator": b_op, "quantile": b_label, "threshold": b_thr},
+                ],
+            },
+        )
+
+    for a_col, a_label, b_col, b_label, c_col, c_label in interaction_specs:
+        a = thresholds.get((a_col, a_label))
+        b = thresholds.get((b_col, b_label))
+        c = thresholds.get((c_col, c_label))
+        if a is None or b is None or c is None:
+            continue
+        a_mask, a_thr, a_op = a
+        b_mask, b_thr, b_op = b
+        c_mask, c_thr, c_op = c
+        add_candidate(
+            f"{a_col}_{a_label}_and_{b_col}_{b_label}_and_{c_col}_{c_label}",
+            f"{a_col} {a_label} AND {b_col} {b_label} AND {c_col} {c_label}",
+            a_mask & b_mask & c_mask,
+            {
+                "feature": "low_friction_interaction",
+                "candidate_shape": "spread_quiet_touch_interaction_v1",
+                "threshold_source": "train_only",
+                "components": [
+                    {"feature": a_col, "operator": a_op, "quantile": a_label, "threshold": a_thr},
+                    {"feature": b_col, "operator": b_op, "quantile": b_label, "threshold": b_thr},
+                    {"feature": c_col, "operator": c_op, "quantile": c_label, "threshold": c_thr},
                 ],
             },
         )
@@ -1987,6 +2044,7 @@ def fill_sim_low_friction_signal_scorecard(
             "name": name,
             "condition": condition,
             "feature": meta.get("feature"),
+            "candidate_shape": meta.get("candidate_shape"),
             "threshold_source": meta.get("threshold_source", "literal"),
             "train": train_cell,
             "holdout": holdout_cell,
@@ -2046,6 +2104,9 @@ def fill_sim_low_friction_signal_scorecard(
     base.update({
         "status": status,
         "candidates_evaluated": len(ranked),
+        "interaction_candidates_evaluated": len([
+            r for r in ranked if r.get("feature") == "low_friction_interaction"
+        ]),
         "best_train_candidate": ranked[0] if ranked else None,
         "best_holdout_current_fee_candidate": holdout_confirmed[0] if holdout_confirmed else None,
         "best_holdout_gross_candidate": holdout_ranked[0] if holdout_ranked else None,

@@ -702,6 +702,64 @@ def test_low_friction_signal_scorecard_ranks_train_confirmed_gross_below_fee_wal
     assert best["holdout_sample_gated_positive_gross"] is True
 
 
+def test_low_friction_interaction_finds_train_confirmed_current_fee_cell():
+    rows = []
+    for _half in range(2):
+        for spread, count, touch, half_spread in (
+            (6.0, 0.0, 1.0, 6.0),   # 只有三條件交集能過 fee
+            (6.0, 0.0, -1.0, 2.0),  # spread + quiet 仍低於 fee
+            (6.0, 10.0, 1.0, 2.0),  # spread + touch 仍低於 fee
+            (1.0, 10.0, -1.0, 0.5),
+        ):
+            for _ in range(32):
+                rows.append(
+                    {
+                        "symbol": "ABCUSDT",
+                        "side": "bid",
+                        "outcome": "fill",
+                        "quoted_half_spread_bps": spread,
+                        "side_recent_trade_imbalance_10s": touch,
+                        "recent_trade_count_10s": count,
+                        "recent_l1_update_count_10s": count,
+                        "recent_l1_update_intensity_10s": count / 10.0,
+                        "side_touch_size_delta_frac_10s": touch,
+                        "spread_bps_delta_10s": touch,
+                        "half_spread_bps": half_spread,
+                        "adverse_sel_bps@15": 1.0,
+                    }
+                )
+    trials = _conditional_trials(rows)
+    for col in (
+        "side_recent_trade_imbalance_10s",
+        "recent_trade_count_10s",
+        "recent_l1_update_count_10s",
+        "recent_l1_update_intensity_10s",
+        "side_touch_size_delta_frac_10s",
+        "spread_bps_delta_10s",
+    ):
+        trials[col] = [row[col] for row in rows]
+    adverse = _conditional_adverse(trials, rows)
+
+    scorecard = fill_sim_low_friction_signal_scorecard(
+        trials,
+        adverse,
+        horizons=(15,),
+        span_hours=1.0,
+        primary_horizon_s=15,
+    )
+
+    assert scorecard["interaction_candidates_evaluated"] > 0
+    train_confirmed = scorecard["train_confirmed_gross_scorecard"]
+    assert train_confirmed["status"] == (
+        "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_CLEARS_CURRENT_FEE"
+    )
+    best = scorecard["best_train_confirmed_gross_candidate"]
+    assert best["feature"] == "low_friction_interaction"
+    assert best["candidate_shape"] == "spread_quiet_touch_interaction_v1"
+    assert best["min_train_holdout_gross_bps"] >= 4.0
+    assert train_confirmed["current_fee_confirmed_count"] >= 1
+
+
 def test_maker_fee_sensitivity_finds_lower_fee_sample_gated_path():
     report = {
         "edge_scorecard": {
