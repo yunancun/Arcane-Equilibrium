@@ -80,6 +80,9 @@ pub struct PendingOrder {
     /// （`"market"` / `"limit"`）。逾時清理需靠此區分 Market 與 PostOnly —
     /// 掛中的 PostOnly 應以 orderLinkId 取消，而非當成過期追蹤記錄刪除。
     pub order_type: String,
+    /// ORDER-AUDIT-PROJECTION-1（2026-06-20）：鏡射 OrderDispatchRequest.limit_price，
+    /// 讓 Working order audit row 可直接保存實際 Limit/PostOnly 委託價。
+    pub limit_price: Option<f64>,
     /// EDGE-P2-3 Phase 1B-3.1: mirrors OrderDispatchRequest.time_in_force.
     /// `None` for legacy Market; `Some(PostOnly)` marks a resting maker order
     /// the sweep can cancel + rebuild on timeout.

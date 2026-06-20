@@ -326,6 +326,19 @@ pub(super) fn handle_pending_registration(
             other => other.to_string(),
         };
         let time_in_force_pg = po.time_in_force.map(|tif| tif.as_str().to_string());
+        let order_context_id = if po.context_id.is_empty() {
+            None
+        } else {
+            Some(po.context_id.clone())
+        };
+        let details = serde_json::json!({
+            "limit_price": po.limit_price,
+            "maker_timeout_ms": po.maker_timeout_ms,
+            "reference_price": po.reference_price,
+            "reference_ts_ms": po.reference_ts_ms,
+            "reference_source": po.reference_source,
+            "is_close": po.is_close,
+        });
         if let Some(tx) = order_tx {
             let em = pipeline.effective_engine_mode().to_string();
             let _ = crate::database::try_send_trading_msg(
@@ -342,9 +355,12 @@ pub(super) fn handle_pending_registration(
                     order_type: order_type_pg,
                     time_in_force: time_in_force_pg,
                     qty: po.qty,
+                    price: po.limit_price,
+                    context_id: order_context_id,
                     strategy_name: po.strategy.clone(),
                     is_close: po.is_close,
                     engine_mode: em.clone(),
+                    details: Some(details),
                     // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：寫入
                     // trading.orders.intent_id，恢復 intents → orders JOIN。
                     // entry path 為 Some（step_4_5_dispatch 注入）；close /
@@ -440,6 +456,9 @@ pub(super) fn handle_pending_registration(
                 is_close,
                 context_id: context_id.clone(),
                 order_type: order_type.clone(),
+                limit_price: close_maker_audit
+                    .as_ref()
+                    .and_then(|audit| audit.initial_limit_price),
                 time_in_force,
                 maker_timeout_ms,
                 close_maker_audit: close_maker_audit.clone(),
@@ -1212,6 +1231,7 @@ mod tests {
             is_close: true,
             context_id: "ctx-close-maker".to_string(),
             order_type: "limit".to_string(),
+            limit_price: Some(50_000.2),
             time_in_force: Some(TimeInForce::PostOnly),
             maker_timeout_ms: Some(30_000),
             close_maker_audit: Some(crate::tick_pipeline::CloseMakerFillAudit {

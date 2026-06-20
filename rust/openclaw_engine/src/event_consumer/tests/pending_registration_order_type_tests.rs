@@ -44,15 +44,26 @@ fn make_loop_state() -> super::super::loop_handlers::LoopState {
 /// (caller must have dispatched something).
 /// 抽乾 channel，回傳第一個 `TradingMsg::Order` 的 `order_type` + `time_in_force`。
 /// 若無 Order msg 直接 panic（呼叫方應確認已派發）。
-fn first_order_shape(rx: &mut mpsc::Receiver<TradingMsg>) -> (String, Option<String>) {
+fn first_order_shape(
+    rx: &mut mpsc::Receiver<TradingMsg>,
+) -> (
+    String,
+    Option<String>,
+    Option<f64>,
+    Option<String>,
+    Option<serde_json::Value>,
+) {
     while let Ok(msg) = rx.try_recv() {
         if let TradingMsg::Order {
             order_type,
             time_in_force,
+            price,
+            context_id,
+            details,
             ..
         } = msg
         {
-            return (order_type, time_in_force);
+            return (order_type, time_in_force, price, context_id, details);
         }
     }
     panic!("no TradingMsg::Order observed on channel / channel 上未見 Order msg");
@@ -105,10 +116,15 @@ fn baseline_pending_order(order_type: &str, tif: Option<TimeInForce>) -> Pending
         sent_ts_ms: 1_700_000_000_000,
         cum_filled_qty: 0.0,
         is_close: false,
-        // FILL-CONTEXT-LINKAGE-1 placeholder; Order audit row doesn't read this.
-        // FILL-CONTEXT-LINKAGE-1 占位；Order audit row 不讀取此欄位。
+        // FILL-CONTEXT-LINKAGE-1 placeholder; Order audit row now projects this.
+        // FILL-CONTEXT-LINKAGE-1 占位；Order audit row 會投影此欄位。
         context_id: "ctx-test".into(),
         order_type: order_type.to_string(),
+        limit_price: if order_type.eq_ignore_ascii_case("limit") {
+            Some(49_990.0)
+        } else {
+            None
+        },
         time_in_force: tif,
         maker_timeout_ms: tif.and(Some(45_000)),
         close_maker_audit: None,
@@ -138,6 +154,7 @@ fn close_maker_pending_order(link_id: &str) -> PendingOrder {
     po.strategy = "strategy_close:grid_close_long".to_string();
     po.is_close = true;
     po.context_id = "ctx-close-maker".to_string();
+    po.limit_price = Some(50_000.2);
     po.close_maker_audit = Some(CloseMakerFillAudit {
         initial_limit_price: Some(50_000.2),
         eligible_reason: "grid_close_long".to_string(),
@@ -216,13 +233,18 @@ fn test_handle_pending_registration_limit_postonly_emits_limit_audit_row() {
         Some(&tx),
     );
 
-    let (order_type, time_in_force) = first_order_shape(&mut rx);
+    let (order_type, time_in_force, price, context_id, details) = first_order_shape(&mut rx);
     assert_eq!(
         order_type, "Limit",
         "intent.order_type=limit + TIF=PostOnly must emit \"Limit\" audit row \
          (FIX-G7-09B regression — pre-fix hardcoded \"Market\" masked maker submits)"
     );
     assert_eq!(time_in_force.as_deref(), Some("PostOnly"));
+    assert_eq!(price, Some(49_990.0));
+    assert_eq!(context_id.as_deref(), Some("ctx-test"));
+    let details = details.expect("order audit details");
+    assert_eq!(details["limit_price"].as_f64(), Some(49_990.0));
+    assert_eq!(details["maker_timeout_ms"].as_u64(), Some(45_000));
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -243,13 +265,16 @@ fn test_handle_pending_registration_market_emits_market_audit_row() {
         Some(&tx),
     );
 
-    let (order_type, time_in_force) = first_order_shape(&mut rx);
+    let (order_type, time_in_force, price, context_id, details) = first_order_shape(&mut rx);
     assert_eq!(
         order_type, "Market",
         "intent.order_type=market must emit \"Market\" audit row \
          (legacy/baseline path — fix must not regress Market dispatches)"
     );
     assert_eq!(time_in_force, None);
+    assert_eq!(price, None);
+    assert_eq!(context_id.as_deref(), Some("ctx-test"));
+    assert!(details.is_some());
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -275,9 +300,10 @@ fn test_handle_pending_registration_limit_with_gtc_emits_limit_audit_row() {
         Some(&tx),
     );
 
-    let (order_type, time_in_force) = first_order_shape(&mut rx);
+    let (order_type, time_in_force, price, _, _) = first_order_shape(&mut rx);
     assert_eq!(order_type, "Limit");
     assert_eq!(time_in_force.as_deref(), Some("GTC"));
+    assert_eq!(price, Some(49_990.0));
 }
 
 #[test]
