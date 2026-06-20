@@ -42,7 +42,11 @@ Updated `helper_scripts/research/alpha_discovery_throughput/runtime_runner.py` s
 - `python3 -m py_compile helper_scripts/research/alpha_discovery_throughput/runtime_runner.py` PASS
 - `PYTHONPATH=helper_scripts/research python3 -m pytest -q helper_scripts/research/tests/test_alpha_discovery_throughput.py` = 13 passed
 - Linux isolated smoke: piped cron script to `trade-core` with `OPENCLAW_DATA_DIR=/tmp/openclaw_flash_touch_smoke_20260620T012509Z`; it wrote only isolated `/tmp` logs/status and produced the evidence above.
+- Linux selective deploy: restored the touched helper/runtime/docs files from `origin/main` to `trade-core`, preserving the existing selective-deploy dirty checkout shape.
+- Linux focused checks after restore: cron `bash -n` PASS, runtime runner `py_compile` PASS, alpha discovery focused tests 13 passed.
+- Runtime activation: installed hourly user cron `17 * * * * ... flash_dip_touchability_cron.sh`, then manually ran it once against production `/tmp/openclaw`; status line at `2026-06-20T01:28:59Z` matched the evidence above.
+- Alpha discovery activation check: manual `alpha_discovery_throughput_cron.sh` refresh at `2026-06-20T01:29:10Z` reported FlashDip `gate_status=CAPTURING_NO_TOUCH`, action `RUN_READ_ONLY_CAPTURE`, and fresh touchability `age_seconds=11.306709`.
 
 ## Boundary
 
-No engine/API restart, no rebuild, no strategy flag change, no Bybit private/signed/trading call, no credential/auth/risk/order mutation, no PG table write/schema migration. This is not promotion proof; it is a repeatable no-touch diagnosis needed before retuning K/ladder behavior.
+Selective helper/docs deploy + user crontab + local `/tmp/openclaw` log/artifact writes only. No engine/API restart, no rebuild, no strategy flag change, no Bybit private/signed/trading call, no credential/auth/risk/order mutation, no PG table write/schema migration. This is not promotion proof; it is a repeatable no-touch diagnosis needed before retuning K/ladder behavior.

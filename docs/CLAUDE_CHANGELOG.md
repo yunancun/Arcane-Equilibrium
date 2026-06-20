@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-20（TODO v240 FlashDip touchability monitor checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-20（TODO v241 FlashDip touchability runtime activation checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v241 增量（2026-06-20 FlashDip touchability runtime activation）**：Selective Linux deploy of v240 helper/runtime docs from `origin/main` to `trade-core` touched only the FlashDip touchability files, then installed hourly user cron `17 * * * * ... flash_dip_touchability_cron.sh`. Linux focused checks passed：cron `bash -n`, runtime runner `py_compile`, alpha discovery focused tests 13 passed. Manual production run wrote `/tmp/openclaw/logs/flash_dip_touchability.log` with `true_order_count=18`, `touched_count=0`, `median_closest_miss_bps=1595.84`, `strategy_mismatch_count=1`; manual alpha discovery cron refresh at `2026-06-20T01:29:10Z` showed FlashDip arm `gate_status=CAPTURING_NO_TOUCH`, action `RUN_READ_ONLY_CAPTURE`, fresh touchability age 11s. Boundary：selective helper/docs deploy + user crontab + `/tmp/openclaw` local log/artifact writes only；no engine/API restart, no rebuild, no PG table write/schema migration, no Bybit private/signed/trading call, no credential/auth/risk/order/trading mutation；not promotion proof.
 
 **v240 增量（2026-06-20 FlashDip touchability monitor checkpoint）**：Added read-only `helper_scripts/cron/flash_dip_touchability_cron.sh` to measure whether recent `flash_dip_buy` open orders touched their intended `trading.intents.details.limit_price` before maker timeout, using `market.klines` 1m lows and excluding order-label/intent-strategy mismatches. `runtime_runner.py` now reads `logs/flash_dip_touchability.log`; when FlashDip death-rate has zero closed slots but fresh touchability shows true orders and zero touches, the arm reports `CAPTURING_NO_TOUCH` instead of plain capture. Linux isolated smoke over 72h produced `order_labeled_count=19`, `true_order_count=18`, `strategy_mismatch_count=1`, `touched_count=0`, `touch_rate_pct=0.0`, median closest miss `1595.84bp`, and identified the lone mismatch as POLUSDT/grid intent. Verification：cron `bash -n` PASS, runtime runner `py_compile` PASS, alpha discovery focused tests 13 passed, Linux isolated `/tmp/openclaw_flash_touch_smoke_20260620T012509Z` read-only smoke PASS. Boundary：source/test/docs + isolated `/tmp` smoke only；no engine/API restart, no rebuild, no PG table write/schema migration, no Bybit private/signed/trading call, no credential/auth/risk/order/trading mutation；not promotion proof.
 

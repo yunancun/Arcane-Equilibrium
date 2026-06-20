@@ -29,8 +29,8 @@
 
 - Added a read-only FlashDip touchability monitor that joins `trading.orders` to `trading.intents` and checks 1m lows from order_ts to maker timeout against `details.limit_price`.
 - Linux isolated smoke showed `order_labeled_count=19`, `true_order_count=18`, `strategy_mismatch_count=1`, `touched_count=0`, `touch_rate_pct=0.0`, median closest miss `1595.84bp`.
-- Alpha discovery runtime now reports fresh no-touch evidence as `CAPTURING_NO_TOUCH` when FlashDip death-rate still has zero closed slots.
-- Boundary: source/test/docs + Linux isolated `/tmp` smoke only; no engine/API restart, no PG write/schema migration, no Bybit private/signed/trading call, no auth/risk/order mutation.
+- Selective Linux deploy installed hourly cron at minute 17 and manual production run wrote `/tmp/openclaw/logs/flash_dip_touchability.log`; alpha discovery manual refresh showed FlashDip `CAPTURING_NO_TOUCH`.
+- Boundary: source/test/docs + selective helper/docs deploy + user crontab + local `/tmp/openclaw` logs/artifacts only; no engine/API restart, no PG write/schema migration, no Bybit private/signed/trading call, no auth/risk/order mutation.
 
 ## 2026-06-20 Order Audit Projection Fix
 

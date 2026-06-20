@@ -10,6 +10,8 @@ FlashDip is not currently failing because the intended limit is missing. The lat
 - 0/18 true FlashDip orders touched their intended limit
 - median closest miss was `1595.84bp`
 
-Implemented a read-only cron source `helper_scripts/cron/flash_dip_touchability_cron.sh` and wired alpha discovery runtime detail so FlashDip can show `CAPTURING_NO_TOUCH` when death-rate remains zero because no order touched.
+Implemented and activated a read-only cron source `helper_scripts/cron/flash_dip_touchability_cron.sh`. Linux hourly cron is installed at minute 17, and a manual production run wrote `/tmp/openclaw/logs/flash_dip_touchability.log`.
 
-Boundary: no deploy/restart in this source checkpoint, no PG write, no Bybit private/signed/trading call, no auth/risk/order mutation. This is diagnostic evidence, not a promotion signal.
+Alpha discovery was refreshed once and now shows FlashDip `CAPTURING_NO_TOUCH`.
+
+Boundary: selective helper/docs deploy + user crontab + local `/tmp/openclaw` logs only; no engine/API restart, no PG write, no Bybit private/signed/trading call, no auth/risk/order mutation. This is diagnostic evidence, not a promotion signal.
