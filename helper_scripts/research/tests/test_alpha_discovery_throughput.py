@@ -889,6 +889,8 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
                 "status": "PERSISTENT_PRE_GATE_WATCHLIST",
                 "recurring_cell_count": 1,
                 "persistent_cell_count": 1,
+                "floor_qualified_recurring_cell_count": 0,
+                "floor_qualified_persistent_cell_count": 0,
                 "top_cells": [{
                     "cell_key": "event_reg|BTCUSDT|240",
                     "bucket": "event_reg",
@@ -969,6 +971,93 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
     blocker = plan["profitability_blocker_scorecard"]["arms"][0]
     assert blocker["pre_gate_watchlist_persistence_status"] == "PERSISTENT_PRE_GATE_WATCHLIST"
     assert blocker["best_persistent_pre_gate_cell"]["cell_key"] == "event_reg|BTCUSDT|240"
+    assert blocker["sample_gate_recheck_status"] == "PERSISTENT_PRE_GATE_WAIT_SAMPLE"
+    assert blocker["next_trigger"] == "continue_polymarket_capture_until_sample_gate_eta"
+
+
+def test_polymarket_leadlag_near_gate_recheck_scorecard_routes_to_eta_recompute(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_polymarket_leadlag_latest(data, {
+        "created_at_utc": "2026-06-20T18:47:00+00:00",
+        "counts": {
+            "max_overlap_adjusted_ic_points": 25,
+            "min_samples_remaining_to_gate": 5,
+            "sample_gate_clock": {
+                "status": "WAITING_FOR_SAMPLE",
+                "min_points": 30,
+                "max_overlap_adjusted_sample_floor": 25,
+                "min_samples_remaining_to_gate": 5,
+                "fastest_gate_ready_utc": "2026-06-20T19:52:01+00:00",
+            },
+            "pre_gate_watchlist_persistence_scorecard": {
+                "status": "PERSISTENT_PRE_GATE_WATCHLIST",
+                "recurring_cell_count": 4,
+                "persistent_cell_count": 3,
+                "floor_qualified_recurring_cell_count": 3,
+                "floor_qualified_persistent_cell_count": 2,
+                "top_cells": [{
+                    "cell_key": "price_target|SOLUSDT|15",
+                    "bucket": "price_target",
+                    "symbol": "SOLUSDT",
+                    "horizon_minutes": 15,
+                    "current_sample_floor": 25,
+                    "sample_gap_to_min_points": 5,
+                    "current_consecutive_reports": 4,
+                    "presence_count": 4,
+                }],
+            },
+        },
+        "verdict": {
+            "status": "INSUFFICIENT_SAMPLE",
+            "reason": "max overlap-adjusted IC points 25 below min_points 30",
+            "candidate_count": 0,
+            "pre_gate_hac_watchlist_count": 5,
+            "pre_gate_watchlist_persistence_status": "PERSISTENT_PRE_GATE_WATCHLIST",
+            "pre_gate_watchlist_recurring_cell_count": 4,
+            "pre_gate_watchlist_persistent_cell_count": 3,
+            "pre_gate_watchlist_floor_qualified_recurring_cell_count": 3,
+            "pre_gate_watchlist_floor_qualified_persistent_cell_count": 2,
+            "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
+        },
+        "pre_gate_hac_watchlist": [{
+            "bucket": "price_target",
+            "symbol": "SOLUSDT",
+            "horizon_minutes": 15,
+            "overlap_adjusted_sample_floor": 25,
+            "sample_gap_to_min_points": 5,
+            "t_stat_hac": 6.5,
+            "bh_q_value_hac_approx": 0.000001,
+            "gate_blocker": "sample_floor_below_min_points",
+        }],
+        "ic_results": [{
+            "bucket": "price_target",
+            "symbol": "SOLUSDT",
+            "horizon_minutes": 15,
+            "n_points": 25,
+            "overlap_adjusted_sample_floor": 25,
+            "ic_pearson": 0.21,
+            "t_stat": 6.5,
+        }],
+    })
+
+    arm = collect_polymarket_leadlag_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 18, 54, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan([arm], now_utc=dt.datetime(2026, 6, 20, 18, 54, tzinfo=dt.timezone.utc))
+
+    recheck = arm["detail"]["sample_gate_recheck_scorecard"]
+    assert recheck["status"] == "PERSISTENT_PRE_GATE_NEAR_SAMPLE_GATE_WAIT_ETA"
+    assert recheck["recheck_actionable"] is False
+    assert recheck["floor_qualified_persistent_cell_count"] == 2
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["sample_gate_recheck_status"] == (
+        "PERSISTENT_PRE_GATE_NEAR_SAMPLE_GATE_WAIT_ETA"
+    )
+    assert blocker["next_trigger"] == (
+        "rerun_polymarket_leadlag_ic_after_sample_gate_eta_then_alpha_discovery"
+    )
+    assert blocker["sample_gate_recheck_scorecard"]["min_samples_remaining_to_gate"] == 5
 
 
 def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
