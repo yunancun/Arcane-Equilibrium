@@ -344,6 +344,13 @@ def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
         "median_ref_to_limit_bps": 1600.0,
         "median_closest_miss_bps": 1500.0,
         "max_closest_miss_bps": 1762.7,
+        "current_k_pct": 15.0,
+        "deepest_candidate_k_with_touch_pct": 6.0,
+        "k_ladder": [
+            {"k_pct": 2.0, "true_order_count": 18, "touched_count": 4, "touch_rate_pct": 22.2222},
+            {"k_pct": 6.0, "true_order_count": 18, "touched_count": 1, "touch_rate_pct": 5.5556},
+            {"k_pct": 15.0, "true_order_count": 18, "touched_count": 0, "touch_rate_pct": 0.0},
+        ],
     }) + "\n", encoding="utf-8")
 
     arm = collect_flash_dip_arm(
@@ -357,6 +364,9 @@ def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
     assert arm["artifacts_ready"] is False
     assert arm["detail"]["touchability"]["true_order_count"] == 18
     assert arm["detail"]["touchability"]["strategy_mismatch_count"] == 1
+    assert arm["detail"]["touchability"]["current_k_pct"] == 15.0
+    assert arm["detail"]["touchability"]["deepest_candidate_k_with_touch_pct"] == 6.0
+    assert arm["detail"]["touchability"]["k_ladder"][0]["k_pct"] == 2.0
     assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
     assert plan["arms"][0]["reason"] == "sample_count_below_gate"
 

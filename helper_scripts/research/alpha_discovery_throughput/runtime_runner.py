@@ -222,6 +222,11 @@ def collect_flash_dip_arm(
             "median_ref_to_limit_bps": touchability.get("median_ref_to_limit_bps"),
             "median_closest_miss_bps": touchability.get("median_closest_miss_bps"),
             "max_closest_miss_bps": touchability.get("max_closest_miss_bps"),
+            "current_k_pct": touchability.get("current_k_pct"),
+            "deepest_candidate_k_with_touch_pct": touchability.get(
+                "deepest_candidate_k_with_touch_pct"
+            ),
+            "k_ladder": touchability.get("k_ladder"),
         }
 
     path = data_dir / "logs" / "flash_dip_death_rate.log"
