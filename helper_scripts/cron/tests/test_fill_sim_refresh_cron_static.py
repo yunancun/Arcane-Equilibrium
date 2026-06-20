@@ -149,6 +149,7 @@ def test_mm_verdict_surfaces_cost_wall_fields() -> None:
     assert "sample_gated_cell_count" in src
     assert "best_sample_gated_current_fee_cell" in src
     assert "best_sample_gated_gross_cell" in src
+    assert "top_sample_gated_gross_cells" in src
     assert "edge_scorecard" in src
     assert "horizon_scorecard" in src
     assert "conditional_feature_scorecard" in src

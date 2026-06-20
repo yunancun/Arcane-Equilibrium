@@ -1065,3 +1065,8 @@
 
 - v290 adds `mm_cost_wall_escape_v1` to alpha-discovery MM blockers. Current fee round trip requires 4.0bp gross edge; best sample-gated gross edge is 2.27bp, gap 1.73bp, multiple 1.7621.
 - Latest alpha sha256 `7a9f0e5005b4906ecbb6db3e4775d2cb2769654f5eac3310b4bdb8438bcff6bb` keeps `engineering_actionable_count=1`; lower-fee path remains scale/capital gated, so next trigger is `search_new_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip`.
+
+## 2026-06-20 MM gross-edge near-miss ranking
+
+- v291 adds `top_sample_gated_gross_cells` to MM gross-edge decomposition and alpha-discovery escape scorecard. Latest alpha sha256 `4dbbb4e964b1077f2b901a7d651b06c59d4cc3622c49b132e47b6b4f511c9583` lists top near misses: `LABUSDT` 2.27bp, `ADAUSDT` walk-forward holdout 2.002bp, quoted-half-spread train_p90 1.565bp.
+- Current-fee threshold remains 4.0bp, so this is routing evidence for new low-friction signal search, not promotion proof or same-family retune authority.

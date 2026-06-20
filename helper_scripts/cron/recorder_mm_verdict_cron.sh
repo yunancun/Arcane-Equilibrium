@@ -609,6 +609,11 @@ def _mm_gross_edge_cost_decomposition(fillsim, *, h_primary, min_fills):
         max(gross_positive, key=lambda cell: _flt_key(cell.get("edge_before_fees_bps")))
         if gross_positive else None
     )
+    top_gross_cells = sorted(
+        gross_positive,
+        key=lambda cell: _flt_key(cell.get("edge_before_fees_bps")),
+        reverse=True,
+    )[:10]
     walk_train_gross = [
         row for row in walk_rows
         if row.get("train")
@@ -681,6 +686,7 @@ def _mm_gross_edge_cost_decomposition(fillsim, *, h_primary, min_fills):
         "current_fee_positive_sample_gated_cell_count": len(current_fee_positive),
         "best_sample_gated_current_fee_cell": best_current_fee,
         "best_sample_gated_gross_cell": best_gross,
+        "top_sample_gated_gross_cells": top_gross_cells,
         "best_sample_gated_gross_edge_bps": (
             best_gross.get("edge_before_fees_bps") if best_gross else None
         ),
