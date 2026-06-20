@@ -12,6 +12,7 @@ MODULE_NOTE
     - fill rate（NO-FILL=機會成本，計入分母）
     - fill-conditional adverse selection（beta-residual post-fill mid 移動，5/15/30s）
     - NET edge（bps/fill）= half_spread_captured − adverse_selection − 2×maker_fee
+    - cost wall：打平所需 fee/rebate/spread 條件（break-even fee、fee shortfall、required spread）
     - naive（兩側都掛）vs informed-skip（信號強烈不利該側就不掛）對照，比較 NET / quoting-hour
   確認的 beta-clean 信號（OFI@10s +0.031、BTC→alt 5s lead +0.077）僅作 skip filter（避開被
   逆選),非 profit source。
@@ -50,6 +51,7 @@ from . import core, data_loader
 
 MAKER_FEE_BPS = 2.0     # per side（對齊 mm_sizing_run.MAKER_FEE_BPS，無 rebate）
 TAKER_FEE_BPS = 5.5     # per side（taker-exit 變體用）
+MAKER_FEE_ROUND_TRIP_BPS = 2 * MAKER_FEE_BPS
 # post-fix 重啟 floor（recorder-v2 crossed-fix）。預設 +02 本地時。可由 --clean-since 覆蓋。
 DEFAULT_CLEAN_SINCE = "2026-06-17T14:25:00+02:00"
 # adverse-selection 量測 horizon（秒）。
@@ -521,7 +523,7 @@ def _r(x, nd=4):
 def _net_block(sub, horizons, n_for_signif):
     """對一個 fill-subset（已 merge adverse）算 half_spread + per-horizon adverse + NET。
 
-    回 dict：half_spread_bps + 每 horizon 的 adverse_sel / net_maker / net_taker。
+    回 dict：half_spread_bps + 每 horizon 的 adverse_sel / net_maker / net_taker / cost wall。
     half_spread 為 BUG-2 修正後的 signed captured half-spread（adverse_through 用 mid_fill）。
     n_for_signif 用「本 subset 的 n」判顯著性抑制（誠實:小樣本不出顯著宣稱）。
     """
@@ -532,8 +534,14 @@ def _net_block(sub, horizons, n_for_signif):
         for h in horizons:
             out[f"adverse_sel_bps@{h}"] = None
             out[f"adverse_sel_median_bps@{h}"] = None
+            out[f"edge_before_fees_bps@{h}"] = None
             out[f"net_bps@{h}_maker_exit"] = None
             out[f"net_bps@{h}_taker_exit"] = None
+            out[f"break_even_fee_round_trip_bps@{h}_maker_exit"] = None
+            out[f"break_even_maker_fee_bps_per_side@{h}_maker_exit"] = None
+            out[f"fee_round_trip_shortfall_bps@{h}_maker_exit"] = None
+            out[f"required_half_spread_bps@{h}_maker_exit"] = None
+            out[f"required_maker_rebate_bps_per_side@{h}_maker_exit"] = None
             out[f"signif_suppressed@{h}"] = True
         return out
     half_spread = float(sub["half_spread_bps"].mean())
@@ -543,14 +551,28 @@ def _net_block(sub, horizons, n_for_signif):
         if col in sub and sub[col].notna().any():
             adv_mean = float(sub[col].mean())
             adv_med = float(sub[col].median())
-            net_maker = half_spread - adv_mean - 2 * MAKER_FEE_BPS
+            edge_before_fees = half_spread - adv_mean
+            net_maker = edge_before_fees - MAKER_FEE_ROUND_TRIP_BPS
             net_taker = half_spread - adv_mean - MAKER_FEE_BPS - TAKER_FEE_BPS
+            break_even_fee_rt = edge_before_fees
+            break_even_maker_fee = break_even_fee_rt / 2.0
+            fee_rt_shortfall = MAKER_FEE_ROUND_TRIP_BPS - break_even_fee_rt
+            required_half_spread = adv_mean + MAKER_FEE_ROUND_TRIP_BPS
+            required_maker_rebate = max(0.0, -break_even_maker_fee)
         else:
-            adv_mean = adv_med = net_maker = net_taker = np.nan
+            adv_mean = adv_med = edge_before_fees = net_maker = net_taker = np.nan
+            break_even_fee_rt = break_even_maker_fee = fee_rt_shortfall = np.nan
+            required_half_spread = required_maker_rebate = np.nan
         out[f"adverse_sel_bps@{h}"] = _r(adv_mean, 3)
         out[f"adverse_sel_median_bps@{h}"] = _r(adv_med, 3)
+        out[f"edge_before_fees_bps@{h}"] = _r(edge_before_fees, 3)
         out[f"net_bps@{h}_maker_exit"] = _r(net_maker, 3)
         out[f"net_bps@{h}_taker_exit"] = _r(net_taker, 3)
+        out[f"break_even_fee_round_trip_bps@{h}_maker_exit"] = _r(break_even_fee_rt, 3)
+        out[f"break_even_maker_fee_bps_per_side@{h}_maker_exit"] = _r(break_even_maker_fee, 3)
+        out[f"fee_round_trip_shortfall_bps@{h}_maker_exit"] = _r(fee_rt_shortfall, 3)
+        out[f"required_half_spread_bps@{h}_maker_exit"] = _r(required_half_spread, 3)
+        out[f"required_maker_rebate_bps_per_side@{h}_maker_exit"] = _r(required_maker_rebate, 3)
         out[f"signif_suppressed@{h}"] = bool(n < MIN_FILLS_FOR_SIGNIF)
     return out
 
@@ -639,7 +661,12 @@ def run(l1, tr, ob, syms, clean_since, horizons, cadence_s, skip_quantile, since
         "params": {"cadence_s": cadence_s, "horizons_s": list(horizons),
                    "skip_quantile": skip_quantile, "maker_fee_bps_per_side": MAKER_FEE_BPS,
                    "taker_fee_bps_per_side": TAKER_FEE_BPS,
-                   "fee_round_trip_bps": 2 * MAKER_FEE_BPS,
+                   "fee_round_trip_bps": MAKER_FEE_ROUND_TRIP_BPS,
+                   "cost_wall_definition": (
+                       "edge_before_fees=half_spread-adverse; break_even_fee_round_trip=edge_before_fees; "
+                       "fee_round_trip_shortfall=current_fee_round_trip-break_even_fee_round_trip; "
+                       "negative break_even_maker_fee implies required maker rebate per side"
+                   ),
                    "queue_positions_frac": QUEUE_POSITIONS,
                    "primary_queue_model": ("back-of-queue (size_ahead=Q0, conservative, "
                                            "NON-OPTIONAL default); front/mid also reported "
