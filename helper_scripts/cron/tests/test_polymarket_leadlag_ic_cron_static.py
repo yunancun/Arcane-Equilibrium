@@ -61,6 +61,7 @@ def test_wrapper_invokes_harness_with_fail_closed_defaults():
     src = _src(WRAPPER)
     assert "OPENCLAW_POLYMARKET_LEADLAG_QUERY_SET" in src
     assert ":-v2}" in src
+    assert "OPENCLAW_POLYMARKET_LEADLAG_SYMBOLS:-BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT" in src
     assert "OPENCLAW_POLYMARKET_LEADLAG_MIN_POINTS:-30" in src
     assert "-m polymarket_leadlag.harness" in src
     assert "--query-set" in src
@@ -72,6 +73,8 @@ def test_wrapper_invokes_harness_with_fail_closed_defaults():
 def test_installer_active_hourly_after_collector_and_apply_gated():
     src = _src(INSTALLER)
     assert 'OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES="${OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES:-17}"' in src
+    assert "OPENCLAW_POLYMARKET_LEADLAG_SYMBOLS" in src
+    assert "BTCUSDT,ETHUSDT,SOLUSDT,XRPUSDT" in src
     assert 'ENTRY="${OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES} * * * *' in src
     assert '_validate_cron_minute_list "OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES"' in src
     assert "2,17,32,47" in src
