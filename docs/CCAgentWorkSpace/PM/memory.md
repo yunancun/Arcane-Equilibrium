@@ -25,6 +25,18 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM Sample-Gated Cost-Wall Diagnosis
+
+- Added `sample_gated_cost_wall_summary` to `recorder_mm_verdict_cron.sh` and passed it through alpha-discovery runtime/blocker rows.
+- Diagnosis: MM no-profit should not be anchored on the best live-markout symbol when that symbol has only one maker fill; use fill_sim sample-gated cells as the primary cost-wall evidence.
+- Latest trade-core MM verdict status line sha256 `fe2ae9b675b11e4e43ebc8ba4bfbd704e30478db8d9cf18be1293cc310d8a5d5`, `ts_utc=2026-06-20T17:28:30Z`.
+- Sample-gated fill_sim cost wall: status `SAMPLE_GATED_CURRENT_FEE_COST_WALL`, 74 sample-gated cells, best current-fee cell `LABUSDT` / back / informed_skip, `n=170`, net `-1.73bp`, fee shortfall `1.73bp RT`.
+- Break-even maker fee remains `1.135bp/side`; fee reduction needed is `0.865bp/side`.
+- Live-markout best remains `ARBUSDT` net `-0.0357bp`, but `best_n_maker_fills=1`, so it is diagnostic only and no longer the main MM cost-wall anchor.
+- Latest alpha discovery sha256 `05301d674686b2763f122b915a47d7837a36ff5829c22c44abda81d9fc0727ad` remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`, ready/probe=0; MM primary blocker is still `no_train_positive_walk_forward_feature_cell` with secondary sample-gated cost wall, live-markout diagnostic cost wall, and VIP5 scale/fee path.
+- Verification: Mac and Linux focused suite `58 passed`; py_compile, bash syntax, diff-check, and read-only runtime wrapper smoke passed.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG write, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Pre-Gate Watchlist Persistence
 
 - Upgraded `polymarket_leadlag` to report schema/runner v0.13.

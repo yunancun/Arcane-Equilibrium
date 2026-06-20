@@ -337,6 +337,94 @@ fee_capacity_30d = mm.get("fee_capacity_30d") or {}
 per_sym_mk = markout.get("per_symbol") or {}
 alerts = []  # alert subject 字串
 
+
+def _flt(value):
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if out != out:
+        return None
+    return out
+
+
+def _round(value, ndigits=4):
+    out = _flt(value)
+    if out is None:
+        return None
+    return round(out, ndigits)
+
+
+def _sample_gated_fill_sim_cost_wall(fillsim, *, h_primary, min_fills):
+    """Rank fill_sim cells with the same sample gate used by fill_sim scorecards."""
+    edge = fillsim.get("edge_scorecard") or {}
+    all_cells = edge.get("all_fill_only_cells") or []
+    sample_gated = []
+    for cell in all_cells:
+        if not isinstance(cell, dict):
+            continue
+        n = int(cell.get("n") or cell.get("n_fill_only") or 0)
+        if n < int(min_fills) or cell.get("signif_suppressed"):
+            continue
+        net = _flt(cell.get("net_bps"))
+        if net is None:
+            continue
+        row = dict(cell)
+        row["n_fill_only"] = n
+        sample_gated.append(row)
+    sample_gated.sort(key=lambda row: _flt(row.get("net_bps")) or -1e9, reverse=True)
+
+    best = sample_gated[0] if sample_gated else None
+    break_even = (fillsim.get("maker_fee_sensitivity_scorecard") or {}).get(
+        "best_sample_gated_break_even_cell"
+    )
+    if not isinstance(break_even, dict):
+        break_even = None
+
+    if best is None and break_even is None:
+        return {
+            "available": False,
+            "status": "NO_SAMPLE_GATED_FILL_SIM_CELL",
+            "horizon_s": h_primary,
+            "sample_gate_min_fills": int(min_fills),
+            "sample_gated_cell_count": 0,
+            "reason": "fill_sim_has_no_sample_gated_fill_only_cells",
+        }
+
+    best_net = _flt(best.get("net_bps")) if best else None
+    status = (
+        "SAMPLE_GATED_CURRENT_FEE_POSITIVE"
+        if best_net is not None and best_net > 0.0
+        else "SAMPLE_GATED_CURRENT_FEE_COST_WALL"
+    )
+    be_fee = _flt((break_even or {}).get("break_even_maker_fee_bps_per_side"))
+    return {
+        "available": True,
+        "status": status,
+        "horizon_s": h_primary,
+        "sample_gate_min_fills": int(min_fills),
+        "sample_gated_cell_count": len(sample_gated),
+        "current_fee_round_trip_bps": fee_rt,
+        "best_sample_gated_current_fee_cell": best,
+        "best_sample_gated_break_even_cell": break_even,
+        "best_sample_gated_net_bps": _round(best_net, 4),
+        "best_sample_gated_fee_round_trip_shortfall_bps": _round(
+            (best or {}).get("fee_round_trip_shortfall_bps")
+        ),
+        "best_sample_gated_required_half_spread_bps": (
+            (best or {}).get("required_half_spread_bps")
+        ),
+        "break_even_maker_fee_bps_per_side": _round(be_fee, 4),
+        "fee_reduction_needed_bps_per_side": _round(
+            max(0.0, maker_fee - be_fee) if be_fee is not None else None,
+            4,
+        ),
+        "note": (
+            "Uses fill_sim sample-gated cells only; live markout n can remain "
+            "diagnostic but does not define the sample-gated cost wall."
+        ),
+    }
+
 # --- fill_sim 報告：adverse_selection（beta-residual fill-conditional）---
 # 決策：讀最新報告而非內跑（檔頭已記理由）。取 pooled fill_only adverse_sel@h（primary=15s，
 # 另記 5/30s sensitivity）。報告缺檔/解析失敗/過期 → adverse 未知（None），net-edge 退化、
@@ -494,6 +582,11 @@ fee_path_feasibility = build_maker_fee_path_feasibility_scorecard(
     fee_capacity_30d,
     current_maker_fee_bps_per_side=maker_fee,
 )
+sample_gated_cost_wall_summary = _sample_gated_fill_sim_cost_wall(
+    fillsim,
+    h_primary=h_primary,
+    min_fills=min_fills,
+)
 # adverse 可用性：報告存在、非過期、有數值。否則 adverse 未知 → net 不可發正告警。
 adverse_usable = (fillsim["present"] and not fillsim["stale"] and adverse_sel is not None)
 
@@ -625,6 +718,7 @@ status = {
     "adverse_selection_usable": adverse_usable,
     "net_edge_per_symbol": net_edge,
     "cost_wall_summary": cost_wall_summary,
+    "sample_gated_cost_wall_summary": sample_gated_cost_wall_summary,
     "l1_regime_days": l1_days,
     "l1_fill_sim_ready": l1_ready,
     "highvol_z": hv_z,

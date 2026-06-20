@@ -142,15 +142,36 @@ def _finish_blocker_row(
 
 def _mm_secondary_blockers(detail: dict[str, Any]) -> list[dict[str, Any]]:
     blockers: list[dict[str, Any]] = []
+    sample_cost_wall = _dict(detail.get("sample_gated_cost_wall_summary"))
+    sample_shortfall = _float(
+        sample_cost_wall.get("best_sample_gated_fee_round_trip_shortfall_bps")
+    )
+    if sample_shortfall is not None and sample_shortfall > 0:
+        blockers.append({
+            "blocker_class": "cost_wall",
+            "blocker": "current_maker_fee_exceeds_sample_gated_fill_sim_break_even",
+            "best_sample_gated_net_bps": sample_cost_wall.get(
+                "best_sample_gated_net_bps"
+            ),
+            "best_sample_gated_fee_round_trip_shortfall_bps": sample_shortfall,
+            "break_even_maker_fee_bps_per_side": sample_cost_wall.get(
+                "break_even_maker_fee_bps_per_side"
+            ),
+            "fee_reduction_needed_bps_per_side": sample_cost_wall.get(
+                "fee_reduction_needed_bps_per_side"
+            ),
+        })
+
     cost_wall = _dict(detail.get("cost_wall_summary"))
     if cost_wall:
         shortfall = _float(cost_wall.get("best_fee_round_trip_shortfall_bps"))
         if shortfall is not None and shortfall > 0:
             blockers.append({
                 "blocker_class": "cost_wall",
-                "blocker": "current_maker_fee_exceeds_best_break_even",
+                "blocker": "live_markout_current_maker_fee_exceeds_best_break_even",
                 "best_symbol_by_net_edge": cost_wall.get("best_symbol_by_net_edge"),
                 "best_fee_round_trip_shortfall_bps": shortfall,
+                "best_n_maker_fills": cost_wall.get("best_n_maker_fills"),
             })
 
     fee_path = _dict(detail.get("fee_path_feasibility"))
@@ -224,6 +245,10 @@ def classify_profitability_blocker(
         fee_path = _dict(detail.get("fee_path_feasibility"))
         fee_status = str(fee_path.get("status") or "").upper()
         cost_wall = _dict(detail.get("cost_wall_summary"))
+        sample_cost_wall = _dict(detail.get("sample_gated_cost_wall_summary"))
+        sample_cost_shortfall = _float(
+            sample_cost_wall.get("best_sample_gated_fee_round_trip_shortfall_bps")
+        )
         cost_shortfall = _float(cost_wall.get("best_fee_round_trip_shortfall_bps"))
 
         if failure_status == "NO_TRAIN_POSITIVE_CELL":
@@ -255,17 +280,44 @@ def classify_profitability_blocker(
                     "best_holdout_candidate": failure.get("best_holdout_candidate"),
                 },
             )
+        if sample_cost_shortfall is not None and sample_cost_shortfall > 0:
+            return _finish_blocker_row(
+                row,
+                blocker_class="cost_wall",
+                primary_blocker="current_fee_round_trip_exceeds_sample_gated_fill_sim_break_even",
+                next_trigger="find_sample_gated_current_fee_cell_or_new_low_friction_mm_signal",
+                engineering_actionable=True,
+                secondary_blockers=secondary,
+                extra={
+                    "best_sample_gated_net_bps": sample_cost_wall.get(
+                        "best_sample_gated_net_bps"
+                    ),
+                    "best_sample_gated_fee_round_trip_shortfall_bps": (
+                        sample_cost_shortfall
+                    ),
+                    "break_even_maker_fee_bps_per_side": sample_cost_wall.get(
+                        "break_even_maker_fee_bps_per_side"
+                    ),
+                    "fee_reduction_needed_bps_per_side": sample_cost_wall.get(
+                        "fee_reduction_needed_bps_per_side"
+                    ),
+                    "sample_gated_cell_count": sample_cost_wall.get(
+                        "sample_gated_cell_count"
+                    ),
+                },
+            )
         if cost_shortfall is not None and cost_shortfall > 0:
             return _finish_blocker_row(
                 row,
                 blocker_class="cost_wall",
-                primary_blocker="current_fee_round_trip_exceeds_best_break_even",
-                next_trigger="find_positive_current_fee_cell_or_prove_lower_fee_business_path",
+                primary_blocker="live_markout_current_fee_round_trip_exceeds_best_break_even",
+                next_trigger="collect_more_maker_fills_or_use_sample_gated_fill_sim_cost_wall",
                 engineering_actionable=True,
                 secondary_blockers=secondary,
                 extra={
                     "best_symbol_by_net_edge": cost_wall.get("best_symbol_by_net_edge"),
                     "best_fee_round_trip_shortfall_bps": cost_shortfall,
+                    "best_n_maker_fills": cost_wall.get("best_n_maker_fills"),
                 },
             )
         if fee_status in {
