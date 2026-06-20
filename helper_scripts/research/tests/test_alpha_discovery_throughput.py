@@ -553,6 +553,17 @@ def test_polymarket_ready_candidate_is_downgraded_after_non_durable_aeg_matrix()
                     "PAPER_REPLAY_NET_POSITIVE_EXECUTION_UNMEASURED"
                 ),
                 "candidate_replay_execution_realism_status": "UNMEASURED",
+                "candidate_replay_history_status": "REPLAY_HISTORY_DAYS_INSUFFICIENT",
+                "candidate_replay_history_report_count": 3,
+                "candidate_replay_history_matched_report_count": 3,
+                "candidate_replay_history_sample_count": 32,
+                "candidate_replay_history_n_days": 1,
+                "candidate_replay_history_min_days": 30,
+                "candidate_replay_history_min_samples": 30,
+                "candidate_replay_history_net_bps_mean": 0.77,
+                "candidate_replay_history_holdout_net_bps_mean": 6.83,
+                "candidate_replay_history_pbo_day_count": 1,
+                "candidate_replay_history_execution_realism_status": "UNMEASURED",
             },
         },
         {
@@ -591,6 +602,15 @@ def test_polymarket_ready_candidate_is_downgraded_after_non_durable_aeg_matrix()
     assert blockers["polymarket_leadlag_ic"]["candidate_replay_execution_realism_status"] == (
         "UNMEASURED"
     )
+    assert blockers["polymarket_leadlag_ic"]["candidate_replay_history_status"] == (
+        "REPLAY_HISTORY_DAYS_INSUFFICIENT"
+    )
+    assert blockers["polymarket_leadlag_ic"]["candidate_replay_history_n_days"] == 1
+    assert blockers["polymarket_leadlag_ic"]["candidate_replay_history_min_days"] == 30
+    assert blockers["polymarket_leadlag_ic"]["candidate_replay_history_pbo_day_count"] == 1
+    assert blockers["polymarket_leadlag_ic"][
+        "candidate_replay_history_execution_realism_status"
+    ] == "UNMEASURED"
     assert blockers["aeg_robustness_matrix"]["candidate_artifact_dependency_status"] == (
         "CANDIDATE_ARTIFACTS_ALREADY_REVIEWED_NO_DURABLE_ROWS"
     )
@@ -899,6 +919,49 @@ def _write_polymarket_leadlag_latest(data: Path, payload: dict) -> Path:
     return path
 
 
+def _write_polymarket_replay_report(
+    data: Path,
+    *,
+    stamp: str,
+    created_at: str,
+    candidate_key: str,
+    samples: list[dict],
+) -> Path:
+    path = data / "research" / "polymarket_leadlag" / f"polymarket_leadlag_{stamp}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "created_at_utc": created_at,
+        "candidate_replay_scorecard": {
+            "status": "PAPER_REPLAY_BUILT",
+            "selected_candidate_key": candidate_key,
+            "selected_summary": {
+                "candidate_id": "polymarket_leadlag_price_target_SOLUSDT_15m",
+                "candidate_key": candidate_key,
+                "strategy_family": "polymarket_leadlag_directional_replay",
+                "parameter_cell_id": "price_target|SOLUSDT|15m|rule=ic_sign_delta|threshold_q=0|cost_bps=4",
+                "selected_variant": "ic_sign_delta",
+                "sample_unit": "polymarket_nonoverlap_forward_window",
+            },
+            "selected_evidence": {
+                "candidate_id": "polymarket_leadlag_price_target_SOLUSDT_15m",
+                "candidate_key": candidate_key,
+                "strategy_family": "polymarket_leadlag_directional_replay",
+                "parameter_cell_id": "price_target|SOLUSDT|15m|rule=ic_sign_delta|threshold_q=0|cost_bps=4",
+                "selected_variant": "ic_sign_delta",
+                "sample_unit": "polymarket_nonoverlap_forward_window",
+                "k_trials": 12,
+                "samples": samples,
+                "daily_returns": {"unit": "fraction", "values": {}},
+                "pbo_candidates": {
+                    "cell_a": {created_at[:10]: 0.001},
+                    "cell_b": {created_at[:10]: -0.0005},
+                },
+            },
+        },
+    }), encoding="utf-8")
+    return path
+
+
 def test_polymarket_leadlag_arm_captures_insufficient_sample(tmp_path):
     data = tmp_path / "openclaw"
     _write_polymarket_leadlag_latest(data, {
@@ -1032,10 +1095,80 @@ def test_polymarket_leadlag_arm_ready_only_for_candidate_review_with_sample(tmp_
     assert arm["detail"]["candidate_replay_cost_wall_status"] == (
         "PAPER_REPLAY_NET_POSITIVE_EXECUTION_UNMEASURED"
     )
+    assert arm["detail"]["candidate_replay_history_status"] == "NO_REPLAY_HISTORY"
     assert arm["detail"]["preliminary_raw_candidate_count"] == 2
     assert arm["detail"]["max_bh_q"] == 0.10
     assert plan["arms"][0]["action"] == "READY_FOR_AEG_CHAIN"
     assert plan["arms"][0]["reason"] == "artifacts_ready_and_sample_gate_met"
+
+
+def test_polymarket_leadlag_arm_surfaces_replay_history(tmp_path):
+    data = tmp_path / "openclaw"
+    candidate_key = "polymarket_leadlag_ic|price_target|SOLUSDT|15m"
+    _write_polymarket_leadlag_latest(data, {
+        "verdict": {
+            "status": "IC_CANDIDATE_REVIEW_REQUIRED",
+            "reason": "candidate",
+            "candidate_count": 1,
+        },
+        "counts": {
+            "max_overlap_adjusted_ic_points": 30,
+        },
+        "ic_results": [{"n_points": 30, "overlap_adjusted_sample_floor": 30}],
+        "candidates": [{
+            "bucket": "price_target",
+            "symbol": "SOLUSDT",
+            "horizon_minutes": 15,
+        }],
+    })
+    _write_polymarket_replay_report(
+        data,
+        stamp="20260620T010000Z",
+        created_at="2026-06-20T01:00:00+00:00",
+        candidate_key=candidate_key,
+        samples=[{
+            "sample_id": "s1",
+            "sample_ts_utc": "2026-06-20T00:00:00+00:00",
+            "regime": "unsegmented",
+            "independence_bucket": "SOLUSDT:15m:1",
+            "gross_bps": 10.0,
+            "cost_bps": 4.0,
+            "net_bps": 6.0,
+            "is_oos": True,
+        }],
+    )
+    _write_polymarket_replay_report(
+        data,
+        stamp="20260621T010000Z",
+        created_at="2026-06-21T01:00:00+00:00",
+        candidate_key=candidate_key,
+        samples=[{
+            "sample_id": "s2",
+            "sample_ts_utc": "2026-06-21T00:00:00+00:00",
+            "regime": "unsegmented",
+            "independence_bucket": "SOLUSDT:15m:2",
+            "gross_bps": 8.0,
+            "cost_bps": 4.0,
+            "net_bps": 4.0,
+            "is_oos": True,
+        }],
+    )
+
+    arm = collect_polymarket_leadlag_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 12, 30, tzinfo=dt.timezone.utc),
+    )
+
+    detail = arm["detail"]
+    assert detail["candidate_replay_history_status"] == "REPLAY_HISTORY_DAYS_INSUFFICIENT"
+    assert detail["candidate_replay_history_report_count"] == 2
+    assert detail["candidate_replay_history_matched_report_count"] == 2
+    assert detail["candidate_replay_history_sample_count"] == 2
+    assert detail["candidate_replay_history_n_days"] == 2
+    assert detail["candidate_replay_history_min_days"] == 30
+    assert detail["candidate_replay_history_net_bps_mean"] == 5.0
+    assert detail["candidate_replay_history_pbo_day_count"] == 2
+    assert detail["candidate_replay_history_execution_realism_status"] == "UNMEASURED"
 
 
 def test_polymarket_leadlag_arm_blocks_stale_report(tmp_path):
