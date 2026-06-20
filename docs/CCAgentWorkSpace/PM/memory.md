@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-20 FillSim Cost-Wall Instrumentation
+
+- `fill_sim.py` now reports break-even maker fee, fee shortfall, required half-spread, and required maker rebate per side for every horizon/net block.
+- Focused test `program_code/research/tests/test_fill_sim_cost_wall.py` covers normal cost wall, negative break-even fee/rebate-needed, and empty-sample output.
+- trade-core temp smoke on fresh L1 (`fillsim_cost_wall_smoke_20260620T003611Z.json`) showed the current MM failure is structural: back fill_only net@15 `-5.365bp` and front fill_only net@15 `-4.796bp`; both still require maker rebate to break even.
+- Boundary: no production report overwrite, no engine/API restart, no PG write, no Bybit private/signed/trading call; this is a single-regime diagnostic, not CP-3 go/no-go or promotion proof.
+
 ## 2026-06-20 MM Verdict Stale Guard + Cron Restore
 
 - Fixed alpha discovery killboard so stale `recorder_mm_verdict` status older than 36h becomes `SOURCE_FAILURE/stale_artifact` instead of active MM capture; focused alpha discovery tests are now 10 passed.
