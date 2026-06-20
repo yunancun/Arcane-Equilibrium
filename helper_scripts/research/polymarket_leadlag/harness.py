@@ -36,6 +36,8 @@ from typing import Any, Iterable, Optional
 try:
     from . import (
         BUCKET_EVENT_REG,
+        BUCKET_EVENT_REG_DIRECT,
+        BUCKET_EVENT_REG_MACRO,
         BUCKET_OTHER,
         BUCKET_PRICE_TARGET,
         REPORT_SCHEMA_VERSION,
@@ -45,6 +47,8 @@ try:
         STATUS_INSUFFICIENT_SAMPLE,
         STATUS_NO_PRICE_DATA,
         STATUS_NO_SNAPSHOT_ROWS,
+        SYMBOL_SOURCE_ASSET_DIRECT,
+        SYMBOL_SOURCE_MACRO_EVENT_REG,
     )
 except ImportError:  # pragma: no cover
     _here = Path(__file__).resolve()
@@ -53,6 +57,8 @@ except ImportError:  # pragma: no cover
         sys.path.insert(0, str(_research))
     from polymarket_leadlag import (  # type: ignore
         BUCKET_EVENT_REG,
+        BUCKET_EVENT_REG_DIRECT,
+        BUCKET_EVENT_REG_MACRO,
         BUCKET_OTHER,
         BUCKET_PRICE_TARGET,
         REPORT_SCHEMA_VERSION,
@@ -62,6 +68,8 @@ except ImportError:  # pragma: no cover
         STATUS_INSUFFICIENT_SAMPLE,
         STATUS_NO_PRICE_DATA,
         STATUS_NO_SNAPSHOT_ROWS,
+        SYMBOL_SOURCE_ASSET_DIRECT,
+        SYMBOL_SOURCE_MACRO_EVENT_REG,
     )
 
 
@@ -165,11 +173,11 @@ def infer_symbol(row: dict[str, Any], allowed_symbols: set[str]) -> Optional[str
 def infer_symbol_mappings(row: dict[str, Any], allowed_symbols: set[str]) -> list[tuple[str, str]]:
     direct_symbol = infer_symbol(row, allowed_symbols)
     if direct_symbol is not None:
-        return [(direct_symbol, "asset_direct")]
+        return [(direct_symbol, SYMBOL_SOURCE_ASSET_DIRECT)]
     if classify_bucket(row) != BUCKET_EVENT_REG:
         return []
     return [
-        (symbol, "macro_event_reg")
+        (symbol, SYMBOL_SOURCE_MACRO_EVENT_REG)
         for symbol in DEFAULT_MACRO_PROXY_SYMBOLS
         if symbol in allowed_symbols
     ]
@@ -355,19 +363,53 @@ def build_market_deltas(
     }
 
 
-def aggregate_features(deltas: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
-    grouped: dict[tuple[int, str, str], list[dict[str, Any]]] = defaultdict(list)
+def _event_reg_source_split_bucket(symbol_source: str) -> Optional[str]:
+    if symbol_source == SYMBOL_SOURCE_ASSET_DIRECT:
+        return BUCKET_EVENT_REG_DIRECT
+    if symbol_source == SYMBOL_SOURCE_MACRO_EVENT_REG:
+        return BUCKET_EVENT_REG_MACRO
+    return None
+
+
+def aggregate_features(
+    deltas: Iterable[dict[str, Any]],
+    *,
+    include_source_splits: bool = False,
+) -> list[dict[str, Any]]:
+    grouped: dict[tuple[int, str, str, str, str], list[dict[str, Any]]] = defaultdict(
+        list
+    )
     for row in deltas:
-        key = (int(row["snapshot_ts_ms"]), str(row["bucket"]), str(row["symbol"]))
-        grouped[key].append(row)
+        ts_ms = int(row["snapshot_ts_ms"])
+        bucket = str(row["bucket"])
+        symbol = str(row["symbol"])
+        symbol_source = str(row.get("symbol_source") or "unknown")
+        grouped[(ts_ms, bucket, symbol, "aggregate", "aggregate")].append(row)
+        if include_source_splits and bucket == BUCKET_EVENT_REG:
+            split_bucket = _event_reg_source_split_bucket(symbol_source)
+            if split_bucket:
+                grouped[(ts_ms, split_bucket, symbol, "source_split", symbol_source)].append(
+                    row
+                )
     out: list[dict[str, Any]] = []
-    for (ts_ms, bucket, symbol), rows in sorted(grouped.items()):
+    for (ts_ms, bucket, symbol, bucket_view, source_key), rows in sorted(grouped.items()):
         vals = [float(r["delta_prob_yes"]) for r in rows]
+        source_breakdown = Counter(str(r.get("symbol_source") or "unknown") for r in rows)
+        base_buckets = sorted({str(r.get("bucket") or "") for r in rows if r.get("bucket")})
+        aggregate_source = (
+            next(iter(source_breakdown))
+            if bucket_view == "aggregate" and len(source_breakdown) == 1
+            else source_key
+        )
         out.append({
             "snapshot_ts_ms": ts_ms,
             "snapshot_ts_utc": _ms_to_iso(ts_ms),
             "bucket": bucket,
+            "base_bucket": base_buckets[0] if len(base_buckets) == 1 else "mixed",
+            "bucket_view": bucket_view,
             "symbol": symbol,
+            "symbol_source": aggregate_source,
+            "symbol_source_breakdown": dict(source_breakdown),
             "n_markets": len(rows),
             "mean_delta_prob_yes": sum(vals) / len(vals),
             "mean_abs_delta_prob_yes": sum(abs(v) for v in vals) / len(vals),
@@ -987,7 +1029,7 @@ def build_report(
 ) -> dict[str, Any]:
     allowed_symbols = set(symbols)
     deltas, delta_meta = build_market_deltas(snapshot_rows, allowed_symbols=allowed_symbols)
-    features = aggregate_features(deltas)
+    features = aggregate_features(deltas, include_source_splits=True)
     joined = join_forward_returns(
         features, price_rows,
         horizons_minutes=horizons_minutes,
@@ -1000,7 +1042,16 @@ def build_report(
     )
     ic_results = compute_ic(joined)
     bucket_counts = Counter(row["bucket"] for row in deltas)
-    joined_counts = Counter(f"{row['bucket']}|{row['symbol']}|{row['horizon_minutes']}" for row in joined)
+    feature_bucket_counts = Counter(row["bucket"] for row in features)
+    feature_bucket_view_counts = Counter(
+        str(row.get("bucket_view") or "unknown") for row in features
+    )
+    feature_source_counts = Counter(
+        str(row.get("symbol_source") or "unknown") for row in features
+    )
+    joined_counts = Counter(
+        f"{row['bucket']}|{row['symbol']}|{row['horizon_minutes']}" for row in joined
+    )
     eligible, preliminary_raw, preliminary_hac, candidates = _partition_ic_candidates(
         ic_results,
         min_points=min_points,
@@ -1069,6 +1120,9 @@ def build_report(
             "joined_rows": len(joined),
             "price_rows": len(price_rows),
             "bucket_delta_counts": dict(bucket_counts),
+            "feature_bucket_counts": dict(feature_bucket_counts),
+            "feature_bucket_view_counts": dict(feature_bucket_view_counts),
+            "feature_source_counts": dict(feature_source_counts),
             "joined_counts": dict(joined_counts),
             "label_readiness": label_readiness,
             "delta_meta": delta_meta,
@@ -1102,6 +1156,8 @@ def build_report(
             "feature = probability delta from previous Polymarket snapshot to current snapshot",
             "target = Bybit close return after snapshot time; first kline at/after timestamps only",
             "price_target/event_reg bucket split is research-side and does not filter collector artifacts",
+            "event_reg aggregate cells are preserved while event_reg_direct/event_reg_macro "
+            "source-split cells are tested separately",
             "insufficient sample fails closed and is not alpha evidence",
             "overlap sample floor allows a small schedule-jitter tolerance before declaring windows overlapping",
             "sample gate clock estimates when the overlap-adjusted floor should reach min_points if cadence holds",

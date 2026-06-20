@@ -413,6 +413,13 @@ def test_polymarket_leadlag_arm_ready_only_for_candidate_review_with_sample(tmp_
             "snapshot_rows": 26000,
             "snapshot_distinct_timestamps": 36,
             "delta_rows": 1200,
+            "feature_points": 180,
+            "feature_bucket_counts": {
+                "event_reg": 90,
+                "event_reg_direct": 40,
+                "event_reg_macro": 50,
+            },
+            "feature_bucket_view_counts": {"aggregate": 90, "source_split": 90},
             "joined_rows": 105,
             "price_rows": 9000,
             "max_ic_points": 35,
@@ -476,6 +483,13 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
             "snapshot_rows": 26000,
             "snapshot_distinct_timestamps": 36,
             "delta_rows": 1200,
+            "feature_points": 180,
+            "feature_bucket_counts": {
+                "event_reg": 90,
+                "event_reg_direct": 40,
+                "event_reg_macro": 50,
+            },
+            "feature_bucket_view_counts": {"aggregate": 90, "source_split": 90},
             "joined_rows": 105,
             "price_rows": 9000,
             "max_ic_points": 35,
@@ -532,6 +546,9 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
     assert arm["sample_count"] == 12
     assert arm["detail"]["max_ic_points"] == 35
     assert arm["detail"]["max_overlap_adjusted_ic_points"] == 12
+    assert arm["detail"]["feature_points"] == 180
+    assert arm["detail"]["feature_bucket_counts"]["event_reg_macro"] == 50
+    assert arm["detail"]["feature_bucket_view_counts"] == {"aggregate": 90, "source_split": 90}
     assert arm["detail"]["min_samples_remaining_to_gate"] == 18
     assert arm["detail"]["sample_gate_status"] == "WAITING_FOR_SAMPLE"
     assert arm["detail"]["sample_gate_eta_utc"] == "2026-06-20T19:52:01+00:00"

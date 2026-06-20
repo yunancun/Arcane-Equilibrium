@@ -25,6 +25,16 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Source-Split IC View
+
+- Upgraded `polymarket_leadlag` to report schema/runner v0.10.
+- Diagnosis: v0.9 correctly recovered macro/regulatory rows, but aggregate `event_reg` cells mixed direct asset events with generic macro/reg proxy rows, leaving two hypotheses collapsed into one IC cell.
+- v0.10 preserves aggregate `event_reg` cells and adds `event_reg_direct` / `event_reg_macro` source-split cells, with `bucket_view`, `base_bucket`, `symbol_source`, and `symbol_source_breakdown` on feature rows.
+- Report/status/runtime detail now expose `feature_bucket_counts`, `feature_bucket_view_counts`, and `feature_source_counts`; candidate gates remain unchanged.
+- Linux v0.10 wrapper smoke latest sha256 `1f85dfb82789d3fd158272b8def4c0762755907e4ffbef7643243ba19e03b53f`: `snapshot_rows=13001`, `delta_rows=14393`, `feature_points=208`, `joined_rows=341`, `event_reg_direct=40`, `event_reg_macro=28`, `max_overlap_adjusted_ic_points=13`, `candidate_count=0`, still `INSUFFICIENT_SAMPLE`, ETA `2026-06-20T19:52:02.188Z`.
+- Alpha discovery latest sha256 `d609117f2c4f44c91643e27cddaddbca37c219c44413fd04c3c1a9f08d6beaf8` reports `polymarket_leadlag_ic.sample_count=13`, split counts in detail, action `RUN_READ_ONLY_CAPTURE`, ready/probe=0.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Macro-Reg Proxy
 
 - Upgraded `polymarket_leadlag` to report schema/runner v0.9.

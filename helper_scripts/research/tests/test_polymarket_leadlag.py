@@ -8,8 +8,12 @@ from pathlib import Path
 
 from polymarket_leadlag import (
     BUCKET_EVENT_REG,
+    BUCKET_EVENT_REG_DIRECT,
+    BUCKET_EVENT_REG_MACRO,
     BUCKET_PRICE_TARGET,
     STATUS_INSUFFICIENT_SAMPLE,
+    SYMBOL_SOURCE_ASSET_DIRECT,
+    SYMBOL_SOURCE_MACRO_EVENT_REG,
 )
 from polymarket_leadlag import harness
 
@@ -66,11 +70,11 @@ def test_bucket_classification_and_symbol_inference():
     assert harness.infer_symbol({"question": "Will XRP lawsuit settle?"}, set(harness.DEFAULT_SYMBOLS)) == "XRPUSDT"
     assert harness.DEFAULT_MACRO_PROXY_SYMBOLS == ("BTCUSDT", "ETHUSDT")
     assert harness.infer_symbol_mappings({"question": "Will CPI increase crypto volatility?"}, set(harness.DEFAULT_SYMBOLS)) == [
-        ("BTCUSDT", "macro_event_reg"),
-        ("ETHUSDT", "macro_event_reg"),
+        ("BTCUSDT", SYMBOL_SOURCE_MACRO_EVENT_REG),
+        ("ETHUSDT", SYMBOL_SOURCE_MACRO_EVENT_REG),
     ]
     assert harness.infer_symbol_mappings({"question": "Will Bitcoin ETF approval happen?"}, set(harness.DEFAULT_SYMBOLS)) == [
-        ("BTCUSDT", "asset_direct"),
+        ("BTCUSDT", SYMBOL_SOURCE_ASSET_DIRECT),
     ]
 
 
@@ -107,8 +111,17 @@ def test_fixture_report_fails_closed_until_min_points(tmp_path):
     assert report["verdict"]["status"] == STATUS_INSUFFICIENT_SAMPLE
     assert report["counts"]["snapshot_rows"] == 3
     assert report["counts"]["delta_rows"] == 2
-    assert report["counts"]["joined_rows"] == 2
+    assert report["counts"]["feature_points"] == 4
+    assert report["counts"]["joined_rows"] == 4
     assert report["counts"]["bucket_delta_counts"][BUCKET_EVENT_REG] == 2
+    assert report["counts"]["feature_bucket_counts"] == {
+        BUCKET_EVENT_REG: 2,
+        BUCKET_EVENT_REG_DIRECT: 2,
+    }
+    assert report["counts"]["feature_bucket_view_counts"] == {
+        "aggregate": 2,
+        "source_split": 2,
+    }
 
 
 def test_generic_event_reg_maps_to_btc_eth_macro_proxy(tmp_path):
@@ -127,6 +140,7 @@ def test_generic_event_reg_maps_to_btc_eth_macro_proxy(tmp_path):
     rows, _meta = harness.load_snapshot_rows(root, query_set_version="v2", mode="hourly-topn")
     deltas, delta_meta = harness.build_market_deltas(rows, allowed_symbols=set(harness.DEFAULT_SYMBOLS))
     features = harness.aggregate_features(deltas)
+    split_features = harness.aggregate_features(deltas, include_source_splits=True)
 
     assert delta_meta["skipped"] == {}
     assert delta_meta["markets_with_rows"] == 1
@@ -134,13 +148,69 @@ def test_generic_event_reg_maps_to_btc_eth_macro_proxy(tmp_path):
     assert delta_meta["symbol_source_counts"] == {"macro_event_reg": 6}
     assert len(deltas) == 4
     assert {(row["symbol"], row["symbol_source"]) for row in deltas} == {
-        ("BTCUSDT", "macro_event_reg"),
-        ("ETHUSDT", "macro_event_reg"),
+        ("BTCUSDT", SYMBOL_SOURCE_MACRO_EVENT_REG),
+        ("ETHUSDT", SYMBOL_SOURCE_MACRO_EVENT_REG),
     }
     assert {(row["symbol"], row["bucket"]) for row in features} == {
         ("BTCUSDT", BUCKET_EVENT_REG),
         ("ETHUSDT", BUCKET_EVENT_REG),
     }
+    assert {(row["symbol"], row["bucket"], row["bucket_view"]) for row in split_features} == {
+        ("BTCUSDT", BUCKET_EVENT_REG, "aggregate"),
+        ("ETHUSDT", BUCKET_EVENT_REG, "aggregate"),
+        ("BTCUSDT", BUCKET_EVENT_REG_MACRO, "source_split"),
+        ("ETHUSDT", BUCKET_EVENT_REG_MACRO, "source_split"),
+    }
+    assert {row["symbol_source"] for row in split_features if row["bucket"] == BUCKET_EVENT_REG_MACRO} == {
+        SYMBOL_SOURCE_MACRO_EVENT_REG,
+    }
+
+
+def test_event_reg_source_splits_keep_macro_and_direct_separate(tmp_path):
+    root = tmp_path / "pm"
+    start = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    for i, (direct_prob, macro_prob) in enumerate(((0.40, 0.55), (0.45, 0.58), (0.43, 0.56))):
+        ts = (start + dt.timedelta(minutes=15 * i)).isoformat()
+        _write_run(root, f"hourly-topn-{i}", ts, [
+            {
+                "market_id": "direct-btc",
+                "question": "Will the SEC approve a spot Bitcoin ETF?",
+                "event_title": "Bitcoin ETF approval",
+                "discovery_queries": ["kw:sec bitcoin"],
+                "outcome_prices": [direct_prob, 1 - direct_prob],
+            },
+            {
+                "market_id": "macro-101",
+                "question": "Will CPI increase crypto volatility?",
+                "event_title": "Crypto CPI macro event",
+                "discovery_queries": ["kw:cpi crypto"],
+                "outcome_prices": [macro_prob, 1 - macro_prob],
+            },
+        ])
+
+    rows, _meta = harness.load_snapshot_rows(root, query_set_version="v2", mode="hourly-topn")
+    deltas, delta_meta = harness.build_market_deltas(rows, allowed_symbols=set(harness.DEFAULT_SYMBOLS))
+    features = harness.aggregate_features(deltas, include_source_splits=True)
+    latest_ts = int((start + dt.timedelta(minutes=30)).timestamp() * 1000)
+
+    assert delta_meta["symbol_source_counts"] == {
+        SYMBOL_SOURCE_ASSET_DIRECT: 3,
+        SYMBOL_SOURCE_MACRO_EVENT_REG: 6,
+    }
+    btc_features = [
+        row for row in features
+        if row["snapshot_ts_ms"] == latest_ts and row["symbol"] == "BTCUSDT"
+    ]
+    by_bucket = {row["bucket"]: row for row in btc_features}
+    assert set(by_bucket) == {BUCKET_EVENT_REG, BUCKET_EVENT_REG_DIRECT, BUCKET_EVENT_REG_MACRO}
+    assert by_bucket[BUCKET_EVENT_REG]["bucket_view"] == "aggregate"
+    assert by_bucket[BUCKET_EVENT_REG]["n_markets"] == 2
+    assert by_bucket[BUCKET_EVENT_REG]["symbol_source_breakdown"] == {
+        SYMBOL_SOURCE_ASSET_DIRECT: 1,
+        SYMBOL_SOURCE_MACRO_EVENT_REG: 1,
+    }
+    assert by_bucket[BUCKET_EVENT_REG_DIRECT]["market_ids"] == ["direct-btc"]
+    assert by_bucket[BUCKET_EVENT_REG_MACRO]["market_ids"] == ["macro-101"]
 
 
 def test_unmapped_non_macro_rows_emit_compact_diagnostics(tmp_path):
@@ -201,12 +271,12 @@ def test_label_readiness_marks_unmatured_forward_target(tmp_path):
 
     readiness = report["counts"]["label_readiness"]
     assert report["counts"]["delta_rows"] == 1
-    assert report["counts"]["feature_points"] == 1
+    assert report["counts"]["feature_points"] == 2
     assert report["counts"]["joined_rows"] == 0
-    assert readiness["feature_horizon_pairs"] == 1
+    assert readiness["feature_horizon_pairs"] == 2
     assert readiness["joinable_pairs"] == 0
-    assert readiness["status_counts"] == {"exit_target_after_latest_price": 1}
-    assert readiness["by_horizon"]["15"] == {"exit_target_after_latest_price": 1}
+    assert readiness["status_counts"] == {"exit_target_after_latest_price": 2}
+    assert readiness["by_horizon"]["15"] == {"exit_target_after_latest_price": 2}
     assert readiness["oldest_unmatured_exit_target_utc"] == "2026-06-20T00:30:00+00:00"
 
 
@@ -404,8 +474,8 @@ def test_bh_gate_separates_raw_and_controlled_candidates(tmp_path):
         price_source="fixture",
     )
 
-    assert report["verdict"]["preliminary_raw_candidate_count"] == 1
-    assert report["verdict"]["preliminary_hac_candidate_count"] == 1
+    assert report["verdict"]["preliminary_raw_candidate_count"] == 2
+    assert report["verdict"]["preliminary_hac_candidate_count"] == 2
     assert report["verdict"]["significance_t_stat"] == "t_stat_hac"
     assert report["verdict"]["candidate_count"] == 0
     assert report["ic_results"][0]["p_value_approx_normal"] is not None
@@ -457,15 +527,16 @@ def test_pre_gate_hac_watchlist_is_diagnostic_not_candidate(tmp_path):
 
     assert report["verdict"]["status"] == STATUS_INSUFFICIENT_SAMPLE
     assert report["verdict"]["candidate_count"] == 0
-    assert report["verdict"]["pre_gate_hac_watchlist_count"] == 1
+    assert report["verdict"]["pre_gate_hac_watchlist_count"] == 2
     assert report["counts"]["min_samples_remaining_to_gate"] == 6
     assert report["counts"]["sample_gate_clock"]["status"] == "WAITING_FOR_SAMPLE"
     assert (
         report["counts"]["sample_gate_clock"]["fastest_gate_ready_utc"]
         == "2026-06-20T10:15:00+00:00"
     )
-    assert len(report["pre_gate_hac_watchlist"]) == 1
+    assert len(report["pre_gate_hac_watchlist"]) == 2
     watch = report["pre_gate_hac_watchlist"][0]
+    assert watch["bucket"] in {BUCKET_EVENT_REG, BUCKET_EVENT_REG_DIRECT}
     assert watch["sample_gap_to_min_points"] == 6
     assert watch["gate_blocker"] == "sample_floor_below_min_points"
     assert watch["bh_q_value_hac_approx"] is not None
