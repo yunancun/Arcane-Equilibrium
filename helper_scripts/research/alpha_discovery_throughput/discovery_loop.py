@@ -199,11 +199,16 @@ def _mm_secondary_blockers(detail: dict[str, Any]) -> list[dict[str, Any]]:
             })
 
     fee_path = _dict(detail.get("fee_path_feasibility"))
+    business_actionability = _dict(fee_path.get("business_path_actionability"))
     fee_status = str(fee_path.get("status") or "").upper()
     if fee_status == "STANDARD_VIP_TIER_CAN_CLEAR_BUT_SCALE_OR_CAPITAL_GATED":
         blockers.append({
             "blocker_class": "fee_or_scale",
             "blocker": "lower_standard_vip_fee_may_clear_but_scale_or_capital_gated",
+            "business_path_actionability_status": business_actionability.get("status"),
+            "operator_action_required": business_actionability.get(
+                "operator_action_required"
+            ),
             "break_even_maker_fee_bps_per_side": fee_path.get(
                 "break_even_maker_fee_bps_per_side"
             ),
@@ -213,6 +218,7 @@ def _mm_secondary_blockers(detail: dict[str, Any]) -> list[dict[str, Any]]:
             "first_standard_vip_tier_clearing_break_even": fee_path.get(
                 "first_standard_vip_tier_clearing_break_even"
             ),
+            "business_path_actionability": business_actionability or None,
         })
     elif fee_status == "NO_STANDARD_VIP_TIER_CLEARS_BREAK_EVEN":
         blockers.append({
@@ -267,6 +273,7 @@ def classify_profitability_blocker(
         failure_status = str(failure.get("status") or "").upper()
         secondary = _mm_secondary_blockers(detail)
         fee_path = _dict(detail.get("fee_path_feasibility"))
+        business_actionability = _dict(fee_path.get("business_path_actionability"))
         fee_status = str(fee_path.get("status") or "").upper()
         cost_wall = _dict(detail.get("cost_wall_summary"))
         sample_cost_wall = _dict(detail.get("sample_gated_cost_wall_summary"))
@@ -313,6 +320,15 @@ def classify_profitability_blocker(
                         ),
                         "fee_reduction_needed_bps_per_side": gross_decomp.get(
                             "fee_reduction_needed_bps_per_side"
+                        ),
+                        "business_path_actionability_status": business_actionability.get(
+                            "status"
+                        ),
+                        "business_path_operator_action_required": (
+                            business_actionability.get("operator_action_required")
+                        ),
+                        "business_path_actionability": (
+                            business_actionability or None
                         ),
                         "best_sample_gated_gross_cell": gross_decomp.get(
                             "best_sample_gated_gross_cell"
@@ -374,6 +390,12 @@ def classify_profitability_blocker(
                     "sample_gated_cell_count": sample_cost_wall.get(
                         "sample_gated_cell_count"
                     ),
+                    "business_path_actionability_status": business_actionability.get(
+                        "status"
+                    ),
+                    "business_path_operator_action_required": (
+                        business_actionability.get("operator_action_required")
+                    ),
                 },
             )
         if cost_shortfall is not None and cost_shortfall > 0:
@@ -407,6 +429,13 @@ def classify_profitability_blocker(
                     "fee_reduction_needed_bps_per_side": fee_path.get(
                         "fee_reduction_needed_bps_per_side"
                     ),
+                    "business_path_actionability_status": business_actionability.get(
+                        "status"
+                    ),
+                    "business_path_operator_action_required": (
+                        business_actionability.get("operator_action_required")
+                    ),
+                    "business_path_actionability": business_actionability or None,
                 },
             )
 

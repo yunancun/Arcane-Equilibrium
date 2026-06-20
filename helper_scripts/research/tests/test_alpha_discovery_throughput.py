@@ -284,6 +284,16 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
                     "break_even_maker_fee_bps_per_side": 1.135,
                     "fee_reduction_needed_bps_per_side": 0.865,
                     "first_standard_vip_tier_clearing_break_even": {"tier": "VIP5"},
+                    "business_path_actionability": {
+                        "status": "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED",
+                        "first_clearing_tier": "VIP5",
+                        "volume_gap_usd": 249_131_074.44,
+                        "volume_multiplier_needed": 287.712,
+                        "asset_gap_usd": 2_000_000.0,
+                        "operator_action_required": (
+                            "do_not_treat_lower_fee_case_as_actionable_at_current_scale"
+                        ),
+                    },
                 },
             },
         },
@@ -335,6 +345,9 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
     )
     assert blockers["mm_verdict_maker_edge"]["best_sample_gated_gross_edge_bps"] == 2.27
     assert blockers["mm_verdict_maker_edge"]["best_gross_cell_net_bps"] == -1.73
+    assert blockers["mm_verdict_maker_edge"]["business_path_actionability_status"] == (
+        "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED"
+    )
     mm_secondary = blockers["mm_verdict_maker_edge"]["secondary_blockers"]
     assert [row["blocker_class"] for row in mm_secondary] == [
         "cost_wall",
@@ -352,6 +365,12 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
     assert mm_secondary[1]["best_sample_gated_net_bps"] == -1.73
     assert mm_secondary[2]["blocker"] == (
         "live_markout_current_maker_fee_exceeds_best_break_even"
+    )
+    assert mm_secondary[3]["business_path_actionability_status"] == (
+        "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED"
+    )
+    assert mm_secondary[3]["operator_action_required"] == (
+        "do_not_treat_lower_fee_case_as_actionable_at_current_scale"
     )
     assert blockers["polymarket_leadlag_ic"]["sample_gate_eta_utc"] == (
         "2026-06-20T19:52:03+00:00"
