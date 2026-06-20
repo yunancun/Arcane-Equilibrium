@@ -645,3 +645,10 @@
 
 - Production logs showed daily LinUCB and API scheduler MLDE reads timing out on the slow `learning.mlde_edge_training_rows` view path. LinUCB and shadow advisor now preserve the MLDE training-row contract while reading base tables directly, avoiding the `trading.signals` lateral bulk-decompress path.
 - Routine LinUCB windows default to 30d with 5s timeout; remote read-only smoke of patched modules showed 30d all-arm LinUCB max arm 1.69s and shadow aggregate ~0.5s. Boundary: source/tests/docs only in this checkpoint; remote smoke was read-only and not an alpha promotion proof.
+
+## 2026-06-20 fill_sim refresh guard + L1 stale diagnosis
+
+- Added bounded `fill_sim_refresh_cron.sh` and installed Linux cron at 06:05 UTC. It writes candidate reports first and only replaces production fill_sim report when candidate has no abort, non-empty L1, non-empty symbols, and L1 data age <=72h. It prevents the failure observed this run: `HOURS=2` refresh produced empty L1 and initially overwrote production before the guard fix.
+- `fill_sim.py` now records `l1_min_ts/l1_max_ts/l1_max_age_hours`; `recorder_mm_verdict_cron.sh` rejects empty/stale L1 data even when `generated_at` is fresh.
+- Runtime recovery: explicit 90m post-fix window restored `/tmp/openclaw/research/fillsim/fillsim_report.json` with `l1_rows_post_filter=1,750,468`, fill_only `n=15,208`, adverse@15=1.477bp, net_maker@15=-4.701bp, `l1_max_age_hours=58.114`. Manual MM verdict then had `adverse_selection_usable=true`, sample=16, all symbol net edges still negative.
+- Root blocker found: `market.l1_events` stopped at `2026-06-17 21:55:45+02` while trades/ob_top are fresh. `recorder_health_cron.sh` installed at 06:23 UTC and manual run appended `[RECORDER-HEALTH] recorder stalled` critical alert. Next PM target is L1 event recorder repair; without it, fill_sim data-age gate will disable adverse selection again around 72h from L1 max.
