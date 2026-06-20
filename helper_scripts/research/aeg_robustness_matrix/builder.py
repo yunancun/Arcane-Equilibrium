@@ -405,9 +405,13 @@ def build_matrix(
             rows.append({col: row.get(col) for col in MATRIX_COLUMNS})
 
     final_counts = Counter(row["final_label"] for row in rows)
+    candidate_summary = candidate_metrics.get("summary") or {}
     summary = {
         "run_id": run_id,
         "candidate_id": breadth_summary.get("candidate_id"),
+        "candidate_key": candidate_summary.get("candidate_key"),
+        "candidate_metrics_source_report_type": candidate_summary.get("source_report_type"),
+        "candidate_metrics_selected_variant": candidate_summary.get("selected_variant"),
         "verdict_gate_version": VERDICT_GATE_VERSION,
         "row_count": len(rows),
         "regime_slice_count": len(regime_slices(regime_artifact)),
@@ -434,7 +438,7 @@ def build_matrix(
             "fnd2_universe_id": (
                 breadth_summary.get("fnd2_universe_id") or regime_summary.get("fnd2_universe_id")
             ),
-            "candidate_metrics_run_id": (candidate_metrics.get("summary") or {}).get("run_id"),
+            "candidate_metrics_run_id": candidate_summary.get("run_id"),
         },
     }
     return rows, summary

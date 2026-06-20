@@ -140,12 +140,73 @@ def _finish_blocker_row(
     return row
 
 
+def _arm_candidate_key(arm: dict[str, Any]) -> str:
+    detail = _dict(arm.get("detail"))
+    return str(detail.get("candidate_key") or "").strip()
+
+
+def _latest_aeg_matrix_review_summary(arms: list[dict[str, Any]]) -> dict[str, Any]:
+    for arm in arms:
+        arm_id = str(arm.get("arm_id") or arm.get("name") or "unknown")
+        if arm_id != "aeg_robustness_matrix":
+            continue
+        detail = _dict(arm.get("detail"))
+        candidate_key = str(detail.get("candidate_key") or "").strip()
+        row_count = _int(arm.get("sample_count") or detail.get("row_count"))
+        counts = _dict(detail.get("final_label_counts"))
+        durable = _int(
+            detail.get("durable_candidate_rows")
+            if detail.get("durable_candidate_rows") is not None
+            else counts.get("durable-alpha candidate")
+        )
+        if not candidate_key or row_count <= 0:
+            return {}
+        status = (
+            "AEG_MATRIX_DURABLE_CANDIDATE_ROWS"
+            if durable > 0
+            else "AEG_MATRIX_NO_DURABLE_CANDIDATE_ROWS"
+        )
+        return {
+            "schema_version": "aeg_matrix_candidate_review_v1",
+            "status": status,
+            "candidate_key": candidate_key,
+            "candidate_id": detail.get("candidate_id"),
+            "run_id": detail.get("run_id"),
+            "row_count": row_count,
+            "durable_candidate_rows": durable,
+            "final_label_counts": counts,
+            "coverage_gate_status": detail.get("coverage_gate_status"),
+            "execution_realism_mode": detail.get("execution_realism_mode"),
+            "candidate_metrics_source_report_type": detail.get(
+                "candidate_metrics_source_report_type"
+            ),
+            "candidate_metrics_selected_variant": detail.get(
+                "candidate_metrics_selected_variant"
+            ),
+        }
+    return {}
+
+
+def _aeg_review_consumes_arm_candidate(
+    arm: dict[str, Any],
+    aeg_review: dict[str, Any],
+) -> bool:
+    if not aeg_review:
+        return False
+    candidate_key = _arm_candidate_key(arm)
+    return bool(candidate_key and candidate_key == str(aeg_review.get("candidate_key") or ""))
+
+
 def _candidate_artifact_dependency_summary(
     arms: list[dict[str, Any]],
     decisions: list[dict[str, Any]],
+    *,
+    aeg_review: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    aeg_review = aeg_review or _latest_aeg_matrix_review_summary(arms)
     decisions_by_id = {str(row.get("arm_id")): row for row in decisions}
     ready: list[dict[str, Any]] = []
+    already_reviewed: list[dict[str, Any]] = []
     for arm in arms:
         arm_id = str(arm.get("arm_id") or arm.get("name") or "unknown")
         if arm_id == "aeg_robustness_matrix":
@@ -156,17 +217,39 @@ def _candidate_artifact_dependency_summary(
         artifacts_ready = bool(arm.get("artifacts_ready"))
         if action not in {READY_FOR_AEG_CHAIN, READY_FOR_PROBE} and not artifacts_ready:
             continue
+        if (
+            _aeg_review_consumes_arm_candidate(arm, aeg_review)
+            and aeg_review.get("status") == "AEG_MATRIX_NO_DURABLE_CANDIDATE_ROWS"
+        ):
+            already_reviewed.append({
+                "arm_id": arm_id,
+                "action": action,
+                "gate_status": gate_status,
+                "sample_count": decision.get("sample_count"),
+                "artifacts_ready": artifacts_ready,
+                "candidate_key": _arm_candidate_key(arm),
+                "aeg_matrix_run_id": aeg_review.get("run_id"),
+            })
+            continue
         ready.append({
             "arm_id": arm_id,
             "action": action,
             "gate_status": gate_status,
             "sample_count": decision.get("sample_count"),
             "artifacts_ready": artifacts_ready,
+            "candidate_key": _arm_candidate_key(arm) or None,
         })
     if ready:
         status = "CANDIDATE_ARTIFACTS_AVAILABLE_FOR_ROBUSTNESS"
         reason = "upstream_ready_or_probe_artifacts_available"
         next_trigger = "feed_candidate_artifacts_into_robustness_matrix"
+        engineering_actionable = True
+    elif already_reviewed:
+        status = "CANDIDATE_ARTIFACTS_ALREADY_REVIEWED_NO_DURABLE_ROWS"
+        reason = "latest_aeg_matrix_reviewed_candidate_without_durable_rows"
+        next_trigger = (
+            "build_candidate_pnl_execution_realism_and_breadth_evidence_before_rerunning_matrix"
+        )
         engineering_actionable = True
     else:
         status = "NO_CANDIDATE_ARTIFACTS_AVAILABLE_FOR_ROBUSTNESS"
@@ -181,6 +264,9 @@ def _candidate_artifact_dependency_summary(
         "engineering_actionable": engineering_actionable,
         "candidate_artifact_count": len(ready),
         "candidate_artifacts": ready[:8],
+        "already_reviewed_candidate_artifact_count": len(already_reviewed),
+        "already_reviewed_candidate_artifacts": already_reviewed[:8],
+        "latest_aeg_matrix_review": aeg_review or None,
     }
 
 
@@ -457,6 +543,36 @@ def classify_profitability_blocker(
     row = _base_blocker_row(arm, decision)
 
     if action == READY_FOR_AEG_CHAIN:
+        aeg_review = _dict(detail.get("aeg_matrix_review"))
+        if aeg_review.get("status") == "AEG_MATRIX_NO_DURABLE_CANDIDATE_ROWS":
+            return _finish_blocker_row(
+                row,
+                blocker_class="robustness_wait",
+                primary_blocker="aeg_matrix_review_no_durable_candidate_rows",
+                next_trigger=(
+                    "build_candidate_pnl_execution_realism_and_breadth_evidence_before_promotion"
+                ),
+                engineering_actionable=True,
+                extra={
+                    "candidate_key": detail.get("candidate_key"),
+                    "aeg_matrix_review_status": aeg_review.get("status"),
+                    "aeg_matrix_run_id": aeg_review.get("run_id"),
+                    "aeg_matrix_candidate_id": aeg_review.get("candidate_id"),
+                    "aeg_matrix_row_count": aeg_review.get("row_count"),
+                    "aeg_matrix_durable_candidate_rows": aeg_review.get(
+                        "durable_candidate_rows"
+                    ),
+                    "aeg_matrix_final_label_counts": aeg_review.get(
+                        "final_label_counts"
+                    ),
+                    "aeg_matrix_coverage_gate_status": aeg_review.get(
+                        "coverage_gate_status"
+                    ),
+                    "aeg_matrix_execution_realism_mode": aeg_review.get(
+                        "execution_realism_mode"
+                    ),
+                },
+            )
         return _finish_blocker_row(
             row,
             blocker_class="candidate_review_ready",
@@ -941,11 +1057,20 @@ def build_profitability_blocker_scorecard(
     min_samples: int = 30,
 ) -> dict[str, Any]:
     """Summarize cross-arm reasons we still have no promotable profit edge."""
-    dependency = _candidate_artifact_dependency_summary(arms, decisions)
+    aeg_review = _latest_aeg_matrix_review_summary(arms)
+    dependency = _candidate_artifact_dependency_summary(
+        arms,
+        decisions,
+        aeg_review=aeg_review,
+    )
     normalized_arms: list[dict[str, Any]] = []
     for arm in arms:
         arm_copy = dict(arm)
         arm_id = str(arm_copy.get("arm_id") or arm_copy.get("name") or "unknown")
+        if _aeg_review_consumes_arm_candidate(arm_copy, aeg_review):
+            detail = dict(_dict(arm_copy.get("detail")))
+            detail["aeg_matrix_review"] = aeg_review
+            arm_copy["detail"] = detail
         if arm_id == "aeg_robustness_matrix":
             detail = dict(_dict(arm_copy.get("detail")))
             detail["candidate_artifact_dependency"] = dependency

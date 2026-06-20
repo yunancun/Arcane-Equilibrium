@@ -927,6 +927,19 @@ def _polymarket_sample_gate_recheck_scorecard(
     }
 
 
+def _polymarket_candidate_key(candidate: dict[str, Any]) -> str | None:
+    bucket = str(candidate.get("bucket") or "").strip()
+    symbol = str(candidate.get("symbol") or "").strip()
+    horizon = candidate.get("horizon_minutes")
+    try:
+        horizon_text = f"{int(float(horizon))}m"
+    except (TypeError, ValueError):
+        horizon_text = f"{horizon}m" if horizon is not None else ""
+    if not (bucket and symbol and horizon_text):
+        return None
+    return f"polymarket_leadlag_ic|{bucket}|{symbol}|{horizon_text}"
+
+
 def collect_polymarket_leadlag_arm(
     data_dir: Path,
     *,
@@ -975,6 +988,17 @@ def collect_polymarket_leadlag_arm(
         else []
     )
     best_watch = watchlist[0] if watchlist and isinstance(watchlist[0], dict) else None
+    candidates = (
+        payload.get("candidates")
+        if isinstance(payload.get("candidates"), list)
+        else []
+    )
+    best_candidate = (
+        candidates[0]
+        if candidates and isinstance(candidates[0], dict)
+        else None
+    )
+    candidate_key = _polymarket_candidate_key(best_candidate or {})
     sample_gate_recheck = _polymarket_sample_gate_recheck_scorecard(
         now_utc=now_utc,
         sample_count=sample_count,
@@ -1018,6 +1042,8 @@ def collect_polymarket_leadlag_arm(
             "verdict_status": status,
             "reason": verdict.get("reason"),
             "candidate_count": candidate_count,
+            "candidate_key": candidate_key,
+            "best_candidate": best_candidate,
             "preliminary_raw_candidate_count": verdict.get("preliminary_raw_candidate_count"),
             "preliminary_hac_candidate_count": verdict.get("preliminary_hac_candidate_count"),
             "pre_gate_hac_watchlist_count": verdict.get("pre_gate_hac_watchlist_count"),
@@ -1125,6 +1151,13 @@ def collect_aeg_matrix_arm(data_dir: Path) -> dict[str, Any]:
         detail={
             "run_id": payload.get("run_id"),
             "candidate_id": payload.get("candidate_id"),
+            "candidate_key": payload.get("candidate_key"),
+            "candidate_metrics_source_report_type": payload.get(
+                "candidate_metrics_source_report_type"
+            ),
+            "candidate_metrics_selected_variant": payload.get(
+                "candidate_metrics_selected_variant"
+            ),
             "final_label_counts": counts,
             "durable_candidate_rows": durable,
             "coverage_gate_status": payload.get("coverage_gate_status"),
