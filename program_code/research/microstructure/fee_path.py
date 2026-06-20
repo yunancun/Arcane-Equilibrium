@@ -127,6 +127,75 @@ def _extract_best_break_even_cell(scorecard: dict[str, Any] | None) -> dict[str,
     return None
 
 
+def _gap_value(gap: dict[str, Any] | None, key: str) -> float | None:
+    if not isinstance(gap, dict):
+        return None
+    return _f(gap.get(key))
+
+
+def _build_business_path_actionability(
+    *,
+    status: str,
+    current_maker_fee_bps_per_side: float,
+    break_even_fee: float | None,
+    first_clear: dict[str, Any] | None,
+) -> dict[str, Any]:
+    base: dict[str, Any] = {
+        "status": status,
+        "current_maker_fee_bps_per_side": _r(current_maker_fee_bps_per_side, 3),
+        "break_even_maker_fee_bps_per_side": _r(break_even_fee, 3),
+        "first_clearing_tier": None,
+        "clearing_tier_maker_fee_bps_per_side": None,
+        "volume_gap_usd": None,
+        "volume_multiplier_needed": None,
+        "asset_gap_usd": None,
+        "research_implication": (
+            "lower_fee scenarios are not strategy evidence unless the account can "
+            "actually access that fee path and the edge survives cross-regime review"
+        ),
+    }
+    if status == "CURRENT_ACCOUNT_FEE_CLEARS_BREAK_EVEN":
+        base["operator_action_required"] = (
+            "fee_path_not_the_current_blocker_continue_with_statistical_edge_review"
+        )
+        return base
+    if status == "NO_STANDARD_VIP_TIER_CLEARS_BREAK_EVEN":
+        base["operator_action_required"] = "seek_new_signal_or_nonstandard_rebate_path"
+        return base
+    if not first_clear:
+        base["operator_action_required"] = "find_sample_gated_break_even_cell_first"
+        return base
+
+    volume = first_clear.get("volume_30d") if isinstance(first_clear, dict) else None
+    asset = first_clear.get("asset_balance") if isinstance(first_clear, dict) else None
+    volume_gap = _gap_value(volume, "gap_usd") or 0.0
+    asset_gap = _gap_value(asset, "gap_usd") or 0.0
+    base.update({
+        "first_clearing_tier": first_clear.get("tier"),
+        "clearing_tier_maker_fee_bps_per_side": first_clear.get(
+            "maker_fee_bps_per_side"
+        ),
+        "volume_gap_usd": _r(volume_gap, 2),
+        "volume_multiplier_needed": (
+            _r(_gap_value(volume, "multiplier_needed"), 3)
+            if _gap_value(volume, "multiplier_needed") is not None
+            else None
+        ),
+        "asset_gap_usd": _r(asset_gap, 2),
+    })
+    if volume_gap <= 0.0 and asset_gap <= 0.0:
+        base["status"] = "STANDARD_FEE_TIER_CAPACITY_PROXY_MEETS_THRESHOLD"
+        base["operator_action_required"] = (
+            "verify_actual_account_fee_then_rerun_cross_regime_mm_review"
+        )
+    else:
+        base["status"] = "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED"
+        base["operator_action_required"] = (
+            "do_not_treat_lower_fee_case_as_actionable_at_current_scale"
+        )
+    return base
+
+
 def build_maker_fee_path_feasibility_scorecard(
     maker_fee_sensitivity_scorecard: dict[str, Any] | None,
     fee_capacity_30d: dict[str, Any] | None,
@@ -162,6 +231,17 @@ def build_maker_fee_path_feasibility_scorecard(
         "fee_reduction_needed_bps_per_side": None,
         "standard_vip_tiers": [],
         "first_standard_vip_tier_clearing_break_even": None,
+        "business_path_actionability": {
+            "status": "NO_SAMPLE_GATED_BREAK_EVEN_CELL",
+            "current_maker_fee_bps_per_side": _r(current_maker_fee_bps_per_side, 3),
+            "break_even_maker_fee_bps_per_side": None,
+            "first_clearing_tier": None,
+            "operator_action_required": "find_sample_gated_break_even_cell_first",
+            "research_implication": (
+                "lower_fee scenarios are not strategy evidence unless the account can "
+                "actually access that fee path and the edge survives cross-regime review"
+            ),
+        },
         "note": (
             "Research/business feasibility lens only. A positive fee tier still "
             "requires actual account eligibility, My Fee Rate verification, and "
@@ -214,6 +294,12 @@ def build_maker_fee_path_feasibility_scorecard(
         out["status"] = "STANDARD_VIP_TIER_CAN_CLEAR_BUT_SCALE_OR_CAPITAL_GATED"
     else:
         out["status"] = "NO_STANDARD_VIP_TIER_CLEARS_BREAK_EVEN"
+    out["business_path_actionability"] = _build_business_path_actionability(
+        status=out["status"],
+        current_maker_fee_bps_per_side=float(current_maker_fee_bps_per_side),
+        break_even_fee=break_even_fee,
+        first_clear=first_clear,
+    )
 
     return out
 
