@@ -189,6 +189,57 @@ def test_compute_ic_reports_overlap_adjusted_sample_floor():
     assert result[0]["n_nonoverlap_timestamps"] == 2
     assert result[0]["overlap_adjusted_sample_floor"] == 2
     assert result[0]["overlap_warning"] is True
+    assert result[0]["hac_lag"] == 3
+    assert result[0]["hac_method"] == "newey_west_slope_t_stat_bartlett"
+
+
+def test_hac_gate_blocks_naive_t_candidate():
+    base = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    xs = [
+        0.4676, 0.8674, 2.079, 3.0293, 4.167, 4.7196, 5.917, 6.8497,
+        7.7851, 8.8312, 9.8975, 10.9426, 11.8187, 13.0844, 13.8905,
+        14.3604, 16.2381, 16.9216, 17.8513, 19.0537, 20.046, 21.0106,
+        21.8291, 23.0383, 23.6925, 25.2887, 25.7469, 26.9587, 28.0038,
+        29.0438, 29.9507, 31.0966, 31.2731, 32.9532, 33.9421, 34.8873,
+        36.2801, 36.7787, 37.9574, 38.5666,
+    ]
+    ys = [
+        0.5454, -4.6783, -9.0109, -1.1081, 1.0908, 0.8023, 1.2591,
+        -3.2387, -6.0902, -4.1393, -10.0499, -8.1082, -12.4667,
+        -10.638, -12.8201, -6.1387, -2.0017, -3.1903, -8.3625, -9.5643,
+        -8.4517, -10.2816, -8.0552, -3.785, -3.2303, -3.634, -0.539,
+        -0.8344, 2.3764, 1.7342, 7.0416, 6.1297, 2.7164, 3.5499, 1.9467,
+        -0.4158, 0.0704, 2.9901, -3.073, -2.1868,
+    ]
+    rows = []
+    for i, (xval, yval) in enumerate(zip(xs, ys)):
+        ts_ms = int((base + dt.timedelta(minutes=15 * i)).timestamp() * 1000)
+        rows.append({
+            "bucket": BUCKET_EVENT_REG,
+            "symbol": "BTCUSDT",
+            "horizon_minutes": 60,
+            "snapshot_ts_ms": ts_ms,
+            "snapshot_ts_utc": harness._ms_to_iso(ts_ms),
+            "mean_delta_prob_yes": xval,
+            "forward_return_bps": yval,
+        })
+
+    result = harness.compute_ic(rows)
+    eligible, preliminary_raw, preliminary_hac, candidates = harness._partition_ic_candidates(
+        result,
+        min_points=10,
+        min_abs_ic=0.15,
+        min_abs_t=2.0,
+        max_bh_q=1.0,
+    )
+
+    assert len(eligible) == 1
+    assert len(preliminary_raw) == 1
+    assert abs(result[0]["t_stat"]) > 2.0
+    assert result[0]["t_stat_hac"] is not None
+    assert abs(result[0]["t_stat_hac"]) < 2.0
+    assert len(preliminary_hac) == 0
+    assert len(candidates) == 0
 
 
 def test_bh_gate_separates_raw_and_controlled_candidates(tmp_path):
@@ -233,9 +284,13 @@ def test_bh_gate_separates_raw_and_controlled_candidates(tmp_path):
     )
 
     assert report["verdict"]["preliminary_raw_candidate_count"] == 1
+    assert report["verdict"]["preliminary_hac_candidate_count"] == 1
+    assert report["verdict"]["significance_t_stat"] == "t_stat_hac"
     assert report["verdict"]["candidate_count"] == 0
     assert report["ic_results"][0]["p_value_approx_normal"] is not None
     assert report["ic_results"][0]["bh_q_value_approx"] is not None
+    assert report["ic_results"][0]["p_value_hac_approx_normal"] is not None
+    assert report["ic_results"][0]["bh_q_value_hac_approx"] is not None
 
 
 def test_source_has_readonly_pg_and_no_trading_tokens():
