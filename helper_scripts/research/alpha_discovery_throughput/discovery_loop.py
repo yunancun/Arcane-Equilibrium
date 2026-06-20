@@ -399,6 +399,58 @@ def classify_profitability_blocker(
                 },
             )
 
+    if arm_id == "flash_dip_execution_realism":
+        verdict = str(detail.get("verdict_status") or "").upper()
+        short_exit_status = str(detail.get("short_exit_status") or "").upper()
+        fail_reasons = [str(item) for item in _list(detail.get("fail_reasons"))]
+        if verdict == "EXECUTION_REALISM_BLOCKED" and short_exit_status == "SHORT_EXIT_RESEARCH_SIGNAL":
+            return _finish_blocker_row(
+                row,
+                blocker_class="data_coverage",
+                primary_blocker="daily_exit_execution_realism_blocked_short_exit_needs_l1_replay",
+                next_trigger="run_l1_short_exit_replay_with_candidate_window_coverage_before_any_retune",
+                engineering_actionable=True,
+                extra={
+                    "candidate_label": detail.get("candidate_label"),
+                    "k_pct": detail.get("k_pct"),
+                    "gate_buffer_bps": detail.get("gate_buffer_bps"),
+                    "gate_filled": detail.get("gate_filled"),
+                    "gate_distinct_days": detail.get("gate_distinct_days"),
+                    "gate_annret": detail.get("gate_annret"),
+                    "short_exit_status": short_exit_status,
+                    "best_short_exit_horizon": detail.get("best_short_exit_horizon"),
+                    "best_short_exit_annret": detail.get("best_short_exit_annret"),
+                    "best_short_exit_n_filled": detail.get("best_short_exit_n_filled"),
+                    "best_short_exit_days": detail.get("best_short_exit_days"),
+                },
+            )
+        if verdict == "EXECUTION_REALISM_BLOCKED":
+            return _finish_blocker_row(
+                row,
+                blocker_class="rejected_no_edge",
+                primary_blocker="execution_realism_blocked_without_short_exit_research_signal",
+                next_trigger="do_not_retune_flash_dip_shallow_k_without_new_execution_evidence",
+                extra={
+                    "candidate_label": detail.get("candidate_label"),
+                    "fail_reasons": fail_reasons,
+                    "gate_annret": detail.get("gate_annret"),
+                    "gate_maxdd": detail.get("gate_maxdd"),
+                },
+            )
+        if verdict == "EXECUTION_REALISM_INSUFFICIENT_SAMPLE":
+            return _finish_blocker_row(
+                row,
+                blocker_class="sample_gate",
+                primary_blocker="execution_realism_sample_below_gate",
+                next_trigger="continue_read_only_execution_realism_capture_until_min_samples",
+                extra={
+                    "candidate_label": detail.get("candidate_label"),
+                    "fail_reasons": fail_reasons,
+                    "gate_filled": detail.get("gate_filled"),
+                    "gate_distinct_days": detail.get("gate_distinct_days"),
+                },
+            )
+
     if arm_id == "flash_dip_buy_demo":
         touchability = _dict(detail.get("touchability"))
         if gate_status == "CAPTURING_NO_TOUCH":
