@@ -140,6 +140,36 @@ def _finish_blocker_row(
     return row
 
 
+def _mm_lower_fee_history_extra(detail: dict[str, Any]) -> dict[str, Any]:
+    history = _dict(detail.get("history_scorecard"))
+    stability = _dict(history.get("lower_fee_break_even_stability"))
+    return {
+        "history_scorecard_status": history.get("status"),
+        "history_scorecard_reason": history.get("reason"),
+        "lower_fee_break_even_stability_status": stability.get("status"),
+        "lower_fee_break_even_stability_reason": stability.get("reason"),
+        "lower_fee_break_even_windows": (
+            stability.get("lower_fee_break_even_windows")
+            if "lower_fee_break_even_windows" in stability
+            else history.get("lower_fee_break_even_windows")
+        ),
+        "lower_fee_break_even_distinct_window_dates": (
+            stability.get("distinct_window_dates")
+            or history.get("lower_fee_break_even_distinct_window_dates")
+        ),
+        "repeated_lower_fee_break_even_key_count": stability.get(
+            "repeated_key_count"
+        ),
+        "best_lower_fee_break_even_window": (
+            stability.get("best_lower_fee_break_even_window")
+            or history.get("best_lower_fee_break_even_window")
+        ),
+        "best_repeated_lower_fee_break_even_key": stability.get(
+            "best_repeated_lower_fee_break_even_key"
+        ),
+    }
+
+
 def _mm_secondary_blockers(detail: dict[str, Any]) -> list[dict[str, Any]]:
     blockers: list[dict[str, Any]] = []
     gross_decomp = _dict(detail.get("gross_edge_cost_decomposition"))
@@ -197,6 +227,37 @@ def _mm_secondary_blockers(detail: dict[str, Any]) -> list[dict[str, Any]]:
                 "best_fee_round_trip_shortfall_bps": shortfall,
                 "best_n_maker_fills": cost_wall.get("best_n_maker_fills"),
             })
+
+    history_extra = _mm_lower_fee_history_extra(detail)
+    history_status = str(
+        history_extra.get("lower_fee_break_even_stability_status") or ""
+    ).upper()
+    if history_status in {
+        "LOWER_FEE_BREAK_EVEN_ROTATES_OR_DATE_INSUFFICIENT",
+        "LOWER_FEE_BREAK_EVEN_REPEATS_BUT_DATE_INSUFFICIENT",
+    }:
+        blockers.append({
+            "blocker_class": "fee_or_scale",
+            "blocker": "lower_fee_break_even_not_stable_across_distinct_windows",
+            "lower_fee_break_even_stability_status": history_extra.get(
+                "lower_fee_break_even_stability_status"
+            ),
+            "lower_fee_break_even_stability_reason": history_extra.get(
+                "lower_fee_break_even_stability_reason"
+            ),
+            "lower_fee_break_even_windows": history_extra.get(
+                "lower_fee_break_even_windows"
+            ),
+            "lower_fee_break_even_distinct_window_dates": history_extra.get(
+                "lower_fee_break_even_distinct_window_dates"
+            ),
+            "repeated_lower_fee_break_even_key_count": history_extra.get(
+                "repeated_lower_fee_break_even_key_count"
+            ),
+            "best_lower_fee_break_even_window": history_extra.get(
+                "best_lower_fee_break_even_window"
+            ),
+        })
 
     fee_path = _dict(detail.get("fee_path_feasibility"))
     business_actionability = _dict(fee_path.get("business_path_actionability"))
@@ -330,6 +391,7 @@ def classify_profitability_blocker(
                         "business_path_actionability": (
                             business_actionability or None
                         ),
+                        **_mm_lower_fee_history_extra(detail),
                         "best_sample_gated_gross_cell": gross_decomp.get(
                             "best_sample_gated_gross_cell"
                         ),

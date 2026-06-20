@@ -849,6 +849,19 @@ def _load_fillsim_history_scorecard(path):
         "best_sample_gated_break_even_window": rep.get(
             "best_sample_gated_break_even_window"
         ),
+        "lower_fee_break_even_windows": rep.get("lower_fee_break_even_windows"),
+        "lower_fee_break_even_distinct_window_dates": rep.get(
+            "lower_fee_break_even_distinct_window_dates"
+        ),
+        "repeated_lower_fee_break_even_keys": rep.get(
+            "repeated_lower_fee_break_even_keys"
+        ),
+        "best_lower_fee_break_even_window": rep.get(
+            "best_lower_fee_break_even_window"
+        ),
+        "lower_fee_break_even_stability": rep.get(
+            "lower_fee_break_even_stability"
+        ),
         "reason": rep.get("reason"),
     })
     return info

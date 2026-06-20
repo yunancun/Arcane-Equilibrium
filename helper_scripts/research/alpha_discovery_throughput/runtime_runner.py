@@ -711,6 +711,9 @@ def collect_mm_verdict_arm(
                     "gross_edge_cost_decomposition"
                 ),
                 "fee_path_feasibility": status.get("fee_path_feasibility"),
+                "history_scorecard": (status.get("fillsim") or {}).get(
+                    "history_scorecard"
+                ),
                 "horizon_scorecard": (status.get("fillsim") or {}).get("horizon_scorecard"),
                 "walk_forward_failure_summary": (
                     ((status.get("fillsim") or {}).get("walk_forward_feature_scorecard") or {})
@@ -739,6 +742,7 @@ def collect_mm_verdict_arm(
             "sample_gated_cost_wall_summary": status.get("sample_gated_cost_wall_summary"),
             "gross_edge_cost_decomposition": status.get("gross_edge_cost_decomposition"),
             "fee_path_feasibility": status.get("fee_path_feasibility"),
+            "history_scorecard": (status.get("fillsim") or {}).get("history_scorecard"),
             "horizon_scorecard": (status.get("fillsim") or {}).get("horizon_scorecard"),
             "walk_forward_failure_summary": (
                 ((status.get("fillsim") or {}).get("walk_forward_feature_scorecard") or {})

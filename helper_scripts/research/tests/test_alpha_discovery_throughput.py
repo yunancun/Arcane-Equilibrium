@@ -279,6 +279,34 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
                         },
                     },
                 },
+                "history_scorecard": {
+                    "status": "HISTORY_INSUFFICIENT_WINDOWS",
+                    "reason": "below_min_windows_or_dates",
+                    "valid_windows": 3,
+                    "distinct_window_dates": ["2026-06-20"],
+                    "lower_fee_break_even_windows": 3,
+                    "lower_fee_break_even_distinct_window_dates": ["2026-06-20"],
+                    "repeated_lower_fee_break_even_keys": [],
+                    "best_lower_fee_break_even_window": {
+                        "break_even_maker_fee_bps_per_side": 1.135,
+                        "cell": {
+                            "key": "edge_scorecard|per_symbol_primary_queue|LABUSDT|back|informed_skip|fill_only",
+                            "symbol": "LABUSDT",
+                            "policy": "informed_skip",
+                        },
+                    },
+                    "lower_fee_break_even_stability": {
+                        "status": "LOWER_FEE_BREAK_EVEN_ROTATES_OR_DATE_INSUFFICIENT",
+                        "reason": "distinct_dates_below_min_and_no_repeated_key",
+                        "lower_fee_break_even_windows": 3,
+                        "distinct_window_dates": ["2026-06-20"],
+                        "repeated_key_count": 0,
+                        "best_lower_fee_break_even_window": {
+                            "break_even_maker_fee_bps_per_side": 1.135,
+                            "cell": {"symbol": "LABUSDT", "policy": "informed_skip"},
+                        },
+                    },
+                },
                 "fee_path_feasibility": {
                     "status": "STANDARD_VIP_TIER_CAN_CLEAR_BUT_SCALE_OR_CAPITAL_GATED",
                     "break_even_maker_fee_bps_per_side": 1.135,
@@ -348,11 +376,17 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
     assert blockers["mm_verdict_maker_edge"]["business_path_actionability_status"] == (
         "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED"
     )
+    assert blockers["mm_verdict_maker_edge"]["lower_fee_break_even_stability_status"] == (
+        "LOWER_FEE_BREAK_EVEN_ROTATES_OR_DATE_INSUFFICIENT"
+    )
+    assert blockers["mm_verdict_maker_edge"]["lower_fee_break_even_windows"] == 3
+    assert blockers["mm_verdict_maker_edge"]["repeated_lower_fee_break_even_key_count"] == 0
     mm_secondary = blockers["mm_verdict_maker_edge"]["secondary_blockers"]
     assert [row["blocker_class"] for row in mm_secondary] == [
         "cost_wall",
         "cost_wall",
         "cost_wall",
+        "fee_or_scale",
         "fee_or_scale",
     ]
     assert mm_secondary[0]["blocker"] == (
@@ -366,10 +400,16 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
     assert mm_secondary[2]["blocker"] == (
         "live_markout_current_maker_fee_exceeds_best_break_even"
     )
-    assert mm_secondary[3]["business_path_actionability_status"] == (
+    assert mm_secondary[3]["blocker"] == (
+        "lower_fee_break_even_not_stable_across_distinct_windows"
+    )
+    assert mm_secondary[3]["lower_fee_break_even_stability_status"] == (
+        "LOWER_FEE_BREAK_EVEN_ROTATES_OR_DATE_INSUFFICIENT"
+    )
+    assert mm_secondary[4]["business_path_actionability_status"] == (
         "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED"
     )
-    assert mm_secondary[3]["operator_action_required"] == (
+    assert mm_secondary[4]["operator_action_required"] == (
         "do_not_treat_lower_fee_case_as_actionable_at_current_scale"
     )
     assert blockers["polymarket_leadlag_ic"]["sample_gate_eta_utc"] == (
@@ -499,6 +539,14 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
             "fee_reduction_needed_bps_per_side": 0.0,
         },
         "fillsim": {
+            "history_scorecard": {
+                "status": "HISTORY_LOWER_FEE_ONLY",
+                "lower_fee_break_even_stability": {
+                    "status": "LOWER_FEE_BREAK_EVEN_REPEATS_ACROSS_WINDOWS",
+                    "lower_fee_break_even_windows": 3,
+                    "repeated_key_count": 1,
+                },
+            },
             "walk_forward_feature_scorecard": {
                 "failure_summary": {
                     "status": "TRAIN_POSITIVE_HOLDOUT_DECAY",
@@ -565,6 +613,13 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     assert raw_arms["mm_verdict_maker_edge"]["detail"]["fee_path_feasibility"]["status"] == (
         "CURRENT_ACCOUNT_FEE_CLEARS_BREAK_EVEN"
     )
+    assert raw_arms["mm_verdict_maker_edge"]["detail"]["history_scorecard"]["status"] == (
+        "HISTORY_LOWER_FEE_ONLY"
+    )
+    assert (
+        raw_arms["mm_verdict_maker_edge"]["detail"]["history_scorecard"]
+        ["lower_fee_break_even_stability"]["status"]
+    ) == "LOWER_FEE_BREAK_EVEN_REPEATS_ACROSS_WINDOWS"
     assert raw_arms["mm_verdict_maker_edge"]["detail"]["walk_forward_failure_summary"]["status"] == (
         "TRAIN_POSITIVE_HOLDOUT_DECAY"
     )
