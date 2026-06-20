@@ -8,6 +8,7 @@ from program_code.research.microstructure.fill_sim import (
     fill_sim_conditional_feature_scorecard,
     fill_sim_edge_scorecard,
     fill_sim_maker_fee_sensitivity_scorecard,
+    fill_sim_walk_forward_feature_scorecard,
 )
 
 
@@ -291,6 +292,137 @@ def test_conditional_feature_scorecard_surfaces_no_positive_cells():
     assert scorecard["best_cell"]["net_bps"] == pytest.approx(-4.2)
 
 
+def test_walk_forward_feature_scorecard_confirms_holdout_positive_cell():
+    rows = []
+    for half in range(2):
+        for i in range(35):
+            rows.append(
+                {
+                    "side": "bid" if i % 2 == 0 else "ask",
+                    "quoted_half_spread_bps": 6.0,
+                    "half_spread_bps": 6.0,
+                    "adverse_sel_bps@15": 1.0,
+                }
+            )
+        for i in range(5):
+            rows.append(
+                {
+                    "side": "bid" if i % 2 == 0 else "ask",
+                    "quoted_half_spread_bps": 1.0,
+                    "half_spread_bps": 1.0,
+                    "adverse_sel_bps@15": 2.0,
+                }
+            )
+    trials = _conditional_trials(rows)
+    adverse = _conditional_adverse(trials, rows)
+
+    scorecard = fill_sim_walk_forward_feature_scorecard(
+        trials,
+        adverse,
+        horizons=(15,),
+        span_hours=1.0,
+        primary_horizon_s=15,
+    )
+
+    assert scorecard["status"] == "WALK_FORWARD_FEATURE_HOLDOUT_POSITIVE_SAMPLE_GATED"
+    assert scorecard["best_holdout_confirmed_candidate"] is not None
+    assert scorecard["best_holdout_confirmed_candidate"]["train"]["n_fill_only"] >= 30
+    assert scorecard["best_holdout_confirmed_candidate"]["holdout"]["n_fill_only"] >= 30
+    assert scorecard["best_holdout_confirmed_candidate"]["holdout"]["net_bps"] > 0
+
+
+def test_walk_forward_feature_scorecard_blocks_train_only_overfit():
+    rows = []
+    for i in range(35):
+        rows.append(
+            {
+                "side": "bid" if i % 2 == 0 else "ask",
+                "quoted_half_spread_bps": 6.0,
+                "half_spread_bps": 6.0,
+                "adverse_sel_bps@15": 1.0,
+            }
+        )
+    for i in range(5):
+        rows.append(
+            {
+                "side": "bid" if i % 2 == 0 else "ask",
+                "quoted_half_spread_bps": 1.0,
+                "half_spread_bps": 1.0,
+                "adverse_sel_bps@15": 2.0,
+            }
+        )
+    for i in range(35):
+        rows.append(
+            {
+                "side": "bid" if i % 2 == 0 else "ask",
+                "quoted_half_spread_bps": 6.0,
+                "half_spread_bps": 1.0,
+                "adverse_sel_bps@15": 2.0,
+            }
+        )
+    for i in range(5):
+        rows.append(
+            {
+                "side": "bid" if i % 2 == 0 else "ask",
+                "quoted_half_spread_bps": 1.0,
+                "half_spread_bps": 1.0,
+                "adverse_sel_bps@15": 2.0,
+            }
+        )
+    trials = _conditional_trials(rows)
+    adverse = _conditional_adverse(trials, rows)
+
+    scorecard = fill_sim_walk_forward_feature_scorecard(
+        trials,
+        adverse,
+        horizons=(15,),
+        span_hours=1.0,
+        primary_horizon_s=15,
+    )
+
+    assert scorecard["status"] == "WALK_FORWARD_FEATURE_TRAIN_ONLY_POSITIVE"
+    assert scorecard["train_positive_sample_gated_candidates"]
+    assert scorecard["holdout_confirmed_candidates"] == []
+    assert scorecard["best_train_candidate"]["train"]["net_bps"] > 0
+    assert scorecard["best_train_candidate"]["holdout"]["net_bps"] < 0
+
+
+def test_walk_forward_feature_scorecard_does_not_peek_at_holdout_thresholds():
+    rows = []
+    for i in range(40):
+        rows.append(
+            {
+                "side": "bid" if i % 2 == 0 else "ask",
+                "quoted_half_spread_bps": 1.0,
+                "half_spread_bps": 1.0,
+                "adverse_sel_bps@15": 2.0,
+            }
+        )
+    for i in range(40):
+        rows.append(
+            {
+                "side": "bid" if i % 2 == 0 else "ask",
+                "quoted_half_spread_bps": 6.0,
+                "half_spread_bps": 6.0,
+                "adverse_sel_bps@15": 1.0,
+            }
+        )
+    trials = _conditional_trials(rows)
+    adverse = _conditional_adverse(trials, rows)
+
+    scorecard = fill_sim_walk_forward_feature_scorecard(
+        trials,
+        adverse,
+        horizons=(15,),
+        span_hours=1.0,
+        primary_horizon_s=15,
+    )
+
+    assert scorecard["status"] == "NO_WALK_FORWARD_FEATURE_TRAIN_POSITIVE"
+    assert scorecard["best_holdout_confirmed_candidate"] is None
+    assert scorecard["holdout_confirmed_candidates"] == []
+
+
 def test_maker_fee_sensitivity_finds_lower_fee_sample_gated_path():
     report = {
         "edge_scorecard": {
@@ -327,6 +459,37 @@ def test_maker_fee_sensitivity_finds_lower_fee_sample_gated_path():
     assert scorecard["scenarios"][0]["positive_sample_gate_count"] == 0
     assert scorecard["scenarios"][1]["positive_sample_gate_count"] == 1
     assert scorecard["scenarios"][1]["best_cell"]["net_bps_at_fee"] == pytest.approx(0.2)
+
+
+def test_maker_fee_sensitivity_includes_walk_forward_holdout_cells():
+    report = {
+        "edge_scorecard": {"all_fill_only_cells": []},
+        "conditional_feature_scorecard": {"all_cells": []},
+        "walk_forward_feature_scorecard": {
+            "holdout_confirmed_candidates": [
+                {
+                    "holdout": {
+                        "name": "quoted_half_spread_train_p75_ge",
+                        "condition": "quoted_half_spread_bps >= train_p75(6)",
+                        "n_fill_only": 35,
+                        "edge_before_fees_bps": 2.4,
+                        "signif_suppressed": False,
+                    }
+                }
+            ]
+        },
+    }
+
+    scorecard = fill_sim_maker_fee_sensitivity_scorecard(
+        report,
+        primary_horizon_s=15,
+        fee_scenarios_bps_per_side=(2.0, 1.0),
+    )
+
+    best = scorecard["best_sample_gated_break_even_cell"]
+    assert best["source"] == "walk_forward_feature_scorecard_holdout"
+    assert best["break_even_maker_fee_bps_per_side"] == pytest.approx(1.2)
+    assert scorecard["scenarios"][1]["positive_sample_gate_count"] == 1
 
 
 def test_maker_fee_sensitivity_keeps_tiny_positive_below_gate():
