@@ -25,6 +25,16 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Durable Snapshot Mirror
+
+- Root diagnosis: Polymarket lead-lag history had a runtime evidence-loop defect. Snapshot run dirs lived only under volatile `/tmp/openclaw/polymarket_axis_runs`, so `/tmp` cleanup could collapse a 30+ sample watch/history path back to zero.
+- Added append-only collector mirroring: `polymarket_axis` copies completed run dirs to `$BASE/../archive/polymarket_axis_runs` through `--mirror-artifact-root`, preserving run IDs without overwriting existing evidence.
+- Added lead-lag mirror loading: `polymarket_leadlag` v0.15 merges primary `/tmp` rows with mirror roots, lets primary rows win, skips duplicate mirror run IDs, and reports mirror metadata in `snapshot_meta`.
+- Runtime smoke: latest lead-lag sha256 `e86ca7daf701da329b76ee51deddc552005a829480a3b0926c30b4b6f8dfb4f7` sees `2685` snapshot rows, `3` distinct timestamps, `3` distinct run dirs, and `1` duplicate mirror run skipped.
+- Still not alpha: `joined_rows=0`, `max_overlap_adjusted_ic_points=0`, verdict `INSUFFICIENT_SAMPLE`; latest alpha sha256 `1619ca99dbfe10c22ee79d83cf44312aae434687c03fd4bfaa5ccfe94a4ff825` remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`.
+- Verification: Mac and Linux research suites `110 passed, 1 skipped`; cron static suites `22 passed`; py_compile, bash syntax, diff-check, and Linux artifact-only runtime smokes passed.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifacts + sibling archive artifact mirror only; no PG write, Bybit private/signed/trading call, engine/API restart, strategy/auth/risk/order mutation, signal, execution proof, or promotion proof.
+
 ## 2026-06-20 MM Low-Friction Interaction Search
 
 - Added bounded three-way MM low-friction interaction candidates: high quoted spread × quiet immediate tape/L1 context × favorable same-side touch/flow.

@@ -28,6 +28,7 @@ esac
 BASE="${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}"
 DATA="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
 QUERY_SET="${OPENCLAW_POLYMARKET_QUERY_SET:-}"
+MIRROR_ROOT="${OPENCLAW_POLYMARKET_AXIS_MIRROR_ROOT:-$BASE/../archive/polymarket_axis_runs}"
 LOG_DIR="${DATA}/logs"
 LOG="${LOG_DIR}/polymarket_axis_cron.log"
 LOCK_ROOT="${DATA}/locks"
@@ -94,7 +95,7 @@ fi
 
 echo "[$(ts)] === polymarket_axis start mode=$MODE query_set=${QUERY_SET:-default} ===" >> "$LOG"
 rc=0
-"$PYBIN" "$CLI" --mode "$MODE" "${QUERY_SET_ARGS[@]}" --created-by-role cron >> "$LOG" 2>&1 || rc=$?
+"$PYBIN" "$CLI" --mode "$MODE" "${QUERY_SET_ARGS[@]}" --created-by-role cron --mirror-artifact-root "$MIRROR_ROOT" >> "$LOG" 2>&1 || rc=$?
 echo "[$(ts)] === polymarket_axis end mode=$MODE rc=${rc} ===" >> "$LOG"
 
 # fail-soft：rc 已落 log；採集結果由 run dir manifest 傳達，不靠 cron mail。

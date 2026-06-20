@@ -83,8 +83,11 @@ def test_wrapper_lock_heartbeat_failsoft():
 def test_wrapper_query_set_env_pass_through():
     src = _src(WRAPPER)
     assert "OPENCLAW_POLYMARKET_QUERY_SET" in src
+    assert "OPENCLAW_POLYMARKET_AXIS_MIRROR_ROOT" in src
+    assert "$BASE/../archive/polymarket_axis_runs" in src
     assert 'QUERY_SET_ARGS=(--query-set "$QUERY_SET")' in src
-    assert '"$PYBIN" "$CLI" --mode "$MODE" "${QUERY_SET_ARGS[@]}" --created-by-role cron' in src
+    assert "--mirror-artifact-root" in src
+    assert '"$PYBIN" "$CLI" --mode "$MODE" "${QUERY_SET_ARGS[@]}" --created-by-role cron --mirror-artifact-root "$MIRROR_ROOT"' in src
 
 
 def test_wrapper_zero_secrets_zero_pg():

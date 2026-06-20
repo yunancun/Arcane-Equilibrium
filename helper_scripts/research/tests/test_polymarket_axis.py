@@ -693,6 +693,21 @@ class TestArtifact:
         with pytest.raises(FileExistsError):
             _snapshot_run(tmp_path)  # 同 run_id 重寫 = 覆寫舊 snapshot，必拒。
 
+    def test_mirror_run_dir_preserves_snapshot_history_append_only(self, tmp_path):
+        out = _snapshot_run(tmp_path)
+        run_dir = Path(out["written"]["run_dir"])
+        mirror_root = tmp_path / "mirror_runs"
+
+        result = artifact_mod.mirror_run_dir(run_dir, mirror_root)
+
+        mirrored = mirror_root / run_dir.name
+        assert result["mirror_status"] == "copied"
+        assert mirrored.exists()
+        assert (mirrored / "manifest.json").exists()
+        assert (mirrored / "snapshots.jsonl").read_text(encoding="utf-8").count("\n") == 1
+        second = artifact_mod.mirror_run_dir(run_dir, mirror_root)
+        assert second["mirror_status"] == "exists"
+
     def test_v2_manifest_and_rows_carry_query_set_version(self, tmp_path):
         out = _snapshot_run(tmp_path, run_id="daily-v2", query_set_version="v2")
         run_dir = Path(out["written"]["run_dir"])

@@ -21,6 +21,7 @@ LOCK_ROOT="${DATA}/locks"
 LOCK_DIR="${LOCK_ROOT}/polymarket_leadlag_ic_cron.lock.d"
 HEARTBEAT_DIR="${DATA}/cron_heartbeat"
 ARTIFACT_DIR="${DATA}/research/polymarket_leadlag"
+POLYMARKET_AXIS_MIRROR_ROOT="${OPENCLAW_POLYMARKET_AXIS_MIRROR_ROOT:-$BASE/../archive/polymarket_axis_runs}"
 
 QUERY_SET="${OPENCLAW_POLYMARKET_LEADLAG_QUERY_SET:-${OPENCLAW_POLYMARKET_QUERY_SET:-v2}}"
 MODE="${OPENCLAW_POLYMARKET_LEADLAG_MODE:-hourly-topn}"
@@ -147,6 +148,7 @@ ARGS=(
     --min-points "$MIN_POINTS"
     --max-align-lag-minutes "$MAX_ALIGN_LAG"
     --price-timeframe "$PRICE_TIMEFRAME"
+    --polymarket-mirror-root "$POLYMARKET_AXIS_MIRROR_ROOT"
     --out "$OUT"
     --write-latest
 )
