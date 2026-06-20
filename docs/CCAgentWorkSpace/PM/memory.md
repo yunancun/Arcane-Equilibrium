@@ -25,6 +25,14 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM FillSim History Runtime Sync
+
+- Selectively synced v255 runtime files to Linux `trade-core` while leaving unrelated dirty docs untouched; full Linux git three-way sync is not claimed.
+- Linux target code files now match `origin/main`: `fill_sim.py`, `fee_path.py`, `fill_sim_history.py`, fill_sim/MM cron wrappers, focused tests, and microstructure `__init__.py`.
+- Linux canonical focused validation passed 34 tests plus py_compile and both cron `bash -n`.
+- Initialized `/tmp/openclaw/research/fillsim/fillsim_history_scorecard.json` as `NO_HISTORY_REPORTS 0 0`; manual read-only MM verdict confirmed `fillsim.history_scorecard.present=true/status=NO_HISTORY_REPORTS`.
+- Boundary: selective source rsync + `/tmp/openclaw` artifact/log writes + read-only PG verdict only; no rebuild/restart, DB table write, Bybit call, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 MM FillSim History Scorecard
 
 - Added report-only `fill_sim_history.py` to aggregate multiple fill_sim JSON artifacts into longer-regime evidence: valid windows/dates, current-fee sample-gated positive repeats, walk-forward holdout confirmations, and best break-even fee.
