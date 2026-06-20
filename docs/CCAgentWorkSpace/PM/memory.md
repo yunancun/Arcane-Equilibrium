@@ -1094,6 +1094,13 @@
 
 - v292 adds recent-flow/L1-churn placement-time features and `low_friction_signal_scorecard` to fill_sim, then passes it through MM verdict and alpha-discovery. It also fixes oversized MM status JSON ingestion in `runtime_runner._latest_json_line`.
 - Latest alpha sha256 `c87f9d538a1cf5dc7480d8d6f76e2048fe0278042812aa7dc725a9cea6890bba` reports best low-friction holdout `quoted_half_spread_bps train_p90 AND side_touch_size_delta_frac_30s train_p90`: gross 2.838bp, net -1.162bp, n=81. Current-fee threshold remains 4.0bp; not promotion proof.
+
+## 2026-06-20 MM low-friction gross stability blocker
+
+- v296 adds `low_friction_gross_stability_v1` inside alpha-discovery `mm_cost_wall_escape_v2`. It reads existing recorder gross decomposition and prevents a holdout-only low-friction near miss from being treated as train-confirmed MM signal.
+- Latest alpha sha256 `d6e3a94c94919a564bc0d2667d3e8f229bc4a39e7c3c57cbc1efb6300990f5c2` remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`; best low-friction candidate train gross is `-0.225bp` / n=74 while holdout gross is `2.838bp` / n=81, so status is `LOW_FRICTION_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED`.
+- Next trigger is now `search_train_confirmed_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip`. Boundary: source/test/docs + read-only alpha artifact only; no strategy, order, risk, runtime, engine, DB, or Bybit private mutation; not promotion proof.
+
 ## 2026-06-20 Polymarket AEG Candidate Review
 
 - Polymarket lead-lag sample gate opened for `price_target|SOLUSDT|15m`: sample 30/30, HAC t `6.754`, BH q `3.378e-10`, partial IC `0.184`.

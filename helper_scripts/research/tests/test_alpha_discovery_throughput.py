@@ -322,6 +322,13 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
                     ),
                     "best_low_friction_signal_holdout_gross_candidate": {
                         "name": "quoted_half_spread_bps_train_p75_and_recent_trade_count_10s_train_p25",
+                        "train": {
+                            "source": "low_friction_signal_train",
+                            "n_fill_only": 142,
+                            "edge_before_fees_bps": -0.225,
+                            "net_bps": -4.225,
+                            "sample_gated": True,
+                        },
                         "holdout": {
                             "source": "low_friction_signal_holdout",
                             "n_fill_only": 120,
@@ -434,14 +441,31 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
     assert blockers["mm_verdict_maker_edge"]["gross_edge_gap_to_current_fee_bps"] == 1.73
     assert blockers["mm_verdict_maker_edge"]["gross_edge_multiple_to_clear_current_fee"] == 1.7621
     assert blockers["mm_verdict_maker_edge"]["next_trigger"] == (
-        "search_new_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
+        "search_train_confirmed_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
     )
     assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
         "top_sample_gated_gross_cells"
     ][0]["symbol"] == "LABUSDT"
     assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
+        "schema_version"
+    ] == "mm_cost_wall_escape_v2"
+    assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
         "low_friction_signal_status"
     ] == "LOW_FRICTION_SIGNAL_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE"
+    assert blockers["mm_verdict_maker_edge"]["low_friction_gross_stability_status"] == (
+        "LOW_FRICTION_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED"
+    )
+    assert blockers["mm_verdict_maker_edge"]["low_friction_gross_stability_reason"] == (
+        "holdout_gross_positive_but_train_gross_non_positive"
+    )
+    assert blockers["mm_verdict_maker_edge"]["low_friction_train_gross_edge_bps"] == -0.225
+    assert blockers["mm_verdict_maker_edge"]["low_friction_holdout_gross_edge_bps"] == 1.91
+    assert blockers["mm_verdict_maker_edge"][
+        "low_friction_holdout_minus_train_gross_bps"
+    ] == 2.135
+    assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
+        "low_friction_gross_stability_scorecard"
+    ]["train_confirms_gross"] is False
     assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
         "best_low_friction_signal_holdout_gross_candidate"
     ]["holdout"]["source"] == "low_friction_signal_holdout"

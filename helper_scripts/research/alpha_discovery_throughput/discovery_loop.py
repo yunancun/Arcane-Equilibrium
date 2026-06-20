@@ -306,6 +306,146 @@ def _round_or_none(value: float | None, digits: int = 4) -> float | None:
     return round(value, digits)
 
 
+def _mm_low_friction_gross_stability_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
+    gross_decomp = _dict(detail.get("gross_edge_cost_decomposition"))
+    sample_cost_wall = _dict(detail.get("sample_gated_cost_wall_summary"))
+    low_friction = _dict(detail.get("low_friction_signal_scorecard"))
+    candidate = _dict(
+        gross_decomp.get("best_low_friction_signal_holdout_gross_candidate")
+    )
+    if not candidate:
+        candidate = _dict(low_friction.get("best_holdout_gross_candidate"))
+
+    train = _dict(candidate.get("train"))
+    holdout = _dict(candidate.get("holdout"))
+    sample_gate_min = _int(
+        gross_decomp.get("sample_gate_min_fills")
+        or low_friction.get("min_fills_for_signif"),
+        default=30,
+    )
+    if sample_gate_min <= 0:
+        sample_gate_min = 30
+
+    def _sample_gated(cell: dict[str, Any]) -> bool:
+        if not cell:
+            return False
+        if cell.get("sample_gated") is not None:
+            return bool(cell.get("sample_gated"))
+        return (
+            _int(cell.get("n_fill_only") or cell.get("n")) >= sample_gate_min
+            and not bool(cell.get("signif_suppressed"))
+        )
+
+    train_gross = _float(train.get("edge_before_fees_bps"))
+    holdout_gross = _float(holdout.get("edge_before_fees_bps"))
+    train_net = _float(train.get("net_bps"))
+    holdout_net = _float(holdout.get("net_bps"))
+    train_sample_gated = _sample_gated(train)
+    holdout_sample_gated = _sample_gated(holdout)
+    current_fee_round_trip = _float(gross_decomp.get("current_fee_round_trip_bps"))
+    if current_fee_round_trip is None:
+        current_fee_round_trip = _float(
+            sample_cost_wall.get("current_fee_round_trip_bps")
+        )
+    if current_fee_round_trip is None:
+        current_fee_round_trip = _float(low_friction.get("current_fee_round_trip_bps"))
+
+    train_clears_current_fee = (
+        train_sample_gated
+        and current_fee_round_trip is not None
+        and train_gross is not None
+        and train_gross >= current_fee_round_trip
+    )
+    holdout_clears_current_fee = (
+        holdout_sample_gated
+        and current_fee_round_trip is not None
+        and holdout_gross is not None
+        and holdout_gross >= current_fee_round_trip
+    )
+    train_confirms_gross = (
+        train_sample_gated
+        and train_gross is not None
+        and train_gross > 0.0
+    )
+    holdout_positive_gross = (
+        holdout_sample_gated
+        and holdout_gross is not None
+        and holdout_gross > 0.0
+    )
+
+    if not candidate:
+        status = "LOW_FRICTION_GROSS_STABILITY_UNAVAILABLE"
+        reason = "missing_low_friction_holdout_gross_candidate"
+        next_trigger = "search_new_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
+    elif holdout_gross is None:
+        status = "LOW_FRICTION_HOLDOUT_GROSS_MISSING"
+        reason = "best_low_friction_candidate_missing_holdout_gross_edge"
+        next_trigger = "refresh_low_friction_scorecard_before_mm_judgment"
+    elif not holdout_positive_gross:
+        status = "LOW_FRICTION_NO_SAMPLE_GATED_HOLDOUT_GROSS_EDGE"
+        reason = "holdout_gross_not_positive_or_not_sample_gated"
+        next_trigger = "search_new_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
+    elif train_gross is None:
+        status = "LOW_FRICTION_HOLDOUT_GROSS_TRAIN_MISSING"
+        reason = "holdout_gross_positive_but_train_leg_missing"
+        next_trigger = "refresh_low_friction_train_holdout_decomposition_before_strategy_judgment"
+    elif not train_confirms_gross:
+        status = "LOW_FRICTION_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED"
+        reason = (
+            "holdout_gross_positive_but_train_gross_non_positive"
+            if train_gross <= 0.0
+            else "holdout_gross_positive_but_train_leg_not_sample_gated"
+        )
+        next_trigger = (
+            "search_train_confirmed_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
+        )
+    elif train_clears_current_fee and holdout_clears_current_fee:
+        status = "LOW_FRICTION_TRAIN_AND_HOLDOUT_GROSS_CLEAR_CURRENT_FEE_REVIEW"
+        reason = "train_and_holdout_sample_gated_gross_clear_current_fee"
+        next_trigger = "run_walk_forward_aeg_execution_realism_chain_before_any_mm_promotion"
+    elif current_fee_round_trip is None:
+        status = "LOW_FRICTION_TRAIN_HOLDOUT_GROSS_POSITIVE_FEE_UNKNOWN"
+        reason = "train_and_holdout_gross_positive_but_current_fee_missing"
+        next_trigger = "refresh_mm_current_fee_inputs_before_strategy_judgment"
+    else:
+        status = "LOW_FRICTION_TRAIN_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE"
+        reason = "train_and_holdout_gross_positive_but_at_least_one_half_below_current_fee"
+        next_trigger = (
+            "search_train_confirmed_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
+        )
+
+    holdout_minus_train = (
+        holdout_gross - train_gross
+        if holdout_gross is not None and train_gross is not None
+        else None
+    )
+
+    return {
+        "schema_version": "low_friction_gross_stability_v1",
+        "status": status,
+        "reason": reason,
+        "next_trigger": next_trigger,
+        "current_fee_round_trip_bps": _round_or_none(current_fee_round_trip),
+        "sample_gate_min_fills": sample_gate_min,
+        "candidate_name": candidate.get("name"),
+        "candidate_condition": candidate.get("condition"),
+        "candidate_feature": candidate.get("feature"),
+        "train_gross_edge_bps": _round_or_none(train_gross),
+        "holdout_gross_edge_bps": _round_or_none(holdout_gross),
+        "train_net_bps": _round_or_none(train_net),
+        "holdout_net_bps": _round_or_none(holdout_net),
+        "train_n_fill_only": train.get("n_fill_only") or train.get("n"),
+        "holdout_n_fill_only": holdout.get("n_fill_only") or holdout.get("n"),
+        "train_sample_gated": train_sample_gated,
+        "holdout_sample_gated": holdout_sample_gated,
+        "train_confirms_gross": train_confirms_gross,
+        "holdout_positive_gross": holdout_positive_gross,
+        "train_gross_clears_current_fee": train_clears_current_fee,
+        "holdout_gross_clears_current_fee": holdout_clears_current_fee,
+        "holdout_minus_train_gross_bps": _round_or_none(holdout_minus_train),
+    }
+
+
 def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
     gross_decomp = _dict(detail.get("gross_edge_cost_decomposition"))
     sample_cost_wall = _dict(detail.get("sample_gated_cost_wall_summary"))
@@ -313,6 +453,18 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
     business_actionability = _dict(fee_path.get("business_path_actionability"))
     low_friction = _dict(detail.get("low_friction_signal_scorecard"))
     history_extra = _mm_lower_fee_history_extra(detail)
+    low_friction_stability = _mm_low_friction_gross_stability_scorecard(detail)
+    low_friction_stability_status = str(
+        low_friction_stability.get("status") or ""
+    ).upper()
+    low_friction_stability_trigger = (
+        low_friction_stability.get("next_trigger")
+        if low_friction_stability_status in {
+            "LOW_FRICTION_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED",
+            "LOW_FRICTION_TRAIN_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE",
+        }
+        else None
+    )
 
     best_gross_edge = _float(gross_decomp.get("best_sample_gated_gross_edge_bps"))
     best_net = _float(gross_decomp.get("best_gross_cell_net_bps"))
@@ -337,6 +489,9 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
         gross_decomp.get("current_fee_positive_sample_gated_cell_count")
     )
     business_status = str(business_actionability.get("status") or "").upper()
+    default_low_friction_trigger = (
+        "search_new_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
+    )
 
     if current_fee_positive_count > 0:
         status = "CURRENT_FEE_SAMPLE_GATED_CELL_AVAILABLE"
@@ -351,9 +506,7 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
     elif gap > 0 and business_status == "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED":
         status = "CURRENT_FEE_GROSS_EDGE_GAP_REQUIRES_NEW_LOW_FRICTION_SIGNAL"
         reason = "lower_fee_path_scale_or_capital_gated_at_current_account_state"
-        next_trigger = (
-            "search_new_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
-        )
+        next_trigger = low_friction_stability_trigger or default_low_friction_trigger
         engineering_actionable = True
     elif gap > 0:
         status = "CURRENT_FEE_GROSS_EDGE_GAP_OR_LOWER_FEE_REQUIRED"
@@ -367,7 +520,7 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
         engineering_actionable = True
 
     return {
-        "schema_version": "mm_cost_wall_escape_v1",
+        "schema_version": "mm_cost_wall_escape_v2",
         "status": status,
         "reason": reason,
         "next_trigger": next_trigger,
@@ -400,6 +553,9 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
         "low_friction_signal_status": (
             gross_decomp.get("low_friction_signal_status") or low_friction.get("status")
         ),
+        "low_friction_gross_stability_status": low_friction_stability.get("status"),
+        "low_friction_gross_stability_reason": low_friction_stability.get("reason"),
+        "low_friction_gross_stability_scorecard": low_friction_stability,
         "best_low_friction_signal_holdout_gross_candidate": gross_decomp.get(
             "best_low_friction_signal_holdout_gross_candidate"
         ),
@@ -724,6 +880,33 @@ def classify_profitability_blocker(
                         ),
                         "gross_edge_multiple_to_clear_current_fee": (
                             escape_scorecard.get("gross_edge_multiple_to_clear_current_fee")
+                        ),
+                        "low_friction_gross_stability_status": (
+                            escape_scorecard.get("low_friction_gross_stability_status")
+                        ),
+                        "low_friction_gross_stability_reason": (
+                            escape_scorecard.get("low_friction_gross_stability_reason")
+                        ),
+                        "low_friction_train_gross_edge_bps": (
+                            _dict(
+                                escape_scorecard.get(
+                                    "low_friction_gross_stability_scorecard"
+                                )
+                            ).get("train_gross_edge_bps")
+                        ),
+                        "low_friction_holdout_gross_edge_bps": (
+                            _dict(
+                                escape_scorecard.get(
+                                    "low_friction_gross_stability_scorecard"
+                                )
+                            ).get("holdout_gross_edge_bps")
+                        ),
+                        "low_friction_holdout_minus_train_gross_bps": (
+                            _dict(
+                                escape_scorecard.get(
+                                    "low_friction_gross_stability_scorecard"
+                                )
+                            ).get("holdout_minus_train_gross_bps")
                         ),
                         "business_path_actionability_status": business_actionability.get(
                             "status"
