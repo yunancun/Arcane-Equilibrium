@@ -307,6 +307,9 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
         "lower_fee_break_even_windows": history_extra.get(
             "lower_fee_break_even_windows"
         ),
+        "top_sample_gated_gross_cells": gross_decomp.get(
+            "top_sample_gated_gross_cells"
+        ),
         "best_sample_gated_gross_cell": gross_decomp.get(
             "best_sample_gated_gross_cell"
         ),
