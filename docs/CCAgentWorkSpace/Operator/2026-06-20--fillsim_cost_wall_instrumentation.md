@@ -16,3 +16,5 @@ Current-regime read:
 - front-of-queue fill_only: half_spread `0.835bp`, adverse@15 `1.631bp`, net maker@15 `-4.796bp`, still requires about `0.398bp/side` maker rebate to break even.
 
 Conclusion: the current MM blocker is structural fee/adverse-selection cost wall, not just stale L1 or pessimistic queue position. This is still a single-regime diagnostic, not CP-3 go/no-go or promotion proof.
+
+Follow-up: daily `recorder_mm_verdict_cron.sh` now emits the same break-even/fee-shortfall/rebate fields using live maker markout spread capture plus fill_sim adverse selection. Alpha discovery `arms_raw` preserves `cost_wall_summary`; action gates are unchanged.

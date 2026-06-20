@@ -212,6 +212,11 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
         "thresholds": {"min_maker_fills": 30},
         "markout_n_total": 31,
         "adverse_selection_usable": True,
+        "cost_wall_summary": {
+            "available": True,
+            "best_symbol_by_net_edge": "BTCUSDT",
+            "best_fee_round_trip_shortfall_bps": -1.25,
+        },
         "net_edge_per_symbol": {
             "BTCUSDT": {"net_edge_bps": 1.25, "n_maker_fills": 31},
         },
@@ -254,7 +259,9 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     assert latest.exists()
     loaded = json.loads(latest.read_text(encoding="utf-8"))
     arms = {row["arm_id"]: row for row in loaded["discovery_plan"]["arms"]}
+    raw_arms = {row["arm_id"]: row for row in loaded["arms_raw"]}
     assert arms["mm_verdict_maker_edge"]["action"] == "READY_FOR_AEG_CHAIN"
+    assert raw_arms["mm_verdict_maker_edge"]["detail"]["cost_wall_summary"]["best_symbol_by_net_edge"] == "BTCUSDT"
     assert arms["gate_b_listing_fade"]["action"] == "WAIT"
     assert arms["vol_event_order_flow"]["reason"] == "gate_status:no_edge_survives"
 
