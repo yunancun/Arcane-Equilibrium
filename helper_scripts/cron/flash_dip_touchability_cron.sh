@@ -10,7 +10,9 @@
 #   death-rate only moves after a fill+close. During the current deep-K pilot,
 #   orders can be live for hours with zero closed slots. This monitor measures
 #   whether flash_dip_buy orders ever touch their intended limit before timeout.
-#   It is evidence for "no-touch/deep-K" vs "fill path broken".
+#   It is evidence for "no-touch/deep-K" vs "fill path broken", and it emits a
+#   counterfactual K ladder so retuning can be discussed from runtime evidence
+#   rather than fill-chasing.
 #
 # Hard boundary:
 #   read-only PG only, enforced by PGOPTIONS. Writes are limited to local logs,
@@ -30,6 +32,8 @@ HEARTBEAT_DIR="${DATA}/cron_heartbeat"
 
 LOOKBACK_HOURS="${OPENCLAW_FLASH_DIP_TOUCH_LOOKBACK_HOURS:-72}"
 ENGINE_MODE="${OPENCLAW_FLASH_DIP_TOUCH_ENGINE_MODE:-demo}"
+CURRENT_K_PCT="${OPENCLAW_FLASH_DIP_CURRENT_K_PCT:-15}"
+K_PCTS="${OPENCLAW_FLASH_DIP_TOUCH_K_PCTS:-0,1,2,3,4,5,6,8,10,12,15}"
 
 mkdir -p "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR"
 touch "$HEARTBEAT_DIR/flash_dip_touchability.last_fire" 2>/dev/null || true
@@ -42,6 +46,29 @@ if [[ ! "$LOOKBACK_HOURS" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
 fi
 if [[ ! "$ENGINE_MODE" =~ ^[A-Za-z0-9_-]+$ ]]; then
     echo "[$(ts)] FATAL: OPENCLAW_FLASH_DIP_TOUCH_ENGINE_MODE contains unsafe characters: $ENGINE_MODE" | tee -a "$LOG" >&2
+    exit 2
+fi
+if [[ ! "$CURRENT_K_PCT" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    echo "[$(ts)] FATAL: OPENCLAW_FLASH_DIP_CURRENT_K_PCT must be numeric: $CURRENT_K_PCT" | tee -a "$LOG" >&2
+    exit 2
+fi
+if [[ ! "$K_PCTS" =~ ^[0-9]+([.][0-9]+)?(,[0-9]+([.][0-9]+)?)*$ ]]; then
+    echo "[$(ts)] FATAL: OPENCLAW_FLASH_DIP_TOUCH_K_PCTS must be comma-separated numeric values: $K_PCTS" | tee -a "$LOG" >&2
+    exit 2
+fi
+if ! python3 - "$CURRENT_K_PCT" "$K_PCTS" <<'PY' 2>>"$LOG"; then
+import sys
+
+current = float(sys.argv[1])
+ks = [float(raw) for raw in sys.argv[2].split(",")]
+if not (0 < current < 100):
+    raise SystemExit("current K must be in (0,100)")
+if not ks:
+    raise SystemExit("K ladder cannot be empty")
+if any(k < 0 or k >= 100 for k in ks):
+    raise SystemExit("all ladder K values must be in [0,100)")
+PY
+    echo "[$(ts)] FATAL: invalid K ladder config current=${CURRENT_K_PCT} ladder=${K_PCTS}" | tee -a "$LOG" >&2
     exit 2
 fi
 
@@ -79,7 +106,7 @@ release_lock() {
 }
 trap release_lock EXIT INT TERM
 
-echo "[$(ts)] === flash_dip touchability check start (lookback_h=${LOOKBACK_HOURS} engine_mode=${ENGINE_MODE}) ===" >> "$LOG"
+echo "[$(ts)] === flash_dip touchability check start (lookback_h=${LOOKBACK_HOURS} engine_mode=${ENGINE_MODE} current_k_pct=${CURRENT_K_PCT} k_pcts=${K_PCTS}) ===" >> "$LOG"
 
 read -r -d '' TOUCH_SQL <<SQL || true
 WITH fd_labeled AS (
@@ -133,9 +160,70 @@ scored AS (
   ) lows ON TRUE
 ),
 true_fd AS (
-  SELECT * FROM scored
+  SELECT *,
+         CASE
+           WHEN limit_price > 0 AND ${CURRENT_K_PCT}::double precision < 100
+           THEN limit_price / (1.0 - (${CURRENT_K_PCT}::double precision / 100.0))
+           ELSE NULL
+         END AS prior_close_est
+  FROM scored
   WHERE intent_strategy = 'flash_dip_buy'
     AND limit_price IS NOT NULL
+),
+ladder AS (
+  SELECT DISTINCT trim(raw_k)::double precision AS k_pct
+  FROM unnest(string_to_array('${K_PCTS}', ',')) AS raw_k
+),
+ladder_eval AS (
+  SELECT l.k_pct,
+         fd.symbol,
+         fd.order_ts,
+         fd.ref_price,
+         fd.min_low,
+         fd.n_1m,
+         fd.prior_close_est,
+         fd.prior_close_est * (1.0 - l.k_pct / 100.0) AS candidate_limit_price,
+         (
+           fd.min_low <= fd.prior_close_est * (1.0 - l.k_pct / 100.0)
+         ) AS touched,
+         CASE
+           WHEN fd.ref_price > 0 AND fd.prior_close_est > 0 AND l.k_pct < 100
+           THEN ((fd.ref_price / (fd.prior_close_est * (1.0 - l.k_pct / 100.0))) - 1.0) * 10000.0
+           ELSE NULL
+         END AS ref_to_candidate_bps,
+         CASE
+           WHEN fd.min_low > 0 AND fd.prior_close_est > 0 AND l.k_pct < 100
+           THEN ((fd.min_low / (fd.prior_close_est * (1.0 - l.k_pct / 100.0))) - 1.0) * 10000.0
+           ELSE NULL
+         END AS closest_miss_bps
+  FROM true_fd fd
+  CROSS JOIN ladder l
+),
+ladder_summary AS (
+  SELECT COALESCE(json_agg(row_to_json(x) ORDER BY x.k_pct), '[]'::json) AS j
+  FROM (
+    SELECT k_pct,
+           count(*) AS true_order_count,
+           count(*) FILTER (WHERE touched IS TRUE) AS touched_count,
+           count(*) FILTER (WHERE touched IS NOT TRUE) AS no_touch_count,
+           CASE WHEN count(*) > 0
+             THEN round(100.0 * count(*) FILTER (WHERE touched IS TRUE) / count(*), 4)
+             ELSE NULL END AS touch_rate_pct,
+           round((percentile_cont(0.5) WITHIN GROUP (ORDER BY ref_to_candidate_bps))::numeric, 2)
+             AS median_ref_to_candidate_bps,
+           round((percentile_cont(0.5) WITHIN GROUP (ORDER BY closest_miss_bps))::numeric, 2)
+             AS median_closest_miss_bps,
+           round(min(closest_miss_bps)::numeric, 2) AS min_closest_miss_bps,
+           round(max(closest_miss_bps)::numeric, 2) AS max_closest_miss_bps
+    FROM ladder_eval
+    GROUP BY k_pct
+  ) x
+),
+ladder_deepest_touch AS (
+  SELECT max(k_pct) AS k_pct
+  FROM ladder_eval
+  GROUP BY k_pct
+  HAVING count(*) FILTER (WHERE touched IS TRUE) > 0
 ),
 miss_examples AS (
   SELECT COALESCE(json_agg(row_to_json(x)), '[]'::json) AS j
@@ -168,6 +256,10 @@ mismatch_examples AS (
   ) x
 )
 SELECT json_build_object(
+  'current_k_pct', ${CURRENT_K_PCT}::double precision,
+  'k_ladder_model', 'candidate_limit = inferred_prior_close_from_current_limit / (1-current_k_pct) then prior_close*(1-k_pct)',
+  'k_ladder', (SELECT j FROM ladder_summary),
+  'deepest_candidate_k_with_touch_pct', (SELECT max(k_pct) FROM ladder_deepest_touch),
   'order_labeled_count', (SELECT count(*) FROM scored),
   'true_order_count', (SELECT count(*) FROM true_fd),
   'strategy_mismatch_count', (
