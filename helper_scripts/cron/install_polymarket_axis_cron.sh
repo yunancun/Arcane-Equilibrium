@@ -7,7 +7,9 @@
 #   41 4 * * *  → polymarket_axis_cron.sh daily（04:41 UTC baseline 全量 sweep）
 #   #7 * * * *  → polymarket_axis_cron.sh hourly-topn（默認「註釋停用」安裝——
 #                 QC memo §3：cron 活化 = operator 決策；operator 設
-#                 OPENCLAW_POLYMARKET_CRON_HOURLY=1 重裝才寫成活行）
+#                 OPENCLAW_POLYMARKET_CRON_HOURLY=1 重裝才寫成活行；
+#                 可用 OPENCLAW_POLYMARKET_CRON_TOPN_MINUTES=7,22,37,52
+#                 opt-in 加速 artifact-only evidence cadence）
 #
 # rollback = 本 script --remove（兩行一併移除）→ 系統回到安裝前狀態，零殘留
 # （run dir / state 檔為 inert 研究資料，可留可刪）。
@@ -30,6 +32,7 @@ fi
 OPENCLAW_BASE_DIR="${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}"
 OPENCLAW_DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
 OPENCLAW_POLYMARKET_QUERY_SET="${OPENCLAW_POLYMARKET_QUERY_SET:-}"
+OPENCLAW_POLYMARKET_CRON_TOPN_MINUTES="${OPENCLAW_POLYMARKET_CRON_TOPN_MINUTES:-7}"
 
 WRAPPER="$OPENCLAW_BASE_DIR/helper_scripts/cron/polymarket_axis_cron.sh"
 MARKER="polymarket_axis_cron.sh"
@@ -88,9 +91,27 @@ _validate_cron_env_value() {
     fi
 }
 
+_validate_cron_minute_list() {
+    local name="$1"
+    local value="$2"
+    if [[ ! "$value" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+        echo "ERROR: ${name} must be comma-separated minute integers: ${value}" >&2
+        exit 6
+    fi
+    IFS=',' read -ra _minutes <<< "$value"
+    local minute
+    for minute in "${_minutes[@]}"; do
+        if (( 10#$minute < 0 || 10#$minute > 59 )); then
+            echo "ERROR: ${name} minute out of range 0..59: ${minute}" >&2
+            exit 6
+        fi
+    done
+}
+
 _validate_cron_env_value "OPENCLAW_BASE_DIR" "$OPENCLAW_BASE_DIR"
 _validate_cron_env_value "OPENCLAW_DATA_DIR" "$OPENCLAW_DATA_DIR"
 _validate_cron_env_value "WRAPPER" "$WRAPPER"
+_validate_cron_minute_list "OPENCLAW_POLYMARKET_CRON_TOPN_MINUTES" "$OPENCLAW_POLYMARKET_CRON_TOPN_MINUTES"
 if [[ -n "$OPENCLAW_POLYMARKET_QUERY_SET" ]]; then
     case "$OPENCLAW_POLYMARKET_QUERY_SET" in
         v1|v2) ;;
@@ -109,7 +130,7 @@ if [[ -n "$OPENCLAW_POLYMARKET_QUERY_SET" ]]; then
     ENV_PREFIX="${ENV_PREFIX} OPENCLAW_POLYMARKET_QUERY_SET=${OPENCLAW_POLYMARKET_QUERY_SET}"
 fi
 ENTRY_DAILY="41 4 * * * ${ENV_PREFIX} ${WRAPPER} daily >> ${OPENCLAW_DATA_DIR}/logs/polymarket_axis_cron.cron.log 2>&1"
-ENTRY_HOURLY_ACTIVE="7 * * * * ${ENV_PREFIX} ${WRAPPER} hourly-topn >> ${OPENCLAW_DATA_DIR}/logs/polymarket_axis_cron.cron.log 2>&1"
+ENTRY_HOURLY_ACTIVE="${OPENCLAW_POLYMARKET_CRON_TOPN_MINUTES} * * * * ${ENV_PREFIX} ${WRAPPER} hourly-topn >> ${OPENCLAW_DATA_DIR}/logs/polymarket_axis_cron.cron.log 2>&1"
 # hourly 默認以註釋行安裝（crontab 合法註釋）：保留完整 entry 供 operator 一鍵
 # 取消註釋活化，亦讓 --remove 的 MARKER grep 能一併清掉。
 if [[ "${OPENCLAW_POLYMARKET_CRON_HOURLY:-0}" == "1" ]]; then
@@ -126,6 +147,7 @@ echo "$ENTRY_HOURLY"
 echo "----------------------------------------"
 echo "Daily:  41 4 * * * UTC（與 residual producer 03:17 錯峰）"
 echo "Hourly: $HOURLY_STATE"
+echo "Hourly-topn minutes: $OPENCLAW_POLYMARKET_CRON_TOPN_MINUTES"
 echo "Query-set: ${OPENCLAW_POLYMARKET_QUERY_SET:-v1 (wrapper default)}"
 echo "Heartbeat: $OPENCLAW_DATA_DIR/cron_heartbeat/polymarket_axis_daily.last_fire"
 echo "Artifacts: $OPENCLAW_DATA_DIR/polymarket_axis_runs/<run_id>/"

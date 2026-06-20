@@ -60,8 +60,11 @@ def test_wrapper_invokes_harness_with_fail_closed_defaults():
 
 def test_installer_active_hourly_after_collector_and_apply_gated():
     src = _src(INSTALLER)
-    assert 'ENTRY="17 * * * *' in src
-    assert "after polymarket_axis hourly-topn at minute 7" in src
+    assert 'OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES="${OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES:-17}"' in src
+    assert 'ENTRY="${OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES} * * * *' in src
+    assert '_validate_cron_minute_list "OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES"' in src
+    assert "2,17,32,47" in src
+    assert "after polymarket_axis collector cadence" in src
     assert "OPENCLAW_POLYMARKET_LEADLAG_CRON_APPLY" in src
     assert "--remove" in src
     assert 'MARKER="polymarket_leadlag_ic_cron.sh"' in src
