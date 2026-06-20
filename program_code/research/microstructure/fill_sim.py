@@ -204,8 +204,19 @@ def simulate_symbol(l1_sym: pd.DataFrame, tr_sym: pd.DataFrame, cadence_s: float
                 p_quote = book["ba"][bi]
                 q0 = book["asz"][bi]
             mid_place = book["mid"][bi]
-            if not (np.isfinite(p_quote) and np.isfinite(q0) and q0 > 0 and np.isfinite(mid_place)):
+            if not (np.isfinite(p_quote) and np.isfinite(q0) and q0 > 0
+                    and np.isfinite(mid_place) and mid_place > 0):
                 continue
+            bid_size_place = float(book["bsz"][bi])
+            ask_size_place = float(book["asz"][bi])
+            denom = bid_size_place + ask_size_place
+            book_imb_at_place = ((bid_size_place - ask_size_place) / denom) if denom > 0 else np.nan
+            if side == "bid":
+                quoted_half_spread_bps = (mid_place - p_quote) / mid_place * 1e4
+                side_book_imb = book_imb_at_place
+            else:
+                quoted_half_spread_bps = (p_quote - mid_place) / mid_place * 1e4
+                side_book_imb = -book_imb_at_place
 
             # 起步事件 index：第一筆 ts > tp 的 book 事件（往後走）。
             ev = bi + 1
@@ -303,6 +314,9 @@ def simulate_symbol(l1_sym: pd.DataFrame, tr_sym: pd.DataFrame, cadence_s: float
                 "t_fill": float(t_fill) if np.isfinite(t_fill) else np.nan,
                 "fill_lag_s": float(fill_lag) if np.isfinite(fill_lag) else np.nan,
                 "mid_place": float(mid_place),
+                "quoted_half_spread_bps": float(quoted_half_spread_bps),
+                "book_imb_at_place": float(book_imb_at_place) if np.isfinite(book_imb_at_place) else np.nan,
+                "side_book_imb": float(side_book_imb) if np.isfinite(side_book_imb) else np.nan,
             })
 
     return pd.DataFrame(rows)
@@ -467,6 +481,10 @@ def apply_informed_skip(trials, sig_by_sym, skip_quantile):
     回加 informed_skip(bool) 欄的 trials copy。
     """
     trials = trials.copy()
+    trials["signal_ofi10"] = np.nan
+    trials["signal_btc_lead"] = np.nan
+    trials["side_signal_ofi10"] = np.nan
+    trials["side_signal_btc_lead"] = np.nan
     # 先收每 symbol 信號分布的 quantile 門檻。
     skip_flags = np.zeros(len(trials), dtype=bool)
     for sym, sig in sig_by_sym.items():
@@ -487,6 +505,14 @@ def apply_informed_skip(trials, sig_by_sym, skip_quantile):
             side = trials.at[ix, "side"]
             o = _signal_at(sig, tp, "o")
             bl = _signal_at(sig, tp, "btc_lead")
+            trials.at[ix, "signal_ofi10"] = o if np.isfinite(o) else np.nan
+            trials.at[ix, "signal_btc_lead"] = bl if np.isfinite(bl) else np.nan
+            if side == "bid":
+                trials.at[ix, "side_signal_ofi10"] = o if np.isfinite(o) else np.nan
+                trials.at[ix, "side_signal_btc_lead"] = bl if np.isfinite(bl) else np.nan
+            else:
+                trials.at[ix, "side_signal_ofi10"] = -o if np.isfinite(o) else np.nan
+                trials.at[ix, "side_signal_btc_lead"] = -bl if np.isfinite(bl) else np.nan
             skip = False
             if side == "bid":
                 # 強負信號 → 預測下殺 → skip bid。
@@ -744,6 +770,215 @@ def fill_sim_edge_scorecard(report: dict, *, primary_horizon_s: int = 15) -> dic
     }
 
 
+def _conditional_feature_cell(name: str, condition: str, trials_subset: pd.DataFrame,
+                              adverse_by_fill: pd.DataFrame, horizons, span_hours: float,
+                              primary_horizon_s: int, meta: dict) -> dict | None:
+    policy = _policy_stats(trials_subset, adverse_by_fill, horizons, span_hours)
+    if not policy:
+        return None
+    block = policy.get("fill_only") or {}
+    net = block.get(f"net_bps@{primary_horizon_s}_maker_exit")
+    if net is None:
+        return None
+    n_fill_only = int(block.get("n") or 0)
+    half_spread = block.get("half_spread_bps")
+    adverse = block.get(f"adverse_sel_bps@{primary_horizon_s}")
+    edge_before_fees = block.get(f"edge_before_fees_bps@{primary_horizon_s}")
+    fee_shortfall = block.get(f"fee_round_trip_shortfall_bps@{primary_horizon_s}_maker_exit")
+    return {
+        "name": name,
+        "condition": condition,
+        "feature": meta.get("feature"),
+        "operator": meta.get("operator"),
+        "quantile": meta.get("quantile"),
+        "threshold": _r(meta.get("threshold"), 6),
+        "components": meta.get("components"),
+        "n_quotes": int(policy.get("n_quotes") or 0),
+        "n_fills_outcome": int(policy.get("n_fills_outcome") or 0),
+        "n_fill_only": n_fill_only,
+        "fill_rate": policy.get("fill_rate"),
+        "net_bps": _r(net, 3),
+        "half_spread_bps": _r(half_spread, 3),
+        "adverse_sel_bps": _r(adverse, 3),
+        "edge_before_fees_bps": _r(edge_before_fees, 3),
+        "fee_round_trip_shortfall_bps": _r(fee_shortfall, 3),
+        "required_half_spread_bps": _r(
+            block.get(f"required_half_spread_bps@{primary_horizon_s}_maker_exit"),
+            3,
+        ),
+        "required_maker_rebate_bps_per_side": _r(
+            block.get(f"required_maker_rebate_bps_per_side@{primary_horizon_s}_maker_exit"),
+            3,
+        ),
+        "signif_suppressed": bool(
+            block.get(f"signif_suppressed@{primary_horizon_s}", n_fill_only < MIN_FILLS_FOR_SIGNIF)
+        ),
+    }
+
+
+def fill_sim_conditional_feature_scorecard(trials: pd.DataFrame, adverse_by_fill: pd.DataFrame,
+                                           horizons, span_hours: float,
+                                           *, primary_horizon_s: int = 15) -> dict:
+    """Rank PIT conditional maker cells from raw quote trials.
+
+    The filters here use only placement-time columns. Quantile cut points are
+    in-window research triage thresholds, not out-of-sample promotion evidence.
+    """
+    base = {
+        "primary_horizon_s": primary_horizon_s,
+        "fee_round_trip_bps": MAKER_FEE_ROUND_TRIP_BPS,
+        "min_fills_for_signif": MIN_FILLS_FOR_SIGNIF,
+        "cells_evaluated": 0,
+        "best_cell": None,
+        "positive_cells": [],
+        "positive_cells_with_sample_gate": [],
+        "nearest_to_breakeven_cells": [],
+        "note": (
+            "Research scorecard only. Filters use placement-time features, but quantile "
+            "thresholds are selected in-window; any positive cell needs OOS/cross-regime "
+            "confirmation before strategy or promotion work."
+        ),
+    }
+    if trials is None or trials.empty:
+        base["status"] = "NO_CONDITIONAL_FEATURE_CELLS"
+        base["reason"] = "empty_trials"
+        return base
+
+    candidates: list[tuple[str, str, pd.Series, dict]] = []
+    seen: set[str] = set()
+
+    def add_candidate(name: str, condition: str, mask, meta: dict):
+        if name in seen:
+            return
+        seen.add(name)
+        m = pd.Series(mask, index=trials.index).fillna(False).astype(bool)
+        if int(m.sum()) <= 0:
+            return
+        candidates.append((name, condition, m, meta))
+
+    if "side" in trials:
+        for side in ("bid", "ask"):
+            add_candidate(
+                f"side={side}",
+                f"side == {side}",
+                trials["side"].astype(str) == side,
+                {"feature": "side", "operator": "==", "threshold": side},
+            )
+
+    thresholds: dict[tuple[str, str], tuple[pd.Series, float]] = {}
+
+    def add_quantile_feature(col: str):
+        if col not in trials:
+            return
+        vals = pd.to_numeric(trials[col], errors="coerce")
+        valid = vals.dropna()
+        valid = valid[np.isfinite(valid)]
+        if valid.empty:
+            return
+        for q, op, label in (
+            (0.10, "<=", "p10"),
+            (0.25, "<=", "p25"),
+            (0.75, ">=", "p75"),
+            (0.90, ">=", "p90"),
+        ):
+            threshold = float(valid.quantile(q))
+            if not np.isfinite(threshold):
+                continue
+            if op == ">=":
+                mask = vals >= threshold
+            else:
+                mask = vals <= threshold
+            thresholds[(col, label)] = (mask, threshold)
+            add_candidate(
+                f"{col}_{label}_{'ge' if op == '>=' else 'le'}",
+                f"{col} {op} {label}({threshold:.6g})",
+                mask,
+                {
+                    "feature": col,
+                    "operator": op,
+                    "quantile": label,
+                    "threshold": threshold,
+                },
+            )
+
+    for feature_col in (
+        "quoted_half_spread_bps",
+        "q0",
+        "q_eff",
+        "side_book_imb",
+        "side_signal_ofi10",
+        "side_signal_btc_lead",
+    ):
+        add_quantile_feature(feature_col)
+
+    # 少量預註冊組合：優先檢驗「足夠 spread」再疊一個 PIT 保護條件，避免組合爆炸。
+    combo_specs = (
+        ("quoted_half_spread_bps", "p75", "side_signal_ofi10", "p75"),
+        ("quoted_half_spread_bps", "p75", "side_signal_btc_lead", "p75"),
+        ("quoted_half_spread_bps", "p75", "side_book_imb", "p75"),
+        ("quoted_half_spread_bps", "p75", "q0", "p25"),
+    )
+    for a_col, a_label, b_col, b_label in combo_specs:
+        a = thresholds.get((a_col, a_label))
+        b = thresholds.get((b_col, b_label))
+        if a is None or b is None:
+            continue
+        a_mask, a_thr = a
+        b_mask, b_thr = b
+        name = f"{a_col}_{a_label}_and_{b_col}_{b_label}"
+        condition = f"{a_col} {a_label} AND {b_col} {b_label}"
+        add_candidate(
+            name,
+            condition,
+            a_mask & b_mask,
+            {
+                "feature": "combo",
+                "components": [
+                    {"feature": a_col, "quantile": a_label, "threshold": a_thr},
+                    {"feature": b_col, "quantile": b_label, "threshold": b_thr},
+                ],
+            },
+        )
+
+    cells = []
+    for name, condition, mask, meta in candidates:
+        cell = _conditional_feature_cell(
+            name,
+            condition,
+            trials.loc[mask],
+            adverse_by_fill,
+            horizons,
+            span_hours,
+            primary_horizon_s,
+            meta,
+        )
+        if cell is not None:
+            cells.append(cell)
+
+    ranked = sorted(cells, key=lambda c: (c["net_bps"] is not None, c["net_bps"]), reverse=True)
+    positive = [c for c in ranked if c["net_bps"] is not None and c["net_bps"] > 0.0]
+    positive_sample_gate = [
+        c for c in positive
+        if c["n_fill_only"] >= MIN_FILLS_FOR_SIGNIF and not c["signif_suppressed"]
+    ]
+    if positive_sample_gate:
+        status = "CONDITIONAL_FEATURE_POSITIVE_SAMPLE_GATED"
+    elif positive:
+        status = "CONDITIONAL_FEATURE_POSITIVE_BELOW_SAMPLE_GATE"
+    else:
+        status = "NO_CONDITIONAL_FEATURE_POSITIVE_CELL"
+
+    base.update({
+        "status": status,
+        "cells_evaluated": len(cells),
+        "best_cell": ranked[0] if ranked else None,
+        "positive_cells": positive[:10],
+        "positive_cells_with_sample_gate": positive_sample_gate[:10],
+        "nearest_to_breakeven_cells": ranked[:10],
+    })
+    return base
+
+
 def run(l1, tr, ob, syms, clean_since, horizons, cadence_s, skip_quantile, since_ts, until_ts):
     """純計算入口：回 report dict。l1 為 raw（未過濾）;本函數做 §1.2 過濾並計數。"""
     l1_clean, fcounts = filter_l1_clean(l1, clean_since)
@@ -928,6 +1163,13 @@ def run(l1, tr, ob, syms, clean_since, horizons, cadence_s, skip_quantile, since
         report,
         primary_horizon_s=primary_horizon,
     )
+    report["conditional_feature_scorecard"] = fill_sim_conditional_feature_scorecard(
+        trials,
+        adverse,
+        horizons,
+        span_hours,
+        primary_horizon_s=primary_horizon,
+    )
 
     return report
 
@@ -1036,7 +1278,8 @@ def main(argv=None):
 
     # 人類可讀摘要（含 queue dose-response）。
     summary_keys = ("window", "params", "data", "caveat", "obtop_crosscheck",
-                    "primary_queue_position", "edge_scorecard", "pooled",
+                    "primary_queue_position", "edge_scorecard",
+                    "conditional_feature_scorecard", "pooled",
                     "queue_dose_response")
     print(json.dumps({k: report[k] for k in summary_keys if k in report},
                      indent=2, ensure_ascii=False))
