@@ -58,3 +58,24 @@ Interpretation: queue position helps but does not flip sign. In this window adve
 No production report overwrite, no engine/API restart, no PG table write, no schema migration, no Bybit private/signed/trading call, no credential/auth/risk/order/trading mutation.
 
 This is a single-regime smoke, not CP-3 go/no-go or promotion proof. The actionable change is that future fill_sim artifacts now expose the fee/spread/rebate requirement directly, so profitability discussions cannot hide behind raw net values.
+
+## Follow-up: MM Verdict Bridge
+
+Daily `recorder_mm_verdict_cron.sh` now carries the same break-even lens into live MM status, using true maker markout-derived spread capture plus fill_sim adverse selection:
+
+- per-symbol `edge_before_fees_bps`
+- `break_even_fee_round_trip_bps`
+- `break_even_maker_fee_bps_per_side`
+- `fee_round_trip_shortfall_bps`
+- `required_spread_captured_bps`
+- `required_maker_rebate_bps_per_side`
+- top-level `cost_wall_summary`
+
+`runtime_runner.py` preserves `cost_wall_summary` in alpha discovery `arms_raw` detail. The stable `discovery_plan` schema and positive-edge gates are unchanged.
+
+Focused verification:
+
+- `bash -n helper_scripts/cron/recorder_mm_verdict_cron.sh`
+- `python3 -m pytest -q helper_scripts/cron/tests/test_fill_sim_refresh_cron_static.py` -> 11 passed
+- `python3 -m pytest -q helper_scripts/research/tests/test_alpha_discovery_throughput.py` -> 10 passed
+- `python3 -m py_compile helper_scripts/research/alpha_discovery_throughput/runtime_runner.py`

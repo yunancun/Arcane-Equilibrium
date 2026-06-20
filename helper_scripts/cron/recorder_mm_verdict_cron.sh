@@ -328,6 +328,22 @@ def _load_fillsim_adverse(path, h_primary, max_age_h):
     info["adverse_sel_bps"] = fo.get(f"adverse_sel_bps@{h_primary}")
     info["adverse_sel_n"] = fo.get("n")
     info["adverse_sel_signif_suppressed"] = fo.get(f"signif_suppressed@{h_primary}")
+    info["fill_only_cost_wall"] = {
+        "edge_before_fees_bps": fo.get(f"edge_before_fees_bps@{h_primary}"),
+        "break_even_fee_round_trip_bps": fo.get(
+            f"break_even_fee_round_trip_bps@{h_primary}_maker_exit"
+        ),
+        "break_even_maker_fee_bps_per_side": fo.get(
+            f"break_even_maker_fee_bps_per_side@{h_primary}_maker_exit"
+        ),
+        "fee_round_trip_shortfall_bps": fo.get(
+            f"fee_round_trip_shortfall_bps@{h_primary}_maker_exit"
+        ),
+        "required_half_spread_bps": fo.get(f"required_half_spread_bps@{h_primary}_maker_exit"),
+        "required_maker_rebate_bps_per_side": fo.get(
+            f"required_maker_rebate_bps_per_side@{h_primary}_maker_exit"
+        ),
+    }
     # 5/30s sensitivity（誠實透明，不入 net 計算）。
     for hs in (5, 30):
         v = fo.get(f"adverse_sel_bps@{hs}")
@@ -353,14 +369,32 @@ for sym, mkrow in per_sym_mk.items():
     spread_captured = None if mean_mk is None else round(-float(mean_mk), 4)
     if spread_captured is None or not adverse_usable:
         net = None
+        edge_before_fees = None
+        break_even_fee_rt = None
+        break_even_maker_fee = None
+        fee_rt_shortfall = None
+        required_spread_captured = None
+        required_maker_rebate = None
     else:
-        net = round(spread_captured - float(adverse_sel) - fee_rt, 4)
+        edge_before_fees = round(spread_captured - float(adverse_sel), 4)
+        break_even_fee_rt = edge_before_fees
+        break_even_maker_fee = round(break_even_fee_rt / 2.0, 4)
+        fee_rt_shortfall = round(fee_rt - break_even_fee_rt, 4)
+        required_spread_captured = round(float(adverse_sel) + fee_rt, 4)
+        required_maker_rebate = round(max(0.0, -break_even_maker_fee), 4)
+        net = round(edge_before_fees - fee_rt, 4)
     net_edge[sym] = {
         "net_edge_bps": net,
         "spread_captured_bps": spread_captured,
         "mean_markout_bps": mean_mk,
         "adverse_selection_bps": (round(float(adverse_sel), 4) if adverse_usable else None),
         "fee_bps_rt": fee_rt,
+        "edge_before_fees_bps": edge_before_fees,
+        "break_even_fee_round_trip_bps": break_even_fee_rt,
+        "break_even_maker_fee_bps_per_side": break_even_maker_fee,
+        "fee_round_trip_shortfall_bps": fee_rt_shortfall,
+        "required_spread_captured_bps": required_spread_captured,
+        "required_maker_rebate_bps_per_side": required_maker_rebate,
         "n_maker_fills": n,
     }
     # 告警 gate：net>0 AND n>=門檻（對齊 fill_sim MIN_FILLS_FOR_SIGNIF=30）AND adverse 可用。
@@ -373,10 +407,39 @@ if positive_flagged:
     # offline adverse-selection 是不同 fill 樣本（只同 regime 可比）；需跨 regime（含
     # trend-stress）才是裁決。
     caveat = ("SINGLE-WINDOW != GO/NO-GO: cross-regime (incl trend-stress) required; "
-              "live spread-capture & offline adverse-selection are DIFFERENT fill samples "
-              "(comparable only same-regime)")
+                  "live spread-capture & offline adverse-selection are DIFFERENT fill samples "
+                  "(comparable only same-regime)")
     alerts.append("[MM-VERDICT] maker net-edge POSITIVE: " + "; ".join(positive_flagged)
                   + " || " + caveat)
+
+cost_wall_rows = [
+    (row["net_edge_bps"], sym, row)
+    for sym, row in net_edge.items()
+    if row.get("net_edge_bps") is not None
+]
+if cost_wall_rows:
+    best_net, best_sym, best_row = max(cost_wall_rows, key=lambda item: item[0])
+    cost_wall_summary = {
+        "available": True,
+        "horizon_s": h_primary,
+        "best_symbol_by_net_edge": best_sym,
+        "best_net_edge_bps": best_net,
+        "best_fee_round_trip_shortfall_bps": best_row.get("fee_round_trip_shortfall_bps"),
+        "best_required_maker_rebate_bps_per_side": best_row.get(
+            "required_maker_rebate_bps_per_side"
+        ),
+        "best_required_spread_captured_bps": best_row.get("required_spread_captured_bps"),
+        "note": (
+            "fee_round_trip_shortfall_bps = current maker RT fee - break-even RT fee; "
+            "positive means still below break-even"
+        ),
+    }
+else:
+    cost_wall_summary = {
+        "available": False,
+        "horizon_s": h_primary,
+        "reason": "adverse_selection_unusable_or_no_markout",
+    }
 
 # --- (4)+(b) recorder-v2 L1 readiness ---
 l1_days = None
@@ -417,6 +480,7 @@ status = {
     "fillsim": fillsim,
     "adverse_selection_usable": adverse_usable,
     "net_edge_per_symbol": net_edge,
+    "cost_wall_summary": cost_wall_summary,
     "l1_regime_days": l1_days,
     "l1_fill_sim_ready": l1_ready,
     "highvol_z": hv_z,

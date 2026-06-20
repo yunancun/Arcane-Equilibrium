@@ -116,3 +116,13 @@ def test_mm_verdict_rejects_empty_or_stale_l1_fillsim_data() -> None:
     assert "data_l1_max_age_hours" in src
     assert "empty_l1" in src
     assert "stale_l1_data" in src
+
+
+def test_mm_verdict_surfaces_cost_wall_fields() -> None:
+    src = MM_VERDICT.read_text(encoding="utf-8")
+    assert "fill_only_cost_wall" in src
+    assert "edge_before_fees_bps" in src
+    assert "break_even_fee_round_trip_bps" in src
+    assert "fee_round_trip_shortfall_bps" in src
+    assert "required_maker_rebate_bps_per_side" in src
+    assert "cost_wall_summary" in src

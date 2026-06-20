@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM Verdict Cost-Wall Bridge
+
+- `recorder_mm_verdict_cron.sh` now carries the break-even lens into daily live MM status: per-symbol edge-before-fees, break-even maker fee, fee shortfall, required spread capture, required maker rebate, and top-level `cost_wall_summary`.
+- `runtime_runner.py` preserves this summary in alpha discovery `arms_raw` detail without changing the stable `discovery_plan` schema or positive-edge gates.
+- Focused checks passed: MM cron bash/static tests 11, alpha discovery runtime tests 10, runtime runner py_compile.
+- Boundary: source/test/docs only at checkpoint; no engine/API restart, no PG write, no Bybit private/signed/trading call, no runtime/auth/risk/order mutation.
+
 ## 2026-06-20 FillSim Cost-Wall Instrumentation
 
 - `fill_sim.py` now reports break-even maker fee, fee shortfall, required half-spread, and required maker rebate per side for every horizon/net block.
