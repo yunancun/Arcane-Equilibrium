@@ -310,6 +310,7 @@ def _mm_low_friction_gross_stability_scorecard(detail: dict[str, Any]) -> dict[s
     gross_decomp = _dict(detail.get("gross_edge_cost_decomposition"))
     sample_cost_wall = _dict(detail.get("sample_gated_cost_wall_summary"))
     low_friction = _dict(detail.get("low_friction_signal_scorecard"))
+    train_confirmed = _dict(low_friction.get("train_confirmed_gross_scorecard"))
     candidate = _dict(
         gross_decomp.get("best_low_friction_signal_holdout_gross_candidate")
     )
@@ -443,6 +444,19 @@ def _mm_low_friction_gross_stability_scorecard(detail: dict[str, Any]) -> dict[s
         "train_gross_clears_current_fee": train_clears_current_fee,
         "holdout_gross_clears_current_fee": holdout_clears_current_fee,
         "holdout_minus_train_gross_bps": _round_or_none(holdout_minus_train),
+        "train_confirmed_gross_status": train_confirmed.get("status"),
+        "train_confirmed_positive_gross_count": train_confirmed.get(
+            "train_confirmed_positive_gross_count"
+        ),
+        "best_train_confirmed_min_gross_bps": train_confirmed.get(
+            "best_min_train_holdout_gross_bps"
+        ),
+        "train_confirmed_gap_to_current_fee_bps": train_confirmed.get(
+            "gap_to_current_fee_round_trip_bps"
+        ),
+        "best_train_confirmed_gross_candidate": train_confirmed.get(
+            "best_train_confirmed_gross_candidate"
+        ),
     }
 
 
@@ -454,6 +468,7 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
     low_friction = _dict(detail.get("low_friction_signal_scorecard"))
     history_extra = _mm_lower_fee_history_extra(detail)
     low_friction_stability = _mm_low_friction_gross_stability_scorecard(detail)
+    train_confirmed = _dict(low_friction.get("train_confirmed_gross_scorecard"))
     low_friction_stability_status = str(
         low_friction_stability.get("status") or ""
     ).upper()
@@ -488,12 +503,26 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
     current_fee_positive_count = _int(
         gross_decomp.get("current_fee_positive_sample_gated_cell_count")
     )
+    current_fee_confirmed_count = _int(train_confirmed.get("current_fee_confirmed_count"))
+    best_current_fee_cell = _dict(gross_decomp.get("best_sample_gated_current_fee_cell"))
+    best_current_fee_source = str(best_current_fee_cell.get("source") or "")
     business_status = str(business_actionability.get("status") or "").upper()
     default_low_friction_trigger = (
         "search_new_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
     )
 
-    if current_fee_positive_count > 0:
+    if (
+        current_fee_positive_count > 0
+        and current_fee_confirmed_count <= 0
+        and best_current_fee_source == "low_friction_signal_holdout"
+    ):
+        status = "CURRENT_FEE_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED"
+        reason = "current_fee_positive_low_friction_holdout_cell_lacks_train_confirmation"
+        next_trigger = (
+            "search_train_confirmed_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
+        )
+        engineering_actionable = True
+    elif current_fee_positive_count > 0:
         status = "CURRENT_FEE_SAMPLE_GATED_CELL_AVAILABLE"
         reason = "sample_gated_current_fee_positive_cell_exists"
         next_trigger = "review_current_fee_positive_mm_cell_with_walk_forward_and_aeg_chain"
@@ -556,6 +585,17 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
         "low_friction_gross_stability_status": low_friction_stability.get("status"),
         "low_friction_gross_stability_reason": low_friction_stability.get("reason"),
         "low_friction_gross_stability_scorecard": low_friction_stability,
+        "low_friction_train_confirmed_gross_status": (
+            low_friction_stability.get("train_confirmed_gross_status")
+        ),
+        "low_friction_best_train_confirmed_min_gross_bps": (
+            low_friction_stability.get("best_train_confirmed_min_gross_bps")
+        ),
+        "low_friction_train_confirmed_gap_to_current_fee_bps": (
+            low_friction_stability.get("train_confirmed_gap_to_current_fee_bps")
+        ),
+        "low_friction_train_confirmed_current_fee_count": current_fee_confirmed_count,
+        "best_sample_gated_current_fee_source": best_current_fee_source or None,
         "best_low_friction_signal_holdout_gross_candidate": gross_decomp.get(
             "best_low_friction_signal_holdout_gross_candidate"
         ),
@@ -830,6 +870,79 @@ def classify_profitability_blocker(
         escape_scorecard = _mm_cost_wall_escape_scorecard(detail)
 
         if failure_status == "NO_TRAIN_POSITIVE_CELL":
+            if escape_scorecard.get("status") == "CURRENT_FEE_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED":
+                stability = _dict(
+                    escape_scorecard.get("low_friction_gross_stability_scorecard")
+                )
+                return _finish_blocker_row(
+                    row,
+                    blocker_class="feature_family_no_edge",
+                    primary_blocker="low_friction_current_fee_holdout_not_train_confirmed",
+                    next_trigger=(
+                        escape_scorecard.get("next_trigger")
+                        or "search_train_confirmed_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
+                    ),
+                    engineering_actionable=bool(
+                        escape_scorecard.get("engineering_actionable", True)
+                    ),
+                    secondary_blockers=secondary,
+                    extra={
+                        "walk_forward_failure_status": failure_status,
+                        "candidate_count": failure.get("candidate_count"),
+                        "best_train_candidate": failure.get("best_train_candidate"),
+                        "best_holdout_candidate": failure.get("best_holdout_candidate"),
+                        "gross_edge_decomposition_status": gross_status,
+                        "current_fee_positive_sample_gated_cell_count": gross_decomp.get(
+                            "current_fee_positive_sample_gated_cell_count"
+                        ),
+                        "cost_wall_escape_status": escape_scorecard.get("status"),
+                        "cost_wall_escape_reason": escape_scorecard.get("reason"),
+                        "cost_wall_escape_scorecard": escape_scorecard,
+                        "best_sample_gated_current_fee_source": escape_scorecard.get(
+                            "best_sample_gated_current_fee_source"
+                        ),
+                        "low_friction_gross_stability_status": (
+                            escape_scorecard.get("low_friction_gross_stability_status")
+                        ),
+                        "low_friction_gross_stability_reason": (
+                            escape_scorecard.get("low_friction_gross_stability_reason")
+                        ),
+                        "low_friction_train_gross_edge_bps": stability.get(
+                            "train_gross_edge_bps"
+                        ),
+                        "low_friction_holdout_gross_edge_bps": stability.get(
+                            "holdout_gross_edge_bps"
+                        ),
+                        "low_friction_holdout_minus_train_gross_bps": stability.get(
+                            "holdout_minus_train_gross_bps"
+                        ),
+                        "low_friction_train_confirmed_gross_status": (
+                            escape_scorecard.get(
+                                "low_friction_train_confirmed_gross_status"
+                            )
+                        ),
+                        "low_friction_train_confirmed_current_fee_count": (
+                            escape_scorecard.get(
+                                "low_friction_train_confirmed_current_fee_count"
+                            )
+                        ),
+                        "low_friction_best_train_confirmed_min_gross_bps": (
+                            escape_scorecard.get(
+                                "low_friction_best_train_confirmed_min_gross_bps"
+                            )
+                        ),
+                        "low_friction_train_confirmed_gap_to_current_fee_bps": (
+                            escape_scorecard.get(
+                                "low_friction_train_confirmed_gap_to_current_fee_bps"
+                            )
+                        ),
+                        "best_low_friction_signal_holdout_gross_candidate": (
+                            gross_decomp.get(
+                                "best_low_friction_signal_holdout_gross_candidate"
+                            )
+                        ),
+                    },
+                )
             if gross_status == "GROSS_EDGE_BELOW_CURRENT_FEE_COST_WALL":
                 return _finish_blocker_row(
                     row,
@@ -907,6 +1020,21 @@ def classify_profitability_blocker(
                                     "low_friction_gross_stability_scorecard"
                                 )
                             ).get("holdout_minus_train_gross_bps")
+                        ),
+                        "low_friction_train_confirmed_gross_status": (
+                            escape_scorecard.get(
+                                "low_friction_train_confirmed_gross_status"
+                            )
+                        ),
+                        "low_friction_best_train_confirmed_min_gross_bps": (
+                            escape_scorecard.get(
+                                "low_friction_best_train_confirmed_min_gross_bps"
+                            )
+                        ),
+                        "low_friction_train_confirmed_gap_to_current_fee_bps": (
+                            escape_scorecard.get(
+                                "low_friction_train_confirmed_gap_to_current_fee_bps"
+                            )
                         ),
                         "business_path_actionability_status": business_actionability.get(
                             "status"

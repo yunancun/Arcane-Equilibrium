@@ -25,6 +25,16 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM Train-Confirmed Low-Friction Gross Scorecard
+
+- Added `train_confirmed_gross_scorecard` inside `fill_sim_low_friction_signal_scorecard()`, ranking every low-friction MM candidate by `min(train_edge_before_fees_bps, holdout_edge_before_fees_bps)`.
+- Diagnosis: the apparent current-fee-positive low-friction cell is holdout-only, not a stable signal. Current best holdout-only cell has holdout gross `5.868bp` / net `1.868bp` but train gross `-0.336bp`.
+- Fresh Linux fill_sim sha256 `a74353a05a99bd28a04acee932af86d5f7ab72ea3b40e5a497dd0303ec0ff408`: 96 low-friction candidates, 44 train-confirmed positive-gross candidates, 0 train-confirmed current-fee candidates.
+- Best train-confirmed candidate is `quoted_half_spread_bps_train_p75_and_side_touch_size_delta_frac_10s_train_p90`: train gross `2.009bp`, holdout gross `1.402bp`, min gross `1.402bp`, gap `2.598bp` to the 4.0bp current-fee round trip.
+- Latest alpha sha256 `18463765c3dd1ad94b36cdfbee9a04b723491ace0a88bfb958257838dd6721ed` remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`; MM blocker is now `low_friction_current_fee_holdout_not_train_confirmed`, next trigger `search_train_confirmed_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip`.
+- Verification: Mac focused `53 passed`, Linux focused `53 passed`, py_compile, diff-check, selective Linux source sync, and read-only fill_sim/MM verdict/alpha runtime smokes passed.
+- Boundary: artifact-only source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact writes only; read-only PG SELECT via wrappers; no PG write/schema migration, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, signal, execution proof, or promotion proof.
+
 ## 2026-06-20 Polymarket Replay History Accumulator
 
 - Added `polymarket_leadlag.replay_history`, an artifact-only accumulator that scans dated lead-lag reports, dedupes explicit replay samples by candidate/sample id, merges PBO daily grids, and writes AEG-compatible history evidence.

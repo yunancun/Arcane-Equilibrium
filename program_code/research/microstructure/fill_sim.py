@@ -1576,6 +1576,154 @@ def _cell_sample_gated_gross_edge_clears(cell: dict | None, threshold_bps: float
     )
 
 
+def _cell_sample_gated_positive_gross_edge(cell: dict | None) -> bool:
+    if not cell:
+        return False
+    edge = cell.get("edge_before_fees_bps")
+    try:
+        edge_f = float(edge)
+    except (TypeError, ValueError):
+        return False
+    return (
+        np.isfinite(edge_f)
+        and edge_f > 0.0
+        and int(cell.get("n_fill_only") or 0) >= MIN_FILLS_FOR_SIGNIF
+        and not bool(cell.get("signif_suppressed"))
+    )
+
+
+def _low_friction_train_confirmed_gross_scorecard(rows: list[dict]) -> dict:
+    def _edge(cell: dict | None) -> float | None:
+        if not cell:
+            return None
+        try:
+            value = float(cell.get("edge_before_fees_bps"))
+        except (TypeError, ValueError):
+            return None
+        return value if np.isfinite(value) else None
+
+    def _condense(row: dict | None) -> dict | None:
+        if not row:
+            return None
+        train = row.get("train") or {}
+        holdout = row.get("holdout") or {}
+        train_edge = _edge(train)
+        holdout_edge = _edge(holdout)
+        min_gross = (
+            min(train_edge, holdout_edge)
+            if train_edge is not None and holdout_edge is not None
+            else None
+        )
+        return {
+            "name": row.get("name"),
+            "condition": row.get("condition"),
+            "feature": row.get("feature"),
+            "threshold_source": row.get("threshold_source"),
+            "train_edge_before_fees_bps": train_edge,
+            "train_net_bps": train.get("net_bps"),
+            "train_n_fill_only": train.get("n_fill_only"),
+            "holdout_edge_before_fees_bps": holdout_edge,
+            "holdout_net_bps": holdout.get("net_bps"),
+            "holdout_n_fill_only": holdout.get("n_fill_only"),
+            "min_train_holdout_gross_bps": _r(min_gross),
+            "gap_to_current_fee_round_trip_bps": _r(
+                MAKER_FEE_ROUND_TRIP_BPS - min_gross
+                if min_gross is not None else None
+            ),
+            "train_sample_gated_positive_gross": (
+                _cell_sample_gated_positive_gross_edge(train)
+            ),
+            "holdout_sample_gated_positive_gross": (
+                _cell_sample_gated_positive_gross_edge(holdout)
+            ),
+            "train_sample_gated_gross_clears_current_fee": row.get(
+                "train_sample_gated_gross_clears_current_fee"
+            ),
+            "holdout_sample_gated_gross_clears_current_fee": row.get(
+                "holdout_sample_gated_gross_clears_current_fee"
+            ),
+            "holdout_confirmed_current_fee": row.get("holdout_confirmed_current_fee"),
+        }
+
+    train_positive = [
+        row for row in rows
+        if _cell_sample_gated_positive_gross_edge(row.get("train"))
+    ]
+    holdout_positive = [
+        row for row in rows
+        if _cell_sample_gated_positive_gross_edge(row.get("holdout"))
+    ]
+    train_confirmed = [
+        row for row in rows
+        if _cell_sample_gated_positive_gross_edge(row.get("train"))
+        and _cell_sample_gated_positive_gross_edge(row.get("holdout"))
+    ]
+    train_confirmed_ranked = sorted(
+        train_confirmed,
+        key=lambda row: (
+            min(
+                _edge(row.get("train")) if _edge(row.get("train")) is not None else -1e9,
+                _edge(row.get("holdout")) if _edge(row.get("holdout")) is not None else -1e9,
+            ),
+            _edge(row.get("holdout")) if _edge(row.get("holdout")) is not None else -1e9,
+            (row.get("holdout") or {}).get("n_fill_only") or 0,
+        ),
+        reverse=True,
+    )
+    current_fee_confirmed = [
+        row for row in train_confirmed_ranked
+        if row.get("train_sample_gated_gross_clears_current_fee")
+        and row.get("holdout_sample_gated_gross_clears_current_fee")
+    ]
+    best = train_confirmed_ranked[0] if train_confirmed_ranked else None
+    best_summary = _condense(best)
+    best_min_gross = (
+        best_summary.get("min_train_holdout_gross_bps")
+        if best_summary else None
+    )
+    if current_fee_confirmed:
+        status = "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_CLEARS_CURRENT_FEE"
+        reason = "train_and_holdout_sample_gated_gross_clear_current_fee"
+    elif train_confirmed_ranked:
+        status = "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_BELOW_CURRENT_FEE"
+        reason = "train_and_holdout_gross_positive_but_min_gross_below_current_fee"
+    elif holdout_positive:
+        status = "LOW_FRICTION_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED"
+        reason = "holdout_gross_positive_but_no_train_confirmed_positive_gross"
+    elif train_positive:
+        status = "LOW_FRICTION_TRAIN_GROSS_NOT_HOLDOUT_CONFIRMED"
+        reason = "train_gross_positive_but_no_holdout_confirmed_positive_gross"
+    else:
+        status = "LOW_FRICTION_NO_TRAIN_OR_HOLDOUT_CONFIRMED_GROSS"
+        reason = "no_sample_gated_positive_gross_in_both_halves"
+    return {
+        "schema_version": "low_friction_train_confirmed_gross_v1",
+        "status": status,
+        "reason": reason,
+        "current_fee_round_trip_bps": MAKER_FEE_ROUND_TRIP_BPS,
+        "min_fills_for_signif": MIN_FILLS_FOR_SIGNIF,
+        "candidates_evaluated": len(rows),
+        "train_sample_gated_positive_gross_count": len(train_positive),
+        "holdout_sample_gated_positive_gross_count": len(holdout_positive),
+        "train_confirmed_positive_gross_count": len(train_confirmed_ranked),
+        "current_fee_confirmed_count": len(current_fee_confirmed),
+        "best_train_confirmed_gross_candidate": best_summary,
+        "best_min_train_holdout_gross_bps": best_min_gross,
+        "gap_to_current_fee_round_trip_bps": _r(
+            MAKER_FEE_ROUND_TRIP_BPS - best_min_gross
+            if best_min_gross is not None else None
+        ),
+        "top_train_confirmed_gross_candidates": [
+            _condense(row) for row in train_confirmed_ranked[:10]
+        ],
+        "note": (
+            "Diagnostic only. A train-confirmed gross candidate still needs "
+            "current-fee clearance, cross-window history, and execution realism "
+            "before any strategy work."
+        ),
+    }
+
+
 def _low_friction_signal_failure_summary(rows: list[dict], holdout_confirmed: list[dict],
                                          train_clearing: list[dict]) -> dict:
     def _condense(row: dict | None) -> dict | None:
@@ -1666,8 +1814,11 @@ def fill_sim_low_friction_signal_scorecard(
         "best_train_candidate": None,
         "best_holdout_current_fee_candidate": None,
         "best_holdout_gross_candidate": None,
+        "best_train_confirmed_gross_candidate": None,
         "failure_summary": None,
         "holdout_confirmed_candidates": [],
+        "train_confirmed_gross_candidates": [],
+        "train_confirmed_gross_scorecard": None,
         "train_current_fee_clearing_candidates": [],
         "top_holdout_gross_candidates": [],
         "top_train_candidates": [],
@@ -1875,6 +2026,9 @@ def fill_sim_low_friction_signal_scorecard(
     )
     train_clearing = [r for r in ranked if r["train_sample_gated_gross_clears_current_fee"]]
     holdout_confirmed = [r for r in ranked if r["holdout_confirmed_current_fee"]]
+    train_confirmed_gross_scorecard = _low_friction_train_confirmed_gross_scorecard(
+        ranked
+    )
 
     if holdout_confirmed:
         status = "LOW_FRICTION_SIGNAL_HOLDOUT_CURRENT_FEE_SAMPLE_GATED"
@@ -1895,12 +2049,19 @@ def fill_sim_low_friction_signal_scorecard(
         "best_train_candidate": ranked[0] if ranked else None,
         "best_holdout_current_fee_candidate": holdout_confirmed[0] if holdout_confirmed else None,
         "best_holdout_gross_candidate": holdout_ranked[0] if holdout_ranked else None,
+        "best_train_confirmed_gross_candidate": (
+            train_confirmed_gross_scorecard.get("best_train_confirmed_gross_candidate")
+        ),
         "failure_summary": _low_friction_signal_failure_summary(
             ranked,
             holdout_confirmed,
             train_clearing,
         ),
         "holdout_confirmed_candidates": holdout_confirmed[:10],
+        "train_confirmed_gross_candidates": train_confirmed_gross_scorecard.get(
+            "top_train_confirmed_gross_candidates"
+        ),
+        "train_confirmed_gross_scorecard": train_confirmed_gross_scorecard,
         "train_current_fee_clearing_candidates": train_clearing[:10],
         "top_holdout_gross_candidates": holdout_ranked[:20],
         "top_train_candidates": ranked[:20],
