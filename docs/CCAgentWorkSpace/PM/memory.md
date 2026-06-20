@@ -1045,3 +1045,8 @@
 
 - v286 adds `coverage_action_scorecard` to FlashDip L1 replay and alpha-discovery blocker rows. Current runtime evidence says the 6 missing candidate event windows ended before symbol L1 capture began, so this is a historical-before-capture wait state, not immediate recorder repair.
 - Latest alpha remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`; FlashDip L1 next trigger is `wait_for_next_flash_dip_candidate_after_l1_capture_start_then_replay`. Treat this as research evidence routing only, not retune/promotion authority.
+
+## 2026-06-20 FlashDip dependent L1 blocker propagation
+
+- v287 propagates the L1 replay coverage-action scorecard into `flash_dip_execution_realism`. The parent execution-realism blocker now follows the child L1 wait state instead of claiming immediate engineering actionability.
+- Latest alpha sha256 `05d0baa71008cc31024c0e58bbe86b5c98f50edae0919691ffaabd519f57a585` remains blocked, with `engineering_actionable_count=2`; FlashDip waits for a new candidate after L1 capture start, while Polymarket is near sample gate at 25/30.
