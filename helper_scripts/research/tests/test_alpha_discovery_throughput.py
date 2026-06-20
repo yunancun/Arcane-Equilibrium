@@ -243,6 +243,15 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
                     "best_symbol_by_net_edge": "LABUSDT",
                     "best_fee_round_trip_shortfall_bps": 1.73,
                 },
+                "sample_gated_cost_wall_summary": {
+                    "available": True,
+                    "status": "SAMPLE_GATED_CURRENT_FEE_COST_WALL",
+                    "best_sample_gated_net_bps": -1.73,
+                    "best_sample_gated_fee_round_trip_shortfall_bps": 1.73,
+                    "break_even_maker_fee_bps_per_side": 1.135,
+                    "fee_reduction_needed_bps_per_side": 0.865,
+                    "sample_gated_cell_count": 41,
+                },
                 "fee_path_feasibility": {
                     "status": "STANDARD_VIP_TIER_CAN_CLEAR_BUT_SCALE_OR_CAPITAL_GATED",
                     "break_even_maker_fee_bps_per_side": 1.135,
@@ -297,15 +306,62 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
     assert blockers["mm_verdict_maker_edge"]["primary_blocker"] == (
         "no_train_positive_walk_forward_feature_cell"
     )
-    assert [row["blocker_class"] for row in blockers["mm_verdict_maker_edge"]["secondary_blockers"]] == [
+    mm_secondary = blockers["mm_verdict_maker_edge"]["secondary_blockers"]
+    assert [row["blocker_class"] for row in mm_secondary] == [
+        "cost_wall",
         "cost_wall",
         "fee_or_scale",
     ]
+    assert mm_secondary[0]["blocker"] == (
+        "current_maker_fee_exceeds_sample_gated_fill_sim_break_even"
+    )
+    assert mm_secondary[0]["best_sample_gated_net_bps"] == -1.73
+    assert mm_secondary[1]["blocker"] == (
+        "live_markout_current_maker_fee_exceeds_best_break_even"
+    )
     assert blockers["polymarket_leadlag_ic"]["sample_gate_eta_utc"] == (
         "2026-06-20T19:52:03+00:00"
     )
     assert blockers["flash_dip_l1_short_exit_replay"]["blocker_class"] == "data_coverage"
     assert scorecard["top_blockers"][0]["arm_id"] == "mm_verdict_maker_edge"
+
+
+def test_mm_blocker_prefers_sample_gated_cost_wall_over_live_markout():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "mm_verdict_maker_edge",
+            "gate_status": "CAPTURING",
+            "sample_count": 40,
+            "artifacts_ready": False,
+            "source_ok": True,
+            "detail": {
+                "cost_wall_summary": {
+                    "available": True,
+                    "best_symbol_by_net_edge": "ARBUSDT",
+                    "best_fee_round_trip_shortfall_bps": 0.0357,
+                    "best_n_maker_fills": 1,
+                },
+                "sample_gated_cost_wall_summary": {
+                    "available": True,
+                    "status": "SAMPLE_GATED_CURRENT_FEE_COST_WALL",
+                    "best_sample_gated_net_bps": -1.73,
+                    "best_sample_gated_fee_round_trip_shortfall_bps": 1.73,
+                    "break_even_maker_fee_bps_per_side": 1.135,
+                    "fee_reduction_needed_bps_per_side": 0.865,
+                    "sample_gated_cell_count": 41,
+                },
+            },
+        },
+    ], now_utc=dt.datetime(2026, 6, 20, 17, 30, tzinfo=dt.timezone.utc))
+
+    row = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert row["blocker_class"] == "cost_wall"
+    assert row["primary_blocker"] == (
+        "current_fee_round_trip_exceeds_sample_gated_fill_sim_break_even"
+    )
+    assert row["best_sample_gated_fee_round_trip_shortfall_bps"] == 1.73
+    assert row["sample_gated_cell_count"] == 41
+    assert row["secondary_blockers"][1]["best_n_maker_fills"] == 1
 
 
 def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
@@ -337,6 +393,12 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
             "available": True,
             "best_symbol_by_net_edge": "BTCUSDT",
             "best_fee_round_trip_shortfall_bps": -1.25,
+        },
+        "sample_gated_cost_wall_summary": {
+            "available": True,
+            "status": "SAMPLE_GATED_CURRENT_FEE_POSITIVE",
+            "best_sample_gated_net_bps": 0.25,
+            "best_sample_gated_fee_round_trip_shortfall_bps": -0.25,
         },
         "fee_path_feasibility": {
             "status": "CURRENT_ACCOUNT_FEE_CLEARS_BREAK_EVEN",
@@ -401,6 +463,9 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     raw_arms = {row["arm_id"]: row for row in loaded["arms_raw"]}
     assert arms["mm_verdict_maker_edge"]["action"] == "READY_FOR_AEG_CHAIN"
     assert raw_arms["mm_verdict_maker_edge"]["detail"]["cost_wall_summary"]["best_symbol_by_net_edge"] == "BTCUSDT"
+    assert raw_arms["mm_verdict_maker_edge"]["detail"]["sample_gated_cost_wall_summary"]["status"] == (
+        "SAMPLE_GATED_CURRENT_FEE_POSITIVE"
+    )
     assert raw_arms["mm_verdict_maker_edge"]["detail"]["fee_path_feasibility"]["status"] == (
         "CURRENT_ACCOUNT_FEE_CLEARS_BREAK_EVEN"
     )
