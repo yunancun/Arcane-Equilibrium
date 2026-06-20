@@ -61,6 +61,9 @@ def test_bucket_classification_and_symbol_inference():
     assert harness.classify_bucket(event_row) == BUCKET_EVENT_REG
     assert harness.infer_symbol(price_row, {"BTCUSDT", "ETHUSDT"}) == "BTCUSDT"
     assert harness.infer_symbol(event_row, {"BTCUSDT", "ETHUSDT"}) == "ETHUSDT"
+    assert harness.DEFAULT_SYMBOLS == ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT")
+    assert harness.infer_symbol({"question": "Will Solana ETF approval happen?"}, set(harness.DEFAULT_SYMBOLS)) == "SOLUSDT"
+    assert harness.infer_symbol({"question": "Will XRP lawsuit settle?"}, set(harness.DEFAULT_SYMBOLS)) == "XRPUSDT"
 
 
 def test_fixture_report_fails_closed_until_min_points(tmp_path):

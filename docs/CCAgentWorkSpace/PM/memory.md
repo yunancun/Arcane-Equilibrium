@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Wide-Symbol Universe
+
+- Upgraded `polymarket_leadlag` to report schema/runner v0.8 and widened defaults from BTC/ETH to BTC/ETH/SOL/XRP in the harness, cron wrapper, and installer env.
+- Same-data isolated comparison separated the effect from sample maturation: BTC/ETH baseline sha256 `a042a4f8ac78cc6f9da7228801fc85e1e6e653170d9d266c1dd545b3b42092a0` had `snapshot_rows=11285`, `delta_rows=4643`, `joined_rows=114`; wide-symbol sha256 `7c9b2a7443af8d3f9f5dceceba83d4b18c49ff4218171f869b9aa2ed10647a55` had the same `snapshot_rows=11285` but `delta_rows=5715`, `joined_rows=190`.
+- Linux v0.8 wrapper smoke latest sha256 `350a689a62ce688a1b1d3bd226f43165fbe9bddc2bc2a0a7f73cae124cd9b5a9`: symbols BTC/ETH/SOL/XRP, adjusted sample_count=11/30, gap=19, ETA `2026-06-20T19:52:01.390Z`, still `INSUFFICIENT_SAMPLE`.
+- New best diagnostic-only pre-gate watch is `event_reg|XRPUSDT|60m`, floor 2 / gap 28, IC≈-0.616, HAC t≈-5.002, q≈1.02e-5; this is not candidate/probe/promotion authority.
+- Alpha discovery latest sha256 `3ade420bc5c20aa671d0a7772d79875446ae937fc3c71c80f03c407804f4d3d3` preserves symbols/watchlist while keeping action `RUN_READ_ONLY_CAPTURE`, artifacts_ready=false, ready/probe=0.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Sample-Gate Clock
 
 - Upgraded `polymarket_leadlag` to report schema/runner v0.7.
