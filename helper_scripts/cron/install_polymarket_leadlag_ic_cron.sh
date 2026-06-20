@@ -3,7 +3,9 @@
 # Polymarket lead-lag IC refresh cron.
 #
 # Installs one active hourly line at minute 17, after polymarket_axis hourly
-# top-N normally runs at minute 7. Apply is gated by
+# top-N normally runs at minute 7. For artifact-only accelerated evidence
+# capture, set OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES=2,17,32,47 after
+# installing the collector at 7,22,37,52. Apply is gated by
 # OPENCLAW_POLYMARKET_LEADLAG_CRON_APPLY=1.
 set -euo pipefail
 
@@ -16,6 +18,7 @@ OPENCLAW_BASE_DIR="${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}"
 OPENCLAW_DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
 OPENCLAW_POLYMARKET_LEADLAG_QUERY_SET="${OPENCLAW_POLYMARKET_LEADLAG_QUERY_SET:-${OPENCLAW_POLYMARKET_QUERY_SET:-v2}}"
 OPENCLAW_POLYMARKET_LEADLAG_MIN_POINTS="${OPENCLAW_POLYMARKET_LEADLAG_MIN_POINTS:-30}"
+OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES="${OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES:-17}"
 
 WRAPPER="$OPENCLAW_BASE_DIR/helper_scripts/cron/polymarket_leadlag_ic_cron.sh"
 MARKER="polymarket_leadlag_ic_cron.sh"
@@ -75,6 +78,23 @@ _validate_int() {
     fi
 }
 
+_validate_cron_minute_list() {
+    local name="$1"
+    local value="$2"
+    if [[ ! "$value" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+        echo "ERROR: ${name} must be comma-separated minute integers: ${value}" >&2
+        exit 6
+    fi
+    IFS=',' read -ra _minutes <<< "$value"
+    local minute
+    for minute in "${_minutes[@]}"; do
+        if (( 10#$minute < 0 || 10#$minute > 59 )); then
+            echo "ERROR: ${name} minute out of range 0..59: ${minute}" >&2
+            exit 6
+        fi
+    done
+}
+
 case "$OPENCLAW_POLYMARKET_LEADLAG_QUERY_SET" in
     v1|v2) ;;
     *)
@@ -83,6 +103,7 @@ case "$OPENCLAW_POLYMARKET_LEADLAG_QUERY_SET" in
         ;;
 esac
 _validate_int "OPENCLAW_POLYMARKET_LEADLAG_MIN_POINTS" "$OPENCLAW_POLYMARKET_LEADLAG_MIN_POINTS"
+_validate_cron_minute_list "OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES" "$OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES"
 _validate_cron_env_value "OPENCLAW_BASE_DIR" "$OPENCLAW_BASE_DIR"
 _validate_cron_env_value "OPENCLAW_DATA_DIR" "$OPENCLAW_DATA_DIR"
 _validate_cron_env_value "OPENCLAW_POLYMARKET_LEADLAG_QUERY_SET" "$OPENCLAW_POLYMARKET_LEADLAG_QUERY_SET"
@@ -90,12 +111,12 @@ _validate_cron_env_value "OPENCLAW_POLYMARKET_LEADLAG_MIN_POINTS" "$OPENCLAW_POL
 _validate_cron_env_value "WRAPPER" "$WRAPPER"
 
 ENV_PREFIX="OPENCLAW_BASE_DIR=${OPENCLAW_BASE_DIR} OPENCLAW_DATA_DIR=${OPENCLAW_DATA_DIR} OPENCLAW_POLYMARKET_LEADLAG_QUERY_SET=${OPENCLAW_POLYMARKET_LEADLAG_QUERY_SET} OPENCLAW_POLYMARKET_LEADLAG_MIN_POINTS=${OPENCLAW_POLYMARKET_LEADLAG_MIN_POINTS}"
-ENTRY="17 * * * * ${ENV_PREFIX} ${WRAPPER} >> ${OPENCLAW_DATA_DIR}/logs/polymarket_leadlag_ic_cron.cron.log 2>&1"
+ENTRY="${OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES} * * * * ${ENV_PREFIX} ${WRAPPER} >> ${OPENCLAW_DATA_DIR}/logs/polymarket_leadlag_ic_cron.cron.log 2>&1"
 
 echo "------- proposed crontab entry -------"
 echo "$ENTRY"
 echo "--------------------------------------"
-echo "Schedule: 17 * * * * UTC, after polymarket_axis hourly-topn at minute 7"
+echo "Schedule minutes: $OPENCLAW_POLYMARKET_LEADLAG_CRON_MINUTES UTC minutes, after polymarket_axis collector cadence"
 echo "Artifacts: $OPENCLAW_DATA_DIR/research/polymarket_leadlag/"
 echo "Heartbeat: $OPENCLAW_DATA_DIR/cron_heartbeat/polymarket_leadlag_ic.last_fire"
 echo "Rollback: $0 --remove (with OPENCLAW_POLYMARKET_LEADLAG_CRON_APPLY=1)"

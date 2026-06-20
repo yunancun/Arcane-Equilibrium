@@ -25,6 +25,16 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket 15m Evidence Cadence
+
+- Manual lead-lag wrapper after first label maturity wrote `/tmp/openclaw/research/polymarket_leadlag/polymarket_leadlag_20260620T122433Z.json`; sha256 `cfc12bd3519a18eaa3dc03a7ea690f61d0e2cb695087a2c4f33cb4c110951111`.
+- The lane is now producing joined labels: 397 deltas, 6 feature points, 6 joined rows, 6 joinable label pairs, max IC points per cell 1; still `INSUFFICIENT_SAMPLE`.
+- Added default-preserving minute-list controls to the Polymarket collector and lead-lag installers, then installed Linux artifact-only cadence: collector `7,22,37,52 * * * *`, lead-lag IC `2,17,32,47 * * * *`.
+- Natural 12:32 UTC lead-lag cron fire wrote `/tmp/openclaw/research/polymarket_leadlag/polymarket_leadlag_20260620T123201Z.json`; sha256 `4616b4dbe306035ce967b299b5c3afa6b37de4b0929885a1e2c5e6a57a0b401b`.
+- Natural 12:37 UTC collector fire wrote `/tmp/openclaw/polymarket_axis_runs/hourly-topn-20260620T123716Z`: 884 snapshot rows, 107 events, 30 HTTP requests, `errors=[]`.
+- Alpha discovery refresh `2026-06-20T12:24:46Z` shows `polymarket_leadlag_ic.sample_count=1`, action `RUN_READ_ONLY_CAPTURE`, ready/probe=0.
+- Boundary: user crontab + `/tmp/openclaw` artifact/log/heartbeat writes only; no engine/API restart, PG table write, Bybit private/signed/trading call, credential/auth/risk/order/strategy mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Label-Readiness Diagnostics
 
 - Upgraded `polymarket_leadlag` report schema/runner to v0.2 with `counts.label_readiness`, so the IC loop distinguishes "forward label not mature yet" from collector/price-source failure.

@@ -49,7 +49,10 @@ def test_installer_hourly_default_commented_operator_gated():
     # hourly 默認以註釋行安裝（QC memo §3：cron 活化 = operator 決策）。
     assert 'ENTRY_HOURLY="#${ENTRY_HOURLY_ACTIVE}"' in src
     assert 'OPENCLAW_POLYMARKET_CRON_HOURLY' in src
-    assert 'ENTRY_HOURLY_ACTIVE="7 * * * *' in src
+    assert 'OPENCLAW_POLYMARKET_CRON_TOPN_MINUTES="${OPENCLAW_POLYMARKET_CRON_TOPN_MINUTES:-7}"' in src
+    assert 'ENTRY_HOURLY_ACTIVE="${OPENCLAW_POLYMARKET_CRON_TOPN_MINUTES} * * * *' in src
+    assert '_validate_cron_minute_list "OPENCLAW_POLYMARKET_CRON_TOPN_MINUTES"' in src
+    assert "7,22,37,52" in src
 
 
 def test_installer_can_persist_query_set_env():
