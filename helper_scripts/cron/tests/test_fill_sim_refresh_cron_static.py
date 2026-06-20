@@ -159,6 +159,7 @@ def test_mm_verdict_surfaces_cost_wall_fields() -> None:
     assert "maker_fee_sensitivity_scorecard" in src
     assert "history_scorecard" in src
     assert "FILLSIM_HISTORY_SCORECARD" in src
+    assert "lower_fee_break_even_stability" in src
     assert "fee_capacity_30d" in src
     assert "fee_path_feasibility" in src
     assert "build_maker_fee_path_feasibility_scorecard" in src

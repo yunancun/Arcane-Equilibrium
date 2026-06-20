@@ -14,6 +14,9 @@ def _report(
     current_positive: bool = False,
     holdout_positive: bool = False,
     break_even_fee: float | None = None,
+    break_even_name: str = "quoted_half_spread_p75_and_side_book_imb_p75",
+    break_even_symbol: str | None = None,
+    break_even_policy: str | None = None,
     source_path: str | None = None,
 ) -> dict:
     edge_positive = []
@@ -51,8 +54,10 @@ def _report(
     if break_even_fee is not None:
         fee_cell = {
             "source": "conditional_feature_scorecard",
-            "name": "quoted_half_spread_p75_and_side_book_imb_p75",
-            "condition": "quoted_half_spread_bps p75 AND side_book_imb p75",
+            "name": break_even_name,
+            "condition": f"{break_even_name} condition",
+            "symbol": break_even_symbol,
+            "policy": break_even_policy,
             "n_fill_only": 40,
             "edge_before_fees_bps": break_even_fee * 2.0,
             "break_even_maker_fee_bps_per_side": break_even_fee,
@@ -129,6 +134,44 @@ def test_history_scorecard_marks_lower_fee_only_when_current_fee_never_clears() 
     best = scorecard["best_sample_gated_break_even_window"]
     assert best["break_even_maker_fee_bps_per_side"] == 1.2
     assert best["cell"]["fee_reduction_to_breakeven_bps_per_side"] == 0.8
+    stability = scorecard["lower_fee_break_even_stability"]
+    assert stability["status"] == "LOWER_FEE_BREAK_EVEN_REPEATS_ACROSS_WINDOWS"
+    assert stability["lower_fee_break_even_windows"] == 3
+    assert stability["repeated_key_count"] == 1
+    assert scorecard["repeated_lower_fee_break_even_keys"][0]["windows"] == 3
+
+
+def test_history_scorecard_marks_rotating_lower_fee_break_even_keys() -> None:
+    reports = [
+        _report("2026-06-18", break_even_fee=1.1, break_even_name="cell_a"),
+        _report("2026-06-19", break_even_fee=1.2, break_even_name="cell_b"),
+        _report("2026-06-20", break_even_fee=1.0, break_even_name="cell_c"),
+    ]
+
+    scorecard = build_fill_sim_history_scorecard(reports)
+
+    assert scorecard["status"] == "HISTORY_LOWER_FEE_ONLY"
+    stability = scorecard["lower_fee_break_even_stability"]
+    assert stability["status"] == "LOWER_FEE_BREAK_EVEN_ROTATES_OR_DATE_INSUFFICIENT"
+    assert stability["reason"] == "no_repeated_lower_fee_break_even_key"
+    assert stability["lower_fee_break_even_windows"] == 3
+    assert stability["repeated_key_count"] == 0
+
+
+def test_history_scorecard_requires_distinct_dates_for_repeated_lower_fee_key() -> None:
+    reports = [
+        _report("2026-06-20", break_even_fee=1.1, source_path="a.json"),
+        _report("2026-06-20", break_even_fee=1.2, source_path="b.json"),
+        _report("2026-06-20", break_even_fee=1.0, source_path="c.json"),
+    ]
+
+    scorecard = build_fill_sim_history_scorecard(reports)
+
+    assert scorecard["status"] == "HISTORY_INSUFFICIENT_WINDOWS"
+    stability = scorecard["lower_fee_break_even_stability"]
+    assert stability["status"] == "LOWER_FEE_BREAK_EVEN_REPEATS_BUT_DATE_INSUFFICIENT"
+    assert stability["reason"] == "repeated_key_but_distinct_dates_below_min"
+    assert stability["repeated_key_count"] == 1
 
 
 def test_history_scorecard_repeated_current_fee_positive_still_requires_oos() -> None:

@@ -107,6 +107,38 @@ def _normalize_positive_cell(source: str, cell: dict, *, net_key: str = "net_bps
     return out
 
 
+def _normalize_break_even_cell(source: str, cell: dict) -> dict | None:
+    """Normalize a sample-gated lower-fee break-even cell for history grouping."""
+    be = _as_float(cell.get("break_even_maker_fee_bps_per_side"))
+    if be is None or be <= 0.0 or be >= MAKER_FEE_BPS:
+        return None
+    n = _as_int(cell.get("n_fill_only", cell.get("n")), 0)
+    signif_suppressed = bool(cell.get("signif_suppressed", n < MIN_FILLS_FOR_SIGNIF))
+    if n < MIN_FILLS_FOR_SIGNIF or signif_suppressed:
+        return None
+    origin = str(cell.get("source") or source)
+    out = {
+        "source": origin,
+        "key": _cell_key(origin, cell),
+        "name": cell.get("name"),
+        "condition": cell.get("condition"),
+        "symbol": cell.get("symbol"),
+        "scope": cell.get("scope"),
+        "queue_position": cell.get("queue_position"),
+        "policy": cell.get("policy"),
+        "track": cell.get("track"),
+        "n_fill_only": n,
+        "edge_before_fees_bps": _r(cell.get("edge_before_fees_bps"), 3),
+        "break_even_maker_fee_bps_per_side": _r(be, 3),
+        "fee_reduction_to_breakeven_bps_per_side": _r(MAKER_FEE_BPS - be, 3),
+    }
+    if "maker_fee_bps_per_side" in cell:
+        out["maker_fee_bps_per_side"] = _r(cell.get("maker_fee_bps_per_side"), 3)
+    if "net_bps_at_fee" in cell:
+        out["net_bps_at_fee"] = _r(cell.get("net_bps_at_fee"), 3)
+    return out
+
+
 def _positive_cells_from_report(rep: dict) -> list[dict]:
     cells: list[dict] = []
     edge = rep.get("edge_scorecard") or {}
@@ -153,9 +185,55 @@ def _best_break_even_cell(rep: dict) -> dict | None:
     if be is None:
         return None
     out = dict(cell)
+    origin = str(out.get("source") or "maker_fee_sensitivity_scorecard")
+    out.setdefault("source", origin)
+    out["key"] = _cell_key(origin, out)
     out["break_even_maker_fee_bps_per_side"] = _r(be, 3)
     out["fee_reduction_to_breakeven_bps_per_side"] = _r(MAKER_FEE_BPS - be, 3)
     return out
+
+
+def _break_even_cells_from_report(rep: dict) -> list[dict]:
+    fee = rep.get("maker_fee_sensitivity_scorecard") or {}
+    candidates = []
+    best = fee.get("best_sample_gated_break_even_cell")
+    if best:
+        candidates.append(("maker_fee_sensitivity_scorecard", best))
+    for scenario in fee.get("scenarios") or []:
+        for cell in scenario.get("positive_sample_gate_cells") or []:
+            candidates.append(("maker_fee_sensitivity_scorecard", cell))
+
+    by_key: dict[str, dict] = {}
+    for source, cell in candidates:
+        norm = _normalize_break_even_cell(source, cell)
+        if norm is None:
+            continue
+        prev = by_key.get(norm["key"])
+        if prev is None:
+            by_key[norm["key"]] = norm
+            continue
+        prev_rank = (
+            _as_float(prev.get("break_even_maker_fee_bps_per_side")) or -1e9,
+            _as_float(prev.get("edge_before_fees_bps")) or -1e9,
+            _as_int(prev.get("n_fill_only")),
+        )
+        new_rank = (
+            _as_float(norm.get("break_even_maker_fee_bps_per_side")) or -1e9,
+            _as_float(norm.get("edge_before_fees_bps")) or -1e9,
+            _as_int(norm.get("n_fill_only")),
+        )
+        if new_rank > prev_rank:
+            by_key[norm["key"]] = norm
+
+    cells = list(by_key.values())
+    cells.sort(
+        key=lambda c: (
+            _as_float(c.get("break_even_maker_fee_bps_per_side")) or -1e9,
+            _as_float(c.get("edge_before_fees_bps")) or -1e9,
+        ),
+        reverse=True,
+    )
+    return cells
 
 
 def extract_window_summary(rep: dict, *, source_path: str | None = None) -> dict:
@@ -165,6 +243,7 @@ def extract_window_summary(rep: dict, *, source_path: str | None = None) -> dict
     positives = _positive_cells_from_report(rep)
     walk_forward = rep.get("walk_forward_feature_scorecard") or {}
     best_be = _best_break_even_cell(rep)
+    lower_fee_break_even_cells = _break_even_cells_from_report(rep)
     generated_at = rep.get("generated_at")
     return {
         "source_path": source_path,
@@ -202,6 +281,8 @@ def extract_window_summary(rep: dict, *, source_path: str | None = None) -> dict
             default=None,
         ),
         "best_sample_gated_break_even_cell": best_be,
+        "lower_fee_sample_gated_break_even_cells": lower_fee_break_even_cells[:20],
+        "lower_fee_sample_gated_break_even_count": len(lower_fee_break_even_cells),
     }
 
 
@@ -284,6 +365,104 @@ def build_fill_sim_history_scorecard(
     )
     best_break_even = break_even_rows[0] if break_even_rows else None
 
+    lower_fee_windows = [
+        w for w in valid_windows if w.get("lower_fee_sample_gated_break_even_count", 0) > 0
+    ]
+    lower_fee_dates = sorted({
+        w["window_date"] for w in lower_fee_windows if w.get("window_date")
+    })
+    lower_fee_rows = []
+    key_to_break_even_windows: dict[str, list[dict]] = defaultdict(list)
+    for w in lower_fee_windows:
+        seen_in_window: set[str] = set()
+        for cell in w.get("lower_fee_sample_gated_break_even_cells") or []:
+            key = cell.get("key")
+            be = _as_float(cell.get("break_even_maker_fee_bps_per_side"))
+            if not key or be is None:
+                continue
+            row = {
+                "source_path": w.get("source_path"),
+                "window_date": w.get("window_date"),
+                "generated_at": w.get("generated_at"),
+                "cell": cell,
+                "break_even_maker_fee_bps_per_side": _r(be, 3),
+            }
+            lower_fee_rows.append(row)
+            if key in seen_in_window:
+                continue
+            seen_in_window.add(key)
+            key_to_break_even_windows[key].append({"window": w, "cell": cell})
+    lower_fee_rows.sort(
+        key=lambda r: r["break_even_maker_fee_bps_per_side"],
+        reverse=True,
+    )
+    best_lower_fee_break_even = lower_fee_rows[0] if lower_fee_rows else None
+
+    repeated_lower_fee_break_even_keys = []
+    for key, rows in key_to_break_even_windows.items():
+        if len(rows) >= min_repeat_positive_windows:
+            best = max(
+                rows,
+                key=lambda r: (
+                    _as_float(r["cell"].get("break_even_maker_fee_bps_per_side")) or -1e9,
+                    _as_float(r["cell"].get("edge_before_fees_bps")) or -1e9,
+                ),
+            )["cell"]
+            window_dates = sorted({
+                r["window"].get("window_date")
+                for r in rows
+                if r["window"].get("window_date")
+            })
+            repeated_lower_fee_break_even_keys.append({
+                "key": key,
+                "windows": len(rows),
+                "distinct_window_dates": window_dates,
+                "best_cell": best,
+                "window_sources": [r["window"].get("source_path") for r in rows],
+            })
+    repeated_lower_fee_break_even_keys.sort(
+        key=lambda r: (
+            r["windows"],
+            len(r.get("distinct_window_dates") or []),
+            _as_float((r.get("best_cell") or {}).get("break_even_maker_fee_bps_per_side")) or -1e9,
+        ),
+        reverse=True,
+    )
+
+    if not lower_fee_windows:
+        lower_fee_stability_status = "NO_LOWER_FEE_BREAK_EVEN_WINDOWS"
+        lower_fee_stability_reason = "no_sample_gated_lower_fee_break_even_cells"
+    elif not repeated_lower_fee_break_even_keys:
+        lower_fee_stability_status = "LOWER_FEE_BREAK_EVEN_ROTATES_OR_DATE_INSUFFICIENT"
+        lower_fee_stability_reason = (
+            "distinct_dates_below_min_and_no_repeated_key"
+            if len(lower_fee_dates) < min_distinct_dates
+            else "no_repeated_lower_fee_break_even_key"
+        )
+    elif len(lower_fee_dates) < min_distinct_dates:
+        lower_fee_stability_status = "LOWER_FEE_BREAK_EVEN_REPEATS_BUT_DATE_INSUFFICIENT"
+        lower_fee_stability_reason = "repeated_key_but_distinct_dates_below_min"
+    else:
+        lower_fee_stability_status = "LOWER_FEE_BREAK_EVEN_REPEATS_ACROSS_WINDOWS"
+        lower_fee_stability_reason = "repeated_lower_fee_break_even_key_across_windows"
+
+    lower_fee_break_even_stability = {
+        "status": lower_fee_stability_status,
+        "reason": lower_fee_stability_reason,
+        "lower_fee_break_even_windows": len(lower_fee_windows),
+        "distinct_window_dates": lower_fee_dates,
+        "repeated_key_count": len(repeated_lower_fee_break_even_keys),
+        "min_distinct_dates": int(min_distinct_dates),
+        "min_repeat_positive_windows": int(min_repeat_positive_windows),
+        "current_maker_fee_bps_per_side": MAKER_FEE_BPS,
+        "best_lower_fee_break_even_window": best_lower_fee_break_even,
+        "best_repeated_lower_fee_break_even_key": (
+            repeated_lower_fee_break_even_keys[0]
+            if repeated_lower_fee_break_even_keys else None
+        ),
+        "top_repeated_lower_fee_break_even_keys": repeated_lower_fee_break_even_keys[:10],
+    }
+
     enough_windows = len(valid_windows) >= min_windows and len(distinct_dates) >= min_distinct_dates
     if not windows:
         status = "NO_HISTORY_REPORTS"
@@ -333,6 +512,11 @@ def build_fill_sim_history_scorecard(
         "repeated_positive_keys": repeated_positive_keys[:20],
         "best_sample_gated_break_even_window": best_break_even,
         "best_break_even_windows": break_even_rows[:20],
+        "lower_fee_break_even_windows": len(lower_fee_windows),
+        "lower_fee_break_even_distinct_window_dates": lower_fee_dates,
+        "repeated_lower_fee_break_even_keys": repeated_lower_fee_break_even_keys[:20],
+        "best_lower_fee_break_even_window": best_lower_fee_break_even,
+        "lower_fee_break_even_stability": lower_fee_break_even_stability,
         "window_summaries": windows,
         "note": (
             "Report-history reducer only. Current-fee repeated positives still need "
@@ -403,6 +587,13 @@ def main(argv=None) -> int:
         "valid_windows": scorecard["valid_windows"],
         "distinct_window_dates": scorecard["distinct_window_dates"],
         "best_break_even": scorecard["best_sample_gated_break_even_window"],
+        "lower_fee_break_even_stability_status": (
+            scorecard.get("lower_fee_break_even_stability") or {}
+        ).get("status"),
+        "lower_fee_break_even_windows": scorecard.get("lower_fee_break_even_windows"),
+        "repeated_lower_fee_break_even_key_count": len(
+            scorecard.get("repeated_lower_fee_break_even_keys") or []
+        ),
         "out": args.out,
     }, indent=2, ensure_ascii=False))
     return 0
