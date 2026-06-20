@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Lead-Lag IC Harness
+
+- Added `helper_scripts/research/polymarket_leadlag/` as the fail-closed IC loop for active Polymarket v2 hourly data.
+- Method: Polymarket PIT snapshot probability deltas -> research-side `price_target` / `event_reg` / `other` buckets -> Bybit perp forward returns from first 1m kline at/after snapshot and horizon.
+- Local and Linux focused verification passed: `test_polymarket_leadlag.py` 4/4, py_compile, diff-check.
+- Linux runtime smoke wrote `/tmp/openclaw/research/polymarket_leadlag/polymarket_leadlag_20260620T114427Z.json` plus latest; verdict `INSUFFICIENT_SAMPLE` with 860 snapshot rows, 1 distinct v2 timestamp, 0 delta/joined rows, 32 price rows.
+- PM read: this is expected and useful. We now have the IC harness, but not enough hourly v2 points. Wait for >=20-30 hourly timestamps, rerun, then only treat candidates as review input after residual/regime/HAC/multiple-testing controls.
+- Boundary: artifact/report only; PG path readonly SELECT `market.klines`; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Query-Set V2 Runtime Activation
 
 - Added Polymarket query-set v2 for event/regulatory discovery while keeping v1 immutable and default-compatible.
