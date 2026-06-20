@@ -569,6 +569,9 @@ def collect_polymarket_leadlag_arm(
     )
     verdict = payload.get("verdict") if isinstance(payload.get("verdict"), dict) else {}
     counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+    label_readiness = (
+        counts.get("label_readiness") if isinstance(counts.get("label_readiness"), dict) else {}
+    )
     status = str(verdict.get("status") or "").upper()
     sample_count = _max_ic_points(payload)
     candidate_count = _int(verdict.get("candidate_count"))
@@ -620,6 +623,13 @@ def collect_polymarket_leadlag_arm(
             "joined_rows": counts.get("joined_rows"),
             "price_rows": counts.get("price_rows"),
             "max_ic_points": sample_count,
+            "label_feature_horizon_pairs": label_readiness.get("feature_horizon_pairs"),
+            "label_joinable_pairs": label_readiness.get("joinable_pairs"),
+            "label_status_counts": label_readiness.get("status_counts"),
+            "label_by_horizon": label_readiness.get("by_horizon"),
+            "oldest_unmatured_exit_target_utc": label_readiness.get(
+                "oldest_unmatured_exit_target_utc"
+            ),
             "promotion_boundary": verdict.get("promotion_boundary"),
         },
     )

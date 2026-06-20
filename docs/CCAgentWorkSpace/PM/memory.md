@@ -25,6 +25,14 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Label-Readiness Diagnostics
+
+- Upgraded `polymarket_leadlag` report schema/runner to v0.2 with `counts.label_readiness`, so the IC loop distinguishes "forward label not mature yet" from collector/price-source failure.
+- Cron status JSONL and alpha-discovery raw detail now expose `label_feature_horizon_pairs`, `label_joinable_pairs`, `label_status_counts`, and `oldest_unmatured_exit_target_utc`.
+- Linux smoke after the 12:07 collector wrote `/tmp/openclaw/research/polymarket_leadlag/polymarket_leadlag_20260620T121515Z.json`; sha256 `43f189ca875ecdb3dddded925e936eda51b98fe5a5396b1e75d7b86452ee1b8a`; 397 deltas, 6 feature points, 0 joined rows.
+- Read: all 18 feature×horizon pairs are `exit_target_after_latest_price`, with first target around `2026-06-20T12:22:01Z`. The Polymarket lane is producing real deltas; labels simply have not matured yet.
+- Boundary: artifact/report/status only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Lead-Lag IC Cron + Killboard
 
 - Added `helper_scripts/cron/polymarket_leadlag_ic_cron.sh` and installer, then installed Linux runtime cron at `17 * * * *`, after the active Polymarket v2 hourly collector at minute 7.
