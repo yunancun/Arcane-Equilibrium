@@ -25,6 +25,14 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM FillSim Skip-Quantile Sweep
+
+- Ran isolated Linux read-only fill-sim scorecard sweep over `skip_quantile=0.00/0.10/0.20/0.30`; artifacts only under `/tmp/openclaw/research/fillsim/fillsim_scorecard_q*.json`.
+- Results: q0.00 best BSBUSDT n=35 net -1.480bp; q0.10 best ADAUSDT n=125 net -1.276bp; q0.20 best ADAUSDT n=109 net -1.214bp.
+- q0.30 produced BEATUSDT net +17.364bp but n=2, status `POSITIVE_FILL_ONLY_CELL_BELOW_SAMPLE_GATE`; all q values have `positive_sample_gate_count=0`.
+- Read: existing informed-skip filter is not enough; aggressive skipping creates tiny-n positives only. No MM promotion or implementation authority.
+- Boundary: isolated read-only PG/artifact run only; no source change, production fill_sim replacement, rebuild/restart, DB write, Bybit private call, or auth/risk/order/trading mutation.
+
 ## 2026-06-20 MM FillSim Edge Scorecard
 
 - Added `edge_scorecard` to fill_sim: compact ranking over fill_only maker-edge cells across pooled/per-symbol, naive/informed-skip, and queue-dose views.
