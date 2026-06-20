@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-20 FlashDip L1 Short-Exit Replay Cron
+
+- Added and Linux-installed read-only `flash_dip_l1_short_exit_replay_cron.sh` at `31 6 * * *`; it writes dated/latest replay artifacts plus `logs/flash_dip_l1_short_exit_replay.log`.
+- Alpha discovery now exposes the latest L1 replay status under `flash_dip_buy_demo.detail.l1_short_exit_replay`, but does not use it as promotion readiness.
+- Linux smoke latest sha256 `67670804402a58eee6f02e2dd1e3da590d7bfc806ebca5dbc71744688e3f48ee`; verdict remains data-gated: 0 L1 rows / 608,227 trade rows for the current APT/ATOM/AVAX candidate window.
+- Boundary: source/test/docs + selective sync + read-only PG artifact + user-cron install only; no rebuild/restart, DB write, Bybit private call, or auth/risk/order/trading mutation.
+
 ## 2026-06-20 FlashDip L1 Short-Exit Replay
 
 - Added read-only `shallow_retune_l1_short_exit_replay.py` for the v245 K6/N2/C3/nf0.5% 240m short-exit research signal, with queue-fill/adverse-through modeling against `market.l1_events` + `market.trades`.

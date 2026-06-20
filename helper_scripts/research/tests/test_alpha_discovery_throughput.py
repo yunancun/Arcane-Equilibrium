@@ -352,6 +352,27 @@ def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
             {"k_pct": 15.0, "true_order_count": 18, "touched_count": 0, "touch_rate_pct": 0.0},
         ],
     }) + "\n", encoding="utf-8")
+    (data / "logs" / "flash_dip_l1_short_exit_replay.log").write_text(json.dumps({
+        "ts_utc": "2026-06-20T01:20:00Z",
+        "check": "flash_dip_l1_short_exit_replay",
+        "artifact_path": "/tmp/openclaw/research/tail_dislocation_meanrev/replay.json",
+        "latest_path": "/tmp/openclaw/research/tail_dislocation_meanrev/latest.json",
+        "sha256": "abc123",
+        "verdict_status": "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE",
+        "fail_reasons": ["no_l1_rows_for_candidate_window"],
+        "candidate_events": 3,
+        "candidate_days": 1,
+        "candidate_symbols": ["APTUSDT", "ATOMUSDT", "AVAXUSDT"],
+        "l1_rows_post_filter": 0,
+        "trade_rows": 608227,
+        "symbols_with_l1": [],
+        "symbols_missing_l1": ["APTUSDT", "ATOMUSDT", "AVAXUSDT"],
+        "gate_exit_measured": 0,
+        "gate_distinct_exit_days": 0,
+        "gate_annret": None,
+        "gate_maxdd": None,
+        "boundary": "counterfactual_only_not_promotion_evidence",
+    }) + "\n", encoding="utf-8")
 
     arm = collect_flash_dip_arm(
         data,
@@ -367,6 +388,13 @@ def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
     assert arm["detail"]["touchability"]["current_k_pct"] == 15.0
     assert arm["detail"]["touchability"]["deepest_candidate_k_with_touch_pct"] == 6.0
     assert arm["detail"]["touchability"]["k_ladder"][0]["k_pct"] == 2.0
+    l1_replay = arm["detail"]["l1_short_exit_replay"]
+    assert l1_replay["source_ok"] is True
+    assert l1_replay["verdict_status"] == "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE"
+    assert l1_replay["fail_reasons"] == ["no_l1_rows_for_candidate_window"]
+    assert l1_replay["l1_rows_post_filter"] == 0
+    assert l1_replay["trade_rows"] == 608227
+    assert l1_replay["boundary"] == "counterfactual_only_not_promotion_evidence"
     assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
     assert plan["arms"][0]["reason"] == "sample_count_below_gate"
 
