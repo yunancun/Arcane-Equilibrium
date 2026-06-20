@@ -142,6 +142,30 @@ def _finish_blocker_row(
 
 def _mm_secondary_blockers(detail: dict[str, Any]) -> list[dict[str, Any]]:
     blockers: list[dict[str, Any]] = []
+    gross_decomp = _dict(detail.get("gross_edge_cost_decomposition"))
+    gross_status = str(gross_decomp.get("status") or "").upper()
+    if gross_status == "GROSS_EDGE_BELOW_CURRENT_FEE_COST_WALL":
+        blockers.append({
+            "blocker_class": "cost_wall",
+            "blocker": "gross_edge_exists_but_current_fee_exceeds_break_even",
+            "best_sample_gated_gross_edge_bps": gross_decomp.get(
+                "best_sample_gated_gross_edge_bps"
+            ),
+            "best_gross_cell_net_bps": gross_decomp.get("best_gross_cell_net_bps"),
+            "break_even_maker_fee_bps_per_side": gross_decomp.get(
+                "break_even_maker_fee_bps_per_side"
+            ),
+            "fee_reduction_needed_bps_per_side": gross_decomp.get(
+                "fee_reduction_needed_bps_per_side"
+            ),
+            "best_sample_gated_gross_cell": gross_decomp.get(
+                "best_sample_gated_gross_cell"
+            ),
+            "best_walk_forward_holdout_gross_candidate": gross_decomp.get(
+                "best_walk_forward_holdout_gross_candidate"
+            ),
+        })
+
     sample_cost_wall = _dict(detail.get("sample_gated_cost_wall_summary"))
     sample_shortfall = _float(
         sample_cost_wall.get("best_sample_gated_fee_round_trip_shortfall_bps")
@@ -246,12 +270,58 @@ def classify_profitability_blocker(
         fee_status = str(fee_path.get("status") or "").upper()
         cost_wall = _dict(detail.get("cost_wall_summary"))
         sample_cost_wall = _dict(detail.get("sample_gated_cost_wall_summary"))
+        gross_decomp = _dict(detail.get("gross_edge_cost_decomposition"))
+        gross_status = str(gross_decomp.get("status") or "").upper()
         sample_cost_shortfall = _float(
             sample_cost_wall.get("best_sample_gated_fee_round_trip_shortfall_bps")
         )
         cost_shortfall = _float(cost_wall.get("best_fee_round_trip_shortfall_bps"))
 
         if failure_status == "NO_TRAIN_POSITIVE_CELL":
+            if gross_status == "GROSS_EDGE_BELOW_CURRENT_FEE_COST_WALL":
+                return _finish_blocker_row(
+                    row,
+                    blocker_class="cost_wall",
+                    primary_blocker=(
+                        "gross_edge_below_current_fee_no_current_fee_walk_forward_positive"
+                    ),
+                    next_trigger=(
+                        "validate_lower_fee_or_new_low_friction_signal_path_before_expanding_current_family"
+                    ),
+                    engineering_actionable=True,
+                    secondary_blockers=secondary,
+                    extra={
+                        "walk_forward_failure_status": failure_status,
+                        "candidate_count": failure.get("candidate_count"),
+                        "best_train_candidate": failure.get("best_train_candidate"),
+                        "best_holdout_candidate": failure.get("best_holdout_candidate"),
+                        "gross_edge_decomposition_status": gross_status,
+                        "gross_positive_sample_gated_cell_count": gross_decomp.get(
+                            "gross_positive_sample_gated_cell_count"
+                        ),
+                        "current_fee_positive_sample_gated_cell_count": gross_decomp.get(
+                            "current_fee_positive_sample_gated_cell_count"
+                        ),
+                        "best_sample_gated_gross_edge_bps": gross_decomp.get(
+                            "best_sample_gated_gross_edge_bps"
+                        ),
+                        "best_gross_cell_net_bps": gross_decomp.get(
+                            "best_gross_cell_net_bps"
+                        ),
+                        "break_even_maker_fee_bps_per_side": gross_decomp.get(
+                            "break_even_maker_fee_bps_per_side"
+                        ),
+                        "fee_reduction_needed_bps_per_side": gross_decomp.get(
+                            "fee_reduction_needed_bps_per_side"
+                        ),
+                        "best_sample_gated_gross_cell": gross_decomp.get(
+                            "best_sample_gated_gross_cell"
+                        ),
+                        "best_walk_forward_holdout_gross_candidate": gross_decomp.get(
+                            "best_walk_forward_holdout_gross_candidate"
+                        ),
+                    },
+                )
             return _finish_blocker_row(
                 row,
                 blocker_class="feature_family_no_edge",

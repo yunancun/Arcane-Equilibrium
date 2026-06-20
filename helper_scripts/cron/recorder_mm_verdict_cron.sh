@@ -355,6 +355,18 @@ def _round(value, ndigits=4):
     return round(out, ndigits)
 
 
+def _flt_key(value, default=-1e9):
+    out = _flt(value)
+    return default if out is None else out
+
+
+def _int_or_zero(value):
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return 0
+
+
 def _sample_gated_fill_sim_cost_wall(fillsim, *, h_primary, min_fills):
     """Rank fill_sim cells with the same sample gate used by fill_sim scorecards."""
     edge = fillsim.get("edge_scorecard") or {}
@@ -372,7 +384,7 @@ def _sample_gated_fill_sim_cost_wall(fillsim, *, h_primary, min_fills):
         row = dict(cell)
         row["n_fill_only"] = n
         sample_gated.append(row)
-    sample_gated.sort(key=lambda row: _flt(row.get("net_bps")) or -1e9, reverse=True)
+    sample_gated.sort(key=lambda row: _flt_key(row.get("net_bps")), reverse=True)
 
     best = sample_gated[0] if sample_gated else None
     break_even = (fillsim.get("maker_fee_sensitivity_scorecard") or {}).get(
@@ -422,6 +434,273 @@ def _sample_gated_fill_sim_cost_wall(fillsim, *, h_primary, min_fills):
         "note": (
             "Uses fill_sim sample-gated cells only; live markout n can remain "
             "diagnostic but does not define the sample-gated cost wall."
+        ),
+    }
+
+
+def _cell_sample_gated(cell, *, min_fills):
+    if not isinstance(cell, dict):
+        return False
+    return (
+        _int_or_zero(cell.get("n") or cell.get("n_fill_only")) >= int(min_fills)
+        and not bool(cell.get("signif_suppressed"))
+    )
+
+
+def _compact_gross_cell(cell, *, source, min_fills):
+    if not isinstance(cell, dict):
+        return None
+    edge = _flt(cell.get("edge_before_fees_bps"))
+    net = _flt(cell.get("net_bps"))
+    if edge is None and net is not None:
+        edge = net + fee_rt
+    if net is None and edge is not None:
+        net = edge - fee_rt
+    if edge is None and net is None:
+        return None
+    n_fill_only = _int_or_zero(cell.get("n") or cell.get("n_fill_only"))
+    break_even_fee = edge / 2.0 if edge is not None else None
+    return {
+        "source": source,
+        "name": cell.get("name"),
+        "condition": cell.get("condition"),
+        "symbol": cell.get("symbol"),
+        "queue_position": cell.get("queue_position"),
+        "policy": cell.get("policy"),
+        "track": cell.get("track"),
+        "feature": cell.get("feature"),
+        "n_fill_only": n_fill_only,
+        "sample_gated": n_fill_only >= int(min_fills) and not bool(cell.get("signif_suppressed")),
+        "signif_suppressed": bool(cell.get("signif_suppressed")),
+        "edge_before_fees_bps": _round(edge, 4),
+        "net_bps": _round(net, 4),
+        "fee_round_trip_shortfall_bps": _round(
+            cell.get("fee_round_trip_shortfall_bps")
+            if cell.get("fee_round_trip_shortfall_bps") is not None
+            else (fee_rt - edge if edge is not None else None),
+            4,
+        ),
+        "break_even_maker_fee_bps_per_side": _round(break_even_fee, 4),
+        "fee_reduction_needed_bps_per_side": _round(
+            max(0.0, maker_fee - break_even_fee) if break_even_fee is not None else None,
+            4,
+        ),
+    }
+
+
+def _walk_forward_candidates(walk_forward):
+    rows = []
+    seen = set()
+
+    def add(row):
+        if not isinstance(row, dict):
+            return
+        key = (
+            row.get("name"),
+            row.get("condition"),
+            json.dumps(row.get("train") or {}, sort_keys=True, default=str),
+            json.dumps(row.get("holdout") or {}, sort_keys=True, default=str),
+        )
+        if key in seen:
+            return
+        seen.add(key)
+        rows.append(row)
+
+    for key in (
+        "top_train_candidates",
+        "holdout_confirmed_candidates",
+        "train_positive_sample_gated_candidates",
+    ):
+        for row in walk_forward.get(key) or []:
+            add(row)
+    add(walk_forward.get("best_train_candidate"))
+    add(walk_forward.get("best_holdout_confirmed_candidate"))
+    return rows
+
+
+def _compact_walk_forward_candidate(row, *, min_fills):
+    if not isinstance(row, dict):
+        return None
+    train = _compact_gross_cell(
+        row.get("train"),
+        source="walk_forward_train",
+        min_fills=min_fills,
+    )
+    holdout = _compact_gross_cell(
+        row.get("holdout"),
+        source="walk_forward_holdout",
+        min_fills=min_fills,
+    )
+    if train is None and holdout is None:
+        return None
+    decay = None
+    if train and holdout and train.get("net_bps") is not None and holdout.get("net_bps") is not None:
+        decay = _round(float(train["net_bps"]) - float(holdout["net_bps"]), 4)
+    return {
+        "name": row.get("name"),
+        "condition": row.get("condition"),
+        "feature": row.get("feature"),
+        "threshold_source": row.get("threshold_source"),
+        "train": train,
+        "holdout": holdout,
+        "train_sample_gated_positive": row.get("train_sample_gated_positive"),
+        "holdout_sample_gated_positive": row.get("holdout_sample_gated_positive"),
+        "holdout_confirmed": row.get("holdout_confirmed"),
+        "train_to_holdout_net_decay_bps": decay,
+    }
+
+
+def _mm_gross_edge_cost_decomposition(fillsim, *, h_primary, min_fills):
+    """Separate true no-edge from gross edge that is smaller than current fees."""
+    edge = fillsim.get("edge_scorecard") or {}
+    fill_cells = [
+        _compact_gross_cell(cell, source="edge_scorecard", min_fills=min_fills)
+        for cell in edge.get("all_fill_only_cells") or []
+        if _cell_sample_gated(cell, min_fills=min_fills)
+    ]
+    fill_cells = [cell for cell in fill_cells if cell is not None]
+
+    conditional = fillsim.get("conditional_feature_scorecard") or {}
+    conditional_cells = [
+        _compact_gross_cell(
+            cell,
+            source="conditional_feature_scorecard",
+            min_fills=min_fills,
+        )
+        for cell in conditional.get("all_cells") or []
+        if _cell_sample_gated(cell, min_fills=min_fills)
+    ]
+    conditional_cells = [cell for cell in conditional_cells if cell is not None]
+
+    walk_forward = fillsim.get("walk_forward_feature_scorecard") or {}
+    walk_rows = [
+        compact
+        for compact in (
+            _compact_walk_forward_candidate(row, min_fills=min_fills)
+            for row in _walk_forward_candidates(walk_forward)
+        )
+        if compact is not None
+    ]
+    walk_train_cells = [
+        row["train"] for row in walk_rows
+        if row.get("train") and row["train"].get("sample_gated")
+    ]
+    walk_holdout_cells = [
+        row["holdout"] for row in walk_rows
+        if row.get("holdout") and row["holdout"].get("sample_gated")
+    ]
+
+    all_cells = fill_cells + conditional_cells + walk_train_cells + walk_holdout_cells
+    current_fee_positive = [
+        cell for cell in all_cells
+        if _flt(cell.get("net_bps")) is not None and _flt(cell.get("net_bps")) > 0.0
+    ]
+    gross_positive = [
+        cell for cell in all_cells
+        if _flt(cell.get("edge_before_fees_bps")) is not None
+        and _flt(cell.get("edge_before_fees_bps")) > 0.0
+    ]
+
+    best_current_fee = (
+        max(all_cells, key=lambda cell: _flt_key(cell.get("net_bps")))
+        if all_cells else None
+    )
+    best_gross = (
+        max(gross_positive, key=lambda cell: _flt_key(cell.get("edge_before_fees_bps")))
+        if gross_positive else None
+    )
+    walk_train_gross = [
+        row for row in walk_rows
+        if row.get("train")
+        and row["train"].get("sample_gated")
+        and (_flt(row["train"].get("edge_before_fees_bps")) or -1e9) > 0.0
+    ]
+    walk_holdout_gross = [
+        row for row in walk_rows
+        if row.get("holdout")
+        and row["holdout"].get("sample_gated")
+        and (_flt(row["holdout"].get("edge_before_fees_bps")) or -1e9) > 0.0
+    ]
+    best_walk_train = (
+        max(
+            walk_train_gross,
+            key=lambda row: _flt_key(row["train"].get("edge_before_fees_bps")),
+        )
+        if walk_train_gross else None
+    )
+    best_walk_holdout = (
+        max(
+            walk_holdout_gross,
+            key=lambda row: _flt_key(row["holdout"].get("edge_before_fees_bps")),
+        )
+        if walk_holdout_gross else None
+    )
+    both_gross = [
+        row for row in walk_rows
+        if row.get("train")
+        and row.get("holdout")
+        and row["train"].get("sample_gated")
+        and row["holdout"].get("sample_gated")
+        and (_flt(row["train"].get("edge_before_fees_bps")) or -1e9) > 0.0
+        and (_flt(row["holdout"].get("edge_before_fees_bps")) or -1e9) > 0.0
+    ]
+    best_walk_both = (
+        max(
+            both_gross,
+            key=lambda row: min(
+                _flt_key(row["train"].get("edge_before_fees_bps")),
+                _flt_key(row["holdout"].get("edge_before_fees_bps")),
+            ),
+        )
+        if both_gross else None
+    )
+
+    if current_fee_positive:
+        status = "CURRENT_FEE_GROSS_AND_NET_POSITIVE"
+    elif gross_positive:
+        status = "GROSS_EDGE_BELOW_CURRENT_FEE_COST_WALL"
+    else:
+        status = "NO_SAMPLE_GATED_GROSS_EDGE"
+
+    return {
+        "available": bool(all_cells),
+        "status": status,
+        "horizon_s": h_primary,
+        "sample_gate_min_fills": int(min_fills),
+        "current_maker_fee_bps_per_side": maker_fee,
+        "current_fee_round_trip_bps": fee_rt,
+        "sample_gated_cell_count": len(all_cells),
+        "sample_gated_fill_only_cell_count": len(fill_cells),
+        "sample_gated_fill_only_gross_positive_count": len([
+            cell for cell in fill_cells
+            if (_flt(cell.get("edge_before_fees_bps")) or -1e9) > 0.0
+        ]),
+        "sample_gated_conditional_cell_count": len(conditional_cells),
+        "sample_gated_walk_forward_candidate_count": len(walk_rows),
+        "gross_positive_sample_gated_cell_count": len(gross_positive),
+        "current_fee_positive_sample_gated_cell_count": len(current_fee_positive),
+        "best_sample_gated_current_fee_cell": best_current_fee,
+        "best_sample_gated_gross_cell": best_gross,
+        "best_sample_gated_gross_edge_bps": (
+            best_gross.get("edge_before_fees_bps") if best_gross else None
+        ),
+        "best_gross_cell_net_bps": best_gross.get("net_bps") if best_gross else None,
+        "best_current_fee_net_bps": (
+            best_current_fee.get("net_bps") if best_current_fee else None
+        ),
+        "break_even_maker_fee_bps_per_side": (
+            best_gross.get("break_even_maker_fee_bps_per_side") if best_gross else None
+        ),
+        "fee_reduction_needed_bps_per_side": (
+            best_gross.get("fee_reduction_needed_bps_per_side") if best_gross else None
+        ),
+        "best_walk_forward_train_gross_candidate": best_walk_train,
+        "best_walk_forward_holdout_gross_candidate": best_walk_holdout,
+        "best_walk_forward_both_gross_candidate": best_walk_both,
+        "note": (
+            "Gross edge is edge_before_fees_bps. If gross edge is positive but "
+            "net_bps remains non-positive at the current maker fee, the blocker is "
+            "a fee/cost wall rather than absence of any measured signal."
         ),
     }
 
@@ -587,6 +866,11 @@ sample_gated_cost_wall_summary = _sample_gated_fill_sim_cost_wall(
     h_primary=h_primary,
     min_fills=min_fills,
 )
+gross_edge_cost_decomposition = _mm_gross_edge_cost_decomposition(
+    fillsim,
+    h_primary=h_primary,
+    min_fills=min_fills,
+)
 # adverse 可用性：報告存在、非過期、有數值。否則 adverse 未知 → net 不可發正告警。
 adverse_usable = (fillsim["present"] and not fillsim["stale"] and adverse_sel is not None)
 
@@ -719,6 +1003,7 @@ status = {
     "net_edge_per_symbol": net_edge,
     "cost_wall_summary": cost_wall_summary,
     "sample_gated_cost_wall_summary": sample_gated_cost_wall_summary,
+    "gross_edge_cost_decomposition": gross_edge_cost_decomposition,
     "l1_regime_days": l1_days,
     "l1_fill_sim_ready": l1_ready,
     "highvol_z": hv_z,
