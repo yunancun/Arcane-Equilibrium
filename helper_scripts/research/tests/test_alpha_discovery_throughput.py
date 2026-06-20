@@ -1141,6 +1141,67 @@ def test_flash_dip_execution_realism_arm_preserves_short_exit_research_path(tmp_
     assert blocker["best_short_exit_annret"] == 0.0132
 
 
+def test_flash_dip_execution_realism_inherits_l1_historical_wait_actionability(tmp_path):
+    data = tmp_path / "openclaw"
+    (data / "logs").mkdir(parents=True)
+    (data / "logs" / "flash_dip_execution_realism.log").write_text(json.dumps({
+        "ts_utc": "2026-06-20T01:18:00Z",
+        "check": "flash_dip_execution_realism",
+        "candidate_label": "K6_N2_C3_nf0.005",
+        "k_pct": 6.0,
+        "verdict_status": "EXECUTION_REALISM_BLOCKED",
+        "fail_reasons": ["gate_buffer_nonpositive_annret"],
+        "gate_buffer_bps": 10.0,
+        "gate_filled": 68,
+        "gate_distinct_days": 38,
+        "gate_annret": -0.0255,
+        "gate_maxdd": 0.0081,
+        "short_exit_status": "SHORT_EXIT_RESEARCH_SIGNAL",
+        "best_short_exit_horizon": "240m",
+        "best_short_exit_annret": 0.0132,
+        "best_short_exit_n_filled": 68,
+        "best_short_exit_days": 38,
+    }) + "\n", encoding="utf-8")
+    (data / "logs" / "flash_dip_l1_short_exit_replay.log").write_text(json.dumps({
+        "ts_utc": "2026-06-20T01:20:00Z",
+        "check": "flash_dip_l1_short_exit_replay",
+        "verdict_status": "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE",
+        "fail_reasons": ["no_l1_rows_for_candidate_event_windows"],
+        "candidate_events": 6,
+        "events_missing_l1_in_event_window": 6,
+        "dominant_missing_event_window_l1_relation": "candidate_window_before_symbol_l1_range",
+        "coverage_action_status": "HISTORICAL_CANDIDATES_BEFORE_L1_CAPTURE_WAIT_NEXT_CANDIDATE",
+        "coverage_action_reason": "candidate_windows_end_before_symbol_l1_capture_starts",
+        "coverage_action_scorecard": {
+            "status": "HISTORICAL_CANDIDATES_BEFORE_L1_CAPTURE_WAIT_NEXT_CANDIDATE",
+            "reason": "candidate_windows_end_before_symbol_l1_capture_starts",
+            "engineering_actionable": False,
+            "next_trigger": "wait_for_next_flash_dip_candidate_after_l1_capture_start_then_replay",
+        },
+    }) + "\n", encoding="utf-8")
+
+    arm = collect_flash_dip_execution_realism_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 1, 30, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan([arm], now_utc=dt.datetime(2026, 6, 20, 1, 30, tzinfo=dt.timezone.utc))
+
+    dependent = arm["detail"]["dependent_l1_short_exit_replay"]
+    assert dependent["coverage_action_status"] == (
+        "HISTORICAL_CANDIDATES_BEFORE_L1_CAPTURE_WAIT_NEXT_CANDIDATE"
+    )
+    assert dependent["engineering_actionable"] is False
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["engineering_actionable"] is False
+    assert blocker["next_trigger"] == (
+        "wait_for_next_flash_dip_candidate_after_l1_capture_start_then_replay"
+    )
+    assert blocker["dependent_l1_coverage_action_status"] == (
+        "HISTORICAL_CANDIDATES_BEFORE_L1_CAPTURE_WAIT_NEXT_CANDIDATE"
+    )
+    assert blocker["dependent_l1_engineering_actionable"] is False
+
+
 def test_flash_dip_execution_realism_rejects_when_no_short_exit_signal(tmp_path):
     data = tmp_path / "openclaw"
     (data / "logs").mkdir(parents=True)

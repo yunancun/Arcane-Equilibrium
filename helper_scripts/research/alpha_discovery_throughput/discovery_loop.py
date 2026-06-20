@@ -586,12 +586,22 @@ def classify_profitability_blocker(
         short_exit_status = str(detail.get("short_exit_status") or "").upper()
         fail_reasons = [str(item) for item in _list(detail.get("fail_reasons"))]
         if verdict == "EXECUTION_REALISM_BLOCKED" and short_exit_status == "SHORT_EXIT_RESEARCH_SIGNAL":
+            dependent_l1 = _dict(detail.get("dependent_l1_short_exit_replay"))
+            dependent_l1_actionable = dependent_l1.get("engineering_actionable")
+            if isinstance(dependent_l1_actionable, bool):
+                engineering_actionable = dependent_l1_actionable
+            else:
+                engineering_actionable = True
+            next_trigger = (
+                dependent_l1.get("coverage_action_next_trigger")
+                or "run_l1_short_exit_replay_with_candidate_window_coverage_before_any_retune"
+            )
             return _finish_blocker_row(
                 row,
                 blocker_class="data_coverage",
                 primary_blocker="daily_exit_execution_realism_blocked_short_exit_needs_l1_replay",
-                next_trigger="run_l1_short_exit_replay_with_candidate_window_coverage_before_any_retune",
-                engineering_actionable=True,
+                next_trigger=next_trigger,
+                engineering_actionable=engineering_actionable,
                 extra={
                     "candidate_label": detail.get("candidate_label"),
                     "k_pct": detail.get("k_pct"),
@@ -604,6 +614,19 @@ def classify_profitability_blocker(
                     "best_short_exit_annret": detail.get("best_short_exit_annret"),
                     "best_short_exit_n_filled": detail.get("best_short_exit_n_filled"),
                     "best_short_exit_days": detail.get("best_short_exit_days"),
+                    "dependent_l1_coverage_action_status": dependent_l1.get(
+                        "coverage_action_status"
+                    ),
+                    "dependent_l1_coverage_action_reason": dependent_l1.get(
+                        "coverage_action_reason"
+                    ),
+                    "dependent_l1_engineering_actionable": dependent_l1.get(
+                        "engineering_actionable"
+                    ),
+                    "dependent_l1_dominant_missing_event_window_l1_relation": dependent_l1.get(
+                        "dominant_missing_event_window_l1_relation"
+                    ),
+                    "dependent_l1_short_exit_replay": dependent_l1 or None,
                 },
             )
         if verdict == "EXECUTION_REALISM_BLOCKED":

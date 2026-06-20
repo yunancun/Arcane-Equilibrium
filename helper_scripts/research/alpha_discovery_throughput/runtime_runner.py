@@ -299,6 +299,38 @@ def collect_flash_dip_l1_replay_arm(
     )
 
 
+def _flash_dip_l1_dependency_summary(detail: dict[str, Any]) -> dict[str, Any]:
+    coverage_scorecard = (
+        detail.get("coverage_action_scorecard")
+        if isinstance(detail.get("coverage_action_scorecard"), dict)
+        else {}
+    )
+    engineering_actionable = coverage_scorecard.get("engineering_actionable")
+    return {
+        "source_ok": detail.get("source_ok"),
+        "source_error": detail.get("source_error"),
+        "verdict_status": detail.get("verdict_status"),
+        "candidate_events": detail.get("candidate_events"),
+        "events_missing_l1_in_event_window": detail.get(
+            "events_missing_l1_in_event_window"
+        ),
+        "dominant_missing_event_window_l1_relation": detail.get(
+            "dominant_missing_event_window_l1_relation"
+        ),
+        "coverage_action_status": (
+            detail.get("coverage_action_status") or coverage_scorecard.get("status")
+        ),
+        "coverage_action_reason": (
+            detail.get("coverage_action_reason") or coverage_scorecard.get("reason")
+        ),
+        "coverage_action_next_trigger": coverage_scorecard.get("next_trigger"),
+        "engineering_actionable": (
+            engineering_actionable if isinstance(engineering_actionable, bool) else None
+        ),
+        "coverage_action_scorecard": coverage_scorecard or None,
+    }
+
+
 def _flash_dip_execution_realism_detail(
     data_dir: Path,
     *,
@@ -364,6 +396,14 @@ def collect_flash_dip_execution_realism_arm(
         data_dir,
         now_utc=now_utc,
         max_age_seconds=max_age_seconds,
+    )
+    l1_replay_detail = _flash_dip_l1_short_exit_replay_detail(
+        data_dir,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    detail["dependent_l1_short_exit_replay"] = _flash_dip_l1_dependency_summary(
+        l1_replay_detail
     )
     path = Path(detail["source_path"])
     source_error = detail.get("source_error")
