@@ -44,6 +44,9 @@ def test_wrapper_readonly_pg_and_status_artifacts_only():
     assert "oldest_unmatured_exit_target_utc" in src
     assert "max_overlap_adjusted_ic_points" in src
     assert "preliminary_raw_candidate_count" in src
+    assert "preliminary_hac_candidate_count" in src
+    assert "significance_t_stat" in src
+    assert "max_abs_t_stat_hac" in src
     assert "max_bh_q" in src
     assert "PYTHONDONTWRITEBYTECODE=1" in src
     assert src.rstrip().endswith("exit 0")

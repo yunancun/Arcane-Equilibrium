@@ -25,6 +25,14 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket HAC IC Gate
+
+- Upgraded `polymarket_leadlag` to report schema/runner v0.4 with Newey-West/HAC slope t-stat significance.
+- Candidate review now requires overlap-adjusted sample floor, HAC t threshold, and BH q-value control; naive t-stat/p/q remain diagnostic only.
+- Cron status and alpha discovery raw detail now expose `preliminary_hac_candidate_count`, `significance_t_stat=t_stat_hac`, and `max_abs_t_stat_hac`.
+- Linux v0.4 smoke wrote latest sha256 `9e4941dc399f5f6c2c08076814d06f3ed78b6084d383689f66800083c80a5601`; `max_ic_points=2`, `max_overlap_adjusted_ic_points=2`, `preliminary_hac_candidate_count=0`, still `INSUFFICIENT_SAMPLE`.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Robust IC Gate
 
 - Upgraded `polymarket_leadlag` to report schema/runner v0.3 with overlap-adjusted sampling and BH q-value controls.

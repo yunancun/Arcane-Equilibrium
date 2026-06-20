@@ -74,6 +74,7 @@ DEFAULT_MAX_ALIGN_LAG_MINUTES = 10
 DEFAULT_MIN_ABS_IC = 0.15
 DEFAULT_MIN_ABS_T = 2.0
 DEFAULT_MAX_BH_Q = 0.10
+DEFAULT_MAX_HAC_LAG = 12
 
 _PRICE_TARGET_RE = re.compile(
     r"(\bprice\b.*\bhit\b|\bhit\b.*\$|\breach\b.*\$|above\s+\$|below\s+\$|"
@@ -575,6 +576,64 @@ def _normal_two_sided_p_from_t(t_stat: Optional[float]) -> Optional[float]:
     return math.erfc(abs(float(t_stat)) / math.sqrt(2.0))
 
 
+def _median_positive_gap_ms(timestamps_ms: Iterable[int]) -> Optional[int]:
+    ordered = sorted({int(ts) for ts in timestamps_ms})
+    gaps = [
+        b - a
+        for a, b in zip(ordered, ordered[1:])
+        if b > a
+    ]
+    if not gaps:
+        return None
+    gaps.sort()
+    mid = len(gaps) // 2
+    if len(gaps) % 2:
+        return int(gaps[mid])
+    return int((gaps[mid - 1] + gaps[mid]) / 2)
+
+
+def _hac_lag_for_horizon(timestamps_ms: Iterable[int], horizon_minutes: int) -> int:
+    gap_ms = _median_positive_gap_ms(timestamps_ms)
+    if gap_ms is None or gap_ms <= 0:
+        return 0
+    horizon_ms = int(max(1, horizon_minutes) * 60 * 1000)
+    return max(0, min(DEFAULT_MAX_HAC_LAG, int(math.ceil(horizon_ms / gap_ms)) - 1))
+
+
+def _newey_west_slope_t_stat(
+    xs: list[float],
+    ys: list[float],
+    *,
+    lag: int,
+) -> Optional[float]:
+    if len(xs) != len(ys) or len(xs) < 3:
+        return None
+    mx = sum(xs) / len(xs)
+    my = sum(ys) / len(ys)
+    centered_x = [x - mx for x in xs]
+    sxx = sum(x * x for x in centered_x)
+    if sxx <= 0.0:
+        return None
+    slope = sum(x * (y - my) for x, y in zip(centered_x, ys)) / sxx
+    intercept = my - slope * mx
+    score = [
+        x * (y - intercept - slope * raw_x)
+        for raw_x, x, y in zip(xs, centered_x, ys)
+    ]
+    max_lag = max(0, min(int(lag), len(score) - 2))
+    long_run_var = sum(u * u for u in score)
+    for lval in range(1, max_lag + 1):
+        weight = 1.0 - (lval / (max_lag + 1.0))
+        gamma = sum(score[idx] * score[idx - lval] for idx in range(lval, len(score)))
+        long_run_var += 2.0 * weight * gamma
+    if long_run_var <= 0.0:
+        return None
+    se = math.sqrt(long_run_var / (sxx * sxx))
+    if se <= 0.0:
+        return None
+    return slope / se
+
+
 def _bh_q_values(p_values: list[Optional[float]]) -> list[Optional[float]]:
     indexed = [
         (idx, float(p))
@@ -598,15 +657,29 @@ def _bh_q_values(p_values: list[Optional[float]]) -> list[Optional[float]]:
 
 
 def annotate_multiple_testing(ic_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    p_values = [_normal_two_sided_p_from_t(row.get("t_stat")) for row in ic_results]
-    q_values = _bh_q_values(p_values)
+    naive_p_values = [_normal_two_sided_p_from_t(row.get("t_stat")) for row in ic_results]
+    hac_p_values = [_normal_two_sided_p_from_t(row.get("t_stat_hac")) for row in ic_results]
+    naive_q_values = _bh_q_values(naive_p_values)
+    hac_q_values = _bh_q_values(hac_p_values)
     out: list[dict[str, Any]] = []
-    for row, p_val, q_val in zip(ic_results, p_values, q_values):
+    for row, naive_p, hac_p, naive_q, hac_q in zip(
+        ic_results,
+        naive_p_values,
+        hac_p_values,
+        naive_q_values,
+        hac_q_values,
+    ):
         out.append({
             **row,
-            "p_value_approx_normal": p_val,
-            "bh_q_value_approx": q_val,
-            "multiple_testing_method": "benjamini_hochberg_over_report_cells_normal_approx",
+            "p_value_naive_approx_normal": naive_p,
+            "bh_q_value_naive_approx": naive_q,
+            "p_value_hac_approx_normal": hac_p,
+            "bh_q_value_hac_approx": hac_q,
+            "p_value_approx_normal": hac_p,
+            "bh_q_value_approx": hac_q,
+            "multiple_testing_method": (
+                "benjamini_hochberg_over_report_cells_hac_normal_approx"
+            ),
         })
     return out
 
@@ -618,12 +691,14 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         grouped[key].append(row)
     out: list[dict[str, Any]] = []
     for (bucket, symbol, horizon), rows in sorted(grouped.items()):
+        rows = sorted(rows, key=lambda r: int(r["snapshot_ts_ms"]))
         xs = [float(r["mean_delta_prob_yes"]) for r in rows]
         ys = [float(r["forward_return_bps"]) for r in rows]
         r = _pearson(xs, ys)
         timestamps = [int(r["snapshot_ts_ms"]) for r in rows]
         n_distinct = len(set(timestamps))
         n_nonoverlap = _count_nonoverlap_timestamps(timestamps, horizon)
+        hac_lag = _hac_lag_for_horizon(timestamps, horizon)
         out.append({
             "bucket": bucket,
             "symbol": symbol,
@@ -635,12 +710,49 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             "overlap_warning": n_nonoverlap < n_distinct,
             "ic_pearson": r,
             "t_stat": _t_stat_from_r(r, len(rows)),
+            "t_stat_hac": _newey_west_slope_t_stat(xs, ys, lag=hac_lag),
+            "hac_lag": hac_lag,
+            "hac_method": "newey_west_slope_t_stat_bartlett",
             "mean_delta_prob_yes": _mean(xs),
             "mean_forward_return_bps": _mean(ys),
             "first_snapshot_ts_utc": _ms_to_iso(min(timestamps)),
             "last_snapshot_ts_utc": _ms_to_iso(max(timestamps)),
         })
     return annotate_multiple_testing(out)
+
+
+def _partition_ic_candidates(
+    ic_results: list[dict[str, Any]],
+    *,
+    min_points: int,
+    min_abs_ic: float,
+    min_abs_t: float,
+    max_bh_q: float,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    eligible = [
+        r for r in ic_results
+        if r["n_points"] >= min_points
+        and r.get("overlap_adjusted_sample_floor", 0) >= min_points
+        and r["ic_pearson"] is not None
+    ]
+    preliminary_raw = [
+        r for r in eligible
+        if r.get("t_stat") is not None
+        and abs(float(r["ic_pearson"])) >= min_abs_ic
+        and abs(float(r["t_stat"])) >= min_abs_t
+    ]
+    preliminary_hac = [
+        r for r in eligible
+        if r.get("t_stat_hac") is not None
+        and abs(float(r["ic_pearson"])) >= min_abs_ic
+        and abs(float(r["t_stat_hac"])) >= min_abs_t
+    ]
+    candidates = [
+        r for r in preliminary_hac
+        if r.get("bh_q_value_hac_approx") is not None
+        and float(r["bh_q_value_hac_approx"]) <= max_bh_q
+    ]
+    return eligible, preliminary_raw, preliminary_hac, candidates
 
 
 def build_report(
@@ -675,22 +787,13 @@ def build_report(
     ic_results = compute_ic(joined)
     bucket_counts = Counter(row["bucket"] for row in deltas)
     joined_counts = Counter(f"{row['bucket']}|{row['symbol']}|{row['horizon_minutes']}" for row in joined)
-    eligible = [
-        r for r in ic_results
-        if r["n_points"] >= min_points
-        and r.get("overlap_adjusted_sample_floor", 0) >= min_points
-        and r["ic_pearson"] is not None
-        and r["t_stat"] is not None
-    ]
-    preliminary_candidates = [
-        r for r in eligible
-        if abs(float(r["ic_pearson"])) >= min_abs_ic and abs(float(r["t_stat"])) >= min_abs_t
-    ]
-    candidates = [
-        r for r in preliminary_candidates
-        if r.get("bh_q_value_approx") is not None
-        and float(r["bh_q_value_approx"]) <= max_bh_q
-    ]
+    eligible, preliminary_raw, preliminary_hac, candidates = _partition_ic_candidates(
+        ic_results,
+        min_points=min_points,
+        min_abs_ic=min_abs_ic,
+        min_abs_t=min_abs_t,
+        max_bh_q=max_bh_q,
+    )
 
     if not snapshot_rows:
         status = STATUS_NO_SNAPSHOT_ROWS
@@ -704,10 +807,10 @@ def build_report(
         reason = f"max overlap-adjusted IC points {best_n} below min_points {min_points}"
     elif candidates:
         status = STATUS_IC_CANDIDATE_REVIEW_REQUIRED
-        reason = "one or more bucket/symbol/horizon IC cells pass preliminary thresholds"
+        reason = "one or more bucket/symbol/horizon IC cells pass HAC and BH-q thresholds"
     else:
         status = STATUS_IC_READY_NO_SIGNIFICANT_EDGE
-        reason = "enough sample for at least one cell, but no preliminary IC threshold pass"
+        reason = "enough sample for at least one cell, but no HAC-controlled IC threshold pass"
 
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
@@ -727,7 +830,9 @@ def build_report(
             "min_abs_t": min_abs_t,
             "max_bh_q": max_bh_q,
             "candidate_count": len(candidates),
-            "preliminary_raw_candidate_count": len(preliminary_candidates),
+            "preliminary_raw_candidate_count": len(preliminary_raw),
+            "preliminary_hac_candidate_count": len(preliminary_hac),
+            "significance_t_stat": "t_stat_hac",
             "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
         },
         "counts": {
@@ -749,6 +854,14 @@ def build_report(
                 (int(r.get("overlap_adjusted_sample_floor", 0)) for r in ic_results),
                 default=0,
             ),
+            "max_abs_t_stat_hac": max(
+                (
+                    abs(float(r["t_stat_hac"]))
+                    for r in ic_results
+                    if r.get("t_stat_hac") is not None
+                ),
+                default=None,
+            ),
         },
         "ic_results": ic_results,
         "candidates": candidates,
@@ -759,6 +872,7 @@ def build_report(
             "price_target/event_reg bucket split is research-side and does not filter collector artifacts",
             "insufficient sample fails closed and is not alpha evidence",
             "candidate gate requires overlap-adjusted sample floor and BH q-value control",
+            "candidate significance uses Newey-West/HAC slope t-stat; naive t-stat is diagnostic only",
         ],
     }
 
