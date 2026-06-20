@@ -25,6 +25,17 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM Walk-Forward Failure Summary
+
+- Added `walk_forward_feature_scorecard.failure_summary` and passed it through alpha-discovery MM detail as `walk_forward_failure_summary`.
+- Diagnosis: determine whether current MM remains unprofitable because the existing PIT spread/queue/OFI/BTC-lead feature family hides a near-ready train/holdout filter.
+- Latest trade-core forced fresh-L1 2h fill_sim report sha256 `b9bdeba681d6182de8eda32031e81320e6f628893aa65c5a645d334aa524a9ca`: `l1_rows_post_filter=1756794`, `trades_rows=1602324`, 33 symbols, L1 age `0.003h`.
+- `walk_forward_feature_scorecard.status=NO_WALK_FORWARD_FEATURE_TRAIN_POSITIVE`; `failure_summary.status=NO_TRAIN_POSITIVE_CELL`; candidates=51, train sample-gated positives=0, holdout confirmations=0.
+- Best train combo `quoted_half_spread_bps train_p75 AND side_book_imb train_p75` remains negative: train `-3.524bp`, holdout `-3.260bp`; best holdout candidate `symbol == ADAUSDT` remains `-1.998bp`.
+- Same report remains current-fee negative across edge/horizon/conditional scorecards; fee sensitivity best break-even maker fee improved to `1.135bp/side` but is still below current `2.0bp/side`.
+- MM verdict status line sha256 `d8c43bde35ff8f11e622734dcb5b939b82ef155c2e6e84dffe323f2a26f9da87` and alpha latest sha256 `3a834cad9e3ba3abbdc72014fab4b09dc2647046cfa232379a3d4f3172e787b3` preserve the summary; MM arm remains `CAPTURING`, ready/probe=0.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 MM FillSim Horizon Scorecard
 
 - Added diagnostic-only `fill_sim_horizon_scorecard(report)` and passed it through `recorder_mm_verdict_cron.sh` plus alpha-discovery MM arm detail.

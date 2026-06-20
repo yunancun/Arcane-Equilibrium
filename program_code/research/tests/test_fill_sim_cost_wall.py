@@ -391,6 +391,8 @@ def test_walk_forward_feature_scorecard_confirms_holdout_positive_cell():
     assert scorecard["best_holdout_confirmed_candidate"]["train"]["n_fill_only"] >= 30
     assert scorecard["best_holdout_confirmed_candidate"]["holdout"]["n_fill_only"] >= 30
     assert scorecard["best_holdout_confirmed_candidate"]["holdout"]["net_bps"] > 0
+    assert scorecard["failure_summary"]["status"] == "HOLDOUT_CONFIRMED"
+    assert scorecard["failure_summary"]["holdout_confirmed_count"] >= 1
 
 
 def test_walk_forward_feature_scorecard_blocks_train_only_overfit():
@@ -447,6 +449,13 @@ def test_walk_forward_feature_scorecard_blocks_train_only_overfit():
     assert scorecard["holdout_confirmed_candidates"] == []
     assert scorecard["best_train_candidate"]["train"]["net_bps"] > 0
     assert scorecard["best_train_candidate"]["holdout"]["net_bps"] < 0
+    summary = scorecard["failure_summary"]
+    assert summary["status"] == "TRAIN_POSITIVE_HOLDOUT_DECAY"
+    assert summary["train_positive_sample_gated_count"] >= 1
+    assert summary["holdout_confirmed_count"] == 0
+    assert summary["best_train_candidate"]["train_net_bps"] > 0
+    assert summary["best_train_candidate"]["holdout_net_bps"] < 0
+    assert summary["best_train_candidate"]["train_to_holdout_net_decay_bps"] > 0
 
 
 def test_walk_forward_feature_scorecard_does_not_peek_at_holdout_thresholds():
@@ -483,6 +492,7 @@ def test_walk_forward_feature_scorecard_does_not_peek_at_holdout_thresholds():
     assert scorecard["status"] == "NO_WALK_FORWARD_FEATURE_TRAIN_POSITIVE"
     assert scorecard["best_holdout_confirmed_candidate"] is None
     assert scorecard["holdout_confirmed_candidates"] == []
+    assert scorecard["failure_summary"]["status"] == "NO_TRAIN_POSITIVE_CELL"
 
 
 def test_maker_fee_sensitivity_finds_lower_fee_sample_gated_path():
