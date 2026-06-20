@@ -373,6 +373,15 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
     )
     assert blockers["mm_verdict_maker_edge"]["best_sample_gated_gross_edge_bps"] == 2.27
     assert blockers["mm_verdict_maker_edge"]["best_gross_cell_net_bps"] == -1.73
+    assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_status"] == (
+        "CURRENT_FEE_GROSS_EDGE_GAP_REQUIRES_NEW_LOW_FRICTION_SIGNAL"
+    )
+    assert blockers["mm_verdict_maker_edge"]["required_current_fee_gross_edge_bps"] == 4.0
+    assert blockers["mm_verdict_maker_edge"]["gross_edge_gap_to_current_fee_bps"] == 1.73
+    assert blockers["mm_verdict_maker_edge"]["gross_edge_multiple_to_clear_current_fee"] == 1.7621
+    assert blockers["mm_verdict_maker_edge"]["next_trigger"] == (
+        "search_new_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
+    )
     assert blockers["mm_verdict_maker_edge"]["business_path_actionability_status"] == (
         "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED"
     )
