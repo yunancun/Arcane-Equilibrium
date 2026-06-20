@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-20（TODO v236 MM verdict cost-wall runtime smoke；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-20（TODO v237 FlashDip death-rate freshness gate；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v237 增量（2026-06-20 FlashDip death-rate freshness gate）**：`helper_scripts/research/alpha_discovery_throughput/runtime_runner.py` now applies daily-artifact freshness to FlashDip death-rate status. Previously `collect_flash_dip_arm()` read the latest `flash_dip_death_rate.log` line without timestamp validation, so a stopped cron could keep alpha discovery looking active for the only currently plausible non-MM strategy path. Now stale/missing `ts_utc` returns `gate_status=SOURCE_FAILURE`, `source_ok=false`, `source_error=stale_artifact`, and `artifacts_ready=false` even if stale closed-slot sample count is above threshold; fresh/missing-not-yet-fired behavior remains fail-soft capture. Added focused regression `test_runtime_runner_blocks_stale_flash_dip_death_rate_status`. Verification：`python3 -m pytest -q helper_scripts/research/tests/test_alpha_discovery_throughput.py` = 11 passed, `python3 -m py_compile helper_scripts/research/alpha_discovery_throughput/runtime_runner.py` PASS, targeted `git diff --check` clean. Boundary：source/test/docs only；no Linux deploy yet, no engine/API restart, no PG table write/schema migration, no Bybit private/signed/trading call, no credential/auth/risk/order mutation；not promotion proof.
 
 **v236 增量（2026-06-20 MM verdict cost-wall runtime smoke）**：Selective Linux deploy/smoke for v234-v235 cost-wall chain. `trade-core` fetched `origin/main=31c46bf9` and restored touched source/docs/test files from origin while keeping repo HEAD at old `bb06ae1b` because the runtime checkout already carries selective-deploy dirty state. Linux focused verification passed when run as separate pytest invocations (`helper_scripts/cron/tests/test_fill_sim_refresh_cron_static.py` 11 passed, `helper_scripts/research/tests/test_alpha_discovery_throughput.py` 10 passed, `program_code/research/tests/test_fill_sim_cost_wall.py` 3 passed, plus py_compile); combined pytest invocation hits existing `tests.*` package collision and was not used as a verdict. Manual read-only `recorder_mm_verdict_cron.sh` smoke appended status `ts_utc=2026-06-20T00:45:49Z`, `markout_n_total=16`, `adverse_selection_usable=true`, and `cost_wall_summary.available=true`; best row `ARBUSDT` had `best_net_edge_bps=-0.1437`, `best_fee_round_trip_shortfall_bps=0.1437`, required maker rebate `0.0`, but `n_maker_fills=1` is below gate; BTC/ETH sample rows still require rebate. Boundary：selective source/docs/test deploy + read-only PG cron + local status/log append only；no engine/API restart, no production fill_sim report overwrite, no PG table write/schema migration, no Bybit private/signed/trading call, no credential/auth/risk/order/trading mutation；not promotion proof.
 

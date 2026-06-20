@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-20 FlashDip Death-Rate Freshness Gate
+
+- Alpha discovery runtime now treats stale `flash_dip_death_rate.log` as `SOURCE_FAILURE/stale_artifact` instead of active FlashDip capture.
+- This closes the same false-active class as the MM verdict stale guard, but for the current non-MM strategy path.
+- Focused checks passed: `test_alpha_discovery_throughput.py` 11 and runtime runner py_compile.
+- Boundary: source/test/docs only at checkpoint; no engine/API restart, no PG write, no Bybit private/signed/trading call, no runtime/auth/risk/order mutation.
+
 ## 2026-06-20 MM Verdict Cost-Wall Bridge
 
 - `recorder_mm_verdict_cron.sh` now carries the break-even lens into daily live MM status: per-symbol edge-before-fees, break-even maker fee, fee shortfall, required spread capture, required maker rebate, and top-level `cost_wall_summary`.
