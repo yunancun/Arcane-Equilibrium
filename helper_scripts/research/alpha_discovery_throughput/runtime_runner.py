@@ -508,6 +508,10 @@ def collect_mm_verdict_arm(
                 "adverse_selection_usable": status.get("adverse_selection_usable"),
                 "cost_wall_summary": status.get("cost_wall_summary"),
                 "horizon_scorecard": (status.get("fillsim") or {}).get("horizon_scorecard"),
+                "walk_forward_failure_summary": (
+                    ((status.get("fillsim") or {}).get("walk_forward_feature_scorecard") or {})
+                    .get("failure_summary")
+                ),
                 "l1_fill_sim_ready": status.get("l1_fill_sim_ready"),
                 "highvol_day": status.get("highvol_day"),
                 "markout_n_total": status.get("markout_n_total"),
@@ -529,6 +533,10 @@ def collect_mm_verdict_arm(
             "adverse_selection_usable": status.get("adverse_selection_usable"),
             "cost_wall_summary": status.get("cost_wall_summary"),
             "horizon_scorecard": (status.get("fillsim") or {}).get("horizon_scorecard"),
+            "walk_forward_failure_summary": (
+                ((status.get("fillsim") or {}).get("walk_forward_feature_scorecard") or {})
+                .get("failure_summary")
+            ),
             "l1_fill_sim_ready": status.get("l1_fill_sim_ready"),
             "highvol_day": status.get("highvol_day"),
             "markout_n_total": status.get("markout_n_total"),

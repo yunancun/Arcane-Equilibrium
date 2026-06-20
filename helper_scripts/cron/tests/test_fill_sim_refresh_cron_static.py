@@ -13,8 +13,13 @@ from pathlib import Path
 import pytest
 
 CRON_DIR = Path(__file__).resolve().parents[1]
+REPO_ROOT = CRON_DIR.parents[1]
 WRAPPER = CRON_DIR / "fill_sim_refresh_cron.sh"
 MM_VERDICT = CRON_DIR / "recorder_mm_verdict_cron.sh"
+FILL_SIM = REPO_ROOT / "program_code" / "research" / "microstructure" / "fill_sim.py"
+RUNTIME_RUNNER = (
+    REPO_ROOT / "helper_scripts" / "research" / "alpha_discovery_throughput" / "runtime_runner.py"
+)
 
 
 def _src() -> str:
@@ -140,6 +145,8 @@ def test_mm_verdict_surfaces_cost_wall_fields() -> None:
     assert "horizon_scorecard" in src
     assert "conditional_feature_scorecard" in src
     assert "walk_forward_feature_scorecard" in src
+    assert "failure_summary" in FILL_SIM.read_text(encoding="utf-8")
+    assert "walk_forward_failure_summary" in RUNTIME_RUNNER.read_text(encoding="utf-8")
     assert "maker_fee_sensitivity_scorecard" in src
     assert "history_scorecard" in src
     assert "FILLSIM_HISTORY_SCORECARD" in src

@@ -1115,6 +1115,77 @@ def _cell_sample_gated_positive(cell: dict | None) -> bool:
     )
 
 
+def _walk_forward_failure_summary(rows: list[dict], holdout_confirmed: list[dict],
+                                  train_positive: list[dict]) -> dict:
+    def _condense(row: dict | None) -> dict | None:
+        if not row:
+            return None
+        train = row.get("train") or {}
+        holdout = row.get("holdout") or {}
+        train_net = train.get("net_bps")
+        holdout_net = holdout.get("net_bps")
+        decay = None
+        if train_net is not None and holdout_net is not None:
+            decay = float(train_net) - float(holdout_net)
+        return {
+            "name": row.get("name"),
+            "condition": row.get("condition"),
+            "feature": row.get("feature"),
+            "threshold_source": row.get("threshold_source"),
+            "train_net_bps": train_net,
+            "train_n_fill_only": train.get("n_fill_only"),
+            "train_fee_shortfall_bps": train.get("fee_round_trip_shortfall_bps"),
+            "holdout_net_bps": holdout_net,
+            "holdout_n_fill_only": holdout.get("n_fill_only"),
+            "holdout_fee_shortfall_bps": holdout.get("fee_round_trip_shortfall_bps"),
+            "train_to_holdout_net_decay_bps": _r(decay, 3),
+            "train_sample_gated_positive": row.get("train_sample_gated_positive"),
+            "holdout_sample_gated_positive": row.get("holdout_sample_gated_positive"),
+            "holdout_confirmed": row.get("holdout_confirmed"),
+        }
+
+    with_holdout = [r for r in rows if (r.get("holdout") or {}).get("net_bps") is not None]
+    holdout_ranked = sorted(
+        with_holdout,
+        key=lambda r: (
+            (r.get("holdout") or {}).get("net_bps") is not None,
+            (r.get("holdout") or {}).get("net_bps")
+            if (r.get("holdout") or {}).get("net_bps") is not None else -1e9,
+            (r.get("holdout") or {}).get("n_fill_only") or 0,
+        ),
+        reverse=True,
+    )
+
+    if holdout_confirmed:
+        status = "HOLDOUT_CONFIRMED"
+    elif train_positive:
+        status = "TRAIN_POSITIVE_HOLDOUT_DECAY"
+    elif any((r.get("train") or {}).get("net_bps") is not None
+             and float((r.get("train") or {}).get("net_bps")) > 0.0 for r in rows):
+        status = "TRAIN_POSITIVE_BELOW_SAMPLE_GATE"
+    elif rows:
+        status = "NO_TRAIN_POSITIVE_CELL"
+    else:
+        status = "NO_WALK_FORWARD_CANDIDATES"
+
+    best_train = rows[0] if rows else None
+    return {
+        "status": status,
+        "candidates_evaluated": len(rows),
+        "train_positive_sample_gated_count": len(train_positive),
+        "holdout_confirmed_count": len(holdout_confirmed),
+        "best_train_candidate": _condense(best_train),
+        "best_holdout_candidate": _condense(holdout_ranked[0] if holdout_ranked else None),
+        "nearest_holdout_to_breakeven_candidates": [
+            _condense(row) for row in holdout_ranked[:10]
+        ],
+        "note": (
+            "Diagnostic only. If train cells are positive but holdout cells decay or "
+            "remain below the sample gate, the feature filter is not yet promotion evidence."
+        ),
+    }
+
+
 def fill_sim_walk_forward_feature_scorecard(trials: pd.DataFrame, adverse_by_fill: pd.DataFrame,
                                             horizons, span_hours: float,
                                             *, primary_horizon_s: int = 15,
@@ -1133,6 +1204,7 @@ def fill_sim_walk_forward_feature_scorecard(trials: pd.DataFrame, adverse_by_fil
         "candidates_evaluated": 0,
         "best_train_candidate": None,
         "best_holdout_confirmed_candidate": None,
+        "failure_summary": None,
         "holdout_confirmed_candidates": [],
         "train_positive_sample_gated_candidates": [],
         "top_train_candidates": [],
@@ -1334,6 +1406,11 @@ def fill_sim_walk_forward_feature_scorecard(trials: pd.DataFrame, adverse_by_fil
         "candidates_evaluated": len(ranked),
         "best_train_candidate": ranked[0] if ranked else None,
         "best_holdout_confirmed_candidate": holdout_confirmed[0] if holdout_confirmed else None,
+        "failure_summary": _walk_forward_failure_summary(
+            ranked,
+            holdout_confirmed,
+            train_positive,
+        ),
         "holdout_confirmed_candidates": holdout_confirmed[:10],
         "train_positive_sample_gated_candidates": train_positive[:10],
         "top_train_candidates": ranked[:20],

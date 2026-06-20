@@ -223,6 +223,19 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
             "best_symbol_by_net_edge": "BTCUSDT",
             "best_fee_round_trip_shortfall_bps": -1.25,
         },
+        "fillsim": {
+            "walk_forward_feature_scorecard": {
+                "failure_summary": {
+                    "status": "TRAIN_POSITIVE_HOLDOUT_DECAY",
+                    "best_train_candidate": {
+                        "name": "quoted_half_spread_bps_train_p75_ge",
+                        "train_net_bps": 1.2,
+                        "holdout_net_bps": -3.4,
+                    },
+                    "holdout_confirmed_count": 0,
+                }
+            }
+        },
         "net_edge_per_symbol": {
             "BTCUSDT": {"net_edge_bps": 1.25, "n_maker_fills": 31},
         },
@@ -268,6 +281,9 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     raw_arms = {row["arm_id"]: row for row in loaded["arms_raw"]}
     assert arms["mm_verdict_maker_edge"]["action"] == "READY_FOR_AEG_CHAIN"
     assert raw_arms["mm_verdict_maker_edge"]["detail"]["cost_wall_summary"]["best_symbol_by_net_edge"] == "BTCUSDT"
+    assert raw_arms["mm_verdict_maker_edge"]["detail"]["walk_forward_failure_summary"]["status"] == (
+        "TRAIN_POSITIVE_HOLDOUT_DECAY"
+    )
     assert arms["gate_b_listing_fade"]["action"] == "WAIT"
     assert arms["vol_event_order_flow"]["reason"] == "gate_status:no_edge_survives"
 
