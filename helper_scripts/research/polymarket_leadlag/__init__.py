@@ -12,8 +12,10 @@ MODULE_NOTE:
 
 from __future__ import annotations
 
-RUNNER_VERSION = "polymarket_leadlag.v0.13"
-REPORT_SCHEMA_VERSION = "polymarket.leadlag_report.v0.13"
+RUNNER_VERSION = "polymarket_leadlag.v0.14"
+REPORT_SCHEMA_VERSION = "polymarket.leadlag_report.v0.14"
+CANDIDATE_REPLAY_SCHEMA_VERSION = "polymarket.leadlag_candidate_replay.v0.1"
+CANDIDATE_REPLAY_SUMMARY_SCHEMA_VERSION = "polymarket.leadlag_candidate_replay_summary.v0.1"
 
 STATUS_INSUFFICIENT_SAMPLE = "INSUFFICIENT_SAMPLE"
 STATUS_NO_SNAPSHOT_ROWS = "NO_SNAPSHOT_ROWS"
@@ -36,6 +38,8 @@ __all__ = [
     "BUCKET_EVENT_REG_MACRO",
     "BUCKET_OTHER",
     "BUCKET_PRICE_TARGET",
+    "CANDIDATE_REPLAY_SCHEMA_VERSION",
+    "CANDIDATE_REPLAY_SUMMARY_SCHEMA_VERSION",
     "REPORT_SCHEMA_VERSION",
     "RUNNER_VERSION",
     "SYMBOL_SOURCE_ASSET_DIRECT",

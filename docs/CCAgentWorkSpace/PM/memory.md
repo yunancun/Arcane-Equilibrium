@@ -25,6 +25,16 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Lead-Lag Candidate Replay PnL
+
+- Added deterministic paper replay for Polymarket IC candidates: `side = sign(IC) * sign(delta_prob_yes)`, explicit diagnostic round-trip cost default 4.0bp.
+- Runtime candidate remains `polymarket_leadlag_ic|price_target|SOLUSDT|15m`; replay sample=32, gross mean `4.771bp`, net mean `0.771bp`, holdout net mean `6.829bp`.
+- Important diagnosis: this is weak positive paper PnL, not executable alpha. Only `n_days=1`, `net_to_cost_ratio≈0.193`, `psr_0≈0.551`, PBO missing, price-feedback warning true, and execution realism is `UNMEASURED`.
+- Direct candidate rows and candidate metrics now preserve the original `candidate_key`; replay candidate metrics remain `FAIL` with `n_days_below_30` and `missing_pbo`.
+- Formal replay matrix stays `final_label_counts={"insufficient evidence":3}`, `coverage_gate_status=FAIL`, `execution_realism_mode=unverified_missing_missing`; alpha latest stays `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`, promotion_ready=0.
+- Next useful work: accumulate dated replay samples and build real execution/breadth evidence. Do not rerun AEG as if the current single-day replay solved profitability.
+- Boundary: artifact-only research; read-only PG via existing lead-lag cron; no PG write, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, signal, execution proof, or promotion proof.
+
 ## 2026-06-20 FlashDip Execution-Realism Cron/Killboard Arm
 
 - Added read-only `flash_dip_execution_realism_cron.sh` and alpha-discovery arm `flash_dip_execution_realism`.

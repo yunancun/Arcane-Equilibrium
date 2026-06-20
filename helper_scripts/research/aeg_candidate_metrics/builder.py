@@ -237,6 +237,12 @@ def _sample_unit_value(src: dict[str, Any], ev: dict[str, Any]) -> Optional[str]
     return None
 
 
+def _explicit_candidate_key(report: dict[str, Any]) -> Optional[str]:
+    value = report.get("candidate_key")
+    text = str(value).strip() if value is not None else ""
+    return text or None
+
+
 def _net_to_cost_ratio(
     src: dict[str, Any],
     ev: dict[str, Any],
@@ -429,7 +435,7 @@ def build_candidate_metrics(
         "parameter_cell_id": parameter_cell_id,
         "source_report_type": report_type,
         "selected_variant": selected_variant,
-        "candidate_key": (
+        "candidate_key": _explicit_candidate_key(report) or (
             f"{report_type}|{selected_variant}"
             if report_type and selected_variant
             else None

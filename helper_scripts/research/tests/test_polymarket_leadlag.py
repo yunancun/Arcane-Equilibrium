@@ -16,6 +16,7 @@ from polymarket_leadlag import (
     SYMBOL_SOURCE_ASSET_DIRECT,
     SYMBOL_SOURCE_MACRO_EVENT_REG,
 )
+from polymarket_leadlag import candidate_replay
 from polymarket_leadlag import harness
 
 
@@ -760,6 +761,108 @@ def test_recent_report_history_excludes_latest_and_keeps_dated_order(tmp_path):
     assert len(reports) == 1
     assert reports[0]["created_at_utc"] == "2026-06-20T12:45:00+00:00"
     assert reports[0]["_history_path"] == str(newer)
+
+
+def test_candidate_replay_builds_explicit_paper_pnl_evidence():
+    start = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    joined = []
+    for i in range(40):
+        ts = start + dt.timedelta(minutes=15 * i)
+        sign = 1.0 if i % 2 == 0 else -1.0
+        joined.append({
+            "snapshot_ts_ms": int(ts.timestamp() * 1000),
+            "snapshot_ts_utc": ts.isoformat(),
+            "bucket": BUCKET_PRICE_TARGET,
+            "symbol": "SOLUSDT",
+            "horizon_minutes": 15,
+            "mean_delta_prob_yes": 0.05 * sign,
+            "forward_return_bps": 10.0 * sign,
+        })
+    candidate = {
+        "bucket": BUCKET_PRICE_TARGET,
+        "symbol": "SOLUSDT",
+        "horizon_minutes": 15,
+        "ic_pearson": 0.8,
+        "t_stat_hac": 5.0,
+        "bh_q_value_hac_approx": 0.01,
+    }
+
+    evidence, summary = candidate_replay.build_candidate_replay(
+        joined_rows=joined,
+        candidate=candidate,
+        ic_result_count=12,
+        price_source="fixture",
+        round_trip_cost_bps=4.0,
+    )
+
+    assert evidence["candidate_id"] == "polymarket_leadlag_price_target_SOLUSDT_15m"
+    assert evidence["candidate_key"] == "polymarket_leadlag_ic|price_target|SOLUSDT|15m"
+    assert evidence["strategy_family"] == "polymarket_leadlag_directional_replay"
+    assert len(evidence["samples"]) == 40
+    assert evidence["samples"][0]["gross_bps"] == 10.0
+    assert evidence["samples"][0]["net_bps"] == 6.0
+    assert evidence["source"]["execution_realism_status"] == "UNMEASURED"
+    assert summary["sample_count"] == 40
+    assert summary["net_bps_mean"] == 6.0
+    assert summary["holdout_net_bps_mean"] == 6.0
+    assert summary["cost_wall_status"] == "PAPER_REPLAY_NET_POSITIVE_EXECUTION_UNMEASURED"
+    assert summary["execution_realism_status"] == "UNMEASURED"
+    assert summary["selection_bias_warning"]
+
+
+def test_report_includes_candidate_replay_scorecard_for_ic_candidate(tmp_path):
+    root = tmp_path / "pm"
+    start = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    probs = [0.50]
+    for i in range(12):
+        probs.append(probs[-1] + (0.05 if i % 2 == 0 else -0.05))
+    for i, prob in enumerate(probs):
+        ts = (start + dt.timedelta(minutes=15 * i)).isoformat()
+        _write_run(root, f"hourly-topn-{i}", ts, [{
+            "market_id": "sol-price",
+            "question": "Will Solana reach $200 this week?",
+            "event_title": "Solana price target",
+            "discovery_queries": ["kw:solana price"],
+            "outcome_prices": [prob, 1 - prob],
+        }])
+
+    prices = [100.0]
+    for i in range(len(probs) + 1):
+        if i == 0:
+            ret_bps = 0.0
+        else:
+            sign = 1.0 if (i - 1) % 2 == 0 else -1.0
+            ret_bps = sign * (8.0 + (i % 3))
+        prices.append(prices[-1] * (1.0 + ret_bps / 10_000.0))
+    price_rows = _price_rows("SOLUSDT", start, prices)
+    rows, meta = harness.load_snapshot_rows(root, query_set_version="v2", mode="hourly-topn")
+
+    report = harness.build_report(
+        snapshot_rows=rows,
+        snapshot_meta=meta,
+        price_rows=price_rows,
+        query_set_version="v2",
+        mode="hourly-topn",
+        symbols=("SOLUSDT",),
+        horizons_minutes=(15,),
+        min_points=5,
+        max_align_lag_minutes=1,
+        min_abs_ic=0.1,
+        min_abs_t=0.1,
+        max_bh_q=1.0,
+        price_source="fixture",
+        candidate_replay_round_trip_cost_bps=4.0,
+    )
+
+    replay = report["candidate_replay_scorecard"]
+    selected = replay["selected_summary"]
+    assert report["verdict"]["candidate_count"] == 1
+    assert replay["status"] == "PAPER_REPLAY_BUILT"
+    assert replay["selected_candidate_key"] == "polymarket_leadlag_ic|price_target|SOLUSDT|15m"
+    assert selected["sample_count"] >= 5
+    assert selected["net_bps_mean"] > 0
+    assert selected["round_trip_cost_bps"] == 4.0
+    assert replay["selected_evidence"]["samples"]
 
 
 def test_source_has_readonly_pg_and_no_trading_tokens():

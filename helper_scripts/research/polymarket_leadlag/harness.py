@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 try:
+    from . import candidate_replay
     from . import (
         BUCKET_EVENT_REG,
         BUCKET_EVENT_REG_DIRECT,
@@ -55,6 +56,7 @@ except ImportError:  # pragma: no cover
     _research = _here.parents[1]
     if str(_research) not in sys.path:
         sys.path.insert(0, str(_research))
+    from polymarket_leadlag import candidate_replay  # type: ignore
     from polymarket_leadlag import (  # type: ignore
         BUCKET_EVENT_REG,
         BUCKET_EVENT_REG_DIRECT,
@@ -1496,6 +1498,7 @@ def build_report(
     max_bh_q: float,
     price_source: str,
     history_reports: list[dict[str, Any]] | None = None,
+    candidate_replay_round_trip_cost_bps: float = candidate_replay.DEFAULT_ROUND_TRIP_COST_BPS,
 ) -> dict[str, Any]:
     created_at_utc = dt.datetime.now(dt.timezone.utc).isoformat()
     allowed_symbols = set(symbols)
@@ -1545,6 +1548,13 @@ def build_report(
         min_points=min_points,
     )
     sample_gate_clock = _sample_gate_clock(ic_results, min_points=min_points)
+    candidate_replay_scorecard = candidate_replay.build_replay_scorecard(
+        joined_rows=joined,
+        candidates=candidates,
+        ic_results=ic_results,
+        price_source=price_source,
+        round_trip_cost_bps=candidate_replay_round_trip_cost_bps,
+    )
 
     if not snapshot_rows:
         status = STATUS_NO_SNAPSHOT_ROWS
@@ -1648,6 +1658,7 @@ def build_report(
         "ic_results": ic_results,
         "candidates": candidates,
         "pre_gate_hac_watchlist": pre_gate_hac_watchlist,
+        "candidate_replay_scorecard": candidate_replay_scorecard,
         "sample_joined_rows": joined[:50],
         "method_notes": [
             "feature = probability delta from previous Polymarket snapshot to current snapshot",
@@ -1664,6 +1675,7 @@ def build_report(
             "partial IC controlling for trailing returns is diagnostic only and never promotion authority",
             "candidate gate requires overlap-adjusted sample floor and BH q-value control",
             "candidate significance uses Newey-West/HAC slope t-stat; naive t-stat is diagnostic only",
+            "candidate replay is paper PnL evidence only and never execution realism or promotion authority",
         ],
     }
 
@@ -1739,6 +1751,11 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-abs-t", default=DEFAULT_MIN_ABS_T, type=float, dest="min_abs_t")
     p.add_argument("--max-bh-q", default=DEFAULT_MAX_BH_Q, type=float, dest="max_bh_q",
                    help="Benjamini-Hochberg q-value ceiling for candidate review")
+    p.add_argument("--candidate-replay-round-trip-cost-bps",
+                   default=candidate_replay.DEFAULT_ROUND_TRIP_COST_BPS,
+                   type=float,
+                   dest="candidate_replay_round_trip_cost_bps",
+                   help="Explicit diagnostic round-trip cost for paper candidate replay")
     p.add_argument("--price-jsonl", default=None, dest="price_jsonl",
                    help="Optional fixture price JSONL. If absent, read market.klines from PG readonly.")
     p.add_argument("--dsn", default=None, dest="dsn", help="Optional PG DSN override")
@@ -1796,6 +1813,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         max_bh_q=args.max_bh_q,
         price_source=price_source,
         history_reports=history_reports,
+        candidate_replay_round_trip_cost_bps=args.candidate_replay_round_trip_cost_bps,
     )
     write_report(report, out_path, repo_root=_repo_root())
     if args.write_latest:

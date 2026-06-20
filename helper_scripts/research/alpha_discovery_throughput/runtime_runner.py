@@ -999,6 +999,16 @@ def collect_polymarket_leadlag_arm(
         else None
     )
     candidate_key = _polymarket_candidate_key(best_candidate or {})
+    replay_scorecard = (
+        payload.get("candidate_replay_scorecard")
+        if isinstance(payload.get("candidate_replay_scorecard"), dict)
+        else {}
+    )
+    replay_summary = (
+        replay_scorecard.get("selected_summary")
+        if isinstance(replay_scorecard.get("selected_summary"), dict)
+        else {}
+    )
     sample_gate_recheck = _polymarket_sample_gate_recheck_scorecard(
         now_utc=now_utc,
         sample_count=sample_count,
@@ -1044,6 +1054,19 @@ def collect_polymarket_leadlag_arm(
             "candidate_count": candidate_count,
             "candidate_key": candidate_key,
             "best_candidate": best_candidate,
+            "candidate_replay_status": replay_scorecard.get("status"),
+            "candidate_replay_candidate_id": replay_summary.get("candidate_id"),
+            "candidate_replay_parameter_cell_id": replay_summary.get("parameter_cell_id"),
+            "candidate_replay_sample_count": replay_summary.get("sample_count"),
+            "candidate_replay_round_trip_cost_bps": replay_summary.get("round_trip_cost_bps"),
+            "candidate_replay_gross_bps_mean": replay_summary.get("gross_bps_mean"),
+            "candidate_replay_net_bps_mean": replay_summary.get("net_bps_mean"),
+            "candidate_replay_holdout_net_bps_mean": replay_summary.get("holdout_net_bps_mean"),
+            "candidate_replay_cost_wall_status": replay_summary.get("cost_wall_status"),
+            "candidate_replay_execution_realism_status": replay_summary.get(
+                "execution_realism_status"
+            ),
+            "candidate_replay_scorecard": replay_scorecard or None,
             "preliminary_raw_candidate_count": verdict.get("preliminary_raw_candidate_count"),
             "preliminary_hac_candidate_count": verdict.get("preliminary_hac_candidate_count"),
             "pre_gate_hac_watchlist_count": verdict.get("pre_gate_hac_watchlist_count"),
