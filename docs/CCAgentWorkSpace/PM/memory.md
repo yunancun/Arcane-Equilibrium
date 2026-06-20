@@ -698,3 +698,8 @@
 - Runtime repair on trade-core: set non-secret env-file keys `OPENCLAW_RECORD_L1_EVENTS=1`, `OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL=50`; engine-only `--keep-auth` restart, no rebuild/API restart/schema migration.
 - Verification: new PID `4155643` env contains L1 flags; read-only PG showed `l1_max_ts=2026-06-20T02:19:20.531+02`, `l1_rows_5m=2635`, stale 0.027min. Formal `recorder_health_cron.sh` status: `l1_events.rows_24h=4566`, `stale_min=0.03`, crossed/locked 0.00.
 - Boundary: source/test/docs + Linux non-secret env flag + engine-only restart and `/tmp/openclaw` logs/heartbeats only; no Bybit private/signed/trading call, no credential/auth/risk/order/trading mutation, no promotion proof.
+
+## 2026-06-20 FlashDip shallow execution-realism checkpoint
+
+- K6/N2/C3/nf0.5% remains a useful FlashDip research object, but its 2-day daily-exit demo-retune path is blocked by recent 1m execution-realism: 10bps buffer has 65 fills / 37 days but fixed-notional annret -2.49%, and all 0-50bps daily-exit buffers are negative.
+- The same artifact shows the actionable next research seam: fee-adjusted short exits, especially 240m, are positive in the recent slice（0bps/240m annret 1.71%, 10bps/240m annret 1.29%）. Treat this as research-only; next gate is L1/orderbook replay plus QC/MIT/AI-E, not a parameter change.
