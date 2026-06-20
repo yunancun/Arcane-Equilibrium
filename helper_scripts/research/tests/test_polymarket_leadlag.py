@@ -10,6 +10,7 @@ from polymarket_leadlag import (
     BUCKET_EVENT_REG,
     BUCKET_EVENT_REG_DIRECT,
     BUCKET_EVENT_REG_MACRO,
+    BUCKET_OTHER,
     BUCKET_PRICE_TARGET,
     STATUS_INSUFFICIENT_SAMPLE,
     SYMBOL_SOURCE_ASSET_DIRECT,
@@ -631,6 +632,12 @@ def test_pre_gate_hac_watchlist_is_diagnostic_not_candidate(tmp_path):
     assert report["verdict"]["status"] == STATUS_INSUFFICIENT_SAMPLE
     assert report["verdict"]["candidate_count"] == 0
     assert report["verdict"]["pre_gate_hac_watchlist_count"] == 2
+    assert report["verdict"]["pre_gate_watchlist_persistence_status"] == (
+        "SINGLE_REPORT_PRE_GATE_WATCHLIST"
+    )
+    assert report["counts"]["pre_gate_watchlist_persistence_scorecard"]["status"] == (
+        "SINGLE_REPORT_PRE_GATE_WATCHLIST"
+    )
     assert report["counts"]["min_samples_remaining_to_gate"] == 6
     assert report["counts"]["sample_gate_clock"]["status"] == "WAITING_FOR_SAMPLE"
     assert (
@@ -643,9 +650,116 @@ def test_pre_gate_hac_watchlist_is_diagnostic_not_candidate(tmp_path):
     assert watch["sample_gap_to_min_points"] == 6
     assert watch["gate_blocker"] == "sample_floor_below_min_points"
     assert watch["bh_q_value_hac_approx"] is not None
+    assert "partial_ic_controlling_trailing_return" in watch
     assert watch["expected_gate_label_ready_utc"] == "2026-06-20T10:15:00+00:00"
     assert watch["eta_basis"] == "overlap_adjusted_floor_forecast_gap_plus_forward_horizon"
     assert watch["forecast_sample_gap_minutes"] == 15.0
+
+
+def test_pre_gate_watchlist_persistence_scorecard_detects_persistent_cells():
+    history = [
+        {
+            "created_at_utc": "2026-06-20T12:32:01+00:00",
+            "pre_gate_hac_watchlist": [{
+                "bucket": BUCKET_EVENT_REG,
+                "symbol": "XRPUSDT",
+                "horizon_minutes": 60,
+                "overlap_adjusted_sample_floor": 11,
+                "t_stat_hac": 2.3,
+            }],
+        },
+        {
+            "created_at_utc": "2026-06-20T12:47:01+00:00",
+            "pre_gate_hac_watchlist": [{
+                "bucket": BUCKET_EVENT_REG,
+                "symbol": "XRPUSDT",
+                "horizon_minutes": 60,
+                "overlap_adjusted_sample_floor": 12,
+                "t_stat_hac": 2.8,
+            }],
+        },
+    ]
+    current = [{
+        "bucket": BUCKET_EVENT_REG,
+        "symbol": "XRPUSDT",
+        "horizon_minutes": 60,
+        "overlap_adjusted_sample_floor": 13,
+        "sample_gap_to_min_points": 17,
+        "ic_pearson": -0.44,
+        "t_stat_hac": -3.1,
+        "bh_q_value_hac_approx": 0.04,
+        "partial_ic_controlling_trailing_return": -0.31,
+        "partial_ic_retained_abs_ratio": 0.70,
+        "price_feedback_partial_collapse_warning": False,
+        "expected_gate_label_ready_utc": "2026-06-20T19:52:00+00:00",
+        "gate_blocker": "sample_floor_below_min_points",
+    }]
+
+    scorecard = harness.build_pre_gate_watchlist_persistence_scorecard(
+        current_watchlist=current,
+        history_reports=history,
+        current_created_at_utc="2026-06-20T13:02:01+00:00",
+    )
+
+    assert scorecard["status"] == "PERSISTENT_PRE_GATE_WATCHLIST"
+    assert scorecard["history_report_count"] == 2
+    assert scorecard["reports_with_watchlist_count"] == 2
+    assert scorecard["persistent_cell_count"] == 1
+    top = scorecard["top_cells"][0]
+    assert top["cell_key"] == "event_reg|XRPUSDT|60"
+    assert top["current_consecutive_reports"] == 3
+    assert top["presence_count"] == 3
+    assert top["first_seen_sample_floor"] == 11
+    assert top["current_sample_floor"] == 13
+
+
+def test_pre_gate_watchlist_persistence_marks_low_floor_recurrence_separately():
+    history = [{
+        "created_at_utc": "2026-06-20T17:02:01+00:00",
+        "pre_gate_hac_watchlist": [{
+            "bucket": BUCKET_OTHER,
+            "symbol": "BTCUSDT",
+            "horizon_minutes": 240,
+            "overlap_adjusted_sample_floor": 1,
+            "t_stat_hac": -20.0,
+        }],
+    }]
+    current = [{
+        "bucket": BUCKET_OTHER,
+        "symbol": "BTCUSDT",
+        "horizon_minutes": 240,
+        "overlap_adjusted_sample_floor": 1,
+        "sample_gap_to_min_points": 29,
+        "t_stat_hac": -24.0,
+    }]
+
+    scorecard = harness.build_pre_gate_watchlist_persistence_scorecard(
+        current_watchlist=current,
+        history_reports=history,
+        current_created_at_utc="2026-06-20T17:17:01+00:00",
+        min_points=30,
+    )
+
+    assert scorecard["status"] == "LOW_SAMPLE_RECURRING_PRE_GATE_WATCHLIST"
+    assert scorecard["min_current_sample_floor_for_status"] == 8
+    assert scorecard["recurring_cell_count"] == 1
+    assert scorecard["floor_qualified_recurring_cell_count"] == 0
+    assert scorecard["top_cells"][0]["floor_qualified_for_status"] is False
+
+
+def test_recent_report_history_excludes_latest_and_keeps_dated_order(tmp_path):
+    latest = tmp_path / "polymarket_leadlag_latest.json"
+    latest.write_text(json.dumps({"created_at_utc": "2026-06-20T12:45:00+00:00"}), encoding="utf-8")
+    older = tmp_path / "polymarket_leadlag_20260620T123000Z.json"
+    newer = tmp_path / "polymarket_leadlag_20260620T124500Z.json"
+    older.write_text(json.dumps({"created_at_utc": "2026-06-20T12:30:00+00:00"}), encoding="utf-8")
+    newer.write_text(json.dumps({"created_at_utc": "2026-06-20T12:45:00+00:00"}), encoding="utf-8")
+
+    reports = harness.load_recent_report_history(tmp_path, limit=1)
+
+    assert len(reports) == 1
+    assert reports[0]["created_at_utc"] == "2026-06-20T12:45:00+00:00"
+    assert reports[0]["_history_path"] == str(newer)
 
 
 def test_source_has_readonly_pg_and_no_trading_tokens():

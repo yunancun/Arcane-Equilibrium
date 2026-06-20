@@ -669,12 +669,28 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
                     "expected_gate_label_ready_utc": "2026-06-20T19:52:01+00:00",
                 }],
             },
+            "pre_gate_watchlist_persistence_scorecard": {
+                "status": "PERSISTENT_PRE_GATE_WATCHLIST",
+                "recurring_cell_count": 1,
+                "persistent_cell_count": 1,
+                "top_cells": [{
+                    "cell_key": "event_reg|BTCUSDT|240",
+                    "bucket": "event_reg",
+                    "symbol": "BTCUSDT",
+                    "horizon_minutes": 240,
+                    "current_consecutive_reports": 3,
+                    "presence_count": 3,
+                }],
+            },
         },
         "verdict": {
             "status": "INSUFFICIENT_SAMPLE",
             "reason": "max overlap-adjusted IC points 12 below min_points 30",
             "candidate_count": 0,
             "pre_gate_hac_watchlist_count": 1,
+            "pre_gate_watchlist_persistence_status": "PERSISTENT_PRE_GATE_WATCHLIST",
+            "pre_gate_watchlist_recurring_cell_count": 1,
+            "pre_gate_watchlist_persistent_cell_count": 1,
             "price_feedback_warning_count": 1,
             "price_feedback_partial_collapse_count": 1,
             "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
@@ -719,6 +735,14 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
     assert arm["detail"]["sample_gate_eta_utc"] == "2026-06-20T19:52:01+00:00"
     assert arm["detail"]["sample_gate_clock"]["cells"][0]["symbol"] == "BTCUSDT"
     assert arm["detail"]["pre_gate_hac_watchlist_count"] == 1
+    assert arm["detail"]["pre_gate_watchlist_persistence_status"] == (
+        "PERSISTENT_PRE_GATE_WATCHLIST"
+    )
+    assert arm["detail"]["pre_gate_watchlist_recurring_cell_count"] == 1
+    assert arm["detail"]["pre_gate_watchlist_persistent_cell_count"] == 1
+    assert arm["detail"]["pre_gate_watchlist_persistence_scorecard"]["top_cells"][0]["cell_key"] == (
+        "event_reg|BTCUSDT|240"
+    )
     assert arm["detail"]["price_feedback_warning_count"] == 1
     assert arm["detail"]["price_feedback_partial_collapse_count"] == 1
     assert arm["detail"]["price_feedback_summary"]["warning_count"] == 1
@@ -726,6 +750,9 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
     assert arm["detail"]["best_pre_gate_hac_watch"]["gate_blocker"] == "sample_floor_below_min_points"
     assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
     assert plan["arms"][0]["reason"] == "sample_count_below_gate"
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["pre_gate_watchlist_persistence_status"] == "PERSISTENT_PRE_GATE_WATCHLIST"
+    assert blocker["best_persistent_pre_gate_cell"]["cell_key"] == "event_reg|BTCUSDT|240"
 
 
 def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):

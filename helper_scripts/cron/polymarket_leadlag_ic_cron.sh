@@ -185,6 +185,7 @@ try:
     counts = payload.get("counts") or {}
     label_readiness = counts.get("label_readiness") or {}
     sample_gate_clock = counts.get("sample_gate_clock") or {}
+    pre_gate_persistence = counts.get("pre_gate_watchlist_persistence_scorecard") or {}
     watchlist = payload.get("pre_gate_hac_watchlist") or []
     best_watch = watchlist[0] if watchlist else None
     status.update({
@@ -194,6 +195,22 @@ try:
         "preliminary_raw_candidate_count": verdict.get("preliminary_raw_candidate_count"),
         "preliminary_hac_candidate_count": verdict.get("preliminary_hac_candidate_count"),
         "pre_gate_hac_watchlist_count": verdict.get("pre_gate_hac_watchlist_count"),
+        "pre_gate_watchlist_persistence_status": verdict.get(
+            "pre_gate_watchlist_persistence_status"
+        ),
+        "pre_gate_watchlist_recurring_cell_count": verdict.get(
+            "pre_gate_watchlist_recurring_cell_count"
+        ),
+        "pre_gate_watchlist_persistent_cell_count": verdict.get(
+            "pre_gate_watchlist_persistent_cell_count"
+        ),
+        "pre_gate_watchlist_floor_qualified_recurring_cell_count": verdict.get(
+            "pre_gate_watchlist_floor_qualified_recurring_cell_count"
+        ),
+        "pre_gate_watchlist_floor_qualified_persistent_cell_count": verdict.get(
+            "pre_gate_watchlist_floor_qualified_persistent_cell_count"
+        ),
+        "pre_gate_watchlist_persistence_scorecard": pre_gate_persistence,
         "price_feedback_warning_count": verdict.get("price_feedback_warning_count"),
         "price_feedback_partial_collapse_count": verdict.get("price_feedback_partial_collapse_count"),
         "best_pre_gate_hac_watch": best_watch,

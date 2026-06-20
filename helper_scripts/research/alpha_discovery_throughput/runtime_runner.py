@@ -607,6 +607,11 @@ def collect_polymarket_leadlag_arm(
     sample_gate_clock = (
         counts.get("sample_gate_clock") if isinstance(counts.get("sample_gate_clock"), dict) else {}
     )
+    pre_gate_persistence = (
+        counts.get("pre_gate_watchlist_persistence_scorecard")
+        if isinstance(counts.get("pre_gate_watchlist_persistence_scorecard"), dict)
+        else {}
+    )
     status = str(verdict.get("status") or "").upper()
     sample_count, raw_sample_count = _sample_ic_points(payload)
     candidate_count = _int(verdict.get("candidate_count"))
@@ -656,6 +661,22 @@ def collect_polymarket_leadlag_arm(
             "preliminary_raw_candidate_count": verdict.get("preliminary_raw_candidate_count"),
             "preliminary_hac_candidate_count": verdict.get("preliminary_hac_candidate_count"),
             "pre_gate_hac_watchlist_count": verdict.get("pre_gate_hac_watchlist_count"),
+            "pre_gate_watchlist_persistence_status": verdict.get(
+                "pre_gate_watchlist_persistence_status"
+            ),
+            "pre_gate_watchlist_recurring_cell_count": verdict.get(
+                "pre_gate_watchlist_recurring_cell_count"
+            ),
+            "pre_gate_watchlist_persistent_cell_count": verdict.get(
+                "pre_gate_watchlist_persistent_cell_count"
+            ),
+            "pre_gate_watchlist_floor_qualified_recurring_cell_count": verdict.get(
+                "pre_gate_watchlist_floor_qualified_recurring_cell_count"
+            ),
+            "pre_gate_watchlist_floor_qualified_persistent_cell_count": verdict.get(
+                "pre_gate_watchlist_floor_qualified_persistent_cell_count"
+            ),
+            "pre_gate_watchlist_persistence_scorecard": pre_gate_persistence,
             "price_feedback_warning_count": verdict.get("price_feedback_warning_count"),
             "price_feedback_partial_collapse_count": verdict.get(
                 "price_feedback_partial_collapse_count"

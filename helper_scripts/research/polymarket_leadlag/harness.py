@@ -88,6 +88,7 @@ DEFAULT_SCHEDULE_JITTER_TOLERANCE_MS = 5_000
 DEFAULT_PRICE_FEEDBACK_MIN_POINTS = 5
 DEFAULT_PRICE_FEEDBACK_MIN_ABS_IC = 0.15
 DEFAULT_PRICE_FEEDBACK_PARTIAL_RETAINED_RATIO = 0.5
+DEFAULT_WATCHLIST_HISTORY_REPORTS = 16
 
 _PRICE_TARGET_RE = re.compile(
     r"(\bprice\b.*\bhit\b|\bhit\b.*\$|\breach\b.*\$|above\s+\$|below\s+\$|"
@@ -218,6 +219,41 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError(f"json_not_object:{path}")
     return payload
+
+
+def _report_sort_ts(payload: dict[str, Any], path: Path) -> tuple[float, str]:
+    parsed = _parse_dt(payload.get("created_at_utc"))
+    if parsed is not None:
+        return parsed.timestamp(), path.name
+    try:
+        return path.stat().st_mtime, path.name
+    except OSError:
+        return 0.0, path.name
+
+
+def load_recent_report_history(
+    report_dir: Path,
+    *,
+    limit: int = DEFAULT_WATCHLIST_HISTORY_REPORTS,
+) -> list[dict[str, Any]]:
+    """Load recent dated Polymarket lead-lag reports for diagnostic reducers."""
+    report_dir = Path(report_dir)
+    if not report_dir.exists():
+        return []
+    reports: list[tuple[float, str, dict[str, Any]]] = []
+    for path in report_dir.glob("polymarket_leadlag_*.json"):
+        if path.name == "polymarket_leadlag_latest.json":
+            continue
+        try:
+            payload = _read_json(path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        ts_key = _report_sort_ts(payload, path)
+        reports.append((ts_key[0], ts_key[1], {**payload, "_history_path": str(path)}))
+    reports.sort(key=lambda item: (item[0], item[1]))
+    if limit <= 0:
+        return [payload for _ts, _name, payload in reports]
+    return [payload for _ts, _name, payload in reports[-limit:]]
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -1253,6 +1289,16 @@ def _pre_gate_hac_watchlist(
             "ic_pearson": row.get("ic_pearson"),
             "t_stat_hac": row.get("t_stat_hac"),
             "bh_q_value_hac_approx": row.get("bh_q_value_hac_approx"),
+            "past_return_control_n_points": row.get("past_return_control_n_points"),
+            "past_return_ic_pearson": row.get("past_return_ic_pearson"),
+            "partial_ic_controlling_trailing_return": row.get(
+                "partial_ic_controlling_trailing_return"
+            ),
+            "partial_ic_retained_abs_ratio": row.get("partial_ic_retained_abs_ratio"),
+            "price_feedback_warning": row.get("price_feedback_warning"),
+            "price_feedback_partial_collapse_warning": row.get(
+                "price_feedback_partial_collapse_warning"
+            ),
             "first_snapshot_ts_utc": row.get("first_snapshot_ts_utc"),
             "last_snapshot_ts_utc": row.get("last_snapshot_ts_utc"),
             "last_nonoverlap_snapshot_ts_utc": row.get("last_nonoverlap_snapshot_ts_utc"),
@@ -1267,6 +1313,171 @@ def _pre_gate_hac_watchlist(
         ),
         reverse=True,
     )[:limit]
+
+
+def _watchlist_cell_key(row: dict[str, Any]) -> str:
+    return "|".join([
+        str(row.get("bucket") or "unknown"),
+        str(row.get("symbol") or "unknown"),
+        str(int(row.get("horizon_minutes") or 0)),
+    ])
+
+
+def _watchlist_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = report.get("pre_gate_hac_watchlist")
+    return rows if isinstance(rows, list) else []
+
+
+def build_pre_gate_watchlist_persistence_scorecard(
+    *,
+    current_watchlist: list[dict[str, Any]],
+    history_reports: list[dict[str, Any]] | None = None,
+    current_created_at_utc: str | None = None,
+    min_points: int | None = None,
+    limit: int = 5,
+) -> dict[str, Any]:
+    """Diagnose whether pre-gate HAC cells persist across report refreshes."""
+    history_reports = list(history_reports or [])
+    min_current_floor_for_status = (
+        max(3, int(math.ceil(float(min_points) * 0.25)))
+        if min_points is not None and int(min_points) > 0
+        else 3
+    )
+    report_snapshots: list[dict[str, Any]] = []
+    for report in history_reports:
+        rows = [
+            row for row in _watchlist_rows(report)
+            if isinstance(row, dict)
+        ]
+        if not rows:
+            continue
+        report_snapshots.append({
+            "created_at_utc": report.get("created_at_utc"),
+            "path": report.get("_history_path"),
+            "rows": rows,
+        })
+    report_snapshots.append({
+        "created_at_utc": current_created_at_utc,
+        "path": None,
+        "rows": [row for row in current_watchlist if isinstance(row, dict)],
+    })
+
+    current_by_key = {
+        _watchlist_cell_key(row): row
+        for row in current_watchlist
+        if isinstance(row, dict)
+    }
+    cell_history: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for idx, snapshot in enumerate(report_snapshots):
+        seen_in_report: set[str] = set()
+        for row in snapshot["rows"]:
+            key = _watchlist_cell_key(row)
+            if key in seen_in_report:
+                continue
+            seen_in_report.add(key)
+            cell_history[key].append({
+                "report_index": idx,
+                "created_at_utc": snapshot.get("created_at_utc"),
+                "path": snapshot.get("path"),
+                "row": row,
+            })
+
+    latest_index = len(report_snapshots) - 1
+    cells: list[dict[str, Any]] = []
+    for key, current in current_by_key.items():
+        observations = cell_history.get(key, [])
+        indexes = {int(obs["report_index"]) for obs in observations}
+        consecutive = 0
+        idx = latest_index
+        while idx in indexes:
+            consecutive += 1
+            idx -= 1
+        presence_count = len(observations)
+        first_seen = observations[0] if observations else None
+        latest_seen = observations[-1] if observations else None
+        cells.append({
+            "cell_key": key,
+            "bucket": current.get("bucket"),
+            "symbol": current.get("symbol"),
+            "horizon_minutes": current.get("horizon_minutes"),
+            "presence_count": presence_count,
+            "current_consecutive_reports": consecutive,
+            "first_seen_created_at_utc": first_seen.get("created_at_utc") if first_seen else None,
+            "latest_seen_created_at_utc": latest_seen.get("created_at_utc") if latest_seen else None,
+            "first_seen_sample_floor": (
+                (first_seen.get("row") or {}).get("overlap_adjusted_sample_floor")
+                if first_seen else None
+            ),
+            "current_sample_floor": current.get("overlap_adjusted_sample_floor"),
+            "floor_qualified_for_status": int(
+                current.get("overlap_adjusted_sample_floor") or 0
+            ) >= min_current_floor_for_status,
+            "sample_gap_to_min_points": current.get("sample_gap_to_min_points"),
+            "ic_pearson": current.get("ic_pearson"),
+            "t_stat_hac": current.get("t_stat_hac"),
+            "bh_q_value_hac_approx": current.get("bh_q_value_hac_approx"),
+            "partial_ic_controlling_trailing_return": current.get(
+                "partial_ic_controlling_trailing_return"
+            ),
+            "partial_ic_retained_abs_ratio": current.get("partial_ic_retained_abs_ratio"),
+            "price_feedback_warning": current.get("price_feedback_warning"),
+            "price_feedback_partial_collapse_warning": current.get(
+                "price_feedback_partial_collapse_warning"
+            ),
+            "expected_gate_label_ready_utc": current.get("expected_gate_label_ready_utc"),
+            "gate_blocker": current.get("gate_blocker"),
+        })
+
+    cells.sort(key=lambda row: (
+        int(row.get("current_consecutive_reports") or 0),
+        int(row.get("presence_count") or 0),
+        abs(float(row.get("t_stat_hac") or 0.0)),
+        int(row.get("current_sample_floor") or 0),
+    ), reverse=True)
+    persistent_count = sum(1 for row in cells if int(row.get("current_consecutive_reports") or 0) >= 3)
+    recurring_count = sum(1 for row in cells if int(row.get("presence_count") or 0) >= 2)
+    floor_qualified_persistent_count = sum(
+        1 for row in cells
+        if int(row.get("current_consecutive_reports") or 0) >= 3
+        and row.get("floor_qualified_for_status") is True
+    )
+    floor_qualified_recurring_count = sum(
+        1 for row in cells
+        if int(row.get("presence_count") or 0) >= 2
+        and row.get("floor_qualified_for_status") is True
+    )
+    feedback_risk_count = sum(
+        1 for row in cells
+        if row.get("price_feedback_warning") or row.get("price_feedback_partial_collapse_warning")
+    )
+
+    if not current_watchlist:
+        status = "NO_PRE_GATE_WATCHLIST"
+    elif floor_qualified_persistent_count > 0:
+        status = "PERSISTENT_PRE_GATE_WATCHLIST"
+    elif floor_qualified_recurring_count > 0:
+        status = "RECURRING_PRE_GATE_WATCHLIST"
+    elif recurring_count > 0:
+        status = "LOW_SAMPLE_RECURRING_PRE_GATE_WATCHLIST"
+    else:
+        status = "SINGLE_REPORT_PRE_GATE_WATCHLIST"
+
+    return {
+        "schema_version": "polymarket_pre_gate_watchlist_persistence_v1",
+        "status": status,
+        "min_current_sample_floor_for_status": min_current_floor_for_status,
+        "history_report_count": len(history_reports),
+        "reports_with_watchlist_count": max(0, len(report_snapshots) - 1),
+        "current_watchlist_count": len(current_watchlist),
+        "current_cell_count": len(cells),
+        "recurring_cell_count": recurring_count,
+        "persistent_cell_count": persistent_count,
+        "floor_qualified_recurring_cell_count": floor_qualified_recurring_count,
+        "floor_qualified_persistent_cell_count": floor_qualified_persistent_count,
+        "feedback_risk_cell_count": feedback_risk_count,
+        "persistence_rule": "current_consecutive_reports_ge_3",
+        "top_cells": cells[:limit],
+    }
 
 
 def build_report(
@@ -1284,7 +1495,9 @@ def build_report(
     min_abs_t: float,
     max_bh_q: float,
     price_source: str,
+    history_reports: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    created_at_utc = dt.datetime.now(dt.timezone.utc).isoformat()
     allowed_symbols = set(symbols)
     deltas, delta_meta = build_market_deltas(snapshot_rows, allowed_symbols=allowed_symbols)
     features = aggregate_features(deltas, include_source_splits=True)
@@ -1325,6 +1538,12 @@ def build_report(
         min_abs_t=min_abs_t,
         max_bh_q=max_bh_q,
     )
+    pre_gate_persistence = build_pre_gate_watchlist_persistence_scorecard(
+        current_watchlist=pre_gate_hac_watchlist,
+        history_reports=history_reports,
+        current_created_at_utc=created_at_utc,
+        min_points=min_points,
+    )
     sample_gate_clock = _sample_gate_clock(ic_results, min_points=min_points)
 
     if not snapshot_rows:
@@ -1347,7 +1566,7 @@ def build_report(
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "runner_version": RUNNER_VERSION,
-        "created_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "created_at_utc": created_at_utc,
         "program": "polymarket-leadlag-ic",
         "query_set_version": query_set_version,
         "mode": mode,
@@ -1365,6 +1584,19 @@ def build_report(
             "preliminary_raw_candidate_count": len(preliminary_raw),
             "preliminary_hac_candidate_count": len(preliminary_hac),
             "pre_gate_hac_watchlist_count": len(pre_gate_hac_watchlist),
+            "pre_gate_watchlist_persistence_status": pre_gate_persistence["status"],
+            "pre_gate_watchlist_recurring_cell_count": (
+                pre_gate_persistence["recurring_cell_count"]
+            ),
+            "pre_gate_watchlist_persistent_cell_count": (
+                pre_gate_persistence["persistent_cell_count"]
+            ),
+            "pre_gate_watchlist_floor_qualified_recurring_cell_count": (
+                pre_gate_persistence["floor_qualified_recurring_cell_count"]
+            ),
+            "pre_gate_watchlist_floor_qualified_persistent_cell_count": (
+                pre_gate_persistence["floor_qualified_persistent_cell_count"]
+            ),
             "price_feedback_warning_count": price_feedback_summary["warning_count"],
             "price_feedback_partial_collapse_count": (
                 price_feedback_summary["raw_to_partial_collapse_count"]
@@ -1403,6 +1635,7 @@ def build_report(
             ),
             "sample_gate_clock": sample_gate_clock,
             "price_feedback_summary": price_feedback_summary,
+            "pre_gate_watchlist_persistence_scorecard": pre_gate_persistence,
             "max_abs_t_stat_hac": max(
                 (
                     abs(float(r["t_stat_hac"]))
@@ -1426,6 +1659,7 @@ def build_report(
             "overlap sample floor allows a small schedule-jitter tolerance before declaring windows overlapping",
             "sample gate clock estimates when the overlap-adjusted floor should reach min_points if cadence holds",
             "pre-gate HAC watchlist is diagnostic only and never promotion or probe authority",
+            "pre-gate watchlist persistence is diagnostic only and never promotion or probe authority",
             "past-return price feedback control is diagnostic only and never promotion authority",
             "partial IC controlling for trailing returns is diagnostic only and never promotion authority",
             "candidate gate requires overlap-adjusted sample floor and BH q-value control",
@@ -1516,6 +1750,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     root = Path(args.polymarket_root) if args.polymarket_root else _data_root() / "polymarket_axis_runs"
+    out_path = Path(args.out) if args.out else default_out_path()
+    history_reports = load_recent_report_history(out_path.parent)
     snapshot_rows, snapshot_meta = load_snapshot_rows(
         root, query_set_version=args.query_set, mode=args.mode,
     )
@@ -1559,8 +1795,8 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         min_abs_t=args.min_abs_t,
         max_bh_q=args.max_bh_q,
         price_source=price_source,
+        history_reports=history_reports,
     )
-    out_path = Path(args.out) if args.out else default_out_path()
     write_report(report, out_path, repo_root=_repo_root())
     if args.write_latest:
         latest = out_path.parent / "polymarket_leadlag_latest.json"

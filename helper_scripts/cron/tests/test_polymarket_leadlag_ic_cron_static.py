@@ -47,6 +47,12 @@ def test_wrapper_readonly_pg_and_status_artifacts_only():
     assert "preliminary_hac_candidate_count" in src
     assert "pre_gate_hac_watchlist_count" in src
     assert "best_pre_gate_hac_watch" in src
+    assert "pre_gate_watchlist_persistence_status" in src
+    assert "pre_gate_watchlist_recurring_cell_count" in src
+    assert "pre_gate_watchlist_persistent_cell_count" in src
+    assert "pre_gate_watchlist_floor_qualified_recurring_cell_count" in src
+    assert "pre_gate_watchlist_floor_qualified_persistent_cell_count" in src
+    assert "pre_gate_watchlist_persistence_scorecard" in src
     assert "price_feedback_warning_count" in src
     assert "price_feedback_partial_collapse_count" in src
     assert "price_feedback_summary" in src
