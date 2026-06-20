@@ -142,14 +142,20 @@ def test_mm_verdict_surfaces_cost_wall_fields() -> None:
     assert "required_maker_rebate_bps_per_side" in src
     assert "cost_wall_summary" in src
     assert "sample_gated_cost_wall_summary" in src
+    assert "gross_edge_cost_decomposition" in src
+    assert "GROSS_EDGE_BELOW_CURRENT_FEE_COST_WALL" in src
+    assert "NO_SAMPLE_GATED_GROSS_EDGE" in src
+    assert "CURRENT_FEE_GROSS_AND_NET_POSITIVE" in src
     assert "sample_gated_cell_count" in src
     assert "best_sample_gated_current_fee_cell" in src
+    assert "best_sample_gated_gross_cell" in src
     assert "edge_scorecard" in src
     assert "horizon_scorecard" in src
     assert "conditional_feature_scorecard" in src
     assert "walk_forward_feature_scorecard" in src
     assert "failure_summary" in FILL_SIM.read_text(encoding="utf-8")
     assert "walk_forward_failure_summary" in RUNTIME_RUNNER.read_text(encoding="utf-8")
+    assert "gross_edge_cost_decomposition" in RUNTIME_RUNNER.read_text(encoding="utf-8")
     assert "maker_fee_sensitivity_scorecard" in src
     assert "history_scorecard" in src
     assert "FILLSIM_HISTORY_SCORECARD" in src
