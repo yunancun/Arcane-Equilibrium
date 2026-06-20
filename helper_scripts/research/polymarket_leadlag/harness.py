@@ -85,6 +85,8 @@ DEFAULT_MIN_ABS_T = 2.0
 DEFAULT_MAX_BH_Q = 0.10
 DEFAULT_MAX_HAC_LAG = 12
 DEFAULT_SCHEDULE_JITTER_TOLERANCE_MS = 5_000
+DEFAULT_PRICE_FEEDBACK_MIN_POINTS = 5
+DEFAULT_PRICE_FEEDBACK_MIN_ABS_IC = 0.15
 
 _PRICE_TARGET_RE = re.compile(
     r"(\bprice\b.*\bhit\b|\bhit\b.*\$|\breach\b.*\$|above\s+\$|below\s+\$|"
@@ -511,6 +513,26 @@ def _price_at_or_after(
     return ts_ms, float(series["prices"][idx])
 
 
+def _price_at_or_before(
+    indexed: dict[str, dict[str, list[Any]]],
+    symbol: str,
+    target_ms: int,
+    *,
+    max_lag_ms: int,
+) -> Optional[tuple[int, float]]:
+    series = indexed.get(symbol)
+    if not series:
+        return None
+    times: list[int] = series["times"]
+    idx = bisect.bisect_right(times, target_ms) - 1
+    if idx < 0:
+        return None
+    ts_ms = times[idx]
+    if target_ms - ts_ms > max_lag_ms:
+        return None
+    return ts_ms, float(series["prices"][idx])
+
+
 def join_forward_returns(
     features: Iterable[dict[str, Any]],
     price_rows: Iterable[dict[str, Any]],
@@ -535,7 +557,7 @@ def join_forward_returns(
             if p1 is None:
                 continue
             p1_ts, p1_px = p1
-            joined.append({
+            out = {
                 **feature,
                 "horizon_minutes": horizon,
                 "entry_price_ts_utc": _ms_to_iso(p0_ts),
@@ -543,7 +565,32 @@ def join_forward_returns(
                 "entry_price": p0_px,
                 "exit_price": p1_px,
                 "forward_return_bps": (p1_px - p0_px) / p0_px * 10_000.0,
-            })
+            }
+            trailing_start = _price_at_or_before(
+                indexed,
+                symbol,
+                ts_ms - horizon * 60 * 1000,
+                max_lag_ms=max_lag_ms,
+            )
+            trailing_end = _price_at_or_before(
+                indexed,
+                symbol,
+                ts_ms,
+                max_lag_ms=max_lag_ms,
+            )
+            if trailing_start is not None and trailing_end is not None:
+                trailing_start_ts, trailing_start_px = trailing_start
+                trailing_end_ts, trailing_end_px = trailing_end
+                out.update({
+                    "trailing_entry_price_ts_utc": _ms_to_iso(trailing_start_ts),
+                    "trailing_exit_price_ts_utc": _ms_to_iso(trailing_end_ts),
+                    "trailing_entry_price": trailing_start_px,
+                    "trailing_exit_price": trailing_end_px,
+                    "trailing_return_bps": (
+                        (trailing_end_px - trailing_start_px) / trailing_start_px * 10_000.0
+                    ),
+                })
+            joined.append(out)
     return joined
 
 
@@ -793,7 +840,26 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         rows = sorted(rows, key=lambda r: int(r["snapshot_ts_ms"]))
         xs = [float(r["mean_delta_prob_yes"]) for r in rows]
         ys = [float(r["forward_return_bps"]) for r in rows]
-        r = _pearson(xs, ys)
+        forward_ic = _pearson(xs, ys)
+        control_rows = [
+            row for row in rows
+            if row.get("trailing_return_bps") is not None
+        ]
+        control_xs = [float(row["mean_delta_prob_yes"]) for row in control_rows]
+        control_ys = [float(row["trailing_return_bps"]) for row in control_rows]
+        past_ic = _pearson(control_xs, control_ys)
+        lead_lag_abs_ic_margin = (
+            abs(float(forward_ic)) - abs(float(past_ic))
+            if forward_ic is not None and past_ic is not None
+            else None
+        )
+        price_feedback_warning = (
+            past_ic is not None
+            and forward_ic is not None
+            and len(control_rows) >= DEFAULT_PRICE_FEEDBACK_MIN_POINTS
+            and abs(float(past_ic)) >= DEFAULT_PRICE_FEEDBACK_MIN_ABS_IC
+            and abs(float(past_ic)) >= abs(float(forward_ic))
+        )
         timestamps = [int(r["snapshot_ts_ms"]) for r in rows]
         selected_nonoverlap = _selected_nonoverlap_timestamps(timestamps, horizon)
         n_distinct = len(set(timestamps))
@@ -814,13 +880,24 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             "overlap_jitter_tolerance_ms": jitter_tolerance_ms,
             "effective_nonoverlap_gap_ms": effective_nonoverlap_gap_ms,
             "median_sample_spacing_ms": median_sample_spacing_ms,
-            "ic_pearson": r,
-            "t_stat": _t_stat_from_r(r, len(rows)),
+            "ic_pearson": forward_ic,
+            "t_stat": _t_stat_from_r(forward_ic, len(rows)),
             "t_stat_hac": _newey_west_slope_t_stat(xs, ys, lag=hac_lag),
             "hac_lag": hac_lag,
             "hac_method": "newey_west_slope_t_stat_bartlett",
+            "past_return_control_n_points": len(control_rows),
+            "past_return_ic_pearson": past_ic,
+            "past_return_t_stat": _t_stat_from_r(past_ic, len(control_rows)),
+            "lead_lag_abs_ic_margin": lead_lag_abs_ic_margin,
+            "price_feedback_warning": price_feedback_warning,
+            "price_feedback_warning_basis": (
+                "abs_past_return_ic_ge_abs_forward_ic"
+                if price_feedback_warning
+                else None
+            ),
             "mean_delta_prob_yes": _mean(xs),
             "mean_forward_return_bps": _mean(ys),
+            "mean_trailing_return_bps": _mean(control_ys),
             "first_snapshot_ts_utc": _ms_to_iso(min(timestamps)),
             "last_snapshot_ts_utc": _ms_to_iso(max(timestamps)),
             "first_nonoverlap_snapshot_ts_utc": (
@@ -831,6 +908,54 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             ),
         })
     return annotate_multiple_testing(out)
+
+
+def _price_feedback_summary(
+    ic_results: list[dict[str, Any]],
+    *,
+    limit: int = 5,
+) -> dict[str, Any]:
+    rows_with_control = [
+        row for row in ic_results
+        if int(row.get("past_return_control_n_points") or 0) > 0
+    ]
+    warning_rows = [row for row in rows_with_control if row.get("price_feedback_warning")]
+    past_ic_values = [
+        abs(float(row["past_return_ic_pearson"]))
+        for row in rows_with_control
+        if row.get("past_return_ic_pearson") is not None
+    ]
+
+    warning_cells = []
+    for row in sorted(
+        warning_rows,
+        key=lambda item: abs(float(item.get("past_return_ic_pearson") or 0.0)),
+        reverse=True,
+    )[:limit]:
+        warning_cells.append({
+            "bucket": row.get("bucket"),
+            "symbol": row.get("symbol"),
+            "horizon_minutes": row.get("horizon_minutes"),
+            "n_points": row.get("n_points"),
+            "past_return_control_n_points": row.get("past_return_control_n_points"),
+            "ic_pearson": row.get("ic_pearson"),
+            "past_return_ic_pearson": row.get("past_return_ic_pearson"),
+            "lead_lag_abs_ic_margin": row.get("lead_lag_abs_ic_margin"),
+            "warning_basis": row.get("price_feedback_warning_basis"),
+        })
+
+    return {
+        "cells_with_control": len(rows_with_control),
+        "warning_count": len(warning_rows),
+        "max_abs_past_return_ic": max(past_ic_values, default=None),
+        "warning_cells": warning_cells,
+        "control_definition": "corr(feature_delta_at_t, price_return_t_minus_h_to_t)",
+        "warning_threshold": {
+            "min_points": DEFAULT_PRICE_FEEDBACK_MIN_POINTS,
+            "min_abs_past_return_ic": DEFAULT_PRICE_FEEDBACK_MIN_ABS_IC,
+            "basis": "abs_past_return_ic_ge_abs_forward_ic",
+        },
+    }
 
 
 def _sample_gate_eta(row: dict[str, Any], *, min_points: int) -> dict[str, Any] | None:
@@ -1041,6 +1166,7 @@ def build_report(
         max_align_lag_minutes=max_align_lag_minutes,
     )
     ic_results = compute_ic(joined)
+    price_feedback_summary = _price_feedback_summary(ic_results)
     bucket_counts = Counter(row["bucket"] for row in deltas)
     feature_bucket_counts = Counter(row["bucket"] for row in features)
     feature_bucket_view_counts = Counter(
@@ -1106,6 +1232,7 @@ def build_report(
             "preliminary_raw_candidate_count": len(preliminary_raw),
             "preliminary_hac_candidate_count": len(preliminary_hac),
             "pre_gate_hac_watchlist_count": len(pre_gate_hac_watchlist),
+            "price_feedback_warning_count": price_feedback_summary["warning_count"],
             "significance_t_stat": "t_stat_hac",
             "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
         },
@@ -1139,6 +1266,7 @@ def build_report(
                 ),
             ),
             "sample_gate_clock": sample_gate_clock,
+            "price_feedback_summary": price_feedback_summary,
             "max_abs_t_stat_hac": max(
                 (
                     abs(float(r["t_stat_hac"]))
@@ -1162,6 +1290,7 @@ def build_report(
             "overlap sample floor allows a small schedule-jitter tolerance before declaring windows overlapping",
             "sample gate clock estimates when the overlap-adjusted floor should reach min_points if cadence holds",
             "pre-gate HAC watchlist is diagnostic only and never promotion or probe authority",
+            "past-return price feedback control is diagnostic only and never promotion authority",
             "candidate gate requires overlap-adjusted sample floor and BH q-value control",
             "candidate significance uses Newey-West/HAC slope t-stat; naive t-stat is diagnostic only",
         ],
@@ -1271,7 +1400,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             pad_ms = (max(horizons) + args.max_align_lag_minutes + 5) * 60 * 1000
             price_rows = load_price_points_pg(
                 symbols=list(symbols),
-                start_ms=min(ts_vals) - 5 * 60 * 1000,
+                start_ms=min(ts_vals) - pad_ms,
                 end_ms=max(ts_vals) + pad_ms,
                 timeframe=args.price_timeframe,
                 dsn=args.dsn,

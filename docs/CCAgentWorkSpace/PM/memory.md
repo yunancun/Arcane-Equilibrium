@@ -25,6 +25,17 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Price-Feedback IC Control
+
+- Upgraded `polymarket_leadlag` to report schema/runner v0.11.
+- Diagnosis: before treating any Polymarket lead-lag IC as actionable, we need to know whether odds deltas lead future perp returns or merely react to already-realized price moves.
+- v0.11 keeps the existing leak-free forward label path and adds same-horizon trailing-return controls using price points at/before `t-h` and `t`; the control is diagnostic-only and does not relax candidate gates.
+- IC rows now expose `past_return_control_n_points`, `past_return_ic_pearson`, `lead_lag_abs_ic_margin`, and `price_feedback_warning`; status/runtime detail expose `price_feedback_warning_count` and `price_feedback_summary`.
+- Linux v0.11 wrapper smoke latest sha256 `bf22fe98f4d391616a0d86552828618efb486cf97e44193a21016286627b9483`: `snapshot_rows=13859`, `delta_rows=15418`, `feature_points=222`, `joined_rows=371`, `max_overlap_adjusted_ic_points=14`, `candidate_count=0`, still `INSUFFICIENT_SAMPLE`, ETA `2026-06-20T19:52:01.378Z`.
+- Price-feedback summary: `cells_with_control=32`, `warning_count=22`, `max_abs_past_return_ic=1.0`; top warnings are `price_target` BTC/ETH/XRP 15m/60m cells where past-return IC dominates forward IC.
+- Alpha discovery latest sha256 `41cdcad77a2897a28b57a73cba780c473f73306de784edbbcdac139699feaebe` reports `polymarket_leadlag_ic.sample_count=14`, `price_feedback_warning_count=22`, action `RUN_READ_ONLY_CAPTURE`, ready/probe=0.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Source-Split IC View
 
 - Upgraded `polymarket_leadlag` to report schema/runner v0.10.
