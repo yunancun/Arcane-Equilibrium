@@ -25,6 +25,16 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM Low-Friction Interaction Search
+
+- Added bounded three-way MM low-friction interaction candidates: high quoted spread × quiet immediate tape/L1 context × favorable same-side touch/flow.
+- Runtime result: the interaction search improves best train-confirmed min gross to `1.871bp`, but still leaves a `2.129bp` gap to the 4.0bp current-fee round trip.
+- Fresh Linux fill_sim sha256 `d453ea298f1b2b427b6558d659fdcbeaf6f7db7e9fe40d52d2183a672b1e1518`: 224 low-friction candidates, 128 interaction candidates, 71 train-confirmed positive-gross candidates, 0 current-fee-confirmed candidates.
+- Best train-confirmed interaction is `quoted_half_spread_bps_train_p90_and_recent_trade_count_30s_train_p25_and_side_recent_trade_imbalance_30s_train_p90`: train gross `1.871bp`, holdout gross `2.831bp`, min gross `1.871bp`.
+- Best holdout gross near miss is still below current fee: `quoted_half_spread_bps_train_p90_and_side_touch_size_delta_frac_10s_train_p90`, holdout gross `3.813bp`, net `-0.187bp`, train gross `1.857bp`.
+- Latest alpha sha256 `4902cbcbc6a0c8cbf19255553954a50a4b68ec176669c8df79cab85c4ccb1433` remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`; MM blocker stays cost-wall, not promotion-ready.
+- Boundary: artifact-only source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact writes only; no PG write, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, signal, execution proof, or promotion proof.
+
 ## 2026-06-20 MM Train-Confirmed Low-Friction Gross Scorecard
 
 - Added `train_confirmed_gross_scorecard` inside `fill_sim_low_friction_signal_scorecard()`, ranking every low-friction MM candidate by `min(train_edge_before_fees_bps, holdout_edge_before_fees_bps)`.
