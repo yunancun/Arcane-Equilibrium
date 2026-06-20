@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-20（TODO v237 FlashDip death-rate freshness gate；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-20（TODO v238 FlashDip death-rate freshness runtime smoke；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v238 增量（2026-06-20 FlashDip death-rate freshness runtime smoke）**：Selective Linux deploy/smoke for v237 FlashDip freshness gate. `trade-core` fetched `origin/main=4d06336d` and restored touched source/docs/test files while keeping checkout HEAD at old `bb06ae1b` because the runtime checkout already carries selective-deploy dirty state. Linux focused verification passed：`python3 -m pytest -q helper_scripts/research/tests/test_alpha_discovery_throughput.py` = 11 passed and `python3 -m py_compile helper_scripts/research/alpha_discovery_throughput/runtime_runner.py` PASS. Manual artifact-only `alpha_discovery_throughput_cron.sh` run refreshed latest killboard `created_at_utc=2026-06-20T00:52:47Z`; FlashDip arm now includes `detail.age_seconds=71986.8`, still inside the 36h daily artifact window, so current runtime remains `source_ok=true`, `gate_status=READY`, `sample_count=0`, `artifacts_ready=false`. Boundary：selective source/docs/test deploy + local artifact refresh only；no engine/API restart, no PG table write/schema migration, no Bybit private/signed/trading call, no credential/auth/risk/order/trading mutation；not promotion proof.
 
 **v237 增量（2026-06-20 FlashDip death-rate freshness gate）**：`helper_scripts/research/alpha_discovery_throughput/runtime_runner.py` now applies daily-artifact freshness to FlashDip death-rate status. Previously `collect_flash_dip_arm()` read the latest `flash_dip_death_rate.log` line without timestamp validation, so a stopped cron could keep alpha discovery looking active for the only currently plausible non-MM strategy path. Now stale/missing `ts_utc` returns `gate_status=SOURCE_FAILURE`, `source_ok=false`, `source_error=stale_artifact`, and `artifacts_ready=false` even if stale closed-slot sample count is above threshold; fresh/missing-not-yet-fired behavior remains fail-soft capture. Added focused regression `test_runtime_runner_blocks_stale_flash_dip_death_rate_status`. Verification：`python3 -m pytest -q helper_scripts/research/tests/test_alpha_discovery_throughput.py` = 11 passed, `python3 -m py_compile helper_scripts/research/alpha_discovery_throughput/runtime_runner.py` PASS, targeted `git diff --check` clean. Boundary：source/test/docs only；no Linux deploy yet, no engine/API restart, no PG table write/schema migration, no Bybit private/signed/trading call, no credential/auth/risk/order mutation；not promotion proof.
 
