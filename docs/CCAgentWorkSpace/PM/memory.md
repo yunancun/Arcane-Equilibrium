@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM FillSim Edge Scorecard
+
+- Added `edge_scorecard` to fill_sim: compact ranking over fill_only maker-edge cells across pooled/per-symbol, naive/informed-skip, and queue-dose views.
+- `recorder_mm_verdict_cron.sh` now passes `fillsim.edge_scorecard` through status and includes `best_n_maker_fills` in `cost_wall_summary`.
+- Isolated Linux read-only smoke artifact `/tmp/openclaw/research/fillsim/fillsim_scorecard_smoke_20260620T090830Z.json`: 15m fresh L1, 142,881 L1 rows, 86,471 trades, 34 symbols.
+- Result: `NO_POSITIVE_FILL_ONLY_CELL`; best fill-sim cell is ADAUSDT back-of-queue informed-skip fill_only, n=121, net -1.082bp after 4bp maker RT fee.
+- Isolated MM verdict smoke using that report: live-markout best ARBUSDT net +0.1213bp but `best_n_maker_fills=1`, below 30-fill gate.
+- Boundary: source/test/docs + selective sync + isolated read-only PG/artifact/status runs only; no production fill_sim replacement, rebuild/restart, DB write, Bybit private call, or auth/risk/order/trading mutation.
+
 ## 2026-06-20 FlashDip L1 Event-Window Coverage
 
 - Promoted the L1 replay status into independent alpha-discovery arm `flash_dip_l1_short_exit_replay`; conditional-pass with >=30 measured exits is required before `READY_FOR_AEG_CHAIN`, stale/blocked status becomes BLOCK.
