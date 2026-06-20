@@ -25,6 +25,14 @@
 
 ## 近期記錄
 
+## 2026-06-20 FlashDip L1 Event-Window Coverage
+
+- Promoted the L1 replay status into independent alpha-discovery arm `flash_dip_l1_short_exit_replay`; conditional-pass with >=30 measured exits is required before `READY_FOR_AEG_CHAIN`, stale/blocked status becomes BLOCK.
+- Added event-window L1 coverage diagnostics so broad symbol-level L1 rows no longer mask missing L1 inside each candidate maker window.
+- Linux read-only smoke latest sha256 `417a4ee7b76191e1e8e2a3ac9a2285bc9fbd47558aabe8ae185115db0bf79c18`: 6 candidate events / 2 days / 5 symbols, 173,749 loaded L1 rows and 2,757,781 trades, but `events_with_l1_in_event_window=0` / `events_missing_l1_in_event_window=6`.
+- Alpha discovery now shows action `RUN_READ_ONLY_CAPTURE`, rank 2, reason `sample_count_below_gate`; the short-exit thesis is still data-gated, not queue-realism disproven.
+- Boundary: source/test/docs + selective helper/test sync + Linux read-only PG/artifact/status run only; no rebuild/restart, DB write, Bybit private call, or auth/risk/order/trading mutation.
+
 ## 2026-06-20 FlashDip L1 Short-Exit Replay Cron
 
 - Added and Linux-installed read-only `flash_dip_l1_short_exit_replay_cron.sh` at `31 6 * * *`; it writes dated/latest replay artifacts plus `logs/flash_dip_l1_short_exit_replay.log`.

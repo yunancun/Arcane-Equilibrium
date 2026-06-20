@@ -17,7 +17,12 @@ from alpha_discovery_throughput.packet import (
     build_direct_report_from_packet,
     daily_returns_from_samples,
 )
-from alpha_discovery_throughput.runtime_runner import collect_flash_dip_arm, collect_runtime_arms, run_once
+from alpha_discovery_throughput.runtime_runner import (
+    collect_flash_dip_arm,
+    collect_flash_dip_l1_replay_arm,
+    collect_runtime_arms,
+    run_once,
+)
 from alpha_discovery_throughput.signal_manifest import build_signal_spec, validate_signal_manifest
 
 
@@ -367,6 +372,11 @@ def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
         "trade_rows": 608227,
         "symbols_with_l1": [],
         "symbols_missing_l1": ["APTUSDT", "ATOMUSDT", "AVAXUSDT"],
+        "event_window_maker_timeout_minutes": 1440,
+        "events_with_l1_in_event_window": 0,
+        "events_missing_l1_in_event_window": 3,
+        "days_with_l1_in_event_window": 0,
+        "days_missing_l1_in_event_window": 1,
         "gate_exit_measured": 0,
         "gate_distinct_exit_days": 0,
         "gate_annret": None,
@@ -394,6 +404,7 @@ def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
     assert l1_replay["fail_reasons"] == ["no_l1_rows_for_candidate_window"]
     assert l1_replay["l1_rows_post_filter"] == 0
     assert l1_replay["trade_rows"] == 608227
+    assert l1_replay["events_missing_l1_in_event_window"] == 3
     assert l1_replay["boundary"] == "counterfactual_only_not_promotion_evidence"
     assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
     assert plan["arms"][0]["reason"] == "sample_count_below_gate"
@@ -426,6 +437,96 @@ def test_runtime_runner_keeps_stale_flash_dip_touchability_non_blocking(tmp_path
     assert arm["gate_status"] == "CAPTURING"
     assert arm["detail"]["touchability"]["source_ok"] is False
     assert arm["detail"]["touchability"]["source_error"] == "stale_artifact"
+
+
+def test_flash_dip_l1_replay_arm_surfaces_coverage_hole_as_capture(tmp_path):
+    data = tmp_path / "openclaw"
+    (data / "logs").mkdir(parents=True)
+    (data / "logs" / "flash_dip_l1_short_exit_replay.log").write_text(json.dumps({
+        "ts_utc": "2026-06-20T01:20:00Z",
+        "verdict_status": "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE",
+        "fail_reasons": ["no_l1_rows_for_candidate_event_windows", "gate_horizon_sample_below_min_filled"],
+        "candidate_events": 6,
+        "candidate_days": 2,
+        "l1_rows_post_filter": 173749,
+        "trade_rows": 2757781,
+        "symbols_with_l1": ["APTUSDT", "ATOMUSDT", "AVAXUSDT", "INJUSDT", "NEARUSDT"],
+        "symbols_missing_l1": [],
+        "event_window_maker_timeout_minutes": 1440,
+        "events_with_l1_in_event_window": 0,
+        "events_missing_l1_in_event_window": 6,
+        "days_with_l1_in_event_window": 0,
+        "days_missing_l1_in_event_window": 2,
+        "gate_exit_measured": 0,
+        "gate_distinct_exit_days": 0,
+    }) + "\n", encoding="utf-8")
+
+    arm = collect_flash_dip_l1_replay_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 1, 30, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan([arm], now_utc=dt.datetime(2026, 6, 20, 1, 30, tzinfo=dt.timezone.utc))
+
+    assert arm["gate_status"] == "CAPTURING"
+    assert arm["source_ok"] is True
+    assert arm["sample_count"] == 0
+    assert arm["artifacts_ready"] is False
+    assert arm["detail"]["fail_reasons"][0] == "no_l1_rows_for_candidate_event_windows"
+    assert arm["detail"]["l1_rows_post_filter"] == 173749
+    assert arm["detail"]["events_missing_l1_in_event_window"] == 6
+    assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
+
+
+def test_flash_dip_l1_replay_arm_ready_only_after_conditional_pass_sample_gate(tmp_path):
+    data = tmp_path / "openclaw"
+    (data / "logs").mkdir(parents=True)
+    (data / "logs" / "flash_dip_l1_short_exit_replay.log").write_text(json.dumps({
+        "ts_utc": "2026-06-20T01:20:00Z",
+        "verdict_status": "L1_SHORT_EXIT_CONDITIONAL_PASS",
+        "fail_reasons": [],
+        "candidate_events": 45,
+        "candidate_days": 24,
+        "l1_rows_post_filter": 250000,
+        "trade_rows": 700000,
+        "gate_exit_measured": 35,
+        "gate_distinct_exit_days": 22,
+        "gate_annret": 0.03,
+        "gate_maxdd": 0.02,
+    }) + "\n", encoding="utf-8")
+
+    arm = collect_flash_dip_l1_replay_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 1, 30, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan([arm], now_utc=dt.datetime(2026, 6, 20, 1, 30, tzinfo=dt.timezone.utc))
+
+    assert arm["gate_status"] == "READY"
+    assert arm["artifacts_ready"] is True
+    assert arm["sample_count"] == 35
+    assert plan["arms"][0]["action"] == "READY_FOR_AEG_CHAIN"
+    assert plan["arms"][0]["reason"] == "artifacts_ready_and_sample_gate_met"
+
+
+def test_flash_dip_l1_replay_arm_blocks_stale_status(tmp_path):
+    data = tmp_path / "openclaw"
+    (data / "logs").mkdir(parents=True)
+    (data / "logs" / "flash_dip_l1_short_exit_replay.log").write_text(json.dumps({
+        "ts_utc": "2026-06-18T01:20:00Z",
+        "verdict_status": "L1_SHORT_EXIT_CONDITIONAL_PASS",
+        "gate_exit_measured": 35,
+    }) + "\n", encoding="utf-8")
+
+    arm = collect_flash_dip_l1_replay_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 14, 0, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan([arm], now_utc=dt.datetime(2026, 6, 20, 14, 0, tzinfo=dt.timezone.utc))
+
+    assert arm["gate_status"] == "SOURCE_FAILURE"
+    assert arm["source_ok"] is False
+    assert arm["source_error"] == "stale_artifact"
+    assert plan["arms"][0]["action"] == "BLOCK"
+    assert plan["arms"][0]["reason"] == "source_not_healthy"
 
 
 def test_edge_snapshot_adapter_only_promotes_durable_non_bull_concrete_rows():

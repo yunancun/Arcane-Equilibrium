@@ -588,14 +588,40 @@ def l1_short_exit_gate(
 def l1_candidate_coverage_summary(
     candidate_events: list[dict[str, Any]],
     l1_by_sym: dict[str, list[dict[str, Any]]],
+    *,
+    maker_timeout_minutes: int = DEFAULT_MAKER_TIMEOUT_MINUTES,
 ) -> dict[str, Any]:
     candidate_symbols = sorted({e["symbol"] for e in candidate_events})
     events_by_symbol: dict[str, int] = {sym: 0 for sym in candidate_symbols}
     days_by_symbol: dict[str, set[str]] = {sym: set() for sym in candidate_symbols}
+    event_window_rows_by_symbol_date: dict[str, int] = {}
+    missing_event_windows: list[dict[str, Any]] = []
+    n_events_with_l1_in_event_window = 0
+    days_with_l1_in_event_window: set[str] = set()
+    days_missing_l1_in_event_window: set[str] = set()
     for event in candidate_events:
         sym = event["symbol"]
         events_by_symbol[sym] = events_by_symbol.get(sym, 0) + 1
         days_by_symbol.setdefault(sym, set()).add(event["entry_date"])
+        day_start = _date_to_ms(event["entry_date"])
+        deadline = min(
+            _date_to_ms(_add_days(event["entry_date"], 1)),
+            day_start + maker_timeout_minutes * 60 * 1000,
+        )
+        rows = l1_by_sym.get(sym, [])
+        n_window_rows = sum(1 for row in rows if day_start <= int(row["ts_ms"]) <= deadline)
+        key = f"{sym}:{event['entry_date']}"
+        event_window_rows_by_symbol_date[key] = event_window_rows_by_symbol_date.get(key, 0) + n_window_rows
+        if n_window_rows > 0:
+            n_events_with_l1_in_event_window += 1
+            days_with_l1_in_event_window.add(event["entry_date"])
+        else:
+            days_missing_l1_in_event_window.add(event["entry_date"])
+            missing_event_windows.append({
+                "symbol": sym,
+                "entry_date": event["entry_date"],
+                "entry_level": event.get("entry_level"),
+            })
     l1_rows_by_symbol = {
         sym: len(rows)
         for sym, rows in sorted(l1_by_sym.items())
@@ -609,6 +635,13 @@ def l1_candidate_coverage_summary(
             sym: len(days)
             for sym, days in sorted(days_by_symbol.items())
         },
+        "event_window_maker_timeout_minutes": maker_timeout_minutes,
+        "n_events_with_l1_in_event_window": n_events_with_l1_in_event_window,
+        "n_events_missing_l1_in_event_window": len(candidate_events) - n_events_with_l1_in_event_window,
+        "n_distinct_days_with_l1_in_event_window": len(days_with_l1_in_event_window),
+        "n_distinct_days_missing_l1_in_event_window": len(days_missing_l1_in_event_window),
+        "event_window_l1_rows_by_symbol_date": dict(sorted(event_window_rows_by_symbol_date.items())),
+        "events_missing_l1_in_event_window_sample": missing_event_windows[:100],
         "symbols_with_l1": symbols_with_l1,
         "symbols_missing_l1": symbols_missing_l1,
         "l1_rows_by_symbol": l1_rows_by_symbol,
@@ -625,6 +658,13 @@ def apply_l1_coverage_reasons(
             reasons.append("no_l1_rows_for_candidate_window")
         elif coverage.get("symbols_missing_l1"):
             reasons.append("partial_l1_symbol_coverage")
+        n_missing_event_windows = int(coverage.get("n_events_missing_l1_in_event_window") or 0)
+        n_with_event_windows = int(coverage.get("n_events_with_l1_in_event_window") or 0)
+        if n_missing_event_windows > 0 and coverage.get("symbols_with_l1"):
+            if n_with_event_windows == 0:
+                reasons.append("no_l1_rows_for_candidate_event_windows")
+            elif "partial_l1_symbol_coverage" not in reasons:
+                reasons.append("partial_l1_event_window_coverage")
 
     if not reasons:
         return gate
@@ -676,7 +716,11 @@ def run_l1_replay(
         symbols = []
     l1_by_sym, loaded_l1_meta = load_l1_rows(conn, symbols=symbols, start_ms=start_ms, end_ms=end_ms)
     trades_by_sym, trades_meta = load_trade_rows(conn, symbols=symbols, start_ms=start_ms, end_ms=end_ms)
-    l1_coverage = l1_candidate_coverage_summary(candidate_events, l1_by_sym)
+    l1_coverage = l1_candidate_coverage_summary(
+        candidate_events,
+        l1_by_sym,
+        maker_timeout_minutes=maker_timeout_minutes,
+    )
 
     records_by_queue: dict[float, list[dict[str, Any]]] = {float(q): [] for q in queue_ahead_fracs}
     for q in queue_ahead_fracs:

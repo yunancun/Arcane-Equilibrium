@@ -59,6 +59,8 @@ def test_local_artifact_log_lock_and_status_surfaces() -> None:
     assert "flash_dip_l1_short_exit_replay.log" in src
     assert "shallow_retune_l1_short_exit_replay_latest.json" in src
     assert "counterfactual_only_not_promotion_evidence" in src
+    assert "events_with_l1_in_event_window" in src
+    assert "events_missing_l1_in_event_window" in src
 
 
 def test_operator_knobs_match_replay_gate_defaults() -> None:

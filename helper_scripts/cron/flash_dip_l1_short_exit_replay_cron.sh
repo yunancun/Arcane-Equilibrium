@@ -192,6 +192,11 @@ status = {
     "trade_rows": None,
     "symbols_with_l1": [],
     "symbols_missing_l1": [],
+    "event_window_maker_timeout_minutes": None,
+    "events_with_l1_in_event_window": None,
+    "events_missing_l1_in_event_window": None,
+    "days_with_l1_in_event_window": None,
+    "days_missing_l1_in_event_window": None,
     "gate_exit_measured": None,
     "gate_distinct_exit_days": None,
     "gate_annret": None,
@@ -222,6 +227,11 @@ try:
         "trade_rows": trades_meta.get("n_rows"),
         "symbols_with_l1": coverage.get("symbols_with_l1") or [],
         "symbols_missing_l1": coverage.get("symbols_missing_l1") or [],
+        "event_window_maker_timeout_minutes": coverage.get("event_window_maker_timeout_minutes"),
+        "events_with_l1_in_event_window": coverage.get("n_events_with_l1_in_event_window"),
+        "events_missing_l1_in_event_window": coverage.get("n_events_missing_l1_in_event_window"),
+        "days_with_l1_in_event_window": coverage.get("n_distinct_days_with_l1_in_event_window"),
+        "days_missing_l1_in_event_window": coverage.get("n_distinct_days_missing_l1_in_event_window"),
     })
     gate_q = verdict.get("gate_queue_ahead_frac")
     gate_h = f"{verdict.get('gate_horizon_minutes')}m"
