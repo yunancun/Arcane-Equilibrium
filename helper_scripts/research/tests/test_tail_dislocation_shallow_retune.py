@@ -11,6 +11,7 @@ import screen as base
 import shallow_retune_screen as srs
 import shallow_retune_adversarial as adv
 import shallow_retune_execution_realism as execr
+import shallow_retune_l1_short_exit_replay as l1replay
 
 
 def _bars(symbol: str, *, n: int = 16) -> list[dict]:
@@ -257,3 +258,153 @@ def test_short_exit_opportunity_summary_is_research_only():
     assert summary["best"]["execution_buffer_bps"] == 10.0
     assert summary["best"]["horizon"] == "15m"
     assert "research-only" in summary["boundary"]
+
+
+def _ts_ms(hour: int, minute: int = 0) -> int:
+    ts = dt.datetime(2026, 1, 2, hour, minute, tzinfo=dt.timezone.utc)
+    return int(ts.timestamp() * 1000)
+
+
+def test_l1_limit_buy_replay_requires_queue_consumption_before_short_exit():
+    event = {
+        "symbol": "AAAUSDT",
+        "entry_date": "2026-01-02",
+        "entry_level": 100.0,
+    }
+    l1_rows = [
+        {"ts_ms": _ts_ms(0, 0), "best_bid": 101.0, "best_ask": 101.1, "bid_size": 5.0},
+        {"ts_ms": _ts_ms(0, 1), "best_bid": 100.0, "best_ask": 100.1, "bid_size": 10.0},
+        {"ts_ms": _ts_ms(0, 3), "best_bid": 100.0, "best_ask": 100.1, "bid_size": 3.0},
+        {"ts_ms": _ts_ms(4, 3), "best_bid": 102.0, "best_ask": 102.1, "bid_size": 8.0},
+    ]
+    trades = [
+        {"ts_ms": _ts_ms(0, 2), "side": "Sell", "price": 100.0, "qty": 3.0},
+        {"ts_ms": _ts_ms(0, 3), "side": "Sell", "price": 100.0, "qty": 7.0},
+    ]
+
+    back = l1replay.replay_limit_buy_short_exit(
+        event,
+        l1_rows,
+        trades,
+        queue_ahead_frac=1.0,
+        horizon_minutes=(240,),
+        maker_timeout_minutes=24 * 60,
+    )
+    assert back["fill_status"] == "FILLED"
+    assert back["fill_outcome"] == "queue_fill"
+    assert back["fill_ts_ms"] == _ts_ms(0, 3)
+    assert back["short_exit"]["240m"]["net_taker"] == pytest.approx(0.02 - 0.0002 - 0.00055)
+
+    front = l1replay.replay_limit_buy_short_exit(
+        event,
+        l1_rows,
+        trades,
+        queue_ahead_frac=0.0,
+        horizon_minutes=(240,),
+        maker_timeout_minutes=24 * 60,
+    )
+    assert front["fill_ts_ms"] == _ts_ms(0, 2)
+
+
+def test_l1_limit_buy_replay_distinguishes_adverse_through():
+    event = {
+        "symbol": "AAAUSDT",
+        "entry_date": "2026-01-02",
+        "entry_level": 100.0,
+    }
+    l1_rows = [
+        {"ts_ms": _ts_ms(0, 0), "best_bid": 101.0, "best_ask": 101.2, "bid_size": 5.0},
+        {"ts_ms": _ts_ms(0, 5), "best_bid": 99.5, "best_ask": 99.7, "bid_size": 7.0},
+        {"ts_ms": _ts_ms(1, 5), "best_bid": 98.0, "best_ask": 98.1, "bid_size": 9.0},
+    ]
+    out = l1replay.replay_limit_buy_short_exit(
+        event,
+        l1_rows,
+        trade_rows=[],
+        queue_ahead_frac=1.0,
+        horizon_minutes=(60,),
+        maker_timeout_minutes=24 * 60,
+    )
+
+    assert out["fill_status"] == "FILLED"
+    assert out["fill_outcome"] == "book_through_fill"
+    assert out["short_exit"]["60m"]["net_taker"] == pytest.approx(-0.02 - 0.0002 - 0.00055)
+
+
+def test_l1_short_exit_gate_separates_sample_from_hard_fail():
+    rows = [
+        {
+            "queue_ahead_frac": 1.0,
+            "horizons": {
+                "240m": {
+                    "n_exit_measured": 35,
+                    "n_distinct_exit_days": 22,
+                    "fixed_notional": {"annualized_return": 0.02, "max_drawdown": 0.01},
+                },
+            },
+        },
+    ]
+    ok = l1replay.l1_short_exit_gate(
+        rows,
+        gate_queue_ahead_frac=1.0,
+        gate_horizon_minutes=240,
+        min_filled=30,
+        min_days=20,
+    )
+    assert ok["status"] == "L1_SHORT_EXIT_CONDITIONAL_PASS"
+
+    sample = l1replay.l1_short_exit_gate(
+        rows,
+        gate_queue_ahead_frac=1.0,
+        gate_horizon_minutes=240,
+        min_filled=50,
+        min_days=20,
+    )
+    assert sample["status"] == "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE"
+
+    rows[0]["horizons"]["240m"]["fixed_notional"] = {"annualized_return": -0.01, "max_drawdown": 0.01}
+    hard = l1replay.l1_short_exit_gate(
+        rows,
+        gate_queue_ahead_frac=1.0,
+        gate_horizon_minutes=240,
+        min_filled=30,
+        min_days=20,
+    )
+    assert hard["status"] == "L1_SHORT_EXIT_BLOCKED"
+    assert "gate_horizon_nonpositive_annret" in hard["fail_reasons"]
+
+
+def test_l1_coverage_reasons_downgrade_only_when_candidate_l1_is_missing():
+    gate = {
+        "status": "L1_SHORT_EXIT_CONDITIONAL_PASS",
+        "fail_reasons": [],
+    }
+    events = [
+        {"symbol": "AAAUSDT", "entry_date": "2026-01-02"},
+        {"symbol": "BBBUSDT", "entry_date": "2026-01-02"},
+    ]
+
+    no_l1 = l1replay.l1_candidate_coverage_summary(events, {})
+    no_l1_gate = l1replay.apply_l1_coverage_reasons(gate, no_l1)
+    assert no_l1["symbols_missing_l1"] == ["AAAUSDT", "BBBUSDT"]
+    assert no_l1_gate["status"] == "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE"
+    assert no_l1_gate["fail_reasons"][0] == "no_l1_rows_for_candidate_window"
+
+    partial_l1 = l1replay.l1_candidate_coverage_summary(
+        events,
+        {"AAAUSDT": [{"ts_ms": _ts_ms(0)}]},
+    )
+    partial_gate = l1replay.apply_l1_coverage_reasons(gate, partial_l1)
+    assert partial_l1["symbols_with_l1"] == ["AAAUSDT"]
+    assert partial_l1["symbols_missing_l1"] == ["BBBUSDT"]
+    assert partial_gate["status"] == "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE"
+    assert partial_gate["fail_reasons"][0] == "partial_l1_symbol_coverage"
+
+    full_l1 = l1replay.l1_candidate_coverage_summary(
+        events,
+        {
+            "AAAUSDT": [{"ts_ms": _ts_ms(0)}],
+            "BBBUSDT": [{"ts_ms": _ts_ms(0)}],
+        },
+    )
+    assert l1replay.apply_l1_coverage_reasons(gate, full_l1) == gate
