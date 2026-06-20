@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-20 Order Audit Projection Fix
+
+- FlashDip order diagnosis found an audit projection gap: current `trading.orders` has 19 `flash_dip_buy` Working rows with NULL `price/context_id/details`, while `trading.intents` joined by `intent_id` contains the true `ctx-*` and `details.limit_price`.
+- Source confirms `OrderDispatchRequest.limit_price` already feeds `CreateOrderRequest.price`; the missing fields were dropped between `PendingOrder`/`TradingMsg::Order` and `flush_orders`.
+- Rust source now carries order price/context/details into existing `trading.orders` columns. Focused checks passed: pending-registration 23, trading_writer 14, `cargo check -p openclaw_engine --lib`, touched-file rustfmt, targeted diff-check.
+- Boundary: source/test/docs + read-only PG only; no Linux deploy/rebuild/restart. New runtime projection requires a future safe rebuild/restart; current old rows remain NULL.
+
 ## 2026-06-20 FlashDip Death-Rate Freshness Gate
 
 - Alpha discovery runtime now treats stale `flash_dip_death_rate.log` as `SOURCE_FAILURE/stale_artifact` instead of active FlashDip capture.

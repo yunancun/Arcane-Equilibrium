@@ -49,6 +49,7 @@ fn close_pending_order(symbol: &str, is_long: bool, qty: f64) -> PendingOrder {
         is_close: true, // ★ reduce-only：本檔的核心旗標
         context_id: "ctx-close".into(),
         order_type: "market".into(),
+        limit_price: None,
         time_in_force: None,
         maker_timeout_ms: None,
         close_maker_audit: None,

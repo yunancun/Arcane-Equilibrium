@@ -254,9 +254,9 @@ const FILL_COLS: usize = 27; // V094 details + close-maker audit; V145 maker_mar
 const FUNDING_SETTLEMENT_COLS: usize = 13; // includes raw JSONB
 const POSITION_COLS: usize = 9;
 const VERDICT_COLS: usize = 12; // includes risk_level/check arrays + details
-// P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：12 → 13；新增 intent_id 欄
-// 寫入 trading.orders.intent_id（V003 起既有 schema 欄但寫入器漏接）。
-const ORDER_COLS: usize = 13;
+                                // ORDER-AUDIT-PROJECTION-1（2026-06-20）：13 → 16；補 price/context_id/details。
+                                // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：12 → 13；新增 intent_id 欄。
+const ORDER_COLS: usize = 16;
 const STATE_CHANGE_COLS: usize = 8;
 const SCANNER_SNAPSHOT_COLS: usize = 9;
 const SCANNER_OPPORTUNITY_DECAY_COLS: usize = 16;
@@ -819,14 +819,13 @@ async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
         buf.as_slice(),
         ORDER_COLS,
         |chunk| {
-            // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：增 intent_id 欄
-            // （V003 起 schema 即有 TEXT NULL，但 writer 自始未綁定）。entry
-            // path 帶 Some(make_intent_id(...)) 與 trading.intents.intent_id
-            // byte-equal；close path 寫 NULL 為誠實表述。
+            // ORDER-AUDIT-PROJECTION-1（2026-06-20）：schema 既有
+            // price/context_id/details，但 Order writer 漏接，導致 Working
+            // PostOnly limit 單不可直接觀測委託價。這裡只補審計投影，不改下單行為。
             let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
                 "INSERT INTO trading.orders \
                  (ts, order_id, symbol, side, order_type, time_in_force, qty, strategy_name, \
-                  category, is_paper, status, engine_mode, intent_id) ",
+                  category, is_paper, status, engine_mode, intent_id, price, context_id, details) ",
             );
             qb.push_values(chunk.iter(), |mut b, msg| {
                 if let TradingMsg::Order {
@@ -837,9 +836,12 @@ async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     order_type,
                     time_in_force,
                     qty,
+                    price,
+                    context_id,
                     strategy_name,
                     is_close: _,
                     engine_mode,
+                    details,
                     intent_id,
                 } = msg
                 {
@@ -860,6 +862,9 @@ async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     b.push_bind(engine_mode.as_str());
                     // P2-ORDERS-INTENT-ID-WRITER-GAP-1：Option<&str> → SQL TEXT NULL
                     b.push_bind(intent_id.as_deref());
+                    b.push_bind(price.and_then(sanitize_f64).map(|v| v as f32));
+                    b.push_bind(context_id.as_deref());
+                    b.push_bind(details.clone());
                 }
             });
             qb.push(" ON CONFLICT (order_id, ts) DO NOTHING");

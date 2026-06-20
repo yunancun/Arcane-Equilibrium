@@ -728,6 +728,7 @@ pub(super) fn spawn_order_dispatch(
                     // EDGE-P2-3 Phase 1B-3.1：鏡射 order_type + time_in_force，
                     // 便於逾時清理區分 Market 與掛中 PostOnly。
                     order_type: req.order_type.clone(),
+                    limit_price: req.limit_price,
                     time_in_force: req.time_in_force,
                     // EDGE-P2-3 Phase 1B-3.2: per-order maker sweep timeout.
                     // EDGE-P2-3 Phase 1B-3.2：每單 maker sweep 逾時。

@@ -572,6 +572,7 @@ fn test_close_maker_reprice_direction_through_real_chain() {
         is_close: req.is_close,
         context_id: req.context_id.clone(),
         order_type: req.order_type.clone(),
+        limit_price: req.limit_price,
         time_in_force: req.time_in_force,
         maker_timeout_ms: req.maker_timeout_ms,
         close_maker_audit: req.close_maker_audit.clone(),
@@ -658,6 +659,7 @@ fn test_close_maker_reprice_direction_through_real_chain() {
         symbol: req2.symbol.clone(),
         order_link_id: req2.order_link_id.clone(),
         strategy: req2.strategy.clone(),
+        limit_price: req2.limit_price,
         close_maker_audit: req2.close_maker_audit.clone(),
         ..po.clone()
     };

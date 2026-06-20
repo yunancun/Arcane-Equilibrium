@@ -289,6 +289,7 @@ mod tests {
             is_close: false,
             context_id: String::new(),
             order_type: "market".into(),
+            limit_price: None,
             time_in_force: None,
             maker_timeout_ms: None,
             close_maker_audit: None,
@@ -321,6 +322,7 @@ mod tests {
             is_close: false,
             context_id: String::new(),
             order_type: "limit".into(),
+            limit_price: Some(100.0),
             time_in_force: Some(crate::order_manager::TimeInForce::PostOnly),
             maker_timeout_ms,
             close_maker_audit: None,
@@ -667,6 +669,7 @@ mod tests {
         // 訂單側 = 持倉反向（鏡射真實 close dispatch）。
         po.is_long = !position_is_long;
         po.strategy = "strategy_close:grid_close_long".into();
+        po.limit_price = Some(initial_limit_price);
         po.reprice_count = reprice_count;
         po.close_maker_audit = Some(crate::tick_pipeline::CloseMakerFillAudit {
             initial_limit_price: Some(initial_limit_price),

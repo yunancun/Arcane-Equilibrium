@@ -66,6 +66,7 @@ fn test_handle_reset_clears_state_and_pending() {
             // FILL-CONTEXT-LINKAGE-1：空字串保持修前行為。
             context_id: String::new(),
             order_type: "market".into(),
+            limit_price: None,
             time_in_force: None,
             maker_timeout_ms: None,
             close_maker_audit: None,

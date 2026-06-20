@@ -514,11 +514,19 @@ pub enum TradingMsg {
         /// Bybit timeInForce, e.g. "GTC" / "PostOnly" / Bybit timeInForce。
         time_in_force: Option<String>,
         qty: f64,
+        /// Limit/order price when known. Market orders may leave this NULL.
+        /// 已知的委託價；市價單可保 NULL。
+        price: Option<f64>,
+        /// Signal-time context id mirrored from PendingOrder for order/fill joins.
+        /// 從 PendingOrder 鏡射的訊號時刻 context_id，供 order/fill join。
+        context_id: Option<String>,
         strategy_name: String,
         /// True if this is a close/reduce order / 是否為平倉單
         is_close: bool,
         /// Engine mode: "paper", "demo", or "live" / 引擎模式
         engine_mode: String,
+        /// Audit metadata for order submission / 委託提交審計 metadata。
+        details: Option<serde_json::Value>,
         /// P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：策略入場意圖 id。
         /// 邏輯 FK → trading.intents.intent_id（trading.orders.intent_id 欄
         /// V003 起即存在但寫入器漏接，導致 Guardian-pass-rate 無法以
