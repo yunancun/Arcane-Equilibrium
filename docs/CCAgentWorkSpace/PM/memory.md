@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Jitter-Tolerant Sample Floor
+
+- Upgraded `polymarket_leadlag` to report schema/runner v0.5.
+- Overlap-adjusted sample counting and HAC lag now share a 5s schedule-jitter tolerance; IC rows expose `overlap_jitter_tolerance_ms`.
+- This fixes evidence velocity under the installed 15m cron cadence without lowering `min_points` or candidate thresholds.
+- Linux v0.5 smoke wrote latest sha256 `8756b1c5758634f283de79fc83014cd12b290c3fd0c79669c6bbef8f2b7d2136`; `max_ic_points=9`, `max_overlap_adjusted_ic_points=9`, `candidate_count=0`, still `INSUFFICIENT_SAMPLE`.
+- Alpha discovery latest sha256 `0c3f6fbd893719888d6b29dd4ddc1ee59366855d4d9343dba90a8d78bbf60532` reports `polymarket_leadlag_ic.sample_count=9`, action `RUN_READ_ONLY_CAPTURE`, ready/probe=0.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket HAC IC Gate
 
 - Upgraded `polymarket_leadlag` to report schema/runner v0.4 with Newey-West/HAC slope t-stat significance.
