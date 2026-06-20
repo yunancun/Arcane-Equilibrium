@@ -666,7 +666,7 @@ def l1_candidate_coverage_summary(
     }
     symbols_with_l1 = sorted(sym for sym in candidate_symbols if l1_rows_by_symbol.get(sym, 0) > 0)
     symbols_missing_l1 = sorted(sym for sym in candidate_symbols if l1_rows_by_symbol.get(sym, 0) <= 0)
-    return {
+    coverage = {
         "n_candidate_events": len(candidate_events),
         "candidate_events_by_symbol": events_by_symbol,
         "candidate_days_by_symbol": {
@@ -686,6 +686,112 @@ def l1_candidate_coverage_summary(
         "symbols_missing_l1": symbols_missing_l1,
         "l1_rows_by_symbol": l1_rows_by_symbol,
         "l1_range_by_symbol": l1_range_by_symbol,
+    }
+    coverage["coverage_action_scorecard"] = l1_coverage_action_scorecard(coverage)
+    return coverage
+
+
+def l1_coverage_action_scorecard(coverage: dict[str, Any]) -> dict[str, Any]:
+    relation_counts = {
+        str(k): int(v)
+        for k, v in (coverage.get("event_window_l1_relation_counts") or {}).items()
+    }
+    missing_windows = [
+        row for row in (coverage.get("events_missing_l1_in_event_window_sample") or [])
+        if isinstance(row, dict)
+    ]
+    n_events = int(coverage.get("n_candidate_events") or 0)
+    n_with = int(coverage.get("n_events_with_l1_in_event_window") or 0)
+    n_missing = int(coverage.get("n_events_missing_l1_in_event_window") or 0)
+    before_count = relation_counts.get("candidate_window_before_symbol_l1_range", 0)
+    after_count = relation_counts.get("candidate_window_after_symbol_l1_range", 0)
+    no_symbol_count = relation_counts.get("no_symbol_l1_rows", 0)
+    overlap_empty_count = relation_counts.get(
+        "candidate_window_overlaps_symbol_l1_range_but_empty",
+        0,
+    )
+    gap_hours = [
+        float(row["l1_gap_hours"])
+        for row in missing_windows
+        if row.get("l1_gap_hours") is not None and math.isfinite(float(row["l1_gap_hours"]))
+    ]
+    latest_missing_window_end = max(
+        (row.get("window_end_ts") for row in missing_windows if row.get("window_end_ts")),
+        default=None,
+    )
+    earliest_symbol_l1_first = min(
+        (
+            row.get("symbol_l1_first_ts")
+            for row in missing_windows
+            if row.get("symbol_l1_first_ts")
+        ),
+        default=None,
+    )
+    latest_symbol_l1_last = max(
+        (
+            row.get("symbol_l1_last_ts")
+            for row in missing_windows
+            if row.get("symbol_l1_last_ts")
+        ),
+        default=None,
+    )
+
+    if n_events <= 0:
+        status = "NO_CANDIDATE_EVENTS_OVERLAP_L1_RANGE"
+        reason = "daily_candidate_events_outside_loaded_l1_range"
+        next_trigger = "wait_for_candidate_events_whose_windows_overlap_loaded_l1"
+        engineering_actionable = False
+    elif n_missing <= 0:
+        status = "EVENT_WINDOWS_HAVE_L1_COVERAGE"
+        reason = "all_candidate_event_windows_have_l1_rows"
+        next_trigger = "evaluate_queue_fill_and_short_exit_gate"
+        engineering_actionable = False
+    elif n_with > 0:
+        status = "PARTIAL_EVENT_WINDOW_L1_COVERAGE"
+        reason = "some_candidate_windows_have_l1_rows_but_sample_gate_not_met"
+        next_trigger = "continue_capture_until_l1_covered_candidate_sample_gate"
+        engineering_actionable = True
+    elif before_count == n_missing and before_count == n_events:
+        status = "HISTORICAL_CANDIDATES_BEFORE_L1_CAPTURE_WAIT_NEXT_CANDIDATE"
+        reason = "candidate_windows_end_before_symbol_l1_capture_starts"
+        next_trigger = "wait_for_next_flash_dip_candidate_after_l1_capture_start_then_replay"
+        engineering_actionable = False
+    elif after_count == n_missing and after_count == n_events:
+        status = "CANDIDATES_AFTER_L1_RANGE_RECORDER_STALE_OR_WINDOW_AFTER_DATA"
+        reason = "candidate_windows_start_after_loaded_symbol_l1_range"
+        next_trigger = "restore_or_extend_l1_capture_then_replay_candidate_windows"
+        engineering_actionable = True
+    elif no_symbol_count > 0 and no_symbol_count >= n_missing:
+        status = "SYMBOL_L1_MISSING_FOR_CANDIDATES"
+        reason = "candidate_symbols_have_no_l1_rows_loaded"
+        next_trigger = "verify_l1_recorder_symbol_subscription_before_replay"
+        engineering_actionable = True
+    elif overlap_empty_count > 0:
+        status = "L1_RANGE_OVERLAPS_BUT_EVENT_WINDOW_EMPTY"
+        reason = "symbol_l1_range_overlaps_candidate_period_but_event_windows_have_no_rows"
+        next_trigger = "inspect_l1_recorder_gaps_inside_candidate_windows"
+        engineering_actionable = True
+    else:
+        status = "MIXED_L1_COVERAGE_GAP"
+        reason = "multiple_l1_gap_modes_present"
+        next_trigger = "split_l1_gap_modes_before_strategy_judgment"
+        engineering_actionable = True
+
+    return {
+        "status": status,
+        "reason": reason,
+        "next_trigger": next_trigger,
+        "engineering_actionable": engineering_actionable,
+        "n_candidate_events": n_events,
+        "events_with_l1_in_event_window": n_with,
+        "events_missing_l1_in_event_window": n_missing,
+        "event_window_l1_relation_counts": relation_counts,
+        "l1_gap_hours": _summary(gap_hours),
+        "latest_missing_window_end_ts": latest_missing_window_end,
+        "earliest_symbol_l1_first_ts": earliest_symbol_l1_first,
+        "latest_symbol_l1_last_ts": latest_symbol_l1_last,
+        "missing_event_windows_sample": missing_windows[:10],
+        "boundary": "diagnostic_only_not_retune_or_promotion_authority",
     }
 
 
