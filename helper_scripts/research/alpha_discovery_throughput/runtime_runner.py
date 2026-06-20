@@ -507,6 +507,7 @@ def collect_mm_verdict_arm(
                 "positive_symbols": sorted(positive_symbols),
                 "adverse_selection_usable": status.get("adverse_selection_usable"),
                 "cost_wall_summary": status.get("cost_wall_summary"),
+                "fee_path_feasibility": status.get("fee_path_feasibility"),
                 "horizon_scorecard": (status.get("fillsim") or {}).get("horizon_scorecard"),
                 "walk_forward_failure_summary": (
                     ((status.get("fillsim") or {}).get("walk_forward_feature_scorecard") or {})
@@ -532,6 +533,7 @@ def collect_mm_verdict_arm(
             "positive_symbols": sorted(positive_symbols),
             "adverse_selection_usable": status.get("adverse_selection_usable"),
             "cost_wall_summary": status.get("cost_wall_summary"),
+            "fee_path_feasibility": status.get("fee_path_feasibility"),
             "horizon_scorecard": (status.get("fillsim") or {}).get("horizon_scorecard"),
             "walk_forward_failure_summary": (
                 ((status.get("fillsim") or {}).get("walk_forward_feature_scorecard") or {})
@@ -812,6 +814,7 @@ def build_runtime_killboard(
             "actionable_probe_found": counts.get("READY_FOR_PROBE", 0) > 0,
         },
         "discovery_plan": plan,
+        "profitability_blocker_scorecard": plan.get("profitability_blocker_scorecard"),
         "arms_raw": arms,
     }
 

@@ -25,6 +25,19 @@
 
 ## 近期記錄
 
+## 2026-06-20 Alpha Profitability Blocker Scorecard
+
+- Added `profitability_blocker_scorecard` to alpha-discovery plans/runtime artifacts and mirrored it at top-level in `alpha_discovery_latest.json`.
+- Purpose: make the no-profit state explicit across all arms instead of only counting `READY/RUN_CAPTURE/WAIT/BLOCK`.
+- Taxonomy now separates ready states from blockers: `candidate_review_ready`, `probe_ready`, `feature_family_no_edge`, `cost_wall`, `fee_or_scale`, `sample_gate`, `data_coverage`, `event_wait`, `robustness_wait`, `rejected_no_edge`, `source_health`.
+- `runtime_runner.py` now passes MM `fee_path_feasibility` into arm detail, so MM can show signal-family failure as primary and fee/capital path as secondary.
+- Latest trade-core alpha-discovery artifact sha256 `64a04a70f674042a426c7f31f584a0f15345e773dfc6c9caab2ff515d781a869`, created `2026-06-20T17:02:16.424355+00:00`: `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`, ready/probe=0.
+- Blocker counts: `feature_family_no_edge=1`, `sample_gate=1`, `data_coverage=1`, `event_wait=2`, `robustness_wait=1`, `rejected_no_edge=1`.
+- Top blocker: MM `no_train_positive_walk_forward_feature_cell`, sample=16; secondary blockers include current fee shortfall `0.0357bp` and VIP5 scale-gated lower-fee path (`break_even_maker_fee=1.135bp/side`).
+- Other active blockers: Polymarket 18/30 sample gate ETA `2026-06-20T19:52:03.067000+00:00`; FlashDip L1 `candidate_window_before_symbol_l1_range`; FlashDip buy no-touch; Gate-B `WATCH_ONLY`; AEG no durable rows; vol-event `NO_EDGE_SURVIVES`.
+- Verification: Mac and Linux focused suite `49 passed`; py_compile and diff-check passed on both; manual Linux artifact-only cron refreshed latest JSON.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact write only; no PG write, Bybit private/signed/trading call, engine/API restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 MM Walk-Forward Failure Summary
 
 - Added `walk_forward_feature_scorecard.failure_summary` and passed it through alpha-discovery MM detail as `walk_forward_failure_summary`.

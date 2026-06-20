@@ -176,6 +176,12 @@ def test_discovery_loop_waits_gate_b_watch_only_and_prioritizes_ready_chain():
     assert plan["arms"][0]["action"] == "READY_FOR_AEG_CHAIN"
     assert next(row for row in plan["arms"] if row["arm_id"] == "gate_b")["action"] == "WAIT"
     assert plan["policy"] == "read_only_recommendations_no_probe_or_trade_side_effect"
+    scorecard = plan["profitability_blocker_scorecard"]
+    assert scorecard["status"] == "ACTIONABLE_ALPHA_REVIEW_READY"
+    assert scorecard["promotion_ready_count"] == 1
+    blockers = {row["arm_id"]: row for row in scorecard["arms"]}
+    assert blockers["funding_oi"]["blocker_class"] == "candidate_review_ready"
+    assert blockers["gate_b"]["blocker_class"] == "event_wait"
 
 
 def test_discovery_loop_blocks_no_edge_survives_without_source_failure_label():
@@ -191,6 +197,115 @@ def test_discovery_loop_blocks_no_edge_survives_without_source_failure_label():
 
     assert plan["arms"][0]["action"] == "BLOCK"
     assert plan["arms"][0]["reason"] == "gate_status:no_edge_survives"
+    scorecard = plan["profitability_blocker_scorecard"]
+    assert scorecard["status"] == "NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED"
+    assert scorecard["blocker_counts"] == {"rejected_no_edge": 1}
+    assert scorecard["arms"][0]["primary_blocker"] == "gate_status:no_edge_survives"
+
+
+def test_profitability_blocker_scorecard_classifies_runtime_blockers():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "gate_b_listing_fade",
+            "gate_status": "WATCH_ONLY",
+            "sample_count": 0,
+            "artifacts_ready": False,
+            "source_ok": True,
+        },
+        {
+            "arm_id": "polymarket_leadlag_ic",
+            "gate_status": "CAPTURING",
+            "sample_count": 16,
+            "artifacts_ready": False,
+            "source_ok": True,
+            "detail": {
+                "min_samples_remaining_to_gate": 14,
+                "sample_gate_eta_utc": "2026-06-20T19:52:03+00:00",
+                "price_feedback_partial_collapse_count": 4,
+                "pre_gate_hac_watchlist_count": 3,
+            },
+        },
+        {
+            "arm_id": "mm_verdict_maker_edge",
+            "gate_status": "CAPTURING",
+            "sample_count": 31,
+            "artifacts_ready": False,
+            "source_ok": True,
+            "detail": {
+                "walk_forward_failure_summary": {
+                    "status": "NO_TRAIN_POSITIVE_CELL",
+                    "candidate_count": 51,
+                    "best_train_candidate": {"name": "quoted_half_spread_bps_train_p75_ge"},
+                    "best_holdout_candidate": {"name": "symbol == ADAUSDT"},
+                },
+                "cost_wall_summary": {
+                    "available": True,
+                    "best_symbol_by_net_edge": "LABUSDT",
+                    "best_fee_round_trip_shortfall_bps": 1.73,
+                },
+                "fee_path_feasibility": {
+                    "status": "STANDARD_VIP_TIER_CAN_CLEAR_BUT_SCALE_OR_CAPITAL_GATED",
+                    "break_even_maker_fee_bps_per_side": 1.135,
+                    "fee_reduction_needed_bps_per_side": 0.865,
+                    "first_standard_vip_tier_clearing_break_even": {"tier": "VIP5"},
+                },
+            },
+        },
+        {
+            "arm_id": "flash_dip_l1_short_exit_replay",
+            "gate_status": "CAPTURING",
+            "sample_count": 0,
+            "artifacts_ready": False,
+            "source_ok": True,
+            "detail": {
+                "fail_reasons": ["no_l1_rows_for_candidate_event_windows"],
+                "candidate_events": 6,
+                "events_missing_l1_in_event_window": 6,
+                "dominant_missing_event_window_l1_relation": (
+                    "candidate_window_before_symbol_l1_range"
+                ),
+            },
+        },
+        {
+            "arm_id": "vol_event_order_flow",
+            "gate_status": "NO_EDGE_SURVIVES",
+            "sample_count": 6,
+            "artifacts_ready": False,
+            "source_ok": True,
+        },
+        {
+            "arm_id": "aeg_robustness_matrix",
+            "gate_status": "WAIT",
+            "sample_count": 0,
+            "artifacts_ready": False,
+            "source_ok": True,
+        },
+    ], now_utc=dt.datetime(2026, 6, 20, 16, 55, tzinfo=dt.timezone.utc))
+
+    scorecard = plan["profitability_blocker_scorecard"]
+    assert scorecard["status"] == "NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED"
+    assert scorecard["blocker_counts"] == {
+        "feature_family_no_edge": 1,
+        "sample_gate": 1,
+        "data_coverage": 1,
+        "event_wait": 1,
+        "robustness_wait": 1,
+        "rejected_no_edge": 1,
+    }
+    blockers = {row["arm_id"]: row for row in scorecard["arms"]}
+    assert blockers["mm_verdict_maker_edge"]["blocker_class"] == "feature_family_no_edge"
+    assert blockers["mm_verdict_maker_edge"]["primary_blocker"] == (
+        "no_train_positive_walk_forward_feature_cell"
+    )
+    assert [row["blocker_class"] for row in blockers["mm_verdict_maker_edge"]["secondary_blockers"]] == [
+        "cost_wall",
+        "fee_or_scale",
+    ]
+    assert blockers["polymarket_leadlag_ic"]["sample_gate_eta_utc"] == (
+        "2026-06-20T19:52:03+00:00"
+    )
+    assert blockers["flash_dip_l1_short_exit_replay"]["blocker_class"] == "data_coverage"
+    assert scorecard["top_blockers"][0]["arm_id"] == "mm_verdict_maker_edge"
 
 
 def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
@@ -222,6 +337,11 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
             "available": True,
             "best_symbol_by_net_edge": "BTCUSDT",
             "best_fee_round_trip_shortfall_bps": -1.25,
+        },
+        "fee_path_feasibility": {
+            "status": "CURRENT_ACCOUNT_FEE_CLEARS_BREAK_EVEN",
+            "break_even_maker_fee_bps_per_side": 2.2,
+            "fee_reduction_needed_bps_per_side": 0.0,
         },
         "fillsim": {
             "walk_forward_feature_scorecard": {
@@ -281,11 +401,20 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     raw_arms = {row["arm_id"]: row for row in loaded["arms_raw"]}
     assert arms["mm_verdict_maker_edge"]["action"] == "READY_FOR_AEG_CHAIN"
     assert raw_arms["mm_verdict_maker_edge"]["detail"]["cost_wall_summary"]["best_symbol_by_net_edge"] == "BTCUSDT"
+    assert raw_arms["mm_verdict_maker_edge"]["detail"]["fee_path_feasibility"]["status"] == (
+        "CURRENT_ACCOUNT_FEE_CLEARS_BREAK_EVEN"
+    )
     assert raw_arms["mm_verdict_maker_edge"]["detail"]["walk_forward_failure_summary"]["status"] == (
         "TRAIN_POSITIVE_HOLDOUT_DECAY"
     )
     assert arms["gate_b_listing_fade"]["action"] == "WAIT"
     assert arms["vol_event_order_flow"]["reason"] == "gate_status:no_edge_survives"
+    scorecard = loaded["discovery_plan"]["profitability_blocker_scorecard"]
+    scorecard_arms = {row["arm_id"]: row for row in scorecard["arms"]}
+    assert loaded["profitability_blocker_scorecard"] == scorecard
+    assert scorecard["status"] == "ACTIONABLE_ALPHA_REVIEW_READY"
+    assert scorecard_arms["mm_verdict_maker_edge"]["blocker_class"] == "candidate_review_ready"
+    assert scorecard_arms["vol_event_order_flow"]["blocker_class"] == "rejected_no_edge"
 
 
 def test_runtime_runner_blocks_stale_mm_verdict_status(tmp_path):

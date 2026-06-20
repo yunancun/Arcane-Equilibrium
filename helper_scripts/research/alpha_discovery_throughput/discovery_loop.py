@@ -21,12 +21,42 @@ _PRIORITY = {
     BLOCK: 4,
 }
 
+_BLOCKER_PRIORITY = {
+    "candidate_review_ready": 0,
+    "probe_ready": 1,
+    "feature_family_no_edge": 2,
+    "cost_wall": 3,
+    "fee_or_scale": 4,
+    "sample_gate": 5,
+    "data_coverage": 6,
+    "event_wait": 7,
+    "robustness_wait": 8,
+    "rejected_no_edge": 9,
+    "source_health": 10,
+    "unknown_wait": 11,
+}
+
 
 def _int(value: Any, default: int = 0) -> int:
     try:
         return int(float(value))
     except (TypeError, ValueError):
         return default
+
+
+def _float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
+
+
+def _list(value: Any) -> list[Any]:
+    return value if isinstance(value, list) else []
 
 
 def decide_arm_action(arm: dict[str, Any], *, min_samples: int = 30) -> dict[str, Any]:
@@ -64,6 +94,363 @@ def decide_arm_action(arm: dict[str, Any], *, min_samples: int = 30) -> dict[str
     }
 
 
+def _base_blocker_row(arm: dict[str, Any], decision: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "arm_id": decision.get("arm_id"),
+        "action": decision.get("action"),
+        "reason": decision.get("reason"),
+        "gate_status": decision.get("gate_status"),
+        "sample_count": decision.get("sample_count"),
+        "min_samples": decision.get("min_samples"),
+        "artifacts_ready": decision.get("artifacts_ready"),
+        "source_ok": arm.get("source_ok", True) is not False,
+        "source_error": arm.get("source_error"),
+        "promotion_ready": False,
+        "operator_actionable": False,
+        "engineering_actionable": False,
+        "secondary_blockers": [],
+    }
+
+
+def _finish_blocker_row(
+    row: dict[str, Any],
+    *,
+    blocker_class: str,
+    primary_blocker: str,
+    next_trigger: str,
+    promotion_ready: bool = False,
+    operator_actionable: bool = False,
+    engineering_actionable: bool = False,
+    secondary_blockers: list[dict[str, Any]] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    row.update({
+        "blocker_class": blocker_class,
+        "primary_blocker": primary_blocker,
+        "next_trigger": next_trigger,
+        "promotion_ready": promotion_ready,
+        "operator_actionable": operator_actionable,
+        "engineering_actionable": engineering_actionable,
+        "blocker_rank": _BLOCKER_PRIORITY.get(blocker_class, 99),
+    })
+    if secondary_blockers:
+        row["secondary_blockers"] = secondary_blockers
+    if extra:
+        row.update(extra)
+    return row
+
+
+def _mm_secondary_blockers(detail: dict[str, Any]) -> list[dict[str, Any]]:
+    blockers: list[dict[str, Any]] = []
+    cost_wall = _dict(detail.get("cost_wall_summary"))
+    if cost_wall:
+        shortfall = _float(cost_wall.get("best_fee_round_trip_shortfall_bps"))
+        if shortfall is not None and shortfall > 0:
+            blockers.append({
+                "blocker_class": "cost_wall",
+                "blocker": "current_maker_fee_exceeds_best_break_even",
+                "best_symbol_by_net_edge": cost_wall.get("best_symbol_by_net_edge"),
+                "best_fee_round_trip_shortfall_bps": shortfall,
+            })
+
+    fee_path = _dict(detail.get("fee_path_feasibility"))
+    fee_status = str(fee_path.get("status") or "").upper()
+    if fee_status == "STANDARD_VIP_TIER_CAN_CLEAR_BUT_SCALE_OR_CAPITAL_GATED":
+        blockers.append({
+            "blocker_class": "fee_or_scale",
+            "blocker": "lower_standard_vip_fee_may_clear_but_scale_or_capital_gated",
+            "break_even_maker_fee_bps_per_side": fee_path.get(
+                "break_even_maker_fee_bps_per_side"
+            ),
+            "fee_reduction_needed_bps_per_side": fee_path.get(
+                "fee_reduction_needed_bps_per_side"
+            ),
+            "first_standard_vip_tier_clearing_break_even": fee_path.get(
+                "first_standard_vip_tier_clearing_break_even"
+            ),
+        })
+    elif fee_status == "NO_STANDARD_VIP_TIER_CLEARS_BREAK_EVEN":
+        blockers.append({
+            "blocker_class": "fee_or_scale",
+            "blocker": "no_standard_vip_fee_tier_clears_break_even",
+            "break_even_maker_fee_bps_per_side": fee_path.get(
+                "break_even_maker_fee_bps_per_side"
+            ),
+        })
+    return blockers
+
+
+def classify_profitability_blocker(
+    arm: dict[str, Any],
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    """Classify why an arm is not yet usable as profit evidence."""
+    arm_id = str(decision.get("arm_id") or arm.get("arm_id") or "")
+    action = str(decision.get("action") or "")
+    gate_status = str(decision.get("gate_status") or "").upper()
+    detail = _dict(arm.get("detail"))
+    row = _base_blocker_row(arm, decision)
+
+    if action == READY_FOR_AEG_CHAIN:
+        return _finish_blocker_row(
+            row,
+            blocker_class="candidate_review_ready",
+            primary_blocker="candidate_artifacts_ready_need_aeg_chain",
+            next_trigger="run_AEG_MIT_QC_chain_before_any_promotion",
+            promotion_ready=True,
+            engineering_actionable=True,
+        )
+    if action == READY_FOR_PROBE:
+        return _finish_blocker_row(
+            row,
+            blocker_class="probe_ready",
+            primary_blocker="operator_probe_preflight_ready",
+            next_trigger="operator_review_then_isolated_probe_if_authorized",
+            operator_actionable=True,
+        )
+    if row["source_ok"] is False or str(decision.get("reason")) == "source_not_healthy":
+        return _finish_blocker_row(
+            row,
+            blocker_class="source_health",
+            primary_blocker=f"source_not_healthy:{arm.get('source_error') or 'unknown'}",
+            next_trigger="restore_or_refresh_source_artifact_before_strategy_judgment",
+            engineering_actionable=True,
+        )
+
+    if arm_id == "mm_verdict_maker_edge":
+        failure = _dict(detail.get("walk_forward_failure_summary"))
+        failure_status = str(failure.get("status") or "").upper()
+        secondary = _mm_secondary_blockers(detail)
+        fee_path = _dict(detail.get("fee_path_feasibility"))
+        fee_status = str(fee_path.get("status") or "").upper()
+        cost_wall = _dict(detail.get("cost_wall_summary"))
+        cost_shortfall = _float(cost_wall.get("best_fee_round_trip_shortfall_bps"))
+
+        if failure_status == "NO_TRAIN_POSITIVE_CELL":
+            return _finish_blocker_row(
+                row,
+                blocker_class="feature_family_no_edge",
+                primary_blocker="no_train_positive_walk_forward_feature_cell",
+                next_trigger="stop_expanding_current_mm_filter_family_seek_new_signal_or_fee_path",
+                engineering_actionable=True,
+                secondary_blockers=secondary,
+                extra={
+                    "walk_forward_failure_status": failure_status,
+                    "candidate_count": failure.get("candidate_count"),
+                    "best_train_candidate": failure.get("best_train_candidate"),
+                    "best_holdout_candidate": failure.get("best_holdout_candidate"),
+                },
+            )
+        if failure_status == "TRAIN_POSITIVE_HOLDOUT_DECAY":
+            return _finish_blocker_row(
+                row,
+                blocker_class="feature_family_no_edge",
+                primary_blocker="train_positive_decays_in_holdout",
+                next_trigger="reject_or_rework_filter_family_before_more_runtime_capture",
+                engineering_actionable=True,
+                secondary_blockers=secondary,
+                extra={
+                    "walk_forward_failure_status": failure_status,
+                    "best_train_candidate": failure.get("best_train_candidate"),
+                    "best_holdout_candidate": failure.get("best_holdout_candidate"),
+                },
+            )
+        if cost_shortfall is not None and cost_shortfall > 0:
+            return _finish_blocker_row(
+                row,
+                blocker_class="cost_wall",
+                primary_blocker="current_fee_round_trip_exceeds_best_break_even",
+                next_trigger="find_positive_current_fee_cell_or_prove_lower_fee_business_path",
+                engineering_actionable=True,
+                secondary_blockers=secondary,
+                extra={
+                    "best_symbol_by_net_edge": cost_wall.get("best_symbol_by_net_edge"),
+                    "best_fee_round_trip_shortfall_bps": cost_shortfall,
+                },
+            )
+        if fee_status in {
+            "STANDARD_VIP_TIER_CAN_CLEAR_BUT_SCALE_OR_CAPITAL_GATED",
+            "NO_STANDARD_VIP_TIER_CLEARS_BREAK_EVEN",
+        }:
+            return _finish_blocker_row(
+                row,
+                blocker_class="fee_or_scale",
+                primary_blocker=f"fee_path:{fee_status.lower()}",
+                next_trigger="business_fee_path_review_not_strategy_promotion",
+                secondary_blockers=secondary,
+                extra={
+                    "break_even_maker_fee_bps_per_side": fee_path.get(
+                        "break_even_maker_fee_bps_per_side"
+                    ),
+                    "fee_reduction_needed_bps_per_side": fee_path.get(
+                        "fee_reduction_needed_bps_per_side"
+                    ),
+                },
+            )
+
+    if arm_id == "polymarket_leadlag_ic" and _int(decision.get("sample_count")) < _int(
+        decision.get("min_samples")
+    ):
+        return _finish_blocker_row(
+            row,
+            blocker_class="sample_gate",
+            primary_blocker="overlap_adjusted_ic_sample_below_gate",
+            next_trigger="wait_until_sample_gate_eta_then_recompute_hac_bh_filters",
+            extra={
+                "min_samples_remaining_to_gate": detail.get("min_samples_remaining_to_gate"),
+                "sample_gate_eta_utc": detail.get("sample_gate_eta_utc"),
+                "price_feedback_partial_collapse_count": detail.get(
+                    "price_feedback_partial_collapse_count"
+                ),
+                "pre_gate_hac_watchlist_count": detail.get("pre_gate_hac_watchlist_count"),
+            },
+        )
+
+    if arm_id == "flash_dip_l1_short_exit_replay":
+        fail_reasons = [str(item) for item in _list(detail.get("fail_reasons"))]
+        relation = str(detail.get("dominant_missing_event_window_l1_relation") or "")
+        if any("l1" in reason.lower() for reason in fail_reasons) or relation:
+            return _finish_blocker_row(
+                row,
+                blocker_class="data_coverage",
+                primary_blocker=relation or (fail_reasons[0] if fail_reasons else "l1_replay_coverage_gap"),
+                next_trigger="capture_candidate_windows_with_l1_overlap_then_replay_short_exit",
+                engineering_actionable=True,
+                extra={
+                    "candidate_events": detail.get("candidate_events"),
+                    "events_missing_l1_in_event_window": detail.get(
+                        "events_missing_l1_in_event_window"
+                    ),
+                    "dominant_missing_event_window_l1_relation": relation or None,
+                },
+            )
+
+    if arm_id == "flash_dip_buy_demo":
+        touchability = _dict(detail.get("touchability"))
+        if gate_status == "CAPTURING_NO_TOUCH":
+            return _finish_blocker_row(
+                row,
+                blocker_class="event_wait",
+                primary_blocker="configured_flash_dip_limit_not_touchable",
+                next_trigger="wait_for_touchable_dip_or_use_l1_replay_to_reprice_k_ladder",
+                extra={
+                    "true_order_count": touchability.get("true_order_count"),
+                    "touched_count": touchability.get("touched_count"),
+                    "deepest_candidate_k_with_touch_pct": touchability.get(
+                        "deepest_candidate_k_with_touch_pct"
+                    ),
+                },
+            )
+
+    if gate_status in {"NO_EDGE_SURVIVES", "NO_EDGE", "REJECTED", "KILL", "KILLED"}:
+        return _finish_blocker_row(
+            row,
+            blocker_class="rejected_no_edge",
+            primary_blocker=f"gate_status:{gate_status.lower()}",
+            next_trigger="do_not_promote_current_family_without_new_evidence",
+        )
+
+    if arm_id == "gate_b_listing_fade":
+        return _finish_blocker_row(
+            row,
+            blocker_class="event_wait",
+            primary_blocker=f"gate_b_status:{gate_status.lower()}",
+            next_trigger="wait_for_fresh_gate_b_actionable_alert",
+        )
+
+    if arm_id == "aeg_robustness_matrix":
+        return _finish_blocker_row(
+            row,
+            blocker_class="robustness_wait",
+            primary_blocker="no_durable_aeg_candidate_rows",
+            next_trigger="feed_candidate_artifacts_into_robustness_matrix",
+            engineering_actionable=True,
+        )
+
+    if action == RUN_READ_ONLY_CAPTURE and _int(decision.get("sample_count")) < _int(
+        decision.get("min_samples")
+    ):
+        return _finish_blocker_row(
+            row,
+            blocker_class="sample_gate",
+            primary_blocker="sample_count_below_gate",
+            next_trigger="continue_read_only_capture_until_min_samples",
+        )
+
+    if action == WAIT:
+        return _finish_blocker_row(
+            row,
+            blocker_class="event_wait",
+            primary_blocker=f"gate_status:{gate_status.lower()}",
+            next_trigger="wait_for_source_status_change",
+        )
+
+    return _finish_blocker_row(
+        row,
+        blocker_class="unknown_wait",
+        primary_blocker="unclassified_profitability_blocker",
+        next_trigger="inspect_arm_detail",
+        engineering_actionable=True,
+    )
+
+
+def build_profitability_blocker_scorecard(
+    arms: list[dict[str, Any]],
+    decisions: list[dict[str, Any]],
+    *,
+    min_samples: int = 30,
+) -> dict[str, Any]:
+    """Summarize cross-arm reasons we still have no promotable profit edge."""
+    arms_by_id = {str(arm.get("arm_id") or arm.get("name") or "unknown"): arm for arm in arms}
+    rows = [
+        classify_profitability_blocker(arms_by_id.get(str(decision.get("arm_id")), {}), decision)
+        for decision in decisions
+    ]
+    rows.sort(key=lambda row: (
+        row.get("blocker_rank", 99),
+        _PRIORITY.get(str(row.get("action")), 99),
+        str(row.get("arm_id")),
+    ))
+    counts: dict[str, int] = {}
+    for row in rows:
+        blocker_class = str(row.get("blocker_class") or "unknown_wait")
+        counts[blocker_class] = counts.get(blocker_class, 0) + 1
+
+    promotion_ready_count = sum(1 for row in rows if row.get("promotion_ready") is True)
+    operator_actionable_count = sum(1 for row in rows if row.get("operator_actionable") is True)
+    engineering_actionable_count = sum(1 for row in rows if row.get("engineering_actionable") is True)
+    if promotion_ready_count > 0:
+        status = "ACTIONABLE_ALPHA_REVIEW_READY"
+    elif operator_actionable_count > 0:
+        status = "ACTIONABLE_PROBE_READY"
+    elif any(
+        counts.get(name, 0)
+        for name in (
+            "feature_family_no_edge",
+            "cost_wall",
+            "fee_or_scale",
+            "data_coverage",
+            "rejected_no_edge",
+            "source_health",
+        )
+    ):
+        status = "NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED"
+    else:
+        status = "NO_ACTIONABLE_ALPHA_WAIT_OR_SAMPLE_GATED"
+
+    return {
+        "schema_version": "alpha_profitability_blocker_scorecard_v1",
+        "status": status,
+        "min_samples": min_samples,
+        "blocker_counts": counts,
+        "promotion_ready_count": promotion_ready_count,
+        "operator_actionable_count": operator_actionable_count,
+        "engineering_actionable_count": engineering_actionable_count,
+        "top_blockers": rows[:3],
+        "arms": rows,
+    }
+
+
 def build_discovery_plan(
     arms: list[dict[str, Any]],
     *,
@@ -77,6 +464,11 @@ def build_discovery_plan(
     counts: dict[str, int] = {}
     for row in decisions:
         counts[row["action"]] = counts.get(row["action"], 0) + 1
+    blocker_scorecard = build_profitability_blocker_scorecard(
+        arms,
+        decisions,
+        min_samples=min_samples,
+    )
     return {
         "schema_version": DISCOVERY_LOOP_SCHEMA_VERSION,
         "runner_version": RUNNER_VERSION,
@@ -84,6 +476,7 @@ def build_discovery_plan(
         "policy": "read_only_recommendations_no_probe_or_trade_side_effect",
         "action_counts": counts,
         "arms": decisions,
+        "profitability_blocker_scorecard": blocker_scorecard,
     }
 
 
@@ -94,5 +487,7 @@ __all__ = [
     "RUN_READ_ONLY_CAPTURE",
     "WAIT",
     "build_discovery_plan",
+    "build_profitability_blocker_scorecard",
+    "classify_profitability_blocker",
     "decide_arm_action",
 ]
