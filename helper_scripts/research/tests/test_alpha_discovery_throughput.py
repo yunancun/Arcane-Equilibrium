@@ -339,6 +339,21 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
                 },
                 "low_friction_signal_scorecard": {
                     "status": "LOW_FRICTION_SIGNAL_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE",
+                    "train_confirmed_gross_scorecard": {
+                        "status": "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_BELOW_CURRENT_FEE",
+                        "train_confirmed_positive_gross_count": 4,
+                        "best_min_train_holdout_gross_bps": 0.63,
+                        "gap_to_current_fee_round_trip_bps": 3.37,
+                        "best_train_confirmed_gross_candidate": {
+                            "name": (
+                                "quoted_half_spread_bps_train_p90_and_"
+                                "recent_trade_count_30s_train_p10"
+                            ),
+                            "train_edge_before_fees_bps": 0.63,
+                            "holdout_edge_before_fees_bps": 1.272,
+                            "min_train_holdout_gross_bps": 0.63,
+                        },
+                    },
                 },
                 "history_scorecard": {
                     "status": "HISTORY_INSUFFICIENT_WINDOWS",
@@ -463,9 +478,21 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
     assert blockers["mm_verdict_maker_edge"][
         "low_friction_holdout_minus_train_gross_bps"
     ] == 2.135
+    assert blockers["mm_verdict_maker_edge"][
+        "low_friction_train_confirmed_gross_status"
+    ] == "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_BELOW_CURRENT_FEE"
+    assert blockers["mm_verdict_maker_edge"][
+        "low_friction_best_train_confirmed_min_gross_bps"
+    ] == 0.63
+    assert blockers["mm_verdict_maker_edge"][
+        "low_friction_train_confirmed_gap_to_current_fee_bps"
+    ] == 3.37
     assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
         "low_friction_gross_stability_scorecard"
     ]["train_confirms_gross"] is False
+    assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
+        "low_friction_best_train_confirmed_min_gross_bps"
+    ] == 0.63
     assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
         "best_low_friction_signal_holdout_gross_candidate"
     ]["holdout"]["source"] == "low_friction_signal_holdout"
@@ -675,6 +702,91 @@ def test_mm_no_train_positive_without_gross_decomposition_stays_feature_family()
     assert row["primary_blocker"] == "no_train_positive_walk_forward_feature_cell"
     assert row["secondary_blockers"][0]["blocker"] == (
         "current_maker_fee_exceeds_sample_gated_fill_sim_break_even"
+    )
+
+
+def test_mm_holdout_only_current_fee_positive_is_not_review_ready():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "mm_verdict_maker_edge",
+            "gate_status": "CAPTURING",
+            "sample_count": 31,
+            "artifacts_ready": False,
+            "source_ok": True,
+            "detail": {
+                "walk_forward_failure_summary": {
+                    "status": "NO_TRAIN_POSITIVE_CELL",
+                    "candidate_count": 51,
+                    "best_train_candidate": {"name": "symbol=ADAUSDT"},
+                },
+                "sample_gated_cost_wall_summary": {
+                    "available": True,
+                    "status": "SAMPLE_GATED_CURRENT_FEE_COST_WALL",
+                    "best_sample_gated_net_bps": -2.133,
+                    "best_sample_gated_fee_round_trip_shortfall_bps": 2.133,
+                    "break_even_maker_fee_bps_per_side": 2.934,
+                    "fee_reduction_needed_bps_per_side": 0.0,
+                },
+                "gross_edge_cost_decomposition": {
+                    "available": True,
+                    "status": "CURRENT_FEE_GROSS_AND_NET_POSITIVE",
+                    "current_fee_round_trip_bps": 4.0,
+                    "current_fee_positive_sample_gated_cell_count": 1,
+                    "best_sample_gated_current_fee_cell": {
+                        "source": "low_friction_signal_holdout",
+                        "name": (
+                            "quoted_half_spread_bps_train_p90_and_"
+                            "side_touch_size_delta_frac_30s_train_p90"
+                        ),
+                        "edge_before_fees_bps": 5.868,
+                        "net_bps": 1.868,
+                        "n_fill_only": 43,
+                    },
+                    "best_low_friction_signal_holdout_gross_candidate": {
+                        "name": (
+                            "quoted_half_spread_bps_train_p90_and_"
+                            "side_touch_size_delta_frac_30s_train_p90"
+                        ),
+                        "train": {
+                            "source": "low_friction_signal_train",
+                            "n_fill_only": 90,
+                            "edge_before_fees_bps": -0.336,
+                            "net_bps": -4.336,
+                            "sample_gated": True,
+                        },
+                        "holdout": {
+                            "source": "low_friction_signal_holdout",
+                            "n_fill_only": 43,
+                            "edge_before_fees_bps": 5.868,
+                            "net_bps": 1.868,
+                            "sample_gated": True,
+                        },
+                    },
+                },
+                "low_friction_signal_scorecard": {
+                    "status": "LOW_FRICTION_SIGNAL_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE",
+                    "train_confirmed_gross_scorecard": {
+                        "status": "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_BELOW_CURRENT_FEE",
+                        "train_confirmed_positive_gross_count": 44,
+                        "current_fee_confirmed_count": 0,
+                        "best_min_train_holdout_gross_bps": 1.402,
+                        "gap_to_current_fee_round_trip_bps": 2.598,
+                    },
+                },
+            },
+        },
+    ], now_utc=dt.datetime(2026, 6, 20, 21, 20, tzinfo=dt.timezone.utc))
+
+    row = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert row["blocker_class"] == "feature_family_no_edge"
+    assert row["primary_blocker"] == "low_friction_current_fee_holdout_not_train_confirmed"
+    assert row["cost_wall_escape_status"] == "CURRENT_FEE_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED"
+    assert row["best_sample_gated_current_fee_source"] == "low_friction_signal_holdout"
+    assert row["low_friction_train_confirmed_current_fee_count"] == 0
+    assert row["low_friction_best_train_confirmed_min_gross_bps"] == 1.402
+    assert row["low_friction_train_confirmed_gap_to_current_fee_bps"] == 2.598
+    assert row["next_trigger"] == (
+        "search_train_confirmed_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
     )
 
 

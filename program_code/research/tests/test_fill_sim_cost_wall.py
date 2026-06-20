@@ -622,7 +622,84 @@ def test_low_friction_signal_scorecard_confirms_holdout_current_fee_cell():
     assert scorecard["best_holdout_current_fee_candidate"] is not None
     assert scorecard["best_holdout_current_fee_candidate"]["holdout"]["edge_before_fees_bps"] >= 4.0
     assert scorecard["best_holdout_current_fee_candidate"]["holdout"]["n_fill_only"] >= 30
+    train_confirmed = scorecard["train_confirmed_gross_scorecard"]
+    assert train_confirmed["status"] == (
+        "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_CLEARS_CURRENT_FEE"
+    )
+    assert train_confirmed["current_fee_confirmed_count"] >= 1
+    assert train_confirmed["best_min_train_holdout_gross_bps"] >= 4.0
+    assert scorecard["best_train_confirmed_gross_candidate"][
+        "min_train_holdout_gross_bps"
+    ] >= 4.0
     assert scorecard["failure_summary"]["holdout_confirmed_current_fee_count"] >= 1
+
+
+def test_low_friction_signal_scorecard_ranks_train_confirmed_gross_below_fee_wall():
+    rows = []
+    for _half in range(2):
+        for _ in range(34):
+            rows.append(
+                {
+                    "symbol": "ABCUSDT",
+                    "side": "bid",
+                    "outcome": "fill",
+                    "quoted_half_spread_bps": 6.0,
+                    "side_recent_trade_imbalance_10s": 1.0,
+                    "recent_trade_count_10s": 1.0,
+                    "recent_l1_update_count_10s": 1.0,
+                    "side_touch_size_delta_frac_10s": 0.2,
+                    "spread_bps_delta_10s": 0.5,
+                    "half_spread_bps": 2.0,
+                    "adverse_sel_bps@15": 1.0,
+                }
+            )
+        for _ in range(8):
+            rows.append(
+                {
+                    "symbol": "ABCUSDT",
+                    "side": "bid",
+                    "outcome": "fill",
+                    "quoted_half_spread_bps": 1.0,
+                    "side_recent_trade_imbalance_10s": -1.0,
+                    "recent_trade_count_10s": 5.0,
+                    "recent_l1_update_count_10s": 5.0,
+                    "side_touch_size_delta_frac_10s": -0.2,
+                    "spread_bps_delta_10s": -0.5,
+                    "half_spread_bps": 0.6,
+                    "adverse_sel_bps@15": 1.0,
+                }
+            )
+    trials = _conditional_trials(rows)
+    for col in (
+        "side_recent_trade_imbalance_10s",
+        "recent_trade_count_10s",
+        "recent_l1_update_count_10s",
+        "side_touch_size_delta_frac_10s",
+        "spread_bps_delta_10s",
+    ):
+        trials[col] = [row[col] for row in rows]
+    adverse = _conditional_adverse(trials, rows)
+
+    scorecard = fill_sim_low_friction_signal_scorecard(
+        trials,
+        adverse,
+        horizons=(15,),
+        span_hours=1.0,
+        primary_horizon_s=15,
+    )
+
+    assert scorecard["status"] == "LOW_FRICTION_SIGNAL_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE"
+    train_confirmed = scorecard["train_confirmed_gross_scorecard"]
+    assert train_confirmed["status"] == (
+        "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_BELOW_CURRENT_FEE"
+    )
+    assert train_confirmed["train_confirmed_positive_gross_count"] >= 1
+    assert train_confirmed["current_fee_confirmed_count"] == 0
+    assert train_confirmed["best_min_train_holdout_gross_bps"] == pytest.approx(1.0)
+    assert train_confirmed["gap_to_current_fee_round_trip_bps"] == pytest.approx(3.0)
+    best = scorecard["best_train_confirmed_gross_candidate"]
+    assert best["train_sample_gated_positive_gross"] is True
+    assert best["holdout_sample_gated_positive_gross"] is True
 
 
 def test_maker_fee_sensitivity_finds_lower_fee_sample_gated_path():
