@@ -893,6 +893,11 @@ def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
     assert arm["detail"]["touchability"]["current_k_pct"] == 15.0
     assert arm["detail"]["touchability"]["deepest_candidate_k_with_touch_pct"] == 6.0
     assert arm["detail"]["touchability"]["k_ladder"][0]["k_pct"] == 2.0
+    action_scorecard = arm["detail"]["touchability"]["action_scorecard"]
+    assert action_scorecard["status"] == "SHALLOW_REPRICE_RESEARCH_BAND_PRESENT"
+    assert action_scorecard["research_candidate_k_pct"] == 6.0
+    assert action_scorecard["research_candidate_touched_count"] == 1
+    assert action_scorecard["touchable_lower_k_count"] == 2
     l1_replay = arm["detail"]["l1_short_exit_replay"]
     assert l1_replay["source_ok"] is True
     assert l1_replay["verdict_status"] == "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE"
@@ -905,6 +910,12 @@ def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
     assert l1_replay["boundary"] == "counterfactual_only_not_promotion_evidence"
     assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
     assert plan["arms"][0]["reason"] == "sample_count_below_gate"
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["next_trigger"] == (
+        "run_shallow_k_execution_realism_then_l1_replay_before_any_retune"
+    )
+    assert blocker["research_candidate_k_pct"] == 6.0
+    assert blocker["research_candidate_touched_count"] == 1
 
 
 def test_runtime_runner_keeps_stale_flash_dip_touchability_non_blocking(tmp_path):

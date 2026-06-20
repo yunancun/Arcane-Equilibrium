@@ -25,6 +25,17 @@
 
 ## 近期記錄
 
+## 2026-06-20 FlashDip Touchability Action Scorecard
+
+- Added diagnostic-only `touchability.action_scorecard` to alpha-discovery FlashDip runtime detail and blocker rows.
+- Diagnosis: K15 no-touch is not enough as an endpoint; the K-ladder should tell us whether a shallower, testable research band exists before any retune discussion.
+- Latest trade-core alpha-discovery artifact sha256 `8d5f58856ece9ff6e79839fbe055782a62a7517b41e1210b9fd6271a7160dd96`, `created_at_utc=2026-06-20T17:38:03.411654+00:00`.
+- Runtime evidence: configured K15 has `0/18` touches; deepest shallower candidate with touches is K6 with `2/18` touches (`11.1111%`); `touchable_lower_k_count=7`.
+- FlashDip blocker row now reports `touchability_action_status=SHALLOW_REPRICE_RESEARCH_BAND_PRESENT`, `research_candidate_k_pct=6.0`, and next trigger `run_shallow_k_execution_realism_then_l1_replay_before_any_retune`.
+- Global alpha-discovery status remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`, ready/probe=0; this only turns passive wait into a concrete read-only research trigger.
+- Verification: Mac and Linux focused `test_alpha_discovery_throughput.py` `22 passed`; py_compile, targeted diff-check, and read-only runtime smoke passed.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG write, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, retune authority, or promotion proof.
+
 ## 2026-06-20 MM Sample-Gated Cost-Wall Diagnosis
 
 - Added `sample_gated_cost_wall_summary` to `recorder_mm_verdict_cron.sh` and passed it through alpha-discovery runtime/blocker rows.

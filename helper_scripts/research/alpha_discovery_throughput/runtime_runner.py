@@ -296,6 +296,82 @@ def collect_flash_dip_l1_replay_arm(
     )
 
 
+def _flash_dip_touchability_action_scorecard(
+    touch_detail: dict[str, Any],
+) -> dict[str, Any]:
+    """Turn the touchability K ladder into a diagnostic research trigger."""
+    if touch_detail.get("source_ok") is not True:
+        return {
+            "status": "NO_FRESH_TOUCHABILITY_SOURCE",
+            "reason": touch_detail.get("source_error") or "missing_or_stale_touchability",
+            "promotion_boundary": "diagnostic_only_not_retune_or_promotion_authority",
+        }
+
+    true_order_count = _int(touch_detail.get("true_order_count"))
+    touched_count = _int(touch_detail.get("touched_count"))
+    current_k = _float(touch_detail.get("current_k_pct"))
+    ladder = touch_detail.get("k_ladder") if isinstance(touch_detail.get("k_ladder"), list) else []
+    if true_order_count <= 0:
+        return {
+            "status": "NO_FLASH_DIP_ORDERS_TO_SCORE",
+            "current_k_pct": current_k,
+            "true_order_count": true_order_count,
+            "promotion_boundary": "diagnostic_only_not_retune_or_promotion_authority",
+        }
+
+    touchable_candidates: list[dict[str, Any]] = []
+    for row in ladder:
+        if not isinstance(row, dict):
+            continue
+        k = _float(row.get("k_pct"))
+        if k is None or current_k is None or k >= current_k:
+            continue
+        candidate_touched = _int(row.get("touched_count"))
+        if candidate_touched <= 0:
+            continue
+        touchable_candidates.append({
+            "k_pct": k,
+            "true_order_count": row.get("true_order_count"),
+            "touched_count": candidate_touched,
+            "touch_rate_pct": row.get("touch_rate_pct"),
+            "median_closest_miss_bps": row.get("median_closest_miss_bps"),
+            "max_closest_miss_bps": row.get("max_closest_miss_bps"),
+        })
+    touchable_candidates.sort(key=lambda row: _float(row.get("k_pct")) or -1.0, reverse=True)
+    research_candidate = touchable_candidates[0] if touchable_candidates else None
+
+    if touched_count > 0:
+        status = "CURRENT_K_TOUCHABLE"
+        reason = "configured_k_has_touches"
+    elif research_candidate:
+        status = "SHALLOW_REPRICE_RESEARCH_BAND_PRESENT"
+        reason = "configured_k_no_touch_but_shallower_k_has_touches"
+    else:
+        status = "CURRENT_K_NO_TOUCH_NO_SHALLOW_TOUCH"
+        reason = "configured_k_and_candidate_ladder_no_touch"
+
+    return {
+        "status": status,
+        "reason": reason,
+        "current_k_pct": current_k,
+        "true_order_count": true_order_count,
+        "current_touched_count": touched_count,
+        "current_touch_rate_pct": touch_detail.get("touch_rate_pct"),
+        "research_candidate_k_pct": (
+            research_candidate.get("k_pct") if research_candidate else None
+        ),
+        "research_candidate_touched_count": (
+            research_candidate.get("touched_count") if research_candidate else None
+        ),
+        "research_candidate_touch_rate_pct": (
+            research_candidate.get("touch_rate_pct") if research_candidate else None
+        ),
+        "touchable_lower_k_count": len(touchable_candidates),
+        "touchable_lower_k_candidates": touchable_candidates[:8],
+        "promotion_boundary": "diagnostic_only_not_retune_or_promotion_authority",
+    }
+
+
 def collect_flash_dip_arm(
     data_dir: Path,
     *,
@@ -335,6 +411,9 @@ def collect_flash_dip_arm(
             ),
             "k_ladder": touchability.get("k_ladder"),
         }
+        touch_detail["action_scorecard"] = _flash_dip_touchability_action_scorecard(
+            touch_detail
+        )
 
     l1_replay_detail = _flash_dip_l1_short_exit_replay_detail(
         data_dir,
