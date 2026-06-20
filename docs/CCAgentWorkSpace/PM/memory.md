@@ -652,3 +652,11 @@
 - `fill_sim.py` now records `l1_min_ts/l1_max_ts/l1_max_age_hours`; `recorder_mm_verdict_cron.sh` rejects empty/stale L1 data even when `generated_at` is fresh.
 - Runtime recovery: explicit 90m post-fix window restored `/tmp/openclaw/research/fillsim/fillsim_report.json` with `l1_rows_post_filter=1,750,468`, fill_only `n=15,208`, adverse@15=1.477bp, net_maker@15=-4.701bp, `l1_max_age_hours=58.114`. Manual MM verdict then had `adverse_selection_usable=true`, sample=16, all symbol net edges still negative.
 - Root blocker found: `market.l1_events` stopped at `2026-06-17 21:55:45+02` while trades/ob_top are fresh. `recorder_health_cron.sh` installed at 06:23 UTC and manual run appended `[RECORDER-HEALTH] recorder stalled` critical alert. Next PM target is L1 event recorder repair; without it, fill_sim data-age gate will disable adverse selection again around 72h from L1 max.
+
+## 2026-06-20 L1 recorder persistence repair
+
+- Root cause was restart env persistence: active engine had `OPENCLAW_RECORD_L1_EVENTS=` while `OPENCLAW_RECORD_TICKS=1`, so `market.trades` and `market.ob_top` stayed fresh but the L1 producer was OFF after restart.
+- Fixed `helper_scripts/restart_all.sh` to read `OPENCLAW_RECORD_L1_EVENTS` and `OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL` from `basic_system_services.env` when parent env is absent; static regression covers the parent-only bug.
+- Runtime repair on trade-core: set non-secret env-file keys `OPENCLAW_RECORD_L1_EVENTS=1`, `OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL=50`; engine-only `--keep-auth` restart, no rebuild/API restart/schema migration.
+- Verification: new PID `4155643` env contains L1 flags; read-only PG showed `l1_max_ts=2026-06-20T02:19:20.531+02`, `l1_rows_5m=2635`, stale 0.027min. Formal `recorder_health_cron.sh` status: `l1_events.rows_24h=4566`, `stale_min=0.03`, crossed/locked 0.00.
+- Boundary: source/test/docs + Linux non-secret env flag + engine-only restart and `/tmp/openclaw` logs/heartbeats only; no Bybit private/signed/trading call, no credential/auth/risk/order/trading mutation, no promotion proof.

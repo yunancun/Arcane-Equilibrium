@@ -619,9 +619,14 @@ restart_engine() {
     #
     # recorder-v2（OPENCLAW_RECORD_L1_EVENTS / market.l1_events）刻意**不**像 RECORD_TICKS
     # 那樣預設 1：recorder-v2 對活引擎施加更重的持續負載（每 ~20ms delta 都要 apply 有狀態
-    # BTreeMap 本地簿，37 symbol），故預設 unset = OFF，二進制 inert，由 operator 顯式
-    # `OPENCLAW_RECORD_L1_EVENTS=1 ./restart_all.sh ...` 才開啟。OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL
-    # 是 rate-cap 安全閥的可選調參（缺省 ~80，僅在 RECORD_L1_EVENTS=1 時生效）。
+    # BTreeMap 本地簿，37+ symbol），故預設 unset = OFF，二進制 inert。operator env 優先；
+    # 否則讀 basic_system_services.env，使「已明確啟用」能跨 watchdog/plain restart 持久保存，
+    # 不再因某次重啟漏帶 inline env 而靜默停寫 market.l1_events。
+    # OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL 是 rate-cap 安全閥（Rust default=50，
+    # 僅在 RECORD_L1_EVENTS=1 時有意義），同樣支援 env-file 持久化。
+    local record_l1_events l1_max_events_per_sec_per_symbol
+    record_l1_events="${OPENCLAW_RECORD_L1_EVENTS:-$(grep '^OPENCLAW_RECORD_L1_EVENTS=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
+    l1_max_events_per_sec_per_symbol="${OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL:-$(grep '^OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL=' "$SECRETS_ROOT/environment_files/basic_system_services.env" 2>/dev/null | cut -d= -f2- || echo "")}"
     OPENCLAW_DATA_DIR="$DATA_DIR" OPENCLAW_IPC_SOCKET="$ENGINE_SOCKET" OPENCLAW_CANARY_MODE="${OPENCLAW_CANARY_MODE:-0}" \
         OPENCLAW_DATABASE_URL_FILE="$OPENCLAW_DATABASE_URL_FILE" \
         OPENCLAW_IPC_SECRET_FILE="$OPENCLAW_IPC_SECRET_FILE" \
@@ -640,8 +645,8 @@ restart_engine() {
         OPENCLAW_EDGE_RELOAD="${OPENCLAW_EDGE_RELOAD:-1}" \
         OPENCLAW_EDGE_RELOAD_INTERVAL_SECS="${OPENCLAW_EDGE_RELOAD_INTERVAL_SECS:-300}" \
         OPENCLAW_RECORD_TICKS="${OPENCLAW_RECORD_TICKS:-1}" \
-        OPENCLAW_RECORD_L1_EVENTS="${OPENCLAW_RECORD_L1_EVENTS:-}" \
-        OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL="${OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL:-}" \
+        OPENCLAW_RECORD_L1_EVENTS="${record_l1_events}" \
+        OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL="${l1_max_events_per_sec_per_symbol}" \
         OPENCLAW_STRATEGIST_RICH_INPUT="${strategist_rich_input}" \
         OPENCLAW_RISKCONFIG_AGENT_TUNING_ENABLED="${riskconfig_agent_tuning}" \
         OPENCLAW_FLASH_DIP_PILOT_ENABLED="${flash_dip_pilot_enabled}" \
