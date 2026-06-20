@@ -1055,3 +1055,8 @@
 
 - v288 adds `sample_gate_recheck_scorecard` to alpha-discovery Polymarket blockers. Current runtime is no longer vague sample wait: 25/30 overlap-adjusted floor, `PERSISTENT_PRE_GATE_WATCHLIST`, floor-qualified persistent=2 / recurring=3.
 - Latest alpha sha256 `c5832b2a371a6c0ea8564b2e321327bdb8d6ebedecf00c5ffab3a233617e89f0` says next trigger is `rerun_polymarket_leadlag_ic_after_sample_gate_eta_then_alpha_discovery` after `2026-06-20T19:52:02.074000+00:00`; not signal/candidate/promotion proof yet.
+
+## 2026-06-20 AEG candidate artifact dependency scorecard
+
+- v289 gates AEG robustness actionability on upstream `READY_FOR_AEG_CHAIN` / `READY_FOR_PROBE` / `artifacts_ready=true` artifacts. Empty candidate/probe pipeline now means AEG waits instead of consuming an engineering actionable slot.
+- Latest alpha sha256 `f3aec25f6904681ce407e97f133dcfcb28629328115ebcbefbc616697d437c72` has `engineering_actionable_count=1`; AEG status `NO_CANDIDATE_ARTIFACTS_AVAILABLE_FOR_ROBUSTNESS`, candidate_artifact_count=0, next trigger `wait_for_candidate_or_probe_artifact_before_robustness_matrix`. Boundary: source/test/docs + read-only alpha artifact only; no trading/runtime mutation.
