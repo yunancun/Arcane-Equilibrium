@@ -195,18 +195,57 @@ def collect_flash_dip_arm(
     now_utc: dt.datetime,
     max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
 ) -> dict[str, Any]:
+    touch_path = data_dir / "logs" / "flash_dip_touchability.log"
+    touchability, touch_err = _latest_json_line(touch_path)
+    touch_detail: dict[str, Any] = {
+        "source_path": str(touch_path),
+        "source_error": touch_err,
+    }
+    if touchability is not None:
+        touch_ts = touchability.get("ts_utc")
+        touch_fresh, touch_age, touch_freshness_error = _source_fresh(
+            touch_ts,
+            now_utc=now_utc,
+            max_age_seconds=max_age_seconds,
+        )
+        touch_detail = {
+            "source_path": str(touch_path),
+            "source_ok": touch_fresh,
+            "source_error": touch_freshness_error,
+            "ts_utc": touch_ts,
+            "age_seconds": touch_age,
+            "true_order_count": touchability.get("true_order_count"),
+            "order_labeled_count": touchability.get("order_labeled_count"),
+            "strategy_mismatch_count": touchability.get("strategy_mismatch_count"),
+            "touched_count": touchability.get("touched_count"),
+            "touch_rate_pct": touchability.get("touch_rate_pct"),
+            "median_ref_to_limit_bps": touchability.get("median_ref_to_limit_bps"),
+            "median_closest_miss_bps": touchability.get("median_closest_miss_bps"),
+            "max_closest_miss_bps": touchability.get("max_closest_miss_bps"),
+        }
+
     path = data_dir / "logs" / "flash_dip_death_rate.log"
     status, err = _latest_json_line(path)
     if err:
+        gate_status = "CAPTURING"
+        if (
+            _int(touch_detail.get("true_order_count")) > 0
+            and _int(touch_detail.get("touched_count")) == 0
+            and touch_detail.get("source_ok") is True
+        ):
+            gate_status = "CAPTURING_NO_TOUCH"
         return _arm(
             arm_id="flash_dip_buy_demo",
-            gate_status="CAPTURING",
+            gate_status=gate_status,
             sample_count=0,
             artifacts_ready=False,
             source_ok=True,
             source_path=path,
             source_error=err,
-            detail={"note": "death_rate_status_missing_or_not_yet_fired"},
+            detail={
+                "note": "death_rate_status_missing_or_not_yet_fired",
+                "touchability": touch_detail,
+            },
         )
     assert status is not None
     ts_utc = status.get("ts_utc")
@@ -217,9 +256,16 @@ def collect_flash_dip_arm(
     )
     sample_count = _int(status.get("n_closed_slots"))
     alerted = bool(status.get("alerted"))
-    gate_status = "REJECTED" if alerted else "READY"
+    gate_status = "REJECTED" if alerted else ("READY" if sample_count > 0 else "CAPTURING")
     if not fresh:
         gate_status = "SOURCE_FAILURE"
+    elif (
+        sample_count == 0
+        and _int(touch_detail.get("true_order_count")) > 0
+        and _int(touch_detail.get("touched_count")) == 0
+        and touch_detail.get("source_ok") is True
+    ):
+        gate_status = "CAPTURING_NO_TOUCH"
     return _arm(
         arm_id="flash_dip_buy_demo",
         gate_status=gate_status,
@@ -239,6 +285,7 @@ def collect_flash_dip_arm(
             "n_deaths": status.get("n_deaths"),
             "actionable": status.get("actionable"),
             "alerted": alerted,
+            "touchability": touch_detail,
         },
     )
 

@@ -322,6 +322,74 @@ def test_runtime_runner_blocks_stale_flash_dip_death_rate_status(tmp_path):
     assert plan["arms"][0]["reason"] == "source_not_healthy"
 
 
+def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
+    data = tmp_path / "openclaw"
+    (data / "logs").mkdir(parents=True)
+    (data / "logs" / "flash_dip_death_rate.log").write_text(json.dumps({
+        "ts_utc": "2026-06-20T00:53:01Z",
+        "thresholds": {"min_n": 20},
+        "n_closed_slots": 0,
+        "n_deaths": 0,
+        "death_rate_pct": None,
+        "actionable": False,
+        "alerted": False,
+    }) + "\n", encoding="utf-8")
+    (data / "logs" / "flash_dip_touchability.log").write_text(json.dumps({
+        "ts_utc": "2026-06-20T01:10:00Z",
+        "true_order_count": 18,
+        "order_labeled_count": 19,
+        "strategy_mismatch_count": 1,
+        "touched_count": 0,
+        "touch_rate_pct": 0.0,
+        "median_ref_to_limit_bps": 1600.0,
+        "median_closest_miss_bps": 1500.0,
+        "max_closest_miss_bps": 1762.7,
+    }) + "\n", encoding="utf-8")
+
+    arm = collect_flash_dip_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 1, 30, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan([arm], now_utc=dt.datetime(2026, 6, 20, 1, 30, tzinfo=dt.timezone.utc))
+
+    assert arm["gate_status"] == "CAPTURING_NO_TOUCH"
+    assert arm["sample_count"] == 0
+    assert arm["artifacts_ready"] is False
+    assert arm["detail"]["touchability"]["true_order_count"] == 18
+    assert arm["detail"]["touchability"]["strategy_mismatch_count"] == 1
+    assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
+    assert plan["arms"][0]["reason"] == "sample_count_below_gate"
+
+
+def test_runtime_runner_keeps_stale_flash_dip_touchability_non_blocking(tmp_path):
+    data = tmp_path / "openclaw"
+    (data / "logs").mkdir(parents=True)
+    (data / "logs" / "flash_dip_death_rate.log").write_text(json.dumps({
+        "ts_utc": "2026-06-20T00:53:01Z",
+        "thresholds": {"min_n": 20},
+        "n_closed_slots": 0,
+        "n_deaths": 0,
+        "death_rate_pct": None,
+        "actionable": False,
+        "alerted": False,
+    }) + "\n", encoding="utf-8")
+    (data / "logs" / "flash_dip_touchability.log").write_text(json.dumps({
+        "ts_utc": "2026-06-18T00:10:00Z",
+        "true_order_count": 18,
+        "touched_count": 0,
+    }) + "\n", encoding="utf-8")
+
+    arm = collect_flash_dip_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 1, 30, tzinfo=dt.timezone.utc),
+    )
+
+    assert arm["source_ok"] is True
+    assert arm["gate_status"] == "CAPTURING"
+    assert arm["detail"]["touchability"]["source_ok"] is False
+    assert arm["detail"]["touchability"]["source_error"] == "stale_artifact"
+
+
 def test_edge_snapshot_adapter_only_promotes_durable_non_bull_concrete_rows():
     durable = {
         "final_label": "durable-alpha candidate",
