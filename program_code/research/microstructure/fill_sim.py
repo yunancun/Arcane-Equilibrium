@@ -65,6 +65,7 @@ DEFAULT_SKIP_QUANTILE = 0.10
 # maker fee sensitivity grid（per side, bps）。0/negative scenarios model zero-fee / rebate paths
 # for research triage only; they do not change current fee accounting.
 DEFAULT_MAKER_FEE_SENSITIVITY_BPS_PER_SIDE = (2.0, 1.0, 0.5, 0.0, -0.5)
+LOW_FRICTION_LOOKBACKS_S = (10, 30)
 # NOTE-A 隊列劑量反應（queue dose-response）：你在 touch 隊列中身前的量 = frac × Q0。
 #   front = 0.0×Q0（隊首,最樂觀,假設你最先 join）
 #   mid   = 0.5×Q0（隊中。L1-only 無多檔深度,無法算真「5bp-of-depth」累積量;
@@ -532,6 +533,147 @@ def apply_informed_skip(trials, sig_by_sym, skip_quantile):
                 skip_flags[trials.index.get_loc(ix)] = True
     trials["informed_skip"] = skip_flags
     return trials
+
+
+def add_low_friction_microstructure_features(
+    trials: pd.DataFrame,
+    trades: pd.DataFrame,
+    l1_clean: pd.DataFrame,
+    *,
+    lookbacks_s=LOW_FRICTION_LOOKBACKS_S,
+) -> pd.DataFrame:
+    """Add PIT recent-flow / L1-churn features at quote placement time.
+
+    All windows are half-open [t-lookback, t): the feature end uses
+    searchsorted(..., side="left") so a trade/L1 event stamped exactly at
+    t_place is not used. This keeps the low-friction signal search leak-free.
+    """
+    if trials is None or trials.empty:
+        return trials.copy() if trials is not None else pd.DataFrame()
+
+    out = trials.copy()
+    for lookback_s in lookbacks_s:
+        suffix = f"{int(lookback_s)}s"
+        for col in (
+            f"recent_trade_count_{suffix}",
+            f"recent_trade_abs_qty_{suffix}",
+            f"recent_trade_imbalance_{suffix}",
+            f"side_recent_trade_imbalance_{suffix}",
+            f"recent_l1_update_count_{suffix}",
+            f"recent_l1_update_intensity_{suffix}",
+            f"side_touch_size_delta_frac_{suffix}",
+            f"spread_bps_delta_{suffix}",
+        ):
+            out[col] = np.nan
+
+    if "symbol" not in out or "t_place" not in out:
+        return out
+
+    for sym in out["symbol"].astype(str).unique():
+        idx = out.index[out["symbol"].astype(str) == sym]
+        if len(idx) == 0:
+            continue
+        tps = pd.to_numeric(out.loc[idx, "t_place"], errors="coerce").to_numpy(dtype="float64")
+        valid_tps = np.isfinite(tps)
+        if not valid_tps.any():
+            continue
+        tps_i = np.where(valid_tps, tps, 0).astype("int64", copy=False)
+
+        tr_sym = trades[trades["symbol"].astype(str) == sym].sort_values("ts") if trades is not None and not trades.empty else pd.DataFrame()
+        if not tr_sym.empty:
+            tr_ts = _ts_ns(tr_sym["ts"])
+            qty = pd.to_numeric(tr_sym["qty"], errors="coerce").fillna(0.0).to_numpy(dtype="float64")
+            side = tr_sym["side"].astype(str).to_numpy()
+            signed = np.where(side == "Buy", qty, -qty)
+            prefix_abs = np.concatenate([[0.0], np.cumsum(np.abs(qty))])
+            prefix_signed = np.concatenate([[0.0], np.cumsum(signed)])
+            prefix_count = np.arange(len(tr_ts) + 1, dtype="float64")
+        else:
+            tr_ts = np.array([], dtype="int64")
+            prefix_abs = prefix_signed = prefix_count = np.array([0.0])
+
+        l1_sym = l1_clean[l1_clean["symbol"].astype(str) == sym].sort_values(["ts", "update_id"]) if l1_clean is not None and not l1_clean.empty else pd.DataFrame()
+        if not l1_sym.empty:
+            l1_ts = _ts_ns(l1_sym["ts"])
+            bid_size = pd.to_numeric(l1_sym["bid_size"], errors="coerce").to_numpy(dtype="float64")
+            ask_size = pd.to_numeric(l1_sym["ask_size"], errors="coerce").to_numpy(dtype="float64")
+            bb = pd.to_numeric(l1_sym["best_bid"], errors="coerce").to_numpy(dtype="float64")
+            ba = pd.to_numeric(l1_sym["best_ask"], errors="coerce").to_numpy(dtype="float64")
+            mid = 0.5 * (bb + ba)
+            spread_bps = (ba - bb) / mid * 1e4
+        else:
+            l1_ts = np.array([], dtype="int64")
+            bid_size = ask_size = spread_bps = np.array([], dtype="float64")
+
+        side_is_bid = out.loc[idx, "side"].astype(str).to_numpy() == "bid"
+        q0 = pd.to_numeric(out.loc[idx, "q0"], errors="coerce").to_numpy(dtype="float64")
+        cur_half_spread = pd.to_numeric(
+            out.loc[idx, "quoted_half_spread_bps"], errors="coerce"
+        ).to_numpy(dtype="float64")
+        cur_spread_bps = 2.0 * cur_half_spread
+
+        for lookback_s in lookbacks_s:
+            look_ns = int(float(lookback_s) * 1e9)
+            suffix = f"{int(lookback_s)}s"
+
+            if len(tr_ts):
+                hi = np.searchsorted(tr_ts, tps_i, side="left")
+                lo = np.searchsorted(tr_ts, tps_i - look_ns, side="left")
+                count = prefix_count[hi] - prefix_count[lo]
+                abs_qty = prefix_abs[hi] - prefix_abs[lo]
+                signed_qty = prefix_signed[hi] - prefix_signed[lo]
+                imbalance = np.divide(
+                    signed_qty,
+                    abs_qty,
+                    out=np.full_like(signed_qty, np.nan, dtype="float64"),
+                    where=abs_qty > 0,
+                )
+            else:
+                count = abs_qty = np.full(len(idx), 0.0)
+                imbalance = np.full(len(idx), np.nan, dtype="float64")
+
+            out.loc[idx, f"recent_trade_count_{suffix}"] = count
+            out.loc[idx, f"recent_trade_abs_qty_{suffix}"] = abs_qty
+            out.loc[idx, f"recent_trade_imbalance_{suffix}"] = imbalance
+            out.loc[idx, f"side_recent_trade_imbalance_{suffix}"] = np.where(
+                side_is_bid, imbalance, -imbalance
+            )
+
+            if len(l1_ts):
+                hi_l1 = np.searchsorted(l1_ts, tps_i, side="left")
+                lo_l1 = np.searchsorted(l1_ts, tps_i - look_ns, side="left")
+                l1_count = hi_l1 - lo_l1
+                prev_ix = np.searchsorted(l1_ts, tps_i - look_ns, side="right") - 1
+                valid_prev = prev_ix >= 0
+                prev_size = np.full(len(idx), np.nan, dtype="float64")
+                prev_spread = np.full(len(idx), np.nan, dtype="float64")
+                if valid_prev.any():
+                    prev_size[valid_prev] = np.where(
+                        side_is_bid[valid_prev],
+                        bid_size[prev_ix[valid_prev]],
+                        ask_size[prev_ix[valid_prev]],
+                    )
+                    prev_spread[valid_prev] = spread_bps[prev_ix[valid_prev]]
+                delta_frac = np.divide(
+                    q0 - prev_size,
+                    prev_size,
+                    out=np.full(len(idx), np.nan, dtype="float64"),
+                    where=prev_size > 0,
+                )
+                spread_delta = cur_spread_bps - prev_spread
+            else:
+                l1_count = np.zeros(len(idx), dtype="float64")
+                delta_frac = np.full(len(idx), np.nan, dtype="float64")
+                spread_delta = np.full(len(idx), np.nan, dtype="float64")
+
+            out.loc[idx, f"recent_l1_update_count_{suffix}"] = l1_count
+            out.loc[idx, f"recent_l1_update_intensity_{suffix}"] = (
+                np.asarray(l1_count, dtype="float64") / float(lookback_s)
+            )
+            out.loc[idx, f"side_touch_size_delta_frac_{suffix}"] = delta_frac
+            out.loc[idx, f"spread_bps_delta_{suffix}"] = spread_delta
+
+    return out
 
 
 # ============================================================
@@ -1418,6 +1560,354 @@ def fill_sim_walk_forward_feature_scorecard(trials: pd.DataFrame, adverse_by_fil
     return base
 
 
+def _cell_sample_gated_gross_edge_clears(cell: dict | None, threshold_bps: float) -> bool:
+    if not cell:
+        return False
+    edge = cell.get("edge_before_fees_bps")
+    try:
+        edge_f = float(edge)
+    except (TypeError, ValueError):
+        return False
+    return (
+        np.isfinite(edge_f)
+        and edge_f >= float(threshold_bps)
+        and int(cell.get("n_fill_only") or 0) >= MIN_FILLS_FOR_SIGNIF
+        and not bool(cell.get("signif_suppressed"))
+    )
+
+
+def _low_friction_signal_failure_summary(rows: list[dict], holdout_confirmed: list[dict],
+                                         train_clearing: list[dict]) -> dict:
+    def _condense(row: dict | None) -> dict | None:
+        if not row:
+            return None
+        train = row.get("train") or {}
+        holdout = row.get("holdout") or {}
+        return {
+            "name": row.get("name"),
+            "condition": row.get("condition"),
+            "feature": row.get("feature"),
+            "threshold_source": row.get("threshold_source"),
+            "train_edge_before_fees_bps": train.get("edge_before_fees_bps"),
+            "train_net_bps": train.get("net_bps"),
+            "train_n_fill_only": train.get("n_fill_only"),
+            "holdout_edge_before_fees_bps": holdout.get("edge_before_fees_bps"),
+            "holdout_net_bps": holdout.get("net_bps"),
+            "holdout_n_fill_only": holdout.get("n_fill_only"),
+            "train_sample_gated_gross_clears_current_fee": row.get(
+                "train_sample_gated_gross_clears_current_fee"
+            ),
+            "holdout_sample_gated_gross_clears_current_fee": row.get(
+                "holdout_sample_gated_gross_clears_current_fee"
+            ),
+            "holdout_confirmed_current_fee": row.get("holdout_confirmed_current_fee"),
+        }
+
+    holdout_ranked = sorted(
+        [r for r in rows if (r.get("holdout") or {}).get("edge_before_fees_bps") is not None],
+        key=lambda r: (
+            (r.get("holdout") or {}).get("edge_before_fees_bps")
+            if (r.get("holdout") or {}).get("edge_before_fees_bps") is not None else -1e9,
+            (r.get("holdout") or {}).get("n_fill_only") or 0,
+        ),
+        reverse=True,
+    )
+    if holdout_confirmed:
+        status = "LOW_FRICTION_HOLDOUT_CURRENT_FEE_CONFIRMED"
+    elif train_clearing:
+        status = "LOW_FRICTION_TRAIN_CLEARS_HOLDOUT_GAP"
+    elif any(
+        (r.get("holdout") or {}).get("edge_before_fees_bps") is not None
+        and float((r.get("holdout") or {}).get("edge_before_fees_bps")) > 0.0
+        for r in rows
+    ):
+        status = "LOW_FRICTION_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE"
+    elif rows:
+        status = "LOW_FRICTION_NO_GROSS_EDGE"
+    else:
+        status = "LOW_FRICTION_NO_CANDIDATES"
+    return {
+        "status": status,
+        "candidates_evaluated": len(rows),
+        "train_current_fee_clearing_count": len(train_clearing),
+        "holdout_confirmed_current_fee_count": len(holdout_confirmed),
+        "best_train_candidate": _condense(rows[0] if rows else None),
+        "best_holdout_gross_candidate": _condense(holdout_ranked[0] if holdout_ranked else None),
+        "top_holdout_gross_candidates": [_condense(row) for row in holdout_ranked[:10]],
+        "note": (
+            "Diagnostic only. Low-friction candidates use placement-time recent flow/L1 "
+            "churn features and still require cross-window CP-3 proof before strategy work."
+        ),
+    }
+
+
+def fill_sim_low_friction_signal_scorecard(
+    trials: pd.DataFrame,
+    adverse_by_fill: pd.DataFrame,
+    horizons,
+    span_hours: float,
+    *,
+    primary_horizon_s: int = 15,
+) -> dict:
+    """Search a new low-friction MM surface from recent flow/L1-churn features.
+
+    Unlike the older spread/queue/OFI scorecards, this reducer only uses
+    columns produced by add_low_friction_microstructure_features plus
+    pre-registered high-spread combinations. Thresholds are selected on the
+    train time half and replayed on holdout.
+    """
+    base = {
+        "primary_horizon_s": primary_horizon_s,
+        "current_fee_round_trip_bps": MAKER_FEE_ROUND_TRIP_BPS,
+        "min_fills_for_signif": MIN_FILLS_FOR_SIGNIF,
+        "feature_family": "recent_flow_l1_churn",
+        "split": None,
+        "candidates_evaluated": 0,
+        "best_train_candidate": None,
+        "best_holdout_current_fee_candidate": None,
+        "best_holdout_gross_candidate": None,
+        "failure_summary": None,
+        "holdout_confirmed_candidates": [],
+        "train_current_fee_clearing_candidates": [],
+        "top_holdout_gross_candidates": [],
+        "top_train_candidates": [],
+        "note": (
+            "Research scorecard only. Features are point-in-time recent flow/L1-churn "
+            "fields; any positive holdout still needs cross-regime CP-3 and QC/MIT/AI-E review."
+        ),
+    }
+    if trials is None or trials.empty:
+        base["status"] = "NO_LOW_FRICTION_SIGNAL_CELLS"
+        base["reason"] = "empty_trials"
+        return base
+
+    low_feature_cols = [
+        col for col in (
+            "side_recent_trade_imbalance_10s",
+            "side_recent_trade_imbalance_30s",
+            "recent_trade_count_10s",
+            "recent_trade_count_30s",
+            "recent_l1_update_count_10s",
+            "recent_l1_update_count_30s",
+            "recent_l1_update_intensity_10s",
+            "recent_l1_update_intensity_30s",
+            "side_touch_size_delta_frac_10s",
+            "side_touch_size_delta_frac_30s",
+            "spread_bps_delta_10s",
+            "spread_bps_delta_30s",
+        )
+        if col in trials
+    ]
+    if not low_feature_cols:
+        base["status"] = "NO_LOW_FRICTION_SIGNAL_CELLS"
+        base["reason"] = "missing_low_friction_features"
+        return base
+
+    train_mask, holdout_mask = _walk_forward_split_masks(trials)
+    train = trials.loc[train_mask]
+    holdout = trials.loc[holdout_mask]
+    base["split"] = {
+        "method": "time_ordered_first_half_train_second_half_holdout",
+        "train_quotes": int(len(train)),
+        "holdout_quotes": int(len(holdout)),
+    }
+    if train.empty or holdout.empty:
+        base["status"] = "NO_LOW_FRICTION_SIGNAL_CELLS"
+        base["reason"] = "empty_train_or_holdout"
+        return base
+
+    candidates: list[tuple[str, str, pd.Series, dict]] = []
+    seen: set[str] = set()
+
+    def add_candidate(name: str, condition: str, mask, meta: dict):
+        if name in seen:
+            return
+        seen.add(name)
+        m = pd.Series(mask, index=trials.index).fillna(False).astype(bool)
+        if int((m & train_mask).sum()) <= 0:
+            return
+        candidates.append((name, condition, m, meta))
+
+    thresholds: dict[tuple[str, str], tuple[pd.Series, float, str]] = {}
+
+    def add_train_quantile_feature(col: str, *, register_candidate: bool):
+        all_vals = pd.to_numeric(trials[col], errors="coerce")
+        train_vals = pd.to_numeric(train[col], errors="coerce")
+        valid = train_vals.dropna()
+        valid = valid[np.isfinite(valid)]
+        if valid.empty:
+            return
+        for q, op, label in (
+            (0.10, "<=", "train_p10"),
+            (0.25, "<=", "train_p25"),
+            (0.75, ">=", "train_p75"),
+            (0.90, ">=", "train_p90"),
+        ):
+            threshold = float(valid.quantile(q))
+            if not np.isfinite(threshold):
+                continue
+            mask = all_vals >= threshold if op == ">=" else all_vals <= threshold
+            thresholds[(col, label)] = (mask, threshold, op)
+            if register_candidate:
+                add_candidate(
+                    f"{col}_{label}_{'ge' if op == '>=' else 'le'}",
+                    f"{col} {op} {label}({threshold:.6g})",
+                    mask,
+                    {
+                        "feature": col,
+                        "operator": op,
+                        "quantile": label,
+                        "threshold": threshold,
+                        "threshold_source": "train_only",
+                    },
+                )
+
+    if "quoted_half_spread_bps" in trials:
+        add_train_quantile_feature("quoted_half_spread_bps", register_candidate=False)
+    for col in low_feature_cols:
+        add_train_quantile_feature(col, register_candidate=True)
+
+    combo_specs = []
+    for spread_label in ("train_p75", "train_p90"):
+        for col, labels in (
+            ("side_recent_trade_imbalance_10s", ("train_p75", "train_p90")),
+            ("side_recent_trade_imbalance_30s", ("train_p75", "train_p90")),
+            ("recent_trade_count_10s", ("train_p10", "train_p25")),
+            ("recent_trade_count_30s", ("train_p10", "train_p25")),
+            ("recent_l1_update_count_10s", ("train_p10", "train_p25")),
+            ("recent_l1_update_count_30s", ("train_p10", "train_p25")),
+            ("recent_l1_update_intensity_10s", ("train_p10", "train_p25")),
+            ("recent_l1_update_intensity_30s", ("train_p10", "train_p25")),
+            ("side_touch_size_delta_frac_10s", ("train_p75", "train_p90")),
+            ("side_touch_size_delta_frac_30s", ("train_p75", "train_p90")),
+            ("spread_bps_delta_10s", ("train_p75", "train_p90")),
+            ("spread_bps_delta_30s", ("train_p75", "train_p90")),
+        ):
+            if col in low_feature_cols:
+                for label in labels:
+                    combo_specs.append(("quoted_half_spread_bps", spread_label, col, label))
+
+    for a_col, a_label, b_col, b_label in combo_specs:
+        a = thresholds.get((a_col, a_label))
+        b = thresholds.get((b_col, b_label))
+        if a is None or b is None:
+            continue
+        a_mask, a_thr, a_op = a
+        b_mask, b_thr, b_op = b
+        add_candidate(
+            f"{a_col}_{a_label}_and_{b_col}_{b_label}",
+            f"{a_col} {a_label} AND {b_col} {b_label}",
+            a_mask & b_mask,
+            {
+                "feature": "low_friction_combo",
+                "threshold_source": "train_only",
+                "components": [
+                    {"feature": a_col, "operator": a_op, "quantile": a_label, "threshold": a_thr},
+                    {"feature": b_col, "operator": b_op, "quantile": b_label, "threshold": b_thr},
+                ],
+            },
+        )
+
+    rows = []
+    for name, condition, mask, meta in candidates:
+        train_cell = _conditional_feature_cell(
+            name,
+            condition,
+            trials.loc[mask & train_mask],
+            adverse_by_fill,
+            horizons,
+            span_hours,
+            primary_horizon_s,
+            meta,
+        )
+        if train_cell is None:
+            continue
+        holdout_cell = _conditional_feature_cell(
+            name,
+            condition,
+            trials.loc[mask & holdout_mask],
+            adverse_by_fill,
+            horizons,
+            span_hours,
+            primary_horizon_s,
+            meta,
+        )
+        row = {
+            "name": name,
+            "condition": condition,
+            "feature": meta.get("feature"),
+            "threshold_source": meta.get("threshold_source", "literal"),
+            "train": train_cell,
+            "holdout": holdout_cell,
+        }
+        row["train_sample_gated_gross_clears_current_fee"] = (
+            _cell_sample_gated_gross_edge_clears(train_cell, MAKER_FEE_ROUND_TRIP_BPS)
+        )
+        row["holdout_sample_gated_gross_clears_current_fee"] = (
+            _cell_sample_gated_gross_edge_clears(holdout_cell, MAKER_FEE_ROUND_TRIP_BPS)
+        )
+        row["holdout_confirmed_current_fee"] = bool(
+            row["train_sample_gated_gross_clears_current_fee"]
+            and row["holdout_sample_gated_gross_clears_current_fee"]
+        )
+        rows.append(row)
+
+    ranked = sorted(
+        rows,
+        key=lambda r: (
+            (r.get("train") or {}).get("edge_before_fees_bps") is not None,
+            (r.get("train") or {}).get("edge_before_fees_bps")
+            if (r.get("train") or {}).get("edge_before_fees_bps") is not None else -1e9,
+            (r.get("train") or {}).get("n_fill_only") or 0,
+        ),
+        reverse=True,
+    )
+    holdout_ranked = sorted(
+        [
+            r for r in ranked
+            if (r.get("holdout") or {}).get("edge_before_fees_bps") is not None
+        ],
+        key=lambda r: (
+            (r.get("holdout") or {}).get("edge_before_fees_bps"),
+            (r.get("holdout") or {}).get("n_fill_only") or 0,
+        ),
+        reverse=True,
+    )
+    train_clearing = [r for r in ranked if r["train_sample_gated_gross_clears_current_fee"]]
+    holdout_confirmed = [r for r in ranked if r["holdout_confirmed_current_fee"]]
+
+    if holdout_confirmed:
+        status = "LOW_FRICTION_SIGNAL_HOLDOUT_CURRENT_FEE_SAMPLE_GATED"
+    elif train_clearing:
+        status = "LOW_FRICTION_SIGNAL_TRAIN_ONLY_CURRENT_FEE"
+    elif any(
+        (r.get("holdout") or {}).get("edge_before_fees_bps") is not None
+        and float((r.get("holdout") or {}).get("edge_before_fees_bps")) > 0.0
+        for r in ranked
+    ):
+        status = "LOW_FRICTION_SIGNAL_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE"
+    else:
+        status = "NO_LOW_FRICTION_SIGNAL_GROSS_EDGE"
+
+    base.update({
+        "status": status,
+        "candidates_evaluated": len(ranked),
+        "best_train_candidate": ranked[0] if ranked else None,
+        "best_holdout_current_fee_candidate": holdout_confirmed[0] if holdout_confirmed else None,
+        "best_holdout_gross_candidate": holdout_ranked[0] if holdout_ranked else None,
+        "failure_summary": _low_friction_signal_failure_summary(
+            ranked,
+            holdout_confirmed,
+            train_clearing,
+        ),
+        "holdout_confirmed_candidates": holdout_confirmed[:10],
+        "train_current_fee_clearing_candidates": train_clearing[:10],
+        "top_holdout_gross_candidates": holdout_ranked[:20],
+        "top_train_candidates": ranked[:20],
+    })
+    return base
+
+
 def _maker_fee_sensitivity_cell(cell: dict, source: str) -> dict | None:
     edge = cell.get("edge_before_fees_bps")
     if edge is None:
@@ -1489,6 +1979,13 @@ def fill_sim_maker_fee_sensitivity_scorecard(
         norm = _maker_fee_sensitivity_cell(cell, "walk_forward_feature_scorecard_holdout")
         if norm is not None:
             cells.append(norm)
+    low_friction_scorecard = report.get("low_friction_signal_scorecard") or {}
+    for key in ("holdout_confirmed_candidates", "top_holdout_gross_candidates"):
+        for row in low_friction_scorecard.get(key) or []:
+            cell = row.get("holdout") or {}
+            norm = _maker_fee_sensitivity_cell(cell, "low_friction_signal_scorecard_holdout")
+            if norm is not None:
+                cells.append(norm)
 
     sample_gated_cells = [
         c for c in cells
@@ -1692,6 +2189,8 @@ def run(l1, tr, ob, syms, clean_since, horizons, cadence_s, skip_quantile, since
 
     # 主 per_symbol / pooled = back-of-queue（保守預設,NON-OPTIONAL）。
     trials, adverse = queue_results[DEFAULT_QUEUE_POSITION]
+    trials = add_low_friction_microstructure_features(trials, tr, l1_clean)
+    queue_results[DEFAULT_QUEUE_POSITION] = (trials, adverse)
     per_symbol = []
     for s in sorted(trials["symbol"].unique()):
         tsub = trials[trials["symbol"] == s]
@@ -1752,6 +2251,13 @@ def run(l1, tr, ob, syms, clean_since, horizons, cadence_s, skip_quantile, since
         primary_horizon_s=primary_horizon,
     )
     report["walk_forward_feature_scorecard"] = fill_sim_walk_forward_feature_scorecard(
+        trials,
+        adverse,
+        horizons,
+        span_hours,
+        primary_horizon_s=primary_horizon,
+    )
+    report["low_friction_signal_scorecard"] = fill_sim_low_friction_signal_scorecard(
         trials,
         adverse,
         horizons,

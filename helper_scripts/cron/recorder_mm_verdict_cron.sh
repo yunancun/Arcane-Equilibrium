@@ -508,27 +508,31 @@ def _walk_forward_candidates(walk_forward):
 
     for key in (
         "top_train_candidates",
+        "top_holdout_gross_candidates",
         "holdout_confirmed_candidates",
         "train_positive_sample_gated_candidates",
+        "train_current_fee_clearing_candidates",
     ):
         for row in walk_forward.get(key) or []:
             add(row)
     add(walk_forward.get("best_train_candidate"))
     add(walk_forward.get("best_holdout_confirmed_candidate"))
+    add(walk_forward.get("best_holdout_current_fee_candidate"))
+    add(walk_forward.get("best_holdout_gross_candidate"))
     return rows
 
 
-def _compact_walk_forward_candidate(row, *, min_fills):
+def _compact_walk_forward_candidate(row, *, min_fills, source_prefix="walk_forward"):
     if not isinstance(row, dict):
         return None
     train = _compact_gross_cell(
         row.get("train"),
-        source="walk_forward_train",
+        source=f"{source_prefix}_train",
         min_fills=min_fills,
     )
     holdout = _compact_gross_cell(
         row.get("holdout"),
-        source="walk_forward_holdout",
+        source=f"{source_prefix}_holdout",
         min_fills=min_fills,
     )
     if train is None and holdout is None:
@@ -590,7 +594,36 @@ def _mm_gross_edge_cost_decomposition(fillsim, *, h_primary, min_fills):
         if row.get("holdout") and row["holdout"].get("sample_gated")
     ]
 
-    all_cells = fill_cells + conditional_cells + walk_train_cells + walk_holdout_cells
+    low_friction = fillsim.get("low_friction_signal_scorecard") or {}
+    low_friction_rows = [
+        compact
+        for compact in (
+            _compact_walk_forward_candidate(
+                row,
+                min_fills=min_fills,
+                source_prefix="low_friction_signal",
+            )
+            for row in _walk_forward_candidates(low_friction)
+        )
+        if compact is not None
+    ]
+    low_friction_train_cells = [
+        row["train"] for row in low_friction_rows
+        if row.get("train") and row["train"].get("sample_gated")
+    ]
+    low_friction_holdout_cells = [
+        row["holdout"] for row in low_friction_rows
+        if row.get("holdout") and row["holdout"].get("sample_gated")
+    ]
+
+    all_cells = (
+        fill_cells
+        + conditional_cells
+        + walk_train_cells
+        + walk_holdout_cells
+        + low_friction_train_cells
+        + low_friction_holdout_cells
+    )
     current_fee_positive = [
         cell for cell in all_cells
         if _flt(cell.get("net_bps")) is not None and _flt(cell.get("net_bps")) > 0.0
@@ -659,6 +692,19 @@ def _mm_gross_edge_cost_decomposition(fillsim, *, h_primary, min_fills):
         )
         if both_gross else None
     )
+    low_friction_holdout_gross = [
+        row for row in low_friction_rows
+        if row.get("holdout")
+        and row["holdout"].get("sample_gated")
+        and (_flt(row["holdout"].get("edge_before_fees_bps")) or -1e9) > 0.0
+    ]
+    best_low_friction_holdout = (
+        max(
+            low_friction_holdout_gross,
+            key=lambda row: _flt_key(row["holdout"].get("edge_before_fees_bps")),
+        )
+        if low_friction_holdout_gross else None
+    )
 
     if current_fee_positive:
         status = "CURRENT_FEE_GROSS_AND_NET_POSITIVE"
@@ -682,6 +728,7 @@ def _mm_gross_edge_cost_decomposition(fillsim, *, h_primary, min_fills):
         ]),
         "sample_gated_conditional_cell_count": len(conditional_cells),
         "sample_gated_walk_forward_candidate_count": len(walk_rows),
+        "sample_gated_low_friction_signal_candidate_count": len(low_friction_rows),
         "gross_positive_sample_gated_cell_count": len(gross_positive),
         "current_fee_positive_sample_gated_cell_count": len(current_fee_positive),
         "best_sample_gated_current_fee_cell": best_current_fee,
@@ -703,6 +750,8 @@ def _mm_gross_edge_cost_decomposition(fillsim, *, h_primary, min_fills):
         "best_walk_forward_train_gross_candidate": best_walk_train,
         "best_walk_forward_holdout_gross_candidate": best_walk_holdout,
         "best_walk_forward_both_gross_candidate": best_walk_both,
+        "best_low_friction_signal_holdout_gross_candidate": best_low_friction_holdout,
+        "low_friction_signal_status": low_friction.get("status"),
         "note": (
             "Gross edge is edge_before_fees_bps. If gross edge is positive but "
             "net_bps remains non-positive at the current maker fee, the blocker is "
@@ -815,6 +864,7 @@ def _load_fillsim_adverse(path, h_primary, max_age_h):
     info["horizon_scorecard"] = rep.get("horizon_scorecard")
     info["conditional_feature_scorecard"] = rep.get("conditional_feature_scorecard")
     info["walk_forward_feature_scorecard"] = rep.get("walk_forward_feature_scorecard")
+    info["low_friction_signal_scorecard"] = rep.get("low_friction_signal_scorecard")
     info["maker_fee_sensitivity_scorecard"] = rep.get("maker_fee_sensitivity_scorecard")
     # 5/30s sensitivity（誠實透明，不入 net 計算）。
     for hs in (5, 30):

@@ -5,9 +5,11 @@ import pytest
 
 from program_code.research.microstructure.fill_sim import (
     _net_block,
+    add_low_friction_microstructure_features,
     fill_sim_conditional_feature_scorecard,
     fill_sim_edge_scorecard,
     fill_sim_horizon_scorecard,
+    fill_sim_low_friction_signal_scorecard,
     fill_sim_maker_fee_sensitivity_scorecard,
     fill_sim_walk_forward_feature_scorecard,
 )
@@ -495,6 +497,134 @@ def test_walk_forward_feature_scorecard_does_not_peek_at_holdout_thresholds():
     assert scorecard["failure_summary"]["status"] == "NO_TRAIN_POSITIVE_CELL"
 
 
+def test_low_friction_feature_enrichment_uses_strictly_prior_windows():
+    t_place = pd.Timestamp("2026-01-01T00:00:20Z").value
+    trials = pd.DataFrame(
+        [
+            {
+                "symbol": "ABCUSDT",
+                "side": "bid",
+                "t_place": t_place,
+                "q0": 12.0,
+                "quoted_half_spread_bps": 2.0,
+            },
+            {
+                "symbol": "ABCUSDT",
+                "side": "ask",
+                "t_place": t_place,
+                "q0": 8.0,
+                "quoted_half_spread_bps": 2.0,
+            },
+        ]
+    )
+    trades = pd.DataFrame(
+        {
+            "ts": pd.to_datetime(
+                [
+                    "2026-01-01T00:00:11Z",
+                    "2026-01-01T00:00:15Z",
+                    "2026-01-01T00:00:20Z",
+                ],
+                utc=True,
+            ),
+            "symbol": ["ABCUSDT", "ABCUSDT", "ABCUSDT"],
+            "side": ["Buy", "Sell", "Buy"],
+            "qty": [2.0, 1.0, 100.0],
+        }
+    )
+    l1 = pd.DataFrame(
+        {
+            "ts": pd.to_datetime(
+                [
+                    "2026-01-01T00:00:09Z",
+                    "2026-01-01T00:00:12Z",
+                    "2026-01-01T00:00:18Z",
+                    "2026-01-01T00:00:20Z",
+                ],
+                utc=True,
+            ),
+            "symbol": ["ABCUSDT"] * 4,
+            "best_bid": [99.0, 99.5, 99.6, 100.0],
+            "bid_size": [10.0, 11.0, 11.5, 50.0],
+            "best_ask": [101.0, 101.0, 100.8, 101.0],
+            "ask_size": [9.0, 8.5, 8.2, 60.0],
+            "update_id": [1, 2, 3, 4],
+        }
+    )
+
+    enriched = add_low_friction_microstructure_features(trials, trades, l1, lookbacks_s=(10,))
+
+    assert enriched.at[0, "recent_trade_count_10s"] == pytest.approx(2.0)
+    assert enriched.at[0, "recent_trade_abs_qty_10s"] == pytest.approx(3.0)
+    assert enriched.at[0, "recent_trade_imbalance_10s"] == pytest.approx(1.0 / 3.0)
+    assert enriched.at[0, "side_recent_trade_imbalance_10s"] == pytest.approx(1.0 / 3.0)
+    assert enriched.at[1, "side_recent_trade_imbalance_10s"] == pytest.approx(-1.0 / 3.0)
+    assert enriched.at[0, "recent_l1_update_count_10s"] == pytest.approx(2.0)
+    assert enriched.at[0, "side_touch_size_delta_frac_10s"] == pytest.approx(0.2)
+    assert enriched.at[1, "side_touch_size_delta_frac_10s"] == pytest.approx(-1.0 / 9.0)
+
+
+def test_low_friction_signal_scorecard_confirms_holdout_current_fee_cell():
+    rows = []
+    for _half in range(2):
+        for _ in range(32):
+            rows.append(
+                {
+                    "symbol": "ABCUSDT",
+                    "side": "bid",
+                    "outcome": "fill",
+                    "quoted_half_spread_bps": 6.0,
+                    "side_recent_trade_imbalance_10s": 1.0,
+                    "recent_trade_count_10s": 1.0,
+                    "recent_l1_update_count_10s": 1.0,
+                    "side_touch_size_delta_frac_10s": 0.2,
+                    "spread_bps_delta_10s": 0.5,
+                    "half_spread_bps": 6.0,
+                    "adverse_sel_bps@15": 1.0,
+                }
+            )
+        for _ in range(8):
+            rows.append(
+                {
+                    "symbol": "ABCUSDT",
+                    "side": "bid",
+                    "outcome": "fill",
+                    "quoted_half_spread_bps": 1.0,
+                    "side_recent_trade_imbalance_10s": -1.0,
+                    "recent_trade_count_10s": 5.0,
+                    "recent_l1_update_count_10s": 5.0,
+                    "side_touch_size_delta_frac_10s": -0.2,
+                    "spread_bps_delta_10s": -0.5,
+                    "half_spread_bps": 1.0,
+                    "adverse_sel_bps@15": 1.0,
+                }
+            )
+    trials = _conditional_trials(rows)
+    for col in (
+        "side_recent_trade_imbalance_10s",
+        "recent_trade_count_10s",
+        "recent_l1_update_count_10s",
+        "side_touch_size_delta_frac_10s",
+        "spread_bps_delta_10s",
+    ):
+        trials[col] = [row[col] for row in rows]
+    adverse = _conditional_adverse(trials, rows)
+
+    scorecard = fill_sim_low_friction_signal_scorecard(
+        trials,
+        adverse,
+        horizons=(15,),
+        span_hours=1.0,
+        primary_horizon_s=15,
+    )
+
+    assert scorecard["status"] == "LOW_FRICTION_SIGNAL_HOLDOUT_CURRENT_FEE_SAMPLE_GATED"
+    assert scorecard["best_holdout_current_fee_candidate"] is not None
+    assert scorecard["best_holdout_current_fee_candidate"]["holdout"]["edge_before_fees_bps"] >= 4.0
+    assert scorecard["best_holdout_current_fee_candidate"]["holdout"]["n_fill_only"] >= 30
+    assert scorecard["failure_summary"]["holdout_confirmed_current_fee_count"] >= 1
+
+
 def test_maker_fee_sensitivity_finds_lower_fee_sample_gated_path():
     report = {
         "edge_scorecard": {
@@ -561,6 +691,39 @@ def test_maker_fee_sensitivity_includes_walk_forward_holdout_cells():
     best = scorecard["best_sample_gated_break_even_cell"]
     assert best["source"] == "walk_forward_feature_scorecard_holdout"
     assert best["break_even_maker_fee_bps_per_side"] == pytest.approx(1.2)
+    assert scorecard["scenarios"][1]["positive_sample_gate_count"] == 1
+
+
+def test_maker_fee_sensitivity_includes_low_friction_holdout_cells():
+    report = {
+        "edge_scorecard": {"all_fill_only_cells": []},
+        "conditional_feature_scorecard": {"all_cells": []},
+        "walk_forward_feature_scorecard": {"holdout_confirmed_candidates": []},
+        "low_friction_signal_scorecard": {
+            "top_holdout_gross_candidates": [
+                {
+                    "holdout": {
+                        "name": "recent_trade_count_10s_train_p25_le",
+                        "condition": "recent_trade_count_10s <= train_p25",
+                        "feature": "recent_trade_count_10s",
+                        "n_fill_only": 35,
+                        "edge_before_fees_bps": 2.6,
+                        "signif_suppressed": False,
+                    }
+                }
+            ]
+        },
+    }
+
+    scorecard = fill_sim_maker_fee_sensitivity_scorecard(
+        report,
+        primary_horizon_s=15,
+        fee_scenarios_bps_per_side=(2.0, 1.0),
+    )
+
+    best = scorecard["best_sample_gated_break_even_cell"]
+    assert best["source"] == "low_friction_signal_scorecard_holdout"
+    assert best["break_even_maker_fee_bps_per_side"] == pytest.approx(1.3)
     assert scorecard["scenarios"][1]["positive_sample_gate_count"] == 1
 
 

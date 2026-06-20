@@ -24,8 +24,32 @@ from alpha_discovery_throughput.runtime_runner import (
     collect_polymarket_leadlag_arm,
     collect_runtime_arms,
     run_once,
+    _latest_json_line,
 )
 from alpha_discovery_throughput.signal_manifest import build_signal_spec, validate_signal_manifest
+
+
+def test_latest_json_line_handles_oversized_status_line(tmp_path: Path):
+    path = tmp_path / "status.jsonl"
+    old = {"ts_utc": "2026-06-20T18:00:00Z", "status": "old"}
+    latest = {
+        "ts_utc": "2026-06-20T19:43:09Z",
+        "status": "latest",
+        "payload": "x" * 300_000,
+    }
+    path.write_text(
+        json.dumps(old, separators=(",", ":"))
+        + "\n"
+        + json.dumps(latest, separators=(",", ":"))
+        + "\n",
+        encoding="utf-8",
+    )
+
+    row, err = _latest_json_line(path)
+
+    assert err is None
+    assert row is not None
+    assert row["status"] == "latest"
 
 
 def _signal_spec(**extra):
@@ -293,6 +317,21 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
                             "net_bps": -1.998,
                         },
                     },
+                    "low_friction_signal_status": (
+                        "LOW_FRICTION_SIGNAL_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE"
+                    ),
+                    "best_low_friction_signal_holdout_gross_candidate": {
+                        "name": "quoted_half_spread_bps_train_p75_and_recent_trade_count_10s_train_p25",
+                        "holdout": {
+                            "source": "low_friction_signal_holdout",
+                            "n_fill_only": 120,
+                            "edge_before_fees_bps": 1.91,
+                            "net_bps": -2.09,
+                        },
+                    },
+                },
+                "low_friction_signal_scorecard": {
+                    "status": "LOW_FRICTION_SIGNAL_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE",
                 },
                 "history_scorecard": {
                     "status": "HISTORY_INSUFFICIENT_WINDOWS",
@@ -400,6 +439,12 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
     assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
         "top_sample_gated_gross_cells"
     ][0]["symbol"] == "LABUSDT"
+    assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
+        "low_friction_signal_status"
+    ] == "LOW_FRICTION_SIGNAL_HOLDOUT_GROSS_POSITIVE_BELOW_CURRENT_FEE"
+    assert blockers["mm_verdict_maker_edge"]["cost_wall_escape_scorecard"][
+        "best_low_friction_signal_holdout_gross_candidate"
+    ]["holdout"]["source"] == "low_friction_signal_holdout"
     assert blockers["mm_verdict_maker_edge"]["business_path_actionability_status"] == (
         "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED"
     )

@@ -225,6 +225,7 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
     sample_cost_wall = _dict(detail.get("sample_gated_cost_wall_summary"))
     fee_path = _dict(detail.get("fee_path_feasibility"))
     business_actionability = _dict(fee_path.get("business_path_actionability"))
+    low_friction = _dict(detail.get("low_friction_signal_scorecard"))
     history_extra = _mm_lower_fee_history_extra(detail)
 
     best_gross_edge = _float(gross_decomp.get("best_sample_gated_gross_edge_bps"))
@@ -309,6 +310,12 @@ def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
         ),
         "top_sample_gated_gross_cells": gross_decomp.get(
             "top_sample_gated_gross_cells"
+        ),
+        "low_friction_signal_status": (
+            gross_decomp.get("low_friction_signal_status") or low_friction.get("status")
+        ),
+        "best_low_friction_signal_holdout_gross_candidate": gross_decomp.get(
+            "best_low_friction_signal_holdout_gross_candidate"
         ),
         "best_sample_gated_gross_cell": gross_decomp.get(
             "best_sample_gated_gross_cell"

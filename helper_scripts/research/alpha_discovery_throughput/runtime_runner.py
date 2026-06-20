@@ -80,32 +80,54 @@ def _read_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     return data, None
 
 
-def _latest_json_line(path: Path, *, prefix: str | None = None) -> tuple[dict[str, Any] | None, str | None]:
+def _latest_json_line(
+    path: Path,
+    *,
+    prefix: str | None = None,
+    max_scan_bytes: int = 4 * 1024 * 1024,
+) -> tuple[dict[str, Any] | None, str | None]:
     try:
         with open(path, "rb") as fh:
             fh.seek(0, os.SEEK_END)
             size = fh.tell()
-            fh.seek(max(0, size - 262144), os.SEEK_SET)
-            chunk = fh.read().decode("utf-8", errors="replace")
     except FileNotFoundError:
         return None, "missing"
     except OSError as exc:
         return None, f"read_error:{type(exc).__name__}"
 
-    for raw_line in reversed(chunk.splitlines()):
-        line = raw_line.strip()
-        if not line:
-            continue
-        if prefix:
-            if not line.startswith(prefix):
-                continue
-            line = line[len(prefix):]
+    scan = min(size, 262144)
+    while scan <= min(size, max_scan_bytes):
         try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(data, dict):
-            return data, None
+            with open(path, "rb") as fh:
+                start = max(0, size - scan)
+                fh.seek(start, os.SEEK_SET)
+                chunk = fh.read().decode("utf-8", errors="replace")
+        except OSError as exc:
+            return None, f"read_error:{type(exc).__name__}"
+
+        lines = chunk.splitlines()
+        # If the chunk starts mid-line, skip that first partial line. The last
+        # line can also be partial only when the writer is concurrently appending;
+        # JSON decoding below naturally rejects it and older complete lines remain.
+        if start > 0 and lines:
+            lines = lines[1:]
+        for raw_line in reversed(lines):
+            line = raw_line.strip()
+            if not line:
+                continue
+            if prefix:
+                if not line.startswith(prefix):
+                    continue
+                line = line[len(prefix):]
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(data, dict):
+                return data, None
+        if scan >= size or scan >= max_scan_bytes:
+            break
+        scan = min(size, scan * 2)
     return None, "no_json_status_line"
 
 
@@ -762,6 +784,9 @@ def collect_mm_verdict_arm(
                     ((status.get("fillsim") or {}).get("walk_forward_feature_scorecard") or {})
                     .get("failure_summary")
                 ),
+                "low_friction_signal_scorecard": (
+                    (status.get("fillsim") or {}).get("low_friction_signal_scorecard")
+                ),
                 "l1_fill_sim_ready": status.get("l1_fill_sim_ready"),
                 "highvol_day": status.get("highvol_day"),
                 "markout_n_total": status.get("markout_n_total"),
@@ -790,6 +815,9 @@ def collect_mm_verdict_arm(
             "walk_forward_failure_summary": (
                 ((status.get("fillsim") or {}).get("walk_forward_feature_scorecard") or {})
                 .get("failure_summary")
+            ),
+            "low_friction_signal_scorecard": (
+                (status.get("fillsim") or {}).get("low_friction_signal_scorecard")
             ),
             "l1_fill_sim_ready": status.get("l1_fill_sim_ready"),
             "highvol_day": status.get("highvol_day"),

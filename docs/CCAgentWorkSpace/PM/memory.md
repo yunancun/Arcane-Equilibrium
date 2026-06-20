@@ -1070,3 +1070,8 @@
 
 - v291 adds `top_sample_gated_gross_cells` to MM gross-edge decomposition and alpha-discovery escape scorecard. Latest alpha sha256 `4dbbb4e964b1077f2b901a7d651b06c59d4cc3622c49b132e47b6b4f511c9583` lists top near misses: `LABUSDT` 2.27bp, `ADAUSDT` walk-forward holdout 2.002bp, quoted-half-spread train_p90 1.565bp.
 - Current-fee threshold remains 4.0bp, so this is routing evidence for new low-friction signal search, not promotion proof or same-family retune authority.
+
+## 2026-06-20 MM low-friction signal scorecard
+
+- v292 adds recent-flow/L1-churn placement-time features and `low_friction_signal_scorecard` to fill_sim, then passes it through MM verdict and alpha-discovery. It also fixes oversized MM status JSON ingestion in `runtime_runner._latest_json_line`.
+- Latest alpha sha256 `c87f9d538a1cf5dc7480d8d6f76e2048fe0278042812aa7dc725a9cea6890bba` reports best low-friction holdout `quoted_half_spread_bps train_p90 AND side_touch_size_delta_frac_30s train_p90`: gross 2.838bp, net -1.162bp, n=81. Current-fee threshold remains 4.0bp; not promotion proof.
