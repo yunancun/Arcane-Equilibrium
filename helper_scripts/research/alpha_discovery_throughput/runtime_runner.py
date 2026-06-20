@@ -227,12 +227,69 @@ def _flash_dip_l1_short_exit_replay_detail(
         "trade_rows": status.get("trade_rows"),
         "symbols_with_l1": status.get("symbols_with_l1"),
         "symbols_missing_l1": status.get("symbols_missing_l1"),
+        "event_window_maker_timeout_minutes": status.get("event_window_maker_timeout_minutes"),
+        "events_with_l1_in_event_window": status.get("events_with_l1_in_event_window"),
+        "events_missing_l1_in_event_window": status.get("events_missing_l1_in_event_window"),
+        "days_with_l1_in_event_window": status.get("days_with_l1_in_event_window"),
+        "days_missing_l1_in_event_window": status.get("days_missing_l1_in_event_window"),
         "gate_exit_measured": status.get("gate_exit_measured"),
         "gate_distinct_exit_days": status.get("gate_distinct_exit_days"),
         "gate_annret": status.get("gate_annret"),
         "gate_maxdd": status.get("gate_maxdd"),
         "boundary": status.get("boundary"),
     }
+
+
+def collect_flash_dip_l1_replay_arm(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    detail = _flash_dip_l1_short_exit_replay_detail(
+        data_dir,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    path = Path(detail["source_path"])
+    source_error = detail.get("source_error")
+    if "source_ok" not in detail:
+        return _arm(
+            arm_id="flash_dip_l1_short_exit_replay",
+            gate_status="CAPTURING",
+            sample_count=0,
+            artifacts_ready=False,
+            source_ok=True,
+            source_path=path,
+            source_error=str(source_error) if source_error else None,
+            detail={**detail, "note": "l1_replay_status_missing_or_not_yet_fired"},
+        )
+
+    sample_count = _int(detail.get("gate_exit_measured"))
+    source_ok = detail.get("source_ok") is True
+    verdict = str(detail.get("verdict_status") or "").upper()
+    if not source_ok:
+        gate_status = "SOURCE_FAILURE"
+        artifacts_ready = False
+    elif verdict == "L1_SHORT_EXIT_CONDITIONAL_PASS":
+        gate_status = "READY"
+        artifacts_ready = True
+    elif verdict == "L1_SHORT_EXIT_BLOCKED":
+        gate_status = "REJECTED"
+        artifacts_ready = False
+    else:
+        gate_status = "CAPTURING"
+        artifacts_ready = False
+    return _arm(
+        arm_id="flash_dip_l1_short_exit_replay",
+        gate_status=gate_status,
+        sample_count=sample_count,
+        artifacts_ready=artifacts_ready,
+        source_ok=source_ok,
+        source_path=path,
+        source_error=str(source_error) if source_error else None,
+        detail=detail,
+    )
 
 
 def collect_flash_dip_arm(
@@ -536,6 +593,7 @@ def collect_runtime_arms(
     return [
         collect_gate_b_arm(data_dir, now_utc=now, max_age_seconds=max_age_seconds),
         collect_flash_dip_arm(data_dir, now_utc=now),
+        collect_flash_dip_l1_replay_arm(data_dir, now_utc=now),
         collect_vol_event_arm(data_dir),
         collect_mm_verdict_arm(data_dir, now_utc=now),
         collect_aeg_matrix_arm(data_dir),

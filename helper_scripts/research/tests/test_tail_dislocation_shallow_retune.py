@@ -408,3 +408,61 @@ def test_l1_coverage_reasons_downgrade_only_when_candidate_l1_is_missing():
         },
     )
     assert l1replay.apply_l1_coverage_reasons(gate, full_l1) == gate
+
+
+def test_l1_coverage_reasons_detect_event_window_hole_when_symbol_l1_exists():
+    gate = {
+        "status": "L1_SHORT_EXIT_CONDITIONAL_PASS",
+        "fail_reasons": [],
+    }
+    events = [
+        {"symbol": "AAAUSDT", "entry_date": "2026-01-02", "entry_level": 100.0},
+        {"symbol": "BBBUSDT", "entry_date": "2026-01-02", "entry_level": 200.0},
+    ]
+
+    broad_l1_without_event_window_rows = l1replay.l1_candidate_coverage_summary(
+        events,
+        {
+            "AAAUSDT": [{"ts_ms": _ts_ms(1)}],
+            "BBBUSDT": [{"ts_ms": _ts_ms(2)}],
+        },
+        maker_timeout_minutes=10,
+    )
+    covered_gate = l1replay.apply_l1_coverage_reasons(gate, broad_l1_without_event_window_rows)
+
+    assert broad_l1_without_event_window_rows["symbols_missing_l1"] == []
+    assert broad_l1_without_event_window_rows["n_events_with_l1_in_event_window"] == 0
+    assert broad_l1_without_event_window_rows["n_events_missing_l1_in_event_window"] == 2
+    assert covered_gate["status"] == "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE"
+    assert covered_gate["fail_reasons"][0] == "no_l1_rows_for_candidate_event_windows"
+
+
+def test_l1_coverage_reasons_detect_partial_event_window_coverage():
+    gate = {
+        "status": "L1_SHORT_EXIT_CONDITIONAL_PASS",
+        "fail_reasons": [],
+    }
+    events = [
+        {"symbol": "AAAUSDT", "entry_date": "2026-01-02", "entry_level": 100.0},
+        {"symbol": "BBBUSDT", "entry_date": "2026-01-02", "entry_level": 200.0},
+    ]
+
+    partial_event_l1 = l1replay.l1_candidate_coverage_summary(
+        events,
+        {
+            "AAAUSDT": [{"ts_ms": _ts_ms(0, 5)}],
+            "BBBUSDT": [{"ts_ms": _ts_ms(2)}],
+        },
+        maker_timeout_minutes=10,
+    )
+    partial_gate = l1replay.apply_l1_coverage_reasons(gate, partial_event_l1)
+
+    assert partial_event_l1["symbols_missing_l1"] == []
+    assert partial_event_l1["n_events_with_l1_in_event_window"] == 1
+    assert partial_event_l1["n_events_missing_l1_in_event_window"] == 1
+    assert partial_event_l1["event_window_l1_rows_by_symbol_date"] == {
+        "AAAUSDT:2026-01-02": 1,
+        "BBBUSDT:2026-01-02": 0,
+    }
+    assert partial_gate["status"] == "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE"
+    assert partial_gate["fail_reasons"][0] == "partial_l1_event_window_coverage"
