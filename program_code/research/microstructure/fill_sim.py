@@ -984,6 +984,264 @@ def fill_sim_conditional_feature_scorecard(trials: pd.DataFrame, adverse_by_fill
     return base
 
 
+def _walk_forward_split_masks(trials: pd.DataFrame, train_frac: float = 0.5):
+    """按 placement time 做 train/holdout 半開窗切分；不打亂時間序。"""
+    if trials is None or trials.empty:
+        empty = pd.Series(False, index=getattr(trials, "index", None))
+        return empty, empty
+    if "t_place" in trials:
+        order = trials.sort_values(["t_place"]).index.to_list()
+    else:
+        order = list(trials.index)
+    if len(order) < 2:
+        train_ix = set(order)
+        holdout_ix = set()
+    else:
+        n_train = max(1, min(len(order) - 1, int(len(order) * train_frac)))
+        train_ix = set(order[:n_train])
+        holdout_ix = set(order[n_train:])
+    train_mask = pd.Series(trials.index.isin(train_ix), index=trials.index)
+    holdout_mask = pd.Series(trials.index.isin(holdout_ix), index=trials.index)
+    return train_mask, holdout_mask
+
+
+def _cell_sample_gated_positive(cell: dict | None) -> bool:
+    if not cell:
+        return False
+    return (
+        (cell.get("net_bps") is not None)
+        and float(cell.get("net_bps")) > 0.0
+        and int(cell.get("n_fill_only") or 0) >= MIN_FILLS_FOR_SIGNIF
+        and not bool(cell.get("signif_suppressed"))
+    )
+
+
+def fill_sim_walk_forward_feature_scorecard(trials: pd.DataFrame, adverse_by_fill: pd.DataFrame,
+                                            horizons, span_hours: float,
+                                            *, primary_horizon_s: int = 15,
+                                            max_symbol_candidates: int = 20) -> dict:
+    """Walk-forward PIT feature search.
+
+    Thresholds are estimated on the first time half only, then the identical
+    rule is evaluated on the second time half. This is still early research,
+    not CP-3, but it prevents the most direct single-window threshold peeking.
+    """
+    base = {
+        "primary_horizon_s": primary_horizon_s,
+        "fee_round_trip_bps": MAKER_FEE_ROUND_TRIP_BPS,
+        "min_fills_for_signif": MIN_FILLS_FOR_SIGNIF,
+        "split": None,
+        "candidates_evaluated": 0,
+        "best_train_candidate": None,
+        "best_holdout_confirmed_candidate": None,
+        "holdout_confirmed_candidates": [],
+        "train_positive_sample_gated_candidates": [],
+        "top_train_candidates": [],
+        "note": (
+            "Research scorecard only. Candidate thresholds are selected on the train "
+            "time half and replayed on holdout; any holdout-positive cell still needs "
+            "more regime-days, portfolio inventory-risk review, and formal QC/MIT/AI-E."
+        ),
+    }
+    if trials is None or trials.empty:
+        base["status"] = "NO_WALK_FORWARD_FEATURE_CELLS"
+        base["reason"] = "empty_trials"
+        return base
+
+    train_mask, holdout_mask = _walk_forward_split_masks(trials)
+    train = trials.loc[train_mask]
+    holdout = trials.loc[holdout_mask]
+    base["split"] = {
+        "method": "time_ordered_first_half_train_second_half_holdout",
+        "train_quotes": int(len(train)),
+        "holdout_quotes": int(len(holdout)),
+    }
+    if train.empty or holdout.empty:
+        base["status"] = "NO_WALK_FORWARD_FEATURE_CELLS"
+        base["reason"] = "empty_train_or_holdout"
+        return base
+
+    candidates: list[tuple[str, str, pd.Series, dict]] = []
+    seen: set[str] = set()
+
+    def add_candidate(name: str, condition: str, mask, meta: dict):
+        if name in seen:
+            return
+        seen.add(name)
+        m = pd.Series(mask, index=trials.index).fillna(False).astype(bool)
+        if int((m & train_mask).sum()) <= 0:
+            return
+        candidates.append((name, condition, m, meta))
+
+    if "side" in trials:
+        for side in ("bid", "ask"):
+            add_candidate(
+                f"side={side}",
+                f"side == {side}",
+                trials["side"].astype(str) == side,
+                {"feature": "side", "operator": "==", "threshold": side},
+            )
+
+    if "symbol" in trials:
+        sym_counts = train["symbol"].astype(str).value_counts().head(max_symbol_candidates)
+        for sym in sym_counts.index:
+            add_candidate(
+                f"symbol={sym}",
+                f"symbol == {sym}",
+                trials["symbol"].astype(str) == sym,
+                {"feature": "symbol", "operator": "==", "threshold": sym},
+            )
+
+    thresholds: dict[tuple[str, str], tuple[pd.Series, float, str]] = {}
+
+    def add_train_quantile_feature(col: str):
+        if col not in trials:
+            return
+        all_vals = pd.to_numeric(trials[col], errors="coerce")
+        train_vals = pd.to_numeric(train[col], errors="coerce")
+        valid = train_vals.dropna()
+        valid = valid[np.isfinite(valid)]
+        if valid.empty:
+            return
+        for q, op, label in (
+            (0.10, "<=", "train_p10"),
+            (0.25, "<=", "train_p25"),
+            (0.75, ">=", "train_p75"),
+            (0.90, ">=", "train_p90"),
+        ):
+            threshold = float(valid.quantile(q))
+            if not np.isfinite(threshold):
+                continue
+            mask = all_vals >= threshold if op == ">=" else all_vals <= threshold
+            thresholds[(col, label)] = (mask, threshold, op)
+            add_candidate(
+                f"{col}_{label}_{'ge' if op == '>=' else 'le'}",
+                f"{col} {op} {label}({threshold:.6g})",
+                mask,
+                {
+                    "feature": col,
+                    "operator": op,
+                    "quantile": label,
+                    "threshold": threshold,
+                    "threshold_source": "train_only",
+                },
+            )
+
+    for feature_col in (
+        "quoted_half_spread_bps",
+        "q0",
+        "q_eff",
+        "side_book_imb",
+        "side_signal_ofi10",
+        "side_signal_btc_lead",
+    ):
+        add_train_quantile_feature(feature_col)
+
+    combo_specs = (
+        ("quoted_half_spread_bps", "train_p75", "side_signal_ofi10", "train_p75"),
+        ("quoted_half_spread_bps", "train_p75", "side_signal_btc_lead", "train_p75"),
+        ("quoted_half_spread_bps", "train_p75", "side_book_imb", "train_p75"),
+        ("quoted_half_spread_bps", "train_p75", "q0", "train_p25"),
+        ("quoted_half_spread_bps", "train_p75", "q_eff", "train_p25"),
+    )
+    for a_col, a_label, b_col, b_label in combo_specs:
+        a = thresholds.get((a_col, a_label))
+        b = thresholds.get((b_col, b_label))
+        if a is None or b is None:
+            continue
+        a_mask, a_thr, a_op = a
+        b_mask, b_thr, b_op = b
+        name = f"{a_col}_{a_label}_and_{b_col}_{b_label}"
+        condition = f"{a_col} {a_label} AND {b_col} {b_label}"
+        add_candidate(
+            name,
+            condition,
+            a_mask & b_mask,
+            {
+                "feature": "combo",
+                "threshold_source": "train_only",
+                "components": [
+                    {"feature": a_col, "operator": a_op, "quantile": a_label, "threshold": a_thr},
+                    {"feature": b_col, "operator": b_op, "quantile": b_label, "threshold": b_thr},
+                ],
+            },
+        )
+
+    rows = []
+    for name, condition, mask, meta in candidates:
+        train_cell = _conditional_feature_cell(
+            name,
+            condition,
+            trials.loc[mask & train_mask],
+            adverse_by_fill,
+            horizons,
+            span_hours,
+            primary_horizon_s,
+            meta,
+        )
+        if train_cell is None:
+            continue
+        holdout_cell = _conditional_feature_cell(
+            name,
+            condition,
+            trials.loc[mask & holdout_mask],
+            adverse_by_fill,
+            horizons,
+            span_hours,
+            primary_horizon_s,
+            meta,
+        )
+        row = {
+            "name": name,
+            "condition": condition,
+            "feature": meta.get("feature"),
+            "threshold_source": meta.get("threshold_source", "literal"),
+            "train": train_cell,
+            "holdout": holdout_cell,
+        }
+        row["train_sample_gated_positive"] = _cell_sample_gated_positive(train_cell)
+        row["holdout_sample_gated_positive"] = _cell_sample_gated_positive(holdout_cell)
+        row["holdout_confirmed"] = bool(
+            row["train_sample_gated_positive"] and row["holdout_sample_gated_positive"]
+        )
+        rows.append(row)
+
+    ranked = sorted(
+        rows,
+        key=lambda r: (
+            r["train"].get("net_bps") is not None,
+            r["train"].get("net_bps") if r["train"].get("net_bps") is not None else -1e9,
+            r["train"].get("n_fill_only") or 0,
+        ),
+        reverse=True,
+    )
+    train_positive = [r for r in ranked if r["train_sample_gated_positive"]]
+    holdout_confirmed = [r for r in ranked if r["holdout_confirmed"]]
+
+    if holdout_confirmed:
+        status = "WALK_FORWARD_FEATURE_HOLDOUT_POSITIVE_SAMPLE_GATED"
+    elif train_positive:
+        status = "WALK_FORWARD_FEATURE_TRAIN_ONLY_POSITIVE"
+    elif any(
+        (r["train"].get("net_bps") is not None and float(r["train"]["net_bps"]) > 0.0)
+        for r in ranked
+    ):
+        status = "WALK_FORWARD_FEATURE_TRAIN_POSITIVE_BELOW_SAMPLE_GATE"
+    else:
+        status = "NO_WALK_FORWARD_FEATURE_TRAIN_POSITIVE"
+
+    base.update({
+        "status": status,
+        "candidates_evaluated": len(ranked),
+        "best_train_candidate": ranked[0] if ranked else None,
+        "best_holdout_confirmed_candidate": holdout_confirmed[0] if holdout_confirmed else None,
+        "holdout_confirmed_candidates": holdout_confirmed[:10],
+        "train_positive_sample_gated_candidates": train_positive[:10],
+        "top_train_candidates": ranked[:20],
+    })
+    return base
+
+
 def _maker_fee_sensitivity_cell(cell: dict, source: str) -> dict | None:
     edge = cell.get("edge_before_fees_bps")
     if edge is None:
@@ -1047,6 +1305,12 @@ def fill_sim_maker_fee_sensitivity_scorecard(
     cond_scorecard = report.get("conditional_feature_scorecard") or {}
     for cell in cond_scorecard.get("all_cells") or []:
         norm = _maker_fee_sensitivity_cell(cell, "conditional_feature_scorecard")
+        if norm is not None:
+            cells.append(norm)
+    walk_forward_scorecard = report.get("walk_forward_feature_scorecard") or {}
+    for row in walk_forward_scorecard.get("holdout_confirmed_candidates") or []:
+        cell = row.get("holdout") or {}
+        norm = _maker_fee_sensitivity_cell(cell, "walk_forward_feature_scorecard_holdout")
         if norm is not None:
             cells.append(norm)
 
@@ -1310,6 +1574,13 @@ def run(l1, tr, ob, syms, clean_since, horizons, cadence_s, skip_quantile, since
         span_hours,
         primary_horizon_s=primary_horizon,
     )
+    report["walk_forward_feature_scorecard"] = fill_sim_walk_forward_feature_scorecard(
+        trials,
+        adverse,
+        horizons,
+        span_hours,
+        primary_horizon_s=primary_horizon,
+    )
     report["maker_fee_sensitivity_scorecard"] = fill_sim_maker_fee_sensitivity_scorecard(
         report,
         primary_horizon_s=primary_horizon,
@@ -1423,8 +1694,8 @@ def main(argv=None):
     # 人類可讀摘要（含 queue dose-response）。
     summary_keys = ("window", "params", "data", "caveat", "obtop_crosscheck",
                     "primary_queue_position", "edge_scorecard",
-                    "conditional_feature_scorecard", "maker_fee_sensitivity_scorecard", "pooled",
-                    "queue_dose_response")
+                    "conditional_feature_scorecard", "walk_forward_feature_scorecard",
+                    "maker_fee_sensitivity_scorecard", "pooled", "queue_dose_response")
     print(json.dumps({k: report[k] for k in summary_keys if k in report},
                      indent=2, ensure_ascii=False))
     if "abort" in report:

@@ -766,3 +766,9 @@
 - v253 adds `fee_path_feasibility` to `recorder_mm_verdict_cron.sh`: local 30d fills capacity proxy is now joined to the v252 maker fee sensitivity break-even. Linux isolated smoke showed `notional_usd=871,107.04`, `maker_notional_usd=496,419.84`, effective fee `3.6688bps`, and v252 break-even `1.028bp/side`.
 - First standard Bybit derivatives VIP tier that clears that break-even is VIP5 (`1.0bp/side`), not VIP1-4; VIP5 is approximately `$250M/30d` derivatives volume or `$2M` asset balance, while current local volume proxy is only `0.348%` of that threshold and is not mainnet eligibility proof.
 - PM read: fee reduction is a capital/scale/Bybit BD/MM-rebate path. Short-term engineering should keep searching for stronger signals/regime filters unless the operator explicitly pursues institutional/MM fee terms.
+
+## 2026-06-20 MM walk-forward feature scorecard
+
+- v254 adds `walk_forward_feature_scorecard` to fill_sim and MM verdict passthrough. Thresholds are selected on the first time half and replayed on the second half; only train+holdout sample-gated positive cells count as confirmed.
+- Linux isolated 15m smoke `/tmp/openclaw/research/fillsim/fillsim_walk_forward_smoke_20260620T100549Z.json` sha256 `091eb93d6f653aa605941274134beff8d5a041c85b9577bc245636559c2364c2`: 139,391 L1 rows, 76,079 trades, 33 symbols, 51 candidates, status `NO_WALK_FORWARD_FEATURE_TRAIN_POSITIVE`. Best train cell `symbol=BCHUSDT` was still negative (train -2.061bp, holdout -1.429bp).
+- PM read: simple PIT spread/imbalance/OFI/BTC-lead thresholding is not the missing short-term maker edge. Next work should be materially new signal/regime coverage or a non-MM path, not more in-window threshold overfitting.
