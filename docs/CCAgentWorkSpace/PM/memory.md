@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Robust IC Gate
+
+- Upgraded `polymarket_leadlag` to report schema/runner v0.3 with overlap-adjusted sampling and BH q-value controls.
+- IC rows now expose `n_nonoverlap_timestamps`, `overlap_adjusted_sample_floor`, `overlap_warning`, approximate p-values, and `bh_q_value_approx`.
+- `verdict.candidate_count` is now controlled-candidate count after raw IC/t thresholds plus `max_bh_q`; `preliminary_raw_candidate_count` preserves raw pass count.
+- Alpha discovery now uses `counts.max_overlap_adjusted_ic_points` for `polymarket_leadlag_ic.sample_count`, with raw `max_ic_points` preserved in detail.
+- Linux v0.3 smoke wrote `/tmp/openclaw/research/polymarket_leadlag/polymarket_leadlag_20260620T124843Z.json`; sha256 `5cd5dde22b7bfd6d31339aca739db3126982ac5b3130d23da3478b2ed56d6de5`; `max_ic_points=1`, `max_overlap_adjusted_ic_points=1`, still `INSUFFICIENT_SAMPLE`.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket 15m Evidence Cadence
 
 - Manual lead-lag wrapper after first label maturity wrote `/tmp/openclaw/research/polymarket_leadlag/polymarket_leadlag_20260620T122433Z.json`; sha256 `cfc12bd3519a18eaa3dc03a7ea690f61d0e2cb695087a2c4f33cb4c110951111`.

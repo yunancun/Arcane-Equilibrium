@@ -541,6 +541,26 @@ def _max_ic_points(payload: dict[str, Any]) -> int:
     return max((_int(row.get("n_points")) for row in rows if isinstance(row, dict)), default=0)
 
 
+def _sample_ic_points(payload: dict[str, Any]) -> tuple[int, int]:
+    raw_points = _max_ic_points(payload)
+    counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+    if "max_overlap_adjusted_ic_points" in counts:
+        return _int(counts.get("max_overlap_adjusted_ic_points")), raw_points
+    rows = payload.get("ic_results")
+    rows = rows if isinstance(rows, list) else []
+    adjusted_from_rows = max(
+        (
+            _int(row.get("overlap_adjusted_sample_floor"))
+            for row in rows
+            if isinstance(row, dict)
+        ),
+        default=0,
+    )
+    if adjusted_from_rows > 0:
+        return adjusted_from_rows, raw_points
+    return raw_points, raw_points
+
+
 def collect_polymarket_leadlag_arm(
     data_dir: Path,
     *,
@@ -573,7 +593,7 @@ def collect_polymarket_leadlag_arm(
         counts.get("label_readiness") if isinstance(counts.get("label_readiness"), dict) else {}
     )
     status = str(verdict.get("status") or "").upper()
-    sample_count = _max_ic_points(payload)
+    sample_count, raw_sample_count = _sample_ic_points(payload)
     candidate_count = _int(verdict.get("candidate_count"))
 
     if not fresh:
@@ -612,6 +632,8 @@ def collect_polymarket_leadlag_arm(
             "verdict_status": status,
             "reason": verdict.get("reason"),
             "candidate_count": candidate_count,
+            "preliminary_raw_candidate_count": verdict.get("preliminary_raw_candidate_count"),
+            "max_bh_q": verdict.get("max_bh_q"),
             "query_set_version": payload.get("query_set_version"),
             "mode": payload.get("mode"),
             "symbols": payload.get("symbols"),
@@ -622,7 +644,8 @@ def collect_polymarket_leadlag_arm(
             "delta_rows": counts.get("delta_rows"),
             "joined_rows": counts.get("joined_rows"),
             "price_rows": counts.get("price_rows"),
-            "max_ic_points": sample_count,
+            "max_ic_points": raw_sample_count,
+            "max_overlap_adjusted_ic_points": sample_count,
             "label_feature_horizon_pairs": label_readiness.get("feature_horizon_pairs"),
             "label_joinable_pairs": label_readiness.get("joinable_pairs"),
             "label_status_counts": label_readiness.get("status_counts"),
