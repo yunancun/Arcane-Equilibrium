@@ -232,6 +232,10 @@ def _flash_dip_l1_short_exit_replay_detail(
         "events_missing_l1_in_event_window": status.get("events_missing_l1_in_event_window"),
         "days_with_l1_in_event_window": status.get("days_with_l1_in_event_window"),
         "days_missing_l1_in_event_window": status.get("days_missing_l1_in_event_window"),
+        "event_window_l1_relation_counts": status.get("event_window_l1_relation_counts"),
+        "dominant_missing_event_window_l1_relation": status.get(
+            "dominant_missing_event_window_l1_relation"
+        ),
         "gate_exit_measured": status.get("gate_exit_measured"),
         "gate_distinct_exit_days": status.get("gate_distinct_exit_days"),
         "gate_annret": status.get("gate_annret"),

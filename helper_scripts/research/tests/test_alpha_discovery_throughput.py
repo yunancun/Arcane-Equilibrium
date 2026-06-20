@@ -377,6 +377,8 @@ def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
         "events_missing_l1_in_event_window": 3,
         "days_with_l1_in_event_window": 0,
         "days_missing_l1_in_event_window": 1,
+        "event_window_l1_relation_counts": {"no_symbol_l1_rows": 3},
+        "dominant_missing_event_window_l1_relation": "no_symbol_l1_rows",
         "gate_exit_measured": 0,
         "gate_distinct_exit_days": 0,
         "gate_annret": None,
@@ -405,6 +407,8 @@ def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
     assert l1_replay["l1_rows_post_filter"] == 0
     assert l1_replay["trade_rows"] == 608227
     assert l1_replay["events_missing_l1_in_event_window"] == 3
+    assert l1_replay["event_window_l1_relation_counts"] == {"no_symbol_l1_rows": 3}
+    assert l1_replay["dominant_missing_event_window_l1_relation"] == "no_symbol_l1_rows"
     assert l1_replay["boundary"] == "counterfactual_only_not_promotion_evidence"
     assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
     assert plan["arms"][0]["reason"] == "sample_count_below_gate"
@@ -457,6 +461,8 @@ def test_flash_dip_l1_replay_arm_surfaces_coverage_hole_as_capture(tmp_path):
         "events_missing_l1_in_event_window": 6,
         "days_with_l1_in_event_window": 0,
         "days_missing_l1_in_event_window": 2,
+        "event_window_l1_relation_counts": {"candidate_window_before_symbol_l1_range": 6},
+        "dominant_missing_event_window_l1_relation": "candidate_window_before_symbol_l1_range",
         "gate_exit_measured": 0,
         "gate_distinct_exit_days": 0,
     }) + "\n", encoding="utf-8")
@@ -474,6 +480,12 @@ def test_flash_dip_l1_replay_arm_surfaces_coverage_hole_as_capture(tmp_path):
     assert arm["detail"]["fail_reasons"][0] == "no_l1_rows_for_candidate_event_windows"
     assert arm["detail"]["l1_rows_post_filter"] == 173749
     assert arm["detail"]["events_missing_l1_in_event_window"] == 6
+    assert arm["detail"]["event_window_l1_relation_counts"] == {
+        "candidate_window_before_symbol_l1_range": 6,
+    }
+    assert arm["detail"]["dominant_missing_event_window_l1_relation"] == (
+        "candidate_window_before_symbol_l1_range"
+    )
     assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
 
 

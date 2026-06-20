@@ -197,6 +197,8 @@ status = {
     "events_missing_l1_in_event_window": None,
     "days_with_l1_in_event_window": None,
     "days_missing_l1_in_event_window": None,
+    "event_window_l1_relation_counts": {},
+    "dominant_missing_event_window_l1_relation": None,
     "gate_exit_measured": None,
     "gate_distinct_exit_days": None,
     "gate_annret": None,
@@ -214,6 +216,18 @@ try:
     l1_meta = report.get("loaded_l1_meta") or {}
     trades_meta = report.get("trades_meta") or {}
     coverage = report.get("l1_candidate_coverage") or {}
+    relation_counts = coverage.get("event_window_l1_relation_counts") or {}
+    missing_relation_counts = {
+        str(k): int(v)
+        for k, v in relation_counts.items()
+        if str(k) != "covered"
+    }
+    dominant_missing_relation = None
+    if missing_relation_counts:
+        dominant_missing_relation = max(
+            missing_relation_counts.items(),
+            key=lambda kv: (kv[1], kv[0]),
+        )[0]
     status.update({
         "parse_ok": True,
         "version": report.get("version"),
@@ -232,6 +246,8 @@ try:
         "events_missing_l1_in_event_window": coverage.get("n_events_missing_l1_in_event_window"),
         "days_with_l1_in_event_window": coverage.get("n_distinct_days_with_l1_in_event_window"),
         "days_missing_l1_in_event_window": coverage.get("n_distinct_days_missing_l1_in_event_window"),
+        "event_window_l1_relation_counts": relation_counts,
+        "dominant_missing_event_window_l1_relation": dominant_missing_relation,
     })
     gate_q = verdict.get("gate_queue_ahead_frac")
     gate_h = f"{verdict.get('gate_horizon_minutes')}m"
