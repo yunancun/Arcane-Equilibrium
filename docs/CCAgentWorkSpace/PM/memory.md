@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM FillSim Daily History Cadence
+
+- Changed fill_sim refresh default `OPENCLAW_FILL_SIM_MAX_AGE_H` from 60h to 18h so the installed daily 06:05 UTC cron can accumulate cross-window history daily-ish instead of every ~2.5 days.
+- This is evidence-velocity only, not promotion proof; v257 fresh-L1 report remains the latest production fill_sim artifact and MM still needs repeated current-fee or holdout-confirmed positives.
+- Boundary: source/test/docs + selective Linux source sync only; no rebuild/restart, DB write, Bybit call, or auth/risk/order/strategy mutation.
+
 ## 2026-06-20 MM FillSim Wall-Clock Freshness Gate
 
 - Fixed fill_sim/MM verdict false-freshness: both cron wrappers now recompute L1 data age from `l1_max_ts` against wall clock; missing/bad `l1_max_ts` fail-closes.

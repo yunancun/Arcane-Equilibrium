@@ -38,7 +38,7 @@ def test_executable_and_strict_mode() -> None:
 def test_bounded_freshness_defaults_and_force_override() -> None:
     src = _src()
     assert 'OPENCLAW_FILL_SIM_HOURS:-2' in src
-    assert 'OPENCLAW_FILL_SIM_MAX_AGE_H:-60' in src
+    assert 'OPENCLAW_FILL_SIM_MAX_AGE_H:-18' in src
     assert 'OPENCLAW_FILL_SIM_STALE_ALERT_H:-72' in src
     assert 'OPENCLAW_FILL_SIM_MAX_DATA_AGE_H:-72' in src
     assert "OPENCLAW_FILL_SIM_HISTORY_DIR" in src

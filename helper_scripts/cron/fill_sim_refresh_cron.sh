@@ -12,7 +12,7 @@
 #
 # Operator knobs:
 #   OPENCLAW_FILL_SIM_HOURS=2              recent window; 0 = full available data
-#   OPENCLAW_FILL_SIM_MAX_AGE_H=60         skip refresh while report is younger
+#   OPENCLAW_FILL_SIM_MAX_AGE_H=18         skip refresh while report is younger
 #   OPENCLAW_FILL_SIM_STALE_ALERT_H=72     alert if report remains too old
 #   OPENCLAW_FILL_SIM_MAX_DATA_AGE_H=72    reject candidate if L1 data is older
 #   OPENCLAW_FILL_SIM_FORCE=1              run even if report is fresh
@@ -37,7 +37,7 @@ HISTORY_SCORECARD="${OPENCLAW_FILL_SIM_HISTORY_SCORECARD:-${DATA}/research/fills
 HISTORY_SCORECARD_DIR="$(dirname "$HISTORY_SCORECARD")"
 
 FILL_SIM_HOURS="${OPENCLAW_FILL_SIM_HOURS:-2}"
-FILL_SIM_MAX_AGE_H="${OPENCLAW_FILL_SIM_MAX_AGE_H:-60}"
+FILL_SIM_MAX_AGE_H="${OPENCLAW_FILL_SIM_MAX_AGE_H:-18}"
 FILL_SIM_STALE_ALERT_H="${OPENCLAW_FILL_SIM_STALE_ALERT_H:-72}"
 FILL_SIM_MAX_DATA_AGE_H="${OPENCLAW_FILL_SIM_MAX_DATA_AGE_H:-72}"
 FILL_SIM_FORCE="${OPENCLAW_FILL_SIM_FORCE:-0}"
