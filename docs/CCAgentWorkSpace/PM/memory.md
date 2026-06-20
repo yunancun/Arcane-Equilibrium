@@ -760,3 +760,9 @@
 
 - K6/N2/C3/nf0.5% remains a useful FlashDip research object, but its 2-day daily-exit demo-retune path is blocked by recent 1m execution-realism: 10bps buffer has 65 fills / 37 days but fixed-notional annret -2.49%, and all 0-50bps daily-exit buffers are negative.
 - The same artifact shows the actionable next research seam: fee-adjusted short exits, especially 240m, are positive in the recent slice（0bps/240m annret 1.71%, 10bps/240m annret 1.29%）. Treat this as research-only; next gate is L1/orderbook replay plus QC/MIT/AI-E, not a parameter change.
+
+## 2026-06-20 MM fee-path feasibility
+
+- v253 adds `fee_path_feasibility` to `recorder_mm_verdict_cron.sh`: local 30d fills capacity proxy is now joined to the v252 maker fee sensitivity break-even. Linux isolated smoke showed `notional_usd=871,107.04`, `maker_notional_usd=496,419.84`, effective fee `3.6688bps`, and v252 break-even `1.028bp/side`.
+- First standard Bybit derivatives VIP tier that clears that break-even is VIP5 (`1.0bp/side`), not VIP1-4; VIP5 is approximately `$250M/30d` derivatives volume or `$2M` asset balance, while current local volume proxy is only `0.348%` of that threshold and is not mainnet eligibility proof.
+- PM read: fee reduction is a capital/scale/Bybit BD/MM-rebate path. Short-term engineering should keep searching for stronger signals/regime filters unless the operator explicitly pursues institutional/MM fee terms.

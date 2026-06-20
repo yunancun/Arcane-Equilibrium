@@ -162,6 +162,61 @@ markout_per_symbol AS (
   FROM maker_fills
   GROUP BY symbol
 ),
+fills_30d AS (
+  -- Local execution throughput proxy only. Demo/live_demo rows do not prove
+  -- Bybit mainnet VIP eligibility; they quantify current bot capacity.
+  SELECT
+      coalesce(engine_mode, 'unknown') AS engine_mode,
+      lower(coalesce(liquidity_role, 'unknown')) AS role,
+      abs(qty::numeric * price::numeric) AS notional_usd,
+      abs(coalesce(fee, 0)::numeric) AS fee_usd
+  FROM trading.fills
+  WHERE ts >= now() - interval '30 days'
+    AND coalesce(engine_mode, '') IN ('demo', 'live_demo', 'live')
+    AND coalesce(strategy_name, '') NOT LIKE 'unattributed:%'
+    AND qty IS NOT NULL AND price IS NOT NULL
+),
+fills_30d_by_mode AS (
+  SELECT engine_mode,
+         count(*) AS fills,
+         round(coalesce(sum(notional_usd), 0), 2) AS notional_usd,
+         round(coalesce(sum(fee_usd), 0), 4) AS fee_usd
+  FROM fills_30d
+  GROUP BY engine_mode
+),
+fee_capacity_summary AS (
+  SELECT json_build_object(
+    'window_days', 30,
+    'fills', (SELECT count(*) FROM fills_30d),
+    'notional_usd', (SELECT round(coalesce(sum(notional_usd), 0), 2) FROM fills_30d),
+    'fee_usd', (SELECT round(coalesce(sum(fee_usd), 0), 4) FROM fills_30d),
+    'effective_fee_bps', (
+      SELECT CASE WHEN coalesce(sum(notional_usd), 0) > 0
+        THEN round((sum(fee_usd) / sum(notional_usd) * 10000.0), 4)
+        ELSE NULL END
+      FROM fills_30d
+    ),
+    'maker_fills', (SELECT count(*) FROM fills_30d WHERE role = 'maker'),
+    'maker_notional_usd', (
+      SELECT round(coalesce(sum(notional_usd) FILTER (WHERE role = 'maker'), 0), 2)
+      FROM fills_30d
+    ),
+    'taker_fills', (SELECT count(*) FROM fills_30d WHERE role = 'taker'),
+    'taker_notional_usd', (
+      SELECT round(coalesce(sum(notional_usd) FILTER (WHERE role = 'taker'), 0), 2)
+      FROM fills_30d
+    ),
+    'by_engine_mode', COALESCE((
+      SELECT json_object_agg(engine_mode, json_build_object(
+          'fills', fills,
+          'notional_usd', notional_usd,
+          'fee_usd', fee_usd
+      ))
+      FROM fills_30d_by_mode
+    ), '{}'::json),
+    'proxy_warning', 'local demo/live_demo/live fills are capacity proxy only; not VIP eligibility proof'
+  ) AS j
+),
 markout_summary AS (
   SELECT json_build_object(
     'n_total', (SELECT count(*) FROM maker_fills),
@@ -201,6 +256,7 @@ highvol_summary AS (
 )
 SELECT json_build_object(
   'markout', (SELECT j FROM markout_summary),
+  'fee_capacity_30d', (SELECT j FROM fee_capacity_summary),
   'l1_readiness', __L1_FRAG__,
   'highvol', (SELECT j FROM highvol_summary)
 );
@@ -242,6 +298,7 @@ fi
 #   第二行 ALERTS=<json list of subject strings>（命中條件，落 alerts.jsonl）
 # ---------------------------------------------------------------------------
 PY_OUT=$(MM_JSON="$MM_JSON" \
+    OPENCLAW_BASE_DIR="$BASE" \
     MM_MIN_MAKER_FILLS="$MM_MIN_MAKER_FILLS" \
     MAKER_FEE_BPS_PER_SIDE="$MAKER_FEE_BPS_PER_SIDE" \
     MM_ADVERSE_HORIZON_S="$MM_ADVERSE_HORIZON_S" \
@@ -250,7 +307,14 @@ PY_OUT=$(MM_JSON="$MM_JSON" \
     MM_HIGHVOL_Z="$MM_HIGHVOL_Z" \
     FILLSIM_REPORT="$FILLSIM_REPORT" \
     python3 - <<'PY' 2>>"$LOG" || true
-import json, os, datetime
+import json, os, datetime, sys
+
+base_dir = os.environ.get("OPENCLAW_BASE_DIR")
+if base_dir:
+    sys.path.insert(0, base_dir)
+from program_code.research.microstructure.fee_path import (
+    build_maker_fee_path_feasibility_scorecard,
+)
 
 mm = json.loads(os.environ["MM_JSON"])
 min_fills = float(os.environ["MM_MIN_MAKER_FILLS"])
@@ -265,6 +329,7 @@ fillsim_path = os.environ["FILLSIM_REPORT"]
 markout = mm.get("markout") or {}
 l1 = mm.get("l1_readiness") or {}
 highvol = mm.get("highvol") or {}
+fee_capacity_30d = mm.get("fee_capacity_30d") or {}
 
 per_sym_mk = markout.get("per_symbol") or {}
 alerts = []  # alert subject 字串
@@ -356,6 +421,11 @@ def _load_fillsim_adverse(path, h_primary, max_age_h):
 
 fillsim = _load_fillsim_adverse(fillsim_path, h_primary, fillsim_max_age_h)
 adverse_sel = fillsim["adverse_sel_bps"]
+fee_path_feasibility = build_maker_fee_path_feasibility_scorecard(
+    fillsim.get("maker_fee_sensitivity_scorecard"),
+    fee_capacity_30d,
+    current_maker_fee_bps_per_side=maker_fee,
+)
 # adverse 可用性：報告存在、非過期、有數值。否則 adverse 未知 → net 不可發正告警。
 adverse_usable = (fillsim["present"] and not fillsim["stale"] and adverse_sel is not None)
 
@@ -482,6 +552,8 @@ status = {
     "markout_n_24h": markout.get("n_24h"),
     "markout_basis": "reference_source=mid_at_submit (half-spread basis only)",
     "fillsim": fillsim,
+    "fee_capacity_30d": fee_capacity_30d,
+    "fee_path_feasibility": fee_path_feasibility,
     "adverse_selection_usable": adverse_usable,
     "net_edge_per_symbol": net_edge,
     "cost_wall_summary": cost_wall_summary,
