@@ -236,6 +236,9 @@ def _flash_dip_l1_short_exit_replay_detail(
         "dominant_missing_event_window_l1_relation": status.get(
             "dominant_missing_event_window_l1_relation"
         ),
+        "coverage_action_status": status.get("coverage_action_status"),
+        "coverage_action_reason": status.get("coverage_action_reason"),
+        "coverage_action_scorecard": status.get("coverage_action_scorecard"),
         "gate_exit_measured": status.get("gate_exit_measured"),
         "gate_distinct_exit_days": status.get("gate_distinct_exit_days"),
         "gate_annret": status.get("gate_annret"),

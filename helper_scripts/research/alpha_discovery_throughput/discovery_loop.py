@@ -544,19 +544,40 @@ def classify_profitability_blocker(
     if arm_id == "flash_dip_l1_short_exit_replay":
         fail_reasons = [str(item) for item in _list(detail.get("fail_reasons"))]
         relation = str(detail.get("dominant_missing_event_window_l1_relation") or "")
+        coverage_action = _dict(detail.get("coverage_action_scorecard"))
+        coverage_action_status = str(
+            detail.get("coverage_action_status")
+            or coverage_action.get("status")
+            or ""
+        )
+        coverage_engineering_actionable = coverage_action.get("engineering_actionable")
+        if isinstance(coverage_engineering_actionable, bool):
+            engineering_actionable = coverage_engineering_actionable
+        else:
+            engineering_actionable = True
+        next_trigger = (
+            coverage_action.get("next_trigger")
+            or "capture_candidate_windows_with_l1_overlap_then_replay_short_exit"
+        )
         if any("l1" in reason.lower() for reason in fail_reasons) or relation:
             return _finish_blocker_row(
                 row,
                 blocker_class="data_coverage",
                 primary_blocker=relation or (fail_reasons[0] if fail_reasons else "l1_replay_coverage_gap"),
-                next_trigger="capture_candidate_windows_with_l1_overlap_then_replay_short_exit",
-                engineering_actionable=True,
+                next_trigger=next_trigger,
+                engineering_actionable=engineering_actionable,
                 extra={
                     "candidate_events": detail.get("candidate_events"),
                     "events_missing_l1_in_event_window": detail.get(
                         "events_missing_l1_in_event_window"
                     ),
                     "dominant_missing_event_window_l1_relation": relation or None,
+                    "coverage_action_status": coverage_action_status or None,
+                    "coverage_action_reason": (
+                        detail.get("coverage_action_reason")
+                        or coverage_action.get("reason")
+                    ),
+                    "coverage_action_scorecard": coverage_action or None,
                 },
             )
 

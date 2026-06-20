@@ -1216,6 +1216,16 @@ def test_flash_dip_l1_replay_arm_surfaces_coverage_hole_as_capture(tmp_path):
         "days_missing_l1_in_event_window": 2,
         "event_window_l1_relation_counts": {"candidate_window_before_symbol_l1_range": 6},
         "dominant_missing_event_window_l1_relation": "candidate_window_before_symbol_l1_range",
+        "coverage_action_status": "HISTORICAL_CANDIDATES_BEFORE_L1_CAPTURE_WAIT_NEXT_CANDIDATE",
+        "coverage_action_reason": "candidate_windows_end_before_symbol_l1_capture_starts",
+        "coverage_action_scorecard": {
+            "status": "HISTORICAL_CANDIDATES_BEFORE_L1_CAPTURE_WAIT_NEXT_CANDIDATE",
+            "reason": "candidate_windows_end_before_symbol_l1_capture_starts",
+            "next_trigger": "wait_for_next_flash_dip_candidate_after_l1_capture_start_then_replay",
+            "engineering_actionable": False,
+            "events_missing_l1_in_event_window": 6,
+            "l1_gap_hours": {"n": 6, "p50": 12.0},
+        },
         "gate_exit_measured": 0,
         "gate_distinct_exit_days": 0,
     }) + "\n", encoding="utf-8")
@@ -1239,7 +1249,18 @@ def test_flash_dip_l1_replay_arm_surfaces_coverage_hole_as_capture(tmp_path):
     assert arm["detail"]["dominant_missing_event_window_l1_relation"] == (
         "candidate_window_before_symbol_l1_range"
     )
+    assert arm["detail"]["coverage_action_status"] == (
+        "HISTORICAL_CANDIDATES_BEFORE_L1_CAPTURE_WAIT_NEXT_CANDIDATE"
+    )
     assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["coverage_action_status"] == (
+        "HISTORICAL_CANDIDATES_BEFORE_L1_CAPTURE_WAIT_NEXT_CANDIDATE"
+    )
+    assert blocker["engineering_actionable"] is False
+    assert blocker["next_trigger"] == (
+        "wait_for_next_flash_dip_candidate_after_l1_capture_start_then_replay"
+    )
 
 
 def test_flash_dip_l1_replay_arm_ready_only_after_conditional_pass_sample_gate(tmp_path):

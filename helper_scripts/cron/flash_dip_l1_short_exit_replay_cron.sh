@@ -199,6 +199,9 @@ status = {
     "days_missing_l1_in_event_window": None,
     "event_window_l1_relation_counts": {},
     "dominant_missing_event_window_l1_relation": None,
+    "coverage_action_status": None,
+    "coverage_action_reason": None,
+    "coverage_action_scorecard": None,
     "gate_exit_measured": None,
     "gate_distinct_exit_days": None,
     "gate_annret": None,
@@ -216,6 +219,7 @@ try:
     l1_meta = report.get("loaded_l1_meta") or {}
     trades_meta = report.get("trades_meta") or {}
     coverage = report.get("l1_candidate_coverage") or {}
+    coverage_action = coverage.get("coverage_action_scorecard") or {}
     relation_counts = coverage.get("event_window_l1_relation_counts") or {}
     missing_relation_counts = {
         str(k): int(v)
@@ -248,6 +252,9 @@ try:
         "days_missing_l1_in_event_window": coverage.get("n_distinct_days_missing_l1_in_event_window"),
         "event_window_l1_relation_counts": relation_counts,
         "dominant_missing_event_window_l1_relation": dominant_missing_relation,
+        "coverage_action_status": coverage_action.get("status"),
+        "coverage_action_reason": coverage_action.get("reason"),
+        "coverage_action_scorecard": coverage_action,
     })
     gate_q = verdict.get("gate_queue_ahead_frac")
     gate_h = f"{verdict.get('gate_horizon_minutes')}m"

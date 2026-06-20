@@ -1040,3 +1040,8 @@
 - v254 adds `walk_forward_feature_scorecard` to fill_sim and MM verdict passthrough. Thresholds are selected on the first time half and replayed on the second half; only train+holdout sample-gated positive cells count as confirmed.
 - Linux isolated 15m smoke `/tmp/openclaw/research/fillsim/fillsim_walk_forward_smoke_20260620T100549Z.json` sha256 `091eb93d6f653aa605941274134beff8d5a041c85b9577bc245636559c2364c2`: 139,391 L1 rows, 76,079 trades, 33 symbols, 51 candidates, status `NO_WALK_FORWARD_FEATURE_TRAIN_POSITIVE`. Best train cell `symbol=BCHUSDT` was still negative (train -2.061bp, holdout -1.429bp).
 - PM read: simple PIT spread/imbalance/OFI/BTC-lead thresholding is not the missing short-term maker edge. Next work should be materially new signal/regime coverage or a non-MM path, not more in-window threshold overfitting.
+
+## 2026-06-20 FlashDip L1 coverage action scorecard
+
+- v286 adds `coverage_action_scorecard` to FlashDip L1 replay and alpha-discovery blocker rows. Current runtime evidence says the 6 missing candidate event windows ended before symbol L1 capture began, so this is a historical-before-capture wait state, not immediate recorder repair.
+- Latest alpha remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`; FlashDip L1 next trigger is `wait_for_next_flash_dip_candidate_after_l1_capture_start_then_replay`. Treat this as research evidence routing only, not retune/promotion authority.

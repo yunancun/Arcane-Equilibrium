@@ -436,6 +436,13 @@ def test_l1_coverage_reasons_detect_event_window_hole_when_symbol_l1_exists():
     assert broad_l1_without_event_window_rows["event_window_l1_relation_counts"] == {
         "candidate_window_before_symbol_l1_range": 2,
     }
+    action = broad_l1_without_event_window_rows["coverage_action_scorecard"]
+    assert action["status"] == "HISTORICAL_CANDIDATES_BEFORE_L1_CAPTURE_WAIT_NEXT_CANDIDATE"
+    assert action["engineering_actionable"] is False
+    assert action["l1_gap_hours"]["n"] == 2
+    assert action["next_trigger"] == (
+        "wait_for_next_flash_dip_candidate_after_l1_capture_start_then_replay"
+    )
     assert broad_l1_without_event_window_rows["events_missing_l1_in_event_window_sample"][0]["l1_relation"] == (
         "candidate_window_before_symbol_l1_range"
     )
@@ -478,6 +485,10 @@ def test_l1_coverage_reasons_detect_partial_event_window_coverage():
         "AAAUSDT:2026-01-02": "covered",
         "BBBUSDT:2026-01-02": "candidate_window_before_symbol_l1_range",
     }
+    assert partial_event_l1["coverage_action_scorecard"]["status"] == (
+        "PARTIAL_EVENT_WINDOW_L1_COVERAGE"
+    )
+    assert partial_event_l1["coverage_action_scorecard"]["engineering_actionable"] is True
     assert partial_gate["status"] == "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE"
     assert partial_gate["fail_reasons"][0] == "partial_l1_event_window_coverage"
 
@@ -528,5 +539,28 @@ def test_l1_candidate_coverage_splits_event_window_timing_holes():
     assert missing["AAAUSDT"]["l1_gap_hours"] == pytest.approx(50 / 60)
     assert missing["BBBUSDT"]["l1_gap_hours"] == pytest.approx(1.0)
     assert missing["CCCUSDT"]["l1_gap_hours"] is None
+    assert coverage["coverage_action_scorecard"]["status"] == "PARTIAL_EVENT_WINDOW_L1_COVERAGE"
     assert covered_gate["status"] == "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE"
     assert covered_gate["fail_reasons"][0] == "partial_l1_event_window_coverage"
+
+
+def test_l1_coverage_action_scorecard_detects_stale_l1_range_after_candidates():
+    events = [
+        {"symbol": "AAAUSDT", "entry_date": "2026-01-02", "entry_level": 100.0},
+    ]
+
+    coverage = l1replay.l1_candidate_coverage_summary(
+        events,
+        {"AAAUSDT": [{"ts_ms": _ts_ms(0) - 60 * 60 * 1000}]},
+        maker_timeout_minutes=10,
+    )
+    action = coverage["coverage_action_scorecard"]
+
+    assert coverage["event_window_l1_relation_counts"] == {
+        "candidate_window_after_symbol_l1_range": 1,
+    }
+    assert action["status"] == "CANDIDATES_AFTER_L1_RANGE_RECORDER_STALE_OR_WINDOW_AFTER_DATA"
+    assert action["engineering_actionable"] is True
+    assert action["next_trigger"] == (
+        "restore_or_extend_l1_capture_then_replay_candidate_windows"
+    )
