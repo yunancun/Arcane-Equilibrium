@@ -41,6 +41,8 @@ def test_bounded_freshness_defaults_and_force_override() -> None:
     assert 'OPENCLAW_FILL_SIM_MAX_AGE_H:-60' in src
     assert 'OPENCLAW_FILL_SIM_STALE_ALERT_H:-72' in src
     assert 'OPENCLAW_FILL_SIM_MAX_DATA_AGE_H:-72' in src
+    assert "OPENCLAW_FILL_SIM_HISTORY_DIR" in src
+    assert "OPENCLAW_FILL_SIM_HISTORY_SCORECARD" in src
     assert "OPENCLAW_FILL_SIM_FORCE" in src
     assert "skipped_fresh" in src
 
@@ -70,6 +72,8 @@ def test_candidate_report_must_validate_before_replace() -> None:
     assert "validate_candidate_report" in src
     assert "empty_l1" in src
     assert "stale_l1_data" in src
+    assert 'cp -f "$CANDIDATE_REPORT" "$HISTORY_REPORT"' in src
+    assert "program_code.research.microstructure.fill_sim_history" in src
     assert 'mv -f "$CANDIDATE_REPORT" "$REPORT"' in src
     assert "candidate_rejected" in src
     assert "invalid_latest" in src
@@ -130,6 +134,8 @@ def test_mm_verdict_surfaces_cost_wall_fields() -> None:
     assert "conditional_feature_scorecard" in src
     assert "walk_forward_feature_scorecard" in src
     assert "maker_fee_sensitivity_scorecard" in src
+    assert "history_scorecard" in src
+    assert "FILLSIM_HISTORY_SCORECARD" in src
     assert "fee_capacity_30d" in src
     assert "fee_path_feasibility" in src
     assert "build_maker_fee_path_feasibility_scorecard" in src

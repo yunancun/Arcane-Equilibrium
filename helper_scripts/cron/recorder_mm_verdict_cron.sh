@@ -64,6 +64,7 @@ LOCK_ROOT="${DATA}/locks"
 LOCK_DIR="${LOCK_ROOT}/recorder_mm_verdict_cron.lock.d"
 # fill_sim 最新報告（read-only；缺檔/過期 → adverse 未知，fail-soft 不發正 net 告警）。
 FILLSIM_REPORT="${OPENCLAW_MM_FILLSIM_REPORT:-${DATA}/research/fillsim/fillsim_report.json}"
+FILLSIM_HISTORY_SCORECARD="${OPENCLAW_MM_FILLSIM_HISTORY_SCORECARD:-${DATA}/research/fillsim/fillsim_history_scorecard.json}"
 
 # MM verdict 門檻（皆可由 env 覆寫）：
 #   n_maker_fills 最小樣本（per-symbol MM-net-positive 告警的可信度門檻；對齊 fill_sim
@@ -306,6 +307,7 @@ PY_OUT=$(MM_JSON="$MM_JSON" \
     MM_L1_REGIME_DAYS="$MM_L1_REGIME_DAYS" \
     MM_HIGHVOL_Z="$MM_HIGHVOL_Z" \
     FILLSIM_REPORT="$FILLSIM_REPORT" \
+    FILLSIM_HISTORY_SCORECARD="$FILLSIM_HISTORY_SCORECARD" \
     python3 - <<'PY' 2>>"$LOG" || true
 import json, os, datetime, sys
 
@@ -325,6 +327,7 @@ fillsim_max_age_h = float(os.environ["MM_FILLSIM_MAX_AGE_H"])
 l1_thr = float(os.environ["MM_L1_REGIME_DAYS"])
 highvol_z_thr = float(os.environ["MM_HIGHVOL_Z"])
 fillsim_path = os.environ["FILLSIM_REPORT"]
+fillsim_history_path = os.environ["FILLSIM_HISTORY_SCORECARD"]
 
 markout = mm.get("markout") or {}
 l1 = mm.get("l1_readiness") or {}
@@ -420,7 +423,44 @@ def _load_fillsim_adverse(path, h_primary, max_age_h):
             info["sensitivity"][f"adverse_sel_bps@{hs}"] = v
     return info
 
+def _load_fillsim_history_scorecard(path):
+    info = {"source": path, "present": False, "parse_ok": False, "status": None,
+            "generated_at": None, "windows_loaded": None, "valid_windows": None,
+            "distinct_window_dates": None, "best_sample_gated_break_even_window": None,
+            "reason": None}
+    try:
+        with open(path) as f:
+            rep = json.load(f)
+    except FileNotFoundError:
+        info["reason"] = "missing"
+        return info
+    except ValueError:
+        info["reason"] = "parse_error"
+        return info
+    info.update({
+        "present": True,
+        "parse_ok": True,
+        "status": rep.get("status"),
+        "generated_at": rep.get("generated_at"),
+        "windows_loaded": rep.get("windows_loaded"),
+        "valid_windows": rep.get("valid_windows"),
+        "distinct_window_dates": rep.get("distinct_window_dates"),
+        "current_fee_sample_gated_positive_windows": rep.get(
+            "current_fee_sample_gated_positive_windows"
+        ),
+        "walk_forward_holdout_confirmed_windows": rep.get(
+            "walk_forward_holdout_confirmed_windows"
+        ),
+        "repeated_positive_keys": rep.get("repeated_positive_keys"),
+        "best_sample_gated_break_even_window": rep.get(
+            "best_sample_gated_break_even_window"
+        ),
+        "reason": rep.get("reason"),
+    })
+    return info
+
 fillsim = _load_fillsim_adverse(fillsim_path, h_primary, fillsim_max_age_h)
+fillsim["history_scorecard"] = _load_fillsim_history_scorecard(fillsim_history_path)
 adverse_sel = fillsim["adverse_sel_bps"]
 fee_path_feasibility = build_maker_fee_path_feasibility_scorecard(
     fillsim.get("maker_fee_sensitivity_scorecard"),
