@@ -18,6 +18,7 @@ from alpha_discovery_throughput.packet import (
     daily_returns_from_samples,
 )
 from alpha_discovery_throughput.runtime_runner import (
+    collect_flash_dip_execution_realism_arm,
     collect_flash_dip_arm,
     collect_flash_dip_l1_replay_arm,
     collect_polymarket_leadlag_arm,
@@ -878,6 +879,28 @@ def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
         "gate_maxdd": None,
         "boundary": "counterfactual_only_not_promotion_evidence",
     }) + "\n", encoding="utf-8")
+    (data / "logs" / "flash_dip_execution_realism.log").write_text(json.dumps({
+        "ts_utc": "2026-06-20T01:18:00Z",
+        "check": "flash_dip_execution_realism",
+        "artifact_path": "/tmp/openclaw/research/tail_dislocation_meanrev/realism.json",
+        "latest_path": "/tmp/openclaw/research/tail_dislocation_meanrev/realism_latest.json",
+        "sha256": "def456",
+        "candidate_label": "K6_N2_C3_nf0.005",
+        "k_pct": 6.0,
+        "verdict_status": "EXECUTION_REALISM_BLOCKED",
+        "fail_reasons": ["gate_buffer_nonpositive_annret"],
+        "gate_buffer_bps": 10.0,
+        "gate_filled": 68,
+        "gate_distinct_days": 38,
+        "gate_annret": -0.0255,
+        "gate_maxdd": 0.0081,
+        "short_exit_status": "SHORT_EXIT_RESEARCH_SIGNAL",
+        "best_short_exit_horizon": "240m",
+        "best_short_exit_annret": 0.0132,
+        "best_short_exit_n_filled": 68,
+        "best_short_exit_days": 38,
+        "boundary": "counterfactual_only_not_promotion_evidence",
+    }) + "\n", encoding="utf-8")
 
     arm = collect_flash_dip_arm(
         data,
@@ -908,6 +931,11 @@ def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
     assert l1_replay["event_window_l1_relation_counts"] == {"no_symbol_l1_rows": 3}
     assert l1_replay["dominant_missing_event_window_l1_relation"] == "no_symbol_l1_rows"
     assert l1_replay["boundary"] == "counterfactual_only_not_promotion_evidence"
+    execution_realism = arm["detail"]["execution_realism"]
+    assert execution_realism["source_ok"] is True
+    assert execution_realism["verdict_status"] == "EXECUTION_REALISM_BLOCKED"
+    assert execution_realism["short_exit_status"] == "SHORT_EXIT_RESEARCH_SIGNAL"
+    assert execution_realism["best_short_exit_horizon"] == "240m"
     assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
     assert plan["arms"][0]["reason"] == "sample_count_below_gate"
     blocker = plan["profitability_blocker_scorecard"]["arms"][0]
@@ -916,6 +944,77 @@ def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
     )
     assert blocker["research_candidate_k_pct"] == 6.0
     assert blocker["research_candidate_touched_count"] == 1
+
+
+def test_flash_dip_execution_realism_arm_preserves_short_exit_research_path(tmp_path):
+    data = tmp_path / "openclaw"
+    (data / "logs").mkdir(parents=True)
+    (data / "logs" / "flash_dip_execution_realism.log").write_text(json.dumps({
+        "ts_utc": "2026-06-20T01:18:00Z",
+        "check": "flash_dip_execution_realism",
+        "candidate_label": "K6_N2_C3_nf0.005",
+        "k_pct": 6.0,
+        "verdict_status": "EXECUTION_REALISM_BLOCKED",
+        "fail_reasons": ["gate_buffer_nonpositive_annret"],
+        "gate_buffer_bps": 10.0,
+        "gate_filled": 68,
+        "gate_distinct_days": 38,
+        "gate_annret": -0.0255,
+        "gate_maxdd": 0.0081,
+        "short_exit_status": "SHORT_EXIT_RESEARCH_SIGNAL",
+        "best_short_exit_horizon": "240m",
+        "best_short_exit_annret": 0.0132,
+        "best_short_exit_n_filled": 68,
+        "best_short_exit_days": 38,
+        "boundary": "counterfactual_only_not_promotion_evidence",
+    }) + "\n", encoding="utf-8")
+
+    arm = collect_flash_dip_execution_realism_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 1, 30, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan([arm], now_utc=dt.datetime(2026, 6, 20, 1, 30, tzinfo=dt.timezone.utc))
+
+    assert arm["gate_status"] == "CAPTURING"
+    assert arm["sample_count"] == 68
+    assert arm["artifacts_ready"] is False
+    assert plan["arms"][0]["action"] == "WAIT"
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["blocker_class"] == "data_coverage"
+    assert blocker["primary_blocker"] == (
+        "daily_exit_execution_realism_blocked_short_exit_needs_l1_replay"
+    )
+    assert blocker["next_trigger"] == (
+        "run_l1_short_exit_replay_with_candidate_window_coverage_before_any_retune"
+    )
+    assert blocker["best_short_exit_horizon"] == "240m"
+    assert blocker["best_short_exit_annret"] == 0.0132
+
+
+def test_flash_dip_execution_realism_rejects_when_no_short_exit_signal(tmp_path):
+    data = tmp_path / "openclaw"
+    (data / "logs").mkdir(parents=True)
+    (data / "logs" / "flash_dip_execution_realism.log").write_text(json.dumps({
+        "ts_utc": "2026-06-20T01:18:00Z",
+        "candidate_label": "K6_N2_C3_nf0.005",
+        "verdict_status": "EXECUTION_REALISM_BLOCKED",
+        "fail_reasons": ["gate_buffer_nonpositive_annret"],
+        "gate_annret": -0.0255,
+        "short_exit_status": "NO_SHORT_EXIT_RESEARCH_SIGNAL",
+    }) + "\n", encoding="utf-8")
+
+    arm = collect_flash_dip_execution_realism_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 1, 30, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan([arm], now_utc=dt.datetime(2026, 6, 20, 1, 30, tzinfo=dt.timezone.utc))
+
+    assert arm["gate_status"] == "REJECTED"
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["blocker_class"] == "rejected_no_edge"
+    assert blocker["primary_blocker"] == (
+        "execution_realism_blocked_without_short_exit_research_signal"
+    )
 
 
 def test_runtime_runner_keeps_stale_flash_dip_touchability_non_blocking(tmp_path):

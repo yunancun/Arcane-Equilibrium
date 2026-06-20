@@ -25,6 +25,17 @@
 
 ## 近期記錄
 
+## 2026-06-20 FlashDip Execution-Realism Cron/Killboard Arm
+
+- Added read-only `flash_dip_execution_realism_cron.sh` and alpha-discovery arm `flash_dip_execution_realism`.
+- Diagnosis: K6 touchability alone is insufficient; we need durable evidence separating daily-exit failure from still-live short-exit research.
+- Latest trade-core execution-realism sha256 `68c0c5ad486fbf2c71be95eea41c1861472bd7f03411e0da48d3d0e2cf375aa3`, generated `2026-06-20T17:49:51Z`.
+- K6/N2/C3/nf0.005: 10bps daily-exit gate filled 68 events across 38 days but remains `EXECUTION_REALISM_BLOCKED`, gate annret `-2.56%`.
+- Short-exit research signal remains: best 240m, 0bps buffer, n=72, 39 days, annret `1.73%`, maxDD `0.00033`.
+- Alpha discovery latest sha256 `225de153dafec013270530b64883c0c6317082a56f66c118c1c55f042bc4bc2c` adds blocker `daily_exit_execution_realism_blocked_short_exit_needs_l1_replay`; global status remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`, ready/probe=0.
+- Linux user cron installed at `29 6 * * *`, before L1 replay at `31 6 * * *`; backup `/tmp/openclaw/cron_backups/crontab_before_flash_dip_execution_realism_20260620T175028Z.txt`.
+- Boundary: source/test/docs + selective Linux source sync + user crontab + `/tmp/openclaw` artifact/status/log writes only; no PG write, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, retune authority, or promotion proof.
+
 ## 2026-06-20 FlashDip Touchability Action Scorecard
 
 - Added diagnostic-only `touchability.action_scorecard` to alpha-discovery FlashDip runtime detail and blocker rows.

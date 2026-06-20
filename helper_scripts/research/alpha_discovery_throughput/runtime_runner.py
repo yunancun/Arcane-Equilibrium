@@ -296,6 +296,117 @@ def collect_flash_dip_l1_replay_arm(
     )
 
 
+def _flash_dip_execution_realism_detail(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int,
+) -> dict[str, Any]:
+    path = data_dir / "logs" / "flash_dip_execution_realism.log"
+    status, err = _latest_json_line(path)
+    if err:
+        return {
+            "source_path": str(path),
+            "source_error": err,
+        }
+    assert status is not None
+    ts_utc = status.get("ts_utc")
+    fresh, age, freshness_error = _source_fresh(
+        ts_utc,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    return {
+        "source_path": str(path),
+        "source_ok": fresh,
+        "source_error": freshness_error,
+        "ts_utc": ts_utc,
+        "age_seconds": age,
+        "artifact_path": status.get("artifact_path"),
+        "latest_path": status.get("latest_path"),
+        "sha256": status.get("sha256"),
+        "version": status.get("version"),
+        "generated_utc": status.get("generated_utc"),
+        "candidate_label": status.get("candidate_label"),
+        "k_pct": status.get("k_pct"),
+        "verdict_status": status.get("verdict_status"),
+        "fail_reasons": status.get("fail_reasons"),
+        "gate_buffer_bps": status.get("gate_buffer_bps"),
+        "gate_filled": status.get("gate_filled"),
+        "gate_distinct_days": status.get("gate_distinct_days"),
+        "gate_annret": status.get("gate_annret"),
+        "gate_maxdd": status.get("gate_maxdd"),
+        "daily_n_raw": status.get("daily_n_raw"),
+        "daily_n_kept_after_cap": status.get("daily_n_kept_after_cap"),
+        "daily_n_kept_with_intraday_day": status.get("daily_n_kept_with_intraday_day"),
+        "intraday_coverage_rate_vs_kept": status.get("intraday_coverage_rate_vs_kept"),
+        "short_exit_status": status.get("short_exit_status"),
+        "best_short_exit_buffer_bps": status.get("best_short_exit_buffer_bps"),
+        "best_short_exit_horizon": status.get("best_short_exit_horizon"),
+        "best_short_exit_annret": status.get("best_short_exit_annret"),
+        "best_short_exit_maxdd": status.get("best_short_exit_maxdd"),
+        "best_short_exit_n_filled": status.get("best_short_exit_n_filled"),
+        "best_short_exit_days": status.get("best_short_exit_days"),
+        "boundary": status.get("boundary"),
+    }
+
+
+def collect_flash_dip_execution_realism_arm(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    detail = _flash_dip_execution_realism_detail(
+        data_dir,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    path = Path(detail["source_path"])
+    source_error = detail.get("source_error")
+    if "source_ok" not in detail:
+        return _arm(
+            arm_id="flash_dip_execution_realism",
+            gate_status="CAPTURING",
+            sample_count=0,
+            artifacts_ready=False,
+            source_ok=True,
+            source_path=path,
+            source_error=str(source_error) if source_error else None,
+            detail={**detail, "note": "execution_realism_status_missing_or_not_yet_fired"},
+        )
+
+    source_ok = detail.get("source_ok") is True
+    verdict = str(detail.get("verdict_status") or "").upper()
+    short_exit_status = str(detail.get("short_exit_status") or "").upper()
+    sample_count = max(
+        _int(detail.get("gate_filled")),
+        _int(detail.get("best_short_exit_n_filled")),
+    )
+    if not source_ok:
+        gate_status = "SOURCE_FAILURE"
+        artifacts_ready = False
+    elif verdict == "EXECUTION_REALISM_CONDITIONAL_PASS":
+        gate_status = "READY"
+        artifacts_ready = True
+    elif verdict == "EXECUTION_REALISM_BLOCKED" and short_exit_status != "SHORT_EXIT_RESEARCH_SIGNAL":
+        gate_status = "REJECTED"
+        artifacts_ready = False
+    else:
+        gate_status = "CAPTURING"
+        artifacts_ready = False
+    return _arm(
+        arm_id="flash_dip_execution_realism",
+        gate_status=gate_status,
+        sample_count=sample_count,
+        artifacts_ready=artifacts_ready,
+        source_ok=source_ok,
+        source_path=path,
+        source_error=str(source_error) if source_error else None,
+        detail=detail,
+    )
+
+
 def _flash_dip_touchability_action_scorecard(
     touch_detail: dict[str, Any],
 ) -> dict[str, Any]:
@@ -420,6 +531,11 @@ def collect_flash_dip_arm(
         now_utc=now_utc,
         max_age_seconds=max_age_seconds,
     )
+    execution_realism_detail = _flash_dip_execution_realism_detail(
+        data_dir,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
 
     path = data_dir / "logs" / "flash_dip_death_rate.log"
     status, err = _latest_json_line(path)
@@ -442,6 +558,7 @@ def collect_flash_dip_arm(
             detail={
                 "note": "death_rate_status_missing_or_not_yet_fired",
                 "touchability": touch_detail,
+                "execution_realism": execution_realism_detail,
                 "l1_short_exit_replay": l1_replay_detail,
             },
         )
@@ -484,6 +601,7 @@ def collect_flash_dip_arm(
             "actionable": status.get("actionable"),
             "alerted": alerted,
             "touchability": touch_detail,
+            "execution_realism": execution_realism_detail,
             "l1_short_exit_replay": l1_replay_detail,
         },
     )
@@ -864,6 +982,7 @@ def collect_runtime_arms(
     return [
         collect_gate_b_arm(data_dir, now_utc=now, max_age_seconds=max_age_seconds),
         collect_flash_dip_arm(data_dir, now_utc=now),
+        collect_flash_dip_execution_realism_arm(data_dir, now_utc=now),
         collect_flash_dip_l1_replay_arm(data_dir, now_utc=now),
         collect_vol_event_arm(data_dir),
         collect_mm_verdict_arm(data_dir, now_utc=now),
