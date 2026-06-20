@@ -402,16 +402,36 @@ def classify_profitability_blocker(
     if arm_id == "flash_dip_buy_demo":
         touchability = _dict(detail.get("touchability"))
         if gate_status == "CAPTURING_NO_TOUCH":
+            action_scorecard = _dict(touchability.get("action_scorecard"))
+            action_status = str(action_scorecard.get("status") or "")
+            next_trigger = (
+                "run_shallow_k_execution_realism_then_l1_replay_before_any_retune"
+                if action_status == "SHALLOW_REPRICE_RESEARCH_BAND_PRESENT"
+                else "wait_for_touchable_dip_or_use_l1_replay_to_reprice_k_ladder"
+            )
             return _finish_blocker_row(
                 row,
                 blocker_class="event_wait",
                 primary_blocker="configured_flash_dip_limit_not_touchable",
-                next_trigger="wait_for_touchable_dip_or_use_l1_replay_to_reprice_k_ladder",
+                next_trigger=next_trigger,
                 extra={
                     "true_order_count": touchability.get("true_order_count"),
                     "touched_count": touchability.get("touched_count"),
                     "deepest_candidate_k_with_touch_pct": touchability.get(
                         "deepest_candidate_k_with_touch_pct"
+                    ),
+                    "touchability_action_status": action_scorecard.get("status"),
+                    "research_candidate_k_pct": action_scorecard.get(
+                        "research_candidate_k_pct"
+                    ),
+                    "research_candidate_touched_count": action_scorecard.get(
+                        "research_candidate_touched_count"
+                    ),
+                    "research_candidate_touch_rate_pct": action_scorecard.get(
+                        "research_candidate_touch_rate_pct"
+                    ),
+                    "touchable_lower_k_count": action_scorecard.get(
+                        "touchable_lower_k_count"
                     ),
                 },
             )
