@@ -825,6 +825,80 @@ def _sample_ic_points(payload: dict[str, Any]) -> tuple[int, int]:
     return raw_points, raw_points
 
 
+def _polymarket_sample_gate_recheck_scorecard(
+    *,
+    now_utc: dt.datetime,
+    sample_count: int,
+    sample_gate_clock: dict[str, Any],
+    pre_gate_persistence: dict[str, Any],
+) -> dict[str, Any]:
+    eta = _parse_dt(sample_gate_clock.get("fastest_gate_ready_utc"))
+    seconds_to_eta = None
+    if eta is not None:
+        seconds_to_eta = (eta - now_utc).total_seconds()
+    min_points = _int(sample_gate_clock.get("min_points"), 30)
+    remaining = _int(
+        sample_gate_clock.get("min_samples_remaining_to_gate"),
+        max(0, min_points - sample_count),
+    )
+    persistence_status = str(pre_gate_persistence.get("status") or "")
+    floor_qualified_persistent = _int(
+        pre_gate_persistence.get("floor_qualified_persistent_cell_count")
+    )
+    floor_qualified_recurring = _int(
+        pre_gate_persistence.get("floor_qualified_recurring_cell_count")
+    )
+    has_floor_qualified_watch = (
+        floor_qualified_persistent > 0 or floor_qualified_recurring > 0
+    )
+    near_gate = 0 < remaining <= 6
+    eta_due = seconds_to_eta is not None and seconds_to_eta <= 0
+    eta_soon = seconds_to_eta is not None and 0 < seconds_to_eta <= 2 * 60 * 60
+
+    if sample_count >= min_points:
+        status = "SAMPLE_GATE_RECHECK_NOW"
+        reason = "overlap_adjusted_sample_floor_reached_min_points"
+        next_trigger = "rerun_polymarket_leadlag_ic_then_candidate_review"
+        recheck_actionable = True
+    elif has_floor_qualified_watch and near_gate and eta_due:
+        status = "PERSISTENT_PRE_GATE_SAMPLE_GATE_ETA_DUE"
+        reason = "floor_qualified_persistent_watchlist_at_or_past_eta"
+        next_trigger = "rerun_polymarket_leadlag_ic_then_alpha_discovery"
+        recheck_actionable = True
+    elif has_floor_qualified_watch and near_gate and eta_soon:
+        status = "PERSISTENT_PRE_GATE_NEAR_SAMPLE_GATE_WAIT_ETA"
+        reason = "floor_qualified_persistent_watchlist_near_sample_gate_eta"
+        next_trigger = "rerun_polymarket_leadlag_ic_after_sample_gate_eta_then_alpha_discovery"
+        recheck_actionable = False
+    elif persistence_status == "PERSISTENT_PRE_GATE_WATCHLIST":
+        status = "PERSISTENT_PRE_GATE_WAIT_SAMPLE"
+        reason = "persistent_watchlist_but_sample_gate_not_close"
+        next_trigger = "continue_polymarket_capture_until_sample_gate_eta"
+        recheck_actionable = False
+    else:
+        status = "WAIT_SAMPLE_GATE"
+        reason = "no_floor_qualified_persistent_watchlist_near_gate"
+        next_trigger = "wait_until_sample_gate_eta_then_recompute_hac_bh_filters"
+        recheck_actionable = False
+
+    return {
+        "schema_version": "polymarket_sample_gate_recheck_v1",
+        "status": status,
+        "reason": reason,
+        "next_trigger": next_trigger,
+        "recheck_actionable": recheck_actionable,
+        "sample_count": sample_count,
+        "min_points": min_points,
+        "min_samples_remaining_to_gate": remaining,
+        "sample_gate_eta_utc": sample_gate_clock.get("fastest_gate_ready_utc"),
+        "seconds_to_eta": seconds_to_eta,
+        "pre_gate_watchlist_persistence_status": persistence_status or None,
+        "floor_qualified_persistent_cell_count": floor_qualified_persistent,
+        "floor_qualified_recurring_cell_count": floor_qualified_recurring,
+        "promotion_boundary": "diagnostic_recheck_routing_only_not_signal_or_promotion_proof",
+    }
+
+
 def collect_polymarket_leadlag_arm(
     data_dir: Path,
     *,
@@ -873,6 +947,12 @@ def collect_polymarket_leadlag_arm(
         else []
     )
     best_watch = watchlist[0] if watchlist and isinstance(watchlist[0], dict) else None
+    sample_gate_recheck = _polymarket_sample_gate_recheck_scorecard(
+        now_utc=now_utc,
+        sample_count=sample_count,
+        sample_gate_clock=sample_gate_clock,
+        pre_gate_persistence=pre_gate_persistence,
+    )
 
     if not fresh:
         gate_status = "SOURCE_FAILURE"
@@ -956,6 +1036,8 @@ def collect_polymarket_leadlag_arm(
             "sample_gate_status": sample_gate_clock.get("status"),
             "sample_gate_eta_utc": sample_gate_clock.get("fastest_gate_ready_utc"),
             "sample_gate_clock": sample_gate_clock,
+            "sample_gate_recheck_scorecard": sample_gate_recheck,
+            "sample_gate_recheck_status": sample_gate_recheck.get("status"),
             "price_feedback_summary": counts.get("price_feedback_summary"),
             "max_abs_t_stat_hac": counts.get("max_abs_t_stat_hac"),
             "label_feature_horizon_pairs": label_readiness.get("feature_horizon_pairs"),

@@ -1050,3 +1050,8 @@
 
 - v287 propagates the L1 replay coverage-action scorecard into `flash_dip_execution_realism`. The parent execution-realism blocker now follows the child L1 wait state instead of claiming immediate engineering actionability.
 - Latest alpha sha256 `05d0baa71008cc31024c0e58bbe86b5c98f50edae0919691ffaabd519f57a585` remains blocked, with `engineering_actionable_count=2`; FlashDip waits for a new candidate after L1 capture start, while Polymarket is near sample gate at 25/30.
+
+## 2026-06-20 Polymarket sample-gate recheck scorecard
+
+- v288 adds `sample_gate_recheck_scorecard` to alpha-discovery Polymarket blockers. Current runtime is no longer vague sample wait: 25/30 overlap-adjusted floor, `PERSISTENT_PRE_GATE_WATCHLIST`, floor-qualified persistent=2 / recurring=3.
+- Latest alpha sha256 `c5832b2a371a6c0ea8564b2e321327bdb8d6ebedecf00c5ffab3a233617e89f0` says next trigger is `rerun_polymarket_leadlag_ic_after_sample_gate_eta_then_alpha_discovery` after `2026-06-20T19:52:02.074000+00:00`; not signal/candidate/promotion proof yet.

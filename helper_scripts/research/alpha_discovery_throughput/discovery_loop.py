@@ -505,15 +505,21 @@ def classify_profitability_blocker(
         decision.get("min_samples")
     ):
         pre_gate_persistence = _dict(detail.get("pre_gate_watchlist_persistence_scorecard"))
+        sample_gate_recheck = _dict(detail.get("sample_gate_recheck_scorecard"))
         top_persistent_cells = _list(pre_gate_persistence.get("top_cells"))
         return _finish_blocker_row(
             row,
             blocker_class="sample_gate",
             primary_blocker="overlap_adjusted_ic_sample_below_gate",
-            next_trigger="wait_until_sample_gate_eta_then_recompute_hac_bh_filters",
+            next_trigger=(
+                sample_gate_recheck.get("next_trigger")
+                or "wait_until_sample_gate_eta_then_recompute_hac_bh_filters"
+            ),
             extra={
                 "min_samples_remaining_to_gate": detail.get("min_samples_remaining_to_gate"),
                 "sample_gate_eta_utc": detail.get("sample_gate_eta_utc"),
+                "sample_gate_recheck_status": sample_gate_recheck.get("status"),
+                "sample_gate_recheck_scorecard": sample_gate_recheck or None,
                 "pre_gate_watchlist_persistence_status": detail.get(
                     "pre_gate_watchlist_persistence_status"
                 ) or pre_gate_persistence.get("status"),
