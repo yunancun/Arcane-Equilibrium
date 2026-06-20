@@ -30,6 +30,7 @@
 - Added a read-only FlashDip touchability monitor that joins `trading.orders` to `trading.intents` and checks 1m lows from order_ts to maker timeout against `details.limit_price`.
 - Linux isolated smoke showed `order_labeled_count=19`, `true_order_count=18`, `strategy_mismatch_count=1`, `touched_count=0`, `touch_rate_pct=0.0`, median closest miss `1595.84bp`.
 - Selective Linux deploy installed hourly cron at minute 17 and manual production run wrote `/tmp/openclaw/logs/flash_dip_touchability.log`; alpha discovery manual refresh showed FlashDip `CAPTURING_NO_TOUCH`.
+- K-ladder extension now reports runtime counterfactual touchability: production ladder has K15/K12/K10/K8 all 0/18 touched, K6 1/18, K4/K5 2/18, K2 4/18, K1 14/18; deepest candidate with any touch is K6.
 - Boundary: source/test/docs + selective helper/docs deploy + user crontab + local `/tmp/openclaw` logs/artifacts only; no engine/API restart, no PG write/schema migration, no Bybit private/signed/trading call, no auth/risk/order mutation.
 
 ## 2026-06-20 Order Audit Projection Fix

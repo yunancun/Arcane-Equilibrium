@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-20（TODO v241 FlashDip touchability runtime activation checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-20（TODO v242 FlashDip K-ladder touchability checkpoint；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v242 增量（2026-06-20 FlashDip K-ladder touchability checkpoint）**：Extended `flash_dip_touchability_cron.sh` with read-only `k_ladder` counterfactuals. The cron now validates `OPENCLAW_FLASH_DIP_CURRENT_K_PCT`（default 15）and `OPENCLAW_FLASH_DIP_TOUCH_K_PCTS`（default `0,1,2,3,4,5,6,8,10,12,15`）, infers prior close from the current intended limit, and evaluates each candidate K against the same 1m min-low window. `runtime_runner.py` passes `current_k_pct`, `deepest_candidate_k_with_touch_pct`, and full `k_ladder` through FlashDip touchability detail. Verification：Mac `bash -n`, runtime runner `py_compile`, alpha discovery focused tests 13 passed；Linux isolated smoke `/tmp/openclaw_flash_touch_ladder_smoke_20260620T013444Z` showed K15/K12/K10/K8 all 0/18 touched, K6 1/18, K4/K5 2/18, K2 4/18, K1 14/18；Linux selective deploy focused checks passed, manual production touchability run at `2026-06-20T01:36:52Z` wrote the ladder, and manual alpha discovery refresh at `2026-06-20T01:37:02Z` preserved `CAPTURING_NO_TOUCH`, `deepest_candidate_k_with_touch_pct=6`, `k_ladder_len=11`. Boundary：source/test/docs + selective helper/docs deploy + local `/tmp/openclaw` artifacts only；no engine/API restart, no rebuild, no strategy parameter change, no PG table write/schema migration, no Bybit private/signed/trading call, no credential/auth/risk/order/trading mutation；not promotion proof.
 
 **v241 增量（2026-06-20 FlashDip touchability runtime activation）**：Selective Linux deploy of v240 helper/runtime docs from `origin/main` to `trade-core` touched only the FlashDip touchability files, then installed hourly user cron `17 * * * * ... flash_dip_touchability_cron.sh`. Linux focused checks passed：cron `bash -n`, runtime runner `py_compile`, alpha discovery focused tests 13 passed. Manual production run wrote `/tmp/openclaw/logs/flash_dip_touchability.log` with `true_order_count=18`, `touched_count=0`, `median_closest_miss_bps=1595.84`, `strategy_mismatch_count=1`; manual alpha discovery cron refresh at `2026-06-20T01:29:10Z` showed FlashDip arm `gate_status=CAPTURING_NO_TOUCH`, action `RUN_READ_ONLY_CAPTURE`, fresh touchability age 11s. Boundary：selective helper/docs deploy + user crontab + `/tmp/openclaw` local log/artifact writes only；no engine/API restart, no rebuild, no PG table write/schema migration, no Bybit private/signed/trading call, no credential/auth/risk/order/trading mutation；not promotion proof.
 

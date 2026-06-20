@@ -10,7 +10,7 @@ FlashDip is not currently failing because the intended limit is missing. The lat
 - 0/18 true FlashDip orders touched their intended limit
 - median closest miss was `1595.84bp`
 
-The same monitor now emits a K-ladder counterfactual. Latest isolated smoke:
+The same monitor now emits a K-ladder counterfactual. Latest production refresh:
 
 - K15/K12/K10/K8: `0/18` touched
 - K6: `1/18` touched
@@ -22,6 +22,6 @@ Interpretation: K15 is too deep for this runtime window; K1 would fill but is li
 
 Implemented and activated a read-only cron source `helper_scripts/cron/flash_dip_touchability_cron.sh`. Linux hourly cron is installed at minute 17, and a manual production run wrote `/tmp/openclaw/logs/flash_dip_touchability.log`.
 
-Alpha discovery was refreshed once and now shows FlashDip `CAPTURING_NO_TOUCH`.
+Alpha discovery was refreshed once and now shows FlashDip `CAPTURING_NO_TOUCH` with `deepest_candidate_k_with_touch_pct=6`.
 
 Boundary: selective helper/docs deploy + user crontab + local `/tmp/openclaw` logs only; no engine/API restart, no PG write, no Bybit private/signed/trading call, no auth/risk/order mutation. This is diagnostic evidence, not a promotion signal.
