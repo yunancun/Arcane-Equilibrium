@@ -774,6 +774,105 @@ def fill_sim_edge_scorecard(report: dict, *, primary_horizon_s: int = 15) -> dic
     }
 
 
+def fill_sim_horizon_scorecard(report: dict) -> dict:
+    """Rank fill-only maker cells across every measured adverse-selection horizon.
+
+    The primary scorecards intentionally focus on the configured main horizon.
+    This reducer answers a narrower diagnostic question: is the MM cost wall a
+    15s holding-period artifact, or does the nearest-to-breakeven cell still
+    fail across the whole measured 5/15/30s horizon set?
+    """
+    horizons = tuple(int(h) for h in ((report.get("params") or {}).get("horizons_s") or ()))
+    if not horizons:
+        horizons = DEFAULT_HORIZONS
+    primary_queue = report.get("primary_queue_position") or DEFAULT_QUEUE_POSITION
+    cells: list[dict] = []
+
+    def add_block(scope: str, queue_position: str, policy_name: str, block: dict,
+                  *, symbol: str | None = None):
+        if not block:
+            return
+        for horizon_s in horizons:
+            cell = _scorecard_cell(
+                scope,
+                queue_position,
+                policy_name,
+                "fill_only",
+                block,
+                horizon_s,
+                symbol=symbol,
+            )
+            if cell is None:
+                continue
+            cell["horizon_s"] = horizon_s
+            cells.append(cell)
+
+    for policy_name, policy in (report.get("pooled") or {}).items():
+        add_block(
+            "pooled_primary_queue",
+            primary_queue,
+            policy_name,
+            (policy or {}).get("fill_only") or {},
+        )
+
+    qdr = ((report.get("queue_dose_response") or {}).get("queue_positions") or {})
+    for queue_position, qrow in qdr.items():
+        for policy_name in ("naive", "informed_skip"):
+            add_block(
+                "pooled_queue_dose",
+                queue_position,
+                policy_name,
+                ((qrow or {}).get(policy_name) or {}).get("fill_only") or {},
+            )
+
+    for row in report.get("per_symbol") or []:
+        symbol = row.get("symbol")
+        for policy_name in ("naive", "informed_skip"):
+            add_block(
+                "per_symbol_primary_queue",
+                primary_queue,
+                policy_name,
+                ((row or {}).get(policy_name) or {}).get("fill_only") or {},
+                symbol=symbol,
+            )
+
+    ranked = sorted(cells, key=lambda c: (c["net_bps"] is not None, c["net_bps"]), reverse=True)
+    positive = [c for c in ranked if c["net_bps"] is not None and c["net_bps"] > 0.0]
+    positive_sample_gate = [
+        c for c in positive
+        if c["n"] >= MIN_FILLS_FOR_SIGNIF and not c["signif_suppressed"]
+    ]
+    per_horizon_best = []
+    for horizon_s in horizons:
+        hcells = [c for c in ranked if c["horizon_s"] == horizon_s]
+        if hcells:
+            per_horizon_best.append(hcells[0])
+
+    if positive_sample_gate:
+        status = "HORIZON_SAMPLE_GATED_POSITIVE"
+    elif positive:
+        status = "HORIZON_POSITIVE_BELOW_SAMPLE_GATE"
+    else:
+        status = "NO_HORIZON_POSITIVE_CELL"
+
+    return {
+        "status": status,
+        "horizons_s": list(horizons),
+        "fee_round_trip_bps": MAKER_FEE_ROUND_TRIP_BPS,
+        "min_fills_for_signif": MIN_FILLS_FOR_SIGNIF,
+        "cells_evaluated": len(cells),
+        "best_cell": ranked[0] if ranked else None,
+        "best_by_horizon": per_horizon_best,
+        "positive_cells": positive[:10],
+        "positive_cells_with_sample_gate": positive_sample_gate[:10],
+        "nearest_to_breakeven_cells": ranked[:10],
+        "note": (
+            "Diagnostic only. If all horizons remain negative at current fee, the "
+            "MM blocker is not just the selected primary adverse-selection horizon."
+        ),
+    }
+
+
 def _conditional_feature_cell(name: str, condition: str, trials_subset: pd.DataFrame,
                               adverse_by_fill: pd.DataFrame, horizons, span_hours: float,
                               primary_horizon_s: int, meta: dict) -> dict | None:
@@ -1567,6 +1666,7 @@ def run(l1, tr, ob, syms, clean_since, horizons, cadence_s, skip_quantile, since
         report,
         primary_horizon_s=primary_horizon,
     )
+    report["horizon_scorecard"] = fill_sim_horizon_scorecard(report)
     report["conditional_feature_scorecard"] = fill_sim_conditional_feature_scorecard(
         trials,
         adverse,
@@ -1693,7 +1793,7 @@ def main(argv=None):
 
     # 人類可讀摘要（含 queue dose-response）。
     summary_keys = ("window", "params", "data", "caveat", "obtop_crosscheck",
-                    "primary_queue_position", "edge_scorecard",
+                    "primary_queue_position", "edge_scorecard", "horizon_scorecard",
                     "conditional_feature_scorecard", "walk_forward_feature_scorecard",
                     "maker_fee_sensitivity_scorecard", "pooled", "queue_dose_response")
     print(json.dumps({k: report[k] for k in summary_keys if k in report},

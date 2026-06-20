@@ -25,6 +25,17 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM FillSim Horizon Scorecard
+
+- Added diagnostic-only `fill_sim_horizon_scorecard(report)` and passed it through `recorder_mm_verdict_cron.sh` plus alpha-discovery MM arm detail.
+- Diagnosis: test whether the MM cost wall is only a 15s adverse-selection horizon artifact.
+- Latest trade-core forced fresh-L1 2h fill_sim report sha256 `bbc92040206c2f50fe3d9fa6556d1aa6737b4c316cb45d6f935220fa06c36647`: `l1_rows_post_filter=1749143`, `trades_rows=1562327`, 33 symbols, L1 age `0.003h`.
+- `horizon_scorecard.status=NO_HORIZON_POSITIVE_CELL`, horizons `[5,15,30]`, cells evaluated 222; best cell `ADAUSDT` / `informed_skip` / `back` / 5s has `n=926`, `net_bps=-2.444`.
+- Best by horizon stays negative: 5s `-2.444bp`, 15s `-2.588bp`, 30s `-2.485bp`; sample-gated positives zero.
+- Same report: current-fee `edge_scorecard` and conditional/walk-forward scorecards remain negative; fee sensitivity still says lower-fee/rebate path can become positive, with best break-even maker fee now `0.706bp/side`.
+- MM verdict status sha256 `82fc3dd6cd55aa0065cea20f35848526a9f92e11a30eff93363438753355a4c7` and alpha discovery latest sha256 `f6915d61bbdf2a9067655b5134f35c46e59dc610d6936601d69c1481d402abee` both preserve the horizon scorecard; alpha MM arm remains `CAPTURING`, ready/probe=0.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Partial IC Control
 
 - Upgraded `polymarket_leadlag` to report schema/runner v0.12.

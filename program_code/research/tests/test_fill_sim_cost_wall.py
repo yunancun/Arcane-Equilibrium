@@ -7,6 +7,7 @@ from program_code.research.microstructure.fill_sim import (
     _net_block,
     fill_sim_conditional_feature_scorecard,
     fill_sim_edge_scorecard,
+    fill_sim_horizon_scorecard,
     fill_sim_maker_fee_sensitivity_scorecard,
     fill_sim_walk_forward_feature_scorecard,
 )
@@ -142,6 +143,67 @@ def test_fill_sim_edge_scorecard_surfaces_nearest_negative_cell():
     assert scorecard["best_fill_only"]["policy"] == "informed_skip"
     assert scorecard["best_fill_only"]["net_bps"] == pytest.approx(-3.7)
     assert scorecard["best_fill_only"]["fee_round_trip_shortfall_bps"] == pytest.approx(3.7)
+
+
+def test_fill_sim_horizon_scorecard_finds_non_primary_horizon_positive():
+    report = {
+        "params": {"horizons_s": [5, 15, 30]},
+        "primary_queue_position": "back",
+        "pooled": {
+            "naive": {
+                "fill_only": _net_block(
+                    pd.DataFrame(
+                        {
+                            "half_spread_bps": [6.0] * 40,
+                            "adverse_sel_bps@5": [3.0] * 40,
+                            "adverse_sel_bps@15": [3.0] * 40,
+                            "adverse_sel_bps@30": [1.0] * 40,
+                        }
+                    ),
+                    horizons=(5, 15, 30),
+                    n_for_signif=40,
+                )
+            }
+        },
+    }
+
+    scorecard = fill_sim_horizon_scorecard(report)
+
+    assert scorecard["status"] == "HORIZON_SAMPLE_GATED_POSITIVE"
+    assert scorecard["best_cell"]["horizon_s"] == 30
+    assert scorecard["best_cell"]["net_bps"] == pytest.approx(1.0)
+    assert scorecard["best_by_horizon"][0]["horizon_s"] == 5
+    assert scorecard["positive_cells_with_sample_gate"][0]["horizon_s"] == 30
+
+
+def test_fill_sim_horizon_scorecard_blocks_when_all_horizons_negative():
+    report = {
+        "params": {"horizons_s": [5, 15, 30]},
+        "primary_queue_position": "back",
+        "pooled": {
+            "naive": {
+                "fill_only": _net_block(
+                    pd.DataFrame(
+                        {
+                            "half_spread_bps": [2.0] * 40,
+                            "adverse_sel_bps@5": [1.0] * 40,
+                            "adverse_sel_bps@15": [1.2] * 40,
+                            "adverse_sel_bps@30": [0.8] * 40,
+                        }
+                    ),
+                    horizons=(5, 15, 30),
+                    n_for_signif=40,
+                )
+            }
+        },
+    }
+
+    scorecard = fill_sim_horizon_scorecard(report)
+
+    assert scorecard["status"] == "NO_HORIZON_POSITIVE_CELL"
+    assert scorecard["positive_cells"] == []
+    assert scorecard["best_cell"]["horizon_s"] == 30
+    assert scorecard["best_cell"]["net_bps"] == pytest.approx(-2.8)
 
 
 def _conditional_trials(rows: list[dict]) -> pd.DataFrame:
