@@ -416,7 +416,47 @@ def test_profitability_blocker_scorecard_classifies_runtime_blockers():
         "2026-06-20T19:52:03+00:00"
     )
     assert blockers["flash_dip_l1_short_exit_replay"]["blocker_class"] == "data_coverage"
+    assert blockers["aeg_robustness_matrix"]["candidate_artifact_dependency_status"] == (
+        "NO_CANDIDATE_ARTIFACTS_AVAILABLE_FOR_ROBUSTNESS"
+    )
+    assert blockers["aeg_robustness_matrix"]["engineering_actionable"] is False
+    assert blockers["aeg_robustness_matrix"]["next_trigger"] == (
+        "wait_for_candidate_or_probe_artifact_before_robustness_matrix"
+    )
     assert scorecard["top_blockers"][0]["arm_id"] == "mm_verdict_maker_edge"
+
+
+def test_aeg_robustness_wait_becomes_actionable_only_with_upstream_candidate_artifact():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "polymarket_leadlag_ic",
+            "gate_status": "READY",
+            "sample_count": 35,
+            "artifacts_ready": True,
+            "source_ok": True,
+            "detail": {"candidate_count": 1},
+        },
+        {
+            "arm_id": "aeg_robustness_matrix",
+            "gate_status": "WAIT",
+            "sample_count": 0,
+            "artifacts_ready": False,
+            "source_ok": True,
+        },
+    ], now_utc=dt.datetime(2026, 6, 20, 19, 5, tzinfo=dt.timezone.utc))
+
+    blockers = {
+        row["arm_id"]: row
+        for row in plan["profitability_blocker_scorecard"]["arms"]
+    }
+    assert blockers["polymarket_leadlag_ic"]["blocker_class"] == "candidate_review_ready"
+    aeg = blockers["aeg_robustness_matrix"]
+    assert aeg["candidate_artifact_dependency_status"] == (
+        "CANDIDATE_ARTIFACTS_AVAILABLE_FOR_ROBUSTNESS"
+    )
+    assert aeg["candidate_artifact_count"] == 1
+    assert aeg["engineering_actionable"] is True
+    assert aeg["next_trigger"] == "feed_candidate_artifacts_into_robustness_matrix"
 
 
 def test_mm_no_train_positive_without_gross_decomposition_stays_feature_family():

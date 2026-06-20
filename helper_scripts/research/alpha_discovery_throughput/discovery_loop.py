@@ -140,6 +140,50 @@ def _finish_blocker_row(
     return row
 
 
+def _candidate_artifact_dependency_summary(
+    arms: list[dict[str, Any]],
+    decisions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    decisions_by_id = {str(row.get("arm_id")): row for row in decisions}
+    ready: list[dict[str, Any]] = []
+    for arm in arms:
+        arm_id = str(arm.get("arm_id") or arm.get("name") or "unknown")
+        if arm_id == "aeg_robustness_matrix":
+            continue
+        decision = decisions_by_id.get(arm_id, {})
+        action = str(decision.get("action") or "")
+        gate_status = str(arm.get("gate_status") or arm.get("status") or "")
+        artifacts_ready = bool(arm.get("artifacts_ready"))
+        if action not in {READY_FOR_AEG_CHAIN, READY_FOR_PROBE} and not artifacts_ready:
+            continue
+        ready.append({
+            "arm_id": arm_id,
+            "action": action,
+            "gate_status": gate_status,
+            "sample_count": decision.get("sample_count"),
+            "artifacts_ready": artifacts_ready,
+        })
+    if ready:
+        status = "CANDIDATE_ARTIFACTS_AVAILABLE_FOR_ROBUSTNESS"
+        reason = "upstream_ready_or_probe_artifacts_available"
+        next_trigger = "feed_candidate_artifacts_into_robustness_matrix"
+        engineering_actionable = True
+    else:
+        status = "NO_CANDIDATE_ARTIFACTS_AVAILABLE_FOR_ROBUSTNESS"
+        reason = "no_upstream_ready_or_probe_artifacts"
+        next_trigger = "wait_for_candidate_or_probe_artifact_before_robustness_matrix"
+        engineering_actionable = False
+    return {
+        "schema_version": "aeg_candidate_artifact_dependency_v1",
+        "status": status,
+        "reason": reason,
+        "next_trigger": next_trigger,
+        "engineering_actionable": engineering_actionable,
+        "candidate_artifact_count": len(ready),
+        "candidate_artifacts": ready[:8],
+    }
+
+
 def _mm_lower_fee_history_extra(detail: dict[str, Any]) -> dict[str, Any]:
     history = _dict(detail.get("history_scorecard"))
     stability = _dict(history.get("lower_fee_break_even_stability"))
@@ -716,12 +760,26 @@ def classify_profitability_blocker(
         )
 
     if arm_id == "aeg_robustness_matrix":
+        dependency = _dict(detail.get("candidate_artifact_dependency"))
         return _finish_blocker_row(
             row,
             blocker_class="robustness_wait",
             primary_blocker="no_durable_aeg_candidate_rows",
-            next_trigger="feed_candidate_artifacts_into_robustness_matrix",
-            engineering_actionable=True,
+            next_trigger=(
+                dependency.get("next_trigger")
+                or "feed_candidate_artifacts_into_robustness_matrix"
+            ),
+            engineering_actionable=(
+                dependency.get("engineering_actionable")
+                if isinstance(dependency.get("engineering_actionable"), bool)
+                else True
+            ),
+            extra={
+                "candidate_artifact_dependency_status": dependency.get("status"),
+                "candidate_artifact_dependency_reason": dependency.get("reason"),
+                "candidate_artifact_count": dependency.get("candidate_artifact_count"),
+                "candidate_artifact_dependency": dependency or None,
+            },
         )
 
     if action == RUN_READ_ONLY_CAPTURE and _int(decision.get("sample_count")) < _int(
@@ -758,7 +816,20 @@ def build_profitability_blocker_scorecard(
     min_samples: int = 30,
 ) -> dict[str, Any]:
     """Summarize cross-arm reasons we still have no promotable profit edge."""
-    arms_by_id = {str(arm.get("arm_id") or arm.get("name") or "unknown"): arm for arm in arms}
+    dependency = _candidate_artifact_dependency_summary(arms, decisions)
+    normalized_arms: list[dict[str, Any]] = []
+    for arm in arms:
+        arm_copy = dict(arm)
+        arm_id = str(arm_copy.get("arm_id") or arm_copy.get("name") or "unknown")
+        if arm_id == "aeg_robustness_matrix":
+            detail = dict(_dict(arm_copy.get("detail")))
+            detail["candidate_artifact_dependency"] = dependency
+            arm_copy["detail"] = detail
+        normalized_arms.append(arm_copy)
+    arms_by_id = {
+        str(arm.get("arm_id") or arm.get("name") or "unknown"): arm
+        for arm in normalized_arms
+    }
     rows = [
         classify_profitability_blocker(arms_by_id.get(str(decision.get("arm_id")), {}), decision)
         for decision in decisions
