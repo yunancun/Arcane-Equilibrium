@@ -79,3 +79,11 @@ Focused verification:
 - `python3 -m pytest -q helper_scripts/cron/tests/test_fill_sim_refresh_cron_static.py` -> 11 passed
 - `python3 -m pytest -q helper_scripts/research/tests/test_alpha_discovery_throughput.py` -> 10 passed
 - `python3 -m py_compile helper_scripts/research/alpha_discovery_throughput/runtime_runner.py`
+
+Linux selective deploy/smoke:
+
+- `origin/main=31c46bf9` restored to trade-core touched files; checkout HEAD remains old `bb06ae1b` due existing selective-deploy dirty state.
+- Linux focused tests passed when run separately: cron static 11, alpha discovery runtime 10, fill_sim cost wall 3.
+- Manual read-only `recorder_mm_verdict_cron.sh` emitted status `2026-06-20T00:45:49Z` with `cost_wall_summary.available=true`.
+- Best live MM row: `ARBUSDT` net `-0.1437bp`, fee shortfall `0.1437bp`, required rebate `0.0`, but `n_maker_fills=1` and therefore below gate.
+- BTC/ETH sample rows still require rebate.

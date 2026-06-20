@@ -30,6 +30,7 @@
 - `recorder_mm_verdict_cron.sh` now carries the break-even lens into daily live MM status: per-symbol edge-before-fees, break-even maker fee, fee shortfall, required spread capture, required maker rebate, and top-level `cost_wall_summary`.
 - `runtime_runner.py` preserves this summary in alpha discovery `arms_raw` detail without changing the stable `discovery_plan` schema or positive-edge gates.
 - Focused checks passed: MM cron bash/static tests 11, alpha discovery runtime tests 10, runtime runner py_compile.
+- Linux selective deploy + manual read-only cron smoke confirmed `cost_wall_summary` in status: best `ARBUSDT` net `-0.1437bp`, fee shortfall `0.1437bp`, `n_maker_fills=1` below gate; BTC/ETH still require rebate.
 - Boundary: source/test/docs only at checkpoint; no engine/API restart, no PG write, no Bybit private/signed/trading call, no runtime/auth/risk/order mutation.
 
 ## 2026-06-20 FillSim Cost-Wall Instrumentation

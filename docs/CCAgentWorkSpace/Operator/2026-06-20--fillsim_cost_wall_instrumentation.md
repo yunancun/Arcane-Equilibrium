@@ -18,3 +18,5 @@ Current-regime read:
 Conclusion: the current MM blocker is structural fee/adverse-selection cost wall, not just stale L1 or pessimistic queue position. This is still a single-regime diagnostic, not CP-3 go/no-go or promotion proof.
 
 Follow-up: daily `recorder_mm_verdict_cron.sh` now emits the same break-even/fee-shortfall/rebate fields using live maker markout spread capture plus fill_sim adverse selection. Alpha discovery `arms_raw` preserves `cost_wall_summary`; action gates are unchanged.
+
+Linux smoke after selective deploy: manual read-only MM verdict status at `2026-06-20T00:45:49Z` reported best `ARBUSDT` net `-0.1437bp` with fee shortfall `0.1437bp`, but sample was only `n_maker_fills=1`; BTC/ETH still require rebate. No promotion proof.
