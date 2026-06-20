@@ -24,6 +24,7 @@ import datetime as dt
 import hashlib
 import json
 import os
+import shutil
 import socket
 import subprocess
 from pathlib import Path
@@ -268,3 +269,34 @@ def mirror_jsonl_to_parquet(run_dir: Path) -> dict[str, Any]:
     else:
         status = "ok"
     return {"parquet_mirror": status, "files_ok": files_ok, "files_failed": files_failed}
+
+
+def mirror_run_dir(run_dir: Path, mirror_root: Path) -> dict[str, Any]:
+    """把已完成 run dir append-only 複製到 durable mirror root。
+
+    為什麼不是覆寫：Polymarket lead-lag 需要跨多個 collector run 累積樣本；
+    runtime `/tmp` 被清理後若只有最新 run，sample gate 會退回 0。mirror 是
+    append-only evidence cache，保留既有 run_id，不修補、不覆蓋。
+    """
+    src = Path(run_dir)
+    root = Path(mirror_root)
+    dest = root / src.name
+    if not src.is_dir():
+        return {
+            "mirror_status": "missing_source",
+            "source_run_dir": str(src),
+            "mirror_run_dir": str(dest),
+        }
+    if dest.exists():
+        return {
+            "mirror_status": "exists",
+            "source_run_dir": str(src),
+            "mirror_run_dir": str(dest),
+        }
+    root.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, dest, symlinks=False)
+    return {
+        "mirror_status": "copied",
+        "source_run_dir": str(src),
+        "mirror_run_dir": str(dest),
+    }

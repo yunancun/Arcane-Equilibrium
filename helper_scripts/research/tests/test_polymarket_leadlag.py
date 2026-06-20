@@ -763,6 +763,41 @@ def test_recent_report_history_excludes_latest_and_keeps_dated_order(tmp_path):
     assert reports[0]["_history_path"] == str(newer)
 
 
+def test_snapshot_loader_recovers_history_from_mirror_without_duplicate_runs(tmp_path):
+    volatile = tmp_path / "volatile"
+    mirror = tmp_path / "mirror"
+    start = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    for i, root in enumerate((mirror, volatile)):
+        ts = (start + dt.timedelta(minutes=15 * i)).isoformat()
+        _write_run(root, f"hourly-topn-{i}", ts, [{
+            "market_id": f"m{i}",
+            "question": "Will Bitcoin reach $90000 in June?",
+            "event_title": "Bitcoin price target",
+            "discovery_queries": ["kw:bitcoin price"],
+            "outcome_prices": [0.40 + i * 0.01, 0.60 - i * 0.01],
+        }])
+    _write_run(mirror, "hourly-topn-1", (start + dt.timedelta(minutes=15)).isoformat(), [{
+        "market_id": "m1",
+        "question": "Will Bitcoin reach $90000 in June?",
+        "event_title": "Bitcoin price target",
+        "discovery_queries": ["kw:bitcoin price"],
+        "outcome_prices": [0.41, 0.59],
+    }])
+
+    rows, meta = harness.load_snapshot_rows_with_mirrors(
+        volatile,
+        mirror_roots=(mirror,),
+        query_set_version="v2",
+        mode="hourly-topn",
+    )
+
+    assert [row["_run_id"] for row in rows] == ["hourly-topn-0", "hourly-topn-1"]
+    assert meta["primary_root"] == str(volatile)
+    assert meta["mirror_roots"] == [str(mirror)]
+    assert meta["distinct_run_dirs"] == 2
+    assert meta["duplicate_mirror_run_dirs_skipped"] == 1
+
+
 def test_candidate_replay_builds_explicit_paper_pnl_evidence():
     start = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
     joined = []

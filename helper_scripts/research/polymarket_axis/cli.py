@@ -98,12 +98,26 @@ def run_snapshot_mode(args: argparse.Namespace) -> dict[str, Any]:
         parquet_mirror=not args.no_parquet_mirror,
         query_set_version=query_set_version,
     )
+    mirror_result: dict[str, Any] | None = None
+    if args.mirror_artifact_root:
+        try:
+            mirror_result = artifact_mod.mirror_run_dir(
+                Path(written["written"]["run_dir"]),
+                Path(args.mirror_artifact_root),
+            )
+        except Exception as exc:  # noqa: BLE001 - mirror 失敗不可破壞 primary run。
+            mirror_result = {
+                "mirror_status": "failed",
+                "reason": f"{type(exc).__name__}:{exc}",
+                "mirror_root": str(args.mirror_artifact_root),
+            }
     # state 在 artifact 成功後才落（順序 load-bearing，見 MODULE_NOTE）。
     state_mod.save_state(tracker, state_path)
     return {
         "mode": args.mode,
         "run_id": run_id,
         "run_dir": written["written"]["run_dir"],
+        "mirror": mirror_result,
         "query_set_version": query_set_version,
         "snapshot_rows": result["stats"].get("snapshot_rows"),
         "unique_events": result["stats"].get("unique_events"),
@@ -180,6 +194,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--data-root", default=None, dest="data_root",
                    help="覆蓋 ${OPENCLAW_DATA_DIR:-/tmp/openclaw}（state + artifact 共用根）")
     p.add_argument("--artifact-root", default=None, dest="artifact_root")
+    p.add_argument("--mirror-artifact-root", default=None, dest="mirror_artifact_root",
+                   help="可選 durable mirror root；append-only 複製，不覆寫既有 run_id")
     p.add_argument("--created-by-role", default="E1", dest="created_by_role")
     p.add_argument("--min-interval-s", default=collector_mod.DEFAULT_MIN_INTERVAL_S,
                    type=float, dest="min_interval_s", help="client throttle（默認 0.5s = 2 req/s 上限）")

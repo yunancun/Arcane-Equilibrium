@@ -318,6 +318,64 @@ def load_snapshot_rows(
     return rows, {"root": str(root), "run_dirs": run_dirs, "skipped": dict(skipped)}
 
 
+def load_snapshot_rows_with_mirrors(
+    root: Path,
+    *,
+    mirror_roots: tuple[Path, ...] = (),
+    query_set_version: str,
+    mode: str,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """合併 volatile collector rows 與 durable mirrors，且不重複 run_id。
+
+    `/tmp/openclaw` 是 runtime working set，不是 durable evidence store；若被清理，
+    Polymarket IC sample 會退回 0。mirror roots 只補缺失 run_id，primary root
+    的同名 run 永遠優先，避免同一 snapshot 被 double-count。
+    """
+    primary_rows, primary_meta = load_snapshot_rows(
+        root,
+        query_set_version=query_set_version,
+        mode=mode,
+    )
+    rows = list(primary_rows)
+    seen_run_ids = {str(row.get("_run_id") or "") for row in rows if row.get("_run_id")}
+    duplicate_mirror_run_dirs_skipped = 0
+    duplicate_seen: set[str] = set()
+    mirror_meta: list[dict[str, Any]] = []
+    for mirror_root in mirror_roots:
+        mirror_rows, meta = load_snapshot_rows(
+            mirror_root,
+            query_set_version=query_set_version,
+            mode=mode,
+        )
+        mirror_meta.append(meta)
+        for row in mirror_rows:
+            run_id = str(row.get("_run_id") or "")
+            if run_id and run_id in seen_run_ids:
+                if run_id not in duplicate_seen:
+                    duplicate_seen.add(run_id)
+                    duplicate_mirror_run_dirs_skipped += 1
+                continue
+            rows.append(row)
+            if run_id:
+                seen_run_ids.add(run_id)
+    rows.sort(key=lambda row: (
+        str(row.get("snapshot_ts_utc") or ""),
+        str(row.get("_run_id") or ""),
+        str(row.get("market_id") or ""),
+    ))
+    return rows, {
+        "root": str(root),
+        "primary_root": str(root),
+        "mirror_roots": [str(p) for p in mirror_roots],
+        "run_dirs": len(seen_run_ids),
+        "distinct_run_dirs": len(seen_run_ids),
+        "duplicate_mirror_run_dirs_skipped": duplicate_mirror_run_dirs_skipped,
+        "primary": primary_meta,
+        "mirrors": mirror_meta,
+        "skipped": primary_meta.get("skipped", {}),
+    }
+
+
 def build_market_deltas(
     rows: Iterable[dict[str, Any]],
     *,
@@ -1739,6 +1797,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("--polymarket-root", default=None, dest="polymarket_root",
                    help="Polymarket run root (default ${OPENCLAW_DATA_DIR}/polymarket_axis_runs)")
+    p.add_argument("--polymarket-mirror-root", default=None, dest="polymarket_mirror_root",
+                   help="可選 os.pathsep 分隔 durable mirror roots，補足 snapshot history")
     p.add_argument("--query-set", default=DEFAULT_QUERY_SET, choices=["v1", "v2"], dest="query_set")
     p.add_argument("--mode", default=DEFAULT_MODE, dest="mode")
     p.add_argument("--symbols", default=",".join(DEFAULT_SYMBOLS), type=_parse_csv_symbols)
@@ -1769,8 +1829,15 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     root = Path(args.polymarket_root) if args.polymarket_root else _data_root() / "polymarket_axis_runs"
     out_path = Path(args.out) if args.out else default_out_path()
     history_reports = load_recent_report_history(out_path.parent)
-    snapshot_rows, snapshot_meta = load_snapshot_rows(
+    mirror_raw = str(args.polymarket_mirror_root or "").strip()
+    mirror_roots = tuple(
+        Path(part)
+        for part in mirror_raw.split(os.pathsep)
+        if part.strip()
+    )
+    snapshot_rows, snapshot_meta = load_snapshot_rows_with_mirrors(
         root, query_set_version=args.query_set, mode=args.mode,
+        mirror_roots=mirror_roots,
     )
     horizons = tuple(int(x) for x in args.horizons_minutes)
     symbols = tuple(str(x) for x in args.symbols)
