@@ -439,6 +439,7 @@ def _load_fillsim_adverse(path, h_primary, max_age_h):
         ),
     }
     info["edge_scorecard"] = rep.get("edge_scorecard")
+    info["horizon_scorecard"] = rep.get("horizon_scorecard")
     info["conditional_feature_scorecard"] = rep.get("conditional_feature_scorecard")
     info["walk_forward_feature_scorecard"] = rep.get("walk_forward_feature_scorecard")
     info["maker_fee_sensitivity_scorecard"] = rep.get("maker_fee_sensitivity_scorecard")
