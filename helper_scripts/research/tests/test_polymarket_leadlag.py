@@ -189,8 +189,57 @@ def test_compute_ic_reports_overlap_adjusted_sample_floor():
     assert result[0]["n_nonoverlap_timestamps"] == 2
     assert result[0]["overlap_adjusted_sample_floor"] == 2
     assert result[0]["overlap_warning"] is True
+    assert result[0]["overlap_jitter_tolerance_ms"] == 5000
     assert result[0]["hac_lag"] == 3
     assert result[0]["hac_method"] == "newey_west_slope_t_stat_bartlett"
+
+
+def test_compute_ic_tolerates_small_15m_schedule_jitter():
+    base = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    rows = []
+    for i, offset_ms in enumerate((0, 899_400, 1_799_100, 2_700_200)):
+        ts_ms = int(base.timestamp() * 1000) + offset_ms
+        rows.append({
+            "bucket": BUCKET_EVENT_REG,
+            "symbol": "BTCUSDT",
+            "horizon_minutes": 15,
+            "snapshot_ts_ms": ts_ms,
+            "snapshot_ts_utc": harness._ms_to_iso(ts_ms),
+            "mean_delta_prob_yes": float(i),
+            "forward_return_bps": float(i),
+        })
+
+    result = harness.compute_ic(rows)
+
+    assert result[0]["n_points"] == 4
+    assert result[0]["n_nonoverlap_timestamps"] == 4
+    assert result[0]["overlap_adjusted_sample_floor"] == 4
+    assert result[0]["overlap_warning"] is False
+    assert result[0]["hac_lag"] == 0
+
+
+def test_compute_ic_uses_jitter_tolerance_for_60m_cadence_floor_and_hac_lag():
+    base_ms = int(dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc).timestamp() * 1000)
+    rows = []
+    for i in range(5):
+        ts_ms = base_ms + i * 899_500
+        rows.append({
+            "bucket": BUCKET_EVENT_REG,
+            "symbol": "BTCUSDT",
+            "horizon_minutes": 60,
+            "snapshot_ts_ms": ts_ms,
+            "snapshot_ts_utc": harness._ms_to_iso(ts_ms),
+            "mean_delta_prob_yes": float(i),
+            "forward_return_bps": float(i),
+        })
+
+    result = harness.compute_ic(rows)
+
+    assert result[0]["n_points"] == 5
+    assert result[0]["n_nonoverlap_timestamps"] == 2
+    assert result[0]["overlap_adjusted_sample_floor"] == 2
+    assert result[0]["overlap_warning"] is True
+    assert result[0]["hac_lag"] == 3
 
 
 def test_hac_gate_blocks_naive_t_candidate():

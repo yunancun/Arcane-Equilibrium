@@ -75,6 +75,7 @@ DEFAULT_MIN_ABS_IC = 0.15
 DEFAULT_MIN_ABS_T = 2.0
 DEFAULT_MAX_BH_Q = 0.10
 DEFAULT_MAX_HAC_LAG = 12
+DEFAULT_SCHEDULE_JITTER_TOLERANCE_MS = 5_000
 
 _PRICE_TARGET_RE = re.compile(
     r"(\bprice\b.*\bhit\b|\bhit\b.*\$|\breach\b.*\$|above\s+\$|below\s+\$|"
@@ -556,11 +557,20 @@ def _t_stat_from_r(r: Optional[float], n: int) -> Optional[float]:
     return r * math.sqrt((n - 2) / denom)
 
 
+def _horizon_ms(horizon_minutes: int) -> int:
+    return int(max(1, horizon_minutes) * 60 * 1000)
+
+
+def _schedule_jitter_tolerance_ms(horizon_minutes: int) -> int:
+    horizon_ms = _horizon_ms(horizon_minutes)
+    return max(0, min(DEFAULT_SCHEDULE_JITTER_TOLERANCE_MS, horizon_ms - 1))
+
+
 def _count_nonoverlap_timestamps(timestamps_ms: Iterable[int], horizon_minutes: int) -> int:
     ordered = sorted({int(ts) for ts in timestamps_ms})
     if not ordered:
         return 0
-    min_gap_ms = int(max(1, horizon_minutes) * 60 * 1000)
+    min_gap_ms = _horizon_ms(horizon_minutes) - _schedule_jitter_tolerance_ms(horizon_minutes)
     count = 0
     last: Optional[int] = None
     for ts_ms in ordered:
@@ -596,8 +606,8 @@ def _hac_lag_for_horizon(timestamps_ms: Iterable[int], horizon_minutes: int) -> 
     gap_ms = _median_positive_gap_ms(timestamps_ms)
     if gap_ms is None or gap_ms <= 0:
         return 0
-    horizon_ms = int(max(1, horizon_minutes) * 60 * 1000)
-    return max(0, min(DEFAULT_MAX_HAC_LAG, int(math.ceil(horizon_ms / gap_ms)) - 1))
+    effective_horizon_ms = _horizon_ms(horizon_minutes) - _schedule_jitter_tolerance_ms(horizon_minutes)
+    return max(0, min(DEFAULT_MAX_HAC_LAG, int(math.ceil(effective_horizon_ms / gap_ms)) - 1))
 
 
 def _newey_west_slope_t_stat(
@@ -699,6 +709,7 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         n_distinct = len(set(timestamps))
         n_nonoverlap = _count_nonoverlap_timestamps(timestamps, horizon)
         hac_lag = _hac_lag_for_horizon(timestamps, horizon)
+        jitter_tolerance_ms = _schedule_jitter_tolerance_ms(horizon)
         out.append({
             "bucket": bucket,
             "symbol": symbol,
@@ -708,6 +719,7 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             "n_nonoverlap_timestamps": n_nonoverlap,
             "overlap_adjusted_sample_floor": min(len(rows), n_nonoverlap),
             "overlap_warning": n_nonoverlap < n_distinct,
+            "overlap_jitter_tolerance_ms": jitter_tolerance_ms,
             "ic_pearson": r,
             "t_stat": _t_stat_from_r(r, len(rows)),
             "t_stat_hac": _newey_west_slope_t_stat(xs, ys, lag=hac_lag),
@@ -871,6 +883,7 @@ def build_report(
             "target = Bybit close return after snapshot time; first kline at/after timestamps only",
             "price_target/event_reg bucket split is research-side and does not filter collector artifacts",
             "insufficient sample fails closed and is not alpha evidence",
+            "overlap sample floor allows a small schedule-jitter tolerance before declaring windows overlapping",
             "candidate gate requires overlap-adjusted sample floor and BH q-value control",
             "candidate significance uses Newey-West/HAC slope t-stat; naive t-stat is diagnostic only",
         ],

@@ -12,8 +12,8 @@ MODULE_NOTE:
 
 from __future__ import annotations
 
-RUNNER_VERSION = "polymarket_leadlag.v0.4"
-REPORT_SCHEMA_VERSION = "polymarket.leadlag_report.v0.4"
+RUNNER_VERSION = "polymarket_leadlag.v0.5"
+REPORT_SCHEMA_VERSION = "polymarket.leadlag_report.v0.5"
 
 STATUS_INSUFFICIENT_SAMPLE = "INSUFFICIENT_SAMPLE"
 STATUS_NO_SNAPSHOT_ROWS = "NO_SNAPSHOT_ROWS"
