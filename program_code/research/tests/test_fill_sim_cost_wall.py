@@ -7,6 +7,7 @@ from program_code.research.microstructure.fill_sim import (
     _net_block,
     fill_sim_conditional_feature_scorecard,
     fill_sim_edge_scorecard,
+    fill_sim_maker_fee_sensitivity_scorecard,
 )
 
 
@@ -288,3 +289,99 @@ def test_conditional_feature_scorecard_surfaces_no_positive_cells():
     assert scorecard["status"] == "NO_CONDITIONAL_FEATURE_POSITIVE_CELL"
     assert scorecard["positive_cells"] == []
     assert scorecard["best_cell"]["net_bps"] == pytest.approx(-4.2)
+
+
+def test_maker_fee_sensitivity_finds_lower_fee_sample_gated_path():
+    report = {
+        "edge_scorecard": {
+            "all_fill_only_cells": [
+                {
+                    "scope": "per_symbol_primary_queue",
+                    "symbol": "ABCUSDT",
+                    "queue_position": "back",
+                    "policy": "naive",
+                    "track": "fill_only",
+                    "n": 40,
+                    "edge_before_fees_bps": 1.2,
+                    "signif_suppressed": False,
+                }
+            ]
+        },
+        "conditional_feature_scorecard": {"all_cells": []},
+    }
+
+    scorecard = fill_sim_maker_fee_sensitivity_scorecard(
+        report,
+        primary_horizon_s=15,
+        fee_scenarios_bps_per_side=(2.0, 0.5, 0.0),
+    )
+
+    assert scorecard["status"] == "LOWER_FEE_SAMPLE_GATED_POSITIVE"
+    assert scorecard["best_sample_gated_break_even_cell"]["symbol"] == "ABCUSDT"
+    assert scorecard["best_sample_gated_break_even_cell"][
+        "break_even_maker_fee_bps_per_side"
+    ] == pytest.approx(0.6)
+    assert scorecard["best_sample_gated_break_even_cell"][
+        "fee_reduction_to_breakeven_bps_per_side"
+    ] == pytest.approx(1.4)
+    assert scorecard["scenarios"][0]["positive_sample_gate_count"] == 0
+    assert scorecard["scenarios"][1]["positive_sample_gate_count"] == 1
+    assert scorecard["scenarios"][1]["best_cell"]["net_bps_at_fee"] == pytest.approx(0.2)
+
+
+def test_maker_fee_sensitivity_keeps_tiny_positive_below_gate():
+    report = {
+        "edge_scorecard": {"all_fill_only_cells": []},
+        "conditional_feature_scorecard": {
+            "all_cells": [
+                {
+                    "name": "tiny_positive",
+                    "condition": "side == bid",
+                    "n_fill_only": 2,
+                    "edge_before_fees_bps": 2.0,
+                    "signif_suppressed": True,
+                }
+            ]
+        },
+    }
+
+    scorecard = fill_sim_maker_fee_sensitivity_scorecard(
+        report,
+        primary_horizon_s=15,
+        fee_scenarios_bps_per_side=(2.0, 0.5, 0.0),
+    )
+
+    assert scorecard["status"] == "FEE_SCENARIO_POSITIVE_BELOW_SAMPLE_GATE"
+    assert scorecard["scenarios"][2]["positive_cell_count"] == 1
+    assert scorecard["scenarios"][2]["positive_sample_gate_count"] == 0
+
+
+def test_maker_fee_sensitivity_surfaces_no_positive_cells():
+    report = {
+        "edge_scorecard": {
+            "all_fill_only_cells": [
+                {
+                    "scope": "pooled_primary_queue",
+                    "queue_position": "back",
+                    "policy": "naive",
+                    "track": "fill_only",
+                    "n": 40,
+                    "edge_before_fees_bps": -2.0,
+                    "signif_suppressed": False,
+                }
+            ]
+        },
+        "conditional_feature_scorecard": {"all_cells": []},
+    }
+
+    scorecard = fill_sim_maker_fee_sensitivity_scorecard(
+        report,
+        primary_horizon_s=15,
+        fee_scenarios_bps_per_side=(2.0, 0.0, -0.5),
+    )
+
+    assert scorecard["status"] == "NO_FEE_SCENARIO_POSITIVE_CELL"
+    assert scorecard["best_sample_gated_break_even_cell"][
+        "break_even_maker_fee_bps_per_side"
+    ] == pytest.approx(-1.0)
+    assert scorecard["scenarios"][2]["best_cell"]["net_bps_at_fee"] == pytest.approx(-1.0)
