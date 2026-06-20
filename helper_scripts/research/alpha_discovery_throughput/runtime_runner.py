@@ -189,7 +189,12 @@ def collect_gate_b_arm(
     )
 
 
-def collect_flash_dip_arm(data_dir: Path) -> dict[str, Any]:
+def collect_flash_dip_arm(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
     path = data_dir / "logs" / "flash_dip_death_rate.log"
     status, err = _latest_json_line(path)
     if err:
@@ -204,18 +209,32 @@ def collect_flash_dip_arm(data_dir: Path) -> dict[str, Any]:
             detail={"note": "death_rate_status_missing_or_not_yet_fired"},
         )
     assert status is not None
+    ts_utc = status.get("ts_utc")
+    fresh, age, freshness_error = _source_fresh(
+        ts_utc,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
     sample_count = _int(status.get("n_closed_slots"))
     alerted = bool(status.get("alerted"))
     gate_status = "REJECTED" if alerted else "READY"
+    if not fresh:
+        gate_status = "SOURCE_FAILURE"
     return _arm(
         arm_id="flash_dip_buy_demo",
         gate_status=gate_status,
         sample_count=sample_count,
-        artifacts_ready=(not alerted and sample_count >= _int((status.get("thresholds") or {}).get("min_n"), 20)),
-        source_ok=True,
+        artifacts_ready=(
+            fresh
+            and not alerted
+            and sample_count >= _int((status.get("thresholds") or {}).get("min_n"), 20)
+        ),
+        source_ok=fresh,
         source_path=path,
+        source_error=freshness_error,
         detail={
-            "ts_utc": status.get("ts_utc"),
+            "ts_utc": ts_utc,
+            "age_seconds": age,
             "death_rate_pct": status.get("death_rate_pct"),
             "n_deaths": status.get("n_deaths"),
             "actionable": status.get("actionable"),
@@ -410,7 +429,7 @@ def collect_runtime_arms(
     now = now_utc or _utc_now()
     return [
         collect_gate_b_arm(data_dir, now_utc=now, max_age_seconds=max_age_seconds),
-        collect_flash_dip_arm(data_dir),
+        collect_flash_dip_arm(data_dir, now_utc=now),
         collect_vol_event_arm(data_dir),
         collect_mm_verdict_arm(data_dir, now_utc=now),
         collect_aeg_matrix_arm(data_dir),

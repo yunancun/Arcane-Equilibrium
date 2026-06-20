@@ -17,7 +17,7 @@ from alpha_discovery_throughput.packet import (
     build_direct_report_from_packet,
     daily_returns_from_samples,
 )
-from alpha_discovery_throughput.runtime_runner import collect_runtime_arms, run_once
+from alpha_discovery_throughput.runtime_runner import collect_flash_dip_arm, collect_runtime_arms, run_once
 from alpha_discovery_throughput.signal_manifest import build_signal_spec, validate_signal_manifest
 
 
@@ -290,6 +290,34 @@ def test_runtime_runner_blocks_stale_mm_verdict_status(tmp_path):
     assert mm_arm["source_error"] == "stale_artifact"
     assert mm_arm["gate_status"] == "SOURCE_FAILURE"
     assert mm_arm["detail"]["age_seconds"] > 36 * 60 * 60
+    assert plan["arms"][0]["action"] == "BLOCK"
+    assert plan["arms"][0]["reason"] == "source_not_healthy"
+
+
+def test_runtime_runner_blocks_stale_flash_dip_death_rate_status(tmp_path):
+    data = tmp_path / "openclaw"
+    (data / "logs").mkdir(parents=True)
+    (data / "logs" / "flash_dip_death_rate.log").write_text(json.dumps({
+        "ts_utc": "2026-06-17T04:53:01Z",
+        "thresholds": {"min_n": 20},
+        "n_closed_slots": 24,
+        "n_deaths": 0,
+        "death_rate_pct": 0.0,
+        "actionable": True,
+        "alerted": False,
+    }) + "\n", encoding="utf-8")
+
+    arm = collect_flash_dip_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 19, 22, 30, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan([arm], now_utc=dt.datetime(2026, 6, 19, 22, 30, tzinfo=dt.timezone.utc))
+
+    assert arm["source_ok"] is False
+    assert arm["source_error"] == "stale_artifact"
+    assert arm["gate_status"] == "SOURCE_FAILURE"
+    assert arm["artifacts_ready"] is False
+    assert arm["detail"]["age_seconds"] > 36 * 60 * 60
     assert plan["arms"][0]["action"] == "BLOCK"
     assert plan["arms"][0]["reason"] == "source_not_healthy"
 
