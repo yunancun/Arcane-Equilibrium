@@ -25,6 +25,17 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Macro-Reg Proxy
+
+- Upgraded `polymarket_leadlag` to report schema/runner v0.9.
+- Diagnosis: a same-data alt-alias probe found `alias_clue_counts=[]`, so blind expansion to ADA/DOGE/BNB/LTC/etc. was rejected.
+- The current unmapped pool before macro proxy had 5406 rows: `event_reg=3878`, `price_target=989`, `other=539`; top event/reg sources were CPI, inflation, Tether/USDT, Coinbase SEC, spot ETF, Fed/rate/regulation queries.
+- v0.9 maps only unmapped `event_reg` rows to BTC/ETH `macro_event_reg` proxy series after direct BTC/ETH/SOL/XRP inference fails; direct asset rows still win, and `price_target`/`other` stay unmapped with diagnostics.
+- Same-snapshot effect: delta rows `6184 -> 13380`, unmapped rows `5406 -> 1528`, mapped snapshot-source counts `asset_direct=6733`, `macro_event_reg=7756`; feature points / joined rows / adjusted sample floor stayed `130 / 210 / 12`.
+- Linux v0.9 wrapper smoke latest sha256 `3c522bc98f73e9f20153d97dfa7a3f1db09e9fd23c585f3f405447545b7fad5d`: `snapshot_rows=12153`, `delta_rows=13380`, `joined_rows=210`, `max_overlap_adjusted_ic_points=12`, `candidate_count=0`, still `INSUFFICIENT_SAMPLE`, ETA `2026-06-20T19:52:03.743Z`.
+- Alpha discovery latest sha256 `de0a74a9faf55bb8f66cbe9db3e978376494dc3effc09b63e077a130b25d905b` reports `polymarket_leadlag_ic.sample_count=12`, action `RUN_READ_ONLY_CAPTURE`, ready/probe=0.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Wide-Symbol Universe
 
 - Upgraded `polymarket_leadlag` to report schema/runner v0.8 and widened defaults from BTC/ETH to BTC/ETH/SOL/XRP in the harness, cron wrapper, and installer env.
