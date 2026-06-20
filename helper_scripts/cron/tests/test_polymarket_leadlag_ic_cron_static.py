@@ -48,6 +48,7 @@ def test_wrapper_readonly_pg_and_status_artifacts_only():
     assert "pre_gate_hac_watchlist_count" in src
     assert "best_pre_gate_hac_watch" in src
     assert "price_feedback_warning_count" in src
+    assert "price_feedback_partial_collapse_count" in src
     assert "price_feedback_summary" in src
     assert "min_samples_remaining_to_gate" in src
     assert "sample_gate_eta_utc" in src

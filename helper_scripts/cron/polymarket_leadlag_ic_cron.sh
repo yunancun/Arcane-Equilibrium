@@ -195,6 +195,7 @@ try:
         "preliminary_hac_candidate_count": verdict.get("preliminary_hac_candidate_count"),
         "pre_gate_hac_watchlist_count": verdict.get("pre_gate_hac_watchlist_count"),
         "price_feedback_warning_count": verdict.get("price_feedback_warning_count"),
+        "price_feedback_partial_collapse_count": verdict.get("price_feedback_partial_collapse_count"),
         "best_pre_gate_hac_watch": best_watch,
         "significance_t_stat": verdict.get("significance_t_stat"),
         "max_bh_q": verdict.get("max_bh_q"),
