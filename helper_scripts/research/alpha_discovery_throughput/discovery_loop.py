@@ -214,6 +214,105 @@ def _mm_lower_fee_history_extra(detail: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _round_or_none(value: float | None, digits: int = 4) -> float | None:
+    if value is None:
+        return None
+    return round(value, digits)
+
+
+def _mm_cost_wall_escape_scorecard(detail: dict[str, Any]) -> dict[str, Any]:
+    gross_decomp = _dict(detail.get("gross_edge_cost_decomposition"))
+    sample_cost_wall = _dict(detail.get("sample_gated_cost_wall_summary"))
+    fee_path = _dict(detail.get("fee_path_feasibility"))
+    business_actionability = _dict(fee_path.get("business_path_actionability"))
+    history_extra = _mm_lower_fee_history_extra(detail)
+
+    best_gross_edge = _float(gross_decomp.get("best_sample_gated_gross_edge_bps"))
+    best_net = _float(gross_decomp.get("best_gross_cell_net_bps"))
+    current_fee_round_trip = (
+        _float(gross_decomp.get("current_fee_round_trip_bps"))
+        if gross_decomp.get("current_fee_round_trip_bps") is not None
+        else _float(sample_cost_wall.get("current_fee_round_trip_bps"))
+    )
+    if current_fee_round_trip is None and best_gross_edge is not None and best_net is not None:
+        current_fee_round_trip = best_gross_edge - best_net
+    gap = (
+        current_fee_round_trip - best_gross_edge
+        if current_fee_round_trip is not None and best_gross_edge is not None
+        else None
+    )
+    multiple = (
+        current_fee_round_trip / best_gross_edge
+        if current_fee_round_trip is not None and best_gross_edge not in {None, 0.0}
+        else None
+    )
+    current_fee_positive_count = _int(
+        gross_decomp.get("current_fee_positive_sample_gated_cell_count")
+    )
+    business_status = str(business_actionability.get("status") or "").upper()
+
+    if current_fee_positive_count > 0:
+        status = "CURRENT_FEE_SAMPLE_GATED_CELL_AVAILABLE"
+        reason = "sample_gated_current_fee_positive_cell_exists"
+        next_trigger = "review_current_fee_positive_mm_cell_with_walk_forward_and_aeg_chain"
+        engineering_actionable = True
+    elif gap is None:
+        status = "INSUFFICIENT_COST_WALL_ESCAPE_INPUT"
+        reason = "missing_current_fee_or_best_gross_edge"
+        next_trigger = "refresh_mm_cost_wall_inputs_before_strategy_judgment"
+        engineering_actionable = True
+    elif gap > 0 and business_status == "STANDARD_FEE_TIER_CLEARS_BUT_SCALE_OR_CAPITAL_GATED":
+        status = "CURRENT_FEE_GROSS_EDGE_GAP_REQUIRES_NEW_LOW_FRICTION_SIGNAL"
+        reason = "lower_fee_path_scale_or_capital_gated_at_current_account_state"
+        next_trigger = (
+            "search_new_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip"
+        )
+        engineering_actionable = True
+    elif gap > 0:
+        status = "CURRENT_FEE_GROSS_EDGE_GAP_OR_LOWER_FEE_REQUIRED"
+        reason = "best_sample_gated_gross_edge_below_current_fee_round_trip"
+        next_trigger = "validate_lower_fee_access_or_new_low_friction_mm_signal"
+        engineering_actionable = True
+    else:
+        status = "GROSS_EDGE_CLEARS_CURRENT_FEE_NEEDS_WALK_FORWARD_CONFIRMATION"
+        reason = "gross_edge_clears_current_fee_but_current_fee_positive_count_absent"
+        next_trigger = "run_walk_forward_confirmation_before_any_mm_promotion"
+        engineering_actionable = True
+
+    return {
+        "schema_version": "mm_cost_wall_escape_v1",
+        "status": status,
+        "reason": reason,
+        "next_trigger": next_trigger,
+        "engineering_actionable": engineering_actionable,
+        "required_current_fee_gross_edge_bps": _round_or_none(current_fee_round_trip),
+        "best_sample_gated_gross_edge_bps": _round_or_none(best_gross_edge),
+        "gross_edge_gap_to_current_fee_bps": _round_or_none(
+            max(0.0, gap) if gap is not None else None
+        ),
+        "gross_edge_multiple_to_clear_current_fee": _round_or_none(
+            multiple if multiple is not None and multiple > 0 else None
+        ),
+        "best_gross_cell_net_bps": _round_or_none(best_net),
+        "fee_reduction_needed_bps_per_side": gross_decomp.get(
+            "fee_reduction_needed_bps_per_side"
+        ) or sample_cost_wall.get("fee_reduction_needed_bps_per_side"),
+        "business_path_actionability_status": business_actionability.get("status"),
+        "business_path_operator_action_required": (
+            business_actionability.get("operator_action_required")
+        ),
+        "lower_fee_break_even_stability_status": history_extra.get(
+            "lower_fee_break_even_stability_status"
+        ),
+        "lower_fee_break_even_windows": history_extra.get(
+            "lower_fee_break_even_windows"
+        ),
+        "best_sample_gated_gross_cell": gross_decomp.get(
+            "best_sample_gated_gross_cell"
+        ),
+    }
+
+
 def _mm_secondary_blockers(detail: dict[str, Any]) -> list[dict[str, Any]]:
     blockers: list[dict[str, Any]] = []
     gross_decomp = _dict(detail.get("gross_edge_cost_decomposition"))
@@ -388,6 +487,7 @@ def classify_profitability_blocker(
             sample_cost_wall.get("best_sample_gated_fee_round_trip_shortfall_bps")
         )
         cost_shortfall = _float(cost_wall.get("best_fee_round_trip_shortfall_bps"))
+        escape_scorecard = _mm_cost_wall_escape_scorecard(detail)
 
         if failure_status == "NO_TRAIN_POSITIVE_CELL":
             if gross_status == "GROSS_EDGE_BELOW_CURRENT_FEE_COST_WALL":
@@ -398,9 +498,12 @@ def classify_profitability_blocker(
                         "gross_edge_below_current_fee_no_current_fee_walk_forward_positive"
                     ),
                     next_trigger=(
-                        "validate_lower_fee_or_new_low_friction_signal_path_before_expanding_current_family"
+                        escape_scorecard.get("next_trigger")
+                        or "validate_lower_fee_or_new_low_friction_signal_path_before_expanding_current_family"
                     ),
-                    engineering_actionable=True,
+                    engineering_actionable=bool(
+                        escape_scorecard.get("engineering_actionable", True)
+                    ),
                     secondary_blockers=secondary,
                     extra={
                         "walk_forward_failure_status": failure_status,
@@ -425,6 +528,18 @@ def classify_profitability_blocker(
                         ),
                         "fee_reduction_needed_bps_per_side": gross_decomp.get(
                             "fee_reduction_needed_bps_per_side"
+                        ),
+                        "cost_wall_escape_status": escape_scorecard.get("status"),
+                        "cost_wall_escape_reason": escape_scorecard.get("reason"),
+                        "cost_wall_escape_scorecard": escape_scorecard,
+                        "required_current_fee_gross_edge_bps": (
+                            escape_scorecard.get("required_current_fee_gross_edge_bps")
+                        ),
+                        "gross_edge_gap_to_current_fee_bps": (
+                            escape_scorecard.get("gross_edge_gap_to_current_fee_bps")
+                        ),
+                        "gross_edge_multiple_to_clear_current_fee": (
+                            escape_scorecard.get("gross_edge_multiple_to_clear_current_fee")
                         ),
                         "business_path_actionability_status": business_actionability.get(
                             "status"

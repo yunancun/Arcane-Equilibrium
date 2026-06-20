@@ -1060,3 +1060,8 @@
 
 - v289 gates AEG robustness actionability on upstream `READY_FOR_AEG_CHAIN` / `READY_FOR_PROBE` / `artifacts_ready=true` artifacts. Empty candidate/probe pipeline now means AEG waits instead of consuming an engineering actionable slot.
 - Latest alpha sha256 `f3aec25f6904681ce407e97f133dcfcb28629328115ebcbefbc616697d437c72` has `engineering_actionable_count=1`; AEG status `NO_CANDIDATE_ARTIFACTS_AVAILABLE_FOR_ROBUSTNESS`, candidate_artifact_count=0, next trigger `wait_for_candidate_or_probe_artifact_before_robustness_matrix`. Boundary: source/test/docs + read-only alpha artifact only; no trading/runtime mutation.
+
+## 2026-06-20 MM current-fee cost-wall escape scorecard
+
+- v290 adds `mm_cost_wall_escape_v1` to alpha-discovery MM blockers. Current fee round trip requires 4.0bp gross edge; best sample-gated gross edge is 2.27bp, gap 1.73bp, multiple 1.7621.
+- Latest alpha sha256 `7a9f0e5005b4906ecbb6db3e4775d2cb2769654f5eac3310b4bdb8438bcff6bb` keeps `engineering_actionable_count=1`; lower-fee path remains scale/capital gated, so next trigger is `search_new_low_friction_mm_signal_with_sample_gated_gross_edge_ge_current_fee_round_trip`.
