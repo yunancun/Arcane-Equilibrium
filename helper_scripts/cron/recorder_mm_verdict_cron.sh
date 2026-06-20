@@ -344,6 +344,7 @@ def _load_fillsim_adverse(path, h_primary, max_age_h):
             f"required_maker_rebate_bps_per_side@{h_primary}_maker_exit"
         ),
     }
+    info["edge_scorecard"] = rep.get("edge_scorecard")
     # 5/30s sensitivity（誠實透明，不入 net 計算）。
     for hs in (5, 30):
         v = fo.get(f"adverse_sel_bps@{hs}")
@@ -424,6 +425,7 @@ if cost_wall_rows:
         "horizon_s": h_primary,
         "best_symbol_by_net_edge": best_sym,
         "best_net_edge_bps": best_net,
+        "best_n_maker_fills": best_row.get("n_maker_fills"),
         "best_fee_round_trip_shortfall_bps": best_row.get("fee_round_trip_shortfall_bps"),
         "best_required_maker_rebate_bps_per_side": best_row.get(
             "required_maker_rebate_bps_per_side"

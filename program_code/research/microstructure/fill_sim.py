@@ -634,6 +634,116 @@ def _policy_stats(trials_policy, adverse_by_fill, horizons, span_hours):
     return res
 
 
+def _scorecard_cell(scope: str, queue_position: str, policy: str, track: str,
+                    block: dict, horizon_s: int, *, symbol: str | None = None) -> dict | None:
+    n = int(block.get("n") or 0)
+    net = block.get(f"net_bps@{horizon_s}_maker_exit")
+    half_spread = block.get("half_spread_bps")
+    adverse = block.get(f"adverse_sel_bps@{horizon_s}")
+    edge_before_fees = block.get(f"edge_before_fees_bps@{horizon_s}")
+    if edge_before_fees is None and half_spread is not None and adverse is not None:
+        edge_before_fees = float(half_spread) - float(adverse)
+    fee_shortfall = block.get(f"fee_round_trip_shortfall_bps@{horizon_s}_maker_exit")
+    if fee_shortfall is None and edge_before_fees is not None:
+        fee_shortfall = MAKER_FEE_ROUND_TRIP_BPS - float(edge_before_fees)
+    if net is None:
+        return None
+    return {
+        "scope": scope,
+        "symbol": symbol,
+        "queue_position": queue_position,
+        "policy": policy,
+        "track": track,
+        "n": n,
+        "net_bps": _r(net, 3),
+        "half_spread_bps": _r(half_spread, 3),
+        "adverse_sel_bps": _r(adverse, 3),
+        "edge_before_fees_bps": _r(edge_before_fees, 3),
+        "fee_round_trip_shortfall_bps": _r(fee_shortfall, 3),
+        "required_half_spread_bps": _r(
+            block.get(f"required_half_spread_bps@{horizon_s}_maker_exit"),
+            3,
+        ),
+        "required_maker_rebate_bps_per_side": _r(
+            block.get(f"required_maker_rebate_bps_per_side@{horizon_s}_maker_exit"),
+            3,
+        ),
+        "signif_suppressed": bool(block.get(f"signif_suppressed@{horizon_s}", n < MIN_FILLS_FOR_SIGNIF)),
+    }
+
+
+def fill_sim_edge_scorecard(report: dict, *, primary_horizon_s: int = 15) -> dict:
+    """Compact reducer for the fill-sim report.
+
+    This ranks already-computed fill_only maker-edge cells. It intentionally
+    does not promote an alpha; it makes the closest-to-breakeven conditional
+    slice visible so PM/QC can decide whether deeper research is warranted.
+    """
+    primary_queue = report.get("primary_queue_position") or DEFAULT_QUEUE_POSITION
+    cells: list[dict] = []
+
+    def add_policy(scope: str, queue_position: str, policy_name: str, policy: dict,
+                   *, symbol: str | None = None):
+        if not policy:
+            return
+        block = policy.get("fill_only") or {}
+        cell = _scorecard_cell(
+            scope,
+            queue_position,
+            policy_name,
+            "fill_only",
+            block,
+            primary_horizon_s,
+            symbol=symbol,
+        )
+        if cell is not None:
+            cells.append(cell)
+
+    for policy_name, policy in (report.get("pooled") or {}).items():
+        add_policy("pooled_primary_queue", primary_queue, policy_name, policy)
+
+    qdr = ((report.get("queue_dose_response") or {}).get("queue_positions") or {})
+    for queue_position, qrow in qdr.items():
+        for policy_name in ("naive", "informed_skip"):
+            add_policy("pooled_queue_dose", queue_position, policy_name, qrow.get(policy_name) or {})
+
+    for row in report.get("per_symbol") or []:
+        symbol = row.get("symbol")
+        for policy_name in ("naive", "informed_skip"):
+            add_policy("per_symbol_primary_queue", primary_queue, policy_name, row.get(policy_name) or {},
+                       symbol=symbol)
+
+    ranked = sorted(cells, key=lambda c: (c["net_bps"] is not None, c["net_bps"]), reverse=True)
+    positive = [c for c in ranked if c["net_bps"] is not None and c["net_bps"] > 0.0]
+    positive_sample_gate = [
+        c for c in positive
+        if c["n"] >= MIN_FILLS_FOR_SIGNIF and not c["signif_suppressed"]
+    ]
+    back_ranked = [c for c in ranked if c["queue_position"] == DEFAULT_QUEUE_POSITION]
+    if positive_sample_gate:
+        status = "CONDITIONAL_POSITIVE_FILL_ONLY_CELL"
+    elif positive:
+        status = "POSITIVE_FILL_ONLY_CELL_BELOW_SAMPLE_GATE"
+    else:
+        status = "NO_POSITIVE_FILL_ONLY_CELL"
+    return {
+        "status": status,
+        "primary_horizon_s": primary_horizon_s,
+        "fee_round_trip_bps": MAKER_FEE_ROUND_TRIP_BPS,
+        "min_fills_for_signif": MIN_FILLS_FOR_SIGNIF,
+        "cells_evaluated": len(cells),
+        "best_fill_only": ranked[0] if ranked else None,
+        "best_back_of_queue_fill_only": back_ranked[0] if back_ranked else None,
+        "positive_fill_only_cells": positive[:10],
+        "positive_fill_only_cells_with_sample_gate": positive_sample_gate[:10],
+        "nearest_to_breakeven_fill_only_cells": ranked[:10],
+        "note": (
+            "Research scorecard only. Positive cells need cross-regime CP-3 evidence, "
+            "portfolio inventory-risk review, and formal QC/MIT/AI-E review before any strategy work."
+        ),
+    }
+
+
 def run(l1, tr, ob, syms, clean_since, horizons, cadence_s, skip_quantile, since_ts, until_ts):
     """純計算入口：回 report dict。l1 為 raw（未過濾）;本函數做 §1.2 過濾並計數。"""
     l1_clean, fcounts = filter_l1_clean(l1, clean_since)
@@ -813,6 +923,11 @@ def run(l1, tr, ob, syms, clean_since, horizons, cadence_s, skip_quantile, since
 
     # ob_top cross-check（§5.3）：l1 mid vs ob_top mid 中位絕對差 bps。
     report["obtop_crosscheck"] = _obtop_crosscheck(l1_clean, ob_clean)
+    primary_horizon = 15 if 15 in horizons else (horizons[0] if horizons else 15)
+    report["edge_scorecard"] = fill_sim_edge_scorecard(
+        report,
+        primary_horizon_s=primary_horizon,
+    )
 
     return report
 
@@ -921,7 +1036,8 @@ def main(argv=None):
 
     # 人類可讀摘要（含 queue dose-response）。
     summary_keys = ("window", "params", "data", "caveat", "obtop_crosscheck",
-                    "primary_queue_position", "pooled", "queue_dose_response")
+                    "primary_queue_position", "edge_scorecard", "pooled",
+                    "queue_dose_response")
     print(json.dumps({k: report[k] for k in summary_keys if k in report},
                      indent=2, ensure_ascii=False))
     if "abort" in report:
