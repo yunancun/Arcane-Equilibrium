@@ -5,9 +5,12 @@ from __future__ import annotations
 import datetime as dt
 import json
 
+import pytest
+
 import screen as base
 import shallow_retune_screen as srs
 import shallow_retune_adversarial as adv
+import shallow_retune_execution_realism as execr
 
 
 def _bars(symbol: str, *, n: int = 16) -> list[dict]:
@@ -153,3 +156,104 @@ def test_adversarial_gate_blocks_overfit_or_death2_failure():
     )
     assert pbo_fail["conditional_adversarial_candidate"] is False
     assert "g3_pbo_overfit" in pbo_fail["fail_reasons"]
+
+
+def test_intraday_fill_assessment_requires_through_buffer():
+    event = {
+        "symbol": "AAAUSDT",
+        "entry_date": "2026-01-02",
+        "exit_date": "2026-01-04",
+        "entry_level": 95.0,
+        "net_taker": 0.01,
+        "net_maker": 0.012,
+        "gross": 0.016,
+    }
+    bars = [
+        {"open_ts_ms": 1767312000000, "low": 95.10, "high": 95.40, "close": 95.20},
+        {"open_ts_ms": 1767312060000, "low": 94.98, "high": 95.20, "close": 95.05},
+        {"open_ts_ms": 1767312360000, "low": 94.94, "high": 95.80, "close": 95.70},
+    ]
+
+    touch = execr.intraday_fill_assessment(event, bars, buffer_bps=0.0, markout_minutes=(5,))
+    assert touch is not None
+    assert touch["through_bps"] == pytest.approx(2.105263, rel=1e-6)
+    assert touch["markout_bps@5m"] == pytest.approx(73.6842105, rel=1e-6)
+    assert touch["short_exit_net_taker@5m"] == pytest.approx(
+        73.6842105 / 10000.0 - 0.0002 - 0.00055,
+        rel=1e-6,
+    )
+
+    five_bps = execr.intraday_fill_assessment(event, bars, buffer_bps=5.0, markout_minutes=(5,))
+    assert five_bps is not None
+    assert five_bps["first_fill_bar_low"] == pytest.approx(94.94)
+
+    too_deep = execr.intraday_fill_assessment(event, bars, buffer_bps=10.0, markout_minutes=(5,))
+    assert too_deep is None
+
+
+def test_execution_realism_gate_separates_sample_and_hard_fail():
+    rows = [
+        {
+            "execution_buffer_bps": 0.0,
+            "n_filled_proxy": 40,
+            "n_distinct_filled_days": 25,
+            "fixed_notional": {"annualized_return": 0.02, "max_drawdown": 0.05},
+        },
+        {
+            "execution_buffer_bps": 10.0,
+            "n_filled_proxy": 35,
+            "n_distinct_filled_days": 22,
+            "fixed_notional": {"annualized_return": 0.01, "max_drawdown": 0.10},
+        },
+    ]
+    ok = execr.execution_realism_gate(rows, gate_buffer_bps=10.0, min_filled=30, min_days=20)
+    assert ok["status"] == "EXECUTION_REALISM_CONDITIONAL_PASS"
+
+    sample_fail = execr.execution_realism_gate(rows, gate_buffer_bps=25.0, min_filled=30, min_days=20)
+    assert sample_fail["status"] == "EXECUTION_REALISM_INSUFFICIENT_SAMPLE"
+    assert "gate_buffer_missing" in sample_fail["fail_reasons"]
+
+    rows[1]["fixed_notional"] = {"annualized_return": -0.01, "max_drawdown": 0.10}
+    hard = execr.execution_realism_gate(rows, gate_buffer_bps=10.0, min_filled=30, min_days=20)
+    assert hard["status"] == "EXECUTION_REALISM_BLOCKED"
+    assert "gate_buffer_nonpositive_annret" in hard["fail_reasons"]
+
+
+def test_short_exit_opportunity_summary_is_research_only():
+    rows = [
+        {
+            "execution_buffer_bps": 10.0,
+            "n_filled_proxy": 35,
+            "n_distinct_filled_days": 22,
+            "short_exit_horizons": {
+                "15m": {
+                    "mean_net_taker_per_trade": 0.001,
+                    "pct_positive": 0.6,
+                    "fixed_notional": {"annualized_return": 0.05, "max_drawdown": 0.02},
+                },
+                "60m": {
+                    "mean_net_taker_per_trade": -0.001,
+                    "pct_positive": 0.4,
+                    "fixed_notional": {"annualized_return": -0.02, "max_drawdown": 0.03},
+                },
+            },
+        },
+        {
+            "execution_buffer_bps": 25.0,
+            "n_filled_proxy": 10,
+            "n_distinct_filled_days": 8,
+            "short_exit_horizons": {
+                "15m": {
+                    "mean_net_taker_per_trade": 0.01,
+                    "pct_positive": 0.9,
+                    "fixed_notional": {"annualized_return": 0.50, "max_drawdown": 0.01},
+                },
+            },
+        },
+    ]
+
+    summary = execr.short_exit_opportunity_summary(rows, min_filled=30, min_days=20)
+    assert summary["status"] == "SHORT_EXIT_RESEARCH_SIGNAL"
+    assert summary["best"]["execution_buffer_bps"] == 10.0
+    assert summary["best"]["horizon"] == "15m"
+    assert "research-only" in summary["boundary"]
