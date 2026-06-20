@@ -104,6 +104,9 @@ Known paths:
 - Alpha promotion evidence is math-primary: bull data is allowed only with
   explicit regime/freshness labels; Bybit market APIs are raw state inputs, not
   prediction; news/X/Reddit agents are secondary corroboration only.
+- FlashDip touchability is not promotion evidence. Shallow-K retunes (for
+  example K4/K5/K6 N2 C3 nf3%) require QC/MIT/AI-E adversarial review before
+  any flag-gated demo parameter change.
 
 ## Operating Rules
 
