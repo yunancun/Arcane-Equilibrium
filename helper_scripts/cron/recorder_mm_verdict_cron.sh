@@ -345,6 +345,7 @@ def _load_fillsim_adverse(path, h_primary, max_age_h):
     info = {"source": path, "present": False, "stale": None, "age_hours": None,
             "stale_reason": None, "data_stale": None, "data_l1_rows_post_filter": None,
             "data_l1_max_ts": None, "data_l1_max_age_hours": None,
+            "data_l1_wall_age_hours": None,
             "adverse_sel_bps": None, "adverse_sel_n": None,
             "adverse_sel_signif_suppressed": None, "sensitivity": {}}
     try:
@@ -353,13 +354,18 @@ def _load_fillsim_adverse(path, h_primary, max_age_h):
     except (OSError, ValueError):
         return info
     info["present"] = True
+    now = datetime.datetime.now(datetime.timezone.utc)
+    def _parse_ts(raw):
+        ts = datetime.datetime.fromisoformat(str(raw))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=datetime.timezone.utc)
+        return ts.astimezone(datetime.timezone.utc)
+
     # 年齡：用報告 generated_at（ISO8601）對比 now，無法解析則標 stale=True 保守。
     gen = rep.get("generated_at")
     try:
-        gt = datetime.datetime.fromisoformat(gen)
-        if gt.tzinfo is None:
-            gt = gt.replace(tzinfo=datetime.timezone.utc)
-        age_h = (datetime.datetime.now(datetime.timezone.utc) - gt).total_seconds() / 3600.0
+        gt = _parse_ts(gen)
+        age_h = (now - gt).total_seconds() / 3600.0
         info["age_hours"] = round(age_h, 2)
         info["stale"] = age_h > max_age_h
     except (TypeError, ValueError):
@@ -380,15 +386,35 @@ def _load_fillsim_adverse(path, h_primary, max_age_h):
         info["stale"] = True
         info["stale_reason"] = "bad_l1_rows"
     try:
-        data_age = data.get("l1_max_age_hours")
-        if data_age is not None and float(data_age) > max_age_h:
+        l1_max_ts = data.get("l1_max_ts")
+        if not l1_max_ts:
             info["data_stale"] = True
             info["stale"] = True
-            info["stale_reason"] = "stale_l1_data"
+            info["stale_reason"] = "missing_l1_max_ts"
+        else:
+            l1_ts = _parse_ts(l1_max_ts)
+            data_age = (now - l1_ts).total_seconds() / 3600.0
+            info["data_l1_wall_age_hours"] = round(data_age, 3)
+            if data_age > max_age_h:
+                info["data_stale"] = True
+                info["stale"] = True
+                info["stale_reason"] = "stale_l1_data"
     except (TypeError, ValueError):
         info["data_stale"] = True
         info["stale"] = True
-        info["stale_reason"] = "bad_l1_age"
+        info["stale_reason"] = "bad_l1_max_ts"
+    try:
+        if info["data_l1_wall_age_hours"] is None and data.get("l1_max_age_hours") is not None:
+            data_age = float(data.get("l1_max_age_hours"))
+            if data_age > max_age_h:
+                info["data_stale"] = True
+                info["stale"] = True
+                info["stale_reason"] = "stale_l1_data"
+    except (TypeError, ValueError):
+        if info["stale_reason"] is None:
+            info["data_stale"] = True
+            info["stale"] = True
+            info["stale_reason"] = "bad_l1_age"
     if info["stale"] and info["stale_reason"] is None:
         info["stale_reason"] = "stale_generated_at"
     # fill-only 軌（QC/PA：fill_only，非 pooled，非 adverse_through）的 adverse_sel@h。

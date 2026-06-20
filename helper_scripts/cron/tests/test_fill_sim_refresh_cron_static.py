@@ -45,6 +45,8 @@ def test_bounded_freshness_defaults_and_force_override() -> None:
     assert "OPENCLAW_FILL_SIM_HISTORY_SCORECARD" in src
     assert "OPENCLAW_FILL_SIM_FORCE" in src
     assert "skipped_fresh" in src
+    assert "l1_wall_age_hours" in src
+    assert 'info.get("data_stale") is False' in src
 
 
 def test_runs_fill_sim_module_with_read_only_pg() -> None:
@@ -72,6 +74,7 @@ def test_candidate_report_must_validate_before_replace() -> None:
     assert "validate_candidate_report" in src
     assert "empty_l1" in src
     assert "stale_l1_data" in src
+    assert "missing_l1_max_ts" in src
     assert 'cp -f "$CANDIDATE_REPORT" "$HISTORY_REPORT"' in src
     assert "program_code.research.microstructure.fill_sim_history" in src
     assert 'mv -f "$CANDIDATE_REPORT" "$REPORT"' in src
@@ -118,6 +121,9 @@ def test_mm_verdict_rejects_empty_or_stale_l1_fillsim_data() -> None:
     src = MM_VERDICT.read_text(encoding="utf-8")
     assert "data_l1_rows_post_filter" in src
     assert "data_l1_max_age_hours" in src
+    assert "data_l1_wall_age_hours" in src
+    assert "missing_l1_max_ts" in src
+    assert "bad_l1_max_ts" in src
     assert "empty_l1" in src
     assert "stale_l1_data" in src
 
