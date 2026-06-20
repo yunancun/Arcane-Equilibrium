@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM FillSim PIT Conditional Feature Scorecard
+
+- Added placement-time `conditional_feature_scorecard` to fill_sim and passthrough under `recorder_mm_verdict_cron.sh` status.
+- Linux isolated read-only smoke `/tmp/openclaw/research/fillsim/fillsim_conditional_feature_smoke_20260620T092837Z.json` sha256 `3da43e8d295322727edcfe121716cd3e5520a1337fcea625e572696806208096`: 15m fresh L1, 139,675 L1 rows, 76,124 trades, 34 symbols.
+- Result: `NO_CONDITIONAL_FEATURE_POSITIVE_CELL`; 30 PIT cells evaluated; best `quoted_half_spread_p75 AND side_book_imb_p75`, n_fill_only=116, net -3.184bp after 4bp maker RT fee.
+- Isolated MM verdict wrapper smoke confirmed passthrough and live-markout cost wall still below gate: ARBUSDT best net -0.2197bp with `best_n_maker_fills=1`.
+- Read: simple PIT spread/imbalance/OFI filters do not yet clear the maker cost wall. Next work needs wider-spread/regime/fee-rebate evidence or a materially new signal, not MM promotion.
+- Boundary: source/test/docs + selective sync + isolated read-only PG/artifact/status runs only; no production fill_sim replacement, rebuild/restart, DB write, Bybit private call, or auth/risk/order/trading mutation.
+
 ## 2026-06-20 MM FillSim Skip-Quantile Sweep
 
 - Ran isolated Linux read-only fill-sim scorecard sweep over `skip_quantile=0.00/0.10/0.20/0.30`; artifacts only under `/tmp/openclaw/research/fillsim/fillsim_scorecard_q*.json`.
