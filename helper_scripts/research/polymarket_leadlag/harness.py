@@ -73,6 +73,7 @@ DEFAULT_MIN_POINTS = 20
 DEFAULT_MAX_ALIGN_LAG_MINUTES = 10
 DEFAULT_MIN_ABS_IC = 0.15
 DEFAULT_MIN_ABS_T = 2.0
+DEFAULT_MAX_BH_Q = 0.10
 
 _PRICE_TARGET_RE = re.compile(
     r"(\bprice\b.*\bhit\b|\bhit\b.*\$|\breach\b.*\$|above\s+\$|below\s+\$|"
@@ -554,6 +555,62 @@ def _t_stat_from_r(r: Optional[float], n: int) -> Optional[float]:
     return r * math.sqrt((n - 2) / denom)
 
 
+def _count_nonoverlap_timestamps(timestamps_ms: Iterable[int], horizon_minutes: int) -> int:
+    ordered = sorted({int(ts) for ts in timestamps_ms})
+    if not ordered:
+        return 0
+    min_gap_ms = int(max(1, horizon_minutes) * 60 * 1000)
+    count = 0
+    last: Optional[int] = None
+    for ts_ms in ordered:
+        if last is None or ts_ms - last >= min_gap_ms:
+            count += 1
+            last = ts_ms
+    return count
+
+
+def _normal_two_sided_p_from_t(t_stat: Optional[float]) -> Optional[float]:
+    if t_stat is None or not math.isfinite(t_stat):
+        return None
+    return math.erfc(abs(float(t_stat)) / math.sqrt(2.0))
+
+
+def _bh_q_values(p_values: list[Optional[float]]) -> list[Optional[float]]:
+    indexed = [
+        (idx, float(p))
+        for idx, p in enumerate(p_values)
+        if p is not None and math.isfinite(float(p)) and 0.0 <= float(p) <= 1.0
+    ]
+    m = len(indexed)
+    out: list[Optional[float]] = [None for _ in p_values]
+    if m == 0:
+        return out
+    prev = 1.0
+    for rank_from_end, (idx, p) in enumerate(
+        sorted(indexed, key=lambda x: x[1], reverse=True),
+        start=1,
+    ):
+        rank = m - rank_from_end + 1
+        q = min(prev, p * m / rank)
+        prev = q
+        out[idx] = min(1.0, max(0.0, q))
+    return out
+
+
+def annotate_multiple_testing(ic_results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    p_values = [_normal_two_sided_p_from_t(row.get("t_stat")) for row in ic_results]
+    q_values = _bh_q_values(p_values)
+    out: list[dict[str, Any]] = []
+    for row, p_val, q_val in zip(ic_results, p_values, q_values):
+        out.append({
+            **row,
+            "p_value_approx_normal": p_val,
+            "bh_q_value_approx": q_val,
+            "multiple_testing_method": "benjamini_hochberg_over_report_cells_normal_approx",
+        })
+    return out
+
+
 def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     grouped: dict[tuple[str, str, int], list[dict[str, Any]]] = defaultdict(list)
     for row in joined:
@@ -564,20 +621,26 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         xs = [float(r["mean_delta_prob_yes"]) for r in rows]
         ys = [float(r["forward_return_bps"]) for r in rows]
         r = _pearson(xs, ys)
+        timestamps = [int(r["snapshot_ts_ms"]) for r in rows]
+        n_distinct = len(set(timestamps))
+        n_nonoverlap = _count_nonoverlap_timestamps(timestamps, horizon)
         out.append({
             "bucket": bucket,
             "symbol": symbol,
             "horizon_minutes": horizon,
             "n_points": len(rows),
-            "n_distinct_timestamps": len({r["snapshot_ts_ms"] for r in rows}),
+            "n_distinct_timestamps": n_distinct,
+            "n_nonoverlap_timestamps": n_nonoverlap,
+            "overlap_adjusted_sample_floor": min(len(rows), n_nonoverlap),
+            "overlap_warning": n_nonoverlap < n_distinct,
             "ic_pearson": r,
             "t_stat": _t_stat_from_r(r, len(rows)),
             "mean_delta_prob_yes": _mean(xs),
             "mean_forward_return_bps": _mean(ys),
-            "first_snapshot_ts_utc": _ms_to_iso(min(int(r["snapshot_ts_ms"]) for r in rows)),
-            "last_snapshot_ts_utc": _ms_to_iso(max(int(r["snapshot_ts_ms"]) for r in rows)),
+            "first_snapshot_ts_utc": _ms_to_iso(min(timestamps)),
+            "last_snapshot_ts_utc": _ms_to_iso(max(timestamps)),
         })
-    return out
+    return annotate_multiple_testing(out)
 
 
 def build_report(
@@ -593,6 +656,7 @@ def build_report(
     max_align_lag_minutes: int,
     min_abs_ic: float,
     min_abs_t: float,
+    max_bh_q: float,
     price_source: str,
 ) -> dict[str, Any]:
     allowed_symbols = set(symbols)
@@ -614,12 +678,18 @@ def build_report(
     eligible = [
         r for r in ic_results
         if r["n_points"] >= min_points
+        and r.get("overlap_adjusted_sample_floor", 0) >= min_points
         and r["ic_pearson"] is not None
         and r["t_stat"] is not None
     ]
-    candidates = [
+    preliminary_candidates = [
         r for r in eligible
         if abs(float(r["ic_pearson"])) >= min_abs_ic and abs(float(r["t_stat"])) >= min_abs_t
+    ]
+    candidates = [
+        r for r in preliminary_candidates
+        if r.get("bh_q_value_approx") is not None
+        and float(r["bh_q_value_approx"]) <= max_bh_q
     ]
 
     if not snapshot_rows:
@@ -630,8 +700,8 @@ def build_report(
         reason = "no price rows available for forward returns"
     elif not eligible:
         status = STATUS_INSUFFICIENT_SAMPLE
-        best_n = max((int(r["n_points"]) for r in ic_results), default=0)
-        reason = f"max joined IC points {best_n} below min_points {min_points}"
+        best_n = max((int(r.get("overlap_adjusted_sample_floor", 0)) for r in ic_results), default=0)
+        reason = f"max overlap-adjusted IC points {best_n} below min_points {min_points}"
     elif candidates:
         status = STATUS_IC_CANDIDATE_REVIEW_REQUIRED
         reason = "one or more bucket/symbol/horizon IC cells pass preliminary thresholds"
@@ -655,7 +725,9 @@ def build_report(
             "min_points": min_points,
             "min_abs_ic": min_abs_ic,
             "min_abs_t": min_abs_t,
+            "max_bh_q": max_bh_q,
             "candidate_count": len(candidates),
+            "preliminary_raw_candidate_count": len(preliminary_candidates),
             "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
         },
         "counts": {
@@ -672,6 +744,11 @@ def build_report(
             "joined_counts": dict(joined_counts),
             "label_readiness": label_readiness,
             "delta_meta": delta_meta,
+            "max_ic_points": max((int(r["n_points"]) for r in ic_results), default=0),
+            "max_overlap_adjusted_ic_points": max(
+                (int(r.get("overlap_adjusted_sample_floor", 0)) for r in ic_results),
+                default=0,
+            ),
         },
         "ic_results": ic_results,
         "candidates": candidates,
@@ -681,6 +758,7 @@ def build_report(
             "target = Bybit close return after snapshot time; first kline at/after timestamps only",
             "price_target/event_reg bucket split is research-side and does not filter collector artifacts",
             "insufficient sample fails closed and is not alpha evidence",
+            "candidate gate requires overlap-adjusted sample floor and BH q-value control",
         ],
     }
 
@@ -754,6 +832,8 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                    type=int, dest="max_align_lag_minutes")
     p.add_argument("--min-abs-ic", default=DEFAULT_MIN_ABS_IC, type=float, dest="min_abs_ic")
     p.add_argument("--min-abs-t", default=DEFAULT_MIN_ABS_T, type=float, dest="min_abs_t")
+    p.add_argument("--max-bh-q", default=DEFAULT_MAX_BH_Q, type=float, dest="max_bh_q",
+                   help="Benjamini-Hochberg q-value ceiling for candidate review")
     p.add_argument("--price-jsonl", default=None, dest="price_jsonl",
                    help="Optional fixture price JSONL. If absent, read market.klines from PG readonly.")
     p.add_argument("--dsn", default=None, dest="dsn", help="Optional PG DSN override")
@@ -806,6 +886,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         max_align_lag_minutes=args.max_align_lag_minutes,
         min_abs_ic=args.min_abs_ic,
         min_abs_t=args.min_abs_t,
+        max_bh_q=args.max_bh_q,
         price_source=price_source,
     )
     out_path = Path(args.out) if args.out else default_out_path()

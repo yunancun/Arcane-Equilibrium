@@ -366,6 +366,8 @@ def test_polymarket_leadlag_arm_captures_insufficient_sample(tmp_path):
             "delta_rows": 400,
             "joined_rows": 120,
             "price_rows": 320,
+            "max_ic_points": 12,
+            "max_overlap_adjusted_ic_points": 0,
             "label_readiness": {
                 "feature_horizon_pairs": 18,
                 "joinable_pairs": 0,
@@ -403,6 +405,8 @@ def test_polymarket_leadlag_arm_ready_only_for_candidate_review_with_sample(tmp_
             "status": "IC_CANDIDATE_REVIEW_REQUIRED",
             "reason": "one or more bucket/symbol/horizon IC cells pass preliminary thresholds",
             "candidate_count": 1,
+            "preliminary_raw_candidate_count": 2,
+            "max_bh_q": 0.10,
             "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
         },
         "counts": {
@@ -411,6 +415,8 @@ def test_polymarket_leadlag_arm_ready_only_for_candidate_review_with_sample(tmp_
             "delta_rows": 1200,
             "joined_rows": 105,
             "price_rows": 9000,
+            "max_ic_points": 35,
+            "max_overlap_adjusted_ic_points": 35,
         },
         "ic_results": [
             {
@@ -433,7 +439,11 @@ def test_polymarket_leadlag_arm_ready_only_for_candidate_review_with_sample(tmp_
     assert arm["gate_status"] == "READY"
     assert arm["artifacts_ready"] is True
     assert arm["sample_count"] == 35
+    assert arm["detail"]["max_ic_points"] == 35
+    assert arm["detail"]["max_overlap_adjusted_ic_points"] == 35
     assert arm["detail"]["candidate_count"] == 1
+    assert arm["detail"]["preliminary_raw_candidate_count"] == 2
+    assert arm["detail"]["max_bh_q"] == 0.10
     assert plan["arms"][0]["action"] == "READY_FOR_AEG_CHAIN"
     assert plan["arms"][0]["reason"] == "artifacts_ready_and_sample_gate_met"
 
@@ -457,6 +467,44 @@ def test_polymarket_leadlag_arm_blocks_stale_report(tmp_path):
     assert arm["detail"]["age_seconds"] > 6 * 60 * 60
     assert plan["arms"][0]["action"] == "BLOCK"
     assert plan["arms"][0]["reason"] == "source_not_healthy"
+
+
+def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_polymarket_leadlag_latest(data, {
+        "counts": {
+            "snapshot_rows": 26000,
+            "snapshot_distinct_timestamps": 36,
+            "delta_rows": 1200,
+            "joined_rows": 105,
+            "price_rows": 9000,
+            "max_ic_points": 35,
+            "max_overlap_adjusted_ic_points": 12,
+        },
+        "ic_results": [
+            {
+                "bucket": "event_reg",
+                "symbol": "BTCUSDT",
+                "horizon_minutes": 240,
+                "n_points": 35,
+                "overlap_adjusted_sample_floor": 12,
+                "ic_pearson": 0.22,
+                "t_stat": 2.1,
+            }
+        ],
+    })
+
+    arm = collect_polymarket_leadlag_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 12, 30, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan([arm], now_utc=dt.datetime(2026, 6, 20, 12, 30, tzinfo=dt.timezone.utc))
+
+    assert arm["sample_count"] == 12
+    assert arm["detail"]["max_ic_points"] == 35
+    assert arm["detail"]["max_overlap_adjusted_ic_points"] == 12
+    assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
+    assert plan["arms"][0]["reason"] == "sample_count_below_gate"
 
 
 def test_runtime_runner_marks_flash_dip_no_touch_capture(tmp_path):
