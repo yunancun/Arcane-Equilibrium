@@ -17,6 +17,8 @@ MODULE_NOTE
   - fill_sim.py：queue-position fill-simulation（CP-3 go/no-go 工具）。讀 l1_events 做
     事件驅動掛單成交模擬,量 fill-conditional adverse selection（beta-residual）+ naive vs
     informed-skip NET 對照。誠實單窗=偵察讀數非裁決。
+  - fill_sim_history.py：多份 fill_sim JSON 的 report-only 跨窗口 reducer。用於檢查
+    current-fee / lower-fee / walk-forward holdout 訊號是否跨窗口重複；0 DB / 0 exchange。
 
 leak-free 保證（與 campaign8b/sharpen_ofi.py 逐位元對齊，不得偷偷弱化）：
   - 特徵窗 [t-w, t) 嚴格 < t；預測窗 [t, t+h) 嚴格在特徵之後（半開不重疊）。

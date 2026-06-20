@@ -17,6 +17,8 @@
 #   OPENCLAW_FILL_SIM_MAX_DATA_AGE_H=72    reject candidate if L1 data is older
 #   OPENCLAW_FILL_SIM_FORCE=1              run even if report is fresh
 #   OPENCLAW_FILL_SIM_REPORT=<path>        output JSON; CSV is written beside it
+#   OPENCLAW_FILL_SIM_HISTORY_DIR=<path>   archive valid reports for cross-window reducer
+#   OPENCLAW_FILL_SIM_HISTORY_SCORECARD=<path>
 set -euo pipefail
 
 BASE="${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}"
@@ -30,6 +32,9 @@ LOCK_ROOT="${DATA}/locks"
 LOCK_DIR="${LOCK_ROOT}/fill_sim_refresh_cron.lock.d"
 HEARTBEAT_DIR="${DATA}/cron_heartbeat"
 REPORT="${OPENCLAW_FILL_SIM_REPORT:-${DATA}/research/fillsim/fillsim_report.json}"
+HISTORY_DIR="${OPENCLAW_FILL_SIM_HISTORY_DIR:-${DATA}/research/fillsim/history}"
+HISTORY_SCORECARD="${OPENCLAW_FILL_SIM_HISTORY_SCORECARD:-${DATA}/research/fillsim/fillsim_history_scorecard.json}"
+HISTORY_SCORECARD_DIR="$(dirname "$HISTORY_SCORECARD")"
 
 FILL_SIM_HOURS="${OPENCLAW_FILL_SIM_HOURS:-2}"
 FILL_SIM_MAX_AGE_H="${OPENCLAW_FILL_SIM_MAX_AGE_H:-60}"
@@ -37,8 +42,11 @@ FILL_SIM_STALE_ALERT_H="${OPENCLAW_FILL_SIM_STALE_ALERT_H:-72}"
 FILL_SIM_MAX_DATA_AGE_H="${OPENCLAW_FILL_SIM_MAX_DATA_AGE_H:-72}"
 FILL_SIM_FORCE="${OPENCLAW_FILL_SIM_FORCE:-0}"
 STALE_LOCK_MIN="${OPENCLAW_FILL_SIM_STALE_LOCK_MIN:-180}"
+HISTORY_MIN_WINDOWS="${OPENCLAW_FILL_SIM_HISTORY_MIN_WINDOWS:-3}"
+HISTORY_MIN_DISTINCT_DATES="${OPENCLAW_FILL_SIM_HISTORY_MIN_DISTINCT_DATES:-3}"
+HISTORY_MIN_REPEAT_POSITIVE_WINDOWS="${OPENCLAW_FILL_SIM_HISTORY_MIN_REPEAT_POSITIVE_WINDOWS:-2}"
 
-mkdir -p "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR" "$ALERT_DIR"
+mkdir -p "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR" "$ALERT_DIR" "$HISTORY_DIR" "$HISTORY_SCORECARD_DIR"
 
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
@@ -128,6 +136,8 @@ emit_status() {
     STATUS_STALE_ALERT_H="$FILL_SIM_STALE_ALERT_H" \
     STATUS_MAX_DATA_AGE_H="$FILL_SIM_MAX_DATA_AGE_H" \
     STATUS_FORCE="$FILL_SIM_FORCE" \
+    STATUS_HISTORY_DIR="$HISTORY_DIR" \
+    STATUS_HISTORY_SCORECARD="$HISTORY_SCORECARD" \
     "$PYBIN" - <<'PY' >> "$STATUS_LOG"
 import datetime
 import json
@@ -151,12 +161,33 @@ row = {
     "stale_alert_h": float(os.environ["STATUS_STALE_ALERT_H"]),
     "max_data_age_h": float(os.environ["STATUS_MAX_DATA_AGE_H"]),
     "force": os.environ["STATUS_FORCE"],
+    "history_dir": os.environ["STATUS_HISTORY_DIR"],
+    "history_scorecard": os.environ["STATUS_HISTORY_SCORECARD"],
     "before": _loads("STATUS_BEFORE"),
     "after": _loads("STATUS_AFTER"),
     "candidate": _loads("STATUS_CANDIDATE"),
 }
 print(json.dumps(row, separators=(",", ":"), sort_keys=True))
 PY
+}
+
+refresh_history_scorecard() {
+    local rc=0
+    (
+        cd "$BASE"
+        export PYTHONPATH="$BASE${PYTHONPATH:+:$PYTHONPATH}"
+        "$PYBIN" -m program_code.research.microstructure.fill_sim_history \
+            --glob "${HISTORY_DIR}/*.json" \
+            --out "$HISTORY_SCORECARD" \
+            --min-windows "$HISTORY_MIN_WINDOWS" \
+            --min-distinct-dates "$HISTORY_MIN_DISTINCT_DATES" \
+            --min-repeat-positive-windows "$HISTORY_MIN_REPEAT_POSITIVE_WINDOWS"
+    ) >> "$LOG" 2>&1 || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        echo "[$(ts)] WARN: fill_sim history scorecard refresh failed rc=${rc}" >> "$LOG"
+    else
+        echo "[$(ts)] history scorecard refreshed: ${HISTORY_SCORECARD}" >> "$LOG"
+    fi
 }
 
 append_alert() {
@@ -367,6 +398,16 @@ if [[ "$rc" -ne 0 ]]; then
         mv -f "$CANDIDATE_CSV" "$INVALID_CSV"
     fi
 elif [[ "$CANDIDATE_VALID" == "valid" ]]; then
+    HISTORY_STAMP="$(date -u +%Y%m%dT%H%M%SZ)"
+    HISTORY_REPORT="${HISTORY_DIR}/fillsim_report_${HISTORY_STAMP}_$$.json"
+    HISTORY_CSV="${HISTORY_REPORT%.json}_per_symbol.csv"
+    cp -f "$CANDIDATE_REPORT" "$HISTORY_REPORT" || \
+        echo "[$(ts)] WARN: failed to archive fill_sim history report ${HISTORY_REPORT}" >> "$LOG"
+    if [[ -f "$CANDIDATE_CSV" ]]; then
+        cp -f "$CANDIDATE_CSV" "$HISTORY_CSV" || \
+            echo "[$(ts)] WARN: failed to archive fill_sim history csv ${HISTORY_CSV}" >> "$LOG"
+    fi
+    refresh_history_scorecard
     mv -f "$CANDIDATE_REPORT" "$REPORT"
     if [[ -f "$CANDIDATE_CSV" ]]; then
         mv -f "$CANDIDATE_CSV" "$REPORT_CSV"

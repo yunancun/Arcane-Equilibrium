@@ -25,6 +25,14 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM FillSim History Scorecard
+
+- Added report-only `fill_sim_history.py` to aggregate multiple fill_sim JSON artifacts into longer-regime evidence: valid windows/dates, current-fee sample-gated positive repeats, walk-forward holdout confirmations, and best break-even fee.
+- `fill_sim_refresh_cron.sh` now archives every valid candidate under `<DATA>/research/fillsim/history/` and refreshes `fillsim_history_scorecard.json`; `recorder_mm_verdict_cron.sh` preserves that under `fillsim.history_scorecard`.
+- Verification: Mac focused tests 31 passed plus py_compile/bash syntax/diff-check/CLI smoke; Linux validation used `/tmp/openclaw_v255_validate` because canonical trade-core checkout was behind/dirty, and passed the same 31 focused tests plus py_compile/bash syntax/CLI smoke.
+- Read: this does not create a promoted edge. It converts the v254 "need longer regime coverage" conclusion into durable evidence accumulation.
+- Boundary: source/test/docs + Linux `/tmp` validation only; no canonical Linux checkout mutation, production report replacement, rebuild/restart, DB write, Bybit call, or trading/auth/risk mutation.
+
 ## 2026-06-20 MM FillSim Maker Fee Sensitivity
 
 - Added `maker_fee_sensitivity_scorecard` to fill_sim and passthrough under `recorder_mm_verdict_cron.sh` status.
