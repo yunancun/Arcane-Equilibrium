@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM FillSim Maker Fee Sensitivity
+
+- Added `maker_fee_sensitivity_scorecard` to fill_sim and passthrough under `recorder_mm_verdict_cron.sh` status.
+- Linux isolated read-only smoke `/tmp/openclaw/research/fillsim/fillsim_fee_sensitivity_smoke_20260620T093904Z.json` sha256 `33020cceaff59b47ae121dc270c7602c3a4540958eff497ac24975387ef9b5f2`: 15m fresh L1, 144,418 L1 rows, 88,555 trades, 34 symbols.
+- Current 2.0bp/side maker fee still has `positive_sample_gate_count=0`; best current positive is BTWUSDT but n=18 below gate.
+- At 1.0bp/side one sample-gated cell turns barely positive: `quoted_half_spread_p75 AND side_book_imb_p75`, n_fill_only=116, edge_before_fees=2.057bp, break-even maker fee=1.028bp/side, net@1bp=+0.057bp.
+- Read: maker profitability is fee-sensitive but not promoted. Actual path needs fee <=~1.03bp/side plus cross-regime CP-3 evidence, or a stronger signal.
+- Boundary: source/test/docs + selective sync + isolated read-only PG/artifact/status runs only; no production fill_sim replacement, rebuild/restart, DB write, Bybit private call, or auth/risk/order/trading mutation.
+
 ## 2026-06-20 MM FillSim PIT Conditional Feature Scorecard
 
 - Added placement-time `conditional_feature_scorecard` to fill_sim and passthrough under `recorder_mm_verdict_cron.sh` status.

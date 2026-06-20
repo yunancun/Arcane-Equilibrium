@@ -62,6 +62,9 @@ DEFAULT_CADENCE_S = core.GRID_STEP_S
 MIN_FILLS_FOR_SIGNIF = 30
 # informed-skip 信號的 worst-tail quantile（預設 skip 最差 10% 信號的掛單）。
 DEFAULT_SKIP_QUANTILE = 0.10
+# maker fee sensitivity grid（per side, bps）。0/negative scenarios model zero-fee / rebate paths
+# for research triage only; they do not change current fee accounting.
+DEFAULT_MAKER_FEE_SENSITIVITY_BPS_PER_SIDE = (2.0, 1.0, 0.5, 0.0, -0.5)
 # NOTE-A 隊列劑量反應（queue dose-response）：你在 touch 隊列中身前的量 = frac × Q0。
 #   front = 0.0×Q0（隊首,最樂觀,假設你最先 join）
 #   mid   = 0.5×Q0（隊中。L1-only 無多檔深度,無法算真「5bp-of-depth」累積量;
@@ -763,6 +766,7 @@ def fill_sim_edge_scorecard(report: dict, *, primary_horizon_s: int = 15) -> dic
         "positive_fill_only_cells": positive[:10],
         "positive_fill_only_cells_with_sample_gate": positive_sample_gate[:10],
         "nearest_to_breakeven_fill_only_cells": ranked[:10],
+        "all_fill_only_cells": ranked,
         "note": (
             "Research scorecard only. Positive cells need cross-regime CP-3 evidence, "
             "portfolio inventory-risk review, and formal QC/MIT/AI-E review before any strategy work."
@@ -975,8 +979,144 @@ def fill_sim_conditional_feature_scorecard(trials: pd.DataFrame, adverse_by_fill
         "positive_cells": positive[:10],
         "positive_cells_with_sample_gate": positive_sample_gate[:10],
         "nearest_to_breakeven_cells": ranked[:10],
+        "all_cells": ranked,
     })
     return base
+
+
+def _maker_fee_sensitivity_cell(cell: dict, source: str) -> dict | None:
+    edge = cell.get("edge_before_fees_bps")
+    if edge is None:
+        half_spread = cell.get("half_spread_bps")
+        adverse = cell.get("adverse_sel_bps")
+        if half_spread is None or adverse is None:
+            return None
+        edge = float(half_spread) - float(adverse)
+    try:
+        edge = float(edge)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(edge):
+        return None
+    n = cell.get("n_fill_only", cell.get("n", 0))
+    try:
+        n = int(n or 0)
+    except (TypeError, ValueError):
+        n = 0
+    break_even_fee = edge / 2.0
+    out = {
+        "source": source,
+        "scope": cell.get("scope"),
+        "symbol": cell.get("symbol"),
+        "queue_position": cell.get("queue_position"),
+        "policy": cell.get("policy"),
+        "track": cell.get("track"),
+        "name": cell.get("name"),
+        "condition": cell.get("condition"),
+        "feature": cell.get("feature"),
+        "n_fill_only": n,
+        "edge_before_fees_bps": _r(edge, 3),
+        "break_even_maker_fee_bps_per_side": _r(break_even_fee, 3),
+        "fee_reduction_to_breakeven_bps_per_side": _r(MAKER_FEE_BPS - break_even_fee, 3),
+        "signif_suppressed": bool(cell.get("signif_suppressed", n < MIN_FILLS_FOR_SIGNIF)),
+    }
+    return out
+
+
+def fill_sim_maker_fee_sensitivity_scorecard(
+    report: dict,
+    *,
+    primary_horizon_s: int = 15,
+    fee_scenarios_bps_per_side=None,
+) -> dict:
+    """Evaluate already-measured maker cells under alternative maker-fee assumptions.
+
+    This is an operator/business-model lens, not a backtest. It answers how far
+    fees/rebates must move before an observed fill-only cell clears zero.
+    """
+    if fee_scenarios_bps_per_side is None:
+        fee_scenarios_bps_per_side = DEFAULT_MAKER_FEE_SENSITIVITY_BPS_PER_SIDE
+    fee_scenarios = [float(x) for x in fee_scenarios_bps_per_side]
+
+    cells = []
+    edge_scorecard = report.get("edge_scorecard") or {}
+    for cell in edge_scorecard.get("all_fill_only_cells") or []:
+        norm = _maker_fee_sensitivity_cell(cell, "edge_scorecard")
+        if norm is not None:
+            cells.append(norm)
+    cond_scorecard = report.get("conditional_feature_scorecard") or {}
+    for cell in cond_scorecard.get("all_cells") or []:
+        norm = _maker_fee_sensitivity_cell(cell, "conditional_feature_scorecard")
+        if norm is not None:
+            cells.append(norm)
+
+    sample_gated_cells = [
+        c for c in cells
+        if c["n_fill_only"] >= MIN_FILLS_FOR_SIGNIF and not c["signif_suppressed"]
+    ]
+    best_break_even = (
+        max(sample_gated_cells, key=lambda c: c["break_even_maker_fee_bps_per_side"])
+        if sample_gated_cells else None
+    )
+
+    scenarios = []
+    any_current_gated = False
+    any_lower_fee_gated = False
+    any_positive = False
+    for fee in fee_scenarios:
+        rows = []
+        for c in cells:
+            net = float(c["edge_before_fees_bps"]) - 2.0 * fee
+            row = dict(c)
+            row["maker_fee_bps_per_side"] = _r(fee, 3)
+            row["fee_round_trip_bps"] = _r(2.0 * fee, 3)
+            row["net_bps_at_fee"] = _r(net, 3)
+            rows.append(row)
+        ranked = sorted(rows, key=lambda c: c["net_bps_at_fee"], reverse=True)
+        positive = [c for c in ranked if c["net_bps_at_fee"] is not None and c["net_bps_at_fee"] > 0]
+        gated = [
+            c for c in positive
+            if c["n_fill_only"] >= MIN_FILLS_FOR_SIGNIF and not c["signif_suppressed"]
+        ]
+        any_positive = any_positive or bool(positive)
+        if gated and abs(fee - MAKER_FEE_BPS) < 1e-9:
+            any_current_gated = True
+        elif gated:
+            any_lower_fee_gated = True
+        scenarios.append({
+            "maker_fee_bps_per_side": _r(fee, 3),
+            "fee_round_trip_bps": _r(2.0 * fee, 3),
+            "best_cell": ranked[0] if ranked else None,
+            "positive_cell_count": len(positive),
+            "positive_sample_gate_count": len(gated),
+            "positive_sample_gate_cells": gated[:10],
+            "nearest_to_positive_cells": ranked[:10],
+        })
+
+    if any_current_gated:
+        status = "CURRENT_FEE_SAMPLE_GATED_POSITIVE"
+    elif any_lower_fee_gated:
+        status = "LOWER_FEE_SAMPLE_GATED_POSITIVE"
+    elif any_positive:
+        status = "FEE_SCENARIO_POSITIVE_BELOW_SAMPLE_GATE"
+    else:
+        status = "NO_FEE_SCENARIO_POSITIVE_CELL"
+
+    return {
+        "status": status,
+        "primary_horizon_s": primary_horizon_s,
+        "current_maker_fee_bps_per_side": MAKER_FEE_BPS,
+        "current_fee_round_trip_bps": MAKER_FEE_ROUND_TRIP_BPS,
+        "min_fills_for_signif": MIN_FILLS_FOR_SIGNIF,
+        "cells_evaluated": len(cells),
+        "fee_scenarios_bps_per_side": [_r(x, 3) for x in fee_scenarios],
+        "best_sample_gated_break_even_cell": best_break_even,
+        "scenarios": scenarios,
+        "note": (
+            "Research business-model lens only. Lower-fee/rebate positives require actual fee-tier "
+            "eligibility plus cross-regime CP-3 evidence before any strategy work."
+        ),
+    }
 
 
 def run(l1, tr, ob, syms, clean_since, horizons, cadence_s, skip_quantile, since_ts, until_ts):
@@ -1170,6 +1310,10 @@ def run(l1, tr, ob, syms, clean_since, horizons, cadence_s, skip_quantile, since
         span_hours,
         primary_horizon_s=primary_horizon,
     )
+    report["maker_fee_sensitivity_scorecard"] = fill_sim_maker_fee_sensitivity_scorecard(
+        report,
+        primary_horizon_s=primary_horizon,
+    )
 
     return report
 
@@ -1279,7 +1423,7 @@ def main(argv=None):
     # 人類可讀摘要（含 queue dose-response）。
     summary_keys = ("window", "params", "data", "caveat", "obtop_crosscheck",
                     "primary_queue_position", "edge_scorecard",
-                    "conditional_feature_scorecard", "pooled",
+                    "conditional_feature_scorecard", "maker_fee_sensitivity_scorecard", "pooled",
                     "queue_dose_response")
     print(json.dumps({k: report[k] for k in summary_keys if k in report},
                      indent=2, ensure_ascii=False))

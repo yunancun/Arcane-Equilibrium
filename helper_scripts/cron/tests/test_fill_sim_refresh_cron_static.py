@@ -128,4 +128,5 @@ def test_mm_verdict_surfaces_cost_wall_fields() -> None:
     assert "cost_wall_summary" in src
     assert "edge_scorecard" in src
     assert "conditional_feature_scorecard" in src
+    assert "maker_fee_sensitivity_scorecard" in src
     assert "best_n_maker_fills" in src

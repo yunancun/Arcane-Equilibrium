@@ -346,6 +346,7 @@ def _load_fillsim_adverse(path, h_primary, max_age_h):
     }
     info["edge_scorecard"] = rep.get("edge_scorecard")
     info["conditional_feature_scorecard"] = rep.get("conditional_feature_scorecard")
+    info["maker_fee_sensitivity_scorecard"] = rep.get("maker_fee_sensitivity_scorecard")
     # 5/30s sensitivity（誠實透明，不入 net 計算）。
     for hs in (5, 30):
         v = fo.get(f"adverse_sel_bps@{hs}")
