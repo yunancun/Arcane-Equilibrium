@@ -25,6 +25,17 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Partial IC Control
+
+- Upgraded `polymarket_leadlag` to report schema/runner v0.12.
+- Diagnosis: v0.11 could flag odds deltas that correlate more with past return than forward return; v0.12 now measures remaining forward information after residualizing forward return against trailing return.
+- IC rows now expose `partial_ic_controlling_trailing_return`, `partial_ic_t_stat`, `partial_ic_abs_margin_vs_raw`, `partial_ic_retained_abs_ratio`, `trailing_forward_return_ic_pearson`, and `price_feedback_partial_collapse_warning`; status/runtime detail expose `price_feedback_partial_collapse_count`.
+- Linux v0.12 wrapper smoke latest sha256 `ab2620e8edc223583b63bcbc00de94c979fcfb45288dc4513845dd9331fd5322`: `snapshot_rows=14727`, `delta_rows=16453`, `feature_points=236`, `joined_rows=414`, `max_overlap_adjusted_ic_points=15`, `candidate_count=0`, still `INSUFFICIENT_SAMPLE`, ETA `2026-06-20T19:52:01.632Z`.
+- Partial-control summary: `cells_with_control=46`, `partial_control_cells=29`, `raw_to_partial_collapse_count=4`, `max_abs_partial_ic_controlling_trailing_return=0.726`.
+- Example: `price_target|XRPUSDT|15m` raw IC≈0.306 collapses to partial IC≈0.095 after trailing-return control, so raw Polymarket IC is not enough for candidate review.
+- Alpha discovery latest sha256 `1a78a867e9912fe7a70ec51032f95e1cbd0f3d37dc288e0c98e82d838ee322e0` reports `polymarket_leadlag_ic.sample_count=15`, `price_feedback_partial_collapse_count=4`, action `RUN_READ_ONLY_CAPTURE`, ready/probe=0.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Price-Feedback IC Control
 
 - Upgraded `polymarket_leadlag` to report schema/runner v0.11.

@@ -87,6 +87,7 @@ DEFAULT_MAX_HAC_LAG = 12
 DEFAULT_SCHEDULE_JITTER_TOLERANCE_MS = 5_000
 DEFAULT_PRICE_FEEDBACK_MIN_POINTS = 5
 DEFAULT_PRICE_FEEDBACK_MIN_ABS_IC = 0.15
+DEFAULT_PRICE_FEEDBACK_PARTIAL_RETAINED_RATIO = 0.5
 
 _PRICE_TARGET_RE = re.compile(
     r"(\bprice\b.*\bhit\b|\bhit\b.*\$|\breach\b.*\$|above\s+\$|below\s+\$|"
@@ -689,6 +690,22 @@ def _t_stat_from_r(r: Optional[float], n: int) -> Optional[float]:
     return r * math.sqrt((n - 2) / denom)
 
 
+def _linear_residuals(ys: list[float], zs: list[float]) -> Optional[list[float]]:
+    if len(ys) != len(zs) or len(ys) < 3:
+        return None
+    mz = sum(zs) / len(zs)
+    my = sum(ys) / len(ys)
+    var_z = sum((z - mz) ** 2 for z in zs)
+    if var_z <= 0.0:
+        return None
+    beta = sum((z - mz) * (y - my) for y, z in zip(ys, zs)) / var_z
+    alpha = my - beta * mz
+    residuals = [y - (alpha + beta * z) for y, z in zip(ys, zs)]
+    if sum((r - sum(residuals) / len(residuals)) ** 2 for r in residuals) <= 0.0:
+        return None
+    return residuals
+
+
 def _horizon_ms(horizon_minutes: int) -> int:
     return int(max(1, horizon_minutes) * 60 * 1000)
 
@@ -846,11 +863,31 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             if row.get("trailing_return_bps") is not None
         ]
         control_xs = [float(row["mean_delta_prob_yes"]) for row in control_rows]
+        control_forward_ys = [float(row["forward_return_bps"]) for row in control_rows]
         control_ys = [float(row["trailing_return_bps"]) for row in control_rows]
         past_ic = _pearson(control_xs, control_ys)
+        trailing_forward_return_ic = _pearson(control_ys, control_forward_ys)
+        forward_residuals = _linear_residuals(control_forward_ys, control_ys)
+        partial_ic = (
+            _pearson(control_xs, forward_residuals)
+            if forward_residuals is not None
+            else None
+        )
         lead_lag_abs_ic_margin = (
             abs(float(forward_ic)) - abs(float(past_ic))
             if forward_ic is not None and past_ic is not None
+            else None
+        )
+        partial_ic_abs_margin_vs_raw = (
+            abs(float(partial_ic)) - abs(float(forward_ic))
+            if forward_ic is not None and partial_ic is not None
+            else None
+        )
+        partial_retained_ratio = (
+            abs(float(partial_ic)) / abs(float(forward_ic))
+            if forward_ic is not None
+            and partial_ic is not None
+            and abs(float(forward_ic)) > 1e-12
             else None
         )
         price_feedback_warning = (
@@ -859,6 +896,18 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             and len(control_rows) >= DEFAULT_PRICE_FEEDBACK_MIN_POINTS
             and abs(float(past_ic)) >= DEFAULT_PRICE_FEEDBACK_MIN_ABS_IC
             and abs(float(past_ic)) >= abs(float(forward_ic))
+        )
+        price_feedback_partial_collapse_warning = (
+            forward_ic is not None
+            and len(control_rows) >= DEFAULT_PRICE_FEEDBACK_MIN_POINTS
+            and abs(float(forward_ic)) >= DEFAULT_PRICE_FEEDBACK_MIN_ABS_IC
+            and (
+                partial_ic is None
+                or abs(float(partial_ic)) < DEFAULT_PRICE_FEEDBACK_MIN_ABS_IC
+                or abs(float(partial_ic)) < (
+                    abs(float(forward_ic)) * DEFAULT_PRICE_FEEDBACK_PARTIAL_RETAINED_RATIO
+                )
+            )
         )
         timestamps = [int(r["snapshot_ts_ms"]) for r in rows]
         selected_nonoverlap = _selected_nonoverlap_timestamps(timestamps, horizon)
@@ -888,11 +937,24 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             "past_return_control_n_points": len(control_rows),
             "past_return_ic_pearson": past_ic,
             "past_return_t_stat": _t_stat_from_r(past_ic, len(control_rows)),
+            "trailing_forward_return_ic_pearson": trailing_forward_return_ic,
+            "partial_ic_controlling_trailing_return": partial_ic,
+            "partial_ic_t_stat": _t_stat_from_r(partial_ic, len(control_rows)),
+            "partial_ic_abs_margin_vs_raw": partial_ic_abs_margin_vs_raw,
+            "partial_ic_retained_abs_ratio": partial_retained_ratio,
             "lead_lag_abs_ic_margin": lead_lag_abs_ic_margin,
             "price_feedback_warning": price_feedback_warning,
             "price_feedback_warning_basis": (
                 "abs_past_return_ic_ge_abs_forward_ic"
                 if price_feedback_warning
+                else None
+            ),
+            "price_feedback_partial_collapse_warning": (
+                price_feedback_partial_collapse_warning
+            ),
+            "price_feedback_partial_collapse_basis": (
+                "partial_ic_collapses_after_trailing_return_control"
+                if price_feedback_partial_collapse_warning
                 else None
             ),
             "mean_delta_prob_yes": _mean(xs),
@@ -920,10 +982,22 @@ def _price_feedback_summary(
         if int(row.get("past_return_control_n_points") or 0) > 0
     ]
     warning_rows = [row for row in rows_with_control if row.get("price_feedback_warning")]
+    partial_control_rows = [
+        row for row in rows_with_control
+        if row.get("partial_ic_controlling_trailing_return") is not None
+    ]
+    partial_collapse_rows = [
+        row for row in rows_with_control
+        if row.get("price_feedback_partial_collapse_warning")
+    ]
     past_ic_values = [
         abs(float(row["past_return_ic_pearson"]))
         for row in rows_with_control
         if row.get("past_return_ic_pearson") is not None
+    ]
+    partial_ic_values = [
+        abs(float(row["partial_ic_controlling_trailing_return"]))
+        for row in partial_control_rows
     ]
 
     warning_cells = []
@@ -944,15 +1018,74 @@ def _price_feedback_summary(
             "warning_basis": row.get("price_feedback_warning_basis"),
         })
 
+    collapsed_cells = []
+    for row in sorted(
+        partial_collapse_rows,
+        key=lambda item: abs(float(item.get("ic_pearson") or 0.0)),
+        reverse=True,
+    )[:limit]:
+        collapsed_cells.append({
+            "bucket": row.get("bucket"),
+            "symbol": row.get("symbol"),
+            "horizon_minutes": row.get("horizon_minutes"),
+            "n_points": row.get("n_points"),
+            "past_return_control_n_points": row.get("past_return_control_n_points"),
+            "ic_pearson": row.get("ic_pearson"),
+            "past_return_ic_pearson": row.get("past_return_ic_pearson"),
+            "trailing_forward_return_ic_pearson": row.get(
+                "trailing_forward_return_ic_pearson"
+            ),
+            "partial_ic_controlling_trailing_return": row.get(
+                "partial_ic_controlling_trailing_return"
+            ),
+            "partial_ic_abs_margin_vs_raw": row.get("partial_ic_abs_margin_vs_raw"),
+            "partial_ic_retained_abs_ratio": row.get("partial_ic_retained_abs_ratio"),
+            "collapse_basis": row.get("price_feedback_partial_collapse_basis"),
+        })
+
+    top_partial_ic_cells = []
+    for row in sorted(
+        partial_control_rows,
+        key=lambda item: abs(float(item.get("partial_ic_controlling_trailing_return") or 0.0)),
+        reverse=True,
+    )[:limit]:
+        top_partial_ic_cells.append({
+            "bucket": row.get("bucket"),
+            "symbol": row.get("symbol"),
+            "horizon_minutes": row.get("horizon_minutes"),
+            "n_points": row.get("n_points"),
+            "past_return_control_n_points": row.get("past_return_control_n_points"),
+            "ic_pearson": row.get("ic_pearson"),
+            "partial_ic_controlling_trailing_return": row.get(
+                "partial_ic_controlling_trailing_return"
+            ),
+            "partial_ic_t_stat": row.get("partial_ic_t_stat"),
+            "partial_ic_abs_margin_vs_raw": row.get("partial_ic_abs_margin_vs_raw"),
+        })
+
     return {
         "cells_with_control": len(rows_with_control),
         "warning_count": len(warning_rows),
         "max_abs_past_return_ic": max(past_ic_values, default=None),
         "warning_cells": warning_cells,
         "control_definition": "corr(feature_delta_at_t, price_return_t_minus_h_to_t)",
+        "partial_control_definition": (
+            "corr(feature_delta_at_t, residual(forward_return_t_to_t_plus_h "
+            "~ price_return_t_minus_h_to_t))"
+        ),
+        "partial_control_cells": len(partial_control_rows),
+        "partial_ic_available_count": len(partial_control_rows),
+        "max_abs_partial_ic_controlling_trailing_return": max(
+            partial_ic_values,
+            default=None,
+        ),
+        "raw_to_partial_collapse_count": len(partial_collapse_rows),
+        "collapsed_cells": collapsed_cells,
+        "top_partial_ic_cells": top_partial_ic_cells,
         "warning_threshold": {
             "min_points": DEFAULT_PRICE_FEEDBACK_MIN_POINTS,
             "min_abs_past_return_ic": DEFAULT_PRICE_FEEDBACK_MIN_ABS_IC,
+            "partial_retained_ratio": DEFAULT_PRICE_FEEDBACK_PARTIAL_RETAINED_RATIO,
             "basis": "abs_past_return_ic_ge_abs_forward_ic",
         },
     }
@@ -1233,6 +1366,9 @@ def build_report(
             "preliminary_hac_candidate_count": len(preliminary_hac),
             "pre_gate_hac_watchlist_count": len(pre_gate_hac_watchlist),
             "price_feedback_warning_count": price_feedback_summary["warning_count"],
+            "price_feedback_partial_collapse_count": (
+                price_feedback_summary["raw_to_partial_collapse_count"]
+            ),
             "significance_t_stat": "t_stat_hac",
             "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
         },
@@ -1291,6 +1427,7 @@ def build_report(
             "sample gate clock estimates when the overlap-adjusted floor should reach min_points if cadence holds",
             "pre-gate HAC watchlist is diagnostic only and never promotion or probe authority",
             "past-return price feedback control is diagnostic only and never promotion authority",
+            "partial IC controlling for trailing returns is diagnostic only and never promotion authority",
             "candidate gate requires overlap-adjusted sample floor and BH q-value control",
             "candidate significance uses Newey-West/HAC slope t-stat; naive t-stat is diagnostic only",
         ],

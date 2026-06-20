@@ -399,6 +399,46 @@ def test_compute_ic_reports_price_feedback_control():
     assert result[0]["price_feedback_warning_basis"] == "abs_past_return_ic_ge_abs_forward_ic"
 
 
+def test_compute_ic_reports_partial_ic_controlling_trailing_return():
+    base = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    rows = []
+    xs = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
+    trailing_returns = [0.0, 2.0, 4.0, 6.0, 8.0, 11.0]
+    residual_noise = [1.0, -1.0, 1.0, -1.0, 1.0, -1.0]
+    for i, (xval, trailing_ret, noise) in enumerate(zip(xs, trailing_returns, residual_noise)):
+        ts_ms = int((base + dt.timedelta(minutes=15 * i)).timestamp() * 1000)
+        rows.append({
+            "bucket": BUCKET_PRICE_TARGET,
+            "symbol": "BTCUSDT",
+            "horizon_minutes": 15,
+            "snapshot_ts_ms": ts_ms,
+            "snapshot_ts_utc": harness._ms_to_iso(ts_ms),
+            "mean_delta_prob_yes": xval,
+            "forward_return_bps": trailing_ret * 3.0 + noise,
+            "trailing_return_bps": trailing_ret,
+        })
+
+    result = harness.compute_ic(rows)
+
+    assert len(result) == 1
+    row = result[0]
+    assert row["ic_pearson"] is not None
+    assert row["ic_pearson"] > 0.95
+    assert row["past_return_ic_pearson"] is not None
+    assert row["past_return_ic_pearson"] > 0.95
+    assert row["trailing_forward_return_ic_pearson"] is not None
+    assert row["trailing_forward_return_ic_pearson"] > 0.95
+    assert row["partial_ic_controlling_trailing_return"] is not None
+    assert abs(row["partial_ic_controlling_trailing_return"]) < 0.15
+    assert row["partial_ic_abs_margin_vs_raw"] < 0
+    assert row["partial_ic_retained_abs_ratio"] < 0.5
+    assert row["price_feedback_partial_collapse_warning"] is True
+    assert (
+        row["price_feedback_partial_collapse_basis"]
+        == "partial_ic_collapses_after_trailing_return_control"
+    )
+
+
 def test_compute_ic_tolerates_small_15m_schedule_jitter():
     base = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
     rows = []

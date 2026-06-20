@@ -424,6 +424,9 @@ def test_polymarket_leadlag_arm_ready_only_for_candidate_review_with_sample(tmp_
                 "cells_with_control": 2,
                 "warning_count": 1,
                 "max_abs_past_return_ic": 0.41,
+                "partial_control_cells": 2,
+                "raw_to_partial_collapse_count": 1,
+                "max_abs_partial_ic_controlling_trailing_return": 0.12,
                 "warning_cells": [{"bucket": "event_reg", "symbol": "BTCUSDT"}],
             },
             "joined_rows": 105,
@@ -500,6 +503,9 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
                 "cells_with_control": 2,
                 "warning_count": 1,
                 "max_abs_past_return_ic": 0.41,
+                "partial_control_cells": 2,
+                "raw_to_partial_collapse_count": 1,
+                "max_abs_partial_ic_controlling_trailing_return": 0.12,
                 "warning_cells": [{"bucket": "event_reg", "symbol": "BTCUSDT"}],
             },
             "joined_rows": 105,
@@ -525,6 +531,7 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
             "candidate_count": 0,
             "pre_gate_hac_watchlist_count": 1,
             "price_feedback_warning_count": 1,
+            "price_feedback_partial_collapse_count": 1,
             "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
         },
         "pre_gate_hac_watchlist": [{
@@ -568,7 +575,9 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
     assert arm["detail"]["sample_gate_clock"]["cells"][0]["symbol"] == "BTCUSDT"
     assert arm["detail"]["pre_gate_hac_watchlist_count"] == 1
     assert arm["detail"]["price_feedback_warning_count"] == 1
+    assert arm["detail"]["price_feedback_partial_collapse_count"] == 1
     assert arm["detail"]["price_feedback_summary"]["warning_count"] == 1
+    assert arm["detail"]["price_feedback_summary"]["raw_to_partial_collapse_count"] == 1
     assert arm["detail"]["best_pre_gate_hac_watch"]["gate_blocker"] == "sample_floor_below_min_points"
     assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
     assert plan["arms"][0]["reason"] == "sample_count_below_gate"
