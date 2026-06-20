@@ -571,6 +571,28 @@ def classify_profitability_blocker(
                     "aeg_matrix_execution_realism_mode": aeg_review.get(
                         "execution_realism_mode"
                     ),
+                    "candidate_replay_status": detail.get("candidate_replay_status"),
+                    "candidate_replay_sample_count": detail.get(
+                        "candidate_replay_sample_count"
+                    ),
+                    "candidate_replay_round_trip_cost_bps": detail.get(
+                        "candidate_replay_round_trip_cost_bps"
+                    ),
+                    "candidate_replay_gross_bps_mean": detail.get(
+                        "candidate_replay_gross_bps_mean"
+                    ),
+                    "candidate_replay_net_bps_mean": detail.get(
+                        "candidate_replay_net_bps_mean"
+                    ),
+                    "candidate_replay_holdout_net_bps_mean": detail.get(
+                        "candidate_replay_holdout_net_bps_mean"
+                    ),
+                    "candidate_replay_cost_wall_status": detail.get(
+                        "candidate_replay_cost_wall_status"
+                    ),
+                    "candidate_replay_execution_realism_status": detail.get(
+                        "candidate_replay_execution_realism_status"
+                    ),
                 },
             )
         return _finish_blocker_row(

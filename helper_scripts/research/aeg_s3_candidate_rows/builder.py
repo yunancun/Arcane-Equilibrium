@@ -74,6 +74,14 @@ def _date_key(ts: Optional[dt.datetime]) -> Optional[str]:
     return ts.date().isoformat()
 
 
+def _candidate_key(evidence: dict[str, Any]) -> Optional[str]:
+    raw = evidence.get("candidate_key")
+    if raw is None and isinstance(evidence.get("source"), dict):
+        raw = (evidence.get("source") or {}).get("candidate_key")
+    text = str(raw).strip() if raw is not None else ""
+    return text or None
+
+
 def _annualized_sharpe(values_fraction: list[float], annualization_factor: Optional[float]) -> Optional[float]:
     clean = [v for v in values_fraction if math.isfinite(v)]
     if len(clean) < 2 or annualization_factor is None or annualization_factor <= 0:
@@ -296,6 +304,7 @@ def build_direct_report(
         "runner_version": RUNNER_VERSION,
         "run_id": run_id,
         "candidate_id": evidence.get("candidate_id"),
+        "candidate_key": _candidate_key(evidence),
         "strategy_family": evidence.get("strategy_family"),
         "parameter_cell_id": evidence.get("parameter_cell_id"),
         "selected_variant": evidence.get("selected_variant") or evidence.get("variant"),
@@ -315,6 +324,7 @@ def build_direct_report(
         "schema_version": "aeg.s3_candidate_rows_summary.v0.1",
         "run_id": run_id,
         "candidate_id": evidence.get("candidate_id"),
+        "candidate_key": report.get("candidate_key"),
         "strategy_family": evidence.get("strategy_family"),
         "parameter_cell_id": evidence.get("parameter_cell_id"),
         "selected_variant": report["selected_variant"],

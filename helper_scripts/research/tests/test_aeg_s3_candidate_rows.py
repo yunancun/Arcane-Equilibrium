@@ -85,6 +85,28 @@ def test_complete_evidence_builds_direct_report_consumed_by_candidate_metrics():
     assert all(row["mean_daily_bps"] == 8.0 for row in rows)
 
 
+def test_direct_report_preserves_explicit_candidate_key_for_metrics_adapter():
+    evidence = _complete_evidence()
+    evidence["candidate_key"] = "polymarket_leadlag_ic|price_target|SOLUSDT|15m"
+    report, summary, _sample_rows, _daily_rows = builder_mod.build_direct_report(
+        evidence,
+        run_id="s3_run",
+    )
+
+    rows, adapted = candidate_builder.build_candidate_metrics(
+        report,
+        run_id="metrics_run",
+        candidate_id="cand_listing",
+        strategy_family="listing_fade",
+        parameter_cell_id="v0",
+    )
+
+    assert report["candidate_key"] == "polymarket_leadlag_ic|price_target|SOLUSDT|15m"
+    assert summary["candidate_key"] == "polymarket_leadlag_ic|price_target|SOLUSDT|15m"
+    assert rows
+    assert adapted["candidate_key"] == "polymarket_leadlag_ic|price_target|SOLUSDT|15m"
+
+
 def test_missing_daily_returns_does_not_synthesize_mean_daily_bps():
     evidence = _complete_evidence()
     evidence.pop("daily_returns")

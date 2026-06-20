@@ -540,7 +540,20 @@ def test_polymarket_ready_candidate_is_downgraded_after_non_durable_aeg_matrix()
             "sample_count": 30,
             "artifacts_ready": True,
             "source_ok": True,
-            "detail": {"candidate_count": 1, "candidate_key": candidate_key},
+            "detail": {
+                "candidate_count": 1,
+                "candidate_key": candidate_key,
+                "candidate_replay_status": "PAPER_REPLAY_BUILT",
+                "candidate_replay_sample_count": 30,
+                "candidate_replay_round_trip_cost_bps": 4.0,
+                "candidate_replay_gross_bps_mean": 9.2,
+                "candidate_replay_net_bps_mean": 5.2,
+                "candidate_replay_holdout_net_bps_mean": 4.4,
+                "candidate_replay_cost_wall_status": (
+                    "PAPER_REPLAY_NET_POSITIVE_EXECUTION_UNMEASURED"
+                ),
+                "candidate_replay_execution_realism_status": "UNMEASURED",
+            },
         },
         {
             "arm_id": "aeg_robustness_matrix",
@@ -570,6 +583,14 @@ def test_polymarket_ready_candidate_is_downgraded_after_non_durable_aeg_matrix()
         "aeg_matrix_review_no_durable_candidate_rows"
     )
     assert blockers["polymarket_leadlag_ic"]["aeg_matrix_run_id"] == "poly_matrix"
+    assert blockers["polymarket_leadlag_ic"]["candidate_replay_sample_count"] == 30
+    assert blockers["polymarket_leadlag_ic"]["candidate_replay_net_bps_mean"] == 5.2
+    assert blockers["polymarket_leadlag_ic"]["candidate_replay_cost_wall_status"] == (
+        "PAPER_REPLAY_NET_POSITIVE_EXECUTION_UNMEASURED"
+    )
+    assert blockers["polymarket_leadlag_ic"]["candidate_replay_execution_realism_status"] == (
+        "UNMEASURED"
+    )
     assert blockers["aeg_robustness_matrix"]["candidate_artifact_dependency_status"] == (
         "CANDIDATE_ARTIFACTS_ALREADY_REVIEWED_NO_DURABLE_ROWS"
     )
@@ -965,6 +986,31 @@ def test_polymarket_leadlag_arm_ready_only_for_candidate_review_with_sample(tmp_
                 "t_stat": 2.1,
             }
         ],
+        "candidates": [{
+            "bucket": "event_reg",
+            "symbol": "BTCUSDT",
+            "horizon_minutes": 60,
+            "n_points": 35,
+            "ic_pearson": 0.22,
+            "t_stat_hac": 2.5,
+        }],
+        "candidate_replay_scorecard": {
+            "status": "PAPER_REPLAY_BUILT",
+            "selected_summary": {
+                "candidate_id": "polymarket_leadlag_event_reg_BTCUSDT_60m",
+                "parameter_cell_id": (
+                    "event_reg|BTCUSDT|60m|rule=ic_sign_delta|"
+                    "threshold_q=0|cost_bps=4"
+                ),
+                "sample_count": 35,
+                "round_trip_cost_bps": 4.0,
+                "gross_bps_mean": 9.5,
+                "net_bps_mean": 5.5,
+                "holdout_net_bps_mean": 4.8,
+                "cost_wall_status": "PAPER_REPLAY_NET_POSITIVE_EXECUTION_UNMEASURED",
+                "execution_realism_status": "UNMEASURED",
+            },
+        },
     })
 
     arm = collect_polymarket_leadlag_arm(
@@ -979,6 +1025,13 @@ def test_polymarket_leadlag_arm_ready_only_for_candidate_review_with_sample(tmp_
     assert arm["detail"]["max_ic_points"] == 35
     assert arm["detail"]["max_overlap_adjusted_ic_points"] == 35
     assert arm["detail"]["candidate_count"] == 1
+    assert arm["detail"]["candidate_key"] == "polymarket_leadlag_ic|event_reg|BTCUSDT|60m"
+    assert arm["detail"]["candidate_replay_status"] == "PAPER_REPLAY_BUILT"
+    assert arm["detail"]["candidate_replay_sample_count"] == 35
+    assert arm["detail"]["candidate_replay_net_bps_mean"] == 5.5
+    assert arm["detail"]["candidate_replay_cost_wall_status"] == (
+        "PAPER_REPLAY_NET_POSITIVE_EXECUTION_UNMEASURED"
+    )
     assert arm["detail"]["preliminary_raw_candidate_count"] == 2
     assert arm["detail"]["max_bh_q"] == 0.10
     assert plan["arms"][0]["action"] == "READY_FOR_AEG_CHAIN"
