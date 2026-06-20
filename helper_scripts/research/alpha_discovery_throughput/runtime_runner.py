@@ -592,6 +592,9 @@ def collect_polymarket_leadlag_arm(
     label_readiness = (
         counts.get("label_readiness") if isinstance(counts.get("label_readiness"), dict) else {}
     )
+    sample_gate_clock = (
+        counts.get("sample_gate_clock") if isinstance(counts.get("sample_gate_clock"), dict) else {}
+    )
     status = str(verdict.get("status") or "").upper()
     sample_count, raw_sample_count = _sample_ic_points(payload)
     candidate_count = _int(verdict.get("candidate_count"))
@@ -657,6 +660,9 @@ def collect_polymarket_leadlag_arm(
             "max_ic_points": raw_sample_count,
             "max_overlap_adjusted_ic_points": sample_count,
             "min_samples_remaining_to_gate": counts.get("min_samples_remaining_to_gate"),
+            "sample_gate_status": sample_gate_clock.get("status"),
+            "sample_gate_eta_utc": sample_gate_clock.get("fastest_gate_ready_utc"),
+            "sample_gate_clock": sample_gate_clock,
             "max_abs_t_stat_hac": counts.get("max_abs_t_stat_hac"),
             "label_feature_horizon_pairs": label_readiness.get("feature_horizon_pairs"),
             "label_joinable_pairs": label_readiness.get("joinable_pairs"),

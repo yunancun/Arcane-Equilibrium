@@ -567,17 +567,21 @@ def _schedule_jitter_tolerance_ms(horizon_minutes: int) -> int:
 
 
 def _count_nonoverlap_timestamps(timestamps_ms: Iterable[int], horizon_minutes: int) -> int:
+    return len(_selected_nonoverlap_timestamps(timestamps_ms, horizon_minutes))
+
+
+def _selected_nonoverlap_timestamps(timestamps_ms: Iterable[int], horizon_minutes: int) -> list[int]:
     ordered = sorted({int(ts) for ts in timestamps_ms})
     if not ordered:
-        return 0
+        return []
     min_gap_ms = _horizon_ms(horizon_minutes) - _schedule_jitter_tolerance_ms(horizon_minutes)
-    count = 0
+    selected: list[int] = []
     last: Optional[int] = None
     for ts_ms in ordered:
         if last is None or ts_ms - last >= min_gap_ms:
-            count += 1
+            selected.append(ts_ms)
             last = ts_ms
-    return count
+    return selected
 
 
 def _normal_two_sided_p_from_t(t_stat: Optional[float]) -> Optional[float]:
@@ -706,10 +710,13 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
         ys = [float(r["forward_return_bps"]) for r in rows]
         r = _pearson(xs, ys)
         timestamps = [int(r["snapshot_ts_ms"]) for r in rows]
+        selected_nonoverlap = _selected_nonoverlap_timestamps(timestamps, horizon)
         n_distinct = len(set(timestamps))
-        n_nonoverlap = _count_nonoverlap_timestamps(timestamps, horizon)
+        n_nonoverlap = len(selected_nonoverlap)
         hac_lag = _hac_lag_for_horizon(timestamps, horizon)
         jitter_tolerance_ms = _schedule_jitter_tolerance_ms(horizon)
+        effective_nonoverlap_gap_ms = _horizon_ms(horizon) - jitter_tolerance_ms
+        median_sample_spacing_ms = _median_positive_gap_ms(timestamps)
         out.append({
             "bucket": bucket,
             "symbol": symbol,
@@ -720,6 +727,8 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             "overlap_adjusted_sample_floor": min(len(rows), n_nonoverlap),
             "overlap_warning": n_nonoverlap < n_distinct,
             "overlap_jitter_tolerance_ms": jitter_tolerance_ms,
+            "effective_nonoverlap_gap_ms": effective_nonoverlap_gap_ms,
+            "median_sample_spacing_ms": median_sample_spacing_ms,
             "ic_pearson": r,
             "t_stat": _t_stat_from_r(r, len(rows)),
             "t_stat_hac": _newey_west_slope_t_stat(xs, ys, lag=hac_lag),
@@ -729,8 +738,108 @@ def compute_ic(joined: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
             "mean_forward_return_bps": _mean(ys),
             "first_snapshot_ts_utc": _ms_to_iso(min(timestamps)),
             "last_snapshot_ts_utc": _ms_to_iso(max(timestamps)),
+            "first_nonoverlap_snapshot_ts_utc": (
+                _ms_to_iso(selected_nonoverlap[0]) if selected_nonoverlap else None
+            ),
+            "last_nonoverlap_snapshot_ts_utc": (
+                _ms_to_iso(selected_nonoverlap[-1]) if selected_nonoverlap else None
+            ),
         })
     return annotate_multiple_testing(out)
+
+
+def _sample_gate_eta(row: dict[str, Any], *, min_points: int) -> dict[str, Any] | None:
+    sample_floor = int(row.get("overlap_adjusted_sample_floor") or 0)
+    if sample_floor <= 0 or sample_floor >= min_points:
+        return None
+    horizon_minutes = int(row.get("horizon_minutes") or 0)
+    if horizon_minutes <= 0:
+        return None
+    last_ts = _parse_dt(row.get("last_nonoverlap_snapshot_ts_utc") or row.get("last_snapshot_ts_utc"))
+    if last_ts is None:
+        return None
+    effective_gap_ms = int(
+        row.get("effective_nonoverlap_gap_ms")
+        or (_horizon_ms(horizon_minutes) - _schedule_jitter_tolerance_ms(horizon_minutes))
+    )
+    forecast_gap_ms = max(
+        _horizon_ms(horizon_minutes),
+        int(row.get("median_sample_spacing_ms") or 0),
+        effective_gap_ms,
+    )
+    if forecast_gap_ms <= 0:
+        return None
+    samples_remaining = max(0, min_points - sample_floor)
+    feature_ts_ms = _dt_to_ms(last_ts) + samples_remaining * forecast_gap_ms
+    label_ready_ms = feature_ts_ms + _horizon_ms(horizon_minutes)
+    return {
+        "expected_gate_feature_ts_utc": _ms_to_iso(feature_ts_ms),
+        "expected_gate_label_ready_utc": _ms_to_iso(label_ready_ms),
+        "eta_basis": "overlap_adjusted_floor_forecast_gap_plus_forward_horizon",
+        "effective_nonoverlap_gap_minutes": effective_gap_ms / 60_000.0,
+        "forecast_sample_gap_minutes": forecast_gap_ms / 60_000.0,
+    }
+
+
+def _sample_gate_clock(
+    ic_results: list[dict[str, Any]],
+    *,
+    min_points: int,
+    limit: int = 5,
+) -> dict[str, Any]:
+    max_floor = max(
+        (int(row.get("overlap_adjusted_sample_floor") or 0) for row in ic_results),
+        default=0,
+    )
+    cells: list[dict[str, Any]] = []
+    for row in ic_results:
+        sample_floor = int(row.get("overlap_adjusted_sample_floor") or 0)
+        if sample_floor <= 0 or sample_floor >= min_points:
+            continue
+        eta = _sample_gate_eta(row, min_points=min_points)
+        if not eta:
+            continue
+        cells.append({
+            "bucket": row.get("bucket"),
+            "symbol": row.get("symbol"),
+            "horizon_minutes": row.get("horizon_minutes"),
+            "overlap_adjusted_sample_floor": sample_floor,
+            "sample_gap_to_min_points": max(0, min_points - sample_floor),
+            "last_nonoverlap_snapshot_ts_utc": row.get("last_nonoverlap_snapshot_ts_utc"),
+            **eta,
+        })
+
+    cells.sort(key=lambda r: (
+        str(r.get("expected_gate_label_ready_utc") or ""),
+        int(r.get("sample_gap_to_min_points") or 0),
+    ))
+
+    if max_floor >= min_points:
+        status = "ENOUGH_SAMPLE"
+    elif not ic_results:
+        status = "NO_IC_ROWS"
+    elif cells:
+        status = "WAITING_FOR_SAMPLE"
+    else:
+        status = "ETA_UNAVAILABLE"
+
+    fastest = cells[0] if cells else None
+    return {
+        "status": status,
+        "min_points": min_points,
+        "max_overlap_adjusted_sample_floor": max_floor,
+        "min_samples_remaining_to_gate": max(0, min_points - max_floor),
+        "fastest_gate_feature_ts_utc": (
+            fastest.get("expected_gate_feature_ts_utc") if fastest else None
+        ),
+        "fastest_gate_ready_utc": (
+            fastest.get("expected_gate_label_ready_utc") if fastest else None
+        ),
+        "eta_basis": (
+            fastest.get("eta_basis") if fastest else "overlap_adjusted_nonoverlap_floor"
+        ),
+        "cells": cells[:limit],
+    }
 
 
 def _partition_ic_candidates(
@@ -803,7 +912,9 @@ def _pre_gate_hac_watchlist(
             "bh_q_value_hac_approx": row.get("bh_q_value_hac_approx"),
             "first_snapshot_ts_utc": row.get("first_snapshot_ts_utc"),
             "last_snapshot_ts_utc": row.get("last_snapshot_ts_utc"),
+            "last_nonoverlap_snapshot_ts_utc": row.get("last_nonoverlap_snapshot_ts_utc"),
             "gate_blocker": "sample_floor_below_min_points",
+            **(_sample_gate_eta(row, min_points=min_points) or {}),
         })
     return sorted(
         rows,
@@ -861,6 +972,7 @@ def build_report(
         min_abs_t=min_abs_t,
         max_bh_q=max_bh_q,
     )
+    sample_gate_clock = _sample_gate_clock(ic_results, min_points=min_points)
 
     if not snapshot_rows:
         status = STATUS_NO_SNAPSHOT_ROWS
@@ -929,6 +1041,7 @@ def build_report(
                     default=0,
                 ),
             ),
+            "sample_gate_clock": sample_gate_clock,
             "max_abs_t_stat_hac": max(
                 (
                     abs(float(r["t_stat_hac"]))
@@ -948,6 +1061,7 @@ def build_report(
             "price_target/event_reg bucket split is research-side and does not filter collector artifacts",
             "insufficient sample fails closed and is not alpha evidence",
             "overlap sample floor allows a small schedule-jitter tolerance before declaring windows overlapping",
+            "sample gate clock estimates when the overlap-adjusted floor should reach min_points if cadence holds",
             "pre-gate HAC watchlist is diagnostic only and never promotion or probe authority",
             "candidate gate requires overlap-adjusted sample floor and BH q-value control",
             "candidate significance uses Newey-West/HAC slope t-stat; naive t-stat is diagnostic only",

@@ -190,6 +190,9 @@ def test_compute_ic_reports_overlap_adjusted_sample_floor():
     assert result[0]["overlap_adjusted_sample_floor"] == 2
     assert result[0]["overlap_warning"] is True
     assert result[0]["overlap_jitter_tolerance_ms"] == 5000
+    assert result[0]["effective_nonoverlap_gap_ms"] == 3_595_000
+    assert result[0]["median_sample_spacing_ms"] == 900_000
+    assert result[0]["last_nonoverlap_snapshot_ts_utc"] == "2026-06-20T01:00:00+00:00"
     assert result[0]["hac_lag"] == 3
     assert result[0]["hac_method"] == "newey_west_slope_t_stat_bartlett"
 
@@ -387,11 +390,19 @@ def test_pre_gate_hac_watchlist_is_diagnostic_not_candidate(tmp_path):
     assert report["verdict"]["candidate_count"] == 0
     assert report["verdict"]["pre_gate_hac_watchlist_count"] == 1
     assert report["counts"]["min_samples_remaining_to_gate"] == 6
+    assert report["counts"]["sample_gate_clock"]["status"] == "WAITING_FOR_SAMPLE"
+    assert (
+        report["counts"]["sample_gate_clock"]["fastest_gate_ready_utc"]
+        == "2026-06-20T10:15:00+00:00"
+    )
     assert len(report["pre_gate_hac_watchlist"]) == 1
     watch = report["pre_gate_hac_watchlist"][0]
     assert watch["sample_gap_to_min_points"] == 6
     assert watch["gate_blocker"] == "sample_floor_below_min_points"
     assert watch["bh_q_value_hac_approx"] is not None
+    assert watch["expected_gate_label_ready_utc"] == "2026-06-20T10:15:00+00:00"
+    assert watch["eta_basis"] == "overlap_adjusted_floor_forecast_gap_plus_forward_horizon"
+    assert watch["forecast_sample_gap_minutes"] == 15.0
 
 
 def test_source_has_readonly_pg_and_no_trading_tokens():
