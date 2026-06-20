@@ -39,6 +39,8 @@ def _int_or_none(value: Any) -> Optional[int]:
 def detect_report_type(report: dict[str, Any]) -> str:
     if report.get("candidate_regime_metrics") is not None:
         return "aeg_candidate_metrics_direct"
+    if _is_polymarket_leadlag_report(report):
+        return "polymarket_leadlag_ic"
     if report.get("diagnostic") == "funding_tilt_carry":
         return "funding_tilt_diagnostic"
     if report.get("phase") == "phase_1_fail_fast_early_gates":
@@ -86,6 +88,80 @@ def _direct_metric_variant(report: dict[str, Any]) -> tuple[Optional[str], Optio
         "regime_metric_defaults": report.get("candidate_metric_defaults") or {},
     }
     return str(selected), ev
+
+
+def _is_polymarket_leadlag_report(report: dict[str, Any]) -> bool:
+    if str(report.get("program") or "") == "polymarket_leadlag_ic":
+        return True
+    return (
+        isinstance(report.get("verdict"), dict)
+        and isinstance(report.get("ic_results"), list)
+        and report.get("query_set_version") is not None
+    )
+
+
+def _polymarket_variant_key(candidate: dict[str, Any]) -> str:
+    bucket = str(candidate.get("bucket") or "unknown_bucket").strip() or "unknown_bucket"
+    symbol = str(candidate.get("symbol") or "unknown_symbol").strip() or "unknown_symbol"
+    horizon = candidate.get("horizon_minutes")
+    horizon_text = f"{_int_or_none(horizon) or horizon}m"
+    return f"{bucket}|{symbol}|{horizon_text}"
+
+
+def _polymarket_leadlag_variant(report: dict[str, Any]) -> tuple[Optional[str], Optional[dict[str, Any]]]:
+    """Expose a Polymarket IC candidate as fail-closed AEG candidate metrics.
+
+    IC/HAC/BH evidence is not PnL evidence, so this adapter only carries the
+    overlap-adjusted sample count, test budget, and lineage. Net bps, Sharpe,
+    PSR/DSR, PBO, and freshness windows intentionally remain missing.
+    """
+    if not _is_polymarket_leadlag_report(report):
+        return None, None
+    candidates = [
+        row for row in (report.get("candidates") or [])
+        if isinstance(row, dict)
+    ]
+    if not candidates:
+        return None, None
+
+    candidate = candidates[0]
+    selected = _polymarket_variant_key(candidate)
+    sample_floor = (
+        _int_or_none(candidate.get("overlap_adjusted_sample_floor"))
+        or _int_or_none(candidate.get("n_nonoverlap_timestamps"))
+        or _int_or_none(candidate.get("n_points"))
+    )
+    test_budget = _int_or_none(len(report.get("ic_results") or []))
+    src = {
+        "n_independent": sample_floor,
+        "sample_unit": "overlap_adjusted_ic_timestamps",
+        "k_trials": test_budget,
+    }
+    ev = {
+        "per_regime_net": {"unmeasured": src},
+        "regime_metric_defaults": {
+            "sample_unit": "overlap_adjusted_ic_timestamps",
+            "k_trials": test_budget,
+        },
+        "polymarket_candidate_summary": {
+            "bucket": candidate.get("bucket"),
+            "symbol": candidate.get("symbol"),
+            "horizon_minutes": candidate.get("horizon_minutes"),
+            "n_points": candidate.get("n_points"),
+            "overlap_adjusted_sample_floor": candidate.get("overlap_adjusted_sample_floor"),
+            "ic_pearson": candidate.get("ic_pearson"),
+            "t_stat_hac": candidate.get("t_stat_hac"),
+            "bh_q_value_hac_approx": candidate.get("bh_q_value_hac_approx"),
+            "partial_ic_controlling_trailing_return": candidate.get(
+                "partial_ic_controlling_trailing_return"
+            ),
+            "price_feedback_warning": candidate.get("price_feedback_warning"),
+            "price_feedback_partial_collapse_warning": candidate.get(
+                "price_feedback_partial_collapse_warning"
+            ),
+        },
+    }
+    return selected, ev
 
 
 def _freshness_value(ev: dict[str, Any], report: dict[str, Any], key: str) -> Optional[float]:
@@ -258,6 +334,8 @@ def build_candidate_metrics(
     report_type = detect_report_type(report)
     selected_variant, ev = _direct_metric_variant(report)
     if ev is None:
+        selected_variant, ev = _polymarket_leadlag_variant(report)
+    if ev is None:
         selected_variant, ev = _select_variant(report)
     rows: list[dict[str, Any]] = []
     if ev is not None:
@@ -351,6 +429,11 @@ def build_candidate_metrics(
         "parameter_cell_id": parameter_cell_id,
         "source_report_type": report_type,
         "selected_variant": selected_variant,
+        "candidate_key": (
+            f"{report_type}|{selected_variant}"
+            if report_type and selected_variant
+            else None
+        ),
         "row_count": len(rows),
         "metric_status_counts": dict(sorted(counts.items())),
         "freshness_buckets": dict(sorted(Counter(row["freshness_bucket"] for row in rows).items())),
@@ -362,6 +445,15 @@ def build_candidate_metrics(
             "recent_90d_net_bps / recent_180d_net_bps 缺失時 freshness 仍未量測",
         ],
     }
+    if report_type == "polymarket_leadlag_ic":
+        summary["diagnostic_verdict"] = (report.get("verdict") or {}).get("status")
+        summary["polymarket_candidate_summary"] = (
+            (ev or {}).get("polymarket_candidate_summary") if isinstance(ev, dict) else None
+        )
+        summary["notes"].append(
+            "Polymarket lead-lag IC/HAC/BH evidence is candidate-review input only; "
+            "this adapter does not convert IC to PnL, Sharpe, PSR/DSR, or execution realism"
+        )
     if ev is None:
         summary["reject_reason"] = "no_selected_or_evaluable_variant"
     return rows, summary

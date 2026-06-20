@@ -200,6 +200,57 @@ def test_direct_candidate_regime_metrics_block_is_supported():
     assert rows[0]["net_to_cost_ratio"] == 2.0
 
 
+def test_polymarket_leadlag_candidate_exports_fail_closed_ic_lineage():
+    report = {
+        "program": "polymarket_leadlag_ic",
+        "query_set_version": "v2",
+        "verdict": {"status": "IC_CANDIDATE_REVIEW_REQUIRED"},
+        "ic_results": [{"bucket": "price_target"}, {"bucket": "other"}],
+        "candidates": [
+            {
+                "bucket": "price_target",
+                "symbol": "SOLUSDT",
+                "horizon_minutes": 15,
+                "n_points": 30,
+                "n_nonoverlap_timestamps": 30,
+                "overlap_adjusted_sample_floor": 30,
+                "ic_pearson": 0.2145,
+                "t_stat_hac": 6.75,
+                "bh_q_value_hac_approx": 3.4e-10,
+                "partial_ic_controlling_trailing_return": 0.183,
+                "price_feedback_warning": True,
+                "price_feedback_partial_collapse_warning": False,
+            }
+        ],
+    }
+
+    rows, summary = builder_mod.build_candidate_metrics(
+        report,
+        run_id="metrics_run",
+        candidate_id="poly_sol_15m",
+        strategy_family="polymarket_leadlag_ic",
+        parameter_cell_id="price_target_SOLUSDT_15m",
+    )
+
+    assert summary["source_report_type"] == "polymarket_leadlag_ic"
+    assert summary["selected_variant"] == "price_target|SOLUSDT|15m"
+    assert summary["candidate_key"] == "polymarket_leadlag_ic|price_target|SOLUSDT|15m"
+    assert summary["diagnostic_verdict"] == "IC_CANDIDATE_REVIEW_REQUIRED"
+    assert summary["metric_status_counts"] == {"FAIL": 1}
+    assert summary["polymarket_candidate_summary"]["t_stat_hac"] == 6.75
+    row = rows[0]
+    assert row["regime"] == "unmeasured"
+    assert row["n_independent"] == 30
+    assert row["sample_unit"] == "overlap_adjusted_ic_timestamps"
+    assert row["k_trials"] == 2
+    assert row["net_bps"] is None
+    reasons = json.loads(row["reject_reasons"])
+    assert "missing_net_bps" in reasons
+    assert "missing_psr_0" in reasons
+    assert "missing_n_independent" not in reasons
+    assert "missing_sample_unit" not in reasons
+
+
 def test_artifact_write_creates_index_and_manifest(tmp_path):
     rows, summary = builder_mod.build_candidate_metrics(
         _report_with_per_regime(include_net_and_freshness=True, include_matrix_fields=True),

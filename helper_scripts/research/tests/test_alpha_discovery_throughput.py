@@ -531,6 +531,54 @@ def test_aeg_robustness_wait_becomes_actionable_only_with_upstream_candidate_art
     assert aeg["next_trigger"] == "feed_candidate_artifacts_into_robustness_matrix"
 
 
+def test_polymarket_ready_candidate_is_downgraded_after_non_durable_aeg_matrix():
+    candidate_key = "polymarket_leadlag_ic|price_target|SOLUSDT|15m"
+    plan = build_discovery_plan([
+        {
+            "arm_id": "polymarket_leadlag_ic",
+            "gate_status": "READY",
+            "sample_count": 30,
+            "artifacts_ready": True,
+            "source_ok": True,
+            "detail": {"candidate_count": 1, "candidate_key": candidate_key},
+        },
+        {
+            "arm_id": "aeg_robustness_matrix",
+            "gate_status": "WAIT",
+            "sample_count": 3,
+            "artifacts_ready": False,
+            "source_ok": True,
+            "detail": {
+                "run_id": "poly_matrix",
+                "candidate_id": "polymarket_price_target_SOLUSDT_15m",
+                "candidate_key": candidate_key,
+                "final_label_counts": {"insufficient evidence": 3},
+                "durable_candidate_rows": 0,
+                "coverage_gate_status": "FAIL",
+                "execution_realism_mode": "unverified_missing_missing",
+            },
+        },
+    ], now_utc=dt.datetime(2026, 6, 20, 20, 5, tzinfo=dt.timezone.utc))
+
+    scorecard = plan["profitability_blocker_scorecard"]
+    blockers = {row["arm_id"]: row for row in scorecard["arms"]}
+    assert scorecard["promotion_ready_count"] == 0
+    assert scorecard["status"] == "NO_ACTIONABLE_ALPHA_WAIT_OR_SAMPLE_GATED"
+    assert blockers["polymarket_leadlag_ic"]["blocker_class"] == "robustness_wait"
+    assert blockers["polymarket_leadlag_ic"]["promotion_ready"] is False
+    assert blockers["polymarket_leadlag_ic"]["primary_blocker"] == (
+        "aeg_matrix_review_no_durable_candidate_rows"
+    )
+    assert blockers["polymarket_leadlag_ic"]["aeg_matrix_run_id"] == "poly_matrix"
+    assert blockers["aeg_robustness_matrix"]["candidate_artifact_dependency_status"] == (
+        "CANDIDATE_ARTIFACTS_ALREADY_REVIEWED_NO_DURABLE_ROWS"
+    )
+    assert blockers["aeg_robustness_matrix"]["candidate_artifact_count"] == 0
+    assert blockers["aeg_robustness_matrix"]["candidate_artifact_dependency"][
+        "already_reviewed_candidate_artifact_count"
+    ] == 1
+
+
 def test_mm_no_train_positive_without_gross_decomposition_stays_feature_family():
     plan = build_discovery_plan([
         {

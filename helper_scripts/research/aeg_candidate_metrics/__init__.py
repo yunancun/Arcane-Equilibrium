@@ -10,9 +10,9 @@ MODULE_NOTE:
 
 from __future__ import annotations
 
-RUNNER_VERSION = "aeg_candidate_metrics.v0.2"
-REGIME_METRICS_SCHEMA_VERSION = "aeg.candidate_regime_metrics.v0.2"
-SUMMARY_SCHEMA_VERSION = "aeg.candidate_metrics_summary.v0.2"
+RUNNER_VERSION = "aeg_candidate_metrics.v0.3"
+REGIME_METRICS_SCHEMA_VERSION = "aeg.candidate_regime_metrics.v0.3"
+SUMMARY_SCHEMA_VERSION = "aeg.candidate_metrics_summary.v0.3"
 MANIFEST_SCHEMA_VERSION = "aeg.alpha_history_run_manifest.v0.1"
 
 REGIME_METRIC_COLUMNS = (
