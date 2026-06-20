@@ -27,6 +27,7 @@ from typing import Any, Optional
 
 try:
     from . import QUERY_SET_V1_KEYWORDS, QUERY_SET_V1_TAG
+    from . import QUERY_SET_V2_KEYWORDS, QUERY_SET_V2_TAG
     from . import LANE_RETROSPECTIVE, LANE_SNAPSHOT
     from . import artifact as artifact_mod
     from . import collector as collector_mod
@@ -37,6 +38,7 @@ except ImportError:  # pragma: no cover —— 直跑 `python cli.py` 時的路�
     if str(_research) not in sys.path:
         sys.path.insert(0, str(_research))
     from polymarket_axis import QUERY_SET_V1_KEYWORDS, QUERY_SET_V1_TAG  # type: ignore
+    from polymarket_axis import QUERY_SET_V2_KEYWORDS, QUERY_SET_V2_TAG  # type: ignore
     from polymarket_axis import LANE_RETROSPECTIVE, LANE_SNAPSHOT  # type: ignore
     from polymarket_axis import artifact as artifact_mod  # type: ignore
     from polymarket_axis import collector as collector_mod  # type: ignore
@@ -48,6 +50,15 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
+def _select_query_set(query_set: str) -> tuple[str, tuple[str, ...], str]:
+    """回 (tag, keywords, version)。v1 是默認相容路徑；v2 是事件/監管 discovery。"""
+    if query_set == "v1":
+        return QUERY_SET_V1_TAG, tuple(QUERY_SET_V1_KEYWORDS), "v1"
+    if query_set == "v2":
+        return QUERY_SET_V2_TAG, tuple(QUERY_SET_V2_KEYWORDS), "v2"
+    raise ValueError(f"unknown query set: {query_set!r}")
+
+
 def run_snapshot_mode(args: argparse.Namespace) -> dict[str, Any]:
     """daily / hourly-topn 共用：collect → write artifact → save state。"""
     data_root = Path(args.data_root) if args.data_root else artifact_mod.resolve_data_root()
@@ -55,17 +66,20 @@ def run_snapshot_mode(args: argparse.Namespace) -> dict[str, Any]:
     tracker = state_mod.load_state(state_path)
     client = collector_mod.ThrottledJsonClient(min_interval_s=args.min_interval_s)
     git_sha = artifact_mod._git_provenance(_repo_root())["git_sha"]
+    default_tag, keywords, query_set_version = _select_query_set(args.query_set)
+    tag_slug = args.tag or default_tag
 
     top_n: Optional[int] = args.top_n if args.mode == "hourly-topn" else None
     result = collector_mod.collect_snapshot_sweep(
         client,
         tracker,
         collector_git_sha=git_sha,
-        tag_slug=args.tag,
-        keywords=tuple(QUERY_SET_V1_KEYWORDS),
+        tag_slug=tag_slug,
+        keywords=keywords,
         keyword_pages=args.keyword_pages,
         max_event_pages=args.max_event_pages,
         top_n=top_n,
+        query_set_version=query_set_version,
     )
 
     run_id = args.run_id or artifact_mod.default_run_id(args.mode)
@@ -82,6 +96,7 @@ def run_snapshot_mode(args: argparse.Namespace) -> dict[str, Any]:
         artifact_root=Path(args.artifact_root) if args.artifact_root else artifact_mod.resolve_artifact_root(data_root),
         created_by_role=args.created_by_role,
         parquet_mirror=not args.no_parquet_mirror,
+        query_set_version=query_set_version,
     )
     # state 在 artifact 成功後才落（順序 load-bearing，見 MODULE_NOTE）。
     state_mod.save_state(tracker, state_path)
@@ -89,6 +104,7 @@ def run_snapshot_mode(args: argparse.Namespace) -> dict[str, Any]:
         "mode": args.mode,
         "run_id": run_id,
         "run_dir": written["written"]["run_dir"],
+        "query_set_version": query_set_version,
         "snapshot_rows": result["stats"].get("snapshot_rows"),
         "unique_events": result["stats"].get("unique_events"),
         "tracker_counts": result["stats"].get("tracker_counts"),
@@ -169,7 +185,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
                    type=float, dest="min_interval_s", help="client throttle（默認 0.5s = 2 req/s 上限）")
     p.add_argument("--no-parquet-mirror", action="store_true", dest="no_parquet_mirror")
     # snapshot lane 參數。
-    p.add_argument("--tag", default=QUERY_SET_V1_TAG, help="tag 枚舉主路（查詢集 v1 = crypto）")
+    p.add_argument("--query-set", default="v1", choices=["v1", "v2"], dest="query_set",
+                   help="snapshot 查詢集版本（v1=既有 crypto 全域；v2=事件/監管 discovery）")
+    p.add_argument("--tag", default=None, help="tag 枚舉主路（未指定時跟隨 --query-set 默認 tag）")
     p.add_argument("--keyword-pages", default=2, type=int, dest="keyword_pages",
                    help="keyword 補充每詞頁數（0 = 關閉補充；/public-search 每頁 5 events）")
     p.add_argument("--max-event-pages", default=collector_mod.MAX_EVENT_PAGES_DEFAULT,

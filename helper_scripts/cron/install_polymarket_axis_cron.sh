@@ -29,6 +29,7 @@ fi
 # ----- env / 預設值 -----
 OPENCLAW_BASE_DIR="${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}"
 OPENCLAW_DATA_DIR="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
+OPENCLAW_POLYMARKET_QUERY_SET="${OPENCLAW_POLYMARKET_QUERY_SET:-}"
 
 WRAPPER="$OPENCLAW_BASE_DIR/helper_scripts/cron/polymarket_axis_cron.sh"
 MARKER="polymarket_axis_cron.sh"
@@ -90,10 +91,23 @@ _validate_cron_env_value() {
 _validate_cron_env_value "OPENCLAW_BASE_DIR" "$OPENCLAW_BASE_DIR"
 _validate_cron_env_value "OPENCLAW_DATA_DIR" "$OPENCLAW_DATA_DIR"
 _validate_cron_env_value "WRAPPER" "$WRAPPER"
+if [[ -n "$OPENCLAW_POLYMARKET_QUERY_SET" ]]; then
+    case "$OPENCLAW_POLYMARKET_QUERY_SET" in
+        v1|v2) ;;
+        *)
+            echo "ERROR: OPENCLAW_POLYMARKET_QUERY_SET must be v1 or v2 (got: $OPENCLAW_POLYMARKET_QUERY_SET)" >&2
+            exit 6
+            ;;
+    esac
+    _validate_cron_env_value "OPENCLAW_POLYMARKET_QUERY_SET" "$OPENCLAW_POLYMARKET_QUERY_SET"
+fi
 
 # 為什麼 plain 組裝不用 printf %q：cron 不跑 full shell parser，唯一可靠路徑是
 # 上面 validation reject special char（mirror install_incident_sentinel_cron.sh）。
 ENV_PREFIX="OPENCLAW_BASE_DIR=${OPENCLAW_BASE_DIR} OPENCLAW_DATA_DIR=${OPENCLAW_DATA_DIR}"
+if [[ -n "$OPENCLAW_POLYMARKET_QUERY_SET" ]]; then
+    ENV_PREFIX="${ENV_PREFIX} OPENCLAW_POLYMARKET_QUERY_SET=${OPENCLAW_POLYMARKET_QUERY_SET}"
+fi
 ENTRY_DAILY="41 4 * * * ${ENV_PREFIX} ${WRAPPER} daily >> ${OPENCLAW_DATA_DIR}/logs/polymarket_axis_cron.cron.log 2>&1"
 ENTRY_HOURLY_ACTIVE="7 * * * * ${ENV_PREFIX} ${WRAPPER} hourly-topn >> ${OPENCLAW_DATA_DIR}/logs/polymarket_axis_cron.cron.log 2>&1"
 # hourly 默認以註釋行安裝（crontab 合法註釋）：保留完整 entry 供 operator 一鍵
@@ -112,6 +126,7 @@ echo "$ENTRY_HOURLY"
 echo "----------------------------------------"
 echo "Daily:  41 4 * * * UTC（與 residual producer 03:17 錯峰）"
 echo "Hourly: $HOURLY_STATE"
+echo "Query-set: ${OPENCLAW_POLYMARKET_QUERY_SET:-v1 (wrapper default)}"
 echo "Heartbeat: $OPENCLAW_DATA_DIR/cron_heartbeat/polymarket_axis_daily.last_fire"
 echo "Artifacts: $OPENCLAW_DATA_DIR/polymarket_axis_runs/<run_id>/"
 echo "Rollback: $0 --remove (with OPENCLAW_POLYMARKET_CRON_APPLY=1)"

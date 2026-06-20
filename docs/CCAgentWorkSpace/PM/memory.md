@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Query-Set V2 Runtime Activation
+
+- Added Polymarket query-set v2 for event/regulatory discovery while keeping v1 immutable and default-compatible.
+- Runtime `trade-core` now has daily `41 4 * * *` and active hourly `7 * * * *` Polymarket cron entries carrying `OPENCLAW_POLYMARKET_QUERY_SET=v2`; backup before reinstall: `/tmp/openclaw/cron_backups/crontab_before_polymarket_query_set_v2_20260620T113342Z.txt`.
+- Manual v2 smoke artifact `/tmp/openclaw/polymarket_axis_runs/hourly-topn-20260620T113312Z` produced 107 events, 860 snapshot rows, 30 HTTP requests, 24 keyword terms, `errors=[]`, `point_in_time=true`, `query_set_version=v2`.
+- Tests passed locally and on Linux: Polymarket research + cron static suite `65 passed, 1 skipped`, plus py_compile for the four package modules and `bash -n` for both cron scripts.
+- PM read: v2 changes discovery, not row filtering. Price-target markets remain in raw artifacts by design; lead-lag IC must bucket price-target vs event/reg markets research-side before any alpha ruling.
+- Boundary: source/test/docs + selective Linux source sync + user crontab + `/tmp/openclaw` artifact/log/heartbeat writes only; no secrets, PG, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Hourly Top-N Activation
 
 - Activated Linux `trade-core` Polymarket `hourly-topn` cron as artifact-only data collection: daily remains `41 4 * * *`; hourly top-50 is active at `7 * * * *`.

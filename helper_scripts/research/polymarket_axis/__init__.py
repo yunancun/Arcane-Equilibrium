@@ -60,6 +60,19 @@ QUERY_SET_V1_KEYWORDS = (
     "tether", "binance", "coinbase",
 )
 
+# 查詢集 v2：事件/監管/宏觀優先。v1 不可原地改；新集合只改「發哪些
+# query」，不在採集端丟 row，維持零過濾零截斷鐵則。
+QUERY_SET_V2_TAG = "crypto"
+QUERY_SET_V2_KEYWORDS = (
+    "bitcoin etf", "ethereum etf", "crypto etf", "spot etf",
+    "blackrock bitcoin", "blackrock ethereum", "grayscale",
+    "sec crypto", "sec bitcoin", "sec ethereum", "cftc crypto",
+    "crypto regulation", "stablecoin regulation", "tether", "usdt",
+    "coinbase sec", "binance sec",
+    "fomc crypto", "fed rate cut", "cpi crypto", "inflation crypto",
+    "bitcoin reserve", "strategic bitcoin reserve", "treasury bitcoin",
+)
+
 # 上游 MIT attribution（manifest 載入，供溯源）。
 UPSTREAM_ATTRIBUTION = {
     "source_repo": "https://github.com/mvanhorn/last30days-skill",
@@ -77,6 +90,8 @@ __all__ = [
     "PRICES_HISTORY_SCHEMA_VERSION",
     "QUERY_SET_V1_KEYWORDS",
     "QUERY_SET_V1_TAG",
+    "QUERY_SET_V2_KEYWORDS",
+    "QUERY_SET_V2_TAG",
     "QUERY_SET_VERSION",
     "RAW_EVENT_SCHEMA_VERSION",
     "RAW_MARKET_SCHEMA_VERSION",
