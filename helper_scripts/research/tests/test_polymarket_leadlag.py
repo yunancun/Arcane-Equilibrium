@@ -16,7 +16,7 @@ from polymarket_leadlag import (
     SYMBOL_SOURCE_ASSET_DIRECT,
     SYMBOL_SOURCE_MACRO_EVENT_REG,
 )
-from polymarket_leadlag import candidate_replay
+from polymarket_leadlag import candidate_replay, replay_history
 from polymarket_leadlag import harness
 
 
@@ -808,6 +808,175 @@ def test_candidate_replay_builds_explicit_paper_pnl_evidence():
     assert summary["cost_wall_status"] == "PAPER_REPLAY_NET_POSITIVE_EXECUTION_UNMEASURED"
     assert summary["execution_realism_status"] == "UNMEASURED"
     assert summary["selection_bias_warning"]
+
+
+def _history_report(
+    *,
+    created_at: str,
+    path: Path,
+    candidate_key: str,
+    samples: list[dict],
+    pbo_day: str,
+) -> dict:
+    evidence = {
+        "candidate_id": "polymarket_leadlag_price_target_SOLUSDT_15m",
+        "candidate_key": candidate_key,
+        "strategy_family": "polymarket_leadlag_directional_replay",
+        "parameter_cell_id": "price_target|SOLUSDT|15m|rule=ic_sign_delta|threshold_q=0|cost_bps=4",
+        "selected_variant": "ic_sign_delta",
+        "sample_unit": "polymarket_nonoverlap_forward_window",
+        "k_trials": 12,
+        "samples": samples,
+        "daily_returns": {"unit": "fraction", "values": {}},
+        "pbo_seed": 20260620,
+        "pbo_candidates": {
+            "cell_a": {pbo_day: 0.001},
+            "cell_b": {pbo_day: -0.0005},
+        },
+    }
+    summary = {
+        "candidate_id": evidence["candidate_id"],
+        "candidate_key": candidate_key,
+        "strategy_family": evidence["strategy_family"],
+        "parameter_cell_id": evidence["parameter_cell_id"],
+        "selected_variant": evidence["selected_variant"],
+        "sample_unit": evidence["sample_unit"],
+    }
+    return {
+        "created_at_utc": created_at,
+        "_history_path": str(path),
+        "candidate_replay_scorecard": {
+            "status": "PAPER_REPLAY_BUILT",
+            "selected_candidate_key": candidate_key,
+            "selected_evidence": evidence,
+            "selected_summary": summary,
+        },
+    }
+
+
+def test_replay_history_accumulates_deduped_samples_and_pbo_days(tmp_path):
+    candidate_key = "polymarket_leadlag_ic|price_target|SOLUSDT|15m"
+    samples_day_1 = [
+        {
+            "sample_id": "s1",
+            "sample_ts_utc": "2026-06-20T00:00:00+00:00",
+            "regime": "unsegmented",
+            "independence_bucket": "SOLUSDT:15m:1",
+            "gross_bps": 10.0,
+            "cost_bps": 4.0,
+            "net_bps": 6.0,
+            "is_oos": False,
+        },
+        {
+            "sample_id": "s2",
+            "sample_ts_utc": "2026-06-20T00:15:00+00:00",
+            "regime": "unsegmented",
+            "independence_bucket": "SOLUSDT:15m:2",
+            "gross_bps": 8.0,
+            "cost_bps": 4.0,
+            "net_bps": 4.0,
+            "is_oos": True,
+        },
+    ]
+    samples_day_2 = [
+        samples_day_1[1],
+        {
+            "sample_id": "s3",
+            "sample_ts_utc": "2026-06-21T00:00:00+00:00",
+            "regime": "unsegmented",
+            "independence_bucket": "SOLUSDT:15m:3",
+            "gross_bps": 7.0,
+            "cost_bps": 4.0,
+            "net_bps": 3.0,
+            "is_oos": True,
+        },
+    ]
+    reports = [
+        _history_report(
+            created_at="2026-06-20T01:00:00+00:00",
+            path=tmp_path / "polymarket_leadlag_20260620T010000Z.json",
+            candidate_key=candidate_key,
+            samples=samples_day_1,
+            pbo_day="2026-06-20",
+        ),
+        _history_report(
+            created_at="2026-06-21T01:00:00+00:00",
+            path=tmp_path / "polymarket_leadlag_20260621T010000Z.json",
+            candidate_key=candidate_key,
+            samples=samples_day_2,
+            pbo_day="2026-06-21",
+        ),
+    ]
+
+    scorecard = replay_history.build_history_scorecard(
+        reports=reports,
+        candidate_key=candidate_key,
+        min_days=2,
+        min_samples=3,
+    )
+
+    summary = scorecard["selected_summary"]
+    evidence = scorecard["selected_evidence"]
+    assert scorecard["status"] == "REPLAY_HISTORY_READY_FOR_AEG_RECHECK"
+    assert summary["sample_count"] == 3
+    assert summary["n_days"] == 2
+    assert summary["net_bps_mean"] == 4.33333333
+    assert summary["pbo_history_cell_count"] == 2
+    assert summary["pbo_history_day_count"] == 2
+    assert evidence["candidate_key"] == candidate_key
+    assert len(evidence["samples"]) == 3
+    assert evidence["daily_returns"]["values"] == {
+        "2026-06-20": 0.001,
+        "2026-06-21": 0.0003,
+    }
+    assert set(evidence["pbo_candidates"]["cell_a"]) == {"2026-06-20", "2026-06-21"}
+    assert evidence["source"]["execution_realism_status"] == "UNMEASURED"
+
+
+def test_replay_history_writer_outputs_aeg_compatible_evidence(tmp_path):
+    candidate_key = "polymarket_leadlag_ic|price_target|SOLUSDT|15m"
+    report_dir = tmp_path / "reports"
+    report_dir.mkdir()
+    report = _history_report(
+        created_at="2026-06-20T01:00:00+00:00",
+        path=report_dir / "polymarket_leadlag_20260620T010000Z.json",
+        candidate_key=candidate_key,
+        samples=[{
+            "sample_id": "s1",
+            "sample_ts_utc": "2026-06-20T00:00:00+00:00",
+            "regime": "unsegmented",
+            "independence_bucket": "SOLUSDT:15m:1",
+            "gross_bps": 10.0,
+            "cost_bps": 4.0,
+            "net_bps": 6.0,
+            "is_oos": True,
+        }],
+        pbo_day="2026-06-20",
+    )
+    (report_dir / "polymarket_leadlag_20260620T010000Z.json").write_text(
+        json.dumps(report),
+        encoding="utf-8",
+    )
+
+    scorecard = replay_history.build_history_scorecard_from_report_dir(
+        report_dir,
+        candidate_key=candidate_key,
+        min_days=1,
+        min_samples=1,
+    )
+    written = replay_history.write_history_evidence(
+        scorecard=scorecard,
+        out_dir=tmp_path / "out",
+        repo_root=Path(__file__).resolve().parents[3],
+    )
+    evidence = json.loads(Path(written["history_evidence"]).read_text(encoding="utf-8"))
+    manifest = json.loads(Path(written["manifest"]).read_text(encoding="utf-8"))
+
+    assert evidence["candidate_key"] == candidate_key
+    assert evidence["samples"][0]["net_bps"] == 6.0
+    assert evidence["daily_returns"]["values"] == {"2026-06-20": 0.0006}
+    assert manifest["candidate_key"] == candidate_key
+    assert manifest["policy"] == evidence["policy"]
 
 
 def test_report_includes_candidate_replay_scorecard_for_ic_candidate(tmp_path):

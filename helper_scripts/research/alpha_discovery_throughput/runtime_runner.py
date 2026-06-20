@@ -16,12 +16,15 @@ import re
 from pathlib import Path
 from typing import Any
 
+from polymarket_leadlag import replay_history as polymarket_replay_history
+
 from . import RUNNER_VERSION
 from .discovery_loop import build_discovery_plan
 
 RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v1"
 DEFAULT_MAX_ARTIFACT_AGE_SECONDS = 6 * 60 * 60
 DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS = 36 * 60 * 60
+DEFAULT_POLYMARKET_REPLAY_HISTORY_REPORT_LIMIT = 4096
 
 
 def _utc_now() -> dt.datetime:
@@ -940,6 +943,30 @@ def _polymarket_candidate_key(candidate: dict[str, Any]) -> str | None:
     return f"polymarket_leadlag_ic|{bucket}|{symbol}|{horizon_text}"
 
 
+def _polymarket_replay_history_scorecard(
+    report_dir: Path,
+    *,
+    candidate_key: str | None,
+) -> dict[str, Any]:
+    limit = _int(
+        os.environ.get("OPENCLAW_POLYMARKET_REPLAY_HISTORY_REPORT_LIMIT"),
+        DEFAULT_POLYMARKET_REPLAY_HISTORY_REPORT_LIMIT,
+    )
+    try:
+        return polymarket_replay_history.build_history_scorecard_from_report_dir(
+            report_dir,
+            candidate_key=candidate_key,
+            limit=limit,
+        )
+    except Exception as exc:  # noqa: BLE001 - killboard must survive diagnostic failure.
+        return {
+            "status": "REPLAY_HISTORY_ERROR",
+            "reason": f"{type(exc).__name__}:{exc}",
+            "candidate_key": candidate_key,
+            "promotion_boundary": "history_diagnostic_error_not_source_or_signal_failure",
+        }
+
+
 def collect_polymarket_leadlag_arm(
     data_dir: Path,
     *,
@@ -1009,6 +1036,15 @@ def collect_polymarket_leadlag_arm(
         if isinstance(replay_scorecard.get("selected_summary"), dict)
         else {}
     )
+    replay_history_scorecard = _polymarket_replay_history_scorecard(
+        path.parent,
+        candidate_key=candidate_key,
+    )
+    replay_history_summary = (
+        replay_history_scorecard.get("selected_summary")
+        if isinstance(replay_history_scorecard.get("selected_summary"), dict)
+        else {}
+    )
     sample_gate_recheck = _polymarket_sample_gate_recheck_scorecard(
         now_utc=now_utc,
         sample_count=sample_count,
@@ -1067,6 +1103,29 @@ def collect_polymarket_leadlag_arm(
                 "execution_realism_status"
             ),
             "candidate_replay_scorecard": replay_scorecard or None,
+            "candidate_replay_history_status": replay_history_scorecard.get("status"),
+            "candidate_replay_history_reason": replay_history_scorecard.get("reason"),
+            "candidate_replay_history_report_count": replay_history_scorecard.get("report_count"),
+            "candidate_replay_history_matched_report_count": replay_history_scorecard.get(
+                "matched_report_count"
+            ),
+            "candidate_replay_history_sample_count": replay_history_summary.get("sample_count"),
+            "candidate_replay_history_n_days": replay_history_summary.get("n_days"),
+            "candidate_replay_history_min_days": replay_history_summary.get("min_history_days"),
+            "candidate_replay_history_min_samples": replay_history_summary.get(
+                "min_history_samples"
+            ),
+            "candidate_replay_history_net_bps_mean": replay_history_summary.get("net_bps_mean"),
+            "candidate_replay_history_holdout_net_bps_mean": replay_history_summary.get(
+                "holdout_net_bps_mean"
+            ),
+            "candidate_replay_history_pbo_day_count": replay_history_summary.get(
+                "pbo_history_day_count"
+            ),
+            "candidate_replay_history_execution_realism_status": replay_history_summary.get(
+                "execution_realism_status"
+            ),
+            "candidate_replay_history_scorecard": replay_history_scorecard or None,
             "preliminary_raw_candidate_count": verdict.get("preliminary_raw_candidate_count"),
             "preliminary_hac_candidate_count": verdict.get("preliminary_hac_candidate_count"),
             "pre_gate_hac_watchlist_count": verdict.get("pre_gate_hac_watchlist_count"),

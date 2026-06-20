@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Replay History Accumulator
+
+- Added `polymarket_leadlag.replay_history`, an artifact-only accumulator that scans dated lead-lag reports, dedupes explicit replay samples by candidate/sample id, merges PBO daily grids, and writes AEG-compatible history evidence.
+- Existing `polymarket_leadlag_ic_cron.sh` now runs the accumulator fail-soft after each IC refresh and logs `candidate_replay_history_*` fields.
+- Latest natural cron evidence: candidate `polymarket_leadlag_ic|price_target|SOLUSDT|15m`, report_count=4, matched=4, sample=33, n_days=1, net mean `0.12063233bp`, history status `REPLAY_HISTORY_DAYS_INSUFFICIENT`.
+- AEG direct rows consume the history evidence, but candidate metrics remain `FAIL` with `n_days_below_30` and `missing_pbo`; PSR is only `0.50811419`, DSR `0.0`, execution realism `UNMEASURED`.
+- Alpha scorecard remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`, promotion_ready=0. This closes an automation gap, not the profitability gap.
+- Boundary: artifact-only; no PG write, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, signal, execution proof, or promotion proof.
+
 ## 2026-06-20 Polymarket Lead-Lag Candidate Replay PnL
 
 - Added deterministic paper replay for Polymarket IC candidates: `side = sign(IC) * sign(delta_prob_yes)`, explicit diagnostic round-trip cost default 4.0bp.

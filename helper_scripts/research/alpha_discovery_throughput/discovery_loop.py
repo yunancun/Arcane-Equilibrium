@@ -593,6 +593,42 @@ def classify_profitability_blocker(
                     "candidate_replay_execution_realism_status": detail.get(
                         "candidate_replay_execution_realism_status"
                     ),
+                    "candidate_replay_history_status": detail.get(
+                        "candidate_replay_history_status"
+                    ),
+                    "candidate_replay_history_reason": detail.get(
+                        "candidate_replay_history_reason"
+                    ),
+                    "candidate_replay_history_report_count": detail.get(
+                        "candidate_replay_history_report_count"
+                    ),
+                    "candidate_replay_history_matched_report_count": detail.get(
+                        "candidate_replay_history_matched_report_count"
+                    ),
+                    "candidate_replay_history_sample_count": detail.get(
+                        "candidate_replay_history_sample_count"
+                    ),
+                    "candidate_replay_history_n_days": detail.get(
+                        "candidate_replay_history_n_days"
+                    ),
+                    "candidate_replay_history_min_days": detail.get(
+                        "candidate_replay_history_min_days"
+                    ),
+                    "candidate_replay_history_min_samples": detail.get(
+                        "candidate_replay_history_min_samples"
+                    ),
+                    "candidate_replay_history_net_bps_mean": detail.get(
+                        "candidate_replay_history_net_bps_mean"
+                    ),
+                    "candidate_replay_history_holdout_net_bps_mean": detail.get(
+                        "candidate_replay_history_holdout_net_bps_mean"
+                    ),
+                    "candidate_replay_history_pbo_day_count": detail.get(
+                        "candidate_replay_history_pbo_day_count"
+                    ),
+                    "candidate_replay_history_execution_realism_status": detail.get(
+                        "candidate_replay_history_execution_realism_status"
+                    ),
                 },
             )
         return _finish_blocker_row(

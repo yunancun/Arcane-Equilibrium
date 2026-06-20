@@ -40,6 +40,10 @@ def test_wrapper_readonly_pg_and_status_artifacts_only():
     assert "polymarket_leadlag_ic.last_fire" in src
     assert "polymarket_leadlag_ic.log" in src
     assert "polymarket_leadlag_latest.json" in src
+    assert "polymarket_leadlag.replay_history" in src
+    assert "polymarket_leadlag_replay_history_" in src
+    assert "candidate_replay_history_status" in src
+    assert "candidate_replay_history_evidence" in src
     assert "label_status_counts" in src
     assert "oldest_unmatured_exit_target_utc" in src
     assert "max_overlap_adjusted_ic_points" in src

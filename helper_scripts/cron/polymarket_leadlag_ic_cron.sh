@@ -136,6 +136,7 @@ export OPENCLAW_DATA_DIR="$DATA"
 STAMP="$(date -u '+%Y%m%dT%H%M%SZ')"
 OUT="${ARTIFACT_DIR}/polymarket_leadlag_${STAMP}.json"
 LATEST="${ARTIFACT_DIR}/polymarket_leadlag_latest.json"
+HISTORY_DIR="${DATA}/alpha_history_runs/polymarket_leadlag_replay_history_${STAMP}"
 
 ARGS=(
     -m polymarket_leadlag.harness
@@ -159,7 +160,23 @@ rc=0
     "$PYBIN" "${ARGS[@]}"
 ) >> "$LOG" 2>&1 || rc=$?
 
-STATUS_JSON=$(LEADLAG_OUT="$OUT" LEADLAG_LATEST="$LATEST" LEADLAG_RC="$rc" "$PYBIN" - <<'PY' 2>>"$LOG" || true
+history_rc=0
+HISTORY_STATUS_JSON=""
+if [[ "$rc" -eq 0 ]]; then
+    HISTORY_STATUS_JSON=$(
+        cd "$BASE"
+        export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+        export PYTHONDONTWRITEBYTECODE=1
+        "$PYBIN" -m polymarket_leadlag.replay_history \
+            --report-dir "$ARTIFACT_DIR" \
+            --out-dir "$HISTORY_DIR"
+    2>>"$LOG") || history_rc=$?
+    if [[ "$history_rc" -ne 0 ]]; then
+        echo "[$(ts)] WARN: replay history accumulator failed rc=${history_rc}" >> "$LOG"
+    fi
+fi
+
+STATUS_JSON=$(LEADLAG_OUT="$OUT" LEADLAG_LATEST="$LATEST" LEADLAG_RC="$rc" LEADLAG_HISTORY_RC="$history_rc" LEADLAG_HISTORY_STATUS_JSON="$HISTORY_STATUS_JSON" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
 import hashlib
 import json
@@ -168,6 +185,7 @@ import os
 out = os.environ["LEADLAG_OUT"]
 latest = os.environ["LEADLAG_LATEST"]
 rc = int(os.environ["LEADLAG_RC"])
+history_rc = int(os.environ.get("LEADLAG_HISTORY_RC") or 0)
 status = {
     "ts_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "check": "polymarket_leadlag_ic",
@@ -175,7 +193,12 @@ status = {
     "artifact_path": out,
     "latest_path": latest,
     "boundary": "artifact_only_readonly_pg_no_signal_no_order",
+    "candidate_replay_history_rc": history_rc,
 }
+try:
+    history_status = json.loads(os.environ.get("LEADLAG_HISTORY_STATUS_JSON") or "{}")
+except json.JSONDecodeError:
+    history_status = {}
 try:
     with open(out, "r", encoding="utf-8") as fh:
         payload = json.load(fh)
@@ -243,6 +266,15 @@ try:
         "price_rows": counts.get("price_rows"),
         "price_source": payload.get("price_source"),
         "ic_result_count": len(payload.get("ic_results") or []),
+        "candidate_replay_history_status": history_status.get("status"),
+        "candidate_replay_history_candidate_key": history_status.get("candidate_key"),
+        "candidate_replay_history_report_count": history_status.get("report_count"),
+        "candidate_replay_history_matched_report_count": history_status.get("matched_report_count"),
+        "candidate_replay_history_sample_count": history_status.get("sample_count"),
+        "candidate_replay_history_n_days": history_status.get("n_days"),
+        "candidate_replay_history_net_bps_mean": history_status.get("net_bps_mean"),
+        "candidate_replay_history_evidence": history_status.get("history_evidence"),
+        "candidate_replay_history_summary": history_status.get("summary"),
     })
 except Exception as exc:  # noqa: BLE001 - status log must survive failed report write.
     status.update({
