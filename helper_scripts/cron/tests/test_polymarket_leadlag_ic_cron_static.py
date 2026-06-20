@@ -40,6 +40,8 @@ def test_wrapper_readonly_pg_and_status_artifacts_only():
     assert "polymarket_leadlag_ic.last_fire" in src
     assert "polymarket_leadlag_ic.log" in src
     assert "polymarket_leadlag_latest.json" in src
+    assert "label_status_counts" in src
+    assert "oldest_unmatured_exit_target_utc" in src
     assert "PYTHONDONTWRITEBYTECODE=1" in src
     assert src.rstrip().endswith("exit 0")
 

@@ -99,6 +99,46 @@ def test_fixture_report_fails_closed_until_min_points(tmp_path):
     assert report["counts"]["bucket_delta_counts"][BUCKET_EVENT_REG] == 2
 
 
+def test_label_readiness_marks_unmatured_forward_target(tmp_path):
+    root = tmp_path / "pm"
+    start = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    for i, prob in enumerate((0.40, 0.46)):
+        ts = (start + dt.timedelta(minutes=15 * i)).isoformat()
+        _write_run(root, f"hourly-topn-{i}", ts, [{
+            "market_id": "101",
+            "question": "Will the SEC approve a spot Bitcoin ETF?",
+            "event_title": "Bitcoin ETF approval",
+            "discovery_queries": ["kw:sec bitcoin"],
+            "outcome_prices": [prob, 1 - prob],
+        }])
+    rows, meta = harness.load_snapshot_rows(root, query_set_version="v2", mode="hourly-topn")
+    price_rows = _price_rows("BTCUSDT", start, [100.0, 101.0])
+    report = harness.build_report(
+        snapshot_rows=rows,
+        snapshot_meta=meta,
+        price_rows=price_rows,
+        query_set_version="v2",
+        mode="hourly-topn",
+        symbols=("BTCUSDT",),
+        horizons_minutes=(15,),
+        min_points=20,
+        max_align_lag_minutes=1,
+        min_abs_ic=0.1,
+        min_abs_t=1.0,
+        price_source="fixture",
+    )
+
+    readiness = report["counts"]["label_readiness"]
+    assert report["counts"]["delta_rows"] == 1
+    assert report["counts"]["feature_points"] == 1
+    assert report["counts"]["joined_rows"] == 0
+    assert readiness["feature_horizon_pairs"] == 1
+    assert readiness["joinable_pairs"] == 0
+    assert readiness["status_counts"] == {"exit_target_after_latest_price": 1}
+    assert readiness["by_horizon"]["15"] == {"exit_target_after_latest_price": 1}
+    assert readiness["oldest_unmatured_exit_target_utc"] == "2026-06-20T00:30:00+00:00"
+
+
 def test_join_forward_returns_uses_prices_at_or_after_snapshot():
     feature = {
         "snapshot_ts_ms": int(dt.datetime(2026, 6, 20, 0, 0, 30, tzinfo=dt.timezone.utc).timestamp() * 1000),

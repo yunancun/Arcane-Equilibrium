@@ -459,6 +459,78 @@ def join_forward_returns(
     return joined
 
 
+def diagnose_label_readiness(
+    features: Iterable[dict[str, Any]],
+    price_rows: Iterable[dict[str, Any]],
+    *,
+    horizons_minutes: tuple[int, ...],
+    max_align_lag_minutes: int,
+) -> dict[str, Any]:
+    indexed = index_prices(price_rows)
+    max_lag_ms = int(max_align_lag_minutes * 60 * 1000)
+    latest_price_ts_by_symbol = {
+        symbol: max(series["times"])
+        for symbol, series in indexed.items()
+        if series.get("times")
+    }
+    status_counts: Counter[str] = Counter()
+    by_horizon: dict[int, Counter[str]] = {int(h): Counter() for h in horizons_minutes}
+    by_symbol: dict[str, Counter[str]] = defaultdict(Counter)
+    by_bucket_horizon: dict[str, Counter[str]] = defaultdict(Counter)
+    unmatured_exit_targets: list[int] = []
+    feature_ts_values: list[int] = []
+
+    for feature in features:
+        ts_ms = int(feature["snapshot_ts_ms"])
+        feature_ts_values.append(ts_ms)
+        symbol = str(feature["symbol"])
+        bucket = str(feature["bucket"])
+        latest_price_ts = latest_price_ts_by_symbol.get(symbol)
+        p0 = _price_at_or_after(indexed, symbol, ts_ms, max_lag_ms=max_lag_ms)
+        for horizon in horizons_minutes:
+            horizon = int(horizon)
+            target_ms = ts_ms + horizon * 60 * 1000
+            if latest_price_ts is None:
+                status = "missing_symbol_price"
+            elif latest_price_ts < ts_ms:
+                status = "entry_target_after_latest_price"
+            elif p0 is None:
+                status = "missing_entry_price_or_align_gap"
+            elif latest_price_ts < target_ms:
+                status = "exit_target_after_latest_price"
+                unmatured_exit_targets.append(target_ms)
+            elif _price_at_or_after(indexed, symbol, target_ms, max_lag_ms=max_lag_ms) is None:
+                status = "missing_exit_price_or_align_gap"
+            else:
+                status = "joinable"
+
+            status_counts[status] += 1
+            by_horizon[horizon][status] += 1
+            by_symbol[symbol][status] += 1
+            by_bucket_horizon[f"{bucket}|{horizon}"][status] += 1
+
+    return {
+        "feature_horizon_pairs": sum(status_counts.values()),
+        "joinable_pairs": status_counts.get("joinable", 0),
+        "status_counts": dict(status_counts),
+        "by_horizon": {str(h): dict(counter) for h, counter in sorted(by_horizon.items())},
+        "by_symbol": {symbol: dict(counter) for symbol, counter in sorted(by_symbol.items())},
+        "by_bucket_horizon": {
+            key: dict(counter) for key, counter in sorted(by_bucket_horizon.items())
+        },
+        "latest_price_ts_utc_by_symbol": {
+            symbol: _ms_to_iso(ts_ms) for symbol, ts_ms in sorted(latest_price_ts_by_symbol.items())
+        },
+        "latest_feature_ts_utc": _ms_to_iso(max(feature_ts_values)) if feature_ts_values else None,
+        "oldest_unmatured_exit_target_utc": (
+            _ms_to_iso(min(unmatured_exit_targets)) if unmatured_exit_targets else None
+        ),
+        "newest_unmatured_exit_target_utc": (
+            _ms_to_iso(max(unmatured_exit_targets)) if unmatured_exit_targets else None
+        ),
+    }
+
+
 def _mean(xs: list[float]) -> Optional[float]:
     return sum(xs) / len(xs) if xs else None
 
@@ -531,6 +603,11 @@ def build_report(
         horizons_minutes=horizons_minutes,
         max_align_lag_minutes=max_align_lag_minutes,
     )
+    label_readiness = diagnose_label_readiness(
+        features, price_rows,
+        horizons_minutes=horizons_minutes,
+        max_align_lag_minutes=max_align_lag_minutes,
+    )
     ic_results = compute_ic(joined)
     bucket_counts = Counter(row["bucket"] for row in deltas)
     joined_counts = Counter(f"{row['bucket']}|{row['symbol']}|{row['horizon_minutes']}" for row in joined)
@@ -593,6 +670,7 @@ def build_report(
             "price_rows": len(price_rows),
             "bucket_delta_counts": dict(bucket_counts),
             "joined_counts": dict(joined_counts),
+            "label_readiness": label_readiness,
             "delta_meta": delta_meta,
         },
         "ic_results": ic_results,

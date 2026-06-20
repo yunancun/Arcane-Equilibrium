@@ -366,6 +366,13 @@ def test_polymarket_leadlag_arm_captures_insufficient_sample(tmp_path):
             "delta_rows": 400,
             "joined_rows": 120,
             "price_rows": 320,
+            "label_readiness": {
+                "feature_horizon_pairs": 18,
+                "joinable_pairs": 0,
+                "status_counts": {"exit_target_after_latest_price": 18},
+                "by_horizon": {"15": {"exit_target_after_latest_price": 6}},
+                "oldest_unmatured_exit_target_utc": "2026-06-20T12:22:00+00:00",
+            },
         },
     })
 
@@ -381,6 +388,9 @@ def test_polymarket_leadlag_arm_captures_insufficient_sample(tmp_path):
     assert arm["artifacts_ready"] is False
     assert arm["detail"]["verdict_status"] == "INSUFFICIENT_SAMPLE"
     assert arm["detail"]["snapshot_rows"] == 860
+    assert arm["detail"]["label_joinable_pairs"] == 0
+    assert arm["detail"]["label_status_counts"] == {"exit_target_after_latest_price": 18}
+    assert arm["detail"]["oldest_unmatured_exit_target_utc"] == "2026-06-20T12:22:00+00:00"
     assert arm["detail"]["promotion_boundary"] == "research_context_only_not_signal_or_promotion_proof"
     assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
     assert plan["arms"][0]["reason"] == "sample_count_below_gate"

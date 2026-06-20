@@ -183,6 +183,7 @@ try:
         status["sha256"] = hashlib.sha256(fh.read()).hexdigest()
     verdict = payload.get("verdict") or {}
     counts = payload.get("counts") or {}
+    label_readiness = counts.get("label_readiness") or {}
     status.update({
         "verdict_status": verdict.get("status"),
         "reason": verdict.get("reason"),
@@ -194,7 +195,12 @@ try:
         "snapshot_rows": counts.get("snapshot_rows"),
         "snapshot_distinct_timestamps": counts.get("snapshot_distinct_timestamps"),
         "delta_rows": counts.get("delta_rows"),
+        "feature_points": counts.get("feature_points"),
         "joined_rows": counts.get("joined_rows"),
+        "label_feature_horizon_pairs": label_readiness.get("feature_horizon_pairs"),
+        "label_joinable_pairs": label_readiness.get("joinable_pairs"),
+        "label_status_counts": label_readiness.get("status_counts"),
+        "oldest_unmatured_exit_target_utc": label_readiness.get("oldest_unmatured_exit_target_utc"),
         "price_rows": counts.get("price_rows"),
         "price_source": payload.get("price_source"),
         "ic_result_count": len(payload.get("ic_results") or []),
