@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Lead-Lag IC Cron + Killboard
+
+- Added `helper_scripts/cron/polymarket_leadlag_ic_cron.sh` and installer, then installed Linux runtime cron at `17 * * * *`, after the active Polymarket v2 hourly collector at minute 7.
+- Wrapper stays artifact-only and read-only: env-file PG creds, `PGOPTIONS=-c default_transaction_read_only=on`, dated/latest report writes, status JSONL, heartbeat, stale lock, fail-soft exit.
+- Alpha discovery now includes arm `polymarket_leadlag_ic`; sample_count is max IC points per cell, not aggregate joined rows, so insufficient per-cell samples keep collecting.
+- Linux smoke wrote `/tmp/openclaw/research/polymarket_leadlag/polymarket_leadlag_20260620T120018Z.json` plus latest; sha256 `15d68093c1e618ae9bfb234b072b6e4a5d3113c28b799e9d1af9913f46b3fab6`; verdict `INSUFFICIENT_SAMPLE` with 860 snapshot rows, 1 distinct v2 timestamp, 0 delta/joined rows, 64 price rows, min_points 30.
+- Alpha discovery refresh `2026-06-20T12:00:33Z` shows Polymarket action `RUN_READ_ONLY_CAPTURE`, sample_count 0, ready/probe 0.
+- Boundary: source/test/docs + selective Linux source sync + user crontab + `/tmp/openclaw` artifact/log/heartbeat writes only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Lead-Lag IC Harness
 
 - Added `helper_scripts/research/polymarket_leadlag/` as the fail-closed IC loop for active Polymarket v2 hourly data.
