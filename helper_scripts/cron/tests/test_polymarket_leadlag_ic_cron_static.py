@@ -45,6 +45,9 @@ def test_wrapper_readonly_pg_and_status_artifacts_only():
     assert "max_overlap_adjusted_ic_points" in src
     assert "preliminary_raw_candidate_count" in src
     assert "preliminary_hac_candidate_count" in src
+    assert "pre_gate_hac_watchlist_count" in src
+    assert "best_pre_gate_hac_watch" in src
+    assert "min_samples_remaining_to_gate" in src
     assert "significance_t_stat" in src
     assert "max_abs_t_stat_hac" in src
     assert "max_bh_q" in src

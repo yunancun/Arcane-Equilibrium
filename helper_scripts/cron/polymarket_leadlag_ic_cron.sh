@@ -184,12 +184,16 @@ try:
     verdict = payload.get("verdict") or {}
     counts = payload.get("counts") or {}
     label_readiness = counts.get("label_readiness") or {}
+    watchlist = payload.get("pre_gate_hac_watchlist") or []
+    best_watch = watchlist[0] if watchlist else None
     status.update({
         "verdict_status": verdict.get("status"),
         "reason": verdict.get("reason"),
         "candidate_count": verdict.get("candidate_count"),
         "preliminary_raw_candidate_count": verdict.get("preliminary_raw_candidate_count"),
         "preliminary_hac_candidate_count": verdict.get("preliminary_hac_candidate_count"),
+        "pre_gate_hac_watchlist_count": verdict.get("pre_gate_hac_watchlist_count"),
+        "best_pre_gate_hac_watch": best_watch,
         "significance_t_stat": verdict.get("significance_t_stat"),
         "max_bh_q": verdict.get("max_bh_q"),
         "query_set_version": payload.get("query_set_version"),
@@ -203,6 +207,7 @@ try:
         "joined_rows": counts.get("joined_rows"),
         "max_ic_points": counts.get("max_ic_points"),
         "max_overlap_adjusted_ic_points": counts.get("max_overlap_adjusted_ic_points"),
+        "min_samples_remaining_to_gate": counts.get("min_samples_remaining_to_gate"),
         "max_abs_t_stat_hac": counts.get("max_abs_t_stat_hac"),
         "label_feature_horizon_pairs": label_readiness.get("feature_horizon_pairs"),
         "label_joinable_pairs": label_readiness.get("joinable_pairs"),

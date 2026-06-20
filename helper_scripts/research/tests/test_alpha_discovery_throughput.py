@@ -480,7 +480,25 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
             "price_rows": 9000,
             "max_ic_points": 35,
             "max_overlap_adjusted_ic_points": 12,
+            "min_samples_remaining_to_gate": 18,
         },
+        "verdict": {
+            "status": "INSUFFICIENT_SAMPLE",
+            "reason": "max overlap-adjusted IC points 12 below min_points 30",
+            "candidate_count": 0,
+            "pre_gate_hac_watchlist_count": 1,
+            "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
+        },
+        "pre_gate_hac_watchlist": [{
+            "bucket": "event_reg",
+            "symbol": "BTCUSDT",
+            "horizon_minutes": 240,
+            "overlap_adjusted_sample_floor": 12,
+            "sample_gap_to_min_points": 18,
+            "t_stat_hac": 2.7,
+            "bh_q_value_hac_approx": 0.04,
+            "gate_blocker": "sample_floor_below_min_points",
+        }],
         "ic_results": [
             {
                 "bucket": "event_reg",
@@ -503,6 +521,9 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
     assert arm["sample_count"] == 12
     assert arm["detail"]["max_ic_points"] == 35
     assert arm["detail"]["max_overlap_adjusted_ic_points"] == 12
+    assert arm["detail"]["min_samples_remaining_to_gate"] == 18
+    assert arm["detail"]["pre_gate_hac_watchlist_count"] == 1
+    assert arm["detail"]["best_pre_gate_hac_watch"]["gate_blocker"] == "sample_floor_below_min_points"
     assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
     assert plan["arms"][0]["reason"] == "sample_count_below_gate"
 
