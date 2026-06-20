@@ -27,6 +27,7 @@ esac
 
 BASE="${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}"
 DATA="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
+QUERY_SET="${OPENCLAW_POLYMARKET_QUERY_SET:-}"
 LOG_DIR="${DATA}/logs"
 LOG="${LOG_DIR}/polymarket_axis_cron.log"
 LOCK_ROOT="${DATA}/locks"
@@ -38,6 +39,14 @@ HEARTBEAT_DIR="${DATA}/cron_heartbeat"
 mkdir -p "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR"
 
 ts() { date -u '+%Y-%m-%d %H:%M:%S'; }
+
+case "$QUERY_SET" in
+    ""|v1|v2) ;;
+    *)
+        echo "[$(ts)] ERROR: invalid OPENCLAW_POLYMARKET_QUERY_SET='$QUERY_SET' (expect v1|v2)" >> "$LOG"
+        exit 0
+        ;;
+esac
 
 export OPENCLAW_BASE_DIR="$BASE"
 export OPENCLAW_DATA_DIR="$DATA"
@@ -78,9 +87,14 @@ if [[ -z "$PYBIN" ]]; then
     fi
 fi
 
-echo "[$(ts)] === polymarket_axis start mode=$MODE ===" >> "$LOG"
+QUERY_SET_ARGS=()
+if [[ -n "$QUERY_SET" ]]; then
+    QUERY_SET_ARGS=(--query-set "$QUERY_SET")
+fi
+
+echo "[$(ts)] === polymarket_axis start mode=$MODE query_set=${QUERY_SET:-default} ===" >> "$LOG"
 rc=0
-"$PYBIN" "$CLI" --mode "$MODE" --created-by-role cron >> "$LOG" 2>&1 || rc=$?
+"$PYBIN" "$CLI" --mode "$MODE" "${QUERY_SET_ARGS[@]}" --created-by-role cron >> "$LOG" 2>&1 || rc=$?
 echo "[$(ts)] === polymarket_axis end mode=$MODE rc=${rc} ===" >> "$LOG"
 
 # fail-soft：rc 已落 log；採集結果由 run dir manifest 傳達，不靠 cron mail。

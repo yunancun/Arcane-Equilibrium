@@ -124,6 +124,7 @@ def write_run(
     runtime_host: Optional[str] = None,
     created_by_role: str = "E1",
     parquet_mirror: bool = True,
+    query_set_version: str = QUERY_SET_VERSION,
 ) -> dict[str, Any]:
     """單輪 run 落 artifact；回各檔路徑 + manifest 摘要。
 
@@ -188,7 +189,7 @@ def write_run(
         "git_diff_sha256": prov["git_diff_sha256"],
         "runtime_host": runtime_host or socket.gethostname(),
         "collector_version": COLLECTOR_VERSION,
-        "query_set_version": QUERY_SET_VERSION,
+        "query_set_version": query_set_version,
         "upstream_attribution": UPSTREAM_ATTRIBUTION,
         "stats": stats,
         "errors": errors,

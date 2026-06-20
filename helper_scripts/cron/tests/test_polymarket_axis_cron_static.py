@@ -52,6 +52,13 @@ def test_installer_hourly_default_commented_operator_gated():
     assert 'ENTRY_HOURLY_ACTIVE="7 * * * *' in src
 
 
+def test_installer_can_persist_query_set_env():
+    src = _src(INSTALLER)
+    assert "OPENCLAW_POLYMARKET_QUERY_SET" in src
+    assert 'ENV_PREFIX="${ENV_PREFIX} OPENCLAW_POLYMARKET_QUERY_SET=${OPENCLAW_POLYMARKET_QUERY_SET}"' in src
+    assert "must be v1 or v2" in src
+
+
 def test_installer_linux_guard_apply_gate_idempotent_remove():
     src = _src(INSTALLER)
     assert 'uname -s' in src and '!= "Linux"' in src.replace("'", '"')
@@ -68,6 +75,13 @@ def test_wrapper_lock_heartbeat_failsoft():
     assert "cron_heartbeat" in src
     assert src.rstrip().endswith("exit 0")  # fail-soft 收尾。
     assert 'case "$MODE"' in src and "hourly-topn" in src
+
+
+def test_wrapper_query_set_env_pass_through():
+    src = _src(WRAPPER)
+    assert "OPENCLAW_POLYMARKET_QUERY_SET" in src
+    assert 'QUERY_SET_ARGS=(--query-set "$QUERY_SET")' in src
+    assert '"$PYBIN" "$CLI" --mode "$MODE" "${QUERY_SET_ARGS[@]}" --created-by-role cron' in src
 
 
 def test_wrapper_zero_secrets_zero_pg():

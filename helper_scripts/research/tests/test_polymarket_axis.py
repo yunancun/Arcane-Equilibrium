@@ -27,6 +27,9 @@ from polymarket_axis import (
     LANE_RETROSPECTIVE,
     LANE_SNAPSHOT,
     QUERY_SET_V1_KEYWORDS,
+    QUERY_SET_V1_TAG,
+    QUERY_SET_V2_KEYWORDS,
+    QUERY_SET_V2_TAG,
     QUERY_SET_VERSION,
     UPSTREAM_ATTRIBUTION,
 )
@@ -108,6 +111,19 @@ def _event(eid="1", markets=None, **extra):
     }
     e.update(extra)
     return e
+
+
+# ---------------------------------------------------------------------------
+# query-set 版本契約
+# ---------------------------------------------------------------------------
+
+def test_query_set_v2_is_event_biased_and_keeps_v1_default():
+    assert QUERY_SET_VERSION == "v1"
+    assert QUERY_SET_V1_TAG == QUERY_SET_V2_TAG == "crypto"
+    banned_exact_terms = {"bitcoin", "btc", "ethereum", "eth", "solana", "xrp",
+                          "bitcoin price", "all time high"}
+    assert banned_exact_terms.isdisjoint(set(QUERY_SET_V2_KEYWORDS))
+    assert {"sec crypto", "fomc crypto", "crypto regulation"} <= set(QUERY_SET_V2_KEYWORDS)
 
 
 # ---------------------------------------------------------------------------
@@ -317,6 +333,10 @@ class TestFlatten:
         assert row["query_set_version"] == QUERY_SET_VERSION == "v1"
         assert row["lane"] == LANE_SNAPSHOT
         assert row["collector_git_sha"] == "abc"
+        row_v2 = collector_mod.flatten_market_row(
+            _market("202"), _event("2"), snapshot_ts_utc="t", collector_git_sha="abc",
+            row_source="public_search", query_set_version="v2")
+        assert row_v2["query_set_version"] == "v2"
 
     def test_collector_code_has_no_relevance_truncation_tokens(self):
         # 負面不變量：採集端零 relevance 截斷。tokenize 剝 COMMENT/STRING 後驗
@@ -539,6 +559,32 @@ class TestSnapshotSweep:
         assert result["stats"]["mode_top_n"] == 50
         assert "follow_up" not in result["stats"]
 
+    def test_hourly_topn_v2_adds_keyword_supplement_without_follow_up(self):
+        tracker = state_mod.TrackerState()
+        tracker.record_seen(_market("99"), "ev9")  # hourly 仍不跑 resolution follow-up。
+        captured: list[str] = []
+
+        def router(url):
+            captured.append(url)
+            assert "/markets/" not in url
+            if "/public-search" in url:
+                if "q=sec+crypto" in url:
+                    return {"events": [_event("2", markets=[_market("22")])],
+                            "pagination": {"hasMore": False}}
+                return {"events": [], "pagination": {"hasMore": False}}
+            assert "/events" in url
+            return [_event("1", markets=[_market("11")])]
+
+        client, _ = _make_client(router)
+        result = collector_mod.collect_snapshot_sweep(
+            client, tracker, collector_git_sha="sha", tag_slug="crypto",
+            keywords=("sec crypto",), keyword_pages=1, top_n=50, query_set_version="v2")
+        assert any("/public-search" in c for c in captured)
+        assert result["stats"]["unique_events"] == 2
+        assert result["stats"]["keyword_supplement"]["sec crypto"]["events"] == 1
+        assert all(r["query_set_version"] == "v2" for r in result["rows"])
+        assert "follow_up" not in result["stats"]
+
     def test_keyword_failure_is_isolated(self):
         def router(url):
             if "/public-search" in url:
@@ -610,15 +656,17 @@ class TestRetrospective:
 # artifact：manifest 完整性 / append-only / lane 隔離
 # ---------------------------------------------------------------------------
 
-def _snapshot_run(tmp_path, run_id="daily-20260611T000000Z"):
+def _snapshot_run(tmp_path, run_id="daily-20260611T000000Z", query_set_version=QUERY_SET_VERSION):
     rows = [collector_mod.flatten_market_row(
-        _market(), _event(), snapshot_ts_utc="t", collector_git_sha="s", row_source="events_tag")]
+        _market(), _event(), snapshot_ts_utc="t", collector_git_sha="s",
+        row_source="events_tag", query_set_version=query_set_version)]
     return artifact_mod.write_run(
         lane=LANE_SNAPSHOT, mode="daily", run_id=run_id,
         repo_root=tmp_path,  # 非 git dir → provenance fail-soft "unknown"。
         stats={"snapshot_rows": 1}, errors=[],
         snapshot_rows=rows, raw_events=[{"event": _event()}], raw_markets=[],
-        artifact_root=tmp_path / "runs", parquet_mirror=False)
+        artifact_root=tmp_path / "runs", parquet_mirror=False,
+        query_set_version=query_set_version)
 
 
 class TestArtifact:
@@ -644,6 +692,14 @@ class TestArtifact:
         _snapshot_run(tmp_path)
         with pytest.raises(FileExistsError):
             _snapshot_run(tmp_path)  # 同 run_id 重寫 = 覆寫舊 snapshot，必拒。
+
+    def test_v2_manifest_and_rows_carry_query_set_version(self, tmp_path):
+        out = _snapshot_run(tmp_path, run_id="daily-v2", query_set_version="v2")
+        run_dir = Path(out["written"]["run_dir"])
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        row = json.loads((run_dir / "snapshots.jsonl").read_text(encoding="utf-8").splitlines()[0])
+        assert manifest["query_set_version"] == "v2"
+        assert row["query_set_version"] == "v2"
 
     def test_lane_isolation_rejects_cross_lane_payload(self, tmp_path):
         with pytest.raises(ValueError, match="snapshot lane"):
@@ -766,6 +822,41 @@ class TestCli:
         assert state_path.exists()
         loaded = state_mod.load_state(state_path)
         assert "11" in loaded.entries
+
+    def test_daily_v2_end_to_end_writes_v2_manifest_rows_and_keywords(self, tmp_path, monkeypatch):
+        from polymarket_axis import cli as cli_mod
+
+        captured: list[str] = []
+        router = _sweep_router(
+            tag_events=[_event("1", markets=[_market("11")])],
+            search_events_by_kw={"sec crypto": [_event("2", markets=[_market("22")])]},
+        )
+        real_client_cls = collector_mod.ThrottledJsonClient
+
+        def patched_client(**kwargs):
+            def fake_urlopen(req, timeout=None):
+                captured.append(req.full_url)
+                result = router(req.full_url)
+                if isinstance(result, Exception):
+                    raise result
+                return _FakeResponse(result)
+
+            kwargs.update({"urlopen": fake_urlopen, "sleep": lambda s: None, "min_interval_s": 0.0})
+            return real_client_cls(**kwargs)
+
+        monkeypatch.setattr(cli_mod.collector_mod, "ThrottledJsonClient", patched_client)
+        rc = cli_mod.main([
+            "--mode", "daily", "--data-root", str(tmp_path),
+            "--query-set", "v2", "--keyword-pages", "1", "--no-parquet-mirror",
+            "--run-id", "daily-v2-test",
+        ])
+        assert rc == 0
+        assert any("q=sec+crypto" in url for url in captured)
+        run_dir = tmp_path / "polymarket_axis_runs" / "daily-v2-test"
+        manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
+        rows = [json.loads(line) for line in (run_dir / "snapshots.jsonl").read_text(encoding="utf-8").splitlines()]
+        assert manifest["query_set_version"] == "v2"
+        assert rows and {r["query_set_version"] for r in rows} == {"v2"}
 
 
 # ---------------------------------------------------------------------------

@@ -381,6 +381,7 @@ def flatten_market_row(
     collector_git_sha: str,
     row_source: str,
     discovery_queries: Optional[list[str]] = None,
+    query_set_version: str = QUERY_SET_VERSION,
 ) -> dict[str, Any]:
     """單 market → 一行 snapshot row（QC memo §2 欄位最小集 + raw 保底）。
 
@@ -391,7 +392,7 @@ def flatten_market_row(
     row: dict[str, Any] = {
         "snapshot_ts_utc": snapshot_ts_utc,
         "lane": LANE_SNAPSHOT,
-        "query_set_version": QUERY_SET_VERSION,
+        "query_set_version": query_set_version,
         "collector_git_sha": collector_git_sha,
         "row_source": row_source,
         "discovery_queries": list(discovery_queries or []),
@@ -479,6 +480,7 @@ def flatten_event_rows(
     collector_git_sha: str,
     row_source: str,
     discovery_queries: Optional[list[str]] = None,
+    query_set_version: str = QUERY_SET_VERSION,
 ) -> list[dict[str, Any]]:
     """event → 各 market row。markets 缺席 / 空 = 0 行（無 market 可攤），
     但 raw event 仍由 caller 寫入 raw lane（不丟 event 本體）。"""
@@ -492,6 +494,7 @@ def flatten_event_rows(
             collector_git_sha=collector_git_sha,
             row_source=row_source,
             discovery_queries=discovery_queries,
+            query_set_version=query_set_version,
         )
         for m in markets if isinstance(m, dict)
     ]
@@ -516,13 +519,15 @@ def collect_snapshot_sweep(
     max_event_pages: int = MAX_EVENT_PAGES_DEFAULT,
     top_n: Optional[int] = None,
     now_iso: Optional[str] = None,
+    query_set_version: str = QUERY_SET_VERSION,
 ) -> dict[str, Any]:
     """snapshot lane 單輪 sweep（daily 全量 / hourly-topn 由參數差異化）。
 
     daily：tag 枚舉全分頁 + keyword 補充 + tracked follow-up。
     hourly-topn：top_n 給定時改走 order=volume24hr 降冪單頁 top-N（server-side
       排序非採集端 relevance 截斷——「只抓 top-N」本身是 QC memo §2 規定的
-      hourly 查詢範圍圈定），不跑 keyword 補充與 follow-up（daily 專責）。
+      hourly 查詢範圍圈定）。v1 保持不跑 keyword / follow-up；v2 追加事件
+      query-set keyword 補充，避免 hourly 母體只剩高量價格目標市場。
 
     回 {"rows", "raw_events", "raw_markets", "stats", "errors"}；
     tracker（state.TrackerState）就地更新，由 caller 決定何時持久化。
@@ -532,7 +537,7 @@ def collect_snapshot_sweep(
     raw_events: list[dict[str, Any]] = []
     raw_markets: list[dict[str, Any]] = []
     errors: list[str] = []
-    stats: dict[str, Any] = {"mode_top_n": top_n}
+    stats: dict[str, Any] = {"mode_top_n": top_n, "query_set_version": query_set_version}
 
     seen_market_ids: set[str] = set()
     # 兩階段：先聚合全部發現源（tag / keyword 重疊時記全部 query 標籤），再一次
@@ -570,6 +575,7 @@ def collect_snapshot_sweep(
                 collector_git_sha=collector_git_sha,
                 row_source=meta["row_source"],
                 discovery_queries=meta["queries"],
+                query_set_version=query_set_version,
             ))
             for m in (event.get("markets") or []):
                 if not isinstance(m, dict):
@@ -594,6 +600,17 @@ def collect_snapshot_sweep(
             stats["tag_enumeration"] = tag_stats
         except CollectorHTTPError as exc:
             errors.append(f"tag_topn:{exc}")
+        # v2 hourly 不是「只換 manifest 標籤」：保留 top-N 主路，再追加事件/監管
+        # keyword discovery。v1 默認行為不變。
+        if query_set_version != QUERY_SET_VERSION and keyword_pages > 0:
+            keyword_stats: dict[str, Any] = {}
+            for kw in keywords:
+                events, kw_stats = fetch_search_events(client, keyword=kw, max_pages=keyword_pages)
+                keyword_stats[kw] = kw_stats
+                if kw_stats.get("error"):
+                    errors.append(f"keyword:{kw}:{kw_stats['error']}")
+                _gather_events(events, f"kw:{kw}", "public_search")
+            stats["keyword_supplement"] = keyword_stats
         _emit_all()
     else:
         try:
@@ -639,6 +656,7 @@ def collect_snapshot_sweep(
                 snapshot_ts_utc=now,
                 collector_git_sha=collector_git_sha,
                 row_source="resolution_follow_up",
+                query_set_version=query_set_version,
             ))
             tracker.record_seen(market, entry.get("event_id", ""), seen_at_utc=now)
         stats["follow_up"] = {"attempted": len(follow_ids), "ok": follow_ok, "failed": follow_fail}
