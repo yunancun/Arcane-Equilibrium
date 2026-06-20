@@ -7,6 +7,7 @@ import json
 
 import screen as base
 import shallow_retune_screen as srs
+import shallow_retune_adversarial as adv
 
 
 def _bars(symbol: str, *, n: int = 16) -> list[dict]:
@@ -93,3 +94,62 @@ def test_report_marks_counterfactual_boundary_and_runtime_touch_context(tmp_path
     assert len(report["grid"]) == 1
     assert report["grid"][0]["evidence_boundary"] == "counterfactual_only_not_promotion_evidence"
     assert "promotion_boundary" in report["verdict"]
+
+
+def _candidate_for_adversarial_gate(*, death2=True, death3=True, dsr_eff=True, dsr_full=True):
+    return {
+        "g1_regime_attribution": {
+            "full_day_clustered_boot_t": 3.0,
+            "full_day_clustered_ci95": [0.01, 0.02],
+            "leave_one_crash_out": [
+                {"removed_rank": "top-1", "survives": True},
+                {"removed_rank": "luna+ftx_named", "survives": True},
+            ],
+        },
+        "g2_death_spiral_fixed_notional": {
+            "death_spiral_mc": [
+                {"cond_death_rate_per_entry": 0.02, "survivable_p95": death2},
+                {"cond_death_rate_per_entry": 0.03, "survivable_p95": death3},
+            ],
+        },
+        "g3_dsr": {
+            "dsr_survives_effective_n": dsr_eff,
+            "dsr_survives_full_trials": dsr_full,
+        },
+    }
+
+
+def test_adversarial_gate_distinguishes_conditional_from_strong():
+    assert adv.candidate_label(0.04, 2, 3, 0.03) == "K4_N2_C3_nf0.03"
+
+    strong = adv.adversarial_gate_status(
+        _candidate_for_adversarial_gate(),
+        pbo={"pbo": 0.20},
+    )
+    assert strong["conditional_adversarial_candidate"] is True
+    assert strong["strong_adversarial_candidate"] is True
+
+    conditional = adv.adversarial_gate_status(
+        _candidate_for_adversarial_gate(death3=False, dsr_full=False),
+        pbo={"pbo": 0.40},
+    )
+    assert conditional["conditional_adversarial_candidate"] is True
+    assert conditional["strong_adversarial_candidate"] is False
+    assert "g2_death3pct_p95_fail" in conditional["fail_reasons"]
+    assert "g3_dsr_full_trials_fail" in conditional["fail_reasons"]
+
+
+def test_adversarial_gate_blocks_overfit_or_death2_failure():
+    death_fail = adv.adversarial_gate_status(
+        _candidate_for_adversarial_gate(death2=False),
+        pbo={"pbo": 0.20},
+    )
+    assert death_fail["conditional_adversarial_candidate"] is False
+    assert "g2_death2pct_p95_fail" in death_fail["fail_reasons"]
+
+    pbo_fail = adv.adversarial_gate_status(
+        _candidate_for_adversarial_gate(),
+        pbo={"pbo": 0.75},
+    )
+    assert pbo_fail["conditional_adversarial_candidate"] is False
+    assert "g3_pbo_overfit" in pbo_fail["fail_reasons"]
