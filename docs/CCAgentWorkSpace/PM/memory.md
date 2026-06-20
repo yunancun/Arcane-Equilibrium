@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-20 FlashDip L1 Short-Exit Replay
+
+- Added read-only `shallow_retune_l1_short_exit_replay.py` for the v245 K6/N2/C3/nf0.5% 240m short-exit research signal, with queue-fill/adverse-through modeling against `market.l1_events` + `market.trades`.
+- Linux artifact `shallow_retune_l1_short_exit_replay_20260620T023713Z.json` sha256 `231d3c57ae8f8945e114a77b8e5b0f8688149ffae738e72c5c31b2ac47631be2` returned `L1_SHORT_EXIT_INSUFFICIENT_SAMPLE`: 3 APT/ATOM/AVAX candidate events had 608,227 trade rows but 0 L1 rows in the candidate window.
+- PM read: 2-day K6 retune remains blocked; 240m short-exit is not disproven, but is data-gated until future/instrumented K6 candidate windows have continuous L1 coverage.
+- Boundary: source/test/docs + selective Linux helper/test sync + read-only PG artifact only; no rebuild/restart, DB write, Bybit private call, or auth/risk/order/trading mutation.
+
 ## 2026-06-20 FlashDip Touchability Monitor
 
 - Added a read-only FlashDip touchability monitor that joins `trading.orders` to `trading.intents` and checks 1m lows from order_ts to maker timeout against `details.limit_price`.
