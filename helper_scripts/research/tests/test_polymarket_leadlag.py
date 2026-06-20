@@ -64,6 +64,14 @@ def test_bucket_classification_and_symbol_inference():
     assert harness.DEFAULT_SYMBOLS == ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT")
     assert harness.infer_symbol({"question": "Will Solana ETF approval happen?"}, set(harness.DEFAULT_SYMBOLS)) == "SOLUSDT"
     assert harness.infer_symbol({"question": "Will XRP lawsuit settle?"}, set(harness.DEFAULT_SYMBOLS)) == "XRPUSDT"
+    assert harness.DEFAULT_MACRO_PROXY_SYMBOLS == ("BTCUSDT", "ETHUSDT")
+    assert harness.infer_symbol_mappings({"question": "Will CPI increase crypto volatility?"}, set(harness.DEFAULT_SYMBOLS)) == [
+        ("BTCUSDT", "macro_event_reg"),
+        ("ETHUSDT", "macro_event_reg"),
+    ]
+    assert harness.infer_symbol_mappings({"question": "Will Bitcoin ETF approval happen?"}, set(harness.DEFAULT_SYMBOLS)) == [
+        ("BTCUSDT", "asset_direct"),
+    ]
 
 
 def test_fixture_report_fails_closed_until_min_points(tmp_path):
@@ -101,6 +109,64 @@ def test_fixture_report_fails_closed_until_min_points(tmp_path):
     assert report["counts"]["delta_rows"] == 2
     assert report["counts"]["joined_rows"] == 2
     assert report["counts"]["bucket_delta_counts"][BUCKET_EVENT_REG] == 2
+
+
+def test_generic_event_reg_maps_to_btc_eth_macro_proxy(tmp_path):
+    root = tmp_path / "pm"
+    start = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    for i, prob in enumerate((0.40, 0.45, 0.43)):
+        ts = (start + dt.timedelta(minutes=15 * i)).isoformat()
+        _write_run(root, f"hourly-topn-{i}", ts, [{
+            "market_id": "macro-101",
+            "question": "Will CPI increase crypto volatility?",
+            "event_title": "Crypto CPI macro event",
+            "discovery_queries": ["kw:cpi crypto"],
+            "outcome_prices": [prob, 1 - prob],
+        }])
+
+    rows, _meta = harness.load_snapshot_rows(root, query_set_version="v2", mode="hourly-topn")
+    deltas, delta_meta = harness.build_market_deltas(rows, allowed_symbols=set(harness.DEFAULT_SYMBOLS))
+    features = harness.aggregate_features(deltas)
+
+    assert delta_meta["skipped"] == {}
+    assert delta_meta["markets_with_rows"] == 1
+    assert delta_meta["market_symbol_series_with_rows"] == 2
+    assert delta_meta["symbol_source_counts"] == {"macro_event_reg": 6}
+    assert len(deltas) == 4
+    assert {(row["symbol"], row["symbol_source"]) for row in deltas} == {
+        ("BTCUSDT", "macro_event_reg"),
+        ("ETHUSDT", "macro_event_reg"),
+    }
+    assert {(row["symbol"], row["bucket"]) for row in features} == {
+        ("BTCUSDT", BUCKET_EVENT_REG),
+        ("ETHUSDT", BUCKET_EVENT_REG),
+    }
+
+
+def test_unmapped_non_macro_rows_emit_compact_diagnostics(tmp_path):
+    root = tmp_path / "pm"
+    start = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    for i, prob in enumerate((0.40, 0.45)):
+        ts = (start + dt.timedelta(minutes=15 * i)).isoformat()
+        _write_run(root, f"hourly-topn-{i}", ts, [{
+            "market_id": "base-101",
+            "question": "Will Base launch a token by June 30?",
+            "event_title": "Base token launch",
+            "market_slug": "will-base-launch-a-token",
+            "event_slug": "will-base-launch-a-token",
+            "discovery_queries": ["tag:crypto|order=volume24hr|top50"],
+            "outcome_prices": [prob, 1 - prob],
+        }])
+
+    rows, _meta = harness.load_snapshot_rows(root, query_set_version="v2", mode="hourly-topn")
+    deltas, delta_meta = harness.build_market_deltas(rows, allowed_symbols=set(harness.DEFAULT_SYMBOLS))
+    diagnostics = delta_meta["unmapped_symbol_diagnostics"]
+
+    assert deltas == []
+    assert delta_meta["skipped"] == {"unmapped_symbol": 2}
+    assert diagnostics["bucket_counts"] == {"other": 2}
+    assert diagnostics["top_queries"] == {"tag:crypto|order=volume24hr|top50": 2}
+    assert diagnostics["examples"][0]["market_slug"] == "will-base-launch-a-token"
 
 
 def test_label_readiness_marks_unmatured_forward_target(tmp_path):

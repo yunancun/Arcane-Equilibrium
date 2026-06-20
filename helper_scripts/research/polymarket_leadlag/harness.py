@@ -67,6 +67,7 @@ except ImportError:  # pragma: no cover
 
 DEFAULT_HORIZONS_MINUTES = (15, 60, 240)
 DEFAULT_SYMBOLS = ("BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT")
+DEFAULT_MACRO_PROXY_SYMBOLS = ("BTCUSDT", "ETHUSDT")
 DEFAULT_QUERY_SET = "v2"
 DEFAULT_MODE = "hourly-topn"
 DEFAULT_MIN_POINTS = 20
@@ -159,6 +160,19 @@ def infer_symbol(row: dict[str, Any], allowed_symbols: set[str]) -> Optional[str
         if symbol in allowed_symbols and pattern.search(text):
             return symbol
     return None
+
+
+def infer_symbol_mappings(row: dict[str, Any], allowed_symbols: set[str]) -> list[tuple[str, str]]:
+    direct_symbol = infer_symbol(row, allowed_symbols)
+    if direct_symbol is not None:
+        return [(direct_symbol, "asset_direct")]
+    if classify_bucket(row) != BUCKET_EVENT_REG:
+        return []
+    return [
+        (symbol, "macro_event_reg")
+        for symbol in DEFAULT_MACRO_PROXY_SYMBOLS
+        if symbol in allowed_symbols
+    ]
 
 
 def classify_bucket(row: dict[str, Any]) -> str:
@@ -260,13 +274,17 @@ def build_market_deltas(
     *,
     allowed_symbols: set[str],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    by_market: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_market_symbol: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    market_ids_with_rows: set[str] = set()
     skipped: Counter[str] = Counter()
+    symbol_source_counts: Counter[str] = Counter()
+    unmapped_bucket_counts: Counter[str] = Counter()
+    unmapped_query_counts: Counter[str] = Counter()
+    unmapped_examples: list[dict[str, Any]] = []
     for row in rows:
         market_id = str(row.get("market_id") or "").strip()
         ts = _parse_dt(row.get("snapshot_ts_utc"))
         prob = yes_probability(row)
-        symbol = infer_symbol(row, allowed_symbols)
         if not market_id:
             skipped["missing_market_id"] += 1
             continue
@@ -276,24 +294,42 @@ def build_market_deltas(
         if prob is None:
             skipped["bad_probability"] += 1
             continue
-        if symbol is None:
+        bucket = classify_bucket(row)
+        symbol_mappings = infer_symbol_mappings(row, allowed_symbols)
+        if not symbol_mappings:
             skipped["unmapped_symbol"] += 1
+            unmapped_bucket_counts[bucket] += 1
+            for query in row.get("discovery_queries") or ["<no_query>"]:
+                unmapped_query_counts[str(query)] += 1
+            if len(unmapped_examples) < 8:
+                unmapped_examples.append({
+                    "bucket": bucket,
+                    "question": row.get("question"),
+                    "event_title": row.get("event_title"),
+                    "market_slug": row.get("market_slug"),
+                    "event_slug": row.get("event_slug"),
+                    "discovery_queries": list(row.get("discovery_queries") or []),
+                })
             continue
-        enriched = {
-            "market_id": market_id,
-            "snapshot_ts_ms": _dt_to_ms(ts),
-            "snapshot_ts_utc": ts.isoformat(),
-            "prob_yes": prob,
-            "symbol": symbol,
-            "bucket": classify_bucket(row),
-            "question": row.get("question"),
-            "event_title": row.get("event_title"),
-            "discovery_queries": list(row.get("discovery_queries") or []),
-        }
-        by_market[market_id].append(enriched)
+        for symbol, symbol_source in symbol_mappings:
+            enriched = {
+                "market_id": market_id,
+                "snapshot_ts_ms": _dt_to_ms(ts),
+                "snapshot_ts_utc": ts.isoformat(),
+                "prob_yes": prob,
+                "symbol": symbol,
+                "symbol_source": symbol_source,
+                "bucket": bucket,
+                "question": row.get("question"),
+                "event_title": row.get("event_title"),
+                "discovery_queries": list(row.get("discovery_queries") or []),
+            }
+            symbol_source_counts[symbol_source] += 1
+            market_ids_with_rows.add(market_id)
+            by_market_symbol[(market_id, symbol)].append(enriched)
 
     deltas: list[dict[str, Any]] = []
-    for market_id, market_rows in by_market.items():
+    for (_market_id, _symbol), market_rows in by_market_symbol.items():
         market_rows.sort(key=lambda r: r["snapshot_ts_ms"])
         prev: Optional[dict[str, Any]] = None
         for row in market_rows:
@@ -306,8 +342,15 @@ def build_market_deltas(
                 })
             prev = row
     return deltas, {
-        "markets_with_rows": len(by_market),
+        "markets_with_rows": len(market_ids_with_rows),
+        "market_symbol_series_with_rows": len(by_market_symbol),
         "delta_rows": len(deltas),
+        "symbol_source_counts": dict(symbol_source_counts),
+        "unmapped_symbol_diagnostics": {
+            "bucket_counts": dict(unmapped_bucket_counts),
+            "top_queries": dict(unmapped_query_counts.most_common(12)),
+            "examples": unmapped_examples,
+        },
         "skipped": dict(skipped),
     }
 
