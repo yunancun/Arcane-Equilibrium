@@ -189,6 +189,52 @@ def collect_gate_b_arm(
     )
 
 
+def _flash_dip_l1_short_exit_replay_detail(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int,
+) -> dict[str, Any]:
+    path = data_dir / "logs" / "flash_dip_l1_short_exit_replay.log"
+    status, err = _latest_json_line(path)
+    if err:
+        return {
+            "source_path": str(path),
+            "source_error": err,
+        }
+    assert status is not None
+    ts_utc = status.get("ts_utc")
+    fresh, age, freshness_error = _source_fresh(
+        ts_utc,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    return {
+        "source_path": str(path),
+        "source_ok": fresh,
+        "source_error": freshness_error,
+        "ts_utc": ts_utc,
+        "age_seconds": age,
+        "artifact_path": status.get("artifact_path"),
+        "latest_path": status.get("latest_path"),
+        "sha256": status.get("sha256"),
+        "verdict_status": status.get("verdict_status"),
+        "fail_reasons": status.get("fail_reasons"),
+        "candidate_events": status.get("candidate_events"),
+        "candidate_days": status.get("candidate_days"),
+        "candidate_symbols": status.get("candidate_symbols"),
+        "l1_rows_post_filter": status.get("l1_rows_post_filter"),
+        "trade_rows": status.get("trade_rows"),
+        "symbols_with_l1": status.get("symbols_with_l1"),
+        "symbols_missing_l1": status.get("symbols_missing_l1"),
+        "gate_exit_measured": status.get("gate_exit_measured"),
+        "gate_distinct_exit_days": status.get("gate_distinct_exit_days"),
+        "gate_annret": status.get("gate_annret"),
+        "gate_maxdd": status.get("gate_maxdd"),
+        "boundary": status.get("boundary"),
+    }
+
+
 def collect_flash_dip_arm(
     data_dir: Path,
     *,
@@ -229,6 +275,12 @@ def collect_flash_dip_arm(
             "k_ladder": touchability.get("k_ladder"),
         }
 
+    l1_replay_detail = _flash_dip_l1_short_exit_replay_detail(
+        data_dir,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+
     path = data_dir / "logs" / "flash_dip_death_rate.log"
     status, err = _latest_json_line(path)
     if err:
@@ -250,6 +302,7 @@ def collect_flash_dip_arm(
             detail={
                 "note": "death_rate_status_missing_or_not_yet_fired",
                 "touchability": touch_detail,
+                "l1_short_exit_replay": l1_replay_detail,
             },
         )
     assert status is not None
@@ -291,6 +344,7 @@ def collect_flash_dip_arm(
             "actionable": status.get("actionable"),
             "alerted": alerted,
             "touchability": touch_detail,
+            "l1_short_exit_replay": l1_replay_detail,
         },
     )
 
