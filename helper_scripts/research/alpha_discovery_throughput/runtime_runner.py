@@ -595,6 +595,12 @@ def collect_polymarket_leadlag_arm(
     status = str(verdict.get("status") or "").upper()
     sample_count, raw_sample_count = _sample_ic_points(payload)
     candidate_count = _int(verdict.get("candidate_count"))
+    watchlist = (
+        payload.get("pre_gate_hac_watchlist")
+        if isinstance(payload.get("pre_gate_hac_watchlist"), list)
+        else []
+    )
+    best_watch = watchlist[0] if watchlist and isinstance(watchlist[0], dict) else None
 
     if not fresh:
         gate_status = "SOURCE_FAILURE"
@@ -634,6 +640,8 @@ def collect_polymarket_leadlag_arm(
             "candidate_count": candidate_count,
             "preliminary_raw_candidate_count": verdict.get("preliminary_raw_candidate_count"),
             "preliminary_hac_candidate_count": verdict.get("preliminary_hac_candidate_count"),
+            "pre_gate_hac_watchlist_count": verdict.get("pre_gate_hac_watchlist_count"),
+            "best_pre_gate_hac_watch": best_watch,
             "significance_t_stat": verdict.get("significance_t_stat"),
             "max_bh_q": verdict.get("max_bh_q"),
             "query_set_version": payload.get("query_set_version"),
@@ -648,6 +656,7 @@ def collect_polymarket_leadlag_arm(
             "price_rows": counts.get("price_rows"),
             "max_ic_points": raw_sample_count,
             "max_overlap_adjusted_ic_points": sample_count,
+            "min_samples_remaining_to_gate": counts.get("min_samples_remaining_to_gate"),
             "max_abs_t_stat_hac": counts.get("max_abs_t_stat_hac"),
             "label_feature_horizon_pairs": label_readiness.get("feature_horizon_pairs"),
             "label_joinable_pairs": label_readiness.get("joinable_pairs"),

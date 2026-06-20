@@ -767,6 +767,54 @@ def _partition_ic_candidates(
     return eligible, preliminary_raw, preliminary_hac, candidates
 
 
+def _pre_gate_hac_watchlist(
+    ic_results: list[dict[str, Any]],
+    *,
+    min_points: int,
+    min_abs_ic: float,
+    min_abs_t: float,
+    max_bh_q: float,
+    limit: int = 5,
+) -> list[dict[str, Any]]:
+    rows = []
+    for row in ic_results:
+        sample_floor = int(row.get("overlap_adjusted_sample_floor") or 0)
+        if sample_floor >= min_points or sample_floor <= 0:
+            continue
+        if row.get("ic_pearson") is None or row.get("t_stat_hac") is None:
+            continue
+        if row.get("bh_q_value_hac_approx") is None:
+            continue
+        if abs(float(row["ic_pearson"])) < min_abs_ic:
+            continue
+        if abs(float(row["t_stat_hac"])) < min_abs_t:
+            continue
+        if float(row["bh_q_value_hac_approx"]) > max_bh_q:
+            continue
+        rows.append({
+            "bucket": row.get("bucket"),
+            "symbol": row.get("symbol"),
+            "horizon_minutes": row.get("horizon_minutes"),
+            "n_points": row.get("n_points"),
+            "overlap_adjusted_sample_floor": sample_floor,
+            "sample_gap_to_min_points": max(0, min_points - sample_floor),
+            "ic_pearson": row.get("ic_pearson"),
+            "t_stat_hac": row.get("t_stat_hac"),
+            "bh_q_value_hac_approx": row.get("bh_q_value_hac_approx"),
+            "first_snapshot_ts_utc": row.get("first_snapshot_ts_utc"),
+            "last_snapshot_ts_utc": row.get("last_snapshot_ts_utc"),
+            "gate_blocker": "sample_floor_below_min_points",
+        })
+    return sorted(
+        rows,
+        key=lambda r: (
+            abs(float(r.get("t_stat_hac") or 0.0)),
+            int(r.get("overlap_adjusted_sample_floor") or 0),
+        ),
+        reverse=True,
+    )[:limit]
+
+
 def build_report(
     *,
     snapshot_rows: list[dict[str, Any]],
@@ -800,6 +848,13 @@ def build_report(
     bucket_counts = Counter(row["bucket"] for row in deltas)
     joined_counts = Counter(f"{row['bucket']}|{row['symbol']}|{row['horizon_minutes']}" for row in joined)
     eligible, preliminary_raw, preliminary_hac, candidates = _partition_ic_candidates(
+        ic_results,
+        min_points=min_points,
+        min_abs_ic=min_abs_ic,
+        min_abs_t=min_abs_t,
+        max_bh_q=max_bh_q,
+    )
+    pre_gate_hac_watchlist = _pre_gate_hac_watchlist(
         ic_results,
         min_points=min_points,
         min_abs_ic=min_abs_ic,
@@ -844,6 +899,7 @@ def build_report(
             "candidate_count": len(candidates),
             "preliminary_raw_candidate_count": len(preliminary_raw),
             "preliminary_hac_candidate_count": len(preliminary_hac),
+            "pre_gate_hac_watchlist_count": len(pre_gate_hac_watchlist),
             "significance_t_stat": "t_stat_hac",
             "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
         },
@@ -866,6 +922,13 @@ def build_report(
                 (int(r.get("overlap_adjusted_sample_floor", 0)) for r in ic_results),
                 default=0,
             ),
+            "min_samples_remaining_to_gate": max(
+                0,
+                min_points - max(
+                    (int(r.get("overlap_adjusted_sample_floor", 0)) for r in ic_results),
+                    default=0,
+                ),
+            ),
             "max_abs_t_stat_hac": max(
                 (
                     abs(float(r["t_stat_hac"]))
@@ -877,6 +940,7 @@ def build_report(
         },
         "ic_results": ic_results,
         "candidates": candidates,
+        "pre_gate_hac_watchlist": pre_gate_hac_watchlist,
         "sample_joined_rows": joined[:50],
         "method_notes": [
             "feature = probability delta from previous Polymarket snapshot to current snapshot",
@@ -884,6 +948,7 @@ def build_report(
             "price_target/event_reg bucket split is research-side and does not filter collector artifacts",
             "insufficient sample fails closed and is not alpha evidence",
             "overlap sample floor allows a small schedule-jitter tolerance before declaring windows overlapping",
+            "pre-gate HAC watchlist is diagnostic only and never promotion or probe authority",
             "candidate gate requires overlap-adjusted sample floor and BH q-value control",
             "candidate significance uses Newey-West/HAC slope t-stat; naive t-stat is diagnostic only",
         ],

@@ -342,6 +342,58 @@ def test_bh_gate_separates_raw_and_controlled_candidates(tmp_path):
     assert report["ic_results"][0]["bh_q_value_hac_approx"] is not None
 
 
+def test_pre_gate_hac_watchlist_is_diagnostic_not_candidate(tmp_path):
+    root = tmp_path / "pm"
+    start = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    deltas = [0.005 + (i % 7) * 0.001 for i in range(34)]
+    probs = [0.40]
+    for delta in deltas:
+        probs.append(probs[-1] + delta)
+    prices = [100.0]
+    for i in range(35):
+        if i == 0:
+            ret = 0.001
+        else:
+            noise = 0.0002 if i % 2 else -0.00016
+            ret = deltas[i - 1] * 0.03 + noise
+        prices.append(prices[-1] * (1.0 + ret))
+    for i, prob in enumerate(probs):
+        ts = (start + dt.timedelta(minutes=15 * i)).isoformat()
+        _write_run(root, f"hourly-topn-{i}", ts, [{
+            "market_id": "101",
+            "question": "Will the SEC approve a spot Bitcoin ETF?",
+            "event_title": "Bitcoin ETF approval",
+            "discovery_queries": ["kw:sec bitcoin"],
+            "outcome_prices": [prob, 1 - prob],
+        }])
+    rows, meta = harness.load_snapshot_rows(root, query_set_version="v2", mode="hourly-topn")
+    report = harness.build_report(
+        snapshot_rows=rows,
+        snapshot_meta=meta,
+        price_rows=_price_rows("BTCUSDT", start, prices),
+        query_set_version="v2",
+        mode="hourly-topn",
+        symbols=("BTCUSDT",),
+        horizons_minutes=(15,),
+        min_points=40,
+        max_align_lag_minutes=1,
+        min_abs_ic=0.1,
+        min_abs_t=1.0,
+        max_bh_q=1.0,
+        price_source="fixture",
+    )
+
+    assert report["verdict"]["status"] == STATUS_INSUFFICIENT_SAMPLE
+    assert report["verdict"]["candidate_count"] == 0
+    assert report["verdict"]["pre_gate_hac_watchlist_count"] == 1
+    assert report["counts"]["min_samples_remaining_to_gate"] == 6
+    assert len(report["pre_gate_hac_watchlist"]) == 1
+    watch = report["pre_gate_hac_watchlist"][0]
+    assert watch["sample_gap_to_min_points"] == 6
+    assert watch["gate_blocker"] == "sample_floor_below_min_points"
+    assert watch["bh_q_value_hac_approx"] is not None
+
+
 def test_source_has_readonly_pg_and_no_trading_tokens():
     src = Path(harness.__file__).read_text(encoding="utf-8")
     assert "set_session(readonly=True)" in src

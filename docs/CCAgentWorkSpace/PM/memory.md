@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Pre-Gate HAC Watchlist
+
+- Upgraded `polymarket_leadlag` to report schema/runner v0.6.
+- Reports now include diagnostic-only `pre_gate_hac_watchlist` for HAC/BH-significant cells blocked by `sample_floor_below_min_points`; this is not candidate/probe/promotion authority.
+- Cron status and alpha discovery raw detail pass through `pre_gate_hac_watchlist_count`, `best_pre_gate_hac_watch`, and `min_samples_remaining_to_gate`.
+- Linux v0.6 smoke latest sha256 `864151680dc2787a79a387d7316faedb81568dc569ca2561ef1b38c723621213`: `max_overlap_adjusted_ic_points=9`, `min_samples_remaining_to_gate=21`, `pre_gate_hac_watchlist_count=5`, best watch `other|BTCUSDT|15m`, `candidate_count=0`, still `INSUFFICIENT_SAMPLE`.
+- Alpha discovery latest sha256 `acaa77cab2660c65e57b092fe13a71966f0c8bd135d14c8ebf7e247603427e13` preserves the best watch while keeping action `RUN_READ_ONLY_CAPTURE`, artifacts_ready=false, ready/probe=0.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Jitter-Tolerant Sample Floor
 
 - Upgraded `polymarket_leadlag` to report schema/runner v0.5.
