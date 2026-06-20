@@ -305,6 +305,39 @@ def test_join_forward_returns_uses_prices_at_or_after_snapshot():
     assert round(joined[0]["forward_return_bps"], 6) == 100.0
 
 
+def test_join_forward_returns_adds_trailing_return_control():
+    feature = {
+        "snapshot_ts_ms": int(
+            dt.datetime(2026, 6, 20, 0, 15, 30, tzinfo=dt.timezone.utc).timestamp()
+            * 1000
+        ),
+        "snapshot_ts_utc": "2026-06-20T00:15:30+00:00",
+        "bucket": BUCKET_EVENT_REG,
+        "symbol": "BTCUSDT",
+        "n_markets": 1,
+        "mean_delta_prob_yes": 0.05,
+        "mean_abs_delta_prob_yes": 0.05,
+        "market_ids": ["101"],
+    }
+    price_rows = [
+        {"symbol": "BTCUSDT", "ts_ms": int(dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc).timestamp() * 1000), "price": 100.0},
+        {"symbol": "BTCUSDT", "ts_ms": int(dt.datetime(2026, 6, 20, 0, 15, tzinfo=dt.timezone.utc).timestamp() * 1000), "price": 101.0},
+        {"symbol": "BTCUSDT", "ts_ms": int(dt.datetime(2026, 6, 20, 0, 16, tzinfo=dt.timezone.utc).timestamp() * 1000), "price": 102.0},
+        {"symbol": "BTCUSDT", "ts_ms": int(dt.datetime(2026, 6, 20, 0, 31, tzinfo=dt.timezone.utc).timestamp() * 1000), "price": 103.0},
+    ]
+
+    joined = harness.join_forward_returns(
+        [feature], price_rows, horizons_minutes=(15,), max_align_lag_minutes=2,
+    )
+
+    assert len(joined) == 1
+    assert joined[0]["entry_price"] == 102.0
+    assert joined[0]["exit_price"] == 103.0
+    assert joined[0]["trailing_entry_price"] == 100.0
+    assert joined[0]["trailing_exit_price"] == 101.0
+    assert round(joined[0]["trailing_return_bps"], 6) == 100.0
+
+
 def test_compute_ic_reports_overlap_adjusted_sample_floor():
     base = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
     rows = []
@@ -334,6 +367,36 @@ def test_compute_ic_reports_overlap_adjusted_sample_floor():
     assert result[0]["last_nonoverlap_snapshot_ts_utc"] == "2026-06-20T01:00:00+00:00"
     assert result[0]["hac_lag"] == 3
     assert result[0]["hac_method"] == "newey_west_slope_t_stat_bartlett"
+
+
+def test_compute_ic_reports_price_feedback_control():
+    base = dt.datetime(2026, 6, 20, 0, 0, tzinfo=dt.timezone.utc)
+    rows = []
+    forward_returns = [1.0, -1.0, 0.5, -0.5, 0.3, -0.3]
+    trailing_returns = [0.0, 4.0, 8.0, 13.0, 17.0, 22.0]
+    for i, (forward_ret, trailing_ret) in enumerate(zip(forward_returns, trailing_returns)):
+        ts_ms = int((base + dt.timedelta(minutes=15 * i)).timestamp() * 1000)
+        rows.append({
+            "bucket": BUCKET_EVENT_REG,
+            "symbol": "BTCUSDT",
+            "horizon_minutes": 15,
+            "snapshot_ts_ms": ts_ms,
+            "snapshot_ts_utc": harness._ms_to_iso(ts_ms),
+            "mean_delta_prob_yes": float(i),
+            "forward_return_bps": forward_ret,
+            "trailing_return_bps": trailing_ret,
+        })
+
+    result = harness.compute_ic(rows)
+
+    assert len(result) == 1
+    assert result[0]["past_return_control_n_points"] == 6
+    assert result[0]["past_return_ic_pearson"] is not None
+    assert result[0]["past_return_ic_pearson"] > 0.99
+    assert result[0]["lead_lag_abs_ic_margin"] is not None
+    assert result[0]["lead_lag_abs_ic_margin"] < 0
+    assert result[0]["price_feedback_warning"] is True
+    assert result[0]["price_feedback_warning_basis"] == "abs_past_return_ic_ge_abs_forward_ic"
 
 
 def test_compute_ic_tolerates_small_15m_schedule_jitter():
