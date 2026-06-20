@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-20 MM FillSim Wall-Clock Freshness Gate
+
+- Fixed fill_sim/MM verdict false-freshness: both cron wrappers now recompute L1 data age from `l1_max_ts` against wall clock; missing/bad `l1_max_ts` fail-closes.
+- Linux selective sync + checks passed; bounded forced 2h refresh replaced production fill_sim report with fresh L1 (`l1_rows_post_filter=1,022,579`, `l1_max_age_hours=0.002`, sha256 `7ff1f9cbccfb97f43a0bc1abc70ee7eb8c656ebed7ed7da95f278a00847727a8`) and history scorecard now has one valid window.
+- Fresh evidence still does not promote MM: fill_sim maker net@15 is -4.086bp, edge scorecard has no current-fee positive, walk-forward has no train-positive feature, and live-markout ARBUSDT positive is n=1 below gate.
+- Boundary: source/test/docs + selective runtime source sync + `/tmp/openclaw` artifact/log writes only; no rebuild/restart, DB write, Bybit call, or auth/risk/order/strategy mutation.
+
 ## 2026-06-20 MM FillSim History Runtime Sync
 
 - Selectively synced v255 runtime files to Linux `trade-core` while leaving unrelated dirty docs untouched; full Linux git three-way sync is not claimed.

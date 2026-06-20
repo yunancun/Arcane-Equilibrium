@@ -62,7 +62,7 @@ fi
 touch "$HEARTBEAT_DIR/fill_sim_refresh.last_fire" 2>/dev/null || true
 
 read_report_state() {
-    "$PYBIN" - "$REPORT" "$FILL_SIM_MAX_AGE_H" "$FILL_SIM_FORCE" <<'PY'
+    "$PYBIN" - "$REPORT" "$FILL_SIM_MAX_AGE_H" "$FILL_SIM_FORCE" "$FILL_SIM_MAX_DATA_AGE_H" <<'PY'
 import datetime
 import json
 import os
@@ -71,6 +71,7 @@ import sys
 path = sys.argv[1]
 max_age_h = float(sys.argv[2])
 force = str(sys.argv[3]).lower() in {"1", "true", "yes", "y"}
+max_data_age_h = float(sys.argv[4])
 now = datetime.datetime.now(datetime.timezone.utc)
 info = {
     "path": path,
@@ -79,7 +80,16 @@ info = {
     "generated_at": None,
     "age_hours": None,
     "error": None,
+    "data_stale": None,
+    "stale_reason": None,
+    "l1_wall_age_hours": None,
 }
+def _parse_ts(raw):
+    ts = datetime.datetime.fromisoformat(str(raw))
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=datetime.timezone.utc)
+    return ts.astimezone(datetime.timezone.utc)
+
 try:
     with open(path, encoding="utf-8") as f:
         rep = json.load(f)
@@ -93,10 +103,32 @@ try:
     info["l1_max_ts"] = data.get("l1_max_ts")
     info["l1_max_age_hours"] = data.get("l1_max_age_hours")
     info["n_symbols"] = data.get("n_symbols")
-    gt = datetime.datetime.fromisoformat(str(gen))
-    if gt.tzinfo is None:
-        gt = gt.replace(tzinfo=datetime.timezone.utc)
+    gt = _parse_ts(gen)
     info["age_hours"] = round((now - gt).total_seconds() / 3600.0, 2)
+    info["data_stale"] = False
+    try:
+        if int(data.get("l1_rows_post_filter") or 0) <= 0:
+            info["data_stale"] = True
+            info["stale_reason"] = "empty_l1"
+    except (TypeError, ValueError):
+        info["data_stale"] = True
+        info["stale_reason"] = "bad_l1_rows"
+    if not info["data_stale"]:
+        try:
+            l1_max_ts = data.get("l1_max_ts")
+            if not l1_max_ts:
+                info["data_stale"] = True
+                info["stale_reason"] = "missing_l1_max_ts"
+            else:
+                l1_ts = _parse_ts(l1_max_ts)
+                l1_wall_age_h = (now - l1_ts).total_seconds() / 3600.0
+                info["l1_wall_age_hours"] = round(l1_wall_age_h, 3)
+                if l1_wall_age_h > max_data_age_h:
+                    info["data_stale"] = True
+                    info["stale_reason"] = "stale_l1_data"
+        except (TypeError, ValueError):
+            info["data_stale"] = True
+            info["stale_reason"] = "bad_l1_max_ts"
 except FileNotFoundError:
     info["error"] = "missing"
 except Exception as exc:
@@ -109,6 +141,8 @@ if (
     and info["parse_ok"]
     and info["age_hours"] is not None
     and info["age_hours"] <= max_age_h
+    and not info.get("abort")
+    and info.get("data_stale") is False
 ):
     action = "skip_fresh"
 print(action)
@@ -221,6 +255,7 @@ import sys
 
 path = sys.argv[1]
 max_data_age_h = float(sys.argv[2])
+now = datetime.datetime.now(datetime.timezone.utc)
 info = {
     "path": path,
     "present": False,
@@ -231,9 +266,16 @@ info = {
     "l1_rows_post_filter": None,
     "l1_max_ts": None,
     "l1_max_age_hours": None,
+    "l1_wall_age_hours": None,
     "n_symbols": None,
     "abort": None,
 }
+def _parse_ts(raw):
+    ts = datetime.datetime.fromisoformat(str(raw))
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=datetime.timezone.utc)
+    return ts.astimezone(datetime.timezone.utc)
+
 try:
     with open(path, encoding="utf-8") as f:
         rep = json.load(f)
@@ -252,14 +294,20 @@ try:
     )
     l1_rows = int(data.get("l1_rows_post_filter") or 0)
     n_symbols = int(data.get("n_symbols") or 0)
-    l1_age = data.get("l1_max_age_hours")
+    l1_age = None
+    if data.get("l1_max_ts"):
+        l1_ts = _parse_ts(data.get("l1_max_ts"))
+        l1_age = (now - l1_ts).total_seconds() / 3600.0
+        info["l1_wall_age_hours"] = round(l1_age, 3)
     if rep.get("abort"):
         info["reason"] = "abort"
     elif l1_rows <= 0:
         info["reason"] = "empty_l1"
     elif n_symbols <= 0:
         info["reason"] = "empty_symbols"
-    elif l1_age is not None and float(l1_age) > max_data_age_h:
+    elif l1_age is None:
+        info["reason"] = "missing_l1_max_ts"
+    elif l1_age > max_data_age_h:
         info["reason"] = "stale_l1_data"
     else:
         info["valid"] = True
@@ -441,6 +489,7 @@ action = os.environ["ACTION"]
 age = post.get("age_hours")
 bad = action in {"refresh_failed", "candidate_rejected"}
 bad = bad or rc != 0 or not post.get("present") or not post.get("parse_ok")
+bad = bad or post.get("data_stale") is True
 if age is not None and float(age) > stale_h:
     bad = True
 print("1" if bad else "0")
