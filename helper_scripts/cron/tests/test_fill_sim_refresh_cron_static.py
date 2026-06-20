@@ -154,8 +154,10 @@ def test_mm_verdict_surfaces_cost_wall_fields() -> None:
     assert "horizon_scorecard" in src
     assert "conditional_feature_scorecard" in src
     assert "walk_forward_feature_scorecard" in src
+    assert "low_friction_signal_scorecard" in src
     assert "failure_summary" in FILL_SIM.read_text(encoding="utf-8")
     assert "walk_forward_failure_summary" in RUNTIME_RUNNER.read_text(encoding="utf-8")
+    assert "low_friction_signal_scorecard" in RUNTIME_RUNNER.read_text(encoding="utf-8")
     assert "gross_edge_cost_decomposition" in RUNTIME_RUNNER.read_text(encoding="utf-8")
     assert "maker_fee_sensitivity_scorecard" in src
     assert "history_scorecard" in src
