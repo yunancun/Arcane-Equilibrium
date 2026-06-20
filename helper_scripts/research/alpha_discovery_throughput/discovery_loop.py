@@ -291,6 +291,8 @@ def classify_profitability_blocker(
     if arm_id == "polymarket_leadlag_ic" and _int(decision.get("sample_count")) < _int(
         decision.get("min_samples")
     ):
+        pre_gate_persistence = _dict(detail.get("pre_gate_watchlist_persistence_scorecard"))
+        top_persistent_cells = _list(pre_gate_persistence.get("top_cells"))
         return _finish_blocker_row(
             row,
             blocker_class="sample_gate",
@@ -299,6 +301,26 @@ def classify_profitability_blocker(
             extra={
                 "min_samples_remaining_to_gate": detail.get("min_samples_remaining_to_gate"),
                 "sample_gate_eta_utc": detail.get("sample_gate_eta_utc"),
+                "pre_gate_watchlist_persistence_status": detail.get(
+                    "pre_gate_watchlist_persistence_status"
+                ) or pre_gate_persistence.get("status"),
+                "pre_gate_watchlist_recurring_cell_count": detail.get(
+                    "pre_gate_watchlist_recurring_cell_count"
+                ) or pre_gate_persistence.get("recurring_cell_count"),
+                "pre_gate_watchlist_persistent_cell_count": detail.get(
+                    "pre_gate_watchlist_persistent_cell_count"
+                ) or pre_gate_persistence.get("persistent_cell_count"),
+                "pre_gate_watchlist_floor_qualified_recurring_cell_count": detail.get(
+                    "pre_gate_watchlist_floor_qualified_recurring_cell_count"
+                ) or pre_gate_persistence.get("floor_qualified_recurring_cell_count"),
+                "pre_gate_watchlist_floor_qualified_persistent_cell_count": detail.get(
+                    "pre_gate_watchlist_floor_qualified_persistent_cell_count"
+                ) or pre_gate_persistence.get("floor_qualified_persistent_cell_count"),
+                "best_persistent_pre_gate_cell": (
+                    top_persistent_cells[0]
+                    if top_persistent_cells and isinstance(top_persistent_cells[0], dict)
+                    else None
+                ),
                 "price_feedback_partial_collapse_count": detail.get(
                     "price_feedback_partial_collapse_count"
                 ),

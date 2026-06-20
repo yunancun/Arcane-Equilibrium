@@ -25,6 +25,19 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Pre-Gate Watchlist Persistence
+
+- Upgraded `polymarket_leadlag` to report schema/runner v0.13.
+- Added diagnostic-only `pre_gate_watchlist_persistence_scorecard`, passed through Polymarket cron status and alpha-discovery Polymarket blocker rows.
+- Diagnosis: recurring pre-gate HAC cells are not enough; they must also have a non-trivial current overlap-adjusted sample floor before being treated as a stronger watch state.
+- Current floor qualification threshold is `max(3, ceil(min_points*0.25))`; with `min_points=30`, threshold is 8.
+- Latest trade-core Polymarket artifact sha256 `c64314139cac2349fdb1983de593a20c58fcac5813b0511d56c4ad4ae3ea65f5`, created `2026-06-20T17:17:02.986979+00:00`: `INSUFFICIENT_SAMPLE`, sample=19/30, remaining=11.
+- Persistence status is `LOW_SAMPLE_RECURRING_PRE_GATE_WATCHLIST`: recurring=5, persistent=5, floor-qualified recurring=0, floor-qualified persistent=0.
+- Top recurring cells are 240m with current sample floor 1 (`other|BTCUSDT|240`, `other|SOLUSDT|240`, `price_target|XRPUSDT|240`), so this is still a wait-for-sample state, not candidate/probe authority.
+- Latest alpha-discovery artifact sha256 `76d8778a1964faaa93dcd81060ecc7afcbb3dcf08e52fbfeb269b9d166f319b8` preserves the same blocker and remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`, ready/probe=0.
+- Verification: Mac and Linux focused suite `78 passed`; py_compile, bash syntax, and diff-check passed.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG write, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Alpha Profitability Blocker Scorecard
 
 - Added `profitability_blocker_scorecard` to alpha-discovery plans/runtime artifacts and mirrored it at top-level in `alpha_discovery_latest.json`.
