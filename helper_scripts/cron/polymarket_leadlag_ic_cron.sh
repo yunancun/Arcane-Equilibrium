@@ -184,6 +184,7 @@ try:
     verdict = payload.get("verdict") or {}
     counts = payload.get("counts") or {}
     label_readiness = counts.get("label_readiness") or {}
+    sample_gate_clock = counts.get("sample_gate_clock") or {}
     watchlist = payload.get("pre_gate_hac_watchlist") or []
     best_watch = watchlist[0] if watchlist else None
     status.update({
@@ -208,6 +209,9 @@ try:
         "max_ic_points": counts.get("max_ic_points"),
         "max_overlap_adjusted_ic_points": counts.get("max_overlap_adjusted_ic_points"),
         "min_samples_remaining_to_gate": counts.get("min_samples_remaining_to_gate"),
+        "sample_gate_status": sample_gate_clock.get("status"),
+        "sample_gate_eta_utc": sample_gate_clock.get("fastest_gate_ready_utc"),
+        "sample_gate_clock": sample_gate_clock,
         "max_abs_t_stat_hac": counts.get("max_abs_t_stat_hac"),
         "label_feature_horizon_pairs": label_readiness.get("feature_horizon_pairs"),
         "label_joinable_pairs": label_readiness.get("joinable_pairs"),

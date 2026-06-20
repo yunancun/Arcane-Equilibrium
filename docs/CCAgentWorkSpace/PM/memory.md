@@ -25,6 +25,15 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Sample-Gate Clock
+
+- Upgraded `polymarket_leadlag` to report schema/runner v0.7.
+- Reports now include `counts.sample_gate_clock`; cron status and alpha discovery pass through `sample_gate_status`, `sample_gate_eta_utc`, and compact `sample_gate_clock`.
+- Linux v0.7 smoke latest sha256 `0eb7c4bdea86f60810f4824d3a0c201b7cbcea67c5077be9ea36a9b8a86c21f2`: sample_count=10/30, gap=20, ETA `2026-06-20T19:52:03.862Z`, still `INSUFFICIENT_SAMPLE`.
+- Key diagnosis: the v269 pre-gate watch did not persist after the 10th adjusted sample; watchlist_count=0 and `other|BTCUSDT|15m` decayed to IC≈0.1286 / HAC t≈0.401 / q≈0.765.
+- Alpha discovery latest sha256 `682c1a278cc9384ccde3680d0ea1024e2b973185728d9befbf5546ec81bfcc4c` preserves the ETA while keeping action `RUN_READ_ONLY_CAPTURE`, artifacts_ready=false, ready/probe=0.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes only; no PG writes, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 Polymarket Pre-Gate HAC Watchlist
 
 - Upgraded `polymarket_leadlag` to report schema/runner v0.6.

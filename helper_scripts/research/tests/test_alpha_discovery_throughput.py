@@ -481,6 +481,17 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
             "max_ic_points": 35,
             "max_overlap_adjusted_ic_points": 12,
             "min_samples_remaining_to_gate": 18,
+            "sample_gate_clock": {
+                "status": "WAITING_FOR_SAMPLE",
+                "fastest_gate_ready_utc": "2026-06-20T19:52:01+00:00",
+                "min_samples_remaining_to_gate": 18,
+                "cells": [{
+                    "bucket": "event_reg",
+                    "symbol": "BTCUSDT",
+                    "horizon_minutes": 240,
+                    "expected_gate_label_ready_utc": "2026-06-20T19:52:01+00:00",
+                }],
+            },
         },
         "verdict": {
             "status": "INSUFFICIENT_SAMPLE",
@@ -522,6 +533,9 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
     assert arm["detail"]["max_ic_points"] == 35
     assert arm["detail"]["max_overlap_adjusted_ic_points"] == 12
     assert arm["detail"]["min_samples_remaining_to_gate"] == 18
+    assert arm["detail"]["sample_gate_status"] == "WAITING_FOR_SAMPLE"
+    assert arm["detail"]["sample_gate_eta_utc"] == "2026-06-20T19:52:01+00:00"
+    assert arm["detail"]["sample_gate_clock"]["cells"][0]["symbol"] == "BTCUSDT"
     assert arm["detail"]["pre_gate_hac_watchlist_count"] == 1
     assert arm["detail"]["best_pre_gate_hac_watch"]["gate_blocker"] == "sample_floor_below_min_points"
     assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
