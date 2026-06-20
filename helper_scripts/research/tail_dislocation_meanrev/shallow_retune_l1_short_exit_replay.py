@@ -38,7 +38,7 @@ import extend_history as ext
 import prepilot_gates as gates
 import shallow_retune_adversarial as adv
 
-L1_REPLAY_VERSION = "tail_dislocation_meanrev.shallow_retune_l1_short_exit_replay.v0.1"
+L1_REPLAY_VERSION = "tail_dislocation_meanrev.shallow_retune_l1_short_exit_replay.v0.2"
 
 DEFAULT_K = 0.06
 DEFAULT_HOLD = 2
@@ -595,10 +595,37 @@ def l1_candidate_coverage_summary(
     events_by_symbol: dict[str, int] = {sym: 0 for sym in candidate_symbols}
     days_by_symbol: dict[str, set[str]] = {sym: set() for sym in candidate_symbols}
     event_window_rows_by_symbol_date: dict[str, int] = {}
+    event_window_l1_relation_by_symbol_date: dict[str, str] = {}
+    event_window_l1_relation_counts: dict[str, int] = {}
     missing_event_windows: list[dict[str, Any]] = []
     n_events_with_l1_in_event_window = 0
     days_with_l1_in_event_window: set[str] = set()
     days_missing_l1_in_event_window: set[str] = set()
+    l1_range_by_symbol: dict[str, dict[str, Any]] = {}
+    for sym, rows in sorted(l1_by_sym.items()):
+        ts_vals = sorted(int(row["ts_ms"]) for row in rows)
+        if not ts_vals:
+            continue
+        l1_range_by_symbol[sym] = {
+            "n_rows": len(ts_vals),
+            "first_ts": _iso_ms(ts_vals[0]),
+            "last_ts": _iso_ms(ts_vals[-1]),
+            "first_ts_ms": ts_vals[0],
+            "last_ts_ms": ts_vals[-1],
+        }
+
+    def relation_for_window(sym: str, start_ms: int, end_ms: int) -> tuple[str, Optional[float]]:
+        rng = l1_range_by_symbol.get(sym)
+        if not rng:
+            return "no_symbol_l1_rows", None
+        first_ms = int(rng["first_ts_ms"])
+        last_ms = int(rng["last_ts_ms"])
+        if end_ms < first_ms:
+            return "candidate_window_before_symbol_l1_range", (first_ms - end_ms) / 3_600_000.0
+        if start_ms > last_ms:
+            return "candidate_window_after_symbol_l1_range", (start_ms - last_ms) / 3_600_000.0
+        return "candidate_window_overlaps_symbol_l1_range_but_empty", None
+
     for event in candidate_events:
         sym = event["symbol"]
         events_by_symbol[sym] = events_by_symbol.get(sym, 0) + 1
@@ -613,15 +640,26 @@ def l1_candidate_coverage_summary(
         key = f"{sym}:{event['entry_date']}"
         event_window_rows_by_symbol_date[key] = event_window_rows_by_symbol_date.get(key, 0) + n_window_rows
         if n_window_rows > 0:
+            relation = "covered"
             n_events_with_l1_in_event_window += 1
             days_with_l1_in_event_window.add(event["entry_date"])
         else:
+            relation, gap_hours = relation_for_window(sym, day_start, deadline)
             days_missing_l1_in_event_window.add(event["entry_date"])
+            rng = l1_range_by_symbol.get(sym) or {}
             missing_event_windows.append({
                 "symbol": sym,
                 "entry_date": event["entry_date"],
                 "entry_level": event.get("entry_level"),
+                "window_start_ts": _iso_ms(day_start),
+                "window_end_ts": _iso_ms(deadline),
+                "l1_relation": relation,
+                "l1_gap_hours": gap_hours,
+                "symbol_l1_first_ts": rng.get("first_ts"),
+                "symbol_l1_last_ts": rng.get("last_ts"),
             })
+        event_window_l1_relation_by_symbol_date[key] = relation
+        event_window_l1_relation_counts[relation] = event_window_l1_relation_counts.get(relation, 0) + 1
     l1_rows_by_symbol = {
         sym: len(rows)
         for sym, rows in sorted(l1_by_sym.items())
@@ -641,10 +679,13 @@ def l1_candidate_coverage_summary(
         "n_distinct_days_with_l1_in_event_window": len(days_with_l1_in_event_window),
         "n_distinct_days_missing_l1_in_event_window": len(days_missing_l1_in_event_window),
         "event_window_l1_rows_by_symbol_date": dict(sorted(event_window_rows_by_symbol_date.items())),
+        "event_window_l1_relation_by_symbol_date": dict(sorted(event_window_l1_relation_by_symbol_date.items())),
+        "event_window_l1_relation_counts": dict(sorted(event_window_l1_relation_counts.items())),
         "events_missing_l1_in_event_window_sample": missing_event_windows[:100],
         "symbols_with_l1": symbols_with_l1,
         "symbols_missing_l1": symbols_missing_l1,
         "l1_rows_by_symbol": l1_rows_by_symbol,
+        "l1_range_by_symbol": l1_range_by_symbol,
     }
 
 

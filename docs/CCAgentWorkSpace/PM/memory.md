@@ -25,6 +25,14 @@
 
 ## 近期記錄
 
+## 2026-06-20 FlashDip L1 Timing Relation Diagnostics
+
+- Added v0.2 timing diagnostics to `shallow_retune_l1_short_exit_replay.py`: missing event windows now record whether they are before, after, or inside the symbol's loaded L1 range, plus gap hours and symbol L1 first/last timestamps.
+- `flash_dip_l1_short_exit_replay_cron.sh` and alpha-discovery `runtime_runner.py` now preserve `event_window_l1_relation_counts` and `dominant_missing_event_window_l1_relation`.
+- Linux read-only replay latest sha256 `43992d40987e61a737b109721b4f079347bddb382fa71c69631cae3a19c75afd`: 6 candidate events / 2 days / 5 symbols, 173,749 L1 rows, 2,757,781 trades, 0/6 event windows covered, all 6 `candidate_window_before_symbol_l1_range`.
+- Loaded L1 range for the replay is `2026-06-20T00:18:11.624Z`..`03:59:59.804Z`; the 2026-06-18 candidate windows ended ~24.3h before L1, and the 2026-06-19 windows ended ~18.2m before L1.
+- PM read: FlashDip 240m short-exit remains data-timing gated after L1 recorder repair; not disproven by queue/fill realism and not promotion proof.
+
 ## 2026-06-20 MM FillSim Daily History Cadence
 
 - Changed fill_sim refresh default `OPENCLAW_FILL_SIM_MAX_AGE_H` from 60h to 18h so the installed daily 06:05 UTC cron can accumulate cross-window history daily-ish instead of every ~2.5 days.

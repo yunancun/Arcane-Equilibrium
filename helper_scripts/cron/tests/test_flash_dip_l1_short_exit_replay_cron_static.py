@@ -61,6 +61,8 @@ def test_local_artifact_log_lock_and_status_surfaces() -> None:
     assert "counterfactual_only_not_promotion_evidence" in src
     assert "events_with_l1_in_event_window" in src
     assert "events_missing_l1_in_event_window" in src
+    assert "event_window_l1_relation_counts" in src
+    assert "dominant_missing_event_window_l1_relation" in src
 
 
 def test_operator_knobs_match_replay_gate_defaults() -> None:

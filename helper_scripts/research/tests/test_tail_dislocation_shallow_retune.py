@@ -433,6 +433,12 @@ def test_l1_coverage_reasons_detect_event_window_hole_when_symbol_l1_exists():
     assert broad_l1_without_event_window_rows["symbols_missing_l1"] == []
     assert broad_l1_without_event_window_rows["n_events_with_l1_in_event_window"] == 0
     assert broad_l1_without_event_window_rows["n_events_missing_l1_in_event_window"] == 2
+    assert broad_l1_without_event_window_rows["event_window_l1_relation_counts"] == {
+        "candidate_window_before_symbol_l1_range": 2,
+    }
+    assert broad_l1_without_event_window_rows["events_missing_l1_in_event_window_sample"][0]["l1_relation"] == (
+        "candidate_window_before_symbol_l1_range"
+    )
     assert covered_gate["status"] == "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE"
     assert covered_gate["fail_reasons"][0] == "no_l1_rows_for_candidate_event_windows"
 
@@ -464,5 +470,63 @@ def test_l1_coverage_reasons_detect_partial_event_window_coverage():
         "AAAUSDT:2026-01-02": 1,
         "BBBUSDT:2026-01-02": 0,
     }
+    assert partial_event_l1["event_window_l1_relation_counts"] == {
+        "candidate_window_before_symbol_l1_range": 1,
+        "covered": 1,
+    }
+    assert partial_event_l1["event_window_l1_relation_by_symbol_date"] == {
+        "AAAUSDT:2026-01-02": "covered",
+        "BBBUSDT:2026-01-02": "candidate_window_before_symbol_l1_range",
+    }
     assert partial_gate["status"] == "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE"
     assert partial_gate["fail_reasons"][0] == "partial_l1_event_window_coverage"
+
+
+def test_l1_candidate_coverage_splits_event_window_timing_holes():
+    gate = {
+        "status": "L1_SHORT_EXIT_CONDITIONAL_PASS",
+        "fail_reasons": [],
+    }
+    events = [
+        {"symbol": "AAAUSDT", "entry_date": "2026-01-02", "entry_level": 100.0},
+        {"symbol": "BBBUSDT", "entry_date": "2026-01-02", "entry_level": 200.0},
+        {"symbol": "CCCUSDT", "entry_date": "2026-01-02", "entry_level": 300.0},
+        {"symbol": "DDDUSDT", "entry_date": "2026-01-02", "entry_level": 400.0},
+    ]
+
+    coverage = l1replay.l1_candidate_coverage_summary(
+        events,
+        {
+            "AAAUSDT": [{"ts_ms": _ts_ms(1)}],
+            "BBBUSDT": [{"ts_ms": _ts_ms(0) - 60 * 60 * 1000}],
+            "CCCUSDT": [
+                {"ts_ms": _ts_ms(0) - 60 * 60 * 1000},
+                {"ts_ms": _ts_ms(1)},
+            ],
+            "DDDUSDT": [{"ts_ms": _ts_ms(0, 5)}],
+        },
+        maker_timeout_minutes=10,
+    )
+    covered_gate = l1replay.apply_l1_coverage_reasons(gate, coverage)
+
+    assert coverage["event_window_l1_relation_counts"] == {
+        "candidate_window_after_symbol_l1_range": 1,
+        "candidate_window_before_symbol_l1_range": 1,
+        "candidate_window_overlaps_symbol_l1_range_but_empty": 1,
+        "covered": 1,
+    }
+    assert coverage["event_window_l1_relation_by_symbol_date"] == {
+        "AAAUSDT:2026-01-02": "candidate_window_before_symbol_l1_range",
+        "BBBUSDT:2026-01-02": "candidate_window_after_symbol_l1_range",
+        "CCCUSDT:2026-01-02": "candidate_window_overlaps_symbol_l1_range_but_empty",
+        "DDDUSDT:2026-01-02": "covered",
+    }
+    missing = {
+        row["symbol"]: row
+        for row in coverage["events_missing_l1_in_event_window_sample"]
+    }
+    assert missing["AAAUSDT"]["l1_gap_hours"] == pytest.approx(50 / 60)
+    assert missing["BBBUSDT"]["l1_gap_hours"] == pytest.approx(1.0)
+    assert missing["CCCUSDT"]["l1_gap_hours"] is None
+    assert covered_gate["status"] == "L1_SHORT_EXIT_INSUFFICIENT_SAMPLE"
+    assert covered_gate["fail_reasons"][0] == "partial_l1_event_window_coverage"
