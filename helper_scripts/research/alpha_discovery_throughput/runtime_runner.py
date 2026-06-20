@@ -534,6 +534,97 @@ def collect_mm_verdict_arm(
     )
 
 
+def _max_ic_points(payload: dict[str, Any]) -> int:
+    rows = payload.get("ic_results")
+    if not isinstance(rows, list):
+        return 0
+    return max((_int(row.get("n_points")) for row in rows if isinstance(row, dict)), default=0)
+
+
+def collect_polymarket_leadlag_arm(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_MAX_ARTIFACT_AGE_SECONDS,
+) -> dict[str, Any]:
+    path = data_dir / "research" / "polymarket_leadlag" / "polymarket_leadlag_latest.json"
+    payload, err = _read_json(path)
+    if err:
+        return _arm(
+            arm_id="polymarket_leadlag_ic",
+            gate_status="CAPTURING",
+            sample_count=0,
+            artifacts_ready=False,
+            source_ok=True,
+            source_path=path,
+            source_error=err,
+            detail={"note": "polymarket_leadlag_report_missing_or_not_yet_fired"},
+        )
+    assert payload is not None
+    created_at = payload.get("created_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        created_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    verdict = payload.get("verdict") if isinstance(payload.get("verdict"), dict) else {}
+    counts = payload.get("counts") if isinstance(payload.get("counts"), dict) else {}
+    status = str(verdict.get("status") or "").upper()
+    sample_count = _max_ic_points(payload)
+    candidate_count = _int(verdict.get("candidate_count"))
+
+    if not fresh:
+        gate_status = "SOURCE_FAILURE"
+        artifacts_ready = False
+        source_ok = False
+    elif status == "IC_CANDIDATE_REVIEW_REQUIRED":
+        gate_status = "READY"
+        artifacts_ready = candidate_count > 0
+        source_ok = True
+    elif status == "IC_READY_NO_SIGNIFICANT_EDGE":
+        gate_status = "NO_EDGE_SURVIVES"
+        artifacts_ready = False
+        source_ok = True
+    elif status == "NO_PRICE_DATA":
+        gate_status = "SOURCE_FAILURE"
+        artifacts_ready = False
+        source_ok = False
+        freshness_error = "no_price_data"
+    else:
+        gate_status = "CAPTURING"
+        artifacts_ready = False
+        source_ok = True
+
+    return _arm(
+        arm_id="polymarket_leadlag_ic",
+        gate_status=gate_status,
+        sample_count=sample_count,
+        artifacts_ready=artifacts_ready,
+        source_ok=source_ok,
+        source_path=path,
+        source_error=freshness_error,
+        detail={
+            "created_at_utc": created_at,
+            "age_seconds": age,
+            "verdict_status": status,
+            "reason": verdict.get("reason"),
+            "candidate_count": candidate_count,
+            "query_set_version": payload.get("query_set_version"),
+            "mode": payload.get("mode"),
+            "symbols": payload.get("symbols"),
+            "horizons_minutes": payload.get("horizons_minutes"),
+            "price_source": payload.get("price_source"),
+            "snapshot_rows": counts.get("snapshot_rows"),
+            "snapshot_distinct_timestamps": counts.get("snapshot_distinct_timestamps"),
+            "delta_rows": counts.get("delta_rows"),
+            "joined_rows": counts.get("joined_rows"),
+            "price_rows": counts.get("price_rows"),
+            "max_ic_points": sample_count,
+            "promotion_boundary": verdict.get("promotion_boundary"),
+        },
+    )
+
+
 def _latest_matrix_summary(alpha_history_root: Path) -> tuple[Path | None, dict[str, Any] | None, str | None]:
     try:
         candidates = sorted(
@@ -600,6 +691,7 @@ def collect_runtime_arms(
         collect_flash_dip_l1_replay_arm(data_dir, now_utc=now),
         collect_vol_event_arm(data_dir),
         collect_mm_verdict_arm(data_dir, now_utc=now),
+        collect_polymarket_leadlag_arm(data_dir, now_utc=now),
         collect_aeg_matrix_arm(data_dir),
     ]
 
@@ -747,6 +839,7 @@ if __name__ == "__main__":  # pragma: no cover
 __all__ = [
     "RUNTIME_KILLBOARD_SCHEMA_VERSION",
     "build_runtime_killboard",
+    "collect_polymarket_leadlag_arm",
     "collect_runtime_arms",
     "run_once",
     "write_runtime_artifacts",

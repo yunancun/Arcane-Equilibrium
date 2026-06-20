@@ -20,6 +20,7 @@ from alpha_discovery_throughput.packet import (
 from alpha_discovery_throughput.runtime_runner import (
     collect_flash_dip_arm,
     collect_flash_dip_l1_replay_arm,
+    collect_polymarket_leadlag_arm,
     collect_runtime_arms,
     run_once,
 )
@@ -323,6 +324,127 @@ def test_runtime_runner_blocks_stale_flash_dip_death_rate_status(tmp_path):
     assert arm["gate_status"] == "SOURCE_FAILURE"
     assert arm["artifacts_ready"] is False
     assert arm["detail"]["age_seconds"] > 36 * 60 * 60
+    assert plan["arms"][0]["action"] == "BLOCK"
+    assert plan["arms"][0]["reason"] == "source_not_healthy"
+
+
+def _write_polymarket_leadlag_latest(data: Path, payload: dict) -> Path:
+    path = data / "research" / "polymarket_leadlag" / "polymarket_leadlag_latest.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps({
+        "created_at_utc": "2026-06-20T12:00:00+00:00",
+        "query_set_version": "v2",
+        "mode": "hourly-topn",
+        "symbols": ["BTCUSDT", "ETHUSDT"],
+        "horizons_minutes": [15, 60, 240],
+        "price_source": "pg:market.klines:1m",
+        "verdict": {
+            "status": "INSUFFICIENT_SAMPLE",
+            "reason": "max joined IC points 0 below min_points 30",
+            "candidate_count": 0,
+            "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
+        },
+        "counts": {
+            "snapshot_rows": 860,
+            "snapshot_distinct_timestamps": 1,
+            "delta_rows": 0,
+            "joined_rows": 0,
+            "price_rows": 32,
+        },
+        "ic_results": [],
+        **payload,
+    }), encoding="utf-8")
+    return path
+
+
+def test_polymarket_leadlag_arm_captures_insufficient_sample(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_polymarket_leadlag_latest(data, {
+        "counts": {
+            "snapshot_rows": 860,
+            "snapshot_distinct_timestamps": 5,
+            "delta_rows": 400,
+            "joined_rows": 120,
+            "price_rows": 320,
+        },
+    })
+
+    arm = collect_polymarket_leadlag_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 12, 30, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan([arm], now_utc=dt.datetime(2026, 6, 20, 12, 30, tzinfo=dt.timezone.utc))
+
+    assert arm["gate_status"] == "CAPTURING"
+    assert arm["source_ok"] is True
+    assert arm["sample_count"] == 0
+    assert arm["artifacts_ready"] is False
+    assert arm["detail"]["verdict_status"] == "INSUFFICIENT_SAMPLE"
+    assert arm["detail"]["snapshot_rows"] == 860
+    assert arm["detail"]["promotion_boundary"] == "research_context_only_not_signal_or_promotion_proof"
+    assert plan["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
+    assert plan["arms"][0]["reason"] == "sample_count_below_gate"
+
+
+def test_polymarket_leadlag_arm_ready_only_for_candidate_review_with_sample(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_polymarket_leadlag_latest(data, {
+        "verdict": {
+            "status": "IC_CANDIDATE_REVIEW_REQUIRED",
+            "reason": "one or more bucket/symbol/horizon IC cells pass preliminary thresholds",
+            "candidate_count": 1,
+            "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
+        },
+        "counts": {
+            "snapshot_rows": 26000,
+            "snapshot_distinct_timestamps": 36,
+            "delta_rows": 1200,
+            "joined_rows": 105,
+            "price_rows": 9000,
+        },
+        "ic_results": [
+            {
+                "bucket": "event_reg",
+                "symbol": "BTCUSDT",
+                "horizon_minutes": 60,
+                "n_points": 35,
+                "ic_pearson": 0.22,
+                "t_stat": 2.1,
+            }
+        ],
+    })
+
+    arm = collect_polymarket_leadlag_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 12, 30, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan([arm], now_utc=dt.datetime(2026, 6, 20, 12, 30, tzinfo=dt.timezone.utc))
+
+    assert arm["gate_status"] == "READY"
+    assert arm["artifacts_ready"] is True
+    assert arm["sample_count"] == 35
+    assert arm["detail"]["candidate_count"] == 1
+    assert plan["arms"][0]["action"] == "READY_FOR_AEG_CHAIN"
+    assert plan["arms"][0]["reason"] == "artifacts_ready_and_sample_gate_met"
+
+
+def test_polymarket_leadlag_arm_blocks_stale_report(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_polymarket_leadlag_latest(data, {
+        "created_at_utc": "2026-06-20T00:00:00+00:00",
+        "ic_results": [{"n_points": 35}],
+    })
+
+    arm = collect_polymarket_leadlag_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 12, 30, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan([arm], now_utc=dt.datetime(2026, 6, 20, 12, 30, tzinfo=dt.timezone.utc))
+
+    assert arm["gate_status"] == "SOURCE_FAILURE"
+    assert arm["source_ok"] is False
+    assert arm["source_error"] == "stale_artifact"
+    assert arm["detail"]["age_seconds"] > 6 * 60 * 60
     assert plan["arms"][0]["action"] == "BLOCK"
     assert plan["arms"][0]["reason"] == "source_not_healthy"
 
