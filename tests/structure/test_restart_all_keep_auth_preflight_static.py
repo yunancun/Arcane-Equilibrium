@@ -73,3 +73,41 @@ def test_canary_mode_is_default_off_across_all_deploy_surfaces() -> None:
     )
     assert m is not None, "plist 缺 OPENCLAW_CANARY_MODE key/value"
     assert m.group("val").strip() == "0", "plist OPENCLAW_CANARY_MODE 非 0"
+
+
+def test_record_l1_events_env_is_durable_across_plain_restart() -> None:
+    """recorder-v2 enablement must survive watchdog/plain restart_all calls.
+
+    The runtime bug this guards: a one-shot
+    `OPENCLAW_RECORD_L1_EVENTS=1 bash restart_all.sh ...` enables market.l1_events,
+    but the next restart without that parent env silently turns the producer OFF.
+    """
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert "local record_l1_events l1_max_events_per_sec_per_symbol" in text
+    assert re.search(
+        r'record_l1_events="\$\{OPENCLAW_RECORD_L1_EVENTS:-\$\(grep '
+        r"'\^OPENCLAW_RECORD_L1_EVENTS=' "
+        r'"\$SECRETS_ROOT/environment_files/basic_system_services\.env"',
+        text,
+    )
+    assert re.search(
+        r'l1_max_events_per_sec_per_symbol="\$\{OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL:-\$\(grep '
+        r"'\^OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL=' "
+        r'"\$SECRETS_ROOT/environment_files/basic_system_services\.env"',
+        text,
+    )
+    assert 'OPENCLAW_RECORD_L1_EVENTS="${record_l1_events}"' in text
+    assert (
+        'OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL="${l1_max_events_per_sec_per_symbol}"'
+        in text
+    )
+    assert 'OPENCLAW_RECORD_L1_EVENTS="${OPENCLAW_RECORD_L1_EVENTS:-}"' not in text
+    assert (
+        'OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL="${OPENCLAW_L1_MAX_EVENTS_PER_SEC_PER_SYMBOL:-}"'
+        not in text
+    )
+
+    resolve_index = text.index("record_l1_events=")
+    launch_index = text.index('OPENCLAW_RECORD_L1_EVENTS="${record_l1_events}"')
+    assert resolve_index < launch_index
