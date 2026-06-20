@@ -70,6 +70,7 @@ Updated `helper_scripts/research/alpha_discovery_throughput/runtime_runner.py` s
 - Linux focused checks after restore: cron `bash -n` PASS, runtime runner `py_compile` PASS, alpha discovery focused tests 13 passed.
 - Runtime activation: installed hourly user cron `17 * * * * ... flash_dip_touchability_cron.sh`, then manually ran it once against production `/tmp/openclaw`; status line at `2026-06-20T01:28:59Z` matched the evidence above.
 - Alpha discovery activation check: manual `alpha_discovery_throughput_cron.sh` refresh at `2026-06-20T01:29:10Z` reported FlashDip `gate_status=CAPTURING_NO_TOUCH`, action `RUN_READ_ONLY_CAPTURE`, and fresh touchability `age_seconds=11.306709`.
+- K-ladder activation check: after selective deploy of the ladder extension, manual production touchability run at `2026-06-20T01:36:52Z` wrote `deepest_candidate_k_with_touch_pct=6` and `k_ladder_len=11`; manual alpha discovery refresh at `2026-06-20T01:37:02Z` preserved `CAPTURING_NO_TOUCH` and exposed K2 `4/18` vs K8 `0/18` in `arms_raw.detail.touchability.k_ladder`.
 
 ## Boundary
 
