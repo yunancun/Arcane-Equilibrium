@@ -25,6 +25,14 @@
 
 ## 近期記錄
 
+## 2026-06-20 Polymarket Hourly Top-N Activation
+
+- Activated Linux `trade-core` Polymarket `hourly-topn` cron as artifact-only data collection: daily remains `41 4 * * *`; hourly top-50 is active at `7 * * * *`.
+- Manual smoke artifact `/tmp/openclaw/polymarket_axis_runs/hourly-topn-20260620T111919Z` produced 50 events, 525 snapshot rows, 1 HTTP request, `errors=[]`, `point_in_time=true`, `query_set_version=v1`.
+- Local tests passed 59/60 with 1 opt-in skip plus both cron scripts `bash -n`; crontab backup before activation is `/tmp/openclaw/cron_backups/crontab_before_polymarket_hourly_20260620T112015Z.txt`.
+- PM read: this unblocks the time-series data requirement for Polymarket lead-lag IC, but Polymarket remains corroborating context only. Wait for 20-30 hourly points, then run leak-free forward IC with BTC/ETH residuals, regime slice, HAC, and multiple-testing correction before QC/MIT/AI-E ruling.
+- Boundary: user crontab + `/tmp/openclaw` artifact/log/heartbeat writes + docs only; no secrets, PG, Bybit private/signed/trading call, engine restart, strategy/auth/risk/order mutation, or promotion proof.
+
 ## 2026-06-20 FlashDip L1 Timing Relation Diagnostics
 
 - Added v0.2 timing diagnostics to `shallow_retune_l1_short_exit_replay.py`: missing event windows now record whether they are before, after, or inside the symbol's loaded L1 range, plus gap hours and symbol L1 first/last timestamps.
