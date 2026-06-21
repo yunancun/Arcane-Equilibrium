@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Runtime Killboard Actionable-Alpha Semantics v2
+
+- Runtime killboard schema is now `alpha_discovery_runtime_killboard_v2`.
+- `actionable_alpha_found` now means profitability-scorecard `promotion_ready_count>0`; raw `READY_FOR_AEG_CHAIN` remains visible as `ready_for_aeg_chain` / `aeg_candidate_artifact_found`.
+- This prevents Polymarket candidate artifacts lacking replay-history/execution-realism proof from being reported as actionable alpha.
+
 ## 2026-06-21 Polymarket Promotion-Ready Replay-History Gate
 
 - Polymarket `READY_FOR_AEG_CHAIN` IC artifacts no longer count as profitability-scorecard `promotion_ready` until candidate replay is built, replay history is AEG-recheck-ready, and replay-history execution realism is `PASS`.
