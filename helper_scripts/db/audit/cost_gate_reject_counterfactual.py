@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
+import math
 from pathlib import Path
 import sys
 from typing import Any
@@ -306,6 +307,197 @@ def annotate_learning_lane_rows(
     return annotated
 
 
+def _as_int(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _sort_float(value: Any) -> float:
+    parsed = _as_float(value)
+    return parsed if parsed is not None else float("-inf")
+
+
+def _side_cell_key(row: dict[str, Any]) -> str:
+    return "|".join(
+        [
+            str(row.get("strategy_name") or "unknown_strategy"),
+            str(row.get("symbol") or "unknown_symbol"),
+            str(row.get("side") or "unknown_side"),
+        ]
+    )
+
+
+def _bounded_score(value: float, scale: float, weight: float) -> float:
+    if scale <= 0:
+        return 0.0
+    return min(max(value, 0.0) / scale, 1.0) * weight
+
+
+def _profit_priority_components(cfg: AuditConfig, row: dict[str, Any]) -> dict[str, float]:
+    n = max(_as_int(row.get("n")), 0)
+    avg_net = _as_float(row.get("avg_net_bps")) or 0.0
+    p50_gross = _as_float(row.get("p50_gross_bps")) or 0.0
+    net_positive_pct = _as_float(row.get("net_positive_pct")) or 0.0
+    return {
+        "sample_score": min(math.log10(n + 1) / 4.0, 1.0) * 25.0,
+        "avg_net_score": _bounded_score(avg_net - cfg.min_probe_avg_net_bps, 100.0, 25.0),
+        "median_margin_score": _bounded_score(p50_gross - cfg.friction_bps, 50.0, 25.0),
+        "hit_rate_score": _bounded_score(net_positive_pct - 50.0, 50.0, 25.0),
+    }
+
+
+def _profit_priority_tier(action: str, score: float) -> str:
+    if action == "LEARNING_PROBE_CANDIDATE":
+        if score >= 70.0:
+            return "HIGH_PRIORITY_BOUNDED_DEMO_LEARNING"
+        if score >= 60.0:
+            return "MEDIUM_PRIORITY_BOUNDED_DEMO_LEARNING"
+        return "LOW_PRIORITY_BOUNDED_DEMO_LEARNING"
+    if action == "BLOCK_CONFIRMED":
+        return "KEEP_BLOCKED_CONFIRMED"
+    if action == "DATA_COVERAGE_BLOCKER":
+        return "DATA_FIX_BEFORE_PROFIT_JUDGMENT"
+    if action == "INSUFFICIENT_SAMPLE":
+        return "COLLECT_MORE_SAMPLE"
+    if action == "TAIL_ONLY_WATCH":
+        return "TAIL_ONLY_WATCH_NO_PROBE"
+    return "NO_PROBE"
+
+
+def _profit_next_action(action: str) -> str:
+    if action == "LEARNING_PROBE_CANDIDATE":
+        return "operator_review_ranked_side_cell_for_bounded_demo_learning_lane"
+    if action == "BLOCK_CONFIRMED":
+        return "keep_main_cost_gate_block_for_side_cell"
+    if action == "DATA_COVERAGE_BLOCKER":
+        return "fix_data_coverage_before_profit_judgment"
+    if action == "INSUFFICIENT_SAMPLE":
+        return "continue_collecting_reject_counterfactual_samples"
+    if action == "TAIL_ONLY_WATCH":
+        return "continue_watch_without_probe_authority"
+    return "do_not_probe_side_cell"
+
+
+def build_profit_opportunity_ranking(
+    cfg: AuditConfig,
+    annotated_rows: list[dict[str, Any]],
+    action_counts: dict[str, int],
+) -> dict[str, Any]:
+    """Rank blocked side-cells by learning value without granting authority."""
+
+    ranked_rows: list[dict[str, Any]] = []
+    for row in annotated_rows:
+        action = str(row.get("learning_lane_action") or "UNSCORABLE")
+        components = _profit_priority_components(cfg, row)
+        score = round(sum(components.values()), 4)
+        n = _as_int(row.get("n"))
+        joined_contexts = _as_int(row.get("joined_contexts"))
+        context_join_coverage_pct = round((joined_contexts / n * 100.0), 4) if n else 0.0
+        avg_net = _as_float(row.get("avg_net_bps"))
+        p50_gross = _as_float(row.get("p50_gross_bps"))
+        net_positive_pct = _as_float(row.get("net_positive_pct"))
+        ranked_rows.append(
+            {
+                "side_cell_key": _side_cell_key(row),
+                "strategy_name": row.get("strategy_name"),
+                "symbol": row.get("symbol"),
+                "side": row.get("side"),
+                "reject_reason_code": row.get("reject_reason_code"),
+                "learning_lane_action": action,
+                "learning_lane_reason": row.get("learning_lane_reason"),
+                "priority_tier": _profit_priority_tier(action, score),
+                "priority_score": score,
+                "priority_components": {key: round(value, 4) for key, value in components.items()},
+                "n": n,
+                "joined_contexts": joined_contexts,
+                "context_join_coverage_pct": context_join_coverage_pct,
+                "avg_net_bps": avg_net,
+                "p50_gross_bps": p50_gross,
+                "p90_gross_bps": _as_float(row.get("p90_gross_bps")),
+                "net_positive_pct": net_positive_pct,
+                "net_margin_bps": (
+                    round(avg_net - cfg.min_probe_avg_net_bps, 4)
+                    if avg_net is not None
+                    else None
+                ),
+                "median_margin_bps": (
+                    round(p50_gross - cfg.friction_bps, 4)
+                    if p50_gross is not None
+                    else None
+                ),
+                "hit_rate_margin_pct": (
+                    round(net_positive_pct - cfg.min_probe_net_positive_pct, 4)
+                    if net_positive_pct is not None
+                    else None
+                ),
+                "next_action": _profit_next_action(action),
+                "order_authority": "NOT_GRANTED",
+                "main_cost_gate_adjustment": "NONE",
+                "promotion_evidence": False,
+            }
+        )
+
+    action_order = {
+        "LEARNING_PROBE_CANDIDATE": 0,
+        "TAIL_ONLY_WATCH": 1,
+        "INSUFFICIENT_SAMPLE": 2,
+        "DATA_COVERAGE_BLOCKER": 3,
+        "NO_PROBE": 4,
+        "UNSCORABLE": 5,
+        "BLOCK_CONFIRMED": 6,
+    }
+    ranked_rows.sort(
+        key=lambda row: (
+            action_order.get(str(row.get("learning_lane_action")), 9),
+            -(float(row.get("priority_score") or 0.0)),
+            -_sort_float(row.get("avg_net_bps")),
+            -_as_int(row.get("n")),
+        )
+    )
+    candidate_count = int(action_counts.get("LEARNING_PROBE_CANDIDATE") or 0)
+    data_blocker_count = int(action_counts.get("DATA_COVERAGE_BLOCKER") or 0)
+    sample_gap_count = int(action_counts.get("INSUFFICIENT_SAMPLE") or 0)
+    tail_watch_count = int(action_counts.get("TAIL_ONLY_WATCH") or 0)
+    if candidate_count:
+        status = "PROFIT_LEARNING_CANDIDATES_PRESENT"
+        next_trigger = "operator_review_top_ranked_side_cells_for_bounded_demo_learning_lane"
+    elif data_blocker_count:
+        status = "DATA_COVERAGE_BLOCKS_PROFIT_JUDGMENT"
+        next_trigger = "fix_data_coverage_before_probe_or_gate_change"
+    elif sample_gap_count or tail_watch_count:
+        status = "NO_READY_CANDIDATE_COLLECT_MORE_EVIDENCE"
+        next_trigger = "continue_collecting_cost_gate_reject_counterfactuals"
+    else:
+        status = "NO_PROFIT_LEARNING_CANDIDATE"
+        next_trigger = "keep_cost_gate_and_continue_research"
+
+    return {
+        "schema_version": "cost_gate_profit_opportunity_ranking_v1",
+        "status": status,
+        "next_trigger": next_trigger,
+        "candidate_count": candidate_count,
+        "data_blocker_count": data_blocker_count,
+        "confirmed_block_count": int(action_counts.get("BLOCK_CONFIRMED") or 0),
+        "sample_gap_count": sample_gap_count,
+        "tail_watch_count": tail_watch_count,
+        "scoring": {
+            "sample_score": "min(log10(n+1)/4,1)*25",
+            "avg_net_score": "clamp((avg_net_bps-min_probe_avg_net_bps)/100,0,1)*25",
+            "median_margin_score": "clamp((p50_gross_bps-friction_bps)/50,0,1)*25",
+            "hit_rate_score": "clamp((net_positive_pct-50)/50,0,1)*25",
+        },
+        "top_side_cells": ranked_rows[:20],
+        "boundary": {
+            "order_authority": "NOT_GRANTED",
+            "main_cost_gate_adjustment": "NONE",
+            "promotion_evidence": False,
+            "runtime_mutation": "NONE",
+        },
+    }
+
+
 def build_learning_lane_scorecard(
     cfg: AuditConfig,
     coverage: dict[str, Any],
@@ -347,6 +539,11 @@ def build_learning_lane_scorecard(
         if probe_candidates
         else "NO_LEARNING_LANE_PROBE_CANDIDATES"
     )
+    profit_opportunity_ranking = build_profit_opportunity_ranking(
+        cfg,
+        annotated,
+        action_counts,
+    )
     return {
         "schema_version": "cost_gate_reject_counterfactual_v2",
         "status": status,
@@ -362,6 +559,7 @@ def build_learning_lane_scorecard(
         },
         "probe_candidates": probe_candidates[:20],
         "block_confirmed": block_confirmed[:20],
+        "profit_opportunity_ranking": profit_opportunity_ranking,
         "rows": annotated,
     }
 
@@ -453,6 +651,28 @@ def render_markdown(
     )
     for action, count in sorted(scorecard["action_counts"].items()):
         lines.append(f"| {action} | {count} |")
+    ranking = scorecard["profit_opportunity_ranking"]
+    lines.extend(
+        [
+            "",
+            "### Profit Opportunity Ranking",
+            "",
+            f"- Status: `{ranking['status']}`",
+            f"- Next trigger: `{ranking['next_trigger']}`",
+            "- Boundary: ranking only; `order_authority=NOT_GRANTED`, `main_cost_gate_adjustment=NONE`.",
+            "",
+            "| rank | side_cell | action | tier | score | n | avg_net | p50 | net+% | next_action |",
+            "|---:|---|---|---|---:|---:|---:|---:|---:|---|",
+        ]
+    )
+    for idx, row in enumerate(ranking["top_side_cells"][:10], start=1):
+        lines.append(
+            "| "
+            f"{idx} | {row['side_cell_key']} | {row['learning_lane_action']} | "
+            f"{row['priority_tier']} | {_fmt(row['priority_score'])} | {row['n']} | "
+            f"{_fmt(row['avg_net_bps'])} | {_fmt(row['p50_gross_bps'])} | "
+            f"{_fmt(row['net_positive_pct'])} | {row['next_action']} |"
+        )
     lines.extend(
         [
             "",

@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Profit Opportunity Ranking
+
+- `cost_gate_reject_counterfactual.py` now emits `cost_gate_profit_opportunity_ranking_v1` inside the existing learning-lane scorecard.
+- Ranking turns blocked side-cells into a direct next-action list: top current runtime artifact is `ma_crossover|ETHUSDT|Sell` with `priority_score=74.4954`, while NEAR/LTC/ATOM Sell are lower priority and FIL Buy remains sample-gated.
+- This is the deliberate pivot away from more wrappers/preflights: rank profit-learning opportunities first; runtime activation remains operator-gated and still has no order authority or main Cost Gate lowering.
+
 ## 2026-06-21 Demo Learning Evidence Cron Installer
 
 - Added `install_demo_learning_evidence_audit_cron.sh` as the reviewed Linux crontab installer for the demo-learning evidence heartbeat.

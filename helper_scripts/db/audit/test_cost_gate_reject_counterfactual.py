@@ -212,6 +212,29 @@ def test_learning_lane_scorecard_classifies_probe_block_and_sample_gap() -> None
     }
     assert scorecard["probe_candidates"][0]["symbol"] == "ETHUSDT"
     assert scorecard["block_confirmed"][0]["symbol"] == "BTCUSDT"
+    ranking = scorecard["profit_opportunity_ranking"]
+    assert ranking["schema_version"] == "cost_gate_profit_opportunity_ranking_v1"
+    assert ranking["status"] == "PROFIT_LEARNING_CANDIDATES_PRESENT"
+    assert ranking["next_trigger"] == (
+        "operator_review_top_ranked_side_cells_for_bounded_demo_learning_lane"
+    )
+    assert ranking["candidate_count"] == 1
+    assert ranking["boundary"] == {
+        "order_authority": "NOT_GRANTED",
+        "main_cost_gate_adjustment": "NONE",
+        "promotion_evidence": False,
+        "runtime_mutation": "NONE",
+    }
+    top = ranking["top_side_cells"][0]
+    assert top["side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+    assert top["priority_tier"] == "HIGH_PRIORITY_BOUNDED_DEMO_LEARNING"
+    assert top["order_authority"] == "NOT_GRANTED"
+    assert top["main_cost_gate_adjustment"] == "NONE"
+    assert top["promotion_evidence"] is False
+    assert top["next_action"] == "operator_review_ranked_side_cell_for_bounded_demo_learning_lane"
+    assert top["priority_score"] > 70.0
+    assert top["median_margin_bps"] == pytest.approx(13.9914)
+    assert top["hit_rate_margin_pct"] == pytest.approx(31.01)
 
 
 def test_markdown_and_json_payload_surface_learning_lane_actions() -> None:
@@ -257,6 +280,8 @@ def test_markdown_and_json_payload_surface_learning_lane_actions() -> None:
         generated="2026-06-21T00:00:00+00:00",
     )
     assert "## Learning Lane Scorecard" in markdown
+    assert "### Profit Opportunity Ranking" in markdown
+    assert "PROFIT_LEARNING_CANDIDATES_PRESENT" in markdown
     assert "LEARNING_PROBE_CANDIDATE" in markdown
     assert "NEARUSDT" in markdown
 
@@ -270,3 +295,7 @@ def test_markdown_and_json_payload_surface_learning_lane_actions() -> None:
     assert scorecard["schema_version"] == "cost_gate_reject_counterfactual_v2"
     assert scorecard["status"] == "LEARNING_LANE_PROBE_CANDIDATES_PRESENT"
     assert scorecard["rows"][0]["learning_lane_action"] == "LEARNING_PROBE_CANDIDATE"
+    ranking = scorecard["profit_opportunity_ranking"]
+    assert ranking["status"] == "PROFIT_LEARNING_CANDIDATES_PRESENT"
+    assert ranking["top_side_cells"][0]["side_cell_key"] == "ma_crossover|NEARUSDT|Sell"
+    assert ranking["top_side_cells"][0]["order_authority"] == "NOT_GRANTED"
