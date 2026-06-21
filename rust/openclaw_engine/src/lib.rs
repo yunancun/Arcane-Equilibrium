@@ -70,6 +70,9 @@ pub mod cost_edge_advisor;
 pub mod cron;
 pub mod database;
 pub mod decision_context_producer;
+pub mod demo_learning_lane;
+#[cfg(test)]
+mod demo_learning_lane_tests;
 pub mod drawdown_revoke;
 pub mod dynamic_risk_sizer;
 pub mod edge_estimates;

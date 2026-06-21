@@ -58,7 +58,8 @@ def _age_seconds(value: Any, *, now_utc: dt.datetime) -> float | None:
     parsed = _parse_dt(value)
     if parsed is None:
         return None
-    return max(0.0, (now_utc - parsed).total_seconds())
+    age = (now_utc - parsed).total_seconds()
+    return age if age >= 0.0 else None
 
 
 def _int(value: Any, default: int = 0) -> int:
@@ -223,11 +224,16 @@ def build_plan_from_payload(
     scorecard = _dict(payload.get("learning_lane_scorecard"))
     scorecard_schema = str(scorecard.get("schema_version") or "")
     generated_at = payload.get("generated_at_utc")
+    parsed_generated_at = _parse_dt(generated_at)
     age = _age_seconds(generated_at, now_utc=now)
     max_age_seconds = cfg.max_scorecard_age_hours * 3600
     source_error = None
     if scorecard_schema != EXPECTED_SCORECARD_SCHEMA_VERSION:
         source_error = "unexpected_scorecard_schema"
+    elif parsed_generated_at is None:
+        source_error = "missing_scorecard_generated_at"
+    elif parsed_generated_at > now:
+        source_error = "future_scorecard_generated_at"
     elif age is None:
         source_error = "missing_scorecard_generated_at"
     elif age > max_age_seconds:

@@ -60,7 +60,8 @@ def _age_seconds(value: Any, *, now_utc: dt.datetime) -> float | None:
     parsed = _parse_dt(value)
     if parsed is None:
         return None
-    return max(0.0, (now_utc - parsed).total_seconds())
+    age = (now_utc - parsed).total_seconds()
+    return age if age >= 0.0 else None
 
 
 def _int(value: Any, default: int = 0) -> int:
