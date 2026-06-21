@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Materializer Cron Wiring
+
+- `cost_gate_learning_lane_cron.sh` now runs reject materialization before outcome refresh/review, so an activated loop can turn PG rejects into ledger rows and then blocked-signal outcomes in one scheduled path.
+- Installer preview now exposes materialize/append toggles, and activation preflight requires `reject_materializer.py` as source readiness.
+- Boundary remains source/test/docs only in this checkpoint: no runtime install, source sync, ledger append, PG write, writer enablement, order authority, or Cost Gate lowering.
+
 ## 2026-06-21 Cost-Gate Reject Materializer
 
 - Added `cost_gate_learning_lane.reject_materializer` to convert recorded `learning.decision_features` cost-gate rejects into the existing `probe_admission_decision` JSONL contract.
