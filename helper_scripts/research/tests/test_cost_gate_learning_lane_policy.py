@@ -744,6 +744,81 @@ def test_alpha_discovery_surfaces_learning_loop_running_without_ledger_rows(
     assert row["learning_loop_last_review_status"] == "NO_BLOCKED_SIGNAL_OUTCOMES"
 
 
+def test_learning_loop_status_falls_back_to_review_artifact_for_top_review_fields(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    log_dir = data_dir / "logs"
+    lane_dir.mkdir(parents=True)
+    log_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    (lane_dir / "blocked_outcome_review_latest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": (
+                    "cost_gate_demo_learning_lane_blocked_outcome_review_v2"
+                ),
+                "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
+                "next_trigger": (
+                    "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+                ),
+                "top_side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "top_side_cell_wrongful_block_score": 3.444444,
+                "top_side_cell_net_cost_cushion_bps": 5.166667,
+                "top_review_candidate_side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "top_review_candidate_wrongful_block_score": 3.444444,
+                "top_review_candidate_net_cost_cushion_bps": 5.166667,
+            }
+        ),
+        encoding="utf-8",
+    )
+    (log_dir / "cost_gate_learning_lane.log").write_text(
+        json.dumps(
+            {
+                "ts_utc": "2026-06-21T11:00:00Z",
+                "check": "cost_gate_learning_lane",
+                "scorecard_rc": 0,
+                "plan_rc": 0,
+                "materializer_rc": 0,
+                "refresh_rc": 0,
+                "review_rc": 0,
+                "ledger_row_count": 3,
+                "review_status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
+                "review_next_trigger": (
+                    "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+                ),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    arm = collect_cost_gate_learning_lane_arm(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+    detail = arm["detail"]
+
+    assert detail["learning_loop_last_review_status"] == (
+        "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+    )
+    assert detail["learning_loop_last_review_top_side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert detail["learning_loop_last_review_top_wrongful_block_score"] == 3.444444
+    assert detail["learning_loop_last_review_top_candidate_side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+
+
 def test_activation_preflight_reports_not_accumulating_without_runtime_artifacts(
     tmp_path: Path,
 ):
@@ -1535,7 +1610,10 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
             "strategy_name": "ma_crossover",
             "symbol": "ETHUSDT",
             "side": "Sell",
+            "gross_bps": 16.5,
+            "cost_bps": 4.0,
             "realized_net_bps": 12.5,
+            "horizon_minutes": 60,
         },
         {
             "record_type": "blocked_signal_outcome",
@@ -1545,7 +1623,10 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
             "strategy_name": "ma_crossover",
             "symbol": "ETHUSDT",
             "side": "Sell",
+            "gross_bps": 8.0,
+            "cost_bps": 4.0,
             "realized_net_bps": 4.0,
+            "horizon_minutes": 60,
         },
         {
             "record_type": "blocked_signal_outcome",
@@ -1555,7 +1636,10 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
             "strategy_name": "ma_crossover",
             "symbol": "ETHUSDT",
             "side": "Sell",
+            "gross_bps": 3.0,
+            "cost_bps": 4.0,
             "realized_net_bps": -1.0,
+            "horizon_minutes": 60,
         },
     ]
     (lane_dir / "probe_ledger.jsonl").write_text(
@@ -1574,6 +1658,23 @@ def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
     assert preflight["ledger"]["blocked_signal_outcome_review_status"] == (
         "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
     )
+    assert preflight["ledger"]["blocked_signal_outcome_review_schema_version"] == (
+        "cost_gate_demo_learning_lane_blocked_outcome_review_v2"
+    )
+    assert preflight["ledger"]["blocked_signal_top_review_side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert preflight["ledger"]["blocked_signal_top_review_candidate_side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert round(
+        preflight["ledger"]["blocked_signal_top_review_wrongful_block_score"],
+        6,
+    ) == 3.444444
+    assert round(
+        preflight["ledger"]["blocked_signal_top_review_net_cost_cushion_bps"],
+        6,
+    ) == 5.166667
     assert preflight["next_actions"] == [
         "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
     ]
@@ -1940,7 +2041,10 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
             "symbol": "ETHUSDT",
             "side": "Sell",
             "source_admission_decision": "ORDER_AUTHORITY_NOT_GRANTED",
+            "gross_bps": 16.5,
+            "cost_bps": 4.0,
             "realized_net_bps": 12.5,
+            "horizon_minutes": 60,
         },
         {
             "record_type": "blocked_signal_outcome",
@@ -1951,7 +2055,10 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
             "symbol": "ETHUSDT",
             "side": "Sell",
             "source_admission_decision": "ORDER_AUTHORITY_NOT_GRANTED",
+            "gross_bps": 8.0,
+            "cost_bps": 4.0,
             "realized_net_bps": 4.0,
+            "horizon_minutes": 60,
         },
         {
             "record_type": "blocked_signal_outcome",
@@ -1962,7 +2069,10 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
             "symbol": "ETHUSDT",
             "side": "Sell",
             "source_admission_decision": "ORDER_AUTHORITY_NOT_GRANTED",
+            "gross_bps": 3.0,
+            "cost_bps": 4.0,
             "realized_net_bps": -1.0,
+            "horizon_minutes": 60,
         },
     ]
     (lane_dir / "probe_ledger.jsonl").write_text(
@@ -1999,6 +2109,17 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
     assert row["blocked_signal_outcome_review"]["top_side_cells"][0]["status"] == (
         "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
     )
+    assert row["blocked_signal_outcome_review_schema_version"] == (
+        "cost_gate_demo_learning_lane_blocked_outcome_review_v2"
+    )
+    assert row["blocked_signal_top_review_side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert row["blocked_signal_top_review_candidate_side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert round(row["blocked_signal_top_review_wrongful_block_score"], 6) == 3.444444
+    assert round(row["blocked_signal_top_review_net_cost_cushion_bps"], 6) == 5.166667
 
 
 def test_alpha_discovery_blocks_when_blocked_outcome_review_fails_thresholds(
@@ -2672,7 +2793,10 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
                 "strategy_name": "ma_crossover",
                 "symbol": "ETHUSDT",
                 "side": "Sell",
+                "gross_bps": 16.5,
+                "cost_bps": 4.0,
                 "realized_net_bps": 12.5,
+                "horizon_minutes": 60,
             },
             {
                 "record_type": "blocked_signal_outcome",
@@ -2682,7 +2806,10 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
                 "strategy_name": "ma_crossover",
                 "symbol": "ETHUSDT",
                 "side": "Sell",
+                "gross_bps": 8.0,
+                "cost_bps": 4.0,
                 "realized_net_bps": 4.0,
+                "horizon_minutes": 60,
             },
             {
                 "record_type": "blocked_signal_outcome",
@@ -2692,7 +2819,10 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
                 "strategy_name": "ma_crossover",
                 "symbol": "ETHUSDT",
                 "side": "Sell",
+                "gross_bps": 3.0,
+                "cost_bps": 4.0,
                 "realized_net_bps": -1.0,
+                "horizon_minutes": 60,
             },
         ],
         now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
@@ -2704,6 +2834,9 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
     )
 
     assert scorecard["status"] == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+    assert scorecard["schema_version"] == (
+        "cost_gate_demo_learning_lane_blocked_outcome_review_v2"
+    )
     assert scorecard["next_trigger"] == (
         "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
     )
@@ -2714,7 +2847,25 @@ def test_blocked_signal_outcome_review_scorecard_is_conservative():
     assert side_cell["status"] == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
     assert side_cell["outcome_count"] == 3
     assert round(side_cell["avg_net_bps"], 6) == 5.166667
+    assert round(side_cell["avg_gross_bps"], 6) == 9.166667
+    assert side_cell["avg_cost_bps"] == 4.0
     assert round(side_cell["net_positive_pct"], 6) == 66.666667
+    assert side_cell["gross_positive_pct"] == 100.0
+    assert round(side_cell["net_cost_cushion_bps"], 6) == 5.166667
+    assert round(side_cell["net_positive_margin_pct"], 6) == 6.666667
+    assert side_cell["sample_margin_count"] == 0
+    assert round(side_cell["wrongful_block_score"], 6) == 3.444444
+    assert side_cell["review_rank"] == 1
+    assert side_cell["bounded_demo_probe_review_rank"] == 1
+    assert side_cell["horizon_minutes"] == [60]
+    assert side_cell["horizon_counts"] == {"60": 3}
+    assert side_cell["dominant_horizon_minutes"] == 60
+    assert scorecard["top_side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+    assert scorecard["top_review_candidate_side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert round(scorecard["top_side_cell_wrongful_block_score"], 6) == 3.444444
+    assert round(scorecard["max_wrongful_block_score"], 6) == 3.444444
 
     insufficient = build_blocked_signal_outcome_review(
         [

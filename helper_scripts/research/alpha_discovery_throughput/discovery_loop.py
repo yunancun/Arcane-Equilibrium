@@ -1611,6 +1611,30 @@ def classify_profitability_blocker(
                 "blocked_signal_outcome_review_next_trigger": detail.get(
                     "blocked_signal_outcome_review_next_trigger"
                 ) or blocked_review.get("next_trigger"),
+                "blocked_signal_outcome_review_schema_version": detail.get(
+                    "blocked_signal_outcome_review_schema_version"
+                ) or blocked_review.get("schema_version"),
+                "blocked_signal_top_review_side_cell_key": detail.get(
+                    "blocked_signal_top_review_side_cell_key"
+                ) or blocked_review.get("top_side_cell_key"),
+                "blocked_signal_top_review_status": detail.get(
+                    "blocked_signal_top_review_status"
+                ) or blocked_review.get("top_side_cell_status"),
+                "blocked_signal_top_review_wrongful_block_score": detail.get(
+                    "blocked_signal_top_review_wrongful_block_score"
+                ) or blocked_review.get("top_side_cell_wrongful_block_score"),
+                "blocked_signal_top_review_net_cost_cushion_bps": detail.get(
+                    "blocked_signal_top_review_net_cost_cushion_bps"
+                ) or blocked_review.get("top_side_cell_net_cost_cushion_bps"),
+                "blocked_signal_top_review_candidate_side_cell_key": detail.get(
+                    "blocked_signal_top_review_candidate_side_cell_key"
+                ) or blocked_review.get("top_review_candidate_side_cell_key"),
+                "blocked_signal_top_review_candidate_wrongful_block_score": detail.get(
+                    "blocked_signal_top_review_candidate_wrongful_block_score"
+                ) or blocked_review.get("top_review_candidate_wrongful_block_score"),
+                "blocked_signal_top_review_candidate_net_cost_cushion_bps": detail.get(
+                    "blocked_signal_top_review_candidate_net_cost_cushion_bps"
+                ) or blocked_review.get("top_review_candidate_net_cost_cushion_bps"),
                 "blocked_signal_outcome_review": blocked_review or None,
                 "latest_admission_decision": detail.get("latest_admission_decision"),
                 "latest_record_type": detail.get("latest_record_type"),

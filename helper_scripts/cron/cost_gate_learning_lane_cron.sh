@@ -440,6 +440,13 @@ status = {
     "review_reason": review.get("reason"),
     "review_next_trigger": review.get("next_trigger"),
     "review_candidate_side_cell_count": review.get("review_candidate_side_cell_count"),
+    "review_top_side_cell_key": review.get("top_side_cell_key"),
+    "review_top_side_cell_status": review.get("top_side_cell_status"),
+    "review_top_wrongful_block_score": review.get("top_side_cell_wrongful_block_score"),
+    "review_top_net_cost_cushion_bps": review.get("top_side_cell_net_cost_cushion_bps"),
+    "review_top_candidate_side_cell_key": review.get("top_review_candidate_side_cell_key"),
+    "review_top_candidate_wrongful_block_score": review.get("top_review_candidate_wrongful_block_score"),
+    "review_top_candidate_net_cost_cushion_bps": review.get("top_review_candidate_net_cost_cushion_bps"),
     "blocked_signal_outcome_count": review.get("blocked_signal_outcome_count"),
     "boundary": "artifact_only_readonly_pg_jsonl_ledger_no_order_no_cost_gate_relaxation",
 }

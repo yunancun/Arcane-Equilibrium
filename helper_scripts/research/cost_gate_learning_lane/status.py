@@ -613,6 +613,14 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         "blocked_signal_outcome_review_status": None,
         "blocked_signal_outcome_review_reason": None,
         "blocked_signal_outcome_review_next_trigger": None,
+        "blocked_signal_outcome_review_schema_version": None,
+        "blocked_signal_top_review_side_cell_key": None,
+        "blocked_signal_top_review_status": None,
+        "blocked_signal_top_review_wrongful_block_score": None,
+        "blocked_signal_top_review_net_cost_cushion_bps": None,
+        "blocked_signal_top_review_candidate_side_cell_key": None,
+        "blocked_signal_top_review_candidate_wrongful_block_score": None,
+        "blocked_signal_top_review_candidate_net_cost_cushion_bps": None,
     }
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -719,6 +727,28 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         summary["blocked_signal_outcome_review_status"] = review.get("status")
         summary["blocked_signal_outcome_review_reason"] = review.get("reason")
         summary["blocked_signal_outcome_review_next_trigger"] = review.get("next_trigger")
+        summary["blocked_signal_outcome_review_schema_version"] = review.get(
+            "schema_version"
+        )
+        summary["blocked_signal_top_review_side_cell_key"] = review.get(
+            "top_side_cell_key"
+        )
+        summary["blocked_signal_top_review_status"] = review.get("top_side_cell_status")
+        summary["blocked_signal_top_review_wrongful_block_score"] = review.get(
+            "top_side_cell_wrongful_block_score"
+        )
+        summary["blocked_signal_top_review_net_cost_cushion_bps"] = review.get(
+            "top_side_cell_net_cost_cushion_bps"
+        )
+        summary["blocked_signal_top_review_candidate_side_cell_key"] = review.get(
+            "top_review_candidate_side_cell_key"
+        )
+        summary["blocked_signal_top_review_candidate_wrongful_block_score"] = review.get(
+            "top_review_candidate_wrongful_block_score"
+        )
+        summary["blocked_signal_top_review_candidate_net_cost_cushion_bps"] = review.get(
+            "top_review_candidate_net_cost_cushion_bps"
+        )
     return summary
 
 
@@ -830,6 +860,36 @@ def summarize_cost_gate_learning_lane_loop(
         status_row.get("review_next_trigger")
         if status_row
         else (review_payload or {}).get("next_trigger")
+    )
+
+    def _status_or_review(status_key: str, review_key: str) -> Any:
+        if status_row and status_row.get(status_key) is not None:
+            return status_row.get(status_key)
+        return (review_payload or {}).get(review_key)
+
+    review_top_side_cell_key = _status_or_review(
+        "review_top_side_cell_key",
+        "top_side_cell_key",
+    )
+    review_top_wrongful_block_score = _status_or_review(
+        "review_top_wrongful_block_score",
+        "top_side_cell_wrongful_block_score",
+    )
+    review_top_net_cost_cushion_bps = _status_or_review(
+        "review_top_net_cost_cushion_bps",
+        "top_side_cell_net_cost_cushion_bps",
+    )
+    review_top_candidate_side_cell_key = _status_or_review(
+        "review_top_candidate_side_cell_key",
+        "top_review_candidate_side_cell_key",
+    )
+    review_top_candidate_wrongful_block_score = _status_or_review(
+        "review_top_candidate_wrongful_block_score",
+        "top_review_candidate_wrongful_block_score",
+    )
+    review_top_candidate_net_cost_cushion_bps = _status_or_review(
+        "review_top_candidate_net_cost_cushion_bps",
+        "top_review_candidate_net_cost_cushion_bps",
     )
 
     any_artifact_present = any(
@@ -945,6 +1005,22 @@ def summarize_cost_gate_learning_lane_loop(
         "learning_loop_last_ledger_row_count": ledger_row_count,
         "learning_loop_last_review_status": review_status or None,
         "learning_loop_last_review_next_trigger": review_next_trigger,
+        "learning_loop_last_review_top_side_cell_key": review_top_side_cell_key,
+        "learning_loop_last_review_top_wrongful_block_score": (
+            review_top_wrongful_block_score
+        ),
+        "learning_loop_last_review_top_net_cost_cushion_bps": (
+            review_top_net_cost_cushion_bps
+        ),
+        "learning_loop_last_review_top_candidate_side_cell_key": (
+            review_top_candidate_side_cell_key
+        ),
+        "learning_loop_last_review_top_candidate_wrongful_block_score": (
+            review_top_candidate_wrongful_block_score
+        ),
+        "learning_loop_last_review_top_candidate_net_cost_cushion_bps": (
+            review_top_candidate_net_cost_cushion_bps
+        ),
     }
 
 
