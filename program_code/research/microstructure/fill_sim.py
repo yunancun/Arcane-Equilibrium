@@ -1838,6 +1838,8 @@ def fill_sim_low_friction_signal_scorecard(
         col for col in (
             "side_recent_trade_imbalance_10s",
             "side_recent_trade_imbalance_30s",
+            "recent_trade_abs_qty_10s",
+            "recent_trade_abs_qty_30s",
             "recent_trade_count_10s",
             "recent_trade_count_30s",
             "recent_l1_update_count_10s",
@@ -1925,6 +1927,8 @@ def fill_sim_low_friction_signal_scorecard(
         for col, labels in (
             ("side_recent_trade_imbalance_10s", ("train_p75", "train_p90")),
             ("side_recent_trade_imbalance_30s", ("train_p75", "train_p90")),
+            ("recent_trade_abs_qty_10s", ("train_p10", "train_p25")),
+            ("recent_trade_abs_qty_30s", ("train_p10", "train_p25")),
             ("recent_trade_count_10s", ("train_p10", "train_p25")),
             ("recent_trade_count_30s", ("train_p10", "train_p25")),
             ("recent_l1_update_count_10s", ("train_p10", "train_p25")),
@@ -1944,6 +1948,7 @@ def fill_sim_low_friction_signal_scorecard(
     for spread_label in ("train_p75", "train_p90"):
         for suffix in ("10s", "30s"):
             quiet_cols = (
+                f"recent_trade_abs_qty_{suffix}",
                 f"recent_trade_count_{suffix}",
                 f"recent_l1_update_count_{suffix}",
                 f"recent_l1_update_intensity_{suffix}",
@@ -2000,13 +2005,18 @@ def fill_sim_low_friction_signal_scorecard(
         a_mask, a_thr, a_op = a
         b_mask, b_thr, b_op = b
         c_mask, c_thr, c_op = c
+        candidate_shape = (
+            "spread_quiet_abs_qty_interaction_v1"
+            if b_col.startswith("recent_trade_abs_qty_")
+            else "spread_quiet_touch_interaction_v1"
+        )
         add_candidate(
             f"{a_col}_{a_label}_and_{b_col}_{b_label}_and_{c_col}_{c_label}",
             f"{a_col} {a_label} AND {b_col} {b_label} AND {c_col} {c_label}",
             a_mask & b_mask & c_mask,
             {
                 "feature": "low_friction_interaction",
-                "candidate_shape": "spread_quiet_touch_interaction_v1",
+                "candidate_shape": candidate_shape,
                 "threshold_source": "train_only",
                 "components": [
                     {"feature": a_col, "operator": a_op, "quantile": a_label, "threshold": a_thr},

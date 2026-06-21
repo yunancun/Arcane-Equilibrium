@@ -760,6 +760,65 @@ def test_low_friction_interaction_finds_train_confirmed_current_fee_cell():
     assert train_confirmed["current_fee_confirmed_count"] >= 1
 
 
+def test_low_friction_interaction_uses_recent_trade_abs_qty_as_quiet_tape():
+    rows = []
+    for _half in range(2):
+        for spread, abs_qty, touch, half_spread in (
+            (6.0, 0.1, 1.0, 7.0),    # only this three-way cell clears current fee
+            (6.0, 0.1, -1.0, 1.0),   # spread + quiet abs qty stays below fee
+            (6.0, 10.0, 1.0, 1.0),   # spread + favorable touch stays below fee
+            (1.0, 0.1, 1.0, 1.0),    # quiet abs qty + favorable touch stays below fee
+        ):
+            for _ in range(32):
+                rows.append(
+                    {
+                        "symbol": "ABCUSDT",
+                        "side": "bid",
+                        "outcome": "fill",
+                        "quoted_half_spread_bps": spread,
+                        "recent_trade_abs_qty_10s": abs_qty,
+                        "recent_trade_count_10s": 2.0,
+                        "recent_l1_update_count_10s": 2.0,
+                        "recent_l1_update_intensity_10s": 0.2,
+                        "side_recent_trade_imbalance_10s": touch,
+                        "side_touch_size_delta_frac_10s": touch,
+                        "spread_bps_delta_10s": touch,
+                        "half_spread_bps": half_spread,
+                        "adverse_sel_bps@15": 1.0,
+                    }
+                )
+    trials = _conditional_trials(rows)
+    for col in (
+        "recent_trade_abs_qty_10s",
+        "recent_trade_count_10s",
+        "recent_l1_update_count_10s",
+        "recent_l1_update_intensity_10s",
+        "side_recent_trade_imbalance_10s",
+        "side_touch_size_delta_frac_10s",
+        "spread_bps_delta_10s",
+    ):
+        trials[col] = [row[col] for row in rows]
+    adverse = _conditional_adverse(trials, rows)
+
+    scorecard = fill_sim_low_friction_signal_scorecard(
+        trials,
+        adverse,
+        horizons=(15,),
+        span_hours=1.0,
+        primary_horizon_s=15,
+    )
+
+    train_confirmed = scorecard["train_confirmed_gross_scorecard"]
+    assert train_confirmed["status"] == (
+        "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_CLEARS_CURRENT_FEE"
+    )
+    best = scorecard["best_train_confirmed_gross_candidate"]
+    assert best["feature"] == "low_friction_interaction"
+    assert best["candidate_shape"] == "spread_quiet_abs_qty_interaction_v1"
+    assert "recent_trade_abs_qty_10s" in best["name"]
+    assert best["min_train_holdout_gross_bps"] >= 4.0
+
+
 def test_maker_fee_sensitivity_finds_lower_fee_sample_gated_path():
     report = {
         "edge_scorecard": {
