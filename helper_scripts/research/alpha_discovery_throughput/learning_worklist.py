@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-LEARNING_WORKLIST_SCHEMA_VERSION = "alpha_learning_worklist_v1"
+LEARNING_WORKLIST_SCHEMA_VERSION = "alpha_learning_worklist_v2"
 
 _TASK_PRIORITY = {
     "promotion_review": 0,
@@ -192,6 +192,141 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
     return _str(row.get("next_trigger")) or "inspect_arm_detail"
 
 
+def _completion_gate(task_type: str) -> str:
+    if task_type == "promotion_review":
+        return "formal_aeg_qc_mit_review_verdict_recorded"
+    if task_type == "operator_probe_review":
+        return "operator_authorization_recorded_and_probe_preflight_passes"
+    if task_type == "runtime_source_reconcile":
+        return "runtime_source_synced_clean_expected_head_match"
+    if task_type == "cost_gate_learning_activation":
+        return "learning_lane_ledger_and_blocked_outcomes_accumulating"
+    if task_type == "cost_gate_outcome_review":
+        return "blocked_signal_outcome_review_refreshed"
+    if task_type == "mm_signal_search":
+        return "train_confirmed_sample_gated_current_fee_gross_edge_found"
+    if task_type == "fee_path_review":
+        return "business_fee_path_decision_recorded_not_alpha_proof"
+    if task_type == "polymarket_execution_realism":
+        return "polymarket_execution_realism_pass_or_reject_recorded"
+    if task_type == "polymarket_replay_history":
+        return "dated_replay_history_ready_for_aeg_recheck"
+    if task_type == "polymarket_candidate_replay":
+        return "candidate_replay_after_cost_built"
+    if task_type == "candidate_evidence_build":
+        return "candidate_pnl_breadth_execution_artifacts_available"
+    if task_type == "data_capture":
+        return "source_data_fresh_and_min_coverage_available"
+    if task_type == "sample_accumulation":
+        return "sample_or_date_gate_met"
+    if task_type == "event_wait":
+        return "fresh_event_or_source_status_change_seen"
+    if task_type == "reject_or_archive":
+        return "new_evidence_changes_rejected_verdict_or_archive_confirmed"
+    return "blocker_reclassified_with_next_trigger"
+
+
+def _completion_status(task_type: str) -> str:
+    if task_type == "event_wait":
+        return "WAITING_FOR_EVENT_OR_DATA"
+    if task_type == "reject_or_archive":
+        return "PARKED_UNTIL_NEW_EVIDENCE"
+    return "PENDING_EVIDENCE"
+
+
+def _completion_evidence_required(task_type: str) -> list[str]:
+    if task_type == "promotion_review":
+        return [
+            "formal_AEG_QC_MIT_review_artifact_exists",
+            "review_verdict_records_promotion_or_rejection_reason",
+            "execution_realism_breadth_regime_freshness_survivorship_fields_present",
+        ]
+    if task_type == "operator_probe_review":
+        return [
+            "operator_authorization_artifact_exists",
+            "isolated_probe_preflight_passes",
+            "order_authority_boundary_explicitly_recorded",
+        ]
+    if task_type == "runtime_source_reconcile":
+        return [
+            "runtime_source.source_activation_status == SYNCED_CLEAN",
+            "runtime_source.expected_head_status == MATCH when expected_head is provided",
+            "runtime_source.git_dirty_path_count == 0 and git_behind_count == 0",
+            "activation_preflight_rerun_after_reconcile",
+        ]
+    if task_type == "cost_gate_learning_activation":
+        return [
+            "learning_loop_status not in NOT_SEEN/MISSING",
+            "ledger_total_rows or materialized_record_count increases",
+            "blocked_signal_outcome_count increases after outcome refresh",
+            "order_authority remains NOT_GRANTED until separate operator probe review",
+        ]
+    if task_type == "cost_gate_outcome_review":
+        return [
+            "blocked_signal_outcome_review artifact refreshed",
+            "review status is DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT or NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE",
+            "positive blocked outcomes include side_cell_key and net_bps evidence",
+        ]
+    if task_type == "mm_signal_search":
+        return [
+            "low_friction_train_confirmed_gross_status shows current_fee_confirmed candidate",
+            "train and holdout sample-gated gross edge clear current fee round trip",
+            "walk_forward or AEG evidence is generated before promotion review",
+        ]
+    if task_type == "fee_path_review":
+        return [
+            "fee tier or rebate decision recorded by operator/business path",
+            "lower-fee scenario remains labeled as fee_or_scale not alpha proof",
+        ]
+    if task_type == "polymarket_execution_realism":
+        return [
+            "candidate_replay_history_execution_realism_status is PASS or explicit FAIL",
+            "execution realism sample count and cost assumptions are recorded",
+        ]
+    if task_type == "polymarket_replay_history":
+        return [
+            "candidate_replay_history_status == REPLAY_HISTORY_READY_FOR_AEG_RECHECK",
+            "candidate_replay_history_n_days >= candidate_replay_history_min_days",
+            "PBO/breadth/history evidence fields are present",
+        ]
+    if task_type == "polymarket_candidate_replay":
+        return [
+            "candidate_replay_status == PAPER_REPLAY_BUILT",
+            "after-cost net_bps and holdout net_bps are recorded",
+            "candidate_key is preserved through AEG candidate rows",
+        ]
+    if task_type == "candidate_evidence_build":
+        return [
+            "candidate PnL evidence artifact exists",
+            "breadth/regime/execution realism inputs are present",
+            "AEG matrix consumes the same candidate_key",
+        ]
+    if task_type == "data_capture":
+        return [
+            "source artifact freshness gate passes",
+            "required coverage/sample fields are nonzero",
+            "blocker row reclassifies away from data_coverage",
+        ]
+    if task_type == "sample_accumulation":
+        return [
+            "sample_count >= min_samples or required distinct-date gate is met",
+            "next discovery run reclassifies the blocker",
+        ]
+    if task_type == "event_wait":
+        return [
+            "fresh event/watch artifact changes gate status",
+            "source freshness gate passes at the next discovery run",
+        ]
+    if task_type == "reject_or_archive":
+        return [
+            "new evidence changes the rejected verdict or archive/no-reopen note is recorded",
+        ]
+    return [
+        "blocker is reclassified with a concrete next_trigger",
+        "supporting source artifact is fresh and parseable",
+    ]
+
+
 def _runtime_mutation_required(row: dict[str, Any], task_type: str) -> bool:
     if task_type in {"runtime_source_reconcile", "cost_gate_learning_activation"}:
         return True
@@ -260,6 +395,9 @@ def build_learning_worklist(
             "arm_id": row.get("arm_id"),
             "task_type": task_type,
             "learning_objective": _learning_objective(row, task_type),
+            "completion_gate": _completion_gate(task_type),
+            "completion_status": _completion_status(task_type),
+            "completion_evidence_required": _completion_evidence_required(task_type),
             "blocker_class": row.get("blocker_class"),
             "primary_blocker": row.get("primary_blocker"),
             "next_trigger": row.get("next_trigger"),

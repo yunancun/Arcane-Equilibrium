@@ -65,7 +65,7 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
     ], now_utc=dt.datetime(2026, 6, 22, tzinfo=dt.timezone.utc))
 
     worklist = plan["learning_worklist"]
-    assert worklist["schema_version"] == "alpha_learning_worklist_v1"
+    assert worklist["schema_version"] == "alpha_learning_worklist_v2"
     assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
     assert worklist["task_count"] == 2
     assert worklist["operator_required_count"] == 1
@@ -79,6 +79,11 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
     assert top["learning_objective"] == (
         "reconcile_runtime_source_before_learning_activation_or_probe_trust"
     )
+    assert top["completion_gate"] == "runtime_source_synced_clean_expected_head_match"
+    assert top["completion_status"] == "PENDING_EVIDENCE"
+    assert "runtime_source.source_activation_status == SYNCED_CLEAN" in (
+        top["completion_evidence_required"]
+    )
     assert top["evidence"]["learning_lane_git_behind_count"] == 5
 
     tasks = {row["arm_id"]: row for row in worklist["tasks"]}
@@ -88,6 +93,13 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
     assert mm_task["actionability"] == "engineering_actionable"
     assert mm_task["learning_objective"] == (
         "find_train_confirmed_low_friction_mm_signal_that_clears_current_fee"
+    )
+    assert mm_task["completion_gate"] == (
+        "train_confirmed_sample_gated_current_fee_gross_edge_found"
+    )
+    assert (
+        "train and holdout sample-gated gross edge clear current fee round trip"
+        in mm_task["completion_evidence_required"]
     )
     assert mm_task["evidence"]["gross_edge_gap_to_current_fee_bps"] == 1.8
     assert mm_task["evidence"]["required_current_fee_gross_edge_bps"] == 4.0
@@ -127,10 +139,21 @@ def test_learning_worklist_keeps_promotion_review_ahead_of_replay_history():
     assert worklist["promotion_ready_count"] == 1
     assert worklist["top_task"]["arm_id"] == "funding_oi"
     assert worklist["top_task"]["task_type"] == "promotion_review"
+    assert worklist["top_task"]["completion_gate"] == (
+        "formal_aeg_qc_mit_review_verdict_recorded"
+    )
+    assert "formal_AEG_QC_MIT_review_artifact_exists" in (
+        worklist["top_task"]["completion_evidence_required"]
+    )
 
     tasks = {row["arm_id"]: row for row in worklist["tasks"]}
     poly = tasks["polymarket_leadlag_ic"]
     assert poly["task_type"] == "polymarket_replay_history"
     assert poly["actionability"] == "engineering_actionable"
+    assert poly["completion_gate"] == "dated_replay_history_ready_for_aeg_recheck"
+    assert (
+        "candidate_replay_history_status == REPLAY_HISTORY_READY_FOR_AEG_RECHECK"
+        in poly["completion_evidence_required"]
+    )
     assert poly["evidence"]["candidate_replay_history_n_days"] == 2
     assert poly["evidence"]["candidate_replay_history_min_days"] == 30

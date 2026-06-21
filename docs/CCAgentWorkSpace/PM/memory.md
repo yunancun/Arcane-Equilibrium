@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Alpha Learning Worklist Completion Gates
+
+- Alpha learning worklist schema is now `alpha_learning_worklist_v2`.
+- Every task carries completion gate, completion status, and required completion evidence.
+- This turns alpha-learning recommendations into machine-checkable work items without granting probe/order/promotion authority.
+
 ## 2026-06-22 Runtime Killboard Learning Worklist v5
 
 - Runtime killboard schema is now `alpha_discovery_runtime_killboard_v5`.
