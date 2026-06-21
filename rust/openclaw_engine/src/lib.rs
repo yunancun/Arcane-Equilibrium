@@ -71,7 +71,10 @@ pub mod cron;
 pub mod database;
 pub mod decision_context_producer;
 pub mod demo_learning_lane;
+pub mod demo_learning_lane_hot_path;
 pub mod demo_learning_lane_ledger;
+#[cfg(test)]
+mod demo_learning_lane_hot_path_tests;
 #[cfg(test)]
 mod demo_learning_lane_tests;
 pub mod drawdown_revoke;
