@@ -27,7 +27,7 @@ from polymarket_leadlag import replay_history as polymarket_replay_history
 from . import RUNNER_VERSION
 from .discovery_loop import build_discovery_plan
 
-RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v2"
+RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v3"
 DEFAULT_MAX_ARTIFACT_AGE_SECONDS = 6 * 60 * 60
 DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS = 36 * 60 * 60
 DEFAULT_POLYMARKET_REPLAY_HISTORY_REPORT_LIMIT = 4096
@@ -1522,6 +1522,10 @@ def build_runtime_killboard(
     max_age_seconds: int = DEFAULT_MAX_ARTIFACT_AGE_SECONDS,
 ) -> dict[str, Any]:
     now = now_utc or _utc_now()
+    runtime_source = summarize_cost_gate_learning_lane_source(
+        repo_root,
+        expected_head=expected_head,
+    )
     arms = collect_runtime_arms(
         data_dir=data_dir,
         repo_root=repo_root,
@@ -1559,6 +1563,16 @@ def build_runtime_killboard(
             "active_arm_count": active_arm_count,
             "source_ok_count": source_ok_count,
             "source_present_count": source_present_count,
+            "runtime_source_activation_ready": runtime_source.get(
+                "source_activation_ready"
+            ),
+            "runtime_source_activation_status": runtime_source.get(
+                "source_activation_status"
+            ),
+            "runtime_source_git_status": runtime_source.get("git_status"),
+            "runtime_source_expected_head_status": runtime_source.get(
+                "expected_head_status"
+            ),
             "ready_for_aeg_chain": counts.get("READY_FOR_AEG_CHAIN", 0),
             "ready_for_probe": counts.get("READY_FOR_PROBE", 0),
             "run_read_only_capture": counts.get("RUN_READ_ONLY_CAPTURE", 0),
@@ -1569,6 +1583,7 @@ def build_runtime_killboard(
             "actionable_alpha_found": promotion_ready_count > 0,
             "actionable_probe_found": counts.get("READY_FOR_PROBE", 0) > 0,
         },
+        "runtime_source": runtime_source,
         "discovery_plan": plan,
         "profitability_blocker_scorecard": plan.get("profitability_blocker_scorecard"),
         "arms_raw": arms,
@@ -1592,6 +1607,12 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
         "is_fast_discovery_active": kb.get("is_fast_discovery_active"),
         "ready_for_aeg_chain": kb.get("ready_for_aeg_chain"),
         "ready_for_probe": kb.get("ready_for_probe"),
+        "runtime_source_activation_ready": kb.get("runtime_source_activation_ready"),
+        "runtime_source_activation_status": kb.get("runtime_source_activation_status"),
+        "runtime_source_git_status": kb.get("runtime_source_git_status"),
+        "runtime_source_expected_head_status": kb.get(
+            "runtime_source_expected_head_status"
+        ),
         "promotion_ready_count": kb.get("promotion_ready_count"),
         "aeg_candidate_artifact_found": kb.get("aeg_candidate_artifact_found"),
         "actionable_alpha_found": kb.get("actionable_alpha_found"),
