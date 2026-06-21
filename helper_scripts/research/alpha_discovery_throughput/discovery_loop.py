@@ -1074,6 +1074,110 @@ def classify_profitability_blocker(
                     ),
                 },
             )
+        if arm_id == "polymarket_leadlag_ic":
+            replay_status = str(detail.get("candidate_replay_status") or "").upper()
+            history_status = str(detail.get("candidate_replay_history_status") or "").upper()
+            history_execution_status = str(
+                detail.get("candidate_replay_history_execution_realism_status") or ""
+            ).upper()
+            replay_extra = {
+                "candidate_key": detail.get("candidate_key"),
+                "candidate_replay_status": detail.get("candidate_replay_status"),
+                "candidate_replay_sample_count": detail.get("candidate_replay_sample_count"),
+                "candidate_replay_net_bps_mean": detail.get("candidate_replay_net_bps_mean"),
+                "candidate_replay_holdout_net_bps_mean": detail.get(
+                    "candidate_replay_holdout_net_bps_mean"
+                ),
+                "candidate_replay_cost_wall_status": detail.get(
+                    "candidate_replay_cost_wall_status"
+                ),
+                "candidate_replay_execution_realism_status": detail.get(
+                    "candidate_replay_execution_realism_status"
+                ),
+                "candidate_replay_history_status": detail.get(
+                    "candidate_replay_history_status"
+                ),
+                "candidate_replay_history_reason": detail.get(
+                    "candidate_replay_history_reason"
+                ),
+                "candidate_replay_history_report_count": detail.get(
+                    "candidate_replay_history_report_count"
+                ),
+                "candidate_replay_history_matched_report_count": detail.get(
+                    "candidate_replay_history_matched_report_count"
+                ),
+                "candidate_replay_history_sample_count": detail.get(
+                    "candidate_replay_history_sample_count"
+                ),
+                "candidate_replay_history_n_days": detail.get(
+                    "candidate_replay_history_n_days"
+                ),
+                "candidate_replay_history_min_days": detail.get(
+                    "candidate_replay_history_min_days"
+                ),
+                "candidate_replay_history_min_samples": detail.get(
+                    "candidate_replay_history_min_samples"
+                ),
+                "candidate_replay_history_pbo_day_count": detail.get(
+                    "candidate_replay_history_pbo_day_count"
+                ),
+                "candidate_replay_history_execution_realism_status": detail.get(
+                    "candidate_replay_history_execution_realism_status"
+                ),
+            }
+            if replay_status != "PAPER_REPLAY_BUILT":
+                return _finish_blocker_row(
+                    row,
+                    blocker_class="data_coverage",
+                    primary_blocker="polymarket_candidate_replay_missing",
+                    next_trigger="build_polymarket_candidate_replay_before_aeg_promotion",
+                    engineering_actionable=True,
+                    extra=replay_extra,
+                )
+            if history_status in {"", "NO_REPLAY_HISTORY"}:
+                return _finish_blocker_row(
+                    row,
+                    blocker_class="data_coverage",
+                    primary_blocker="polymarket_candidate_replay_history_missing",
+                    next_trigger=(
+                        "collect_dated_polymarket_replay_history_before_aeg_promotion"
+                    ),
+                    engineering_actionable=True,
+                    extra=replay_extra,
+                )
+            if history_status != "REPLAY_HISTORY_READY_FOR_AEG_RECHECK":
+                return _finish_blocker_row(
+                    row,
+                    blocker_class="sample_gate",
+                    primary_blocker="polymarket_candidate_replay_history_not_ready",
+                    next_trigger=(
+                        "collect_more_dated_polymarket_replay_history_before_promotion"
+                    ),
+                    engineering_actionable=True,
+                    extra=replay_extra,
+                )
+            if history_execution_status in {"", "UNMEASURED", "UNVERIFIED", "MISSING"}:
+                return _finish_blocker_row(
+                    row,
+                    blocker_class="robustness_wait",
+                    primary_blocker="polymarket_execution_realism_unmeasured",
+                    next_trigger=(
+                        "build_polymarket_execution_realism_before_promotion"
+                    ),
+                    engineering_actionable=True,
+                    extra=replay_extra,
+                )
+            if history_execution_status != "PASS":
+                return _finish_blocker_row(
+                    row,
+                    blocker_class="robustness_wait",
+                    primary_blocker="polymarket_execution_realism_not_passed",
+                    next_trigger=(
+                        "fix_or_reject_polymarket_execution_realism_before_promotion"
+                    ),
+                    engineering_actionable=True,
+                    extra=replay_extra,
+                )
         return _finish_blocker_row(
             row,
             blocker_class="candidate_review_ready",

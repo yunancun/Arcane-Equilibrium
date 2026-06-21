@@ -573,7 +573,11 @@ def test_aeg_robustness_wait_becomes_actionable_only_with_upstream_candidate_art
         row["arm_id"]: row
         for row in plan["profitability_blocker_scorecard"]["arms"]
     }
-    assert blockers["polymarket_leadlag_ic"]["blocker_class"] == "candidate_review_ready"
+    assert blockers["polymarket_leadlag_ic"]["blocker_class"] == "data_coverage"
+    assert blockers["polymarket_leadlag_ic"]["primary_blocker"] == (
+        "polymarket_candidate_replay_missing"
+    )
+    assert blockers["polymarket_leadlag_ic"]["promotion_ready"] is False
     aeg = blockers["aeg_robustness_matrix"]
     assert aeg["candidate_artifact_dependency_status"] == (
         "CANDIDATE_ARTIFACTS_AVAILABLE_FOR_ROBUSTNESS"
@@ -670,6 +674,118 @@ def test_polymarket_ready_candidate_is_downgraded_after_non_durable_aeg_matrix()
     assert blockers["aeg_robustness_matrix"]["candidate_artifact_dependency"][
         "already_reviewed_candidate_artifact_count"
     ] == 1
+
+
+def test_polymarket_ready_candidate_requires_replay_history_before_promotion_ready():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "polymarket_leadlag_ic",
+            "gate_status": "READY",
+            "sample_count": 35,
+            "artifacts_ready": True,
+            "source_ok": True,
+            "detail": {
+                "candidate_count": 1,
+                "candidate_key": "polymarket_leadlag_ic|price_target|SOLUSDT|15m",
+                "candidate_replay_status": "PAPER_REPLAY_BUILT",
+                "candidate_replay_sample_count": 35,
+                "candidate_replay_net_bps_mean": 5.2,
+                "candidate_replay_holdout_net_bps_mean": 4.4,
+                "candidate_replay_cost_wall_status": (
+                    "PAPER_REPLAY_NET_POSITIVE_EXECUTION_UNMEASURED"
+                ),
+                "candidate_replay_execution_realism_status": "UNMEASURED",
+                "candidate_replay_history_status": "REPLAY_HISTORY_DAYS_INSUFFICIENT",
+                "candidate_replay_history_report_count": 2,
+                "candidate_replay_history_matched_report_count": 2,
+                "candidate_replay_history_sample_count": 35,
+                "candidate_replay_history_n_days": 2,
+                "candidate_replay_history_min_days": 30,
+                "candidate_replay_history_min_samples": 30,
+                "candidate_replay_history_pbo_day_count": 2,
+                "candidate_replay_history_execution_realism_status": "UNMEASURED",
+            },
+        },
+    ], now_utc=dt.datetime(2026, 6, 20, 20, 5, tzinfo=dt.timezone.utc))
+
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert plan["arms"][0]["action"] == "READY_FOR_AEG_CHAIN"
+    assert plan["profitability_blocker_scorecard"]["promotion_ready_count"] == 0
+    assert plan["profitability_blocker_scorecard"]["status"] == (
+        "NO_ACTIONABLE_ALPHA_WAIT_OR_SAMPLE_GATED"
+    )
+    assert blocker["blocker_class"] == "sample_gate"
+    assert blocker["primary_blocker"] == "polymarket_candidate_replay_history_not_ready"
+    assert blocker["candidate_replay_history_status"] == (
+        "REPLAY_HISTORY_DAYS_INSUFFICIENT"
+    )
+    assert blocker["candidate_replay_history_n_days"] == 2
+    assert blocker["candidate_replay_history_min_days"] == 30
+
+
+def test_polymarket_ready_candidate_requires_execution_realism_pass_before_promotion_ready():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "polymarket_leadlag_ic",
+            "gate_status": "READY",
+            "sample_count": 35,
+            "artifacts_ready": True,
+            "source_ok": True,
+            "detail": {
+                "candidate_count": 1,
+                "candidate_key": "polymarket_leadlag_ic|price_target|SOLUSDT|15m",
+                "candidate_replay_status": "PAPER_REPLAY_BUILT",
+                "candidate_replay_history_status": "REPLAY_HISTORY_READY_FOR_AEG_RECHECK",
+                "candidate_replay_history_sample_count": 90,
+                "candidate_replay_history_n_days": 30,
+                "candidate_replay_history_min_days": 30,
+                "candidate_replay_history_min_samples": 30,
+                "candidate_replay_history_execution_realism_status": "FAIL",
+            },
+        },
+    ], now_utc=dt.datetime(2026, 6, 20, 20, 5, tzinfo=dt.timezone.utc))
+
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert plan["arms"][0]["action"] == "READY_FOR_AEG_CHAIN"
+    assert plan["profitability_blocker_scorecard"]["promotion_ready_count"] == 0
+    assert blocker["blocker_class"] == "robustness_wait"
+    assert blocker["primary_blocker"] == "polymarket_execution_realism_not_passed"
+    assert blocker["next_trigger"] == (
+        "fix_or_reject_polymarket_execution_realism_before_promotion"
+    )
+    assert blocker["promotion_ready"] is False
+
+
+def test_polymarket_ready_candidate_can_be_promotion_ready_after_replay_history_and_execution_pass():
+    plan = build_discovery_plan([
+        {
+            "arm_id": "polymarket_leadlag_ic",
+            "gate_status": "READY",
+            "sample_count": 35,
+            "artifacts_ready": True,
+            "source_ok": True,
+            "detail": {
+                "candidate_count": 1,
+                "candidate_key": "polymarket_leadlag_ic|price_target|SOLUSDT|15m",
+                "candidate_replay_status": "PAPER_REPLAY_BUILT",
+                "candidate_replay_history_status": "REPLAY_HISTORY_READY_FOR_AEG_RECHECK",
+                "candidate_replay_history_sample_count": 90,
+                "candidate_replay_history_n_days": 30,
+                "candidate_replay_history_min_days": 30,
+                "candidate_replay_history_min_samples": 30,
+                "candidate_replay_history_execution_realism_status": "PASS",
+            },
+        },
+    ], now_utc=dt.datetime(2026, 6, 20, 20, 5, tzinfo=dt.timezone.utc))
+
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert plan["profitability_blocker_scorecard"]["promotion_ready_count"] == 1
+    assert plan["profitability_blocker_scorecard"]["status"] == (
+        "ACTIONABLE_ALPHA_REVIEW_READY"
+    )
+    assert blocker["blocker_class"] == "candidate_review_ready"
+    assert blocker["primary_blocker"] == "candidate_artifacts_ready_need_aeg_chain"
+    assert blocker["promotion_ready"] is True
 
 
 def test_mm_no_train_positive_without_gross_decomposition_stays_feature_family():
@@ -1356,6 +1472,19 @@ def test_polymarket_leadlag_arm_ready_only_for_candidate_review_with_sample(tmp_
     assert arm["detail"]["max_bh_q"] == 0.10
     assert plan["arms"][0]["action"] == "READY_FOR_AEG_CHAIN"
     assert plan["arms"][0]["reason"] == "artifacts_ready_and_sample_gate_met"
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert plan["profitability_blocker_scorecard"]["promotion_ready_count"] == 0
+    assert plan["profitability_blocker_scorecard"]["status"] == (
+        "NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED"
+    )
+    assert blocker["blocker_class"] == "data_coverage"
+    assert blocker["primary_blocker"] == "polymarket_candidate_replay_history_missing"
+    assert blocker["next_trigger"] == (
+        "collect_dated_polymarket_replay_history_before_aeg_promotion"
+    )
+    assert blocker["promotion_ready"] is False
+    assert blocker["candidate_replay_status"] == "PAPER_REPLAY_BUILT"
+    assert blocker["candidate_replay_history_status"] == "NO_REPLAY_HISTORY"
 
 
 def test_polymarket_leadlag_arm_surfaces_replay_history(tmp_path):
