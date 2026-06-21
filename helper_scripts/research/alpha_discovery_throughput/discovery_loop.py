@@ -860,7 +860,7 @@ def classify_profitability_blocker(
         elif admission_count > 0 and blocked_outcome_count == 0:
             primary_blocker = "cost_gate_rejects_recorded_need_blocked_signal_outcomes"
             next_trigger = (
-                "build_price_observations_then_record_blocked_signal_outcomes"
+                "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes"
             )
         elif blocked_outcome_count > 0:
             primary_blocker = "cost_gate_blocked_signal_outcomes_accumulating"

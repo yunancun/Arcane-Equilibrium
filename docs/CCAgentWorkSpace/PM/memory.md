@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Outcome Refresh Loop
+
+- Added artifact-only `cost_gate_learning_lane.outcome_refresh`, a one-command dry-run/append loop from `probe_ledger.jsonl` plus local/read-only-PG prices to missing `blocked_signal_outcome` / `probe_outcome` rows.
+- The CLI requires explicit outcome targets and only appends when `--append-ledger` is set; `--source-pg` skips PG connection when no missing outcome windows exist.
+- Alpha-discovery now routes admission-only cost-gate progress to `run_cost_gate_outcome_refresh_for_blocked_signal_outcomes`; still no order authority, main cost-gate lowering, PG write, Bybit call, or runtime mutation.
+
 ## 2026-06-21 Cost-Gate Read-Only Kline Observation Adapter
 
 - Extended `cost_gate_learning_lane.price_observations` with `--source-pg`, a read-only SELECT-only Adapter over local `market.klines` for ledger-derived observation windows.

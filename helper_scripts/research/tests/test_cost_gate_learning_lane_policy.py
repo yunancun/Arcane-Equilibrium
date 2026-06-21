@@ -20,6 +20,12 @@ from cost_gate_learning_lane.outcome_writer import (
     build_probe_outcome_records,
     read_price_observations,
 )
+from cost_gate_learning_lane.outcome_refresh import (
+    OutcomeRefreshSelection,
+    build_cost_gate_outcome_refresh_batch,
+    build_price_rows_from_pg_for_refresh,
+    refresh_cost_gate_outcomes_from_price_rows,
+)
 from cost_gate_learning_lane.price_observations import (
     PriceObservationBuildConfig,
     build_price_observation_artifact,
@@ -360,7 +366,7 @@ def test_alpha_discovery_routes_admission_only_ledger_to_price_observation_build
         "cost_gate_rejects_recorded_need_blocked_signal_outcomes"
     )
     assert row["next_trigger"] == (
-        "build_price_observations_then_record_blocked_signal_outcomes"
+        "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes"
     )
     assert row["ledger_status"] == "ADMISSION_ROWS_PRESENT"
     assert row["admission_decision_count"] == 1
@@ -762,6 +768,132 @@ def test_price_observation_pg_adapter_is_read_only_and_feeds_observation_builder
     observations = build_price_observations_from_rows(rows, windows)
     assert observations[0]["source"] == "pg_market_klines"
     assert observations[0]["timeframe"] == "1m"
+
+
+def test_outcome_refresh_dry_run_append_and_idempotent_blocked_signal_rows(
+    tmp_path: Path,
+):
+    ledger_path = tmp_path / "probe_ledger.jsonl"
+    not_granted = evaluate_probe_admission(
+        _runtime_plan(),
+        _selected_reject_event(),
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    append_jsonl_ledger(ledger_path, build_ledger_record(not_granted))
+    price_rows = [
+        {"symbol": "ETHUSDT", "ts_ms": 1_782_037_200_000, "close": 2000.0},
+        {"symbol": "ETHUSDT", "ts_ms": 1_782_040_800_000, "close": 2010.0},
+    ]
+    selection = OutcomeRefreshSelection(record_blocked_outcomes=True)
+    outcome_cfg = ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0)
+    now = dt.datetime(2026, 6, 21, 12, 11, tzinfo=dt.timezone.utc)
+
+    dry_run = refresh_cost_gate_outcomes_from_price_rows(
+        ledger_path,
+        price_rows,
+        now_utc=now,
+        selection=selection,
+        outcome_cfg=outcome_cfg,
+        append_ledger=False,
+    )
+
+    assert dry_run["record_type"] == "cost_gate_outcome_refresh_batch"
+    assert dry_run["append_requested"] is False
+    assert dry_run["appended_to_ledger"] is False
+    assert dry_run["blocked_signal_outcome_count"] == 1
+    assert dry_run["outcome_count"] == 1
+    assert len(read_jsonl_ledger(ledger_path)) == 1
+
+    appended = refresh_cost_gate_outcomes_from_price_rows(
+        ledger_path,
+        price_rows,
+        now_utc=now,
+        selection=selection,
+        outcome_cfg=outcome_cfg,
+        append_ledger=True,
+    )
+    rows = read_jsonl_ledger(ledger_path)
+
+    assert appended["append_requested"] is True
+    assert appended["appended_to_ledger"] is True
+    assert appended["appended_outcome_count"] == 1
+    assert len(rows) == 2
+    assert rows[1]["record_type"] == "blocked_signal_outcome"
+    assert rows[1]["promotion_evidence"] is False
+    assert round(rows[1]["realized_net_bps"], 6) == -54.0
+
+    rerun = refresh_cost_gate_outcomes_from_price_rows(
+        ledger_path,
+        price_rows,
+        now_utc=now,
+        selection=selection,
+        outcome_cfg=outcome_cfg,
+        append_ledger=True,
+    )
+    assert rerun["window_count"] == 0
+    assert rerun["outcome_count"] == 0
+    assert rerun["appended_outcome_count"] == 0
+    assert len(read_jsonl_ledger(ledger_path)) == 2
+
+
+def test_outcome_refresh_pg_price_rows_feed_batch_without_duplicate_queries():
+    not_granted = evaluate_probe_admission(
+        _runtime_plan(),
+        _selected_reject_event(),
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    ledger = [build_ledger_record(not_granted)]
+    selection = OutcomeRefreshSelection(record_blocked_outcomes=True)
+    outcome_cfg = ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0)
+    conn = _FakeKlineConn(
+        {
+            "ETHUSDT": [
+                ("ETHUSDT", 1_782_037_200_000, 2000.0),
+                ("ETHUSDT", 1_782_040_800_000, 2010.0),
+            ],
+        }
+    )
+
+    price_rows = build_price_rows_from_pg_for_refresh(
+        ledger,
+        selection=selection,
+        outcome_cfg=outcome_cfg,
+        timeframe="1m",
+        conn=conn,
+    )
+    batch = build_cost_gate_outcome_refresh_batch(
+        ledger,
+        price_rows,
+        now_utc=dt.datetime(2026, 6, 21, 12, 11, tzinfo=dt.timezone.utc),
+        selection=selection,
+        outcome_cfg=outcome_cfg,
+        price_source="pg_market_klines",
+    )
+
+    assert [params[0] for _sql, params in conn.executions] == ["ETHUSDT"]
+    assert batch["price_source"] == "pg_market_klines"
+    assert batch["price_observation_count"] == 2
+    assert batch["blocked_signal_outcome_count"] == 1
+    assert batch["observations"][0]["source"] == "pg_market_klines"
+    assert batch["observations"][0]["timeframe"] == "1m"
+
+    completed = ledger + [
+        {
+            "record_type": "blocked_signal_outcome",
+            "attempt_id": _selected_reject_event()["context_id"],
+        }
+    ]
+    no_window_conn = _FakeKlineConn({"ETHUSDT": []})
+    assert build_price_rows_from_pg_for_refresh(
+        completed,
+        selection=selection,
+        outcome_cfg=outcome_cfg,
+        timeframe="1m",
+        conn=no_window_conn,
+    ) == []
+    assert no_window_conn.executions == []
 
 
 def test_runtime_adapter_outcome_rows_are_idempotent_and_feed_disable():
