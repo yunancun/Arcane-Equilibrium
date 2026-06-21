@@ -1098,7 +1098,7 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
         now_utc=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.timezone.utc),
     )
 
-    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v4"
+    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v5"
     assert result["killboard"]["is_fast_discovery_active"] is True
     assert result["killboard"]["source_present_count"] == 5
     assert result["killboard"]["runtime_source_activation_ready"] is False
@@ -1111,9 +1111,22 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     assert result["killboard"]["aeg_candidate_artifact_found"] is True
     assert result["killboard"]["actionable_alpha_found"] is False
     assert result["killboard"]["block"] == 1
+    assert result["killboard"]["learning_worklist_status"] == "PROMOTION_REVIEW_READY"
+    assert result["killboard"]["learning_task_count"] == len(
+        result["learning_worklist"]["tasks"]
+    )
+    assert result["killboard"]["learning_task_count"] >= 5
+    assert result["killboard"]["learning_promotion_ready_count"] == 1
+    assert result["killboard"]["top_learning_task_arm_id"] == "mm_verdict_maker_edge"
+    assert result["killboard"]["top_learning_task_type"] == "promotion_review"
+    assert result["killboard"]["top_learning_task_actionability"] == (
+        "engineering_actionable"
+    )
+    assert result["learning_worklist"]["top_task"]["task_type"] == "promotion_review"
     latest = Path(result["written"]["latest"])
     assert latest.exists()
     loaded = json.loads(latest.read_text(encoding="utf-8"))
+    assert loaded["learning_worklist"] == loaded["discovery_plan"]["learning_worklist"]
     arms = {row["arm_id"]: row for row in loaded["discovery_plan"]["arms"]}
     raw_arms = {row["arm_id"]: row for row in loaded["arms_raw"]}
     assert arms["mm_verdict_maker_edge"]["action"] == "READY_FOR_AEG_CHAIN"
@@ -1145,6 +1158,11 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     assert scorecard["status"] == "ACTIONABLE_ALPHA_REVIEW_READY"
     assert scorecard_arms["mm_verdict_maker_edge"]["blocker_class"] == "candidate_review_ready"
     assert scorecard_arms["vol_event_order_flow"]["blocker_class"] == "rejected_no_edge"
+    history = Path(result["written"]["history"])
+    history_row = json.loads(history.read_text(encoding="utf-8").splitlines()[-1])
+    assert history_row["learning_worklist_status"] == "PROMOTION_REVIEW_READY"
+    assert history_row["top_learning_task_type"] == "promotion_review"
+    assert history_row["top_learning_task_arm_id"] == "mm_verdict_maker_edge"
 
 
 def test_runtime_runner_requires_trusted_source_for_actionable_alpha(tmp_path):
@@ -1195,6 +1213,8 @@ def test_runtime_runner_requires_trusted_source_for_actionable_alpha(tmp_path):
     assert result["killboard"]["promotion_ready_count"] == 1
     assert result["killboard"]["promotion_ready_candidate_found"] is True
     assert result["killboard"]["actionable_alpha_found"] is True
+    assert result["killboard"]["learning_worklist_status"] == "PROMOTION_REVIEW_READY"
+    assert result["killboard"]["top_learning_task_type"] == "promotion_review"
 
 
 def test_runtime_runner_blocks_stale_mm_verdict_status(tmp_path):

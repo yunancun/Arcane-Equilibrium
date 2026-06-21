@@ -1,7 +1,9 @@
 # helper_scripts/ — 腳本索引 (Script Index)
 
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
-最後更新：2026-06-21。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
+最後更新：2026-06-22。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
+
+最新補充（2026-06-22 runtime killboard learning worklist v5）：`research/alpha_discovery_throughput/runtime_runner.py` now emits schema `alpha_discovery_runtime_killboard_v5` and mirrors `learning_worklist` status/counts/top-task fields into both top-level killboard and history JSONL。This makes the next learning action visible without parsing full `discovery_plan`。Boundary：source/test/docs only；不 runtime sync、不刷新 runtime artifact、不裝 cron、不啟 writer、不寫 PG、不連 Bybit、不下單、不給 probe/order/promotion proof。PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-22--runtime_killboard_learning_worklist_v5.md`；Operator note `docs/CCAgentWorkSpace/Operator/2026-06-22--runtime_killboard_learning_worklist_v5.md`。
 
 最新補充（2026-06-21 runtime killboard source-trusted actionability v4）：`research/alpha_discovery_throughput/runtime_runner.py` now emits schema `alpha_discovery_runtime_killboard_v4` and requires trusted source before top-level actionability。`promotion_ready_count` / `promotion_ready_candidate_found` keep raw candidate evidence visible, but `actionable_alpha_found` requires `promotion_ready_count>0` plus `runtime_source_activation_ready=true`；`actionable_probe_found` is gated the same way。Boundary：source/test/docs only；不 runtime sync、不刷新 runtime artifact、不裝 cron、不啟 writer、不寫 PG、不連 Bybit、不下單、不給 promotion proof。PM report `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-21--killboard_source_trusted_actionability_v4.md`；Operator note `docs/CCAgentWorkSpace/Operator/2026-06-21--killboard_source_trusted_actionability_v4.md`。
 
