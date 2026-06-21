@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Runtime Killboard Source-Trusted Actionability v4
+
+- Runtime killboard schema is now `alpha_discovery_runtime_killboard_v4`.
+- Raw promotion candidates remain visible via `promotion_ready_count`, but `actionable_alpha_found` now also requires `runtime_source_activation_ready=true`.
+- `actionable_probe_found` is source-trusted too, preventing stale/dirty/behind source from producing top-level actionable flags.
+
 ## 2026-06-21 Runtime Killboard Source-Readiness Visibility v3
 
 - Runtime killboard schema is now `alpha_discovery_runtime_killboard_v3`.

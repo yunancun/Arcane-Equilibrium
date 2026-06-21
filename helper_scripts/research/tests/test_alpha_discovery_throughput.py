@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import subprocess
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -28,6 +29,7 @@ from alpha_discovery_throughput.runtime_runner import (
     _latest_json_line,
 )
 from alpha_discovery_throughput.signal_manifest import build_signal_spec, validate_signal_manifest
+from cost_gate_learning_lane.status import REQUIRED_SOURCE_RELATIVE_PATHS
 
 
 def test_latest_json_line_handles_oversized_status_line(tmp_path: Path):
@@ -90,6 +92,55 @@ def _samples(n: int = 64) -> list[dict]:
             "is_oos": i % 2 == 0,
         })
     return rows
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+
+def _git_output(repo: Path, *args: str) -> str:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return proc.stdout.strip()
+
+
+def _write_required_source_files(repo: Path) -> None:
+    for rel in REQUIRED_SOURCE_RELATIVE_PATHS:
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.suffix == ".sh":
+            path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            path.chmod(0o755)
+        else:
+            path.write_text('"""fixture source file."""\n', encoding="utf-8")
+
+
+def _init_clean_source_repo_with_origin(tmp_path: Path) -> Path:
+    remote = tmp_path / "remote.git"
+    repo = tmp_path / "source"
+    remote.mkdir()
+    repo.mkdir()
+    _git(remote, "init", "--bare")
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.invalid")
+    _git(repo, "config", "user.name", "Test User")
+    _write_required_source_files(repo)
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "push", "-u", "origin", "main")
+    return repo
 
 
 def _pbo_candidates(n_days: int = 64) -> dict[str, dict[str, float]]:
@@ -1047,7 +1098,7 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
         now_utc=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.timezone.utc),
     )
 
-    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v3"
+    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v4"
     assert result["killboard"]["is_fast_discovery_active"] is True
     assert result["killboard"]["source_present_count"] == 5
     assert result["killboard"]["runtime_source_activation_ready"] is False
@@ -1056,8 +1107,9 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     assert result["runtime_source"]["repo_root"] == str(tmp_path)
     assert result["killboard"]["ready_for_aeg_chain"] == 1
     assert result["killboard"]["promotion_ready_count"] == 1
+    assert result["killboard"]["promotion_ready_candidate_found"] is True
     assert result["killboard"]["aeg_candidate_artifact_found"] is True
-    assert result["killboard"]["actionable_alpha_found"] is True
+    assert result["killboard"]["actionable_alpha_found"] is False
     assert result["killboard"]["block"] == 1
     latest = Path(result["written"]["latest"])
     assert latest.exists()
@@ -1093,6 +1145,56 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     assert scorecard["status"] == "ACTIONABLE_ALPHA_REVIEW_READY"
     assert scorecard_arms["mm_verdict_maker_edge"]["blocker_class"] == "candidate_review_ready"
     assert scorecard_arms["vol_event_order_flow"]["blocker_class"] == "rejected_no_edge"
+
+
+def test_runtime_runner_requires_trusted_source_for_actionable_alpha(tmp_path):
+    data = tmp_path / "openclaw"
+    (data / "logs").mkdir(parents=True)
+    (data / "logs" / "recorder_mm_verdict.log").write_text(json.dumps({
+        "ts_utc": "2026-06-19T00:00:00Z",
+        "thresholds": {"min_maker_fills": 30},
+        "markout_n_total": 31,
+        "adverse_selection_usable": True,
+        "cost_wall_summary": {
+            "available": True,
+            "best_symbol_by_net_edge": "BTCUSDT",
+            "best_fee_round_trip_shortfall_bps": -1.25,
+        },
+        "sample_gated_cost_wall_summary": {
+            "available": True,
+            "status": "SAMPLE_GATED_CURRENT_FEE_POSITIVE",
+            "best_sample_gated_net_bps": 0.25,
+        },
+        "gross_edge_cost_decomposition": {
+            "available": True,
+            "status": "CURRENT_FEE_GROSS_AND_NET_POSITIVE",
+            "best_sample_gated_gross_edge_bps": 4.25,
+            "best_gross_cell_net_bps": 0.25,
+        },
+        "fee_path_feasibility": {
+            "status": "CURRENT_ACCOUNT_FEE_CLEARS_BREAK_EVEN",
+            "break_even_maker_fee_bps_per_side": 2.2,
+        },
+        "net_edge_per_symbol": {
+            "BTCUSDT": {"net_edge_bps": 1.25, "n_maker_fills": 31},
+        },
+    }) + "\n", encoding="utf-8")
+    repo = _init_clean_source_repo_with_origin(tmp_path)
+    head = _git_output(repo, "rev-parse", "HEAD")
+
+    result = run_once(
+        data_dir=data,
+        repo_root=repo,
+        expected_head=head[:12],
+        now_utc=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.timezone.utc),
+    )
+
+    assert result["killboard"]["runtime_source_activation_ready"] is True
+    assert result["killboard"]["runtime_source_activation_status"] == "SYNCED_CLEAN"
+    assert result["killboard"]["runtime_source_expected_head_status"] == "MATCH"
+    assert result["killboard"]["promotion_ready_count"] == 1
+    assert result["killboard"]["promotion_ready_candidate_found"] is True
+    assert result["killboard"]["actionable_alpha_found"] is True
 
 
 def test_runtime_runner_blocks_stale_mm_verdict_status(tmp_path):
