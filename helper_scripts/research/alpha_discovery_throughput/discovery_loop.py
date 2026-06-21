@@ -1225,6 +1225,30 @@ def classify_profitability_blocker(
                 "learning_loop_last_ledger_row_count": detail.get(
                     "learning_loop_last_ledger_row_count"
                 ),
+                "learning_loop_last_materializer_rc": detail.get(
+                    "learning_loop_last_materializer_rc"
+                ),
+                "learning_loop_materialize_rejects_enabled": detail.get(
+                    "learning_loop_materialize_rejects_enabled"
+                ),
+                "learning_loop_append_materialized_rejects_enabled": detail.get(
+                    "learning_loop_append_materialized_rejects_enabled"
+                ),
+                "learning_loop_last_materializer_status": detail.get(
+                    "learning_loop_last_materializer_status"
+                ),
+                "learning_loop_last_materializer_input_feature_row_count": detail.get(
+                    "learning_loop_last_materializer_input_feature_row_count"
+                ),
+                "learning_loop_last_materialized_record_count": detail.get(
+                    "learning_loop_last_materialized_record_count"
+                ),
+                "learning_loop_last_appended_materialized_record_count": detail.get(
+                    "learning_loop_last_appended_materialized_record_count"
+                ),
+                "learning_loop_last_materializer_decision_counts": detail.get(
+                    "learning_loop_last_materializer_decision_counts"
+                ),
                 "learning_loop_last_review_status": detail.get(
                     "learning_loop_last_review_status"
                 ),
@@ -1239,6 +1263,12 @@ def classify_profitability_blocker(
                 ),
                 "learning_loop_refresh_latest_path": detail.get(
                     "learning_loop_refresh_latest_path"
+                ),
+                "learning_loop_materializer_latest_path": detail.get(
+                    "learning_loop_materializer_latest_path"
+                ),
+                "learning_loop_materializer_latest_error": detail.get(
+                    "learning_loop_materializer_latest_error"
                 ),
                 "learning_loop_review_latest_path": detail.get(
                     "learning_loop_review_latest_path"

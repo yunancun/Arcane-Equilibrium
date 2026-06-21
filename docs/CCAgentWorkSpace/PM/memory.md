@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Materializer Status Visibility
+
+- `cost_gate_learning_lane.status` now exposes reject materializer evidence from `reject_materializer_latest.json` and the learning-loop status log; activation preflight and alpha-discovery rows show ran/enabled/append/materialized/appended/decision counts.
+- Runtime read-only smoke confirmed current PG rejects can traverse local in-memory materializer -> blocked-outcome refresh -> review; latest BTCUSDT sample is `KEEP_COST_GATE_BLOCKED`, so evidence supports continuous learning rather than blind Cost Gate lowering.
+- Boundary remains source/test/docs plus read-only runtime PG/artifact smoke only: no runtime sync, cron install, ledger append, PG write, Bybit call, order authority, writer enablement, or Cost Gate lowering.
+
 ## 2026-06-21 Cost-Gate Materializer Cron Wiring
 
 - `cost_gate_learning_lane_cron.sh` now runs reject materialization before outcome refresh/review, so an activated loop can turn PG rejects into ledger rows and then blocked-signal outcomes in one scheduled path.

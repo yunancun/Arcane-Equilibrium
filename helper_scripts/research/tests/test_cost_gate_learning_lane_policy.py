@@ -553,6 +553,18 @@ def test_alpha_discovery_surfaces_learning_loop_running_without_ledger_rows(
         json.dumps(plan),
         encoding="utf-8",
     )
+    (lane_dir / "reject_materializer_latest.json").write_text(
+        json.dumps({
+            "schema_version": "cost_gate_reject_materializer_v1",
+            "generated_at_utc": "2026-06-21T11:04:00Z",
+            "status": "MATERIALIZED_REJECT_ROWS_PRESENT",
+            "input_feature_row_count": 20,
+            "materialized_record_count": 20,
+            "appended_record_count": 0,
+            "decision_counts": {"SIDE_CELL_NOT_SELECTED": 20},
+        }),
+        encoding="utf-8",
+    )
     heartbeat = data_dir / "cron_heartbeat" / "cost_gate_learning_lane.last_fire"
     heartbeat.parent.mkdir(parents=True)
     heartbeat.write_text("", encoding="utf-8")
@@ -596,6 +608,16 @@ def test_alpha_discovery_surfaces_learning_loop_running_without_ledger_rows(
     assert row["learning_loop_status"] == "RUNNING_NO_LEDGER_ROWS"
     assert row["learning_loop_heartbeat_present"] is True
     assert row["learning_loop_last_ledger_row_count"] == 0
+    assert row["learning_loop_last_materializer_status"] == (
+        "MATERIALIZED_REJECT_ROWS_PRESENT"
+    )
+    assert row["learning_loop_last_materializer_input_feature_row_count"] == 20
+    assert row["learning_loop_last_materialized_record_count"] == 20
+    assert row["learning_loop_last_appended_materialized_record_count"] == 0
+    assert row["learning_loop_last_materializer_decision_counts"] == {
+        "SIDE_CELL_NOT_SELECTED": 20,
+    }
+    assert row["learning_loop_materializer_latest_error"] is None
     assert row["learning_loop_last_review_status"] == "NO_BLOCKED_SIGNAL_OUTCOMES"
 
 
@@ -1012,6 +1034,14 @@ def test_activation_preflight_reports_loop_running_without_ledger_rows(
             "ts_utc": "2026-06-21T11:04:00Z",
             "check": "cost_gate_learning_lane",
             "ledger_row_count": 0,
+            "materialize_rejects": True,
+            "append_materialized_rejects": False,
+            "materializer_rc": 0,
+            "materializer_status": "MATERIALIZED_REJECT_ROWS_PRESENT",
+            "materializer_input_feature_row_count": 20,
+            "materializer_materialized_record_count": 20,
+            "materializer_appended_record_count": 0,
+            "materializer_decision_counts": {"SIDE_CELL_NOT_SELECTED": 20},
             "refresh_rc": 0,
             "review_rc": 0,
             "review_status": "NO_BLOCKED_SIGNAL_OUTCOMES",
@@ -1028,6 +1058,22 @@ def test_activation_preflight_reports_loop_running_without_ledger_rows(
     assert preflight["status"] == "LOOP_RUNNING_NO_LEDGER_ROWS"
     assert preflight["reason"] == "learning_loop_recent_but_no_probe_ledger_rows"
     assert preflight["learning_loop"]["learning_loop_status"] == "RUNNING_NO_LEDGER_ROWS"
+    assert preflight["learning_loop"]["learning_loop_last_materializer_status"] == (
+        "MATERIALIZED_REJECT_ROWS_PRESENT"
+    )
+    assert preflight["learning_loop"]["learning_loop_last_materialized_record_count"] == 20
+    assert preflight["learning_loop"][
+        "learning_loop_last_appended_materialized_record_count"
+    ] == 0
+    assert preflight["learning_loop"]["learning_loop_last_materializer_decision_counts"] == {
+        "SIDE_CELL_NOT_SELECTED": 20,
+    }
+    assert preflight["answers"]["reject_materializer_ran"] is True
+    assert preflight["answers"]["reject_materializer_enabled"] is True
+    assert preflight["answers"]["reject_materializer_append_enabled"] is False
+    assert preflight["answers"]["reject_materializer_latest_available"] is False
+    assert preflight["answers"]["reject_materializer_materialized_records"] == 20
+    assert preflight["answers"]["reject_materializer_appended_records"] == 0
     assert preflight["answers"]["silent_drop_risk"] is True
     assert "runtime_ledger_writer_or_recent_cost_gate_reject_rows" in preflight["missing_links"]
 
