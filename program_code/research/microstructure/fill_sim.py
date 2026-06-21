@@ -1885,56 +1885,90 @@ def fill_sim_low_friction_signal_scorecard(
 
     thresholds: dict[tuple[str, str], tuple[pd.Series, float, str]] = {}
 
-    def add_train_quantile_feature(col: str, *, register_candidate: bool):
+    def add_train_quantile_threshold(
+        col: str,
+        q: float,
+        op: str,
+        label: str,
+        *,
+        register_candidate: bool,
+    ):
         all_vals = pd.to_numeric(trials[col], errors="coerce")
         train_vals = pd.to_numeric(train[col], errors="coerce")
         valid = train_vals.dropna()
         valid = valid[np.isfinite(valid)]
         if valid.empty:
             return
+        threshold = float(valid.quantile(q))
+        if not np.isfinite(threshold):
+            return
+        mask = all_vals >= threshold if op == ">=" else all_vals <= threshold
+        thresholds[(col, label)] = (mask, threshold, op)
+        if register_candidate:
+            add_candidate(
+                f"{col}_{label}_{'ge' if op == '>=' else 'le'}",
+                f"{col} {op} {label}({threshold:.6g})",
+                mask,
+                {
+                    "feature": col,
+                    "operator": op,
+                    "quantile": label,
+                    "threshold": threshold,
+                    "threshold_source": "train_only",
+                },
+            )
+
+    def add_train_quantile_feature(col: str, *, register_candidate: bool):
         for q, op, label in (
             (0.10, "<=", "train_p10"),
             (0.25, "<=", "train_p25"),
             (0.75, ">=", "train_p75"),
             (0.90, ">=", "train_p90"),
         ):
-            threshold = float(valid.quantile(q))
-            if not np.isfinite(threshold):
-                continue
-            mask = all_vals >= threshold if op == ">=" else all_vals <= threshold
-            thresholds[(col, label)] = (mask, threshold, op)
-            if register_candidate:
-                add_candidate(
-                    f"{col}_{label}_{'ge' if op == '>=' else 'le'}",
-                    f"{col} {op} {label}({threshold:.6g})",
-                    mask,
-                    {
-                        "feature": col,
-                        "operator": op,
-                        "quantile": label,
-                        "threshold": threshold,
-                        "threshold_source": "train_only",
-                    },
-                )
+            add_train_quantile_threshold(
+                col,
+                q,
+                op,
+                label,
+                register_candidate=register_candidate,
+            )
 
     if "quoted_half_spread_bps" in trials:
         add_train_quantile_feature("quoted_half_spread_bps", register_candidate=False)
     for col in low_feature_cols:
         add_train_quantile_feature(col, register_candidate=True)
+    quiet_tape_cols = tuple(
+        col for suffix in ("10s", "30s")
+        for col in (
+            f"recent_trade_abs_qty_{suffix}",
+            f"recent_trade_count_{suffix}",
+            f"recent_l1_update_count_{suffix}",
+            f"recent_l1_update_intensity_{suffix}",
+        )
+        if col in low_feature_cols
+    )
+    for col in quiet_tape_cols:
+        add_train_quantile_threshold(
+            col,
+            0.50,
+            "<=",
+            "train_p50",
+            register_candidate=False,
+        )
 
     combo_specs = []
     for spread_label in ("train_p75", "train_p90"):
         for col, labels in (
             ("side_recent_trade_imbalance_10s", ("train_p75", "train_p90")),
             ("side_recent_trade_imbalance_30s", ("train_p75", "train_p90")),
-            ("recent_trade_abs_qty_10s", ("train_p10", "train_p25")),
-            ("recent_trade_abs_qty_30s", ("train_p10", "train_p25")),
-            ("recent_trade_count_10s", ("train_p10", "train_p25")),
-            ("recent_trade_count_30s", ("train_p10", "train_p25")),
-            ("recent_l1_update_count_10s", ("train_p10", "train_p25")),
-            ("recent_l1_update_count_30s", ("train_p10", "train_p25")),
-            ("recent_l1_update_intensity_10s", ("train_p10", "train_p25")),
-            ("recent_l1_update_intensity_30s", ("train_p10", "train_p25")),
+            ("recent_trade_abs_qty_10s", ("train_p10", "train_p25", "train_p50")),
+            ("recent_trade_abs_qty_30s", ("train_p10", "train_p25", "train_p50")),
+            ("recent_trade_count_10s", ("train_p10", "train_p25", "train_p50")),
+            ("recent_trade_count_30s", ("train_p10", "train_p25", "train_p50")),
+            ("recent_l1_update_count_10s", ("train_p10", "train_p25", "train_p50")),
+            ("recent_l1_update_count_30s", ("train_p10", "train_p25", "train_p50")),
+            ("recent_l1_update_intensity_10s", ("train_p10", "train_p25", "train_p50")),
+            ("recent_l1_update_intensity_30s", ("train_p10", "train_p25", "train_p50")),
             ("side_touch_size_delta_frac_10s", ("train_p75", "train_p90")),
             ("side_touch_size_delta_frac_30s", ("train_p75", "train_p90")),
             ("spread_bps_delta_10s", ("train_p75", "train_p90")),
@@ -1961,7 +1995,7 @@ def fill_sim_low_friction_signal_scorecard(
             for quiet_col in quiet_cols:
                 if quiet_col not in low_feature_cols:
                     continue
-                for quiet_label in ("train_p10", "train_p25"):
+                for quiet_label in ("train_p10", "train_p25", "train_p50"):
                     for favorable_col in favorable_cols:
                         if favorable_col not in low_feature_cols:
                             continue
