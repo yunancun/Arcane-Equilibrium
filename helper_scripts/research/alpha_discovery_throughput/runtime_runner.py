@@ -1255,6 +1255,68 @@ def collect_aeg_matrix_arm(data_dir: Path) -> dict[str, Any]:
     )
 
 
+def collect_cost_gate_learning_lane_arm(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    path = data_dir / "cost_gate_learning_lane" / "demo_learning_lane_plan_latest.json"
+    payload, err = _read_json(path)
+    if err:
+        return _arm(
+            arm_id="cost_gate_demo_learning_lane",
+            gate_status="WAIT",
+            sample_count=0,
+            artifacts_ready=False,
+            source_ok=True,
+            source_path=path,
+            source_error=f"optional_plan_{err}",
+            detail={
+                "plan_status": "SOURCE_SCORECARD_UNAVAILABLE",
+                "note": "cost_gate_learning_lane_plan_not_seen",
+            },
+        )
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    status = str(payload.get("status") or "WAIT")
+    gate_status = str(payload.get("gate_status") or "WAIT").upper()
+    candidates = payload.get("probe_candidates") if isinstance(payload.get("probe_candidates"), list) else []
+    selected_count = _int(payload.get("selected_probe_candidate_count"), len(candidates))
+    if not fresh:
+        gate_status = "SOURCE_FAILURE"
+    return _arm(
+        arm_id="cost_gate_demo_learning_lane",
+        gate_status=gate_status,
+        sample_count=selected_count,
+        artifacts_ready=False,
+        source_ok=fresh,
+        source_path=path,
+        source_error=freshness_error,
+        detail={
+            "plan_status": status,
+            "generated_at_utc": generated_at,
+            "age_seconds": age,
+            "main_cost_gate_adjustment": payload.get("main_cost_gate_adjustment"),
+            "learning_gate_adjustment": payload.get("learning_gate_adjustment"),
+            "order_authority": payload.get("order_authority"),
+            "probe_budget": payload.get("probe_budget"),
+            "probe_candidate_count": payload.get("probe_candidate_count"),
+            "selected_probe_candidate_count": selected_count,
+            "probe_candidates": candidates[:8],
+            "do_not_probe_side_cells": payload.get("do_not_probe_side_cells"),
+            "data_coverage_tasks": payload.get("data_coverage_tasks"),
+            "source": payload.get("source"),
+            "boundary": payload.get("boundary"),
+        },
+    )
+
+
 def collect_runtime_arms(
     *,
     data_dir: Path,
@@ -1270,6 +1332,7 @@ def collect_runtime_arms(
         collect_vol_event_arm(data_dir),
         collect_mm_verdict_arm(data_dir, now_utc=now),
         collect_polymarket_leadlag_arm(data_dir, now_utc=now),
+        collect_cost_gate_learning_lane_arm(data_dir, now_utc=now),
         collect_aeg_matrix_arm(data_dir),
     ]
 
