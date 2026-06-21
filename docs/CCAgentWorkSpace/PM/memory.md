@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Lane Cron Loop
+
+- Read-only Linux probe found runtime `trade-core` behind origin by 5 commits and dirty; `/tmp/openclaw/cost_gate_learning_lane/` had no `probe_ledger.jsonl` and no `blocked_outcome_review_latest.json`, so demo cost-gate rejects are not yet accumulating enough outcome evidence on runtime.
+- Added artifact-only `cost_gate_learning_lane_cron.sh` plus dry-run-gated installer to run blocked-outcome refresh and outcome-review hourly once operator syncs/enables it.
+- Boundary remains strict: readonly PG plus local JSONL/JSON/log/heartbeat writes only; no order authority, main Cost Gate lowering, PG write, Bybit call, deploy, restart, or runtime mutation.
+
 ## 2026-06-21 Cost-Gate Blocked Outcome Review Scorecard
 
 - Added artifact-only `cost_gate_learning_lane.outcome_review`, grouping `blocked_signal_outcome` ledger rows by side-cell and classifying them as collect-more, keep-blocked, or demo-probe-authority review candidates.

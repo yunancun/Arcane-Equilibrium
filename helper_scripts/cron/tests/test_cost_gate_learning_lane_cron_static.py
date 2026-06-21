@@ -1,0 +1,106 @@
+"""Static contract tests for the cost-gate learning-lane cron wrapper."""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+from pathlib import Path
+
+import pytest
+
+CRON_DIR = Path(__file__).resolve().parents[1]
+WRAPPER = CRON_DIR / "cost_gate_learning_lane_cron.sh"
+INSTALLER = CRON_DIR / "install_cost_gate_learning_lane_cron.sh"
+
+
+def _src(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("script", [WRAPPER, INSTALLER], ids=["wrapper", "installer"])
+def test_bash_syntax_ok(script: Path) -> None:
+    if shutil.which("bash") is None:
+        pytest.skip("bash not available")
+    proc = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
+
+
+@pytest.mark.parametrize("script", [WRAPPER, INSTALLER], ids=["wrapper", "installer"])
+def test_scripts_executable_and_strict_mode(script: Path) -> None:
+    assert script.stat().st_mode & 0o111, f"{script.name} not executable"
+    assert "set -euo pipefail" in _src(script)
+
+
+def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
+    src = _src(WRAPPER)
+    assert "basic_system_services.env" in src
+    assert "POSTGRES_PASSWORD" in src
+    assert 'PGOPTIONS="-c default_transaction_read_only=on"' in src
+    assert "cost_gate_learning_lane_cron.lock.d" in src
+    assert "cost_gate_learning_lane.last_fire" in src
+    assert "cost_gate_learning_lane_cron.log" in src
+    assert "cost_gate_learning_lane.log" in src
+    assert "probe_ledger.jsonl" in src
+    assert "outcome_refresh_latest.json" in src
+    assert "blocked_outcome_review_latest.json" in src
+    assert "cost_gate_learning_lane.outcome_refresh" in src
+    assert "cost_gate_learning_lane.outcome_review" in src
+    assert "--source-pg" in src
+    assert "--record-blocked-outcomes" in src
+    assert "--append-ledger" in src
+    assert "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES" in src
+    assert "OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES" in src
+    assert "PYTHONDONTWRITEBYTECODE=1" in src
+    assert "artifact_only_readonly_pg_jsonl_ledger_no_order_no_cost_gate_relaxation" in src
+    assert src.rstrip().endswith("exit 0")
+
+
+def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
+    src = _src(WRAPPER)
+    assert 'PG_TIMEFRAME="${OPENCLAW_COST_GATE_LEARNING_PG_TIMEFRAME:-1m}"' in src
+    assert 'OUTCOME_HORIZON_MINUTES="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES:-60}"' in src
+    assert 'OUTCOME_COST_BPS="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_COST_BPS:-4.0}"' in src
+    assert 'MAX_ENTRY_DELAY_MS="${OPENCLAW_COST_GATE_LEARNING_MAX_ENTRY_DELAY_MS:-300000}"' in src
+    assert 'APPEND_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES:-1}"' in src
+    assert 'RECORD_PROBE_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES:-0}"' in src
+    assert 'REVIEW_MIN_OUTCOMES="${OPENCLAW_COST_GATE_REVIEW_MIN_OUTCOMES_PER_SIDE_CELL:-3}"' in src
+    assert 'REVIEW_MIN_AVG_NET_BPS="${OPENCLAW_COST_GATE_REVIEW_MIN_AVG_NET_BPS:-0.0}"' in src
+    assert 'REVIEW_MIN_NET_POSITIVE_PCT="${OPENCLAW_COST_GATE_REVIEW_MIN_NET_POSITIVE_PCT:-60.0}"' in src
+    assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES"' in src
+    assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES"' in src
+
+
+def test_installer_dry_run_apply_gate_and_reversible_entry() -> None:
+    src = _src(INSTALLER)
+    assert 'OPENCLAW_COST_GATE_LEARNING_CRON_MINUTES="${OPENCLAW_COST_GATE_LEARNING_CRON_MINUTES:-27}"' in src
+    assert 'OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES:-1}"' in src
+    assert 'OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES:-0}"' in src
+    assert 'ENTRY="${OPENCLAW_COST_GATE_LEARNING_CRON_MINUTES} * * * *' in src
+    assert '_validate_cron_minute_list "OPENCLAW_COST_GATE_LEARNING_CRON_MINUTES"' in src
+    assert "_validate_bool01" in src
+    assert "OPENCLAW_COST_GATE_LEARNING_CRON_APPLY" in src
+    assert "DRY-RUN: not modifying crontab." in src
+    assert "--remove" in src
+    assert 'MARKER="cost_gate_learning_lane_cron.sh"' in src
+    assert 'grep -q "$MARKER"' in src
+    assert "cost_gate_learning_lane_cron.cron.log" in src
+    assert "Boundary: artifact-only JSONL/JSON refresh; readonly PG; no order authority or Cost Gate relaxation" in src
+
+
+@pytest.mark.parametrize("script", [WRAPPER, INSTALLER], ids=["wrapper", "installer"])
+def test_no_hardcoded_user_paths_or_trading_tokens(script: Path) -> None:
+    src = _src(script)
+    forbidden = (
+        "/home/ncyu",
+        "/Users/",
+        "OPENCLAW_ALLOW_MAINNET",
+        "authorization.json",
+        "create_order",
+        "place_order",
+        "cancel_order",
+        "live_authorization",
+        "restart_all.sh",
+        "systemctl",
+    )
+    for token in forbidden:
+        assert token not in src
