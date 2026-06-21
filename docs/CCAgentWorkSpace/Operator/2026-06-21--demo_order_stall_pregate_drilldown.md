@@ -4,6 +4,8 @@
 
 新增結果：audit 現在會列出哪些 `strategy / symbol / decision_type` 有 context rows，但沒有 downstream evaluation / risk / intent / order / fill。
 
+2026-06-21 後續 payload-scope correction：這些 no-downstream context rows 後續確認是 `signal_observation_only` 且 `accepted_intent_bound=false`，不應直接解讀為 actionable candidate silent drop。最新 operator note：`docs/CCAgentWorkSpace/Operator/2026-06-21--demo_order_stall_payload_scope_correction.md`。
+
 2026-06-21 16:49 +02:00 read-only 實查：
 
 - 最近 4h top context rows 全部是 `signal_generated`。
@@ -15,7 +17,7 @@
   - `NEARUSDT`：494
   - `FILUSDT`：490
 
-這說明短期問題不是 context writer 死掉，而是 `ma_crossover` 的 signal/context stream 沒進 candidate evaluation / Guardian risk。
+這說明短期問題不是 context writer 死掉；後續修正後，這批 rows 應視為 observation/learning telemetry，而不是已接受候選被靜默丟失。
 
 驗證：
 

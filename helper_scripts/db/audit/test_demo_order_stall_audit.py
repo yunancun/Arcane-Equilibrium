@@ -4,6 +4,7 @@ import pytest
 
 from helper_scripts.db.audit.demo_order_stall_audit import (
     AuditConfig,
+    build_context_payload_scope_sql,
     build_evaluation_outcome_sql,
     build_intent_order_lineage_sql,
     build_json_payload,
@@ -13,6 +14,7 @@ from helper_scripts.db.audit.demo_order_stall_audit import (
     classify_order_stall,
     render_markdown,
     reason_category,
+    context_scope_is_observation_only,
     summarize_pre_gate_drilldown,
     validate_config,
 )
@@ -61,6 +63,7 @@ def test_sql_contract_is_read_only_and_covers_pipeline_tables() -> None:
             build_risk_reason_sql(),
             build_evaluation_outcome_sql(),
             build_intent_order_lineage_sql(),
+            build_context_payload_scope_sql(),
             build_pre_gate_drilldown_sql(),
         ]
     )
@@ -85,6 +88,9 @@ def test_pre_gate_drilldown_sql_joins_contexts_to_downstream_tables() -> None:
     sql = build_pre_gate_drilldown_sql()
 
     assert "FROM trading.decision_context_snapshots d" in sql
+    assert "d.decision_payload->>'linucb_metadata_scope'" in sql
+    assert "d.decision_payload->>'accepted_intent_bound'" in sql
+    assert "jsonb_array_length" in sql
     assert "LEFT JOIN evals e" in sql
     assert "LEFT JOIN rv" in sql
     assert "LEFT JOIN intents i" in sql
@@ -93,6 +99,17 @@ def test_pre_gate_drilldown_sql_joins_contexts_to_downstream_tables() -> None:
     assert "d.context_id" in sql
     assert "coalesce(f.entry_context_id, f.context_id)" in sql
     assert "GROUP BY d.engine_mode, d.strategy_name, d.symbol, d.decision_type" in sql
+
+
+def test_context_payload_scope_sql_surfaces_observation_payload_fields() -> None:
+    sql = build_context_payload_scope_sql()
+
+    assert "FROM trading.decision_context_snapshots d" in sql
+    assert "d.decision_payload->>'linucb_metadata_scope'" in sql
+    assert "d.decision_payload->>'accepted_intent_bound'" in sql
+    assert "signal_observation_only_contexts" in sql
+    assert "accepted_intent_bound_contexts" in sql
+    assert "non_observation_scope_contexts" in sql
 
 
 def test_reason_category_identifies_cost_gate_and_other_gate_types() -> None:
@@ -119,6 +136,29 @@ def test_classification_no_data_and_signal_only_paths() -> None:
     )
     assert signal_only["status"] == "SIGNAL_OBSERVATION_ONLY_PRE_GATE"
     assert signal_only["answers"]["silent_drop_risk"] is True
+
+    observation_only_scope = {
+        "context_rows": 100,
+        "signal_observation_only_contexts": 100,
+        "accepted_intent_bound_contexts": 0,
+        "non_observation_scope_contexts": 0,
+        "missing_scope_contexts": 0,
+    }
+    observation_only = classify_order_stall(
+        _base_counts(decision_context_snapshots=100),
+        [],
+        {},
+        observation_only_scope,
+    )
+    assert context_scope_is_observation_only(observation_only_scope) is True
+    assert observation_only["status"] == "OBSERVATION_ONLY_CONTEXTS_ACTIVE"
+    assert (
+        observation_only["data_accumulation_status"]
+        == "OBSERVATION_ONLY_CONTEXTS_ACCUMULATING"
+    )
+    assert observation_only["answers"]["context_payload_observation_only"] is True
+    assert observation_only["answers"]["actionable_contexts_present"] is False
+    assert observation_only["answers"]["silent_drop_risk"] is False
 
     candidates_only = classify_order_stall(
         _base_counts(decision_context_snapshots=100, candidate_evaluations=50),
@@ -234,6 +274,37 @@ def test_pre_gate_drilldown_summary_surfaces_unjoined_contexts() -> None:
     }
 
 
+def test_pre_gate_drilldown_summary_recognizes_observation_only_contexts() -> None:
+    rows = [
+        {
+            "engine_mode": "demo",
+            "strategy_name": "ma_crossover",
+            "symbol": "REUSDT",
+            "decision_type": "signal_generated",
+            "context_rows": 549,
+            "linucb_metadata_scopes": "signal_observation_only",
+            "signal_observation_only_contexts": 549,
+            "accepted_intent_bound_contexts": 0,
+            "non_observation_scope_contexts": 0,
+            "contexts_with_evaluation": 0,
+            "contexts_with_risk": 0,
+            "contexts_with_intent": 0,
+            "contexts_with_order": 0,
+            "contexts_with_fill": 0,
+            "latest_context_ts": "2026-06-21T16:49:01+02:00",
+        }
+    ]
+
+    summary = summarize_pre_gate_drilldown(rows)
+
+    assert summary["status"] == "TOP_CONTEXT_ROWS_OBSERVATION_ONLY_NO_DOWNSTREAM_EXPECTED"
+    assert summary["signal_observation_only_contexts"] == 549
+    assert summary["accepted_intent_bound_contexts"] == 0
+    assert summary["top_unjoined_context_rows"][0][
+        "linucb_metadata_scopes"
+    ] == "signal_observation_only"
+
+
 def test_markdown_and_json_payload_surface_answers() -> None:
     cfg = AuditConfig(engine_modes=("demo", "live_demo"), lookback_hours=24)
     counts = _base_counts(
@@ -263,6 +334,19 @@ def test_markdown_and_json_payload_surface_answers() -> None:
         }
     ]
     lineage = {"intents": 0, "intents_with_orders": 0, "intents_without_orders": 0}
+    context_payload_scope = {
+        "context_rows": 100,
+        "signal_observation_only_contexts": 100,
+        "accepted_intent_bound_contexts": 0,
+        "non_observation_scope_contexts": 0,
+        "missing_scope_contexts": 0,
+        "distinct_scope_count": 1,
+        "linucb_metadata_scopes": "signal_observation_only",
+        "strategies": 1,
+        "symbols": 1,
+        "latest_context_ts": "2026-06-21T00:00:00Z",
+        "avg_signal_count": 3.0,
+    }
     pre_gate_drilldown = [
         {
             "engine_mode": "demo",
@@ -286,11 +370,14 @@ def test_markdown_and_json_payload_surface_answers() -> None:
         eval_outcomes,
         lineage,
         pre_gate_drilldown,
+        context_payload_scope,
         generated="2026-06-21T00:00:00+00:00",
     )
     assert "COST_GATE_REJECTING_ALL_RECENT_ATTEMPTS" in markdown
     assert "Bounded demo-learning lane recommended: `True`" in markdown
     assert "candidate_evaluations" in markdown
+    assert "## Context Payload Scope" in markdown
+    assert "signal_observation_only" in markdown
     assert "## Pre-Gate Drilldown" in markdown
     assert "REUSDT" in markdown
 
@@ -301,10 +388,14 @@ def test_markdown_and_json_payload_surface_answers() -> None:
         eval_outcomes,
         lineage,
         pre_gate_drilldown,
+        context_payload_scope,
         generated="2026-06-21T00:00:00+00:00",
     )
     assert payload["schema_version"] == "demo_order_stall_audit_v1"
     assert payload["classification"]["answers"]["cost_gate_dominant"] is True
+    assert payload["context_payload_scope"]["linucb_metadata_scopes"] == (
+        "signal_observation_only"
+    )
     assert (
         payload["pre_gate_drilldown_summary"]["status"]
         == "TOP_CONTEXT_ROWS_HAVE_NO_DOWNSTREAM_JOIN"
