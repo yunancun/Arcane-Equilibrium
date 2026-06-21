@@ -14,6 +14,8 @@ use crate::demo_learning_lane::{
 };
 
 pub const ADMISSION_LEDGER_RECORD_TYPE: &str = "probe_admission_decision";
+pub const CAPTURE_ERROR_LEDGER_RECORD_TYPE: &str = "probe_capture_error";
+pub const CAPTURE_ERROR_DECISION: &str = "ADMISSION_NOT_EVALUATED";
 pub const ADMISSION_LEDGER_BOUNDARY: &str =
     "admission-ledger artifact only; no PG, Bybit, order, config, risk, auth, or runtime mutation";
 
@@ -53,6 +55,28 @@ impl AdmissionLedgerRecord {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CaptureErrorLedgerRecord {
+    pub schema_version: &'static str,
+    pub record_type: &'static str,
+    pub generated_at_utc: String,
+    pub attempt_id: String,
+    pub decision: &'static str,
+    pub allowed_to_submit_order: bool,
+    pub side_cell_key: String,
+    pub event: AdmissionLedgerEvent,
+    pub runtime_state: Value,
+    pub capture_error: String,
+    pub reason: &'static str,
+    pub boundary: &'static str,
+}
+
+impl CaptureErrorLedgerRecord {
+    pub fn to_json_string(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
+    }
+}
+
 pub fn attempt_id_for_reject_event(event: &RejectEvent) -> String {
     if let Some(context_id) = non_empty(&event.context_id) {
         return context_id;
@@ -86,6 +110,31 @@ pub fn build_admission_ledger_record(
         event: ledger_event,
         runtime_state,
         reason: decision.reason.clone(),
+        boundary: ADMISSION_LEDGER_BOUNDARY,
+    }
+}
+
+pub fn build_capture_error_ledger_record(
+    event: &RejectEvent,
+    generated_at_utc: DateTime<Utc>,
+    risk_state: &str,
+    capture_error: &str,
+) -> CaptureErrorLedgerRecord {
+    let ledger_event = build_admission_ledger_event(event);
+    CaptureErrorLedgerRecord {
+        schema_version: ADAPTER_SCHEMA_VERSION,
+        record_type: CAPTURE_ERROR_LEDGER_RECORD_TYPE,
+        generated_at_utc: generated_at_utc.to_rfc3339(),
+        attempt_id: attempt_id_for_reject_event(event),
+        decision: CAPTURE_ERROR_DECISION,
+        allowed_to_submit_order: false,
+        side_cell_key: side_cell_key(&event.strategy_name, &event.symbol, &event.side),
+        event: ledger_event,
+        runtime_state: json!({
+            "risk_state": risk_state.trim(),
+        }),
+        capture_error: capture_error.trim().to_string(),
+        reason: "runtime_admission_evaluation_failed",
         boundary: ADMISSION_LEDGER_BOUNDARY,
     }
 }

@@ -137,6 +137,45 @@ fn no_authority_decision_still_builds_learning_ledger_record() {
 }
 
 #[test]
+fn capture_error_record_keeps_rejected_signal_when_admission_cannot_run() {
+    let event = selected_event();
+    let generated_at = Utc.timestamp_millis_opt(NOW_MS as i64).single().unwrap();
+    let record = build_capture_error_ledger_record(
+        &event,
+        generated_at,
+        "NORMAL",
+        "read plan /tmp/openclaw/cost_gate_learning_lane/demo_learning_lane_plan_latest.json failed: missing",
+    );
+
+    assert_eq!(record.schema_version, ADAPTER_SCHEMA_VERSION);
+    assert_eq!(record.record_type, CAPTURE_ERROR_LEDGER_RECORD_TYPE);
+    assert_eq!(record.decision, CAPTURE_ERROR_DECISION);
+    assert!(!record.allowed_to_submit_order);
+    assert_eq!(
+        record.attempt_id,
+        "ctx-demo-ma_crossover-ETHUSDT-1782040200000"
+    );
+    assert_eq!(record.side_cell_key, "ma_crossover|ETHUSDT|Sell");
+    assert_eq!(record.event.reject_reason_code, ELIGIBLE_REJECT_REASON_CODE);
+    assert_eq!(record.runtime_state["risk_state"].as_str(), Some("NORMAL"));
+    assert!(record.capture_error.contains("read plan"));
+    assert_eq!(record.reason, "runtime_admission_evaluation_failed");
+
+    let json = record.to_json_string().unwrap();
+    let parsed = LedgerRecord::from_jsonl_str(&json).unwrap();
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(
+        parsed[0].record_type.as_deref(),
+        Some(CAPTURE_ERROR_LEDGER_RECORD_TYPE)
+    );
+    assert_eq!(parsed[0].decision.as_deref(), Some(CAPTURE_ERROR_DECISION));
+    assert_eq!(
+        parsed[0].attempt_id.as_deref(),
+        Some("ctx-demo-ma_crossover-ETHUSDT-1782040200000")
+    );
+}
+
+#[test]
 fn ledger_attempt_id_prefers_context_then_signal_then_side_cell_timestamp() {
     let mut event = selected_event();
     assert_eq!(

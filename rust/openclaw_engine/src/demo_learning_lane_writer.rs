@@ -21,7 +21,8 @@ use crate::demo_learning_lane::{
     evaluate_probe_admission, AdmissionConfig, DemoLearningLanePlan, LedgerRecord, RejectEvent,
 };
 use crate::demo_learning_lane_ledger::{
-    attempt_id_for_reject_event, build_admission_ledger_record, AdmissionLedgerRecord,
+    attempt_id_for_reject_event, build_admission_ledger_record, build_capture_error_ledger_record,
+    AdmissionLedgerRecord,
 };
 
 const CHANNEL_CAPACITY: usize = 4096;
@@ -183,7 +184,33 @@ async fn run_writer(
                     }
                     Ok(None) => {}
                     Err(e) => {
-                        warn!(error = %e, "demo-learning lane admission record skipped / demo-learning lane admission record 已跳過");
+                        warn!(error = %e, "demo-learning lane admission evaluation failed; writing capture-error row / demo-learning lane admission 評估失敗，寫入 capture-error row");
+                        let record = build_capture_error_ledger_record(
+                            &msg.event,
+                            Utc::now(),
+                            &msg.risk_state,
+                            &e,
+                        );
+                        match record.to_json_string() {
+                            Ok(json) => {
+                                if let Err(write_err) = bw.write_all(json.as_bytes()).and_then(|_| bw.write_all(b"\n")) {
+                                    warn!(
+                                        error = %write_err,
+                                        ledger_path = %ledger_path.display(),
+                                        "demo-learning lane capture-error write failed / demo-learning lane capture-error 寫入失敗"
+                                    );
+                                } else if let Err(flush_err) = bw.flush() {
+                                    warn!(
+                                        error = %flush_err,
+                                        ledger_path = %ledger_path.display(),
+                                        "demo-learning lane capture-error flush failed / demo-learning lane capture-error flush 失敗"
+                                    );
+                                }
+                            }
+                            Err(ser_err) => {
+                                warn!(error = %ser_err, "demo-learning lane capture-error serialize failed / demo-learning lane capture-error 序列化失敗");
+                            }
+                        }
                     }
                 }
             }
@@ -201,10 +228,6 @@ pub(crate) fn build_runtime_admission_record(
     now_ms: u64,
     generated_at_utc: DateTime<Utc>,
 ) -> Result<Option<AdmissionLedgerRecord>, String> {
-    let plan_json = std::fs::read_to_string(plan_path)
-        .map_err(|err| format!("read plan {} failed: {err}", plan_path.display()))?;
-    let plan = DemoLearningLanePlan::from_json_str(&plan_json)
-        .map_err(|err| format!("parse plan {} failed: {err}", plan_path.display()))?;
     let ledger_rows = read_ledger_rows(ledger_path)?;
     let attempt_id = attempt_id_for_reject_event(event);
     if ledger_rows
@@ -213,6 +236,10 @@ pub(crate) fn build_runtime_admission_record(
     {
         return Ok(None);
     }
+    let plan_json = std::fs::read_to_string(plan_path)
+        .map_err(|err| format!("read plan {} failed: {err}", plan_path.display()))?;
+    let plan = DemoLearningLanePlan::from_json_str(&plan_json)
+        .map_err(|err| format!("parse plan {} failed: {err}", plan_path.display()))?;
     let decision = evaluate_probe_admission(
         &plan,
         event,
@@ -257,6 +284,9 @@ fn epoch_ms() -> u64 {
 mod tests {
     use super::*;
     use crate::demo_learning_lane::ELIGIBLE_REJECT_REASON_CODE;
+    use crate::demo_learning_lane_ledger::{
+        CAPTURE_ERROR_DECISION, CAPTURE_ERROR_LEDGER_RECORD_TYPE,
+    };
     use tempfile::TempDir;
 
     fn plan_json(generated_at: &str) -> String {
@@ -408,5 +438,49 @@ mod tests {
             Some("ORDER_AUTHORITY_NOT_GRANTED")
         );
         assert_eq!(rows[0].allowed_to_submit_order, Some(false));
+    }
+
+    #[tokio::test]
+    async fn writer_task_appends_capture_error_when_plan_missing() {
+        let tmp = TempDir::new().unwrap();
+        let plan_path = tmp.path().join("missing-plan.json");
+        let ledger_path = tmp.path().join("probe_ledger.jsonl");
+
+        let (tx, rx) = mpsc::channel(4);
+        let cancel = CancellationToken::new();
+        let handle = tokio::spawn(run_writer(
+            rx,
+            plan_path,
+            ledger_path.clone(),
+            cancel.clone(),
+        ));
+
+        tx.send(WriterMsg {
+            event: reject_event(),
+            risk_state: "NORMAL".to_string(),
+            now_ms: 1_782_041_001_000,
+        })
+        .await
+        .unwrap();
+        drop(tx);
+        handle.await.unwrap();
+
+        let content = std::fs::read_to_string(&ledger_path).unwrap();
+        let rows = LedgerRecord::from_jsonl_str(&content).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            rows[0].record_type.as_deref(),
+            Some(CAPTURE_ERROR_LEDGER_RECORD_TYPE)
+        );
+        assert_eq!(rows[0].decision.as_deref(), Some(CAPTURE_ERROR_DECISION));
+        assert_eq!(
+            rows[0].attempt_id.as_deref(),
+            Some("ctx-live_demo-ETHUSDT-1782041000000")
+        );
+        assert_eq!(rows[0].allowed_to_submit_order, Some(false));
+        assert_eq!(
+            rows[0].reason.as_deref(),
+            Some("runtime_admission_evaluation_failed")
+        );
     }
 }
