@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Price Observation Builder
+
+- Added artifact-only `cost_gate_learning_lane.price_observations` to turn probe ledger admission rows into required local price observation windows.
+- The builder normalizes local price/kline JSON/JSONL into rows that `runtime_adapter --price-observations` can consume, reducing manual data stitching before `--record-blocked-outcomes`.
+- Alpha-discovery now points admission-only cost-gate ledger progress to `build_price_observations_then_record_blocked_signal_outcomes`; no order authority, main cost-gate lowering, PG/Bybit call, or runtime mutation was added.
+
 ## 2026-06-21 Cost-Gate Blocked-Signal Outcome Feedback
 
 - Extended `runtime_adapter --record-blocked-outcomes` to append `blocked_signal_outcome` markout rows for recorded rejects that were not allowed to submit orders, including current `ORDER_AUTHORITY_NOT_GRANTED` rows.
