@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Reject Counterfactual Learning Loop
+
+- Demo no-order root cause is cost-gate rejection before order creation, not market-data failure; rejects persist to `risk_verdicts`/`decision_features` but not `trading.intents`, and recent outcome labels are effectively missing.
+- Added read-only `cost_gate_reject_counterfactual.py`; 168h artifact shows BTC Buy rejects correctly blocked, while ETH/NEAR Sell rejects contain side-cell learning value.
+- PM rule: do not globally lower the main cost gate; build a bounded demo-learning lane with small exploration budget, durable blocked/explored labels, and edge-estimate feedback.
+
 ## 2026-06-21 Polymarket Label Maturity / Price Catch-Up Routing
 
 - Root diagnosis: Polymarket lead-lag had durable snapshots but zero joined IC rows; alpha only reported generic sample gate, hiding whether the next wait was label horizon maturity or PG 1m price catch-up.

@@ -819,6 +819,66 @@ def test_low_friction_interaction_uses_recent_trade_abs_qty_as_quiet_tape():
     assert best["min_train_holdout_gross_bps"] >= 4.0
 
 
+def test_low_friction_interaction_uses_median_quiet_l1_to_restore_sample_gate():
+    rows = []
+    for _half in range(2):
+        for spread, l1_count, touch, half_spread, repeats in (
+            (6.0, 0.0, 1.0, 2.0, 64),    # p25/p10 quiet is sample-rich but below fee
+            (6.0, 4.0, 1.0, 9.0, 64),    # p50 quiet is needed to clear fee with sample gate
+            (6.0, 10.0, 1.0, 0.0, 32),   # spread + touch alone stays below fee
+            (1.0, 4.0, 1.0, 1.0, 32),    # quiet + touch alone stays below fee
+            (6.0, 4.0, -1.0, 0.0, 64),   # spread + p50 quiet alone stays below fee
+        ):
+            for _ in range(repeats):
+                rows.append(
+                    {
+                        "symbol": "ABCUSDT",
+                        "side": "bid",
+                        "outcome": "fill",
+                        "quoted_half_spread_bps": spread,
+                        "recent_trade_abs_qty_10s": 99.0,
+                        "recent_trade_count_10s": 99.0,
+                        "recent_l1_update_count_10s": l1_count,
+                        "recent_l1_update_intensity_10s": l1_count / 10.0,
+                        "side_recent_trade_imbalance_10s": touch,
+                        "side_touch_size_delta_frac_10s": touch,
+                        "spread_bps_delta_10s": touch,
+                        "half_spread_bps": half_spread,
+                        "adverse_sel_bps@15": 1.0,
+                    }
+                )
+    trials = _conditional_trials(rows)
+    for col in (
+        "recent_trade_abs_qty_10s",
+        "recent_trade_count_10s",
+        "recent_l1_update_count_10s",
+        "recent_l1_update_intensity_10s",
+        "side_recent_trade_imbalance_10s",
+        "side_touch_size_delta_frac_10s",
+        "spread_bps_delta_10s",
+    ):
+        trials[col] = [row[col] for row in rows]
+    adverse = _conditional_adverse(trials, rows)
+
+    scorecard = fill_sim_low_friction_signal_scorecard(
+        trials,
+        adverse,
+        horizons=(15,),
+        span_hours=1.0,
+        primary_horizon_s=15,
+    )
+
+    train_confirmed = scorecard["train_confirmed_gross_scorecard"]
+    assert train_confirmed["status"] == (
+        "LOW_FRICTION_TRAIN_CONFIRMED_GROSS_CLEARS_CURRENT_FEE"
+    )
+    best = scorecard["best_train_confirmed_gross_candidate"]
+    assert best["feature"] == "low_friction_interaction"
+    assert best["candidate_shape"] == "spread_quiet_touch_interaction_v1"
+    assert "recent_l1_update_count_10s_train_p50" in best["name"]
+    assert best["min_train_holdout_gross_bps"] >= 4.0
+
+
 def test_maker_fee_sensitivity_finds_lower_fee_sample_gated_path():
     report = {
         "edge_scorecard": {

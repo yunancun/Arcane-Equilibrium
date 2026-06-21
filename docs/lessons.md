@@ -27,6 +27,14 @@
 
 ## 條目
 
+## 2026-06-21 · Demo learning lane 不是 demo-as-mini-live
+
+- **場景**：Demo 長時間無下單、cost gate 大量拒單、或討論是否降低下單阻擋時。
+- **錯誤模式**：把 Demo 當成縮小版 live，只關注「是否受控下單」，忽略它的核心任務是用小風險自主積累可標註證據並推動 edge estimate 更新；結果會形成 guardrail + stagnation。
+- **預防規則**：先確認 blocked/explored signals 是否有 durable feature + market outcome labels；若 labels 缺失，優先補 blocked-signal counterfactual / demo-learning lane，而不是全局放鬆主 cost gate。主 gate 保護正常交易預算，學習 lane 才承擔小額 side-cell exploration。
+- **相關檔案 / 指令**：`helper_scripts/db/audit/cost_gate_reject_counterfactual.py`; `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-21--cost_gate_reject_counterfactual_learning_loop.md`
+- **來源 commit / session**：2026-06-21 Codex PM session
+
 ## 2026-05-10 · improve-codebase-architecture 中文輸出偏好
 
 - **場景**：使用 `improve-codebase-architecture` skill 做架構候選、deepening opportunities、grilling loop 或後續總結。
