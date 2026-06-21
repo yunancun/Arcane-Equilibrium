@@ -488,6 +488,50 @@ def test_alpha_discovery_does_not_mark_cost_gate_plan_ready_without_runtime_ledg
     assert row["probe_candidates"][0]["side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
 
 
+def test_alpha_discovery_blocks_cost_gate_probe_when_source_not_activation_ready(
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "data"
+    repo_root = tmp_path / "not_git_repo"
+    repo_root.mkdir()
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    plan_path = data_dir / "cost_gate_learning_lane" / "demo_learning_lane_plan_latest.json"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+    arm = collect_cost_gate_learning_lane_arm(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+        repo_root=repo_root,
+        expected_head="249b2ebd",
+    )
+    discovery = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+    row = discovery["profitability_blocker_scorecard"]["arms"][0]
+
+    assert discovery["arms"][0]["action"] == "BLOCK"
+    assert discovery["arms"][0]["reason"] == (
+        "cost_gate_learning_lane_source_not_activation_ready"
+    )
+    assert row["blocker_class"] == "source_health"
+    assert row["primary_blocker"] == "cost_gate_learning_lane_source_not_activation_ready"
+    assert row["next_trigger"] == (
+        "sync_runtime_source_to_expected_head_before_cost_gate_learning_activation"
+    )
+    assert row["operator_actionable"] is False
+    assert row["engineering_actionable"] is True
+    assert row["learning_lane_source_activation_ready"] is False
+    assert row["learning_lane_source_activation_status"] == "MISSING_FILES"
+    assert row["learning_lane_git_status"] == "NOT_GIT_REPO"
+    assert row["learning_lane_expected_head_status"] == "UNKNOWN_HEAD"
+    assert row["ledger_status"] == "MISSING"
+
+
 def test_alpha_discovery_routes_historical_cost_gate_candidates_to_runtime_capture(
     tmp_path: Path,
 ):

@@ -20,6 +20,7 @@ from cost_gate_learning_lane.status import (
     summarize_cost_gate_learning_lane_historical_review,
     summarize_cost_gate_learning_lane_ledger,
     summarize_cost_gate_learning_lane_loop,
+    summarize_cost_gate_learning_lane_source,
 )
 from polymarket_leadlag import replay_history as polymarket_replay_history
 
@@ -1370,6 +1371,8 @@ def collect_cost_gate_learning_lane_arm(
     *,
     now_utc: dt.datetime,
     max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+    repo_root: Path | None = None,
+    expected_head: str | None = None,
 ) -> dict[str, Any]:
     path = data_dir / "cost_gate_learning_lane" / "demo_learning_lane_plan_latest.json"
     ledger_path = data_dir / "cost_gate_learning_lane" / "probe_ledger.jsonl"
@@ -1383,6 +1386,36 @@ def collect_cost_gate_learning_lane_arm(
         data_dir,
         now_utc=now_utc,
     )
+    source_summary: dict[str, Any] = {}
+    if repo_root is not None:
+        source = summarize_cost_gate_learning_lane_source(
+            repo_root,
+            expected_head=expected_head,
+        )
+        source_summary = {
+            "learning_lane_source_status": source.get("source_status"),
+            "learning_lane_source_ready": source.get("source_ready"),
+            "learning_lane_source_activation_status": source.get("source_activation_status"),
+            "learning_lane_source_activation_ready": source.get("source_activation_ready"),
+            "learning_lane_git_status": source.get("git_status"),
+            "learning_lane_git_head": source.get("git_head"),
+            "learning_lane_git_head_short": source.get("git_head_short"),
+            "learning_lane_git_branch": source.get("git_branch"),
+            "learning_lane_git_upstream": source.get("git_upstream"),
+            "learning_lane_git_behind_count": source.get("git_behind_count"),
+            "learning_lane_git_ahead_count": source.get("git_ahead_count"),
+            "learning_lane_git_dirty_path_count": source.get("git_dirty_path_count"),
+            "learning_lane_git_untracked_path_count": source.get("git_untracked_path_count"),
+            "learning_lane_expected_head": source.get("expected_head"),
+            "learning_lane_expected_head_status": source.get("expected_head_status"),
+            "learning_lane_expected_head_matches": source.get("expected_head_matches"),
+            "learning_lane_missing_source_relative_paths": source.get(
+                "missing_source_relative_paths"
+            ),
+            "learning_lane_non_executable_source_relative_paths": source.get(
+                "non_executable_source_relative_paths"
+            ),
+        }
     payload, err = _read_json(path)
     if err:
         return _arm(
@@ -1396,6 +1429,7 @@ def collect_cost_gate_learning_lane_arm(
             detail={
                 "plan_status": "SOURCE_SCORECARD_UNAVAILABLE",
                 "note": "cost_gate_learning_lane_plan_not_seen",
+                **source_summary,
                 **demo_evidence_summary,
                 **historical_summary,
                 **loop_summary,
@@ -1438,6 +1472,7 @@ def collect_cost_gate_learning_lane_arm(
             "data_coverage_tasks": payload.get("data_coverage_tasks"),
             "source": payload.get("source"),
             "boundary": payload.get("boundary"),
+            **source_summary,
             **demo_evidence_summary,
             **historical_summary,
             **loop_summary,
@@ -1449,6 +1484,8 @@ def collect_cost_gate_learning_lane_arm(
 def collect_runtime_arms(
     *,
     data_dir: Path,
+    repo_root: Path | None = None,
+    expected_head: str | None = None,
     now_utc: dt.datetime | None = None,
     max_age_seconds: int = DEFAULT_MAX_ARTIFACT_AGE_SECONDS,
 ) -> list[dict[str, Any]]:
@@ -1461,7 +1498,12 @@ def collect_runtime_arms(
         collect_vol_event_arm(data_dir),
         collect_mm_verdict_arm(data_dir, now_utc=now),
         collect_polymarket_leadlag_arm(data_dir, now_utc=now),
-        collect_cost_gate_learning_lane_arm(data_dir, now_utc=now),
+        collect_cost_gate_learning_lane_arm(
+            data_dir,
+            now_utc=now,
+            repo_root=repo_root,
+            expected_head=expected_head,
+        ),
         collect_aeg_matrix_arm(data_dir),
     ]
 
@@ -1474,12 +1516,19 @@ def build_runtime_killboard(
     *,
     data_dir: Path,
     repo_root: Path,
+    expected_head: str | None = None,
     now_utc: dt.datetime | None = None,
     min_samples: int = 30,
     max_age_seconds: int = DEFAULT_MAX_ARTIFACT_AGE_SECONDS,
 ) -> dict[str, Any]:
     now = now_utc or _utc_now()
-    arms = collect_runtime_arms(data_dir=data_dir, now_utc=now, max_age_seconds=max_age_seconds)
+    arms = collect_runtime_arms(
+        data_dir=data_dir,
+        repo_root=repo_root,
+        expected_head=expected_head,
+        now_utc=now,
+        max_age_seconds=max_age_seconds,
+    )
     plan = build_discovery_plan(arms, min_samples=min_samples, now_utc=now)
     counts = _action_counts(plan)
     source_ok_count = sum(1 for arm in arms if arm.get("source_ok") is True)
@@ -1498,6 +1547,7 @@ def build_runtime_killboard(
         "policy": "artifact_only_runtime_discovery_no_db_no_bybit_no_trade_side_effect",
         "data_dir": str(data_dir),
         "repo_root": str(repo_root),
+        "expected_source_head": expected_head,
         "killboard": {
             "is_fast_discovery_active": active_arm_count >= 3 and source_present_count >= 3,
             "active_arm_count": active_arm_count,
@@ -1558,6 +1608,7 @@ def run_once(
     data_dir: Path,
     repo_root: Path,
     out_dir: Path | None = None,
+    expected_head: str | None = None,
     now_utc: dt.datetime | None = None,
     min_samples: int = 30,
     max_age_seconds: int = DEFAULT_MAX_ARTIFACT_AGE_SECONDS,
@@ -1565,6 +1616,7 @@ def run_once(
     killboard = build_runtime_killboard(
         data_dir=data_dir,
         repo_root=repo_root,
+        expected_head=expected_head,
         now_utc=now_utc,
         min_samples=min_samples,
         max_age_seconds=max_age_seconds,
@@ -1580,6 +1632,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--data-dir", default=os.environ.get("OPENCLAW_DATA_DIR", "/tmp/openclaw"))
     parser.add_argument("--repo-root", default=os.environ.get("OPENCLAW_BASE_DIR", str(Path.cwd())))
+    parser.add_argument(
+        "--expected-head",
+        default=(
+            os.environ.get("OPENCLAW_EXPECTED_SOURCE_HEAD")
+            or os.environ.get("OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD")
+        ),
+    )
     parser.add_argument("--out-dir", default=None)
     parser.add_argument("--min-samples", type=int, default=30)
     parser.add_argument("--max-age-seconds", type=int, default=DEFAULT_MAX_ARTIFACT_AGE_SECONDS)
@@ -1593,6 +1652,7 @@ def main(argv: list[str] | None = None) -> int:
         data_dir=Path(args.data_dir),
         repo_root=Path(args.repo_root),
         out_dir=Path(args.out_dir) if args.out_dir else None,
+        expected_head=args.expected_head,
         min_samples=args.min_samples,
         max_age_seconds=args.max_age_seconds,
     )

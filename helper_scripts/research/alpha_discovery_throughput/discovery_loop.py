@@ -103,6 +103,20 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
     demo_cost_gate_rejects_recorded = (
         detail.get("demo_learning_evidence_cost_gate_rejects_recorded_in_pg") is True
     )
+    source_activation_ready = detail.get("learning_lane_source_activation_ready")
+
+    if source_activation_ready is False:
+        return {
+            "action": BLOCK,
+            "reason": "cost_gate_learning_lane_source_not_activation_ready",
+            "blocker_class": "source_health",
+            "primary_blocker": "cost_gate_learning_lane_source_not_activation_ready",
+            "next_trigger": (
+                "sync_runtime_source_to_expected_head_before_cost_gate_learning_activation"
+            ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
 
     if (
         ledger_status in {"MISSING", "EMPTY"}
@@ -1101,6 +1115,26 @@ def classify_profitability_blocker(
                 "probe_candidates": detail.get("probe_candidates"),
                 "do_not_probe_side_cells": detail.get("do_not_probe_side_cells"),
                 "data_coverage_tasks": detail.get("data_coverage_tasks"),
+                "learning_lane_source_status": detail.get("learning_lane_source_status"),
+                "learning_lane_source_ready": detail.get("learning_lane_source_ready"),
+                "learning_lane_source_activation_status": detail.get(
+                    "learning_lane_source_activation_status"
+                ),
+                "learning_lane_source_activation_ready": detail.get(
+                    "learning_lane_source_activation_ready"
+                ),
+                "learning_lane_git_status": detail.get("learning_lane_git_status"),
+                "learning_lane_git_head_short": detail.get("learning_lane_git_head_short"),
+                "learning_lane_git_behind_count": detail.get("learning_lane_git_behind_count"),
+                "learning_lane_git_dirty_path_count": detail.get(
+                    "learning_lane_git_dirty_path_count"
+                ),
+                "learning_lane_expected_head_status": detail.get(
+                    "learning_lane_expected_head_status"
+                ),
+                "learning_lane_expected_head_matches": detail.get(
+                    "learning_lane_expected_head_matches"
+                ),
                 "demo_learning_evidence_status": detail.get(
                     "demo_learning_evidence_status"
                 ),
