@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Engine PID Auto-Detect Preflight
+
+- `cost_gate_learning_lane.status` now auto-detects the engine PID when process-writer enablement is required and no PID/proc path is supplied.
+- Detection scans `/proc/*/cmdline` and only accepts argv[0] basename `openclaw-engine`, avoiding shell/pgrep false positives.
+- Preflight reports `engine_pid_detection_status`, detected PID, candidate count, and clearer `ENGINE_PROCESS_NOT_FOUND` / `ENGINE_PROCESS_DETECTION_UNAVAILABLE` statuses.
+
 ## 2026-06-21 Cost-Gate Learning Running-Process Preflight
 
 - `cost_gate_learning_lane.status` can now inspect active engine process env via `--engine-pid` or `--runtime-proc-environ`.

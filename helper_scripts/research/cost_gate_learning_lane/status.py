@@ -42,6 +42,8 @@ WRITER_PLAN_ENV = "OPENCLAW_DEMO_LEARNING_LANE_PLAN"
 WRITER_LEDGER_ENV = "OPENCLAW_DEMO_LEARNING_LANE_LEDGER"
 REQUIRE_WRITER_ENABLED_ENV = "OPENCLAW_COST_GATE_REQUIRE_WRITER_ENABLED"
 REQUIRE_PROCESS_WRITER_ENABLED_ENV = "OPENCLAW_COST_GATE_REQUIRE_PROCESS_WRITER_ENABLED"
+AUTO_DETECT_ENGINE_PID_ENV = "OPENCLAW_COST_GATE_AUTO_DETECT_ENGINE_PID"
+ENGINE_PROCESS_BASENAME = "openclaw-engine"
 TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 FALSE_ENV_VALUES = {"0", "false", "no", "off", ""}
 
@@ -139,6 +141,87 @@ def _read_proc_environ_file(path: Path) -> tuple[dict[str, str] | None, str | No
         if key:
             values[key] = value
     return values, None
+
+
+def _read_proc_cmdline(path: Path) -> tuple[list[str] | None, str | None]:
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return None, "missing"
+    except OSError as exc:
+        return None, f"read_error:{type(exc).__name__}"
+
+    argv = [
+        chunk.decode("utf-8", errors="replace")
+        for chunk in raw.split(b"\0")
+        if chunk
+    ]
+    return argv, None
+
+
+def _is_openclaw_engine_cmdline(argv: list[str] | None) -> bool:
+    if not argv:
+        return False
+    return Path(argv[0]).name == ENGINE_PROCESS_BASENAME
+
+
+def _detect_openclaw_engine_process(proc_root: Path = Path("/proc")) -> dict[str, Any]:
+    try:
+        entries = list(proc_root.iterdir())
+    except FileNotFoundError:
+        return {
+            "engine_pid_detection_status": "PROC_ROOT_MISSING",
+            "engine_pid_detection_error": "proc_root_missing",
+            "engine_pid_candidate_count": 0,
+            "engine_pid_candidates": [],
+            "engine_pid_detected": None,
+        }
+    except OSError as exc:
+        return {
+            "engine_pid_detection_status": "PROC_ROOT_UNREADABLE",
+            "engine_pid_detection_error": f"read_error:{type(exc).__name__}",
+            "engine_pid_candidate_count": 0,
+            "engine_pid_candidates": [],
+            "engine_pid_detected": None,
+        }
+
+    candidates: list[dict[str, Any]] = []
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        pid = _int(entry.name, default=-1)
+        if pid < 0:
+            continue
+        argv, err = _read_proc_cmdline(entry / "cmdline")
+        if err or not _is_openclaw_engine_cmdline(argv):
+            continue
+        candidates.append(
+            {
+                "pid": pid,
+                "cmdline": " ".join(argv or []),
+            }
+        )
+
+    candidates.sort(key=lambda row: int(row["pid"]))
+    if not candidates:
+        return {
+            "engine_pid_detection_status": "NOT_FOUND",
+            "engine_pid_detection_error": None,
+            "engine_pid_candidate_count": 0,
+            "engine_pid_candidates": [],
+            "engine_pid_detected": None,
+        }
+
+    detected = int(candidates[-1]["pid"])
+    return {
+        "engine_pid_detection_status": (
+            "FOUND" if len(candidates) == 1 else "MULTIPLE_FOUND"
+        ),
+        "engine_pid_detection_error": None,
+        "engine_pid_candidate_count": len(candidates),
+        "engine_pid_candidates": candidates[-5:],
+        "engine_pid_detected": detected,
+    }
 
 
 def _parse_env_bool(value: Any) -> tuple[bool | None, str | None]:
@@ -755,15 +838,49 @@ def summarize_cost_gate_learning_lane_writer_process(
     *,
     engine_pid: int | None = None,
     proc_environ_file: Path | None = None,
+    auto_detect_engine_pid: bool = False,
+    proc_root: Path = Path("/proc"),
     require_writer_enabled: bool = False,
 ) -> dict[str, Any]:
+    detection = {
+        "engine_pid_auto_detect": auto_detect_engine_pid,
+        "engine_pid_detection_status": "NOT_REQUESTED",
+        "engine_pid_detection_error": None,
+        "engine_pid_candidate_count": None,
+        "engine_pid_candidates": [],
+        "engine_pid_detected": None,
+    }
+    if proc_environ_file is None and engine_pid is None and auto_detect_engine_pid:
+        detection = {
+            "engine_pid_auto_detect": True,
+            **_detect_openclaw_engine_process(proc_root),
+        }
+        detected = detection.get("engine_pid_detected")
+        if detected is not None:
+            engine_pid = _int(detected, default=-1)
+            if engine_pid < 0:
+                engine_pid = None
+
     if proc_environ_file is None and engine_pid is not None:
-        proc_environ_file = Path("/proc") / str(engine_pid) / "environ"
+        proc_environ_file = proc_root / str(engine_pid) / "environ"
     if proc_environ_file is None:
+        status = "NOT_CHECKED"
+        reason = "engine_pid_or_proc_environ_file_not_provided"
+        if auto_detect_engine_pid:
+            detection_status = str(detection.get("engine_pid_detection_status") or "")
+            if detection_status == "NOT_FOUND":
+                status = "ENGINE_PROCESS_NOT_FOUND"
+                reason = "openclaw_engine_process_not_found"
+            elif detection_status in {"PROC_ROOT_MISSING", "PROC_ROOT_UNREADABLE"}:
+                status = "ENGINE_PROCESS_DETECTION_UNAVAILABLE"
+                reason = str(
+                    detection.get("engine_pid_detection_error")
+                    or "engine_process_detection_unavailable"
+                )
         return {
             "writer_process_checked": False,
-            "writer_process_status": "NOT_CHECKED",
-            "writer_process_reason": "engine_pid_or_proc_environ_file_not_provided",
+            "writer_process_status": status,
+            "writer_process_reason": reason,
             "writer_process_enabled": None,
             "writer_process_required_for_activation": require_writer_enabled,
             "engine_pid": engine_pid,
@@ -772,6 +889,7 @@ def summarize_cost_gate_learning_lane_writer_process(
             "writer_env_value": None,
             "plan_path": None,
             "ledger_path": None,
+            **detection,
         }
 
     env_values, err = _read_proc_environ_file(proc_environ_file)
@@ -788,6 +906,7 @@ def summarize_cost_gate_learning_lane_writer_process(
             "writer_env_value": None,
             "plan_path": None,
             "ledger_path": None,
+            **detection,
         }
 
     config = summarize_cost_gate_learning_lane_writer_config(
@@ -810,6 +929,7 @@ def summarize_cost_gate_learning_lane_writer_process(
         "plan_path_source": config["plan_path_source"],
         "ledger_path": config["ledger_path"],
         "ledger_path_source": config["ledger_path_source"],
+        **detection,
     }
 
 
@@ -1016,6 +1136,8 @@ def build_cost_gate_learning_lane_activation_preflight(
     runtime_env_file: Path | None = None,
     engine_pid: int | None = None,
     runtime_proc_environ: Path | None = None,
+    auto_detect_engine_pid: bool = False,
+    proc_root: Path = Path("/proc"),
     require_writer_enabled: bool = False,
     require_process_writer_enabled: bool = False,
     now_utc: dt.datetime | None = None,
@@ -1047,6 +1169,8 @@ def build_cost_gate_learning_lane_activation_preflight(
         data_dir,
         engine_pid=engine_pid,
         proc_environ_file=runtime_proc_environ,
+        auto_detect_engine_pid=auto_detect_engine_pid,
+        proc_root=proc_root,
         require_writer_enabled=require_process_writer_enabled,
     )
     decision = _activation_decision(
@@ -1185,6 +1309,22 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="Optional explicit proc environ file, e.g. /proc/<pid>/environ.",
     )
+    parser.add_argument(
+        "--auto-detect-engine-pid",
+        action="store_true",
+        default=_parse_env_bool(os.environ.get(AUTO_DETECT_ENGINE_PID_ENV))[0] is True,
+        help=(
+            "Auto-detect a running openclaw-engine process by scanning /proc/*/cmdline. "
+            "Also enabled automatically when --require-process-writer-enabled is used "
+            "without --engine-pid or --runtime-proc-environ."
+        ),
+    )
+    parser.add_argument(
+        "--proc-root",
+        type=Path,
+        default=Path("/proc"),
+        help="Procfs root used for engine PID auto-detection.",
+    )
     require_writer_default = (
         _parse_env_bool(os.environ.get(REQUIRE_WRITER_ENABLED_ENV))[0] is True
     )
@@ -1229,6 +1369,15 @@ def main(argv: list[str] | None = None) -> int:
         runtime_env_file=args.runtime_env_file,
         engine_pid=args.engine_pid,
         runtime_proc_environ=args.runtime_proc_environ,
+        auto_detect_engine_pid=(
+            args.auto_detect_engine_pid
+            or (
+                args.require_process_writer_enabled
+                and args.engine_pid is None
+                and args.runtime_proc_environ is None
+            )
+        ),
+        proc_root=args.proc_root,
         require_writer_enabled=args.require_writer_enabled,
         require_process_writer_enabled=args.require_process_writer_enabled,
         max_loop_age_seconds=args.max_loop_age_seconds,
