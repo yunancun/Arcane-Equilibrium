@@ -850,6 +850,31 @@ def classify_profitability_blocker(
             promotion_ready=True,
             engineering_actionable=True,
         )
+    if action == READY_FOR_PROBE and arm_id == "cost_gate_demo_learning_lane":
+        return _finish_blocker_row(
+            row,
+            blocker_class="probe_ready",
+            primary_blocker="cost_gate_learning_probe_candidates_ready",
+            next_trigger="wire_bounded_demo_learning_lane_policy_before_any_gate_lowering",
+            operator_actionable=True,
+            engineering_actionable=True,
+            extra={
+                "plan_status": detail.get("plan_status"),
+                "main_cost_gate_adjustment": detail.get("main_cost_gate_adjustment"),
+                "learning_gate_adjustment": detail.get("learning_gate_adjustment"),
+                "order_authority": detail.get("order_authority"),
+                "probe_candidate_count": detail.get("probe_candidate_count"),
+                "selected_probe_candidate_count": detail.get(
+                    "selected_probe_candidate_count"
+                ),
+                "probe_budget": detail.get("probe_budget"),
+                "probe_candidates": detail.get("probe_candidates"),
+                "do_not_probe_side_cells": detail.get("do_not_probe_side_cells"),
+                "data_coverage_tasks": detail.get("data_coverage_tasks"),
+                "boundary": detail.get("boundary"),
+            },
+        )
+
     if action == READY_FOR_PROBE:
         return _finish_blocker_row(
             row,

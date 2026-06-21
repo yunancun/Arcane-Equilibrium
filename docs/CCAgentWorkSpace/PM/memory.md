@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Demo-Learning Lane Plan
+
+- Added artifact-only `cost_gate_demo_learning_lane_plan_v1`: consumes the counterfactual scorecard, selects bounded demo-only side-cell probes, and keeps `main_cost_gate_adjustment=NONE` / `order_authority=NOT_GRANTED`.
+- Latest Linux plan selected `ma_crossover ETH/NEAR Sell` and `grid_trading LTC/ATOM Sell`, 2 demo-only probe proposals each; confirmed blocks and data-coverage blockers stay separated.
+- Alpha-discovery now reports `ACTIONABLE_PROBE_READY` from `cost_gate_demo_learning_lane`, with `actionable_alpha_found=false` and promotion-ready count 0. Next work is runtime adapter + durable probe outcome labels, not global gate lowering.
+
 ## 2026-06-21 Cost-Gate Learning-Lane Scorecard
 
 - Upgraded the cost-gate reject counterfactual audit to v2 with JSON output and per-row learning-lane actions.
