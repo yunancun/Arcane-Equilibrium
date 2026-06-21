@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Activation Runbook
+
+- Added an operator-gated runtime activation runbook for the cost-gate demo-learning lane, covering read-only audit, dirty source reconcile/sync, preflight, cron install, append enablement, optional writer restart, observation, and rollback.
+- The runbook is intentionally non-authorizing; current runtime blockers from v341 remain until operator approves source sync and activation.
+- This shifts the remaining work from source-wrapper building to a controlled runtime activation procedure.
+
 ## 2026-06-21 Cost-Gate Runtime Activation Blocker Audit
 
 - Read-only `trade-core` audit confirmed PG Cost Gate rejects are abundant (27,071 in last 4h; 4,423,477 total), so data source accumulation exists.
