@@ -1622,6 +1622,24 @@ def test_source_summary_blocks_activation_when_checkout_dirty(tmp_path: Path):
     assert source["git_status"] == "DIRTY"
     assert source["git_dirty_path_count"] == 1
     assert source["git_behind_count"] == 0
+    assert source["source_reconcile_required"] is True
+    assert source["source_reconcile_status"] == "DIRTY_PATH_REVIEW_REQUIRED"
+    assert source["source_reconcile_reasons"] == ["dirty_or_untracked_paths_present"]
+    assert source["source_reconcile_next_actions"] == [
+        "operator_review_dirty_paths_before_sync",
+        "preserve_or_discard_runtime_local_changes",
+        "rerun_activation_preflight_after_reconcile",
+    ]
+    assert source["git_dirty_status_counts"] == {"M": 1}
+    assert source["source_reconcile_dirty_manifest"] == [
+        {
+            "status_code": "M",
+            "path": "helper_scripts/research/cost_gate_learning_lane/status.py",
+            "old_path": None,
+            "category": "tracked_change",
+            "action_hint": "review_tracked_change_before_runtime_source_sync",
+        }
+    ]
 
 
 def test_source_summary_blocks_activation_when_checkout_behind_upstream(
@@ -1653,6 +1671,14 @@ def test_source_summary_blocks_activation_when_checkout_behind_upstream(
     assert source["git_status"] == "BEHIND_UPSTREAM"
     assert source["git_ahead_count"] == 0
     assert source["git_behind_count"] == 1
+    assert source["source_reconcile_required"] is True
+    assert source["source_reconcile_status"] == "SOURCE_SYNC_REQUIRED"
+    assert source["source_reconcile_reasons"] == ["checkout_behind_upstream"]
+    assert source["source_reconcile_next_actions"] == [
+        "sync_runtime_source_to_pm_approved_head",
+        "rerun_activation_preflight_after_reconcile",
+    ]
+    assert source["source_reconcile_dirty_manifest"] == []
 
 
 def test_source_summary_honors_expected_head_when_checkout_matches(
@@ -1669,6 +1695,9 @@ def test_source_summary_honors_expected_head_when_checkout_matches(
     assert source["git_status"] == "SYNCED_CLEAN"
     assert source["expected_head_status"] == "MATCH"
     assert source["expected_head_matches"] is True
+    assert source["source_reconcile_required"] is False
+    assert source["source_reconcile_status"] == "SOURCE_RECONCILE_NOT_REQUIRED"
+    assert source["source_reconcile_next_actions"] == ["no_source_reconcile_required"]
 
 
 def test_source_summary_blocks_activation_when_expected_head_mismatches(
