@@ -8,10 +8,12 @@ from helper_scripts.db.audit.demo_order_stall_audit import (
     build_intent_order_lineage_sql,
     build_json_payload,
     build_pipeline_counts_sql,
+    build_pre_gate_drilldown_sql,
     build_risk_reason_sql,
     classify_order_stall,
     render_markdown,
     reason_category,
+    summarize_pre_gate_drilldown,
     validate_config,
 )
 
@@ -59,6 +61,7 @@ def test_sql_contract_is_read_only_and_covers_pipeline_tables() -> None:
             build_risk_reason_sql(),
             build_evaluation_outcome_sql(),
             build_intent_order_lineage_sql(),
+            build_pre_gate_drilldown_sql(),
         ]
     )
     for table in [
@@ -76,6 +79,20 @@ def test_sql_contract_is_read_only_and_covers_pipeline_tables() -> None:
     assert "INSERT " not in sql.upper()
     assert "UPDATE " not in sql.upper()
     assert "DELETE " not in sql.upper()
+
+
+def test_pre_gate_drilldown_sql_joins_contexts_to_downstream_tables() -> None:
+    sql = build_pre_gate_drilldown_sql()
+
+    assert "FROM trading.decision_context_snapshots d" in sql
+    assert "LEFT JOIN evals e" in sql
+    assert "LEFT JOIN rv" in sql
+    assert "LEFT JOIN intents i" in sql
+    assert "LEFT JOIN orders o" in sql
+    assert "LEFT JOIN fills f" in sql
+    assert "d.context_id" in sql
+    assert "coalesce(f.entry_context_id, f.context_id)" in sql
+    assert "GROUP BY d.engine_mode, d.strategy_name, d.symbol, d.decision_type" in sql
 
 
 def test_reason_category_identifies_cost_gate_and_other_gate_types() -> None:
@@ -171,6 +188,52 @@ def test_classification_later_stage_gaps() -> None:
     assert filled["status"] == "RECENT_FILL_FLOW_PRESENT"
 
 
+def test_pre_gate_drilldown_summary_surfaces_unjoined_contexts() -> None:
+    rows = [
+        {
+            "engine_mode": "demo",
+            "strategy_name": "ma_crossover",
+            "symbol": "REUSDT",
+            "decision_type": "signal_generated",
+            "context_rows": 549,
+            "contexts_with_evaluation": 0,
+            "contexts_with_risk": 0,
+            "contexts_with_intent": 0,
+            "contexts_with_order": 0,
+            "contexts_with_fill": 0,
+            "latest_context_ts": "2026-06-21T16:49:01+02:00",
+        },
+        {
+            "engine_mode": "demo",
+            "strategy_name": "flash_dip_buy",
+            "symbol": "SUIUSDT",
+            "decision_type": "signal_generated",
+            "context_rows": 3,
+            "contexts_with_evaluation": 3,
+            "contexts_with_risk": 3,
+            "contexts_with_intent": 1,
+            "contexts_with_order": 1,
+            "contexts_with_fill": 0,
+            "latest_context_ts": "2026-06-21T02:00:00+02:00",
+        },
+    ]
+
+    summary = summarize_pre_gate_drilldown(rows)
+
+    assert summary["status"] == "TOP_CONTEXT_ROWS_HAVE_PARTIAL_DOWNSTREAM_JOIN"
+    assert summary["scope"] == "top_limit_rows_only"
+    assert summary["context_rows"] == 552
+    assert summary["contexts_with_evaluation"] == 3
+    assert summary["top_unjoined_context_rows"][0] == {
+        "engine_mode": "demo",
+        "strategy_name": "ma_crossover",
+        "symbol": "REUSDT",
+        "decision_type": "signal_generated",
+        "unjoined_context_rows": 549,
+        "latest_context_ts": "2026-06-21T16:49:01+02:00",
+    }
+
+
 def test_markdown_and_json_payload_surface_answers() -> None:
     cfg = AuditConfig(engine_modes=("demo", "live_demo"), lookback_hours=24)
     counts = _base_counts(
@@ -200,6 +263,21 @@ def test_markdown_and_json_payload_surface_answers() -> None:
         }
     ]
     lineage = {"intents": 0, "intents_with_orders": 0, "intents_without_orders": 0}
+    pre_gate_drilldown = [
+        {
+            "engine_mode": "demo",
+            "strategy_name": "ma_crossover",
+            "symbol": "REUSDT",
+            "decision_type": "signal_generated",
+            "context_rows": 100,
+            "contexts_with_evaluation": 0,
+            "contexts_with_risk": 0,
+            "contexts_with_intent": 0,
+            "contexts_with_order": 0,
+            "contexts_with_fill": 0,
+            "latest_context_ts": "2026-06-21T00:00:00Z",
+        }
+    ]
 
     markdown = render_markdown(
         cfg,
@@ -207,11 +285,14 @@ def test_markdown_and_json_payload_surface_answers() -> None:
         risk_reasons,
         eval_outcomes,
         lineage,
+        pre_gate_drilldown,
         generated="2026-06-21T00:00:00+00:00",
     )
     assert "COST_GATE_REJECTING_ALL_RECENT_ATTEMPTS" in markdown
     assert "Bounded demo-learning lane recommended: `True`" in markdown
     assert "candidate_evaluations" in markdown
+    assert "## Pre-Gate Drilldown" in markdown
+    assert "REUSDT" in markdown
 
     payload = build_json_payload(
         cfg,
@@ -219,7 +300,12 @@ def test_markdown_and_json_payload_surface_answers() -> None:
         risk_reasons,
         eval_outcomes,
         lineage,
+        pre_gate_drilldown,
         generated="2026-06-21T00:00:00+00:00",
     )
     assert payload["schema_version"] == "demo_order_stall_audit_v1"
     assert payload["classification"]["answers"]["cost_gate_dominant"] is True
+    assert (
+        payload["pre_gate_drilldown_summary"]["status"]
+        == "TOP_CONTEXT_ROWS_HAVE_NO_DOWNSTREAM_JOIN"
+    )
