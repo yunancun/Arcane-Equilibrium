@@ -6,6 +6,7 @@ import datetime as dt
 from typing import Any
 
 from . import DISCOVERY_LOOP_SCHEMA_VERSION, RUNNER_VERSION
+from .learning_worklist import build_learning_worklist
 
 READY_FOR_AEG_CHAIN = "READY_FOR_AEG_CHAIN"
 READY_FOR_PROBE = "READY_FOR_PROBE"
@@ -2397,6 +2398,7 @@ def build_discovery_plan(
         decisions,
         min_samples=min_samples,
     )
+    learning_worklist = build_learning_worklist(blocker_scorecard)
     return {
         "schema_version": DISCOVERY_LOOP_SCHEMA_VERSION,
         "runner_version": RUNNER_VERSION,
@@ -2405,6 +2407,7 @@ def build_discovery_plan(
         "action_counts": counts,
         "arms": decisions,
         "profitability_blocker_scorecard": blocker_scorecard,
+        "learning_worklist": learning_worklist,
     }
 
 
@@ -2415,6 +2418,7 @@ __all__ = [
     "RUN_READ_ONLY_CAPTURE",
     "WAIT",
     "build_discovery_plan",
+    "build_learning_worklist",
     "build_profitability_blocker_scorecard",
     "classify_profitability_blocker",
     "decide_arm_action",
