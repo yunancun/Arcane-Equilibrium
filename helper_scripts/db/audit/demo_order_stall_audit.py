@@ -264,6 +264,102 @@ FROM per_intent
 """
 
 
+def build_pre_gate_drilldown_sql() -> str:
+    return """
+WITH params AS (
+    SELECT %s::text[] AS engine_modes, %s::int AS lookback_hours
+),
+dcs AS (
+    SELECT
+        d.engine_mode,
+        coalesce(d.strategy_name, '<null>') AS strategy_name,
+        d.symbol,
+        d.decision_type,
+        d.context_id,
+        d.ts
+    FROM trading.decision_context_snapshots d, params p
+    WHERE d.engine_mode = ANY(p.engine_modes)
+      AND d.ts >= now() - (p.lookback_hours * interval '1 hour')
+),
+evals AS (
+    SELECT e.engine_mode, e.context_id, count(*)::bigint AS n
+    FROM learning.decision_features_evaluations e, params p
+    WHERE e.engine_mode = ANY(p.engine_modes)
+      AND e.ts >= now() - (p.lookback_hours * interval '1 hour')
+    GROUP BY e.engine_mode, e.context_id
+),
+rv AS (
+    SELECT
+        r.engine_mode,
+        r.context_id,
+        count(*)::bigint AS n,
+        count(*) FILTER (WHERE lower(verdict) = 'approved')::bigint AS approved_n,
+        count(*) FILTER (WHERE lower(verdict) = 'rejected')::bigint AS rejected_n
+    FROM trading.risk_verdicts r, params p
+    WHERE r.engine_mode = ANY(p.engine_modes)
+      AND r.ts >= now() - (p.lookback_hours * interval '1 hour')
+    GROUP BY r.engine_mode, r.context_id
+),
+intents AS (
+    SELECT i.engine_mode, i.context_id, count(*)::bigint AS n
+    FROM trading.intents i, params p
+    WHERE i.engine_mode = ANY(p.engine_modes)
+      AND i.ts >= now() - (p.lookback_hours * interval '1 hour')
+    GROUP BY i.engine_mode, i.context_id
+),
+orders AS (
+    SELECT o.engine_mode, o.context_id, count(*)::bigint AS n
+    FROM trading.orders o, params p
+    WHERE o.engine_mode = ANY(p.engine_modes)
+      AND o.ts >= now() - (p.lookback_hours * interval '1 hour')
+    GROUP BY o.engine_mode, o.context_id
+),
+fills AS (
+    SELECT
+        f.engine_mode,
+        coalesce(f.entry_context_id, f.context_id) AS context_id,
+        count(*)::bigint AS n
+    FROM trading.fills f, params p
+    WHERE f.engine_mode = ANY(p.engine_modes)
+      AND f.ts >= now() - (p.lookback_hours * interval '1 hour')
+    GROUP BY f.engine_mode, coalesce(f.entry_context_id, f.context_id)
+)
+SELECT
+    d.engine_mode,
+    d.strategy_name,
+    d.symbol,
+    d.decision_type,
+    count(*)::bigint AS context_rows,
+    max(d.ts) AS latest_context_ts,
+    count(*) FILTER (WHERE e.n IS NOT NULL)::bigint AS contexts_with_evaluation,
+    count(*) FILTER (WHERE rv.n IS NOT NULL)::bigint AS contexts_with_risk,
+    coalesce(sum(rv.approved_n), 0)::bigint AS approved_verdicts,
+    coalesce(sum(rv.rejected_n), 0)::bigint AS rejected_verdicts,
+    count(*) FILTER (WHERE i.n IS NOT NULL)::bigint AS contexts_with_intent,
+    count(*) FILTER (WHERE o.n IS NOT NULL)::bigint AS contexts_with_order,
+    count(*) FILTER (WHERE f.n IS NOT NULL)::bigint AS contexts_with_fill
+FROM dcs d
+LEFT JOIN evals e
+  ON e.engine_mode = d.engine_mode
+ AND e.context_id = d.context_id
+LEFT JOIN rv
+  ON rv.engine_mode = d.engine_mode
+ AND rv.context_id = d.context_id
+LEFT JOIN intents i
+  ON i.engine_mode = d.engine_mode
+ AND i.context_id = d.context_id
+LEFT JOIN orders o
+  ON o.engine_mode = d.engine_mode
+ AND o.context_id = d.context_id
+LEFT JOIN fills f
+  ON f.engine_mode = d.engine_mode
+ AND f.context_id = d.context_id
+GROUP BY d.engine_mode, d.strategy_name, d.symbol, d.decision_type
+ORDER BY context_rows DESC, latest_context_ts DESC
+LIMIT %s
+"""
+
+
 def fetch_one(conn: Any, sql: str, params: list[Any]) -> dict[str, Any]:
     with conn.cursor() as cur:
         cur.execute(sql, params)
@@ -279,14 +375,28 @@ def fetch_rows(conn: Any, sql: str, params: list[Any]) -> list[dict[str, Any]]:
         return [dict(zip(cols, row)) for row in cur.fetchall()]
 
 
-def fetch_audit(conn: Any, cfg: AuditConfig) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+def fetch_audit(
+    conn: Any,
+    cfg: AuditConfig,
+) -> tuple[
+    dict[str, Any],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    dict[str, Any],
+    list[dict[str, Any]],
+]:
     validate_config(cfg)
     base = [list(cfg.engine_modes), cfg.lookback_hours]
     counts = fetch_one(conn, build_pipeline_counts_sql(), base)
     risk_reasons = fetch_rows(conn, build_risk_reason_sql(), [*base, cfg.top_limit])
     eval_outcomes = fetch_rows(conn, build_evaluation_outcome_sql(), [*base, cfg.top_limit])
     lineage = fetch_one(conn, build_intent_order_lineage_sql(), base)
-    return counts, risk_reasons, eval_outcomes, lineage
+    pre_gate_drilldown = fetch_rows(
+        conn,
+        build_pre_gate_drilldown_sql(),
+        [*base, cfg.top_limit],
+    )
+    return counts, risk_reasons, eval_outcomes, lineage, pre_gate_drilldown
 
 
 def _as_int(value: Any) -> int:
@@ -341,6 +451,67 @@ def dominant_risk_category(
         "n": n,
         "pct": round((n / total_risk_verdicts) * 100.0, 4),
         "top_reason": top_reason,
+    }
+
+
+def summarize_pre_gate_drilldown(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    total_context_rows = sum(_as_int(row.get("context_rows")) for row in rows)
+    contexts_with_evaluation = sum(
+        _as_int(row.get("contexts_with_evaluation")) for row in rows
+    )
+    contexts_with_risk = sum(_as_int(row.get("contexts_with_risk")) for row in rows)
+    contexts_with_intent = sum(_as_int(row.get("contexts_with_intent")) for row in rows)
+    contexts_with_order = sum(_as_int(row.get("contexts_with_order")) for row in rows)
+    contexts_with_fill = sum(_as_int(row.get("contexts_with_fill")) for row in rows)
+    downstream_contexts = (
+        contexts_with_evaluation
+        + contexts_with_risk
+        + contexts_with_intent
+        + contexts_with_order
+        + contexts_with_fill
+    )
+    if total_context_rows == 0:
+        status = "NO_CONTEXT_ROWS_IN_TOP_DRILLDOWN"
+    elif downstream_contexts == 0:
+        status = "TOP_CONTEXT_ROWS_HAVE_NO_DOWNSTREAM_JOIN"
+    else:
+        status = "TOP_CONTEXT_ROWS_HAVE_PARTIAL_DOWNSTREAM_JOIN"
+    top_unjoined = []
+    for row in rows:
+        joined = (
+            _as_int(row.get("contexts_with_evaluation"))
+            + _as_int(row.get("contexts_with_risk"))
+            + _as_int(row.get("contexts_with_intent"))
+            + _as_int(row.get("contexts_with_order"))
+            + _as_int(row.get("contexts_with_fill"))
+        )
+        unjoined = _as_int(row.get("context_rows")) - joined
+        if unjoined <= 0:
+            continue
+        top_unjoined.append(
+            {
+                "engine_mode": row.get("engine_mode"),
+                "strategy_name": row.get("strategy_name"),
+                "symbol": row.get("symbol"),
+                "decision_type": row.get("decision_type"),
+                "unjoined_context_rows": unjoined,
+                "latest_context_ts": row.get("latest_context_ts"),
+            }
+        )
+    top_unjoined.sort(
+        key=lambda item: _as_int(item.get("unjoined_context_rows")),
+        reverse=True,
+    )
+    return {
+        "status": status,
+        "scope": "top_limit_rows_only",
+        "context_rows": total_context_rows,
+        "contexts_with_evaluation": contexts_with_evaluation,
+        "contexts_with_risk": contexts_with_risk,
+        "contexts_with_intent": contexts_with_intent,
+        "contexts_with_order": contexts_with_order,
+        "contexts_with_fill": contexts_with_fill,
+        "top_unjoined_context_rows": top_unjoined[:10],
     }
 
 
@@ -455,17 +626,21 @@ def build_scorecard(
     risk_reasons: list[dict[str, Any]],
     eval_outcomes: list[dict[str, Any]],
     lineage: dict[str, Any],
+    pre_gate_drilldown: list[dict[str, Any]],
 ) -> dict[str, Any]:
     classification = classify_order_stall(counts, risk_reasons, lineage)
     return {
         "schema_version": "demo_order_stall_audit_v1",
         "engine_modes": list(cfg.engine_modes),
         "lookback_hours": cfg.lookback_hours,
+        "top_limit": cfg.top_limit,
         "classification": classification,
         "counts": counts,
         "risk_reason_top": risk_reasons,
         "evaluation_outcome_top": eval_outcomes,
         "intent_order_lineage": lineage,
+        "pre_gate_drilldown_summary": summarize_pre_gate_drilldown(pre_gate_drilldown),
+        "pre_gate_drilldown_top": pre_gate_drilldown,
         "boundary": "read-only PG SELECT; no Bybit call, order, config, risk, auth, runtime, or schema mutation",
     }
 
@@ -484,13 +659,21 @@ def build_json_payload(
     risk_reasons: list[dict[str, Any]],
     eval_outcomes: list[dict[str, Any]],
     lineage: dict[str, Any],
+    pre_gate_drilldown: list[dict[str, Any]],
     *,
     generated: str | None = None,
 ) -> dict[str, Any]:
     generated = generated or datetime.now(timezone.utc).isoformat(timespec="seconds")
     return {
         "generated_at_utc": generated,
-        **build_scorecard(cfg, counts, risk_reasons, eval_outcomes, lineage),
+        **build_scorecard(
+            cfg,
+            counts,
+            risk_reasons,
+            eval_outcomes,
+            lineage,
+            pre_gate_drilldown,
+        ),
     }
 
 
@@ -510,13 +693,22 @@ def render_markdown(
     risk_reasons: list[dict[str, Any]],
     eval_outcomes: list[dict[str, Any]],
     lineage: dict[str, Any],
+    pre_gate_drilldown: list[dict[str, Any]],
     *,
     generated: str | None = None,
 ) -> str:
     generated = generated or datetime.now(timezone.utc).isoformat(timespec="seconds")
-    scorecard = build_scorecard(cfg, counts, risk_reasons, eval_outcomes, lineage)
+    scorecard = build_scorecard(
+        cfg,
+        counts,
+        risk_reasons,
+        eval_outcomes,
+        lineage,
+        pre_gate_drilldown,
+    )
     cls = scorecard["classification"]
     answers = cls["answers"]
+    pre_gate_summary = scorecard["pre_gate_drilldown_summary"]
     lines = [
         "# Demo Order Stall Audit",
         "",
@@ -585,6 +777,31 @@ def render_markdown(
     lines.extend(
         [
             "",
+            "## Pre-Gate Drilldown",
+            "",
+            f"- Status: `{pre_gate_summary['status']}`",
+            f"- Scope: `{pre_gate_summary['scope']}`",
+            "",
+            "| engine | strategy | symbol | decision_type | contexts | eval | risk | intent | order | fill | latest |",
+            "|---|---|---:|---|---:|---:|---:|---:|---:|---:|---|",
+        ]
+    )
+    for row in pre_gate_drilldown:
+        lines.append(
+            f"| {_fmt(row.get('engine_mode'))} | {_fmt(row.get('strategy_name'))} | "
+            f"{_fmt(row.get('symbol'))} | {_fmt(row.get('decision_type'))} | "
+            f"{_fmt(row.get('context_rows'))} | "
+            f"{_fmt(row.get('contexts_with_evaluation'))} | "
+            f"{_fmt(row.get('contexts_with_risk'))} | "
+            f"{_fmt(row.get('contexts_with_intent'))} | "
+            f"{_fmt(row.get('contexts_with_order'))} | "
+            f"{_fmt(row.get('contexts_with_fill'))} | "
+            f"{_fmt(row.get('latest_context_ts'))} |"
+        )
+
+    lines.extend(
+        [
+            "",
             "## Risk Reasons",
             "",
             "| reason | category | n | approved | rejected | latest |",
@@ -646,7 +863,10 @@ def main() -> int:
     try:
         conn.rollback()
         conn.set_session(readonly=True, autocommit=True)
-        counts, risk_reasons, eval_outcomes, lineage = fetch_audit(conn, cfg)
+        counts, risk_reasons, eval_outcomes, lineage, pre_gate_drilldown = fetch_audit(
+            conn,
+            cfg,
+        )
     finally:
         conn.close()
 
@@ -657,6 +877,7 @@ def main() -> int:
         risk_reasons,
         eval_outcomes,
         lineage,
+        pre_gate_drilldown,
         generated=generated,
     )
     if args.output:
@@ -671,6 +892,7 @@ def main() -> int:
             risk_reasons,
             eval_outcomes,
             lineage,
+            pre_gate_drilldown,
             generated=generated,
         )
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
