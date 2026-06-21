@@ -988,6 +988,25 @@ impl TickPipeline {
                                     format!("rejected:{}", reason),
                                 );
 
+                                if let Some(reject_event) =
+                                    crate::demo_learning_lane_hot_path::exchange_gate_reject_event(
+                                        intent,
+                                        em,
+                                        reason,
+                                        event.ts_ms,
+                                        &context_id,
+                                        &signal_id,
+                                    )
+                                {
+                                    tracing::debug!(
+                                        target: "demo_learning_lane",
+                                        side_cell_key = %reject_event.side_cell_key(),
+                                        context_id = %context_id,
+                                        signal_id = %signal_id,
+                                        "demo-learning lane eligible cost-gate reject recognized; ledger append not wired / 已識別 demo-learning lane eligible cost-gate reject，尚未接 ledger append"
+                                    );
+                                }
+
                                 // W-AUDIT-4b-M3 (2026-05-09)：exchange gate reject
                                 // path 寫 negative label。features 已於上方
                                 // build_feature_vector 構造，context_id 已 make_*

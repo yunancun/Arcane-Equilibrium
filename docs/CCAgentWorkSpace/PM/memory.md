@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Demo-Learning Lane Hot-Path Adapter
+
+- Added pure Rust `demo_learning_lane_hot_path` adapter plus tests to convert eligible demo/live_demo cost-gate negative-edge exchange rejects into `RejectEvent` learning shape.
+- `step_4_5_dispatch` now recognizes those rejects and emits a `demo_learning_lane` debug trace, so the next runtime sink can append every eligible rejected signal instead of silently losing it.
+- Boundary remains strict: no ledger append yet, no order authority, no main cost-gate lowering, no PG/Bybit/runtime mutation; selected side-cells still remain `ORDER_AUTHORITY_NOT_GRANTED`.
+
 ## 2026-06-21 Cost-Gate Demo-Learning Lane Outcome Writer
 
 - Added artifact-only `outcome_writer.py` and shared `contract.py` for the cost-gate demo-learning lane.
