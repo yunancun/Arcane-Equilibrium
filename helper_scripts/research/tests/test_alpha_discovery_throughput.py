@@ -1262,6 +1262,7 @@ def _write_demo_learning_evidence_latest(
     next_action: str = "test_next_action",
     cost_gate_rejects_recorded: bool = False,
     observation_only: bool = False,
+    learning_data_flow_stale: bool = False,
 ) -> Path:
     path = data / "demo_learning_evidence" / "demo_learning_evidence_audit_latest.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1280,6 +1281,8 @@ def _write_demo_learning_evidence_latest(
                 "learning_lane_currently_accumulating_evidence": False,
                 "blocked_outcome_review_candidate_present": False,
                 "order_flow_silent_drop_risk": False,
+                "learning_data_flow_fresh": not learning_data_flow_stale,
+                "learning_data_flow_stale": learning_data_flow_stale,
                 "bounded_demo_learning_lane_recommended": cost_gate_rejects_recorded,
             },
             "key_counts": {
@@ -1290,6 +1293,14 @@ def _write_demo_learning_evidence_latest(
                 "fills": 0,
                 "learning_ledger_rows": 0,
                 "blocked_signal_outcomes": 0,
+                "data_flow_freshness_status": (
+                    "LEARNING_DATA_FLOW_STALE"
+                    if learning_data_flow_stale
+                    else "LEARNING_DATA_FLOW_FRESH"
+                ),
+                "latest_learning_stage": "risk_verdicts",
+                "latest_learning_ts_utc": "2026-06-21T20:47:59+00:00",
+                "latest_learning_age_seconds": 8461 if learning_data_flow_stale else 60,
             },
         },
         "order_stall_scorecard": {
@@ -1370,6 +1381,41 @@ def test_cost_gate_arm_keeps_observation_only_demo_from_probe_readiness(tmp_path
         "wait_for_candidate_rejects_or_verify_strategy_candidate_producer"
     )
     assert blocker["demo_learning_evidence_observation_only_contexts_active"] is True
+
+
+def test_cost_gate_arm_blocks_stale_demo_learning_data_flow(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_demo_learning_evidence_latest(
+        data,
+        status="DEMO_LEARNING_DATA_FLOW_STALE",
+        generated_at="2026-06-21T23:09:00+00:00",
+        reason="latest candidate/reject/order-flow timestamp is stale",
+        next_action="restore_demo_data_flow_before_cost_gate_learning_activation",
+        cost_gate_rejects_recorded=True,
+        learning_data_flow_stale=True,
+    )
+
+    now = dt.datetime(2026, 6, 21, 23, 10, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(
+        data,
+        now_utc=now,
+    )
+    plan = build_discovery_plan(
+        [arm],
+        now_utc=now,
+    )
+
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["action"] == "WAIT"
+    assert blocker["primary_blocker"] == "demo_learning_data_flow_stale"
+    assert blocker["next_trigger"] == (
+        "restore_demo_data_flow_before_cost_gate_learning_activation"
+    )
+    assert blocker["demo_learning_evidence_data_flow_freshness_status"] == (
+        "LEARNING_DATA_FLOW_STALE"
+    )
+    assert blocker["demo_learning_evidence_latest_learning_age_seconds"] == 8461
+    assert blocker["engineering_actionable"] is True
 
 
 def _write_polymarket_leadlag_latest(data: Path, payload: dict) -> Path:

@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Demo Learning Data-Flow Freshness Blocker
+
+- Demo order-stall audit now emits learning-data freshness with a 90-minute stale threshold.
+- Demo learning evidence routes stale candidate/reject/order-flow data to `DEMO_LEARNING_DATA_FLOW_STALE` before claiming Cost Gate reject accumulation.
+- Alpha-discovery cost-gate blocker rows now expose `demo_learning_data_flow_stale`; runtime remains unsynced, while latest read-only PG shows decision/risk rows resumed but no 1h/4h intents/orders/fills.
+
 ## 2026-06-21 Runtime Killboard Source-Trusted Actionability v4
 
 - Runtime killboard schema is now `alpha_discovery_runtime_killboard_v4`.

@@ -103,6 +103,8 @@ def classify_demo_learning_evidence(
     counts = order_scorecard.get("counts") or {}
     order_cls = order_scorecard.get("classification") or {}
     order_answers = order_cls.get("answers") or {}
+    order_freshness = order_cls.get("data_flow_freshness") or {}
+    order_freshness_answers = order_freshness.get("answers") or {}
     risk_category = order_cls.get("dominant_risk_category") or {}
     context_scope = order_scorecard.get("context_payload_scope") or {}
     learning_answers = learning_preflight.get("answers") or {}
@@ -116,6 +118,10 @@ def classify_demo_learning_evidence(
     fills = _as_int(counts.get("fills"))
     observation_only = order_answers.get("context_payload_observation_only") is True
     order_silent_drop = order_answers.get("silent_drop_risk") is True
+    learning_data_flow_stale = (
+        order_answers.get("learning_data_flow_stale") is True
+        or order_freshness_answers.get("learning_data_flow_stale") is True
+    )
     candidate_or_reject_data = (
         order_answers.get("candidate_or_reject_data_accumulating") is True
     )
@@ -163,6 +169,13 @@ def classify_demo_learning_evidence(
         status = "ADMISSION_ROWS_NEED_OUTCOME_REFRESH"
         reason = "cost-gate rejects are in the ledger but blocked outcomes are missing"
         next_action = "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes"
+    elif learning_data_flow_stale and not learning_evidence_accumulating:
+        status = "DEMO_LEARNING_DATA_FLOW_STALE"
+        reason = (
+            "demo learning data rows exist in the lookback window but the latest "
+            "candidate/reject/order-flow timestamp is stale"
+        )
+        next_action = "restore_demo_data_flow_before_cost_gate_learning_activation"
     elif cost_gate_pg_rejects_recorded and not learning_evidence_accumulating:
         status = "PG_REJECTS_RECORDED_LEARNING_LANE_NOT_ACCUMULATING"
         reason = "PG records Cost Gate rejects but runtime learning ledger is absent or empty"
@@ -198,6 +211,10 @@ def classify_demo_learning_evidence(
             "demo_context_data_accumulating": contexts > 0,
             "demo_observation_only_contexts_active": observation_only,
             "candidate_or_reject_data_accumulating": candidate_or_reject_data,
+            "pipeline_flow_fresh": order_answers.get("pipeline_flow_fresh"),
+            "pipeline_flow_stale": order_answers.get("pipeline_flow_stale"),
+            "learning_data_flow_fresh": order_answers.get("learning_data_flow_fresh"),
+            "learning_data_flow_stale": learning_data_flow_stale,
             "cost_gate_rejects_recorded_in_pg": cost_gate_pg_rejects_recorded,
             "learning_lane_ledger_rows_present": ledger_rows > 0,
             "learning_lane_currently_accumulating_evidence": learning_evidence_accumulating,
@@ -224,6 +241,12 @@ def classify_demo_learning_evidence(
             "rejected_decision_features": rejected_features,
             "orders": orders,
             "fills": fills,
+            "data_flow_freshness_status": order_freshness.get("status"),
+            "latest_learning_stage": order_freshness.get("latest_learning_stage"),
+            "latest_learning_ts_utc": order_freshness.get("latest_learning_ts_utc"),
+            "latest_learning_age_seconds": order_freshness.get(
+                "latest_learning_age_seconds"
+            ),
             "context_payload_rows": _as_int(context_scope.get("context_rows")),
             "signal_observation_only_contexts": _as_int(
                 context_scope.get("signal_observation_only_contexts")
@@ -266,6 +289,7 @@ def build_payload(
         lineage,
         pre_gate_drilldown,
         context_payload_scope,
+        now_utc=now_utc,
     )
     learning_preflight = build_cost_gate_learning_lane_activation_preflight(
         cfg.data_dir,
@@ -383,6 +407,10 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "demo_context_data_accumulating",
         "demo_observation_only_contexts_active",
         "candidate_or_reject_data_accumulating",
+        "pipeline_flow_fresh",
+        "pipeline_flow_stale",
+        "learning_data_flow_fresh",
+        "learning_data_flow_stale",
         "cost_gate_rejects_recorded_in_pg",
         "learning_lane_ledger_rows_present",
         "learning_lane_currently_accumulating_evidence",
