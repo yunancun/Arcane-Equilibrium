@@ -74,6 +74,95 @@ def _list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
 
+def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
+    detail = _dict(arm.get("detail"))
+    ledger_status = str(detail.get("ledger_status") or "UNKNOWN").upper()
+    admission_count = _int(detail.get("admission_decision_count"))
+    blocked_outcome_count = _int(detail.get("blocked_signal_outcome_count"))
+    blocked_review = _dict(detail.get("blocked_signal_outcome_review"))
+    blocked_review_status = str(
+        detail.get("blocked_signal_outcome_review_status")
+        or blocked_review.get("status")
+        or ""
+    ).upper()
+
+    if ledger_status in {"MISSING", "EMPTY"}:
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "cost_gate_runtime_ledger_missing",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "cost_gate_probe_candidates_ready_but_runtime_ledger_empty",
+            "next_trigger": (
+                "deploy_enable_runtime_ledger_writer_and_learning_lane_cron_then_observe_reject_rows"
+            ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+    if admission_count > 0 and blocked_outcome_count == 0:
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "cost_gate_blocked_signal_outcomes_missing",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "cost_gate_rejects_recorded_need_blocked_signal_outcomes",
+            "next_trigger": "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes",
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+    if blocked_review_status == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT":
+        return {
+            "action": READY_FOR_PROBE,
+            "reason": "cost_gate_blocked_outcome_review_candidate",
+            "blocker_class": "probe_ready",
+            "primary_blocker": (
+                "cost_gate_blocked_signal_outcomes_need_demo_probe_authority_review"
+            ),
+            "next_trigger": (
+                detail.get("blocked_signal_outcome_review_next_trigger")
+                or blocked_review.get("next_trigger")
+                or "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+            ),
+            "operator_actionable": True,
+            "engineering_actionable": True,
+        }
+    if blocked_review_status == "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE":
+        return {
+            "action": BLOCK,
+            "reason": "cost_gate_blocked_outcomes_confirm_current_block",
+            "blocker_class": "rejected_no_edge",
+            "primary_blocker": "cost_gate_blocked_signal_outcomes_confirm_current_block",
+            "next_trigger": (
+                detail.get("blocked_signal_outcome_review_next_trigger")
+                or blocked_review.get("next_trigger")
+                or "keep_cost_gate_blocked_for_reviewed_side_cells"
+            ),
+            "operator_actionable": False,
+            "engineering_actionable": False,
+        }
+    if blocked_outcome_count > 0:
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "cost_gate_blocked_outcomes_below_review_gate",
+            "blocker_class": "sample_gate",
+            "primary_blocker": "cost_gate_blocked_signal_outcomes_accumulating",
+            "next_trigger": (
+                detail.get("blocked_signal_outcome_review_next_trigger")
+                or blocked_review.get("next_trigger")
+                or "continue_recording_and_refreshing_blocked_signal_outcomes"
+            ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+    return {
+        "action": RUN_READ_ONLY_CAPTURE,
+        "reason": "cost_gate_learning_lane_runtime_evidence_missing",
+        "blocker_class": "data_coverage",
+        "primary_blocker": "cost_gate_learning_lane_runtime_evidence_missing",
+        "next_trigger": "inspect_cost_gate_learning_lane_ledger_and_cron_status",
+        "operator_actionable": False,
+        "engineering_actionable": True,
+    }
+
+
 def decide_arm_action(arm: dict[str, Any], *, min_samples: int = 30) -> dict[str, Any]:
     """單 discovery arm 的 deterministic action。"""
     name = str(arm.get("arm_id") or arm.get("name") or "unknown")
@@ -90,6 +179,9 @@ def decide_arm_action(arm: dict[str, Any], *, min_samples: int = 30) -> dict[str
         action, reason = BLOCK, f"gate_status:{gate_status.lower()}"
     elif gate_status in {"WATCH_ONLY", "NO_CANDIDATE", "WAIT"}:
         action, reason = WAIT, f"gate_status:{gate_status.lower()}"
+    elif name == "cost_gate_demo_learning_lane" and gate_status == "OPERATOR_REVIEW":
+        state = _cost_gate_learning_lane_state(arm)
+        action, reason = str(state["action"]), str(state["reason"])
     elif artifacts_ready and sample_count >= min_samples:
         action, reason = READY_FOR_AEG_CHAIN, "artifacts_ready_and_sample_gate_met"
     elif gate_status in {"ACTIONABLE_START_NOW", "ACTIONABLE_SCHEDULE", "OPERATOR_REVIEW"}:
@@ -850,48 +942,26 @@ def classify_profitability_blocker(
             promotion_ready=True,
             engineering_actionable=True,
         )
-    if action == READY_FOR_PROBE and arm_id == "cost_gate_demo_learning_lane":
+    if (
+        arm_id == "cost_gate_demo_learning_lane"
+        and row["source_ok"] is not False
+        and str(decision.get("reason")) != "source_not_healthy"
+    ):
+        state = _cost_gate_learning_lane_state(arm)
         ledger_status = str(detail.get("ledger_status") or "UNKNOWN")
-        admission_count = _int(detail.get("admission_decision_count"))
-        blocked_outcome_count = _int(detail.get("blocked_signal_outcome_count"))
         blocked_review = _dict(detail.get("blocked_signal_outcome_review"))
         blocked_review_status = str(
             detail.get("blocked_signal_outcome_review_status")
             or blocked_review.get("status")
             or ""
         )
-        if ledger_status in {"MISSING", "EMPTY"}:
-            primary_blocker = "cost_gate_probe_candidates_ready_but_runtime_ledger_empty"
-            next_trigger = "deploy_enable_runtime_ledger_writer_then_observe_reject_rows"
-        elif admission_count > 0 and blocked_outcome_count == 0:
-            primary_blocker = "cost_gate_rejects_recorded_need_blocked_signal_outcomes"
-            next_trigger = (
-                "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes"
-            )
-        elif blocked_outcome_count > 0:
-            if blocked_review_status == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT":
-                primary_blocker = (
-                    "cost_gate_blocked_signal_outcomes_need_demo_probe_authority_review"
-                )
-            elif blocked_review_status == "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE":
-                primary_blocker = "cost_gate_blocked_signal_outcomes_confirm_current_block"
-            else:
-                primary_blocker = "cost_gate_blocked_signal_outcomes_accumulating"
-            next_trigger = str(
-                detail.get("blocked_signal_outcome_review_next_trigger")
-                or blocked_review.get("next_trigger")
-                or "review_blocked_signal_outcomes_before_any_probe_order_authority"
-            )
-        else:
-            primary_blocker = "cost_gate_learning_probe_candidates_ready"
-            next_trigger = "wire_bounded_demo_learning_lane_policy_before_any_gate_lowering"
         return _finish_blocker_row(
             row,
-            blocker_class="probe_ready",
-            primary_blocker=primary_blocker,
-            next_trigger=next_trigger,
-            operator_actionable=True,
-            engineering_actionable=True,
+            blocker_class=str(state["blocker_class"]),
+            primary_blocker=str(state["primary_blocker"]),
+            next_trigger=str(state["next_trigger"]),
+            operator_actionable=bool(state["operator_actionable"]),
+            engineering_actionable=bool(state["engineering_actionable"]),
             extra={
                 "plan_status": detail.get("plan_status"),
                 "main_cost_gate_adjustment": detail.get("main_cost_gate_adjustment"),
