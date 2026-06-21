@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Runtime Demo Accumulation Read-Only Audit
+
+- Runtime PG still records demo/live_demo Cost Gate rejects: 1h has 2496 decision features / cost-gate features / risk rejects, but 0 intents/orders/fills.
+- Cost-gate learning lane is not accumulating: only old plan artifact exists; no heartbeat/status/ledger/materializer/outcome refresh/review; engine writer env is unset.
+- Runtime source remains behind/dirty/stale and alpha latest is old killboard schema v1 with false actionable flags until operator-approved sync/rerun.
+
 ## 2026-06-21 Cost Gate Multi-Horizon Counterfactual Stability
 
 - Cost Gate rejected-signal scorecard now compares configured outcome horizons instead of relying on one holding window.
