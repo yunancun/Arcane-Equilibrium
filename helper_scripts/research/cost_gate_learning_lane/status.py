@@ -296,6 +296,98 @@ def _expected_head_status(
     return "MISMATCH", False, "current_git_head_does_not_match_expected_head"
 
 
+def _parse_git_status_line(line: str) -> dict[str, Any]:
+    status_code = (line[:2] if len(line) >= 2 else line).strip() or "UNKNOWN"
+    path_text = line[2:].strip() if len(line) > 2 else ""
+    old_path = None
+    path = path_text
+    if " -> " in path_text:
+        old_path, path = path_text.split(" -> ", 1)
+    category = "untracked" if status_code == "??" else "tracked_change"
+    action_hint = (
+        "review_untracked_path_before_runtime_source_sync"
+        if category == "untracked"
+        else "review_tracked_change_before_runtime_source_sync"
+    )
+    return {
+        "status_code": status_code,
+        "path": path,
+        "old_path": old_path,
+        "category": category,
+        "action_hint": action_hint,
+    }
+
+
+def _source_reconcile_summary(
+    *,
+    git_status: str,
+    dirty_lines: list[str],
+    ahead_count: int | None,
+    behind_count: int | None,
+    expected_head_status: str,
+) -> dict[str, Any]:
+    manifest = [_parse_git_status_line(line) for line in dirty_lines[:50]]
+    status_counts: dict[str, int] = {}
+    for row in manifest:
+        code = str(row.get("status_code") or "UNKNOWN")
+        status_counts[code] = status_counts.get(code, 0) + 1
+
+    reasons: list[str] = []
+    next_actions: list[str] = []
+    if dirty_lines:
+        reasons.append("dirty_or_untracked_paths_present")
+        next_actions.extend(
+            [
+                "operator_review_dirty_paths_before_sync",
+                "preserve_or_discard_runtime_local_changes",
+            ]
+        )
+    if (ahead_count or 0) > 0:
+        reasons.append("local_commits_ahead_of_upstream")
+        next_actions.append("review_local_commits_before_fast_forward")
+    if (behind_count or 0) > 0:
+        reasons.append("checkout_behind_upstream")
+        next_actions.append("sync_runtime_source_to_pm_approved_head")
+    if expected_head_status in {
+        "MISMATCH",
+        "INVALID",
+        "UNKNOWN_HEAD",
+        "EXPECTED_HEAD_UNVERIFIED",
+    }:
+        reasons.append(f"expected_head_{expected_head_status.lower()}")
+        if "sync_runtime_source_to_pm_approved_head" not in next_actions:
+            next_actions.append("sync_runtime_source_to_pm_approved_head")
+    if git_status in {"NO_UPSTREAM", "NOT_GIT_REPO", "GIT_UNREADABLE"}:
+        reasons.append(f"git_status_{git_status.lower()}")
+        next_actions.append("restore_or_repair_runtime_source_checkout")
+
+    required = bool(reasons)
+    if not required:
+        reconcile_status = "SOURCE_RECONCILE_NOT_REQUIRED"
+        next_actions = ["no_source_reconcile_required"]
+    elif dirty_lines:
+        reconcile_status = "DIRTY_PATH_REVIEW_REQUIRED"
+    elif git_status == "DIVERGED" or (ahead_count or 0) > 0:
+        reconcile_status = "LOCAL_COMMITS_REVIEW_REQUIRED"
+    elif (behind_count or 0) > 0 or expected_head_status == "MISMATCH":
+        reconcile_status = "SOURCE_SYNC_REQUIRED"
+    else:
+        reconcile_status = "SOURCE_RECONCILE_REQUIRED"
+
+    if required and "rerun_activation_preflight_after_reconcile" not in next_actions:
+        next_actions.append("rerun_activation_preflight_after_reconcile")
+
+    return {
+        "source_reconcile_required": required,
+        "source_reconcile_status": reconcile_status,
+        "source_reconcile_reasons": reasons,
+        "source_reconcile_next_actions": next_actions,
+        "source_reconcile_dirty_manifest": manifest,
+        "source_reconcile_dirty_manifest_truncated": len(dirty_lines) > len(manifest),
+        "git_dirty_status_counts": status_counts,
+    }
+
+
 def _summarize_git_checkout(
     repo_root: Path,
     *,
@@ -406,6 +498,13 @@ def _summarize_git_checkout(
         ready = True
         error = None
 
+    reconcile = _source_reconcile_summary(
+        git_status=status,
+        dirty_lines=dirty_lines,
+        ahead_count=ahead_count,
+        behind_count=behind_count,
+        expected_head_status=expected_status,
+    )
     return {
         "git_status": status,
         "git_ready_for_activation": ready,
@@ -423,6 +522,7 @@ def _summarize_git_checkout(
         "expected_head_status": expected_status,
         "expected_head_matches": expected_matches,
         "expected_head_error": expected_error,
+        **reconcile,
     }
 
 

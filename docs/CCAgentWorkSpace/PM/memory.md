@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Cost Gate Source Reconcile Manifest
+
+- Cost-gate activation preflight now emits source reconcile status/reasons/actions plus a capped dirty-path manifest.
+- Dirty runtime source becomes `DIRTY_PATH_REVIEW_REQUIRED`; behind-only source becomes `SOURCE_SYNC_REQUIRED`; clean matching source reports no reconcile required.
+- Runtime blocker still external: trade-core remains behind/dirty/old-schema with no learning-lane heartbeat/ledger/outcome artifacts or writer env.
+
 ## 2026-06-21 Runtime Demo Accumulation Read-Only Audit
 
 - Runtime PG still records demo/live_demo Cost Gate rejects: 1h has 2496 decision features / cost-gate features / risk rejects, but 0 intents/orders/fills.
