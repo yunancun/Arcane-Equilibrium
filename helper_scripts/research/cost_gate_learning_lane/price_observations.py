@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 """Build local price observations for the cost-gate demo learning lane.
 
-This module is artifact-only. It reads an append-only learning-lane ledger and a
-local price/kline export, then emits normalized observations that can be passed
-to ``runtime_adapter.py --price-observations``. It does not connect to PG, call
-Bybit, submit orders, or mutate runtime config.
+This module is artifact-only. It reads an append-only learning-lane ledger and
+either a local price/kline export or read-only ``market.klines`` rows, then emits
+normalized observations that can be passed to
+``runtime_adapter.py --price-observations``. It does not write PG, call Bybit,
+submit orders, or mutate runtime config.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections.abc import Mapping
 import datetime as dt
 from dataclasses import dataclass
 import json
 import math
 from pathlib import Path
+import sys
 from typing import Any
 
 from cost_gate_learning_lane.contract import (
@@ -25,6 +28,10 @@ from cost_gate_learning_lane.contract import (
     PROBE_OUTCOME_RECORD_TYPE,
 )
 
+
+ROOT = Path(__file__).resolve().parents[3]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 PRICE_OBSERVATION_SCHEMA_VERSION = "cost_gate_demo_learning_lane_price_observations_v1"
 
@@ -130,6 +137,109 @@ def read_ledger_rows(path: Path) -> list[dict[str, Any]]:
 def read_source_price_rows(path: Path) -> list[dict[str, Any]]:
     """Read local price rows from JSONL, JSON array, or row-container JSON."""
     return _read_json_or_jsonl_rows(path)
+
+
+def validate_pg_timeframe(value: Any) -> str:
+    text = _str(value)
+    if not text or len(text) > 16 or not all(ch.isalnum() for ch in text):
+        raise ValueError("--pg-timeframe must be a short alphanumeric kline timeframe")
+    return text
+
+
+def build_market_klines_observation_sql() -> str:
+    """SQL used by the read-only PG Adapter to load local kline closes."""
+    return """
+SELECT
+    k.symbol,
+    (EXTRACT(EPOCH FROM k.ts) * 1000)::bigint AS ts_ms,
+    k.close::float8 AS close
+FROM market.klines k
+WHERE k.symbol = %s
+  AND k.timeframe = %s
+  AND k.ts >= %s
+  AND k.ts <= %s
+ORDER BY k.ts ASC
+"""
+
+
+def _ms_to_utc_dt(value: int) -> dt.datetime:
+    return dt.datetime.fromtimestamp(value / 1000.0, tz=dt.timezone.utc)
+
+
+def _cursor_rows_to_dicts(cur: Any) -> list[dict[str, Any]]:
+    rows = cur.fetchall()
+    if not rows:
+        return []
+    if isinstance(rows[0], Mapping):
+        return [dict(row) for row in rows]
+    columns = [desc[0] for desc in cur.description]
+    return [dict(zip(columns, row)) for row in rows]
+
+
+def fetch_market_kline_price_rows(
+    conn: Any,
+    windows: list[dict[str, Any]],
+    *,
+    timeframe: str = "1m",
+) -> list[dict[str, Any]]:
+    """Fetch local PG ``market.klines`` rows for ledger-derived windows."""
+    timeframe = validate_pg_timeframe(timeframe)
+    windows_by_symbol: dict[str, list[dict[str, Any]]] = {}
+    for window in windows:
+        symbol = _str(window.get("symbol")).upper()
+        start_ts_ms = _int(window.get("start_ts_ms"))
+        end_ts_ms = _int(window.get("end_ts_ms"))
+        if symbol and start_ts_ms > 0 and end_ts_ms >= start_ts_ms:
+            windows_by_symbol.setdefault(symbol, []).append(window)
+    if not windows_by_symbol:
+        return []
+
+    sql = build_market_klines_observation_sql()
+    rows: list[dict[str, Any]] = []
+    for symbol, symbol_windows in sorted(windows_by_symbol.items()):
+        start_ts_ms = min(_int(window.get("start_ts_ms")) for window in symbol_windows)
+        end_ts_ms = max(_int(window.get("end_ts_ms")) for window in symbol_windows)
+        with conn.cursor() as cur:
+            cur.execute(
+                sql,
+                (
+                    symbol,
+                    timeframe,
+                    _ms_to_utc_dt(start_ts_ms),
+                    _ms_to_utc_dt(end_ts_ms),
+                ),
+            )
+            for row in _cursor_rows_to_dicts(cur):
+                ts_ms = _int(row.get("ts_ms"))
+                close = _float(row.get("close"))
+                if ts_ms <= 0 or close is None or close <= 0.0:
+                    continue
+                rows.append(
+                    {
+                        "symbol": _str(row.get("symbol")).upper() or symbol,
+                        "ts_ms": ts_ms,
+                        "close": close,
+                        "timeframe": timeframe,
+                        "source": "pg_market_klines",
+                    }
+                )
+    return rows
+
+
+def connect_readonly_price_observation_pg(
+    *,
+    statement_timeout_ms_default: int = 180_000,
+) -> Any:
+    """Connect to PG for read-only price observation extraction."""
+    from helper_scripts.lib.pg_connect import connect_report_pg
+
+    conn = connect_report_pg(
+        "cost_gate_price_observations",
+        statement_timeout_ms_default=statement_timeout_ms_default,
+    )
+    conn.rollback()
+    conn.set_session(readonly=True, autocommit=True)
+    return conn
 
 
 def _row_decision(row: dict[str, Any]) -> str:
@@ -334,16 +444,18 @@ def build_price_observations_from_rows(
         if key in seen:
             continue
         seen.add(key)
-        out.append(
-            {
-                "schema_version": PRICE_OBSERVATION_SCHEMA_VERSION,
-                "record_type": "price_observation",
-                "symbol": symbol,
-                "ts_ms": ts_ms,
-                "close": price,
-                "source": "local_price_row",
-            }
-        )
+        observation = {
+            "schema_version": PRICE_OBSERVATION_SCHEMA_VERSION,
+            "record_type": "price_observation",
+            "symbol": symbol,
+            "ts_ms": ts_ms,
+            "close": price,
+            "source": _str(row.get("source")) or "local_price_row",
+        }
+        timeframe = _str(row.get("timeframe"))
+        if timeframe:
+            observation["timeframe"] = timeframe
+        out.append(observation)
 
     return sorted(out, key=lambda row: (_str(row.get("symbol")), _int(row.get("ts_ms"))))
 
@@ -401,10 +513,14 @@ def write_price_observation_artifact(path: Path, artifact: dict[str, Any]) -> No
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ledger", type=Path, required=True)
-    parser.add_argument("--source-prices", type=Path, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--source-prices", type=Path)
+    source.add_argument("--source-pg", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--horizon-minutes", type=int, default=60)
     parser.add_argument("--max-entry-delay-ms", type=int, default=5 * 60_000)
+    parser.add_argument("--pg-timeframe", default="1m")
+    parser.add_argument("--pg-statement-timeout-ms", type=int, default=180_000)
     parser.add_argument("--include-admitted", action="store_true")
     parser.add_argument("--no-blocked", action="store_true")
     parser.add_argument("--print-json", action="store_true")
@@ -420,11 +536,38 @@ def main() -> int:
         include_admitted_probes=args.include_admitted,
     )
     validate_price_observation_config(cfg)
+    ledger_rows = read_ledger_rows(args.ledger)
+    price_source = "local_price_file"
+    if args.source_pg:
+        validate_pg_timeframe(args.pg_timeframe)
+        windows = required_price_observation_windows(ledger_rows, cfg=cfg)
+        if windows:
+            conn = connect_readonly_price_observation_pg(
+                statement_timeout_ms_default=args.pg_statement_timeout_ms,
+            )
+            try:
+                price_rows = fetch_market_kline_price_rows(
+                    conn,
+                    windows,
+                    timeframe=args.pg_timeframe,
+                )
+            finally:
+                conn.close()
+        else:
+            price_rows = []
+        price_source = "pg_market_klines"
+    else:
+        if args.source_prices is None:
+            raise ValueError("--source-prices is required unless --source-pg is used")
+        price_rows = read_source_price_rows(args.source_prices)
     artifact = build_price_observation_artifact(
-        read_ledger_rows(args.ledger),
-        read_source_price_rows(args.source_prices),
+        ledger_rows,
+        price_rows,
         cfg=cfg,
     )
+    artifact["price_source"] = price_source
+    if args.source_pg:
+        artifact["pg_timeframe"] = args.pg_timeframe
     if args.output:
         write_price_observation_artifact(args.output, artifact)
     if args.print_json or not args.output:
