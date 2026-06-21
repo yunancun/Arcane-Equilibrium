@@ -77,6 +77,7 @@ def _list(value: Any) -> list[Any]:
 def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
     detail = _dict(arm.get("detail"))
     ledger_status = str(detail.get("ledger_status") or "UNKNOWN").upper()
+    loop_status = str(detail.get("learning_loop_status") or "UNKNOWN").upper()
     admission_count = _int(detail.get("admission_decision_count"))
     blocked_outcome_count = _int(detail.get("blocked_signal_outcome_count"))
     blocked_review = _dict(detail.get("blocked_signal_outcome_review"))
@@ -86,6 +87,30 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         or ""
     ).upper()
 
+    if ledger_status in {"MISSING", "EMPTY"} and loop_status == "NOT_SEEN":
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "cost_gate_learning_loop_not_seen",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "cost_gate_learning_loop_not_running",
+            "next_trigger": (
+                "sync_source_install_learning_lane_cron_enable_runtime_writer_then_observe_reject_rows"
+            ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+    if ledger_status in {"MISSING", "EMPTY"} and loop_status == "RUNNING_NO_LEDGER_ROWS":
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "cost_gate_learning_loop_running_no_ledger_rows",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "cost_gate_learning_loop_running_but_no_reject_rows",
+            "next_trigger": (
+                "verify_runtime_ledger_writer_enabled_or_wait_for_cost_gate_rejects"
+            ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
     if ledger_status in {"MISSING", "EMPTY"}:
         return {
             "action": RUN_READ_ONLY_CAPTURE,
@@ -95,6 +120,18 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "next_trigger": (
                 "deploy_enable_runtime_ledger_writer_and_learning_lane_cron_then_observe_reject_rows"
             ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+    if admission_count > 0 and blocked_outcome_count == 0 and loop_status == "NOT_SEEN":
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "cost_gate_admission_rows_without_refresh_loop",
+            "blocker_class": "data_coverage",
+            "primary_blocker": (
+                "cost_gate_rejects_recorded_but_outcome_refresh_loop_not_running"
+            ),
+            "next_trigger": "install_learning_lane_cron_or_run_outcome_refresh",
             "operator_actionable": False,
             "engineering_actionable": True,
         }
@@ -980,6 +1017,47 @@ def classify_profitability_blocker(
                 "ledger_source_error": detail.get("ledger_source_error"),
                 "ledger_total_rows": detail.get("ledger_total_rows"),
                 "ledger_malformed_line_count": detail.get("ledger_malformed_line_count"),
+                "learning_loop_status": detail.get("learning_loop_status"),
+                "learning_loop_reason": detail.get("learning_loop_reason"),
+                "learning_loop_max_age_seconds": detail.get(
+                    "learning_loop_max_age_seconds"
+                ),
+                "learning_loop_heartbeat_present": detail.get(
+                    "learning_loop_heartbeat_present"
+                ),
+                "learning_loop_heartbeat_age_seconds": detail.get(
+                    "learning_loop_heartbeat_age_seconds"
+                ),
+                "learning_loop_status_age_seconds": detail.get(
+                    "learning_loop_status_age_seconds"
+                ),
+                "learning_loop_last_refresh_rc": detail.get(
+                    "learning_loop_last_refresh_rc"
+                ),
+                "learning_loop_last_review_rc": detail.get(
+                    "learning_loop_last_review_rc"
+                ),
+                "learning_loop_last_ledger_row_count": detail.get(
+                    "learning_loop_last_ledger_row_count"
+                ),
+                "learning_loop_last_review_status": detail.get(
+                    "learning_loop_last_review_status"
+                ),
+                "learning_loop_last_review_next_trigger": detail.get(
+                    "learning_loop_last_review_next_trigger"
+                ),
+                "learning_loop_status_log_path": detail.get(
+                    "learning_loop_status_log_path"
+                ),
+                "learning_loop_heartbeat_path": detail.get(
+                    "learning_loop_heartbeat_path"
+                ),
+                "learning_loop_refresh_latest_path": detail.get(
+                    "learning_loop_refresh_latest_path"
+                ),
+                "learning_loop_review_latest_path": detail.get(
+                    "learning_loop_review_latest_path"
+                ),
                 "admission_decision_count": detail.get("admission_decision_count"),
                 "admit_decision_count": detail.get("admit_decision_count"),
                 "order_authority_not_granted_count": detail.get(
