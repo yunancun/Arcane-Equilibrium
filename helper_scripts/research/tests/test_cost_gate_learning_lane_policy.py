@@ -14,6 +14,10 @@ from cost_gate_learning_lane.policy import (
     build_plan_from_file,
     build_plan_from_payload,
 )
+from cost_gate_learning_lane.outcome_writer import (
+    ProbeOutcomeConfig,
+    build_probe_outcome_records,
+)
 from cost_gate_learning_lane.runtime_adapter import (
     ADMIT_DECISION,
     ORDER_AUTHORITY_GRANTED,
@@ -370,6 +374,94 @@ def test_runtime_adapter_ledger_record_round_trips_jsonl(tmp_path: Path):
     assert rows[0]["record_type"] == "probe_admission_decision"
     assert rows[0]["decision"] == "ORDER_AUTHORITY_NOT_GRANTED"
     assert rows[0]["side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+
+
+def test_runtime_adapter_builds_markout_outcome_only_for_admitted_probe():
+    admitted = evaluate_probe_admission(
+        _runtime_plan(order_authority=ORDER_AUTHORITY_GRANTED),
+        {
+            **_selected_reject_event(),
+            "last_price": 2000.0,
+        },
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    not_granted = evaluate_probe_admission(
+        _runtime_plan(),
+        _selected_reject_event(),
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    ledger = [build_ledger_record(admitted), build_ledger_record(not_granted)]
+
+    outcomes = build_probe_outcome_records(
+        ledger,
+        [
+            {"symbol": "ETHUSDT", "ts_ms": 1_782_037_200_000, "close": 2000.0},
+            {"symbol": "ETHUSDT", "ts_ms": 1_782_040_800_000, "close": 1980.0},
+        ],
+        now_utc=dt.datetime(2026, 6, 21, 12, 11, tzinfo=dt.timezone.utc),
+        cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
+    )
+
+    assert len(outcomes) == 1
+    outcome = outcomes[0]
+    assert outcome["record_type"] == "probe_outcome"
+    assert outcome["attempt_id"] == _selected_reject_event()["context_id"]
+    assert outcome["side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+    assert outcome["outcome_source"] == "market_markout_proxy"
+    assert outcome["promotion_evidence"] is False
+    assert round(outcome["gross_bps"], 6) == 100.0
+    assert round(outcome["realized_net_bps"], 6) == 96.0
+
+
+def test_runtime_adapter_outcome_rows_are_idempotent_and_feed_disable():
+    admitted = evaluate_probe_admission(
+        _runtime_plan(order_authority=ORDER_AUTHORITY_GRANTED),
+        {
+            **_selected_reject_event(),
+            "last_price": 2000.0,
+        },
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    ledger = [build_ledger_record(admitted)]
+    first_outcome = build_probe_outcome_records(
+        ledger,
+        [
+            {"symbol": "ETHUSDT", "ts_ms": 1_782_037_200_000, "close": 2000.0},
+            {"symbol": "ETHUSDT", "ts_ms": 1_782_040_800_000, "close": 2010.0},
+        ],
+        now_utc=dt.datetime(2026, 6, 21, 12, 11, tzinfo=dt.timezone.utc),
+        cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
+    )
+    assert len(first_outcome) == 1
+
+    duplicate = build_probe_outcome_records(
+        ledger + first_outcome,
+        [
+            {"symbol": "ETHUSDT", "ts_ms": 1_782_037_200_000, "close": 2000.0},
+            {"symbol": "ETHUSDT", "ts_ms": 1_782_040_800_000, "close": 2010.0},
+        ],
+        now_utc=dt.datetime(2026, 6, 21, 12, 11, tzinfo=dt.timezone.utc),
+        cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
+    )
+    assert duplicate == []
+
+    disabled = evaluate_probe_admission(
+        _runtime_plan(order_authority=ORDER_AUTHORITY_GRANTED),
+        {
+            **_selected_reject_event(),
+            "context_id": "ctx-demo-ma_crossover-ETHUSDT-1782044400000",
+            "ts_ms": 1_782_044_400_000,
+        },
+        ledger_rows=ledger + first_outcome,
+        now_utc=dt.datetime(2026, 6, 21, 13, 30, tzinfo=dt.timezone.utc),
+        cfg=RuntimeAdmissionConfig(min_failed_outcomes_to_disable=1),
+        adapter_enabled=True,
+    )
+    assert disabled["decision"] == "REALIZED_PROBE_OUTCOMES_FAIL_LEARNING_THRESHOLD"
+    assert disabled["runtime_state"]["completed_outcome_count"] == 1
 
 
 def test_runtime_adapter_normalizes_cost_gate_negative_reason_text():

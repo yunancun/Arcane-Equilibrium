@@ -19,12 +19,18 @@ import os
 from pathlib import Path
 from typing import Any
 
+from cost_gate_learning_lane.contract import (
+    ADAPTER_SCHEMA_VERSION,
+    ADMIT_DECISION,
+    ELIGIBLE_REJECT_REASON_CODE,
+    ORDER_AUTHORITY_GRANTED,
+)
+from cost_gate_learning_lane.outcome_writer import (
+    ProbeOutcomeConfig,
+    build_probe_outcome_records,
+    read_price_observations,
+)
 from cost_gate_learning_lane.policy import DEMO_LEARNING_LANE_SCHEMA_VERSION
-
-ADAPTER_SCHEMA_VERSION = "cost_gate_demo_learning_lane_adapter_v1"
-ORDER_AUTHORITY_GRANTED = "DEMO_LEARNING_PROBE_GRANTED"
-ELIGIBLE_REJECT_REASON_CODE = "cost_gate_js_demo_negative_edge"
-ADMIT_DECISION = "ADMIT_DEMO_LEARNING_PROBE"
 
 
 @dataclass(frozen=True)
@@ -188,6 +194,17 @@ def _row_ts_ms(row: dict[str, Any]) -> int:
             return value
     event = _dict(row.get("event"))
     return _int(event.get("ts_ms"), default=0)
+
+
+def _attempt_id(row: dict[str, Any]) -> str:
+    event = _dict(row.get("event"))
+    context_id = _str(event.get("context_id"))
+    if context_id:
+        return context_id
+    signal_id = _str(event.get("signal_id"))
+    if signal_id:
+        return signal_id
+    return "|".join([_ledger_side_cell(row), str(_row_ts_ms(row))])
 
 
 def _candidate_max_orders(candidate: dict[str, Any]) -> int:
@@ -516,14 +533,16 @@ def evaluate_probe_admission(
 
 
 def build_ledger_record(decision: dict[str, Any], *, record_type: str = "probe_admission_decision") -> dict[str, Any]:
+    event = decision.get("event") or {}
     return {
         "schema_version": ADAPTER_SCHEMA_VERSION,
         "record_type": record_type,
         "generated_at_utc": decision["generated_at_utc"],
+        "attempt_id": _attempt_id({"side_cell_key": decision.get("side_cell_key"), "event": event}),
         "decision": decision["decision"],
         "allowed_to_submit_order": decision["allowed_to_submit_order"],
         "side_cell_key": decision.get("side_cell_key"),
-        "event": decision.get("event") or {},
+        "event": event,
         "runtime_state": decision.get("runtime_state") or {},
         "reason": decision.get("reason"),
         "boundary": decision.get("boundary"),
@@ -569,9 +588,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, default=_default_plan_path())
     parser.add_argument("--ledger", type=Path, default=_default_ledger_path())
+    parser.add_argument("--price-observations", type=Path)
     parser.add_argument("--event-json", type=Path)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--record-decision", action="store_true")
+    parser.add_argument("--record-outcomes", action="store_true")
     parser.add_argument("--adapter-enabled", action="store_true")
     parser.add_argument("--risk-state", default="NORMAL")
     parser.add_argument("--strategy")
@@ -586,6 +607,9 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-failed-outcomes-to-disable", type=int, default=2)
     parser.add_argument("--min-outcome-net-positive-pct", type=float, default=50.0)
     parser.add_argument("--min-avg-net-bps", type=float, default=0.0)
+    parser.add_argument("--outcome-horizon-minutes", type=int, default=60)
+    parser.add_argument("--outcome-cost-bps", type=float, default=4.0)
+    parser.add_argument("--max-entry-delay-ms", type=int, default=5 * 60_000)
     parser.add_argument("--print-json", action="store_true")
     return parser
 
@@ -599,9 +623,43 @@ def main() -> int:
         min_avg_net_bps=args.min_avg_net_bps,
     )
     validate_runtime_config(cfg)
+    ledger = read_jsonl_ledger(args.ledger)
+    if args.record_outcomes:
+        if args.price_observations is None:
+            raise ValueError("--record-outcomes requires --price-observations")
+        outcome_cfg = ProbeOutcomeConfig(
+            horizon_minutes=args.outcome_horizon_minutes,
+            cost_bps=args.outcome_cost_bps,
+            max_entry_delay_ms=args.max_entry_delay_ms,
+        )
+        price_rows = read_price_observations(args.price_observations)
+        outcome_rows = build_probe_outcome_records(
+            ledger,
+            price_rows,
+            cfg=outcome_cfg,
+        )
+        for row in outcome_rows:
+            append_jsonl_ledger(args.ledger, row)
+        payload = {
+            "schema_version": ADAPTER_SCHEMA_VERSION,
+            "record_type": "probe_outcome_batch",
+            "outcome_count": len(outcome_rows),
+            "outcomes": outcome_rows,
+            "boundary": "artifact-only; no PG, Bybit, order, config, risk, auth, or runtime mutation",
+        }
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str)
+                + "\n",
+                encoding="utf-8",
+            )
+        if args.print_json or not args.output:
+            print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True, default=str))
+        return 0
+
     plan = _read_json(args.plan)
     event = _event_from_args(args)
-    ledger = read_jsonl_ledger(args.ledger)
     decision = evaluate_probe_admission(
         plan,
         event,
