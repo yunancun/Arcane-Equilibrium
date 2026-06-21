@@ -25,6 +25,18 @@
 
 ## 近期記錄
 
+## 2026-06-22 Runtime Killboard Learning Worklist v5
+
+- Runtime killboard schema is now `alpha_discovery_runtime_killboard_v5`.
+- Latest/history alpha artifacts mirror learning worklist status, task counts, operator/runtime-mutation counts, and top learning task fields.
+- This is artifact visibility only; runtime source remains behind/dirty/stale until operator-approved reconcile/sync.
+
+## 2026-06-22 Alpha Learning Worklist
+
+- Alpha discovery now emits `alpha_learning_worklist_v1` beside the profitability blocker scorecard.
+- Blocker rows become ranked learning tasks such as runtime source reconcile, cost-gate learning activation, MM signal search, Polymarket replay history, or promotion review.
+- Worklist tasks explicitly mark operator authorization and runtime mutation requirements; no probe/order/promotion authority is granted.
+
 ## 2026-06-22 Cost Gate Source Reconcile Manifest
 
 - Cost-gate activation preflight now emits source reconcile status/reasons/actions plus a capped dirty-path manifest.

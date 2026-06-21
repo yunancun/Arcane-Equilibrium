@@ -27,7 +27,7 @@ from polymarket_leadlag import replay_history as polymarket_replay_history
 from . import RUNNER_VERSION
 from .discovery_loop import build_discovery_plan
 
-RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v4"
+RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v5"
 DEFAULT_MAX_ARTIFACT_AGE_SECONDS = 6 * 60 * 60
 DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS = 36 * 60 * 60
 DEFAULT_POLYMARKET_REPLAY_HISTORY_REPORT_LIMIT = 4096
@@ -1593,6 +1593,44 @@ def _action_counts(plan: dict[str, Any]) -> dict[str, int]:
     return {str(k): _int(v) for k, v in (plan.get("action_counts") or {}).items()}
 
 
+def _learning_worklist(plan: dict[str, Any]) -> dict[str, Any]:
+    worklist = plan.get("learning_worklist")
+    return worklist if isinstance(worklist, dict) else {}
+
+
+def _learning_top_task(worklist: dict[str, Any]) -> dict[str, Any]:
+    top_task = worklist.get("top_task")
+    return top_task if isinstance(top_task, dict) else {}
+
+
+def _learning_summary(worklist: dict[str, Any]) -> dict[str, Any]:
+    top_task = _learning_top_task(worklist)
+    return {
+        "learning_worklist_status": worklist.get("status"),
+        "learning_task_count": _int(worklist.get("task_count")),
+        "learning_promotion_ready_count": _int(worklist.get("promotion_ready_count")),
+        "learning_operator_required_count": _int(worklist.get("operator_required_count")),
+        "learning_runtime_mutation_required_count": _int(
+            worklist.get("runtime_mutation_required_count")
+        ),
+        "learning_engineering_actionable_count": _int(
+            worklist.get("engineering_actionable_count")
+        ),
+        "top_learning_task_id": top_task.get("task_id"),
+        "top_learning_task_arm_id": top_task.get("arm_id"),
+        "top_learning_task_type": top_task.get("task_type"),
+        "top_learning_task_objective": top_task.get("learning_objective"),
+        "top_learning_task_actionability": top_task.get("actionability"),
+        "top_learning_task_requires_operator_authorization": top_task.get(
+            "requires_operator_authorization"
+        ),
+        "top_learning_task_runtime_mutation_required": top_task.get(
+            "runtime_mutation_required"
+        ),
+        "top_learning_task_next_trigger": top_task.get("next_trigger"),
+    }
+
+
 def build_runtime_killboard(
     *,
     data_dir: Path,
@@ -1616,6 +1654,8 @@ def build_runtime_killboard(
     )
     plan = build_discovery_plan(arms, min_samples=min_samples, now_utc=now)
     counts = _action_counts(plan)
+    learning_worklist = _learning_worklist(plan)
+    learning_summary = _learning_summary(learning_worklist)
     scorecard = (
         plan.get("profitability_blocker_scorecard")
         if isinstance(plan.get("profitability_blocker_scorecard"), dict)
@@ -1670,10 +1710,12 @@ def build_runtime_killboard(
                 counts.get("READY_FOR_PROBE", 0) > 0
                 and runtime_source_activation_ready
             ),
+            **learning_summary,
         },
         "runtime_source": runtime_source,
         "discovery_plan": plan,
         "profitability_blocker_scorecard": plan.get("profitability_blocker_scorecard"),
+        "learning_worklist": learning_worklist,
         "arms_raw": arms,
     }
 
@@ -1709,6 +1751,24 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
         "run_read_only_capture": kb.get("run_read_only_capture"),
         "wait": kb.get("wait"),
         "block": kb.get("block"),
+        "learning_worklist_status": kb.get("learning_worklist_status"),
+        "learning_task_count": kb.get("learning_task_count"),
+        "learning_operator_required_count": kb.get("learning_operator_required_count"),
+        "learning_runtime_mutation_required_count": kb.get(
+            "learning_runtime_mutation_required_count"
+        ),
+        "learning_engineering_actionable_count": kb.get(
+            "learning_engineering_actionable_count"
+        ),
+        "top_learning_task_arm_id": kb.get("top_learning_task_arm_id"),
+        "top_learning_task_type": kb.get("top_learning_task_type"),
+        "top_learning_task_actionability": kb.get("top_learning_task_actionability"),
+        "top_learning_task_requires_operator_authorization": kb.get(
+            "top_learning_task_requires_operator_authorization"
+        ),
+        "top_learning_task_runtime_mutation_required": kb.get(
+            "top_learning_task_runtime_mutation_required"
+        ),
     }
 
 
