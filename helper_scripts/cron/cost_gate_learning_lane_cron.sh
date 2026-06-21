@@ -23,12 +23,15 @@ LOCK_ROOT="${DATA}/locks"
 LOCK_DIR="${LOCK_ROOT}/cost_gate_learning_lane_cron.lock.d"
 HEARTBEAT_DIR="${DATA}/cron_heartbeat"
 LEDGER="${OPENCLAW_COST_GATE_LEARNING_LEDGER:-$LANE_DIR/probe_ledger.jsonl}"
+SCORECARD_JSON="${OPENCLAW_COST_GATE_SCORECARD_JSON:-$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json}"
 
 PG_TIMEFRAME="${OPENCLAW_COST_GATE_LEARNING_PG_TIMEFRAME:-1m}"
 OUTCOME_HORIZON_MINUTES="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES:-60}"
 OUTCOME_COST_BPS="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_COST_BPS:-4.0}"
 MAX_ENTRY_DELAY_MS="${OPENCLAW_COST_GATE_LEARNING_MAX_ENTRY_DELAY_MS:-300000}"
 PG_STATEMENT_TIMEOUT_MS="${OPENCLAW_COST_GATE_LEARNING_PG_STATEMENT_TIMEOUT_MS:-180000}"
+HISTORICAL_MAX_SCORECARD_AGE_HOURS="${OPENCLAW_COST_GATE_HISTORICAL_MAX_SCORECARD_AGE_HOURS:-36}"
+HISTORICAL_MIN_CANDIDATE_SAMPLE="${OPENCLAW_COST_GATE_HISTORICAL_MIN_CANDIDATE_SAMPLE:-100}"
 APPEND_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES:-1}"
 RECORD_PROBE_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES:-0}"
 REVIEW_MIN_OUTCOMES="${OPENCLAW_COST_GATE_REVIEW_MIN_OUTCOMES_PER_SIDE_CELL:-3}"
@@ -75,6 +78,8 @@ validate_int "OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES" "$OUTCOME_HOR
 validate_decimal "OPENCLAW_COST_GATE_LEARNING_OUTCOME_COST_BPS" "$OUTCOME_COST_BPS"
 validate_int "OPENCLAW_COST_GATE_LEARNING_MAX_ENTRY_DELAY_MS" "$MAX_ENTRY_DELAY_MS"
 validate_int "OPENCLAW_COST_GATE_LEARNING_PG_STATEMENT_TIMEOUT_MS" "$PG_STATEMENT_TIMEOUT_MS"
+validate_int "OPENCLAW_COST_GATE_HISTORICAL_MAX_SCORECARD_AGE_HOURS" "$HISTORICAL_MAX_SCORECARD_AGE_HOURS"
+validate_int "OPENCLAW_COST_GATE_HISTORICAL_MIN_CANDIDATE_SAMPLE" "$HISTORICAL_MIN_CANDIDATE_SAMPLE"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES" "$APPEND_OUTCOMES"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES" "$RECORD_PROBE_OUTCOMES"
 validate_int "OPENCLAW_COST_GATE_REVIEW_MIN_OUTCOMES_PER_SIDE_CELL" "$REVIEW_MIN_OUTCOMES"
@@ -133,6 +138,16 @@ REFRESH_OUT="${LANE_DIR}/outcome_refresh_${STAMP}.json"
 REFRESH_LATEST="${LANE_DIR}/outcome_refresh_latest.json"
 REVIEW_OUT="${LANE_DIR}/blocked_outcome_review_${STAMP}.json"
 REVIEW_LATEST="${LANE_DIR}/blocked_outcome_review_latest.json"
+HISTORICAL_REVIEW_OUT="${LANE_DIR}/historical_scorecard_review_${STAMP}.json"
+HISTORICAL_REVIEW_LATEST="${LANE_DIR}/historical_scorecard_review_latest.json"
+
+HISTORICAL_REVIEW_ARGS=(
+    -m cost_gate_learning_lane.historical_review
+    --scorecard-json "$SCORECARD_JSON"
+    --max-scorecard-age-hours "$HISTORICAL_MAX_SCORECARD_AGE_HOURS"
+    --min-candidate-sample "$HISTORICAL_MIN_CANDIDATE_SAMPLE"
+    --output "$HISTORICAL_REVIEW_OUT"
+)
 
 REFRESH_ARGS=(
     -m cost_gate_learning_lane.outcome_refresh
@@ -163,6 +178,17 @@ REVIEW_ARGS=(
 )
 
 echo "[$(ts)] === Cost-gate learning lane refresh start append=${APPEND_OUTCOMES} ledger=${LEDGER} ===" >> "$LOG"
+historical_review_rc=0
+(
+    cd "$BASE"
+    export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+    export PYTHONDONTWRITEBYTECODE=1
+    "$PYBIN" "${HISTORICAL_REVIEW_ARGS[@]}"
+) >> "$LOG" 2>&1 || historical_review_rc=$?
+if [[ -f "$HISTORICAL_REVIEW_OUT" ]]; then
+    cp "$HISTORICAL_REVIEW_OUT" "$HISTORICAL_REVIEW_LATEST"
+fi
+
 refresh_rc=0
 (
     cd "$BASE"
@@ -185,7 +211,7 @@ if [[ -f "$REVIEW_OUT" ]]; then
     cp "$REVIEW_OUT" "$REVIEW_LATEST"
 fi
 
-STATUS_JSON=$(REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" LEDGER="$LEDGER" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
+STATUS_JSON=$(HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" HISTORICAL_REVIEW_RC="$historical_review_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" LEDGER="$LEDGER" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
 import hashlib
 import json
@@ -206,6 +232,7 @@ def load(path):
         return {}, None, f"{type(exc).__name__}:{exc}"
 
 
+historical, historical_sha, historical_err = load(os.environ["HISTORICAL_REVIEW_OUT"])
 refresh, refresh_sha, refresh_err = load(os.environ["REFRESH_OUT"])
 review, review_sha, review_err = load(os.environ["REVIEW_OUT"])
 ledger = Path(os.environ["LEDGER"])
@@ -220,11 +247,19 @@ except OSError:
 status = {
     "ts_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "check": "cost_gate_learning_lane",
+    "historical_review_rc": int(os.environ["HISTORICAL_REVIEW_RC"]),
     "refresh_rc": int(os.environ["REFRESH_RC"]),
     "review_rc": int(os.environ["REVIEW_RC"]),
     "append_outcomes": os.environ["APPEND_OUTCOMES"] == "1",
     "ledger_path": str(ledger),
     "ledger_row_count": ledger_rows,
+    "historical_review_artifact_path": os.environ["HISTORICAL_REVIEW_OUT"],
+    "historical_review_sha256": historical_sha,
+    "historical_review_error": historical_err,
+    "historical_review_status": historical.get("status"),
+    "historical_review_reason": historical.get("reason"),
+    "historical_review_next_trigger": historical.get("next_trigger"),
+    "historical_candidate_side_cell_count": historical.get("historical_candidate_side_cell_count"),
     "refresh_artifact_path": os.environ["REFRESH_OUT"],
     "refresh_sha256": refresh_sha,
     "refresh_error": refresh_err,
@@ -249,7 +284,7 @@ if [[ -n "$STATUS_JSON" ]]; then
     echo "$STATUS_JSON" >> "$STATUS_LOG"
 fi
 
-echo "[$(ts)] === Cost-gate learning lane refresh end refresh_rc=${refresh_rc} review_rc=${review_rc} ===" >> "$LOG"
+echo "[$(ts)] === Cost-gate learning lane refresh end historical_review_rc=${historical_review_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} ===" >> "$LOG"
 
 # fail-soft: rc/status are recorded; alpha-discovery reads artifacts and ledger
 # state. Operator action is required for deploy, writer enablement, or probe authority.

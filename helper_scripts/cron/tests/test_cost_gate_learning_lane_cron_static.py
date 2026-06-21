@@ -43,8 +43,10 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "probe_ledger.jsonl" in src
     assert "outcome_refresh_latest.json" in src
     assert "blocked_outcome_review_latest.json" in src
+    assert "historical_scorecard_review_latest.json" in src
     assert "cost_gate_learning_lane.outcome_refresh" in src
     assert "cost_gate_learning_lane.outcome_review" in src
+    assert "cost_gate_learning_lane.historical_review" in src
     assert "--source-pg" in src
     assert "--record-blocked-outcomes" in src
     assert "--append-ledger" in src
@@ -61,6 +63,8 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'OUTCOME_HORIZON_MINUTES="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES:-60}"' in src
     assert 'OUTCOME_COST_BPS="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_COST_BPS:-4.0}"' in src
     assert 'MAX_ENTRY_DELAY_MS="${OPENCLAW_COST_GATE_LEARNING_MAX_ENTRY_DELAY_MS:-300000}"' in src
+    assert 'HISTORICAL_MAX_SCORECARD_AGE_HOURS="${OPENCLAW_COST_GATE_HISTORICAL_MAX_SCORECARD_AGE_HOURS:-36}"' in src
+    assert 'HISTORICAL_MIN_CANDIDATE_SAMPLE="${OPENCLAW_COST_GATE_HISTORICAL_MIN_CANDIDATE_SAMPLE:-100}"' in src
     assert 'APPEND_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES:-1}"' in src
     assert 'RECORD_PROBE_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES:-0}"' in src
     assert 'REVIEW_MIN_OUTCOMES="${OPENCLAW_COST_GATE_REVIEW_MIN_OUTCOMES_PER_SIDE_CELL:-3}"' in src
@@ -68,6 +72,8 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'REVIEW_MIN_NET_POSITIVE_PCT="${OPENCLAW_COST_GATE_REVIEW_MIN_NET_POSITIVE_PCT:-60.0}"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES"' in src
+    assert 'validate_int "OPENCLAW_COST_GATE_HISTORICAL_MAX_SCORECARD_AGE_HOURS"' in src
+    assert 'validate_int "OPENCLAW_COST_GATE_HISTORICAL_MIN_CANDIDATE_SAMPLE"' in src
 
 
 def test_installer_dry_run_apply_gate_and_reversible_entry() -> None:

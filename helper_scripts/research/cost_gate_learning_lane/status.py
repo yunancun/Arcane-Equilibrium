@@ -19,6 +19,9 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from cost_gate_learning_lane.historical_review import (
+    build_historical_scorecard_review_from_file,
+)
 from cost_gate_learning_lane.outcome_review import build_blocked_signal_outcome_review
 
 
@@ -34,6 +37,7 @@ REQUIRED_SOURCE_RELATIVE_PATHS = (
     "helper_scripts/research/cost_gate_learning_lane/runtime_adapter.py",
     "helper_scripts/research/cost_gate_learning_lane/outcome_refresh.py",
     "helper_scripts/research/cost_gate_learning_lane/outcome_review.py",
+    "helper_scripts/research/cost_gate_learning_lane/historical_review.py",
     "helper_scripts/research/cost_gate_learning_lane/status.py",
 )
 
@@ -714,6 +718,52 @@ def summarize_cost_gate_learning_lane_loop(
     }
 
 
+def summarize_cost_gate_learning_lane_historical_review(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+) -> dict[str, Any]:
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    review_path = lane_dir / "historical_scorecard_review_latest.json"
+    scorecard_path = (
+        data_dir
+        / "cost_gate_counterfactual"
+        / "cost_gate_reject_counterfactual_latest.json"
+    )
+    review_payload, review_err = _read_json(review_path)
+    source_kind = "review_artifact"
+    if review_err:
+        source_kind = "scorecard_direct"
+        review_payload = build_historical_scorecard_review_from_file(
+            scorecard_path,
+            now_utc=now_utc,
+        )
+    assert review_payload is not None
+    generated_at = review_payload.get("generated_at_utc")
+    age = _age_seconds(generated_at, now_utc=now_utc)
+    status = str(review_payload.get("status") or "UNKNOWN")
+    candidates = _int(review_payload.get("historical_candidate_side_cell_count"))
+    keep_blocked = _int(review_payload.get("historical_keep_blocked_side_cell_count"))
+    data_tasks = _int(review_payload.get("historical_data_coverage_task_count"))
+    return {
+        "historical_scorecard_review_path": str(review_path),
+        "historical_scorecard_review_error": review_err,
+        "historical_scorecard_review_source_kind": source_kind,
+        "historical_scorecard_source_path": str(scorecard_path),
+        "historical_scorecard_review_status": status,
+        "historical_scorecard_review_reason": review_payload.get("reason"),
+        "historical_scorecard_review_next_trigger": review_payload.get("next_trigger"),
+        "historical_scorecard_review_generated_at_utc": generated_at,
+        "historical_scorecard_review_age_seconds": age,
+        "historical_candidate_side_cell_count": candidates,
+        "historical_keep_blocked_side_cell_count": keep_blocked,
+        "historical_data_coverage_task_count": data_tasks,
+        "historical_counterfactual_candidates_present": candidates > 0,
+        "historical_counterfactual_is_runtime_evidence": False,
+        "historical_scorecard_review": review_payload,
+    }
+
+
 def summarize_cost_gate_learning_lane_source(
     repo_root: Path | None = None,
     *,
@@ -1160,6 +1210,10 @@ def build_cost_gate_learning_lane_activation_preflight(
         now_utc=now,
         max_age_seconds=max_loop_age_seconds,
     )
+    historical_review = summarize_cost_gate_learning_lane_historical_review(
+        data_dir,
+        now_utc=now,
+    )
     writer_config = summarize_cost_gate_learning_lane_writer_config(
         data_dir,
         env_file=runtime_env_file,
@@ -1231,6 +1285,14 @@ def build_cost_gate_learning_lane_activation_preflight(
                 bool(ledger.get("blocked_signal_outcome_review_status"))
                 or loop.get("learning_loop_review_latest_error") is None
             ),
+            "historical_counterfactual_review_available": (
+                str(historical_review.get("historical_scorecard_review_status"))
+                not in {"SOURCE_SCORECARD_UNAVAILABLE", "WAIT_FOR_HISTORICAL_SCORECARD_REFRESH"}
+            ),
+            "historical_counterfactual_candidates_present": (
+                historical_review.get("historical_counterfactual_candidates_present") is True
+            ),
+            "historical_counterfactual_is_runtime_evidence": False,
             "runtime_source_ready_for_activation": (
                 source.get("source_activation_ready") is True
             ),
@@ -1259,6 +1321,7 @@ def build_cost_gate_learning_lane_activation_preflight(
         "plan": plan,
         "ledger": ledger,
         "learning_loop": loop,
+        "historical_review": historical_review,
         "boundary": (
             "read-only activation preflight only; no PG write/schema migration, "
             "Bybit private/signed/trading call, order, auth/risk/runtime/config "

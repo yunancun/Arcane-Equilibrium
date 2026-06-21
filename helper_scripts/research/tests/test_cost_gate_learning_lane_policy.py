@@ -16,6 +16,12 @@ from cost_gate_learning_lane.policy import (
     build_plan_from_file,
     build_plan_from_payload,
 )
+from cost_gate_learning_lane.historical_review import (
+    HISTORICAL_REVIEW_SCHEMA_VERSION,
+    HistoricalScorecardReviewConfig,
+    build_historical_scorecard_review,
+    build_historical_scorecard_review_from_file,
+)
 from cost_gate_learning_lane.outcome_writer import (
     ProbeOutcomeConfig,
     build_blocked_signal_outcome_records,
@@ -253,6 +259,49 @@ def test_policy_plan_keeps_main_gate_closed_and_selects_only_probe_candidates():
     assert plan["data_coverage_tasks"][0]["side_cell_key"] == "grid_trading|OPUSDT|Sell"
 
 
+def test_historical_scorecard_review_prioritizes_candidates_without_authority():
+    review = build_historical_scorecard_review(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+        cfg=HistoricalScorecardReviewConfig(max_side_cells=4),
+    )
+
+    assert review["schema_version"] == HISTORICAL_REVIEW_SCHEMA_VERSION
+    assert review["status"] == "HISTORICAL_COUNTERFACTUAL_CANDIDATES_PRESENT"
+    assert review["runtime_evidence_status"] == "NOT_RUNTIME_LEDGER_EVIDENCE"
+    assert review["runtime_evidence_required_before_probe_authority"] is True
+    assert review["promotion_evidence"] is False
+    assert review["order_authority"] == "NOT_GRANTED"
+    assert review["main_cost_gate_adjustment"] == "NONE"
+    assert [row["side_cell_key"] for row in review["historical_probe_candidates"]] == [
+        "ma_crossover|ETHUSDT|Sell",
+        "ma_crossover|NEARUSDT|Sell",
+    ]
+    assert review["historical_keep_blocked_side_cells"][0]["side_cell_key"] == (
+        "ma_crossover|BTCUSDT|Buy"
+    )
+
+
+def test_historical_scorecard_review_waits_on_stale_scorecard(tmp_path: Path):
+    path = tmp_path / "scorecard.json"
+    path.write_text(
+        json.dumps(_scorecard_payload("2026-06-20T00:00:00+00:00")),
+        encoding="utf-8",
+    )
+
+    review = build_historical_scorecard_review_from_file(
+        path,
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+        cfg=HistoricalScorecardReviewConfig(max_scorecard_age_hours=6),
+    )
+
+    assert review["status"] == "WAIT_FOR_HISTORICAL_SCORECARD_REFRESH"
+    assert review["reason"] == "stale_scorecard"
+    assert review["historical_candidate_side_cell_count"] == 0
+    assert review["historical_probe_candidates"] == []
+    assert review["order_authority"] == "NOT_GRANTED"
+
+
 def test_policy_plan_waits_on_stale_scorecard(tmp_path: Path):
     path = tmp_path / "scorecard.json"
     path.write_text(json.dumps(_scorecard_payload("2026-06-20T00:00:00+00:00")), encoding="utf-8")
@@ -326,6 +375,57 @@ def test_alpha_discovery_does_not_mark_cost_gate_plan_ready_without_runtime_ledg
     assert row["learning_loop_heartbeat_present"] is False
     assert row["admission_decision_count"] == 0
     assert row["probe_candidates"][0]["side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+
+
+def test_alpha_discovery_routes_historical_cost_gate_candidates_to_runtime_capture(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    scorecard = _scorecard_payload()
+    plan = build_plan_from_payload(
+        scorecard,
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    plan_path = data_dir / "cost_gate_learning_lane" / "demo_learning_lane_plan_latest.json"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    scorecard_path = (
+        data_dir
+        / "cost_gate_counterfactual"
+        / "cost_gate_reject_counterfactual_latest.json"
+    )
+    scorecard_path.parent.mkdir(parents=True)
+    scorecard_path.write_text(json.dumps(scorecard), encoding="utf-8")
+
+    arm = collect_cost_gate_learning_lane_arm(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+    discovery = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+    row = discovery["profitability_blocker_scorecard"]["arms"][0]
+
+    assert discovery["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
+    assert discovery["arms"][0]["reason"] == (
+        "historical_cost_gate_counterfactual_candidates_need_runtime_capture"
+    )
+    assert row["blocker_class"] == "data_coverage"
+    assert row["primary_blocker"] == "historical_cost_gate_candidates_not_runtime_verified"
+    assert row["next_trigger"] == (
+        "enable_runtime_writer_to_accumulate_reject_outcomes_for_historical_candidates"
+    )
+    assert row["operator_actionable"] is False
+    assert row["engineering_actionable"] is True
+    assert row["ledger_status"] == "MISSING"
+    assert row["historical_scorecard_review_status"] == (
+        "HISTORICAL_COUNTERFACTUAL_CANDIDATES_PRESENT"
+    )
+    assert row["historical_candidate_side_cell_count"] == 2
+    assert row["historical_counterfactual_is_runtime_evidence"] is False
+    assert row["order_authority"] == "NOT_GRANTED"
+    assert row["main_cost_gate_adjustment"] == "NONE"
 
 
 def test_alpha_discovery_surfaces_learning_loop_running_without_ledger_rows(
@@ -420,6 +520,47 @@ def test_activation_preflight_reports_not_accumulating_without_runtime_artifacts
     assert preflight["plan"]["main_cost_gate_adjustment"] == "NONE"
     assert preflight["plan"]["order_authority"] == "NOT_GRANTED"
     assert "probe_ledger_jsonl" in preflight["missing_links"]
+
+
+def test_activation_preflight_surfaces_historical_scorecard_candidates(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    scorecard = _scorecard_payload()
+    plan = build_plan_from_payload(
+        scorecard,
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    scorecard_path = (
+        data_dir
+        / "cost_gate_counterfactual"
+        / "cost_gate_reject_counterfactual_latest.json"
+    )
+    scorecard_path.parent.mkdir(parents=True)
+    scorecard_path.write_text(json.dumps(scorecard), encoding="utf-8")
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["status"] == "NOT_ACCUMULATING"
+    assert preflight["answers"]["historical_counterfactual_review_available"] is True
+    assert preflight["answers"]["historical_counterfactual_candidates_present"] is True
+    assert preflight["answers"]["historical_counterfactual_is_runtime_evidence"] is False
+    assert preflight["historical_review"]["historical_scorecard_review_status"] == (
+        "HISTORICAL_COUNTERFACTUAL_CANDIDATES_PRESENT"
+    )
+    assert preflight["historical_review"]["historical_candidate_side_cell_count"] == 2
+    assert preflight["historical_review"]["historical_scorecard_review"][
+        "order_authority"
+    ] == "NOT_GRANTED"
 
 
 def test_writer_config_reports_enabled_env_file_paths(tmp_path: Path):

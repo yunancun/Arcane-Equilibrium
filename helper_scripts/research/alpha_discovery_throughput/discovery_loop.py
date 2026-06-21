@@ -87,6 +87,34 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         or blocked_review.get("status")
         or ""
     ).upper()
+    historical_review = _dict(detail.get("historical_scorecard_review"))
+    historical_review_status = str(
+        detail.get("historical_scorecard_review_status")
+        or historical_review.get("status")
+        or ""
+    ).upper()
+    historical_candidate_count = _int(
+        detail.get("historical_candidate_side_cell_count")
+    )
+
+    if (
+        ledger_status in {"MISSING", "EMPTY"}
+        and historical_review_status == "HISTORICAL_COUNTERFACTUAL_CANDIDATES_PRESENT"
+        and historical_candidate_count > 0
+    ):
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "historical_cost_gate_counterfactual_candidates_need_runtime_capture",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "historical_cost_gate_candidates_not_runtime_verified",
+            "next_trigger": (
+                detail.get("historical_scorecard_review_next_trigger")
+                or historical_review.get("next_trigger")
+                or "enable_runtime_writer_to_accumulate_reject_outcomes_for_historical_candidates"
+            ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
 
     if ledger_status in {"MISSING", "EMPTY"} and loop_status == "NOT_SEEN":
         return {
@@ -1027,6 +1055,39 @@ def classify_profitability_blocker(
                 "probe_candidates": detail.get("probe_candidates"),
                 "do_not_probe_side_cells": detail.get("do_not_probe_side_cells"),
                 "data_coverage_tasks": detail.get("data_coverage_tasks"),
+                "historical_scorecard_review_status": detail.get(
+                    "historical_scorecard_review_status"
+                ),
+                "historical_scorecard_review_reason": detail.get(
+                    "historical_scorecard_review_reason"
+                ),
+                "historical_scorecard_review_next_trigger": detail.get(
+                    "historical_scorecard_review_next_trigger"
+                ),
+                "historical_scorecard_review_source_kind": detail.get(
+                    "historical_scorecard_review_source_kind"
+                ),
+                "historical_scorecard_review_path": detail.get(
+                    "historical_scorecard_review_path"
+                ),
+                "historical_scorecard_source_path": detail.get(
+                    "historical_scorecard_source_path"
+                ),
+                "historical_candidate_side_cell_count": detail.get(
+                    "historical_candidate_side_cell_count"
+                ),
+                "historical_keep_blocked_side_cell_count": detail.get(
+                    "historical_keep_blocked_side_cell_count"
+                ),
+                "historical_data_coverage_task_count": detail.get(
+                    "historical_data_coverage_task_count"
+                ),
+                "historical_counterfactual_is_runtime_evidence": detail.get(
+                    "historical_counterfactual_is_runtime_evidence"
+                ),
+                "historical_scorecard_review": detail.get(
+                    "historical_scorecard_review"
+                ),
                 "ledger_status": ledger_status,
                 "ledger_path": detail.get("ledger_path"),
                 "ledger_source_error": detail.get("ledger_source_error"),
