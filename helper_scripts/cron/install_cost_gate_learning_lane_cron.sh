@@ -18,6 +18,9 @@ OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS="${OPENCLAW_COST_GATE_LE
 OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES:-1}"
 OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES:-0}"
 OPENCLAW_COST_GATE_LEARNING_CRON_MINUTES="${OPENCLAW_COST_GATE_LEARNING_CRON_MINUTES:-27}"
+OPENCLAW_COST_GATE_LEARNING_INSTALL_PREFLIGHT="${OPENCLAW_COST_GATE_LEARNING_INSTALL_PREFLIGHT:-1}"
+OPENCLAW_COST_GATE_LEARNING_REQUIRE_EXPECTED_HEAD="${OPENCLAW_COST_GATE_LEARNING_REQUIRE_EXPECTED_HEAD:-1}"
+OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD="${OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD:-${OPENCLAW_EXPECTED_SOURCE_HEAD:-}}"
 
 WRAPPER="$OPENCLAW_BASE_DIR/helper_scripts/cron/cost_gate_learning_lane_cron.sh"
 MARKER="cost_gate_learning_lane_cron.sh"
@@ -49,6 +52,15 @@ if crontab -l 2>/dev/null | grep -q "$MARKER"; then
     echo "SKIP: existing cost_gate_learning_lane cron entry detected; not installing (use --remove first)." >&2
     crontab -l | grep "$MARKER" >&2
     exit 0
+fi
+
+PYBIN="${OPENCLAW_PYTHON_BIN:-}"
+if [[ -z "$PYBIN" ]]; then
+    if [[ -x "$HOME/.venv/bin/python" ]]; then
+        PYBIN="$HOME/.venv/bin/python"
+    else
+        PYBIN="python3"
+    fi
 fi
 
 _validate_cron_env_value() {
@@ -98,6 +110,8 @@ _validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES" "$OPENCLAW_COST_G
 _validate_bool01 "OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS" "$OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS"
 _validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS" "$OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS"
 _validate_bool01 "OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES" "$OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES"
+_validate_bool01 "OPENCLAW_COST_GATE_LEARNING_INSTALL_PREFLIGHT" "$OPENCLAW_COST_GATE_LEARNING_INSTALL_PREFLIGHT"
+_validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REQUIRE_EXPECTED_HEAD" "$OPENCLAW_COST_GATE_LEARNING_REQUIRE_EXPECTED_HEAD"
 _validate_cron_minute_list "OPENCLAW_COST_GATE_LEARNING_CRON_MINUTES" "$OPENCLAW_COST_GATE_LEARNING_CRON_MINUTES"
 _validate_cron_env_value "OPENCLAW_BASE_DIR" "$OPENCLAW_BASE_DIR"
 _validate_cron_env_value "OPENCLAW_DATA_DIR" "$OPENCLAW_DATA_DIR"
@@ -117,6 +131,7 @@ echo "Schedule minutes: $OPENCLAW_COST_GATE_LEARNING_CRON_MINUTES UTC minutes"
 echo "Artifacts: $OPENCLAW_DATA_DIR/cost_gate_learning_lane/"
 echo "Status log: $OPENCLAW_DATA_DIR/logs/cost_gate_learning_lane.log"
 echo "Heartbeat: $OPENCLAW_DATA_DIR/cron_heartbeat/cost_gate_learning_lane.last_fire"
+echo "Apply preflight: $OPENCLAW_COST_GATE_LEARNING_INSTALL_PREFLIGHT (expected-head required: $OPENCLAW_COST_GATE_LEARNING_REQUIRE_EXPECTED_HEAD)"
 echo "Rollback: $0 --remove (with OPENCLAW_COST_GATE_LEARNING_CRON_APPLY=1)"
 echo "Boundary: artifact-only JSONL/JSON refresh; readonly PG; no order authority or Cost Gate relaxation"
 
@@ -125,6 +140,61 @@ if [[ "${OPENCLAW_COST_GATE_LEARNING_CRON_APPLY:-0}" != "1" ]]; then
     echo "DRY-RUN: not modifying crontab."
     echo "Set OPENCLAW_COST_GATE_LEARNING_CRON_APPLY=1 to actually install."
     exit 0
+fi
+
+if [[ "$OPENCLAW_COST_GATE_LEARNING_INSTALL_PREFLIGHT" == "1" ]]; then
+    if [[ "$OPENCLAW_COST_GATE_LEARNING_REQUIRE_EXPECTED_HEAD" == "1" && -z "$OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD" ]]; then
+        echo "ERROR: OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD or OPENCLAW_EXPECTED_SOURCE_HEAD is required when apply preflight is enabled." >&2
+        exit 7
+    fi
+    echo "Running read-only cost-gate learning activation preflight before crontab install..."
+    (
+        cd "$OPENCLAW_BASE_DIR"
+        export PYTHONPATH="$OPENCLAW_BASE_DIR/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+        export OPENCLAW_BASE_DIR OPENCLAW_DATA_DIR OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD
+        "$PYBIN" - <<'PY'
+import json
+import os
+from pathlib import Path
+
+from cost_gate_learning_lane.status import (
+    build_cost_gate_learning_lane_activation_preflight,
+)
+
+data_dir = Path(os.environ["OPENCLAW_DATA_DIR"])
+repo_root = Path(os.environ["OPENCLAW_BASE_DIR"])
+expected_head = os.environ.get("OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD") or None
+payload = build_cost_gate_learning_lane_activation_preflight(
+    data_dir,
+    repo_root=repo_root,
+    expected_head=expected_head,
+)
+source = payload.get("source") or {}
+plan = payload.get("plan") or {}
+failures = []
+if source.get("source_ready") is not True:
+    failures.append("required_source_files_not_ready")
+if source.get("source_activation_ready") is not True:
+    failures.append(str(source.get("source_activation_status") or "source_activation_not_ready"))
+if expected_head and source.get("expected_head_matches") is not True:
+    failures.append(str(source.get("expected_head_status") or "expected_head_not_matched"))
+if plan.get("plan_status") != "READY":
+    failures.append(str(plan.get("plan_status") or "plan_not_ready"))
+
+summary = {
+    "status": payload.get("status"),
+    "reason": payload.get("reason"),
+    "source_activation_status": source.get("source_activation_status"),
+    "expected_head_status": source.get("expected_head_status"),
+    "plan_status": plan.get("plan_status"),
+    "ledger_status": (payload.get("ledger") or {}).get("ledger_status"),
+    "failures": failures,
+    "boundary": "read-only installer preflight; no crontab edit performed by this check",
+}
+print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+raise SystemExit(0 if not failures else 7)
+PY
+    )
 fi
 
 ( crontab -l 2>/dev/null; echo "$ENTRY" ) | crontab -

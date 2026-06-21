@@ -13,7 +13,7 @@
 | 凭证 / key rotation | `credential_rotation.md`, `replay_signing_key_rotation.md` |
 | DB restore / 演练 | `pg_restore_drill_sop.md` |
 | Replay / REF-21 操作 | `ref21_replay_operator_runbook.md`, `2026-05-21--counterfactual_quality_report_runbook.md` |
-| Cost Gate demo-learning lane activation | `2026-06-21--cost_gate_learning_lane_runtime_activation.md` |
+| Cost Gate demo-learning lane activation | `2026-06-21--cost_gate_learning_lane_runtime_activation.md`（installer apply path now enforces read-only expected-head activation preflight by default） |
 | Earn / 资金移动 | `2026-05-21--earn_governance_runbook.md` |
 | M-series 运维 | `2026-05-21--m*_runbook.md` |
 | OPS / trust first use | `2026-05-28--ops_1_cert_trust_first_use.md` |
