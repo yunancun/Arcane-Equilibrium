@@ -37,6 +37,7 @@ from cost_gate_learning_lane.status import (
     REQUIRED_SOURCE_RELATIVE_PATHS,
     build_cost_gate_learning_lane_activation_preflight,
     summarize_cost_gate_learning_lane_writer_config,
+    summarize_cost_gate_learning_lane_writer_process,
     summarize_cost_gate_learning_lane_source,
 )
 from cost_gate_learning_lane.price_observations import (
@@ -532,6 +533,112 @@ def test_activation_preflight_accepts_runtime_writer_enabled_env_file(tmp_path: 
     assert preflight["answers"]["runtime_writer_config_required"] is True
     assert preflight["answers"]["writer_disabled_or_unset_drop_risk"] is False
     assert "runtime_writer_not_enabled" not in preflight["activation_blockers"]
+
+
+def test_writer_process_reports_enabled_proc_environ_paths(tmp_path: Path):
+    data_dir = tmp_path / "data"
+    proc_env = tmp_path / "environ"
+    proc_env.write_bytes(
+        b"OPENCLAW_DEMO_LEARNING_LANE_WRITER=1\0"
+        b"OPENCLAW_DEMO_LEARNING_LANE_PLAN=/tmp/runtime_plan.json\0"
+        b"OPENCLAW_DEMO_LEARNING_LANE_LEDGER=/tmp/runtime_ledger.jsonl\0"
+    )
+
+    process = summarize_cost_gate_learning_lane_writer_process(
+        data_dir,
+        proc_environ_file=proc_env,
+        require_writer_enabled=True,
+    )
+
+    assert process["writer_process_checked"] is True
+    assert process["writer_process_status"] == "ENABLED"
+    assert process["writer_process_enabled"] is True
+    assert process["writer_env_value"] == "1"
+    assert process["plan_path"] == "/tmp/runtime_plan.json"
+    assert process["ledger_path"] == "/tmp/runtime_ledger.jsonl"
+
+
+def test_writer_process_reports_unreadable_proc_environ(tmp_path: Path):
+    process = summarize_cost_gate_learning_lane_writer_process(
+        tmp_path,
+        proc_environ_file=tmp_path / "missing-environ",
+        require_writer_enabled=True,
+    )
+
+    assert process["writer_process_checked"] is False
+    assert process["writer_process_status"] == "PROC_ENVIRON_UNREADABLE"
+    assert process["writer_process_enabled"] is None
+    assert process["proc_environ_error"] == "missing"
+
+
+def test_activation_preflight_can_require_running_process_writer_enabled(
+    tmp_path: Path,
+):
+    repo, _remote = _init_source_repo_with_origin(tmp_path)
+    data_dir = tmp_path / "data"
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text(
+        "OPENCLAW_DEMO_LEARNING_LANE_WRITER=1\n",
+        encoding="utf-8",
+    )
+    proc_env = tmp_path / "environ"
+    proc_env.write_bytes(b"OPENCLAW_DEMO_LEARNING_LANE_WRITER=0\0")
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        repo_root=repo,
+        runtime_env_file=env_file,
+        runtime_proc_environ=proc_env,
+        require_writer_enabled=True,
+        require_process_writer_enabled=True,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["answers"]["runtime_writer_enabled"] is True
+    assert preflight["answers"]["runtime_writer_process_checked"] is True
+    assert preflight["answers"]["runtime_writer_process_enabled"] is False
+    assert preflight["answers"]["runtime_writer_process_status"] == "DISABLED"
+    assert preflight["answers"]["running_engine_writer_disabled_or_unset_drop_risk"] is True
+    assert "runtime_writer_not_enabled" not in preflight["activation_blockers"]
+    assert "running_engine_writer_not_enabled" in preflight["activation_blockers"]
+
+
+def test_activation_preflight_requires_process_check_when_requested(tmp_path: Path):
+    repo, _remote = _init_source_repo_with_origin(tmp_path)
+    data_dir = tmp_path / "data"
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        repo_root=repo,
+        require_process_writer_enabled=True,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["writer_process"]["writer_process_status"] == "NOT_CHECKED"
+    assert preflight["answers"]["runtime_writer_process_checked"] is False
+    assert preflight["answers"]["runtime_writer_process_enabled"] is False
+    assert preflight["answers"]["running_engine_writer_disabled_or_unset_drop_risk"] is True
+    assert "running_engine_writer_not_enabled" in preflight["activation_blockers"]
 
 
 def test_activation_preflight_reports_loop_running_without_ledger_rows(
