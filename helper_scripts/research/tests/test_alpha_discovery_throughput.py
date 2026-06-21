@@ -1047,9 +1047,13 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
         now_utc=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.timezone.utc),
     )
 
+    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v2"
     assert result["killboard"]["is_fast_discovery_active"] is True
     assert result["killboard"]["source_present_count"] == 5
     assert result["killboard"]["ready_for_aeg_chain"] == 1
+    assert result["killboard"]["promotion_ready_count"] == 1
+    assert result["killboard"]["aeg_candidate_artifact_found"] is True
+    assert result["killboard"]["actionable_alpha_found"] is True
     assert result["killboard"]["block"] == 1
     latest = Path(result["written"]["latest"])
     assert latest.exists()
@@ -1485,6 +1489,58 @@ def test_polymarket_leadlag_arm_ready_only_for_candidate_review_with_sample(tmp_
     assert blocker["promotion_ready"] is False
     assert blocker["candidate_replay_status"] == "PAPER_REPLAY_BUILT"
     assert blocker["candidate_replay_history_status"] == "NO_REPLAY_HISTORY"
+
+
+def test_runtime_killboard_separates_polymarket_candidate_artifact_from_actionable_alpha(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_polymarket_leadlag_latest(data, {
+        "verdict": {
+            "status": "IC_CANDIDATE_REVIEW_REQUIRED",
+            "reason": "one candidate",
+            "candidate_count": 1,
+            "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
+        },
+        "counts": {
+            "snapshot_rows": 26000,
+            "snapshot_distinct_timestamps": 36,
+            "joined_rows": 105,
+            "max_overlap_adjusted_ic_points": 35,
+        },
+        "candidates": [{
+            "bucket": "event_reg",
+            "symbol": "BTCUSDT",
+            "horizon_minutes": 60,
+            "n_points": 35,
+            "t_stat_hac": 2.5,
+        }],
+        "candidate_replay_scorecard": {
+            "status": "PAPER_REPLAY_BUILT",
+            "selected_summary": {
+                "candidate_id": "polymarket_leadlag_event_reg_BTCUSDT_60m",
+                "parameter_cell_id": "event_reg|BTCUSDT|60m|rule=ic_sign_delta",
+                "sample_count": 35,
+                "net_bps_mean": 5.5,
+                "execution_realism_status": "UNMEASURED",
+            },
+        },
+    })
+
+    result = run_once(
+        data_dir=data,
+        repo_root=tmp_path,
+        now_utc=dt.datetime(2026, 6, 20, 12, 30, tzinfo=dt.timezone.utc),
+    )
+
+    assert result["killboard"]["ready_for_aeg_chain"] == 1
+    assert result["killboard"]["aeg_candidate_artifact_found"] is True
+    assert result["killboard"]["promotion_ready_count"] == 0
+    assert result["killboard"]["actionable_alpha_found"] is False
+    scorecard = result["profitability_blocker_scorecard"]
+    blockers = {row["arm_id"]: row for row in scorecard["arms"]}
+    assert blockers["polymarket_leadlag_ic"]["blocker_class"] == "data_coverage"
+    assert blockers["polymarket_leadlag_ic"]["primary_blocker"] == (
+        "polymarket_candidate_replay_history_missing"
+    )
 
 
 def test_polymarket_leadlag_arm_surfaces_replay_history(tmp_path):
