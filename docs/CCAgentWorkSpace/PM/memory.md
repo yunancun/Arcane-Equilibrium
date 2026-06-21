@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Cron Installer Apply Preflight
+
+- `install_cost_gate_learning_lane_cron.sh` now defaults to a read-only activation preflight before any crontab write, requiring an expected source head and source/activation/plan readiness.
+- The installer deliberately does not require existing ledger rows; installing the cron is the bounded step that starts materializing PG rejects and refreshing blocked outcomes.
+- Boundary remains source/test/docs only in this checkpoint: no runtime sync, cron install, env edit, writer enablement, ledger append, PG write, Bybit call, order authority, or Cost Gate lowering.
+
 ## 2026-06-21 Cost-Gate Learning Activation Runbook
 
 - Added an operator-gated runtime activation runbook for the cost-gate demo-learning lane, covering read-only audit, dirty source reconcile/sync, preflight, cron install, append enablement, optional writer restart, observation, and rollback.

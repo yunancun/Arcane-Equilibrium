@@ -98,10 +98,15 @@ def test_installer_dry_run_apply_gate_and_reversible_entry() -> None:
     assert 'OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS="${OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS:-1}"' in src
     assert 'OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES:-1}"' in src
     assert 'OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES:-0}"' in src
+    assert 'OPENCLAW_COST_GATE_LEARNING_INSTALL_PREFLIGHT="${OPENCLAW_COST_GATE_LEARNING_INSTALL_PREFLIGHT:-1}"' in src
+    assert 'OPENCLAW_COST_GATE_LEARNING_REQUIRE_EXPECTED_HEAD="${OPENCLAW_COST_GATE_LEARNING_REQUIRE_EXPECTED_HEAD:-1}"' in src
+    assert "OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD" in src
     assert 'ENTRY="${OPENCLAW_COST_GATE_LEARNING_CRON_MINUTES} * * * *' in src
     assert '_validate_cron_minute_list "OPENCLAW_COST_GATE_LEARNING_CRON_MINUTES"' in src
     assert '_validate_bool01 "OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS"' in src
     assert '_validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS"' in src
+    assert '_validate_bool01 "OPENCLAW_COST_GATE_LEARNING_INSTALL_PREFLIGHT"' in src
+    assert '_validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REQUIRE_EXPECTED_HEAD"' in src
     assert "_validate_bool01" in src
     assert "OPENCLAW_COST_GATE_LEARNING_CRON_APPLY" in src
     assert "DRY-RUN: not modifying crontab." in src
@@ -110,6 +115,22 @@ def test_installer_dry_run_apply_gate_and_reversible_entry() -> None:
     assert 'grep -q "$MARKER"' in src
     assert "cost_gate_learning_lane_cron.cron.log" in src
     assert "Boundary: artifact-only JSONL/JSON refresh; readonly PG; no order authority or Cost Gate relaxation" in src
+
+
+def test_installer_apply_requires_readonly_activation_preflight_before_crontab_write() -> None:
+    src = _src(INSTALLER)
+    assert "build_cost_gate_learning_lane_activation_preflight" in src
+    assert "Running read-only cost-gate learning activation preflight" in src
+    assert "OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD or OPENCLAW_EXPECTED_SOURCE_HEAD is required" in src
+    assert "required_source_files_not_ready" in src
+    assert "source_activation_ready" in src
+    assert "expected_head_matches" in src
+    assert "plan_status" in src
+    assert "read-only installer preflight; no crontab edit performed by this check" in src
+    assert "exit 7" in src
+    preflight_index = src.index('if [[ "$OPENCLAW_COST_GATE_LEARNING_INSTALL_PREFLIGHT" == "1" ]]')
+    install_index = src.index('( crontab -l 2>/dev/null; echo "$ENTRY" ) | crontab -')
+    assert preflight_index < install_index
 
 
 @pytest.mark.parametrize("script", [WRAPPER, INSTALLER], ids=["wrapper", "installer"])

@@ -155,21 +155,31 @@ ssh trade-core 'cd /home/ncyu/BybitOpenClaw/srv && \
 ```
 
 Review the proposed crontab entry. It should point to the synced repo and `/tmp/openclaw`.
+The dry run also prints the apply preflight posture. Default apply requires read-only activation preflight plus an expected source head.
 
 ## Cron Install
 
-Requires explicit operator approval:
+Requires explicit operator approval. The installer now runs the read-only activation preflight before any crontab write by default. It fails closed unless:
+
+- `OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD` or `OPENCLAW_EXPECTED_SOURCE_HEAD` is supplied.
+- runtime source files are present.
+- the checkout is activation-ready and matches the expected head.
+- the demo-learning plan is `READY`.
+
+Existing ledger/outcome rows are not required at install time because this cron is the bounded path that starts materializing PG rejects and refreshing blocked outcomes. `OPENCLAW_COST_GATE_LEARNING_INSTALL_PREFLIGHT=0` is an explicit bypass knob and should not be used without a separate PM/operator note.
 
 ```bash
-ssh trade-core 'cd /home/ncyu/BybitOpenClaw/srv && \
+PM_APPROVED_HEAD=REPLACE_WITH_PM_APPROVED_SHA
+ssh trade-core "cd /home/ncyu/BybitOpenClaw/srv && \
   OPENCLAW_COST_GATE_LEARNING_CRON_APPLY=1 \
+  OPENCLAW_COST_GATE_LEARNING_EXPECTED_HEAD=${PM_APPROVED_HEAD} \
   OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv \
   OPENCLAW_DATA_DIR=/tmp/openclaw \
   OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS=1 \
   OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS=1 \
   OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES=1 \
   OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES=0 \
-  helper_scripts/cron/install_cost_gate_learning_lane_cron.sh'
+  helper_scripts/cron/install_cost_gate_learning_lane_cron.sh"
 ```
 
 Rollback:
