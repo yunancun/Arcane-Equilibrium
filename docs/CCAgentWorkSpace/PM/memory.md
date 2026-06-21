@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Runtime Activation Blocker Audit
+
+- Read-only `trade-core` audit confirmed PG Cost Gate rejects are abundant (27,071 in last 4h; 4,423,477 total), so data source accumulation exists.
+- Runtime learning lane is not active: source checkout is behind/dirty and missing the new status/materializer/cron files; no learning-lane cron entry, no ledger/materializer/review artifacts, and running engine writer env is unset.
+- Next hard step is operator-approved runtime reconcile/sync + cron/writer/append activation, not another source-only wrapper or blind Cost Gate lowering.
+
 ## 2026-06-21 Cost-Gate Materializer Status Visibility
 
 - `cost_gate_learning_lane.status` now exposes reject materializer evidence from `reject_materializer_latest.json` and the learning-loop status log; activation preflight and alpha-discovery rows show ran/enabled/append/materialized/appended/decision counts.
