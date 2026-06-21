@@ -1047,9 +1047,13 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
         now_utc=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.timezone.utc),
     )
 
-    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v2"
+    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v3"
     assert result["killboard"]["is_fast_discovery_active"] is True
     assert result["killboard"]["source_present_count"] == 5
+    assert result["killboard"]["runtime_source_activation_ready"] is False
+    assert result["killboard"]["runtime_source_activation_status"] == "MISSING_FILES"
+    assert result["killboard"]["runtime_source_git_status"] == "NOT_GIT_REPO"
+    assert result["runtime_source"]["repo_root"] == str(tmp_path)
     assert result["killboard"]["ready_for_aeg_chain"] == 1
     assert result["killboard"]["promotion_ready_count"] == 1
     assert result["killboard"]["aeg_candidate_artifact_found"] is True

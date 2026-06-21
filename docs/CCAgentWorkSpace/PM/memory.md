@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Runtime Killboard Source-Readiness Visibility v3
+
+- Runtime killboard schema is now `alpha_discovery_runtime_killboard_v3`.
+- Alpha artifacts now carry top-level `runtime_source` plus mirrored source readiness/status fields in `killboard` and history JSONL.
+- This makes stale/dirty/behind/mismatched runtime source visible beside alpha/probe status, but does not sync runtime or refresh current artifacts.
+
 ## 2026-06-21 Runtime Killboard Actionable-Alpha Semantics v2
 
 - Runtime killboard schema is now `alpha_discovery_runtime_killboard_v2`.
