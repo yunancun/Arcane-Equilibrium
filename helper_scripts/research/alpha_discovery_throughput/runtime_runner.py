@@ -16,7 +16,10 @@ import re
 from pathlib import Path
 from typing import Any
 
-from cost_gate_learning_lane.outcome_review import build_blocked_signal_outcome_review
+from cost_gate_learning_lane.status import (
+    summarize_cost_gate_learning_lane_ledger,
+    summarize_cost_gate_learning_lane_loop,
+)
 from polymarket_leadlag import replay_history as polymarket_replay_history
 
 from . import RUNNER_VERSION
@@ -26,7 +29,6 @@ RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v1"
 DEFAULT_MAX_ARTIFACT_AGE_SECONDS = 6 * 60 * 60
 DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS = 36 * 60 * 60
 DEFAULT_POLYMARKET_REPLAY_HISTORY_REPORT_LIMIT = 4096
-DEFAULT_COST_GATE_LEARNING_LOOP_MAX_AGE_SECONDS = 3 * 60 * 60
 
 
 def _utc_now() -> dt.datetime:
@@ -85,127 +87,6 @@ def _read_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     return data, None
 
 
-def _summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
-    summary: dict[str, Any] = {
-        "ledger_path": str(path),
-        "ledger_status": "MISSING",
-        "ledger_source_error": None,
-        "ledger_total_rows": 0,
-        "ledger_malformed_line_count": 0,
-        "admission_decision_count": 0,
-        "admit_decision_count": 0,
-        "order_authority_not_granted_count": 0,
-        "allowed_to_submit_order_count": 0,
-        "probe_outcome_count": 0,
-        "blocked_signal_outcome_count": 0,
-        "blocked_signal_positive_outcome_count": 0,
-        "latest_record_type": None,
-        "latest_generated_at_utc": None,
-        "latest_admission_decision": None,
-        "latest_side_cell_key": None,
-        "avg_probe_outcome_net_bps": None,
-        "avg_blocked_signal_outcome_net_bps": None,
-        "blocked_signal_net_positive_pct": None,
-        "blocked_signal_outcome_review": None,
-        "blocked_signal_outcome_review_status": None,
-        "blocked_signal_outcome_review_reason": None,
-        "blocked_signal_outcome_review_next_trigger": None,
-    }
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except FileNotFoundError:
-        return summary
-    except OSError as exc:
-        summary["ledger_status"] = "READ_ERROR"
-        summary["ledger_source_error"] = f"read_error:{type(exc).__name__}"
-        return summary
-
-    valid_rows: list[dict[str, Any]] = []
-    probe_net_sum = 0.0
-    blocked_net_sum = 0.0
-    for line_no, raw_line in enumerate(lines, start=1):
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            row = json.loads(line)
-        except json.JSONDecodeError:
-            summary["ledger_malformed_line_count"] += 1
-            summary["ledger_source_error"] = f"malformed_jsonl_line:{line_no}"
-            continue
-        if not isinstance(row, dict):
-            summary["ledger_malformed_line_count"] += 1
-            summary["ledger_source_error"] = f"non_object_jsonl_line:{line_no}"
-            continue
-
-        valid_rows.append(row)
-        summary["ledger_total_rows"] += 1
-        record_type = str(row.get("record_type") or "").strip()
-        summary["latest_record_type"] = record_type or None
-        generated_at = row.get("generated_at_utc")
-        if generated_at:
-            summary["latest_generated_at_utc"] = generated_at
-        side_cell_key = row.get("side_cell_key")
-        if side_cell_key:
-            summary["latest_side_cell_key"] = side_cell_key
-
-        if record_type == "probe_admission_decision":
-            decision = str(row.get("decision") or "").strip()
-            summary["admission_decision_count"] += 1
-            summary["latest_admission_decision"] = decision or None
-            if decision == "ADMIT_DEMO_LEARNING_PROBE":
-                summary["admit_decision_count"] += 1
-            if decision == "ORDER_AUTHORITY_NOT_GRANTED":
-                summary["order_authority_not_granted_count"] += 1
-            if row.get("allowed_to_submit_order") is True:
-                summary["allowed_to_submit_order_count"] += 1
-        elif record_type == "probe_outcome":
-            net_bps = _float(row.get("realized_net_bps"))
-            summary["probe_outcome_count"] += 1
-            if net_bps is not None:
-                probe_net_sum += net_bps
-        elif record_type == "blocked_signal_outcome":
-            net_bps = _float(row.get("realized_net_bps"))
-            summary["blocked_signal_outcome_count"] += 1
-            if net_bps is not None:
-                blocked_net_sum += net_bps
-                if net_bps > 0.0:
-                    summary["blocked_signal_positive_outcome_count"] += 1
-
-    if summary["ledger_total_rows"] == 0:
-        summary["ledger_status"] = (
-            "MALFORMED"
-            if summary["ledger_malformed_line_count"] > 0
-            else "EMPTY"
-        )
-    elif summary["blocked_signal_outcome_count"] > 0:
-        summary["ledger_status"] = "BLOCKED_SIGNAL_OUTCOMES_PRESENT"
-    elif summary["probe_outcome_count"] > 0:
-        summary["ledger_status"] = "PROBE_OUTCOMES_PRESENT"
-    elif summary["admission_decision_count"] > 0:
-        summary["ledger_status"] = "ADMISSION_ROWS_PRESENT"
-    else:
-        summary["ledger_status"] = "OTHER_ROWS_PRESENT"
-
-    if summary["probe_outcome_count"] > 0:
-        summary["avg_probe_outcome_net_bps"] = probe_net_sum / summary["probe_outcome_count"]
-    if summary["blocked_signal_outcome_count"] > 0:
-        summary["avg_blocked_signal_outcome_net_bps"] = (
-            blocked_net_sum / summary["blocked_signal_outcome_count"]
-        )
-        summary["blocked_signal_net_positive_pct"] = (
-            summary["blocked_signal_positive_outcome_count"]
-            / summary["blocked_signal_outcome_count"]
-            * 100.0
-        )
-        review = build_blocked_signal_outcome_review(valid_rows)
-        summary["blocked_signal_outcome_review"] = review
-        summary["blocked_signal_outcome_review_status"] = review.get("status")
-        summary["blocked_signal_outcome_review_reason"] = review.get("reason")
-        summary["blocked_signal_outcome_review_next_trigger"] = review.get("next_trigger")
-    return summary
-
-
 def _latest_json_line(
     path: Path,
     *,
@@ -255,114 +136,6 @@ def _latest_json_line(
             break
         scan = min(size, scan * 2)
     return None, "no_json_status_line"
-
-
-def _file_mtime_age(path: Path, *, now_utc: dt.datetime) -> tuple[bool, str | None, float | None]:
-    try:
-        stat = path.stat()
-    except FileNotFoundError:
-        return False, None, None
-    except OSError:
-        return False, None, None
-    mtime = dt.datetime.fromtimestamp(stat.st_mtime, tz=dt.timezone.utc)
-    return True, mtime.isoformat(), max(0.0, (now_utc - mtime).total_seconds())
-
-
-def _summarize_cost_gate_learning_lane_loop(
-    data_dir: Path,
-    *,
-    now_utc: dt.datetime,
-    max_age_seconds: int = DEFAULT_COST_GATE_LEARNING_LOOP_MAX_AGE_SECONDS,
-) -> dict[str, Any]:
-    lane_dir = data_dir / "cost_gate_learning_lane"
-    heartbeat_path = data_dir / "cron_heartbeat" / "cost_gate_learning_lane.last_fire"
-    status_log_path = data_dir / "logs" / "cost_gate_learning_lane.log"
-    refresh_latest_path = lane_dir / "outcome_refresh_latest.json"
-    review_latest_path = lane_dir / "blocked_outcome_review_latest.json"
-
-    heartbeat_present, heartbeat_mtime, heartbeat_age = _file_mtime_age(
-        heartbeat_path,
-        now_utc=now_utc,
-    )
-    status_row, status_err = _latest_json_line(status_log_path)
-    refresh_payload, refresh_err = _read_json(refresh_latest_path)
-    review_payload, review_err = _read_json(review_latest_path)
-
-    status_ts = status_row.get("ts_utc") if status_row else None
-    status_age = _age_seconds(status_ts, now_utc=now_utc)
-    refresh_rc = _int(status_row.get("refresh_rc")) if status_row else None
-    review_rc = _int(status_row.get("review_rc")) if status_row else None
-    ledger_row_count = (
-        _int(status_row.get("ledger_row_count"))
-        if status_row and status_row.get("ledger_row_count") is not None
-        else None
-    )
-    review_status = (
-        str(status_row.get("review_status") or "").strip()
-        if status_row
-        else str((review_payload or {}).get("status") or "").strip()
-    )
-    review_next_trigger = (
-        status_row.get("review_next_trigger")
-        if status_row
-        else (review_payload or {}).get("next_trigger")
-    )
-
-    any_artifact_present = any(
-        err is None
-        for err in (status_err, refresh_err, review_err)
-    ) or heartbeat_present
-    status = "NOT_SEEN"
-    reason = "no_cron_heartbeat_status_or_learning_artifacts"
-    if status_row:
-        if status_age is not None and status_age > max_age_seconds:
-            status = "STALE_STATUS"
-            reason = "cost_gate_learning_status_stale"
-        elif refresh_rc not in (None, 0) or review_rc not in (None, 0):
-            status = "ERROR"
-            reason = "cost_gate_learning_refresh_or_review_failed"
-        elif ledger_row_count == 0 and review_status == "NO_BLOCKED_SIGNAL_OUTCOMES":
-            status = "RUNNING_NO_LEDGER_ROWS"
-            reason = "cost_gate_learning_loop_ran_but_no_ledger_rows"
-        else:
-            status = "RUNNING"
-            reason = "cost_gate_learning_status_recent"
-    elif heartbeat_present:
-        if heartbeat_age is not None and heartbeat_age > max_age_seconds:
-            status = "STALE_HEARTBEAT"
-            reason = "cost_gate_learning_heartbeat_stale"
-        else:
-            status = "HEARTBEAT_ONLY_NO_STATUS"
-            reason = "cost_gate_learning_heartbeat_without_status_log"
-    elif status_err and status_err not in {"missing", "no_json_status_line"}:
-        status = "STATUS_UNREADABLE"
-        reason = str(status_err)
-    elif any_artifact_present:
-        status = "ARTIFACTS_PRESENT_NO_STATUS"
-        reason = "learning_artifacts_present_without_status_line"
-
-    return {
-        "learning_loop_status": status,
-        "learning_loop_reason": reason,
-        "learning_loop_max_age_seconds": max_age_seconds,
-        "learning_loop_heartbeat_path": str(heartbeat_path),
-        "learning_loop_heartbeat_present": heartbeat_present,
-        "learning_loop_heartbeat_mtime_utc": heartbeat_mtime,
-        "learning_loop_heartbeat_age_seconds": heartbeat_age,
-        "learning_loop_status_log_path": str(status_log_path),
-        "learning_loop_status_log_error": status_err,
-        "learning_loop_status_ts_utc": status_ts,
-        "learning_loop_status_age_seconds": status_age,
-        "learning_loop_refresh_latest_path": str(refresh_latest_path),
-        "learning_loop_refresh_latest_error": refresh_err,
-        "learning_loop_review_latest_path": str(review_latest_path),
-        "learning_loop_review_latest_error": review_err,
-        "learning_loop_last_refresh_rc": refresh_rc,
-        "learning_loop_last_review_rc": review_rc,
-        "learning_loop_last_ledger_row_count": ledger_row_count,
-        "learning_loop_last_review_status": review_status or None,
-        "learning_loop_last_review_next_trigger": review_next_trigger,
-    }
 
 
 def _source_fresh(
@@ -1494,8 +1267,8 @@ def collect_cost_gate_learning_lane_arm(
 ) -> dict[str, Any]:
     path = data_dir / "cost_gate_learning_lane" / "demo_learning_lane_plan_latest.json"
     ledger_path = data_dir / "cost_gate_learning_lane" / "probe_ledger.jsonl"
-    ledger_summary = _summarize_cost_gate_learning_lane_ledger(ledger_path)
-    loop_summary = _summarize_cost_gate_learning_lane_loop(data_dir, now_utc=now_utc)
+    ledger_summary = summarize_cost_gate_learning_lane_ledger(ledger_path)
+    loop_summary = summarize_cost_gate_learning_lane_loop(data_dir, now_utc=now_utc)
     payload, err = _read_json(path)
     if err:
         return _arm(

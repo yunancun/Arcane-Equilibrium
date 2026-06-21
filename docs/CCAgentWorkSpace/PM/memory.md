@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Activation Preflight
+
+- Added `cost_gate_learning_lane.status` as the public read-only status/preflight surface for the demo-learning lane.
+- It now answers directly whether ledger rows have accumulated, whether evidence is currently accumulating, whether rejects are recorded, whether silent-drop risk remains, and whether blocked-signal review evidence is available.
+- `alpha_discovery_throughput.runtime_runner` now imports the public status helpers, so killboard and operator preflight read the same artifact state. Runtime still needs operator-approved source sync/install/enable before trade-core can accumulate evidence.
+
 ## 2026-06-21 Cost-Gate Learning Loop Status Ingestion
 
 - Added alpha-discovery ingestion for cost-gate learning-loop heartbeat, status log, latest refresh artifact, and latest blocked-outcome review artifact.
