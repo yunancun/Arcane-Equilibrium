@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from cost_gate_learning_lane.status import (
+    summarize_cost_gate_learning_lane_historical_review,
     summarize_cost_gate_learning_lane_ledger,
     summarize_cost_gate_learning_lane_loop,
 )
@@ -1269,6 +1270,10 @@ def collect_cost_gate_learning_lane_arm(
     ledger_path = data_dir / "cost_gate_learning_lane" / "probe_ledger.jsonl"
     ledger_summary = summarize_cost_gate_learning_lane_ledger(ledger_path)
     loop_summary = summarize_cost_gate_learning_lane_loop(data_dir, now_utc=now_utc)
+    historical_summary = summarize_cost_gate_learning_lane_historical_review(
+        data_dir,
+        now_utc=now_utc,
+    )
     payload, err = _read_json(path)
     if err:
         return _arm(
@@ -1282,6 +1287,7 @@ def collect_cost_gate_learning_lane_arm(
             detail={
                 "plan_status": "SOURCE_SCORECARD_UNAVAILABLE",
                 "note": "cost_gate_learning_lane_plan_not_seen",
+                **historical_summary,
                 **loop_summary,
                 **ledger_summary,
             },
@@ -1322,6 +1328,7 @@ def collect_cost_gate_learning_lane_arm(
             "data_coverage_tasks": payload.get("data_coverage_tasks"),
             "source": payload.get("source"),
             "boundary": payload.get("boundary"),
+            **historical_summary,
             **loop_summary,
             **ledger_summary,
         },

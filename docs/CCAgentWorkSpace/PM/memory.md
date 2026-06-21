@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Historical Scorecard Review
+
+- Added a separate `cost_gate_learning_lane.historical_review` artifact so old counterfactual scorecards can prioritize reject capture without being treated as runtime evidence.
+- Alpha discovery now routes historical-scorecard-only candidates to `historical_cost_gate_candidates_not_runtime_verified`, not `READY_FOR_PROBE`.
+- Boundary remains strict: historical review is not probe ledger/fill/execution evidence, has `order_authority=NOT_GRANTED`, and does not lower the main Cost Gate.
+
 ## 2026-06-21 Cost-Gate Learning Engine PID Auto-Detect Preflight
 
 - `cost_gate_learning_lane.status` now auto-detects the engine PID when process-writer enablement is required and no PID/proc path is supplied.
