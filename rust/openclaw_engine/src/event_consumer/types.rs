@@ -414,6 +414,12 @@ pub struct EventConsumerDeps {
     /// ENGINE-HEAL-FIX-PHASE1 R1：灰度寫入器控制代碼 — 非阻塞 try_send 將 JSONL
     /// 寫盤移出事件循環熱路徑。功能關閉時為 `disabled()` clone，producer 跳過記錄構建。
     pub canary_handle: crate::canary_writer::CanaryWriterHandle,
+    /// Cost-gate demo-learning lane writer handle. Disabled by default; when
+    /// enabled it records eligible rejected demo/live_demo signals as JSONL
+    /// admission decisions. It never grants order authority.
+    /// Cost-gate demo-learning lane 寫入器控制代碼。默認停用；啟用時把 eligible
+    /// demo/live_demo reject 記為 JSONL admission decision，永不授權下單。
+    pub demo_learning_lane_writer: crate::demo_learning_lane_writer::DemoLearningLaneWriterHandle,
     /// EDGE-P3-1 Phase B #1: Per-engine EdgePredictorStore handle. `None` keeps the
     /// §7.3 gate `store = None` short-circuit path (→ legacy shrinkage), matching the
     /// pre-wiring behaviour. Bootstrap in `main.rs` passes `Some(pep.<kind>.clone())`

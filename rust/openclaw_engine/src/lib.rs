@@ -73,6 +73,7 @@ pub mod decision_context_producer;
 pub mod demo_learning_lane;
 pub mod demo_learning_lane_hot_path;
 pub mod demo_learning_lane_ledger;
+pub mod demo_learning_lane_writer;
 #[cfg(test)]
 mod demo_learning_lane_hot_path_tests;
 #[cfg(test)]

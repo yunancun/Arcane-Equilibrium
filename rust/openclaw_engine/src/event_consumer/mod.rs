@@ -78,6 +78,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         cross_engine_rx,
         pipeline_health,
         canary_handle,
+        demo_learning_lane_writer: _demo_learning_lane_writer,
     } = bootstrap::bootstrap_runtime(deps).await;
 
     // G1-02 Step 2a (2026-04-24): 7 loop-internal mut fields bundled into

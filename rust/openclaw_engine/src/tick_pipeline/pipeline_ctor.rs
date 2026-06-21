@@ -59,6 +59,8 @@ impl TickPipeline {
             stop_request_tx: None,
             adl_alerts: VecDeque::new(),
             canary_mode: false,
+            demo_learning_lane_writer:
+                crate::demo_learning_lane_writer::DemoLearningLaneWriterHandle::disabled(),
             instrument_cache: None,
             use_maker_close: false,
             order_dispatch_tx: None,
@@ -213,6 +215,15 @@ impl TickPipeline {
     /// pipeline command 或啟動序列注入；test / cold 路徑不注入即走 None fallback。
     pub fn set_signal_stats(&mut self, stats: Arc<super::signal_stats::SignalStats>) {
         self.signal_stats = Some(stats);
+    }
+
+    /// 注入 cost-gate demo-learning lane 寫入器。writer handle 本身可為 disabled，
+    /// 所以 test/cold path 不需要特殊分支。
+    pub fn set_demo_learning_lane_writer(
+        &mut self,
+        writer: crate::demo_learning_lane_writer::DemoLearningLaneWriterHandle,
+    ) {
+        self.demo_learning_lane_writer = writer;
     }
 
     /// 3E-2a: Create a pipeline with explicit kind + balance.
