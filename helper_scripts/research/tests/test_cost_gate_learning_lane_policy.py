@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 from pathlib import Path
 
 from alpha_discovery_throughput.discovery_loop import build_discovery_plan
@@ -250,21 +251,83 @@ def test_alpha_discovery_does_not_mark_cost_gate_plan_ready_without_runtime_ledg
     row = scorecard["arms"][0]
 
     assert discovery["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
-    assert discovery["arms"][0]["reason"] == "cost_gate_runtime_ledger_missing"
+    assert discovery["arms"][0]["reason"] == "cost_gate_learning_loop_not_seen"
     assert scorecard["status"] == "NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED"
     assert row["arm_id"] == "cost_gate_demo_learning_lane"
     assert row["blocker_class"] == "data_coverage"
-    assert row["primary_blocker"] == "cost_gate_probe_candidates_ready_but_runtime_ledger_empty"
+    assert row["primary_blocker"] == "cost_gate_learning_loop_not_running"
     assert row["next_trigger"] == (
-        "deploy_enable_runtime_ledger_writer_and_learning_lane_cron_then_observe_reject_rows"
+        "sync_source_install_learning_lane_cron_enable_runtime_writer_then_observe_reject_rows"
     )
     assert row["operator_actionable"] is False
     assert row["engineering_actionable"] is True
     assert row["main_cost_gate_adjustment"] == "NONE"
     assert row["order_authority"] == "NOT_GRANTED"
     assert row["ledger_status"] == "MISSING"
+    assert row["learning_loop_status"] == "NOT_SEEN"
+    assert row["learning_loop_heartbeat_present"] is False
     assert row["admission_decision_count"] == 0
     assert row["probe_candidates"][0]["side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+
+
+def test_alpha_discovery_surfaces_learning_loop_running_without_ledger_rows(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    heartbeat = data_dir / "cron_heartbeat" / "cost_gate_learning_lane.last_fire"
+    heartbeat.parent.mkdir(parents=True)
+    heartbeat.write_text("", encoding="utf-8")
+    heartbeat_ts = dt.datetime(2026, 6, 21, 11, 4, tzinfo=dt.timezone.utc).timestamp()
+    os.utime(heartbeat, (heartbeat_ts, heartbeat_ts))
+    log = data_dir / "logs" / "cost_gate_learning_lane.log"
+    log.parent.mkdir(parents=True)
+    log.write_text(
+        json.dumps({
+            "ts_utc": "2026-06-21T11:04:00Z",
+            "check": "cost_gate_learning_lane",
+            "ledger_row_count": 0,
+            "refresh_rc": 0,
+            "review_rc": 0,
+            "review_status": "NO_BLOCKED_SIGNAL_OUTCOMES",
+            "review_next_trigger": (
+                "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes"
+            ),
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    arm = collect_cost_gate_learning_lane_arm(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+    discovery = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+    row = discovery["profitability_blocker_scorecard"]["arms"][0]
+
+    assert discovery["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
+    assert discovery["arms"][0]["reason"] == "cost_gate_learning_loop_running_no_ledger_rows"
+    assert row["primary_blocker"] == "cost_gate_learning_loop_running_but_no_reject_rows"
+    assert row["next_trigger"] == (
+        "verify_runtime_ledger_writer_enabled_or_wait_for_cost_gate_rejects"
+    )
+    assert row["ledger_status"] == "MISSING"
+    assert row["learning_loop_status"] == "RUNNING_NO_LEDGER_ROWS"
+    assert row["learning_loop_heartbeat_present"] is True
+    assert row["learning_loop_last_ledger_row_count"] == 0
+    assert row["learning_loop_last_review_status"] == "NO_BLOCKED_SIGNAL_OUTCOMES"
 
 
 def test_alpha_discovery_keeps_stale_cost_gate_plan_as_source_health_blocker(
@@ -584,16 +647,16 @@ def test_alpha_discovery_routes_admission_only_ledger_to_price_observation_build
     row = discovery["profitability_blocker_scorecard"]["arms"][0]
 
     assert discovery["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
-    assert discovery["arms"][0]["reason"] == "cost_gate_blocked_signal_outcomes_missing"
+    assert discovery["arms"][0]["reason"] == "cost_gate_admission_rows_without_refresh_loop"
     assert discovery["profitability_blocker_scorecard"]["status"] == (
         "NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED"
     )
     assert row["blocker_class"] == "data_coverage"
     assert row["primary_blocker"] == (
-        "cost_gate_rejects_recorded_need_blocked_signal_outcomes"
+        "cost_gate_rejects_recorded_but_outcome_refresh_loop_not_running"
     )
     assert row["next_trigger"] == (
-        "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes"
+        "install_learning_lane_cron_or_run_outcome_refresh"
     )
     assert row["ledger_status"] == "ADMISSION_ROWS_PRESENT"
     assert row["admission_decision_count"] == 1

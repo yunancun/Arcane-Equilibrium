@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Loop Status Ingestion
+
+- Added alpha-discovery ingestion for cost-gate learning-loop heartbeat, status log, latest refresh artifact, and latest blocked-outcome review artifact.
+- Runtime blocker rows now expose `learning_loop_status` such as `NOT_SEEN` or `RUNNING_NO_LEDGER_ROWS`, plus latest rc/ledger/review fields, so lack of accumulation is machine-visible.
+- Read-only Linux probe still found no heartbeat/status log/ledger/review artifact; source now reports that state, but runtime still needs operator-approved sync/install/enable before evidence can accumulate.
+
 ## 2026-06-21 Cost-Gate Learning Readiness Classification
 
 - Fixed alpha-discovery semantics: a cost-gate learning plan with `OPERATOR_REVIEW` no longer counts as global `READY_FOR_PROBE` while the runtime ledger is missing/empty.
