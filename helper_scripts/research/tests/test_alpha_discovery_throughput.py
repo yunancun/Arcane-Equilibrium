@@ -1457,6 +1457,111 @@ def test_polymarket_leadlag_arm_uses_overlap_adjusted_sample_count(tmp_path):
     assert blocker["next_trigger"] == "continue_polymarket_capture_until_sample_gate_eta"
 
 
+def test_polymarket_leadlag_routes_zero_joined_rows_to_label_maturity_wait(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_polymarket_leadlag_latest(data, {
+        "created_at_utc": "2026-06-20T22:02:00+00:00",
+        "counts": {
+            "snapshot_rows": 2685,
+            "snapshot_distinct_timestamps": 3,
+            "delta_rows": 2061,
+            "feature_points": 26,
+            "joined_rows": 0,
+            "price_rows": 1100,
+            "max_overlap_adjusted_ic_points": 0,
+            "min_samples_remaining_to_gate": 30,
+            "label_readiness": {
+                "feature_horizon_pairs": 78,
+                "joinable_pairs": 0,
+                "status_counts": {"exit_target_after_latest_price": 78},
+                "oldest_unmatured_exit_target_utc": "2026-06-20T22:07:01+00:00",
+            },
+        },
+        "verdict": {
+            "status": "INSUFFICIENT_SAMPLE",
+            "reason": "max overlap-adjusted IC points 0 below min_points 30",
+            "candidate_count": 0,
+            "promotion_boundary": "research_context_only_not_signal_or_promotion_proof",
+        },
+    })
+
+    arm = collect_polymarket_leadlag_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 22, 3, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 20, 22, 3, tzinfo=dt.timezone.utc),
+    )
+
+    assert arm["detail"]["snapshot_rows"] == 2685
+    assert arm["detail"]["label_status_counts"] == {"exit_target_after_latest_price": 78}
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["blocker_class"] == "sample_gate"
+    assert blocker["primary_blocker"] == "label_horizon_not_matured"
+    assert blocker["joined_rows"] == 0
+    assert blocker["label_status_counts"] == {"exit_target_after_latest_price": 78}
+    assert blocker["oldest_unmatured_exit_target_utc"] == "2026-06-20T22:07:01+00:00"
+    assert blocker["next_trigger"] == (
+        "rerun_polymarket_leadlag_after_label_maturity_then_alpha_discovery"
+    )
+
+
+def test_polymarket_leadlag_routes_matured_label_wait_to_price_catchup(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_polymarket_leadlag_latest(data, {
+        "created_at_utc": "2026-06-20T22:07:53+00:00",
+        "counts": {
+            "snapshot_rows": 3555,
+            "snapshot_distinct_timestamps": 4,
+            "delta_rows": 3066,
+            "feature_points": 39,
+            "joined_rows": 0,
+            "price_rows": 1100,
+            "max_overlap_adjusted_ic_points": 0,
+            "min_samples_remaining_to_gate": 30,
+            "label_readiness": {
+                "feature_horizon_pairs": 117,
+                "joinable_pairs": 0,
+                "latest_feature_ts_utc": "2026-06-20T22:07:01.434000+00:00",
+                "latest_price_ts_utc_by_symbol": {
+                    "BTCUSDT": "2026-06-20T22:06:00+00:00",
+                    "ETHUSDT": "2026-06-20T22:06:00+00:00",
+                },
+                "status_counts": {
+                    "entry_target_after_latest_price": 39,
+                    "exit_target_after_latest_price": 78,
+                },
+                "oldest_unmatured_exit_target_utc": "2026-06-20T22:07:01.150000+00:00",
+                "newest_unmatured_exit_target_utc": "2026-06-21T01:54:29.853000+00:00",
+            },
+        },
+    })
+
+    arm = collect_polymarket_leadlag_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 20, 22, 8, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 20, 22, 8, tzinfo=dt.timezone.utc),
+    )
+
+    assert arm["detail"]["latest_price_ts_utc_by_symbol"] == {
+        "BTCUSDT": "2026-06-20T22:06:00+00:00",
+        "ETHUSDT": "2026-06-20T22:06:00+00:00",
+    }
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["primary_blocker"] == "price_data_not_caught_up_to_label_target"
+    assert blocker["latest_price_ts_utc_by_symbol"]["BTCUSDT"] == (
+        "2026-06-20T22:06:00+00:00"
+    )
+    assert blocker["latest_feature_ts_utc"] == "2026-06-20T22:07:01.434000+00:00"
+    assert blocker["next_trigger"] == (
+        "wait_for_price_data_to_cover_oldest_label_target_then_rerun_polymarket_leadlag"
+    )
+
+
 def test_polymarket_leadlag_near_gate_recheck_scorecard_routes_to_eta_recompute(tmp_path):
     data = tmp_path / "openclaw"
     _write_polymarket_leadlag_latest(data, {

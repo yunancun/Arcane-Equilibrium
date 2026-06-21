@@ -51,6 +51,21 @@ def _float(value: Any) -> float | None:
         return None
 
 
+def _parse_dt(value: Any) -> dt.datetime | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = dt.datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
 def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -1161,6 +1176,103 @@ def classify_profitability_blocker(
         pre_gate_persistence = _dict(detail.get("pre_gate_watchlist_persistence_scorecard"))
         sample_gate_recheck = _dict(detail.get("sample_gate_recheck_scorecard"))
         top_persistent_cells = _list(pre_gate_persistence.get("top_cells"))
+        label_status_counts = _dict(detail.get("label_status_counts"))
+        joined_rows = _int(detail.get("joined_rows"))
+        label_feature_horizon_pairs = _int(detail.get("label_feature_horizon_pairs"))
+        created_at = _parse_dt(detail.get("created_at_utc"))
+        oldest_label_target = _parse_dt(detail.get("oldest_unmatured_exit_target_utc"))
+        latest_price_by_symbol = _dict(detail.get("latest_price_ts_utc_by_symbol"))
+        latest_price_times = [
+            parsed
+            for parsed in (_parse_dt(value) for value in latest_price_by_symbol.values())
+            if parsed is not None
+        ]
+        latest_price_max = max(latest_price_times) if latest_price_times else None
+        pending_label_count = sum(
+            _int(label_status_counts.get(key))
+            for key in (
+                "entry_target_after_latest_price",
+                "exit_target_after_latest_price",
+            )
+        )
+        if (
+            joined_rows == 0
+            and label_feature_horizon_pairs > 0
+            and pending_label_count > 0
+            and detail.get("oldest_unmatured_exit_target_utc")
+        ):
+            if (
+                created_at is not None
+                and oldest_label_target is not None
+                and created_at >= oldest_label_target
+                and latest_price_max is not None
+                and latest_price_max < oldest_label_target
+            ):
+                return _finish_blocker_row(
+                    row,
+                    blocker_class="sample_gate",
+                    primary_blocker="price_data_not_caught_up_to_label_target",
+                    next_trigger=(
+                        "wait_for_price_data_to_cover_oldest_label_target_then_"
+                        "rerun_polymarket_leadlag"
+                    ),
+                    extra={
+                        "snapshot_rows": detail.get("snapshot_rows"),
+                        "snapshot_distinct_timestamps": detail.get(
+                            "snapshot_distinct_timestamps"
+                        ),
+                        "delta_rows": detail.get("delta_rows"),
+                        "feature_points": detail.get("feature_points"),
+                        "joined_rows": detail.get("joined_rows"),
+                        "label_feature_horizon_pairs": detail.get(
+                            "label_feature_horizon_pairs"
+                        ),
+                        "label_joinable_pairs": detail.get("label_joinable_pairs"),
+                        "label_status_counts": label_status_counts,
+                        "latest_feature_ts_utc": detail.get("latest_feature_ts_utc"),
+                        "latest_price_ts_utc_by_symbol": latest_price_by_symbol,
+                        "oldest_unmatured_exit_target_utc": detail.get(
+                            "oldest_unmatured_exit_target_utc"
+                        ),
+                        "newest_unmatured_exit_target_utc": detail.get(
+                            "newest_unmatured_exit_target_utc"
+                        ),
+                        "sample_gate_recheck_status": sample_gate_recheck.get("status"),
+                        "sample_gate_recheck_scorecard": sample_gate_recheck or None,
+                    },
+                )
+            return _finish_blocker_row(
+                row,
+                blocker_class="sample_gate",
+                primary_blocker="label_horizon_not_matured",
+                next_trigger=(
+                    "rerun_polymarket_leadlag_after_label_maturity_then_alpha_discovery"
+                ),
+                extra={
+                    "snapshot_rows": detail.get("snapshot_rows"),
+                    "snapshot_distinct_timestamps": detail.get(
+                        "snapshot_distinct_timestamps"
+                    ),
+                    "delta_rows": detail.get("delta_rows"),
+                    "feature_points": detail.get("feature_points"),
+                    "joined_rows": detail.get("joined_rows"),
+                    "label_feature_horizon_pairs": detail.get(
+                        "label_feature_horizon_pairs"
+                    ),
+                    "label_joinable_pairs": detail.get("label_joinable_pairs"),
+                    "label_status_counts": label_status_counts,
+                    "latest_feature_ts_utc": detail.get("latest_feature_ts_utc"),
+                    "latest_price_ts_utc_by_symbol": latest_price_by_symbol or None,
+                    "oldest_unmatured_exit_target_utc": detail.get(
+                        "oldest_unmatured_exit_target_utc"
+                    ),
+                    "newest_unmatured_exit_target_utc": detail.get(
+                        "newest_unmatured_exit_target_utc"
+                    ),
+                    "sample_gate_recheck_status": sample_gate_recheck.get("status"),
+                    "sample_gate_recheck_scorecard": sample_gate_recheck or None,
+                },
+            )
         return _finish_blocker_row(
             row,
             blocker_class="sample_gate",

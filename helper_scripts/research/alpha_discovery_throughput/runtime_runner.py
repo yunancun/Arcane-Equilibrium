@@ -1180,8 +1180,15 @@ def collect_polymarket_leadlag_arm(
             "label_joinable_pairs": label_readiness.get("joinable_pairs"),
             "label_status_counts": label_readiness.get("status_counts"),
             "label_by_horizon": label_readiness.get("by_horizon"),
+            "latest_feature_ts_utc": label_readiness.get("latest_feature_ts_utc"),
+            "latest_price_ts_utc_by_symbol": label_readiness.get(
+                "latest_price_ts_utc_by_symbol"
+            ),
             "oldest_unmatured_exit_target_utc": label_readiness.get(
                 "oldest_unmatured_exit_target_utc"
+            ),
+            "newest_unmatured_exit_target_utc": label_readiness.get(
+                "newest_unmatured_exit_target_utc"
             ),
             "promotion_boundary": verdict.get("promotion_boundary"),
         },
