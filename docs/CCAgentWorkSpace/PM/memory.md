@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Runtime Demo Cost Gate Read-Only Audit
+
+- `trade-core` demo engine is alive, but runtime source remains behind/dirty at `917be4cc`; latest alpha artifact is stale `alpha_discovery_runtime_killboard_v1` and false-reports actionable alpha/probe.
+- Runtime PG shows 4h demo/live_demo decision/risk rows exist (2,496), all Cost Gate rejects, but 4h intents/orders/fills are 0; 24h has only 3 intents/orders and 0 fills, and latest 1h had 0 rows at audit time.
+- Cost Gate/demo-learning evidence crons are not installed; learning lane has only an old plan artifact, no heartbeat/status/ledger/outcome/review loop. Next step is operator-approved runtime source reconcile + activation preflight/install, not more source-only visibility work.
+
 ## 2026-06-22 Runtime Killboard Learning Completion Evidence v6
 
 - Runtime killboard schema is now `alpha_discovery_runtime_killboard_v6`.
