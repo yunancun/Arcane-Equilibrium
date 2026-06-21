@@ -24,6 +24,7 @@ LOCK_DIR="${LOCK_ROOT}/cost_gate_learning_lane_cron.lock.d"
 HEARTBEAT_DIR="${DATA}/cron_heartbeat"
 LEDGER="${OPENCLAW_COST_GATE_LEARNING_LEDGER:-$LANE_DIR/probe_ledger.jsonl}"
 SCORECARD_JSON="${OPENCLAW_COST_GATE_SCORECARD_JSON:-$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json}"
+PLAN_JSON="${OPENCLAW_COST_GATE_LEARNING_PLAN_JSON:-$LANE_DIR/demo_learning_lane_plan_latest.json}"
 
 PG_TIMEFRAME="${OPENCLAW_COST_GATE_LEARNING_PG_TIMEFRAME:-1m}"
 OUTCOME_HORIZON_MINUTES="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES:-60}"
@@ -32,6 +33,10 @@ MAX_ENTRY_DELAY_MS="${OPENCLAW_COST_GATE_LEARNING_MAX_ENTRY_DELAY_MS:-300000}"
 PG_STATEMENT_TIMEOUT_MS="${OPENCLAW_COST_GATE_LEARNING_PG_STATEMENT_TIMEOUT_MS:-180000}"
 HISTORICAL_MAX_SCORECARD_AGE_HOURS="${OPENCLAW_COST_GATE_HISTORICAL_MAX_SCORECARD_AGE_HOURS:-36}"
 HISTORICAL_MIN_CANDIDATE_SAMPLE="${OPENCLAW_COST_GATE_HISTORICAL_MIN_CANDIDATE_SAMPLE:-100}"
+MATERIALIZE_REJECTS="${OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS:-1}"
+APPEND_MATERIALIZED_REJECTS="${OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS:-1}"
+MATERIALIZER_LOOKBACK_HOURS="${OPENCLAW_COST_GATE_MATERIALIZER_LOOKBACK_HOURS:-4}"
+MATERIALIZER_LIMIT="${OPENCLAW_COST_GATE_MATERIALIZER_LIMIT:-10000}"
 APPEND_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES:-1}"
 RECORD_PROBE_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES:-0}"
 REVIEW_MIN_OUTCOMES="${OPENCLAW_COST_GATE_REVIEW_MIN_OUTCOMES_PER_SIDE_CELL:-3}"
@@ -80,6 +85,10 @@ validate_int "OPENCLAW_COST_GATE_LEARNING_MAX_ENTRY_DELAY_MS" "$MAX_ENTRY_DELAY_
 validate_int "OPENCLAW_COST_GATE_LEARNING_PG_STATEMENT_TIMEOUT_MS" "$PG_STATEMENT_TIMEOUT_MS"
 validate_int "OPENCLAW_COST_GATE_HISTORICAL_MAX_SCORECARD_AGE_HOURS" "$HISTORICAL_MAX_SCORECARD_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_HISTORICAL_MIN_CANDIDATE_SAMPLE" "$HISTORICAL_MIN_CANDIDATE_SAMPLE"
+validate_bool01 "OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS" "$MATERIALIZE_REJECTS"
+validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS" "$APPEND_MATERIALIZED_REJECTS"
+validate_int "OPENCLAW_COST_GATE_MATERIALIZER_LOOKBACK_HOURS" "$MATERIALIZER_LOOKBACK_HOURS"
+validate_int "OPENCLAW_COST_GATE_MATERIALIZER_LIMIT" "$MATERIALIZER_LIMIT"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES" "$APPEND_OUTCOMES"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES" "$RECORD_PROBE_OUTCOMES"
 validate_int "OPENCLAW_COST_GATE_REVIEW_MIN_OUTCOMES_PER_SIDE_CELL" "$REVIEW_MIN_OUTCOMES"
@@ -140,6 +149,8 @@ REVIEW_OUT="${LANE_DIR}/blocked_outcome_review_${STAMP}.json"
 REVIEW_LATEST="${LANE_DIR}/blocked_outcome_review_latest.json"
 HISTORICAL_REVIEW_OUT="${LANE_DIR}/historical_scorecard_review_${STAMP}.json"
 HISTORICAL_REVIEW_LATEST="${LANE_DIR}/historical_scorecard_review_latest.json"
+MATERIALIZER_OUT="${LANE_DIR}/reject_materializer_${STAMP}.json"
+MATERIALIZER_LATEST="${LANE_DIR}/reject_materializer_latest.json"
 
 HISTORICAL_REVIEW_ARGS=(
     -m cost_gate_learning_lane.historical_review
@@ -148,6 +159,22 @@ HISTORICAL_REVIEW_ARGS=(
     --min-candidate-sample "$HISTORICAL_MIN_CANDIDATE_SAMPLE"
     --output "$HISTORICAL_REVIEW_OUT"
 )
+
+MATERIALIZER_ARGS=(
+    -m cost_gate_learning_lane.reject_materializer
+    --plan "$PLAN_JSON"
+    --ledger "$LEDGER"
+    --source-pg
+    --engine-mode demo
+    --engine-mode live_demo
+    --lookback-hours "$MATERIALIZER_LOOKBACK_HOURS"
+    --limit "$MATERIALIZER_LIMIT"
+    --pg-statement-timeout-ms "$PG_STATEMENT_TIMEOUT_MS"
+    --output "$MATERIALIZER_OUT"
+)
+if [[ "$APPEND_MATERIALIZED_REJECTS" == "1" ]]; then
+    MATERIALIZER_ARGS+=(--append-ledger)
+fi
 
 REFRESH_ARGS=(
     -m cost_gate_learning_lane.outcome_refresh
@@ -189,6 +216,21 @@ if [[ -f "$HISTORICAL_REVIEW_OUT" ]]; then
     cp "$HISTORICAL_REVIEW_OUT" "$HISTORICAL_REVIEW_LATEST"
 fi
 
+materializer_rc=0
+if [[ "$MATERIALIZE_REJECTS" == "1" ]]; then
+    (
+        cd "$BASE"
+        export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+        export PYTHONDONTWRITEBYTECODE=1
+        "$PYBIN" "${MATERIALIZER_ARGS[@]}"
+    ) >> "$LOG" 2>&1 || materializer_rc=$?
+    if [[ -f "$MATERIALIZER_OUT" ]]; then
+        cp "$MATERIALIZER_OUT" "$MATERIALIZER_LATEST"
+    fi
+else
+    echo "[$(ts)] SKIP: cost-gate reject materializer disabled by OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS=0" >> "$LOG"
+fi
+
 refresh_rc=0
 (
     cd "$BASE"
@@ -211,7 +253,7 @@ if [[ -f "$REVIEW_OUT" ]]; then
     cp "$REVIEW_OUT" "$REVIEW_LATEST"
 fi
 
-STATUS_JSON=$(HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" HISTORICAL_REVIEW_RC="$historical_review_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" LEDGER="$LEDGER" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
+STATUS_JSON=$(HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
 import hashlib
 import json
@@ -233,6 +275,7 @@ def load(path):
 
 
 historical, historical_sha, historical_err = load(os.environ["HISTORICAL_REVIEW_OUT"])
+materializer, materializer_sha, materializer_err = load(os.environ["MATERIALIZER_OUT"])
 refresh, refresh_sha, refresh_err = load(os.environ["REFRESH_OUT"])
 review, review_sha, review_err = load(os.environ["REVIEW_OUT"])
 ledger = Path(os.environ["LEDGER"])
@@ -248,8 +291,11 @@ status = {
     "ts_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "check": "cost_gate_learning_lane",
     "historical_review_rc": int(os.environ["HISTORICAL_REVIEW_RC"]),
+    "materializer_rc": int(os.environ["MATERIALIZER_RC"]),
     "refresh_rc": int(os.environ["REFRESH_RC"]),
     "review_rc": int(os.environ["REVIEW_RC"]),
+    "materialize_rejects": os.environ["MATERIALIZE_REJECTS"] == "1",
+    "append_materialized_rejects": os.environ["APPEND_MATERIALIZED_REJECTS"] == "1",
     "append_outcomes": os.environ["APPEND_OUTCOMES"] == "1",
     "ledger_path": str(ledger),
     "ledger_row_count": ledger_rows,
@@ -260,6 +306,14 @@ status = {
     "historical_review_reason": historical.get("reason"),
     "historical_review_next_trigger": historical.get("next_trigger"),
     "historical_candidate_side_cell_count": historical.get("historical_candidate_side_cell_count"),
+    "materializer_artifact_path": os.environ["MATERIALIZER_OUT"],
+    "materializer_sha256": materializer_sha,
+    "materializer_error": materializer_err,
+    "materializer_status": materializer.get("status"),
+    "materializer_input_feature_row_count": materializer.get("input_feature_row_count"),
+    "materializer_materialized_record_count": materializer.get("materialized_record_count"),
+    "materializer_appended_record_count": materializer.get("appended_record_count"),
+    "materializer_decision_counts": materializer.get("decision_counts"),
     "refresh_artifact_path": os.environ["REFRESH_OUT"],
     "refresh_sha256": refresh_sha,
     "refresh_error": refresh_err,
@@ -284,7 +338,7 @@ if [[ -n "$STATUS_JSON" ]]; then
     echo "$STATUS_JSON" >> "$STATUS_LOG"
 fi
 
-echo "[$(ts)] === Cost-gate learning lane refresh end historical_review_rc=${historical_review_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} ===" >> "$LOG"
+echo "[$(ts)] === Cost-gate learning lane refresh end historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} ===" >> "$LOG"
 
 # fail-soft: rc/status are recorded; alpha-discovery reads artifacts and ledger
 # state. Operator action is required for deploy, writer enablement, or probe authority.

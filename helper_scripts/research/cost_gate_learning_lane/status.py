@@ -35,6 +35,7 @@ REQUIRED_SOURCE_RELATIVE_PATHS = (
     "helper_scripts/cron/cost_gate_learning_lane_cron.sh",
     "helper_scripts/cron/install_cost_gate_learning_lane_cron.sh",
     "helper_scripts/research/cost_gate_learning_lane/runtime_adapter.py",
+    "helper_scripts/research/cost_gate_learning_lane/reject_materializer.py",
     "helper_scripts/research/cost_gate_learning_lane/outcome_refresh.py",
     "helper_scripts/research/cost_gate_learning_lane/outcome_review.py",
     "helper_scripts/research/cost_gate_learning_lane/historical_review.py",
