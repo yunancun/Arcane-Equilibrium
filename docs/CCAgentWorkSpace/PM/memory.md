@@ -25,6 +25,16 @@
 
 ## 近期記錄
 
+## 2026-06-21 Polymarket Label Maturity / Price Catch-Up Routing
+
+- Root diagnosis: Polymarket lead-lag had durable snapshots but zero joined IC rows; alpha only reported generic sample gate, hiding whether the next wait was label horizon maturity or PG 1m price catch-up.
+- Added alpha runtime detail fields from `label_readiness`: `latest_feature_ts_utc`, `latest_price_ts_utc_by_symbol`, `oldest_unmatured_exit_target_utc`, and `newest_unmatured_exit_target_utc`.
+- Added blocker split: `label_horizon_not_matured` before target maturity; `price_data_not_caught_up_to_label_target` when report time is past the oldest target but latest 1m price is still behind it.
+- Runtime evidence after waiting past the first target: lead-lag sha256 `199fb15e150298ab076fb47e08513546e3e82c02153a5174da09edaa56b995c1`, `snapshot_rows=3555`, `feature_points=39`, `joined_rows=0`, `latest_feature_ts_utc=2026-06-20T22:07:01.434000+00:00`, all latest 1m prices at `2026-06-20T22:06:00+00:00`.
+- Alpha sha256 `a77a709ec1f80bd5057a96d6874b297cbf5bdb7e821cdc796050d7f5129585f5` remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`, but Polymarket next trigger is now precise: wait for price data to cover the oldest label target, then rerun lead-lag.
+- Verification: Mac and Linux alpha+Polymarket suites `59 passed`; Mac cron static `9 passed`; Linux alpha suite `34 passed`; py_compile, diff-check, and artifact-only alpha runtime smoke passed.
+- Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifacts only; no PG write, Bybit private/signed/trading call, engine/API restart, strategy/auth/risk/order mutation, signal, execution proof, or promotion proof.
+
 ## 2026-06-20 Polymarket Durable Snapshot Mirror
 
 - Root diagnosis: Polymarket lead-lag history had a runtime evidence-loop defect. Snapshot run dirs lived only under volatile `/tmp/openclaw/polymarket_axis_runs`, so `/tmp` cleanup could collapse a 30+ sample watch/history path back to zero.
