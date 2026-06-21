@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Source-Sync Activation Gate
+
+- Extended `cost_gate_learning_lane.status` with read-only local git checkout readiness: head, branch/upstream, ahead/behind, dirty/untracked counts, and dirty path sample.
+- Preflight now emits `source_activation_status`, `source_activation_ready`, `runtime_source_ready_for_activation`, and aggregate `activation_blockers`.
+- This directly captures the current runtime blocker: Linux `trade-core` is behind origin/main and dirty, so learning writer/cron activation must wait for operator-approved source sync/reconcile.
+
 ## 2026-06-21 Cost-Gate Learning Activation Preflight
 
 - Added `cost_gate_learning_lane.status` as the public read-only status/preflight surface for the demo-learning lane.

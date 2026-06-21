@@ -6,6 +6,7 @@ import datetime as dt
 import json
 import os
 from pathlib import Path
+import subprocess
 
 from alpha_discovery_throughput.discovery_loop import build_discovery_plan
 from alpha_discovery_throughput.runtime_runner import collect_cost_gate_learning_lane_arm
@@ -33,7 +34,9 @@ from cost_gate_learning_lane.outcome_review import (
 )
 from cost_gate_learning_lane.status import (
     ACTIVATION_PREFLIGHT_SCHEMA_VERSION,
+    REQUIRED_SOURCE_RELATIVE_PATHS,
     build_cost_gate_learning_lane_activation_preflight,
+    summarize_cost_gate_learning_lane_source,
 )
 from cost_gate_learning_lane.price_observations import (
     PriceObservationBuildConfig,
@@ -165,6 +168,44 @@ class _FakeKlineConn:
 
     def cursor(self):
         return _FakeKlineCursor(self)
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+
+
+def _write_required_source_files(repo: Path) -> None:
+    for rel in REQUIRED_SOURCE_RELATIVE_PATHS:
+        path = repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.suffix == ".sh":
+            path.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+            path.chmod(0o755)
+        else:
+            path.write_text('"""fixture source file."""\n', encoding="utf-8")
+
+
+def _init_source_repo_with_origin(tmp_path: Path) -> tuple[Path, Path]:
+    remote = tmp_path / "remote.git"
+    repo = tmp_path / "repo"
+    remote.mkdir()
+    repo.mkdir()
+    _git(remote, "init", "--bare")
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "test@example.invalid")
+    _git(repo, "config", "user.name", "Test User")
+    _write_required_source_files(repo)
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+    _git(repo, "remote", "add", "origin", str(remote))
+    _git(repo, "push", "-u", "origin", "main")
+    return repo, remote
 
 
 def test_policy_plan_keeps_main_gate_closed_and_selects_only_probe_candidates():
@@ -567,6 +608,53 @@ def test_activation_preflight_fails_closed_when_source_files_missing(
     assert preflight["source"]["source_ready"] is False
     assert preflight["source"]["source_status"] == "MISSING_FILES"
     assert "source_sync" in preflight["missing_links"]
+
+
+def test_source_summary_blocks_activation_when_checkout_dirty(tmp_path: Path):
+    repo, _remote = _init_source_repo_with_origin(tmp_path)
+    dirty_path = repo / "helper_scripts/research/cost_gate_learning_lane/status.py"
+    dirty_path.write_text('"""dirty fixture source file."""\n', encoding="utf-8")
+
+    source = summarize_cost_gate_learning_lane_source(repo)
+
+    assert source["source_status"] == "READY"
+    assert source["source_ready"] is True
+    assert source["source_activation_status"] == "DIRTY"
+    assert source["source_activation_ready"] is False
+    assert source["git_status"] == "DIRTY"
+    assert source["git_dirty_path_count"] == 1
+    assert source["git_behind_count"] == 0
+
+
+def test_source_summary_blocks_activation_when_checkout_behind_upstream(
+    tmp_path: Path,
+):
+    repo, remote = _init_source_repo_with_origin(tmp_path)
+    other = tmp_path / "other"
+    subprocess.run(
+        ["git", "clone", "--branch", "main", str(remote), str(other)],
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    _git(other, "config", "user.email", "test@example.invalid")
+    _git(other, "config", "user.name", "Test User")
+    extra = other / "extra.txt"
+    extra.write_text("new upstream commit\n", encoding="utf-8")
+    _git(other, "add", "extra.txt")
+    _git(other, "commit", "-m", "upstream")
+    _git(other, "push", "origin", "main")
+    _git(repo, "fetch", "origin")
+
+    source = summarize_cost_gate_learning_lane_source(repo)
+
+    assert source["source_status"] == "READY"
+    assert source["source_ready"] is True
+    assert source["source_activation_status"] == "BEHIND_UPSTREAM"
+    assert source["source_activation_ready"] is False
+    assert source["git_status"] == "BEHIND_UPSTREAM"
+    assert source["git_ahead_count"] == 0
+    assert source["git_behind_count"] == 1
 
 
 def test_alpha_discovery_keeps_stale_cost_gate_plan_as_source_health_blocker(
