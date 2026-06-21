@@ -859,7 +859,9 @@ def classify_profitability_blocker(
             next_trigger = "deploy_enable_runtime_ledger_writer_then_observe_reject_rows"
         elif admission_count > 0 and blocked_outcome_count == 0:
             primary_blocker = "cost_gate_rejects_recorded_need_blocked_signal_outcomes"
-            next_trigger = "record_blocked_signal_outcomes_to_verify_gate_reject_profitability"
+            next_trigger = (
+                "build_price_observations_then_record_blocked_signal_outcomes"
+            )
         elif blocked_outcome_count > 0:
             primary_blocker = "cost_gate_blocked_signal_outcomes_accumulating"
             next_trigger = "review_blocked_signal_outcomes_before_any_probe_order_authority"

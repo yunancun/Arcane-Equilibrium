@@ -18,6 +18,14 @@ from cost_gate_learning_lane.outcome_writer import (
     ProbeOutcomeConfig,
     build_blocked_signal_outcome_records,
     build_probe_outcome_records,
+    read_price_observations,
+)
+from cost_gate_learning_lane.price_observations import (
+    PriceObservationBuildConfig,
+    build_price_observation_artifact,
+    build_price_observations_from_rows,
+    required_price_observation_windows,
+    write_price_observation_artifact,
 )
 from cost_gate_learning_lane.runtime_adapter import (
     ADMIT_DECISION,
@@ -276,6 +284,57 @@ def test_alpha_discovery_surfaces_cost_gate_ledger_progress(tmp_path: Path):
     assert row["blocked_signal_net_positive_pct"] == 100.0
 
 
+def test_alpha_discovery_routes_admission_only_ledger_to_price_observation_builder(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    (lane_dir / "probe_ledger.jsonl").write_text(
+        json.dumps(
+            {
+                "record_type": "probe_admission_decision",
+                "generated_at_utc": "2026-06-21T11:02:00+00:00",
+                "attempt_id": "ctx-demo-ma_crossover-ETHUSDT-1782037200000",
+                "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+                "allowed_to_submit_order": False,
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "event": _selected_reject_event(),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    arm = collect_cost_gate_learning_lane_arm(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+    discovery = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+    row = discovery["profitability_blocker_scorecard"]["arms"][0]
+
+    assert row["primary_blocker"] == (
+        "cost_gate_rejects_recorded_need_blocked_signal_outcomes"
+    )
+    assert row["next_trigger"] == (
+        "build_price_observations_then_record_blocked_signal_outcomes"
+    )
+    assert row["ledger_status"] == "ADMISSION_ROWS_PRESENT"
+    assert row["admission_decision_count"] == 1
+    assert row["blocked_signal_outcome_count"] == 0
+
+
 def _selected_reject_event() -> dict:
     return {
         "strategy_name": "ma_crossover",
@@ -509,6 +568,105 @@ def test_runtime_adapter_builds_blocked_signal_outcome_for_not_granted_reject():
     assert outcome["promotion_evidence"] is False
     assert round(outcome["gross_bps"], 6) == -50.0
     assert round(outcome["realized_net_bps"], 6) == -54.0
+
+
+def test_price_observation_windows_target_unlabeled_blocked_signals_only():
+    not_granted = evaluate_probe_admission(
+        _runtime_plan(),
+        _selected_reject_event(),
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    ledger = [build_ledger_record(not_granted)]
+
+    windows = required_price_observation_windows(
+        ledger,
+        cfg=PriceObservationBuildConfig(horizon_minutes=60, max_entry_delay_ms=300_000),
+    )
+
+    assert len(windows) == 1
+    window = windows[0]
+    assert window["target_outcome_record_type"] == "blocked_signal_outcome"
+    assert window["source_admission_decision"] == "ORDER_AUTHORITY_NOT_GRANTED"
+    assert window["attempt_id"] == _selected_reject_event()["context_id"]
+    assert window["symbol"] == "ETHUSDT"
+    assert window["start_ts_ms"] == 1_782_037_200_000
+    assert window["exit_target_ts_ms"] == 1_782_040_800_000
+    assert window["end_ts_ms"] == 1_782_041_100_000
+
+    completed = {
+        "record_type": "blocked_signal_outcome",
+        "attempt_id": _selected_reject_event()["context_id"],
+    }
+    assert required_price_observation_windows(ledger + [completed]) == []
+
+
+def test_price_observation_builder_filters_rows_and_writes_adapter_compatible_artifact(
+    tmp_path: Path,
+):
+    not_granted = evaluate_probe_admission(
+        _runtime_plan(),
+        _selected_reject_event(),
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    ledger = [build_ledger_record(not_granted)]
+    windows = required_price_observation_windows(
+        ledger,
+        cfg=PriceObservationBuildConfig(horizon_minutes=60, max_entry_delay_ms=300_000),
+    )
+    source_rows = [
+        {
+            "symbol": "ETHUSDT",
+            "open_time_ms": 1_782_037_140_000,
+            "close_time_ms": 1_782_037_200_000,
+            "close": "2000.0",
+        },
+        {"symbol": "ETHUSDT", "ts_ms": 1_782_040_800_000, "price": 2010.0},
+        {"symbol": "ETHUSDT", "ts_ms": 1_782_040_800_000, "price": 2010.0},
+        {"symbol": "ETHUSDT", "ts_ms": 1_782_041_200_000, "close": 2012.0},
+        {"symbol": "BTCUSDT", "ts_ms": 1_782_040_800_000, "close": 100_000.0},
+        {"symbol": "ETHUSDT", "ts_ms": 1_782_040_000_000},
+    ]
+
+    observations = build_price_observations_from_rows(source_rows, windows)
+
+    assert observations == [
+        {
+            "schema_version": "cost_gate_demo_learning_lane_price_observations_v1",
+            "record_type": "price_observation",
+            "symbol": "ETHUSDT",
+            "ts_ms": 1_782_037_200_000,
+            "close": 2000.0,
+            "source": "local_price_row",
+        },
+        {
+            "schema_version": "cost_gate_demo_learning_lane_price_observations_v1",
+            "record_type": "price_observation",
+            "symbol": "ETHUSDT",
+            "ts_ms": 1_782_040_800_000,
+            "close": 2010.0,
+            "source": "local_price_row",
+        },
+    ]
+
+    artifact = build_price_observation_artifact(
+        ledger,
+        source_rows,
+        now_utc=dt.datetime(2026, 6, 21, 12, 15, tzinfo=dt.timezone.utc),
+        cfg=PriceObservationBuildConfig(horizon_minutes=60, max_entry_delay_ms=300_000),
+    )
+    assert artifact["window_count"] == 1
+    assert artifact["observation_count"] == 2
+    assert artifact["observations"] == observations
+
+    json_path = tmp_path / "price_observations.json"
+    jsonl_path = tmp_path / "price_observations.jsonl"
+    write_price_observation_artifact(json_path, artifact)
+    write_price_observation_artifact(jsonl_path, artifact)
+
+    assert read_price_observations(json_path) == observations
+    assert read_price_observations(jsonl_path) == observations
 
 
 def test_runtime_adapter_outcome_rows_are_idempotent_and_feed_disable():
