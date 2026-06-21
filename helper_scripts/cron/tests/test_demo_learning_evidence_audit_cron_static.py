@@ -10,29 +10,32 @@ import pytest
 
 CRON_DIR = Path(__file__).resolve().parents[1]
 WRAPPER = CRON_DIR / "demo_learning_evidence_audit_cron.sh"
+INSTALLER = CRON_DIR / "install_demo_learning_evidence_audit_cron.sh"
 
 
-def _src() -> str:
-    return WRAPPER.read_text(encoding="utf-8")
+def _src(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
 
 
-def test_bash_syntax_ok() -> None:
+@pytest.mark.parametrize("script", [WRAPPER, INSTALLER], ids=["wrapper", "installer"])
+def test_bash_syntax_ok(script: Path) -> None:
     if shutil.which("bash") is None:
         pytest.skip("bash not available")
-    proc = subprocess.run(["bash", "-n", str(WRAPPER)], capture_output=True, text=True)
+    proc = subprocess.run(["bash", "-n", str(script)], capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
 
 
-def test_executable_strict_mode_and_portable_bash() -> None:
-    src = _src()
-    assert WRAPPER.stat().st_mode & 0o111
+@pytest.mark.parametrize("script", [WRAPPER, INSTALLER], ids=["wrapper", "installer"])
+def test_executable_strict_mode_and_portable_bash(script: Path) -> None:
+    src = _src(script)
+    assert script.stat().st_mode & 0o111, f"{script.name} not executable"
     assert "set -euo pipefail" in src
     assert "mapfile" not in src
     assert ":-{}}" not in src
 
 
 def test_read_only_pg_and_runtime_boundaries() -> None:
-    src = _src()
+    src = _src(WRAPPER)
     assert "basic_system_services.env" in src
     assert "POSTGRES_PASSWORD" in src
     assert 'PGOPTIONS="-c default_transaction_read_only=on' in src
@@ -59,7 +62,7 @@ def test_read_only_pg_and_runtime_boundaries() -> None:
 
 
 def test_artifact_log_lock_heartbeat_and_status_surfaces() -> None:
-    src = _src()
+    src = _src(WRAPPER)
     assert "demo_learning_evidence_audit_cron.lock.d" in src
     assert "demo_learning_evidence_audit.last_fire" in src
     assert "demo_learning_evidence_audit_cron.log" in src
@@ -75,7 +78,7 @@ def test_artifact_log_lock_heartbeat_and_status_surfaces() -> None:
 
 
 def test_operator_knobs_cover_learning_evidence_questions() -> None:
-    src = _src()
+    src = _src(WRAPPER)
     for key in (
         "OPENCLAW_DEMO_LEARNING_EVIDENCE_ENGINE_MODES:-demo,live_demo",
         "OPENCLAW_DEMO_LEARNING_EVIDENCE_LOOKBACK_HOURS:-24",
@@ -100,7 +103,56 @@ def test_operator_knobs_cover_learning_evidence_questions() -> None:
     assert 'validate_bool01 "OPENCLAW_DEMO_LEARNING_EVIDENCE_REQUIRE_PROCESS_WRITER_ENABLED"' in src
 
 
-def test_no_hardcoded_user_paths() -> None:
-    src = _src()
+def test_installer_dry_run_apply_gate_and_reversible_entry() -> None:
+    src = _src(INSTALLER)
+    assert (
+        'OPENCLAW_DEMO_LEARNING_EVIDENCE_CRON_MINUTES="${OPENCLAW_DEMO_LEARNING_EVIDENCE_CRON_MINUTES:-7,37}"'
+        in src
+    )
+    assert (
+        'OPENCLAW_DEMO_LEARNING_EVIDENCE_ENGINE_MODES="${OPENCLAW_DEMO_LEARNING_EVIDENCE_ENGINE_MODES:-demo,live_demo}"'
+        in src
+    )
+    assert (
+        'OPENCLAW_DEMO_LEARNING_EVIDENCE_REQUIRE_WRITER_ENABLED="${OPENCLAW_DEMO_LEARNING_EVIDENCE_REQUIRE_WRITER_ENABLED:-0}"'
+        in src
+    )
+    assert (
+        'OPENCLAW_DEMO_LEARNING_EVIDENCE_REQUIRE_PROCESS_WRITER_ENABLED="${OPENCLAW_DEMO_LEARNING_EVIDENCE_REQUIRE_PROCESS_WRITER_ENABLED:-0}"'
+        in src
+    )
+    assert 'ENTRY="${OPENCLAW_DEMO_LEARNING_EVIDENCE_CRON_MINUTES} * * * *' in src
+    assert '_validate_cron_minute_list "OPENCLAW_DEMO_LEARNING_EVIDENCE_CRON_MINUTES"' in src
+    assert '_validate_bool01 "OPENCLAW_DEMO_LEARNING_EVIDENCE_REQUIRE_WRITER_ENABLED"' in src
+    assert '_append_env_if_set "OPENCLAW_DEMO_LEARNING_EVIDENCE_RUNTIME_PROC_ENVIRON"' in src
+    assert "OPENCLAW_DEMO_LEARNING_EVIDENCE_CRON_APPLY" in src
+    assert "DRY-RUN: not modifying crontab." in src
+    assert "--remove" in src
+    assert 'MARKER="demo_learning_evidence_audit_cron.sh"' in src
+    assert 'grep -q "$MARKER"' in src
+    assert "filtered_crontab" in src
+    assert 'grep -v "$MARKER" || true' in src
+    assert "demo_learning_evidence_audit_cron.cron.log" in src
+    assert (
+        "Boundary: artifact-only Markdown/JSON heartbeat; readonly PG; no order authority or Cost Gate relaxation"
+        in src
+    )
+    assert "install_demo_learning_evidence_audit_cron.sh requires Linux runtime" in src
+
+
+@pytest.mark.parametrize("script", [WRAPPER, INSTALLER], ids=["wrapper", "installer"])
+def test_no_hardcoded_user_paths_or_trading_tokens(script: Path) -> None:
+    src = _src(script)
     assert "/home/ncyu" not in src
     assert "/Users/" not in src
+    forbidden = (
+        "OPENCLAW_ALLOW_MAINNET",
+        "authorization.json",
+        "restart_all.sh",
+        "systemctl",
+        "place_order",
+        "cancel_order",
+        "live_authorization",
+    )
+    for token in forbidden:
+        assert token not in src
