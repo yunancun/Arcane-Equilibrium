@@ -16,6 +16,7 @@ set -euo pipefail
 BASE="${OPENCLAW_BASE_DIR:-$HOME/BybitOpenClaw/srv}"
 DATA="${OPENCLAW_DATA_DIR:-/tmp/openclaw}"
 LANE_DIR="${DATA}/cost_gate_learning_lane"
+COUNTERFACTUAL_DIR="${DATA}/cost_gate_counterfactual"
 LOG_DIR="${DATA}/logs"
 LOG="${LOG_DIR}/cost_gate_learning_lane_cron.log"
 STATUS_LOG="${LOG_DIR}/cost_gate_learning_lane.log"
@@ -24,8 +25,12 @@ LOCK_DIR="${LOCK_ROOT}/cost_gate_learning_lane_cron.lock.d"
 HEARTBEAT_DIR="${DATA}/cron_heartbeat"
 LEDGER="${OPENCLAW_COST_GATE_LEARNING_LEDGER:-$LANE_DIR/probe_ledger.jsonl}"
 SCORECARD_JSON="${OPENCLAW_COST_GATE_SCORECARD_JSON:-$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json}"
+SCORECARD_MD="${OPENCLAW_COST_GATE_SCORECARD_MD:-$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.md}"
 PLAN_JSON="${OPENCLAW_COST_GATE_LEARNING_PLAN_JSON:-$LANE_DIR/demo_learning_lane_plan_latest.json}"
 
+REFRESH_SCORECARD="${OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD:-1}"
+SCORECARD_LOOKBACK_HOURS="${OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS:-168}"
+SCORECARD_LIMIT="${OPENCLAW_COST_GATE_SCORECARD_LIMIT:-50000}"
 REFRESH_PLAN="${OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN:-1}"
 PLAN_MAX_SCORECARD_AGE_HOURS="${OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS:-24}"
 PLAN_MIN_CANDIDATE_SAMPLE="${OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE:-100}"
@@ -47,7 +52,7 @@ REVIEW_MIN_AVG_NET_BPS="${OPENCLAW_COST_GATE_REVIEW_MIN_AVG_NET_BPS:-0.0}"
 REVIEW_MIN_NET_POSITIVE_PCT="${OPENCLAW_COST_GATE_REVIEW_MIN_NET_POSITIVE_PCT:-60.0}"
 STALE_LOCK_MIN="${OPENCLAW_COST_GATE_LEARNING_STALE_LOCK_MIN:-30}"
 
-mkdir -p "$LANE_DIR" "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR"
+mkdir -p "$LANE_DIR" "$COUNTERFACTUAL_DIR" "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR"
 
 ts() { date -u '+%Y-%m-%d %H:%M:%S'; }
 
@@ -82,6 +87,9 @@ if [[ ! "$PG_TIMEFRAME" =~ ^[[:alnum:]]{1,16}$ ]]; then
     echo "[$(ts)] FATAL: OPENCLAW_COST_GATE_LEARNING_PG_TIMEFRAME invalid: ${PG_TIMEFRAME}" | tee -a "$LOG" >&2
     exit 2
 fi
+validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD" "$REFRESH_SCORECARD"
+validate_int "OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS" "$SCORECARD_LOOKBACK_HOURS"
+validate_int "OPENCLAW_COST_GATE_SCORECARD_LIMIT" "$SCORECARD_LIMIT"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN" "$REFRESH_PLAN"
 validate_int "OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS" "$PLAN_MAX_SCORECARD_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE" "$PLAN_MIN_CANDIDATE_SAMPLE"
@@ -149,6 +157,8 @@ export OPENCLAW_BASE_DIR="$BASE"
 export OPENCLAW_DATA_DIR="$DATA"
 
 STAMP="$(date -u '+%Y%m%dT%H%M%SZ')"
+SCORECARD_JSON_OUT="${COUNTERFACTUAL_DIR}/cost_gate_reject_counterfactual_${STAMP}.json"
+SCORECARD_MD_OUT="${COUNTERFACTUAL_DIR}/cost_gate_reject_counterfactual_${STAMP}.md"
 REFRESH_OUT="${LANE_DIR}/outcome_refresh_${STAMP}.json"
 REFRESH_LATEST="${LANE_DIR}/outcome_refresh_latest.json"
 REVIEW_OUT="${LANE_DIR}/blocked_outcome_review_${STAMP}.json"
@@ -158,6 +168,17 @@ HISTORICAL_REVIEW_LATEST="${LANE_DIR}/historical_scorecard_review_latest.json"
 MATERIALIZER_OUT="${LANE_DIR}/reject_materializer_${STAMP}.json"
 MATERIALIZER_LATEST="${LANE_DIR}/reject_materializer_latest.json"
 PLAN_OUT="${LANE_DIR}/demo_learning_lane_plan_${STAMP}.json"
+
+SCORECARD_ARGS=(
+    "$BASE/helper_scripts/db/audit/cost_gate_reject_counterfactual.py"
+    --lookback-hours "$SCORECARD_LOOKBACK_HOURS"
+    --horizon-minutes "$OUTCOME_HORIZON_MINUTES"
+    --limit "$SCORECARD_LIMIT"
+    --friction-bps "$OUTCOME_COST_BPS"
+    --min-probe-sample "$PLAN_MIN_CANDIDATE_SAMPLE"
+    --output "$SCORECARD_MD_OUT"
+    --json-output "$SCORECARD_JSON_OUT"
+)
 
 PLAN_ARGS=(
     -m cost_gate_learning_lane.policy
@@ -220,6 +241,24 @@ REVIEW_ARGS=(
 )
 
 echo "[$(ts)] === Cost-gate learning lane refresh start append=${APPEND_OUTCOMES} ledger=${LEDGER} ===" >> "$LOG"
+scorecard_rc=0
+if [[ "$REFRESH_SCORECARD" == "1" ]]; then
+    (
+        cd "$BASE"
+        export PYTHONPATH="$BASE${PYTHONPATH:+:$PYTHONPATH}"
+        export PYTHONDONTWRITEBYTECODE=1
+        "$PYBIN" "${SCORECARD_ARGS[@]}"
+    ) >> "$LOG" 2>&1 || scorecard_rc=$?
+    if [[ -f "$SCORECARD_JSON_OUT" ]]; then
+        cp "$SCORECARD_JSON_OUT" "$SCORECARD_JSON"
+    fi
+    if [[ -f "$SCORECARD_MD_OUT" ]]; then
+        cp "$SCORECARD_MD_OUT" "$SCORECARD_MD"
+    fi
+else
+    echo "[$(ts)] SKIP: cost-gate counterfactual scorecard refresh disabled by OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD=0" >> "$LOG"
+fi
+
 plan_rc=0
 if [[ "$REFRESH_PLAN" == "1" ]]; then
     (
@@ -283,7 +322,7 @@ if [[ -f "$REVIEW_OUT" ]]; then
     cp "$REVIEW_OUT" "$REVIEW_LATEST"
 fi
 
-STATUS_JSON=$(PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
+STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
 import hashlib
 import json
@@ -304,6 +343,7 @@ def load(path):
         return {}, None, f"{type(exc).__name__}:{exc}"
 
 
+scorecard, scorecard_sha, scorecard_err = load(os.environ["SCORECARD_JSON_OUT"])
 plan, plan_sha, plan_err = load(os.environ["PLAN_OUT"])
 historical, historical_sha, historical_err = load(os.environ["HISTORICAL_REVIEW_OUT"])
 materializer, materializer_sha, materializer_err = load(os.environ["MATERIALIZER_OUT"])
@@ -321,17 +361,27 @@ except OSError:
 status = {
     "ts_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "check": "cost_gate_learning_lane",
+    "scorecard_rc": int(os.environ["SCORECARD_RC"]),
     "plan_rc": int(os.environ["PLAN_RC"]),
     "historical_review_rc": int(os.environ["HISTORICAL_REVIEW_RC"]),
     "materializer_rc": int(os.environ["MATERIALIZER_RC"]),
     "refresh_rc": int(os.environ["REFRESH_RC"]),
     "review_rc": int(os.environ["REVIEW_RC"]),
+    "refresh_scorecard": os.environ["REFRESH_SCORECARD"] == "1",
     "refresh_plan": os.environ["REFRESH_PLAN"] == "1",
     "materialize_rejects": os.environ["MATERIALIZE_REJECTS"] == "1",
     "append_materialized_rejects": os.environ["APPEND_MATERIALIZED_REJECTS"] == "1",
     "append_outcomes": os.environ["APPEND_OUTCOMES"] == "1",
     "ledger_path": str(ledger),
     "ledger_row_count": ledger_rows,
+    "scorecard_artifact_path": os.environ["SCORECARD_JSON_OUT"],
+    "scorecard_latest_path": os.environ["SCORECARD_JSON"],
+    "scorecard_sha256": scorecard_sha,
+    "scorecard_error": scorecard_err,
+    "scorecard_status": (scorecard.get("learning_lane_scorecard") or {}).get("status"),
+    "scorecard_probe_candidate_count": (
+        (scorecard.get("learning_lane_scorecard") or {}).get("probe_candidate_count")
+    ),
     "plan_artifact_path": os.environ["PLAN_OUT"],
     "plan_latest_path": os.environ["PLAN_JSON"],
     "plan_sha256": plan_sha,
@@ -378,7 +428,7 @@ if [[ -n "$STATUS_JSON" ]]; then
     echo "$STATUS_JSON" >> "$STATUS_LOG"
 fi
 
-echo "[$(ts)] === Cost-gate learning lane refresh end plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} ===" >> "$LOG"
+echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} ===" >> "$LOG"
 
 # fail-soft: rc/status are recorded; alpha-discovery reads artifacts and ledger
 # state. Operator action is required for deploy, writer enablement, or probe authority.

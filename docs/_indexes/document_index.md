@@ -11,6 +11,8 @@
 | 文件 | 内容 |
 |------|------|
 | `runbooks/2026-06-21--cost_gate_learning_lane_runtime_activation.md` | Operator-gated runtime activation SOP for the Cost Gate demo-learning lane: read-only audit, source reconcile/sync gate, activation preflight, cron dry-run/install, optional hot-path writer, observation and rollback boundaries. Runbook only; not runtime approval. |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-21--cost_gate_learning_scorecard_refresh_chain.md` | PM checkpoint: cost-gate learning cron refreshes the read-only reject counterfactual scorecard before plan/materializer/outcome/review, and surfaces scorecard rc/status in status/killboard. |
+| `CCAgentWorkSpace/Operator/2026-06-21--cost_gate_learning_scorecard_refresh_chain.md` | Operator note for the complete scorecard-to-review self-refresh chain and remaining runtime activation gate. |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-21--cost_gate_learning_plan_refresh_preflight.md` | PM checkpoint: cron refreshes the bounded demo-learning plan before reject materialization, and activation preflight rejects policy-not-ready plan artifacts. |
 | `CCAgentWorkSpace/Operator/2026-06-21--cost_gate_learning_plan_refresh_preflight.md` | Operator note for strict plan readiness and recurring plan refresh in the cost-gate learning loop. |
 | `CCAgentWorkSpace/PM/workspace/reports/2026-06-21--cost_gate_cron_installer_apply_preflight.md` | PM checkpoint: moves the cost-gate learning cron activation preflight into the installer apply path, requiring expected-head/source/plan readiness before crontab write. |

@@ -157,7 +157,7 @@ ssh trade-core 'cd /home/ncyu/BybitOpenClaw/srv && \
 
 Review the proposed crontab entry. It should point to the synced repo and `/tmp/openclaw`.
 The dry run also prints the apply preflight posture. Default apply requires read-only activation preflight plus an expected source head.
-The installed wrapper refreshes the demo-learning plan at the start of every run unless `OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN=0` is explicitly set.
+The installed wrapper refreshes the read-only cost-gate reject counterfactual scorecard and then the demo-learning plan at the start of every run unless `OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD=0` or `OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN=0` is explicitly set.
 
 ## Cron Install
 

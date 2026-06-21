@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Scorecard Refresh Chain
+
+- Cost-gate learning cron now refreshes the read-only reject counterfactual scorecard before plan refresh, reject materialization, blocked-outcome refresh, and review.
+- Status and alpha-discovery blocker rows now expose scorecard rc/status/probe-candidate count; scorecard refresh failures become learning-loop errors.
+- This completes the source-side recurring learning chain, but runtime remains untouched until operator source sync/activation approval.
+
 ## 2026-06-21 Cost-Gate Learning Plan Refresh Preflight
 
 - Cost-gate learning cron now refreshes `demo_learning_lane_plan_latest.json` before reject materialization and records plan rc/status/selected count in the learning-loop status log.
