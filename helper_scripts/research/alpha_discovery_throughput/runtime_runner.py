@@ -1377,6 +1377,39 @@ def summarize_demo_learning_evidence_audit(
         "demo_learning_evidence_cost_gate_learning_gate_adjustment": counts.get(
             "cost_gate_learning_gate_adjustment"
         ),
+        "demo_learning_evidence_cost_gate_adjustment_runtime_preflight_blocking": counts.get(
+            "cost_gate_adjustment_runtime_preflight_blocking"
+        ),
+        "demo_learning_evidence_cost_gate_adjustment_runtime_activation_ready": counts.get(
+            "cost_gate_adjustment_runtime_activation_ready"
+        ),
+        "demo_learning_evidence_cost_gate_adjustment_runtime_activation_blockers": counts.get(
+            "cost_gate_adjustment_runtime_activation_blockers"
+        ),
+        "demo_learning_evidence_cost_gate_adjustment_runtime_source_activation_ready": counts.get(
+            "cost_gate_adjustment_runtime_source_activation_ready"
+        ),
+        "demo_learning_evidence_cost_gate_adjustment_runtime_source_activation_status": counts.get(
+            "cost_gate_adjustment_runtime_source_activation_status"
+        ),
+        "demo_learning_evidence_cost_gate_adjustment_runtime_writer_config_required": counts.get(
+            "cost_gate_adjustment_runtime_writer_config_required"
+        ),
+        "demo_learning_evidence_cost_gate_adjustment_runtime_writer_config_enabled": counts.get(
+            "cost_gate_adjustment_runtime_writer_config_enabled"
+        ),
+        "demo_learning_evidence_cost_gate_adjustment_runtime_writer_config_status": counts.get(
+            "cost_gate_adjustment_runtime_writer_config_status"
+        ),
+        "demo_learning_evidence_cost_gate_adjustment_runtime_writer_process_required": counts.get(
+            "cost_gate_adjustment_runtime_writer_process_required"
+        ),
+        "demo_learning_evidence_cost_gate_adjustment_runtime_writer_process_enabled": counts.get(
+            "cost_gate_adjustment_runtime_writer_process_enabled"
+        ),
+        "demo_learning_evidence_cost_gate_adjustment_runtime_writer_process_status": counts.get(
+            "cost_gate_adjustment_runtime_writer_process_status"
+        ),
         "demo_learning_evidence_data_flow_freshness_status": counts.get(
             "data_flow_freshness_status"
         ),

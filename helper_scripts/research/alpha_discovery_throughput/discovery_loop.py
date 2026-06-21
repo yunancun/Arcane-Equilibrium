@@ -1370,6 +1370,39 @@ def classify_profitability_blocker(
                 "demo_learning_evidence_cost_gate_learning_gate_adjustment": detail.get(
                     "demo_learning_evidence_cost_gate_learning_gate_adjustment"
                 ),
+                "demo_learning_evidence_cost_gate_adjustment_runtime_preflight_blocking": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_runtime_preflight_blocking"
+                ),
+                "demo_learning_evidence_cost_gate_adjustment_runtime_activation_ready": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_runtime_activation_ready"
+                ),
+                "demo_learning_evidence_cost_gate_adjustment_runtime_activation_blockers": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_runtime_activation_blockers"
+                ),
+                "demo_learning_evidence_cost_gate_adjustment_runtime_source_activation_ready": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_runtime_source_activation_ready"
+                ),
+                "demo_learning_evidence_cost_gate_adjustment_runtime_source_activation_status": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_runtime_source_activation_status"
+                ),
+                "demo_learning_evidence_cost_gate_adjustment_runtime_writer_config_required": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_runtime_writer_config_required"
+                ),
+                "demo_learning_evidence_cost_gate_adjustment_runtime_writer_config_enabled": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_runtime_writer_config_enabled"
+                ),
+                "demo_learning_evidence_cost_gate_adjustment_runtime_writer_config_status": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_runtime_writer_config_status"
+                ),
+                "demo_learning_evidence_cost_gate_adjustment_runtime_writer_process_required": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_runtime_writer_process_required"
+                ),
+                "demo_learning_evidence_cost_gate_adjustment_runtime_writer_process_enabled": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_runtime_writer_process_enabled"
+                ),
+                "demo_learning_evidence_cost_gate_adjustment_runtime_writer_process_status": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_runtime_writer_process_status"
+                ),
                 "demo_learning_evidence_data_flow_freshness_status": detail.get(
                     "demo_learning_evidence_data_flow_freshness_status"
                 ),

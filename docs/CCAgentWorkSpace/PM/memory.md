@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost Gate Recommendation Runtime Preflight Gate
+
+- Cost Gate adjustment recommendations now consume runtime/source/writer readiness from `cost_gate_learning_preflight`.
+- Source not activation-ready, required writer disabled, or required running-process writer disabled now blocks bounded learning/probe recommendations before any Cost Gate change.
+- Alpha-discovery cost-gate rows propagate runtime preflight/source/writer fields; order authority remains `NOT_GRANTED` and main/global Cost Gate lowering remains `NONE/false`.
+
 ## 2026-06-21 Cost Gate Adjustment Recommendation Scorecard
 
 - Demo learning evidence now emits `cost_gate_adjustment_recommendation`, explicitly separating no global main Cost Gate lowering from bounded learning-lane activation and bounded demo-probe review readiness.
