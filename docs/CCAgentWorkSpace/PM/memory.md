@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Blocked-Signal Outcome Feedback
+
+- Extended `runtime_adapter --record-blocked-outcomes` to append `blocked_signal_outcome` markout rows for recorded rejects that were not allowed to submit orders, including current `ORDER_AUTHORITY_NOT_GRANTED` rows.
+- These rows are not `probe_outcome`, do not feed probe auto-disable or order authority, and remain `promotion_evidence=false`; they answer whether blocked signals later moved profitably.
+- Alpha-discovery now summarizes the cost-gate probe ledger status/counts and changes next triggers based on actual progress: enable writer, record blocked outcomes, or review blocked outcomes before any probe authority.
+
 ## 2026-06-21 Cost-Gate Demo-Learning Lane Runtime Ledger Writer
 
 - Added env-gated Rust `demo_learning_lane_writer`, wired from engine startup through all paper/demo/live pipeline deps into `TickPipeline`.
