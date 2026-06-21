@@ -6,6 +6,12 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-21 Cost-Gate learning lane runtime activation runbook
+
+| 文件 | 内容 |
+|------|------|
+| `runbooks/2026-06-21--cost_gate_learning_lane_runtime_activation.md` | Operator-gated runtime activation SOP for the Cost Gate demo-learning lane: read-only audit, source reconcile/sync gate, activation preflight, cron dry-run/install, optional hot-path writer, observation and rollback boundaries. Runbook only; not runtime approval. |
+
 ### 2026-06-18 Codex sub-agent hygiene dispatch rules
 
 | 文件 | 内容 |
