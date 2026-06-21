@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Demo Order-Flow Starvation Blocker
+
+- Demo learning evidence now has an order-flow evidence scorecard that distinguishes Cost Gate reject wall with zero orders/fills from orders-without-fills and fills-present states.
+- Alpha-discovery cost-gate rows can now expose `demo_cost_gate_reject_wall_no_order_flow_evidence` with next trigger `activate_cost_gate_learning_lane_then_operator_review_bounded_demo_probe`.
+- This remains evidence-only: no main Cost Gate lowering, order authority, runtime sync, PG write, or Bybit call.
+
 ## 2026-06-21 Demo Learning Data-Flow Freshness Blocker
 
 - Demo order-stall audit now emits learning-data freshness with a 90-minute stale threshold.
