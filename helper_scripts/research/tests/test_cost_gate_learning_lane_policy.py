@@ -26,6 +26,10 @@ from cost_gate_learning_lane.outcome_refresh import (
     build_price_rows_from_pg_for_refresh,
     refresh_cost_gate_outcomes_from_price_rows,
 )
+from cost_gate_learning_lane.outcome_review import (
+    BlockedOutcomeReviewConfig,
+    build_blocked_signal_outcome_review,
+)
 from cost_gate_learning_lane.price_observations import (
     PriceObservationBuildConfig,
     build_price_observation_artifact,
@@ -311,7 +315,7 @@ def test_alpha_discovery_surfaces_cost_gate_ledger_progress(tmp_path: Path):
 
     assert row["primary_blocker"] == "cost_gate_blocked_signal_outcomes_accumulating"
     assert row["next_trigger"] == (
-        "review_blocked_signal_outcomes_before_any_probe_order_authority"
+        "continue_recording_and_refreshing_blocked_signal_outcomes"
     )
     assert row["ledger_status"] == "BLOCKED_SIGNAL_OUTCOMES_PRESENT"
     assert row["admission_decision_count"] == 1
@@ -320,6 +324,98 @@ def test_alpha_discovery_surfaces_cost_gate_ledger_progress(tmp_path: Path):
     assert row["blocked_signal_positive_outcome_count"] == 1
     assert row["avg_blocked_signal_outcome_net_bps"] == 12.5
     assert row["blocked_signal_net_positive_pct"] == 100.0
+    assert row["blocked_signal_outcome_review_status"] == (
+        "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
+    )
+    assert row["blocked_signal_outcome_review"]["review_candidate_side_cell_count"] == 0
+
+
+def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    ledger_rows = [
+        {
+            "record_type": "probe_admission_decision",
+            "generated_at_utc": "2026-06-21T11:02:00+00:00",
+            "attempt_id": "ctx-demo-ma_crossover-ETHUSDT-admission",
+            "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+            "allowed_to_submit_order": False,
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "event": _selected_reject_event(),
+        },
+        {
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-06-21T12:15:00+00:00",
+            "attempt_id": "blocked-1",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "source_admission_decision": "ORDER_AUTHORITY_NOT_GRANTED",
+            "realized_net_bps": 12.5,
+        },
+        {
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-06-21T13:15:00+00:00",
+            "attempt_id": "blocked-2",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "source_admission_decision": "ORDER_AUTHORITY_NOT_GRANTED",
+            "realized_net_bps": 4.0,
+        },
+        {
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-06-21T14:15:00+00:00",
+            "attempt_id": "blocked-3",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "source_admission_decision": "ORDER_AUTHORITY_NOT_GRANTED",
+            "realized_net_bps": -1.0,
+        },
+    ]
+    (lane_dir / "probe_ledger.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in ledger_rows),
+        encoding="utf-8",
+    )
+
+    arm = collect_cost_gate_learning_lane_arm(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
+    )
+    discovery = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
+    )
+    row = discovery["profitability_blocker_scorecard"]["arms"][0]
+
+    assert row["primary_blocker"] == (
+        "cost_gate_blocked_signal_outcomes_need_demo_probe_authority_review"
+    )
+    assert row["next_trigger"] == (
+        "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+    )
+    assert row["blocked_signal_outcome_review_status"] == (
+        "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+    )
+    assert row["blocked_signal_outcome_review"]["review_candidate_side_cell_count"] == 1
+    assert row["blocked_signal_outcome_review"]["top_side_cells"][0]["status"] == (
+        "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
+    )
 
 
 def test_alpha_discovery_routes_admission_only_ledger_to_price_observation_builder(
@@ -894,6 +990,75 @@ def test_outcome_refresh_pg_price_rows_feed_batch_without_duplicate_queries():
         conn=no_window_conn,
     ) == []
     assert no_window_conn.executions == []
+
+
+def test_blocked_signal_outcome_review_scorecard_is_conservative():
+    scorecard = build_blocked_signal_outcome_review(
+        [
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T12:15:00+00:00",
+                "attempt_id": "blocked-1",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "realized_net_bps": 12.5,
+            },
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T13:15:00+00:00",
+                "attempt_id": "blocked-2",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "realized_net_bps": 4.0,
+            },
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T14:15:00+00:00",
+                "attempt_id": "blocked-3",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "realized_net_bps": -1.0,
+            },
+        ],
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
+        cfg=BlockedOutcomeReviewConfig(
+            min_outcomes_per_side_cell=3,
+            min_avg_net_bps=0.0,
+            min_net_positive_pct=60.0,
+        ),
+    )
+
+    assert scorecard["status"] == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+    assert scorecard["next_trigger"] == (
+        "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+    )
+    assert scorecard["review_candidate_side_cell_count"] == 1
+    assert scorecard["promotion_evidence"] is False
+    assert scorecard["order_authority"] == "NOT_GRANTED"
+    side_cell = scorecard["top_side_cells"][0]
+    assert side_cell["status"] == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
+    assert side_cell["outcome_count"] == 3
+    assert round(side_cell["avg_net_bps"], 6) == 5.166667
+    assert round(side_cell["net_positive_pct"], 6) == 66.666667
+
+    insufficient = build_blocked_signal_outcome_review(
+        [
+            {
+                "record_type": "blocked_signal_outcome",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "realized_net_bps": 12.5,
+            }
+        ],
+        cfg=BlockedOutcomeReviewConfig(min_outcomes_per_side_cell=3),
+    )
+    assert insufficient["status"] == "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
+    assert insufficient["review_candidate_side_cell_count"] == 0
 
 
 def test_runtime_adapter_outcome_rows_are_idempotent_and_feed_disable():

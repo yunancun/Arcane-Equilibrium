@@ -16,6 +16,7 @@ import re
 from pathlib import Path
 from typing import Any
 
+from cost_gate_learning_lane.outcome_review import build_blocked_signal_outcome_review
 from polymarket_leadlag import replay_history as polymarket_replay_history
 
 from . import RUNNER_VERSION
@@ -104,6 +105,10 @@ def _summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         "avg_probe_outcome_net_bps": None,
         "avg_blocked_signal_outcome_net_bps": None,
         "blocked_signal_net_positive_pct": None,
+        "blocked_signal_outcome_review": None,
+        "blocked_signal_outcome_review_status": None,
+        "blocked_signal_outcome_review_reason": None,
+        "blocked_signal_outcome_review_next_trigger": None,
     }
     try:
         lines = path.read_text(encoding="utf-8").splitlines()
@@ -114,6 +119,7 @@ def _summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         summary["ledger_source_error"] = f"read_error:{type(exc).__name__}"
         return summary
 
+    valid_rows: list[dict[str, Any]] = []
     probe_net_sum = 0.0
     blocked_net_sum = 0.0
     for line_no, raw_line in enumerate(lines, start=1):
@@ -131,6 +137,7 @@ def _summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
             summary["ledger_source_error"] = f"non_object_jsonl_line:{line_no}"
             continue
 
+        valid_rows.append(row)
         summary["ledger_total_rows"] += 1
         record_type = str(row.get("record_type") or "").strip()
         summary["latest_record_type"] = record_type or None
@@ -190,6 +197,11 @@ def _summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
             / summary["blocked_signal_outcome_count"]
             * 100.0
         )
+        review = build_blocked_signal_outcome_review(valid_rows)
+        summary["blocked_signal_outcome_review"] = review
+        summary["blocked_signal_outcome_review_status"] = review.get("status")
+        summary["blocked_signal_outcome_review_reason"] = review.get("reason")
+        summary["blocked_signal_outcome_review_next_trigger"] = review.get("next_trigger")
     return summary
 
 
