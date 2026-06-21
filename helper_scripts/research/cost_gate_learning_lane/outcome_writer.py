@@ -1,4 +1,4 @@
-"""Artifact-only outcome writer for admitted cost-gate demo-learning probes."""
+"""Artifact-only outcome writer for cost-gate demo-learning lane rows."""
 
 from __future__ import annotations
 
@@ -9,7 +9,13 @@ import math
 from pathlib import Path
 from typing import Any
 
-from cost_gate_learning_lane.contract import ADAPTER_SCHEMA_VERSION, ADMIT_DECISION
+from cost_gate_learning_lane.contract import (
+    ADAPTER_SCHEMA_VERSION,
+    ADMIT_DECISION,
+    BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE,
+    PROBE_ADMISSION_DECISION_RECORD_TYPE,
+    PROBE_OUTCOME_RECORD_TYPE,
+)
 
 
 @dataclass(frozen=True)
@@ -199,34 +205,45 @@ def _first_price_at_or_after(
     return None
 
 
-def _existing_outcome_attempt_ids(ledger_rows: list[dict[str, Any]]) -> set[str]:
+def _existing_outcome_attempt_ids(
+    ledger_rows: list[dict[str, Any]],
+    *,
+    record_type: str,
+) -> set[str]:
     return {
         _str(row.get("attempt_id")) or _attempt_id(row)
         for row in ledger_rows
-        if _str(row.get("record_type")) == "probe_outcome"
+        if _str(row.get("record_type")) == record_type
     }
 
 
-def build_probe_outcome_records(
+def _build_markout_outcome_records(
     ledger_rows: list[dict[str, Any]],
     price_observations: list[dict[str, Any]],
     *,
     now_utc: dt.datetime | None = None,
     cfg: ProbeOutcomeConfig | None = None,
+    source_row_predicate,
+    record_type: str,
+    outcome_source: str,
+    boundary: str,
 ) -> list[dict[str, Any]]:
-    """Build append-only outcome rows for admitted probes whose horizon matured."""
     cfg = cfg or ProbeOutcomeConfig()
     validate_outcome_config(cfg)
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     now_ms = int(now.timestamp() * 1000)
     horizon_ms = cfg.horizon_minutes * 60_000
-    existing_attempt_ids = _existing_outcome_attempt_ids(ledger_rows)
+    existing_attempt_ids = _existing_outcome_attempt_ids(
+        ledger_rows,
+        record_type=record_type,
+    )
     outcomes: list[dict[str, Any]] = []
 
     for row in ledger_rows:
-        if _str(row.get("record_type")) != "probe_admission_decision":
+        if _str(row.get("record_type")) != PROBE_ADMISSION_DECISION_RECORD_TYPE:
             continue
-        if _row_decision(row) != ADMIT_DECISION:
+        decision = _row_decision(row)
+        if not source_row_predicate(row, decision):
             continue
         attempt_id = _str(row.get("attempt_id")) or _attempt_id(row)
         if not attempt_id or attempt_id in existing_attempt_ids:
@@ -262,10 +279,12 @@ def build_probe_outcome_records(
         outcomes.append(
             {
                 "schema_version": ADAPTER_SCHEMA_VERSION,
-                "record_type": "probe_outcome",
+                "record_type": record_type,
                 "generated_at_utc": now.isoformat(),
                 "attempt_id": attempt_id,
                 "side_cell_key": row.get("side_cell_key") or _ledger_side_cell(row),
+                "source_admission_decision": decision,
+                "allowed_to_submit_order": row.get("allowed_to_submit_order"),
                 "strategy_name": event.get("strategy_name") or event.get("strategy"),
                 "symbol": symbol,
                 "side": side,
@@ -278,14 +297,60 @@ def build_probe_outcome_records(
                 "gross_bps": gross_bps,
                 "cost_bps": cfg.cost_bps,
                 "realized_net_bps": net_bps,
-                "outcome_source": "market_markout_proxy",
+                "outcome_source": outcome_source,
                 "promotion_evidence": False,
-                "boundary": (
-                    "probe outcome ledger artifact only; markout proxy unless "
-                    "future fill-backed writer replaces source; no PG, Bybit, "
-                    "order, config, risk, auth, or runtime mutation"
-                ),
+                "boundary": boundary,
             }
         )
 
     return outcomes
+
+
+def build_probe_outcome_records(
+    ledger_rows: list[dict[str, Any]],
+    price_observations: list[dict[str, Any]],
+    *,
+    now_utc: dt.datetime | None = None,
+    cfg: ProbeOutcomeConfig | None = None,
+) -> list[dict[str, Any]]:
+    """Build append-only outcome rows for admitted probes whose horizon matured."""
+    return _build_markout_outcome_records(
+        ledger_rows,
+        price_observations,
+        now_utc=now_utc,
+        cfg=cfg,
+        source_row_predicate=lambda _row, decision: decision == ADMIT_DECISION,
+        record_type=PROBE_OUTCOME_RECORD_TYPE,
+        outcome_source="market_markout_proxy",
+        boundary=(
+            "probe outcome ledger artifact only; markout proxy unless "
+            "future fill-backed writer replaces source; no PG, Bybit, "
+            "order, config, risk, auth, or runtime mutation"
+        ),
+    )
+
+
+def build_blocked_signal_outcome_records(
+    ledger_rows: list[dict[str, Any]],
+    price_observations: list[dict[str, Any]],
+    *,
+    now_utc: dt.datetime | None = None,
+    cfg: ProbeOutcomeConfig | None = None,
+) -> list[dict[str, Any]]:
+    """Build markout rows for rejected signals that were recorded but not allowed."""
+    return _build_markout_outcome_records(
+        ledger_rows,
+        price_observations,
+        now_utc=now_utc,
+        cfg=cfg,
+        source_row_predicate=lambda row, decision: (
+            decision != ADMIT_DECISION and row.get("allowed_to_submit_order") is False
+        ),
+        record_type=BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE,
+        outcome_source="market_markout_proxy_for_blocked_signal",
+        boundary=(
+            "blocked-signal counterfactual outcome artifact only; not a probe "
+            "fill, not promotion evidence, and no PG, Bybit, order, config, "
+            "risk, auth, or runtime mutation"
+        ),
+    )

@@ -851,11 +851,26 @@ def classify_profitability_blocker(
             engineering_actionable=True,
         )
     if action == READY_FOR_PROBE and arm_id == "cost_gate_demo_learning_lane":
+        ledger_status = str(detail.get("ledger_status") or "UNKNOWN")
+        admission_count = _int(detail.get("admission_decision_count"))
+        blocked_outcome_count = _int(detail.get("blocked_signal_outcome_count"))
+        if ledger_status in {"MISSING", "EMPTY"}:
+            primary_blocker = "cost_gate_probe_candidates_ready_but_runtime_ledger_empty"
+            next_trigger = "deploy_enable_runtime_ledger_writer_then_observe_reject_rows"
+        elif admission_count > 0 and blocked_outcome_count == 0:
+            primary_blocker = "cost_gate_rejects_recorded_need_blocked_signal_outcomes"
+            next_trigger = "record_blocked_signal_outcomes_to_verify_gate_reject_profitability"
+        elif blocked_outcome_count > 0:
+            primary_blocker = "cost_gate_blocked_signal_outcomes_accumulating"
+            next_trigger = "review_blocked_signal_outcomes_before_any_probe_order_authority"
+        else:
+            primary_blocker = "cost_gate_learning_probe_candidates_ready"
+            next_trigger = "wire_bounded_demo_learning_lane_policy_before_any_gate_lowering"
         return _finish_blocker_row(
             row,
             blocker_class="probe_ready",
-            primary_blocker="cost_gate_learning_probe_candidates_ready",
-            next_trigger="wire_bounded_demo_learning_lane_policy_before_any_gate_lowering",
+            primary_blocker=primary_blocker,
+            next_trigger=next_trigger,
             operator_actionable=True,
             engineering_actionable=True,
             extra={
@@ -871,6 +886,35 @@ def classify_profitability_blocker(
                 "probe_candidates": detail.get("probe_candidates"),
                 "do_not_probe_side_cells": detail.get("do_not_probe_side_cells"),
                 "data_coverage_tasks": detail.get("data_coverage_tasks"),
+                "ledger_status": ledger_status,
+                "ledger_path": detail.get("ledger_path"),
+                "ledger_source_error": detail.get("ledger_source_error"),
+                "ledger_total_rows": detail.get("ledger_total_rows"),
+                "ledger_malformed_line_count": detail.get("ledger_malformed_line_count"),
+                "admission_decision_count": detail.get("admission_decision_count"),
+                "admit_decision_count": detail.get("admit_decision_count"),
+                "order_authority_not_granted_count": detail.get(
+                    "order_authority_not_granted_count"
+                ),
+                "allowed_to_submit_order_count": detail.get("allowed_to_submit_order_count"),
+                "probe_outcome_count": detail.get("probe_outcome_count"),
+                "blocked_signal_outcome_count": detail.get(
+                    "blocked_signal_outcome_count"
+                ),
+                "blocked_signal_positive_outcome_count": detail.get(
+                    "blocked_signal_positive_outcome_count"
+                ),
+                "avg_probe_outcome_net_bps": detail.get("avg_probe_outcome_net_bps"),
+                "avg_blocked_signal_outcome_net_bps": detail.get(
+                    "avg_blocked_signal_outcome_net_bps"
+                ),
+                "blocked_signal_net_positive_pct": detail.get(
+                    "blocked_signal_net_positive_pct"
+                ),
+                "latest_admission_decision": detail.get("latest_admission_decision"),
+                "latest_record_type": detail.get("latest_record_type"),
+                "latest_generated_at_utc": detail.get("latest_generated_at_utc"),
+                "latest_side_cell_key": detail.get("latest_side_cell_key"),
                 "boundary": detail.get("boundary"),
             },
         )

@@ -27,6 +27,7 @@ from cost_gate_learning_lane.contract import (
 )
 from cost_gate_learning_lane.outcome_writer import (
     ProbeOutcomeConfig,
+    build_blocked_signal_outcome_records,
     build_probe_outcome_records,
     read_price_observations,
 )
@@ -593,6 +594,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path)
     parser.add_argument("--record-decision", action="store_true")
     parser.add_argument("--record-outcomes", action="store_true")
+    parser.add_argument("--record-blocked-outcomes", action="store_true")
     parser.add_argument("--adapter-enabled", action="store_true")
     parser.add_argument("--risk-state", default="NORMAL")
     parser.add_argument("--strategy")
@@ -624,27 +626,36 @@ def main() -> int:
     )
     validate_runtime_config(cfg)
     ledger = read_jsonl_ledger(args.ledger)
-    if args.record_outcomes:
+    if args.record_outcomes or args.record_blocked_outcomes:
         if args.price_observations is None:
-            raise ValueError("--record-outcomes requires --price-observations")
+            raise ValueError(
+                "--record-outcomes/--record-blocked-outcomes requires --price-observations"
+            )
         outcome_cfg = ProbeOutcomeConfig(
             horizon_minutes=args.outcome_horizon_minutes,
             cost_bps=args.outcome_cost_bps,
             max_entry_delay_ms=args.max_entry_delay_ms,
         )
         price_rows = read_price_observations(args.price_observations)
-        outcome_rows = build_probe_outcome_records(
-            ledger,
-            price_rows,
-            cfg=outcome_cfg,
+        outcome_rows = (
+            build_probe_outcome_records(ledger, price_rows, cfg=outcome_cfg)
+            if args.record_outcomes
+            else []
         )
-        for row in outcome_rows:
+        blocked_outcome_rows = (
+            build_blocked_signal_outcome_records(ledger, price_rows, cfg=outcome_cfg)
+            if args.record_blocked_outcomes
+            else []
+        )
+        for row in outcome_rows + blocked_outcome_rows:
             append_jsonl_ledger(args.ledger, row)
         payload = {
             "schema_version": ADAPTER_SCHEMA_VERSION,
             "record_type": "probe_outcome_batch",
             "outcome_count": len(outcome_rows),
+            "blocked_signal_outcome_count": len(blocked_outcome_rows),
             "outcomes": outcome_rows,
+            "blocked_signal_outcomes": blocked_outcome_rows,
             "boundary": "artifact-only; no PG, Bybit, order, config, risk, auth, or runtime mutation",
         }
         if args.output:

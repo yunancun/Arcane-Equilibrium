@@ -16,6 +16,7 @@ from cost_gate_learning_lane.policy import (
 )
 from cost_gate_learning_lane.outcome_writer import (
     ProbeOutcomeConfig,
+    build_blocked_signal_outcome_records,
     build_probe_outcome_records,
 )
 from cost_gate_learning_lane.runtime_adapter import (
@@ -199,15 +200,80 @@ def test_alpha_discovery_surfaces_cost_gate_learning_probe_ready(tmp_path: Path)
     assert discovery["arms"][0]["action"] == "READY_FOR_PROBE"
     assert scorecard["status"] == "ACTIONABLE_PROBE_READY"
     assert row["arm_id"] == "cost_gate_demo_learning_lane"
-    assert row["primary_blocker"] == "cost_gate_learning_probe_candidates_ready"
+    assert row["primary_blocker"] == "cost_gate_probe_candidates_ready_but_runtime_ledger_empty"
     assert row["next_trigger"] == (
-        "wire_bounded_demo_learning_lane_policy_before_any_gate_lowering"
+        "deploy_enable_runtime_ledger_writer_then_observe_reject_rows"
     )
     assert row["operator_actionable"] is True
     assert row["engineering_actionable"] is True
     assert row["main_cost_gate_adjustment"] == "NONE"
     assert row["order_authority"] == "NOT_GRANTED"
+    assert row["ledger_status"] == "MISSING"
+    assert row["admission_decision_count"] == 0
     assert row["probe_candidates"][0]["side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+
+
+def test_alpha_discovery_surfaces_cost_gate_ledger_progress(tmp_path: Path):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    ledger_path = lane_dir / "probe_ledger.jsonl"
+    ledger_path.write_text(
+        json.dumps(
+            {
+                "record_type": "probe_admission_decision",
+                "generated_at_utc": "2026-06-21T11:02:00+00:00",
+                "attempt_id": "ctx-demo-ma_crossover-ETHUSDT-1782037200000",
+                "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+                "allowed_to_submit_order": False,
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "event": _selected_reject_event(),
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "record_type": "blocked_signal_outcome",
+                "generated_at_utc": "2026-06-21T12:15:00+00:00",
+                "attempt_id": "ctx-demo-ma_crossover-ETHUSDT-1782037200000",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "source_admission_decision": "ORDER_AUTHORITY_NOT_GRANTED",
+                "realized_net_bps": 12.5,
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    arm = collect_cost_gate_learning_lane_arm(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+    discovery = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+    row = discovery["profitability_blocker_scorecard"]["arms"][0]
+
+    assert row["primary_blocker"] == "cost_gate_blocked_signal_outcomes_accumulating"
+    assert row["next_trigger"] == (
+        "review_blocked_signal_outcomes_before_any_probe_order_authority"
+    )
+    assert row["ledger_status"] == "BLOCKED_SIGNAL_OUTCOMES_PRESENT"
+    assert row["admission_decision_count"] == 1
+    assert row["order_authority_not_granted_count"] == 1
+    assert row["blocked_signal_outcome_count"] == 1
+    assert row["blocked_signal_positive_outcome_count"] == 1
+    assert row["avg_blocked_signal_outcome_net_bps"] == 12.5
+    assert row["blocked_signal_net_positive_pct"] == 100.0
 
 
 def _selected_reject_event() -> dict:
@@ -413,6 +479,36 @@ def test_runtime_adapter_builds_markout_outcome_only_for_admitted_probe():
     assert outcome["promotion_evidence"] is False
     assert round(outcome["gross_bps"], 6) == 100.0
     assert round(outcome["realized_net_bps"], 6) == 96.0
+
+
+def test_runtime_adapter_builds_blocked_signal_outcome_for_not_granted_reject():
+    not_granted = evaluate_probe_admission(
+        _runtime_plan(),
+        _selected_reject_event(),
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    ledger = [build_ledger_record(not_granted)]
+
+    outcomes = build_blocked_signal_outcome_records(
+        ledger,
+        [
+            {"symbol": "ETHUSDT", "ts_ms": 1_782_037_200_000, "close": 2000.0},
+            {"symbol": "ETHUSDT", "ts_ms": 1_782_040_800_000, "close": 2010.0},
+        ],
+        now_utc=dt.datetime(2026, 6, 21, 12, 11, tzinfo=dt.timezone.utc),
+        cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
+    )
+
+    assert len(outcomes) == 1
+    outcome = outcomes[0]
+    assert outcome["record_type"] == "blocked_signal_outcome"
+    assert outcome["source_admission_decision"] == "ORDER_AUTHORITY_NOT_GRANTED"
+    assert outcome["allowed_to_submit_order"] is False
+    assert outcome["outcome_source"] == "market_markout_proxy_for_blocked_signal"
+    assert outcome["promotion_evidence"] is False
+    assert round(outcome["gross_bps"], 6) == -50.0
+    assert round(outcome["realized_net_bps"], 6) == -54.0
 
 
 def test_runtime_adapter_outcome_rows_are_idempotent_and_feed_disable():
