@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Readiness Classification
+
+- Fixed alpha-discovery semantics: a cost-gate learning plan with `OPERATOR_REVIEW` no longer counts as global `READY_FOR_PROBE` while the runtime ledger is missing/empty.
+- Missing ledger / admission-only ledger / insufficient blocked outcomes now route to data-coverage or sample-gate work; only a positive blocked-outcome review candidate becomes operator-review actionable.
+- This keeps `actionable_probe_found` aligned with actual demo-learning evidence accumulation, not just a plan artifact.
+
 ## 2026-06-21 Cost-Gate Learning Lane Cron Loop
 
 - Read-only Linux probe found runtime `trade-core` behind origin by 5 commits and dirty; `/tmp/openclaw/cost_gate_learning_lane/` had no `probe_ledger.jsonl` and no `blocked_outcome_review_latest.json`, so demo cost-gate rejects are not yet accumulating enough outcome evidence on runtime.

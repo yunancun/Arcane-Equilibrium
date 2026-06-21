@@ -226,7 +226,9 @@ def test_policy_plan_waits_on_future_scorecard_timestamp():
     assert plan["main_cost_gate_adjustment"] == "NONE"
 
 
-def test_alpha_discovery_surfaces_cost_gate_learning_probe_ready(tmp_path: Path):
+def test_alpha_discovery_does_not_mark_cost_gate_plan_ready_without_runtime_ledger(
+    tmp_path: Path,
+):
     data_dir = tmp_path
     plan = build_plan_from_payload(
         _scorecard_payload(),
@@ -247,20 +249,51 @@ def test_alpha_discovery_surfaces_cost_gate_learning_probe_ready(tmp_path: Path)
     scorecard = discovery["profitability_blocker_scorecard"]
     row = scorecard["arms"][0]
 
-    assert discovery["arms"][0]["action"] == "READY_FOR_PROBE"
-    assert scorecard["status"] == "ACTIONABLE_PROBE_READY"
+    assert discovery["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
+    assert discovery["arms"][0]["reason"] == "cost_gate_runtime_ledger_missing"
+    assert scorecard["status"] == "NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED"
     assert row["arm_id"] == "cost_gate_demo_learning_lane"
+    assert row["blocker_class"] == "data_coverage"
     assert row["primary_blocker"] == "cost_gate_probe_candidates_ready_but_runtime_ledger_empty"
     assert row["next_trigger"] == (
-        "deploy_enable_runtime_ledger_writer_then_observe_reject_rows"
+        "deploy_enable_runtime_ledger_writer_and_learning_lane_cron_then_observe_reject_rows"
     )
-    assert row["operator_actionable"] is True
+    assert row["operator_actionable"] is False
     assert row["engineering_actionable"] is True
     assert row["main_cost_gate_adjustment"] == "NONE"
     assert row["order_authority"] == "NOT_GRANTED"
     assert row["ledger_status"] == "MISSING"
     assert row["admission_decision_count"] == 0
     assert row["probe_candidates"][0]["side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+
+
+def test_alpha_discovery_keeps_stale_cost_gate_plan_as_source_health_blocker(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    plan_path = data_dir / "cost_gate_learning_lane" / "demo_learning_lane_plan_latest.json"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+
+    arm = collect_cost_gate_learning_lane_arm(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 23, 11, 5, tzinfo=dt.timezone.utc),
+        max_age_seconds=60,
+    )
+    discovery = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 23, 11, 5, tzinfo=dt.timezone.utc),
+    )
+    row = discovery["profitability_blocker_scorecard"]["arms"][0]
+
+    assert discovery["arms"][0]["action"] == "BLOCK"
+    assert discovery["arms"][0]["reason"] == "source_not_healthy"
+    assert row["blocker_class"] == "source_health"
+    assert row["primary_blocker"] == "source_not_healthy:stale_artifact"
 
 
 def test_alpha_discovery_surfaces_cost_gate_ledger_progress(tmp_path: Path):
@@ -313,6 +346,12 @@ def test_alpha_discovery_surfaces_cost_gate_ledger_progress(tmp_path: Path):
     )
     row = discovery["profitability_blocker_scorecard"]["arms"][0]
 
+    assert discovery["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
+    assert discovery["arms"][0]["reason"] == "cost_gate_blocked_outcomes_below_review_gate"
+    assert discovery["profitability_blocker_scorecard"]["status"] == (
+        "NO_ACTIONABLE_ALPHA_WAIT_OR_SAMPLE_GATED"
+    )
+    assert row["blocker_class"] == "sample_gate"
     assert row["primary_blocker"] == "cost_gate_blocked_signal_outcomes_accumulating"
     assert row["next_trigger"] == (
         "continue_recording_and_refreshing_blocked_signal_outcomes"
@@ -403,6 +442,12 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
     )
     row = discovery["profitability_blocker_scorecard"]["arms"][0]
 
+    assert discovery["arms"][0]["action"] == "READY_FOR_PROBE"
+    assert discovery["arms"][0]["reason"] == "cost_gate_blocked_outcome_review_candidate"
+    assert discovery["profitability_blocker_scorecard"]["status"] == (
+        "ACTIONABLE_PROBE_READY"
+    )
+    assert row["blocker_class"] == "probe_ready"
     assert row["primary_blocker"] == (
         "cost_gate_blocked_signal_outcomes_need_demo_probe_authority_review"
     )
@@ -415,6 +460,86 @@ def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(
     assert row["blocked_signal_outcome_review"]["review_candidate_side_cell_count"] == 1
     assert row["blocked_signal_outcome_review"]["top_side_cells"][0]["status"] == (
         "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
+    )
+
+
+def test_alpha_discovery_blocks_when_blocked_outcome_review_fails_thresholds(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    ledger_rows = [
+        {
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-06-21T12:15:00+00:00",
+            "attempt_id": "blocked-1",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "realized_net_bps": -3.0,
+        },
+        {
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-06-21T13:15:00+00:00",
+            "attempt_id": "blocked-2",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "realized_net_bps": -1.0,
+        },
+        {
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-06-21T14:15:00+00:00",
+            "attempt_id": "blocked-3",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "realized_net_bps": 0.5,
+        },
+    ]
+    (lane_dir / "probe_ledger.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in ledger_rows),
+        encoding="utf-8",
+    )
+
+    arm = collect_cost_gate_learning_lane_arm(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
+    )
+    discovery = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
+    )
+    row = discovery["profitability_blocker_scorecard"]["arms"][0]
+
+    assert discovery["arms"][0]["action"] == "BLOCK"
+    assert discovery["arms"][0]["reason"] == (
+        "cost_gate_blocked_outcomes_confirm_current_block"
+    )
+    assert discovery["profitability_blocker_scorecard"]["status"] == (
+        "NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED"
+    )
+    assert row["blocker_class"] == "rejected_no_edge"
+    assert row["primary_blocker"] == (
+        "cost_gate_blocked_signal_outcomes_confirm_current_block"
+    )
+    assert row["next_trigger"] == "keep_cost_gate_blocked_for_reviewed_side_cells"
+    assert row["operator_actionable"] is False
+    assert row["engineering_actionable"] is False
+    assert row["blocked_signal_outcome_review_status"] == (
+        "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE"
     )
 
 
@@ -458,6 +583,12 @@ def test_alpha_discovery_routes_admission_only_ledger_to_price_observation_build
     )
     row = discovery["profitability_blocker_scorecard"]["arms"][0]
 
+    assert discovery["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
+    assert discovery["arms"][0]["reason"] == "cost_gate_blocked_signal_outcomes_missing"
+    assert discovery["profitability_blocker_scorecard"]["status"] == (
+        "NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED"
+    )
+    assert row["blocker_class"] == "data_coverage"
     assert row["primary_blocker"] == (
         "cost_gate_rejects_recorded_need_blocked_signal_outcomes"
     )
