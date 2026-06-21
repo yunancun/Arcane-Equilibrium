@@ -631,6 +631,7 @@ def summarize_cost_gate_learning_lane_loop(
     lane_dir = data_dir / "cost_gate_learning_lane"
     heartbeat_path = data_dir / "cron_heartbeat" / "cost_gate_learning_lane.last_fire"
     status_log_path = data_dir / "logs" / "cost_gate_learning_lane.log"
+    materializer_latest_path = lane_dir / "reject_materializer_latest.json"
     refresh_latest_path = lane_dir / "outcome_refresh_latest.json"
     review_latest_path = lane_dir / "blocked_outcome_review_latest.json"
 
@@ -639,11 +640,23 @@ def summarize_cost_gate_learning_lane_loop(
         now_utc=now_utc,
     )
     status_row, status_err = _latest_json_line(status_log_path)
+    materializer_payload, materializer_err = _read_json(materializer_latest_path)
     refresh_payload, refresh_err = _read_json(refresh_latest_path)
     review_payload, review_err = _read_json(review_latest_path)
 
     status_ts = status_row.get("ts_utc") if status_row else None
     status_age = _age_seconds(status_ts, now_utc=now_utc)
+    materializer_rc = _int(status_row.get("materializer_rc")) if status_row else None
+    materialize_rejects_enabled = (
+        status_row.get("materialize_rejects")
+        if status_row and isinstance(status_row.get("materialize_rejects"), bool)
+        else None
+    )
+    append_materialized_rejects_enabled = (
+        status_row.get("append_materialized_rejects")
+        if status_row and isinstance(status_row.get("append_materialized_rejects"), bool)
+        else None
+    )
     refresh_rc = _int(status_row.get("refresh_rc")) if status_row else None
     review_rc = _int(status_row.get("review_rc")) if status_row else None
     ledger_row_count = (
@@ -651,6 +664,45 @@ def summarize_cost_gate_learning_lane_loop(
         if status_row and status_row.get("ledger_row_count") is not None
         else None
     )
+    materializer_status = (
+        str(status_row.get("materializer_status") or "").strip()
+        if status_row and status_row.get("materializer_status") is not None
+        else str((materializer_payload or {}).get("status") or "").strip()
+    )
+    materializer_input_feature_row_count = (
+        _int(status_row.get("materializer_input_feature_row_count"))
+        if status_row and status_row.get("materializer_input_feature_row_count") is not None
+        else (
+            _int((materializer_payload or {}).get("input_feature_row_count"))
+            if materializer_payload
+            else None
+        )
+    )
+    materializer_materialized_record_count = (
+        _int(status_row.get("materializer_materialized_record_count"))
+        if status_row and status_row.get("materializer_materialized_record_count") is not None
+        else (
+            _int((materializer_payload or {}).get("materialized_record_count"))
+            if materializer_payload
+            else None
+        )
+    )
+    materializer_appended_record_count = (
+        _int(status_row.get("materializer_appended_record_count"))
+        if status_row and status_row.get("materializer_appended_record_count") is not None
+        else (
+            _int((materializer_payload or {}).get("appended_record_count"))
+            if materializer_payload
+            else None
+        )
+    )
+    materializer_decision_counts = (
+        status_row.get("materializer_decision_counts")
+        if status_row and status_row.get("materializer_decision_counts") is not None
+        else (materializer_payload or {}).get("decision_counts")
+    )
+    if not isinstance(materializer_decision_counts, dict):
+        materializer_decision_counts = None
     review_status = (
         str(status_row.get("review_status") or "").strip()
         if status_row
@@ -664,7 +716,7 @@ def summarize_cost_gate_learning_lane_loop(
 
     any_artifact_present = any(
         err is None
-        for err in (status_err, refresh_err, review_err)
+        for err in (status_err, materializer_err, refresh_err, review_err)
     ) or heartbeat_present
     status = "NOT_SEEN"
     reason = "no_cron_heartbeat_status_or_learning_artifacts"
@@ -672,9 +724,13 @@ def summarize_cost_gate_learning_lane_loop(
         if status_age is not None and status_age > max_age_seconds:
             status = "STALE_STATUS"
             reason = "cost_gate_learning_status_stale"
-        elif refresh_rc not in (None, 0) or review_rc not in (None, 0):
+        elif (
+            materializer_rc not in (None, 0)
+            or refresh_rc not in (None, 0)
+            or review_rc not in (None, 0)
+        ):
             status = "ERROR"
-            reason = "cost_gate_learning_refresh_or_review_failed"
+            reason = "cost_gate_learning_materializer_refresh_or_review_failed"
         elif ledger_row_count == 0 and review_status == "NO_BLOCKED_SIGNAL_OUTCOMES":
             status = "RUNNING_NO_LEDGER_ROWS"
             reason = "cost_gate_learning_loop_ran_but_no_ledger_rows"
@@ -707,10 +763,28 @@ def summarize_cost_gate_learning_lane_loop(
         "learning_loop_status_log_error": status_err,
         "learning_loop_status_ts_utc": status_ts,
         "learning_loop_status_age_seconds": status_age,
+        "learning_loop_materializer_latest_path": str(materializer_latest_path),
+        "learning_loop_materializer_latest_error": materializer_err,
         "learning_loop_refresh_latest_path": str(refresh_latest_path),
         "learning_loop_refresh_latest_error": refresh_err,
         "learning_loop_review_latest_path": str(review_latest_path),
         "learning_loop_review_latest_error": review_err,
+        "learning_loop_materialize_rejects_enabled": materialize_rejects_enabled,
+        "learning_loop_append_materialized_rejects_enabled": (
+            append_materialized_rejects_enabled
+        ),
+        "learning_loop_last_materializer_rc": materializer_rc,
+        "learning_loop_last_materializer_status": materializer_status or None,
+        "learning_loop_last_materializer_input_feature_row_count": (
+            materializer_input_feature_row_count
+        ),
+        "learning_loop_last_materialized_record_count": (
+            materializer_materialized_record_count
+        ),
+        "learning_loop_last_appended_materialized_record_count": (
+            materializer_appended_record_count
+        ),
+        "learning_loop_last_materializer_decision_counts": materializer_decision_counts,
         "learning_loop_last_refresh_rc": refresh_rc,
         "learning_loop_last_review_rc": review_rc,
         "learning_loop_last_ledger_row_count": ledger_row_count,
@@ -1285,6 +1359,31 @@ def build_cost_gate_learning_lane_activation_preflight(
             "blocked_signal_profitability_review_available": (
                 bool(ledger.get("blocked_signal_outcome_review_status"))
                 or loop.get("learning_loop_review_latest_error") is None
+            ),
+            "reject_materializer_ran": (
+                (
+                    loop.get("learning_loop_materialize_rejects_enabled") is not False
+                    and loop.get("learning_loop_last_materializer_rc") is not None
+                )
+                or loop.get("learning_loop_materializer_latest_error") is None
+            ),
+            "reject_materializer_enabled": (
+                loop.get("learning_loop_materialize_rejects_enabled")
+            ),
+            "reject_materializer_append_enabled": (
+                loop.get("learning_loop_append_materialized_rejects_enabled")
+            ),
+            "reject_materializer_latest_available": (
+                loop.get("learning_loop_materializer_latest_error") is None
+            ),
+            "reject_materializer_status": (
+                loop.get("learning_loop_last_materializer_status")
+            ),
+            "reject_materializer_materialized_records": _int(
+                loop.get("learning_loop_last_materialized_record_count")
+            ),
+            "reject_materializer_appended_records": _int(
+                loop.get("learning_loop_last_appended_materialized_record_count")
             ),
             "historical_counterfactual_review_available": (
                 str(historical_review.get("historical_scorecard_review_status"))
