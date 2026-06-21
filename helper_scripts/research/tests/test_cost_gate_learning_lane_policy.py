@@ -14,6 +14,16 @@ from cost_gate_learning_lane.policy import (
     build_plan_from_file,
     build_plan_from_payload,
 )
+from cost_gate_learning_lane.runtime_adapter import (
+    ADMIT_DECISION,
+    ORDER_AUTHORITY_GRANTED,
+    RuntimeAdmissionConfig,
+    build_ledger_record,
+    evaluate_probe_admission,
+    normalize_reject_reason_code,
+    read_jsonl_ledger,
+    append_jsonl_ledger,
+)
 
 
 def _scorecard_payload(generated_at: str = "2026-06-21T10:00:00+00:00") -> dict:
@@ -180,3 +190,159 @@ def test_alpha_discovery_surfaces_cost_gate_learning_probe_ready(tmp_path: Path)
     assert row["main_cost_gate_adjustment"] == "NONE"
     assert row["order_authority"] == "NOT_GRANTED"
     assert row["probe_candidates"][0]["side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+
+
+def _selected_reject_event() -> dict:
+    return {
+        "strategy_name": "ma_crossover",
+        "symbol": "ETHUSDT",
+        "side": "Sell",
+        "reject_reason_code": "cost_gate_js_demo_negative_edge",
+        "engine_mode": "live_demo",
+        "ts_ms": 1_782_037_200_000,
+        "context_id": "ctx-demo-ma_crossover-ETHUSDT-1782037200000",
+        "signal_id": "sig-demo-ma_crossover-ETHUSDT-1782037200000",
+    }
+
+
+def _runtime_plan(*, order_authority: str = "NOT_GRANTED") -> dict:
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+        cfg=LearningLanePolicyConfig(max_probe_side_cells=2, max_total_probe_orders=4),
+    )
+    plan["order_authority"] = order_authority
+    return plan
+
+
+def test_runtime_adapter_matches_candidate_but_keeps_current_plan_no_order_authority():
+    decision = evaluate_probe_admission(
+        _runtime_plan(),
+        _selected_reject_event(),
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+
+    assert decision["decision"] == "ORDER_AUTHORITY_NOT_GRANTED"
+    assert decision["allowed_to_submit_order"] is False
+    assert decision["no_order_authority"] is True
+    assert decision["side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+    assert decision["runtime_state"]["remaining_probe_orders"] == 2
+    assert decision["plan_summary"]["main_cost_gate_adjustment"] == "NONE"
+    assert decision["reason"] == "plan_matches_candidate_but_artifact_has_no_order_authority"
+
+
+def test_runtime_adapter_admits_only_when_plan_and_adapter_explicitly_authorize():
+    decision = evaluate_probe_admission(
+        _runtime_plan(order_authority=ORDER_AUTHORITY_GRANTED),
+        _selected_reject_event(),
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+
+    assert decision["decision"] == ADMIT_DECISION
+    assert decision["allowed_to_submit_order"] is True
+    assert decision["no_order_authority"] is False
+
+
+def test_runtime_adapter_blocks_unselected_side_cell_and_non_negative_cost_gate_reason():
+    plan = _runtime_plan(order_authority=ORDER_AUTHORITY_GRANTED)
+    unselected = {
+        **_selected_reject_event(),
+        "symbol": "BTCUSDT",
+        "side": "Buy",
+    }
+    not_cost_gate_negative = {
+        **_selected_reject_event(),
+        "reject_reason_code": "cost_gate_atr_unavailable",
+    }
+
+    assert evaluate_probe_admission(
+        plan,
+        unselected,
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )["decision"] == "SIDE_CELL_NOT_SELECTED"
+    assert evaluate_probe_admission(
+        plan,
+        not_cost_gate_negative,
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )["decision"] == "REJECT_REASON_NOT_ELIGIBLE"
+
+
+def test_runtime_adapter_enforces_budget_cooldown_and_failed_outcome_disable():
+    plan = _runtime_plan(order_authority=ORDER_AUTHORITY_GRANTED)
+    event = _selected_reject_event()
+    prior_admit = {
+        "record_type": "probe_admission_decision",
+        "decision": ADMIT_DECISION,
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "ts_ms": 1_782_039_600_000,
+    }
+    now = dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc)
+
+    cooldown = evaluate_probe_admission(
+        plan,
+        event,
+        ledger_rows=[prior_admit],
+        now_utc=now,
+        adapter_enabled=True,
+    )
+    assert cooldown["decision"] == "COOLDOWN_ACTIVE"
+
+    exhausted = evaluate_probe_admission(
+        plan,
+        event,
+        ledger_rows=[
+            {**prior_admit, "ts_ms": 1_782_033_000_000},
+            {**prior_admit, "ts_ms": 1_782_034_000_000},
+        ],
+        now_utc=now,
+        adapter_enabled=True,
+    )
+    assert exhausted["decision"] == "PROBE_BUDGET_EXHAUSTED"
+
+    failed_outcomes = evaluate_probe_admission(
+        plan,
+        event,
+        ledger_rows=[
+            {
+                "record_type": "probe_outcome",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "realized_net_bps": -8.0,
+            },
+            {
+                "record_type": "probe_outcome",
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "realized_net_bps": -3.0,
+            },
+        ],
+        now_utc=now,
+        cfg=RuntimeAdmissionConfig(min_failed_outcomes_to_disable=2),
+        adapter_enabled=True,
+    )
+    assert failed_outcomes["decision"] == "REALIZED_PROBE_OUTCOMES_FAIL_LEARNING_THRESHOLD"
+
+
+def test_runtime_adapter_ledger_record_round_trips_jsonl(tmp_path: Path):
+    path = tmp_path / "probe_ledger.jsonl"
+    decision = evaluate_probe_admission(
+        _runtime_plan(),
+        _selected_reject_event(),
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    append_jsonl_ledger(path, build_ledger_record(decision))
+    rows = read_jsonl_ledger(path)
+
+    assert len(rows) == 1
+    assert rows[0]["record_type"] == "probe_admission_decision"
+    assert rows[0]["decision"] == "ORDER_AUTHORITY_NOT_GRANTED"
+    assert rows[0]["side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+
+
+def test_runtime_adapter_normalizes_cost_gate_negative_reason_text():
+    assert normalize_reject_reason_code(
+        "cost_gate(JS-demo): negative edge -15.2 bps blocked"
+    ) == "cost_gate_js_demo_negative_edge"

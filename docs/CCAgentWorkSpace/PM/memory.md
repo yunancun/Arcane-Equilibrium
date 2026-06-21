@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Demo-Learning Lane Runtime Adapter
+
+- Added `runtime_adapter.py` for the cost-gate demo-learning lane: plan + rejected demo event + JSONL ledger -> fail-closed admission decision.
+- Matching selected side-cells still return `ORDER_AUTHORITY_NOT_GRANTED` under the current plan; future admission requires explicit `DEMO_LEARNING_PROBE_GRANTED` plus adapter enablement.
+- The adapter tracks budget, cooldown, and failed `probe_outcome` rows for auto-disable, but it is artifact-only and does not submit orders. Actual demo-order routing must be Rust hot-path work after operator review.
+
 ## 2026-06-21 Cost-Gate Demo-Learning Lane Plan
 
 - Added artifact-only `cost_gate_demo_learning_lane_plan_v1`: consumes the counterfactual scorecard, selects bounded demo-only side-cell probes, and keeps `main_cost_gate_adjustment=NONE` / `order_authority=NOT_GRANTED`.
