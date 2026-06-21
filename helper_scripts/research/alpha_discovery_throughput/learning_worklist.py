@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-LEARNING_WORKLIST_SCHEMA_VERSION = "alpha_learning_worklist_v2"
+LEARNING_WORKLIST_SCHEMA_VERSION = "alpha_learning_worklist_v3"
 
 _TASK_PRIORITY = {
     "promotion_review": 0,
@@ -75,9 +75,26 @@ _EVIDENCE_KEYS = (
     "demo_learning_evidence_order_flow_evidence_status",
     "demo_learning_evidence_order_flow_evidence_starved",
     "ledger_status",
+    "blocked_signal_outcome_review_schema_version",
+    "blocked_signal_outcome_review_status",
+    "blocked_signal_outcome_review_reason",
+    "blocked_signal_outcome_review_next_trigger",
     "blocked_signal_outcome_count",
     "blocked_signal_positive_outcome_count",
     "blocked_signal_net_positive_pct",
+    "blocked_signal_top_review_side_cell_key",
+    "blocked_signal_top_review_status",
+    "blocked_signal_top_review_wrongful_block_score",
+    "blocked_signal_top_review_net_cost_cushion_bps",
+    "blocked_signal_top_review_candidate_side_cell_key",
+    "blocked_signal_top_review_candidate_wrongful_block_score",
+    "blocked_signal_top_review_candidate_net_cost_cushion_bps",
+    "learning_loop_last_review_top_side_cell_key",
+    "learning_loop_last_review_top_wrongful_block_score",
+    "learning_loop_last_review_top_net_cost_cushion_bps",
+    "learning_loop_last_review_top_candidate_side_cell_key",
+    "learning_loop_last_review_top_candidate_wrongful_block_score",
+    "learning_loop_last_review_top_candidate_net_cost_cushion_bps",
 )
 
 
@@ -162,6 +179,14 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
     if task_type == "promotion_review":
         return "run_formal_aeg_qc_mit_review_before_any_promotion"
     if task_type == "operator_probe_review":
+        if (
+            _str(row.get("arm_id")) == "cost_gate_demo_learning_lane"
+            and (
+                row.get("blocked_signal_top_review_candidate_side_cell_key")
+                or row.get("blocked_signal_top_review_side_cell_key")
+            )
+        ):
+            return "operator_review_top_blocked_signal_side_cell_before_bounded_demo_probe"
         return "operator_review_isolated_probe_authority_without_granting_order_authority"
     if task_type == "runtime_source_reconcile":
         return "reconcile_runtime_source_before_learning_activation_or_probe_trust"
@@ -245,6 +270,7 @@ def _completion_evidence_required(task_type: str) -> list[str]:
         return [
             "operator_authorization_artifact_exists",
             "isolated_probe_preflight_passes",
+            "candidate_specific_side_cell_or_candidate_key_evidence_present",
             "order_authority_boundary_explicitly_recorded",
         ]
     if task_type == "runtime_source_reconcile":
@@ -266,6 +292,7 @@ def _completion_evidence_required(task_type: str) -> list[str]:
             "blocked_signal_outcome_review artifact refreshed",
             "review status is DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT or NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE",
             "positive blocked outcomes include side_cell_key and net_bps evidence",
+            "top blocked side-cell carries wrongful_block_score and net_cost_cushion_bps",
         ]
     if task_type == "mm_signal_search":
         return [
