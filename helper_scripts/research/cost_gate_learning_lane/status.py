@@ -41,6 +41,7 @@ WRITER_ENABLE_ENV = "OPENCLAW_DEMO_LEARNING_LANE_WRITER"
 WRITER_PLAN_ENV = "OPENCLAW_DEMO_LEARNING_LANE_PLAN"
 WRITER_LEDGER_ENV = "OPENCLAW_DEMO_LEARNING_LANE_LEDGER"
 REQUIRE_WRITER_ENABLED_ENV = "OPENCLAW_COST_GATE_REQUIRE_WRITER_ENABLED"
+REQUIRE_PROCESS_WRITER_ENABLED_ENV = "OPENCLAW_COST_GATE_REQUIRE_PROCESS_WRITER_ENABLED"
 TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 FALSE_ENV_VALUES = {"0", "false", "no", "off", ""}
 
@@ -118,6 +119,25 @@ def _read_env_file(path: Path) -> tuple[dict[str, str] | None, str | None]:
         if not key:
             continue
         values[key] = _strip_env_value(value)
+    return values, None
+
+
+def _read_proc_environ_file(path: Path) -> tuple[dict[str, str] | None, str | None]:
+    try:
+        raw = path.read_bytes()
+    except FileNotFoundError:
+        return None, "missing"
+    except OSError as exc:
+        return None, f"read_error:{type(exc).__name__}"
+
+    values: dict[str, str] = {}
+    for chunk in raw.split(b"\0"):
+        if not chunk or b"=" not in chunk:
+            continue
+        text = chunk.decode("utf-8", errors="replace")
+        key, value = text.split("=", 1)
+        if key:
+            values[key] = value
     return values, None
 
 
@@ -730,6 +750,69 @@ def summarize_cost_gate_learning_lane_writer_config(
     }
 
 
+def summarize_cost_gate_learning_lane_writer_process(
+    data_dir: Path,
+    *,
+    engine_pid: int | None = None,
+    proc_environ_file: Path | None = None,
+    require_writer_enabled: bool = False,
+) -> dict[str, Any]:
+    if proc_environ_file is None and engine_pid is not None:
+        proc_environ_file = Path("/proc") / str(engine_pid) / "environ"
+    if proc_environ_file is None:
+        return {
+            "writer_process_checked": False,
+            "writer_process_status": "NOT_CHECKED",
+            "writer_process_reason": "engine_pid_or_proc_environ_file_not_provided",
+            "writer_process_enabled": None,
+            "writer_process_required_for_activation": require_writer_enabled,
+            "engine_pid": engine_pid,
+            "proc_environ_path": None,
+            "proc_environ_error": None,
+            "writer_env_value": None,
+            "plan_path": None,
+            "ledger_path": None,
+        }
+
+    env_values, err = _read_proc_environ_file(proc_environ_file)
+    if err:
+        return {
+            "writer_process_checked": False,
+            "writer_process_status": "PROC_ENVIRON_UNREADABLE",
+            "writer_process_reason": f"proc_environ_{err}",
+            "writer_process_enabled": None,
+            "writer_process_required_for_activation": require_writer_enabled,
+            "engine_pid": engine_pid,
+            "proc_environ_path": str(proc_environ_file),
+            "proc_environ_error": err,
+            "writer_env_value": None,
+            "plan_path": None,
+            "ledger_path": None,
+        }
+
+    config = summarize_cost_gate_learning_lane_writer_config(
+        data_dir,
+        env=env_values or {},
+        require_writer_enabled=require_writer_enabled,
+    )
+    return {
+        "writer_process_checked": True,
+        "writer_process_status": config["writer_config_status"],
+        "writer_process_reason": config["writer_config_reason"],
+        "writer_process_enabled": config["writer_enabled"],
+        "writer_process_required_for_activation": require_writer_enabled,
+        "engine_pid": engine_pid,
+        "proc_environ_path": str(proc_environ_file),
+        "proc_environ_error": None,
+        "writer_env_value": config["writer_env_value"],
+        "writer_bool_error": config["writer_bool_error"],
+        "plan_path": config["plan_path"],
+        "plan_path_source": config["plan_path_source"],
+        "ledger_path": config["ledger_path"],
+        "ledger_path_source": config["ledger_path_source"],
+    }
+
+
 def _plan_summary(
     plan_path: Path,
     *,
@@ -931,7 +1014,10 @@ def build_cost_gate_learning_lane_activation_preflight(
     repo_root: Path | None = None,
     expected_head: str | None = None,
     runtime_env_file: Path | None = None,
+    engine_pid: int | None = None,
+    runtime_proc_environ: Path | None = None,
     require_writer_enabled: bool = False,
+    require_process_writer_enabled: bool = False,
     now_utc: dt.datetime | None = None,
     max_loop_age_seconds: int = DEFAULT_COST_GATE_LEARNING_LOOP_MAX_AGE_SECONDS,
     max_plan_age_seconds: int = DEFAULT_PLAN_MAX_AGE_SECONDS,
@@ -956,6 +1042,12 @@ def build_cost_gate_learning_lane_activation_preflight(
         data_dir,
         env_file=runtime_env_file,
         require_writer_enabled=require_writer_enabled,
+    )
+    writer_process = summarize_cost_gate_learning_lane_writer_process(
+        data_dir,
+        engine_pid=engine_pid,
+        proc_environ_file=runtime_proc_environ,
+        require_writer_enabled=require_process_writer_enabled,
     )
     decision = _activation_decision(
         source=source,
@@ -988,6 +1080,12 @@ def build_cost_gate_learning_lane_activation_preflight(
     writer_enabled = writer_config.get("writer_enabled") is True
     if require_writer_enabled and not writer_enabled:
         activation_blockers.insert(0, "runtime_writer_not_enabled")
+    writer_process_status = str(
+        writer_process.get("writer_process_status") or "UNKNOWN"
+    )
+    writer_process_enabled = writer_process.get("writer_process_enabled") is True
+    if require_process_writer_enabled and not writer_process_enabled:
+        activation_blockers.insert(0, "running_engine_writer_not_enabled")
     return {
         "schema_version": ACTIVATION_PREFLIGHT_SCHEMA_VERSION,
         "generated_at_utc": now.isoformat(),
@@ -1019,11 +1117,21 @@ def build_cost_gate_learning_lane_activation_preflight(
             "writer_disabled_or_unset_drop_risk": (
                 require_writer_enabled and not writer_enabled
             ),
+            "runtime_writer_process_checked": (
+                writer_process.get("writer_process_checked") is True
+            ),
+            "runtime_writer_process_enabled": writer_process_enabled,
+            "runtime_writer_process_status": writer_process_status,
+            "runtime_writer_process_required": require_process_writer_enabled,
+            "running_engine_writer_disabled_or_unset_drop_risk": (
+                require_process_writer_enabled and not writer_process_enabled
+            ),
             "activation_ready": not activation_blockers,
         },
         "activation_blockers": activation_blockers,
         "source": source,
         "writer_config": writer_config,
+        "writer_process": writer_process,
         "plan": plan,
         "ledger": ledger,
         "learning_loop": loop,
@@ -1065,8 +1173,23 @@ def main(argv: list[str] | None = None) -> int:
             "OPENCLAW_DEMO_LEARNING_LANE_WRITER and path overrides."
         ),
     )
+    parser.add_argument(
+        "--engine-pid",
+        type=int,
+        default=None,
+        help="Optional running openclaw-engine PID; reads /proc/<pid>/environ.",
+    )
+    parser.add_argument(
+        "--runtime-proc-environ",
+        type=Path,
+        default=None,
+        help="Optional explicit proc environ file, e.g. /proc/<pid>/environ.",
+    )
     require_writer_default = (
         _parse_env_bool(os.environ.get(REQUIRE_WRITER_ENABLED_ENV))[0] is True
+    )
+    require_process_writer_default = (
+        _parse_env_bool(os.environ.get(REQUIRE_PROCESS_WRITER_ENABLED_ENV))[0] is True
     )
     parser.add_argument(
         "--require-writer-enabled",
@@ -1075,6 +1198,15 @@ def main(argv: list[str] | None = None) -> int:
         help=(
             "Fail activation preflight unless OPENCLAW_DEMO_LEARNING_LANE_WRITER "
             "is explicitly enabled in the inspected env."
+        ),
+    )
+    parser.add_argument(
+        "--require-process-writer-enabled",
+        action="store_true",
+        default=require_process_writer_default,
+        help=(
+            "Fail activation preflight unless the running engine process has "
+            "OPENCLAW_DEMO_LEARNING_LANE_WRITER explicitly enabled."
         ),
     )
     parser.add_argument(
@@ -1095,7 +1227,10 @@ def main(argv: list[str] | None = None) -> int:
         repo_root=args.repo_root,
         expected_head=args.expected_head,
         runtime_env_file=args.runtime_env_file,
+        engine_pid=args.engine_pid,
+        runtime_proc_environ=args.runtime_proc_environ,
         require_writer_enabled=args.require_writer_enabled,
+        require_process_writer_enabled=args.require_process_writer_enabled,
         max_loop_age_seconds=args.max_loop_age_seconds,
         max_plan_age_seconds=args.max_plan_age_seconds,
     )

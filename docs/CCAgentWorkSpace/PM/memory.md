@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Running-Process Preflight
+
+- `cost_gate_learning_lane.status` can now inspect active engine process env via `--engine-pid` or `--runtime-proc-environ`.
+- Preflight emits `writer_process.*` plus `answers.runtime_writer_process_enabled/status`, and can fail-closed with `running_engine_writer_not_enabled`.
+- This separates env-file intent from the running engine actually loading `OPENCLAW_DEMO_LEARNING_LANE_WRITER`.
+
 ## 2026-06-21 Cost-Gate Learning Writer Config Preflight
 
 - `cost_gate_learning_lane.status` now reports `writer_config.*` and can inspect `--runtime-env-file` plus fail-closed under `--require-writer-enabled`.
