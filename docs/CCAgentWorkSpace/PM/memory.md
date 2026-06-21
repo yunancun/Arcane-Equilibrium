@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Capture-Error Diagnostics
+
+- Extended Rust demo-learning writer with durable `probe_capture_error` rows for eligible rejects that cannot be admission-evaluated due plan/path/config failure.
+- `cost_gate_learning_lane.status` now reports `CAPTURE_ERRORS_PRESENT`, `capture_error_count`, `captured_reject_count`, and `CAPTURE_ERRORS_NEED_OPERATOR_FIX`.
+- Alpha discovery now routes capture-error-only ledgers to data-coverage work instead of treating them as normal evidence accumulation.
+
 ## 2026-06-21 Cost-Gate Learning Expected-Head Gate
 
 - Extended `cost_gate_learning_lane.status` with optional `--expected-head` / `OPENCLAW_EXPECTED_SOURCE_HEAD`.

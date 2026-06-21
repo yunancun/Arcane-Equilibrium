@@ -79,6 +79,7 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
     ledger_status = str(detail.get("ledger_status") or "UNKNOWN").upper()
     loop_status = str(detail.get("learning_loop_status") or "UNKNOWN").upper()
     admission_count = _int(detail.get("admission_decision_count"))
+    capture_error_count = _int(detail.get("capture_error_count"))
     blocked_outcome_count = _int(detail.get("blocked_signal_outcome_count"))
     blocked_review = _dict(detail.get("blocked_signal_outcome_review"))
     blocked_review_status = str(
@@ -120,6 +121,20 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "next_trigger": (
                 "deploy_enable_runtime_ledger_writer_and_learning_lane_cron_then_observe_reject_rows"
             ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+    if ledger_status == "CAPTURE_ERRORS_PRESENT" or (
+        capture_error_count > 0
+        and admission_count == 0
+        and blocked_outcome_count == 0
+    ):
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "cost_gate_capture_errors_present",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "cost_gate_rejects_captured_but_admission_not_evaluated",
+            "next_trigger": "inspect_demo_learning_lane_plan_and_writer_config",
             "operator_actionable": False,
             "engineering_actionable": True,
         }
@@ -1059,6 +1074,9 @@ def classify_profitability_blocker(
                     "learning_loop_review_latest_path"
                 ),
                 "admission_decision_count": detail.get("admission_decision_count"),
+                "capture_error_count": detail.get("capture_error_count"),
+                "captured_reject_count": detail.get("captured_reject_count"),
+                "latest_capture_error": detail.get("latest_capture_error"),
                 "admit_decision_count": detail.get("admit_decision_count"),
                 "order_authority_not_granted_count": detail.get(
                     "order_authority_not_granted_count"

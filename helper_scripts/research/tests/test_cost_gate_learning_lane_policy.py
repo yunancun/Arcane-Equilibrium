@@ -525,6 +525,59 @@ def test_activation_preflight_routes_admission_only_ledger_to_outcome_refresh(
     ]
 
 
+def test_activation_preflight_routes_capture_error_rows_to_writer_config_fix(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    (lane_dir / "probe_ledger.jsonl").write_text(
+        json.dumps(
+            {
+                "schema_version": "cost_gate_demo_learning_lane_adapter_v1",
+                "record_type": "probe_capture_error",
+                "generated_at_utc": "2026-06-21T11:02:00+00:00",
+                "attempt_id": "ctx-demo-ma_crossover-ETHUSDT-1782037200000",
+                "decision": "ADMISSION_NOT_EVALUATED",
+                "allowed_to_submit_order": False,
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "event": _selected_reject_event(),
+                "runtime_state": {"risk_state": "NORMAL"},
+                "capture_error": "read plan /tmp/openclaw/cost_gate_learning_lane/demo_learning_lane_plan_latest.json failed: missing",
+                "reason": "runtime_admission_evaluation_failed",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["status"] == "CAPTURE_ERRORS_NEED_OPERATOR_FIX"
+    assert preflight["reason"] == "rejects_captured_but_admission_evaluation_failed"
+    assert preflight["answers"]["has_accumulated_ledger_rows"] is True
+    assert preflight["answers"]["cost_gate_rejects_recorded"] is True
+    assert preflight["answers"]["admission_evaluation_errors_recorded"] is True
+    assert preflight["answers"]["silent_drop_risk"] is False
+    assert preflight["ledger"]["ledger_status"] == "CAPTURE_ERRORS_PRESENT"
+    assert preflight["ledger"]["capture_error_count"] == 1
+    assert preflight["ledger"]["captured_reject_count"] == 1
+    assert preflight["ledger"]["latest_admission_decision"] == "ADMISSION_NOT_EVALUATED"
+    assert "read plan" in preflight["ledger"]["latest_capture_error"]
+    assert "demo_learning_lane_plan_or_writer_config" in preflight["missing_links"]
+
+
 def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
     tmp_path: Path,
 ):
@@ -834,6 +887,61 @@ def test_alpha_discovery_surfaces_cost_gate_ledger_progress(tmp_path: Path):
         "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
     )
     assert row["blocked_signal_outcome_review"]["review_candidate_side_cell_count"] == 0
+
+
+def test_alpha_discovery_surfaces_cost_gate_capture_errors(tmp_path: Path):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    (lane_dir / "probe_ledger.jsonl").write_text(
+        json.dumps(
+            {
+                "schema_version": "cost_gate_demo_learning_lane_adapter_v1",
+                "record_type": "probe_capture_error",
+                "generated_at_utc": "2026-06-21T11:02:00+00:00",
+                "attempt_id": "ctx-demo-ma_crossover-ETHUSDT-1782037200000",
+                "decision": "ADMISSION_NOT_EVALUATED",
+                "allowed_to_submit_order": False,
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "event": _selected_reject_event(),
+                "runtime_state": {"risk_state": "NORMAL"},
+                "capture_error": "parse plan /tmp/openclaw/cost_gate_learning_lane/demo_learning_lane_plan_latest.json failed: expected value",
+                "reason": "runtime_admission_evaluation_failed",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    arm = collect_cost_gate_learning_lane_arm(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+    discovery = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+    row = discovery["profitability_blocker_scorecard"]["arms"][0]
+
+    assert discovery["arms"][0]["action"] == "RUN_READ_ONLY_CAPTURE"
+    assert discovery["arms"][0]["reason"] == "cost_gate_capture_errors_present"
+    assert row["blocker_class"] == "data_coverage"
+    assert row["primary_blocker"] == (
+        "cost_gate_rejects_captured_but_admission_not_evaluated"
+    )
+    assert row["next_trigger"] == "inspect_demo_learning_lane_plan_and_writer_config"
+    assert row["ledger_status"] == "CAPTURE_ERRORS_PRESENT"
+    assert row["capture_error_count"] == 1
+    assert row["captured_reject_count"] == 1
+    assert "parse plan" in row["latest_capture_error"]
 
 
 def test_alpha_discovery_routes_positive_blocked_outcome_review_candidate(

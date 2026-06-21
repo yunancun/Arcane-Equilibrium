@@ -335,6 +335,8 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         "ledger_total_rows": 0,
         "ledger_malformed_line_count": 0,
         "admission_decision_count": 0,
+        "capture_error_count": 0,
+        "captured_reject_count": 0,
         "admit_decision_count": 0,
         "order_authority_not_granted_count": 0,
         "allowed_to_submit_order_count": 0,
@@ -344,6 +346,7 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         "latest_record_type": None,
         "latest_generated_at_utc": None,
         "latest_admission_decision": None,
+        "latest_capture_error": None,
         "latest_side_cell_key": None,
         "avg_probe_outcome_net_bps": None,
         "avg_blocked_signal_outcome_net_bps": None,
@@ -394,6 +397,7 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         if record_type == "probe_admission_decision":
             decision = str(row.get("decision") or "").strip()
             summary["admission_decision_count"] += 1
+            summary["captured_reject_count"] += 1
             summary["latest_admission_decision"] = decision or None
             if decision == "ADMIT_DEMO_LEARNING_PROBE":
                 summary["admit_decision_count"] += 1
@@ -401,6 +405,16 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
                 summary["order_authority_not_granted_count"] += 1
             if row.get("allowed_to_submit_order") is True:
                 summary["allowed_to_submit_order_count"] += 1
+        elif record_type == "probe_capture_error":
+            decision = str(row.get("decision") or "").strip()
+            summary["capture_error_count"] += 1
+            summary["captured_reject_count"] += 1
+            summary["latest_admission_decision"] = decision or None
+            summary["latest_capture_error"] = (
+                row.get("capture_error")
+                or row.get("reason")
+                or "runtime_admission_evaluation_failed"
+            )
         elif record_type == "probe_outcome":
             net_bps = _float(row.get("realized_net_bps"))
             summary["probe_outcome_count"] += 1
@@ -426,6 +440,8 @@ def summarize_cost_gate_learning_lane_ledger(path: Path) -> dict[str, Any]:
         summary["ledger_status"] = "PROBE_OUTCOMES_PRESENT"
     elif summary["admission_decision_count"] > 0:
         summary["ledger_status"] = "ADMISSION_ROWS_PRESENT"
+    elif summary["capture_error_count"] > 0:
+        summary["ledger_status"] = "CAPTURE_ERRORS_PRESENT"
     else:
         summary["ledger_status"] = "OTHER_ROWS_PRESENT"
 
@@ -645,6 +661,7 @@ def _activation_decision(
         or ""
     ).upper()
     admission_count = _int(ledger.get("admission_decision_count"))
+    capture_error_count = _int(ledger.get("capture_error_count"))
     blocked_count = _int(ledger.get("blocked_signal_outcome_count"))
     probe_outcome_count = _int(ledger.get("probe_outcome_count"))
 
@@ -712,6 +729,17 @@ def _activation_decision(
             "reason": reason,
             "missing_links": missing_links,
             "next_actions": next_actions,
+        }
+
+    if capture_error_count > 0 and admission_count == 0 and blocked_count == 0:
+        return {
+            "status": "CAPTURE_ERRORS_NEED_OPERATOR_FIX",
+            "reason": "rejects_captured_but_admission_evaluation_failed",
+            "missing_links": ["demo_learning_lane_plan_or_writer_config"],
+            "next_actions": [
+                "inspect_probe_capture_error_rows",
+                "refresh_demo_learning_lane_plan_and_verify_writer_paths",
+            ],
         }
 
     if admission_count > 0 and blocked_count == 0 and probe_outcome_count == 0:
@@ -807,6 +835,8 @@ def build_cost_gate_learning_lane_activation_preflight(
     ledger_rows = _int(ledger.get("ledger_total_rows"))
     blocked_count = _int(ledger.get("blocked_signal_outcome_count"))
     admission_count = _int(ledger.get("admission_decision_count"))
+    capture_error_count = _int(ledger.get("capture_error_count"))
+    captured_reject_count = _int(ledger.get("captured_reject_count"))
     loop_recent = str(loop.get("learning_loop_status") or "").upper() in {
         "RUNNING",
         "RUNNING_NO_LEDGER_ROWS",
@@ -833,7 +863,10 @@ def build_cost_gate_learning_lane_activation_preflight(
         "answers": {
             "has_accumulated_ledger_rows": ledger_rows > 0,
             "currently_accumulating_evidence": ledger_rows > 0 and loop_recent,
-            "cost_gate_rejects_recorded": admission_count > 0,
+            "cost_gate_rejects_recorded": (
+                admission_count > 0 or captured_reject_count > 0
+            ),
+            "admission_evaluation_errors_recorded": capture_error_count > 0,
             "silent_drop_risk": str(ledger.get("ledger_status")) in {"MISSING", "EMPTY"},
             "blocked_signal_outcomes_recorded": blocked_count > 0,
             "blocked_signal_profitability_review_available": (
