@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Demo-Learning Lane Rust Policy Seam
+
+- Added pure Rust `openclaw_engine::demo_learning_lane` policy + tests, mirroring the Python adapter inside the trading-authority codebase without hot-path wiring.
+- Current selected side-cells still remain `ORDER_AUTHORITY_NOT_GRANTED`; admission requires explicit `DEMO_LEARNING_PROBE_GRANTED`, adapter enablement, normal risk state, budget/cooldown/outcome checks, and demo/live_demo mode.
+- Python planner/runtime adapter and Rust policy now fail closed on future artifact timestamps. Next work remains operator-reviewed hot-path wiring plus durable probe outcome labels, not main cost-gate lowering.
+
 ## 2026-06-21 Cost-Gate Demo-Learning Lane Runtime Adapter
 
 - Added `runtime_adapter.py` for the cost-gate demo-learning lane: plan + rejected demo event + JSONL ledger -> fail-closed admission decision.

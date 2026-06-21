@@ -157,6 +157,20 @@ def test_policy_plan_waits_on_stale_scorecard(tmp_path: Path):
     assert plan["main_cost_gate_adjustment"] == "NONE"
 
 
+def test_policy_plan_waits_on_future_scorecard_timestamp():
+    plan = build_plan_from_payload(
+        _scorecard_payload("2026-06-21T12:00:01+00:00"),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+
+    assert plan["status"] == "WAIT_FOR_SCORECARD_REFRESH"
+    assert plan["gate_status"] == "WAIT"
+    assert plan["source"]["source_error"] == "future_scorecard_generated_at"
+    assert plan["selected_probe_candidate_count"] == 0
+    assert plan["probe_candidates"] == []
+    assert plan["main_cost_gate_adjustment"] == "NONE"
+
+
 def test_alpha_discovery_surfaces_cost_gate_learning_probe_ready(tmp_path: Path):
     data_dir = tmp_path
     plan = build_plan_from_payload(
@@ -243,6 +257,22 @@ def test_runtime_adapter_admits_only_when_plan_and_adapter_explicitly_authorize(
     assert decision["decision"] == ADMIT_DECISION
     assert decision["allowed_to_submit_order"] is True
     assert decision["no_order_authority"] is False
+
+
+def test_runtime_adapter_rejects_future_plan_timestamp():
+    plan = _runtime_plan(order_authority=ORDER_AUTHORITY_GRANTED)
+    plan["generated_at_utc"] = "2026-06-21T12:00:01+00:00"
+
+    decision = evaluate_probe_admission(
+        plan,
+        _selected_reject_event(),
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+
+    assert decision["decision"] == "PLAN_STALE_OR_MISSING_GENERATED_AT"
+    assert decision["allowed_to_submit_order"] is False
+    assert decision["reason"] == "plan_generated_at_missing_or_too_old"
 
 
 def test_runtime_adapter_blocks_unselected_side_cell_and_non_negative_cost_gate_reason():
