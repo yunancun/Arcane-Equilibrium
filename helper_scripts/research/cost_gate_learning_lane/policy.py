@@ -79,6 +79,11 @@ def _float(value: Any) -> float | None:
     return out if math.isfinite(out) else None
 
 
+def _sort_float(value: Any) -> float:
+    parsed = _float(value)
+    return parsed if parsed is not None else float("-inf")
+
+
 def _dict(value: Any) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
@@ -122,6 +127,157 @@ def _rank_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         ),
         reverse=True,
     )
+
+
+def _bounded_score(value: float, scale: float, weight: float) -> float:
+    if scale <= 0:
+        return 0.0
+    return min(max(value, 0.0) / scale, 1.0) * weight
+
+
+def _profit_thresholds(scorecard: dict[str, Any]) -> dict[str, float]:
+    thresholds = _dict(scorecard.get("thresholds"))
+    return {
+        "friction_bps": _float(thresholds.get("friction_bps")) or 4.0,
+        "min_probe_avg_net_bps": _float(thresholds.get("min_probe_avg_net_bps")) or 0.0,
+        "min_probe_net_positive_pct": (
+            _float(thresholds.get("min_probe_net_positive_pct")) or 55.0
+        ),
+    }
+
+
+def _profit_priority_components(
+    row: dict[str, Any],
+    thresholds: dict[str, float],
+) -> dict[str, float]:
+    n = max(_int(row.get("n")), 0)
+    avg_net = _float(row.get("avg_net_bps")) or 0.0
+    p50_gross = _float(row.get("p50_gross_bps")) or 0.0
+    net_positive_pct = _float(row.get("net_positive_pct")) or 0.0
+    return {
+        "sample_score": min(math.log10(n + 1) / 4.0, 1.0) * 25.0,
+        "avg_net_score": _bounded_score(
+            avg_net - thresholds["min_probe_avg_net_bps"],
+            100.0,
+            25.0,
+        ),
+        "median_margin_score": _bounded_score(
+            p50_gross - thresholds["friction_bps"],
+            50.0,
+            25.0,
+        ),
+        "hit_rate_score": _bounded_score(net_positive_pct - 50.0, 50.0, 25.0),
+    }
+
+
+def _profit_priority_tier(action: str, score: float) -> str:
+    if action == "LEARNING_PROBE_CANDIDATE":
+        if score >= 70.0:
+            return "HIGH_PRIORITY_BOUNDED_DEMO_LEARNING"
+        if score >= 60.0:
+            return "MEDIUM_PRIORITY_BOUNDED_DEMO_LEARNING"
+        return "LOW_PRIORITY_BOUNDED_DEMO_LEARNING"
+    if action == "BLOCK_CONFIRMED":
+        return "KEEP_BLOCKED_CONFIRMED"
+    if action == "DATA_COVERAGE_BLOCKER":
+        return "DATA_FIX_BEFORE_PROFIT_JUDGMENT"
+    if action == "INSUFFICIENT_SAMPLE":
+        return "COLLECT_MORE_SAMPLE"
+    if action == "TAIL_ONLY_WATCH":
+        return "TAIL_ONLY_WATCH_NO_PROBE"
+    return "NO_PROBE"
+
+
+def _profit_next_action(action: str) -> str:
+    if action == "LEARNING_PROBE_CANDIDATE":
+        return "operator_review_ranked_side_cell_for_bounded_demo_learning_lane"
+    if action == "BLOCK_CONFIRMED":
+        return "keep_main_cost_gate_block_for_side_cell"
+    if action == "DATA_COVERAGE_BLOCKER":
+        return "fix_data_coverage_before_profit_judgment"
+    if action == "INSUFFICIENT_SAMPLE":
+        return "continue_collecting_reject_counterfactual_samples"
+    if action == "TAIL_ONLY_WATCH":
+        return "continue_watch_without_probe_authority"
+    return "do_not_probe_side_cell"
+
+
+def _derive_profit_opportunity_ranking(scorecard: dict[str, Any]) -> dict[str, Any]:
+    rows = [row for row in _list(scorecard.get("rows")) if isinstance(row, dict)]
+    if not rows:
+        return {}
+    thresholds = _profit_thresholds(scorecard)
+    ranked_rows: list[dict[str, Any]] = []
+    for row in rows:
+        action = str(row.get("learning_lane_action") or "UNSCORABLE")
+        components = _profit_priority_components(row, thresholds)
+        score = round(sum(components.values()), 4)
+        avg_net = _float(row.get("avg_net_bps"))
+        p50_gross = _float(row.get("p50_gross_bps"))
+        net_positive_pct = _float(row.get("net_positive_pct"))
+        ranked_rows.append(
+            {
+                "side_cell_key": _side_cell_key(row),
+                "strategy_name": row.get("strategy_name"),
+                "symbol": row.get("symbol"),
+                "side": row.get("side"),
+                "reject_reason_code": row.get("reject_reason_code"),
+                "learning_lane_action": action,
+                "learning_lane_reason": row.get("learning_lane_reason"),
+                "priority_tier": _profit_priority_tier(action, score),
+                "priority_score": score,
+                "priority_components": {
+                    key: round(value, 4) for key, value in components.items()
+                },
+                "n": _int(row.get("n")),
+                "avg_net_bps": avg_net,
+                "p50_gross_bps": p50_gross,
+                "p90_gross_bps": _float(row.get("p90_gross_bps")),
+                "net_positive_pct": net_positive_pct,
+                "next_action": _profit_next_action(action),
+                "order_authority": "NOT_GRANTED",
+                "main_cost_gate_adjustment": "NONE",
+                "promotion_evidence": False,
+            }
+        )
+    action_order = {
+        "LEARNING_PROBE_CANDIDATE": 0,
+        "TAIL_ONLY_WATCH": 1,
+        "INSUFFICIENT_SAMPLE": 2,
+        "DATA_COVERAGE_BLOCKER": 3,
+        "NO_PROBE": 4,
+        "UNSCORABLE": 5,
+        "BLOCK_CONFIRMED": 6,
+    }
+    ranked_rows.sort(
+        key=lambda row: (
+            action_order.get(str(row.get("learning_lane_action")), 9),
+            -(float(row.get("priority_score") or 0.0)),
+            -_sort_float(row.get("avg_net_bps")),
+            -_int(row.get("n")),
+        )
+    )
+    candidate_count = sum(
+        1 for row in ranked_rows
+        if row.get("learning_lane_action") == "LEARNING_PROBE_CANDIDATE"
+    )
+    status = (
+        "PROFIT_LEARNING_CANDIDATES_PRESENT"
+        if candidate_count
+        else "NO_PROFIT_LEARNING_CANDIDATE"
+    )
+    return {
+        "schema_version": "cost_gate_profit_opportunity_ranking_v1",
+        "source_kind": "derived_from_scorecard_rows",
+        "status": status,
+        "next_trigger": (
+            "operator_review_top_ranked_side_cells_for_bounded_demo_learning_lane"
+            if candidate_count
+            else "keep_cost_gate_and_continue_research"
+        ),
+        "candidate_count": candidate_count,
+        "top_side_cells": ranked_rows[:20],
+    }
 
 
 def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
@@ -189,6 +345,8 @@ def _ranking_probe_rows(
     cfg: LearningLanePolicyConfig,
 ) -> tuple[list[dict[str, Any]], dict[str, Any], bool]:
     ranking = _dict(scorecard.get("profit_opportunity_ranking"))
+    if ranking.get("schema_version") != "cost_gate_profit_opportunity_ranking_v1":
+        ranking = _derive_profit_opportunity_ranking(scorecard)
     if ranking.get("schema_version") != "cost_gate_profit_opportunity_ranking_v1":
         return [], {}, False
     rows = [
@@ -265,7 +423,7 @@ def build_plan_from_payload(
     rows = _list(scorecard.get("rows"))
     ranking_probe_rows, profit_ranking, has_profit_ranking = _ranking_probe_rows(scorecard, cfg)
     ranking_source = (
-        "profit_opportunity_ranking"
+        str(profit_ranking.get("source_kind") or "profit_opportunity_ranking")
         if has_profit_ranking
         else "legacy_scorecard_candidates"
     )
