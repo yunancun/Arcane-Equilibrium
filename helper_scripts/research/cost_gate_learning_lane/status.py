@@ -112,7 +112,37 @@ def _run_git(repo_root: Path, args: list[str]) -> tuple[str | None, str | None]:
     return proc.stdout.strip(), None
 
 
-def _summarize_git_checkout(repo_root: Path) -> dict[str, Any]:
+def _normalize_expected_head(value: str | None) -> str | None:
+    text = str(value or "").strip()
+    return text or None
+
+
+def _expected_head_status(
+    *,
+    head_full: str | None,
+    expected_head: str | None,
+) -> tuple[str, bool | None, str | None]:
+    expected = _normalize_expected_head(expected_head)
+    if expected is None:
+        return "NOT_PROVIDED", None, None
+    if not all(ch in "0123456789abcdefABCDEF" for ch in expected):
+        return "INVALID", False, "expected_head_must_be_hex_sha_prefix"
+    if len(expected) < 7 or len(expected) > 40:
+        return "INVALID", False, "expected_head_length_must_be_7_to_40_hex_chars"
+    if not head_full:
+        return "UNKNOWN_HEAD", False, "current_git_head_unavailable"
+    expected_lower = expected.lower()
+    head_lower = head_full.lower()
+    if head_lower.startswith(expected_lower):
+        return "MATCH", True, None
+    return "MISMATCH", False, "current_git_head_does_not_match_expected_head"
+
+
+def _summarize_git_checkout(
+    repo_root: Path,
+    *,
+    expected_head: str | None = None,
+) -> dict[str, Any]:
     inside, inside_err = _run_git(repo_root, ["rev-parse", "--is-inside-work-tree"])
     if inside_err or inside != "true":
         return {
@@ -121,21 +151,35 @@ def _summarize_git_checkout(repo_root: Path) -> dict[str, Any]:
             "git_error": inside_err,
             "git_branch": None,
             "git_head_short": None,
+            "git_head": None,
             "git_upstream": None,
             "git_ahead_count": None,
             "git_behind_count": None,
             "git_dirty_path_count": None,
             "git_untracked_path_count": None,
             "git_dirty_path_sample": [],
+            "expected_head": _normalize_expected_head(expected_head),
+            "expected_head_status": (
+                "NOT_PROVIDED"
+                if _normalize_expected_head(expected_head) is None
+                else "UNKNOWN_HEAD"
+            ),
+            "expected_head_matches": None,
+            "expected_head_error": inside_err,
         }
 
     branch, branch_err = _run_git(repo_root, ["branch", "--show-current"])
-    head, head_err = _run_git(repo_root, ["rev-parse", "--short", "HEAD"])
+    head, head_err = _run_git(repo_root, ["rev-parse", "HEAD"])
+    head_short, head_short_err = _run_git(repo_root, ["rev-parse", "--short", "HEAD"])
     upstream, upstream_err = _run_git(
         repo_root,
         ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
     )
     dirty_text, dirty_err = _run_git(repo_root, ["status", "--porcelain"])
+    expected_status, expected_matches, expected_error = _expected_head_status(
+        head_full=head,
+        expected_head=expected_head,
+    )
 
     dirty_lines = [
         line
@@ -159,10 +203,10 @@ def _summarize_git_checkout(repo_root: Path) -> dict[str, Any]:
                 ahead_count = _int(parts[0])
                 behind_count = _int(parts[1])
 
-    if branch_err or head_err or dirty_err:
+    if branch_err or head_err or head_short_err or dirty_err:
         status = "GIT_UNREADABLE"
         ready = False
-        error = branch_err or head_err or dirty_err
+        error = branch_err or head_err or head_short_err or dirty_err
     elif upstream_err:
         status = "NO_UPSTREAM"
         ready = False
@@ -187,6 +231,18 @@ def _summarize_git_checkout(repo_root: Path) -> dict[str, Any]:
         status = "GIT_UNREADABLE"
         ready = False
         error = counts_err
+    elif expected_status == "INVALID":
+        status = "EXPECTED_HEAD_INVALID"
+        ready = False
+        error = expected_error
+    elif expected_status == "UNKNOWN_HEAD":
+        status = "EXPECTED_HEAD_UNVERIFIED"
+        ready = False
+        error = expected_error
+    elif expected_status == "MISMATCH":
+        status = "EXPECTED_HEAD_MISMATCH"
+        ready = False
+        error = expected_error
     else:
         status = "SYNCED_CLEAN"
         ready = True
@@ -197,13 +253,18 @@ def _summarize_git_checkout(repo_root: Path) -> dict[str, Any]:
         "git_ready_for_activation": ready,
         "git_error": error,
         "git_branch": branch or None,
-        "git_head_short": head or None,
+        "git_head_short": head_short or None,
+        "git_head": head or None,
         "git_upstream": upstream or None,
         "git_ahead_count": ahead_count,
         "git_behind_count": behind_count,
         "git_dirty_path_count": dirty_count,
         "git_untracked_path_count": untracked_count,
         "git_dirty_path_sample": dirty_lines[:12],
+        "expected_head": _normalize_expected_head(expected_head),
+        "expected_head_status": expected_status,
+        "expected_head_matches": expected_matches,
+        "expected_head_error": expected_error,
     }
 
 
@@ -484,9 +545,13 @@ def summarize_cost_gate_learning_lane_loop(
     }
 
 
-def summarize_cost_gate_learning_lane_source(repo_root: Path | None = None) -> dict[str, Any]:
+def summarize_cost_gate_learning_lane_source(
+    repo_root: Path | None = None,
+    *,
+    expected_head: str | None = None,
+) -> dict[str, Any]:
     root = repo_root or Path(__file__).resolve().parents[3]
-    git = _summarize_git_checkout(root)
+    git = _summarize_git_checkout(root, expected_head=expected_head)
     missing: list[str] = []
     non_executable: list[str] = []
     for rel in REQUIRED_SOURCE_RELATIVE_PATHS:
@@ -711,6 +776,7 @@ def build_cost_gate_learning_lane_activation_preflight(
     data_dir: Path,
     *,
     repo_root: Path | None = None,
+    expected_head: str | None = None,
     now_utc: dt.datetime | None = None,
     max_loop_age_seconds: int = DEFAULT_COST_GATE_LEARNING_LOOP_MAX_AGE_SECONDS,
     max_plan_age_seconds: int = DEFAULT_PLAN_MAX_AGE_SECONDS,
@@ -720,7 +786,10 @@ def build_cost_gate_learning_lane_activation_preflight(
     plan_path = lane_dir / "demo_learning_lane_plan_latest.json"
     ledger_path = lane_dir / "probe_ledger.jsonl"
 
-    source = summarize_cost_gate_learning_lane_source(repo_root)
+    source = summarize_cost_gate_learning_lane_source(
+        repo_root,
+        expected_head=expected_head,
+    )
     plan = _plan_summary(plan_path, now_utc=now, max_age_seconds=max_plan_age_seconds)
     ledger = summarize_cost_gate_learning_lane_ledger(ledger_path)
     loop = summarize_cost_gate_learning_lane_loop(
@@ -746,6 +815,13 @@ def build_cost_gate_learning_lane_activation_preflight(
     activation_blockers = list(decision["missing_links"])
     if source.get("source_activation_ready") is not True:
         activation_blockers.insert(0, "source_checkout_not_synced_clean")
+    expected_status = str(source.get("expected_head_status") or "NOT_PROVIDED")
+    if expected_status == "MISMATCH":
+        activation_blockers.insert(0, "expected_source_head_mismatch")
+    elif expected_status == "INVALID":
+        activation_blockers.insert(0, "expected_source_head_invalid")
+    elif expected_status == "UNKNOWN_HEAD":
+        activation_blockers.insert(0, "expected_source_head_unverified")
     return {
         "schema_version": ACTIVATION_PREFLIGHT_SCHEMA_VERSION,
         "generated_at_utc": now.isoformat(),
@@ -799,6 +875,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Repo root used to verify required source files.",
     )
     parser.add_argument(
+        "--expected-head",
+        default=os.environ.get("OPENCLAW_EXPECTED_SOURCE_HEAD"),
+        help="Expected git HEAD SHA/prefix for activation, e.g. PM-pushed origin/main.",
+    )
+    parser.add_argument(
         "--max-loop-age-seconds",
         type=int,
         default=DEFAULT_COST_GATE_LEARNING_LOOP_MAX_AGE_SECONDS,
@@ -814,6 +895,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = build_cost_gate_learning_lane_activation_preflight(
         args.data_dir,
         repo_root=args.repo_root,
+        expected_head=args.expected_head,
         max_loop_age_seconds=args.max_loop_age_seconds,
         max_plan_age_seconds=args.max_plan_age_seconds,
     )

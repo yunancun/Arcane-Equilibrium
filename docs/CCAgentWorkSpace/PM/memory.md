@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Expected-Head Gate
+
+- Extended `cost_gate_learning_lane.status` with optional `--expected-head` / `OPENCLAW_EXPECTED_SOURCE_HEAD`.
+- Preflight now compares runtime `HEAD` directly with the PM-pushed commit and reports `expected_head_status`, `expected_head_matches`, and `expected_source_head_mismatch` blockers.
+- This avoids relying only on runtime local upstream refs, which may be stale if `trade-core` has not fetched.
+
 ## 2026-06-21 Cost-Gate Learning Source-Sync Activation Gate
 
 - Extended `cost_gate_learning_lane.status` with read-only local git checkout readiness: head, branch/upstream, ahead/behind, dirty/untracked counts, and dirty path sample.

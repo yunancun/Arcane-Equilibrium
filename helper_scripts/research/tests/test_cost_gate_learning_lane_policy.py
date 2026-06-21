@@ -180,6 +180,17 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
+def _git_output(repo: Path, *args: str) -> str:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=True,
+        text=True,
+        capture_output=True,
+    )
+    return proc.stdout.strip()
+
+
 def _write_required_source_files(repo: Path) -> None:
     for rel in REQUIRED_SOURCE_RELATIVE_PATHS:
         path = repo / rel
@@ -655,6 +666,72 @@ def test_source_summary_blocks_activation_when_checkout_behind_upstream(
     assert source["git_status"] == "BEHIND_UPSTREAM"
     assert source["git_ahead_count"] == 0
     assert source["git_behind_count"] == 1
+
+
+def test_source_summary_honors_expected_head_when_checkout_matches(
+    tmp_path: Path,
+):
+    repo, _remote = _init_source_repo_with_origin(tmp_path)
+    head = _git_output(repo, "rev-parse", "HEAD")
+
+    source = summarize_cost_gate_learning_lane_source(repo, expected_head=head[:12])
+
+    assert source["source_status"] == "READY"
+    assert source["source_activation_status"] == "SYNCED_CLEAN"
+    assert source["source_activation_ready"] is True
+    assert source["git_status"] == "SYNCED_CLEAN"
+    assert source["expected_head_status"] == "MATCH"
+    assert source["expected_head_matches"] is True
+
+
+def test_source_summary_blocks_activation_when_expected_head_mismatches(
+    tmp_path: Path,
+):
+    repo, _remote = _init_source_repo_with_origin(tmp_path)
+
+    source = summarize_cost_gate_learning_lane_source(
+        repo,
+        expected_head="deadbee",
+    )
+
+    assert source["source_status"] == "READY"
+    assert source["source_activation_status"] == "EXPECTED_HEAD_MISMATCH"
+    assert source["source_activation_ready"] is False
+    assert source["git_status"] == "EXPECTED_HEAD_MISMATCH"
+    assert source["expected_head_status"] == "MISMATCH"
+    assert source["expected_head_matches"] is False
+    assert source["expected_head_error"] == (
+        "current_git_head_does_not_match_expected_head"
+    )
+
+
+def test_activation_preflight_reports_expected_head_mismatch_blocker(
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "data"
+    repo, _remote = _init_source_repo_with_origin(tmp_path)
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        repo_root=repo,
+        expected_head="deadbee",
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["source"]["expected_head_status"] == "MISMATCH"
+    assert preflight["answers"]["runtime_source_ready_for_activation"] is False
+    assert "expected_source_head_mismatch" in preflight["activation_blockers"]
+    assert "source_checkout_not_synced_clean" in preflight["activation_blockers"]
 
 
 def test_alpha_discovery_keeps_stale_cost_gate_plan_as_source_health_blocker(
