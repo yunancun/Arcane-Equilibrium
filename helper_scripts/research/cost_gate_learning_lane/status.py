@@ -631,6 +631,11 @@ def summarize_cost_gate_learning_lane_loop(
     lane_dir = data_dir / "cost_gate_learning_lane"
     heartbeat_path = data_dir / "cron_heartbeat" / "cost_gate_learning_lane.last_fire"
     status_log_path = data_dir / "logs" / "cost_gate_learning_lane.log"
+    scorecard_latest_path = (
+        data_dir
+        / "cost_gate_counterfactual"
+        / "cost_gate_reject_counterfactual_latest.json"
+    )
     plan_latest_path = lane_dir / "demo_learning_lane_plan_latest.json"
     materializer_latest_path = lane_dir / "reject_materializer_latest.json"
     refresh_latest_path = lane_dir / "outcome_refresh_latest.json"
@@ -647,6 +652,12 @@ def summarize_cost_gate_learning_lane_loop(
 
     status_ts = status_row.get("ts_utc") if status_row else None
     status_age = _age_seconds(status_ts, now_utc=now_utc)
+    scorecard_rc = _int(status_row.get("scorecard_rc")) if status_row else None
+    refresh_scorecard_enabled = (
+        status_row.get("refresh_scorecard")
+        if status_row and isinstance(status_row.get("refresh_scorecard"), bool)
+        else None
+    )
     plan_rc = _int(status_row.get("plan_rc")) if status_row else None
     refresh_plan_enabled = (
         status_row.get("refresh_plan")
@@ -732,13 +743,14 @@ def summarize_cost_gate_learning_lane_loop(
             status = "STALE_STATUS"
             reason = "cost_gate_learning_status_stale"
         elif (
-            plan_rc not in (None, 0)
+            scorecard_rc not in (None, 0)
+            or plan_rc not in (None, 0)
             or materializer_rc not in (None, 0)
             or refresh_rc not in (None, 0)
             or review_rc not in (None, 0)
         ):
             status = "ERROR"
-            reason = "cost_gate_learning_plan_materializer_refresh_or_review_failed"
+            reason = "cost_gate_learning_scorecard_plan_materializer_refresh_or_review_failed"
         elif ledger_row_count == 0 and review_status == "NO_BLOCKED_SIGNAL_OUTCOMES":
             status = "RUNNING_NO_LEDGER_ROWS"
             reason = "cost_gate_learning_loop_ran_but_no_ledger_rows"
@@ -771,6 +783,16 @@ def summarize_cost_gate_learning_lane_loop(
         "learning_loop_status_log_error": status_err,
         "learning_loop_status_ts_utc": status_ts,
         "learning_loop_status_age_seconds": status_age,
+        "learning_loop_scorecard_latest_path": str(scorecard_latest_path),
+        "learning_loop_refresh_scorecard_enabled": refresh_scorecard_enabled,
+        "learning_loop_last_scorecard_rc": scorecard_rc,
+        "learning_loop_last_scorecard_status": (
+            status_row.get("scorecard_status") if status_row else None
+        ),
+        "learning_loop_last_scorecard_probe_candidate_count": (
+            status_row.get("scorecard_probe_candidate_count")
+            if status_row else None
+        ),
         "learning_loop_plan_latest_path": str(plan_latest_path),
         "learning_loop_refresh_plan_enabled": refresh_plan_enabled,
         "learning_loop_last_plan_rc": plan_rc,

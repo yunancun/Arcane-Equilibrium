@@ -577,6 +577,15 @@ def test_alpha_discovery_surfaces_learning_loop_running_without_ledger_rows(
             "ts_utc": "2026-06-21T11:04:00Z",
             "check": "cost_gate_learning_lane",
             "ledger_row_count": 0,
+            "refresh_scorecard": True,
+            "scorecard_rc": 0,
+            "scorecard_status": "LEARNING_LANE_PROBE_CANDIDATES_PRESENT",
+            "scorecard_probe_candidate_count": 2,
+            "refresh_plan": True,
+            "plan_rc": 0,
+            "plan_policy_status": "READY_FOR_DEMO_LEARNING_PROBE",
+            "plan_gate_status": "OPERATOR_REVIEW",
+            "plan_selected_probe_candidate_count": 2,
             "refresh_rc": 0,
             "review_rc": 0,
             "review_status": "NO_BLOCKED_SIGNAL_OUTCOMES",
@@ -608,6 +617,18 @@ def test_alpha_discovery_surfaces_learning_loop_running_without_ledger_rows(
     assert row["learning_loop_status"] == "RUNNING_NO_LEDGER_ROWS"
     assert row["learning_loop_heartbeat_present"] is True
     assert row["learning_loop_last_ledger_row_count"] == 0
+    assert row["learning_loop_refresh_scorecard_enabled"] is True
+    assert row["learning_loop_last_scorecard_rc"] == 0
+    assert row["learning_loop_last_scorecard_status"] == (
+        "LEARNING_LANE_PROBE_CANDIDATES_PRESENT"
+    )
+    assert row["learning_loop_last_scorecard_probe_candidate_count"] == 2
+    assert row["learning_loop_refresh_plan_enabled"] is True
+    assert row["learning_loop_last_plan_rc"] == 0
+    assert row["learning_loop_last_plan_policy_status"] == (
+        "READY_FOR_DEMO_LEARNING_PROBE"
+    )
+    assert row["learning_loop_last_plan_selected_probe_candidate_count"] == 2
     assert row["learning_loop_last_materializer_status"] == (
         "MATERIALIZED_REJECT_ROWS_PRESENT"
     )
@@ -1092,6 +1113,10 @@ def test_activation_preflight_reports_loop_running_without_ledger_rows(
             "ts_utc": "2026-06-21T11:04:00Z",
             "check": "cost_gate_learning_lane",
             "ledger_row_count": 0,
+            "refresh_scorecard": True,
+            "scorecard_rc": 0,
+            "scorecard_status": "LEARNING_LANE_PROBE_CANDIDATES_PRESENT",
+            "scorecard_probe_candidate_count": 2,
             "refresh_plan": True,
             "plan_rc": 0,
             "plan_policy_status": "READY_FOR_DEMO_LEARNING_PROBE",
@@ -1121,6 +1146,14 @@ def test_activation_preflight_reports_loop_running_without_ledger_rows(
     assert preflight["status"] == "LOOP_RUNNING_NO_LEDGER_ROWS"
     assert preflight["reason"] == "learning_loop_recent_but_no_probe_ledger_rows"
     assert preflight["learning_loop"]["learning_loop_status"] == "RUNNING_NO_LEDGER_ROWS"
+    assert preflight["learning_loop"]["learning_loop_refresh_scorecard_enabled"] is True
+    assert preflight["learning_loop"]["learning_loop_last_scorecard_rc"] == 0
+    assert preflight["learning_loop"]["learning_loop_last_scorecard_status"] == (
+        "LEARNING_LANE_PROBE_CANDIDATES_PRESENT"
+    )
+    assert preflight["learning_loop"][
+        "learning_loop_last_scorecard_probe_candidate_count"
+    ] == 2
     assert preflight["learning_loop"]["learning_loop_refresh_plan_enabled"] is True
     assert preflight["learning_loop"]["learning_loop_last_plan_rc"] == 0
     assert preflight["learning_loop"]["learning_loop_last_plan_policy_status"] == (
@@ -1170,6 +1203,8 @@ def test_activation_preflight_treats_plan_refresh_failure_as_loop_error(
             "ts_utc": "2026-06-21T11:04:00Z",
             "check": "cost_gate_learning_lane",
             "ledger_row_count": 0,
+            "refresh_scorecard": True,
+            "scorecard_rc": 0,
             "refresh_plan": True,
             "plan_rc": 7,
             "materialize_rejects": True,
@@ -1192,7 +1227,57 @@ def test_activation_preflight_treats_plan_refresh_failure_as_loop_error(
     assert preflight["learning_loop"]["learning_loop_status"] == "ERROR"
     assert preflight["learning_loop"]["learning_loop_last_plan_rc"] == 7
     assert preflight["learning_loop"]["learning_loop_reason"] == (
-        "cost_gate_learning_plan_materializer_refresh_or_review_failed"
+        "cost_gate_learning_scorecard_plan_materializer_refresh_or_review_failed"
+    )
+    assert "cost_gate_learning_lane_cron_health" in preflight["missing_links"]
+
+
+def test_activation_preflight_treats_scorecard_refresh_failure_as_loop_error(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    log = data_dir / "logs" / "cost_gate_learning_lane.log"
+    log.parent.mkdir(parents=True)
+    log.write_text(
+        json.dumps({
+            "ts_utc": "2026-06-21T11:04:00Z",
+            "check": "cost_gate_learning_lane",
+            "ledger_row_count": 0,
+            "refresh_scorecard": True,
+            "scorecard_rc": 9,
+            "refresh_plan": True,
+            "plan_rc": 0,
+            "materialize_rejects": True,
+            "append_materialized_rejects": True,
+            "materializer_rc": 0,
+            "refresh_rc": 0,
+            "review_rc": 0,
+            "review_status": "NO_BLOCKED_SIGNAL_OUTCOMES",
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["status"] == "LEARNING_LOOP_ERROR"
+    assert preflight["learning_loop"]["learning_loop_status"] == "ERROR"
+    assert preflight["learning_loop"]["learning_loop_last_scorecard_rc"] == 9
+    assert preflight["learning_loop"]["learning_loop_reason"] == (
+        "cost_gate_learning_scorecard_plan_materializer_refresh_or_review_failed"
     )
     assert "cost_gate_learning_lane_cron_health" in preflight["missing_links"]
 

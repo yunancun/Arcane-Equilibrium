@@ -1216,6 +1216,33 @@ def classify_profitability_blocker(
                 "learning_loop_status_age_seconds": detail.get(
                     "learning_loop_status_age_seconds"
                 ),
+                "learning_loop_last_scorecard_rc": detail.get(
+                    "learning_loop_last_scorecard_rc"
+                ),
+                "learning_loop_refresh_scorecard_enabled": detail.get(
+                    "learning_loop_refresh_scorecard_enabled"
+                ),
+                "learning_loop_last_scorecard_status": detail.get(
+                    "learning_loop_last_scorecard_status"
+                ),
+                "learning_loop_last_scorecard_probe_candidate_count": detail.get(
+                    "learning_loop_last_scorecard_probe_candidate_count"
+                ),
+                "learning_loop_last_plan_rc": detail.get(
+                    "learning_loop_last_plan_rc"
+                ),
+                "learning_loop_refresh_plan_enabled": detail.get(
+                    "learning_loop_refresh_plan_enabled"
+                ),
+                "learning_loop_last_plan_policy_status": detail.get(
+                    "learning_loop_last_plan_policy_status"
+                ),
+                "learning_loop_last_plan_gate_status": detail.get(
+                    "learning_loop_last_plan_gate_status"
+                ),
+                "learning_loop_last_plan_selected_probe_candidate_count": detail.get(
+                    "learning_loop_last_plan_selected_probe_candidate_count"
+                ),
                 "learning_loop_last_refresh_rc": detail.get(
                     "learning_loop_last_refresh_rc"
                 ),
