@@ -94,6 +94,7 @@ pub(super) struct BootstrappedRuntime {
     pub cross_engine_rx: Option<broadcast::Receiver<crate::tick_pipeline::EngineEvent>>,
     pub pipeline_health: Option<Arc<std::sync::atomic::AtomicU8>>,
     pub canary_handle: crate::canary_writer::CanaryWriterHandle,
+    pub demo_learning_lane_writer: crate::demo_learning_lane_writer::DemoLearningLaneWriterHandle,
 }
 
 /// Build the pipeline and wire all startup dependencies.
@@ -163,6 +164,7 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         cross_engine_rx,
         pipeline_health,
         canary_handle,
+        demo_learning_lane_writer,
         edge_predictor_store,
         positions_mirror,
         funding_curve_panel_slot,
@@ -215,6 +217,7 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
     // status JSON consumer 過濾）。
     let h0_latency_recorder = Arc::new(openclaw_core::hot_path_metrics::H0LatencyRecorder::new());
     pipeline.set_h0_latency_recorder(h0_latency_recorder);
+    pipeline.set_demo_learning_lane_writer(demo_learning_lane_writer.clone());
     if let Some(tx) = lease_transition_tx {
         pipeline.governance.set_lease_transition_tx(tx);
     }
@@ -1164,6 +1167,7 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         cross_engine_rx,
         pipeline_health,
         canary_handle,
+        demo_learning_lane_writer,
     }
 }
 

@@ -985,6 +985,12 @@ pub struct TickPipeline {
     /// Enable canary mode — on_tick returns per-tick CanaryRecord (R07-2).
     /// 啟用灰度模式 — on_tick 返回每 tick 的 CanaryRecord。
     pub canary_mode: bool,
+    /// Cost-gate demo-learning lane writer handle. Disabled by default; when
+    /// enabled it records eligible exchange-gate rejects as append-only
+    /// admission decisions without changing order routing.
+    /// Cost-gate demo-learning lane 寫入器控制代碼。默認停用；啟用時只把
+    /// eligible exchange-gate reject 記為 append-only admission decision，不改送單。
+    demo_learning_lane_writer: crate::demo_learning_lane_writer::DemoLearningLaneWriterHandle,
     /// Instrument info cache for exchange precision rounding (R-05).
     /// 合約信息緩存，用於交易所精度取整。
     instrument_cache: Option<Arc<InstrumentInfoCache>>,

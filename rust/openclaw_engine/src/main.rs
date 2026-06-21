@@ -1025,6 +1025,11 @@ async fn async_main(
         std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into()),
     );
     let canary_handle = openclaw_engine::canary_writer::spawn(canary_data_path, cancel.clone());
+    let demo_learning_data_path = std::path::PathBuf::from(
+        std::env::var("OPENCLAW_DATA_DIR").unwrap_or_else(|_| "/tmp/openclaw".into()),
+    );
+    let demo_learning_lane_writer =
+        openclaw_engine::demo_learning_lane_writer::spawn(demo_learning_data_path, cancel.clone());
 
     // EDGE-P3-1 Phase B #1: Per-engine EdgePredictorStore. One container, three
     // Arc<EdgePredictorStore> slots (paper/demo/live). Each pipeline receives
@@ -1342,6 +1347,7 @@ async fn async_main(
         shared_last_tick_ms: &shared_last_tick_ms,
         shared_last_processed_wallclock_ms: &shared_last_processed_wallclock_ms,
         canary_handle: &canary_handle,
+        demo_learning_lane_writer: &demo_learning_lane_writer,
         per_engine_predictors: &per_engine_predictors,
         cross_engine_tx: &cross_engine_tx,
         global_exposure_usdt: &global_exposure_usdt,
@@ -1453,6 +1459,7 @@ async fn async_main(
             shared_last_tick_ms: Arc::clone(&shared_last_tick_ms),
             shared_last_processed_wallclock_ms: Arc::clone(&shared_last_processed_wallclock_ms),
             canary_handle: canary_handle.clone(),
+            demo_learning_lane_writer: demo_learning_lane_writer.clone(),
             per_engine_predictors: Arc::clone(&per_engine_predictors),
             cross_engine_tx: cross_engine_tx.clone(),
             global_exposure_usdt: Arc::clone(&global_exposure_usdt),

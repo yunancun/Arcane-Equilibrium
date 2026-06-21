@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Demo-Learning Lane Runtime Ledger Writer
+
+- Added env-gated Rust `demo_learning_lane_writer`, wired from engine startup through all paper/demo/live pipeline deps into `TickPipeline`.
+- Eligible demo/live_demo `cost_gate_js_demo_negative_edge` exchange-gate rejects now have a bounded non-blocking path to append `probe_admission_decision` JSONL rows when `OPENCLAW_DEMO_LEARNING_LANE_WRITER=1|true`.
+- The writer dedupes by `attempt_id`, evaluates the existing Rust admission policy off hot path, flushes after successful writes, and hard-codes adapter enablement to false so enabling the writer cannot grant order authority. Current selected side-cells still record `ORDER_AUTHORITY_NOT_GRANTED`; no main cost-gate relaxation or order routing was added.
+
 ## 2026-06-21 Cost-Gate Demo-Learning Lane Hot-Path Adapter
 
 - Added pure Rust `demo_learning_lane_hot_path` adapter plus tests to convert eligible demo/live_demo cost-gate negative-edge exchange rejects into `RejectEvent` learning shape.

@@ -37,6 +37,7 @@ use openclaw_engine::database::{
     DecisionContextMsg, DecisionFeatureEvaluationMsg, DecisionFeatureMsg, ExitFeatureRow,
     MarketDataMsg, ShadowExitMsg, ShadowFillMsg, TradingMsg,
 };
+use openclaw_engine::demo_learning_lane_writer::DemoLearningLaneWriterHandle;
 use openclaw_engine::edge_predictor::PerEnginePredictors;
 use openclaw_engine::event_consumer::{run_event_consumer, EventConsumerDeps};
 use openclaw_engine::feature_collector::FeatureSnapshot;
@@ -77,6 +78,7 @@ pub(crate) struct PipelineSpawnContext<'a> {
     /// 的 EventConsumerDeps；同一 Arc 也傳給 tick-stale watchdog 讀取。
     pub shared_last_processed_wallclock_ms: &'a Arc<std::sync::atomic::AtomicU64>,
     pub canary_handle: &'a CanaryWriterHandle,
+    pub demo_learning_lane_writer: &'a DemoLearningLaneWriterHandle,
     pub per_engine_predictors: &'a Arc<PerEnginePredictors>,
     pub cross_engine_tx: &'a broadcast::Sender<EngineEvent>,
     pub global_exposure_usdt: &'a Arc<std::sync::atomic::AtomicU64>,
@@ -412,6 +414,7 @@ pub(crate) fn spawn_paper_pipeline(
         cross_engine_rx: Some(ctx.cross_engine_tx.subscribe()),
         pipeline_health: Some(Arc::clone(&paper.health)),
         canary_handle: ctx.canary_handle.clone(),
+        demo_learning_lane_writer: ctx.demo_learning_lane_writer.clone(),
         edge_predictor_store: Some(Arc::clone(&ctx.per_engine_predictors.paper)),
         positions_mirror: Some(Arc::clone(&paper.positions_mirror)),
         // W2 sub-task 4 (E1-δ, 2026-05-11): paper engine 接 BtcLeadLagPanelSlot
@@ -532,6 +535,7 @@ pub(crate) fn spawn_demo_pipeline(
         cross_engine_rx: Some(ctx.cross_engine_tx.subscribe()),
         pipeline_health: Some(Arc::clone(&demo_b.health)),
         canary_handle: ctx.canary_handle.clone(),
+        demo_learning_lane_writer: ctx.demo_learning_lane_writer.clone(),
         edge_predictor_store: Some(Arc::clone(&ctx.per_engine_predictors.demo)),
         positions_mirror: Some(Arc::clone(&demo.positions_mirror)),
         // W2 sub-task 4 (E1-δ, 2026-05-11): demo engine 接 BtcLeadLagPanelSlot
@@ -675,6 +679,7 @@ pub(crate) fn spawn_live_pipeline(
         cross_engine_rx: Some(ctx.cross_engine_tx.subscribe()),
         pipeline_health: Some(Arc::clone(&live_b.health)),
         canary_handle: ctx.canary_handle.clone(),
+        demo_learning_lane_writer: ctx.demo_learning_lane_writer.clone(),
         edge_predictor_store: Some(Arc::clone(&ctx.per_engine_predictors.live)),
         positions_mirror: Some(Arc::clone(&live.positions_mirror)),
         // W2 sub-task 4 (E1-δ, 2026-05-11): live engine 接 BtcLeadLagPanelSlot
@@ -837,6 +842,7 @@ pub(crate) struct LiveSpawnBundle {
     /// ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘 atomic（live respawn 每次重生共享）。
     pub shared_last_processed_wallclock_ms: Arc<std::sync::atomic::AtomicU64>,
     pub canary_handle: CanaryWriterHandle,
+    pub demo_learning_lane_writer: DemoLearningLaneWriterHandle,
     pub per_engine_predictors: Arc<PerEnginePredictors>,
     pub cross_engine_tx: broadcast::Sender<EngineEvent>,
     pub global_exposure_usdt: Arc<std::sync::atomic::AtomicU64>,
@@ -923,6 +929,7 @@ pub(crate) fn build_live_pipeline_spawner(
     // ENGINE-CRASH-FIX C3 (2026-06-15)：牆鐘 atomic 移入 closure，每次 respawn 共享。
     let last_processed_wallclock_ms_c = b.shared_last_processed_wallclock_ms;
     let canary_c = b.canary_handle;
+    let demo_learning_lane_writer_c = b.demo_learning_lane_writer;
     let per_engine_predictors_c = b.per_engine_predictors;
     let cross_engine_tx_c = b.cross_engine_tx;
     let global_exposure_c = b.global_exposure_usdt;
@@ -995,6 +1002,7 @@ pub(crate) fn build_live_pipeline_spawner(
             shared_last_tick_ms: &last_tick_ms_c,
             shared_last_processed_wallclock_ms: &last_processed_wallclock_ms_c,
             canary_handle: &canary_c,
+            demo_learning_lane_writer: &demo_learning_lane_writer_c,
             per_engine_predictors: &per_engine_predictors_c,
             cross_engine_tx: &cross_engine_tx_c,
             global_exposure_usdt: &global_exposure_c,

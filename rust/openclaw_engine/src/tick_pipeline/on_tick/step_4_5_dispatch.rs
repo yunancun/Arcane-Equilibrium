@@ -998,12 +998,21 @@ impl TickPipeline {
                                         &signal_id,
                                     )
                                 {
+                                    let writer_enabled =
+                                        self.demo_learning_lane_writer.is_enabled();
                                     tracing::debug!(
                                         target: "demo_learning_lane",
                                         side_cell_key = %reject_event.side_cell_key(),
                                         context_id = %context_id,
                                         signal_id = %signal_id,
-                                        "demo-learning lane eligible cost-gate reject recognized; ledger append not wired / 已識別 demo-learning lane eligible cost-gate reject，尚未接 ledger append"
+                                        writer_enabled,
+                                        "demo-learning lane eligible cost-gate reject recognized; admission ledger writer handle observed / 已識別 demo-learning lane eligible cost-gate reject，已觀測 admission ledger writer handle"
+                                    );
+                                    let risk_state = self.governance.risk.snapshot_level().as_str();
+                                    self.demo_learning_lane_writer.record_reject_event(
+                                        reject_event,
+                                        risk_state,
+                                        event.ts_ms,
                                     );
                                 }
 
