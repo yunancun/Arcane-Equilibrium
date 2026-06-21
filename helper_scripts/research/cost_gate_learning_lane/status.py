@@ -15,6 +15,7 @@ import datetime as dt
 import json
 import math
 import os
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -91,6 +92,119 @@ def _read_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
     if not isinstance(data, dict):
         return None, "not_object"
     return data, None
+
+
+def _run_git(repo_root: Path, args: list[str]) -> tuple[str | None, str | None]:
+    try:
+        proc = subprocess.run(
+            ["git", *args],
+            cwd=repo_root,
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return None, f"git_error:{type(exc).__name__}"
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        return None, err or f"git_rc:{proc.returncode}"
+    return proc.stdout.strip(), None
+
+
+def _summarize_git_checkout(repo_root: Path) -> dict[str, Any]:
+    inside, inside_err = _run_git(repo_root, ["rev-parse", "--is-inside-work-tree"])
+    if inside_err or inside != "true":
+        return {
+            "git_status": "NOT_GIT_REPO",
+            "git_ready_for_activation": False,
+            "git_error": inside_err,
+            "git_branch": None,
+            "git_head_short": None,
+            "git_upstream": None,
+            "git_ahead_count": None,
+            "git_behind_count": None,
+            "git_dirty_path_count": None,
+            "git_untracked_path_count": None,
+            "git_dirty_path_sample": [],
+        }
+
+    branch, branch_err = _run_git(repo_root, ["branch", "--show-current"])
+    head, head_err = _run_git(repo_root, ["rev-parse", "--short", "HEAD"])
+    upstream, upstream_err = _run_git(
+        repo_root,
+        ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"],
+    )
+    dirty_text, dirty_err = _run_git(repo_root, ["status", "--porcelain"])
+
+    dirty_lines = [
+        line
+        for line in (dirty_text or "").splitlines()
+        if line.strip()
+    ]
+    untracked_count = sum(1 for line in dirty_lines if line.startswith("??"))
+    dirty_count = len(dirty_lines)
+
+    ahead_count: int | None = None
+    behind_count: int | None = None
+    counts_err: str | None = None
+    if upstream and not upstream_err:
+        counts, counts_err = _run_git(
+            repo_root,
+            ["rev-list", "--left-right", "--count", f"HEAD...{upstream}"],
+        )
+        if counts:
+            parts = counts.split()
+            if len(parts) >= 2:
+                ahead_count = _int(parts[0])
+                behind_count = _int(parts[1])
+
+    if branch_err or head_err or dirty_err:
+        status = "GIT_UNREADABLE"
+        ready = False
+        error = branch_err or head_err or dirty_err
+    elif upstream_err:
+        status = "NO_UPSTREAM"
+        ready = False
+        error = upstream_err
+    elif dirty_count > 0:
+        status = "DIRTY"
+        ready = False
+        error = None
+    elif (ahead_count or 0) > 0 and (behind_count or 0) > 0:
+        status = "DIVERGED"
+        ready = False
+        error = None
+    elif (behind_count or 0) > 0:
+        status = "BEHIND_UPSTREAM"
+        ready = False
+        error = None
+    elif (ahead_count or 0) > 0:
+        status = "AHEAD_OF_UPSTREAM"
+        ready = False
+        error = None
+    elif counts_err:
+        status = "GIT_UNREADABLE"
+        ready = False
+        error = counts_err
+    else:
+        status = "SYNCED_CLEAN"
+        ready = True
+        error = None
+
+    return {
+        "git_status": status,
+        "git_ready_for_activation": ready,
+        "git_error": error,
+        "git_branch": branch or None,
+        "git_head_short": head or None,
+        "git_upstream": upstream or None,
+        "git_ahead_count": ahead_count,
+        "git_behind_count": behind_count,
+        "git_dirty_path_count": dirty_count,
+        "git_untracked_path_count": untracked_count,
+        "git_dirty_path_sample": dirty_lines[:12],
+    }
 
 
 def _latest_json_line(
@@ -372,6 +486,7 @@ def summarize_cost_gate_learning_lane_loop(
 
 def summarize_cost_gate_learning_lane_source(repo_root: Path | None = None) -> dict[str, Any]:
     root = repo_root or Path(__file__).resolve().parents[3]
+    git = _summarize_git_checkout(root)
     missing: list[str] = []
     non_executable: list[str] = []
     for rel in REQUIRED_SOURCE_RELATIVE_PATHS:
@@ -387,13 +502,25 @@ def summarize_cost_gate_learning_lane_source(repo_root: Path | None = None) -> d
         status = "NON_EXECUTABLE_CRON_WRAPPERS"
     else:
         status = "READY"
+    source_ready = status == "READY"
+    source_activation_ready = (
+        source_ready
+        and git.get("git_ready_for_activation") is True
+    )
+    if not source_ready:
+        source_activation_status = status
+    else:
+        source_activation_status = str(git.get("git_status") or "UNKNOWN")
     return {
         "source_status": status,
-        "source_ready": status == "READY",
+        "source_ready": source_ready,
+        "source_activation_status": source_activation_status,
+        "source_activation_ready": source_activation_ready,
         "repo_root": str(root),
         "required_source_relative_paths": list(REQUIRED_SOURCE_RELATIVE_PATHS),
         "missing_source_relative_paths": missing,
         "non_executable_source_relative_paths": non_executable,
+        **git,
     }
 
 
@@ -616,6 +743,9 @@ def build_cost_gate_learning_lane_activation_preflight(
         "RUNNING_NO_LEDGER_ROWS",
         "HEARTBEAT_ONLY_NO_STATUS",
     }
+    activation_blockers = list(decision["missing_links"])
+    if source.get("source_activation_ready") is not True:
+        activation_blockers.insert(0, "source_checkout_not_synced_clean")
     return {
         "schema_version": ACTIVATION_PREFLIGHT_SCHEMA_VERSION,
         "generated_at_utc": now.isoformat(),
@@ -634,7 +764,12 @@ def build_cost_gate_learning_lane_activation_preflight(
                 bool(ledger.get("blocked_signal_outcome_review_status"))
                 or loop.get("learning_loop_review_latest_error") is None
             ),
+            "runtime_source_ready_for_activation": (
+                source.get("source_activation_ready") is True
+            ),
+            "activation_ready": not activation_blockers,
         },
+        "activation_blockers": activation_blockers,
         "source": source,
         "plan": plan,
         "ledger": ledger,
