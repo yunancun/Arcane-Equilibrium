@@ -1365,6 +1365,18 @@ def summarize_demo_learning_evidence_audit(
         "demo_learning_evidence_order_flow_evidence_starved": answers.get(
             "order_flow_evidence_starved"
         ),
+        "demo_learning_evidence_cost_gate_adjustment_recommendation_status": counts.get(
+            "cost_gate_adjustment_recommendation_status"
+        ),
+        "demo_learning_evidence_cost_gate_adjustment_recommendation_reason": counts.get(
+            "cost_gate_adjustment_recommendation_reason"
+        ),
+        "demo_learning_evidence_cost_gate_adjustment_recommendation_next_action": counts.get(
+            "cost_gate_adjustment_recommendation_next_action"
+        ),
+        "demo_learning_evidence_cost_gate_learning_gate_adjustment": counts.get(
+            "cost_gate_learning_gate_adjustment"
+        ),
         "demo_learning_evidence_data_flow_freshness_status": counts.get(
             "data_flow_freshness_status"
         ),

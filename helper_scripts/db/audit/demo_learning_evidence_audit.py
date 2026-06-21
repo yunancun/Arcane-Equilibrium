@@ -136,6 +136,71 @@ def classify_order_flow_evidence(
     }
 
 
+def classify_cost_gate_adjustment_recommendation(
+    *,
+    cost_gate_rejects_recorded: bool,
+    order_flow_evidence: dict[str, Any],
+    learning_data_flow_stale: bool,
+    learning_evidence_accumulating: bool,
+    blocked_outcome_review_candidate: bool,
+) -> dict[str, Any]:
+    order_flow_status = str(order_flow_evidence.get("status") or "")
+    order_flow_answers = order_flow_evidence.get("answers") or {}
+    if blocked_outcome_review_candidate:
+        status = "BOUNDED_DEMO_PROBE_AUTHORITY_REVIEW_READY"
+        reason = "blocked-signal outcomes cleared review thresholds"
+        next_action = "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+        learning_gate_adjustment = "OPERATOR_REVIEW_BOUNDED_SIDE_CELL_DEMO_PROBE"
+    elif learning_data_flow_stale:
+        status = "RESTORE_DATA_FLOW_BEFORE_ANY_COST_GATE_CHANGE"
+        reason = "candidate/reject/order-flow data is stale"
+        next_action = "restore_demo_data_flow_before_cost_gate_learning_activation"
+        learning_gate_adjustment = "NONE_RESTORE_DATA_FLOW_FIRST"
+    elif (
+        cost_gate_rejects_recorded
+        and order_flow_answers.get("order_flow_evidence_starved") is True
+        and not learning_evidence_accumulating
+    ):
+        status = "BOUNDED_LEARNING_LANE_ACTIVATION_RECOMMENDED"
+        reason = "fresh Cost Gate rejects exist but no demo order/fill evidence exists"
+        next_action = (
+            "activate_cost_gate_learning_lane_then_operator_review_bounded_demo_probe"
+        )
+        learning_gate_adjustment = "ENABLE_LEDGER_AND_OUTCOME_REVIEW_FIRST"
+    elif (
+        cost_gate_rejects_recorded
+        and order_flow_status == "DEMO_ORDER_FLOW_PRESENT_NO_FILL_EVIDENCE"
+    ):
+        status = "ORDER_TO_FILL_DIAGNOSIS_BEFORE_COST_GATE_CHANGE"
+        reason = "demo orders exist but no fills landed"
+        next_action = "diagnose_demo_order_to_fill_gap_before_cost_gate_changes"
+        learning_gate_adjustment = "NONE_DIAGNOSE_ORDER_TO_FILL_FIRST"
+    elif cost_gate_rejects_recorded and learning_evidence_accumulating:
+        status = "CONTINUE_BOUNDED_LEARNING_NO_COST_GATE_CHANGE"
+        reason = "learning evidence is accumulating; continue outcome review"
+        next_action = "continue_recording_and_refreshing_blocked_signal_outcomes"
+        learning_gate_adjustment = "NONE_CONTINUE_EVIDENCE_ACCUMULATION"
+    else:
+        status = "NO_COST_GATE_ADJUSTMENT_RECOMMENDED"
+        reason = "no machine-checked evidence supports changing Cost Gate behavior"
+        next_action = "continue_demo_learning_evidence_collection"
+        learning_gate_adjustment = "NONE"
+    return {
+        "status": status,
+        "reason": reason,
+        "next_action": next_action,
+        "main_cost_gate_adjustment": "NONE",
+        "global_cost_gate_lowering_recommended": False,
+        "bounded_demo_learning_lane_recommended": status in {
+            "BOUNDED_LEARNING_LANE_ACTIVATION_RECOMMENDED",
+            "BOUNDED_DEMO_PROBE_AUTHORITY_REVIEW_READY",
+            "CONTINUE_BOUNDED_LEARNING_NO_COST_GATE_CHANGE",
+        },
+        "learning_gate_adjustment": learning_gate_adjustment,
+        "order_authority": "NOT_GRANTED",
+    }
+
+
 def classify_demo_learning_evidence(
     *,
     order_scorecard: dict[str, Any],
@@ -201,6 +266,13 @@ def classify_demo_learning_evidence(
         review_status == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
         or learning_status == "REVIEW_CANDIDATE_OPERATOR_REVIEW"
     )
+    cost_gate_recommendation = classify_cost_gate_adjustment_recommendation(
+        cost_gate_rejects_recorded=cost_gate_pg_rejects_recorded,
+        order_flow_evidence=order_flow_evidence,
+        learning_data_flow_stale=learning_data_flow_stale,
+        learning_evidence_accumulating=learning_evidence_accumulating,
+        blocked_outcome_review_candidate=blocked_outcome_review_candidate,
+    )
 
     if contexts == 0 and not candidate_or_reject_data and ledger_rows == 0:
         status = "NO_DEMO_LEARNING_EVIDENCE"
@@ -259,6 +331,7 @@ def classify_demo_learning_evidence(
         "next_action": next_action,
         "global_cost_gate_lowering_recommended": False,
         "main_cost_gate_adjustment": "NONE",
+        "cost_gate_adjustment_recommendation": cost_gate_recommendation,
         "order_authority": "NOT_GRANTED",
         "answers": {
             "demo_context_data_accumulating": contexts > 0,
@@ -296,7 +369,8 @@ def classify_demo_learning_evidence(
             ),
             "historical_counterfactual_is_runtime_evidence": False,
             "bounded_demo_learning_lane_recommended": (
-                cost_gate_pg_rejects_recorded and not blocked_outcome_review_candidate
+                cost_gate_recommendation.get("bounded_demo_learning_lane_recommended")
+                is True
             ),
         },
         "key_counts": {
@@ -309,6 +383,18 @@ def classify_demo_learning_evidence(
             "order_flow_evidence_status": order_flow_evidence.get("status"),
             "order_flow_evidence_reason": order_flow_evidence.get("reason"),
             "order_flow_evidence_next_action": order_flow_evidence.get("next_action"),
+            "cost_gate_adjustment_recommendation_status": (
+                cost_gate_recommendation.get("status")
+            ),
+            "cost_gate_adjustment_recommendation_reason": (
+                cost_gate_recommendation.get("reason")
+            ),
+            "cost_gate_adjustment_recommendation_next_action": (
+                cost_gate_recommendation.get("next_action")
+            ),
+            "cost_gate_learning_gate_adjustment": (
+                cost_gate_recommendation.get("learning_gate_adjustment")
+            ),
             "data_flow_freshness_status": order_freshness.get("status"),
             "latest_learning_stage": order_freshness.get("latest_learning_stage"),
             "latest_learning_ts_utc": order_freshness.get("latest_learning_ts_utc"),
@@ -446,6 +532,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
     cls = payload["classification"]
     answers = cls["answers"]
     counts = cls["key_counts"]
+    recommendation = cls.get("cost_gate_adjustment_recommendation") or {}
     order_cls = payload["order_stall_scorecard"]["classification"]
     preflight = payload["cost_gate_learning_preflight"]
     preflight_answers = preflight.get("answers") or {}
@@ -464,6 +551,8 @@ def render_markdown(payload: dict[str, Any]) -> str:
         f"- Next action: `{cls['next_action']}`",
         f"- Global Cost Gate lowering recommended: `{cls['global_cost_gate_lowering_recommended']}`",
         f"- Main Cost Gate adjustment: `{cls['main_cost_gate_adjustment']}`",
+        f"- Cost Gate adjustment recommendation: `{recommendation.get('status')}`",
+        f"- Learning Gate adjustment: `{recommendation.get('learning_gate_adjustment')}`",
         f"- Order authority: `{cls['order_authority']}`",
         "",
         "## Answers",
