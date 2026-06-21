@@ -18,6 +18,8 @@ from __future__ import annotations
 import argparse
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from decimal import Decimal
+import json
 from pathlib import Path
 import sys
 from typing import Any
@@ -42,6 +44,10 @@ class AuditConfig:
     strategy: str | None = None
     symbol: str | None = None
     side: int | None = None
+    min_probe_sample: int = 100
+    min_probe_avg_net_bps: float = 0.0
+    min_probe_net_positive_pct: float = 55.0
+    max_block_net_positive_pct: float = 40.0
 
 
 def side_to_int(raw: str | None) -> int | None:
@@ -69,6 +75,12 @@ def validate_config(cfg: AuditConfig) -> None:
         raise ValueError("--limit must be in [1, 500000]")
     if cfg.friction_bps < 0 or cfg.friction_bps > 200:
         raise ValueError("--friction-bps must be in [0, 200]")
+    if cfg.min_probe_sample < 1 or cfg.min_probe_sample > cfg.limit:
+        raise ValueError("--min-probe-sample must be in [1, --limit]")
+    if cfg.min_probe_net_positive_pct < 0 or cfg.min_probe_net_positive_pct > 100:
+        raise ValueError("--min-probe-net-positive-pct must be in [0, 100]")
+    if cfg.max_block_net_positive_pct < 0 or cfg.max_block_net_positive_pct > 100:
+        raise ValueError("--max-block-net-positive-pct must be in [0, 100]")
 
 
 def build_coverage_sql() -> str:
@@ -233,15 +245,171 @@ def _fmt(value: Any) -> str:
         return "n/a"
     if isinstance(value, float):
         return f"{value:.4f}"
+    if isinstance(value, Decimal):
+        return f"{float(value):.4f}"
     return str(value)
+
+
+def _as_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return float(value)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def classify_learning_lane_row(cfg: AuditConfig, row: dict[str, Any]) -> tuple[str, str]:
+    reject_reason = str(row.get("reject_reason_code") or "").lower()
+    if "unavailable" in reject_reason or "missing" in reject_reason:
+        return "DATA_COVERAGE_BLOCKER", "reject_reason_requires_data_fix_not_probe"
+    if "negative_edge" not in reject_reason:
+        return "NON_EDGE_REJECT_REASON", "reject_reason_not_negative_edge"
+    n = int(row.get("n") or 0)
+    avg_net = _as_float(row.get("avg_net_bps"))
+    p50_gross = _as_float(row.get("p50_gross_bps"))
+    p90_gross = _as_float(row.get("p90_gross_bps"))
+    net_positive_pct = _as_float(row.get("net_positive_pct"))
+    if n < cfg.min_probe_sample:
+        return "INSUFFICIENT_SAMPLE", f"n<{cfg.min_probe_sample}"
+    if avg_net is None or p50_gross is None or p90_gross is None or net_positive_pct is None:
+        return "UNSCORABLE", "missing_counterfactual_metrics"
+    if (
+        avg_net > cfg.min_probe_avg_net_bps
+        and p50_gross > cfg.friction_bps
+        and net_positive_pct >= cfg.min_probe_net_positive_pct
+    ):
+        return (
+            "LEARNING_PROBE_CANDIDATE",
+            "avg_net_positive_and_median_gross_clears_friction",
+        )
+    if avg_net <= 0 and net_positive_pct <= cfg.max_block_net_positive_pct:
+        return "BLOCK_CONFIRMED", "avg_net_nonpositive_and_low_net_positive_rate"
+    if avg_net > cfg.min_probe_avg_net_bps and p90_gross > cfg.friction_bps:
+        return "TAIL_ONLY_WATCH", "positive_average_but_median_or_hit_rate_not_ready"
+    return "NO_PROBE", "does_not_clear_learning_probe_thresholds"
+
+
+def annotate_learning_lane_rows(
+    cfg: AuditConfig,
+    rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    annotated: list[dict[str, Any]] = []
+    for row in rows:
+        action, reason = classify_learning_lane_row(cfg, row)
+        enriched = dict(row)
+        enriched["learning_lane_action"] = action
+        enriched["learning_lane_reason"] = reason
+        annotated.append(enriched)
+    return annotated
+
+
+def build_learning_lane_scorecard(
+    cfg: AuditConfig,
+    coverage: dict[str, Any],
+    rows: list[dict[str, Any]],
+) -> dict[str, Any]:
+    annotated = annotate_learning_lane_rows(cfg, rows)
+    action_counts: dict[str, int] = {}
+    for row in annotated:
+        action = str(row["learning_lane_action"])
+        action_counts[action] = action_counts.get(action, 0) + 1
+
+    def ranked(source: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(
+            source,
+            key=lambda item: (
+                _as_float(item.get("avg_net_bps")) or float("-inf"),
+                int(item.get("n") or 0),
+            ),
+            reverse=True,
+        )
+
+    probe_candidates = ranked(
+        [row for row in annotated if row["learning_lane_action"] == "LEARNING_PROBE_CANDIDATE"]
+    )
+    block_confirmed = ranked(
+        [row for row in annotated if row["learning_lane_action"] == "BLOCK_CONFIRMED"]
+    )
+    features = int(coverage.get("decision_features") or 0)
+    outcomes = int(coverage.get("features_joined_outcomes") or 0)
+    contexts = int(coverage.get("features_joined_contexts") or 0)
+    context_coverage_pct = (contexts / features * 100.0) if features else 0.0
+    outcome_path_status = (
+        "OUTCOME_PATH_STALLED_FOR_FEATURE_REJECTS"
+        if features > 0 and outcomes == 0
+        else "OUTCOME_PATH_HAS_REJECT_COVERAGE_OR_NO_FEATURES"
+    )
+    status = (
+        "LEARNING_LANE_PROBE_CANDIDATES_PRESENT"
+        if probe_candidates
+        else "NO_LEARNING_LANE_PROBE_CANDIDATES"
+    )
+    return {
+        "schema_version": "cost_gate_reject_counterfactual_v2",
+        "status": status,
+        "outcome_path_status": outcome_path_status,
+        "action_counts": action_counts,
+        "context_coverage_pct": round(context_coverage_pct, 4),
+        "thresholds": {
+            "min_probe_sample": cfg.min_probe_sample,
+            "min_probe_avg_net_bps": cfg.min_probe_avg_net_bps,
+            "min_probe_net_positive_pct": cfg.min_probe_net_positive_pct,
+            "max_block_net_positive_pct": cfg.max_block_net_positive_pct,
+            "friction_bps": cfg.friction_bps,
+        },
+        "probe_candidates": probe_candidates[:20],
+        "block_confirmed": block_confirmed[:20],
+        "rows": annotated,
+    }
+
+
+def _json_default(value: Any) -> Any:
+    if isinstance(value, Decimal):
+        return float(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def build_json_payload(
+    cfg: AuditConfig,
+    coverage: dict[str, Any],
+    rows: list[dict[str, Any]],
+    *,
+    generated: str | None = None,
+) -> dict[str, Any]:
+    generated = generated or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    scorecard = build_learning_lane_scorecard(cfg, coverage, rows)
+    return {
+        "generated_at_utc": generated,
+        "engine_modes": list(cfg.engine_modes),
+        "lookback_hours": cfg.lookback_hours,
+        "horizon_minutes": cfg.horizon_minutes,
+        "limit": cfg.limit,
+        "friction_bps": cfg.friction_bps,
+        "filters": {
+            "strategy": cfg.strategy,
+            "symbol": cfg.symbol,
+            "side": cfg.side,
+        },
+        "boundary": "read-only PG SELECT; no order/config/risk/auth/runtime mutation",
+        "coverage": coverage,
+        "learning_lane_scorecard": scorecard,
+    }
 
 
 def render_markdown(
     cfg: AuditConfig,
     coverage: dict[str, Any],
     rows: list[dict[str, Any]],
+    *,
+    generated: str | None = None,
 ) -> str:
-    generated = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    generated = generated or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    scorecard = build_learning_lane_scorecard(cfg, coverage, rows)
     lines = [
         "# Cost Gate Reject Counterfactual Audit",
         "",
@@ -273,16 +441,49 @@ def render_markdown(
     lines.extend(
         [
             "",
-            "## Counterfactual",
+            "## Learning Lane Scorecard",
             "",
-            "| strategy | symbol | side | reason | n | ctx | avg_gross | p50 | p90 | avg_net | gross+% | net+% | max_ts |",
-            "|---|---:|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+            f"- Status: `{scorecard['status']}`",
+            f"- Outcome path: `{scorecard['outcome_path_status']}`",
+            f"- Context coverage: `{scorecard['context_coverage_pct']:.4f}%`",
+            "",
+            "| action | count |",
+            "|---|---:|",
         ]
     )
-    for row in rows:
+    for action, count in sorted(scorecard["action_counts"].items()):
+        lines.append(f"| {action} | {count} |")
+    lines.extend(
+        [
+            "",
+            "### Probe Candidates",
+            "",
+            "| strategy | symbol | side | n | avg_net | p50 | net+% | reason |",
+            "|---|---:|---:|---:|---:|---:|---:|---|",
+        ]
+    )
+    for row in scorecard["probe_candidates"][:10]:
         lines.append(
             "| "
             f"{row['strategy_name']} | {row['symbol']} | {row['side']} | "
+            f"{row['n']} | {_fmt(row['avg_net_bps'])} | {_fmt(row['p50_gross_bps'])} | "
+            f"{_fmt(row['net_positive_pct'])} | {row['learning_lane_reason']} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Counterfactual",
+            "",
+            "| strategy | symbol | side | action | reason | n | ctx | avg_gross | p50 | p90 | avg_net | gross+% | net+% | max_ts |",
+            "|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+        ]
+    )
+    for row in scorecard["rows"]:
+        lines.append(
+            "| "
+            f"{row['strategy_name']} | {row['symbol']} | {row['side']} | "
+            f"{row['learning_lane_action']} | "
             f"{row['reject_reason_code']} | {row['n']} | {row['joined_contexts']} | "
             f"{_fmt(row['avg_gross_bps'])} | {_fmt(row['p50_gross_bps'])} | "
             f"{_fmt(row['p90_gross_bps'])} | {_fmt(row['avg_net_bps'])} | "
@@ -302,7 +503,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--strategy")
     parser.add_argument("--symbol")
     parser.add_argument("--side")
+    parser.add_argument("--min-probe-sample", type=int, default=100)
+    parser.add_argument("--min-probe-avg-net-bps", type=float, default=0.0)
+    parser.add_argument("--min-probe-net-positive-pct", type=float, default=55.0)
+    parser.add_argument("--max-block-net-positive-pct", type=float, default=40.0)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--json-output", type=Path)
     return parser.parse_args()
 
 
@@ -317,6 +523,10 @@ def main() -> int:
         strategy=args.strategy,
         symbol=args.symbol,
         side=side_to_int(args.side),
+        min_probe_sample=args.min_probe_sample,
+        min_probe_avg_net_bps=args.min_probe_avg_net_bps,
+        min_probe_net_positive_pct=args.min_probe_net_positive_pct,
+        max_block_net_positive_pct=args.max_block_net_positive_pct,
     )
     validate_config(cfg)
     conn = connect_report_pg(
@@ -333,12 +543,20 @@ def main() -> int:
         rows = fetch_counterfactual_rows(conn, cfg)
     finally:
         conn.close()
-    report = render_markdown(cfg, coverage, rows)
+    generated = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    report = render_markdown(cfg, coverage, rows, generated=generated)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(report, encoding="utf-8")
     else:
         print(report, end="")
+    if args.json_output:
+        payload = build_json_payload(cfg, coverage, rows, generated=generated)
+        args.json_output.parent.mkdir(parents=True, exist_ok=True)
+        args.json_output.write_text(
+            json.dumps(payload, indent=2, sort_keys=True, default=_json_default) + "\n",
+            encoding="utf-8",
+        )
     return 0
 
 

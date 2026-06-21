@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning-Lane Scorecard
+
+- Upgraded the cost-gate reject counterfactual audit to v2 with JSON output and per-row learning-lane actions.
+- Latest Linux read-only artifact has 4 probe candidates: `ma_crossover ETH/NEAR Sell` and `grid_trading LTC/ATOM Sell`; `atr_unavailable` rows are data-coverage blockers, not probe candidates.
+- This is candidate-selection evidence for a future bounded demo-learning lane; it does not lower the main cost gate or grant trading authority.
+
 ## 2026-06-21 Cost-Gate Reject Counterfactual Learning Loop
 
 - Demo no-order root cause is cost-gate rejection before order creation, not market-data failure; rejects persist to `risk_verdicts`/`decision_features` but not `trading.intents`, and recent outcome labels are effectively missing.
