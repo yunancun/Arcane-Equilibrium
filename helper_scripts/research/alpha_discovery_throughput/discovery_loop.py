@@ -1497,6 +1497,17 @@ def classify_profitability_blocker(
                 "learning_loop_last_scorecard_probe_candidate_count": detail.get(
                     "learning_loop_last_scorecard_probe_candidate_count"
                 ),
+                "learning_loop_last_scorecard_horizon_stability_status": detail.get(
+                    "learning_loop_last_scorecard_horizon_stability_status"
+                ),
+                "learning_loop_last_scorecard_horizon_stability_next_trigger": (
+                    detail.get(
+                        "learning_loop_last_scorecard_horizon_stability_next_trigger"
+                    )
+                ),
+                "learning_loop_last_scorecard_horizon_stability_horizons": detail.get(
+                    "learning_loop_last_scorecard_horizon_stability_horizons"
+                ),
                 "learning_loop_last_plan_rc": detail.get(
                     "learning_loop_last_plan_rc"
                 ),

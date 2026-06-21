@@ -150,6 +150,38 @@ def _scorecard_payload(generated_at: str = "2026-06-21T10:00:00+00:00") -> dict:
                 "DATA_COVERAGE_BLOCKER": 1,
             },
             "probe_candidates": rows[:2],
+            "horizon_stability_scorecard": {
+                "schema_version": "cost_gate_reject_horizon_stability_v1",
+                "status": "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT",
+                "next_trigger": (
+                    "operator_review_multi_horizon_side_cells_for_bounded_demo_learning_lane"
+                ),
+                "horizons_minutes": [15, 60],
+                "top_side_cells": [
+                    {
+                        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                        "status": "CANDIDATE_MULTI_HORIZON_STABLE",
+                        "reason": (
+                            "side_cell_clears_learning_thresholds_on_multiple_horizons"
+                        ),
+                        "candidate_horizons": [15, 60],
+                        "best_horizon_minutes": 60,
+                        "best_avg_net_bps": 97.9788,
+                        "best_net_positive_pct": 86.01,
+                    },
+                    {
+                        "side_cell_key": "ma_crossover|NEARUSDT|Sell",
+                        "status": "CANDIDATE_HORIZON_SPECIFIC",
+                        "reason": (
+                            "side_cell_clears_learning_thresholds_on_one_horizon_only"
+                        ),
+                        "candidate_horizons": [60],
+                        "best_horizon_minutes": 60,
+                        "best_avg_net_bps": 16.2197,
+                        "best_net_positive_pct": 99.95,
+                    },
+                ],
+            },
             "rows": rows,
         },
     }
@@ -250,6 +282,10 @@ def test_policy_plan_keeps_main_gate_closed_and_selects_only_probe_candidates():
     assert plan["source"]["profit_opportunity_ranking_status"] == (
         "PROFIT_LEARNING_CANDIDATES_PRESENT"
     )
+    assert plan["source"]["horizon_stability_status"] == (
+        "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
+    )
+    assert plan["source"]["horizon_stability_horizons_minutes"] == [15, 60]
     assert plan["learning_gate_adjustment"] == (
         "SIDE_CELL_DEMO_PROBE_ONLY_AFTER_ADAPTER_WIRING"
     )
@@ -264,6 +300,14 @@ def test_policy_plan_keeps_main_gate_closed_and_selects_only_probe_candidates():
     assert plan["probe_candidates"][0]["profit_priority_tier"] == (
         "HIGH_PRIORITY_BOUNDED_DEMO_LEARNING"
     )
+    assert plan["probe_candidates"][0]["horizon_stability"] == {
+        "status": "CANDIDATE_MULTI_HORIZON_STABLE",
+        "reason": "side_cell_clears_learning_thresholds_on_multiple_horizons",
+        "candidate_horizons": [15, 60],
+        "best_horizon_minutes": 60,
+        "best_avg_net_bps": 97.9788,
+        "best_net_positive_pct": 86.01,
+    }
     assert all(
         row["guardrails"]["main_cost_gate_adjustment"] == "NONE"
         for row in plan["probe_candidates"]
@@ -625,6 +669,13 @@ def test_alpha_discovery_surfaces_learning_loop_running_without_ledger_rows(
             "scorecard_rc": 0,
             "scorecard_status": "LEARNING_LANE_PROBE_CANDIDATES_PRESENT",
             "scorecard_probe_candidate_count": 2,
+            "scorecard_horizon_stability_status": (
+                "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
+            ),
+            "scorecard_horizon_stability_next_trigger": (
+                "operator_review_multi_horizon_side_cells_for_bounded_demo_learning_lane"
+            ),
+            "scorecard_horizon_stability_horizons": [15, 60],
             "refresh_plan": True,
             "plan_rc": 0,
             "plan_policy_status": "READY_FOR_DEMO_LEARNING_PROBE",
@@ -667,6 +718,13 @@ def test_alpha_discovery_surfaces_learning_loop_running_without_ledger_rows(
         "LEARNING_LANE_PROBE_CANDIDATES_PRESENT"
     )
     assert row["learning_loop_last_scorecard_probe_candidate_count"] == 2
+    assert row["learning_loop_last_scorecard_horizon_stability_status"] == (
+        "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
+    )
+    assert row["learning_loop_last_scorecard_horizon_stability_next_trigger"] == (
+        "operator_review_multi_horizon_side_cells_for_bounded_demo_learning_lane"
+    )
+    assert row["learning_loop_last_scorecard_horizon_stability_horizons"] == [15, 60]
     assert row["learning_loop_refresh_plan_enabled"] is True
     assert row["learning_loop_last_plan_rc"] == 0
     assert row["learning_loop_last_plan_policy_status"] == (
@@ -1161,6 +1219,13 @@ def test_activation_preflight_reports_loop_running_without_ledger_rows(
             "scorecard_rc": 0,
             "scorecard_status": "LEARNING_LANE_PROBE_CANDIDATES_PRESENT",
             "scorecard_probe_candidate_count": 2,
+            "scorecard_horizon_stability_status": (
+                "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
+            ),
+            "scorecard_horizon_stability_next_trigger": (
+                "operator_review_multi_horizon_side_cells_for_bounded_demo_learning_lane"
+            ),
+            "scorecard_horizon_stability_horizons": [15, 60],
             "refresh_plan": True,
             "plan_rc": 0,
             "plan_policy_status": "READY_FOR_DEMO_LEARNING_PROBE",
@@ -1198,6 +1263,15 @@ def test_activation_preflight_reports_loop_running_without_ledger_rows(
     assert preflight["learning_loop"][
         "learning_loop_last_scorecard_probe_candidate_count"
     ] == 2
+    assert preflight["learning_loop"][
+        "learning_loop_last_scorecard_horizon_stability_status"
+    ] == "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
+    assert preflight["learning_loop"][
+        "learning_loop_last_scorecard_horizon_stability_next_trigger"
+    ] == "operator_review_multi_horizon_side_cells_for_bounded_demo_learning_lane"
+    assert preflight["learning_loop"][
+        "learning_loop_last_scorecard_horizon_stability_horizons"
+    ] == [15, 60]
     assert preflight["learning_loop"]["learning_loop_refresh_plan_enabled"] is True
     assert preflight["learning_loop"]["learning_loop_last_plan_rc"] == 0
     assert preflight["learning_loop"]["learning_loop_last_plan_policy_status"] == (

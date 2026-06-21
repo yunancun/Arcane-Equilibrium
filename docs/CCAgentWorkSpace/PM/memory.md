@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost Gate Multi-Horizon Counterfactual Stability
+
+- Cost Gate rejected-signal scorecard now compares configured outcome horizons instead of relying on one holding window.
+- Policy/cron/status/alpha rows surface horizon-stability status, candidate horizons, and best horizon for bounded demo-learning review.
+- Boundary remains source/test/docs only: no runtime sync, artifact refresh, order authority, main Cost Gate lowering, PG/Bybit call, deploy, or restart.
+
 ## 2026-06-21 Cost Gate Recommendation Runtime Preflight Gate
 
 - Cost Gate adjustment recommendations now consume runtime/source/writer readiness from `cost_gate_learning_preflight`.

@@ -793,6 +793,18 @@ def summarize_cost_gate_learning_lane_loop(
             status_row.get("scorecard_probe_candidate_count")
             if status_row else None
         ),
+        "learning_loop_last_scorecard_horizon_stability_status": (
+            status_row.get("scorecard_horizon_stability_status")
+            if status_row else None
+        ),
+        "learning_loop_last_scorecard_horizon_stability_next_trigger": (
+            status_row.get("scorecard_horizon_stability_next_trigger")
+            if status_row else None
+        ),
+        "learning_loop_last_scorecard_horizon_stability_horizons": (
+            status_row.get("scorecard_horizon_stability_horizons")
+            if status_row else None
+        ),
         "learning_loop_plan_latest_path": str(plan_latest_path),
         "learning_loop_refresh_plan_enabled": refresh_plan_enabled,
         "learning_loop_last_plan_rc": plan_rc,

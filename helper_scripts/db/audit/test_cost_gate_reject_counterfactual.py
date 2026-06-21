@@ -4,10 +4,12 @@ import pytest
 
 from helper_scripts.db.audit.cost_gate_reject_counterfactual import (
     AuditConfig,
+    build_horizon_stability_scorecard,
     build_json_payload,
     build_learning_lane_scorecard,
     build_counterfactual_sql,
     classify_learning_lane_row,
+    parse_horizon_minutes_list,
     render_markdown,
     side_to_int,
     validate_config,
@@ -237,6 +239,94 @@ def test_learning_lane_scorecard_classifies_probe_block_and_sample_gap() -> None
     assert top["hit_rate_margin_pct"] == pytest.approx(31.01)
 
 
+def test_horizon_stability_scorecard_compares_rejected_signal_windows() -> None:
+    cfg = AuditConfig(
+        engine_modes=("demo",),
+        lookback_hours=168,
+        horizon_minutes=60,
+        limit=50_000,
+        friction_bps=4.0,
+        min_probe_sample=100,
+    )
+    assert parse_horizon_minutes_list("15,60,240,60", fallback=60) == (
+        15,
+        60,
+        240,
+    )
+    with pytest.raises(ValueError):
+        parse_horizon_minutes_list("15,nope", fallback=60)
+
+    def row(
+        symbol: str,
+        avg_net_bps: float,
+        p50_gross_bps: float,
+        net_positive_pct: float,
+        n: int = 150,
+    ) -> dict:
+        return {
+            "strategy_name": "ma_crossover",
+            "symbol": symbol,
+            "side": "Sell",
+            "reject_reason_code": "cost_gate_js_demo_negative_edge",
+            "n": n,
+            "joined_contexts": n,
+            "avg_gross_bps": avg_net_bps + cfg.friction_bps,
+            "p50_gross_bps": p50_gross_bps,
+            "p90_gross_bps": p50_gross_bps + 20.0,
+            "avg_net_bps": avg_net_bps,
+            "gross_positive_pct": net_positive_pct,
+            "net_positive_pct": net_positive_pct,
+            "max_ts": "2026-06-21T00:00:00Z",
+        }
+
+    horizon_rows_by_horizon = {
+        15: [
+            row("ETHUSDT", 12.0, 8.0, 65.0),
+            row("NEARUSDT", 11.0, 8.0, 70.0),
+            row("BTCUSDT", -12.0, -8.0, 15.0),
+        ],
+        60: [
+            row("ETHUSDT", 21.0, 12.0, 80.0, n=220),
+            row("NEARUSDT", -4.0, -2.0, 20.0, n=180),
+            row("BTCUSDT", -8.0, -5.0, 18.0, n=190),
+        ],
+    }
+    stability = build_horizon_stability_scorecard(cfg, horizon_rows_by_horizon)
+
+    assert stability["schema_version"] == "cost_gate_reject_horizon_stability_v1"
+    assert stability["status"] == "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
+    assert stability["horizons_minutes"] == [15, 60]
+    assert stability["horizon_count"] == 2
+    assert stability["boundary"] == {
+        "order_authority": "NOT_GRANTED",
+        "main_cost_gate_adjustment": "NONE",
+        "promotion_evidence": False,
+        "runtime_mutation": "NONE",
+    }
+    by_key = {row["side_cell_key"]: row for row in stability["top_side_cells"]}
+    eth = by_key["ma_crossover|ETHUSDT|Sell"]
+    assert eth["status"] == "CANDIDATE_MULTI_HORIZON_STABLE"
+    assert eth["candidate_horizons"] == [15, 60]
+    assert eth["best_horizon_minutes"] == 60
+    assert eth["order_authority"] == "NOT_GRANTED"
+    assert eth["main_cost_gate_adjustment"] == "NONE"
+    assert eth["promotion_evidence"] is False
+    assert by_key["ma_crossover|NEARUSDT|Sell"]["status"] == "MIXED_HORIZON_RESPONSE"
+    assert by_key["ma_crossover|BTCUSDT|Sell"]["status"] == (
+        "BLOCK_CONFIRMED_MULTI_HORIZON"
+    )
+
+    payload = build_json_payload(
+        cfg,
+        {"decision_features": 10, "features_joined_outcomes": 0},
+        horizon_rows_by_horizon[60],
+        horizon_rows_by_horizon=horizon_rows_by_horizon,
+        generated="2026-06-21T00:00:00+00:00",
+    )
+    embedded = payload["learning_lane_scorecard"]["horizon_stability_scorecard"]
+    assert embedded["status"] == stability["status"]
+
+
 def test_markdown_and_json_payload_surface_learning_lane_actions() -> None:
     cfg = AuditConfig(
         engine_modes=("demo",),
@@ -281,6 +371,7 @@ def test_markdown_and_json_payload_surface_learning_lane_actions() -> None:
     )
     assert "## Learning Lane Scorecard" in markdown
     assert "### Profit Opportunity Ranking" in markdown
+    assert "### Horizon Stability" in markdown
     assert "PROFIT_LEARNING_CANDIDATES_PRESENT" in markdown
     assert "LEARNING_PROBE_CANDIDATE" in markdown
     assert "NEARUSDT" in markdown
@@ -299,3 +390,4 @@ def test_markdown_and_json_payload_surface_learning_lane_actions() -> None:
     assert ranking["status"] == "PROFIT_LEARNING_CANDIDATES_PRESENT"
     assert ranking["top_side_cells"][0]["side_cell_key"] == "ma_crossover|NEARUSDT|Sell"
     assert ranking["top_side_cells"][0]["order_authority"] == "NOT_GRANTED"
+    assert scorecard["horizon_stability_scorecard"]["status"] == "SINGLE_HORIZON_ONLY"
