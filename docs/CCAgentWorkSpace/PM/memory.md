@@ -25,6 +25,11 @@
 
 ## 近期記錄
 
+## 2026-06-21 Demo Learning Evidence Artifact Wrapper
+
+- Added `demo_learning_evidence_audit_cron.sh` so demo learning status has a recurring read-only evidence heartbeat instead of manual multi-command diagnosis.
+- The wrapper records PG reject/context status plus cost-gate learning ledger/source/process readiness, but grants no order authority, writer activation, cron install, or Cost Gate lowering.
+
 ## 2026-06-21 Cost-Gate Historical Scorecard Review
 
 - Added a separate `cost_gate_learning_lane.historical_review` artifact so old counterfactual scorecards can prioritize reject capture without being treated as runtime evidence.
