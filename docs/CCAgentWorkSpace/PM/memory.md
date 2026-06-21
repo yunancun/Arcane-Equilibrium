@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Blocked Outcome Review Scorecard
+
+- Added artifact-only `cost_gate_learning_lane.outcome_review`, grouping `blocked_signal_outcome` ledger rows by side-cell and classifying them as collect-more, keep-blocked, or demo-probe-authority review candidates.
+- Default thresholds are intentionally conservative (`n>=3`, avg net >= 0bp, net-positive pct >= 60%); output never grants order authority, lowers the main Cost Gate, or becomes promotion evidence.
+- Alpha-discovery now surfaces `blocked_signal_outcome_review_status` and uses the scorecard's next trigger instead of a generic human-review string.
+
 ## 2026-06-21 Cost-Gate Outcome Refresh Loop
 
 - Added artifact-only `cost_gate_learning_lane.outcome_refresh`, a one-command dry-run/append loop from `probe_ledger.jsonl` plus local/read-only-PG prices to missing `blocked_signal_outcome` / `probe_outcome` rows.

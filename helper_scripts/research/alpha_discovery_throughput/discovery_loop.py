@@ -854,6 +854,12 @@ def classify_profitability_blocker(
         ledger_status = str(detail.get("ledger_status") or "UNKNOWN")
         admission_count = _int(detail.get("admission_decision_count"))
         blocked_outcome_count = _int(detail.get("blocked_signal_outcome_count"))
+        blocked_review = _dict(detail.get("blocked_signal_outcome_review"))
+        blocked_review_status = str(
+            detail.get("blocked_signal_outcome_review_status")
+            or blocked_review.get("status")
+            or ""
+        )
         if ledger_status in {"MISSING", "EMPTY"}:
             primary_blocker = "cost_gate_probe_candidates_ready_but_runtime_ledger_empty"
             next_trigger = "deploy_enable_runtime_ledger_writer_then_observe_reject_rows"
@@ -863,8 +869,19 @@ def classify_profitability_blocker(
                 "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes"
             )
         elif blocked_outcome_count > 0:
-            primary_blocker = "cost_gate_blocked_signal_outcomes_accumulating"
-            next_trigger = "review_blocked_signal_outcomes_before_any_probe_order_authority"
+            if blocked_review_status == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT":
+                primary_blocker = (
+                    "cost_gate_blocked_signal_outcomes_need_demo_probe_authority_review"
+                )
+            elif blocked_review_status == "NO_DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE":
+                primary_blocker = "cost_gate_blocked_signal_outcomes_confirm_current_block"
+            else:
+                primary_blocker = "cost_gate_blocked_signal_outcomes_accumulating"
+            next_trigger = str(
+                detail.get("blocked_signal_outcome_review_next_trigger")
+                or blocked_review.get("next_trigger")
+                or "review_blocked_signal_outcomes_before_any_probe_order_authority"
+            )
         else:
             primary_blocker = "cost_gate_learning_probe_candidates_ready"
             next_trigger = "wire_bounded_demo_learning_lane_policy_before_any_gate_lowering"
@@ -913,6 +930,14 @@ def classify_profitability_blocker(
                 "blocked_signal_net_positive_pct": detail.get(
                     "blocked_signal_net_positive_pct"
                 ),
+                "blocked_signal_outcome_review_status": blocked_review_status or None,
+                "blocked_signal_outcome_review_reason": detail.get(
+                    "blocked_signal_outcome_review_reason"
+                ) or blocked_review.get("reason"),
+                "blocked_signal_outcome_review_next_trigger": detail.get(
+                    "blocked_signal_outcome_review_next_trigger"
+                ) or blocked_review.get("next_trigger"),
+                "blocked_signal_outcome_review": blocked_review or None,
                 "latest_admission_decision": detail.get("latest_admission_decision"),
                 "latest_record_type": detail.get("latest_record_type"),
                 "latest_generated_at_utc": detail.get("latest_generated_at_utc"),
