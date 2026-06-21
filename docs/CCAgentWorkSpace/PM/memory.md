@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Demo Learning Evidence Cron Installer
+
+- Added `install_demo_learning_evidence_audit_cron.sh` as the reviewed Linux crontab installer for the demo-learning evidence heartbeat.
+- It defaults to dry-run, requires `OPENCLAW_DEMO_LEARNING_EVIDENCE_CRON_APPLY=1` for install/remove, validates cron inputs, and preserves expected-head/runtime-env/process-writer preflight knobs.
+- Boundary remains source/test/docs only: no runtime install, source sync, env edit, writer enablement, Cost Gate lowering, order authority, PG write, Bybit call, or restart.
+
 ## 2026-06-21 Demo Learning Evidence Killboard Ingestion
 
 - Alpha-discovery now reads `demo_learning_evidence_audit_latest.json` into the cost-gate demo-learning arm.
