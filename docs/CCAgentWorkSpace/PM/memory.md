@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Writer Config Preflight
+
+- `cost_gate_learning_lane.status` now reports `writer_config.*` and can inspect `--runtime-env-file` plus fail-closed under `--require-writer-enabled`.
+- `restart_all.sh` now forwards `OPENCLAW_DEMO_LEARNING_LANE_WRITER/PLAN/LEDGER` from operator env or `basic_system_services.env` into the Rust engine process.
+- Rust writer treats blank plan/ledger overrides as unset, so restart-wrapper empty pass-through keeps default `$OPENCLAW_DATA_DIR/cost_gate_learning_lane/` paths.
+
 ## 2026-06-21 Cost-Gate Learning Capture-Error Diagnostics
 
 - Extended Rust demo-learning writer with durable `probe_capture_error` rows for eligible rejects that cannot be admission-evaluated due plan/path/config failure.

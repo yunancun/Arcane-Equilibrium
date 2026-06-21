@@ -29,6 +29,9 @@ const CHANNEL_CAPACITY: usize = 4096;
 const BUF_WRITER_CAPACITY: usize = 64 * 1024;
 const FLUSH_INTERVAL_MS: u64 = 200;
 const WARN_THROTTLE_MS: u64 = 1000;
+const ENABLE_WRITER_ENV: &str = "OPENCLAW_DEMO_LEARNING_LANE_WRITER";
+const PLAN_PATH_ENV: &str = "OPENCLAW_DEMO_LEARNING_LANE_PLAN";
+const LEDGER_PATH_ENV: &str = "OPENCLAW_DEMO_LEARNING_LANE_LEDGER";
 
 #[derive(Debug, Clone)]
 struct WriterMsg {
@@ -93,7 +96,7 @@ impl DemoLearningLaneWriterHandle {
 }
 
 pub fn spawn(data_dir: PathBuf, cancel: CancellationToken) -> DemoLearningLaneWriterHandle {
-    let enabled = std::env::var("OPENCLAW_DEMO_LEARNING_LANE_WRITER")
+    let enabled = std::env::var(ENABLE_WRITER_ENV)
         .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
     if !enabled {
@@ -101,12 +104,11 @@ pub fn spawn(data_dir: PathBuf, cancel: CancellationToken) -> DemoLearningLaneWr
     }
 
     let base_dir = data_dir.join("cost_gate_learning_lane");
-    let plan_path = std::env::var("OPENCLAW_DEMO_LEARNING_LANE_PLAN")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| base_dir.join("demo_learning_lane_plan_latest.json"));
-    let ledger_path = std::env::var("OPENCLAW_DEMO_LEARNING_LANE_LEDGER")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| base_dir.join("probe_ledger.jsonl"));
+    let plan_path = env_path_or_default(
+        PLAN_PATH_ENV,
+        base_dir.join("demo_learning_lane_plan_latest.json"),
+    );
+    let ledger_path = env_path_or_default(LEDGER_PATH_ENV, base_dir.join("probe_ledger.jsonl"));
 
     let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
     info!(
@@ -120,6 +122,17 @@ pub fn spawn(data_dir: PathBuf, cancel: CancellationToken) -> DemoLearningLaneWr
         tx: Some(tx),
         total_dropped: Arc::new(AtomicU64::new(0)),
         last_warn_ms: Arc::new(AtomicU64::new(0)),
+    }
+}
+
+fn env_path_or_default(name: &str, default_path: PathBuf) -> PathBuf {
+    path_override_or_default(std::env::var(name).ok(), default_path)
+}
+
+fn path_override_or_default(value: Option<String>, default_path: PathBuf) -> PathBuf {
+    match value {
+        Some(value) if !value.trim().is_empty() => PathBuf::from(value.trim()),
+        _ => default_path,
     }
 }
 
@@ -398,6 +411,27 @@ mod tests {
         let handle = DemoLearningLaneWriterHandle::disabled();
         assert!(!handle.is_enabled());
         handle.record_reject_event(reject_event(), "NORMAL", 1_782_041_001_000);
+    }
+
+    #[test]
+    fn blank_path_overrides_fall_back_to_default_lane_paths() {
+        let default_path =
+            PathBuf::from("/tmp/openclaw/cost_gate_learning_lane/probe_ledger.jsonl");
+        assert_eq!(
+            path_override_or_default(None, default_path.clone()),
+            default_path
+        );
+        assert_eq!(
+            path_override_or_default(Some("   ".to_string()), default_path.clone()),
+            default_path
+        );
+        assert_eq!(
+            path_override_or_default(
+                Some(" /tmp/custom_probe_ledger.jsonl ".to_string()),
+                default_path,
+            ),
+            PathBuf::from("/tmp/custom_probe_ledger.jsonl")
+        );
     }
 
     #[tokio::test]

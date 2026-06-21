@@ -36,6 +36,7 @@ from cost_gate_learning_lane.status import (
     ACTIVATION_PREFLIGHT_SCHEMA_VERSION,
     REQUIRED_SOURCE_RELATIVE_PATHS,
     build_cost_gate_learning_lane_activation_preflight,
+    summarize_cost_gate_learning_lane_writer_config,
     summarize_cost_gate_learning_lane_source,
 )
 from cost_gate_learning_lane.price_observations import (
@@ -418,6 +419,119 @@ def test_activation_preflight_reports_not_accumulating_without_runtime_artifacts
     assert preflight["plan"]["main_cost_gate_adjustment"] == "NONE"
     assert preflight["plan"]["order_authority"] == "NOT_GRANTED"
     assert "probe_ledger_jsonl" in preflight["missing_links"]
+
+
+def test_writer_config_reports_enabled_env_file_paths(tmp_path: Path):
+    data_dir = tmp_path / "data"
+    plan_path = tmp_path / "runtime_plan.json"
+    ledger_path = tmp_path / "runtime_ledger.jsonl"
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text(
+        "\n".join(
+            [
+                'export OPENCLAW_DEMO_LEARNING_LANE_WRITER="true"',
+                f"OPENCLAW_DEMO_LEARNING_LANE_PLAN={plan_path}",
+                f"OPENCLAW_DEMO_LEARNING_LANE_LEDGER='{ledger_path}'",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config = summarize_cost_gate_learning_lane_writer_config(
+        data_dir,
+        env_file=env_file,
+        require_writer_enabled=True,
+    )
+
+    assert config["writer_config_status"] == "ENABLED"
+    assert config["writer_enabled"] is True
+    assert config["writer_required_for_activation"] is True
+    assert config["writer_env_source"] == "env_file"
+    assert config["plan_path"] == str(plan_path)
+    assert config["plan_path_source"] == "env_override"
+    assert config["ledger_path"] == str(ledger_path)
+    assert config["ledger_path_source"] == "env_override"
+
+
+def test_writer_config_reports_invalid_enable_value(tmp_path: Path):
+    config = summarize_cost_gate_learning_lane_writer_config(
+        tmp_path,
+        env={"OPENCLAW_DEMO_LEARNING_LANE_WRITER": "maybe"},
+    )
+
+    assert config["writer_config_status"] == "INVALID"
+    assert config["writer_enabled"] is None
+    assert config["writer_bool_error"] == "invalid_bool"
+
+
+def test_activation_preflight_can_require_runtime_writer_enabled(tmp_path: Path):
+    repo, _remote = _init_source_repo_with_origin(tmp_path)
+    data_dir = tmp_path / "data"
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text(
+        "OPENCLAW_DEMO_LEARNING_LANE_WRITER=0\n",
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        repo_root=repo,
+        runtime_env_file=env_file,
+        require_writer_enabled=True,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["writer_config"]["writer_config_status"] == "DISABLED"
+    assert preflight["answers"]["runtime_writer_enabled"] is False
+    assert preflight["answers"]["runtime_writer_config_required"] is True
+    assert preflight["answers"]["writer_disabled_or_unset_drop_risk"] is True
+    assert "runtime_writer_not_enabled" in preflight["activation_blockers"]
+    assert preflight["answers"]["activation_ready"] is False
+
+
+def test_activation_preflight_accepts_runtime_writer_enabled_env_file(tmp_path: Path):
+    repo, _remote = _init_source_repo_with_origin(tmp_path)
+    data_dir = tmp_path / "data"
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    env_file = tmp_path / "runtime.env"
+    env_file.write_text(
+        "OPENCLAW_DEMO_LEARNING_LANE_WRITER=1\n",
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        repo_root=repo,
+        runtime_env_file=env_file,
+        require_writer_enabled=True,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["writer_config"]["writer_config_status"] == "ENABLED"
+    assert preflight["answers"]["runtime_writer_enabled"] is True
+    assert preflight["answers"]["runtime_writer_config_required"] is True
+    assert preflight["answers"]["writer_disabled_or_unset_drop_risk"] is False
+    assert "runtime_writer_not_enabled" not in preflight["activation_blockers"]
 
 
 def test_activation_preflight_reports_loop_running_without_ledger_rows(

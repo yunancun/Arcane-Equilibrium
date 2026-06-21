@@ -111,3 +111,32 @@ def test_record_l1_events_env_is_durable_across_plain_restart() -> None:
     resolve_index = text.index("record_l1_events=")
     launch_index = text.index('OPENCLAW_RECORD_L1_EVENTS="${record_l1_events}"')
     assert resolve_index < launch_index
+
+
+def test_demo_learning_lane_writer_env_is_durable_across_plain_restart() -> None:
+    """Cost-gate learning writer env-file settings must reach the engine process."""
+    text = SCRIPT.read_text(encoding="utf-8")
+
+    assert (
+        "local demo_learning_lane_writer demo_learning_lane_plan demo_learning_lane_ledger"
+        in text
+    )
+    for env_name, shell_name in (
+        ("OPENCLAW_DEMO_LEARNING_LANE_WRITER", "demo_learning_lane_writer"),
+        ("OPENCLAW_DEMO_LEARNING_LANE_PLAN", "demo_learning_lane_plan"),
+        ("OPENCLAW_DEMO_LEARNING_LANE_LEDGER", "demo_learning_lane_ledger"),
+    ):
+        assert re.search(
+            rf'{shell_name}="\$\{{{env_name}:-\$\(grep '
+            rf"'\^{env_name}=' "
+            r'"\$SECRETS_ROOT/environment_files/basic_system_services\.env"',
+            text,
+        )
+        assert f'{env_name}="${{{shell_name}}}"' in text
+        assert f'{env_name}="${{{env_name}:-}}"' not in text
+
+    resolve_index = text.index("demo_learning_lane_writer=")
+    launch_index = text.index(
+        'OPENCLAW_DEMO_LEARNING_LANE_WRITER="${demo_learning_lane_writer}"'
+    )
+    assert resolve_index < launch_index
