@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Learning Worklist Cost Gate Review Evidence v3
+
+- Alpha learning worklist schema is now `alpha_learning_worklist_v3`.
+- Cost Gate outcome/probe review tasks carry the ranked blocked side-cell, wrongful-block score, net cost cushion, review schema/status, and latest review top fields in task evidence.
+- Cost Gate operator-probe objective now points to reviewing the top blocked side-cell before any bounded demo probe; no probe/order/promotion authority is granted.
+
 ## 2026-06-22 Cost Gate Blocked Outcome Review v2
 
 - Blocked-signal outcome review schema is now `cost_gate_demo_learning_lane_blocked_outcome_review_v2`.

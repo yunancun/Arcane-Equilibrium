@@ -65,7 +65,7 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
     ], now_utc=dt.datetime(2026, 6, 22, tzinfo=dt.timezone.utc))
 
     worklist = plan["learning_worklist"]
-    assert worklist["schema_version"] == "alpha_learning_worklist_v2"
+    assert worklist["schema_version"] == "alpha_learning_worklist_v3"
     assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
     assert worklist["task_count"] == 2
     assert worklist["operator_required_count"] == 1
@@ -157,3 +157,67 @@ def test_learning_worklist_keeps_promotion_review_ahead_of_replay_history():
     )
     assert poly["evidence"]["candidate_replay_history_n_days"] == 2
     assert poly["evidence"]["candidate_replay_history_min_days"] == 30
+
+
+def test_learning_worklist_carries_ranked_cost_gate_blocked_review_evidence():
+    worklist = build_learning_worklist({
+        "arms": [
+            {
+                "arm_id": "cost_gate_demo_learning_lane",
+                "blocker_class": "probe_ready",
+                "primary_blocker": (
+                    "cost_gate_blocked_signal_outcomes_need_demo_probe_authority_review"
+                ),
+                "next_trigger": (
+                    "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+                ),
+                "operator_actionable": True,
+                "engineering_actionable": True,
+                "ledger_status": "BLOCKED_SIGNAL_OUTCOMES_PRESENT",
+                "blocked_signal_outcome_review_schema_version": (
+                    "cost_gate_demo_learning_lane_blocked_outcome_review_v2"
+                ),
+                "blocked_signal_outcome_review_status": (
+                    "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+                ),
+                "blocked_signal_outcome_count": 3,
+                "blocked_signal_positive_outcome_count": 2,
+                "blocked_signal_net_positive_pct": 66.666667,
+                "blocked_signal_top_review_candidate_side_cell_key": (
+                    "ma_crossover|ETHUSDT|Sell"
+                ),
+                "blocked_signal_top_review_candidate_wrongful_block_score": 3.444444,
+                "blocked_signal_top_review_candidate_net_cost_cushion_bps": 5.166667,
+                "blocked_signal_top_review_side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "blocked_signal_top_review_wrongful_block_score": 3.444444,
+                "blocked_signal_top_review_net_cost_cushion_bps": 5.166667,
+            }
+        ],
+    })
+
+    task = worklist["top_task"]
+
+    assert worklist["schema_version"] == "alpha_learning_worklist_v3"
+    assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
+    assert task["task_type"] == "operator_probe_review"
+    assert task["learning_objective"] == (
+        "operator_review_top_blocked_signal_side_cell_before_bounded_demo_probe"
+    )
+    assert task["requires_operator_authorization"] is True
+    assert task["runtime_mutation_required"] is False
+    assert task["evidence"]["blocked_signal_outcome_review_schema_version"] == (
+        "cost_gate_demo_learning_lane_blocked_outcome_review_v2"
+    )
+    assert task["evidence"]["blocked_signal_top_review_candidate_side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert task["evidence"]["blocked_signal_top_review_candidate_wrongful_block_score"] == (
+        3.444444
+    )
+    assert task["evidence"]["blocked_signal_top_review_candidate_net_cost_cushion_bps"] == (
+        5.166667
+    )
+    assert (
+        "candidate_specific_side_cell_or_candidate_key_evidence_present"
+        in task["completion_evidence_required"]
+    )
