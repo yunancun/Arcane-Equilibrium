@@ -32,6 +32,7 @@ REFRESH_SCORECARD="${OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD:-1}"
 SCORECARD_LOOKBACK_HOURS="${OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS:-168}"
 SCORECARD_LIMIT="${OPENCLAW_COST_GATE_SCORECARD_LIMIT:-50000}"
 REFRESH_PLAN="${OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN:-1}"
+PREINSTALL_REFRESH_ONLY="${OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY:-0}"
 PLAN_MAX_SCORECARD_AGE_HOURS="${OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS:-24}"
 PLAN_MIN_CANDIDATE_SAMPLE="${OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE:-100}"
 PG_TIMEFRAME="${OPENCLAW_COST_GATE_LEARNING_PG_TIMEFRAME:-1m}"
@@ -91,6 +92,7 @@ validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD" "$REFRESH_SCOREC
 validate_int "OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS" "$SCORECARD_LOOKBACK_HOURS"
 validate_int "OPENCLAW_COST_GATE_SCORECARD_LIMIT" "$SCORECARD_LIMIT"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN" "$REFRESH_PLAN"
+validate_bool01 "OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY" "$PREINSTALL_REFRESH_ONLY"
 validate_int "OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS" "$PLAN_MAX_SCORECARD_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE" "$PLAN_MIN_CANDIDATE_SAMPLE"
 validate_int "OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES" "$OUTCOME_HORIZON_MINUTES"
@@ -275,54 +277,58 @@ else
 fi
 
 historical_review_rc=0
-(
-    cd "$BASE"
-    export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
-    export PYTHONDONTWRITEBYTECODE=1
-    "$PYBIN" "${HISTORICAL_REVIEW_ARGS[@]}"
-) >> "$LOG" 2>&1 || historical_review_rc=$?
-if [[ -f "$HISTORICAL_REVIEW_OUT" ]]; then
-    cp "$HISTORICAL_REVIEW_OUT" "$HISTORICAL_REVIEW_LATEST"
-fi
-
 materializer_rc=0
-if [[ "$MATERIALIZE_REJECTS" == "1" ]]; then
+refresh_rc=0
+review_rc=0
+if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]; then
+    echo "[$(ts)] SKIP: preinstall refresh-only mode; refreshed scorecard/plan, skipped historical/materializer/outcome/review stages" >> "$LOG"
+else
     (
         cd "$BASE"
         export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
         export PYTHONDONTWRITEBYTECODE=1
-        "$PYBIN" "${MATERIALIZER_ARGS[@]}"
-    ) >> "$LOG" 2>&1 || materializer_rc=$?
-    if [[ -f "$MATERIALIZER_OUT" ]]; then
-        cp "$MATERIALIZER_OUT" "$MATERIALIZER_LATEST"
+        "$PYBIN" "${HISTORICAL_REVIEW_ARGS[@]}"
+    ) >> "$LOG" 2>&1 || historical_review_rc=$?
+    if [[ -f "$HISTORICAL_REVIEW_OUT" ]]; then
+        cp "$HISTORICAL_REVIEW_OUT" "$HISTORICAL_REVIEW_LATEST"
     fi
-else
-    echo "[$(ts)] SKIP: cost-gate reject materializer disabled by OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS=0" >> "$LOG"
+
+    if [[ "$MATERIALIZE_REJECTS" == "1" ]]; then
+        (
+            cd "$BASE"
+            export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+            export PYTHONDONTWRITEBYTECODE=1
+            "$PYBIN" "${MATERIALIZER_ARGS[@]}"
+        ) >> "$LOG" 2>&1 || materializer_rc=$?
+        if [[ -f "$MATERIALIZER_OUT" ]]; then
+            cp "$MATERIALIZER_OUT" "$MATERIALIZER_LATEST"
+        fi
+    else
+        echo "[$(ts)] SKIP: cost-gate reject materializer disabled by OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS=0" >> "$LOG"
+    fi
+
+    (
+        cd "$BASE"
+        export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+        export PYTHONDONTWRITEBYTECODE=1
+        "$PYBIN" "${REFRESH_ARGS[@]}"
+    ) >> "$LOG" 2>&1 || refresh_rc=$?
+    if [[ -f "$REFRESH_OUT" ]]; then
+        cp "$REFRESH_OUT" "$REFRESH_LATEST"
+    fi
+
+    (
+        cd "$BASE"
+        export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+        export PYTHONDONTWRITEBYTECODE=1
+        "$PYBIN" "${REVIEW_ARGS[@]}"
+    ) >> "$LOG" 2>&1 || review_rc=$?
+    if [[ -f "$REVIEW_OUT" ]]; then
+        cp "$REVIEW_OUT" "$REVIEW_LATEST"
+    fi
 fi
 
-refresh_rc=0
-(
-    cd "$BASE"
-    export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
-    export PYTHONDONTWRITEBYTECODE=1
-    "$PYBIN" "${REFRESH_ARGS[@]}"
-) >> "$LOG" 2>&1 || refresh_rc=$?
-if [[ -f "$REFRESH_OUT" ]]; then
-    cp "$REFRESH_OUT" "$REFRESH_LATEST"
-fi
-
-review_rc=0
-(
-    cd "$BASE"
-    export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
-    export PYTHONDONTWRITEBYTECODE=1
-    "$PYBIN" "${REVIEW_ARGS[@]}"
-) >> "$LOG" 2>&1 || review_rc=$?
-if [[ -f "$REVIEW_OUT" ]]; then
-    cp "$REVIEW_OUT" "$REVIEW_LATEST"
-fi
-
-STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
+STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
 import hashlib
 import json
@@ -369,6 +375,7 @@ status = {
     "review_rc": int(os.environ["REVIEW_RC"]),
     "refresh_scorecard": os.environ["REFRESH_SCORECARD"] == "1",
     "refresh_plan": os.environ["REFRESH_PLAN"] == "1",
+    "preinstall_refresh_only": os.environ["PREINSTALL_REFRESH_ONLY"] == "1",
     "materialize_rejects": os.environ["MATERIALIZE_REJECTS"] == "1",
     "append_materialized_rejects": os.environ["APPEND_MATERIALIZED_REJECTS"] == "1",
     "append_outcomes": os.environ["APPEND_OUTCOMES"] == "1",

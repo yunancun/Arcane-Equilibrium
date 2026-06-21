@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Pre-Install Refresh Bridge
+
+- Added `OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY=1` to the cost-gate learning cron wrapper.
+- This mode refreshes scorecard -> plan -> status only, then skips historical review, reject materializer, outcome refresh, and blocked-outcome review.
+- Activation runbook now uses it after runtime source reconcile and before installer activation preflight, avoiding the plan-ready deadlock without bypassing preflight or appending runtime ledger rows.
+
 ## 2026-06-21 Cost-Gate Learning Scorecard Refresh Chain
 
 - Cost-gate learning cron now refreshes the read-only reject counterfactual scorecard before plan refresh, reject materialization, blocked-outcome refresh, and review.
