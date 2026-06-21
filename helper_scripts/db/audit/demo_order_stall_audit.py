@@ -264,6 +264,64 @@ FROM per_intent
 """
 
 
+def build_context_payload_scope_sql() -> str:
+    return """
+WITH params AS (
+    SELECT %s::text[] AS engine_modes, %s::int AS lookback_hours
+),
+dcs AS (
+    SELECT
+        d.engine_mode,
+        coalesce(d.strategy_name, '<null>') AS strategy_name,
+        d.symbol,
+        d.decision_type,
+        d.ts,
+        coalesce(
+            nullif(d.decision_payload->>'linucb_metadata_scope', ''),
+            '<missing>'
+        ) AS linucb_metadata_scope,
+        CASE
+            WHEN lower(coalesce(d.decision_payload->>'accepted_intent_bound', 'false'))
+                IN ('true', 't', '1', 'yes')
+            THEN true
+            ELSE false
+        END AS accepted_intent_bound,
+        jsonb_array_length(
+            CASE
+                WHEN jsonb_typeof(d.decision_payload->'signals') = 'array'
+                THEN d.decision_payload->'signals'
+                ELSE '[]'::jsonb
+            END
+        ) AS signal_count
+    FROM trading.decision_context_snapshots d, params p
+    WHERE d.engine_mode = ANY(p.engine_modes)
+      AND d.ts >= now() - (p.lookback_hours * interval '1 hour')
+)
+SELECT
+    count(*)::bigint AS context_rows,
+    count(*) FILTER (
+        WHERE linucb_metadata_scope = 'signal_observation_only'
+    )::bigint AS signal_observation_only_contexts,
+    count(*) FILTER (WHERE accepted_intent_bound)::bigint
+        AS accepted_intent_bound_contexts,
+    count(*) FILTER (
+        WHERE linucb_metadata_scope <> 'signal_observation_only'
+    )::bigint AS non_observation_scope_contexts,
+    count(*) FILTER (WHERE linucb_metadata_scope = '<missing>')::bigint
+        AS missing_scope_contexts,
+    count(DISTINCT linucb_metadata_scope)::bigint AS distinct_scope_count,
+    string_agg(
+        DISTINCT linucb_metadata_scope,
+        ',' ORDER BY linucb_metadata_scope
+    ) AS linucb_metadata_scopes,
+    count(DISTINCT strategy_name)::bigint AS strategies,
+    count(DISTINCT symbol)::bigint AS symbols,
+    max(ts) AS latest_context_ts,
+    round(avg(signal_count)::numeric, 4) AS avg_signal_count
+FROM dcs
+"""
+
+
 def build_pre_gate_drilldown_sql() -> str:
     return """
 WITH params AS (
@@ -276,7 +334,24 @@ dcs AS (
         d.symbol,
         d.decision_type,
         d.context_id,
-        d.ts
+        d.ts,
+        coalesce(
+            nullif(d.decision_payload->>'linucb_metadata_scope', ''),
+            '<missing>'
+        ) AS linucb_metadata_scope,
+        CASE
+            WHEN lower(coalesce(d.decision_payload->>'accepted_intent_bound', 'false'))
+                IN ('true', 't', '1', 'yes')
+            THEN true
+            ELSE false
+        END AS accepted_intent_bound,
+        jsonb_array_length(
+            CASE
+                WHEN jsonb_typeof(d.decision_payload->'signals') = 'array'
+                THEN d.decision_payload->'signals'
+                ELSE '[]'::jsonb
+            END
+        ) AS signal_count
     FROM trading.decision_context_snapshots d, params p
     WHERE d.engine_mode = ANY(p.engine_modes)
       AND d.ts >= now() - (p.lookback_hours * interval '1 hour')
@@ -331,6 +406,19 @@ SELECT
     d.decision_type,
     count(*)::bigint AS context_rows,
     max(d.ts) AS latest_context_ts,
+    string_agg(
+        DISTINCT d.linucb_metadata_scope,
+        ',' ORDER BY d.linucb_metadata_scope
+    ) AS linucb_metadata_scopes,
+    count(*) FILTER (
+        WHERE d.linucb_metadata_scope = 'signal_observation_only'
+    )::bigint AS signal_observation_only_contexts,
+    count(*) FILTER (WHERE d.accepted_intent_bound)::bigint
+        AS accepted_intent_bound_contexts,
+    count(*) FILTER (
+        WHERE d.linucb_metadata_scope <> 'signal_observation_only'
+    )::bigint AS non_observation_scope_contexts,
+    round(avg(d.signal_count)::numeric, 4) AS avg_signal_count,
     count(*) FILTER (WHERE e.n IS NOT NULL)::bigint AS contexts_with_evaluation,
     count(*) FILTER (WHERE rv.n IS NOT NULL)::bigint AS contexts_with_risk,
     coalesce(sum(rv.approved_n), 0)::bigint AS approved_verdicts,
@@ -383,6 +471,7 @@ def fetch_audit(
     list[dict[str, Any]],
     list[dict[str, Any]],
     dict[str, Any],
+    dict[str, Any],
     list[dict[str, Any]],
 ]:
     validate_config(cfg)
@@ -391,12 +480,20 @@ def fetch_audit(
     risk_reasons = fetch_rows(conn, build_risk_reason_sql(), [*base, cfg.top_limit])
     eval_outcomes = fetch_rows(conn, build_evaluation_outcome_sql(), [*base, cfg.top_limit])
     lineage = fetch_one(conn, build_intent_order_lineage_sql(), base)
+    context_payload_scope = fetch_one(conn, build_context_payload_scope_sql(), base)
     pre_gate_drilldown = fetch_rows(
         conn,
         build_pre_gate_drilldown_sql(),
         [*base, cfg.top_limit],
     )
-    return counts, risk_reasons, eval_outcomes, lineage, pre_gate_drilldown
+    return (
+        counts,
+        risk_reasons,
+        eval_outcomes,
+        lineage,
+        context_payload_scope,
+        pre_gate_drilldown,
+    )
 
 
 def _as_int(value: Any) -> int:
@@ -456,6 +553,15 @@ def dominant_risk_category(
 
 def summarize_pre_gate_drilldown(rows: list[dict[str, Any]]) -> dict[str, Any]:
     total_context_rows = sum(_as_int(row.get("context_rows")) for row in rows)
+    signal_observation_only_contexts = sum(
+        _as_int(row.get("signal_observation_only_contexts")) for row in rows
+    )
+    accepted_intent_bound_contexts = sum(
+        _as_int(row.get("accepted_intent_bound_contexts")) for row in rows
+    )
+    non_observation_scope_contexts = sum(
+        _as_int(row.get("non_observation_scope_contexts")) for row in rows
+    )
     contexts_with_evaluation = sum(
         _as_int(row.get("contexts_with_evaluation")) for row in rows
     )
@@ -472,6 +578,13 @@ def summarize_pre_gate_drilldown(rows: list[dict[str, Any]]) -> dict[str, Any]:
     )
     if total_context_rows == 0:
         status = "NO_CONTEXT_ROWS_IN_TOP_DRILLDOWN"
+    elif (
+        downstream_contexts == 0
+        and signal_observation_only_contexts == total_context_rows
+        and accepted_intent_bound_contexts == 0
+        and non_observation_scope_contexts == 0
+    ):
+        status = "TOP_CONTEXT_ROWS_OBSERVATION_ONLY_NO_DOWNSTREAM_EXPECTED"
     elif downstream_contexts == 0:
         status = "TOP_CONTEXT_ROWS_HAVE_NO_DOWNSTREAM_JOIN"
     else:
@@ -498,6 +611,21 @@ def summarize_pre_gate_drilldown(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "latest_context_ts": row.get("latest_context_ts"),
             }
         )
+        if "signal_observation_only_contexts" in row:
+            top_unjoined[-1].update(
+                {
+                    "linucb_metadata_scopes": row.get("linucb_metadata_scopes"),
+                    "signal_observation_only_contexts": _as_int(
+                        row.get("signal_observation_only_contexts")
+                    ),
+                    "accepted_intent_bound_contexts": _as_int(
+                        row.get("accepted_intent_bound_contexts")
+                    ),
+                    "non_observation_scope_contexts": _as_int(
+                        row.get("non_observation_scope_contexts")
+                    ),
+                }
+            )
     top_unjoined.sort(
         key=lambda item: _as_int(item.get("unjoined_context_rows")),
         reverse=True,
@@ -506,6 +634,9 @@ def summarize_pre_gate_drilldown(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "status": status,
         "scope": "top_limit_rows_only",
         "context_rows": total_context_rows,
+        "signal_observation_only_contexts": signal_observation_only_contexts,
+        "accepted_intent_bound_contexts": accepted_intent_bound_contexts,
+        "non_observation_scope_contexts": non_observation_scope_contexts,
         "contexts_with_evaluation": contexts_with_evaluation,
         "contexts_with_risk": contexts_with_risk,
         "contexts_with_intent": contexts_with_intent,
@@ -515,10 +646,28 @@ def summarize_pre_gate_drilldown(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def context_scope_is_observation_only(scope: dict[str, Any] | None) -> bool:
+    if not scope:
+        return False
+    total_contexts = _as_int(scope.get("context_rows"))
+    signal_observation_only = _as_int(scope.get("signal_observation_only_contexts"))
+    accepted_bound = _as_int(scope.get("accepted_intent_bound_contexts"))
+    non_observation = _as_int(scope.get("non_observation_scope_contexts"))
+    missing_scope = _as_int(scope.get("missing_scope_contexts"))
+    return (
+        total_contexts > 0
+        and signal_observation_only == total_contexts
+        and accepted_bound == 0
+        and non_observation == 0
+        and missing_scope == 0
+    )
+
+
 def classify_order_stall(
     counts: dict[str, Any],
     risk_reasons: list[dict[str, Any]],
     lineage: dict[str, Any] | None = None,
+    context_payload_scope: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     dcs = _as_int(counts.get("decision_context_snapshots"))
     evaluations = _as_int(counts.get("candidate_evaluations"))
@@ -533,6 +682,9 @@ def classify_order_stall(
     cancelled_orders = _as_int(counts.get("orders_with_cancelled_state"))
     post_only_cross = _as_int(counts.get("post_only_cross_orders"))
     risk_category = dominant_risk_category(risk_reasons, risk)
+    observation_only_context_scope = context_scope_is_observation_only(
+        context_payload_scope,
+    )
     warnings: list[str] = []
 
     if evaluations > 0 and features == 0:
@@ -541,6 +693,8 @@ def classify_order_stall(
         warnings.append("risk_verdicts_present_without_rejected_decision_features")
     if risk_category["category"] == "cost_gate":
         warnings.append("cost_gate_dominates_recent_risk_verdicts")
+    if observation_only_context_scope:
+        warnings.append("context_payload_scope_is_signal_observation_only")
     if lineage and _as_float(lineage.get("intent_without_order_pct")) is not None:
         orphan_pct = _as_float(lineage.get("intent_without_order_pct")) or 0.0
         if _as_int(lineage.get("intents")) > 0 and orphan_pct > 50.0:
@@ -583,9 +737,18 @@ def classify_order_stall(
         stage = "candidate_to_risk"
         reason = "candidate evaluations exist but no risk verdicts or intents landed"
     elif dcs > 0:
-        status = "SIGNAL_OBSERVATION_ONLY_PRE_GATE"
-        stage = "signal_to_candidate"
-        reason = "decision context snapshots exist but no candidate/risk/order rows landed"
+        if observation_only_context_scope:
+            status = "OBSERVATION_ONLY_CONTEXTS_ACTIVE"
+            stage = "signal_observation"
+            reason = (
+                "decision context payloads are signal_observation_only and "
+                "accepted_intent_bound=false; these rows feed learning/telemetry, "
+                "not candidate/risk/order flow"
+            )
+        else:
+            status = "SIGNAL_OBSERVATION_ONLY_PRE_GATE"
+            stage = "signal_to_candidate"
+            reason = "decision context snapshots exist but no candidate/risk/order rows landed"
     else:
         status = "DECISION_FEATURES_ONLY"
         stage = "feature_writer"
@@ -593,6 +756,8 @@ def classify_order_stall(
 
     if status == "NO_RECENT_PIPELINE_DATA":
         data_status = "NOT_ACCUMULATING_RECENT_DATA"
+    elif status == "OBSERVATION_ONLY_CONTEXTS_ACTIVE":
+        data_status = "OBSERVATION_ONLY_CONTEXTS_ACCUMULATING"
     elif evaluations > 0 or risk > 0 or rejected_features > 0:
         data_status = "REJECT_OR_CANDIDATE_DATA_ACCUMULATING"
     else:
@@ -611,7 +776,25 @@ def classify_order_stall(
             or risk > 0
             or rejected_features > 0,
             "rejected_signals_recorded": risk > 0 or rejected_features > 0,
-            "silent_drop_risk": dcs > 0 and evaluations == 0 and risk == 0 and intents == 0,
+            "context_payload_observation_only": observation_only_context_scope,
+            "actionable_contexts_present": bool(
+                context_payload_scope
+                and (
+                    _as_int(context_payload_scope.get("accepted_intent_bound_contexts"))
+                    > 0
+                    or _as_int(
+                        context_payload_scope.get("non_observation_scope_contexts")
+                    )
+                    > 0
+                )
+            ),
+            "silent_drop_risk": (
+                dcs > 0
+                and evaluations == 0
+                and risk == 0
+                and intents == 0
+                and not observation_only_context_scope
+            ),
             "cost_gate_dominant": risk_category["category"] == "cost_gate",
             "global_cost_gate_lowering_recommended": False,
             "bounded_demo_learning_lane_recommended": risk_category["category"] == "cost_gate"
@@ -627,8 +810,15 @@ def build_scorecard(
     eval_outcomes: list[dict[str, Any]],
     lineage: dict[str, Any],
     pre_gate_drilldown: list[dict[str, Any]],
+    context_payload_scope: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    classification = classify_order_stall(counts, risk_reasons, lineage)
+    context_payload_scope = context_payload_scope or {}
+    classification = classify_order_stall(
+        counts,
+        risk_reasons,
+        lineage,
+        context_payload_scope,
+    )
     return {
         "schema_version": "demo_order_stall_audit_v1",
         "engine_modes": list(cfg.engine_modes),
@@ -639,6 +829,7 @@ def build_scorecard(
         "risk_reason_top": risk_reasons,
         "evaluation_outcome_top": eval_outcomes,
         "intent_order_lineage": lineage,
+        "context_payload_scope": context_payload_scope,
         "pre_gate_drilldown_summary": summarize_pre_gate_drilldown(pre_gate_drilldown),
         "pre_gate_drilldown_top": pre_gate_drilldown,
         "boundary": "read-only PG SELECT; no Bybit call, order, config, risk, auth, runtime, or schema mutation",
@@ -660,6 +851,7 @@ def build_json_payload(
     eval_outcomes: list[dict[str, Any]],
     lineage: dict[str, Any],
     pre_gate_drilldown: list[dict[str, Any]],
+    context_payload_scope: dict[str, Any] | None = None,
     *,
     generated: str | None = None,
 ) -> dict[str, Any]:
@@ -673,6 +865,7 @@ def build_json_payload(
             eval_outcomes,
             lineage,
             pre_gate_drilldown,
+            context_payload_scope,
         ),
     }
 
@@ -694,6 +887,7 @@ def render_markdown(
     eval_outcomes: list[dict[str, Any]],
     lineage: dict[str, Any],
     pre_gate_drilldown: list[dict[str, Any]],
+    context_payload_scope: dict[str, Any] | None = None,
     *,
     generated: str | None = None,
 ) -> str:
@@ -705,9 +899,11 @@ def render_markdown(
         eval_outcomes,
         lineage,
         pre_gate_drilldown,
+        context_payload_scope,
     )
     cls = scorecard["classification"]
     answers = cls["answers"]
+    context_payload_scope = scorecard["context_payload_scope"]
     pre_gate_summary = scorecard["pre_gate_drilldown_summary"]
     lines = [
         "# Demo Order Stall Audit",
@@ -777,13 +973,37 @@ def render_markdown(
     lines.extend(
         [
             "",
+            "## Context Payload Scope",
+            "",
+            "| metric | value |",
+            "|---|---:|",
+        ]
+    )
+    for key in [
+        "context_rows",
+        "signal_observation_only_contexts",
+        "accepted_intent_bound_contexts",
+        "non_observation_scope_contexts",
+        "missing_scope_contexts",
+        "distinct_scope_count",
+        "linucb_metadata_scopes",
+        "strategies",
+        "symbols",
+        "latest_context_ts",
+        "avg_signal_count",
+    ]:
+        lines.append(f"| {key} | {_fmt(context_payload_scope.get(key))} |")
+
+    lines.extend(
+        [
+            "",
             "## Pre-Gate Drilldown",
             "",
             f"- Status: `{pre_gate_summary['status']}`",
             f"- Scope: `{pre_gate_summary['scope']}`",
             "",
-            "| engine | strategy | symbol | decision_type | contexts | eval | risk | intent | order | fill | latest |",
-            "|---|---|---:|---|---:|---:|---:|---:|---:|---:|---|",
+            "| engine | strategy | symbol | decision_type | contexts | obs_only | accepted_bound | eval | risk | intent | order | fill | scope | latest |",
+            "|---|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|",
         ]
     )
     for row in pre_gate_drilldown:
@@ -791,11 +1011,14 @@ def render_markdown(
             f"| {_fmt(row.get('engine_mode'))} | {_fmt(row.get('strategy_name'))} | "
             f"{_fmt(row.get('symbol'))} | {_fmt(row.get('decision_type'))} | "
             f"{_fmt(row.get('context_rows'))} | "
+            f"{_fmt(row.get('signal_observation_only_contexts'))} | "
+            f"{_fmt(row.get('accepted_intent_bound_contexts'))} | "
             f"{_fmt(row.get('contexts_with_evaluation'))} | "
             f"{_fmt(row.get('contexts_with_risk'))} | "
             f"{_fmt(row.get('contexts_with_intent'))} | "
             f"{_fmt(row.get('contexts_with_order'))} | "
             f"{_fmt(row.get('contexts_with_fill'))} | "
+            f"{_fmt(row.get('linucb_metadata_scopes'))} | "
             f"{_fmt(row.get('latest_context_ts'))} |"
         )
 
@@ -863,10 +1086,14 @@ def main() -> int:
     try:
         conn.rollback()
         conn.set_session(readonly=True, autocommit=True)
-        counts, risk_reasons, eval_outcomes, lineage, pre_gate_drilldown = fetch_audit(
-            conn,
-            cfg,
-        )
+        (
+            counts,
+            risk_reasons,
+            eval_outcomes,
+            lineage,
+            context_payload_scope,
+            pre_gate_drilldown,
+        ) = fetch_audit(conn, cfg)
     finally:
         conn.close()
 
@@ -878,6 +1105,7 @@ def main() -> int:
         eval_outcomes,
         lineage,
         pre_gate_drilldown,
+        context_payload_scope,
         generated=generated,
     )
     if args.output:
@@ -893,6 +1121,7 @@ def main() -> int:
             eval_outcomes,
             lineage,
             pre_gate_drilldown,
+            context_payload_scope,
             generated=generated,
         )
         args.json_output.parent.mkdir(parents=True, exist_ok=True)

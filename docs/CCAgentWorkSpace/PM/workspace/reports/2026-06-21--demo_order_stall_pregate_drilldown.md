@@ -4,6 +4,8 @@
 
 上一輪 `demo_order_stall_audit.py` 已把 demo no-order 拆到 pipeline 階段；本輪再補 pre-gate drilldown，讓 audit 不只說「最近 4h 只有 context、沒有 candidate/risk」，而能直接列出哪些 `engine_mode / strategy / symbol / decision_type` 的 context row 沒有 downstream evaluation / risk / intent / order / fill join。
 
+2026-06-21 follow-up payload-scope correction：這些 top no-downstream context rows 後續確認為 `linucb_metadata_scope=signal_observation_only` 且 `accepted_intent_bound=false`，因此不應直接解讀為 actionable candidate silent drop。最新修正見 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-06-21--demo_order_stall_payload_scope_correction.md`。
+
 這仍是 read-only PG audit，不寫 DB、不連 Bybit、不下單、不改 runtime/risk/config。
 
 ## 2026-06-21 Read-Only Runtime Probe
@@ -18,7 +20,7 @@ Top context rows 全部是 `decision_type=signal_generated` 且 downstream join 
 - `demo / ma_crossover / NEARUSDT`：`context_rows=494`，latest `2026-06-21 16:42:12+02`。
 - `demo / ma_crossover / FILUSDT`：`context_rows=490`，latest `2026-06-21 16:48:28+02`。
 
-Interpretation：短期斷點不是 DB/context writer 停止，而是 signal/context 之後沒有進入 candidate evaluation / Guardian risk。集中在 `ma_crossover` 的多 symbol context stream，這是後續 producer/pre-gate 診斷的優先入口。
+Interpretation（已被後續 payload-scope 修正）：短期斷點不是 DB/context writer 停止。後續確認這批 context 是 signal-observation telemetry，不是 accepted/actionable candidate；優先入口應改成建立/驗證 Cost Gate bounded learning lane 的 rejected/actionable ledger，而不是假設 `ma_crossover` producer silent drop。
 
 ## 變更
 
