@@ -81,7 +81,16 @@ def _preflight(
     probe_outcomes: int = 0,
     review_status: str | None = None,
     currently_accumulating: bool = False,
+    source_activation_ready: bool = True,
+    source_activation_status: str = "SYNCED_CLEAN",
+    activation_ready: bool = True,
+    activation_blockers: list[str] | None = None,
+    writer_config_required: bool = False,
+    writer_enabled: bool = True,
+    writer_process_required: bool = False,
+    writer_process_enabled: bool = True,
 ) -> dict:
+    blockers = list(activation_blockers or [])
     return {
         "status": status,
         "reason": "fixture",
@@ -90,16 +99,31 @@ def _preflight(
             "currently_accumulating_evidence": currently_accumulating,
             "silent_drop_risk": ledger_rows == 0,
             "historical_counterfactual_candidates_present": False,
+            "runtime_source_ready_for_activation": source_activation_ready,
+            "runtime_writer_enabled": writer_enabled,
+            "runtime_writer_config_status": "ENABLED" if writer_enabled else "DISABLED",
+            "runtime_writer_config_required": writer_config_required,
+            "runtime_writer_process_enabled": writer_process_enabled,
+            "runtime_writer_process_status": (
+                "ENABLED" if writer_process_enabled else "DISABLED"
+            ),
+            "runtime_writer_process_required": writer_process_required,
+            "activation_ready": activation_ready,
         },
-        "activation_blockers": [],
-        "source": {"source_activation_status": "SYNCED_CLEAN", "source_activation_ready": True},
+        "activation_blockers": blockers,
+        "source": {
+            "source_activation_status": source_activation_status,
+            "source_activation_ready": source_activation_ready,
+        },
         "writer_config": {
-            "writer_config_status": "ENABLED",
+            "writer_config_status": "ENABLED" if writer_enabled else "DISABLED",
             "writer_config_reason": "fixture",
+            "writer_enabled": writer_enabled,
         },
         "writer_process": {
-            "writer_process_status": "ENABLED",
+            "writer_process_status": "ENABLED" if writer_process_enabled else "DISABLED",
             "writer_process_reason": "fixture",
+            "writer_process_enabled": writer_process_enabled,
         },
         "learning_loop": {
             "learning_loop_status": "RUNNING" if currently_accumulating else "NOT_SEEN",
@@ -150,6 +174,69 @@ def test_pg_cost_gate_rejects_without_ledger_recommend_bounded_learning_lane() -
         "global_cost_gate_lowering_recommended"
     ] is False
     assert result["answers"]["bounded_demo_learning_lane_recommended"] is True
+
+
+def test_runtime_source_not_ready_blocks_cost_gate_adjustment_before_learning_lane() -> None:
+    result = classify_demo_learning_evidence(
+        order_scorecard=_order_scorecard(
+            candidate_evaluations=80,
+            risk_verdicts=70,
+            rejected_features=70,
+            cost_gate=True,
+        ),
+        learning_preflight=_preflight(
+            source_activation_ready=False,
+            source_activation_status="DIRTY_OR_BEHIND",
+            activation_ready=False,
+            activation_blockers=["source_checkout_not_synced_clean"],
+        ),
+    )
+
+    assert result["status"] == "RUNTIME_PREFLIGHT_BLOCKS_COST_GATE_LEARNING_ADJUSTMENT"
+    assert result["next_action"] == (
+        "sync_runtime_source_to_expected_head_before_cost_gate_learning_activation"
+    )
+    assert result["answers"]["bounded_demo_learning_lane_recommended"] is False
+    assert result["answers"]["runtime_preflight_blocking_cost_gate_adjustment"] is True
+    assert result["key_counts"]["cost_gate_adjustment_recommendation_status"] == (
+        "RUNTIME_SOURCE_SYNC_REQUIRED_BEFORE_COST_GATE_CHANGE"
+    )
+    assert result["key_counts"]["cost_gate_adjustment_runtime_preflight_blocking"] is True
+    assert (
+        result["key_counts"]["cost_gate_adjustment_runtime_source_activation_ready"]
+        is False
+    )
+    assert result["key_counts"]["cost_gate_adjustment_runtime_activation_blockers"] == [
+        "source_checkout_not_synced_clean"
+    ]
+    assert result["global_cost_gate_lowering_recommended"] is False
+    assert result["main_cost_gate_adjustment"] == "NONE"
+    assert result["order_authority"] == "NOT_GRANTED"
+
+
+def test_required_writer_not_enabled_blocks_cost_gate_adjustment() -> None:
+    result = classify_demo_learning_evidence(
+        order_scorecard=_order_scorecard(
+            candidate_evaluations=80,
+            risk_verdicts=70,
+            rejected_features=70,
+            cost_gate=True,
+        ),
+        learning_preflight=_preflight(
+            activation_ready=False,
+            activation_blockers=["runtime_writer_not_enabled"],
+            writer_config_required=True,
+            writer_enabled=False,
+        ),
+    )
+
+    assert result["status"] == "RUNTIME_PREFLIGHT_BLOCKS_COST_GATE_LEARNING_ADJUSTMENT"
+    assert result["key_counts"]["cost_gate_adjustment_recommendation_status"] == (
+        "RUNTIME_WRITER_ENABLEMENT_REQUIRED_BEFORE_BOUNDED_LEARNING_LANE"
+    )
+    assert result["key_counts"]["cost_gate_adjustment_runtime_writer_config_required"] is True
+    assert result["key_counts"]["cost_gate_adjustment_runtime_writer_config_enabled"] is False
+    assert result["answers"]["bounded_demo_learning_lane_recommended"] is False
 
 
 def test_cost_gate_adjustment_recommendation_never_lowers_main_gate() -> None:

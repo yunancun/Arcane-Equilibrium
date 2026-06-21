@@ -1264,9 +1264,33 @@ def _write_demo_learning_evidence_latest(
     observation_only: bool = False,
     learning_data_flow_stale: bool = False,
     order_flow_starved: bool = False,
+    recommendation_status: str | None = None,
+    recommendation_next_action: str | None = None,
+    learning_gate_adjustment: str | None = None,
+    runtime_preflight_blocking: bool = False,
+    runtime_source_activation_ready: bool | None = True,
+    runtime_source_activation_status: str | None = "SYNCED_CLEAN",
+    runtime_activation_blockers: list[str] | None = None,
 ) -> Path:
     path = data / "demo_learning_evidence" / "demo_learning_evidence_audit_latest.json"
     path.parent.mkdir(parents=True, exist_ok=True)
+    default_recommendation_status = (
+        "BOUNDED_LEARNING_LANE_ACTIVATION_RECOMMENDED"
+        if order_flow_starved
+        else "ORDER_TO_FILL_DIAGNOSIS_BEFORE_COST_GATE_CHANGE"
+        if cost_gate_rejects_recorded
+        else "NO_COST_GATE_ADJUSTMENT_RECOMMENDED"
+    )
+    default_recommendation_next_action = (
+        "activate_cost_gate_learning_lane_then_operator_review_bounded_demo_probe"
+        if order_flow_starved
+        else "diagnose_demo_order_to_fill_gap_before_cost_gate_changes"
+    )
+    default_learning_gate_adjustment = (
+        "ENABLE_LEDGER_AND_OUTCOME_REVIEW_FIRST"
+        if order_flow_starved
+        else "NONE_DIAGNOSE_ORDER_TO_FILL_FIRST"
+    )
     path.write_text(json.dumps({
         "schema_version": "demo_learning_evidence_audit_v1",
         "generated_at_utc": generated_at,
@@ -1289,7 +1313,12 @@ def _write_demo_learning_evidence_latest(
                 "order_flow_evidence_starved": order_flow_starved,
                 "learning_data_flow_fresh": not learning_data_flow_stale,
                 "learning_data_flow_stale": learning_data_flow_stale,
-                "bounded_demo_learning_lane_recommended": cost_gate_rejects_recorded,
+                "bounded_demo_learning_lane_recommended": (
+                    cost_gate_rejects_recorded and not runtime_preflight_blocking
+                ),
+                "runtime_preflight_blocking_cost_gate_adjustment": (
+                    runtime_preflight_blocking
+                ),
             },
             "key_counts": {
                 "decision_context_snapshots": 1200,
@@ -1313,24 +1342,31 @@ def _write_demo_learning_evidence_latest(
                     else "diagnose_demo_order_to_fill_gap_before_alpha_promotion"
                 ),
                 "cost_gate_adjustment_recommendation_status": (
-                    "BOUNDED_LEARNING_LANE_ACTIVATION_RECOMMENDED"
-                    if order_flow_starved
-                    else "ORDER_TO_FILL_DIAGNOSIS_BEFORE_COST_GATE_CHANGE"
-                    if cost_gate_rejects_recorded
-                    else "NO_COST_GATE_ADJUSTMENT_RECOMMENDED"
+                    recommendation_status or default_recommendation_status
                 ),
                 "cost_gate_adjustment_recommendation_reason": (
                     "fixture Cost Gate recommendation"
                 ),
                 "cost_gate_adjustment_recommendation_next_action": (
-                    "activate_cost_gate_learning_lane_then_operator_review_bounded_demo_probe"
-                    if order_flow_starved
-                    else "diagnose_demo_order_to_fill_gap_before_cost_gate_changes"
+                    recommendation_next_action or default_recommendation_next_action
                 ),
                 "cost_gate_learning_gate_adjustment": (
-                    "ENABLE_LEDGER_AND_OUTCOME_REVIEW_FIRST"
-                    if order_flow_starved
-                    else "NONE_DIAGNOSE_ORDER_TO_FILL_FIRST"
+                    learning_gate_adjustment or default_learning_gate_adjustment
+                ),
+                "cost_gate_adjustment_runtime_preflight_blocking": (
+                    runtime_preflight_blocking
+                ),
+                "cost_gate_adjustment_runtime_activation_ready": (
+                    not runtime_preflight_blocking
+                ),
+                "cost_gate_adjustment_runtime_activation_blockers": (
+                    runtime_activation_blockers or []
+                ),
+                "cost_gate_adjustment_runtime_source_activation_ready": (
+                    runtime_source_activation_ready
+                ),
+                "cost_gate_adjustment_runtime_source_activation_status": (
+                    runtime_source_activation_status
                 ),
                 "data_flow_freshness_status": (
                     "LEARNING_DATA_FLOW_STALE"
@@ -1425,6 +1461,56 @@ def test_cost_gate_arm_surfaces_fresh_reject_wall_without_order_flow(tmp_path):
         "ENABLE_LEDGER_AND_OUTCOME_REVIEW_FIRST"
     )
     assert blocker["engineering_actionable"] is True
+
+
+def test_cost_gate_arm_surfaces_source_sync_recommendation_before_learning_lane(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_demo_learning_evidence_latest(
+        data,
+        status="RUNTIME_PREFLIGHT_BLOCKS_COST_GATE_LEARNING_ADJUSTMENT",
+        reason="runtime source checkout is not activation-ready",
+        next_action=(
+            "sync_runtime_source_to_expected_head_before_cost_gate_learning_activation"
+        ),
+        cost_gate_rejects_recorded=True,
+        order_flow_starved=True,
+        recommendation_status="RUNTIME_SOURCE_SYNC_REQUIRED_BEFORE_COST_GATE_CHANGE",
+        recommendation_next_action=(
+            "sync_runtime_source_to_expected_head_before_cost_gate_learning_activation"
+        ),
+        learning_gate_adjustment="NONE_SYNC_RUNTIME_SOURCE_FIRST",
+        runtime_preflight_blocking=True,
+        runtime_source_activation_ready=False,
+        runtime_source_activation_status="DIRTY_OR_BEHIND",
+        runtime_activation_blockers=["source_checkout_not_synced_clean"],
+    )
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["primary_blocker"] == (
+        "demo_cost_gate_reject_wall_no_order_flow_evidence"
+    )
+    assert blocker["next_trigger"] == (
+        "sync_runtime_source_to_expected_head_before_cost_gate_learning_activation"
+    )
+    assert blocker[
+        "demo_learning_evidence_cost_gate_adjustment_recommendation_status"
+    ] == "RUNTIME_SOURCE_SYNC_REQUIRED_BEFORE_COST_GATE_CHANGE"
+    assert blocker[
+        "demo_learning_evidence_cost_gate_adjustment_runtime_preflight_blocking"
+    ] is True
+    assert blocker[
+        "demo_learning_evidence_cost_gate_adjustment_runtime_source_activation_ready"
+    ] is False
+    assert blocker[
+        "demo_learning_evidence_cost_gate_adjustment_runtime_activation_blockers"
+    ] == ["source_checkout_not_synced_clean"]
+    assert blocker["demo_learning_evidence_cost_gate_learning_gate_adjustment"] == (
+        "NONE_SYNC_RUNTIME_SOURCE_FIRST"
+    )
 
 
 def test_cost_gate_arm_keeps_observation_only_demo_from_probe_readiness(tmp_path):

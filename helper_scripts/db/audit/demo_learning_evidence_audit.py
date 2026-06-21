@@ -136,6 +136,133 @@ def classify_order_flow_evidence(
     }
 
 
+def _cost_gate_adjustment_preflight_gate(
+    learning_preflight: dict[str, Any] | None,
+) -> dict[str, Any]:
+    preflight = learning_preflight or {}
+    answers = (
+        preflight.get("answers")
+        if isinstance(preflight.get("answers"), dict)
+        else {}
+    )
+    source = (
+        preflight.get("source")
+        if isinstance(preflight.get("source"), dict)
+        else {}
+    )
+    writer_config = (
+        preflight.get("writer_config")
+        if isinstance(preflight.get("writer_config"), dict)
+        else {}
+    )
+    writer_process = (
+        preflight.get("writer_process")
+        if isinstance(preflight.get("writer_process"), dict)
+        else {}
+    )
+    blockers = list(preflight.get("activation_blockers") or [])
+    source_ready = answers.get("runtime_source_ready_for_activation")
+    if source_ready is None:
+        source_ready = source.get("source_activation_ready")
+    source_status = (
+        source.get("source_activation_status")
+        or preflight.get("status")
+        or "UNKNOWN"
+    )
+    writer_config_required = answers.get("runtime_writer_config_required") is True
+    writer_config_enabled = answers.get("runtime_writer_enabled")
+    if writer_config_enabled is None:
+        writer_config_enabled = writer_config.get("writer_enabled")
+    writer_process_required = answers.get("runtime_writer_process_required") is True
+    writer_process_enabled = answers.get("runtime_writer_process_enabled")
+    if writer_process_enabled is None:
+        writer_process_enabled = writer_process.get("writer_process_enabled")
+    preflight_status = str(preflight.get("status") or "UNKNOWN")
+    first_preflight_action = str(
+        (preflight.get("next_actions") or [None])[0]
+        or "rerun_cost_gate_learning_lane_activation_preflight"
+    )
+    hard_preflight_blocked = preflight_status in {
+        "PLAN_NOT_READY",
+        "LEARNING_LOOP_ERROR",
+        "LEARNING_LOOP_STALE",
+        "CAPTURE_ERRORS_NEED_OPERATOR_FIX",
+    }
+    runtime_summary = {
+        "runtime_activation_blockers": blockers,
+        "runtime_source_activation_ready": source_ready,
+        "runtime_source_activation_status": source_status,
+        "runtime_writer_config_required": writer_config_required,
+        "runtime_writer_config_enabled": writer_config_enabled,
+        "runtime_writer_config_status": answers.get("runtime_writer_config_status")
+        or writer_config.get("writer_config_status"),
+        "runtime_writer_process_required": writer_process_required,
+        "runtime_writer_process_enabled": writer_process_enabled,
+        "runtime_writer_process_status": answers.get("runtime_writer_process_status")
+        or writer_process.get("writer_process_status"),
+    }
+
+    def _block(
+        *,
+        status: str,
+        reason: str,
+        next_action: str,
+        learning_gate_adjustment: str,
+    ) -> dict[str, Any]:
+        return {
+            "status": status,
+            "reason": reason,
+            "next_action": next_action,
+            "learning_gate_adjustment": learning_gate_adjustment,
+            "bounded_demo_learning_lane_recommended": False,
+            "runtime_preflight_blocking_cost_gate_adjustment": True,
+            "runtime_activation_ready": False,
+            **runtime_summary,
+        }
+
+    if source_ready is False:
+        return _block(
+            status="RUNTIME_SOURCE_SYNC_REQUIRED_BEFORE_COST_GATE_CHANGE",
+            reason="runtime source checkout is not activation-ready",
+            next_action=(
+                "sync_runtime_source_to_expected_head_before_cost_gate_learning_activation"
+            ),
+            learning_gate_adjustment="NONE_SYNC_RUNTIME_SOURCE_FIRST",
+        )
+    if writer_config_required and writer_config_enabled is not True:
+        return _block(
+            status="RUNTIME_WRITER_ENABLEMENT_REQUIRED_BEFORE_BOUNDED_LEARNING_LANE",
+            reason="runtime writer config is required but disabled or unset",
+            next_action=(
+                "enable_OPENCLAW_DEMO_LEARNING_LANE_WRITER_after_operator_review"
+            ),
+            learning_gate_adjustment="NONE_ENABLE_RUNTIME_WRITER_FIRST",
+        )
+    if writer_process_required and writer_process_enabled is not True:
+        return _block(
+            status=(
+                "RUNNING_ENGINE_WRITER_ENABLEMENT_REQUIRED_BEFORE_BOUNDED_LEARNING_LANE"
+            ),
+            reason="running engine writer is required but not enabled",
+            next_action=(
+                "restart_or_reconfigure_engine_with_demo_learning_writer_after_operator_review"
+            ),
+            learning_gate_adjustment="NONE_ENABLE_RUNNING_ENGINE_WRITER_FIRST",
+        )
+    if hard_preflight_blocked:
+        return _block(
+            status="RUNTIME_PREFLIGHT_REQUIRED_BEFORE_BOUNDED_LEARNING_LANE",
+            reason=f"cost-gate learning preflight is {preflight_status}",
+            next_action=first_preflight_action,
+            learning_gate_adjustment="NONE_CLEAR_RUNTIME_PREFLIGHT_FIRST",
+        )
+    return {
+        **runtime_summary,
+        "runtime_preflight_blocking_cost_gate_adjustment": False,
+        "runtime_activation_ready": answers.get("activation_ready"),
+    }
+
+
 def classify_cost_gate_adjustment_recommendation(
     *,
     cost_gate_rejects_recorded: bool,
@@ -143,19 +270,29 @@ def classify_cost_gate_adjustment_recommendation(
     learning_data_flow_stale: bool,
     learning_evidence_accumulating: bool,
     blocked_outcome_review_candidate: bool,
+    learning_preflight: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     order_flow_status = str(order_flow_evidence.get("status") or "")
     order_flow_answers = order_flow_evidence.get("answers") or {}
-    if blocked_outcome_review_candidate:
+    runtime_gate = _cost_gate_adjustment_preflight_gate(learning_preflight)
+    if runtime_gate.get("runtime_preflight_blocking_cost_gate_adjustment") is True:
+        status = str(runtime_gate["status"])
+        reason = str(runtime_gate["reason"])
+        next_action = str(runtime_gate["next_action"])
+        learning_gate_adjustment = str(runtime_gate["learning_gate_adjustment"])
+        bounded_recommended = False
+    elif blocked_outcome_review_candidate:
         status = "BOUNDED_DEMO_PROBE_AUTHORITY_REVIEW_READY"
         reason = "blocked-signal outcomes cleared review thresholds"
         next_action = "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
         learning_gate_adjustment = "OPERATOR_REVIEW_BOUNDED_SIDE_CELL_DEMO_PROBE"
+        bounded_recommended = True
     elif learning_data_flow_stale:
         status = "RESTORE_DATA_FLOW_BEFORE_ANY_COST_GATE_CHANGE"
         reason = "candidate/reject/order-flow data is stale"
         next_action = "restore_demo_data_flow_before_cost_gate_learning_activation"
         learning_gate_adjustment = "NONE_RESTORE_DATA_FLOW_FIRST"
+        bounded_recommended = False
     elif (
         cost_gate_rejects_recorded
         and order_flow_answers.get("order_flow_evidence_starved") is True
@@ -167,6 +304,7 @@ def classify_cost_gate_adjustment_recommendation(
             "activate_cost_gate_learning_lane_then_operator_review_bounded_demo_probe"
         )
         learning_gate_adjustment = "ENABLE_LEDGER_AND_OUTCOME_REVIEW_FIRST"
+        bounded_recommended = True
     elif (
         cost_gate_rejects_recorded
         and order_flow_status == "DEMO_ORDER_FLOW_PRESENT_NO_FILL_EVIDENCE"
@@ -175,30 +313,31 @@ def classify_cost_gate_adjustment_recommendation(
         reason = "demo orders exist but no fills landed"
         next_action = "diagnose_demo_order_to_fill_gap_before_cost_gate_changes"
         learning_gate_adjustment = "NONE_DIAGNOSE_ORDER_TO_FILL_FIRST"
+        bounded_recommended = False
     elif cost_gate_rejects_recorded and learning_evidence_accumulating:
         status = "CONTINUE_BOUNDED_LEARNING_NO_COST_GATE_CHANGE"
         reason = "learning evidence is accumulating; continue outcome review"
         next_action = "continue_recording_and_refreshing_blocked_signal_outcomes"
         learning_gate_adjustment = "NONE_CONTINUE_EVIDENCE_ACCUMULATION"
+        bounded_recommended = True
     else:
         status = "NO_COST_GATE_ADJUSTMENT_RECOMMENDED"
         reason = "no machine-checked evidence supports changing Cost Gate behavior"
         next_action = "continue_demo_learning_evidence_collection"
         learning_gate_adjustment = "NONE"
-    return {
+        bounded_recommended = False
+    recommendation = {
         "status": status,
         "reason": reason,
         "next_action": next_action,
         "main_cost_gate_adjustment": "NONE",
         "global_cost_gate_lowering_recommended": False,
-        "bounded_demo_learning_lane_recommended": status in {
-            "BOUNDED_LEARNING_LANE_ACTIVATION_RECOMMENDED",
-            "BOUNDED_DEMO_PROBE_AUTHORITY_REVIEW_READY",
-            "CONTINUE_BOUNDED_LEARNING_NO_COST_GATE_CHANGE",
-        },
+        "bounded_demo_learning_lane_recommended": bounded_recommended,
         "learning_gate_adjustment": learning_gate_adjustment,
         "order_authority": "NOT_GRANTED",
     }
+    recommendation.update(runtime_gate)
+    return recommendation
 
 
 def classify_demo_learning_evidence(
@@ -272,6 +411,7 @@ def classify_demo_learning_evidence(
         learning_data_flow_stale=learning_data_flow_stale,
         learning_evidence_accumulating=learning_evidence_accumulating,
         blocked_outcome_review_candidate=blocked_outcome_review_candidate,
+        learning_preflight=learning_preflight,
     )
 
     if contexts == 0 and not candidate_or_reject_data and ledger_rows == 0:
@@ -282,6 +422,13 @@ def classify_demo_learning_evidence(
         status = "ACTIONABLE_CONTEXT_SILENT_DROP_RISK"
         reason = "recent non-observation contexts have no candidate/risk/intent path"
         next_action = "diagnose_context_to_candidate_pipeline_before_cost_gate_changes"
+    elif (
+        cost_gate_recommendation.get("runtime_preflight_blocking_cost_gate_adjustment")
+        is True
+    ):
+        status = "RUNTIME_PREFLIGHT_BLOCKS_COST_GATE_LEARNING_ADJUSTMENT"
+        reason = str(cost_gate_recommendation.get("reason"))
+        next_action = str(cost_gate_recommendation.get("next_action"))
     elif blocked_outcome_review_candidate:
         status = "LEARNING_REVIEW_CANDIDATES_PRESENT"
         reason = "blocked-signal outcomes clear review thresholds"
@@ -372,6 +519,12 @@ def classify_demo_learning_evidence(
                 cost_gate_recommendation.get("bounded_demo_learning_lane_recommended")
                 is True
             ),
+            "runtime_preflight_blocking_cost_gate_adjustment": (
+                cost_gate_recommendation.get(
+                    "runtime_preflight_blocking_cost_gate_adjustment"
+                )
+                is True
+            ),
         },
         "key_counts": {
             "decision_context_snapshots": contexts,
@@ -394,6 +547,41 @@ def classify_demo_learning_evidence(
             ),
             "cost_gate_learning_gate_adjustment": (
                 cost_gate_recommendation.get("learning_gate_adjustment")
+            ),
+            "cost_gate_adjustment_runtime_preflight_blocking": (
+                cost_gate_recommendation.get(
+                    "runtime_preflight_blocking_cost_gate_adjustment"
+                )
+            ),
+            "cost_gate_adjustment_runtime_activation_ready": (
+                cost_gate_recommendation.get("runtime_activation_ready")
+            ),
+            "cost_gate_adjustment_runtime_activation_blockers": (
+                cost_gate_recommendation.get("runtime_activation_blockers")
+            ),
+            "cost_gate_adjustment_runtime_source_activation_ready": (
+                cost_gate_recommendation.get("runtime_source_activation_ready")
+            ),
+            "cost_gate_adjustment_runtime_source_activation_status": (
+                cost_gate_recommendation.get("runtime_source_activation_status")
+            ),
+            "cost_gate_adjustment_runtime_writer_config_required": (
+                cost_gate_recommendation.get("runtime_writer_config_required")
+            ),
+            "cost_gate_adjustment_runtime_writer_config_enabled": (
+                cost_gate_recommendation.get("runtime_writer_config_enabled")
+            ),
+            "cost_gate_adjustment_runtime_writer_config_status": (
+                cost_gate_recommendation.get("runtime_writer_config_status")
+            ),
+            "cost_gate_adjustment_runtime_writer_process_required": (
+                cost_gate_recommendation.get("runtime_writer_process_required")
+            ),
+            "cost_gate_adjustment_runtime_writer_process_enabled": (
+                cost_gate_recommendation.get("runtime_writer_process_enabled")
+            ),
+            "cost_gate_adjustment_runtime_writer_process_status": (
+                cost_gate_recommendation.get("runtime_writer_process_status")
             ),
             "data_flow_freshness_status": order_freshness.get("status"),
             "latest_learning_stage": order_freshness.get("latest_learning_stage"),
@@ -580,6 +768,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "order_flow_silent_drop_risk",
         "learning_lane_silent_drop_risk",
         "bounded_demo_learning_lane_recommended",
+        "runtime_preflight_blocking_cost_gate_adjustment",
     ]:
         lines.append(f"| {key} | {_fmt(answers.get(key))} |")
 
