@@ -1151,3 +1151,11 @@
 - Latest alpha sha256 `0f31b41faa50ad144e4419ac0621d99caa93f695f6d40da3c3e20e0115caec9a`, `created_at_utc=2026-06-20T20:06:01.065368+00:00`, status `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`, promotion-ready `0`.
 - Next trigger: build candidate-specific PnL, breadth, and execution-realism evidence before any promotion discussion.
 - Boundary: source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact writes only; read-only PG SELECT for regime artifact; no PG write/schema migration, Bybit private/signed/trading call, engine/API restart, credential/auth/risk/order/strategy mutation, or promotion proof.
+
+## 2026-06-21 MM quiet-notional low-friction search
+
+- v301 adds existing PIT `recent_trade_abs_qty_10s/30s` to the MM low-friction search, including high-spread x quiet-notional combos and `spread_quiet_abs_qty_interaction_v1` three-way candidates.
+- Runtime result after Linux forced 2h fill_sim refresh: the new surface is searched but still below current fee. Best quiet-notional train-confirmed interaction min gross is `1.234bp`, gap `2.766bp`; global best train-confirmed min gross is `1.521bp`, gap `2.479bp`.
+- Latest alpha sha256 `da105c37b2ba0c6565bfeebeb974a865df486685d4368d71ccedcac49c4030d4` remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`. Best sample-gated gross cell is `2.647bp` / n=33 / net `-1.353bp`, but train leg n=28 and gross `0.541bp`, so the blocker remains `LOW_FRICTION_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED`.
+- Polymarket has moved past the previous price-catch-up blocker to `IC_READY_NO_SIGNIFICANT_EDGE`, candidate_count=0. Do not chase Polymarket unless new evidence or a new family appears.
+- Boundary: artifact-only source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes; read-only PG via existing wrappers; no engine/API restart, no Bybit private/signed/trading call, no strategy/risk/order/auth mutation, not promotion proof.
