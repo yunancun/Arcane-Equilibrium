@@ -55,6 +55,13 @@ from cost_gate_learning_lane.price_observations import (
     required_price_observation_windows,
     write_price_observation_artifact,
 )
+from cost_gate_learning_lane.reject_materializer import (
+    RejectMaterializerConfig,
+    append_materialized_records_to_ledger,
+    build_cost_gate_reject_feature_sql,
+    build_materialized_reject_ledger_batch,
+    reject_feature_row_to_event,
+)
 from cost_gate_learning_lane.runtime_adapter import (
     ADMIT_DECISION,
     ORDER_AUTHORITY_GRANTED,
@@ -2379,3 +2386,129 @@ def test_runtime_adapter_normalizes_cost_gate_negative_reason_text():
     assert normalize_reject_reason_code(
         "cost_gate(JS-demo): negative edge -15.2 bps blocked"
     ) == "cost_gate_js_demo_negative_edge"
+
+
+def test_reject_materializer_builds_blocked_admission_rows_from_feature_rows():
+    event_ts_ms = 1_782_037_200_000
+    feature_rows = [
+        {
+            "ts_ms": event_ts_ms,
+            "context_id": "ctx-materialized-eth",
+            "engine_mode": "live_demo",
+            "strategy_name": "ma_crossover",
+            "symbol": "ethusdt",
+            "side": -1,
+            "reject_reason_code": "cost_gate_js_demo_negative_edge",
+            "last_price": 2000.0,
+        },
+        {
+            "ts_ms": event_ts_ms,
+            "context_id": "ctx-already-present",
+            "engine_mode": "live_demo",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "reject_reason_code": "cost_gate_js_demo_negative_edge",
+            "last_price": 2000.0,
+        },
+    ]
+    batch = build_materialized_reject_ledger_batch(
+        _runtime_plan(),
+        feature_rows,
+        existing_ledger_rows=[
+            {
+                "record_type": "probe_admission_decision",
+                "attempt_id": "ctx-already-present",
+            }
+        ],
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+    )
+
+    assert batch["schema_version"] == "cost_gate_reject_materializer_v1"
+    assert batch["status"] == "MATERIALIZED_REJECT_ROWS_PRESENT"
+    assert batch["input_feature_row_count"] == 2
+    assert batch["materialized_record_count"] == 1
+    assert batch["skipped_existing_attempt_count"] == 1
+    assert batch["decision_counts"] == {"ORDER_AUTHORITY_NOT_GRANTED": 1}
+    record = batch["records"][0]
+    assert record["record_type"] == "probe_admission_decision"
+    assert record["attempt_id"] == "ctx-materialized-eth"
+    assert record["decision"] == "ORDER_AUTHORITY_NOT_GRANTED"
+    assert record["allowed_to_submit_order"] is False
+    assert record["source"] == "materialized_from_pg_decision_features"
+    assert record["event"]["side"] == "Sell"
+    assert record["event"]["symbol"] == "ETHUSDT"
+    assert record["event"]["last_price"] == 2000.0
+
+    outcomes = build_blocked_signal_outcome_records(
+        [record],
+        [
+            {"symbol": "ETHUSDT", "ts_ms": event_ts_ms, "close": 2000.0},
+            {"symbol": "ETHUSDT", "ts_ms": event_ts_ms + 3_600_000, "close": 1980.0},
+        ],
+        now_utc=dt.datetime(2026, 6, 21, 12, 11, tzinfo=dt.timezone.utc),
+        cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
+    )
+    assert len(outcomes) == 1
+    assert outcomes[0]["source_admission_decision"] == "ORDER_AUTHORITY_NOT_GRANTED"
+    assert outcomes[0]["promotion_evidence"] is False
+    assert outcomes[0]["realized_net_bps"] > 0.0
+
+
+def test_reject_materializer_append_is_explicit_and_readable(tmp_path: Path):
+    batch = build_materialized_reject_ledger_batch(
+        _runtime_plan(),
+        [
+            {
+                "ts_ms": 1_782_037_200_000,
+                "context_id": "ctx-materialized-append",
+                "engine_mode": "live_demo",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "reject_reason_code": "cost_gate_js_demo_negative_edge",
+            }
+        ],
+        now_utc=dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+    )
+    ledger = tmp_path / "probe_ledger.jsonl"
+    assert append_materialized_records_to_ledger(ledger, batch) == 1
+    assert batch["append_requested"] is True
+    assert batch["appended_to_ledger"] is True
+
+    rows = read_jsonl_ledger(ledger)
+    assert len(rows) == 1
+    assert rows[0]["attempt_id"] == "ctx-materialized-append"
+    assert rows[0]["decision"] == "ORDER_AUTHORITY_NOT_GRANTED"
+
+
+def test_reject_materializer_sql_is_cost_gate_negative_edge_readonly_shape():
+    sql, params = build_cost_gate_reject_feature_sql(
+        RejectMaterializerConfig(engine_modes=("demo",), lookback_hours=4, limit=123)
+    )
+    assert "FROM learning.decision_features f" in sql
+    assert "LEFT JOIN trading.decision_context_snapshots d" in sql
+    assert "f.reject_reason_code LIKE 'cost_gate%%'" in sql
+    assert "f.reject_reason_code LIKE '%%negative_edge%%'" in sql
+    assert "LIMIT %s" in sql
+    assert params == [["demo"], 4, 123]
+
+
+def test_reject_feature_row_to_event_normalizes_side_symbol_and_ts():
+    event = reject_feature_row_to_event(
+        {
+            "ts": dt.datetime(2026, 6, 21, 11, 10, tzinfo=dt.timezone.utc),
+            "context_id": "ctx-normalized",
+            "engine_mode": "LIVE_DEMO",
+            "strategy_name": "ma_crossover",
+            "symbol": "ethusdt",
+            "side": -1,
+            "reject_reason_code": "cost_gate_js_demo_negative_edge",
+            "last_price": "2000.5",
+        }
+    )
+    assert event["symbol"] == "ETHUSDT"
+    assert event["side"] == "Sell"
+    assert event["engine_mode"] == "live_demo"
+    assert event["ts_ms"] == 1_782_040_200_000
+    assert event["last_price"] == 2000.5

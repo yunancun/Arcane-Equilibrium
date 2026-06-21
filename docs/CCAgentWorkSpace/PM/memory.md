@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Reject Materializer
+
+- Added `cost_gate_learning_lane.reject_materializer` to convert recorded `learning.decision_features` cost-gate rejects into the existing `probe_admission_decision` JSONL contract.
+- It reuses the runtime admission adapter and keeps `adapter_enabled=false`, so output is fail-closed evidence rows, not order authority.
+- Runtime PG read-only probe confirmed current demo cost-gate negative-edge rows match the extractor; no ledger append, writer enablement, PG write, source sync, deploy, restart, or gate lowering was performed.
+
 ## 2026-06-21 Derived Profit Ranking Policy
 
 - `cost_gate_learning_lane.policy` now derives `cost_gate_profit_opportunity_ranking_v1` from legacy scorecard rows when embedded ranking is absent.
