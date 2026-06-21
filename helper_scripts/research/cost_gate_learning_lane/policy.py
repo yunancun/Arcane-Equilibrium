@@ -142,6 +142,10 @@ def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
         "max_ts": row.get("max_ts"),
         "learning_lane_action": row.get("learning_lane_action"),
         "learning_lane_reason": row.get("learning_lane_reason"),
+        "profit_priority_score": _float(row.get("priority_score")),
+        "profit_priority_tier": row.get("priority_tier"),
+        "profit_priority_components": row.get("priority_components"),
+        "profit_priority_next_action": row.get("next_action"),
     }
 
 
@@ -178,6 +182,25 @@ def _candidate_to_probe(
         "notional_or_qty_not_granted_by_artifact": True,
     }
     return compact
+
+
+def _ranking_probe_rows(
+    scorecard: dict[str, Any],
+    cfg: LearningLanePolicyConfig,
+) -> tuple[list[dict[str, Any]], dict[str, Any], bool]:
+    ranking = _dict(scorecard.get("profit_opportunity_ranking"))
+    if ranking.get("schema_version") != "cost_gate_profit_opportunity_ranking_v1":
+        return [], {}, False
+    rows = [
+        row for row in _list(ranking.get("top_side_cells"))
+        if isinstance(row, dict)
+        and row.get("learning_lane_action") == "LEARNING_PROBE_CANDIDATE"
+        and _int(row.get("n")) >= cfg.min_candidate_sample
+        and row.get("order_authority") == "NOT_GRANTED"
+        and row.get("main_cost_gate_adjustment") == "NONE"
+        and row.get("promotion_evidence") is False
+    ]
+    return rows, ranking, True
 
 
 def _source_failure_plan(
@@ -240,20 +263,29 @@ def build_plan_from_payload(
         source_error = "stale_scorecard"
 
     rows = _list(scorecard.get("rows"))
-    probe_rows = [
-        row for row in _list(scorecard.get("probe_candidates"))
-        if isinstance(row, dict)
-        and row.get("learning_lane_action") == "LEARNING_PROBE_CANDIDATE"
-        and _int(row.get("n")) >= cfg.min_candidate_sample
-    ]
-    if not probe_rows:
+    ranking_probe_rows, profit_ranking, has_profit_ranking = _ranking_probe_rows(scorecard, cfg)
+    ranking_source = (
+        "profit_opportunity_ranking"
+        if has_profit_ranking
+        else "legacy_scorecard_candidates"
+    )
+    if has_profit_ranking:
+        ranked = ranking_probe_rows
+    else:
         probe_rows = [
-            row for row in rows
+            row for row in _list(scorecard.get("probe_candidates"))
             if isinstance(row, dict)
             and row.get("learning_lane_action") == "LEARNING_PROBE_CANDIDATE"
             and _int(row.get("n")) >= cfg.min_candidate_sample
         ]
-    ranked = _rank_candidates(probe_rows)
+        if not probe_rows:
+            probe_rows = [
+                row for row in rows
+                if isinstance(row, dict)
+                and row.get("learning_lane_action") == "LEARNING_PROBE_CANDIDATE"
+                and _int(row.get("n")) >= cfg.min_candidate_sample
+            ]
+        ranked = _rank_candidates(probe_rows)
     selected = ranked[: cfg.max_probe_side_cells]
     per_cell_budget = _probe_budget_for_candidates(len(selected), cfg)
     probe_candidates = [
@@ -312,6 +344,10 @@ def build_plan_from_payload(
             "scorecard_schema_version": scorecard_schema or None,
             "scorecard_status": scorecard.get("status"),
             "scorecard_outcome_path_status": scorecard.get("outcome_path_status"),
+            "profit_opportunity_ranking_schema_version": profit_ranking.get("schema_version"),
+            "profit_opportunity_ranking_status": profit_ranking.get("status"),
+            "profit_opportunity_ranking_next_trigger": profit_ranking.get("next_trigger"),
+            "probe_candidate_ranking_source": ranking_source,
             "source_error": source_error,
         },
         "coverage": payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {},

@@ -259,6 +259,102 @@ def test_policy_plan_keeps_main_gate_closed_and_selects_only_probe_candidates():
     assert plan["data_coverage_tasks"][0]["side_cell_key"] == "grid_trading|OPUSDT|Sell"
 
 
+def test_policy_plan_prefers_profit_opportunity_ranking_when_present():
+    payload = _scorecard_payload()
+    scorecard = payload["learning_lane_scorecard"]
+    scorecard["profit_opportunity_ranking"] = {
+        "schema_version": "cost_gate_profit_opportunity_ranking_v1",
+        "status": "PROFIT_LEARNING_CANDIDATES_PRESENT",
+        "next_trigger": "operator_review_top_ranked_side_cells_for_bounded_demo_learning_lane",
+        "top_side_cells": [
+            {
+                "side_cell_key": "ma_crossover|NEARUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "NEARUSDT",
+                "side": "Sell",
+                "reject_reason_code": "cost_gate_js_demo_negative_edge",
+                "learning_lane_action": "LEARNING_PROBE_CANDIDATE",
+                "learning_lane_reason": "avg_net_positive_and_median_gross_clears_friction",
+                "priority_tier": "HIGH_PRIORITY_BOUNDED_DEMO_LEARNING",
+                "priority_score": 88.0,
+                "priority_components": {"hit_rate_score": 25.0},
+                "n": 244,
+                "avg_net_bps": 16.2197,
+                "p50_gross_bps": 13.2,
+                "p90_gross_bps": 31.0,
+                "net_positive_pct": 99.95,
+                "next_action": "operator_review_ranked_side_cell_for_bounded_demo_learning_lane",
+                "order_authority": "NOT_GRANTED",
+                "main_cost_gate_adjustment": "NONE",
+                "promotion_evidence": False,
+            },
+            {
+                "side_cell_key": "grid_trading|FILUSDT|Buy",
+                "strategy_name": "grid_trading",
+                "symbol": "FILUSDT",
+                "side": "Buy",
+                "reject_reason_code": "cost_gate_js_demo_negative_edge",
+                "learning_lane_action": "LEARNING_PROBE_CANDIDATE",
+                "priority_tier": "COLLECT_MORE_SAMPLE",
+                "priority_score": 99.0,
+                "n": 57,
+                "avg_net_bps": 58.9223,
+                "p50_gross_bps": 81.5493,
+                "net_positive_pct": 75.44,
+                "next_action": "continue_collecting_reject_counterfactual_samples",
+                "order_authority": "NOT_GRANTED",
+                "main_cost_gate_adjustment": "NONE",
+                "promotion_evidence": False,
+            },
+            {
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "strategy_name": "ma_crossover",
+                "symbol": "ETHUSDT",
+                "side": "Sell",
+                "reject_reason_code": "cost_gate_js_demo_negative_edge",
+                "learning_lane_action": "LEARNING_PROBE_CANDIDATE",
+                "learning_lane_reason": "avg_net_positive_and_median_gross_clears_friction",
+                "priority_tier": "MEDIUM_PRIORITY_BOUNDED_DEMO_LEARNING",
+                "priority_score": 70.0,
+                "priority_components": {"avg_net_score": 25.0},
+                "n": 486,
+                "avg_net_bps": 97.9788,
+                "p50_gross_bps": 49.421,
+                "p90_gross_bps": 211.0,
+                "net_positive_pct": 86.01,
+                "next_action": "operator_review_ranked_side_cell_for_bounded_demo_learning_lane",
+                "order_authority": "NOT_GRANTED",
+                "main_cost_gate_adjustment": "NONE",
+                "promotion_evidence": False,
+            },
+        ],
+    }
+
+    plan = build_plan_from_payload(
+        payload,
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+        cfg=LearningLanePolicyConfig(max_probe_side_cells=3, max_total_probe_orders=6),
+    )
+
+    assert plan["source"]["probe_candidate_ranking_source"] == "profit_opportunity_ranking"
+    assert plan["source"]["profit_opportunity_ranking_status"] == (
+        "PROFIT_LEARNING_CANDIDATES_PRESENT"
+    )
+    assert [row["side_cell_key"] for row in plan["probe_candidates"]] == [
+        "ma_crossover|NEARUSDT|Sell",
+        "ma_crossover|ETHUSDT|Sell",
+    ]
+    assert "grid_trading|FILUSDT|Buy" not in [
+        row["side_cell_key"] for row in plan["probe_candidates"]
+    ]
+    assert plan["probe_candidates"][0]["profit_priority_score"] == 88.0
+    assert plan["probe_candidates"][0]["profit_priority_tier"] == (
+        "HIGH_PRIORITY_BOUNDED_DEMO_LEARNING"
+    )
+    assert plan["probe_candidates"][0]["guardrails"]["main_cost_gate_adjustment"] == "NONE"
+    assert plan["order_authority"] == "NOT_GRANTED"
+
+
 def test_historical_scorecard_review_prioritizes_candidates_without_authority():
     review = build_historical_scorecard_review(
         _scorecard_payload(),
