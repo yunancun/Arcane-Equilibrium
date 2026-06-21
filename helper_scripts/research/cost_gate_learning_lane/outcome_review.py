@@ -29,7 +29,7 @@ from cost_gate_learning_lane.runtime_adapter import read_jsonl_ledger
 
 
 BLOCKED_OUTCOME_REVIEW_SCHEMA_VERSION = (
-    "cost_gate_demo_learning_lane_blocked_outcome_review_v1"
+    "cost_gate_demo_learning_lane_blocked_outcome_review_v2"
 )
 BLOCKED_OUTCOME_REVIEW_RECORD_TYPE = "blocked_signal_outcome_review"
 
@@ -74,6 +74,36 @@ def _row_sort_ts(row: dict[str, Any]) -> str:
     return _str(row.get("generated_at_utc")) or _str(row.get("exit_ts_ms"))
 
 
+def _int(value: Any, default: int = 0) -> int:
+    try:
+        out = int(float(value))
+    except (TypeError, ValueError):
+        return default
+    return out
+
+
+def _wrongful_block_score(
+    *,
+    outcome_count: int,
+    avg_net_bps: float | None,
+    net_positive_pct: float | None,
+    cfg: BlockedOutcomeReviewConfig,
+) -> float:
+    """Rank review candidates without changing the conservative review gate."""
+    if avg_net_bps is None or net_positive_pct is None:
+        return 0.0
+    avg_margin = avg_net_bps - cfg.min_avg_net_bps
+    pct_margin = net_positive_pct - cfg.min_net_positive_pct
+    if (
+        outcome_count < cfg.min_outcomes_per_side_cell
+        or avg_margin < 0.0
+        or pct_margin < 0.0
+    ):
+        return 0.0
+    sample_factor = min(2.0, outcome_count / cfg.min_outcomes_per_side_cell)
+    return avg_margin * (net_positive_pct / 100.0) * sample_factor
+
+
 def _review_side_cell_rows(
     side_cell_key: str,
     rows: list[dict[str, Any]],
@@ -81,6 +111,9 @@ def _review_side_cell_rows(
     cfg: BlockedOutcomeReviewConfig,
 ) -> dict[str, Any]:
     nets = []
+    gross_values = []
+    cost_values = []
+    horizon_counts: dict[int, int] = {}
     symbols = set()
     strategies = set()
     sides = set()
@@ -90,6 +123,15 @@ def _review_side_cell_rows(
         if net is None:
             continue
         nets.append(net)
+        gross = _float(row.get("gross_bps"))
+        if gross is not None:
+            gross_values.append(gross)
+        cost = _float(row.get("cost_bps"))
+        if cost is not None:
+            cost_values.append(cost)
+        horizon = _int(row.get("horizon_minutes"), default=0)
+        if horizon > 0:
+            horizon_counts[horizon] = horizon_counts.get(horizon, 0) + 1
         symbol = _str(row.get("symbol")).upper()
         strategy = _str(row.get("strategy_name"))
         side = _str(row.get("side"))
@@ -104,10 +146,41 @@ def _review_side_cell_rows(
 
     outcome_count = len(nets)
     positive_count = sum(1 for value in nets if value > 0.0)
+    gross_positive_count = sum(1 for value in gross_values if value > 0.0)
     avg_net = sum(nets) / outcome_count if outcome_count else None
     net_positive_pct = (positive_count / outcome_count * 100.0) if outcome_count else None
     min_net = min(nets) if nets else None
     max_net = max(nets) if nets else None
+    avg_gross = sum(gross_values) / len(gross_values) if gross_values else None
+    avg_cost = sum(cost_values) / len(cost_values) if cost_values else None
+    gross_positive_pct = (
+        gross_positive_count / len(gross_values) * 100.0
+        if gross_values
+        else None
+    )
+    net_cost_cushion_bps = (
+        avg_net - cfg.min_avg_net_bps
+        if avg_net is not None
+        else None
+    )
+    net_positive_margin_pct = (
+        net_positive_pct - cfg.min_net_positive_pct
+        if net_positive_pct is not None
+        else None
+    )
+    sample_margin_count = outcome_count - cfg.min_outcomes_per_side_cell
+    wrongful_block_score = _wrongful_block_score(
+        outcome_count=outcome_count,
+        avg_net_bps=avg_net,
+        net_positive_pct=net_positive_pct,
+        cfg=cfg,
+    )
+    dominant_horizon = None
+    if horizon_counts:
+        dominant_horizon = sorted(
+            horizon_counts.items(),
+            key=lambda item: (-item[1], item[0]),
+        )[0][0]
 
     if outcome_count < cfg.min_outcomes_per_side_cell:
         status = "COLLECT_MORE_BLOCKED_SIGNAL_OUTCOMES"
@@ -134,10 +207,24 @@ def _review_side_cell_rows(
         "review_candidate": review_candidate,
         "outcome_count": outcome_count,
         "positive_outcome_count": positive_count,
+        "gross_positive_outcome_count": gross_positive_count,
         "avg_net_bps": avg_net,
+        "avg_gross_bps": avg_gross,
+        "avg_cost_bps": avg_cost,
         "min_net_bps": min_net,
         "max_net_bps": max_net,
         "net_positive_pct": net_positive_pct,
+        "gross_positive_pct": gross_positive_pct,
+        "net_cost_cushion_bps": net_cost_cushion_bps,
+        "net_positive_margin_pct": net_positive_margin_pct,
+        "sample_margin_count": sample_margin_count,
+        "wrongful_block_score": wrongful_block_score,
+        "horizon_minutes": sorted(horizon_counts),
+        "horizon_counts": {
+            str(key): horizon_counts[key]
+            for key in sorted(horizon_counts)
+        },
+        "dominant_horizon_minutes": dominant_horizon,
         "min_outcomes_per_side_cell": cfg.min_outcomes_per_side_cell,
         "min_avg_net_bps": cfg.min_avg_net_bps,
         "min_net_positive_pct": cfg.min_net_positive_pct,
@@ -183,11 +270,21 @@ def build_blocked_signal_outcome_review(
         side_cells,
         key=lambda row: (
             0 if row["review_candidate"] else 1,
+            -float(row.get("wrongful_block_score") or 0.0),
             -int(row.get("outcome_count") or 0),
             -float(row.get("avg_net_bps") or -10_000.0),
             row["side_cell_key"],
         ),
     )
+    candidate_rank = 0
+    for rank, row in enumerate(side_cells, start=1):
+        row["review_rank"] = rank
+        if row["review_candidate"]:
+            candidate_rank += 1
+            row["bounded_demo_probe_review_rank"] = candidate_rank
+        else:
+            row["bounded_demo_probe_review_rank"] = None
+
     candidate_count = sum(1 for row in side_cells if row["review_candidate"])
     insufficient_count = sum(
         1 for row in side_cells
@@ -210,6 +307,16 @@ def build_blocked_signal_outcome_review(
         else None
     )
     net_positive_pct = (positive_count / outcome_count * 100.0) if outcome_count else None
+    top_side_cell = side_cells[0] if side_cells else None
+    top_candidate = next(
+        (row for row in side_cells if row["review_candidate"]),
+        None,
+    )
+    max_wrongful_block_score = (
+        max(float(row.get("wrongful_block_score") or 0.0) for row in side_cells)
+        if side_cells
+        else 0.0
+    )
 
     if outcome_count == 0:
         status = "NO_BLOCKED_SIGNAL_OUTCOMES"
@@ -244,6 +351,24 @@ def build_blocked_signal_outcome_review(
         "invalid_outcome_row_count": invalid_outcome_row_count,
         "avg_blocked_signal_outcome_net_bps": avg_net,
         "blocked_signal_net_positive_pct": net_positive_pct,
+        "max_wrongful_block_score": max_wrongful_block_score,
+        "top_side_cell_key": top_side_cell.get("side_cell_key") if top_side_cell else None,
+        "top_side_cell_status": top_side_cell.get("status") if top_side_cell else None,
+        "top_side_cell_wrongful_block_score": (
+            top_side_cell.get("wrongful_block_score") if top_side_cell else None
+        ),
+        "top_side_cell_net_cost_cushion_bps": (
+            top_side_cell.get("net_cost_cushion_bps") if top_side_cell else None
+        ),
+        "top_review_candidate_side_cell_key": (
+            top_candidate.get("side_cell_key") if top_candidate else None
+        ),
+        "top_review_candidate_wrongful_block_score": (
+            top_candidate.get("wrongful_block_score") if top_candidate else None
+        ),
+        "top_review_candidate_net_cost_cushion_bps": (
+            top_candidate.get("net_cost_cushion_bps") if top_candidate else None
+        ),
         "thresholds": {
             "min_outcomes_per_side_cell": cfg.min_outcomes_per_side_cell,
             "min_avg_net_bps": cfg.min_avg_net_bps,

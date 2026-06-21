@@ -66,6 +66,11 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "plan_policy_status" in src
     assert "plan_selected_probe_candidate_count" in src
     assert "preinstall_refresh_only" in src
+    assert "review_top_side_cell_key" in src
+    assert "review_top_wrongful_block_score" in src
+    assert "review_top_net_cost_cushion_bps" in src
+    assert "review_top_candidate_side_cell_key" in src
+    assert "review_top_candidate_wrongful_block_score" in src
     assert "--source-pg" in src
     assert "--record-blocked-outcomes" in src
     assert "--append-ledger" in src

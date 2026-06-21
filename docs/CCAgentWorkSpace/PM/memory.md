@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Cost Gate Blocked Outcome Review v2
+
+- Blocked-signal outcome review schema is now `cost_gate_demo_learning_lane_blocked_outcome_review_v2`.
+- Review rows rank side-cells by wrongful-block score, net cost cushion, sample margin, gross/cost aggregates, and horizon counts.
+- Activation preflight, learning-loop status, cron status JSON, and alpha-discovery rows mirror the top review opportunity; this is review visibility only and grants no probe/order/promotion authority.
+
 ## 2026-06-22 Alpha Learning Worklist Completion Gates
 
 - Alpha learning worklist schema is now `alpha_learning_worklist_v2`.
