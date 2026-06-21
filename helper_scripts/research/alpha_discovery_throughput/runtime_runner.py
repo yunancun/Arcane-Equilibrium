@@ -1260,6 +1260,111 @@ def collect_aeg_matrix_arm(data_dir: Path) -> dict[str, Any]:
     )
 
 
+def summarize_demo_learning_evidence_audit(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    path = data_dir / "demo_learning_evidence" / "demo_learning_evidence_audit_latest.json"
+    payload, err = _read_json(path)
+    if err:
+        return {
+            "demo_learning_evidence_status": "NOT_SEEN",
+            "demo_learning_evidence_source_path": str(path),
+            "demo_learning_evidence_source_error": err,
+        }
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    classification = (
+        payload.get("classification")
+        if isinstance(payload.get("classification"), dict)
+        else {}
+    )
+    answers = (
+        classification.get("answers")
+        if isinstance(classification.get("answers"), dict)
+        else {}
+    )
+    counts = (
+        classification.get("key_counts")
+        if isinstance(classification.get("key_counts"), dict)
+        else {}
+    )
+    order_scorecard = (
+        payload.get("order_stall_scorecard")
+        if isinstance(payload.get("order_stall_scorecard"), dict)
+        else {}
+    )
+    order_classification = (
+        order_scorecard.get("classification")
+        if isinstance(order_scorecard.get("classification"), dict)
+        else {}
+    )
+    preflight = (
+        payload.get("cost_gate_learning_preflight")
+        if isinstance(payload.get("cost_gate_learning_preflight"), dict)
+        else {}
+    )
+    return {
+        "demo_learning_evidence_status": (
+            str(classification.get("status") or "UNKNOWN") if fresh else "STALE_ARTIFACT"
+        ),
+        "demo_learning_evidence_classification_status": classification.get("status"),
+        "demo_learning_evidence_reason": classification.get("reason"),
+        "demo_learning_evidence_next_action": classification.get("next_action"),
+        "demo_learning_evidence_generated_at_utc": generated_at,
+        "demo_learning_evidence_age_seconds": age,
+        "demo_learning_evidence_source_ok": fresh,
+        "demo_learning_evidence_source_path": str(path),
+        "demo_learning_evidence_source_error": freshness_error,
+        "demo_learning_evidence_order_stall_status": order_classification.get("status"),
+        "demo_learning_evidence_preflight_status": preflight.get("status"),
+        "demo_learning_evidence_cost_gate_rejects_recorded_in_pg": answers.get(
+            "cost_gate_rejects_recorded_in_pg"
+        ),
+        "demo_learning_evidence_observation_only_contexts_active": answers.get(
+            "demo_observation_only_contexts_active"
+        ),
+        "demo_learning_evidence_candidate_or_reject_data_accumulating": answers.get(
+            "candidate_or_reject_data_accumulating"
+        ),
+        "demo_learning_evidence_learning_lane_ledger_rows_present": answers.get(
+            "learning_lane_ledger_rows_present"
+        ),
+        "demo_learning_evidence_currently_accumulating": answers.get(
+            "learning_lane_currently_accumulating_evidence"
+        ),
+        "demo_learning_evidence_blocked_outcome_review_candidate_present": answers.get(
+            "blocked_outcome_review_candidate_present"
+        ),
+        "demo_learning_evidence_order_flow_silent_drop_risk": answers.get(
+            "order_flow_silent_drop_risk"
+        ),
+        "demo_learning_evidence_bounded_learning_lane_recommended": answers.get(
+            "bounded_demo_learning_lane_recommended"
+        ),
+        "demo_learning_evidence_contexts": counts.get("decision_context_snapshots"),
+        "demo_learning_evidence_risk_verdicts": counts.get("risk_verdicts"),
+        "demo_learning_evidence_rejected_features": counts.get(
+            "rejected_decision_features"
+        ),
+        "demo_learning_evidence_orders": counts.get("orders"),
+        "demo_learning_evidence_fills": counts.get("fills"),
+        "demo_learning_evidence_learning_ledger_rows": counts.get(
+            "learning_ledger_rows"
+        ),
+        "demo_learning_evidence_blocked_signal_outcomes": counts.get(
+            "blocked_signal_outcomes"
+        ),
+    }
+
+
 def collect_cost_gate_learning_lane_arm(
     data_dir: Path,
     *,
@@ -1271,6 +1376,10 @@ def collect_cost_gate_learning_lane_arm(
     ledger_summary = summarize_cost_gate_learning_lane_ledger(ledger_path)
     loop_summary = summarize_cost_gate_learning_lane_loop(data_dir, now_utc=now_utc)
     historical_summary = summarize_cost_gate_learning_lane_historical_review(
+        data_dir,
+        now_utc=now_utc,
+    )
+    demo_evidence_summary = summarize_demo_learning_evidence_audit(
         data_dir,
         now_utc=now_utc,
     )
@@ -1287,6 +1396,7 @@ def collect_cost_gate_learning_lane_arm(
             detail={
                 "plan_status": "SOURCE_SCORECARD_UNAVAILABLE",
                 "note": "cost_gate_learning_lane_plan_not_seen",
+                **demo_evidence_summary,
                 **historical_summary,
                 **loop_summary,
                 **ledger_summary,
@@ -1328,6 +1438,7 @@ def collect_cost_gate_learning_lane_arm(
             "data_coverage_tasks": payload.get("data_coverage_tasks"),
             "source": payload.get("source"),
             "boundary": payload.get("boundary"),
+            **demo_evidence_summary,
             **historical_summary,
             **loop_summary,
             **ledger_summary,

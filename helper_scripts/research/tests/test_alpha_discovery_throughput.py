@@ -18,6 +18,7 @@ from alpha_discovery_throughput.packet import (
     daily_returns_from_samples,
 )
 from alpha_discovery_throughput.runtime_runner import (
+    collect_cost_gate_learning_lane_arm,
     collect_flash_dip_execution_realism_arm,
     collect_flash_dip_arm,
     collect_flash_dip_l1_replay_arm,
@@ -1024,6 +1025,125 @@ def test_runtime_runner_blocks_stale_flash_dip_death_rate_status(tmp_path):
     assert arm["detail"]["age_seconds"] > 36 * 60 * 60
     assert plan["arms"][0]["action"] == "BLOCK"
     assert plan["arms"][0]["reason"] == "source_not_healthy"
+
+
+def _write_demo_learning_evidence_latest(
+    data: Path,
+    *,
+    status: str,
+    generated_at: str = "2026-06-21T18:00:00+00:00",
+    reason: str = "test reason",
+    next_action: str = "test_next_action",
+    cost_gate_rejects_recorded: bool = False,
+    observation_only: bool = False,
+) -> Path:
+    path = data / "demo_learning_evidence" / "demo_learning_evidence_audit_latest.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema_version": "demo_learning_evidence_audit_v1",
+        "generated_at_utc": generated_at,
+        "classification": {
+            "status": status,
+            "reason": reason,
+            "next_action": next_action,
+            "answers": {
+                "cost_gate_rejects_recorded_in_pg": cost_gate_rejects_recorded,
+                "demo_observation_only_contexts_active": observation_only,
+                "candidate_or_reject_data_accumulating": cost_gate_rejects_recorded,
+                "learning_lane_ledger_rows_present": False,
+                "learning_lane_currently_accumulating_evidence": False,
+                "blocked_outcome_review_candidate_present": False,
+                "order_flow_silent_drop_risk": False,
+                "bounded_demo_learning_lane_recommended": cost_gate_rejects_recorded,
+            },
+            "key_counts": {
+                "decision_context_snapshots": 1200,
+                "risk_verdicts": 24155 if cost_gate_rejects_recorded else 0,
+                "rejected_decision_features": 24152 if cost_gate_rejects_recorded else 0,
+                "orders": 3 if cost_gate_rejects_recorded else 0,
+                "fills": 0,
+                "learning_ledger_rows": 0,
+                "blocked_signal_outcomes": 0,
+            },
+        },
+        "order_stall_scorecard": {
+            "classification": {
+                "status": "COST_GATE_REJECTING_ALL_RECENT_ATTEMPTS"
+                if cost_gate_rejects_recorded
+                else "OBSERVATION_ONLY_CONTEXTS_ACTIVE",
+            },
+        },
+        "cost_gate_learning_preflight": {
+            "status": "NOT_ACCUMULATING",
+        },
+    }), encoding="utf-8")
+    return path
+
+
+def test_cost_gate_arm_uses_demo_learning_evidence_for_pg_reject_gap(tmp_path):
+    data = tmp_path / "openclaw"
+    artifact = _write_demo_learning_evidence_latest(
+        data,
+        status="PG_REJECTS_RECORDED_LEARNING_LANE_NOT_ACCUMULATING",
+        reason="PG records Cost Gate rejects but runtime learning ledger is empty",
+        next_action="enable_bounded_cost_gate_learning_lane_after_operator_review",
+        cost_gate_rejects_recorded=True,
+    )
+
+    arm = collect_cost_gate_learning_lane_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert arm["detail"]["demo_learning_evidence_source_path"] == str(artifact)
+    assert arm["detail"]["demo_learning_evidence_status"] == (
+        "PG_REJECTS_RECORDED_LEARNING_LANE_NOT_ACCUMULATING"
+    )
+    assert arm["detail"]["ledger_status"] == "MISSING"
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["primary_blocker"] == (
+        "demo_cost_gate_rejects_recorded_but_learning_lane_not_accumulating"
+    )
+    assert blocker["next_trigger"] == (
+        "enable_bounded_cost_gate_learning_lane_after_operator_review"
+    )
+    assert blocker["demo_learning_evidence_cost_gate_rejects_recorded_in_pg"] is True
+    assert blocker["demo_learning_evidence_risk_verdicts"] == 24155
+    assert blocker["engineering_actionable"] is True
+
+
+def test_cost_gate_arm_keeps_observation_only_demo_from_probe_readiness(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_demo_learning_evidence_latest(
+        data,
+        status="OBSERVATION_TELEMETRY_ACTIVE_NO_ACTIONABLE_LEDGER",
+        reason="demo signal observation telemetry is active but no reject evidence exists",
+        next_action="wait_for_candidate_rejects_or_verify_strategy_candidate_producer",
+        observation_only=True,
+    )
+
+    arm = collect_cost_gate_learning_lane_arm(
+        data,
+        now_utc=dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc),
+    )
+    plan = build_discovery_plan(
+        [arm],
+        now_utc=dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc),
+    )
+
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["blocker_class"] == "data_coverage"
+    assert blocker["primary_blocker"] == (
+        "demo_observation_telemetry_active_no_actionable_reject_evidence"
+    )
+    assert blocker["next_trigger"] == (
+        "wait_for_candidate_rejects_or_verify_strategy_candidate_producer"
+    )
+    assert blocker["demo_learning_evidence_observation_only_contexts_active"] is True
 
 
 def _write_polymarket_leadlag_latest(data: Path, payload: dict) -> Path:

@@ -96,6 +96,52 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
     historical_candidate_count = _int(
         detail.get("historical_candidate_side_cell_count")
     )
+    demo_evidence_status = str(
+        detail.get("demo_learning_evidence_status") or ""
+    ).upper()
+    demo_evidence_next_action = detail.get("demo_learning_evidence_next_action")
+    demo_cost_gate_rejects_recorded = (
+        detail.get("demo_learning_evidence_cost_gate_rejects_recorded_in_pg") is True
+    )
+
+    if (
+        ledger_status in {"MISSING", "EMPTY"}
+        and demo_evidence_status == "PG_REJECTS_RECORDED_LEARNING_LANE_NOT_ACCUMULATING"
+        and demo_cost_gate_rejects_recorded
+    ):
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "demo_pg_cost_gate_rejects_without_learning_ledger",
+            "blocker_class": "data_coverage",
+            "primary_blocker": (
+                "demo_cost_gate_rejects_recorded_but_learning_lane_not_accumulating"
+            ),
+            "next_trigger": (
+                demo_evidence_next_action
+                or "enable_bounded_cost_gate_learning_lane_after_operator_review"
+            ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
+    if (
+        ledger_status in {"MISSING", "EMPTY"}
+        and demo_evidence_status == "OBSERVATION_TELEMETRY_ACTIVE_NO_ACTIONABLE_LEDGER"
+    ):
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "demo_observation_only_no_actionable_reject_ledger",
+            "blocker_class": "data_coverage",
+            "primary_blocker": (
+                "demo_observation_telemetry_active_no_actionable_reject_evidence"
+            ),
+            "next_trigger": (
+                demo_evidence_next_action
+                or "wait_for_candidate_rejects_or_verify_strategy_candidate_producer"
+            ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
 
     if (
         ledger_status in {"MISSING", "EMPTY"}
@@ -1055,6 +1101,69 @@ def classify_profitability_blocker(
                 "probe_candidates": detail.get("probe_candidates"),
                 "do_not_probe_side_cells": detail.get("do_not_probe_side_cells"),
                 "data_coverage_tasks": detail.get("data_coverage_tasks"),
+                "demo_learning_evidence_status": detail.get(
+                    "demo_learning_evidence_status"
+                ),
+                "demo_learning_evidence_classification_status": detail.get(
+                    "demo_learning_evidence_classification_status"
+                ),
+                "demo_learning_evidence_reason": detail.get(
+                    "demo_learning_evidence_reason"
+                ),
+                "demo_learning_evidence_next_action": detail.get(
+                    "demo_learning_evidence_next_action"
+                ),
+                "demo_learning_evidence_generated_at_utc": detail.get(
+                    "demo_learning_evidence_generated_at_utc"
+                ),
+                "demo_learning_evidence_age_seconds": detail.get(
+                    "demo_learning_evidence_age_seconds"
+                ),
+                "demo_learning_evidence_source_ok": detail.get(
+                    "demo_learning_evidence_source_ok"
+                ),
+                "demo_learning_evidence_source_path": detail.get(
+                    "demo_learning_evidence_source_path"
+                ),
+                "demo_learning_evidence_source_error": detail.get(
+                    "demo_learning_evidence_source_error"
+                ),
+                "demo_learning_evidence_order_stall_status": detail.get(
+                    "demo_learning_evidence_order_stall_status"
+                ),
+                "demo_learning_evidence_preflight_status": detail.get(
+                    "demo_learning_evidence_preflight_status"
+                ),
+                "demo_learning_evidence_cost_gate_rejects_recorded_in_pg": detail.get(
+                    "demo_learning_evidence_cost_gate_rejects_recorded_in_pg"
+                ),
+                "demo_learning_evidence_observation_only_contexts_active": detail.get(
+                    "demo_learning_evidence_observation_only_contexts_active"
+                ),
+                "demo_learning_evidence_candidate_or_reject_data_accumulating": detail.get(
+                    "demo_learning_evidence_candidate_or_reject_data_accumulating"
+                ),
+                "demo_learning_evidence_currently_accumulating": detail.get(
+                    "demo_learning_evidence_currently_accumulating"
+                ),
+                "demo_learning_evidence_blocked_outcome_review_candidate_present": detail.get(
+                    "demo_learning_evidence_blocked_outcome_review_candidate_present"
+                ),
+                "demo_learning_evidence_order_flow_silent_drop_risk": detail.get(
+                    "demo_learning_evidence_order_flow_silent_drop_risk"
+                ),
+                "demo_learning_evidence_contexts": detail.get(
+                    "demo_learning_evidence_contexts"
+                ),
+                "demo_learning_evidence_risk_verdicts": detail.get(
+                    "demo_learning_evidence_risk_verdicts"
+                ),
+                "demo_learning_evidence_learning_ledger_rows": detail.get(
+                    "demo_learning_evidence_learning_ledger_rows"
+                ),
+                "demo_learning_evidence_blocked_signal_outcomes": detail.get(
+                    "demo_learning_evidence_blocked_signal_outcomes"
+                ),
                 "historical_scorecard_review_status": detail.get(
                     "historical_scorecard_review_status"
                 ),

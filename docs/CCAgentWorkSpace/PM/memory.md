@@ -25,6 +25,11 @@
 
 ## 近期記錄
 
+## 2026-06-21 Demo Learning Evidence Killboard Ingestion
+
+- Alpha-discovery now reads `demo_learning_evidence_audit_latest.json` into the cost-gate demo-learning arm.
+- Fresh composite PG evidence outranks historical-only review when classifying missing learning-ledger blockers; observation-only telemetry no longer implies probe readiness.
+
 ## 2026-06-21 Demo Learning Evidence Artifact Wrapper
 
 - Added `demo_learning_evidence_audit_cron.sh` so demo learning status has a recurring read-only evidence heartbeat instead of manual multi-command diagnosis.
