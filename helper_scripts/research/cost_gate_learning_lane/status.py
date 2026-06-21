@@ -37,6 +37,13 @@ REQUIRED_SOURCE_RELATIVE_PATHS = (
     "helper_scripts/research/cost_gate_learning_lane/status.py",
 )
 
+WRITER_ENABLE_ENV = "OPENCLAW_DEMO_LEARNING_LANE_WRITER"
+WRITER_PLAN_ENV = "OPENCLAW_DEMO_LEARNING_LANE_PLAN"
+WRITER_LEDGER_ENV = "OPENCLAW_DEMO_LEARNING_LANE_LEDGER"
+REQUIRE_WRITER_ENABLED_ENV = "OPENCLAW_COST_GATE_REQUIRE_WRITER_ENABLED"
+TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
+FALSE_ENV_VALUES = {"0", "false", "no", "off", ""}
+
 
 def _utc_now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
@@ -80,6 +87,49 @@ def _float(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return out if math.isfinite(out) else None
+
+
+def _strip_env_value(value: str) -> str:
+    text = value.strip()
+    if len(text) >= 2 and text[0] == text[-1] and text[0] in {'"', "'"}:
+        return text[1:-1]
+    return text
+
+
+def _read_env_file(path: Path) -> tuple[dict[str, str] | None, str | None]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return None, "missing"
+    except OSError as exc:
+        return None, f"read_error:{type(exc).__name__}"
+
+    values: dict[str, str] = {}
+    for raw_line in lines:
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        values[key] = _strip_env_value(value)
+    return values, None
+
+
+def _parse_env_bool(value: Any) -> tuple[bool | None, str | None]:
+    if value is None:
+        return None, None
+    text = str(value).strip().lower()
+    if text in TRUE_ENV_VALUES:
+        return True, None
+    if text in FALSE_ENV_VALUES:
+        return False, None
+    return None, "invalid_bool"
 
 
 def _read_json(path: Path) -> tuple[dict[str, Any] | None, str | None]:
@@ -605,6 +655,81 @@ def summarize_cost_gate_learning_lane_source(
     }
 
 
+def summarize_cost_gate_learning_lane_writer_config(
+    data_dir: Path,
+    *,
+    env: dict[str, str] | None = None,
+    env_file: Path | None = None,
+    require_writer_enabled: bool = False,
+) -> dict[str, Any]:
+    """Summarize the disabled-by-default runtime writer config.
+
+    This is intentionally read-only. When an env file is provided, it is treated
+    as the inspected runtime config and process env does not leak into the check.
+    """
+    if env_file is not None:
+        env_values, env_file_error = _read_env_file(env_file)
+        env_values = env_values or {}
+        env_source = "env_file"
+    else:
+        env_values = dict(os.environ if env is None else env)
+        env_file_error = None
+        env_source = "process_env" if env is None else "provided_env"
+
+    raw_writer = env_values.get(WRITER_ENABLE_ENV)
+    writer_enabled, writer_bool_error = _parse_env_bool(raw_writer)
+
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    raw_plan_path = str(env_values.get(WRITER_PLAN_ENV) or "").strip()
+    raw_ledger_path = str(env_values.get(WRITER_LEDGER_ENV) or "").strip()
+    plan_path = (
+        Path(raw_plan_path)
+        if raw_plan_path
+        else lane_dir / "demo_learning_lane_plan_latest.json"
+    )
+    ledger_path = (
+        Path(raw_ledger_path)
+        if raw_ledger_path
+        else lane_dir / "probe_ledger.jsonl"
+    )
+
+    if env_file_error:
+        status = "ENV_FILE_UNREADABLE"
+        reason = f"runtime_env_file_{env_file_error}"
+    elif raw_writer is None:
+        status = "UNSET"
+        reason = f"{WRITER_ENABLE_ENV}_unset"
+    elif writer_bool_error:
+        status = "INVALID"
+        reason = f"{WRITER_ENABLE_ENV}_{writer_bool_error}"
+    elif writer_enabled is True:
+        status = "ENABLED"
+        reason = "runtime_writer_explicitly_enabled"
+    else:
+        status = "DISABLED"
+        reason = "runtime_writer_explicitly_disabled"
+
+    return {
+        "writer_config_status": status,
+        "writer_config_reason": reason,
+        "writer_enabled": writer_enabled,
+        "writer_required_for_activation": require_writer_enabled,
+        "writer_env_name": WRITER_ENABLE_ENV,
+        "writer_env_value": raw_writer,
+        "writer_env_source": env_source,
+        "writer_env_file": str(env_file) if env_file else None,
+        "writer_env_file_error": env_file_error,
+        "writer_bool_error": writer_bool_error,
+        "plan_env_name": WRITER_PLAN_ENV,
+        "plan_path": str(plan_path),
+        "plan_path_source": "env_override" if raw_plan_path else "default_data_dir",
+        "ledger_env_name": WRITER_LEDGER_ENV,
+        "ledger_path": str(ledger_path),
+        "ledger_path_source": "env_override" if raw_ledger_path else "default_data_dir",
+        "data_dir": str(data_dir),
+    }
+
+
 def _plan_summary(
     plan_path: Path,
     *,
@@ -805,6 +930,8 @@ def build_cost_gate_learning_lane_activation_preflight(
     *,
     repo_root: Path | None = None,
     expected_head: str | None = None,
+    runtime_env_file: Path | None = None,
+    require_writer_enabled: bool = False,
     now_utc: dt.datetime | None = None,
     max_loop_age_seconds: int = DEFAULT_COST_GATE_LEARNING_LOOP_MAX_AGE_SECONDS,
     max_plan_age_seconds: int = DEFAULT_PLAN_MAX_AGE_SECONDS,
@@ -824,6 +951,11 @@ def build_cost_gate_learning_lane_activation_preflight(
         data_dir,
         now_utc=now,
         max_age_seconds=max_loop_age_seconds,
+    )
+    writer_config = summarize_cost_gate_learning_lane_writer_config(
+        data_dir,
+        env_file=runtime_env_file,
+        require_writer_enabled=require_writer_enabled,
     )
     decision = _activation_decision(
         source=source,
@@ -852,6 +984,10 @@ def build_cost_gate_learning_lane_activation_preflight(
         activation_blockers.insert(0, "expected_source_head_invalid")
     elif expected_status == "UNKNOWN_HEAD":
         activation_blockers.insert(0, "expected_source_head_unverified")
+    writer_status = str(writer_config.get("writer_config_status") or "UNKNOWN")
+    writer_enabled = writer_config.get("writer_enabled") is True
+    if require_writer_enabled and not writer_enabled:
+        activation_blockers.insert(0, "runtime_writer_not_enabled")
     return {
         "schema_version": ACTIVATION_PREFLIGHT_SCHEMA_VERSION,
         "generated_at_utc": now.isoformat(),
@@ -876,10 +1012,18 @@ def build_cost_gate_learning_lane_activation_preflight(
             "runtime_source_ready_for_activation": (
                 source.get("source_activation_ready") is True
             ),
+            "runtime_writer_enabled": writer_enabled,
+            "runtime_writer_config_status": writer_status,
+            "runtime_writer_config_required": require_writer_enabled,
+            "runtime_writer_config_checked_from_env_file": runtime_env_file is not None,
+            "writer_disabled_or_unset_drop_risk": (
+                require_writer_enabled and not writer_enabled
+            ),
             "activation_ready": not activation_blockers,
         },
         "activation_blockers": activation_blockers,
         "source": source,
+        "writer_config": writer_config,
         "plan": plan,
         "ledger": ledger,
         "learning_loop": loop,
@@ -913,6 +1057,27 @@ def main(argv: list[str] | None = None) -> int:
         help="Expected git HEAD SHA/prefix for activation, e.g. PM-pushed origin/main.",
     )
     parser.add_argument(
+        "--runtime-env-file",
+        type=Path,
+        default=None,
+        help=(
+            "Optional runtime env file to inspect for "
+            "OPENCLAW_DEMO_LEARNING_LANE_WRITER and path overrides."
+        ),
+    )
+    require_writer_default = (
+        _parse_env_bool(os.environ.get(REQUIRE_WRITER_ENABLED_ENV))[0] is True
+    )
+    parser.add_argument(
+        "--require-writer-enabled",
+        action="store_true",
+        default=require_writer_default,
+        help=(
+            "Fail activation preflight unless OPENCLAW_DEMO_LEARNING_LANE_WRITER "
+            "is explicitly enabled in the inspected env."
+        ),
+    )
+    parser.add_argument(
         "--max-loop-age-seconds",
         type=int,
         default=DEFAULT_COST_GATE_LEARNING_LOOP_MAX_AGE_SECONDS,
@@ -929,6 +1094,8 @@ def main(argv: list[str] | None = None) -> int:
         args.data_dir,
         repo_root=args.repo_root,
         expected_head=args.expected_head,
+        runtime_env_file=args.runtime_env_file,
+        require_writer_enabled=args.require_writer_enabled,
         max_loop_age_seconds=args.max_loop_age_seconds,
         max_plan_age_seconds=args.max_plan_age_seconds,
     )
