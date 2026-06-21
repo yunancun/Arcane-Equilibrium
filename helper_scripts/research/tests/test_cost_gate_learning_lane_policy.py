@@ -31,6 +31,10 @@ from cost_gate_learning_lane.outcome_review import (
     BlockedOutcomeReviewConfig,
     build_blocked_signal_outcome_review,
 )
+from cost_gate_learning_lane.status import (
+    ACTIVATION_PREFLIGHT_SCHEMA_VERSION,
+    build_cost_gate_learning_lane_activation_preflight,
+)
 from cost_gate_learning_lane.price_observations import (
     PriceObservationBuildConfig,
     build_price_observation_artifact,
@@ -328,6 +332,241 @@ def test_alpha_discovery_surfaces_learning_loop_running_without_ledger_rows(
     assert row["learning_loop_heartbeat_present"] is True
     assert row["learning_loop_last_ledger_row_count"] == 0
     assert row["learning_loop_last_review_status"] == "NO_BLOCKED_SIGNAL_OUTCOMES"
+
+
+def test_activation_preflight_reports_not_accumulating_without_runtime_artifacts(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["schema_version"] == ACTIVATION_PREFLIGHT_SCHEMA_VERSION
+    assert preflight["status"] == "NOT_ACCUMULATING"
+    assert preflight["reason"] == "plan_present_but_writer_cron_or_ledger_not_observed"
+    assert preflight["answers"]["has_accumulated_ledger_rows"] is False
+    assert preflight["answers"]["currently_accumulating_evidence"] is False
+    assert preflight["answers"]["cost_gate_rejects_recorded"] is False
+    assert preflight["answers"]["silent_drop_risk"] is True
+    assert preflight["ledger"]["ledger_status"] == "MISSING"
+    assert preflight["learning_loop"]["learning_loop_status"] == "NOT_SEEN"
+    assert preflight["plan"]["main_cost_gate_adjustment"] == "NONE"
+    assert preflight["plan"]["order_authority"] == "NOT_GRANTED"
+    assert "probe_ledger_jsonl" in preflight["missing_links"]
+
+
+def test_activation_preflight_reports_loop_running_without_ledger_rows(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    heartbeat = data_dir / "cron_heartbeat" / "cost_gate_learning_lane.last_fire"
+    heartbeat.parent.mkdir(parents=True)
+    heartbeat.write_text("", encoding="utf-8")
+    heartbeat_ts = dt.datetime(2026, 6, 21, 11, 4, tzinfo=dt.timezone.utc).timestamp()
+    os.utime(heartbeat, (heartbeat_ts, heartbeat_ts))
+    log = data_dir / "logs" / "cost_gate_learning_lane.log"
+    log.parent.mkdir(parents=True)
+    log.write_text(
+        json.dumps({
+            "ts_utc": "2026-06-21T11:04:00Z",
+            "check": "cost_gate_learning_lane",
+            "ledger_row_count": 0,
+            "refresh_rc": 0,
+            "review_rc": 0,
+            "review_status": "NO_BLOCKED_SIGNAL_OUTCOMES",
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["status"] == "LOOP_RUNNING_NO_LEDGER_ROWS"
+    assert preflight["reason"] == "learning_loop_recent_but_no_probe_ledger_rows"
+    assert preflight["learning_loop"]["learning_loop_status"] == "RUNNING_NO_LEDGER_ROWS"
+    assert preflight["answers"]["silent_drop_risk"] is True
+    assert "runtime_ledger_writer_or_recent_cost_gate_reject_rows" in preflight["missing_links"]
+
+
+def test_activation_preflight_routes_admission_only_ledger_to_outcome_refresh(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    (lane_dir / "probe_ledger.jsonl").write_text(
+        json.dumps(
+            {
+                "record_type": "probe_admission_decision",
+                "generated_at_utc": "2026-06-21T11:02:00+00:00",
+                "attempt_id": "ctx-demo-ma_crossover-ETHUSDT-1782037200000",
+                "decision": "ORDER_AUTHORITY_NOT_GRANTED",
+                "allowed_to_submit_order": False,
+                "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                "event": _selected_reject_event(),
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    log = data_dir / "logs" / "cost_gate_learning_lane.log"
+    log.parent.mkdir(parents=True)
+    log.write_text(
+        json.dumps({
+            "ts_utc": "2026-06-21T11:04:00Z",
+            "ledger_row_count": 1,
+            "refresh_rc": 0,
+            "review_rc": 0,
+            "review_status": "NO_BLOCKED_SIGNAL_OUTCOMES",
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["status"] == "ADMISSION_ONLY_NEEDS_OUTCOME_REFRESH"
+    assert preflight["answers"]["has_accumulated_ledger_rows"] is True
+    assert preflight["answers"]["currently_accumulating_evidence"] is True
+    assert preflight["answers"]["cost_gate_rejects_recorded"] is True
+    assert preflight["answers"]["silent_drop_risk"] is False
+    assert preflight["ledger"]["ledger_status"] == "ADMISSION_ROWS_PRESENT"
+    assert preflight["next_actions"] == [
+        "run_cost_gate_outcome_refresh_for_blocked_signal_outcomes"
+    ]
+
+
+def test_activation_preflight_surfaces_blocked_outcome_review_candidate(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    ledger_rows = [
+        {
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-06-21T12:15:00+00:00",
+            "attempt_id": "blocked-1",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "realized_net_bps": 12.5,
+        },
+        {
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-06-21T13:15:00+00:00",
+            "attempt_id": "blocked-2",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "realized_net_bps": 4.0,
+        },
+        {
+            "record_type": "blocked_signal_outcome",
+            "generated_at_utc": "2026-06-21T14:15:00+00:00",
+            "attempt_id": "blocked-3",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "realized_net_bps": -1.0,
+        },
+    ]
+    (lane_dir / "probe_ledger.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in ledger_rows),
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 14, 30, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["status"] == "REVIEW_CANDIDATE_OPERATOR_REVIEW"
+    assert preflight["answers"]["blocked_signal_outcomes_recorded"] is True
+    assert preflight["answers"]["blocked_signal_profitability_review_available"] is True
+    assert preflight["ledger"]["blocked_signal_outcome_review_status"] == (
+        "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+    )
+    assert preflight["next_actions"] == [
+        "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+    ]
+
+
+def test_activation_preflight_fails_closed_when_source_files_missing(
+    tmp_path: Path,
+):
+    data_dir = tmp_path / "data"
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        repo_root=repo_root,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["status"] == "SOURCE_NOT_READY"
+    assert preflight["source"]["source_ready"] is False
+    assert preflight["source"]["source_status"] == "MISSING_FILES"
+    assert "source_sync" in preflight["missing_links"]
 
 
 def test_alpha_discovery_keeps_stale_cost_gate_plan_as_source_health_blocker(
