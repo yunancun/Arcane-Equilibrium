@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Demo-Learning Lane Outcome Writer
+
+- Added artifact-only `outcome_writer.py` and shared `contract.py` for the cost-gate demo-learning lane.
+- `runtime_adapter --record-outcomes` can append idempotent `probe_outcome` markout rows for admitted probes from local price observations, including gross/net bps and explicit cost.
+- These outcomes feed the existing failed-outcome auto-disable path; current plan still has `order_authority=NOT_GRANTED`, so this is learning infrastructure, not order routing or main cost-gate relaxation.
+
 ## 2026-06-21 Cost-Gate Demo-Learning Lane Rust Policy Seam
 
 - Added pure Rust `openclaw_engine::demo_learning_lane` policy + tests, mirroring the Python adapter inside the trading-authority codebase without hot-path wiring.
