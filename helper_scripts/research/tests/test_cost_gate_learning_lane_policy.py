@@ -655,6 +655,64 @@ def test_activation_preflight_reports_not_accumulating_without_runtime_artifacts
     assert "probe_ledger_jsonl" in preflight["missing_links"]
 
 
+def test_activation_preflight_rejects_recent_policy_artifact_when_policy_waits(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    waiting_plan = build_plan_from_payload(
+        _scorecard_payload(generated_at="2026-06-19T00:00:00+00:00"),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(waiting_plan),
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert waiting_plan["status"] == "WAIT_FOR_SCORECARD_REFRESH"
+    assert preflight["status"] == "PLAN_NOT_READY"
+    assert preflight["plan"]["plan_status"] == "POLICY_NOT_READY"
+    assert preflight["plan"]["plan_reason"] == (
+        "plan_policy_status_WAIT_FOR_SCORECARD_REFRESH"
+    )
+    assert preflight["plan"]["plan_policy_status"] == "WAIT_FOR_SCORECARD_REFRESH"
+    assert "demo_learning_lane_plan_latest" in preflight["activation_blockers"]
+
+
+def test_activation_preflight_requires_selected_probe_candidates_in_plan(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    plan["selected_probe_candidate_count"] = 0
+    plan["probe_candidates"] = []
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["status"] == "PLAN_NOT_READY"
+    assert preflight["plan"]["plan_status"] == "NO_SELECTED_CANDIDATES"
+    assert preflight["plan"]["plan_reason"] == "plan_has_no_selected_probe_candidates"
+    assert "demo_learning_lane_plan_latest" in preflight["activation_blockers"]
+
+
 def test_activation_preflight_surfaces_historical_scorecard_candidates(
     tmp_path: Path,
 ):
@@ -1034,6 +1092,11 @@ def test_activation_preflight_reports_loop_running_without_ledger_rows(
             "ts_utc": "2026-06-21T11:04:00Z",
             "check": "cost_gate_learning_lane",
             "ledger_row_count": 0,
+            "refresh_plan": True,
+            "plan_rc": 0,
+            "plan_policy_status": "READY_FOR_DEMO_LEARNING_PROBE",
+            "plan_gate_status": "OPERATOR_REVIEW",
+            "plan_selected_probe_candidate_count": 2,
             "materialize_rejects": True,
             "append_materialized_rejects": False,
             "materializer_rc": 0,
@@ -1058,6 +1121,14 @@ def test_activation_preflight_reports_loop_running_without_ledger_rows(
     assert preflight["status"] == "LOOP_RUNNING_NO_LEDGER_ROWS"
     assert preflight["reason"] == "learning_loop_recent_but_no_probe_ledger_rows"
     assert preflight["learning_loop"]["learning_loop_status"] == "RUNNING_NO_LEDGER_ROWS"
+    assert preflight["learning_loop"]["learning_loop_refresh_plan_enabled"] is True
+    assert preflight["learning_loop"]["learning_loop_last_plan_rc"] == 0
+    assert preflight["learning_loop"]["learning_loop_last_plan_policy_status"] == (
+        "READY_FOR_DEMO_LEARNING_PROBE"
+    )
+    assert preflight["learning_loop"][
+        "learning_loop_last_plan_selected_probe_candidate_count"
+    ] == 2
     assert preflight["learning_loop"]["learning_loop_last_materializer_status"] == (
         "MATERIALIZED_REJECT_ROWS_PRESENT"
     )
@@ -1076,6 +1147,54 @@ def test_activation_preflight_reports_loop_running_without_ledger_rows(
     assert preflight["answers"]["reject_materializer_appended_records"] == 0
     assert preflight["answers"]["silent_drop_risk"] is True
     assert "runtime_ledger_writer_or_recent_cost_gate_reject_rows" in preflight["missing_links"]
+
+
+def test_activation_preflight_treats_plan_refresh_failure_as_loop_error(
+    tmp_path: Path,
+):
+    data_dir = tmp_path
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    log = data_dir / "logs" / "cost_gate_learning_lane.log"
+    log.parent.mkdir(parents=True)
+    log.write_text(
+        json.dumps({
+            "ts_utc": "2026-06-21T11:04:00Z",
+            "check": "cost_gate_learning_lane",
+            "ledger_row_count": 0,
+            "refresh_plan": True,
+            "plan_rc": 7,
+            "materialize_rejects": True,
+            "append_materialized_rejects": True,
+            "materializer_rc": 0,
+            "refresh_rc": 0,
+            "review_rc": 0,
+            "review_status": "NO_BLOCKED_SIGNAL_OUTCOMES",
+        })
+        + "\n",
+        encoding="utf-8",
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["status"] == "LEARNING_LOOP_ERROR"
+    assert preflight["learning_loop"]["learning_loop_status"] == "ERROR"
+    assert preflight["learning_loop"]["learning_loop_last_plan_rc"] == 7
+    assert preflight["learning_loop"]["learning_loop_reason"] == (
+        "cost_gate_learning_plan_materializer_refresh_or_review_failed"
+    )
+    assert "cost_gate_learning_lane_cron_health" in preflight["missing_links"]
 
 
 def test_activation_preflight_routes_admission_only_ledger_to_outcome_refresh(

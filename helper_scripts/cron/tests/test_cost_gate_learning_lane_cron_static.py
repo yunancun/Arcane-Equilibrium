@@ -41,10 +41,13 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "cost_gate_learning_lane_cron.log" in src
     assert "cost_gate_learning_lane.log" in src
     assert "probe_ledger.jsonl" in src
+    assert "demo_learning_lane_plan_latest.json" in src
+    assert "demo_learning_lane_plan_${STAMP}.json" in src
     assert "outcome_refresh_latest.json" in src
     assert "blocked_outcome_review_latest.json" in src
     assert "historical_scorecard_review_latest.json" in src
     assert "reject_materializer_latest.json" in src
+    assert "cost_gate_learning_lane.policy" in src
     assert "cost_gate_learning_lane.reject_materializer" in src
     assert "cost_gate_learning_lane.outcome_refresh" in src
     assert "cost_gate_learning_lane.outcome_review" in src
@@ -52,9 +55,12 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "materializer_materialized_record_count" in src
     assert "materializer_appended_record_count" in src
     assert "materializer_decision_counts" in src
+    assert "plan_policy_status" in src
+    assert "plan_selected_probe_candidate_count" in src
     assert "--source-pg" in src
     assert "--record-blocked-outcomes" in src
     assert "--append-ledger" in src
+    assert "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN" in src
     assert "OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS" in src
     assert "OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS" in src
     assert "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES" in src
@@ -67,6 +73,9 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
 def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     src = _src(WRAPPER)
     assert 'PG_TIMEFRAME="${OPENCLAW_COST_GATE_LEARNING_PG_TIMEFRAME:-1m}"' in src
+    assert 'REFRESH_PLAN="${OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN:-1}"' in src
+    assert 'PLAN_MAX_SCORECARD_AGE_HOURS="${OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS:-24}"' in src
+    assert 'PLAN_MIN_CANDIDATE_SAMPLE="${OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE:-100}"' in src
     assert 'OUTCOME_HORIZON_MINUTES="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES:-60}"' in src
     assert 'OUTCOME_COST_BPS="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_COST_BPS:-4.0}"' in src
     assert 'MAX_ENTRY_DELAY_MS="${OPENCLAW_COST_GATE_LEARNING_MAX_ENTRY_DELAY_MS:-300000}"' in src
@@ -81,6 +90,9 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'REVIEW_MIN_OUTCOMES="${OPENCLAW_COST_GATE_REVIEW_MIN_OUTCOMES_PER_SIDE_CELL:-3}"' in src
     assert 'REVIEW_MIN_AVG_NET_BPS="${OPENCLAW_COST_GATE_REVIEW_MIN_AVG_NET_BPS:-0.0}"' in src
     assert 'REVIEW_MIN_NET_POSITIVE_PCT="${OPENCLAW_COST_GATE_REVIEW_MIN_NET_POSITIVE_PCT:-60.0}"' in src
+    assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN"' in src
+    assert 'validate_int "OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS"' in src
+    assert 'validate_int "OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS"' in src
@@ -89,6 +101,18 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_HISTORICAL_MAX_SCORECARD_AGE_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_HISTORICAL_MIN_CANDIDATE_SAMPLE"' in src
+
+
+def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
+    src = _src(WRAPPER)
+    assert 'PLAN_ARGS=(' in src
+    assert "-m cost_gate_learning_lane.policy" in src
+    assert 'cp "$PLAN_OUT" "$PLAN_JSON"' in src
+    assert 'PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN"' in src
+    assert "plan_rc=" in src
+    plan_index = src.index('"$PYBIN" "${PLAN_ARGS[@]}"')
+    materializer_index = src.index('"$PYBIN" "${MATERIALIZER_ARGS[@]}"')
+    assert plan_index < materializer_index
 
 
 def test_installer_dry_run_apply_gate_and_reversible_entry() -> None:
