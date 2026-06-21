@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Polymarket Promotion-Ready Replay-History Gate
+
+- Polymarket `READY_FOR_AEG_CHAIN` IC artifacts no longer count as profitability-scorecard `promotion_ready` until candidate replay is built, replay history is AEG-recheck-ready, and replay-history execution realism is `PASS`.
+- Missing history now routes to data coverage, insufficient dated history to sample gate, and unmeasured/failed execution realism to robustness wait.
+- This preserves AEG candidate artifacts while preventing stale or under-verified Polymarket IC from appearing as alpha promotion readiness.
+
 ## 2026-06-21 Cost-Gate Killboard Source-Readiness Blocker
 
 - Runtime alpha latest still showed `cost_gate_demo_learning_lane` as `probe_ready` even though runtime source was behind/dirty and no learning cron/ledger/materializer was active; this is a stale-runtime-code artifact, not true readiness.
