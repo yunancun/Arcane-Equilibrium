@@ -60,6 +60,9 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "materializer_decision_counts" in src
     assert "scorecard_status" in src
     assert "scorecard_probe_candidate_count" in src
+    assert "scorecard_horizon_stability_status" in src
+    assert "scorecard_horizon_stability_next_trigger" in src
+    assert "scorecard_horizon_stability_horizons" in src
     assert "plan_policy_status" in src
     assert "plan_selected_probe_candidate_count" in src
     assert "preinstall_refresh_only" in src
@@ -89,6 +92,7 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'PLAN_MAX_SCORECARD_AGE_HOURS="${OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS:-24}"' in src
     assert 'PLAN_MIN_CANDIDATE_SAMPLE="${OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE:-100}"' in src
     assert 'OUTCOME_HORIZON_MINUTES="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES:-60}"' in src
+    assert 'SCORECARD_HORIZON_MINUTES_LIST="${OPENCLAW_COST_GATE_SCORECARD_HORIZON_MINUTES_LIST:-$OUTCOME_HORIZON_MINUTES}"' in src
     assert 'OUTCOME_COST_BPS="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_COST_BPS:-4.0}"' in src
     assert 'MAX_ENTRY_DELAY_MS="${OPENCLAW_COST_GATE_LEARNING_MAX_ENTRY_DELAY_MS:-300000}"' in src
     assert 'HISTORICAL_MAX_SCORECARD_AGE_HOURS="${OPENCLAW_COST_GATE_HISTORICAL_MAX_SCORECARD_AGE_HOURS:-36}"' in src
@@ -109,6 +113,8 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE"' in src
+    assert "OPENCLAW_COST_GATE_SCORECARD_HORIZON_MINUTES_LIST must be comma-separated integers" in src
+    assert '^[0-9]+(,[0-9]+)*$' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS"' in src
@@ -124,6 +130,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert 'SCORECARD_ARGS=(' in src
     assert 'PLAN_ARGS=(' in src
     assert "cost_gate_reject_counterfactual.py" in src
+    assert '--horizon-minutes-list "$SCORECARD_HORIZON_MINUTES_LIST"' in src
     assert "-m cost_gate_learning_lane.policy" in src
     assert 'cp "$SCORECARD_JSON_OUT" "$SCORECARD_JSON"' in src
     assert 'cp "$PLAN_OUT" "$PLAN_JSON"' in src

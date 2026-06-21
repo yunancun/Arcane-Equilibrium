@@ -37,6 +37,7 @@ PLAN_MAX_SCORECARD_AGE_HOURS="${OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS:
 PLAN_MIN_CANDIDATE_SAMPLE="${OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE:-100}"
 PG_TIMEFRAME="${OPENCLAW_COST_GATE_LEARNING_PG_TIMEFRAME:-1m}"
 OUTCOME_HORIZON_MINUTES="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES:-60}"
+SCORECARD_HORIZON_MINUTES_LIST="${OPENCLAW_COST_GATE_SCORECARD_HORIZON_MINUTES_LIST:-$OUTCOME_HORIZON_MINUTES}"
 OUTCOME_COST_BPS="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_COST_BPS:-4.0}"
 MAX_ENTRY_DELAY_MS="${OPENCLAW_COST_GATE_LEARNING_MAX_ENTRY_DELAY_MS:-300000}"
 PG_STATEMENT_TIMEOUT_MS="${OPENCLAW_COST_GATE_LEARNING_PG_STATEMENT_TIMEOUT_MS:-180000}"
@@ -96,6 +97,10 @@ validate_bool01 "OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY" "$PREINSTA
 validate_int "OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS" "$PLAN_MAX_SCORECARD_AGE_HOURS"
 validate_int "OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE" "$PLAN_MIN_CANDIDATE_SAMPLE"
 validate_int "OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES" "$OUTCOME_HORIZON_MINUTES"
+if [[ ! "$SCORECARD_HORIZON_MINUTES_LIST" =~ ^[0-9]+(,[0-9]+)*$ ]]; then
+    echo "[$(ts)] FATAL: OPENCLAW_COST_GATE_SCORECARD_HORIZON_MINUTES_LIST must be comma-separated integers: ${SCORECARD_HORIZON_MINUTES_LIST}" | tee -a "$LOG" >&2
+    exit 2
+fi
 validate_decimal "OPENCLAW_COST_GATE_LEARNING_OUTCOME_COST_BPS" "$OUTCOME_COST_BPS"
 validate_int "OPENCLAW_COST_GATE_LEARNING_MAX_ENTRY_DELAY_MS" "$MAX_ENTRY_DELAY_MS"
 validate_int "OPENCLAW_COST_GATE_LEARNING_PG_STATEMENT_TIMEOUT_MS" "$PG_STATEMENT_TIMEOUT_MS"
@@ -175,6 +180,7 @@ SCORECARD_ARGS=(
     "$BASE/helper_scripts/db/audit/cost_gate_reject_counterfactual.py"
     --lookback-hours "$SCORECARD_LOOKBACK_HOURS"
     --horizon-minutes "$OUTCOME_HORIZON_MINUTES"
+    --horizon-minutes-list "$SCORECARD_HORIZON_MINUTES_LIST"
     --limit "$SCORECARD_LIMIT"
     --friction-bps "$OUTCOME_COST_BPS"
     --min-probe-sample "$PLAN_MIN_CANDIDATE_SAMPLE"
@@ -388,6 +394,15 @@ status = {
     "scorecard_status": (scorecard.get("learning_lane_scorecard") or {}).get("status"),
     "scorecard_probe_candidate_count": (
         (scorecard.get("learning_lane_scorecard") or {}).get("probe_candidate_count")
+    ),
+    "scorecard_horizon_stability_status": (
+        ((scorecard.get("learning_lane_scorecard") or {}).get("horizon_stability_scorecard") or {}).get("status")
+    ),
+    "scorecard_horizon_stability_next_trigger": (
+        ((scorecard.get("learning_lane_scorecard") or {}).get("horizon_stability_scorecard") or {}).get("next_trigger")
+    ),
+    "scorecard_horizon_stability_horizons": (
+        ((scorecard.get("learning_lane_scorecard") or {}).get("horizon_stability_scorecard") or {}).get("horizons_minutes")
     ),
     "plan_artifact_path": os.environ["PLAN_OUT"],
     "plan_latest_path": os.environ["PLAN_JSON"],

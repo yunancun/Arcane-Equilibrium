@@ -403,6 +403,12 @@ def build_plan_from_payload(
     validate_policy_config(cfg)
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     scorecard = _dict(payload.get("learning_lane_scorecard"))
+    horizon_stability = _dict(scorecard.get("horizon_stability_scorecard"))
+    stability_by_side_cell = {
+        str(row.get("side_cell_key")): row
+        for row in _list(horizon_stability.get("top_side_cells"))
+        if isinstance(row, dict) and row.get("side_cell_key")
+    }
     scorecard_schema = str(scorecard.get("schema_version") or "")
     generated_at = payload.get("generated_at_utc")
     parsed_generated_at = _parse_dt(generated_at)
@@ -446,10 +452,20 @@ def build_plan_from_payload(
         ranked = _rank_candidates(probe_rows)
     selected = ranked[: cfg.max_probe_side_cells]
     per_cell_budget = _probe_budget_for_candidates(len(selected), cfg)
-    probe_candidates = [
-        _candidate_to_probe(row, max_probe_orders=per_cell_budget, cfg=cfg)
-        for row in selected
-    ]
+    probe_candidates = []
+    for row in selected:
+        candidate = _candidate_to_probe(row, max_probe_orders=per_cell_budget, cfg=cfg)
+        stability = stability_by_side_cell.get(str(candidate.get("side_cell_key")))
+        if stability:
+            candidate["horizon_stability"] = {
+                "status": stability.get("status"),
+                "reason": stability.get("reason"),
+                "candidate_horizons": stability.get("candidate_horizons"),
+                "best_horizon_minutes": stability.get("best_horizon_minutes"),
+                "best_avg_net_bps": stability.get("best_avg_net_bps"),
+                "best_net_positive_pct": stability.get("best_net_positive_pct"),
+            }
+        probe_candidates.append(candidate)
     if source_error:
         probe_candidates = []
         per_cell_budget = 0
@@ -506,6 +522,12 @@ def build_plan_from_payload(
             "profit_opportunity_ranking_status": profit_ranking.get("status"),
             "profit_opportunity_ranking_next_trigger": profit_ranking.get("next_trigger"),
             "probe_candidate_ranking_source": ranking_source,
+            "horizon_stability_schema_version": horizon_stability.get("schema_version"),
+            "horizon_stability_status": horizon_stability.get("status"),
+            "horizon_stability_next_trigger": horizon_stability.get("next_trigger"),
+            "horizon_stability_horizons_minutes": horizon_stability.get(
+                "horizons_minutes"
+            ),
             "source_error": source_error,
         },
         "coverage": payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {},

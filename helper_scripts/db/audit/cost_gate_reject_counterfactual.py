@@ -16,7 +16,7 @@ No PG writes, no order placement, no risk/config mutation.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from decimal import Decimal
 import json
@@ -307,6 +307,30 @@ def annotate_learning_lane_rows(
     return annotated
 
 
+def parse_horizon_minutes_list(raw: str | None, *, fallback: int) -> tuple[int, ...]:
+    """Parse a comma-separated horizon list while preserving first-seen order."""
+    if not raw:
+        return (fallback,)
+    out: list[int] = []
+    seen: set[int] = set()
+    for part in raw.split(","):
+        text = part.strip()
+        if not text:
+            continue
+        try:
+            horizon = int(text)
+        except ValueError as exc:
+            raise ValueError("--horizon-minutes-list must contain integers") from exc
+        if horizon < 1 or horizon > 24 * 60:
+            raise ValueError("--horizon-minutes-list values must be in [1, 1440]")
+        if horizon not in seen:
+            out.append(horizon)
+            seen.add(horizon)
+    if not out:
+        raise ValueError("--horizon-minutes-list did not contain any horizons")
+    return tuple(out)
+
+
 def _as_int(value: Any) -> int:
     try:
         return int(value or 0)
@@ -498,10 +522,162 @@ def build_profit_opportunity_ranking(
     }
 
 
+def build_horizon_stability_scorecard(
+    cfg: AuditConfig,
+    horizon_rows_by_horizon: dict[int, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    """Compare blocked side-cells across counterfactual horizons."""
+    horizons = sorted(int(h) for h in horizon_rows_by_horizon)
+    if not horizons:
+        horizons = [cfg.horizon_minutes]
+        horizon_rows_by_horizon = {cfg.horizon_minutes: []}
+
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for horizon in horizons:
+        horizon_cfg = replace(cfg, horizon_minutes=horizon)
+        for row in annotate_learning_lane_rows(
+            horizon_cfg,
+            horizon_rows_by_horizon.get(horizon, []),
+        ):
+            components = _profit_priority_components(horizon_cfg, row)
+            enriched = dict(row)
+            enriched["horizon_minutes"] = horizon
+            enriched["priority_score"] = round(sum(components.values()), 4)
+            grouped.setdefault(_side_cell_key(enriched), []).append(enriched)
+
+    side_cells: list[dict[str, Any]] = []
+    counts: dict[str, int] = {}
+    for key, rows in grouped.items():
+        rows = sorted(rows, key=lambda row: int(row["horizon_minutes"]))
+        candidate_rows = [
+            row for row in rows
+            if row.get("learning_lane_action") == "LEARNING_PROBE_CANDIDATE"
+        ]
+        block_rows = [
+            row for row in rows
+            if row.get("learning_lane_action") == "BLOCK_CONFIRMED"
+        ]
+        best = max(
+            rows,
+            key=lambda row: (
+                _sort_float(row.get("priority_score")),
+                _sort_float(row.get("avg_net_bps")),
+                _as_int(row.get("n")),
+            ),
+        )
+        candidate_horizons = [int(row["horizon_minutes"]) for row in candidate_rows]
+        block_horizons = [int(row["horizon_minutes"]) for row in block_rows]
+        observed_horizons = [int(row["horizon_minutes"]) for row in rows]
+        if len(horizons) <= 1:
+            status = "SINGLE_HORIZON_ONLY"
+            reason = "only_one_counterfactual_horizon_available"
+        elif len(candidate_horizons) >= 2:
+            status = "CANDIDATE_MULTI_HORIZON_STABLE"
+            reason = "side_cell_clears_learning_thresholds_on_multiple_horizons"
+        elif len(candidate_horizons) == 1 and block_horizons:
+            status = "MIXED_HORIZON_RESPONSE"
+            reason = "side_cell_candidate_on_one_horizon_but_blocked_on_another"
+        elif len(candidate_horizons) == 1:
+            status = "CANDIDATE_HORIZON_SPECIFIC"
+            reason = "side_cell_clears_learning_thresholds_on_one_horizon_only"
+        elif len(block_horizons) == len(observed_horizons):
+            status = "BLOCK_CONFIRMED_MULTI_HORIZON"
+            reason = "side_cell_block_confirmed_on_all_observed_horizons"
+        elif block_horizons:
+            status = "NO_CANDIDATE_MIXED_BLOCK"
+            reason = "side_cell_has_blocked_horizons_and_no_candidate_horizon"
+        else:
+            status = "NO_HORIZON_CANDIDATE"
+            reason = "side_cell_has_no_learning_candidate_horizon"
+        counts[status] = counts.get(status, 0) + 1
+        side_cells.append(
+            {
+                "side_cell_key": key,
+                "status": status,
+                "reason": reason,
+                "observed_horizons": observed_horizons,
+                "candidate_horizons": candidate_horizons,
+                "block_confirmed_horizons": block_horizons,
+                "best_horizon_minutes": int(best["horizon_minutes"]),
+                "best_learning_lane_action": best.get("learning_lane_action"),
+                "best_priority_score": _as_float(best.get("priority_score")),
+                "best_avg_net_bps": _as_float(best.get("avg_net_bps")),
+                "best_p50_gross_bps": _as_float(best.get("p50_gross_bps")),
+                "best_net_positive_pct": _as_float(best.get("net_positive_pct")),
+                "horizon_rows": [
+                    {
+                        "horizon_minutes": int(row["horizon_minutes"]),
+                        "learning_lane_action": row.get("learning_lane_action"),
+                        "learning_lane_reason": row.get("learning_lane_reason"),
+                        "n": _as_int(row.get("n")),
+                        "avg_net_bps": _as_float(row.get("avg_net_bps")),
+                        "p50_gross_bps": _as_float(row.get("p50_gross_bps")),
+                        "net_positive_pct": _as_float(row.get("net_positive_pct")),
+                        "priority_score": _as_float(row.get("priority_score")),
+                    }
+                    for row in rows
+                ],
+                "order_authority": "NOT_GRANTED",
+                "main_cost_gate_adjustment": "NONE",
+                "promotion_evidence": False,
+            }
+        )
+
+    side_cells.sort(
+        key=lambda row: (
+            0 if str(row.get("status")) == "CANDIDATE_MULTI_HORIZON_STABLE" else 1,
+            0 if str(row.get("status")) == "CANDIDATE_HORIZON_SPECIFIC" else 1,
+            0 if str(row.get("status")) == "MIXED_HORIZON_RESPONSE" else 1,
+            -len(row.get("candidate_horizons") or []),
+            -float(row.get("best_priority_score") or 0.0),
+            str(row.get("side_cell_key")),
+        )
+    )
+    if len(horizons) <= 1:
+        status = "SINGLE_HORIZON_ONLY"
+        next_trigger = "run_counterfactual_scorecard_across_multiple_horizons"
+    elif counts.get("CANDIDATE_MULTI_HORIZON_STABLE", 0) > 0:
+        status = "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
+        next_trigger = "operator_review_multi_horizon_side_cells_for_bounded_demo_learning_lane"
+    elif (
+        counts.get("CANDIDATE_HORIZON_SPECIFIC", 0)
+        or counts.get("MIXED_HORIZON_RESPONSE", 0)
+    ):
+        status = "HORIZON_SPECIFIC_PROFIT_LEARNING_CANDIDATES_PRESENT"
+        next_trigger = "review_best_horizon_before_bounded_demo_learning_lane"
+    elif (
+        side_cells
+        and counts.get("BLOCK_CONFIRMED_MULTI_HORIZON", 0) == len(side_cells)
+    ):
+        status = "MULTI_HORIZON_BLOCK_CONFIRMED"
+        next_trigger = "keep_cost_gate_blocked_for_multi_horizon_confirmed_side_cells"
+    else:
+        status = "NO_MULTI_HORIZON_PROFIT_CANDIDATE"
+        next_trigger = "continue_collecting_multi_horizon_cost_gate_counterfactuals"
+    return {
+        "schema_version": "cost_gate_reject_horizon_stability_v1",
+        "status": status,
+        "next_trigger": next_trigger,
+        "horizons_minutes": horizons,
+        "horizon_count": len(horizons),
+        "side_cell_count": len(side_cells),
+        "status_counts": counts,
+        "top_side_cells": side_cells[:20],
+        "boundary": {
+            "order_authority": "NOT_GRANTED",
+            "main_cost_gate_adjustment": "NONE",
+            "promotion_evidence": False,
+            "runtime_mutation": "NONE",
+        },
+    }
+
+
 def build_learning_lane_scorecard(
     cfg: AuditConfig,
     coverage: dict[str, Any],
     rows: list[dict[str, Any]],
+    *,
+    horizon_rows_by_horizon: dict[int, list[dict[str, Any]]] | None = None,
 ) -> dict[str, Any]:
     annotated = annotate_learning_lane_rows(cfg, rows)
     action_counts: dict[str, int] = {}
@@ -544,6 +720,10 @@ def build_learning_lane_scorecard(
         annotated,
         action_counts,
     )
+    horizon_stability = build_horizon_stability_scorecard(
+        cfg,
+        horizon_rows_by_horizon or {cfg.horizon_minutes: rows},
+    )
     return {
         "schema_version": "cost_gate_reject_counterfactual_v2",
         "status": status,
@@ -560,6 +740,7 @@ def build_learning_lane_scorecard(
         "probe_candidates": probe_candidates[:20],
         "block_confirmed": block_confirmed[:20],
         "profit_opportunity_ranking": profit_opportunity_ranking,
+        "horizon_stability_scorecard": horizon_stability,
         "rows": annotated,
     }
 
@@ -577,10 +758,16 @@ def build_json_payload(
     coverage: dict[str, Any],
     rows: list[dict[str, Any]],
     *,
+    horizon_rows_by_horizon: dict[int, list[dict[str, Any]]] | None = None,
     generated: str | None = None,
 ) -> dict[str, Any]:
     generated = generated or datetime.now(timezone.utc).isoformat(timespec="seconds")
-    scorecard = build_learning_lane_scorecard(cfg, coverage, rows)
+    scorecard = build_learning_lane_scorecard(
+        cfg,
+        coverage,
+        rows,
+        horizon_rows_by_horizon=horizon_rows_by_horizon,
+    )
     return {
         "generated_at_utc": generated,
         "engine_modes": list(cfg.engine_modes),
@@ -604,10 +791,16 @@ def render_markdown(
     coverage: dict[str, Any],
     rows: list[dict[str, Any]],
     *,
+    horizon_rows_by_horizon: dict[int, list[dict[str, Any]]] | None = None,
     generated: str | None = None,
 ) -> str:
     generated = generated or datetime.now(timezone.utc).isoformat(timespec="seconds")
-    scorecard = build_learning_lane_scorecard(cfg, coverage, rows)
+    scorecard = build_learning_lane_scorecard(
+        cfg,
+        coverage,
+        rows,
+        horizon_rows_by_horizon=horizon_rows_by_horizon,
+    )
     lines = [
         "# Cost Gate Reject Counterfactual Audit",
         "",
@@ -673,6 +866,29 @@ def render_markdown(
             f"{_fmt(row['avg_net_bps'])} | {_fmt(row['p50_gross_bps'])} | "
             f"{_fmt(row['net_positive_pct'])} | {row['next_action']} |"
         )
+    stability = scorecard["horizon_stability_scorecard"]
+    lines.extend(
+        [
+            "",
+            "### Horizon Stability",
+            "",
+            f"- Status: `{stability['status']}`",
+            f"- Next trigger: `{stability['next_trigger']}`",
+            f"- Horizons: `{','.join(str(h) for h in stability['horizons_minutes'])}`",
+            "- Boundary: horizon comparison only; no order authority or Cost Gate lowering.",
+            "",
+            "| rank | side_cell | status | candidate_horizons | best_horizon | best_avg_net | best_net+% |",
+            "|---:|---|---|---|---:|---:|---:|",
+        ]
+    )
+    for idx, row in enumerate(stability["top_side_cells"][:10], start=1):
+        lines.append(
+            "| "
+            f"{idx} | {row['side_cell_key']} | {row['status']} | "
+            f"{','.join(str(h) for h in row.get('candidate_horizons') or [])} | "
+            f"{row.get('best_horizon_minutes')} | {_fmt(row.get('best_avg_net_bps'))} | "
+            f"{_fmt(row.get('best_net_positive_pct'))} |"
+        )
     lines.extend(
         [
             "",
@@ -718,6 +934,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--engine-mode", action="append", default=["demo", "live_demo"])
     parser.add_argument("--lookback-hours", type=int, default=168)
     parser.add_argument("--horizon-minutes", type=int, default=60)
+    parser.add_argument(
+        "--horizon-minutes-list",
+        help="Optional comma-separated horizons for stability comparison, e.g. 15,60,240.",
+    )
     parser.add_argument("--limit", type=int, default=50_000)
     parser.add_argument("--friction-bps", type=float, default=4.0)
     parser.add_argument("--strategy")
@@ -734,6 +954,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
+    horizons = parse_horizon_minutes_list(
+        args.horizon_minutes_list,
+        fallback=args.horizon_minutes,
+    )
     cfg = AuditConfig(
         engine_modes=tuple(args.engine_mode),
         lookback_hours=args.lookback_hours,
@@ -760,18 +984,40 @@ def main() -> int:
         conn.rollback()
         conn.set_session(readonly=True, autocommit=True)
         coverage = fetch_coverage(conn, cfg)
-        rows = fetch_counterfactual_rows(conn, cfg)
+        horizon_rows_by_horizon = {
+            horizon: fetch_counterfactual_rows(
+                conn,
+                replace(cfg, horizon_minutes=horizon),
+            )
+            for horizon in horizons
+        }
+        rows = horizon_rows_by_horizon.get(args.horizon_minutes)
+        if rows is None:
+            rows = fetch_counterfactual_rows(conn, cfg)
+            horizon_rows_by_horizon[args.horizon_minutes] = rows
     finally:
         conn.close()
     generated = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    report = render_markdown(cfg, coverage, rows, generated=generated)
+    report = render_markdown(
+        cfg,
+        coverage,
+        rows,
+        horizon_rows_by_horizon=horizon_rows_by_horizon,
+        generated=generated,
+    )
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(report, encoding="utf-8")
     else:
         print(report, end="")
     if args.json_output:
-        payload = build_json_payload(cfg, coverage, rows, generated=generated)
+        payload = build_json_payload(
+            cfg,
+            coverage,
+            rows,
+            horizon_rows_by_horizon=horizon_rows_by_horizon,
+            generated=generated,
+        )
         args.json_output.parent.mkdir(parents=True, exist_ok=True)
         args.json_output.write_text(
             json.dumps(payload, indent=2, sort_keys=True, default=_json_default) + "\n",
