@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Read-Only Kline Observation Adapter
+
+- Extended `cost_gate_learning_lane.price_observations` with `--source-pg`, a read-only SELECT-only Adapter over local `market.klines` for ledger-derived observation windows.
+- The Adapter reuses `connect_report_pg`, rolls back setup state, and switches to `readonly=True, autocommit=True`; local file sourcing remains available through `--source-prices`.
+- This moves blocked-signal outcome generation closer to autonomous evidence accumulation, but still adds no PG write, Bybit call, runtime mutation, order authority, or Cost Gate relaxation.
+
 ## 2026-06-21 Cost-Gate Price Observation Builder
 
 - Added artifact-only `cost_gate_learning_lane.price_observations` to turn probe ledger admission rows into required local price observation windows.

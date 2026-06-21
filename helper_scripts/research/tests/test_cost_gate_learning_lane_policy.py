@@ -23,7 +23,9 @@ from cost_gate_learning_lane.outcome_writer import (
 from cost_gate_learning_lane.price_observations import (
     PriceObservationBuildConfig,
     build_price_observation_artifact,
+    build_market_klines_observation_sql,
     build_price_observations_from_rows,
+    fetch_market_kline_price_rows,
     required_price_observation_windows,
     write_price_observation_artifact,
 )
@@ -118,6 +120,36 @@ def _scorecard_payload(generated_at: str = "2026-06-21T10:00:00+00:00") -> dict:
             "rows": rows,
         },
     }
+
+
+class _FakeKlineCursor:
+    description = [("symbol",), ("ts_ms",), ("close",)]
+
+    def __init__(self, conn):
+        self.conn = conn
+        self._rows = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, sql, params):
+        self.conn.executions.append((sql, params))
+        self._rows = self.conn.rows_by_symbol.get(params[0], [])
+
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeKlineConn:
+    def __init__(self, rows_by_symbol):
+        self.rows_by_symbol = rows_by_symbol
+        self.executions = []
+
+    def cursor(self):
+        return _FakeKlineCursor(self)
 
 
 def test_policy_plan_keeps_main_gate_closed_and_selects_only_probe_candidates():
@@ -667,6 +699,69 @@ def test_price_observation_builder_filters_rows_and_writes_adapter_compatible_ar
 
     assert read_price_observations(json_path) == observations
     assert read_price_observations(jsonl_path) == observations
+
+
+def test_price_observation_pg_adapter_is_read_only_and_feeds_observation_builder():
+    sql = build_market_klines_observation_sql()
+    lowered = sql.lower()
+    assert "market.klines" in sql
+    for token in ("insert", "update", "delete", "alter", "drop"):
+        assert token not in lowered
+
+    windows = [
+        {
+            "symbol": "ETHUSDT",
+            "start_ts_ms": 1_782_037_200_000,
+            "end_ts_ms": 1_782_041_100_000,
+        },
+        {
+            "symbol": "BTCUSDT",
+            "start_ts_ms": 1_782_037_200_000,
+            "end_ts_ms": 1_782_037_260_000,
+        },
+    ]
+    conn = _FakeKlineConn(
+        {
+            "ETHUSDT": [
+                ("ETHUSDT", 1_782_037_200_000, 2000.0),
+                ("ETHUSDT", 1_782_040_800_000, 2010.0),
+            ],
+            "BTCUSDT": [("BTCUSDT", 1_782_037_200_000, 100_000.0)],
+        }
+    )
+
+    rows = fetch_market_kline_price_rows(conn, windows, timeframe="1m")
+
+    assert [params[0] for _sql, params in conn.executions] == ["BTCUSDT", "ETHUSDT"]
+    assert all(params[1] == "1m" for _sql, params in conn.executions)
+    assert all(params[2].tzinfo == dt.timezone.utc for _sql, params in conn.executions)
+    assert rows == [
+        {
+            "symbol": "BTCUSDT",
+            "ts_ms": 1_782_037_200_000,
+            "close": 100_000.0,
+            "timeframe": "1m",
+            "source": "pg_market_klines",
+        },
+        {
+            "symbol": "ETHUSDT",
+            "ts_ms": 1_782_037_200_000,
+            "close": 2000.0,
+            "timeframe": "1m",
+            "source": "pg_market_klines",
+        },
+        {
+            "symbol": "ETHUSDT",
+            "ts_ms": 1_782_040_800_000,
+            "close": 2010.0,
+            "timeframe": "1m",
+            "source": "pg_market_klines",
+        },
+    ]
+
+    observations = build_price_observations_from_rows(rows, windows)
+    assert observations[0]["source"] == "pg_market_klines"
+    assert observations[0]["timeframe"] == "1m"
 
 
 def test_runtime_adapter_outcome_rows_are_idempotent_and_feed_disable():
