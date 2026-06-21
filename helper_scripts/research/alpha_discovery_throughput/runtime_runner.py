@@ -27,7 +27,7 @@ from polymarket_leadlag import replay_history as polymarket_replay_history
 from . import RUNNER_VERSION
 from .discovery_loop import build_discovery_plan
 
-RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v3"
+RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v4"
 DEFAULT_MAX_ARTIFACT_AGE_SECONDS = 6 * 60 * 60
 DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS = 36 * 60 * 60
 DEFAULT_POLYMARKET_REPLAY_HISTORY_REPORT_LIMIT = 4096
@@ -1541,6 +1541,9 @@ def build_runtime_killboard(
         else {}
     )
     promotion_ready_count = _int(scorecard.get("promotion_ready_count"))
+    runtime_source_activation_ready = (
+        runtime_source.get("source_activation_ready") is True
+    )
     source_ok_count = sum(1 for arm in arms if arm.get("source_ok") is True)
     source_present_count = sum(
         1 for arm in arms
@@ -1563,9 +1566,7 @@ def build_runtime_killboard(
             "active_arm_count": active_arm_count,
             "source_ok_count": source_ok_count,
             "source_present_count": source_present_count,
-            "runtime_source_activation_ready": runtime_source.get(
-                "source_activation_ready"
-            ),
+            "runtime_source_activation_ready": runtime_source_activation_ready,
             "runtime_source_activation_status": runtime_source.get(
                 "source_activation_status"
             ),
@@ -1579,9 +1580,15 @@ def build_runtime_killboard(
             "wait": counts.get("WAIT", 0),
             "block": counts.get("BLOCK", 0),
             "promotion_ready_count": promotion_ready_count,
+            "promotion_ready_candidate_found": promotion_ready_count > 0,
             "aeg_candidate_artifact_found": counts.get("READY_FOR_AEG_CHAIN", 0) > 0,
-            "actionable_alpha_found": promotion_ready_count > 0,
-            "actionable_probe_found": counts.get("READY_FOR_PROBE", 0) > 0,
+            "actionable_alpha_found": (
+                promotion_ready_count > 0 and runtime_source_activation_ready
+            ),
+            "actionable_probe_found": (
+                counts.get("READY_FOR_PROBE", 0) > 0
+                and runtime_source_activation_ready
+            ),
         },
         "runtime_source": runtime_source,
         "discovery_plan": plan,
@@ -1614,6 +1621,7 @@ def _history_row(killboard: dict[str, Any]) -> dict[str, Any]:
             "runtime_source_expected_head_status"
         ),
         "promotion_ready_count": kb.get("promotion_ready_count"),
+        "promotion_ready_candidate_found": kb.get("promotion_ready_candidate_found"),
         "aeg_candidate_artifact_found": kb.get("aeg_candidate_artifact_found"),
         "actionable_alpha_found": kb.get("actionable_alpha_found"),
         "actionable_probe_found": kb.get("actionable_probe_found"),
