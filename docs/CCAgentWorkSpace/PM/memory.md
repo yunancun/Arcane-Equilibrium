@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Runtime Killboard Learning Completion Evidence v6
+
+- Runtime killboard schema is now `alpha_discovery_runtime_killboard_v6`.
+- Killboard/history mirror top learning task completion gate/status, completion evidence count, compact evidence, evidence key count, and Cost Gate top blocked-review candidate fields.
+- This is artifact visibility only; runtime source still requires operator-approved reconcile before current code can refresh runtime artifacts.
+
 ## 2026-06-22 Learning Worklist Cost Gate Review Evidence v3
 
 - Alpha learning worklist schema is now `alpha_learning_worklist_v3`.

@@ -27,6 +27,7 @@ from alpha_discovery_throughput.runtime_runner import (
     collect_runtime_arms,
     run_once,
     _latest_json_line,
+    _learning_summary,
 )
 from alpha_discovery_throughput.signal_manifest import build_signal_spec, validate_signal_manifest
 from cost_gate_learning_lane.status import REQUIRED_SOURCE_RELATIVE_PATHS
@@ -53,6 +54,62 @@ def test_latest_json_line_handles_oversized_status_line(tmp_path: Path):
     assert err is None
     assert row is not None
     assert row["status"] == "latest"
+
+
+def test_learning_summary_mirrors_completion_and_top_evidence_fields():
+    summary = _learning_summary({
+        "status": "OPERATOR_GATED_LEARNING_READY",
+        "task_count": 1,
+        "operator_required_count": 1,
+        "runtime_mutation_required_count": 0,
+        "engineering_actionable_count": 1,
+        "top_task": {
+            "task_id": "cost_gate_demo_learning_lane:operator_probe_review:x",
+            "arm_id": "cost_gate_demo_learning_lane",
+            "task_type": "operator_probe_review",
+            "learning_objective": (
+                "operator_review_top_blocked_signal_side_cell_before_bounded_demo_probe"
+            ),
+            "completion_gate": (
+                "operator_authorization_recorded_and_probe_preflight_passes"
+            ),
+            "completion_status": "PENDING_EVIDENCE",
+            "completion_evidence_required": [
+                "operator_authorization_artifact_exists",
+                "isolated_probe_preflight_passes",
+                "candidate_specific_side_cell_or_candidate_key_evidence_present",
+            ],
+            "actionability": "operator_required",
+            "requires_operator_authorization": True,
+            "runtime_mutation_required": False,
+            "next_trigger": (
+                "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
+            ),
+            "evidence": {
+                "blocked_signal_top_review_candidate_side_cell_key": (
+                    "ma_crossover|ETHUSDT|Sell"
+                ),
+                "blocked_signal_top_review_candidate_wrongful_block_score": 3.444444,
+                "blocked_signal_top_review_candidate_net_cost_cushion_bps": 5.166667,
+            },
+        },
+    })
+
+    assert summary["top_learning_task_completion_gate"] == (
+        "operator_authorization_recorded_and_probe_preflight_passes"
+    )
+    assert summary["top_learning_task_completion_status"] == "PENDING_EVIDENCE"
+    assert summary["top_learning_task_completion_evidence_required_count"] == 3
+    assert summary["top_learning_task_evidence_key_count"] == 3
+    assert summary["top_learning_task_blocked_signal_top_review_candidate_side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert summary[
+        "top_learning_task_blocked_signal_top_review_candidate_wrongful_block_score"
+    ] == 3.444444
+    assert summary[
+        "top_learning_task_blocked_signal_top_review_candidate_net_cost_cushion_bps"
+    ] == 5.166667
 
 
 def _signal_spec(**extra):
@@ -1098,7 +1155,7 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
         now_utc=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.timezone.utc),
     )
 
-    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v5"
+    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v6"
     assert result["killboard"]["is_fast_discovery_active"] is True
     assert result["killboard"]["source_present_count"] == 5
     assert result["killboard"]["runtime_source_activation_ready"] is False
@@ -1119,9 +1176,18 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     assert result["killboard"]["learning_promotion_ready_count"] == 1
     assert result["killboard"]["top_learning_task_arm_id"] == "mm_verdict_maker_edge"
     assert result["killboard"]["top_learning_task_type"] == "promotion_review"
+    assert result["killboard"]["top_learning_task_completion_gate"] == (
+        "formal_aeg_qc_mit_review_verdict_recorded"
+    )
+    assert result["killboard"]["top_learning_task_completion_status"] == (
+        "PENDING_EVIDENCE"
+    )
+    assert result["killboard"]["top_learning_task_completion_evidence_required_count"] == 3
     assert result["killboard"]["top_learning_task_actionability"] == (
         "engineering_actionable"
     )
+    assert result["killboard"]["top_learning_task_evidence_key_count"] > 0
+    assert isinstance(result["killboard"]["top_learning_task_evidence"], dict)
     assert result["learning_worklist"]["top_task"]["task_type"] == "promotion_review"
     latest = Path(result["written"]["latest"])
     assert latest.exists()
@@ -1163,6 +1229,12 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
     assert history_row["learning_worklist_status"] == "PROMOTION_REVIEW_READY"
     assert history_row["top_learning_task_type"] == "promotion_review"
     assert history_row["top_learning_task_arm_id"] == "mm_verdict_maker_edge"
+    assert history_row["top_learning_task_completion_gate"] == (
+        "formal_aeg_qc_mit_review_verdict_recorded"
+    )
+    assert history_row["top_learning_task_completion_status"] == "PENDING_EVIDENCE"
+    assert history_row["top_learning_task_completion_evidence_required_count"] == 3
+    assert history_row["top_learning_task_evidence_key_count"] > 0
 
 
 def test_runtime_runner_requires_trusted_source_for_actionable_alpha(tmp_path):
