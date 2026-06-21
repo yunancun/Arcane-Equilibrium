@@ -1,4 +1,6 @@
 use crate::demo_learning_lane::*;
+use crate::demo_learning_lane_ledger::*;
+use chrono::{TimeZone, Utc};
 
 const NOW_MS: u64 = 1_782_040_200_000;
 
@@ -86,6 +88,122 @@ fn current_plan_matches_candidate_but_keeps_no_order_authority() {
 }
 
 #[test]
+fn no_authority_decision_still_builds_learning_ledger_record() {
+    let event = selected_event();
+    let decision = evaluate_probe_admission(
+        &sample_plan("NOT_GRANTED"),
+        &event,
+        &[],
+        NOW_MS,
+        &AdmissionConfig::default(),
+        true,
+        "NORMAL",
+    );
+    let generated_at = Utc.timestamp_millis_opt(NOW_MS as i64).single().unwrap();
+    let record = build_admission_ledger_record(&decision, &event, generated_at);
+
+    assert_eq!(record.schema_version, ADAPTER_SCHEMA_VERSION);
+    assert_eq!(record.record_type, ADMISSION_LEDGER_RECORD_TYPE);
+    assert_eq!(
+        record.attempt_id,
+        "ctx-demo-ma_crossover-ETHUSDT-1782040200000"
+    );
+    assert_eq!(record.decision, "ORDER_AUTHORITY_NOT_GRANTED");
+    assert!(!record.allowed_to_submit_order);
+    assert_eq!(record.side_cell_key, "ma_crossover|ETHUSDT|Sell");
+    assert_eq!(record.event.reject_reason_code, ELIGIBLE_REJECT_REASON_CODE);
+    assert_eq!(record.event.engine_mode, "live_demo");
+    assert_eq!(
+        record.runtime_state["remaining_probe_orders"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(record.boundary, ADMISSION_LEDGER_BOUNDARY);
+
+    let json = record.to_json_string().unwrap();
+    let parsed = LedgerRecord::from_jsonl_str(&json).unwrap();
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(
+        parsed[0].decision.as_deref(),
+        Some("ORDER_AUTHORITY_NOT_GRANTED")
+    );
+    assert_eq!(
+        parsed[0].side_cell_key.as_deref(),
+        Some("ma_crossover|ETHUSDT|Sell")
+    );
+    assert_eq!(
+        parsed[0].attempt_id.as_deref(),
+        Some(record.attempt_id.as_str())
+    );
+}
+
+#[test]
+fn ledger_attempt_id_prefers_context_then_signal_then_side_cell_timestamp() {
+    let mut event = selected_event();
+    assert_eq!(
+        attempt_id_for_reject_event(&event),
+        "ctx-demo-ma_crossover-ETHUSDT-1782040200000"
+    );
+
+    event.context_id = None;
+    assert_eq!(
+        attempt_id_for_reject_event(&event),
+        "sig-demo-ma_crossover-ETHUSDT-1782040200000"
+    );
+
+    event.signal_id = None;
+    assert_eq!(
+        attempt_id_for_reject_event(&event),
+        "ma_crossover|ETHUSDT|Sell|1782040200000"
+    );
+}
+
+#[test]
+fn admitted_ledger_record_reenters_runtime_state_cooldown_from_event_ts() {
+    let plan = sample_plan(ORDER_AUTHORITY_GRANTED);
+    let event = selected_event();
+    let admitted = evaluate_probe_admission(
+        &plan,
+        &event,
+        &[],
+        NOW_MS,
+        &AdmissionConfig::default(),
+        true,
+        "NORMAL",
+    );
+    assert_eq!(
+        admitted.decision,
+        AdmissionDecisionCode::AdmitDemoLearningProbe
+    );
+
+    let generated_at = Utc.timestamp_millis_opt(NOW_MS as i64).single().unwrap();
+    let record = build_admission_ledger_record(&admitted, &event, generated_at);
+    let json = record.to_json_string().unwrap();
+    let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert!(value.get("ts_ms").is_none());
+    assert_eq!(value["event"]["ts_ms"].as_u64(), Some(NOW_MS));
+
+    let rows = LedgerRecord::from_jsonl_str(&json).unwrap();
+    let cooldown = evaluate_probe_admission(
+        &plan,
+        &event,
+        &rows,
+        NOW_MS + 10 * 60_000,
+        &AdmissionConfig::default(),
+        true,
+        "NORMAL",
+    );
+    assert_eq!(cooldown.decision, AdmissionDecisionCode::CooldownActive);
+    assert_eq!(
+        cooldown
+            .runtime_state
+            .as_ref()
+            .unwrap()
+            .admitted_attempt_count,
+        1
+    );
+}
+
+#[test]
 fn admits_only_with_explicit_authority_and_enable_flag() {
     let disabled = evaluate_probe_admission(
         &sample_plan(ORDER_AUTHORITY_GRANTED),
@@ -159,7 +277,10 @@ fn enforces_budget_cooldown_and_failed_outcome_disable() {
     let event = selected_event();
     let cooldown_rows = vec![LedgerRecord {
         record_type: Some("probe_admission_decision".to_string()),
+        attempt_id: None,
+        generated_at_utc: None,
         decision: Some(ADMIT_DECISION.to_string()),
+        allowed_to_submit_order: None,
         admission_decision: None,
         side_cell_key: Some("ma_crossover|ETHUSDT|Sell".to_string()),
         strategy_name: None,
@@ -171,6 +292,8 @@ fn enforces_budget_cooldown_and_failed_outcome_disable() {
         event: None,
         realized_net_bps: None,
         disable_reason: None,
+        reason: None,
+        boundary: None,
     }];
     let cooldown = evaluate_probe_admission(
         &plan,

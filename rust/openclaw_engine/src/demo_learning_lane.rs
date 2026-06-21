@@ -224,7 +224,13 @@ pub struct LedgerRecord {
     #[serde(default)]
     pub record_type: Option<String>,
     #[serde(default)]
+    pub attempt_id: Option<String>,
+    #[serde(default)]
+    pub generated_at_utc: Option<String>,
+    #[serde(default)]
     pub decision: Option<String>,
+    #[serde(default)]
+    pub allowed_to_submit_order: Option<bool>,
     #[serde(default)]
     pub admission_decision: Option<LedgerDecisionRef>,
     #[serde(default)]
@@ -247,6 +253,10 @@ pub struct LedgerRecord {
     pub realized_net_bps: Option<f64>,
     #[serde(default)]
     pub disable_reason: Option<String>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub boundary: Option<String>,
 }
 
 impl LedgerRecord {
@@ -275,13 +285,19 @@ impl LedgerRecord {
             return key.trim().to_string();
         }
         if let Some(event) = self.event.as_ref() {
+            if let Some(key) = event.side_cell_key.as_deref() {
+                return key.trim().to_string();
+            }
             return side_cell_key_opt(&event.strategy_name, &event.symbol, &event.side);
         }
         side_cell_key_opt(&self.strategy_name, &self.symbol, &self.side)
     }
 
     fn attempt_ts_ms(&self) -> Option<u64> {
-        self.ts_ms.or(self.attempt_ts_ms).or(self.generated_at_ms)
+        self.ts_ms
+            .or(self.attempt_ts_ms)
+            .or(self.generated_at_ms)
+            .or_else(|| self.event.as_ref()?.ts_ms)
     }
 }
 
@@ -293,15 +309,27 @@ pub struct LedgerDecisionRef {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct LedgerEventRef {
+    #[serde(default)]
+    pub side_cell_key: Option<String>,
     #[serde(default, alias = "strategy")]
     pub strategy_name: Option<String>,
     #[serde(default)]
     pub symbol: Option<String>,
     #[serde(default)]
     pub side: Option<String>,
+    #[serde(default)]
+    pub reject_reason_code: Option<String>,
+    #[serde(default)]
+    pub engine_mode: Option<String>,
+    #[serde(default)]
+    pub ts_ms: Option<u64>,
+    #[serde(default)]
+    pub context_id: Option<String>,
+    #[serde(default)]
+    pub signal_id: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SideCellRuntimeState {
     pub side_cell_key: String,
     pub max_probe_orders: u64,
