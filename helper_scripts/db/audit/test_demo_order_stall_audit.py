@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from helper_scripts.db.audit.demo_order_stall_audit import (
@@ -15,6 +17,7 @@ from helper_scripts.db.audit.demo_order_stall_audit import (
     render_markdown,
     reason_category,
     context_scope_is_observation_only,
+    summarize_data_flow_freshness,
     summarize_pre_gate_drilldown,
     validate_config,
 )
@@ -201,6 +204,33 @@ def test_classification_cost_gate_rejects_are_not_silent_drops() -> None:
     assert result["answers"]["silent_drop_risk"] is False
     assert result["answers"]["global_cost_gate_lowering_recommended"] is False
     assert result["answers"]["bounded_demo_learning_lane_recommended"] is True
+
+
+def test_learning_data_flow_freshness_marks_stale_reject_rows() -> None:
+    counts = _base_counts(
+        decision_features=800,
+        rejected_decision_features=800,
+        risk_verdicts=1_000,
+        rejected_risk_verdicts=1_000,
+        latest_decision_feature_ts="2026-06-21T20:47:59+00:00",
+        latest_risk_verdict_ts="2026-06-21T20:47:59+00:00",
+    )
+    now = datetime(2026, 6, 21, 23, 9, tzinfo=timezone.utc)
+
+    freshness = summarize_data_flow_freshness(counts, now_utc=now)
+    result = classify_order_stall(
+        counts,
+        [{"reason": "cost_gate(JS-demo): estimated=-3.5bps < 0", "n": 1_000}],
+        {},
+        now_utc=now,
+    )
+
+    assert freshness["status"] == "LEARNING_DATA_FLOW_STALE"
+    assert freshness["latest_learning_stage"] == "decision_features"
+    assert freshness["latest_learning_age_seconds"] == 8461
+    assert result["data_accumulation_status"] == "LEARNING_DATA_FLOW_STALE"
+    assert result["answers"]["learning_data_flow_stale"] is True
+    assert "learning_data_flow_stale" in result["warnings"]
 
 
 def test_classification_later_stage_gaps() -> None:

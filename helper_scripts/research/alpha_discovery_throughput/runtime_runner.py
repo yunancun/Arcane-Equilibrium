@@ -1347,6 +1347,24 @@ def summarize_demo_learning_evidence_audit(
         "demo_learning_evidence_order_flow_silent_drop_risk": answers.get(
             "order_flow_silent_drop_risk"
         ),
+        "demo_learning_evidence_data_flow_freshness_status": counts.get(
+            "data_flow_freshness_status"
+        ),
+        "demo_learning_evidence_latest_learning_stage": counts.get(
+            "latest_learning_stage"
+        ),
+        "demo_learning_evidence_latest_learning_ts_utc": counts.get(
+            "latest_learning_ts_utc"
+        ),
+        "demo_learning_evidence_latest_learning_age_seconds": counts.get(
+            "latest_learning_age_seconds"
+        ),
+        "demo_learning_evidence_learning_data_flow_fresh": answers.get(
+            "learning_data_flow_fresh"
+        ),
+        "demo_learning_evidence_learning_data_flow_stale": answers.get(
+            "learning_data_flow_stale"
+        ),
         "demo_learning_evidence_bounded_learning_lane_recommended": answers.get(
             "bounded_demo_learning_lane_recommended"
         ),

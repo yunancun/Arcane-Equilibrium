@@ -103,6 +103,14 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
     demo_cost_gate_rejects_recorded = (
         detail.get("demo_learning_evidence_cost_gate_rejects_recorded_in_pg") is True
     )
+    demo_learning_data_flow_stale = (
+        detail.get("demo_learning_evidence_learning_data_flow_stale") is True
+        or demo_evidence_status == "DEMO_LEARNING_DATA_FLOW_STALE"
+        or str(
+            detail.get("demo_learning_evidence_data_flow_freshness_status") or ""
+        ).upper()
+        == "LEARNING_DATA_FLOW_STALE"
+    )
     source_activation_ready = detail.get("learning_lane_source_activation_ready")
 
     if source_activation_ready is False:
@@ -113,6 +121,20 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "primary_blocker": "cost_gate_learning_lane_source_not_activation_ready",
             "next_trigger": (
                 "sync_runtime_source_to_expected_head_before_cost_gate_learning_activation"
+            ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
+    if ledger_status in {"MISSING", "EMPTY"} and demo_learning_data_flow_stale:
+        return {
+            "action": BLOCK,
+            "reason": "demo_learning_data_flow_stale",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "demo_learning_data_flow_stale",
+            "next_trigger": (
+                demo_evidence_next_action
+                or "restore_demo_data_flow_before_cost_gate_learning_activation"
             ),
             "operator_actionable": False,
             "engineering_actionable": True,
@@ -1289,6 +1311,24 @@ def classify_profitability_blocker(
                 ),
                 "demo_learning_evidence_order_flow_silent_drop_risk": detail.get(
                     "demo_learning_evidence_order_flow_silent_drop_risk"
+                ),
+                "demo_learning_evidence_data_flow_freshness_status": detail.get(
+                    "demo_learning_evidence_data_flow_freshness_status"
+                ),
+                "demo_learning_evidence_latest_learning_stage": detail.get(
+                    "demo_learning_evidence_latest_learning_stage"
+                ),
+                "demo_learning_evidence_latest_learning_ts_utc": detail.get(
+                    "demo_learning_evidence_latest_learning_ts_utc"
+                ),
+                "demo_learning_evidence_latest_learning_age_seconds": detail.get(
+                    "demo_learning_evidence_latest_learning_age_seconds"
+                ),
+                "demo_learning_evidence_learning_data_flow_fresh": detail.get(
+                    "demo_learning_evidence_learning_data_flow_fresh"
+                ),
+                "demo_learning_evidence_learning_data_flow_stale": detail.get(
+                    "demo_learning_evidence_learning_data_flow_stale"
                 ),
                 "demo_learning_evidence_contexts": detail.get(
                     "demo_learning_evidence_contexts"

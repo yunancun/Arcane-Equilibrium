@@ -34,6 +34,24 @@ from helper_scripts.lib.pg_connect import connect_report_pg  # noqa: E402
 
 
 VALID_ENGINE_MODES = {"paper", "demo", "live_demo", "live", "live_testnet", "replay"}
+DATA_FLOW_STALE_AFTER_SECONDS = 90 * 60
+_PIPELINE_STAGE_TS_KEYS = [
+    ("decision_context_snapshots", "latest_decision_context_ts"),
+    ("candidate_evaluations", "latest_candidate_evaluation_ts"),
+    ("decision_features", "latest_decision_feature_ts"),
+    ("risk_verdicts", "latest_risk_verdict_ts"),
+    ("intents", "latest_intent_ts"),
+    ("orders", "latest_order_ts"),
+    ("fills", "latest_fill_ts"),
+]
+_LEARNING_STAGE_TS_KEYS = [
+    ("candidate_evaluations", "latest_candidate_evaluation_ts"),
+    ("decision_features", "latest_decision_feature_ts"),
+    ("risk_verdicts", "latest_risk_verdict_ts"),
+    ("intents", "latest_intent_ts"),
+    ("orders", "latest_order_ts"),
+    ("fills", "latest_fill_ts"),
+]
 
 
 @dataclass(frozen=True)
@@ -505,6 +523,97 @@ def _as_int(value: Any) -> int:
         return 0
 
 
+def _parse_ts(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        ts = value
+    else:
+        try:
+            ts = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(timezone.utc)
+
+
+def _latest_stage_ts(
+    counts: dict[str, Any],
+    stage_keys: list[tuple[str, str]],
+) -> tuple[str | None, datetime | None]:
+    latest_stage: str | None = None
+    latest_ts: datetime | None = None
+    for stage, ts_key in stage_keys:
+        if _as_int(counts.get(stage)) <= 0:
+            continue
+        ts = _parse_ts(counts.get(ts_key))
+        if ts is None:
+            continue
+        if latest_ts is None or ts > latest_ts:
+            latest_stage = stage
+            latest_ts = ts
+    return latest_stage, latest_ts
+
+
+def _age_seconds(now_utc: datetime | None, ts: datetime | None) -> int | None:
+    if now_utc is None or ts is None:
+        return None
+    now = now_utc.astimezone(timezone.utc)
+    return max(0, int((now - ts).total_seconds()))
+
+
+def summarize_data_flow_freshness(
+    counts: dict[str, Any],
+    *,
+    now_utc: datetime | None = None,
+    stale_after_seconds: int = DATA_FLOW_STALE_AFTER_SECONDS,
+) -> dict[str, Any]:
+    pipeline_stage, pipeline_ts = _latest_stage_ts(counts, _PIPELINE_STAGE_TS_KEYS)
+    learning_stage, learning_ts = _latest_stage_ts(counts, _LEARNING_STAGE_TS_KEYS)
+    pipeline_age = _age_seconds(now_utc, pipeline_ts)
+    learning_age = _age_seconds(now_utc, learning_ts)
+
+    if now_utc is None:
+        status = "FRESHNESS_NOT_EVALUATED"
+    elif learning_ts is not None and (learning_age or 0) <= stale_after_seconds:
+        status = "LEARNING_DATA_FLOW_FRESH"
+    elif learning_ts is not None:
+        status = "LEARNING_DATA_FLOW_STALE"
+    elif pipeline_ts is not None and (pipeline_age or 0) <= stale_after_seconds:
+        status = "OBSERVATION_FLOW_FRESH_NO_LEARNING_DATA"
+    elif pipeline_ts is not None:
+        status = "PIPELINE_DATA_FLOW_STALE"
+    else:
+        status = "NO_PIPELINE_DATA_FLOW_TIMESTAMP"
+
+    return {
+        "status": status,
+        "stale_after_seconds": stale_after_seconds,
+        "latest_pipeline_stage": pipeline_stage,
+        "latest_pipeline_ts_utc": pipeline_ts.isoformat() if pipeline_ts else None,
+        "latest_pipeline_age_seconds": pipeline_age,
+        "latest_learning_stage": learning_stage,
+        "latest_learning_ts_utc": learning_ts.isoformat() if learning_ts else None,
+        "latest_learning_age_seconds": learning_age,
+        "answers": {
+            "pipeline_flow_fresh": (
+                pipeline_age is not None and pipeline_age <= stale_after_seconds
+            ),
+            "pipeline_flow_stale": (
+                pipeline_age is not None and pipeline_age > stale_after_seconds
+            ),
+            "learning_data_flow_fresh": (
+                learning_age is not None and learning_age <= stale_after_seconds
+            ),
+            "learning_data_flow_stale": (
+                learning_age is not None and learning_age > stale_after_seconds
+            ),
+            "learning_data_flow_seen": learning_ts is not None,
+        },
+    }
+
+
 def _as_float(value: Any) -> float | None:
     if value is None:
         return None
@@ -668,6 +777,8 @@ def classify_order_stall(
     risk_reasons: list[dict[str, Any]],
     lineage: dict[str, Any] | None = None,
     context_payload_scope: dict[str, Any] | None = None,
+    *,
+    now_utc: datetime | None = None,
 ) -> dict[str, Any]:
     dcs = _as_int(counts.get("decision_context_snapshots"))
     evaluations = _as_int(counts.get("candidate_evaluations"))
@@ -682,6 +793,8 @@ def classify_order_stall(
     cancelled_orders = _as_int(counts.get("orders_with_cancelled_state"))
     post_only_cross = _as_int(counts.get("post_only_cross_orders"))
     risk_category = dominant_risk_category(risk_reasons, risk)
+    freshness = summarize_data_flow_freshness(counts, now_utc=now_utc)
+    freshness_answers = freshness.get("answers") or {}
     observation_only_context_scope = context_scope_is_observation_only(
         context_payload_scope,
     )
@@ -695,6 +808,10 @@ def classify_order_stall(
         warnings.append("cost_gate_dominates_recent_risk_verdicts")
     if observation_only_context_scope:
         warnings.append("context_payload_scope_is_signal_observation_only")
+    if freshness_answers.get("learning_data_flow_stale") is True:
+        warnings.append("learning_data_flow_stale")
+    elif freshness_answers.get("pipeline_flow_stale") is True:
+        warnings.append("pipeline_data_flow_stale")
     if lineage and _as_float(lineage.get("intent_without_order_pct")) is not None:
         orphan_pct = _as_float(lineage.get("intent_without_order_pct")) or 0.0
         if _as_int(lineage.get("intents")) > 0 and orphan_pct > 50.0:
@@ -758,6 +875,8 @@ def classify_order_stall(
         data_status = "NOT_ACCUMULATING_RECENT_DATA"
     elif status == "OBSERVATION_ONLY_CONTEXTS_ACTIVE":
         data_status = "OBSERVATION_ONLY_CONTEXTS_ACCUMULATING"
+    elif freshness_answers.get("learning_data_flow_stale") is True:
+        data_status = "LEARNING_DATA_FLOW_STALE"
     elif evaluations > 0 or risk > 0 or rejected_features > 0:
         data_status = "REJECT_OR_CANDIDATE_DATA_ACCUMULATING"
     else:
@@ -768,6 +887,7 @@ def classify_order_stall(
         "primary_blocker_stage": stage,
         "primary_blocker_reason": reason,
         "data_accumulation_status": data_status,
+        "data_flow_freshness": freshness,
         "dominant_risk_category": risk_category,
         "warnings": warnings,
         "answers": {
@@ -796,6 +916,14 @@ def classify_order_stall(
                 and not observation_only_context_scope
             ),
             "cost_gate_dominant": risk_category["category"] == "cost_gate",
+            "pipeline_flow_fresh": freshness_answers.get("pipeline_flow_fresh"),
+            "pipeline_flow_stale": freshness_answers.get("pipeline_flow_stale"),
+            "learning_data_flow_fresh": freshness_answers.get(
+                "learning_data_flow_fresh"
+            ),
+            "learning_data_flow_stale": freshness_answers.get(
+                "learning_data_flow_stale"
+            ),
             "global_cost_gate_lowering_recommended": False,
             "bounded_demo_learning_lane_recommended": risk_category["category"] == "cost_gate"
             and intents == 0,
@@ -811,6 +939,8 @@ def build_scorecard(
     lineage: dict[str, Any],
     pre_gate_drilldown: list[dict[str, Any]],
     context_payload_scope: dict[str, Any] | None = None,
+    *,
+    now_utc: datetime | None = None,
 ) -> dict[str, Any]:
     context_payload_scope = context_payload_scope or {}
     classification = classify_order_stall(
@@ -818,6 +948,7 @@ def build_scorecard(
         risk_reasons,
         lineage,
         context_payload_scope,
+        now_utc=now_utc,
     )
     return {
         "schema_version": "demo_order_stall_audit_v1",
@@ -856,6 +987,7 @@ def build_json_payload(
     generated: str | None = None,
 ) -> dict[str, Any]:
     generated = generated or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now_utc = _parse_ts(generated)
     return {
         "generated_at_utc": generated,
         **build_scorecard(
@@ -866,6 +998,7 @@ def build_json_payload(
             lineage,
             pre_gate_drilldown,
             context_payload_scope,
+            now_utc=now_utc,
         ),
     }
 
@@ -892,6 +1025,7 @@ def render_markdown(
     generated: str | None = None,
 ) -> str:
     generated = generated or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    now_utc = _parse_ts(generated)
     scorecard = build_scorecard(
         cfg,
         counts,
@@ -900,9 +1034,11 @@ def render_markdown(
         lineage,
         pre_gate_drilldown,
         context_payload_scope,
+        now_utc=now_utc,
     )
     cls = scorecard["classification"]
     answers = cls["answers"]
+    freshness = cls["data_flow_freshness"]
     context_payload_scope = scorecard["context_payload_scope"]
     pre_gate_summary = scorecard["pre_gate_drilldown_summary"]
     lines = [
@@ -919,6 +1055,9 @@ def render_markdown(
         f"- Primary stage: `{cls['primary_blocker_stage']}`",
         f"- Reason: {cls['primary_blocker_reason']}",
         f"- Data accumulation: `{cls['data_accumulation_status']}`",
+        f"- Data flow freshness: `{freshness['status']}` "
+        f"(latest learning stage=`{_fmt(freshness.get('latest_learning_stage'))}`, "
+        f"age_s=`{_fmt(freshness.get('latest_learning_age_seconds'))}`)",
         f"- Dominant risk category: `{_fmt(cls['dominant_risk_category'].get('category'))}` "
         f"({_fmt(cls['dominant_risk_category'].get('pct'))}%)",
         f"- Global cost-gate lowering recommended: `{answers['global_cost_gate_lowering_recommended']}`",

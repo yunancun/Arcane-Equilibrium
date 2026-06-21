@@ -15,6 +15,7 @@ def _order_scorecard(
     rejected_features: int = 0,
     cost_gate: bool = False,
     silent_drop: bool = False,
+    learning_data_flow_stale: bool = False,
 ) -> dict:
     return {
         "counts": {
@@ -40,6 +41,20 @@ def _order_scorecard(
             "dominant_risk_category": {
                 "category": "cost_gate" if cost_gate else None,
             },
+            "data_flow_freshness": {
+                "status": (
+                    "LEARNING_DATA_FLOW_STALE"
+                    if learning_data_flow_stale
+                    else "LEARNING_DATA_FLOW_FRESH"
+                ),
+                "latest_learning_stage": "risk_verdicts",
+                "latest_learning_ts_utc": "2026-06-21T20:47:59+00:00",
+                "latest_learning_age_seconds": 8461 if learning_data_flow_stale else 30,
+                "answers": {
+                    "learning_data_flow_fresh": not learning_data_flow_stale,
+                    "learning_data_flow_stale": learning_data_flow_stale,
+                },
+            },
             "answers": {
                 "context_payload_observation_only": observation_only,
                 "candidate_or_reject_data_accumulating": (
@@ -48,6 +63,8 @@ def _order_scorecard(
                     or rejected_features > 0
                 ),
                 "silent_drop_risk": silent_drop,
+                "learning_data_flow_fresh": not learning_data_flow_stale,
+                "learning_data_flow_stale": learning_data_flow_stale,
             },
         },
     }
@@ -130,6 +147,30 @@ def test_observation_only_telemetry_is_not_actionable_silent_drop() -> None:
     assert result["answers"]["demo_context_data_accumulating"] is True
     assert result["answers"]["demo_observation_only_contexts_active"] is True
     assert result["answers"]["order_flow_silent_drop_risk"] is False
+
+
+def test_stale_demo_learning_flow_blocks_pg_reject_learning_claim() -> None:
+    result = classify_demo_learning_evidence(
+        order_scorecard=_order_scorecard(
+            candidate_evaluations=80,
+            risk_verdicts=70,
+            rejected_features=70,
+            cost_gate=True,
+            learning_data_flow_stale=True,
+        ),
+        learning_preflight=_preflight(),
+    )
+
+    assert result["status"] == "DEMO_LEARNING_DATA_FLOW_STALE"
+    assert result["next_action"] == (
+        "restore_demo_data_flow_before_cost_gate_learning_activation"
+    )
+    assert result["answers"]["cost_gate_rejects_recorded_in_pg"] is True
+    assert result["answers"]["learning_data_flow_stale"] is True
+    assert result["key_counts"]["data_flow_freshness_status"] == (
+        "LEARNING_DATA_FLOW_STALE"
+    )
+    assert result["key_counts"]["latest_learning_age_seconds"] == 8461
 
 
 def test_actionable_context_silent_drop_takes_priority_over_learning_lane() -> None:
