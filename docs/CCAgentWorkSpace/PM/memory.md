@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Learning Plan Refresh Preflight
+
+- Cost-gate learning cron now refreshes `demo_learning_lane_plan_latest.json` before reject materialization and records plan rc/status/selected count in the learning-loop status log.
+- Activation preflight now distinguishes a fresh artifact from a usable policy: only recent, schema-correct, `READY_FOR_DEMO_LEARNING_PROBE`, `OPERATOR_REVIEW`, non-empty plans are activation-ready.
+- Local smoke proved no-scorecard runs emit a diagnostic `SOURCE_SCORECARD_UNAVAILABLE` plan/status rather than silent decay; runtime remains untouched until operator source sync/activation approval.
+
 ## 2026-06-21 Cost-Gate Cron Installer Apply Preflight
 
 - `install_cost_gate_learning_lane_cron.sh` now defaults to a read-only activation preflight before any crontab write, requiring an expected source head and source/activation/plan readiness.

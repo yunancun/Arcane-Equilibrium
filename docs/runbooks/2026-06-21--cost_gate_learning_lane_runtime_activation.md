@@ -136,6 +136,7 @@ ssh trade-core "cd /home/ncyu/BybitOpenClaw/srv && \
 Interpretation:
 
 - `runtime_source_ready_for_activation=true` is required before any activation.
+- `plan.plan_status=READY` now means the plan artifact is recent, schema-correct, `READY_FOR_DEMO_LEARNING_PROBE`, `OPERATOR_REVIEW`, and has selected candidates. A recent source-error or no-candidate plan is not activation-ready.
 - `reject_materializer_*` answers should be absent/false before cron first run and present after.
 - `runtime_writer_process_enabled=false` is acceptable for materializer-only activation; it is not acceptable if the operator explicitly wants hot-path capture.
 
@@ -156,6 +157,7 @@ ssh trade-core 'cd /home/ncyu/BybitOpenClaw/srv && \
 
 Review the proposed crontab entry. It should point to the synced repo and `/tmp/openclaw`.
 The dry run also prints the apply preflight posture. Default apply requires read-only activation preflight plus an expected source head.
+The installed wrapper refreshes the demo-learning plan at the start of every run unless `OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN=0` is explicitly set.
 
 ## Cron Install
 

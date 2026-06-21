@@ -26,6 +26,9 @@ LEDGER="${OPENCLAW_COST_GATE_LEARNING_LEDGER:-$LANE_DIR/probe_ledger.jsonl}"
 SCORECARD_JSON="${OPENCLAW_COST_GATE_SCORECARD_JSON:-$DATA/cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json}"
 PLAN_JSON="${OPENCLAW_COST_GATE_LEARNING_PLAN_JSON:-$LANE_DIR/demo_learning_lane_plan_latest.json}"
 
+REFRESH_PLAN="${OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN:-1}"
+PLAN_MAX_SCORECARD_AGE_HOURS="${OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS:-24}"
+PLAN_MIN_CANDIDATE_SAMPLE="${OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE:-100}"
 PG_TIMEFRAME="${OPENCLAW_COST_GATE_LEARNING_PG_TIMEFRAME:-1m}"
 OUTCOME_HORIZON_MINUTES="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES:-60}"
 OUTCOME_COST_BPS="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_COST_BPS:-4.0}"
@@ -79,6 +82,9 @@ if [[ ! "$PG_TIMEFRAME" =~ ^[[:alnum:]]{1,16}$ ]]; then
     echo "[$(ts)] FATAL: OPENCLAW_COST_GATE_LEARNING_PG_TIMEFRAME invalid: ${PG_TIMEFRAME}" | tee -a "$LOG" >&2
     exit 2
 fi
+validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN" "$REFRESH_PLAN"
+validate_int "OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS" "$PLAN_MAX_SCORECARD_AGE_HOURS"
+validate_int "OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE" "$PLAN_MIN_CANDIDATE_SAMPLE"
 validate_int "OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES" "$OUTCOME_HORIZON_MINUTES"
 validate_decimal "OPENCLAW_COST_GATE_LEARNING_OUTCOME_COST_BPS" "$OUTCOME_COST_BPS"
 validate_int "OPENCLAW_COST_GATE_LEARNING_MAX_ENTRY_DELAY_MS" "$MAX_ENTRY_DELAY_MS"
@@ -151,6 +157,15 @@ HISTORICAL_REVIEW_OUT="${LANE_DIR}/historical_scorecard_review_${STAMP}.json"
 HISTORICAL_REVIEW_LATEST="${LANE_DIR}/historical_scorecard_review_latest.json"
 MATERIALIZER_OUT="${LANE_DIR}/reject_materializer_${STAMP}.json"
 MATERIALIZER_LATEST="${LANE_DIR}/reject_materializer_latest.json"
+PLAN_OUT="${LANE_DIR}/demo_learning_lane_plan_${STAMP}.json"
+
+PLAN_ARGS=(
+    -m cost_gate_learning_lane.policy
+    --scorecard-json "$SCORECARD_JSON"
+    --output "$PLAN_OUT"
+    --max-scorecard-age-hours "$PLAN_MAX_SCORECARD_AGE_HOURS"
+    --min-candidate-sample "$PLAN_MIN_CANDIDATE_SAMPLE"
+)
 
 HISTORICAL_REVIEW_ARGS=(
     -m cost_gate_learning_lane.historical_review
@@ -205,6 +220,21 @@ REVIEW_ARGS=(
 )
 
 echo "[$(ts)] === Cost-gate learning lane refresh start append=${APPEND_OUTCOMES} ledger=${LEDGER} ===" >> "$LOG"
+plan_rc=0
+if [[ "$REFRESH_PLAN" == "1" ]]; then
+    (
+        cd "$BASE"
+        export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+        export PYTHONDONTWRITEBYTECODE=1
+        "$PYBIN" "${PLAN_ARGS[@]}"
+    ) >> "$LOG" 2>&1 || plan_rc=$?
+    if [[ -f "$PLAN_OUT" ]]; then
+        cp "$PLAN_OUT" "$PLAN_JSON"
+    fi
+else
+    echo "[$(ts)] SKIP: cost-gate demo-learning plan refresh disabled by OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN=0" >> "$LOG"
+fi
+
 historical_review_rc=0
 (
     cd "$BASE"
@@ -253,7 +283,7 @@ if [[ -f "$REVIEW_OUT" ]]; then
     cp "$REVIEW_OUT" "$REVIEW_LATEST"
 fi
 
-STATUS_JSON=$(HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
+STATUS_JSON=$(PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
 import hashlib
 import json
@@ -274,6 +304,7 @@ def load(path):
         return {}, None, f"{type(exc).__name__}:{exc}"
 
 
+plan, plan_sha, plan_err = load(os.environ["PLAN_OUT"])
 historical, historical_sha, historical_err = load(os.environ["HISTORICAL_REVIEW_OUT"])
 materializer, materializer_sha, materializer_err = load(os.environ["MATERIALIZER_OUT"])
 refresh, refresh_sha, refresh_err = load(os.environ["REFRESH_OUT"])
@@ -290,15 +321,24 @@ except OSError:
 status = {
     "ts_utc": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     "check": "cost_gate_learning_lane",
+    "plan_rc": int(os.environ["PLAN_RC"]),
     "historical_review_rc": int(os.environ["HISTORICAL_REVIEW_RC"]),
     "materializer_rc": int(os.environ["MATERIALIZER_RC"]),
     "refresh_rc": int(os.environ["REFRESH_RC"]),
     "review_rc": int(os.environ["REVIEW_RC"]),
+    "refresh_plan": os.environ["REFRESH_PLAN"] == "1",
     "materialize_rejects": os.environ["MATERIALIZE_REJECTS"] == "1",
     "append_materialized_rejects": os.environ["APPEND_MATERIALIZED_REJECTS"] == "1",
     "append_outcomes": os.environ["APPEND_OUTCOMES"] == "1",
     "ledger_path": str(ledger),
     "ledger_row_count": ledger_rows,
+    "plan_artifact_path": os.environ["PLAN_OUT"],
+    "plan_latest_path": os.environ["PLAN_JSON"],
+    "plan_sha256": plan_sha,
+    "plan_error": plan_err,
+    "plan_policy_status": plan.get("status"),
+    "plan_gate_status": plan.get("gate_status"),
+    "plan_selected_probe_candidate_count": plan.get("selected_probe_candidate_count"),
     "historical_review_artifact_path": os.environ["HISTORICAL_REVIEW_OUT"],
     "historical_review_sha256": historical_sha,
     "historical_review_error": historical_err,
@@ -338,7 +378,7 @@ if [[ -n "$STATUS_JSON" ]]; then
     echo "$STATUS_JSON" >> "$STATUS_LOG"
 fi
 
-echo "[$(ts)] === Cost-gate learning lane refresh end historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} ===" >> "$LOG"
+echo "[$(ts)] === Cost-gate learning lane refresh end plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} ===" >> "$LOG"
 
 # fail-soft: rc/status are recorded; alpha-discovery reads artifacts and ledger
 # state. Operator action is required for deploy, writer enablement, or probe authority.

@@ -631,6 +631,7 @@ def summarize_cost_gate_learning_lane_loop(
     lane_dir = data_dir / "cost_gate_learning_lane"
     heartbeat_path = data_dir / "cron_heartbeat" / "cost_gate_learning_lane.last_fire"
     status_log_path = data_dir / "logs" / "cost_gate_learning_lane.log"
+    plan_latest_path = lane_dir / "demo_learning_lane_plan_latest.json"
     materializer_latest_path = lane_dir / "reject_materializer_latest.json"
     refresh_latest_path = lane_dir / "outcome_refresh_latest.json"
     review_latest_path = lane_dir / "blocked_outcome_review_latest.json"
@@ -646,6 +647,12 @@ def summarize_cost_gate_learning_lane_loop(
 
     status_ts = status_row.get("ts_utc") if status_row else None
     status_age = _age_seconds(status_ts, now_utc=now_utc)
+    plan_rc = _int(status_row.get("plan_rc")) if status_row else None
+    refresh_plan_enabled = (
+        status_row.get("refresh_plan")
+        if status_row and isinstance(status_row.get("refresh_plan"), bool)
+        else None
+    )
     materializer_rc = _int(status_row.get("materializer_rc")) if status_row else None
     materialize_rejects_enabled = (
         status_row.get("materialize_rejects")
@@ -725,12 +732,13 @@ def summarize_cost_gate_learning_lane_loop(
             status = "STALE_STATUS"
             reason = "cost_gate_learning_status_stale"
         elif (
-            materializer_rc not in (None, 0)
+            plan_rc not in (None, 0)
+            or materializer_rc not in (None, 0)
             or refresh_rc not in (None, 0)
             or review_rc not in (None, 0)
         ):
             status = "ERROR"
-            reason = "cost_gate_learning_materializer_refresh_or_review_failed"
+            reason = "cost_gate_learning_plan_materializer_refresh_or_review_failed"
         elif ledger_row_count == 0 and review_status == "NO_BLOCKED_SIGNAL_OUTCOMES":
             status = "RUNNING_NO_LEDGER_ROWS"
             reason = "cost_gate_learning_loop_ran_but_no_ledger_rows"
@@ -763,6 +771,19 @@ def summarize_cost_gate_learning_lane_loop(
         "learning_loop_status_log_error": status_err,
         "learning_loop_status_ts_utc": status_ts,
         "learning_loop_status_age_seconds": status_age,
+        "learning_loop_plan_latest_path": str(plan_latest_path),
+        "learning_loop_refresh_plan_enabled": refresh_plan_enabled,
+        "learning_loop_last_plan_rc": plan_rc,
+        "learning_loop_last_plan_policy_status": (
+            status_row.get("plan_policy_status") if status_row else None
+        ),
+        "learning_loop_last_plan_gate_status": (
+            status_row.get("plan_gate_status") if status_row else None
+        ),
+        "learning_loop_last_plan_selected_probe_candidate_count": (
+            status_row.get("plan_selected_probe_candidate_count")
+            if status_row else None
+        ),
         "learning_loop_materializer_latest_path": str(materializer_latest_path),
         "learning_loop_materializer_latest_error": materializer_err,
         "learning_loop_refresh_latest_path": str(refresh_latest_path),
@@ -1067,15 +1088,33 @@ def _plan_summary(
     payload, err = _read_json(plan_path)
     generated_at = payload.get("generated_at_utc") if payload else None
     age = _age_seconds(generated_at, now_utc=now_utc)
+    policy_status = str(payload.get("status") or "") if payload else ""
+    gate_status = str(payload.get("gate_status") or "") if payload else ""
+    selected_count = (
+        _int(payload.get("selected_probe_candidate_count"), default=0)
+        if payload else 0
+    )
     if err:
         status = "MISSING" if err == "missing" else "UNREADABLE"
         reason = f"plan_{err}"
+    elif payload.get("schema_version") != "cost_gate_demo_learning_lane_plan_v1":
+        status = "UNEXPECTED_SCHEMA"
+        reason = "plan_schema_version_unexpected"
     elif age is None:
         status = "MISSING_GENERATED_AT"
         reason = "plan_generated_at_missing_or_unparseable"
     elif age > max_age_seconds:
         status = "STALE"
         reason = "plan_stale"
+    elif policy_status != "READY_FOR_DEMO_LEARNING_PROBE":
+        status = "POLICY_NOT_READY"
+        reason = f"plan_policy_status_{policy_status or 'missing'}"
+    elif gate_status != "OPERATOR_REVIEW":
+        status = "POLICY_GATE_NOT_READY"
+        reason = f"plan_gate_status_{gate_status or 'missing'}"
+    elif selected_count < 1:
+        status = "NO_SELECTED_CANDIDATES"
+        reason = "plan_has_no_selected_probe_candidates"
     else:
         status = "READY"
         reason = "plan_recent"
