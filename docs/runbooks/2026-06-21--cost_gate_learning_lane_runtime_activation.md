@@ -105,6 +105,33 @@ Do not continue to cron activation unless these files are present:
 - `helper_scripts/cron/cost_gate_learning_lane_cron.sh`
 - `helper_scripts/cron/install_cost_gate_learning_lane_cron.sh`
 
+## Pre-Install Scorecard / Plan Refresh
+
+After source reconcile and before activation preflight, run one operator-approved
+refresh-only pass if `demo_learning_lane_plan_latest.json` is missing, stale, or
+not `READY`. This writes only local scorecard / plan / status artifacts under
+`/tmp/openclaw`; it does not install cron, append ledger rows, refresh outcomes,
+write PG, call Bybit, restart services, or lower the Cost Gate.
+
+```bash
+ssh trade-core 'cd /home/ncyu/BybitOpenClaw/srv && \
+  OPENCLAW_BASE_DIR=/home/ncyu/BybitOpenClaw/srv \
+  OPENCLAW_DATA_DIR=/tmp/openclaw \
+  OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY=1 \
+  OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS=0 \
+  OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS=0 \
+  OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES=0 \
+  OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES=0 \
+  helper_scripts/cron/cost_gate_learning_lane_cron.sh'
+```
+
+Then re-run the activation preflight below. Expected healthy effect:
+
+- `cost_gate_counterfactual/cost_gate_reject_counterfactual_latest.json` is refreshed.
+- `cost_gate_learning_lane/demo_learning_lane_plan_latest.json` is refreshed.
+- `logs/cost_gate_learning_lane.log` latest row has `preinstall_refresh_only=true`.
+- no `probe_ledger.jsonl` append is required or expected from this step.
+
 ## Activation Preflight
 
 After source is synced, run read-only preflight from runtime:

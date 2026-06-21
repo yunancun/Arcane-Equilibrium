@@ -62,11 +62,13 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "scorecard_probe_candidate_count" in src
     assert "plan_policy_status" in src
     assert "plan_selected_probe_candidate_count" in src
+    assert "preinstall_refresh_only" in src
     assert "--source-pg" in src
     assert "--record-blocked-outcomes" in src
     assert "--append-ledger" in src
     assert "OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD" in src
     assert "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN" in src
+    assert "OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY" in src
     assert "OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS" in src
     assert "OPENCLAW_COST_GATE_LEARNING_APPEND_MATERIALIZED_REJECTS" in src
     assert "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES" in src
@@ -83,6 +85,7 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'SCORECARD_LOOKBACK_HOURS="${OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS:-168}"' in src
     assert 'SCORECARD_LIMIT="${OPENCLAW_COST_GATE_SCORECARD_LIMIT:-50000}"' in src
     assert 'REFRESH_PLAN="${OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN:-1}"' in src
+    assert 'PREINSTALL_REFRESH_ONLY="${OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY:-0}"' in src
     assert 'PLAN_MAX_SCORECARD_AGE_HOURS="${OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS:-24}"' in src
     assert 'PLAN_MIN_CANDIDATE_SAMPLE="${OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE:-100}"' in src
     assert 'OUTCOME_HORIZON_MINUTES="${OPENCLAW_COST_GATE_LEARNING_OUTCOME_HORIZON_MINUTES:-60}"' in src
@@ -103,6 +106,7 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'validate_int "OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_SCORECARD_LIMIT"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN"' in src
+    assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_PLAN_MAX_SCORECARD_AGE_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_PLAN_MIN_CANDIDATE_SAMPLE"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES"' in src
@@ -132,6 +136,22 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     materializer_index = src.index('"$PYBIN" "${MATERIALIZER_ARGS[@]}"')
     assert scorecard_index < plan_index
     assert plan_index < materializer_index
+
+
+def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None:
+    src = _src(WRAPPER)
+    assert 'if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]' in src
+    assert "preinstall refresh-only mode" in src
+    assert 'PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY"' in src
+    assert '"preinstall_refresh_only": os.environ["PREINSTALL_REFRESH_ONLY"] == "1"' in src
+    plan_copy_index = src.index('cp "$PLAN_OUT" "$PLAN_JSON"')
+    preinstall_index = src.index('if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]')
+    historical_index = src.index('"$PYBIN" "${HISTORICAL_REVIEW_ARGS[@]}"')
+    materializer_index = src.index('"$PYBIN" "${MATERIALIZER_ARGS[@]}"')
+    refresh_index = src.index('"$PYBIN" "${REFRESH_ARGS[@]}"')
+    review_index = src.index('"$PYBIN" "${REVIEW_ARGS[@]}"')
+    assert plan_copy_index < preinstall_index
+    assert preinstall_index < historical_index < materializer_index < refresh_index < review_index
 
 
 def test_installer_dry_run_apply_gate_and_reversible_entry() -> None:
