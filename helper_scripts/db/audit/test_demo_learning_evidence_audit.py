@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from helper_scripts.db.audit.demo_learning_evidence_audit import (
+    classify_cost_gate_adjustment_recommendation,
     classify_demo_learning_evidence,
     classify_order_flow_evidence,
     render_markdown,
@@ -139,7 +140,40 @@ def test_pg_cost_gate_rejects_without_ledger_recommend_bounded_learning_lane() -
     assert result["key_counts"]["order_flow_evidence_status"] == (
         "COST_GATE_REJECT_WALL_NO_ORDER_FLOW_EVIDENCE"
     )
+    assert result["key_counts"]["cost_gate_adjustment_recommendation_status"] == (
+        "BOUNDED_LEARNING_LANE_ACTIVATION_RECOMMENDED"
+    )
+    assert result["key_counts"]["cost_gate_learning_gate_adjustment"] == (
+        "ENABLE_LEDGER_AND_OUTCOME_REVIEW_FIRST"
+    )
+    assert result["cost_gate_adjustment_recommendation"][
+        "global_cost_gate_lowering_recommended"
+    ] is False
     assert result["answers"]["bounded_demo_learning_lane_recommended"] is True
+
+
+def test_cost_gate_adjustment_recommendation_never_lowers_main_gate() -> None:
+    order_flow = classify_order_flow_evidence(
+        candidate_or_reject_data=True,
+        cost_gate_rejects_recorded=True,
+        orders=0,
+        fills=0,
+    )
+    recommendation = classify_cost_gate_adjustment_recommendation(
+        cost_gate_rejects_recorded=True,
+        order_flow_evidence=order_flow,
+        learning_data_flow_stale=False,
+        learning_evidence_accumulating=False,
+        blocked_outcome_review_candidate=False,
+    )
+
+    assert recommendation["status"] == "BOUNDED_LEARNING_LANE_ACTIVATION_RECOMMENDED"
+    assert recommendation["main_cost_gate_adjustment"] == "NONE"
+    assert recommendation["global_cost_gate_lowering_recommended"] is False
+    assert recommendation["learning_gate_adjustment"] == (
+        "ENABLE_LEDGER_AND_OUTCOME_REVIEW_FIRST"
+    )
+    assert recommendation["order_authority"] == "NOT_GRANTED"
 
 
 def test_order_flow_evidence_scorecard_distinguishes_no_fills_from_no_orders() -> None:
@@ -246,7 +280,13 @@ def test_blocked_outcome_review_candidate_routes_to_operator_review() -> None:
         "operator_review_blocked_outcome_scorecard_before_demo_probe_authority"
     )
     assert result["answers"]["blocked_outcome_review_candidate_present"] is True
-    assert result["answers"]["bounded_demo_learning_lane_recommended"] is False
+    assert result["answers"]["bounded_demo_learning_lane_recommended"] is True
+    assert result["key_counts"]["cost_gate_adjustment_recommendation_status"] == (
+        "BOUNDED_DEMO_PROBE_AUTHORITY_REVIEW_READY"
+    )
+    assert result["key_counts"]["cost_gate_learning_gate_adjustment"] == (
+        "OPERATOR_REVIEW_BOUNDED_SIDE_CELL_DEMO_PROBE"
+    )
 
 
 def test_markdown_surfaces_composite_component_status() -> None:

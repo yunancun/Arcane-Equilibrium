@@ -1312,6 +1312,26 @@ def _write_demo_learning_evidence_latest(
                     if order_flow_starved
                     else "diagnose_demo_order_to_fill_gap_before_alpha_promotion"
                 ),
+                "cost_gate_adjustment_recommendation_status": (
+                    "BOUNDED_LEARNING_LANE_ACTIVATION_RECOMMENDED"
+                    if order_flow_starved
+                    else "ORDER_TO_FILL_DIAGNOSIS_BEFORE_COST_GATE_CHANGE"
+                    if cost_gate_rejects_recorded
+                    else "NO_COST_GATE_ADJUSTMENT_RECOMMENDED"
+                ),
+                "cost_gate_adjustment_recommendation_reason": (
+                    "fixture Cost Gate recommendation"
+                ),
+                "cost_gate_adjustment_recommendation_next_action": (
+                    "activate_cost_gate_learning_lane_then_operator_review_bounded_demo_probe"
+                    if order_flow_starved
+                    else "diagnose_demo_order_to_fill_gap_before_cost_gate_changes"
+                ),
+                "cost_gate_learning_gate_adjustment": (
+                    "ENABLE_LEDGER_AND_OUTCOME_REVIEW_FIRST"
+                    if order_flow_starved
+                    else "NONE_DIAGNOSE_ORDER_TO_FILL_FIRST"
+                ),
                 "data_flow_freshness_status": (
                     "LEARNING_DATA_FLOW_STALE"
                     if learning_data_flow_stale
@@ -1398,6 +1418,12 @@ def test_cost_gate_arm_surfaces_fresh_reject_wall_without_order_flow(tmp_path):
         "COST_GATE_REJECT_WALL_NO_ORDER_FLOW_EVIDENCE"
     )
     assert blocker["demo_learning_evidence_order_flow_evidence_starved"] is True
+    assert blocker[
+        "demo_learning_evidence_cost_gate_adjustment_recommendation_status"
+    ] == "BOUNDED_LEARNING_LANE_ACTIVATION_RECOMMENDED"
+    assert blocker["demo_learning_evidence_cost_gate_learning_gate_adjustment"] == (
+        "ENABLE_LEDGER_AND_OUTCOME_REVIEW_FIRST"
+    )
     assert blocker["engineering_actionable"] is True
 
 

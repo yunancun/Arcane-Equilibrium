@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost Gate Adjustment Recommendation Scorecard
+
+- Demo learning evidence now emits `cost_gate_adjustment_recommendation`, explicitly separating no global main Cost Gate lowering from bounded learning-lane activation and bounded demo-probe review readiness.
+- Recommendation statuses include `BOUNDED_LEARNING_LANE_ACTIVATION_RECOMMENDED`, `BOUNDED_DEMO_PROBE_AUTHORITY_REVIEW_READY`, data-flow restore, and order-to-fill diagnosis states.
+- Alpha-discovery cost-gate rows carry the recommendation status/reason/next action and learning gate adjustment; order authority remains `NOT_GRANTED`.
+
 ## 2026-06-21 Demo Order-Flow Starvation Blocker
 
 - Demo learning evidence now has an order-flow evidence scorecard that distinguishes Cost Gate reject wall with zero orders/fills from orders-without-fills and fills-present states.

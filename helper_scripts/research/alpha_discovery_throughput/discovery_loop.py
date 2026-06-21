@@ -158,7 +158,10 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "blocker_class": "data_coverage",
             "primary_blocker": "demo_cost_gate_reject_wall_no_order_flow_evidence",
             "next_trigger": (
-                detail.get("demo_learning_evidence_order_flow_evidence_next_action")
+                detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_recommendation_next_action"
+                )
+                or detail.get("demo_learning_evidence_order_flow_evidence_next_action")
                 or "activate_cost_gate_learning_lane_then_operator_review_bounded_demo_probe"
             ),
             "operator_actionable": False,
@@ -1354,6 +1357,18 @@ def classify_profitability_blocker(
                 ),
                 "demo_learning_evidence_order_flow_evidence_starved": detail.get(
                     "demo_learning_evidence_order_flow_evidence_starved"
+                ),
+                "demo_learning_evidence_cost_gate_adjustment_recommendation_status": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_recommendation_status"
+                ),
+                "demo_learning_evidence_cost_gate_adjustment_recommendation_reason": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_recommendation_reason"
+                ),
+                "demo_learning_evidence_cost_gate_adjustment_recommendation_next_action": detail.get(
+                    "demo_learning_evidence_cost_gate_adjustment_recommendation_next_action"
+                ),
+                "demo_learning_evidence_cost_gate_learning_gate_adjustment": detail.get(
+                    "demo_learning_evidence_cost_gate_learning_gate_adjustment"
                 ),
                 "demo_learning_evidence_data_flow_freshness_status": detail.get(
                     "demo_learning_evidence_data_flow_freshness_status"
