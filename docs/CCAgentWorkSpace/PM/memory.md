@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Derived Profit Ranking Policy
+
+- `cost_gate_learning_lane.policy` now derives `cost_gate_profit_opportunity_ranking_v1` from legacy scorecard rows when embedded ranking is absent.
+- Current runtime latest scorecard now produces source `derived_from_scorecard_rows` and ranked ETH/NEAR/LTC/ATOM Sell candidates without any runtime write or artifact refresh.
+- Boundary remains unchanged: no writer enablement, order authority, ledger append, main Cost Gate lowering, PG write, Bybit call, source sync, deploy, rebuild, or restart.
+
 ## 2026-06-21 Profit Ranking Policy Selection
 
 - `cost_gate_learning_lane.policy` now consumes `cost_gate_profit_opportunity_ranking_v1` as the preferred selection source when present.

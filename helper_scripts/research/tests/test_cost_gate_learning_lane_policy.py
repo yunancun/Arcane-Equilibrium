@@ -239,6 +239,10 @@ def test_policy_plan_keeps_main_gate_closed_and_selects_only_probe_candidates():
     assert plan["gate_status"] == "OPERATOR_REVIEW"
     assert plan["main_cost_gate_adjustment"] == "NONE"
     assert plan["order_authority"] == "NOT_GRANTED"
+    assert plan["source"]["probe_candidate_ranking_source"] == "derived_from_scorecard_rows"
+    assert plan["source"]["profit_opportunity_ranking_status"] == (
+        "PROFIT_LEARNING_CANDIDATES_PRESENT"
+    )
     assert plan["learning_gate_adjustment"] == (
         "SIDE_CELL_DEMO_PROBE_ONLY_AFTER_ADAPTER_WIRING"
     )
@@ -249,6 +253,10 @@ def test_policy_plan_keeps_main_gate_closed_and_selects_only_probe_candidates():
     assert {row["probe_proposal"]["mode"] for row in plan["probe_candidates"]} == {
         "demo_only_learning_probe"
     }
+    assert plan["probe_candidates"][0]["profit_priority_score"] is not None
+    assert plan["probe_candidates"][0]["profit_priority_tier"] == (
+        "HIGH_PRIORITY_BOUNDED_DEMO_LEARNING"
+    )
     assert all(
         row["guardrails"]["main_cost_gate_adjustment"] == "NONE"
         for row in plan["probe_candidates"]
