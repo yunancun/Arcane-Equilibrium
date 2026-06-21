@@ -103,6 +103,13 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
     demo_cost_gate_rejects_recorded = (
         detail.get("demo_learning_evidence_cost_gate_rejects_recorded_in_pg") is True
     )
+    demo_order_flow_starved = (
+        detail.get("demo_learning_evidence_order_flow_evidence_starved") is True
+        or str(
+            detail.get("demo_learning_evidence_order_flow_evidence_status") or ""
+        ).upper()
+        == "COST_GATE_REJECT_WALL_NO_ORDER_FLOW_EVIDENCE"
+    )
     demo_learning_data_flow_stale = (
         detail.get("demo_learning_evidence_learning_data_flow_stale") is True
         or demo_evidence_status == "DEMO_LEARNING_DATA_FLOW_STALE"
@@ -135,6 +142,24 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "next_trigger": (
                 demo_evidence_next_action
                 or "restore_demo_data_flow_before_cost_gate_learning_activation"
+            ),
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
+    if (
+        ledger_status in {"MISSING", "EMPTY"}
+        and demo_cost_gate_rejects_recorded
+        and demo_order_flow_starved
+    ):
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "fresh_cost_gate_reject_wall_no_order_flow_evidence",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "demo_cost_gate_reject_wall_no_order_flow_evidence",
+            "next_trigger": (
+                detail.get("demo_learning_evidence_order_flow_evidence_next_action")
+                or "activate_cost_gate_learning_lane_then_operator_review_bounded_demo_probe"
             ),
             "operator_actionable": False,
             "engineering_actionable": True,
@@ -1311,6 +1336,24 @@ def classify_profitability_blocker(
                 ),
                 "demo_learning_evidence_order_flow_silent_drop_risk": detail.get(
                     "demo_learning_evidence_order_flow_silent_drop_risk"
+                ),
+                "demo_learning_evidence_order_flow_evidence_status": detail.get(
+                    "demo_learning_evidence_order_flow_evidence_status"
+                ),
+                "demo_learning_evidence_order_flow_evidence_reason": detail.get(
+                    "demo_learning_evidence_order_flow_evidence_reason"
+                ),
+                "demo_learning_evidence_order_flow_evidence_next_action": detail.get(
+                    "demo_learning_evidence_order_flow_evidence_next_action"
+                ),
+                "demo_learning_evidence_recent_order_flow_present": detail.get(
+                    "demo_learning_evidence_recent_order_flow_present"
+                ),
+                "demo_learning_evidence_recent_fill_evidence_present": detail.get(
+                    "demo_learning_evidence_recent_fill_evidence_present"
+                ),
+                "demo_learning_evidence_order_flow_evidence_starved": detail.get(
+                    "demo_learning_evidence_order_flow_evidence_starved"
                 ),
                 "demo_learning_evidence_data_flow_freshness_status": detail.get(
                     "demo_learning_evidence_data_flow_freshness_status"

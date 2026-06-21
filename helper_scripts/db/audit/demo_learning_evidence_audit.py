@@ -90,6 +90,52 @@ def _get_path(payload: dict[str, Any], *parts: str) -> Any:
     return current
 
 
+def classify_order_flow_evidence(
+    *,
+    candidate_or_reject_data: bool,
+    cost_gate_rejects_recorded: bool,
+    orders: int,
+    fills: int,
+) -> dict[str, Any]:
+    if fills > 0:
+        status = "DEMO_FILL_EVIDENCE_PRESENT"
+        reason = "recent demo fills exist and can support execution realism review"
+        next_action = "review_demo_fill_outcomes_for_execution_realism"
+    elif orders > 0:
+        status = "DEMO_ORDER_FLOW_PRESENT_NO_FILL_EVIDENCE"
+        reason = "recent demo orders exist but no fills landed in the lookback window"
+        next_action = "diagnose_demo_order_to_fill_gap_before_alpha_promotion"
+    elif cost_gate_rejects_recorded:
+        status = "COST_GATE_REJECT_WALL_NO_ORDER_FLOW_EVIDENCE"
+        reason = "fresh Cost Gate rejects exist but no demo orders or fills landed"
+        next_action = (
+            "activate_cost_gate_learning_lane_then_operator_review_bounded_demo_probe"
+        )
+    elif candidate_or_reject_data:
+        status = "CANDIDATE_OR_REJECT_DATA_WITHOUT_ORDER_FLOW_EVIDENCE"
+        reason = "candidate/reject data exists but no demo orders or fills landed"
+        next_action = "diagnose_candidate_to_order_gate_before_claiming_execution_data"
+    else:
+        status = "NO_ORDER_FLOW_EVIDENCE"
+        reason = "no recent demo orders or fills landed"
+        next_action = "restore_candidate_or_reject_flow_before_order_evidence_review"
+    return {
+        "status": status,
+        "reason": reason,
+        "next_action": next_action,
+        "answers": {
+            "recent_order_flow_present": orders > 0 or fills > 0,
+            "recent_fill_evidence_present": fills > 0,
+            "order_flow_evidence_starved": (
+                cost_gate_rejects_recorded and orders == 0 and fills == 0
+            ),
+            "candidate_or_reject_without_order_flow": (
+                candidate_or_reject_data and orders == 0 and fills == 0
+            ),
+        },
+    }
+
+
 def classify_demo_learning_evidence(
     *,
     order_scorecard: dict[str, Any],
@@ -129,6 +175,13 @@ def classify_demo_learning_evidence(
     cost_gate_pg_rejects_recorded = bool(
         cost_gate_dominant and (risk_verdicts > 0 or rejected_features > 0)
     )
+    order_flow_evidence = classify_order_flow_evidence(
+        candidate_or_reject_data=candidate_or_reject_data,
+        cost_gate_rejects_recorded=cost_gate_pg_rejects_recorded,
+        orders=orders,
+        fills=fills,
+    )
+    order_flow_answers = order_flow_evidence.get("answers") or {}
 
     ledger_rows = _as_int(ledger.get("ledger_total_rows"))
     admission_rows = _as_int(ledger.get("admission_decision_count"))
@@ -216,6 +269,18 @@ def classify_demo_learning_evidence(
             "learning_data_flow_fresh": order_answers.get("learning_data_flow_fresh"),
             "learning_data_flow_stale": learning_data_flow_stale,
             "cost_gate_rejects_recorded_in_pg": cost_gate_pg_rejects_recorded,
+            "recent_order_flow_present": order_flow_answers.get(
+                "recent_order_flow_present"
+            ),
+            "recent_fill_evidence_present": order_flow_answers.get(
+                "recent_fill_evidence_present"
+            ),
+            "order_flow_evidence_starved": order_flow_answers.get(
+                "order_flow_evidence_starved"
+            ),
+            "candidate_or_reject_without_order_flow": order_flow_answers.get(
+                "candidate_or_reject_without_order_flow"
+            ),
             "learning_lane_ledger_rows_present": ledger_rows > 0,
             "learning_lane_currently_accumulating_evidence": learning_evidence_accumulating,
             "blocked_signal_outcomes_recorded": blocked_outcomes > 0,
@@ -241,6 +306,9 @@ def classify_demo_learning_evidence(
             "rejected_decision_features": rejected_features,
             "orders": orders,
             "fills": fills,
+            "order_flow_evidence_status": order_flow_evidence.get("status"),
+            "order_flow_evidence_reason": order_flow_evidence.get("reason"),
+            "order_flow_evidence_next_action": order_flow_evidence.get("next_action"),
             "data_flow_freshness_status": order_freshness.get("status"),
             "latest_learning_stage": order_freshness.get("latest_learning_stage"),
             "latest_learning_ts_utc": order_freshness.get("latest_learning_ts_utc"),
@@ -412,6 +480,10 @@ def render_markdown(payload: dict[str, Any]) -> str:
         "learning_data_flow_fresh",
         "learning_data_flow_stale",
         "cost_gate_rejects_recorded_in_pg",
+        "recent_order_flow_present",
+        "recent_fill_evidence_present",
+        "order_flow_evidence_starved",
+        "candidate_or_reject_without_order_flow",
         "learning_lane_ledger_rows_present",
         "learning_lane_currently_accumulating_evidence",
         "blocked_signal_outcomes_recorded",

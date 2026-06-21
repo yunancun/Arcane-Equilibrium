@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from helper_scripts.db.audit.demo_learning_evidence_audit import (
     classify_demo_learning_evidence,
+    classify_order_flow_evidence,
     render_markdown,
 )
 
@@ -134,7 +135,41 @@ def test_pg_cost_gate_rejects_without_ledger_recommend_bounded_learning_lane() -
     assert result["main_cost_gate_adjustment"] == "NONE"
     assert result["order_authority"] == "NOT_GRANTED"
     assert result["answers"]["cost_gate_rejects_recorded_in_pg"] is True
+    assert result["answers"]["order_flow_evidence_starved"] is True
+    assert result["key_counts"]["order_flow_evidence_status"] == (
+        "COST_GATE_REJECT_WALL_NO_ORDER_FLOW_EVIDENCE"
+    )
     assert result["answers"]["bounded_demo_learning_lane_recommended"] is True
+
+
+def test_order_flow_evidence_scorecard_distinguishes_no_fills_from_no_orders() -> None:
+    no_orders = classify_order_flow_evidence(
+        candidate_or_reject_data=True,
+        cost_gate_rejects_recorded=True,
+        orders=0,
+        fills=0,
+    )
+    assert no_orders["status"] == "COST_GATE_REJECT_WALL_NO_ORDER_FLOW_EVIDENCE"
+    assert no_orders["answers"]["order_flow_evidence_starved"] is True
+
+    no_fills = classify_order_flow_evidence(
+        candidate_or_reject_data=True,
+        cost_gate_rejects_recorded=True,
+        orders=3,
+        fills=0,
+    )
+    assert no_fills["status"] == "DEMO_ORDER_FLOW_PRESENT_NO_FILL_EVIDENCE"
+    assert no_fills["answers"]["recent_order_flow_present"] is True
+    assert no_fills["answers"]["recent_fill_evidence_present"] is False
+
+    fills = classify_order_flow_evidence(
+        candidate_or_reject_data=True,
+        cost_gate_rejects_recorded=True,
+        orders=3,
+        fills=1,
+    )
+    assert fills["status"] == "DEMO_FILL_EVIDENCE_PRESENT"
+    assert fills["answers"]["recent_fill_evidence_present"] is True
 
 
 def test_observation_only_telemetry_is_not_actionable_silent_drop() -> None:

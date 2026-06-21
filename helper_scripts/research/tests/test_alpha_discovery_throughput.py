@@ -1263,6 +1263,7 @@ def _write_demo_learning_evidence_latest(
     cost_gate_rejects_recorded: bool = False,
     observation_only: bool = False,
     learning_data_flow_stale: bool = False,
+    order_flow_starved: bool = False,
 ) -> Path:
     path = data / "demo_learning_evidence" / "demo_learning_evidence_audit_latest.json"
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1281,6 +1282,11 @@ def _write_demo_learning_evidence_latest(
                 "learning_lane_currently_accumulating_evidence": False,
                 "blocked_outcome_review_candidate_present": False,
                 "order_flow_silent_drop_risk": False,
+                "recent_order_flow_present": (
+                    not order_flow_starved and cost_gate_rejects_recorded
+                ),
+                "recent_fill_evidence_present": False,
+                "order_flow_evidence_starved": order_flow_starved,
                 "learning_data_flow_fresh": not learning_data_flow_stale,
                 "learning_data_flow_stale": learning_data_flow_stale,
                 "bounded_demo_learning_lane_recommended": cost_gate_rejects_recorded,
@@ -1293,6 +1299,19 @@ def _write_demo_learning_evidence_latest(
                 "fills": 0,
                 "learning_ledger_rows": 0,
                 "blocked_signal_outcomes": 0,
+                "order_flow_evidence_status": (
+                    "COST_GATE_REJECT_WALL_NO_ORDER_FLOW_EVIDENCE"
+                    if order_flow_starved
+                    else "DEMO_ORDER_FLOW_PRESENT_NO_FILL_EVIDENCE"
+                    if cost_gate_rejects_recorded
+                    else "NO_ORDER_FLOW_EVIDENCE"
+                ),
+                "order_flow_evidence_reason": "fixture order-flow evidence",
+                "order_flow_evidence_next_action": (
+                    "activate_cost_gate_learning_lane_then_operator_review_bounded_demo_probe"
+                    if order_flow_starved
+                    else "diagnose_demo_order_to_fill_gap_before_alpha_promotion"
+                ),
                 "data_flow_freshness_status": (
                     "LEARNING_DATA_FLOW_STALE"
                     if learning_data_flow_stale
@@ -1350,6 +1369,35 @@ def test_cost_gate_arm_uses_demo_learning_evidence_for_pg_reject_gap(tmp_path):
     )
     assert blocker["demo_learning_evidence_cost_gate_rejects_recorded_in_pg"] is True
     assert blocker["demo_learning_evidence_risk_verdicts"] == 24155
+    assert blocker["engineering_actionable"] is True
+
+
+def test_cost_gate_arm_surfaces_fresh_reject_wall_without_order_flow(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_demo_learning_evidence_latest(
+        data,
+        status="PG_REJECTS_RECORDED_LEARNING_LANE_NOT_ACCUMULATING",
+        reason="PG records Cost Gate rejects but runtime learning ledger is empty",
+        next_action="enable_bounded_cost_gate_learning_lane_after_operator_review",
+        cost_gate_rejects_recorded=True,
+        order_flow_starved=True,
+    )
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["primary_blocker"] == (
+        "demo_cost_gate_reject_wall_no_order_flow_evidence"
+    )
+    assert blocker["next_trigger"] == (
+        "activate_cost_gate_learning_lane_then_operator_review_bounded_demo_probe"
+    )
+    assert blocker["demo_learning_evidence_order_flow_evidence_status"] == (
+        "COST_GATE_REJECT_WALL_NO_ORDER_FLOW_EVIDENCE"
+    )
+    assert blocker["demo_learning_evidence_order_flow_evidence_starved"] is True
     assert blocker["engineering_actionable"] is True
 
 
