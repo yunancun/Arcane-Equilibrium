@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Profit Ranking Policy Selection
+
+- `cost_gate_learning_lane.policy` now consumes `cost_gate_profit_opportunity_ranking_v1` as the preferred selection source when present.
+- Ranked top-side-cells preserve `profit_priority_score/tier/components/next_action` in the plan, while sample gate and `NOT_GRANTED/NONE/false` authority boundaries remain mandatory.
+- Current runtime latest artifact still lacks the ranking until refreshed, so production plan generation falls back to legacy; local read-only trial confirmed refreshed ranking will drive ETH/NEAR/LTC/ATOM order.
+
 ## 2026-06-21 Cost-Gate Profit Opportunity Ranking
 
 - `cost_gate_reject_counterfactual.py` now emits `cost_gate_profit_opportunity_ranking_v1` inside the existing learning-lane scorecard.
