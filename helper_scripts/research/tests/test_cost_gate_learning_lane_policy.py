@@ -571,6 +571,58 @@ def test_writer_process_reports_unreadable_proc_environ(tmp_path: Path):
     assert process["proc_environ_error"] == "missing"
 
 
+def test_writer_process_auto_detect_reports_not_found(tmp_path: Path):
+    proc_root = tmp_path / "proc"
+    shell_proc = proc_root / "101"
+    shell_proc.mkdir(parents=True)
+    shell_proc.joinpath("cmdline").write_bytes(
+        b"bash\0-c\0pgrep -af openclaw-engine\0"
+    )
+
+    process = summarize_cost_gate_learning_lane_writer_process(
+        tmp_path,
+        auto_detect_engine_pid=True,
+        proc_root=proc_root,
+        require_writer_enabled=True,
+    )
+
+    assert process["writer_process_checked"] is False
+    assert process["writer_process_status"] == "ENGINE_PROCESS_NOT_FOUND"
+    assert process["writer_process_reason"] == "openclaw_engine_process_not_found"
+    assert process["engine_pid_detection_status"] == "NOT_FOUND"
+    assert process["engine_pid_candidate_count"] == 0
+
+
+def test_writer_process_auto_detects_exact_openclaw_engine_cmdline(tmp_path: Path):
+    proc_root = tmp_path / "proc"
+    fake_shell = proc_root / "101"
+    fake_shell.mkdir(parents=True)
+    fake_shell.joinpath("cmdline").write_bytes(
+        b"bash\0-c\0pgrep -af openclaw-engine\0"
+    )
+    fake_engine = proc_root / "202"
+    fake_engine.mkdir()
+    fake_engine.joinpath("cmdline").write_bytes(
+        b"rust/target/release/openclaw-engine\0"
+    )
+    fake_engine.joinpath("environ").write_bytes(
+        b"OPENCLAW_DEMO_LEARNING_LANE_WRITER=1\0"
+    )
+
+    process = summarize_cost_gate_learning_lane_writer_process(
+        tmp_path,
+        auto_detect_engine_pid=True,
+        proc_root=proc_root,
+    )
+
+    assert process["engine_pid_detection_status"] == "FOUND"
+    assert process["engine_pid_candidate_count"] == 1
+    assert process["engine_pid_detected"] == 202
+    assert process["engine_pid"] == 202
+    assert process["writer_process_status"] == "ENABLED"
+    assert process["writer_process_enabled"] is True
+
+
 def test_activation_preflight_can_require_running_process_writer_enabled(
     tmp_path: Path,
 ):
@@ -610,6 +662,47 @@ def test_activation_preflight_can_require_running_process_writer_enabled(
     assert preflight["answers"]["runtime_writer_process_status"] == "DISABLED"
     assert preflight["answers"]["running_engine_writer_disabled_or_unset_drop_risk"] is True
     assert "runtime_writer_not_enabled" not in preflight["activation_blockers"]
+    assert "running_engine_writer_not_enabled" in preflight["activation_blockers"]
+
+
+def test_activation_preflight_can_auto_detect_disabled_running_process(
+    tmp_path: Path,
+):
+    repo, _remote = _init_source_repo_with_origin(tmp_path)
+    data_dir = tmp_path / "data"
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+    proc_root = tmp_path / "proc"
+    engine_proc = proc_root / "303"
+    engine_proc.mkdir(parents=True)
+    engine_proc.joinpath("cmdline").write_bytes(
+        b"/home/ncyu/BybitOpenClaw/srv/rust/target/release/openclaw-engine\0"
+    )
+    engine_proc.joinpath("environ").write_bytes(
+        b"OPENCLAW_DEMO_LEARNING_LANE_WRITER=0\0"
+    )
+
+    preflight = build_cost_gate_learning_lane_activation_preflight(
+        data_dir,
+        repo_root=repo,
+        auto_detect_engine_pid=True,
+        proc_root=proc_root,
+        require_process_writer_enabled=True,
+        now_utc=dt.datetime(2026, 6, 21, 11, 5, tzinfo=dt.timezone.utc),
+    )
+
+    assert preflight["writer_process"]["engine_pid_detection_status"] == "FOUND"
+    assert preflight["writer_process"]["engine_pid_detected"] == 303
+    assert preflight["answers"]["runtime_writer_process_checked"] is True
+    assert preflight["answers"]["runtime_writer_process_status"] == "DISABLED"
     assert "running_engine_writer_not_enabled" in preflight["activation_blockers"]
 
 
