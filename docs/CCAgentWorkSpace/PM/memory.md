@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-21 Cost-Gate Killboard Source-Readiness Blocker
+
+- Runtime alpha latest still showed `cost_gate_demo_learning_lane` as `probe_ready` even though runtime source was behind/dirty and no learning cron/ledger/materializer was active; this is a stale-runtime-code artifact, not true readiness.
+- Alpha runtime runner now attaches cost-gate source activation readiness into the arm detail when repo root is available.
+- Discovery loop blocks cost-gate probe readiness with `source_health` / `cost_gate_learning_lane_source_not_activation_ready` whenever the learning-lane source checkout is not activation-ready.
+
 ## 2026-06-21 Cost-Gate Learning Pre-Install Refresh Bridge
 
 - Added `OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY=1` to the cost-gate learning cron wrapper.
