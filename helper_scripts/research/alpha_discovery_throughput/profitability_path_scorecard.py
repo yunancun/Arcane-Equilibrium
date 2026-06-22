@@ -97,6 +97,7 @@ def _score_priority(path: dict[str, Any]) -> tuple[int, float]:
     """Sort by status class first, then evidence strength."""
     status_rank = {
         "COST_GATE_CANDIDATE_READY_FOR_DATA_FLOW_PROOF": 10,
+        "SEALED_HORIZON_REPLAY_READY_FOR_LEARNING_ACCUMULATION": 11,
         "COST_GATE_CANDIDATE_EXECUTION_EVIDENCE_MISSING": 12,
         "HORIZON_EDGE_AMPLIFICATION_CANDIDATE": 20,
         "LOW_FRICTION_MM_GROSS_EDGE_BELOW_CURRENT_FEE": 40,
@@ -173,6 +174,57 @@ def _horizon_cells_by_key(counterfactual: dict[str, Any] | None) -> dict[str, di
     return out
 
 
+def _sealed_replay_side_cell_key(sealed_replay: dict[str, Any] | None) -> str:
+    return _str(
+        _dict(
+            _dict(_dict(sealed_replay).get("selection")).get("selected")
+        ).get("side_cell_key")
+        or _dict(_dict(sealed_replay).get("replay_evaluation")).get("side_cell_key")
+    )
+
+
+def _sealed_replay_by_key(
+    horizon_sealed_replay: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    key = _sealed_replay_side_cell_key(horizon_sealed_replay)
+    if not key:
+        return {}
+    return {key: _dict(horizon_sealed_replay)}
+
+
+def _sealed_replay_evidence(sealed: dict[str, Any] | None) -> dict[str, Any]:
+    payload = _dict(sealed)
+    if not payload:
+        return {}
+    replay = _dict(_dict(payload.get("replay_evaluation")).get("best_horizon"))
+    primary = _dict(_dict(payload.get("replay_evaluation")).get("primary_horizon"))
+    source = _dict(payload.get("source"))
+    return {
+        "sealed_replay_schema_version": payload.get("schema_version"),
+        "sealed_replay_status": payload.get("status"),
+        "sealed_replay_reason": payload.get("reason"),
+        "sealed_replay_next_action": payload.get("next_action"),
+        "sealed_replay_generated_at_utc": payload.get("generated_at_utc"),
+        "sealed_replay_failed_gate_names": _dict(
+            payload.get("replay_evaluation")
+        ).get("failed_gate_names"),
+        "sealed_replay_best_horizon_minutes": replay.get("horizon_minutes"),
+        "sealed_replay_best_avg_net_bps": replay.get("avg_net_bps"),
+        "sealed_replay_best_p50_gross_bps": replay.get("p50_gross_bps"),
+        "sealed_replay_best_net_positive_pct": replay.get("net_positive_pct"),
+        "sealed_replay_best_sample_count_for_gate": replay.get("sample_count_for_gate"),
+        "sealed_replay_primary_horizon_minutes": primary.get("horizon_minutes"),
+        "sealed_replay_primary_action": primary.get("learning_lane_action"),
+        "sealed_replay_primary_avg_net_bps": primary.get("avg_net_bps"),
+        "sealed_replay_horizon_packet_sha256": _dict(
+            source.get("horizon_packet")
+        ).get("sha256"),
+        "sealed_replay_counterfactual_sha256": _dict(
+            source.get("replay_counterfactual")
+        ).get("sha256"),
+    }
+
+
 def _base_path(
     *,
     path_id: str,
@@ -220,6 +272,7 @@ def _cost_gate_candidate_paths(
     counterfactual: dict[str, Any] | None,
     profit_packet: dict[str, Any] | None,
     activation_preflight: dict[str, Any] | None,
+    horizon_sealed_replay: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     if not counterfactual:
         return []
@@ -234,6 +287,7 @@ def _cost_gate_candidate_paths(
     else:
         status = "COST_GATE_CANDIDATE_EXECUTION_EVIDENCE_MISSING"
     horizon_by_key = _horizon_cells_by_key(counterfactual)
+    sealed_by_key = _sealed_replay_by_key(horizon_sealed_replay)
     paths: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in _list(_profit_ranking(counterfactual).get("top_side_cells")):
@@ -290,15 +344,38 @@ def _cost_gate_candidate_paths(
             continue
         if horizon.get("status") not in {"MIXED_HORIZON_RESPONSE", "CANDIDATE_MULTI_HORIZON_STABLE"}:
             continue
+        sealed = sealed_by_key.get(key)
+        sealed_passed = (
+            _str(_dict(sealed).get("status"))
+            == "SEALED_HORIZON_REPLAY_READY_FOR_OPERATOR_REVIEW"
+            and _dict(_dict(sealed).get("answers")).get("sealed_replay_passed") is True
+        )
+        path_status = (
+            "SEALED_HORIZON_REPLAY_READY_FOR_LEARNING_ACCUMULATION"
+            if sealed_passed
+            else "HORIZON_EDGE_AMPLIFICATION_CANDIDATE"
+        )
+        required_next_gate = (
+            "learning_stack_accumulates_ledger_and_outcome_rows_for_sealed_horizon_candidate"
+            if sealed_passed
+            else "sealed_replay_or_bounded_demo_probe_for_selected_horizon"
+        )
+        path_next_action = (
+            "activate_or_repair_cost_gate_learning_lane_then_record_blocked_signal_outcomes"
+            if sealed_passed
+            else "build_horizon_specific_candidate_packet_then_operator_review"
+        )
+        sealed_evidence = _sealed_replay_evidence(sealed)
         paths.append(_base_path(
             path_id=f"horizon_edge_amplification:{key}",
             path_class="horizon_retiming_or_side_cell_filter",
-            status="HORIZON_EDGE_AMPLIFICATION_CANDIDATE",
+            status=path_status,
             candidate_key=key,
             why=(
                 "The same side-cell changes sign across holding horizons; retiming, "
                 "regime filtering, or side-cell specialization can amplify edge instead "
-                "of globally lowering the Cost Gate."
+                "of globally lowering the Cost Gate. A sealed replay pass moves this "
+                "path from replay-selection proof to learning/outcome accumulation."
             ),
             current_edge_bps=horizon.get("best_avg_net_bps"),
             cost_threshold_bps=friction_bps,
@@ -309,8 +386,8 @@ def _cost_gate_candidate_paths(
             horizon_status=_str(horizon.get("status")) or None,
             candidate_horizons=candidate_horizons,
             best_horizon_minutes=horizon.get("best_horizon_minutes"),
-            required_next_gate="sealed_replay_or_bounded_demo_probe_for_selected_horizon",
-            next_action="build_horizon_specific_candidate_packet_then_operator_review",
+            required_next_gate=required_next_gate,
+            next_action=path_next_action,
             evidence={
                 "block_confirmed_horizons": horizon.get("block_confirmed_horizons"),
                 "observed_horizons": horizon.get("observed_horizons"),
@@ -318,6 +395,9 @@ def _cost_gate_candidate_paths(
                 "best_p50_gross_bps": horizon.get("best_p50_gross_bps"),
                 "reason": horizon.get("reason"),
                 "horizon_rows": horizon.get("horizon_rows"),
+                "sealed_replay_present": bool(sealed),
+                "sealed_replay_passed": sealed_passed,
+                **sealed_evidence,
             },
         ))
     return paths
@@ -518,6 +598,7 @@ def build_profitability_path_scorecard(
     profit_learning_packet: dict[str, Any] | None = None,
     learning_plan: dict[str, Any] | None = None,
     activation_preflight: dict[str, Any] | None = None,
+    horizon_sealed_replay: dict[str, Any] | None = None,
     fillsim: dict[str, Any] | None = None,
     fillsim_history: dict[str, Any] | None = None,
     polymarket_leadlag: dict[str, Any] | None = None,
@@ -532,6 +613,7 @@ def build_profitability_path_scorecard(
         counterfactual=cost_gate_counterfactual,
         profit_packet=profit_learning_packet,
         activation_preflight=activation_preflight,
+        horizon_sealed_replay=horizon_sealed_replay,
     ))
     candidates.extend(_mm_signal_path(fillsim, fillsim_history))
     candidates.extend(_fee_or_scale_path(fillsim, fillsim_history))
@@ -549,6 +631,7 @@ def build_profitability_path_scorecard(
         "COST_GATE_CANDIDATE_READY_FOR_DATA_FLOW_PROOF",
         "COST_GATE_CANDIDATE_EXECUTION_EVIDENCE_MISSING",
         "HORIZON_EDGE_AMPLIFICATION_CANDIDATE",
+        "SEALED_HORIZON_REPLAY_READY_FOR_LEARNING_ACCUMULATION",
     }]
     if not candidates:
         status = "NO_PROFITABILITY_PATH_ARTIFACTS"
@@ -614,6 +697,11 @@ def build_profitability_path_scorecard(
                 input_paths.get("activation_preflight"),
                 activation_preflight,
             ),
+            "horizon_sealed_replay": _artifact_summary(
+                "horizon_sealed_replay",
+                input_paths.get("horizon_sealed_replay"),
+                horizon_sealed_replay,
+            ),
             "fillsim": _artifact_summary("fillsim", input_paths.get("fillsim"), fillsim),
             "fillsim_history": _artifact_summary(
                 "fillsim_history",
@@ -643,9 +731,9 @@ def build_profitability_path_scorecard(
             "do_not_lower_global_cost_gate": True,
             "recommended_engineering_sequence": [
                 "fix_or_run_demo_data_flow_monitor",
+                "run_horizon_specific_replay_for_mixed_horizon_side_cells",
                 "activate_or_repair_cost_gate_learning_lane_accumulation",
                 "operator_review_bounded_demo_probe_for_ranked_side_cells",
-                "run_horizon_specific_replay_for_mixed_horizon_side_cells",
                 "continue_low_friction_mm_and_external_alpha_search",
             ],
         },
@@ -722,6 +810,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--profit-learning-packet-json", type=Path)
     parser.add_argument("--learning-plan-json", type=Path)
     parser.add_argument("--activation-preflight-json", type=Path)
+    parser.add_argument("--horizon-sealed-replay-json", type=Path)
     parser.add_argument("--fillsim-json", type=Path)
     parser.add_argument("--fillsim-history-json", type=Path)
     parser.add_argument("--polymarket-leadlag-json", type=Path)
@@ -739,6 +828,7 @@ def main() -> int:
         "profit_learning_packet": args.profit_learning_packet_json,
         "learning_plan": args.learning_plan_json,
         "activation_preflight": args.activation_preflight_json,
+        "horizon_sealed_replay": args.horizon_sealed_replay_json,
         "fillsim": args.fillsim_json,
         "fillsim_history": args.fillsim_history_json,
         "polymarket_leadlag": args.polymarket_leadlag_json,
@@ -749,6 +839,7 @@ def main() -> int:
         profit_learning_packet=_read_json(args.profit_learning_packet_json),
         learning_plan=_read_json(args.learning_plan_json),
         activation_preflight=_read_json(args.activation_preflight_json),
+        horizon_sealed_replay=_read_json(args.horizon_sealed_replay_json),
         fillsim=_read_json(args.fillsim_json),
         fillsim_history=_read_json(args.fillsim_history_json),
         polymarket_leadlag=_read_json(args.polymarket_leadlag_json),
