@@ -120,6 +120,12 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         == "LEARNING_DATA_FLOW_STALE"
     )
     source_activation_ready = detail.get("learning_lane_source_activation_ready")
+    stack_health_status = str(
+        detail.get("demo_learning_stack_healthcheck_status") or ""
+    ).upper()
+    stack_health_next_action = detail.get(
+        "demo_learning_stack_healthcheck_next_action"
+    )
 
     if source_activation_ready is False:
         return {
@@ -133,6 +139,121 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "operator_actionable": False,
             "engineering_actionable": True,
         }
+
+    if ledger_status in {"MISSING", "EMPTY"}:
+        if stack_health_status == "SOURCE_NOT_READY":
+            return {
+                "action": BLOCK,
+                "reason": "demo_learning_stack_source_not_ready",
+                "blocker_class": "source_health",
+                "primary_blocker": "demo_learning_stack_source_not_ready",
+                "next_trigger": (
+                    stack_health_next_action
+                    or "reconcile_runtime_source_before_stack_install_or_validation"
+                ),
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if stack_health_status == "NOT_INSTALLED":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_not_installed",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "demo_learning_stack_not_installed",
+                "next_trigger": (
+                    stack_health_next_action
+                    or "operator_approve_runtime_source_reconcile_then_install_demo_learning_stack_crons"
+                ),
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if stack_health_status == "INSTALLED_NOT_FIRING":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_installed_not_firing",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "demo_learning_stack_installed_not_firing",
+                "next_trigger": (
+                    stack_health_next_action or "inspect_cron_logs_and_crontab_schedule"
+                ),
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if stack_health_status == "FIRING_NO_RECENT_STATUS":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_firing_no_recent_status",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "demo_learning_stack_firing_no_recent_status",
+                "next_trigger": (
+                    stack_health_next_action
+                    or "inspect_cron_logs_for_runtime_or_python_errors"
+                ),
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if stack_health_status == "ERROR":
+            return {
+                "action": BLOCK,
+                "reason": "demo_learning_stack_error",
+                "blocker_class": "source_health",
+                "primary_blocker": "demo_learning_stack_error",
+                "next_trigger": (
+                    stack_health_next_action
+                    or "inspect_cost_gate_learning_lane_status_log_and_stage_artifacts"
+                ),
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if stack_health_status == "FIRING_BUT_ARTIFACTS_INCOMPLETE":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_artifacts_incomplete",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "demo_learning_stack_artifacts_incomplete",
+                "next_trigger": (
+                    stack_health_next_action
+                    or "wait_one_cycle_or_inspect_latest_artifact_paths"
+                ),
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if stack_health_status == "RUNNING_NO_LEDGER_ROWS":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_running_no_ledger_rows",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "demo_learning_stack_running_no_ledger_rows",
+                "next_trigger": (
+                    stack_health_next_action
+                    or "confirm_materializer_input_rows_and_writer_or_pg_reject_source"
+                ),
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if stack_health_status == "LEDGER_ONLY_NEEDS_OUTCOME_REFRESH":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_ledger_only_needs_outcome_refresh",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "demo_learning_stack_ledger_only_needs_outcome_refresh",
+                "next_trigger": (
+                    stack_health_next_action
+                    or "wait_for_outcome_refresh_or_inspect_price_observation_windows"
+                ),
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if stack_health_status == "STALE_ARTIFACT":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_healthcheck_stale",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "demo_learning_stack_healthcheck_stale",
+                "next_trigger": "refresh_demo_learning_stack_healthcheck_latest",
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
 
     if ledger_status in {"MISSING", "EMPTY"} and demo_learning_data_flow_stale:
         return {
@@ -1289,6 +1410,66 @@ def classify_profitability_blocker(
                 ),
                 "learning_lane_expected_head_matches": detail.get(
                     "learning_lane_expected_head_matches"
+                ),
+                "demo_learning_stack_healthcheck_status": detail.get(
+                    "demo_learning_stack_healthcheck_status"
+                ),
+                "demo_learning_stack_healthcheck_raw_status": detail.get(
+                    "demo_learning_stack_healthcheck_raw_status"
+                ),
+                "demo_learning_stack_healthcheck_reason": detail.get(
+                    "demo_learning_stack_healthcheck_reason"
+                ),
+                "demo_learning_stack_healthcheck_next_action": detail.get(
+                    "demo_learning_stack_healthcheck_next_action"
+                ),
+                "demo_learning_stack_healthcheck_ts_utc": detail.get(
+                    "demo_learning_stack_healthcheck_ts_utc"
+                ),
+                "demo_learning_stack_healthcheck_age_seconds": detail.get(
+                    "demo_learning_stack_healthcheck_age_seconds"
+                ),
+                "demo_learning_stack_healthcheck_source_ok": detail.get(
+                    "demo_learning_stack_healthcheck_source_ok"
+                ),
+                "demo_learning_stack_healthcheck_source_path": detail.get(
+                    "demo_learning_stack_healthcheck_source_path"
+                ),
+                "demo_learning_stack_healthcheck_source_error": detail.get(
+                    "demo_learning_stack_healthcheck_source_error"
+                ),
+                "demo_learning_stack_source_ready": detail.get(
+                    "demo_learning_stack_source_ready"
+                ),
+                "demo_learning_stack_stack_installed": detail.get(
+                    "demo_learning_stack_stack_installed"
+                ),
+                "demo_learning_stack_heartbeats_recent": detail.get(
+                    "demo_learning_stack_heartbeats_recent"
+                ),
+                "demo_learning_stack_statuses_recent": detail.get(
+                    "demo_learning_stack_statuses_recent"
+                ),
+                "demo_learning_stack_latest_artifacts_present": detail.get(
+                    "demo_learning_stack_latest_artifacts_present"
+                ),
+                "demo_learning_stack_cost_gate_learning_stage_error": detail.get(
+                    "demo_learning_stack_cost_gate_learning_stage_error"
+                ),
+                "demo_learning_stack_cost_gate_learning_ledger_rows_present": detail.get(
+                    "demo_learning_stack_cost_gate_learning_ledger_rows_present"
+                ),
+                "demo_learning_stack_blocked_signal_outcomes_present": detail.get(
+                    "demo_learning_stack_blocked_signal_outcomes_present"
+                ),
+                "demo_learning_stack_blocked_outcome_review_present": detail.get(
+                    "demo_learning_stack_blocked_outcome_review_present"
+                ),
+                "demo_learning_stack_demo_learning_evidence_classification_status": detail.get(
+                    "demo_learning_stack_demo_learning_evidence_classification_status"
+                ),
+                "demo_learning_stack_cost_gate_learning_review_status": detail.get(
+                    "demo_learning_stack_cost_gate_learning_review_status"
                 ),
                 "demo_learning_evidence_status": detail.get(
                     "demo_learning_evidence_status"

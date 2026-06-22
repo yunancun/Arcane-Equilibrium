@@ -27,7 +27,7 @@ from polymarket_leadlag import replay_history as polymarket_replay_history
 from . import RUNNER_VERSION
 from .discovery_loop import build_discovery_plan
 
-RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v6"
+RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v7"
 DEFAULT_MAX_ARTIFACT_AGE_SECONDS = 6 * 60 * 60
 DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS = 36 * 60 * 60
 DEFAULT_POLYMARKET_REPLAY_HISTORY_REPORT_LIMIT = 4096
@@ -1447,6 +1447,72 @@ def summarize_demo_learning_evidence_audit(
     }
 
 
+def summarize_demo_learning_stack_healthcheck(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    path = (
+        data_dir
+        / "demo_learning_stack_healthcheck"
+        / "demo_learning_stack_healthcheck_latest.json"
+    )
+    payload, err = _read_json(path)
+    if err:
+        return {
+            "demo_learning_stack_healthcheck_status": "NOT_SEEN",
+            "demo_learning_stack_healthcheck_source_path": str(path),
+            "demo_learning_stack_healthcheck_source_error": err,
+        }
+    assert payload is not None
+    ts_utc = payload.get("ts_utc")
+    fresh, age, freshness_error = _source_fresh(
+        ts_utc,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else {}
+    return {
+        "demo_learning_stack_healthcheck_status": (
+            str(payload.get("status") or "UNKNOWN") if fresh else "STALE_ARTIFACT"
+        ),
+        "demo_learning_stack_healthcheck_raw_status": payload.get("status"),
+        "demo_learning_stack_healthcheck_reason": payload.get("reason"),
+        "demo_learning_stack_healthcheck_next_action": payload.get("next_action"),
+        "demo_learning_stack_healthcheck_ts_utc": ts_utc,
+        "demo_learning_stack_healthcheck_age_seconds": age,
+        "demo_learning_stack_healthcheck_source_ok": fresh,
+        "demo_learning_stack_healthcheck_source_path": str(path),
+        "demo_learning_stack_healthcheck_source_error": freshness_error,
+        "demo_learning_stack_source_ready": answers.get("source_ready"),
+        "demo_learning_stack_stack_installed": answers.get("stack_installed"),
+        "demo_learning_stack_heartbeats_recent": answers.get("heartbeats_recent"),
+        "demo_learning_stack_statuses_recent": answers.get("statuses_recent"),
+        "demo_learning_stack_latest_artifacts_present": answers.get(
+            "latest_artifacts_present"
+        ),
+        "demo_learning_stack_cost_gate_learning_stage_error": answers.get(
+            "cost_gate_learning_stage_error"
+        ),
+        "demo_learning_stack_cost_gate_learning_ledger_rows_present": answers.get(
+            "cost_gate_learning_ledger_rows_present"
+        ),
+        "demo_learning_stack_blocked_signal_outcomes_present": answers.get(
+            "blocked_signal_outcomes_present"
+        ),
+        "demo_learning_stack_blocked_outcome_review_present": answers.get(
+            "blocked_outcome_review_present"
+        ),
+        "demo_learning_stack_demo_learning_evidence_classification_status": answers.get(
+            "demo_learning_evidence_classification_status"
+        ),
+        "demo_learning_stack_cost_gate_learning_review_status": answers.get(
+            "cost_gate_learning_review_status"
+        ),
+    }
+
+
 def collect_cost_gate_learning_lane_arm(
     data_dir: Path,
     *,
@@ -1464,6 +1530,10 @@ def collect_cost_gate_learning_lane_arm(
         now_utc=now_utc,
     )
     demo_evidence_summary = summarize_demo_learning_evidence_audit(
+        data_dir,
+        now_utc=now_utc,
+    )
+    stack_health_summary = summarize_demo_learning_stack_healthcheck(
         data_dir,
         now_utc=now_utc,
     )
@@ -1512,6 +1582,7 @@ def collect_cost_gate_learning_lane_arm(
                 "note": "cost_gate_learning_lane_plan_not_seen",
                 **source_summary,
                 **demo_evidence_summary,
+                **stack_health_summary,
                 **historical_summary,
                 **loop_summary,
                 **ledger_summary,
@@ -1555,6 +1626,7 @@ def collect_cost_gate_learning_lane_arm(
             "boundary": payload.get("boundary"),
             **source_summary,
             **demo_evidence_summary,
+            **stack_health_summary,
             **historical_summary,
             **loop_summary,
             **ledger_summary,
