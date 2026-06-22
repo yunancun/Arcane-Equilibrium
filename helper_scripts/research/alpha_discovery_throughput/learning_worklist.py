@@ -185,6 +185,11 @@ _EVIDENCE_KEYS = (
     "blocked_signal_top_review_candidate_side_cell_key",
     "blocked_signal_top_review_candidate_wrongful_block_score",
     "blocked_signal_top_review_candidate_net_cost_cushion_bps",
+    "learning_loop_last_scorecard_status",
+    "learning_loop_last_scorecard_probe_candidate_count",
+    "learning_loop_last_scorecard_horizon_stability_status",
+    "learning_loop_last_scorecard_horizon_stability_next_trigger",
+    "learning_loop_last_scorecard_horizon_stability_horizons",
     "learning_loop_last_review_top_side_cell_key",
     "learning_loop_last_review_top_wrongful_block_score",
     "learning_loop_last_review_top_net_cost_cushion_bps",
@@ -317,6 +322,14 @@ def _bool(value: Any) -> bool:
     return value is True
 
 
+def _as_list(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    return []
+
+
 def _contains_any(text: str, needles: tuple[str, ...]) -> bool:
     lowered = text.lower()
     return any(needle in lowered for needle in needles)
@@ -409,11 +422,11 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
                 "blocked_signal" in _str(row.get("primary_blocker"))
                 or "blocked_outcome" in _str(row.get("primary_blocker"))
             )
-            and (
-                row.get("blocked_signal_top_review_candidate_side_cell_key")
-                or row.get("blocked_signal_top_review_side_cell_key")
-            )
+            and _blocked_signal_review_candidate_key(row)
         ):
+            horizon_objective = _blocked_signal_horizon_review_objective(row)
+            if horizon_objective:
+                return horizon_objective
             return "operator_review_top_blocked_signal_side_cell_before_bounded_demo_probe"
         preflight_status = _str(row.get("sealed_horizon_probe_preflight_status"))
         if preflight_status == "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED":
@@ -481,6 +494,69 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
     return _str(row.get("next_trigger")) or "inspect_arm_detail"
 
 
+def _blocked_signal_review_candidate_key(row: dict[str, Any]) -> str:
+    return _str(
+        row.get("blocked_signal_top_review_candidate_side_cell_key")
+        or row.get("blocked_signal_top_review_side_cell_key")
+        or row.get("learning_loop_last_review_top_candidate_side_cell_key")
+        or row.get("learning_loop_last_review_top_side_cell_key")
+    )
+
+
+def _profit_learning_cell_for_candidate(
+    row: dict[str, Any],
+    candidate_key: str,
+) -> dict[str, Any]:
+    if not candidate_key:
+        return {}
+    for raw in _as_list(row.get("profit_learning_top_side_cells")):
+        if not isinstance(raw, dict):
+            continue
+        raw_key = _str(raw.get("candidate_key") or raw.get("side_cell_key"))
+        if raw_key == candidate_key:
+            return raw
+    return {}
+
+
+def _blocked_signal_horizon_review_objective(row: dict[str, Any]) -> str | None:
+    candidate_key = _blocked_signal_review_candidate_key(row)
+    cell = _profit_learning_cell_for_candidate(row, candidate_key)
+    cell_status = _str(cell.get("horizon_status") or cell.get("status"))
+    candidate_horizons = _as_list(
+        cell.get("candidate_horizons_minutes") or cell.get("candidate_horizons")
+    )
+    scorecard_status = _str(
+        row.get("learning_loop_last_scorecard_horizon_stability_status")
+        or row.get("profit_learning_counterfactual_horizon_stability_status")
+    )
+    if (
+        cell_status == "CANDIDATE_MULTI_HORIZON_STABLE"
+        and len(candidate_horizons) >= 2
+        and scorecard_status
+        in {
+            "",
+            "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT",
+            "HORIZON_SPECIFIC_PROFIT_LEARNING_CANDIDATES_PRESENT",
+        }
+    ):
+        return (
+            "operator_review_multi_horizon_blocked_signal_side_cell_before_"
+            "bounded_demo_probe"
+        )
+    if cell_status in {
+        "CANDIDATE_HORIZON_SPECIFIC",
+        "MIXED_HORIZON_RESPONSE",
+    } or (
+        scorecard_status == "HORIZON_SPECIFIC_PROFIT_LEARNING_CANDIDATES_PRESENT"
+        and candidate_horizons
+    ):
+        return (
+            "operator_review_horizon_specific_blocked_signal_side_cell_before_"
+            "bounded_demo_probe"
+        )
+    return None
+
+
 def _completion_gate(task_type: str) -> str:
     if task_type == "promotion_review":
         return "formal_aeg_qc_mit_review_verdict_recorded"
@@ -537,6 +613,7 @@ def _completion_evidence_required(task_type: str) -> list[str]:
             "operator_authorization_artifact_exists",
             "isolated_probe_preflight_passes",
             "candidate_specific_side_cell_or_candidate_key_evidence_present",
+            "horizon_stability_status_and_candidate_horizons_recorded_when_available",
             "sealed_horizon_learning_evidence_review_ready_or_blocked_review_candidate_present",
             "bounded_probe_result_review_status_recorded_when_probe_outcomes_exist",
             "order_authority_boundary_explicitly_recorded",
