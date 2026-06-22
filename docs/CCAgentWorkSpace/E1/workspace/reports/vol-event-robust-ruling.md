@@ -1,6 +1,6 @@
 # Vol-Event Robust Ruling — order-flow edge × high-vol regime
 
-> 自動產出（vol_event_trigger.py）：2026-06-22T04:00:07.686539+00:00
+> 自動產出（vol_event_trigger.py）：2026-06-22T10:00:02.778557+00:00
 > $0 唯讀 / OFFLINE / leak-free PIT。指標性彙總，**最終 verdict 屬 QC**。
 > 不下單、不碰 production engine/risk、不改 sibling 檔。
 
