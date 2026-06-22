@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Profitability Path Scorecard
+
+- Added an artifact-only profitability scorecard that ranks bounded Cost Gate demo-learning, horizon retiming / side-cell filtering, low-friction MM alpha search, fee/scale, Polymarket lead-lag, and Gate-B event-wait paths in one machine-readable output.
+- The scorecard makes the profit thesis explicit: cross the Cost Gate through bounded learning and execution-realism proof for ranked side-cells, not global gate relaxation.
+- Fixed the demo data-flow monitor blocker caused by unescaped literal `%` patterns in psycopg SQL. No Cost Gate lowering, order/probe authority, runtime mutation, or promotion proof was granted.
+
 ## 2026-06-22 Cost Gate Downstream Effective-Sample Guard
 
 - Bounded learning policy and historical scorecard review now consume the v381 effective sample fields, preferring `sample_count_for_gate` / `distinct_ts` before raw rows for sample gates, scoring, ranking, and compact outputs.

@@ -87,6 +87,15 @@ def test_sql_contract_is_read_only_and_covers_pipeline_tables() -> None:
     assert "DELETE " not in sql.upper()
 
 
+def test_pipeline_counts_sql_escapes_literal_percent_for_psycopg() -> None:
+    sql = build_pipeline_counts_sql()
+
+    assert "ILIKE '%%post_only_cross%%'" in sql
+    assert "ILIKE '%%postonlywilltakeliquidity%%'" in sql
+    assert "ILIKE '%%post only will take liquidity%%'" in sql
+    assert "ILIKE '%%ec_postonlywilltakeliquidity%%'" in sql
+
+
 def test_pre_gate_drilldown_sql_joins_contexts_to_downstream_tables() -> None:
     sql = build_pre_gate_drilldown_sql()
 
