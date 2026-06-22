@@ -42,6 +42,7 @@ from cost_gate_learning_lane.status import (
     ACTIVATION_PREFLIGHT_SCHEMA_VERSION,
     REQUIRED_SOURCE_RELATIVE_PATHS,
     build_cost_gate_learning_lane_activation_preflight,
+    main as cost_gate_status_main,
     summarize_cost_gate_learning_lane_writer_config,
     summarize_cost_gate_learning_lane_writer_process,
     summarize_cost_gate_learning_lane_source,
@@ -1088,6 +1089,37 @@ def test_activation_preflight_reports_not_accumulating_without_runtime_artifacts
     assert preflight["plan"]["main_cost_gate_adjustment"] == "NONE"
     assert preflight["plan"]["order_authority"] == "NOT_GRANTED"
     assert "probe_ledger_jsonl" in preflight["missing_links"]
+
+
+def test_activation_preflight_cli_writes_json_output(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    out = tmp_path / "activation_preflight_latest.json"
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
+    )
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    lane_dir.mkdir(parents=True)
+    (lane_dir / "demo_learning_lane_plan_latest.json").write_text(
+        json.dumps(plan),
+        encoding="utf-8",
+    )
+
+    rc = cost_gate_status_main(
+        [
+            "--data-dir",
+            str(data_dir),
+            "--json-output",
+            str(out),
+        ]
+    )
+
+    payload = json.loads(out.read_text(encoding="utf-8"))
+    assert rc == 0
+    assert payload["schema_version"] == ACTIVATION_PREFLIGHT_SCHEMA_VERSION
+    assert payload["status"] == "NOT_ACCUMULATING"
+    assert payload["answers"]["activation_ready"] is False
+    assert payload["boundary"].startswith("read-only activation preflight only")
 
 
 def test_activation_preflight_rejects_recent_policy_artifact_when_policy_waits(
