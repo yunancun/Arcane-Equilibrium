@@ -12,4 +12,6 @@
 
 如果 sealed preflight cron 缺 entry，stack 會是 `NOT_INSTALLED`。如果 sealed preflight heartbeat stale，stack 會是 `INSTALLED_NOT_FIRING`。如果 cron 有跑但 latest sealed preflight artifact 缺失，stack 會是 `BOUNDED_PROBE_PREFLIGHT_MISSING`。
 
-已在 Mac 驗證：py_compile passed；healthcheck tests `9 passed`；alpha/worklist focused `60 passed`。本 note 不授權 runtime cron install。
+已驗證：Mac py_compile passed；Mac healthcheck tests `9 passed`；Mac alpha/worklist focused `60 passed`；Linux source fast-forward 到 `b2a1c55b`；Linux 同套 py_compile/tests passed；Linux read-only healthcheck stdout smoke 報 `status=NOT_INSTALLED`，且四條 stack crontab entries 都是 `false`，符合現狀。
+
+本 note 不授權 runtime cron install。
