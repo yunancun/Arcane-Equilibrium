@@ -1,14 +1,16 @@
-# Runtime Source Reconcile Current Target Dry Run
+# Runtime Source Reconcile Recorded Target Dry Run
 
 日期：2026-06-22
 角色：PM
 範圍：只讀 runtime source reconcile 證據刷新；不執行 runtime apply。
 
+重要口徑：本報告證明 recorded target `34066e5eb0aa15b51284d4e0013fbf73f4874784` 的 probe/dry-run 結果。後續文檔 commit 會自然推進 `origin/main`；若 operator 要 apply 較新的 target，必須先對 then-current `origin/main` 重跑 probe/dry-run。
+
 ## 結論
 
-current `origin/main=34066e5eb0aa15b51284d4e0013fbf73f4874784` 已重新生成 `trade-core` source reconcile dry-run。Runtime 仍停在 `917be4cc9a3d3549328155f1863d42400c70267f`，target object 尚未在 runtime 可用，dirty/untracked 路徑 56，其中 13 條需要 review。Apply dry-run 返回 `DRY_RUN_OPERATOR_APPROVAL_REQUIRED`，blockers 為空，預覽 10 條命令，但沒有在 runtime 執行任何命令。
+recorded target `34066e5eb0aa15b51284d4e0013fbf73f4874784` 已重新生成 `trade-core` source reconcile dry-run。Runtime 仍停在 `917be4cc9a3d3549328155f1863d42400c70267f`，target object 尚未在 runtime 可用，dirty/untracked 路徑 56，其中 13 條需要 review。Apply dry-run 返回 `DRY_RUN_OPERATOR_APPROVAL_REQUIRED`，blockers 為空，預覽 10 條命令，但沒有在 runtime 執行任何命令。
 
-這是 operator 審批 source reconcile 的最新 packet；它取代舊 v374 `eaed0cf2` dry-run target。Source reconcile 完成前，最新 demo-learning monitor / packet / alpha ingestion 仍只是 repo source，不是 Linux runtime evidence。
+這是 operator 審批 source reconcile 的 target-specific packet；它取代舊 v374 `eaed0cf2` dry-run target，但不授權 apply 較新的 commit。Source reconcile 完成前，最新 demo-learning monitor / packet / alpha ingestion 仍只是 repo source，不是 Linux runtime evidence。
 
 ## 關鍵數字
 
@@ -47,4 +49,4 @@ current `origin/main=34066e5eb0aa15b51284d4e0013fbf73f4874784` 已重新生成 `
 
 ## 下一步
 
-operator 若批准 source reconcile，應在真正 apply 前再次確認 `origin/main` 未前進；若已前進，先重跑 dry-run。真正 apply 仍需顯式 `--apply`、review acceptance、target-wins confirmation、expected head/count checks，以及 `OPENCLAW_RUNTIME_SOURCE_RECONCILE_APPLY=1`。
+operator 若批准 source reconcile，應在真正 apply 前再次確認 `origin/main` 是否等於 recorded target；若已前進，先重跑 probe/dry-run。真正 apply 仍需顯式 `--apply`、review acceptance、target-wins confirmation、expected head/count checks，以及 `OPENCLAW_RUNTIME_SOURCE_RECONCILE_APPLY=1`。

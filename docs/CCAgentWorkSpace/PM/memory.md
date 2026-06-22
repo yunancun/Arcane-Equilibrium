@@ -29,7 +29,7 @@
 
 - Refreshed the read-only remote probe and apply dry-run against current `origin/main=34066e5e`, superseding the prior dry-run target `eaed0cf2`.
 - `trade-core` still reports runtime HEAD `917be4cc`, target object unavailable, dirty/untracked 56, review-required 13, and apply dry-run status `DRY_RUN_OPERATOR_APPROVAL_REQUIRED` with 0 blockers and 10 previewed commands.
-- No runtime fetch/pull/reset/clean/source sync was executed; v375-v377 demo-learning monitors/packets remain blocked from running on Linux until operator-approved reconcile.
+- No runtime fetch/pull/reset/clean/source sync was executed; v375-v377 demo-learning monitors/packets remain blocked from running on Linux until operator-approved reconcile. The dry-run is valid for recorded target `34066e5e`; any later apply target must rerun probe/dry-run first.
 
 ## 2026-06-22 Profit-Learning Packet Alpha Ingestion
 
