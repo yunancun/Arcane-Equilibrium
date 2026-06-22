@@ -6,6 +6,13 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-22 Demo order-to-fill touchability audit
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-22--demo_order_to_fill_gap_touchability_audit.md` | PM checkpoint: read-only Demo order-to-fill touchability audit classifies the 48h no-fill sample as deep passive no-touch, making touchability-aware bounded Demo probe design the next engineering gate before any Cost Gate change. |
+| `CCAgentWorkSpace/Operator/2026-06-22--demo_order_to_fill_gap_touchability_audit.md` | Operator note for the no-fill conclusion: 6 PostOnly buys, 0 fills, 0 BBO touches, 6 deep passive no-touch orders; no Cost Gate lowering or probe/order authority. |
+
 ### 2026-06-21 Cost-Gate learning lane runtime activation runbook
 
 | 文件 | 内容 |
