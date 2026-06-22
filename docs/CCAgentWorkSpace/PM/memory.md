@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Profitability Engineering Closure
+
+- Profitability path scorecard now consumes the sealed horizon probe preflight and emits `profitability_engineering_closure_v1`.
+- Current leading path is still `ma_crossover|BTCUSDT|Sell@240m`, but it is now classified precisely as blocked by operator review plus production learning-lane accumulation.
+- The closure keeps the strategy thesis explicit: cross Cost Gate with side-cell/horizon specialization, bounded demo learning, execution-realism proof, and stronger alpha search, not global Cost Gate lowering or Python-side authority.
+
 ## 2026-06-22 Sealed Horizon Bounded Demo-Probe Preflight
 
 - Added a no-authority `sealed_horizon_bounded_demo_probe_preflight_v1` that makes sealed evidence, decision-packet alignment, operator review, production learning-lane accumulation, and authority boundary explicit before any bounded demo probe.
