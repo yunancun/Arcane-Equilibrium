@@ -1,16 +1,18 @@
-# Runtime Source Reconcile Current Target Dry Run
+# Runtime Source Reconcile Recorded Target Dry Run
 
 日期：2026-06-22
 角色：PM
 範圍：只讀 runtime source reconcile 證據刷新；不執行 runtime apply。
 
+重要口徑：本報告證明 recorded target `34066e5eb0aa15b51284d4e0013fbf73f4874784` 的 probe/dry-run 結果。後續文檔 commit 會自然推進 `origin/main`；若 operator 要 apply 較新的 target，必須先對 then-current `origin/main` 重跑 probe/dry-run。
+
 ## 結論
 
-當前 operator apply packet 已刷新到 current `origin/main=34066e5eb0aa15b51284d4e0013fbf73f4874784`。`trade-core` runtime source 仍停在 `917be4cc9a3d3549328155f1863d42400c70267f`，target object 尚未在 runtime 可用，dirty/untracked 路徑 56，其中 13 條仍屬 review-required。Apply helper dry-run 返回 `DRY_RUN_OPERATOR_APPROVAL_REQUIRED`，blockers 為空，預覽 10 條命令，但沒有在 runtime 執行任何命令。
+operator apply packet 已刷新到 recorded target `34066e5eb0aa15b51284d4e0013fbf73f4874784`。`trade-core` runtime source 仍停在 `917be4cc9a3d3549328155f1863d42400c70267f`，target object 尚未在 runtime 可用，dirty/untracked 路徑 56，其中 13 條仍屬 review-required。Apply helper dry-run 返回 `DRY_RUN_OPERATOR_APPROVAL_REQUIRED`，blockers 為空，預覽 10 條命令，但沒有在 runtime 執行任何命令。
 
 這代表：下一步可以由 operator 審批是否使用 current-target apply packet 進行 source reconcile；在此之前，v375-v377 的 demo data-flow monitor、profit-learning packet、alpha/worklist ingestion 仍不能算已在 Linux runtime 運行。
 
-## Current Target
+## Recorded Target
 
 - Local `HEAD`：`34066e5eb0aa15b51284d4e0013fbf73f4874784`
 - Local `origin/main`：`34066e5eb0aa15b51284d4e0013fbf73f4874784`
@@ -122,4 +124,4 @@ Not performed:
 
 ## Next Action
 
-If operator approves runtime source reconcile, rerun this dry-run one more time immediately before real apply if `origin/main` has advanced. Then execute only the reviewed current-target apply path under the explicit `--apply` and `OPENCLAW_RUNTIME_SOURCE_RECONCILE_APPLY=1` gates.
+If operator approves runtime source reconcile, rerun this dry-run one more time immediately before real apply if `origin/main` has advanced or differs from the recorded target. Then execute only the reviewed apply path under the explicit `--apply` and `OPENCLAW_RUNTIME_SOURCE_RECONCILE_APPLY=1` gates.
