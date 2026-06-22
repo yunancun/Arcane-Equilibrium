@@ -39,6 +39,10 @@
 - Probe status: `REVIEW_REQUIRED_BEFORE_REMOTE_RECONCILE`
 - Runtime file analysis: remote/local line counts and top-level Python symbols showed local target is a strict newer source surface for the code/test files, except the old runtime-only test name that is superseded by newer target assertions.
 
+## Post-v373 Probe Note
+
+After this report and the cleaned vol-event report were pushed, a follow-up read-only probe against target `609718e077c1a768debd9e1d6e470aebd7bcde40` still returned `REVIEW_REQUIRED_BEFORE_REMOTE_RECONCILE`: runtime HEAD `917be4cc`, runtime `origin/main` `1401848b`, runtime target object unavailable, 56 dirty/untracked paths, 43 content-equivalent paths, and 13 review-required paths. The only classification shift is that `vol-event-robust-ruling.md` is now a target path conflict instead of a target-absent runtime-only file because the repo copy normalizes trailing whitespace.
+
 ## Next Operator-Gated Step
 
 After operator approval, make the target commit available on `trade-core`, preserve any explicitly requested runtime-local artifacts, then perform source reconcile and rerun the remote/direct planner before installing the demo-learning crons. Until that happens, demo-learning stack remains absent and Cost Gate learning cannot be trusted as continuously accumulating evidence.
