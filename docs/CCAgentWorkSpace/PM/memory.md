@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Bounded Demo-Probe Result Review
+
+- Added no-authority `bounded_demo_probe_result_review_v1` so future probe outcomes can be classified into collect-more, first-review, stop, or learning-review states against the v397 design packet.
+- The result review consumes only preflight JSON + JSONL ledger rows and preserves no Cost Gate lowering, no probe/order authority, no runtime mutation, and no promotion proof.
+- Current path still lacks operator approval and real probe outcomes; this closes the post-probe stop/review artifact gap before any authority is granted.
+
 ## 2026-06-22 Sealed Horizon Bounded Probe Design
 
 - `sealed_horizon_bounded_demo_probe_preflight_v1` now embeds inactive `bounded_demo_probe_design_v1` with candidate side-cell/horizon, edge snapshot, initial demo caps, success criteria, stop conditions, and required review artifacts.
