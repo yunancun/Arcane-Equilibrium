@@ -97,6 +97,9 @@ def _score_priority(path: dict[str, Any]) -> tuple[int, float]:
     """Sort by status class first, then evidence strength."""
     status_rank = {
         "SEALED_HORIZON_PREFLIGHT_READY_FOR_OPERATOR_AUTHORIZATION": 6,
+        "BOUNDED_DEMO_PROBE_LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED": 5,
+        "BOUNDED_DEMO_PROBE_FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED": 6,
+        "BOUNDED_DEMO_PROBE_COLLECT_MORE_OUTCOMES": 7,
         "SEALED_HORIZON_PREFLIGHT_REQUIRES_OPERATOR_REVIEW": 7,
         "SEALED_HORIZON_PREFLIGHT_REQUIRES_OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE": 8,
         "SEALED_HORIZON_LEARNING_EVIDENCE_READY_FOR_OPERATOR_REVIEW": 9,
@@ -108,6 +111,7 @@ def _score_priority(path: dict[str, Any]) -> tuple[int, float]:
         "SEALED_HORIZON_PREFLIGHT_NOT_ALIGNED": 25,
         "LOW_FRICTION_MM_GROSS_EDGE_BELOW_CURRENT_FEE": 40,
         "POLYMARKET_ALPHA_GROSS_BELOW_COST_OR_EXECUTION_UNMEASURED": 50,
+        "BOUNDED_DEMO_PROBE_RESULT_FAILED_STOP": 85,
         "FEE_OR_SCALE_PATH_NOT_SHORT_TERM_ALPHA": 70,
         "GATE_B_ACTIONABLE_WINDOW_REVIEW": 30,
         "EVENT_WAIT_NO_ACTIONABLE_WINDOW": 80,
@@ -257,6 +261,18 @@ def _sealed_probe_preflight_by_key(
     return {key: _dict(sealed_horizon_probe_preflight)}
 
 
+def _bounded_probe_result_review_by_key(
+    bounded_probe_result_review: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    payload = _dict(bounded_probe_result_review)
+    key = _str(
+        payload.get("side_cell_key") or _dict(payload.get("design")).get("side_cell_key")
+    )
+    if not key:
+        return {}
+    return {key: payload}
+
+
 def _sealed_learning_review_ready(evidence: dict[str, Any] | None) -> bool:
     payload = _dict(evidence)
     answers = _dict(payload.get("answers"))
@@ -313,6 +329,98 @@ def _sealed_learning_evidence_fields(evidence: dict[str, Any] | None) -> dict[st
             artifacts.get("source_rows")
         ).get("sha256"),
         "sealed_learning_review_sha256": _dict(artifacts.get("review")).get("sha256"),
+    }
+
+
+def _bounded_probe_result_review_fields(
+    review: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload = _dict(review)
+    if not payload:
+        return {
+            "bounded_probe_result_review_present": False,
+            "bounded_probe_result_review_status": None,
+            "bounded_probe_result_review_completed_probe_outcome_count": 0,
+            "bounded_probe_result_review_operator_review_required": False,
+            "bounded_probe_result_review_stop_probe_recommended": False,
+            "bounded_probe_result_review_learning_review_candidate": False,
+        }
+    summary = _dict(payload.get("probe_result_summary"))
+    answers = _dict(payload.get("answers"))
+    design = _dict(payload.get("design"))
+    return {
+        "bounded_probe_result_review_present": True,
+        "bounded_probe_result_review_schema_version": payload.get("schema_version"),
+        "bounded_probe_result_review_status": payload.get("status"),
+        "bounded_probe_result_review_reason": payload.get("reason"),
+        "bounded_probe_result_review_generated_at_utc": payload.get(
+            "generated_at_utc"
+        ),
+        "bounded_probe_result_review_side_cell_key": payload.get("side_cell_key"),
+        "bounded_probe_result_review_next_actions": _list(
+            payload.get("next_actions")
+        ),
+        "bounded_probe_result_review_admitted_probe_attempt_count": summary.get(
+            "admitted_probe_attempt_count"
+        ),
+        "bounded_probe_result_review_completed_probe_outcome_count": summary.get(
+            "completed_probe_outcome_count"
+        ),
+        "bounded_probe_result_review_positive_probe_outcome_count": summary.get(
+            "positive_probe_outcome_count"
+        ),
+        "bounded_probe_result_review_avg_realized_gross_bps": summary.get(
+            "avg_realized_gross_bps"
+        ),
+        "bounded_probe_result_review_avg_realized_net_bps": summary.get(
+            "avg_realized_net_bps"
+        ),
+        "bounded_probe_result_review_net_positive_pct": summary.get(
+            "net_positive_pct"
+        ),
+        "bounded_probe_result_review_min_realized_avg_net_bps": summary.get(
+            "min_realized_avg_net_bps"
+        ),
+        "bounded_probe_result_review_min_realized_net_positive_pct": summary.get(
+            "min_realized_net_positive_pct"
+        ),
+        "bounded_probe_result_review_first_review_outcome_floor": summary.get(
+            "first_review_outcome_floor"
+        ),
+        "bounded_probe_result_review_learning_review_outcome_floor": summary.get(
+            "learning_review_outcome_floor"
+        ),
+        "bounded_probe_result_review_max_filled_probe_outcomes_before_review": (
+            summary.get("max_filled_probe_outcomes_before_review")
+        ),
+        "bounded_probe_result_review_authority_boundary_preserved": answers.get(
+            "authority_boundary_preserved"
+        ),
+        "bounded_probe_result_review_operator_review_required": (
+            answers.get("operator_review_required") is True
+        ),
+        "bounded_probe_result_review_continue_probe_without_operator_review_allowed": (
+            answers.get("continue_probe_without_operator_review_allowed") is True
+        ),
+        "bounded_probe_result_review_stop_probe_recommended": (
+            answers.get("stop_probe_recommended") is True
+        ),
+        "bounded_probe_result_review_learning_review_candidate": (
+            answers.get("learning_review_candidate") is True
+        ),
+        "bounded_probe_result_review_probe_authority_granted": (
+            answers.get("probe_authority_granted") is True
+        ),
+        "bounded_probe_result_review_order_authority_granted": (
+            answers.get("order_authority_granted") is True
+        ),
+        "bounded_probe_result_review_main_cost_gate_adjustment": answers.get(
+            "main_cost_gate_adjustment"
+        ),
+        "bounded_probe_result_review_promotion_evidence": (
+            answers.get("promotion_evidence") is True
+        ),
+        "bounded_probe_result_review_design_status": design.get("status"),
     }
 
 
@@ -450,6 +558,54 @@ def _sealed_preflight_path_state(
     )
 
 
+def _bounded_probe_result_path_state(
+    review: dict[str, Any] | None,
+) -> tuple[str, str, str] | None:
+    payload = _dict(review)
+    status = _str(payload.get("status"))
+    next_actions = payload.get("next_actions")
+    completed = _int(_dict(payload.get("probe_result_summary")).get(
+        "completed_probe_outcome_count"
+    ))
+    if status == "AUTHORITY_BOUNDARY_VIOLATION":
+        return (
+            "SEALED_HORIZON_PREFLIGHT_AUTHORITY_BOUNDARY_VIOLATION",
+            "remove_authority_granting_probe_result_input_before_any_review",
+            _first_text(next_actions, "remove_authority_granting_input_before_any_review"),
+        )
+    if status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED":
+        return (
+            "BOUNDED_DEMO_PROBE_RESULT_FAILED_STOP",
+            "keep_cost_gate_blocked_after_realized_probe_edge_failed",
+            _first_text(next_actions, "stop_probe_and_keep_cost_gate_blocked_for_this_side_cell"),
+        )
+    if status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
+        return (
+            "BOUNDED_DEMO_PROBE_LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
+            "operator_review_probe_learning_results_before_any_promotion_or_gate_change",
+            _first_text(next_actions, "operator_review_probe_learning_results_before_any_promotion_or_gate_change"),
+        )
+    if status == "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED":
+        return (
+            "BOUNDED_DEMO_PROBE_FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+            "operator_review_first_probe_results_before_any_additional_probe_budget",
+            _first_text(next_actions, "operator_review_first_probe_results_before_any_additional_probe_budget"),
+        )
+    if status == "COLLECT_MORE_PROBE_OUTCOMES_BEFORE_FIRST_REVIEW":
+        return (
+            "BOUNDED_DEMO_PROBE_COLLECT_MORE_OUTCOMES",
+            "record_completed_probe_outcomes_until_first_review_floor",
+            _first_text(next_actions, "continue_recording_probe_outcomes_with_existing_authority_boundaries"),
+        )
+    if completed > 0 and status == "PREFLIGHT_DESIGN_NOT_USABLE":
+        return (
+            "SEALED_HORIZON_PREFLIGHT_NOT_ALIGNED",
+            "refresh_or_operator_review_bounded_probe_design_before_result_review",
+            _first_text(next_actions, "refresh_or_operator_review_bounded_probe_design_before_result_review"),
+        )
+    return None
+
+
 def _base_path(
     *,
     path_id: str,
@@ -500,6 +656,7 @@ def _cost_gate_candidate_paths(
     horizon_sealed_replay: dict[str, Any] | None,
     horizon_learning_evidence: dict[str, Any] | None,
     sealed_horizon_probe_preflight: dict[str, Any] | None,
+    bounded_probe_result_review: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     if not counterfactual:
         return []
@@ -520,6 +677,9 @@ def _cost_gate_candidate_paths(
     )
     sealed_probe_preflight_by_key = _sealed_probe_preflight_by_key(
         sealed_horizon_probe_preflight
+    )
+    bounded_probe_result_review_by_key = _bounded_probe_result_review_by_key(
+        bounded_probe_result_review
     )
     paths: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -580,13 +740,19 @@ def _cost_gate_candidate_paths(
         sealed = sealed_by_key.get(key)
         learning_evidence = learning_evidence_by_key.get(key)
         sealed_probe_preflight = sealed_probe_preflight_by_key.get(key)
+        bounded_probe_result_review = bounded_probe_result_review_by_key.get(key)
         sealed_passed = (
             _str(_dict(sealed).get("status"))
             == "SEALED_HORIZON_REPLAY_READY_FOR_OPERATOR_REVIEW"
             and _dict(_dict(sealed).get("answers")).get("sealed_replay_passed") is True
         )
         learning_ready = _sealed_learning_review_ready(learning_evidence)
-        if learning_ready and sealed_probe_preflight:
+        result_path_state = _bounded_probe_result_path_state(
+            bounded_probe_result_review
+        )
+        if result_path_state:
+            path_status, required_next_gate, path_next_action = result_path_state
+        elif learning_ready and sealed_probe_preflight:
             path_status, required_next_gate, path_next_action = (
                 _sealed_preflight_path_state(sealed_probe_preflight)
             )
@@ -613,6 +779,9 @@ def _cost_gate_candidate_paths(
         sealed_evidence = _sealed_replay_evidence(sealed)
         learning_fields = _sealed_learning_evidence_fields(learning_evidence)
         sealed_preflight_fields = _sealed_probe_preflight_fields(sealed_probe_preflight)
+        bounded_probe_result_fields = _bounded_probe_result_review_fields(
+            bounded_probe_result_review
+        )
         paths.append(_base_path(
             path_id=f"horizon_edge_amplification:{key}",
             path_class="horizon_retiming_or_side_cell_filter",
@@ -649,6 +818,7 @@ def _cost_gate_candidate_paths(
                 **sealed_evidence,
                 **learning_fields,
                 **sealed_preflight_fields,
+                **bounded_probe_result_fields,
             },
         ))
     return paths
@@ -900,15 +1070,34 @@ def _profitability_engineering_closure(
     *,
     candidates: list[dict[str, Any]],
     sealed_horizon_probe_preflight: dict[str, Any] | None,
+    bounded_probe_result_review: dict[str, Any] | None,
 ) -> dict[str, Any]:
     top = candidates[0] if candidates else {}
     preflight = _dict(sealed_horizon_probe_preflight)
     preflight_status = _str(preflight.get("status"))
     preflight_answers = _dict(preflight.get("answers"))
     blocking_gates = _list(preflight.get("blocking_gates"))
+    result_review = _dict(bounded_probe_result_review)
+    result_status = _str(result_review.get("status"))
+    result_summary = _dict(result_review.get("probe_result_summary"))
+    result_answers = _dict(result_review.get("answers"))
+    result_next_actions = _list(result_review.get("next_actions"))
+    completed_probe_outcomes = _int(
+        result_summary.get("completed_probe_outcome_count")
+    )
 
     if not candidates:
         status = "NO_PROFITABILITY_PATH_TO_CLOSE"
+    elif result_status == "AUTHORITY_BOUNDARY_VIOLATION":
+        status = "AUTHORITY_BOUNDARY_VIOLATION_REPAIR_FIRST"
+    elif result_status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED":
+        status = "COST_GATE_ESCAPE_RESULT_REVIEW_FAILED_REALIZED_EDGE"
+    elif result_status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
+        status = "BOUNDED_DEMO_PROBE_LEARNING_REVIEW_OPERATOR_REQUIRED"
+    elif result_status == "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED":
+        status = "BOUNDED_DEMO_PROBE_FIRST_REVIEW_OPERATOR_REQUIRED"
+    elif result_status == "COLLECT_MORE_PROBE_OUTCOMES_BEFORE_FIRST_REVIEW":
+        status = "BOUNDED_DEMO_PROBE_ACCUMULATING_OUTCOMES_BEFORE_REVIEW"
     elif preflight_status == "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION":
         status = "OPERATOR_CAN_REVIEW_BOUNDED_DEMO_PROBE_AUTHORIZATION"
     elif preflight_status == "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED":
@@ -926,10 +1115,21 @@ def _profitability_engineering_closure(
 
     preflight_next_actions = _list(preflight.get("next_actions"))
     remaining = _proof_gate_labels(blocking_gates)
+    if result_status == "AUTHORITY_BOUNDARY_VIOLATION":
+        remaining = ["remove authority-granting result-review input before continuing"]
+    elif result_status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED":
+        remaining = ["realized bounded demo probe edge failed; keep Cost Gate blocked"]
+    elif result_status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
+        remaining = ["operator reviews bounded probe learning results before any gate or promotion change"]
+    elif result_status == "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED":
+        remaining = ["operator reviews first bounded probe results before additional probe budget"]
+    elif result_status == "COLLECT_MORE_PROBE_OUTCOMES_BEFORE_FIRST_REVIEW":
+        remaining = ["complete first-review bounded probe outcome floor"]
     if not remaining and top and status == "PROFITABILITY_PATHS_REQUIRE_NEXT_PROOF_GATE":
         remaining = [_str(top.get("required_next_gate"))]
     next_actions = [
         action for action in [
+            *[str(item) for item in result_next_actions],
             *[str(item) for item in preflight_next_actions],
             _str(top.get("next_action")),
             "continue_low_friction_mm_and_external_alpha_search",
@@ -967,6 +1167,19 @@ def _profitability_engineering_closure(
                 is True
             ),
             "sealed_horizon_probe_preflight_blocking_gates": blocking_gates,
+            "bounded_probe_result_review_status": result_status or None,
+            "bounded_probe_result_review_completed_probe_outcomes": (
+                completed_probe_outcomes
+            ),
+            "bounded_probe_result_review_operator_review_required": (
+                result_answers.get("operator_review_required") is True
+            ),
+            "bounded_probe_result_review_stop_recommended": (
+                result_answers.get("stop_probe_recommended") is True
+            ),
+            "bounded_probe_result_review_learning_review_candidate": (
+                result_answers.get("learning_review_candidate") is True
+            ),
         },
         "edge_amplification_levers": [
             _lever_status(candidates, "horizon_retiming_or_side_cell_filter"),
@@ -997,6 +1210,7 @@ def build_profitability_path_scorecard(
     horizon_sealed_replay: dict[str, Any] | None = None,
     horizon_learning_evidence: dict[str, Any] | None = None,
     sealed_horizon_probe_preflight: dict[str, Any] | None = None,
+    bounded_probe_result_review: dict[str, Any] | None = None,
     fillsim: dict[str, Any] | None = None,
     fillsim_history: dict[str, Any] | None = None,
     polymarket_leadlag: dict[str, Any] | None = None,
@@ -1014,6 +1228,7 @@ def build_profitability_path_scorecard(
         horizon_sealed_replay=horizon_sealed_replay,
         horizon_learning_evidence=horizon_learning_evidence,
         sealed_horizon_probe_preflight=sealed_horizon_probe_preflight,
+        bounded_probe_result_review=bounded_probe_result_review,
     ))
     candidates.extend(_mm_signal_path(fillsim, fillsim_history))
     candidates.extend(_fee_or_scale_path(fillsim, fillsim_history))
@@ -1045,6 +1260,7 @@ def build_profitability_path_scorecard(
     closure = _profitability_engineering_closure(
         candidates=candidates,
         sealed_horizon_probe_preflight=sealed_horizon_probe_preflight,
+        bounded_probe_result_review=bounded_probe_result_review,
     )
     return {
         "schema_version": PROFITABILITY_PATH_SCORECARD_SCHEMA_VERSION,
@@ -1080,6 +1296,27 @@ def build_profitability_path_scorecard(
             "bounded_demo_probe_preflight_ready": (
                 _dict(_dict(sealed_horizon_probe_preflight).get("answers")).get(
                     "ready_for_operator_bounded_demo_probe_authorization"
+                )
+                is True
+            ),
+            "bounded_demo_probe_result_review_present": bool(
+                _dict(bounded_probe_result_review)
+            ),
+            "bounded_demo_probe_result_review_operator_review_required": (
+                _dict(_dict(bounded_probe_result_review).get("answers")).get(
+                    "operator_review_required"
+                )
+                is True
+            ),
+            "bounded_demo_probe_result_review_stop_recommended": (
+                _dict(_dict(bounded_probe_result_review).get("answers")).get(
+                    "stop_probe_recommended"
+                )
+                is True
+            ),
+            "bounded_demo_probe_result_learning_review_candidate": (
+                _dict(_dict(bounded_probe_result_review).get("answers")).get(
+                    "learning_review_candidate"
                 )
                 is True
             ),
@@ -1126,6 +1363,11 @@ def build_profitability_path_scorecard(
                 "sealed_horizon_probe_preflight",
                 input_paths.get("sealed_horizon_probe_preflight"),
                 sealed_horizon_probe_preflight,
+            ),
+            "bounded_probe_result_review": _artifact_summary(
+                "bounded_probe_result_review",
+                input_paths.get("bounded_probe_result_review"),
+                bounded_probe_result_review,
             ),
             "fillsim": _artifact_summary("fillsim", input_paths.get("fillsim"), fillsim),
             "fillsim_history": _artifact_summary(
@@ -1246,6 +1488,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--horizon-sealed-replay-json", type=Path)
     parser.add_argument("--horizon-learning-evidence-json", type=Path)
     parser.add_argument("--sealed-horizon-probe-preflight-json", type=Path)
+    parser.add_argument("--bounded-probe-result-review-json", type=Path)
     parser.add_argument("--fillsim-json", type=Path)
     parser.add_argument("--fillsim-history-json", type=Path)
     parser.add_argument("--polymarket-leadlag-json", type=Path)
@@ -1266,6 +1509,7 @@ def main() -> int:
         "horizon_sealed_replay": args.horizon_sealed_replay_json,
         "horizon_learning_evidence": args.horizon_learning_evidence_json,
         "sealed_horizon_probe_preflight": args.sealed_horizon_probe_preflight_json,
+        "bounded_probe_result_review": args.bounded_probe_result_review_json,
         "fillsim": args.fillsim_json,
         "fillsim_history": args.fillsim_history_json,
         "polymarket_leadlag": args.polymarket_leadlag_json,
@@ -1281,6 +1525,7 @@ def main() -> int:
         sealed_horizon_probe_preflight=_read_json(
             args.sealed_horizon_probe_preflight_json
         ),
+        bounded_probe_result_review=_read_json(args.bounded_probe_result_review_json),
         fillsim=_read_json(args.fillsim_json),
         fillsim_history=_read_json(args.fillsim_history_json),
         polymarket_leadlag=_read_json(args.polymarket_leadlag_json),

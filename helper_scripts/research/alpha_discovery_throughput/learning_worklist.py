@@ -166,6 +166,24 @@ _EVIDENCE_KEYS = (
     "sealed_horizon_probe_preflight_probe_authority_granted",
     "sealed_horizon_probe_preflight_main_cost_gate_adjustment",
     "sealed_horizon_probe_preflight_promotion_evidence",
+    "bounded_probe_result_review_status",
+    "bounded_probe_result_review_reason",
+    "bounded_probe_result_review_next_actions",
+    "bounded_probe_result_review_generated_at_utc",
+    "bounded_probe_result_review_source_ok",
+    "bounded_probe_result_review_source_path",
+    "bounded_probe_result_review_source_error",
+    "bounded_probe_result_review_side_cell_key",
+    "bounded_probe_result_review_completed_probe_outcome_count",
+    "bounded_probe_result_review_avg_realized_net_bps",
+    "bounded_probe_result_review_net_positive_pct",
+    "bounded_probe_result_review_operator_review_required",
+    "bounded_probe_result_review_stop_probe_recommended",
+    "bounded_probe_result_review_learning_review_candidate",
+    "bounded_probe_result_review_order_authority_granted",
+    "bounded_probe_result_review_probe_authority_granted",
+    "bounded_probe_result_review_main_cost_gate_adjustment",
+    "bounded_probe_result_review_promotion_evidence",
 )
 
 
@@ -205,6 +223,8 @@ def _classify_task_type(row: dict[str, Any]) -> str:
         return "promotion_review"
     if _bool(row.get("operator_actionable")):
         return "operator_probe_review"
+    if blocker_class == "rejected_no_edge":
+        return "reject_or_archive"
     if (
         blocker_class == "source_health"
         and ("runtime_source" in next_trigger or "source_not_activation_ready" in primary)
@@ -242,8 +262,6 @@ def _classify_task_type(row: dict[str, Any]) -> str:
         return "event_wait"
     if blocker_class == "source_health":
         return "source_health"
-    if blocker_class == "rejected_no_edge":
-        return "reject_or_archive"
     return "diagnose_blocker"
 
 
@@ -251,6 +269,11 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
     if task_type == "promotion_review":
         return "run_formal_aeg_qc_mit_review_before_any_promotion"
     if task_type == "operator_probe_review":
+        bounded_review_status = _str(row.get("bounded_probe_result_review_status"))
+        if bounded_review_status == "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED":
+            return "operator_review_first_bounded_probe_results_before_additional_budget"
+        if bounded_review_status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
+            return "operator_review_bounded_probe_learning_results_without_promotion"
         preflight_status = _str(row.get("sealed_horizon_probe_preflight_status"))
         if preflight_status == "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED":
             return "operator_review_sealed_horizon_preflight_and_activate_production_learning_lane"
@@ -361,6 +384,7 @@ def _completion_evidence_required(task_type: str) -> list[str]:
             "isolated_probe_preflight_passes",
             "candidate_specific_side_cell_or_candidate_key_evidence_present",
             "sealed_horizon_learning_evidence_review_ready_or_blocked_review_candidate_present",
+            "bounded_probe_result_review_status_recorded_when_probe_outcomes_exist",
             "order_authority_boundary_explicitly_recorded",
         ]
     if task_type == "runtime_source_reconcile":
