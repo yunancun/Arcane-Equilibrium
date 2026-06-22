@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Demo Learning Stack Healthcheck Cron Wiring
+
+- Added `demo_learning_stack_healthcheck_cron.sh` plus dry-run-gated `install_demo_learning_stack_healthcheck_cron.sh` so the stack health latest JSON can self-refresh after an operator-approved install.
+- `install_demo_learning_stack_crons.sh` now manages three child crons as one stack: demo evidence heartbeat, Cost Gate learning lane, and stack healthcheck refresher.
+- Boundary stayed source/test/docs plus local temp artifact smoke only; no runtime source sync, cron install, writer enablement, Cost Gate lowering, or order/probe authority was performed.
+
 ## 2026-06-22 Demo Learning Stack Health Evidence Ingestion
 
 - `demo_learning_stack_healthcheck.py` can now write an explicit local JSON artifact via `--json-output` while still printing stdout.
