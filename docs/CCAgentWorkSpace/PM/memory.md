@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Bounded Probe Authority Patch Readiness
+
+- `bounded_demo_probe_authority_patch_readiness_v1` now consumes the placement repair plan and scans Rust authority-path source for the exact near-touch bounded Demo Implementation seams.
+- Linux canonical smoke reports `RUST_PATCH_REQUIRED_NEAR_TOUCH_PLACEMENT_ADAPTER_MISSING`: existing Cost Gate learning seams are present, but the deeper Adapter for `post_only_near_touch_or_skip`, fresh-BBO guard, initial-gap guard, skip record, and candidate-matched attempt lineage is still missing.
+- PM read: the profit path is to increase Depth at the Rust authority path so selected blocked side-cell/horizon alpha becomes touchable, maker, candidate-matched Demo learning evidence; no global Cost Gate lowering, probe/order authority, or promotion proof was granted.
+
 ## 2026-06-22 Bounded Probe Shadow Placement Impact
 
 - `bounded_demo_probe_shadow_placement_impact_v1` now shadow-applies the no-authority near-touch repair plan to already-observed Demo order-touchability rows.
