@@ -6,6 +6,13 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-22 Shadow placement alpha ingestion
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-22--shadow_placement_impact_alpha_ingestion.md` | PM checkpoint: wires bounded probe shadow placement impact into alpha runtime v9, worklist v6, and profitability closure while preserving result-review precedence and no authority. |
+| `CCAgentWorkSpace/Operator/2026-06-22--shadow_placement_impact_alpha_ingestion.md` | Operator note: shadow placement evidence now drives a bounded probe placement repair task, but it still grants no Cost Gate lowering or probe/order authority. |
+
 ### 2026-06-22 Bounded probe shadow placement impact
 
 | 文件 | 内容 |

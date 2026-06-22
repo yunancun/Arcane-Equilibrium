@@ -1791,3 +1791,9 @@
 - v413 wires demo data-flow monitor + profit-learning decision packet refresh into `cost_gate_learning_lane_cron.sh`, so the learning lane now auto-records whether rejects are present, whether silent-drop risk exists, and whether blocked side-cells are ready for operator review.
 - Linux smoke initially failed on a missing optional sealed-evidence artifact; source now treats absent optional packet inputs as `MISSING` and still emits a fail-closed packet.
 - Latest runtime evidence: data-flow `DEMO_ORDER_FLOW_PRESENT_NO_FILLS`, `broad_cost_gate_rejects=58968`, `broad_orders=3`, `broad_fills=0`, decision packet `OPERATOR_REVIEW_DEMO_PROBE_CANDIDATES`, `silent_drop_risk=false`, alpha top task `operator_probe_review`; no Cost Gate lowering, probe/order authority, runtime mutation, or promotion proof.
+
+## 2026-06-22 Shadow Placement Impact Alpha Ingestion
+
+- v418 wires `bounded_demo_probe_shadow_placement_impact_v1` into `alpha_discovery_runtime_killboard_v9`, `alpha_learning_worklist_v6`, and `profitability_engineering_closure_v1`.
+- Evidence priority is now result-review/execution-realism first, then shadow placement, then older blocked-review candidate; current shadow sample still proves mechanical touchability only, not candidate alpha.
+- Mac and Linux related suites both passed `107/107`; source commit `f0d422b2` was pushed `[skip ci]` and fast-forwarded on `trade-core` cleanly. No Cost Gate lowering, probe/order authority, deploy/restart, PG write, Bybit private call, or CI run.
