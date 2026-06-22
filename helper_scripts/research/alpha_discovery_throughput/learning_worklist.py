@@ -111,6 +111,35 @@ _EVIDENCE_KEYS = (
     "demo_learning_stack_activation_packet_operator_only_apply_shell",
     "demo_learning_stack_activation_packet_operator_only_rollback_shell",
     "demo_learning_stack_activation_packet_post_install_verification_shell",
+    "demo_learning_stack_dry_run_review_present",
+    "demo_learning_stack_dry_run_review_status",
+    "demo_learning_stack_dry_run_review_raw_status",
+    "demo_learning_stack_dry_run_review_reason",
+    "demo_learning_stack_dry_run_review_operator_next_action",
+    "demo_learning_stack_dry_run_review_generated_at_utc",
+    "demo_learning_stack_dry_run_review_age_seconds",
+    "demo_learning_stack_dry_run_review_source_ok",
+    "demo_learning_stack_dry_run_review_source_path",
+    "demo_learning_stack_dry_run_review_source_error",
+    "demo_learning_stack_dry_run_review_expected_head",
+    "demo_learning_stack_dry_run_review_activation_packet_status",
+    "demo_learning_stack_dry_run_review_activation_packet_missing_cron_count",
+    "demo_learning_stack_dry_run_review_dry_run_preview_executed",
+    "demo_learning_stack_dry_run_review_dry_run_preview_passed",
+    "demo_learning_stack_dry_run_review_crontab_mutated",
+    "demo_learning_stack_dry_run_review_operator_apply_required",
+    "demo_learning_stack_dry_run_review_global_cost_gate_lowering_recommended",
+    "demo_learning_stack_dry_run_review_order_authority_granted",
+    "demo_learning_stack_dry_run_review_probe_authority_granted",
+    "demo_learning_stack_dry_run_review_promotion_proof",
+    "demo_learning_stack_dry_run_review_returncode",
+    "demo_learning_stack_dry_run_review_run_error",
+    "demo_learning_stack_dry_run_review_forced_apply_gate",
+    "demo_learning_stack_dry_run_review_preinstall_refresh",
+    "demo_learning_stack_dry_run_review_mutates_crontab",
+    "demo_learning_stack_dry_run_review_dry_run_preview_shell",
+    "demo_learning_stack_dry_run_review_operator_only_apply_shell",
+    "demo_learning_stack_dry_run_review_operator_only_rollback_shell",
     "demo_learning_stack_source_ready",
     "demo_learning_stack_stack_installed",
     "demo_learning_stack_demo_learning_evidence_cron_entry_present",
@@ -314,6 +343,11 @@ def _classify_task_type(row: dict[str, Any]) -> str:
 
     if _bool(row.get("promotion_ready")):
         return "promotion_review"
+    if arm_id == "cost_gate_demo_learning_lane" and (
+        "demo_learning_stack_dry_run" in primary
+        or "demo_learning_stack_activation" in primary
+    ):
+        return "cost_gate_learning_activation"
     if _bool(row.get("operator_actionable")):
         return "operator_probe_review"
     if blocker_class == "rejected_no_edge":
@@ -398,6 +432,16 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
     if task_type == "runtime_source_reconcile":
         return "reconcile_runtime_source_before_learning_activation_or_probe_trust"
     if task_type == "cost_gate_learning_activation":
+        if _str(row.get("demo_learning_stack_dry_run_review_status")) == (
+            "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED"
+        ):
+            return (
+                "operator_review_learning_stack_dry_run_preview_before_cron_apply"
+            )
+        if _str(row.get("demo_learning_stack_dry_run_review_status")) == (
+            "DRY_RUN_PREVIEW_FAILED_REPAIR_REQUIRED"
+        ):
+            return "repair_demo_learning_stack_dry_run_before_any_cron_apply"
         if _str(row.get("demo_learning_stack_activation_packet_status")) == (
             "READY_FOR_OPERATOR_DRY_RUN"
         ):

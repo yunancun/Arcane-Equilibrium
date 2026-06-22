@@ -67,6 +67,21 @@ if [[ -f "$PACKET_SCRIPT" ]]; then
 else
     echo "[$(ts)] WARN: activation packet script not found: $PACKET_SCRIPT" >> "$LOG"
 fi
+DRY_RUN_SCRIPT="$BASE/helper_scripts/cron/demo_learning_stack_dry_run_review.py"
+DRY_RUN_DIR="$DATA/demo_learning_stack_dry_run_review"
+if [[ -f "$DRY_RUN_SCRIPT" ]]; then
+    mkdir -p "$DRY_RUN_DIR"
+    dry_run_rc=0
+    "$PYBIN" "$DRY_RUN_SCRIPT" \
+        --data-dir "$DATA" \
+        --repo-root "$BASE" \
+        --python-bin "$PYBIN" \
+        --json-output "$DRY_RUN_DIR/demo_learning_stack_dry_run_review_latest.json" \
+        > "$DRY_RUN_DIR/demo_learning_stack_dry_run_review_stdout.json" 2>> "$LOG" || dry_run_rc=$?
+    echo "[$(ts)] dry_run_review_refresh rc=${dry_run_rc}" >> "$LOG"
+else
+    echo "[$(ts)] WARN: dry-run review script not found: $DRY_RUN_SCRIPT" >> "$LOG"
+fi
 rc=0
 (
     cd "$BASE/helper_scripts/research"

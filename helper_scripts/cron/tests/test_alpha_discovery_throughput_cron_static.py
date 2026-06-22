@@ -29,10 +29,17 @@ def test_wrapper_refreshes_activation_packet_before_alpha_runner() -> None:
     assert "demo_learning_stack_activation_packet.py" in src
     assert "demo_learning_stack_activation_packet_latest.json" in src
     assert "demo_learning_stack_activation_packet_stdout.json" in src
+    assert "demo_learning_stack_dry_run_review.py" in src
+    assert "demo_learning_stack_dry_run_review_latest.json" in src
+    assert "demo_learning_stack_dry_run_review_stdout.json" in src
     assert "--json-output" in src
     assert "activation_packet_refresh rc=" in src
+    assert "dry_run_review_refresh rc=" in src
     assert "alpha_discovery_throughput.runtime_runner" in src
     assert src.index("demo_learning_stack_activation_packet.py") < src.index(
+        "demo_learning_stack_dry_run_review.py"
+    )
+    assert src.index("demo_learning_stack_dry_run_review.py") < src.index(
         "alpha_discovery_throughput.runtime_runner"
     )
 

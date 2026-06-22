@@ -1660,6 +1660,63 @@ def _write_demo_learning_stack_activation_packet_latest(
     return path
 
 
+def _write_demo_learning_stack_dry_run_review_latest(
+    data: Path,
+    *,
+    status: str,
+    reason: str,
+    operator_next_action: str,
+    generated_at: str = "2026-06-21T18:04:30+00:00",
+    passed: bool = True,
+) -> Path:
+    path = (
+        data
+        / "demo_learning_stack_dry_run_review"
+        / "demo_learning_stack_dry_run_review_latest.json"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema_version": "demo_learning_stack_dry_run_review_v1",
+        "generated_at_utc": generated_at,
+        "status": status,
+        "reason": reason,
+        "operator_next_action": operator_next_action,
+        "expected_head": "abc1234",
+        "activation_packet_status": "READY_FOR_OPERATOR_DRY_RUN",
+        "activation_packet_missing_cron_count": 4,
+        "dry_run_preview_shell": (
+            "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=0 install_stack"
+        ),
+        "operator_only_apply_shell": (
+            "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1 install_stack"
+        ),
+        "operator_only_rollback_shell": (
+            "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1 install_stack --remove"
+        ),
+        "answers": {
+            "dry_run_preview_executed": True,
+            "dry_run_preview_passed": passed,
+            "crontab_mutated": False,
+            "operator_apply_required": passed,
+            "global_cost_gate_lowering_recommended": False,
+            "order_authority_granted": False,
+            "probe_authority_granted": False,
+            "promotion_proof": False,
+        },
+        "dry_run_preview": {
+            "executed": True,
+            "returncode": 0 if passed else 13,
+            "run_error": None,
+            "stdout_tail": "DRY-RUN: not modifying crontab.",
+            "stderr_tail": "",
+            "forced_apply_gate": "0",
+            "preinstall_refresh": "0",
+            "mutates_crontab": False,
+        },
+    }), encoding="utf-8")
+    return path
+
+
 def _write_profit_learning_decision_packet_latest(
     data: Path,
     *,
@@ -2197,6 +2254,85 @@ def test_cost_gate_arm_uses_activation_packet_for_operator_dry_run(tmp_path):
     ] is False
     assert task["evidence"][
         "demo_learning_stack_activation_packet_probe_authority_granted"
+    ] is False
+
+
+def test_cost_gate_arm_uses_dry_run_review_after_activation_packet(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_demo_learning_stack_activation_packet_latest(
+        data,
+        status="READY_FOR_OPERATOR_DRY_RUN",
+        reason="source_ready_but_one_or_more_stack_crons_missing",
+        operator_next_action=(
+            "run_dry_run_preview_then_apply_only_if_installer_preflight_passes"
+        ),
+    )
+    artifact = _write_demo_learning_stack_dry_run_review_latest(
+        data,
+        status="DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED",
+        reason="installer_dry_run_preview_passed_without_crontab_mutation",
+        operator_next_action=(
+            "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+        ),
+        passed=True,
+    )
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+
+    assert arm["detail"]["demo_learning_stack_dry_run_review_source_path"] == (
+        str(artifact)
+    )
+    assert arm["detail"]["demo_learning_stack_dry_run_review_status"] == (
+        "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED"
+    )
+    assert arm["detail"][
+        "demo_learning_stack_dry_run_review_dry_run_preview_passed"
+    ] is True
+    assert arm["detail"]["demo_learning_stack_dry_run_review_crontab_mutated"] is False
+    assert arm["detail"][
+        "demo_learning_stack_dry_run_review_global_cost_gate_lowering_recommended"
+    ] is False
+    assert arm["detail"][
+        "demo_learning_stack_dry_run_review_order_authority_granted"
+    ] is False
+    assert arm["detail"][
+        "demo_learning_stack_dry_run_review_probe_authority_granted"
+    ] is False
+
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["primary_blocker"] == (
+        "demo_learning_stack_dry_run_preview_passed_operator_apply_review_required"
+    )
+    assert blocker["next_trigger"] == (
+        "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+    )
+    assert blocker["operator_actionable"] is True
+    assert blocker[
+        "demo_learning_stack_dry_run_review_dry_run_preview_passed"
+    ] is True
+    assert blocker["demo_learning_stack_dry_run_review_forced_apply_gate"] == "0"
+    assert blocker["demo_learning_stack_dry_run_review_mutates_crontab"] is False
+
+    task = plan["learning_worklist"]["top_task"]
+    assert task["task_type"] == "cost_gate_learning_activation"
+    assert task["learning_objective"] == (
+        "operator_review_learning_stack_dry_run_preview_before_cron_apply"
+    )
+    assert task["requires_operator_authorization"] is True
+    assert task["runtime_mutation_required"] is True
+    assert task["evidence"]["demo_learning_stack_dry_run_review_status"] == (
+        "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED"
+    )
+    assert task["evidence"][
+        "demo_learning_stack_dry_run_review_operator_apply_required"
+    ] is True
+    assert task["evidence"][
+        "demo_learning_stack_dry_run_review_order_authority_granted"
+    ] is False
+    assert task["evidence"][
+        "demo_learning_stack_dry_run_review_probe_authority_granted"
     ] is False
 
 
