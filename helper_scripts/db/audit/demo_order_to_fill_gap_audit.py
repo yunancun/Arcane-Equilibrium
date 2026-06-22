@@ -65,7 +65,7 @@ def validate_config(cfg: AuditConfig) -> None:
 
 
 def build_order_touchability_sql() -> str:
-    return """
+    return r"""
 WITH params AS (
     SELECT
         %s::text[] AS engine_modes,
