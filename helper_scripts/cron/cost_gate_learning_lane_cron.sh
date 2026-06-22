@@ -63,6 +63,7 @@ MATERIALIZER_LIMIT="${OPENCLAW_COST_GATE_MATERIALIZER_LIMIT:-10000}"
 APPEND_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES:-1}"
 RECORD_PROBE_OUTCOMES="${OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES:-0}"
 REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT:-1}"
+REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN:-1}"
 REFRESH_BOUNDED_PROBE_RESULT_REVIEW="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_RESULT_REVIEW:-1}"
 REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="${OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW:-1}"
 REVIEW_MIN_OUTCOMES="${OPENCLAW_COST_GATE_REVIEW_MIN_OUTCOMES_PER_SIDE_CELL:-3}"
@@ -71,6 +72,8 @@ REVIEW_MIN_NET_POSITIVE_PCT="${OPENCLAW_COST_GATE_REVIEW_MIN_NET_POSITIVE_PCT:-6
 TOUCHABILITY_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_TOUCHABILITY_MAX_ARTIFACT_AGE_HOURS:-24}"
 TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS="${OPENCLAW_COST_GATE_TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS:-75.0}"
 TOUCHABILITY_MAX_DEEP_NO_TOUCH_GAP_BPS="${OPENCLAW_COST_GATE_TOUCHABILITY_MAX_DEEP_NO_TOUCH_GAP_BPS:-500.0}"
+PLACEMENT_REPAIR_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX_ARTIFACT_AGE_HOURS:-24}"
+PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS="${OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS:-1000}"
 STALE_LOCK_MIN="${OPENCLAW_COST_GATE_LEARNING_STALE_LOCK_MIN:-30}"
 
 mkdir -p "$LANE_DIR" "$COUNTERFACTUAL_DIR" "$DATA_FLOW_DIR" "$LOG_DIR" "$LOCK_ROOT" "$HEARTBEAT_DIR"
@@ -139,6 +142,7 @@ validate_int "OPENCLAW_COST_GATE_MATERIALIZER_LIMIT" "$MATERIALIZER_LIMIT"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_APPEND_OUTCOMES" "$APPEND_OUTCOMES"
 validate_bool01 "OPENCLAW_COST_GATE_LEARNING_RECORD_PROBE_OUTCOMES" "$RECORD_PROBE_OUTCOMES"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" "$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT"
+validate_bool01 "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" "$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_RESULT_REVIEW" "$REFRESH_BOUNDED_PROBE_RESULT_REVIEW"
 validate_bool01 "OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" "$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW"
 validate_int "OPENCLAW_COST_GATE_REVIEW_MIN_OUTCOMES_PER_SIDE_CELL" "$REVIEW_MIN_OUTCOMES"
@@ -147,6 +151,8 @@ validate_decimal "OPENCLAW_COST_GATE_REVIEW_MIN_NET_POSITIVE_PCT" "$REVIEW_MIN_N
 validate_int "OPENCLAW_COST_GATE_TOUCHABILITY_MAX_ARTIFACT_AGE_HOURS" "$TOUCHABILITY_MAX_ARTIFACT_AGE_HOURS"
 validate_decimal "OPENCLAW_COST_GATE_TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS" "$TOUCHABILITY_MAX_INITIAL_PASSIVE_GAP_BPS"
 validate_decimal "OPENCLAW_COST_GATE_TOUCHABILITY_MAX_DEEP_NO_TOUCH_GAP_BPS" "$TOUCHABILITY_MAX_DEEP_NO_TOUCH_GAP_BPS"
+validate_int "OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX_ARTIFACT_AGE_HOURS" "$PLACEMENT_REPAIR_MAX_ARTIFACT_AGE_HOURS"
+validate_int "OPENCLAW_COST_GATE_PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS" "$PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS"
 validate_int "OPENCLAW_COST_GATE_LEARNING_STALE_LOCK_MIN" "$STALE_LOCK_MIN"
 
 PYBIN="${OPENCLAW_PYTHON_BIN:-}"
@@ -210,6 +216,10 @@ BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="${LANE_DIR}/bounded_probe_touchability
 BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_OUT="${LANE_DIR}/bounded_probe_touchability_preflight_${STAMP}.md"
 BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="${LANE_DIR}/bounded_probe_touchability_preflight_latest.json"
 BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_LATEST="${LANE_DIR}/bounded_probe_touchability_preflight_latest.md"
+BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="${LANE_DIR}/bounded_probe_placement_repair_plan_${STAMP}.json"
+BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT="${LANE_DIR}/bounded_probe_placement_repair_plan_${STAMP}.md"
+BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="${LANE_DIR}/bounded_probe_placement_repair_plan_latest.json"
+BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_LATEST="${LANE_DIR}/bounded_probe_placement_repair_plan_latest.md"
 BOUNDED_PROBE_RESULT_REVIEW_OUT="${LANE_DIR}/bounded_probe_result_review_${STAMP}.json"
 BOUNDED_PROBE_RESULT_REVIEW_MD_OUT="${LANE_DIR}/bounded_probe_result_review_${STAMP}.md"
 BOUNDED_PROBE_RESULT_REVIEW_LATEST="${LANE_DIR}/bounded_probe_result_review_latest.json"
@@ -318,6 +328,15 @@ BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_ARGS=(
     --output "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_MD_OUT"
 )
 
+BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_ARGS=(
+    -m cost_gate_learning_lane.bounded_probe_placement_repair_plan
+    --touchability-preflight-json "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT"
+    --max-artifact-age-hours "$PLACEMENT_REPAIR_MAX_ARTIFACT_AGE_HOURS"
+    --max-fresh-bbo-age-ms "$PLACEMENT_REPAIR_MAX_FRESH_BBO_AGE_MS"
+    --json-output "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"
+    --output "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT"
+)
+
 BOUNDED_PROBE_RESULT_REVIEW_ARGS=(
     -m cost_gate_learning_lane.bounded_probe_result_review
     --preflight-json "$SEALED_PREFLIGHT_JSON"
@@ -403,13 +422,16 @@ materializer_rc=0
 refresh_rc=0
 review_rc=0
 bounded_probe_touchability_preflight_rc=0
+bounded_probe_placement_repair_plan_rc=0
 bounded_probe_result_review_rc=0
 bounded_probe_execution_realism_review_rc=0
 bounded_probe_touchability_preflight_skip_reason=""
+bounded_probe_placement_repair_plan_skip_reason=""
 bounded_probe_result_review_skip_reason=""
 bounded_probe_execution_realism_review_skip_reason=""
 if [[ "$PREINSTALL_REFRESH_ONLY" == "1" ]]; then
     bounded_probe_touchability_preflight_skip_reason="preinstall_refresh_only"
+    bounded_probe_placement_repair_plan_skip_reason="preinstall_refresh_only"
     bounded_probe_result_review_skip_reason="preinstall_refresh_only"
     bounded_probe_execution_realism_review_skip_reason="preinstall_refresh_only"
     echo "[$(ts)] SKIP: preinstall refresh-only mode; refreshed scorecard/plan, skipped historical/materializer/outcome/review/bounded-probe stages" >> "$LOG"
@@ -474,6 +496,24 @@ else
     else
         bounded_probe_touchability_preflight_skip_reason="disabled"
         echo "[$(ts)] SKIP: bounded probe touchability preflight disabled by OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT=0" >> "$LOG"
+    fi
+
+    if [[ "$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" == "1" ]]; then
+        (
+            cd "$BASE"
+            export PYTHONPATH="$BASE/helper_scripts/research${PYTHONPATH:+:$PYTHONPATH}"
+            export PYTHONDONTWRITEBYTECODE=1
+            "$PYBIN" "${BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_ARGS[@]}"
+        ) >> "$LOG" 2>&1 || bounded_probe_placement_repair_plan_rc=$?
+        if [[ -f "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" ]]; then
+            cp "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST"
+            if [[ -f "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT" ]]; then
+                cp "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_OUT" "$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_MD_LATEST"
+            fi
+        fi
+    else
+        bounded_probe_placement_repair_plan_skip_reason="disabled"
+        echo "[$(ts)] SKIP: bounded probe placement repair plan disabled by OPENCLAW_COST_GATE_REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN=0" >> "$LOG"
     fi
 
     if [[ "$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" == "1" ]]; then
@@ -541,7 +581,7 @@ else
     echo "[$(ts)] SKIP: profit-learning decision packet refresh disabled by OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET=0" >> "$LOG"
 fi
 
-STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR" DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$SEALED_PREFLIGHT_JSON" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC="$bounded_probe_touchability_preflight_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_SKIP_REASON="$bounded_probe_touchability_preflight_skip_reason" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
+STATUS_JSON=$(SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD" DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR" DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET" PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN" PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY" HISTORICAL_REVIEW_OUT="$HISTORICAL_REVIEW_OUT" MATERIALIZER_OUT="$MATERIALIZER_OUT" REFRESH_OUT="$REFRESH_OUT" REVIEW_OUT="$REVIEW_OUT" BOUNDED_PROBE_PREFLIGHT_JSON="$SEALED_PREFLIGHT_JSON" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST="$BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST" BOUNDED_PROBE_RESULT_REVIEW_OUT="$BOUNDED_PROBE_RESULT_REVIEW_OUT" BOUNDED_PROBE_RESULT_REVIEW_LATEST="$BOUNDED_PROBE_RESULT_REVIEW_LATEST" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST="$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST" HISTORICAL_REVIEW_RC="$historical_review_rc" MATERIALIZER_RC="$materializer_rc" REFRESH_RC="$refresh_rc" REVIEW_RC="$review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC="$bounded_probe_touchability_preflight_rc" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC="$bounded_probe_placement_repair_plan_rc" BOUNDED_PROBE_RESULT_REVIEW_RC="$bounded_probe_result_review_rc" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC="$bounded_probe_execution_realism_review_rc" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_SKIP_REASON="$bounded_probe_touchability_preflight_skip_reason" BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_SKIP_REASON="$bounded_probe_placement_repair_plan_skip_reason" BOUNDED_PROBE_RESULT_REVIEW_SKIP_REASON="$bounded_probe_result_review_skip_reason" BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_SKIP_REASON="$bounded_probe_execution_realism_review_skip_reason" REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT="$REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT" REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN="$REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN" REFRESH_BOUNDED_PROBE_RESULT_REVIEW="$REFRESH_BOUNDED_PROBE_RESULT_REVIEW" REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW="$REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW" LEDGER="$LEDGER" MATERIALIZE_REJECTS="$MATERIALIZE_REJECTS" APPEND_MATERIALIZED_REJECTS="$APPEND_MATERIALIZED_REJECTS" APPEND_OUTCOMES="$APPEND_OUTCOMES" "$PYBIN" - <<'PY' 2>>"$LOG" || true
 import datetime
 import hashlib
 import json
@@ -573,6 +613,9 @@ review, review_sha, review_err = load(os.environ["REVIEW_OUT"])
 bounded_touchability, bounded_touchability_sha, bounded_touchability_err = load(
     os.environ["BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT"]
 )
+bounded_placement, bounded_placement_sha, bounded_placement_err = load(
+    os.environ["BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"]
+)
 bounded_result, bounded_result_sha, bounded_result_err = load(os.environ["BOUNDED_PROBE_RESULT_REVIEW_OUT"])
 bounded_exec, bounded_exec_sha, bounded_exec_err = load(os.environ["BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT"])
 ledger = Path(os.environ["LEDGER"])
@@ -596,6 +639,7 @@ status = {
     "refresh_rc": int(os.environ["REFRESH_RC"]),
     "review_rc": int(os.environ["REVIEW_RC"]),
     "bounded_probe_touchability_preflight_rc": int(os.environ["BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_RC"]),
+    "bounded_probe_placement_repair_plan_rc": int(os.environ["BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_RC"]),
     "bounded_probe_result_review_rc": int(os.environ["BOUNDED_PROBE_RESULT_REVIEW_RC"]),
     "bounded_probe_execution_realism_review_rc": int(os.environ["BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_RC"]),
     "refresh_scorecard": os.environ["REFRESH_SCORECARD"] == "1",
@@ -603,6 +647,7 @@ status = {
     "refresh_decision_packet": os.environ["REFRESH_DECISION_PACKET"] == "1",
     "refresh_plan": os.environ["REFRESH_PLAN"] == "1",
     "refresh_bounded_probe_touchability_preflight": os.environ["REFRESH_BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT"] == "1",
+    "refresh_bounded_probe_placement_repair_plan": os.environ["REFRESH_BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN"] == "1",
     "refresh_bounded_probe_result_review": os.environ["REFRESH_BOUNDED_PROBE_RESULT_REVIEW"] == "1",
     "refresh_bounded_probe_execution_realism_review": os.environ["REFRESH_BOUNDED_PROBE_EXECUTION_REALISM_REVIEW"] == "1",
     "preinstall_refresh_only": os.environ["PREINSTALL_REFRESH_ONLY"] == "1",
@@ -723,6 +768,33 @@ status = {
         if isinstance(bounded_touchability.get("answers"), dict)
         else None
     ),
+    "bounded_probe_placement_repair_plan_artifact_path": os.environ["BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_OUT"],
+    "bounded_probe_placement_repair_plan_latest_path": os.environ["BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_LATEST"],
+    "bounded_probe_placement_repair_plan_sha256": bounded_placement_sha,
+    "bounded_probe_placement_repair_plan_error": bounded_placement_err,
+    "bounded_probe_placement_repair_plan_skip_reason": os.environ["BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_SKIP_REASON"] or None,
+    "bounded_probe_placement_repair_plan_status": bounded_placement.get("status"),
+    "bounded_probe_placement_repair_plan_reason": bounded_placement.get("reason"),
+    "bounded_probe_placement_repair_order_mode": (
+        (bounded_placement.get("placement_repair_plan") or {}).get("order_mode")
+        if isinstance(bounded_placement.get("placement_repair_plan"), dict)
+        else None
+    ),
+    "bounded_probe_placement_repair_ready": (
+        (bounded_placement.get("answers") or {}).get("placement_repair_plan_ready_for_operator_review")
+        if isinstance(bounded_placement.get("answers"), dict)
+        else None
+    ),
+    "bounded_probe_placement_repair_max_fresh_bbo_age_ms": (
+        (bounded_placement.get("placement_repair_plan") or {}).get("max_fresh_bbo_age_ms")
+        if isinstance(bounded_placement.get("placement_repair_plan"), dict)
+        else None
+    ),
+    "bounded_probe_placement_repair_max_initial_passive_gap_bps": (
+        (bounded_placement.get("placement_repair_plan") or {}).get("max_initial_passive_gap_bps")
+        if isinstance(bounded_placement.get("placement_repair_plan"), dict)
+        else None
+    ),
     "bounded_probe_result_review_artifact_path": os.environ["BOUNDED_PROBE_RESULT_REVIEW_OUT"],
     "bounded_probe_result_review_latest_path": os.environ["BOUNDED_PROBE_RESULT_REVIEW_LATEST"],
     "bounded_probe_result_review_sha256": bounded_result_sha,
@@ -794,7 +866,7 @@ if [[ -n "$STATUS_JSON" ]]; then
     echo "$STATUS_JSON" >> "$STATUS_LOG"
 fi
 
-echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
+echo "[$(ts)] === Cost-gate learning lane refresh end scorecard_rc=${scorecard_rc} plan_rc=${plan_rc} historical_review_rc=${historical_review_rc} materializer_rc=${materializer_rc} refresh_rc=${refresh_rc} review_rc=${review_rc} bounded_probe_touchability_preflight_rc=${bounded_probe_touchability_preflight_rc} bounded_probe_placement_repair_plan_rc=${bounded_probe_placement_repair_plan_rc} bounded_probe_result_review_rc=${bounded_probe_result_review_rc} bounded_probe_execution_realism_review_rc=${bounded_probe_execution_realism_review_rc} ===" >> "$LOG"
 
 # fail-soft: rc/status are recorded; alpha-discovery reads artifacts and ledger
 # state. Operator action is required for deploy, writer enablement, or probe authority.
