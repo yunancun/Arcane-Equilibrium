@@ -17,15 +17,18 @@ apply bundle 的命令順序是：fetch target、verify target object、archive 
 
 ## True Runtime Dry Run
 
-Command shape used against `trade-core` was dry-run only:
+Command shape used against `trade-core` was dry-run only. Before a real apply,
+replace `APPROVED_TARGET` with the current `git rev-parse origin/main` and
+rerun dry-run because source may advance through doc-only commits.
 
 ```bash
+APPROVED_TARGET=eaed0cf23b1a350d7e2cbd84639710d840e9f2dd
 python3 helper_scripts/deploy/runtime_source_reconcile_apply.py \
   --local-repo-root . \
   --target-ref origin/main \
   --ssh-host trade-core \
   --remote-repo-root /home/ncyu/BybitOpenClaw/srv \
-  --expected-target-commit eaed0cf23b1a350d7e2cbd84639710d840e9f2dd \
+  --expected-target-commit "$APPROVED_TARGET" \
   --expected-remote-head 917be4cc9a3d3549328155f1863d42400c70267f \
   --expected-dirty-count 56 \
   --expected-review-required-count 13 \
@@ -38,7 +41,7 @@ python3 helper_scripts/deploy/runtime_source_reconcile_apply.py \
 Result:
 
 - status: `DRY_RUN_OPERATOR_APPROVAL_REQUIRED`
-- target: `eaed0cf23b1a350d7e2cbd84639710d840e9f2dd`
+- then-current target: `eaed0cf23b1a350d7e2cbd84639710d840e9f2dd`
 - remote HEAD: `917be4cc9a3d3549328155f1863d42400c70267f`
 - probe status: `REVIEW_REQUIRED_BEFORE_REMOTE_RECONCILE`
 - dirty paths: 56
@@ -58,4 +61,4 @@ No runtime fetch/pull/reset/clean/source sync was performed. No cron install, en
 
 ## Next Step
 
-The next non-repetitive step is an explicit operator decision: authorize the apply packet, or reject/adjust the target-wins disposition. After apply, rerun the remote probe and direct runtime planner before installing the demo-learning stack.
+The next non-repetitive step is an explicit operator decision: authorize the apply packet, or reject/adjust the target-wins disposition. Immediately before apply, rerun dry-run with current `origin/main`; after apply, rerun the remote probe and direct runtime planner before installing the demo-learning stack.
