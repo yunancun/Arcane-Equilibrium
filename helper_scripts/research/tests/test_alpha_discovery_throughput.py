@@ -1633,6 +1633,67 @@ def _write_profit_learning_decision_packet_latest(
     return path
 
 
+def _write_sealed_horizon_probe_preflight_latest(
+    data: Path,
+    *,
+    status: str = "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED",
+    generated_at: str = "2026-06-21T18:04:30+00:00",
+) -> Path:
+    path = (
+        data
+        / "cost_gate_learning_lane"
+        / "sealed_horizon_probe_preflight_latest.json"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    blocking_gates: list[str]
+    if status == "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED":
+        blocking_gates = [
+            "operator_sealed_horizon_review_recorded",
+            "production_learning_lane_accumulating",
+        ]
+    elif status == "PRODUCTION_LEARNING_LANE_NOT_READY":
+        blocking_gates = ["production_learning_lane_accumulating"]
+    else:
+        blocking_gates = []
+    payload = {
+        "schema_version": "sealed_horizon_bounded_demo_probe_preflight_v1",
+        "generated_at_utc": generated_at,
+        "status": status,
+        "reason": ";".join(blocking_gates)
+        or "all_pre_authorization_gates_passed_without_authority_grant",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "outcome_horizon_minutes": 240,
+        "blocking_gate_count": len(blocking_gates),
+        "blocking_gates": blocking_gates,
+        "next_actions": [
+            "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe",
+            "sync_runtime_source_then_enable_learning_lane_writer_after_operator_review",
+        ],
+        "answers": {
+            "sealed_horizon_evidence_ready": True,
+            "decision_packet_aligned": True,
+            "operator_review_recorded": not any(
+                gate == "operator_sealed_horizon_review_recorded"
+                for gate in blocking_gates
+            ),
+            "production_learning_lane_accumulating": not any(
+                gate == "production_learning_lane_accumulating"
+                for gate in blocking_gates
+            ),
+            "ready_for_operator_bounded_demo_probe_authorization": (
+                status == "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+            ),
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_cost_gate_arm_uses_demo_learning_evidence_for_pg_reject_gap(tmp_path):
     data = tmp_path / "openclaw"
     artifact = _write_demo_learning_evidence_latest(
@@ -1968,6 +2029,50 @@ def test_cost_gate_profit_packet_sealed_horizon_candidate_reaches_worklist(tmp_p
     assert task["evidence"]["profit_learning_sealed_horizon_review_ready"] is True
     assert task["evidence"]["profit_learning_sealed_horizon_avg_net_bps"] == 3.0511
     assert task["evidence"]["profit_learning_order_authority_granted"] is False
+
+
+def test_cost_gate_sealed_horizon_probe_preflight_supersedes_packet(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_profit_learning_decision_packet_latest(
+        data,
+        status="OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+        reason="sealed_horizon_learning_evidence_clears_review_thresholds",
+        next_actions=[
+            "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe"
+        ],
+        sealed_horizon_candidate=True,
+    )
+    _write_sealed_horizon_probe_preflight_latest(data)
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    task = plan["learning_worklist"]["top_task"]
+
+    assert blocker["blocker_class"] == "probe_ready"
+    assert blocker["primary_blocker"] == (
+        "sealed_horizon_probe_preflight_requires_operator_review_and_learning_lane"
+    )
+    assert blocker["sealed_horizon_probe_preflight_status"] == (
+        "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED"
+    )
+    assert blocker["sealed_horizon_probe_preflight_blocking_gates"] == [
+        "operator_sealed_horizon_review_recorded",
+        "production_learning_lane_accumulating",
+    ]
+    assert blocker["sealed_horizon_probe_preflight_order_authority_granted"] is False
+    assert blocker["sealed_horizon_probe_preflight_probe_authority_granted"] is False
+    assert blocker["sealed_horizon_probe_preflight_main_cost_gate_adjustment"] == "NONE"
+
+    assert task["learning_objective"] == (
+        "operator_review_sealed_horizon_preflight_and_activate_production_learning_lane"
+    )
+    assert task["evidence"]["sealed_horizon_probe_preflight_operator_review_recorded"] is False
+    assert task["evidence"][
+        "sealed_horizon_probe_preflight_production_lane_accumulating"
+    ] is False
+    assert task["evidence"]["sealed_horizon_probe_preflight_blocking_gate_count"] == 2
 
 
 def _write_polymarket_leadlag_latest(data: Path, payload: dict) -> Path:

@@ -1,13 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-06-22（TODO v390 sealed horizon alpha/worklist bridge；per todo-maintenance「masthead 不放增量敘事」原則）
+> 最後更新：2026-06-22（TODO v391 sealed horizon bounded demo-probe preflight；per todo-maintenance「masthead 不放增量敘事」原則）
 
 ---
 
 ## TODO Version-Increment Log
 
 > per todo-maintenance「TODO header 是 masthead，不放 vN 增量敘事」原則，自 `TODO.md` header 遷出；newest-first。**active 狀態以 `TODO.md` 結構化章節為準**（P0 blockers / AEG program / module posture / active queue）；以下僅供回顧的變更敘事。v75-91 增量見 `docs/archive/2026-05-31--todo_v92_archive.md` §A。
+
+**v391 增量（2026-06-22 sealed horizon bounded demo-probe preflight）**：Added `helper_scripts/research/cost_gate_learning_lane/sealed_horizon_probe_preflight.py` with schema `sealed_horizon_bounded_demo_probe_preflight_v1`. The preflight consumes `sealed_horizon_learning_evidence_v1`, the profit-learning decision packet, activation/stack-health artifacts, and an optional operator-review artifact, then emits machine-checkable gates: sealed evidence ready, decision packet aligned, operator review recorded, production learning lane accumulating, and authority boundary preserved. `alpha_discovery_throughput.runtime_runner` now ingests the latest preflight artifact; `discovery_loop.py` lets fresh preflight status supersede the older decision-packet-only blocker; `learning_worklist.py` carries preflight evidence and emits sealed-preflight-specific objectives. Verification：Mac py_compile passed；Mac focused preflight/alpha/worklist pytest `59 passed`；Mac related Cost Gate/scorecard/alpha suite `72 passed`. Boundary：source/test/docs + artifact-only future reads/writes；no PG write/schema migration, no Bybit private/signed/trading call, no credential/auth/risk/order/strategy/runtime mutation, no deploy/rebuild/restart, no Cost Gate lowering, no probe/order authority, and no promotion proof。
 
 **v390 增量（2026-06-22 sealed horizon alpha/worklist bridge）**：Wired `OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE` through alpha discovery and the learning worklist. `runtime_runner.py` now surfaces sealed horizon evidence fields from the profit-learning decision packet into the Cost Gate arm detail; `discovery_loop.py` maps the new status to a `READY_FOR_PROBE` blocker `profit_learning_sealed_horizon_demo_probe_candidate_needs_operator_review`; `learning_worklist.py` carries sealed side-cell/horizon/outcome/avg-net evidence and emits the sealed-specific objective `operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe`. This prevents the v389 review candidate from getting stuck in the decision packet layer and makes it visible to the autonomous work scheduler without granting runtime mutation or order/probe authority. Verification：Mac py_compile passed；focused alpha/worklist pytest `54 passed`；related Cost Gate/scorecard/alpha suite `67 passed`；Mac `git diff --check` passed. Boundary：source/test/docs + artifact-only future reads/writes；no PG write/schema migration, no Bybit private/signed/trading call, no credential/auth/risk/order/strategy/runtime mutation, no deploy/rebuild/restart, no Cost Gate lowering, no probe/order authority, and no promotion proof。
 
