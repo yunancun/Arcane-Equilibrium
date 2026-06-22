@@ -421,6 +421,125 @@ def _gate(
     }
 
 
+def _parse_side_cell_key(side_cell_key: Any) -> dict[str, Any]:
+    parts = [part.strip() for part in str(side_cell_key or "").split("|")]
+    if len(parts) != 3:
+        return {
+            "side_cell_key": side_cell_key,
+            "strategy_name": None,
+            "symbol": None,
+            "side": None,
+        }
+    return {
+        "side_cell_key": side_cell_key,
+        "strategy_name": parts[0] or None,
+        "symbol": parts[1].upper() if parts[1] else None,
+        "side": parts[2] or None,
+    }
+
+
+def _bounded_demo_probe_design_status(
+    *,
+    preflight_status: str,
+    sealed_ready: bool,
+    decision_aligned: bool,
+    operator_review_aligned: bool,
+    production_accumulating: bool,
+    authority_preserved: bool,
+) -> str:
+    if not authority_preserved:
+        return "AUTHORITY_BOUNDARY_VIOLATION"
+    if not sealed_ready or not decision_aligned or not production_accumulating:
+        return "NOT_READY_FOR_OPERATOR_PROBE_REVIEW"
+    if preflight_status == "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION":
+        return "READY_FOR_SEPARATE_OPERATOR_AUTHORIZATION"
+    if not operator_review_aligned:
+        return "OPERATOR_REVIEW_READY_FOR_BOUNDED_DEMO_PROBE_DESIGN"
+    return "READY_FOR_SEPARATE_OPERATOR_AUTHORIZATION"
+
+
+def _bounded_demo_probe_design(
+    *,
+    preflight_status: str,
+    sealed: dict[str, Any],
+    decision_aligned: bool,
+    operator_review_aligned: bool,
+    production_accumulating: bool,
+    authority_preserved: bool,
+) -> dict[str, Any]:
+    design_status = _bounded_demo_probe_design_status(
+        preflight_status=preflight_status,
+        sealed_ready=sealed.get("review_ready") is True,
+        decision_aligned=decision_aligned,
+        operator_review_aligned=operator_review_aligned,
+        production_accumulating=production_accumulating,
+        authority_preserved=authority_preserved,
+    )
+    candidate = _parse_side_cell_key(sealed.get("side_cell_key"))
+    candidate["outcome_horizon_minutes"] = sealed.get("outcome_horizon_minutes")
+    candidate["source_kind"] = sealed.get("source_kind")
+    return {
+        "schema_version": "bounded_demo_probe_design_v1",
+        "status": design_status,
+        "candidate": candidate,
+        "evidence_snapshot": {
+            "blocked_signal_outcome_count": sealed.get("blocked_signal_outcome_count"),
+            "avg_gross_bps": sealed.get("avg_gross_bps"),
+            "avg_net_bps": sealed.get("avg_net_bps"),
+            "net_positive_pct": sealed.get("net_positive_pct"),
+            "top_side_cell_status": sealed.get("top_side_cell_status"),
+        },
+        "edge_amplification_levers": [
+            "side_cell_specific_cost_gate_review",
+            "horizon_retiming_or_holding_period_specialization",
+            "demo_fill_fee_slippage_realism_check",
+            "regime_or_context_filter_search_if_demo_edge_compresses",
+        ],
+        "suggested_initial_probe_limits": {
+            "active": False,
+            "requires_separate_operator_authorization": True,
+            "max_probe_intents_before_review": 3,
+            "max_filled_probe_outcomes_before_review": 3,
+            "max_total_filled_probe_outcomes_before_second_review": 10,
+            "max_demo_notional_usdt_per_order": 10,
+            "max_total_demo_notional_usdt_before_review": 30,
+            "environment": "demo_or_live_demo_only",
+            "execution_path": "existing_rust_authority_path_only",
+        },
+        "success_criteria": {
+            "min_filled_probe_outcomes_for_first_review": 3,
+            "min_filled_probe_outcomes_for_learning_review": 10,
+            "min_realized_avg_net_bps": 0.0,
+            "min_realized_net_positive_pct": 60.0,
+            "fees_slippage_and_fill_quality_recorded": True,
+            "promotion_evidence": False,
+        },
+        "stop_conditions": [
+            "authority_boundary_violation",
+            "main_cost_gate_adjustment_requested",
+            "production_learning_lane_stops_accumulating",
+            "filled_probe_outcomes_reach_review_limit",
+            "realized_avg_net_bps_nonpositive_after_first_review_sample",
+            "realized_net_positive_pct_below_review_floor_after_first_review_sample",
+            "order_fill_or_fee_lineage_gap_detected",
+        ],
+        "required_review_artifacts": [
+            "probe_admission_decision_rows",
+            "demo_order_intent_and_order_state_rows",
+            "fill_fee_slippage_rows",
+            "probe_outcome_rows",
+            "post_probe_blocked_outcome_review",
+        ],
+        "authority_boundary": {
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+    }
+
+
 def _dedupe(items: list[Any]) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
@@ -614,6 +733,14 @@ def build_sealed_horizon_bounded_demo_probe_preflight(
         next_actions = [
             "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
         ]
+    bounded_probe_design = _bounded_demo_probe_design(
+        preflight_status=status,
+        sealed=sealed,
+        decision_aligned=decision_aligned,
+        operator_review_aligned=operator_review_aligned,
+        production_accumulating=production_accumulating,
+        authority_preserved=authority_preserved,
+    )
 
     return {
         "schema_version": SEALED_HORIZON_PROBE_PREFLIGHT_SCHEMA_VERSION,
@@ -635,12 +762,20 @@ def build_sealed_horizon_bounded_demo_probe_preflight(
             "ready_for_operator_bounded_demo_probe_authorization": (
                 status == "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
             ),
+            "bounded_demo_probe_design_ready_for_operator_review": (
+                bounded_probe_design["status"]
+                in {
+                    "OPERATOR_REVIEW_READY_FOR_BOUNDED_DEMO_PROBE_DESIGN",
+                    "READY_FOR_SEPARATE_OPERATOR_AUTHORIZATION",
+                }
+            ),
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "probe_authority_granted": False,
             "order_authority_granted": False,
             "promotion_evidence": False,
         },
+        "bounded_demo_probe_design": bounded_probe_design,
         "artifacts": artifacts,
         "boundary": BOUNDARY,
     }
@@ -655,6 +790,7 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Side-cell: `{packet.get('side_cell_key')}`",
         f"- Horizon minutes: `{packet.get('outcome_horizon_minutes')}`",
         f"- Boundary: {BOUNDARY}.",
+        f"- Probe design: `{_dict(packet.get('bounded_demo_probe_design')).get('status')}`",
         "",
         "## Gates",
         "",

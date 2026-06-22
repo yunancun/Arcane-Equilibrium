@@ -190,6 +190,12 @@ def _sealed_horizon_probe_preflight(
             "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe",
             "activate_or_repair_cost_gate_learning_lane_stack_before_runtime_probe",
         ]
+    elif status == "OPERATOR_REVIEW_REQUIRED":
+        blocking_gates = ["operator_sealed_horizon_review_recorded"]
+        production_lane_accumulating = True
+        next_actions = [
+            "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe"
+        ]
     elif status == "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION":
         operator_review_recorded = True
         production_lane_accumulating = True
@@ -197,6 +203,13 @@ def _sealed_horizon_probe_preflight(
         next_actions = [
             "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
         ]
+    design_status = (
+        "READY_FOR_SEPARATE_OPERATOR_AUTHORIZATION"
+        if ready
+        else "OPERATOR_REVIEW_READY_FOR_BOUNDED_DEMO_PROBE_DESIGN"
+        if production_lane_accumulating
+        else "NOT_READY_FOR_OPERATOR_PROBE_REVIEW"
+    )
     return {
         "schema_version": "sealed_horizon_bounded_demo_probe_preflight_v1",
         "generated_at_utc": "2026-06-22T06:00:00+00:00",
@@ -219,6 +232,21 @@ def _sealed_horizon_probe_preflight(
             "probe_authority_granted": False,
             "order_authority_granted": False,
             "promotion_evidence": False,
+        },
+        "bounded_demo_probe_design": {
+            "schema_version": "bounded_demo_probe_design_v1",
+            "status": design_status,
+            "suggested_initial_probe_limits": {
+                "active": False,
+                "requires_separate_operator_authorization": True,
+                "max_probe_intents_before_review": 3,
+                "max_demo_notional_usdt_per_order": 10,
+                "max_total_demo_notional_usdt_before_review": 30,
+            },
+            "success_criteria": {
+                "min_realized_avg_net_bps": 0.0,
+                "promotion_evidence": False,
+            },
         },
     }
 
@@ -376,6 +404,15 @@ def test_sealed_horizon_preflight_drives_profitability_closure_gates() -> None:
     assert top["evidence"]["sealed_probe_preflight_blocking_gate_count"] == 2
     assert top["evidence"]["sealed_probe_preflight_operator_review_recorded"] is False
     assert top["evidence"]["sealed_probe_preflight_production_lane_accumulating"] is False
+    assert top["evidence"][
+        "sealed_probe_preflight_bounded_demo_probe_design_status"
+    ] == "NOT_READY_FOR_OPERATOR_PROBE_REVIEW"
+    assert top["evidence"][
+        "sealed_probe_preflight_bounded_demo_probe_max_probe_intents_before_review"
+    ] == 3
+    assert top["evidence"][
+        "sealed_probe_preflight_bounded_demo_probe_promotion_evidence"
+    ] is False
 
     assert closure["schema_version"] == "profitability_engineering_closure_v1"
     assert closure["status"] == (
