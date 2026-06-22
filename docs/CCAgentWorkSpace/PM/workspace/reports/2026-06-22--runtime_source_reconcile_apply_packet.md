@@ -25,7 +25,7 @@ python3 helper_scripts/deploy/runtime_source_reconcile_apply.py \
   --target-ref origin/main \
   --ssh-host trade-core \
   --remote-repo-root /home/ncyu/BybitOpenClaw/srv \
-  --expected-target-commit 6383b5128716509741a03c64ba3bae9606d4dc99 \
+  --expected-target-commit eaed0cf23b1a350d7e2cbd84639710d840e9f2dd \
   --expected-remote-head 917be4cc9a3d3549328155f1863d42400c70267f \
   --expected-dirty-count 56 \
   --expected-review-required-count 13 \
@@ -38,7 +38,7 @@ python3 helper_scripts/deploy/runtime_source_reconcile_apply.py \
 Result:
 
 - status: `DRY_RUN_OPERATOR_APPROVAL_REQUIRED`
-- target: `6383b5128716509741a03c64ba3bae9606d4dc99`
+- target: `eaed0cf23b1a350d7e2cbd84639710d840e9f2dd`
 - remote HEAD: `917be4cc9a3d3549328155f1863d42400c70267f`
 - probe status: `REVIEW_REQUIRED_BEFORE_REMOTE_RECONCILE`
 - dirty paths: 56
