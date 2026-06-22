@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Profit-Learning Packet Alpha Ingestion
+
+- Wired `profit_learning_decision_packet_latest.json` into `alpha_discovery_throughput.runtime_runner`, profitability blocker classification, and `learning_worklist` evidence.
+- Fresh packet states now drive alpha/worklist blockers such as counterfactual refresh, bounded-plan refresh, learning-stack repair, and operator probe review while preserving no-order/no-Cost-Gate-lowering boundaries.
+- Verification passed locally with py_compile, focused alpha/worklist/decision-packet tests, and diff-check; runtime source is still unsynced, so this ingestion has not run on Linux yet.
+
 ## 2026-06-22 Profit-Learning Decision Packet
 
 - Added `helper_scripts/research/cost_gate_learning_lane/decision_packet.py`, an artifact-only closure packet that consumes demo data-flow, counterfactual, bounded-plan, activation/stack-health, and blocked-outcome-review JSON.

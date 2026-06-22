@@ -126,6 +126,19 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
     stack_health_next_action = detail.get(
         "demo_learning_stack_healthcheck_next_action"
     )
+    packet_present = detail.get("profit_learning_decision_packet_present") is True
+    packet_source_ok = detail.get("profit_learning_decision_packet_source_ok") is True
+    packet_status = str(
+        detail.get("profit_learning_decision_packet_status") or ""
+    ).upper()
+    packet_next_actions = _list(
+        detail.get("profit_learning_decision_packet_next_actions")
+    )
+    packet_next_trigger = (
+        str(packet_next_actions[0])
+        if packet_next_actions
+        else "refresh_profit_learning_decision_packet"
+    )
 
     if source_activation_ready is False:
         return {
@@ -139,6 +152,121 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "operator_actionable": False,
             "engineering_actionable": True,
         }
+
+    if packet_present and not packet_source_ok:
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "profit_learning_decision_packet_stale_or_unreadable",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "profit_learning_decision_packet_not_fresh",
+            "next_trigger": "refresh_profit_learning_decision_packet",
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
+    if packet_source_ok:
+        if packet_status == "DATA_FLOW_MONITOR_REQUIRED":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "profit_learning_data_flow_monitor_required",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "profit_learning_data_flow_monitor_required",
+                "next_trigger": packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if packet_status in {"RUN_REJECT_COUNTERFACTUAL", "REFRESH_REJECT_COUNTERFACTUAL"}:
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "profit_learning_reject_counterfactual_required",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "profit_learning_reject_counterfactual_required",
+                "next_trigger": packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if packet_status == "BUILD_OR_REFRESH_BOUNDED_LEARNING_PLAN":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "profit_learning_bounded_plan_required",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "profit_learning_bounded_plan_required",
+                "next_trigger": packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if packet_status == "RUN_LEARNING_LANE_ACTIVATION_PREFLIGHT":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "profit_learning_activation_preflight_required",
+                "blocker_class": "source_health",
+                "primary_blocker": "profit_learning_activation_preflight_required",
+                "next_trigger": packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if packet_status == "ACTIVATE_OR_REPAIR_LEARNING_STACK":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "profit_learning_stack_activation_or_repair_required",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "profit_learning_stack_activation_or_repair_required",
+                "next_trigger": packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if packet_status == "WAIT_FOR_BLOCKED_OUTCOME_REVIEW":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "profit_learning_blocked_outcome_review_required",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "profit_learning_blocked_outcome_review_required",
+                "next_trigger": packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if packet_status == "OPERATOR_REVIEW_DEMO_PROBE_CANDIDATES":
+            return {
+                "action": READY_FOR_PROBE,
+                "reason": "profit_learning_demo_probe_candidates_need_operator_review",
+                "blocker_class": "probe_ready",
+                "primary_blocker": (
+                    "profit_learning_demo_probe_candidates_need_operator_review"
+                ),
+                "next_trigger": packet_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
+        if packet_status == "CONTINUE_BLOCKED_OUTCOME_COLLECTION":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "profit_learning_blocked_outcomes_need_more_samples",
+                "blocker_class": "sample_gate",
+                "primary_blocker": "profit_learning_blocked_outcomes_need_more_samples",
+                "next_trigger": packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if packet_status == "KEEP_COST_GATE_AND_CONTINUE_COLLECTION":
+            return {
+                "action": BLOCK,
+                "reason": "profit_learning_counterfactual_confirms_current_block",
+                "blocker_class": "rejected_no_edge",
+                "primary_blocker": "profit_learning_counterfactual_confirms_current_block",
+                "next_trigger": packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": False,
+            }
+        if packet_status == "NO_READY_PROFIT_LEARNING_CANDIDATE":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "profit_learning_no_ready_candidate_continue_collection",
+                "blocker_class": "sample_gate",
+                "primary_blocker": "profit_learning_no_ready_candidate_continue_collection",
+                "next_trigger": packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
 
     if ledger_status in {"MISSING", "EMPTY"}:
         if stack_health_status == "SOURCE_NOT_READY":
@@ -1817,6 +1945,81 @@ def classify_profitability_blocker(
                     "blocked_signal_top_review_candidate_net_cost_cushion_bps"
                 ) or blocked_review.get("top_review_candidate_net_cost_cushion_bps"),
                 "blocked_signal_outcome_review": blocked_review or None,
+                "profit_learning_decision_packet_status": detail.get(
+                    "profit_learning_decision_packet_status"
+                ),
+                "profit_learning_decision_packet_reason": detail.get(
+                    "profit_learning_decision_packet_reason"
+                ),
+                "profit_learning_decision_packet_next_actions": detail.get(
+                    "profit_learning_decision_packet_next_actions"
+                ),
+                "profit_learning_decision_packet_generated_at_utc": detail.get(
+                    "profit_learning_decision_packet_generated_at_utc"
+                ),
+                "profit_learning_decision_packet_age_seconds": detail.get(
+                    "profit_learning_decision_packet_age_seconds"
+                ),
+                "profit_learning_decision_packet_source_ok": detail.get(
+                    "profit_learning_decision_packet_source_ok"
+                ),
+                "profit_learning_decision_packet_source_path": detail.get(
+                    "profit_learning_decision_packet_source_path"
+                ),
+                "profit_learning_decision_packet_source_error": detail.get(
+                    "profit_learning_decision_packet_source_error"
+                ),
+                "profit_learning_cost_gate_rejects_recorded": detail.get(
+                    "profit_learning_cost_gate_rejects_recorded"
+                ),
+                "profit_learning_silent_drop_risk": detail.get(
+                    "profit_learning_silent_drop_risk"
+                ),
+                "profit_learning_counterfactual_scorecard_available": detail.get(
+                    "profit_learning_counterfactual_scorecard_available"
+                ),
+                "profit_learning_counterfactual_learning_candidates_present": detail.get(
+                    "profit_learning_counterfactual_learning_candidates_present"
+                ),
+                "profit_learning_bounded_plan_ready": detail.get(
+                    "profit_learning_bounded_plan_ready"
+                ),
+                "profit_learning_blocked_outcome_review_candidates_present": detail.get(
+                    "profit_learning_blocked_outcome_review_candidates_present"
+                ),
+                "profit_learning_global_cost_gate_lowering_recommended": detail.get(
+                    "profit_learning_global_cost_gate_lowering_recommended"
+                ),
+                "profit_learning_order_authority_granted": detail.get(
+                    "profit_learning_order_authority_granted"
+                ),
+                "profit_learning_main_cost_gate_adjustment": detail.get(
+                    "profit_learning_main_cost_gate_adjustment"
+                ),
+                "profit_learning_promotion_evidence": detail.get(
+                    "profit_learning_promotion_evidence"
+                ),
+                "profit_learning_data_flow_status": detail.get(
+                    "profit_learning_data_flow_status"
+                ),
+                "profit_learning_counterfactual_ranking_status": detail.get(
+                    "profit_learning_counterfactual_ranking_status"
+                ),
+                "profit_learning_counterfactual_horizon_stability_status": detail.get(
+                    "profit_learning_counterfactual_horizon_stability_status"
+                ),
+                "profit_learning_counterfactual_candidate_count": detail.get(
+                    "profit_learning_counterfactual_candidate_count"
+                ),
+                "profit_learning_top_side_cells": detail.get(
+                    "profit_learning_top_side_cells"
+                ),
+                "profit_learning_activation_status": detail.get(
+                    "profit_learning_activation_status"
+                ),
+                "profit_learning_blocked_review_status": detail.get(
+                    "profit_learning_blocked_review_status"
+                ),
                 "latest_admission_decision": detail.get("latest_admission_decision"),
                 "latest_record_type": detail.get("latest_record_type"),
                 "latest_generated_at_utc": detail.get("latest_generated_at_utc"),
