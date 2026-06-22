@@ -19,6 +19,7 @@ from typing import Any
 
 from cost_gate_learning_lane.contract import (
     ADMIT_DECISION,
+    BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE,
     PROBE_ADMISSION_DECISION_RECORD_TYPE,
     PROBE_OUTCOME_RECORD_TYPE,
 )
@@ -165,6 +166,12 @@ def _latest_unique_by_attempt(rows: list[dict[str, Any]]) -> list[dict[str, Any]
     return [latest[key] for key in sorted(latest)]
 
 
+def _horizon_matches(row: dict[str, Any], horizon_minutes: Any) -> bool:
+    expected = _int(horizon_minutes)
+    observed = _int(row.get("horizon_minutes"))
+    return expected <= 0 or observed <= 0 or observed == expected
+
+
 def _matching_probe_rows(
     ledger_rows: list[dict[str, Any]],
     *,
@@ -185,6 +192,48 @@ def _matching_probe_rows(
             if _float(row.get("realized_net_bps")) is not None:
                 outcomes.append(row)
     return _latest_unique_by_attempt(admissions), _latest_unique_by_attempt(outcomes)
+
+
+def _matching_control_rows(
+    ledger_rows: list[dict[str, Any]],
+    *,
+    side_cell_key: str,
+    horizon_minutes: Any,
+) -> list[dict[str, Any]]:
+    controls = []
+    for row in ledger_rows:
+        if _str(row.get("side_cell_key")) != side_cell_key:
+            continue
+        if _str(row.get("record_type")) != BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE:
+            continue
+        if not _horizon_matches(row, horizon_minutes):
+            continue
+        if _float(row.get("realized_net_bps")) is not None:
+            controls.append(row)
+    return _latest_unique_by_attempt(controls)
+
+
+def _net_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    nets = [
+        value for value in (_float(row.get("realized_net_bps")) for row in rows)
+        if value is not None
+    ]
+    gross = [
+        value for value in (_float(row.get("gross_bps")) for row in rows)
+        if value is not None
+    ]
+    count = len(nets)
+    positive_count = sum(1 for value in nets if value > 0.0)
+    avg_net = sum(nets) / count if count else None
+    avg_gross = sum(gross) / len(gross) if gross else None
+    positive_pct = 100.0 * positive_count / count if count else None
+    return {
+        "count": count,
+        "positive_count": positive_count,
+        "avg_net_bps": avg_net,
+        "avg_gross_bps": avg_gross,
+        "net_positive_pct": positive_pct,
+    }
 
 
 def _review_status(
@@ -263,6 +312,105 @@ def _review_status(
     )
 
 
+def _evidence_quality(
+    *,
+    design: dict[str, Any],
+    review_status: str,
+    probe_summary: dict[str, Any],
+    control_summary: dict[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    first_review_n = max(1, _int(design.get("min_filled_probe_outcomes_for_first_review"), 3))
+    learning_review_n = max(
+        first_review_n,
+        _int(design.get("min_filled_probe_outcomes_for_learning_review"), 10),
+    )
+    probe_count = _int(probe_summary.get("count"))
+    control_count = _int(control_summary.get("count"))
+    probe_avg = _float(probe_summary.get("avg_net_bps"))
+    control_avg = _float(control_summary.get("avg_net_bps"))
+    probe_pct = _float(probe_summary.get("net_positive_pct"))
+    control_pct = _float(control_summary.get("net_positive_pct"))
+    avg_delta = (
+        probe_avg - control_avg
+        if probe_avg is not None and control_avg is not None
+        else None
+    )
+    pct_delta = (
+        probe_pct - control_pct
+        if probe_pct is not None and control_pct is not None
+        else None
+    )
+
+    if review_status == "AUTHORITY_BOUNDARY_VIOLATION":
+        status = "AUTHORITY_BOUNDARY_VIOLATION"
+        reason = "authority_boundary_violation_prevents_evidence_quality_review"
+        next_actions = ["remove_authority_granting_input_before_any_review"]
+    elif review_status == "PREFLIGHT_DESIGN_NOT_USABLE":
+        status = "PREFLIGHT_DESIGN_NOT_USABLE"
+        reason = "bounded_probe_design_not_usable_for_evidence_quality_review"
+        next_actions = ["refresh_or_operator_review_bounded_probe_design_before_result_review"]
+    elif probe_count <= 0:
+        status = "NO_PROBE_OUTCOMES_RECORDED"
+        reason = "completed_probe_outcomes_missing"
+        next_actions = ["wait_for_or_record_probe_outcome_rows_before_review"]
+    elif probe_count < first_review_n:
+        status = "PROBE_SAMPLE_BELOW_FIRST_REVIEW_FLOOR"
+        reason = "completed_probe_outcomes_below_first_review_floor"
+        next_actions = ["continue_recording_probe_outcomes_with_existing_authority_boundaries"]
+    elif review_status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED":
+        status = "REALIZED_EDGE_FAILED"
+        reason = "probe_realized_edge_failed_absolute_success_criteria"
+        next_actions = ["stop_probe_and_keep_cost_gate_blocked_for_this_side_cell"]
+    elif control_count <= 0:
+        status = "CONTROL_COMPARISON_MISSING"
+        reason = "matched_blocked_signal_control_outcomes_missing_for_same_side_cell_horizon"
+        next_actions = [
+            "record_matched_blocked_signal_outcomes_for_same_side_cell_and_horizon"
+        ]
+    elif control_count < first_review_n:
+        status = "MATCHED_CONTROL_SAMPLE_BELOW_FIRST_REVIEW_FLOOR"
+        reason = "matched_blocked_signal_control_outcomes_below_first_review_floor"
+        next_actions = [
+            "continue_recording_matched_blocked_signal_control_outcomes"
+        ]
+    elif probe_count < learning_review_n:
+        status = "FIRST_REVIEW_WITH_MATCHED_CONTROL_COMPARISON"
+        reason = "first_probe_review_has_matched_blocked_signal_control_comparison"
+        next_actions = ["operator_review_first_probe_results_with_matched_control_before_additional_budget"]
+    else:
+        status = "LEARNING_REVIEW_WITH_MATCHED_CONTROL_COMPARISON"
+        reason = "learning_probe_review_has_matched_blocked_signal_control_comparison"
+        next_actions = ["operator_review_probe_learning_results_with_matched_control_before_any_gate_change"]
+
+    quality = {
+        "schema_version": "bounded_demo_probe_evidence_quality_v1",
+        "status": status,
+        "reason": reason,
+        "matched_control_required": probe_count >= first_review_n,
+        "matched_control_present": control_count > 0,
+        "matched_control_outcome_count": control_count,
+        "matched_control_positive_outcome_count": _int(control_summary.get("positive_count")),
+        "matched_control_avg_gross_bps": _round(control_summary.get("avg_gross_bps")),
+        "matched_control_avg_net_bps": _round(control_avg),
+        "matched_control_net_positive_pct": _round(control_pct),
+        "probe_minus_control_avg_net_bps": _round(avg_delta),
+        "probe_net_positive_pct_minus_control_pct": _round(pct_delta),
+        "probe_outperforms_matched_control": (
+            avg_delta is not None and avg_delta > 0.0
+        ),
+        "matched_control_horizon_minutes": design.get("outcome_horizon_minutes"),
+        "first_review_outcome_floor": first_review_n,
+        "learning_review_outcome_floor": learning_review_n,
+        "anecdote_risk": status
+        in {
+            "CONTROL_COMPARISON_MISSING",
+            "MATCHED_CONTROL_SAMPLE_BELOW_FIRST_REVIEW_FLOOR",
+        },
+        "promotion_evidence": False,
+    }
+    return quality, next_actions
+
+
 def build_bounded_demo_probe_result_review(
     *,
     preflight: dict[str, Any],
@@ -274,21 +422,18 @@ def build_bounded_demo_probe_result_review(
     design = _design_summary(preflight)
     side_cell_key = _str(design.get("side_cell_key") or _side_cell_key_from_preflight(preflight))
     admissions, outcomes = _matching_probe_rows(ledger_rows, side_cell_key=side_cell_key)
-    nets = [
-        value for value in (_float(row.get("realized_net_bps")) for row in outcomes)
-        if value is not None
-    ]
-    gross = [
-        value for value in (_float(row.get("gross_bps")) for row in outcomes)
-        if value is not None
-    ]
-    outcome_count = len(nets)
-    positive_count = sum(1 for value in nets if value > 0.0)
-    avg_net = sum(nets) / outcome_count if outcome_count else None
-    avg_gross = sum(gross) / len(gross) if gross else None
-    net_positive_pct = (
-        100.0 * positive_count / outcome_count if outcome_count else None
+    controls = _matching_control_rows(
+        ledger_rows,
+        side_cell_key=side_cell_key,
+        horizon_minutes=design.get("outcome_horizon_minutes"),
     )
+    probe_summary = _net_summary(outcomes)
+    control_summary = _net_summary(controls)
+    outcome_count = _int(probe_summary.get("count"))
+    positive_count = _int(probe_summary.get("positive_count"))
+    avg_net = _float(probe_summary.get("avg_net_bps"))
+    avg_gross = _float(probe_summary.get("avg_gross_bps"))
+    net_positive_pct = _float(probe_summary.get("net_positive_pct"))
     authority_ok = _authority_preserved(preflight, design)
     status, reason, next_actions = _review_status(
         authority_preserved=authority_ok,
@@ -297,6 +442,16 @@ def build_bounded_demo_probe_result_review(
         avg_net_bps=avg_net,
         net_positive_pct=net_positive_pct,
     )
+    evidence_quality, quality_actions = _evidence_quality(
+        design=design,
+        review_status=status,
+        probe_summary=probe_summary,
+        control_summary=control_summary,
+    )
+    if evidence_quality.get("anecdote_risk") is True:
+        next_actions = list(dict.fromkeys([*quality_actions, *next_actions]))
+    else:
+        next_actions = list(dict.fromkeys([*next_actions, *quality_actions]))
     first_review_n = max(1, _int(design.get("min_filled_probe_outcomes_for_first_review"), 3))
     max_outcomes_before_review = max(
         first_review_n,
@@ -338,6 +493,7 @@ def build_bounded_demo_probe_result_review(
             ),
             "max_filled_probe_outcomes_before_review": max_outcomes_before_review,
         },
+        "evidence_quality": evidence_quality,
         "answers": {
             "authority_boundary_preserved": authority_ok,
             "operator_review_required": operator_review_required,
@@ -354,6 +510,10 @@ def build_bounded_demo_probe_result_review(
             "learning_review_candidate": (
                 status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED"
             ),
+            "matched_control_comparison_present": (
+                evidence_quality.get("matched_control_present") is True
+            ),
+            "anecdote_risk": evidence_quality.get("anecdote_risk") is True,
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "probe_authority_granted": False,
@@ -368,6 +528,7 @@ def build_bounded_demo_probe_result_review(
 
 def render_markdown(packet: dict[str, Any]) -> str:
     summary = _dict(packet.get("probe_result_summary"))
+    quality = _dict(packet.get("evidence_quality"))
     answers = _dict(packet.get("answers"))
     lines = [
         "# Bounded Demo Probe Result Review",
@@ -378,6 +539,9 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Completed outcomes: `{summary.get('completed_probe_outcome_count')}`",
         f"- Avg net bps: `{summary.get('avg_realized_net_bps')}`",
         f"- Net-positive pct: `{summary.get('net_positive_pct')}`",
+        f"- Evidence quality: `{quality.get('status')}`",
+        f"- Matched control outcomes: `{quality.get('matched_control_outcome_count')}`",
+        f"- Probe minus control avg net bps: `{quality.get('probe_minus_control_avg_net_bps')}`",
         f"- Operator review required: `{answers.get('operator_review_required')}`",
         f"- Boundary: {BOUNDARY}.",
         "",

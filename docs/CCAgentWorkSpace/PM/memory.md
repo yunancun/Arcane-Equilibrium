@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Bounded Probe Matched-Control Evidence Quality
+
+- `bounded_demo_probe_result_review_v1` now emits `bounded_demo_probe_evidence_quality_v1`, comparing probe outcomes with matched same side-cell/horizon `blocked_signal_outcome` controls.
+- Positive probe outcomes without matched controls are marked `anecdote_risk` and routed back to data coverage in profitability scorecard / runtime killboard / discovery loop / learning worklist.
+- This strengthens the Cost Gate escape path toward controlled Demo mode learning evidence, but still grants no Cost Gate lowering, probe/order authority, runtime mutation, or promotion proof.
+
 ## 2026-06-22 Bounded Probe Result Review Alpha Ingestion
 
 - Profitability scorecard, runtime killboard, blocker taxonomy, and learning worklist now consume `bounded_demo_probe_result_review_v1`; post-probe outcomes can stop, continue, or require operator review in the main loop.
