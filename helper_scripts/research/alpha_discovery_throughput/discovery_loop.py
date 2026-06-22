@@ -237,6 +237,20 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
                 "operator_actionable": True,
                 "engineering_actionable": True,
             }
+        if packet_status == "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE":
+            return {
+                "action": READY_FOR_PROBE,
+                "reason": (
+                    "profit_learning_sealed_horizon_demo_probe_candidate_needs_operator_review"
+                ),
+                "blocker_class": "probe_ready",
+                "primary_blocker": (
+                    "profit_learning_sealed_horizon_demo_probe_candidate_needs_operator_review"
+                ),
+                "next_trigger": packet_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
         if packet_status == "CONTINUE_BLOCKED_OUTCOME_COLLECTION":
             return {
                 "action": RUN_READ_ONLY_CAPTURE,
@@ -1987,6 +2001,16 @@ def classify_profitability_blocker(
                 "profit_learning_blocked_outcome_review_candidates_present": detail.get(
                     "profit_learning_blocked_outcome_review_candidates_present"
                 ),
+                "profit_learning_sealed_horizon_learning_evidence_available": (
+                    detail.get(
+                        "profit_learning_sealed_horizon_learning_evidence_available"
+                    )
+                ),
+                "profit_learning_sealed_horizon_learning_evidence_candidates_present": (
+                    detail.get(
+                        "profit_learning_sealed_horizon_learning_evidence_candidates_present"
+                    )
+                ),
                 "profit_learning_global_cost_gate_lowering_recommended": detail.get(
                     "profit_learning_global_cost_gate_lowering_recommended"
                 ),
@@ -2019,6 +2043,38 @@ def classify_profitability_blocker(
                 ),
                 "profit_learning_blocked_review_status": detail.get(
                     "profit_learning_blocked_review_status"
+                ),
+                "profit_learning_sealed_horizon_learning_evidence_status": detail.get(
+                    "profit_learning_sealed_horizon_learning_evidence_status"
+                ),
+                "profit_learning_sealed_horizon_side_cell_key": detail.get(
+                    "profit_learning_sealed_horizon_side_cell_key"
+                ),
+                "profit_learning_sealed_horizon_source_kind": detail.get(
+                    "profit_learning_sealed_horizon_source_kind"
+                ),
+                "profit_learning_sealed_horizon_outcome_horizon_minutes": detail.get(
+                    "profit_learning_sealed_horizon_outcome_horizon_minutes"
+                ),
+                "profit_learning_sealed_horizon_blocked_signal_outcome_count": (
+                    detail.get(
+                        "profit_learning_sealed_horizon_blocked_signal_outcome_count"
+                    )
+                ),
+                "profit_learning_sealed_horizon_avg_gross_bps": detail.get(
+                    "profit_learning_sealed_horizon_avg_gross_bps"
+                ),
+                "profit_learning_sealed_horizon_avg_net_bps": detail.get(
+                    "profit_learning_sealed_horizon_avg_net_bps"
+                ),
+                "profit_learning_sealed_horizon_net_positive_pct": detail.get(
+                    "profit_learning_sealed_horizon_net_positive_pct"
+                ),
+                "profit_learning_sealed_horizon_review_ready": detail.get(
+                    "profit_learning_sealed_horizon_review_ready"
+                ),
+                "profit_learning_sealed_horizon_top_side_cell_status": detail.get(
+                    "profit_learning_sealed_horizon_top_side_cell_status"
                 ),
                 "latest_admission_decision": detail.get("latest_admission_decision"),
                 "latest_record_type": detail.get("latest_record_type"),

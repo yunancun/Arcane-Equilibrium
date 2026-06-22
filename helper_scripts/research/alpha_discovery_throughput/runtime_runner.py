@@ -1559,6 +1559,11 @@ def summarize_profit_learning_decision_packet(
         if isinstance(payload.get("blocked_review"), dict)
         else {}
     )
+    sealed_horizon = (
+        payload.get("sealed_horizon_learning_evidence")
+        if isinstance(payload.get("sealed_horizon_learning_evidence"), dict)
+        else {}
+    )
     top_side_cells = counterfactual.get("top_side_cells")
     if not isinstance(top_side_cells, list):
         top_side_cells = []
@@ -1594,6 +1599,12 @@ def summarize_profit_learning_decision_packet(
         ),
         "profit_learning_blocked_outcome_review_candidates_present": answers.get(
             "blocked_outcome_review_candidates_present"
+        ),
+        "profit_learning_sealed_horizon_learning_evidence_available": answers.get(
+            "sealed_horizon_learning_evidence_available"
+        ),
+        "profit_learning_sealed_horizon_learning_evidence_candidates_present": (
+            answers.get("sealed_horizon_learning_evidence_candidates_present")
         ),
         "profit_learning_global_cost_gate_lowering_recommended": answers.get(
             "global_cost_gate_lowering_recommended"
@@ -1633,6 +1644,34 @@ def summarize_profit_learning_decision_packet(
         "profit_learning_blocked_review_status": blocked_review.get("status"),
         "profit_learning_blocked_review_candidate_count": blocked_review.get(
             "candidate_count"
+        ),
+        "profit_learning_sealed_horizon_learning_evidence_status": (
+            sealed_horizon.get("status")
+        ),
+        "profit_learning_sealed_horizon_side_cell_key": (
+            sealed_horizon.get("side_cell_key")
+        ),
+        "profit_learning_sealed_horizon_source_kind": sealed_horizon.get("source_kind"),
+        "profit_learning_sealed_horizon_outcome_horizon_minutes": (
+            sealed_horizon.get("outcome_horizon_minutes")
+        ),
+        "profit_learning_sealed_horizon_blocked_signal_outcome_count": (
+            sealed_horizon.get("blocked_signal_outcome_count")
+        ),
+        "profit_learning_sealed_horizon_avg_gross_bps": (
+            sealed_horizon.get("avg_gross_bps")
+        ),
+        "profit_learning_sealed_horizon_avg_net_bps": (
+            sealed_horizon.get("avg_net_bps")
+        ),
+        "profit_learning_sealed_horizon_net_positive_pct": (
+            sealed_horizon.get("net_positive_pct")
+        ),
+        "profit_learning_sealed_horizon_review_ready": (
+            sealed_horizon.get("review_ready")
+        ),
+        "profit_learning_sealed_horizon_top_side_cell_status": (
+            sealed_horizon.get("top_side_cell_status")
         ),
     }
 

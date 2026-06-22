@@ -223,6 +223,65 @@ def test_learning_worklist_carries_ranked_cost_gate_blocked_review_evidence():
     )
 
 
+def test_learning_worklist_uses_sealed_horizon_review_objective():
+    worklist = build_learning_worklist({
+        "arms": [
+            {
+                "arm_id": "cost_gate_demo_learning_lane",
+                "blocker_class": "probe_ready",
+                "primary_blocker": (
+                    "profit_learning_sealed_horizon_demo_probe_candidate_needs_operator_review"
+                ),
+                "next_trigger": (
+                    "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe"
+                ),
+                "operator_actionable": True,
+                "engineering_actionable": True,
+                "profit_learning_decision_packet_status": (
+                    "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE"
+                ),
+                "profit_learning_sealed_horizon_learning_evidence_candidates_present": True,
+                "profit_learning_sealed_horizon_learning_evidence_status": (
+                    "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+                ),
+                "profit_learning_sealed_horizon_side_cell_key": (
+                    "ma_crossover|BTCUSDT|Sell"
+                ),
+                "profit_learning_sealed_horizon_source_kind": (
+                    "horizon_specific_sealed_replay"
+                ),
+                "profit_learning_sealed_horizon_outcome_horizon_minutes": 240,
+                "profit_learning_sealed_horizon_blocked_signal_outcome_count": 16515,
+                "profit_learning_sealed_horizon_avg_net_bps": 3.0511,
+                "profit_learning_sealed_horizon_net_positive_pct": 68.5619,
+                "profit_learning_sealed_horizon_review_ready": True,
+                "profit_learning_order_authority_granted": False,
+                "profit_learning_main_cost_gate_adjustment": "NONE",
+            }
+        ],
+    })
+
+    task = worklist["top_task"]
+
+    assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
+    assert task["task_type"] == "operator_probe_review"
+    assert task["learning_objective"] == (
+        "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe"
+    )
+    assert task["requires_operator_authorization"] is True
+    assert task["runtime_mutation_required"] is False
+    assert "sealed_horizon_learning_evidence_review_ready_or_blocked_review_candidate_present" in (
+        task["completion_evidence_required"]
+    )
+    assert task["evidence"]["profit_learning_sealed_horizon_side_cell_key"] == (
+        "ma_crossover|BTCUSDT|Sell"
+    )
+    assert task["evidence"]["profit_learning_sealed_horizon_outcome_horizon_minutes"] == 240
+    assert task["evidence"]["profit_learning_sealed_horizon_avg_net_bps"] == 3.0511
+    assert task["evidence"]["profit_learning_order_authority_granted"] is False
+    assert task["evidence"]["profit_learning_main_cost_gate_adjustment"] == "NONE"
+
+
 def test_learning_worklist_carries_demo_learning_stack_health_evidence():
     worklist = build_learning_worklist({
         "arms": [
