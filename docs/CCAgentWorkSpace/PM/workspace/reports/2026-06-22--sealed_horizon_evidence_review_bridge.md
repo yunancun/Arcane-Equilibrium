@@ -29,6 +29,12 @@ This turns the existing sealed BTCUSDT Sell 240m scratch evidence from an isolat
 - `PYTHONPATH=helper_scripts/research python3 -m pytest helper_scripts/research/tests/test_profitability_path_scorecard.py helper_scripts/research/tests/test_cost_gate_learning_lane_decision_packet.py helper_scripts/research/tests/test_alpha_discovery_throughput.py helper_scripts/research/tests/test_alpha_discovery_learning_worklist.py -q` = `62 passed`.
 - `python3 -m pytest helper_scripts/research/tests/test_cost_gate_sealed_horizon_learning_evidence.py helper_scripts/research/tests/test_profitability_path_scorecard.py helper_scripts/research/tests/test_cost_gate_learning_lane_decision_packet.py -q` = `13 passed`.
 - `git diff --check` passed.
+- Linux `trade-core` fast-forwarded to the checkpoint and artifact-only smokes passed:
+  - `/tmp/openclaw/profitability_refresh/20260622T031320Z/profitability_path_scorecard_v389/profitability_path_scorecard_v389_latest.json`
+  - `/tmp/openclaw/profitability_refresh/20260622T031320Z/profit_learning_decision_packet_v389/profit_learning_decision_packet_v389_latest.json`
+  - top path/status: `horizon_edge_amplification:ma_crossover|BTCUSDT|Sell` / `SEALED_HORIZON_LEARNING_EVIDENCE_READY_FOR_OPERATOR_REVIEW`
+  - decision status: `OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE`
+  - sealed evidence: 16,515 240m blocked outcomes, avg net `3.0511bp`, net-positive `68.56%`
 
 ## Boundary
 
