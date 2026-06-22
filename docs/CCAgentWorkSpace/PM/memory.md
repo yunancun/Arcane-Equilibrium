@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Cost Gate Learning-Lane Accumulation Gate
+
+- A controlled artifact-only 168h learning-lane refresh produced 40,000 ledger rows, 20,000 blocked-signal outcomes, and a review candidate `ma_crossover|ETHUSDT|Sell`, proving the production learning lane can accumulate evidence from recorded rejects without lowering Cost Gate or submitting orders.
+- `cost_gate_learning_lane.status --json-output` now writes canonical activation preflight artifacts; sealed preflight now reads that evidence and is reduced to `OPERATOR_REVIEW_REQUIRED` with production lane accumulating.
+- Current remaining sealed-path blocker is actual operator review approval; no cron install, writer/env enablement, Cost Gate lowering, probe/order authority, or promotion proof has been granted.
+
 ## 2026-06-22 Sealed Horizon Preflight Refresh Wrapper
 
 - Added an artifact-only `sealed_horizon_probe_preflight_cron.sh` wrapper so canonical sealed preflight latest/status/heartbeat can be refreshed without manual one-off commands.
