@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Bounded Probe Result Review Alpha Ingestion
+
+- Profitability scorecard, runtime killboard, blocker taxonomy, and learning worklist now consume `bounded_demo_probe_result_review_v1`; post-probe outcomes can stop, continue, or require operator review in the main loop.
+- Empty result-review artifacts remain evidence only and do not advance preflight closure; failed realized edge keeps the Cost Gate blocked, while learning-review candidates still require operator review and grant no promotion proof.
+- Linux v399 smoke showed current result review has `NO_PROBE_OUTCOMES_RECORDED` / completed outcomes `0`, so the sealed path remains blocked by operator review with no Cost Gate lowering or probe/order authority.
+
 ## 2026-06-22 Bounded Demo-Probe Result Review
 
 - Added no-authority `bounded_demo_probe_result_review_v1` so future probe outcomes can be classified into collect-more, first-review, stop, or learning-review states against the v397 design packet.
