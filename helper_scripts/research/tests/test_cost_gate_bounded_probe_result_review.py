@@ -9,6 +9,7 @@ from cost_gate_learning_lane.bounded_probe_result_review import (
 )
 from cost_gate_learning_lane.contract import (
     ADMIT_DECISION,
+    BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE,
     PROBE_ADMISSION_DECISION_RECORD_TYPE,
     PROBE_OUTCOME_RECORD_TYPE,
 )
@@ -104,6 +105,18 @@ def _outcome(i: int, net_bps: float, gross_bps: float | None = None) -> dict:
     }
 
 
+def _control(i: int, net_bps: float, horizon_minutes: int = 240) -> dict:
+    return {
+        "record_type": BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE,
+        "generated_at_utc": f"2026-06-22T11:{i:02d}:00+00:00",
+        "attempt_id": f"control-{i}",
+        "side_cell_key": SIDE_CELL,
+        "horizon_minutes": horizon_minutes,
+        "realized_net_bps": net_bps,
+        "gross_bps": net_bps + 4.0,
+    }
+
+
 def _ledger(nets: list[float]) -> list[dict]:
     rows = []
     for idx, net in enumerate(nets, start=1):
@@ -125,6 +138,7 @@ def test_no_probe_outcomes_waits_without_granting_authority() -> None:
     assert packet["answers"]["probe_authority_granted"] is False
     assert packet["answers"]["order_authority_granted"] is False
     assert packet["answers"]["promotion_evidence"] is False
+    assert packet["evidence_quality"]["status"] == "NO_PROBE_OUTCOMES_RECORDED"
 
 
 def test_partial_probe_sample_can_continue_under_existing_review_boundary() -> None:
@@ -138,9 +152,10 @@ def test_partial_probe_sample_can_continue_under_existing_review_boundary() -> N
     assert packet["probe_result_summary"]["completed_probe_outcome_count"] == 2
     assert packet["answers"]["continue_probe_without_operator_review_allowed"] is True
     assert packet["answers"]["operator_review_required"] is False
+    assert packet["evidence_quality"]["status"] == "PROBE_SAMPLE_BELOW_FIRST_REVIEW_FLOOR"
 
 
-def test_first_review_pass_requires_operator_review_even_when_positive() -> None:
+def test_first_review_pass_without_control_is_marked_as_anecdote_risk() -> None:
     packet = build_bounded_demo_probe_result_review(
         preflight=_preflight(),
         ledger_rows=_ledger([2.0, 4.0, 1.0]),
@@ -153,7 +168,37 @@ def test_first_review_pass_requires_operator_review_even_when_positive() -> None
     assert packet["probe_result_summary"]["net_positive_pct"] == 100.0
     assert packet["answers"]["operator_review_required"] is True
     assert packet["answers"]["continue_probe_without_operator_review_allowed"] is False
+    assert packet["answers"]["anecdote_risk"] is True
+    assert packet["evidence_quality"]["status"] == "CONTROL_COMPARISON_MISSING"
+    assert packet["evidence_quality"]["matched_control_outcome_count"] == 0
+    assert packet["next_actions"][0] == (
+        "record_matched_blocked_signal_outcomes_for_same_side_cell_and_horizon"
+    )
     assert "Operator review required" in markdown
+
+
+def test_first_review_pass_with_matched_control_records_relative_edge() -> None:
+    packet = build_bounded_demo_probe_result_review(
+        preflight=_preflight(),
+        ledger_rows=[
+            *_ledger([2.0, 4.0, 1.0]),
+            _control(1, 1.0),
+            _control(2, -1.0),
+            _control(3, 0.0),
+        ],
+        now_utc=NOW,
+    )
+
+    assert packet["status"] == "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED"
+    assert packet["answers"]["matched_control_comparison_present"] is True
+    assert packet["answers"]["anecdote_risk"] is False
+    assert packet["evidence_quality"]["status"] == (
+        "FIRST_REVIEW_WITH_MATCHED_CONTROL_COMPARISON"
+    )
+    assert packet["evidence_quality"]["matched_control_outcome_count"] == 3
+    assert packet["evidence_quality"]["matched_control_avg_net_bps"] == 0.0
+    assert packet["evidence_quality"]["probe_minus_control_avg_net_bps"] == 2.3333
+    assert packet["evidence_quality"]["probe_outperforms_matched_control"] is True
 
 
 def test_failed_first_review_stops_probe() -> None:
@@ -166,6 +211,7 @@ def test_failed_first_review_stops_probe() -> None:
     assert packet["status"] == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED"
     assert packet["answers"]["stop_probe_recommended"] is True
     assert packet["answers"]["operator_review_required"] is True
+    assert packet["evidence_quality"]["status"] == "REALIZED_EDGE_FAILED"
     assert "stop_probe_and_keep_cost_gate_blocked_for_this_side_cell" in packet[
         "next_actions"
     ]
@@ -183,6 +229,7 @@ def test_learning_review_candidate_still_does_not_promote_or_grant_authority() -
     assert packet["answers"]["operator_review_required"] is True
     assert packet["answers"]["promotion_evidence"] is False
     assert packet["answers"]["main_cost_gate_adjustment"] == "NONE"
+    assert packet["evidence_quality"]["status"] == "CONTROL_COMPARISON_MISSING"
 
 
 def test_authority_violation_fails_closed() -> None:

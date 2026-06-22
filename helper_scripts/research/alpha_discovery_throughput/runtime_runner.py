@@ -1797,6 +1797,9 @@ def summarize_bounded_probe_result_review(
     summary = payload.get("probe_result_summary")
     if not isinstance(summary, dict):
         summary = {}
+    quality = payload.get("evidence_quality")
+    if not isinstance(quality, dict):
+        quality = {}
     answers = payload.get("answers")
     if not isinstance(answers, dict):
         answers = {}
@@ -1865,6 +1868,30 @@ def summarize_bounded_probe_result_review(
         "bounded_probe_result_review_promotion_evidence": answers.get(
             "promotion_evidence"
         ),
+        "bounded_probe_result_review_evidence_quality_status": quality.get("status"),
+        "bounded_probe_result_review_evidence_quality_reason": quality.get("reason"),
+        "bounded_probe_result_review_matched_control_required": quality.get(
+            "matched_control_required"
+        ),
+        "bounded_probe_result_review_matched_control_present": quality.get(
+            "matched_control_present"
+        ),
+        "bounded_probe_result_review_matched_control_outcome_count": quality.get(
+            "matched_control_outcome_count"
+        ),
+        "bounded_probe_result_review_matched_control_avg_net_bps": quality.get(
+            "matched_control_avg_net_bps"
+        ),
+        "bounded_probe_result_review_matched_control_net_positive_pct": quality.get(
+            "matched_control_net_positive_pct"
+        ),
+        "bounded_probe_result_review_probe_minus_control_avg_net_bps": quality.get(
+            "probe_minus_control_avg_net_bps"
+        ),
+        "bounded_probe_result_review_probe_outperforms_matched_control": quality.get(
+            "probe_outperforms_matched_control"
+        ),
+        "bounded_probe_result_review_anecdote_risk": quality.get("anecdote_risk"),
     }
 
 

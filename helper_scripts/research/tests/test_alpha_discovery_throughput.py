@@ -1699,6 +1699,8 @@ def _write_bounded_probe_result_review_latest(
     *,
     status: str,
     generated_at: str = "2026-06-21T18:04:45+00:00",
+    evidence_quality_status: str | None = None,
+    matched_control_count: int | None = None,
 ) -> Path:
     path = (
         data
@@ -1706,6 +1708,16 @@ def _write_bounded_probe_result_review_latest(
         / "bounded_probe_result_review_latest.json"
     )
     path.parent.mkdir(parents=True, exist_ok=True)
+    if evidence_quality_status is None:
+        evidence_quality_status = (
+            "REALIZED_EDGE_FAILED"
+            if status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED"
+            else "LEARNING_REVIEW_WITH_MATCHED_CONTROL_COMPARISON"
+        )
+    if matched_control_count is None:
+        matched_control_count = 0 if "MISSING" in evidence_quality_status else 3
+    avg_net = -1.2 if status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED" else 2.5
+    net_positive = 33.3 if status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED" else 100.0
     payload = {
         "schema_version": "bounded_demo_probe_result_review_v1",
         "generated_at_utc": generated_at,
@@ -1715,12 +1727,34 @@ def _write_bounded_probe_result_review_latest(
         "probe_result_summary": {
             "admitted_probe_attempt_count": 3,
             "completed_probe_outcome_count": 3,
-            "positive_probe_outcome_count": 1,
-            "avg_realized_gross_bps": 2.8,
-            "avg_realized_net_bps": -1.2,
-            "net_positive_pct": 33.3,
+            "positive_probe_outcome_count": 1
+            if status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED"
+            else 3,
+            "avg_realized_gross_bps": avg_net + 4.0,
+            "avg_realized_net_bps": avg_net,
+            "net_positive_pct": net_positive,
             "first_review_outcome_floor": 3,
             "learning_review_outcome_floor": 10,
+        },
+        "evidence_quality": {
+            "schema_version": "bounded_demo_probe_evidence_quality_v1",
+            "status": evidence_quality_status,
+            "reason": "fixture_evidence_quality",
+            "matched_control_required": True,
+            "matched_control_present": matched_control_count > 0,
+            "matched_control_outcome_count": matched_control_count,
+            "matched_control_avg_net_bps": 1.0 if matched_control_count else None,
+            "matched_control_net_positive_pct": 66.7 if matched_control_count else None,
+            "probe_minus_control_avg_net_bps": avg_net - 1.0
+            if matched_control_count
+            else None,
+            "probe_outperforms_matched_control": matched_control_count > 0 and avg_net > 1.0,
+            "anecdote_risk": evidence_quality_status
+            in {
+                "CONTROL_COMPARISON_MISSING",
+                "MATCHED_CONTROL_SAMPLE_BELOW_FIRST_REVIEW_FLOOR",
+            },
+            "promotion_evidence": False,
         },
         "answers": {
             "authority_boundary_preserved": True,
@@ -1732,6 +1766,12 @@ def _write_bounded_probe_result_review_latest(
             "learning_review_candidate": (
                 status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED"
             ),
+            "matched_control_comparison_present": matched_control_count > 0,
+            "anecdote_risk": evidence_quality_status
+            in {
+                "CONTROL_COMPARISON_MISSING",
+                "MATCHED_CONTROL_SAMPLE_BELOW_FIRST_REVIEW_FLOOR",
+            },
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "probe_authority_granted": False,
@@ -1741,6 +1781,8 @@ def _write_bounded_probe_result_review_latest(
         "next_actions": [
             "stop_probe_and_keep_cost_gate_blocked_for_this_side_cell"
             if status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED"
+            else "record_matched_blocked_signal_outcomes_for_same_side_cell_and_horizon"
+            if evidence_quality_status == "CONTROL_COMPARISON_MISSING"
             else "operator_review_probe_learning_results_before_any_promotion_or_gate_change"
         ],
         "design": {
@@ -2171,8 +2213,54 @@ def test_cost_gate_bounded_probe_result_review_supersedes_preflight(tmp_path):
     assert blocker["bounded_probe_result_review_stop_probe_recommended"] is True
     assert blocker["bounded_probe_result_review_order_authority_granted"] is False
     assert blocker["bounded_probe_result_review_main_cost_gate_adjustment"] == "NONE"
+    assert blocker["bounded_probe_result_review_evidence_quality_status"] == (
+        "REALIZED_EDGE_FAILED"
+    )
     assert task["task_type"] == "reject_or_archive"
     assert task["evidence"]["bounded_probe_result_review_stop_probe_recommended"] is True
+
+
+def test_positive_bounded_probe_result_without_control_stays_data_coverage(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_profit_learning_decision_packet_latest(
+        data,
+        status="OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+        reason="sealed_horizon_learning_evidence_clears_review_thresholds",
+        next_actions=[
+            "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+        ],
+        sealed_horizon_candidate=True,
+    )
+    _write_sealed_horizon_probe_preflight_latest(
+        data,
+        status="READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
+    )
+    _write_bounded_probe_result_review_latest(
+        data,
+        status="FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+        evidence_quality_status="CONTROL_COMPARISON_MISSING",
+        matched_control_count=0,
+    )
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    task = plan["learning_worklist"]["top_task"]
+
+    assert blocker["blocker_class"] == "data_coverage"
+    assert blocker["primary_blocker"] == (
+        "bounded_probe_result_review_needs_matched_blocked_signal_control"
+    )
+    assert blocker["next_trigger"] == (
+        "record_matched_blocked_signal_outcomes_for_same_side_cell_and_horizon"
+    )
+    assert blocker["bounded_probe_result_review_evidence_quality_status"] == (
+        "CONTROL_COMPARISON_MISSING"
+    )
+    assert blocker["bounded_probe_result_review_anecdote_risk"] is True
+    assert task["requires_operator_authorization"] is False
+    assert task["evidence"]["bounded_probe_result_review_matched_control_outcome_count"] == 0
 
 
 def _write_polymarket_leadlag_latest(data: Path, payload: dict) -> Path:

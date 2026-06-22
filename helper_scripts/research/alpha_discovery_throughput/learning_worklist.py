@@ -184,6 +184,16 @@ _EVIDENCE_KEYS = (
     "bounded_probe_result_review_probe_authority_granted",
     "bounded_probe_result_review_main_cost_gate_adjustment",
     "bounded_probe_result_review_promotion_evidence",
+    "bounded_probe_result_review_evidence_quality_status",
+    "bounded_probe_result_review_evidence_quality_reason",
+    "bounded_probe_result_review_matched_control_required",
+    "bounded_probe_result_review_matched_control_present",
+    "bounded_probe_result_review_matched_control_outcome_count",
+    "bounded_probe_result_review_matched_control_avg_net_bps",
+    "bounded_probe_result_review_matched_control_net_positive_pct",
+    "bounded_probe_result_review_probe_minus_control_avg_net_bps",
+    "bounded_probe_result_review_probe_outperforms_matched_control",
+    "bounded_probe_result_review_anecdote_risk",
 )
 
 

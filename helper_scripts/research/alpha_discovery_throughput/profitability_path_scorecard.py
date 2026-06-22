@@ -99,6 +99,7 @@ def _score_priority(path: dict[str, Any]) -> tuple[int, float]:
         "SEALED_HORIZON_PREFLIGHT_READY_FOR_OPERATOR_AUTHORIZATION": 6,
         "BOUNDED_DEMO_PROBE_LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED": 5,
         "BOUNDED_DEMO_PROBE_FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED": 6,
+        "BOUNDED_DEMO_PROBE_CONTROL_COMPARISON_REQUIRED": 7,
         "BOUNDED_DEMO_PROBE_COLLECT_MORE_OUTCOMES": 7,
         "SEALED_HORIZON_PREFLIGHT_REQUIRES_OPERATOR_REVIEW": 7,
         "SEALED_HORIZON_PREFLIGHT_REQUIRES_OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE": 8,
@@ -344,8 +345,12 @@ def _bounded_probe_result_review_fields(
             "bounded_probe_result_review_operator_review_required": False,
             "bounded_probe_result_review_stop_probe_recommended": False,
             "bounded_probe_result_review_learning_review_candidate": False,
+            "bounded_probe_result_review_evidence_quality_status": None,
+            "bounded_probe_result_review_matched_control_outcome_count": 0,
+            "bounded_probe_result_review_anecdote_risk": False,
         }
     summary = _dict(payload.get("probe_result_summary"))
+    quality = _dict(payload.get("evidence_quality"))
     answers = _dict(payload.get("answers"))
     design = _dict(payload.get("design"))
     return {
@@ -421,6 +426,32 @@ def _bounded_probe_result_review_fields(
             answers.get("promotion_evidence") is True
         ),
         "bounded_probe_result_review_design_status": design.get("status"),
+        "bounded_probe_result_review_evidence_quality_status": quality.get("status"),
+        "bounded_probe_result_review_evidence_quality_reason": quality.get("reason"),
+        "bounded_probe_result_review_matched_control_required": (
+            quality.get("matched_control_required") is True
+        ),
+        "bounded_probe_result_review_matched_control_present": (
+            quality.get("matched_control_present") is True
+        ),
+        "bounded_probe_result_review_matched_control_outcome_count": quality.get(
+            "matched_control_outcome_count"
+        ),
+        "bounded_probe_result_review_matched_control_avg_net_bps": quality.get(
+            "matched_control_avg_net_bps"
+        ),
+        "bounded_probe_result_review_matched_control_net_positive_pct": quality.get(
+            "matched_control_net_positive_pct"
+        ),
+        "bounded_probe_result_review_probe_minus_control_avg_net_bps": (
+            quality.get("probe_minus_control_avg_net_bps")
+        ),
+        "bounded_probe_result_review_probe_outperforms_matched_control": (
+            quality.get("probe_outperforms_matched_control") is True
+        ),
+        "bounded_probe_result_review_anecdote_risk": (
+            quality.get("anecdote_risk") is True
+        ),
     }
 
 
@@ -563,7 +594,10 @@ def _bounded_probe_result_path_state(
 ) -> tuple[str, str, str] | None:
     payload = _dict(review)
     status = _str(payload.get("status"))
+    quality = _dict(payload.get("evidence_quality"))
+    quality_status = _str(quality.get("status"))
     next_actions = payload.get("next_actions")
+    quality_next_action = "record_matched_blocked_signal_outcomes_for_same_side_cell_and_horizon"
     completed = _int(_dict(payload.get("probe_result_summary")).get(
         "completed_probe_outcome_count"
     ))
@@ -578,6 +612,19 @@ def _bounded_probe_result_path_state(
             "BOUNDED_DEMO_PROBE_RESULT_FAILED_STOP",
             "keep_cost_gate_blocked_after_realized_probe_edge_failed",
             _first_text(next_actions, "stop_probe_and_keep_cost_gate_blocked_for_this_side_cell"),
+        )
+    if status in {
+        "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+        "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
+    } and quality_status in {
+        "",
+        "CONTROL_COMPARISON_MISSING",
+        "MATCHED_CONTROL_SAMPLE_BELOW_FIRST_REVIEW_FLOOR",
+    }:
+        return (
+            "BOUNDED_DEMO_PROBE_CONTROL_COMPARISON_REQUIRED",
+            "record_matched_blocked_signal_control_outcomes_before_operator_gate_review",
+            _first_text(next_actions, quality_next_action),
         )
     if status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
         return (
@@ -1081,6 +1128,8 @@ def _profitability_engineering_closure(
     result_status = _str(result_review.get("status"))
     result_summary = _dict(result_review.get("probe_result_summary"))
     result_answers = _dict(result_review.get("answers"))
+    result_quality = _dict(result_review.get("evidence_quality"))
+    result_quality_status = _str(result_quality.get("status"))
     result_next_actions = _list(result_review.get("next_actions"))
     completed_probe_outcomes = _int(
         result_summary.get("completed_probe_outcome_count")
@@ -1092,6 +1141,15 @@ def _profitability_engineering_closure(
         status = "AUTHORITY_BOUNDARY_VIOLATION_REPAIR_FIRST"
     elif result_status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED":
         status = "COST_GATE_ESCAPE_RESULT_REVIEW_FAILED_REALIZED_EDGE"
+    elif result_status in {
+        "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
+        "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+    } and result_quality_status in {
+        "",
+        "CONTROL_COMPARISON_MISSING",
+        "MATCHED_CONTROL_SAMPLE_BELOW_FIRST_REVIEW_FLOOR",
+    }:
+        status = "BOUNDED_DEMO_PROBE_CONTROL_COMPARISON_REQUIRED"
     elif result_status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
         status = "BOUNDED_DEMO_PROBE_LEARNING_REVIEW_OPERATOR_REQUIRED"
     elif result_status == "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED":
@@ -1119,6 +1177,17 @@ def _profitability_engineering_closure(
         remaining = ["remove authority-granting result-review input before continuing"]
     elif result_status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED":
         remaining = ["realized bounded demo probe edge failed; keep Cost Gate blocked"]
+    elif result_status in {
+        "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
+        "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+    } and result_quality_status in {
+        "",
+        "CONTROL_COMPARISON_MISSING",
+        "MATCHED_CONTROL_SAMPLE_BELOW_FIRST_REVIEW_FLOOR",
+    }:
+        remaining = [
+            "record matched blocked-signal control outcomes before treating positive probe results as Cost Gate evidence"
+        ]
     elif result_status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
         remaining = ["operator reviews bounded probe learning results before any gate or promotion change"]
     elif result_status == "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED":
@@ -1179,6 +1248,18 @@ def _profitability_engineering_closure(
             ),
             "bounded_probe_result_review_learning_review_candidate": (
                 result_answers.get("learning_review_candidate") is True
+            ),
+            "bounded_probe_result_review_evidence_quality_status": (
+                result_quality_status or None
+            ),
+            "bounded_probe_result_review_matched_control_outcomes": (
+                result_quality.get("matched_control_outcome_count")
+            ),
+            "bounded_probe_result_review_probe_minus_control_avg_net_bps": (
+                result_quality.get("probe_minus_control_avg_net_bps")
+            ),
+            "bounded_probe_result_review_anecdote_risk": (
+                result_quality.get("anecdote_risk") is True
             ),
         },
         "edge_amplification_levers": [

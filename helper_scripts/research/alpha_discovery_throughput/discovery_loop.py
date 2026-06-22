@@ -165,6 +165,9 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
     bounded_review_status = str(
         detail.get("bounded_probe_result_review_status") or ""
     ).upper()
+    bounded_review_quality_status = str(
+        detail.get("bounded_probe_result_review_evidence_quality_status") or ""
+    ).upper()
     bounded_review_next_actions = _list(
         detail.get("bounded_probe_result_review_next_actions")
     )
@@ -256,6 +259,25 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
                 "next_trigger": bounded_review_next_trigger,
                 "operator_actionable": False,
                 "engineering_actionable": False,
+            }
+        if bounded_review_status in {
+            "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+            "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
+        } and bounded_review_quality_status in {
+            "",
+            "CONTROL_COMPARISON_MISSING",
+            "MATCHED_CONTROL_SAMPLE_BELOW_FIRST_REVIEW_FLOOR",
+        }:
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "bounded_probe_result_review_control_comparison_missing",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "bounded_probe_result_review_needs_matched_blocked_signal_control"
+                ),
+                "next_trigger": bounded_review_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
             }
         if bounded_review_status == (
             "COLLECT_MORE_PROBE_OUTCOMES_BEFORE_FIRST_REVIEW"
@@ -2423,6 +2445,36 @@ def classify_profitability_blocker(
                 ),
                 "bounded_probe_result_review_promotion_evidence": detail.get(
                     "bounded_probe_result_review_promotion_evidence"
+                ),
+                "bounded_probe_result_review_evidence_quality_status": detail.get(
+                    "bounded_probe_result_review_evidence_quality_status"
+                ),
+                "bounded_probe_result_review_evidence_quality_reason": detail.get(
+                    "bounded_probe_result_review_evidence_quality_reason"
+                ),
+                "bounded_probe_result_review_matched_control_required": detail.get(
+                    "bounded_probe_result_review_matched_control_required"
+                ),
+                "bounded_probe_result_review_matched_control_present": detail.get(
+                    "bounded_probe_result_review_matched_control_present"
+                ),
+                "bounded_probe_result_review_matched_control_outcome_count": detail.get(
+                    "bounded_probe_result_review_matched_control_outcome_count"
+                ),
+                "bounded_probe_result_review_matched_control_avg_net_bps": detail.get(
+                    "bounded_probe_result_review_matched_control_avg_net_bps"
+                ),
+                "bounded_probe_result_review_matched_control_net_positive_pct": detail.get(
+                    "bounded_probe_result_review_matched_control_net_positive_pct"
+                ),
+                "bounded_probe_result_review_probe_minus_control_avg_net_bps": detail.get(
+                    "bounded_probe_result_review_probe_minus_control_avg_net_bps"
+                ),
+                "bounded_probe_result_review_probe_outperforms_matched_control": detail.get(
+                    "bounded_probe_result_review_probe_outperforms_matched_control"
+                ),
+                "bounded_probe_result_review_anecdote_risk": detail.get(
+                    "bounded_probe_result_review_anecdote_risk"
                 ),
                 "latest_admission_decision": detail.get("latest_admission_decision"),
                 "latest_record_type": detail.get("latest_record_type"),
