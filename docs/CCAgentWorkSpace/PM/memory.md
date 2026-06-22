@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Demo Order-To-Fill Touchability Audit
+
+- `demo_order_to_fill_gap_audit_v1` now explains `DEMO_ORDER_FLOW_PRESENT_NO_FILLS` by joining Demo orders, intents, state changes, fills, and BBO touchability.
+- Linux 48h artifact-only smoke reviewed 6 Demo PostOnly buy orders, 0 fills, 6 inferred effective limits from `intents.details.limit_price`, and 6/6 deep passive no-touch orders with best-touch gaps about 1156-1531bp.
+- PM read: the current blocker is order touchability / execution realism, not silent Cost Gate signal loss or a proven fill-recorder break; next profit path is touchability-aware bounded Demo probe design before any Cost Gate change.
+
 ## 2026-06-22 Demo-Learning Stack Activation Packet
 
 - `demo_learning_stack_activation_packet_v1` now turns stack health + Cost Gate activation preflight into one no-authority operator review artifact.
