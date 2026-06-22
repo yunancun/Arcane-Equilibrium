@@ -34,7 +34,8 @@ MODULE_NOTE
 
 硬邊界：
   - 純讀 PG（connect 已 set_session readonly=True）；0 寫 PG、0 order、0 auth/lease/risk、
-    0 production engine/risk 改動。只寫 research artifact（ledger JSON / report md / log / marker）。
+    0 production engine/risk 改動。只寫 data-dir research artifact（ledger JSON / report md /
+    log / marker），不把週期性 latest report 寫回 git source tree。
   - 不改 sibling microstructure 檔，不改 analysis.py / regime.py，只 import 復用。
   - leak-free 由 regime.py / analysis.py 保證（shift(1) PIT，無 current-bar）；本檔不新增任何
     統計，只編排 + 累積 + 通知。
@@ -101,11 +102,16 @@ def _marker_path(tag: str) -> str:
 
 
 def _report_path() -> str:
-    """robust-ruling summary md（E1 workspace reports，per mandate）。"""
-    return os.path.join(
-        _SRV_ROOT, "docs", "CCAgentWorkSpace", "E1", "workspace", "reports",
-        "vol-event-robust-ruling.md",
-    )
+    """robust-ruling latest md.
+
+    The cron writes volatile latest evidence under OPENCLAW_DATA_DIR so routine
+    runtime refreshes cannot dirty the source checkout. Set the explicit env var
+    only for a one-off archival export that is meant to be reviewed/committed.
+    """
+    explicit = os.environ.get("OPENCLAW_VOL_EVENT_RULING_REPORT_PATH")
+    if explicit:
+        return explicit
+    return os.path.join(_data_dir(), "order_flow_alpha", "vol-event-robust-ruling.md")
 
 
 # 達成 robust ruling 的門檻（mandate 指定）。
@@ -403,7 +409,7 @@ def _write_robust_ruling(ledger: dict) -> str:
     lines.append("")
     lines.append("- 事件=tape 可分析窗內連續 high_vol 小時 cluster（gap ≤ 1h 合併）；anchor=|ret| 最大時；")
     lines.append("  direction=anchor ret 符號。regime 標籤 leak-free PIT（regime.py，shift(1) RV）。")
-    lines.append("- 每事件跑 analysis.run(regime_split=True)，取 high_vol block 的 fee-wall（taker 6bp / ")
+    lines.append("- 每事件跑 analysis.run(regime_split=True)，取 high_vol block 的 fee-wall（taker 6bp /")
     lines.append("  maker 4bp / microprice 用 own-spread）。survives_wall=any axis 過牆。")
     lines.append("- low_power_preliminary（樣本薄）的事件 verdict 為指標性；穩健結論需多事件一致。")
     lines.append("")

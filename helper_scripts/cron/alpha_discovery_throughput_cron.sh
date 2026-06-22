@@ -52,6 +52,21 @@ if [[ -z "$PYBIN" ]]; then
 fi
 
 echo "[$(ts)] === alpha_discovery_throughput start ===" >> "$LOG"
+PACKET_SCRIPT="$BASE/helper_scripts/cron/demo_learning_stack_activation_packet.py"
+PACKET_DIR="$DATA/demo_learning_stack_activation_packet"
+if [[ -f "$PACKET_SCRIPT" ]]; then
+    mkdir -p "$PACKET_DIR"
+    packet_rc=0
+    "$PYBIN" "$PACKET_SCRIPT" \
+        --data-dir "$DATA" \
+        --repo-root "$BASE" \
+        --python-bin "$PYBIN" \
+        --json-output "$PACKET_DIR/demo_learning_stack_activation_packet_latest.json" \
+        > "$PACKET_DIR/demo_learning_stack_activation_packet_stdout.json" 2>> "$LOG" || packet_rc=$?
+    echo "[$(ts)] activation_packet_refresh rc=${packet_rc}" >> "$LOG"
+else
+    echo "[$(ts)] WARN: activation packet script not found: $PACKET_SCRIPT" >> "$LOG"
+fi
 rc=0
 (
     cd "$BASE/helper_scripts/research"
