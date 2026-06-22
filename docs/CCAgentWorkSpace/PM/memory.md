@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Runtime Source Reconcile Planner
+
+- Added `helper_scripts/deploy/runtime_source_reconcile_planner.py` to turn the v370 manual runtime dirty-tree manifest into a reusable read-only JSON preflight.
+- Planner classifies tracked/untracked dirty paths against a local target ref into content-equivalent vs review-required buckets and fails closed when the target ref is unavailable.
+- Verification passed: `py_compile` plus focused pytest `4 passed`; no runtime source sync, cron install, writer enablement, Cost Gate lowering, or order/probe authority was performed.
+
 ## 2026-06-22 Runtime Source Reconcile Blocker Manifest
 
 - Read-only runtime classification found `trade-core` still at HEAD `917be4cc`, stale runtime `origin/main=1401848b`, while GitHub/local main is `e2b90306`.
