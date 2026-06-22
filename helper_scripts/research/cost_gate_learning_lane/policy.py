@@ -20,6 +20,8 @@ from typing import Any
 
 DEMO_LEARNING_LANE_SCHEMA_VERSION = "cost_gate_demo_learning_lane_plan_v1"
 EXPECTED_SCORECARD_SCHEMA_VERSION = "cost_gate_reject_counterfactual_v2"
+EXPECTED_SEALED_REPLAY_SCHEMA_VERSION = "horizon_specific_sealed_replay_packet_v1"
+SEALED_REPLAY_READY_STATUS = "SEALED_HORIZON_REPLAY_READY_FOR_OPERATOR_REVIEW"
 DEFAULT_MAX_SCORECARD_AGE_HOURS = 24
 
 
@@ -100,6 +102,13 @@ def _side_cell_key(row: dict[str, Any]) -> str:
             str(row.get("side") or "unknown_side"),
         ]
     )
+
+
+def _side_cell_parts(side_cell_key: Any) -> tuple[str | None, str | None, str | None]:
+    parts = str(side_cell_key or "").split("|")
+    if len(parts) != 3 or not all(parts):
+        return None, None, None
+    return parts[0], parts[1], parts[2]
 
 
 def _effective_sample_count(row: dict[str, Any]) -> int:
@@ -318,6 +327,14 @@ def _compact_row(row: dict[str, Any]) -> dict[str, Any]:
         "profit_priority_tier": row.get("priority_tier"),
         "profit_priority_components": row.get("priority_components"),
         "profit_priority_next_action": row.get("next_action"),
+        "source_kind": row.get("source_kind"),
+        "outcome_horizon_minutes": _int(row.get("outcome_horizon_minutes")),
+        "learning_outcome_horizon_minutes": _int(
+            row.get("learning_outcome_horizon_minutes")
+        ),
+        "primary_horizon_minutes": _int(row.get("primary_horizon_minutes")),
+        "primary_horizon_action": row.get("primary_horizon_action"),
+        "sealed_horizon_replay": row.get("sealed_horizon_replay"),
     }
 
 
@@ -338,6 +355,10 @@ def _candidate_to_probe(
     cfg: LearningLanePolicyConfig,
 ) -> dict[str, Any]:
     compact = _compact_row(row)
+    outcome_horizon = _int(
+        compact.get("outcome_horizon_minutes")
+        or compact.get("learning_outcome_horizon_minutes")
+    )
     compact["probe_proposal"] = {
         "mode": "demo_only_learning_probe",
         "max_probe_orders": max_probe_orders,
@@ -346,6 +367,10 @@ def _candidate_to_probe(
         "requires_probe_attempt_logging": True,
         "requires_probe_outcome_logging": True,
     }
+    if outcome_horizon > 0:
+        compact["probe_proposal"]["outcome_horizon_minutes"] = outcome_horizon
+        compact["probe_proposal"]["learning_outcome_horizon_minutes"] = outcome_horizon
+        compact["probe_proposal"]["requires_candidate_horizon_outcome_logging"] = True
     compact["guardrails"] = {
         "main_cost_gate_adjustment": "NONE",
         "may_bypass_main_live_gate": False,
@@ -354,6 +379,123 @@ def _candidate_to_probe(
         "notional_or_qty_not_granted_by_artifact": True,
     }
     return compact
+
+
+def _sealed_replay_failed_gates(packet: dict[str, Any]) -> list[str]:
+    replay = _dict(packet.get("replay_evaluation"))
+    failed = replay.get("failed_gate_names")
+    return [str(item) for item in failed] if isinstance(failed, list) else []
+
+
+def _sealed_replay_source_error(packet: dict[str, Any] | None) -> str | None:
+    if not packet:
+        return None
+    if packet.get("schema_version") != EXPECTED_SEALED_REPLAY_SCHEMA_VERSION:
+        return "unexpected_horizon_sealed_replay_schema"
+    if packet.get("status") != SEALED_REPLAY_READY_STATUS:
+        return "horizon_sealed_replay_not_ready"
+    answers = _dict(packet.get("answers"))
+    boundaries = _dict(packet.get("global_boundaries"))
+    if answers.get("sealed_replay_passed") is not True:
+        return "horizon_sealed_replay_not_passed"
+    if answers.get("global_cost_gate_lowering_recommended") is not False:
+        return "horizon_sealed_replay_recommends_cost_gate_lowering"
+    if answers.get("order_authority_granted") is not False:
+        return "horizon_sealed_replay_grants_order_authority"
+    if answers.get("probe_authority_granted") is not False:
+        return "horizon_sealed_replay_grants_probe_authority"
+    if boundaries.get("order_authority") != "NOT_GRANTED":
+        return "horizon_sealed_replay_boundary_order_authority_not_closed"
+    if boundaries.get("main_cost_gate_adjustment") != "NONE":
+        return "horizon_sealed_replay_boundary_cost_gate_adjustment_not_none"
+    if _sealed_replay_failed_gates(packet):
+        return "horizon_sealed_replay_has_failed_gates"
+    return None
+
+
+def _sealed_replay_candidate_row(
+    packet: dict[str, Any] | None,
+    *,
+    thresholds: dict[str, float],
+) -> tuple[dict[str, Any] | None, str | None]:
+    source_error = _sealed_replay_source_error(packet)
+    if source_error or not packet:
+        return None, source_error
+    selection = _dict(_dict(packet.get("selection")).get("selected"))
+    replay = _dict(packet.get("replay_evaluation"))
+    best = _dict(replay.get("best_horizon"))
+    primary = _dict(replay.get("primary_horizon"))
+    side_cell_key = replay.get("side_cell_key") or selection.get("side_cell_key")
+    strategy, symbol, side = _side_cell_parts(side_cell_key)
+    if not strategy or not symbol or not side:
+        return None, "horizon_sealed_replay_side_cell_invalid"
+
+    sample_count = _int(best.get("sample_count_for_gate"))
+    row: dict[str, Any] = {
+        "side_cell_key": side_cell_key,
+        "strategy_name": strategy,
+        "symbol": symbol,
+        "side": side,
+        "reject_reason_code": "cost_gate_js_demo_negative_edge",
+        "n": sample_count,
+        "sample_count_for_gate": sample_count,
+        "avg_net_bps": _float(best.get("avg_net_bps")),
+        "p50_gross_bps": _float(best.get("p50_gross_bps")),
+        "net_positive_pct": _float(best.get("net_positive_pct")),
+        "learning_lane_action": "LEARNING_PROBE_CANDIDATE",
+        "learning_lane_reason": (
+            "sealed_horizon_replay_revalidated_retiming_candidate"
+        ),
+        "next_action": (
+            "accumulate_blocked_signal_outcomes_at_sealed_candidate_horizon"
+        ),
+        "order_authority": "NOT_GRANTED",
+        "main_cost_gate_adjustment": "NONE",
+        "promotion_evidence": False,
+        "source_kind": "horizon_specific_sealed_replay",
+        "outcome_horizon_minutes": _int(best.get("horizon_minutes")),
+        "learning_outcome_horizon_minutes": _int(best.get("horizon_minutes")),
+        "primary_horizon_minutes": _int(primary.get("horizon_minutes")),
+        "primary_horizon_action": primary.get("learning_lane_action"),
+        "sealed_horizon_replay": {
+            "schema_version": packet.get("schema_version"),
+            "status": packet.get("status"),
+            "next_action": packet.get("next_action"),
+            "side_cell_key": side_cell_key,
+            "best_horizon_minutes": _int(best.get("horizon_minutes")),
+            "primary_horizon_minutes": _int(primary.get("horizon_minutes")),
+            "primary_horizon_action": primary.get("learning_lane_action"),
+            "best_avg_net_bps": _float(best.get("avg_net_bps")),
+            "best_p50_gross_bps": _float(best.get("p50_gross_bps")),
+            "best_net_positive_pct": _float(best.get("net_positive_pct")),
+            "sample_count_for_gate": sample_count,
+            "failed_gate_names": _sealed_replay_failed_gates(packet),
+            "source": packet.get("source"),
+        },
+    }
+    components = _profit_priority_components(row, thresholds)
+    score = round(sum(components.values()), 4)
+    row["priority_score"] = score
+    row["priority_tier"] = "HIGH_PRIORITY_SEALED_HORIZON_DEMO_LEARNING"
+    row["priority_components"] = {
+        key: round(value, 4) for key, value in components.items()
+    }
+    return row, None
+
+
+def _merge_sealed_replay_candidate(
+    ranked: list[dict[str, Any]],
+    sealed_row: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not sealed_row:
+        return ranked
+    sealed_key = _side_cell_key(sealed_row)
+    merged: list[dict[str, Any]] = [sealed_row]
+    for row in ranked:
+        if _side_cell_key(row) == sealed_key:
+            continue
+        merged.append(row)
+    return merged
 
 
 def _ranking_probe_rows(
@@ -413,6 +555,9 @@ def build_plan_from_payload(
     now_utc: dt.datetime | None = None,
     cfg: LearningLanePolicyConfig | None = None,
     scorecard_path: Path | None = None,
+    horizon_sealed_replay: dict[str, Any] | None = None,
+    horizon_sealed_replay_path: Path | None = None,
+    horizon_sealed_replay_error: str | None = None,
 ) -> dict[str, Any]:
     """Build the guarded demo-learning lane plan from a scorecard payload."""
     cfg = cfg or LearningLanePolicyConfig()
@@ -466,6 +611,15 @@ def build_plan_from_payload(
                 and _effective_sample_count(row) >= cfg.min_candidate_sample
             ]
         ranked = _rank_candidates(probe_rows)
+    thresholds = _profit_thresholds(scorecard)
+    sealed_row, sealed_source_error = _sealed_replay_candidate_row(
+        horizon_sealed_replay,
+        thresholds=thresholds,
+    )
+    if horizon_sealed_replay_error:
+        sealed_source_error = horizon_sealed_replay_error
+        sealed_row = None
+    ranked = _merge_sealed_replay_candidate(ranked, sealed_row)
     selected = ranked[: cfg.max_probe_side_cells]
     per_cell_budget = _probe_budget_for_candidates(len(selected), cfg)
     probe_candidates = []
@@ -485,11 +639,15 @@ def build_plan_from_payload(
     if source_error:
         probe_candidates = []
         per_cell_budget = 0
+    selected_side_cells = {
+        str(row.get("side_cell_key")) for row in probe_candidates if row.get("side_cell_key")
+    }
     do_not_probe = [
         _compact_row(row) for row in _rank_candidates([
             row for row in rows
             if isinstance(row, dict)
             and row.get("learning_lane_action") == "BLOCK_CONFIRMED"
+            and _side_cell_key(row) not in selected_side_cells
         ])[:20]
     ]
     data_tasks = [
@@ -544,6 +702,31 @@ def build_plan_from_payload(
             "horizon_stability_horizons_minutes": horizon_stability.get(
                 "horizons_minutes"
             ),
+            "horizon_sealed_replay_path": (
+                str(horizon_sealed_replay_path)
+                if horizon_sealed_replay_path is not None
+                else None
+            ),
+            "horizon_sealed_replay_schema_version": (
+                horizon_sealed_replay or {}
+            ).get("schema_version"),
+            "horizon_sealed_replay_status": (horizon_sealed_replay or {}).get("status"),
+            "horizon_sealed_replay_source_error": sealed_source_error,
+            "horizon_sealed_replay_side_cell_key": (
+                _dict(_dict(horizon_sealed_replay or {}).get("replay_evaluation")).get(
+                    "side_cell_key"
+                )
+            ),
+            "horizon_sealed_replay_best_horizon_minutes": _int(
+                _dict(
+                    _dict(_dict(horizon_sealed_replay or {}).get("replay_evaluation")).get(
+                        "best_horizon"
+                    )
+                ).get("horizon_minutes")
+            ),
+            "horizon_sealed_replay_failed_gate_names": _sealed_replay_failed_gates(
+                horizon_sealed_replay or {}
+            ),
             "source_error": source_error,
         },
         "coverage": payload.get("coverage") if isinstance(payload.get("coverage"), dict) else {},
@@ -562,6 +745,8 @@ def build_plan_from_payload(
         "data_coverage_tasks": data_tasks,
         "required_runtime_wiring": [
             "consume_plan_in_demo_learning_policy_before_any_probe",
+            "record_candidate_summary_and_horizon_in_learning_ledger",
+            "refresh_blocked_signal_outcomes_at_candidate_horizon",
             "persist_probe_attempts_with_source_scorecard_hash",
             "persist_probe_outcomes_and_counterfactual_labels",
             "auto_disable_side_cell_after_budget_or_stop_condition",
@@ -595,6 +780,7 @@ def build_plan_from_file(
     *,
     now_utc: dt.datetime | None = None,
     cfg: LearningLanePolicyConfig | None = None,
+    horizon_sealed_replay_json: Path | None = None,
 ) -> dict[str, Any]:
     """Read a scorecard artifact and produce a fail-soft plan."""
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
@@ -606,11 +792,20 @@ def build_plan_from_file(
             source_error=err,
         )
     assert payload is not None
+    horizon_sealed_replay = None
+    horizon_sealed_replay_error = None
+    if horizon_sealed_replay_json is not None:
+        horizon_sealed_replay, horizon_sealed_replay_error = _read_json(
+            horizon_sealed_replay_json
+        )
     return build_plan_from_payload(
         payload,
         now_utc=now,
         cfg=cfg,
         scorecard_path=scorecard_json,
+        horizon_sealed_replay=horizon_sealed_replay,
+        horizon_sealed_replay_path=horizon_sealed_replay_json,
+        horizon_sealed_replay_error=horizon_sealed_replay_error,
     )
 
 
@@ -637,6 +832,7 @@ def _default_output() -> Path:
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scorecard-json", type=Path, default=_default_scorecard_json())
+    parser.add_argument("--horizon-sealed-replay-json", type=Path)
     parser.add_argument("--output", type=Path, default=_default_output())
     parser.add_argument("--max-probe-side-cells", type=int, default=4)
     parser.add_argument("--max-probe-orders-per-side-cell", type=int, default=3)
@@ -659,7 +855,11 @@ def main() -> int:
         min_candidate_sample=args.min_candidate_sample,
     )
     validate_policy_config(cfg)
-    plan = build_plan_from_file(args.scorecard_json, cfg=cfg)
+    plan = build_plan_from_file(
+        args.scorecard_json,
+        cfg=cfg,
+        horizon_sealed_replay_json=args.horizon_sealed_replay_json,
+    )
     _atomic_write_json(args.output, plan)
     if args.print_json:
         print(json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True, default=str))

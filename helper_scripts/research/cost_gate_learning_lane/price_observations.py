@@ -303,6 +303,20 @@ def _is_blocked_admission(row: dict[str, Any], decision: str) -> bool:
     return decision != ADMIT_DECISION and allowed is False
 
 
+def _row_outcome_horizon_minutes(row: dict[str, Any], default_horizon_minutes: int) -> int:
+    candidate = _dict(row.get("candidate_summary"))
+    for value in (
+        row.get("outcome_horizon_minutes"),
+        row.get("learning_outcome_horizon_minutes"),
+        candidate.get("outcome_horizon_minutes"),
+        candidate.get("learning_outcome_horizon_minutes"),
+    ):
+        parsed = _int(value)
+        if 1 <= parsed <= 24 * 60:
+            return parsed
+    return default_horizon_minutes
+
+
 def required_price_observation_windows(
     ledger_rows: list[dict[str, Any]],
     *,
@@ -311,7 +325,6 @@ def required_price_observation_windows(
     """Return ledger-derived symbol/time windows that still need price rows."""
     cfg = cfg or PriceObservationBuildConfig()
     validate_price_observation_config(cfg)
-    horizon_ms = cfg.horizon_minutes * 60_000
     blocked_done = _existing_outcome_attempt_ids(
         ledger_rows,
         record_type=BLOCKED_SIGNAL_OUTCOME_RECORD_TYPE,
@@ -348,6 +361,8 @@ def required_price_observation_windows(
             target_record_type = PROBE_OUTCOME_RECORD_TYPE
         if target_record_type is None:
             continue
+        horizon_minutes = _row_outcome_horizon_minutes(row, cfg.horizon_minutes)
+        horizon_ms = horizon_minutes * 60_000
         exit_target_ts_ms = event_ts_ms + horizon_ms
         windows.append(
             {
@@ -364,8 +379,10 @@ def required_price_observation_windows(
                 "start_ts_ms": event_ts_ms,
                 "exit_target_ts_ms": exit_target_ts_ms,
                 "end_ts_ms": exit_target_ts_ms + cfg.max_entry_delay_ms,
-                "horizon_minutes": cfg.horizon_minutes,
+                "horizon_minutes": horizon_minutes,
+                "default_horizon_minutes": cfg.horizon_minutes,
                 "max_entry_delay_ms": cfg.max_entry_delay_ms,
+                "candidate_summary": row.get("candidate_summary") or {},
             }
         )
 

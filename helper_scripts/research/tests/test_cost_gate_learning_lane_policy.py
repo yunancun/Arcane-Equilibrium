@@ -187,6 +187,91 @@ def _scorecard_payload(generated_at: str = "2026-06-21T10:00:00+00:00") -> dict:
     }
 
 
+def _sealed_horizon_replay_packet(*, status: str = "SEALED_HORIZON_REPLAY_READY_FOR_OPERATOR_REVIEW") -> dict:
+    passed = status == "SEALED_HORIZON_REPLAY_READY_FOR_OPERATOR_REVIEW"
+    failed_gates = [] if passed else ["avg_net_floor_met"]
+    return {
+        "schema_version": "horizon_specific_sealed_replay_packet_v1",
+        "generated_at_utc": "2026-06-22T03:31:40+00:00",
+        "status": status,
+        "next_action": (
+            "operator_review_sealed_replay_then_wait_for_learning_stack_outcome_accumulation"
+            if passed
+            else "rerun_or_repair_horizon_replay_artifacts_before_any_probe_review"
+        ),
+        "selection": {
+            "candidate_rank": 1,
+            "requested_side_cell_key": None,
+            "selected": {
+                "rank": 1,
+                "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+                "candidate_status": "RETIMING_CANDIDATE",
+                "best_horizon_minutes": 240,
+                "primary_horizon_minutes": 60,
+                "primary_horizon_action": "BLOCK_CONFIRMED",
+                "required_next_gate": (
+                    "sealed_horizon_specific_replay_before_bounded_demo_probe"
+                ),
+            },
+        },
+        "source": {
+            "horizon_packet": {
+                "path": "/tmp/openclaw/horizon_edge_amplification_latest.json",
+                "sha256": "horizon-sha",
+                "schema_version": "horizon_edge_amplification_packet_v1",
+                "generated_at_utc": "2026-06-22T03:31:38+00:00",
+            },
+            "replay_counterfactual": {
+                "path": "/tmp/openclaw/cost_gate_reject_counterfactual_latest.json",
+                "sha256": "counterfactual-sha",
+                "schema_version": "cost_gate_reject_counterfactual_v2",
+                "generated_at_utc": "2026-06-22T03:16:07+00:00",
+            },
+        },
+        "replay_evaluation": {
+            "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+            "best_horizon": {
+                "source": "horizon_stability_scorecard",
+                "horizon_minutes": 240,
+                "learning_lane_action": "LEARNING_PROBE_CANDIDATE",
+                "sample_count_for_gate": 13819,
+                "avg_net_bps": 31.8707,
+                "p50_gross_bps": 51.4448,
+                "net_positive_pct": 81.94,
+                "candidate_edge_amplification_vs_primary_bps": 73.6814,
+            },
+            "primary_horizon": {
+                "horizon_minutes": 60,
+                "learning_lane_action": "BLOCK_CONFIRMED",
+                "avg_net_bps": -41.8107,
+                "sample_count_for_gate": 16515,
+            },
+            "failed_gate_names": failed_gates,
+            "gates": [
+                {"name": "avg_net_floor_met", "passed": passed},
+            ],
+        },
+        "answers": {
+            "sealed_replay_passed": passed,
+            "retiming_candidate_revalidated": passed,
+            "operator_review_ready": passed,
+            "requires_learning_stack_accumulation": True,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "global_boundaries": {
+            "order_authority": "NOT_GRANTED",
+            "probe_authority": "NOT_GRANTED",
+            "main_cost_gate_adjustment": "NONE",
+            "runtime_mutation": "NONE",
+            "promotion_evidence": False,
+        },
+    }
+
+
 class _FakeKlineCursor:
     description = [("symbol",), ("ts_ms",), ("close",)]
 
@@ -316,6 +401,74 @@ def test_policy_plan_keeps_main_gate_closed_and_selects_only_probe_candidates():
         "ma_crossover|BTCUSDT|Buy"
     )
     assert plan["data_coverage_tasks"][0]["side_cell_key"] == "grid_trading|OPUSDT|Sell"
+
+
+def test_policy_plan_promotes_passed_sealed_horizon_replay_into_learning_candidate():
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 22, 4, tzinfo=dt.timezone.utc),
+        cfg=LearningLanePolicyConfig(max_probe_side_cells=1, max_total_probe_orders=3),
+        horizon_sealed_replay=_sealed_horizon_replay_packet(),
+    )
+
+    assert plan["status"] == "READY_FOR_DEMO_LEARNING_PROBE"
+    assert plan["gate_status"] == "OPERATOR_REVIEW"
+    assert plan["main_cost_gate_adjustment"] == "NONE"
+    assert plan["order_authority"] == "NOT_GRANTED"
+    assert plan["source"]["horizon_sealed_replay_status"] == (
+        "SEALED_HORIZON_REPLAY_READY_FOR_OPERATOR_REVIEW"
+    )
+    assert plan["source"]["horizon_sealed_replay_source_error"] is None
+    assert plan["source"]["horizon_sealed_replay_side_cell_key"] == (
+        "ma_crossover|BTCUSDT|Sell"
+    )
+    assert plan["source"]["horizon_sealed_replay_best_horizon_minutes"] == 240
+
+    candidate = plan["probe_candidates"][0]
+    assert candidate["side_cell_key"] == "ma_crossover|BTCUSDT|Sell"
+    assert candidate["source_kind"] == "horizon_specific_sealed_replay"
+    assert candidate["outcome_horizon_minutes"] == 240
+    assert candidate["learning_outcome_horizon_minutes"] == 240
+    assert candidate["probe_proposal"]["outcome_horizon_minutes"] == 240
+    assert candidate["probe_proposal"]["learning_outcome_horizon_minutes"] == 240
+    assert (
+        candidate["probe_proposal"]["requires_candidate_horizon_outcome_logging"]
+        is True
+    )
+    assert candidate["sealed_horizon_replay"]["best_avg_net_bps"] == 31.8707
+    assert candidate["sealed_horizon_replay"]["failed_gate_names"] == []
+    assert candidate["guardrails"]["main_cost_gate_adjustment"] == "NONE"
+    assert candidate["guardrails"]["notional_or_qty_not_granted_by_artifact"] is True
+    assert "ma_crossover|BTCUSDT|Sell" not in [
+        row["side_cell_key"] for row in plan["do_not_probe_side_cells"]
+    ]
+    assert "record_candidate_summary_and_horizon_in_learning_ledger" in (
+        plan["required_runtime_wiring"]
+    )
+    assert "refresh_blocked_signal_outcomes_at_candidate_horizon" in (
+        plan["required_runtime_wiring"]
+    )
+
+
+def test_policy_plan_ignores_blocked_sealed_horizon_replay_packet():
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 22, 4, tzinfo=dt.timezone.utc),
+        cfg=LearningLanePolicyConfig(max_probe_side_cells=1, max_total_probe_orders=3),
+        horizon_sealed_replay=_sealed_horizon_replay_packet(
+            status="SEALED_HORIZON_REPLAY_BLOCKED"
+        ),
+    )
+
+    assert plan["source"]["horizon_sealed_replay_source_error"] == (
+        "horizon_sealed_replay_not_ready"
+    )
+    assert plan["source"]["horizon_sealed_replay_failed_gate_names"] == [
+        "avg_net_floor_met"
+    ]
+    assert [row["side_cell_key"] for row in plan["probe_candidates"]] == [
+        "ma_crossover|ETHUSDT|Sell"
+    ]
 
 
 def test_policy_plan_prefers_profit_opportunity_ranking_when_present():
@@ -2356,11 +2509,35 @@ def _selected_reject_event() -> dict:
     }
 
 
+def _btc_sell_reject_event() -> dict:
+    return {
+        "strategy_name": "ma_crossover",
+        "symbol": "BTCUSDT",
+        "side": "Sell",
+        "reject_reason_code": "cost_gate_js_demo_negative_edge",
+        "engine_mode": "live_demo",
+        "ts_ms": 1_782_037_200_000,
+        "context_id": "ctx-demo-ma_crossover-BTCUSDT-1782037200000",
+        "signal_id": "sig-demo-ma_crossover-BTCUSDT-1782037200000",
+    }
+
+
 def _runtime_plan(*, order_authority: str = "NOT_GRANTED") -> dict:
     plan = build_plan_from_payload(
         _scorecard_payload(),
         now_utc=dt.datetime(2026, 6, 21, 11, tzinfo=dt.timezone.utc),
         cfg=LearningLanePolicyConfig(max_probe_side_cells=2, max_total_probe_orders=4),
+    )
+    plan["order_authority"] = order_authority
+    return plan
+
+
+def _sealed_runtime_plan(*, order_authority: str = "NOT_GRANTED") -> dict:
+    plan = build_plan_from_payload(
+        _scorecard_payload(),
+        now_utc=dt.datetime(2026, 6, 22, 4, tzinfo=dt.timezone.utc),
+        cfg=LearningLanePolicyConfig(max_probe_side_cells=1, max_total_probe_orders=3),
+        horizon_sealed_replay=_sealed_horizon_replay_packet(),
     )
     plan["order_authority"] = order_authority
     return plan
@@ -2381,6 +2558,32 @@ def test_runtime_adapter_matches_candidate_but_keeps_current_plan_no_order_autho
     assert decision["runtime_state"]["remaining_probe_orders"] == 2
     assert decision["plan_summary"]["main_cost_gate_adjustment"] == "NONE"
     assert decision["reason"] == "plan_matches_candidate_but_artifact_has_no_order_authority"
+
+
+def test_runtime_adapter_carries_sealed_candidate_summary_into_ledger():
+    decision = evaluate_probe_admission(
+        _sealed_runtime_plan(),
+        _btc_sell_reject_event(),
+        now_utc=dt.datetime(2026, 6, 22, 4, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+
+    assert decision["decision"] == "ORDER_AUTHORITY_NOT_GRANTED"
+    assert decision["allowed_to_submit_order"] is False
+    assert decision["candidate_summary"]["source_kind"] == (
+        "horizon_specific_sealed_replay"
+    )
+    assert decision["candidate_summary"]["outcome_horizon_minutes"] == 240
+    assert decision["candidate_summary"]["sealed_horizon_replay"]["best_avg_net_bps"] == (
+        31.8707
+    )
+
+    record = build_ledger_record(decision)
+    assert record["decision"] == "ORDER_AUTHORITY_NOT_GRANTED"
+    assert record["candidate_summary"]["outcome_horizon_minutes"] == 240
+    assert record["candidate_summary"]["sealed_horizon_replay"]["sample_count_for_gate"] == (
+        13819
+    )
 
 
 def test_runtime_adapter_admits_only_when_plan_and_adapter_explicitly_authorize():
@@ -2578,6 +2781,35 @@ def test_runtime_adapter_builds_blocked_signal_outcome_for_not_granted_reject():
     assert round(outcome["realized_net_bps"], 6) == -54.0
 
 
+def test_blocked_signal_outcome_uses_candidate_specific_horizon_from_ledger():
+    not_granted = evaluate_probe_admission(
+        _sealed_runtime_plan(),
+        _btc_sell_reject_event(),
+        now_utc=dt.datetime(2026, 6, 22, 4, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    ledger = [build_ledger_record(not_granted)]
+
+    outcomes = build_blocked_signal_outcome_records(
+        ledger,
+        [
+            {"symbol": "BTCUSDT", "ts_ms": 1_782_037_200_000, "close": 100_000.0},
+            {"symbol": "BTCUSDT", "ts_ms": 1_782_051_600_000, "close": 99_000.0},
+        ],
+        now_utc=dt.datetime(2026, 6, 22, 8, 11, tzinfo=dt.timezone.utc),
+        cfg=ProbeOutcomeConfig(horizon_minutes=60, cost_bps=4.0),
+    )
+
+    assert len(outcomes) == 1
+    outcome = outcomes[0]
+    assert outcome["record_type"] == "blocked_signal_outcome"
+    assert outcome["horizon_minutes"] == 240
+    assert outcome["default_horizon_minutes"] == 60
+    assert outcome["candidate_summary"]["outcome_horizon_minutes"] == 240
+    assert round(outcome["gross_bps"], 6) == 100.0
+    assert round(outcome["realized_net_bps"], 6) == 96.0
+
+
 def test_price_observation_windows_target_unlabeled_blocked_signals_only():
     not_granted = evaluate_probe_admission(
         _runtime_plan(),
@@ -2607,6 +2839,30 @@ def test_price_observation_windows_target_unlabeled_blocked_signals_only():
         "attempt_id": _selected_reject_event()["context_id"],
     }
     assert required_price_observation_windows(ledger + [completed]) == []
+
+
+def test_price_observation_windows_use_candidate_specific_horizon_from_ledger():
+    not_granted = evaluate_probe_admission(
+        _sealed_runtime_plan(),
+        _btc_sell_reject_event(),
+        now_utc=dt.datetime(2026, 6, 22, 4, 10, tzinfo=dt.timezone.utc),
+        adapter_enabled=True,
+    )
+    ledger = [build_ledger_record(not_granted)]
+
+    windows = required_price_observation_windows(
+        ledger,
+        cfg=PriceObservationBuildConfig(horizon_minutes=60, max_entry_delay_ms=300_000),
+    )
+
+    assert len(windows) == 1
+    window = windows[0]
+    assert window["side_cell_key"] == "ma_crossover|BTCUSDT|Sell"
+    assert window["horizon_minutes"] == 240
+    assert window["default_horizon_minutes"] == 60
+    assert window["exit_target_ts_ms"] == 1_782_051_600_000
+    assert window["end_ts_ms"] == 1_782_051_600_000 + 300_000
+    assert window["candidate_summary"]["outcome_horizon_minutes"] == 240
 
 
 def test_price_observation_builder_filters_rows_and_writes_adapter_compatible_artifact(

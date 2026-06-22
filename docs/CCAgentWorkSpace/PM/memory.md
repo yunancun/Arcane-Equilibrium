@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Sealed Horizon Learning Plan Bridge
+
+- Demo-learning policy now consumes passed sealed horizon replay artifacts and selects `ma_crossover|BTCUSDT|Sell` as a 240m learning candidate without granting order/probe authority or lowering Cost Gate.
+- Runtime adapter ledger rows now carry selected candidate summaries, including outcome horizon and sealed replay evidence, so blocked-signal outcomes can be attributed to the intended horizon.
+- Price observation and outcome writers use row-level candidate horizon before defaulting to 60m; the next blocker remains runtime writer/cron/ledger/outcome accumulation, not another offline replay.
+
 ## 2026-06-22 Sealed Replay Profitability Scorecard Bridge
 
 - Profitability path scorecard now consumes a passed horizon-specific sealed replay artifact and advances the matching horizon path to learning/outcome accumulation instead of re-requesting sealed replay construction.

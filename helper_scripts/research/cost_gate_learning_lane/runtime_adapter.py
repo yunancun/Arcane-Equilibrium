@@ -241,6 +241,44 @@ def _valid_candidate_guardrails(candidate: dict[str, Any]) -> tuple[bool, str | 
     return True, None
 
 
+def _candidate_summary(candidate: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(candidate, dict):
+        return {}
+    proposal = _dict(candidate.get("probe_proposal"))
+    return {
+        "side_cell_key": candidate.get("side_cell_key"),
+        "source_kind": candidate.get("source_kind"),
+        "learning_lane_action": candidate.get("learning_lane_action"),
+        "learning_lane_reason": candidate.get("learning_lane_reason"),
+        "outcome_horizon_minutes": _int(
+            proposal.get("outcome_horizon_minutes")
+            or candidate.get("outcome_horizon_minutes")
+            or candidate.get("learning_outcome_horizon_minutes")
+        ),
+        "learning_outcome_horizon_minutes": _int(
+            proposal.get("learning_outcome_horizon_minutes")
+            or candidate.get("learning_outcome_horizon_minutes")
+            or candidate.get("outcome_horizon_minutes")
+        ),
+        "max_probe_orders": _candidate_max_orders(candidate),
+        "cooldown_minutes": _int(proposal.get("cooldown_minutes")),
+        "requires_candidate_horizon_outcome_logging": (
+            proposal.get("requires_candidate_horizon_outcome_logging") is True
+        ),
+        "horizon_stability": candidate.get("horizon_stability"),
+        "sealed_horizon_replay": candidate.get("sealed_horizon_replay"),
+        "guardrails": {
+            "main_cost_gate_adjustment": _dict(candidate.get("guardrails")).get(
+                "main_cost_gate_adjustment"
+            ),
+            "demo_only": _dict(candidate.get("guardrails")).get("demo_only"),
+            "notional_or_qty_not_granted_by_artifact": _dict(
+                candidate.get("guardrails")
+            ).get("notional_or_qty_not_granted_by_artifact"),
+        },
+    }
+
+
 def summarize_side_cell_runtime_state(
     candidate: dict[str, Any],
     ledger_rows: list[dict[str, Any]],
@@ -333,6 +371,7 @@ def _decision(
     side_cell_key_value: str | None = None,
     runtime_state: dict[str, Any] | None = None,
     plan: dict[str, Any] | None = None,
+    candidate: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     allowed = decision == ADMIT_DECISION
     return {
@@ -345,6 +384,7 @@ def _decision(
         "side_cell_key": side_cell_key_value,
         "event": event,
         "runtime_state": runtime_state or {},
+        "candidate_summary": _candidate_summary(candidate),
         "plan_summary": {
             "schema_version": (plan or {}).get("schema_version"),
             "status": (plan or {}).get("status"),
@@ -470,6 +510,7 @@ def evaluate_probe_admission(
             side_cell_key_value=key,
             runtime_state=runtime_state,
             plan=plan,
+            candidate=candidate,
         )
     if runtime_state["disabled"]:
         return _decision(
@@ -480,6 +521,7 @@ def evaluate_probe_admission(
             side_cell_key_value=key,
             runtime_state=runtime_state,
             plan=plan,
+            candidate=candidate,
         )
     if runtime_state["cooldown_active"]:
         return _decision(
@@ -490,6 +532,7 @@ def evaluate_probe_admission(
             side_cell_key_value=key,
             runtime_state=runtime_state,
             plan=plan,
+            candidate=candidate,
         )
     if _str(risk_state).upper() != "NORMAL":
         return _decision(
@@ -500,6 +543,7 @@ def evaluate_probe_admission(
             side_cell_key_value=key,
             runtime_state=runtime_state,
             plan=plan,
+            candidate=candidate,
         )
     if plan.get("order_authority") != ORDER_AUTHORITY_GRANTED:
         return _decision(
@@ -510,6 +554,7 @@ def evaluate_probe_admission(
             side_cell_key_value=key,
             runtime_state=runtime_state,
             plan=plan,
+            candidate=candidate,
         )
     if not adapter_enabled:
         return _decision(
@@ -520,6 +565,7 @@ def evaluate_probe_admission(
             side_cell_key_value=key,
             runtime_state=runtime_state,
             plan=plan,
+            candidate=candidate,
         )
 
     return _decision(
@@ -530,6 +576,7 @@ def evaluate_probe_admission(
         side_cell_key_value=key,
         runtime_state=runtime_state,
         plan=plan,
+        candidate=candidate,
     )
 
 
@@ -545,6 +592,7 @@ def build_ledger_record(decision: dict[str, Any], *, record_type: str = "probe_a
         "side_cell_key": decision.get("side_cell_key"),
         "event": event,
         "runtime_state": decision.get("runtime_state") or {},
+        "candidate_summary": decision.get("candidate_summary") or {},
         "reason": decision.get("reason"),
         "boundary": decision.get("boundary"),
     }
