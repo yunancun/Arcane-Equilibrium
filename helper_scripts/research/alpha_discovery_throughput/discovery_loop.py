@@ -127,6 +127,19 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
     stack_health_next_action = detail.get(
         "demo_learning_stack_healthcheck_next_action"
     )
+    activation_packet_present = (
+        detail.get("demo_learning_stack_activation_packet_present") is True
+    )
+    activation_packet_source_ok = (
+        detail.get("demo_learning_stack_activation_packet_source_ok") is True
+    )
+    activation_packet_status = str(
+        detail.get("demo_learning_stack_activation_packet_status") or ""
+    ).upper()
+    activation_packet_next_trigger = str(
+        detail.get("demo_learning_stack_activation_packet_operator_next_action")
+        or "refresh_demo_learning_stack_activation_packet"
+    )
     packet_present = detail.get("profit_learning_decision_packet_present") is True
     packet_source_ok = detail.get("profit_learning_decision_packet_source_ok") is True
     packet_status = str(
@@ -219,6 +232,17 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
 
+    if activation_packet_present and not activation_packet_source_ok:
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "demo_learning_stack_activation_packet_stale_or_unreadable",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "demo_learning_stack_activation_packet_not_fresh",
+            "next_trigger": "refresh_demo_learning_stack_activation_packet",
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
     if sealed_preflight_present and not sealed_preflight_source_ok:
         return {
             "action": RUN_READ_ONLY_CAPTURE,
@@ -267,6 +291,68 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "operator_actionable": False,
             "engineering_actionable": True,
         }
+
+    if activation_packet_source_ok:
+        if activation_packet_status == "SOURCE_NOT_READY":
+            return {
+                "action": BLOCK,
+                "reason": "demo_learning_stack_activation_packet_source_not_ready",
+                "blocker_class": "source_health",
+                "primary_blocker": (
+                    "demo_learning_stack_activation_packet_source_not_ready"
+                ),
+                "next_trigger": activation_packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if activation_packet_status == "READY_FOR_OPERATOR_DRY_RUN":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_activation_packet_ready_for_operator_dry_run",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_activation_packet_ready_for_operator_dry_run"
+                ),
+                "next_trigger": activation_packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if activation_packet_status == "STACK_INSTALLED_REPAIR_REQUIRED":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_activation_packet_repair_required",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_activation_packet_repair_required"
+                ),
+                "next_trigger": activation_packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if activation_packet_status == "LEARNING_REVIEW_REFRESH_REQUIRED":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_activation_packet_review_refresh_required",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_activation_packet_review_refresh_required"
+                ),
+                "next_trigger": activation_packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if activation_packet_status == "REVIEW_REQUIRED":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_activation_packet_review_required",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_activation_packet_review_required"
+                ),
+                "next_trigger": activation_packet_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
 
     if bounded_review_source_ok:
         if bounded_review_status == "AUTHORITY_BOUNDARY_VIOLATION":
@@ -1975,6 +2061,108 @@ def classify_profitability_blocker(
                 ),
                 "demo_learning_stack_healthcheck_source_error": detail.get(
                     "demo_learning_stack_healthcheck_source_error"
+                ),
+                "demo_learning_stack_activation_packet_present": detail.get(
+                    "demo_learning_stack_activation_packet_present"
+                ),
+                "demo_learning_stack_activation_packet_status": detail.get(
+                    "demo_learning_stack_activation_packet_status"
+                ),
+                "demo_learning_stack_activation_packet_raw_status": detail.get(
+                    "demo_learning_stack_activation_packet_raw_status"
+                ),
+                "demo_learning_stack_activation_packet_reason": detail.get(
+                    "demo_learning_stack_activation_packet_reason"
+                ),
+                "demo_learning_stack_activation_packet_operator_next_action": detail.get(
+                    "demo_learning_stack_activation_packet_operator_next_action"
+                ),
+                "demo_learning_stack_activation_packet_install_review_ready": detail.get(
+                    "demo_learning_stack_activation_packet_install_review_ready"
+                ),
+                "demo_learning_stack_activation_packet_missing_links": detail.get(
+                    "demo_learning_stack_activation_packet_missing_links"
+                ),
+                "demo_learning_stack_activation_packet_generated_at_utc": detail.get(
+                    "demo_learning_stack_activation_packet_generated_at_utc"
+                ),
+                "demo_learning_stack_activation_packet_age_seconds": detail.get(
+                    "demo_learning_stack_activation_packet_age_seconds"
+                ),
+                "demo_learning_stack_activation_packet_source_ok": detail.get(
+                    "demo_learning_stack_activation_packet_source_ok"
+                ),
+                "demo_learning_stack_activation_packet_source_path": detail.get(
+                    "demo_learning_stack_activation_packet_source_path"
+                ),
+                "demo_learning_stack_activation_packet_source_error": detail.get(
+                    "demo_learning_stack_activation_packet_source_error"
+                ),
+                "demo_learning_stack_activation_packet_source_ready": detail.get(
+                    "demo_learning_stack_activation_packet_source_ready"
+                ),
+                "demo_learning_stack_activation_packet_stack_installed": detail.get(
+                    "demo_learning_stack_activation_packet_stack_installed"
+                ),
+                "demo_learning_stack_activation_packet_missing_cron_count": detail.get(
+                    "demo_learning_stack_activation_packet_missing_cron_count"
+                ),
+                "demo_learning_stack_activation_packet_missing_crons": detail.get(
+                    "demo_learning_stack_activation_packet_missing_crons"
+                ),
+                "demo_learning_stack_activation_packet_sealed_horizon_probe_preflight_present": detail.get(
+                    "demo_learning_stack_activation_packet_sealed_horizon_probe_preflight_present"
+                ),
+                "demo_learning_stack_activation_packet_bounded_probe_reviews_present": detail.get(
+                    "demo_learning_stack_activation_packet_bounded_probe_reviews_present"
+                ),
+                "demo_learning_stack_activation_packet_cost_gate_activation_ready": detail.get(
+                    "demo_learning_stack_activation_packet_cost_gate_activation_ready"
+                ),
+                "demo_learning_stack_activation_packet_runtime_writer_enabled": detail.get(
+                    "demo_learning_stack_activation_packet_runtime_writer_enabled"
+                ),
+                "demo_learning_stack_activation_packet_global_cost_gate_lowering_recommended": detail.get(
+                    "demo_learning_stack_activation_packet_global_cost_gate_lowering_recommended"
+                ),
+                "demo_learning_stack_activation_packet_order_authority_granted": detail.get(
+                    "demo_learning_stack_activation_packet_order_authority_granted"
+                ),
+                "demo_learning_stack_activation_packet_probe_authority_granted": detail.get(
+                    "demo_learning_stack_activation_packet_probe_authority_granted"
+                ),
+                "demo_learning_stack_activation_packet_promotion_proof": detail.get(
+                    "demo_learning_stack_activation_packet_promotion_proof"
+                ),
+                "demo_learning_stack_activation_packet_planned_cron_count": detail.get(
+                    "demo_learning_stack_activation_packet_planned_cron_count"
+                ),
+                "demo_learning_stack_activation_packet_healthcheck_status": detail.get(
+                    "demo_learning_stack_activation_packet_healthcheck_status"
+                ),
+                "demo_learning_stack_activation_packet_cost_gate_activation_status": detail.get(
+                    "demo_learning_stack_activation_packet_cost_gate_activation_status"
+                ),
+                "demo_learning_stack_activation_packet_cost_gate_escape_thesis": detail.get(
+                    "demo_learning_stack_activation_packet_cost_gate_escape_thesis"
+                ),
+                "demo_learning_stack_activation_packet_edge_amplification_levers": detail.get(
+                    "demo_learning_stack_activation_packet_edge_amplification_levers"
+                ),
+                "demo_learning_stack_activation_packet_next_profit_gate_after_activation": detail.get(
+                    "demo_learning_stack_activation_packet_next_profit_gate_after_activation"
+                ),
+                "demo_learning_stack_activation_packet_dry_run_preview_shell": detail.get(
+                    "demo_learning_stack_activation_packet_dry_run_preview_shell"
+                ),
+                "demo_learning_stack_activation_packet_operator_only_apply_shell": detail.get(
+                    "demo_learning_stack_activation_packet_operator_only_apply_shell"
+                ),
+                "demo_learning_stack_activation_packet_operator_only_rollback_shell": detail.get(
+                    "demo_learning_stack_activation_packet_operator_only_rollback_shell"
+                ),
+                "demo_learning_stack_activation_packet_post_install_verification_shell": detail.get(
+                    "demo_learning_stack_activation_packet_post_install_verification_shell"
                 ),
                 "demo_learning_stack_source_ready": detail.get(
                     "demo_learning_stack_source_ready"

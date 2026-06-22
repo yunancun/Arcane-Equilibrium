@@ -65,7 +65,7 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
     ], now_utc=dt.datetime(2026, 6, 22, tzinfo=dt.timezone.utc))
 
     worklist = plan["learning_worklist"]
-    assert worklist["schema_version"] == "alpha_learning_worklist_v4"
+    assert worklist["schema_version"] == "alpha_learning_worklist_v5"
     assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
     assert worklist["task_count"] == 2
     assert worklist["operator_required_count"] == 1
@@ -197,7 +197,7 @@ def test_learning_worklist_carries_ranked_cost_gate_blocked_review_evidence():
 
     task = worklist["top_task"]
 
-    assert worklist["schema_version"] == "alpha_learning_worklist_v4"
+    assert worklist["schema_version"] == "alpha_learning_worklist_v5"
     assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
     assert task["task_type"] == "operator_probe_review"
     assert task["learning_objective"] == (
@@ -325,7 +325,7 @@ def test_learning_worklist_carries_demo_learning_stack_health_evidence():
 
     task = worklist["top_task"]
 
-    assert worklist["schema_version"] == "alpha_learning_worklist_v4"
+    assert worklist["schema_version"] == "alpha_learning_worklist_v5"
     assert task["task_type"] == "cost_gate_learning_activation"
     assert task["requires_operator_authorization"] is True
     assert task["runtime_mutation_required"] is True
@@ -349,4 +349,82 @@ def test_learning_worklist_carries_demo_learning_stack_health_evidence():
     )
     assert task["evidence"][
         "demo_learning_stack_cost_gate_learning_ledger_rows_present"
+    ] is False
+
+
+def test_learning_worklist_carries_demo_learning_stack_activation_packet_evidence():
+    worklist = build_learning_worklist({
+        "arms": [
+            {
+                "arm_id": "cost_gate_demo_learning_lane",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_activation_packet_ready_for_operator_dry_run"
+                ),
+                "next_trigger": (
+                    "run_dry_run_preview_then_apply_only_if_installer_preflight_passes"
+                ),
+                "engineering_actionable": True,
+                "demo_learning_stack_activation_packet_present": True,
+                "demo_learning_stack_activation_packet_status": (
+                    "READY_FOR_OPERATOR_DRY_RUN"
+                ),
+                "demo_learning_stack_activation_packet_reason": (
+                    "source_ready_but_one_or_more_stack_crons_missing"
+                ),
+                "demo_learning_stack_activation_packet_operator_next_action": (
+                    "run_dry_run_preview_then_apply_only_if_installer_preflight_passes"
+                ),
+                "demo_learning_stack_activation_packet_install_review_ready": True,
+                "demo_learning_stack_activation_packet_missing_cron_count": 4,
+                "demo_learning_stack_activation_packet_missing_crons": [
+                    "demo_learning_evidence",
+                    "sealed_horizon_probe_preflight",
+                    "cost_gate_learning_lane",
+                    "demo_learning_stack_healthcheck",
+                ],
+                "demo_learning_stack_activation_packet_global_cost_gate_lowering_recommended": False,
+                "demo_learning_stack_activation_packet_order_authority_granted": False,
+                "demo_learning_stack_activation_packet_probe_authority_granted": False,
+                "demo_learning_stack_activation_packet_dry_run_preview_shell": (
+                    "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=0 install_stack"
+                ),
+                "demo_learning_stack_activation_packet_edge_amplification_levers": [
+                    "side_cell_filtering",
+                    "horizon_retiming",
+                    "low_friction_execution_filtering",
+                ],
+            }
+        ],
+    })
+
+    task = worklist["top_task"]
+
+    assert worklist["schema_version"] == "alpha_learning_worklist_v5"
+    assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
+    assert task["task_type"] == "cost_gate_learning_activation"
+    assert task["learning_objective"] == (
+        "review_demo_learning_stack_activation_packet_and_run_dry_run_"
+        "before_any_cron_install"
+    )
+    assert task["requires_operator_authorization"] is True
+    assert task["runtime_mutation_required"] is True
+    assert task["actionability"] == "operator_required"
+    assert "dry-run preview is captured before any operator apply" in (
+        task["completion_evidence_required"]
+    )
+    assert task["evidence"]["demo_learning_stack_activation_packet_status"] == (
+        "READY_FOR_OPERATOR_DRY_RUN"
+    )
+    assert task["evidence"][
+        "demo_learning_stack_activation_packet_missing_cron_count"
+    ] == 4
+    assert task["evidence"][
+        "demo_learning_stack_activation_packet_global_cost_gate_lowering_recommended"
+    ] is False
+    assert task["evidence"][
+        "demo_learning_stack_activation_packet_order_authority_granted"
+    ] is False
+    assert task["evidence"][
+        "demo_learning_stack_activation_packet_probe_authority_granted"
     ] is False
