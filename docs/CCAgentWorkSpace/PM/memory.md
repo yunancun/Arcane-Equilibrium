@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Demo Learning Stack Cron Installer
+
+- Added `install_demo_learning_stack_crons.sh` as the operator-facing stack installer for demo-learning evidence plus Cost Gate learning-lane crons.
+- The stack defaults to dry-run and apply requires expected HEAD, clean matching runtime source, Cost Gate preinstall refresh, and activation preflight before child installer apply.
+- This reduces half-install/repeat-work risk, but no runtime source sync, cron install, writer enablement, Cost Gate lowering, or order authority was performed.
+
 ## 2026-06-22 Runtime Demo Cost Gate Read-Only Audit
 
 - `trade-core` demo engine is alive, but runtime source remains behind/dirty at `917be4cc`; latest alpha artifact is stale `alpha_discovery_runtime_killboard_v1` and false-reports actionable alpha/probe.
