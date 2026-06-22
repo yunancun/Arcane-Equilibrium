@@ -109,6 +109,31 @@ _EVIDENCE_KEYS = (
     "learning_loop_last_review_top_candidate_side_cell_key",
     "learning_loop_last_review_top_candidate_wrongful_block_score",
     "learning_loop_last_review_top_candidate_net_cost_cushion_bps",
+    "profit_learning_decision_packet_status",
+    "profit_learning_decision_packet_reason",
+    "profit_learning_decision_packet_next_actions",
+    "profit_learning_decision_packet_generated_at_utc",
+    "profit_learning_decision_packet_age_seconds",
+    "profit_learning_decision_packet_source_ok",
+    "profit_learning_decision_packet_source_path",
+    "profit_learning_decision_packet_source_error",
+    "profit_learning_cost_gate_rejects_recorded",
+    "profit_learning_silent_drop_risk",
+    "profit_learning_counterfactual_scorecard_available",
+    "profit_learning_counterfactual_learning_candidates_present",
+    "profit_learning_bounded_plan_ready",
+    "profit_learning_blocked_outcome_review_candidates_present",
+    "profit_learning_global_cost_gate_lowering_recommended",
+    "profit_learning_order_authority_granted",
+    "profit_learning_main_cost_gate_adjustment",
+    "profit_learning_promotion_evidence",
+    "profit_learning_data_flow_status",
+    "profit_learning_counterfactual_ranking_status",
+    "profit_learning_counterfactual_horizon_stability_status",
+    "profit_learning_counterfactual_candidate_count",
+    "profit_learning_top_side_cells",
+    "profit_learning_activation_status",
+    "profit_learning_blocked_review_status",
 )
 
 
@@ -194,6 +219,11 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
     if task_type == "promotion_review":
         return "run_formal_aeg_qc_mit_review_before_any_promotion"
     if task_type == "operator_probe_review":
+        if (
+            _str(row.get("arm_id")) == "cost_gate_demo_learning_lane"
+            and row.get("profit_learning_top_side_cells")
+        ):
+            return "operator_review_profit_learning_decision_packet_before_bounded_demo_probe"
         if (
             _str(row.get("arm_id")) == "cost_gate_demo_learning_lane"
             and (

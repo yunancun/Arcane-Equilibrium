@@ -1513,6 +1513,130 @@ def summarize_demo_learning_stack_healthcheck(
     }
 
 
+def summarize_profit_learning_decision_packet(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """Summarize the Cost Gate profit-learning closure packet if present."""
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    path = lane_dir / "profit_learning_decision_packet_latest.json"
+    payload, err = _read_json(path)
+    if err and err == "missing":
+        fallback = lane_dir / "profit_learning_decision_packet.json"
+        payload, err = _read_json(fallback)
+        if err is None:
+            path = fallback
+    if err:
+        return {
+            "profit_learning_decision_packet_present": False,
+            "profit_learning_decision_packet_source_path": str(path),
+            "profit_learning_decision_packet_source_error": err,
+        }
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else {}
+    counterfactual = (
+        payload.get("counterfactual")
+        if isinstance(payload.get("counterfactual"), dict)
+        else {}
+    )
+    data_flow = payload.get("data_flow") if isinstance(payload.get("data_flow"), dict) else {}
+    plan = payload.get("plan") if isinstance(payload.get("plan"), dict) else {}
+    activation = (
+        payload.get("activation")
+        if isinstance(payload.get("activation"), dict)
+        else {}
+    )
+    blocked_review = (
+        payload.get("blocked_review")
+        if isinstance(payload.get("blocked_review"), dict)
+        else {}
+    )
+    top_side_cells = counterfactual.get("top_side_cells")
+    if not isinstance(top_side_cells, list):
+        top_side_cells = []
+    next_actions = payload.get("next_actions")
+    if not isinstance(next_actions, list):
+        next_actions = []
+    return {
+        "profit_learning_decision_packet_present": True,
+        "profit_learning_decision_packet_status": payload.get("status"),
+        "profit_learning_decision_packet_reason": payload.get("reason"),
+        "profit_learning_decision_packet_next_actions": next_actions,
+        "profit_learning_decision_packet_generated_at_utc": generated_at,
+        "profit_learning_decision_packet_age_seconds": age,
+        "profit_learning_decision_packet_source_ok": fresh,
+        "profit_learning_decision_packet_source_path": str(path),
+        "profit_learning_decision_packet_source_error": freshness_error,
+        "profit_learning_cost_gate_rejects_recorded": answers.get(
+            "cost_gate_rejects_recorded"
+        ),
+        "profit_learning_silent_drop_risk": answers.get("silent_drop_risk"),
+        "profit_learning_counterfactual_scorecard_available": answers.get(
+            "counterfactual_scorecard_available"
+        ),
+        "profit_learning_counterfactual_learning_candidates_present": answers.get(
+            "counterfactual_learning_candidates_present"
+        ),
+        "profit_learning_bounded_plan_ready": answers.get("bounded_plan_ready"),
+        "profit_learning_activation_or_stack_health_available": answers.get(
+            "activation_or_stack_health_available"
+        ),
+        "profit_learning_blocked_outcome_review_available": answers.get(
+            "blocked_outcome_review_available"
+        ),
+        "profit_learning_blocked_outcome_review_candidates_present": answers.get(
+            "blocked_outcome_review_candidates_present"
+        ),
+        "profit_learning_global_cost_gate_lowering_recommended": answers.get(
+            "global_cost_gate_lowering_recommended"
+        ),
+        "profit_learning_order_authority_granted": answers.get(
+            "order_authority_granted"
+        ),
+        "profit_learning_main_cost_gate_adjustment": answers.get(
+            "main_cost_gate_adjustment"
+        ),
+        "profit_learning_promotion_evidence": answers.get("promotion_evidence"),
+        "profit_learning_data_flow_status": data_flow.get("status"),
+        "profit_learning_data_flow_cost_gate_rejects": data_flow.get(
+            "broad_cost_gate_rejects"
+        ),
+        "profit_learning_counterfactual_scorecard_status": counterfactual.get(
+            "scorecard_status"
+        ),
+        "profit_learning_counterfactual_ranking_status": counterfactual.get(
+            "profit_opportunity_ranking_status"
+        ),
+        "profit_learning_counterfactual_horizon_stability_status": (
+            counterfactual.get("horizon_stability_status")
+        ),
+        "profit_learning_counterfactual_candidate_count": counterfactual.get(
+            "candidate_count"
+        ),
+        "profit_learning_top_side_cells": top_side_cells[:5],
+        "profit_learning_plan_status": plan.get("status"),
+        "profit_learning_plan_gate_status": plan.get("gate_status"),
+        "profit_learning_plan_selected_probe_candidate_count": plan.get(
+            "selected_probe_candidate_count"
+        ),
+        "profit_learning_plan_ready": plan.get("ready"),
+        "profit_learning_activation_status": activation.get("status"),
+        "profit_learning_activation_next_actions": activation.get("next_actions"),
+        "profit_learning_blocked_review_status": blocked_review.get("status"),
+        "profit_learning_blocked_review_candidate_count": blocked_review.get(
+            "candidate_count"
+        ),
+    }
+
+
 def collect_cost_gate_learning_lane_arm(
     data_dir: Path,
     *,
@@ -1534,6 +1658,10 @@ def collect_cost_gate_learning_lane_arm(
         now_utc=now_utc,
     )
     stack_health_summary = summarize_demo_learning_stack_healthcheck(
+        data_dir,
+        now_utc=now_utc,
+    )
+    decision_packet_summary = summarize_profit_learning_decision_packet(
         data_dir,
         now_utc=now_utc,
     )
@@ -1583,6 +1711,7 @@ def collect_cost_gate_learning_lane_arm(
                 **source_summary,
                 **demo_evidence_summary,
                 **stack_health_summary,
+                **decision_packet_summary,
                 **historical_summary,
                 **loop_summary,
                 **ledger_summary,
@@ -1627,6 +1756,7 @@ def collect_cost_gate_learning_lane_arm(
             **source_summary,
             **demo_evidence_summary,
             **stack_health_summary,
+            **decision_packet_summary,
             **historical_summary,
             **loop_summary,
             **ledger_summary,

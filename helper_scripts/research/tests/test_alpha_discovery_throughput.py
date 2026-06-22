@@ -1529,6 +1529,90 @@ def _write_demo_learning_stack_healthcheck_latest(
     return path
 
 
+def _write_profit_learning_decision_packet_latest(
+    data: Path,
+    *,
+    status: str,
+    reason: str,
+    next_actions: list[str],
+    generated_at: str = "2026-06-21T18:04:00+00:00",
+    review_candidate: bool = False,
+) -> Path:
+    path = (
+        data
+        / "cost_gate_learning_lane"
+        / "profit_learning_decision_packet_latest.json"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    top_cell = {
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "strategy_name": "ma_crossover",
+        "symbol": "ETHUSDT",
+        "side": "Sell",
+        "learning_lane_action": "LEARNING_PROBE_CANDIDATE",
+        "priority_score": 82.5,
+        "n": 486,
+        "avg_net_bps": 97.9,
+        "net_positive_pct": 86.0,
+        "order_authority": "NOT_GRANTED",
+        "main_cost_gate_adjustment": "NONE",
+        "promotion_evidence": False,
+    }
+    path.write_text(json.dumps({
+        "schema_version": "cost_gate_profit_learning_decision_packet_v1",
+        "generated_at_utc": generated_at,
+        "status": status,
+        "reason": reason,
+        "next_actions": next_actions,
+        "answers": {
+            "demo_data_flow_seen": True,
+            "cost_gate_rejects_recorded": True,
+            "silent_drop_risk": False,
+            "counterfactual_scorecard_available": status != "RUN_REJECT_COUNTERFACTUAL",
+            "counterfactual_learning_candidates_present": True,
+            "bounded_plan_ready": status != "BUILD_OR_REFRESH_BOUNDED_LEARNING_PLAN",
+            "activation_or_stack_health_available": status not in {
+                "RUN_LEARNING_LANE_ACTIVATION_PREFLIGHT",
+            },
+            "blocked_outcome_review_available": review_candidate,
+            "blocked_outcome_review_candidates_present": review_candidate,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "data_flow": {
+            "status": "RECENT_WINDOW_EMPTY_COST_GATE_REJECT_WALL",
+            "broad_cost_gate_rejects": 2696,
+        },
+        "counterfactual": {
+            "scorecard_status": "LEARNING_LANE_PROBE_CANDIDATES_PRESENT",
+            "profit_opportunity_ranking_status": "PROFIT_LEARNING_CANDIDATES_PRESENT",
+            "horizon_stability_status": (
+                "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
+            ),
+            "candidate_count": 1,
+            "top_side_cells": [top_cell],
+        },
+        "plan": {
+            "status": "READY_FOR_DEMO_LEARNING_PROBE",
+            "gate_status": "OPERATOR_REVIEW",
+            "selected_probe_candidate_count": 1,
+            "ready": True,
+        },
+        "activation": {"status": "DATA_ACCUMULATING", "next_actions": []},
+        "blocked_review": {
+            "status": (
+                "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+                if review_candidate
+                else None
+            ),
+            "candidate_count": 1 if review_candidate else 0,
+        },
+    }), encoding="utf-8")
+    return path
+
+
 def test_cost_gate_arm_uses_demo_learning_evidence_for_pg_reject_gap(tmp_path):
     data = tmp_path / "openclaw"
     artifact = _write_demo_learning_evidence_latest(
@@ -1739,6 +1823,80 @@ def test_cost_gate_arm_blocks_stale_demo_learning_data_flow(tmp_path):
     )
     assert blocker["demo_learning_evidence_latest_learning_age_seconds"] == 8461
     assert blocker["engineering_actionable"] is True
+
+
+def test_cost_gate_arm_uses_profit_learning_packet_for_counterfactual_gap(tmp_path):
+    data = tmp_path / "openclaw"
+    artifact = _write_profit_learning_decision_packet_latest(
+        data,
+        status="RUN_REJECT_COUNTERFACTUAL",
+        reason="cost_gate_rejects_are_recorded_but_counterfactual_scorecard_missing",
+        next_actions=["run_cost_gate_reject_counterfactual_multi_horizon_scorecard"],
+    )
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+
+    assert arm["detail"]["profit_learning_decision_packet_source_path"] == str(artifact)
+    assert arm["detail"]["profit_learning_decision_packet_status"] == (
+        "RUN_REJECT_COUNTERFACTUAL"
+    )
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["primary_blocker"] == (
+        "profit_learning_reject_counterfactual_required"
+    )
+    assert blocker["next_trigger"] == (
+        "run_cost_gate_reject_counterfactual_multi_horizon_scorecard"
+    )
+    assert blocker["profit_learning_cost_gate_rejects_recorded"] is True
+    assert blocker["profit_learning_silent_drop_risk"] is False
+    assert blocker["profit_learning_order_authority_granted"] is False
+    assert blocker["profit_learning_main_cost_gate_adjustment"] == "NONE"
+
+
+def test_cost_gate_profit_packet_probe_candidate_reaches_worklist(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_profit_learning_decision_packet_latest(
+        data,
+        status="OPERATOR_REVIEW_DEMO_PROBE_CANDIDATES",
+        reason="blocked_signal_outcomes_clear_review_thresholds",
+        next_actions=[
+            "operator_review_blocked_outcome_scorecard_before_probe_authority"
+        ],
+        review_candidate=True,
+    )
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    worklist = plan["learning_worklist"]
+    task = worklist["top_task"]
+
+    assert blocker["blocker_class"] == "probe_ready"
+    assert blocker["primary_blocker"] == (
+        "profit_learning_demo_probe_candidates_need_operator_review"
+    )
+    assert blocker["operator_actionable"] is True
+    assert blocker["profit_learning_blocked_outcome_review_candidates_present"] is True
+    assert blocker["profit_learning_top_side_cells"][0]["side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
+    assert task["task_type"] == "operator_probe_review"
+    assert task["learning_objective"] == (
+        "operator_review_profit_learning_decision_packet_before_bounded_demo_probe"
+    )
+    assert task["requires_operator_authorization"] is True
+    assert task["runtime_mutation_required"] is False
+    assert task["evidence"]["profit_learning_decision_packet_status"] == (
+        "OPERATOR_REVIEW_DEMO_PROBE_CANDIDATES"
+    )
+    assert task["evidence"]["profit_learning_top_side_cells"][0]["side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert task["evidence"]["profit_learning_order_authority_granted"] is False
 
 
 def _write_polymarket_leadlag_latest(data: Path, payload: dict) -> Path:
