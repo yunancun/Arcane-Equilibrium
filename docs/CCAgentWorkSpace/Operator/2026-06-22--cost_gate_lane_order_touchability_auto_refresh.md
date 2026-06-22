@@ -23,6 +23,8 @@ Linux isolated smoke showed the wrapper generated fresh order audit and bounded 
 - Placement repair plan: `PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW`
 - Shadow placement impact: `SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH`
 
+Canonical `/tmp/openclaw` was also refreshed with the same no-authority path after source sync. The latest Cost Gate learning status line is `2026-06-22T19:16:18Z` and includes `order_touchability_audit_rc=0`, `order_touchability_audit_status=PASSIVE_LIMITS_TOO_DEEP_NO_TOUCH`, and the bounded chain statuses above. Alpha was refreshed afterward and now reads the 19:16 shadow artifact with source `SYNCED_CLEAN` at `6a2d0fc6`.
+
 This does not authorize orders or probes. It only makes the learning system better at autonomously diagnosing that current Demo orders cannot produce fill-backed learning and that near-touch maker placement repair is required before any candidate-matched alpha proof can be collected.
 
 No CI was run, no cron was installed, no env was changed, no service was restarted, no PG write occurred, no Bybit trading/private call was made, and no Cost Gate lowering, probe/order authority, or promotion proof was granted.

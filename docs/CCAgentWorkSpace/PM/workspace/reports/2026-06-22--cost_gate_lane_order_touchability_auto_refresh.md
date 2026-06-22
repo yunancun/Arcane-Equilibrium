@@ -35,6 +35,28 @@ Key status:
 - `bounded_probe_shadow_placement_candidate_matched_order_count=0`
 - `bounded_probe_shadow_placement_max_gap_reduction_bps=1522.1026`
 
+## Canonical Runtime Proof
+
+After source and docs sync, the same v420 path was run against canonical `/tmp/openclaw` with scorecard/data-flow/plan/decision refresh, materializer, and ledger appends disabled.
+
+Latest canonical status line:
+
+- `ts_utc=2026-06-22T19:16:18Z`
+- `order_touchability_audit_rc=0`
+- `order_touchability_audit_status=PASSIVE_LIMITS_TOO_DEEP_NO_TOUCH`
+- `reviewed_orders=6`
+- `fill_rows=0`
+- `deep_passive_no_touch_orders=6`
+- `bounded_probe_touchability_preflight_status=TOUCHABILITY_REPAIR_REQUIRED_BEFORE_BOUNDED_DEMO_PROBE`
+- `bounded_probe_placement_repair_plan_status=PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW`
+- `bounded_probe_shadow_placement_impact_status=SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH`
+- `bounded_probe_shadow_placement_submit_count=6`
+- `bounded_probe_shadow_placement_candidate_matched_order_count=0`
+
+Canonical latest artifacts now have generated times `2026-06-22T19:16:16-17Z`.
+
+Canonical alpha refresh then produced `alpha_discovery_runtime_killboard_v9` at `2026-06-22T19:16:38Z`, source `SYNCED_CLEAN` at `6a2d0fc6`, top task `bounded_probe_placement_repair`, next trigger `operator_review_mechanical_touchability_before_rust_patch`, and fresh shadow generated time `2026-06-22T19:16:17Z`.
+
 ## PM Read
 
 This makes the autonomous learning loop materially deeper. The lane no longer has a shallow interface that says "refresh bounded probe review" while depending on an external, manual order-touchability artifact.
