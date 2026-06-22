@@ -202,9 +202,14 @@ SELECT
     CASE WHEN side = 1 THEN 'Buy' ELSE 'Sell' END AS side,
     reject_reason_code,
     count(*)::bigint AS n,
+    count(DISTINCT ts)::bigint AS distinct_ts,
     count(*) FILTER (WHERE has_context)::bigint AS joined_contexts,
     min(ts) AS min_ts,
     max(ts) AS max_ts,
+    round((extract(epoch FROM (max(ts) - min(ts))) / 60.0)::numeric, 4)
+      AS timespan_minutes,
+    round((count(*)::numeric / NULLIF(count(DISTINCT ts), 0))::numeric, 4)
+      AS rows_per_distinct_ts,
     round(avg(directional_gross_bps)::numeric, 4) AS avg_gross_bps,
     round(percentile_cont(0.5) WITHIN GROUP (ORDER BY directional_gross_bps)::numeric, 4)
       AS p50_gross_bps,
@@ -268,7 +273,7 @@ def classify_learning_lane_row(cfg: AuditConfig, row: dict[str, Any]) -> tuple[s
         return "DATA_COVERAGE_BLOCKER", "reject_reason_requires_data_fix_not_probe"
     if "negative_edge" not in reject_reason:
         return "NON_EDGE_REJECT_REASON", "reject_reason_not_negative_edge"
-    n = int(row.get("n") or 0)
+    n = _effective_sample_count(row)
     avg_net = _as_float(row.get("avg_net_bps"))
     p50_gross = _as_float(row.get("p50_gross_bps"))
     p90_gross = _as_float(row.get("p90_gross_bps"))
@@ -338,6 +343,11 @@ def _as_int(value: Any) -> int:
         return 0
 
 
+def _effective_sample_count(row: dict[str, Any]) -> int:
+    distinct_ts = _as_int(row.get("distinct_ts"))
+    return distinct_ts if distinct_ts > 0 else _as_int(row.get("n"))
+
+
 def _sort_float(value: Any) -> float:
     parsed = _as_float(value)
     return parsed if parsed is not None else float("-inf")
@@ -360,7 +370,7 @@ def _bounded_score(value: float, scale: float, weight: float) -> float:
 
 
 def _profit_priority_components(cfg: AuditConfig, row: dict[str, Any]) -> dict[str, float]:
-    n = max(_as_int(row.get("n")), 0)
+    n = max(_effective_sample_count(row), 0)
     avg_net = _as_float(row.get("avg_net_bps")) or 0.0
     p50_gross = _as_float(row.get("p50_gross_bps")) or 0.0
     net_positive_pct = _as_float(row.get("net_positive_pct")) or 0.0
@@ -417,6 +427,7 @@ def build_profit_opportunity_ranking(
         components = _profit_priority_components(cfg, row)
         score = round(sum(components.values()), 4)
         n = _as_int(row.get("n"))
+        sample_count_for_gate = _effective_sample_count(row)
         joined_contexts = _as_int(row.get("joined_contexts"))
         context_join_coverage_pct = round((joined_contexts / n * 100.0), 4) if n else 0.0
         avg_net = _as_float(row.get("avg_net_bps"))
@@ -435,6 +446,10 @@ def build_profit_opportunity_ranking(
                 "priority_score": score,
                 "priority_components": {key: round(value, 4) for key, value in components.items()},
                 "n": n,
+                "sample_count_for_gate": sample_count_for_gate,
+                "distinct_ts": _as_int(row.get("distinct_ts")),
+                "rows_per_distinct_ts": _as_float(row.get("rows_per_distinct_ts")),
+                "timespan_minutes": _as_float(row.get("timespan_minutes")),
                 "joined_contexts": joined_contexts,
                 "context_join_coverage_pct": context_join_coverage_pct,
                 "avg_net_bps": avg_net,
@@ -477,7 +492,7 @@ def build_profit_opportunity_ranking(
             action_order.get(str(row.get("learning_lane_action")), 9),
             -(float(row.get("priority_score") or 0.0)),
             -_sort_float(row.get("avg_net_bps")),
-            -_as_int(row.get("n")),
+            -_effective_sample_count(row),
         )
     )
     candidate_count = int(action_counts.get("LEARNING_PROBE_CANDIDATE") or 0)
@@ -604,12 +619,16 @@ def build_horizon_stability_scorecard(
                 "best_avg_net_bps": _as_float(best.get("avg_net_bps")),
                 "best_p50_gross_bps": _as_float(best.get("p50_gross_bps")),
                 "best_net_positive_pct": _as_float(best.get("net_positive_pct")),
+                "best_sample_count_for_gate": _effective_sample_count(best),
+                "best_distinct_ts": _as_int(best.get("distinct_ts")),
                 "horizon_rows": [
                     {
                         "horizon_minutes": int(row["horizon_minutes"]),
                         "learning_lane_action": row.get("learning_lane_action"),
                         "learning_lane_reason": row.get("learning_lane_reason"),
                         "n": _as_int(row.get("n")),
+                        "sample_count_for_gate": _effective_sample_count(row),
+                        "distinct_ts": _as_int(row.get("distinct_ts")),
                         "avg_net_bps": _as_float(row.get("avg_net_bps")),
                         "p50_gross_bps": _as_float(row.get("p50_gross_bps")),
                         "net_positive_pct": _as_float(row.get("net_positive_pct")),
@@ -854,15 +873,16 @@ def render_markdown(
             f"- Next trigger: `{ranking['next_trigger']}`",
             "- Boundary: ranking only; `order_authority=NOT_GRANTED`, `main_cost_gate_adjustment=NONE`.",
             "",
-            "| rank | side_cell | action | tier | score | n | avg_net | p50 | net+% | next_action |",
-            "|---:|---|---|---|---:|---:|---:|---:|---:|---|",
+            "| rank | side_cell | action | tier | score | sample_n | rows | avg_net | p50 | net+% | next_action |",
+            "|---:|---|---|---|---:|---:|---:|---:|---:|---:|---|",
         ]
     )
     for idx, row in enumerate(ranking["top_side_cells"][:10], start=1):
         lines.append(
             "| "
             f"{idx} | {row['side_cell_key']} | {row['learning_lane_action']} | "
-            f"{row['priority_tier']} | {_fmt(row['priority_score'])} | {row['n']} | "
+            f"{row['priority_tier']} | {_fmt(row['priority_score'])} | "
+            f"{row['sample_count_for_gate']} | {row['n']} | "
             f"{_fmt(row['avg_net_bps'])} | {_fmt(row['p50_gross_bps'])} | "
             f"{_fmt(row['net_positive_pct'])} | {row['next_action']} |"
         )
@@ -877,8 +897,8 @@ def render_markdown(
             f"- Horizons: `{','.join(str(h) for h in stability['horizons_minutes'])}`",
             "- Boundary: horizon comparison only; no order authority or Cost Gate lowering.",
             "",
-            "| rank | side_cell | status | candidate_horizons | best_horizon | best_avg_net | best_net+% |",
-            "|---:|---|---|---|---:|---:|---:|",
+            "| rank | side_cell | status | candidate_horizons | best_horizon | best_sample_n | best_avg_net | best_net+% |",
+            "|---:|---|---|---|---:|---:|---:|---:|",
         ]
     )
     for idx, row in enumerate(stability["top_side_cells"][:10], start=1):
@@ -886,7 +906,8 @@ def render_markdown(
             "| "
             f"{idx} | {row['side_cell_key']} | {row['status']} | "
             f"{','.join(str(h) for h in row.get('candidate_horizons') or [])} | "
-            f"{row.get('best_horizon_minutes')} | {_fmt(row.get('best_avg_net_bps'))} | "
+            f"{row.get('best_horizon_minutes')} | {_fmt(row.get('best_sample_count_for_gate'))} | "
+            f"{_fmt(row.get('best_avg_net_bps'))} | "
             f"{_fmt(row.get('best_net_positive_pct'))} |"
         )
     lines.extend(
@@ -894,15 +915,16 @@ def render_markdown(
             "",
             "### Probe Candidates",
             "",
-            "| strategy | symbol | side | n | avg_net | p50 | net+% | reason |",
-            "|---|---:|---:|---:|---:|---:|---:|---|",
+            "| strategy | symbol | side | sample_n | rows | avg_net | p50 | net+% | reason |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---|",
         ]
     )
     for row in scorecard["probe_candidates"][:10]:
         lines.append(
             "| "
             f"{row['strategy_name']} | {row['symbol']} | {row['side']} | "
-            f"{row['n']} | {_fmt(row['avg_net_bps'])} | {_fmt(row['p50_gross_bps'])} | "
+            f"{_effective_sample_count(row)} | {row['n']} | "
+            f"{_fmt(row['avg_net_bps'])} | {_fmt(row['p50_gross_bps'])} | "
             f"{_fmt(row['net_positive_pct'])} | {row['learning_lane_reason']} |"
         )
 
@@ -911,8 +933,8 @@ def render_markdown(
             "",
             "## Counterfactual",
             "",
-            "| strategy | symbol | side | action | reason | n | ctx | avg_gross | p50 | p90 | avg_net | gross+% | net+% | max_ts |",
-            "|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|",
+            "| strategy | symbol | side | action | reason | sample_n | rows | distinct_ts | rows/ts | span_min | ctx | avg_gross | p50 | p90 | avg_net | gross+% | net+% | max_ts |",
+            "|---|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|",
         ]
     )
     for row in scorecard["rows"]:
@@ -920,7 +942,10 @@ def render_markdown(
             "| "
             f"{row['strategy_name']} | {row['symbol']} | {row['side']} | "
             f"{row['learning_lane_action']} | "
-            f"{row['reject_reason_code']} | {row['n']} | {row['joined_contexts']} | "
+            f"{row['reject_reason_code']} | {_effective_sample_count(row)} | "
+            f"{row['n']} | {_fmt(row.get('distinct_ts'))} | "
+            f"{_fmt(row.get('rows_per_distinct_ts'))} | "
+            f"{_fmt(row.get('timespan_minutes'))} | {row['joined_contexts']} | "
             f"{_fmt(row['avg_gross_bps'])} | {_fmt(row['p50_gross_bps'])} | "
             f"{_fmt(row['p90_gross_bps'])} | {_fmt(row['avg_net_bps'])} | "
             f"{_fmt(row['gross_positive_pct'])} | {_fmt(row['net_positive_pct'])} | "

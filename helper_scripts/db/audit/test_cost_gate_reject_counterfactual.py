@@ -47,6 +47,9 @@ def test_counterfactual_sql_uses_feature_rows_and_klines_not_outcomes() -> None:
     assert "trading.decision_outcomes" not in sql
     assert "LIKE 'cost_gate%%'" in sql
     assert "LIKE 'cost_gate%'" not in sql
+    assert "count(DISTINCT ts)::bigint AS distinct_ts" in sql
+    assert "rows_per_distinct_ts" in sql
+    assert "timespan_minutes" in sql
     assert "f.strategy_name = %s" in sql
     assert "f.symbol = %s" in sql
     assert "f.side = %s" in sql
@@ -167,6 +170,25 @@ def test_learning_lane_scorecard_classifies_probe_block_and_sample_gap() -> None
             "side": "Buy",
             "reject_reason_code": "cost_gate_js_demo_negative_edge",
             "n": 3,
+            "distinct_ts": 3,
+            "joined_contexts": 0,
+            "avg_gross_bps": 20.0,
+            "p50_gross_bps": 20.0,
+            "p90_gross_bps": 20.0,
+            "avg_net_bps": 16.0,
+            "gross_positive_pct": 100.0,
+            "net_positive_pct": 100.0,
+            "max_ts": "2026-06-21 08:47:59.990+02",
+        },
+        {
+            "strategy_name": "dup_signal",
+            "symbol": "SOLUSDT",
+            "side": "Buy",
+            "reject_reason_code": "cost_gate_js_demo_negative_edge",
+            "n": 500,
+            "distinct_ts": 3,
+            "rows_per_distinct_ts": 166.6667,
+            "timespan_minutes": 2.0,
             "joined_contexts": 0,
             "avg_gross_bps": 20.0,
             "p50_gross_bps": 20.0,
@@ -201,7 +223,8 @@ def test_learning_lane_scorecard_classifies_probe_block_and_sample_gap() -> None
     assert classify_learning_lane_row(cfg, rows[0])[0] == "LEARNING_PROBE_CANDIDATE"
     assert classify_learning_lane_row(cfg, rows[1])[0] == "BLOCK_CONFIRMED"
     assert classify_learning_lane_row(cfg, rows[2])[0] == "INSUFFICIENT_SAMPLE"
-    assert classify_learning_lane_row(cfg, rows[3])[0] == "DATA_COVERAGE_BLOCKER"
+    assert classify_learning_lane_row(cfg, rows[3])[0] == "INSUFFICIENT_SAMPLE"
+    assert classify_learning_lane_row(cfg, rows[4])[0] == "DATA_COVERAGE_BLOCKER"
 
     scorecard = build_learning_lane_scorecard(cfg, coverage, rows)
     assert scorecard["status"] == "LEARNING_LANE_PROBE_CANDIDATES_PRESENT"
@@ -209,7 +232,7 @@ def test_learning_lane_scorecard_classifies_probe_block_and_sample_gap() -> None
     assert scorecard["action_counts"] == {
         "LEARNING_PROBE_CANDIDATE": 1,
         "BLOCK_CONFIRMED": 1,
-        "INSUFFICIENT_SAMPLE": 1,
+        "INSUFFICIENT_SAMPLE": 2,
         "DATA_COVERAGE_BLOCKER": 1,
     }
     assert scorecard["probe_candidates"][0]["symbol"] == "ETHUSDT"
@@ -237,6 +260,15 @@ def test_learning_lane_scorecard_classifies_probe_block_and_sample_gap() -> None
     assert top["priority_score"] > 70.0
     assert top["median_margin_bps"] == pytest.approx(13.9914)
     assert top["hit_rate_margin_pct"] == pytest.approx(31.01)
+    sample_gap = [
+        row for row in ranking["top_side_cells"]
+        if row["side_cell_key"] == "dup_signal|SOLUSDT|Buy"
+    ][0]
+    assert sample_gap["learning_lane_action"] == "INSUFFICIENT_SAMPLE"
+    assert sample_gap["sample_count_for_gate"] == 3
+    assert sample_gap["n"] == 500
+    assert sample_gap["distinct_ts"] == 3
+    assert sample_gap["rows_per_distinct_ts"] == pytest.approx(166.6667)
 
 
 def test_horizon_stability_scorecard_compares_rejected_signal_windows() -> None:

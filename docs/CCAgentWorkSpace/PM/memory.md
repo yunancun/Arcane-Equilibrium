@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Cost Gate Reject Counterfactual Sample Guard
+
+- Runtime read-only counterfactual showed Cost Gate blocks contain learning candidates: BTCUSDT Buy is positive at 15m/60m after 4bp friction, while 240m flips to BTCUSDT Sell and confirms BTCUSDT Buy blocked.
+- Added `distinct_ts`, `timespan_minutes`, `rows_per_distinct_ts`, and `sample_count_for_gate` to Cost Gate reject counterfactual outputs, using distinct timestamps as the sample gate to prevent duplicate-row inflation.
+- Verification passed with py_compile, focused counterfactual pytest, related Cost Gate/alpha pytest, and diff-check; no Cost Gate lowering, order/probe authority, PG write, Bybit call, or runtime source sync was performed.
+
 ## 2026-06-22 Demo Data Flow Runtime Refresh
 
 - Direct read-only PG refresh confirmed demo/live_demo data is still accumulating: latest 1h has 2355 decision/risk rows, all rejected, and latest 24h has 61093 risk verdicts with 61090 rejects.
