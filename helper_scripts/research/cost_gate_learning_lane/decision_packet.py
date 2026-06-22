@@ -201,6 +201,57 @@ def _blocked_review_candidates(blocked_review: dict[str, Any] | None) -> int:
     )
 
 
+def _sealed_learning_review_ready(evidence: dict[str, Any] | None) -> bool:
+    payload = _dict(evidence)
+    answers = _dict(payload.get("answers"))
+    return (
+        payload.get("schema_version") == "sealed_horizon_learning_evidence_v1"
+        and payload.get("status") == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+        and answers.get("candidate_clears_operator_review_gate") is True
+        and answers.get("order_authority_granted") is not True
+        and answers.get("probe_authority_granted") is not True
+        and answers.get("global_cost_gate_lowering_recommended") is not True
+    )
+
+
+def _sealed_learning_summary(evidence: dict[str, Any] | None) -> dict[str, Any]:
+    payload = _dict(evidence)
+    if not payload:
+        return {
+            "status": None,
+            "side_cell_key": None,
+            "outcome_horizon_minutes": None,
+            "blocked_signal_outcome_count": 0,
+            "avg_net_bps": None,
+            "net_positive_pct": None,
+            "review_ready": False,
+        }
+    outcomes = _dict(payload.get("outcomes"))
+    review = _dict(payload.get("review"))
+    return {
+        "status": payload.get("status"),
+        "side_cell_key": payload.get("side_cell_key")
+        or review.get("top_side_cell_key"),
+        "source_kind": payload.get("source_kind"),
+        "outcome_horizon_minutes": payload.get("outcome_horizon_minutes"),
+        "blocked_signal_outcome_count": outcomes.get(
+            "blocked_signal_outcome_count"
+        )
+        or review.get("blocked_signal_outcome_count")
+        or 0,
+        "avg_gross_bps": outcomes.get("avg_gross_bps"),
+        "avg_net_bps": outcomes.get("avg_net_bps")
+        or review.get("avg_blocked_signal_outcome_net_bps"),
+        "net_positive_pct": outcomes.get("net_positive_pct")
+        or review.get("blocked_signal_net_positive_pct"),
+        "review_candidate_side_cell_count": review.get(
+            "review_candidate_side_cell_count"
+        ),
+        "top_side_cell_status": review.get("top_side_cell_status"),
+        "review_ready": _sealed_learning_review_ready(payload),
+    }
+
+
 def _counterfactual_has_learning_candidates(counterfactual: dict[str, Any] | None) -> bool:
     scorecard = _counterfactual_scorecard(counterfactual)
     ranking = _profit_ranking(counterfactual)
@@ -252,6 +303,7 @@ def _decision(
     plan: dict[str, Any] | None,
     activation_preflight: dict[str, Any] | None,
     blocked_review: dict[str, Any] | None,
+    sealed_horizon_learning_evidence: dict[str, Any] | None,
     stack_health: dict[str, Any] | None,
     artifact_summaries: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
@@ -260,6 +312,11 @@ def _decision(
     counterfresh = artifact_summaries["counterfactual"]["status"] == "FRESH"
     activation_status = _activation_status(activation_preflight, stack_health)
     review_status = _blocked_review_status(blocked_review)
+    sealed_summary = _sealed_learning_summary(sealed_horizon_learning_evidence)
+    sealed_review_ready = (
+        artifact_summaries["sealed_horizon_learning_evidence"]["status"] == "FRESH"
+        and sealed_summary["review_ready"] is True
+    )
 
     if artifact_summaries["data_flow"]["present"] is not True:
         return {
@@ -305,6 +362,18 @@ def _decision(
                 "status": "BUILD_OR_REFRESH_BOUNDED_LEARNING_PLAN",
                 "reason": "counterfactual_candidates_present_but_ready_plan_missing",
                 "next_actions": ["build_cost_gate_demo_learning_lane_plan_from_scorecard"],
+            }
+        if sealed_review_ready:
+            return {
+                "status": "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+                "reason": (
+                    "sealed_horizon_learning_evidence_clears_review_thresholds;"
+                    "production_learning_lane_activation_still_requires_operator_control"
+                ),
+                "next_actions": [
+                    "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe",
+                    "activate_or_repair_cost_gate_learning_lane_stack_before_runtime_probe",
+                ],
             }
         if activation_status is None:
             return {
@@ -375,6 +444,7 @@ def build_profit_learning_decision_packet(
     plan: dict[str, Any] | None = None,
     activation_preflight: dict[str, Any] | None = None,
     blocked_review: dict[str, Any] | None = None,
+    sealed_horizon_learning_evidence: dict[str, Any] | None = None,
     stack_health: dict[str, Any] | None = None,
     paths: dict[str, Path | None] | None = None,
     now_utc: dt.datetime | None = None,
@@ -422,6 +492,13 @@ def build_profit_learning_decision_packet(
             now_utc=now,
             max_age_seconds=max_age_seconds,
         ),
+        "sealed_horizon_learning_evidence": _artifact_summary(
+            name="sealed_horizon_learning_evidence",
+            path=paths.get("sealed_horizon_learning_evidence"),
+            payload=sealed_horizon_learning_evidence,
+            now_utc=now,
+            max_age_seconds=max_age_seconds,
+        ),
         "stack_health": _artifact_summary(
             name="stack_health",
             path=paths.get("stack_health"),
@@ -436,6 +513,7 @@ def build_profit_learning_decision_packet(
         plan=plan,
         activation_preflight=activation_preflight,
         blocked_review=blocked_review,
+        sealed_horizon_learning_evidence=sealed_horizon_learning_evidence,
         stack_health=stack_health,
         artifact_summaries=artifacts,
     )
@@ -443,6 +521,7 @@ def build_profit_learning_decision_packet(
     ranking = _profit_ranking(counterfactual)
     stability = _horizon_stability(counterfactual)
     review_status = _blocked_review_status(blocked_review)
+    sealed_summary = _sealed_learning_summary(sealed_horizon_learning_evidence)
 
     return {
         "schema_version": PROFIT_LEARNING_DECISION_PACKET_SCHEMA_VERSION,
@@ -474,6 +553,12 @@ def build_profit_learning_decision_packet(
                 review_status == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
                 or _blocked_review_candidates(blocked_review) > 0
             ),
+            "sealed_horizon_learning_evidence_available": artifacts[
+                "sealed_horizon_learning_evidence"
+            ]["present"],
+            "sealed_horizon_learning_evidence_candidates_present": sealed_summary[
+                "review_ready"
+            ],
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "order_authority_granted": False,
@@ -505,6 +590,7 @@ def build_profit_learning_decision_packet(
             "status": review_status,
             "candidate_count": _blocked_review_candidates(blocked_review),
         },
+        "sealed_horizon_learning_evidence": sealed_summary,
         "artifacts": artifacts,
         "boundary": BOUNDARY,
     }
@@ -544,10 +630,30 @@ def render_markdown(packet: dict[str, Any]) -> str:
         "activation_or_stack_health_available",
         "blocked_outcome_review_available",
         "blocked_outcome_review_candidates_present",
+        "sealed_horizon_learning_evidence_available",
+        "sealed_horizon_learning_evidence_candidates_present",
         "global_cost_gate_lowering_recommended",
         "order_authority_granted",
     ]:
         lines.append(f"| {key} | `{answers.get(key)}` |")
+
+    sealed = packet.get("sealed_horizon_learning_evidence") or {}
+    if sealed.get("review_ready"):
+        lines.extend(
+            [
+                "",
+                "## Sealed Horizon Learning Evidence",
+                "",
+                "| side_cell | horizon_min | outcomes | avg_net_bps | net_positive_pct |",
+                "|---|---:|---:|---:|---:|",
+                "| "
+                f"{sealed.get('side_cell_key')} | "
+                f"{sealed.get('outcome_horizon_minutes')} | "
+                f"{sealed.get('blocked_signal_outcome_count')} | "
+                f"{sealed.get('avg_net_bps')} | "
+                f"{sealed.get('net_positive_pct')} |",
+            ]
+        )
 
     top = ((packet.get("counterfactual") or {}).get("top_side_cells") or [])[:5]
     if top:
@@ -602,6 +708,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--plan-json", type=Path)
     parser.add_argument("--activation-preflight-json", type=Path)
     parser.add_argument("--blocked-outcome-review-json", type=Path)
+    parser.add_argument("--sealed-horizon-learning-evidence-json", type=Path)
     parser.add_argument("--stack-health-json", type=Path)
     parser.add_argument("--max-artifact-age-hours", type=int, default=24)
     parser.add_argument("--output", type=Path)
@@ -618,6 +725,9 @@ def main() -> int:
         "plan": _read_json(args.plan_json),
         "activation_preflight": _read_json(args.activation_preflight_json),
         "blocked_review": _read_json(args.blocked_outcome_review_json),
+        "sealed_horizon_learning_evidence": _read_json(
+            args.sealed_horizon_learning_evidence_json
+        ),
         "stack_health": _read_json(args.stack_health_json),
     }
     paths = {
@@ -626,6 +736,7 @@ def main() -> int:
         "plan": args.plan_json,
         "activation_preflight": args.activation_preflight_json,
         "blocked_review": args.blocked_outcome_review_json,
+        "sealed_horizon_learning_evidence": args.sealed_horizon_learning_evidence_json,
         "stack_health": args.stack_health_json,
     }
     packet = build_profit_learning_decision_packet(

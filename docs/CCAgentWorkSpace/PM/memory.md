@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Sealed Horizon Evidence Review Bridge
+
+- Profitability path scorecard now consumes `sealed_horizon_learning_evidence_v1`; passing evidence promotes the horizon path to `SEALED_HORIZON_LEARNING_EVIDENCE_READY_FOR_OPERATOR_REVIEW`.
+- Profit-learning decision packet now consumes the same evidence and can emit `OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE`, with explicit next actions for operator review and production learning-lane activation/repair before any probe.
+- This stops the loop from asking for more replay after sealed blocked-outcome evidence exists; it still grants no Cost Gate lowering, probe/order authority, runtime mutation, or promotion proof.
+
 ## 2026-06-22 Sealed Horizon Learning Evidence Builder
 
 - Added a reusable artifact-only builder that converts one sealed horizon plan candidate into mature reject materialization, candidate-horizon blocked outcomes, blocked-outcome review, and compact evidence packet.

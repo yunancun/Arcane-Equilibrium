@@ -119,6 +119,60 @@ def _sealed_horizon_replay() -> dict:
     }
 
 
+def _sealed_horizon_learning_evidence() -> dict:
+    return {
+        "schema_version": "sealed_horizon_learning_evidence_v1",
+        "generated_at_utc": "2026-06-22T05:30:00+00:00",
+        "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
+        "reason": "blocked_signal_outcomes_clear_review_thresholds",
+        "next_trigger": "operator_review_blocked_outcome_scorecard_before_probe_authority",
+        "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+        "strategy_name": "ma_crossover",
+        "symbol": "BTCUSDT",
+        "side": "Sell",
+        "source_kind": "horizon_specific_sealed_replay",
+        "outcome_horizon_minutes": 240,
+        "default_horizon_minutes": 60,
+        "materialization": {
+            "input_feature_row_count": 16515,
+            "materialized_record_count": 16515,
+            "appended_record_count": 16515,
+            "decision_counts": {"ORDER_AUTHORITY_NOT_GRANTED": 16515},
+            "all_order_authority_not_granted": True,
+        },
+        "outcomes": {
+            "blocked_signal_outcome_count": 16515,
+            "appended_outcome_count": 16515,
+            "avg_gross_bps": 7.0511,
+            "avg_net_bps": 3.0511,
+            "net_positive_pct": 68.5619,
+        },
+        "review": {
+            "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
+            "review_candidate_side_cell_count": 1,
+            "blocked_signal_outcome_count": 16515,
+            "top_side_cell_key": "ma_crossover|BTCUSDT|Sell",
+            "top_side_cell_status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE",
+            "top_side_cell_wrongful_block_score": 16000.0,
+        },
+        "answers": {
+            "sealed_candidate_materialized": True,
+            "blocked_signal_outcomes_recorded": True,
+            "candidate_clears_operator_review_gate": True,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "artifacts": {
+            "ledger": {"sha256": "ledger-sha"},
+            "source_rows": {"sha256": "source-rows-sha"},
+            "review": {"sha256": "review-sha"},
+        },
+    }
+
+
 def test_cost_gate_candidates_and_horizon_paths_do_not_grant_authority() -> None:
     scorecard = build_profitability_path_scorecard(
         cost_gate_counterfactual=_cost_gate_counterfactual(),
@@ -192,6 +246,49 @@ def test_sealed_horizon_replay_advances_path_to_learning_accumulation() -> None:
     assert scorecard["artifacts"]["horizon_sealed_replay"]["present"] is True
     assert scorecard["answers"]["global_cost_gate_lowering_recommended"] is False
     assert horizon_path["order_authority"] == "NOT_GRANTED"
+    assert horizon_path["promotion_evidence"] is False
+
+
+def test_sealed_horizon_learning_evidence_advances_path_to_operator_review() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "ACTIVATE_OR_REPAIR_LEARNING_STACK",
+            "next_actions": ["activate_or_repair_cost_gate_learning_lane_stack"],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "NOT_ACCUMULATING"},
+        },
+        activation_preflight={"status": "NOT_ACCUMULATING"},
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        now_utc=dt.datetime(2026, 6, 22, 6, tzinfo=dt.timezone.utc),
+    )
+
+    paths = {row["path_id"]: row for row in scorecard["top_paths"]}
+    horizon_path = paths["horizon_edge_amplification:ma_crossover|BTCUSDT|Sell"]
+    assert horizon_path["status"] == (
+        "SEALED_HORIZON_LEARNING_EVIDENCE_READY_FOR_OPERATOR_REVIEW"
+    )
+    assert horizon_path["priority_rank"] == 1
+    assert horizon_path["required_next_gate"] == (
+        "operator_reviews_bounded_demo_probe_for_sealed_horizon_candidate"
+    )
+    assert horizon_path["next_action"] == (
+        "operator_review_sealed_horizon_learning_evidence_before_any_bounded_demo_probe"
+    )
+    assert horizon_path["evidence"]["sealed_learning_operator_review_ready"] is True
+    assert horizon_path["evidence"]["sealed_learning_outcome_horizon_minutes"] == 240
+    assert horizon_path["evidence"]["sealed_learning_blocked_signal_outcome_count"] == (
+        16515
+    )
+    assert horizon_path["evidence"]["sealed_learning_avg_net_bps"] == 3.0511
+    assert scorecard["artifacts"]["horizon_learning_evidence"]["present"] is True
+    assert scorecard["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert horizon_path["order_authority"] == "NOT_GRANTED"
+    assert horizon_path["main_cost_gate_adjustment"] == "NONE"
     assert horizon_path["promotion_evidence"] is False
 
 

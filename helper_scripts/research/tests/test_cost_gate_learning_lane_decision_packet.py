@@ -83,6 +83,47 @@ def _ready_plan() -> dict:
     }
 
 
+def _sealed_horizon_learning_evidence() -> dict:
+    return {
+        "schema_version": "sealed_horizon_learning_evidence_v1",
+        "generated_at_utc": "2026-06-22T11:59:00+00:00",
+        "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
+        "reason": "blocked_signal_outcomes_clear_review_thresholds",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "source_kind": "horizon_specific_sealed_replay",
+        "outcome_horizon_minutes": 240,
+        "materialization": {
+            "input_feature_row_count": 16515,
+            "materialized_record_count": 16515,
+            "decision_counts": {"ORDER_AUTHORITY_NOT_GRANTED": 16515},
+            "all_order_authority_not_granted": True,
+        },
+        "outcomes": {
+            "blocked_signal_outcome_count": 16515,
+            "avg_gross_bps": 7.0511,
+            "avg_net_bps": 3.0511,
+            "net_positive_pct": 68.5619,
+        },
+        "review": {
+            "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
+            "review_candidate_side_cell_count": 1,
+            "blocked_signal_outcome_count": 16515,
+            "top_side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "top_side_cell_status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE",
+        },
+        "answers": {
+            "sealed_candidate_materialized": True,
+            "blocked_signal_outcomes_recorded": True,
+            "candidate_clears_operator_review_gate": True,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+    }
+
+
 def test_missing_counterfactual_routes_recorded_rejects_to_scorecard_refresh() -> None:
     packet = build_profit_learning_decision_packet(
         data_flow=_data_flow(),
@@ -160,6 +201,44 @@ def test_blocked_outcome_candidate_surfaces_operator_review_without_authority() 
     assert packet["answers"]["order_authority_granted"] is False
     assert packet["answers"]["global_cost_gate_lowering_recommended"] is False
     assert "Cost Gate Profit Learning Decision Packet" in markdown
+    assert "ma_crossover|ETHUSDT|Sell" in markdown
+
+
+def test_sealed_horizon_learning_evidence_surfaces_operator_review_without_authority() -> None:
+    packet = build_profit_learning_decision_packet(
+        data_flow=_data_flow(),
+        counterfactual=_counterfactual(),
+        plan=_ready_plan(),
+        activation_preflight={
+            "schema_version": "cost_gate_demo_learning_lane_activation_preflight_v1",
+            "generated_at_utc": "2026-06-22T11:58:00+00:00",
+            "status": "NOT_ACCUMULATING",
+            "next_actions": ["activate_or_repair_cost_gate_learning_lane_stack"],
+        },
+        sealed_horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        now_utc=NOW,
+    )
+    markdown = render_markdown(packet)
+
+    assert packet["status"] == (
+        "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE"
+    )
+    assert packet["answers"]["sealed_horizon_learning_evidence_available"] is True
+    assert packet["answers"][
+        "sealed_horizon_learning_evidence_candidates_present"
+    ] is True
+    assert packet["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert packet["answers"]["order_authority_granted"] is False
+    assert packet["answers"]["main_cost_gate_adjustment"] == "NONE"
+    assert packet["sealed_horizon_learning_evidence"]["side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert packet["sealed_horizon_learning_evidence"]["outcome_horizon_minutes"] == 240
+    assert packet["next_actions"] == [
+        "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe",
+        "activate_or_repair_cost_gate_learning_lane_stack_before_runtime_probe",
+    ]
+    assert "Sealed Horizon Learning Evidence" in markdown
     assert "ma_crossover|ETHUSDT|Sell" in markdown
 
 
