@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Runtime Source Reconcile Current Target Dry Run
+
+- Refreshed the read-only remote probe and apply dry-run against current `origin/main=34066e5e`, superseding the prior dry-run target `eaed0cf2`.
+- `trade-core` still reports runtime HEAD `917be4cc`, target object unavailable, dirty/untracked 56, review-required 13, and apply dry-run status `DRY_RUN_OPERATOR_APPROVAL_REQUIRED` with 0 blockers and 10 previewed commands.
+- No runtime fetch/pull/reset/clean/source sync was executed; v375-v377 demo-learning monitors/packets remain blocked from running on Linux until operator-approved reconcile.
+
 ## 2026-06-22 Profit-Learning Packet Alpha Ingestion
 
 - Wired `profit_learning_decision_packet_latest.json` into `alpha_discovery_throughput.runtime_runner`, profitability blocker classification, and `learning_worklist` evidence.
