@@ -31,13 +31,16 @@
   - `test_alpha_discovery_learning_worklist.py`
   - Result：`74 passed`。
 - `git diff --check` passed。
+- Linux source fast-forwarded to `1553d63c`.
+- Linux py_compile：touched modules passed。
+- Linux focused pytest：same suite `74 passed`。
 
 ## 邊界
 
-本 checkpoint 仍是 source/test/docs only：no CI run, no PG write/schema migration, no Bybit private/signed/trading call, no deploy/rebuild/restart, no cron install/env/auth/risk/order/strategy/runtime mutation, no Cost Gate lowering, no probe/order authority, no promotion proof。
+本 checkpoint 仍是 source/test/docs + Linux source sync/read-only test only：no CI run, no PG write/schema migration, no Bybit private/signed/trading call, no deploy/rebuild/restart, no cron install/env/auth/risk/order/strategy/runtime mutation, no Cost Gate lowering, no probe/order authority, no promotion proof。
 
-## 待完成
+## 同步
 
-- Commit / push。
-- Linux `trade-core` source sync。
-- Linux focused py_compile / pytest / artifact-only smoke。
+- Source commit：`1553d63c Add matched controls to bounded probe reviews [skip ci]`。
+- GitHub `origin/main` 已推送。
+- Linux `trade-core` `/home/ncyu/BybitOpenClaw/srv` 已 fast-forward 到同一 source commit。
