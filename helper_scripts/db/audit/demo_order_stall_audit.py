@@ -129,10 +129,10 @@ order_states AS (
             'deactivated'
         )) AS any_cancelled_state,
         bool_or(
-            coalesce(osc.reason, '') ILIKE '%post_only_cross%'
-            OR coalesce(osc.reason, '') ILIKE '%postonlywilltakeliquidity%'
-            OR coalesce(osc.reason, '') ILIKE '%post only will take liquidity%'
-            OR coalesce(osc.reason, '') ILIKE '%ec_postonlywilltakeliquidity%'
+            coalesce(osc.reason, '') ILIKE '%%post_only_cross%%'
+            OR coalesce(osc.reason, '') ILIKE '%%postonlywilltakeliquidity%%'
+            OR coalesce(osc.reason, '') ILIKE '%%post only will take liquidity%%'
+            OR coalesce(osc.reason, '') ILIKE '%%ec_postonlywilltakeliquidity%%'
         ) AS any_post_only_cross
     FROM orders o
     LEFT JOIN trading.order_state_changes osc
