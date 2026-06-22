@@ -1729,3 +1729,11 @@
 - The current intended blocker is specific: `demo_learning_stack_activation_packet_ready_for_operator_dry_run`, not generic `demo_learning_stack_not_installed`. This carries missing crons, dry-run/apply/rollback/verify commands, edge-amplification levers, and no-authority answers into the worklist.
 - Verification: Mac py_compile and focused alpha/worklist pytest `62 passed`; source commit `277b00be` pushed `[skip ci]`; Linux fast-forwarded to `277b00be`; Linux py_compile and same pytest `62 passed`; Mac/Linux `git diff --check` clean.
 - Boundary: source/test/docs + Linux source sync/read-only/static tests only; no CI, no cron install, no PG write/schema migration, no Bybit private/signed/trading call, no deploy/restart, no env/auth/risk/order/strategy/runtime mutation, no Cost Gate lowering, no probe/order authority, no promotion proof.
+
+## 2026-06-22 Alpha Cron Activation Packet + Source Cleanliness
+
+- v409 makes the v408 activation-packet ingestion durable in the natural alpha cron path: `alpha_discovery_throughput_cron.sh` refreshes canonical `demo_learning_stack_activation_packet_latest.json` before the alpha runner.
+- v409 also moves the volatile vol-event robust-ruling latest report out of tracked docs by default and into `$OPENCLAW_DATA_DIR/order_flow_alpha/vol-event-robust-ruling.md`; `OPENCLAW_VOL_EVENT_RULING_REPORT_PATH` is now the explicit archival override.
+- Runtime smoke on Linux after source sync produced packet `READY_FOR_OPERATOR_DRY_RUN`, alpha `alpha_discovery_runtime_killboard_v8`, source `SYNCED_CLEAN`, worklist `alpha_learning_worklist_v5`, top task `cost_gate_learning_activation`, and blocker `demo_learning_stack_activation_packet_ready_for_operator_dry_run`.
+- Verification: Mac bash/py_compile passed; Mac cron tests `6 passed`; Mac research alpha/worklist/vol-event tests `64 passed`; source commit `2d4bad29` pushed `[skip ci]`; Linux fast-forwarded to `2d4bad29`; Linux same checks `6 + 64 passed`; Linux artifact-only cron smoke passed and source remained clean.
+- Boundary: source/test/docs + Linux source sync + `/tmp/openclaw` artifact-only smoke only; no CI, no new cron install, no PG write/schema migration, no Bybit private/signed/trading call, no deploy/restart, no env/auth/risk/order/strategy mutation, no Cost Gate lowering, no probe/order authority, no promotion proof.
