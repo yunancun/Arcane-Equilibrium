@@ -1155,7 +1155,7 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
         now_utc=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.timezone.utc),
     )
 
-    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v6"
+    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v7"
     assert result["killboard"]["is_fast_discovery_active"] is True
     assert result["killboard"]["source_present_count"] == 5
     assert result["killboard"]["runtime_source_activation_ready"] is False
@@ -1484,6 +1484,51 @@ def _write_demo_learning_evidence_latest(
     return path
 
 
+def _write_demo_learning_stack_healthcheck_latest(
+    data: Path,
+    *,
+    status: str,
+    reason: str,
+    next_action: str,
+    ts_utc: str = "2026-06-21T18:04:00+00:00",
+    source_ready: bool = True,
+    stack_installed: bool = False,
+    heartbeats_recent: bool = False,
+    statuses_recent: bool = False,
+    latest_artifacts_present: bool = False,
+    ledger_rows_present: bool = False,
+    blocked_outcomes_present: bool = False,
+) -> Path:
+    path = (
+        data
+        / "demo_learning_stack_healthcheck"
+        / "demo_learning_stack_healthcheck_latest.json"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema_version": "demo_learning_stack_healthcheck_v1",
+        "ts_utc": ts_utc,
+        "status": status,
+        "reason": reason,
+        "next_action": next_action,
+        "answers": {
+            "source_ready": source_ready,
+            "stack_installed": stack_installed,
+            "heartbeats_recent": heartbeats_recent,
+            "statuses_recent": statuses_recent,
+            "latest_artifacts_present": latest_artifacts_present,
+            "cost_gate_learning_ledger_rows_present": ledger_rows_present,
+            "blocked_signal_outcomes_present": blocked_outcomes_present,
+            "blocked_outcome_review_present": blocked_outcomes_present,
+            "demo_learning_evidence_classification_status": (
+                "PG_REJECTS_RECORDED_LEARNING_LANE_NOT_ACCUMULATING"
+            ),
+            "cost_gate_learning_review_status": None,
+        },
+    }), encoding="utf-8")
+    return path
+
+
 def test_cost_gate_arm_uses_demo_learning_evidence_for_pg_reject_gap(tmp_path):
     data = tmp_path / "openclaw"
     artifact = _write_demo_learning_evidence_latest(
@@ -1517,6 +1562,32 @@ def test_cost_gate_arm_uses_demo_learning_evidence_for_pg_reject_gap(tmp_path):
     )
     assert blocker["demo_learning_evidence_cost_gate_rejects_recorded_in_pg"] is True
     assert blocker["demo_learning_evidence_risk_verdicts"] == 24155
+    assert blocker["engineering_actionable"] is True
+
+
+def test_cost_gate_arm_uses_demo_learning_stack_healthcheck_for_not_installed(tmp_path):
+    data = tmp_path / "openclaw"
+    artifact = _write_demo_learning_stack_healthcheck_latest(
+        data,
+        status="NOT_INSTALLED",
+        reason="one_or_both_demo_learning_stack_crons_missing",
+        next_action="install_stack_after_operator_source_reconcile",
+    )
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+
+    assert arm["detail"]["demo_learning_stack_healthcheck_source_path"] == str(artifact)
+    assert arm["detail"]["demo_learning_stack_healthcheck_status"] == "NOT_INSTALLED"
+    assert arm["detail"]["demo_learning_stack_stack_installed"] is False
+    assert arm["detail"]["demo_learning_stack_source_ready"] is True
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["primary_blocker"] == "demo_learning_stack_not_installed"
+    assert blocker["next_trigger"] == "install_stack_after_operator_source_reconcile"
+    assert blocker["demo_learning_stack_healthcheck_status"] == "NOT_INSTALLED"
+    assert blocker["demo_learning_stack_stack_installed"] is False
+    assert blocker["demo_learning_stack_cost_gate_learning_ledger_rows_present"] is False
     assert blocker["engineering_actionable"] is True
 
 

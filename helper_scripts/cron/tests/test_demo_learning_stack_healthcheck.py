@@ -146,6 +146,46 @@ def test_active_stack_reports_evidence_active(tmp_path: Path) -> None:
     assert payload["components"]["cost_gate_learning_lane"]["latest_status"]["ledger_row_count"] == 9
 
 
+def test_json_output_writes_explicit_artifact(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    head = _git_repo(repo)
+    data = tmp_path / "data"
+    _populate_active_data(data)
+    cron_file = tmp_path / "crontab.txt"
+    output = data / "demo_learning_stack_healthcheck" / "latest.json"
+    _write(cron_file, _active_crontab())
+
+    proc = subprocess.run(
+        [
+            sys.executable,
+            str(HEALTHCHECK),
+            "--data-dir",
+            str(data),
+            "--repo-root",
+            str(repo),
+            "--expected-head",
+            head[:12],
+            "--crontab-text-file",
+            str(cron_file),
+            "--now-utc",
+            "2026-06-22T00:00:00Z",
+            "--json-output",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    stdout_payload = json.loads(proc.stdout)
+    artifact_payload = json.loads(output.read_text(encoding="utf-8"))
+    assert artifact_payload == stdout_payload
+    assert artifact_payload["status"] == "EVIDENCE_STACK_ACTIVE"
+    assert artifact_payload["boundary"].startswith(
+        "read-only crontab/artifact/status/source healthcheck with optional"
+    )
+
+
 def test_stale_heartbeat_blocks_active_status(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     head = _git_repo(repo)

@@ -25,6 +25,13 @@
 
 ## 近期記錄
 
+## 2026-06-22 Demo Learning Stack Health Evidence Ingestion
+
+- `demo_learning_stack_healthcheck.py` can now write an explicit local JSON artifact via `--json-output` while still printing stdout.
+- Runtime killboard schema is now `alpha_discovery_runtime_killboard_v7`; it ingests the healthcheck latest artifact into the Cost Gate learning arm.
+- Alpha learning worklist schema is now `alpha_learning_worklist_v4`; Cost Gate learning activation carries stack-health evidence, is operator-authorized runtime mutation, and requires `demo_learning_stack_healthcheck_status == EVIDENCE_STACK_ACTIVE` before completion.
+- Boundary remains source/test/docs plus optional local JSON artifact output only; no runtime sync/install/write/order/Cost Gate relaxation was performed.
+
 ## 2026-06-22 Demo Learning Stack Post-Install Healthcheck
 
 - Added `demo_learning_stack_healthcheck.py` as the read-only acceptance gate after runtime source reconcile and stack install.

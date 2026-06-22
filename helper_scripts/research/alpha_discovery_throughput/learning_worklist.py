@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-LEARNING_WORKLIST_SCHEMA_VERSION = "alpha_learning_worklist_v3"
+LEARNING_WORKLIST_SCHEMA_VERSION = "alpha_learning_worklist_v4"
 
 _TASK_PRIORITY = {
     "promotion_review": 0,
@@ -70,6 +70,20 @@ _EVIDENCE_KEYS = (
     "learning_lane_git_status",
     "learning_lane_git_behind_count",
     "learning_lane_git_dirty_path_count",
+    "demo_learning_stack_healthcheck_status",
+    "demo_learning_stack_healthcheck_reason",
+    "demo_learning_stack_healthcheck_next_action",
+    "demo_learning_stack_healthcheck_ts_utc",
+    "demo_learning_stack_healthcheck_age_seconds",
+    "demo_learning_stack_healthcheck_source_ok",
+    "demo_learning_stack_source_ready",
+    "demo_learning_stack_stack_installed",
+    "demo_learning_stack_heartbeats_recent",
+    "demo_learning_stack_statuses_recent",
+    "demo_learning_stack_latest_artifacts_present",
+    "demo_learning_stack_cost_gate_learning_ledger_rows_present",
+    "demo_learning_stack_blocked_signal_outcomes_present",
+    "demo_learning_stack_blocked_outcome_review_present",
     "demo_learning_evidence_status",
     "demo_learning_evidence_cost_gate_rejects_recorded_in_pg",
     "demo_learning_evidence_order_flow_evidence_status",
@@ -144,6 +158,7 @@ def _classify_task_type(row: dict[str, Any]) -> str:
             return "cost_gate_outcome_review"
         if (
             "learning_lane" in primary
+            or "demo_learning_stack" in primary
             or "cost_gate_reject" in primary
             or "cost_gate" in next_trigger
         ):
@@ -282,6 +297,7 @@ def _completion_evidence_required(task_type: str) -> list[str]:
         ]
     if task_type == "cost_gate_learning_activation":
         return [
+            "demo_learning_stack_healthcheck_status == EVIDENCE_STACK_ACTIVE",
             "learning_loop_status not in NOT_SEEN/MISSING",
             "ledger_total_rows or materialized_record_count increases",
             "blocked_signal_outcome_count increases after outcome refresh",
@@ -364,7 +380,11 @@ def _runtime_mutation_required(row: dict[str, Any], task_type: str) -> bool:
 def _operator_authorization_required(row: dict[str, Any], task_type: str) -> bool:
     if _bool(row.get("operator_actionable")):
         return True
-    if task_type in {"operator_probe_review", "runtime_source_reconcile"}:
+    if task_type in {
+        "operator_probe_review",
+        "runtime_source_reconcile",
+        "cost_gate_learning_activation",
+    }:
         return True
     next_trigger = _str(row.get("next_trigger")).lower()
     return "operator_" in next_trigger or "operator-review" in next_trigger

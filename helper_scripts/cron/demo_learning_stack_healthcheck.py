@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -370,9 +371,10 @@ def build_healthcheck(
             "cost_gate_learning_lane": cost,
         },
         "boundary": (
-            "read-only crontab/artifact/status/source healthcheck; no PG write, "
-            "Bybit call, order authority, writer enablement, Cost Gate lowering, "
-            "deploy, restart, or crontab mutation"
+            "read-only crontab/artifact/status/source healthcheck with optional "
+            "explicit local JSON artifact output only; no PG write, Bybit call, "
+            "order authority, writer enablement, Cost Gate lowering, deploy, "
+            "restart, or crontab mutation"
         ),
     }
 
@@ -403,7 +405,26 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help="return nonzero unless status is EVIDENCE_STACK_ACTIVE",
     )
+    parser.add_argument(
+        "--json-output",
+        type=Path,
+        default=None,
+        help=(
+            "optional explicit artifact path to write the healthcheck JSON; "
+            "stdout is still emitted"
+        ),
+    )
     return parser.parse_args(argv)
+
+
+def _write_json_atomic(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temp.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    temp.replace(path)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -420,7 +441,10 @@ def main(argv: list[str] | None = None) -> int:
         max_status_age_minutes=args.max_status_age_minutes,
         now_utc=now,
     )
-    print(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2))
+    text = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2)
+    print(text)
+    if args.json_output is not None:
+        _write_json_atomic(args.json_output, payload)
     if args.fail_on_not_active and payload.get("status") != "EVIDENCE_STACK_ACTIVE":
         return 2
     return 0
