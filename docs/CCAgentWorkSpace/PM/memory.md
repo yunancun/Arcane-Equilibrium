@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Runtime Source Reconcile Blocker Manifest
+
+- Read-only runtime classification found `trade-core` still at HEAD `917be4cc`, stale runtime `origin/main=1401848b`, while GitHub/local main is `e2b90306`.
+- Dirty tree has 55 paths: 43 are content-equivalent to current main, but 7 tracked paths, 3 untracked current-main paths, and the untracked Cost Gate learning-lane directory still need operator-approved preserve/reconcile handling.
+- Demo-learning stack crons and health artifacts remain absent; no runtime fetch/pull/reset/clean/source sync or cron install was performed.
+
 ## 2026-06-22 Demo Learning Stack Healthcheck Cron Wiring
 
 - Added `demo_learning_stack_healthcheck_cron.sh` plus dry-run-gated `install_demo_learning_stack_healthcheck_cron.sh` so the stack health latest JSON can self-refresh after an operator-approved install.
