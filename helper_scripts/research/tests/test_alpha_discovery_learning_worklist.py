@@ -192,14 +192,10 @@ def test_learning_worklist_carries_ranked_cost_gate_blocked_review_evidence():
                 "blocked_signal_top_review_wrongful_block_score": 3.444444,
                 "blocked_signal_top_review_net_cost_cushion_bps": 5.166667,
                 "learning_loop_last_scorecard_horizon_stability_status": (
-                    "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
+                    "SINGLE_HORIZON_ONLY"
                 ),
                 "learning_loop_last_scorecard_horizon_stability_horizons": [
-                    15,
-                    30,
                     60,
-                    120,
-                    240,
                 ],
                 "profit_learning_counterfactual_horizon_stability_status": (
                     "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
@@ -241,6 +237,9 @@ def test_learning_worklist_carries_ranked_cost_gate_blocked_review_evidence():
     )
     assert task["evidence"][
         "learning_loop_last_scorecard_horizon_stability_status"
+    ] == "SINGLE_HORIZON_ONLY"
+    assert task["evidence"][
+        "profit_learning_counterfactual_horizon_stability_status"
     ] == "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT"
     assert task["evidence"]["profit_learning_top_side_cells"][0][
         "candidate_horizons_minutes"
