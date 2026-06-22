@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Profit-Learning Decision Packet
+
+- Added `helper_scripts/research/cost_gate_learning_lane/decision_packet.py`, an artifact-only closure packet that consumes demo data-flow, counterfactual, bounded-plan, activation/stack-health, and blocked-outcome-review JSON.
+- Packet fails closed into explicit next actions such as running counterfactual, building a bounded plan, repairing activation, or operator-reviewing blocked-outcome candidates; main Cost Gate lowering and order authority remain false.
+- Verification passed locally with py_compile, focused packet tests, related Cost Gate/data-flow tests, and diff-check; runtime source is still unsynced, so the packet has not run on Linux yet.
+
 ## 2026-06-22 Demo Data Flow Rolling Monitor
 
 - Added `helper_scripts/db/audit/demo_data_flow_monitor.py`, a read-only multi-window wrapper around `demo_order_stall_audit` for 1h/4h/24h demo/live_demo data-flow accumulation.
