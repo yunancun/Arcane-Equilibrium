@@ -1701,6 +1701,7 @@ def _write_bounded_probe_result_review_latest(
     generated_at: str = "2026-06-21T18:04:45+00:00",
     evidence_quality_status: str | None = None,
     matched_control_count: int | None = None,
+    matched_control_avg_net_bps: float = 1.0,
 ) -> Path:
     path = (
         data
@@ -1718,6 +1719,35 @@ def _write_bounded_probe_result_review_latest(
         matched_control_count = 0 if "MISSING" in evidence_quality_status else 3
     avg_net = -1.2 if status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED" else 2.5
     net_positive = 33.3 if status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED" else 100.0
+    probe_minus_control = (
+        avg_net - matched_control_avg_net_bps
+        if matched_control_count
+        else None
+    )
+    probe_edge_capture_ratio = (
+        round(avg_net / matched_control_avg_net_bps, 4)
+        if matched_control_count and matched_control_avg_net_bps > 0.0
+        else None
+    )
+    probe_execution_gap_bps = (
+        round(-probe_minus_control, 4)
+        if probe_minus_control is not None and probe_minus_control < 0.0
+        else None
+    )
+    execution_realism_gap = (
+        evidence_quality_status == "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP"
+    )
+    next_action = (
+        "stop_probe_and_keep_cost_gate_blocked_for_this_side_cell"
+        if status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED"
+        else "record_matched_blocked_signal_outcomes_for_same_side_cell_and_horizon"
+        if evidence_quality_status == "CONTROL_COMPARISON_MISSING"
+        else "operator_review_probe_learning_results_before_any_promotion_or_gate_change"
+    )
+    if execution_realism_gap:
+        next_action = (
+            "investigate_probe_execution_realism_slippage_and_timing_before_cost_gate_review"
+        )
     payload = {
         "schema_version": "bounded_demo_probe_result_review_v1",
         "generated_at_utc": generated_at,
@@ -1743,12 +1773,17 @@ def _write_bounded_probe_result_review_latest(
             "matched_control_required": True,
             "matched_control_present": matched_control_count > 0,
             "matched_control_outcome_count": matched_control_count,
-            "matched_control_avg_net_bps": 1.0 if matched_control_count else None,
-            "matched_control_net_positive_pct": 66.7 if matched_control_count else None,
-            "probe_minus_control_avg_net_bps": avg_net - 1.0
+            "matched_control_avg_net_bps": matched_control_avg_net_bps
             if matched_control_count
             else None,
-            "probe_outperforms_matched_control": matched_control_count > 0 and avg_net > 1.0,
+            "matched_control_net_positive_pct": 66.7 if matched_control_count else None,
+            "probe_minus_control_avg_net_bps": probe_minus_control,
+            "probe_edge_capture_ratio": probe_edge_capture_ratio,
+            "probe_execution_gap_bps": probe_execution_gap_bps,
+            "probe_outperforms_matched_control": (
+                matched_control_count > 0 and avg_net > matched_control_avg_net_bps
+            ),
+            "execution_realism_gap": execution_realism_gap,
             "anecdote_risk": evidence_quality_status
             in {
                 "CONTROL_COMPARISON_MISSING",
@@ -1772,19 +1807,14 @@ def _write_bounded_probe_result_review_latest(
                 "CONTROL_COMPARISON_MISSING",
                 "MATCHED_CONTROL_SAMPLE_BELOW_FIRST_REVIEW_FLOOR",
             },
+            "execution_realism_gap": execution_realism_gap,
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "probe_authority_granted": False,
             "order_authority_granted": False,
             "promotion_evidence": False,
         },
-        "next_actions": [
-            "stop_probe_and_keep_cost_gate_blocked_for_this_side_cell"
-            if status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED"
-            else "record_matched_blocked_signal_outcomes_for_same_side_cell_and_horizon"
-            if evidence_quality_status == "CONTROL_COMPARISON_MISSING"
-            else "operator_review_probe_learning_results_before_any_promotion_or_gate_change"
-        ],
+        "next_actions": [next_action],
         "design": {
             "status": "READY_FOR_SEPARATE_OPERATOR_AUTHORIZATION",
             "side_cell_key": "ma_crossover|ETHUSDT|Sell",
@@ -2261,6 +2291,53 @@ def test_positive_bounded_probe_result_without_control_stays_data_coverage(tmp_p
     assert blocker["bounded_probe_result_review_anecdote_risk"] is True
     assert task["requires_operator_authorization"] is False
     assert task["evidence"]["bounded_probe_result_review_matched_control_outcome_count"] == 0
+
+
+def test_positive_bounded_probe_under_captures_control_becomes_execution_gap(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_profit_learning_decision_packet_latest(
+        data,
+        status="OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+        reason="sealed_horizon_learning_evidence_clears_review_thresholds",
+        next_actions=[
+            "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+        ],
+        sealed_horizon_candidate=True,
+    )
+    _write_sealed_horizon_probe_preflight_latest(
+        data,
+        status="READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
+    )
+    _write_bounded_probe_result_review_latest(
+        data,
+        status="FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+        evidence_quality_status="PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP",
+        matched_control_count=3,
+        matched_control_avg_net_bps=3.0,
+    )
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    task = plan["learning_worklist"]["top_task"]
+
+    assert blocker["blocker_class"] == "execution_realism"
+    assert blocker["primary_blocker"] == (
+        "bounded_probe_result_review_probe_under_captures_matched_control_edge"
+    )
+    assert blocker["operator_actionable"] is False
+    assert blocker["engineering_actionable"] is True
+    assert blocker["bounded_probe_result_review_probe_edge_capture_ratio"] == 0.8333
+    assert blocker["bounded_probe_result_review_probe_execution_gap_bps"] == 0.5
+    assert blocker["bounded_probe_result_review_execution_realism_gap"] is True
+    assert task["task_type"] == "bounded_probe_execution_realism"
+    assert task["learning_objective"] == (
+        "measure_probe_slippage_timing_and_fill_quality_against_matched_control_edge"
+    )
+    assert task["requires_operator_authorization"] is False
+    assert task["runtime_mutation_required"] is False
+    assert task["evidence"]["bounded_probe_result_review_execution_realism_gap"] is True
 
 
 def _write_polymarket_leadlag_latest(data: Path, payload: dict) -> Path:

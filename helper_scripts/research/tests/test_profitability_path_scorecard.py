@@ -274,6 +274,35 @@ def _bounded_probe_result_review(
             evidence_quality_status = "NO_PROBE_OUTCOMES_RECORDED"
     if matched_control_count is None:
         matched_control_count = 0 if "MISSING" in evidence_quality_status else completed
+    probe_minus_control = (
+        avg_net_bps - matched_control_avg_net_bps
+        if matched_control_count
+        else None
+    )
+    probe_edge_capture_ratio = (
+        round(avg_net_bps / matched_control_avg_net_bps, 4)
+        if matched_control_count and matched_control_avg_net_bps > 0.0
+        else None
+    )
+    probe_execution_gap_bps = (
+        round(-probe_minus_control, 4)
+        if probe_minus_control is not None and probe_minus_control < 0.0
+        else None
+    )
+    execution_realism_gap = (
+        evidence_quality_status == "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP"
+    )
+    next_action = "operator_review_first_probe_results_before_any_additional_probe_budget"
+    if status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
+        next_action = (
+            "operator_review_probe_learning_results_before_any_promotion_or_gate_change"
+        )
+    elif status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED":
+        next_action = "stop_probe_and_keep_cost_gate_blocked_for_this_side_cell"
+    if execution_realism_gap:
+        next_action = (
+            "investigate_probe_execution_realism_slippage_and_timing_before_cost_gate_review"
+        )
     return {
         "schema_version": "bounded_demo_probe_result_review_v1",
         "generated_at_utc": "2026-06-22T07:00:00+00:00",
@@ -312,12 +341,13 @@ def _bounded_probe_result_review(
             "matched_control_net_positive_pct": 66.7
             if matched_control_count
             else None,
-            "probe_minus_control_avg_net_bps": avg_net_bps - matched_control_avg_net_bps
-            if matched_control_count
-            else None,
+            "probe_minus_control_avg_net_bps": probe_minus_control,
+            "probe_edge_capture_ratio": probe_edge_capture_ratio,
+            "probe_execution_gap_bps": probe_execution_gap_bps,
             "probe_outperforms_matched_control": (
                 matched_control_count > 0 and avg_net_bps > matched_control_avg_net_bps
             ),
+            "execution_realism_gap": execution_realism_gap,
             "anecdote_risk": evidence_quality_status
             in {
                 "CONTROL_COMPARISON_MISSING",
@@ -348,17 +378,14 @@ def _bounded_probe_result_review(
                 "CONTROL_COMPARISON_MISSING",
                 "MATCHED_CONTROL_SAMPLE_BELOW_FIRST_REVIEW_FLOOR",
             },
+            "execution_realism_gap": execution_realism_gap,
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "probe_authority_granted": False,
             "order_authority_granted": False,
             "promotion_evidence": False,
         },
-        "next_actions": [
-            "operator_review_probe_learning_results_before_any_promotion_or_gate_change"
-            if status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED"
-            else "stop_probe_and_keep_cost_gate_blocked_for_this_side_cell"
-        ],
+        "next_actions": [next_action],
         "design": {
             "status": "READY_FOR_SEPARATE_OPERATOR_AUTHORIZATION",
             "side_cell_key": "ma_crossover|BTCUSDT|Sell",
@@ -722,6 +749,60 @@ def test_positive_probe_result_without_control_requires_matched_control_evidence
     assert top["evidence"]["bounded_probe_result_review_anecdote_risk"] is True
     assert closure["status"] == "BOUNDED_DEMO_PROBE_CONTROL_COMPARISON_REQUIRED"
     assert "matched blocked-signal control" in closure["proof_gates_remaining"][0]
+
+
+def test_positive_probe_result_under_captures_control_requires_execution_review() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+            "next_actions": [
+                "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+            ],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "EVIDENCE_STACK_ACTIVE"},
+        },
+        activation_preflight={"status": "EVIDENCE_STACK_ACTIVE"},
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        sealed_horizon_probe_preflight=_sealed_horizon_probe_preflight(
+            "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+        ),
+        bounded_probe_result_review=_bounded_probe_result_review(
+            "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+            completed=3,
+            avg_net_bps=2.0,
+            net_positive_pct=100.0,
+            evidence_quality_status=(
+                "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP"
+            ),
+            matched_control_count=3,
+            matched_control_avg_net_bps=3.0,
+        ),
+        now_utc=dt.datetime(2026, 6, 22, 7, tzinfo=dt.timezone.utc),
+    )
+
+    top = scorecard["top_paths"][0]
+    closure = scorecard["profitability_engineering_closure"]
+    strategy = closure["cost_gate_escape_strategy"]
+
+    assert top["status"] == "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP"
+    assert top["required_next_gate"] == (
+        "investigate_probe_execution_realism_before_cost_gate_or_operator_review"
+    )
+    assert top["next_action"] == (
+        "investigate_probe_execution_realism_slippage_and_timing_before_cost_gate_review"
+    )
+    assert top["evidence"]["bounded_probe_result_review_probe_edge_capture_ratio"] == 0.6667
+    assert top["evidence"]["bounded_probe_result_review_probe_execution_gap_bps"] == 1.0
+    assert top["evidence"]["bounded_probe_result_review_execution_realism_gap"] is True
+    assert closure["status"] == "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP"
+    assert "execution realism gap" in closure["proof_gates_remaining"][0]
+    assert strategy["bounded_probe_result_review_execution_realism_gap"] is True
+    assert strategy["bounded_probe_result_review_probe_execution_gap_bps"] == 1.0
 
 
 def test_mm_fee_polymarket_and_gate_b_paths_are_separated() -> None:

@@ -29,12 +29,13 @@ _BLOCKER_PRIORITY = {
     "cost_wall": 3,
     "fee_or_scale": 4,
     "sample_gate": 5,
-    "data_coverage": 6,
-    "event_wait": 7,
-    "robustness_wait": 8,
-    "rejected_no_edge": 9,
-    "source_health": 10,
-    "unknown_wait": 11,
+    "execution_realism": 6,
+    "data_coverage": 7,
+    "event_wait": 8,
+    "robustness_wait": 9,
+    "rejected_no_edge": 10,
+    "source_health": 11,
+    "unknown_wait": 12,
 }
 
 
@@ -274,6 +275,21 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
                 "blocker_class": "data_coverage",
                 "primary_blocker": (
                     "bounded_probe_result_review_needs_matched_blocked_signal_control"
+                ),
+                "next_trigger": bounded_review_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if bounded_review_status in {
+            "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+            "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
+        } and bounded_review_quality_status == "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "bounded_probe_result_review_execution_realism_gap",
+                "blocker_class": "execution_realism",
+                "primary_blocker": (
+                    "bounded_probe_result_review_probe_under_captures_matched_control_edge"
                 ),
                 "next_trigger": bounded_review_next_trigger,
                 "operator_actionable": False,
@@ -2470,8 +2486,17 @@ def classify_profitability_blocker(
                 "bounded_probe_result_review_probe_minus_control_avg_net_bps": detail.get(
                     "bounded_probe_result_review_probe_minus_control_avg_net_bps"
                 ),
+                "bounded_probe_result_review_probe_edge_capture_ratio": detail.get(
+                    "bounded_probe_result_review_probe_edge_capture_ratio"
+                ),
+                "bounded_probe_result_review_probe_execution_gap_bps": detail.get(
+                    "bounded_probe_result_review_probe_execution_gap_bps"
+                ),
                 "bounded_probe_result_review_probe_outperforms_matched_control": detail.get(
                     "bounded_probe_result_review_probe_outperforms_matched_control"
+                ),
+                "bounded_probe_result_review_execution_realism_gap": detail.get(
+                    "bounded_probe_result_review_execution_realism_gap"
                 ),
                 "bounded_probe_result_review_anecdote_risk": detail.get(
                     "bounded_probe_result_review_anecdote_risk"

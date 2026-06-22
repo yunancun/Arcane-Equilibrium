@@ -335,6 +335,16 @@ def _evidence_quality(
         if probe_avg is not None and control_avg is not None
         else None
     )
+    edge_capture_ratio = (
+        probe_avg / control_avg
+        if probe_avg is not None and control_avg is not None and control_avg > 0.0
+        else None
+    )
+    execution_gap_bps = (
+        -avg_delta
+        if avg_delta is not None and avg_delta < 0.0
+        else None
+    )
     pct_delta = (
         probe_pct - control_pct
         if probe_pct is not None and control_pct is not None
@@ -373,6 +383,12 @@ def _evidence_quality(
         next_actions = [
             "continue_recording_matched_blocked_signal_control_outcomes"
         ]
+    elif avg_delta is not None and avg_delta <= 0.0:
+        status = "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP"
+        reason = "probe_realized_edge_does_not_capture_matched_blocked_signal_control_edge"
+        next_actions = [
+            "investigate_probe_execution_realism_slippage_and_timing_before_cost_gate_review"
+        ]
     elif probe_count < learning_review_n:
         status = "FIRST_REVIEW_WITH_MATCHED_CONTROL_COMPARISON"
         reason = "first_probe_review_has_matched_blocked_signal_control_comparison"
@@ -394,9 +410,14 @@ def _evidence_quality(
         "matched_control_avg_net_bps": _round(control_avg),
         "matched_control_net_positive_pct": _round(control_pct),
         "probe_minus_control_avg_net_bps": _round(avg_delta),
+        "probe_edge_capture_ratio": _round(edge_capture_ratio),
+        "probe_execution_gap_bps": _round(execution_gap_bps),
         "probe_net_positive_pct_minus_control_pct": _round(pct_delta),
         "probe_outperforms_matched_control": (
             avg_delta is not None and avg_delta > 0.0
+        ),
+        "execution_realism_gap": (
+            status == "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP"
         ),
         "matched_control_horizon_minutes": design.get("outcome_horizon_minutes"),
         "first_review_outcome_floor": first_review_n,
@@ -448,7 +469,10 @@ def build_bounded_demo_probe_result_review(
         probe_summary=probe_summary,
         control_summary=control_summary,
     )
-    if evidence_quality.get("anecdote_risk") is True:
+    if (
+        evidence_quality.get("anecdote_risk") is True
+        or evidence_quality.get("execution_realism_gap") is True
+    ):
         next_actions = list(dict.fromkeys([*quality_actions, *next_actions]))
     else:
         next_actions = list(dict.fromkeys([*next_actions, *quality_actions]))
@@ -514,6 +538,9 @@ def build_bounded_demo_probe_result_review(
                 evidence_quality.get("matched_control_present") is True
             ),
             "anecdote_risk": evidence_quality.get("anecdote_risk") is True,
+            "execution_realism_gap": (
+                evidence_quality.get("execution_realism_gap") is True
+            ),
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "probe_authority_granted": False,
@@ -542,6 +569,8 @@ def render_markdown(packet: dict[str, Any]) -> str:
         f"- Evidence quality: `{quality.get('status')}`",
         f"- Matched control outcomes: `{quality.get('matched_control_outcome_count')}`",
         f"- Probe minus control avg net bps: `{quality.get('probe_minus_control_avg_net_bps')}`",
+        f"- Probe edge capture ratio: `{quality.get('probe_edge_capture_ratio')}`",
+        f"- Probe execution gap bps: `{quality.get('probe_execution_gap_bps')}`",
         f"- Operator review required: `{answers.get('operator_review_required')}`",
         f"- Boundary: {BOUNDARY}.",
         "",

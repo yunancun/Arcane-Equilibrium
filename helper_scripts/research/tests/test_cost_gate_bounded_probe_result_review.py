@@ -201,6 +201,39 @@ def test_first_review_pass_with_matched_control_records_relative_edge() -> None:
     assert packet["evidence_quality"]["probe_outperforms_matched_control"] is True
 
 
+def test_first_review_pass_under_captures_matched_control_execution_gap() -> None:
+    packet = build_bounded_demo_probe_result_review(
+        preflight=_preflight(),
+        ledger_rows=[
+            *_ledger([1.0, 2.0, 3.0]),
+            _control(1, 3.0),
+            _control(2, 3.0),
+            _control(3, 3.0),
+        ],
+        now_utc=NOW,
+    )
+    markdown = render_markdown(packet)
+
+    assert packet["status"] == "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED"
+    assert packet["answers"]["matched_control_comparison_present"] is True
+    assert packet["answers"]["anecdote_risk"] is False
+    assert packet["answers"]["execution_realism_gap"] is True
+    assert packet["evidence_quality"]["status"] == (
+        "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP"
+    )
+    assert packet["evidence_quality"]["matched_control_outcome_count"] == 3
+    assert packet["evidence_quality"]["matched_control_avg_net_bps"] == 3.0
+    assert packet["evidence_quality"]["probe_minus_control_avg_net_bps"] == -1.0
+    assert packet["evidence_quality"]["probe_edge_capture_ratio"] == 0.6667
+    assert packet["evidence_quality"]["probe_execution_gap_bps"] == 1.0
+    assert packet["evidence_quality"]["probe_outperforms_matched_control"] is False
+    assert packet["evidence_quality"]["execution_realism_gap"] is True
+    assert packet["next_actions"][0] == (
+        "investigate_probe_execution_realism_slippage_and_timing_before_cost_gate_review"
+    )
+    assert "Probe execution gap bps" in markdown
+
+
 def test_failed_first_review_stops_probe() -> None:
     packet = build_bounded_demo_probe_result_review(
         preflight=_preflight(),
