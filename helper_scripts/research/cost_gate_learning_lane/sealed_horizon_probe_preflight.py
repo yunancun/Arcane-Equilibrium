@@ -208,6 +208,114 @@ def _decision_summary(packet: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _decision_packet_aligned(
+    *,
+    artifact_status: str,
+    decision: dict[str, Any],
+    side_cell_key: Any,
+    outcome_horizon_minutes: Any,
+) -> bool:
+    return (
+        artifact_status == "FRESH"
+        and decision["schema_version"] == "cost_gate_profit_learning_decision_packet_v1"
+        and decision["status"] == "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE"
+        and decision["sealed_evidence_available"] is True
+        and decision["sealed_candidates_present"] is True
+        and decision["sealed_review_ready"] is True
+        and decision["side_cell_key"] == side_cell_key
+        and decision["outcome_horizon_minutes"] == outcome_horizon_minutes
+        and decision["main_cost_gate_adjustment"] == "NONE"
+        and decision["order_authority_granted"] is not True
+        and decision["promotion_evidence"] is not True
+    )
+
+
+def _decision_packet_candidate_paths(search_roots: list[Path]) -> list[Path]:
+    out: list[Path] = []
+    seen: set[str] = set()
+    for root in search_roots:
+        if root is None:
+            continue
+        candidates: list[Path]
+        if root.is_file():
+            candidates = [root]
+        elif root.is_dir():
+            candidates = []
+            for pattern in (
+                "profit_learning_decision_packet_latest.json",
+                "profit_learning_decision_packet.json",
+                "profit_learning_decision_packet*.json",
+            ):
+                candidates.extend(root.rglob(pattern))
+        else:
+            continue
+        for path in candidates:
+            key = str(path.resolve())
+            if key in seen or not path.is_file():
+                continue
+            seen.add(key)
+            out.append(path)
+    return sorted(out, key=lambda path: (path.stat().st_mtime, str(path)), reverse=True)
+
+
+def resolve_decision_packet_for_sealed_horizon_preflight(
+    *,
+    sealed_horizon_learning_evidence: dict[str, Any] | None,
+    explicit_decision_packet: dict[str, Any] | None = None,
+    explicit_decision_packet_path: Path | None = None,
+    search_roots: list[Path] | None = None,
+    now_utc: dt.datetime | None = None,
+    max_artifact_age_hours: int = DEFAULT_MAX_ARTIFACT_AGE_HOURS,
+) -> tuple[dict[str, Any] | None, Path | None]:
+    """Prefer a fresh decision packet aligned to the sealed side-cell/horizon."""
+    if max_artifact_age_hours < 1 or max_artifact_age_hours > 24 * 14:
+        raise ValueError("max_artifact_age_hours must be in [1, 336]")
+    now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
+    max_age_seconds = max_artifact_age_hours * 3600
+    sealed = _sealed_summary(sealed_horizon_learning_evidence)
+    side_cell_key = sealed.get("side_cell_key")
+    horizon_minutes = sealed.get("outcome_horizon_minutes")
+
+    explicit_artifact = _artifact_summary(
+        name="decision_packet",
+        path=explicit_decision_packet_path,
+        payload=explicit_decision_packet,
+        now_utc=now,
+        max_age_seconds=max_age_seconds,
+    )
+    explicit_summary = _decision_summary(explicit_decision_packet)
+    if _decision_packet_aligned(
+        artifact_status=explicit_artifact["status"],
+        decision=explicit_summary,
+        side_cell_key=side_cell_key,
+        outcome_horizon_minutes=horizon_minutes,
+    ):
+        return explicit_decision_packet, explicit_decision_packet_path
+
+    for candidate_path in _decision_packet_candidate_paths(search_roots or []):
+        try:
+            candidate = _read_json(candidate_path)
+        except (OSError, json.JSONDecodeError, ValueError):
+            continue
+        candidate_artifact = _artifact_summary(
+            name="decision_packet",
+            path=candidate_path,
+            payload=candidate,
+            now_utc=now,
+            max_age_seconds=max_age_seconds,
+        )
+        candidate_summary = _decision_summary(candidate)
+        if _decision_packet_aligned(
+            artifact_status=candidate_artifact["status"],
+            decision=candidate_summary,
+            side_cell_key=side_cell_key,
+            outcome_horizon_minutes=horizon_minutes,
+        ):
+            return candidate, candidate_path
+
+    return explicit_decision_packet, explicit_decision_packet_path
+
+
 def _operator_review_summary(review: dict[str, Any] | None) -> dict[str, Any]:
     payload = _dict(review)
     answers = _dict(payload.get("answers"))
@@ -406,18 +514,11 @@ def build_sealed_horizon_bounded_demo_probe_preflight(
 
     side_cell_key = sealed.get("side_cell_key")
     horizon_minutes = sealed.get("outcome_horizon_minutes")
-    decision_aligned = (
-        artifacts["decision_packet"]["status"] == "FRESH"
-        and decision["schema_version"] == "cost_gate_profit_learning_decision_packet_v1"
-        and decision["status"] == "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE"
-        and decision["sealed_evidence_available"] is True
-        and decision["sealed_candidates_present"] is True
-        and decision["sealed_review_ready"] is True
-        and decision["side_cell_key"] == side_cell_key
-        and decision["outcome_horizon_minutes"] == horizon_minutes
-        and decision["main_cost_gate_adjustment"] == "NONE"
-        and decision["order_authority_granted"] is not True
-        and decision["promotion_evidence"] is not True
+    decision_aligned = _decision_packet_aligned(
+        artifact_status=artifacts["decision_packet"]["status"],
+        decision=decision,
+        side_cell_key=side_cell_key,
+        outcome_horizon_minutes=horizon_minutes,
     )
     operator_review_aligned = (
         artifacts["operator_review"]["status"] == "FRESH"
@@ -598,6 +699,17 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sealed-horizon-learning-evidence-json", type=Path, required=True)
     parser.add_argument("--decision-packet-json", type=Path)
+    parser.add_argument(
+        "--decision-packet-search-root",
+        action="append",
+        type=Path,
+        default=[],
+        help=(
+            "Optional file or directory to search for a fresh decision packet "
+            "aligned to the sealed side-cell/horizon. If the explicit latest "
+            "packet is not aligned, an aligned packet from this root is used."
+        ),
+    )
     parser.add_argument("--activation-preflight-json", type=Path)
     parser.add_argument("--stack-health-json", type=Path)
     parser.add_argument("--operator-review-json", type=Path)
@@ -610,18 +722,31 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = _build_parser().parse_args()
+    sealed_horizon_learning_evidence = _read_json(
+        args.sealed_horizon_learning_evidence_json
+    )
+    decision_packet = _read_json(args.decision_packet_json)
+    decision_packet_path = args.decision_packet_json
+    if args.decision_packet_search_root:
+        decision_packet, decision_packet_path = (
+            resolve_decision_packet_for_sealed_horizon_preflight(
+                sealed_horizon_learning_evidence=sealed_horizon_learning_evidence,
+                explicit_decision_packet=decision_packet,
+                explicit_decision_packet_path=decision_packet_path,
+                search_roots=args.decision_packet_search_root,
+                max_artifact_age_hours=args.max_artifact_age_hours,
+            )
+        )
     payloads = {
-        "sealed_horizon_learning_evidence": _read_json(
-            args.sealed_horizon_learning_evidence_json
-        ),
-        "decision_packet": _read_json(args.decision_packet_json),
+        "sealed_horizon_learning_evidence": sealed_horizon_learning_evidence,
+        "decision_packet": decision_packet,
         "activation_preflight": _read_json(args.activation_preflight_json),
         "stack_health": _read_json(args.stack_health_json),
         "operator_review": _read_json(args.operator_review_json),
     }
     paths = {
         "sealed_horizon_learning_evidence": args.sealed_horizon_learning_evidence_json,
-        "decision_packet": args.decision_packet_json,
+        "decision_packet": decision_packet_path,
         "activation_preflight": args.activation_preflight_json,
         "stack_health": args.stack_health_json,
         "operator_review": args.operator_review_json,
