@@ -1982,11 +1982,41 @@ def classify_profitability_blocker(
                 "demo_learning_stack_stack_installed": detail.get(
                     "demo_learning_stack_stack_installed"
                 ),
+                "demo_learning_stack_demo_learning_evidence_cron_entry_present": detail.get(
+                    "demo_learning_stack_demo_learning_evidence_cron_entry_present"
+                ),
+                "demo_learning_stack_sealed_horizon_probe_preflight_cron_entry_present": detail.get(
+                    "demo_learning_stack_sealed_horizon_probe_preflight_cron_entry_present"
+                ),
+                "demo_learning_stack_cost_gate_learning_lane_cron_entry_present": detail.get(
+                    "demo_learning_stack_cost_gate_learning_lane_cron_entry_present"
+                ),
+                "demo_learning_stack_healthcheck_cron_entry_present": detail.get(
+                    "demo_learning_stack_healthcheck_cron_entry_present"
+                ),
                 "demo_learning_stack_heartbeats_recent": detail.get(
                     "demo_learning_stack_heartbeats_recent"
                 ),
+                "demo_learning_stack_demo_learning_evidence_heartbeat_recent": detail.get(
+                    "demo_learning_stack_demo_learning_evidence_heartbeat_recent"
+                ),
+                "demo_learning_stack_sealed_horizon_probe_preflight_heartbeat_recent": detail.get(
+                    "demo_learning_stack_sealed_horizon_probe_preflight_heartbeat_recent"
+                ),
+                "demo_learning_stack_cost_gate_learning_lane_heartbeat_recent": detail.get(
+                    "demo_learning_stack_cost_gate_learning_lane_heartbeat_recent"
+                ),
                 "demo_learning_stack_statuses_recent": detail.get(
                     "demo_learning_stack_statuses_recent"
+                ),
+                "demo_learning_stack_demo_learning_evidence_status_recent": detail.get(
+                    "demo_learning_stack_demo_learning_evidence_status_recent"
+                ),
+                "demo_learning_stack_sealed_horizon_probe_preflight_status_recent": detail.get(
+                    "demo_learning_stack_sealed_horizon_probe_preflight_status_recent"
+                ),
+                "demo_learning_stack_cost_gate_learning_lane_status_recent": detail.get(
+                    "demo_learning_stack_cost_gate_learning_lane_status_recent"
                 ),
                 "demo_learning_stack_latest_artifacts_present": detail.get(
                     "demo_learning_stack_latest_artifacts_present"

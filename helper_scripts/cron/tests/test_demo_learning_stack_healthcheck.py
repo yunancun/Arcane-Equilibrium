@@ -64,7 +64,9 @@ def _active_crontab() -> str:
     return "\n".join(
         [
             "7,37 * * * * OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/demo_learning_evidence_audit_cron.sh",
+            "22 * * * * OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/sealed_horizon_probe_preflight_cron.sh",
             "27 * * * * OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/cost_gate_learning_lane_cron.sh",
+            "32 * * * * OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/demo_learning_stack_healthcheck_cron.sh",
         ]
     )
 
@@ -72,6 +74,7 @@ def _active_crontab() -> str:
 def _populate_active_data(data_dir: Path) -> None:
     recent_epoch = 1782086100  # 2026-06-21T23:55:00Z
     _touch(data_dir / "cron_heartbeat/demo_learning_evidence_audit.last_fire", recent_epoch)
+    _touch(data_dir / "cron_heartbeat/sealed_horizon_probe_preflight.last_fire", recent_epoch)
     _touch(data_dir / "cron_heartbeat/cost_gate_learning_lane.last_fire", recent_epoch)
     _write(
         data_dir / "logs/demo_learning_evidence_audit.log",
@@ -102,6 +105,19 @@ def _populate_active_data(data_dir: Path) -> None:
                 "review_status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
                 "bounded_probe_result_review_status": "NO_PROBE_OUTCOMES_RECORDED",
                 "bounded_probe_execution_realism_review_status": "NO_EXECUTION_REALISM_GAP_TO_REVIEW",
+            },
+            sort_keys=True,
+        )
+        + "\n",
+    )
+    _write(
+        data_dir / "logs/sealed_horizon_probe_preflight.log",
+        json.dumps(
+            {
+                "ts_utc": "2026-06-21T23:56:30Z",
+                "rc": 0,
+                "status": "OPERATOR_REVIEW_REQUIRED",
+                "reason": "operator_review_required_before_bounded_demo_probe",
             },
             sort_keys=True,
         )
@@ -177,7 +193,22 @@ def test_active_stack_reports_evidence_active(tmp_path: Path) -> None:
 
     assert payload["status"] == "EVIDENCE_STACK_ACTIVE"
     assert payload["answers"]["stack_installed"] is True
+    assert payload["answers"]["demo_learning_evidence_cron_entry_present"] is True
+    assert (
+        payload["answers"]["sealed_horizon_probe_preflight_cron_entry_present"]
+        is True
+    )
+    assert payload["answers"]["cost_gate_learning_lane_cron_entry_present"] is True
+    assert (
+        payload["answers"]["demo_learning_stack_healthcheck_cron_entry_present"]
+        is True
+    )
     assert payload["answers"]["heartbeats_recent"] is True
+    assert (
+        payload["answers"]["sealed_horizon_probe_preflight_heartbeat_recent"] is True
+    )
+    assert payload["answers"]["statuses_recent"] is True
+    assert payload["answers"]["sealed_horizon_probe_preflight_status_recent"] is True
     assert payload["answers"]["cost_gate_learning_ledger_rows_present"] is True
     assert payload["answers"]["blocked_signal_outcomes_present"] is True
     assert payload["answers"]["sealed_horizon_probe_preflight_present"] is True
@@ -190,6 +221,9 @@ def test_active_stack_reports_evidence_active(tmp_path: Path) -> None:
         "NO_PROBE_OUTCOMES_RECORDED"
     )
     assert payload["components"]["cost_gate_learning_lane"]["latest_status"]["ledger_row_count"] == 9
+    assert payload["components"]["sealed_horizon_probe_preflight_cron"][
+        "latest_status"
+    ]["status"] == "OPERATOR_REVIEW_REQUIRED"
     assert payload["components"]["bounded_probe_result_review"]["present"] is True
     assert (
         payload["components"]["bounded_probe_execution_realism_review"]["present"]
@@ -250,6 +284,54 @@ def test_stale_heartbeat_blocks_active_status(tmp_path: Path) -> None:
     assert payload["status"] == "INSTALLED_NOT_FIRING"
     assert payload["answers"]["heartbeats_recent"] is False
     assert payload["components"]["cost_gate_learning_lane"]["heartbeat_recent"] is False
+
+
+def test_missing_sealed_preflight_cron_blocks_installed_status(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    head = _git_repo(repo)
+    data = tmp_path / "data"
+    _populate_active_data(data)
+    crontab = "\n".join(
+        [
+            "7,37 * * * * OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/demo_learning_evidence_audit_cron.sh",
+            "27 * * * * OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/cost_gate_learning_lane_cron.sh",
+            "32 * * * * OPENCLAW_BASE_DIR=/srv /srv/helper_scripts/cron/demo_learning_stack_healthcheck_cron.sh",
+        ]
+    )
+
+    payload = _run(tmp_path, data, repo, crontab, head)
+
+    assert payload["status"] == "NOT_INSTALLED"
+    assert payload["reason"] == "one_or_more_demo_learning_stack_crons_missing"
+    assert payload["answers"]["stack_installed"] is False
+    assert (
+        payload["answers"]["sealed_horizon_probe_preflight_cron_entry_present"]
+        is False
+    )
+
+
+def test_stale_sealed_preflight_heartbeat_blocks_active_status(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    head = _git_repo(repo)
+    data = tmp_path / "data"
+    _populate_active_data(data)
+    old_epoch = 1782075600  # 2026-06-21T21:00:00Z
+    _touch(data / "cron_heartbeat/sealed_horizon_probe_preflight.last_fire", old_epoch)
+
+    payload = _run(tmp_path, data, repo, _active_crontab(), head)
+
+    assert payload["status"] == "INSTALLED_NOT_FIRING"
+    assert payload["answers"]["heartbeats_recent"] is False
+    assert (
+        payload["answers"]["sealed_horizon_probe_preflight_heartbeat_recent"]
+        is False
+    )
+    assert (
+        payload["components"]["sealed_horizon_probe_preflight_cron"][
+            "heartbeat_recent"
+        ]
+        is False
+    )
 
 
 def test_missing_bounded_probe_reviews_block_active_status(tmp_path: Path) -> None:

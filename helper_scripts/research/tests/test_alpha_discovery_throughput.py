@@ -1493,8 +1493,18 @@ def _write_demo_learning_stack_healthcheck_latest(
     ts_utc: str = "2026-06-21T18:04:00+00:00",
     source_ready: bool = True,
     stack_installed: bool = False,
+    demo_cron_entry_present: bool = False,
+    sealed_preflight_cron_entry_present: bool = False,
+    cost_cron_entry_present: bool = False,
+    healthcheck_cron_entry_present: bool = False,
     heartbeats_recent: bool = False,
+    demo_heartbeat_recent: bool = False,
+    sealed_preflight_heartbeat_recent: bool = False,
+    cost_heartbeat_recent: bool = False,
     statuses_recent: bool = False,
+    demo_status_recent: bool = False,
+    sealed_preflight_status_recent: bool = False,
+    cost_status_recent: bool = False,
     latest_artifacts_present: bool = False,
     sealed_preflight_present: bool = False,
     bounded_reviews_present: bool = False,
@@ -1518,8 +1528,26 @@ def _write_demo_learning_stack_healthcheck_latest(
         "answers": {
             "source_ready": source_ready,
             "stack_installed": stack_installed,
+            "demo_learning_evidence_cron_entry_present": demo_cron_entry_present,
+            "sealed_horizon_probe_preflight_cron_entry_present": (
+                sealed_preflight_cron_entry_present
+            ),
+            "cost_gate_learning_lane_cron_entry_present": cost_cron_entry_present,
+            "demo_learning_stack_healthcheck_cron_entry_present": (
+                healthcheck_cron_entry_present
+            ),
             "heartbeats_recent": heartbeats_recent,
+            "demo_learning_evidence_heartbeat_recent": demo_heartbeat_recent,
+            "sealed_horizon_probe_preflight_heartbeat_recent": (
+                sealed_preflight_heartbeat_recent
+            ),
+            "cost_gate_learning_lane_heartbeat_recent": cost_heartbeat_recent,
             "statuses_recent": statuses_recent,
+            "demo_learning_evidence_status_recent": demo_status_recent,
+            "sealed_horizon_probe_preflight_status_recent": (
+                sealed_preflight_status_recent
+            ),
+            "cost_gate_learning_lane_status_recent": cost_status_recent,
             "latest_artifacts_present": latest_artifacts_present,
             "sealed_horizon_probe_preflight_present": sealed_preflight_present,
             "bounded_probe_reviews_present": bounded_reviews_present,
@@ -1980,6 +2008,12 @@ def test_cost_gate_arm_uses_demo_learning_stack_healthcheck_for_not_installed(tm
     assert arm["detail"]["demo_learning_stack_healthcheck_source_path"] == str(artifact)
     assert arm["detail"]["demo_learning_stack_healthcheck_status"] == "NOT_INSTALLED"
     assert arm["detail"]["demo_learning_stack_stack_installed"] is False
+    assert (
+        arm["detail"][
+            "demo_learning_stack_sealed_horizon_probe_preflight_cron_entry_present"
+        ]
+        is False
+    )
     assert arm["detail"]["demo_learning_stack_source_ready"] is True
     blocker = plan["profitability_blocker_scorecard"]["arms"][0]
     assert blocker["primary_blocker"] == "demo_learning_stack_not_installed"
@@ -1998,8 +2032,18 @@ def test_cost_gate_arm_uses_stack_healthcheck_for_missing_bounded_reviews(tmp_pa
         reason="bounded_probe_result_or_execution_realism_review_latest_missing_or_unreadable",
         next_action="rerun_cost_gate_learning_lane_cron_after_sealed_preflight_refresh",
         stack_installed=True,
+        demo_cron_entry_present=True,
+        sealed_preflight_cron_entry_present=True,
+        cost_cron_entry_present=True,
+        healthcheck_cron_entry_present=True,
         heartbeats_recent=True,
+        demo_heartbeat_recent=True,
+        sealed_preflight_heartbeat_recent=True,
+        cost_heartbeat_recent=True,
         statuses_recent=True,
+        demo_status_recent=True,
+        sealed_preflight_status_recent=True,
+        cost_status_recent=True,
         latest_artifacts_present=True,
         sealed_preflight_present=True,
         bounded_reviews_present=False,
@@ -2016,6 +2060,18 @@ def test_cost_gate_arm_uses_stack_healthcheck_for_missing_bounded_reviews(tmp_pa
     assert arm["detail"]["demo_learning_stack_healthcheck_source_path"] == str(artifact)
     assert arm["detail"]["demo_learning_stack_bounded_probe_reviews_present"] is False
     assert arm["detail"]["demo_learning_stack_bounded_probe_result_review_present"] is False
+    assert (
+        arm["detail"][
+            "demo_learning_stack_sealed_horizon_probe_preflight_cron_entry_present"
+        ]
+        is True
+    )
+    assert (
+        arm["detail"][
+            "demo_learning_stack_sealed_horizon_probe_preflight_heartbeat_recent"
+        ]
+        is True
+    )
     blocker = plan["profitability_blocker_scorecard"]["arms"][0]
     assert blocker["primary_blocker"] == (
         "bounded_probe_review_artifacts_missing_for_learning_stack"
@@ -2024,6 +2080,12 @@ def test_cost_gate_arm_uses_stack_healthcheck_for_missing_bounded_reviews(tmp_pa
         "rerun_cost_gate_learning_lane_cron_after_sealed_preflight_refresh"
     )
     assert blocker["demo_learning_stack_bounded_probe_reviews_present"] is False
+    assert (
+        blocker[
+            "demo_learning_stack_sealed_horizon_probe_preflight_cron_entry_present"
+        ]
+        is True
+    )
     assert blocker["demo_learning_stack_blocked_signal_outcomes_present"] is True
     assert blocker["engineering_actionable"] is True
 
