@@ -66,6 +66,17 @@ def _counterfactual(*, generated_at: str = "2026-06-22T11:56:00+00:00") -> dict:
             "horizon_stability_scorecard": {
                 "schema_version": "cost_gate_reject_horizon_stability_v1",
                 "status": "MULTI_HORIZON_PROFIT_LEARNING_CANDIDATES_PRESENT",
+                "top_side_cells": [
+                    {
+                        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                        "status": "CANDIDATE_MULTI_HORIZON_STABLE",
+                        "candidate_horizons": [15, 30, 60, 120, 240],
+                        "block_confirmed_horizons": [],
+                        "best_horizon_minutes": 120,
+                        "best_avg_net_bps": 121.1121,
+                        "best_net_positive_pct": 100.0,
+                    }
+                ],
             },
         },
     }
@@ -153,6 +164,15 @@ def test_counterfactual_candidate_without_plan_routes_to_bounded_plan() -> None:
     assert packet["counterfactual"]["top_side_cells"][0]["side_cell_key"] == (
         "ma_crossover|ETHUSDT|Sell"
     )
+    assert packet["counterfactual"]["top_side_cells"][0]["horizon_status"] == (
+        "CANDIDATE_MULTI_HORIZON_STABLE"
+    )
+    assert packet["counterfactual"]["top_side_cells"][0][
+        "candidate_horizons_minutes"
+    ] == [15, 30, 60, 120, 240]
+    assert packet["counterfactual"]["top_side_cells"][0][
+        "best_horizon_minutes"
+    ] == 120
 
 
 def test_ready_plan_with_source_not_ready_routes_to_stack_repair() -> None:

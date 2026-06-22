@@ -142,7 +142,30 @@ def _horizon_stability(counterfactual: dict[str, Any] | None) -> dict[str, Any]:
 
 def _top_side_cells(counterfactual: dict[str, Any] | None, limit: int = 5) -> list[dict[str, Any]]:
     ranking = _profit_ranking(counterfactual)
-    rows = [row for row in _list(ranking.get("top_side_cells")) if isinstance(row, dict)]
+    stability = _horizon_stability(counterfactual)
+    horizon_by_key = {
+        str(row.get("side_cell_key")): row
+        for row in _list(stability.get("top_side_cells"))
+        if isinstance(row, dict) and row.get("side_cell_key")
+    }
+    rows: list[dict[str, Any]] = []
+    for row in _list(ranking.get("top_side_cells")):
+        if not isinstance(row, dict):
+            continue
+        enriched = dict(row)
+        horizon = horizon_by_key.get(str(row.get("side_cell_key") or ""))
+        if horizon:
+            enriched["horizon_status"] = horizon.get("status")
+            enriched["candidate_horizons_minutes"] = horizon.get("candidate_horizons")
+            enriched["block_confirmed_horizons_minutes"] = (
+                horizon.get("block_confirmed_horizons")
+            )
+            enriched["best_horizon_minutes"] = horizon.get("best_horizon_minutes")
+            enriched["best_horizon_avg_net_bps"] = horizon.get("best_avg_net_bps")
+            enriched["best_horizon_net_positive_pct"] = horizon.get(
+                "best_net_positive_pct"
+            )
+        rows.append(enriched)
     return rows[:limit]
 
 
