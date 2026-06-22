@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Demo Learning Stack Post-Install Healthcheck
+
+- Added `demo_learning_stack_healthcheck.py` as the read-only acceptance gate after runtime source reconcile and stack install.
+- It checks source HEAD/dirty state, crontab entries, heartbeats, status JSONL freshness, latest demo evidence JSON, Cost Gate blocked-outcome review JSON, ledger/outcome counts, and classifies the stack into actionable states.
+- This proves whether the learning loop is actually accumulating evidence before any bounded demo-probe review; no runtime sync/install/write/order/COST gate relaxation was performed.
+
 ## 2026-06-22 Demo Learning Stack Cron Installer
 
 - Added `install_demo_learning_stack_crons.sh` as the operator-facing stack installer for demo-learning evidence plus Cost Gate learning-lane crons.
