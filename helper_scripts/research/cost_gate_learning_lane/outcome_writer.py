@@ -217,6 +217,20 @@ def _existing_outcome_attempt_ids(
     }
 
 
+def _row_outcome_horizon_minutes(row: dict[str, Any], default_horizon_minutes: int) -> int:
+    candidate = _dict(row.get("candidate_summary"))
+    for value in (
+        row.get("outcome_horizon_minutes"),
+        row.get("learning_outcome_horizon_minutes"),
+        candidate.get("outcome_horizon_minutes"),
+        candidate.get("learning_outcome_horizon_minutes"),
+    ):
+        parsed = _int(value)
+        if 1 <= parsed <= 24 * 60:
+            return parsed
+    return default_horizon_minutes
+
+
 def _build_markout_outcome_records(
     ledger_rows: list[dict[str, Any]],
     price_observations: list[dict[str, Any]],
@@ -232,7 +246,6 @@ def _build_markout_outcome_records(
     validate_outcome_config(cfg)
     now = (now_utc or _utc_now()).astimezone(dt.timezone.utc)
     now_ms = int(now.timestamp() * 1000)
-    horizon_ms = cfg.horizon_minutes * 60_000
     existing_attempt_ids = _existing_outcome_attempt_ids(
         ledger_rows,
         record_type=record_type,
@@ -250,6 +263,8 @@ def _build_markout_outcome_records(
             continue
         event = _dict(row.get("event"))
         event_ts_ms = _row_ts_ms(row)
+        horizon_minutes = _row_outcome_horizon_minutes(row, cfg.horizon_minutes)
+        horizon_ms = horizon_minutes * 60_000
         exit_target_ts_ms = event_ts_ms + horizon_ms
         if event_ts_ms <= 0 or now_ms < exit_target_ts_ms:
             continue
@@ -291,13 +306,15 @@ def _build_markout_outcome_records(
                 "event_ts_ms": event_ts_ms,
                 "entry_ts_ms": entry_ts_ms,
                 "exit_ts_ms": exit_ts_ms,
-                "horizon_minutes": cfg.horizon_minutes,
+                "horizon_minutes": horizon_minutes,
+                "default_horizon_minutes": cfg.horizon_minutes,
                 "entry_price": entry,
                 "exit_price": exit_price,
                 "gross_bps": gross_bps,
                 "cost_bps": cfg.cost_bps,
                 "realized_net_bps": net_bps,
                 "outcome_source": outcome_source,
+                "candidate_summary": row.get("candidate_summary") or {},
                 "promotion_evidence": False,
                 "boundary": boundary,
             }
