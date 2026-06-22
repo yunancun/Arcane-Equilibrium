@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 
 from cost_gate_learning_lane.sealed_horizon_probe_preflight import (
     build_sealed_horizon_bounded_demo_probe_preflight,
     render_markdown,
+    resolve_decision_packet_for_sealed_horizon_preflight,
 )
 
 
@@ -61,6 +63,30 @@ def _decision_packet() -> dict:
             "side_cell_key": "ma_crossover|BTCUSDT|Sell",
             "outcome_horizon_minutes": 240,
             "review_ready": True,
+        },
+    }
+
+
+def _generic_unsealed_decision_packet() -> dict:
+    return {
+        "schema_version": "cost_gate_profit_learning_decision_packet_v1",
+        "generated_at_utc": "2026-06-22T11:56:30+00:00",
+        "status": "ACTIVATE_OR_REPAIR_LEARNING_STACK",
+        "reason": "learning_stack_not_accumulating: NOT_ACCUMULATING",
+        "next_actions": ["activate_or_repair_cost_gate_learning_lane_stack"],
+        "answers": {
+            "sealed_horizon_learning_evidence_available": False,
+            "sealed_horizon_learning_evidence_candidates_present": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "sealed_horizon_learning_evidence": {
+            "status": None,
+            "side_cell_key": None,
+            "outcome_horizon_minutes": None,
+            "review_ready": False,
         },
     }
 
@@ -169,3 +195,39 @@ def test_authority_granting_input_fails_closed() -> None:
     assert packet["status"] == "AUTHORITY_BOUNDARY_VIOLATION"
     assert packet["answers"]["ready_for_operator_bounded_demo_probe_authorization"] is False
     assert "authority_boundary_preserved" in packet["blocking_gates"]
+
+
+def test_decision_packet_search_root_prefers_aligned_sealed_packet(tmp_path) -> None:
+    generic_path = tmp_path / "cost_gate_learning_lane" / "profit_learning_decision_packet_latest.json"
+    aligned_path = (
+        tmp_path
+        / "profit_learning_decision_packet_v389"
+        / "profit_learning_decision_packet_v389_latest.json"
+    )
+    generic_path.parent.mkdir(parents=True, exist_ok=True)
+    aligned_path.parent.mkdir(parents=True, exist_ok=True)
+    generic = _generic_unsealed_decision_packet()
+    aligned = _decision_packet()
+    generic_path.write_text(json.dumps(generic), encoding="utf-8")
+    aligned_path.write_text(json.dumps(aligned), encoding="utf-8")
+
+    selected, selected_path = resolve_decision_packet_for_sealed_horizon_preflight(
+        sealed_horizon_learning_evidence=_sealed_evidence(),
+        explicit_decision_packet=generic,
+        explicit_decision_packet_path=generic_path,
+        search_roots=[tmp_path],
+        now_utc=NOW,
+    )
+    packet = build_sealed_horizon_bounded_demo_probe_preflight(
+        sealed_horizon_learning_evidence=_sealed_evidence(),
+        decision_packet=selected,
+        activation_preflight=_activation(),
+        paths={"decision_packet": selected_path},
+        now_utc=NOW,
+    )
+
+    assert selected_path == aligned_path
+    assert selected == aligned
+    assert packet["answers"]["decision_packet_aligned"] is True
+    assert packet["artifacts"]["decision_packet"]["path"] == str(aligned_path)
+    assert packet["status"] == "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED"
