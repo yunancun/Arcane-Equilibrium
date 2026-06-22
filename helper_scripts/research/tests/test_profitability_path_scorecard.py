@@ -394,6 +394,83 @@ def _bounded_probe_result_review(
     }
 
 
+def _bounded_probe_execution_realism_review(
+    *,
+    status: str = "EXECUTION_REALISM_GAP_DIAGNOSED_REPAIR_REQUIRED",
+    primary_hypothesis: str = "fill_backed_execution_missing",
+    next_action: str = "record_fill_backed_probe_execution_rows_or_l1_replay_before_cost_gate_review",
+) -> dict:
+    return {
+        "schema_version": "bounded_demo_probe_execution_realism_review_v1",
+        "generated_at_utc": "2026-06-22T07:05:00+00:00",
+        "status": status,
+        "reason": "fixture_execution_realism_review",
+        "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+        "candidate": {
+            "strategy_name": "ma_crossover",
+            "symbol": "BTCUSDT",
+            "side": "Sell",
+            "outcome_horizon_minutes": 240,
+        },
+        "source_result_review": {
+            "schema_version": "bounded_demo_probe_result_review_v1",
+            "status": "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+            "evidence_quality_status": (
+                "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP"
+            ),
+            "probe_edge_capture_ratio": 0.6667,
+            "probe_execution_gap_bps": 1.0,
+            "probe_minus_control_avg_net_bps": -1.0,
+        },
+        "probe_execution_summary": {
+            "count": 3,
+            "avg_net_bps": 2.0,
+            "avg_gross_bps": 6.0,
+            "avg_cost_bps": 4.0,
+            "avg_entry_delay_ms": 120000.0,
+            "fill_backed_outcome_count": 0,
+            "proxy_outcome_count": 3,
+            "fill_backed_pct": 0.0,
+        },
+        "matched_control_execution_summary": {
+            "count": 3,
+            "avg_net_bps": 3.0,
+            "avg_gross_bps": 7.0,
+            "avg_cost_bps": 4.0,
+            "avg_entry_delay_ms": 0.0,
+            "fill_backed_outcome_count": 3,
+            "proxy_outcome_count": 0,
+            "fill_backed_pct": 100.0,
+        },
+        "gap_decomposition": {
+            "net_capture_gap_bps": 1.0,
+            "gross_capture_gap_bps": 1.0,
+            "cost_or_slippage_gap_bps": 0.0,
+            "entry_delay_gap_ms": 120000.0,
+        },
+        "execution_gap_hypotheses": [
+            {
+                "kind": primary_hypothesis,
+                "severity": "HIGH",
+                "next_action": next_action,
+            }
+        ],
+        "answers": {
+            "authority_boundary_preserved": True,
+            "execution_realism_gap_confirmed": True,
+            "fill_backed_probe_execution_available": False,
+            "cost_gate_or_operator_review_allowed": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "next_actions": [next_action],
+        "boundary": "artifact-only bounded demo-probe execution-realism review",
+    }
+
+
 def test_cost_gate_candidates_and_horizon_paths_do_not_grant_authority() -> None:
     scorecard = build_profitability_path_scorecard(
         cost_gate_counterfactual=_cost_gate_counterfactual(),
@@ -789,20 +866,96 @@ def test_positive_probe_result_under_captures_control_requires_execution_review(
     closure = scorecard["profitability_engineering_closure"]
     strategy = closure["cost_gate_escape_strategy"]
 
-    assert top["status"] == "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP"
+    assert top["status"] == "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REVIEW_REQUIRED"
     assert top["required_next_gate"] == (
-        "investigate_probe_execution_realism_before_cost_gate_or_operator_review"
+        "generate_bounded_probe_execution_realism_review_before_cost_gate_or_operator_review"
     )
     assert top["next_action"] == (
-        "investigate_probe_execution_realism_slippage_and_timing_before_cost_gate_review"
+        "refresh_bounded_probe_execution_realism_review"
     )
     assert top["evidence"]["bounded_probe_result_review_probe_edge_capture_ratio"] == 0.6667
     assert top["evidence"]["bounded_probe_result_review_probe_execution_gap_bps"] == 1.0
     assert top["evidence"]["bounded_probe_result_review_execution_realism_gap"] is True
-    assert closure["status"] == "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP"
-    assert "execution realism gap" in closure["proof_gates_remaining"][0]
+    assert top["evidence"]["bounded_probe_execution_realism_review_present"] is False
+    assert closure["status"] == "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REVIEW_REQUIRED"
+    assert "execution-realism review" in closure["proof_gates_remaining"][0]
     assert strategy["bounded_probe_result_review_execution_realism_gap"] is True
     assert strategy["bounded_probe_result_review_probe_execution_gap_bps"] == 1.0
+    assert strategy["bounded_probe_execution_realism_review_status"] is None
+
+
+def test_positive_probe_under_capture_with_execution_review_requires_repair() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+            "next_actions": [
+                "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+            ],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "EVIDENCE_STACK_ACTIVE"},
+        },
+        activation_preflight={"status": "EVIDENCE_STACK_ACTIVE"},
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        sealed_horizon_probe_preflight=_sealed_horizon_probe_preflight(
+            "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+        ),
+        bounded_probe_result_review=_bounded_probe_result_review(
+            "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+            completed=3,
+            avg_net_bps=2.0,
+            net_positive_pct=100.0,
+            evidence_quality_status=(
+                "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP"
+            ),
+            matched_control_count=3,
+            matched_control_avg_net_bps=3.0,
+        ),
+        bounded_probe_execution_realism_review=(
+            _bounded_probe_execution_realism_review()
+        ),
+        now_utc=dt.datetime(2026, 6, 22, 7, tzinfo=dt.timezone.utc),
+    )
+
+    top = scorecard["top_paths"][0]
+    closure = scorecard["profitability_engineering_closure"]
+    strategy = closure["cost_gate_escape_strategy"]
+
+    assert top["status"] == "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REPAIR_REQUIRED"
+    assert top["required_next_gate"] == (
+        "repair_or_replay_bounded_probe_execution_realism_gap_before_cost_gate_review"
+    )
+    assert top["next_action"] == (
+        "record_fill_backed_probe_execution_rows_or_l1_replay_before_cost_gate_review"
+    )
+    assert top["evidence"][
+        "bounded_probe_execution_realism_review_primary_hypothesis"
+    ] == "fill_backed_execution_missing"
+    assert top["evidence"]["bounded_probe_execution_realism_review_net_capture_gap_bps"] == 1.0
+    assert top["evidence"]["bounded_probe_execution_realism_review_probe_fill_backed_pct"] == 0.0
+    assert top["evidence"][
+        "bounded_probe_execution_realism_review_cost_gate_or_operator_review_allowed"
+    ] is False
+    assert closure["status"] == "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REPAIR_REQUIRED"
+    assert "repair bounded demo probe execution-realism gap" in closure[
+        "proof_gates_remaining"
+    ][0]
+    assert strategy["bounded_probe_execution_realism_review_status"] == (
+        "EXECUTION_REALISM_GAP_DIAGNOSED_REPAIR_REQUIRED"
+    )
+    assert strategy["bounded_probe_execution_realism_review_primary_hypothesis"] == (
+        "fill_backed_execution_missing"
+    )
+    assert scorecard["answers"][
+        "bounded_demo_probe_execution_realism_repair_required"
+    ] is True
+    assert scorecard["artifacts"]["bounded_probe_execution_realism_review"][
+        "present"
+    ] is True
 
 
 def test_mm_fee_polymarket_and_gate_b_paths_are_separated() -> None:

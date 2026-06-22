@@ -1824,6 +1824,96 @@ def _write_bounded_probe_result_review_latest(
     return path
 
 
+def _write_bounded_probe_execution_realism_review_latest(
+    data: Path,
+    *,
+    status: str = "EXECUTION_REALISM_GAP_DIAGNOSED_REPAIR_REQUIRED",
+    generated_at: str = "2026-06-21T18:04:50+00:00",
+    primary_hypothesis: str = "fill_backed_execution_missing",
+    next_action: str = "record_fill_backed_probe_execution_rows_or_l1_replay_before_cost_gate_review",
+) -> Path:
+    path = (
+        data
+        / "cost_gate_learning_lane"
+        / "bounded_probe_execution_realism_review_latest.json"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": "bounded_demo_probe_execution_realism_review_v1",
+        "generated_at_utc": generated_at,
+        "status": status,
+        "reason": "fixture_bounded_probe_execution_realism_review",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "candidate": {
+            "strategy_name": "ma_crossover",
+            "symbol": "ETHUSDT",
+            "side": "Sell",
+            "outcome_horizon_minutes": 240,
+        },
+        "source_result_review": {
+            "schema_version": "bounded_demo_probe_result_review_v1",
+            "status": "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+            "evidence_quality_status": (
+                "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP"
+            ),
+            "generated_at_utc": generated_at,
+            "probe_edge_capture_ratio": 0.8333,
+            "probe_execution_gap_bps": 0.5,
+            "probe_minus_control_avg_net_bps": -0.5,
+        },
+        "probe_execution_summary": {
+            "count": 3,
+            "avg_net_bps": 2.5,
+            "avg_gross_bps": 6.5,
+            "avg_cost_bps": 4.0,
+            "avg_entry_delay_ms": 120000.0,
+            "fill_backed_outcome_count": 0,
+            "proxy_outcome_count": 3,
+            "fill_backed_pct": 0.0,
+        },
+        "matched_control_execution_summary": {
+            "count": 3,
+            "avg_net_bps": 3.0,
+            "avg_gross_bps": 7.0,
+            "avg_cost_bps": 4.0,
+            "avg_entry_delay_ms": 0.0,
+            "fill_backed_outcome_count": 3,
+            "proxy_outcome_count": 0,
+            "fill_backed_pct": 100.0,
+        },
+        "gap_decomposition": {
+            "net_capture_gap_bps": 0.5,
+            "gross_capture_gap_bps": 0.5,
+            "cost_or_slippage_gap_bps": 0.0,
+            "entry_delay_gap_ms": 120000.0,
+        },
+        "execution_gap_hypotheses": [
+            {
+                "kind": primary_hypothesis,
+                "severity": "HIGH",
+                "next_action": next_action,
+            }
+        ],
+        "answers": {
+            "authority_boundary_preserved": True,
+            "execution_realism_gap_confirmed": (
+                status == "EXECUTION_REALISM_GAP_DIAGNOSED_REPAIR_REQUIRED"
+            ),
+            "fill_backed_probe_execution_available": False,
+            "cost_gate_or_operator_review_allowed": False,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "next_actions": [next_action],
+        "boundary": "artifact-only bounded demo-probe execution-realism review",
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_cost_gate_arm_uses_demo_learning_evidence_for_pg_reject_gap(tmp_path):
     data = tmp_path / "openclaw"
     artifact = _write_demo_learning_evidence_latest(
@@ -2293,7 +2383,7 @@ def test_positive_bounded_probe_result_without_control_stays_data_coverage(tmp_p
     assert task["evidence"]["bounded_probe_result_review_matched_control_outcome_count"] == 0
 
 
-def test_positive_bounded_probe_under_captures_control_becomes_execution_gap(tmp_path):
+def test_positive_bounded_probe_under_captures_control_requires_execution_review(tmp_path):
     data = tmp_path / "openclaw"
     _write_profit_learning_decision_packet_latest(
         data,
@@ -2324,13 +2414,17 @@ def test_positive_bounded_probe_under_captures_control_becomes_execution_gap(tmp
 
     assert blocker["blocker_class"] == "execution_realism"
     assert blocker["primary_blocker"] == (
-        "bounded_probe_result_review_probe_under_captures_matched_control_edge"
+        "bounded_probe_execution_realism_review_required"
+    )
+    assert blocker["next_trigger"] == (
+        "refresh_bounded_probe_execution_realism_review"
     )
     assert blocker["operator_actionable"] is False
     assert blocker["engineering_actionable"] is True
     assert blocker["bounded_probe_result_review_probe_edge_capture_ratio"] == 0.8333
     assert blocker["bounded_probe_result_review_probe_execution_gap_bps"] == 0.5
     assert blocker["bounded_probe_result_review_execution_realism_gap"] is True
+    assert blocker["bounded_probe_execution_realism_review_present"] is False
     assert task["task_type"] == "bounded_probe_execution_realism"
     assert task["learning_objective"] == (
         "measure_probe_slippage_timing_and_fill_quality_against_matched_control_edge"
@@ -2338,6 +2432,67 @@ def test_positive_bounded_probe_under_captures_control_becomes_execution_gap(tmp
     assert task["requires_operator_authorization"] is False
     assert task["runtime_mutation_required"] is False
     assert task["evidence"]["bounded_probe_result_review_execution_realism_gap"] is True
+    assert task["evidence"]["bounded_probe_execution_realism_review_present"] is False
+
+
+def test_positive_bounded_probe_execution_review_drives_repair_task(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_profit_learning_decision_packet_latest(
+        data,
+        status="OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+        reason="sealed_horizon_learning_evidence_clears_review_thresholds",
+        next_actions=[
+            "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+        ],
+        sealed_horizon_candidate=True,
+    )
+    _write_sealed_horizon_probe_preflight_latest(
+        data,
+        status="READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
+    )
+    _write_bounded_probe_result_review_latest(
+        data,
+        status="FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+        evidence_quality_status="PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP",
+        matched_control_count=3,
+        matched_control_avg_net_bps=3.0,
+    )
+    _write_bounded_probe_execution_realism_review_latest(data)
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    task = plan["learning_worklist"]["top_task"]
+
+    assert blocker["blocker_class"] == "execution_realism"
+    assert blocker["primary_blocker"] == (
+        "bounded_probe_execution_realism_gap_diagnosed_repair_required"
+    )
+    assert blocker["next_trigger"] == (
+        "record_fill_backed_probe_execution_rows_or_l1_replay_before_cost_gate_review"
+    )
+    assert blocker["bounded_probe_execution_realism_review_status"] == (
+        "EXECUTION_REALISM_GAP_DIAGNOSED_REPAIR_REQUIRED"
+    )
+    assert blocker["bounded_probe_execution_realism_review_primary_hypothesis"] == (
+        "fill_backed_execution_missing"
+    )
+    assert blocker["bounded_probe_execution_realism_review_net_capture_gap_bps"] == 0.5
+    assert blocker["bounded_probe_execution_realism_review_probe_fill_backed_pct"] == 0.0
+    assert blocker[
+        "bounded_probe_execution_realism_review_cost_gate_or_operator_review_allowed"
+    ] is False
+    assert task["task_type"] == "bounded_probe_execution_realism"
+    assert task["requires_operator_authorization"] is False
+    assert task["runtime_mutation_required"] is False
+    assert task["evidence"][
+        "bounded_probe_execution_realism_review_primary_hypothesis"
+    ] == "fill_backed_execution_missing"
+    assert task["evidence"]["bounded_probe_execution_realism_review_net_capture_gap_bps"] == 0.5
+    assert task["evidence"][
+        "bounded_probe_execution_realism_review_cost_gate_or_operator_review_allowed"
+    ] is False
 
 
 def _write_polymarket_leadlag_latest(data: Path, payload: dict) -> Path:

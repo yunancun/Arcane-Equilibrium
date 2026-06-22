@@ -99,7 +99,11 @@ def _score_priority(path: dict[str, Any]) -> tuple[int, float]:
         "SEALED_HORIZON_PREFLIGHT_READY_FOR_OPERATOR_AUTHORIZATION": 6,
         "BOUNDED_DEMO_PROBE_LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED": 5,
         "BOUNDED_DEMO_PROBE_FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED": 6,
+        "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REPAIR_REQUIRED": 6,
+        "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REVIEW_REQUIRED": 6,
         "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP": 6,
+        "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_SAMPLE_REQUIRED": 7,
+        "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REVIEW_NOT_ALIGNED": 8,
         "BOUNDED_DEMO_PROBE_CONTROL_COMPARISON_REQUIRED": 7,
         "BOUNDED_DEMO_PROBE_COLLECT_MORE_OUTCOMES": 7,
         "SEALED_HORIZON_PREFLIGHT_REQUIRES_OPERATOR_REVIEW": 7,
@@ -111,6 +115,7 @@ def _score_priority(path: dict[str, Any]) -> tuple[int, float]:
         "COST_GATE_CANDIDATE_EXECUTION_EVIDENCE_MISSING": 12,
         "HORIZON_EDGE_AMPLIFICATION_CANDIDATE": 20,
         "SEALED_HORIZON_PREFLIGHT_NOT_ALIGNED": 25,
+        "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_AUTHORITY_BOUNDARY_VIOLATION": 25,
         "LOW_FRICTION_MM_GROSS_EDGE_BELOW_CURRENT_FEE": 40,
         "POLYMARKET_ALPHA_GROSS_BELOW_COST_OR_EXECUTION_UNMEASURED": 50,
         "BOUNDED_DEMO_PROBE_RESULT_FAILED_STOP": 85,
@@ -269,6 +274,20 @@ def _bounded_probe_result_review_by_key(
     payload = _dict(bounded_probe_result_review)
     key = _str(
         payload.get("side_cell_key") or _dict(payload.get("design")).get("side_cell_key")
+    )
+    if not key:
+        return {}
+    return {key: payload}
+
+
+def _bounded_probe_execution_realism_review_by_key(
+    bounded_probe_execution_realism_review: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    payload = _dict(bounded_probe_execution_realism_review)
+    key = _str(
+        payload.get("side_cell_key")
+        or _dict(payload.get("candidate")).get("side_cell_key")
+        or _dict(payload.get("source_result_review")).get("side_cell_key")
     )
     if not key:
         return {}
@@ -468,6 +487,99 @@ def _bounded_probe_result_review_fields(
     }
 
 
+def _bounded_probe_execution_realism_review_fields(
+    review: dict[str, Any] | None,
+) -> dict[str, Any]:
+    payload = _dict(review)
+    if not payload:
+        return {
+            "bounded_probe_execution_realism_review_present": False,
+            "bounded_probe_execution_realism_review_status": None,
+            "bounded_probe_execution_realism_review_primary_hypothesis": None,
+            "bounded_probe_execution_realism_review_net_capture_gap_bps": None,
+            "bounded_probe_execution_realism_review_probe_fill_backed_pct": None,
+            "bounded_probe_execution_realism_review_cost_gate_or_operator_review_allowed": False,
+        }
+    source = _dict(payload.get("source_result_review"))
+    probe = _dict(payload.get("probe_execution_summary"))
+    control = _dict(payload.get("matched_control_execution_summary"))
+    gap = _dict(payload.get("gap_decomposition"))
+    answers = _dict(payload.get("answers"))
+    hypotheses = _list(payload.get("execution_gap_hypotheses"))
+    first_hypothesis = (
+        hypotheses[0] if hypotheses and isinstance(hypotheses[0], dict) else {}
+    )
+    return {
+        "bounded_probe_execution_realism_review_present": True,
+        "bounded_probe_execution_realism_review_schema_version": payload.get(
+            "schema_version"
+        ),
+        "bounded_probe_execution_realism_review_status": payload.get("status"),
+        "bounded_probe_execution_realism_review_reason": payload.get("reason"),
+        "bounded_probe_execution_realism_review_generated_at_utc": payload.get(
+            "generated_at_utc"
+        ),
+        "bounded_probe_execution_realism_review_side_cell_key": payload.get(
+            "side_cell_key"
+        ),
+        "bounded_probe_execution_realism_review_next_actions": _list(
+            payload.get("next_actions")
+        ),
+        "bounded_probe_execution_realism_review_result_review_status": (
+            source.get("status")
+        ),
+        "bounded_probe_execution_realism_review_evidence_quality_status": (
+            source.get("evidence_quality_status")
+        ),
+        "bounded_probe_execution_realism_review_probe_edge_capture_ratio": (
+            source.get("probe_edge_capture_ratio")
+        ),
+        "bounded_probe_execution_realism_review_probe_execution_gap_bps": (
+            source.get("probe_execution_gap_bps")
+        ),
+        "bounded_probe_execution_realism_review_probe_avg_net_bps": probe.get(
+            "avg_net_bps"
+        ),
+        "bounded_probe_execution_realism_review_probe_avg_gross_bps": probe.get(
+            "avg_gross_bps"
+        ),
+        "bounded_probe_execution_realism_review_probe_avg_cost_bps": probe.get(
+            "avg_cost_bps"
+        ),
+        "bounded_probe_execution_realism_review_probe_fill_backed_pct": probe.get(
+            "fill_backed_pct"
+        ),
+        "bounded_probe_execution_realism_review_control_avg_net_bps": control.get(
+            "avg_net_bps"
+        ),
+        "bounded_probe_execution_realism_review_net_capture_gap_bps": gap.get(
+            "net_capture_gap_bps"
+        ),
+        "bounded_probe_execution_realism_review_gross_capture_gap_bps": gap.get(
+            "gross_capture_gap_bps"
+        ),
+        "bounded_probe_execution_realism_review_cost_or_slippage_gap_bps": gap.get(
+            "cost_or_slippage_gap_bps"
+        ),
+        "bounded_probe_execution_realism_review_entry_delay_gap_ms": gap.get(
+            "entry_delay_gap_ms"
+        ),
+        "bounded_probe_execution_realism_review_hypothesis_count": len(hypotheses),
+        "bounded_probe_execution_realism_review_primary_hypothesis": (
+            first_hypothesis.get("kind")
+        ),
+        "bounded_probe_execution_realism_review_execution_gap_confirmed": (
+            answers.get("execution_realism_gap_confirmed") is True
+        ),
+        "bounded_probe_execution_realism_review_fill_backed_probe_execution_available": (
+            answers.get("fill_backed_probe_execution_available") is True
+        ),
+        "bounded_probe_execution_realism_review_cost_gate_or_operator_review_allowed": (
+            answers.get("cost_gate_or_operator_review_allowed") is True
+        ),
+    }
+
+
 def _first_text(items: Any, fallback: str) -> str:
     for item in _list(items):
         text = _str(item)
@@ -604,12 +716,16 @@ def _sealed_preflight_path_state(
 
 def _bounded_probe_result_path_state(
     review: dict[str, Any] | None,
+    execution_realism_review: dict[str, Any] | None = None,
 ) -> tuple[str, str, str] | None:
     payload = _dict(review)
     status = _str(payload.get("status"))
     quality = _dict(payload.get("evidence_quality"))
     quality_status = _str(quality.get("status"))
     next_actions = payload.get("next_actions")
+    execution_payload = _dict(execution_realism_review)
+    execution_status = _str(execution_payload.get("status"))
+    execution_next_actions = _list(execution_payload.get("next_actions"))
     quality_next_action = "record_matched_blocked_signal_outcomes_for_same_side_cell_and_horizon"
     completed = _int(_dict(payload.get("probe_result_summary")).get(
         "completed_probe_outcome_count"
@@ -643,6 +759,51 @@ def _bounded_probe_result_path_state(
         "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
         "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
     } and quality_status == "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP":
+        if not execution_payload:
+            return (
+                "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REVIEW_REQUIRED",
+                "generate_bounded_probe_execution_realism_review_before_cost_gate_or_operator_review",
+                "refresh_bounded_probe_execution_realism_review",
+            )
+        if execution_status == "AUTHORITY_BOUNDARY_VIOLATION":
+            return (
+                "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_AUTHORITY_BOUNDARY_VIOLATION",
+                "remove_authority_granting_execution_review_input_before_any_review",
+                _first_text(
+                    execution_next_actions,
+                    "remove_authority_granting_input_before_any_review",
+                ),
+            )
+        if execution_status == "EXECUTION_REALISM_GAP_DIAGNOSED_REPAIR_REQUIRED":
+            return (
+                "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REPAIR_REQUIRED",
+                "repair_or_replay_bounded_probe_execution_realism_gap_before_cost_gate_review",
+                _first_text(
+                    execution_next_actions,
+                    "record_fill_backed_probe_execution_rows_or_l1_replay_before_cost_gate_review",
+                ),
+            )
+        if execution_status in {
+            "EXECUTION_REALISM_PROBE_SAMPLE_BELOW_REVIEW_FLOOR",
+            "EXECUTION_REALISM_CONTROL_SAMPLE_BELOW_REVIEW_FLOOR",
+        }:
+            return (
+                "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_SAMPLE_REQUIRED",
+                "record_probe_and_matched_control_rows_before_execution_realism_review",
+                _first_text(
+                    execution_next_actions,
+                    "continue_recording_probe_and_matched_control_outcomes_before_execution_realism_review",
+                ),
+            )
+        if execution_status == "NO_EXECUTION_REALISM_GAP_TO_REVIEW":
+            return (
+                "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REVIEW_NOT_ALIGNED",
+                "refresh_execution_realism_review_until_it_matches_result_review",
+                _first_text(
+                    execution_next_actions,
+                    "refresh_bounded_probe_execution_realism_review",
+                ),
+            )
         return (
             "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP",
             "investigate_probe_execution_realism_before_cost_gate_or_operator_review",
@@ -729,6 +890,7 @@ def _cost_gate_candidate_paths(
     horizon_learning_evidence: dict[str, Any] | None,
     sealed_horizon_probe_preflight: dict[str, Any] | None,
     bounded_probe_result_review: dict[str, Any] | None,
+    bounded_probe_execution_realism_review: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     if not counterfactual:
         return []
@@ -752,6 +914,11 @@ def _cost_gate_candidate_paths(
     )
     bounded_probe_result_review_by_key = _bounded_probe_result_review_by_key(
         bounded_probe_result_review
+    )
+    bounded_probe_execution_realism_review_by_key = (
+        _bounded_probe_execution_realism_review_by_key(
+            bounded_probe_execution_realism_review
+        )
     )
     paths: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -813,6 +980,9 @@ def _cost_gate_candidate_paths(
         learning_evidence = learning_evidence_by_key.get(key)
         sealed_probe_preflight = sealed_probe_preflight_by_key.get(key)
         bounded_probe_result_review = bounded_probe_result_review_by_key.get(key)
+        bounded_probe_execution_realism_review = (
+            bounded_probe_execution_realism_review_by_key.get(key)
+        )
         sealed_passed = (
             _str(_dict(sealed).get("status"))
             == "SEALED_HORIZON_REPLAY_READY_FOR_OPERATOR_REVIEW"
@@ -820,7 +990,8 @@ def _cost_gate_candidate_paths(
         )
         learning_ready = _sealed_learning_review_ready(learning_evidence)
         result_path_state = _bounded_probe_result_path_state(
-            bounded_probe_result_review
+            bounded_probe_result_review,
+            execution_realism_review=bounded_probe_execution_realism_review,
         )
         if result_path_state:
             path_status, required_next_gate, path_next_action = result_path_state
@@ -853,6 +1024,11 @@ def _cost_gate_candidate_paths(
         sealed_preflight_fields = _sealed_probe_preflight_fields(sealed_probe_preflight)
         bounded_probe_result_fields = _bounded_probe_result_review_fields(
             bounded_probe_result_review
+        )
+        bounded_probe_execution_realism_fields = (
+            _bounded_probe_execution_realism_review_fields(
+                bounded_probe_execution_realism_review
+            )
         )
         paths.append(_base_path(
             path_id=f"horizon_edge_amplification:{key}",
@@ -891,6 +1067,7 @@ def _cost_gate_candidate_paths(
                 **learning_fields,
                 **sealed_preflight_fields,
                 **bounded_probe_result_fields,
+                **bounded_probe_execution_realism_fields,
             },
         ))
     return paths
@@ -1143,6 +1320,7 @@ def _profitability_engineering_closure(
     candidates: list[dict[str, Any]],
     sealed_horizon_probe_preflight: dict[str, Any] | None,
     bounded_probe_result_review: dict[str, Any] | None,
+    bounded_probe_execution_realism_review: dict[str, Any] | None,
 ) -> dict[str, Any]:
     top = candidates[0] if candidates else {}
     preflight = _dict(sealed_horizon_probe_preflight)
@@ -1158,6 +1336,26 @@ def _profitability_engineering_closure(
     result_next_actions = _list(result_review.get("next_actions"))
     completed_probe_outcomes = _int(
         result_summary.get("completed_probe_outcome_count")
+    )
+    execution_review = _dict(bounded_probe_execution_realism_review)
+    execution_status = _str(execution_review.get("status"))
+    execution_next_actions = _list(execution_review.get("next_actions"))
+    execution_probe = _dict(execution_review.get("probe_execution_summary"))
+    execution_gap = _dict(execution_review.get("gap_decomposition"))
+    execution_answers = _dict(execution_review.get("answers"))
+    execution_hypotheses = _list(execution_review.get("execution_gap_hypotheses"))
+    execution_primary_hypothesis = (
+        execution_hypotheses[0]
+        if execution_hypotheses and isinstance(execution_hypotheses[0], dict)
+        else {}
+    )
+    result_under_capture = (
+        result_status
+        in {
+            "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
+            "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+        }
+        and result_quality_status == "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP"
     )
 
     if not candidates:
@@ -1175,10 +1373,21 @@ def _profitability_engineering_closure(
         "MATCHED_CONTROL_SAMPLE_BELOW_FIRST_REVIEW_FLOOR",
     }:
         status = "BOUNDED_DEMO_PROBE_CONTROL_COMPARISON_REQUIRED"
-    elif result_status in {
-        "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
-        "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
-    } and result_quality_status == "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP":
+    elif result_under_capture and not execution_review:
+        status = "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REVIEW_REQUIRED"
+    elif (
+        result_under_capture
+        and execution_status == "EXECUTION_REALISM_GAP_DIAGNOSED_REPAIR_REQUIRED"
+    ):
+        status = "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REPAIR_REQUIRED"
+    elif result_under_capture and execution_status in {
+        "EXECUTION_REALISM_PROBE_SAMPLE_BELOW_REVIEW_FLOOR",
+        "EXECUTION_REALISM_CONTROL_SAMPLE_BELOW_REVIEW_FLOOR",
+    }:
+        status = "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_SAMPLE_REQUIRED"
+    elif result_under_capture and execution_status == "NO_EXECUTION_REALISM_GAP_TO_REVIEW":
+        status = "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REVIEW_NOT_ALIGNED"
+    elif result_under_capture:
         status = "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP"
     elif result_status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
         status = "BOUNDED_DEMO_PROBE_LEARNING_REVIEW_OPERATOR_REQUIRED"
@@ -1218,10 +1427,29 @@ def _profitability_engineering_closure(
         remaining = [
             "record matched blocked-signal control outcomes before treating positive probe results as Cost Gate evidence"
         ]
-    elif result_status in {
-        "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
-        "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
-    } and result_quality_status == "PROBE_UNDERPERFORMS_MATCHED_CONTROL_EXECUTION_GAP":
+    elif result_under_capture and not execution_review:
+        remaining = [
+            "generate bounded demo probe execution-realism review before Cost Gate or operator review"
+        ]
+    elif (
+        result_under_capture
+        and execution_status == "EXECUTION_REALISM_GAP_DIAGNOSED_REPAIR_REQUIRED"
+    ):
+        remaining = [
+            "repair bounded demo probe execution-realism gap or record fill-backed/L1 evidence before Cost Gate review"
+        ]
+    elif result_under_capture and execution_status in {
+        "EXECUTION_REALISM_PROBE_SAMPLE_BELOW_REVIEW_FLOOR",
+        "EXECUTION_REALISM_CONTROL_SAMPLE_BELOW_REVIEW_FLOOR",
+    }:
+        remaining = [
+            "record enough probe and matched-control rows for execution-realism review"
+        ]
+    elif result_under_capture and execution_status == "NO_EXECUTION_REALISM_GAP_TO_REVIEW":
+        remaining = [
+            "refresh execution-realism review until it aligns with bounded result review"
+        ]
+    elif result_under_capture:
         remaining = [
             "investigate bounded demo probe execution realism gap before treating matched-control edge as capturable"
         ]
@@ -1235,6 +1463,12 @@ def _profitability_engineering_closure(
         remaining = [_str(top.get("required_next_gate"))]
     next_actions = [
         action for action in [
+            *[str(item) for item in execution_next_actions],
+            (
+                "refresh_bounded_probe_execution_realism_review"
+                if result_under_capture and not execution_review
+                else ""
+            ),
             *[str(item) for item in result_next_actions],
             *[str(item) for item in preflight_next_actions],
             _str(top.get("next_action")),
@@ -1307,6 +1541,30 @@ def _profitability_engineering_closure(
             "bounded_probe_result_review_anecdote_risk": (
                 result_quality.get("anecdote_risk") is True
             ),
+            "bounded_probe_execution_realism_review_status": (
+                execution_status or None
+            ),
+            "bounded_probe_execution_realism_review_primary_hypothesis": (
+                execution_primary_hypothesis.get("kind")
+            ),
+            "bounded_probe_execution_realism_review_net_capture_gap_bps": (
+                execution_gap.get("net_capture_gap_bps")
+            ),
+            "bounded_probe_execution_realism_review_gross_capture_gap_bps": (
+                execution_gap.get("gross_capture_gap_bps")
+            ),
+            "bounded_probe_execution_realism_review_cost_or_slippage_gap_bps": (
+                execution_gap.get("cost_or_slippage_gap_bps")
+            ),
+            "bounded_probe_execution_realism_review_entry_delay_gap_ms": (
+                execution_gap.get("entry_delay_gap_ms")
+            ),
+            "bounded_probe_execution_realism_review_probe_fill_backed_pct": (
+                execution_probe.get("fill_backed_pct")
+            ),
+            "bounded_probe_execution_realism_review_cost_gate_or_operator_review_allowed": (
+                execution_answers.get("cost_gate_or_operator_review_allowed") is True
+            ),
         },
         "edge_amplification_levers": [
             _lever_status(candidates, "horizon_retiming_or_side_cell_filter"),
@@ -1338,6 +1596,7 @@ def build_profitability_path_scorecard(
     horizon_learning_evidence: dict[str, Any] | None = None,
     sealed_horizon_probe_preflight: dict[str, Any] | None = None,
     bounded_probe_result_review: dict[str, Any] | None = None,
+    bounded_probe_execution_realism_review: dict[str, Any] | None = None,
     fillsim: dict[str, Any] | None = None,
     fillsim_history: dict[str, Any] | None = None,
     polymarket_leadlag: dict[str, Any] | None = None,
@@ -1356,6 +1615,7 @@ def build_profitability_path_scorecard(
         horizon_learning_evidence=horizon_learning_evidence,
         sealed_horizon_probe_preflight=sealed_horizon_probe_preflight,
         bounded_probe_result_review=bounded_probe_result_review,
+        bounded_probe_execution_realism_review=bounded_probe_execution_realism_review,
     ))
     candidates.extend(_mm_signal_path(fillsim, fillsim_history))
     candidates.extend(_fee_or_scale_path(fillsim, fillsim_history))
@@ -1375,6 +1635,11 @@ def build_profitability_path_scorecard(
         "HORIZON_EDGE_AMPLIFICATION_CANDIDATE",
         "SEALED_HORIZON_REPLAY_READY_FOR_LEARNING_ACCUMULATION",
         "SEALED_HORIZON_LEARNING_EVIDENCE_READY_FOR_OPERATOR_REVIEW",
+        "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REVIEW_REQUIRED",
+        "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_REPAIR_REQUIRED",
+        "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_SAMPLE_REQUIRED",
+        "BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP",
+        "BOUNDED_DEMO_PROBE_CONTROL_COMPARISON_REQUIRED",
     }]
     if not candidates:
         status = "NO_PROFITABILITY_PATH_ARTIFACTS"
@@ -1388,6 +1653,9 @@ def build_profitability_path_scorecard(
         candidates=candidates,
         sealed_horizon_probe_preflight=sealed_horizon_probe_preflight,
         bounded_probe_result_review=bounded_probe_result_review,
+        bounded_probe_execution_realism_review=(
+            bounded_probe_execution_realism_review
+        ),
     )
     return {
         "schema_version": PROFITABILITY_PATH_SCORECARD_SCHEMA_VERSION,
@@ -1447,6 +1715,13 @@ def build_profitability_path_scorecard(
                 )
                 is True
             ),
+            "bounded_demo_probe_execution_realism_review_present": bool(
+                _dict(bounded_probe_execution_realism_review)
+            ),
+            "bounded_demo_probe_execution_realism_repair_required": (
+                _str(_dict(bounded_probe_execution_realism_review).get("status"))
+                == "EXECUTION_REALISM_GAP_DIAGNOSED_REPAIR_REQUIRED"
+            ),
             "silent_drop_risk": packet_answers.get("silent_drop_risk") is True,
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
@@ -1495,6 +1770,11 @@ def build_profitability_path_scorecard(
                 "bounded_probe_result_review",
                 input_paths.get("bounded_probe_result_review"),
                 bounded_probe_result_review,
+            ),
+            "bounded_probe_execution_realism_review": _artifact_summary(
+                "bounded_probe_execution_realism_review",
+                input_paths.get("bounded_probe_execution_realism_review"),
+                bounded_probe_execution_realism_review,
             ),
             "fillsim": _artifact_summary("fillsim", input_paths.get("fillsim"), fillsim),
             "fillsim_history": _artifact_summary(
@@ -1616,6 +1896,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--horizon-learning-evidence-json", type=Path)
     parser.add_argument("--sealed-horizon-probe-preflight-json", type=Path)
     parser.add_argument("--bounded-probe-result-review-json", type=Path)
+    parser.add_argument("--bounded-probe-execution-realism-review-json", type=Path)
     parser.add_argument("--fillsim-json", type=Path)
     parser.add_argument("--fillsim-history-json", type=Path)
     parser.add_argument("--polymarket-leadlag-json", type=Path)
@@ -1637,6 +1918,9 @@ def main() -> int:
         "horizon_learning_evidence": args.horizon_learning_evidence_json,
         "sealed_horizon_probe_preflight": args.sealed_horizon_probe_preflight_json,
         "bounded_probe_result_review": args.bounded_probe_result_review_json,
+        "bounded_probe_execution_realism_review": (
+            args.bounded_probe_execution_realism_review_json
+        ),
         "fillsim": args.fillsim_json,
         "fillsim_history": args.fillsim_history_json,
         "polymarket_leadlag": args.polymarket_leadlag_json,
@@ -1653,6 +1937,9 @@ def main() -> int:
             args.sealed_horizon_probe_preflight_json
         ),
         bounded_probe_result_review=_read_json(args.bounded_probe_result_review_json),
+        bounded_probe_execution_realism_review=_read_json(
+            args.bounded_probe_execution_realism_review_json
+        ),
         fillsim=_read_json(args.fillsim_json),
         fillsim_history=_read_json(args.fillsim_history_json),
         polymarket_leadlag=_read_json(args.polymarket_leadlag_json),
