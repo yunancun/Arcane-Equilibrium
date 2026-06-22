@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Bounded Probe Edge-Capture Execution Gap
+
+- `bounded_demo_probe_evidence_quality_v1` now measures whether positive probe outcomes actually capture matched blocked-signal control edge via `probe_edge_capture_ratio` and `probe_execution_gap_bps`.
+- Positive probes that underperform matched controls are routed to `BOUNDED_DEMO_PROBE_EXECUTION_REALISM_GAP` / `bounded_probe_execution_realism`, forcing slippage/timing/fill-quality/horizon-retiming investigation before Cost Gate/operator review.
+- This strengthens the profitability path by separating alpha/control discovery from realized PnL capture; no Cost Gate lowering, probe/order authority, runtime mutation, or promotion proof was granted.
+
 ## 2026-06-22 Bounded Probe Matched-Control Evidence Quality
 
 - `bounded_demo_probe_result_review_v1` now emits `bounded_demo_probe_evidence_quality_v1`, comparing probe outcomes with matched same side-cell/horizon `blocked_signal_outcome` controls.
