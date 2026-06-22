@@ -1722,3 +1722,10 @@
 - Latest alpha sha256 `da105c37b2ba0c6565bfeebeb974a865df486685d4368d71ccedcac49c4030d4` remains `NO_ACTIONABLE_ALPHA_RESEARCH_BLOCKED`. Best sample-gated gross cell is `2.647bp` / n=33 / net `-1.353bp`, but train leg n=28 and gross `0.541bp`, so the blocker remains `LOW_FRICTION_HOLDOUT_GROSS_NOT_TRAIN_CONFIRMED`.
 - Polymarket has moved past the previous price-catch-up blocker to `IC_READY_NO_SIGNIFICANT_EDGE`, candidate_count=0. Do not chase Polymarket unless new evidence or a new family appears.
 - Boundary: artifact-only source/test/docs + selective Linux source sync + `/tmp/openclaw` artifact/status writes; read-only PG via existing wrappers; no engine/API restart, no Bybit private/signed/trading call, no strategy/risk/order/auth mutation, not promotion proof.
+
+## 2026-06-22 Demo-Learning Activation Packet Alpha Ingestion
+
+- v408 wires `demo_learning_stack_activation_packet_v1` into the alpha runtime and autonomous-learning worklist. The packet is no longer just a standalone operator artifact; `runtime_runner.py` emits `alpha_discovery_runtime_killboard_v8`, `discovery_loop.py` maps packet states into Cost Gate learning blockers, and `learning_worklist.py` emits `alpha_learning_worklist_v5` with packet evidence.
+- The current intended blocker is specific: `demo_learning_stack_activation_packet_ready_for_operator_dry_run`, not generic `demo_learning_stack_not_installed`. This carries missing crons, dry-run/apply/rollback/verify commands, edge-amplification levers, and no-authority answers into the worklist.
+- Verification: Mac py_compile and focused alpha/worklist pytest `62 passed`; source commit `277b00be` pushed `[skip ci]`; Linux fast-forwarded to `277b00be`; Linux py_compile and same pytest `62 passed`; Mac/Linux `git diff --check` clean.
+- Boundary: source/test/docs + Linux source sync/read-only/static tests only; no CI, no cron install, no PG write/schema migration, no Bybit private/signed/trading call, no deploy/restart, no env/auth/risk/order/strategy/runtime mutation, no Cost Gate lowering, no probe/order authority, no promotion proof.
