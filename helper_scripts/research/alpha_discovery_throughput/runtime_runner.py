@@ -27,7 +27,7 @@ from polymarket_leadlag import replay_history as polymarket_replay_history
 from . import RUNNER_VERSION
 from .discovery_loop import build_discovery_plan
 
-RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v7"
+RUNTIME_KILLBOARD_SCHEMA_VERSION = "alpha_discovery_runtime_killboard_v8"
 DEFAULT_MAX_ARTIFACT_AGE_SECONDS = 6 * 60 * 60
 DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS = 36 * 60 * 60
 DEFAULT_POLYMARKET_REPLAY_HISTORY_REPORT_LIMIT = 4096
@@ -1567,6 +1567,146 @@ def summarize_demo_learning_stack_healthcheck(
     }
 
 
+def _operator_command_shell(commands: dict[str, Any], key: str) -> Any:
+    command = commands.get(key)
+    if isinstance(command, dict):
+        return command.get("shell")
+    return None
+
+
+def summarize_demo_learning_stack_activation_packet(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    path = (
+        data_dir
+        / "demo_learning_stack_activation_packet"
+        / "demo_learning_stack_activation_packet_latest.json"
+    )
+    payload, err = _read_json(path)
+    if err:
+        return {
+            "demo_learning_stack_activation_packet_present": False,
+            "demo_learning_stack_activation_packet_status": "NOT_SEEN",
+            "demo_learning_stack_activation_packet_source_path": str(path),
+            "demo_learning_stack_activation_packet_source_error": err,
+        }
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else {}
+    planned = (
+        payload.get("planned_stack")
+        if isinstance(payload.get("planned_stack"), dict)
+        else {}
+    )
+    profitability_path = (
+        payload.get("profitability_path")
+        if isinstance(payload.get("profitability_path"), dict)
+        else {}
+    )
+    commands = (
+        payload.get("operator_commands")
+        if isinstance(payload.get("operator_commands"), dict)
+        else {}
+    )
+    missing_links = payload.get("missing_links")
+    if not isinstance(missing_links, list):
+        missing_links = []
+    return {
+        "demo_learning_stack_activation_packet_present": True,
+        "demo_learning_stack_activation_packet_status": (
+            str(payload.get("status") or "UNKNOWN") if fresh else "STALE_ARTIFACT"
+        ),
+        "demo_learning_stack_activation_packet_raw_status": payload.get("status"),
+        "demo_learning_stack_activation_packet_reason": payload.get("reason"),
+        "demo_learning_stack_activation_packet_operator_next_action": payload.get(
+            "operator_next_action"
+        ),
+        "demo_learning_stack_activation_packet_install_review_ready": payload.get(
+            "install_review_ready"
+        ),
+        "demo_learning_stack_activation_packet_missing_links": missing_links,
+        "demo_learning_stack_activation_packet_generated_at_utc": generated_at,
+        "demo_learning_stack_activation_packet_age_seconds": age,
+        "demo_learning_stack_activation_packet_source_ok": fresh,
+        "demo_learning_stack_activation_packet_source_path": str(path),
+        "demo_learning_stack_activation_packet_source_error": freshness_error,
+        "demo_learning_stack_activation_packet_source_ready": answers.get(
+            "source_ready"
+        ),
+        "demo_learning_stack_activation_packet_stack_installed": answers.get(
+            "stack_installed"
+        ),
+        "demo_learning_stack_activation_packet_missing_cron_count": answers.get(
+            "missing_cron_count"
+        ),
+        "demo_learning_stack_activation_packet_missing_crons": answers.get(
+            "missing_crons"
+        ),
+        "demo_learning_stack_activation_packet_sealed_horizon_probe_preflight_present": (
+            answers.get("sealed_horizon_probe_preflight_present")
+        ),
+        "demo_learning_stack_activation_packet_bounded_probe_reviews_present": (
+            answers.get("bounded_probe_reviews_present")
+        ),
+        "demo_learning_stack_activation_packet_cost_gate_activation_ready": answers.get(
+            "cost_gate_activation_ready"
+        ),
+        "demo_learning_stack_activation_packet_runtime_writer_enabled": answers.get(
+            "runtime_writer_enabled"
+        ),
+        "demo_learning_stack_activation_packet_global_cost_gate_lowering_recommended": (
+            answers.get("global_cost_gate_lowering_recommended")
+        ),
+        "demo_learning_stack_activation_packet_order_authority_granted": answers.get(
+            "order_authority_granted"
+        ),
+        "demo_learning_stack_activation_packet_probe_authority_granted": answers.get(
+            "probe_authority_granted"
+        ),
+        "demo_learning_stack_activation_packet_promotion_proof": answers.get(
+            "promotion_proof"
+        ),
+        "demo_learning_stack_activation_packet_planned_cron_count": planned.get(
+            "cron_count"
+        ),
+        "demo_learning_stack_activation_packet_healthcheck_status": planned.get(
+            "healthcheck_status"
+        ),
+        "demo_learning_stack_activation_packet_cost_gate_activation_status": planned.get(
+            "cost_gate_activation_status"
+        ),
+        "demo_learning_stack_activation_packet_cost_gate_escape_thesis": (
+            profitability_path.get("cost_gate_escape_thesis")
+        ),
+        "demo_learning_stack_activation_packet_edge_amplification_levers": (
+            profitability_path.get("edge_amplification_levers")
+        ),
+        "demo_learning_stack_activation_packet_next_profit_gate_after_activation": (
+            profitability_path.get("next_profit_gate_after_activation")
+        ),
+        "demo_learning_stack_activation_packet_dry_run_preview_shell": (
+            _operator_command_shell(commands, "dry_run_preview")
+        ),
+        "demo_learning_stack_activation_packet_operator_only_apply_shell": (
+            _operator_command_shell(commands, "operator_only_apply")
+        ),
+        "demo_learning_stack_activation_packet_operator_only_rollback_shell": (
+            _operator_command_shell(commands, "operator_only_rollback")
+        ),
+        "demo_learning_stack_activation_packet_post_install_verification_shell": (
+            _operator_command_shell(commands, "post_install_verification")
+        ),
+    }
+
+
 def summarize_profit_learning_decision_packet(
     data_dir: Path,
     *,
@@ -2110,6 +2250,10 @@ def collect_cost_gate_learning_lane_arm(
         data_dir,
         now_utc=now_utc,
     )
+    stack_activation_packet_summary = summarize_demo_learning_stack_activation_packet(
+        data_dir,
+        now_utc=now_utc,
+    )
     decision_packet_summary = summarize_profit_learning_decision_packet(
         data_dir,
         now_utc=now_utc,
@@ -2174,6 +2318,7 @@ def collect_cost_gate_learning_lane_arm(
                 **source_summary,
                 **demo_evidence_summary,
                 **stack_health_summary,
+                **stack_activation_packet_summary,
                 **decision_packet_summary,
                 **sealed_probe_preflight_summary,
                 **bounded_probe_result_review_summary,
@@ -2222,6 +2367,7 @@ def collect_cost_gate_learning_lane_arm(
             **source_summary,
             **demo_evidence_summary,
             **stack_health_summary,
+            **stack_activation_packet_summary,
             **decision_packet_summary,
             **sealed_probe_preflight_summary,
             **bounded_probe_result_review_summary,

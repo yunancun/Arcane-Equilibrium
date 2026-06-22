@@ -1155,7 +1155,7 @@ def test_runtime_runner_writes_artifact_only_killboard(tmp_path):
         now_utc=dt.datetime(2026, 6, 19, 1, 0, tzinfo=dt.timezone.utc),
     )
 
-    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v7"
+    assert result["schema_version"] == "alpha_discovery_runtime_killboard_v8"
     assert result["killboard"]["is_fast_discovery_active"] is True
     assert result["killboard"]["source_present_count"] == 5
     assert result["killboard"]["runtime_source_activation_ready"] is False
@@ -1566,6 +1566,95 @@ def _write_demo_learning_stack_healthcheck_latest(
                 "PG_REJECTS_RECORDED_LEARNING_LANE_NOT_ACCUMULATING"
             ),
             "cost_gate_learning_review_status": None,
+        },
+    }), encoding="utf-8")
+    return path
+
+
+def _write_demo_learning_stack_activation_packet_latest(
+    data: Path,
+    *,
+    status: str,
+    reason: str,
+    operator_next_action: str,
+    generated_at: str = "2026-06-21T18:04:00+00:00",
+    install_review_ready: bool = True,
+    missing_crons: list[str] | None = None,
+    healthcheck_status: str = "NOT_INSTALLED",
+    cost_gate_activation_status: str = "REVIEW_CANDIDATE_OPERATOR_REVIEW",
+) -> Path:
+    path = (
+        data
+        / "demo_learning_stack_activation_packet"
+        / "demo_learning_stack_activation_packet_latest.json"
+    )
+    missing = missing_crons or [
+        "demo_learning_evidence",
+        "sealed_horizon_probe_preflight",
+        "cost_gate_learning_lane",
+        "demo_learning_stack_healthcheck",
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({
+        "schema_version": "demo_learning_stack_activation_packet_v1",
+        "generated_at_utc": generated_at,
+        "status": status,
+        "reason": reason,
+        "operator_next_action": operator_next_action,
+        "missing_links": [f"cron:{name}" for name in missing],
+        "install_review_ready": install_review_ready,
+        "answers": {
+            "source_ready": True,
+            "stack_installed": False,
+            "missing_cron_count": len(missing),
+            "missing_crons": missing,
+            "sealed_horizon_probe_preflight_present": True,
+            "bounded_probe_reviews_present": False,
+            "cost_gate_activation_ready": True,
+            "runtime_writer_enabled": False,
+            "global_cost_gate_lowering_recommended": False,
+            "order_authority_granted": False,
+            "probe_authority_granted": False,
+            "promotion_proof": False,
+        },
+        "planned_stack": {
+            "cron_count": 4,
+            "crons": [],
+            "healthcheck_status": healthcheck_status,
+            "cost_gate_activation_status": cost_gate_activation_status,
+        },
+        "profitability_path": {
+            "cost_gate_escape_thesis": (
+                "collect rejected demo signals and compare matched blocked outcomes"
+            ),
+            "edge_amplification_levers": [
+                "side_cell_filtering",
+                "horizon_retiming",
+                "low_friction_execution_filtering",
+            ],
+            "next_profit_gate_after_activation": (
+                "bounded_probe_result_review_and_execution_realism_review_with_matched_controls"
+            ),
+        },
+        "operator_commands": {
+            "dry_run_preview": {
+                "shell": "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=0 install_stack",
+                "mutates_crontab": False,
+            },
+            "operator_only_apply": {
+                "shell": "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1 install_stack",
+                "mutates_crontab": True,
+                "requires_operator_approval": True,
+            },
+            "operator_only_rollback": {
+                "shell": "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1 install_stack --remove",
+                "mutates_crontab": True,
+                "requires_operator_approval": True,
+            },
+            "post_install_verification": {
+                "shell": "python3 demo_learning_stack_healthcheck.py --fail-on-not-active",
+                "mutates_crontab": False,
+            },
         },
     }), encoding="utf-8")
     return path
@@ -2022,6 +2111,93 @@ def test_cost_gate_arm_uses_demo_learning_stack_healthcheck_for_not_installed(tm
     assert blocker["demo_learning_stack_stack_installed"] is False
     assert blocker["demo_learning_stack_cost_gate_learning_ledger_rows_present"] is False
     assert blocker["engineering_actionable"] is True
+
+
+def test_cost_gate_arm_uses_activation_packet_for_operator_dry_run(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_demo_learning_stack_healthcheck_latest(
+        data,
+        status="NOT_INSTALLED",
+        reason="one_or_more_demo_learning_stack_crons_missing",
+        next_action="install_stack_after_operator_source_reconcile",
+    )
+    artifact = _write_demo_learning_stack_activation_packet_latest(
+        data,
+        status="READY_FOR_OPERATOR_DRY_RUN",
+        reason="source_ready_but_one_or_more_stack_crons_missing",
+        operator_next_action=(
+            "run_dry_run_preview_then_apply_only_if_installer_preflight_passes"
+        ),
+    )
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+
+    assert arm["detail"]["demo_learning_stack_activation_packet_source_path"] == (
+        str(artifact)
+    )
+    assert arm["detail"]["demo_learning_stack_activation_packet_status"] == (
+        "READY_FOR_OPERATOR_DRY_RUN"
+    )
+    assert arm["detail"]["demo_learning_stack_activation_packet_missing_cron_count"] == 4
+    assert arm["detail"][
+        "demo_learning_stack_activation_packet_global_cost_gate_lowering_recommended"
+    ] is False
+    assert arm["detail"][
+        "demo_learning_stack_activation_packet_order_authority_granted"
+    ] is False
+    assert arm["detail"][
+        "demo_learning_stack_activation_packet_probe_authority_granted"
+    ] is False
+
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    assert blocker["primary_blocker"] == (
+        "demo_learning_stack_activation_packet_ready_for_operator_dry_run"
+    )
+    assert blocker["next_trigger"] == (
+        "run_dry_run_preview_then_apply_only_if_installer_preflight_passes"
+    )
+    assert blocker["demo_learning_stack_activation_packet_install_review_ready"] is True
+    assert blocker["demo_learning_stack_activation_packet_missing_crons"] == [
+        "demo_learning_evidence",
+        "sealed_horizon_probe_preflight",
+        "cost_gate_learning_lane",
+        "demo_learning_stack_healthcheck",
+    ]
+    assert blocker[
+        "demo_learning_stack_activation_packet_dry_run_preview_shell"
+    ].startswith("OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=0")
+    assert blocker[
+        "demo_learning_stack_activation_packet_operator_only_apply_shell"
+    ].startswith("OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1")
+    assert blocker[
+        "demo_learning_stack_activation_packet_global_cost_gate_lowering_recommended"
+    ] is False
+    assert blocker[
+        "demo_learning_stack_activation_packet_order_authority_granted"
+    ] is False
+    assert blocker[
+        "demo_learning_stack_activation_packet_probe_authority_granted"
+    ] is False
+
+    task = plan["learning_worklist"]["top_task"]
+    assert task["task_type"] == "cost_gate_learning_activation"
+    assert task["learning_objective"] == (
+        "review_demo_learning_stack_activation_packet_and_run_dry_run_"
+        "before_any_cron_install"
+    )
+    assert task["requires_operator_authorization"] is True
+    assert task["runtime_mutation_required"] is True
+    assert task["evidence"]["demo_learning_stack_activation_packet_status"] == (
+        "READY_FOR_OPERATOR_DRY_RUN"
+    )
+    assert task["evidence"][
+        "demo_learning_stack_activation_packet_order_authority_granted"
+    ] is False
+    assert task["evidence"][
+        "demo_learning_stack_activation_packet_probe_authority_granted"
+    ] is False
 
 
 def test_cost_gate_arm_uses_stack_healthcheck_for_missing_bounded_reviews(tmp_path):

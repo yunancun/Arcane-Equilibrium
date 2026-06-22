@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-LEARNING_WORKLIST_SCHEMA_VERSION = "alpha_learning_worklist_v4"
+LEARNING_WORKLIST_SCHEMA_VERSION = "alpha_learning_worklist_v5"
 
 _TASK_PRIORITY = {
     "promotion_review": 0,
@@ -77,6 +77,40 @@ _EVIDENCE_KEYS = (
     "demo_learning_stack_healthcheck_ts_utc",
     "demo_learning_stack_healthcheck_age_seconds",
     "demo_learning_stack_healthcheck_source_ok",
+    "demo_learning_stack_activation_packet_present",
+    "demo_learning_stack_activation_packet_status",
+    "demo_learning_stack_activation_packet_raw_status",
+    "demo_learning_stack_activation_packet_reason",
+    "demo_learning_stack_activation_packet_operator_next_action",
+    "demo_learning_stack_activation_packet_install_review_ready",
+    "demo_learning_stack_activation_packet_missing_links",
+    "demo_learning_stack_activation_packet_generated_at_utc",
+    "demo_learning_stack_activation_packet_age_seconds",
+    "demo_learning_stack_activation_packet_source_ok",
+    "demo_learning_stack_activation_packet_source_path",
+    "demo_learning_stack_activation_packet_source_error",
+    "demo_learning_stack_activation_packet_source_ready",
+    "demo_learning_stack_activation_packet_stack_installed",
+    "demo_learning_stack_activation_packet_missing_cron_count",
+    "demo_learning_stack_activation_packet_missing_crons",
+    "demo_learning_stack_activation_packet_sealed_horizon_probe_preflight_present",
+    "demo_learning_stack_activation_packet_bounded_probe_reviews_present",
+    "demo_learning_stack_activation_packet_cost_gate_activation_ready",
+    "demo_learning_stack_activation_packet_runtime_writer_enabled",
+    "demo_learning_stack_activation_packet_global_cost_gate_lowering_recommended",
+    "demo_learning_stack_activation_packet_order_authority_granted",
+    "demo_learning_stack_activation_packet_probe_authority_granted",
+    "demo_learning_stack_activation_packet_promotion_proof",
+    "demo_learning_stack_activation_packet_planned_cron_count",
+    "demo_learning_stack_activation_packet_healthcheck_status",
+    "demo_learning_stack_activation_packet_cost_gate_activation_status",
+    "demo_learning_stack_activation_packet_cost_gate_escape_thesis",
+    "demo_learning_stack_activation_packet_edge_amplification_levers",
+    "demo_learning_stack_activation_packet_next_profit_gate_after_activation",
+    "demo_learning_stack_activation_packet_dry_run_preview_shell",
+    "demo_learning_stack_activation_packet_operator_only_apply_shell",
+    "demo_learning_stack_activation_packet_operator_only_rollback_shell",
+    "demo_learning_stack_activation_packet_post_install_verification_shell",
     "demo_learning_stack_source_ready",
     "demo_learning_stack_stack_installed",
     "demo_learning_stack_demo_learning_evidence_cron_entry_present",
@@ -364,6 +398,13 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
     if task_type == "runtime_source_reconcile":
         return "reconcile_runtime_source_before_learning_activation_or_probe_trust"
     if task_type == "cost_gate_learning_activation":
+        if _str(row.get("demo_learning_stack_activation_packet_status")) == (
+            "READY_FOR_OPERATOR_DRY_RUN"
+        ):
+            return (
+                "review_demo_learning_stack_activation_packet_and_run_dry_run_"
+                "before_any_cron_install"
+            )
         return "activate_bounded_cost_gate_reject_learning_before_lowering_main_gate"
     if task_type == "cost_gate_outcome_review":
         return "compare_blocked_signal_outcomes_against_market_path"
@@ -461,6 +502,8 @@ def _completion_evidence_required(task_type: str) -> list[str]:
         ]
     if task_type == "cost_gate_learning_activation":
         return [
+            "demo_learning_stack_activation_packet_status records dry-run readiness or stack-active state",
+            "dry-run preview is captured before any operator apply",
             "demo_learning_stack_healthcheck_status == EVIDENCE_STACK_ACTIVE",
             "learning_loop_status not in NOT_SEEN/MISSING",
             "ledger_total_rows or materialized_record_count increases",
