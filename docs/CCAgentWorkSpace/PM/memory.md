@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Sealed Horizon Alpha Worklist Bridge
+
+- Alpha discovery now recognizes `OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE` as a Cost Gate `READY_FOR_PROBE` review blocker instead of leaving it stranded in the decision packet.
+- Learning worklist carries sealed horizon side-cell/horizon/outcome evidence and emits `operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe`.
+- This makes the profit path more autonomous and reviewable, but still grants no runtime mutation, Cost Gate lowering, probe/order authority, or promotion proof.
+
 ## 2026-06-22 Sealed Horizon Evidence Review Bridge
 
 - Profitability path scorecard now consumes `sealed_horizon_learning_evidence_v1`; passing evidence promotes the horizon path to `SEALED_HORIZON_LEARNING_EVIDENCE_READY_FOR_OPERATOR_REVIEW`.

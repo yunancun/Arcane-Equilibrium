@@ -1537,6 +1537,7 @@ def _write_profit_learning_decision_packet_latest(
     next_actions: list[str],
     generated_at: str = "2026-06-21T18:04:00+00:00",
     review_candidate: bool = False,
+    sealed_horizon_candidate: bool = False,
 ) -> Path:
     path = (
         data
@@ -1558,7 +1559,7 @@ def _write_profit_learning_decision_packet_latest(
         "main_cost_gate_adjustment": "NONE",
         "promotion_evidence": False,
     }
-    path.write_text(json.dumps({
+    payload = {
         "schema_version": "cost_gate_profit_learning_decision_packet_v1",
         "generated_at_utc": generated_at,
         "status": status,
@@ -1576,6 +1577,10 @@ def _write_profit_learning_decision_packet_latest(
             },
             "blocked_outcome_review_available": review_candidate,
             "blocked_outcome_review_candidates_present": review_candidate,
+            "sealed_horizon_learning_evidence_available": sealed_horizon_candidate,
+            "sealed_horizon_learning_evidence_candidates_present": (
+                sealed_horizon_candidate
+            ),
             "global_cost_gate_lowering_recommended": False,
             "main_cost_gate_adjustment": "NONE",
             "order_authority_granted": False,
@@ -1609,7 +1614,22 @@ def _write_profit_learning_decision_packet_latest(
             ),
             "candidate_count": 1 if review_candidate else 0,
         },
-    }), encoding="utf-8")
+    }
+    if sealed_horizon_candidate:
+        payload["sealed_horizon_learning_evidence"] = {
+            "status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+            "source_kind": "horizon_specific_sealed_replay",
+            "outcome_horizon_minutes": 240,
+            "blocked_signal_outcome_count": 16515,
+            "avg_gross_bps": 7.0511,
+            "avg_net_bps": 3.0511,
+            "net_positive_pct": 68.5619,
+            "review_candidate_side_cell_count": 1,
+            "review_ready": True,
+            "top_side_cell_status": "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATE",
+        }
+    path.write_text(json.dumps(payload), encoding="utf-8")
     return path
 
 
@@ -1896,6 +1916,57 @@ def test_cost_gate_profit_packet_probe_candidate_reaches_worklist(tmp_path):
     assert task["evidence"]["profit_learning_top_side_cells"][0]["side_cell_key"] == (
         "ma_crossover|ETHUSDT|Sell"
     )
+    assert task["evidence"]["profit_learning_order_authority_granted"] is False
+
+
+def test_cost_gate_profit_packet_sealed_horizon_candidate_reaches_worklist(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_profit_learning_decision_packet_latest(
+        data,
+        status="OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+        reason=(
+            "sealed_horizon_learning_evidence_clears_review_thresholds;"
+            "production_learning_lane_activation_still_requires_operator_control"
+        ),
+        next_actions=[
+            "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe",
+            "activate_or_repair_cost_gate_learning_lane_stack_before_runtime_probe",
+        ],
+        sealed_horizon_candidate=True,
+    )
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    task = plan["learning_worklist"]["top_task"]
+
+    assert blocker["blocker_class"] == "probe_ready"
+    assert blocker["primary_blocker"] == (
+        "profit_learning_sealed_horizon_demo_probe_candidate_needs_operator_review"
+    )
+    assert blocker["operator_actionable"] is True
+    assert blocker["profit_learning_sealed_horizon_learning_evidence_candidates_present"] is True
+    assert blocker["profit_learning_sealed_horizon_side_cell_key"] == (
+        "ma_crossover|ETHUSDT|Sell"
+    )
+    assert blocker["profit_learning_sealed_horizon_outcome_horizon_minutes"] == 240
+    assert blocker["profit_learning_sealed_horizon_avg_net_bps"] == 3.0511
+    assert blocker["profit_learning_order_authority_granted"] is False
+    assert blocker["profit_learning_main_cost_gate_adjustment"] == "NONE"
+
+    assert plan["learning_worklist"]["status"] == "OPERATOR_GATED_LEARNING_READY"
+    assert task["task_type"] == "operator_probe_review"
+    assert task["learning_objective"] == (
+        "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe"
+    )
+    assert task["requires_operator_authorization"] is True
+    assert task["runtime_mutation_required"] is False
+    assert task["evidence"]["profit_learning_decision_packet_status"] == (
+        "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE"
+    )
+    assert task["evidence"]["profit_learning_sealed_horizon_review_ready"] is True
+    assert task["evidence"]["profit_learning_sealed_horizon_avg_net_bps"] == 3.0511
     assert task["evidence"]["profit_learning_order_authority_granted"] is False
 
 

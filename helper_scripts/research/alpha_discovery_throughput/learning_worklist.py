@@ -123,6 +123,8 @@ _EVIDENCE_KEYS = (
     "profit_learning_counterfactual_learning_candidates_present",
     "profit_learning_bounded_plan_ready",
     "profit_learning_blocked_outcome_review_candidates_present",
+    "profit_learning_sealed_horizon_learning_evidence_available",
+    "profit_learning_sealed_horizon_learning_evidence_candidates_present",
     "profit_learning_global_cost_gate_lowering_recommended",
     "profit_learning_order_authority_granted",
     "profit_learning_main_cost_gate_adjustment",
@@ -134,6 +136,16 @@ _EVIDENCE_KEYS = (
     "profit_learning_top_side_cells",
     "profit_learning_activation_status",
     "profit_learning_blocked_review_status",
+    "profit_learning_sealed_horizon_learning_evidence_status",
+    "profit_learning_sealed_horizon_side_cell_key",
+    "profit_learning_sealed_horizon_source_kind",
+    "profit_learning_sealed_horizon_outcome_horizon_minutes",
+    "profit_learning_sealed_horizon_blocked_signal_outcome_count",
+    "profit_learning_sealed_horizon_avg_gross_bps",
+    "profit_learning_sealed_horizon_avg_net_bps",
+    "profit_learning_sealed_horizon_net_positive_pct",
+    "profit_learning_sealed_horizon_review_ready",
+    "profit_learning_sealed_horizon_top_side_cell_status",
 )
 
 
@@ -219,6 +231,11 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
     if task_type == "promotion_review":
         return "run_formal_aeg_qc_mit_review_before_any_promotion"
     if task_type == "operator_probe_review":
+        if (
+            _str(row.get("arm_id")) == "cost_gate_demo_learning_lane"
+            and row.get("profit_learning_sealed_horizon_review_ready") is True
+        ):
+            return "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe"
         if (
             _str(row.get("arm_id")) == "cost_gate_demo_learning_lane"
             and row.get("profit_learning_top_side_cells")
@@ -316,6 +333,7 @@ def _completion_evidence_required(task_type: str) -> list[str]:
             "operator_authorization_artifact_exists",
             "isolated_probe_preflight_passes",
             "candidate_specific_side_cell_or_candidate_key_evidence_present",
+            "sealed_horizon_learning_evidence_review_ready_or_blocked_review_candidate_present",
             "order_authority_boundary_explicitly_recorded",
         ]
     if task_type == "runtime_source_reconcile":
