@@ -139,6 +139,23 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         if packet_next_actions
         else "refresh_profit_learning_decision_packet"
     )
+    sealed_preflight_present = (
+        detail.get("sealed_horizon_probe_preflight_present") is True
+    )
+    sealed_preflight_source_ok = (
+        detail.get("sealed_horizon_probe_preflight_source_ok") is True
+    )
+    sealed_preflight_status = str(
+        detail.get("sealed_horizon_probe_preflight_status") or ""
+    ).upper()
+    sealed_preflight_next_actions = _list(
+        detail.get("sealed_horizon_probe_preflight_next_actions")
+    )
+    sealed_preflight_next_trigger = (
+        str(sealed_preflight_next_actions[0])
+        if sealed_preflight_next_actions
+        else "refresh_sealed_horizon_probe_preflight"
+    )
 
     if source_activation_ready is False:
         return {
@@ -163,6 +180,109 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "operator_actionable": False,
             "engineering_actionable": True,
         }
+
+    if sealed_preflight_present and not sealed_preflight_source_ok:
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "sealed_horizon_probe_preflight_stale_or_unreadable",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "sealed_horizon_probe_preflight_not_fresh",
+            "next_trigger": "refresh_sealed_horizon_probe_preflight",
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
+    if sealed_preflight_source_ok:
+        if sealed_preflight_status == "AUTHORITY_BOUNDARY_VIOLATION":
+            return {
+                "action": BLOCK,
+                "reason": "sealed_horizon_probe_preflight_authority_boundary_violation",
+                "blocker_class": "source_health",
+                "primary_blocker": (
+                    "sealed_horizon_probe_preflight_authority_boundary_violation"
+                ),
+                "next_trigger": sealed_preflight_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if sealed_preflight_status == "SEALED_HORIZON_EVIDENCE_NOT_READY":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "sealed_horizon_probe_preflight_evidence_not_ready",
+                "blocker_class": "data_coverage",
+                "primary_blocker": "sealed_horizon_probe_preflight_evidence_not_ready",
+                "next_trigger": sealed_preflight_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if sealed_preflight_status == "PROFIT_DECISION_PACKET_NOT_ALIGNED":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "sealed_horizon_probe_preflight_decision_packet_not_aligned",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "sealed_horizon_probe_preflight_decision_packet_not_aligned"
+                ),
+                "next_trigger": sealed_preflight_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if sealed_preflight_status == (
+            "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED"
+        ):
+            return {
+                "action": READY_FOR_PROBE,
+                "reason": (
+                    "sealed_horizon_probe_preflight_requires_operator_review_and_learning_lane"
+                ),
+                "blocker_class": "probe_ready",
+                "primary_blocker": (
+                    "sealed_horizon_probe_preflight_requires_operator_review_and_learning_lane"
+                ),
+                "next_trigger": sealed_preflight_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
+        if sealed_preflight_status == "OPERATOR_REVIEW_REQUIRED":
+            return {
+                "action": READY_FOR_PROBE,
+                "reason": "sealed_horizon_probe_preflight_requires_operator_review",
+                "blocker_class": "probe_ready",
+                "primary_blocker": (
+                    "sealed_horizon_probe_preflight_requires_operator_review"
+                ),
+                "next_trigger": sealed_preflight_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
+        if sealed_preflight_status == "PRODUCTION_LEARNING_LANE_NOT_READY":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "sealed_horizon_probe_preflight_production_lane_not_ready",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "sealed_horizon_probe_preflight_production_lane_not_ready"
+                ),
+                "next_trigger": sealed_preflight_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if sealed_preflight_status == (
+            "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+        ):
+            return {
+                "action": READY_FOR_PROBE,
+                "reason": (
+                    "sealed_horizon_probe_preflight_ready_for_operator_authorization"
+                ),
+                "blocker_class": "probe_ready",
+                "primary_blocker": (
+                    "sealed_horizon_probe_preflight_ready_for_operator_authorization"
+                ),
+                "next_trigger": sealed_preflight_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
 
     if packet_source_ok:
         if packet_status == "DATA_FLOW_MONITOR_REQUIRED":
@@ -2075,6 +2195,70 @@ def classify_profitability_blocker(
                 ),
                 "profit_learning_sealed_horizon_top_side_cell_status": detail.get(
                     "profit_learning_sealed_horizon_top_side_cell_status"
+                ),
+                "sealed_horizon_probe_preflight_status": detail.get(
+                    "sealed_horizon_probe_preflight_status"
+                ),
+                "sealed_horizon_probe_preflight_reason": detail.get(
+                    "sealed_horizon_probe_preflight_reason"
+                ),
+                "sealed_horizon_probe_preflight_next_actions": detail.get(
+                    "sealed_horizon_probe_preflight_next_actions"
+                ),
+                "sealed_horizon_probe_preflight_generated_at_utc": detail.get(
+                    "sealed_horizon_probe_preflight_generated_at_utc"
+                ),
+                "sealed_horizon_probe_preflight_source_ok": detail.get(
+                    "sealed_horizon_probe_preflight_source_ok"
+                ),
+                "sealed_horizon_probe_preflight_source_path": detail.get(
+                    "sealed_horizon_probe_preflight_source_path"
+                ),
+                "sealed_horizon_probe_preflight_source_error": detail.get(
+                    "sealed_horizon_probe_preflight_source_error"
+                ),
+                "sealed_horizon_probe_preflight_side_cell_key": detail.get(
+                    "sealed_horizon_probe_preflight_side_cell_key"
+                ),
+                "sealed_horizon_probe_preflight_outcome_horizon_minutes": detail.get(
+                    "sealed_horizon_probe_preflight_outcome_horizon_minutes"
+                ),
+                "sealed_horizon_probe_preflight_blocking_gate_count": detail.get(
+                    "sealed_horizon_probe_preflight_blocking_gate_count"
+                ),
+                "sealed_horizon_probe_preflight_blocking_gates": detail.get(
+                    "sealed_horizon_probe_preflight_blocking_gates"
+                ),
+                "sealed_horizon_probe_preflight_evidence_ready": detail.get(
+                    "sealed_horizon_probe_preflight_evidence_ready"
+                ),
+                "sealed_horizon_probe_preflight_decision_packet_aligned": detail.get(
+                    "sealed_horizon_probe_preflight_decision_packet_aligned"
+                ),
+                "sealed_horizon_probe_preflight_operator_review_recorded": detail.get(
+                    "sealed_horizon_probe_preflight_operator_review_recorded"
+                ),
+                "sealed_horizon_probe_preflight_production_lane_accumulating": (
+                    detail.get(
+                        "sealed_horizon_probe_preflight_production_lane_accumulating"
+                    )
+                ),
+                "sealed_horizon_probe_preflight_ready_for_operator_authorization": (
+                    detail.get(
+                        "sealed_horizon_probe_preflight_ready_for_operator_authorization"
+                    )
+                ),
+                "sealed_horizon_probe_preflight_order_authority_granted": detail.get(
+                    "sealed_horizon_probe_preflight_order_authority_granted"
+                ),
+                "sealed_horizon_probe_preflight_probe_authority_granted": detail.get(
+                    "sealed_horizon_probe_preflight_probe_authority_granted"
+                ),
+                "sealed_horizon_probe_preflight_main_cost_gate_adjustment": detail.get(
+                    "sealed_horizon_probe_preflight_main_cost_gate_adjustment"
+                ),
+                "sealed_horizon_probe_preflight_promotion_evidence": detail.get(
+                    "sealed_horizon_probe_preflight_promotion_evidence"
                 ),
                 "latest_admission_decision": detail.get("latest_admission_decision"),
                 "latest_record_type": detail.get("latest_record_type"),

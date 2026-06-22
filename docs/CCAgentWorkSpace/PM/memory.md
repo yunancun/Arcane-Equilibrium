@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Sealed Horizon Bounded Demo-Probe Preflight
+
+- Added a no-authority `sealed_horizon_bounded_demo_probe_preflight_v1` that makes sealed evidence, decision-packet alignment, operator review, production learning-lane accumulation, and authority boundary explicit before any bounded demo probe.
+- Alpha discovery and learning worklist now ingest the preflight when present, so a sealed candidate can move from packet-only review into machine-checkable operator/prod-lane gates.
+- The current BTCUSDT Sell/240m path still needs operator review and production learning-lane accumulation; no Cost Gate lowering, probe/order authority, runtime mutation, or promotion proof was granted.
+
 ## 2026-06-22 Sealed Horizon Alpha Worklist Bridge
 
 - Alpha discovery now recognizes `OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE` as a Cost Gate `READY_FOR_PROBE` review blocker instead of leaving it stranded in the decision packet.

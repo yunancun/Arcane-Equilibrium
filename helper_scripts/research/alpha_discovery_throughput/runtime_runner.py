@@ -1676,6 +1676,89 @@ def summarize_profit_learning_decision_packet(
     }
 
 
+def summarize_sealed_horizon_probe_preflight(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """Summarize sealed horizon bounded demo-probe preflight if present."""
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    path = lane_dir / "sealed_horizon_probe_preflight_latest.json"
+    payload, err = _read_json(path)
+    if err and err == "missing":
+        fallback = lane_dir / "sealed_horizon_probe_preflight.json"
+        payload, err = _read_json(fallback)
+        if err is None:
+            path = fallback
+    if err:
+        return {
+            "sealed_horizon_probe_preflight_present": False,
+            "sealed_horizon_probe_preflight_source_path": str(path),
+            "sealed_horizon_probe_preflight_source_error": err,
+        }
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else {}
+    next_actions = payload.get("next_actions")
+    if not isinstance(next_actions, list):
+        next_actions = []
+    blocking_gates = payload.get("blocking_gates")
+    if not isinstance(blocking_gates, list):
+        blocking_gates = []
+    return {
+        "sealed_horizon_probe_preflight_present": True,
+        "sealed_horizon_probe_preflight_status": payload.get("status"),
+        "sealed_horizon_probe_preflight_reason": payload.get("reason"),
+        "sealed_horizon_probe_preflight_next_actions": next_actions,
+        "sealed_horizon_probe_preflight_generated_at_utc": generated_at,
+        "sealed_horizon_probe_preflight_age_seconds": age,
+        "sealed_horizon_probe_preflight_source_ok": fresh,
+        "sealed_horizon_probe_preflight_source_path": str(path),
+        "sealed_horizon_probe_preflight_source_error": freshness_error,
+        "sealed_horizon_probe_preflight_side_cell_key": payload.get("side_cell_key"),
+        "sealed_horizon_probe_preflight_outcome_horizon_minutes": payload.get(
+            "outcome_horizon_minutes"
+        ),
+        "sealed_horizon_probe_preflight_blocking_gate_count": payload.get(
+            "blocking_gate_count"
+        ),
+        "sealed_horizon_probe_preflight_blocking_gates": blocking_gates,
+        "sealed_horizon_probe_preflight_evidence_ready": answers.get(
+            "sealed_horizon_evidence_ready"
+        ),
+        "sealed_horizon_probe_preflight_decision_packet_aligned": answers.get(
+            "decision_packet_aligned"
+        ),
+        "sealed_horizon_probe_preflight_operator_review_recorded": answers.get(
+            "operator_review_recorded"
+        ),
+        "sealed_horizon_probe_preflight_production_lane_accumulating": answers.get(
+            "production_learning_lane_accumulating"
+        ),
+        "sealed_horizon_probe_preflight_ready_for_operator_authorization": (
+            answers.get("ready_for_operator_bounded_demo_probe_authorization")
+        ),
+        "sealed_horizon_probe_preflight_order_authority_granted": answers.get(
+            "order_authority_granted"
+        ),
+        "sealed_horizon_probe_preflight_probe_authority_granted": answers.get(
+            "probe_authority_granted"
+        ),
+        "sealed_horizon_probe_preflight_main_cost_gate_adjustment": answers.get(
+            "main_cost_gate_adjustment"
+        ),
+        "sealed_horizon_probe_preflight_promotion_evidence": answers.get(
+            "promotion_evidence"
+        ),
+    }
+
+
 def collect_cost_gate_learning_lane_arm(
     data_dir: Path,
     *,
@@ -1701,6 +1784,10 @@ def collect_cost_gate_learning_lane_arm(
         now_utc=now_utc,
     )
     decision_packet_summary = summarize_profit_learning_decision_packet(
+        data_dir,
+        now_utc=now_utc,
+    )
+    sealed_probe_preflight_summary = summarize_sealed_horizon_probe_preflight(
         data_dir,
         now_utc=now_utc,
     )
@@ -1751,6 +1838,7 @@ def collect_cost_gate_learning_lane_arm(
                 **demo_evidence_summary,
                 **stack_health_summary,
                 **decision_packet_summary,
+                **sealed_probe_preflight_summary,
                 **historical_summary,
                 **loop_summary,
                 **ledger_summary,
@@ -1796,6 +1884,7 @@ def collect_cost_gate_learning_lane_arm(
             **demo_evidence_summary,
             **stack_health_summary,
             **decision_packet_summary,
+            **sealed_probe_preflight_summary,
             **historical_summary,
             **loop_summary,
             **ledger_summary,

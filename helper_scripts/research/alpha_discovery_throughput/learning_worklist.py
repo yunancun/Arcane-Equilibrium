@@ -146,6 +146,26 @@ _EVIDENCE_KEYS = (
     "profit_learning_sealed_horizon_net_positive_pct",
     "profit_learning_sealed_horizon_review_ready",
     "profit_learning_sealed_horizon_top_side_cell_status",
+    "sealed_horizon_probe_preflight_status",
+    "sealed_horizon_probe_preflight_reason",
+    "sealed_horizon_probe_preflight_next_actions",
+    "sealed_horizon_probe_preflight_generated_at_utc",
+    "sealed_horizon_probe_preflight_source_ok",
+    "sealed_horizon_probe_preflight_source_path",
+    "sealed_horizon_probe_preflight_source_error",
+    "sealed_horizon_probe_preflight_side_cell_key",
+    "sealed_horizon_probe_preflight_outcome_horizon_minutes",
+    "sealed_horizon_probe_preflight_blocking_gate_count",
+    "sealed_horizon_probe_preflight_blocking_gates",
+    "sealed_horizon_probe_preflight_evidence_ready",
+    "sealed_horizon_probe_preflight_decision_packet_aligned",
+    "sealed_horizon_probe_preflight_operator_review_recorded",
+    "sealed_horizon_probe_preflight_production_lane_accumulating",
+    "sealed_horizon_probe_preflight_ready_for_operator_authorization",
+    "sealed_horizon_probe_preflight_order_authority_granted",
+    "sealed_horizon_probe_preflight_probe_authority_granted",
+    "sealed_horizon_probe_preflight_main_cost_gate_adjustment",
+    "sealed_horizon_probe_preflight_promotion_evidence",
 )
 
 
@@ -231,6 +251,13 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
     if task_type == "promotion_review":
         return "run_formal_aeg_qc_mit_review_before_any_promotion"
     if task_type == "operator_probe_review":
+        preflight_status = _str(row.get("sealed_horizon_probe_preflight_status"))
+        if preflight_status == "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED":
+            return "operator_review_sealed_horizon_preflight_and_activate_production_learning_lane"
+        if preflight_status == "OPERATOR_REVIEW_REQUIRED":
+            return "operator_review_sealed_horizon_probe_preflight"
+        if preflight_status == "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION":
+            return "operator_authorize_minimal_bounded_demo_probe_after_preflight"
         if (
             _str(row.get("arm_id")) == "cost_gate_demo_learning_lane"
             and row.get("profit_learning_sealed_horizon_review_ready") is True
