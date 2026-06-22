@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Sealed Replay Profitability Scorecard Bridge
+
+- Profitability path scorecard now consumes a passed horizon-specific sealed replay artifact and advances the matching horizon path to learning/outcome accumulation instead of re-requesting sealed replay construction.
+- The path carries sealed replay hashes, best/primary horizon metrics, and failed-gate state while preserving no Cost Gate lowering, no probe/order authority, and no promotion proof.
+- Runtime status is source-synced but still not accumulating learning-lane ledger/outcome rows; next blocker remains writer/cron/ledger activation under operator-reviewed boundaries.
+
 ## 2026-06-22 Horizon-Specific Sealed Replay Packet
 
 - Added an artifact-only sealed replay packet that binds a preselected horizon retiming candidate to hashed replay counterfactual inputs.

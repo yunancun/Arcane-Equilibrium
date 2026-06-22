@@ -73,6 +73,52 @@ def _cost_gate_counterfactual() -> dict:
     }
 
 
+def _sealed_horizon_replay() -> dict:
+    return {
+        "schema_version": "horizon_specific_sealed_replay_packet_v1",
+        "generated_at_utc": "2026-06-22T03:43:00+00:00",
+        "status": "SEALED_HORIZON_REPLAY_READY_FOR_OPERATOR_REVIEW",
+        "reason": "preselected_retiming_candidate_revalidated_against_sealed_replay_artifact",
+        "next_action": "operator_review_sealed_replay_then_wait_for_learning_stack_outcome_accumulation",
+        "selection": {
+            "selected": {
+                "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+                "candidate_status": "RETIMING_CANDIDATE",
+                "best_horizon_minutes": 240,
+                "primary_horizon_minutes": 60,
+            },
+        },
+        "source": {
+            "horizon_packet": {"sha256": "horizon-sha"},
+            "replay_counterfactual": {"sha256": "replay-sha"},
+        },
+        "replay_evaluation": {
+            "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+            "failed_gate_names": [],
+            "best_horizon": {
+                "horizon_minutes": 240,
+                "learning_lane_action": "LEARNING_PROBE_CANDIDATE",
+                "sample_count_for_gate": 13819,
+                "avg_net_bps": 31.8707,
+                "p50_gross_bps": 51.4448,
+                "net_positive_pct": 81.94,
+            },
+            "primary_horizon": {
+                "horizon_minutes": 60,
+                "learning_lane_action": "BLOCK_CONFIRMED",
+                "avg_net_bps": -41.8107,
+            },
+        },
+        "answers": {
+            "sealed_replay_passed": True,
+            "global_cost_gate_lowering_recommended": False,
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+    }
+
+
 def test_cost_gate_candidates_and_horizon_paths_do_not_grant_authority() -> None:
     scorecard = build_profitability_path_scorecard(
         cost_gate_counterfactual=_cost_gate_counterfactual(),
@@ -110,6 +156,43 @@ def test_cost_gate_candidates_and_horizon_paths_do_not_grant_authority() -> None
     assert horizon_path["status"] == "HORIZON_EDGE_AMPLIFICATION_CANDIDATE"
     assert horizon_path["candidate_horizons_minutes"] == [240]
     assert horizon_path["best_horizon_minutes"] == 240
+
+
+def test_sealed_horizon_replay_advances_path_to_learning_accumulation() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "ACTIVATE_OR_REPAIR_LEARNING_STACK",
+            "next_actions": ["activate_or_repair_cost_gate_learning_lane_stack"],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "NOT_ACCUMULATING"},
+        },
+        activation_preflight={"status": "NOT_ACCUMULATING"},
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        now_utc=dt.datetime(2026, 6, 22, 3, tzinfo=dt.timezone.utc),
+    )
+
+    paths = {row["path_id"]: row for row in scorecard["top_paths"]}
+    horizon_path = paths["horizon_edge_amplification:ma_crossover|BTCUSDT|Sell"]
+    assert horizon_path["status"] == (
+        "SEALED_HORIZON_REPLAY_READY_FOR_LEARNING_ACCUMULATION"
+    )
+    assert horizon_path["required_next_gate"] == (
+        "learning_stack_accumulates_ledger_and_outcome_rows_for_sealed_horizon_candidate"
+    )
+    assert horizon_path["next_action"] == (
+        "activate_or_repair_cost_gate_learning_lane_then_record_blocked_signal_outcomes"
+    )
+    assert horizon_path["evidence"]["sealed_replay_passed"] is True
+    assert horizon_path["evidence"]["sealed_replay_best_horizon_minutes"] == 240
+    assert horizon_path["evidence"]["sealed_replay_primary_action"] == "BLOCK_CONFIRMED"
+    assert scorecard["artifacts"]["horizon_sealed_replay"]["present"] is True
+    assert scorecard["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert horizon_path["order_authority"] == "NOT_GRANTED"
+    assert horizon_path["promotion_evidence"] is False
 
 
 def test_mm_fee_polymarket_and_gate_b_paths_are_separated() -> None:
