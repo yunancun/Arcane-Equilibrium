@@ -173,6 +173,56 @@ def _sealed_horizon_learning_evidence() -> dict:
     }
 
 
+def _sealed_horizon_probe_preflight(
+    status: str = "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED",
+) -> dict:
+    blocking_gates = []
+    next_actions = []
+    operator_review_recorded = False
+    production_lane_accumulating = False
+    ready = False
+    if status == "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED":
+        blocking_gates = [
+            "operator_sealed_horizon_review_recorded",
+            "production_learning_lane_accumulating",
+        ]
+        next_actions = [
+            "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe",
+            "activate_or_repair_cost_gate_learning_lane_stack_before_runtime_probe",
+        ]
+    elif status == "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION":
+        operator_review_recorded = True
+        production_lane_accumulating = True
+        ready = True
+        next_actions = [
+            "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+        ]
+    return {
+        "schema_version": "sealed_horizon_bounded_demo_probe_preflight_v1",
+        "generated_at_utc": "2026-06-22T06:00:00+00:00",
+        "status": status,
+        "reason": ";".join(blocking_gates)
+        or "all_pre_authorization_gates_passed_without_authority_grant",
+        "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+        "outcome_horizon_minutes": 240,
+        "blocking_gate_count": len(blocking_gates),
+        "blocking_gates": blocking_gates,
+        "next_actions": next_actions,
+        "answers": {
+            "sealed_horizon_evidence_ready": True,
+            "decision_packet_aligned": True,
+            "operator_review_recorded": operator_review_recorded,
+            "production_learning_lane_accumulating": production_lane_accumulating,
+            "ready_for_operator_bounded_demo_probe_authorization": ready,
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+    }
+
+
 def test_cost_gate_candidates_and_horizon_paths_do_not_grant_authority() -> None:
     scorecard = build_profitability_path_scorecard(
         cost_gate_counterfactual=_cost_gate_counterfactual(),
@@ -290,6 +340,93 @@ def test_sealed_horizon_learning_evidence_advances_path_to_operator_review() -> 
     assert horizon_path["order_authority"] == "NOT_GRANTED"
     assert horizon_path["main_cost_gate_adjustment"] == "NONE"
     assert horizon_path["promotion_evidence"] is False
+
+
+def test_sealed_horizon_preflight_drives_profitability_closure_gates() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+            "next_actions": [
+                "operator_review_sealed_horizon_learning_evidence_before_bounded_demo_probe"
+            ],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "NOT_ACCUMULATING"},
+        },
+        activation_preflight={"status": "NOT_ACCUMULATING"},
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        sealed_horizon_probe_preflight=_sealed_horizon_probe_preflight(),
+        now_utc=dt.datetime(2026, 6, 22, 6, tzinfo=dt.timezone.utc),
+    )
+
+    top = scorecard["top_paths"][0]
+    closure = scorecard["profitability_engineering_closure"]
+
+    assert top["path_id"] == "horizon_edge_amplification:ma_crossover|BTCUSDT|Sell"
+    assert top["status"] == (
+        "SEALED_HORIZON_PREFLIGHT_REQUIRES_OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE"
+    )
+    assert top["required_next_gate"] == (
+        "operator_review_recorded_and_production_learning_lane_accumulates"
+    )
+    assert top["evidence"]["sealed_probe_preflight_blocking_gate_count"] == 2
+    assert top["evidence"]["sealed_probe_preflight_operator_review_recorded"] is False
+    assert top["evidence"]["sealed_probe_preflight_production_lane_accumulating"] is False
+
+    assert closure["schema_version"] == "profitability_engineering_closure_v1"
+    assert closure["status"] == (
+        "COST_GATE_ESCAPE_PREFLIGHT_BLOCKED_BY_OPERATOR_AND_PRODUCTION_LEARNING_LANE"
+    )
+    assert closure["proof_gate_count_remaining"] == 2
+    assert "production learning lane accumulates ledger" in closure[
+        "proof_gates_remaining"
+    ][1]
+    assert closure["cost_gate_escape_strategy"]["global_cost_gate_lowering"] is False
+    assert closure["cost_gate_escape_strategy"]["probe_authority_granted"] is False
+    assert scorecard["answers"]["bounded_demo_probe_preflight_present"] is True
+    assert scorecard["answers"]["bounded_demo_probe_preflight_ready"] is False
+    assert scorecard["artifacts"]["sealed_horizon_probe_preflight"]["present"] is True
+
+
+def test_ready_preflight_keeps_authority_separate_from_profitability_closure() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+            "next_actions": [
+                "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+            ],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "EVIDENCE_STACK_ACTIVE"},
+        },
+        activation_preflight={"status": "EVIDENCE_STACK_ACTIVE"},
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        sealed_horizon_probe_preflight=_sealed_horizon_probe_preflight(
+            "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+        ),
+        now_utc=dt.datetime(2026, 6, 22, 6, tzinfo=dt.timezone.utc),
+    )
+
+    top = scorecard["top_paths"][0]
+    closure = scorecard["profitability_engineering_closure"]
+
+    assert top["status"] == "SEALED_HORIZON_PREFLIGHT_READY_FOR_OPERATOR_AUTHORIZATION"
+    assert top["evidence"]["sealed_probe_preflight_ready_for_operator_authorization"] is True
+    assert closure["status"] == "OPERATOR_CAN_REVIEW_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+    assert closure["proof_gate_count_remaining"] == 0
+    assert scorecard["answers"]["bounded_demo_probe_preflight_ready"] is True
+    assert scorecard["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert scorecard["answers"]["order_authority_granted"] is False
+    assert scorecard["global_boundaries"]["probe_authority"] == "NOT_GRANTED"
+    assert closure["cost_gate_escape_strategy"]["order_authority_granted"] is False
 
 
 def test_mm_fee_polymarket_and_gate_b_paths_are_separated() -> None:
