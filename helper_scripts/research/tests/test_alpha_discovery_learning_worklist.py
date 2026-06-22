@@ -65,7 +65,7 @@ def test_learning_worklist_prioritizes_runtime_reconcile_over_mm_signal_search()
     ], now_utc=dt.datetime(2026, 6, 22, tzinfo=dt.timezone.utc))
 
     worklist = plan["learning_worklist"]
-    assert worklist["schema_version"] == "alpha_learning_worklist_v5"
+    assert worklist["schema_version"] == "alpha_learning_worklist_v6"
     assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
     assert worklist["task_count"] == 2
     assert worklist["operator_required_count"] == 1
@@ -215,7 +215,7 @@ def test_learning_worklist_carries_ranked_cost_gate_blocked_review_evidence():
 
     task = worklist["top_task"]
 
-    assert worklist["schema_version"] == "alpha_learning_worklist_v5"
+    assert worklist["schema_version"] == "alpha_learning_worklist_v6"
     assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
     assert task["task_type"] == "operator_probe_review"
     assert task["learning_objective"] == (
@@ -356,7 +356,7 @@ def test_learning_worklist_carries_demo_learning_stack_health_evidence():
 
     task = worklist["top_task"]
 
-    assert worklist["schema_version"] == "alpha_learning_worklist_v5"
+    assert worklist["schema_version"] == "alpha_learning_worklist_v6"
     assert task["task_type"] == "cost_gate_learning_activation"
     assert task["requires_operator_authorization"] is True
     assert task["runtime_mutation_required"] is True
@@ -431,7 +431,7 @@ def test_learning_worklist_carries_demo_learning_stack_activation_packet_evidenc
 
     task = worklist["top_task"]
 
-    assert worklist["schema_version"] == "alpha_learning_worklist_v5"
+    assert worklist["schema_version"] == "alpha_learning_worklist_v6"
     assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
     assert task["task_type"] == "cost_gate_learning_activation"
     assert task["learning_objective"] == (
