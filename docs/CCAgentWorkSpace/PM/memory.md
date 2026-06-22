@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Sealed Horizon Preflight Decision Resolver
+
+- `sealed_horizon_probe_preflight.py` can now use `--decision-packet-search-root` to supersede a stale/generic explicit decision packet with a fresh aligned sealed decision packet.
+- Linux smoke intentionally passed the old generic latest and verified the resolver selected the v389 sealed packet, preserving `decision_packet_aligned=true`.
+- This closes source/artifact routing drift only; operator approval and production learning-lane accumulation remain the live blockers, with no Cost Gate lowering or probe/order authority.
+
 ## 2026-06-22 Sealed Horizon Operator Review Artifact
 
 - Added a no-authority `sealed_horizon_operator_review_v1` builder for bounded demo-probe preflight review.
