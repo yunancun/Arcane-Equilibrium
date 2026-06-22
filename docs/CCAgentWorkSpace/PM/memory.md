@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Horizon Edge Amplification Packet
+
+- Added an artifact-only packet that turns multi-horizon Cost Gate counterfactuals into ranked retiming/stable side-cell candidates.
+- The packet makes BTCUSDT Sell style horizon retiming reviewable as a sealed replay path before any bounded demo probe review, without lowering the global Cost Gate.
+- Verification passed with py_compile, focused horizon packet tests, related alpha/profitability tests, and diff-check; no PG/Bybit/runtime/order/probe/promotion authority was granted.
+
 ## 2026-06-22 Profitability Path Scorecard
 
 - Added an artifact-only profitability scorecard that ranks bounded Cost Gate demo-learning, horizon retiming / side-cell filtering, low-friction MM alpha search, fee/scale, Polymarket lead-lag, and Gate-B event-wait paths in one machine-readable output.
