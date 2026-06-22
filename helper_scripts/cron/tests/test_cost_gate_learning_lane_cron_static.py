@@ -43,6 +43,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "probe_ledger.jsonl" in src
     assert "demo_data_flow_monitor_latest.json" in src
     assert "demo_data_flow_monitor_${STAMP}.json" in src
+    assert "demo_order_to_fill_gap_${STAMP}.json" in src
     assert "profit_learning_decision_packet_latest.json" in src
     assert "profit_learning_decision_packet_${STAMP}.json" in src
     assert "cost_gate_reject_counterfactual_latest.json" in src
@@ -62,6 +63,7 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "reject_materializer_latest.json" in src
     assert "cost_gate_reject_counterfactual.py" in src
     assert "demo_data_flow_monitor.py" in src
+    assert "demo_order_to_fill_gap_audit.py" in src
     assert "cost_gate_learning_lane.decision_packet" in src
     assert "cost_gate_learning_lane.policy" in src
     assert "cost_gate_learning_lane.reject_materializer" in src
@@ -83,6 +85,9 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "scorecard_horizon_stability_horizons" in src
     assert "data_flow_monitor_status" in src
     assert "data_flow_monitor_key_counts" in src
+    assert "order_touchability_audit_status" in src
+    assert "order_touchability_audit_counts" in src
+    assert "order_touchability_audit_answers" in src
     assert "decision_packet_status" in src
     assert "decision_packet_silent_drop_risk" in src
     assert "decision_packet_data_flow_status" in src
@@ -123,9 +128,16 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "--append-ledger" in src
     assert "OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD" in src
     assert "OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR" in src
+    assert "OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILITY_AUDIT" in src
     assert "OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET" in src
     assert "OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS" in src
     assert "OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT" in src
+    assert "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_ENGINE_MODES" in src
+    assert "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_LOOKBACK_HOURS" in src
+    assert "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_TOUCH_WINDOW_MINUTES" in src
+    assert "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_PLACEMENT_WINDOW_SECONDS" in src
+    assert "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_TOP_LIMIT" in src
+    assert "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_DEEP_GAP_BPS" in src
     assert "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN" in src
     assert "OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY" in src
     assert "OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS" in src
@@ -149,9 +161,16 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'PG_TIMEFRAME="${OPENCLAW_COST_GATE_LEARNING_PG_TIMEFRAME:-1m}"' in src
     assert 'REFRESH_SCORECARD="${OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD:-1}"' in src
     assert 'REFRESH_DATA_FLOW_MONITOR="${OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR:-1}"' in src
+    assert 'REFRESH_ORDER_TOUCHABILITY_AUDIT="${OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILITY_AUDIT:-1}"' in src
     assert 'REFRESH_DECISION_PACKET="${OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET:-1}"' in src
     assert 'DATA_FLOW_WINDOW_HOURS="${OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS:-1,4,24}"' in src
     assert 'DATA_FLOW_TOP_LIMIT="${OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT:-10}"' in src
+    assert 'ORDER_TOUCHABILITY_ENGINE_MODES="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_ENGINE_MODES:-demo,live_demo}"' in src
+    assert 'ORDER_TOUCHABILITY_LOOKBACK_HOURS="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_LOOKBACK_HOURS:-48}"' in src
+    assert 'ORDER_TOUCHABILITY_TOUCH_WINDOW_MINUTES="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_TOUCH_WINDOW_MINUTES:-1440}"' in src
+    assert 'ORDER_TOUCHABILITY_PLACEMENT_WINDOW_SECONDS="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_PLACEMENT_WINDOW_SECONDS:-30}"' in src
+    assert 'ORDER_TOUCHABILITY_TOP_LIMIT="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_TOP_LIMIT:-50}"' in src
+    assert 'ORDER_TOUCHABILITY_DEEP_GAP_BPS="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_DEEP_GAP_BPS:-500.0}"' in src
     assert 'SCORECARD_LOOKBACK_HOURS="${OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS:-168}"' in src
     assert 'SCORECARD_LIMIT="${OPENCLAW_COST_GATE_SCORECARD_LIMIT:-50000}"' in src
     assert 'REFRESH_PLAN="${OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN:-1}"' in src
@@ -186,9 +205,16 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS="${OPENCLAW_COST_GATE_SHADOW_PLACEMENT_MAX_ARTIFACT_AGE_HOURS:-24}"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR"' in src
+    assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_ORDER_TOUCHABILITY_AUDIT"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET"' in src
     assert "OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS must be comma-separated integers" in src
+    assert "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_ENGINE_MODES must be comma-separated engine modes" in src
     assert 'validate_int "OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT"' in src
+    assert 'validate_int "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_LOOKBACK_HOURS"' in src
+    assert 'validate_int "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_TOUCH_WINDOW_MINUTES"' in src
+    assert 'validate_int "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_PLACEMENT_WINDOW_SECONDS"' in src
+    assert 'validate_int "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_TOP_LIMIT"' in src
+    assert 'validate_decimal "OPENCLAW_DEMO_ORDER_TO_FILL_GAP_DEEP_GAP_BPS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_SCORECARD_LIMIT"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN"' in src
@@ -222,11 +248,14 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     src = _src(WRAPPER)
     assert 'SCORECARD_ARGS=(' in src
     assert 'DATA_FLOW_ARGS=(' in src
+    assert 'ORDER_TOUCHABILITY_ARGS=(' in src
     assert 'PLAN_ARGS=(' in src
     assert 'DECISION_PACKET_ARGS=(' in src
     assert "cost_gate_reject_counterfactual.py" in src
     assert "demo_data_flow_monitor.py" in src
+    assert "demo_order_to_fill_gap_audit.py" in src
     assert '--horizon-minutes-list "$SCORECARD_HORIZON_MINUTES_LIST"' in src
+    assert '--engine-mode "$engine_mode"' in src
     assert "-m cost_gate_learning_lane.policy" in src
     assert "-m cost_gate_learning_lane.decision_packet" in src
     assert "-m cost_gate_learning_lane.bounded_probe_touchability_preflight" in src
@@ -236,6 +265,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert "-m cost_gate_learning_lane.bounded_probe_execution_realism_review" in src
     assert 'cp "$SCORECARD_JSON_OUT" "$SCORECARD_JSON"' in src
     assert 'cp "$DATA_FLOW_JSON_OUT" "$DATA_FLOW_JSON"' in src
+    assert 'cp "$ORDER_TOUCHABILITY_JSON_OUT" "$ORDER_TOUCHABILITY_JSON"' in src
     assert 'cp "$PLAN_OUT" "$PLAN_JSON"' in src
     assert 'cp "$DECISION_PACKET_JSON_OUT" "$DECISION_PACKET_JSON"' in src
     assert 'cp "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT" "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_LATEST"' in src
@@ -245,6 +275,7 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert 'cp "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST"' in src
     assert 'SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD"' in src
     assert 'DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR"' in src
+    assert 'ORDER_TOUCHABILITY_JSON_OUT="$ORDER_TOUCHABILITY_JSON_OUT" ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" ORDER_TOUCHABILITY_AUDIT_RC="$order_touchability_audit_rc"' in src
     assert 'DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET"' in src
     assert 'PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN"' in src
     assert 'ORDER_TOUCHABILITY_JSON="$ORDER_TOUCHABILITY_JSON" BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT="$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT"' in src
@@ -252,12 +283,14 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert 'export BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT="$BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_OUT"' in src
     assert "scorecard_rc=" in src
     assert "data_flow_monitor_rc=" in src
+    assert "order_touchability_audit_rc=" in src
     assert "decision_packet_rc=" in src
     assert "plan_rc=" in src
     assert "bounded_probe_placement_repair_plan_rc=" in src
     assert "bounded_probe_shadow_placement_impact_rc=" in src
     scorecard_index = src.index('"$PYBIN" "${SCORECARD_ARGS[@]}"')
     data_flow_index = src.index('"$PYBIN" "${DATA_FLOW_ARGS[@]}"')
+    order_touchability_index = src.index('"$PYBIN" "${ORDER_TOUCHABILITY_ARGS[@]}"')
     plan_index = src.index('"$PYBIN" "${PLAN_ARGS[@]}"')
     materializer_index = src.index('"$PYBIN" "${MATERIALIZER_ARGS[@]}"')
     refresh_index = src.index('"$PYBIN" "${REFRESH_ARGS[@]}"')
@@ -272,14 +305,15 @@ def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     assert scorecard_index < data_flow_index < plan_index
     assert plan_index < materializer_index
     assert materializer_index < refresh_index < review_index
-    assert review_index < touchability_index < placement_index < shadow_index < result_review_index < execution_review_index
+    assert review_index < order_touchability_index < touchability_index < placement_index < shadow_index < result_review_index < execution_review_index
     assert execution_review_index < decision_packet_index
 
 
 def test_wrapper_bounded_probe_reviews_use_fresh_result_review_only() -> None:
     src = _src(WRAPPER)
     assert 'SEALED_PREFLIGHT_JSON="${OPENCLAW_COST_GATE_BOUNDED_PROBE_PREFLIGHT_JSON:-$LANE_DIR/sealed_horizon_probe_preflight_latest.json}"' in src
-    assert 'ORDER_TOUCHABILITY_JSON="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_AUDIT_JSON:-$DATA/demo_order_to_fill_gap/demo_order_to_fill_gap_latest.json}"' in src
+    assert 'ORDER_TOUCHABILITY_DIR="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_AUDIT_DIR:-$DATA/demo_order_to_fill_gap}"' in src
+    assert 'ORDER_TOUCHABILITY_JSON="${OPENCLAW_DEMO_ORDER_TO_FILL_GAP_AUDIT_JSON:-$ORDER_TOUCHABILITY_DIR/demo_order_to_fill_gap_latest.json}"' in src
     assert '--preflight-json "$SEALED_PREFLIGHT_JSON"' in src
     assert '--order-to-fill-gap-json "$ORDER_TOUCHABILITY_JSON"' in src
     assert '--touchability-preflight-json "$BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_OUT"' in src
@@ -306,6 +340,7 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
     assert "skipped historical/materializer/outcome/review/bounded-probe stages" in src
     assert 'PREINSTALL_REFRESH_ONLY="$PREINSTALL_REFRESH_ONLY"' in src
     assert '"preinstall_refresh_only": os.environ["PREINSTALL_REFRESH_ONLY"] == "1"' in src
+    assert 'order_touchability_audit_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_touchability_preflight_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_placement_repair_plan_skip_reason="preinstall_refresh_only"' in src
     assert 'bounded_probe_shadow_placement_impact_skip_reason="preinstall_refresh_only"' in src
@@ -317,6 +352,7 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
     materializer_index = src.index('"$PYBIN" "${MATERIALIZER_ARGS[@]}"')
     refresh_index = src.index('"$PYBIN" "${REFRESH_ARGS[@]}"')
     review_index = src.index('"$PYBIN" "${REVIEW_ARGS[@]}"')
+    order_touchability_index = src.index('"$PYBIN" "${ORDER_TOUCHABILITY_ARGS[@]}"')
     touchability_index = src.index('"$PYBIN" "${BOUNDED_PROBE_TOUCHABILITY_PREFLIGHT_ARGS[@]}"')
     placement_index = src.index('"$PYBIN" "${BOUNDED_PROBE_PLACEMENT_REPAIR_PLAN_ARGS[@]}"')
     shadow_index = src.index('"$PYBIN" "${BOUNDED_PROBE_SHADOW_PLACEMENT_IMPACT_ARGS[@]}"')
@@ -329,6 +365,7 @@ def test_wrapper_has_preinstall_refresh_only_cutoff_after_plan_refresh() -> None
         < materializer_index
         < refresh_index
         < review_index
+        < order_touchability_index
         < touchability_index
         < placement_index
         < shadow_index
