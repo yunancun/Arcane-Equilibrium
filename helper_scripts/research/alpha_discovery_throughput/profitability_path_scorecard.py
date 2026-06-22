@@ -96,6 +96,7 @@ def _artifact_summary(
 def _score_priority(path: dict[str, Any]) -> tuple[int, float]:
     """Sort by status class first, then evidence strength."""
     status_rank = {
+        "SEALED_HORIZON_LEARNING_EVIDENCE_READY_FOR_OPERATOR_REVIEW": 9,
         "COST_GATE_CANDIDATE_READY_FOR_DATA_FLOW_PROOF": 10,
         "SEALED_HORIZON_REPLAY_READY_FOR_LEARNING_ACCUMULATION": 11,
         "COST_GATE_CANDIDATE_EXECUTION_EVIDENCE_MISSING": 12,
@@ -225,6 +226,81 @@ def _sealed_replay_evidence(sealed: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _sealed_learning_evidence_side_cell_key(evidence: dict[str, Any] | None) -> str:
+    return _str(
+        _dict(evidence).get("side_cell_key")
+        or _dict(_dict(evidence).get("review")).get("top_side_cell_key")
+    )
+
+
+def _sealed_learning_evidence_by_key(
+    horizon_learning_evidence: dict[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    key = _sealed_learning_evidence_side_cell_key(horizon_learning_evidence)
+    if not key:
+        return {}
+    return {key: _dict(horizon_learning_evidence)}
+
+
+def _sealed_learning_review_ready(evidence: dict[str, Any] | None) -> bool:
+    payload = _dict(evidence)
+    answers = _dict(payload.get("answers"))
+    return (
+        payload.get("schema_version") == "sealed_horizon_learning_evidence_v1"
+        and payload.get("status") == "DEMO_PROBE_AUTHORITY_REVIEW_CANDIDATES_PRESENT"
+        and answers.get("candidate_clears_operator_review_gate") is True
+        and answers.get("order_authority_granted") is not True
+        and answers.get("probe_authority_granted") is not True
+        and answers.get("global_cost_gate_lowering_recommended") is not True
+    )
+
+
+def _sealed_learning_evidence_fields(evidence: dict[str, Any] | None) -> dict[str, Any]:
+    payload = _dict(evidence)
+    if not payload:
+        return {}
+    materialization = _dict(payload.get("materialization"))
+    outcomes = _dict(payload.get("outcomes"))
+    review = _dict(payload.get("review"))
+    artifacts = _dict(payload.get("artifacts"))
+    return {
+        "sealed_learning_schema_version": payload.get("schema_version"),
+        "sealed_learning_status": payload.get("status"),
+        "sealed_learning_reason": payload.get("reason"),
+        "sealed_learning_generated_at_utc": payload.get("generated_at_utc"),
+        "sealed_learning_side_cell_key": payload.get("side_cell_key"),
+        "sealed_learning_source_kind": payload.get("source_kind"),
+        "sealed_learning_outcome_horizon_minutes": payload.get("outcome_horizon_minutes"),
+        "sealed_learning_input_feature_row_count": materialization.get(
+            "input_feature_row_count"
+        ),
+        "sealed_learning_materialized_record_count": materialization.get(
+            "materialized_record_count"
+        ),
+        "sealed_learning_all_order_authority_not_granted": materialization.get(
+            "all_order_authority_not_granted"
+        ),
+        "sealed_learning_blocked_signal_outcome_count": outcomes.get(
+            "blocked_signal_outcome_count"
+        ),
+        "sealed_learning_avg_gross_bps": outcomes.get("avg_gross_bps"),
+        "sealed_learning_avg_net_bps": outcomes.get("avg_net_bps"),
+        "sealed_learning_net_positive_pct": outcomes.get("net_positive_pct"),
+        "sealed_learning_review_candidate_side_cell_count": review.get(
+            "review_candidate_side_cell_count"
+        ),
+        "sealed_learning_top_side_cell_status": review.get("top_side_cell_status"),
+        "sealed_learning_wrongful_block_score": review.get(
+            "top_side_cell_wrongful_block_score"
+        ),
+        "sealed_learning_ledger_sha256": _dict(artifacts.get("ledger")).get("sha256"),
+        "sealed_learning_source_rows_sha256": _dict(
+            artifacts.get("source_rows")
+        ).get("sha256"),
+        "sealed_learning_review_sha256": _dict(artifacts.get("review")).get("sha256"),
+    }
+
+
 def _base_path(
     *,
     path_id: str,
@@ -273,6 +349,7 @@ def _cost_gate_candidate_paths(
     profit_packet: dict[str, Any] | None,
     activation_preflight: dict[str, Any] | None,
     horizon_sealed_replay: dict[str, Any] | None,
+    horizon_learning_evidence: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
     if not counterfactual:
         return []
@@ -288,6 +365,9 @@ def _cost_gate_candidate_paths(
         status = "COST_GATE_CANDIDATE_EXECUTION_EVIDENCE_MISSING"
     horizon_by_key = _horizon_cells_by_key(counterfactual)
     sealed_by_key = _sealed_replay_by_key(horizon_sealed_replay)
+    learning_evidence_by_key = _sealed_learning_evidence_by_key(
+        horizon_learning_evidence
+    )
     paths: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in _list(_profit_ranking(counterfactual).get("top_side_cells")):
@@ -345,27 +425,35 @@ def _cost_gate_candidate_paths(
         if horizon.get("status") not in {"MIXED_HORIZON_RESPONSE", "CANDIDATE_MULTI_HORIZON_STABLE"}:
             continue
         sealed = sealed_by_key.get(key)
+        learning_evidence = learning_evidence_by_key.get(key)
         sealed_passed = (
             _str(_dict(sealed).get("status"))
             == "SEALED_HORIZON_REPLAY_READY_FOR_OPERATOR_REVIEW"
             and _dict(_dict(sealed).get("answers")).get("sealed_replay_passed") is True
         )
-        path_status = (
-            "SEALED_HORIZON_REPLAY_READY_FOR_LEARNING_ACCUMULATION"
-            if sealed_passed
-            else "HORIZON_EDGE_AMPLIFICATION_CANDIDATE"
-        )
-        required_next_gate = (
-            "learning_stack_accumulates_ledger_and_outcome_rows_for_sealed_horizon_candidate"
-            if sealed_passed
-            else "sealed_replay_or_bounded_demo_probe_for_selected_horizon"
-        )
-        path_next_action = (
-            "activate_or_repair_cost_gate_learning_lane_then_record_blocked_signal_outcomes"
-            if sealed_passed
-            else "build_horizon_specific_candidate_packet_then_operator_review"
-        )
+        learning_ready = _sealed_learning_review_ready(learning_evidence)
+        if learning_ready:
+            path_status = "SEALED_HORIZON_LEARNING_EVIDENCE_READY_FOR_OPERATOR_REVIEW"
+            required_next_gate = (
+                "operator_reviews_bounded_demo_probe_for_sealed_horizon_candidate"
+            )
+            path_next_action = (
+                "operator_review_sealed_horizon_learning_evidence_before_any_bounded_demo_probe"
+            )
+        elif sealed_passed:
+            path_status = "SEALED_HORIZON_REPLAY_READY_FOR_LEARNING_ACCUMULATION"
+            required_next_gate = (
+                "learning_stack_accumulates_ledger_and_outcome_rows_for_sealed_horizon_candidate"
+            )
+            path_next_action = (
+                "activate_or_repair_cost_gate_learning_lane_then_record_blocked_signal_outcomes"
+            )
+        else:
+            path_status = "HORIZON_EDGE_AMPLIFICATION_CANDIDATE"
+            required_next_gate = "sealed_replay_or_bounded_demo_probe_for_selected_horizon"
+            path_next_action = "build_horizon_specific_candidate_packet_then_operator_review"
         sealed_evidence = _sealed_replay_evidence(sealed)
+        learning_fields = _sealed_learning_evidence_fields(learning_evidence)
         paths.append(_base_path(
             path_id=f"horizon_edge_amplification:{key}",
             path_class="horizon_retiming_or_side_cell_filter",
@@ -397,7 +485,10 @@ def _cost_gate_candidate_paths(
                 "horizon_rows": horizon.get("horizon_rows"),
                 "sealed_replay_present": bool(sealed),
                 "sealed_replay_passed": sealed_passed,
+                "sealed_learning_evidence_present": bool(learning_evidence),
+                "sealed_learning_operator_review_ready": learning_ready,
                 **sealed_evidence,
+                **learning_fields,
             },
         ))
     return paths
@@ -599,6 +690,7 @@ def build_profitability_path_scorecard(
     learning_plan: dict[str, Any] | None = None,
     activation_preflight: dict[str, Any] | None = None,
     horizon_sealed_replay: dict[str, Any] | None = None,
+    horizon_learning_evidence: dict[str, Any] | None = None,
     fillsim: dict[str, Any] | None = None,
     fillsim_history: dict[str, Any] | None = None,
     polymarket_leadlag: dict[str, Any] | None = None,
@@ -614,6 +706,7 @@ def build_profitability_path_scorecard(
         profit_packet=profit_learning_packet,
         activation_preflight=activation_preflight,
         horizon_sealed_replay=horizon_sealed_replay,
+        horizon_learning_evidence=horizon_learning_evidence,
     ))
     candidates.extend(_mm_signal_path(fillsim, fillsim_history))
     candidates.extend(_fee_or_scale_path(fillsim, fillsim_history))
@@ -632,6 +725,7 @@ def build_profitability_path_scorecard(
         "COST_GATE_CANDIDATE_EXECUTION_EVIDENCE_MISSING",
         "HORIZON_EDGE_AMPLIFICATION_CANDIDATE",
         "SEALED_HORIZON_REPLAY_READY_FOR_LEARNING_ACCUMULATION",
+        "SEALED_HORIZON_LEARNING_EVIDENCE_READY_FOR_OPERATOR_REVIEW",
     }]
     if not candidates:
         status = "NO_PROFITABILITY_PATH_ARTIFACTS"
@@ -702,6 +796,11 @@ def build_profitability_path_scorecard(
                 input_paths.get("horizon_sealed_replay"),
                 horizon_sealed_replay,
             ),
+            "horizon_learning_evidence": _artifact_summary(
+                "horizon_learning_evidence",
+                input_paths.get("horizon_learning_evidence"),
+                horizon_learning_evidence,
+            ),
             "fillsim": _artifact_summary("fillsim", input_paths.get("fillsim"), fillsim),
             "fillsim_history": _artifact_summary(
                 "fillsim_history",
@@ -733,6 +832,7 @@ def build_profitability_path_scorecard(
                 "fix_or_run_demo_data_flow_monitor",
                 "run_horizon_specific_replay_for_mixed_horizon_side_cells",
                 "activate_or_repair_cost_gate_learning_lane_accumulation",
+                "operator_review_sealed_horizon_learning_evidence_for_bounded_demo_probe",
                 "operator_review_bounded_demo_probe_for_ranked_side_cells",
                 "continue_low_friction_mm_and_external_alpha_search",
             ],
@@ -811,6 +911,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning-plan-json", type=Path)
     parser.add_argument("--activation-preflight-json", type=Path)
     parser.add_argument("--horizon-sealed-replay-json", type=Path)
+    parser.add_argument("--horizon-learning-evidence-json", type=Path)
     parser.add_argument("--fillsim-json", type=Path)
     parser.add_argument("--fillsim-history-json", type=Path)
     parser.add_argument("--polymarket-leadlag-json", type=Path)
@@ -829,6 +930,7 @@ def main() -> int:
         "learning_plan": args.learning_plan_json,
         "activation_preflight": args.activation_preflight_json,
         "horizon_sealed_replay": args.horizon_sealed_replay_json,
+        "horizon_learning_evidence": args.horizon_learning_evidence_json,
         "fillsim": args.fillsim_json,
         "fillsim_history": args.fillsim_history_json,
         "polymarket_leadlag": args.polymarket_leadlag_json,
@@ -840,6 +942,7 @@ def main() -> int:
         learning_plan=_read_json(args.learning_plan_json),
         activation_preflight=_read_json(args.activation_preflight_json),
         horizon_sealed_replay=_read_json(args.horizon_sealed_replay_json),
+        horizon_learning_evidence=_read_json(args.horizon_learning_evidence_json),
         fillsim=_read_json(args.fillsim_json),
         fillsim_history=_read_json(args.fillsim_history_json),
         polymarket_leadlag=_read_json(args.polymarket_leadlag_json),
