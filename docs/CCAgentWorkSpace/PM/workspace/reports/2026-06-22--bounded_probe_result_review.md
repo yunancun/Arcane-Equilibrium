@@ -44,6 +44,8 @@ This result packet makes the future loop measurable:
 - `PYTHONPATH=helper_scripts/research python3 -m pytest helper_scripts/research/tests/test_cost_gate_bounded_probe_result_review.py -q` -> `7 passed`.
 - `PYTHONPATH=helper_scripts/research python3 -m pytest helper_scripts/research/tests/test_cost_gate_bounded_probe_result_review.py helper_scripts/research/tests/test_cost_gate_sealed_horizon_probe_preflight.py helper_scripts/research/tests/test_cost_gate_learning_lane_policy.py -q` -> `84 passed`.
 - `git diff --check` passed.
+- Linux source fast-forwarded to `a2cb8ce7`; Linux py_compile + focused result-review tests passed (`7 passed`).
+- Linux artifact-only smoke wrote `/tmp/openclaw/cost_gate_learning_lane/bounded_probe_result_review_v398/bounded_probe_result_review_latest.json` sha256 `3a5d4cf2680d1ec7b75afad601a924dc93e20ff15296ed22ce26a2cba8034cbf`, status `NO_PROBE_OUTCOMES_RECORDED`, side-cell `ma_crossover|BTCUSDT|Sell`, admitted/completed probe outcomes `0/0`, promotion evidence `false`.
 
 ## Boundaries
 
@@ -51,4 +53,4 @@ No CI, no PG write/schema migration, no Bybit private/signed/trading call, no de
 
 ## Next Gate
 
-After source sync, run a Linux artifact-only smoke against the current sealed preflight and runtime ledger. Expected current status is `NO_PROBE_OUTCOMES_RECORDED` because no bounded demo probe has been operator-authorized yet.
+The current runtime result-review smoke is `NO_PROBE_OUTCOMES_RECORDED` because no bounded demo probe has been operator-authorized yet. The next gate remains operator review/authorization of the sealed preflight/design, not result promotion.
