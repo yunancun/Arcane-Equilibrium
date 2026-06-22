@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Bounded Probe Shadow Placement Impact
+
+- `bounded_demo_probe_shadow_placement_impact_v1` now shadow-applies the no-authority near-touch repair plan to already-observed Demo order-touchability rows.
+- Linux smoke reports `SHADOW_PLACEMENT_TOUCHABILITY_IMPROVED_SAMPLE_MISMATCH`: current no-fill sample would become 6/6 shadow-submit with max initial touch gap `58.2092bp` versus original max `1530.6074bp`, but candidate-matched order count is 0.
+- PM read: the near-touch repair is mechanically worthwhile, but not alpha proof; next step still needs operator-authorized Rust bounded Demo patch plus candidate-matched fill-backed evidence before any Cost Gate change.
+
 ## 2026-06-22 Bounded Probe Placement Repair Plan
 
 - `bounded_demo_probe_placement_repair_plan_v1` now turns the touchability failure into a no-authority near-touch-or-skip plan before any bounded Demo probe result review.

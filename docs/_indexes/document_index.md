@@ -6,6 +6,13 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-22 Bounded probe shadow placement impact
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-22--bounded_probe_shadow_placement_impact.md` | PM checkpoint: shadow-applies the near-touch repair plan to current Demo order-flow and proves mechanical touchability improvement while marking the sample as not candidate-matched alpha proof. |
+| `CCAgentWorkSpace/Operator/2026-06-22--bounded_probe_shadow_placement_impact.md` | Operator note for the current shadow replay: 6/6 current no-fill orders would be near-touch submits, but 0/6 match `ma_crossover|BTCUSDT|Sell`; no authority granted. |
+
 ### 2026-06-22 Bounded probe placement repair plan
 
 | 文件 | 内容 |
