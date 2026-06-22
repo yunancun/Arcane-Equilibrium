@@ -17,6 +17,7 @@ This checkpoint turns the profitability scorecard's horizon retiming path into a
 - Output classes:
   - `RETIMING_CANDIDATE`: blocked on the primary horizon but positive on another horizon.
   - `STABLE_MULTI_HORIZON_CANDIDATE`: positive across multiple horizons.
+  - `MIXED_HORIZON_GUARD_CANDIDATE`: positive on the primary horizon while other horizons remain blocked.
   - `SINGLE_HORIZON_CANDIDATE`: positive on one available horizon.
 - Each candidate carries best horizon, primary-horizon action/net, edge amplification versus primary, effective sample count, required next gate, and authority boundary.
 

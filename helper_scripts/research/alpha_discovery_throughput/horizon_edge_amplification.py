@@ -75,13 +75,25 @@ def _primary_horizon_row(row: dict[str, Any], primary_horizon_minutes: int | Non
     return {}
 
 
-def _status_class(row: dict[str, Any]) -> str:
+def _status_class(row: dict[str, Any], primary_horizon_minutes: int | None = None) -> str:
     status = _str(row.get("status"))
     candidates = _list(row.get("candidate_horizons"))
     blocks = _list(row.get("block_confirmed_horizons"))
+    primary_in_candidates = (
+        primary_horizon_minutes is not None
+        and primary_horizon_minutes in {_int(item) for item in candidates}
+    )
+    primary_in_blocks = (
+        primary_horizon_minutes is not None
+        and primary_horizon_minutes in {_int(item) for item in blocks}
+    )
     if status == "CANDIDATE_MULTI_HORIZON_STABLE" and len(candidates) >= 2:
         return "STABLE_MULTI_HORIZON_CANDIDATE"
     if status == "MIXED_HORIZON_RESPONSE" and candidates and blocks:
+        if primary_in_blocks:
+            return "RETIMING_CANDIDATE"
+        if primary_in_candidates:
+            return "MIXED_HORIZON_GUARD_CANDIDATE"
         return "RETIMING_CANDIDATE"
     if candidates:
         return "SINGLE_HORIZON_CANDIDATE"
@@ -89,14 +101,17 @@ def _status_class(row: dict[str, Any]) -> str:
 
 
 def _candidate_priority(row: dict[str, Any]) -> tuple[int, float, int]:
+    raw_status = _str(row.get("status"))
     status_rank = {
         "RETIMING_CANDIDATE": 0,
         "STABLE_MULTI_HORIZON_CANDIDATE": 1,
-        "SINGLE_HORIZON_CANDIDATE": 2,
-    }.get(_status_class(row), 9)
+        "MIXED_HORIZON_GUARD_CANDIDATE": 2,
+        "SINGLE_HORIZON_CANDIDATE": 3,
+    }
+    rank_key = raw_status if raw_status in status_rank else _status_class(row)
     edge = _float(row.get("best_avg_net_bps")) or -9999.0
     sample = _int(row.get("best_sample_count_for_gate") or row.get("best_distinct_ts"))
-    return (status_rank, -edge, -sample)
+    return (status_rank.get(rank_key, 9), -edge, -sample)
 
 
 def _candidate_record(
@@ -105,7 +120,7 @@ def _candidate_record(
     primary_horizon_minutes: int | None,
     friction_bps: float,
 ) -> dict[str, Any] | None:
-    status_class = _status_class(row)
+    status_class = _status_class(row, primary_horizon_minutes)
     if status_class == "NOT_HORIZON_EDGE_CANDIDATE":
         return None
 
@@ -121,16 +136,15 @@ def _candidate_record(
     best_horizon = _int(row.get("best_horizon_minutes"))
     candidate_horizons = [_int(item) for item in _list(row.get("candidate_horizons"))]
     blocked_horizons = [_int(item) for item in _list(row.get("block_confirmed_horizons"))]
-    next_gate = (
-        "sealed_horizon_specific_replay_before_bounded_demo_probe"
-        if status_class == "RETIMING_CANDIDATE"
-        else "bounded_demo_learning_probe_after_learning_stack_accumulates"
-    )
-    next_action = (
-        "build_horizon_specific_replay_for_best_horizon_then_operator_review"
-        if status_class == "RETIMING_CANDIDATE"
-        else "operator_review_stable_side_cell_after_learning_stack_accumulates"
-    )
+    if status_class == "RETIMING_CANDIDATE":
+        next_gate = "sealed_horizon_specific_replay_before_bounded_demo_probe"
+        next_action = "build_horizon_specific_replay_for_best_horizon_then_operator_review"
+    elif status_class == "MIXED_HORIZON_GUARD_CANDIDATE":
+        next_gate = "sealed_primary_horizon_replay_with_blocked_horizon_guard"
+        next_action = "build_primary_horizon_replay_and_guard_blocked_horizons_then_operator_review"
+    else:
+        next_gate = "bounded_demo_learning_probe_after_learning_stack_accumulates"
+        next_action = "operator_review_stable_side_cell_after_learning_stack_accumulates"
 
     return {
         "side_cell_key": row.get("side_cell_key"),
@@ -194,7 +208,7 @@ def build_horizon_edge_amplification_packet(
             candidates.append(record)
     candidates.sort(
         key=lambda item: _candidate_priority({
-            "status": item.get("source_status"),
+            "status": item.get("status"),
             "candidate_horizons": item.get("candidate_horizons_minutes"),
             "block_confirmed_horizons": item.get("blocked_horizons_minutes"),
             "best_avg_net_bps": item.get("best_net_bps"),
@@ -206,6 +220,9 @@ def build_horizon_edge_amplification_packet(
 
     retiming_count = sum(1 for item in candidates if item["status"] == "RETIMING_CANDIDATE")
     stable_count = sum(1 for item in candidates if item["status"] == "STABLE_MULTI_HORIZON_CANDIDATE")
+    horizon_guard_count = sum(
+        1 for item in candidates if item["status"] == "MIXED_HORIZON_GUARD_CANDIDATE"
+    )
     if retiming_count:
         status = "HORIZON_RETIMING_CANDIDATES_PRESENT"
         next_action = "run_sealed_replay_for_top_retiming_candidate"
@@ -234,6 +251,7 @@ def build_horizon_edge_amplification_packet(
             "candidate_count": len(candidates),
             "retiming_candidate_count": retiming_count,
             "stable_multi_horizon_candidate_count": stable_count,
+            "horizon_guard_candidate_count": horizon_guard_count,
             "top_side_cell_key": candidates[0]["side_cell_key"] if candidates else None,
             "top_best_horizon_minutes": candidates[0]["best_horizon_minutes"] if candidates else None,
             "top_best_net_bps": candidates[0]["best_net_bps"] if candidates else None,

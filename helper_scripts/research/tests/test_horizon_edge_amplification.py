@@ -96,6 +96,39 @@ def _counterfactual() -> dict:
                         "best_avg_net_bps": -66.8474,
                         "best_sample_count_for_gate": 2583,
                     },
+                    {
+                        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+                        "status": "MIXED_HORIZON_RESPONSE",
+                        "candidate_horizons": [60],
+                        "block_confirmed_horizons": [15, 240],
+                        "observed_horizons": [15, 60, 240],
+                        "best_horizon_minutes": 60,
+                        "best_avg_net_bps": 4.0264,
+                        "best_net_positive_pct": 100.0,
+                        "best_p50_gross_bps": 8.2321,
+                        "best_sample_count_for_gate": 2355,
+                        "reason": "primary_horizon_candidate_but_other_horizons_blocked",
+                        "horizon_rows": [
+                            {
+                                "horizon_minutes": 15,
+                                "learning_lane_action": "BLOCK_CONFIRMED",
+                                "avg_net_bps": -12.0,
+                                "sample_count_for_gate": 2355,
+                            },
+                            {
+                                "horizon_minutes": 60,
+                                "learning_lane_action": "LEARNING_PROBE_CANDIDATE",
+                                "avg_net_bps": 4.0264,
+                                "sample_count_for_gate": 2355,
+                            },
+                            {
+                                "horizon_minutes": 240,
+                                "learning_lane_action": "BLOCK_CONFIRMED",
+                                "avg_net_bps": -8.0,
+                                "sample_count_for_gate": 2355,
+                            },
+                        ],
+                    },
                 ],
             },
         },
@@ -110,6 +143,8 @@ def test_horizon_packet_ranks_retiming_candidate_before_stable_candidate() -> No
 
     assert packet["schema_version"] == SCHEMA_VERSION
     assert packet["status"] == "HORIZON_RETIMING_CANDIDATES_PRESENT"
+    assert packet["summary"]["retiming_candidate_count"] == 1
+    assert packet["summary"]["horizon_guard_candidate_count"] == 1
     assert packet["answers"]["retiming_can_amplify_edge"] is True
     assert packet["answers"]["global_cost_gate_lowering_recommended"] is False
     assert packet["answers"]["order_authority_granted"] is False
@@ -131,6 +166,14 @@ def test_horizon_packet_ranks_retiming_candidate_before_stable_candidate() -> No
     assert stable["side_cell_key"] == "ma_crossover|BTCUSDT|Buy"
     assert stable["status"] == "STABLE_MULTI_HORIZON_CANDIDATE"
     assert stable["edge_amplification_vs_primary_bps"] == 0.0
+
+    guarded = packet["candidates"][2]
+    assert guarded["side_cell_key"] == "ma_crossover|ETHUSDT|Sell"
+    assert guarded["status"] == "MIXED_HORIZON_GUARD_CANDIDATE"
+    assert guarded["primary_horizon_action"] == "LEARNING_PROBE_CANDIDATE"
+    assert guarded["required_next_gate"] == (
+        "sealed_primary_horizon_replay_with_blocked_horizon_guard"
+    )
 
 
 def test_horizon_packet_markdown_escapes_side_cell_pipes() -> None:
