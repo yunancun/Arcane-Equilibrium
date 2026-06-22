@@ -156,6 +156,23 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         if sealed_preflight_next_actions
         else "refresh_sealed_horizon_probe_preflight"
     )
+    bounded_review_present = (
+        detail.get("bounded_probe_result_review_present") is True
+    )
+    bounded_review_source_ok = (
+        detail.get("bounded_probe_result_review_source_ok") is True
+    )
+    bounded_review_status = str(
+        detail.get("bounded_probe_result_review_status") or ""
+    ).upper()
+    bounded_review_next_actions = _list(
+        detail.get("bounded_probe_result_review_next_actions")
+    )
+    bounded_review_next_trigger = (
+        str(bounded_review_next_actions[0])
+        if bounded_review_next_actions
+        else "refresh_bounded_probe_result_review"
+    )
 
     if source_activation_ready is False:
         return {
@@ -191,6 +208,97 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "operator_actionable": False,
             "engineering_actionable": True,
         }
+
+    if bounded_review_present and not bounded_review_source_ok:
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "bounded_probe_result_review_stale_or_unreadable",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "bounded_probe_result_review_not_fresh",
+            "next_trigger": "refresh_bounded_probe_result_review",
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
+    if bounded_review_source_ok:
+        if bounded_review_status == "AUTHORITY_BOUNDARY_VIOLATION":
+            return {
+                "action": BLOCK,
+                "reason": "bounded_probe_result_review_authority_boundary_violation",
+                "blocker_class": "source_health",
+                "primary_blocker": (
+                    "bounded_probe_result_review_authority_boundary_violation"
+                ),
+                "next_trigger": bounded_review_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if bounded_review_status == "PREFLIGHT_DESIGN_NOT_USABLE":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "bounded_probe_result_review_preflight_design_not_usable",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "bounded_probe_result_review_preflight_design_not_usable"
+                ),
+                "next_trigger": bounded_review_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if bounded_review_status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED":
+            return {
+                "action": BLOCK,
+                "reason": "bounded_probe_result_review_realized_edge_failed",
+                "blocker_class": "rejected_no_edge",
+                "primary_blocker": (
+                    "bounded_probe_result_review_realized_edge_failed_keep_cost_gate_blocked"
+                ),
+                "next_trigger": bounded_review_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": False,
+            }
+        if bounded_review_status == (
+            "COLLECT_MORE_PROBE_OUTCOMES_BEFORE_FIRST_REVIEW"
+        ):
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "bounded_probe_result_review_collect_more_outcomes",
+                "blocker_class": "sample_gate",
+                "primary_blocker": (
+                    "bounded_probe_result_review_needs_more_probe_outcomes"
+                ),
+                "next_trigger": bounded_review_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if bounded_review_status == "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED":
+            return {
+                "action": READY_FOR_PROBE,
+                "reason": "bounded_probe_first_review_passed_operator_review_required",
+                "blocker_class": "probe_ready",
+                "primary_blocker": (
+                    "bounded_probe_first_review_passed_operator_review_required"
+                ),
+                "next_trigger": bounded_review_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
+        if bounded_review_status == (
+            "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED"
+        ):
+            return {
+                "action": READY_FOR_PROBE,
+                "reason": (
+                    "bounded_probe_learning_review_candidate_operator_review_required"
+                ),
+                "blocker_class": "probe_ready",
+                "primary_blocker": (
+                    "bounded_probe_learning_review_candidate_operator_review_required"
+                ),
+                "next_trigger": bounded_review_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
 
     if sealed_preflight_source_ok:
         if sealed_preflight_status == "AUTHORITY_BOUNDARY_VIOLATION":
@@ -2259,6 +2367,62 @@ def classify_profitability_blocker(
                 ),
                 "sealed_horizon_probe_preflight_promotion_evidence": detail.get(
                     "sealed_horizon_probe_preflight_promotion_evidence"
+                ),
+                "bounded_probe_result_review_status": detail.get(
+                    "bounded_probe_result_review_status"
+                ),
+                "bounded_probe_result_review_reason": detail.get(
+                    "bounded_probe_result_review_reason"
+                ),
+                "bounded_probe_result_review_next_actions": detail.get(
+                    "bounded_probe_result_review_next_actions"
+                ),
+                "bounded_probe_result_review_generated_at_utc": detail.get(
+                    "bounded_probe_result_review_generated_at_utc"
+                ),
+                "bounded_probe_result_review_source_ok": detail.get(
+                    "bounded_probe_result_review_source_ok"
+                ),
+                "bounded_probe_result_review_source_path": detail.get(
+                    "bounded_probe_result_review_source_path"
+                ),
+                "bounded_probe_result_review_source_error": detail.get(
+                    "bounded_probe_result_review_source_error"
+                ),
+                "bounded_probe_result_review_side_cell_key": detail.get(
+                    "bounded_probe_result_review_side_cell_key"
+                ),
+                "bounded_probe_result_review_completed_probe_outcome_count": (
+                    detail.get(
+                        "bounded_probe_result_review_completed_probe_outcome_count"
+                    )
+                ),
+                "bounded_probe_result_review_avg_realized_net_bps": detail.get(
+                    "bounded_probe_result_review_avg_realized_net_bps"
+                ),
+                "bounded_probe_result_review_net_positive_pct": detail.get(
+                    "bounded_probe_result_review_net_positive_pct"
+                ),
+                "bounded_probe_result_review_operator_review_required": detail.get(
+                    "bounded_probe_result_review_operator_review_required"
+                ),
+                "bounded_probe_result_review_stop_probe_recommended": detail.get(
+                    "bounded_probe_result_review_stop_probe_recommended"
+                ),
+                "bounded_probe_result_review_learning_review_candidate": detail.get(
+                    "bounded_probe_result_review_learning_review_candidate"
+                ),
+                "bounded_probe_result_review_order_authority_granted": detail.get(
+                    "bounded_probe_result_review_order_authority_granted"
+                ),
+                "bounded_probe_result_review_probe_authority_granted": detail.get(
+                    "bounded_probe_result_review_probe_authority_granted"
+                ),
+                "bounded_probe_result_review_main_cost_gate_adjustment": detail.get(
+                    "bounded_probe_result_review_main_cost_gate_adjustment"
+                ),
+                "bounded_probe_result_review_promotion_evidence": detail.get(
+                    "bounded_probe_result_review_promotion_evidence"
                 ),
                 "latest_admission_decision": detail.get("latest_admission_decision"),
                 "latest_record_type": detail.get("latest_record_type"),

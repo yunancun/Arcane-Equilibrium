@@ -1694,6 +1694,64 @@ def _write_sealed_horizon_probe_preflight_latest(
     return path
 
 
+def _write_bounded_probe_result_review_latest(
+    data: Path,
+    *,
+    status: str,
+    generated_at: str = "2026-06-21T18:04:45+00:00",
+) -> Path:
+    path = (
+        data
+        / "cost_gate_learning_lane"
+        / "bounded_probe_result_review_latest.json"
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": "bounded_demo_probe_result_review_v1",
+        "generated_at_utc": generated_at,
+        "status": status,
+        "reason": "fixture_bounded_probe_result_review",
+        "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        "probe_result_summary": {
+            "admitted_probe_attempt_count": 3,
+            "completed_probe_outcome_count": 3,
+            "positive_probe_outcome_count": 1,
+            "avg_realized_gross_bps": 2.8,
+            "avg_realized_net_bps": -1.2,
+            "net_positive_pct": 33.3,
+            "first_review_outcome_floor": 3,
+            "learning_review_outcome_floor": 10,
+        },
+        "answers": {
+            "authority_boundary_preserved": True,
+            "operator_review_required": True,
+            "continue_probe_without_operator_review_allowed": False,
+            "stop_probe_recommended": (
+                status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED"
+            ),
+            "learning_review_candidate": (
+                status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED"
+            ),
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "next_actions": [
+            "stop_probe_and_keep_cost_gate_blocked_for_this_side_cell"
+            if status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED"
+            else "operator_review_probe_learning_results_before_any_promotion_or_gate_change"
+        ],
+        "design": {
+            "status": "READY_FOR_SEPARATE_OPERATOR_AUTHORIZATION",
+            "side_cell_key": "ma_crossover|ETHUSDT|Sell",
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
 def test_cost_gate_arm_uses_demo_learning_evidence_for_pg_reject_gap(tmp_path):
     data = tmp_path / "openclaw"
     artifact = _write_demo_learning_evidence_latest(
@@ -2073,6 +2131,48 @@ def test_cost_gate_sealed_horizon_probe_preflight_supersedes_packet(tmp_path):
         "sealed_horizon_probe_preflight_production_lane_accumulating"
     ] is False
     assert task["evidence"]["sealed_horizon_probe_preflight_blocking_gate_count"] == 2
+
+
+def test_cost_gate_bounded_probe_result_review_supersedes_preflight(tmp_path):
+    data = tmp_path / "openclaw"
+    _write_profit_learning_decision_packet_latest(
+        data,
+        status="OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+        reason="sealed_horizon_learning_evidence_clears_review_thresholds",
+        next_actions=[
+            "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+        ],
+        sealed_horizon_candidate=True,
+    )
+    _write_sealed_horizon_probe_preflight_latest(
+        data,
+        status="READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION",
+    )
+    _write_bounded_probe_result_review_latest(
+        data,
+        status="STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED",
+    )
+
+    now = dt.datetime(2026, 6, 21, 18, 5, tzinfo=dt.timezone.utc)
+    arm = collect_cost_gate_learning_lane_arm(data, now_utc=now)
+    plan = build_discovery_plan([arm], now_utc=now)
+    blocker = plan["profitability_blocker_scorecard"]["arms"][0]
+    task = plan["learning_worklist"]["top_task"]
+
+    assert blocker["blocker_class"] == "rejected_no_edge"
+    assert blocker["primary_blocker"] == (
+        "bounded_probe_result_review_realized_edge_failed_keep_cost_gate_blocked"
+    )
+    assert blocker["bounded_probe_result_review_status"] == (
+        "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED"
+    )
+    assert blocker["bounded_probe_result_review_completed_probe_outcome_count"] == 3
+    assert blocker["bounded_probe_result_review_avg_realized_net_bps"] == -1.2
+    assert blocker["bounded_probe_result_review_stop_probe_recommended"] is True
+    assert blocker["bounded_probe_result_review_order_authority_granted"] is False
+    assert blocker["bounded_probe_result_review_main_cost_gate_adjustment"] == "NONE"
+    assert task["task_type"] == "reject_or_archive"
+    assert task["evidence"]["bounded_probe_result_review_stop_probe_recommended"] is True
 
 
 def _write_polymarket_leadlag_latest(data: Path, payload: dict) -> Path:

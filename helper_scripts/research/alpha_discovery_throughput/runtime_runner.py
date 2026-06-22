@@ -1759,6 +1759,115 @@ def summarize_sealed_horizon_probe_preflight(
     }
 
 
+def _bounded_probe_result_review_path(lane_dir: Path) -> Path:
+    canonical = lane_dir / "bounded_probe_result_review_latest.json"
+    if canonical.exists():
+        return canonical
+    candidates = sorted(
+        lane_dir.glob("bounded_probe_result_review*/bounded_probe_result_review_latest.json"),
+        key=lambda path: str(path),
+        reverse=True,
+    )
+    return candidates[0] if candidates else canonical
+
+
+def summarize_bounded_probe_result_review(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    """Summarize bounded demo-probe result review if present."""
+    lane_dir = data_dir / "cost_gate_learning_lane"
+    path = _bounded_probe_result_review_path(lane_dir)
+    payload, err = _read_json(path)
+    if err:
+        return {
+            "bounded_probe_result_review_present": False,
+            "bounded_probe_result_review_source_path": str(path),
+            "bounded_probe_result_review_source_error": err,
+        }
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    summary = payload.get("probe_result_summary")
+    if not isinstance(summary, dict):
+        summary = {}
+    answers = payload.get("answers")
+    if not isinstance(answers, dict):
+        answers = {}
+    next_actions = payload.get("next_actions")
+    if not isinstance(next_actions, list):
+        next_actions = []
+    return {
+        "bounded_probe_result_review_present": True,
+        "bounded_probe_result_review_status": payload.get("status"),
+        "bounded_probe_result_review_reason": payload.get("reason"),
+        "bounded_probe_result_review_next_actions": next_actions,
+        "bounded_probe_result_review_generated_at_utc": generated_at,
+        "bounded_probe_result_review_age_seconds": age,
+        "bounded_probe_result_review_source_ok": fresh,
+        "bounded_probe_result_review_source_path": str(path),
+        "bounded_probe_result_review_source_error": freshness_error,
+        "bounded_probe_result_review_side_cell_key": payload.get("side_cell_key"),
+        "bounded_probe_result_review_admitted_probe_attempt_count": summary.get(
+            "admitted_probe_attempt_count"
+        ),
+        "bounded_probe_result_review_completed_probe_outcome_count": summary.get(
+            "completed_probe_outcome_count"
+        ),
+        "bounded_probe_result_review_positive_probe_outcome_count": summary.get(
+            "positive_probe_outcome_count"
+        ),
+        "bounded_probe_result_review_avg_realized_gross_bps": summary.get(
+            "avg_realized_gross_bps"
+        ),
+        "bounded_probe_result_review_avg_realized_net_bps": summary.get(
+            "avg_realized_net_bps"
+        ),
+        "bounded_probe_result_review_net_positive_pct": summary.get(
+            "net_positive_pct"
+        ),
+        "bounded_probe_result_review_first_review_outcome_floor": summary.get(
+            "first_review_outcome_floor"
+        ),
+        "bounded_probe_result_review_learning_review_outcome_floor": summary.get(
+            "learning_review_outcome_floor"
+        ),
+        "bounded_probe_result_review_authority_boundary_preserved": answers.get(
+            "authority_boundary_preserved"
+        ),
+        "bounded_probe_result_review_operator_review_required": answers.get(
+            "operator_review_required"
+        ),
+        "bounded_probe_result_review_continue_probe_without_operator_review_allowed": (
+            answers.get("continue_probe_without_operator_review_allowed")
+        ),
+        "bounded_probe_result_review_stop_probe_recommended": answers.get(
+            "stop_probe_recommended"
+        ),
+        "bounded_probe_result_review_learning_review_candidate": answers.get(
+            "learning_review_candidate"
+        ),
+        "bounded_probe_result_review_order_authority_granted": answers.get(
+            "order_authority_granted"
+        ),
+        "bounded_probe_result_review_probe_authority_granted": answers.get(
+            "probe_authority_granted"
+        ),
+        "bounded_probe_result_review_main_cost_gate_adjustment": answers.get(
+            "main_cost_gate_adjustment"
+        ),
+        "bounded_probe_result_review_promotion_evidence": answers.get(
+            "promotion_evidence"
+        ),
+    }
+
+
 def collect_cost_gate_learning_lane_arm(
     data_dir: Path,
     *,
@@ -1788,6 +1897,10 @@ def collect_cost_gate_learning_lane_arm(
         now_utc=now_utc,
     )
     sealed_probe_preflight_summary = summarize_sealed_horizon_probe_preflight(
+        data_dir,
+        now_utc=now_utc,
+    )
+    bounded_probe_result_review_summary = summarize_bounded_probe_result_review(
         data_dir,
         now_utc=now_utc,
     )
@@ -1839,6 +1952,7 @@ def collect_cost_gate_learning_lane_arm(
                 **stack_health_summary,
                 **decision_packet_summary,
                 **sealed_probe_preflight_summary,
+                **bounded_probe_result_review_summary,
                 **historical_summary,
                 **loop_summary,
                 **ledger_summary,
@@ -1885,6 +1999,7 @@ def collect_cost_gate_learning_lane_arm(
             **stack_health_summary,
             **decision_packet_summary,
             **sealed_probe_preflight_summary,
+            **bounded_probe_result_review_summary,
             **historical_summary,
             **loop_summary,
             **ledger_summary,

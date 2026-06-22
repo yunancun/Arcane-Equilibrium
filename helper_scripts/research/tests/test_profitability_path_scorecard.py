@@ -251,6 +251,74 @@ def _sealed_horizon_probe_preflight(
     }
 
 
+def _bounded_probe_result_review(
+    status: str = "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
+    *,
+    completed: int = 10,
+    avg_net_bps: float = 2.5,
+    net_positive_pct: float = 70.0,
+) -> dict:
+    return {
+        "schema_version": "bounded_demo_probe_result_review_v1",
+        "generated_at_utc": "2026-06-22T07:00:00+00:00",
+        "status": status,
+        "reason": "fixture_result_review",
+        "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+        "candidate": {
+            "strategy_name": "ma_crossover",
+            "symbol": "BTCUSDT",
+            "side": "Sell",
+            "outcome_horizon_minutes": 240,
+        },
+        "probe_result_summary": {
+            "admitted_probe_attempt_count": completed,
+            "completed_probe_outcome_count": completed,
+            "positive_probe_outcome_count": int(completed * net_positive_pct / 100.0),
+            "avg_realized_gross_bps": avg_net_bps + 4.0,
+            "avg_realized_net_bps": avg_net_bps,
+            "net_positive_pct": net_positive_pct,
+            "min_realized_avg_net_bps": 0.0,
+            "min_realized_net_positive_pct": 60.0,
+            "first_review_outcome_floor": 3,
+            "learning_review_outcome_floor": 10,
+            "max_filled_probe_outcomes_before_review": 3,
+        },
+        "answers": {
+            "authority_boundary_preserved": True,
+            "operator_review_required": status
+            in {
+                "FIRST_REVIEW_PASSED_OPERATOR_REVIEW_REQUIRED",
+                "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED",
+                "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED",
+            },
+            "continue_probe_without_operator_review_allowed": (
+                status == "COLLECT_MORE_PROBE_OUTCOMES_BEFORE_FIRST_REVIEW"
+            ),
+            "stop_probe_recommended": (
+                status == "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED"
+            ),
+            "learning_review_candidate": (
+                status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED"
+            ),
+            "global_cost_gate_lowering_recommended": False,
+            "main_cost_gate_adjustment": "NONE",
+            "probe_authority_granted": False,
+            "order_authority_granted": False,
+            "promotion_evidence": False,
+        },
+        "next_actions": [
+            "operator_review_probe_learning_results_before_any_promotion_or_gate_change"
+            if status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED"
+            else "stop_probe_and_keep_cost_gate_blocked_for_this_side_cell"
+        ],
+        "design": {
+            "status": "READY_FOR_SEPARATE_OPERATOR_AUTHORIZATION",
+            "side_cell_key": "ma_crossover|BTCUSDT|Sell",
+        },
+        "boundary": "artifact-only bounded demo-probe result review",
+    }
+
+
 def test_cost_gate_candidates_and_horizon_paths_do_not_grant_authority() -> None:
     scorecard = build_profitability_path_scorecard(
         cost_gate_counterfactual=_cost_gate_counterfactual(),
@@ -464,6 +532,101 @@ def test_ready_preflight_keeps_authority_separate_from_profitability_closure() -
     assert scorecard["answers"]["order_authority_granted"] is False
     assert scorecard["global_boundaries"]["probe_authority"] == "NOT_GRANTED"
     assert closure["cost_gate_escape_strategy"]["order_authority_granted"] is False
+
+
+def test_bounded_probe_result_failure_stops_cost_gate_escape_path() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+            "next_actions": [
+                "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+            ],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "EVIDENCE_STACK_ACTIVE"},
+        },
+        activation_preflight={"status": "EVIDENCE_STACK_ACTIVE"},
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        sealed_horizon_probe_preflight=_sealed_horizon_probe_preflight(
+            "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+        ),
+        bounded_probe_result_review=_bounded_probe_result_review(
+            "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED",
+            completed=3,
+            avg_net_bps=-1.2,
+            net_positive_pct=33.3,
+        ),
+        now_utc=dt.datetime(2026, 6, 22, 7, tzinfo=dt.timezone.utc),
+    )
+
+    top = {row["path_id"]: row for row in scorecard["top_paths"]}[
+        "horizon_edge_amplification:ma_crossover|BTCUSDT|Sell"
+    ]
+    closure = scorecard["profitability_engineering_closure"]
+
+    assert top["status"] == "BOUNDED_DEMO_PROBE_RESULT_FAILED_STOP"
+    assert top["required_next_gate"] == (
+        "keep_cost_gate_blocked_after_realized_probe_edge_failed"
+    )
+    assert top["evidence"]["bounded_probe_result_review_status"] == (
+        "STOP_BOUNDED_DEMO_PROBE_REALIZED_EDGE_FAILED"
+    )
+    assert top["evidence"]["bounded_probe_result_review_avg_realized_net_bps"] == -1.2
+    assert top["evidence"]["bounded_probe_result_review_stop_probe_recommended"] is True
+    assert closure["status"] == "COST_GATE_ESCAPE_RESULT_REVIEW_FAILED_REALIZED_EDGE"
+    assert "keep Cost Gate blocked" in closure["proof_gates_remaining"][0]
+    assert scorecard["answers"]["bounded_demo_probe_result_review_stop_recommended"] is True
+    assert scorecard["answers"]["global_cost_gate_lowering_recommended"] is False
+    assert scorecard["answers"]["promotion_evidence"] is False
+    assert scorecard["artifacts"]["bounded_probe_result_review"]["present"] is True
+
+
+def test_bounded_probe_learning_review_requires_operator_without_promotion() -> None:
+    scorecard = build_profitability_path_scorecard(
+        cost_gate_counterfactual=_cost_gate_counterfactual(),
+        profit_learning_packet={
+            "status": "OPERATOR_REVIEW_SEALED_HORIZON_DEMO_PROBE_CANDIDATE",
+            "next_actions": [
+                "operator_may_authorize_minimal_rust_authority_bounded_demo_probe_separately"
+            ],
+            "answers": {
+                "global_cost_gate_lowering_recommended": False,
+                "order_authority_granted": False,
+            },
+            "activation": {"status": "EVIDENCE_STACK_ACTIVE"},
+        },
+        activation_preflight={"status": "EVIDENCE_STACK_ACTIVE"},
+        horizon_sealed_replay=_sealed_horizon_replay(),
+        horizon_learning_evidence=_sealed_horizon_learning_evidence(),
+        sealed_horizon_probe_preflight=_sealed_horizon_probe_preflight(
+            "READY_FOR_OPERATOR_BOUNDED_DEMO_PROBE_AUTHORIZATION"
+        ),
+        bounded_probe_result_review=_bounded_probe_result_review(),
+        now_utc=dt.datetime(2026, 6, 22, 7, tzinfo=dt.timezone.utc),
+    )
+
+    top = scorecard["top_paths"][0]
+    closure = scorecard["profitability_engineering_closure"]
+
+    assert top["status"] == (
+        "BOUNDED_DEMO_PROBE_LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED"
+    )
+    assert top["priority_rank"] == 1
+    assert top["evidence"]["bounded_probe_result_review_completed_probe_outcome_count"] == 10
+    assert top["evidence"]["bounded_probe_result_review_learning_review_candidate"] is True
+    assert closure["status"] == "BOUNDED_DEMO_PROBE_LEARNING_REVIEW_OPERATOR_REQUIRED"
+    assert closure["cost_gate_escape_strategy"][
+        "bounded_probe_result_review_learning_review_candidate"
+    ] is True
+    assert scorecard["answers"][
+        "bounded_demo_probe_result_learning_review_candidate"
+    ] is True
+    assert scorecard["answers"]["order_authority_granted"] is False
+    assert top["promotion_evidence"] is False
 
 
 def test_mm_fee_polymarket_and_gate_b_paths_are_separated() -> None:
