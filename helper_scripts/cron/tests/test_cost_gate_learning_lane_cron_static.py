@@ -41,6 +41,10 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "cost_gate_learning_lane_cron.log" in src
     assert "cost_gate_learning_lane.log" in src
     assert "probe_ledger.jsonl" in src
+    assert "demo_data_flow_monitor_latest.json" in src
+    assert "demo_data_flow_monitor_${STAMP}.json" in src
+    assert "profit_learning_decision_packet_latest.json" in src
+    assert "profit_learning_decision_packet_${STAMP}.json" in src
     assert "cost_gate_reject_counterfactual_latest.json" in src
     assert "cost_gate_reject_counterfactual_${STAMP}.json" in src
     assert "demo_learning_lane_plan_latest.json" in src
@@ -53,6 +57,8 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "historical_scorecard_review_latest.json" in src
     assert "reject_materializer_latest.json" in src
     assert "cost_gate_reject_counterfactual.py" in src
+    assert "demo_data_flow_monitor.py" in src
+    assert "cost_gate_learning_lane.decision_packet" in src
     assert "cost_gate_learning_lane.policy" in src
     assert "cost_gate_learning_lane.reject_materializer" in src
     assert "cost_gate_learning_lane.outcome_refresh" in src
@@ -68,6 +74,11 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "scorecard_horizon_stability_status" in src
     assert "scorecard_horizon_stability_next_trigger" in src
     assert "scorecard_horizon_stability_horizons" in src
+    assert "data_flow_monitor_status" in src
+    assert "data_flow_monitor_key_counts" in src
+    assert "decision_packet_status" in src
+    assert "decision_packet_silent_drop_risk" in src
+    assert "decision_packet_data_flow_status" in src
     assert "plan_policy_status" in src
     assert "plan_selected_probe_candidate_count" in src
     assert "preinstall_refresh_only" in src
@@ -85,10 +96,17 @@ def test_wrapper_readonly_pg_and_artifact_only_status() -> None:
     assert "bounded_probe_execution_realism_review_cost_gate_or_operator_review_allowed" in src
     assert "--source-pg" in src
     assert "--record-blocked-outcomes" in src
+    assert "--data-flow-json" in src
+    assert "--counterfactual-json" in src
+    assert "--blocked-outcome-review-json" in src
     assert "--preflight-json" in src
     assert "--result-review-json" in src
     assert "--append-ledger" in src
     assert "OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD" in src
+    assert "OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR" in src
+    assert "OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET" in src
+    assert "OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS" in src
+    assert "OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT" in src
     assert "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN" in src
     assert "OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY" in src
     assert "OPENCLAW_COST_GATE_LEARNING_MATERIALIZE_REJECTS" in src
@@ -107,6 +125,10 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     src = _src(WRAPPER)
     assert 'PG_TIMEFRAME="${OPENCLAW_COST_GATE_LEARNING_PG_TIMEFRAME:-1m}"' in src
     assert 'REFRESH_SCORECARD="${OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD:-1}"' in src
+    assert 'REFRESH_DATA_FLOW_MONITOR="${OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR:-1}"' in src
+    assert 'REFRESH_DECISION_PACKET="${OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET:-1}"' in src
+    assert 'DATA_FLOW_WINDOW_HOURS="${OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS:-1,4,24}"' in src
+    assert 'DATA_FLOW_TOP_LIMIT="${OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT:-10}"' in src
     assert 'SCORECARD_LOOKBACK_HOURS="${OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS:-168}"' in src
     assert 'SCORECARD_LIMIT="${OPENCLAW_COST_GATE_SCORECARD_LIMIT:-50000}"' in src
     assert 'REFRESH_PLAN="${OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN:-1}"' in src
@@ -131,6 +153,10 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
     assert 'REVIEW_MIN_AVG_NET_BPS="${OPENCLAW_COST_GATE_REVIEW_MIN_AVG_NET_BPS:-0.0}"' in src
     assert 'REVIEW_MIN_NET_POSITIVE_PCT="${OPENCLAW_COST_GATE_REVIEW_MIN_NET_POSITIVE_PCT:-60.0}"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_SCORECARD"' in src
+    assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DATA_FLOW_MONITOR"' in src
+    assert 'validate_bool01 "OPENCLAW_COST_GATE_REFRESH_DECISION_PACKET"' in src
+    assert "OPENCLAW_COST_GATE_DATA_FLOW_WINDOW_HOURS must be comma-separated integers" in src
+    assert 'validate_int "OPENCLAW_COST_GATE_DATA_FLOW_TOP_LIMIT"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_SCORECARD_LOOKBACK_HOURS"' in src
     assert 'validate_int "OPENCLAW_COST_GATE_SCORECARD_LIMIT"' in src
     assert 'validate_bool01 "OPENCLAW_COST_GATE_LEARNING_REFRESH_PLAN"' in src
@@ -154,31 +180,45 @@ def test_wrapper_fail_soft_defaults_match_learning_lane_review_policy() -> None:
 def test_wrapper_refreshes_plan_before_materializing_rejects() -> None:
     src = _src(WRAPPER)
     assert 'SCORECARD_ARGS=(' in src
+    assert 'DATA_FLOW_ARGS=(' in src
     assert 'PLAN_ARGS=(' in src
+    assert 'DECISION_PACKET_ARGS=(' in src
     assert "cost_gate_reject_counterfactual.py" in src
+    assert "demo_data_flow_monitor.py" in src
     assert '--horizon-minutes-list "$SCORECARD_HORIZON_MINUTES_LIST"' in src
     assert "-m cost_gate_learning_lane.policy" in src
+    assert "-m cost_gate_learning_lane.decision_packet" in src
     assert "-m cost_gate_learning_lane.bounded_probe_result_review" in src
     assert "-m cost_gate_learning_lane.bounded_probe_execution_realism_review" in src
     assert 'cp "$SCORECARD_JSON_OUT" "$SCORECARD_JSON"' in src
+    assert 'cp "$DATA_FLOW_JSON_OUT" "$DATA_FLOW_JSON"' in src
     assert 'cp "$PLAN_OUT" "$PLAN_JSON"' in src
+    assert 'cp "$DECISION_PACKET_JSON_OUT" "$DECISION_PACKET_JSON"' in src
     assert 'cp "$BOUNDED_PROBE_RESULT_REVIEW_OUT" "$BOUNDED_PROBE_RESULT_REVIEW_LATEST"' in src
     assert 'cp "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_OUT" "$BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_LATEST"' in src
     assert 'SCORECARD_JSON_OUT="$SCORECARD_JSON_OUT" SCORECARD_JSON="$SCORECARD_JSON" SCORECARD_RC="$scorecard_rc" REFRESH_SCORECARD="$REFRESH_SCORECARD"' in src
+    assert 'DATA_FLOW_JSON_OUT="$DATA_FLOW_JSON_OUT" DATA_FLOW_JSON="$DATA_FLOW_JSON" DATA_FLOW_MONITOR_RC="$data_flow_monitor_rc" REFRESH_DATA_FLOW_MONITOR="$REFRESH_DATA_FLOW_MONITOR"' in src
+    assert 'DECISION_PACKET_JSON_OUT="$DECISION_PACKET_JSON_OUT" DECISION_PACKET_JSON="$DECISION_PACKET_JSON" DECISION_PACKET_RC="$decision_packet_rc" REFRESH_DECISION_PACKET="$REFRESH_DECISION_PACKET"' in src
     assert 'PLAN_OUT="$PLAN_OUT" PLAN_JSON="$PLAN_JSON" PLAN_RC="$plan_rc" REFRESH_PLAN="$REFRESH_PLAN"' in src
     assert "scorecard_rc=" in src
+    assert "data_flow_monitor_rc=" in src
+    assert "decision_packet_rc=" in src
     assert "plan_rc=" in src
     scorecard_index = src.index('"$PYBIN" "${SCORECARD_ARGS[@]}"')
+    data_flow_index = src.index('"$PYBIN" "${DATA_FLOW_ARGS[@]}"')
     plan_index = src.index('"$PYBIN" "${PLAN_ARGS[@]}"')
     materializer_index = src.index('"$PYBIN" "${MATERIALIZER_ARGS[@]}"')
     refresh_index = src.index('"$PYBIN" "${REFRESH_ARGS[@]}"')
     review_index = src.index('"$PYBIN" "${REVIEW_ARGS[@]}"')
     result_review_index = src.index('"$PYBIN" "${BOUNDED_PROBE_RESULT_REVIEW_ARGS[@]}"')
     execution_review_index = src.index('"$PYBIN" "${BOUNDED_PROBE_EXECUTION_REALISM_REVIEW_ARGS[@]}"')
+    decision_packet_index = src.index('"$PYBIN" "${DECISION_PACKET_ARGS[@]}"')
     assert scorecard_index < plan_index
+    assert scorecard_index < data_flow_index < plan_index
     assert plan_index < materializer_index
     assert materializer_index < refresh_index < review_index
     assert review_index < result_review_index < execution_review_index
+    assert execution_review_index < decision_packet_index
 
 
 def test_wrapper_bounded_probe_reviews_use_fresh_result_review_only() -> None:
