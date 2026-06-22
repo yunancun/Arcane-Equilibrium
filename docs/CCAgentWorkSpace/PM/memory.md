@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Sealed Horizon Operator Review Artifact
+
+- Added a no-authority `sealed_horizon_operator_review_v1` builder for bounded demo-probe preflight review.
+- Exact approval for the current leading path requires `approve_sealed_horizon_preflight:ma_crossover|BTCUSDT|Sell:240`, a fresh aligned preflight, and a non-empty operator id.
+- Codex smoke generated only `PENDING_OPERATOR_REVIEW`; the remaining gates are actual operator approval plus production learning-lane accumulation, with no Cost Gate lowering, probe/order authority, runtime mutation, or promotion proof.
+
 ## 2026-06-22 Profitability Engineering Closure
 
 - Profitability path scorecard now consumes the sealed horizon probe preflight and emits `profitability_engineering_closure_v1`.
