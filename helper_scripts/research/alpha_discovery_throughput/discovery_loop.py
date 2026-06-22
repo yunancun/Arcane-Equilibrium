@@ -140,6 +140,19 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
         detail.get("demo_learning_stack_activation_packet_operator_next_action")
         or "refresh_demo_learning_stack_activation_packet"
     )
+    dry_run_review_present = (
+        detail.get("demo_learning_stack_dry_run_review_present") is True
+    )
+    dry_run_review_source_ok = (
+        detail.get("demo_learning_stack_dry_run_review_source_ok") is True
+    )
+    dry_run_review_status = str(
+        detail.get("demo_learning_stack_dry_run_review_status") or ""
+    ).upper()
+    dry_run_review_next_trigger = str(
+        detail.get("demo_learning_stack_dry_run_review_operator_next_action")
+        or "run_demo_learning_stack_dry_run_review"
+    )
     packet_present = detail.get("profit_learning_decision_packet_present") is True
     packet_source_ok = detail.get("profit_learning_decision_packet_source_ok") is True
     packet_status = str(
@@ -243,6 +256,17 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "engineering_actionable": True,
         }
 
+    if dry_run_review_present and not dry_run_review_source_ok:
+        return {
+            "action": RUN_READ_ONLY_CAPTURE,
+            "reason": "demo_learning_stack_dry_run_review_stale_or_unreadable",
+            "blocker_class": "data_coverage",
+            "primary_blocker": "demo_learning_stack_dry_run_review_not_fresh",
+            "next_trigger": "refresh_demo_learning_stack_dry_run_review",
+            "operator_actionable": False,
+            "engineering_actionable": True,
+        }
+
     if sealed_preflight_present and not sealed_preflight_source_ok:
         return {
             "action": RUN_READ_ONLY_CAPTURE,
@@ -291,6 +315,35 @@ def _cost_gate_learning_lane_state(arm: dict[str, Any]) -> dict[str, Any]:
             "operator_actionable": False,
             "engineering_actionable": True,
         }
+
+    if dry_run_review_source_ok:
+        if dry_run_review_status == "DRY_RUN_PREVIEW_FAILED_REPAIR_REQUIRED":
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_dry_run_preview_failed",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_dry_run_preview_failed_repair_required"
+                ),
+                "next_trigger": dry_run_review_next_trigger,
+                "operator_actionable": False,
+                "engineering_actionable": True,
+            }
+        if (
+            dry_run_review_status
+            == "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED"
+        ):
+            return {
+                "action": RUN_READ_ONLY_CAPTURE,
+                "reason": "demo_learning_stack_dry_run_preview_passed",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_dry_run_preview_passed_operator_apply_review_required"
+                ),
+                "next_trigger": dry_run_review_next_trigger,
+                "operator_actionable": True,
+                "engineering_actionable": True,
+            }
 
     if activation_packet_source_ok:
         if activation_packet_status == "SOURCE_NOT_READY":
@@ -2163,6 +2216,93 @@ def classify_profitability_blocker(
                 ),
                 "demo_learning_stack_activation_packet_post_install_verification_shell": detail.get(
                     "demo_learning_stack_activation_packet_post_install_verification_shell"
+                ),
+                "demo_learning_stack_dry_run_review_present": detail.get(
+                    "demo_learning_stack_dry_run_review_present"
+                ),
+                "demo_learning_stack_dry_run_review_status": detail.get(
+                    "demo_learning_stack_dry_run_review_status"
+                ),
+                "demo_learning_stack_dry_run_review_raw_status": detail.get(
+                    "demo_learning_stack_dry_run_review_raw_status"
+                ),
+                "demo_learning_stack_dry_run_review_reason": detail.get(
+                    "demo_learning_stack_dry_run_review_reason"
+                ),
+                "demo_learning_stack_dry_run_review_operator_next_action": detail.get(
+                    "demo_learning_stack_dry_run_review_operator_next_action"
+                ),
+                "demo_learning_stack_dry_run_review_generated_at_utc": detail.get(
+                    "demo_learning_stack_dry_run_review_generated_at_utc"
+                ),
+                "demo_learning_stack_dry_run_review_age_seconds": detail.get(
+                    "demo_learning_stack_dry_run_review_age_seconds"
+                ),
+                "demo_learning_stack_dry_run_review_source_ok": detail.get(
+                    "demo_learning_stack_dry_run_review_source_ok"
+                ),
+                "demo_learning_stack_dry_run_review_source_path": detail.get(
+                    "demo_learning_stack_dry_run_review_source_path"
+                ),
+                "demo_learning_stack_dry_run_review_source_error": detail.get(
+                    "demo_learning_stack_dry_run_review_source_error"
+                ),
+                "demo_learning_stack_dry_run_review_expected_head": detail.get(
+                    "demo_learning_stack_dry_run_review_expected_head"
+                ),
+                "demo_learning_stack_dry_run_review_activation_packet_status": detail.get(
+                    "demo_learning_stack_dry_run_review_activation_packet_status"
+                ),
+                "demo_learning_stack_dry_run_review_activation_packet_missing_cron_count": detail.get(
+                    "demo_learning_stack_dry_run_review_activation_packet_missing_cron_count"
+                ),
+                "demo_learning_stack_dry_run_review_dry_run_preview_executed": detail.get(
+                    "demo_learning_stack_dry_run_review_dry_run_preview_executed"
+                ),
+                "demo_learning_stack_dry_run_review_dry_run_preview_passed": detail.get(
+                    "demo_learning_stack_dry_run_review_dry_run_preview_passed"
+                ),
+                "demo_learning_stack_dry_run_review_crontab_mutated": detail.get(
+                    "demo_learning_stack_dry_run_review_crontab_mutated"
+                ),
+                "demo_learning_stack_dry_run_review_operator_apply_required": detail.get(
+                    "demo_learning_stack_dry_run_review_operator_apply_required"
+                ),
+                "demo_learning_stack_dry_run_review_global_cost_gate_lowering_recommended": detail.get(
+                    "demo_learning_stack_dry_run_review_global_cost_gate_lowering_recommended"
+                ),
+                "demo_learning_stack_dry_run_review_order_authority_granted": detail.get(
+                    "demo_learning_stack_dry_run_review_order_authority_granted"
+                ),
+                "demo_learning_stack_dry_run_review_probe_authority_granted": detail.get(
+                    "demo_learning_stack_dry_run_review_probe_authority_granted"
+                ),
+                "demo_learning_stack_dry_run_review_promotion_proof": detail.get(
+                    "demo_learning_stack_dry_run_review_promotion_proof"
+                ),
+                "demo_learning_stack_dry_run_review_returncode": detail.get(
+                    "demo_learning_stack_dry_run_review_returncode"
+                ),
+                "demo_learning_stack_dry_run_review_run_error": detail.get(
+                    "demo_learning_stack_dry_run_review_run_error"
+                ),
+                "demo_learning_stack_dry_run_review_forced_apply_gate": detail.get(
+                    "demo_learning_stack_dry_run_review_forced_apply_gate"
+                ),
+                "demo_learning_stack_dry_run_review_preinstall_refresh": detail.get(
+                    "demo_learning_stack_dry_run_review_preinstall_refresh"
+                ),
+                "demo_learning_stack_dry_run_review_mutates_crontab": detail.get(
+                    "demo_learning_stack_dry_run_review_mutates_crontab"
+                ),
+                "demo_learning_stack_dry_run_review_dry_run_preview_shell": detail.get(
+                    "demo_learning_stack_dry_run_review_dry_run_preview_shell"
+                ),
+                "demo_learning_stack_dry_run_review_operator_only_apply_shell": detail.get(
+                    "demo_learning_stack_dry_run_review_operator_only_apply_shell"
+                ),
+                "demo_learning_stack_dry_run_review_operator_only_rollback_shell": detail.get(
+                    "demo_learning_stack_dry_run_review_operator_only_rollback_shell"
                 ),
                 "demo_learning_stack_source_ready": detail.get(
                     "demo_learning_stack_source_ready"

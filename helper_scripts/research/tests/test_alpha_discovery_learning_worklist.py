@@ -428,3 +428,83 @@ def test_learning_worklist_carries_demo_learning_stack_activation_packet_evidenc
     assert task["evidence"][
         "demo_learning_stack_activation_packet_probe_authority_granted"
     ] is False
+
+
+def test_learning_worklist_carries_demo_learning_stack_dry_run_review_evidence():
+    worklist = build_learning_worklist({
+        "arms": [
+            {
+                "arm_id": "cost_gate_demo_learning_lane",
+                "blocker_class": "data_coverage",
+                "primary_blocker": (
+                    "demo_learning_stack_dry_run_preview_passed_operator_apply_review_required"
+                ),
+                "next_trigger": (
+                    "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+                ),
+                "operator_actionable": True,
+                "engineering_actionable": True,
+                "demo_learning_stack_dry_run_review_present": True,
+                "demo_learning_stack_dry_run_review_status": (
+                    "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED"
+                ),
+                "demo_learning_stack_dry_run_review_reason": (
+                    "installer_dry_run_preview_passed_without_crontab_mutation"
+                ),
+                "demo_learning_stack_dry_run_review_operator_next_action": (
+                    "operator_review_dry_run_preview_then_apply_learning_stack_if_accepted"
+                ),
+                "demo_learning_stack_dry_run_review_expected_head": "abc1234",
+                "demo_learning_stack_dry_run_review_activation_packet_status": (
+                    "READY_FOR_OPERATOR_DRY_RUN"
+                ),
+                "demo_learning_stack_dry_run_review_dry_run_preview_executed": True,
+                "demo_learning_stack_dry_run_review_dry_run_preview_passed": True,
+                "demo_learning_stack_dry_run_review_crontab_mutated": False,
+                "demo_learning_stack_dry_run_review_operator_apply_required": True,
+                "demo_learning_stack_dry_run_review_global_cost_gate_lowering_recommended": False,
+                "demo_learning_stack_dry_run_review_order_authority_granted": False,
+                "demo_learning_stack_dry_run_review_probe_authority_granted": False,
+                "demo_learning_stack_dry_run_review_forced_apply_gate": "0",
+                "demo_learning_stack_dry_run_review_preinstall_refresh": "0",
+                "demo_learning_stack_dry_run_review_mutates_crontab": False,
+                "demo_learning_stack_dry_run_review_dry_run_preview_shell": (
+                    "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=0 install_stack"
+                ),
+                "demo_learning_stack_dry_run_review_operator_only_apply_shell": (
+                    "OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY=1 install_stack"
+                ),
+            }
+        ],
+    })
+
+    task = worklist["top_task"]
+
+    assert worklist["status"] == "OPERATOR_GATED_LEARNING_READY"
+    assert task["task_type"] == "cost_gate_learning_activation"
+    assert task["learning_objective"] == (
+        "operator_review_learning_stack_dry_run_preview_before_cron_apply"
+    )
+    assert task["requires_operator_authorization"] is True
+    assert task["runtime_mutation_required"] is True
+    assert task["actionability"] == "operator_required"
+    assert task["evidence"]["demo_learning_stack_dry_run_review_status"] == (
+        "DRY_RUN_PREVIEW_PASSED_OPERATOR_APPLY_REVIEW_REQUIRED"
+    )
+    assert task["evidence"][
+        "demo_learning_stack_dry_run_review_dry_run_preview_passed"
+    ] is True
+    assert task["evidence"][
+        "demo_learning_stack_dry_run_review_operator_apply_required"
+    ] is True
+    assert task["evidence"]["demo_learning_stack_dry_run_review_forced_apply_gate"] == "0"
+    assert task["evidence"]["demo_learning_stack_dry_run_review_mutates_crontab"] is False
+    assert task["evidence"][
+        "demo_learning_stack_dry_run_review_global_cost_gate_lowering_recommended"
+    ] is False
+    assert task["evidence"][
+        "demo_learning_stack_dry_run_review_order_authority_granted"
+    ] is False
+    assert task["evidence"][
+        "demo_learning_stack_dry_run_review_probe_authority_granted"
+    ] is False

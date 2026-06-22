@@ -1707,6 +1707,109 @@ def summarize_demo_learning_stack_activation_packet(
     }
 
 
+def summarize_demo_learning_stack_dry_run_review(
+    data_dir: Path,
+    *,
+    now_utc: dt.datetime,
+    max_age_seconds: int = DEFAULT_DAILY_ARTIFACT_MAX_AGE_SECONDS,
+) -> dict[str, Any]:
+    path = (
+        data_dir
+        / "demo_learning_stack_dry_run_review"
+        / "demo_learning_stack_dry_run_review_latest.json"
+    )
+    payload, err = _read_json(path)
+    if err:
+        return {
+            "demo_learning_stack_dry_run_review_present": False,
+            "demo_learning_stack_dry_run_review_status": "NOT_SEEN",
+            "demo_learning_stack_dry_run_review_source_path": str(path),
+            "demo_learning_stack_dry_run_review_source_error": err,
+        }
+    assert payload is not None
+    generated_at = payload.get("generated_at_utc")
+    fresh, age, freshness_error = _source_fresh(
+        generated_at,
+        now_utc=now_utc,
+        max_age_seconds=max_age_seconds,
+    )
+    answers = payload.get("answers") if isinstance(payload.get("answers"), dict) else {}
+    preview = (
+        payload.get("dry_run_preview")
+        if isinstance(payload.get("dry_run_preview"), dict)
+        else {}
+    )
+    return {
+        "demo_learning_stack_dry_run_review_present": True,
+        "demo_learning_stack_dry_run_review_status": (
+            str(payload.get("status") or "UNKNOWN") if fresh else "STALE_ARTIFACT"
+        ),
+        "demo_learning_stack_dry_run_review_raw_status": payload.get("status"),
+        "demo_learning_stack_dry_run_review_reason": payload.get("reason"),
+        "demo_learning_stack_dry_run_review_operator_next_action": payload.get(
+            "operator_next_action"
+        ),
+        "demo_learning_stack_dry_run_review_generated_at_utc": generated_at,
+        "demo_learning_stack_dry_run_review_age_seconds": age,
+        "demo_learning_stack_dry_run_review_source_ok": fresh,
+        "demo_learning_stack_dry_run_review_source_path": str(path),
+        "demo_learning_stack_dry_run_review_source_error": freshness_error,
+        "demo_learning_stack_dry_run_review_expected_head": payload.get(
+            "expected_head"
+        ),
+        "demo_learning_stack_dry_run_review_activation_packet_status": payload.get(
+            "activation_packet_status"
+        ),
+        "demo_learning_stack_dry_run_review_activation_packet_missing_cron_count": (
+            payload.get("activation_packet_missing_cron_count")
+        ),
+        "demo_learning_stack_dry_run_review_dry_run_preview_executed": answers.get(
+            "dry_run_preview_executed"
+        ),
+        "demo_learning_stack_dry_run_review_dry_run_preview_passed": answers.get(
+            "dry_run_preview_passed"
+        ),
+        "demo_learning_stack_dry_run_review_crontab_mutated": answers.get(
+            "crontab_mutated"
+        ),
+        "demo_learning_stack_dry_run_review_operator_apply_required": answers.get(
+            "operator_apply_required"
+        ),
+        "demo_learning_stack_dry_run_review_global_cost_gate_lowering_recommended": (
+            answers.get("global_cost_gate_lowering_recommended")
+        ),
+        "demo_learning_stack_dry_run_review_order_authority_granted": answers.get(
+            "order_authority_granted"
+        ),
+        "demo_learning_stack_dry_run_review_probe_authority_granted": answers.get(
+            "probe_authority_granted"
+        ),
+        "demo_learning_stack_dry_run_review_promotion_proof": answers.get(
+            "promotion_proof"
+        ),
+        "demo_learning_stack_dry_run_review_returncode": preview.get("returncode"),
+        "demo_learning_stack_dry_run_review_run_error": preview.get("run_error"),
+        "demo_learning_stack_dry_run_review_forced_apply_gate": preview.get(
+            "forced_apply_gate"
+        ),
+        "demo_learning_stack_dry_run_review_preinstall_refresh": preview.get(
+            "preinstall_refresh"
+        ),
+        "demo_learning_stack_dry_run_review_mutates_crontab": preview.get(
+            "mutates_crontab"
+        ),
+        "demo_learning_stack_dry_run_review_dry_run_preview_shell": payload.get(
+            "dry_run_preview_shell"
+        ),
+        "demo_learning_stack_dry_run_review_operator_only_apply_shell": payload.get(
+            "operator_only_apply_shell"
+        ),
+        "demo_learning_stack_dry_run_review_operator_only_rollback_shell": payload.get(
+            "operator_only_rollback_shell"
+        ),
+    }
+
+
 def summarize_profit_learning_decision_packet(
     data_dir: Path,
     *,
@@ -2254,6 +2357,10 @@ def collect_cost_gate_learning_lane_arm(
         data_dir,
         now_utc=now_utc,
     )
+    stack_dry_run_review_summary = summarize_demo_learning_stack_dry_run_review(
+        data_dir,
+        now_utc=now_utc,
+    )
     decision_packet_summary = summarize_profit_learning_decision_packet(
         data_dir,
         now_utc=now_utc,
@@ -2319,6 +2426,7 @@ def collect_cost_gate_learning_lane_arm(
                 **demo_evidence_summary,
                 **stack_health_summary,
                 **stack_activation_packet_summary,
+                **stack_dry_run_review_summary,
                 **decision_packet_summary,
                 **sealed_probe_preflight_summary,
                 **bounded_probe_result_review_summary,
@@ -2368,6 +2476,7 @@ def collect_cost_gate_learning_lane_arm(
             **demo_evidence_summary,
             **stack_health_summary,
             **stack_activation_packet_summary,
+            **stack_dry_run_review_summary,
             **decision_packet_summary,
             **sealed_probe_preflight_summary,
             **bounded_probe_result_review_summary,
