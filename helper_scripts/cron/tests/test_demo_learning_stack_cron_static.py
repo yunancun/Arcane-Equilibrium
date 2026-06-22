@@ -10,6 +10,8 @@ import pytest
 
 CRON_DIR = Path(__file__).resolve().parents[1]
 STACK_INSTALLER = CRON_DIR / "install_demo_learning_stack_crons.sh"
+SEALED_PREFLIGHT_INSTALLER = CRON_DIR / "install_sealed_horizon_probe_preflight_cron.sh"
+SEALED_PREFLIGHT_WRAPPER = CRON_DIR / "sealed_horizon_probe_preflight_cron.sh"
 HEALTHCHECK_WRAPPER = CRON_DIR / "demo_learning_stack_healthcheck_cron.sh"
 HEALTHCHECK_INSTALLER = CRON_DIR / "install_demo_learning_stack_healthcheck_cron.sh"
 
@@ -21,7 +23,13 @@ def _src(path: Path) -> str:
 def test_bash_syntax_ok() -> None:
     if shutil.which("bash") is None:
         pytest.skip("bash not available")
-    for script in (STACK_INSTALLER, HEALTHCHECK_WRAPPER, HEALTHCHECK_INSTALLER):
+    for script in (
+        STACK_INSTALLER,
+        SEALED_PREFLIGHT_INSTALLER,
+        SEALED_PREFLIGHT_WRAPPER,
+        HEALTHCHECK_WRAPPER,
+        HEALTHCHECK_INSTALLER,
+    ):
         proc = subprocess.run(
             ["bash", "-n", str(script)],
             capture_output=True,
@@ -31,27 +39,40 @@ def test_bash_syntax_ok() -> None:
 
 
 def test_executable_strict_mode_and_linux_only() -> None:
-    for script in (STACK_INSTALLER, HEALTHCHECK_WRAPPER, HEALTHCHECK_INSTALLER):
+    for script in (
+        STACK_INSTALLER,
+        SEALED_PREFLIGHT_INSTALLER,
+        SEALED_PREFLIGHT_WRAPPER,
+        HEALTHCHECK_WRAPPER,
+        HEALTHCHECK_INSTALLER,
+    ):
         src = _src(script)
         assert script.stat().st_mode & 0o111
         assert "set -euo pipefail" in src
     src = _src(STACK_INSTALLER)
     assert "install_demo_learning_stack_crons.sh requires Linux runtime" in src
+    assert "install_sealed_horizon_probe_preflight_cron.sh requires Linux runtime" in (
+        _src(SEALED_PREFLIGHT_INSTALLER)
+    )
     assert "install_demo_learning_stack_healthcheck_cron.sh requires Linux runtime" in (
         _src(HEALTHCHECK_INSTALLER)
     )
 
 
-def test_stack_wraps_both_installers_without_direct_crontab_write() -> None:
+def test_stack_wraps_full_learning_installers_without_direct_crontab_write() -> None:
     src = _src(STACK_INSTALLER)
     assert "install_demo_learning_evidence_audit_cron.sh" in src
+    assert "install_sealed_horizon_probe_preflight_cron.sh" in src
+    assert "sealed_horizon_probe_preflight_cron.sh" in src
     assert "install_cost_gate_learning_lane_cron.sh" in src
     assert "install_demo_learning_stack_healthcheck_cron.sh" in src
     assert "cost_gate_learning_lane_cron.sh" in src
     assert "OPENCLAW_DEMO_LEARNING_EVIDENCE_CRON_APPLY=1" in src
+    assert "OPENCLAW_SEALED_HORIZON_PREFLIGHT_CRON_APPLY=1" in src
     assert "OPENCLAW_COST_GATE_LEARNING_CRON_APPLY=1" in src
     assert "OPENCLAW_DEMO_LEARNING_STACK_HEALTHCHECK_CRON_APPLY=1" in src
     assert "OPENCLAW_DEMO_LEARNING_EVIDENCE_CRON_APPLY=0" in src
+    assert "OPENCLAW_SEALED_HORIZON_PREFLIGHT_CRON_APPLY=0" in src
     assert "OPENCLAW_COST_GATE_LEARNING_CRON_APPLY=0" in src
     assert "OPENCLAW_DEMO_LEARNING_STACK_HEALTHCHECK_CRON_APPLY=0" in src
     assert "( crontab -l" not in src
@@ -74,6 +95,8 @@ def test_preflight_runs_before_any_child_apply_install() -> None:
     src = _src(STACK_INSTALLER)
     assert "build_cost_gate_learning_lane_activation_preflight" in src
     assert "read-only stack preflight; no crontab edit performed by this check" in src
+    assert "Running artifact-only sealed horizon preflight refresh" in src
+    assert '"$SEALED_PREFLIGHT_WRAPPER"' in src
     assert "OPENCLAW_COST_GATE_LEARNING_PREINSTALL_REFRESH_ONLY=1" in src
     assert "Running read-only/artifact-only Cost Gate preinstall refresh" in src
     apply_gate_index = src.index(
@@ -90,12 +113,33 @@ def test_remove_is_reversible_through_child_installers() -> None:
     src = _src(STACK_INSTALLER)
     assert "--remove" in src
     assert "Removing healthcheck cron first" in src
+    assert "then sealed horizon preflight cron" in src
     assert '"$HEALTH_INSTALLER" --remove' in src
     assert '"$COST_INSTALLER" --remove' in src
+    assert '"$SEALED_PREFLIGHT_INSTALLER" --remove' in src
     assert '"$DEMO_INSTALLER" --remove' in src
     assert 'OPENCLAW_DEMO_LEARNING_STACK_HEALTHCHECK_CRON_APPLY="${OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY:-0}"' in src
     assert 'OPENCLAW_COST_GATE_LEARNING_CRON_APPLY="${OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY:-0}"' in src
+    assert 'OPENCLAW_SEALED_HORIZON_PREFLIGHT_CRON_APPLY="${OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY:-0}"' in src
     assert 'OPENCLAW_DEMO_LEARNING_EVIDENCE_CRON_APPLY="${OPENCLAW_DEMO_LEARNING_STACK_CRON_APPLY:-0}"' in src
+
+
+def test_sealed_preflight_installer_is_dry_run_gated_and_reversible() -> None:
+    src = _src(SEALED_PREFLIGHT_INSTALLER)
+    assert "OPENCLAW_SEALED_HORIZON_PREFLIGHT_CRON_APPLY" in src
+    assert "DRY-RUN: not modifying crontab." in src
+    assert "sealed_horizon_probe_preflight_cron.sh" in src
+    assert "OPENCLAW_SEALED_HORIZON_PREFLIGHT_EXPECTED_HEAD" in src
+    assert "OPENCLAW_DEMO_LEARNING_STACK_EXPECTED_HEAD" in src
+    assert "OPENCLAW_EXPECTED_SOURCE_HEAD" in src
+    assert "_validate_sha_prefix" in src
+    assert "--remove" in src
+    assert "grep -v \"$MARKER\"" in src
+    assert "( crontab -l" in src
+    assert "| crontab -" in src
+    assert "OPENCLAW_SEALED_HORIZON_PREFLIGHT_CRON_MINUTES:-22" in src
+    assert "no crontab write without apply" in src
+    assert "probe authority" in src
 
 
 def test_healthcheck_wrapper_writes_only_local_artifacts() -> None:
@@ -127,7 +171,13 @@ def test_healthcheck_installer_is_dry_run_gated_and_reversible() -> None:
 def test_no_trading_or_runtime_mutation_tokens() -> None:
     combined = "\n".join(
         _src(path)
-        for path in (STACK_INSTALLER, HEALTHCHECK_WRAPPER, HEALTHCHECK_INSTALLER)
+        for path in (
+            STACK_INSTALLER,
+            SEALED_PREFLIGHT_INSTALLER,
+            SEALED_PREFLIGHT_WRAPPER,
+            HEALTHCHECK_WRAPPER,
+            HEALTHCHECK_INSTALLER,
+        )
     )
     forbidden = (
         "/home/ncyu",
