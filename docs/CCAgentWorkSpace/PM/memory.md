@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Runtime Source Reconcile Review Packet
+
+- Added PM/Operator review packet for the 13 runtime source review-required paths found by the read-only remote probe.
+- Recommended target-wins for stale docs/source/test paths after checking line counts and top-level Python symbols; no remote-only source symbols were found.
+- Preserved the runtime-only `vol-event-robust-ruling.md` report into repo as a cleaned-format doc; still no runtime source sync, cron install, writer enablement, Cost Gate lowering, or order/probe authority.
+
 ## 2026-06-22 Runtime Source Remote Reconcile Probe
 
 - Added `helper_scripts/deploy/runtime_source_remote_reconcile_probe.py` so Mac can compare local approved target tree to `trade-core` remote worktree over read-only SSH even when runtime lacks the target object.
