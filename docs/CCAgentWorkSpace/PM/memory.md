@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Bounded Probe Touchability Preflight
+
+- `bounded_demo_probe_touchability_preflight_v1` now gates bounded Demo probe design against the latest order-to-fill touchability audit before any probe review.
+- Linux smoke reports `TOUCHABILITY_REPAIR_REQUIRED_BEFORE_BOUNDED_DEMO_PROBE`: the sealed BTCUSDT Sell design is reviewable, but current Demo orders are 6/6 deep passive no-touch with max best-touch gap `1530.6074bp` versus a required initial passive gap of `75bp`.
+- PM read: next profit work is near-touch-or-skip placement repair plus fill/fee/slippage lineage, not global Cost Gate lowering; missing order-touchability input fails closed as `ORDER_TOUCHABILITY_AUDIT_REQUIRED`, not silent loss.
+
 ## 2026-06-22 Demo Order-To-Fill Touchability Audit
 
 - `demo_order_to_fill_gap_audit_v1` now explains `DEMO_ORDER_FLOW_PRESENT_NO_FILLS` by joining Demo orders, intents, state changes, fills, and BBO touchability.

@@ -6,6 +6,13 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-22 Bounded probe touchability preflight
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-22--bounded_probe_touchability_preflight.md` | PM checkpoint: converts the Demo order-to-fill no-touch finding into a fail-closed bounded Demo probe touchability preflight and cron status stage before any Cost Gate/probe authority change. |
+| `CCAgentWorkSpace/Operator/2026-06-22--bounded_probe_touchability_preflight.md` | Operator note for the current gate: 6/6 reviewed Demo orders are deep passive no-touch, max best-touch gap 1530.6074bp versus 75bp initial passive gap requirement; no authority granted. |
+
 ### 2026-06-22 Demo order-to-fill touchability audit
 
 | 文件 | 内容 |
