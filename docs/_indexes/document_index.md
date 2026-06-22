@@ -6,6 +6,13 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 
+### 2026-06-22 Bounded probe placement repair plan
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-06-22--bounded_probe_placement_repair_plan.md` | PM checkpoint: converts the bounded Demo touchability failure into a no-authority near-touch-or-skip placement repair plan and cron status stage before any Cost Gate/probe/order authority change. |
+| `CCAgentWorkSpace/Operator/2026-06-22--bounded_probe_placement_repair_plan.md` | Operator note for the current repair gate: post-only near-touch-or-skip plan is review-ready but inactive, requires separate operator authorization, and grants no Cost Gate/order/probe authority. |
+
 ### 2026-06-22 Bounded probe touchability preflight
 
 | 文件 | 内容 |

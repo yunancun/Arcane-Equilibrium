@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Bounded Probe Placement Repair Plan
+
+- `bounded_demo_probe_placement_repair_plan_v1` now turns the touchability failure into a no-authority near-touch-or-skip plan before any bounded Demo probe result review.
+- Linux smoke reports `PLACEMENT_REPAIR_PLAN_READY_FOR_OPERATOR_REVIEW` for `ma_crossover|BTCUSDT|Sell`: the baseline remains 6/6 deep passive no-touch, max best-touch gap `1530.6074bp`, required initial passive gap `75bp`, order mode `post_only_near_touch_or_skip`, active=false.
+- PM read: the next profitability move is a bounded Demo-only existing Rust authority-path repair with fresh BBO, maker-side near-touch price, skip-and-record if too wide, and immediate order-to-fill/fill-fee-slippage lineage; no global Cost Gate lowering or probe/order authority was granted.
+
 ## 2026-06-22 Bounded Probe Touchability Preflight
 
 - `bounded_demo_probe_touchability_preflight_v1` now gates bounded Demo probe design against the latest order-to-fill touchability audit before any probe review.
