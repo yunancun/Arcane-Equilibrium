@@ -403,6 +403,18 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
             return "operator_review_first_bounded_probe_results_before_additional_budget"
         if bounded_review_status == "LEARNING_REVIEW_CANDIDATE_OPERATOR_REVIEW_REQUIRED":
             return "operator_review_bounded_probe_learning_results_without_promotion"
+        if (
+            _str(row.get("arm_id")) == "cost_gate_demo_learning_lane"
+            and (
+                "blocked_signal" in _str(row.get("primary_blocker"))
+                or "blocked_outcome" in _str(row.get("primary_blocker"))
+            )
+            and (
+                row.get("blocked_signal_top_review_candidate_side_cell_key")
+                or row.get("blocked_signal_top_review_side_cell_key")
+            )
+        ):
+            return "operator_review_top_blocked_signal_side_cell_before_bounded_demo_probe"
         preflight_status = _str(row.get("sealed_horizon_probe_preflight_status"))
         if preflight_status == "OPERATOR_REVIEW_AND_PRODUCTION_LEARNING_LANE_REQUIRED":
             return "operator_review_sealed_horizon_preflight_and_activate_production_learning_lane"
@@ -420,14 +432,6 @@ def _learning_objective(row: dict[str, Any], task_type: str) -> str:
             and row.get("profit_learning_top_side_cells")
         ):
             return "operator_review_profit_learning_decision_packet_before_bounded_demo_probe"
-        if (
-            _str(row.get("arm_id")) == "cost_gate_demo_learning_lane"
-            and (
-                row.get("blocked_signal_top_review_candidate_side_cell_key")
-                or row.get("blocked_signal_top_review_side_cell_key")
-            )
-        ):
-            return "operator_review_top_blocked_signal_side_cell_before_bounded_demo_probe"
         return "operator_review_isolated_probe_authority_without_granting_order_authority"
     if task_type == "runtime_source_reconcile":
         return "reconcile_runtime_source_before_learning_activation_or_probe_trust"
