@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Sealed Horizon Learning Evidence Builder
+
+- Added a reusable artifact-only builder that converts one sealed horizon plan candidate into mature reject materialization, candidate-horizon blocked outcomes, blocked-outcome review, and compact evidence packet.
+- Linux smoke for `ma_crossover|BTCUSDT|Sell` at 240m produced 16,515 scratch blocked outcomes with avg net +3.0511bp and net-positive 68.56%, enough for operator review of bounded demo probe authority.
+- This remains review evidence only: production learning lane is still not accumulating via writer/cron/prod ledger, and no Cost Gate lowering, probe/order authority, or promotion proof was granted.
+
 ## 2026-06-22 Sealed Horizon Learning Plan Bridge
 
 - Demo-learning policy now consumes passed sealed horizon replay artifacts and selects `ma_crossover|BTCUSDT|Sell` as a 240m learning candidate without granting order/probe authority or lowering Cost Gate.
