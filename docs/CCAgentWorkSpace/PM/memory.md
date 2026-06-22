@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Runtime Source Reconcile Apply Packet
+
+- Added `helper_scripts/deploy/runtime_source_reconcile_apply.py`, a dry-run-first apply packet helper for the reviewed runtime source reconcile.
+- True runtime dry-run against target `6383b512` produced `DRY_RUN_OPERATOR_APPROVAL_REQUIRED` with 56 dirty/untracked paths, 13 review-required paths, and no blockers when exact expected values plus review packet/target-wins confirmation are supplied.
+- No runtime apply was performed; actual source reconcile still requires `--apply` plus `OPENCLAW_RUNTIME_SOURCE_RECONCILE_APPLY=1` and operator authorization.
+
 ## 2026-06-22 Runtime Source Reconcile Review Packet
 
 - Added PM/Operator review packet for the 13 runtime source review-required paths found by the read-only remote probe.
