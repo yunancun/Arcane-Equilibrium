@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Horizon-Specific Sealed Replay Packet
+
+- Added an artifact-only sealed replay packet that binds a preselected horizon retiming candidate to hashed replay counterfactual inputs.
+- The packet checks candidate/replay/sample/net/hit-rate/primary-block/metric-drift gates without searching for a better side-cell, reducing hindsight-selection risk before operator review.
+- Verification passed with py_compile, focused sealed-replay tests, related alpha/profitability tests, and diff-check; no PG/Bybit/runtime/order/probe/promotion authority was granted.
+
 ## 2026-06-22 Horizon Edge Amplification Packet
 
 - Added an artifact-only packet that turns multi-horizon Cost Gate counterfactuals into ranked retiming/stable side-cell candidates.
