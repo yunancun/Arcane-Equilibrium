@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Demo Data Flow Rolling Monitor
+
+- Added `helper_scripts/db/audit/demo_data_flow_monitor.py`, a read-only multi-window wrapper around `demo_order_stall_audit` for 1h/4h/24h demo/live_demo data-flow accumulation.
+- Classifier distinguishes recent empty windows from broader Cost Gate reject walls, prior order-flow-without-fills, no-data, and fill-present states; main Cost Gate lowering remains false.
+- Verification passed locally with py_compile and focused pytest; runtime source is still unsynced, so this monitor has not run on Linux yet.
+
 ## 2026-06-22 Runtime Source Reconcile Apply Packet
 
 - Added `helper_scripts/deploy/runtime_source_reconcile_apply.py`, a dry-run-first apply packet helper for the reviewed runtime source reconcile.
