@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Demo Data Flow Runtime Refresh
+
+- Direct read-only PG refresh confirmed demo/live_demo data is still accumulating: latest 1h has 2355 decision/risk rows, all rejected, and latest 24h has 61093 risk verdicts with 61090 rejects.
+- Rejects are recorded and dominated by Cost Gate, so the evidence does not support silent-drop at the risk-recording layer.
+- Order/fill evidence remains insufficient: only 3 approved/intents/orders in 24h, all demo flash_dip_buy PostOnly Working, and 0 fills; next step remains source reconcile plus bounded learning-lane/counterfactual review, not global Cost Gate lowering.
+
 ## 2026-06-22 Runtime Source Reconcile Current Target Dry Run
 
 - Refreshed the read-only remote probe and apply dry-run against current `origin/main=34066e5e`, superseding the prior dry-run target `eaed0cf2`.
