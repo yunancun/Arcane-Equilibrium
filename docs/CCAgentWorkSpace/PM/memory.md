@@ -25,6 +25,12 @@
 
 ## 近期記錄
 
+## 2026-06-22 Runtime Source Remote Reconcile Probe
+
+- Added `helper_scripts/deploy/runtime_source_remote_reconcile_probe.py` so Mac can compare local approved target tree to `trade-core` remote worktree over read-only SSH even when runtime lacks the target object.
+- True runtime read-only probe found target `6e29c06f` unavailable on runtime, remote HEAD `917be4cc`, 56 dirty/untracked paths, 43 content-equivalent, and 13 review-required paths.
+- Demo-learning stack remains absent; PG read-only evidence showed 1h demo/live_demo flow all zero, 4h decisions/risk=2699 with 2696 Cost Gate blocks, 3 Working flash_dip orders, and 0 fills.
+
 ## 2026-06-22 Runtime Source Reconcile Planner
 
 - Added `helper_scripts/deploy/runtime_source_reconcile_planner.py` to turn the v370 manual runtime dirty-tree manifest into a reusable read-only JSON preflight.
